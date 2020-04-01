@@ -59,9 +59,12 @@ void ${functional_variant_name}_test_forward(
 def run_forward(unit_test_class, test_params):
     device = test_params.device
 
-    inputs = set_python_tensors_requires_grad(move_python_tensors_to_device([arg_value for _, arg_value in test_params.arg_dict['input']], device))
-    inputs = inputs + move_python_tensors_to_device([arg_value for _, arg_value in test_params.arg_dict['target']], device)
-    inputs = inputs + move_python_tensors_to_device([arg_value for _, arg_value in test_params.arg_dict['extra_args']], device)
+    inputs = set_python_tensors_requires_grad(move_python_tensors_to_device(
+        [arg_value for _, arg_value in test_params.arg_dict['input']], device))
+    inputs = inputs + move_python_tensors_to_device(
+        [arg_value for _, arg_value in test_params.arg_dict['target']], device)
+    inputs = inputs + move_python_tensors_to_device(
+        [arg_value for _, arg_value in test_params.arg_dict['extra_args']], device)
 
     # Some functionals (such as `F.rrelu`) create random tensors in their call path.
     # To make sure the random tensors created are the same in Python/C++, we need
@@ -102,7 +105,7 @@ def test_forward(unit_test_class, test_params):
     # if this fails.
     try:
         shutil.rmtree(cpp_tmp_folder)
-    except: # noqa: E722
+    except:  # noqa: E722
         pass
 
 def compute_functional_name(test_params_dict):
@@ -112,7 +115,8 @@ def compute_functional_name(test_params_dict):
     if 'cpp_options_args' in test_params_dict:
         # Expected format for `cpp_options_args`: `F::FunctionalFuncOptions(...)`
         # Example output: `binary_cross_entropy`
-        return camel_case_to_snake_case(test_params_dict['cpp_options_args'].split('(')[0].replace('F::', '').replace('FuncOptions', ''))
+        return camel_case_to_snake_case(
+            test_params_dict['cpp_options_args'].split('(')[0].replace('F::', '').replace('FuncOptions', ''))
     elif 'cpp_function_call' in test_params_dict:
         # Expected format for `cpp_function_call`: `F::functional_name(...)`
         # Example output: `binary_cross_entropy`
@@ -126,8 +130,10 @@ def compute_cpp_function_call(test_params_dict, arg_dict, functional_name):
     if 'cpp_function_call' in test_params_dict:
         return test_params_dict['cpp_function_call']
     elif 'cpp_options_args' in test_params_dict:
-        cpp_forward_args_symbols = [arg_name for arg_name, _ in arg_dict['input'] + arg_dict['target'] + arg_dict['extra_args']]
-        return 'F::{}({}, {})'.format(functional_name, ", ".join(cpp_forward_args_symbols), test_params_dict['cpp_options_args'])
+        cpp_forward_args_symbols = [arg_name for arg_name, _ in 
+                                    arg_dict['input'] + arg_dict['target'] + arg_dict['extra_args']]
+        return 'F::{}({}, {})'.format(
+            functional_name, ", ".join(cpp_forward_args_symbols), test_params_dict['cpp_options_args'])
     else:
         raise RuntimeError(
             "`cpp_options_args` or `cpp_function_call` entry must be present in test params dict: {}".format(
@@ -155,7 +161,8 @@ def process_test_params_for_functional(test_params_dict, device, test_instance_c
 def test_torch_nn_functional_variant(unit_test_class, test_params):
     test_forward(unit_test_class, test_params)
 
-def add_torch_nn_functional_impl_parity_tests(parity_table, unit_test_class, test_params_dicts, test_instance_class, devices):
+def add_torch_nn_functional_impl_parity_tests(
+        parity_table, unit_test_class, test_params_dicts, test_instance_class, devices):
     if not hasattr(unit_test_class, 'functional_test_params_map'):
         unit_test_class.functional_test_params_map = {}
     for test_params_dict in test_params_dicts:
@@ -166,9 +173,9 @@ def add_torch_nn_functional_impl_parity_tests(parity_table, unit_test_class, tes
         assert 'cpp_options_args' in test_params_dict or 'cpp_function_call' in test_params_dict, \
             "`cpp_options_args` or `cpp_function_call` entry must be present in test params dict: {}".format(
                 test_params_dict)
-        assert not ('cpp_options_args' in test_params_dict and 'cpp_function_call' in test_params_dict), \
-            "Only one of `cpp_options_args` and `cpp_function_call` entries should be present in test params dict: {}".format(
-                test_params_dict)
+        assert not ('cpp_options_args' in test_params_dict and 'cpp_function_call' in test_params_dict), (
+            "Only one of `cpp_options_args` and `cpp_function_call` entries "
+            "should be present in test params dict: {}").format(test_params_dict)
 
         functional_name = compute_functional_name(test_params_dict)
 
@@ -178,9 +185,9 @@ def add_torch_nn_functional_impl_parity_tests(parity_table, unit_test_class, tes
 
         functional_full_name = 'F::' + functional_name
 
-        assert functional_full_name in parity_table['torch::nn::functional'], \
-            "Please add `{}` entry to `torch::nn::functional` section of `test/cpp_api_parity/parity-tracker.md`. (Discovered while processing {}.)".format(
-                functional_full_name, test_params_dict)
+        assert functional_full_name in parity_table['torch::nn::functional'], (
+            "Please add `{}` entry to `torch::nn::functional` section of `test/cpp_api_parity/parity-tracker.md`. "
+            "(Discovered while processing {}.)").format(functional_full_name, test_params_dict)
 
         for device in devices:
             test_params = process_test_params_for_functional(
@@ -192,13 +199,15 @@ def add_torch_nn_functional_impl_parity_tests(parity_table, unit_test_class, tes
             unit_test_class.functional_test_params_map[test_name] = test_params
 
             def test_fn(self):
-                test_torch_nn_functional_variant(unit_test_class=self, test_params=unit_test_class.functional_test_params_map[self._testMethodName])
+                test_torch_nn_functional_variant(
+                    unit_test_class=self, test_params=unit_test_class.functional_test_params_map[self._testMethodName])
 
             test_fn = decorate_test_fn(
                 test_fn=test_fn,
                 test_cpp_api_parity=test_params_dict.get('test_cpp_api_parity', True),
                 test_cuda=test_params_dict.get('test_cuda', True),
-                has_impl_parity=parity_table['torch::nn::functional'][functional_full_name][0] and test_params_dict.get('has_parity', True),
+                has_impl_parity=parity_table['torch::nn::functional'][functional_full_name][0] and
+                test_params_dict.get('has_parity', True),
                 device=device)
 
             add_test(unit_test_class, test_name, test_fn)

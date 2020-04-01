@@ -73,7 +73,8 @@ TorchNNFunctionalTestParams = namedtuple(
         'test_instance',
 
         # The C++ function call that is strictly equivalent to the Python function call
-        # (e.g. "F::binary_cross_entropy(i, t.to(i.options()), F::BinaryCrossEntropyFuncOptions().reduction(torch::kNone))",
+        # (e.g. "F::binary_cross_entropy(
+        #            i, t.to(i.options()),F::BinaryCrossEntropyFuncOptions().reduction(torch::kNone))",
         # which is strictly equivalent to `F.binary_cross_entropy(i, t.type_as(i), reduction='none')` in Python)
         'cpp_function_call',
 
@@ -194,9 +195,12 @@ def compute_cpp_args_construction_stmts_and_forward_arg_symbols(test_params):
             cpp_forward_args_symbols.append(arg_name)
         return args_stmts
 
-    cpp_forward_input_args_stmts = set_cpp_tensors_requires_grad(move_cpp_tensors_to_device(add_cpp_forward_args(test_params.arg_dict['input']), device), test_params.arg_dict['input'])
-    cpp_forward_target_args_stmts = move_cpp_tensors_to_device(add_cpp_forward_args(test_params.arg_dict['target']), device)
-    cpp_forward_extra_args_stmts = move_cpp_tensors_to_device(add_cpp_forward_args(test_params.arg_dict['extra_args']), device)
+    cpp_forward_input_args_stmts = set_cpp_tensors_requires_grad(move_cpp_tensors_to_device(
+        add_cpp_forward_args(test_params.arg_dict['input']), device), test_params.arg_dict['input'])
+    cpp_forward_target_args_stmts = move_cpp_tensors_to_device(
+        add_cpp_forward_args(test_params.arg_dict['target']), device)
+    cpp_forward_extra_args_stmts = move_cpp_tensors_to_device(
+        add_cpp_forward_args(test_params.arg_dict['extra_args']), device)
 
     # Build the list of other arguments needed
     cpp_other_args_stmts = []
@@ -204,7 +208,8 @@ def compute_cpp_args_construction_stmts_and_forward_arg_symbols(test_params):
         cpp_other_args_stmts.append('auto {} = arg_dict.at("{}")'.format(arg_name, arg_name))
     cpp_other_args_stmts = move_cpp_tensors_to_device(cpp_other_args_stmts, device)
 
-    cpp_args_construction_stmts = cpp_forward_input_args_stmts + cpp_forward_target_args_stmts + cpp_forward_extra_args_stmts + cpp_other_args_stmts
+    cpp_args_construction_stmts = cpp_forward_input_args_stmts + cpp_forward_target_args_stmts + \
+        cpp_forward_extra_args_stmts + cpp_other_args_stmts
 
     return cpp_args_construction_stmts, cpp_forward_args_symbols
 
@@ -237,7 +242,11 @@ def serialize_arg_dict_as_script_module(arg_dict):
 #         constructor=wrap_functional(
 #             lambda i: F.binary_cross_entropy(i, t.type_as(i),
 #                                              weight=weights.type_as(i), reduction='none')),
-#         cpp_function_call='F::binary_cross_entropy(i, t.to(i.options()), F::BinaryCrossEntropyFuncOptions().weight(weights.to(i.options())).reduction(torch::kNone))',
+#         cpp_function_call='''F::binary_cross_entropy(
+#                              i, t.to(i.options()),
+#                              F::BinaryCrossEntropyFuncOptions()
+#                              .weight(weights.to(i.options()))
+#                              .reduction(torch::kNone))''',
 #         input_fn=lambda: torch.rand(15, 10).clamp_(2.8e-2, 1 - 2.8e-2),
 #         cpp_var_map={'i': 'input', 't': t, 'weights': weights},
 #         reference_fn=lambda i, p, m: -(t * i.log() + (1 - t) * (1 - i).log()) * weights,
@@ -311,8 +320,13 @@ However, if any of the above is proven to be too complicated, you can just add
 `test_cpp_api_parity=False` to any failing test in `torch/testing/_internal/common_nn.py`,
 and the C++ API parity test will be skipped accordingly. Note that you should
 also file an issue when you do this.
+
+For more details on how to add a C++ API parity test, please see:
+NOTE [How to check NN module / functional API parity between Python and C++ frontends]
 '''
 
 def generate_error_msg(name, cpp_value, python_value):
-    return "Parity test failed: {} in C++ has value: {}, which does not match the corresponding value in Python: {}.\n{}".format(
+    return (
+        "Parity test failed: {} in C++ has value: {}, "
+        "which does not match the corresponding value in Python: {}.\n{}").format(
         name, cpp_value, python_value, MESSAGE_HOW_TO_FIX_CPP_PARITY_TEST_FAILURE)

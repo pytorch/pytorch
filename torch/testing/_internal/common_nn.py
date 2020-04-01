@@ -360,7 +360,8 @@ def poissonnllloss_no_reduce_test():
         fullname='PoissonNLLLoss_no_reduce',
         constructor=wrap_functional(
             lambda i: F.poisson_nll_loss(i, t.type_as(i), reduction='none')),
-        cpp_function_call='F::poisson_nll_loss(i, t.to(i.options()), F::PoissonNLLLossFuncOptions().reduction(torch::kNone))',
+        cpp_function_call='F::poisson_nll_loss('
+                          'i, t.to(i.options()), F::PoissonNLLLossFuncOptions().reduction(torch::kNone))',
         input_fn=lambda: torch.rand(10, 10),
         cpp_var_map={'i': 'input', 't': t},
         reference_fn=lambda i, *_: i.exp() - t.mul(i),
@@ -373,7 +374,8 @@ def bceloss_no_reduce_test():
         fullname='BCELoss_no_reduce',
         constructor=wrap_functional(
             lambda i: F.binary_cross_entropy(i, t.type_as(i), reduction='none')),
-        cpp_function_call='F::binary_cross_entropy(i, t.to(i.options()), F::BinaryCrossEntropyFuncOptions().reduction(torch::kNone))',
+        cpp_function_call='F::binary_cross_entropy('
+                          'i, t.to(i.options()), F::BinaryCrossEntropyFuncOptions().reduction(torch::kNone))',
         input_fn=lambda: torch.rand(15, 10).clamp_(2.8e-2, 1 - 2.8e-2),
         cpp_var_map={'i': 'input', 't': t},
         reference_fn=lambda i, *_: -(t * i.log() + (1 - t) * (1 - i).log()),
@@ -387,7 +389,8 @@ def bceloss_no_reduce_scalar_test():
         fullname='BCELoss_no_reduce_scalar',
         constructor=wrap_functional(
             lambda i: F.binary_cross_entropy(i, t.type_as(i), reduction='none')),
-        cpp_function_call='F::binary_cross_entropy(i, t.to(i.options()), F::BinaryCrossEntropyFuncOptions().reduction(torch::kNone))',
+        cpp_function_call='F::binary_cross_entropy('
+                          'i, t.to(i.options()), F::BinaryCrossEntropyFuncOptions().reduction(torch::kNone))',
         input_fn=lambda: torch.rand(()).clamp_(2.8e-2, 1 - 2.8e-2),
         cpp_var_map={'i': 'input', 't': t},
         reference_fn=lambda i, *_: -(t * i.log() + (1 - t) * (1 - i).log()),
@@ -402,7 +405,9 @@ def bceloss_weights_no_reduce_test():
         constructor=wrap_functional(
             lambda i: F.binary_cross_entropy(i, t.type_as(i),
                                              weight=weights.type_as(i), reduction='none')),
-        cpp_function_call='F::binary_cross_entropy(i, t.to(i.options()), F::BinaryCrossEntropyFuncOptions().weight(weights.to(i.options())).reduction(torch::kNone))',
+        cpp_function_call='F::binary_cross_entropy('
+                          'i, t.to(i.options()), '
+                          'F::BinaryCrossEntropyFuncOptions().weight(weights.to(i.options())).reduction(torch::kNone))',
         input_fn=lambda: torch.rand(15, 10).clamp_(2.8e-2, 1 - 2.8e-2),
         cpp_var_map={'i': 'input', 't': t, 'weights': weights},
         reference_fn=lambda i, p, m: -(t * i.log() + (1 - t) * (1 - i).log()) * weights,
@@ -419,7 +424,9 @@ def bceloss_weights_no_reduce_scalar_test():
         constructor=wrap_functional(
             lambda i: F.binary_cross_entropy(i, t.type_as(i),
                                              weight=weights.type_as(i), reduction='none')),
-        cpp_function_call='F::binary_cross_entropy(i, t.to(i.options()), F::BinaryCrossEntropyFuncOptions().weight(weights.to(i.options())).reduction(torch::kNone))',
+        cpp_function_call='''F::binary_cross_entropy(
+            i, t.to(i.options()),
+            F::BinaryCrossEntropyFuncOptions().weight(weights.to(i.options())).reduction(torch::kNone))''',
         cpp_var_map={'i': 'input', 't': t, 'weights': weights},
         input_fn=lambda: torch.rand(()).clamp_(2.8e-2, 1 - 2.8e-2),
         reference_fn=lambda i, *_: -(t * i.log() + (1 - t) * (1 - i).log()) * weights,
@@ -434,7 +441,8 @@ def bce_with_logistic_legacy_enum_test():
         fullname='BCEWithLogitsLoss_legacy_enum',
         constructor=wrap_functional(
             lambda i: F.binary_cross_entropy_with_logits(i, t.type_as(i), reduce=False)),
-        cpp_function_call='F::binary_cross_entropy_with_logits(i, t.to(i.options()), F::BinaryCrossEntropyWithLogitsFuncOptions().reduction(torch::kNone))',
+        cpp_function_call='''F::binary_cross_entropy_with_logits(
+            i, t.to(i.options()), F::BinaryCrossEntropyWithLogitsFuncOptions().reduction(torch::kNone))''',
         input_fn=lambda: torch.rand(15, 10).clamp_(2.8e-2, 1 - 2.8e-2),
         cpp_var_map={'i': 'input', 't': t},
         reference_fn=lambda i, *_: -(t * sigmoid(i).log() + (1 - t) * (1 - sigmoid(i)).log()),
@@ -450,7 +458,8 @@ def bce_with_logistic_no_reduce_test():
         fullname='BCEWithLogitsLoss_no_reduce',
         constructor=wrap_functional(
             lambda i: F.binary_cross_entropy_with_logits(i, t.type_as(i), reduction='none')),
-        cpp_function_call='F::binary_cross_entropy_with_logits(i, t.to(i.options()), F::BinaryCrossEntropyWithLogitsFuncOptions().reduction(torch::kNone))',
+        cpp_function_call='''F::binary_cross_entropy_with_logits(
+            i, t.to(i.options()), F::BinaryCrossEntropyWithLogitsFuncOptions().reduction(torch::kNone))''',
         input_fn=lambda: torch.rand(15, 10).clamp_(2.8e-2, 1 - 2.8e-2),
         cpp_var_map={'i': 'input', 't': t},
         reference_fn=lambda i, *_: -(t * sigmoid(i).log() + (1 - t) * (1 - sigmoid(i)).log()),
@@ -466,7 +475,8 @@ def bce_with_logistic_no_reduce_scalar_test():
         fullname='BCEWithLogitsLoss_no_reduce_scalar',
         constructor=wrap_functional(
             lambda i: F.binary_cross_entropy_with_logits(i, t.type_as(i), reduction='none')),
-        cpp_function_call='F::binary_cross_entropy_with_logits(i, t.to(i.options()), F::BinaryCrossEntropyWithLogitsFuncOptions().reduction(torch::kNone))',
+        cpp_function_call='''F::binary_cross_entropy_with_logits(
+            i, t.to(i.options()), F::BinaryCrossEntropyWithLogitsFuncOptions().reduction(torch::kNone))''',
         input_fn=lambda: torch.rand(()).clamp_(2.8e-2, 1 - 2.8e-2),
         cpp_var_map={'i': 'input', 't': t},
         reference_fn=lambda i, *_: -(t * sigmoid(i).log() + (1 - t) * (1 - sigmoid(i)).log()),
@@ -579,7 +589,8 @@ def nllloss_no_reduce_test():
         fullname='NLLLoss_no_reduce',
         constructor=wrap_functional(
             lambda i: F.nll_loss(i, t.type_as(i).long(), **kwargs)),
-        cpp_function_call='F::nll_loss(i, t.to(i.options()).to(torch::kLong), F::NLLLossFuncOptions().reduction(torch::kNone))',
+        cpp_function_call='''F::nll_loss(
+            i, t.to(i.options()).to(torch::kLong), F::NLLLossFuncOptions().reduction(torch::kNone))''',
         input_fn=lambda: torch.rand(15, 10).log(),
         cpp_var_map={'i': 'input', 't': t},
         reference_fn=lambda i, *_:
@@ -594,7 +605,8 @@ def nllloss_no_reduce_ignore_index_test():
         fullname='NLLLoss_no_reduce_ignore_index',
         constructor=wrap_functional(
             lambda i: F.nll_loss(i, t.type_as(i).long(), **kwargs)),
-        cpp_function_call='F::nll_loss(i, t.to(i.options()).to(torch::kLong), F::NLLLossFuncOptions().ignore_index(2).reduction(torch::kNone))',
+        cpp_function_call='''F::nll_loss(
+            i, t.to(i.options()).to(torch::kLong), F::NLLLossFuncOptions().ignore_index(2).reduction(torch::kNone))''',
         input_fn=lambda: torch.rand(15, 10).log(),
         cpp_var_map={'i': 'input', 't': t},
         reference_fn=lambda i, *_:
@@ -613,7 +625,9 @@ def nllloss_no_reduce_weights_test():
         fullname='NLLLoss_no_reduce_weights',
         constructor=wrap_functional(
             lambda i: F.nll_loss(i, t.type_as(i).long(), **kwargs(i))),
-        cpp_function_call='F::nll_loss(i, t.to(i.options()).to(torch::kLong), F::NLLLossFuncOptions().weight(weight.to(i.options())).reduction(torch::kNone))',
+        cpp_function_call='''F::nll_loss(
+            i, t.to(i.options()).to(torch::kLong),
+            F::NLLLossFuncOptions().weight(weight.to(i.options())).reduction(torch::kNone))''',
         input_fn=lambda: torch.rand(15, 10).add(1e-2).log(),
         cpp_var_map={'i': 'input', 't': t, 'weight': weight},
         reference_fn=lambda i, *_:
@@ -633,7 +647,9 @@ def nllloss_no_reduce_weights_ignore_index_test():
         fullname='NLLLoss_no_reduce_weights_ignore_index',
         constructor=wrap_functional(
             lambda i: F.nll_loss(i, t.type_as(i).long(), **kwargs(i.data))),
-        cpp_function_call='F::nll_loss(i, t.to(i.options()).to(torch::kLong), F::NLLLossFuncOptions().weight(weight.to(i.options())).reduction(torch::kNone).ignore_index(2))',
+        cpp_function_call='''F::nll_loss(
+            i, t.to(i.options()).to(torch::kLong),
+            F::NLLLossFuncOptions().weight(weight.to(i.options())).reduction(torch::kNone).ignore_index(2))''',
         input_fn=lambda: torch.rand(15, 10).add(1e-2).log(),
         cpp_var_map={'i': 'input', 't': t, 'weight': weight},
         reference_fn=lambda i, *_:
@@ -653,7 +669,9 @@ def nllloss_no_reduce_weights_ignore_index_neg_test():
         fullname='NLLLoss_no_reduce_weights_ignore_index_neg',
         constructor=wrap_functional(
             lambda i: F.nll_loss(i, t.type_as(i).long(), **kwargs(i))),
-        cpp_function_call='F::nll_loss(i, t.to(i.options()).to(torch::kLong), F::NLLLossFuncOptions().weight(weight.to(i.options())).reduction(torch::kNone).ignore_index(-1))',
+        cpp_function_call='''F::nll_loss(
+            i, t.to(i.options()).to(torch::kLong),
+            F::NLLLossFuncOptions().weight(weight.to(i.options())).reduction(torch::kNone).ignore_index(-1))''',
         input=torch.rand(15, 10).add(1e-2).log(),
         cpp_var_map={'i': 'input', 't': t, 'weight': weight},
         reference_fn=lambda i, *_:
@@ -668,7 +686,8 @@ def nllloss2d_no_reduce_test():
         fullname='NLLLoss2d_no_reduce',
         constructor=wrap_functional(
             lambda i: F.nll_loss(i, t.type_as(i).long(), **kwargs)),
-        cpp_function_call='F::nll_loss(i, t.to(i.options()).to(torch::kLong), F::NLLLossFuncOptions().reduction(torch::kNone))',
+        cpp_function_call='''F::nll_loss(
+            i, t.to(i.options()).to(torch::kLong), F::NLLLossFuncOptions().reduction(torch::kNone))''',
         input_fn=lambda: torch.rand(2, 3, 5, 5).log(),
         cpp_var_map={'i': 'input', 't': t},
         reference_fn=lambda i, *_:
@@ -683,7 +702,8 @@ def nllloss2d_no_reduce_ignore_index_test():
         fullname='NLLLoss2d_no_reduce_ignore_index',
         constructor=wrap_functional(
             lambda i: F.nll_loss(i, t.type_as(i).long(), **kwargs)),
-        cpp_function_call='F::nll_loss(i, t.to(i.options()).to(torch::kLong), F::NLLLossFuncOptions().ignore_index(1).reduction(torch::kNone))',
+        cpp_function_call='''F::nll_loss(
+            i, t.to(i.options()).to(torch::kLong), F::NLLLossFuncOptions().ignore_index(1).reduction(torch::kNone))''',
         input_fn=lambda: torch.rand(2, 3, 5, 5).log(),
         cpp_var_map={'i': 'input', 't': t},
         reference_fn=lambda i, *_:
@@ -702,7 +722,9 @@ def nllloss2d_no_reduce_weights_test():
         fullname='NLLLoss2d_no_reduce_weights',
         constructor=wrap_functional(
             lambda i: F.nll_loss(i, t.type_as(i).long(), **kwargs(i))),
-        cpp_function_call='F::nll_loss(i, t.to(i.options()).to(torch::kLong), F::NLLLossFuncOptions().weight(weight.to(i.options())).reduction(torch::kNone))',
+        cpp_function_call='''F::nll_loss(
+            i, t.to(i.options()).to(torch::kLong),
+            F::NLLLossFuncOptions().weight(weight.to(i.options())).reduction(torch::kNone))''',
         input_fn=lambda: torch.rand(2, 3, 5, 5).log(),
         cpp_var_map={'i': 'input', 't': t, 'weight': weight},
         reference_fn=lambda i, *_:
@@ -717,7 +739,8 @@ def nlllossNd_no_reduce_test():
         fullname='NLLLossNd_no_reduce',
         constructor=wrap_functional(
             lambda i: F.nll_loss(i, t.type_as(i).long(), **kwargs)),
-        cpp_function_call='F::nll_loss(i, t.to(i.options()).to(torch::kLong), F::NLLLossFuncOptions().reduction(torch::kNone))',
+        cpp_function_call='''F::nll_loss(
+            i, t.to(i.options()).to(torch::kLong), F::NLLLossFuncOptions().reduction(torch::kNone))''',
         input_fn=lambda: torch.rand(2, 3, 5, 5, 2, 2).log(),
         cpp_var_map={'i': 'input', 't': t},
         reference_fn=lambda i, *_:
@@ -732,7 +755,8 @@ def nlllossNd_no_reduce_ignore_index_test():
         fullname='NLLLossNd_no_reduce_ignore_index',
         constructor=wrap_functional(
             lambda i: F.nll_loss(i, t.type_as(i).long(), **kwargs)),
-        cpp_function_call='F::nll_loss(i, t.to(i.options()).to(torch::kLong), F::NLLLossFuncOptions().ignore_index(1).reduction(torch::kNone))',
+        cpp_function_call='''F::nll_loss(
+            i, t.to(i.options()).to(torch::kLong), F::NLLLossFuncOptions().ignore_index(1).reduction(torch::kNone))''',
         input_fn=lambda: torch.rand(2, 3, 5, 5, 2, 2).log(),
         cpp_var_map={'i': 'input', 't': t},
         reference_fn=lambda i, *_:
@@ -751,7 +775,9 @@ def nlllossNd_no_reduce_weights_test():
         fullname='NLLLossNd_no_reduce_weights',
         constructor=wrap_functional(
             lambda i: F.nll_loss(i, t.type_as(i).long(), **kwargs(i))),
-        cpp_function_call='F::nll_loss(i, t.to(i.options()).to(torch::kLong), F::NLLLossFuncOptions().weight(weight.to(i.options())).reduction(torch::kNone))',
+        cpp_function_call='''F::nll_loss(
+            i, t.to(i.options()).to(torch::kLong),
+            F::NLLLossFuncOptions().weight(weight.to(i.options())).reduction(torch::kNone))''',
         input_fn=lambda: torch.rand(2, 3, 5, 5, 2, 2).log(),
         cpp_var_map={'i': 'input', 't': t, 'weight': weight},
         reference_fn=lambda i, *_:
@@ -765,7 +791,8 @@ def smoothl1loss_no_reduce_test():
         fullname='SmoothL1Loss_no_reduce',
         constructor=wrap_functional(
             lambda i: F.smooth_l1_loss(i, t.type_as(i), reduction='none')),
-        cpp_function_call='F::smooth_l1_loss(i, t.to(i.options()), F::SmoothL1LossFuncOptions().reduction(torch::kNone))',
+        cpp_function_call='''F::smooth_l1_loss(
+            i, t.to(i.options()), F::SmoothL1LossFuncOptions().reduction(torch::kNone))''',
         input_fn=lambda: torch.randn(2, 3, 4),
         cpp_var_map={'i': 'input', 't': t},
         reference_fn=lambda i, *_:
@@ -779,7 +806,8 @@ def smoothl1loss_no_reduce_scalar_test():
         fullname='SmoothL1Loss_no_reduce_scalar',
         constructor=wrap_functional(
             lambda i: F.smooth_l1_loss(i, t.type_as(i), reduction='none')),
-        cpp_function_call='F::smooth_l1_loss(i, t.to(i.options()), F::SmoothL1LossFuncOptions().reduction(torch::kNone))',
+        cpp_function_call='''F::smooth_l1_loss(
+            i, t.to(i.options()), F::SmoothL1LossFuncOptions().reduction(torch::kNone))''',
         input_fn=lambda: torch.randn(()),
         cpp_var_map={'i': 'input', 't': t},
         reference_fn=lambda i, *_:
@@ -793,7 +821,8 @@ def multilabelmarginloss_0d_no_reduce_test():
         fullname='MultiLabelMarginLoss_0d_no_reduce',
         constructor=wrap_functional(
             lambda i: F.multilabel_margin_loss(i, t.type_as(i).long(), reduction='none')),
-        cpp_function_call='F::multilabel_margin_loss(i, t.to(i.options()).to(torch::kLong), F::MultilabelMarginLossFuncOptions().reduction(torch::kNone))',
+        cpp_function_call='''F::multilabel_margin_loss(
+            i, t.to(i.options()).to(torch::kLong), F::MultilabelMarginLossFuncOptions().reduction(torch::kNone))''',
         input_fn=lambda: torch.randn(()),
         cpp_var_map={'i': 'input', 't': t},
         reference_fn=lambda i, *_:
@@ -809,7 +838,8 @@ def multilabelmarginloss_1d_no_reduce_test():
         fullname='MultiLabelMarginLoss_1d_no_reduce',
         constructor=wrap_functional(
             lambda i: F.multilabel_margin_loss(i, t.type_as(i).long(), reduction='none')),
-        cpp_function_call='F::multilabel_margin_loss(i, t.to(i.options()).to(torch::kLong), F::MultilabelMarginLossFuncOptions().reduction(torch::kNone))',
+        cpp_function_call='''F::multilabel_margin_loss(
+            i, t.to(i.options()).to(torch::kLong), F::MultilabelMarginLossFuncOptions().reduction(torch::kNone))''',
         input_fn=lambda: torch.randn(10),
         cpp_var_map={'i': 'input', 't': t},
         reference_fn=lambda i, *_:
@@ -825,7 +855,8 @@ def multilabelmarginloss_index_neg_test():
         fullname='MultiLabelMarginLoss_index_neg',
         constructor=wrap_functional(
             lambda i: F.multilabel_margin_loss(i, t.type_as(i).long(), reduction='none')),
-        cpp_function_call='F::multilabel_margin_loss(i, t.to(i.options()).to(torch::kLong), F::MultilabelMarginLossFuncOptions().reduction(torch::kNone))',
+        cpp_function_call='''F::multilabel_margin_loss(
+            i, t.to(i.options()).to(torch::kLong), F::MultilabelMarginLossFuncOptions().reduction(torch::kNone))''',
         input_fn=lambda: torch.randn(5, 10),
         cpp_var_map={'i': 'input', 't': t},
         reference_fn=lambda i, *_:
@@ -841,7 +872,8 @@ def multilabelmarginloss_no_reduce_test():
         fullname='MultiLabelMarginLoss_no_reduce',
         constructor=wrap_functional(
             lambda i: F.multilabel_margin_loss(i, t.type_as(i).long(), reduction='none')),
-        cpp_function_call='F::multilabel_margin_loss(i, t.to(i.options()).to(torch::kLong), F::MultilabelMarginLossFuncOptions().reduction(torch::kNone))',
+        cpp_function_call='''F::multilabel_margin_loss(
+            i, t.to(i.options()).to(torch::kLong), F::MultilabelMarginLossFuncOptions().reduction(torch::kNone))''',
         input_fn=lambda: torch.randn(5, 10),
         cpp_var_map={'i': 'input', 't': t},
         reference_fn=lambda i, *_:
@@ -857,7 +889,8 @@ def hingeembeddingloss_no_reduce_test():
         fullname='HingeEmbeddingLoss_no_reduce',
         constructor=wrap_functional(
             lambda i: F.hinge_embedding_loss(i, t.type_as(i), reduction='none')),
-        cpp_function_call='F::hinge_embedding_loss(i, t.to(i.options()), F::HingeEmbeddingLossFuncOptions().reduction(torch::kNone))',
+        cpp_function_call='''F::hinge_embedding_loss(
+            i, t.to(i.options()), F::HingeEmbeddingLossFuncOptions().reduction(torch::kNone))''',
         input_fn=lambda: torch.randn(10),
         cpp_var_map={'i': 'input', 't': t},
         reference_fn=lambda i, *_:
@@ -872,7 +905,8 @@ def hingeembeddingloss_margin_no_reduce_test():
         fullname='HingeEmbeddingLoss_margin_no_reduce',
         constructor=wrap_functional(
             lambda i: F.hinge_embedding_loss(i, t.type_as(i), margin=0.5, reduction='none')),
-        cpp_function_call='F::hinge_embedding_loss(i, t.to(i.options()), F::HingeEmbeddingLossFuncOptions().margin(0.5).reduction(torch::kNone))',
+        cpp_function_call='''F::hinge_embedding_loss(
+            i, t.to(i.options()), F::HingeEmbeddingLossFuncOptions().margin(0.5).reduction(torch::kNone))''',
         input_fn=lambda: torch.randn(10),
         cpp_var_map={'i': 'input', 't': t},
         reference_fn=lambda i, *_:
@@ -887,7 +921,8 @@ def softmarginloss_no_reduce_test():
         fullname='SoftMarginLoss_no_reduce',
         constructor=wrap_functional(
             lambda i: F.soft_margin_loss(i, t.type_as(i), reduction='none')),
-        cpp_function_call='F::soft_margin_loss(i, t.to(i.options()), F::SoftMarginLossFuncOptions().reduction(torch::kNone))',
+        cpp_function_call='''F::soft_margin_loss(
+            i, t.to(i.options()), F::SoftMarginLossFuncOptions().reduction(torch::kNone))''',
         input_fn=lambda: torch.randn(5, 5),
         cpp_var_map={'i': 'input', 't': t},
         reference_fn=lambda i, *_:
@@ -901,7 +936,8 @@ def multilabelsoftmarginloss_no_reduce_test():
         fullname='MultiLabelSoftMarginLoss_no_reduce',
         constructor=wrap_functional(
             lambda i: F.multilabel_soft_margin_loss(i, t.type_as(i), reduction='none')),
-        cpp_function_call='F::multilabel_soft_margin_loss(i, t.to(i.options()), F::MultilabelSoftMarginLossFuncOptions().reduction(torch::kNone))',
+        cpp_function_call='''F::multilabel_soft_margin_loss(
+            i, t.to(i.options()), F::MultilabelSoftMarginLossFuncOptions().reduction(torch::kNone))''',
         input_fn=lambda: torch.randn(5, 10),
         cpp_var_map={'i': 'input', 't': t},
         reference_fn=lambda i, *_:
@@ -918,7 +954,9 @@ def multilabelsoftmarginloss_weights_no_reduce_test():
         constructor=wrap_functional(
             lambda i: F.multilabel_soft_margin_loss(i, t.type_as(i),
                                                     weight=weights.type_as(i), reduction='none')),
-        cpp_function_call='F::multilabel_soft_margin_loss(i, t.to(i.options()), F::MultilabelSoftMarginLossFuncOptions().weight(weights.to(i.options())).reduction(torch::kNone))',
+        cpp_function_call='''F::multilabel_soft_margin_loss(
+            i, t.to(i.options()),
+            F::MultilabelSoftMarginLossFuncOptions().weight(weights.to(i.options())).reduction(torch::kNone))''',
         input_fn=lambda: torch.randn(5, 10),
         cpp_var_map={'i': 'input', 't': t, 'weights': weights},
         reference_fn=lambda i, *_:
@@ -934,7 +972,8 @@ def multimarginloss_no_reduce_test():
         fullname='MultiMarginLoss_no_reduce',
         constructor=wrap_functional(
             lambda i: F.multi_margin_loss(i, t.type_as(i).long(), reduction='none')),
-        cpp_function_call='F::multi_margin_loss(i, t.to(i.options()).to(torch::kLong), F::MultiMarginLossFuncOptions().reduction(torch::kNone))',
+        cpp_function_call='''F::multi_margin_loss(
+            i, t.to(i.options()).to(torch::kLong), F::MultiMarginLossFuncOptions().reduction(torch::kNone))''',
         input_fn=lambda: torch.randn(5, 10),
         cpp_var_map={'i': 'input', 't': t},
         reference_fn=lambda i, *_:
@@ -950,7 +989,8 @@ def multimarginloss_1d_no_reduce_test():
         fullname='MultiMarginLoss_1d_no_reduce',
         constructor=wrap_functional(
             lambda i: F.multi_margin_loss(i, t.type_as(i).long(), reduction='none')),
-        cpp_function_call='F::multi_margin_loss(i, t.to(i.options()).to(torch::kLong), F::MultiMarginLossFuncOptions().reduction(torch::kNone))',
+        cpp_function_call='''F::multi_margin_loss(
+            i, t.to(i.options()).to(torch::kLong), F::MultiMarginLossFuncOptions().reduction(torch::kNone))''',
         input_fn=lambda: torch.randn(10),
         cpp_var_map={'i': 'input', 't': t},
         reference_fn=lambda i, *_:
@@ -966,7 +1006,8 @@ def multimarginloss_1d_input_0d_target_no_reduce_test():
         fullname='multimarginloss_1d_input_0d_target_no_reduce',
         constructor=wrap_functional(
             lambda i: F.multi_margin_loss(i, t.type_as(i).long(), reduction='none')),
-        cpp_function_call='F::multi_margin_loss(i, t.to(i.options()).to(torch::kLong), F::MultiMarginLossFuncOptions().reduction(torch::kNone))',
+        cpp_function_call='''F::multi_margin_loss(
+            i, t.to(i.options()).to(torch::kLong), F::MultiMarginLossFuncOptions().reduction(torch::kNone))''',
         input_fn=lambda: torch.randn(10),
         cpp_var_map={'i': 'input', 't': t},
         reference_fn=lambda i, *_:
@@ -982,7 +1023,8 @@ def multimarginloss_p_no_reduce_test():
         fullname='MultiMarginLoss_p_no_reduce',
         constructor=wrap_functional(
             lambda i: F.multi_margin_loss(i, t.type_as(i).long(), p=2, reduction='none')),
-        cpp_function_call='F::multi_margin_loss(i, t.to(i.options()).to(torch::kLong), F::MultiMarginLossFuncOptions().p(2).reduction(torch::kNone))',
+        cpp_function_call='''F::multi_margin_loss(
+            i, t.to(i.options()).to(torch::kLong), F::MultiMarginLossFuncOptions().p(2).reduction(torch::kNone))''',
         input_fn=lambda: torch.randn(5, 10).clamp_(1e-2, 1 - 1e-2),
         cpp_var_map={'i': 'input', 't': t},
         reference_fn=lambda i, *_:
@@ -998,7 +1040,9 @@ def multimarginloss_margin_no_reduce_test():
         fullname='MultiMarginLoss_margin_no_reduce',
         constructor=wrap_functional(
             lambda i: F.multi_margin_loss(i, t.type_as(i).long(), margin=0.5, reduction='none')),
-        cpp_function_call='F::multi_margin_loss(i, t.to(i.options()).to(torch::kLong), F::MultiMarginLossFuncOptions().margin(0.5).reduction(torch::kNone))',
+        cpp_function_call='''F::multi_margin_loss(
+            i, t.to(i.options()).to(torch::kLong),
+            F::MultiMarginLossFuncOptions().margin(0.5).reduction(torch::kNone))''',
         input_fn=lambda: torch.randn(5, 10),
         cpp_var_map={'i': 'input', 't': t},
         reference_fn=lambda i, *_:
@@ -1017,7 +1061,9 @@ def multimarginloss_weights_no_reduce_test():
         constructor=wrap_functional(
             lambda i: F.multi_margin_loss(i, t.type_as(i).long(), weight=weights.type_as(i),
                                           reduction='none')),
-        cpp_function_call='F::multi_margin_loss(i, t.to(i.options()).to(torch::kLong), F::MultiMarginLossFuncOptions().weight(weights.to(i.options())).reduction(torch::kNone))',
+        cpp_function_call='''F::multi_margin_loss(
+            i, t.to(i.options()).to(torch::kLong),
+            F::MultiMarginLossFuncOptions().weight(weights.to(i.options())).reduction(torch::kNone))''',
         input_fn=lambda: torch.randn(5, 10),
         cpp_var_map={'i': 'input', 't': t, 'weights': weights},
         reference_fn=lambda i, *_:
@@ -1034,7 +1080,9 @@ def fractional_max_pool2d_test(test_case):
         return dict(
             constructor=lambda: nn.FractionalMaxPool2d(
                 2, output_ratio=0.5, _random_samples=random_samples),
-            cpp_constructor_args='torch::nn::FractionalMaxPool2dOptions(2).output_ratio(0.5)._random_samples(random_samples)',
+            cpp_constructor_args='''torch::nn::FractionalMaxPool2dOptions(2)
+                                    .output_ratio(0.5)
+                                    ._random_samples(random_samples)''',
             input_size=(1, 3, 5, 7),
             cpp_var_map={'random_samples': random_samples},
             fullname='FractionalMaxPool2d_ratio')
@@ -1042,7 +1090,9 @@ def fractional_max_pool2d_test(test_case):
         return dict(
             constructor=lambda: nn.FractionalMaxPool2d((2, 3), output_size=(
                 4, 3), _random_samples=random_samples),
-            cpp_constructor_args='torch::nn::FractionalMaxPool2dOptions({2, 3}).output_size(std::vector<int64_t>({4, 3}))._random_samples(random_samples)',
+            cpp_constructor_args='''torch::nn::FractionalMaxPool2dOptions({2, 3})
+                                    .output_size(std::vector<int64_t>({4, 3}))
+                                    ._random_samples(random_samples)''',
             input_size=(1, 3, 7, 6),
             cpp_var_map={'random_samples': random_samples},
             fullname='FractionalMaxPool2d_size')
@@ -1054,7 +1104,9 @@ def fractional_max_pool3d_test(test_case):
         return dict(
             constructor=lambda: nn.FractionalMaxPool3d(
                 2, output_ratio=0.5, _random_samples=random_samples),
-            cpp_constructor_args='torch::nn::FractionalMaxPool3dOptions(2).output_ratio(0.5)._random_samples(random_samples)',
+            cpp_constructor_args='''torch::nn::FractionalMaxPool3dOptions(2)
+                                    .output_ratio(0.5)
+                                    ._random_samples(random_samples)''',
             input_size=(2, 4, 5, 5, 5),
             cpp_var_map={'random_samples': random_samples},
             fullname='FractionalMaxPool3d_ratio')
@@ -1062,7 +1114,9 @@ def fractional_max_pool3d_test(test_case):
         return dict(
             constructor=lambda: nn.FractionalMaxPool3d((2, 2, 2), output_size=(
                 4, 4, 4), _random_samples=random_samples),
-            cpp_constructor_args='torch::nn::FractionalMaxPool3dOptions({2, 2, 2}).output_size(std::vector<int64_t>({4, 4, 4}))._random_samples(random_samples)',
+            cpp_constructor_args='''torch::nn::FractionalMaxPool3dOptions({2, 2, 2})
+                                    .output_size(std::vector<int64_t>({4, 4, 4}))
+                                    ._random_samples(random_samples)''',
             input_size=(2, 4, 7, 7, 7),
             cpp_var_map={'random_samples': random_samples},
             fullname='FractionalMaxPool3d_size')
@@ -1070,7 +1124,9 @@ def fractional_max_pool3d_test(test_case):
         return dict(
             constructor=lambda: nn.FractionalMaxPool3d((4, 2, 3), output_size=(
                 10, 3, 2), _random_samples=random_samples),
-            cpp_constructor_args='torch::nn::FractionalMaxPool3dOptions({4, 2, 3}).output_size(std::vector<int64_t>({10, 3, 2}))._random_samples(random_samples)',
+            cpp_constructor_args='''torch::nn::FractionalMaxPool3dOptions({4, 2, 3})
+                                    .output_size(std::vector<int64_t>({10, 3, 2}))
+                                    ._random_samples(random_samples)''',
             input_size=(2, 4, 16, 7, 5),
             cpp_var_map={'random_samples': random_samples},
             fullname='FractionalMaxPool3d_asymsize')
@@ -1166,7 +1222,8 @@ new_module_tests = [
     dict(
         module_name='BatchNorm1d',
         constructor_args=(10, 1e-3, 0.3, True, False),
-        cpp_constructor_args='torch::nn::BatchNorm1dOptions(10).eps(1e-3).momentum(0.3).affine(true).track_running_stats(false)',
+        cpp_constructor_args='''torch::nn::BatchNorm1dOptions(10)
+                                .eps(1e-3).momentum(0.3).affine(true).track_running_stats(false)''',
         input_size=(4, 10),
         cudnn=True,
         check_eval=True,
@@ -1229,7 +1286,8 @@ new_module_tests = [
     dict(
         module_name='BatchNorm2d',
         constructor_args=(3, 1e-3, 0.8, True, False),
-        cpp_constructor_args='torch::nn::BatchNorm2dOptions(3).eps(1e-3).momentum(0.8).affine(true).track_running_stats(false)',
+        cpp_constructor_args='''torch::nn::BatchNorm2dOptions(3)
+                                .eps(1e-3).momentum(0.8).affine(true).track_running_stats(false)''',
         input_size=(2, 3, 6, 6),
         cudnn=True,
         check_eval=True,
@@ -1282,7 +1340,8 @@ new_module_tests = [
     dict(
         module_name='BatchNorm3d',
         constructor_args=(3, 1e-3, 0.7, True, False),
-        cpp_constructor_args='torch::nn::BatchNorm3dOptions(3).eps(1e-3).momentum(0.7).affine(true).track_running_stats(false)',
+        cpp_constructor_args='''torch::nn::BatchNorm3dOptions(3)
+                                .eps(1e-3).momentum(0.7).affine(true).track_running_stats(false)''',
         input_size=(2, 3, 4, 4, 4),
         cudnn=True,
         check_eval=True,
@@ -1308,7 +1367,8 @@ new_module_tests = [
     dict(
         module_name='InstanceNorm1d',
         constructor_args=(3, 1e-3, 0.3, False, True),
-        cpp_constructor_args='torch::nn::InstanceNorm1dOptions(3).eps(1e-3).momentum(0.3).affine(false).track_running_stats(true)',
+        cpp_constructor_args='''torch::nn::InstanceNorm1dOptions(3)
+                                .eps(1e-3).momentum(0.3).affine(false).track_running_stats(true)''',
         input_size=(4, 3, 15),
         cudnn=True,
         check_eval=True,
@@ -1325,7 +1385,8 @@ new_module_tests = [
     dict(
         module_name='InstanceNorm2d',
         constructor_args=(3, 1e-3, 0.3, False, True),
-        cpp_constructor_args='torch::nn::InstanceNorm2dOptions(3).eps(1e-3).momentum(0.3).affine(false).track_running_stats(true)',
+        cpp_constructor_args='''torch::nn::InstanceNorm2dOptions(3)
+                                .eps(1e-3).momentum(0.3).affine(false).track_running_stats(true)''',
         input_size=(2, 3, 6, 6),
         cudnn=True,
         check_eval=True,
@@ -1342,7 +1403,8 @@ new_module_tests = [
     dict(
         module_name='InstanceNorm3d',
         constructor_args=(3, 1e-3, 0.3, False, True),
-        cpp_constructor_args='torch::nn::InstanceNorm3dOptions(3).eps(1e-3).momentum(0.3).affine(false).track_running_stats(true)',
+        cpp_constructor_args='''torch::nn::InstanceNorm3dOptions(3)
+                                .eps(1e-3).momentum(0.3).affine(false).track_running_stats(true)''',
         input_size=(2, 3, 4, 4, 4),
         cudnn=True,
         check_eval=True,
@@ -1526,7 +1588,8 @@ new_module_tests = [
     dict(
         module_name='ConvTranspose1d',
         constructor_args=(3, 4, 3, 2, 1, 1, 1, False),
-        cpp_constructor_args='torch::nn::ConvTranspose1dOptions(3, 4, 3).stride(2).padding(1).output_padding(1).groups(1).bias(false)',
+        cpp_constructor_args='''torch::nn::ConvTranspose1dOptions(3, 4, 3)
+                                .stride(2).padding(1).output_padding(1).groups(1).bias(false)''',
         input_size=(1, 3, 6),
         cudnn=True,
         desc='no_bias',
@@ -1534,7 +1597,8 @@ new_module_tests = [
     dict(
         module_name='ConvTranspose1d',
         constructor_args=(3, 4, 3, 2, 1, 1, 1, True, 2),
-        cpp_constructor_args='torch::nn::ConvTranspose1dOptions(3, 4, 3).stride(2).padding(1).output_padding(1).groups(1).bias(true).dilation(2)',
+        cpp_constructor_args='''torch::nn::ConvTranspose1dOptions(3, 4, 3)
+                                .stride(2).padding(1).output_padding(1).groups(1).bias(true).dilation(2)''',
         input_size=(1, 3, 6),
         cudnn=True,
         desc='dilated',
@@ -1542,7 +1606,8 @@ new_module_tests = [
     dict(
         fullname='ConvTranspose1d_groups',
         constructor=lambda: nn.ConvTranspose1d(4, 6, 3, stride=(3,), padding=1, output_padding=(1,), groups=2),
-        cpp_constructor_args='torch::nn::ConvTranspose1dOptions(4, 6, 3).stride(3).padding(1).output_padding(1).groups(2)',
+        cpp_constructor_args='''torch::nn::ConvTranspose1dOptions(4, 6, 3)
+                                .stride(3).padding(1).output_padding(1).groups(2)''',
         cudnn=True,
         input_size=(2, 4, 7),
     ),
@@ -1597,7 +1662,8 @@ new_module_tests = [
     dict(
         module_name='Conv2d',
         constructor_args=(3, 4, (3, 2), 1, 0, 1, 1, False),
-        cpp_constructor_args='torch::nn::Conv2dOptions(3, 4, {3, 2}).stride(1).padding(0).dilation(1).groups(1).bias(false)',
+        cpp_constructor_args='''torch::nn::Conv2dOptions(3, 4, {3, 2})
+                                .stride(1).padding(0).dilation(1).groups(1).bias(false)''',
         input_size=(2, 3, 6, 5),
         cudnn=True,
         desc='no_bias',
@@ -1631,7 +1697,8 @@ new_module_tests = [
     dict(
         module_name='ConvTranspose2d',
         constructor_args=(3, 4, 3, (3, 2), 1, (1, 1)),
-        cpp_constructor_args='torch::nn::ConvTranspose2dOptions(3, 4, 3).stride({3, 2}).padding(1).output_padding({1, 1})',
+        cpp_constructor_args='''torch::nn::ConvTranspose2dOptions(3, 4, 3)
+                                .stride({3, 2}).padding(1).output_padding({1, 1})''',
         cudnn=True,
         input_size=(1, 3, 7, 6),
         check_with_long_tensor=True,
@@ -1639,7 +1706,13 @@ new_module_tests = [
     dict(
         module_name='ConvTranspose2d',
         constructor_args=(3, 4, 3, (2, 3), 1, (1, 1), 1, False, (2, 2)),
-        cpp_constructor_args='torch::nn::ConvTranspose2dOptions(3, 4, 3).stride({2, 3}).padding(1).output_padding({1, 1}).groups(1).bias(false).dilation({2, 2})',
+        cpp_constructor_args='''torch::nn::ConvTranspose2dOptions(3, 4, 3)
+                                .stride({2, 3})
+                                .padding(1)
+                                .output_padding({1, 1})
+                                .groups(1)
+                                .bias(false)
+                                .dilation({2, 2})''',
         input_size=(1, 3, 6, 7),
         cudnn=True,
         desc='dilated',
@@ -1648,7 +1721,8 @@ new_module_tests = [
     dict(
         module_name='ConvTranspose2d',
         constructor_args=(3, 4, 3, (2, 3), 1, (1, 1), 1, False),
-        cpp_constructor_args='torch::nn::ConvTranspose2dOptions(3, 4, 3).stride({2, 3}).padding(1).output_padding({1, 1}).groups(1).bias(false)',
+        cpp_constructor_args='''torch::nn::ConvTranspose2dOptions(3, 4, 3)
+                                .stride({2, 3}).padding(1).output_padding({1, 1}).groups(1).bias(false)''',
         input_size=(1, 3, 6, 7),
         cudnn=True,
         desc='no_bias',
@@ -1873,7 +1947,8 @@ new_module_tests = [
     dict(
         module_name='Conv3d',
         constructor_args=(3, 4, (2, 3, 4), 1, 0, 1, 1, False),
-        cpp_constructor_args='torch::nn::Conv3dOptions(3, 4, {2, 3, 4}).stride(1).padding(0).dilation(1).groups(1).bias(false)',
+        cpp_constructor_args='''torch::nn::Conv3dOptions(3, 4, {2, 3, 4})
+                                .stride(1).padding(0).dilation(1).groups(1).bias(false)''',
         input_size=(2, 3, 3, 4, 5),
         cudnn=True,
         desc='no_bias',
@@ -1937,7 +2012,8 @@ new_module_tests = [
     dict(
         module_name='ConvTranspose3d',
         constructor_args=(2, 3, (2, 3, 2), 1, 0, 0, 1, True, (2, 2, 2)),
-        cpp_constructor_args='torch::nn::ConvTranspose3dOptions(2, 3, {2, 3, 2}).stride(1).padding(0).output_padding(0).groups(1).bias(true).dilation({2, 2, 2})',
+        cpp_constructor_args='''torch::nn::ConvTranspose3dOptions(2, 3, {2, 3, 2})
+                                .stride(1).padding(0).output_padding(0).groups(1).bias(true).dilation({2, 2, 2})''',
         cudnn=True,
         input_size=(1, 2, 4, 5, 4),
         desc='dilated',
@@ -2085,7 +2161,8 @@ new_module_tests = [
     dict(
         module_name='EmbeddingBag',
         constructor_args=(4, 3, None, 2., False, 'sum'),
-        cpp_constructor_args='torch::nn::EmbeddingBagOptions(4, 3).max_norm(c10::nullopt).norm_type(2.).scale_grad_by_freq(false).mode(torch::kSum)',
+        cpp_constructor_args='''torch::nn::EmbeddingBagOptions(4, 3)
+                                .max_norm(c10::nullopt).norm_type(2.).scale_grad_by_freq(false).mode(torch::kSum)''',
         input_fn=lambda: torch.empty(2, 3, dtype=torch.long).random_(4),
         jacobian_input=False,
         check_gradgrad=False,
@@ -2094,7 +2171,8 @@ new_module_tests = [
     dict(
         module_name='EmbeddingBag',
         constructor_args=(4, 3, None, 2., False, 'max'),
-        cpp_constructor_args='torch::nn::EmbeddingBagOptions(4, 3).max_norm(c10::nullopt).norm_type(2.).scale_grad_by_freq(false).mode(torch::kMax)',
+        cpp_constructor_args='''torch::nn::EmbeddingBagOptions(4, 3)
+                                .max_norm(c10::nullopt).norm_type(2.).scale_grad_by_freq(false).mode(torch::kMax)''',
         input_fn=lambda: torch.empty(2, 3, dtype=torch.long).random_(4),
         jacobian_input=False,
         check_gradgrad=False,
@@ -2124,119 +2202,170 @@ new_module_tests = [
     ),
     dict(
         constructor=wrap_functional(F.interpolate, size=12, scale_factor=None, mode='nearest'),
-        cpp_options_args='F::InterpolateFuncOptions().size(std::vector<int64_t>({12})).scale_factor(c10::nullopt).mode(torch::kNearest)',
+        cpp_options_args='''F::InterpolateFuncOptions()
+                            .size(std::vector<int64_t>({12})).scale_factor(c10::nullopt).mode(torch::kNearest)''',
         input_size=(1, 2, 4),
         fullname='interpolate_nearest_1d',
         pickle=False,
     ),
     dict(
         constructor=wrap_functional(F.interpolate, size=12, scale_factor=None, mode='nearest'),
-        cpp_options_args='F::InterpolateFuncOptions().size(std::vector<int64_t>({12})).scale_factor(c10::nullopt).mode(torch::kNearest)',
+        cpp_options_args='''F::InterpolateFuncOptions()
+                            .size(std::vector<int64_t>({12})).scale_factor(c10::nullopt).mode(torch::kNearest)''',
         input_size=(0, 2, 4),
         fullname='interpolate_nearest_1d_zero_dim',
         pickle=False,
     ),
     dict(
         constructor=wrap_functional(F.interpolate, size=(12, ), scale_factor=None, mode='nearest'),
-        cpp_options_args='F::InterpolateFuncOptions().size(std::vector<int64_t>({12})).scale_factor(c10::nullopt).mode(torch::kNearest)',
+        cpp_options_args='''F::InterpolateFuncOptions()
+                            .size(std::vector<int64_t>({12})).scale_factor(c10::nullopt).mode(torch::kNearest)''',
         input_size=(1, 2, 3),
         fullname='interpolate_nearest_tuple_1d',
         pickle=False,
     ),
     dict(
         constructor=wrap_functional(F.interpolate, size=None, scale_factor=4., mode='nearest'),
-        cpp_options_args='F::InterpolateFuncOptions().size(c10::nullopt).scale_factor(std::vector<double>({4.})).mode(torch::kNearest)',
+        cpp_options_args='''F::InterpolateFuncOptions()
+                            .size(c10::nullopt).scale_factor(std::vector<double>({4.})).mode(torch::kNearest)''',
         input_size=(1, 2, 4),
         fullname='interpolate_nearest_scale_1d',
         pickle=False,
     ),
     dict(
         constructor=wrap_functional(F.interpolate, size=12, scale_factor=None, mode='linear', align_corners=False),
-        cpp_options_args='F::InterpolateFuncOptions().size(std::vector<int64_t>({12})).scale_factor(c10::nullopt).mode(torch::kLinear).align_corners(false)',
+        cpp_options_args='''F::InterpolateFuncOptions()
+                            .size(std::vector<int64_t>({12}))
+                            .scale_factor(c10::nullopt)
+                            .mode(torch::kLinear)
+                            .align_corners(false)''',
         input_size=(1, 2, 4),
         fullname='interpolate_linear_1d',
         pickle=False,
     ),
     dict(
         constructor=wrap_functional(F.interpolate, size=(4, ), scale_factor=None, mode='linear', align_corners=False),
-        cpp_options_args='F::InterpolateFuncOptions().size(std::vector<int64_t>({4})).scale_factor(c10::nullopt).mode(torch::kLinear).align_corners(false)',
+        cpp_options_args='''F::InterpolateFuncOptions()
+                            .size(std::vector<int64_t>({4}))
+                            .scale_factor(c10::nullopt)
+                            .mode(torch::kLinear)
+                            .align_corners(false)''',
         input_size=(1, 2, 3),
         fullname='interpolate_linear_tuple_1d',
         pickle=False,
     ),
     dict(
         constructor=wrap_functional(F.interpolate, size=None, scale_factor=4., mode='linear', align_corners=False),
-        cpp_options_args='F::InterpolateFuncOptions().size(c10::nullopt).scale_factor(std::vector<double>({4.})).mode(torch::kLinear).align_corners(false)',
+        cpp_options_args='''F::InterpolateFuncOptions()
+                            .size(c10::nullopt)
+                            .scale_factor(std::vector<double>({4.}))
+                            .mode(torch::kLinear)
+                            .align_corners(false)''',
         input_size=(1, 2, 4),
         fullname='interpolate_linear_scale_1d',
         pickle=False,
     ),
     dict(
         constructor=wrap_functional(F.interpolate, size=12, scale_factor=None, mode='linear', align_corners=False),
-        cpp_options_args='F::InterpolateFuncOptions().size(std::vector<int64_t>({12})).scale_factor(c10::nullopt).mode(torch::kLinear).align_corners(false)',
+        cpp_options_args='''F::InterpolateFuncOptions()
+                            .size(std::vector<int64_t>({12}))
+                            .scale_factor(c10::nullopt)
+                            .mode(torch::kLinear)
+                            .align_corners(false)''',
         input_size=(0, 2, 4),
         fullname='interpolate_linear_1d_zero_dim',
         pickle=False,
     ),
     dict(
         constructor=wrap_functional(F.interpolate, size=12, scale_factor=None, mode='linear', align_corners=True),
-        cpp_options_args='F::InterpolateFuncOptions().size(std::vector<int64_t>({12})).scale_factor(c10::nullopt).mode(torch::kLinear).align_corners(true)',
+        cpp_options_args='''F::InterpolateFuncOptions()
+                            .size(std::vector<int64_t>({12}))
+                            .scale_factor(c10::nullopt)
+                            .mode(torch::kLinear)
+                            .align_corners(true)''',
         input_size=(1, 2, 4),
         fullname='interpolate_linear_1d_align_corners',
         pickle=False,
     ),
     dict(
         constructor=wrap_functional(F.interpolate, size=None, scale_factor=4., mode='linear', align_corners=True),
-        cpp_options_args='F::InterpolateFuncOptions().size(c10::nullopt).scale_factor(std::vector<double>({4.})).mode(torch::kLinear).align_corners(true)',
+        cpp_options_args='''F::InterpolateFuncOptions()
+                            .size(c10::nullopt)
+                            .scale_factor(std::vector<double>({4.}))
+                            .mode(torch::kLinear)
+                            .align_corners(true)''',
         input_size=(1, 2, 4),
         fullname='interpolate_linear_scale_1d_align_corners',
         pickle=False,
     ),
     dict(
         constructor=wrap_functional(F.interpolate, size=2, scale_factor=None, mode='nearest'),
-        cpp_options_args='F::InterpolateFuncOptions().size(std::vector<int64_t>({2, 2})).scale_factor(c10::nullopt).mode(torch::kNearest)',
+        cpp_options_args='''F::InterpolateFuncOptions()
+                            .size(std::vector<int64_t>({2, 2}))
+                            .scale_factor(c10::nullopt)
+                            .mode(torch::kNearest)''',
         input_size=(1, 128, 1, 1),
         fullname='interpolate_nearest_2d_launch_configs',
         pickle=False,
     ),
     dict(
         constructor=wrap_functional(F.interpolate, size=12, scale_factor=None, mode='nearest'),
-        cpp_options_args='F::InterpolateFuncOptions().size(std::vector<int64_t>({12, 12})).scale_factor(c10::nullopt).mode(torch::kNearest)',
+        cpp_options_args='''F::InterpolateFuncOptions()
+                            .size(std::vector<int64_t>({12, 12}))
+                            .scale_factor(c10::nullopt)
+                            .mode(torch::kNearest)''',
         input_size=(1, 2, 4, 4),
         fullname='interpolate_nearest_2d',
         pickle=False,
     ),
     dict(
         constructor=wrap_functional(F.interpolate, size=(12, 16), scale_factor=None, mode='nearest'),
-        cpp_options_args='F::InterpolateFuncOptions().size(std::vector<int64_t>({12, 16})).scale_factor(c10::nullopt).mode(torch::kNearest)',
+        cpp_options_args='''F::InterpolateFuncOptions()
+                            .size(std::vector<int64_t>({12, 16}))
+                            .scale_factor(c10::nullopt)
+                            .mode(torch::kNearest)''',
         input_size=(1, 2, 3, 4),
         fullname='interpolate_nearest_tuple_2d',
         pickle=False,
     ),
     dict(
         constructor=wrap_functional(F.interpolate, size=None, scale_factor=4., mode='nearest'),
-        cpp_options_args='F::InterpolateFuncOptions().size(c10::nullopt).scale_factor(std::vector<double>({4., 4.})).mode(torch::kNearest)',
+        cpp_options_args='''F::InterpolateFuncOptions()
+                            .size(c10::nullopt)
+                            .scale_factor(std::vector<double>({4., 4.}))
+                            .mode(torch::kNearest)''',
         input_size=(1, 2, 4, 4),
         fullname='interpolate_nearest_scale_2d',
         pickle=False,
     ),
     dict(
         constructor=wrap_functional(F.interpolate, size=12, scale_factor=None, mode='nearest'),
-        cpp_options_args='F::InterpolateFuncOptions().size(std::vector<int64_t>({12, 12})).scale_factor(c10::nullopt).mode(torch::kNearest)',
+        cpp_options_args='''F::InterpolateFuncOptions()
+                            .size(std::vector<int64_t>({12, 12}))
+                            .scale_factor(c10::nullopt)
+                            .mode(torch::kNearest)''',
         input_size=(0, 2, 4, 4),
         fullname='interpolate_nearest_2d_zero_dim',
         pickle=False,
     ),
     dict(
         constructor=wrap_functional(F.interpolate, size=12, scale_factor=None, mode='bilinear', align_corners=False),
-        cpp_options_args='F::InterpolateFuncOptions().size(std::vector<int64_t>({12, 12})).scale_factor(c10::nullopt).mode(torch::kBilinear).align_corners(false)',
+        cpp_options_args='''F::InterpolateFuncOptions()
+                            .size(std::vector<int64_t>({12, 12}))
+                            .scale_factor(c10::nullopt)
+                            .mode(torch::kBilinear)
+                            .align_corners(false)''',
         input_size=(1, 2, 4, 4),
         fullname='interpolate_bilinear_2d',
         pickle=False,
     ),
     dict(
         constructor=wrap_functional(F.interpolate, size=12, scale_factor=None, mode='bilinear', align_corners=False),
-        cpp_options_args='F::InterpolateFuncOptions().size(std::vector<int64_t>({12, 12})).scale_factor(c10::nullopt).mode(torch::kBilinear).align_corners(false)',
+        cpp_options_args='''F::InterpolateFuncOptions()
+                            .size(std::vector<int64_t>({12, 12}))
+                            .scale_factor(c10::nullopt)
+                            .mode(torch::kBilinear)
+                            .align_corners(false)''',
         input_size=(0, 2, 4, 4),
         fullname='interpolate_bilinear_2d_zero_dim',
         pickle=False,
@@ -2244,7 +2373,11 @@ new_module_tests = [
     dict(
         constructor=wrap_functional(F.interpolate, size=(4, 6), scale_factor=None,
                                     mode='bilinear', align_corners=False),
-        cpp_options_args='F::InterpolateFuncOptions().size(std::vector<int64_t>({4, 6})).scale_factor(c10::nullopt).mode(torch::kBilinear).align_corners(false)',
+        cpp_options_args='''F::InterpolateFuncOptions()
+                            .size(std::vector<int64_t>({4, 6}))
+                            .scale_factor(c10::nullopt)
+                            .mode(torch::kBilinear)
+                            .align_corners(false)''',
         input_size=(1, 2, 2, 3),
         fullname='interpolate_bilinear_tuple_2d',
         pickle=False,
@@ -2252,7 +2385,11 @@ new_module_tests = [
     dict(
         constructor=wrap_functional(F.interpolate, size=None, scale_factor=4.,
                                     mode='bilinear', align_corners=False),
-        cpp_options_args='F::InterpolateFuncOptions().size(c10::nullopt).scale_factor(std::vector<double>({4., 4.})).mode(torch::kBilinear).align_corners(false)',
+        cpp_options_args='''F::InterpolateFuncOptions()
+                            .size(c10::nullopt)
+                            .scale_factor(std::vector<double>({4., 4.}))
+                            .mode(torch::kBilinear)
+                            .align_corners(false)''',
         input_size=(1, 2, 4, 4),
         fullname='interpolate_bilinear_scale_2d',
         pickle=False,
@@ -2260,7 +2397,11 @@ new_module_tests = [
     dict(
         constructor=wrap_functional(F.interpolate, size=None, scale_factor=(2., 2.),
                                     mode='bilinear', align_corners=False),
-        cpp_options_args='F::InterpolateFuncOptions().size(c10::nullopt).scale_factor(std::vector<double>({2., 2.})).mode(torch::kBilinear).align_corners(false)',
+        cpp_options_args='''F::InterpolateFuncOptions()
+                            .size(c10::nullopt)
+                            .scale_factor(std::vector<double>({2., 2.}))
+                            .mode(torch::kBilinear)
+                            .align_corners(false)''',
         input_size=(1, 2, 4, 4),
         fullname='interpolate_bilinear_scale_tuple_shared_2d',
         pickle=False,
@@ -2268,14 +2409,22 @@ new_module_tests = [
     dict(
         constructor=wrap_functional(F.interpolate, size=None, scale_factor=(2., 1.),
                                     mode='bilinear', align_corners=False),
-        cpp_options_args='F::InterpolateFuncOptions().size(c10::nullopt).scale_factor(std::vector<double>({2., 1.})).mode(torch::kBilinear).align_corners(false)',
+        cpp_options_args='''F::InterpolateFuncOptions()
+                            .size(c10::nullopt)
+                            .scale_factor(std::vector<double>({2., 1.}))
+                            .mode(torch::kBilinear)
+                            .align_corners(false)''',
         input_size=(1, 2, 4, 4),
         fullname='interpolate_bilinear_scale_tuple_skewed_2d',
         pickle=False,
     ),
     dict(
         constructor=wrap_functional(F.interpolate, size=(4, 6), scale_factor=None, mode='bilinear', align_corners=True),
-        cpp_options_args='F::InterpolateFuncOptions().size(std::vector<int64_t>({4, 6})).scale_factor(c10::nullopt).mode(torch::kBilinear).align_corners(true)',
+        cpp_options_args='''F::InterpolateFuncOptions()
+                            .size(std::vector<int64_t>({4, 6}))
+                            .scale_factor(c10::nullopt)
+                            .mode(torch::kBilinear)
+                            .align_corners(true)''',
         input_size=(1, 2, 4, 4),
         fullname='interpolate_bilinear_tuple_2d_align_corners',
         pickle=False,
@@ -2283,21 +2432,33 @@ new_module_tests = [
     dict(
         constructor=wrap_functional(F.interpolate, size=None, scale_factor=(2., 1.),
                                     mode='bilinear', align_corners=True),
-        cpp_options_args='F::InterpolateFuncOptions().size(c10::nullopt).scale_factor(std::vector<double>({2., 1.})).mode(torch::kBilinear).align_corners(true)',
+        cpp_options_args='''F::InterpolateFuncOptions()
+                            .size(c10::nullopt)
+                            .scale_factor(std::vector<double>({2., 1.}))
+                            .mode(torch::kBilinear)
+                            .align_corners(true)''',
         input_size=(1, 2, 4, 4),
         fullname='interpolate_bilinear_scale_tuple_skewed_2d_align_corners',
         pickle=False,
     ),
     dict(
         constructor=wrap_functional(F.interpolate, size=12, scale_factor=None, mode='bicubic', align_corners=False),
-        cpp_options_args='F::InterpolateFuncOptions().size(std::vector<int64_t>({12, 12})).scale_factor(c10::nullopt).mode(torch::kBicubic).align_corners(false)',
+        cpp_options_args='''F::InterpolateFuncOptions()
+                            .size(std::vector<int64_t>({12, 12}))
+                            .scale_factor(c10::nullopt)
+                            .mode(torch::kBicubic)
+                            .align_corners(false)''',
         input_size=(1, 2, 4, 4),
         fullname='interpolate_bicubic_2d',
         pickle=False,
     ),
     dict(
         constructor=wrap_functional(F.interpolate, size=12, scale_factor=None, mode='bicubic', align_corners=False),
-        cpp_options_args='F::InterpolateFuncOptions().size(std::vector<int64_t>({12, 12})).scale_factor(c10::nullopt).mode(torch::kBicubic).align_corners(false)',
+        cpp_options_args='''F::InterpolateFuncOptions()
+                            .size(std::vector<int64_t>({12, 12}))
+                            .scale_factor(c10::nullopt)
+                            .mode(torch::kBicubic)
+                            .align_corners(false)''',
         input_size=(0, 2, 4, 4),
         fullname='interpolate_bicubic_2d_zero_dim',
         pickle=False,
@@ -2305,14 +2466,22 @@ new_module_tests = [
     dict(
         constructor=wrap_functional(F.interpolate, size=(4, 6), scale_factor=None,
                                     mode='bicubic', align_corners=False),
-        cpp_options_args='F::InterpolateFuncOptions().size(std::vector<int64_t>({4, 6})).scale_factor(c10::nullopt).mode(torch::kBicubic).align_corners(false)',
+        cpp_options_args='''F::InterpolateFuncOptions()
+                            .size(std::vector<int64_t>({4, 6}))
+                            .scale_factor(c10::nullopt)
+                            .mode(torch::kBicubic)
+                            .align_corners(false)''',
         input_size=(1, 2, 2, 3),
         fullname='interpolate_bicubic_tuple_2d',
         pickle=False,
     ),
     dict(
         constructor=wrap_functional(F.interpolate, size=None, scale_factor=4., mode='bicubic', align_corners=False),
-        cpp_options_args='F::InterpolateFuncOptions().size(c10::nullopt).scale_factor(std::vector<double>({4., 4.})).mode(torch::kBicubic).align_corners(false)',
+        cpp_options_args='''F::InterpolateFuncOptions()
+                            .size(c10::nullopt)
+                            .scale_factor(std::vector<double>({4., 4.}))
+                            .mode(torch::kBicubic)
+                            .align_corners(false)''',
         input_size=(1, 2, 4, 4),
         fullname='interpolate_bicubic_scale_2d',
         pickle=False,
@@ -2320,7 +2489,11 @@ new_module_tests = [
     dict(
         constructor=wrap_functional(F.interpolate, size=None, scale_factor=(2., 2.),
                                     mode='bicubic', align_corners=False),
-        cpp_options_args='F::InterpolateFuncOptions().size(c10::nullopt).scale_factor(std::vector<double>({2., 2.})).mode(torch::kBicubic).align_corners(false)',
+        cpp_options_args='''F::InterpolateFuncOptions()
+                            .size(c10::nullopt)
+                            .scale_factor(std::vector<double>({2., 2.}))
+                            .mode(torch::kBicubic)
+                            .align_corners(false)''',
         input_size=(1, 2, 4, 4),
         fullname='interpolate_bicubic_scale_tuple_shared_2d',
         pickle=False,
@@ -2328,14 +2501,22 @@ new_module_tests = [
     dict(
         constructor=wrap_functional(F.interpolate, size=None, scale_factor=(2., 1.),
                                     mode='bicubic', align_corners=False),
-        cpp_options_args='F::InterpolateFuncOptions().size(c10::nullopt).scale_factor(std::vector<double>({2., 1.})).mode(torch::kBicubic).align_corners(false)',
+        cpp_options_args='''F::InterpolateFuncOptions()
+                            .size(c10::nullopt)
+                            .scale_factor(std::vector<double>({2., 1.}))
+                            .mode(torch::kBicubic)
+                            .align_corners(false)''',
         input_size=(1, 2, 4, 4),
         fullname='interpolate_bicubic_scale_tuple_skewed_2d',
         pickle=False,
     ),
     dict(
         constructor=wrap_functional(F.interpolate, size=(4, 6), scale_factor=None, mode='bicubic', align_corners=True),
-        cpp_options_args='F::InterpolateFuncOptions().size(std::vector<int64_t>({4, 6})).scale_factor(c10::nullopt).mode(torch::kBicubic).align_corners(true)',
+        cpp_options_args='''F::InterpolateFuncOptions()
+                            .size(std::vector<int64_t>({4, 6}))
+                            .scale_factor(c10::nullopt)
+                            .mode(torch::kBicubic)
+                            .align_corners(true)''',
         input_size=(1, 2, 4, 4),
         fullname='interpolate_bicubic_tuple_2d_align_corners',
         pickle=False,
@@ -2343,49 +2524,73 @@ new_module_tests = [
     dict(
         constructor=wrap_functional(F.interpolate, size=None, scale_factor=(2., 1.),
                                     mode='bicubic', align_corners=True),
-        cpp_options_args='F::InterpolateFuncOptions().size(c10::nullopt).scale_factor(std::vector<double>({2., 1.})).mode(torch::kBicubic).align_corners(true)',
+        cpp_options_args='''F::InterpolateFuncOptions()
+                            .size(c10::nullopt)
+                            .scale_factor(std::vector<double>({2., 1.}))
+                            .mode(torch::kBicubic)
+                            .align_corners(true)''',
         input_size=(1, 2, 4, 4),
         fullname='interpolate_bicubic_scale_tuple_skewed_2d_align_corners',
         pickle=False,
     ),
     dict(
         constructor=wrap_functional(F.interpolate, size=12, scale_factor=None, mode='nearest'),
-        cpp_options_args='F::InterpolateFuncOptions().size(std::vector<int64_t>({12, 12, 12})).scale_factor(c10::nullopt).mode(torch::kNearest)',
+        cpp_options_args='''F::InterpolateFuncOptions()
+                            .size(std::vector<int64_t>({12, 12, 12}))
+                            .scale_factor(c10::nullopt)
+                            .mode(torch::kNearest)''',
         input_size=(1, 2, 4, 4, 4),
         fullname='interpolate_nearest_3d',
         pickle=False,
     ),
     dict(
         constructor=wrap_functional(F.interpolate, size=12, scale_factor=None, mode='nearest'),
-        cpp_options_args='F::InterpolateFuncOptions().size(std::vector<int64_t>({12, 12, 12})).scale_factor(c10::nullopt).mode(torch::kNearest)',
+        cpp_options_args='''F::InterpolateFuncOptions()
+                            .size(std::vector<int64_t>({12, 12, 12}))
+                            .scale_factor(c10::nullopt)
+                            .mode(torch::kNearest)''',
         input_size=(0, 2, 4, 4, 4),
         fullname='interpolate_nearest_3d_zero_dim',
         pickle=False,
     ),
     dict(
         constructor=wrap_functional(F.interpolate, size=(12, 16, 16), scale_factor=None, mode='nearest'),
-        cpp_options_args='F::InterpolateFuncOptions().size(std::vector<int64_t>({12, 16, 16})).scale_factor(c10::nullopt).mode(torch::kNearest)',
+        cpp_options_args='''F::InterpolateFuncOptions()
+                            .size(std::vector<int64_t>({12, 16, 16}))
+                            .scale_factor(c10::nullopt)
+                            .mode(torch::kNearest)''',
         input_size=(1, 2, 3, 4, 4),
         fullname='interpolate_nearest_tuple_3d',
         pickle=False,
     ),
     dict(
         constructor=wrap_functional(F.interpolate, size=None, scale_factor=4., mode='nearest'),
-        cpp_options_args='F::InterpolateFuncOptions().size(c10::nullopt).scale_factor(std::vector<double>({4., 4., 4.})).mode(torch::kNearest)',
+        cpp_options_args='''F::InterpolateFuncOptions()
+                            .size(c10::nullopt)
+                            .scale_factor(std::vector<double>({4., 4., 4.}))
+                            .mode(torch::kNearest)''',
         input_size=(1, 2, 4, 4, 4),
         fullname='interpolate_nearest_scale_3d',
         pickle=False,
     ),
     dict(
         constructor=wrap_functional(F.interpolate, size=12, scale_factor=None, mode='trilinear', align_corners=False),
-        cpp_options_args='F::InterpolateFuncOptions().size(std::vector<int64_t>({12, 12, 12})).scale_factor(c10::nullopt).mode(torch::kTrilinear).align_corners(false)',
+        cpp_options_args='''F::InterpolateFuncOptions()
+                            .size(std::vector<int64_t>({12, 12, 12}))
+                            .scale_factor(c10::nullopt)
+                            .mode(torch::kTrilinear)
+                            .align_corners(false)''',
         input_size=(1, 2, 4, 4, 4),
         fullname='interpolate_trilinear_3d',
         pickle=False,
     ),
     dict(
         constructor=wrap_functional(F.interpolate, size=12, scale_factor=None, mode='trilinear', align_corners=False),
-        cpp_options_args='F::InterpolateFuncOptions().size(std::vector<int64_t>({12, 12, 12})).scale_factor(c10::nullopt).mode(torch::kTrilinear).align_corners(false)',
+        cpp_options_args='''F::InterpolateFuncOptions()
+                            .size(std::vector<int64_t>({12, 12, 12}))
+                            .scale_factor(c10::nullopt)
+                            .mode(torch::kTrilinear)
+                            .align_corners(false)''',
         input_size=(0, 2, 4, 4, 4),
         fullname='interpolate_trilinear_3d_zero_dim',
         pickle=False,
@@ -2393,14 +2598,22 @@ new_module_tests = [
     dict(
         constructor=wrap_functional(F.interpolate, size=(4, 6, 6),
                                     scale_factor=None, mode='trilinear', align_corners=False),
-        cpp_options_args='F::InterpolateFuncOptions().size(std::vector<int64_t>({4, 6, 6})).scale_factor(c10::nullopt).mode(torch::kTrilinear).align_corners(false)',
+        cpp_options_args='''F::InterpolateFuncOptions()
+                            .size(std::vector<int64_t>({4, 6, 6}))
+                            .scale_factor(c10::nullopt)
+                            .mode(torch::kTrilinear)
+                            .align_corners(false)''',
         input_size=(1, 2, 2, 3, 3),
         fullname='interpolate_trilinear_tuple_3d',
         pickle=False,
     ),
     dict(
         constructor=wrap_functional(F.interpolate, size=None, scale_factor=3., mode='trilinear', align_corners=False),
-        cpp_options_args='F::InterpolateFuncOptions().size(c10::nullopt).scale_factor(std::vector<double>({3., 3., 3.})).mode(torch::kTrilinear).align_corners(false)',
+        cpp_options_args='''F::InterpolateFuncOptions()
+                            .size(c10::nullopt)
+                            .scale_factor(std::vector<double>({3., 3., 3.}))
+                            .mode(torch::kTrilinear)
+                            .align_corners(false)''',
         input_size=(1, 2, 3, 4, 4),
         fullname='interpolate_trilinear_scale_3d',
         # See https://github.com/pytorch/pytorch/issues/5006
@@ -2410,14 +2623,22 @@ new_module_tests = [
     dict(
         constructor=wrap_functional(F.interpolate, size=(4, 6, 6), scale_factor=None,
                                     mode='trilinear', align_corners=True),
-        cpp_options_args='F::InterpolateFuncOptions().size(std::vector<int64_t>({4, 6, 6})).scale_factor(c10::nullopt).mode(torch::kTrilinear).align_corners(true)',
+        cpp_options_args='''F::InterpolateFuncOptions()
+                            .size(std::vector<int64_t>({4, 6, 6}))
+                            .scale_factor(c10::nullopt)
+                            .mode(torch::kTrilinear)
+                            .align_corners(true)''',
         input_size=(1, 2, 2, 3, 3),
         fullname='interpolate_trilinear_tuple_3d_align_corners',
         pickle=False,
     ),
     dict(
         constructor=wrap_functional(F.interpolate, size=None, scale_factor=3., mode='trilinear', align_corners=True),
-        cpp_options_args='F::InterpolateFuncOptions().size(c10::nullopt).scale_factor(std::vector<double>({3., 3., 3.})).mode(torch::kTrilinear).align_corners(true)',
+        cpp_options_args='''F::InterpolateFuncOptions()
+                            .size(c10::nullopt)
+                            .scale_factor(std::vector<double>({3., 3., 3.}))
+                            .mode(torch::kTrilinear)
+                            .align_corners(true)''',
         input_size=(1, 2, 3, 4, 4),
         fullname='interpolate_trilinear_scale_3d_align_corners',
         # See https://github.com/pytorch/pytorch/issues/5006
@@ -2970,7 +3191,13 @@ for padding_mode, cpp_padding_mode in zip(
             dict(
                 module_name='Conv{}d'.format(d),
                 constructor_args=(3, 4, 3, 2, 2, 1, 1, True, padding_mode),
-                cpp_constructor_args='torch::nn::Conv{}dOptions(3, 4, 3).stride(2).padding(2).dilation(1).groups(1).bias(true).padding_mode({})'.format(d, cpp_padding_mode),
+                cpp_constructor_args='''torch::nn::Conv{}dOptions(3, 4, 3)
+                                        .stride(2)
+                                        .padding(2)
+                                        .dilation(1)
+                                        .groups(1)
+                                        .bias(true)
+                                        .padding_mode({})'''.format(d, cpp_padding_mode),
                 input_size=(2, 3) + (3,) * d,
                 output_size=(2, 4) + (3,) * d,
                 cudnn=True,
@@ -3691,8 +3918,9 @@ new_criterion_tests = [
         cpp_constructor_args='torch::nn::PoissonNLLLossOptions().log_input(false).full(true)',
         input_fn=lambda: torch.randn(2, 3, 4, 5).abs_().add_(0.001),
         target_fn=lambda: torch.randn(2, 3, 4, 5).floor_().abs_(),
-        reference_fn=lambda i, t, _:
-            (i - t.mul((i + 1e-8).log()) + (t.mul(t.log()) - t + 0.5 * (2. * pi * t).log()).masked_fill(t <= 1, 0)).mean(),
+        reference_fn=lambda i, t, _: (
+            i - t.mul((i + 1e-8).log()) + (t.mul(t.log()) - t + 0.5 * (2. * pi * t).log()).masked_fill(t <= 1, 0)
+        ).mean(),
         desc='full_loss_no_log_input',
     ),
     dict(

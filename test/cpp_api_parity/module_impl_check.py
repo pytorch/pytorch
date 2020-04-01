@@ -85,9 +85,12 @@ def run_python_forward_backward(unit_test_class, test_params):
     device = test_params.device
     module = test_params.test_instance.constructor(*test_params.test_instance.constructor_args).to(device)
 
-    inputs = set_python_tensors_requires_grad(move_python_tensors_to_device([arg_value for _, arg_value in test_params.arg_dict['input']], device))
-    inputs = inputs + move_python_tensors_to_device([arg_value for _, arg_value in test_params.arg_dict['target']], device)
-    inputs = inputs + move_python_tensors_to_device([arg_value for _, arg_value in test_params.arg_dict['extra_args']], device)
+    inputs = set_python_tensors_requires_grad(move_python_tensors_to_device(
+        [arg_value for _, arg_value in test_params.arg_dict['input']], device))
+    inputs = inputs + move_python_tensors_to_device(
+        [arg_value for _, arg_value in test_params.arg_dict['target']], device)
+    inputs = inputs + move_python_tensors_to_device(
+        [arg_value for _, arg_value in test_params.arg_dict['extra_args']], device)
 
     # Some modules (such as `RReLU`) create random tensors in their forward pass.
     # To make sure the random tensors created are the same in Python/C++, we need
@@ -144,7 +147,7 @@ def test_forward_backward(unit_test_class, test_params):
 
         # Check that forward outputs are equal
         unit_test_class.assertEqual(python_output, cpp_output,
-            message=generate_error_msg("forward output", cpp_output, python_output))
+                                    message=generate_error_msg("forward output", cpp_output, python_output))
 
         # Check that module parameter gradients are equal after backward pass
         unit_test_class.assertEqual(
@@ -156,7 +159,8 @@ def test_forward_backward(unit_test_class, test_params):
                 msg=generate_error_msg("\"Does module have a parameter named `{}`?\"".format(key[:-5]), False, True))
             unit_test_class.assertEqual(
                 python_grad_dict[key], cpp_grad_dict[key],
-                message=generate_error_msg("gradient of `{}`".format(key[:-5]), cpp_grad_dict[key], python_grad_dict[key]))
+                message=generate_error_msg(
+                    "gradient of `{}`".format(key[:-5]), cpp_grad_dict[key], python_grad_dict[key]))
 
     run_cpp_test_fn_and_check_output()
 
@@ -164,7 +168,7 @@ def test_forward_backward(unit_test_class, test_params):
     # if this fails.
     try:
         shutil.rmtree(cpp_tmp_folder)
-    except: # noqa: E722
+    except:  # noqa: E722
         pass
 
 def test_torch_nn_module_variant(unit_test_class, test_params):
@@ -202,7 +206,8 @@ def process_test_params_for_module(test_params_dict, device, test_instance_class
         cpp_tmp_folder=tempfile.mkdtemp(),
     )
 
-def add_torch_nn_module_impl_parity_tests(parity_table, unit_test_class, test_params_dicts, test_instance_class, devices):
+def add_torch_nn_module_impl_parity_tests(
+        parity_table, unit_test_class, test_params_dicts, test_instance_class, devices):
     if not hasattr(unit_test_class, 'module_test_params_map'):
         unit_test_class.module_test_params_map = {}
     for test_params_dict in test_params_dicts:
@@ -220,9 +225,9 @@ def add_torch_nn_module_impl_parity_tests(parity_table, unit_test_class, test_pa
 
         module_full_name = 'torch::nn::' + module_name
 
-        assert module_full_name in parity_table['torch::nn'], \
-            "Please add `{}` entry to `torch::nn` section of `test/cpp_api_parity/parity-tracker.md`. (Discovered while processing {}.)".format(
-                module_full_name, test_params_dict)
+        assert module_full_name in parity_table['torch::nn'], (
+            "Please add `{}` entry to `torch::nn` section of `test/cpp_api_parity/parity-tracker.md`. "
+            "(Discovered while processing {}.)").format(module_full_name, test_params_dict)
 
         for device in devices:
             test_params = process_test_params_for_module(
@@ -234,13 +239,15 @@ def add_torch_nn_module_impl_parity_tests(parity_table, unit_test_class, test_pa
             unit_test_class.module_test_params_map[test_name] = test_params
 
             def test_fn(self):
-                test_torch_nn_module_variant(unit_test_class=self, test_params=unit_test_class.module_test_params_map[self._testMethodName])
+                test_torch_nn_module_variant(
+                    unit_test_class=self, test_params=unit_test_class.module_test_params_map[self._testMethodName])
 
             test_fn = decorate_test_fn(
                 test_fn=test_fn,
                 test_cpp_api_parity=test_params_dict.get('test_cpp_api_parity', True),
                 test_cuda=test_params_dict.get('test_cuda', True),
-                has_impl_parity=parity_table['torch::nn'][module_full_name][0] and test_params_dict.get('has_parity', True),
+                has_impl_parity=parity_table['torch::nn'][module_full_name][0] and
+                test_params_dict.get('has_parity', True),
                 device=device)
 
             add_test(unit_test_class, test_name, test_fn)
@@ -260,7 +267,8 @@ def generate_test_cpp_sources(test_params, template):
     if cpp_constructor_args != '':
         cpp_constructor_args = '({})'.format(cpp_constructor_args)
 
-    cpp_args_construction_stmts, cpp_forward_args_symbols = compute_cpp_args_construction_stmts_and_forward_arg_symbols(test_params)
+    cpp_args_construction_stmts, cpp_forward_args_symbols = \
+        compute_cpp_args_construction_stmts_and_forward_arg_symbols(test_params)
 
     test_cpp_sources = template.substitute(
         module_variant_name=test_params.module_variant_name,
@@ -282,7 +290,8 @@ def build_cpp_tests(unit_test_class, print_cpp_source=False):
         if test_params.module_name not in modules_added_cpp_sources:
             cpp_sources += cpp_api_parity.module_cpp_sources.get(test_params.module_name, '')
             modules_added_cpp_sources.add(test_params.module_name)
-        cpp_sources += generate_test_cpp_sources(test_params=test_params, template=TORCH_NN_MODULE_TEST_FORWARD_BACKWARD)
+        cpp_sources += generate_test_cpp_sources(
+            test_params=test_params, template=TORCH_NN_MODULE_TEST_FORWARD_BACKWARD)
         functions.append('{}_{}'.format(test_params.module_variant_name, 'test_forward_backward'))
     if print_cpp_source:
         print(cpp_sources)
