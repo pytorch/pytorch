@@ -1,13 +1,10 @@
 import math
 import torch
-from torch.testing._internal.common_utils import TestCase, run_tests
+from torch.testing._internal.common_utils import TestCase, run_tests, TEST_NUMPY
 import unittest
 
-TEST_NUMPY = True
-try:
+if TEST_NUMPY:
     import numpy as np
-except ImportError:
-    TEST_NUMPY = False
 
 devices = (torch.device('cpu'), torch.device('cuda:0'))
 
@@ -21,8 +18,7 @@ class TestComplexTensor(TestCase):
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_exp(self):
         def exp_fn(dtype):
-            a = (1j * torch.tensor([0, 1 + 1j, 2 + 2j, 3 + 3j], dtype=dtype) /
-                 3 * math.pi)
+            a = torch.tensor(1j, dtype=dtype) * torch.arange(4) / 3 * math.pi
             expected = np.exp(a.numpy())
             actual = torch.exp(a)
             self.assertEqual(actual, torch.from_numpy(expected))
