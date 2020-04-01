@@ -2768,9 +2768,11 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(CrossEntropyLossMean(), input=(x, y))
         '''
         class CrossEntropyLossMeanWeight(torch.nn.Module):
+            def __init__(self):
+                super(CrossEntropyLossMeanWeight, self).__init__()
+                self.loss = torch.nn.CrossEntropyLoss(weight=torch.randn(5))
             def forward(self, input, target):
-                loss = torch.nn.CrossEntropyLoss(weight=torch.randn(5))
-                return loss(input, target)
+                return self.loss(input, target)
 
         x = torch.randn(3, 5, 2)
         y = torch.empty(3, 2, dtype=torch.long).random_(5)
