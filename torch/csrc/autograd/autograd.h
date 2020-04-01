@@ -15,7 +15,7 @@ namespace autograd {
 /// additionally requires specifying `grad_tensors`. It should be a sequence of
 /// matching length, that contains the "vector" in the Jacobian-vector product,
 /// usually the gradient of the differentiated function w.r.t. corresponding tensors
-/// (`torch::Tensor()` is an acceptable value for all tensors that don’t need
+/// (`torch::Tensor()` is an acceptable value for all tensors that don't need
 /// gradient tensors).
 ///
 /// This function accumulates gradients in the leaves - you might need to zero them
@@ -24,7 +24,7 @@ namespace autograd {
 /// \param tensors Tensors of which the derivative will be computed.
 /// \param grad_tensors The "vector" in the Jacobian-vector product, usually gradients
 ///     w.r.t. each element of corresponding tensors. `torch::Tensor()` values can be
-///     specified for scalar Tensors or ones that don’t require grad. If a `torch::Tensor()` value
+///     specified for scalar Tensors or ones that don't require grad. If a `torch::Tensor()` value
 ///     would be acceptable for all grad_tensors, then this argument is optional.
 /// \param retain_graph If `false`, the graph used to compute the grad will be freed.
 ///     Note that in nearly all cases setting this option to `true` is not needed
