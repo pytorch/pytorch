@@ -161,8 +161,8 @@ void testCudaDynamicShape2D() {
   auto testWithSize = [](int32_t M, int32_t N) {
     VarHandle m("m", kInt);
     VarHandle n("n", kInt);
-    Buffer a(VarHandle("a", kHandle), kFloat, {m, n});
-    Buffer b(VarHandle("b", kHandle), kFloat, {m, n});
+    Buffer a(BufHandle("a", kHandle, {m, n}), kFloat);
+    Buffer b(BufHandle("b", kHandle, {m, n}), kFloat);
     Tensor* c = Compute(
         "c", {{m, "m"}, {n, "n"}}, [&](const VarHandle& i, const VarHandle& j) {
           return a(i, j) + b(i, j);
@@ -280,7 +280,7 @@ void testCudaDynamicShapeSplit() {
   KernelScope ks;
   constexpr int N = 4096;
   VarHandle n("n", kInt);
-  Buffer a(VarHandle("a", kHandle), kFloat, {n});
+  Buffer a(BufHandle("a", kHandle, {n}), kFloat);
   Tensor* b =
       Compute("b", {{n, "n"}}, [&](const VarHandle& i) { return a(i) * 2.0f; });
   LoopNest l({b});

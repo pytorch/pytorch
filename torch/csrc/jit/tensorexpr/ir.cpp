@@ -10,44 +10,188 @@ static Dtype ChooseDtype(const Dtype& buffer_dtype, const Dtype& index_dtype) {
   return Dtype(buffer_dtype, index_dtype.lanes());
 }
 
-Load::Load(const Buffer& buffer, const Expr* index, const Expr* mask)
+static Dtype dtypeOfIndices(const std::vector<const Expr*>& indices) {
+  if (!indices.size()) {
+    throw malformed_input();
+  }
+  Dtype dt = indices.at(0)->dtype();
+  for (size_t i = 1; i < indices.size(); ++i) {
+    if (indices.at(i)->dtype() != dt) {
+      throw malformed_input();
+    }
+  }
+  return dt;
+}
+
+static bool indicesValid(const std::vector<const Expr*>& indices) {
+  if (indices.size() == 0) {
+    return false;
+  }
+  Dtype index_dtype = dtypeOfIndices(indices);
+  if (indices.size() > 1 && index_dtype.lanes() > 1) {
+    // Multilane is only allowed in a flattened (i.e. 1D) index
+    return false;
+  }
+  if (index_dtype.scalar_type() != ScalarType::Int) {
+    return false;
+  }
+  return true;
+}
+
+Load::Load(
+    const Buffer& buffer,
+    const std::vector<const Expr*>& indices,
+    const Expr* mask)
     : Load(
-          ChooseDtype(buffer.dtype(), index->dtype()),
+          ChooseDtype(buffer.dtype(), dtypeOfIndices(indices)),
           buffer.data(),
-          index,
+          indices,
           mask) {}
 
 Load::Load(
     Dtype dtype,
-    const Var* base_handle,
-    const Expr* index,
+    const Buf* buf,
+    const std::vector<const Expr*>& indices,
     const Expr* mask)
-    : ExprNodeBase(dtype),
-      base_handle_(base_handle),
-      index_(index),
-      mask_(mask) {
-  if (base_handle->dtype() != kHandle) {
+    : ExprNodeBase(dtype), buf_(buf), indices_(indices), mask_(mask) {
+  if (buf->base_handle()->dtype() != kHandle) {
     throw malformed_input();
   }
-
-  if (index->dtype().lanes() != mask->dtype().lanes()) {
+  if (!indicesValid(indices)) {
     throw malformed_input();
   }
-
-  if (index->dtype().scalar_type() != ScalarType::Int) {
-    throw unsupported_dtype();
+  Dtype index_dtype = dtypeOfIndices(indices);
+  if (index_dtype.lanes() != mask->dtype().lanes()) {
+    throw malformed_input();
   }
+}
+
+ExprHandle Load::make(
+    const Buffer& buffer,
+    const std::vector<ExprHandle>& indices,
+    const ExprHandle& mask) {
+  return ExprHandle(
+      new Load(buffer, ExprHandleVectorToExprVector(indices), mask.node()));
+}
+ExprHandle Load::make(
+    Dtype dtype,
+    const BufHandle& buf,
+    const std::vector<ExprHandle>& indices,
+    const ExprHandle& mask) {
+  return ExprHandle(new Load(
+      dtype, buf.node(), ExprHandleVectorToExprVector(indices), mask.node()));
 }
 
 Store::Store(
     const Buffer& buffer,
-    const Expr* index,
+    const std::vector<const Expr*>& indices,
     const Expr* value,
     const Expr* mask)
-    : Store(buffer.data(), index, value, mask) {
+    : Store(buffer.data(), indices, value, mask) {
   if (buffer.dtype().scalar_type() != value->dtype().scalar_type()) {
     throw malformed_input();
   }
+}
+
+Store::Store(
+    const Buf* buf,
+    const std::vector<const Expr*>& indices,
+    const Expr* value,
+    const Expr* mask)
+    : buf_(buf), indices_(indices), value_(value), mask_(mask) {
+  if (buf->dtype() != kHandle) {
+    throw malformed_input();
+  }
+  /*
+  TODO: Reenable the checks.
+  The reason they are disabled is that kernel.cpp is using Buffers somewhat
+  loosely: we don't set dimensions properly and just construct index expressions
+  directly. We should harden that part and then we'd be able to turn on these
+  checks.
+
+  if (!indicesValid(indices)) {
+    throw malformed_input();
+  }
+  if (!mask || !value) {
+    throw malformed_input();
+  }
+  Dtype index_dtype = dtypeOfIndices(indices);
+  if (index_dtype.lanes() != mask->dtype().lanes()) {
+    throw malformed_input();
+  }
+  if (index_dtype.lanes() != value->dtype().lanes()) {
+    throw malformed_input();
+  }
+  */
+}
+
+Store* Store::make(
+    const Buffer& buffer,
+    const std::vector<ExprHandle>& indices,
+    const ExprHandle& value,
+    const ExprHandle& mask) {
+  return new Store(
+      buffer, ExprHandleVectorToExprVector(indices), value.node(), mask.node());
+}
+
+Store* Store::make(
+    const BufHandle& buf,
+    const std::vector<ExprHandle>& indices,
+    const ExprHandle& value,
+    const ExprHandle& mask) {
+  return new Store(
+      buf.node(),
+      ExprHandleVectorToExprVector(indices),
+      value.node(),
+      mask.node());
+}
+
+Store* Store::make(
+    const BufHandle& buf,
+    const std::vector<ExprHandle>& indices,
+    const ExprHandle& value) {
+  return new Store(
+      buf.node(),
+      ExprHandleVectorToExprVector(indices),
+      value.node(),
+      ExprHandle(1).node());
+}
+
+const Expr* flattened_index(
+    const std::vector<const Expr*>& dims,
+    const std::vector<const Expr*>& indices) {
+  // Handle already flattened indices first
+  if (indices.size() == 1) {
+    return indices[0];
+  }
+
+  size_t ndim = dims.size();
+  if (ndim != indices.size()) {
+    throw malformed_input();
+  }
+  std::vector<ExprHandle> strides(ndim);
+  for (size_t i = 0; i < ndim; i++) {
+    if (i == ndim - 1) {
+      strides[i] = ExprHandle(1);
+      continue;
+    }
+    ExprHandle stride = ExprHandle(dims[i + 1]);
+    for (size_t j = i + 2; j < ndim; j++) {
+      stride = stride * ExprHandle(dims[j]);
+    }
+    strides[i] = stride;
+  }
+
+  ExprHandle total_index = int32_t{0};
+  for (size_t i = 0; i < ndim; i++) {
+    if (i == ndim - 1) {
+      total_index = total_index + ExprHandle(indices[ndim - 1]);
+    } else {
+      total_index =
+          total_index + ExprHandle(indices[i]) * ExprHandle(strides[i]);
+    }
+  }
+  return total_index.node();
 }
 
 Dtype Intrinsics::IntrinsicsDtype(IntrinsicsOp op_type, Dtype dt1) {
