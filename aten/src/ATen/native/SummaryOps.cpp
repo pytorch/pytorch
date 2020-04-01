@@ -66,9 +66,8 @@ _bincount_cpu(const Tensor& self, const Tensor& weights, int64_t minlength) {
 }
 
 Tensor& histc_out(Tensor& hist, const Tensor &self, int64_t nbins, Scalar minvalue, Scalar maxvalue) {
-  if (nbins <= 0) {
-    AT_ERROR("bins must be > 0");
-  }
+  TORCH_CHECK(nbins > 0, "histc: bins must be > 0");
+  TORCH_CHECK(at::isIntegralType(hist.scalar_type()), "hist only supports integral-point dtypes, hist got: ", hist.scalar_type());
 
   auto tensor = self.contiguous();
   hist.resize_({nbins});
