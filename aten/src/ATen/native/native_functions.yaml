@@ -1554,10 +1554,10 @@
   device_guard: False
   supports_named_tensor: True
 
-- func: kl_div(Tensor self, Tensor target, int reduction=Mean) -> Tensor
+- func: kl_div(Tensor self, Tensor target, int reduction=Mean, *, bool log_target=False) -> Tensor
   use_c10_dispatcher: full
 
-- func: kl_div_backward(Tensor grad_output, Tensor self, Tensor target, int reduction=Mean) -> Tensor
+- func: kl_div_backward(Tensor grad_output, Tensor self, Tensor target, int reduction=Mean, *, bool log_target=False) -> Tensor
   use_c10_dispatcher: full
   dispatch:
     CPU: kl_div_backward_cpu
