@@ -5,6 +5,7 @@
 #include <c10/util/Exception.h>
 #include <c10/macros/Macros.h>
 #include <ATen/detail/FunctionTraits.h>
+#include <ATen/cuda/detail/OffsetCalculator.cuh>
 
 // References:
 // https://devblogs.nvidia.com/cuda-pro-tip-increase-performance-with-vectorized-memory-access/
@@ -44,8 +45,11 @@ struct static_unroll<func, end, end> {
   static inline C10_HOST_DEVICE void with_args(Args... args) {}
 };
 
+// helper structs to be used with static_unroll to load arguments
+// one by one
+
 template<int arg_index>
-struct load_with_policy {
+struct vectorized_load_helper {
   template <typename args_t, typename policy_t>
   static __device__ void apply(policy_t &self, args_t *args, int idx) {
     using arg_t = std::tuple_element_t<arg_index, args_t>;
@@ -54,6 +58,18 @@ struct load_with_policy {
     auto ptr = reinterpret_cast<arg_t *>(self.data[arg_index + 1]) + block_work_size * idx;
     auto args_accessor = [&args] __device__ (int thread_unroll_idx) -> arg_t & { return std::get<arg_index>(args[thread_unroll_idx]); };
     self.load_single_arg(args_accessor, ptr);
+  }
+};
+
+template<int arg_index>
+struct unroll_load_helper {
+  template <typename args_t, typename policy_t, typename offset_t>
+  static __device__ void apply(policy_t &self, args_t *args, offset_t offset, int j) {
+    using arg_t = std::tuple_element_t<arg_index, args_t>;
+    // `data` hold the data_ptr for tensors [output, input0, input1, ...], so we
+    // need a +1 offset to get the input
+    auto ptr = reinterpret_cast<arg_t *>(self.data[arg_index + 1]) + offset[arg_index];
+    std::get<arg_index>(args[j]) = *ptr;
   }
 };
 
@@ -69,35 +85,35 @@ namespace policies {
 
 // Assumption:
 // all tensors are contiguous, that is: stride == sizeof(type) for all tensors
-template<typename data_t>
+template<typename data_t, typename inp_calc_t, typename out_calc_t>
 struct unroll {
 
   data_t data;
   int remaining;
+  inp_calc_t input_offset_calculator;
+  out_calc_t output_offset_calculator;
 
-  __device__ unroll(data_t data, int remaining): data(data), remaining(remaining) {}
+  __device__ unroll(data_t data, int remaining, inp_calc_t ic, out_calc_t oc):
+    data(data), remaining(remaining), input_offset_calculator(ic), output_offset_calculator(oc) {}
 
   __device__ inline bool check_inbounds(int thread_work_elem) {
     return ((threadIdx.x  + thread_work_elem*num_threads) < remaining);
   }
 
-  template<typename accessor_t, typename scalar_t>
-  __device__ inline void load_single_arg(accessor_t to, scalar_t *from) {
+  template<typename args_t>
+  __device__ inline void load(args_t *args, int idx) {
+    constexpr int arity = std::tuple_size<args_t>::value;
     int thread_idx = threadIdx.x;
     #pragma unroll
     for (int i = 0; i < thread_work_size; i++) {
       if (thread_idx >= remaining) {
         return;
       }
-      to(i) = from[thread_idx];
+      int linear_idx = thread_idx + block_work_size * idx;
+      auto offset = input_offset_calculator.get(linear_idx);
+      detail::static_unroll<detail::unroll_load_helper, arity>::with_args(*this, args, offset, i);
       thread_idx += num_threads;
     }
-  }
-
-  template<typename args_t>
-  __device__ inline void load(args_t *args, int idx) {
-    constexpr int arity = std::tuple_size<args_t>::value;
-    detail::static_unroll<detail::load_with_policy, arity>::with_args(*this, args, idx);
   }
 
   template<typename scalar_t>
@@ -109,7 +125,10 @@ struct unroll {
       if (thread_idx >= remaining) {
         return;
       }
-      to[thread_idx] = from[i];
+      int linear_idx = thread_idx + block_work_size * idx;
+      int offset = output_offset_calculator.get(linear_idx)[0];
+      scalar_t *to = reinterpret_cast<scalar_t *>(data[0]) + offset;
+      *to = from[i];
       thread_idx += num_threads;
     }
   }
@@ -153,7 +172,7 @@ struct vectorized {
   template<typename args_t>
   __device__ inline void load(args_t *args, int idx) {
     constexpr int arity = std::tuple_size<args_t>::value;
-    detail::static_unroll<detail::load_with_policy, arity>::with_args(*this, args, idx);
+    detail::static_unroll<detail::vectorized_load_helper, arity>::with_args(*this, args, idx);
   }
 
   template<typename scalar_t>
