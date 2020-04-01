@@ -886,7 +886,6 @@ Node* createSoftmaxCrossEntropyNode(Block* b, graph_node_list_iterator it, std::
   for (Value* value : values) {
     softmaxCrossEntropyNode->addInput(value);
   }
-
   return softmaxCrossEntropyNode;
 }
 
@@ -930,23 +929,11 @@ static void fuseLogSoftmaxNllLoss(Block* b) {
         origLogSoftmaxNode->removeAllInputs();
         deleteNodes.push_back(origLogSoftmaxNode);
         deleteNodes.push_back(transpose);
-
         recursive_del(origNllLossNode);
       } else {
         break;
       }
 
-      //softmaxCrossEntropyNode = b->owningGraph()->create(onnx::SoftmaxCrossEntropyLoss, it->outputs().size());
-      //for (size_t i = 0; i < softmaxCrossEntropyNode->outputs().size(); ++i) {
-	      //softmaxCrossEntropyNode->outputs()[i]->copyMetadata(it->outputs()[i]);
-      //}
-      //softmaxCrossEntropyNode->copyAttributes(*origNllLossNode);
-      //softmaxCrossEntropyNode->insertBefore(origNllLossNode);
-      //softmaxCrossEntropyNode->addInput(origLogSoftmaxNode->inputs().at(0));
-      //softmaxCrossEntropyNode->addInput(origNllLossNode->inputs().at(1));
-      //if (origNllLossNode->inputs().size() == 3) {
-	      //softmaxCrossEntropyNode->addInput(origNllLossNode->inputs().at(2));
-      //}
       if (!softmaxCrossEntropyNode) {
         std::vector<Value*> values{origLogSoftmaxNode->inputs().at(0), origNllLossNode->inputs().at(1)};
         if (origNllLossNode->inputs().size() == 3) {
@@ -959,8 +946,6 @@ static void fuseLogSoftmaxNllLoss(Block* b) {
       softmaxCrossEntropyNode->insertBefore(origNllLossNode);
       it->replaceAllUsesWith(softmaxCrossEntropyNode);
       it->removeAllInputs();
-      //origLogSoftmaxNode->destroy();
-      //prev->destroy();
       for (Node* node : deleteNodes) {
         node->destroy();
       }
