@@ -125,8 +125,7 @@ void RNNImplBase<Derived>::reset() {
         param_names.emplace_back("bias_ih_l{layer}{suffix}");
         param_names.emplace_back("bias_hh_l{layer}{suffix}");
       }
-      for (size_t i = 0; i < param_names.size();
-           i++) { // NOLINT(modernize-loop-convert)
+      for (size_t i = 0; i < param_names.size(); i++) { // NOLINT(modernize-loop-convert)
         std::string x = std::regex_replace(
             param_names[i], std::regex("\\{layer\\}"), c10::str(layer));
         x = std::regex_replace(x, std::regex("\\{suffix\\}"), c10::str(suffix));
@@ -205,12 +204,12 @@ std::tuple<std::vector<Tensor>, std::vector<std::string>> RNNImplBase<Derived>::
   std::vector<Tensor> merge_weights;
   std::vector<std::string> merge_weights_names;
 
-  for (int64_t i = 0; i < flat_weights_fwd.size(); i++) {
+  for (uint64_t i = 0; i < flat_weights_fwd.size(); i++) {
     merge_weights.push_back(flat_weights_fwd[i]);
     merge_weights_names.push_back(weights_fwd_names[i]);
   }
 
-  for (int64_t i = 0; i < flat_weights_bwd.size(); i++) {
+  for (uint64_t i = 0; i < flat_weights_bwd.size(); i++) {
     merge_weights.push_back(flat_weights_bwd[i]);
     merge_weights_names.push_back(weights_bwd_names[i]);
   }
