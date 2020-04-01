@@ -12397,7 +12397,7 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(sort_topk, topk[0])      # check values
         self.assertEqual(sort_topk, a[topk[1]])   # check indices
 
-    @dtypesIfCUDA(torch.half, torch.float, torch.double)
+    @dtypesIfCUDA(_float_types2)
     @dtypes(torch.float, torch.double)
     def test_topk_nonfinite(self, device, dtype):
         x = torch.tensor([float('nan'), float('inf'), 1e4, 0, -1e4, -float('inf')], device=device, dtype=dtype)
