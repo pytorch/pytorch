@@ -6,6 +6,7 @@
 #include <c10/util/intrusive_ptr.h>
 #include <c10/util/order_preserving_flat_hash_map.h>
 #include <c10/util/Optional.h>
+#include <torch/csrc/WindowsTorchApiMacro.h>
 #include <ATen/core/TensorBody.h>
 
 namespace c10 {
@@ -33,9 +34,7 @@ struct DictKeyHash {
 };
 
 struct DictKeyEqualTo {
-  bool operator()(const IValue& lhs, const IValue& rhs) const {
-    return impl::shallowEquals(lhs, rhs);
-  }
+  bool operator()(const IValue& lhs, const IValue& rhs) const;
 };
 
 struct DictImpl final : public c10::intrusive_ptr_target {
@@ -53,6 +52,7 @@ struct DictImpl final : public c10::intrusive_ptr_target {
   DictElementTypes elementTypes;
 
   intrusive_ptr<DictImpl> copy() const;
+  friend TORCH_API bool operator==(const DictImpl& lhs, const DictImpl& rhs);
 };
 
 }
