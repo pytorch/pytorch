@@ -16402,6 +16402,22 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         test_output_dtype(torch.int64, True)
 
 
+    @onlyCPU
+    @dtypes(torch.complex64, torch.complex128)
+    def test_polar(self, device, dtype):
+        torch.manual_seed(123456)
+        a = torch.rand(SIZE, SIZE, dtype=dtype)
+        res1 = a.polar()
+        res2 = torch.tensor([], dtype=dtype)
+        torch.polar(a, out=res2)
+        self.assertEqual(res1, res2)
+
+        torch.manual_seed(123456)
+        a = torch.rand(SIZE, SIZE, dtype=dtype)
+        polar_tensor = a.polar()
+        self.assertEqual(polar_tensor, a.abs() + 1j * a.angle())
+
+
 # NOTE [Linspace+Logspace precision override]
 # Our Linspace and logspace torch.half CUDA kernels are not very precise.
 # Since linspace/logspace are deterministic, we can compute an expected

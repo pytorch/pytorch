@@ -237,6 +237,7 @@ Pointwise Ops
 .. autofunction:: mul
 .. autofunction:: mvlgamma
 .. autofunction:: neg
+.. autofunction:: polar
 .. autofunction:: polygamma
 .. autofunction:: pow
 .. autofunction:: real

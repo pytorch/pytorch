@@ -707,6 +707,9 @@
 - name: poisson(Tensor self, Generator? generator=None) -> Tensor
   self: zeros_like(self)
 
+- name: polar(Tensor self) -> Tensor
+  self: grad.to(self.scalar_type()) * self.sign() + grad.to(self.scalar_type()) * (self*Scalar(std::complex<double>{0.0, 1.0})).conj() / self.abs().pow(2)
+
 - name: pow.Tensor_Scalar(Tensor self, Scalar exponent) -> Tensor
   self: pow_backward(grad, self, exponent)
 

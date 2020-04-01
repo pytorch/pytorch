@@ -322,7 +322,7 @@ public:
     return ret;
   }
   Vec256<T> polar() const {
-    return *this;
+    return abs();
   }
   Vec256<T> log() const {
     return map(std::log);

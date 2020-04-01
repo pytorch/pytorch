@@ -4370,7 +4370,7 @@ add_docstr(torch.polar,
 polar(input, out=None) -> Tensor
 
 Returns a new tensor in the polar form of the elements of
-:attr:`input`. Magnitude is stored in real value and angle in imageniry.
+:attr:`input`. Magnitude is stored in real value and angle in imaginary.
 
 Args:
     {input}

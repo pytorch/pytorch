@@ -396,6 +396,8 @@ view of a storage and defines numeric operations on it.
    .. automethod:: permute
    .. automethod:: pin_memory
    .. automethod:: pinverse
+   .. automethod:: polar
+   .. automethod:: polar_
    .. automethod:: polygamma
    .. automethod:: polygamma_
    .. automethod:: pow
