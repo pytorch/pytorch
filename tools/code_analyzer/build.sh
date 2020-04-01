@@ -15,7 +15,7 @@
 #
 # 3. Analyze torch and generate yaml file of op dependency with debug path:
 # LLVM_DIR=${HOME}/src/llvm8/build/install \
-# ANALYZE_TORCH=1 tools/code_analyzer/build.sh -closure=false -debug_path=true
+# ANALYZE_TORCH=1 tools/code_analyzer/build.sh -debug_path=true
 
 set -ex
 
@@ -100,7 +100,7 @@ analyze_torch_mobile() {
     cat > ${DEST} <<- EOM
 # Generated for selective build without using static dispatch.
 # Manually run the script to update:
-# ANALYZE_TORCH=1 FORMAT=py DEPLOY=1 tools/code_analyzer/build.sh -closure=false
+# ANALYZE_TORCH=1 FORMAT=py DEPLOY=1 tools/code_analyzer/build.sh
 EOM
     printf "TORCH_DEPS = " >> ${DEST}
     cat "${OUTPUT}" >> ${DEST}

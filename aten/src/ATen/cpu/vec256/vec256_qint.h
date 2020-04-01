@@ -362,6 +362,26 @@ Vec256<c10::qint32> inline operator*(
 #endif
 }
 
+template <>
+Vec256<c10::qint32> inline operator+(
+    const Vec256<c10::qint32>& a,
+    const Vec256<c10::qint32>& b) {
+#ifdef __AVX2__
+  return _mm256_add_epi32(a, b);
+#else
+  // Pray the compiler can autovectorize this
+  int32_t a_vals[a.size()];
+  int32_t b_vals[b.size()];
+  a.store(a_vals);
+  b.store(b_vals);
+  int32_t result_vals[a.size()];
+  for (size_t i = 0; i < a.size(); ++i) {
+    result_vals[i] = a_vals[i] + b_vals[i];
+  }
+  return Vec256<c10::qint32>::loadu(result_vals);
+#endif
+}
+
 #ifdef __AVX2__
 /*
  * Convert values from int32 back to int8/uint8
@@ -1145,6 +1165,17 @@ Vec256<c10::qint32> inline operator*(
   Vec256<c10::qint32> retval;
   for (size_t i = 0; i < a.size(); ++i) {
     retval.vals[i] = a.vals[i] * b.vals[i];
+  }
+  return retval;
+}
+
+template <>
+Vec256<c10::qint32> inline operator+(
+    const Vec256<c10::qint32>& a,
+    const Vec256<c10::qint32>& b) {
+  Vec256<c10::qint32> retval;
+  for (size_t i = 0; i < a.size(); ++i) {
+    retval.vals[i] = a.vals[i] + b.vals[i];
   }
   return retval;
 }
