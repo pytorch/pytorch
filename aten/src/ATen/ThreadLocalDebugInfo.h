@@ -38,6 +38,10 @@ class CAFFE2_API ThreadLocalDebugInfo {
   // use DebugInfoGuard instead
   static std::shared_ptr<ThreadLocalDebugInfo> _current();
 
+  // Internal, use DebugInfoGuard/ThreadLocalStateGuard
+  static void _forceCurrentDebugInfo(
+      const std::shared_ptr<ThreadLocalDebugInfo>& info);
+
  private:
   std::shared_ptr<DebugInfoBase> debug_info_;
   DebugInfoKind kind_;
