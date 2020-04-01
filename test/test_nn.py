@@ -9349,8 +9349,7 @@ class TestNNDeviceType(NNTestCase):
             self.assertEqual(out1, out2)
 
     @onlyCUDA
-    @dtypesIfCUDA(torch.half, torch.float, torch.double)
-    def test_grid_sample_large(self, device, dtype):
+    def test_grid_sample_large(self, device):
         def issue_35202():
             input_tensor = torch.rand(1, 1, 480, 640, dtype=torch.float, device=device, requires_grad=True)
             coords = torch.tensor([[-10059144, 67680944], [67680944, 67680944]], dtype=torch.float, device=device)
@@ -9361,7 +9360,7 @@ class TestNNDeviceType(NNTestCase):
             torch.cuda.synchronize()
         issue_35202()
 
-        def issue_24823_1():
+        def issue_24823_1(dtype):
             image = torch.arange(27, 0, -1, dtype=dtype, device=device).view(1, 1, 3, 3, 3)
             image.requires_grad_()
             grid = torch.nn.functional.affine_grid(
@@ -9373,12 +9372,13 @@ class TestNNDeviceType(NNTestCase):
                                                      [[18., 17., 16.], [15., 0., 13.], [12., 11., 10.]],
                                                      [[9., 8., 7.], [6., 5., 4.], [3., 2., 1.]]]]], 
                                                   device=device, dtype=dtype))
-
             result.backward(torch.ones_like(result))
             expected_grad = torch.ones_like(image)
             expected_grad[0, 0, 1, 1, 1] = 0
             self.assertTrue(torch.allclose(image.grad, expected_grad, atol=1e-3))
-        issue_24823_1()
+        issue_24823_1(torch.half)
+        issue_24823_1(torch.float)
+        issue_24823_1(torch.double)
 
         def issue_24823_2():
             param = torch.tensor([[[-1.0e+20, 0.0, 0.0], [0.0, -1.0e+20, 0.0]]], dtype=torch.float, device=device)
@@ -9389,15 +9389,6 @@ class TestNNDeviceType(NNTestCase):
             result.backward(torch.ones_like(result))
             torch.cuda.synchronize()
         issue_24823_2()
-
-        def issue_24823_3():
-            x = torch.randn(8, 3, 1024, 1024, dtype=dtype, device=device, requires_grad=True)
-            w = torch.randn(8, 1024, 1024, 2, dtype=dtype, device=device)
-            w[:, 64, 64] = float("inf")
-            result = torch.nn.functional.grid_sample(x, w)
-            result.backward(torch.ones_like(result))
-            torch.cuda.synchronize()
-        issue_24823_3()
 
     @largeCUDATensorTest('12GB')
     def test_conv_transposed_large(self, device):
