@@ -1573,7 +1573,14 @@ def sigmoid(input):
 def hardsigmoid(input, inplace=False):
     r"""hardsigmoid(input) -> Tensor
 
-    Applies the element-wise function :math:`\text{Hardsigmoid}(x) = \frac{ReLU6(x + 3)}{6}`
+    Applies the element-wise function
+
+    .. math::
+        \text{Hardsigmoid}(x) = \begin{cases}
+            0 & \text{if~} x \le -3, \\
+            1 & \text{if~} x \ge +3, \\
+            x / 6 & \text{otherwise}
+        \end{cases}
 
     Args:
         inplace: If set to ``True``, will do this operation in-place. Default: ``False``
@@ -1643,7 +1650,11 @@ def hardswish(input, inplace=False):
     `Searching for MobileNetV3`_.
 
     .. math::
-        \text{Hardswish}(x) = x * \frac{ReLU6(x + 3)}{6}
+        \text{Hardswish}(x) = \begin{cases}
+            0 & \text{if~} x \le -3, \\
+            x & \text{if~} x \ge +3, \\
+            x^2/6 & \text{otherwise}
+        \end{cases}
 
     See :class:`~torch.nn.Hardswish` for more details.
 
@@ -3616,6 +3627,7 @@ def normalize(input, p=2, dim=1, eps=1e-12, out=None):
 
 
 def assert_int_or_pair(arg, arg_name, message):
+    # type: (List[int], str, str)
     assert isinstance(arg, int) or len(arg) == 2, message.format(arg_name)
 
 

@@ -33,7 +33,7 @@ TORCH_API void _call_end_callbacks_on_fut(
             "not correctly persisted and is destroyed before the future is "
             "realized.");
         auto& rec = getRecordFunctionFromTensor(handle);
-        rec.end();
+        rec._end();
       });
 }
 
