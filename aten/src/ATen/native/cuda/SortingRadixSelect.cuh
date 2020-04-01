@@ -146,7 +146,7 @@ struct TopKTypeConfig<at::Half> {
 
 template <>
 struct TopKTypeConfig<at::BFloat16> {
-  typedef uint32_t RadixType;
+  typedef uint16_t RadixType;
 
   static inline __device__ RadixType convert(at::BFloat16 v) {
     RadixType x = v.x;
