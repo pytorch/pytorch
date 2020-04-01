@@ -1,8 +1,8 @@
 #include <torch/csrc/jit/runtime/profiling_record.h>
+#include <torch/csrc/jit/passes/clear_profiling.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
 #include <torch/csrc/jit/runtime/interpreter.h>
-#include <torch/csrc/jit/passes/clear_profiling.h>
 
 namespace torch {
 namespace jit {

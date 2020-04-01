@@ -35,9 +35,9 @@ static void unprofileBlock(Block* start_block) {
 // We need to make sure that passes that use profiling information
 // use it **only after** guards validating it are inserted
 // Ideally, we would run any pass that relies on profiling information
-// after `InsertBailOuts`, however, practically, some passes 
+// after `InsertBailOuts`, however, practically, some passes
 // (e.g. Peephole) useful to run both w/ and w/o profiling information
-// so we could run them in `preoptimizeGraph` and 
+// so we could run them in `preoptimizeGraph` and
 // in `runProfilingInsensitiveOptimizations`
 void ClearProfilingInformation(const std::shared_ptr<Graph>& graph) {
   unprofileGraphInputs(graph);
