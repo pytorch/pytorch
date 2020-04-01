@@ -42,7 +42,7 @@ if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
 fi
 
 # --user breaks ppc64le builds and these packages are already in ppc64le docker
-if [[ "$BUILD_ENVIRONMENT" != *ppc64le* ]]; then
+if [[ "$BUILD_ENVIRONMENT" != *ppc64le* ]] && [[ "$BUILD_ENVIRONMENT" != *-bazel-* ]] ; then
   # JIT C++ extensions require ninja.
   pip_install --user ninja
   # ninja is installed in /var/lib/jenkins/.local/bin
