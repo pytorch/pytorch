@@ -3120,6 +3120,8 @@ class _TestTorchMixin(object):
         double = torch.DoubleStorage().element_size()
         bool = torch.BoolStorage().element_size()
         bfloat16 = torch.BFloat16Storage().element_size()
+        complexfloat = torch.ComplexFloatStorage().element_size()
+        complexdouble = torch.ComplexDoubleStorage().element_size()
 
         self.assertEqual(byte, torch.ByteTensor().element_size())
         self.assertEqual(char, torch.CharTensor().element_size())
@@ -3129,6 +3131,9 @@ class _TestTorchMixin(object):
         self.assertEqual(float, torch.FloatTensor().element_size())
         self.assertEqual(double, torch.DoubleTensor().element_size())
         self.assertEqual(bool, torch.BoolTensor().element_size())
+        self.assertEqual(bfloat16, torch.tensor([], dtype=torch.bfloat16).element_size())
+        self.assertEqual(complexfloat, torch.tensor([], dtype=torch.complex64).element_size())
+        self.assertEqual(complexfloat, torch.tensor([], dtype=torch.complex128).element_size())
 
         self.assertGreater(byte, 0)
         self.assertGreater(char, 0)
@@ -3139,6 +3144,8 @@ class _TestTorchMixin(object):
         self.assertGreater(double, 0)
         self.assertGreater(bool, 0)
         self.assertGreater(bfloat16, 0)
+        self.assertGreater(complexfloat, 0)
+        self.assertGreater(complexdouble, 0)
 
         # These tests are portable, not necessarily strict for your system.
         self.assertEqual(byte, 1)
@@ -3681,6 +3688,13 @@ class _TestTorchMixin(object):
         self.assertEqual(halfStorage.type(), 'torch.HalfStorage')
         self.assertEqual(halfStorage.int().tolist(), [-1, 0, 1, 2, 3, 4])
         self.assertIs(halfStorage.dtype, torch.float16)
+
+        complexfloatStorage = storage.complex_float()
+        self.assertEqual(complexfloatStorage.size(), 6)
+        self.assertEqual(complexfloatStorage.tolist(), [-1, 0, 1, 2, 3, 4])
+        self.assertEqual(complexfloatStorage.type(), 'torch.ComplexFloatStorage')
+        self.assertEqual(complexfloatStorage.int().tolist(), [-1, 0, 1, 2, 3, 4])
+        self.assertIs(complexfloatStorage.dtype, torch.complex64)
 
         bfloat16Storage = storage.bfloat16()
         self.assertEqual(bfloat16Storage.size(), 6)
