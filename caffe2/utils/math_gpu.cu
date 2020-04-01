@@ -595,9 +595,7 @@ CAFFE2_CUDA_EXPORT void Gemm<at::Half, CUDAContext>(
   if (math_type == TensorProto_DataType_FLOAT) {
     CUBLAS_ENFORCE(cublasSetPointerMode(
         context->cublas_handle(), CUBLAS_POINTER_MODE_HOST));
-#if HIP_VERSION < 210
-    CAFFE_THROW("HIP currently does not support FP16 completely yet.");
-#elif HIP_VERSION > 210
+#ifdef __HIP_PLATFORM_HCC__
     // rocblas doesn't support cublasSgemmEx type API yet.
     // It has more general rocblas_gemm_ex API which is more close to
     // cublasGemmEx rocblas_gemm_ex does D = alpha*op( A )*op( B ) + beta*C,
@@ -1692,7 +1690,9 @@ CAFFE2_CUDA_EXPORT void Dot<at::Half, CUDAContext>(
     const at::Half* b,
     at::Half* y,
     CUDAContext* context) {
-#if defined(__HIP_PLATFORM_HCC__)
+#if defined __HIP_PLATFORM_HCC__ && HIP_VERSION < 210
+  CAFFE_THROW("HIP currently does not support FP16 completely yet.");
+#elif defined __HIP_PLATFORM_HCC__ && HIP_VERSION >= 210  
   CUBLAS_ENFORCE(cublasSetPointerMode(
       context->cublas_handle(), CUBLAS_POINTER_MODE_DEVICE));
   CUBLAS_ENFORCE(rocblas_hdot(
