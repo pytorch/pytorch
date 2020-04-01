@@ -3,11 +3,23 @@
 #include <ATen/core/ivalue.h>
 
 namespace c10 {
+namespace detail {
+inline bool DictKeyEqualTo::operator()(const IValue& lhs, const IValue& rhs) const {
+  if (lhs.isTensor() && rhs.isTensor()) {
+    // for tensors, we compare only by identity (following how it's done in Python).
+    return lhs.is(rhs);
+  }
+  // Otherwise, we first compare by identity for efficiency, then by value (see:
+  // [container equality])
+  return _fastEqualsForContainer(lhs, rhs);
+}
+}
 
 template<class T> TypePtr getTypePtr();
 std::string toString(TypePtr typePtr);
 
 namespace impl {
+
 inline bool shallowEquals(const IValue& lhs, const IValue& rhs) {
   if (lhs.isNone()) {
     return rhs.isNone();
@@ -217,28 +229,13 @@ void Dict<Key, Value>::unsafeSetValueType(TypePtr t) {
 
 template <class Key_, class Value_>
 bool operator==(const Dict<Key_, Value_>& lhs, const Dict<Key_, Value_>& rhs) {
+  // Dicts with the same identity trivially compare equal.
   if (lhs.impl_ == rhs.impl_) {
-    // Dicts with the same identity trivially compare equal.
     return true;
   }
 
-  // TODO: when we define equality on IValue, we can just defer to the
-  // operator== implementation of the underlying map.
-  // For now, do the comparison manually to avoid invoking the template
-  // specialization for IValue equality
-  if (lhs.size() != rhs.size()) {
-    return false;
-  }
-  for (const auto& pr : lhs) {
-    auto it = rhs.find(pr.key());
-    if (it == rhs.end()) {
-      return false;
-    }
-    if (it->value() != pr.value()) {
-      return false;
-    }
-  }
-  return true;
+  // Otherwise compare the values
+  return *lhs.impl_ == *rhs.impl_;
 }
 
 template <class Key_, class Value_>
