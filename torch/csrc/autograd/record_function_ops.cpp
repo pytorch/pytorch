@@ -17,16 +17,15 @@ c10::intrusive_ptr<RecordFunction> record_function_enter(
     const std::string& name) {
   auto rec = c10::make_intrusive<RecordFunction>();
   // Only add new scope if profiling is enabled.
-  if (auto* current = RecordFunction::current()) {
+  if (auto* current = rec->current()) {
     AT_ASSERT(
         current->name() == StringView("profiler::_record_function_enter"));
     // RecordFunction requires parent_ to be alive for it's entire lifetime.
     // Since the currently active RecordFunction will only live for the lifetime
     // of this op we need to end it early so the new RecordFunction we create is
     // a direct child of the parent RecordFunction.
-    current->end();
-
-    runBeforeCallbacks(rec.get(), name);
+    current->_end();
+    rec->_before(name);
   }
   return rec;
 }
@@ -41,13 +40,14 @@ void record_function_exit(const c10::intrusive_ptr<RecordFunction>& instance) {
   // profiler::_record_function_exit to ensure the creating scope outlives it.
   if (auto* current = RecordFunction::current()) {
     AT_ASSERT(current->name() == StringView("profiler::_record_function_exit"));
-    current->end();
+    current->_end();
   }
-  if (instance->active()) {
-    instance->end();
+  if (instance->_active()) {
+    instance->_end();
   }
 }
 
+// Internal only, do not use directly, use Python's record_function()
 // The following will bind the class to TorchScript with the qualified name
 // torch.classes.profiler.RecordFunction. Note that this class is only meant to
 // be used in conjunction with the record_function python context manager.
