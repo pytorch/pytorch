@@ -302,7 +302,9 @@ TEST(OperatorRegistrationTest, givenMultipleKernelsWithSameDispatchKey_whenRegis
   testing::internal::CaptureStderr();
   c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options().kernel<DummyKernel>(c10::DispatchKey::CPUTensorId));
   std::string output = testing::internal::GetCapturedStderr();
-  EXPECT_THAT(output, testing::HasSubstr("Warning: Registered a kernel for operator _test::dummy with dispatch key CPUTensorId that overwrote a previously registered kernel with the same dispatch key for the same operator."));
+  EXPECT_THAT(output, testing::HasSubstr("_test::dummy"));
+  EXPECT_THAT(output, testing::HasSubstr("CPUTensorId"));
+  EXPECT_THAT(output, testing::HasSubstr("overwrote a previously registered kernel with the same dispatch key for the same operator"));
 }
 
 TEST(OperatorRegistrationTest, givenMultipleKernelsWithSameDispatchKey_whenRegisteringInSameOpCall_thenFails) {
@@ -338,7 +340,9 @@ TEST(OperatorRegistrationTest, givenMultipleCatchallKernels_whenRegistering_then
   testing::internal::CaptureStderr();
   c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options().catchAllKernel<DummyKernel>());
   std::string output = testing::internal::GetCapturedStderr();
-  EXPECT_THAT(output, testing::HasSubstr("Warning: Registered a catch-all kernel for operator _test::dummy that overwrote a previously registered catch-all kernel for the same operator."));
+  EXPECT_THAT(output, testing::HasSubstr("_test::dummy"));
+  EXPECT_THAT(output, testing::HasSubstr("catch all"));
+  EXPECT_THAT(output, testing::HasSubstr("overwrote a previously registered kernel with the same dispatch key for the same operator"));
 }
 
 TEST(OperatorRegistrationTest, givenMultipleCatchallKernels_whenRegisteringInSameOpCall_thenFails) {
