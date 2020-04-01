@@ -166,11 +166,7 @@ def doAutodiffCheck(testname):
     return True
 
 torch._C._jit_set_profiling_executor(GRAPH_EXECUTOR != ProfilingMode.LEGACY)
-# even though FULL_PROFILER should be our default
-# we haven't tested every single test in this file
-# but we enable FULL_PROFILER for a large subset
-# of the tests with "with enable_profiling_mode"
-torch._C._jit_set_profiling_mode(False)
+torch._C._jit_set_profiling_mode(True)
 
 def LSTMCell(input, hidden, w_ih, w_hh, b_ih=None, b_hh=None):
     hx, cx = hidden
@@ -5061,6 +5057,17 @@ def foo(x):
 
         # shouldn't throw a type error
         torch.jit.script(MyMod())
+
+    def test_elias(self):
+        with enable_profiling_mode():
+            class DimModel(torch.nn.Module):
+                def forward(self, input):
+                    out = input * 2
+                    out *= out.dim()
+                    return out
+
+            self.checkModule(DimModel(), (torch.ones(0),))
+            self.checkModule(DimModel(), (torch.ones(1, 2, 3),))
 
     @_inline_everything
     def test_lazy_script(self):
