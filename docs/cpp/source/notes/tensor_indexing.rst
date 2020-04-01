@@ -59,10 +59,10 @@ Setter
 +----------------------------------------------------------+--------------------------------------------------------------------------------------+
 
 
-Mapping Python/C++ index types
-------------------------------
+Translating between Python/C++ index types
+------------------------------------------
 
-The one-to-one mapping between Python and C++ index types is as follows:
+The one-to-one translation between Python and C++ index types is as follows:
 
 +-------------------------+------------------------------------------------------------------------+
 | Python                  | C++ (assuming ``using namespace torch::indexing``)                     |
