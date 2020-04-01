@@ -271,12 +271,12 @@ elif [[ "${BUILD_ENVIRONMENT}" == *libtorch* ]]; then
   echo "no-op at the moment"
 elif [[ "${BUILD_ENVIRONMENT}" == *-test1 || "${JOB_BASE_NAME}" == *-test1 ]]; then
   test_python_nn
+  test_libtorch
+  test_custom_script_ops
 elif [[ "${BUILD_ENVIRONMENT}" == *-test2 || "${JOB_BASE_NAME}" == *-test2 ]]; then
   test_torchvision
   test_python_all_except_nn
   test_aten
-  test_libtorch
-  test_custom_script_ops
 else
   test_torchvision
   test_python_nn
