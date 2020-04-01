@@ -708,8 +708,12 @@ ELSEIF(USE_CUDA)
     set(_generated_name "torch_cuda_w_sort_by_key_intermediate_link${CMAKE_C_OUTPUT_EXTENSION}")
     set(torch_cuda_w_sort_by_key_link_file "${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/torch_cuda.dir/${CMAKE_CFG_INTDIR}/${_generated_name}")
     cuda_wrap_srcs(torch_cuda OBJ Caffe2_GPU_W_SORT_BY_KEY_OBJ ${Caffe2_GPU_SRCS_W_SORT_BY_KEY})
-    CUDA_LINK_SEPARABLE_COMPILATION_OBJECTS("${torch_cuda_w_sort_by_key_link_file}" torch_cpu "${_options}" "${torch_cuda_SEPARABLE_COMPILATION_OBJECTS}")
+    CUDA_LINK_SEPARABLE_COMPILATION_OBJECTS("${torch_cuda_w_sort_by_key_link_file}" torch_cpu "${_options}"
+      "${torch_cuda_SEPARABLE_COMPILATION_OBJECTS}"
+      "${torch_cuda_UNSTRIPPED_SEPARABLE_COMPILATION_OBJECTS}"
+      )
     set( torch_cuda_SEPARABLE_COMPILATION_OBJECTS )
+    set( torch_cuda_UNSTRIPPED_SEPARABLE_COMPILATION_OBJECTS )
     # Pass compiled sort-by-key object + device-linked fatbin as extra dependencies of torch_cuda
     cuda_add_library(torch_cuda ${Caffe2_GPU_SRCS} ${torch_cuda_w_sort_by_key_link_file} ${Caffe2_GPU_W_SORT_BY_KEY_OBJ})
   else()

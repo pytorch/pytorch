@@ -1554,11 +1554,13 @@ macro(CUDA_WRAP_SRCS cuda_target format generated_files)
       if( cuda_compile_to_external_module )
         set(generated_file_path "${cuda_compile_output_dir}")
         set(generated_file_basename "${cuda_target}_generated_${basename}.${cuda_compile_to_external_module_type}")
+        set(generated_strip_file_basename "${cuda_target}_generated_strip_${basename}.${cuda_compile_to_external_module_type}")
         set(format_flag "-${cuda_compile_to_external_module_type}")
         file(MAKE_DIRECTORY "${cuda_compile_output_dir}")
       else()
         set(generated_file_path "${cuda_compile_output_dir}/${CMAKE_CFG_INTDIR}")
         set(generated_file_basename "${cuda_target}_generated_${basename}${generated_extension}")
+        set(generated_strip_file_basename "${cuda_target}_generated_strip_${basename}${generated_extension}")
         if(CUDA_SEPARABLE_COMPILATION)
           set(format_flag "-dc")
         else()
@@ -1571,6 +1573,7 @@ macro(CUDA_WRAP_SRCS cuda_target format generated_files)
       # argument, so that the ${CMAKE_CFG_INTDIR} gets expanded at run time
       # instead of configure time.
       set(generated_file "${generated_file_path}/${generated_file_basename}")
+      set(generated_strip_file "${generated_file_path}/${generated_strip_file_basename}")
       set(cmake_dependency_file "${cuda_compile_intermediate_directory}/${generated_file_basename}.depend")
       set(NVCC_generated_dependency_file "${cuda_compile_intermediate_directory}/${generated_file_basename}.NVCC-depend")
       set(generated_cubin_file "${generated_file_path}/${generated_file_basename}.cubin.txt")
@@ -1594,7 +1597,8 @@ macro(CUDA_WRAP_SRCS cuda_target format generated_files)
       endif()
 
       if( NOT cuda_compile_to_external_module AND CUDA_SEPARABLE_COMPILATION)
-        list(APPEND ${cuda_target}_SEPARABLE_COMPILATION_OBJECTS "${generated_file}")
+        list(APPEND ${cuda_target}_SEPARABLE_COMPILATION_OBJECTS "${generated_strip_file}")
+        list(APPEND ${cuda_target}_UNSTRIPPED_SEPARABLE_COMPILATION_OBJECTS "${generated_file}")
       endif()
 
       # Bring in the dependencies.  Creates a variable CUDA_NVCC_DEPEND #######
@@ -1605,6 +1609,30 @@ macro(CUDA_WRAP_SRCS cuda_target format generated_files)
         set(cuda_build_type "Emulation")
       else()
         set(cuda_build_type "Device")
+      endif()
+
+      # Configure relfatbin stripping #########################################
+      if(CUDA_SEPARABLE_COMPILATION AND NOT MSVC)
+        if(NOT CUDA_OBJCOPY_VERSION)
+          execute_process(COMMAND "${CMAKE_OBJCOPY}" "--version" OUTPUT_VARIABLE OBJCOPY_VERSION_STR)
+          string(REGEX REPLACE "GNU objcopy version ([0-9])\\.([0-9]+).*" "\\1" OBJCOPY_VERSION_MAJOR ${OBJCOPY_VERSION_STR})
+          string(REGEX REPLACE "GNU objcopy version ([0-9])\\.([0-9]+).*" "\\2" OBJCOPY_VERSION_MINOR ${OBJCOPY_VERSION_STR})
+          set(CUDA_OBJCOPY_VERSION "${OBJCOPY_VERSION_MAJOR}.${OBJCOPY_VERSION_MINOR}" CACHE STRING "Version of objcopy used by FindCUDA")
+        else()
+          string(REGEX REPLACE "([0-9])\\.([0-9]+).*" "\\1" OBJCOPY_VERSION_MAJOR ${CUDA_OBJCOPY_VERSION})
+          string(REGEX REPLACE "([0-9])\\.([0-9]+).*" "\\2" OBJCOPY_VERSION_MINOR ${CUDA_OBJCOPY_VERSION})
+        endif()
+        if((${OBJCOPY_VERSION_MAJOR} GREATER 2) OR ((${OBJCOPY_VERSION_MAJOR} EQUAL 2) AND (${OBJCOPY_VERSION_MINOR} GREATER 27)))
+          set(CUDA_strip_relfatbin ON)
+        else()
+          set(CUDA_strip_relfatbin OFF)
+        endif()
+        set(CUDA_OBJCOPY "${CMAKE_OBJCOPY}")
+      else()
+        set(CUDA_strip_relfatbin OFF)
+      endif()
+      if(NOT CUDA_strip_relfatbin)
+      set(generated_strip_file "${generated_file}")
       endif()
 
       # Build the NVCC made dependency file ###################################
@@ -1659,7 +1687,7 @@ macro(CUDA_WRAP_SRCS cuda_target format generated_files)
 
       # Build the generated file and dependency file ##########################
       add_custom_command(
-        OUTPUT ${generated_file}
+        OUTPUT ${generated_strip_file}
         # These output files depend on the source_file and the contents of cmake_dependency_file
         ${main_dep}
         DEPENDS ${CUDA_NVCC_DEPEND}
@@ -1671,6 +1699,7 @@ macro(CUDA_WRAP_SRCS cuda_target format generated_files)
           ${ccbin_flags}
           -D build_configuration:STRING=${CUDA_build_configuration}
           -D "generated_file:STRING=${generated_file}"
+          -D "generated_strip_file:STRING=${generated_strip_file}"
           -D "generated_cubin_file:STRING=${generated_cubin_file}"
           -P "${custom_target_script}"
         WORKING_DIRECTORY "${cuda_compile_intermediate_directory}"
@@ -1678,10 +1707,11 @@ macro(CUDA_WRAP_SRCS cuda_target format generated_files)
         ${_verbatim}
         )
 
-      # Make sure the build system knows the file is generated.
+      # Make sure the build system knows the files are generated.
       set_source_files_properties(${generated_file} PROPERTIES GENERATED TRUE)
+      set_source_files_properties(${generated_strip_file} PROPERTIES GENERATED TRUE)
 
-      list(APPEND _cuda_wrap_generated_files ${generated_file})
+      list(APPEND _cuda_wrap_generated_files ${generated_strip_file})
 
       # Add the other files that we want cmake to clean on a cleanup ##########
       list(APPEND CUDA_ADDITIONAL_CLEAN_FILES "${cmake_dependency_file}")
@@ -1725,7 +1755,7 @@ function(CUDA_COMPUTE_SEPARABLE_COMPILATION_OBJECT_FILE_NAME output_file_var cud
 endfunction()
 
 # Setup the build rule for the separable compilation intermediate link file.
-function(CUDA_LINK_SEPARABLE_COMPILATION_OBJECTS output_file cuda_target options object_files)
+function(CUDA_LINK_SEPARABLE_COMPILATION_OBJECTS output_file cuda_target options dep_object_files object_files)
   if (object_files)
 
     set_source_files_properties("${output_file}"
@@ -1800,7 +1830,7 @@ function(CUDA_LINK_SEPARABLE_COMPILATION_OBJECTS output_file cuda_target options
     if (do_obj_build_rule)
       add_custom_command(
         OUTPUT ${output_file}
-        DEPENDS ${object_files}
+        DEPENDS ${dep_object_files}
         COMMAND ${CUDA_NVCC_EXECUTABLE} ${nvcc_flags} -dlink ${object_files} -o ${output_file}
         ${flags}
         COMMENT "Building NVCC intermediate link file ${output_file_relative_path}"
@@ -1853,7 +1883,9 @@ macro(CUDA_ADD_LIBRARY cuda_target)
   # Add a link phase for the separable compilation if it has been enabled.  If
   # it has been enabled then the ${cuda_target}_SEPARABLE_COMPILATION_OBJECTS
   # variable will have been defined.
-  CUDA_LINK_SEPARABLE_COMPILATION_OBJECTS("${link_file}" ${cuda_target} "${_options}" "${${cuda_target}_SEPARABLE_COMPILATION_OBJECTS}")
+  CUDA_LINK_SEPARABLE_COMPILATION_OBJECTS("${link_file}" ${cuda_target} "${_options}"
+    "${${cuda_target}_SEPARABLE_COMPILATION_OBJECTS}"
+    "${${cuda_target}_UNSTRIPPED_SEPARABLE_COMPILATION_OBJECTS}")
 
   target_link_libraries(${cuda_target} ${CUDA_LINK_LIBRARIES_KEYWORD}
     ${CUDA_LIBRARIES}
@@ -1903,7 +1935,9 @@ macro(CUDA_ADD_EXECUTABLE cuda_target)
   # Add a link phase for the separable compilation if it has been enabled.  If
   # it has been enabled then the ${cuda_target}_SEPARABLE_COMPILATION_OBJECTS
   # variable will have been defined.
-  CUDA_LINK_SEPARABLE_COMPILATION_OBJECTS("${link_file}" ${cuda_target} "${_options}" "${${cuda_target}_SEPARABLE_COMPILATION_OBJECTS}")
+  CUDA_LINK_SEPARABLE_COMPILATION_OBJECTS("${link_file}" ${cuda_target} "${_options}"
+    "${${cuda_target}_SEPARABLE_COMPILATION_OBJECTS}"
+    "${${cuda_target}_UNSTRIPPED_SEPARABLE_COMPILATION_OBJECTS}")
 
   target_link_libraries(${cuda_target} ${CUDA_LINK_LIBRARIES_KEYWORD}
     ${CUDA_LIBRARIES}
