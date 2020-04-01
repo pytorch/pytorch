@@ -21,6 +21,8 @@ parity_table = parse_parity_tracker_table(PARITY_TABLE_PATH)
 class TestCppApiParity(common.TestCase):
     pass
 
+expected_test_params_dicts = []
+
 for test_params_dicts, test_instance_class in [
     (sample_module.module_tests, common_nn.ModuleTest),
     (sample_functional.functional_tests, common_nn.NewModuleTest),
@@ -31,12 +33,18 @@ for test_params_dicts, test_instance_class in [
 ]:
     module_impl_check.add_tests(TestCppApiParity, test_params_dicts, test_instance_class, parity_table, devices)
     functional_impl_check.add_tests(TestCppApiParity, test_params_dicts, test_instance_class, parity_table, devices)
+    expected_test_params_dicts += test_params_dicts
+
+# Assert that all NN module/functional test dicts appear in the parity test
+assert len([name for name in TestCppApiParity.__dict__ if 'test_torch_nn_' in name]) == \
+    len(expected_test_params_dicts) * len(devices)
 
 # Assert that there exists auto-generated tests for `SampleModule` and `sample_functional`.
 assert len([name for name in TestCppApiParity.__dict__ if 'SampleModule' in name]) == \
     len(sample_module.module_tests) * len(devices)
 assert len([name for name in TestCppApiParity.__dict__ if 'sample_functional' in name]) == \
     len(sample_functional.functional_tests) * len(devices)
+
 
 if __name__ == "__main__":
     module_impl_check.build_cpp_tests(TestCppApiParity, print_cpp_source=PRINT_CPP_SOURCE)
