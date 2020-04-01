@@ -60,7 +60,6 @@ struct THCNumerics<uint8_t> {
   static inline __host__ __device__  uint8_t pow(uint8_t a, uint8_t b) { return powi<uint8_t>(a, b); }
   static inline __host__ __device__  bool isnan(uint8_t a) { return false; }
   static inline __host__ __device__  bool isinf(uint8_t a) { return false; }
-  static inline __host__ __device__  uint8_t fmod(uint8_t a, uint8_t b) { return a % b; }
 };
 
 template <>
@@ -106,7 +105,6 @@ struct THCNumerics<int8_t> {
   static inline __host__ __device__  int8_t pow(int8_t a, int8_t b) { return powi<int8_t>(a, b); }
   static inline __host__ __device__  bool isnan(int8_t a) { return false; }
   static inline __host__ __device__  bool isinf(int8_t a) { return false; }
-  static inline __host__ __device__  int8_t fmod(int8_t a, int8_t b) { return a % b; }
 };
 
 template <>
@@ -131,7 +129,6 @@ struct THCNumerics<int16_t> {
   static inline __host__ __device__  int16_t pow(int16_t a, int16_t b) { return powi<int16_t>(a, b); }
   static inline __host__ __device__  bool isnan(int16_t a) { return false; }
   static inline __host__ __device__  bool isinf(int16_t a) { return false; }
-  static inline __host__ __device__  int16_t fmod(int16_t a, int16_t b) { return a % b; }
 };
 
 template <>
@@ -156,7 +153,6 @@ struct THCNumerics<int32_t> {
   static inline __host__ __device__  int32_t pow(int32_t a, int32_t b) { return powi<int32_t>(a, b); }
   static inline __host__ __device__  bool isnan(int32_t a) { return false; }
   static inline __host__ __device__  bool isinf(int32_t a) { return false; }
-  static inline __host__ __device__  int32_t fmod(int32_t a, int32_t b) { return a % b; }
 };
 
 template <>
@@ -182,7 +178,6 @@ struct THCNumerics<int64_t> {
   static inline __host__ __device__  int64_t pow(int64_t a, int64_t b) { return powi<int64_t>(a, b); }
   static inline __host__ __device__  bool isnan(int64_t a) { return false; }
   static inline __host__ __device__  bool isinf(int64_t a) { return false; }
-  static inline __host__ __device__  int64_t fmod(int64_t a, int64_t b) { return a % b; }
 };
 
 // DEPRECATED: use math functions from std and NumericLimits.cuh
@@ -215,7 +210,6 @@ struct THCNumerics<at::Half> {
   static inline __host__ __device__ at::Half mul(at::Half a, at::Half b) { return a * b; }
   static inline __host__ __device__ at::Half sub(at::Half a, at::Half b) { return a - b; }
   static inline __host__ __device__ at::Half pow(at::Half a, at::Half b) { return ::pow(a, b); }
-  static inline __host__ __device__ at::Half fmod(at::Half a, at::Half b) { return ::fmod(a, b); }
 
   static inline __host__ __device__ bool isnan(at::Half a) {
     #ifdef _MSC_VER
@@ -269,7 +263,6 @@ struct THCNumerics<float> {
   static inline __host__ __device__  float mul  (float a, float b) { return a * b; }
   static inline __host__ __device__  float sub  (float a, float b) { return a - b; }
   static inline __host__ __device__  float pow  (float a, float b) { return powf(a, b); }
-  static inline __host__ __device__  float fmod (float a, float b) { return ::fmod(a, b); }
   static inline __host__ __device__  bool isnan(float a) { return ::isnan(a); }
   static inline __host__ __device__  bool isinf(float a) { return ::isinf(a); }
 };
@@ -355,7 +348,6 @@ struct THCNumerics<double> {
   static inline __host__ __device__  double mul  (double a, double b) { return a * b; }
   static inline __host__ __device__  double sub  (double a, double b) { return a - b; }
   static inline __host__ __device__  double pow  (double a, double b) { return ::pow(a, b); }
-  static inline __host__ __device__  double fmod (double a, double b) { return ::fmod(a, b); }
   static inline __host__ __device__  bool isnan(double a) { return ::isnan(a); }
   static inline __host__ __device__  bool isinf(double a) { return ::isinf(a); }
 };

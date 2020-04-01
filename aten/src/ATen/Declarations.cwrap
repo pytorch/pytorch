@@ -590,6 +590,47 @@
     - THTensor* self
 ]]
 [[
+  name: _th_fmod
+  return: argument 0
+  variants:
+    - function
+  backends:
+    - CUDA
+  options:
+    - cname: fmod
+      arguments:
+        - arg: THTensor* result
+          output: True
+        - THTensor* self
+        - real other
+    - cname: cfmod
+      arguments:
+        - arg: THTensor* result
+          output: True
+        - arg: THTensor* self
+          broadcast: other fallback
+        - THTensor* other
+]]
+[[
+  name: _th_fmod_
+  return: argument 0
+  variants: function
+  backends:
+    - CUDA
+  options:
+    - cname: fmod
+      arguments:
+        - THTensor* self
+        - THTensor* self
+        - real other
+    - cname: cfmod
+      arguments:
+        - THTensor* self
+        - arg: THTensor* self
+          broadcast: other inplace fallback
+        - THTensor* other
+]]
+[[
   name: _th_clamp
   cname: clamp
   variants: function
