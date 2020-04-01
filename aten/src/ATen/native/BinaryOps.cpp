@@ -703,7 +703,6 @@ Tensor& floor_divide_(Tensor& self, Scalar other) {
 Tensor& fmod_out(Tensor & result, const Tensor& self, const Tensor& other) {
   auto iter = TensorIterator::binary_op(result, self, other,
                                         /*check_mem_overlap=*/true);
-  TORCH_CHECK(iter.device_type() == at::kCPU, "Native fmod only supports CPU");
   fmod_stub(iter.device_type(), iter);
   return result;
 }
@@ -711,7 +710,6 @@ Tensor& fmod_out(Tensor & result, const Tensor& self, const Tensor& other) {
 Tensor& fmod_out(Tensor & result, const Tensor& self, Scalar other) {
   auto iter = TensorIterator::unary_op(result, self,
                                        /*check_mem_overlap=*/true);
-  TORCH_CHECK(iter.device_type() == at::kCPU, "Native fmod only supports CPU");
   fmod_scalar_stub(iter.device_type(), iter, other);
   return result;
 }
