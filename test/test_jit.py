@@ -18129,6 +18129,7 @@ a")
                     return self.maybe_attr
                 else:
                     return 0
+
         class MaybeHasAttr2(torch.nn.Module):
             def __init__(self, add_attr):
                 super(MaybeHasAttr2, self).__init__()
