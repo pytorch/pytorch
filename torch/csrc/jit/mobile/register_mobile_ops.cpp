@@ -109,15 +109,13 @@ void log_softmax_kernel(const c10::OperatorHandle& op, Stack* stack) {
 
 void quantize_per_tensor_kernel(const c10::OperatorHandle& op, Stack* stack) {
   auto result_ = at::quantize_per_tensor(
-    (std::move(peek(*stack, 0, 4))).toTensor(),
-    (std::move(peek(*stack, 1, 4))).toDouble(),
-    (std::move(peek(*stack, 2, 4))).toInt(),
-    (std::move(peek(*stack, 3, 4))).to<c10::ScalarType>()
-  );
+      (std::move(peek(*stack, 0, 4))).toTensor(),
+      (std::move(peek(*stack, 1, 4))).toDouble(),
+      (std::move(peek(*stack, 2, 4))).toInt(),
+      (std::move(peek(*stack, 3, 4))).to<c10::ScalarType>());
   drop(*stack, 4);
   pack(*stack, std::move(result_));
 }
-
 
 void softmax_kernel(const c10::OperatorHandle& op, Stack* stack) {
   auto result_ = at::softmax(
@@ -184,25 +182,28 @@ void to_dtype_kernel(const c10::OperatorHandle& op, Stack* stack) {
 }
 
 void to_device_kernel(const c10::OperatorHandle& op, Stack* stack) {
-  auto result_ = ((std::move(peek(*stack, 0, 6))).toTensor()).to(
-     (std::move(peek(*stack, 1, 6))).toDevice(),
-     (std::move(peek(*stack, 2, 6))).toScalarType(),
-     (std::move(peek(*stack, 3, 6))).toBool(),
-     (std::move(peek(*stack, 4, 6))).toBool(),
-     (std::move(peek(*stack, 5, 6))).toOptional<c10::MemoryFormat>()
-  );
+  auto result_ =
+      ((std::move(peek(*stack, 0, 6))).toTensor())
+          .to((std::move(peek(*stack, 1, 6))).toDevice(),
+              (std::move(peek(*stack, 2, 6))).toScalarType(),
+              (std::move(peek(*stack, 3, 6))).toBool(),
+              (std::move(peek(*stack, 4, 6))).toBool(),
+              (std::move(peek(*stack, 5, 6))).toOptional<c10::MemoryFormat>());
   drop(*stack, 6);
   pack(*stack, std::move(result_));
 }
 
 void full_op_kernel(const c10::OperatorHandle& op, Stack* stack) {
-  const auto options = c10::TensorOptions()
-      .dtype((std::move(peek(*stack, 2, 6))).toOptional<c10::ScalarType>())
-      .layout((std::move(peek(*stack, 3, 6))).toOptional<c10::Layout>())
-      .device((std::move(peek(*stack, 4, 6))).toOptional<c10::Device>())
-      .pinned_memory((std::move(peek(*stack, 5, 6))).toOptional<bool>());
-  auto result_ = at::full((std::move(peek(*stack, 0, 6))).toIntVector(),
-    (std::move(peek(*stack, 1, 6))).toScalar(), options);
+  const auto options =
+      c10::TensorOptions()
+          .dtype((std::move(peek(*stack, 2, 6))).toOptional<c10::ScalarType>())
+          .layout((std::move(peek(*stack, 3, 6))).toOptional<c10::Layout>())
+          .device((std::move(peek(*stack, 4, 6))).toOptional<c10::Device>())
+          .pinned_memory((std::move(peek(*stack, 5, 6))).toOptional<bool>());
+  auto result_ = at::full(
+      (std::move(peek(*stack, 0, 6))).toIntVector(),
+      (std::move(peek(*stack, 1, 6))).toScalar(),
+      options);
   drop(*stack, 6);
   pack(*stack, std::move(result_));
 }
@@ -557,37 +558,42 @@ static auto registry =
             torch::RegisterOperators::options().catchAllKernel(
                 [](int64_t a, int64_t b) -> bool { return a == b; }))
         .op("_aten::div.Tensor(Tensor self, Tensor other) -> Tensor",
-            torch::RegisterOperators::options().kernel(c10::DispatchKey::CPUTensorId,
-            [](const Tensor & self, const Tensor & other) {
-               return at::div(self, other);
-            }))
+            torch::RegisterOperators::options().kernel(
+                c10::DispatchKey::CPUTensorId,
+                [](const Tensor& self, const Tensor& other) {
+                  return at::div(self, other);
+                }))
         .op("_aten::quantize_per_tensor(Tensor self, float scale, int zero_point, ScalarType dtype) -> Tensor",
-            torch::RegisterOperators::options().kernel<&quantize_per_tensor_kernel>(c10::DispatchKey::CPUTensorId))
+            torch::RegisterOperators::options()
+                .kernel<&quantize_per_tensor_kernel>(
+                    c10::DispatchKey::CPUTensorId))
         .op("_aten::floor(Tensor self) -> Tensor",
-            torch::RegisterOperators::options().kernel(c10::DispatchKey::CPUTensorId,
-            [](const Tensor & self) {
-               return at::floor(self);
-            }))
+            torch::RegisterOperators::options().kernel(
+                c10::DispatchKey::CPUTensorId,
+                [](const Tensor& self) { return at::floor(self); }))
         .op("_aten::slice.Tensor(Tensor self, int dim, int start, int end, int step) -> Tensor",
-            torch::RegisterOperators::options().kernel(c10::DispatchKey::CPUTensorId,
-            [](const Tensor & self, int64_t dim, int64_t start, int64_t end, int64_t step) {
-               return at::slice(self, dim, start, end, step);
-            }))
+            torch::RegisterOperators::options().kernel(
+                c10::DispatchKey::CPUTensorId,
+                [](const Tensor& self,
+                   int64_t dim,
+                   int64_t start,
+                   int64_t end,
+                   int64_t step) {
+                  return at::slice(self, dim, start, end, step);
+                }))
         .op("_aten::detach(Tensor self) -> Tensor",
-            torch::RegisterOperators::options().kernel(c10::DispatchKey::CPUTensorId,
-            [](const Tensor & self) {
-               return at::detach(self);
-            }))
+            torch::RegisterOperators::options().kernel(
+                c10::DispatchKey::CPUTensorId,
+                [](const Tensor& self) { return at::detach(self); }))
         .op("_aten::dequantize(Tensor self) -> Tensor",
             torch::RegisterOperators::options().catchAllKernel(
-            [](const Tensor & self) {
-               return at::dequantize(self);
-            }))
+                [](const Tensor& self) { return at::dequantize(self); }))
         .op("_aten::select.int(Tensor self, int dim, int index) -> Tensor",
-            torch::RegisterOperators::options().kernel(c10::DispatchKey::CPUTensorId,
-            [](const Tensor & self, int64_t dim, int64_t index) {
-               return at::select(self, dim, index);
-            }))
+            torch::RegisterOperators::options().kernel(
+                c10::DispatchKey::CPUTensorId,
+                [](const Tensor& self, int64_t dim, int64_t index) {
+                  return at::select(self, dim, index);
+                }))
         .op(torch::RegisterOperators::options()
                 .schema(
                     "_aten::to.dtype(Tensor self, ScalarType dtype, bool non_blocking=False, bool copy=False, MemoryFormat? memory_format=None) -> Tensor")
@@ -601,11 +607,13 @@ static auto registry =
                 .kernel<&pop_kernel>(c10::DispatchKey::CPUTensorId)
                 .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
         .op(torch::RegisterOperators::options()
-                .schema("_aten::to.device(Tensor self, Device device, ScalarType dtype, bool non_blocking=False, bool copy=False, MemoryFormat? memory_format=None) -> Tensor")
+                .schema(
+                    "_aten::to.device(Tensor self, Device device, ScalarType dtype, bool non_blocking=False, bool copy=False, MemoryFormat? memory_format=None) -> Tensor")
                 .catchAllKernel<&to_device_kernel>()
                 .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
         .op(torch::RegisterOperators::options()
-                .schema("_aten::full(int[] size, Scalar fill_value, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor")
+                .schema(
+                    "_aten::full(int[] size, Scalar fill_value, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor")
                 .catchAllKernel<&full_op_kernel>()
                 .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA));
 } // namespace
