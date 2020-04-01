@@ -3,13 +3,6 @@
 #include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <THC/THCAtomics.cuh>
 
-#ifdef _MSC_VER
-#define GRIDSAMPLER_NOINLINE __declspec(noinline)
-#else 
-#define GRIDSAMPLER_NOINLINE __attribute__((noinline))
-#endif
-
-
 namespace at { namespace native {
 
 namespace detail {
@@ -149,6 +142,19 @@ scalar_t reflect_coordinates_set_grad(scalar_t in, int twice_low, int twice_high
   }
 }
 
+template<typename scalar_t> 
+static __forceinline__ __device__ 
+scalar_t safe_downgrade_to_int_range(scalar_t x){
+  // -100.0 does not have special meaning. This is just to make sure 
+  // it's not within_bounds_2d or within_bounds_3d, and does not cause 
+  // undefined behavior. See #35506.  
+  if (std::is_same<at::Half, scalar_t>::value && !std::isfinite(static_cast<double>(x)))
+    return static_cast<at::Half>(-100.0); 
+  if (x > INT_MAX-1 || x < INT_MIN || !std::isfinite(static_cast<double>(x))) 
+    return static_cast<scalar_t>(-100.0); 
+  return x;
+}
+
 // Computes the pixel source index value for a grid coordinate
 template <typename scalar_t>
 static __forceinline__ __device__
@@ -171,6 +177,8 @@ scalar_t grid_sampler_compute_source_index(
     // clip coordinates to image borders
     coord = clip_coordinates(coord, size);
   }
+
+  coord = safe_downgrade_to_int_range(coord); 
   return coord;
 }
 
@@ -203,15 +211,17 @@ scalar_t grid_sampler_compute_source_index_set_grad(
     coord = clip_coordinates_set_grad(coord, size, &grad_clip);
     *grad_in = (*grad_in) * grad_refl * grad_clip;
   }
+
+  coord = safe_downgrade_to_int_range(coord); 
   return coord;
 }
 
-static GRIDSAMPLER_NOINLINE __device__
+static __forceinline__ __device__
 bool within_bounds_2d(int h, int w, int H, int W) {
   return h >= 0 && h < H && w >= 0 && w < W;
 }
 
-static GRIDSAMPLER_NOINLINE __device__
+static __forceinline__ __device__
 bool within_bounds_3d(int d, int h, int w, int D, int H, int W) {
   return d >= 0 && d < D && h >= 0 && h < H && w >= 0 && w < W;
 }
