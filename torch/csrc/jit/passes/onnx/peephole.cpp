@@ -929,6 +929,36 @@ static void fuseLogSoftmaxNllLoss(Block* b) {
         origLogSoftmaxNode->removeAllInputs();
         deleteNodes.push_back(origLogSoftmaxNode);
         deleteNodes.push_back(transpose);
+        if (!origNllLossNode->output(0)->uses().empty()){
+          auto nllloss_output = origNllLossNode->output(0)->uses()[0].user;
+ 
+          if (nllloss_output->kind() == onnx::Reshape &&
+              nllloss_output->inputs()[1]->node()->kind() == prim::ListConstruct) {
+            auto reshape_after = nllloss_output;
+            auto listconstruct = nllloss_output->inputs()[1]->node(); 
+ 
+            //make output of reshape the output of nllloss
+            reshape_after->replaceAllUsesWith(origNllLossNode);
+ 
+            reshape_after->removeAllInputs();
+            reshape_after->destroy();
+ 
+            auto gather = listconstruct->input(1)->node();
+  
+            listconstruct->removeAllInputs();
+            listconstruct->destroy();
+ 
+            auto shape = gather->input(0)->node();
+            auto constant = gather->input(1)->node();
+            constant->removeAllInputs();
+            shape->removeAllInputs();
+            gather->removeAllInputs();
+            constant->destroy();
+            shape->destroy();
+            gather->destroy();
+          } 
+       }
+
         recursive_del(origNllLossNode);
       } else {
         break;
