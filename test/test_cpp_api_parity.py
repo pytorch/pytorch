@@ -31,8 +31,8 @@ for test_params_dicts, test_instance_class in [
     (common_nn.criterion_tests, common_nn.CriterionTest),
     (common_nn.new_criterion_tests, common_nn.NewCriterionTest),
 ]:
-    module_impl_check.add_tests(TestCppApiParity, test_params_dicts, test_instance_class, parity_table, devices)
-    functional_impl_check.add_tests(TestCppApiParity, test_params_dicts, test_instance_class, parity_table, devices)
+    module_impl_check.write_tests_to_test_class(TestCppApiParity, test_params_dicts, test_instance_class, parity_table, devices)
+    functional_impl_check.write_tests_to_test_class(TestCppApiParity, test_params_dicts, test_instance_class, parity_table, devices)
     expected_test_params_dicts += test_params_dicts
 
 # Assert that all NN module/functional test dicts appear in the parity test

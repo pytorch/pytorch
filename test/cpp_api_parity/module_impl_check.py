@@ -23,7 +23,7 @@ import torch
 from cpp_api_parity.utils import TorchNNModuleTestParams, TORCH_NN_COMMON_TEST_HARNESS, \
     compile_cpp_code_inline, set_python_tensors_requires_grad, move_python_tensors_to_device, \
     add_test, compute_cpp_args_construction_stmts_and_forward_arg_symbols, serialize_arg_dict_as_script_module, \
-    compute_arg_dict, decorate_test_fn, compute_temp_file_path, generate_error_msg
+    compute_arg_dict, decorate_test_fn, compute_temp_file_path, generate_error_msg, is_torch_nn_functional_test
 import cpp_api_parity
 
 # Expected substitutions:
@@ -143,21 +143,20 @@ def test_forward_backward(unit_test_class, test_params):
         cpp_grad_dict = torch.load(backward_grad_dict_file_path)
 
         # Check that forward outputs are equal
-        unit_test_class.assertTrue(
-            torch.allclose(python_output, cpp_output),
-            generate_error_msg("forward output", cpp_output, python_output))
+        unit_test_class.assertEqual(python_output, cpp_output,
+            message=generate_error_msg("forward output", cpp_output, python_output))
 
         # Check that module parameter gradients are equal after backward pass
         unit_test_class.assertEqual(
             len(python_grad_dict), len(cpp_grad_dict),
-            generate_error_msg("# of parameters", len(cpp_grad_dict), len(python_grad_dict)))
+            message=generate_error_msg("# of parameters", len(cpp_grad_dict), len(python_grad_dict)))
         for key in python_grad_dict:
             unit_test_class.assertTrue(
                 key in cpp_grad_dict,
-                generate_error_msg("\"Does module have a parameter named `{}`?\"".format(key[:-5]), False, True))
-            unit_test_class.assertTrue(
-                torch.allclose(python_grad_dict[key], cpp_grad_dict[key]),
-                generate_error_msg("gradient of `{}`".format(key[:-5]), cpp_grad_dict[key], python_grad_dict[key]))
+                msg=generate_error_msg("\"Does module have a parameter named `{}`?\"".format(key[:-5]), False, True))
+            unit_test_class.assertEqual(
+                python_grad_dict[key], cpp_grad_dict[key],
+                message=generate_error_msg("gradient of `{}`".format(key[:-5]), cpp_grad_dict[key], python_grad_dict[key]))
 
     run_cpp_test_fn_and_check_output()
 
@@ -184,6 +183,7 @@ def process_test_params_for_module(test_params_dict, device, test_instance_class
     test_params_dict['constructor'] = test_params_dict.get('constructor', getattr(torch.nn, module_name))
     test_instance = test_instance_class(**test_params_dict)
     assert test_instance.get_name().startswith('test_')
+    # Example output: `BCELoss_weights_cuda`
     module_variant_name = test_instance.get_name()[5:] + (('_' + device) if device != 'cpu' else '')
 
     if 'constructor_args' in test_params_dict:
@@ -202,12 +202,12 @@ def process_test_params_for_module(test_params_dict, device, test_instance_class
         cpp_tmp_folder=tempfile.mkdtemp(),
     )
 
-torch_nn_test_params_map = {}
-
 def add_torch_nn_module_impl_parity_tests(parity_table, unit_test_class, test_params_dicts, test_instance_class, devices):
+    if not hasattr(unit_test_class, 'module_test_params_map'):
+        unit_test_class.module_test_params_map = {}
     for test_params_dict in test_params_dicts:
         # Skip all `torch.nn.functional` tests, since they are handled by another test suite.
-        if 'wrap_functional' in str(test_params_dict.get('constructor', '')):
+        if is_torch_nn_functional_test(test_params_dict):
             continue
 
         module_name = compute_module_name(test_params_dict)
@@ -231,10 +231,10 @@ def add_torch_nn_module_impl_parity_tests(parity_table, unit_test_class, test_pa
                 test_instance_class=test_instance_class,
             )
             test_name = 'test_torch_nn_{}'.format(test_params.module_variant_name)
-            torch_nn_test_params_map[test_name] = test_params
+            unit_test_class.module_test_params_map[test_name] = test_params
 
             def test_fn(self):
-                test_torch_nn_module_variant(unit_test_class=self, test_params=torch_nn_test_params_map[self._testMethodName])
+                test_torch_nn_module_variant(unit_test_class=self, test_params=unit_test_class.module_test_params_map[self._testMethodName])
 
             test_fn = decorate_test_fn(
                 test_fn=test_fn,
@@ -245,7 +245,7 @@ def add_torch_nn_module_impl_parity_tests(parity_table, unit_test_class, test_pa
 
             add_test(unit_test_class, test_name, test_fn)
 
-def add_tests(unit_test_class, test_params_dicts, test_instance_class, parity_table, devices):
+def write_tests_to_test_class(unit_test_class, test_params_dicts, test_instance_class, parity_table, devices):
     add_torch_nn_module_impl_parity_tests(
         parity_table=parity_table,
         unit_test_class=unit_test_class,
@@ -274,11 +274,11 @@ def generate_test_cpp_sources(test_params, template):
 
 # Build all C++ tests together, instead of once per test.
 def build_cpp_tests(unit_test_class, print_cpp_source=False):
-    assert len(torch_nn_test_params_map) > 0
+    assert len(unit_test_class.module_test_params_map) > 0
     cpp_sources = TORCH_NN_COMMON_TEST_HARNESS
     functions = []
     modules_added_cpp_sources = set()
-    for test_name, test_params in torch_nn_test_params_map.items():
+    for test_name, test_params in unit_test_class.module_test_params_map.items():
         if test_params.module_name not in modules_added_cpp_sources:
             cpp_sources += cpp_api_parity.module_cpp_sources.get(test_params.module_name, '')
             modules_added_cpp_sources.add(test_params.module_name)

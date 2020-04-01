@@ -7,30 +7,98 @@ import torch.utils.cpp_extension
 import torch.testing._internal.common_nn as common_nn
 from torch.testing._internal.common_cuda import TEST_CUDA
 
+# Note that this namedtuple is for C++ parity test mechanism's internal use.
+# For guidance on how to add a new C++ parity test, please see
+# NOTE [How to check NN module / functional API parity between Python and C++ frontends]
 TorchNNModuleTestParams = namedtuple(
     'TorchNNModuleTestParams',
     [
+        # NN module name (e.g. "BCELoss")
         'module_name',
+
+        # Unique identifier for this test (e.g. "BCELoss_weights_cuda")
         'module_variant_name',
+
+        # An instance of an NN test class (e.g. `NewCriterionTest`) which stores
+        # necessary information (e.g. input / target / extra_args) for running the Python test
         'test_instance',
+
+        # Constructor arguments passed to the C++ module constructor, which must be
+        # strictly equivalent to the Python module constructor arguments
+        # (e.g. `torch::nn::BCELossOptions().weight(torch::rand(10))`,
+        # which is strictly equivalent to passing `torch.rand(10)` to `torch.nn.BCELoss`
+        # constructor in Python)
         'cpp_constructor_args',
+
+        # All arguments used in NN module's forward pass.
+        # Please see `compute_arg_dict` function for details on how we construct this dict.
+        # (e.g.
+        # ```
+        # arg_dict = {
+        #     'input': [python_input_tensor],
+        #     'target': [python_target_tensor],
+        #     'extra_args': [],
+        #     'other': [],
+        # }
+        # ```
+        # )
         'arg_dict',
+
+        # Whether we expect this NN module test to pass the Python/C++ parity test
+        # (e.g. `True`)
         'has_parity',
+
+        # Device (e.g. "cuda")
         'device',
+
+        # Temporary folder to store C++ outputs (to be compared with Python outputs later)
         'cpp_tmp_folder',
     ]
 )
 
+# Note that this namedtuple is for C++ parity test mechanism's internal use.
+# For guidance on how to add a new C++ parity test, please see
+# NOTE [How to check NN module / functional API parity between Python and C++ frontends]
 TorchNNFunctionalTestParams = namedtuple(
     'TorchNNFunctionalTestParams',
     [
+        # NN functional name (e.g. "binary_cross_entropy")
         'functional_name',
+
+        # Unique identifier for this test (e.g. "BCELoss_no_reduce_cuda")
         'functional_variant_name',
+
+        # An instance of an NN test class (e.g. `NewModuleTest`) which stores
+        # necessary information (e.g. input / target / extra_args) for running the Python test
         'test_instance',
+
+        # The C++ function call that is strictly equivalent to the Python function call
+        # (e.g. "F::binary_cross_entropy(i, t.to(i.options()), F::BinaryCrossEntropyFuncOptions().reduction(torch::kNone))",
+        # which is strictly equivalent to `F.binary_cross_entropy(i, t.type_as(i), reduction='none')` in Python)
         'cpp_function_call',
+
+        # All arguments used in NN functional's function call.
+        # Please see `compute_arg_dict` function for details on how we construct this dict.
+        # (e.g.
+        # ```
+        # arg_dict = {
+        #     'input': [python_input_tensor],
+        #     'target': [python_target_tensor],
+        #     'extra_args': [],
+        #     'other': [],
+        # }
+        # ```
+        # )
         'arg_dict',
+
+        # Whether we expect this NN functional test to pass the Python/C++ parity test
+        # (e.g. `True`)
         'has_parity',
+
+        # Device (e.g. "cuda")
         'device',
+
+        # Temporary folder to store C++ outputs (to be compared with Python outputs later)
         'cpp_tmp_folder',
     ]
 )
@@ -79,6 +147,9 @@ def compile_cpp_code_inline(name, cpp_sources, functions):
 
 def compute_temp_file_path(cpp_tmp_folder, variant_name, file_suffix):
     return os.path.join(cpp_tmp_folder, '{}_{}.pt'.format(variant_name, file_suffix))
+
+def is_torch_nn_functional_test(test_params_dict):
+    return 'wrap_functional' in str(test_params_dict.get('constructor', ''))
 
 def convert_to_list(python_input):
     if isinstance(python_input, torch.Tensor):
@@ -149,7 +220,7 @@ def serialize_arg_dict_as_script_module(arg_dict):
     return torch.jit.script(arg_dict_module)
 
 # NOTE: any argument symbol used in `cpp_constructor_args` / `cpp_options_args` / `cpp_function_call`
-# must have a mapping in `cpp_arg_symbol_map`.
+# must have a mapping in `cpp_var_map`.
 #
 # The mapping can take one of the following formats:
 #
@@ -168,7 +239,7 @@ def serialize_arg_dict_as_script_module(arg_dict):
 #                                              weight=weights.type_as(i), reduction='none')),
 #         cpp_function_call='F::binary_cross_entropy(i, t.to(i.options()), F::BinaryCrossEntropyFuncOptions().weight(weights.to(i.options())).reduction(torch::kNone))',
 #         input_fn=lambda: torch.rand(15, 10).clamp_(2.8e-2, 1 - 2.8e-2),
-#         cpp_arg_symbol_map={'i': 'input', 't': t, 'weights': weights},
+#         cpp_var_map={'i': 'input', 't': t, 'weights': weights},
 #         reference_fn=lambda i, p, m: -(t * i.log() + (1 - t) * (1 - i).log()) * weights,
 #     )
 # ```
@@ -190,8 +261,8 @@ def compute_arg_dict(test_params_dict, test_instance):
     if test_instance.extra_args:
         put_args_into_arg_dict('extra_args', 'e', convert_to_list(test_instance.extra_args))
 
-    cpp_arg_symbol_map = test_params_dict.get('cpp_arg_symbol_map', {})
-    for arg_name, arg_value in cpp_arg_symbol_map.items():
+    cpp_var_map = test_params_dict.get('cpp_var_map', {})
+    for arg_name, arg_value in cpp_var_map.items():
         if isinstance(arg_value, str):
             if arg_value == 'input':
                 arg_dict['other'].append(CppArg(name=arg_name, value=test_instance._get_input()))

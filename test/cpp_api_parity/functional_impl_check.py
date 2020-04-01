@@ -23,7 +23,7 @@ import torch
 from cpp_api_parity.utils import TorchNNFunctionalTestParams, TORCH_NN_COMMON_TEST_HARNESS, \
     compile_cpp_code_inline, set_python_tensors_requires_grad, move_python_tensors_to_device, \
     add_test, compute_cpp_args_construction_stmts_and_forward_arg_symbols, serialize_arg_dict_as_script_module, \
-    compute_arg_dict, decorate_test_fn, compute_temp_file_path, generate_error_msg
+    compute_arg_dict, decorate_test_fn, compute_temp_file_path, generate_error_msg, is_torch_nn_functional_test
 import cpp_api_parity
 
 # Expected substitutions:
@@ -92,9 +92,9 @@ def test_forward(unit_test_class, test_params):
         cpp_output = torch.load(forward_output_file_path)
 
         # Check that forward outputs are equal
-        unit_test_class.assertTrue(
-            torch.allclose(python_output, cpp_output),
-            generate_error_msg("forward output", cpp_output, python_output))
+        unit_test_class.assertEqual(
+            python_output, cpp_output,
+            message=generate_error_msg("forward output", cpp_output, python_output))
 
     run_cpp_test_fn_and_check_output()
 
@@ -110,10 +110,12 @@ def compute_functional_name(test_params_dict):
         return re.sub(r'(?<!^)(?=[A-Z])', '_', camel_case_str).lower()
 
     if 'cpp_options_args' in test_params_dict:
-        # Expected format: `F::FunctionalFuncOptions(...)`
+        # Expected format for `cpp_options_args`: `F::FunctionalFuncOptions(...)`
+        # Example output: `binary_cross_entropy`
         return camel_case_to_snake_case(test_params_dict['cpp_options_args'].split('(')[0].replace('F::', '').replace('FuncOptions', ''))
     elif 'cpp_function_call' in test_params_dict:
-        # Expected format: `F::functional_name(...)`
+        # Expected format for `cpp_function_call`: `F::functional_name(...)`
+        # Example output: `binary_cross_entropy`
         return test_params_dict['cpp_function_call'].split('(')[0].replace('F::', '')
     else:
         raise RuntimeError(
@@ -135,6 +137,7 @@ def process_test_params_for_functional(test_params_dict, device, test_instance_c
     test_instance = test_instance_class(**test_params_dict)
     functional_name = compute_functional_name(test_params_dict)
     assert test_instance.get_name().startswith('test_')
+    # Example output: `BCELoss_no_reduce_cuda`
     functional_variant_name = test_instance.get_name()[5:] + (('_' + device) if device != 'cpu' else '')
     arg_dict = compute_arg_dict(test_params_dict, test_instance)
 
@@ -149,15 +152,15 @@ def process_test_params_for_functional(test_params_dict, device, test_instance_c
         cpp_tmp_folder=tempfile.mkdtemp(),
     )
 
-torch_nn_test_params_map = {}
-
 def test_torch_nn_functional_variant(unit_test_class, test_params):
     test_forward(unit_test_class, test_params)
 
 def add_torch_nn_functional_impl_parity_tests(parity_table, unit_test_class, test_params_dicts, test_instance_class, devices):
+    if not hasattr(unit_test_class, 'functional_test_params_map'):
+        unit_test_class.functional_test_params_map = {}
     for test_params_dict in test_params_dicts:
         # Skip all `torch.nn` module tests, since they are handled by another test suite.
-        if 'wrap_functional' not in str(test_params_dict.get('constructor', '')):
+        if not is_torch_nn_functional_test(test_params_dict):
             continue
 
         assert 'cpp_options_args' in test_params_dict or 'cpp_function_call' in test_params_dict, \
@@ -186,10 +189,10 @@ def add_torch_nn_functional_impl_parity_tests(parity_table, unit_test_class, tes
                 test_instance_class=test_instance_class,
             )
             test_name = 'test_torch_nn_functional_{}'.format(test_params.functional_variant_name)
-            torch_nn_test_params_map[test_name] = test_params
+            unit_test_class.functional_test_params_map[test_name] = test_params
 
             def test_fn(self):
-                test_torch_nn_functional_variant(unit_test_class=self, test_params=torch_nn_test_params_map[self._testMethodName])
+                test_torch_nn_functional_variant(unit_test_class=self, test_params=unit_test_class.functional_test_params_map[self._testMethodName])
 
             test_fn = decorate_test_fn(
                 test_fn=test_fn,
@@ -200,7 +203,7 @@ def add_torch_nn_functional_impl_parity_tests(parity_table, unit_test_class, tes
 
             add_test(unit_test_class, test_name, test_fn)
 
-def add_tests(unit_test_class, test_params_dicts, test_instance_class, parity_table, devices):
+def write_tests_to_test_class(unit_test_class, test_params_dicts, test_instance_class, parity_table, devices):
     add_torch_nn_functional_impl_parity_tests(
         parity_table=parity_table,
         unit_test_class=unit_test_class,
@@ -220,11 +223,11 @@ def generate_test_cpp_sources(test_params, template):
 
 # Build all C++ tests together, instead of once per test.
 def build_cpp_tests(unit_test_class, print_cpp_source=False):
-    assert len(torch_nn_test_params_map) > 0
+    assert len(unit_test_class.functional_test_params_map) > 0
     cpp_sources = TORCH_NN_COMMON_TEST_HARNESS
     functions = []
     functionals_added_cpp_sources = set()
-    for test_name, test_params in torch_nn_test_params_map.items():
+    for test_name, test_params in unit_test_class.functional_test_params_map.items():
         if test_params.functional_name not in functionals_added_cpp_sources:
             cpp_sources += cpp_api_parity.functional_cpp_sources.get(test_params.functional_name, '')
             functionals_added_cpp_sources.add(test_params.functional_name)
