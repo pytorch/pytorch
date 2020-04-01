@@ -260,20 +260,13 @@ void List<T>::resize(size_type count, const T& value) const {
 
 template<class T>
 bool operator==(const List<T>& lhs, const List<T>& rhs) {
+  // Lists with the same identity trivially compare equal.
   if (lhs.impl_ == rhs.impl_) {
-    // Lists with the same identity trivially compare equal.
     return true;
   }
 
-  if (lhs.size() != rhs.size()) {
-    return false;
-  }
-  for (size_t i = 0; i < lhs.size(); ++i) {
-    if (lhs.get(i) != rhs.get(i)) {
-      return false;
-    }
-  }
-  return true;
+  // Otherwise, just compare values directly.
+  return *lhs.impl_ == *rhs.impl_;
 }
 
 template<class T>
