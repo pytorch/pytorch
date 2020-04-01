@@ -1,6 +1,7 @@
 #include <c10/util/Exception.h>
 #include <test/cpp/jit/tests.h>
 #include <test/cpp/tensorexpr/tests.h>
+#include <iostream>
 
 namespace torch {
 namespace jit {
@@ -31,7 +32,9 @@ JIT_TEST_API void runJITCPPTests(bool runCuda) {
 JIT_TEST_API void runTENSOREXPRCPPTests(bool runCuda) {
   TH_FORALL_TENSOREXPR_TESTS(JIT_TEST)
   if (runCuda) {
+  std::cerr << "RUNNING TH_FORALL_TENSOREXPR_TESTS_CUDA\n";
 #ifdef USE_CUDA
+    std::cerr << "RUNNING TH_FORALL_TENSOREXPR_TESTS_CUDA USE CUDA\n";
     TH_FORALL_TENSOREXPR_TESTS_CUDA(JIT_TEST)
 #endif
   }

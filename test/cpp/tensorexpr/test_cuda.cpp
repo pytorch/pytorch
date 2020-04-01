@@ -83,6 +83,7 @@ void testCudaTestVectorAdd01_impl() {
 }
 
 void testCudaTestVectorAdd01() {
+  ASSERT_TRUE(false, "califragilistic expialidocious!");
   // floating types.
   testCudaTestVectorAdd01_impl<float>();
   testCudaTestVectorAdd01_impl<at::Half>();
@@ -152,6 +153,7 @@ static void testCudaTestVectorAdd02_impl(int N, int block_size) {
 }
 
 void testCudaTestVectorAdd02() {
+  ASSERT_TRUE(false, "califragilistic expialidocious!");
   testCudaTestVectorAdd02_impl(1024, 128);
   testCudaTestVectorAdd02_impl(1030, 128);
 }
