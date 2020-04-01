@@ -2224,8 +2224,7 @@ graph(%input, %weight):
                 x, y = torch.chunk(x, 2)
                 x = F.dropout(x)
                 x = self.dropout(x)
-                # TODO: uncomment when sort is supported
-                # x, _ = torch.sort(x)
+                x, _ = torch.sort(x)
                 x = F.interpolate(x, 4, mode='nearest')
                 x = F.upsample(x, (32, 32))
                 x = F.upsample_bilinear(x, (32, 32))
