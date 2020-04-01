@@ -221,7 +221,6 @@ std::tuple<std::vector<Tensor>, std::vector<std::string>> RNNImplBase<Derived>::
 
 template <typename Derived>
 void RNNImplBase<Derived>::flatten_parameters() {
-  // TODO: Re-pack weights for Type-1 order
   // Resets parameter data pointer so that they can use faster code paths.
   //
   // Right now, this works only if the module is on the GPU and cuDNN is
@@ -457,7 +456,6 @@ void RNNImplBase<Derived>::pretty_print(std::ostream& stream) const {
 
 template <typename Derived>
 std::vector<Tensor> RNNImplBase<Derived>::all_weights() const {
-  // TODO: Pack correctly for type-1 RNNs
   std::vector<Tensor> result = {};
   auto named_parameters = this->named_parameters(/*recurse=*/false);
   for (const auto& weights : all_weights_) {
