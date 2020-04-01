@@ -481,6 +481,37 @@ void GraphExecutorImplBase::run(Stack& stack) {
   last_executed_optimized_graph = plan.graph;
 }
 
+c10::intrusive_ptr<Future> GraphExecutorImplBase::runAsync(Stack& stack) {
+  TORCH_CHECK(
+      stack.size() >= num_inputs,
+      "expected ",
+      num_inputs,
+      " inputs, but got only ",
+      stack.size());
+
+  C10_LOG_API_USAGE_ONCE("torch.graph_executor.runAsync");
+  logging::getLogger()->addStatValue(
+      logging::runtime_counters::GRAPH_EXECUTOR_INVOCATIONS, 1.0);
+
+  struct Frame {
+    explicit Frame(ExecutionPlan eplan)
+      : plan(std::move(eplan)),
+        state(plan.code) {
+    }
+    ExecutionPlan plan;
+    InterpreterState state;
+  };
+  auto frame = std::make_shared<Frame>(
+    getPlanFor(stack, GraphExecutor::getDefaultNumBailOuts()));
+  auto res = frame->state.runAsync(stack);
+  last_executed_optimized_graph = frame->plan.graph;
+  if (!res->completed()) {
+    // If not completed, persist the Frame until complete.
+    res->addCallback([frame] {});
+  }
+  return res;
+}
+
 // a Graph can be created via tracing, or via a language-based frontend
 // GraphExecutor runs it. It can run the same graph on many different sizes
 // and different requires_grad states, and handles specializations for each
@@ -638,6 +669,10 @@ GraphExecutor::GraphExecutor(
 
 void GraphExecutor::run(Stack& inputs) {
   return pImpl->run(inputs);
+}
+
+c10::intrusive_ptr<Future> GraphExecutor::runAsync(Stack& stack) {
+  return pImpl->runAsync(stack);
 }
 
 size_t GraphExecutor::getDefaultNumBailOuts() {
