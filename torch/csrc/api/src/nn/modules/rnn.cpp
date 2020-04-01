@@ -204,12 +204,17 @@ std::tuple<std::vector<Tensor>, std::vector<std::string>> RNNImplBase<Derived>::
   // Merge direction weights into a single vector with (fwd, bwd) layout
   std::vector<Tensor> merge_weights;
   std::vector<std::string> merge_weights_names;
+
   for (int64_t i = 0; i < flat_weights_fwd.size(); i++) {
     merge_weights.push_back(flat_weights_fwd[i]);
-    merge_weights.push_back(flat_weights_bwd[i]);
     merge_weights_names.push_back(weights_fwd_names[i]);
+  }
+
+  for (int64_t i = 0; i < flat_weights_bwd.size(); i++) {
+    merge_weights.push_back(flat_weights_bwd[i]);
     merge_weights_names.push_back(weights_bwd_names[i]);
   }
+
   return std::make_pair(
       std::move(merge_weights), std::move(merge_weights_names));
 }
