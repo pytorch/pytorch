@@ -5397,7 +5397,7 @@ class TestAutogradDeviceType(TestCase):
         for i in range(2):
             with torch.no_grad():
                 asd.set_(asd[1:])
-                asd.grad=None
+                asd.grad = None
 
             m = torch.cat((asd, asd))
             m.sum().backward()
