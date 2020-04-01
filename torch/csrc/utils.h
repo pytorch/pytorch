@@ -62,10 +62,10 @@
     (PyBool_Check(object) ? object :                                           \
     (throw std::runtime_error("Could not parse real"), Py_False))
 
-#define THPUtils_unpackReal_COMPLEX(object)                                              \
-    (PyComplex_Check(object) ?                                                           \
-    std::complex<double>(PyComplex_RealAsDouble(object), PyComplex_RealAsImag(object)) : \                                          \
-    (throw std::runtime_error("Could not parse real"), std::complex<double>(0,0)))
+#define THPUtils_unpackReal_COMPLEX(object)                                                                        \
+    (PyComplex_Check(object) ?                                                                                     \
+    (std::complex<double>(PyComplex_RealAsDouble(object), PyComplex_ImagAsDouble(object))) :                         \
+    (throw std::runtime_error("Could not parse real"), std::complex<double>(0,0)))                                 \
 
 #define THPUtils_checkReal_BOOL(object)                                        \
     PyBool_Check(object)
@@ -79,7 +79,7 @@
 
 #define THPUtils_newReal_BOOL(value) PyBool_FromLong(value)
 
-#define THPUtils_newReal_COMPLEX(value) PyComplex_AsCComplex(value)
+#define THPUtils_newReal_COMPLEX(value) PyComplex_FromDoubles(value.real(), value.imag())
 
 #define THPDoubleUtils_checkReal(object)             THPUtils_checkReal_FLOAT(object)
 #define THPDoubleUtils_unpackReal(object)            (double)THPUtils_unpackReal_FLOAT(object)
@@ -92,7 +92,7 @@
 #define THPHalfUtils_newReal(value)                  PyFloat_FromDouble(value)
 #define THPHalfUtils_newAccreal(value)               THPUtils_newReal_FLOAT(value)
 #define THPComplexDoubleUtils_checkReal(object)      THPUtils_checkReal_COMPLEX(object)
-#define THPComplexDoubleUtils_unpackReal(object)     (std::complex<double>)THPUtils_unpackReal_COMPLEX(object)
+#define THPComplexDoubleUtils_unpackReal(object)     THPUtils_unpackReal_COMPLEX(object)
 #define THPComplexDoubleUtils_newReal(value)         THPUtils_newReal_COMPLEX(value)
 #define THPComplexFloatUtils_checkReal(object)       THPUtils_checkReal_COMPLEX(object)
 #define THPComplexFloatUtils_unpackReal(object)      (std::complex<float>)THPUtils_unpackReal_COMPLEX(object)
@@ -163,6 +163,9 @@ struct THPUtils_typeTraits {};
 
 #include <torch/csrc/generic/utils.h>
 #include <TH/THGenerateAllTypes.h>
+
+#include <torch/csrc/generic/utils.h>
+#include <TH/THGenerateComplexTypes.h>
 
 #include <torch/csrc/generic/utils.h>
 #include <TH/THGenerateHalfType.h>

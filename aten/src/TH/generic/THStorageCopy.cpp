@@ -25,7 +25,7 @@ void THStorage_(copy##TYPENAMESRC)(THStorage *storage, TH##TYPENAMESRC##Storage 
     data[i] = static_cast<scalar_t>(src_data[i]);                           \
 }
 
-#if !defined(THCOMPLEXFLOAT) && !defined(THCOMPLEXDOUBLE)
+#if !defined(TH_REAL_IS_COMPLEXFLOAT) && !defined(TH_REAL_IS_COMPLEXDOUBLE)
 IMPLEMENT_THStorage_COPY(Byte)
 IMPLEMENT_THStorage_COPY(Char)
 IMPLEMENT_THStorage_COPY(Short)

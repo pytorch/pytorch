@@ -94,11 +94,11 @@ class _StorageBase(object):
         return self.type(type(self).__module__ + '.BFloat16Storage')
 
     def complex_double(self):
-        """Casts this storage to double type"""
+        """Casts this storage to complex double type"""
         return self.type(type(self).__module__ + '.ComplexDoubleStorage')
 
     def complex_float(self):
-        """Casts this storage to float type"""
+        """Casts this storage to complex float type"""
         return self.type(type(self).__module__ + '.ComplexFloatStorage')
 
     def pin_memory(self):
