@@ -718,12 +718,17 @@ template <typename Func>
 inline CppFunction dispatch(DeviceType type, Func&& raw_f) {
   auto deviceTypeToDispatchKey = [](DeviceType t){
     switch (t) {
+      // This list is synchronized with the k-constants in c10/core/DeviceType.h
       case DeviceType::CPU:
         return c10::DispatchKey::CPUTensorId;
       case DeviceType::CUDA:
         return c10::DispatchKey::CUDATensorId;
       case DeviceType::XLA:
         return c10::DispatchKey::XLATensorId;
+      case DeviceType::HIP:
+        return c10::DispatchKey::HIPTensorId;
+      case DeviceType::MSNPU:
+        return c10::DispatchKey::MSNPUTensorId;
       default:
         TORCH_CHECK(false,
           "Device type ", t, " cannot be overloaded at dispatch time, "
