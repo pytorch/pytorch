@@ -193,7 +193,7 @@ Tensor& bernoulli_scalar_cpu_(Tensor& self, double p, Generator gen) {
   return self;
 }
 
-Tensor& uniform_cpu_(Tensor& self, double from, double to, Generator* gen) {
+Tensor& uniform_cpu_(Tensor& self, double from, double to, Generator gen) {
   auto iter = TensorIterator::nullary_op(self);
   uniform_cpu_stub(iter.device_type(), iter, from, to, gen);
   return self;
