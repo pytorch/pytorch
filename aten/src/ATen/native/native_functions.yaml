@@ -4441,7 +4441,7 @@
   use_c10_dispatcher: full
   variants: method, function
   dispatch:
-    CPU: trace
+    CPU: trace_cpu
     CUDA: legacy::cuda::_th_trace
 
 - func: ne.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
