@@ -161,12 +161,12 @@ bool isAddScalar(Node* n) {
       n->input(1)->type()->isSubtypeOf(NumberType::get());
 }
 
-// If the op doesn't require observation, return
-// the the list of input `Value`s that we should check to see
-// if they are observed/quantized, if so, we can say the output
-// of this op is observed/quantized as well, since for these ops we can derive
-// the quantization parameters for output given inputs
-std::vector<Value*> getGeneralOpTensorInputs(Node* n) {
+// For a given value `v`, get the list of values that we need to check
+// if they are observed/quantized or not, if so, we can say the
+// `v` is also observed/quantized, since we can derive
+// the quantization parameters for `v` given the list of values
+std::vector<Value*> getPassThroughInputs(Value* v) {
+  Node* n = v->node();
   std::vector<std::string> single_input_aten_funcs = {
       "max_pool2d",
       "avg_pool2d",
@@ -612,16 +612,18 @@ class InsertObserversHelper {
   std::unordered_set<Graph*> visited_graph_of_observer_map_;
   std::unordered_map<Value*, Module> observer_for_value_;
   // Map from values from callsite into the values in the CallMethod graph
-  std::unordered_map<Value*, std::unordered_set<Value*>> boundary_value_map_;
-  std::unordered_set<Value*> observed_values_;
-  // This is used for the observed values to pass through the ops like flatten,
-  // so that output value of platten do not need to be observed
   // key of the map is the value from caller graph, and the value of the map
   // is the list of values in the callee graph (the graph
   // corresponding to the called method),
-  // the reason it is a vector is that a value in the caller graph
+  // the reason it is a set is that a value in the caller graph
   // can both correspond to the output of one callee graph and input of another
   // callee graph.
+  std::unordered_map<Value*, std::unordered_set<Value*>> boundary_value_map_;
+  std::unordered_set<Value*> observed_values_;
+  // This is used for the observed values to pass through the ops like flatten,
+  // so that output value of flatten do not need to be observed
+  // key is the output of the op, value is a vector of values that need
+  // to be observed in order to pass the observed property to the output
   std::unordered_map<Value*, std::vector<Value*>> pass_through_value_map_;
   // Unique id generator for observer module, used for generating
   // unique observer names when we insert observer module, we
@@ -903,9 +905,8 @@ void InsertObserversHelper::fillPassThroughValueMap(
         auto g = getCallFunctionGraph(n);
         blocks_to_visit.push(g->block());
       }
-      auto inputs = getGeneralOpTensorInputs(n);
-      for (auto* input : inputs) {
-        for (auto* output : n->outputs()) {
+      for (auto* output : n->outputs()) {
+        for (auto* input : getPassThroughInputs(output)) {
           pass_through_value_map_[output].push_back(input);
         }
       }
@@ -2404,33 +2405,33 @@ void swapDeQuant(Block* block) {
         continue;
       }
     }
-    auto inputs = getGeneralOpTensorInputs(n);
-    if (inputs.size() > 0) {
-      bool is_dequantized = true;
-      for (auto* input : inputs) {
-        // note that we don't need to recursively check for prim::If
-        // here because if all inputs of a prim::If is dequantized
-        // the dequantize will be factored out before we get to this
-        // point
-        is_dequantized &= input->node()->kind() == Symbol::aten("dequantize");
-      }
-      if (!is_dequantized) {
-        continue;
-      }
-      // Delete dequantize node, we have one dequantize
-      // for each use of the value
-      for (auto* dequantized_val : inputs) {
-        auto* dequantize_node = dequantized_val->node();
-        TORCH_INTERNAL_ASSERT(
-            dequantized_val->uses().size() == 1,
-            "Expect to have one dequantize node for each use");
-        // Replace useses of dequantized_val with the input of
-        // dequantize node
-        dequantized_val->replaceAllUsesWith(dequantize_node->inputs()[0]);
-        dequantize_node->removeAllInputs();
-        dequantize_node->destroy();
-      }
-      for (auto* output : n->outputs()) {
+    for (auto* output : n->outputs()) {
+      auto inputs = getPassThroughInputs(output);
+      if (inputs.size() > 0) {
+        bool is_dequantized = true;
+        for (auto* input : inputs) {
+          // note that we don't need to recursively check for prim::If
+          // here because if all inputs of a prim::If is dequantized
+          // the dequantize will be factored out before we get to this
+          // point
+          is_dequantized &= input->node()->kind() == Symbol::aten("dequantize");
+        }
+        if (!is_dequantized) {
+          continue;
+        }
+        // Delete dequantize node, we have one dequantize
+        // for each use of the value
+        for (auto* dequantized_val : inputs) {
+          auto* dequantize_node = dequantized_val->node();
+          TORCH_INTERNAL_ASSERT(
+              dequantized_val->uses().size() == 1,
+              "Expect to have one dequantize node for each use");
+          // Replace useses of dequantized_val with the input of
+          // dequantize node
+          dequantized_val->replaceAllUsesWith(dequantize_node->inputs()[0]);
+          dequantize_node->removeAllInputs();
+          dequantize_node->destroy();
+        }
         std::vector<Use> uses = output->uses();
         // Insert new dequantize node for each use of the output
         insertDeQuantCall(graph, output, output, uses);
