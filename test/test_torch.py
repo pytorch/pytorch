@@ -12391,9 +12391,12 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(sort_topk, topk[0])      # check values
         self.assertEqual(sort_topk, a[topk[1]])   # check indices
 
-    @dtypesIfCUDA(torch.half, torch.float, torch.double)
+    @dtypesIfCUDA(torch.bfloat16, torch.half, torch.float, torch.double)
     @dtypes(torch.float, torch.double)
     def test_topk_nonfinite(self, device, dtype):
+        if torch.device(device).type == 'cuda' and dtype == torch.bfloat16:
+            raise unittest.SkipTest('bfloat16 not supported wih cuda')
+
         x = torch.tensor([float('nan'), float('inf'), 1e4, 0, -1e4, -float('inf')], device=device, dtype=dtype)
         val, idx = x.topk(4)
         expect = torch.tensor([float('nan'), float('inf'), 1e4, 0], device=device, dtype=dtype)
