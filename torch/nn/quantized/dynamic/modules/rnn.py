@@ -74,7 +74,8 @@ class RNNBase(torch.nn.Module):
                         torch.ops.quantized.linear_prepack(w_ih, b_ih)
                     packed_hh = \
                         torch.ops.quantized.linear_prepack(w_hh, b_hh)
-                    cell_params = torch.ops.quantized.make_quantized_cell_params_dynamic(packed_ih, packed_hh)
+                    cell_params = torch.ops.quantized.make_quantized_cell_params_dynamic(
+                        packed_ih, packed_hh, b_ih, b_hh)
                 else:
                     w_ih = torch.Tensor(gate_size, layer_input_size).float()
                     w_hh = torch.Tensor(gate_size, hidden_size).float()
@@ -87,7 +88,8 @@ class RNNBase(torch.nn.Module):
                             w_ih)
                     packed_hh = torch.ops.quantized.linear_prepack_fp16(
                             w_hh)
-                    cell_params = torch.ops.quantized.make_quantized_cell_params_fp16(packed_ih, packed_hh, b_ih, b_hh)
+                    cell_params = torch.ops.quantized.make_quantized_cell_params_fp16(
+                        packed_ih, packed_hh, b_ih, b_hh)
 
                 _all_weight_values.append(PackedParameter(cell_params))
         self._all_weight_values = torch.nn.ModuleList(_all_weight_values)
@@ -250,14 +252,16 @@ class RNNBase(torch.nn.Module):
                     packed_ih = quantize_and_pack(weight_ih, bias_ih)
                     packed_hh = quantize_and_pack(weight_hh, bias_hh)
 
-                    cell_params = torch.ops.quantized.make_quantized_cell_params_dynamic(packed_ih, packed_hh)
+                    cell_params = torch.ops.quantized.make_quantized_cell_params_dynamic(
+                        packed_ih, packed_hh, bias_ih, bias_hh)
                 else:
-                    packed_ih = torch.fbgemm_pack_gemm_matrix_fp16(
+                    packed_ih = torch.ops.quantized.linear_prepack_fp16(
                         weight_ih.float())
-                    packed_hh = torch.fbgemm_pack_gemm_matrix_fp16(
+                    packed_hh = torch.ops.quantized.linear_prepack_fp16(
                         weight_hh.float())
 
-                    cell_params = torch.ops.quantized.make_quantized_cell_params_fp16(packed_ih, packed_hh, bias_ih, bias_hh)
+                    cell_params = torch.ops.quantized.make_quantized_cell_params_fp16(
+                        packed_ih, packed_hh, bias_ih, bias_hh)
 
                 _all_weight_values.append(PackedParameter(cell_params))
         qRNNBase._all_weight_values = torch.nn.ModuleList(_all_weight_values)
