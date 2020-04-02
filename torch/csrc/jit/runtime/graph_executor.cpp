@@ -506,8 +506,9 @@ c10::intrusive_ptr<Future> GraphExecutorImplBase::runAsync(Stack& stack) {
   if (!res->completed()) {
     // If not completed, persist the Frame until complete.
     res->addCallback(
-      [frame](const at::IValue&,
-              const c10::optional<at::ivalue::Future::FutureError>&) {});
+        [frame](
+            const at::IValue&,
+            const c10::optional<at::ivalue::Future::FutureError>&) {});
   }
   return res;
 }
