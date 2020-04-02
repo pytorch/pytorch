@@ -93,15 +93,12 @@ bool bothMinMaxNone(
   const auto& match_vmap = match.values_map;
   // If value map has dummy_min_max in it, then it means
   // the pattern to be replaced was the one containing hardtanh.
-  if (vmap.find("dummy_min_max") != vmap.end()) {
-    auto dummy_min_max =
-      graph_rewrite_helper::getIValue("dummy_min_max", match_vmap, vmap);
-    return (!dummy_min_max || dummy_min_max.value().isNone());
-  }
-  // Otherwise the pattern is relu.
-  auto output_min_max =
-    graph_rewrite_helper::getIValue("output_min_max", match_vmap, vmap);
-  return (!output_min_max || output_min_max.value().isNone());
+  TORCH_CHECK(
+      vmap.find("dummy_min_max") != vmap.end(),
+      "Expected to find dummy_min_max Value in the subgraph to be replaced.");
+  auto dummy_min_max =
+    graph_rewrite_helper::getIValue("dummy_min_max", match_vmap, vmap);
+  return (!dummy_min_max || dummy_min_max.value().isNone());
 }
 
 void fuseHardtanhWithPackedOps(std::shared_ptr<Graph>& graph) {
@@ -177,7 +174,7 @@ void fuseReluWithPackedOps(std::shared_ptr<Graph>& graph) {
   SubgraphRewriter rewriter;
 
   std::string linear_prepack_run_relu_fused = R"(
-    graph(%input, %weight, %bias, %output_min_max):
+    graph(%input, %weight, %bias, %dummy_min_max):
         %output_min: float = prim::Constant[value=0.0]()
         %output_max: None = prim::Constant()
         %packed_weight_bias : __torch__.torch.classes.xnnpack.LinearOpContext = prepacked::linear_clamp_prepack(
@@ -187,7 +184,7 @@ void fuseReluWithPackedOps(std::shared_ptr<Graph>& graph) {
 
   std::string conv2d_prepack_run_relu_fused = R"(
     graph(%input, %weight, %bias, %stride:int[], %padding:int[],
-          %dilation:int[], %groups:int, %output_min_max):
+          %dilation:int[], %groups:int, %dummy_min_max):
         %output_min: float = prim::Constant[value=0.0]()
         %output_max: None = prim::Constant()
         %packed_weight_bias : __torch__.torch.classes.xnnpack.Conv2dOpContext = prepacked::conv2d_clamp_prepack(
@@ -197,9 +194,9 @@ void fuseReluWithPackedOps(std::shared_ptr<Graph>& graph) {
         return (%r) )";
 
   std::string linear_prepack_run_relu = R"(
-    graph(%input, %weight, %bias, %output_min_max):
+    graph(%input, %weight, %bias, %dummy_min_max):
         %packed_weight_bias = prepacked::linear_clamp_prepack(
-            %weight, %bias, %output_min_max, %output_min_max)
+            %weight, %bias, %dummy_min_max, %dummy_min_max)
         %linear_res = prepacked::linear_clamp_run(%input, %packed_weight_bias)
         %res = aten::relu(%linear_res)
         return (%res))";
@@ -209,10 +206,10 @@ void fuseReluWithPackedOps(std::shared_ptr<Graph>& graph) {
 
   std::string conv2d_prepack_run_relu = R"(
     graph(%input, %weight, %bias, %stride:int[], %padding:int[],
-          %dilation:int[], %groups:int, %output_min_max):
+          %dilation:int[], %groups:int, %dummy_min_max):
         %packed_weight_bias = prepacked::conv2d_clamp_prepack(
             %weight, %bias, %stride, %padding, %dilation, %groups,
-            %output_min_max, %output_min_max)
+            %dummy_min_max, %dummy_min_max)
         %conv2d_res = prepacked::conv2d_clamp_run(%input, %packed_weight_bias)
         %r = aten::relu(%conv2d_res)
         return (%r) )";
@@ -221,19 +218,19 @@ void fuseReluWithPackedOps(std::shared_ptr<Graph>& graph) {
       conv2d_prepack_run_relu, conv2d_prepack_run_relu_fused);
 
   std::string linear_prepack_run_relu_inplace = R"(
-    graph(%input, %weight, %bias, %output_min_max):
+    graph(%input, %weight, %bias, %dummy_min_max):
         %packed_weight_bias = prepacked::linear_clamp_prepack(
-            %weight, %bias, %output_min_max, %output_min_max)
+            %weight, %bias, %dummy_min_max, %dummy_min_max)
         %linear_res = prepacked::linear_clamp_run(%input, %packed_weight_bias)
         %res = aten::relu_(%linear_res)
         return (%res))";
 
   std::string conv2d_prepack_run_relu_inplace = R"(
     graph(%input, %weight, %bias, %stride:int[], %padding:int[],
-          %dilation:int[], %groups:int, %output_min_max):
+          %dilation:int[], %groups:int, %dummy_min_max):
         %packed_weight_bias = prepacked::conv2d_clamp_prepack(
             %weight, %bias, %stride, %padding, %dilation, %groups,
-            %output_min_max, %output_min_max)
+            %dummy_min_max, %dummy_min_max)
         %conv2d_res = prepacked::conv2d_clamp_run(%input, %packed_weight_bias)
         %r = aten::relu_(%conv2d_res)
         return (%r) )";
