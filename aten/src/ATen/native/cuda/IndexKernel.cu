@@ -148,10 +148,7 @@ static Tensor & masked_select_out_cuda_impl(Tensor & result, const Tensor & self
   Tensor _mask, _self;
   std::tie(_mask, _self) = expand_outplace(mask, self);
 
-  Tensor _result = _self.index(_mask);
-
-  result.resize_as_(_result);
-  result.copy_(_result);
+  at::native::index_out(result, _self, _mask);
 
   return result;
 }
