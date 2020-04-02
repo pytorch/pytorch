@@ -198,7 +198,7 @@ def process_test_params_for_module(test_params_dict, device, test_instance_class
             "If you are interested in adding the C++ API parity test, please see:\n"
             "NOTE [How to check NN module / functional API parity between Python and C++ frontends]. \n"
             "If not, please add `test_cpp_api_parity=False` to the test params dict and file an issue about this."
-            ).format(pprint.pformat(test_params_dict))
+        ).format(pprint.pformat(test_params_dict))
 
     return TorchNNModuleTestParams(
         module_name=module_name,

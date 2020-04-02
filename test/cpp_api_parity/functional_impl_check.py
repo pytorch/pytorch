@@ -177,7 +177,7 @@ def add_torch_nn_functional_impl_parity_tests(
             "If you are interested in adding the C++ API parity test, please see:\n"
             "NOTE [How to check NN module / functional API parity between Python and C++ frontends]. \n"
             "If not, please add `test_cpp_api_parity=False` to the test params dict and file an issue about this."
-            ).format(pprint.pformat(test_params_dict))
+        ).format(pprint.pformat(test_params_dict))
 
         assert not ('cpp_options_args' in test_params_dict and 'cpp_function_call' in test_params_dict), (
             "Only one of `cpp_options_args` and `cpp_function_call` entries "
