@@ -16138,7 +16138,7 @@ tensor_op_tests = [
     ('dist', '2_5_norm', _small_2d, lambda t, d: [_small_2d(t, d), 2.5],
         1e-2, 1e-5, 1e-5, _float_types, _cpu_types, False),
     ('dot', '', _medium_1d, lambda t, d: [_medium_1d(t, d)],
-        1e-2, 1e-5, 1e-5, _float_types, _cpu_types, False, [skipCUDAIfRocm]),
+        1e-2, 1e-5, 1e-5, _float_types, _cpu_types, False),
     ('element_size', '', _medium_1d, lambda t, d: [], 1e-5, 1e-5, 1e-5, _float_types_no_half, _cpu_types, False),
     ('eq', '', _small_3d_ones, lambda t, d: [_small_3d(t, d)], 1e-5, 1e-5, 1e-5, _types2),
     ('eq', 'equal', _small_3d_ones, lambda t, d: [_small_3d_ones(t, d)], 1e-5, 1e-5, 1e-5, _types2),

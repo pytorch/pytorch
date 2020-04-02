@@ -149,7 +149,7 @@ class TestQuantizedTensor(TestCase):
         self.assertRaises(RuntimeError, lambda: qr.new(torch.Size([2, 3])))
         self.assertRaises(RuntimeError, lambda: qr.new([6]))
 
-    def test_per_channel_qtensor_creation(self, dtype):
+    def test_per_channel_qtensor_creation(self):
         numel = 10
         ch_axis = 0
         scales = torch.rand(numel)
@@ -169,8 +169,7 @@ class TestQuantizedTensor(TestCase):
         self.assertEqual(zero_points, q.q_per_channel_zero_points())
         self.assertEqual(ch_axis, q.q_per_channel_axis())
 
-    @given(device=st.sampled_from(get_supported_device_types()))
-    def test_qtensor_creation(self, device):
+    def test_qtensor_creation(self):
         scale = 0.5
         zero_point = 10
         numel = 10
@@ -294,7 +293,7 @@ class TestQuantizedTensor(TestCase):
         self.assertEqual(1, qlast.q_per_channel_axis())
         self.assertEqual(qlast.dequantize(), qr.dequantize())
 
-    def test_qtensor_load_save(self, device, dtype):
+    def test_qtensor_load_save(self):
         scale = 0.2
         zero_point = 10
         # storage is not accessible on the cuda right now
@@ -312,7 +311,7 @@ class TestQuantizedTensor(TestCase):
                 self.assertEqual(qrv, qrv2)
                 self.assertEqual(qr2.storage().data_ptr(), qrv2.storage().data_ptr())
 
-    def test_qtensor_per_channel_load_save(self, dtype):
+    def test_qtensor_per_channel_load_save(self):
         r = torch.rand(20, 10, dtype=torch.float) * 4 - 2
         scales = torch.rand(10, dtype=torch.double) * 0.02 + 0.01
         zero_points = torch.round(torch.rand(10) * 20 + 1).to(torch.long)
@@ -361,7 +360,7 @@ class TestQuantizedTensor(TestCase):
 
     def test_torch_qtensor_deepcopy(self):
         # cuda is not supported yet
-        device = "cuda"
+        device = "cpu"
         q_int = torch.randint(0, 100, [3, 5], device=device, dtype=torch.uint8)
         scale, zero_point = 2.0, 3
         q = torch._make_per_tensor_quantized_tensor(q_int, scale=scale, zero_point=zero_point)
@@ -479,10 +478,10 @@ class TestQuantizedTensor(TestCase):
             qr_cpu = torch.quantize_per_tensor(r, scale, zero_point, dtype=dtype)
             qr_cuda = torch.quantize_per_tensor(r.cuda(), scale, zero_point, dtype=dtype)
             # intr repr must be the same
-            self.assertTrue(np.allclose(qr_cpu.int_repr().numpy(), qr_cuda.int_repr().cpu().numpy()))
+            np.testing.assert_equal(qr_cpu.int_repr().numpy(), qr_cuda.int_repr().cpu().numpy())
             # dequantized values must be the same
             r_cpu, r_cuda = qr_cpu.dequantize().numpy(), qr_cuda.dequantize().cpu().numpy()
-            np.testing.assert_almost_equal(r_cuda, r_cpu, decimal=6)
+            np.testing.assert_almost_equal(r_cuda, r_cpu, decimal=5)
 
 if __name__ == "__main__":
     run_tests()
