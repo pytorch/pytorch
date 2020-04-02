@@ -138,11 +138,12 @@ TEST(BackendFallbackTest, TestBackendFallbackWithWrapper) {
 TEST(BackendFallbackTest, TestFallthroughBackendFallback) {
   // By default fallthrough
   auto registry = c10::import()
-    .fallback(DispatchKey::TESTING_ONLY_GenericModeTensorId,
-              c10::CppFunction::makeFallthrough())
+    .fallback(
+          c10::dispatch(DispatchKey::TESTING_ONLY_GenericModeTensorId,
+                        c10::CppFunction::makeFallthrough()))
     .impl("aten::mul.Tensor",
-          DispatchKey::TESTING_ONLY_GenericModeTensorId,
-          c10::CppFunction::makeFromBoxedFunction<&generic_mode_fallback>());
+          c10::dispatch(DispatchKey::TESTING_ONLY_GenericModeTensorId,
+                        c10::CppFunction::makeFromBoxedFunction<&generic_mode_fallback>()));
 
   c10::impl::IncludeDispatchKeyGuard guard(DispatchKey::TESTING_ONLY_GenericModeTensorId);
 

@@ -1,7 +1,8 @@
 #include <torch/csrc/jit/passes/cuda_graph_fuser.h>
 
 #include <c10/util/Exception.h>
-#include <torch/csrc/jit/codegen/fuser/interface.h>
+#include <torch/csrc/jit/codegen/cuda/interface.h>
+#include <torch/csrc/jit/codegen/cuda/partition.h>
 #include <torch/csrc/jit/frontend/ir_emitter.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/passes/common_subexpression_elimination.h>
@@ -18,107 +19,10 @@
 
 namespace torch {
 namespace jit {
+namespace fuser {
+namespace cuda {
 
 namespace {
-
-// What is a simple mappable operator?  It:
-//    - Has a single tensor output
-//    - Output and all tensor inputs have the same shape
-//    - Output and all tensor inputs have the same scalar type
-//      or all tensor inputs have the same scalar type and
-//         output is identified in PropagateInputShapes
-//    - Output and all tensor inputs should be on the same device
-//    - Produces dense non-overlapping outputs
-// Some of these restrictions may be relaxable, but you should
-// carefully read the code first, as we rely on these assumptions.
-bool isSimpleMap(Node* node) {
-  static OperatorSet simple_mappable{{
-      "aten::_cast_Float(Tensor self, bool non_blocking) -> Tensor",
-
-      "aten::abs(Tensor self) -> Tensor",
-      "aten::acos(Tensor self) -> Tensor",
-      "aten::add(Tensor self, Tensor other, *, Scalar alpha) -> Tensor",
-      "aten::asin(Tensor self) -> Tensor",
-      "aten::atan(Tensor self) -> Tensor",
-      "aten::atan2(Tensor self, Tensor other) -> Tensor",
-      "aten::ceil(Tensor self) -> Tensor",
-      "aten::clamp(Tensor self, Scalar? min, Scalar? max) -> Tensor",
-      "aten::cos(Tensor self) -> Tensor",
-      "aten::cosh(Tensor self) -> Tensor",
-      "aten::div(Tensor self, Tensor other) -> Tensor",
-      "aten::exp(Tensor self) -> Tensor",
-      "aten::expm1(Tensor self) -> Tensor",
-      "aten::erf(Tensor self) -> Tensor",
-      "aten::erfc(Tensor self) -> Tensor",
-      "aten::floor(Tensor self) -> Tensor",
-      "aten::fmod(Tensor self, Tensor other) -> Tensor",
-      "aten::frac(Tensor self) -> Tensor",
-      "aten::lgamma(Tensor self) -> Tensor",
-      "aten::log(Tensor self) -> Tensor",
-      "aten::log10(Tensor self) -> Tensor",
-      "aten::log1p(Tensor self) -> Tensor",
-      "aten::log2(Tensor self) -> Tensor",
-      "aten::lerp(Tensor self, Tensor end, Scalar weight) -> Tensor",
-      "aten::lerp(Tensor self, Tensor end, Tensor weight) -> Tensor",
-      "aten::max(Tensor self, Tensor other) -> Tensor",
-      "aten::min(Tensor self, Tensor other) -> Tensor",
-      "aten::mul(Tensor self, Tensor other) -> Tensor",
-      "aten::neg(Tensor self) -> Tensor",
-      "aten::pow(Tensor self, Tensor exponent) -> Tensor",
-      "aten::pow(Tensor self, Scalar exponent) -> Tensor",
-      "aten::pow(Scalar self, Tensor exponent) -> Tensor",
-      "aten::reciprocal(Tensor self) -> Tensor",
-      "aten::relu(Tensor self) -> Tensor",
-      "aten::threshold(Tensor self, Scalar threshold, Scalar value) -> Tensor",
-      "aten::remainder(Tensor self, Tensor other) -> Tensor",
-      "aten::round(Tensor self) -> Tensor",
-      "aten::rsqrt(Tensor self) -> Tensor",
-      "aten::sigmoid(Tensor self) -> Tensor",
-      "aten::sin(Tensor self) -> Tensor",
-      "aten::sinh(Tensor self) -> Tensor",
-      "aten::sqrt(Tensor self) -> Tensor",
-      "aten::sub(Tensor self, Tensor other, *, Scalar alpha) -> Tensor",
-      "aten::tan(Tensor self) -> Tensor",
-      "aten::rand_like(Tensor self, *, MemoryFormat? memory_format=None) -> Tensor",
-      "aten::tanh(Tensor self) -> Tensor",
-      "aten::trunc(Tensor self) -> Tensor",
-      "aten::add(Tensor self, Scalar other, Scalar alpha) -> Tensor",
-      "aten::sub(Tensor self, Scalar other, Scalar alpha) -> Tensor",
-      "aten::mul(Tensor self, Scalar other) -> Tensor",
-      "aten::div(Tensor self, Scalar other) -> Tensor",
-
-      "aten::eq(Tensor self, Tensor other) -> Tensor",
-      "aten::eq(Tensor self, Scalar other) -> Tensor",
-      "aten::ne(Tensor self, Tensor other) -> Tensor",
-      "aten::ne(Tensor self, Scalar other) -> Tensor",
-      "aten::ge(Tensor self, Tensor other) -> Tensor",
-      "aten::ge(Tensor self, Scalar other) -> Tensor",
-      "aten::gt(Tensor self, Tensor other) -> Tensor",
-      "aten::gt(Tensor self, Scalar other) -> Tensor",
-      "aten::le(Tensor self, Tensor other) -> Tensor",
-      "aten::le(Tensor self, Scalar other) -> Tensor",
-      "aten::lt(Tensor self, Tensor other) -> Tensor",
-      "aten::lt(Tensor self, Scalar other) -> Tensor",
-
-      "aten::addcmul(Tensor self, Tensor tensor1, Tensor tensor2, *, Scalar value=1) -> Tensor",
-      "aten::where(Tensor condition, Tensor self, Tensor other) -> Tensor",
-
-      "aten::type_as(Tensor self, Tensor other) -> Tensor",
-  }};
-  if (!node->isMemberOf(simple_mappable)) {
-    return false;
-  }
-  for (Value* input : node->inputs()) {
-    if (input->type()->isSubtypeOf(TensorType::get()) ||
-        input->type()->isSubtypeOf(FloatType::get())) {
-      continue;
-    }
-    if (input->node()->kind() != prim::Constant) {
-      return false;
-    }
-  }
-  return true;
-}
 
 Value* broadcastSizes(at::ArrayRef<Value*> sizes) {
   AT_ASSERT(!sizes.empty());
@@ -129,13 +33,12 @@ Value* broadcastSizes(at::ArrayRef<Value*> sizes) {
   return broadcast_n->output();
 }
 
-struct GraphFuser {
+struct CudaGraphFuser {
   using FusionCallback = std::function<bool(Node*)>;
 
   Block* block_;
   std::unique_ptr<AliasDb> aliasDb_;
   std::shared_ptr<Graph> graph_;
-  FusionCallback callback_ = [&](Node* n) { return isFusableDefault(n); };
   Symbol kind_ = prim::CudaFusionGroup;
 
   // nvrtc has a limit on the number of arguments allowed in a CUDA kernel.
@@ -146,19 +49,8 @@ struct GraphFuser {
   // Change with setInputArgLimit
   size_t subgraph_arg_limit_ = 128;
 
-  GraphFuser(Block* block, std::shared_ptr<Graph> graph)
+  CudaGraphFuser(Block* block, std::shared_ptr<Graph> graph)
       : block_(block), graph_(std::move(graph)) {}
-
-  // Custom passes require kind to specified
-  GraphFuser(
-      Block* block,
-      std::shared_ptr<Graph> graph,
-      FusionCallback callback,
-      Symbol kind)
-      : block_(block),
-        graph_(std::move(graph)),
-        callback_(callback),
-        kind_(kind) {}
 
   void setInputArgLimit(size_t limit) {
     subgraph_arg_limit_ = limit;
@@ -168,71 +60,6 @@ struct GraphFuser {
     return filter(node->inputs(), [](Value* v) {
       return v->type()->isSubtypeOf(TensorType::get());
     });
-  }
-
-  bool isFusable(Node* node) {
-    return callback_(node);
-  }
-
-  bool isFusableDevice(Value* v) {
-    if (!v->type()->isSubtypeOf(TensorType::get())) {
-      return true;
-    }
-    auto device = v->type()->expect<TensorType>()->device();
-    if (!device) {
-      return true;
-    }
-    if ((*device).is_cpu()) {
-      return false;
-    } else if ((*device).is_cuda()) {
-      // We want to introduce minimal knobs exposed to user;
-      // turn on/off CUDA fuser through custom pass registration.
-      return true;
-    }
-    throw std::runtime_error("Unknown device");
-  }
-
-  // Default fusability check - used when the user doesn't pass in
-  // a callback.
-  bool isFusableDefault(Node* node) {
-    bool fusableDevice = true;
-    for (const auto& output : node->outputs()) {
-      if (output->uses().size() > 0) {
-        fusableDevice &= isFusableDevice(output);
-      }
-    }
-    return fusableDevice && isFusableMap(node);
-  }
-
-  bool isFusableMap(Node* node) {
-    // We don't want to bother with cross-block node movements, as they
-    // are not necessarily correct.
-    if (node->owningBlock() != block_)
-      return false;
-    return node->kind() == prim::CudaFusionGroup || isSimpleMap(node);
-  }
-
-  bool isFusableCatNode(Node* node) {
-    if (node->kind() != aten::cat)
-      return false;
-    if (!node->is_constant(attr::dim))
-      return false;
-
-    auto tensors_node = node->namedInput(attr::tensors)->node();
-    if ((tensors_node->inputs().size() + node->outputs().size()) >
-        subgraph_arg_limit_) {
-      return false;
-    }
-    if (tensors_node->kind() != prim::ListConstruct)
-      return false;
-    // NB: Note that technically other uses of the list aren't a big problem for
-    // us. It would be enough to place the prim::FusedConcat before the
-    // prim::ListConstruct, and allUsersAreThisConsumerOrOccurAfterIt would
-    // still be satisfied. However, I don't expect this to be necessary any time
-    // soon, and so we're simply assuming that we don't have to deal with it.
-    if (tensors_node->output()->uses().size() > 1)
-      return false;
-    return true;
   }
 
   bool calculatesSize(Node* node) {
@@ -255,7 +82,7 @@ struct GraphFuser {
     return *n->g(attr::Subgraph);
   }
 
-  void mergeCudaFusionGroups(Node* consumer_group, Node* producer_group) {
+  void mergeFusionGroups(Node* consumer_group, Node* producer_group) {
     // Now we have two fusion groups!
     // Revert the fusion - place all inner nodes of producer back in the outer
     // graph.
@@ -394,7 +221,7 @@ struct GraphFuser {
 
   // turn consumer node n into a fusion group with just n inside
   // to prepare for fusion and replace uses of n with the new group
-  Node* createSingletonCudaFusionGroup(Node* n) {
+  Node* createSingletonFusionGroup(Node* n) {
     auto group = block_->owningGraph()->createWithSubgraph(kind_);
     // propogate position information for the new node so we can always
     // have a valid mapping
@@ -416,7 +243,8 @@ struct GraphFuser {
     // we can move the consumer up into the producer.
     // but this requires better handling of merging fusion groups so it is not
     // done now
-    bool shouldFuse = isFusable(producer->node()) &&
+    bool shouldFuse =
+        fuser::cuda::isFusableCudaFusionGroup(consumer, producer->node()) &&
         // Rearrange nodes such that all uses of producer are after the
         // consumer. Fusion will rewrite those later uses to use the version of
         // producer generated by the fused blob. In this case, producer becomes
@@ -435,11 +263,11 @@ struct GraphFuser {
 
     auto group = consumer;
     if (consumer->kind() != kind_) {
-      group = createSingletonCudaFusionGroup(consumer);
+      group = createSingletonFusionGroup(consumer);
     }
 
     if (producer->node()->kind() == kind_) {
-      mergeCudaFusionGroups(group, producer->node());
+      mergeFusionGroups(group, producer->node());
       return group;
     }
     AT_ASSERT(producer->node()->outputs().size() == 1);
@@ -447,7 +275,7 @@ struct GraphFuser {
     // remaining uses of this producer can occur because we allow
     // fusion in cases where uses remain after the consumer
     // if these exist, re-route them to the version of producer
-    // created in CudaFusionGroup
+    // created in FusionGroup
     if (producer->uses().size() != 0) {
       getSubgraph(group).registerOutput(merged->output());
       Value* new_producer = group->addOutput();
@@ -458,32 +286,8 @@ struct GraphFuser {
     return group;
   }
 
-  bool canFuseChunk(Node* consumer, Value* producer) {
-    if (consumer->kind() != prim::CudaFusionGroup) {
-      return false;
-    }
-    // Does the chunk have constant chunks/dim?
-    auto* chunk = producer->node();
-    if (chunk->kind() != prim::ConstantChunk)
-      return false;
-    // And all uses of the chunk are in this consumer
-    for (auto s : chunk->outputs()) {
-      for (auto u : s->uses()) {
-        if (u.user != consumer) {
-          return false;
-        }
-      }
-    }
-    // And isn't a no-op chunk (chunks == 1). Have CSE clean this up.
-    // We could fuse this but it's better to just delete the node.
-    if (chunk->i(attr::chunks) == 1) {
-      return false;
-    }
-    return true;
-  }
-
   c10::optional<Node*> findFusedChunk(Node* group, Value* input) {
-    AT_ASSERT(group->kind() == prim::CudaFusionGroup);
+    AT_ASSERT(group->kind() == kind_);
     auto it = std::find(group->inputs().begin(), group->inputs().end(), input);
     if (it == group->inputs().end()) {
       return c10::nullopt;
@@ -509,7 +313,7 @@ struct GraphFuser {
     }
     auto& subgraph = getSubgraph(group);
     for (size_t i = 0; i < chunk->outputs().size(); ++i) {
-      // Find the input to the CudaFusionGroup (group)
+      // Find the input to the FusionGroup (group)
       auto* replacement_val = existingFusedChunk->outputs().at(i);
       auto* val = chunk->outputs().at(i);
       auto it = std::find(group->inputs().begin(), group->inputs().end(), val);
@@ -526,30 +330,6 @@ struct GraphFuser {
     chunk->destroy();
   }
 
-  // There are two invariants for prim::ConstantChunk:
-  // (1) the tensor input to prim::ConstantChunk must be an input to the fusion
-  // group (2) no two ConstantChunks in the same CudaFusionGroup can share a
-  // tensor input.
-  graph_node_list::iterator fuseChunk(Node* consumer, Value* producer) {
-    auto* chunk = producer->node();
-    AT_ASSERT(consumer->kind() == prim::CudaFusionGroup);
-    AT_ASSERT(chunk->kind() == prim::ConstantChunk);
-
-    // if producer's input is already an input to a prim::ConstantChunk node,
-    // we cannot add a new prim::ConstantChunk node because of invariant (2).
-    auto* chunked_tensor = producer->node()->input();
-    if (auto existingFusedChunk = findFusedChunk(consumer, chunked_tensor)) {
-      fuseChunkByReusingExistingFusedChunk(
-          consumer, chunk, *existingFusedChunk);
-      return consumer->reverseIterator();
-    }
-
-    // Move prim::ConstantChunk into the CudaFusionGroup
-    mergeNodeIntoGroup(consumer, chunk);
-    chunk->destroy();
-    return consumer->reverseIterator();
-  }
-
   value_list sortReverseTopological(ArrayRef<Value*> inputs) {
     value_list result;
     for (auto i : inputs) {
@@ -562,19 +342,6 @@ struct GraphFuser {
       return a->node()->isAfter(b->node());
     });
     return result;
-  }
-
-  graph_node_list::iterator scanNodeForChunks(Node* consumer) {
-    if (consumer->kind() == prim::CudaFusionGroup) {
-      auto inputs = sortReverseTopological(consumer->inputs());
-      for (auto producer : inputs) {
-        if (!canFuseChunk(consumer, producer)) {
-          continue;
-        }
-        return fuseChunk(consumer, producer);
-      }
-    }
-    return ++consumer->reverseIterator();
   }
 
   at::ArrayRef<Value*> broadcast_tensors(value_list inputs) {
@@ -658,7 +425,7 @@ struct GraphFuser {
   //
   // NB: The intermediate BroadcastingChunk is important for moving chunks past
   // more than one operation: the graph fuser is not able to easily move
-  // operations around broadcast_tensors + chunk nodes. Let f, g, h be fusible
+  // operations around broadcast_tensors + chunk nodes. Let f, g, h be fusable
   // ops
   //   x = f(v, w)
   //   z = g(x, y)
@@ -673,7 +440,7 @@ struct GraphFuser {
   //   b = g(bx, by)
   //   c = h(a, b)
   // The broadcast_tensors node makes it harder to move f into the resulting
-  // CudaFusionGroup of g, g, and h. Keeping the broadcasting and chunk behavior
+  // FusionGroup of g, g, and h. Keeping the broadcasting and chunk behavior
   // together results in:
   //   x = f(v, w)
   //   ax, bx, ay, by = BroadcastingChunk(x, y)
@@ -696,12 +463,13 @@ struct GraphFuser {
       return false;
 
     // try to find a producer to move after the chunk/bchunk. The producer must
-    // be fusible into the consumer.
+    // be fusable into the consumer.
     auto it = std::find_if(
         chunk->inputs().begin(),
         chunk->inputs().end(),
         [&](Value* producer_for_chunk) {
-          return isFusableMap(producer_for_chunk->node()) &&
+          return fuser::cuda::isFusableCudaFusionGroup(
+                     consumer, producer_for_chunk->node()) &&
               allUsersAreThisConsumerOrCalcSizes(chunk, producer_for_chunk);
         });
     if (it == chunk->inputs().end()) {
@@ -834,7 +602,7 @@ struct GraphFuser {
 
   // returns where to continue scanning, and whether any fusion was made
   std::pair<graph_node_list::iterator, bool> scanNode(Node* consumer) {
-    if (isFusable(consumer)) {
+    if (fuser::cuda::isFusableCudaFusionGroup(consumer)) {
       // handle inputs in reverse topological order as well...
       // otherwise in f(a,a+b) it will appear a is used twice if we consider
       // the f-a fusion before the f-(a+b) fusion first.
@@ -847,9 +615,8 @@ struct GraphFuser {
         }
         auto fusion_group = tryFuse(consumer, producer);
         if (fusion_group) {
-          // after fusion, consumer moves into a CudaFusionGroup, so inputs is
-          // no longer valid so we rescan the new CudaFusionGroup for more
-          // fusions...
+          // after fusion, consumer moves into a FusionGroup, so inputs is no
+          // longer valid so we rescan the new FusionGroup for more fusions...
           return std::make_pair(fusion_group.value()->reverseIterator(), true);
         }
       }
@@ -902,6 +669,7 @@ struct GraphFuser {
   // Builds up expressions that compute shapes of all intermediates (and
   // outputs) of the fusion group, based on the sizes of inputs. You should run
   // DCE to remove those that you end up not using.
+  /*
   std::unordered_map<Value*, Value*> buildShapeExpressions(Node* fusion_group) {
     WithInsertPoint insert_guard{fusion_group->next()};
     std::unordered_map<Value*, Value*> shape_of;
@@ -998,98 +766,15 @@ struct GraphFuser {
       }
     }
   }
+  */
 
   void refreshAliasDb() {
     aliasDb_ = torch::make_unique<AliasDb>(graph_);
   }
 
-  bool canFuseWithConcat(Value* producer, Node* before_check) {
-    if (!isFusable(producer->node())) {
-      return false;
-    }
-    // NB: it is important that this check happens after isFusable, which checks
-    // that the blocks match, and it's not a special node like prim::Param
-    if (!aliasDb_->couldMoveBeforeTopologically(
-            producer->node(), before_check)) {
-      return false;
-    }
-
-    // If the number of kernel args could exceed the limit, skip.
-    if ((before_check->inputs().size() + before_check->outputs().size() +
-         producer->node()->inputs().size() +
-         producer->node()->outputs().size()) > subgraph_arg_limit_) {
-      return false;
-    }
-
-    // Fusion groups can be merged with concat's group if and only if
-    // the value they produce isn't already coming from a concat
-    if (producer->node()->kind() == prim::CudaFusionGroup) {
-      auto subgraph = producer->node()->g(attr::Subgraph);
-      auto* node = subgraph->outputs().at(producer->offset())->node();
-      return node->kind() != prim::FusedConcat;
-    }
-    return true;
-  }
-
-  Node* createFusedConcat(Node* node) {
-    AT_ASSERT(node->kind() == aten::cat);
-
-    Graph* graph = node->owningGraph();
-    Node* list_construct = node->namedInput(attr::tensors)->node();
-    int64_t dim = node->get<int64_t>(attr::dim).value();
-
-    Node* fused_cat = graph->create(prim::FusedConcat, list_construct->inputs())
-                          ->i_(attr::dim, dim);
-    fused_cat->insertBefore(list_construct);
-    fused_cat->output()->copyMetadata(node->output());
-
-    // NB: this deletes the fused_cat node from the original graph
-    return createSingletonCudaFusionGroup(fused_cat);
-  }
-
-  void fuseConcats() {
-    for (auto it = block_->nodes().rbegin(); it != block_->nodes().rend();
-         ++it) {
-      Node* cat = *it;
-      if (!isFusableCatNode(cat)) {
-        continue;
-      }
-      Node* list_construct = cat->namedInput(attr::tensors)->node();
-      Node* fused_cat = createFusedConcat(cat);
-      Value* fused_cat_out = fused_cat->output();
-
-      auto sorted_inputs = sortReverseTopological(fused_cat->inputs());
-      size_t input_idx = 0;
-      bool any_fused = false;
-      while (input_idx < sorted_inputs.size()) {
-        Value* input = sorted_inputs[input_idx++];
-        if (!canFuseWithConcat(input, fused_cat)) {
-          continue;
-        }
-        any_fused = true;
-        auto maybe_group = tryFuse(fused_cat, input);
-        AT_ASSERT(maybe_group && maybe_group == fused_cat);
-        // We could have destroyed multiple inputs when performing this fusion,
-        // so we have to recompute the list and iterate over it again.
-        sorted_inputs = sortReverseTopological(fused_cat->inputs());
-        input_idx = 0;
-      }
-
-      if (any_fused) {
-        cat->output()->replaceAllUsesWith(fused_cat_out);
-        it.destroyCurrent();
-        if (list_construct->output()->uses().empty()) {
-          list_construct->destroy();
-        }
-      } else {
-        fused_cat->destroy();
-      }
-    }
-  }
-
   void optimizeFusedGraphs() {
     for (Node* node : block_->nodes()) {
-      if (node->kind() != prim::CudaFusionGroup) {
+      if (node->kind() != kind_) {
         continue;
       }
       auto subgraph = node->g(attr::Subgraph);
@@ -1128,7 +813,7 @@ struct GraphFuser {
     }
     refreshAliasDb();
 
-    fuseConcats();
+    // fuseConcats();
 
     optimizeFusedGraphs();
 
@@ -1137,22 +822,33 @@ struct GraphFuser {
     replaceIntermediateBroadcastingChunks();
 
     // Fuse starting chunks into the group.
-    for (auto it = block_->nodes().rbegin(); it != block_->nodes().rend();) {
-      it = scanNodeForChunks(*it);
-    }
+    // for (auto it = block_->nodes().rbegin(); it != block_->nodes().rend();) {
+    //  it = scanNodeForChunks(*it);
+    //}
 
     // Remove outputs that have been added only because we need their size
-    for (Node* n : block_->nodes()) {
-      removeOutputsUsedOnlyInSize(n);
-    }
+    // for (Node* n : block_->nodes()) {
+    //  removeOutputsUsedOnlyInSize(n);
+    //}
 
     for (Node* node : block_->nodes()) {
       for (Block* sub_block : node->blocks()) {
-        GraphFuser(sub_block, graph_, callback_, kind_).run();
+        CudaGraphFuser(sub_block, graph_).run();
       }
     }
   }
 };
+
+void compileFusionRecursive(Block* block) {
+  for (auto node : block->nodes()) {
+    if (node->kind() == prim::CudaFusionGroup) {
+      fuser::cuda::compileFusionGroup(node);
+    }
+    for (auto sub_block : node->blocks()) {
+      compileFusionRecursive(sub_block);
+    }
+  }
+}
 
 void PeepholeOptimizeShapeExpressions(Block* block) {
   auto nodes = block->nodes();
@@ -1208,8 +904,8 @@ void PeepholeOptimizeShapeExpressions(Block* block) {
 
 } // anonymous namespace
 
-void CudaFuseGraph(std::shared_ptr<Graph>& graph) {
-  GraphFuser(graph->block(), graph).run();
+TORCH_CUDA_API void CudaFuseGraph(std::shared_ptr<Graph>& graph) {
+  CudaGraphFuser(graph->block(), graph).run();
   // After FuseGraph some common subexpressions may come back
   EliminateCommonSubexpression(graph);
   // We might have emitted a fair amount of useless shape propagating code, so
@@ -1217,15 +913,11 @@ void CudaFuseGraph(std::shared_ptr<Graph>& graph) {
   EliminateDeadCode(graph);
   // Improve the quality of shape propagation code that was left
   PeepholeOptimizeShapeExpressions(graph->block());
+  // Compile CudaFusionGroup
+  compileFusionRecursive(graph->block());
 }
 
-void registerCudaFuseGraph() {
-  static bool not_registered = true;
-  if (not_registered) {
-    RegisterPostFusionPass pass(CudaFuseGraph);
-    not_registered = false;
-  }
-}
-
+} // namespace cuda
+} // namespace fuser
 } // namespace jit
 } // namespace torch
