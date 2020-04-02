@@ -30,6 +30,7 @@ TESTS = [
     'distributed/test_c10d',
     'distributed/test_c10d_spawn',
     'test_cuda',
+    'test_jit_cuda_fuser',
     'test_cuda_primary_ctx',
     'test_dataloader',
     'distributed/test_data_parallel',
