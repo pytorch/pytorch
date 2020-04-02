@@ -1,3 +1,4 @@
+#include <torch/csrc/autograd/record_function_ops.h>
 #include <ATen/cpp_custom_type_hack.h>
 #include <torch/csrc/autograd/record_function.h>
 #include <torch/csrc/jit/runtime/custom_operator.h>
@@ -28,16 +29,48 @@ at::Tensor record_function_enter(const std::string& name) {
   return at::cpp_custom_type_hack::create(std::move(rec), at::TensorOptions());
 }
 
+RecordFunction& getRecordFunctionFromTensor(const at::Tensor& handle) {
+  auto& rec = at::cpp_custom_type_hack::cast<RecordFunction>(handle);
+  return rec;
+}
+
 void record_function_exit(const at::Tensor& handle) {
   // We don't actually need to do anything with handle just need to persist the
   // lifetime until now.
-  auto& rec = at::cpp_custom_type_hack::cast<RecordFunction>(handle);
-  if (auto* current = rec.current()) {
-    AT_ASSERT(
-        current->name() == StringView("profiler::_record_function_exit"));
+  auto& rec = getRecordFunctionFromTensor(handle);
+  if (auto* current = RecordFunction::current()) {
+    AT_ASSERT(current->name() == StringView("profiler::_record_function_exit"));
+    current->_end();
   }
   rec._end();
 }
+
+template <typename T>
+void _call_end_callbacks_on_fut(
+    const at::Tensor& handle,
+    const std::shared_ptr<torch::utils::Future<T>> fut) {
+  // Add a callback onto the future to mark run RecordFunction's end callbacks
+  // when the future is completed.
+  fut->addCallback(
+      // Copy handle by value to persist after the python context manager is
+      // exited.
+      [handle](
+          const T& /* unused */,
+          const c10::optional<torch::utils::FutureError>& /* unused */) {
+        TORCH_INTERNAL_ASSERT(
+            handle.defined(),
+            "Undefined RecordFunction handle. This can happen if the handle is "
+            "not correctly persisted and is destroyed before the future is "
+            "realized.");
+        auto& rec = getRecordFunctionFromTensor(handle);
+        rec._end();
+      });
+}
+// Explicit template instantiation of _call_end_callbacks_on_fut.
+template void _call_end_callbacks_on_fut(
+    const at::Tensor& handle,
+    const std::shared_ptr<
+        torch::utils::Future<torch::distributed::rpc::Message>>);
 
 // Internal only, do not use directly, use Python's record_function()
 static auto registry =
