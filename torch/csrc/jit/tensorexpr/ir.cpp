@@ -12,12 +12,12 @@ static Dtype ChooseDtype(const Dtype& buffer_dtype, const Dtype& index_dtype) {
 
 static Dtype dtypeOfIndices(const std::vector<const Expr*>& indices) {
   if (!indices.size()) {
-    throw malformed_input();
+    throw malformed_input("cant get dtype of empty indices");
   }
   Dtype dt = indices.at(0)->dtype();
   for (size_t i = 1; i < indices.size(); ++i) {
     if (indices.at(i)->dtype() != dt) {
-      throw malformed_input();
+      throw malformed_input("dtype mismatch in dtypeOfIndices");
     }
   }
   return dt;
@@ -55,14 +55,15 @@ Load::Load(
     const Expr* mask)
     : ExprNodeBase(dtype), buf_(buf), indices_(indices), mask_(mask) {
   if (buf->base_handle()->dtype() != kHandle) {
-    throw malformed_input();
+    throw malformed_input(
+        "Load base handle dtype must be Handle", buf->base_handle());
   }
   if (!indicesValid(indices)) {
-    throw malformed_input();
+    throw malformed_input("invalid indices in Load");
   }
   Dtype index_dtype = dtypeOfIndices(indices);
   if (index_dtype.lanes() != mask->dtype().lanes()) {
-    throw malformed_input();
+    throw malformed_input("lane mismatch in Load mask");
   }
 }
 
@@ -89,7 +90,7 @@ Store::Store(
     const Expr* mask)
     : Store(buffer.data(), indices, value, mask) {
   if (buffer.dtype().scalar_type() != value->dtype().scalar_type()) {
-    throw malformed_input();
+    throw malformed_input("invalid dtype in Store");
   }
 }
 
@@ -100,7 +101,7 @@ Store::Store(
     const Expr* mask)
     : buf_(buf), indices_(std::move(indices)), value_(value), mask_(mask) {
   if (buf->dtype() != kHandle) {
-    throw malformed_input();
+    throw malformed_input("Store base handle must be Handle");
   }
   /*
   TODO: Reenable the checks.
@@ -167,7 +168,7 @@ const Expr* flatten_index(
 
   size_t ndim = dims.size();
   if (ndim != indices.size()) {
-    throw malformed_input();
+    throw malformed_input("dimensions mismatch in flatten_index");
   }
   if (ndim == 0) {
     return new IntImm(0);
@@ -202,7 +203,7 @@ Dtype Intrinsics::IntrinsicsDtype(
     const std::vector<const Expr*>& params) {
   // TODO: check the op_type an dmake a real decision
   if (params.size() == 0) {
-    throw malformed_input();
+    throw malformed_input("invalid params in Intrinsics");
   }
 
   return params[0]->dtype();
