@@ -60,6 +60,10 @@ auto CopySlices::apply(variable_list&& inputs) -> variable_list {
   check_input_variables("CopySlices", inputs, 1);
   auto& grad = inputs[0];
 
+  // Acquire lock to here protect thread safety on fn
+  // see Note [Thread Safety on Autograd Node]
+  std::lock_guard<std::mutex> lock(mutex_);
+
   if (!fn) {
     throw std::runtime_error(ERR_BACKWARD_TWICE);
   }
@@ -92,6 +96,8 @@ auto CopySlices::apply(variable_list&& inputs) -> variable_list {
 }
 
 void CopySlices::release_variables() {
+  // Acquire lock to here protect thread safety on fn
+  std::lock_guard<std::mutex> lock(mutex_);
   fn = nullptr;
 }
 

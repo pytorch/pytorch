@@ -129,22 +129,6 @@ Tensor RMSprop::step(LossClosure closure)  {
   return loss;
 }
 
-void RMSprop::add_parameters(const std::vector<Tensor>& parameters) {
-  return _add_parameters_new_design(parameters);
-}
-
-const std::vector<Tensor>& RMSprop::parameters() const noexcept {
-  return _parameters_new_design();
-}
-
-std::vector<Tensor>& RMSprop::parameters() noexcept {
-  return _parameters_new_design();
-}
-
-size_t RMSprop::size() const noexcept {
-  return _size_new_design();
-}
-
 void RMSprop::save(serialize::OutputArchive& archive) const {
   serialize(*this, archive);
 }
