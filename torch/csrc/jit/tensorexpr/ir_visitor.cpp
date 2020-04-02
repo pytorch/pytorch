@@ -97,22 +97,14 @@ void IRVisitor::visit(const Ramp* v) {
 }
 
 void IRVisitor::visit(const Load* v) {
-  v->buf()->accept(this);
-  for (const Expr* ind : v->indices()) {
-    ind->accept(this);
-  }
+  v->base_handle()->accept(this);
+  v->index()->accept(this);
   v->mask()->accept(this);
 }
 
-void IRVisitor::visit(const Buf* v) {
-  v->base_handle()->accept(this);
-}
-
 void IRVisitor::visit(const Store* v) {
-  v->buf()->accept(this);
-  for (const Expr* ind : v->indices()) {
-    ind->accept(this);
-  }
+  v->base_handle()->accept(this);
+  v->index()->accept(this);
   v->value()->accept(this);
   v->mask()->accept(this);
 }
@@ -159,7 +151,8 @@ void IRVisitor::visit(const FunctionCall* v) {
 }
 
 void IRVisitor::visit(const Allocate* v) {
-  v->buffer_var()->accept(this);
+  const Var* buffer_var = v->buffer_var();
+  buffer_var->accept(this);
   std::vector<const Expr*> dims = v->dims();
   for (const Expr* dim : dims) {
     dim->accept(this);
@@ -167,7 +160,8 @@ void IRVisitor::visit(const Allocate* v) {
 }
 
 void IRVisitor::visit(const Free* v) {
-  v->buffer_var()->accept(this);
+  const Var* buffer_var = v->buffer_var();
+  buffer_var->accept(this);
 }
 
 void IRVisitor::visit(const Cond* v) {

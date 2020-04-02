@@ -21,25 +21,6 @@
 
 namespace torch { namespace autograd {
 
-/// `Variable` is exactly the same as `Tensor` (i.e. we have `using Variable = at::Tensor`).
-/// This means you can perform all the usual mathematical and other
-/// operations you can perform on `Tensor`s also on `Variable`s.
-///
-/// The only reason we are keeping the `Variable` class is backward compatibility
-/// with external user's legacy C++ frontend code. Our intention is to eliminate
-/// the `Variable` class in the near future.
-using Variable = at::Tensor;
-
-} // namespace autograd
-} // namespace torch
-
-// The following are all internal APIs and should not be shown in libtorch docs.
-// Therefore, we wrap the following code with `#ifndef DOXYGEN_SHOULD_SKIP_THIS ... #endif`
-
-#ifndef DOXYGEN_SHOULD_SKIP_THIS
-
-namespace torch { namespace autograd {
-
 struct Node;
 
 ///~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -56,8 +37,7 @@ struct Node;
 /// Every Tensor is a Variable, but sometimes we colloquially refer to Variables
 /// that don't require gradients as Tensors (since none of the autograd
 /// machinery for Variables applies).  Historically, Variables and Tensors
-/// were separate concepts, but now they are exactly the same (i.e. we have
-/// `using Variable = at::Tensor`).
+/// were separate concepts, but we've merged them together.
 ///
 ///                              Gradient Edges
 ///~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -88,10 +68,25 @@ struct Node;
 /// probing its `is_view()` method. Note that the *view* semantics are only
 /// meaningful for `Variable` relations that are relevant to autograd.
 /// See NOTE [ Autograd View Variables ] for more details.
+///
+///
+///                               Interface
+///~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/// `Variable` inherits from `Tensor` and thus its API is a superset of that of
+/// `Tensor`. This means you can perform all the usual mathematical and other
+/// operations you can perform on `Tensor`s also on `Variable`s. Furthermore,
+/// `Variable` and `Tensor` actually convert implicitly between each other. You
+/// can thus call functions defined on `Tensor`s also with `Variable`s. For
+/// this, the `Variable` class allows implicit construction from `Tensor`.
+///
+/// Our intention is to eliminate the Variable class in the near future, or make
+/// it so that only internal code uses it to do internal operations.
 ///~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 struct AutogradMeta;
 struct DifferentiableViewMeta;
+
+using Variable = at::Tensor;
 
 // Private-ish functions for manipulating variables; we don't want to put them
 // on Tensor proper
@@ -521,5 +516,3 @@ inline const Variable& as_variable_ref(const at::Tensor& tensor) {
 }
 
 }} // namespace torch::autograd
-
-#endif /* DOXYGEN_SHOULD_SKIP_THIS */
