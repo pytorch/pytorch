@@ -436,7 +436,24 @@ class Tensor(torch._C._TensorBase):
     __le__ = _wrap_type_error_to_not_implemented(_C._TensorBase.le)
     __gt__ = _wrap_type_error_to_not_implemented(_C._TensorBase.gt)
     __ge__ = _wrap_type_error_to_not_implemented(_C._TensorBase.ge)
-    __abs__ = _C._TensorBase.abs
+
+    def abs(self):
+        r"""Computes the element-wise absolute value of the given :attr:`input` tensor.
+
+        See :func:`torch.abs`
+        """
+        return torch.abs(self)
+    
+    def abs_(self):
+        r"""Computes the element-wise absolute value of the given :attr:`input` tensor.
+        and makes an in-place save.
+
+        See :func:`torch.abs`
+        """
+        # Needs to be finished
+        return abs(self)
+
+    __abs__ = abs
 
     def __len__(self):
         if self.dim() == 0:

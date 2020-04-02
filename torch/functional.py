@@ -11,6 +11,7 @@ Tensor = torch.Tensor
 from torch import _VF
 
 __all__ = [
+    'abs',
     'align_tensors',
     'broadcast_tensors',
     'cartesian_prod',
@@ -32,6 +33,30 @@ __all__ = [
     'unique_consecutive',
 ]
 
+def abs(tensor):
+    r"""abs(input, out=None) -> Tensor
+    
+    Computes the element-wise absolute value of the given :attr:`input` tensor.
+    
+    .. math::
+        \text{out}_{i} = |\text{input}_{i}|
+    
+    Args:
+        input (Tensor): the input tensor.
+        out (Tensor, optional): the output tensor.
+    
+    Example::
+    
+        >>> torch.abs(torch.tensor([-1, -2, 3]))
+        tensor([ 1,  2,  3])
+    """
+    result = _VF.abs(tensor)
+    my_dtype = tensor.dtype
+    if my_dtype == torch.complex128:
+        return result.double()
+    elif my_dtype == torch.complex64:
+        return result.float()
+    return result
 
 def broadcast_tensors(*tensors):
     r"""broadcast_tensors(*tensors) -> List of Tensors
