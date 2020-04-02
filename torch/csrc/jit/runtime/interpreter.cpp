@@ -1159,7 +1159,8 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
                     c10::intrusive_ptr<InterpreterStateImpl> state,
                     Stack stack)
                     : state_(std::move(state)), stack_(std::move(stack)) {}
-                void operator()(const IValue&, const c10::optional<ivalue::Future::FutureError>&) {
+                void operator()(const IValue&,
+                    const c10::optional<c10::ivalue::Future::FutureError>&) {
                   at::launch(InterpreterContinuation(
                       state_, std::move(stack_), getDistAutogradContextId()));
                 }
