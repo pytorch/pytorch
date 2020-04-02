@@ -204,20 +204,7 @@ static inline DispatchKey XLATensorId() {
   return DispatchKey::XLATensorId;
 }
 
-// These are some convenience identifiers for dispatch keys which are
-// shorter to type than their long counterparts.  Note that some of these
-// dispatch keys directly correspond to DeviceType; and most APIs that
-// accept DispatchKey also accept DeviceType; e.g.,
-// torch::dispatch(torch::kCPU, ...) is also valid.
-constexpr DispatchKey kAutograd = DispatchKey::VariableTensorId;
-
 } // namespace c10
-
-namespace torch {
-  // Expose the constant, but not the TYPE (DispatchKey is an implementation
-  // detail!)
-  using c10::kAutograd;
-}
 
 // NB: You really shouldn't use this instance; this enum is guaranteed
 // to be pretty small so a regular array should be acceptable.
