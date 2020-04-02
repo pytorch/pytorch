@@ -40,7 +40,7 @@ set(CUDA_LINK_LIBRARIES_KEYWORD)
 # If building shared library, set dllimport/dllexport proper.
 target_compile_options(c10_cuda PRIVATE "-DC10_CUDA_BUILD_MAIN_LIB")
 # Enable hidden visibility if compiler supports it.
-if (${COMPILER_SUPPORTS_HIDDEN_VISIBILITY})
+if(${COMPILER_SUPPORTS_HIDDEN_VISIBILITY})
   target_compile_options(c10_cuda PRIVATE "-fvisibility=hidden")
 endif()
 
@@ -69,6 +69,6 @@ endforeach()
 install(FILES ${CMAKE_BINARY_DIR}/c10/cuda/impl/cuda_cmake_macros.h
   DESTINATION include/c10/cuda/impl)
 
-if (MSVC AND C10_CUDA_BUILD_SHARED_LIBS)
+if(MSVC AND C10_CUDA_BUILD_SHARED_LIBS)
   install(FILES $<TARGET_PDB_FILE:c10_cuda> DESTINATION lib OPTIONAL)
 endif()

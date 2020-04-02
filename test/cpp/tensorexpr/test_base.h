@@ -1,7 +1,45 @@
 #pragma once
 
+#if defined(USE_GTEST)
 #include <gtest/gtest.h>
 #include <test/cpp/common/support.h>
+#else
+#include "c10/util/Exception.h"
+#include "test/cpp/tensorexpr/gtest_assert_float_eq.h"
+#include <cmath>
+#define ASSERT_EQ(x, y, ...) TORCH_INTERNAL_ASSERT((x) == (y), __VA_ARGS__)
+#define ASSERT_FLOAT_EQ(x, y, ...) \
+  TORCH_INTERNAL_ASSERT(AlmostEquals((x), (y)), __VA_ARGS__)
+#define ASSERT_NE(x, y, ...) TORCH_INTERNAL_ASSERT((x) != (y), __VA_ARGS__)
+#define ASSERT_GT(x, y, ...) TORCH_INTERNAL_ASSERT((x) > (y), __VA_ARGS__)
+#define ASSERT_GE(x, y, ...) TORCH_INTERNAL_ASSERT((x) >= (y), __VA_ARGS__)
+#define ASSERT_LT(x, y, ...) TORCH_INTERNAL_ASSERT((x) < (y), __VA_ARGS__)
+#define ASSERT_LE(x, y, ...) TORCH_INTERNAL_ASSERT((x) <= (y), __VA_ARGS__)
+
+#define ASSERT_NEAR(x, y, a, ...) \
+  TORCH_INTERNAL_ASSERT(std::fabs((x) - (y)) < (a), __VA_ARGS__)
+
+#define ASSERT_TRUE TORCH_INTERNAL_ASSERT
+#define ASSERT_FALSE(x) ASSERT_TRUE(!(x))
+#define ASSERT_THROWS_WITH(statement, substring)                         \
+  try {                                                                  \
+    (void)statement;                                                     \
+    ASSERT_TRUE(false);                                                  \
+  } catch (const std::exception& e) {                                    \
+    ASSERT_NE(std::string(e.what()).find(substring), std::string::npos); \
+  }
+#define ASSERT_ANY_THROW(statement)     \
+  {                                     \
+    bool threw = false;                 \
+    try {                               \
+      (void)statement;                  \
+    } catch (const std::exception& e) { \
+      threw = true;                     \
+    }                                   \
+    ASSERT_TRUE(threw);                 \
+  }
+
+#endif // defined(USE_GTEST)
 
 namespace torch {
 namespace jit {
@@ -15,8 +53,8 @@ void ExpectAllNear(
     const std::string& name = "") {
   ASSERT_EQ(v1.size(), v2.size());
   for (int i = 0; i < v1.size(); i++) {
-    EXPECT_NEAR(v1[i], v2[i], threshold)
-        << "element index: " << i << ", name: " << name;
+    ASSERT_NEAR(
+        v1[i], v2[i], threshold, "element index: ", i, ", name: ", name);
   }
 }
 
