@@ -364,13 +364,13 @@ Therefore, for the moment, this is all copy pasted in from VariableTypeEverythin
     &WrapFunction<CastPolicy::POLICY, SIGNATURE, SIGNATURE, &FUNC>::type::call)
 
 #define KERNEL_UNBOXED_ONLY(FUNC, REGISTER_NAME, SIGNATURE, POLICY) \
-  .impl(REGISTER_NAME, DispatchKey::AutocastTensorId, \
-    c10::CppFunction::makeUnboxedOnly(&WrapFunction<CastPolicy::POLICY, SIGNATURE, SIGNATURE, &FUNC>::type::call))
+  .impl_UNBOXED(REGISTER_NAME, DispatchKey::AutocastTensorId, \
+    &WrapFunction<CastPolicy::POLICY, SIGNATURE, SIGNATURE, &FUNC>::type::call)
 
 // Less-common but still useful case: redispatching to a function with a new signature (e.g. appending a dtype)
 #define KERNEL_UNBOXED_ONLY_DIFFERENT_REDISPATCH_SIGNATURE(REDISPATCH_FUNC, REGISTER_NAME, REGISTER_SIGNATURE, REDISPATCH_SIGNATURE, POLICY) \
-  .impl(REGISTER_NAME, DispatchKey::AutocastTensorId, \
-    c10::CppFunction::makeUnboxedOnly(&WrapFunction<CastPolicy::POLICY, REGISTER_SIGNATURE, REDISPATCH_SIGNATURE, &REDISPATCH_FUNC>::type::call))
+  .impl_UNBOXED(REGISTER_NAME, DispatchKey::AutocastTensorId, \
+    &WrapFunction<CastPolicy::POLICY, REGISTER_SIGNATURE, REDISPATCH_SIGNATURE, &REDISPATCH_FUNC>::type::call)
 
 /*****************************************
 Explicit registration for out-of-place ops
@@ -425,8 +425,8 @@ auto register_out_of_place = c10::import()
   KERNEL(ADD_NS(gelu), "aten::gelu", Tensor (const Tensor &), fp32)
   KERNEL_UNBOXED_ONLY(ADD_NS(layer_norm), "aten::layer_norm", Tensor (const Tensor &, IntArrayRef, const Tensor &, const Tensor &, double, bool), fp32)
   // The macro doesn't like this one so I had to write it out manually.
-  .impl("aten::native_layer_norm", DispatchKey::AutocastTensorId,
-      CppFunction::makeUnboxedOnly(&WrapFunction<CastPolicy::fp32, std::tuple<Tensor,Tensor,Tensor> (const Tensor &, const Tensor &, const Tensor &, int64_t, int64_t, double), std::tuple<Tensor,Tensor,Tensor> (const Tensor &, const Tensor &, const Tensor &, int64_t, int64_t, double), &ADD_NS(native_layer_norm)>::type::call))
+  .impl_UNBOXED("aten::native_layer_norm", DispatchKey::AutocastTensorId,
+                &WrapFunction<CastPolicy::fp32, std::tuple<Tensor,Tensor,Tensor> (const Tensor &, const Tensor &, const Tensor &, int64_t, int64_t, double), std::tuple<Tensor,Tensor,Tensor> (const Tensor &, const Tensor &, const Tensor &, int64_t, int64_t, double), &ADD_NS(native_layer_norm)>::type::call)
   KERNEL_UNBOXED_ONLY(ADD_NS(group_norm), "aten::group_norm", Tensor (const Tensor &, int64_t, const Tensor &, const Tensor &, double, bool), fp32)
   KERNEL_UNBOXED_ONLY(ADD_NS(frobenius_norm), "aten::frobenius_norm", Tensor (const Tensor &), fp32)
   KERNEL_UNBOXED_ONLY(ADD_NS(frobenius_norm), "aten::frobenius_norm.dim", Tensor (const Tensor &, IntArrayRef, bool), fp32)
@@ -494,8 +494,8 @@ auto register_out_of_place = c10::import()
   ;
 
 auto register_banned = torch::import()
-  .impl("aten::binary_cross_entropy", DispatchKey::AutocastTensorId,
-        CppFunction::makeUnboxedOnly(&at::autocast::binary_cross_entropy_banned));
+  .impl_UNBOXED("aten::binary_cross_entropy", DispatchKey::AutocastTensorId,
+                &at::autocast::binary_cross_entropy_banned);
 }
 #endif
 
