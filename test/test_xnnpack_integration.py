@@ -199,10 +199,10 @@ class TestXNNPACKSerDes(TestCase):
         strides = (stride_h, stride_w)
         paddings = (pad_h, pad_w)
         dilations = (dilation, dilation)
-        assume(height + 2 * paddings[0]
-               >= dilations[0] * (kernels[0] - 1) + 1)
-        assume(width + 2 * paddings[1]
-               >= dilations[1] * (kernels[1] - 1) + 1)
+        assume(height + 2 * paddings[0] >=
+               dilations[0] * (kernels[0] - 1) + 1)
+        assume(width + 2 * paddings[1] >=
+               dilations[1] * (kernels[1] - 1) + 1)
 
         input_data = torch.rand((batch_size, input_channels, height, width))
         weight = torch.rand((output_channels, input_channels_per_group, kernel_h, kernel_w))
@@ -480,7 +480,6 @@ class TestXNNPACKRewritePass(TestCase):
                 self.paddings = paddings
                 self.dilations = dilations
                 self.groups = groups
-                self.activation_fn = F.relu
                 self.activation_fn = activation_fn
 
             def forward(self, x):
@@ -553,6 +552,29 @@ class TestXNNPACKRewritePass(TestCase):
         validate_transformed_module(M(F.hardtanh_), pattern_count_map, data_shape,
                                     prepack_removal=True, fuse_clamping_ops=True)
 
+        class MFusionAntiPattern(torch.nn.Module):
+            def __init__(self):
+                super(MFusionAntiPattern, self).__init__()
+                self.linear_weight = torch.nn.Parameter(torch.Tensor(torch.rand(linear_weight_shape)))
+                self.linear_bias = torch.nn.Parameter(torch.Tensor(torch.rand((weight_output_dim))))
+                self.strides = strides
+                self.paddings = paddings
+                self.dilations = dilations
+                self.groups = groups
+
+            def forward(self, x):
+                o = F.linear(x, self.linear_weight, self.linear_bias)
+                o = F.relu(o)
+                o = F.hardtanh(o)
+                return o
+
+        # Unfusable hardtanh.
+        pattern_count_map = {"aten::hardtanh": 1, # hardtanh cannot be.
+                             "aten::relu" : -1, # relu is fused.
+                             "prepacked::linear_clamp_prepack": -1,
+                             "prepacked::linear_clamp_run": 1}
+        validate_transformed_module(MFusionAntiPattern(), pattern_count_map, (16, linear_weight_shape[1]),
+                                    prepack_removal=True, fuse_clamping_ops=True)
 
 if __name__ == "__main__":
     run_tests()

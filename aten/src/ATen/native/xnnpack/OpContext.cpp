@@ -22,9 +22,9 @@ XNNPackLinearOpContext::create_context(
           xnnpack::internal::linear::create(
               weight,
               bias,
-              output_min ? (*output_min).to<float>()
+              output_min ? output_min->to<float>()
                          : xnnpack::ContextLinear::kMin,
-              output_max ? (*output_max).to<float>()
+              output_max ? output_max->to<float>()
                          : xnnpack::ContextLinear::kMax)
           );
   return linear_op_context;
@@ -51,9 +51,9 @@ XNNPackConv2dOpContext::create_context(at::Tensor&& weight,
           stride,
           dilation,
           groups,
-          output_min ? (*output_min).to<float>()
+          output_min ? output_min->to<float>()
                      : xnnpack::ContextConv2D::kMin,
-          output_max ? (*output_max).to<float>()
+          output_max ? output_max->to<float>()
                      : xnnpack::ContextConv2D::kMax);
   auto conv2d_op_context =
       c10::make_intrusive<XNNPackConv2dOpContext>(
