@@ -506,6 +506,7 @@ class _DistTestBase(object):
     @require_backend({"gloo", "nccl"})
     @require_backends_available({"gloo", "nccl"})
     @require_num_gpus(3)
+    @skip_if_rocm
     def test_backend_full_group(self):
         self._test_group_override_backend(self._init_full_group_test)
 
@@ -1511,6 +1512,92 @@ class _DistTestBase(object):
             output_tensors_lists, input_tensors, expected_tensors, group_id)
         self._barrier()
 
+    # AllToAll
+    def _test_all_to_all_single_equal_split_helper(self, group, group_id, rank):
+        if group_id is not None:
+            size = len(group)
+            in_tensor = torch.ones([size, size]) * rank
+            expected_tensor = torch.cat([torch.ones([1, size]) * i for i in group])
+            out_tensor = torch.ones([size, size]) * -1
+            dist.all_to_all_single(out_tensor, in_tensor, group=group_id)
+            self.assertEqual(out_tensor, expected_tensor)
+        self._barrier()
+
+    def _test_all_to_all_single_unequal_split_helper(self, group, group_id, rank):
+        if group_id is not None:
+            size = len(group)
+            in_splits = [i + 1 for i in group]
+            out_splits = [rank + 1 for _ in group]
+            in_tensor = torch.ones([sum(in_splits), size]) * rank
+            out_tensor = torch.ones([(rank + 1) * size, size])
+            expected_tensor = torch.cat([torch.ones([rank + 1, size]) * i for i in group])
+            dist.all_to_all_single(
+                out_tensor, in_tensor, out_splits, in_splits, group=group_id)
+            self.assertEqual(out_tensor, expected_tensor)
+        self._barrier()
+
+    def _test_all_to_all_helper(self, group, group_id, rank):
+        if group_id is not None:
+            size = len(group)
+            in_splits = [i + 1 for i in group]
+            in_tensors = [
+                torch.ones([in_splits[i], size]) * rank for i, _ in enumerate(group)
+            ]
+            out_tensors = [torch.ones([(rank + 1), size]) for _ in group]
+            expected_tensors = [torch.ones([rank + 1, size]) * i for i in group]
+            dist.all_to_all(out_tensors, in_tensors, group=group_id)
+            for t1, t2 in zip(out_tensors, expected_tensors):
+                self.assertEqual(t1, t2)
+        self._barrier()
+
+    @unittest.skipIf(BACKEND != "mpi", "Only MPI supports all_to_all_single")
+    def test_all_to_all_single_equal_split(self):
+        group, group_id, rank = self._init_global_test()
+        self._test_all_to_all_single_equal_split_helper(group, group_id, rank)
+
+    @unittest.skipIf(BACKEND != "mpi", "Only MPI supports all_to_all_single")
+    def test_all_to_all_single_unequal_split(self):
+        group, group_id, rank = self._init_global_test()
+        self._test_all_to_all_single_unequal_split_helper(group, group_id, rank)
+
+    @unittest.skipIf(BACKEND != "mpi", "Only MPI supports all_to_all")
+    def test_all_to_all(self):
+        group, group_id, rank = self._init_global_test()
+        self._test_all_to_all_helper(group, group_id, rank)
+
+    @unittest.skipIf(BACKEND != "mpi", "Only MPI supports all_to_all_single")
+    @skip_if_small_worldsize
+    def test_all_to_all_single_equal_split_group(self):
+        group, group_id, rank = self._init_group_test()
+        self._test_all_to_all_single_equal_split_helper(group, group_id, rank)
+
+    @unittest.skipIf(BACKEND != "mpi", "Only MPI supports all_to_all_single")
+    @skip_if_small_worldsize
+    def test_all_to_all_single_unequal_split_group(self):
+        group, group_id, rank = self._init_group_test()
+        self._test_all_to_all_single_unequal_split_helper(group, group_id, rank)
+
+    @unittest.skipIf(BACKEND != "mpi", "Only MPI supports all_to_all")
+    @skip_if_small_worldsize
+    def test_all_to_all_group(self):
+        group, group_id, rank = self._init_group_test()
+        self._test_all_to_all_helper(group, group_id, rank)
+
+    @unittest.skipIf(BACKEND != "mpi", "Only MPI supports all_to_all_single")
+    def test_all_to_all_single_equal_split_full_group(self):
+        group, group_id, rank = self._init_full_group_test()
+        self._test_all_to_all_single_equal_split_helper(group, group_id, rank)
+
+    @unittest.skipIf(BACKEND != "mpi", "Only MPI supports all_to_all_single")
+    def test_all_to_all_single_unequal_split_full_group(self):
+        group, group_id, rank = self._init_full_group_test()
+        self._test_all_to_all_single_unequal_split_helper(group, group_id, rank)
+
+    @unittest.skipIf(BACKEND != "mpi", "Only MPI supports all_to_all")
+    def test_all_to_all_full_group(self):
+        group, group_id, rank = self._init_full_group_test()
+        self._test_all_to_all_helper(group, group_id, rank)
+
     # BARRIER
     def _test_barrier_helper(
             self, group, group_id, rank, cuda=False, rank_to_GPU=None):
@@ -2158,7 +2245,7 @@ if BACKEND == "gloo" or BACKEND == "nccl":
                     first_process.exitcode == SKIP_IF_NO_GPU_EXIT_CODE or
                     first_process.exitcode == SKIP_IF_SMALL_WORLDSIZE_EXIT_CODE or
                     first_process.exitcode == SKIP_IF_ROCM_EXIT_CODE
-                )
+                ), "unexpected exit code {}".format(first_process.exitcode)
 
                 if first_process.exitcode == SKIP_IF_NO_CUDA_EXIT_CODE:
                     raise unittest.SkipTest("cuda is not available")
@@ -2171,7 +2258,11 @@ if BACKEND == "gloo" or BACKEND == "nccl":
                 if first_process.exitcode == SKIP_IF_ROCM_EXIT_CODE:
                     raise unittest.SkipTest("Test skipped for ROCm")
 
-            self.assertEqual(first_process.exitcode, 0)
+            self.assertEqual(
+                first_process.exitcode,
+                0,
+                "Expect 0 exit code, but got {}".format(first_process.exitcode)
+            )
 
 
 elif BACKEND == "mpi":

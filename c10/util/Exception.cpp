@@ -66,24 +66,44 @@ void Error::AppendMessage(const std::string& new_msg) {
 namespace Warning {
 
 namespace {
-  WarningHandler* getHandler() {
+  WarningHandler* getBaseHandler() {
     static WarningHandler base_warning_handler_ = WarningHandler();
     return &base_warning_handler_;
   };
-  static thread_local WarningHandler* warning_handler_ = getHandler();
+
+  class ThreadWarningHandler {
+    public:
+      ThreadWarningHandler() = delete;
+
+      static WarningHandler* get_handler() {
+        if (!warning_handler_) {
+          warning_handler_ = getBaseHandler();
+        }
+        return warning_handler_;
+      }
+
+      static void set_handler(WarningHandler* handler) {
+        warning_handler_ = handler;
+      }
+
+    private:
+      static thread_local WarningHandler* warning_handler_;
+  };
+
+  thread_local WarningHandler* ThreadWarningHandler::warning_handler_ = nullptr;
 
 }
 
 void warn(SourceLocation source_location, const std::string& msg) {
-  warning_handler_->process(source_location, msg);
+  ThreadWarningHandler::get_handler()->process(source_location, msg);
 }
 
 void set_warning_handler(WarningHandler* handler) noexcept(true) {
-  warning_handler_ = handler;
+  ThreadWarningHandler::set_handler(handler);
 }
 
 WarningHandler* get_warning_handler() noexcept(true) {
-  return warning_handler_;
+  return ThreadWarningHandler::get_handler();
 }
 
 } // namespace Warning
