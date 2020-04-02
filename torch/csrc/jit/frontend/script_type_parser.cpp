@@ -1,5 +1,5 @@
-#include <torch/csrc/jit/frontend/parser.h>
 #include <torch/csrc/jit/frontend/script_type_parser.h>
+#include <torch/csrc/jit/frontend/parser.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/custom_class.h>
 
@@ -331,28 +331,28 @@ FunctionSchema ScriptTypeParser::parseSchemaFromDef(
 c10::IValue ScriptTypeParser::parseClassConstant(const Assign& assign) {
   if (assign.lhs().kind() != TK_VAR) {
     throw ErrorReport(assign.range())
-      << "Expected to a variable for class constant";
+        << "Expected to a variable for class constant";
   }
   const auto final_type = assign.type().get();
   auto expr = assign.rhs().get();
   if (final_type.kind() != TK_SUBSCRIPT) {
     throw ErrorReport(assign.range())
-      << "Expected subscripted type for class constant";
+        << "Expected subscripted type for class constant";
   }
   auto subscript = Subscript(final_type);
   auto value_name = parseBaseTypeName(subscript.value());
   if (!value_name) {
     throw ErrorReport(subscript.value().range())
-      << "Subscripted type must be a type identifier";
+        << "Subscripted type must be a type identifier";
   }
   if (*value_name != "Final") {
     throw ErrorReport(subscript.range())
-      << "Base type must be Final for class constant";
+        << "Base type must be Final for class constant";
   }
   if (subscript.subscript_exprs().size() != 1) {
     throw ErrorReport(subscript)
-      << " expected exactly one element type but found "
-      << subscript.subscript_exprs().size();
+        << " expected exactly one element type but found "
+        << subscript.subscript_exprs().size();
   }
   auto type = *subscript.subscript_exprs().begin();
   auto default_val = evaluateDefaults(expr.range(), {type}, {expr});
