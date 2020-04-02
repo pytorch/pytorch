@@ -104,24 +104,24 @@ factory_data_common_args = parse_kwargs("""
         the pinned memory. Works only for CPU tensors. Default: ``False``.
 """)
 
-add_docstr(torch.abs,
-           r"""
-abs(input, out=None) -> Tensor
+# add_docstr(torch.abs,
+#            r"""
+# abs(input, out=None) -> Tensor
 
-Computes the element-wise absolute value of the given :attr:`input` tensor.
+# Computes the element-wise absolute value of the given :attr:`input` tensor.
 
-.. math::
-    \text{out}_{i} = |\text{input}_{i}|
-""" + r"""
-Args:
-    {input}
-    {out}
+# .. math::
+#     \text{out}_{i} = |\text{input}_{i}|
+# """ + r"""
+# Args:
+#     {input}
+#     {out}
 
-Example::
+# Example::
 
-    >>> torch.abs(torch.tensor([-1, -2, 3]))
-    tensor([ 1,  2,  3])
-""".format(**common_args))
+#     >>> torch.abs(torch.tensor([-1, -2, 3]))
+#     tensor([ 1,  2,  3])
+# """.format(**common_args))
 
 add_docstr(torch.absolute,
            r"""
