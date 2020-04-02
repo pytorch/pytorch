@@ -51,7 +51,7 @@ OPERATOR_SCHEMA(CbrtGradient)
     .NumInputs(2)
     .NumOutputs(1)
     .AllowInplace({{0, 0}})
-    .IdenticalTypeAndShapeOfInput(0);
+    .IdenticalTypeAndShape();
 
 namespace {
 
