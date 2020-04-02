@@ -1579,7 +1579,7 @@ class ObserverTest(QuantizationTestCase):
 
         # Check TensorListObserver
         from torch.quantization.observer import _MinMaxTensorListObserver
-        obs =  _MinMaxTensorListObserver()
+        obs = _MinMaxTensorListObserver()
         scripted = torch.jit.script(obs)
         x = [torch.rand(3, 4), torch.rand(4, 5)]
         obs(x)

@@ -745,17 +745,13 @@ bool isBiasOfConvOrLinear(Value* v) {
   return result;
 }
 
-bool isWeightOfFunction(Value* v) {
-  bool result = matchArgPattern(
+// Go through the CallMethod graph to check if the value is Weight.
+bool isWeight(Module& module, Value* v) {
+  bool is_weight_of_fn = matchArgPattern(
       v,
       AtenFuncArgs({{"conv2d", 1}, {"conv3d", 1}, {"linear", 1}, {"lstm", 2}}),
       CallFuncArgs({{"linear", 2}}));
-  return result;
-}
-
-// Go through the CallMethod graph to check if the value is Weight.
-bool isWeight(Module& module, Value* v) {
-  if (isWeightOfFunction(v)) {
+  if (is_weight_of_fn) {
     return true;
   }
   c10::optional<bool> result;
@@ -782,8 +778,8 @@ bool isWeight(Module& module, Value* v) {
   return result.has_value() ? result.value() : false;
 }
 
-Module getObserverModuleFor(Value* v, const QConfig& qconfig) {
-  return isWeightOfFunction(v) ? std::get<1>(qconfig) : std::get<0>(qconfig);
+Module getObserverModuleFor(Module& m, Value* v, const QConfig& qconfig) {
+  return isWeight(m, v) ? std::get<1>(qconfig) : std::get<0>(qconfig);
 }
 
 ModuleMethodVector InsertObserversHelper::getInvokedMethods(
@@ -1047,7 +1043,7 @@ void InsertObserversHelper::fillValueObserverMap(
   auto qconfig = *qconfig_opt;
   for (auto* v : graph->inputs()) {
     if (valueNeedsToBeQuantized(v)) {
-      observer_for_value_[v] = getObserverModuleFor(v, qconfig);
+      observer_for_value_[v] = getObserverModuleFor(module, v, qconfig);
     }
   }
 
@@ -1058,7 +1054,7 @@ void InsertObserversHelper::fillValueObserverMap(
     for (Node* n : b->nodes()) {
       for (Value* v : n->outputs()) {
         if (valueNeedsToBeQuantized(v)) {
-          observer_for_value_[v] = getObserverModuleFor(v, qconfig);
+          observer_for_value_[v] = getObserverModuleFor(module, v, qconfig);
         }
       }
 
