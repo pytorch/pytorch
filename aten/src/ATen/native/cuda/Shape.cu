@@ -2,6 +2,7 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/MemoryOverlap.h>
 #include <ATen/cuda/detail/IndexUtils.cuh>
+#include <ATen/native/TypeProperties.h>
 #include <ATen/Dispatch.h>
 #include <c10/core/MemoryFormat.h>
 #include <c10/util/Optional.h>
@@ -257,14 +258,7 @@ void parallel_cat(Tensor &out, const TensorList &inputs, int64_t dimension,
 } // namespace
 
 Tensor cat_cuda(TensorList inputs, int64_t dimension) {
-  // Ideally we would like to obtain the type using `result_type`
-  // But some linker error prevent us from using it here
-  // ScalarType high_type = at::native::result_type(inputs);
-  ScalarType high_type = inputs.front().scalar_type();
-  for (size_t i = 1; i < inputs.size(); ++i) {
-    high_type = promoteTypes(high_type, inputs[i].scalar_type());
-  }
-
+  ScalarType high_type = result_type(inputs);
   Tensor out = at::empty({0}, inputs.front().options().dtype(high_type));
   cat_out_cuda(out, inputs, dimension);
   return out;
@@ -313,15 +307,6 @@ Tensor& cat_out_cuda(Tensor& out, TensorList inputs, int64_t dimension) {
                 "unsupported operation: the input tensors cannot refer to any "
                 "of the output memory locations. Found overlap in input "
                 "tensor ", i);
-  }
-
-  // Dtypes should be the same
-  const auto first_in_cat = inputs[0];
-  for (int64_t i = 1; i < inputs.size(); i++) {
-    TORCH_CHECK(first_in_cat.dtype() == inputs[i].dtype(),
-              "Expected object of scalar type ", first_in_cat.dtype(),
-              " but got scalar type ", inputs[i].dtype(),
-              " for sequence element ", i, ".");
   }
 
   for (int i = 0; i < inputs.size(); i++)
@@ -392,6 +377,15 @@ Tensor& cat_out_cuda(Tensor& out, TensorList inputs, int64_t dimension) {
     [firstType](const Tensor& t) {
       return t.scalar_type() == firstType;
     });
+  if (!allSameType) {
+    // Since we are not using the iterator here, we need to enforce type promotion 
+    // compatibility ourselves
+    for(auto input : inputs) {
+      TORCH_CHECK(canCast(input.scalar_type(), out.scalar_type()), "input type ", input.scalar_type(),
+          " can't be cast to the desired output type ",
+          out.scalar_type());
+    }
+  }
   if (inputs.size() > 1 &&
       !hasSkippedInput &&
       out.dim() <= CAT_ARRAY_MAX_INPUT_DIMS &&
