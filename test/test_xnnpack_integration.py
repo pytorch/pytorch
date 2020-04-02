@@ -69,10 +69,10 @@ class TestXNNPACKOps(TestCase):
         strides = (stride_h, stride_w)
         paddings = (pad_h, pad_w)
         dilations = (dilation, dilation)
-        assume(height + 2 * paddings[0] >=
-               dilations[0] * (kernels[0] - 1) + 1)
-        assume(width + 2 * paddings[1] >=
-               dilations[1] * (kernels[1] - 1) + 1)
+        assume(height + 2 * paddings[0]
+               >= dilations[0] * (kernels[0] - 1) + 1)
+        assume(width + 2 * paddings[1]
+               >= dilations[1] * (kernels[1] - 1) + 1)
 
         input_data = torch.rand((batch_size, input_channels, height, width))
         weight = torch.rand((output_channels, input_channels_per_group, kernel_h, kernel_w))
@@ -199,10 +199,10 @@ class TestXNNPACKSerDes(TestCase):
         strides = (stride_h, stride_w)
         paddings = (pad_h, pad_w)
         dilations = (dilation, dilation)
-        assume(height + 2 * paddings[0] >=
-               dilations[0] * (kernels[0] - 1) + 1)
-        assume(width + 2 * paddings[1] >=
-               dilations[1] * (kernels[1] - 1) + 1)
+        assume(height + 2 * paddings[0]
+               >= dilations[0] * (kernels[0] - 1) + 1)
+        assume(width + 2 * paddings[1]
+               >= dilations[1] * (kernels[1] - 1) + 1)
 
         input_data = torch.rand((batch_size, input_channels, height, width))
         weight = torch.rand((output_channels, input_channels_per_group, kernel_h, kernel_w))
@@ -305,10 +305,10 @@ class TestXNNPACKSerDes(TestCase):
         strides = (stride_h, stride_w)
         paddings = (pad_h, pad_w)
         dilations = (dilation, dilation)
-        assume(height + 2 * paddings[0] >=
-               dilations[0] * (kernels[0] - 1) + 1)
-        assume(width + 2 * paddings[1] >=
-               dilations[1] * (kernels[1] - 1) + 1)
+        assume(height + 2 * paddings[0]
+               >= dilations[0] * (kernels[0] - 1) + 1)
+        assume(width + 2 * paddings[1]
+               >= dilations[1] * (kernels[1] - 1) + 1)
 
         input_data = torch.rand((batch_size, input_channels, height, width))
         conv_weight = torch.rand((output_channels, input_channels_per_group, kernel_h, kernel_w))
@@ -366,16 +366,16 @@ class TestXNNPACKSerDes(TestCase):
                      " Please build with USE_XNNPACK=1.")
 class TestXNNPACKRewritePass(TestCase):
     def test_linear(self):
-        def validate_transformed_module(module_instance, pattern_count_map, data_shape, prepack_removal=False, fuse_relu=False):
+        def validate_transformed_module(module_instance, pattern_count_map, data_shape, prepack_removal=False, fuse_clamping_ops=False):
             scripted_model = torch.jit.script(module_instance)
             scripted_model.eval()
             input_data = torch.rand(data_shape)
             ref_result = scripted_model(input_data)
             torch._C._jit_pass_insert_prepacked_ops(scripted_model._c)
-            if fuse_relu or prepack_removal:
+            if fuse_clamping_ops or prepack_removal:
                 scripted_model._c = torch._C._freeze_module(scripted_model._c)
-            if fuse_relu:
-                torch._C._jit_pass_fuse_relu_w_prepacked_linear_conv(scripted_model._c)
+            if fuse_clamping_ops:
+                torch._C._jit_pass_fuse_clamp_w_prepacked_linear_conv(scripted_model._c)
             if (prepack_removal):
                 torch._C._jit_pass_fold_prepacking_ops(scripted_model._c)
 
@@ -512,7 +512,7 @@ class TestXNNPACKRewritePass(TestCase):
         pattern_count_map["prepacked::conv2d_clamp_prepack"] = -1
         pattern_count_map["prepacked::linear_clamp_prepack"] = -1
         pattern_count_map["aten::relu"] = -1
-        validate_transformed_module(M(), pattern_count_map, data_shape, prepack_removal=True, fuse_relu=True)
+        validate_transformed_module(M(), pattern_count_map, data_shape, prepack_removal=True, fuse_clamping_ops=True)
 
         # Inplace relu fusion test.
         pattern_count_map = {"aten::relu": 2,
@@ -524,7 +524,8 @@ class TestXNNPACKRewritePass(TestCase):
         pattern_count_map["prepacked::conv2d_clamp_prepack"] = -1
         pattern_count_map["prepacked::linear_clamp_prepack"] = -1
         pattern_count_map["aten::relu"] = -1
-        validate_transformed_module(M(F.relu_), pattern_count_map, data_shape, prepack_removal=True, fuse_relu=True)
+        validate_transformed_module(M(F.relu_), pattern_count_map, data_shape,
+                                    prepack_removal=True, fuse_clamping_ops=True)
 
         # Not inplace hardtanh fusion test.
         pattern_count_map = {"aten::hardtanh": 2,
@@ -536,7 +537,8 @@ class TestXNNPACKRewritePass(TestCase):
         pattern_count_map["prepacked::conv2d_clamp_prepack"] = -1
         pattern_count_map["prepacked::linear_clamp_prepack"] = -1
         pattern_count_map["aten::hardtanh"] = -1
-        validate_transformed_module(M(F.hardtanh), pattern_count_map, data_shape, prepack_removal=True, fuse_relu=True)
+        validate_transformed_module(M(F.hardtanh), pattern_count_map, data_shape,
+                                    prepack_removal=True, fuse_clamping_ops=True)
 
         # Inplace hardtanh fusion test.
         pattern_count_map = {"aten::hardtanh_": 2,
@@ -548,7 +550,8 @@ class TestXNNPACKRewritePass(TestCase):
         pattern_count_map["prepacked::conv2d_clamp_prepack"] = -1
         pattern_count_map["prepacked::linear_clamp_prepack"] = -1
         pattern_count_map["aten::hardtanh_"] = -1
-        validate_transformed_module(M(F.hardtanh_), pattern_count_map, data_shape, prepack_removal=True, fuse_relu=True)
+        validate_transformed_module(M(F.hardtanh_), pattern_count_map, data_shape,
+                                    prepack_removal=True, fuse_clamping_ops=True)
 
 
 if __name__ == "__main__":

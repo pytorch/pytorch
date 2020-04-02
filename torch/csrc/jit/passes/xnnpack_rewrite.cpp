@@ -245,7 +245,7 @@ void insertPrePackedOps(script::Module& module) {
   }
 }
 
-void fusePrePackedLinearConvWithRelu(script::Module& module) {
+void fusePrePackedLinearConvWithClamp(script::Module& module) {
   auto graph = module.get_method("forward").graph();
   fuseReluWithPackedOps(graph);
   fuseHardtanhWithPackedOps(graph);
@@ -280,7 +280,7 @@ void insertPrePackedOps(script::Module& module) {
       "XNNPACK is not enabled. Please build with USE_XNNPACK=1");
 }
 
-void fusePrePackedLinearConvWithRelu(script::Module& module) {
+void fusePrePackedLinearConvWithClamp(script::Module& module) {
   TORCH_INTERNAL_ASSERT(
       "XNNPACK is not enabled. Please build with USE_XNNPACK=1");
 }
