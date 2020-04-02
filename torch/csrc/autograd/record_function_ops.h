@@ -1,6 +1,7 @@
 #pragma once
 #include <torch/csrc/autograd/record_function.h>
 #include <torch/csrc/utils/future.h>
+#include <torch/csrc/distributed/rpc/message.h>
 
 namespace torch {
 namespace autograd {

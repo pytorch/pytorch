@@ -2,7 +2,6 @@
 #include <ATen/cpp_custom_type_hack.h>
 #include <torch/csrc/autograd/record_function.h>
 #include <torch/csrc/jit/runtime/custom_operator.h>
-#include <torch/csrc/distributed/rpc/message.h>
 
 namespace caffe2 {
 // Required for cpp_custom_type_hack to work
@@ -70,7 +69,8 @@ void _call_end_callbacks_on_fut(
 // Explicit template instantiation of _call_end_callbacks_on_fut.
 template void _call_end_callbacks_on_fut(
     const at::Tensor& handle,
-    const std::shared_ptr<torch::distributed::rpc::FutureMessage>);
+    const std::shared_ptr<
+        torch::utils::Future<torch::distributed::rpc::Message>>);
 
 // Internal only, do not use directly, use Python's record_function()
 static auto registry =
