@@ -13,34 +13,31 @@ void stopInliningCalls(Block* block) {
   for (auto it = block->nodes().begin(), end = block->nodes().end();
        it != end;) {
     Node* cur = *it++;
-    switch (cur->kind()) {
-      case prim::CallFunction: {
-        AT_ASSERT(cur->input(0)->node()->kind() == prim::Constant);
-        auto function_constant = cur->input(0)->node();
-        auto fun_type =
-            function_constant->output()->type()->expect<FunctionType>();
+    if (cur->kind() == prim::CallFunction) {
+      AT_ASSERT(cur->input(0)->node()->kind() == prim::Constant);
+      auto function_constant = cur->input(0)->node();
+      auto fun_type =
+          function_constant->output()->type()->expect<FunctionType>();
 
-        if (fun_type->function()->qualname().qualifiedName().find(
-                qualFuncName + "interpolate") != std::string::npos) {
-          cur->removeInput(0);
-          Node* interpolate_node = block->owningGraph()->create(
-              Symbol::fromQualString("aten::__interpolate"),
-              {cur->inputs()},
-              cur->outputs().size());
-          interpolate_node->output()->copyMetadata(cur->output());
-          interpolate_node->insertAfter(cur);
-          cur->replaceAllUsesWith(interpolate_node);
-          cur->removeAllInputs();
-          cur->destroy();
-          return;
-        }
-        stopInliningCalls(fun_type->function()->graph()->block());
-      } break;
-      default: {
-        for (auto b : cur->blocks()) {
-          stopInliningCalls(b);
-        }
-      } break;
+      if (fun_type->function()->qualname().qualifiedName().find(
+              qualFuncName + "interpolate") != std::string::npos) {
+        cur->removeInput(0);
+        Node* interpolate_node = block->owningGraph()->create(
+            Symbol::fromQualString("aten::__interpolate"),
+            {cur->inputs()},
+            cur->outputs().size());
+        interpolate_node->output()->copyMetadata(cur->output());
+        interpolate_node->insertAfter(cur);
+        cur->replaceAllUsesWith(interpolate_node);
+        cur->removeAllInputs();
+        cur->destroy();
+        return;
+      }
+      stopInliningCalls(fun_type->function()->graph()->block());
+    } else {
+      for (auto b : cur->blocks()) {
+        stopInliningCalls(b);
+      }
     }
   }
 }
