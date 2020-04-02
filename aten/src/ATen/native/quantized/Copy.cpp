@@ -7,7 +7,7 @@ namespace at {
 namespace native {
 
 // Copying from float to QInt, used for assigning float value to QTensor
-Tensor& quantized_copy_from_float_(Tensor& self, const Tensor& src) {
+Tensor& quantized_copy_from_float_cpu_(Tensor& self, const Tensor& src) {
   TORCH_CHECK(
       src.scalar_type() == at::kFloat,
       "Quantized copy only works with kFloat as source Tensor");
@@ -18,7 +18,7 @@ Tensor& quantized_copy_from_float_(Tensor& self, const Tensor& src) {
       self.sizes().equals(src.sizes()),
       "Quantized copy only works with Tensors with the same shape");
   TORCH_CHECK(
-      self.device() == kCPU,
+      self.device().type() == kCPU,
       "Quantized copy only works with QuantizedCPU Tensors");
   AT_DISPATCH_QINT_TYPES(self.scalar_type(), "Copy", [&]() {
     float* src_data = src.data_ptr<float>();

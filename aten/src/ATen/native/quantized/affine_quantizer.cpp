@@ -19,7 +19,7 @@ namespace {
 
 void checkCPUTensor(std::string fn_name, Tensor t) {
   TORCH_CHECK(
-      t.device() == kCPU,
+      t.device().type() == kCPU,
       fn_name,
       " expects a CPU Tensor.");
 }
@@ -48,7 +48,7 @@ void checkQuantizedTensor(std::string fn_name, Tensor t) {
            " expects a ",
            caffe2::TypeMeta::Make<T>(),
            " Tensor");
-  TORCH_CHECK(t.is_cuda() || t.device() == kCPU,
+  TORCH_CHECK(t.is_cuda() || t.device().type() == kCPU,
            fn_name,
            " expects a CUDA or CPU quantized Tensor");
 }
@@ -85,7 +85,7 @@ void checkSameSize(std::string fn_name, Tensor qt, Tensor rt) {
 } // anonymous namespace
 
 Tensor quantize_tensor_affine(Tensor rtensor, Tensor qtensor, double scale, int64_t zero_point) {
-  auto fn_name = "quantize_tensor_affine";
+  static const auto fn_name = "quantize_tensor_affine";
   checkFloatTensor(fn_name, rtensor);
   checkSameDevice(fn_name, rtensor, qtensor);
   checkSameSize(fn_name, qtensor, rtensor);
@@ -104,7 +104,7 @@ Tensor quantize_tensor_per_channel_affine(Tensor rtensor,
                                           Tensor scales,
                                           Tensor zero_points,
                                           int64_t axis) {
-  auto fn_name = "quantize_tensor_per_channel_affine";
+  static const auto fn_name = "quantize_tensor_per_channel_affine";
 
   checkFloatTensor(fn_name, rtensor);
   checkCPUTensor(fn_name, rtensor);
@@ -126,7 +126,7 @@ Tensor quantize_tensor_per_channel_affine(Tensor rtensor,
 }
 
 Tensor dequantize_tensor_affine(Tensor qtensor, Tensor rtensor, double scale, int64_t zero_point) {
-  auto fn_name = "dequantize_tensor_affine";
+  static const auto fn_name = "dequantize_tensor_affine";
   checkFloatTensor(fn_name, rtensor);
   checkSameDevice(fn_name, rtensor, qtensor);
   checkSameSize(fn_name, qtensor, rtensor);
@@ -145,7 +145,7 @@ Tensor dequantize_tensor_per_channel_affine(Tensor qtensor,
                                             Tensor scales,
                                             Tensor zero_points,
                                             int64_t axis) {
-  auto fn_name = "dequantize_tensor_per_channel_affine";
+  static const auto fn_name = "dequantize_tensor_per_channel_affine";
 
   checkFloatTensor(fn_name, rtensor);
   checkCPUTensor(fn_name, rtensor);

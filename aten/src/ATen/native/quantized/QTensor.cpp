@@ -147,8 +147,8 @@ Tensor quantized_clone(const Tensor& self, c10::optional<c10::MemoryFormat> opti
   return dst;
 }
 
-bool quantized_equal(const Tensor& self, const Tensor& other) {
-  TORCH_CHECK(self.device() == kCPU && other.device() == kCPU, 
+bool quantized_equal_cpu(const Tensor& self, const Tensor& other) {
+  TORCH_CHECK(self.device().type() == kCPU && other.device().type() == kCPU, 
     "quantized_equal is implemented only for the QuantizedCPU backend");
   if (!other.is_quantized()) {
     return false;
