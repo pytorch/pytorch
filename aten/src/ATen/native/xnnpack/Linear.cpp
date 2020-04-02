@@ -43,6 +43,7 @@ bool usable(const Tensor& input) {
   return (2 <= input.ndimension()) &&
          (c10::DeviceType::CPU == input.device().type()) &&
          (kFloat == input.scalar_type()) &&
+         !input.requires_grad() &&
          true;
 }
 

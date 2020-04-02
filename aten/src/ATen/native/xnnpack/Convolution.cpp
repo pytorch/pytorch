@@ -79,6 +79,7 @@ bool usable(const Tensor& input) {
          (input.size(Layout::Activation4D::channels) > 0) &&
          (input.size(Layout::Activation4D::height) > 0) &&
          (input.size(Layout::Activation4D::width) > 0) &&
+         !input.requires_grad() &&
          true;
 }
 

@@ -129,8 +129,6 @@ Tensor max_pool2d(
     dilation_,
   };
 
-  xnn_operator_t max_pool_op{};
-
   const Tensor input_padded_contig_nhwc = allocate_padded_contiguous_if_needed(
       input,
       MemoryFormat::ChannelsLast);
@@ -157,6 +155,8 @@ Tensor max_pool2d(
       input_padded_contig_nhwc.options().dtype(),
       MemoryFormat::ChannelsLast,
       input_padded_contig_nhwc.names());
+
+  xnn_operator_t max_pool_op{};
 
   const xnn_status create_status = xnn_create_max_pooling2d_nhwc_f32(
       parameters.padding[Layout::Parameter::height],                  // input_padding_top
