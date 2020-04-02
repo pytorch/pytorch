@@ -9384,6 +9384,48 @@ class TestNNDeviceType(NNTestCase):
             out2 = conv1(input_c)
             self.assertEqual(out1, out2)
 
+    @onlyCUDA
+    def test_grid_sample_large(self, device):
+        def issue_35202():
+            input_tensor = torch.rand(1, 1, 480, 640, dtype=torch.float, device=device, requires_grad=True)
+            coords = torch.tensor([[-10059144, 67680944], [67680944, 67680944]], dtype=torch.float, device=device)
+            coords = coords.unsqueeze(0).unsqueeze(0).repeat(1, 1, 1, 1)
+            result = torch.nn.functional.grid_sample(input_tensor, coords)
+            self.assertEqual(result, torch.tensor([[[[0., 0.]]]], dtype=torch.float, device=device))
+            result.backward(torch.ones_like(result))
+            torch.cuda.synchronize()
+        issue_35202()
+
+        def issue_24823_1(dtype):
+            image = torch.arange(27, 0, -1, dtype=dtype, device=device).view(1, 1, 3, 3, 3)
+            image.requires_grad_()
+            grid = torch.nn.functional.affine_grid(
+                torch.tensor([[[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0]]], dtype=dtype, device=device),
+                (1, 1, 3, 3, 3))
+            grid[:, 1, 1, 1, 0] = float('inf')
+            result = torch.nn.functional.grid_sample(image, grid, padding_mode='zeros')
+            self.assertEqual(result, torch.tensor([[[[[27., 26., 25.], [24., 23., 22.], [21., 20., 19.]],
+                                                     [[18., 17., 16.], [15., 0., 13.], [12., 11., 10.]],
+                                                     [[9., 8., 7.], [6., 5., 4.], [3., 2., 1.]]]]], 
+                                                  device=device, dtype=dtype))
+            result.backward(torch.ones_like(result))
+            expected_grad = torch.ones_like(image)
+            expected_grad[0, 0, 1, 1, 1] = 0
+            self.assertTrue(torch.allclose(image.grad, expected_grad, atol=1e-3))
+        issue_24823_1(torch.half)
+        issue_24823_1(torch.float)
+        issue_24823_1(torch.double)
+
+        def issue_24823_2():
+            param = torch.tensor([[[-1.0e+20, 0.0, 0.0], [0.0, -1.0e+20, 0.0]]], dtype=torch.float, device=device)
+            img = torch.zeros((1, 1, 4, 4), dtype=torch.float, device=device, requires_grad=True)
+            grid = torch.nn.functional.affine_grid(param, img.size())
+            result = torch.nn.functional.grid_sample(img, grid)
+            self.assertEqual(result, torch.zeros(1, 1, 4, 4, device=device, dtype=torch.float))
+            result.backward(torch.ones_like(result))
+            torch.cuda.synchronize()
+        issue_24823_2()
+
     @largeCUDATensorTest('12GB')
     def test_conv_transposed_large(self, device):
         dtype = torch.half if self.device_type == 'cuda' else torch.float

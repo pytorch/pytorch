@@ -165,10 +165,14 @@ class Block : public StmtNode<Block> {
 class TORCH_API Store : public StmtNode<Store> {
  public:
   const Var* base_handle() const {
-    return base_handle_;
+    return buf_->base_handle();
   }
-  const Expr* index() const {
-    return index_;
+  std::vector<const Expr*> indices() const {
+    return indices_;
+  }
+  const Expr* flat_index() const {
+    TORCH_CHECK(indices_.size() == 1, "Indices haven't been flattened.");
+    return indices_[0];
   }
   const Expr* value() const {
     return value_;
@@ -176,62 +180,43 @@ class TORCH_API Store : public StmtNode<Store> {
   const Expr* mask() const {
     return mask_;
   }
+  const Buf* buf() const {
+    return buf_;
+  }
 
   static Store* make(
       const Buffer& buffer,
-      const ExprHandle& index,
+      const std::vector<ExprHandle>& indices,
       const ExprHandle& value,
-      const ExprHandle& mask) {
-    return new Store(buffer, index.node(), value.node(), mask.node());
-  }
+      const ExprHandle& mask);
 
   static Store* make(
-      const VarHandle& base_handle,
-      const ExprHandle& index,
+      const BufHandle& buf,
+      const std::vector<ExprHandle>& indices,
       const ExprHandle& value,
-      const ExprHandle& mask) {
-    return new Store(
-        base_handle.node(), index.node(), value.node(), mask.node());
-  }
+      const ExprHandle& mask);
 
   static Store* make(
-      const VarHandle& base_handle,
-      const ExprHandle& index,
-      const ExprHandle& value) {
-    return new Store(
-        base_handle.node(), index.node(), value.node(), ExprHandle(1).node());
-  }
+      const BufHandle& buf,
+      const std::vector<ExprHandle>& indices,
+      const ExprHandle& value);
 
   // TODO: merge this with Load.
   Store(
       const Buffer& buffer,
-      const Expr* index,
+      const std::vector<const Expr*>& indices,
       const Expr* value,
       const Expr* mask);
 
   Store(
-      const Var* base_handle,
-      const Expr* index,
+      const Buf* buf,
+      std::vector<const Expr*> indices,
       const Expr* value,
-      const Expr* mask)
-      : base_handle_(base_handle), index_(index), value_(value), mask_(mask) {
-    if (base_handle_->dtype() != kHandle) {
-      throw malformed_input(base_handle);
-    }
-
-    if (index->dtype().lanes() != mask->dtype().lanes() ||
-        index->dtype().lanes() != value->dtype().lanes()) {
-      throw malformed_input();
-    }
-
-    if (index->dtype().scalar_type() != ScalarType::Int) {
-      throw unsupported_dtype();
-    }
-  }
+      const Expr* mask);
 
  private:
-  const Var* base_handle_;
-  const Expr* index_;
+  const Buf* buf_;
+  std::vector<const Expr*> indices_;
   const Expr* value_;
   const Expr* mask_;
 };
