@@ -1,7 +1,8 @@
+#include <torch/csrc/autograd/record_function_ops.h>
 #include <ATen/cpp_custom_type_hack.h>
 #include <torch/csrc/autograd/record_function.h>
 #include <torch/csrc/jit/runtime/custom_operator.h>
-#include <torch/csrc/autograd/record_function_ops.h>
+#include <torch/csrc/distributed/rpc/message.h>
 
 namespace caffe2 {
 // Required for cpp_custom_type_hack to work
@@ -44,6 +45,32 @@ void record_function_exit(const at::Tensor& handle) {
   }
   rec._end();
 }
+
+template <typename T>
+void _call_end_callbacks_on_fut(
+    const at::Tensor& handle,
+    const std::shared_ptr<torch::utils::Future<T>> fut) {
+  // Add a callback onto the future to mark run RecordFunction's end callbacks
+  // when the future is completed.
+  fut->addCallback(
+      // Copy handle by value to persist after the python context manager is
+      // exited.
+      [handle](
+          const T& /* unused */,
+          const c10::optional<torch::utils::FutureError>& /* unused */) {
+        TORCH_INTERNAL_ASSERT(
+            handle.defined(),
+            "Undefined RecordFunction handle. This can happen if the handle is "
+            "not correctly persisted and is destroyed before the future is "
+            "realized.");
+        auto& rec = getRecordFunctionFromTensor(handle);
+        rec._end();
+      });
+}
+// Explicit template instantiation of _call_end_callbacks_on_fut.
+template void _call_end_callbacks_on_fut(
+    const at::Tensor& handle,
+    const std::shared_ptr<torch::distributed::rpc::FutureMessage>);
 
 // Internal only, do not use directly, use Python's record_function()
 static auto registry =
