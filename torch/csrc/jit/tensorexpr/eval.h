@@ -582,8 +582,7 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
     }
     void* ptr = iter->second;
 
-    const Expr* flat_idx = flatten_index(v->buf()->dims(), v->indices());
-    flat_idx->accept(this);
+    v->index()->accept(this);
     std::vector<int> index = value().as_vec<int>();
     v->mask()->accept(this);
     std::vector<int> mask = value().as_vec<int>();
@@ -616,8 +615,7 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
 
     void* ptr = iter->second;
 
-    const Expr* flat_idx = flatten_index(v->buf()->dims(), v->indices());
-    flat_idx->accept(this);
+    v->index()->accept(this);
     std::vector<int> index = value().as_vec<int>();
     v->mask()->accept(this);
     std::vector<int> mask = value().as_vec<int>();
@@ -859,13 +857,7 @@ class ExprEval {
       : dtype_(expr.dtype()) {
     std::vector<BufferArg> buffer_args_extended = buffer_args;
     Buffer ret_buf("ret_val", dtype_, {1});
-    std::vector<const Expr*> indices;
-    const Expr* zero = new IntImm(0);
-    for (size_t i = 0; i < ret_buf.data()->ndim(); i++) {
-      indices.push_back(zero);
-    }
-    Stmt* store_stmt =
-        new Store(ret_buf.data(), indices, expr.node(), new IntImm(1));
+    Stmt* store_stmt = Store::make(VarHandle(ret_buf.data()), 0, expr);
     buffer_args_extended.push_back(ret_buf);
     codegen_.reset(new CodeGenType(store_stmt, buffer_args_extended));
   }

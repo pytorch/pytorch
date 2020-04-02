@@ -428,7 +428,6 @@ class HypothesisTestCase(test_util.TestCase):
         threshold=0.005,
         stepsize=0.05,
         input_device_options=None,
-        ensure_outputs_are_inferred=False,
     ):
         """
         Implements a standard numerical gradient checker for the operator
@@ -456,8 +455,7 @@ class HypothesisTestCase(test_util.TestCase):
         res, grad, grad_estimated = gc.CheckSimple(
             op, inputs, outputs_to_check, outputs_with_grads,
             grad_ops=grad_ops,
-            input_device_options=input_device_options,
-            ensure_outputs_are_inferred=ensure_outputs_are_inferred,
+            input_device_options=input_device_options
         )
         self.assertEqual(grad.shape, grad_estimated.shape)
         self.assertTrue(
