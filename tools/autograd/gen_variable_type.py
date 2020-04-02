@@ -183,17 +183,15 @@ ${return_type} ${type_wrapper_name}(${type_method_formals}) {
 """)
 
 UNBOXEDONLY_WRAPPER_REGISTRATION = CodeTemplate("""\
-.impl("${operator_name_with_overload}",
-      torch::dispatch_autograd(
+.impl("${operator_name_with_overload}", torch::kAutograd,
         CppFunction::makeUnboxedOnly(VariableType::${type_wrapper_name})
-      ))
+      )
 """)
 
 WRAPPER_REGISTRATION = CodeTemplate("""\
-.impl("${operator_name_with_overload}",
-      torch::dispatch_autograd(
+.impl("${operator_name_with_overload}", torch::kAutograd,
         &VariableType::${type_wrapper_name}
-     ))
+     )
 """)
 
 UNPACK_TENSOR = CodeTemplate("""\
