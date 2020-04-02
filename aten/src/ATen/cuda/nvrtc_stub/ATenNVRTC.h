@@ -31,7 +31,6 @@ namespace at { namespace cuda {
 
 #define AT_FORALL_NVRTC(_)                       \
   _(nvrtcVersion)                                \
-  _(nvrtcAddNameExpression)                      \
   _(nvrtcCreateProgram)                          \
   _(nvrtcDestroyProgram)                         \
   _(nvrtcGetPTXSize)                             \
@@ -40,7 +39,6 @@ namespace at { namespace cuda {
   _(nvrtcGetErrorString)                         \
   _(nvrtcGetProgramLogSize)                      \
   _(nvrtcGetProgramLog)                          \
-  _(nvrtcGetLoweredName)                         \
   _(cuModuleLoadData)                            \
   _(cuModuleGetFunction)                         \
   _(cuOccupancyMaxActiveBlocksPerMultiprocessor) \
