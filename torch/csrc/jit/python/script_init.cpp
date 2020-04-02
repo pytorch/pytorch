@@ -257,9 +257,15 @@ FunctionSchema getSchemaWithNameAndDefaults(
       checkMutableFunctionDefault(range, arg, it->second);
       c10::optional<IValue> value = tryCalculateDefaultParam(arg, it->second);
       if (!value) {
-        throw ErrorReport(range)
-            << "Expected a default value of type " << arg.type()->python_str()
-            << " on parameter \"" << arg.name() << "\"";
+        ErrorReport error(range);
+        error << "Expected a default value of type " << arg.type()->python_str()
+              << " on parameter \"" << arg.name() << "\".";
+        if (arg.is_inferred_type()) {
+          error << "Because \"" << arg.name()
+                << "\" was not annotated with an explicit type "
+                << "it is assumed to be type 'Tensor'.";
+        }
+        throw error;
       }
       new_args.emplace_back(
           arg.name(), arg.type(), arg.N(), *value, arg.kwarg_only());
