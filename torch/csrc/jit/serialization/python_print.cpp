@@ -500,7 +500,7 @@ struct PythonPrintImpl {
       indent();
       body_ << useOf(lhs[i]);
       if (requiresAnnotation(lhs[i], rhs[i])) {
-        body_ << ": " << lhs[i]->type()->python_str();
+        body_ << ": " << lhs[i]->type()->python_str(type_printer_);
       }
       body_ << " = " << useOf(rhs[i]) << "\n";
     }
@@ -755,7 +755,7 @@ struct PythonPrintImpl {
           if (i > 0) {
             body_ << ", ";
           }
-          body_ << useOf(v) << ": " << v->type()->python_str();
+          body_ << useOf(v) << ": " << v->type()->python_str(type_printer_);
         }
         body_ << "):\n";
         printBody(graph->block());
@@ -787,7 +787,7 @@ struct PythonPrintImpl {
       if (v.isTuple() && v.type()->expect<TupleType>()->schema()) {
         // print the namedtuple constructor and let rest of tuple printing
         // continue
-        ss << v.type()->expect<TupleType>()->python_str();
+        ss << v.type()->expect<TupleType>()->python_str(type_printer_);
       }
       return false;
     };
@@ -839,14 +839,15 @@ struct PythonPrintImpl {
         printValueList(stmt, node->inputs(), "(", ")");
       } break;
       case prim::Uninitialized: {
-        stmt << "uninitialized(" << node->output()->type()->python_str() << ")";
+        stmt << "uninitialized("
+             << node->output()->type()->python_str(type_printer_) << ")";
       } break;
       case prim::Constant: {
         if (node->outputs().size() == 1 &&
             node->output()->type()->kind() == TypeKind::FunctionType) {
           auto fn = node->output()->type()->expect<FunctionType>();
           registerDependency(fn);
-          stmt << fn->name()->qualifiedName();
+          stmt << fn->python_str(type_printer_);
         } else if (!node->mustBeNone()) {
           IValue v = toIValue(node->output()).value();
           printConstant(stmt, v);
@@ -857,8 +858,8 @@ struct PythonPrintImpl {
       case aten::ScalarImplicit:
       case aten::FloatImplicit:
       case aten::IntImplicit: {
-        stmt << "annotate(" << node->output()->type()->python_str() << ", "
-             << useOf(node->input()) << ")";
+        stmt << "annotate(" << node->output()->type()->python_str(type_printer_)
+             << ", " << useOf(node->input()) << ")";
       } break;
       case aten::Int: {
         printValueList(stmt, node->inputs(), "int(", ")");
@@ -884,7 +885,7 @@ struct PythonPrintImpl {
       case prim::TupleConstruct: {
         if (auto qualname =
                 node->output()->type()->expect<TupleType>()->name()) {
-          stmt << qualname->qualifiedName();
+          stmt << node->output()->type()->python_str(type_printer_);
         }
         printValueList(
             stmt, node->inputs(), "(", node->inputs().size() == 1 ? ",)" : ")");
@@ -903,13 +904,14 @@ struct PythonPrintImpl {
         // Empty lists must be annotated with their type so the compiler knows
         // what type is supposed to be inside them
         if (node->inputs().size() == 0) {
-          stmt << "annotate(" << node->output()->type()->python_str()
-               << ", [])";
+          stmt << "annotate("
+               << node->output()->type()->python_str(type_printer_) << ", [])";
           // If we can't infer the type based on what's inside, explicitly
           // annotate it to disambiguate.
           // This happens for List[Tensor] vs. List[Optional[Tensor]]
         } else if (!elementTypeCanBeInferredFromMembers(elem_type)) {
-          stmt << "annotate(" << node->output()->type()->python_str() << ", ";
+          stmt << "annotate("
+               << node->output()->type()->python_str(type_printer_) << ", ";
           printValueList(stmt, node->inputs(), "[", "]");
           stmt << ")";
           // Otherwise just print a list
@@ -927,7 +929,8 @@ struct PythonPrintImpl {
         if (node->inputs().size() == 0 ||
             !elementTypeCanBeInferredFromMembers(dict_type->getKeyType()) ||
             !elementTypeCanBeInferredFromMembers(dict_type->getValueType())) {
-          stmt << "annotate(" << node->output()->type()->python_str() << ", ";
+          stmt << "annotate("
+               << node->output()->type()->python_str(type_printer_) << ", ";
           printDict(stmt, node->inputs());
           stmt << ")";
           // Otherwise just print a dict
@@ -937,8 +940,8 @@ struct PythonPrintImpl {
       } break;
       case prim::CreateObject: {
         const auto classType = node->output()->type()->expect<ClassType>();
-        stmt << classType->python_str() << ".__new__("
-             << classType->python_str() << ")";
+        stmt << classType->python_str(type_printer_) << ".__new__("
+             << classType->python_str(type_printer_) << ")";
       } break;
       case prim::GetAttr: {
         const auto obj = node->inputs().at(0);
@@ -993,7 +996,7 @@ struct PythonPrintImpl {
         if (node->input()->type()->isSubtypeOf(NoneType::get()) ||
             node->input()->mustBeNone()) {
           auto input_type = OptionalType::create(node->output()->type());
-          stmt << "annotate(" << input_type->python_str() << ", "
+          stmt << "annotate(" << input_type->python_str(type_printer_) << ", "
                << useOf(node->input()) << ")";
         } else {
           stmt << useOf(node->input());
@@ -1006,14 +1009,15 @@ struct PythonPrintImpl {
       // equivalent op
       case prim::unchecked_unwrap_optional:
       case prim::unchecked_cast: {
-        stmt << "unchecked_cast(" << node->output()->type()->python_str()
-             << ", " << useOf(node->input()) << ")";
+        stmt << "unchecked_cast("
+             << node->output()->type()->python_str(type_printer_) << ", "
+             << useOf(node->input()) << ")";
       } break;
       case prim::isinstance: {
         stmt << "isinstance(" << useOf(node->input()) << ", ";
         const auto& types = node->tys(attr::types);
         if (types.size() == 1) {
-          stmt << types.at(0)->python_str();
+          stmt << types.at(0)->python_str(type_printer_);
         } else {
           // check multiple things, e.g. (str, list, int)
           stmt << "(";
@@ -1022,7 +1026,7 @@ struct PythonPrintImpl {
             if (!first) {
               stmt << ", ";
             }
-            stmt << typ->python_str();
+            stmt << typ->python_str(type_printer_);
             first = false;
           }
           stmt << ")";
@@ -1030,7 +1034,8 @@ struct PythonPrintImpl {
         stmt << ")";
       } break;
       case prim::tolist: {
-        stmt << "annotate(" << node->output()->type()->python_str() << ", ";
+        stmt << "annotate(" << node->output()->type()->python_str(type_printer_)
+             << ", ";
         stmt << useOf(node->input(0)) << ".tolist()"
              << ")";
       } break;
@@ -1150,10 +1155,11 @@ struct PythonPrintImpl {
         // the flag print_first_argument_type determines when to do this
         body_ << arg_name;
         if (print_first_argument_type) {
-          body_ << ": " << arg.type()->python_str();
+          body_ << ": " << arg.type()->python_str(type_printer_);
         }
       } else {
-        body_ << ",\n    " << arg_name << ": " << arg.type()->python_str();
+        body_ << ",\n    " << arg_name << ": "
+              << arg.type()->python_str(type_printer_);
       }
       if (arg.default_value()) {
         printDefaultValue(arg, body_, *arg.default_value());
@@ -1161,7 +1167,8 @@ struct PythonPrintImpl {
       assignValue(*param_it++, arg_name);
     }
 
-    body_ << ") -> " << schema.returns().at(0).type()->python_str() << ":\n";
+    body_ << ") -> " << schema.returns().at(0).type()->python_str(type_printer_)
+          << ":\n";
     printBody(graph.block());
   }
 
@@ -1172,10 +1179,12 @@ struct PythonPrintImpl {
   PythonPrintImpl(
       std::vector<at::Tensor>& tensor_table,
       std::vector<c10::NamedTypePtr>& deps_table,
+      c10::TypePrinter type_printer,
       bool enforce_importable)
       : body_(&source_range_stack_),
         tensor_table_(tensor_table),
         deps_table_(deps_table),
+        type_printer_(type_printer),
         enforce_importable_(enforce_importable) {}
 
   void printClass(const ClassTypePtr& classType) {
@@ -1236,11 +1245,12 @@ struct PythonPrintImpl {
           // Print out a direct manipulation of the annotations dict, like:
           //   __annotations__["0"] = SomeType
           body_ << "__annotations__["
-                << "\"" << name << "\"] = " << type->python_str() << "\n";
+                << "\"" << name << "\"] = " << type->python_str(type_printer_)
+                << "\n";
         } else {
           // Otherwise: just emit a python 3 attribute annotation, like:
           //   foo : SomeType
-          body_ << name << " : " << type->python_str() << "\n";
+          body_ << name << " : " << type->python_str(type_printer_) << "\n";
         }
       }
 
@@ -1251,7 +1261,7 @@ struct PythonPrintImpl {
 
         indent();
         body_ << name << " : "
-              << "Final[" << v.type()->python_str() << "] = ";
+              << "Final[" << v.type()->python_str(type_printer_) << "] = ";
         auto ss = std::make_shared<TaggedStringStream>(&source_range_stack_);
         printConstant(*ss, v);
         body_ << ss->str() << "\n";
@@ -1278,7 +1288,8 @@ struct PythonPrintImpl {
         for (const auto& attr : tupleType->schema()->arguments()) {
           TORCH_INTERNAL_ASSERT(attr.type());
           indent();
-          body_ << attr.name() << " : " << attr.type()->python_str() << "\n";
+          body_ << attr.name() << " : "
+                << attr.type()->python_str(type_printer_) << "\n";
         }
       }
     } else if (auto interfaceType = type->cast<InterfaceType>()) {
@@ -1300,11 +1311,12 @@ struct PythonPrintImpl {
                at::ArrayRef<Argument>(method.arguments()).slice(1)) {
             auto type = arg.type();
             registerClassDependencies(type);
-            body_ << ", " << arg.name() << ": " << type->python_str();
+            body_ << ", " << arg.name() << ": "
+                  << type->python_str(type_printer_);
           }
           auto return_type = method.returns().at(0).type();
           registerClassDependencies(return_type);
-          body_ << ") -> " << return_type->python_str() << ":\n";
+          body_ << ") -> " << return_type->python_str(type_printer_) << ":\n";
           indent();
           body_ << "  pass\n";
         }
@@ -1332,6 +1344,10 @@ struct PythonPrintImpl {
   // table.
   std::vector<c10::NamedTypePtr>& deps_table_;
 
+  // A function that, given a named type, returns us the correct string to print
+  // for it.
+  c10::TypePrinter type_printer_;
+
   // when we print this, should we error if the resulting output would
   // not be able to be reparsed?
   bool enforce_importable_;
@@ -1340,10 +1356,12 @@ struct PythonPrintImpl {
 PythonPrint::PythonPrint(
     std::vector<at::Tensor>& tensor_table,
     std::vector<c10::NamedTypePtr>& deps_table,
+    c10::TypePrinter type_printer,
     bool enforce_importable)
     : pImpl(std::make_shared<PythonPrintImpl>(
           tensor_table,
           deps_table,
+          type_printer,
           enforce_importable)) {}
 
 void PythonPrint::printNamedType(const c10::NamedTypePtr& type) {
