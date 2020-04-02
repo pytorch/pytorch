@@ -24,6 +24,8 @@ ideep::tensor itensor_from_tensor(const at::Tensor& tensor);
 // Retrieve mkldnn data type from cpu ScalarType
 ideep::tensor::data_type get_mkldnn_dtype(ScalarType dtype);
 
+// Calculate MKL-DNN tensor scales from QTensor scales
+ideep::scale_t ConvertScales(const std::vector<float> &scales_z);
 }}
 
 #endif // AT_MKLDNN_ENABLED

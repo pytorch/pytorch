@@ -2293,6 +2293,152 @@ class TestComparatorOps(TestCase):
             self.assertEqual(result_ref, result,
                              "'tensor.{}(scalar)'' failed".format(op))
 
+@unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
+                     " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
+                     " with instruction set support avx2 or newer.")
+@unittest.skipIf(not torch._C.has_mkldnn, "MKL-DNN build is disabled")
+class TestQMKLDNNOps(TestCase):
+    @given(shapes=hu.array_shapes(3, 3),
+           has_bias=st.booleans(),
+           use_channelwise=st.booleans(),
+           X_scale=st.floats(0.2, 1.6),
+           ZP=st.sampled_from([0, 5]),
+           W_scale=st.lists(st.floats(0.2, 1.6), min_size=1, max_size=2),
+           W_ZP=st.sampled_from([0, 5]))
+    def test_linear_qmkldnn(self, shapes, has_bias, use_channelwise, X_scale, ZP, \
+		    W_scale, W_ZP):
+        """Tests the correctness of the Linear functional.
+        """
+        # Random inputs
+        X_zero_point = ZP
+        X_value_min = 10
+        X_value_max = 20
+        X_init = torch.from_numpy(np.random.randint(
+            X_value_min, X_value_max, shapes))
+        X = X_scale * (X_init - X_zero_point).to(dtype=torch.float)
+
+        N = np.random.randint(7, 17)
+        W_scale = W_scale * N
+        W_zero_point = [W_ZP]
+        W_zero_point = W_zero_point * N
+        # Resize W_scale and W_zero_points arrays equal to output_channels
+        W_scale = W_scale[:N]
+        W_zero_point = W_zero_point[:N]
+        W_value_min = -10
+        W_value_max = 10
+        W_init = torch.from_numpy(np.random.randint(
+            W_value_min, W_value_max, (N, X_init.shape[-1])))
+
+        b_init = torch.from_numpy(np.random.randint(0, 10, (N,)))
+        if use_channelwise:
+            W_scales_tensor = torch.tensor(W_scale, dtype=torch.float)
+            W_zero_points_tensor = torch.tensor(W_zero_point, dtype=torch.int32)
+            W = W_scales_tensor.reshape(-1, 1) * (W_init.to(dtype=torch.float) - \
+			    W_zero_points_tensor.reshape(-1, 1)).to(dtype=torch.float)
+            b = X_scale * W_scales_tensor * (b_init - 0).to(dtype=torch.float) if has_bias else None
+        else:
+            W = W_scale[0] * (W_init - W_zero_point[0]).to(dtype=torch.float)
+            b = X_scale * W_scale[0] * (b_init - 0).to(dtype=torch.float) if has_bias else None
+        
+        # compute the fp32 output and get the output_scale and output_zero_point
+        X_float = X.clone().to(torch.float) 
+        W_float = W.t().clone().to(torch.float).repeat(X.shape[0], 1, 1)
+        if has_bias:
+            linear_float = torch.addbmm(b.clone().to(torch.float), X_float, W_float)
+        else:
+            linear_float = torch.bmm(X_float, W_float)
+        Y_scale = (torch.max(linear_float) - torch.min(linear_float)) / 255
+        Y_zp = (-255*torch.min(linear_float) / \
+			(torch.max(linear_float) - torch.min(linear_float))).to(dtype=torch.int)
+
+        # get quantized input and weight tensor
+        X_q = torch.quantize_per_tensor(X, scale=X_scale, zero_point=X_zero_point, dtype=torch.quint8)
+        if use_channelwise:
+            W_q = torch.quantize_per_channel(W,
+                                             W_scales_tensor.to(dtype=torch.double),
+                                             W_zero_points_tensor.to(dtype=torch.long),
+                                             0,
+                                             dtype=torch.qint8)
+        else:
+            W_q = torch.quantize_per_tensor(W, 
+                                            scale=W_scale[0], 
+                                            zero_point=W_zero_point[0], 
+                                            dtype=torch.qint8)
+
+        qlinear_prepack = torch.ops.quantized.linear_prepack
+        qlinear = torch.ops.quantized.linear
+        
+        # Reference fbgemm linear result
+        torch.backends.quantized.engine = 'fbgemm'
+        W_prepack_ref = qlinear_prepack(W_q, b)
+        ref_result = qlinear(X_q, W_prepack_ref, Y_scale, Y_zp)
+
+        # DNNL linear result
+        torch.backends.quantized.engine = 'mkldnn'
+        W_prepack = qlinear_prepack(W_q, b)
+        q_result = qlinear(X_q, W_prepack, Y_scale, Y_zp)
+
+        # ignore off-by-1 differences
+        np.testing.assert_array_almost_equal(
+            ref_result.int_repr().numpy(), q_result.int_repr().numpy(), decimal=0)
+        
+    @given(K=st.integers(3, 7),
+           N=st.integers(3, 7),
+           W_scale=st.lists(st.floats(0.2, 1.6), min_size=1, max_size=2),
+           W_ZP=st.sampled_from([0, 5]),
+           use_bias=st.booleans(),
+           use_channelwise=st.booleans())
+    def test_prepack_unpack_linear_qmkldnn(self, K, N, W_scale, W_ZP, use_bias, use_channelwise):
+        W_zero_point = [0, W_ZP]
+        W_scale = W_scale * N
+        W_zero_point = W_zero_point * N
+        # Resize W_scale and W_zero_points arrays equal to N
+        W_scale = W_scale[:N]
+        W_zero_point = W_zero_point[:N]
+        W_value_min = -128
+        W_value_max = 127
+        W_init = torch.from_numpy(
+            np.random.randint(
+                W_value_min,
+                W_value_max,
+                (N, K)),
+        )
+        b_init = torch.from_numpy(np.random.randint(0, 10, (N,)))
+
+        if use_channelwise:
+            W_scales_tensor = torch.tensor(W_scale, dtype=torch.float)
+            W_zero_points_tensor = torch.tensor(W_zero_point, dtype=torch.float)
+            W = W_scales_tensor.reshape(-1, 1) * (W_init.to(dtype=torch.float) -
+                                                  W_zero_points_tensor.reshape(-1, 1)).to(dtype=torch.float)
+            b = W_scales_tensor * (b_init - 0).to(dtype=torch.float)
+        else:
+            W = W_scale[0] * (W_init - W_zero_point[0]).to(dtype=torch.float)
+            b = W_scale[0] * (b_init - 0).to(dtype=torch.float)
+
+        if use_channelwise:
+            W_q = torch.quantize_per_channel(W,
+                                             W_scales_tensor.to(dtype=torch.double),
+                                             W_zero_points_tensor.to(dtype=torch.long),
+                                             0,
+                                             dtype=torch.qint8)
+        else:
+            W_q = torch.quantize_per_tensor(W, scale=W_scale[0], zero_point=W_zero_point[0], dtype=torch.qint8)
+
+        bias_float = b if use_bias else None
+        # Reference result
+        torch.backends.quantized.engine = 'fbgemm'
+        W_q_ref = torch.ops.quantized.linear_prepack(W_q, bias_float)
+        W_q_unpack_ref, bias_ref = torch.ops.quantized.linear_unpack(W_q_ref)
+
+        # mkldnn result
+        torch.backends.quantized.engine = 'mkldnn'
+        W_q_mkldnn = torch.ops.quantized.linear_prepack(W_q, bias_float)
+        W_q_unpack_mkldnn, bias_mkldnn = torch.ops.quantized.linear_unpack(W_q_mkldnn)
+
+        self.assertEqual(W_q_unpack_ref.qscheme(), W_q_unpack_mkldnn.qscheme())
+        self.assertEqual(W_q_unpack_ref.int_repr().to(torch.int32), W_q_unpack_mkldnn.int_repr().to(torch.int32))
+        if use_bias:
+            self.assertEqual(bias_ref, bias_mkldnn)
 
 if __name__ == "__main__":
     run_tests()

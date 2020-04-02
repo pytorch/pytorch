@@ -2,6 +2,7 @@
 #include <ATen/core/op_registration/op_registration.h>
 #include <ATen/cpp_custom_type_hack.h>
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
+#include <ATen/native/quantized/cpu/qmkldnn_utils.h>
 #include <ATen/native/quantized/cpu/init_qnnpack.h>
 #include <ATen/native/quantized/cpu/qnnpack_utils.h>
 #include <ATen/quantized/Quantizer.h>
@@ -12,6 +13,9 @@ namespace caffe2 {
 #ifdef USE_FBGEMM
 // Required for cpp_custom_type_hack to work
 CAFFE_KNOWN_TYPE(PackedLinearWeight);
+#if AT_MKLDNN_ENABLED()
+CAFFE_KNOWN_TYPE(PackedWeightQmkldnn);
+#endif
 CAFFE_KNOWN_TYPE(PackedLinearWeightFp16);
 #endif // USE_FBGEMM
 #ifdef USE_PYTORCH_QNNPACK
@@ -177,6 +181,11 @@ class QLinearPackWeightInt8 final : public c10::OperatorKernel {
     auto& ctx = at::globalContext();
 
 #ifdef USE_FBGEMM
+#if AT_MKLDNN_ENABLED()
+    if (ctx.qEngine() == at::QEngine::MKLDNN) {
+      return mkldnn_linear_prepack(weight, bias);
+    }
+#endif
     if (ctx.qEngine() == at::QEngine::FBGEMM) {
       return fbgemm_linear_prepack(weight, bias);
     }

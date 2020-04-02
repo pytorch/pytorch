@@ -114,6 +114,17 @@ ideep::tensor itensor_from_tensor(const at::Tensor& tensor) {
   }
 }
 
+ideep::scale_t ConvertScales(const std::vector<float> &scales_z) {
+  ideep::scale_t scales(scales_z.size());
+#ifdef _OPENMP
+  #pragma omp parallel for schedule(static)
+#endif
+  for (int i = 0; i < scales_z.size(); i++) {
+    scales[i] = 1.0f / scales_z[i];
+  }
+  return scales;
+}
+
 }}
 
 #endif // AT_MKLDNN_ENABLED()
