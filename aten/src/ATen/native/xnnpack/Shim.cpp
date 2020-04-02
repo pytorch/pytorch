@@ -28,6 +28,29 @@ bool available() {
     return false;
 }
 
+bool use_clamp(
+    const Tensor&,
+    const Tensor* const,
+    const Scalar,
+    const Scalar output_max) {
+  return false;
+}
+
+Tensor& clamp_(
+    const Tensor&,
+    const Tensor&,
+    const Scalar,
+    const Scalar output_max) {
+  TORCH_CHECK(false, internal::kError);
+}
+
+Tensor clamp(
+    const Tensor&,
+    const Scalar,
+    const Scalar output_max) {
+  TORCH_CHECK(false, internal::kError);
+}
+
 bool use_convolution2d(
     const Tensor&,
     const Tensor&,
@@ -91,7 +114,6 @@ Tensor max_pool2d(
 }
 
 } // namespace xnnpack
-
 } // namespace native
 } // namespace at
 

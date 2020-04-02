@@ -9,6 +9,10 @@ namespace native {
 namespace xnnpack {
 namespace internal {
 
+bool can_avoid_reallocation(
+    const Tensor& input,
+    c10::MemoryFormat memory_format);
+
 Tensor allocate_padded_contiguous_if_needed(
     const Tensor& input,
     c10::MemoryFormat memory_format);

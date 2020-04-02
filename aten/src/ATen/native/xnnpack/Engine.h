@@ -7,6 +7,32 @@ namespace native {
 namespace xnnpack {
 
 //
+// Clamp
+//
+
+bool use_clamp(
+    const Tensor& input,
+    const Tensor* output,
+    float output_min,
+    float output_max);
+
+Tensor clamp(
+    const Tensor& input,
+    float output_min,
+    float output_max);
+
+Tensor& clamp_(
+    Tensor& input,
+    float output_min,
+    float output_max);
+
+Tensor& clamp_out(
+    Tensor& output,
+    const Tensor & input,
+    float output_min,
+    float output_max);
+
+//
 // Convolution
 //
 

@@ -74,11 +74,18 @@ struct Layout final {
     // XNNPACK denotes that operator with an _nc suffix and expects all dimensions,
     // except channels, to be flattened into one argument: batch_size.
     static int64_t batch(const IntArrayRef tensor) {
+      // Empty dimensions are invalid.
       if (C10_UNLIKELY(tensor.empty())) {
         return -1;
       }
 
-      // Handle the case where batch size is zero.
+      // 1D tensors have a batch size of 0.
+      // This single dimension is to be considered as channels.
+      if (tensor.size() == 1) {
+        return 0;
+      }
+
+      // For 2D tensors, or above:
       int64_t batch = tensor[0];
 
       for (size_t index = 1u; index < (tensor.size() - 1u); ++index) {
@@ -89,10 +96,13 @@ struct Layout final {
     };
 
     static int64_t channel(const IntArrayRef tensor) {
+      // Empty tensor dimensions are invalid.
       if (C10_UNLIKELY(tensor.empty())) {
         return -1;
       }
 
+      // For tensors with dimensionality of 1D or above, consider the last
+      // dimension as number of channels.
       return tensor.back();
     };
   };
