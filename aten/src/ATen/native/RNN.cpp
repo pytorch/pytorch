@@ -68,7 +68,7 @@ struct CellParamsBase : torch::CustomClassHolder {
   virtual const Tensor &b_ih() const = 0;
   virtual const Tensor &b_hh() const = 0;
 
-  virtual CellParamsSerializationType __getstate__() const;
+  virtual CellParamsSerializationType __getstate__() const = 0;
 };
 
 // Pretty much all cells we support take the same set of arguments, but threading those
@@ -254,7 +254,7 @@ c10::intrusive_ptr<CellParamsBase> make_quantized_cell_params(
 // aten/src/ATen/native/quantized/cpu/fbgemm_utils.h.
 
 c10::intrusive_ptr<CellParamsBase> make_quantized_cell_params_dynamic(
-    at::Tensor w_ih_packed, at::Tensor w_hh_packed);
+    at::Tensor w_ih_packed, at::Tensor w_hh_packed, at::Tensor bias_ih, at::Tensor bias_hh);
 
 struct QuantizedCellParamsDynamic : public CellParamsBase {
   QuantizedCellParamsDynamic(
@@ -350,19 +350,13 @@ struct QuantizedCellParamsDynamic : public CellParamsBase {
     TORCH_INTERNAL_ASSERT(packed_hh.size() == 1);
 
     return make_quantized_cell_params_dynamic(
-      std::move(packed_ih[0]).toTensor(), std::move(packed_hh[0]).toTensor());
+      std::move(packed_ih[0]).toTensor(), std::move(packed_hh[0]).toTensor(),
+      std::move(b_ih), std::move(b_hh));
   }
 };
 
 c10::intrusive_ptr<CellParamsBase> make_quantized_cell_params_dynamic(
-    at::Tensor w_ih_packed, at::Tensor w_hh_packed) {
-  static at::Tensor undefined;
-  auto& packed_struct_ih =
-      cpp_custom_type_hack::cast<PackedLinearWeight>(w_ih_packed);
-  auto& packed_struct_hh =
-      cpp_custom_type_hack::cast<PackedLinearWeight>(w_hh_packed);
-  auto bias_ih = packed_struct_ih.bias.value_or(undefined);
-  auto bias_hh = packed_struct_hh.bias.value_or(undefined);
+    at::Tensor w_ih_packed, at::Tensor w_hh_packed, at::Tensor bias_ih, at::Tensor bias_hh) {
   return c10::make_intrusive<QuantizedCellParamsDynamic>(
     std::move(w_ih_packed), std::move(w_hh_packed), std::move(bias_ih), std::move(bias_hh));
 }
@@ -390,10 +384,26 @@ struct QuantizedCellParamsFP16 : public CellParamsBase{
     TORCH_CHECK(false, "matmul is not supported with quantized cell params");
   }
   Tensor linear_ih(const Tensor& input) const override {
-    return at::fbgemm_linear_fp16_weight(input, packed_ih, b_ih_);
+    const auto kFuncName = "quantized::linear_dynamic_fp16";
+    const auto kOvrldName = "";
+    const std::vector<c10::IValue> output_ih_list =
+        callOp(kFuncName, kOvrldName, input, packed_ih);
+    TORCH_INTERNAL_ASSERT(
+        output_ih_list.size() == 1,
+        "The output vector should have exact one element");
+    const Tensor output_ih = output_ih_list[0].toTensor();
+    return output_ih;
   }
   Tensor linear_hh(const Tensor& h) const override {
-    return at::fbgemm_linear_fp16_weight(h, packed_hh, b_hh_);
+    const auto kFuncName = "quantized::linear_dynamic_fp16";
+    const auto kOvrldName = "";
+    const std::vector<c10::IValue> output_hh_list =
+        callOp(kFuncName, kOvrldName, h, packed_hh);
+    TORCH_INTERNAL_ASSERT(
+        output_hh_list.size() == 1,
+        "The output vector should have exact one element");
+    const Tensor output_hh = output_hh_list[0].toTensor();
+    return output_hh;
   }
 
   const Tensor &b_ih() const override {
@@ -463,6 +473,32 @@ static std::unordered_map<
   {"quantized_fp16", &QuantizedCellParamsFP16::__setstate__}
 };
 
+// Stupid wrapper to convert from -> to .
+struct QRNNCellParamsWrapper {
+  QRNNCellParamsWrapper(c10::intrusive_ptr<CellParamsBase> param)
+    : param_(std::move(param)) {}
+
+  Tensor matmul_ih(const Tensor& input) const {
+    return param_->matmul_ih(input);
+  }
+  Tensor matmul_hh(const Tensor& h) const {
+    return param_->matmul_hh(h);
+  }
+  Tensor linear_ih(const Tensor& input) const {
+    return param_->linear_ih(input);
+  }
+  Tensor linear_hh(const Tensor& h) const {
+    return param_->linear_hh(h);
+  }
+  const Tensor &b_ih() const {
+    return param_->b_ih();
+  }
+  const Tensor &b_hh() const {
+    return param_->b_hh();
+  }
+
+  c10::intrusive_ptr<CellParamsBase> param_;
+};
 
 // Gathers every two elements of a vector in a vector of pairs
 template<typename T>
@@ -515,73 +551,6 @@ static std::vector<QuantizedCellParams> gather_quantized_params(TensorList param
                         params[i + 4], params[i + 5], params[i + 6], params[i + 7],
                         params[i + 8].item(), params[i + 9].item(),
                         params[i + 10].item(), params[i + 11].item());
-  }
-  return result;
-}
-
-static std::vector<QuantizedCellParamsDynamic> _quantized_params_dynamic(
-  TensorList params, std::string qengine) {
-
-    static at::Tensor undefined;
-    std::vector<QuantizedCellParamsDynamic> result;
-    for (size_t i = 0; i < params.size(); i += 2) {
-      at::Tensor bias_ih, bias_hh;
-
-      if (qengine == "fbgemm") {
-#ifdef USE_FBGEMM
-        auto& packed_struct_ih =
-            cpp_custom_type_hack::cast<PackedLinearWeight>(params[i]);
-        auto& packed_struct_hh =
-            cpp_custom_type_hack::cast<PackedLinearWeight>(params[i + 1]);
-
-        bias_ih = packed_struct_ih.bias.value_or(undefined);
-        bias_hh = packed_struct_hh.bias.value_or(undefined);
-#endif
-      } else if (qengine == "qnnpack") {
-#ifdef USE_PYTORCH_QNNPACK
-        auto& packed_struct_ih =
-            cpp_custom_type_hack::cast<PackedLinearWeightsQnnp>(params[i]);
-        auto& packed_struct_hh =
-            cpp_custom_type_hack::cast<PackedLinearWeightsQnnp>(params[i + 1]);
-
-        bias_ih = packed_struct_ih.bias;
-        bias_hh = packed_struct_hh.bias;
-#endif
-      }
-      result.emplace_back(params[i], params[i + 1], bias_ih, bias_hh);
-    }
-    return result;
-}
-
-static std::vector<QuantizedCellParamsDynamic> gather_quantized_params_dynamic(
-    TensorList params) {
-
-  TORCH_CHECK(
-      params.size() % 2 == 0,
-      "got an incorrect number of quantized RNN parameters");
-  auto& ctx = at::globalContext();
-#ifdef USE_FBGEMM
-  if (ctx.qEngine() == at::QEngine::FBGEMM){
-    return _quantized_params_dynamic(params, "fbgemm");
-}
-#endif
-#ifdef USE_PYTORCH_QNNPACK
-  if (ctx.qEngine() == at::QEngine::QNNPACK) {
-      return _quantized_params_dynamic(params, "qnnpack");
-  }
-#endif
-  TORCH_INTERNAL_ASSERT(false, "Tried to use quantized RNN without FBGEMM or QNNPACK!")
-
-}
-
-static std::vector<QuantizedCellParamsFP16> gather_quantized_params_fp16(
-    TensorList params) {
-  static at::Tensor undefined;
-  std::vector<QuantizedCellParamsFP16> result;
-  TORCH_CHECK(params.size() % 4 == 0,
-              "incorrect number of quantized RNN parameters FP16");
-  for (size_t i = 0; i < params.size(); i += 4) {
-    result.emplace_back(params[i], params[i + 1], params[i + 2], params[i + 3]);
   }
   return result;
 }
@@ -1150,7 +1119,7 @@ std::tuple<Tensor, Tensor> NAME(                                               \
   return results;                                                              \
 }                                                                              \
                                                                                \
-std::tuple<Tensor, Tensor> NAME(                                               \
+std::tuple<Tensor, Tensor> NAME (                                               \
     const Tensor& data, \
     const Tensor& batch_sizes, \
     const Tensor& hx, \
@@ -1181,25 +1150,23 @@ std::tuple<Tensor, Tensor> NAME(                                               \
 }
 
 #define ONE_HIDDEN_QRNN(NAME, CELL)                                             \
-std::tuple<Tensor, Tensor> NAME(                                               \
+std::tuple<Tensor, Tensor> NAME##_input (                                               \
     const Tensor& _input, \
     const Tensor& hx, \
-    TensorList _params, \
+    c10::List<c10::intrusive_ptr<CellParamsBase>> _params, \
     bool has_biases, \
     int64_t num_layers, \
     double dropout_p,  \
     bool train, \
     bool bidirectional, \
     bool batch_first) { \
-  if (at::cudnn_is_acceptable(_input)) {                                       \
-    Tensor output, hy;                                                         \
-    gru_cudnn_stub(_input.device().type(), output, hy, _input, hx, _params, has_biases, \
-            num_layers, dropout_p, train, bidirectional, batch_first);         \
-    return std::make_tuple(std::move(output), std::move(hy));                  \
-  }                                                                            \
-  check_device(_input, _params, hx); \
+  std::vector<QRNNCellParamsWrapper> params; \
+  for (c10::intrusive_ptr<CellParamsBase> x : _params) { \
+    params.emplace_back(std::move(x)); \
+  } \
+  /* TODOJAMES */                                     \
+  /* check_device(_input, _params, hx); */ \
   auto input = batch_first ? _input.transpose(0, 1) : _input;                  \
-  auto params = gather_quantized_params(_params);                            \
   auto results = _rnn_impl_with_concat<CELL, FullLayer, FullBidirectionalLayer>( \
       input, params, hx.unbind(0), num_layers, dropout_p, train, bidirectional); \
   if (batch_first) {                                                           \
@@ -1208,24 +1175,21 @@ std::tuple<Tensor, Tensor> NAME(                                               \
   return results;                                                              \
 }                                                                              \
                                                                                \
-std::tuple<Tensor, Tensor> NAME(                                               \
+std::tuple<Tensor, Tensor> NAME##_data (                                               \
     const Tensor& data, \
     const Tensor& batch_sizes, \
     const Tensor& hx, \
-    TensorList _params, \
+    c10::List<c10::intrusive_ptr<CellParamsBase>> _params, \
     bool has_biases, \
     int64_t num_layers, \
     double dropout_p, \
     bool train, \
     bool bidirectional) {  \
-  if (at::cudnn_is_acceptable(data)) {                                         \
-    Tensor output, hy;                                                         \
-    gru_packed_cudnn_stub(data.device().type(), output, hy, data, batch_sizes, hx, \
-            _params, has_biases, num_layers, dropout_p, train, bidirectional); \
-    return std::make_tuple(std::move(output), std::move(hy));                                        \
-  }                                                                            \
+  std::vector<QRNNCellParamsWrapper> params; \
+  for (c10::intrusive_ptr<CellParamsBase> x : _params) { \
+    params.emplace_back(std::move(x)); \
+  }                                                     \
   PackedSequence input { data, batch_sizes };                                  \
-  auto params = gather_quantized_params(_params);                            \
   auto result = _rnn_impl_with_concat<CELL, PackedLayer, PackedBidirectionalLayer>( \
           input, params, hx.unbind(0), num_layers, dropout_p, train, bidirectional); \
   auto & packed_output = std::get<0>(result);                                  \
@@ -1233,7 +1197,7 @@ std::tuple<Tensor, Tensor> NAME(                                               \
 }
 
 ONE_HIDDEN_RNN(gru, GRUCell<CellParams>)
-ONE_HIDDEN_QRNN(quantized_gru, GRUCell<QuantizedCellParams>)
+ONE_HIDDEN_QRNN(quantized_gru, GRUCell<QRNNCellParamsWrapper>)
 using tanf_cell_type = SimpleCell<tanh_f, CellParams>;
 ONE_HIDDEN_RNN(rnn_tanh, tanf_cell_type)
 using relu_cell_type = SimpleCell<relu_f, CellParams>;
@@ -1425,33 +1389,6 @@ Tensor rnn_relu_cell(
 // an int8 or float16 quantized weight. This is advantageous in small-batch-size
 // scenarios where runtime is dominated by memory fetches of the weight matrix.
 
-// Stupid wrapper to convert from -> to .
-struct QRNNCellParamsWrapper {
-  QRNNCellParamsWrapper(c10::intrusive_ptr<CellParamsBase> param)
-    : param_(std::move(param)) {}
-
-  Tensor matmul_ih(const Tensor& input) const {
-    return param_->matmul_ih(input);
-  }
-  Tensor matmul_hh(const Tensor& h) const {
-    return param_->matmul_hh(h);
-  }
-  Tensor linear_ih(const Tensor& input) const {
-    return param_->linear_ih(input);
-  }
-  Tensor linear_hh(const Tensor& h) const {
-    return param_->linear_hh(h);
-  }
-  const Tensor &b_ih() const {
-    return param_->b_ih();
-  }
-  const Tensor &b_hh() const {
-    return param_->b_hh();
-  }
-
-  c10::intrusive_ptr<CellParamsBase> param_;
-};
-
 std::tuple<Tensor, Tensor, Tensor> quantized_lstm_tensor(
       const Tensor& _input, c10::List<at::Tensor> hx_,
       c10::List<c10::intrusive_ptr<CellParamsBase>> _params_, bool has_biases,
@@ -1630,7 +1567,7 @@ static auto registry =
         .op("aten::quantized_lstm.data(Tensor data, Tensor batch_sizes, Tensor[] hx, __torch__.torch.classes.rnn.CellParamsBase[] params, bool has_biases, int num_layers, float dropout, bool train, bool bidirectional, *, ScalarType? dtype=None, bool use_dynamic=False) -> (Tensor, Tensor, Tensor)",
             torch::RegisterOperators::options().kernel<decltype(quantized_lstm_data), quantized_lstm_data>(
                 DispatchKey::CPUTensorId))
-        .op("quantized::make_quantized_cell_params_dynamic(Tensor w_ih, Tensor w_hh) -> __torch__.torch.classes.rnn.CellParamsBase",
+        .op("quantized::make_quantized_cell_params_dynamic(Tensor w_ih, Tensor w_hh, Tensor bias_ih, Tensor bias_hh) -> __torch__.torch.classes.rnn.CellParamsBase",
             torch::RegisterOperators::options().kernel<decltype(make_quantized_cell_params_dynamic), make_quantized_cell_params_dynamic>(
                 DispatchKey::CPUTensorId))
         .op("quantized::make_quantized_cell_params_fp16(Tensor w_ih, Tensor w_hh, Tensor b_ih, Tensor b_hh) -> __torch__.torch.classes.rnn.CellParamsBase",
@@ -1638,6 +1575,12 @@ static auto registry =
                 DispatchKey::CPUTensorId))
         .op("quantized::make_quantized_cell_params(Tensor w_ih, Tensor w_hh, Tensor b_ih, Tensor b_hh) -> __torch__.torch.classes.rnn.CellParamsBase",
             torch::RegisterOperators::options().kernel<decltype(make_quantized_cell_params), make_quantized_cell_params>(
+                DispatchKey::CPUTensorId))
+        .op("aten::quantized_gru.input(Tensor input, Tensor hx, __torch__.torch.classes.rnn.CellParamsBase[] params, bool has_biases, int num_layers, float dropout, bool train, bool bidirectional, bool batch_first) -> (Tensor, Tensor)",
+            torch::RegisterOperators::options().kernel<decltype(quantized_gru_input), quantized_gru_input>(
+                DispatchKey::CPUTensorId))
+        .op("aten::quantized_gru.data(Tensor data, Tensor batch_sizes, Tensor hx, __torch__.torch.classes.rnn.CellParamsBase[] params, bool has_biases, int num_layers, float dropout, bool train, bool bidirectional) -> (Tensor, Tensor)",
+            torch::RegisterOperators::options().kernel<decltype(quantized_gru_data), quantized_gru_data>(
                 DispatchKey::CPUTensorId));
 
 }  // namespace
