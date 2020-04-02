@@ -1,7 +1,7 @@
 #pragma once
 
-#include <torch/csrc/WindowsTorchApiMacro.h>
 #include <c10/util/Exception.h>
+#include <torch/csrc/WindowsTorchApiMacro.h>
 
 /*
  * dispatch.h prevents the need from adding manual dispatch in every class that
