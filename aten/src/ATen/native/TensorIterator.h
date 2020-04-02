@@ -9,6 +9,7 @@
 #include <c10/util/Optional.h>
 #include <ATen/MemoryOverlap.h>
 #include <ATen/NamedTensorUtils.h>
+#include <ATen/Parallel.h>
 
 // TensorIterator is a helper class for element-wise operations, such as
 // arithmetic, comparisons, and trigonometric functions. It handles
@@ -263,8 +264,8 @@ struct CAFFE2_API TensorIterator {
     return c10::fetch_and_cast<T>(op.tensor.scalar_type(), op.data);
   }
 
-  void for_each(loop_t loop);
-  void for_each(loop2d_t loop);
+  void for_each(loop_t loop, int64_t grain_size = at::internal::GRAIN_SIZE);
+  void for_each(loop2d_t loop, int64_t grain_size = at::internal::GRAIN_SIZE);
 
   void parallel_reduce(loop2d_t loop);
 

@@ -161,14 +161,15 @@ void CudaPrinter::visit(const Intrinsics* v) {
 void CudaPrinter::visit(const Load* v) {
   // TODO: find a better metric in using ldg or not. Support different dtypes.
   if (v->dtype().scalar_type() == ScalarType::Half) {
-    os() << "__half2float(" << *v->base_handle() << "[" << *v->index() << "])";
+    os() << "__half2float(" << *v->base_handle() << "[" << *v->flat_index()
+         << "])";
   } else {
-    os() << "__ldg(" << *v->base_handle() << " + " << *v->index() << ")";
+    os() << "__ldg(" << *v->base_handle() << " + " << *v->flat_index() << ")";
   }
 }
 
 void CudaPrinter::visit(const Store* v) {
-  os() << *v->base_handle() << "[" << *v->index() << "] = ";
+  os() << *v->base_handle() << "[" << *v->flat_index() << "] = ";
   if (v->value()->dtype().scalar_type() == ScalarType::Half) {
     os() << "__float2half(" << *v->value() << ");";
   } else {
@@ -579,7 +580,8 @@ void CudaCodeGen::call(const std::vector<CallArg>& args) {
     {
       std::lock_guard<std::mutex> lock(gen->mutex_);
       auto philox_engine_inputs =
-          gen->philox_engine_inputs(total_elements_per_thread);
+          at::check_generator<at::CUDAGenerator>(gen)->philox_engine_inputs(
+              total_elements_per_thread);
       rand_seed = philox_engine_inputs.first;
       rand_offset = philox_engine_inputs.second;
     }

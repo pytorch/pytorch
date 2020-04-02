@@ -16,7 +16,6 @@ import os
 import shutil
 import torch.testing._internal.common_utils as common
 
-
 '''Usage: python test/onnx/test_operators.py [--no-onnx] [--produce-onnx-test-data]
           --no-onnx: no onnx python dependence
           --produce-onnx-test-data: generate onnx test data
@@ -255,7 +254,12 @@ class TestOperators(TestCase):
 
     def test_batchnorm_training(self):
         x = torch.ones(2, 2, 2, 2, requires_grad=True)
-        self.assertONNX(nn.BatchNorm2d(2), x, training=True, keep_initializers_as_inputs=True)
+        self.assertONNX(nn.BatchNorm2d(2), x, training=torch.onnx.TrainingMode.TRAINING, keep_initializers_as_inputs=True)
+
+    def test_batchnorm_training_opset12(self):
+        x = torch.ones(2, 2, 2, 2, requires_grad=True)
+        self.assertONNX(nn.BatchNorm2d(2), x, training=torch.onnx.TrainingMode.TRAINING,
+                        keep_initializers_as_inputs=True, opset_version=12)
 
     def test_conv(self):
         x = torch.ones(20, 16, 50, 40, requires_grad=True)
@@ -671,6 +675,18 @@ class TestOperators(TestCase):
     def test_dropout(self):
         x = torch.randn(3, 4, requires_grad=True)
         self.assertONNX(lambda x: torch.max(functional.dropout(x, training=False)), x)
+
+    def test_dropout_default(self):
+        x = torch.randn(3, 4, requires_grad=True)
+        self.assertONNX(lambda x: torch.max(functional.dropout(x,)), x)
+
+    def test_dropout_training(self):
+        x = torch.randn(3, 4, requires_grad=True)
+        self.assertONNX(lambda x: torch.max(functional.dropout(x)), x, training=torch.onnx.TrainingMode.TRAINING)
+
+    def test_dropout_training_opset12(self):
+        x = torch.randn(3, 4, requires_grad=True)
+        self.assertONNX(lambda x: torch.max(functional.dropout(x)), x, opset_version=12, training=torch.onnx.TrainingMode.TRAINING)
 
     def test_nonzero(self):
         x = torch.tensor([[[2., 2.], [1., 0.]], [[0., 0.], [1., 1.]]], requires_grad=True)
