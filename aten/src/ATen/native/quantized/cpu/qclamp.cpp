@@ -25,7 +25,7 @@ Tensor qnnpack_clamp(Tensor input, Scalar min, Scalar max) {
 
   initQNNPACK();
 
-  Tensor input_contig = input.contiguous();
+  Tensor input_contig = input.contiguous(input.suggest_memory_format());
   size_t num_elems = input_contig.numel() / input_contig.size(0);
 
   auto min_f = min.to<float>();
@@ -47,7 +47,7 @@ Tensor qnnpack_clamp(Tensor input, Scalar min, Scalar max) {
 
   Tensor qy = at::_empty_affine_quantized(
     input_contig.sizes(),
-    input.options(),
+    input_contig.options(),
     input_contig.q_scale(),
     input_contig.q_zero_point());
 
