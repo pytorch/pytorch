@@ -254,6 +254,11 @@ const Expr* IRMutator::mutate(const Polynomial* v) {
   return new Polynomial(v->hasher(), newScalar, variables);
 }
 
+const Expr* IRMutator::mutate(const RoundOff* v) {
+  return new RoundOff(
+      v->lhs()->accept_mutator(this), v->rhs()->accept_mutator(this));
+}
+
 const Expr* IRMutator::mutate(const BaseCallNode* v) {
   std::vector<const Expr*> params(v->nparams());
   bool any_change = false;

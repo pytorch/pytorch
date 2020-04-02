@@ -64,20 +64,20 @@ namespace {
 
 auto registerer = torch::import()
   .def("aten::AA(Tensor self) -> Tensor",
-    torch::dispatch(DispatchKey::CPUTensorId, &AA_op))
+    DispatchKey::CPUTensorId, &AA_op)
   .def("aten::BB(Tensor self) -> Tensor", &BB_op)
   .impl("aten::CC(Tensor self) -> Tensor",
-    torch::dispatch(DispatchKey::CPUTensorId, &CC_op))
+    DispatchKey::CPUTensorId, &CC_op)
   .impl("aten::DD(Tensor self) -> Tensor", &DD_op)
-  .def("aten::EE(Tensor self) -> Tensor", torch::dispatch(
+  .def("aten::EE(Tensor self) -> Tensor",
     DispatchKey::CPUTensorId,
-    CppFunction::makeUnboxedOnly(EE_op)))
+    CppFunction::makeUnboxedOnly(EE_op))
   .def("aten::FF(Tensor self) -> Tensor",
     CppFunction::makeUnboxedOnly(FF_op))
-  .impl("aten::GG(Tensor self) -> Tensor", torch::dispatch(
+  .impl("aten::GG(Tensor self) -> Tensor",
     DispatchKey::CPUTensorId, [] (Tensor a) -> Tensor {
       return call_FF_op(a);
-    }))
+    })
   .impl("aten::HH(Tensor self) -> Tensor",
     [] (Tensor a) -> Tensor {
       return a;
