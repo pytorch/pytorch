@@ -117,16 +117,16 @@ DEFAULT_UNBOXEDONLY_FUNCTION_REGISTRATION = CodeTemplate("""\
       CppFunction::makeUnboxedOnly(TypeDefault::${type_wrapper_name}))
 """)
 BACKEND_UNBOXEDONLY_FUNCTION_REGISTRATION = CodeTemplate("""\
-.impl("${operator_name_with_overload}", torch::dispatch(
+.impl("${operator_name_with_overload}",
     DispatchKey::${Backend}TensorId,
-    CppFunction::makeUnboxedOnly(${Type}::${type_wrapper_name})))
+    CppFunction::makeUnboxedOnly(${Type}::${type_wrapper_name}))
 """)
 DEFAULT_FUNCTION_REGISTRATION = CodeTemplate("""\
 .impl("${operator_name_with_overload}", &TypeDefault::${type_wrapper_name})
 """)
 BACKEND_FUNCTION_REGISTRATION = CodeTemplate("""\
 .impl("${operator_name_with_overload}",
-      torch::dispatch(DispatchKey::${Backend}TensorId, &${Type}::${type_wrapper_name}))
+      DispatchKey::${Backend}TensorId, &${Type}::${type_wrapper_name})
 """)
 
 # add non-virtual declaration to TensorBody.h
