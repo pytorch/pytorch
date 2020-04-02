@@ -3,7 +3,7 @@
 #include <ATen/ATen.h>
 #include <ATen/Config.h>
 
-#if AT_BUILD_WITH_BLAS()
+#if defined(USE_BLAS)
 extern "C" void dscal_(int *n, double *a, double *x, int *incx);
 extern "C" void sscal_(int *n, float *a, float *x, int *incx);
 extern "C" void dgemv_(char *trans, int *m, int *n, double *alpha, double *a, int *lda, double *x, int *incx, double *beta, double *y, int *incy);
@@ -34,7 +34,7 @@ void gemv_fast_path(char *trans, int *m, int *n, scalar_t *alpha, scalar_t *a, i
   TORCH_INTERNAL_ASSERT(false, "gemv_fast_path shouldn't be called for this configuration");
 }
 
-#if AT_BUILD_WITH_BLAS()
+#if defined(USE_BLAS)
 template <>
 bool scal_use_fast_path<double>(int64_t n, int64_t incx) {
   auto intmax = std::numeric_limits<int>::max();
