@@ -1,12 +1,17 @@
 // Returns the frequency of elements of input non-negative integer tensor.
+#include <ATen/native/SummaryOps.h>
 
 #include <ATen/ATen.h>
 #include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
+#include <ATen/native/TensorIterator.h>
+#include <ATen/native/DispatchStub.h>
 
 #include <tuple>
 
 namespace at { namespace native {
+
+DEFINE_DISPATCH(histc_stub);
 
 ///////////////// bincount /////////////////
 namespace {
@@ -72,39 +77,11 @@ Tensor& histc_out(Tensor& hist, const Tensor &self, int64_t nbins, Scalar minval
   hist.resize_({nbins});
   hist.zero_();
 
-  AT_DISPATCH_FLOATING_TYPES(tensor.scalar_type(), "histc_cpu", [&]() -> void {
-    scalar_t minval;
-    scalar_t maxval;
-    int64_t *h_data;
-    scalar_t *tensor_data;
-
-    minval = minvalue.to<scalar_t>();
-    maxval = maxvalue.to<scalar_t>();
-
-    if (minval == maxval) {
-      minval = tensor.min().item().to<scalar_t>();
-      maxval = tensor.max().item().to<scalar_t>();
-    }
-    if (minval == maxval) {
-      minval = minval - 1;
-      maxval = maxval + 1;
-    }
-
-    TORCH_CHECK(!(std::isinf(minval) || std::isinf(maxval) || std::isnan(minval) || std::isnan(maxval)), "range of [", minval, ", ", maxval, "] is not finite");
-    TORCH_CHECK(minval < maxval, "max must be larger than min");
-
-    h_data = hist.data_ptr<int64_t>();
-    auto iter = at::TensorIterator();
-    iter.add_input(tensor);
-    iter.build();
-    cpu_serial_kernel(iter, [&](scalar_t val) -> void { 
-      if (val >= minval && val <= maxval) {
-        const int64_t bin = (int64_t)((val-minval) / (maxval-minval) * nbins);
-        h_data[std::min(bin, nbins-1)] += 1;
-      }
-    });
-  });
-
+  auto iter = at::TensorIterator();
+  iter.add_input(tensor);
+  iter.build();
+  TORCH_CHECK(iter.device_type() == at::kCPU, "Native histc only supports CPU");
+  histc_stub(iter.device_type(), iter, hist, nbins, minvalue, maxvalue);
   return hist;
 }
 
