@@ -47,6 +47,7 @@ class Cond;
 class Stmt;
 class Term;
 class Polynomial;
+class RoundOff;
 
 class TORCH_API IRMutator {
  public:
@@ -89,6 +90,7 @@ class TORCH_API IRMutator {
 
   virtual const Expr* mutate(const Term* v);
   virtual const Expr* mutate(const Polynomial* v);
+  virtual const Expr* mutate(const RoundOff* v);
 
   virtual Stmt* mutate(const For* v);
   virtual Stmt* mutate(const Block* v);
