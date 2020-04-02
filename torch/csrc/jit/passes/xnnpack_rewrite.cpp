@@ -91,8 +91,6 @@ bool bothMinMaxNone(
     const Match& match,
     const std::unordered_map<std::string, Value*>& vmap) {
   const auto& match_vmap = match.values_map;
-  // If value map has dummy_min_max in it, then it means
-  // the pattern to be replaced was the one containing hardtanh.
   TORCH_CHECK(
       vmap.find("dummy_min_max") != vmap.end(),
       "Expected to find dummy_min_max Value in the subgraph to be replaced.");

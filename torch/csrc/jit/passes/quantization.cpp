@@ -1,3 +1,4 @@
+#include <torch/csrc/jit/passes/quantization.h>
 #include <torch/csrc/jit/passes/constant_pooling.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
 #include <torch/csrc/jit/passes/freeze_module.h>
@@ -5,7 +6,6 @@
 #include <torch/csrc/jit/passes/graph_rewrite_helper.h>
 #include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/passes/prepack_folding.h>
-#include <torch/csrc/jit/passes/quantization.h>
 #include <torch/csrc/jit/passes/quantization_patterns.h>
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
 
