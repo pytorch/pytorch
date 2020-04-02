@@ -814,42 +814,8 @@ void removeMaxPoolUnusedOutput(Block* b) {
     }
   }
 }
-/*
-// This optimization fuses LogSoftmax and NegativeLogLikelihoodLoss operators into
-// one operator: SoftmaxCrossEntropyLoss.
-static void fuseLogSoftmaxNllLoss(Block* b) {
-  for (auto it = b->nodes().begin(), end = b->nodes().end(); it != end; ++it) {
-    for (auto* child_block : it->blocks()) {
-      fuseLogSoftmaxNllLoss(child_block);
-    }
-    if (it->kind() == onnx::NegativeLogLikelihoodLoss &&
-        it->input(0)->node()->kind() == onnx::LogSoftmax) {
-      auto origLogSoftmaxNode= it->input(0)->node();
-      auto origNllLossNode = *it;
 
-      Node* softmaxCrossEntropyNode = b->owningGraph()->create(onnx::SoftmaxCrossEntropyLoss, it->outputs().size());
-      for (size_t i = 0; i < softmaxCrossEntropyNode->outputs().size(); ++i) {
-         softmaxCrossEntropyNode->outputs()[i]->copyMetadata(it->outputs()[i]);
-      }
-      softmaxCrossEntropyNode->copyAttributes(*origNllLossNode);
-      softmaxCrossEntropyNode->insertBefore(origNllLossNode);
-      softmaxCrossEntropyNode->addInput(origLogSoftmaxNode->inputs().at(0));
-      softmaxCrossEntropyNode->addInput(origNllLossNode->inputs().at(1));
-      if (origNllLossNode->inputs().size() == 3) {
-        softmaxCrossEntropyNode->addInput(origNllLossNode->inputs().at(2));
-      }
-      it->replaceAllUsesWith(softmaxCrossEntropyNode);
-      it->removeAllInputs();
-      origLogSoftmaxNode->destroy();
-      it.destroyCurrent();
-      continue;
-    }
-  }
-}
-*/
-
- void recursive_del(Node* node) {
-  printf("%s \n", node->kind().toQualString());
+void recursive_del(Node* node) {
   if (node->kind() == onnx::LogSoftmax) {
     return;
   }
