@@ -41,6 +41,8 @@ using torch::distributed::autograd::DistAutogradContainer;
 namespace torch {
 namespace jit {
 
+std::recursive_mutex interpreter_lock;
+
 // Before we translate to intepreter instructions, we do
 // some preprocessing of the graph to turn it into a form that is closer
 // to what the instructions will look like.
@@ -1019,6 +1021,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
 
     ActiveFrame af(frames.back());
     try {
+      std::unique_lock<std::recursive_mutex> lk(interpreter_lock);
       while (true) {
         // std::cout << "RUNNING ";
         // frames.back().function->dump(std::cout, af.pc);

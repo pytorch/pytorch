@@ -12,6 +12,8 @@
 
 namespace torch {
 namespace jit {
+
+
 char const* toString(OpCode op);
 std::ostream& operator<<(std::ostream& out, Instruction inst);
 namespace mobile {
