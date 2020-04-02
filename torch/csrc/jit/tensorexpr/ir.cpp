@@ -95,10 +95,10 @@ Store::Store(
 
 Store::Store(
     const Buf* buf,
-    const std::vector<const Expr*>& indices,
+    std::vector<const Expr*> indices,
     const Expr* value,
     const Expr* mask)
-    : buf_(buf), indices_(indices), value_(value), mask_(mask) {
+    : buf_(buf), indices_(std::move(indices)), value_(value), mask_(mask) {
   if (buf->dtype() != kHandle) {
     throw malformed_input();
   }

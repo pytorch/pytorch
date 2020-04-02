@@ -210,7 +210,7 @@ class TORCH_API Store : public StmtNode<Store> {
 
   Store(
       const Buf* buf,
-      const std::vector<const Expr*>& indices,
+      std::vector<const Expr*> indices,
       const Expr* value,
       const Expr* mask);
 
