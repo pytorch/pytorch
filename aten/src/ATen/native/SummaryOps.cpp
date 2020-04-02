@@ -69,7 +69,6 @@ Tensor& histc_out(Tensor& hist, const Tensor &self, int64_t nbins, Scalar minval
   TORCH_CHECK(nbins > 0, "histc: bins must be > 0");
   TORCH_CHECK(at::isIntegralType(hist.scalar_type()), "hist only supports integral-point dtypes, hist got: ", hist.scalar_type());
 
-  auto tensor = self.contiguous();
   hist.resize_({nbins});
   hist.zero_();
 
@@ -95,14 +94,13 @@ Tensor& histc_out(Tensor& hist, const Tensor &self, int64_t nbins, Scalar minval
     TORCH_CHECK(minval < maxval, "max must be larger than min");
 
     h_data = hist.data_ptr<int64_t>();
-    tensor_data = tensor.data_ptr<scalar_t>();
-
-    at::parallel_for(0, tensor.numel(), 1, [&](int64_t i_begin, int64_t i_end) {
-      for(int64_t i = i_begin; i < i_end; i++) {
-        if (tensor_data[i] >= minval && tensor_data[i] <= maxval) {
-          const int64_t bin = (int64_t)((tensor_data[i]-minval) / (maxval-minval) * nbins);
-          h_data[std::min(bin, nbins-1)] += 1;
-        }
+    auto iter = at::TensorIterator();
+    iter.add_input(tensor);
+    iter.build();
+    cpu_serial_kernel(iter, [&](scalar_t val) -> void { 
+      if (val >= minval && val <= maxval) {
+        const int64_t bin = (int64_t)((val-minval) / (maxval-minval) * nbins);
+        h_data[std::min(bin, nbins-1)] += 1;
       }
     });
   });
