@@ -15,6 +15,8 @@ import collections
 import torch
 from .file_baton import FileBaton
 from ._cpp_extension_versioner import ExtensionVersioner
+from .hipify import hipify_python
+from .hipify.hipify_python import get_hip_file_path
 
 from setuptools.command.build_ext import build_ext
 
@@ -1056,6 +1058,18 @@ def _jit_compile(name,
                  verbose,
                  with_cuda,
                  is_python_module):
+    if with_cuda is None:
+        with_cuda = any(map(_is_cuda_file, sources))
+    with_cudnn = any(['cudnn' in f for f in extra_ldflags or []])
+    if IS_HIP_EXTENSION and with_cuda or with_cudnn:
+        hipify_python.hipify(
+            project_directory=build_directory,
+            output_directory=build_directory,
+            includes=os.path.join(build_directory, '*'),
+            extra_files=[os.path.abspath(s) for s in sources],
+            show_detailed=verbose,
+            is_pytorch_extension=True,
+        )
     old_version = JIT_EXTENSION_VERSIONER.get_version(name)
     version = JIT_EXTENSION_VERSIONER.bump_version_if_changed(
         name,
@@ -1231,10 +1245,10 @@ def _prepare_ldflags(extra_ldflags, with_cuda, verbose):
         extra_ldflags.append('-L{}'.format(lib_path))
         extra_ldflags.append('-lc10')
         if with_cuda:
-            extra_ldflags.append('-lc10_cuda')
+            extra_ldflags.append('-lc10_hip' if IS_HIP_EXTENSION else '-lc10_cuda')
         extra_ldflags.append('-ltorch_cpu')
         if with_cuda:
-            extra_ldflags.append('-ltorch_cuda')
+            extra_ldflags.append('-ltorch_hip' if IS_HIP_EXTENSION else '-ltorch_cuda')
         extra_ldflags.append('-ltorch')
         extra_ldflags.append('-ltorch_python')
 
@@ -1465,7 +1479,14 @@ def _write_ninja_file_to_build_library(path,
     else:
         cflags = common_cflags + ['-fPIC', '-std=c++14'] + extra_cflags
 
-    if with_cuda:
+    if with_cuda and IS_HIP_EXTENSION:
+        cuda_flags = ['-DWITH_HIP'] + cflags + COMMON_HIPCC_FLAGS
+        cuda_flags += _get_rocm_arch_flags(cuda_flags)
+        sources = [s if not _is_cuda_file(s) else
+                   os.path.abspath(os.path.join(
+                       path, get_hip_file_path(os.path.relpath(s, path))))
+                   for s in sources]
+    elif with_cuda:
         cuda_flags = common_cflags + COMMON_NVCC_FLAGS + _get_cuda_arch_flags()
         if IS_WINDOWS:
             for flag in COMMON_MSVC_FLAGS:
@@ -1568,7 +1589,8 @@ def _write_ninja_file(path,
     config = ['ninja_required_version = 1.3']
     config.append('cxx = {}'.format(compiler))
     if with_cuda:
-        config.append('nvcc = {}'.format(_join_cuda_home('bin', 'nvcc')))
+        nvcc = (_join_rocm_home('bin', 'hipcc') if IS_HIP_EXTENSION else _join_cuda_home('bin', 'nvcc'))
+        config.append('nvcc = {}'.format(nvcc))
 
     flags = ['cflags = {}'.format(' '.join(cflags))]
     flags.append('post_cflags = {}'.format(' '.join(post_cflags)))

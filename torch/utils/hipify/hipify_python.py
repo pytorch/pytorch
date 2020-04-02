@@ -776,6 +776,7 @@ def hipify(
     extensions=(".cu", ".cuh", ".c", ".cc", ".cpp", ".h", ".in", ".hpp"),
     output_directory="",
     includes=(),
+    extra_files=[],
     out_of_place_only=False,
     ignores=(),
     show_progress=True,
@@ -802,6 +803,7 @@ def hipify(
     all_files = list(matched_files_iter(output_directory, includes=includes,
                                         ignores=ignores, extensions=extensions,
                                         out_of_place_only=out_of_place_only))
+    all_files += [f for f in extra_files if f not in all_files]
 
     # Start Preprocessor
     preprocess(
