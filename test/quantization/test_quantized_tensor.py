@@ -234,8 +234,8 @@ class TestQuantizedTensor(TestCase):
         scale = 0.02
         zero_point = 1
         for device in get_supported_device_types():
+            r = torch.rand(10, 30, 2, 2, device=device, dtype=torch.float) * 4 - 2
             for dtype in [torch.qint8, torch.quint8, torch.qint32]:
-                r = torch.rand(10, 30, 2, 2, device=device, dtype=torch.float) * 4 - 2
                 qr = torch.quantize_per_tensor(r, scale, zero_point, dtype=dtype)
                 qr = qr.transpose(0, 1)
                 rqr = qr.dequantize()
@@ -316,7 +316,7 @@ class TestQuantizedTensor(TestCase):
         scales = torch.rand(10, dtype=torch.double) * 0.02 + 0.01
         zero_points = torch.round(torch.rand(10) * 20 + 1).to(torch.long)
         # quint32, cuda is not supported yet
-        for dtype in [torch.qint8, torch.quint8]:
+        for dtype in [torch.quint8, torch.qint8]:
             qr = torch.quantize_per_channel(r, scales, zero_points, 1, dtype)
             with tempfile.NamedTemporaryFile() as f:
                 # Serializing and Deserializing Tensor
@@ -329,7 +329,6 @@ class TestQuantizedTensor(TestCase):
         scale = 0.5
         zero_point = 10
         numel = 10
-
         for device in get_supported_device_types():
             for dtype in [torch.qint8, torch.quint8, torch.qint32]:
                 # copy from same scale and zero_point
