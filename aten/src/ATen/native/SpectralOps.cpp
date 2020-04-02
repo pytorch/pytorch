@@ -289,9 +289,7 @@ Tensor istft(const Tensor& self, const int64_t n_fft, const optional<int64_t> ho
 
   const auto expected_output_signal_len = n_fft + hop_length * (n_frames - 1);
 
-  const auto device = self.device();
-  const auto dtype = self.dtype();
-
+  const auto options = at::device(self.device()).dtype(self.dtype());
   if (self.numel() == 0) {
     std::ostringstream ss;
     REPR(ss) << ": input tensor cannot be empty.";
@@ -307,7 +305,7 @@ Tensor istft(const Tensor& self, const int64_t n_fft, const optional<int64_t> ho
     REPR(ss) << ": expected the last dimension to be 2 (corresponding to real and imaginary parts), but got " << self.size(-1);
     AT_ERROR(ss.str());
   }
- 
+
   if (onesided) {
     if (n_fft / 2 + 1 != fft_size) {
       std::ostringstream ss;
@@ -341,7 +339,7 @@ Tensor istft(const Tensor& self, const int64_t n_fft, const optional<int64_t> ho
     }
   }
 
-  Tensor window_tmp = window.defined() ? window : at::ones({win_length,}, at::device(device).dtype(dtype));
+  Tensor window_tmp = window.defined() ? window : at::ones({win_length,}, options);
   if (win_length != n_fft) {
     // center window by padding zeros on right and left side
     int64_t left = (n_fft - win_length) / 2;
@@ -358,21 +356,16 @@ Tensor istft(const Tensor& self, const int64_t n_fft, const optional<int64_t> ho
   Tensor y_tmp = input * window_tmp.view({1, 1, n_fft});  // size: (channel, n_frames, n_fft)
   y_tmp = y_tmp.transpose(1, 2);  // size: (channel, n_fft, frame)
 
-  Tensor y = col2im_cpu(y_tmp,
-                        {1, (n_frames - 1) * hop_length + n_fft},
-                        {1, n_fft},
-                        {1, 1},
-                        {0, 0},
-                        {1, hop_length}).squeeze(2);  // size: (channel, n_frames, n_fft)
-
+  const Tensor eye = at::native::eye(n_fft, options).unsqueeze(1);
+  Tensor y = at::conv_transpose1d(y_tmp, eye,
+                                  /*bias*/ Tensor(),
+                                  /*stride*/ {hop_length,},
+                                  /*padding*/{0,});  // size: (channel, n_frames, n_fft)
   window_tmp = window_tmp.pow(2).view({n_fft, 1}).repeat({1, n_frames}).unsqueeze(0);  // size: (1, n_fft, n_frames)
-  Tensor window_envelop = col2im_cpu(window_tmp,
-                                     {1, (n_frames - 1) * hop_length + n_fft},
-                                     {1, n_fft},
-                                     {1, 1,},
-                                     {0, 0},
-                                     {1, hop_length}).squeeze(2);  // size: (1, 1, expected_output_signal_len)
-
+  Tensor window_envelop = at::conv_transpose1d(window_tmp, eye,
+                                               /*bias*/ Tensor(),
+                                               /*stride*/ {hop_length, },
+                                               /*padding*/{0, });  // size: (1, 1, expected_output_signal_len)
   TORCH_INTERNAL_ASSERT(expected_output_signal_len == y.size(2));
   TORCH_INTERNAL_ASSERT(expected_output_signal_len == window_envelop.size(2));
 
