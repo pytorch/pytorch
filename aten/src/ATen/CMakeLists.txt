@@ -160,19 +160,17 @@ ENDIF(BLAS_FOUND)
 
 IF(LAPACK_FOUND)
   list(APPEND ATen_CPU_DEPENDENCY_LIBS ${LAPACK_LIBRARIES})
-  if(USE_CUDA)
+  if(USE_CUDA AND MSVC)
     # Although Lapack provides CPU (and thus, one might expect that ATen_cuda
     # would not need this at all), some of our libraries (magma in particular)
     # backend to CPU BLAS/LAPACK implementations, and so it is very important
     # we get the *right* implementation, because even if the symbols are the
     # same, LAPACK implementions may have different calling conventions.
     # This caused https://github.com/pytorch/pytorch/issues/7353
+    #
+    # We do NOT do this on Linux, since we just rely on torch_cpu to
+    # provide all of the symbols we need
     list(APPEND ATen_CUDA_DEPENDENCY_LIBS ${LAPACK_LIBRARIES})
-  endif()
-  if(USE_ROCM)
-    # It's not altogether clear that HIP behaves the same way, but it
-    # seems safer to assume that it needs it too
-    list(APPEND ATen_HIP_DEPENDENCY_LIBS ${LAPACK_LIBRARIES})
   endif()
 ENDIF(LAPACK_FOUND)
 
@@ -330,7 +328,9 @@ IF(USE_CUDA AND NOT USE_ROCM)
 
   IF(USE_MAGMA)
     list(APPEND ATen_CUDA_DEPENDENCY_LIBS ${MAGMA_LIBRARIES})
-    IF ($ENV{TH_BINARY_BUILD})
+    IF ($ENV{TH_BINARY_BUILD} AND MSVC)
+      # Do not do this on Linux: see Note [Extra MKL symbols for MAGMA in torch_cpu]
+      # in caffe2/CMakeLists.txt
       list(APPEND ATen_CUDA_DEPENDENCY_LIBS
         "${BLAS_LIBRARIES};${BLAS_LIBRARIES};${BLAS_LIBRARIES}")
     ENDIF($ENV{TH_BINARY_BUILD})
