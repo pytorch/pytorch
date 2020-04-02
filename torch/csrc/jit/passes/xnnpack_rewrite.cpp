@@ -97,7 +97,7 @@ bool bothMinMaxNone(
       vmap.find("dummy_min_max") != vmap.end(),
       "Expected to find dummy_min_max Value in the subgraph to be replaced.");
   auto dummy_min_max =
-    graph_rewrite_helper::getIValue("dummy_min_max", match_vmap, vmap);
+      graph_rewrite_helper::getIValue("dummy_min_max", match_vmap, vmap);
   return (!dummy_min_max || dummy_min_max.value().isNone());
 }
 

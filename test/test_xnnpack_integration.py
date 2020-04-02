@@ -366,7 +366,12 @@ class TestXNNPACKSerDes(TestCase):
                      " Please build with USE_XNNPACK=1.")
 class TestXNNPACKRewritePass(TestCase):
     def test_linear(self):
-        def validate_transformed_module(module_instance, pattern_count_map, data_shape, prepack_removal=False, fuse_clamping_ops=False):
+        def validate_transformed_module(
+                module_instance,
+                pattern_count_map,
+                data_shape,
+                prepack_removal=False,
+                fuse_clamping_ops=False):
             scripted_model = torch.jit.script(module_instance)
             scripted_model.eval()
             input_data = torch.normal(1, 20, size=data_shape)
@@ -569,12 +574,13 @@ class TestXNNPACKRewritePass(TestCase):
                 return o
 
         # Unfusable hardtanh.
-        pattern_count_map = {"aten::hardtanh": 1, # hardtanh cannot be.
-                             "aten::relu" : -1, # relu is fused.
+        pattern_count_map = {"aten::hardtanh": 1,  # hardtanh cannot be.
+                             "aten::relu": -1,  # relu is fused.
                              "prepacked::linear_clamp_prepack": -1,
                              "prepacked::linear_clamp_run": 1}
         validate_transformed_module(MFusionAntiPattern(), pattern_count_map, (16, linear_weight_shape[1]),
                                     prepack_removal=True, fuse_clamping_ops=True)
+
 
 if __name__ == "__main__":
     run_tests()
