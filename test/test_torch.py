@@ -12229,7 +12229,7 @@ class TestTorchDeviceType(TestCase):
         _ = torch.irfft(half_spectrum_copy, 2, signal_sizes=(2, 2))
         self.assertEqual(half_spectrum, half_spectrum_copy)
 
-    @skipCUDAIfRocm
+    @onlyOnCPUAndCUDA
     @unittest.skipIf(not TEST_MKL, "PyTorch is built without MKL support")
     @dtypes(torch.double)
     def test_istft_round_trip_simple_cases(self, device, dtype):
@@ -12242,7 +12242,7 @@ class TestTorchDeviceType(TestCase):
         _test(torch.ones(4, dtype=dtype, device=device), 4, 4)
         _test(torch.zeros(4, dtype=dtype, device=device), 4, 4)
 
-    @skipCUDAIfRocm
+    @onlyOnCPUAndCUDA
     @unittest.skipIf(not TEST_MKL, "PyTorch is built without MKL support")
     @dtypes(torch.double)
     def test_istft_round_trip_various_params(self, device, dtype):
@@ -12320,6 +12320,7 @@ class TestTorchDeviceType(TestCase):
         for i, pattern in enumerate(patterns):
             _test_istft_is_inverse_of_stft(pattern)
 
+    @onlyOnCPUAndCUDA
     def test_istft_throws(self, device):
         """istft should throw exception for invalid parameters"""
         stft = torch.zeros((3, 5, 2), device=device)
@@ -12335,7 +12336,7 @@ class TestTorchDeviceType(TestCase):
         self.assertRaises(RuntimeError, torch.istft, torch.zeros((3, 0, 2)), 2)
         self.assertRaises(RuntimeError, torch.istft, torch.zeros((0, 3, 2)), 2)
 
-    @skipCUDAIfRocm
+    @onlyOnCPUAndCUDA
     @dtypes(torch.double)
     def test_istft_of_sine(self, device, dtype):
         def _test(amplitude, L, n):
@@ -12368,6 +12369,7 @@ class TestTorchDeviceType(TestCase):
         _test(amplitude=80, L=9, n=6)
         _test(amplitude=99, L=10, n=7)
 
+    @onlyOnCPUAndCUDA
     @dtypes(torch.double)
     def test_istft_linearity(self, device, dtype):
         num_trials = 100
@@ -12431,6 +12433,7 @@ class TestTorchDeviceType(TestCase):
         for data_size, kwargs in patterns:
             _test(data_size, kwargs)
 
+    @onlyOnCPUAndCUDA
     @skipCUDAIfRocm
     def test_batch_istft(self, device):
         original = torch.tensor([
