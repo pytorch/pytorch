@@ -152,15 +152,19 @@ void RequestCallbackImpl::processRpc(
             std::move(ScriptResp(std::move(jitFuture->value()))).toMessage());
         return;
       }
-      jitFuture->addCallback([responseFuture, messageId, jitFuture]() {
-        try {
-          Message m = ScriptResp(std::move(jitFuture->value())).toMessage();
-          m.setId(messageId);
-          responseFuture->markCompleted(std::move(m));
-        } catch (const std::exception& e) {
-          responseFuture->setError(e.what());
-        }
-      });
+      jitFuture->addCallback(
+          [responseFuture, messageId](
+              const IValue& val,
+              const c10::optional<ivalue::Future::FutureError>& err) {
+            if (!err) {
+              IValue ival(val);
+              Message m = ScriptResp(std::move(ival)).toMessage();
+              m.setId(messageId);
+              responseFuture->markCompleted(std::move(m));
+            } else {
+              responseFuture->setError(err->what());
+            }
+          });
       return;
     }
     case MessageType::PYTHON_CALL: {
@@ -256,14 +260,17 @@ void RequestCallbackImpl::processRpc(
         postProcessing();
         return;
       }
-      jitFuture->addCallback([ownerRRef, postProcessing, jitFuture]() {
-        try {
-          ownerRRef->setValue(jitFuture->value());
-        } catch (const std::exception& e) {
-          ownerRRef->setError(e.what());
-        }
-        postProcessing();
-      });
+      jitFuture->addCallback(
+          [ownerRRef, postProcessing](
+              const IValue& val,
+              const c10::optional<ivalue::Future::FutureError>& err) {
+            if (!err) {
+              ownerRRef->setValue(IValue(val));
+            } else {
+              ownerRRef->setError(err->what());
+            }
+            postProcessing();
+          });
       return;
     }
     case MessageType::PYTHON_REMOTE_CALL: {

@@ -224,7 +224,7 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
  public:
   Future(TypePtr type) : type_(type) {}
   struct CAFFE2_API FutureError final : public std::exception {
-    FutureError(std::string&& error_msg_)
+    explicit FutureError(std::string&& error_msg_)
         : error_msg(std::move(error_msg_)) {}
 
     FutureError() = default;
@@ -235,10 +235,12 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
 
     std::string error_msg;
   };
+  using Callback =
+    std::function<void(const IValue&, const c10::optional<FutureError>&)>;
 
   /**
-  * Wait on the future until it completes.
-  */
+   * Wait on the future until it completes.
+   */
   void wait() {
     std::unique_lock<std::mutex> lock(mutex_);
     while (!completed_) {
@@ -254,43 +256,30 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
     AT_ASSERT(!completed());
     completed_ = true;
     value_ = std::move(value);
-
-    std::vector<std::function<void(void)>> cbs;
-    cbs.swap(callbacks_);
-    lock.unlock();
-
-    finished_cv_.notify_all();
-    for (auto& callback : cbs) {
-      callback();
-    }
+    runCbs(lock);
   }
 
   void markCompleted() {
     markCompleted(IValue {});
   }
 
-  void markCompleted(FutureError&& error) {
+  void setError(std::string err) {
+    setError(FutureError(std::move(err)));
+  }
+
+  void setError(FutureError&& error) {
     std::unique_lock<std::mutex> lock(mutex_);
     AT_ASSERT(!completed());
     completed_ = true;
-    has_error_ = true;
     error_ = std::move(error);
-
-    std::vector<std::function<void(void)>> cbs;
-    cbs.swap(callbacks_);
-    lock.unlock();
-
-    finished_cv_.notify_all();
-    for (auto& callback : cbs) {
-      callback();
-    }
+    runCbs(lock);
   }
 
   // Get the result of the current future.
   IValue value() {
     std::unique_lock<std::mutex> lock(mutex_);
     AT_ASSERT(completed());
-    if (has_error_) {
+    if (error_) {
       throw error_;
     }
     return value_;
@@ -302,11 +291,11 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
    * If the future has already completed,
    * this function will execute the callback immediately.
    */
-  void addCallback(std::function<void(void)> callback) {
+  void addCallback(const Callback& callback) {
     std::unique_lock<std::mutex> lock(mutex_);
     if (completed()) {
       lock.unlock();
-      callback();
+      callback(value_, error_);
       return;
     }
     callbacks_.push_back(callback);
@@ -315,6 +304,16 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
   // Check if the current future has completed
   bool completed() const{
     return completed_;
+  }
+
+  bool hasError() const {
+    std::unique_lock<std::mutex> lock(mutex_);
+    return error_ ? true : false;
+  }
+
+  c10::optional<FutureError> error() const {
+    std::unique_lock<std::mutex> lock(mutex_);
+    return error_;
   }
 
   CAFFE2_API friend std::ostream& operator<<(
@@ -326,15 +325,25 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
   }
 
  private:
-  std::mutex mutex_;
+  void runCbs(std::unique_lock<std::mutex>& lock) {
+    std::vector<Callback> cbs;
+    cbs.swap(callbacks_);
+    lock.unlock();
+
+    finished_cv_.notify_all();
+    for (auto& callback : cbs) {
+      callback(value_, error_);
+    }
+  }
+
+  mutable std::mutex mutex_;
   std::atomic_bool completed_ = {false}; // is this future complete
   std::condition_variable finished_cv_;
 
   IValue value_; // when finished the value
   TypePtr type_;
-  std::vector<std::function<void(void)>> callbacks_;
-  bool has_error_ = false;
-  FutureError error_;
+  std::vector<Callback> callbacks_;
+  c10::optional<FutureError> error_;
 };
 
 // User-defined object.

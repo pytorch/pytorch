@@ -505,7 +505,9 @@ c10::intrusive_ptr<Future> GraphExecutorImplBase::runAsync(Stack& stack) {
   last_executed_optimized_graph = frame->plan.graph;
   if (!res->completed()) {
     // If not completed, persist the Frame until complete.
-    res->addCallback([frame] {});
+    res->addCallback(
+      [frame](const at::IValue&,
+              const c10::optional<at::ivalue::Future::FutureError>&) {});
   }
   return res;
 }

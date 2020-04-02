@@ -105,7 +105,9 @@ TEST(IValueTest, FutureCallbacks) {
   auto f2 = c10::make_intrusive<ivalue::Future>(IntType::get());
   int calledTimesA = 0;
   int calledTimesB = 0;
-  f2->addCallback([f2, &calledTimesA]() {
+  f2->addCallback([f2, &calledTimesA](const IValue& val, const c10::optional<ivalue::Future::FutureError>&err) {
+    ASSERT_EQ(val.toInt(), 43);
+    ASSERT_FALSE(err);
     ASSERT_TRUE(f2->completed());
     ASSERT_EQ(f2->value().toInt(), 43);
     ++calledTimesA;
@@ -114,31 +116,36 @@ TEST(IValueTest, FutureCallbacks) {
   ASSERT_EQ(calledTimesA, 1);
   ASSERT_EQ(calledTimesB, 0);
   // Post-markCompleted()
-  f2->addCallback([f2, &calledTimesB]() {
+  f2->addCallback([f2, &calledTimesB](const IValue& val, const c10::optional<ivalue::Future::FutureError>&err) {
+    ASSERT_EQ(val.toInt(), 43);
+    ASSERT_FALSE(err);
     ASSERT_TRUE(f2->completed());
     ASSERT_EQ(f2->value().toInt(), 43);
     ++calledTimesB;
   });
   ASSERT_EQ(calledTimesA, 1);
   ASSERT_EQ(calledTimesB, 1);
+  ASSERT_FALSE(f2->hasError());
 }
 
 TEST(IValueTest, FutureExceptions) {
   auto f3 = c10::make_intrusive<ivalue::Future>(IntType::get());
   int calledTimes = 0;
-  f3->addCallback([f3, &calledTimes]() {
+  f3->addCallback([f3, &calledTimes](const IValue& val, const c10::optional<ivalue::Future::FutureError>&err) {
     ASSERT_TRUE(f3->completed());
-    try {
-      (void)f3->value();
-    } catch (const std::exception& e) {
-      if (std::string(e.what()) == "My Error") {
+    if (err && std::string(err->what()) == "My Error") {
+      try { // second check
+        (void)f3->value();
+      } catch (std::exception& e) {
         ++calledTimes;
       }
     }
   });
   ivalue::Future::FutureError err("My Error");
-  f3->markCompleted(std::move(err));
+  f3->setError(std::move(err));
   ASSERT_EQ(calledTimes, 1);
+  ASSERT_TRUE(f3->hasError());
+  ASSERT_EQ(std::string(f3->error()->what()), std::string("My Error"));
 }
 
 TEST(IValueTest, ValueEquality) {

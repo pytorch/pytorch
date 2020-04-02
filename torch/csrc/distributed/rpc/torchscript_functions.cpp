@@ -42,8 +42,7 @@ c10::intrusive_ptr<c10::ivalue::Future> rpcTorchscript(
                               const rpc::Message& message,
                               const c10::optional<utils::FutureError>& futErr) {
     if (futErr) {
-      c10::ivalue::Future::FutureError jitFutErr(std::string((*futErr).what()));
-      futPtr->markCompleted(std::move(jitFutErr));
+      futPtr->setError(std::string((*futErr).what()));
     } else {
       futPtr->markCompleted(deserializeRespToIValue(message));
     }
