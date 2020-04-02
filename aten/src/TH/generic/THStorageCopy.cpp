@@ -48,11 +48,9 @@ void THStorage_(copy##TYPENAMESRC)(THStorage *storage, TH##TYPENAMESRC##Storage 
 #elif defined(THQUANTIZED)
   #ifdef THQUINT8
   IMPLEMENT_THStorage_COPY(QUInt8)
-  #endif
-  #ifdef THQINT8
+  #elif defined(THQINT8)
   IMPLEMENT_THStorage_COPY(QInt8)
-  #endif
-  #ifdef THQINT32
+  #elif defined(THQINT32)
   IMPLEMENT_THStorage_COPY(QInt32)
   #endif
 #endif
