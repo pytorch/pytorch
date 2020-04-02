@@ -5,21 +5,10 @@
 namespace torch {
 namespace jit {
 
-void replaceFunctions(Node* to_replace, Function* callee) {
-  if (callee->name() == "interpolate") {
-    to_replace->removeInput(0);
-    Node* interpolate_node = to_replace->owningGraph()->create(
-        Symbol::fromQualString("aten::__interpolate"),
-        {to_replace->inputs()},
-        to_replace->outputs().size());
-    interpolate_node->output()->copyMetadata(to_replace->output());
-    interpolate_node->insertAfter(to_replace);
-    to_replace->replaceAllUsesWith(interpolate_node);
-    to_replace->removeAllInputs();
-    to_replace->destroy();
-    return;
-  }
-}
+
+const auto namespaceName = std::string("___torch_mangle_3");
+const auto qualFuncName = std::string("__torch__.torch.nn.functional.") + namespaceName + ".";
+
 
 void PreInlineCalls(Block* block) {
   for (auto it = block->nodes().begin(), end = block->nodes().end();
@@ -31,8 +20,23 @@ void PreInlineCalls(Block* block) {
         auto function_constant = cur->input(0)->node();
         auto fun_type =
             function_constant->output()->type()->expect<FunctionType>();
-        replaceFunctions(cur, fun_type->function());
+
+        if (fun_type->function()->qualname().qualifiedName().find(qualFuncName + "interpolate")!= std::string::npos) {
+          cur->removeInput(0);
+          Node* interpolate_node = block->owningGraph()->create(
+              Symbol::fromQualString("aten::__interpolate"),
+              {cur->inputs()},
+              cur->outputs().size());
+          interpolate_node->output()->copyMetadata(cur->output());
+          interpolate_node->insertAfter(cur);
+          cur->replaceAllUsesWith(interpolate_node);
+          cur->removeAllInputs();
+          cur->destroy();
+          return;
+        }
+        PreInlineCalls(fun_type->function()->graph()->block());
       } break;
+      //case prim::CallMethod: {}
       default: {
         for (auto b : cur->blocks()) {
           PreInlineCalls(b);
@@ -42,6 +46,11 @@ void PreInlineCalls(Block* block) {
   }
 }
 
+// This pass is to be used for ONNX conversion only. The ONNX converter depends on
+// a number of deprecated aten operators. These operators are removed from IR and
+// replaced by the compiled python function code. However, in-order to maintain the
+// behavior for ONNX conversion, we replace these function calls with the aten symbolic
+// which can still be used by the ONNX converter.
 void PreInlineONNX(Graph& graph) {
   GRAPH_DUMP("Before Pre-inlining: ", &graph);
   PreInlineCalls(graph.block());
