@@ -5,6 +5,7 @@
 #include <torch/csrc/autograd/grad_mode.h>
 #include <ATen/autocast_mode.h>
 #include <torch/csrc/autograd/profiler.h>
+#include <torch/csrc/autograd/record_function_ops.h>
 #include <torch/csrc/autograd/python_function.h>
 #include <torch/csrc/autograd/function.h>
 
@@ -52,10 +53,13 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
   m.def("_enable_profiler", enableProfiler);
   m.def("_disable_profiler", disableProfiler);
   m.def("_profiler_enabled", profilerEnabled);
-  m.def("_run_before_callbacks", _runBeforeCallbacks);
 
-  py::class_<RecordFunction, std::shared_ptr<RecordFunction>>(m, "_RecordFunction")
-    .def(py::init<>());
+  m.def(
+      "_call_end_callbacks_on_fut",
+      [](const at::Tensor& handle,
+         const std::shared_ptr<torch::distributed::rpc::FutureMessage>& fut) {
+        torch::autograd::profiler::_call_end_callbacks_on_fut(handle, fut);
+      });
 
   Py_RETURN_TRUE;
 }

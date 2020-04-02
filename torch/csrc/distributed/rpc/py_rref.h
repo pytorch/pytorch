@@ -13,7 +13,9 @@ namespace rpc {
 class PyRRef {
  public:
   explicit PyRRef(const py::object& value, const py::object& type_hint);
-  explicit PyRRef(c10::intrusive_ptr<RRef> rref);
+  explicit PyRRef(
+      c10::intrusive_ptr<RRef> rref,
+      const std::shared_ptr<FutureMessage> fm = nullptr);
 
   bool isOwner() const;
   bool confirmedByOwner() const;
@@ -25,9 +27,12 @@ class PyRRef {
   py::tuple pickle() const;
   static PyRRef unpickle(const py::tuple& t);
   c10::IValue toIValue();
+  // Future that is associated with the creation of this RRef on the remote end.
+  const std::shared_ptr<FutureMessage> getFuture();
 
  private:
   c10::intrusive_ptr<RRef> rref_;
+  const std::shared_ptr<FutureMessage> fm_;
 };
 
 } // namespace rpc

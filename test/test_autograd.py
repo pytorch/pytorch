@@ -2638,16 +2638,6 @@ class TestAutograd(TestCase):
             self.assertEqual(info.name, expected_name)
             last_end = info.cpu_interval.end
 
-    def test_record_function_callbacks(self):
-        x = torch.randn(10, 10)
-        with profile() as p:
-            with record_function("foo"):
-                y = x * 2 + 4
-
-        function_events = p.function_events
-        foo_event = [event for event in function_events if "foo" in event.name][0]
-        self.assertEqual(foo_event.count, 1)
-
     def test_profiler_aggregation_fake(self):
         events = EventList()
         id = [0]
