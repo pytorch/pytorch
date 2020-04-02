@@ -4,6 +4,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include <c10/macros/Macros.h>
 #include <c10/util/Logging.h>
 #include <torch/csrc/jit/tensorexpr/buffer.h>
 #include <torch/csrc/jit/tensorexpr/codegen.h>
@@ -59,24 +60,24 @@ class Value {
   void* ptr;
 };
 
-#define VALUE_AS_DISPATCH(Type, Name)             \
-  template <>                                     \
-  inline Type Value::as<Type>() const {           \
-    if (dtype_ != k##Name) {                      \
-      throw unsupported_dtype();                  \
-    }                                             \
-    return Name##values[0];                       \
+#define VALUE_AS_DISPATCH(Type, Name)   \
+  template <>                           \
+  inline Type Value::as<Type>() const { \
+    if (dtype_ != k##Name) {            \
+      throw unsupported_dtype();        \
+    }                                   \
+    return Name##values[0];             \
   }
 AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, VALUE_AS_DISPATCH);
 #undef VALUE_AS_DISPATCH
 
-#define VALUE_AS_VEC_DISPATCH(Type, Name)                                \
-  template <>                                                            \
-  inline const std::vector<Type>& Value::as_vec<Type>() const {          \
-    if (dtype_.scalar_type() != ScalarType::Name) {                      \
-      throw unsupported_dtype();                                         \
-    }                                                                    \
-    return Name##values;                                                 \
+#define VALUE_AS_VEC_DISPATCH(Type, Name)                       \
+  template <>                                                   \
+  inline const std::vector<Type>& Value::as_vec<Type>() const { \
+    if (dtype_.scalar_type() != ScalarType::Name) {             \
+      throw unsupported_dtype();                                \
+    }                                                           \
+    return Name##values;                                        \
   }
 AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, VALUE_AS_VEC_DISPATCH);
 #undef VALUE_AS_VEC_DISPATCH
@@ -96,6 +97,26 @@ mod_value(T lhs, T rhs) {
 
 inline bool mod_value(bool lhs, bool rhs) {
   throw std::runtime_error("Attempted modulus of bool");
+}
+
+template <typename T>
+inline typename std::enable_if<std::is_integral<T>::value, T>::type div_value(
+    T lhs,
+    T rhs) {
+  TORCH_CHECK(rhs != 0, "Division by zero");
+  return lhs / rhs;
+}
+
+template <typename T>
+inline typename std::enable_if<std::is_floating_point<T>::value, T>::
+    type __ubsan_ignore_float_divide_by_zero__
+    div_value(T lhs, T rhs) {
+  return lhs / rhs;
+}
+
+inline bool div_value(bool lhs, bool rhs) {
+  LOG(FATAL) << "Attempted division of bool";
+  return false;
 }
 
 class SimpleIREvaluator : public CodeGen, public IRVisitor {
@@ -205,7 +226,7 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
           result_v[i] = lhs_v[i] * rhs_v[i];
           break;
         case IRNodeType::kDiv:
-          result_v[i] = lhs_v[i] / rhs_v[i];
+          result_v[i] = div_value(lhs_v[i], rhs_v[i]);
           break;
         case IRNodeType::kMod:
           result_v[i] = mod_value(lhs_v[i], rhs_v[i]);
@@ -479,7 +500,6 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
       throw malformed_input(v);
     }
 
-
     if (src_dtype != dst_dtype) {
       switch (src_dtype.scalar_type()) {
 #define SRC_TYPE_CASE(Type, Name)                      \
@@ -562,7 +582,8 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
     }
     void* ptr = iter->second;
 
-    v->index()->accept(this);
+    const Expr* flat_idx = flatten_index(v->buf()->dims(), v->indices());
+    flat_idx->accept(this);
     std::vector<int> index = value().as_vec<int>();
     v->mask()->accept(this);
     std::vector<int> mask = value().as_vec<int>();
@@ -595,7 +616,8 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
 
     void* ptr = iter->second;
 
-    v->index()->accept(this);
+    const Expr* flat_idx = flatten_index(v->buf()->dims(), v->indices());
+    flat_idx->accept(this);
     std::vector<int> index = value().as_vec<int>();
     v->mask()->accept(this);
     std::vector<int> mask = value().as_vec<int>();
@@ -796,15 +818,14 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
       internal_buffers_;
 };
 
-using VarMapping = std::vector<std::pair<ExprHandle, ExprHandle>>;
+using VarMapping = std::vector<std::pair<const Var*, const Expr*>>;
 
 class VarSubMutator : public IRMutator {
  public:
   VarSubMutator(const VarMapping& var_mapping) {
     for (const auto& entry : var_mapping) {
-      const ExprHandle& key = entry.first;
-      const ExprHandle& value = entry.second;
-      const Var* key_var = key.AsNode<Var>();
+      const Var* key_var = entry.first;
+      const Expr* value = entry.second;
       if (!key_var) {
         throw malformed_input();
       }
@@ -815,13 +836,13 @@ class VarSubMutator : public IRMutator {
   const Expr* mutate(const Var* var) override {
     auto iter = var_mapping_.find(var);
     if (iter == var_mapping_.end()) {
-      return const_cast<Var*>(var);
+      return var;
     }
-    return iter->second.node();
+    return iter->second;
   }
 
  private:
-  std::unordered_map<const Var*, ExprHandle> var_mapping_;
+  std::unordered_map<const Var*, const Expr*> var_mapping_;
 };
 
 template <class CodeGenType>
@@ -838,7 +859,13 @@ class ExprEval {
       : dtype_(expr.dtype()) {
     std::vector<BufferArg> buffer_args_extended = buffer_args;
     Buffer ret_buf("ret_val", dtype_, {1});
-    Stmt* store_stmt = Store::make(VarHandle(ret_buf.data()), 0, expr);
+    std::vector<const Expr*> indices;
+    const Expr* zero = new IntImm(0);
+    for (size_t i = 0; i < ret_buf.data()->ndim(); i++) {
+      indices.push_back(zero);
+    }
+    Stmt* store_stmt =
+        new Store(ret_buf.data(), indices, expr.node(), new IntImm(1));
     buffer_args_extended.push_back(ret_buf);
     codegen_.reset(new CodeGenType(store_stmt, buffer_args_extended));
   }
@@ -910,6 +937,28 @@ inline const Expr* Substitute(const Expr* expr, const VarMapping& var_mapping) {
 inline Stmt* Substitute(Stmt* stmt, const VarMapping& var_mapping) {
   VarSubMutator var_sub(var_mapping);
   return stmt->accept_mutator(&var_sub);
+}
+
+// Uses the evaluator to fold an Expression with constant terms.
+// E.g. evaluateOp(Add(3, 4)) => 7.
+// Expr v must not have any unbound Vars.
+static Expr* evaluateOp(const Expr* v) {
+  ExprHandle handle(v);
+  ExprEval<SimpleIREvaluator> eval(handle);
+
+  switch (v->dtype().scalar_type()) {
+#define TYPE_CASE(Type, Name)                                 \
+  case ScalarType::Name: {                                    \
+    Type val = eval.value<Type>();                            \
+    return getImmediateByType(v->dtype().scalar_type(), val); \
+  }
+    AT_FORALL_SCALAR_TYPES_AND(Half, TYPE_CASE);
+#undef TYPE_CASE
+    default:
+      LOG(FATAL) << "Unsupported datatype: " << v->dtype();
+      return nullptr;
+  }
+  return nullptr;
 }
 
 } // namespace tensorexpr

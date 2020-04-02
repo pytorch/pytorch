@@ -873,8 +873,8 @@ bool Node::matches(const FunctionSchema& schema) const {
   TypeEnv type_env;
   for (size_t i = 0; i < formals.size(); ++i) {
     auto formal = formals[i].type();
-    const MatchTypeReturn matched_type = matchTypeVariables(
-        formal, actuals[i]->type(), type_env);
+    const MatchTypeReturn matched_type =
+        matchTypeVariables(formal, actuals[i]->type(), type_env);
     if (!matched_type.success()) {
       return false;
     }
@@ -987,9 +987,9 @@ const Operator& Node::getOperator() const {
 }
 
 Operation Node::getOperation() const {
-  // note: some operators require the node to produce a runnable operation, which
-  // is why 'this' is passed here. getOperator() ensures that 'this' matches the schema
-  // of the returned operator.
+  // note: some operators require the node to produce a runnable operation,
+  // which is why 'this' is passed here. getOperator() ensures that 'this'
+  // matches the schema of the returned operator.
   return getOperator().getOperation(this);
 }
 
@@ -1048,6 +1048,7 @@ bool Node::hasSideEffects() const {
     case prim::profile:
     case prim::BailOut:
     case prim::Guard:
+    case aten::wait: // It can represent RPC message received.
       return true;
   }
 
@@ -1673,9 +1674,7 @@ Node* Graph::createLoad(const std::string& name, const TypePtr& type) {
   return n;
 }
 
-Node* Graph::createIsInstance(
-    Value* v,
-    at::ArrayRef<TypePtr> types) {
+Node* Graph::createIsInstance(Value* v, at::ArrayRef<TypePtr> types) {
   auto n = create(prim::isinstance, {v}, /*num_outputs*/ 1);
   n->tys_(attr::types, types.vec());
   n->output()->setType(BoolType::get());
@@ -1948,14 +1947,12 @@ TypePtr NamedValue::type() const {
 
 constexpr Symbol ProfileOp::Kind;
 
-
 OperatorSet::OperatorSet(std::initializer_list<const char*> sig_literals) {
   for (const char* sig : sig_literals) {
     auto op = getOperatorForLiteral(sig);
     ops[Symbol::fromQualString(op->schema().name())].push_back(op);
   }
 }
-
 
 bool Node::isMemberOf(const OperatorSet& os) const {
   auto it = os.ops.find(kind());
@@ -1969,7 +1966,6 @@ bool Node::isMemberOf(const OperatorSet& os) const {
   }
   return false;
 }
-
 
 } // namespace jit
 } // namespace torch
