@@ -240,7 +240,7 @@ std::ostream& print(std::ostream& stream, const Tensor & tensor_, int64_t linesi
   } else {
     Tensor tensor;
     if (tensor_.is_quantized()) {
-      Tensor tensor = tensor_.dequantize().to(kCPU, kDouble).contiguous();
+      tensor = tensor_.dequantize().to(kCPU, kDouble).contiguous();
     } else {
       tensor = tensor_.to(kCPU, kDouble).contiguous();
     }

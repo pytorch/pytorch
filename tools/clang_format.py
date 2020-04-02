@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 """
 A script that runs clang-format on all C/C++ files in CLANG_FORMAT_WHITELIST. There is
 also a diff mode which simply checks if clang-format would make any changes, which is useful for 
@@ -292,7 +292,8 @@ def main(args):
     ok = get_and_check_clang_format(options.verbose)
     # Invoke clang-format on all files in the directories in the whitelist.
     if ok:
-        ok = asyncio.run(run_clang_format(options.max_processes, options.diff, options.verbose))
+        loop = asyncio.get_event_loop()
+        ok = loop.run_until_complete(run_clang_format(options.max_processes, options.diff, options.verbose))
 
     # We have to invert because False -> 0, which is the code to be returned if everything is okay.
     return not ok

@@ -16,7 +16,6 @@
  *   right      - corresponding to lower bound if False and upper bound if True
  *   out_int32  - the output tensor is int64_t type if False and int(32bit normally) type if True.
  *
- * - Scalar version has no out_int32, and can only output 64bit integer Scalar as result
  * - Restrictions are defined in searchsorted_pre_check()
  */
 
