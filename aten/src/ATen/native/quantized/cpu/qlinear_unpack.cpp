@@ -2,6 +2,7 @@
 #include <ATen/core/op_registration/op_registration.h>
 #include <ATen/cpp_custom_type_hack.h>
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
+#include <ATen/native/quantized/cpu/qmkldnn_utils.h>
 #include <ATen/native/quantized/cpu/qnnpack_utils.h>
 
 namespace at {
@@ -69,6 +70,11 @@ class QLinearUnpackWeightInt8 final : public c10::OperatorKernel {
     auto& ctx = at::globalContext();
 
 #ifdef USE_FBGEMM
+#if AT_MKLDNN_ENABLED()
+    if (ctx.qEngine() == at::QEngine::MKLDNN) {
+      return mkldnn_linear_unpack(packed_weight);
+    }
+#endif
     if (ctx.qEngine() == at::QEngine::FBGEMM) {
       return fbgemm_linear_unpack(packed_weight);
     }
