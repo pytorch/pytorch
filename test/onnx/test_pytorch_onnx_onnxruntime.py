@@ -2738,17 +2738,17 @@ class TestONNXRuntime(unittest.TestCase):
     @unittest.skip("Enable this once ORT version is updated")
     @skipIfUnsupportedMinOpsetVersion(12)
     def test_crossentropyloss(self):
-            x = torch.randn(3, 5)
-            y = torch.empty(3, dtype=torch.long).random_(5)
-            self._crossentropyloss(x, y)
+        x = torch.randn(3, 5)
+        y = torch.empty(3, dtype=torch.long).random_(5)
+        self._crossentropyloss(x, y)
 
-            x = torch.randn(3, 5, 2)
-            y = torch.empty(3, 2, dtype=torch.long).random_(5)
-            self._crossentropyloss(x, y)
+        x = torch.randn(3, 5, 2)
+        y = torch.empty(3, 2, dtype=torch.long).random_(5)
+        self._crossentropyloss(x, y)
 
-            x = torch.randn(3, 5, 2, 7)
-            y = torch.empty(3, 2, 7, dtype=torch.long).random_(5)
-            self._crossentropyloss(x, y)
+        x = torch.randn(3, 5, 2, 7)
+        y = torch.empty(3, 2, 7, dtype=torch.long).random_(5)
+        self._crossentropyloss(x, y)
 
     def _crossentropyloss(self, x, y):
         class CrossEntropyLossNone(torch.nn.Module):
