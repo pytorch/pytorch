@@ -10,7 +10,7 @@ namespace prim {
 using namespace ::c10::prim;
 }
 
-void inlineCalls(Block* block) {
+void inlineCalls(Block* block, bool use_graph /*=false*/) {
   for (auto it = block->nodes().begin(), end = block->nodes().end();
        it != end;) {
     Node* cur = *it++;
@@ -25,7 +25,7 @@ void inlineCalls(Block* block) {
             "Inlining function '", fun_type->function()->name(), "' to ", *cur);
         GRAPH_UPDATE(
             "Function body: ", *fun_type->function()->optimized_graph());
-        inlineCallTo(cur, fun_type->function());
+        inlineCallTo(cur, fun_type->function(), use_graph);
       } break;
       case prim::CallMethod: {
         const std::string& name = cur->s(attr::name);
@@ -36,21 +36,21 @@ void inlineCalls(Block* block) {
           }
           GRAPH_UPDATE("Inlining method '", function->name(), "' to ", *cur);
           GRAPH_UPDATE("Function body: ", *function->optimized_graph());
-          inlineCallTo(cur, function);
+          inlineCallTo(cur, function, use_graph);
         }
       } break;
       default: {
         for (auto b : cur->blocks()) {
-          inlineCalls(b);
+          inlineCalls(b, use_graph);
         }
       } break;
     }
   }
 }
 
-void Inline(Graph& graph) {
+void Inline(Graph& graph, bool use_graph /*=false*/) {
   GRAPH_DUMP("Before Inlining: ", &graph);
-  inlineCalls(graph.block());
+  inlineCalls(graph.block(), use_graph);
   GRAPH_DUMP("After Inlining: ", &graph);
 }
 

@@ -1820,16 +1820,24 @@ at::ArrayRef<Value*> createTupleUnpack(Value* v) {
   return g.insertNode(g.createTupleUnpack(v))->outputs();
 }
 
-std::vector<Value*> inlineCallTo(Node* to_replace, Function* callee) {
+std::vector<Value*> inlineCallTo(Node* to_replace, Function* callee, bool use_graph /*=false*/) {
   WithInsertPoint guard(to_replace);
   TORCH_INTERNAL_ASSERT(callee->isGraphFunction());
   std::unordered_map<Value*, Value*> value_map;
-  auto new_outputs = insertGraph(
+  std::vector<torch::jit::Value*> new_outputs;
+  if (use_graph) {
+    new_outputs = insertGraph(
+      *to_replace->owningGraph(),
+      *(callee->graph()),
+      to_replace->inputs(),
+      value_map);
+  } else {
+    new_outputs = insertGraph(
       *to_replace->owningGraph(),
       *(callee->optimized_graph()),
       to_replace->inputs(),
       value_map);
-
+  }
   std::unordered_map<InlinedCallStack*, InlinedCallStackPtr>
       new_callstack_entries;
 

@@ -5,7 +5,7 @@
 namespace torch {
 namespace jit {
 
-void PreInlineONNX(Graph& graph);
+void StopInliningForONNX(Graph& graph);
 
 }
 } // namespace torch

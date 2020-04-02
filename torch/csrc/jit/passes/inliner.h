@@ -6,7 +6,7 @@ namespace torch {
 namespace jit {
 
 // Inline function and method calls.
-TORCH_API void Inline(Graph& graph);
+TORCH_API void Inline(Graph& graph, bool use_graph=false);
 
 } // namespace jit
 } // namespace torch

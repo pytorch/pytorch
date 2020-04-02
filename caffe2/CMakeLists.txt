@@ -404,7 +404,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/jit/passes/inline_autodiff_subgraphs.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/insert_guards.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/inliner.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/passes/onnx/preinline_onnx.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/passes/onnx/preclude_inlining.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/lift_closures.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/inline_forked_closures.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/dead_code_elimination.cpp
