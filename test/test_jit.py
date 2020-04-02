@@ -18117,6 +18117,38 @@ a")
         f = Foo()
         torch.jit.script(f)
 
+    def test_static_if_prop(self):
+        class MaybeHasAttr(torch.nn.Module):
+            def __init__(self, add_attr):
+                super(MaybeHasAttr, self).__init__()
+                if add_attr:
+                    self.maybe_attr = 1
+
+            def forward(self):
+                if hasattr(self, "maybe_attr") and True:
+                    return self.maybe_attr
+                else:
+                    return 0
+
+        class MaybeHasAttr2(torch.nn.Module):
+            def __init__(self, add_attr):
+                super(MaybeHasAttr2, self).__init__()
+                if add_attr:
+                    self.maybe_attr = 1
+
+            def forward(self):
+                if not hasattr(self, "maybe_attr") or False:
+                    return 0
+                else:
+                    return self.maybe_attr
+
+        torch.jit.script(MaybeHasAttr(True))
+        torch.jit.script(MaybeHasAttr(False))
+        torch.jit.script(MaybeHasAttr2(True))
+        torch.jit.script(MaybeHasAttr2(False))
+
+
+
     def test_optional_tuple(self):
         def fn(x=None):
             # type: (Optional[Tuple[int, int]]) -> Tuple[int, int]
