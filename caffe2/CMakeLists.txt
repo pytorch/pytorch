@@ -1137,7 +1137,7 @@ endif()
 # ---[ CUDA library.
 if(USE_CUDA)
 
-  target_link_libraries(torch_cuda INTERFACE torch::cudart)
+  target_link_libraries(torch_cuda INTERFACE torch::cudart caffe2::mkl)
   target_link_libraries(torch_cuda PUBLIC c10_cuda)
 
   target_link_libraries(torch_cuda PUBLIC ${TORCH_CUDA_LIBRARIES})

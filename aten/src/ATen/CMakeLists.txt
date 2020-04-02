@@ -149,20 +149,6 @@ endif(BLAS_FOUND)
 
 if(LAPACK_FOUND)
   list(APPEND ATen_CPU_DEPENDENCY_LIBS ${LAPACK_LIBRARIES})
-  if(USE_CUDA)
-    # Although Lapack provides CPU (and thus, one might expect that ATen_cuda
-    # would not need this at all), some of our libraries (magma in particular)
-    # backend to CPU BLAS/LAPACK implementations, and so it is very important
-    # we get the *right* implementation, because even if the symbols are the
-    # same, LAPACK implementions may have different calling conventions.
-    # This caused https://github.com/pytorch/pytorch/issues/7353
-    list(APPEND ATen_CUDA_DEPENDENCY_LIBS ${LAPACK_LIBRARIES})
-  endif()
-  if(USE_ROCM)
-    # It's not altogether clear that HIP behaves the same way, but it
-    # seems safer to assume that it needs it too
-    list(APPEND ATen_HIP_DEPENDENCY_LIBS ${LAPACK_LIBRARIES})
-  endif()
 endif(LAPACK_FOUND)
 
 if(UNIX AND NOT APPLE)
@@ -319,10 +305,6 @@ if(USE_CUDA AND NOT USE_ROCM)
 
   if(USE_MAGMA)
     list(APPEND ATen_CUDA_DEPENDENCY_LIBS ${MAGMA_LIBRARIES})
-    if($ENV{TH_BINARY_BUILD})
-      list(APPEND ATen_CUDA_DEPENDENCY_LIBS
-        "${BLAS_LIBRARIES};${BLAS_LIBRARIES};${BLAS_LIBRARIES}")
-    endif($ENV{TH_BINARY_BUILD})
   endif(USE_MAGMA)
   if($ENV{ATEN_STATIC_CUDA})
     list(APPEND ATen_CUDA_DEPENDENCY_LIBS "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libculibos.a")
