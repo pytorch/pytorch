@@ -67,7 +67,15 @@ Tensor asin(const Tensor& self) { return unary_op_impl(self, at::asin_out); }
 Tensor& asin_(Tensor& self) { return unary_op_impl_(self, at::asin_out); }
 
 Tensor& abs_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, abs_stub); }
-Tensor abs(const Tensor& self) { return unary_op_impl(self, at::abs_out); }
+Tensor abs(const Tensor& self) {
+  // Casts complex tensor output to float
+  if (self.is_complex()) {
+    auto t = unary_op_impl(self, at::abs_out);
+    const auto out_type = c10::toValueType(c10::typeMetaToScalarType(self.dtype()));
+    return t.to(out_type);
+  }
+  return unary_op_impl(self, at::abs_out);
+}
 Tensor& abs_(Tensor& self) { return unary_op_impl_(self, at::abs_out); }
 
 Tensor& angle_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, angle_stub); }

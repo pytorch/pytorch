@@ -2,10 +2,15 @@ from functools import wraps
 
 import torch
 import itertools
+import unittest
 
-from torch.testing._internal.common_utils import TestCase, run_tests, load_tests
+from torch.testing._internal.common_utils import TestCase, run_tests, load_tests, \
+    TEST_NUMPY, numpy_dtype
 from torch.testing._internal.common_device_type import (instantiate_device_type_tests, onlyOnCPUAndCUDA,
                                                         dtypes)
+
+if TEST_NUMPY:
+    import numpy as np
 
 # load_tests from torch.testing._internal.common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -686,6 +691,19 @@ class TestTypePromotion(TestCase):
         with self.maybeWarnsRegex(UserWarning, '^Integer division.+is deprecated.+'):
             torch.addcdiv(a, b, b, out=o)
 
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    @dtypes(torch.complex64, torch.complex128)
+    def test_abs_complex_to_float(self, device, dtype):
+        np_dtype = numpy_dtype(dtype)
+        vals = (0 + 0j, 0 - 2j, 0 + 2j, 1 + 1j, 1 - 1j, 2 + .2j, -2 - .2j)
+        a = np.array(vals, dtype=np_dtype)
+        t = torch.tensor(vals, device=device, dtype=dtype)
+
+        np_result = np.abs(a)
+        torch_result = torch.abs(t).cpu()
+
+        for idx, _ in enumerate(vals):
+            self.assertEqual(np_result[idx], torch_result[idx].item())
 
 
 instantiate_device_type_tests(TestTypePromotion, globals())

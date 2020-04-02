@@ -300,9 +300,11 @@ def numpy_dtype(dtype):
     assert TEST_NUMPY
 
     torch_to_numpy_dtype = {
-        torch.half   : numpy.float16,
-        torch.float  : numpy.float32,
-        torch.double : numpy.float64
+        torch.half       : numpy.float16,
+        torch.float      : numpy.float32,
+        torch.double     : numpy.float64,
+        torch.complex64  : numpy.complex64,
+        torch.complex128 : numpy.complex128
     }
 
     return torch_to_numpy_dtype[dtype]
