@@ -550,7 +550,7 @@ static auto registry = torch::RegisterOperators()
     .schema("aten::set_.source_Tensor(Tensor(a!) self, Tensor source) -> Tensor(a!)")
     .impl_unboxedOnlyKernel<decltype(set__source_Tensor), &set__source_Tensor>(DispatchKey::VariableTensorId))
   .op(torch::RegisterOperators::options()
-    .schema("set_(Tensor(a!) self) -> Tensor(a!)")
+    .schema("aten::set_(Tensor(a!) self) -> Tensor(a!)")
     .impl_unboxedOnlyKernel<decltype(set_), &set_>(DispatchKey::VariableTensorId))
   ;
 

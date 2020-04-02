@@ -101,7 +101,7 @@ Tensor& set_empty_(Tensor& result) {
 
 static auto registry_set_cpu_ = torch::RegisterOperators()
   .op(torch::RegisterOperators::options()
-    .schema("set_(Tensor(a!) self) -> Tensor(a!)")
+    .schema("aten::set_(Tensor(a!) self) -> Tensor(a!)")
     .impl_unboxedOnlyKernel<decltype(set_empty_), &set_empty_>(DispatchKey::CPUTensorId))
   ;
 
