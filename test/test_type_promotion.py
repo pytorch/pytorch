@@ -702,7 +702,7 @@ class TestTypePromotion(TestCase):
         np_result = np.abs(a)
         torch_result = torch.abs(t).cpu()
 
-        self.assertEqual(torch.from_numpy(np_result), torch_result)
+        self.assertEqual(torch.from_numpy(np_result), torch_result, exact_dtype=True)
 
 
 instantiate_device_type_tests(TestTypePromotion, globals())
