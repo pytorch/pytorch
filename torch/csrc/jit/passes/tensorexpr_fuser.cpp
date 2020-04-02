@@ -13,11 +13,6 @@
 namespace torch {
 namespace jit {
 
-static bool texpr_fuser_enabled = true;
-void setTensorExprFuserEnabled(bool val) {
-  texpr_fuser_enabled = val;
-}
-
 const Symbol& getTensorExprSymbol() {
   static Symbol s = Symbol::fromQualString("tensorexpr::Group");
   return s;
@@ -255,9 +250,6 @@ std::pair<graph_node_list::iterator, bool> scanNode(
 }
 
 void fuseTensorExprs(std::shared_ptr<Graph>& graph) {
-  if (!texpr_fuser_enabled) {
-    return;
-  }
   GRAPH_DUMP("Before TExprFuser: ", graph);
 
   // Get rid of dead code so that we don't waste effort fusing it.
@@ -331,12 +323,5 @@ RegisterOperators TensorExprOps({
         AliasAnalysisKind::PURE_FUNCTION),
 });
 
-void registerTensorExprFuser() {
-  static bool already_registered = false;
-  if (!already_registered) {
-    RegisterPass pass(fuseTensorExprs);
-    already_registered = true;
-  }
-}
 } // namespace jit
 } // namespace torch

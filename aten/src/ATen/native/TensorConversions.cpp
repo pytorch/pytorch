@@ -46,32 +46,19 @@ static inline Tensor to_impl(const Tensor& self, const TensorOptions& options, b
 
 Tensor to(const Tensor& self, const TensorOptions& options, bool non_blocking, bool copy) {
 
-  auto memory_format = options.memory_format_opt().value_or(MemoryFormat::Contiguous);
-
   TORCH_CHECK(options.requires_grad_opt() == c10::nullopt,
            "to(options) expects unset requires_grad flag, but got "
            "options.requires_grad set as ", options.requires_grad());
 
-  const auto & layout_opt = options.layout_opt();
-  TORCH_CHECK(!layout_opt || self.layout() == layout_opt.value(),
+  TORCH_CHECK(!options.has_layout() || self.layout() == options.layout(),
            "to(options) doesn't support converting to a different layout, "
            "but got self.layout being ", self.layout(),
            " and options.layout set as ", options.layout());
 
-  // TODO: refactor all of this code to just use merge_in
-
-  auto device_opt = options.device_opt();
-  if (device_opt) {
-    device_opt = ensure_has_index(device_opt.value());
+  if (options.has_device()) {
+    options = options.device(ensure_has_index(options.device()));
   }
-  const auto & dtype_opt = options.dtype_opt();
-  auto specified_options = self.options();
-  if (device_opt) {
-    specified_options = specified_options.device(device_opt.value());
-  }
-  if (dtype_opt) {
-    specified_options = specified_options.dtype(dtype_opt.value());
-  }
+  auto specified_options = self.options().merge_in(options);
   return to_impl(self, specified_options, non_blocking, copy);
 }
 

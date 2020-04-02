@@ -75,7 +75,7 @@ void ProcessGroupAgent::collectNames() {
   pg_->allgather(outputNames, inputName)->wait();
 
   // convert collected name tensors into string names
-  for (int i = 0; i < worldSize; ++i) {
+  for (worker_id_t i = 0; i < worldSize; ++i) {
     torch::Tensor& tensor = outputNames[0][i];
     std::string peerName((const char*)tensor.storage().data<signed char>());
 
@@ -95,7 +95,7 @@ ProcessGroupAgent::ProcessGroupAgent(
     int numSendRecvThreads,
     std::chrono::milliseconds rpcTimeout)
     : RpcAgent(
-          WorkerInfo(std::move(workerName), pg->getRank()),
+          WorkerInfo(std::move(workerName), (int64_t)pg->getRank()),
           std::make_unique<RequestCallbackImpl>(),
           rpcTimeout),
       pg_(std::move(pg)),
@@ -129,13 +129,14 @@ ProcessGroupAgent::ProcessGroupAgent(
       pg_->getRank());
 
   // tmp vector to sort names in rank's order
-  std::vector<std::string> tmpWorkerIds(pg_->getSize());
+  const auto worldSize = pg_->getSize();
+  std::vector<std::string> tmpWorkerIds(worldSize);
   for (auto& entry : nameMap_) {
     tmpWorkerIds[entry.second] = entry.first;
   }
 
-  allWorkerInfo_.reserve(pg_->getSize());
-  for (int rank = 0; rank < (int)tmpWorkerIds.size(); ++rank) {
+  allWorkerInfo_.reserve(worldSize);
+  for (worker_id_t rank = 0; rank < worldSize; ++rank) {
     allWorkerInfo_.emplace_back(std::move(tmpWorkerIds[rank]), rank);
   }
 }
@@ -174,21 +175,26 @@ void ProcessGroupAgent::join() {
 
 bool ProcessGroupAgent::hasPendingMessage() {
   const auto worldSize = pg_->getSize();
-  std::vector<int64_t> snapshot;
-  snapshot.reserve(2 * worldSize);
+  auto snapshot = std::make_unique<std::vector<int64_t>>();
+  snapshot->reserve(2 * worldSize);
   auto recvSnapshot = recvCounts_.snapshot();
   auto sendSnapshot = sendCounts_.snapshot();
-  snapshot.insert(
-      snapshot.end(),
+  snapshot->insert(
+      snapshot->end(),
       std::make_move_iterator(recvSnapshot.begin()),
       std::make_move_iterator(recvSnapshot.end()));
-  snapshot.insert(
-      snapshot.end(),
+  snapshot->insert(
+      snapshot->end(),
       std::make_move_iterator(sendSnapshot.begin()),
       std::make_move_iterator(sendSnapshot.end()));
 
-  std::vector<torch::Tensor> inputSnapshot = {
-      torch::from_blob(snapshot.data(), {2, worldSize}, {torch::kInt64})};
+  auto snapshotData = snapshot->data();
+  auto deleteWhenDone = snapshot.release();
+  std::vector<torch::Tensor> inputSnapshot = {torch::from_blob(
+      snapshotData,
+      {2, worldSize},
+      [deleteWhenDone](void*) { delete deleteWhenDone; },
+      {torch::kInt64})};
   // allgather both send and recv messages in one shot
   std::vector<std::vector<torch::Tensor>> outputSnapshots(1);
 
@@ -401,12 +407,12 @@ std::shared_ptr<FutureMessage> ProcessGroupAgent::send(
 }
 
 void ProcessGroupAgent::handleSend(const SendWork& work) {
-  std::string serializedPayload =
-      wireSerialize(work.message_.payload(), work.message_.tensors());
+  auto serializedPayload = std::make_unique<std::string>(std::move(
+      wireSerialize(work.message_.payload(), work.message_.tensors())));
 
   std::vector<torch::Tensor> preamble = {torch::tensor(
       {(int64_t)pg_->getRank(),
-       (int64_t)serializedPayload.length(),
+       (int64_t)serializedPayload->length(),
        (int64_t)work.message_.type(),
        (int64_t)work.message_.id()},
       {torch::kInt64})};
@@ -415,9 +421,14 @@ void ProcessGroupAgent::handleSend(const SendWork& work) {
   // hence the lock
   std::vector<std::shared_ptr<c10d::ProcessGroup::Work>> pendingSends;
   const auto dst = work.to_.id_;
+
+  auto serializedPayloadData = const_cast<char*>(serializedPayload->data());
+  auto serializedPayloadSize = serializedPayload->size();
+  std::string* deleteWhenDone = serializedPayload.release();
   std::vector<torch::Tensor> payload = {torch::from_blob(
-      (void*)serializedPayload.c_str(),
-      serializedPayload.length(),
+      reinterpret_cast<void*>(serializedPayloadData),
+      serializedPayloadSize,
+      [deleteWhenDone](void*) { delete deleteWhenDone; },
       {torch::kChar})};
   pendingSends.reserve(2);
 
@@ -465,15 +476,13 @@ void ProcessGroupAgent::enqueueSend(SendWork work) {
         } catch (std::exception& e) {
           auto errorStr = c10::str(
               "Encountered exception in ProcessGroupAgent::enqueueSend: ",
-              e.what());
+              e.what(),
+              " on node: ",
+              RpcAgent::getWorkerInfo().id_);
           auto exceptionMsg =
               rpc::createExceptionResponse(errorStr, work.message_.id());
           if (work.message_.isRequest()) {
-            auto err = c10::str(
-                "Encountered exception in ProcessGroupAgent::enqueueSend: ",
-                e.what());
-            auto exceptionMsg =
-                rpc::createExceptionResponse(err, work.message_.id());
+            // Mark the future with corresponding to this request with an error.
             markFutureWithError(exceptionMsg);
           } else if (work.message_.isResponse()) {
             // Try sending the error along.
@@ -670,14 +679,14 @@ void ProcessGroupAgent::listenLoop() {
       listenLoopException_ = std::current_exception();
     }
   } catch (...) {
+    std::string unknownErrorMsg =
+        "Unknown exception occured in "
+        "ProcessGroupAgent::listenLoop. RPC Agent is in an unhealthy state and "
+        "unusable.";
+    LOG(ERROR) << unknownErrorMsg;
     {
       // Lock write to listenLoopException_ since ::send() reads from it.
       std::lock_guard<std::mutex> guard(listenLoopExceptionMutex_);
-      std::string unknownErrorMsg =
-          "Unknown exception occured in "
-          "ProcessGroupAgent::listenLoop. RPC Agent is in an unhealthy state and "
-          "unusable.";
-      LOG(ERROR) << unknownErrorMsg;
       listenLoopException_ =
           std::make_exception_ptr(std::runtime_error(unknownErrorMsg));
     }

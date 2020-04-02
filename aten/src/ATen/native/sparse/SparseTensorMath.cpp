@@ -272,6 +272,10 @@ SparseTensor& true_divide_out_sparse_scalar(
   return true_divide_out_sparse_zerodim(result, dividend, wrapped_scalar_tensor(divisor));
 }
 
+Tensor& true_divide_sparse_(Tensor& self, const Tensor& divisor) {
+  return true_divide_out_sparse_zerodim(self, self, divisor);
+}
+
 // --------------------------------------------------------------------
 // floor_divide(SparseTensor, Scalar)
 // --------------------------------------------------------------------
@@ -345,6 +349,25 @@ Tensor norm_sparse(const SparseTensor& self, Scalar value) {
   AT_ASSERT(self.is_sparse());
 
   return self.coalesce()._values().norm(value);
+}
+
+// --------------------------------------------------------------------
+// mv(SparseTensor, Tensor)
+// --------------------------------------------------------------------
+
+Tensor mv_sparse(const SparseTensor& self, const Tensor& vec)
+{
+  TORCH_CHECK(self.ndimension() == 2 && 
+              vec.ndimension() == 1,
+              "mv: two tensor dim should be 2 and 1, but got ",
+              "SparseTensor Dim: ", self.ndimension(), "Tensor Dim: ", vec.ndimension());
+
+  TORCH_CHECK(vec.size(-1) == self.size(-1),
+              "mv: expected self.size(-1) == vec.size(-1)");
+
+  auto result = self.matmul(vec.unsqueeze(-1));
+
+  return result.squeeze(-1);
 }
 
 // --------------------------------------------------------------------
