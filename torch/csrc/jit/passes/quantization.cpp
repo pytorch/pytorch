@@ -745,17 +745,17 @@ bool isBiasOfConvOrLinear(Value* v) {
   return result;
 }
 
-bool isWeightOfConvOrLinear(Value* v) {
+bool isWeightOfFunction(Value* v) {
   bool result = matchArgPattern(
       v,
-      AtenFuncArgs({{"conv2d", 1}, {"conv3d", 1}, {"linear", 1}}),
+      AtenFuncArgs({{"conv2d", 1}, {"conv3d", 1}, {"linear", 1}, {"lstm", 2}}),
       CallFuncArgs({{"linear", 2}}));
   return result;
 }
 
 // Go through the CallMethod graph to check if the value is Weight.
 bool isWeight(Module& module, Value* v) {
-  if (isWeightOfConvOrLinear(v)) {
+  if (isWeightOfFunction(v)) {
     return true;
   }
   c10::optional<bool> result;
@@ -783,8 +783,7 @@ bool isWeight(Module& module, Value* v) {
 }
 
 Module getObserverModuleFor(Value* v, const QConfig& qconfig) {
-  return isWeightOfConvOrLinear(v) ? std::get<1>(qconfig)
-                                   : std::get<0>(qconfig);
+  return isWeightOfFunction(v) ? std::get<1>(qconfig) : std::get<0>(qconfig);
 }
 
 ModuleMethodVector InsertObserversHelper::getInvokedMethods(
@@ -999,6 +998,12 @@ void InsertObserversHelper::preprocess(
   }
 }
 
+// Returns true if the value is the weight to LSTM operator.
+bool isDynamicLSTMWeight(Value* v, Use use, bool is_dynamic) {
+  return is_dynamic && use.user->kind() == Symbol::aten("lstm") &&
+      (use.offset == 2);
+}
+
 // TODO: remove this as a class method
 bool InsertObserversHelper::valueNeedsToBeQuantized(Value* v) {
   if (isBiasOfConvOrLinear(v) ||
@@ -1016,7 +1021,7 @@ bool InsertObserversHelper::valueNeedsToBeQuantized(Value* v) {
   }
   // Check whether user is quantizable
   for (const auto& use : v->uses()) {
-    if (nodeQuantizable(use.user)) {
+    if (nodeQuantizable(use.user) || isDynamicLSTMWeight(v, use, is_dynamic)) {
       return true;
     }
   }
