@@ -144,6 +144,7 @@ GRADIENT_OPERATOR_SCHEMA(ReluGradient)
     .NumInputs(2)
     .NumOutputs(1)
     .AllowInplace({{1, 0}})
+    .IdenticalTypeAndShapeOfInput(1)
     .SetDoc(R"DOC(
 ReluGradient takes both Y and dY and uses this to update dX according to the
 chain rule and derivatives of the rectified linear function.
