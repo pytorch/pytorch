@@ -203,7 +203,7 @@ Example (type annotations for Python 3):
 
     class EmptyDataStructures(torch.nn.Module):
         def __init__(self):
-            super(EmptyDataStructures, self).__init__()
+            super().__init__()
 
         def forward(self, x: torch.Tensor) -> Tuple[List[Tuple[int, float]], Dict[str, int]]:
             # This annotates the list to be a `List[Tuple[int, float]]`
@@ -227,7 +227,7 @@ Example (``torch.jit.annotate`` for Python 2):
 
     class EmptyDataStructures(torch.nn.Module):
         def __init__(self):
-            super(EmptyDataStructures, self).__init__()
+            super().__init__()
 
         def forward(self, x):
             # type: (Tensor) -> Tuple[List[Tuple[int, float]], Dict[str, int]]
@@ -272,7 +272,7 @@ Example (refining types on parameters and locals):
         z: Optional[int]
 
         def __init__(self, z):
-            super(M, self).__init__()
+            super().__init__()
             # If `z` is None, its type cannot be inferred, so it must
             # be specified (above)
             self.z = z
@@ -558,7 +558,7 @@ calling its ``forward`` method (e.g. ``self.resnet.forward(input)``).
 
     class MyModule(nn.Module):
         def __init__(self):
-            super(MyModule, self).__init__()
+            super().__init__()
             means = torch.tensor([103.939, 116.779, 123.68])
             self.means = torch.nn.Parameter(means.resize_(1, 3, 1, 1))
             resnet = torchvision.models.resnet18()
@@ -694,7 +694,7 @@ loop at compile time, with each member of the constant module list.
 
     class SubModule(torch.nn.Module):
         def __init__(self):
-            super(SubModule, self).__init__()
+            super().__init__()
             self.weight = nn.Parameter(torch.randn(2))
 
         def forward(self, input):
@@ -704,7 +704,7 @@ loop at compile time, with each member of the constant module list.
         __constants__ = ['mods']
 
         def __init__(self):
-            super(MyModule, self).__init__()
+            super().__init__()
             self.mods = torch.nn.ModuleList([SubModule() for i in range(10)])
 
         def forward(self, v):
@@ -837,7 +837,7 @@ value should be treated as a constant.
         a : torch.jit.Final[int]
 
         def __init__(self):
-            super(Foo, self).__init__()
+            super().__init__()
             self.a = 1 + 4
 
         def forward(self, input):
@@ -869,7 +869,7 @@ Supported constant Python types are
             __constants__ = ['a']
 
             def __init__(self):
-                super(Foo, self).__init__()
+                super().__init__()
                 self.a = 1 + 4
 
             def forward(self, input):
@@ -910,7 +910,7 @@ Example:
         some_dict: Dict[str, int]
 
         def __init__(self, a_dict):
-            super(Foo, self).__init__()
+            super().__init__()
             self.words = []
             self.some_dict = a_dict
 
@@ -938,7 +938,7 @@ Example:
             __annotations__ = {'words': List[str], 'some_dict': Dict[str, int]}
 
             def __init__(self, a_dict):
-                super(Foo, self).__init__()
+                super().__init__()
                 self.words = []
                 self.some_dict = a_dict
 

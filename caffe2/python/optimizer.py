@@ -231,7 +231,7 @@ class SgdOptimizer(Optimizer):
     def __init__(self, base_learning_rate=0.01, policy='fixed',
                  momentum=0.0, nesterov=1, sparse_dedup_aggregator=None,
                  lars=None, **kwargs):
-        super(SgdOptimizer, self).__init__()
+        super().__init__()
         self.base_learning_rate = base_learning_rate
         self.policy = policy
         self.momentum = momentum
@@ -336,7 +336,7 @@ class MultiPrecisionSgdOptimizer(SgdOptimizer):
     def __init__(self, base_learning_rate=0.1, momentum=0.0,
                  policy="fixed", nesterov=1, sparse_dedup_aggregator=None,
                  **kwargs):
-        super(MultiPrecisionSgdOptimizer, self).__init__(
+        super().__init__(
             base_learning_rate=base_learning_rate,
             policy=policy,
             momentum=momentum,
@@ -394,7 +394,7 @@ class FP16SgdOptimizer(SgdOptimizer):
                  policy="fixed", nesterov=1, weight_decay=0.0001,
                  sparse_dedup_aggregator=None,
                  **kwargs):
-        super(FP16SgdOptimizer, self).__init__(
+        super().__init__(
             base_learning_rate=base_learning_rate,
             policy=policy,
             momentum=momentum,
@@ -521,7 +521,7 @@ class AdagradOptimizer(Optimizer):
                  lars=None, output_effective_lr=False,
                  output_effective_lr_and_update=False,
                  pruning_options=None, swa_options=None, weight_scale=None, **kwargs):
-        super(AdagradOptimizer, self).__init__()
+        super().__init__()
         self.alpha = alpha
         self.epsilon = epsilon
         self.decay = decay
@@ -784,7 +784,7 @@ class WngradOptimizer(Optimizer):
                  sparse_dedup_aggregator=None, engine='', moment_init=100.0,
                  lars=None, output_effective_lr=False,
                  output_effective_lr_and_update=False, **kwargs):
-        super(WngradOptimizer, self).__init__()
+        super().__init__()
         self.alpha = alpha
         self.epsilon = epsilon
         self.policy = policy
@@ -882,7 +882,7 @@ class AdadeltaOptimizer(Optimizer):
               include "mean" and "sum".
             engine: the engine used, options include "", "CUDNN", etc.
         """
-        super(AdadeltaOptimizer, self).__init__()
+        super().__init__()
         self.alpha = alpha
         self.epsilon = epsilon
         self.decay = decay
@@ -941,7 +941,7 @@ class AdadeltaOptimizer(Optimizer):
 class FtrlOptimizer(Optimizer):
     def __init__(self, alpha=0.01, beta=1e-4, lambda1=0, lambda2=0,
                  sparse_dedup_aggregator=None, engine=''):
-        super(FtrlOptimizer, self).__init__()
+        super().__init__()
         self.alpha = alpha
         self.beta = beta
         self.lambda1 = lambda1
@@ -995,7 +995,7 @@ class GFtrlOptimizer(Optimizer):
 
     def __init__(self, alpha=0.01, beta=1e-4, lambda1=0, lambda2=0,
                  sparse_dedup_aggregator=None, engine=''):
-        super(GFtrlOptimizer, self).__init__()
+        super().__init__()
         self.alpha = alpha
         self.beta = beta
         self.lambda1 = lambda1
@@ -1037,7 +1037,7 @@ class AdamOptimizer(Optimizer):
                  policy='fixed', use_lr_adaption=False, lr_alpha=0.01,
                  normalized_lr_adaption=True, sparse_dedup_aggregator=None,
                  rowWise=False, engine='', enableRAdam=False, **kwargs):
-        super(AdamOptimizer, self).__init__()
+        super().__init__()
         self.alpha = alpha
         self.beta1 = beta1
         self.beta2 = beta2
@@ -1169,7 +1169,7 @@ class YellowFinOptimizer(Optimizer):
                  policy='fixed',
                  sparse_dedup_aggregator=None,
                  **kwargs):
-        super(YellowFinOptimizer, self).__init__()
+        super().__init__()
         self.alpha = alpha
         self.mu = mu
         self.beta = beta
@@ -1283,7 +1283,7 @@ class RmsPropOptimizer(Optimizer):
         engine='',
         **kwargs
     ):
-        super(RmsPropOptimizer, self).__init__()
+        super().__init__()
         self.alpha = alpha
         self.decay = decay
         self.momentum = momentum

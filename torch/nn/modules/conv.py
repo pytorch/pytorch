@@ -20,7 +20,7 @@ class _ConvNd(Module):
     def __init__(self, in_channels, out_channels, kernel_size, stride,
                  padding, dilation, transposed, output_padding,
                  groups, bias, padding_mode):
-        super(_ConvNd, self).__init__()
+        super().__init__()
         if in_channels % groups != 0:
             raise ValueError('in_channels must be divisible by groups')
         if out_channels % groups != 0:
@@ -77,7 +77,7 @@ class _ConvNd(Module):
         return s.format(**self.__dict__)
 
     def __setstate__(self, state):
-        super(_ConvNd, self).__setstate__(state)
+        super().__setstate__(state)
         if not hasattr(self, 'padding_mode'):
             self.padding_mode = 'zeros'
 
@@ -195,7 +195,7 @@ class Conv1d(_ConvNd):
         stride = _single(stride)
         padding = _single(padding)
         dilation = _single(dilation)
-        super(Conv1d, self).__init__(
+        super().__init__(
             in_channels, out_channels, kernel_size, stride, padding, dilation,
             False, _single(0), groups, bias, padding_mode)
 
@@ -333,7 +333,7 @@ class Conv2d(_ConvNd):
         stride = _pair(stride)
         padding = _pair(padding)
         dilation = _pair(dilation)
-        super(Conv2d, self).__init__(
+        super().__init__(
             in_channels, out_channels, kernel_size, stride, padding, dilation,
             False, _pair(0), groups, bias, padding_mode)
 
@@ -468,7 +468,7 @@ class Conv3d(_ConvNd):
         stride = _triple(stride)
         padding = _triple(padding)
         dilation = _triple(dilation)
-        super(Conv3d, self).__init__(
+        super().__init__(
             in_channels, out_channels, kernel_size, stride, padding, dilation,
             False, _triple(0), groups, bias, padding_mode)
 
@@ -488,7 +488,7 @@ class _ConvTransposeNd(_ConvNd):
         if padding_mode != 'zeros':
             raise ValueError('Only "zeros" padding mode is supported for {}'.format(self.__class__.__name__))
 
-        super(_ConvTransposeNd, self).__init__(
+        super().__init__(
             in_channels, out_channels, kernel_size, stride,
             padding, dilation, transposed, output_padding,
             groups, bias, padding_mode)
@@ -628,7 +628,7 @@ class ConvTranspose1d(_ConvTransposeNd):
         padding = _single(padding)
         dilation = _single(dilation)
         output_padding = _single(output_padding)
-        super(ConvTranspose1d, self).__init__(
+        super().__init__(
             in_channels, out_channels, kernel_size, stride, padding, dilation,
             True, output_padding, groups, bias, padding_mode)
 
@@ -774,7 +774,7 @@ class ConvTranspose2d(_ConvTransposeNd):
         padding = _pair(padding)
         dilation = _pair(dilation)
         output_padding = _pair(output_padding)
-        super(ConvTranspose2d, self).__init__(
+        super().__init__(
             in_channels, out_channels, kernel_size, stride, padding, dilation,
             True, output_padding, groups, bias, padding_mode)
 
@@ -917,7 +917,7 @@ class ConvTranspose3d(_ConvTransposeNd):
         padding = _triple(padding)
         dilation = _triple(dilation)
         output_padding = _triple(output_padding)
-        super(ConvTranspose3d, self).__init__(
+        super().__init__(
             in_channels, out_channels, kernel_size, stride, padding, dilation,
             True, output_padding, groups, bias, padding_mode)
 
@@ -953,7 +953,7 @@ class _ConvTransposeMixin(_ConvTransposeNd):
         warnings.warn(
             "_ConvTransposeMixin is a deprecated internal class. "
             "Please consider using public APIs.")
-        super(_ConvTransposeMixin, self).__init__(*args, **kwargs)
+        super().__init__(*args, **kwargs)
 
 
 # TODO: Conv2dLocal

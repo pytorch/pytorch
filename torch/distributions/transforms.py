@@ -88,7 +88,7 @@ class Transform(object):
             self._cached_x_y = None, None
         else:
             raise ValueError('cache_size must be 0 or 1')
-        super(Transform, self).__init__()
+        super().__init__()
 
     @property
     def inv(self):
@@ -173,7 +173,7 @@ class _InverseTransform(Transform):
     This class is private; please instead use the ``Transform.inv`` property.
     """
     def __init__(self, transform):
-        super(_InverseTransform, self).__init__()
+        super().__init__()
         self._inv = transform
 
     @constraints.dependent_property
@@ -221,7 +221,7 @@ class ComposeTransform(Transform):
         parts (list of :class:`Transform`): A list of transforms to compose.
     """
     def __init__(self, parts):
-        super(ComposeTransform, self).__init__()
+        super().__init__()
         self.parts = parts
 
     def __eq__(self, other):
@@ -328,7 +328,7 @@ class PowerTransform(Transform):
     sign = +1
 
     def __init__(self, exponent, cache_size=0):
-        super(PowerTransform, self).__init__(cache_size=cache_size)
+        super().__init__(cache_size=cache_size)
         self.exponent, = broadcast_all(exponent)
 
     def __eq__(self, other):
@@ -448,7 +448,7 @@ class AffineTransform(Transform):
     bijective = True
 
     def __init__(self, loc, scale, event_dim=0, cache_size=0):
-        super(AffineTransform, self).__init__(cache_size=cache_size)
+        super().__init__(cache_size=cache_size)
         self.loc = loc
         self.scale = scale
         self.event_dim = event_dim
@@ -608,7 +608,7 @@ class CatTransform(Transform):
     """
     def __init__(self, tseq, dim=0, lengths=None):
         assert all(isinstance(t, Transform) for t in tseq)
-        super(CatTransform, self).__init__()
+        super().__init__()
         self.transforms = list(tseq)
         if lengths is None:
             lengths = [1] * len(self.transforms)
@@ -684,7 +684,7 @@ class StackTransform(Transform):
     """
     def __init__(self, tseq, dim=0):
         assert all(isinstance(t, Transform) for t in tseq)
-        super(StackTransform, self).__init__()
+        super().__init__()
         self.transforms = list(tseq)
         self.dim = dim
 

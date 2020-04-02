@@ -115,7 +115,7 @@ class DataParallel(Module):
     # TODO: update notes/cuda.rst when this class handles 8+ GPUs well
 
     def __init__(self, module, device_ids=None, output_device=None, dim=0):
-        super(DataParallel, self).__init__()
+        super().__init__()
 
         if not torch.cuda.is_available():
             self.module = module

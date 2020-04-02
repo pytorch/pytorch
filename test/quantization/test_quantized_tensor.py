@@ -15,7 +15,7 @@ import tempfile
 
 class Foo(torch.nn.Module):
     def __init__(self):
-        super(Foo, self).__init__()
+        super().__init__()
         self.qscheme = torch.per_tensor_symmetric
 
 def _calculate_dynamic_qparams(X, dtype, reduce_range=False):

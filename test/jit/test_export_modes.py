@@ -24,7 +24,7 @@ if __name__ == '__main__':
 class TestExportModes(JitTestCase):
     class MyModel(nn.Module):
         def __init__(self):
-            super(TestExportModes.MyModel, self).__init__()
+            super().__init__()
 
         def forward(self, x):
             return x.transpose(0, 1)

@@ -27,7 +27,7 @@ class RNNBase(Module):
     def __init__(self, mode, input_size, hidden_size,
                  num_layers=1, bias=True, batch_first=False,
                  dropout=0., bidirectional=False):
-        super(RNNBase, self).__init__()
+        super().__init__()
         self.mode = mode
         self.input_size = input_size
         self.hidden_size = hidden_size
@@ -94,7 +94,7 @@ class RNNBase(Module):
             # keep self._flat_weights up to date if you do self.weight = ...
             idx = self._flat_weights_names.index(attr)
             self._flat_weights[idx] = value
-        super(RNNBase, self).__setattr__(attr, value)
+        super().__setattr__(attr, value)
 
     def flatten_parameters(self):
         """Resets parameter data pointer so that they can use faster code paths.
@@ -141,7 +141,7 @@ class RNNBase(Module):
                         self.batch_first, bool(self.bidirectional))
 
     def _apply(self, fn):
-        ret = super(RNNBase, self)._apply(fn)
+        ret = super()._apply(fn)
 
         # Resets _flat_weights
         # Note: be v. careful before removing this, as 3rd party device types
@@ -251,7 +251,7 @@ class RNNBase(Module):
         return s.format(**self.__dict__)
 
     def __setstate__(self, d):
-        super(RNNBase, self).__setstate__(d)
+        super().__setstate__(d)
         if 'all_weights' in d:
             self._all_weights = d['all_weights']
 
@@ -279,7 +279,7 @@ class RNNBase(Module):
         return [[getattr(self, weight) for weight in weights] for weights in self._all_weights]
 
     def _replicate_for_data_parallel(self):
-        replica = super(RNNBase, self)._replicate_for_data_parallel()
+        replica = super()._replicate_for_data_parallel()
         # Need to copy these caches, otherwise the replica will share the same
         # flat weights list.
         replica._flat_weights = replica._flat_weights[:]
@@ -392,7 +392,7 @@ class RNN(RNNBase):
             mode = 'RNN_RELU'
         else:
             raise ValueError("Unknown nonlinearity '{}'".format(self.nonlinearity))
-        super(RNN, self).__init__(mode, *args, **kwargs)
+        super().__init__(mode, *args, **kwargs)
 
 
 # XXX: LSTM and GRU implementation is different from RNNBase, this is because:
@@ -512,7 +512,7 @@ class LSTM(RNNBase):
         >>> output, (hn, cn) = rnn(input, (h0, c0))
     """
     def __init__(self, *args, **kwargs):
-        super(LSTM, self).__init__('LSTM', *args, **kwargs)
+        super().__init__('LSTM', *args, **kwargs)
 
     def check_forward_args(self, input, hidden, batch_sizes):
         # type: (Tensor, Tuple[Tensor, Tensor], Optional[Tensor]) -> None
@@ -686,7 +686,7 @@ class GRU(RNNBase):
         >>> output, hn = rnn(input, h0)
     """
     def __init__(self, *args, **kwargs):
-        super(GRU, self).__init__('GRU', *args, **kwargs)
+        super().__init__('GRU', *args, **kwargs)
 
     @torch._jit_internal._overload_method  # noqa: F811
     def forward(self, input, hx=None):  # noqa: F811
@@ -743,7 +743,7 @@ class RNNCellBase(Module):
     __constants__ = ['input_size', 'hidden_size', 'bias']
 
     def __init__(self, input_size, hidden_size, bias, num_chunks):
-        super(RNNCellBase, self).__init__()
+        super().__init__()
         self.input_size = input_size
         self.hidden_size = hidden_size
         self.bias = bias
@@ -849,7 +849,7 @@ class RNNCell(RNNCellBase):
     __constants__ = ['input_size', 'hidden_size', 'bias', 'nonlinearity']
 
     def __init__(self, input_size, hidden_size, bias=True, nonlinearity="tanh"):
-        super(RNNCell, self).__init__(input_size, hidden_size, bias, num_chunks=1)
+        super().__init__(input_size, hidden_size, bias, num_chunks=1)
         self.nonlinearity = nonlinearity
 
     def forward(self, input, hx=None):
@@ -939,7 +939,7 @@ class LSTMCell(RNNCellBase):
     """
 
     def __init__(self, input_size, hidden_size, bias=True):
-        super(LSTMCell, self).__init__(input_size, hidden_size, bias, num_chunks=4)
+        super().__init__(input_size, hidden_size, bias, num_chunks=4)
 
     def forward(self, input, hx=None):
         # type: (Tensor, Optional[Tuple[Tensor, Tensor]]) -> Tuple[Tensor, Tensor]
@@ -1019,7 +1019,7 @@ class GRUCell(RNNCellBase):
     """
 
     def __init__(self, input_size, hidden_size, bias=True):
-        super(GRUCell, self).__init__(input_size, hidden_size, bias, num_chunks=3)
+        super().__init__(input_size, hidden_size, bias, num_chunks=3)
 
     def forward(self, input, hx=None):
         # type: (Tensor, Optional[Tensor]) -> Tensor

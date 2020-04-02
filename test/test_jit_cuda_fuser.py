@@ -19,7 +19,7 @@ if GRAPH_EXECUTOR == ProfilingMode.PROFILING:
 class TestCudaFuser(JitTestCase):
 
     def setUp(self):
-        super(TestCudaFuser, self).setUp()
+        super().setUp()
         self.old_cpu_fuse = torch._C._jit_can_fuse_on_cpu()
         self.old_gpu_fuse = torch._C._jit_can_fuse_on_gpu()
         torch._C._jit_override_can_fuse_on_cpu(False)
@@ -33,7 +33,7 @@ class TestCudaFuser(JitTestCase):
             torch._C._jit_clear_cuda_fuser()
         torch._C._jit_override_can_fuse_on_cpu(self.old_cpu_fuse)
         torch._C._jit_override_can_fuse_on_gpu(self.old_gpu_fuse)
-        super(TestCudaFuser, self).tearDown()
+        super().tearDown()
 
     def _has_cuda_fusion_group(self, graph):
         has_cuda_fusion_group = False

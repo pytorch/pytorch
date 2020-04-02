@@ -13,7 +13,7 @@ from torch.testing._internal.distributed.rpc.jit.dist_autograd_test import (
 )
 class JitDistAutogradTestWithSpawn(MultiProcessTestCase, JitDistAutogradTest):
     def setUp(self):
-        super(JitDistAutogradTestWithSpawn, self).setUp()
+        super().setUp()
         self._spawn_processes()
 
 

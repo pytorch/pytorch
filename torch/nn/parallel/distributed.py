@@ -232,7 +232,7 @@ class DistributedDataParallel(Module):
                  find_unused_parameters=False,
                  check_reduction=False):
 
-        super(DistributedDataParallel, self).__init__()
+        super().__init__()
 
         assert any((p.requires_grad for p in module.parameters())), (
             "DistributedDataParallel is not needed when a module "
@@ -394,7 +394,7 @@ class DistributedDataParallel(Module):
     def __setstate__(self, state):
         # If serializable, then the process group should be the default one
         self.process_group = _get_default_group()
-        super(DistributedDataParallel, self).__setstate__(state)
+        super().__setstate__(state)
         self.__dict__.setdefault('require_forward_param_sync', True)
         self.__dict__.setdefault('require_backward_grad_sync', True)
         self._ddp_init_helper()
@@ -477,7 +477,7 @@ class DistributedDataParallel(Module):
         return gather(outputs, output_device, dim=self.dim)
 
     def train(self, mode=True):
-        super(DistributedDataParallel, self).train(mode)
+        super().train(mode)
         for module in self._module_copies[1:]:
             module.train(mode)
 

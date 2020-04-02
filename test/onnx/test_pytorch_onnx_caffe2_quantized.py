@@ -40,7 +40,7 @@ class TestQuantizedOps(unittest.TestCase):
     def generic_unary_test(self, op):
         class QModule(torch.nn.Module):
             def __init__(self, op):
-                super(QModule, self).__init__()
+                super().__init__()
                 self.quant1 = torch.quantization.QuantStub()
                 self.op = op
                 self.dequant = torch.quantization.DeQuantStub()
@@ -56,7 +56,7 @@ class TestQuantizedOps(unittest.TestCase):
     def test_quantized_add(self):
         class QAddModule(torch.nn.Module):
             def __init__(self):
-                super(QAddModule, self).__init__()
+                super().__init__()
                 self.quant1 = torch.quantization.QuantStub()
                 self.quant2 = torch.quantization.QuantStub()
                 self.dequant = torch.quantization.DeQuantStub()
@@ -92,7 +92,7 @@ class TestQuantizedOps(unittest.TestCase):
     def test_qlinear_model(self):
         class LinearModel(torch.nn.Module):
             def __init__(self):
-                super(LinearModel, self).__init__()
+                super().__init__()
                 self.qconfig = torch.quantization.default_qconfig
                 self.fc1 = torch.quantization.QuantWrapper(torch.nn.Linear(5, 10).to(dtype=torch.float))
 
@@ -119,7 +119,7 @@ class TestQuantizedOps(unittest.TestCase):
     def test_qconv_model(self):
         class ConvModel(torch.nn.Module):
             def __init__(self):
-                super(ConvModel, self).__init__()
+                super().__init__()
                 self.qconfig = torch.quantization.default_qconfig
                 self.fc1 = torch.quantization.QuantWrapper(torch.nn.Conv2d(3, 5, 2, bias=True).to(dtype=torch.float))
 
@@ -148,7 +148,7 @@ class TestQuantizedOps(unittest.TestCase):
     def test_upsample(self):
         class QUpsampleModule(torch.nn.Module):
             def __init__(self):
-                super(QUpsampleModule, self).__init__()
+                super().__init__()
                 self.quant1 = torch.quantization.QuantStub()
                 self.dequant = torch.quantization.DeQuantStub()
 
@@ -162,7 +162,7 @@ class TestQuantizedOps(unittest.TestCase):
     def test_avg_pool2d(self):
         class QAvgPool2dModule(torch.nn.Module):
             def __init__(self):
-                super(QAvgPool2dModule, self).__init__()
+                super().__init__()
                 self.quant1 = torch.quantization.QuantStub()
                 self.dequant = torch.quantization.DeQuantStub()
 
@@ -176,7 +176,7 @@ class TestQuantizedOps(unittest.TestCase):
     def test_reshape(self):
         class QReshapeModule(torch.nn.Module):
             def __init__(self):
-                super(QReshapeModule, self).__init__()
+                super().__init__()
                 self.quant1 = torch.quantization.QuantStub()
                 self.dequant = torch.quantization.DeQuantStub()
 
@@ -190,7 +190,7 @@ class TestQuantizedOps(unittest.TestCase):
     def test_slice(self):
         class QSliceModule(torch.nn.Module):
             def __init__(self):
-                super(QSliceModule, self).__init__()
+                super().__init__()
                 self.quant1 = torch.quantization.QuantStub()
                 self.dequant = torch.quantization.DeQuantStub()
 
@@ -205,7 +205,7 @@ class TestQuantizedOps(unittest.TestCase):
     def test_cat(self):
         class QConcatModule(torch.nn.Module):
             def __init__(self):
-                super(QConcatModule, self).__init__()
+                super().__init__()
                 self.quant1 = torch.quantization.QuantStub()
                 self.dequant = torch.quantization.DeQuantStub()
 
@@ -220,7 +220,7 @@ class TestQuantizedOps(unittest.TestCase):
     def test_max_pool2d(self):
         class QMaxPool2dModule(torch.nn.Module):
             def __init__(self):
-                super(QMaxPool2dModule, self).__init__()
+                super().__init__()
                 self.quant1 = torch.quantization.QuantStub()
                 self.dequant = torch.quantization.DeQuantStub()
 
@@ -237,7 +237,7 @@ class TestQuantizedOps(unittest.TestCase):
     def test_small_model(self):
         class SimpleModel(torch.nn.Module):
             def __init__(self):
-                super(SimpleModel, self).__init__()
+                super().__init__()
                 self.quant = torch.quantization.QuantStub()
                 self.dequant = torch.quantization.DeQuantStub()
                 self.conv1 = nn.Conv2d(3, 2, 5, bias=None).to(dtype=torch.float)

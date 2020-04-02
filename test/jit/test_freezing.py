@@ -15,7 +15,7 @@ class TestFreezing(JitTestCase):
     def test_fold_quantize_freeze(self):
         class M(nn.Module):
             def __init__(self):
-                super(M, self).__init__()
+                super().__init__()
                 self.weight = nn.Parameter(torch.tensor([2], dtype=torch.float))
 
             def forward(self, x):
@@ -39,7 +39,7 @@ class TestFreezing(JitTestCase):
     def test_freeze_module(self):
         class M(nn.Module):
             def __init__(self):
-                super(M, self).__init__()
+                super().__init__()
                 self.a = 1         # folded
                 self.b = 1.2       # folded
                 self.c = "hello"   # folded
@@ -79,7 +79,7 @@ class TestFreezing(JitTestCase):
     def test_freeze_module_with_submodule(self):
         class SubModule(nn.Module):
             def __init__(self):
-                super(SubModule, self).__init__()
+                super().__init__()
                 self.a = 11
                 self.b = 2
 
@@ -88,7 +88,7 @@ class TestFreezing(JitTestCase):
 
         class SubModule2(nn.Module):
             def __init__(self):
-                super(SubModule2, self).__init__()
+                super().__init__()
                 self.a = 12
                 self.b = 2
 
@@ -98,7 +98,7 @@ class TestFreezing(JitTestCase):
 
         class TestModule(nn.Module):
             def __init__(self):
-                super(TestModule, self).__init__()
+                super().__init__()
                 self.sub1 = SubModule()
                 self.sub2 = SubModule2()
                 self.a = 3
@@ -123,7 +123,7 @@ class TestFreezing(JitTestCase):
     def test_freeze_module_with_helperfunction(self):
         class SubModule(nn.Module):
             def __init__(self):
-                super(SubModule, self).__init__()
+                super().__init__()
                 self.a = 11
                 self.b = 2
 
@@ -132,7 +132,7 @@ class TestFreezing(JitTestCase):
 
         class TestModule(nn.Module):
             def __init__(self):
-                super(TestModule, self).__init__()
+                super().__init__()
                 self.sub = SubModule()
                 self.a = 3
                 self.b = 4
@@ -156,7 +156,7 @@ class TestFreezing(JitTestCase):
     def test_freeze_module_with_inplace_mutable(self):
         class FreezeMe(torch.jit.ScriptModule):
             def __init__(self):
-                super(FreezeMe, self).__init__()
+                super().__init__()
                 self.a = [11, 22]
 
             @torch.jit.script_method
@@ -178,7 +178,7 @@ class TestFreezing(JitTestCase):
     def test_freeze_module_with_mutable_list(self):
         class FreezeMe(nn.Module):
             def __init__(self):
-                super(FreezeMe, self).__init__()
+                super().__init__()
                 self.a = [1, 2]
 
             def forward(self, x):
@@ -205,7 +205,7 @@ class TestFreezing(JitTestCase):
     def test_freeze_module_with_mutable_dict(self):
         class FreezeMe(nn.Module):
             def __init__(self):
-                super(FreezeMe, self).__init__()
+                super().__init__()
                 self.a = {"layer" : "4"}
 
             def forward(self, x):
@@ -234,7 +234,7 @@ class TestFreezing(JitTestCase):
     def test_freeze_module_with_mutable_tensor(self):
         class FreezeMe(nn.Module):
             def __init__(self):
-                super(FreezeMe, self).__init__()
+                super().__init__()
                 self.a = torch.tensor([1., 2., 3.])
 
             def forward(self, x):
@@ -256,7 +256,7 @@ class TestFreezing(JitTestCase):
     def test_freeze_module_with_tuple(self):
         class FreezeMe(nn.Module):
             def __init__(self):
-                super(FreezeMe, self).__init__()
+                super().__init__()
                 self.a = (torch.tensor([1, 2, 3, 4, 5, 6]), "hi")
 
             def forward(self, x):
@@ -278,7 +278,7 @@ class TestFreezing(JitTestCase):
     def test_freeze_module_with_tensor(self):
         class FreezeMe(nn.Module):
             def __init__(self):
-                super(FreezeMe, self).__init__()
+                super().__init__()
                 self.a = torch.tensor([1, 2, 3, 4, 5, 6])
 
             def forward(self, x):
@@ -300,7 +300,7 @@ class TestFreezing(JitTestCase):
     def test_freeze_module_with_list(self):
         class FreezeMe(nn.Module):
             def __init__(self):
-                super(FreezeMe, self).__init__()
+                super().__init__()
                 self.a = [torch.tensor([1, 2, 3, 4, 5, 6])]
 
             def forward(self, x):
@@ -321,7 +321,7 @@ class TestFreezing(JitTestCase):
     def test_freeze_module_with_aliased_tensor_attr(self):
         class FreezeMe(nn.Module):
             def __init__(self):
-                super(FreezeMe, self).__init__()
+                super().__init__()
                 self.a = torch.tensor([1, 2, 3, 4, 5, 6])
                 self.b = self.a.view(2, 3)
 
@@ -342,7 +342,7 @@ class TestFreezing(JitTestCase):
     def test_freeze_module_with_aliased_tensor_attr2(self):
         class FreezeMe(nn.Module):
             def __init__(self):
-                super(FreezeMe, self).__init__()
+                super().__init__()
                 self.a = torch.tensor([1, 2, 3, 4, 5, 6])
                 self.b = {"layer" : ([self.a.view(2, 3), torch.tensor([10])], 20)}
                 self.c = ([self.a.view(2, 3), torch.tensor([10])], 20)
@@ -363,7 +363,7 @@ class TestFreezing(JitTestCase):
     def test_freeze_module_with_aliased_tensor_attr3(self):
         class FreezeMe(nn.Module):
             def __init__(self):
-                super(FreezeMe, self).__init__()
+                super().__init__()
                 self.a = torch.tensor([1, 2, 3, 4, 5, 6])
                 self.b = [self.a, torch.tensor([10])]
 
@@ -386,7 +386,7 @@ class TestFreezing(JitTestCase):
     def test_freeze_module_with_aliased_tensor_attr4(self):
         class FreezeMe(nn.Module):
             def __init__(self):
-                super(FreezeMe, self).__init__()
+                super().__init__()
                 self.a = torch.tensor([1, 2, 3, 4, 5, 6])
                 self.b = [self.a, torch.tensor([10])]
 
@@ -408,7 +408,7 @@ class TestFreezing(JitTestCase):
 
         class FreezeMe(nn.Module):
             def __init__(self):
-                super(FreezeMe, self).__init__()
+                super().__init__()
                 self.b = [a.view(3, 2), torch.tensor([10])]
                 self.c = (20, a.view(2, 3))
 
@@ -428,7 +428,7 @@ class TestFreezing(JitTestCase):
     def test_freeze_module_with_aliased_attr(self):
         class FreezeMe(nn.Module):
             def __init__(self):
-                super(FreezeMe, self).__init__()
+                super().__init__()
                 self.a = [1, 2, 3, 4, 5, 6]
                 self.b = self.a
                 self.c = (self.a, 10)
@@ -455,7 +455,7 @@ class TestFreezing(JitTestCase):
     def test_freeze_module_with_aliased_attr2(self):
         class FreezeMe(nn.Module):
             def __init__(self):
-                super(FreezeMe, self).__init__()
+                super().__init__()
                 self.a = [1, 2, 3, 4, 5, 6]
                 self.b = ([11], [10])
 
@@ -479,7 +479,7 @@ class TestFreezing(JitTestCase):
     def test_freeze_module_with_aliased_attr3(self):
         class FreezeMe(nn.Module):
             def __init__(self):
-                super(FreezeMe, self).__init__()
+                super().__init__()
                 self.a = [1, 2, 3, 4, 5, 6]
                 self.b = ([11], [10])
 
@@ -503,7 +503,7 @@ class TestFreezing(JitTestCase):
     def test_freeze_module_return_self(self):
         class FreezeMe(nn.Module):
             def __init__(self):
-                super(FreezeMe, self).__init__()
+                super().__init__()
                 self.a = torch.tensor([1., 2., 3.])
 
             def forward(self, x):
@@ -519,7 +519,7 @@ class TestFreezing(JitTestCase):
 
         class FreezeMe(nn.Module):
             def __init__(self):
-                super(FreezeMe, self).__init__()
+                super().__init__()
                 self.conv1 = nn.Conv2d(1, 32, 3, 1)
 
             def forward(self, x):
@@ -535,7 +535,7 @@ class TestFreezing(JitTestCase):
     def test_freeze_module_in_training_mode(self):
         class Net(nn.Module):
             def __init__(self):
-                super(Net, self).__init__()
+                super().__init__()
                 self.conv1 = nn.Conv2d(1, 32, 3, 1)
                 self.conv2 = nn.Conv2d(32, 64, 3, 1)
                 self.dropout1 = nn.Dropout2d(0.25)

@@ -41,12 +41,12 @@ def num_non_tensor_nodes(block):
 
 class TestComplexity(JitTestCase):
     def setUp(self):
-        super(TestComplexity, self).setUp()
+        super().setUp()
         self.grad_enabled = torch.is_grad_enabled()
         torch.set_grad_enabled(False)
 
     def tearDown(self):
-        super(TestComplexity, self).tearDown()
+        super().tearDown()
         torch.set_grad_enabled(self.grad_enabled)
 
     @suppress_warnings 

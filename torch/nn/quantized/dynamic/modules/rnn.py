@@ -17,7 +17,7 @@ def apply_permutation(tensor, permutation, dim=1):
 
 class PackedParameter(torch.nn.Module):
     def __init__(self, param):
-        super(PackedParameter, self).__init__()
+        super().__init__()
         self.param = param
 
     @torch.jit.export
@@ -30,7 +30,7 @@ class PackedParameter(torch.nn.Module):
         self.training = state[1]
 
     def _save_to_state_dict(self, destination, prefix, keep_vars):
-        super(PackedParameter, self)._save_to_state_dict(destination, prefix,
+        super()._save_to_state_dict(destination, prefix,
                                                          keep_vars)
         (w, b) = self.unpack()
 
@@ -45,7 +45,7 @@ class PackedParameter(torch.nn.Module):
         state_dict.pop(prefix + 'weight')
         state_dict.pop(prefix + 'bias')
 
-        super(PackedParameter, self)._load_from_state_dict(state_dict, prefix,
+        super()._load_from_state_dict(state_dict, prefix,
                                                            local_metadata,
                                                            False, missing_keys,
                                                            unexpected_keys,
@@ -71,7 +71,7 @@ class RNNBase(torch.nn.Module):
     def __init__(self, mode, input_size, hidden_size,
                  num_layers=1, bias=True, batch_first=False,
                  dropout=0., bidirectional=False, dtype=torch.qint8):
-        super(RNNBase, self).__init__()
+        super().__init__()
 
         self.mode = mode
         self.input_size = input_size
@@ -352,7 +352,7 @@ class LSTM(RNNBase):
     __overloads__ = {'forward': ['forward_packed', 'forward_tensor']}
 
     def __init__(self, *args, **kwargs):
-        super(LSTM, self).__init__('LSTM', *args, **kwargs)
+        super().__init__('LSTM', *args, **kwargs)
 
     def _get_name(self):
         return 'DynamicQuantizedLSTM'

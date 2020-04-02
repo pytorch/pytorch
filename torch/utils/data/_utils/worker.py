@@ -68,7 +68,7 @@ class WorkerInfo(object):
     def __setattr__(self, key, val):
         if self.__initialized:
             raise RuntimeError("Cannot assign attributes to {} objects".format(self.__class__.__name__))
-        return super(WorkerInfo, self).__setattr__(key, val)
+        return super().__setattr__(key, val)
 
 
 def get_worker_info():

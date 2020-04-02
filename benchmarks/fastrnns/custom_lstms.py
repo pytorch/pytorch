@@ -93,7 +93,7 @@ def reverse(lst):
 
 class LSTMCell(jit.ScriptModule):
     def __init__(self, input_size, hidden_size):
-        super(LSTMCell, self).__init__()
+        super().__init__()
         self.input_size = input_size
         self.hidden_size = hidden_size
         self.weight_ih = Parameter(torch.randn(4 * hidden_size, input_size))
@@ -122,7 +122,7 @@ class LSTMCell(jit.ScriptModule):
 
 class LayerNorm(jit.ScriptModule):
     def __init__(self, normalized_shape):
-        super(LayerNorm, self).__init__()
+        super().__init__()
         if isinstance(normalized_shape, numbers.Integral):
             normalized_shape = (normalized_shape,)
         normalized_shape = torch.Size(normalized_shape)
@@ -148,7 +148,7 @@ class LayerNorm(jit.ScriptModule):
 
 class LayerNormLSTMCell(jit.ScriptModule):
     def __init__(self, input_size, hidden_size, decompose_layernorm=False):
-        super(LayerNormLSTMCell, self).__init__()
+        super().__init__()
         self.input_size = input_size
         self.hidden_size = hidden_size
         self.weight_ih = Parameter(torch.randn(4 * hidden_size, input_size))
@@ -186,7 +186,7 @@ class LayerNormLSTMCell(jit.ScriptModule):
 
 class LSTMLayer(jit.ScriptModule):
     def __init__(self, cell, *cell_args):
-        super(LSTMLayer, self).__init__()
+        super().__init__()
         self.cell = cell(*cell_args)
 
     @jit.script_method
@@ -202,7 +202,7 @@ class LSTMLayer(jit.ScriptModule):
 
 class ReverseLSTMLayer(jit.ScriptModule):
     def __init__(self, cell, *cell_args):
-        super(ReverseLSTMLayer, self).__init__()
+        super().__init__()
         self.cell = cell(*cell_args)
 
     @jit.script_method
@@ -220,7 +220,7 @@ class BidirLSTMLayer(jit.ScriptModule):
     __constants__ = ['directions']
 
     def __init__(self, cell, *cell_args):
-        super(BidirLSTMLayer, self).__init__()
+        super().__init__()
         self.directions = nn.ModuleList([
             LSTMLayer(cell, *cell_args),
             ReverseLSTMLayer(cell, *cell_args),
@@ -253,7 +253,7 @@ class StackedLSTM(jit.ScriptModule):
     __constants__ = ['layers']  # Necessary for iterating through self.layers
 
     def __init__(self, num_layers, layer, first_layer_args, other_layer_args):
-        super(StackedLSTM, self).__init__()
+        super().__init__()
         self.layers = init_stacked_lstm(num_layers, layer, first_layer_args,
                                         other_layer_args)
 
@@ -281,7 +281,7 @@ class StackedLSTM2(jit.ScriptModule):
     __constants__ = ['layers']  # Necessary for iterating through self.layers
 
     def __init__(self, num_layers, layer, first_layer_args, other_layer_args):
-        super(StackedLSTM2, self).__init__()
+        super().__init__()
         self.layers = init_stacked_lstm(num_layers, layer, first_layer_args,
                                         other_layer_args)
 
@@ -307,7 +307,7 @@ class StackedLSTMWithDropout(jit.ScriptModule):
     __constants__ = ['layers', 'num_layers']
 
     def __init__(self, num_layers, layer, first_layer_args, other_layer_args):
-        super(StackedLSTMWithDropout, self).__init__()
+        super().__init__()
         self.layers = init_stacked_lstm(num_layers, layer, first_layer_args,
                                         other_layer_args)
         # Introduces a Dropout layer on the outputs of each LSTM layer except

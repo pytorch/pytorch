@@ -23,7 +23,7 @@ class Rprop(Optimizer):
             raise ValueError("Invalid eta values: {}, {}".format(etas[0], etas[1]))
 
         defaults = dict(lr=lr, etas=etas, step_sizes=step_sizes)
-        super(Rprop, self).__init__(params, defaults)
+        super().__init__(params, defaults)
 
     @torch.no_grad()
     def step(self, closure=None):

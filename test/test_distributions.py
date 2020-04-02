@@ -2904,14 +2904,14 @@ class TestRsample(TestCase):
 
 class TestDistributionShapes(TestCase):
     def setUp(self):
-        super(TestDistributionShapes, self).setUp()
+        super().setUp()
         self.scalar_sample = 1
         self.tensor_sample_1 = torch.ones(3, 2)
         self.tensor_sample_2 = torch.ones(3, 2, 3)
         Distribution.set_default_validate_args(True)
 
     def tearDown(self):
-        super(TestDistributionShapes, self).tearDown()
+        super().tearDown()
         Distribution.set_default_validate_args(False)
 
     def test_entropy_shape(self):
@@ -3344,11 +3344,11 @@ class TestDistributionShapes(TestCase):
 class TestKL(TestCase):
 
     def setUp(self):
-        super(TestKL, self).setUp()
+        super().setUp()
 
         class Binomial30(Binomial):
             def __init__(self, probs):
-                super(Binomial30, self).__init__(30, probs)
+                super().__init__(30, probs)
 
         # These are pairs of distributions with 4 x 4 parameters as specified.
         # The first of the pair e.g. bernoulli[0] varies column-wise and the second
@@ -3971,7 +3971,7 @@ class TestNumericalStability(TestCase):
 
 class TestLazyLogitsInitialization(TestCase):
     def setUp(self):
-        super(TestLazyLogitsInitialization, self).setUp()
+        super().setUp()
         # ContinuousBernoulli is not tested because log_prob is not computed simply
         # from 'logits', but 'probs' is also needed
         self.examples = [e for e in EXAMPLES if e.Dist in
@@ -4016,7 +4016,7 @@ class TestLazyLogitsInitialization(TestCase):
 @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
 class TestAgainstScipy(TestCase):
     def setUp(self):
-        super(TestAgainstScipy, self).setUp()
+        super().setUp()
         positive_var = torch.randn(20).exp()
         positive_var2 = torch.randn(20).exp()
         random_var = torch.randn(20)
@@ -4172,7 +4172,7 @@ class TestAgainstScipy(TestCase):
 
 class TestTransforms(TestCase):
     def setUp(self):
-        super(TestTransforms, self).setUp()
+        super().setUp()
         self.transforms = []
         transforms_by_cache_size = {}
         for cache_size in [0, 1]:
@@ -4668,7 +4668,7 @@ class TestConstraintRegistry(TestCase):
 
 class TestValidation(TestCase):
     def setUp(self):
-        super(TestCase, self).setUp()
+        super().setUp()
         Distribution.set_default_validate_args(True)
 
     def test_valid(self):
@@ -4688,7 +4688,7 @@ class TestValidation(TestCase):
                     raise AssertionError(fail_string.format(Dist.__name__, i + 1, len(params)))
 
     def tearDown(self):
-        super(TestValidation, self).tearDown()
+        super().tearDown()
         Distribution.set_default_validate_args(False)
 
 

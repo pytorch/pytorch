@@ -118,7 +118,7 @@ class Fold(Module):
                      'stride']
 
     def __init__(self, output_size, kernel_size, dilation=1, padding=0, stride=1):
-        super(Fold, self).__init__()
+        super().__init__()
         self.output_size = output_size
         self.kernel_size = kernel_size
         self.dilation = dilation
@@ -259,7 +259,7 @@ class Unfold(Module):
     __constants__ = ['kernel_size', 'dilation', 'padding', 'stride']
 
     def __init__(self, kernel_size, dilation=1, padding=0, stride=1):
-        super(Unfold, self).__init__()
+        super().__init__()
         self.kernel_size = kernel_size
         self.dilation = dilation
         self.padding = padding

@@ -122,7 +122,7 @@ class ProcessContext:
 class SpawnContext(ProcessContext):
     def __init__(self, processes, error_queues):
         warnings.warn('SpawnContext is renamed to ProcessContext since 1.4 release.')
-        super(SpawnContext, self).__init__(self, processes, error_queues)
+        super().__init__(self, processes, error_queues)
     pass
 
 

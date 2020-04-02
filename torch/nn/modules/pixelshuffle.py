@@ -36,7 +36,7 @@ class PixelShuffle(Module):
     __constants__ = ['upscale_factor']
 
     def __init__(self, upscale_factor):
-        super(PixelShuffle, self).__init__()
+        super().__init__()
         self.upscale_factor = upscale_factor
 
     def forward(self, input):

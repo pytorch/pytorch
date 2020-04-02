@@ -5,7 +5,7 @@ from .. import functional as F
 class _InstanceNorm(_NormBase):
     def __init__(self, num_features, eps=1e-5, momentum=0.1, affine=False,
                  track_running_stats=False):
-        super(_InstanceNorm, self).__init__(
+        super().__init__(
             num_features, eps, momentum, affine, track_running_stats)
 
     def _check_input_dim(self, input):
@@ -37,7 +37,7 @@ class _InstanceNorm(_NormBase):
                 for key in running_stats_keys:
                     state_dict.pop(key)
 
-        super(_InstanceNorm, self)._load_from_state_dict(
+        super()._load_from_state_dict(
             state_dict, prefix, local_metadata, strict,
             missing_keys, unexpected_keys, error_msgs)
 

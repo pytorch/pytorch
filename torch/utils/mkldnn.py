@@ -5,7 +5,7 @@ import torch
 
 class MkldnnLinear(torch.jit.ScriptModule):
     def __init__(self, dense_module):
-        super(MkldnnLinear, self).__init__()
+        super().__init__()
         self.register_buffer('weight', dense_module.weight.to_mkldnn())
         if dense_module.bias is not None:
             self.register_buffer('bias', dense_module.bias.to_mkldnn())
@@ -37,7 +37,7 @@ class MkldnnConv2d(torch.jit.ScriptModule):
     __constants__ = ['stride', 'padding', 'dilation', 'groups']
 
     def __init__(self, dense_module):
-        super(MkldnnConv2d, self).__init__()
+        super().__init__()
 
         self.stride = dense_module.stride
         self.padding = dense_module.padding
@@ -89,7 +89,7 @@ class MkldnnBatchNorm2d(torch.jit.ScriptModule):
     __constants__ = ['exponential_average_factor', 'eps']
 
     def __init__(self, dense_module):
-        super(MkldnnBatchNorm2d, self).__init__()
+        super().__init__()
 
         assert(not dense_module.training)
         assert(dense_module.track_running_stats)

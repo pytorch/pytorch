@@ -16,7 +16,7 @@ class _NormBase(Module):
 
     def __init__(self, num_features, eps=1e-5, momentum=0.1, affine=True,
                  track_running_stats=True):
-        super(_NormBase, self).__init__()
+        super().__init__()
         self.num_features = num_features
         self.eps = eps
         self.momentum = momentum
@@ -68,7 +68,7 @@ class _NormBase(Module):
             if num_batches_tracked_key not in state_dict:
                 state_dict[num_batches_tracked_key] = torch.tensor(0, dtype=torch.long)
 
-        super(_NormBase, self)._load_from_state_dict(
+        super()._load_from_state_dict(
             state_dict, prefix, local_metadata, strict,
             missing_keys, unexpected_keys, error_msgs)
 
@@ -77,7 +77,7 @@ class _BatchNorm(_NormBase):
 
     def __init__(self, num_features, eps=1e-5, momentum=0.1, affine=True,
                  track_running_stats=True):
-        super(_BatchNorm, self).__init__(
+        super().__init__(
             num_features, eps, momentum, affine, track_running_stats)
 
     def forward(self, input):
@@ -411,7 +411,7 @@ class SyncBatchNorm(_BatchNorm):
 
     def __init__(self, num_features, eps=1e-5, momentum=0.1, affine=True,
                  track_running_stats=True, process_group=None):
-        super(SyncBatchNorm, self).__init__(num_features, eps, momentum, affine, track_running_stats)
+        super().__init__(num_features, eps, momentum, affine, track_running_stats)
         self.process_group = process_group
         # gpu_size is set through DistributedDataParallel initialization. This is to ensure that SyncBatchNorm is used
         # under supported condition (single GPU per process)

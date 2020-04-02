@@ -30,7 +30,7 @@ class Weibull(TransformedDistribution):
         base_dist = Exponential(torch.ones_like(self.scale))
         transforms = [PowerTransform(exponent=self.concentration_reciprocal),
                       AffineTransform(loc=0, scale=self.scale)]
-        super(Weibull, self).__init__(base_dist,
+        super().__init__(base_dist,
                                       transforms,
                                       validate_args=validate_args)
 

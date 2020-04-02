@@ -21,7 +21,7 @@ class TestDataParallel(TestCase):
     def test_data_parallel_buffers_requiring_grad(self):
         class TestModule(nn.Module):
             def __init__(self, t):
-                super(TestModule, self).__init__()
+                super().__init__()
                 self.register_buffer('t_rg', t)
                 self.register_buffer('t_not_rg', t.clone().detach())
 
@@ -45,7 +45,7 @@ class TestDataParallel(TestCase):
         class TestModule(torch.nn.Module):
 
             def __init__(self):
-                super(TestModule, self).__init__()
+                super().__init__()
                 self.rnn = torch.nn.LSTM(300, 1024, 1, batch_first=True, bidirectional=True)
 
             def forward(self, x):
@@ -266,7 +266,7 @@ class TestDataParallel(TestCase):
 
         class Model(nn.Module):
             def __init__(self):
-                super(Model, self).__init__()
+                super().__init__()
                 self.linear = nn.Linear(1, 1)
 
             def forward(self, x):
@@ -412,7 +412,7 @@ class TestDataParallel(TestCase):
     def test_data_parallel_module_kwargs_only(self, dtype=torch.float):
         class Net(nn.Module):
             def __init__(self):
-                super(Net, self).__init__()
+                super().__init__()
                 self.l = l
 
             def forward(self, input):
@@ -431,7 +431,7 @@ class TestDataParallel(TestCase):
     def test_data_parallel_module_kwargs_only_empty_list(self, dtype=torch.float):
         class Net(nn.Module):
             def __init__(self):
-                super(Net, self).__init__()
+                super().__init__()
                 self.l = l
 
             def forward(self, input):
@@ -450,7 +450,7 @@ class TestDataParallel(TestCase):
     def test_data_parallel_module_kwargs_only_empty_dict(self, dtype=torch.float):
         class Net(nn.Module):
             def __init__(self):
-                super(Net, self).__init__()
+                super().__init__()
                 self.l = l
 
             def forward(self, input):
@@ -469,7 +469,7 @@ class TestDataParallel(TestCase):
     def test_data_parallel_module_kwargs_only_empty_tuple(self, dtype=torch.float):
         class Net(nn.Module):
             def __init__(self):
-                super(Net, self).__init__()
+                super().__init__()
                 self.l = l
 
             def forward(self, input):
@@ -640,7 +640,7 @@ class TestDataParallel(TestCase):
 
         class Net(torch.nn.Module):
             def __init__(self, testcase):
-                super(Net, self).__init__()
+                super().__init__()
                 self._testcase = testcase
 
             def forward(self, x):
@@ -658,11 +658,11 @@ class TestDataParallel(TestCase):
     def test_autocast(self):
         class Model(torch.nn.Linear):
             def __init__(self):
-                super(Model, self).__init__(8, 8)
+                super().__init__(8, 8)
 
             @torch.cuda.amp.autocast()
             def forward(self, input):
-                return super(Model, self).forward(input)
+                return super().forward(input)
 
         model = dp.DataParallel(Model().cuda().to(dtype=torch.float32))
         input = torch.randn((8, 8), dtype=torch.float32, device="cuda")

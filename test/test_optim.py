@@ -487,7 +487,7 @@ class TestOptim(TestCase):
 
 class SchedulerTestNet(torch.nn.Module):
     def __init__(self):
-        super(SchedulerTestNet, self).__init__()
+        super().__init__()
         self.conv1 = torch.nn.Conv2d(1, 1, 1)
         self.conv2 = torch.nn.Conv2d(1, 1, 1)
 
@@ -513,7 +513,7 @@ class TestLRScheduler(TestCase):
     exact_dtype = True
 
     def setUp(self):
-        super(TestLRScheduler, self).setUp()
+        super().setUp()
         self.net = SchedulerTestNet()
         self.opt = SGD(
             [{'params': self.net.conv1.parameters()}, {'params': self.net.conv2.parameters(), 'lr': 0.5}],

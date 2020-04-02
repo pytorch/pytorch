@@ -66,7 +66,7 @@ class TestSparse(TestCase):
             return torch.sparse_coo_tensor(*args, **kwargs)
         self.sparse_tensor = sparse_tensor_factory
         self.legacy_sparse_tensor = torch.sparse.DoubleTensor
-        super(TestSparse, self).setUp()
+        super().setUp()
 
     def _gen_sparse(self, sparse_dim, nnz, with_size):
         if isinstance(with_size, Number):
@@ -2209,14 +2209,14 @@ class TestSparse(TestCase):
 
 class TestUncoalescedSparse(TestSparse):
     def setUp(self):
-        super(TestUncoalescedSparse, self).setUp()
+        super().setUp()
         self.is_uncoalesced = True
 
 
 @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
 class TestCudaSparse(TestSparse):
     def setUp(self):
-        super(TestCudaSparse, self).setUp()
+        super().setUp()
         self.is_cuda = True
         self.device = 'cuda'
         self.legacy_sparse_tensor = torch.cuda.sparse.DoubleTensor
@@ -2225,7 +2225,7 @@ class TestCudaSparse(TestSparse):
 @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
 class TestCudaUncoalescedSparse(TestCudaSparse):
     def setUp(self):
-        super(TestCudaUncoalescedSparse, self).setUp()
+        super().setUp()
         self.is_uncoalesced = True
 
 

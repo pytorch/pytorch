@@ -34,7 +34,7 @@ class Adamax(Optimizer):
             raise ValueError("Invalid weight_decay value: {}".format(weight_decay))
 
         defaults = dict(lr=lr, betas=betas, eps=eps, weight_decay=weight_decay)
-        super(Adamax, self).__init__(params, defaults)
+        super().__init__(params, defaults)
 
     @torch.no_grad()
     def step(self, closure=None):

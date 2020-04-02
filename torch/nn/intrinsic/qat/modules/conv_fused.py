@@ -55,7 +55,7 @@ class _ConvBnNd(nn.modules.conv._ConvNd):
         init.zeros_(self.beta)
 
     def reset_parameters(self):
-        super(_ConvBnNd, self).reset_parameters()
+        super().reset_parameters()
         # A hack to avoid resetting on undefined parameters
         if hasattr(self, 'gamma'):
             self.reset_bn_parameters()
@@ -118,7 +118,7 @@ class _ConvBnNd(nn.modules.conv._ConvNd):
 
     def extra_repr(self):
         # TODO(jerryzh): extend
-        return super(_ConvBnNd, self).extra_repr()
+        return super().extra_repr()
 
     def forward(self, input):
         return self.activation_post_process(self._forward(input))
@@ -233,7 +233,7 @@ class ConvBnReLU2d(ConvBn2d):
                  # Args for this module
                  freeze_bn=False,
                  qconfig=None):
-        super(ConvBnReLU2d, self).__init__(in_channels, out_channels, kernel_size, stride,
+        super().__init__(in_channels, out_channels, kernel_size, stride,
                                            padding, dilation, groups,
                                            padding_mode, eps, momentum,
                                            freeze_bn,
@@ -266,7 +266,7 @@ class ConvReLU2d(nnqat.Conv2d):
                  padding=0, dilation=1, groups=1,
                  bias=True, padding_mode='zeros',
                  qconfig=None):
-        super(ConvReLU2d, self).__init__(in_channels, out_channels, kernel_size,
+        super().__init__(in_channels, out_channels, kernel_size,
                                          stride=stride, padding=padding, dilation=dilation,
                                          groups=groups, bias=bias, padding_mode=padding_mode,
                                          qconfig=qconfig)

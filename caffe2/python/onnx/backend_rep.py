@@ -11,7 +11,7 @@ from onnx.backend.base import BackendRep, namedtupledict
 
 class Caffe2Rep(BackendRep):
     def __init__(self, init_net, predict_net, workspace, uninitialized):
-        super(Caffe2Rep, self).__init__()
+        super().__init__()
         self.init_net = init_net
         self.predict_net = predict_net
         self.workspace = workspace
@@ -28,7 +28,7 @@ class Caffe2Rep(BackendRep):
         return ''
 
     def run(self, inputs, **kwargs):
-        super(Caffe2Rep, self).run(inputs, **kwargs)
+        super().run(inputs, **kwargs)
         with core.DeviceScope(self.predict_net.device_option):
             if isinstance(inputs, dict):
                 with core.NameScope(self._name_scope):

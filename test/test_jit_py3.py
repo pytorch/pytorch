@@ -199,7 +199,7 @@ class TestScriptPy3(JitTestCase):
 
         class MyModule(types.ModuleType):
             def __init__(self):
-                super(MyModule, self).__init__('MyModule')
+                super().__init__('MyModule')
 
             def __getattr__(self, attr):
                 return TheType
@@ -218,7 +218,7 @@ class TestScriptPy3(JitTestCase):
 
         class M(torch.nn.Module):
             def __init__(self):
-                super(M, self).__init__()
+                super().__init__()
 
             def forward(self, in_batch: Dict[str, Optional[torch.Tensor]]) -> torch.Tensor:
                 self.dropout_modality(in_batch)
@@ -462,7 +462,7 @@ class TestScriptPy3(JitTestCase):
             sub : OneTwoModule
 
             def __init__(self):
-                super(M, self).__init__()
+                super().__init__()
                 self.sub = BarMod()
 
             def forward(self, x):

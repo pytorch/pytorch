@@ -125,7 +125,7 @@ from torch.testing._internal.common_utils import TestCase, TEST_WITH_ROCM, TEST_
 #         # Intention is to override
 #         def assertEqual(self, x, y):
 #             # This DOESN'T WORK!
-#             super(TestFooDeviceType, self).assertEqual(x, y)
+#             super().assertEqual(x, y)
 #
 # If you try to run this code, you'll get an error saying that TestFooDeviceType
 # is not in scope.  This is because after instantiating our classes, we delete
@@ -375,14 +375,14 @@ class skipIf(object):
 class skipCPUIf(skipIf):
 
     def __init__(self, dep, reason):
-        super(skipCPUIf, self).__init__(dep, reason, device_type='cpu')
+        super().__init__(dep, reason, device_type='cpu')
 
 
 # Skips a test on CUDA if the condition is true.
 class skipCUDAIf(skipIf):
 
     def __init__(self, dep, reason):
-        super(skipCUDAIf, self).__init__(dep, reason, device_type='cuda')
+        super().__init__(dep, reason, device_type='cuda')
 
 
 # Only runs on cuda, and only run when there is enough GPU RAM
@@ -526,14 +526,14 @@ class dtypes(object):
 class dtypesIfCPU(dtypes):
 
     def __init__(self, *args):
-        super(dtypesIfCPU, self).__init__(*args, device_type='cpu')
+        super().__init__(*args, device_type='cpu')
 
 
 # Overrides specified dtypes on CUDA.
 class dtypesIfCUDA(dtypes):
 
     def __init__(self, *args):
-        super(dtypesIfCUDA, self).__init__(*args, device_type='cuda')
+        super().__init__(*args, device_type='cuda')
 
 
 def onlyCPU(fn):

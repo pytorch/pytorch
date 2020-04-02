@@ -17,7 +17,7 @@ class SampleModule(torch.nn.Module):
     def __init__(self, has_parity, has_submodule, int_option=0, double_option=0.1,
                  bool_option=False, string_option='0', tensor_option=torch.zeros(1),
                  int_or_tuple_option=0):
-        super(SampleModule, self).__init__()
+        super().__init__()
         self.has_parity = has_parity
         if has_submodule:
             self.submodule = SampleModule(self.has_parity, False)

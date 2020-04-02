@@ -56,7 +56,7 @@ class _QFunctionalBinaryArithmeticBenchmarkBase(op_bench.TorchBenchmarkBase):
 
 class QFunctionalAddBenchmarkBase(_QFunctionalBinaryArithmeticBenchmarkBase):
     def init(self, N, dtype, contig, op_func):
-        super(QFunctionalAddBenchmarkBase, self).setup(N, dtype, contig)
+        super().setup(N, dtype, contig)
         self.qop = op_func
         if self.qop.endswith('_scalar'):
             self.q_input_b = 42

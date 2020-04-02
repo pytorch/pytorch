@@ -17,7 +17,7 @@ class FeatureSparseToDense(ModelLayer):
         precise it's a namedtuple that should have:
             'feature_type', 'feature_names', 'feature_ids'
         """
-        super(FeatureSparseToDense, self).__init__(model, name, input_record, **kwargs)
+        super().__init__(model, name, input_record, **kwargs)
 
         self.input_specs = input_specs
 

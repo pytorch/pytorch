@@ -41,7 +41,7 @@ CUSTOMIZED_TIMEOUT = {"test_DistributedDataParallel": 500}
 
 class _FC2(nn.Module):
     def __init__(self):
-        super(_FC2, self).__init__()
+        super().__init__()
         self.fc = nn.Linear(10, 50, bias=True)
         self.fc.bias.requires_grad = False
 
@@ -52,7 +52,7 @@ class _FC2(nn.Module):
 
 class Net(nn.Module):
     def __init__(self):
-        super(Net, self).__init__()
+        super().__init__()
         self.fc1 = nn.Linear(2, 10, bias=False)
         self.fc2 = _FC2()
         self.fc3 = nn.Linear(50, 4, bias=False)
@@ -70,7 +70,7 @@ class Net(nn.Module):
 class BatchNormNet(nn.Module):
 
     def __init__(self):
-        super(BatchNormNet, self).__init__()
+        super().__init__()
         self.fc1 = nn.Linear(2, 40, bias=False)
         self.bn = nn.BatchNorm1d(4)
         self.fc2 = nn.Linear(40, 4, bias=False)
@@ -2152,7 +2152,7 @@ if BACKEND == "gloo" or BACKEND == "nccl":
                         setattr(cls, attr, cls.manager_join(fn))
 
         def setUp(self):
-            super(TestDistBackend, self).setUp()
+            super().setUp()
             # We rely on the manager process to delete the temporary file.
             global INIT_METHOD
             self.temporary_file = None
@@ -2167,7 +2167,7 @@ if BACKEND == "gloo" or BACKEND == "nccl":
                 self.processes.append(self._spawn_process(rank))
 
         def tearDown(self):
-            super(TestDistBackend, self).tearDown()
+            super().tearDown()
 
             # Clean up temporary file if we used one.
             if self.temporary_file:

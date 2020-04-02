@@ -310,7 +310,7 @@ def unused(fn):
 
             class MyModule(nn.Module):
                 def __init__(self, use_memory_efficent):
-                    super(MyModule, self).__init__()
+                    super().__init__()
                     self.use_memory_efficent = use_memory_efficent
 
                 @torch.jit.unused
@@ -715,7 +715,7 @@ def _qualified_name(obj):
 # about the function-to-be-compiled.
 class SourceContext(torch._C._jit_tree_views.SourceRangeFactory):
     def __init__(self, source, filename, file_lineno, leading_whitespace_len, uses_true_division=True):
-        super(SourceContext, self).__init__(source, filename, file_lineno, leading_whitespace_len)
+        super().__init__(source, filename, file_lineno, leading_whitespace_len)
         self.uses_true_division = uses_true_division
 
 

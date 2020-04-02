@@ -21,7 +21,7 @@ class SamplingTrain(ModelLayer):
         name='sampling_train',
         **kwargs
     ):
-        super(SamplingTrain, self).__init__(
+        super().__init__(
             model, name, input_record, **kwargs
         )
 

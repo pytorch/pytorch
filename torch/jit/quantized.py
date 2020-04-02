@@ -12,7 +12,7 @@ class QuantizedLinear(torch.jit.ScriptModule):
     __constants__ = ['scale', 'zero_point']
 
     def __init__(self, other):
-        super(QuantizedLinear, self).__init__()
+        super().__init__()
         self.in_features = other.in_features
         self.out_features = other.out_features
         # Quantize weight and discard the original
@@ -53,7 +53,7 @@ class QuantizedLinear(torch.jit.ScriptModule):
 class QuantizedLinearFP16(torch.jit.ScriptModule):
 
     def __init__(self, other):
-        super(QuantizedLinearFP16, self).__init__()
+        super().__init__()
         self.in_features = other.in_features
         self.out_features = other.out_features
         self.original_weight = other.weight
@@ -90,7 +90,7 @@ class QuantizedRNNCellBase(torch.jit.ScriptModule):
                      'zero_point_ih', 'zero_point_hh']
 
     def __init__(self, other):
-        super(QuantizedRNNCellBase, self).__init__()
+        super().__init__()
         self.input_size = other.input_size
         self.hidden_size = other.hidden_size
         self.bias = other.bias
@@ -165,7 +165,7 @@ class QuantizedRNNCell(QuantizedRNNCellBase):
                      'zero_point_ih', 'zero_point_hh', 'nonlinearity']
 
     def __init__(self, other):
-        super(QuantizedRNNCell, self).__init__(other)
+        super().__init__(other)
         self.nonlinearity = other.nonlinearity
 
     @torch.jit.script_method
@@ -198,7 +198,7 @@ class QuantizedRNNCell(QuantizedRNNCellBase):
 
 class QuantizedLSTMCell(QuantizedRNNCellBase):
     def __init__(self, other):
-        super(QuantizedLSTMCell, self).__init__(other)
+        super().__init__(other)
 
     @torch.jit.script_method
     def forward(self, input, hx=None):
@@ -219,7 +219,7 @@ class QuantizedLSTMCell(QuantizedRNNCellBase):
 
 class QuantizedGRUCell(QuantizedRNNCellBase):
     def __init__(self, other):
-        super(QuantizedGRUCell, self).__init__(other)
+        super().__init__(other)
 
     @torch.jit.script_method
     def forward(self, input, hx=None):
@@ -246,7 +246,7 @@ class QuantizedRNNBase(torch.jit.ScriptModule):
                      'batch_first', 'dropout', 'bidirectional', 'dtype']
 
     def __init__(self, other, dtype=torch.int8):
-        super(QuantizedRNNBase, self).__init__()
+        super().__init__()
         self.mode = other.mode
         self.input_size = other.input_size
         self.hidden_size = other.hidden_size
@@ -410,7 +410,7 @@ class QuantizedRNNBase(torch.jit.ScriptModule):
                 idx = self._quantized_weights_names.index(attr)
                 self._quantized_weights[idx] = value
 
-        return super(QuantizedRNNBase, self).__setattr__(attr, value)
+        return super().__setattr__(attr, value)
 
     # TODO: for some reason torch.jit.script_method causes a destruction of the
     # module to occur, which in turn frees the packed_ih object via its DataPtr
@@ -447,7 +447,7 @@ class QuantizedLSTM(QuantizedRNNBase):
     __overloads__ = {'forward': ['forward_packed', 'forward_tensor']}
 
     def __init__(self, other, dtype):
-        super(QuantizedLSTM, self).__init__(other, dtype)
+        super().__init__(other, dtype)
 
     @torch.jit.script_method
     def forward_impl(self, input, hx, batch_sizes, max_batch_size, sorted_indices):

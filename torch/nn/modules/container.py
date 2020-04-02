@@ -12,7 +12,7 @@ from torch._jit_internal import _copy_to_script_wrapper
 class Container(Module):
 
     def __init__(self, **kwargs):
-        super(Container, self).__init__()
+        super().__init__()
         # DeprecationWarning is ignored by default <sigh>
         warnings.warn("nn.Container is deprecated. All of it's functionality "
                       "is now implemented in nn.Module. Subclass that instead.")
@@ -45,7 +45,7 @@ class Sequential(Module):
     """
 
     def __init__(self, *args):
-        super(Sequential, self).__init__()
+        super().__init__()
         if len(args) == 1 and isinstance(args[0], OrderedDict):
             for key, module in args[0].items():
                 self.add_module(key, module)
@@ -87,7 +87,7 @@ class Sequential(Module):
 
     @_copy_to_script_wrapper
     def __dir__(self):
-        keys = super(Sequential, self).__dir__()
+        keys = super().__dir__()
         keys = [key for key in keys if not key.isdigit()]
         return keys
 
@@ -115,7 +115,7 @@ class ModuleList(Module):
 
         class MyModule(nn.Module):
             def __init__(self):
-                super(MyModule, self).__init__()
+                super().__init__()
                 self.linears = nn.ModuleList([nn.Linear(10, 10) for i in range(10)])
 
             def forward(self, x):
@@ -126,7 +126,7 @@ class ModuleList(Module):
     """
 
     def __init__(self, modules=None):
-        super(ModuleList, self).__init__()
+        super().__init__()
         if modules is not None:
             self += modules
 
@@ -173,7 +173,7 @@ class ModuleList(Module):
 
     @_copy_to_script_wrapper
     def __dir__(self):
-        keys = super(ModuleList, self).__dir__()
+        keys = super().__dir__()
         keys = [key for key in keys if not key.isdigit()]
         return keys
 
@@ -241,7 +241,7 @@ class ModuleDict(Module):
 
         class MyModule(nn.Module):
             def __init__(self):
-                super(MyModule, self).__init__()
+                super().__init__()
                 self.choices = nn.ModuleDict({
                         'conv': nn.Conv2d(10, 10, 3),
                         'pool': nn.MaxPool2d(3)
@@ -258,7 +258,7 @@ class ModuleDict(Module):
     """
 
     def __init__(self, modules=None):
-        super(ModuleDict, self).__init__()
+        super().__init__()
         if modules is not None:
             self.update(modules)
 
@@ -371,7 +371,7 @@ class ParameterList(Module):
 
         class MyModule(nn.Module):
             def __init__(self):
-                super(MyModule, self).__init__()
+                super().__init__()
                 self.params = nn.ParameterList([nn.Parameter(torch.randn(10, 10)) for i in range(10)])
 
             def forward(self, x):
@@ -382,7 +382,7 @@ class ParameterList(Module):
     """
 
     def __init__(self, parameters=None):
-        super(ParameterList, self).__init__()
+        super().__init__()
         if parameters is not None:
             self += parameters
 
@@ -416,7 +416,7 @@ class ParameterList(Module):
         return self.extend(parameters)
 
     def __dir__(self):
-        keys = super(ParameterList, self).__dir__()
+        keys = super().__dir__()
         keys = [key for key in keys if not key.isdigit()]
         return keys
 
@@ -485,7 +485,7 @@ class ParameterDict(Module):
 
         class MyModule(nn.Module):
             def __init__(self):
-                super(MyModule, self).__init__()
+                super().__init__()
                 self.params = nn.ParameterDict({
                         'left': nn.Parameter(torch.randn(5, 10)),
                         'right': nn.Parameter(torch.randn(5, 10))
@@ -497,7 +497,7 @@ class ParameterDict(Module):
     """
 
     def __init__(self, parameters=None):
-        super(ParameterDict, self).__init__()
+        super().__init__()
         if parameters is not None:
             self.update(parameters)
 

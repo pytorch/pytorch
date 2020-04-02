@@ -30,7 +30,7 @@ class LinearReLU(nnqat.Linear):
 
     def __init__(self, in_features, out_features, bias=True,
                  qconfig=None):
-        super(LinearReLU, self).__init__(in_features, out_features, bias, qconfig)
+        super().__init__(in_features, out_features, bias, qconfig)
 
     def forward(self, input):
         return self.activation_post_process(F.relu(

@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 
 class TestControl(test_util.TestCase):
     def setUp(self):
-        super(TestControl, self).setUp()
+        super().setUp()
         self.N_ = 10
 
         self.init_net_ = core.Net("init-net")

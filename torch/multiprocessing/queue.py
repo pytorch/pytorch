@@ -31,7 +31,7 @@ class ConnectionWrapper(object):
 class Queue(multiprocessing.queues.Queue):
 
     def __init__(self, *args, **kwargs):
-        super(Queue, self).__init__(*args, **kwargs)
+        super().__init__(*args, **kwargs)
         self._reader = ConnectionWrapper(self._reader)
         self._writer = ConnectionWrapper(self._writer)
         self._send = self._writer.send
@@ -44,4 +44,4 @@ class SimpleQueue(multiprocessing.queues.SimpleQueue):
         if not isinstance(self._reader, ConnectionWrapper):
             self._reader = ConnectionWrapper(self._reader)
             self._writer = ConnectionWrapper(self._writer)
-        super(SimpleQueue, self)._make_methods()
+        super()._make_methods()

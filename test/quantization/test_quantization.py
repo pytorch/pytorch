@@ -659,7 +659,7 @@ class PostTrainingDynamicQuantTest(QuantizationTestCase):
 
             class ScriptWrapper(torch.nn.Module):
                 def __init__(self, cell):
-                    super(ScriptWrapper, self).__init__()
+                    super().__init__()
                     self.cell = cell
 
                 def forward(self, x, hiddens):
@@ -719,7 +719,7 @@ class PostTrainingDynamicQuantTest(QuantizationTestCase):
 
             class ScriptWrapperPacked(torch.nn.Module):
                 def __init__(self, cell):
-                    super(ScriptWrapperPacked, self).__init__()
+                    super().__init__()
                     self.cell = cell
 
                 def forward(self,

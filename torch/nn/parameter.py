@@ -34,7 +34,7 @@ class Parameter(torch.Tensor):
             return result
 
     def __repr__(self):
-        return 'Parameter containing:\n' + super(Parameter, self).__repr__()
+        return 'Parameter containing:\n' + super().__repr__()
 
     def __reduce_ex__(self, proto):
         # See Note [Don't serialize hooks]

@@ -63,7 +63,7 @@ def _get_valid_constant(attr, v):
 
 class SourceContext(torch._C._jit_tree_views.SourceRangeFactory):
     def __init__(self, source, filename, file_lineno, leading_whitespace_len):
-        super(SourceContext, self).__init__(source, filename, file_lineno, leading_whitespace_len)
+        super().__init__(source, filename, file_lineno, leading_whitespace_len)
 
 
 def infer_concrete_type_builder(nn_module):

@@ -375,15 +375,15 @@ class Tensor(torch._C._TensorBase):
         r"""See :func:`torch.split`
         """
         if isinstance(split_size, int):
-            return super(Tensor, self).split(split_size, dim)
+            return super().split(split_size, dim)
         elif isinstance(split_size, Tensor):
             try:
                 split_size = int(split_size)
-                return super(Tensor, self).split(split_size, dim)
+                return super().split(split_size, dim)
             except ValueError:
-                return super(Tensor, self).split_with_sizes(split_size, dim)
+                return super().split_with_sizes(split_size, dim)
         else:
-            return super(Tensor, self).split_with_sizes(split_size, dim)
+            return super().split_with_sizes(split_size, dim)
 
     def unique(self, sorted=True, return_inverse=False, return_counts=False, dim=None):
         r"""Returns the unique elements of the input tensor.
@@ -614,7 +614,7 @@ class Tensor(torch._C._TensorBase):
 
         """
         names = resolve_ellipsis(names, self.names, 'refine_names')
-        return super(Tensor, self).refine_names(names)
+        return super().refine_names(names)
 
     def align_to(self, *names):
         r"""Permutes the dimensions of the :attr:`self` tensor to match the order
@@ -654,8 +654,8 @@ class Tensor(torch._C._TensorBase):
         """
         ellipsis_idx = single_ellipsis_index(names, 'align_to')
         if ellipsis_idx is None:
-            return super(Tensor, self).align_to(names)
-        return super(Tensor, self).align_to(
+            return super().align_to(names)
+        return super().align_to(
             [name for name in names if not is_ellipsis(name)],
             ellipsis_idx)
 
@@ -678,7 +678,7 @@ class Tensor(torch._C._TensorBase):
 
         """
         names, sizes = unzip_namedshape(namedshape)
-        return super(Tensor, self).unflatten(dim, sizes, names)
+        return super().unflatten(dim, sizes, names)
 
     def rename_(self, *names, **rename_map):
         """In-place version of :meth:`~Tensor.rename`."""
@@ -730,9 +730,9 @@ class Tensor(torch._C._TensorBase):
     def _update_names(self, names, inplace):
         # See Note [rename_ / rename API]
         if inplace:
-            return super(Tensor, self).rename_(names)
+            return super().rename_(names)
         else:
-            return super(Tensor, self).rename(names)
+            return super().rename(names)
 
     @property
     def grad(self):

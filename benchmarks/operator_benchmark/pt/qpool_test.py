@@ -102,20 +102,20 @@ class QMaxPool2dBenchmark(_QPool2dBenchmarkBase):
         self.pool_op = torch.nn.MaxPool2d(kernel_size=k, stride=s, padding=p,
                                           dilation=(1, 1), ceil_mode=False,
                                           return_indices=False)
-        super(QMaxPool2dBenchmark, self).setup(N, C, H, W, dtype, contig)
+        super().setup(N, C, H, W, dtype, contig)
 
 
 class QAvgPool2dBenchmark(_QPool2dBenchmarkBase):
     def init(self, N, C, H, W, k, s, p, contig, dtype):
         self.pool_op = torch.nn.AvgPool2d(kernel_size=k, stride=s, padding=p,
                                           ceil_mode=False)
-        super(QAvgPool2dBenchmark, self).setup(N, C, H, W, dtype, contig)
+        super().setup(N, C, H, W, dtype, contig)
 
 
 class QAdaptiveAvgPool2dBenchmark(_QPool2dBenchmarkBase):
     def init(self, N, C, input_size, output_size, contig, dtype):
         self.pool_op = torch.nn.AdaptiveAvgPool2d(output_size=output_size)
-        super(QAdaptiveAvgPool2dBenchmark, self).setup(N, C, *input_size,
+        super().setup(N, C, *input_size,
                                                        dtype=dtype,
                                                        contig=contig)
 

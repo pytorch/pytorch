@@ -42,7 +42,7 @@ class FakeQuantize(Module):
 
     """
     def __init__(self, observer=MovingAverageMinMaxObserver, quant_min=0, quant_max=255, **observer_kwargs):
-        super(FakeQuantize, self).__init__()
+        super().__init__()
         assert quant_min <= quant_max, \
             'quant_min must be less than or equal to quant_max'
         self.quant_min = quant_min
@@ -101,7 +101,7 @@ class FakeQuantize(Module):
     def _save_to_state_dict(self, destination, prefix, keep_vars):
         # We cannot currently register scalar values as buffers, so need to manually
         # specify serialization here.
-        super(FakeQuantize, self)._save_to_state_dict(destination, prefix, keep_vars)
+        super()._save_to_state_dict(destination, prefix, keep_vars)
         destination[prefix + 'scale'] = self.scale
         destination[prefix + 'zero_point'] = self.zero_point
 
@@ -117,7 +117,7 @@ class FakeQuantize(Module):
                 setattr(self, name, val)
             elif strict:
                 missing_keys.append(key)
-        super(FakeQuantize, self)._load_from_state_dict(state_dict, prefix, local_metadata, strict,
+        super()._load_from_state_dict(state_dict, prefix, local_metadata, strict,
                                                         missing_keys, unexpected_keys, error_msgs)
 
 default_fake_quant = FakeQuantize.with_args(observer=MovingAverageMinMaxObserver, quant_min=0, quant_max=255,

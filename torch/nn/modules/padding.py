@@ -10,7 +10,7 @@ class _ConstantPadNd(Module):
     __constants__ = ['padding', 'value']
 
     def __init__(self, value):
-        super(_ConstantPadNd, self).__init__()
+        super().__init__()
         self.value = value
 
     def forward(self, input):
@@ -65,7 +65,7 @@ class ConstantPad1d(_ConstantPadNd):
     """
 
     def __init__(self, padding, value):
-        super(ConstantPad1d, self).__init__(value)
+        super().__init__(value)
         self.padding = _pair(padding)
 
 
@@ -114,7 +114,7 @@ class ConstantPad2d(_ConstantPadNd):
     __constants__ = ['padding', 'value']
 
     def __init__(self, padding, value):
-        super(ConstantPad2d, self).__init__(value)
+        super().__init__(value)
         self.padding = _quadruple(padding)
 
 
@@ -152,7 +152,7 @@ class ConstantPad3d(_ConstantPadNd):
     """
 
     def __init__(self, padding, value):
-        super(ConstantPad3d, self).__init__(value)
+        super().__init__(value)
         self.padding = _ntuple(6)(padding)
 
 
@@ -201,7 +201,7 @@ class ReflectionPad1d(_ReflectionPadNd):
     """
 
     def __init__(self, padding):
-        super(ReflectionPad1d, self).__init__()
+        super().__init__()
         self.padding = _pair(padding)
 
 
@@ -251,7 +251,7 @@ class ReflectionPad2d(_ReflectionPadNd):
     """
 
     def __init__(self, padding):
-        super(ReflectionPad2d, self).__init__()
+        super().__init__()
         self.padding = _quadruple(padding)
 
 
@@ -300,7 +300,7 @@ class ReplicationPad1d(_ReplicationPadNd):
     """
 
     def __init__(self, padding):
-        super(ReplicationPad1d, self).__init__()
+        super().__init__()
         self.padding = _pair(padding)
 
 
@@ -350,7 +350,7 @@ class ReplicationPad2d(_ReplicationPadNd):
     """
 
     def __init__(self, padding):
-        super(ReplicationPad2d, self).__init__()
+        super().__init__()
         self.padding = _quadruple(padding)
 
 
@@ -388,7 +388,7 @@ class ReplicationPad3d(_ReplicationPadNd):
     """
 
     def __init__(self, padding):
-        super(ReplicationPad3d, self).__init__()
+        super().__init__()
         self.padding = _ntuple(6)(padding)
 
 
@@ -438,4 +438,4 @@ class ZeroPad2d(ConstantPad2d):
     """
 
     def __init__(self, padding):
-        super(ZeroPad2d, self).__init__(padding, 0.)
+        super().__init__(padding, 0.)

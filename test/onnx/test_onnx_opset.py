@@ -133,7 +133,7 @@ class TestONNXOpset(TestCase):
     def test_upsample(self):
         class MyModule(Module):
             def __init__(self):
-                super(MyModule, self).__init__()
+                super().__init__()
 
             def forward(self, x):
                 size = [v * 2 for v in x.size()[2:]]
@@ -152,7 +152,7 @@ class TestONNXOpset(TestCase):
     def test_cast_constant(self):
         class MyModule(Module):
             def __init__(self):
-                super(MyModule, self).__init__()
+                super().__init__()
 
             def forward(self, x):
                 return x - 1
@@ -225,7 +225,7 @@ class TestONNXOpset(TestCase):
     def test_dropout(self):
         class MyModule(Module):
             def __init__(self):
-                super(MyModule, self).__init__()
+                super().__init__()
                 self.dropout = torch.nn.Dropout(0.5)
 
             def forward(self, x):

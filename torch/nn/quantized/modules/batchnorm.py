@@ -41,7 +41,7 @@ class BatchNorm2d(torch.nn.BatchNorm2d):
     """
 
     def __init__(self, num_features, eps=1e-5, momentum=0.1):
-        super(BatchNorm2d, self).__init__(num_features)
+        super().__init__(num_features)
         self.eps = eps
         self.scale = 1.0
         self.zero_point = 0
@@ -97,7 +97,7 @@ class BatchNorm3d(torch.nn.BatchNorm3d):
     """
 
     def __init__(self, num_features, eps=1e-5, momentum=0.1):
-        super(BatchNorm3d, self).__init__(num_features)
+        super().__init__(num_features)
         self.eps = eps
         self.scale = 1.0
         self.zero_point = 0

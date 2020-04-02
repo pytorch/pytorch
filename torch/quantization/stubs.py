@@ -10,7 +10,7 @@ class QuantStub(nn.Module):
             if qconfig is not provided, we will get qconfig from parent modules
     """
     def __init__(self, qconfig=None):
-        super(QuantStub, self).__init__()
+        super().__init__()
         if qconfig:
             self.qconfig = qconfig
 
@@ -23,7 +23,7 @@ class DeQuantStub(nn.Module):
     this will be swapped as `nnq.DeQuantize` in `convert`.
     """
     def __init__(self):
-        super(DeQuantStub, self).__init__()
+        super().__init__()
 
     def forward(self, x):
         return x
@@ -41,7 +41,7 @@ class QuantWrapper(nn.Module):
     for `DeQuantStub`.
     """
     def __init__(self, module):
-        super(QuantWrapper, self).__init__()
+        super().__init__()
         qconfig = module.qconfig if hasattr(module, 'qconfig') else None
         self.add_module('quant', QuantStub(qconfig))
         self.add_module('dequant', DeQuantStub())

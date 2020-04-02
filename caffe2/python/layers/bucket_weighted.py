@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 class BucketWeighted(ModelLayer):
     def __init__(self, model, input_record, max_score=0, bucket_boundaries=None,
                  hash_buckets=True, weight_optim=None, name="bucket_weighted"):
-        super(BucketWeighted, self).__init__(model, name, input_record)
+        super().__init__(model, name, input_record)
 
         assert isinstance(input_record, schema.List), "Incorrect input type"
         self.bucket_boundaries = bucket_boundaries

@@ -141,7 +141,7 @@ class MultivariateNormal(Distribution):
         self.loc = loc_[..., 0]  # drop rightmost dim
 
         batch_shape, event_shape = self.loc.shape[:-1], self.loc.shape[-1:]
-        super(MultivariateNormal, self).__init__(batch_shape, event_shape, validate_args=validate_args)
+        super().__init__(batch_shape, event_shape, validate_args=validate_args)
 
         if scale_tril is not None:
             self._unbroadcasted_scale_tril = scale_tril

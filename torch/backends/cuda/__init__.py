@@ -80,7 +80,7 @@ class cuFFTPlanCacheManager(object):
         if self.__initialized:
             return setattr(self[torch.cuda.current_device()], name, value)
         else:
-            return super(cuFFTPlanCacheManager, self).__setattr__(name, value)
+            return super().__setattr__(name, value)
 
 
 class CUDAModule(object):

@@ -72,7 +72,7 @@ class Stream(torch._C._CudaStreamBase):
 
         Returns:
             A boolean indicating if all kernels in this stream are completed."""
-        return super(Stream, self).query()
+        return super().query()
 
     def synchronize(self):
         r"""Wait for all the kernels in this stream to complete.
@@ -80,7 +80,7 @@ class Stream(torch._C._CudaStreamBase):
         .. note:: This is a wrapper around ``cudaStreamSynchronize()``: see
            `CUDA Stream documentation`_ for more info.
         """
-        super(Stream, self).synchronize()
+        super().synchronize()
 
     @property
     def _as_parameter_(self):
@@ -88,7 +88,7 @@ class Stream(torch._C._CudaStreamBase):
 
     def __eq__(self, o):
         if isinstance(o, Stream):
-            return super(Stream, self).__eq__(o)
+            return super().__eq__(o)
         return False
 
     def __hash__(self):
@@ -139,7 +139,7 @@ class Event(torch._C._CudaEventBase):
         stream's device must match the event's device."""
         if stream is None:
             stream = torch.cuda.current_stream()
-        super(Event, self).record(stream)
+        super().record(stream)
 
     def wait(self, stream=None):
         r"""Makes all future work submitted to the given stream wait for this
@@ -148,7 +148,7 @@ class Event(torch._C._CudaEventBase):
         Use ``torch.cuda.current_stream()`` if no stream is specified."""
         if stream is None:
             stream = torch.cuda.current_stream()
-        super(Event, self).wait(stream)
+        super().wait(stream)
 
     def query(self):
         r"""Checks if all work currently captured by event has completed.
@@ -157,13 +157,13 @@ class Event(torch._C._CudaEventBase):
             A boolean indicating if all work currently captured by event has
             completed.
         """
-        return super(Event, self).query()
+        return super().query()
 
     def elapsed_time(self, end_event):
         r"""Returns the time elapsed in milliseconds after the event was
         recorded and before the end_event was recorded.
         """
-        return super(Event, self).elapsed_time(end_event)
+        return super().elapsed_time(end_event)
 
     def synchronize(self):
         r"""Waits for the event to complete.
@@ -174,12 +174,12 @@ class Event(torch._C._CudaEventBase):
          .. note:: This is a wrapper around ``cudaEventSynchronize()``: see
             `CUDA Event documentation`_ for more info.
         """
-        super(Event, self).synchronize()
+        super().synchronize()
 
     def ipc_handle(self):
         r"""Returns an IPC handle of this event. If not recorded yet, the event
         will use the current device. """
-        return super(Event, self).ipc_handle()
+        return super().ipc_handle()
 
     @property
     def _as_parameter_(self):

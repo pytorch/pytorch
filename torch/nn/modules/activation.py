@@ -40,7 +40,7 @@ class Threshold(Module):
     __constants__ = ['threshold', 'value', 'inplace']
 
     def __init__(self, threshold, value, inplace=False):
-        super(Threshold, self).__init__()
+        super().__init__()
         self.threshold = threshold
         self.value = value
         self.inplace = inplace
@@ -87,7 +87,7 @@ class ReLU(Module):
     __constants__ = ['inplace']
 
     def __init__(self, inplace=False):
-        super(ReLU, self).__init__()
+        super().__init__()
         self.inplace = inplace
 
     def forward(self, input):
@@ -140,7 +140,7 @@ class RReLU(Module):
     __constants__ = ['lower', 'upper', 'inplace']
 
     def __init__(self, lower=1. / 8, upper=1. / 3, inplace=False):
-        super(RReLU, self).__init__()
+        super().__init__()
         self.lower = lower
         self.upper = upper
         self.inplace = inplace
@@ -192,7 +192,7 @@ class Hardtanh(Module):
     __constants__ = ['min_val', 'max_val', 'inplace']
 
     def __init__(self, min_val=-1., max_val=1., inplace=False, min_value=None, max_value=None):
-        super(Hardtanh, self).__init__()
+        super().__init__()
         if min_value is not None:
             warnings.warn("keyword argument min_value is deprecated and rename to min_val")
             min_val = min_value
@@ -239,7 +239,7 @@ class ReLU6(Hardtanh):
     """
 
     def __init__(self, inplace=False):
-        super(ReLU6, self).__init__(0., 6., inplace)
+        super().__init__(0., 6., inplace)
 
     def extra_repr(self):
         inplace_str = 'inplace=True' if self.inplace else ''
@@ -379,7 +379,7 @@ class ELU(Module):
     __constants__ = ['alpha', 'inplace']
 
     def __init__(self, alpha=1., inplace=False):
-        super(ELU, self).__init__()
+        super().__init__()
         self.alpha = alpha
         self.inplace = inplace
 
@@ -422,7 +422,7 @@ class CELU(Module):
     __constants__ = ['alpha', 'inplace']
 
     def __init__(self, alpha=1., inplace=False):
-        super(CELU, self).__init__()
+        super().__init__()
         self.alpha = alpha
         self.inplace = inplace
 
@@ -466,7 +466,7 @@ class SELU(Module):
     __constants__ = ['inplace']
 
     def __init__(self, inplace=False):
-        super(SELU, self).__init__()
+        super().__init__()
         self.inplace = inplace
 
     def forward(self, input):
@@ -499,7 +499,7 @@ class GLU(Module):
     __constants__ = ['dim']
 
     def __init__(self, dim=-1):
-        super(GLU, self).__init__()
+        super().__init__()
         self.dim = dim
 
     def forward(self, input):
@@ -563,7 +563,7 @@ class Hardshrink(Module):
     __constants__ = ['lambd']
 
     def __init__(self, lambd=0.5):
-        super(Hardshrink, self).__init__()
+        super().__init__()
         self.lambd = lambd
 
     def forward(self, input):
@@ -609,7 +609,7 @@ class LeakyReLU(Module):
     __constants__ = ['inplace', 'negative_slope']
 
     def __init__(self, negative_slope=1e-2, inplace=False):
-        super(LeakyReLU, self).__init__()
+        super().__init__()
         self.negative_slope = negative_slope
         self.inplace = inplace
 
@@ -677,7 +677,7 @@ class Softplus(Module):
     __constants__ = ['beta', 'threshold']
 
     def __init__(self, beta=1, threshold=20):
-        super(Softplus, self).__init__()
+        super().__init__()
         self.beta = beta
         self.threshold = threshold
 
@@ -718,7 +718,7 @@ class Softshrink(Module):
     __constants__ = ['lambd']
 
     def __init__(self, lambd=0.5):
-        super(Softshrink, self).__init__()
+        super().__init__()
         self.lambd = lambd
 
     def forward(self, input):
@@ -763,7 +763,7 @@ class MultiheadAttention(Module):
     __constants__ = ['q_proj_weight', 'k_proj_weight', 'v_proj_weight', 'in_proj_weight']
 
     def __init__(self, embed_dim, num_heads, dropout=0., bias=True, add_bias_kv=False, add_zero_attn=False, kdim=None, vdim=None):
-        super(MultiheadAttention, self).__init__()
+        super().__init__()
         self.embed_dim = embed_dim
         self.kdim = kdim if kdim is not None else embed_dim
         self.vdim = vdim if vdim is not None else embed_dim
@@ -822,7 +822,7 @@ class MultiheadAttention(Module):
         if '_qkv_same_embed_dim' not in state:
             state['_qkv_same_embed_dim'] = True
 
-        super(MultiheadAttention, self).__setstate__(state)
+        super().__setstate__(state)
 
     def forward(self, query, key, value, key_padding_mask=None,
                 need_weights=True, attn_mask=None):
@@ -933,7 +933,7 @@ class PReLU(Module):
 
     def __init__(self, num_parameters=1, init=0.25):
         self.num_parameters = num_parameters
-        super(PReLU, self).__init__()
+        super().__init__()
         self.weight = Parameter(torch.Tensor(num_parameters).fill_(init))
 
     def forward(self, input):
@@ -1023,7 +1023,7 @@ class Softmin(Module):
     __constants__ = ['dim']
 
     def __init__(self, dim=None):
-        super(Softmin, self).__init__()
+        super().__init__()
         self.dim = dim
 
     def forward(self, input):
@@ -1067,7 +1067,7 @@ class Softmax(Module):
     __constants__ = ['dim']
 
     def __init__(self, dim=None):
-        super(Softmax, self).__init__()
+        super().__init__()
         self.dim = dim
 
     def __setstate__(self, state):
@@ -1137,7 +1137,7 @@ class LogSoftmax(Module):
     __constants__ = ['dim']
 
     def __init__(self, dim=None):
-        super(LogSoftmax, self).__init__()
+        super().__init__()
         self.dim = dim
 
     def __setstate__(self, state):

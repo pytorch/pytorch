@@ -43,7 +43,7 @@ class FuncModule(Module):
     def __init__(self, f, params=None):
         if params is None:
             params = ()
-        super(FuncModule, self).__init__()
+        super().__init__()
         self.f = f
         self.params = nn.ParameterList(list(params))
 
@@ -730,7 +730,7 @@ class TestOperators(TestCase):
     def test_retain_param_name_disabled(self):
         class MyModule(Module):
             def __init__(self):
-                super(MyModule, self).__init__()
+                super().__init__()
                 self.fc1 = nn.Linear(4, 5, bias=False)
                 self.fc1.weight.data.fill_(2.)
                 self.fc2 = nn.Linear(5, 6, bias=False)
@@ -746,7 +746,7 @@ class TestOperators(TestCase):
     def test_c2_op(self):
         class MyModel(torch.nn.Module):
             def __init__(self):
-                super(MyModel, self).__init__()
+                super().__init__()
 
             def forward(self, scores, bbox_deltas, im_info, anchors):
                 a, b = torch.ops._caffe2.GenerateProposals(

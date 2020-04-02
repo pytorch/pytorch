@@ -19,7 +19,7 @@ class Dropout(ModelLayer):
             dropout_for_eval=False,
             **kwargs):
 
-        super(Dropout, self).__init__(model, name, input_record, **kwargs)
+        super().__init__(model, name, input_record, **kwargs)
         assert isinstance(input_record, schema.Scalar), "Incorrect input type"
         assert (ratio >= 0 and ratio < 1.0), \
             "Expected 0 <= ratio < 1, but got ratio of %s" % ratio

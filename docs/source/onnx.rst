@@ -586,7 +586,7 @@ you can create and register your own custom ops implementation in PyTorch. Here'
 
     class FooModel(torch.nn.Module):
         def __init__(self, attr1, attr2):
-            super(FooModule, self).__init__()
+            super().__init__()
             self.attr1 = attr1
             self.attr2 = attr2
 

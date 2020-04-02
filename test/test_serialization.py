@@ -650,7 +650,7 @@ class TestOldSerialization(TestCase, SerializationMixin):
 
     def run(self, *args, **kwargs):
         with serialization_method(use_zip=False):
-            return super(TestOldSerialization, self).run(*args, **kwargs)
+            return super().run(*args, **kwargs)
 
 
 class TestSerialization(TestCase, SerializationMixin):
@@ -676,7 +676,7 @@ class TestSerialization(TestCase, SerializationMixin):
 
     def run(self, *args, **kwargs):
         with serialization_method(use_zip=True):
-            return super(TestSerialization, self).run(*args, **kwargs)
+            return super().run(*args, **kwargs)
 
 
 if __name__ == '__main__':

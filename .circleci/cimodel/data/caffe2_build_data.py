@@ -13,7 +13,7 @@ CONFIG_TREE_DATA = [
 
 class TreeConfigNode(ConfigNode):
     def __init__(self, parent, node_name, subtree):
-        super(TreeConfigNode, self).__init__(parent, self.modify_label(node_name))
+        super().__init__(parent, self.modify_label(node_name))
         self.subtree = subtree
         self.init2(node_name)
 
@@ -48,7 +48,7 @@ class TreeConfigNode(ConfigNode):
 
 class TopLevelNode(TreeConfigNode):
     def __init__(self, node_name, subtree):
-        super(TopLevelNode, self).__init__(None, node_name, subtree)
+        super().__init__(None, node_name, subtree)
 
     # noinspection PyMethodMayBeStatic
     def child_constructor(self):

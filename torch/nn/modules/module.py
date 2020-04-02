@@ -12,7 +12,7 @@ class _IncompatibleKeys(namedtuple('IncompatibleKeys', ['missing_keys', 'unexpec
     def __repr__(self):
         if not self.missing_keys and not self.unexpected_keys:
             return '<All keys matched successfully>'
-        return super(_IncompatibleKeys, self).__repr__()
+        return super().__repr__()
 
     __str__ = __repr__
 
@@ -50,7 +50,7 @@ class Module(object):
 
         class Model(nn.Module):
             def __init__(self):
-                super(Model, self).__init__()
+                super().__init__()
                 self.conv1 = nn.Conv2d(1, 20, 5)
                 self.conv2 = nn.Conv2d(20, 20, 5)
 

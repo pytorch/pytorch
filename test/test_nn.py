@@ -96,7 +96,7 @@ class PackedSequenceTest(TestCase):
     }
 
     def __init__(self, *args, **kwargs):
-        super(PackedSequenceTest, self).__init__(*args, **kwargs)
+        super().__init__(*args, **kwargs)
         self.batch_size = 5
         self.max_length = 6
 
@@ -333,13 +333,13 @@ class TestNN(NNTestCase):
     def _create_basic_net(self):
         class Layer(nn.Module):
             def __init__(self):
-                super(Layer, self).__init__()
+                super().__init__()
                 self.layer_dummy_param = Parameter(torch.Tensor(3, 5))
                 self.register_buffer('layer_dummy_buf', torch.zeros(1, 3, 3, 7))
 
         class Net(nn.Module):
             def __init__(self):
-                super(Net, self).__init__()
+                super().__init__()
                 self.l1 = Layer()
                 self.dummy_param = Parameter(torch.Tensor(3, 5))
                 self.register_buffer('dummy_buf', torch.zeros(7, 3, 3, 1))
@@ -404,7 +404,7 @@ class TestNN(NNTestCase):
     def test_share_memory(self):
         class Net(nn.Module):
             def __init__(self):
-                super(Net, self).__init__()
+                super().__init__()
                 self.p = nn.Parameter(torch.eye(5))
                 self.par = nn.ParameterList()
                 self.par.append(nn.Parameter(torch.randn(10)))
@@ -764,7 +764,7 @@ class TestNN(NNTestCase):
     def test_call_supports_python_dict_output(self):
         class Net(nn.Module):
             def __init__(self):
-                super(Net, self).__init__()
+                super().__init__()
                 self.l1 = nn.Linear(10, 20)
                 self.register_backward_hook(self.hook)
                 self.check_backward_hook_flag = False
@@ -846,7 +846,7 @@ class TestNN(NNTestCase):
     def test_modules(self):
         class Net(nn.Module):
             def __init__(self):
-                super(Net, self).__init__()
+                super().__init__()
                 self.l1 = l
                 self.l2 = l
                 self.param = torch.empty(3, 5)
@@ -859,7 +859,7 @@ class TestNN(NNTestCase):
     def test_named_modules(self):
         class Net(nn.Module):
             def __init__(self):
-                super(Net, self).__init__()
+                super().__init__()
                 self.l1 = l
                 self.l2 = l
                 self.param = torch.empty(3, 5)
@@ -972,7 +972,7 @@ class TestNN(NNTestCase):
     def test_getattr_with_property(self):
         class Model(nn.Module):
             def __init__(self):
-                super(Model, self).__init__()
+                super().__init__()
                 self.linear = nn.Linear(4, 5)
 
             def forward(self, input):
@@ -3589,7 +3589,7 @@ class TestNN(NNTestCase):
 
         class CustomState(nn.Module):
             def __init__(self):
-                super(CustomState, self).__init__()
+                super().__init__()
                 self.param = torch.nn.Parameter(torch.ones(1))
                 self.sub = torch.nn.Linear(5, 5)
 
@@ -4028,7 +4028,7 @@ class TestNN(NNTestCase):
     def test_container_copy(self):
         class Model(nn.Module):
             def __init__(self):
-                super(Model, self).__init__()
+                super().__init__()
                 self.linear = nn.Linear(4, 5)
 
             def forward(self, input):
@@ -7926,7 +7926,7 @@ class TestNN(NNTestCase):
 
 class TestNNInit(TestCase):
     def setUp(self):
-        super(TestNNInit, self).setUp()
+        super().setUp()
         random.seed(123)
 
     def _is_normal(self, tensor, mean, std):
@@ -8493,7 +8493,7 @@ for test_params in criterion_tests + new_criterion_tests:
 
 class UnpoolingNet(nn.Module):
     def __init__(self, pool, unpool):
-        super(UnpoolingNet, self).__init__()
+        super().__init__()
         self.pool = pool
         self.unpool = unpool
 

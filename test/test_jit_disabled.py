@@ -47,7 +47,7 @@ class TestJitDisabled(unittest.TestCase):
 import torch
 class Foo(torch.jit.ScriptModule):
     def __init__(self, x):
-        super(Foo, self).__init__()
+        super().__init__()
         self.x = torch.jit.Attribute(x, torch.Tensor)
 
     def forward(self, input):
@@ -64,7 +64,7 @@ import torch
 
 class AModule(torch.jit.ScriptModule):
     def __init__(self):
-        super(AModule, self).__init__()
+        super().__init__()
     @torch.jit.script_method
     def forward(self, input):
         pass
@@ -80,7 +80,7 @@ import torch
 
 class AModule(torch.nn.Module):
     def __init__(self):
-        super(AModule, self).__init__()
+        super().__init__()
 
     def forward(self, input):
         pass

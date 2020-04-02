@@ -30,7 +30,7 @@ class ReLU(torch.nn.ReLU):
         >>> output = m(input)
     """
     def __init__(self, inplace=False):
-        super(ReLU, self).__init__(inplace)
+        super().__init__(inplace)
         self.inplace = inplace
 
     def forward(self, input):
@@ -68,7 +68,7 @@ class ReLU6(torch.nn.ReLU):
         >>> output = m(input)
     """
     def __init__(self, inplace=False):
-        super(ReLU6, self).__init__(inplace)
+        super().__init__(inplace)
         self.inplace = inplace
 
     def forward(self, input):

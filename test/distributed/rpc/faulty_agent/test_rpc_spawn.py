@@ -11,7 +11,7 @@ from torch.testing._internal.distributed.rpc.rpc_test import FaultyAgentRpcTest
 )
 class FaultyAgentRpcTestWithSpawn(MultiProcessTestCase, FaultyAgentRpcTest):
     def setUp(self):
-        super(FaultyAgentRpcTestWithSpawn, self).setUp()
+        super().setUp()
         self._spawn_processes()
 
 

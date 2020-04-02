@@ -11,7 +11,7 @@ from torch.testing._internal.distributed.rpc.rpc_test import RpcTest
 )
 class RpcTestWithSpawn(MultiProcessTestCase, RpcTest):
     def setUp(self):
-        super(RpcTestWithSpawn, self).setUp()
+        super().setUp()
         self._spawn_processes()
 
 

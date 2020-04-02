@@ -49,7 +49,7 @@ class ArcCosineFeatureMap(ModelLayer):
             name='arc_cosine_feature_map',
             **kwargs):
 
-        super(ArcCosineFeatureMap, self).__init__(model, name, input_record,
+        super().__init__(model, name, input_record,
                                                   **kwargs)
         assert isinstance(input_record, schema.Scalar), "Incorrect input type"
         self.params = []

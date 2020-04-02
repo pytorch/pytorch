@@ -37,7 +37,7 @@ class _StorageBase(object):
         return (_load_from_bytes, (b.getvalue(),))
 
     def __sizeof__(self):
-        return super(_StorageBase, self).__sizeof__() + self.element_size() * self.size()
+        return super().__sizeof__() + self.element_size() * self.size()
 
     def clone(self):
         """Returns a copy of this storage"""

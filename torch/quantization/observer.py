@@ -55,7 +55,7 @@ class ObserverBase(ABC, nn.Module):
         dtype: Quantized data type
     """
     def __init__(self, dtype):
-        super(ObserverBase, self).__init__()
+        super().__init__()
         self.dtype = dtype
 
     @abstractmethod
@@ -106,7 +106,7 @@ class _ObserverBase(ObserverBase):
 
     def __init__(self, dtype=torch.quint8, qscheme=torch.per_tensor_affine,
                  reduce_range=False):
-        super(_ObserverBase, self).__init__(dtype=dtype)
+        super().__init__(dtype=dtype)
         self.qscheme = qscheme
         self.reduce_range = reduce_range
 
@@ -321,7 +321,7 @@ class MinMaxObserver(_ObserverBase):
         # This is not an optimal choice for non x86 backends as it loses a bit
         # of precision for activations.
 
-        super(MinMaxObserver, self).__init__(dtype=dtype,
+        super().__init__(dtype=dtype,
                                              qscheme=qscheme,
                                              reduce_range=reduce_range)
         self.register_buffer('min_val', torch.tensor([]))
@@ -357,7 +357,7 @@ class MinMaxObserver(_ObserverBase):
         return "min_val={}, max_val={}".format(self.min_val, self.max_val)
 
     def _save_to_state_dict(self, destination, prefix, keep_vars):
-        super(MinMaxObserver, self)._save_to_state_dict(destination, prefix, keep_vars)
+        super()._save_to_state_dict(destination, prefix, keep_vars)
         destination[prefix + 'min_val'] = self.min_val
         destination[prefix + 'max_val'] = self.max_val
 
@@ -372,7 +372,7 @@ class MinMaxObserver(_ObserverBase):
                 setattr(self, name, val)
             elif strict:
                 missing_keys.append(key)
-        super(MinMaxObserver, self)._load_from_state_dict(state_dict, prefix, local_metadata, strict,
+        super()._load_from_state_dict(state_dict, prefix, local_metadata, strict,
                                                           missing_keys, unexpected_keys, error_msgs)
 
 
@@ -420,7 +420,7 @@ class MovingAverageMinMaxObserver(MinMaxObserver):
     def __init__(self, averaging_constant=0.01, dtype=torch.quint8,
                  qscheme=torch.per_tensor_affine, reduce_range=False):
         self.averaging_constant = averaging_constant
-        super(MovingAverageMinMaxObserver, self).__init__(dtype=dtype,
+        super().__init__(dtype=dtype,
                                                           qscheme=qscheme,
                                                           reduce_range=reduce_range)
 
@@ -542,7 +542,7 @@ class PerChannelMinMaxObserver(_ObserverBase):
 
     def __init__(self, ch_axis=0, dtype=torch.quint8,
                  qscheme=torch.per_channel_affine, reduce_range=False):
-        super(PerChannelMinMaxObserver, self).__init__(dtype=dtype,
+        super().__init__(dtype=dtype,
                                                        qscheme=qscheme,
                                                        reduce_range=reduce_range)
         self.ch_axis = ch_axis
@@ -595,7 +595,7 @@ class PerChannelMinMaxObserver(_ObserverBase):
         return "min_val={}, max_val={}".format(self.min_vals, self.max_vals)
 
     def _save_to_state_dict(self, destination, prefix, keep_vars):
-        super(PerChannelMinMaxObserver, self)._save_to_state_dict(destination, prefix, keep_vars)
+        super()._save_to_state_dict(destination, prefix, keep_vars)
         destination[prefix + 'min_vals'] = self.min_vals
         destination[prefix + 'max_vals'] = self.max_vals
 
@@ -609,7 +609,7 @@ class PerChannelMinMaxObserver(_ObserverBase):
                 setattr(self, name, val)
             elif strict:
                 missing_keys.append(key)
-        super(PerChannelMinMaxObserver, self)._load_from_state_dict(state_dict, prefix, local_metadata, strict,
+        super()._load_from_state_dict(state_dict, prefix, local_metadata, strict,
                                                                     missing_keys, unexpected_keys, error_msgs)
 
 class MovingAveragePerChannelMinMaxObserver(PerChannelMinMaxObserver):
@@ -639,7 +639,7 @@ class MovingAveragePerChannelMinMaxObserver(PerChannelMinMaxObserver):
 
     def __init__(self, averaging_constant=0.01, ch_axis=0, dtype=torch.quint8,
                  qscheme=torch.per_channel_affine, reduce_range=False):
-        super(MovingAveragePerChannelMinMaxObserver, self).__init__(
+        super().__init__(
             ch_axis=ch_axis, dtype=dtype, qscheme=qscheme,
             reduce_range=reduce_range)
         self.averaging_constant = averaging_constant
@@ -693,7 +693,7 @@ class HistogramObserver(_ObserverBase):
     def __init__(self, bins=2048, upsample_rate=128, dtype=torch.quint8,
                  qscheme=torch.per_tensor_affine, reduce_range=False):
         # bins: The number of bins used for histogram calculation.
-        super(HistogramObserver, self).__init__(dtype=dtype,
+        super().__init__(dtype=dtype,
                                                 qscheme=qscheme,
                                                 reduce_range=reduce_range)
         self.bins = bins
@@ -932,7 +932,7 @@ class HistogramObserver(_ObserverBase):
         return self._calculate_qparams(new_min, new_max)
 
     def _save_to_state_dict(self, destination, prefix, keep_vars):
-        super(HistogramObserver, self)._save_to_state_dict(destination, prefix, keep_vars)
+        super()._save_to_state_dict(destination, prefix, keep_vars)
         destination[prefix + 'min_val'] = self.min_val
         destination[prefix + 'max_val'] = self.max_val
 
@@ -947,7 +947,7 @@ class HistogramObserver(_ObserverBase):
                 setattr(self, name, val)
             elif strict:
                 missing_keys.append(key)
-        super(HistogramObserver, self)._load_from_state_dict(state_dict, prefix, local_metadata, strict,
+        super()._load_from_state_dict(state_dict, prefix, local_metadata, strict,
                                                              missing_keys, unexpected_keys, error_msgs)
 
 class RecordingObserver(_ObserverBase):
@@ -962,7 +962,7 @@ class RecordingObserver(_ObserverBase):
     __annotations__ = {"tensor_val": List[Optional[torch.Tensor]]}
 
     def __init__(self, **kwargs):
-        super(RecordingObserver, self).__init__(**kwargs)
+        super().__init__(**kwargs)
         self.tensor_val = []
 
     def forward(self, x):
@@ -992,7 +992,7 @@ class NoopObserver(ObserverBase):
     def __init__(self, dtype=torch.float16):
         if dtype != torch.float16:
             raise ValueError("Only float16 quantization can be used without calibration process")
-        super(NoopObserver, self).__init__(dtype=dtype)
+        super().__init__(dtype=dtype)
 
     def forward(self, x):
         return x

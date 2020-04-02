@@ -171,7 +171,7 @@ This is how a ``Linear`` module can be implemented::
 
     class Linear(nn.Module):
         def __init__(self, input_features, output_features, bias=True):
-            super(Linear, self).__init__()
+            super().__init__()
             self.input_features = input_features
             self.output_features = output_features
 

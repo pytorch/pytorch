@@ -267,7 +267,7 @@ class TestUtilityFuns(TestCase):
     def test_constant_fold_lstm(self):
         class GruNet(torch.nn.Module):
             def __init__(self):
-                super(GruNet, self).__init__()
+                super().__init__()
                 self.mygru = torch.nn.GRU(7, 3, 1, bidirectional=False)
 
             def forward(self, input, initial_state):
@@ -291,7 +291,7 @@ class TestUtilityFuns(TestCase):
     def test_constant_fold_transpose_matmul(self):
         class MatMulNet(torch.nn.Module):
             def __init__(self):
-                super(MatMulNet, self).__init__()
+                super().__init__()
                 self.B = torch.nn.Parameter(torch.ones(5, 3))
 
             def forward(self, A):
@@ -312,7 +312,7 @@ class TestUtilityFuns(TestCase):
     def test_constant_fold_reshape(self):
         class ReshapeModule(torch.nn.Module):
             def __init__(self, ):
-                super(ReshapeModule, self).__init__()
+                super().__init__()
                 self.register_buffer("weight", torch.ones(5))
 
             def forward(self, x):
@@ -333,7 +333,7 @@ class TestUtilityFuns(TestCase):
     def test_constant_fold_div(self):
         class Module(torch.nn.Module):
             def __init__(self, ):
-                super(Module, self).__init__()
+                super().__init__()
                 self.register_buffer("weight", torch.ones(5))
 
             def forward(self, x):
@@ -354,7 +354,7 @@ class TestUtilityFuns(TestCase):
     def test_constant_fold_mul(self):
         class Module(torch.nn.Module):
             def __init__(self, ):
-                super(Module, self).__init__()
+                super().__init__()
                 self.register_buffer("weight", torch.ones(5))
 
             def forward(self, x):
@@ -375,7 +375,7 @@ class TestUtilityFuns(TestCase):
     def test_constant_fold_sqrt(self):
         class Module(torch.nn.Module):
             def __init__(self, ):
-                super(Module, self).__init__()
+                super().__init__()
                 self.register_buffer("weight", torch.ones(5))
 
             def forward(self, x):
@@ -455,7 +455,7 @@ class TestUtilityFuns(TestCase):
     def test_batchnorm_training(self):
         class MyModule(torch.nn.Module):
             def __init__(self):
-                super(MyModule, self).__init__()
+                super().__init__()
                 self.bn = torch.nn.BatchNorm2d(3, affine=True)
 
             def forward(self, x):
@@ -493,7 +493,7 @@ class TestUtilityFuns(TestCase):
     def test_dropout_training(self):
         class MyModule(torch.nn.Module):
             def __init__(self):
-                super(MyModule, self).__init__()
+                super().__init__()
                 self.dropout = torch.nn.Dropout(0.4)
 
             def forward(self, x):

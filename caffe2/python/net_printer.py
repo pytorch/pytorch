@@ -185,8 +185,8 @@ class Text(object):
 
 class Printer(Visitor, Text):
     def __init__(self, factor_prefixes=False, c2_syntax=True):
-        super(Visitor, self).__init__()
-        super(Text, self).__init__()
+        super().__init__()
+        super().__init__()
         self.factor_prefixes = factor_prefixes
         self.c2_syntax = c2_syntax
         self.c2_net_name = None

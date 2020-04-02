@@ -55,7 +55,7 @@ class TestVerify(TestCase):
     def test_jumbled_params(self):
         class MyModel(Module):
             def __init__(self):
-                super(MyModel, self).__init__()
+                super().__init__()
 
             def forward(self, x):
                 y = x * x
@@ -69,7 +69,7 @@ class TestVerify(TestCase):
     def test_modifying_params(self):
         class MyModel(Module):
             def __init__(self):
-                super(MyModel, self).__init__()
+                super().__init__()
                 self.param = Parameter(torch.tensor([2.0]))
 
             def forward(self, x):
@@ -84,7 +84,7 @@ class TestVerify(TestCase):
     def test_dynamic_model_structure(self):
         class MyModel(Module):
             def __init__(self):
-                super(MyModel, self).__init__()
+                super().__init__()
                 self.iters = 0
 
             def forward(self, x):
@@ -102,7 +102,7 @@ class TestVerify(TestCase):
     def test_embedded_constant_difference(self):
         class MyModel(Module):
             def __init__(self):
-                super(MyModel, self).__init__()
+                super().__init__()
                 self.iters = 0
 
             def forward(self, x):

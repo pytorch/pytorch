@@ -29,7 +29,7 @@ class Linear(nnq.Linear):
     """
 
     def __init__(self, in_features, out_features, bias_=True, dtype=torch.qint8):
-        super(Linear, self).__init__(in_features, out_features, bias_, dtype=dtype)
+        super().__init__(in_features, out_features, bias_, dtype=dtype)
         # We don't muck around with buffers or attributes or anything here
         # to keep the module simple. *everything* is simply a Python attribute.
         # Serialization logic is explicitly handled in the below serialization and

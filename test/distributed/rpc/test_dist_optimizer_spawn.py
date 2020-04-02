@@ -11,7 +11,7 @@ import unittest
 class DistOptimizerTestWithSpawn(MultiProcessTestCase, DistOptimizerTest):
 
     def setUp(self):
-        super(DistOptimizerTestWithSpawn, self).setUp()
+        super().setUp()
         self._spawn_processes()
 
 if __name__ == '__main__':

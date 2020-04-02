@@ -6,7 +6,7 @@ from torch.jit._recursive import wrap_cpp_module
 
 class ConvPackedParams(torch.nn.Module):
     def __init__(self):
-        super(ConvPackedParams, self).__init__()
+        super().__init__()
         wq = torch._empty_affine_quantized([1, 1, 1, 1], scale=1.0, zero_point=0, dtype=torch.qint8)
         self.stride = [1, 1]
         self.padding = [0, 0]

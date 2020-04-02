@@ -11,7 +11,7 @@ class LinearPackedParams(torch.nn.Module):
     _version = 2
 
     def __init__(self, dtype=torch.qint8):
-        super(LinearPackedParams, self).__init__()
+        super().__init__()
         self.dtype = dtype
         if self.dtype == torch.qint8:
             wq = torch._empty_affine_quantized([1, 1], scale=1.0, zero_point=0, dtype=torch.qint8)
@@ -43,7 +43,7 @@ class LinearPackedParams(torch.nn.Module):
         return x
 
     def _save_to_state_dict(self, destination, prefix, keep_vars):
-        super(LinearPackedParams, self)._save_to_state_dict(destination, prefix, keep_vars)
+        super()._save_to_state_dict(destination, prefix, keep_vars)
         (w, b) = self._weight_bias()
         destination[prefix + 'weight'] = w
         destination[prefix + 'bias'] = b
@@ -62,7 +62,7 @@ class LinearPackedParams(torch.nn.Module):
             self.dtype = state_dict[prefix + 'dtype']
             state_dict.pop(prefix + 'dtype')
 
-        super(LinearPackedParams, self)._load_from_state_dict(state_dict, prefix, local_metadata, False,
+        super()._load_from_state_dict(state_dict, prefix, local_metadata, False,
                                                               missing_keys, unexpected_keys, error_msgs)
 
     @torch.jit.export
@@ -114,7 +114,7 @@ class Linear(torch.nn.Module):
     _FLOAT_MODULE = nn.Linear
 
     def __init__(self, in_features, out_features, bias_=True, dtype=torch.qint8):
-        super(Linear, self).__init__()
+        super().__init__()
         # We don't muck around with buffers or attributes or anything here
         # to keep the module simple. *everything* is simply a Python attribute.
         # Serialization logic is explicitly handled in the below serialization and
@@ -186,7 +186,7 @@ class Linear(torch.nn.Module):
     # outside the process in which they were created, rather they should be derived
     # from the QTensor weight.
     def _save_to_state_dict(self, destination, prefix, keep_vars):
-        super(Linear, self)._save_to_state_dict(destination, prefix, keep_vars)
+        super()._save_to_state_dict(destination, prefix, keep_vars)
         destination[prefix + 'scale'] = torch.tensor(self.scale)
         destination[prefix + 'zero_point'] = torch.tensor(self.zero_point)
 
@@ -209,7 +209,7 @@ class Linear(torch.nn.Module):
             state_dict.update({prefix + '_packed_params.weight': weight,
                                prefix + '_packed_params.bias': bias})
 
-        super(Linear, self)._load_from_state_dict(state_dict, prefix, local_metadata, False,
+        super()._load_from_state_dict(state_dict, prefix, local_metadata, False,
                                                   missing_keys, unexpected_keys, error_msgs)
 
     # Function rather than property to make sure that JIT serialization doesn't

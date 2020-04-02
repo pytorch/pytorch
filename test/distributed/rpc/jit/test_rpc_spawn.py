@@ -11,7 +11,7 @@ from torch.testing._internal.distributed.rpc.jit.rpc_test import JitRpcTest
 )
 class JitRpcTestWithSpawn(MultiProcessTestCase, JitRpcTest):
     def setUp(self):
-        super(JitRpcTestWithSpawn, self).setUp()
+        super().setUp()
         self._spawn_processes()
 
 

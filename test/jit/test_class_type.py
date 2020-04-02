@@ -618,7 +618,7 @@ class TestClassType(JitTestCase):
         # Test interface/class python assignment
         class TestPyAssign(nn.Module):
             def __init__(self):
-                super(TestPyAssign, self).__init__()
+                super().__init__()
                 self.proxy_mod = Foo()
 
             def forward(self, x):
@@ -633,7 +633,7 @@ class TestClassType(JitTestCase):
 
         class TestPyAssignError(nn.Module):
             def __init__(self, obj):
-                super(TestPyAssignError, self).__init__()
+                super().__init__()
                 self.proxy_mod = obj
 
             def forward(self, x):
@@ -921,7 +921,7 @@ class TestClassType(JitTestCase):
             __constants__ = ["w"]
 
             def __init__(self, w):
-                super(M, self).__init__()
+                super().__init__()
                 self.w = w
 
             def forward(self, x):

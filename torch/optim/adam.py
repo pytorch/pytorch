@@ -41,10 +41,10 @@ class Adam(Optimizer):
             raise ValueError("Invalid weight_decay value: {}".format(weight_decay))
         defaults = dict(lr=lr, betas=betas, eps=eps,
                         weight_decay=weight_decay, amsgrad=amsgrad)
-        super(Adam, self).__init__(params, defaults)
+        super().__init__(params, defaults)
 
     def __setstate__(self, state):
-        super(Adam, self).__setstate__(state)
+        super().__setstate__(state)
         for group in self.param_groups:
             group.setdefault('amsgrad', False)
 

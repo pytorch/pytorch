@@ -13,7 +13,7 @@ def scriptAndSave(module, fileName):
 
 class Test(torch.jit.ScriptModule):
     def __init__(self):
-        super(Test, self).__init__()
+        super().__init__()
 
     @torch.jit.script_method
     def forward(self, input):

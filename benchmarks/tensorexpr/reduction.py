@@ -56,7 +56,7 @@ class ReduceBench(benchmark.Benchmark):
 
 class ReduceRowBench(ReduceBench):
     def __init__(self, mode, device, M, N, K):
-        super(ReduceRowBench, self).__init__(mode, device, "row", M, N, K)
+        super().__init__(mode, device, "row", M, N, K)
 
     @staticmethod
     def module():
@@ -65,7 +65,7 @@ class ReduceRowBench(ReduceBench):
 
 class ReduceMidBench(ReduceBench):
     def __init__(self, mode, device, M, N, K):
-        super(ReduceMidBench, self).__init__(mode, device, "mid", M, N, K)
+        super().__init__(mode, device, "mid", M, N, K)
 
     @staticmethod
     def module():
@@ -74,7 +74,7 @@ class ReduceMidBench(ReduceBench):
 
 class ReduceColBench(ReduceBench):
     def __init__(self, mode, device, M, N, K):
-        super(ReduceColBench, self).__init__(mode, device, "col", M, N, K)
+        super().__init__(mode, device, "col", M, N, K)
 
     @staticmethod
     def module():

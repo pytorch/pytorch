@@ -184,7 +184,7 @@ class ConcatDataset(Dataset):
         return r
 
     def __init__(self, datasets):
-        super(ConcatDataset, self).__init__()
+        super().__init__()
         assert len(datasets) > 0, 'datasets should not be an empty iterable'
         self.datasets = list(datasets)
         for d in self.datasets:
@@ -224,7 +224,7 @@ class ChainDataset(IterableDataset):
         datasets (iterable of IterableDataset): datasets to be chained together
     """
     def __init__(self, datasets):
-        super(ChainDataset, self).__init__()
+        super().__init__()
         self.datasets = datasets
 
     def __iter__(self):

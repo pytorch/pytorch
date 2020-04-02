@@ -217,7 +217,7 @@ class StoreTestBase(object):
 
 class FileStoreTest(TestCase, StoreTestBase):
     def setUp(self):
-        super(FileStoreTest, self).setUp()
+        super().setUp()
         self.file = tempfile.NamedTemporaryFile(delete=False)
 
     def _create_store(self):
@@ -228,7 +228,7 @@ class FileStoreTest(TestCase, StoreTestBase):
 
 class PrefixFileStoreTest(TestCase, StoreTestBase):
     def setUp(self):
-        super(PrefixFileStoreTest, self).setUp()
+        super().setUp()
         self.file = tempfile.NamedTemporaryFile(delete=False)
         self.filestore = c10d.FileStore(self.file.name, 1)
         self.prefix = "test_prefix"
@@ -275,7 +275,7 @@ class TCPStoreTest(TestCase, StoreTestBase):
 
 class PrefixTCPStoreTest(TestCase, StoreTestBase):
     def setUp(self):
-        super(PrefixTCPStoreTest, self).setUp()
+        super().setUp()
         self.tcpstore = create_tcp_store('localhost')
         self.prefix = "test_prefix"
         self.tcpstore.set_timeout(timedelta(seconds=300))
@@ -286,7 +286,7 @@ class PrefixTCPStoreTest(TestCase, StoreTestBase):
 
 class MyPythonStore(c10d.Store):
     def __init__(self):
-        super(MyPythonStore, self).__init__()
+        super().__init__()
         self.store = dict()
 
     def set(self, key, value):
@@ -310,7 +310,7 @@ class MyPythonStore(c10d.Store):
 
 class PythonStoreTest(TestCase):
     def setUp(self):
-        super(PythonStoreTest, self).setUp()
+        super().setUp()
 
     def test_set_get(self):
         # If we were to inherit from StoreTestBase and try to use
@@ -583,7 +583,7 @@ class TimeoutTest(TestCase):
 @unittest.skipIf(TEST_WITH_TSAN, "TSAN is not fork-safe since we're forking in a multi-threaded environment")
 class ProcessGroupGlooTest(MultiProcessTestCase):
     def setUp(self):
-        super(ProcessGroupGlooTest, self).setUp()
+        super().setUp()
         self._fork_processes()
 
     def opts(self, threads=2):
@@ -1816,7 +1816,7 @@ class ProcessGroupNCCLTest(TestCase):
 
 class Net(nn.Module):
     def __init__(self):
-        super(Net, self).__init__()
+        super().__init__()
         self.fc1 = nn.Linear(2, 10, bias=False)
         self.fc2 = nn.Linear(10, 50, bias=False)
         self.fc3 = nn.Linear(50, 4, bias=False)
@@ -1831,7 +1831,7 @@ class Net(nn.Module):
 
 class DoubleGpuNet(nn.Module):
     def __init__(self, gpus):
-        super(DoubleGpuNet, self).__init__()
+        super().__init__()
         self.fc1 = nn.Linear(2, 10, bias=False).to(gpus[0])
         self.fc2 = nn.Linear(10, 50, bias=False).to(gpus[1])
         self.fc3 = nn.Linear(50, 4, bias=False).to(gpus[1])
@@ -1850,7 +1850,7 @@ class DoubleGpuNet(nn.Module):
 
 class QuadraGpuNet(nn.Module):
     def __init__(self, gpus):
-        super(QuadraGpuNet, self).__init__()
+        super().__init__()
         self.fc1 = nn.Linear(2, 10, bias=False).to(gpus[0])
         self.fc2 = nn.Linear(10, 50, bias=False).to(gpus[1])
         self.fc3 = nn.Linear(50, 4, bias=False).to(gpus[2])
@@ -1874,7 +1874,7 @@ class QuadraGpuNet(nn.Module):
 @unittest.skipIf(TEST_WITH_TSAN, "TSAN is not fork-safe since we're forking in a multi-threaded environment")
 class DistributedDataParallelTest(MultiProcessTestCase):
     def setUp(self):
-        super(DistributedDataParallelTest, self).setUp()
+        super().setUp()
         self._fork_processes()
 
     def tearDown(self):
@@ -2312,7 +2312,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
 
         class ForwardReturnValueModule(nn.Module):
             def __init__(self):
-                super(ForwardReturnValueModule, self).__init__()
+                super().__init__()
                 self.fc1 = nn.Linear(2, 10, bias=False)
                 self.fc2 = nn.Linear(10, 4, bias=False)
                 self.fc3 = nn.Linear(4, 4, bias=False)
@@ -2402,7 +2402,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
 
         class FindUnusedParametersModule(nn.Module):
             def __init__(self):
-                super(FindUnusedParametersModule, self).__init__()
+                super().__init__()
                 self.fc1 = nn.Linear(2, 10, bias=False)
                 self.fc2 = nn.Linear(10, 4, bias=False)
                 self.fc3 = nn.Linear(4, 4, bias=False)
@@ -2477,14 +2477,14 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         class GlobalLocalUnusedParamModule(nn.Module):
             class Task(nn.Module):
                 def __init__(self):
-                    super(GlobalLocalUnusedParamModule.Task, self).__init__()
+                    super().__init__()
                     self.p = nn.Parameter(torch.ones(2, 2))
 
                 def forward(self, x):
                     return self.p + x
 
             def __init__(self):
-                super(GlobalLocalUnusedParamModule, self).__init__()
+                super().__init__()
                 self.t0 = self.Task()
                 self.t1 = self.Task()
                 self.task_unused = self.Task()
@@ -2548,7 +2548,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
 
         class MultipleOutputModule(nn.Module):
             def __init__(self):
-                super(MultipleOutputModule, self).__init__()
+                super().__init__()
 
                 def define_module():
                     return nn.Sequential(
@@ -2598,7 +2598,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
 
         class NoGradModule(nn.Module):
             def __init__(self):
-                super(NoGradModule, self).__init__()
+                super().__init__()
                 self.fc1 = nn.Linear(2, 10, bias=False)
                 self.fc2 = nn.Linear(10, 4, bias=False)
                 self.relu = nn.ReLU()
@@ -2751,7 +2751,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
 
         class IgnoredOutput(nn.Module):
             def __init__(self):
-                super(IgnoredOutput, self).__init__()
+                super().__init__()
                 self.fc1 = nn.Linear(2, 10, bias=False)
                 self.fc2 = nn.Linear(10, 4, bias=False)
                 self.relu = nn.ReLU()
@@ -2794,7 +2794,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
 
         class IgnoredOutputWithUnusedParameters(nn.Module):
             def __init__(self):
-                super(IgnoredOutputWithUnusedParameters, self).__init__()
+                super().__init__()
                 self.fc1 = nn.Linear(2, 10, bias=False)
                 self.fc2 = nn.Linear(10, 4, bias=False)
                 self.fc3 = nn.Linear(4, 4, bias=False)
@@ -2845,7 +2845,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
 
         class TestModel(nn.Module):
             def __init__(self):
-                super(TestModel, self).__init__()
+                super().__init__()
                 self.fc1 = nn.Linear(2, 10, bias=False)
                 self.fc2 = nn.Linear(10, 4, bias=False)
                 self.relu = nn.ReLU()
@@ -2899,7 +2899,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
 
         class SparseGradientModule(nn.Module):
             def __init__(self):
-                super(SparseGradientModule, self).__init__()
+                super().__init__()
                 self.embedding = nn.EmbeddingBag(10, 10, sparse=True)
 
             def forward(self, x):
@@ -2936,7 +2936,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
 
 class ReducerModule(nn.Module):
     def __init__(self):
-        super(ReducerModule, self).__init__()
+        super().__init__()
         self.fc1 = nn.Linear(2, 10, bias=False)
         self.fc2 = nn.Linear(10, 4, bias=False)
         self.fc3 = nn.Linear(4, 4, bias=False)
@@ -3116,7 +3116,7 @@ class ComputeBucketAssignmentTest(TestCase):
 @unittest.skipIf(TEST_WITH_TSAN, "TSAN is not fork-safe since we're forking in a multi-threaded environment")
 class NcclErrorHandlingTest(MultiProcessTestCase):
     def setUp(self):
-        super(NcclErrorHandlingTest, self).setUp()
+        super().setUp()
         # Need to skip return code checking for these tests since the child
         # processes don't exit cleanly.
         self.skip_return_code_checks = [
@@ -3128,7 +3128,7 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
         self._fork_processes()
 
     def tearDown(self):
-        super(NcclErrorHandlingTest, self).tearDown()
+        super().tearDown()
         try:
             os.remove(self.file_name)
         except OSError:
@@ -3289,11 +3289,11 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
 @unittest.skipIf(TEST_WITH_TSAN, "TSAN is not fork-safe since we're forking in a multi-threaded environment")
 class CommTest(MultiProcessTestCase):
     def setUp(self):
-        super(CommTest, self).setUp()
+        super().setUp()
         self._fork_processes()
 
     def tearDown(self):
-        super(CommTest, self).tearDown()
+        super().tearDown()
         try:
             os.remove(self.file_name)
         except OSError:

@@ -289,7 +289,7 @@ class BuildExtension(build_ext, object):
         return init_with_options
 
     def __init__(self, *args, **kwargs):
-        super(BuildExtension, self).__init__(*args, **kwargs)
+        super().__init__(*args, **kwargs)
         self.no_python_abi_suffix = kwargs.get("no_python_abi_suffix", False)
 
         self.use_ninja = kwargs.get('use_ninja', False if IS_HIP_EXTENSION else True)
@@ -584,7 +584,7 @@ class BuildExtension(build_ext, object):
         # suffixed with "<SOABI>.so", where <SOABI> will be something like
         # cpython-37m-x86_64-linux-gnu. On Python 2, there is no such ABI name.
         # The final extension, .so, would be .lib/.dll on Windows of course.
-        ext_filename = super(BuildExtension, self).get_ext_filename(ext_name)
+        ext_filename = super().get_ext_filename(ext_name)
         # If `no_python_abi_suffix` is `True`, we omit the Python 3 ABI
         # component. This makes building shared libraries with setuptools that
         # aren't Python modules nicer.

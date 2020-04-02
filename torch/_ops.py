@@ -51,7 +51,7 @@ class _OpNamespace(types.ModuleType):
         operation will already exist).
     """
     def __init__(self, name):
-        super(_OpNamespace, self).__init__('torch.ops.' + name)
+        super().__init__('torch.ops.' + name)
         self.name = name
 
     def __getattr__(self, op_name):
@@ -70,7 +70,7 @@ class _Ops(types.ModuleType):
     __file__ = os.path.join(os.path.dirname(__file__), '_ops.py')
 
     def __init__(self):
-        super(_Ops, self).__init__('torch.ops')
+        super().__init__('torch.ops')
         self.loaded_libraries = set()
 
     def __getattr__(self, name):

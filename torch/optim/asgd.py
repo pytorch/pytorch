@@ -30,7 +30,7 @@ class ASGD(Optimizer):
 
         defaults = dict(lr=lr, lambd=lambd, alpha=alpha, t0=t0,
                         weight_decay=weight_decay)
-        super(ASGD, self).__init__(params, defaults)
+        super().__init__(params, defaults)
 
     @torch.no_grad()
     def step(self, closure=None):

@@ -11,7 +11,7 @@ from torch.testing._internal.distributed.rpc.dist_autograd_test import DistAutog
 )
 class DistAutogradTestWithSpawn(MultiProcessTestCase, DistAutogradTest):
     def setUp(self):
-        super(DistAutogradTestWithSpawn, self).setUp()
+        super().setUp()
         self._spawn_processes()
 
 

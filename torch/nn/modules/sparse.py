@@ -80,7 +80,7 @@ class Embedding(Module):
     def __init__(self, num_embeddings, embedding_dim, padding_idx=None,
                  max_norm=None, norm_type=2., scale_grad_by_freq=False,
                  sparse=False, _weight=None):
-        super(Embedding, self).__init__()
+        super().__init__()
         self.num_embeddings = num_embeddings
         self.embedding_dim = embedding_dim
         if padding_idx is not None:
@@ -257,7 +257,7 @@ class EmbeddingBag(Module):
     def __init__(self, num_embeddings, embedding_dim,
                  max_norm=None, norm_type=2., scale_grad_by_freq=False,
                  mode='mean', sparse=False, _weight=None, include_last_offset=False):
-        super(EmbeddingBag, self).__init__()
+        super().__init__()
         self.num_embeddings = num_embeddings
         self.embedding_dim = embedding_dim
         self.max_norm = max_norm

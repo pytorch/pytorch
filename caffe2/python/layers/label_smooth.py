@@ -29,7 +29,7 @@ class LabelSmooth(ModelLayer):
     def __init__(
         self, model, label, smooth_matrix, name='label_smooth', **kwargs
     ):
-        super(LabelSmooth, self).__init__(model, name, label, **kwargs)
+        super().__init__(model, name, label, **kwargs)
         self.label = label
         # shape as a list
         smooth_matrix = np.array(smooth_matrix).astype(np.float32).flatten()

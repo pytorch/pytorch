@@ -24,7 +24,7 @@ class Identity(Module):
 
     """
     def __init__(self, *args, **kwargs):
-        super(Identity, self).__init__()
+        super().__init__()
 
     def forward(self, input):
         return input
@@ -66,7 +66,7 @@ class Linear(Module):
     __constants__ = ['in_features', 'out_features']
 
     def __init__(self, in_features, out_features, bias=True):
-        super(Linear, self).__init__()
+        super().__init__()
         self.in_features = in_features
         self.out_features = out_features
         self.weight = Parameter(torch.Tensor(out_features, in_features))
@@ -133,7 +133,7 @@ class Bilinear(Module):
     __constants__ = ['in1_features', 'in2_features', 'out_features']
 
     def __init__(self, in1_features, in2_features, out_features, bias=True):
-        super(Bilinear, self).__init__()
+        super().__init__()
         self.in1_features = in1_features
         self.in2_features = in2_features
         self.out_features = out_features

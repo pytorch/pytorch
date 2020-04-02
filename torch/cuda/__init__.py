@@ -181,7 +181,7 @@ class cudaStatus(object):
 class CudaError(RuntimeError):
     def __init__(self, code):
         msg = _cudart.cudaGetErrorString(code).decode('utf-8')
-        super(CudaError, self).__init__('{0} ({1})'.format(msg, code))
+        super().__init__('{0} ({1})'.format(msg, code))
 
 
 def check_error(res):
@@ -227,7 +227,7 @@ class device_of(device):
 
     def __init__(self, obj):
         idx = obj.get_device() if obj.is_cuda else -1
-        super(device_of, self).__init__(idx)
+        super().__init__(idx)
 
 
 def set_device(device):
@@ -439,7 +439,7 @@ class _CudaBase(object):
 
     def type(self, *args, **kwargs):
         with device(self.get_device()):
-            return super(_CudaBase, self).type(*args, **kwargs)
+            return super().type(*args, **kwargs)
 
     __new__ = _lazy_new
 

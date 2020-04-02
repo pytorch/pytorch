@@ -35,7 +35,7 @@ class Adagrad(Optimizer):
 
         defaults = dict(lr=lr, lr_decay=lr_decay, eps=eps, weight_decay=weight_decay,
                         initial_accumulator_value=initial_accumulator_value)
-        super(Adagrad, self).__init__(params, defaults)
+        super().__init__(params, defaults)
 
         for group in self.param_groups:
             for p in group['params']:

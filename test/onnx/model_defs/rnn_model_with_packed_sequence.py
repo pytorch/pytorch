@@ -4,7 +4,7 @@ from torch.nn.utils import rnn as rnn_utils
 
 class RnnModelWithPackedSequence(nn.Module):
     def __init__(self, model, batch_first):
-        super(RnnModelWithPackedSequence, self).__init__()
+        super().__init__()
         self.model = model
         self.batch_first = batch_first
 

@@ -16,7 +16,7 @@ class TestScript(JitTestCase):
     def test_prepare_dynamic(self):
         class M(torch.nn.Module):
             def __init__(self):
-                super(M, self).__init__()
+                super().__init__()
                 self.fc = torch.nn.Linear(5, 5)
 
             def forward(self, x):
@@ -39,7 +39,7 @@ class TestScript(JitTestCase):
     def test_prepare_dynamic_child_qconfig(self):
         class Sub(torch.nn.Module):
             def __init__(self):
-                super(Sub, self).__init__()
+                super().__init__()
                 self.fc = torch.nn.Linear(5, 5)
 
             def forward(self, x):
@@ -47,7 +47,7 @@ class TestScript(JitTestCase):
 
         class M(torch.nn.Module):
             def __init__(self):
-                super(M, self).__init__()
+                super().__init__()
                 self.conv = torch.nn.Conv2d(3, 5, 3)
                 self.sub = Sub()
 
@@ -77,7 +77,7 @@ class TestScript(JitTestCase):
     def test_insert_quant_dequant_conv_dynamic(self):
         class M(torch.nn.Module):
             def __init__(self):
-                super(M, self).__init__()
+                super().__init__()
                 self.conv = torch.nn.Conv2d(3, 5, 3).float()
 
             def forward(self, x):
@@ -122,7 +122,7 @@ class TestScript(JitTestCase):
     def test_insert_quant_dequant_linear_dynamic(self):
         class M(torch.nn.Module):
             def __init__(self):
-                super(M, self).__init__()
+                super().__init__()
                 self.fc1 = torch.nn.Linear(5, 5).float()
                 self.fc2 = torch.nn.Linear(5, 5).float()
 
@@ -165,7 +165,7 @@ class TestScript(JitTestCase):
     def test_finalize_for_linear_dynamic(self):
         class M(torch.nn.Module):
             def __init__(self):
-                super(M, self).__init__()
+                super().__init__()
                 self.fc = torch.nn.Linear(5, 5).float()
 
             def forward(self, x):

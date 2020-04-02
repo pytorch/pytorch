@@ -83,7 +83,7 @@ class MixtureSameFamily(Distribution):
 
         event_shape = self._component_distribution.event_shape
         self._event_ndims = len(event_shape)
-        super(MixtureSameFamily, self).__init__(batch_shape=cdbs,
+        super().__init__(batch_shape=cdbs,
                                                 event_shape=event_shape,
                                                 validate_args=validate_args)
 

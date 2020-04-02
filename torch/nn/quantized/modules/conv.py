@@ -20,7 +20,7 @@ class _ConvNd(nn.Module):
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
                  padding=0, dilation=1, groups=1, bias=True,
                  padding_mode='zeros'):
-        super(_ConvNd, self).__init__()
+        super().__init__()
         if padding_mode != 'zeros':
             raise NotImplementedError(
                 "Currently only zero-padding is supported by quantized conv")
@@ -68,7 +68,7 @@ class _ConvNd(nn.Module):
     # live outside the process in which they were created, rather they should be
     # derived from the QTensor weight.
     def _save_to_state_dict(self, destination, prefix, keep_vars):
-        super(_ConvNd, self)._save_to_state_dict(destination, prefix, keep_vars)
+        super()._save_to_state_dict(destination, prefix, keep_vars)
         (w, b) = self._weight_bias()
         destination[prefix + 'weight'] = w
         destination[prefix + 'scale'] = torch.tensor(self.scale)
@@ -114,7 +114,7 @@ class _ConvNd(nn.Module):
         state_dict.pop(prefix + 'scale')
         self.zero_point = int(state_dict[prefix + 'zero_point'])
         state_dict.pop(prefix + 'zero_point')
-        super(_ConvNd, self)._load_from_state_dict(
+        super()._load_from_state_dict(
             state_dict, prefix, local_metadata, False, missing_keys,
             unexpected_keys, error_msgs)
 
@@ -194,7 +194,7 @@ class Conv1d(_ConvNd):
         dilation[self._SQUEEZE_DIM] = 1
         dilation = tuple(dilation)
 
-        super(Conv1d, self).__init__(
+        super().__init__(
             in_channels, out_channels, kernel_size, stride, padding, dilation,
             groups, bias, padding_mode)
 
@@ -306,7 +306,7 @@ class Conv2d(_ConvNd):
         stride = _pair(stride)
         padding = _pair(padding)
         dilation = _pair(dilation)
-        super(Conv2d, self).__init__(
+        super().__init__(
             in_channels, out_channels, kernel_size, stride, padding, dilation,
             groups, bias, padding_mode)
 
@@ -432,7 +432,7 @@ class Conv3d(_ConvNd):
         stride = _triple(stride)
         padding = _triple(padding)
         dilation = _triple(dilation)
-        super(Conv3d, self).__init__(
+        super().__init__(
             in_channels, out_channels, kernel_size, stride, padding, dilation,
             groups, bias, padding_mode)
 

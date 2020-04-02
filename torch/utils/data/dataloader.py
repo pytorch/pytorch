@@ -50,7 +50,7 @@ class _InfiniteConstantSampler(Sampler):
     """
 
     def __init__(self):
-        super(_InfiniteConstantSampler, self).__init__(None)
+        super().__init__(None)
 
     def __iter__(self):
         while True:
@@ -270,7 +270,7 @@ class DataLoader(object):
             raise ValueError('{} attribute should not be set after {} is '
                              'initialized'.format(attr, self.__class__.__name__))
 
-        super(DataLoader, self).__setattr__(attr, val)
+        super().__setattr__(attr, val)
 
     def __iter__(self):
         if self.num_workers == 0:
@@ -373,7 +373,7 @@ class _BaseDataLoaderIter(object):
 
 class _SingleProcessDataLoaderIter(_BaseDataLoaderIter):
     def __init__(self, loader):
-        super(_SingleProcessDataLoaderIter, self).__init__(loader)
+        super().__init__(loader)
         assert self._timeout == 0
         assert self._num_workers == 0
 
@@ -670,7 +670,7 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
     #     down.
 
     def __init__(self, loader):
-        super(_MultiProcessingDataLoaderIter, self).__init__(loader)
+        super().__init__(loader)
 
         assert self._num_workers > 0
 

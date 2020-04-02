@@ -27,7 +27,7 @@ class TestSaveLoad(JitTestCase):
         """
         class Foo(torch.nn.Module):
             def __init__(self):
-                super(Foo, self).__init__()
+                super().__init__()
                 self.foo = torch.nn.Linear(2, 2)
                 self.bar = torch.nn.Linear(2, 2)
 
@@ -45,7 +45,7 @@ class TestSaveLoad(JitTestCase):
 
         class Foo(torch.nn.Module):
             def __init__(self):
-                super(Foo, self).__init__()
+                super().__init__()
                 self.foo = torch.nn.Linear(2, 2)
 
             def forward(self, x):

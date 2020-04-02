@@ -85,7 +85,7 @@ class TestAsync(JitTestCase):
             __constants__ = ['const']
 
             def __init__(self):
-                super(Mod, self).__init__()
+                super().__init__()
                 self.const = 42
                 self.param = nn.Parameter(torch.randn(2, 2))
 
@@ -201,14 +201,14 @@ class TestAsync(JitTestCase):
     def test_async_script_trace(self):
         class Traced(nn.Module):
             def __init__(self):
-                super(Traced, self).__init__()
+                super().__init__()
 
             def forward(self, x):
                 return (torch.neg(x), x)
 
         class Mod(torch.jit.ScriptModule):
             def __init__(self):
-                super(Mod, self).__init__()
+                super().__init__()
                 x = torch.rand(3, 3)
                 self.traced = torch.jit.trace(Traced(), (x), _force_outplace=True)
 
@@ -230,7 +230,7 @@ class TestAsync(JitTestCase):
 
         class TupleCl(nn.Module):
             def __init__(self):
-                super(TupleCl, self).__init__()
+                super().__init__()
                 self.module = Mod()
 
             def forward(self, x):

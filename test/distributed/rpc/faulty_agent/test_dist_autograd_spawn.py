@@ -13,7 +13,7 @@ from torch.testing._internal.distributed.rpc.dist_autograd_test import (
 )
 class FaultyAgentDistAutogradTestWithSpawn(MultiProcessTestCase, FaultyAgentDistAutogradTest):
     def setUp(self):
-        super(FaultyAgentDistAutogradTestWithSpawn, self).setUp()
+        super().setUp()
         self._spawn_processes()
 
 

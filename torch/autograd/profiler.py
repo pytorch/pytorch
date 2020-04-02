@@ -24,7 +24,7 @@ class EventList(list):
     """A list of Events (for pretty printing)"""
     def __init__(self, *args, **kwargs):
         use_cuda = kwargs.pop('use_cuda', True)
-        super(EventList, self).__init__(*args, **kwargs)
+        super().__init__(*args, **kwargs)
         self._cpu_children_populated = False
         self._use_cuda = use_cuda
 

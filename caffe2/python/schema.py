@@ -545,7 +545,7 @@ class Struct(Field):
         # post initialization.
         if getattr(self, '_frozen', None) and not key.startswith('_'):
             raise TypeError('Struct.__setattr__() is disabled after __init__()')
-        super(Struct, self).__setattr__(key, value)
+        super().__setattr__(key, value)
 
     def __add__(self, other):
         """

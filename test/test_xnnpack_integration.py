@@ -99,7 +99,7 @@ class TestXNNPACKSerDes(TestCase):
     def test_linear(self, batch_size, data_shape, weight_output_dim, use_bias):
         class Linear(torch.nn.Module):
             def __init__(self, weight, bias=None):
-                super(Linear, self).__init__()
+                super().__init__()
                 self.weight = weight
                 self.bias = bias
 
@@ -108,7 +108,7 @@ class TestXNNPACKSerDes(TestCase):
 
         class LinearPrePacked(torch.nn.Module):
             def __init__(self, weight, bias=None):
-                super(LinearPrePacked, self).__init__()
+                super().__init__()
                 self.packed_weight_bias = torch.ops.prepacked.linear_clamp_prepack(weight, bias)
 
             def forward(self, x):
@@ -172,7 +172,7 @@ class TestXNNPACKSerDes(TestCase):
                     use_bias):
         class Conv2D(torch.nn.Module):
             def __init__(self, weight, bias, strides, paddings, dilations, groups):
-                super(Conv2D, self).__init__()
+                super().__init__()
                 self.weight = weight
                 self.bias = bias
                 self.strides = strides
@@ -186,7 +186,7 @@ class TestXNNPACKSerDes(TestCase):
 
         class Conv2DPrePacked(torch.nn.Module):
             def __init__(self, weight, bias, strides, paddings, dilations, groups):
-                super(Conv2DPrePacked, self).__init__()
+                super().__init__()
                 self.packed_weight_bias = torch.ops.prepacked.conv2d_clamp_prepack(weight, bias,
                                                                                    strides, paddings, dilations, groups)
 
@@ -266,7 +266,7 @@ class TestXNNPACKSerDes(TestCase):
         class M(torch.nn.Module):
             def __init__(self, conv_weight, conv_bias, linear_weight, linear_bias,
                          strides, paddings, dilations, groups):
-                super(M, self).__init__()
+                super().__init__()
                 self.conv_weight = conv_weight
                 self.conv_bias = conv_bias
                 self.linear_weight = linear_weight
@@ -286,7 +286,7 @@ class TestXNNPACKSerDes(TestCase):
         class MPrePacked(torch.nn.Module):
             def __init__(self, conv_weight, conv_bias, linear_weight, linear_bias,
                          strides, paddings, dilations, groups):
-                super(MPrePacked, self).__init__()
+                super().__init__()
                 self.conv2d_clamp_run_weight_bias = \
                     torch.ops.prepacked.conv2d_clamp_prepack(conv_weight, conv_bias,
                                                              strides, paddings, dilations, groups)
@@ -398,7 +398,7 @@ class TestXNNPACKRewritePass(TestCase):
 
         class Linear(torch.nn.Module):
             def __init__(self):
-                super(Linear, self).__init__()
+                super().__init__()
                 self.weight = torch.nn.Parameter(torch.Tensor(torch.rand(weight_shape)))
                 self.bias = torch.nn.Parameter(torch.Tensor(torch.rand((weight_output_dim))))
 
@@ -407,7 +407,7 @@ class TestXNNPACKRewritePass(TestCase):
 
         class LinearNoBias(torch.nn.Module):
             def __init__(self):
-                super(LinearNoBias, self).__init__()
+                super().__init__()
                 self.weight = torch.nn.Parameter(torch.Tensor(torch.rand(weight_shape)))
 
             def forward(self, x):
@@ -442,7 +442,7 @@ class TestXNNPACKRewritePass(TestCase):
 
         class Conv2D(torch.nn.Module):
             def __init__(self):
-                super(Conv2D, self).__init__()
+                super().__init__()
                 self.weight = torch.nn.Parameter(torch.Tensor(torch.rand(conv_weight_shape)))
                 self.bias = torch.nn.Parameter(torch.Tensor(torch.rand(conv_bias_shape)))
                 self.strides = strides
@@ -470,7 +470,7 @@ class TestXNNPACKRewritePass(TestCase):
 
         class M(torch.nn.Module):
             def __init__(self):
-                super(M, self).__init__()
+                super().__init__()
                 self.conv_weight = torch.nn.Parameter(torch.Tensor(torch.rand(conv_weight_shape)))
                 self.conv_bias = torch.nn.Parameter(torch.Tensor(torch.rand((conv_bias_shape))))
                 self.linear_weight = torch.nn.Parameter(torch.Tensor(torch.rand(linear_weight_shape)))
