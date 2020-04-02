@@ -22,6 +22,7 @@ endif()
 # ---[ Project and semantic versioning.
 project(Caffe2 CXX C)
 
+
 if(${CMAKE_SYSTEM_NAME} STREQUAL "Linux")
   set(LINUX TRUE)
 else()
