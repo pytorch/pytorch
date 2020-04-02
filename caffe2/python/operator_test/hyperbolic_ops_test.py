@@ -27,10 +27,9 @@ class TestHyperbolicOps(serial.SerializedTestCase):
             op=op,
             inputs=[X],
             reference=ref,
-            ensure_outputs_are_inferred=True,
         )
         self.assertDeviceChecks(dc, op, [X], [0])
-        self.assertGradientChecks(gc, op, [X], 0, [0], ensure_outputs_are_inferred=True)
+        self.assertGradientChecks(gc, op, [X], 0, [0])
 
     @serial.given(X=hu.tensor(dtype=np.float32), **hu.gcs)
     def test_sinh(self, X, gc, dc):

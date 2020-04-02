@@ -263,15 +263,7 @@ void IRPrinter::visit(const Ramp* v) {
 
 void IRPrinter::visit(const Load* v) {
   // TODO: support the mask case
-  os() << *v->base_handle() << "[";
-  size_t i = 0;
-  for (const Expr* ind : v->indices()) {
-    if (i++) {
-      os() << ", ";
-    }
-    ind->accept(this);
-  }
-  os() << "]";
+  os() << *v->base_handle() << "[" << *v->index() << "]";
 }
 
 void IRPrinter::visit(const For* v) {
@@ -304,15 +296,8 @@ void IRPrinter::visit(const Block* v) {
 void IRPrinter::visit(const Store* v) {
   // TODO: handle the mask
   emitIndent();
-  os() << *v->base_handle() << "[";
-  size_t i = 0;
-  for (const Expr* ind : v->indices()) {
-    if (i++) {
-      os() << ", ";
-    }
-    ind->accept(this);
-  }
-  os() << "] = " << *v->value() << ";";
+  os() << *v->base_handle() << "[" << *v->index() << "] = " << *v->value()
+       << ";";
 }
 
 void IRPrinter::visit(const Broadcast* v) {
