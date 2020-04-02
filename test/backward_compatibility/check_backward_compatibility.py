@@ -94,6 +94,15 @@ def check_bc(new_schema_dict):
     return is_bc
 
 
+blacklist = [
+    "torch.classes",
+    "Any",
+    "RRef",
+    "aten::setdefault",
+    "aten::_set_item",
+]
+
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Process some integers.')
     parser.add_argument(
