@@ -369,7 +369,7 @@ class TestXNNPACKRewritePass(TestCase):
         def validate_transformed_module(module_instance, pattern_count_map, data_shape, prepack_removal=False, fuse_clamping_ops=False):
             scripted_model = torch.jit.script(module_instance)
             scripted_model.eval()
-            input_data = torch.rand(data_shape)
+            input_data = torch.normal(1, 20, size=data_shape)
             ref_result = scripted_model(input_data)
             torch._C._jit_pass_insert_prepacked_ops(scripted_model._c)
             if fuse_clamping_ops or prepack_removal:
