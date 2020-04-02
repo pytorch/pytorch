@@ -42,11 +42,11 @@ if(NOT __NCCL_INCLUDED)
       OUTPUT "${__NCCL_BUILD_DIR}/lib/libnccl_slim_static.a"
       DEPENDS nccl_external
       COMMAND "${CMAKE_COMMAND}" -E make_directory "${__NCCL_BUILD_DIR}/objects"
-      COMMAND pushd objects
+      COMMAND cd objects
       COMMAND "${CMAKE_AR}" x "${__NCCL_BUILD_DIR}/lib/libnccl_static.a"
       COMMAND for obj in all_gather_* all_reduce_* broadcast_* reduce_*.o$<SEMICOLON> do "${CMAKE_OBJCOPY}" --remove-relocations .nvFatBinSegment --remove-section __nv_relfatbin $$obj$<SEMICOLON> done
       COMMAND "${CMAKE_AR}" cr "${__NCCL_BUILD_DIR}/lib/libnccl_slim_static.a" "*.o"
-      COMMAND popd
+      COMMAND cd -
       COMMAND "${CMAKE_COMMAND}" -E remove_directory "${__NCCL_BUILD_DIR}/objects"
       WORKING_DIRECTORY "${__NCCL_BUILD_DIR}"
       COMMENT "Slimming NCCL"
