@@ -56,6 +56,10 @@ INPUT                  = ../../../aten/src/ATen/ATen.h \
                          ../../../c10/cuda/CUDAStream.h \
                          ../../../torch/csrc/api/include \
                          ../../../torch/csrc/api/src \
+                         ../../../torch/csrc/autograd/autograd.h \
+                         ../../../torch/csrc/autograd/custom_function.h \
+                         ../../../torch/csrc/autograd/function.h \
+                         ../../../torch/csrc/autograd/variable.h \
                          ../../../torch/csrc/autograd/generated/variable_factories.h \
                          ../../../torch/csrc/jit/runtime/custom_operator.h \
                          ../../../torch/csrc/jit/serialization/import.h \
