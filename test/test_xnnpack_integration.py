@@ -372,10 +372,11 @@ class TestXNNPACKRewritePass(TestCase):
             input_data = torch.rand(data_shape)
             ref_result = scripted_model(input_data)
             torch._C._jit_pass_insert_prepacked_ops(scripted_model._c)
-            if (prepack_removal):
+            if fuse_relu or prepack_removal:
                 scripted_model._c = torch._C._freeze_module(scripted_model._c)
-                if fuse_relu:
-                    torch._C._jit_pass_fuse_relu_w_prepacked_linear_conv(scripted_model._c)
+            if fuse_relu:
+                torch._C._jit_pass_fuse_relu_w_prepacked_linear_conv(scripted_model._c)
+            if (prepack_removal):
                 torch._C._jit_pass_fold_prepacking_ops(scripted_model._c)
 
             buffer = io.BytesIO()
@@ -469,7 +470,7 @@ class TestXNNPACKRewritePass(TestCase):
         linear_weight_shape = (weight_output_dim, linear_input_shape)
 
         class M(torch.nn.Module):
-            def __init__(self, inplace=False):
+            def __init__(self, activation_fn=F.relu):
                 super(M, self).__init__()
                 self.conv_weight = torch.nn.Parameter(torch.Tensor(torch.rand(conv_weight_shape)))
                 self.conv_bias = torch.nn.Parameter(torch.Tensor(torch.rand((conv_bias_shape))))
@@ -480,8 +481,7 @@ class TestXNNPACKRewritePass(TestCase):
                 self.dilations = dilations
                 self.groups = groups
                 self.activation_fn = F.relu
-                if (inplace):
-                    self.activation_fn = F.relu_
+                self.activation_fn = activation_fn
 
             def forward(self, x):
                 o = F.conv2d(x, self.conv_weight, self.conv_bias,
@@ -500,7 +500,7 @@ class TestXNNPACKRewritePass(TestCase):
         pattern_count_map["prepacked::conv2d_clamp_prepack"] = -1
         pattern_count_map["Tensor = prim::CallFunction"] = -1
         pattern_count_map["prepacked::linear_clamp_prepack"] = -1
-        validate_transformed_module(M(), pattern_count_map, data_shape, True)
+        validate_transformed_module(M(), pattern_count_map, data_shape, prepack_removal=True)
 
         # Not inplace relu fusion test.
         pattern_count_map = {"aten::relu": 2,
@@ -508,11 +508,11 @@ class TestXNNPACKRewritePass(TestCase):
                              "prepacked::conv2d_clamp_run": 1,
                              "prepacked::linear_clamp_prepack": -1,
                              "prepacked::linear_clamp_run": 1}
-        validate_transformed_module(M(), pattern_count_map, data_shape, True)
+        validate_transformed_module(M(), pattern_count_map, data_shape, prepack_removal=True)
         pattern_count_map["prepacked::conv2d_clamp_prepack"] = -1
         pattern_count_map["prepacked::linear_clamp_prepack"] = -1
         pattern_count_map["aten::relu"] = -1
-        validate_transformed_module(M(), pattern_count_map, data_shape, True, True)
+        validate_transformed_module(M(), pattern_count_map, data_shape, prepack_removal=True, fuse_relu=True)
 
         # Inplace relu fusion test.
         pattern_count_map = {"aten::relu": 2,
@@ -520,11 +520,35 @@ class TestXNNPACKRewritePass(TestCase):
                              "prepacked::conv2d_clamp_run": 1,
                              "prepacked::linear_clamp_prepack": -1,
                              "prepacked::linear_clamp_run": 1}
-        validate_transformed_module(M(True), pattern_count_map, data_shape, True)
+        validate_transformed_module(M(F.relu_), pattern_count_map, data_shape, prepack_removal=True)
         pattern_count_map["prepacked::conv2d_clamp_prepack"] = -1
         pattern_count_map["prepacked::linear_clamp_prepack"] = -1
         pattern_count_map["aten::relu"] = -1
-        validate_transformed_module(M(True), pattern_count_map, data_shape, True, True)
+        validate_transformed_module(M(F.relu_), pattern_count_map, data_shape, prepack_removal=True, fuse_relu=True)
+
+        # Not inplace hardtanh fusion test.
+        pattern_count_map = {"aten::hardtanh": 2,
+                             "prepacked::conv2d_clamp_prepack": -1,
+                             "prepacked::conv2d_clamp_run": 1,
+                             "prepacked::linear_clamp_prepack": -1,
+                             "prepacked::linear_clamp_run": 1}
+        validate_transformed_module(M(F.hardtanh), pattern_count_map, data_shape, prepack_removal=True)
+        pattern_count_map["prepacked::conv2d_clamp_prepack"] = -1
+        pattern_count_map["prepacked::linear_clamp_prepack"] = -1
+        pattern_count_map["aten::hardtanh"] = -1
+        validate_transformed_module(M(F.hardtanh), pattern_count_map, data_shape, prepack_removal=True, fuse_relu=True)
+
+        # Inplace hardtanh fusion test.
+        pattern_count_map = {"aten::hardtanh_": 2,
+                             "prepacked::conv2d_clamp_prepack": -1,
+                             "prepacked::conv2d_clamp_run": 1,
+                             "prepacked::linear_clamp_prepack": -1,
+                             "prepacked::linear_clamp_run": 1}
+        validate_transformed_module(M(F.hardtanh_), pattern_count_map, data_shape, prepack_removal=True)
+        pattern_count_map["prepacked::conv2d_clamp_prepack"] = -1
+        pattern_count_map["prepacked::linear_clamp_prepack"] = -1
+        pattern_count_map["aten::hardtanh_"] = -1
+        validate_transformed_module(M(F.hardtanh_), pattern_count_map, data_shape, prepack_removal=True, fuse_relu=True)
 
 
 if __name__ == "__main__":

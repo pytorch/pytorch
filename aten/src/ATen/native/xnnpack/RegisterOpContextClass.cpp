@@ -66,7 +66,7 @@ static auto registry =
   // We can refactor the code and use a better namespace.
     torch::RegisterOperators()
         .op("prepacked::linear_clamp_prepack(Tensor W, Tensor? B=None, "
-            "float? output_min=None, float? output_max=None) "
+            "Scalar? output_min=None, Scalar? output_max=None) "
             "-> __torch__.torch.classes.xnnpack.LinearOpContext",
             torch::RegisterOperators::options()
             .aliasAnalysis(at::AliasAnalysisKind::PURE_FUNCTION)
@@ -81,7 +81,7 @@ static auto registry =
                 DispatchKey::CPUTensorId))
         .op("prepacked::conv2d_clamp_prepack(Tensor W, Tensor? B, int[2] stride, "
             "int[2] padding, int[2] dilation, int groups, "
-            "float? output_min=None, float? output_max=None) "
+            "Scalar? output_min=None, Scalar? output_max=None) "
             "-> __torch__.torch.classes.xnnpack.Conv2dOpContext",
             torch::RegisterOperators::options()
             .aliasAnalysis(at::AliasAnalysisKind::PURE_FUNCTION)

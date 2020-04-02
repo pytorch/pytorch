@@ -32,7 +32,9 @@ if(INTERN_BUILD_ATEN_OPS)
   # Add source, includes, and libs to lists
   list(APPEND Caffe2_CPU_SRCS ${ATen_CPU_SRCS})
   list(APPEND Caffe2_GPU_SRCS ${ATen_CUDA_SRCS})
+  list(APPEND Caffe2_GPU_SRCS_W_SORT_BY_KEY ${ATen_CUDA_SRCS_W_SORT_BY_KEY})
   list(APPEND Caffe2_HIP_SRCS ${ATen_HIP_SRCS})
+  list(APPEND Caffe2_HIP_SRCS ${ATen_HIP_SRCS_W_SORT_BY_KEY})
   list(APPEND Caffe2_CPU_TEST_SRCS ${ATen_CPU_TEST_SRCS})
   list(APPEND Caffe2_GPU_TEST_SRCS ${ATen_CUDA_TEST_SRCS})
   list(APPEND Caffe2_HIP_TEST_SRCS ${ATen_HIP_TEST_SRCS})
@@ -346,7 +348,6 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
   set(TORCH_SRCS
     ${GENERATED_CXX_TORCH}
     ${GENERATED_H_TORCH}
-    ${TORCH_SRC_DIR}/csrc/ThreadLocalState.cpp
     ${TORCH_SRC_DIR}/csrc/autograd/anomaly_mode.cpp
     ${TORCH_SRC_DIR}/csrc/autograd/autograd.cpp
     ${TORCH_SRC_DIR}/csrc/autograd/custom_function.cpp
@@ -447,6 +448,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/jit/runtime/register_special_ops.cpp
     ${TORCH_SRC_DIR}/csrc/jit/ir/scope.cpp
     ${TORCH_SRC_DIR}/csrc/jit/frontend/ir_emitter.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/frontend/name_mangler.cpp
     ${TORCH_SRC_DIR}/csrc/jit/testing/file_check.cpp
     ${TORCH_SRC_DIR}/csrc/jit/frontend/convert_to_ssa.cpp
     ${TORCH_SRC_DIR}/csrc/jit/frontend/exit_transforms.cpp
@@ -464,6 +466,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/jit/runtime/jit_exception.cpp
     ${TORCH_SRC_DIR}/csrc/jit/frontend/string_to_type.cpp
     ${TORCH_SRC_DIR}/csrc/jit/serialization/source_range_serialization.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/serialization/type_name_uniquer.cpp
     ${TORCH_SRC_DIR}/csrc/jit/frontend/tracer.cpp
     ${TORCH_SRC_DIR}/csrc/jit/testing/hooks_for_testing.cpp
     ${TORCH_SRC_DIR}/csrc/utils/tensor_flatten.cpp
@@ -704,7 +707,19 @@ if(USE_ROCM)
   endif()
 elseif(USE_CUDA)
   set(CUDA_LINK_LIBRARIES_KEYWORD PRIVATE)
-  cuda_add_library(torch_cuda ${Caffe2_GPU_SRCS})
+  if(CUDA_SEPARABLE_COMPILATION)
+    # Separate compilation fails when kernels using `thrust::sort_by_key`
+    # are linked with the rest of CUDA code. Workaround by linking the separateley
+    set(_generated_name "torch_cuda_w_sort_by_key_intermediate_link${CMAKE_C_OUTPUT_EXTENSION}")
+    set(torch_cuda_w_sort_by_key_link_file "${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/torch_cuda.dir/${CMAKE_CFG_INTDIR}/${_generated_name}")
+    cuda_wrap_srcs(torch_cuda OBJ Caffe2_GPU_W_SORT_BY_KEY_OBJ ${Caffe2_GPU_SRCS_W_SORT_BY_KEY})
+    CUDA_LINK_SEPARABLE_COMPILATION_OBJECTS("${torch_cuda_w_sort_by_key_link_file}" torch_cpu "${_options}" "${torch_cuda_SEPARABLE_COMPILATION_OBJECTS}")
+    set( torch_cuda_SEPARABLE_COMPILATION_OBJECTS )
+    # Pass compiled sort-by-key object + device-linked fatbin as extra dependencies of torch_cuda
+    cuda_add_library(torch_cuda ${Caffe2_GPU_SRCS} ${torch_cuda_w_sort_by_key_link_file} ${Caffe2_GPU_W_SORT_BY_KEY_OBJ})
+  else()
+    cuda_add_library(torch_cuda ${Caffe2_GPU_SRCS} ${Caffe2_GPU_SRCS_W_SORT_BY_KEY})
+  endif()
   set(CUDA_LINK_LIBRARIES_KEYWORD)
   torch_compile_options(torch_cuda)  # see cmake/public/utils.cmake
   if(USE_NCCL)
@@ -752,7 +767,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       target_include_directories(torch_cuda PUBLIC "${NVTOOLEXT_HOME}/include")
       # -INCLUDE is used to ensure torch_cuda is linked against in a project that relies on it.
       # Related issue: https://github.com/pytorch/pytorch/issues/31611
-      target_link_libraries(torch_cuda INTERFACE "-INCLUDE:\"?warp_size@cuda@at@@YAHXZ\"")
+      target_link_libraries(torch_cuda INTERFACE "-INCLUDE:?warp_size@cuda@at@@YAHXZ")
 
     elseif(APPLE)
       set(TORCH_CUDA_LIBRARIES
