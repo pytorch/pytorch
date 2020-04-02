@@ -30,6 +30,7 @@ TESTS = [
     'distributed/test_c10d',
     'distributed/test_c10d_spawn',
     'test_cuda',
+    'test_jit_cuda_fuser',
     'test_cuda_primary_ctx',
     'test_dataloader',
     'distributed/test_data_parallel',
@@ -73,7 +74,6 @@ TESTS = [
     'test_function_schema',
     'test_overrides',
     'test_jit_fuser_te',
-    'test_tensorexpr',
 ]
 
 # skip < 3.3 because mock is added in 3.3 and is used in rpc_spawn
