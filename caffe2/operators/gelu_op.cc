@@ -107,7 +107,7 @@ is applied to the tensor elementwise.
 OPERATOR_SCHEMA(GeluGradient)
     .NumInputs(2)
     .NumOutputs(1)
-    .IdenticalTypeAndShapeOfInput(1);
+    .IdenticalTypeAndShape();
 
 namespace {
 

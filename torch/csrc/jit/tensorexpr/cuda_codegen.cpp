@@ -161,15 +161,14 @@ void CudaPrinter::visit(const Intrinsics* v) {
 void CudaPrinter::visit(const Load* v) {
   // TODO: find a better metric in using ldg or not. Support different dtypes.
   if (v->dtype().scalar_type() == ScalarType::Half) {
-    os() << "__half2float(" << *v->base_handle() << "[" << *v->flat_index()
-         << "])";
+    os() << "__half2float(" << *v->base_handle() << "[" << *v->index() << "])";
   } else {
-    os() << "__ldg(" << *v->base_handle() << " + " << *v->flat_index() << ")";
+    os() << "__ldg(" << *v->base_handle() << " + " << *v->index() << ")";
   }
 }
 
 void CudaPrinter::visit(const Store* v) {
-  os() << *v->base_handle() << "[" << *v->flat_index() << "] = ";
+  os() << *v->base_handle() << "[" << *v->index() << "] = ";
   if (v->value()->dtype().scalar_type() == ScalarType::Half) {
     os() << "__float2half(" << *v->value() << ");";
   } else {
