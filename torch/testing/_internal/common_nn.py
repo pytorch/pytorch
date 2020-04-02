@@ -422,6 +422,43 @@ def kldivloss_no_reduce_scalar_test():
         pickle=False)
 
 
+def kldivloss_with_log_target_no_reduce_test():
+    i = torch.rand(10, 10).log()
+    return dict(
+        fullname='KLDivLoss_with_log_target_no_reduce',
+        constructor=wrap_functional(
+            lambda t: F.kl_div(i.type_as(t), t, reduction='none', log_target=True)),
+        input_fn=lambda: torch.rand(10, 10),
+        reference_fn=lambda t, *_:
+            loss_reference_fns['KLDivLoss_log_target'](i.type_as(t), t, reduction='none'),
+        pickle=False)
+
+
+def kldivloss_no_reduce_log_target_test():
+    t = torch.randn(10, 10)
+    return dict(
+        fullname='KLDivLoss_no_reduce_log_target',
+        constructor=wrap_functional(
+            lambda i: F.kl_div(i, t.type_as(i), reduction='none', log_target=True)),
+        input_fn=lambda: torch.rand(10, 10).log(),
+        reference_fn=lambda i, *_:
+            loss_reference_fns['KLDivLoss_log_target'](i, t.type_as(i), reduction='none'),
+        pickle=False,
+    )
+
+
+def kldivloss_no_reduce_scalar_log_target_test():
+    t = torch.randn(())
+    return dict(
+        fullname='KLDivLoss_no_reduce_scalar_log_target',
+        constructor=wrap_functional(
+            lambda i: F.kl_div(i, t.type_as(i), reduction='none', log_target=True)),
+        input_fn=lambda: torch.rand(()).log(),
+        reference_fn=lambda i, *_:
+            loss_reference_fns['KLDivLoss_log_target'](i, t.type_as(i), reduction='none'),
+        pickle=False)
+
+
 def l1loss_no_reduce_test():
     t = torch.randn(2, 3, 4)
     return dict(
@@ -917,6 +954,9 @@ new_module_tests = [
     kldivloss_with_target_no_reduce_test(),
     kldivloss_no_reduce_test(),
     kldivloss_no_reduce_scalar_test(),
+    kldivloss_with_log_target_no_reduce_test(),
+    kldivloss_no_reduce_log_target_test(),
+    kldivloss_no_reduce_scalar_log_target_test(),
     l1loss_no_reduce_test(),
     l1loss_no_reduce_scalar_test(),
     mseloss_no_reduce_test(),
@@ -2617,6 +2657,16 @@ def kldivloss_reference(input, target, reduction='mean'):
         return result.sum() / result.size(0)
     return result
 
+def kldivloss_log_target_reference(input, target, reduction='mean'):
+    result = torch.exp(target) * (target - input)
+    if reduction == 'mean':
+        return result.mean()
+    elif reduction == 'sum':
+        return result.sum()
+    elif reduction == 'batchmean' and results.dim() != 0:
+        return result.sum() / result.size(0)
+    return result
+
 
 def nlllossNd_reference(input, target, weight=None, ignore_index=-100,
                         reduction='mean'):
@@ -2927,6 +2977,7 @@ def padding3d_circular(input, pad):
 
 loss_reference_fns = {
     'KLDivLoss': kldivloss_reference,
+    'KLDivLoss_log_target': kldivloss_log_target_reference,
     'NLLLoss': nllloss_reference,
     'NLLLossNd': nlllossNd_reference,
     'SmoothL1Loss': smoothl1loss_reference,
@@ -3005,6 +3056,15 @@ criterion_tests = [
         reference_fn=lambda i, t, m:
             kldivloss_reference(i, t, get_reduction(m)),
         check_sum_reduction=True,
+    ),
+    dict(
+        module_name='KLDivLoss',
+        input_fn=lambda: torch.rand(10, 10).log(),
+        target_fn=lambda: torch.rand(10, 10),
+        reference_fn=lambda i, t, m:
+            kldivloss_log_target_reference(i, t.log(), get_reduction(m)),
+        check_sum_reduction=True,
+        desc='log_target',
     ),
     dict(
         module_name='MSELoss',
@@ -3319,6 +3379,15 @@ new_criterion_tests = [
             kldivloss_reference(i, t, get_reduction(m)),
         check_sum_reduction=True,
         desc='scalar',
+    ),
+    dict(
+        module_name='KLDivLoss',
+        input_fn=lambda: torch.rand(()).log(),
+        target_fn=lambda: torch.rand(()),
+        reference_fn=lambda i, t, m:
+            kldivloss_log_target_reference(i, t.log(), get_reduction(m)),
+        check_sum_reduction=True,
+        desc='scalar_log_target',
     ),
     dict(
         module_name='MSELoss',

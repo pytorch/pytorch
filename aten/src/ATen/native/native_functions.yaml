@@ -1554,10 +1554,10 @@
   device_guard: False
   supports_named_tensor: True
 
-- func: kl_div(Tensor self, Tensor target, int reduction=Mean) -> Tensor
+- func: kl_div(Tensor self, Tensor target, int reduction=Mean, *, bool log_target=False) -> Tensor
   use_c10_dispatcher: full
 
-- func: kl_div_backward(Tensor grad_output, Tensor self, Tensor target, int reduction=Mean) -> Tensor
+- func: kl_div_backward(Tensor grad_output, Tensor self, Tensor target, int reduction=Mean, *, bool log_target=False) -> Tensor
   use_c10_dispatcher: full
   dispatch:
     CPU: kl_div_backward_cpu
@@ -2029,6 +2029,8 @@
   dispatch:
     CPU: mv_cpu
     CUDA: legacy::cuda::_th_mv
+    SparseCPU: mv_sparse
+    SparseCUDA: mv_sparse
   supports_named_tensor: True
 
 - func: mv.out(Tensor self, Tensor vec, *, Tensor(a!) out) -> Tensor(a!)
@@ -4304,9 +4306,15 @@
 
 - func: fmod_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
   variants: method
+  dispatch:
+    CPU: fmod_
+    CUDA: legacy::cuda::_th_fmod_
 
 - func: fmod_.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
   variants: method
+  dispatch:
+    CPU: fmod_
+    CUDA: legacy::cuda::_th_fmod_
 
 - func: remainder_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
   variants: method
@@ -5029,26 +5037,26 @@
 - func: fmod.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU: fmod_out
-    CUDA: fmod_out
+    CUDA: legacy::cuda::_th_fmod_out
 
 - func: fmod.Scalar(Tensor self, Scalar other) -> Tensor
   use_c10_dispatcher: full
   variants: method, function
   dispatch:
     CPU: fmod
-    CUDA: fmod
+    CUDA: legacy::cuda::_th_fmod
 
 - func: fmod.Tensor_out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU: fmod_out
-    CUDA: fmod_out
+    CUDA: legacy::cuda::_th_fmod_out
 
 - func: fmod.Tensor(Tensor self, Tensor other) -> Tensor
   use_c10_dispatcher: full
   variants: method, function
   dispatch:
     CPU: fmod
-    CUDA: fmod
+    CUDA: legacy::cuda::_th_fmod
 
 - func: remainder.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
