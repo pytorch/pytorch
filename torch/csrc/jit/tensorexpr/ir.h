@@ -447,7 +447,7 @@ class TORCH_API Load : public ExprNode<Load> {
   std::vector<const Expr*> indices() const {
     return indices_;
   }
-  const Expr* flattened_index() const {
+  const Expr* flat_index() const {
     TORCH_CHECK(indices_.size() == 1, "Indices haven't been flattened.");
     return indices_[0];
   }
@@ -877,7 +877,7 @@ TORCH_API std::vector<const Var*> VarHandleVectorToVarVector(
     const std::vector<VarHandle>&);
 TORCH_API std::vector<VarHandle> VarVectorToVarHandleVector(
     const std::vector<const Var*>&);
-TORCH_API const Expr* flattened_index(
+TORCH_API const Expr* flatten_index(
     const std::vector<const Expr*>& dims,
     const std::vector<const Expr*>& indices);
 

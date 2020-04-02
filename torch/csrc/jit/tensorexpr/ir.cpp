@@ -157,7 +157,7 @@ Store* Store::make(
       ExprHandle(1).node());
 }
 
-const Expr* flattened_index(
+const Expr* flatten_index(
     const std::vector<const Expr*>& dims,
     const std::vector<const Expr*>& indices) {
   // Handle already flattened indices first

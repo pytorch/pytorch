@@ -43,6 +43,7 @@ void testCudaTestVectorAdd01_impl() {
   std::vector<For*> loops = l.getLoopStmtsFor(c);
   l.setGPUBlockIndex(loops[1], 0);
   l.setGPUThreadIndex(loops[2], 0);
+  l.prepareForCodegen();
   Stmt* stmt = l.root_stmt();
   CudaCodeGen cuda_cg(stmt, c, a_buf, b_buf);
   const int N = block_count * block_size * num_iter;
@@ -113,6 +114,7 @@ static void testCudaTestVectorAdd02_impl(int N, int block_size) {
   l.splitWithMask(loops[0], block_size, &n_outer, &n_inner);
   l.setGPUBlockIndex(n_outer, 0);
   l.setGPUThreadIndex(n_inner, 0);
+  l.prepareForCodegen();
   Stmt* stmt = l.root_stmt();
   CudaCodeGen cuda_cg(stmt, c, a_buf, b_buf);
   PaddedBuffer<float> a_v(N);
@@ -168,6 +170,7 @@ void testCudaDynamicShape2D() {
           return a(i, j) + b(i, j);
         });
     LoopNest l({c});
+    l.prepareForCodegen();
     Stmt* s = l.root_stmt();
     CudaCodeGen cg(s, {a, b, c, m, n});
 
@@ -237,6 +240,7 @@ void testCudaTestRand01() {
   std::vector<For*> loops = l.getLoopStmtsFor(c);
   l.setGPUBlockIndex(loops[1], 0);
   l.setGPUThreadIndex(loops[2], 0);
+  l.prepareForCodegen();
   Stmt* stmt = l.root_stmt();
   CudaCodeGen cuda_cg(stmt, c);
   const int N = block_count * block_size * num_iter;

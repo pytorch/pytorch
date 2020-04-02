@@ -582,8 +582,8 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
     }
     void* ptr = iter->second;
 
-    const Expr* flattened_idx = flattened_index(v->buf()->dims(), v->indices());
-    flattened_idx->accept(this);
+    const Expr* flat_idx = flatten_index(v->buf()->dims(), v->indices());
+    flat_idx->accept(this);
     std::vector<int> index = value().as_vec<int>();
     v->mask()->accept(this);
     std::vector<int> mask = value().as_vec<int>();
@@ -616,8 +616,8 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
 
     void* ptr = iter->second;
 
-    const Expr* flattened_idx = flattened_index(v->buf()->dims(), v->indices());
-    flattened_idx->accept(this);
+    const Expr* flat_idx = flatten_index(v->buf()->dims(), v->indices());
+    flat_idx->accept(this);
     std::vector<int> index = value().as_vec<int>();
     v->mask()->accept(this);
     std::vector<int> mask = value().as_vec<int>();

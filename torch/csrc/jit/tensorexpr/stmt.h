@@ -170,7 +170,7 @@ class TORCH_API Store : public StmtNode<Store> {
   std::vector<const Expr*> indices() const {
     return indices_;
   }
-  const Expr* flattened_index() const {
+  const Expr* flat_index() const {
     TORCH_CHECK(indices_.size() == 1, "Indices haven't been flattened.");
     return indices_[0];
   }

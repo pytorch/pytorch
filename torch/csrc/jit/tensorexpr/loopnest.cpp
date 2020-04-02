@@ -41,7 +41,7 @@ class IndexFlattener : public IRMutator {
     return new Load(
         v->dtype(),
         v->buf(),
-        {flattened_index(v->buf()->dims(), v->indices())},
+        {flatten_index(v->buf()->dims(), v->indices())},
         v->mask());
   }
   Stmt* mutate(const Store* v) override {
@@ -52,7 +52,7 @@ class IndexFlattener : public IRMutator {
     }
     return new Store(
         v->buf(),
-        {flattened_index(v->buf()->dims(), v->indices())},
+        {flatten_index(v->buf()->dims(), v->indices())},
         new_value,
         v->mask());
   }
@@ -192,7 +192,7 @@ class Vectorizer : public IRMutator {
   const Expr* mutate(const Load* v) override {
     Dtype dtype(v->dtype().scalar_type(), lanes_);
     const Buf* buf = v->buf();
-    std::vector<const Expr*> inputs = {v->flattened_index(), v->mask()};
+    std::vector<const Expr*> inputs = {v->flat_index(), v->mask()};
     return try_vectorize(v, inputs, [&]() {
       return Load::make(
           dtype,
@@ -234,8 +234,7 @@ class Vectorizer : public IRMutator {
 
   Stmt* mutate(const Store* v) override {
     const Buf* buf = v->buf();
-    std::vector<const Expr*> inputs = {
-        v->flattened_index(), v->value(), v->mask()};
+    std::vector<const Expr*> inputs = {v->flat_index(), v->value(), v->mask()};
     return try_vectorize(v, inputs, [&]() {
       return Store::make(
           BufHandle(buf),
@@ -326,11 +325,10 @@ void LoopNest::vectorize(Stmt* stmt) {
   }
 
   Vectorizer v;
-  IndexFlattener idx_flattener;
   Stmt* old_f = Stmt::clone(f);
   Stmt* new_f = nullptr;
   try {
-    new_f = idx_flattener.flatten(f);
+    new_f = FlattenIndexes(f);
     new_f = v.vectorize(dynamic_cast<For*>(new_f));
   } catch (std::runtime_error& e) {
     // Partial vectorization may have corrupted f
