@@ -1,6 +1,8 @@
 from collections import namedtuple
 import unittest
 import os
+import warnings
+import shutil
 
 import torch
 import torch.utils.cpp_extension
@@ -16,7 +18,7 @@ TorchNNModuleTestParams = namedtuple(
         # NN module name (e.g. "BCELoss")
         'module_name',
 
-        # Unique identifier for this test (e.g. "BCELoss_weights_cuda")
+        # Unique identifier for this module config (e.g. "BCELoss_weights_cuda")
         'module_variant_name',
 
         # An instance of an NN test class (e.g. `NewCriterionTest`) which stores
@@ -65,7 +67,7 @@ TorchNNFunctionalTestParams = namedtuple(
         # NN functional name (e.g. "binary_cross_entropy")
         'functional_name',
 
-        # Unique identifier for this test (e.g. "BCELoss_no_reduce_cuda")
+        # Unique identifier for this functional config (e.g. "BCELoss_no_reduce_cuda")
         'functional_variant_name',
 
         # An instance of an NN test class (e.g. `NewModuleTest`) which stores
@@ -172,10 +174,10 @@ def add_test(unit_test_class, test_name, test_fn):
         raise RuntimeError("Found two tests with the same name: " + test_name)
     setattr(unit_test_class, test_name, test_fn)
 
-def set_cpp_tensors_requires_grad(cpp_tensor_stmts, cpp_tensors):
-    assert len(cpp_tensor_stmts) == len(cpp_tensors)
+def set_cpp_tensors_requires_grad(cpp_tensor_stmts, python_tensors):
+    assert len(cpp_tensor_stmts) == len(python_tensors)
     return ['{}.requires_grad_(true)'.format(tensor_stmt) if tensor.dtype != torch.long else tensor_stmt
-            for tensor_stmt, (_, tensor) in zip(cpp_tensor_stmts, cpp_tensors)]
+            for tensor_stmt, (_, tensor) in zip(cpp_tensor_stmts, python_tensors)]
 
 def move_cpp_tensors_to_device(cpp_tensor_stmts, device):
     return ['{}.to("{}")'.format(tensor_stmt, device) for tensor_stmt in cpp_tensor_stmts]
@@ -184,6 +186,22 @@ def is_criterion_test(test_instance):
     return isinstance(test_instance, common_nn.CriterionTest) or \
         isinstance(test_instance, common_nn.NewCriterionTest)
 
+# This function computes the following:
+# - What variable declaration statements should show up in the C++ parity test function
+# - What arguments should be passed into the C++ module/functional's forward function
+#
+# For example, for the "L1Loss" test, the return values from this function are:
+# ```
+# // Note that `arg_dict` stores all tensor values we transfer from Python to C++
+# cpp_args_construction_stmts = [
+#   "auto i0 = arg_dict.at("i0").to("cpu").requires_grad_(true)",
+#   "auto t0 = arg_dict.at("t0").to("cpu")",
+# ],
+# cpp_forward_args_symbols = [
+#   "i0",
+#   "t0",
+# ]
+# ```
 def compute_cpp_args_construction_stmts_and_forward_arg_symbols(test_params):
     device = test_params.device
     cpp_forward_args_symbols = []
@@ -284,9 +302,7 @@ def compute_arg_dict(test_params_dict, test_instance):
 
     return arg_dict
 
-def decorate_test_fn(test_fn, test_cpp_api_parity, test_cuda, has_impl_parity, device):
-    test_fn = unittest.skipIf(not test_cpp_api_parity, "Excluded from C++ API parity tests")(test_fn)
-
+def decorate_test_fn(test_fn, test_cuda, has_impl_parity, device):
     if device == 'cuda':
         test_fn = unittest.skipIf(not TEST_CUDA, "CUDA unavailable")(test_fn)
         test_fn = unittest.skipIf(not test_cuda, "Excluded from CUDA tests")(test_fn)
@@ -330,3 +346,11 @@ def generate_error_msg(name, cpp_value, python_value):
         "Parity test failed: {} in C++ has value: {}, "
         "which does not match the corresponding value in Python: {}.\n{}").format(
         name, cpp_value, python_value, MESSAGE_HOW_TO_FIX_CPP_PARITY_TEST_FAILURE)
+
+def try_remove_folder(folder_path):
+    if os.path.exists(folder_path):
+        # Don't block the process if this fails, but show the error message as warning.
+        try:
+            shutil.rmtree(folder_path)
+        except Exception as e:
+            warnings.warn("Non-blocking folder removal fails with the following error:\n{}".format(str(e)))

@@ -4079,6 +4079,20 @@ new_criterion_tests = [
     dict(
         module_name='CTCLoss',
         constructor_args=(14,),  # blank=14
+        extra_args=([50, 50, 50], [30, 25, 20]),  # input_lengths, target_lengths
+        input_fn=lambda: torch.randn(50, 3, 15).log_softmax(2),
+        target_fn=lambda: torch.randint(0, 14, (3, 30), dtype=torch.long),
+        reference_fn=lambda i, t, il, tl, m:
+            ctcloss_reference(i, t, il, tl, blank=14, reduction=get_reduction(m)),
+        check_sum_reduction=True,
+        check_gradgrad=False,
+        check_half=False,
+        # `CTCLoss` in C++ frontend doesn't accept integer lists for `input_lengths` or `target_lengths`
+        test_cpp_api_parity=False,
+    ),
+    dict(
+        module_name='CTCLoss',
+        constructor_args=(14,),  # blank=14
         cpp_constructor_args='torch::nn::CTCLossOptions().blank(14)',
         extra_args=(torch.tensor([50, 50, 50]), torch.tensor([30, 25, 20])),  # input_lengths, target_lengths
         input_fn=lambda: torch.randn(50, 3, 15).log_softmax(2),
@@ -4095,8 +4109,7 @@ new_criterion_tests = [
     #     module_name='CTCLoss',
     #     desc='1d_target',
     #     constructor_args=(14,),  # blank=14
-    #     cpp_constructor_args='torch::nn::CTCLossOptions().blank(14)',
-    #     extra_args=(torch.tensor([50, 50, 50]), torch.tensor([30, 25, 20])),  # input_lengths, target_lengths
+    #     extra_args=([50, 50, 50], [30, 25, 20]),  # input_lengths, target_lengths
     #     input_fn=lambda: torch.randn(50, 3, 15).log_softmax(2),
     #     target_fn=lambda: torch.randint(0, 14, (3, 30), dtype=torch.long),
     #     reference_fn=lambda i, t, il, tl, m:
@@ -4105,6 +4118,22 @@ new_criterion_tests = [
     #     check_gradgrad=False,
     #     check_half=False,
     # ),
+    dict(
+        module_name='CTCLoss',
+        desc='2d_int_target',
+        constructor_args=(0,),  # blank=0
+        extra_args=([50, 50, 50], [30, 25, 20]),  # input_lengths, target_lengths
+        input_fn=lambda: torch.randn(50, 3, 15).log_softmax(2),
+        target_fn=lambda: torch.randint(1, 15, (3, 30), dtype=torch.int),
+        reference_fn=lambda i, t, il, tl, m:
+            ctcloss_reference(i, t, il, tl, blank=0, reduction=get_reduction(m)),
+        check_sum_reduction=True,
+        check_gradgrad=False,
+        check_half=False,
+        convert_target=False,
+        # `CTCLoss` in C++ frontend doesn't accept integer lists for `input_lengths` or `target_lengths`
+        test_cpp_api_parity=False,
+    ),
     dict(
         module_name='CTCLoss',
         desc='2d_int_target',
