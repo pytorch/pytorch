@@ -5689,6 +5689,7 @@ def foo(x):
         self.assertEqual(7, w(3))
         self.assertFalse("training" in w.state_dict())
 
+    @unittest.skipIf(not torch._C._jit_has_cpp_tests(), "Tests were not built, use BUILD_TEST=1")
     @skipIfRocm
     def test_torchbind(self):
         def test_equality(f, cmp_key):
@@ -5718,6 +5719,7 @@ def foo(x):
             return ss1.pop() + ss2.pop()
         test_equality(f, lambda x: x)
 
+    @unittest.skipIf(not torch._C._jit_has_cpp_tests(), "Tests were not built, use BUILD_TEST=1")
     @skipIfRocm
     def test_torchbind_take_as_arg(self):
         global StackString  # see [local resolution in python]
@@ -5733,6 +5735,7 @@ def foo(x):
         script_output = scripted(script_input)
         self.assertEqual(script_output.pop(), "lel")
 
+    @unittest.skipIf(not torch._C._jit_has_cpp_tests(), "Tests were not built, use BUILD_TEST=1")
     @skipIfRocm
     def test_torchbind_return_instance(self):
         def foo():
@@ -5749,6 +5752,7 @@ def foo(x):
         self.assertEqual(out.pop(), "mom")
         self.assertEqual(out.pop(), "hi")
 
+    @unittest.skipIf(not torch._C._jit_has_cpp_tests(), "Tests were not built, use BUILD_TEST=1")
     @skipIfRocm
     def test_torchbind_return_instance_from_method(self):
         def foo():
@@ -5763,6 +5767,7 @@ def foo(x):
         self.assertEqual(out[1].pop(), "mom")
         self.assertEqual(out[1].pop(), "hi")
 
+    @unittest.skipIf(not torch._C._jit_has_cpp_tests(), "Tests were not built, use BUILD_TEST=1")
     @skipIfRocm
     def test_torchbind_take_instance_as_method_arg(self):
         def foo():
@@ -5776,6 +5781,7 @@ def foo(x):
         self.assertEqual(out.pop(), "hi")
         self.assertEqual(out.pop(), "mom")
 
+    @unittest.skipIf(not torch._C._jit_has_cpp_tests(), "Tests were not built, use BUILD_TEST=1")
     @skipIfRocm
     def test_torchbind_return_tuple(self):
         def f():
@@ -5786,6 +5792,7 @@ def foo(x):
         tup = scripted()
         self.assertEqual(tup, (1337.0, 123))
 
+    @unittest.skipIf(not torch._C._jit_has_cpp_tests(), "Tests were not built, use BUILD_TEST=1")
     @skipIfRocm
     def test_torchbind_save_load(self):
         def foo():
@@ -5816,6 +5823,7 @@ def foo(x):
         x = torch.rand(3, 4)
         self.assertEqual(scripted(x), eic(x))
 
+    @unittest.skipIf(not torch._C._jit_has_cpp_tests(), "Tests were not built, use BUILD_TEST=1")
     @skipIfRocm
     def test_torchbind_lambda_method(self):
         def foo():
@@ -5825,6 +5833,7 @@ def foo(x):
         scripted = torch.jit.script(foo)
         self.assertEqual(scripted(), "mom")
 
+    @unittest.skipIf(not torch._C._jit_has_cpp_tests(), "Tests were not built, use BUILD_TEST=1")
     @skipIfRocm
     def test_torchbind_class_attribute(self):
         class FooBar1234(torch.nn.Module):
@@ -5842,6 +5851,7 @@ def foo(x):
         for expected in ["deserialized", "was", "i"]:
             assert eic.f.pop() == expected
 
+    @unittest.skipIf(not torch._C._jit_has_cpp_tests(), "Tests were not built, use BUILD_TEST=1")
     @skipIfRocm
     def test_torchbind_getstate(self):
         class FooBar4321(torch.nn.Module):
@@ -5864,6 +5874,7 @@ def foo(x):
         for expected in [7, 3, 3, 1]:
             assert eic.f.pop() == expected
 
+    @unittest.skipIf(not torch._C._jit_has_cpp_tests(), "Tests were not built, use BUILD_TEST=1")
     @skipIfRocm
     def test_torchbind_tracing(self):
         class TryTracing(torch.nn.Module):
@@ -5877,6 +5888,7 @@ def foo(x):
         traced = torch.jit.trace(TryTracing(), ())
         self.assertEqual(torch.zeros(4, 4), traced())
 
+    @unittest.skipIf(not torch._C._jit_has_cpp_tests(), "Tests were not built, use BUILD_TEST=1")
     @skipIfRocm
     def test_torchbind_tracing_nested(self):
         class TryTracingNest(torch.nn.Module):
@@ -5895,6 +5907,7 @@ def foo(x):
         traced = torch.jit.trace(TryTracing123(), ())
         self.assertEqual(torch.zeros(4, 4), traced())
 
+    @unittest.skipIf(not torch._C._jit_has_cpp_tests(), "Tests were not built, use BUILD_TEST=1")
     @skipIfRocm
     def test_torchbind_pickle_serialization(self):
         nt = torch.classes._TorchScriptTesting._PickleTester([3, 4])
