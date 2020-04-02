@@ -2018,6 +2018,8 @@
   use_c10_dispatcher: full
   variants: function, method
   dispatch:
+    CPU: mv
+    CUDA: mv
     SparseCPU: mv_sparse
     SparseCUDA: mv_sparse
   supports_named_tensor: True
