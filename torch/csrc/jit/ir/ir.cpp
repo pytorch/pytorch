@@ -1820,6 +1820,7 @@ at::ArrayRef<Value*> createTupleUnpack(Value* v) {
   return g.insertNode(g.createTupleUnpack(v))->outputs();
 }
 
+// use_graph argument is used to preclude inlining functions for ONNX conversion
 std::vector<Value*> inlineCallTo(Node* to_replace, Function* callee, bool use_graph /*=false*/) {
   WithInsertPoint guard(to_replace);
   TORCH_INTERNAL_ASSERT(callee->isGraphFunction());
