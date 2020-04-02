@@ -27,7 +27,7 @@ namespace torch { namespace autograd {
 ///
 /// The only reason we are keeping the `Variable` class is backward compatibility
 /// with external user's legacy C++ frontend code. Our intention is to eliminate
-/// the Variable class in the near future.
+/// the `Variable` class in the near future.
 using Variable = at::Tensor;
 
 } // namespace autograd
