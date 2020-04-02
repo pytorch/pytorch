@@ -191,6 +191,11 @@ void IRVisitor::visit(const Polynomial* v) {
   }
 }
 
+void IRVisitor::visit(const RoundOff* v) {
+  v->lhs()->accept(this);
+  v->rhs()->accept(this);
+}
+
 } // namespace tensorexpr
 } // namespace jit
 } // namespace torch
