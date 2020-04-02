@@ -43,6 +43,7 @@ void testCudaTestVectorAdd01_impl() {
   std::vector<For*> loops = l.getLoopStmtsFor(c);
   l.setGPUBlockIndex(loops[1], 0);
   l.setGPUThreadIndex(loops[2], 0);
+  l.prepareForCodegen();
   Stmt* stmt = l.root_stmt();
   CudaCodeGen cuda_cg(stmt, c, a_buf, b_buf);
   const int N = block_count * block_size * num_iter;
@@ -113,6 +114,7 @@ static void testCudaTestVectorAdd02_impl(int N, int block_size) {
   l.splitWithMask(loops[0], block_size, &n_outer, &n_inner);
   l.setGPUBlockIndex(n_outer, 0);
   l.setGPUThreadIndex(n_inner, 0);
+  l.prepareForCodegen();
   Stmt* stmt = l.root_stmt();
   CudaCodeGen cuda_cg(stmt, c, a_buf, b_buf);
   PaddedBuffer<float> a_v(N);
@@ -161,13 +163,14 @@ void testCudaDynamicShape2D() {
   auto testWithSize = [](int32_t M, int32_t N) {
     VarHandle m("m", kInt);
     VarHandle n("n", kInt);
-    Buffer a(VarHandle("a", kHandle), kFloat, {m, n});
-    Buffer b(VarHandle("b", kHandle), kFloat, {m, n});
+    Buffer a(BufHandle("a", {m, n}), kFloat);
+    Buffer b(BufHandle("b", {m, n}), kFloat);
     Tensor* c = Compute(
         "c", {{m, "m"}, {n, "n"}}, [&](const VarHandle& i, const VarHandle& j) {
           return a(i, j) + b(i, j);
         });
     LoopNest l({c});
+    l.prepareForCodegen();
     Stmt* s = l.root_stmt();
     CudaCodeGen cg(s, {a, b, c, m, n});
 
@@ -237,6 +240,7 @@ void testCudaTestRand01() {
   std::vector<For*> loops = l.getLoopStmtsFor(c);
   l.setGPUBlockIndex(loops[1], 0);
   l.setGPUThreadIndex(loops[2], 0);
+  l.prepareForCodegen();
   Stmt* stmt = l.root_stmt();
   CudaCodeGen cuda_cg(stmt, c);
   const int N = block_count * block_size * num_iter;
@@ -280,7 +284,7 @@ void testCudaDynamicShapeSplit() {
   KernelScope ks;
   constexpr int N = 4096;
   VarHandle n("n", kInt);
-  Buffer a(VarHandle("a", kHandle), kFloat, {n});
+  Buffer a(BufHandle("a", {n}), kFloat);
   Tensor* b =
       Compute("b", {{n, "n"}}, [&](const VarHandle& i) { return a(i) * 2.0f; });
   LoopNest l({b});
