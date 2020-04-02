@@ -171,9 +171,9 @@ std::tuple<Tensor &,Tensor &> _max_out_cpu(Tensor& max, Tensor& max_indices,
 }
 
 std::tuple<Tensor, Tensor> _max_cpu(const Tensor& self, int64_t dim, bool keepdim) {
-  Tensor min_indices = at::empty({0}, self.options().dtype(kLong));
-  Tensor min = at::empty({0}, self.options());
-  return at::native::_max_out_cpu(min, min_indices, self, dim, keepdim);
+  Tensor max_indices = at::empty({0}, self.options().dtype(kLong));
+  Tensor max = at::empty({0}, self.options());
+  return at::native::_max_out_cpu(max, max_indices, self, dim, keepdim);
 }
 
 std::tuple<Tensor, Tensor> max(const Tensor& self, int64_t dim, bool keepdim) {
