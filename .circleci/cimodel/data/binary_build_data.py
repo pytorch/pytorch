@@ -41,7 +41,7 @@ LINUX_PACKAGE_VARIANTS = OrderedDict(
     ],
     conda=dimensions.STANDARD_PYTHON_VERSIONS,
     libtorch=[
-        "2.7m",
+        "3.7m",
     ],
 )
 
@@ -51,7 +51,7 @@ CONFIG_TREE_DATA = OrderedDict(
         wheel=dimensions.STANDARD_PYTHON_VERSIONS,
         conda=dimensions.STANDARD_PYTHON_VERSIONS,
         libtorch=[
-            "2.7",
+            "3.7",
         ],
     )),
 )
