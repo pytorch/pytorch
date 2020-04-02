@@ -31,30 +31,21 @@ public:
   : kernels_()
   , kernelCount_(0) {}
 
-  enum class SetKernelResult : uint8_t {ADDED_NEW_KERNEL, OVERWROTE_EXISTING_KERNEL};
-  C10_NODISCARD SetKernelResult setKernel(DispatchKey dispatchKey, KernelFunction kernel) {
+  void setKernel(DispatchKey dispatchKey, KernelFunction kernel) {
     TORCH_INTERNAL_ASSERT(dispatchKey != DispatchKey::Undefined);
     auto& slot = kernels_[static_cast<uint8_t>(dispatchKey)];
-    SetKernelResult result;;
-    if (slot.isValid()) {
-      result = SetKernelResult::OVERWROTE_EXISTING_KERNEL;
-    } else {
-      result = SetKernelResult::ADDED_NEW_KERNEL;
+    if (!slot.isValid()) {
       ++kernelCount_;
     }
     slot = std::move(kernel);
-    return result;
   }
 
-  enum class RemoveKernelIfExistsResult : uint8_t {REMOVED_KERNEL, KERNEL_DIDNT_EXIST};
-  RemoveKernelIfExistsResult removeKernelIfExists(DispatchKey dispatchKey) {
+  void removeKernelIfExists(DispatchKey dispatchKey) {
     auto& slot = kernels_[static_cast<uint8_t>(dispatchKey)];
     if (slot.isValid()) {
       --kernelCount_;
       slot = {};
-      return RemoveKernelIfExistsResult::REMOVED_KERNEL;
     } else {
-      return RemoveKernelIfExistsResult::KERNEL_DIDNT_EXIST;
     }
   }
 
@@ -106,11 +97,8 @@ class DispatchTable final {
    * @param kernel Concrete kernel function implementation to register
    */
   void setKernel(DispatchKey dispatchKey, KernelFunction kernel) {
-    auto result = kernels_.setKernel(dispatchKey, std::move(kernel));
+    kernels_.setKernel(dispatchKey, std::move(kernel));
     dispatchKeyExtractor_.setOperatorHasKernelForBackend(dispatchKey, true);
-    if (result == impl::KernelFunctionTable::SetKernelResult::OVERWROTE_EXISTING_KERNEL) {
-      TORCH_WARN("Registered a kernel for operator ", operatorName_, " with dispatch key ", dispatchKey, " that overwrote a previously registered kernel with the same dispatch key for the same operator.");
-    }
   }
 
   /**
@@ -130,9 +118,6 @@ class DispatchTable final {
    * dispatch keys, not both.
    */
   void setCatchallKernel(KernelFunction kernel) {
-    if (catchallKernel_.isValid()) {
-      TORCH_WARN("Registered a catch-all kernel for operator ", operatorName_," that overwrote a previously registered catch-all kernel for the same operator.");
-    }
     catchallKernel_ = std::move(kernel);
   }
 
@@ -140,7 +125,6 @@ class DispatchTable final {
    * Remove the catch-all kernel.
    */
   void removeCatchallKernel() {
-    TORCH_INTERNAL_ASSERT(catchallKernel_.isValid(), "Tried to remove the catch-all kernel for operator ", operatorName_," but there is no catch-all kernel registered.");
     catchallKernel_ = {};
   }
 

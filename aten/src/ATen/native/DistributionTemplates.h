@@ -264,7 +264,7 @@ Tensor normal_impl(const Tensor& mean, const Tensor& std, Generator gen) {
 
 template<template<typename> class uniform_kernel, typename RNG>
 at::Tensor& uniform_impl_(at::Tensor& self, double from, double to, at::Generator generator) {
-  const auto scalar_type = typeMetaToScalarType(self.dtype());
+  const auto scalar_type = self.scalar_type();
   AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, scalar_type, "check_uniform_bounds", [&] {
     const auto min = static_cast<double>(std::numeric_limits<scalar_t>::lowest());
     const auto max = static_cast<double>(std::numeric_limits<scalar_t>::max());
