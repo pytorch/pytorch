@@ -862,7 +862,7 @@ void recursive_del(Node* node) {
 Node* createSoftmaxCrossEntropyNode(Block* b, graph_node_list_iterator it, std::vector<Value*> values) {
   Node* softmaxCrossEntropyNode = b->owningGraph()->create(onnx::SoftmaxCrossEntropyLoss, it->outputs().size());
   for (size_t i = 0; i < softmaxCrossEntropyNode->outputs().size(); ++i) {
-	      softmaxCrossEntropyNode->outputs()[i]->copyMetadata(it->outputs()[i]);
+    softmaxCrossEntropyNode->outputs()[i]->copyMetadata(it->outputs()[i]);
   }
   for (Value* value : values) {
     softmaxCrossEntropyNode->addInput(value);
@@ -882,15 +882,15 @@ static void fuseLogSoftmaxNllLoss(Block* b) {
       std::vector<Node*> deleteNodes;
       Node* softmaxCrossEntropyNode = nullptr;
       if (prev->kind() == onnx::LogSoftmax) {
-	      origLogSoftmaxNode= it->input(0)->node();
-	      origNllLossNode = *it;
+        origLogSoftmaxNode= it->input(0)->node();
+        origNllLossNode = *it;
         deleteNodes.push_back(origLogSoftmaxNode);
       } else if (prev->kind() == onnx::Transpose &&
-		             prev->input(0)->node()->kind() == onnx::LogSoftmax) {
-	      auto logSoftmaxNode = prev->input(0)->node();
+                 prev->input(0)->node()->kind() == onnx::LogSoftmax) {
+        auto logSoftmaxNode = prev->input(0)->node();
         origLogSoftmaxNode = logSoftmaxNode->input(0)->node();
-	      origNllLossNode = *it;
-	      prev->removeAllInputs();
+        origNllLossNode = *it;
+        prev->removeAllInputs();
         logSoftmaxNode->removeAllInputs();
         deleteNodes.push_back(origLogSoftmaxNode);
         deleteNodes.push_back(logSoftmaxNode);
