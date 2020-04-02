@@ -4087,7 +4087,7 @@ new_criterion_tests = [
         check_sum_reduction=True,
         check_gradgrad=False,
         check_half=False,
-        # `CTCLoss` in C++ frontend doesn't accept integer lists for `input_lengths` or `target_lengths`
+        # `CTCLoss` in C++ frontend doesn't accept integer list for `input_lengths` or `target_lengths`
         test_cpp_api_parity=False,
     ),
     dict(
@@ -4131,7 +4131,7 @@ new_criterion_tests = [
         check_gradgrad=False,
         check_half=False,
         convert_target=False,
-        # `CTCLoss` in C++ frontend doesn't accept integer lists for `input_lengths` or `target_lengths`
+        # `CTCLoss` in C++ frontend doesn't accept integer list for `input_lengths` or `target_lengths`
         test_cpp_api_parity=False,
     ),
     dict(
