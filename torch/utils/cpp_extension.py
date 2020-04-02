@@ -658,16 +658,17 @@ def CppExtension(name, sources, *args, **kwargs):
     include_dirs += include_paths()
     kwargs['include_dirs'] = include_dirs
 
-    library_dirs = kwargs.get('library_dirs', [])
-    library_dirs += library_paths()
-    kwargs['library_dirs'] = library_dirs
+    if IS_WINDOWS:
+        library_dirs = kwargs.get('library_dirs', [])
+        library_dirs += library_paths()
+        kwargs['library_dirs'] = library_dirs
 
-    libraries = kwargs.get('libraries', [])
-    libraries.append('c10')
-    libraries.append('torch')
-    libraries.append('torch_cpu')
-    libraries.append('torch_python')
-    kwargs['libraries'] = libraries
+        libraries = kwargs.get('libraries', [])
+        libraries.append('c10')
+        libraries.append('torch')
+        libraries.append('torch_python')
+        libraries.append('_C')
+        kwargs['libraries'] = libraries
 
     kwargs['language'] = 'c++'
     return setuptools.Extension(name, sources, *args, **kwargs)
@@ -716,7 +717,9 @@ def CUDAExtension(name, sources, *args, **kwargs):
     else:
         libraries.append('cudart')
         libraries.append('c10_cuda')
-        libraries.append('torch_cuda')
+        libraries.append('torch')
+        libraries.append('torch_python')
+        libraries.append('_C')
     kwargs['libraries'] = libraries
 
     include_dirs = kwargs.get('include_dirs', [])
@@ -1217,9 +1220,6 @@ def _prepare_ldflags(extra_ldflags, with_cuda, verbose):
         extra_ldflags.append('c10.lib')
         if with_cuda:
             extra_ldflags.append('c10_cuda.lib')
-        extra_ldflags.append('torch_cpu.lib')
-        if with_cuda:
-            extra_ldflags.append('torch_cuda.lib')
             # /INCLUDE is used to ensure torch_cuda is linked against in a project that relies on it.
             # Related issue: https://github.com/pytorch/pytorch/issues/31611
             extra_ldflags.append('-INCLUDE:?warp_size@cuda@at@@YAHXZ')
