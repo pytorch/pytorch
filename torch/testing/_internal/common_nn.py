@@ -534,7 +534,9 @@ def kldivloss_with_log_target_no_reduce_test():
         fullname='KLDivLoss_with_log_target_no_reduce',
         constructor=wrap_functional(
             lambda t: F.kl_div(i.type_as(t), t, reduction='none', log_target=True)),
+        cpp_function_call='F::kl_div(i.to(t.options()), t, F::KLDivFuncOptions().reduction(torch::kNone).log_target(true))',
         input_fn=lambda: torch.rand(10, 10),
+        cpp_var_map={'i': i, 't': 'input'},
         reference_fn=lambda t, *_:
             loss_reference_fns['KLDivLoss_log_target'](i.type_as(t), t, reduction='none'),
         pickle=False)
@@ -546,7 +548,9 @@ def kldivloss_no_reduce_log_target_test():
         fullname='KLDivLoss_no_reduce_log_target',
         constructor=wrap_functional(
             lambda i: F.kl_div(i, t.type_as(i), reduction='none', log_target=True)),
+        cpp_function_call='F::kl_div(i, t.to(i.options()), F::KLDivFuncOptions().reduction(torch::kNone).log_target(true))',
         input_fn=lambda: torch.rand(10, 10).log(),
+        cpp_var_map={'i': 'input', 't': t},
         reference_fn=lambda i, *_:
             loss_reference_fns['KLDivLoss_log_target'](i, t.type_as(i), reduction='none'),
         pickle=False,
@@ -559,7 +563,9 @@ def kldivloss_no_reduce_scalar_log_target_test():
         fullname='KLDivLoss_no_reduce_scalar_log_target',
         constructor=wrap_functional(
             lambda i: F.kl_div(i, t.type_as(i), reduction='none', log_target=True)),
+        cpp_function_call='F::kl_div(i, t.to(i.options()), F::KLDivFuncOptions().reduction(torch::kNone).log_target(true))',
         input_fn=lambda: torch.rand(()).log(),
+        cpp_var_map={'i': 'input', 't': t},
         reference_fn=lambda i, *_:
             loss_reference_fns['KLDivLoss_log_target'](i, t.type_as(i), reduction='none'),
         pickle=False)

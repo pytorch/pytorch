@@ -18,6 +18,7 @@ import tempfile
 import shutil
 from string import Template
 import types
+import pprint
 
 import torch
 from cpp_api_parity.utils import TorchNNModuleTestParams, TORCH_NN_COMMON_TEST_HARNESS, \
@@ -191,9 +192,13 @@ def process_test_params_for_module(test_params_dict, device, test_instance_class
     module_variant_name = test_instance.get_name()[5:] + (('_' + device) if device != 'cpu' else '')
 
     if 'constructor_args' in test_params_dict:
-        assert 'cpp_constructor_args' in test_params_dict, \
-            "If `constructor_args` is present in test params dict, `cpp_constructor_args` must be present: {}".format(
-                test_params_dict)
+        assert 'cpp_constructor_args' in test_params_dict, (
+            "If `constructor_args` is present in test params dict, to enable C++ API parity test, "
+            "`cpp_constructor_args` must be present in:\n{}"
+            "If you are interested in adding the C++ API parity test, please see:\n"
+            "NOTE [How to check NN module / functional API parity between Python and C++ frontends]. \n"
+            "If not, please add `test_cpp_api_parity=False` to the test params dict and file an issue about this."
+            ).format(pprint.pformat(test_params_dict))
 
     return TorchNNModuleTestParams(
         module_name=module_name,
@@ -221,13 +226,13 @@ def add_torch_nn_module_impl_parity_tests(
             "`torch.nn` doesn't have module `{}`. ".format(module_name) + \
             "If you are adding a new test, please set `fullname` using format `ModuleName_desc`, " + \
             "or set `module_name` using format `ModuleName`. " + \
-            "(Discovered while processing {}.)".format(test_params_dict)
+            "(Discovered while processing\n{}.)".format(pprint.pformat(test_params_dict))
 
         module_full_name = 'torch::nn::' + module_name
 
         assert module_full_name in parity_table['torch::nn'], (
             "Please add `{}` entry to `torch::nn` section of `test/cpp_api_parity/parity-tracker.md`. "
-            "(Discovered while processing {}.)").format(module_full_name, test_params_dict)
+            "(Discovered while processing\n{}.)").format(module_full_name, pprint.pformat(test_params_dict))
 
         for device in devices:
             test_params = process_test_params_for_module(
