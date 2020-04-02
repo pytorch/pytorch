@@ -33,6 +33,9 @@ enum IRNodeType {
   kCast,
   kBroadcast,
   kRamp,
+  kPolynomial,
+  kTerm,
+  kRoundOff,
   kNone
 };
 

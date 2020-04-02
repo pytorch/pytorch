@@ -1157,5 +1157,241 @@ void testSimplifyWontReorderFloat() {
   }
 }
 
+void testSimplifyRoundModPattern() {
+  KernelScope kernel_scope;
+
+  {
+    // (x/y)*y + x%y => x.
+    VarHandle x("x", kInt);
+    VarHandle y("y", kInt);
+    ExprHandle body = ((x / y) * y) + (x % y);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_VAR_WITH_NAME(simplified.node(), "x");
+  }
+
+  {
+    // Non opaque denominator.
+    // (x / (4+y)) * (4+y)) + (x % (y + 4)) => x.
+    VarHandle x("x", kInt);
+    VarHandle y("y", kInt);
+    ExprHandle body = ((x / (ExprHandle(4) + y)) * (ExprHandle(4) + y)) +
+        (x % (y + ExprHandle(4)));
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_VAR_WITH_NAME(simplified.node(), "x");
+  }
+
+  {
+    // Opaque denominator.
+    // (x / (2/y)) * (2/y)) + (x % (2/y)) => x.
+    VarHandle x("x", kInt);
+    VarHandle y("y", kInt);
+    ExprHandle body = ((x / (ExprHandle(2) / y)) * (ExprHandle(2) / y)) +
+        (x % (ExprHandle(2) / y));
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_VAR_WITH_NAME(simplified.node(), "x");
+  }
+
+  {
+    // Non opaque numerator
+    // ((2*x)/y * y) + ((2*x) % y) => 2 * x.
+    VarHandle x("x", kInt);
+    VarHandle y("y", kInt);
+    ExprHandle body =
+        (((ExprHandle(2) * x) / y) * y) + ((ExprHandle(2) * x) % y);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(Mul, simplified.node(), mul);
+    IS_IMM_WITH_VAL(Int, mul->lhs(), 2);
+    IS_VAR_WITH_NAME(mul->rhs(), "x");
+  }
+
+  {
+    // Opaque numerator.
+    // ((x/2) / y * y) + (x/2 % y) => x / 2.
+    VarHandle x("x", kInt);
+    VarHandle y("y", kInt);
+    ExprHandle body =
+        (((x / ExprHandle(2)) / y) * y) + ((x / ExprHandle(2)) % y);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_NODE_WITH_NAME(Div, simplified.node(), div);
+    IS_VAR_WITH_NAME(div->lhs(), "x");
+    IS_IMM_WITH_VAL(Int, div->rhs(), 2);
+  }
+
+  {
+    // Negated Subtraction of Round Mod.
+    // (x/y) * y - (0 - x%y) => x.
+    VarHandle x("x", kInt);
+    VarHandle y("y", kInt);
+    ExprHandle body = ((x / y) * y) - (ExprHandle(0) - (x % y));
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_VAR_WITH_NAME(simplified.node(), "x");
+  }
+
+  {
+    // Other terms are preserved.
+    // (x/y)*y + x%y + (y * x) => x + (y * x).
+    VarHandle x("x", kInt);
+    VarHandle y("y", kInt);
+    ExprHandle body = ((x / y) * y) + (x % y) + (y * x);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(Add, simplified.node(), add);
+    IS_VAR_WITH_NAME(add->lhs(), "x");
+    IS_NODE_WITH_NAME(Mul, add->rhs(), mul);
+    IS_VAR_WITH_NAME(mul->lhs(), "x");
+    IS_VAR_WITH_NAME(mul->rhs(), "y");
+  }
+
+  {
+    // Sanity checking we wont do the optimization on floats.
+    VarHandle x("x", kFloat);
+    VarHandle y("y", kFloat);
+    ExprHandle body = ((x / y) * y) + (x % y);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(Add, simplified.node(), add);
+    IS_NODE_WITH_NAME(Mul, add->lhs(), roundMul);
+    IS_NODE_WITH_NAME(Div, roundMul->lhs(), roundDiv);
+    IS_VAR_WITH_NAME(roundDiv->lhs(), "x");
+    IS_VAR_WITH_NAME(roundDiv->rhs(), "y");
+    IS_VAR_WITH_NAME(roundMul->rhs(), "y");
+    IS_NODE_WITH_NAME(Mod, add->rhs(), mod);
+    IS_VAR_WITH_NAME(mod->lhs(), "x");
+    IS_VAR_WITH_NAME(mod->rhs(), "y");
+  }
+
+  {
+    // Sanity check we wont do it if the mod term doesn't match.
+    VarHandle x("x", kInt);
+    VarHandle y("y", kInt);
+    VarHandle z("z", kInt);
+    ExprHandle body = ((x / y) * y) + (x % z);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_NODE_WITH_NAME(Add, simplified.node(), add);
+    IS_NODE_WITH_NAME(Mul, add->lhs(), roundMul);
+    IS_VAR_WITH_NAME(roundMul->lhs(), "y");
+    IS_NODE_WITH_NAME(Div, roundMul->rhs(), roundDiv);
+    IS_VAR_WITH_NAME(roundDiv->lhs(), "x");
+    IS_VAR_WITH_NAME(roundDiv->rhs(), "y");
+    IS_NODE_WITH_NAME(Mod, add->rhs(), mod);
+    IS_VAR_WITH_NAME(mod->lhs(), "x");
+    IS_VAR_WITH_NAME(mod->rhs(), "z");
+  }
+
+  {
+    // Sanity check we wont do it if the div term doesn't match.
+    VarHandle x("x", kInt);
+    VarHandle y("y", kInt);
+    VarHandle z("z", kInt);
+    ExprHandle body = (y * (x / z)) + (x % y);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(Add, simplified.node(), add);
+    IS_NODE_WITH_NAME(Mul, add->lhs(), roundMul);
+    IS_VAR_WITH_NAME(roundMul->lhs(), "y");
+    IS_NODE_WITH_NAME(Div, roundMul->rhs(), roundDiv);
+    IS_VAR_WITH_NAME(roundDiv->lhs(), "x");
+    IS_VAR_WITH_NAME(roundDiv->rhs(), "z");
+    IS_NODE_WITH_NAME(Mod, add->rhs(), mod);
+    IS_VAR_WITH_NAME(mod->lhs(), "x");
+    IS_VAR_WITH_NAME(mod->rhs(), "y");
+  }
+
+  {
+    // Sanity check we wont do it if the mul term doesn't match.
+    VarHandle x("x", kInt);
+    VarHandle y("y", kInt);
+    VarHandle z("z", kInt);
+    ExprHandle body = ((x / y) * z) + (x % y);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(Add, simplified.node(), add);
+    IS_NODE_WITH_NAME(Mul, add->lhs(), roundMul);
+    IS_VAR_WITH_NAME(roundMul->lhs(), "z");
+    IS_NODE_WITH_NAME(Div, roundMul->rhs(), roundDiv);
+    IS_VAR_WITH_NAME(roundDiv->lhs(), "x");
+    IS_VAR_WITH_NAME(roundDiv->rhs(), "y");
+    IS_NODE_WITH_NAME(Mod, add->rhs(), mod);
+    IS_VAR_WITH_NAME(mod->lhs(), "x");
+    IS_VAR_WITH_NAME(mod->rhs(), "y");
+  }
+}
+
+void testSimplifyRoundModPatternFactorization() {
+  KernelScope kernel_scope;
+
+  {
+    // Full factorization.
+    // 2 * (x/y * y) + 2 * (x%y) => 2 * x.
+    VarHandle x("x", kInt);
+    VarHandle y("y", kInt);
+    ExprHandle body = ExprHandle(2) * ((x / y) * y) + ExprHandle(2) * (x % y);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(Mul, simplified.node(), mul);
+    IS_IMM_WITH_VAL(Int, mul->lhs(), 2);
+    IS_VAR_WITH_NAME(mul->rhs(), "x");
+  }
+
+  {
+    // Partial Factorization.
+    // 32 * (x/y) + 4 * (x % y) => 4 * x.
+    VarHandle x("x", kInt);
+    VarHandle y("y", kInt);
+    ExprHandle body = ExprHandle(32) * (x / 8) + ExprHandle(4) * (x % 8);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_NODE_WITH_NAME(Mul, simplified.node(), mul);
+    IS_IMM_WITH_VAL(Int, mul->lhs(), 4);
+    IS_VAR_WITH_NAME(mul->rhs(), "x");
+  }
+
+  {
+    // Factorization requiring constant folding.
+    // 20 * (x  / (16 / 2)) * 2 + (11 % 6) * (x % (7+1)) => 5 * x.
+    VarHandle x("x", kInt);
+    ExprHandle body = ExprHandle(40) * (x / (ExprHandle(16) / 2)) +
+        (ExprHandle(11) % 6) * (x % (ExprHandle(7) + 1));
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(Mul, simplified.node(), mul);
+    IS_IMM_WITH_VAL(Int, mul->lhs(), 5);
+    IS_VAR_WITH_NAME(mul->rhs(), "x");
+  }
+}
+
+void testSimplifyRoundModPatternMultivar() {
+  KernelScope kernel_scope;
+
+  {
+    // Multivar.
+    // (x/8) * 8 + (y/5)*5 + x%8 + y%5 => y + x.
+    VarHandle x("x", kInt);
+    VarHandle y("y", kInt);
+    ExprHandle body = (x / ExprHandle(8) * ExprHandle(8)) +
+        (y / ExprHandle(5) * ExprHandle(5)) + (x % 8) + (y % 5);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(Add, simplified.node(), add);
+    IS_VAR_WITH_NAME(add->lhs(), "y");
+    IS_VAR_WITH_NAME(add->rhs(), "x");
+  }
+
+  {
+    // Find the right var.
+    // (y/8) * 8  x%8 + y%8 + z%8 => z%8 + x%8 + y
+    VarHandle x("x", kInt);
+    VarHandle y("y", kInt);
+    VarHandle z("z", kInt);
+    ExprHandle body =
+        (y / ExprHandle(8) * ExprHandle(8)) + (x % 8) + (y % 8) + (z % 8);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(Add, simplified.node(), add);
+    IS_NODE_WITH_NAME(Add, add->lhs(), add2);
+    IS_NODE_WITH_NAME(Mod, add2->lhs(), xMod);
+    IS_VAR_WITH_NAME(xMod->lhs(), "x");
+    IS_IMM_WITH_VAL(Int, xMod->rhs(), 8);
+    IS_VAR_WITH_NAME(add2->rhs(), "y");
+    IS_NODE_WITH_NAME(Mod, add->rhs(), zMod);
+    IS_VAR_WITH_NAME(zMod->lhs(), "z");
+    IS_IMM_WITH_VAL(Int, zMod->rhs(), 8);
+  }
+}
+
 } // namespace jit
 } // namespace torch

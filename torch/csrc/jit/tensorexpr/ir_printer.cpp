@@ -90,7 +90,7 @@ void IRPrinter::visit(const Mod* v) {
   if (v->dtype().is_integral()) {
     visitBinaryOp(v, "%", this);
   } else if (v->dtype().is_floating_point()) {
-    os() << "mod(" << v->lhs() << ", " << v->rhs() << ")";
+    os() << "mod(" << *v->lhs() << ", " << *v->rhs() << ")";
   } else {
     throw std::runtime_error("invalid dtype: " + std::to_string(v->dtype()));
   }
@@ -396,6 +396,14 @@ void IRPrinter::visit(const Polynomial* v) {
     os() << " + ";
   }
   v->scalar()->accept(this);
+  os() << ")";
+}
+
+void IRPrinter::visit(const RoundOff* v) {
+  os() << "RoundOff(";
+  v->lhs()->accept(this);
+  os() << ", ";
+  v->rhs()->accept(this);
   os() << ")";
 }
 
