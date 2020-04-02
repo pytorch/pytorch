@@ -720,6 +720,12 @@ void initJitScriptBindings(PyObject* module) {
               return method.name();
             });
           })
+      .def(
+          "named_attributes",
+          [](Module& module, bool recurse) {
+            return debugMakeNamedList(module.named_attributes(recurse));
+          },
+          py::arg("recurse") = true)
       .def(py::pickle(
           [](const Object& self)
               -> std::tuple<py::object, std::string> { // __getstate__

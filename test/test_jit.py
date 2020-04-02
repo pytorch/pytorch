@@ -11371,6 +11371,60 @@ a")
         imported = self.getExportImportCopy(traced)
         check(imported.foo)
 
+    def test_named_attributes(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super(Foo, self).__init__()
+                self.a = 3
+
+            @torch.jit.export
+            def __getstate__(self):
+                return (3, self.training)
+
+            @torch.jit.export
+            def __setstate__(self, state):
+                self.a = state[0]
+                self.training = state[1]
+
+            def forward(self, x):
+                return x + self.a
+
+        class Wrapper(torch.nn.Module):
+            def __init__(self):
+                super(Wrapper, self).__init__()
+                self.foo = Foo()
+
+            def forward(self, x):
+                return self.foo(x)
+
+        def check(module):
+            expects = [
+                {'training': True},
+                {'training': True, 'foo.a': 3, 'foo.training': True},
+            ]
+
+            def check_attributes(attrs, expect):
+                self.assertTrue('foo' in attrs)
+                del attrs['foo']
+                self.assertDictEqual(attrs, expect)
+
+            def check_model(m, expects):
+                attributes = {kv[0]: kv[1] for kv in m._c.named_attributes(False)}
+                attributes_r = {kv[0]: kv[1] for kv in m._c.named_attributes()}
+                check_attributes(attributes, expects[0])
+                check_attributes(attributes_r, expects[1])
+
+            check_model(module, expects)
+
+            imported = self.getExportImportCopy(module)
+            check_model(imported, expects)
+
+        f = Wrapper()
+        traced = torch.jit.trace(f, (torch.rand(3, 4),))
+        check(traced)
+        scripted = torch.jit.script(f)
+        check(scripted)
+
     def test_pack_unpack_nested(self):
         class SubSubMod(torch.jit.ScriptModule):
             def __init__(self):
