@@ -136,8 +136,10 @@ TEST(IValueTest, FutureExceptions) {
     if (err && std::string(err->what()) == "My Error") {
       try { // second check
         (void)f3->value();
-      } catch (std::exception& e) {
-        ++calledTimes;
+      } catch (const std::exception& e) {
+        if (std::string(e.what()) == "My Error") {
+          ++calledTimes;
+        }
       }
     }
   });

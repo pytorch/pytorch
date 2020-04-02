@@ -280,7 +280,7 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
     std::unique_lock<std::mutex> lock(mutex_);
     AT_ASSERT(completed());
     if (error_) {
-      throw error_;
+      throw *error_;
     }
     return value_;
   }
