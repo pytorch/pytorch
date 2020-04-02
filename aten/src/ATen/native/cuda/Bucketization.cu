@@ -17,7 +17,7 @@ template<typename input_t>
 __device__ int64_t lower_bound(const input_t *data_ss, int64_t start, int64_t end, input_t val) {
   while (start < end) {
     int64_t mid = start + ((end - start) >> 1);
-    if (data_ss[mid] < val) {
+    if (!(data_ss[mid] >= val)) {
       start = mid + 1;
     }
     else {

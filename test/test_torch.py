@@ -5247,7 +5247,7 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             # nan input
             values_nan = torch.tensor([1.0, float('nan'), 2.0, float('nan')], device=device, dtype=torch.float64)
             boundaries = torch.tensor([0.0, 1.0, 2.0, 3.0], device=device, dtype=torch.float64)
-            result_left = torch.tensor([1, 0, 2, 0], device=device)
+            result_left = torch.tensor([1, 4, 2, 4], device=device)
             result_right = torch.tensor([2, 4, 3, 4], device=device)
             self.assertEqual(torch.equal(torch.searchsorted(boundaries, values_nan), result_left), True)
             self.assertEqual(torch.equal(torch.searchsorted(boundaries, values_nan, right=True), result_right), True)
@@ -5265,10 +5265,9 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             result = torch.tensor(1, device=device)
             self.assertEqual(torch.equal(torch.searchsorted(boundaries, 2), result), True)
             self.assertEqual(torch.equal(torch.bucketize(torch.tensor(2, device=device), boundaries), result), True)
-            result = torch.tensor(0, device=device)
+            result = torch.tensor(3, device=device)
             scalar_tensor_nan = torch.tensor(float('nan'), device=device)
             self.assertEqual(torch.equal(torch.searchsorted(boundaries, scalar_tensor_nan), result), True)
-            result = torch.tensor(3, device=device)
             self.assertEqual(torch.equal(torch.bucketize(float('nan'), boundaries, right=True), result), True)
 
             # invalid input dimensions

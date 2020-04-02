@@ -47,7 +47,9 @@ void searchsorted_cpu_contiguous(Tensor& result, const Tensor& input, const Tens
       const input_t *data_bd_start = &data_bd[start_bd];
 
       int64_t pos = !right ?
-        std::lower_bound(data_bd_start, data_bd_start + idim_bd, data_in[i]) - data_bd_start :
+        std::lower_bound(data_bd_start, data_bd_start + idim_bd, data_in[i],
+          // custom comparator to ensure the low bound of 'nan', 'inf' etc. be the end of boundary
+          [](const input_t& data, const input_t& val){ return !(data >= val); }) - data_bd_start :
         std::upper_bound(data_bd_start, data_bd_start + idim_bd, data_in[i]) - data_bd_start;
 
       // type conversion might happen here
