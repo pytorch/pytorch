@@ -938,7 +938,7 @@ void testRecordFunction() {
   cleanUpScopeCallbacks();
 }
 
-class TestThreadLocalDebugInfo : public at::ThreadLocalDebugInfoBase {
+class TestThreadLocalDebugInfo : public at::DebugInfoBase {
  public:
   int getModelId() const {
     return model_id_;
@@ -954,51 +954,93 @@ class TestThreadLocalDebugInfo : public at::ThreadLocalDebugInfoBase {
   int model_id_ = 0;
 };
 
-void testThreadLocalDebugInfo() {
-  auto checkDebugInfo = []() {
-    auto debug_info = at::getThreadLocalDebugInfo();
-    TORCH_CHECK(debug_info != nullptr);
-    auto* test_debug_info =
-        dynamic_cast<TestThreadLocalDebugInfo*>(debug_info.get());
-    TORCH_CHECK(test_debug_info != nullptr);
-    TORCH_CHECK(test_debug_info->getModelId() == 42);
-  };
+void checkDebugInfo(at::DebugInfoKind kind, int model_id) {
+  auto debug_info = at::ThreadLocalDebugInfo::get(kind);
+  TORCH_CHECK(debug_info != nullptr);
+  auto* test_debug_info =
+      dynamic_cast<TestThreadLocalDebugInfo*>(debug_info.get());
+  TORCH_CHECK(test_debug_info != nullptr);
+  TORCH_CHECK(test_debug_info->getModelId() == model_id);
+}
 
-  TORCH_CHECK(at::getThreadLocalDebugInfo() == nullptr);
+void testThreadLocalDebugInfo() {
+  TORCH_CHECK(
+      at::ThreadLocalDebugInfo::get(at::DebugInfoKind::TEST_INFO) == nullptr);
   auto debug_info = std::make_shared<TestThreadLocalDebugInfo>();
   debug_info->setModelId(42);
-  at::setThreadLocalDebugInfo(debug_info);
-
-  checkDebugInfo();
+  {
+    at::DebugInfoGuard guard(at::DebugInfoKind::TEST_INFO, debug_info);
+    checkDebugInfo(at::DebugInfoKind::TEST_INFO, 42);
+  }
 
   // check that thread local debug info is propagated through fork calls
+  TORCH_CHECK(
+      at::ThreadLocalDebugInfo::get(at::DebugInfoKind::TEST_INFO) == nullptr);
   std::atomic<bool> done{false};
-  at::launch([checkDebugInfo, &done]() {
-    checkDebugInfo();
-    done = true;
-  });
+  {
+    at::DebugInfoGuard guard(at::DebugInfoKind::TEST_INFO, debug_info);
+    at::launch([&done]() {
+      checkDebugInfo(at::DebugInfoKind::TEST_INFO, 42);
+      done = true;
+    });
+  }
   while (!done) {
   }
-  checkDebugInfo();
 
   // check that thread local debug info is propagated through backward pass
+  TORCH_CHECK(
+      at::ThreadLocalDebugInfo::get(at::DebugInfoKind::TEST_INFO) == nullptr);
+  done = false;
   autograd::profiler::pushCallback(
-      [&checkDebugInfo](const autograd::profiler::RecordFunction& fn) {
-        checkDebugInfo();
+      [&done](const autograd::profiler::RecordFunction&) {
+        checkDebugInfo(at::DebugInfoKind::TEST_INFO, 42);
+        done = true;
         return true;
       },
       [](const autograd::profiler::RecordFunction&) {});
   {
+    at::DebugInfoGuard guard(at::DebugInfoKind::TEST_INFO, debug_info);
     auto t = torch::randn({1, 2, 3}, at::kCPU);
     t.set_requires_grad(true);
     auto t2 = t.pow(2);
     t2.backward(torch::ones_like(t2, at::MemoryFormat::Preserve));
   }
   autograd::profiler::popCallback();
+  TORCH_CHECK(done);
 
-  checkDebugInfo();
-  at::setThreadLocalDebugInfo(nullptr);
-  TORCH_CHECK(at::getThreadLocalDebugInfo() == nullptr);
+  // check nested debug info
+  TORCH_CHECK(
+      at::ThreadLocalDebugInfo::get(at::DebugInfoKind::TEST_INFO) == nullptr);
+  {
+    at::DebugInfoGuard guard(at::DebugInfoKind::TEST_INFO, debug_info);
+    {
+      bool throws_ = false;
+      try {
+        at::DebugInfoGuard guard(at::DebugInfoKind::TEST_INFO, debug_info);
+      } catch (const std::exception&) {
+        throws_ = true;
+      }
+      TORCH_CHECK(throws_);
+      checkDebugInfo(at::DebugInfoKind::TEST_INFO, 42);
+      {
+        auto debug_info = std::make_shared<TestThreadLocalDebugInfo>();
+        debug_info->setModelId(314);
+        at::DebugInfoGuard guard(at::DebugInfoKind::TEST_INFO_2, debug_info);
+        {
+          checkDebugInfo(at::DebugInfoKind::TEST_INFO, 42);
+          checkDebugInfo(at::DebugInfoKind::TEST_INFO_2, 314);
+          done = false;
+          at::launch([&done]() {
+            checkDebugInfo(at::DebugInfoKind::TEST_INFO, 42);
+            checkDebugInfo(at::DebugInfoKind::TEST_INFO_2, 314);
+            done = true;
+          });
+          while (!done) {
+          }
+        }
+      }
+    }
+  }
 }
 
 void testAutogradProfiler() {

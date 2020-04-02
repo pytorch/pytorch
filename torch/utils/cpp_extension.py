@@ -58,7 +58,7 @@ def _find_rocm_home():
         # Guess #2
         try:
             hipcc = subprocess.check_output(
-                ['which', 'hipcc']).decode().rstrip('\r\n')
+                ['which', 'hipcc'], stderr=subprocess.DEVNULL).decode().rstrip('\r\n')
             # this will be either <ROCM_HOME>/hip/bin/hipcc or <ROCM_HOME>/bin/hipcc
             rocm_home = os.path.dirname(os.path.dirname(hipcc))
             if os.path.basename(rocm_home) == 'hip':
