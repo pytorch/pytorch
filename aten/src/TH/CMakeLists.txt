@@ -98,6 +98,8 @@ install(FILES
   generic/THLapack.h
   generic/THStorage.cpp
   generic/THStorage.h
+  generic/THStorageCopy.cpp
+  generic/THStorageCopy.h
   generic/THTensor.cpp
   generic/THTensor.h
   generic/THTensor.hpp
