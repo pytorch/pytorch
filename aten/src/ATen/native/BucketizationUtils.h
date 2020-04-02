@@ -72,10 +72,8 @@ inline void searchsorted_pre_check(const Tensor& boundaries, const Tensor& input
     "but we got output tensor's dtype ", output_dtype, " and out_int32 flag is ", (out_int32 ? "True" : "False"));
 
   if (out_int32) {
-    int numel_input = input.numel();
-    TORCH_CHECK(numel_input <= INT_MAX && boundaries.sizes().back() <= INT_MAX,
-      "total size of input and last dimension of boundaries should not exceed ", INT_MAX, " ",
-      "but we got total size of input ", numel_input, " and last dimension of boundaries ", boundaries.sizes().back());
+    TORCH_CHECK(boundaries.sizes().back() < INT_MAX,
+      "the size of boundaries' last dimension should be less than ", INT_MAX, ", but we got ", boundaries.sizes().back());
   }
 }
 
