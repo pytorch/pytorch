@@ -77,16 +77,6 @@ __global__ void distribution_elementwise_grid_stride_kernel(int numel,
   }
 }
 
-template<int N>
-static OffsetCalculator<N> make_offset_calculator(const at::TensorIterator& iter) {
-  AT_ASSERT(N == iter.ntensors());
-  std::array<const int64_t*, N> strides;
-  for (int i = 0; i < N; i++) {
-    strides[i] = iter.strides(i).data();
-  }
-  return OffsetCalculator<N>(iter.ndim(), iter.shape().data(), strides.data());
-}
-
 /**
  * distribution_nullary_kernel is analogous to gpu_kernel in
  * ATen/native/cuda/Loops.cuh. Like gpu_kernel, it uses
