@@ -298,11 +298,11 @@ class LSTM(RNNBase):
         self.check_forward_args(input, hx, batch_sizes)
 
         if batch_sizes is None:
-            result = torch.ops.aten.quantized_lstm(input, hx, self._all_params, self.bias, self.num_layers,
+            result = torch.quantized_lstm(input, hx, self._all_params, self.bias, self.num_layers,
                                                    float(self.dropout), self.training, self.bidirectional,
                                                    self.batch_first, dtype=self.dtype, use_dynamic=True)
         else:
-            result = torch.ops.aten.quantized_lstm(input, batch_sizes, hx, self._all_params, self.bias,
+            result = torch.quantized_lstm(input, batch_sizes, hx, self._all_params, self.bias,
                                                    self.num_layers, float(self.dropout), self.training,
                                                    self.bidirectional, dtype=self.dtype, use_dynamic=True)
         output = result[0]

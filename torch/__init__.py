@@ -404,4 +404,8 @@ del register_after_fork
 # torch.jit.script as a decorator, for instance):
 from ._lobpcg import lobpcg
 
+# These were previously defined in native_functions.yaml and appeared on the
+# `torch` namespace, but we moved them to c10 dispatch to facilitate custom
+# class usage. We add these lines here to preserve backward compatbility.
 quantized_lstm = torch.ops.aten.quantized_lstm
+quantized_gru = torch.ops.aten.quantized_gru
