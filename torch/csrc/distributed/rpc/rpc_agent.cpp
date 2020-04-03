@@ -20,20 +20,24 @@ RpcAgent::RpcAgent(
       cb_(std::move(cb)),
       rpcTimeout_(rpcTimeout),
       profilingEnabled_(false),
-      rpcAgentRunning_(true) {
-  rpcRetryThread_ = std::thread(&RpcAgent::retryExpiredRpcs, this);
-}
+      rpcAgentRunning_(false) {}
 
 RpcAgent::~RpcAgent() {
   cleanup();
 }
 
+void RpcAgent::start() {
+  rpcAgentRunning_.store(true);
+  rpcRetryThread_ = std::thread(&RpcAgent::retryExpiredRpcs, this);
+  startImpl();
+}
+
 void RpcAgent::cleanup() {
-  if (!rpcAgentRunning_.exchange(false)) {
-    return;
+  rpcAgentRunning_.store(false);
+  if (rpcRetryThread_.joinable()) {
+    rpcRetryMapCV_.notify_one();
+    rpcRetryThread_.join();
   }
-  rpcRetryMapCV_.notify_one();
-  rpcRetryThread_.join();
 }
 
 std::shared_ptr<FutureMessage> RpcAgent::sendWithRetries(
