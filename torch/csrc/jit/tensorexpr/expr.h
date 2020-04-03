@@ -161,6 +161,66 @@ class Var : public ExprNode<Var> {
   std::string name_hint_;
 };
 
+class TORCH_API Buf : public ExprNode<Buf> {
+ public:
+  static ExprHandle make(
+      const std::string& name_hint,
+      const std::vector<ExprHandle>& dims);
+  static ExprHandle make(const std::vector<ExprHandle>& dims);
+
+  // TODO: unique_name
+  const Var* base_handle() const {
+    return base_handle_;
+  }
+  const std::string& name_hint() const {
+    return base_handle_->name_hint();
+  }
+
+  Buf(const Var* var, const std::vector<const Expr*>& dims)
+      : ExprNodeBase(kHandle, kPrimitive), base_handle_(var), dims_(dims) {
+    TORCH_CHECK(var);
+  }
+
+  int ndim() const {
+    return dims_.size();
+  }
+  const Expr* dim(int index) const {
+    return dims_[index];
+  }
+  std::vector<const Expr*> dims() const {
+    return dims_;
+  }
+
+ private:
+  const Var* base_handle_;
+  std::vector<const Expr*> dims_;
+};
+
+class TORCH_API BufHandle : public ExprHandle {
+ public:
+  BufHandle() : ExprHandle(nullptr) {}
+  //   explicit BufHandle(Dtype dtype) : ExprHandle(Buf::make(dtype)) {}
+  BufHandle(const std::string& name_hint, const std::vector<ExprHandle>& dims)
+      : ExprHandle(Buf::make(name_hint, dims)) {}
+  explicit BufHandle(const Buf* node) : ExprHandle(node) {}
+  const Buf* node() const {
+    return static_cast<const Buf*>(ExprHandle::node());
+  }
+  bool operator==(const BufHandle& other) const {
+    return this->node() == other.node();
+  }
+  bool operator!=(const BufHandle& other) const {
+    return !(*this == other);
+  }
+
+  const std::string& name_hint() const {
+    return this->node()->name_hint();
+  }
+  bool empty() const {
+    return (this->node() == nullptr);
+  }
+};
+
 // An expression to construct the underlying variable node.
 // Note: do not store any info here, since it is often possible to slice this
 // object. For example: VarHandle x('x'); ExprHandle x2 = x;
