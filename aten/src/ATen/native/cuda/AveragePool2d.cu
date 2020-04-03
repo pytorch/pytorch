@@ -334,7 +334,7 @@ void avg_pool2d_out_cuda_template(
                 cuda::ATenCeilDiv(safe_downcast<int, int64_t>(outputHeight), block_z*BLOCK_STRIDE));
             const dim3 grid(grid_x, grid_y, grid_z);
 
-            size_t shmem_size = (kernel_size_C * block_x*block_y*block_z) * (sizeof(int) + sizeof(scalar_t));
+            size_t shmem_size = (kernel_size_C * block_x*block_y*block_z) * sizeof(accscalar_t);
             AT_ASSERT(shmem_size <= at::cuda::getCurrentDeviceProperties()->sharedMemPerBlock); 
 
             avg_pool2d_out_cuda_frame_nhwc<scalar_t, accscalar_t>
