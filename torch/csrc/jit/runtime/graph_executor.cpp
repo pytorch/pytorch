@@ -28,6 +28,7 @@
 #include <torch/csrc/jit/passes/requires_grad_analysis.h>
 #include <torch/csrc/jit/passes/shape_analysis.h>
 #include <torch/csrc/jit/passes/specialize_autogradzero.h>
+#include <torch/csrc/jit/passes/tensorexpr_fuser.h>
 #include <torch/csrc/jit/resource_guard.h>
 #include <torch/csrc/jit/runtime/argument_spec.h>
 #include <torch/csrc/jit/runtime/autodiff.h>
@@ -750,8 +751,8 @@ void runNondiffOptimization(
     std::shared_ptr<Graph>& graph,
     bool strict_fuser_check) {
   // Run custom passes that different backends can register.
-  for (const auto& pass : getCustomPreFusionPasses()) {
-    pass(graph);
+  for (const auto& passPair : getCustomPrePasses()) {
+    passPair.first(graph);
   }
 
   // decomposition pass, decompose certain ops that will be used in the
@@ -772,9 +773,11 @@ void runNondiffOptimization(
 
   FuseGraph(graph, strict_fuser_check);
 
+  fuseTensorExprs(graph);
+
   // Run custom post-fusion passes
-  for (const auto& pass : getCustomPostFusionPasses()) {
-    pass(graph);
+  for (const auto& passPair : getCustomPostPasses()) {
+    passPair.first(graph);
   }
 }
 
