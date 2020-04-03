@@ -20,8 +20,8 @@ Tensor quantize_per_tensor_cpu(
 
 std::vector<Tensor> quantize_per_tensor_list_cpu(
     TensorList tensors,
-    Tensor scales,
-    Tensor zero_points,
+    const Tensor& scales,
+    const Tensor& zero_points,
     ScalarType dtype) {
   std::vector<Tensor> quantized_tensors;
   for (auto i = 0; i < tensors.size(); ++i) {
