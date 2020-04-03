@@ -3,7 +3,7 @@ import torch.jit
 
 from torch.quantization._quantize_script import prepare_dynamic_script
 from torch.quantization._quantize_script import quantize_dynamic_script
-from torch.quantization import default_dynamic_qconfig
+from torch.quantization import default_dynamic_qconfig, QConfigDynamic
 
 from torch.testing._internal.common_utils import run_tests
 from torch.testing import FileCheck
@@ -177,6 +177,25 @@ class TestScript(JitTestCase):
         model = quantize_dynamic_script(model, qconfig_dict, _test_only_eval_fn, [data])
         FileCheck().check("quantized::linear_dynamic") \
                    .run(model.graph)
+
+    def test_prepare_dynamic_lstm(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+                self.lstm = torch.nn.LSTM(2, 2).to(dtype=torch.float)
+
+            def forward(self, x):
+                return self.lstm(x)
+        from torch.quantization.observer import default_dynamic_quant_observer, _MinMaxTensorListObserver
+        qconfig = QConfigDynamic(activation=default_dynamic_quant_observer,
+                                 weight=_MinMaxTensorListObserver)
+        m = torch.jit.script(M())
+        m = prepare_dynamic_script(m, {'': qconfig})
+        assert len(attrs_with_prefix(m.lstm, '_observer_')) == 1
+        FileCheck().check('_MinMaxTensorListObserver = prim::GetAttr[name="_observer_0') \
+                   .check("aten::lstm") \
+                   .check("return") \
+                   .run(str(get_module_method(m, 'lstm', 'forward__0').graph))
 
 if __name__ == "__main__":
     run_tests()
