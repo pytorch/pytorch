@@ -25,7 +25,7 @@ std::vector<Tensor> quantize_per_tensor_list_cpu(
     ScalarType dtype) {
   std::vector<Tensor> quantized_tensors;
   for (auto i = 0; i < tensors.size(); ++i) {
-    quantized_tensors.push_back(quantize_per_tensor_cpu(
+    quantized_tensors.push_back(at::quantize_per_tensor(
         tensors[i],
         scales[i].item<double>(),
         zero_points[i].item<int64_t>(),

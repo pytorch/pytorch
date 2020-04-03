@@ -516,6 +516,9 @@ class MinMaxDynamicQuantObserver(MinMaxObserver):
 
         return scale.to(dtype=torch.float), torch.tensor([nudged_zero_point])
 
+# This observer is a temporary solution for quantizing modules with tensor lists as inputs.
+# If we decide to support more observers with TensorList this should be refactored
+# to work with multiple observer types.
 class _MinMaxTensorListObserver(MinMaxObserver):
     r"""Observer module that works on lists of tensors.
     It uses MinMaxObserver for computing the quantization parameters based on the
