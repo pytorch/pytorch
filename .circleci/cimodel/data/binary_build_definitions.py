@@ -66,7 +66,7 @@ class Conf(object):
             job_def["requires"].append("update_s3_htmls_for_nightlies")
             job_def["requires"].append("update_s3_htmls_for_nightlies_devtoolset7")
             job_def["filters"] = {"branches": {"only": "postnightly"}}
-        else:
+        elif phase == 'upload':
             job_def["filters"] = {
                 "branches": {
                     "only": "nightly"
