@@ -77,7 +77,8 @@ Tensor mkldnn_linear_backward_input(
   auto grad_output_reshaped = grad_output.dim() > 2 ?
     grad_output.reshape({-1, grad_output.size(grad_output.dim() - 1)}) : grad_output;
   ideep::tensor& grady = itensor_from_mkldnn(grad_output_reshaped);
-  const ideep::tensor w = itensor_from_tensor(weight);
+  // weight always dense tensor for training.
+  const ideep::tensor w = itensor_view_from_dense(weight);
 
   std::vector<int64_t> input_reshaped_size;
   input_reshaped_size.push_back(grad_output_reshaped.size(0));
@@ -101,25 +102,17 @@ std::tuple<Tensor, Tensor> mkldnn_linear_backward_weights(
 
   ideep::tensor& grady = itensor_from_mkldnn(grad_output_reshaped);
   ideep::tensor& x = itensor_from_mkldnn(input_reshaped);
+  auto diff_weight_type = get_mkldnn_dtype(weight.scalar_type());
   ideep::tensor gradw, gradb;
   if (bias_defined) {
-    ideep::inner_product_backward_weights::compute(x, grady, gradw, gradb);
+    ideep::inner_product_backward_weights::compute(x, grady, gradw, gradb, diff_weight_type);
   } else {
-    ideep::inner_product_backward_weights::compute(x, grady, gradw);
+    ideep::inner_product_backward_weights::compute(x, grady, gradw, diff_weight_type);
   }
 
-  // Extract device info from weight and data type info from input.
-  // since for current BF16 design, input is BF16 tensor while weight is FP32 tensor.  
-  auto options = weight.options().dtype(input.scalar_type());
-  if (weight.is_mkldnn()) {
-    return std::tuple<Tensor, Tensor>{
-      new_with_itensor_mkldnn(std::move(gradw), options),
-      new_with_itensor_mkldnn(std::move(gradb), options)};
-  } else {
-    return std::tuple<Tensor, Tensor>{
-      mkldnn_to_dense(new_with_itensor_mkldnn(std::move(gradw), options), weight.scalar_type()),
-      mkldnn_to_dense(new_with_itensor_mkldnn(std::move(gradb), options), weight.scalar_type())};
-  }
+  return std::tuple<Tensor, Tensor>{
+    mkldnn_to_dense(new_with_itensor_mkldnn(std::move(gradw), weight.options())),
+    mkldnn_to_dense(new_with_itensor_mkldnn(std::move(gradb), weight.options()))};
 }
 
 std::tuple<Tensor, Tensor, Tensor> mkldnn_linear_backward(
