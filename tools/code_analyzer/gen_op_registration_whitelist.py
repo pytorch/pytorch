@@ -67,4 +67,11 @@ if __name__ == "__main__":
 
     deps = load_op_dep_graph(args.op_dependency) if args.op_dependency else {}
     root_ops = load_root_ops(args.root_ops)
+
+    # The dependency graph might contain a special entry with key = `__ROOT__`
+    # and value = (set of ops reachable from C++ functions). Insert the special
+    # `__ROOT__` key to include ops which can be called from C++ code directly,
+    # in addition to ops that are called from TorchScript model.
+    root_ops.append('__ROOT__')
+
     print(gen_transitive_closure(deps, root_ops))
