@@ -125,8 +125,13 @@ class QAdd final : public c10::OperatorKernel {
 #ifdef USE_PYTORCH_QNNPACK
 Tensor qnnpack_add(Tensor qa, Tensor qb, double scale, int64_t zero_point) {
   TORCH_CHECK(qa.ndimension() > 0, "qnnpack_add(): Got empty input tensor.");
-  Tensor qa_contig = qa.contiguous();
-  Tensor qb_contig = qb.contiguous();
+  Tensor qa_contig = qa.contiguous(qa.suggest_memory_format());
+  // Reason for use qa's memory format for qb is that for the underlying
+  // kernel can flatten all the dims and iterate over both the tensors.
+  // In most cases, both qa and qb are in same memory format.
+  // When they are not there is a copy overhead to make it contiguous
+  // in qa's memory format.
+  Tensor qb_contig = qb.contiguous(qa.suggest_memory_format());
 
   const auto a_zero_point = qa_contig.q_zero_point();
   const auto b_zero_point = qb_contig.q_zero_point();
@@ -134,7 +139,11 @@ Tensor qnnpack_add(Tensor qa, Tensor qb, double scale, int64_t zero_point) {
   const auto b_scale = qb_contig.q_scale();
 
   Tensor qy = at::_empty_affine_quantized(
-      qa_contig.sizes(), at::device(kCPU).dtype(kQUInt8), scale, zero_point);
+      qa_contig.sizes(),
+      at::device(kCPU).dtype(kQUInt8).memory_format(qa.suggest_memory_format()),
+      scale,
+      zero_point,
+      c10::nullopt);
 
   if (qa_contig.size(0) == 0) {
     return qy;
