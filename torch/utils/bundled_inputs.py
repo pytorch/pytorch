@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-from typing import Any, TypeVar, Optional, Tuple, List
+from typing import Any, TypeVar, Optional, Tuple, List, NamedTuple
 import textwrap
 import torch
 
@@ -7,6 +7,11 @@ import torch
 T = TypeVar("T")
 
 MAX_RAW_TENSOR_SIZE = 16
+
+
+class InflatableArg(NamedTuple):
+    value: Any
+    fmt: str
 
 
 def augment_model_with_bundled_inputs(
@@ -47,7 +52,7 @@ def augment_model_with_bundled_inputs(
     if not isinstance(model, torch.jit.ScriptModule):
         raise Exception("Only ScriptModule is supported.")
 
-    forward_arg_types = [node.type() for node in list(model.graph.param_node().outputs())[1:]]
+    forward_arg_types = [arg.type for arg in model.forward.schema.arguments[1:]]
     deflated_inputs_type = torch._C.ListType(torch._C.TupleType(forward_arg_types))
     inflated_inputs_type = torch._C.OptionalType(deflated_inputs_type)
     model._c._register_attribute("_bundled_inputs_deflated", deflated_inputs_type, [])
@@ -112,13 +117,14 @@ def augment_model_with_bundled_inputs(
         """))
 
 
-def _inflate_expr(arg: T, ref: str) -> T:
+def _inflate_expr(arg: T, ref: str) -> Tuple[T, str]:
+    # Allow custom inflation expressions any object.
+    # For example, calling custom image-decoding ops.
+    # Or just use "{}" as the format string to ignore size limits.
+    if isinstance(arg, InflatableArg):
+        return arg.value, arg.fmt.format(ref)
+
     if isinstance(arg, torch.Tensor):
-        # Allow custom inflation expressions any tensor.
-        # For example, calling custom image-decoding ops.
-        # Or just use "{}" as the format string to ignore size limits.
-        if hasattr(arg, "_bundled_input_inflate_format"):
-            return arg, arg._bundled_input_inflate_format.format(ref)
         # Small-storage tensors can just be saved directly.
         if arg.storage().size() <= MAX_RAW_TENSOR_SIZE:
             return arg, ref
@@ -144,5 +150,4 @@ def _inflate_expr(arg: T, ref: str) -> T:
 def bundle_randn(*size, dtype=None):
     """Generate a tensor that will be inflated with torch.randn."""
     stub = torch.zeros(1, dtype=dtype).expand(*size)
-    stub._bundled_input_inflate_format = "torch.randn_like({})"
-    return stub
+    return InflatableArg(value=stub, fmt="torch.randn_like({})")

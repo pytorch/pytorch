@@ -77,10 +77,11 @@ class TestBundledInputs(TestCase):
             def forward(self, arg):
                 return arg
         sm = torch.jit.script(SingleTensorModel())
-        sample = torch.randn(1 << 16)
+        sample_tensor = torch.randn(1 << 16)
         # We can store tensors with custom inflation functions regardless
         # of size, even if inflation is just the identity.
-        sample._bundled_input_inflate_format = "{}"
+        sample = torch.utils.bundled_inputs.InflatableArg(
+                value=sample_tensor, fmt="{}")
         torch.utils.bundled_inputs.augment_model_with_bundled_inputs(
             sm, [(sample,)])
 
@@ -88,7 +89,7 @@ class TestBundledInputs(TestCase):
         inflated = loaded.get_all_bundled_inputs()
         self.assertEqual(len(inflated), 1)
 
-        self.assertEqual(inflated[0][0], sample)
+        self.assertEqual(inflated[0][0], sample_tensor)
 
 
     def test_rejected_tensors(self):
