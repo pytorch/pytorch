@@ -15,20 +15,21 @@ Tensor _bincount_cpu_template(
     const Tensor& self,
     const Tensor& weights,
     int64_t minlength) {
-  if (minlength < 0) {
-    AT_ERROR("minlength should be >= 0");
-  }
+
+  TORCH_CHECK(minlength < 0, "bincount: minlength should be >= 0");
+
+  TORCH_CHECK(
+      self.dim() != 1 || *self.min().data_ptr<input_t>() < 0,
+      "bincount only supports 1-d non-negative integral inputs.");
+
   if (self.dim() == 1 && self.numel() == 0) {
     return native::zeros({minlength}, kLong);
   }
-  if (self.dim() != 1 || *self.min().data_ptr<input_t>() < 0) {
-    AT_ERROR("bincount only supports 1-d non-negative integral inputs.");
-  }
 
   bool has_weights = weights.defined();
-  if (has_weights && weights.size(0) != self.size(0)) {
-    AT_ERROR("input and weights should have the same length");
-  }
+  TORCH_CHECK(
+      has_weights && weights.size(0) != self.size(0),
+      "input and weights should have the same length");
 
   Tensor output;
   int64_t self_size = self.size(0);
