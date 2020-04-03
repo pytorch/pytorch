@@ -1,4 +1,4 @@
-//#if defined(USE_CUDA)
+#if defined(USE_CUDA)
 #include <test/cpp/jit/test_base.h>
 
 #include <torch/csrc/jit/codegen/cuda/arith.h>
@@ -1004,4 +1004,4 @@ void testGPU_Fusion() {}
 
 } // namespace jit
 } // namespace torch
-//#endif // #if defined(USE_CUDA)
+#endif // #if defined(USE_CUDA)
