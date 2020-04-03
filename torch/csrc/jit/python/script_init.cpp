@@ -444,7 +444,8 @@ static void setInputTensorTypes(Graph& g, const Stack& stack, bool complete) {
     // (like alias analysis) to work properly. This will be unpacked later
     // in unpackQuantizedWeights.
     if (v->type() ==
-        getCustomClass("__torch__.torch.classes.quantized.LinearPackedParamsBase")) {
+        getCustomClass(
+            "__torch__.torch.classes.quantized.LinearPackedParamsBase")) {
       s_iter++;
       continue;
     }

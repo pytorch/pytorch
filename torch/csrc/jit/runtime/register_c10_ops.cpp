@@ -77,7 +77,8 @@ Operator createOperatorFromC10(const c10::OperatorHandle& op) {
             for (IValue iv : list) {
               objects.emplace_back(std::move(iv).toObject());
             }
-            tracer::addInputs(node, args[i].name().c_str(), objects, class_type);
+            tracer::addInputs(
+                node, args[i].name().c_str(), objects, class_type);
           } else if (elem_type->kind() == TypeKind::FloatType) {
             AT_ASSERT(iter->isDoubleList());
             // NB: now, tracer doesn't support tracing double list. We add
