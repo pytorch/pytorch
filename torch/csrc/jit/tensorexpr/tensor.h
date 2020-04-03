@@ -146,7 +146,7 @@ class FunctionCall : public CallNode<FunctionCall> {
     return new FunctionCall(tensor_, new_params);
   }
 
-  std::string func_name() const {
+  std::string func_name() const override {
     return tensor_->func_var()->name_hint();
   }
 
