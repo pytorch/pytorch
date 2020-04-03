@@ -14,8 +14,10 @@ class TestShowPickle(unittest.TestCase):
             def __init__(self, weight):
                 super().__init__()
                 self.weight = weight
+
             def forward(self, x):
                 return x * self.weight
+
         m = torch.jit.script(MyCoolModule(torch.tensor([2.0])))
 
         with tempfile.NamedTemporaryFile() as tmp:
