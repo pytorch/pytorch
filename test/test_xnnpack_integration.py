@@ -602,6 +602,30 @@ class TestXNNPACKRewritePass(TestCase):
         validate_transformed_module(MFusionAntiPattern(), pattern_count_map, (16, linear_weight_shape[1]),
                                     prepack_removal=True, fuse_clamping_ops=True)
 
+        class MFusionAntiPatternParamMinMax(torch.nn.Module):
+            def __init__(self):
+                super(MFusionAntiPatternParamMinMax, self).__init__()
+                self.linear_weight = torch.nn.Parameter(torch.Tensor(torch.rand(linear_weight_shape)))
+                self.linear_bias = torch.nn.Parameter(torch.Tensor(torch.rand((weight_output_dim))))
+                self.strides = strides
+                self.paddings = paddings
+                self.dilations = dilations
+                self.groups = groups
+
+            def forward(self, x):
+                min = x[0,0]
+                max = min + 10
+                o = F.linear(x, self.linear_weight, self.linear_bias)
+                o = F.hardtanh(o, min, max)
+                return o
+
+        # Unfusable hardtanh.
+        pattern_count_map = {"aten::hardtanh": 1,  # hardtanh cannot be.
+                             "prepacked::linear_clamp_prepack": -1,
+                             "prepacked::linear_clamp_run": 1}
+        validate_transformed_module(MFusionAntiPatternParamMinMax(), pattern_count_map, (16, linear_weight_shape[1]),
+                                    prepack_removal=True, fuse_clamping_ops=True)
+
 
 if __name__ == "__main__":
     run_tests()
