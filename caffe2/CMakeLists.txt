@@ -413,7 +413,6 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/jit/passes/fixup_trace_scope_blocks.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/inline_fork_wait.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/graph_fuser.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/passes/cuda_graph_fuser.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/graph_rewrite_helper.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/guard_elimination.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/inplace_check.cpp
@@ -441,6 +440,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/jit/passes/freeze_module.cpp
     ${TORCH_SRC_DIR}/csrc/jit/runtime/print_handler.cpp
     ${TORCH_SRC_DIR}/csrc/jit/codegen/fuser/interface.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/interface.cpp
     ${TORCH_SRC_DIR}/csrc/jit/runtime/register_prim_ops.cpp
     ${TORCH_SRC_DIR}/csrc/jit/runtime/register_prim_ops_fulljit.cpp
     ${TORCH_SRC_DIR}/csrc/jit/runtime/register_prim_ops_c10.cpp
@@ -566,6 +566,29 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       ${TORCH_SRC_DIR}/csrc/autograd/profiler_cuda.cpp
       ${TORCH_SRC_DIR}/csrc/autograd/functions/comm.cpp
       ${TORCH_SRC_DIR}/csrc/cuda/comm.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/arith.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/code_write.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/dispatch.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/fusion.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/graph_fuser.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/index_compute.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/ir_base_nodes.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/ir_nodes.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/ir_iostream.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/iter_visitor.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/kernel.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/manager.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/mutator.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/parser.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/partition.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/predicate_compute.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/tensor_meta.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/tensor_view.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/transform_iter.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/transform_replay.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/type.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/utils.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/register_interface.cpp
       ${TORCH_SRC_DIR}/csrc/jit/tensorexpr/cuda_codegen.cpp
     )
     add_library(caffe2_nvrtc SHARED ${ATen_NVRTC_STUB_SRCS})
