@@ -797,9 +797,9 @@ class TestCase(expecttest.TestCase):
         'float16': (0.001, 1e-5),
         'bfloat16': (0.016, 1e-5),
         'float32': (1.3e-6, 1e-5),
-        'float64': (1.3e6, 1e-7),
+        'float64': (1e-7, 1e-7),
         'complex32': (1.3e-6, 1e-5),
-        'complex64': (1.3e6, 1e-7),
+        'complex64': (1e-7, 1e-7),
     }
 
     # todo: implement numpy-like issubdtype
