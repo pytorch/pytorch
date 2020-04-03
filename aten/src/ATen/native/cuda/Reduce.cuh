@@ -789,15 +789,18 @@ inline void gpu_reduce_kernel(TensorIterator& iter, const ops_t& ops, ident_t id
     config.output_mult[1] = config.split_output(block_height);
   }
 
-  if (config.input_mult[1] != 0 && config.values_per_thread() >= 256 && num_outputs <= 4096) {
+  constexpr int target_grid_size = 4096;
+  int grid = config.grid().x;
+  if (config.input_mult[1] != 0 && config.values_per_thread() >= 256 && grid <= target_grid_size) {
     // Divide the input across thread-blocks if the amount of work per-thread
     // is large enough and the size of the output is small enough. This will
     // require a reduction using global memory.
-    config.ctas_per_output = div_up(config.values_per_thread(), 16);
-    if (config.ctas_per_output > 65535) {
-      config.ctas_per_output = 65535;
+    int ctas_per_output1 = div_up(config.values_per_thread(), 16);
+    int ctas_per_output2 = div_up(target_grid_size, grid);
+    config.ctas_per_output = std::min<int>(ctas_per_output1, ctas_per_output2);
+    if (config.ctas_per_output > 1) {
+      config.input_mult[2] = config.split_input(config.ctas_per_output);
     }
-    config.input_mult[2] = config.split_input(config.ctas_per_output);
   }
 
   at::DataPtr buffer;
