@@ -58,6 +58,8 @@ PyObject* rpc_init(PyObject* /* unused */) {
               R"(URL specifying how to initialize the process group.
                 Default is ``env://``)");
 
+   // The following C++ constnats need to be cast so they can be used from
+  // python.
   module.attr("_DEFAULT_RPC_TIMEOUT") = py::cast(kDefaultRpcTimeout);
   module.attr("_UNSET_RPC_TIMEOUT") = py::cast(kUnsetRpcTimeout);
   module.attr("_DEFAULT_INIT_METHOD") = py::cast(kDefaultInitMethod);
