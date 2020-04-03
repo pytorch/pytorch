@@ -222,6 +222,8 @@ namespace c10 {
   _(onnx, SequenceInsert)            \
   _(onnx, ConcatFromSequence)        \
   _(onnx, Identity)                  \
+  _(onnx, ReduceL1)                  \
+  _(onnx, ReduceL2)                  \
   FORALL_ATTR_BASE_SYMBOLS(_)        \
   _(attr, Subgraph)                  \
   _(attr, ReverseSubgraph)           \
@@ -254,6 +256,7 @@ namespace c10 {
   _(attr, types)                     \
   _(attr, scope)                     \
   _(attr, keepdims)                  \
+  _(attr, cache_id)                  \
   _(attr, new_axis)
 #else
 #define FORALL_NS_SYMBOLS(_) \

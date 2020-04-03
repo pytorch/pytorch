@@ -1019,7 +1019,12 @@ add_docstr(torch.real,
            r"""
 real(input, out=None) -> Tensor
 
-Computes the element-wise real value of the given :attr:`input` tensor.
+Returns the real part of the :attr:`input` tensor. If
+:attr:`input` is a real (non-complex) tensor, this function just
+returns it.
+
+.. warning::
+    Not yet implemented for complex tensors.
 
 .. math::
     \text{out}_{i} = real(\text{input}_{i})
@@ -1027,11 +1032,6 @@ Computes the element-wise real value of the given :attr:`input` tensor.
 Args:
     {input}
     {out}
-
-Example::
-
-    >>> torch.real(torch.tensor([-1 + 1j, -2 + 2j, 3 - 3j]))
-    tensor([ -1,  -2,  3])
 """.format(**common_args))
 
 add_docstr(torch.reciprocal,
@@ -2488,7 +2488,10 @@ add_docstr(torch.imag,
            r"""
 imag(input, out=None) -> Tensor
 
-Computes the element-wise imag value of the given :attr:`input` tensor.
+Returns the imaginary part of the :attr:`input` tensor.
+
+.. warning::
+    Not yet implemented.
 
 .. math::
     \text{out}_{i} = imag(\text{input}_{i})
@@ -2496,11 +2499,6 @@ Computes the element-wise imag value of the given :attr:`input` tensor.
 Args:
     {input}
     {out}
-
-Example::
-
-    >>> torch.imag(torch.tensor([-1 + 1j, -2 + 2j, 3 - 3j]))
-    tensor([ 1,  2,  -3])
 """.format(**common_args))
 
 add_docstr(torch.index_select,
@@ -2643,8 +2641,8 @@ add_docstr(torch.is_complex,
            r"""
 is_complex(input) -> (bool)
 
-Returns True if the data type of :attr:`input` is a floating point data type i.e.,
-one of ``torch.complex64``, and ``torch.float128``.
+Returns True if the data type of :attr:`input` is a complex data type i.e.,
+one of ``torch.complex64``, and ``torch.complex128``.
 
 Args:
     input (Tensor): the PyTorch tensor to test
