@@ -55,8 +55,13 @@ void AdagradParamState::serialize(torch::serialize::InputArchive& archive) {
 
 /// Adapted from
 /// https://github.com/pytorch/pytorch/blob/master/torch/optim/adagrad.py
-void Adagrad::step() {
+Tensor Adagrad::step(LossClosure closure) {
   NoGradGuard no_grad;
+  Tensor loss = {};
+  if (closure != nullptr) {
+    at::AutoGradMode enable_grad(true);
+    loss = closure();
+  }
   for (auto& group : param_groups_) {
     for (auto& p : group.params()) {
       if (!p.grad().defined()) {
@@ -101,22 +106,7 @@ void Adagrad::step() {
       }
     }
   }
-}
-
-void Adagrad::add_parameters(const std::vector<Tensor>& parameters) {
-  return _add_parameters_new_design(parameters);
-}
-
-const std::vector<Tensor>& Adagrad::parameters() const noexcept {
-  return _parameters_new_design();
-}
-
-std::vector<Tensor>& Adagrad::parameters() noexcept {
-  return _parameters_new_design();
-}
-
-size_t Adagrad::size() const noexcept {
-  return _size_new_design();
+  return loss;
 }
 
 void Adagrad::save(serialize::OutputArchive& archive) const {

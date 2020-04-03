@@ -30,8 +30,9 @@
 
 #if defined(EXPOSE_C2_OPS) || \
     !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
-#include <ATen/core/Tensor.h>
+#include <ATen/core/TensorBody.h>
 #include <ATen/core/ivalue.h>
+#include <ATen/core/function_schema.h>
 #endif
 
 C10_DECLARE_bool(caffe2_operator_throw_if_fp_exceptions);

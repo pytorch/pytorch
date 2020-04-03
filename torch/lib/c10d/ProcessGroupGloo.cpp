@@ -954,7 +954,7 @@ class AsyncSparseAllreduceWork : public ProcessGroupGloo::AsyncWork {
           continue;
         }
         const auto actual = metadata[i].sizes();
-        AT_CHECK(actual == expected, "Sparse dimensions do not match");
+        TORCH_CHECK(actual == expected, "Sparse dimensions do not match");
       }
     }
 

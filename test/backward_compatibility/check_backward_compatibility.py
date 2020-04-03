@@ -21,33 +21,15 @@ white_list = [
     # We export some functions and classes for test_jit.py directly from libtorch.so,
     # it's not important to have BC for them
     ('_TorchScriptTesting.*', datetime.date(9999, 1, 1)),
-    ('aten::pop*', datetime.date(2020, 4, 1)),
-    ('aten::insert*', datetime.date(2020, 4, 1)),
-    ('aten::Delete*', datetime.date(2020, 4, 1)),
-    ('aten::clear*', datetime.date(2020, 4, 1)),
-    ('aten::_set_item*', datetime.date(2020, 4, 1)),
-    ('aten::copy*', datetime.date(2020, 4, 1)),
-    ('aten::extend*', datetime.date(2020, 4, 1)),
-    ('aten::reverse*', datetime.date(2020, 4, 1)),
-    ('aten::append*', datetime.date(2020, 4, 1)),
-    ('aten::list*', datetime.date(2020, 4, 1)),
-    ('aten::__getitem__*', datetime.date(2020, 4, 1)),
-    ('aten::len*', datetime.date(2020, 4, 1)),
-    ('aten::mul_*', datetime.date(2020, 4, 1)),
-    ('aten::slice*', datetime.date(2020, 4, 1)),
-    ('aten::add*', datetime.date(2020, 4, 1)),
-    ('aten::mul*', datetime.date(2020, 4, 1)),
-    ('aten::select*', datetime.date(2020, 4, 1)),
-    ('aten::add_*', datetime.date(2020, 4, 1)),
-    # _like default change, see https://github.com/pytorch/pytorch/issues/33580
-    ('aten::randn_like', datetime.date(2020, 3, 15)),
-    ('aten::full_like', datetime.date(2020, 3, 15)),
-    ('aten::empty_like', datetime.date(2020, 3, 15)),
-    ('aten::rand_like', datetime.date(2020, 3, 15)),
-    ('aten::ones_like', datetime.date(2020, 3, 15)),
-    ('aten::randint_like', datetime.date(2020, 3, 15)),
-    ('aten::zeros_like', datetime.date(2020, 3, 15)),
-    ('_aten', datetime.date(2020, 4, 1)),
+    ('aten::append*', datetime.date(2020, 4, 15)),
+    ('aten::real*', datetime.date(2020, 4, 15)),
+    ('aten::imag*', datetime.date(2020, 4, 15)),
+]
+
+
+# The nightly will fail to parse newly added syntax to schema declarations
+# Add new schemas that will fail the nightly here
+dont_parse_list = [
 ]
 
 
@@ -61,13 +43,23 @@ def white_listed(schema, white_list):
     return False
 
 
+def dont_parse(schema_line):
+    for item in dont_parse_list:
+        if item[1] < datetime.date.today():
+            continue
+        regexp = re.compile(item[0])
+        if regexp.search(schema_line):
+            return True
+    return False
+
+
 def check_bc(new_schema_dict):
     existing_schemas = torch._C._jit_get_all_schemas()
     is_bc = True
     broken_ops = []
     for existing_schema in existing_schemas:
         if white_listed(existing_schema, white_list):
-            print("skipping schema: ", str(existing_schema))
+            print("Black list, skipping schema: ", str(existing_schema))
             continue
         print("processing existing schema: ", str(existing_schema))
         new_schemas = new_schema_dict.get(existing_schema.name, [])
@@ -109,10 +101,9 @@ if __name__ == '__main__':
             line = f.readline()
             if not line:
                 break
-            if "torch.classes" in line:
-                # TODO Fix type __torch__.torch.classes.xxx
+            if dont_parse(line.strip()):
+                print("Not parsing schema line: ", line.strip())
                 continue
-
             s = parse_schema(line.strip())
             slist = new_schema_dict.get(s.name, [])
             slist.append(s)
