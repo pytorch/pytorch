@@ -22,7 +22,6 @@ struct TypeHash {
   }
 };
 
-
 /*
  * Usage: FusionGuard and Fusion are required user interfaces for any operation
  * underlying the code generator. In order to create values, expressions, and
