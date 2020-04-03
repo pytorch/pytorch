@@ -28,17 +28,26 @@ bool is_cast_legal(const DataType& t1, const DataType& t2) {
   return true;
 }
 
-static std::unordered_map<DataType, std::string> data_type_string_map{
+namespace {
+
+struct TypeHash {
+  template <typename T>
+  std::size_t operator()(T t) const {
+    return static_cast<std::size_t>(t);
+  }
+};
+
+static std::unordered_map<DataType, std::string, TypeHash> data_type_string_map{
     {DataType::Float, "float"},
     {DataType::Int, "size_t"}};
-static std::unordered_map<ValType, std::string> val_type_string_map{
+static std::unordered_map<ValType, std::string, TypeHash> val_type_string_map{
     {ValType::TensorIndex, "TensorIndex"},
     {ValType::TensorView, "TensorView"},
     {ValType::TensorDomain, "TensorDomain"},
     {ValType::IterDomain, "IterDomain"},
     {ValType::Scalar, "Scalar"}};
 
-static std::unordered_map<ExprType, std::string> expr_type_string_map{
+static std::unordered_map<ExprType, std::string, TypeHash> expr_type_string_map{
     {ExprType::UnaryOp, "UnaryOp"},
     {ExprType::BinaryOp, "BinaryOp"},
     {ExprType::ForLoop, "ForLoop"},
@@ -46,20 +55,20 @@ static std::unordered_map<ExprType, std::string> expr_type_string_map{
     {ExprType::Split, "Split"},
     {ExprType::Merge, "Merge"},
     {ExprType::Reorder, "Reorder"}};
-static std::unordered_map<UnaryOpType, std::string> unary_op_type_string_map{
-    {UnaryOpType::Neg, "Neg"},
-    {UnaryOpType::Cast, "Cast"}};
-static std::unordered_map<UnaryOpType, std::string>
+static std::unordered_map<UnaryOpType, std::string, TypeHash>
+    unary_op_type_string_map{{UnaryOpType::Neg, "Neg"},
+                             {UnaryOpType::Cast, "Cast"}};
+static std::unordered_map<UnaryOpType, std::string, TypeHash>
     unary_op_type_inline_op_string_map{{UnaryOpType::Neg, "~"}};
-static std::unordered_map<BinaryOpType, std::string> binary_op_type_string_map{
-    {BinaryOpType::Add, "Add"},
-    {BinaryOpType::Sub, "Sub"},
-    {BinaryOpType::Mul, "Mul"},
-    {BinaryOpType::Div, "Div"},
-    {BinaryOpType::Mod, "Mod"},
-    {BinaryOpType::LT, "LessThan"},
-    {BinaryOpType::CeilDiv, "ceilDiv"}};
-static std::unordered_map<BinaryOpType, std::string>
+static std::unordered_map<BinaryOpType, std::string, TypeHash>
+    binary_op_type_string_map{{BinaryOpType::Add, "Add"},
+                              {BinaryOpType::Sub, "Sub"},
+                              {BinaryOpType::Mul, "Mul"},
+                              {BinaryOpType::Div, "Div"},
+                              {BinaryOpType::Mod, "Mod"},
+                              {BinaryOpType::LT, "LessThan"},
+                              {BinaryOpType::CeilDiv, "ceilDiv"}};
+static std::unordered_map<BinaryOpType, std::string, TypeHash>
     binary_op_type_inline_op_string_map{{BinaryOpType::Add, "+"},
                                         {BinaryOpType::Sub, "-"},
                                         {BinaryOpType::Mul, "*"},
@@ -67,25 +76,27 @@ static std::unordered_map<BinaryOpType, std::string>
                                         {BinaryOpType::Mod, "%"},
                                         {BinaryOpType::LT, "<"}};
 
-static std::unordered_map<ParallelType, std::string> parallel_type_string_map{
-    {ParallelType::BIDz, "blockIdx.z"},
-    {ParallelType::BIDy, "blockIdx.y"},
-    {ParallelType::BIDx, "blockIdx.x"},
-    {ParallelType::TIDz, "threadIdx.z"},
-    {ParallelType::TIDy, "threadIdx.y"},
-    {ParallelType::TIDx, "threadIdx.x"},
-    {ParallelType::Vectorize, "Vectorize"},
-    {ParallelType::Unroll, "Unroll"},
-    {ParallelType::Serial, "Serial"}};
+static std::unordered_map<ParallelType, std::string, TypeHash>
+    parallel_type_string_map{{ParallelType::BIDz, "blockIdx.z"},
+                             {ParallelType::BIDy, "blockIdx.y"},
+                             {ParallelType::BIDx, "blockIdx.x"},
+                             {ParallelType::TIDz, "threadIdx.z"},
+                             {ParallelType::TIDy, "threadIdx.y"},
+                             {ParallelType::TIDx, "threadIdx.x"},
+                             {ParallelType::Vectorize, "Vectorize"},
+                             {ParallelType::Unroll, "Unroll"},
+                             {ParallelType::Serial, "Serial"}};
 
-static std::unordered_map<at::ScalarType, DataType> at_type_map{
+static std::unordered_map<at::ScalarType, DataType, TypeHash> at_type_map{
     {at::ScalarType::Float, DataType::Float},
     {at::ScalarType::Int, DataType::Int},
 };
 
+} // namespace
 DataType aten_to_data_type(const at::ScalarType& scalar_type) {
   TORCH_INTERNAL_ASSERT(
-      at_type_map.count(scalar_type) != 0, "No string found for scalar type.");
+      at_type_map.find(scalar_type) != at_type_map.end(),
+      "No string found for scalar type.");
   return at_type_map[scalar_type];
 }
 
@@ -93,7 +104,8 @@ TORCH_CUDA_API std::ostream& operator<<(
     std::ostream& out,
     const ValType vtype) {
   TORCH_INTERNAL_ASSERT(
-      val_type_string_map.count(vtype) != 0, "No string found for val type.");
+      val_type_string_map.find(vtype) != val_type_string_map.end(),
+      "No string found for val type.");
   return out << val_type_string_map[vtype];
 }
 
@@ -101,7 +113,8 @@ TORCH_CUDA_API std::ostream& operator<<(
     std::ostream& out,
     const DataType dtype) {
   TORCH_INTERNAL_ASSERT(
-      data_type_string_map.count(dtype) != 0, "No string found for data type.");
+      data_type_string_map.find(dtype) != data_type_string_map.end(),
+      "No string found for data type.");
   return out << data_type_string_map[dtype];
 }
 
@@ -109,7 +122,8 @@ TORCH_CUDA_API std::ostream& operator<<(
     std::ostream& out,
     const ExprType etype) {
   TORCH_INTERNAL_ASSERT(
-      expr_type_string_map.count(etype) != 0, "No string found for expr type.");
+      expr_type_string_map.find(etype) != expr_type_string_map.end(),
+      "No string found for expr type.");
   return out << expr_type_string_map[etype];
 }
 
@@ -117,7 +131,7 @@ TORCH_CUDA_API std::ostream& operator<<(
     std::ostream& out,
     const UnaryOpType uotype) {
   TORCH_INTERNAL_ASSERT(
-      unary_op_type_string_map.count(uotype) != 0,
+      unary_op_type_string_map.find(uotype) != unary_op_type_string_map.end(),
       "No string found for UnaryOp type.");
   return out << unary_op_type_string_map[uotype];
 }
@@ -126,7 +140,7 @@ TORCH_CUDA_API std::ostream& operator<<(
     std::ostream& out,
     const BinaryOpType botype) {
   TORCH_INTERNAL_ASSERT(
-      binary_op_type_string_map.count(botype) != 0,
+      binary_op_type_string_map.find(botype) != binary_op_type_string_map.end(),
       "No string found for BinaryOp type.");
   return out << binary_op_type_string_map[botype];
 }
@@ -135,7 +149,7 @@ TORCH_CUDA_API std::ostream& operator<<(
     std::ostream& out,
     const ParallelType ptype) {
   TORCH_INTERNAL_ASSERT(
-      parallel_type_string_map.count(ptype) != 0,
+      parallel_type_string_map.find(ptype) != parallel_type_string_map.end(),
       "No string found for parallel type.");
   return out << parallel_type_string_map[ptype];
 }
