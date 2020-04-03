@@ -1571,7 +1571,14 @@ def sigmoid(input):
 def hardsigmoid(input, inplace=False):
     r"""hardsigmoid(input) -> Tensor
 
-    Applies the element-wise function :math:`\text{Hardsigmoid}(x) = \frac{ReLU6(x + 3)}{6}`
+    Applies the element-wise function
+
+    .. math::
+        \text{Hardsigmoid}(x) = \begin{cases}
+            0 & \text{if~} x \le -3, \\
+            1 & \text{if~} x \ge +3, \\
+            x / 6 & \text{otherwise}
+        \end{cases}
 
     Args:
         inplace: If set to ``True``, will do this operation in-place. Default: ``False``
@@ -1641,7 +1648,11 @@ def hardswish(input, inplace=False):
     `Searching for MobileNetV3`_.
 
     .. math::
-        \text{Hardswish}(x) = x * \frac{ReLU6(x + 3)}{6}
+        \text{Hardswish}(x) = \begin{cases}
+            0 & \text{if~} x \le -3, \\
+            x & \text{if~} x \ge +3, \\
+            x^2/6 & \text{otherwise}
+        \end{cases}
 
     See :class:`~torch.nn.Hardswish` for more details.
 
@@ -2215,8 +2226,8 @@ def poisson_nll_loss(input, target, log_input=True, full=False, size_average=Non
     return ret
 
 
-def kl_div(input, target, size_average=None, reduce=None, reduction='mean'):
-    # type: (Tensor, Tensor, Optional[bool], Optional[bool], str) -> Tensor
+def kl_div(input, target, size_average=None, reduce=None, reduction='mean', log_target=False):
+    # type: (Tensor, Tensor, Optional[bool], Optional[bool], str, bool) -> Tensor
     r"""The `Kullback-Leibler divergence`_ Loss.
 
     See :class:`~torch.nn.KLDivLoss` for details.
@@ -2240,6 +2251,10 @@ def kl_div(input, target, size_average=None, reduce=None, reduction='mean'):
             ``'sum'``: the output will be summed
             ``'mean'``: the output will be divided by the number of elements in the output
             Default: ``'mean'``
+        log_target (bool): A flag indicating whether ``target`` is passed in the log space.
+            It is recommended to pass certain distributions (like ``softmax``)
+            in the log space to avoid numerical issues caused by explicit ``log``.
+            Default: ``False``
 
     .. note::
         :attr:`size_average` and :attr:`reduce` are in the process of being deprecated,
@@ -2258,7 +2273,7 @@ def kl_div(input, target, size_average=None, reduce=None, reduction='mean'):
         if any([type(t) is not Tensor for t in tens_ops]) and has_torch_function(tens_ops):
             return handle_torch_function(
                 kl_div, tens_ops, input, target, size_average=size_average,
-                reduce=reduce, reduction=reduction)
+                reduce=reduce, reduction=reduction, log_target=log_target)
     if size_average is not None or reduce is not None:
         reduction_enum = _Reduction.legacy_get_enum(size_average, reduce)
     else:
@@ -2273,7 +2288,7 @@ def kl_div(input, target, size_average=None, reduce=None, reduction='mean'):
         else:
             reduction_enum = _Reduction.get_enum(reduction)
 
-    reduced = torch.kl_div(input, target, reduction_enum)
+    reduced = torch.kl_div(input, target, reduction_enum, log_target=log_target)
 
     if reduction == 'batchmean' and input.dim() != 0:
         reduced = reduced / input.size()[0]
@@ -3614,6 +3629,7 @@ def normalize(input, p=2, dim=1, eps=1e-12, out=None):
 
 
 def assert_int_or_pair(arg, arg_name, message):
+    # type: (List[int], str, str)
     assert isinstance(arg, int) or len(arg) == 2, message.format(arg_name)
 
 

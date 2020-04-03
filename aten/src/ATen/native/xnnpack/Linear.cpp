@@ -109,7 +109,8 @@ Tensor run(
     const Tensor& input) {
   using namespace internal;
 
-  const Tensor padded_input = allocate_padded_if_needed(input.contiguous());
+  const Tensor padded_input = allocate_padded_contiguous_if_needed(
+      input, input.suggest_memory_format());
 
   TORCH_CHECK(
       usable(padded_input),
@@ -150,8 +151,8 @@ Tensor run(
 c10::intrusive_ptr<xnnpack::LinearOpContext> createLinearClampPrePackOpContext(
     Tensor weight,
     c10::optional<Tensor> bias,
-    c10::optional<double> output_min,
-    c10::optional<double> output_max) {
+    c10::optional<Scalar> output_min,
+    c10::optional<Scalar> output_max) {
   return xnnpack::XNNPackLinearOpContext::create_context(
       std::move(weight), std::move(bias), output_min, output_max);
 }

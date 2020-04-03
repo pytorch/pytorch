@@ -6,6 +6,7 @@
 #include <c10/util/Exception.h>
 #include <torch/csrc/autograd/edge.h>
 #include <torch/csrc/autograd/grad_mode.h>
+#include <torch/csrc/autograd/record_function.h>
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/jit/api/compilation_unit.h>
 #include <torch/csrc/jit/api/function_impl.h>
@@ -19,6 +20,11 @@
 #include <torch/csrc/jit/runtime/jit_exception.h>
 #include <torch/csrc/jit/runtime/operator.h>
 #include <torch/csrc/jit/runtime/vararg_functions.h>
+
+#ifdef USE_DISTRIBUTED
+#include <torch/csrc/distributed/autograd/context/container.h>
+using torch::distributed::autograd::DistAutogradContainer;
+#endif
 
 #include <exception>
 #include <iostream>
@@ -208,6 +214,14 @@ void insertLastUses(Graph& g) {
 
   InsertLastUses ilu(g);
 }
+
+inline int64_t getDistAutogradContextId() {
+#ifdef USE_DISTRIBUTED
+  return DistAutogradContainer::currentContextId();
+#else
+  return 0;
+#endif
+}
 } // namespace
 
 std::ostream& operator<<(std::ostream& out, Instruction inst);
@@ -253,6 +267,8 @@ struct CanEmitInline {
         // instruction stack
         // by the later BailOut in createBailoutBlock and its jf_index
         // will become invalid.
+        v->node()->kind() != prim::CudaFusionGroup &&
+        v->node()->kind() != prim::FusionGroup &&
         v->node()->kind() != prim::BailOut && v->uses().size() == 1 &&
         v->node()->outputs().size() == 1;
   }
@@ -985,6 +1001,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             .getPlanFor(stack, GraphExecutor::getDefaultNumBailOuts())
             .code;
     frames.back().pc = af->pc + 1;
+    RECORD_TORCHSCRIPT_FUNCTION(fn->name(), last(stack, code.num_inputs()));
     enterFrame(code, stack.size() - code.num_inputs());
     *af = ActiveFrame(frames.back());
   }
@@ -1146,9 +1163,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
                     : state_(std::move(state)), stack_(std::move(stack)) {}
                 void operator()() {
                   at::launch(InterpreterContinuation(
-                      state_,
-                      std::move(stack_),
-                      torch::ThreadLocalState::getThreadLocalState()));
+                      state_, std::move(stack_), getDistAutogradContextId()));
                 }
 
                private:
@@ -1273,7 +1288,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             InterpreterContinuation continuation(
                 forked_interpreter,
                 Stack(stack.end() - inst.N, stack.end()),
-                torch::ThreadLocalState::getThreadLocalState());
+                getDistAutogradContextId());
             drop(stack, inst.N);
             push(stack, forked_interpreter.getFuture());
             at::launch(std::move(continuation));
@@ -1451,8 +1466,14 @@ InterpreterState::InterpreterState(
     : pImpl(std::move(pImpl_)) {}
 
 void InterpreterContinuation::operator()() {
-  torch::ThreadLocalStateGuard guard(thread_local_state);
+#ifdef USE_DISTRIBUTED
+  auto prev_dist_id = DistAutogradContainer::currentContextId();
+  DistAutogradContainer::forceCurrentContextId(dist_autograd_context_id_);
+#endif
   state.runAsync(stack);
+#ifdef USE_DISTRIBUTED
+  DistAutogradContainer::forceCurrentContextId(prev_dist_id);
+#endif
 }
 } // namespace jit
 } // namespace torch
