@@ -69,9 +69,9 @@ void testExprLetStmtTest01() {
   Buffer a_buf("a", kFloat, {1});
   Buffer b_buf("b", kFloat, {1});
 
-  ExprHandle load_a = Load::make(a_buf, 0, 1);
+  ExprHandle load_a = Load::make(a_buf, {0}, 1);
   VarHandle var = VarHandle("v", kFloat);
-  Stmt* store_b = Store::make(b_buf, 0, var, 1);
+  Stmt* store_b = Store::make(b_buf, {0}, var, 1);
   Stmt* let_store = LetStmt::make(var, load_a, store_b);
   SimpleIREvaluator eval(let_store, a_buf, b_buf);
 
@@ -182,9 +182,9 @@ void testExprVectorAdd01() {
   const int kVectorCount = 128;
   const int kTotalSize = kVectorSize * kVectorCount;
 
-  Buffer a_buf(VarHandle("A", kHandle), kFloat, {ExprHandle(kTotalSize)});
-  Buffer b_buf(VarHandle("B", kHandle), kFloat, {ExprHandle(kTotalSize)});
-  Buffer c_buf(VarHandle("C", kHandle), kFloat, {ExprHandle(kTotalSize)});
+  Buffer a_buf(BufHandle("A", {ExprHandle(kTotalSize)}), kFloat);
+  Buffer b_buf(BufHandle("B", {ExprHandle(kTotalSize)}), kFloat);
+  Buffer c_buf(BufHandle("C", {ExprHandle(kTotalSize)}), kFloat);
 
   /*
   Build the following:
@@ -197,16 +197,16 @@ void testExprVectorAdd01() {
   VarHandle index = VarHandle("index", kInt);
   ExprHandle load_a = Load::make(
       a_buf,
-      Ramp::make(index * kVectorSize, 1, kVectorSize),
+      {Ramp::make(index * kVectorSize, 1, kVectorSize)},
       Broadcast::make(1, kVectorSize));
   ExprHandle load_b = Load::make(
       b_buf,
-      Ramp::make(index * kVectorSize, 1, kVectorSize),
+      {Ramp::make(index * kVectorSize, 1, kVectorSize)},
       Broadcast::make(1, kVectorSize));
   ExprHandle value = load_a + load_b;
   Stmt* store_c = Store::make(
       c_buf,
-      Ramp::make(index * kVectorSize, 1, kVectorSize),
+      {Ramp::make(index * kVectorSize, 1, kVectorSize)},
       value,
       Broadcast::make(1, kVectorSize));
   Stmt* stmt = For::make(index, 0, kVectorCount, store_c);
@@ -232,9 +232,9 @@ void testExprVectorAdd01() {
 void testExprCompareSelectEQ() {
   KernelScope kernel_scope;
   constexpr int N = 1024;
-  Buffer a(VarHandle("A", kHandle), kInt, {N});
-  Buffer b(VarHandle("B", kHandle), kInt, {N});
-  Buffer c(VarHandle("C", kHandle), kInt, {N});
+  Buffer a(BufHandle("A", {N}), kInt);
+  Buffer b(BufHandle("B", {N}), kInt);
+  Buffer c(BufHandle("C", {N}), kInt);
   std::vector<int> a_buffer(N, 1);
   std::vector<int> b_buffer(N, 1);
   std::vector<int> c_buffer(N, 0);
@@ -248,10 +248,10 @@ void testExprCompareSelectEQ() {
       N,
       Store::make(
           c,
-          i,
+          {i},
           CompareSelect::make(
-              Load::make(a, i, mask),
-              Load::make(b, i, mask),
+              Load::make(a, {i}, mask),
+              Load::make(b, {i}, mask),
               CompareSelectOperation::kEQ),
           mask));
 
@@ -403,11 +403,11 @@ void testExprDynamicShapeAdd() {
   KernelScope kernel_scope;
   auto testWithSize = [](int32_t size) {
     VarHandle n("n", kInt);
-    Buffer a(VarHandle("a", kHandle), kFloat, {n});
-    Buffer b(VarHandle("b", kHandle), kFloat, {n});
-    Buffer c(VarHandle("c", kHandle), kFloat, {n});
+    Buffer a(BufHandle("a", {n}), kFloat);
+    Buffer b(BufHandle("b", {n}), kFloat);
+    Buffer c(BufHandle("c", {n}), kFloat);
     VarHandle i("i", kInt);
-    Stmt* s = For::make(i, 0, n, Store::make(c, i, a(i) + b(i), 1));
+    Stmt* s = For::make(i, 0, n, Store::make(c, {i}, a(i) + b(i), 1));
     std::vector<float> aData(size, 1.0f);
     std::vector<float> bData(size, 2.0f);
     std::vector<float> cData(size, 0.0f);
@@ -426,9 +426,9 @@ void testCond01() {
   Buffer a_buf("a", kFloat, {N});
   VarHandle index = VarHandle("index", kInt);
   Stmt* assign_x2 =
-      Store::make(VarHandle(a_buf.data()), index, cast<float>(index) * 2, 1);
+      Store::make(BufHandle(a_buf.data()), {index}, cast<float>(index) * 2, 1);
   Stmt* assign_x3 =
-      Store::make(VarHandle(a_buf.data()), index, cast<float>(index) * 3, 1);
+      Store::make(BufHandle(a_buf.data()), {index}, cast<float>(index) * 3, 1);
   ExprHandle even_cond = CompareSelect::make(Mod::make(index, 2), 0, kEQ);
   Stmt* assign = Cond::make(even_cond, assign_x2, assign_x3);
   Stmt* for_stmt = For::make(index, 0, N, assign);
@@ -476,7 +476,7 @@ void testStmtClone() {
   Buffer a_buf("a", kInt, {N});
   VarHandle index = VarHandle("index", kInt);
   Stmt* body =
-      Store::make(VarHandle(a_buf.data()), index, 5, 1);
+      Store::make(BufHandle(a_buf.data()), {index}, 5, 1);
   Stmt* loop = For::make(index, 0, N, body);
 
   Stmt* cloned_loop = Stmt::clone(loop);
@@ -490,7 +490,7 @@ void testStmtClone() {
 
   // Let's add another assign to the body in the cloned loop and verify that the
   // original statement hasn't changed while the cloned one has.
-  Stmt* body_addition = Store::make(VarHandle(a_buf.data()), index, 33, 1);
+  Stmt* body_addition = Store::make(BufHandle(a_buf.data()), {index}, 33, 1);
   Block* cloned_body =
       static_cast<Block*>(static_cast<const For*>(cloned_loop)->body());
   cloned_body->append_stmt(body_addition);
