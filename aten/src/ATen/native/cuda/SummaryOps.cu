@@ -369,24 +369,23 @@ Tensor _bincount_cuda(
   });
 }
 
-Tensor _histc_cuda(
-    const Tensor& self,
-    int64_t nbins,
-    Scalar min,
-    Scalar max) {
-  if (self.scalar_type() == ScalarType::Half) {
-    AT_ERROR("HalfTensor is not supported");
-  }
-  return AT_DISPATCH_ALL_TYPES(self.scalar_type(), "histc", [&] {
-    return _histc_cuda_template<scalar_t>(self, nbins, min.to<scalar_t>(), max.to<scalar_t>());
+void histc_kernel(
+  TensorIterator& iter,
+  Tensor& hist,
+  int64_t nbins,
+  Scalar minvalue,
+  Scalar maxvalue
+) {
+  const Tensor& self = iter.tensor(0);
+  auto ret = AT_DISPATCH_ALL_TYPES(self.scalar_type(), "histc", [&] {
+    return _histc_cuda_template<scalar_t>(self, nbins, minvalue.to<scalar_t>(), maxvalue.to<scalar_t>());
   });
+
+  hist.resize_as_(ret);
+  hist.copy_(ret);
 }
 
-Tensor& _histc_out_cuda(Tensor& result, const Tensor& self, int64_t bins, Scalar min, Scalar max) {
-  auto ret = _histc_cuda(self, bins, min, max);
-  result.resize_as_(ret);
-  result.copy_(ret);
-  return result;
-}
+REGISTER_DISPATCH(histc_stub, &histc_kernel);
+
 } // namespace native
 } // namespace at

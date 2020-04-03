@@ -72,6 +72,7 @@ _bincount_cpu(const Tensor& self, const Tensor& weights, int64_t minlength) {
 
 Tensor& histc_out(Tensor& hist, const Tensor &self, int64_t nbins, Scalar minvalue, Scalar maxvalue) {
   TORCH_CHECK(nbins > 0, "histc: bins must be > 0");
+  TORCH_CHECK(at::isIntegralType(hist.scalar_type()), "hist only supports integral-point dtypes, hist got: ", hist.scalar_type());
 
   hist.resize_({nbins});
   hist.zero_();
@@ -85,7 +86,7 @@ Tensor& histc_out(Tensor& hist, const Tensor &self, int64_t nbins, Scalar minval
 }
 
 Tensor histc(const Tensor& self, int64_t nbins, Scalar minvalue, Scalar maxvalue) {
-  Tensor hist = at::empty({0}, self.options());
+  Tensor hist = at::empty({0}, self.options().dtype(kLong));
   at::histc_out(hist, self, nbins, minvalue, maxvalue);
   return hist;
 }

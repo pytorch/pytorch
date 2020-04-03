@@ -5025,14 +5025,14 @@
 - func: histc.out(Tensor self, int bins=100, Scalar min=0, Scalar max=0, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU: histc_out
-    CUDA: _histc_out_cuda
+    CUDA: histc_out
 
 - func: histc(Tensor self, int bins=100, Scalar min=0, Scalar max=0) -> Tensor
   use_c10_dispatcher: full
   variants: method, function
   dispatch:
     CPU: histc
-    CUDA: _histc_cuda
+    CUDA: histc
 
 - func: fmod.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
