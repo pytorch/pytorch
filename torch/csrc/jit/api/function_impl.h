@@ -25,6 +25,8 @@ struct TORCH_API GraphFunction : public Function {
 
   void run(Stack&& stack) override;
 
+  c10::intrusive_ptr<c10::ivalue::Future> runAsync(Stack& stack) override;
+
   IValue operator()(std::vector<IValue> stack, const Kwargs& kwargs = Kwargs())
       override;
 
@@ -38,7 +40,9 @@ struct TORCH_API GraphFunction : public Function {
       return *optimized_graph_;
     }
     optimized_graph_ = graph_->copy();
-    preoptimizeGraph(*optimized_graph_);
+    if (getGraphExecutorOptimize()) {
+      preoptimizeGraph(*optimized_graph_);
+    }
     return *optimized_graph_;
   }
 
