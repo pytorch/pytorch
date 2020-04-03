@@ -18,7 +18,7 @@ void histc_kernel(
     Scalar maxvalue
 ) {
   const Tensor& tensor = iter.tensor(0);
-  AT_DISPATCH_FLOATING_TYPES(tensor.scalar_type(), "histc_cpu", [&]() -> void {
+  AT_DISPATCH_ALL_TYPES(tensor.scalar_type(), "histc_cpu", [&]() -> void {
     scalar_t minval;
     scalar_t maxval;
     int64_t *h_data;
