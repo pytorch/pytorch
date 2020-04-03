@@ -72,9 +72,9 @@ if(APPLE)
   set(CMAKE_FIND_APPBUNDLE LAST)
 
   # Get clang version on macOS
-  EXECUTE_PROCESS( COMMAND ${CMAKE_CXX_COMPILER} --version OUTPUT_VARIABLE clang_full_version_string )
+  execute_process( COMMAND ${CMAKE_CXX_COMPILER} --version OUTPUT_VARIABLE clang_full_version_string )
   string(REGEX REPLACE "Apple LLVM version ([0-9]+\\.[0-9]+).*" "\\1" CLANG_VERSION_STRING ${clang_full_version_string})
-  MESSAGE( STATUS "CLANG_VERSION_STRING:         " ${CLANG_VERSION_STRING} )
+  message( STATUS "CLANG_VERSION_STRING:         " ${CLANG_VERSION_STRING} )
 
 
   # RPATH stuff
@@ -363,7 +363,13 @@ include(cmake/Utils.cmake)
 include(cmake/public/utils.cmake)
 
 # ---[ Version numbers for generated libraries
-set(TORCH_DEFAULT_VERSION "1.1.0")
+file(READ version.txt TORCH_DEFAULT_VERSION)
+if("${TORCH_DEFAULT_VERSION} " STREQUAL " ")
+  message(WARNING "Could not get version from base 'version.txt'")
+  # If we can't get the version from the version file we should probably
+  # set it to something non-sensical like 0.0.0
+  set(TORCH_DEFAULT_VERSION, "0.0.0")
+endif()
 set(TORCH_BUILD_VERSION "${TORCH_DEFAULT_VERSION}" CACHE STRING "Torch build version")
 if(DEFINED ENV{PYTORCH_BUILD_VERSION})
   set(TORCH_BUILD_VERSION "$ENV{PYTORCH_BUILD_VERSION}"
