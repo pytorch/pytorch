@@ -70,7 +70,9 @@ UserRRef::UserRRef(
     const RRefId& rrefId,
     const ForkId& forkId,
     TypePtr type)
-    : RRef(ownerId, rrefId, std::move(type)), forkId_(forkId) {
+    : RRef(ownerId, rrefId, std::move(type)),
+      forkId_(forkId),
+      confirmedByOwner_(false) {
   // Do nothing,
   // (1) If this UserRRef is a fork of an existing RRef, RRefContext will send
   //     a RREF_FORK_REQUEST message to the owner.
@@ -105,6 +107,28 @@ const ForkId& UserRRef::forkId() const {
 }
 
 IValue UserRRef::toHere() {
+  // see Note [Best-Effort Check on Deleted UserRRefs]
+  TORCH_CHECK(
+      !deletedOnOwner_,
+      "User RRef with RRefId=",
+      rrefId(),
+      " and ForkId=",
+      forkId(),
+      " has been deleted. Cannot call to_here() on it after deletion.");
+  TORCH_CHECK(
+      !type_->is_module(),
+      "User RRef with RRefId=",
+      rrefId(),
+      " and ForkId=",
+      forkId(),
+      " is an RRef to a ScriptModule. "
+      "It can't be sent through RPC "
+      "from owner, ",
+      ownerName(),
+      ", to user, ",
+      RpcAgent::getCurrentRpcAgent()->getWorkerInfo().name_,
+      ".");
+
   auto agent = RpcAgent::getCurrentRpcAgent();
 
   // ScriptRRefFetchCall message always carries autograd context id even if
@@ -143,17 +167,54 @@ IValue UserRRef::toHere() {
   }
 }
 
+RRefForkData UserRRef::fork() const {
+  // Note [Best-Effort Check on Deleted UserRRefs]
+  // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  // This check does not guarantee correctness, as there could be another thread
+  // trying to delete this UserRRef concurrently. Passing this check does not
+  // mean this RRef will be alive throughout this function. This is just our
+  // best-effort attempt to raise proper error messages. The behavior of using
+  // deleted UserRRefs is undefined.
+  //
+  // The reason for not implementing strict checks are:
+  // 1. This would need to acquire lock on deletedOnOwnerMutex_, which would
+  //    introduce unnecessary overhead for most normal use cases.
+  // 2. This would introduce a lot of complexities to get the behavior correct.
+  //    Assume we acquired the lock here, and there is another thread X block
+  //    waiting in tryDel() on the lock. Exiting this fork function would
+  //    unblock thread X. However, while X proceeds with deleting this UserRRef,
+  //    the call site of fork() might have added the UserRRef to
+  //    pendingChildren_ map, but up to this point, nothing prevents X from
+  //    deleting this RRef even if it shouldn't do so due to the state change
+  //    in pendingChildren_. We might be able to get it right for now by locking
+  //    and checking pendingChildren_ in X, but the gain does not seem to
+  //    worth the complexity.
+  TORCH_CHECK(
+      !deletedOnOwner_,
+      "User RRef with RRefId=",
+      rrefId(),
+      " and ForkId=",
+      forkId(),
+      " has been deleted. Cannot call fork an UserRRef after deletion.");
+  return RRef::fork();
+}
+
 //////////////////////////  OwnerRRef  /////////////////////////////////////
 
 const IValue& OwnerRRef::getValue() const {
   std::unique_lock<std::mutex> lock(mutex_);
-  valueCV_.wait(lock, [this] { return value_.has_value(); });
+  valueCV_.wait(
+      lock, [this] { return value_.has_value() || error_.has_value(); });
+  if (error_) {
+    std::runtime_error err(*error_);
+    throw err;
+  }
   return value_.value();
 }
 
 bool OwnerRRef::hasValue() const {
   std::lock_guard<std::mutex> lock(mutex_);
-  return value_.has_value();
+  return value_.has_value() || error_.has_value();
 }
 
 std::shared_ptr<FutureMessage> OwnerRRef::getFuture() {
@@ -166,6 +227,10 @@ std::shared_ptr<FutureMessage> OwnerRRef::getFuture() {
   if (value_.has_value()) {
     lock.unlock();
     ret->markCompleted(Message());
+  } else if (error_.has_value()) {
+    auto err = *error_;
+    lock.unlock();
+    ret->setError(std::move(err));
   }
   return ret;
 }
@@ -179,6 +244,18 @@ void OwnerRRef::setValue(IValue&& value) {
   valueCV_.notify_all();
   if (future.get() && !future->completed()) {
     future->markCompleted(Message());
+  }
+}
+
+void OwnerRRef::setError(const std::string& error) {
+  std::unique_lock<std::mutex> lock(mutex_);
+  error_ = error;
+  std::shared_ptr<FutureMessage> future;
+  future.swap(future_);
+  lock.unlock();
+  valueCV_.notify_all();
+  if (future.get()) {
+    future->setErrorIfNeeded(error);
   }
 }
 

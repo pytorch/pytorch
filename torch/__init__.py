@@ -1,4 +1,3 @@
-# @lint-ignore-every PYTHON3COMPATIMPORTS
 
 r"""
 The torch package contains data structures for multi-dimensional
@@ -29,6 +28,7 @@ __all__ = [
     'ShortStorage', 'CharStorage', 'ByteStorage', 'BoolStorage',
     'DoubleTensor', 'FloatTensor', 'LongTensor', 'IntTensor',
     'ShortTensor', 'CharTensor', 'ByteTensor', 'BoolTensor', 'Tensor',
+    'lobpcg',
 ]
 
 ################################################################################
@@ -69,6 +69,11 @@ if platform.system() == 'Windows':
         dll_paths = list(filter(os.path.exists, dll_paths)) + [os.environ['PATH']]
 
         os.environ['PATH'] = ';'.join(dll_paths)
+
+    import glob
+    dlls = glob.glob(os.path.join(th_dll_path, '*.dll'))
+    for dll in dlls:
+        ctypes.CDLL(dll)
 
 
 # See Note [Global dependencies]
@@ -394,3 +399,7 @@ legacy_contiguous_format = contiguous_format
 from torch.multiprocessing._atfork import register_after_fork
 register_after_fork(torch.get_num_threads)
 del register_after_fork
+
+# Import tools that require fully imported torch (for applying
+# torch.jit.script as a decorator, for instance):
+from ._lobpcg import lobpcg

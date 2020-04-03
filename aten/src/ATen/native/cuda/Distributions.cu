@@ -98,20 +98,6 @@ void gamma_cuda_kernel(
       });
 }
 
-template <typename scalar_t>
-void dirichlet_grad_cuda_kernel(
-    at::Tensor& ret,
-    const at::Tensor& x,
-    const at::Tensor& alpha,
-    const at::Tensor& total) {
-  using accscalar_t = at::acc_type<scalar_t, true>;
-  at::cuda::CUDA_tensor_apply4<scalar_t, scalar_t, scalar_t, scalar_t>(
-      ret, x, alpha, total,
-      [] __device__ (scalar_t& ret_val, const scalar_t& x_val, const scalar_t& alpha_val, const scalar_t& total_val) {
-        ret_val = dirichlet_grad_one<scalar_t, accscalar_t>(x_val, alpha_val, total_val);
-      });
-}
-
 template<typename scalar_t>
 void dirichlet_scalar_cuda_kernel(
     at::Tensor& ret,
@@ -137,7 +123,7 @@ void dirichlet_scalar_cuda_kernel(
 
 namespace at { namespace native {
 
-Tensor _s_poisson_cuda(const Tensor& lambda, Generator* gen_) {
+Tensor _s_poisson_cuda(const Tensor& lambda, Generator gen_) {
   auto gen = get_generator_or_default<CUDAGenerator>(gen_, cuda::detail::getDefaultCUDAGenerator());
   std::pair<uint64_t, uint64_t> rng_engine_inputs;
   {
@@ -152,7 +138,7 @@ Tensor _s_poisson_cuda(const Tensor& lambda, Generator* gen_) {
   return ret;
 }
 
-Tensor _s_gamma_cuda(const Tensor& alpha, Generator* gen_) {
+Tensor _s_gamma_cuda(const Tensor& alpha, Generator gen_) {
   auto gen = get_generator_or_default<CUDAGenerator>(gen_, cuda::detail::getDefaultCUDAGenerator());
   std::pair<uint64_t, uint64_t> rng_engine_inputs;
   {
@@ -167,7 +153,7 @@ Tensor _s_gamma_cuda(const Tensor& alpha, Generator* gen_) {
   return ret;
 }
 
-Tensor _s_dirichlet_cuda(const Tensor& alpha, Generator* gen_) {
+Tensor _s_dirichlet_cuda(const Tensor& alpha, Generator gen_) {
   auto gen = get_generator_or_default<CUDAGenerator>(gen_, cuda::detail::getDefaultCUDAGenerator());
   std::pair<uint64_t, uint64_t> rng_engine_inputs;
   {
@@ -203,8 +189,18 @@ Tensor _standard_gamma_grad_cuda(const Tensor& self, const Tensor& output) {
 
 Tensor _dirichlet_grad_cuda(const Tensor& x, const Tensor& alpha, const Tensor& total) {
   Tensor ret = at::empty(x.sizes(), x.options());
+  TensorIterator iter;
+  iter.add_output(ret);
+  iter.add_input(x);
+  iter.add_input(alpha);
+  iter.add_input(total);
+  iter.build();
   AT_DISPATCH_FLOATING_TYPES(x.scalar_type(), "_dirichlet_grad_cuda", [&] {
-    dirichlet_grad_cuda_kernel<scalar_t>(ret, x, alpha, total);
+    using accscalar_t = at::acc_type<scalar_t, true>;
+    gpu_kernel(iter,
+      [] GPU_LAMBDA (scalar_t x_val, scalar_t alpha_val, scalar_t total_val) -> scalar_t {
+        return dirichlet_grad_one<scalar_t, accscalar_t>(x_val, alpha_val, total_val);
+      });
   });
   return ret;
 }

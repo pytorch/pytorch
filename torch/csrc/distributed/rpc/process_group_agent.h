@@ -2,7 +2,6 @@
 
 #include <c10/core/thread_pool.h>
 #include <c10d/ProcessGroup.hpp>
-#include <torch/csrc/distributed/rpc/python_rpc_handler.h>
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
 
 #include <atomic>
@@ -75,7 +74,7 @@ class ProcessGroupAgent : public RpcAgent {
 
   void sync() override;
 
-  void start() override;
+  void startImpl() override;
 
   void shutdown() override;
 
@@ -154,6 +153,11 @@ class ProcessGroupAgent : public RpcAgent {
   void handleSend(const SendWork& work);
   // put RecvWork into a queue and notify the worker thread
   void enqueueRecv(RecvWork work);
+  // handle a RecvWork request. Return true if we should increment recvCounts,
+  // false if not (i.e. if the RPC timed out and we are getting a result after
+  // the timeout). This ensures that the messages accounted for in
+  // hasPendingMessage() are tallied properly during a graceful shutdown.
+  bool handleRecv(RecvWork& work);
   // Loop for receiving messages. Calls listenLoopInternal and handles errors
   // such as timeouts on the process group.
   virtual void listenLoopInternal();
@@ -176,6 +180,7 @@ class ProcessGroupAgent : public RpcAgent {
   // futures_ map. It is also removed from the futureTimeouts_ map since these
   // maps are kept in sync.
   void markFutureWithError(Message& message);
+  void markFutureWithError(int64_t id, std::string errorMsg);
 
   // Note [Termination Detection]
   // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -206,7 +211,7 @@ class ProcessGroupAgent : public RpcAgent {
 
   std::shared_ptr<c10d::ProcessGroup> pg_;
   // worker name -> rank
-  std::unordered_map<std::string, int> nameMap_;
+  std::unordered_map<std::string, worker_id_t> nameMap_;
   std::vector<WorkerInfo> allWorkerInfo_;
   // record the number of messages sent to and received from each peer. The recv
   // counter is only marked after the message is processed. Join uses allgather
@@ -216,13 +221,6 @@ class ProcessGroupAgent : public RpcAgent {
   MessageCounter recvCounts_;
 
   std::atomic<int64_t> nextId_;
-  // atomic bool indicating if this agent is running. It is set in
-  // ProcessGroupAgent::start and unset in ProcessGroupAgent::shutdown and
-  // ProcessGroupAgent::join. It controls whether several background threads
-  // should be running.
-  // We lock access to this in shutdown() and pollTimedOutRPCs() to prevent race
-  // conditions when notifying condition variables.
-  std::atomic<bool> rpcRunning_{false};
   // one mutex per ProcessGroup rank, as ProcessGroup::send is not thread-safe
   // when using the same tag.
   std::vector<std::mutex> sendMutexes_;
@@ -233,6 +231,16 @@ class ProcessGroupAgent : public RpcAgent {
   // interruptible in shutdown().
   std::mutex recvWorkMutex_;
   std::shared_ptr<c10d::ProcessGroup::Work> recvWork_;
+  // Map of dst rank to current oustanding sends that we are waiting on. In the
+  // case of a call to ::shutdown() while we are still waiting on these sends,
+  // the pending sends contained in this map will be aborted, allowing the
+  // waiting thread to be unblocked.
+  std::unordered_map<
+      worker_id_t,
+      std::set<std::shared_ptr<c10d::ProcessGroup::Work>>>
+      currentPendingSends_;
+  // Lock to serialize access to the above map.
+  std::mutex pendingSendMutex_;
   // A threadPool that processing both SendWork and RecvWork. There are two
   // motivations for adding a ThreadPool:
   // (1) RPC serialization/deserialization and processing can be expensive,

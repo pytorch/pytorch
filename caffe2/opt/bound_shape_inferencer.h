@@ -105,6 +105,7 @@ class CAFFE2_API BoundShapeInferencer : public BoundShapeInferencerBase {
 
   void InferConcatInputs(const OperatorDef& op);
   void InferInt8QuantizeInput(const OperatorDef& op);
+  void InferElementwiseOpInput(const OperatorDef& op);
 
   void InferGivenTensorFill(const OperatorDef& op);
   void InferSparseLengthsSum(const OperatorDef& op);
@@ -113,6 +114,7 @@ class CAFFE2_API BoundShapeInferencer : public BoundShapeInferencerBase {
   void InferShape(const OperatorDef& op);
   void InferReshape(const OperatorDef& op);
   void InferLengthsRangeFill(const OperatorDef& op);
+  void InferQuantizationTransformation(const OperatorDef& op);
 
   // Standard shape/type inference using op schema registered shape inference
   // function

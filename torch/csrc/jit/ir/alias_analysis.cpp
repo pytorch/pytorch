@@ -23,7 +23,8 @@ c10::optional<TypePtr> getMutableTypePtr(const TypePtr& type) {
     case TypeKind::OptionalType:
       return getMutableTypePtr(type->cast<OptionalType>()->getElementType());
     case TypeKind::FutureType: {
-      if (auto elem = getMutableTypePtr(type->cast<FutureType>()->getElementType())) {
+      if (auto elem =
+              getMutableTypePtr(type->cast<FutureType>()->getElementType())) {
         return FutureType::create(*elem);
       }
       return c10::nullopt;
@@ -123,11 +124,11 @@ void AliasDb::getWritesImpl(Node* n, MemoryLocations& ret) const {
     ret |= writes;
   }
 
-    for (auto block : n->blocks()) {
-      for (auto node : block->nodes()) {
-        getWritesImpl(node, ret);
-      }
+  for (auto block : n->blocks()) {
+    for (auto node : block->nodes()) {
+      getWritesImpl(node, ret);
     }
+  }
 }
 
 // Does `n` write to an alias of one of the values in `vs`?
@@ -315,7 +316,8 @@ void AliasDb::analyzeImpl(Node* node) {
           "We don't have an op for ",
           node->kind().toDisplayString(),
           " but it isn't a special case.  ",
-          "Argument types: ", oss.str());
+          "Argument types: ",
+          oss.str());
     }
   }
 
@@ -327,6 +329,7 @@ void AliasDb::analyzeImpl(Node* node) {
       return analyzeLoop(node);
     case prim::FusionGroup:
     case prim::CudaFusionGroup:
+    case prim::FunctionalGraph:
     case prim::DifferentiableGraph:
       return analyzeSubgraph(node);
     case prim::fork:
@@ -359,7 +362,8 @@ void AliasDb::analyzeImpl(Node* node) {
     case prim::ListUnpack:
     case prim::PythonOp:
     case prim::GetAttr:
-      if (isFrozen_ && node->kind() == prim::GetAttr)
+      if (isFrozen_ && node->kind() == prim::GetAttr &&
+          node->input()->type()->expect<ClassType>()->is_module())
         return analyzeCreator(node);
       return analyzeExtractor(node);
     case prim::unchecked_cast:
@@ -376,8 +380,8 @@ void AliasDb::analyzeImpl(Node* node) {
       }
       return;
     case prim::BailOut:
-      TORCH_INTERNAL_ASSERT(node->inputs().at(0)->node()->kind() ==
-                            prim::BailoutTemplate);
+      TORCH_INTERNAL_ASSERT(
+          node->inputs().at(0)->node()->kind() == prim::BailoutTemplate);
       makePointerTo(node->output(), node->inputs().at(1));
       return;
     case prim::Guard:
@@ -411,9 +415,10 @@ void AliasDb::analyzeImpl(Node* node) {
 
   if (node->kind().is_aten() || node->kind().is_prim()) {
     // TODO There is nothing in the system that relies on aten:: and prim::
-    // ops using AliasAnalysisKind::FROM_SCHEMA or AliasAnalysisKind::INTERNAL_SPECIAL_CASE,
-    // but this is the intended behavior for all current ops and a good error check.
-    // We can consider lifting this constraint later if we have a use case for it.
+    // ops using AliasAnalysisKind::FROM_SCHEMA or
+    // AliasAnalysisKind::INTERNAL_SPECIAL_CASE, but this is the intended
+    // behavior for all current ops and a good error check. We can consider
+    // lifting this constraint later if we have a use case for it.
     TORCH_INTERNAL_ASSERT(
         analysis == AliasAnalysisKind::FROM_SCHEMA ||
             analysis == AliasAnalysisKind::CONSERVATIVE,
@@ -890,7 +895,9 @@ bool AliasDb::mayContainAlias(
     const at::ArrayRef<Value*> a,
     const at::ArrayRef<Value*> b) const {
   auto a_elems = getElements(a);
-  return a_elems.size() == 0 ? false : memoryDAG_->mayContainAlias(a_elems, getElements(b));
+  return a_elems.size() == 0
+      ? false
+      : memoryDAG_->mayContainAlias(a_elems, getElements(b));
 }
 
 // Make each value in the `from` list point to its partner in the `to` list
@@ -1143,7 +1150,9 @@ bool AliasDb::tryMove(
     Node* movePoint,
     MoveSide moveSide,
     bool dryRun) {
-  TORCH_INTERNAL_ASSERT(toMove->owningBlock() == movePoint->owningBlock());
+  if (toMove->owningBlock() != movePoint->owningBlock()) {
+    return false;
+  }
   if (toMove == movePoint) {
     return true;
   }
@@ -1325,7 +1334,8 @@ c10::optional<Element*> AliasDb::setWildcard(const Value* v) {
   auto wildcardElement = *maybe_wildcardElement;
   // Making a value a wildcard means that all its potential memory locations
   // may alias the wildcard set.
-  const MemoryLocations pointeeSet = getOrCreateElement(v)->getMemoryLocations();
+  const MemoryLocations pointeeSet =
+      getOrCreateElement(v)->getMemoryLocations();
   for (const auto& pointee : pointeeSet) {
     auto from = memoryDAG_->fromIndex(pointee);
     // avoid cycles where the wildcard points to itself
@@ -1348,8 +1358,8 @@ c10::optional<Element*> AliasDb::setWildcard(const Value* v) {
 void AliasDb::rebuildWriteCache() const {
   for (const auto& pr : writeIndex_) {
     const auto& writtenLocs = pr.second;
-      writeCache_ |= writtenLocs;
-    }
+    writeCache_ |= writtenLocs;
+  }
   isWriteCacheStale_ = false;
 }
 } // namespace jit

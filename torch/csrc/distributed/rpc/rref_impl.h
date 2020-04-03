@@ -201,6 +201,11 @@ class TORCH_API RRef : public RRefInterface {
     return ownerId_;
   }
 
+  // returns the worker name of the owner
+  inline std::string ownerName() const override {
+    return RpcAgent::getCurrentRpcAgent()->getWorkerInfo(ownerId_).name_;
+  }
+
   // Returns the globally unique RRefId of this RRef
   inline const RRefId& rrefId() const {
     return rrefId_;
@@ -226,7 +231,7 @@ class TORCH_API RRef : public RRefInterface {
 
   RRef(worker_id_t ownerId, const RRefId& rrefId, TypePtr type);
 
-  RRefForkData fork() const;
+  virtual RRefForkData fork() const;
 
   const worker_id_t ownerId_;
   const RRefId rrefId_;
@@ -257,6 +262,10 @@ class TORCH_API UserRRef final : public RRef {
     return false;
   }
 
+  inline bool confirmedByOwner() const override {
+    return confirmedByOwner_;
+  }
+
   // Returns the globally unique ForkId of this RRef
   const ForkId& forkId() const;
 
@@ -279,6 +288,11 @@ class TORCH_API UserRRef final : public RRef {
  private:
   friend class RRefContext;
 
+  RRefForkData fork() const override;
+  inline void confirm() {
+    confirmedByOwner_ = true;
+  }
+
   const ForkId forkId_;
 
   // Indicates if this user has sent delete message to it's owner.
@@ -287,6 +301,8 @@ class TORCH_API UserRRef final : public RRef {
   // proactive cleanup on RPC graceful shutdown.
   std::mutex deletedOnOwnerMutex_;
   bool deletedOnOwner_{false};
+  // Indicating whether this UserRRef has been confirmed by its owner.
+  std::atomic<bool> confirmedByOwner_;
 };
 
 // Keep the template only on the derived class because ``RRefContext`` needs to
@@ -314,24 +330,33 @@ class TORCH_API OwnerRRef final : public RRef {
     return true;
   }
 
+  // OwnerRRef is always confirmed, while UserRRef is only confirmed when the
+  // owner knows about it.
+  inline bool confirmedByOwner() const override {
+    return true;
+  }
+
   // Get a constant reference of the real value. This method will block if the
   // value is not ready. This method does not need GIL as it does not create
-  // any new py::object.
+  // any new py::object. It will throw if there is an error.
   const IValue& getValue() const;
 
   // Set the value of this ``OwnerRRef``. This method does not need GIL as it
   // does not create any new py::object.
   void setValue(IValue&& value);
+  // Sets the value of this ``OwnerRRef`` to contain an exception.
+  void setError(const std::string& err);
 
-  // Has a value been set?
+  // Has a value or error been set?
   bool hasValue() const;
-  // Gets a future that is satisfied when the value is set.
+  // Gets a future that is satisfied when the value or error is set.
   std::shared_ptr<FutureMessage> getFuture();
 
  private:
   friend class RRefContext;
 
   c10::optional<IValue> value_;
+  c10::optional<std::string> error_;
   mutable std::mutex mutex_;
   mutable std::condition_variable valueCV_;
   std::shared_ptr<FutureMessage> future_;
