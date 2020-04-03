@@ -1370,7 +1370,7 @@ TORCH_API std::vector<Value*> insertGraph(
 TORCH_API std::vector<Value*> inlineCallTo(
     Node* to_replace,
     Function* callee,
-    bool use_graph = false);
+    bool use_graph = true);
 
 /** If there is only one value in \p OUTPUTS and its kind is Tuple, insert a
  * tuple unpack node and return the resulting values.

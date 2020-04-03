@@ -5,7 +5,6 @@
 namespace torch {
 namespace jit {
 
-
 void functionCallSubstitution(Block* block) {
   for (auto it = block->nodes().begin(), end = block->nodes().end();
        it != end;) {
@@ -17,7 +16,7 @@ void functionCallSubstitution(Block* block) {
           function_constant->output()->type()->expect<FunctionType>();
 
       if ((fun_type->function()->qualname().qualifiedName().find(
-              "__torch__.torch.nn.functional") != std::string::npos) &&
+               "__torch__.torch.nn.functional") != std::string::npos) &&
           (fun_type->function()->qualname().qualifiedName().find(
                "interpolate") != std::string::npos)) {
         cur->removeInput(0);
@@ -41,7 +40,7 @@ void functionCallSubstitution(Block* block) {
             "Function in ONNX preclude inlining body: ",
             *fun_type->function()->optimized_graph());
         functionCallSubstitution(fun_type->function()->graph()->block());
-        inlineCallTo(cur, fun_type->function(), true);
+        inlineCallTo(cur, fun_type->function(), false);
       }
     } else {
       for (auto b : cur->blocks()) {
