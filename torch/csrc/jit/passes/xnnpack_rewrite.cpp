@@ -115,7 +115,8 @@ bool isClampFusable(
         graph_rewrite_helper::getIValue("output_min", match_vmap, vmap);
     auto output_max =
         graph_rewrite_helper::getIValue("output_max", match_vmap, vmap);
-    is_fusable = is_fusable && (output_min.has_value() && output_max.has_value());
+    is_fusable =
+        is_fusable && (output_min.has_value() && output_max.has_value());
   }
 
   return is_fusable;

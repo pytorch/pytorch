@@ -613,7 +613,7 @@ class TestXNNPACKRewritePass(TestCase):
                 self.groups = groups
 
             def forward(self, x):
-                min = x[0,0]
+                min = x[0, 0]
                 max = min + 10
                 o = F.linear(x, self.linear_weight, self.linear_bias)
                 o = F.hardtanh(o, min, max)
