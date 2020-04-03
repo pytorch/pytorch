@@ -17,22 +17,22 @@ namespace tensorexpr {
  * [x] Run simplification in the beginning
  * [x] Compute accesses at an outer scope (replace index with its min/max)
  * [x] Implement merging
- * [ ] Implement compute_at
- *   [ ] Compute size of temp buffer
- *   [ ] Insert alloc/free stmts
- *   [ ] Compute map old->new indexes for the expression we're moving
+ * [.] Implement compute_at
+ *   [x] Compute size of temp buffer
+ *   [x] Insert alloc/free stmts
+ *   [x] Compute map old->new indexes for the expression we're moving
  *   [ ] Add tests
  * [ ] Take into account how index is used when replacing (if with '-', then it
  * should be replaced with max/min instead of min/max)
  * [ ] Generally handle signed multiplication
  * [ ] Use jit_log
- * [ ] Add comments and cleanup
- * [ ] Buffer and FunctionCall cleanup (buffers are 1-D, functions are N-d)
+ * [.] Add comments and cleanup
+ * [x] Buffer and FunctionCall cleanup (buffers are 1-D, functions are N-d)
  */
 
 void AccessFinder::visit(const Load* v) {
   std::cerr << "Load:" << *v << "\n";
-  accesses.push_back({v->base_handle(), kLoad, {v->index()}, {v->index()}});
+  accesses.push_back({v->buf(), kLoad, v->indices(), v->indices()});
 }
 void AccessFinder::visit(const FunctionCall* v) {
   std::cerr << "Function call:" << *v << "\n";
@@ -41,7 +41,7 @@ void AccessFinder::visit(const FunctionCall* v) {
 }
 void AccessFinder::visit(const Store* v) {
   std::cerr << "Store:" << *v << "\n";
-  accesses.push_back({v->base_handle(), kStore, {v->index()}, {v->index()}});
+  accesses.push_back({v->buf(), kStore, v->indices(), v->indices()});
   IRVisitor::visit(v);
 }
 

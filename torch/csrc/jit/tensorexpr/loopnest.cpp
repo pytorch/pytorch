@@ -31,6 +31,35 @@ static T EvalConstExpr(const ExprHandle& expr) {
 
 } // namespace
 
+class IndexFlattener : public IRMutator {
+ public:
+  Stmt* flatten(Stmt* s) {
+    return s->accept_mutator(this);
+  }
+  const Expr* mutate(const Load* v) override {
+    if (v->indices().size() == 1) {
+      return v;
+    }
+    return new Load(
+        v->dtype(),
+        v->buf(),
+        {flatten_index(v->buf()->dims(), v->indices())},
+        v->mask());
+  }
+  Stmt* mutate(const Store* v) override {
+    const Expr* value = v->value();
+    const Expr* new_value = value->accept_mutator(this);
+    if (v->indices().size() == 1 && value == new_value) {
+      return (Stmt*)v;
+    }
+    return new Store(
+        v->buf(),
+        {flatten_index(v->buf()->dims(), v->indices())},
+        new_value,
+        v->mask());
+  }
+};
+
 class Vectorizer : public IRMutator {
  public:
   Stmt* vectorize(const For* v) {
@@ -164,13 +193,13 @@ class Vectorizer : public IRMutator {
 
   const Expr* mutate(const Load* v) override {
     Dtype dtype(v->dtype().scalar_type(), lanes_);
-    const Var* base_handle = v->base_handle();
-    std::vector<const Expr*> inputs = {v->index(), v->mask()};
+    const Buf* buf = v->buf();
+    std::vector<const Expr*> inputs = {v->flat_index(), v->mask()};
     return try_vectorize(v, inputs, [&]() {
       return Load::make(
           dtype,
-          VarHandle(base_handle),
-          ExprHandle(inputs[0]),
+          BufHandle(buf),
+          {ExprHandle(inputs[0])},
           ExprHandle(inputs[1]));
     });
   }
@@ -206,12 +235,12 @@ class Vectorizer : public IRMutator {
   }
 
   Stmt* mutate(const Store* v) override {
-    const Var* base_handle = v->base_handle();
-    std::vector<const Expr*> inputs = {v->index(), v->value(), v->mask()};
+    const Buf* buf = v->buf();
+    std::vector<const Expr*> inputs = {v->flat_index(), v->value(), v->mask()};
     return try_vectorize(v, inputs, [&]() {
       return Store::make(
-          VarHandle(base_handle),
-          ExprHandle(inputs[0]),
+          BufHandle(buf),
+          {ExprHandle(inputs[0])},
           ExprHandle(inputs[1]),
           ExprHandle(inputs[2]));
     });
@@ -301,7 +330,8 @@ void LoopNest::vectorize(Stmt* stmt) {
   Stmt* old_f = Stmt::clone(f);
   Stmt* new_f = nullptr;
   try {
-    new_f = v.vectorize(f);
+    new_f = FlattenIndexes(f);
+    new_f = v.vectorize(dynamic_cast<For*>(new_f));
   } catch (std::runtime_error& e) {
     // Partial vectorization may have corrupted f
     new_f = old_f;
@@ -314,10 +344,8 @@ class Flattener : public IRMutator {
  private:
   Expr* mutate(const FunctionCall* v) override {
     const Tensor* t = v->tensor();
-    Buffer buffer(
-        VarHandle(t->func_var()),
-        t->body()->dtype(),
-        ExprVectorToExprHandleVector(t->dims()));
+    const Buf* b = t->buf();
+    Buffer buffer(BufHandle(b), t->body()->dtype());
     const std::vector<const Expr*>& params = v->params();
     std::vector<ExprHandle> params_expr(params.size());
     for (size_t i = 0; i < params.size(); i++) {
@@ -335,19 +363,20 @@ class FunctionInliner : public IRMutator {
       if (func->func_vars().size() != 1) {
         throw unimplemented_lowering();
       }
-      func_var_set_.insert(func->func_var(0));
+      func_var_set_.insert(func->func_var(0)->base_handle());
     }
   }
 
  protected:
   bool should_inline(Function* func) const {
-    return func_var_set_.count(func->func_var(0)) > 0;
+    return func_var_set_.count(func->func_var(0)->base_handle()) > 0;
   }
 
   // For the target function, insert the caller/callee pair into the replacement
   // mapping.
   const Expr* mutate(const FunctionCall* v) override {
     Function* func = v->tensor()->function();
+    const Buf* buf = v->tensor()->buf();
     // TODO: Support multiple-output functions
     if (func->func_vars().size() != 1) {
       throw unimplemented_lowering();
@@ -355,7 +384,7 @@ class FunctionInliner : public IRMutator {
 
     if (should_inline(func)) {
       // Insert the caller/callee pair into the mapping.
-      for (int i = 0; i < func->ndim(); i++) {
+      for (int i = 0; i < buf->ndim(); i++) {
         const Var* func_callee_arg = dynamic_cast<const Var*>(func->arg(i));
         const Expr* func_caller_param = v->param(i);
         auto iter = inline_mapping_.find(func_callee_arg);
@@ -371,7 +400,7 @@ class FunctionInliner : public IRMutator {
       const Expr* result = body->accept_mutator(this);
 
       // Remove the caller/callee relationship.
-      for (int i = 0; i < func->ndim(); i++) {
+      for (int i = 0; i < buf->ndim(); i++) {
         const Var* func_callee_arg = dynamic_cast<const Var*>(func->arg(i));
         auto iter = inline_mapping_.find(func_callee_arg);
         if (iter == inline_mapping_.end()) {
@@ -654,18 +683,19 @@ Stmt* LoopNest::lowerToStmt(Tensor* t) {
   stmt_to_tensor_[body] = t;
   tensor_to_stmt_[t] = body;
 
-  if (f->ndim() == 0) {
+  if (t->buf()->ndim() == 0) {
     return body;
   }
 
-  if (f->ndim() == 0) {
+  if (t->buf()->ndim() == 0) {
     throw malformed_input();
   }
 
-  for (size_t i = 0; i < f->ndim(); i++) {
+  for (size_t i = 0; i < t->buf()->ndim(); i++) {
     // Going in reverse order: from innermost loop to the outermost
-    size_t dim_index = f->ndim() - i - 1;
-    body = new For(f->arg(dim_index), new IntImm(0), f->dim(dim_index), body);
+    size_t dim_index = t->buf()->ndim() - i - 1;
+    body = new For(
+        f->arg(dim_index), new IntImm(0), t->buf()->dim(dim_index), body);
   }
   return body;
 }
@@ -703,8 +733,8 @@ Stmt* LoopNest::insertAllocFree(Stmt* stmt) {
       continue;
     }
     Stmt* alloc = new Allocate(
-        tensor->func_var(), tensor->body()->dtype(), tensor->dims());
-    Stmt* free = new Free(tensor->func_var());
+        tensor->buf()->base_handle(), tensor->body()->dtype(), tensor->dims());
+    Stmt* free = new Free(tensor->buf()->base_handle());
     b->prepend_stmt(alloc);
     b->append_stmt(free);
   }
@@ -722,6 +752,8 @@ void LoopNest::prepareForCodegen() {
   // Flatten function calls.
   Flattener flattener;
   root_stmt_ = root_stmt_->accept_mutator(&flattener);
+
+  root_stmt_ = FlattenIndexes(root_stmt_);
 
   // Add allocs and frees for intermediate buffers at the global level.
   root_stmt_ = insertAllocFree(root_stmt_);
@@ -880,6 +912,11 @@ bool LoopNest::hasLoopBodyFor(Tensor* t) const {
   return tensor_to_stmt_.count(t) > 0;
 }
 
+Stmt* FlattenIndexes(Stmt* s) {
+  IndexFlattener idx_flattener;
+  return idx_flattener.flatten(s);
+}
+
 const Expr* computeMin(const Expr* a, const Expr* b) {
   const Expr* diff = IRSimplifier::simplify(new Sub(a, b));
   if (auto diff_imm = dynamic_cast<const IntImm*>(diff)) {
@@ -905,7 +942,7 @@ const Expr* computeMax(const Expr* a, const Expr* b) {
 
 std::vector<TensorAccess> mergeTensorAccesses(std::vector<TensorAccess> a) {
   std::vector<TensorAccess> res;
-  std::unordered_map<const Var*, TensorAccess> merged;
+  std::unordered_map<const Buf*, TensorAccess> merged;
   for (const auto& t : a) {
     if (!merged.count(t.var)) {
       merged[t.var] = t;
@@ -925,7 +962,7 @@ std::vector<TensorAccess> mergeTensorAccesses(std::vector<TensorAccess> a) {
     merged[t.var] = new_t;
   }
 
-  std::unordered_set<const Var*> added;
+  std::unordered_set<const Buf*> added;
   for (const auto& t : a) {
     if (added.insert(t.var).second) {
       res.push_back(merged.at(t.var));
@@ -1001,45 +1038,170 @@ std::vector<TensorAccess> mergeTensorAccesses(std::vector<TensorAccess> a) {
  * indices used in it: old indices are referring to the old loop and are not
  * valid in the new loop.
  */
-void LoopNest::computeAt(Stmt* s, For* f) {
-  std::cerr << "COMPUTE AT:\n";
-  BoundsInference bi;
-  auto bi_result = bi.inferBoundsForLoop(f);
+class LoopComputeAtRewriter : public IRMutator {
+ public:
+  LoopComputeAtRewriter(
+      const Buf* var,
+      const Buf* new_var,
+      std::vector<const Expr*> offsets)
+      : var_(var), new_var_(new_var), offsets_(offsets) {}
 
-  AccessFinder ac;
-  s->accept(&ac);
+ private:
+  const Buf* var_;
+  const Buf* new_var_;
+  std::vector<const Expr*> offsets_;
 
-  std::unordered_map<const Var*, TensorAccess>
-      required_computations; // What tensor are accessed in the loop F
-  std::vector<const Var*>
-      computations_to_move; // What tensor are produced in stmt S
-  std::cerr << "Accesses in stmt:\n";
-  for (auto t : ac.accesses) {
-    printBufVector({t});
-    if (t.kind == kStore) {
-      computations_to_move.push_back(t.var);
-      std::cerr << "Store\n";
+  const Expr* mutate(const Load* v) override {
+    std::cerr << "Comparing " << *v << " with " << *var_ << "\n";
+    if (v->buf() != var_) {
+      return v;
+    }
+    std::cerr << "Substituting " << *v << "\n";
+    std::vector<const Expr*> new_indices;
+    for (size_t i = 0; i < v->indices().size(); i++) {
+      new_indices.push_back(
+          IRSimplifier::simplify(new Sub(v->indices()[i], offsets_[i])));
+    }
+    const Expr* l = new Load(v->dtype(), new_var_, new_indices, v->mask());
+    return l;
+  }
+  const Expr* mutate(const FunctionCall* v) override {
+    std::cerr << "Comparing " << *v << " with " << *var_ << "\n";
+    if (v->tensor()->func_var() != var_) {
+      return v;
+    }
+    std::cerr << "Substituting " << *v << "\n";
+    std::vector<const Expr*> new_indices;
+    for (size_t i = 0; i < v->nparams(); i++) {
+      new_indices.push_back(
+          IRSimplifier::simplify(new Sub(v->param(i), offsets_[i])));
+    }
+    const Expr* l = new Load(v->dtype(), new_var_, new_indices, new IntImm(1));
+    std::cerr << "New load " << *l << "\n";
+    return l;
+  }
+};
+
+Store* getStoreStmtOfProducer(Stmt* s) {
+  if (Store *st = dynamic_cast<Store*>(s)) {
+    return st;
+  }
+  if (Block *b = dynamic_cast<Block*>(s)) {
+    for (Stmt* ss : b->stmts()) {
+      if (Store* st = dynamic_cast<Store*>(ss)) {
+        return st;
+      }
     }
   }
+  return nullptr;
+}
 
+std::vector<const Var*> getOuterLoopIndexes(Stmt* s) {
+  std::vector<const Var*> res;
+  Stmt* cur = s;
+  while (cur) {
+    if (auto l = dynamic_cast<For*>(cur)) {
+      res.push_back(l->var());
+    }
+    cur = cur->get_parent();
+  }
+  return res;
+}
+
+void LoopNest::computeAt(Stmt* s, For* f) {
+  std::cerr << "COMPUTE AT:\n";
+
+  Store* st = getStoreStmtOfProducer(s);
+  if (!st) {
+    return;
+  }
+
+  AccessFinder ac;
+  st->accept(&ac);
+
+  BoundsInference bi;
+  auto bi_result = bi.inferBoundsForBlock(f->body());
   auto merged_bi_result = mergeTensorAccesses(bi_result);
 
   std::cerr << "Accesses in the loop:\n";
   printBufVector(merged_bi_result);
+  TensorAccess ta;
+  bool found = false;
   for (auto p : merged_bi_result) {
-    required_computations[p.var] = p;
+    if (p.var == st->buf()) {
+      ta = p;
+      found = true;
+    }
   }
 
-  std::vector<TensorAccess> to_move;
-  for (auto c : computations_to_move) {
-    if (!required_computations.count(c)) {
-      continue;
-    }
-    to_move.push_back(required_computations.at(c));
+  if (!found) {
+    return;
   }
-  std::cerr << "Gonna generate allocs for the following:\n";
-  std::cerr << "\n";
-  printBufVector(to_move);
+
+  std::vector<const Var*> prod_indices = getOuterLoopIndexes(s);
+
+  // Compute dims
+  std::vector<const Expr*> dims;
+  for (size_t i = 0; i < ta.start.size(); i++) {
+    const Expr* dim = IRSimplifier::simplify(
+        new Add(new Sub(ta.stop[i], ta.start[i]), new IntImm(1)));
+    dims.push_back(dim);
+  }
+
+  // Generate alloc/free stmts
+  const Buf* new_var = new Buf(new Var("temp", ta.var->dtype()), dims);
+  Stmt* al = new Allocate(new_var->base_handle(), ta.var->dtype(), dims);
+  Stmt* fr = new Free(new_var->base_handle());
+
+  // Generate computation for the moved stmt
+
+  // Generate Compute loop
+  // Generate index variables
+  std::vector<const Expr*> temp_indices(dims.size());
+  for (size_t i = 0; i < dims.size(); i++) {
+    // Going in reverse order: from innermost loop to the outermost
+    temp_indices[i] = new Var(std::string("idx") + std::to_string(i), kInt);
+  }
+
+  // Prepare substitute rules for constructing the temp statement from the prod
+  // statement
+  std::vector<std::pair<const Var*, const Expr*>> rewrite_indices_map;
+  for (size_t i = 0; i < prod_indices.size(); i++) {
+    size_t dim_index = dims.size() - i - 1;
+    const Expr* offset = ta.start[dim_index];
+    std::cerr << "Rewrite index " << *prod_indices[i] << " -> "
+              << *temp_indices[i] << "+" << *offset << "\n";
+    rewrite_indices_map.push_back(
+        {prod_indices[i], new Add(temp_indices[i], offset)});
+  }
+  // Construct the temp statement
+  std::vector<const Expr*> temp_indices_rev(temp_indices.rbegin(), temp_indices.rend());
+  Stmt* bd = new Store(
+      new_var,
+      temp_indices_rev,
+      Substitute(st->value(), rewrite_indices_map),
+      st->mask());
+
+  // Construct the loop nest for the temp computation
+  for (size_t i = 0; i < dims.size(); i++) {
+    // Going in reverse order: from innermost loop to the outermost
+    size_t dim_index = dims.size() - i - 1;
+    bd = new For(
+        dynamic_cast<const Var*>(temp_indices[i]),
+        new IntImm(0),
+        dims[dim_index],
+        bd);
+  }
+
+  // Add constructed stmts to the consumer loop
+  f->body()->prepend_stmt(bd);
+  f->body()->prepend_stmt(al);
+  f->body()->append_stmt(fr);
+
+  // Rewrite accesses to producer in consumer with accesses to temp
+  LoopComputeAtRewriter lr(ta.var, new_var, ta.start);
+  Stmt* new_f = f->accept_mutator(&lr);
+  std::cerr << "NEW FOR:\n" << *new_f << "\n";
 }
 
 } // namespace tensorexpr

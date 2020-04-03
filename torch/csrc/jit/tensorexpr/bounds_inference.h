@@ -37,7 +37,7 @@ class Range {
 };
 
 struct TensorAccess {
-  const Var* var;
+  const Buf* var;
   TensorAccessKind kind;
   std::vector<const Expr*> start;
   std::vector<const Expr*> stop;

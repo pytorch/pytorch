@@ -59,6 +59,8 @@ class TORCH_API LoopNest {
   std::unordered_set<Tensor*> intermediate_tensors_;
 };
 
+TORCH_API Stmt* FlattenIndexes(Stmt* s);
+
 } // namespace tensorexpr
 } // namespace jit
 } // namespace torch
