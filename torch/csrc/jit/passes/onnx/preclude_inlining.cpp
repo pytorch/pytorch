@@ -33,8 +33,9 @@ void stopInliningCalls(Block* block) {
         cur->replaceAllUsesWith(interpolate_node);
         cur->removeAllInputs();
         cur->destroy();
-      } else if (fun_type->function()->qualname().qualifiedName().find(
-              ".nms") != std::string::npos) {
+      } else if (
+          fun_type->function()->qualname().qualifiedName().find(".nms") !=
+          std::string::npos) {
         cur->removeInput(0);
         Node* interpolate_node = block->owningGraph()->create(
             Symbol::fromQualString("torchvision::nms"),
@@ -48,9 +49,13 @@ void stopInliningCalls(Block* block) {
       } else {
         cur->removeInput(0);
         GRAPH_UPDATE(
-            "Inlining in ONNX preclude inlining function '", fun_type->function()->name(), "' to ", *cur);
+            "Inlining in ONNX preclude inlining function '",
+            fun_type->function()->name(),
+            "' to ",
+            *cur);
         GRAPH_UPDATE(
-            "Function in ONNX preclude inlining body: ", *fun_type->function()->optimized_graph());
+            "Function in ONNX preclude inlining body: ",
+            *fun_type->function()->optimized_graph());
         stopInliningCalls(fun_type->function()->graph()->block());
         inlineCallTo(cur, fun_type->function(), true);
       }
