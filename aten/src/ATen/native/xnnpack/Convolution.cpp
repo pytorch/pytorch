@@ -179,8 +179,8 @@ Tensor run(
     const Tensor& input) {
   using namespace internal;
 
-  const Tensor input_nhwc = input.contiguous(MemoryFormat::ChannelsLast);
-  const Tensor padded_input_nhwc = allocate_padded_if_needed(input_nhwc);
+  const Tensor padded_input_nhwc = allocate_padded_contiguous_if_needed(
+      input, MemoryFormat::ChannelsLast);
 
   TORCH_CHECK(
       usable(padded_input_nhwc),

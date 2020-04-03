@@ -109,7 +109,8 @@ Tensor run(
     const Tensor& input) {
   using namespace internal;
 
-  const Tensor padded_input = allocate_padded_if_needed(input.contiguous());
+  const Tensor padded_input = allocate_padded_contiguous_if_needed(
+      input, input.suggest_memory_format());
 
   TORCH_CHECK(
       usable(padded_input),
