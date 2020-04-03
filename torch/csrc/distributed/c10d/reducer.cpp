@@ -359,7 +359,7 @@ void Reducer::mark_variable_ready(VariableIndex index) {
   // Check if this was the final gradient for this bucket.
   if (--replica.pending == 0) {
     // Prescale bucket contents to turn the global sum into the global average.
-    replica.contents.div_(process_group_->getSize());
+    replica.contents.mul_(1.0/process_group_->getSize());
     // Kick off reduction if all replicas for this bucket are ready.
     if (--bucket.pending == 0) {
       mark_bucket_ready(bucket_index.bucket_index);
