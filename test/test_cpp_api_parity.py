@@ -53,8 +53,8 @@ assert len([name for name in TestCppApiParity.__dict__ if 'SampleModule' in name
 # 4 == 2 (number of test dicts that are not skipped) * 2 (number of devices)
 assert len([name for name in TestCppApiParity.__dict__ if 'sample_functional' in name]) == 4
 
+module_impl_check.build_cpp_tests(TestCppApiParity, print_cpp_source=PRINT_CPP_SOURCE)
+functional_impl_check.build_cpp_tests(TestCppApiParity, print_cpp_source=PRINT_CPP_SOURCE)
 
 if __name__ == "__main__":
-    module_impl_check.build_cpp_tests(TestCppApiParity, print_cpp_source=PRINT_CPP_SOURCE)
-    functional_impl_check.build_cpp_tests(TestCppApiParity, print_cpp_source=PRINT_CPP_SOURCE)
     common.run_tests()
