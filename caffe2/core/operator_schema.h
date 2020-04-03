@@ -600,33 +600,27 @@ OpSchema::Cost PointwiseCostInference(
 
 } // namespace caffe2
 
-#if defined(_MSC_VER)
-#define EXPORT_IF_NOT_MSVC
-#else
-#define EXPORT_IF_NOT_MSVC C10_EXPORT
-#endif
-
 #ifndef CAFFE2_NO_OPERATOR_SCHEMA
 
-#define OPERATOR_SCHEMA(name)                                                \
-  EXPORT_IF_NOT_MSVC void CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name(){};  \
-  static OpSchema* C10_ANONYMOUS_VARIABLE(name) CAFFE2_UNUSED =              \
+#define OPERATOR_SCHEMA(name)                                       \
+  C10_EXPORT void CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name(){}; \
+  static OpSchema* C10_ANONYMOUS_VARIABLE(name) CAFFE2_UNUSED =     \
       &OpSchemaRegistry::NewSchema(#name, __FILE__, __LINE__)
 
 #else // CAFFE2_NO_OPERATOR_SCHEMA
 
-#define OPERATOR_SCHEMA(name)                                                \
-  EXPORT_IF_NOT_MSVC void CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name(){};  \
-  static OpSchema* C10_ANONYMOUS_VARIABLE(name) CAFFE2_UNUSED =              \
+#define OPERATOR_SCHEMA(name)                                       \
+  C10_EXPORT void CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name(){}; \
+  static OpSchema* C10_ANONYMOUS_VARIABLE(name) CAFFE2_UNUSED =     \
       1 ? nullptr : &OpSchemaRegistry::NewSchema(#name, __FILE__, __LINE__)
 
 #endif // CAFFE2_NO_OPERATOR_SCHEMA
 
 #ifdef CAFFE2_NO_GRADIENT_OPS
 
-#define GRADIENT_OPERATOR_SCHEMA(name)                                       \
-  EXPORT_IF_NOT_MSVC void CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name(){};  \
-  static OpSchema* C10_ANONYMOUS_VARIABLE(name) CAFFE2_UNUSED =              \
+#define GRADIENT_OPERATOR_SCHEMA(name)                              \
+  C10_EXPORT void CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name(){}; \
+  static OpSchema* C10_ANONYMOUS_VARIABLE(name) CAFFE2_UNUSED =     \
       1 ? nullptr : &OpSchemaRegistry::NewSchema(#name, __FILE__, __LINE__)
 
 #else

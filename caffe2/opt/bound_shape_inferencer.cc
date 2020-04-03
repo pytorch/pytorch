@@ -128,6 +128,8 @@ void BoundShapeInferencer::InferBoundShapeAndType(
         InferConcatInputs(op);
       } else if (op.type() == "Int8Quantize") {
         InferInt8QuantizeInput(op);
+      } else if (op.type() == "Mul" || op.type() == "Add") {
+        InferElementwiseOpInput(op);
       }
     }
     inferFinished = old_shape_num == shape_info_.size();
@@ -366,6 +368,22 @@ void BoundShapeInferencer::InferInt8QuantizeInput(const OperatorDef& op) {
   input_shape_info.q_info.scale.clear();
   input_shape_info.shape.set_data_type(TensorProto_DataType_FLOAT);
   shape_info_.emplace(op.input(0), std::move(input_shape_info));
+}
+
+void BoundShapeInferencer::InferElementwiseOpInput(const OperatorDef& op) {
+  if (shape_info_.find(op.input(0)) != shape_info_.end()) {
+    return;
+  }
+  const auto it = shape_info_.find(op.output(0));
+  if (it == shape_info_.end()) {
+    return;
+  }
+  ArgumentHelper helper(op);
+  const bool broadcast = helper.GetSingleArgument<bool>("broadcast", false);
+  if (broadcast) {
+    auto input_shape_info = it->second;
+    shape_info_.emplace(op.input(0), std::move(input_shape_info));
+  }
 }
 
 void BoundShapeInferencer::InferConcatInputs(const OperatorDef& op) {

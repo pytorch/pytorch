@@ -204,6 +204,8 @@ def run_tests(argv=UNITTEST_ARGS):
             test_report_path = os.path.join('test-reports', test_source)
             os.makedirs(test_report_path, exist_ok=True)
             verbose = '--verbose' in argv or '-v' in argv
+            if verbose:
+                print('Test results will be stored in {}'.format(test_report_path))
             unittest.main(argv=argv, testRunner=xmlrunner.XMLTestRunner(output=test_report_path, verbosity=2 if verbose else 1))
         else:
             unittest.main(argv=argv)
@@ -275,6 +277,17 @@ TEST_SKIP_FAST = os.getenv('PYTORCH_TEST_SKIP_FAST', '0') == '1'
 if TEST_NUMPY:
     import numpy
 
+def numpy_dtype(dtype):
+    assert TEST_NUMPY
+
+    torch_to_numpy_dtype = {
+        torch.half   : numpy.float16,
+        torch.float  : numpy.float32,
+        torch.double : numpy.float64
+    }
+
+    return torch_to_numpy_dtype[dtype]
+
 ALL_TENSORTYPES = [torch.float,
                    torch.double,
                    torch.half]
@@ -319,7 +332,6 @@ def skipIfCompiledWithoutNumpy(fn):
         else:
             fn(*args, **kwargs)
     return wrapper
-
 
 def _test_function(fn, device):
     def run_test_function(self):
