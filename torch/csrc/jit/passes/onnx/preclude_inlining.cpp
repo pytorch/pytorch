@@ -22,9 +22,9 @@ void stopInliningCalls(Block* block) {
           function_constant->output()->type()->expect<FunctionType>();
 
       if ((fun_type->function()->qualname().qualifiedName().find(
-              qualFuncName + "interpolate") != std::string::npos) ||
-         (fun_type->function()->qualname().qualifiedName().find(
-              qualFuncName2 + "interpolate") != std::string::npos)) {
+               qualFuncName + "interpolate") != std::string::npos) ||
+          (fun_type->function()->qualname().qualifiedName().find(
+               qualFuncName2 + "interpolate") != std::string::npos)) {
         cur->removeInput(0);
         Node* interpolate_node = block->owningGraph()->create(
             Symbol::fromQualString("aten::__interpolate"),
