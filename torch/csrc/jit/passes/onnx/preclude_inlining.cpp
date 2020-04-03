@@ -8,6 +8,8 @@ namespace jit {
 const auto namespaceName = std::string("___torch_mangle_3.");
 const auto qualFuncName =
     std::string("__torch__.torch.nn.functional."); // + namespaceName;
+const auto qualFuncName2 =
+    std::string("__torch__.torch.nn.functional.") + namespaceName;
 
 void stopInliningCalls(Block* block) {
   for (auto it = block->nodes().begin(), end = block->nodes().end();
@@ -19,8 +21,10 @@ void stopInliningCalls(Block* block) {
       auto fun_type =
           function_constant->output()->type()->expect<FunctionType>();
 
-      if (fun_type->function()->qualname().qualifiedName().find(
-              qualFuncName + "interpolate") != std::string::npos) {
+      if ((fun_type->function()->qualname().qualifiedName().find(
+              qualFuncName + "interpolate") != std::string::npos) ||
+         (fun_type->function()->qualname().qualifiedName().find(
+              qualFuncName2 + "interpolate") != std::string::npos)) {
         cur->removeInput(0);
         Node* interpolate_node = block->owningGraph()->create(
             Symbol::fromQualString("aten::__interpolate"),
@@ -31,7 +35,7 @@ void stopInliningCalls(Block* block) {
         cur->replaceAllUsesWith(interpolate_node);
         cur->removeAllInputs();
         cur->destroy();
-        return;
+//        return;
       }
       stopInliningCalls(fun_type->function()->graph()->block());
     } else {
@@ -47,7 +51,7 @@ void stopInliningCalls(Block* block) {
 // and replaced by the compiled python function code. However, in-order to
 // maintain the behavior for ONNX conversion, we replace these function calls
 // with the aten symbolic which can still be used by the ONNX converter.
-void StopInliningONNX(Graph& graph) {
+void StopInliningForONNX(Graph& graph) {
   GRAPH_DUMP("Before stop-inlining calls: ", &graph);
   stopInliningCalls(graph.block());
   GRAPH_DUMP("After stop-inlining calls: ", &graph);
