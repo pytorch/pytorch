@@ -10286,56 +10286,56 @@ class TestTorchDeviceType(TestCase):
         # without nbins
         actual = torch.histc(
             torch.tensor([2, 5], dtype=torch.float, device=device))
-        expected = torch.zeros(100, dtype=torch.int64, device=device)
+        expected = torch.zeros(100, dtype=torch.float, device=device)
         expected[0] = 1
         expected[99] = 1
         self.assertEqual(expected, actual)
         # tensor with the same element
         actual = torch.histc(torch.ones(5, dtype=torch.float, device=device), bins=5)
         self.assertEqual(
-            torch.tensor([0, 0, 5, 0, 0], dtype=torch.int64, device=device),
+            torch.tensor([0, 0, 5, 0, 0], dtype=torch.float, device=device),
             actual)
         # no element falls between [min, max]
         actual = torch.histc(
             torch.ones(5, dtype=torch.float, device=device), bins=5, min=2, max=3)
         self.assertEqual(
-            torch.tensor([0, 0, 0, 0, 0], dtype=torch.int64, device=device),
+            torch.tensor([0, 0, 0, 0, 0], dtype=torch.float, device=device),
             actual)
         # element falls below min + integral bin size and
         actual = torch.histc(
-            torch.tensor([2, 4, 2, 2, 5, 4], dtype=torch.int64, device=device),
+            torch.tensor([2, 4, 2, 2, 5, 4], dtype=torch.float, device=device),
             bins=5, min=1, max=5)
         self.assertEqual(
-            torch.tensor([0, 3, 0, 2, 1], dtype=torch.int64, device=device),
+            torch.tensor([0, 3, 0, 2, 1], dtype=torch.float, device=device),
             actual)
         # non-integral bin size
         actual = torch.histc(
             torch.tensor([1, 2, 1], dtype=torch.float, device=device),
             bins=4, min=0, max=3)
         self.assertEqual(
-            torch.tensor([0, 2, 1, 0], dtype=torch.int64, device=device),
+            torch.tensor([0, 2, 1, 0], dtype=torch.float, device=device),
             actual)
         # double input
         actual = torch.histc(
             torch.tensor([1, 2, 1], dtype=torch.double, device=device), bins=4, min=0, max=3)
         self.assertEqual(
-            torch.tensor([0, 2, 1, 0], dtype=torch.int64, device=device),
+            torch.tensor([0, 2, 1, 0], dtype=torch.double, device=device),
             actual)
-        self.assertEqual(actual.dtype, torch.int64)
+        self.assertEqual(actual.dtype, torch.double)
         # mixed input
         actual = torch.histc(
             torch.tensor([1., 2, 1], dtype=torch.float, device=device),
             bins=4, min=0, max=3)
         self.assertEqual(
-            torch.tensor([0, 2, 1, 0], dtype=torch.int64, device=device),
+            torch.tensor([0, 2, 1, 0], dtype=torch.float, device=device),
             actual)
-        self.assertEqual(actual.dtype, torch.int64)
+        self.assertEqual(actual.dtype, torch.float)
         # scalar input and 1 bin -- should return a 1-dimensional tensor, not a scalar.
         actual = torch.histc(
             torch.tensor(0, dtype=torch.float, device=device),
             bins=1, min=0, max=3)
         self.assertEqual(
-            torch.tensor([1], dtype=torch.int64, device=device),
+            torch.tensor([1], dtype=torch.float, device=device),
             actual)
         # tensors with inf; min, max not provided -- should throw a RuntimeError
         with self.assertRaisesRegex(RuntimeError, r'range of \[inf, inf\] is not finite'):
@@ -10346,11 +10346,11 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(
             torch.histc(torch.tensor([float("inf")], dtype=torch.float, device=device),
                         bins=1, min=0, max=3),
-            torch.tensor([0], dtype=torch.int64, device=device))
+            torch.tensor([0], dtype=torch.float, device=device))
         self.assertEqual(
             torch.histc(torch.tensor([1., 2., float("inf")], dtype=torch.float, device=device),
                         bins=4, max=3),
-            torch.tensor([0, 1, 1, 0], dtype=torch.int64, device=device))
+            torch.tensor([0, 1, 1, 0], dtype=torch.float, device=device))
         # tensor with nan -- should throw a RuntimeError
         with self.assertRaisesRegex(RuntimeError, r'range of \[nan, nan\] is not finite'):
             torch.histc(torch.tensor([float("nan")], dtype=torch.float, device=device))
