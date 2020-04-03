@@ -670,15 +670,6 @@ struct CAFFE2_API TensorType : public Type {
   c10::optional<bool> undefined_;
 };
 
-struct CAFFE2_API ListType2
-    : public SingleElementType<TypeKind::ListType, ListType2> {
-  void registerMethod(std::unique_ptr<torch::jit::Function> fn) {
-    methods_.emplace_back(std::move(fn));
-  }
-  private:
-    std::vector<std::unique_ptr<torch::jit::Function>> methods_;
-};
-
 struct ListType;
 using ListTypePtr = std::shared_ptr<ListType>;
 struct CAFFE2_API ListType
