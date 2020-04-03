@@ -19,6 +19,37 @@ namespace at { namespace native {
 // of the same size.
 template <int N> struct alignas(N) OpaqueType { char data[N]; };
 
+// essentialy rewritten related to legacy::launch_kernel parts
+template <int nt, int vt, typename func_t>
+C10_LAUNCH_BOUNDS_2(nt, launch_bound2)
+__global__ void _scatter_gather_elementwise_kernel(int N, func_t f) {
+  constexpr int nv = nt * vt;
+  int idx = nv * blockIdx.x + threadIdx.x;
+
+  #pragma unroll
+  for (int i = 0; i < vt; ++i) {
+    if (idx < N) {
+      f(idx);
+      idx += nt;
+    }
+  }
+}
+
+template <int nt, int vt, typename func_t>
+static void _launch_scatter_gather_kernel(int64_t N, const func_t& f) {
+  TORCH_INTERNAL_ASSERT(N >= 0 && N <= std::numeric_limits<int32_t>::max());
+  if (N == 0) {
+    return;
+  }
+
+  dim3 block(nt);
+  dim3 grid((N + block.x * vt - 1) / (block.x * vt));
+  auto stream = at::cuda::getCurrentCUDAStream();
+  _scatter_gather_elementwise_kernel<nt, vt, func_t><<<grid, block, 0, stream>>>(N, f);
+  AT_CUDA_CHECK(cudaGetLastError());
+}
+
+
 template <bool is_scatter_like, typename scalar_t>
 struct _cuda_scatter_gather_internal_kernel {
   template <typename func_t>
@@ -46,7 +77,7 @@ struct _cuda_scatter_gather_internal_kernel {
     char* index_ptr = (char*)iter.data_ptr(2);
 
     auto offset_calc = make_offset_calculator<3>(iter);
-    legacy::launch_kernel<launch_size_nd, launch_bound2>(iter.numel(), [=]__device__(int i) {
+    auto loop = [=]C10_DEVICE(int i) {
       auto offsets = offset_calc.get(i);
 
       int64_t idx_dim = *(int64_t*)(index_ptr + offsets[2]);
@@ -61,7 +92,9 @@ struct _cuda_scatter_gather_internal_kernel {
         (scalar_t*)src_data + (is_scatter_like ? 0 : idx_dim * index_stride)
       );
 
-    });
+    };
+
+    _launch_scatter_gather_kernel<launch_size_nd, launch_bound2>(iter.numel(), loop);
   }
 }; // struct _cuda_scatter_fill_internal_kernel
 
