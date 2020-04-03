@@ -495,14 +495,12 @@ c10::intrusive_ptr<Future> GraphExecutorImplBase::runAsync(Stack& stack) {
 
   struct Frame {
     explicit Frame(ExecutionPlan eplan)
-      : plan(std::move(eplan)),
-        state(plan.code) {
-    }
+        : plan(std::move(eplan)), state(plan.code) {}
     ExecutionPlan plan;
     InterpreterState state;
   };
   auto frame = std::make_shared<Frame>(
-    getPlanFor(stack, GraphExecutor::getDefaultNumBailOuts()));
+      getPlanFor(stack, GraphExecutor::getDefaultNumBailOuts()));
   auto res = frame->state.runAsync(stack);
   last_executed_optimized_graph = frame->plan.graph;
   if (!res->completed()) {

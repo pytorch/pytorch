@@ -21,6 +21,7 @@ white_list = [
     # We export some functions and classes for test_jit.py directly from libtorch.so,
     # it's not important to have BC for them
     ('_TorchScriptTesting.*', datetime.date(9999, 1, 1)),
+    ('aten::append*', datetime.date(2020, 4, 15)),
     ('aten::real*', datetime.date(2020, 4, 15)),
     ('aten::imag*', datetime.date(2020, 4, 15)),
 ]
