@@ -4,9 +4,9 @@ import torch
 
 
 class MkldnnLinear(torch.jit.ScriptModule):
-    def __init__(self, dense_module):
+    def __init__(self, dense_module, dtype):
         super(MkldnnLinear, self).__init__()
-        self.register_buffer('weight', dense_module.weight.to_mkldnn())
+        self.register_buffer('weight', dense_module.weight.to_mkldnn(dtype))
         if dense_module.bias is not None:
             self.register_buffer('bias', dense_module.bias.to_mkldnn())
         else:
@@ -36,15 +36,14 @@ class MkldnnLinear(torch.jit.ScriptModule):
 class MkldnnConv2d(torch.jit.ScriptModule):
     __constants__ = ['stride', 'padding', 'dilation', 'groups']
 
-    def __init__(self, dense_module):
+    def __init__(self, dense_module, dtype):
         super(MkldnnConv2d, self).__init__()
-
         self.stride = dense_module.stride
         self.padding = dense_module.padding
         self.dilation = dense_module.dilation
         self.groups = dense_module.groups
         prepacked_weight = torch._C._nn.mkldnn_reorder_conv_weight(
-            dense_module.weight.to_mkldnn(),
+            dense_module.weight.to_mkldnn(dtype),
             self.padding,
             self.stride,
             self.dilation,
@@ -89,7 +88,7 @@ class MkldnnConv2d(torch.jit.ScriptModule):
 class MkldnnConv3d(torch.jit.ScriptModule):
     __constants__ = ['stride', 'padding', 'dilation', 'groups']
 
-    def __init__(self, dense_module):
+    def __init__(self, dense_module, dtype):
         super(MkldnnConv3d, self).__init__()
 
         self.stride = dense_module.stride
@@ -97,7 +96,7 @@ class MkldnnConv3d(torch.jit.ScriptModule):
         self.dilation = dense_module.dilation
         self.groups = dense_module.groups
         prepacked_weight = torch._C._nn.mkldnn_reorder_conv_weight(
-            dense_module.weight.to_mkldnn(),
+            dense_module.weight.to_mkldnn(dtype),
             self.padding,
             self.stride,
             self.dilation,
@@ -190,23 +189,23 @@ class MkldnnBatchNorm(torch.jit.ScriptModule):
         )
 
 
-def to_mkldnn(module):
-    def m_fn(m):
+def to_mkldnn(module, dtype=torch.float):
+    def m_fn(m, d):
         if isinstance(m, torch.nn.Linear):
-            return MkldnnLinear(m)
+            return MkldnnLinear(m, d)
         elif isinstance(m, torch.nn.Conv2d):
-            return MkldnnConv2d(m)
+            return MkldnnConv2d(m, d)
         elif isinstance(m, torch.nn.Conv3d):
-            return MkldnnConv3d(m)
+            return MkldnnConv3d(m, d)
         elif isinstance(m, torch.nn.BatchNorm2d) or isinstance(m, torch.nn.BatchNorm3d):
             return MkldnnBatchNorm(m)
         else:
             return m
 
-    def m_fn_rec(m):
-        new_m = m_fn(m)
+    def m_fn_rec(m, d):
+        new_m = m_fn(m, d)
         for name, sub_m in m.named_children():
-            setattr(new_m, name, m_fn_rec(sub_m))
+            setattr(new_m, name, m_fn_rec(sub_m, d))
         return new_m
 
-    return m_fn_rec(module)
+    return m_fn_rec(module, dtype)
