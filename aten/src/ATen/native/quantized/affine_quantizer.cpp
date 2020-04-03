@@ -17,21 +17,21 @@ DEFINE_DISPATCH(dequantize_tensor_per_channel_affine_stub);
 
 namespace {
 
-void checkCPUTensor(std::string fn_name, Tensor t) {
+void checkCPUTensor(const std::string& fn_name, Tensor t) {
   TORCH_CHECK(
       t.device().type() == kCPU,
       fn_name,
-      " expects a CPU Tensor.");
+      " only supports CPU device type.");
 }
 
-void checkFloatTensor(std::string fn_name, Tensor t) {
+void checkFloatTensor(const std::string& fn_name, Tensor t) {
   TORCH_CHECK(
       t.scalar_type() == kFloat,
       fn_name,
       " expects a Float Tensor.");
 }
 
-void checkSameDevice(std::string fn_name, Tensor t1, Tensor t2) {
+void checkSameDevice(const std::string& fn_name, Tensor t1, Tensor t2) {
   TORCH_CHECK(
       t1.device() == t2.device(),
       fn_name,
@@ -39,7 +39,7 @@ void checkSameDevice(std::string fn_name, Tensor t1, Tensor t2) {
 }
 
 template <typename T>
-void checkQuantizedTensor(std::string fn_name, Tensor t) {
+void checkQuantizedTensor(const std::string& fn_name, Tensor t) {
   TORCH_CHECK(t.is_quantized(),
            fn_name,
            " expects a quantized Tensor.");
@@ -48,13 +48,10 @@ void checkQuantizedTensor(std::string fn_name, Tensor t) {
            " expects a ",
            caffe2::TypeMeta::Make<T>(),
            " Tensor");
-  TORCH_CHECK(t.is_cuda() || t.device().type() == kCPU,
-           fn_name,
-           " expects a CUDA or CPU quantized Tensor");
 }
 
 template <typename T>
-void checkZeroPoint(std::string fn_name, int64_t zero_point) {
+void checkZeroPoint(const std::string& fn_name, int64_t zero_point) {
   TORCH_CHECK(zero_point <= std::numeric_limits<T>::max(),
               fn_name,
               " zero_point ",
@@ -68,14 +65,14 @@ void checkZeroPoint(std::string fn_name, int64_t zero_point) {
 }
 
 template <typename T>
-void checkZeroPoints(std::string fn_name, Tensor zero_points) {
+void checkZeroPoints(const std::string& fn_name, Tensor zero_points) {
   auto zero_points_data = zero_points.data_ptr<int64_t>();
   for (size_t i = 0; i < zero_points.numel(); ++i) {
     checkZeroPoint<T>(fn_name, zero_points_data[i]);
   }
 }
 
-void checkSameSize(std::string fn_name, Tensor qt, Tensor rt) {
+void checkSameSize(const std::string& fn_name, Tensor qt, Tensor rt) {
   TORCH_CHECK(
       qt.sizes().equals(rt.sizes()),
       fn_name, 
