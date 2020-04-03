@@ -1092,7 +1092,7 @@ class TestSparse(TestCase):
         x = x.bfloat16()
         y = y.bfloat16()
         res_bf16 = torch.add(x, y)
-        res_bf16 = res_bf16.float() # to compare with reference
+        res_bf16 = res_bf16.float()  # to compare with reference
         self.assertEqual(res_fp32, res_bf16, prec=1e-2)
 
     def test_norm(self):
