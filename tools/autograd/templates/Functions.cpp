@@ -7,7 +7,7 @@
 #include <cmath>
 #endif
 
-#include "Functions.h"
+#include "torch/csrc/autograd/generated/Functions.h"
 #include <ATen/Utils.h>
 #include <c10/core/TensorOptions.h>
 #include <ATen/WrapDimUtils.h>

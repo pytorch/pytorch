@@ -60,6 +60,16 @@ __m256i pack_saturate_and_clamp(
     T max_val);
 
 template <>
+__m256i pack_saturate_and_clamp<int32_t>(
+    __m256i first,
+    __m256i second,
+    int32_t min_val,
+    int32_t max_val) {
+  // This function is for linkage only, will not be used
+  AT_ERROR("pack_saturate_and_clamp<int32_t> is not supported");
+}
+
+template <>
 __m256i pack_saturate_and_clamp<int8_t>(
     __m256i first,
     __m256i second,
@@ -95,10 +105,47 @@ inline void __attribute__((always_inline)) QuantizeAvx2(
   constexpr int VLEN = 8;
   constexpr auto min_val = std::numeric_limits<typename T::underlying>::min();
   constexpr auto max_val = std::numeric_limits<typename T::underlying>::max();
+  const __m256i min_v = _mm256_set1_epi32(min_val);
+  const __m256i max_v = _mm256_set1_epi32(max_val);
   int i = 0;
   __m256 inverse_scale_v = _mm256_set1_ps(inverse_scale);
+  static const __m256i shuffle_mask_v = _mm256_set_epi8(
+      0xff,
+      0xff,
+      0xff,
+      0xff,
+      0xff,
+      0xff,
+      0xff,
+      0xff,
+      0xff,
+      0xff,
+      0xff,
+      0xff,
+      0x0c,
+      0x08,
+      0x04,
+      0x00,
+      0xff,
+      0xff,
+      0xff,
+      0xff,
+      0xff,
+      0xff,
+      0xff,
+      0xff,
+      0xff,
+      0xff,
+      0xff,
+      0xff,
+      0x0c,
+      0x08,
+      0x04,
+      0x00);
   __m256i permute_mask_v =
       _mm256_set_epi32(0x07, 0x03, 0x06, 0x02, 0x05, 0x01, 0x04, 0x00);
+  __m256i permute_mask_l8_v =
+      _mm256_set_epi32(0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x04, 0x00);
   int len_aligned = len / (VLEN * 4) * (VLEN * 4);
   for (; i < len_aligned; i += 4 * VLEN) {
     // x
@@ -131,6 +178,22 @@ inline void __attribute__((always_inline)) QuantizeAvx2(
     xyzw_clamped_v =
         _mm256_permutevar8x32_epi32(xyzw_clamped_v, permute_mask_v);
     _mm256_storeu_si256(reinterpret_cast<__m256i*>(dst + i), xyzw_clamped_v);
+  }
+
+  // Additional 8-lane AVX2 version to take advantage when len is smaller
+  // based on fbgemm::QuantizeAvx2 (https://github.com/pytorch/FBGEMM)
+  for (; i < len / VLEN * VLEN; i += VLEN) {
+    __m256 x_vals = _mm256_load_ps(src + i);
+    __m256 x_transformed_v =
+        _mm256_fmadd_ps(x_vals, inverse_scale_v, _mm256_set1_ps(zero_point));
+    __m256i x_rounded_v = _mm256_cvtps_epi32(x_transformed_v);
+    __m256i x_clipped_v =
+        _mm256_max_epi32(min_v, _mm256_min_epi32(max_v, x_rounded_v));
+
+    x_clipped_v = _mm256_shuffle_epi8(x_clipped_v, shuffle_mask_v);
+    x_clipped_v = _mm256_permutevar8x32_epi32(x_clipped_v, permute_mask_l8_v);
+    _mm_storel_epi64(
+        reinterpret_cast<__m128i*>(dst + i), _mm256_castsi256_si128(x_clipped_v));
   }
 
   for (; i < len; ++i) {
