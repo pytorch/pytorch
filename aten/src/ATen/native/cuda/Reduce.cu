@@ -39,6 +39,9 @@ std::ostream& operator<<(std::ostream& out, const ReduceConfig& config) {
     out << config.output_mult[i];
   }
   out << "], ";
+  out << "block_width=" << config.block_width << ", ";
+  out << "block_height=" << config.block_height << ", ";
+  out << "num_threads=" << config.num_threads << ", ";
   out << "values_per_thread=" << config.values_per_thread() << ", ";
   out << "block=" << config.block() << ", ";
   out << "grid=" << config.grid() << ", ";
