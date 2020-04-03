@@ -91,17 +91,19 @@ struct Suspend : public std::exception {
   c10::intrusive_ptr<Future> future;
 };
 
+// InterpreterContinuation propagates dist_autograd_context_id
+// through (and only through) the forward pass manually, other
+// thread local settings are propagated with ThreadLocalState
 struct InterpreterContinuation {
   InterpreterContinuation(
       InterpreterState state_,
       Stack stack_,
       int64_t dist_autograd_context_id = 0)
-      : state(state_),
-        stack(std::move(stack_)) {
+      : state(state_), stack(std::move(stack_)) {
 #ifdef USE_DISTRIBUTED
     dist_autograd_context_id_ = dist_autograd_context_id;
 #endif
-}
+  }
 
   void operator()();
 

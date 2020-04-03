@@ -103,10 +103,6 @@ enum class DispatchKey : uint8_t {
   // correct backend.
   BackendSelect,
 
-  // There is some code that should only be run before we hit the backend,
-  // but is generic to all backends and should be run for everyone.
-  BackendGeneric,
-
 
 
   // ~~~~~~~~~~~~~~~~~~~~~~~~~~~ AUTOGRAD ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //

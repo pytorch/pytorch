@@ -3,6 +3,7 @@
 #include <string>
 #include <vector>
 
+#include <c10/util/string_utils.h>
 #include <torch/csrc/jit/tensorexpr/exceptions.h>
 #include <torch/csrc/jit/tensorexpr/expr.h>
 #include <torch/csrc/jit/tensorexpr/stmt.h>
@@ -283,22 +284,92 @@ AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, IMM_DECLARE);
 
 // Get immediate by ScalarType.
 template <typename T>
-ExprHandle getImmediateByType(ScalarType immType, T initialVal) {
+Expr* getImmediateByType(ScalarType immType, T initialVal) {
   switch (immType) {
 #define TYPE_CASE(Type, Name) \
   case ScalarType::Name:      \
-    return Name##Imm::make(initialVal);
+    return new Name##Imm(initialVal);
     AT_FORALL_SCALAR_TYPES_AND(Half, TYPE_CASE);
 #undef TYPE_CASE
     default:
       throw unsupported_dtype();
   }
-  return ExprHandle();
+  return nullptr;
 }
 
 template <typename T>
-ExprHandle getImmediateByType(Dtype dtype, T initialVal) {
+Expr* getImmediateByType(Dtype dtype, T initialVal) {
   return getImmediateByType<T>(dtype.scalar_type(), initialVal);
+}
+
+template <typename T>
+T immediateAs(const Expr* e) {
+#define TYPE_CASE(Type, Name)                                     \
+  if (const Name##Imm* imm = dynamic_cast<const Name##Imm*>(e)) { \
+    return imm->value();                                          \
+  }
+  AT_FORALL_SCALAR_TYPES_AND(Half, TYPE_CASE);
+#undef TYPE_CASE
+  throw unsupported_dtype();
+  return 0;
+}
+
+template <typename T>
+bool immediateEquals(const Expr* e, T val) {
+#define TYPE_CASE(Type, Name)                                     \
+  if (const Name##Imm* imm = dynamic_cast<const Name##Imm*>(e)) { \
+    return imm->value() == val;                                   \
+  }
+  AT_FORALL_SCALAR_TYPES_AND(Half, TYPE_CASE);
+#undef TYPE_CASE
+  throw unsupported_dtype();
+  return false;
+}
+
+template <typename T>
+bool immediateIsNegative(const T* e) {
+#define TYPE_CASE(Type, Name)                                     \
+  if (const Name##Imm* imm = dynamic_cast<const Name##Imm*>(e)) { \
+    return imm->value() < 0;                                      \
+  }
+  AT_FORALL_SCALAR_TYPES_AND(Half, TYPE_CASE);
+#undef TYPE_CASE
+  return false;
+}
+
+// Creates a new Expr of the given type with the provided lhs and rhs.
+static const Expr* newBinaryOpOfType(
+    IRNodeType expr_type,
+    const Expr* lhs,
+    const Expr* rhs,
+    bool option) {
+  switch (expr_type) {
+    case IRNodeType::kAdd:
+      return new Add(lhs, rhs);
+    case IRNodeType::kSub:
+      return new Sub(lhs, rhs);
+    case IRNodeType::kMul:
+      return new Mul(lhs, rhs);
+    case IRNodeType::kDiv:
+      return new Div(lhs, rhs);
+    case IRNodeType::kMod:
+      return new Mod(lhs, rhs);
+    case IRNodeType::kMax:
+      return new Max(lhs, rhs, option);
+    case IRNodeType::kMin:
+      return new Min(lhs, rhs, option);
+    case IRNodeType::kAnd:
+      return new And(lhs, rhs);
+    case IRNodeType::kXor:
+      return new Xor(lhs, rhs);
+    case IRNodeType::kLshift:
+      return new Lshift(lhs, rhs);
+    case IRNodeType::kRshift:
+      return new Rshift(lhs, rhs);
+    default:
+      LOG(FATAL) << "unsupported expr_type: " << static_cast<int>(expr_type);
+      return nullptr;
+  }
 }
 
 // Bind the value to the var and evaluate the body.
@@ -354,7 +425,7 @@ class Ramp : public ExprNode<Ramp> {
   }
 
   Ramp(const Expr* base, const Expr* stride, int lanes)
-      : ExprNodeBase(Dtype(base->dtype(), lanes)),
+      : ExprNodeBase(Dtype(base->dtype(), lanes), kRamp),
         base_(base),
         stride_(stride),
         lanes_(lanes) {
@@ -372,39 +443,44 @@ class Ramp : public ExprNode<Ramp> {
 class TORCH_API Load : public ExprNode<Load> {
  public:
   const Var* base_handle() const {
-    return base_handle_;
+    return buf_->base_handle();
   }
-  const Expr* index() const {
-    return index_;
+  std::vector<const Expr*> indices() const {
+    return indices_;
+  }
+  const Expr* flat_index() const {
+    TORCH_CHECK(indices_.size() == 1, "Indices haven't been flattened.");
+    return indices_[0];
   }
   const Expr* mask() const {
     return mask_;
   }
+  const Buf* buf() const {
+    return buf_;
+  }
   static ExprHandle make(
       const Buffer& buffer,
-      const ExprHandle& index,
-      const ExprHandle& mask) {
-    return ExprHandle(new Load(buffer, index.node(), mask.node()));
-  }
+      const std::vector<ExprHandle>& indices,
+      const ExprHandle& mask);
   static ExprHandle make(
       Dtype dtype,
-      const VarHandle& base_handle,
-      const ExprHandle& index,
-      const ExprHandle& mask) {
-    return ExprHandle(
-        new Load(dtype, base_handle.node(), index.node(), mask.node()));
-  }
+      const BufHandle& buf,
+      const std::vector<ExprHandle>& indices,
+      const ExprHandle& mask);
 
-  Load(const Buffer& buffer, const Expr* index, const Expr* mask);
+  Load(
+      const Buffer& buffer,
+      const std::vector<const Expr*>& indices,
+      const Expr* mask);
   Load(
       Dtype dtype,
-      const Var* base_handle,
-      const Expr* index,
+      const Buf* base_handle,
+      const std::vector<const Expr*>& indices,
       const Expr* mask);
 
  private:
-  const Var* base_handle_;
-  const Expr* index_;
+  const Buf* buf_;
+  std::vector<const Expr*> indices_;
   const Expr* mask_;
 };
 
@@ -420,7 +496,7 @@ class Broadcast : public ExprNode<Broadcast> {
     return ExprHandle(new Broadcast(value.node(), lanes));
   }
   Broadcast(const Expr* value, int lanes)
-      : ExprNodeBase(Dtype(value->dtype(), lanes)),
+      : ExprNodeBase(Dtype(value->dtype(), lanes), kBroadcast),
         value_(value),
         lanes_(lanes) {}
 
@@ -725,7 +801,7 @@ class Intrinsics : public CallNode<Intrinsics> {
         return "frac";
       default:
         throw std::runtime_error(
-            "invalid op_type: " + std::to_string(op_type()));
+            "invalid op_type: " + c10::to_string(op_type()));
     }
   }
   using BaseClass = CallNode<Intrinsics>;
@@ -789,48 +865,8 @@ class Intrinsics : public CallNode<Intrinsics> {
   IntrinsicsOp op_type_;
 };
 
-/* An internal only Expr used in IR simplification.
- * Encodes relationship y = Ax + B, where A and B are Immediates.
- * Not required to be implemented by codegen. */
-class LinearForm : public ExprNode<LinearForm> {
- public:
-  LinearForm(const Expr* x, const Expr* A, const Expr* B)
-      : ExprNodeBase(dtypeFor(x, A, B)), x_(x), A_(A), B_(B) {}
-
-  LinearForm(const Expr* x)
-      : ExprNodeBase(x->dtype()),
-        x_(x),
-        A_(new CharImm(1)),
-        B_(new CharImm(0)) {}
-
-  const Expr* getX() const {
-    return x_;
-  }
-  const Expr* getA() const {
-    return A_;
-  }
-  const Expr* getB() const {
-    return B_;
-  }
-
-  void setA(const Expr* A) {
-    A_ = A;
-  }
-
-  void setB(const Expr* B) {
-    B_ = B;
-  }
-
-  static Dtype dtypeFor(const Expr* A, const Expr* B, const Expr* C) {
-    return ToDtype(promoteTypes(
-        A->dtype().scalar_type(), promoteTypes(B->dtype(), C->dtype())));
-  }
-
- private:
-  const Expr* x_;
-  const Expr* A_;
-  const Expr* B_;
-};
+class Polynomial;
+class Term;
 
 class FunctionCall;
 
@@ -842,6 +878,9 @@ TORCH_API std::vector<const Var*> VarHandleVectorToVarVector(
     const std::vector<VarHandle>&);
 TORCH_API std::vector<VarHandle> VarVectorToVarHandleVector(
     const std::vector<const Var*>&);
+TORCH_API const Expr* flatten_index(
+    const std::vector<const Expr*>& dims,
+    const std::vector<const Expr*>& indices);
 
 } // namespace tensorexpr
 } // namespace jit

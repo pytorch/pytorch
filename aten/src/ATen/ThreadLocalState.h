@@ -13,7 +13,10 @@ class ThreadLocalState {
  public:
   // Saves the thread local variables' values and
   // returns them as a ThreadLocalState
-  ThreadLocalState();
+  // keep_grad_mode - whether grad mode has to be preserved
+  //  (e.g. not preserved when passing from forward pass into
+  //   the autograd engine, autograd engine takes care of grad mode)
+  ThreadLocalState(bool keep_grad_mode = true);
 
   // Sets thread local variables in the current thread,
   // according to the thread boundary specified
@@ -22,13 +25,14 @@ class ThreadLocalState {
  private:
   c10::impl::LocalDispatchKeySet dispatch_key_;
 
-#if !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
-  bool grad_mode_enabled_;
-#endif
-
   // ThreadLocalDebugInfo does not change after being created
   // with DebugInfoGuard
   std::shared_ptr<at::ThreadLocalDebugInfo> debug_info_;
+
+#if !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
+  bool keep_grad_mode_ = true;
+  bool grad_mode_enabled_;
+#endif
 
   friend class ThreadLocalStateGuard;
 };

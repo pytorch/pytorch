@@ -238,18 +238,12 @@
 
 - func: real(Tensor self) -> Tensor
   use_c10_dispatcher: full
-  variants: function, method
-  supports_named_tensor: True
-
-- func: real.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  variants: function
   supports_named_tensor: True
 
 - func: imag(Tensor self) -> Tensor
   use_c10_dispatcher: full
-  variants: function, method
-  supports_named_tensor: True
-
-- func: imag.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  variants: function
   supports_named_tensor: True
 
 - func: conj(Tensor self) -> Tensor
@@ -1560,10 +1554,10 @@
   device_guard: False
   supports_named_tensor: True
 
-- func: kl_div(Tensor self, Tensor target, int reduction=Mean) -> Tensor
+- func: kl_div(Tensor self, Tensor target, int reduction=Mean, *, bool log_target=False) -> Tensor
   use_c10_dispatcher: full
 
-- func: kl_div_backward(Tensor grad_output, Tensor self, Tensor target, int reduction=Mean) -> Tensor
+- func: kl_div_backward(Tensor grad_output, Tensor self, Tensor target, int reduction=Mean, *, bool log_target=False) -> Tensor
   use_c10_dispatcher: full
   dispatch:
     CPU: kl_div_backward_cpu
@@ -2035,6 +2029,8 @@
   dispatch:
     CPU: mv_cpu
     CUDA: legacy::cuda::_th_mv
+    SparseCPU: mv_sparse
+    SparseCUDA: mv_sparse
   supports_named_tensor: True
 
 - func: mv.out(Tensor self, Tensor vec, *, Tensor(a!) out) -> Tensor(a!)
@@ -3636,6 +3632,11 @@
   variants: function
   dispatch:
     CPU: quantize_per_tensor_cpu
+
+- func: quantize_per_tensor.tensors(Tensor[] tensors, Tensor scales, Tensor zero_points, ScalarType dtype) -> Tensor[]
+  variants: function
+  dispatch:
+    CPU: quantize_per_tensor_list_cpu
 
 - func: quantize_per_channel(Tensor self, Tensor scales, Tensor zero_points, int axis, ScalarType dtype) -> Tensor
   variants: function
