@@ -74,6 +74,28 @@ class TestBuiltins(JitTestCase):
         with self.assertRaisesRegex(RuntimeError, "hasattr"):
             torch.jit.script(Mod())
 
+    def list_of_types(self):
+        return [
+            'bool',
+            'float',
+            'List[int]',
+            'Dict[str, Tensor]',
+            'Dict[str, int]',
+            'Tuple[int, int, str]',
+            'int',
+            'str',
+        ]
+
+    def test_bool_casting(self):
+        fn = """
+        def fn(x):
+            # type: ({})
+            return bool(x)
+        """
+
+        for t in self.list_of_types():
+            torch.jit.CompilationUnit().define(fn.format(t))
+
 
 class TestTensorBuiltins(JitTestCase):
     def test_tensor_properties(self):

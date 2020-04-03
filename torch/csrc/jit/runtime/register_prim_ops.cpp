@@ -363,7 +363,7 @@ RegisterOperators reg(
          [](Stack& stack) {
            int64_t i;
            pop(stack, i);
-           push(stack, (bool)i);
+           push(stack, bool(i));
            return 0;
          },
          aliasAnalysisFromSchema()),
@@ -372,7 +372,34 @@ RegisterOperators reg(
          [](Stack& stack) {
            double d;
            pop(stack, d);
-           push(stack, (bool)d);
+           push(stack, bool(d));
+           return 0;
+         },
+         aliasAnalysisFromSchema()),
+     Operator(
+         "aten::Bool.list(t[] a) -> bool",
+         [](Stack& stack) {
+           auto d = pop(stack).to<c10::List<IValue>>();
+           pop(stack, d);
+           push(stack, bool(d.size()));
+           return 0;
+         },
+         aliasAnalysisFromSchema()),
+     Operator(
+         "aten::Bool.tuple(AnyTupleType a) -> bool",
+         [](Stack& stack) {
+           IValue d;
+           pop(stack, d);
+           push(stack, bool(d.toTuple()->elements().size()));
+           return 0;
+         },
+         aliasAnalysisFromSchema()),
+     Operator(
+         "aten::Bool.str(str a) -> bool",
+         [](Stack& stack) {
+           std::string d;
+           pop(stack, d);
+           push(stack, bool(d.size()));
            return 0;
          },
          aliasAnalysisFromSchema()),
@@ -1740,6 +1767,13 @@ int dictSetItem(Stack& stack) {
   return 0;
 }
 
+int dictBool(Stack& stack) {
+  IValue d;
+  pop(stack);
+  push(stack, bool(false));
+  return 0;
+}
+
 int dictLen(Stack& stack) {
   auto dict = pop(stack).toGenericDict();
   push(stack, int64_t(dict.size()));
@@ -2702,6 +2736,10 @@ RegisterOperators reg2({
           "aten::_set_item(Dict(" key_type ", t)(a!) l, " key_type            \
           "(b -> *) idx, t(c -> *) v) -> ()",                                 \
           dictSetItem,                                                        \
+          aliasAnalysisFromSchema()),                                         \
+      Operator(                                                               \
+          "aten::Bool(Dict(" key_type ", t) l) -> bool ",                     \
+          dictBool,                                                           \
           aliasAnalysisFromSchema()),                                         \
       Operator(                                                               \
           "aten::dict((" key_type ", tVal)[] inputs) -> Dict(" key_type       \
