@@ -114,9 +114,10 @@ void FoldPrePackingOps(script::Module& m) {
 }
 
 void optimizeForMobile(script::Module& m) {
+  m.eval();
   m = FoldConvBatchNorm2d(m);
-  m = freeze_module(m);
   insertPrePackedOps(m);
+  m = freeze_module(m);
   FoldPrePackingOps(m);
 }
 
