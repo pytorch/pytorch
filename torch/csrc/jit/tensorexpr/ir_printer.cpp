@@ -1,5 +1,7 @@
 #include <torch/csrc/jit/tensorexpr/ir_printer.h>
 
+#include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
+
 namespace torch {
 namespace jit {
 namespace tensorexpr {
@@ -88,7 +90,7 @@ void IRPrinter::visit(const Mod* v) {
   if (v->dtype().is_integral()) {
     visitBinaryOp(v, "%", this);
   } else if (v->dtype().is_floating_point()) {
-    os() << "mod(" << v->lhs() << ", " << v->rhs() << ")";
+    os() << "mod(" << *v->lhs() << ", " << *v->rhs() << ")";
   } else {
     throw std::runtime_error("invalid dtype: " + std::to_string(v->dtype()));
   }
@@ -198,7 +200,7 @@ template <
     typename T,
     std::enable_if_t<!std::is_floating_point<T>::value>* = nullptr>
 static void formatImm(std::ostream& os, T v) {
-  os << v;
+  os << +v;
 }
 
 // NOLINTNEXTLINE
@@ -261,7 +263,15 @@ void IRPrinter::visit(const Ramp* v) {
 
 void IRPrinter::visit(const Load* v) {
   // TODO: support the mask case
-  os() << *v->base_handle() << "[" << *v->index() << "]";
+  os() << *v->base_handle() << "[";
+  size_t i = 0;
+  for (const Expr* ind : v->indices()) {
+    if (i++) {
+      os() << ", ";
+    }
+    ind->accept(this);
+  }
+  os() << "]";
 }
 
 void IRPrinter::visit(const For* v) {
@@ -294,8 +304,15 @@ void IRPrinter::visit(const Block* v) {
 void IRPrinter::visit(const Store* v) {
   // TODO: handle the mask
   emitIndent();
-  os() << *v->base_handle() << "[" << *v->index() << "] = " << *v->value()
-       << ";";
+  os() << *v->base_handle() << "[";
+  size_t i = 0;
+  for (const Expr* ind : v->indices()) {
+    if (i++) {
+      os() << ", ";
+    }
+    ind->accept(this);
+  }
+  os() << "] = " << *v->value() << ";";
 }
 
 void IRPrinter::visit(const Broadcast* v) {
@@ -368,9 +385,41 @@ void IRPrinter::visit(const Cond* v) {
   }
 }
 
-void IRPrinter::visit(const LinearForm* v) {
-  os() << "(" << *v->getA() << ") * (" << *v->getX() << ") + (" << *v->getB()
-       << ")" << std::endl;
+void IRPrinter::visit(const Term* v) {
+  os() << "Term(";
+  v->scalar()->accept(this);
+  for (auto* t : v->variables()) {
+    os() << ",";
+    t->accept(this);
+  }
+  os() << ")";
+}
+
+void IRPrinter::visit(const Polynomial* v) {
+  bool first = true;
+  os() << "Polynomial(";
+  for (auto* t : v->variables()) {
+    emitIndent();
+    if (!first) {
+      os() << " + ";
+    }
+    first = false;
+    t->accept(this);
+  }
+
+  if (!first) {
+    os() << " + ";
+  }
+  v->scalar()->accept(this);
+  os() << ")";
+}
+
+void IRPrinter::visit(const RoundOff* v) {
+  os() << "RoundOff(";
+  v->lhs()->accept(this);
+  os() << ", ";
+  v->rhs()->accept(this);
+  os() << ")";
 }
 
 void IRPrinter::emitIndent() {

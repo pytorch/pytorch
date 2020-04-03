@@ -204,6 +204,10 @@ They are used in specifying strategies for reduction collectives, e.g.,
       .def(py::init<>())
       .def_readwrite("timeout", &::c10d::BarrierOptions::timeout);
 
+  py::class_<::c10d::AllToAllOptions>(module, "AllToAllOptions")
+      .def(py::init<>())
+      .def_readwrite("timeout", &::c10d::AllToAllOptions::timeout);
+
   auto store =
       py::class_<::c10d::Store, std::shared_ptr<::c10d::Store>, PythonStore>(
           module, "Store")
@@ -467,6 +471,55 @@ They are used in specifying strategies for reduction collectives, e.g.,
               },
               py::arg("output_tensors"),
               py::arg("input_tensor"),
+              py::call_guard<py::gil_scoped_release>())
+
+          .def(
+              "alltoall_base",
+              &::c10d::ProcessGroup::alltoall_base,
+              py::arg("output_tensor"),
+              py::arg("input_tensor"),
+              py::arg("output_split_sizes"),
+              py::arg("input_split_sizes"),
+              py::arg("opts") = ::c10d::AllToAllOptions(),
+              py::call_guard<py::gil_scoped_release>())
+
+          .def(
+              "alltoall_base",
+              [](::c10d::ProcessGroup& pg,
+                 at::Tensor& output,
+                 at::Tensor& input,
+                 std::vector<int64_t> outputSplitSizes,
+                 std::vector<int64_t> inputSplitSizes) {
+                return pg.alltoall_base(
+                    output,
+                    input,
+                    outputSplitSizes,
+                    inputSplitSizes,
+                    ::c10d::AllToAllOptions());
+              },
+              py::arg("output"),
+              py::arg("input"),
+              py::arg("output_split_sizes"),
+              py::arg("input_split_sizes"),
+              py::call_guard<py::gil_scoped_release>())
+
+          .def(
+              "alltoall",
+              &::c10d::ProcessGroup::alltoall,
+              py::arg("output_tensor"),
+              py::arg("input_tensor"),
+              py::arg("opts") = ::c10d::AllToAllOptions(),
+              py::call_guard<py::gil_scoped_release>())
+
+          .def(
+              "alltoall",
+              [](::c10d::ProcessGroup& pg,
+                 std::vector<at::Tensor>& output,
+                 std::vector<at::Tensor>& input) {
+                return pg.alltoall(output, input, ::c10d::AllToAllOptions());
+              },
+              py::arg("output"),
+              py::arg("input"),
               py::call_guard<py::gil_scoped_release>())
 
           .def(
