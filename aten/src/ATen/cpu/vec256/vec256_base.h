@@ -23,7 +23,7 @@
 #elif defined(_WIN32)
 #define __at_align32__ __declspec(align(32))
 #else
-#define __at_align32__
+#error "The compiler must support 256-bit alignment."
 #endif
 
 namespace at {
