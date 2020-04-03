@@ -2,7 +2,7 @@ import os
 import unittest
 
 import torch.testing._internal.common_utils as common
-from torch.testing._internal.common_utils import IS_WINDOWS
+from torch.testing._internal.common_utils import IS_WINDOWS, skipIfRocm
 from torch.testing._internal.common_cuda import TEST_CUDA
 import torch
 import torch.backends.cudnn
@@ -55,6 +55,7 @@ class TestCppExtensionAOT(common.TestCase):
         expected_tensor_grad = torch.ones([4, 4], dtype=torch.double).mm(weights.t())
         self.assertEqual(tensor.grad, expected_tensor_grad)
 
+    @skipIfRocm
     @unittest.skipIf(not TEST_CUDA, "CUDA not found")
     def test_cuda_extension(self):
         import torch_test_cpp_extension.cuda as cuda_extension

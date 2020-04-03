@@ -1,4 +1,3 @@
-# @lint-ignore-every PYTHON3COMPATIMPORTS
 
 r"""
 The torch package contains data structures for multi-dimensional
