@@ -566,8 +566,44 @@ Value* emitBuiltinCall(
     at::ArrayRef<NamedValue> inputs,
     at::ArrayRef<NamedValue> attributes,
     const c10::optional<NamedValue>& self) {
+
+  std::cout << "emitBuiltinCall" << std::endl;
+  std::cout << "name (symbol): " << name.toDisplayString() << std::endl;
+
   const auto& variants = getAllOperatorsFor(name);
+
+  const bool is_scalar_div = inputs.size() == 2
+    && inputs[0].type()->isSubtypeOf(NumberType::get())
+    && inputs[1].type()->isSubtypeOf(NumberType::get());
+
+  if (name == aten::div && !is_scalar_div) {
+  // if (name == aten::div) {
+    // std::cout << "inputs.size(): " << inputs.size() << std::endl;
+    // std::cout << "inputs[0].type()->isSubtypeOf(NumberType::get()):" << inputs[0].type()->isSubtypeOf(NumberType::get()) << std::endl;
+    // std::cout << "inputs[1].type()->isSubtypeOf(NumberType::get()):" << inputs[1].type()->isSubtypeOf(NumberType::get()) << std::endl;
+
+    // const auto& variants = getAllOperatorsFor(aten::add);
+    std::cout << "upgrading div" << std::endl;
+    // const auto sym = Symbol::fromQualString("aten::floordiv");
+    const auto sym = Symbol::fromQualString("aten::div_updater");
+    const auto& builtin_functions = getAllBuiltinFunctionsFor(sym);
+    std::vector<const FunctionSchema*> schemas;
+    for (const auto method : builtin_functions) {
+      std::cout << "adding a schema" << std::endl;
+      method->ensure_defined();
+      schemas.push_back(&method->getSchema());
+    }
+    std::cout << "matching schemas" << std::endl;
+    auto matched = matchSchemas(schemas, loc, graph, inputs, attributes, self);
+    Function* fn = builtin_functions[matched.first];
+    std::cout << "inserting into graph" << std::endl;
+    auto* result = insertGraph(graph, *fn->graph(), matched.second.inputs).at(0);
+    std::cout << "done inserting into graph" << std::endl;
+    return result;
+  }
+
   const auto& builtin_functions = getAllBuiltinFunctionsFor(name);
+
 
   std::stringstream failure_messages;
   std::vector<const FunctionSchema*> schemas;

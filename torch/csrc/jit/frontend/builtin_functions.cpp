@@ -42,6 +42,47 @@ def floordiv(self : Tensor, other : ${Rhs_Type}) -> Tensor:
   return torch.floor_divide(self, other)
 )SCRIPT");
 
+
+auto div_updater_tensor = CodeTemplate(R"SCRIPT(
+def div_updater(self: Tensor, other: Tensor) -> Tensor:
+  if (torch.is_floating_point(self) or
+      torch.is_complex(self) or
+      torch.is_floating_point(other) or
+      torch.is_complex(other)):
+    return torch.true_divide(self, other)
+
+  return torch.floor_divide(self, other)
+)SCRIPT");
+
+// TODO: update out type promotion logic for consistency
+auto div_updater_tensor_out = CodeTemplate(R"SCRIPT(
+def div_updater(self: Tensor, other: Tensor, *, out: Tensor) -> Tensor:
+  if (torch.is_floating_point(self) or
+      torch.is_complex(self) or
+      torch.is_floating_point(other) or
+      torch.is_complex(other)):
+    return torch.true_divide(self, other, out=out)
+
+  return torch.floor_divide(self, other, out=out)
+)SCRIPT");
+
+// TODO: other should be checked for being complex, too, but the jit
+// doesn't understand isinstance(other, complex)
+auto div_updater_tensor_scalar = CodeTemplate(R"SCRIPT(
+def div_updater(self: Tensor, other: number) -> Tensor:
+  if (torch.is_floating_point(self) or
+      torch.is_complex(self) or
+      isinstance(other, float)):
+    return torch.true_divide(self, other)
+
+  return torch.floor_divide(self, other)
+)SCRIPT");
+
+auto div_updater_scalar_tensor = CodeTemplate(R"SCRIPT(
+def div_updater(self: number, other: Tensor) -> Tensor:
+  return torch.reciprocal(other).mul_(self)
+)SCRIPT");
+
 auto tensor_properties =
     R"SCRIPT(
 def ndim(a : Tensor) -> int:
@@ -96,6 +137,7 @@ struct BuiltinFunctionRegistry {
           .push_back(method);
     }
   }
+
   void loadBuiltinFunctions() {
     for (auto scalar : {"float", "int"}) {
       TemplateEnv env;
@@ -125,6 +167,11 @@ struct BuiltinFunctionRegistry {
       loadSource(floordiv.format(env), "aten");
     }
 
+    TemplateEnv env;
+    loadSource(div_updater_tensor.format(env), "aten");
+    loadSource(div_updater_tensor_out.format(env), "aten");
+    loadSource(div_updater_tensor_scalar.format(env), "aten");
+    loadSource(div_updater_scalar_tensor.format(env), "aten");
     loadSource(aten_ops, "aten");
 
     // These are under `prim` instead of `aten` since they exist to bind certain
