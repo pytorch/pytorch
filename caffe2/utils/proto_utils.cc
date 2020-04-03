@@ -559,10 +559,11 @@ GetFlagArgument(const NetDef& def, const string& name, bool default_value) {
   return GetFlagArgument(def.arg(), name, default_value);
 }
 
-C10_EXPORT Argument* GetMutableArgument(
+template <typename Def>
+Argument* GetMutableArgumentImpl(
     const string& name,
     const bool create_if_missing,
-    OperatorDef* def) {
+    Def* def) {
   for (int i = 0; i < def->arg_size(); ++i) {
     if (def->arg(i).name() == name) {
       return def->mutable_arg(i);
@@ -576,6 +577,20 @@ C10_EXPORT Argument* GetMutableArgument(
   } else {
     return nullptr;
   }
+}
+
+C10_EXPORT Argument* GetMutableArgument(
+    const string& name,
+    const bool create_if_missing,
+    OperatorDef* def) {
+  return GetMutableArgumentImpl(name, create_if_missing, def);
+}
+
+C10_EXPORT Argument* GetMutableArgument(
+    const string& name,
+    const bool create_if_missing,
+    NetDef* def) {
+  return GetMutableArgumentImpl(name, create_if_missing, def);
 }
 
 C10_EXPORT void cleanupExternalInputsAndOutputs(NetDef* net) {

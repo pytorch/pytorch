@@ -36,17 +36,17 @@ DebugInfoGuard::DebugInfoGuard(
     return;
   }
   TORCH_CHECK(!ThreadLocalDebugInfo::get(kind), "Debug info is already set");
-  auto parent_info = debug_info;
+  prev_info_ = debug_info;
   debug_info = std::make_shared<ThreadLocalDebugInfo>();
-  debug_info->parent_info_ = parent_info;
+  debug_info->parent_info_ = prev_info_;
   debug_info->kind_ = kind;
   debug_info->debug_info_ = info;
   active_ = true;
 }
 
 DebugInfoGuard::~DebugInfoGuard() {
-  if (active_ && debug_info) {
-    debug_info = debug_info->parent_info_;
+  if (active_) {
+    debug_info = prev_info_;
   }
 }
 
@@ -58,6 +58,7 @@ DebugInfoGuard::DebugInfoGuard(
   if (!info) {
     return;
   }
+  prev_info_ = debug_info;
   debug_info = info;
   active_ = true;
 }

@@ -80,7 +80,8 @@ struct GraphTask {
   // out of the GraphTask and are no longer valid.
   std::vector<Variable> captured_vars_;
 
-  at::ThreadLocalState thread_locals_;
+  at::ThreadLocalState thread_locals_ =
+      at::ThreadLocalState(/* keep_grad_mode */ false);
 
   std::unordered_set<c10::Stream> leaf_streams;
 

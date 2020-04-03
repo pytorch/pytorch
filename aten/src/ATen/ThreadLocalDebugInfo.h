@@ -71,6 +71,7 @@ class CAFFE2_API DebugInfoGuard {
 
  private:
   bool active_ = false;
+  std::shared_ptr<ThreadLocalDebugInfo> prev_info_ = nullptr;
 };
 
 } // namespace at
