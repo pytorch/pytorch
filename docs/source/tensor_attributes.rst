@@ -100,6 +100,7 @@ Promotion Examples::
 When the output tensor of an arithmetic operation is specified, we allow casting to its `dtype` except that:
   * An integral output tensor cannot accept a floating point tensor.
   * A boolean output tensor cannot accept a non-boolean tensor.
+  * A non-complex output tensor cannot accept a complex tensor
 
 Casting Examples::
 
@@ -117,6 +118,7 @@ Casting Examples::
     >>> int_tensor *= float_tensor
     >>> bool_tensor *= int_tensor
     >>> bool_tensor *= uint_tensor
+    >>> float_tensor *= complex_float_tensor
 
 
 .. _device-doc:
@@ -234,10 +236,10 @@ Possible values are:
   Tensor is or will be  allocated in dense non-overlapping memory. Strides represented by values in decreasing order.
 
 - ``torch.channels_last``:
-  Tensor is or will be  allocated in dense non-overlapping memory. Strides represented by values in 
-  ``strides[0] > strides[2] > strides[3] > strides[1] == 1`` aka NHWC order. 
+  Tensor is or will be  allocated in dense non-overlapping memory. Strides represented by values in
+  ``strides[0] > strides[2] > strides[3] > strides[1] == 1`` aka NHWC order.
 
 - ``torch.preserve_format``:
-  Used in functions like `clone` to preserve the memory format of the input tensor. If input tensor is 
-  allocated in dense non-overlapping memory, the output tensor strides will be copied from the input. 
+  Used in functions like `clone` to preserve the memory format of the input tensor. If input tensor is
+  allocated in dense non-overlapping memory, the output tensor strides will be copied from the input.
   Otherwise output strides will follow ``torch.contiguous_format``
