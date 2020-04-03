@@ -1,12 +1,14 @@
 #include <torch/csrc/jit/serialization/export.h>
 
 #include <c10/util/Exception.h>
+#include <torch/csrc/jit/ir/type_hashing.h>
 #include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/runtime/instruction.h>
 #include <torch/csrc/jit/serialization/import_export_helpers.h>
 #include <torch/csrc/jit/serialization/pickle.h>
 #include <torch/csrc/jit/serialization/python_print.h>
 #include <torch/csrc/jit/serialization/source_range_serialization.h>
+#include <torch/csrc/jit/serialization/type_name_uniquer.h>
 
 #include <caffe2/serialize/inline_container.h>
 
@@ -14,6 +16,8 @@
 
 #include <string>
 #include <vector>
+#include "ATen/core/jit_type.h"
+#include "ATen/core/qualified_name.h"
 
 namespace torch {
 namespace jit {
@@ -195,6 +199,9 @@ class ScriptModuleSerializer {
           data.insert(data.end(), buf, buf + size);
         },
         nullptr,
+        [&](const c10::ClassTypePtr& t) {
+          return type_name_uniquer_.getUniqueName(t);
+        },
         &memorizedClassTypes);
     data_pickle.protocol();
     data_pickle.pushIValue(value);
@@ -280,13 +287,26 @@ class ScriptModuleSerializer {
       return;
     }
     converted_types_.insert(class_type);
-    std::string qualifier = class_type->name()->prefix();
+    auto qualname = type_name_uniquer_.getUniqueName(class_type);
+    std::string qualifier = qualname.prefix();
     PythonPrint* pp = file_streams_.find(qualifier);
+
+    auto type_printer =
+        [&](const c10::ConstTypePtr& t) -> c10::optional<std::string> {
+      auto namedType = t->cast<c10::NamedType>();
+      if (namedType && namedType->name()) {
+        return type_name_uniquer_.getUniqueName(namedType).qualifiedName();
+      }
+      return c10::nullopt;
+    };
     if (!pp) {
       pp = &file_streams_.insert(
           qualifier,
           PythonPrint(
-              constant_table_, class_deps_, /*enforce_importable=*/true));
+              constant_table_,
+              class_deps_,
+              type_printer,
+              /*enforce_importable=*/true));
     }
     pp->printNamedType(class_type);
   }
@@ -295,6 +315,7 @@ class ScriptModuleSerializer {
   std::vector<at::Tensor> constant_table_;
   std::unordered_set<c10::NamedTypePtr> converted_types_;
   std::vector<c10::NamedTypePtr> class_deps_;
+  TypeNameUniquer type_name_uniquer_;
 
   // qualifier, e.g. '__torch__.Bar' -> PythonPrint for the file that will be
   // created
