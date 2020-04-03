@@ -805,7 +805,7 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
       case kFmod:
         return std::fmod(v1, v2);
       case kRemainder:
-        return std::remainderf(v1, v2);
+        return std::remainder(v1, v2);
       case kAtan2:
         return std::atan2(v1, v2);
       default:
