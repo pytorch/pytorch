@@ -5360,7 +5360,7 @@ def foo(x):
 
         node = list(f.graph.nodes())[0]
         t = node.outputsAt(0).type()
-        self.assertFalse(t == None)
+        self.assertFalse(t == None)  # noqa
 
     @unittest.skipIf(IS_WINDOWS and sys.version_info >= (3, 8), 'TODO: need to fix the test case')
     def test_unmatched_type_annotation(self):
