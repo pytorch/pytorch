@@ -32,14 +32,13 @@ context (e.g. `name`). If enabled, ``RecordFunction::inputs()`` contains argumen
 of the function represented as ``torch::IValue`` variant type. Note, that inputs
 logging is relatively expensive and thus has to be enabled explicitly.
 
-The operator callbacks also have access to ``at::getThreadLocalDebugInfo()``
-interface that returns a pointer to the struct holding the debug information. This
-debug information is supposed to be set earlier with the corresponding
-``at::setThreadLocalDebugInfo(debug_info)`` call. Debug information is propagated
-through the forward (including async ``fork`` tasks) and backward passes and can
-be useful for passing some extra information about execution environment
-(e.g. model id) from the higher layers of the application down to the operator
-callbacks.
+The operator callbacks also have access to ``at::ThreadLocalDebugInfo::get()``
+interface that returns a pointer to the struct holding the debug information.
+This debug information can be set earlier by using ``at::DebugInfoGuard`` object.
+Debug information is propagated through the forward (including async ``fork``
+tasks) and backward passes and can be useful for passing some extra information
+about execution environment (e.g. model id) from the higher layers of the
+application down to the operator callbacks.
 
 Invoking callbacks adds some overhead, so usually it's useful to just randomly
 sample operator invocations. This can be enabled on per-callback basis with an

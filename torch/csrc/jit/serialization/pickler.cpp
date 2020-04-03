@@ -101,7 +101,11 @@ void Pickler::pushIValueImpl(const IValue& ivalue) {
       // and serialize them properly for class/interface polymorphism
       memorized_class_types_->emplace_back(type);
     }
-    pushGlobal(type->name()->prefix(), type->name()->name());
+    auto type_name = type->name().value();
+    if (type_renamer_) {
+      type_name = type_renamer_(type);
+    }
+    pushGlobal(type_name.prefix(), type_name.name());
     push<PickleOpCode>(PickleOpCode::EMPTY_TUPLE);
     push<PickleOpCode>(PickleOpCode::NEWOBJ);
     if (checkHasValidSetGetState(type)) {
