@@ -687,15 +687,8 @@ Stmt* LoopNest::lowerToStmt(Tensor* t) {
     return body;
   }
 
-  if (t->buf()->ndim() == 0) {
-    throw malformed_input();
-  }
-
   for (size_t i = 0; i < t->buf()->ndim(); i++) {
-    // Going in reverse order: from innermost loop to the outermost
-    size_t dim_index = t->buf()->ndim() - i - 1;
-    body = new For(
-        f->arg(dim_index), new IntImm(0), t->buf()->dim(dim_index), body);
+    body = new For(f->arg(i), new IntImm(0), t->buf()->dim(i), body);
   }
   return body;
 }
@@ -893,7 +886,7 @@ std::vector<For*> LoopNest::getLoopStmtsFor(Tensor* t) const {
     }
     cur_stmt = cur_stmt->get_parent();
   }
-  return std::vector<For*>(result.rbegin(), result.rend());
+  return result;
 }
 
 void LoopNest::setGPUBlockIndex(For* f, int block_index) {
@@ -1167,8 +1160,7 @@ void LoopNest::computeAt(Stmt* s, For* f) {
   // statement
   std::vector<std::pair<const Var*, const Expr*>> rewrite_indices_map;
   for (size_t i = 0; i < prod_indices.size(); i++) {
-    size_t dim_index = dims.size() - i - 1;
-    const Expr* offset = ta.start[dim_index];
+    const Expr* offset = ta.start[i];
     std::cerr << "Rewrite index " << *prod_indices[i] << " -> "
               << *temp_indices[i] << "+" << *offset << "\n";
     rewrite_indices_map.push_back(
@@ -1184,12 +1176,10 @@ void LoopNest::computeAt(Stmt* s, For* f) {
 
   // Construct the loop nest for the temp computation
   for (size_t i = 0; i < dims.size(); i++) {
-    // Going in reverse order: from innermost loop to the outermost
-    size_t dim_index = dims.size() - i - 1;
     bd = new For(
         dynamic_cast<const Var*>(temp_indices[i]),
         new IntImm(0),
-        dims[dim_index],
+        dims[i],
         bd);
   }
 

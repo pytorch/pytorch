@@ -173,11 +173,11 @@ const Expr* flatten_index(
     return new IntImm(0);
   }
   std::vector<const Expr*> strides(ndim);
-  // stride[i] = stride[i+1]*dims[i+1], i < ndim-1
-  // stride[i] = 1,                     i = ndim-1
-  strides[ndim - 1] = new IntImm(1);
+  // stride[0] = 1,
+  // stride[i] = stride[i-1]*dims[i-1], i > 0
+  strides[0] = new IntImm(1);
   for (size_t i = 1; i < ndim; i++) {
-    strides[ndim - 1 - i] = new Mul(strides[ndim - i], dims[ndim - i]);
+    strides[i] = new Mul(strides[i - 1], dims[i - 1]);
   }
 
   const Expr* total_index = new IntImm(0);

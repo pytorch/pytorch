@@ -58,13 +58,13 @@ void testExprSimple02() {
   auto func = [](const ExprHandle& x, const ExprHandle& y) {
     return ExprHandle(1.0f) + cast<float>(x) * x + cast<float>(y) * y;
   };
-  Tensor* tensor = Compute("f", {{26, "x"}, {5, "y"}}, func);
+  Tensor* tensor = Compute("f", {{5, "x"}, {26, "y"}}, func);
   LoopNest l({tensor});
-  For* x_outer;
-  For* x_inner;
-  For* x_tail;
+  For* y_outer;
+  For* y_inner;
+  For* y_tail;
   std::vector<For*> loops = l.getLoopStmtsFor(tensor);
-  l.splitWithTail(loops[0], 4, &x_outer, &x_inner, &x_tail);
+  l.splitWithTail(loops[1], 4, &y_outer, &y_inner, &y_tail);
 
   Stmt* stmt = l.root_stmt();
   std::ostringstream oss;
@@ -74,29 +74,29 @@ void testExprSimple02() {
 
   {
     // Compare to a reference loop structure structure.
-    VarHandle x_outer("x_outer", kInt);
-    VarHandle x_inner("x_inner", kInt);
-    VarHandle y("y", kInt);
-    VarHandle x_tail("x_tail", kInt);
-    BufHandle f("f", {26, 5});
-    ExprHandle x_1 = x_outer * 4 + x_inner;
-    ExprHandle x_outer_end = (ExprHandle(26) - 0) / 4;
+    VarHandle y_outer("y_outer", kInt);
+    VarHandle y_inner("y_inner", kInt);
+    VarHandle x("x", kInt);
+    VarHandle y_tail("y_tail", kInt);
+    BufHandle f("f", {5, 26});
+    ExprHandle y_1 = y_outer * 4 + y_inner;
+    ExprHandle y_outer_end = (ExprHandle(26) - 0) / 4;
     For* stmt1 = For::make(
-        x_outer,
+        y_outer,
         0,
-        x_outer_end,
+        y_outer_end,
         For::make(
-            x_inner,
+            y_inner,
             0,
             4,
             For::make(
-                y, 0, 5, Store::make(f, {x_1, y}, func(x_1, y), 1))));
-    ExprHandle x_2 = x_tail + x_outer_end * 4;
+                x, 0, 5, Store::make(f, {x, y_1}, func(x, y_1), 1))));
+    ExprHandle y_2 = y_tail + y_outer_end * 4;
     For* stmt2 = For::make(
-        x_tail,
+        y_tail,
         0,
         (ExprHandle(26) - 0) % 4,
-        For::make(y, 0, 5, Store::make(f, {x_2, y}, func(x_2, y), 1)));
+        For::make(x, 0, 5, Store::make(f, {x, y_2}, func(x, y_2), 1)));
     Stmt* stmt = Block::make({stmt1, stmt2});
 
     std::ostringstream oss_ref;
@@ -105,15 +105,15 @@ void testExprSimple02() {
   }
 
   {
-    PaddedBuffer<float> f_v(26, 5, "f_v");
-    PaddedBuffer<float> f_ref(26, 5, "f_res");
+    PaddedBuffer<float> f_v(5, 26, "f_v");
+    PaddedBuffer<float> f_ref(5, 26, "f_res");
 
     stmt = FlattenIndexes(stmt);
     SimpleIREvaluator ir_eval(stmt, tensor);
     ir_eval(f_v);
 
-    for (int x = 0; x < 26; x++) {
-      for (int y = 0; y < 5; y++) {
+    for (int y = 0; y < 26; y++) {
+      for (int x = 0; x < 5; x++) {
         f_ref(x, y) = 1 + x * x + y * y;
       }
     }
@@ -127,13 +127,13 @@ void testExprSplitWithTailNone() {
   auto func = [](const ExprHandle& x, const ExprHandle& y) {
     return ExprHandle(1.0f) + cast<float>(x) * x + cast<float>(y) * y;
   };
-  Tensor* tensor = Compute("f", {{24, "x"}, {5, "y"}}, func);
+  Tensor* tensor = Compute("f", {{5, "x"}, {24, "y"}}, func);
   LoopNest l({tensor});
-  For* x_outer;
-  For* x_inner;
-  For* x_tail;
+  For* y_outer;
+  For* y_inner;
+  For* y_tail;
   std::vector<For*> loops = l.getLoopStmtsFor(tensor);
-  l.splitWithTail(loops[0], 4, &x_outer, &x_inner, &x_tail);
+  l.splitWithTail(loops[1], 4, &y_outer, &y_inner, &y_tail);
 
   Stmt* stmt = l.root_stmt();
   std::ostringstream oss;
@@ -143,23 +143,23 @@ void testExprSplitWithTailNone() {
 
   {
     // Compare to a reference loop structure structure.
-    VarHandle x_outer("x_outer", kInt);
-    VarHandle x_inner("x_inner", kInt);
-    VarHandle y("y", kInt);
-    VarHandle x_tail("x_tail", kInt);
-    BufHandle f("f", {24, 5});
-    ExprHandle x_1 = x_outer * 4 + x_inner;
-    ExprHandle x_outer_end = (ExprHandle(24) - 0) / 4;
+    VarHandle y_outer("y_outer", kInt);
+    VarHandle y_inner("y_inner", kInt);
+    VarHandle x("x", kInt);
+    VarHandle y_tail("y_tail", kInt);
+    BufHandle f("f", {5, 24});
+    ExprHandle y_1 = y_outer * 4 + y_inner;
+    ExprHandle y_outer_end = (ExprHandle(24) - 0) / 4;
     For* stmt = For::make(
-        x_outer,
+        y_outer,
         0,
-        x_outer_end,
+        y_outer_end,
         For::make(
-            x_inner,
+            y_inner,
             0,
             4,
             For::make(
-                y, 0, 5, Store::make(f, {x_1, y}, func(x_1, y), 1))));
+                x, 0, 5, Store::make(f, {x, y_1}, func(x, y_1), 1))));
 
     std::ostringstream oss_ref;
     oss_ref << *stmt;
@@ -168,14 +168,14 @@ void testExprSplitWithTailNone() {
   }
 
   {
-    PaddedBuffer<float> f_v(24, 5, "f_v");
-    PaddedBuffer<float> f_ref(24, 5, "f_res");
+    PaddedBuffer<float> f_v(5, 24, "f_v");
+    PaddedBuffer<float> f_ref(5, 24, "f_res");
 
     SimpleIREvaluator ir_eval(stmt, tensor);
     ir_eval(f_v);
 
-    for (int x = 0; x < 24; x++) {
-      for (int y = 0; y < 5; y++) {
+    for (int y = 0; y < 24; y++) {
+      for (int x = 0; x < 5; x++) {
         f_ref(x, y) = 1 + x * x + y * y;
       }
     }
@@ -609,11 +609,11 @@ void testScheduleBoundsInference() {
     VarHandle H("H", kInt);
     Tensor* p = Compute(
         "p",
-        {{H + 1, "py"}, {W + 1, "px"}},
+        {{W + 1, "px"}, {H + 1, "py"}},
         [&](const VarHandle& px, const VarHandle& py) { return px * py; });
     Tensor* c = Compute(
         "c",
-        {{H, "cy"}, {W, "cx"}},
+        {{W, "cx"}, {H, "cy"}},
         [&](const VarHandle& x, const VarHandle& y) {
           return p->call(x, y) + p->call(x + 1, y) + p->call(x, y + 1) +
               p->call(x + 1, y + 1);
@@ -632,11 +632,11 @@ void testScheduleBoundsInference() {
     ExprHandle H(200);
     Tensor* p = Compute(
         "p",
-        {{H + 1, "py"}, {W + 1, "px"}},
+        {{W + 1, "px"}, {H + 1, "py"}},
         [&](const VarHandle& px, const VarHandle& py) { return px * py; });
     Tensor* c = Compute(
         "c",
-        {{H, "cy"}, {W, "cx"}},
+        {{W, "cx"}, {H, "cy"}},
         [&](const VarHandle& x, const VarHandle& y) {
           return p->call(x, y) + p->call(x + 1, y) + p->call(x, y + 1) +
               p->call(x + 1, y + 1);
@@ -646,7 +646,7 @@ void testScheduleBoundsInference() {
     std::cerr << "****\n" << *l.root_stmt() << "\n";
     std::cerr << "****\nLoop0:\n" << *loops[0] << "\n";
     std::cerr << "****\nLoop1:\n" << *loops[1] << "\n";
-    l.computeAt(l.getLoopBodyFor(p), loops[0]);
+    l.computeAt(l.getLoopBodyFor(p), loops[1]);
     std::cerr << "****\n" << *l.root_stmt() << "\n";
   }
 }
