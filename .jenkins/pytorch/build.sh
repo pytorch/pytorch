@@ -113,7 +113,7 @@ if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   # the build process, leaving undefined symbols in the shared lib
   # which will cause undefined symbol errors when later running
   # tests. Setting MAX_JOBS to smaller number to make CI less flaky.
-  export MAX_JOBS=4
+  export MAX_JOBS=2
 
   # ROCm CI is using Caffe2 docker images, which needs these wrapper
   # scripts to correctly use sccache.
