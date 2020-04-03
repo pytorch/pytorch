@@ -246,7 +246,7 @@ void scatter_cuda_kernel(Tensor& self, int64_t dim, const Tensor& index, const T
 void scatter_fill_cuda_kernel(Tensor& self, int64_t dim, const Tensor& index, Scalar src) {
   cuda_scatter_fill_base_kernel<>()(
     self, dim, index, src,
-    "scatter_fill_cuda_", [src]C10_DEVICE(auto* lhs, auto rhs_val) {
+    "scatter_fill_cuda_", []C10_DEVICE(auto* lhs, auto rhs_val) {
       *lhs = rhs_val;
     }
   );
