@@ -1,4 +1,4 @@
-#include "python_functions.h"
+#include "torch/csrc/autograd/generated/python_functions.h"
 
 // ${generated_comment}
 

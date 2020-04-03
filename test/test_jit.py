@@ -5353,6 +5353,15 @@ def foo(x):
 
         self.checkModule(Add(), [torch.randn(2, 2)])
 
+    def test_pybind_type_comparisons(self):
+        @torch.jit.script
+        def f():
+            return None
+
+        node = list(f.graph.nodes())[0]
+        t = node.outputsAt(0).type()
+        self.assertFalse(t == None)
+
     @unittest.skipIf(IS_WINDOWS and sys.version_info >= (3, 8), 'TODO: need to fix the test case')
     def test_unmatched_type_annotation(self):
         message1 = re.escape("Number of type annotations (2) did not match the number of function parameters (1):")
