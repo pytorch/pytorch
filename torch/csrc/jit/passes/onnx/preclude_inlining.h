@@ -5,7 +5,7 @@
 namespace torch {
 namespace jit {
 
-void StopInliningForONNX(Graph& graph);
+void ONNXFunctionCallSubstitution(Graph& graph);
 
 }
 } // namespace torch
