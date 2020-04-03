@@ -6,6 +6,7 @@ import numbers
 import torch
 import torch.nn as nn
 from torch import Tensor  # noqa: F401
+from torch import _VF
 from torch._jit_internal import Tuple, Optional, List  # noqa: F401
 from torch.nn.utils.rnn import PackedSequence
 
@@ -376,13 +377,13 @@ class LSTM(RNNBase):
             weight_values.append(mod.param)
 
         if batch_sizes is None:
-            result = torch.ops.aten.quantized_lstm(input, hx, weight_values, self.bias, self.num_layers,
-                                                   float(self.dropout), self.training, self.bidirectional,
-                                                   self.batch_first, dtype=self.dtype, use_dynamic=True)
+            result = _VF.quantized_lstm(input, hx, weight_values, self.bias, self.num_layers,
+                                        float(self.dropout), self.training, self.bidirectional,
+                                        self.batch_first, dtype=self.dtype, use_dynamic=True)
         else:
-            result = torch.ops.aten.quantized_lstm(input, batch_sizes, hx, weight_values, self.bias,
-                                                   self.num_layers, float(self.dropout), self.training,
-                                                   self.bidirectional, dtype=self.dtype, use_dynamic=True)
+            result = _VF.quantized_lstm(input, batch_sizes, hx, weight_values, self.bias,
+                                        self.num_layers, float(self.dropout), self.training,
+                                        self.bidirectional, dtype=self.dtype, use_dynamic=True)
         output = result[0]
         hidden = result[1:]
 
