@@ -582,7 +582,8 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
     }
     void* ptr = iter->second;
 
-    v->index()->accept(this);
+    const Expr* flat_idx = flatten_index(v->buf()->dims(), v->indices());
+    flat_idx->accept(this);
     std::vector<int> index = value().as_vec<int>();
     v->mask()->accept(this);
     std::vector<int> mask = value().as_vec<int>();
@@ -615,7 +616,8 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
 
     void* ptr = iter->second;
 
-    v->index()->accept(this);
+    const Expr* flat_idx = flatten_index(v->buf()->dims(), v->indices());
+    flat_idx->accept(this);
     std::vector<int> index = value().as_vec<int>();
     v->mask()->accept(this);
     std::vector<int> mask = value().as_vec<int>();
@@ -857,7 +859,13 @@ class ExprEval {
       : dtype_(expr.dtype()) {
     std::vector<BufferArg> buffer_args_extended = buffer_args;
     Buffer ret_buf("ret_val", dtype_, {1});
-    Stmt* store_stmt = Store::make(VarHandle(ret_buf.data()), 0, expr);
+    std::vector<const Expr*> indices;
+    const Expr* zero = new IntImm(0);
+    for (size_t i = 0; i < ret_buf.data()->ndim(); i++) {
+      indices.push_back(zero);
+    }
+    Stmt* store_stmt =
+        new Store(ret_buf.data(), indices, expr.node(), new IntImm(1));
     buffer_args_extended.push_back(ret_buf);
     codegen_.reset(new CodeGenType(store_stmt, buffer_args_extended));
   }
@@ -929,6 +937,28 @@ inline const Expr* Substitute(const Expr* expr, const VarMapping& var_mapping) {
 inline Stmt* Substitute(Stmt* stmt, const VarMapping& var_mapping) {
   VarSubMutator var_sub(var_mapping);
   return stmt->accept_mutator(&var_sub);
+}
+
+// Uses the evaluator to fold an Expression with constant terms.
+// E.g. evaluateOp(Add(3, 4)) => 7.
+// Expr v must not have any unbound Vars.
+static Expr* evaluateOp(const Expr* v) {
+  ExprHandle handle(v);
+  ExprEval<SimpleIREvaluator> eval(handle);
+
+  switch (v->dtype().scalar_type()) {
+#define TYPE_CASE(Type, Name)                                 \
+  case ScalarType::Name: {                                    \
+    Type val = eval.value<Type>();                            \
+    return getImmediateByType(v->dtype().scalar_type(), val); \
+  }
+    AT_FORALL_SCALAR_TYPES_AND(Half, TYPE_CASE);
+#undef TYPE_CASE
+    default:
+      LOG(FATAL) << "Unsupported datatype: " << v->dtype();
+      return nullptr;
+  }
+  return nullptr;
 }
 
 } // namespace tensorexpr
