@@ -219,8 +219,8 @@ def process_test_params_for_module(test_params_dict, device, test_instance_class
         cpp_tmp_folder=tempfile.mkdtemp(),
     )
 
-def add_torch_nn_module_impl_parity_test(
-        parity_table, unit_test_class, test_params_dict, test_instance_class, devices):
+def write_test_to_test_class(
+        unit_test_class, test_params_dict, test_instance_class, parity_table, devices):
     assert not is_torch_nn_functional_test(test_params_dict)
 
     module_name = compute_module_name(test_params_dict)
@@ -258,14 +258,6 @@ def add_torch_nn_module_impl_parity_test(
             device=device)
 
         add_test(unit_test_class, unit_test_name, test_fn)
-
-def write_test_to_test_class(unit_test_class, test_params_dict, test_instance_class, parity_table, devices):
-    add_torch_nn_module_impl_parity_test(
-        parity_table=parity_table,
-        unit_test_class=unit_test_class,
-        test_params_dict=test_params_dict,
-        test_instance_class=test_instance_class,
-        devices=devices)
 
 def generate_test_cpp_sources(test_params, template):
     device = test_params.device
