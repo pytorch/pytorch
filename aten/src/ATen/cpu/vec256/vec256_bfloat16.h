@@ -133,7 +133,8 @@ public:
       const Vec256<BFloat16>& b, const Vec256<BFloat16>& mask) {
     return _mm256_blendv_epi8(a.values, b.values, mask.values);
   }
-  static Vec256<BFloat16> arange(BFloat16 base = 0.f, BFloat16 step = 1.f) {
+  template<typename step_t>
+  static Vec256<BFloat16> arange(BFloat16 base = 0.f, step_t step = static_cast<step_t>(1)) {
     return Vec256<BFloat16>(
       base,             base +      step, base +  2 * step, base +  3 * step,
       base +  4 * step, base +  5 * step, base +  6 * step, base +  7 * step,
