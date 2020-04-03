@@ -57,6 +57,7 @@ Refinements RefinementSet::unionSet(
   }
   return result;
 }
+
 Refinements RefinementSet::intersectSet(
     const Refinements& a,
     const Refinements& b) {

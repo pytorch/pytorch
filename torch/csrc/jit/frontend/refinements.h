@@ -48,7 +48,6 @@ using Refinements = std::vector<Refinement>;
  * conditionals.
  */
 struct RefinementSet {
-
   RefinementSet(Refinements true_refinements, Refinements false_refinements);
   RefinementSet(Refinement single);
   RefinementSet(Refinement single_true, Refinement single_false);
