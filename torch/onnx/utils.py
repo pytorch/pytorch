@@ -113,7 +113,6 @@ def _split_tensor_list_constants(g, block):
 
 def _optimize_graph(graph, operator_export_type, _disable_torch_constant_prop=False, fixed_batch_size=False, params_dict=None):
     # Inline everyting
-
     torch._C._jit_pass_inline(graph)
 
     # Remove fork/wait nodes
@@ -196,7 +195,6 @@ def _optimize_graph(graph, operator_export_type, _disable_torch_constant_prop=Fa
     torch._C._jit_pass_lint(graph)
     graph = torch._C._jit_pass_canonicalize(graph)
     torch._C._jit_pass_lint(graph)
-
     return graph
 
 
