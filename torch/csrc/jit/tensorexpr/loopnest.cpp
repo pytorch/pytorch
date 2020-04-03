@@ -685,15 +685,8 @@ Stmt* LoopNest::lowerToStmt(Tensor* t) {
     return body;
   }
 
-  if (t->buf()->ndim() == 0) {
-    throw malformed_input();
-  }
-
   for (size_t i = 0; i < t->buf()->ndim(); i++) {
-    // Going in reverse order: from innermost loop to the outermost
-    size_t dim_index = t->buf()->ndim() - i - 1;
-    Range r(new IntImm(0), t->buf()->dim(dim_index));
-    body = new For(f->arg(dim_index), r.start(), r.stop(), body);
+    body = new For(f->arg(i), new IntImm(0), t->buf()->dim(i), body);
   }
   return body;
 }
@@ -891,7 +884,7 @@ std::vector<For*> LoopNest::getLoopStmtsFor(Tensor* t) const {
     }
     cur_stmt = cur_stmt->get_parent();
   }
-  return std::vector<For*>(result.rbegin(), result.rend());
+  return result;
 }
 
 void LoopNest::setGPUBlockIndex(For* f, int block_index) {

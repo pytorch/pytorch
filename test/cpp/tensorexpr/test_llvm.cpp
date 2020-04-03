@@ -1068,9 +1068,9 @@ void testLLVMBroadcastAdd() {
   std::vector<void*> args({av.data(), bv.data(), cv.data()});
   ASSERT_EQ(cg.value<int>(args), 0);
 
-  for (int i = 0; i < M; i++) {
-    for (int j = 0; j < N; j++) {
-      ASSERT_EQ(cv[i * N + j], av[i * N + j] + bv[j]);
+  for (int j = 0; j < N; j++) {
+    for (int i = 0; i < M; i++) {
+      ASSERT_EQ(cv[j * M + i], av[j * M + i] + bv[j]);
     }
   }
 }
