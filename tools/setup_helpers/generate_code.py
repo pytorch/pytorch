@@ -34,27 +34,32 @@ def generate_code(ninja_global=None,
     from tools.jit.gen_jit_dispatch import gen_jit_dispatch
 
     # Build ATen based Variable classes
-    autograd_gen_dir = install_dir or 'torch/csrc/autograd/generated'
-    jit_gen_dir = install_dir or 'torch/csrc/jit/generated'
+    install_dir = install_dir or 'torch/csrc'
+    autograd_gen_dir = os.path.join(install_dir, 'autograd', 'generated')
+    jit_gen_dir = os.path.join(install_dir, 'jit', 'generated')
     for d in (autograd_gen_dir, jit_gen_dir):
         if not os.path.exists(d):
             os.makedirs(d)
+    runfiles_dir = os.environ.get("RUNFILES_DIR", None)
+    data_dir = os.path.join(runfiles_dir, 'pytorch') if runfiles_dir else ''
+    autograd_dir = os.path.join(data_dir, 'tools', 'autograd')
+    tools_jit_templates = os.path.join(data_dir, 'tools', 'jit', 'templates')
 
     if subset == "pybindings" or not subset:
-        gen_autograd_python(declarations_path or DECLARATIONS_PATH, autograd_gen_dir, 'tools/autograd')
+        gen_autograd_python(declarations_path or DECLARATIONS_PATH, autograd_gen_dir, autograd_dir)
 
     if subset == "libtorch" or not subset:
         gen_autograd(
             declarations_path or DECLARATIONS_PATH,
             autograd_gen_dir,
-            'tools/autograd',
+            autograd_dir,
             disable_autograd=disable_autograd,
             disable_trace=disable_trace,
         )
         gen_jit_dispatch(
             declarations_path or DECLARATIONS_PATH,
             jit_gen_dir,
-            'tools/jit/templates',
+            tools_jit_templates,
             disable_autograd=disable_autograd,
             selected_op_list_path=selected_op_list_path)
 
