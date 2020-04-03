@@ -69,6 +69,40 @@ static PyObject * THPStorage_(pyNewFilenameStorage)(PyObject *_unused, PyObject 
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject * THPStorage_(shareFilename)(THPStorage *self, PyObject *noargs)
+{
+  HANDLE_TH_ERRORS
+  THWStorage *storage = self->cdata;
+  THManagedMapAllocator *ctx;
+  // Storage is already in shared memory, just return a handle
+  if ((ctx = THManagedMapAllocator::fromDataPtr(storage->data_ptr()))) {
+    // done
+  } else {
+    // TODO: retry on collision
+    // TODO: free GIL - but remember to reacquire it when an exception is thrown
+    THWStoragePtr new_storage(THPStorage_(newFilenameStorage)(storage->numel()));
+    THWStorage_(copy)(new_storage, storage);
+    THWStorage_(swap)(storage, new_storage);
+    ctx = THManagedMapAllocator::fromDataPtr(storage->data_ptr());
+    AT_ASSERT(ctx);
+  }
+
+  THPObjectPtr manager_handle(PyBytes_FromString(ctx->manager_handle()));
+  if (!manager_handle) return nullptr;
+  THPObjectPtr storage_handle(PyBytes_FromString(ctx->filename()));
+  if (!storage_handle) return nullptr;
+  THPObjectPtr size(PyLong_FromLong(storage->numel()));
+  if (!size) return nullptr;
+
+  THPObjectPtr tuple(PyTuple_New(3));
+  if (!tuple) return nullptr;
+  PyTuple_SET_ITEM(tuple.get(), 0, manager_handle.release());
+  PyTuple_SET_ITEM(tuple.get(), 1, storage_handle.release());
+  PyTuple_SET_ITEM(tuple.get(), 2, size.release());
+  return tuple.release();
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject * THPStorage_(newSharedFilename)(PyObject *_unused, PyObject *args)
 {
   HANDLE_TH_ERRORS
@@ -113,6 +147,35 @@ static PyObject * THPStorage_(pyNewFdStorage)(PyObject *_unused, PyObject *args)
     return nullptr;
   }
   return THPStorage_(New)(THPStorage_(newFdStorage)(size));
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject * THPStorage_(shareFd)(THPStorage *self, PyObject *noargs)
+{
+  HANDLE_TH_ERRORS
+  THWStorage *storage = self->cdata;
+  THMapAllocator *ctx;
+  // Storage is already in shared memory, just return a handle
+  if ((ctx = THMapAllocator::fromDataPtr(storage->data_ptr()))) {
+    // done
+  } else {
+    THWStoragePtr new_storage(THPStorage_(newFdStorage)(storage->numel()));
+    THWStorage_(copy)(new_storage, storage);
+    THWStorage_(swap)(storage, new_storage);
+    ctx = THMapAllocator::fromDataPtr(storage->data_ptr());
+    AT_ASSERT(ctx);
+  }
+
+  THPObjectPtr storage_handle(PyLong_FromLong(ctx->fd()));
+  if (!storage_handle) return nullptr;
+  THPObjectPtr size(PyLong_FromLong(storage->numel()));
+  if (!size) return nullptr;
+
+  THPObjectPtr tuple(PyTuple_New(2));
+  if (!tuple) return nullptr;
+  PyTuple_SET_ITEM(tuple.get(), 0, storage_handle.release());
+  PyTuple_SET_ITEM(tuple.get(), 1, size.release());
+  return tuple.release();
   END_HANDLE_TH_ERRORS
 }
 
@@ -468,8 +531,10 @@ static PyMethodDef THPStorage_(sharingMethods)[] = {
   {"_new_shared_cuda", (PyCFunction)(void(*)(void))THPStorage_(newSharedCuda), METH_VARARGS | METH_STATIC, nullptr},
   {"_release_ipc_counter", (PyCFunction)(void(*)(void))THPStorage_(releaseIPCCounter), METH_VARARGS | METH_STATIC, nullptr},
 #else
+  {"_share_fd_", (PyCFunction)THPStorage_(shareFd), METH_NOARGS, nullptr},
   {"_new_shared_fd", (PyCFunction)(void(*)(void))THPStorage_(newSharedFd), METH_VARARGS | METH_STATIC, nullptr},
   {"_new_using_fd", (PyCFunction)(void(*)(void))THPStorage_(pyNewFdStorage), METH_VARARGS | METH_STATIC, nullptr},
+  {"_share_filename_", (PyCFunction)THPStorage_(shareFilename), METH_NOARGS, nullptr},
   {"_new_shared_filename", (PyCFunction)(void(*)(void))THPStorage_(newSharedFilename), METH_VARARGS | METH_STATIC, nullptr},
   {"_new_using_filename", (PyCFunction)(void(*)(void))THPStorage_(pyNewFilenameStorage), METH_VARARGS | METH_STATIC, nullptr},
 #endif
