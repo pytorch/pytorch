@@ -120,6 +120,10 @@ class TestCppExtensionJIT(common.TestCase):
 
         # 2 * sigmoid(0) = 2 * 0.5 = 1
         self.assertEqual(z, torch.ones_like(z))
+        if TEST_ROCM:
+            os.unlink('cpp_extensions/hip/hip_extension.cpp')
+            os.unlink('cpp_extensions/hip/hip_extension.hip')
+            os.rmdir('cpp_extensions/hip/')
 
     def _run_jit_cuda_archflags(self, flags, expected):
         # Compile an extension with given `flags`
