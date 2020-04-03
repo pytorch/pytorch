@@ -80,7 +80,6 @@ Tensor& histc_out(Tensor& hist, const Tensor &self, int64_t nbins, Scalar minval
   auto iter = at::TensorIterator();
   iter.add_input(self);
   iter.build();
-  TORCH_CHECK(iter.device_type() == at::kCPU, "Native histc only supports CPU");
   histc_stub(iter.device_type(), iter, hist, nbins, minvalue, maxvalue);
   return hist;
 }
