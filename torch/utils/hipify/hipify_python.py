@@ -130,9 +130,13 @@ def preprocess(
 
     # Preprocessing statistics.
     stats = {"unsupported_calls": [], "kernel_launches": []}
+    translated_files = {}
 
     for filepath in all_files:
         result = preprocessor(output_directory, filepath, stats, hip_clang_launch, is_pytorch_extension)
+        if result == "ok":
+            translated_files[filepath] = os.path.join(output_directory, get_hip_file_path(filepath))
+
         # Show what happened
         if show_progress:
             print(
@@ -140,6 +144,7 @@ def preprocess(
                 get_hip_file_path(filepath), result)
 
     print(bcolors.OKGREEN + "Successfully preprocessed all matching files." + bcolors.ENDC, file=sys.stderr)
+    return translated_files
 
     # Show detailed summary
     if show_detailed:
@@ -806,7 +811,7 @@ def hipify(
     all_files += [f for f in extra_files if f not in all_files]
 
     # Start Preprocessor
-    preprocess(
+    return preprocess(
         output_directory,
         all_files,
         show_detailed=show_detailed,

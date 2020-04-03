@@ -1062,7 +1062,7 @@ def _jit_compile(name,
         with_cuda = any(map(_is_cuda_file, sources))
     with_cudnn = any(['cudnn' in f for f in extra_ldflags or []])
     if IS_HIP_EXTENSION and with_cuda or with_cudnn:
-        hipify_python.hipify(
+        translated_files = hipify_python.hipify(
             project_directory=build_directory,
             output_directory=build_directory,
             includes=os.path.join(build_directory, '*'),
@@ -1070,6 +1070,8 @@ def _jit_compile(name,
             show_detailed=verbose,
             is_pytorch_extension=True,
         )
+    else:
+        translated_files = None
     old_version = JIT_EXTENSION_VERSIONER.get_version(name)
     version = JIT_EXTENSION_VERSIONER.bump_version_if_changed(
         name,
@@ -1108,6 +1110,14 @@ def _jit_compile(name,
 
     if verbose:
         print('Loading extension module {}...'.format(name))
+    if translated_files is not None:
+        for fn in translated_files.values():
+            os.unlink(fn)
+            try:
+                os.rmdir(os.path.dirname(fn))
+            except IOError:
+                pass
+
     return _import_module_from_library(name, build_directory, is_python_module)
 
 
