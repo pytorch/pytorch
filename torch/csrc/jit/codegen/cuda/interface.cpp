@@ -36,6 +36,7 @@ void fuseGraph(std::shared_ptr<Graph>& graph) {
 } // namespace cuda
 } // namespace fuser
 
+namespace {
 RegisterOperators reg({
     Operator(
         prim::CudaFusionGroup,
@@ -47,6 +48,7 @@ RegisterOperators reg({
         },
         c10::AliasAnalysisKind::INTERNAL_SPECIAL_CASE),
 });
+}
 
 } // namespace jit
 } // namespace torch
