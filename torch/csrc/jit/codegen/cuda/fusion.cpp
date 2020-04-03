@@ -93,6 +93,7 @@ void Fusion::removeVal(Val* val) {
     removeExpr(use);
 
   val_set_.erase(val);
+  delete val;
 }
 
 void Fusion::addInput(Val* const input) {

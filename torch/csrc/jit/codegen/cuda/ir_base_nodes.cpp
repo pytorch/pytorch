@@ -20,6 +20,16 @@ namespace torch {
 namespace jit {
 namespace fuser {
 
+Val* Statement::asVal() {
+  TORCH_INTERNAL_ASSERT(isVal(), "Cannot cast to Val as this is not a Val.");
+  return static_cast<Val*>(this);
+}
+
+Expr* Statement::asExpr() {
+  TORCH_INTERNAL_ASSERT(isExpr(), "Cannot cast to Expr as this is not a Expr.");
+  return static_cast<Expr*>(this);
+}
+
 // When we create a Val we immediately register them with the active fusion.
 Val::Val(ValType _vtype, DataType _dtype) : vtype_{_vtype}, dtype_{_dtype} {
   Fusion* fusion = FusionGuard::getCurFusion();
@@ -31,6 +41,44 @@ Val::Val(ValType _vtype, DataType _dtype) : vtype_{_vtype}, dtype_{_dtype} {
   }
 }
 
+namespace {
+
+struct ConstCheck : OptInConstDispatch {
+ private:
+  bool is_const_;
+
+  virtual void handle(const Float* const f) {
+    is_const_ = f->isConst();
+  }
+
+  virtual void handle(const Int* const i) {
+    is_const_ = i->isConst();
+  }
+
+  virtual void handle(const NamedScalar* const ns) {
+    is_const_ = false;
+  }
+
+  virtual void handle(const Val* const val) {
+    OptInConstDispatch::handle(val);
+  }
+
+ public:
+  static bool isConst(const Val* const val) {
+    ConstCheck cc;
+    cc.is_const_ = false;
+    cc.handle(val);
+    return cc.is_const_;
+  }
+};
+
+} // namespace
+bool Val::isConstScalar() const {
+  if (!isScalar())
+    return false;
+  return ConstCheck::isConst(this);
+}
+
 c10::optional<DataType> Val::getDataType() const {
   TORCH_INTERNAL_ASSERT(
       dtype_ != DataType::Null, "Value does not have a data type.");
@@ -39,6 +87,52 @@ c10::optional<DataType> Val::getDataType() const {
 
 Expr* Val::getOrigin() {
   return (fusion_->origin(this));
+}
+
+void Scope::insert_before(Expr* ref, Expr* expr) {
+  auto it = exprs_.begin();
+  while (it != exprs_.end()) {
+    if (*it == ref)
+      break;
+  }
+  if (it != exprs_.end())
+    exprs_.insert(it, expr);
+}
+
+void Scope::insert_after(Expr* ref, Expr* expr) {
+  auto it = exprs_.begin();
+  while (it != exprs_.end()) {
+    if (*it == ref)
+      break;
+  }
+  if (it != exprs_.end())
+    exprs_.insert(++it, expr);
+}
+
+void Scope::erase(Expr* ref) {
+  auto it = exprs_.begin();
+  while (it != exprs_.end()) {
+    if (*it == ref)
+      break;
+  }
+  if (it != exprs_.end())
+    exprs_.erase(it);
+}
+
+bool Scope::contains(Expr* expr) const {
+  for (auto e : exprs_)
+    if (e == expr)
+      return true;
+  return false;
+}
+
+bool Scope::sameAs(const Scope& other) const {
+  if (other.exprs().size() != this->exprs().size())
+    return false;
+  for (decltype(exprs().size()) i{0}; i < exprs().size(); i++)
+    if (other.exprs()[i] != exprs()[i])
+      return false;
+  return true;
 }
 
 bool IRInputOutput::hasInput(const Val* const input) const {
@@ -53,6 +147,52 @@ bool IRInputOutput::hasOutput(const Val* const output) const {
     if (val == output)
       return true;
   return false;
+}
+
+void IRInputOutput::replaceInput(Val* replace, Val* with) {
+  bool changed = false;
+  for (decltype(inputs_.size()) i{0}; i < inputs_.size(); i++) {
+    if (inputs_[i] == replace) {
+      inputs_[i] = with;
+      changed = true;
+      break;
+    }
+  }
+  TORCH_INTERNAL_ASSERT(
+      changed,
+      "Error detected when trying to replace input ",
+      replace,
+      " with ",
+      with,
+      " .");
+}
+
+void IRInputOutput::replaceOutput(Val* replace, Val* with) {
+  bool changed = false;
+  for (decltype(outputs_.size()) i{0}; i < outputs_.size(); i++) {
+    if (outputs_[i] == replace) {
+      outputs_[i] = with;
+      changed = true;
+      break;
+    }
+  }
+  TORCH_INTERNAL_ASSERT(
+      changed,
+      "Error detected when trying to replace output ",
+      replace,
+      " with ",
+      with,
+      " .");
+}
+
+void IRInputOutput::removeInput(Val* val) {
+  auto it = inputs_.begin();
+  for (; it != inputs_.end(); ++it) {
+    if ((*it) == val)
+      break;
+  }
+  assert(it != inputs_.end());
+  inputs_.erase(it);
 }
 
 void IRInputOutput::removeOutput(Val* val) {

@@ -3,6 +3,8 @@
 #include <c10/util/Exception.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
+#include <unordered_map>
+
 /*
  * dispatch.h prevents the need from adding manual dispatch in every class that
  * wants to define how to process a series of nodes. dispatch.h provides 4
@@ -57,8 +59,10 @@ struct Val;
 struct IterDomain;
 struct TensorDomain;
 struct TensorView;
+struct TensorIndex;
 struct Float;
 struct Int;
+struct NamedScalar;
 
 // Exprs
 struct Split;
@@ -66,6 +70,9 @@ struct Merge;
 struct Reorder;
 struct UnaryOp;
 struct BinaryOp;
+struct ForLoop;
+struct IfThenElse;
+struct Allocate;
 
 /*
  * By default, all IR nodes are handled in this dispatch, and will call an empty
@@ -90,8 +97,10 @@ struct TORCH_CUDA_API OptOutDispatch {
   virtual void handle(IterDomain*) {}
   virtual void handle(TensorDomain*) {}
   virtual void handle(TensorView*) {}
+  virtual void handle(TensorIndex*) {}
   virtual void handle(Float*) {}
   virtual void handle(Int*) {}
+  virtual void handle(NamedScalar*) {}
 
   // Exprs
   virtual void handle(Split*) {}
@@ -99,6 +108,9 @@ struct TORCH_CUDA_API OptOutDispatch {
   virtual void handle(Reorder*) {}
   virtual void handle(UnaryOp*) {}
   virtual void handle(BinaryOp*) {}
+  virtual void handle(ForLoop*) {}
+  virtual void handle(IfThenElse*) {}
+  virtual void handle(Allocate*) {}
 };
 
 struct TORCH_CUDA_API OptInConstDispatch {
@@ -126,11 +138,17 @@ struct TORCH_CUDA_API OptInConstDispatch {
   virtual void handle(const TensorView* const) {
     TORCH_INTERNAL_ASSERT(false, "Handle not overriden for TensorView.");
   }
+  virtual void handle(const TensorIndex* const) {
+    AT_ERROR("Handle not overriden for TensorIndex.");
+  }
   virtual void handle(const Float* const) {
     TORCH_INTERNAL_ASSERT(false, "Handle not overriden for Float.");
   }
   virtual void handle(const Int* const) {
     TORCH_INTERNAL_ASSERT(false, "Handle not overriden for Int.");
+  }
+  virtual void handle(const NamedScalar* const) {
+    AT_ERROR("Handle not overriden for NamedScalar.");
   }
 
   // Exprs
@@ -148,6 +166,15 @@ struct TORCH_CUDA_API OptInConstDispatch {
   }
   virtual void handle(const BinaryOp* const) {
     TORCH_INTERNAL_ASSERT(false, "Handle not overriden for BinaryOp.");
+  }
+  virtual void handle(const ForLoop* const) {
+    AT_ERROR("Handle not overriden for ForLoop.");
+  }
+  virtual void handle(const Allocate* const) {
+    AT_ERROR("Handle not overriden for Allocate.");
+  }
+  virtual void handle(const IfThenElse* const) {
+    AT_ERROR("Handle not overriden for IfThenElse.");
   }
 };
 
@@ -176,11 +203,17 @@ struct TORCH_CUDA_API OptInDispatch {
   virtual void handle(TensorView*) {
     TORCH_INTERNAL_ASSERT(false, "Handle not overriden for TensorView.");
   }
+  virtual void handle(TensorIndex*) {
+    AT_ERROR("Handle not overriden for TensorIndex.");
+  }
   virtual void handle(Float*) {
     TORCH_INTERNAL_ASSERT(false, "Handle not overriden for Float.");
   }
   virtual void handle(Int*) {
     TORCH_INTERNAL_ASSERT(false, "Handle not overriden for Int.");
+  }
+  virtual void handle(NamedScalar*) {
+    AT_ERROR("Handle not overriden for NamedScalar.");
   }
 
   // Exprs
@@ -198,6 +231,15 @@ struct TORCH_CUDA_API OptInDispatch {
   }
   virtual void handle(BinaryOp*) {
     TORCH_INTERNAL_ASSERT(false, "Handle not overriden for BinaryOp.");
+  }
+  virtual void handle(ForLoop*) {
+    TORCH_INTERNAL_ASSERT(false, "Handle not overriden for ForLoop.");
+  }
+  virtual void handle(Allocate*) {
+    AT_ERROR("Handle not overriden for Allocate.");
+  }
+  virtual void handle(IfThenElse*) {
+    TORCH_INTERNAL_ASSERT(false, "Handle not overriden for IfThenElse.");
   }
 };
 
@@ -218,13 +260,36 @@ struct TORCH_CUDA_API OptOutMutator {
   virtual Statement* mutate(Expr* e);
   virtual Statement* mutate(Val* v);
 
+  /*
+   * We always want to dispatch through a Val, so we can capture and dispatch
+   * correctly members of nodes like Split->TensorDomain If we don't call the
+   * below function or manually cast to use mutate(Val* v) we can't intercept
+   * and mutate by capturing mutate(Val* v), which is what we do when we want to
+   * replace all instances of a value.
+   */
+  Statement* mutateAsVal(Val* v) {
+    return mutate(v);
+  }
+
+  void registerMutation(Val* val, Val* mutation) {
+    TORCH_INTERNAL_ASSERT(
+        mutations.find(val) == mutations.end(),
+        " The same value is incorrectly being mutated twice.",
+        " One mutation per mutation pass is allowed.");
+    mutations[val] = mutation;
+  }
+
+  std::unordered_map<Val*, Val*> mutations;
+
   //****Functions below defined in mutator.cpp*****///
   // Vals
   virtual Statement* mutate(IterDomain*);
   virtual Statement* mutate(TensorDomain*);
   virtual Statement* mutate(TensorView*);
+  virtual Statement* mutate(TensorIndex*);
   virtual Statement* mutate(Float*);
   virtual Statement* mutate(Int*);
+  virtual Statement* mutate(NamedScalar*);
 
   // Exprs
   virtual Statement* mutate(Split*);
@@ -232,6 +297,9 @@ struct TORCH_CUDA_API OptOutMutator {
   virtual Statement* mutate(Reorder*);
   virtual Statement* mutate(UnaryOp*);
   virtual Statement* mutate(BinaryOp*);
+  virtual Statement* mutate(ForLoop*);
+  virtual Statement* mutate(IfThenElse*);
+  virtual Statement* mutate(Allocate*);
 };
 
 struct TORCH_CUDA_API OptInMutator {
@@ -243,6 +311,16 @@ struct TORCH_CUDA_API OptInMutator {
 
   OptInMutator(OptInMutator&& other) = default;
   OptInMutator& operator=(OptInMutator&& other) = default;
+
+  void registerMutation(Val* val, Val* mutation) {
+    TORCH_INTERNAL_ASSERT(
+        mutations.find(val) == mutations.end(),
+        " The same value is incorrectly being mutated twice.",
+        " One mutation per mutation pass is allowed.");
+    mutations[val] = mutation;
+  }
+
+  std::unordered_map<Val*, Val*> mutations;
 
   // Hierarchal dispatch functions for mutate
   virtual Statement* mutate(Statement*);
@@ -259,11 +337,17 @@ struct TORCH_CUDA_API OptInMutator {
   virtual Statement* mutate(TensorView*) {
     TORCH_INTERNAL_ASSERT(false, "Mutate not overriden for TensorView.");
   }
+  virtual Statement* mutate(TensorIndex*) {
+    AT_ERROR("Mutate not overriden for TensorIndex.");
+  }
   virtual Statement* mutate(Float*) {
     TORCH_INTERNAL_ASSERT(false, "Mutate not overriden for Float.");
   }
   virtual Statement* mutate(Int*) {
     TORCH_INTERNAL_ASSERT(false, "Mutate not overriden for Int.");
+  }
+  virtual Statement* mutate(NamedScalar*) {
+    AT_ERROR("Mutate not overriden for NamedScalar.");
   }
 
   // Exprs
@@ -281,6 +365,15 @@ struct TORCH_CUDA_API OptInMutator {
   }
   virtual Statement* mutate(BinaryOp*) {
     TORCH_INTERNAL_ASSERT(false, "Mutate not overriden for BinaryOp.");
+  }
+  virtual Statement* mutate(ForLoop*) {
+    TORCH_INTERNAL_ASSERT(false, "Mutate not overriden for ForLoop.");
+  }
+  virtual Statement* mutate(Allocate*) {
+    AT_ERROR("Mutate not overriden for Allocate.");
+  }
+  virtual Statement* mutate(IfThenElse*) {
+    TORCH_INTERNAL_ASSERT(false, "Mutate not overriden for IfThenElse.");
   }
 };
 
