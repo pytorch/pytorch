@@ -1,3 +1,7 @@
+- name: __ROOT__
+  depends:
+  - name: aten::AA
+  - name: aten::BB
 - name: aten::AA
   depends:
   - name: aten::BB
