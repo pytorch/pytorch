@@ -17,7 +17,8 @@ import torch.cuda
 import torch.distributed as dist
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.testing._internal.common_utils import TestCase, run_tests
+from torch.testing._internal.common_utils import TestCase, run_tests, find_free_port
+from torch.distributed.distributed_c10d import _get_default_group
 from torch._utils_internal import TEST_MASTER_ADDR as MASTER_ADDR
 from torch._utils_internal import TEST_MASTER_PORT as MASTER_PORT
 from torch.testing._internal.common_distributed import simple_sparse_reduce_tests, skip_if_rocm
@@ -30,6 +31,12 @@ except ImportError:
 
 
 skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
+
+CPP_EXTENSIONS_WARNING = """
+Ninja (https://ninja-build.org) must be available to run C++ extensions tests,
+but it could not be found. Install ninja with `pip install ninja`
+or `conda install ninja`.
+"""
 
 BACKEND = os.environ["BACKEND"]
 TEMP_DIR = os.environ["TEMP_DIR"]
@@ -149,6 +156,21 @@ def skip_if_small_worldsize(func):
 
     return wrapper
 
+
+def skip_if_no_ninja(func):
+
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        try:
+            import torch.utils.cpp_extension
+            torch.utils.cpp_extension.verify_ninja_availability()
+        except RuntimeError:
+            print(CPP_EXTENSIONS_WARNING)
+            return 0
+
+        return func(*args, **kwargs)
+
+    return wrapper
 
 def require_backend(backends):
     if BACKEND not in backends:
@@ -2272,6 +2294,45 @@ elif BACKEND == "mpi":
     class TestMPI(TestCase, _DistTestBase):
         pass
 
+elif BACKEND == "test":
+    class TestBackendDynamicLoad(TestCase):
+        def setUp(self):
+            super(TestBackendDynamicLoad, self).setUp()
+
+        def _load_test_backend(self):
+            temp_dir = tempfile.mkdtemp()
+            src = "{}/../cpp_extensions/cpp_c10d_extension.cpp".format(os.path.abspath(os.path.dirname(__file__)))
+            extension = torch.utils.cpp_extension.load(
+                name="torch_test",
+                sources=[src],
+                build_directory=temp_dir
+            )
+
+        @skip_if_no_ninja
+        def test_backend_apis(self):
+            self._load_test_backend()
+
+            os.environ['WORLD_SIZE'] = '1'
+            os.environ['MASTER_ADDR'] = '127.0.0.1'
+            os.environ['MASTER_PORT'] = str(find_free_port())
+            os.environ['RANK'] = '0'
+
+            dist.init_process_group(backend='test', init_method='env://', world_size=1, rank=0)
+            self.assertEqual(dist.get_rank(), 0)
+            self.assertEqual(dist.get_world_size(), 1)
+
+            process_group = _get_default_group()
+            work = process_group.allreduce([torch.rand(1), torch.rand(1)])
+            self.assertTrue(work.wait())
+            self.assertTrue(work.is_completed())
+            self.assertTrue(work.is_success())
+
+            work = process_group.broadcast([torch.rand(1)])
+            self.assertTrue(work.wait())
+            self.assertTrue(work.is_completed())
+            self.assertTrue(work.is_success())
+
+            dist.destroy_process_group()
 
 if __name__ == "__main__":
     assert (
