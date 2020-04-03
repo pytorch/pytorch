@@ -442,39 +442,44 @@ class Ramp : public ExprNode<Ramp> {
 class TORCH_API Load : public ExprNode<Load> {
  public:
   const Var* base_handle() const {
-    return base_handle_;
+    return buf_->base_handle();
   }
-  const Expr* index() const {
-    return index_;
+  std::vector<const Expr*> indices() const {
+    return indices_;
+  }
+  const Expr* flat_index() const {
+    TORCH_CHECK(indices_.size() == 1, "Indices haven't been flattened.");
+    return indices_[0];
   }
   const Expr* mask() const {
     return mask_;
   }
+  const Buf* buf() const {
+    return buf_;
+  }
   static ExprHandle make(
       const Buffer& buffer,
-      const ExprHandle& index,
-      const ExprHandle& mask) {
-    return ExprHandle(new Load(buffer, index.node(), mask.node()));
-  }
+      const std::vector<ExprHandle>& indices,
+      const ExprHandle& mask);
   static ExprHandle make(
       Dtype dtype,
-      const VarHandle& base_handle,
-      const ExprHandle& index,
-      const ExprHandle& mask) {
-    return ExprHandle(
-        new Load(dtype, base_handle.node(), index.node(), mask.node()));
-  }
+      const BufHandle& buf,
+      const std::vector<ExprHandle>& indices,
+      const ExprHandle& mask);
 
-  Load(const Buffer& buffer, const Expr* index, const Expr* mask);
+  Load(
+      const Buffer& buffer,
+      const std::vector<const Expr*>& indices,
+      const Expr* mask);
   Load(
       Dtype dtype,
-      const Var* base_handle,
-      const Expr* index,
+      const Buf* base_handle,
+      const std::vector<const Expr*>& indices,
       const Expr* mask);
 
  private:
-  const Var* base_handle_;
-  const Expr* index_;
+  const Buf* buf_;
+  std::vector<const Expr*> indices_;
   const Expr* mask_;
 };
 
@@ -872,6 +877,9 @@ TORCH_API std::vector<const Var*> VarHandleVectorToVarVector(
     const std::vector<VarHandle>&);
 TORCH_API std::vector<VarHandle> VarVectorToVarHandleVector(
     const std::vector<const Var*>&);
+TORCH_API const Expr* flatten_index(
+    const std::vector<const Expr*>& dims,
+    const std::vector<const Expr*>& indices);
 
 } // namespace tensorexpr
 } // namespace jit
