@@ -267,6 +267,8 @@ struct CanEmitInline {
         // instruction stack
         // by the later BailOut in createBailoutBlock and its jf_index
         // will become invalid.
+        v->node()->kind() != prim::CudaFusionGroup &&
+        v->node()->kind() != prim::FusionGroup &&
         v->node()->kind() != prim::BailOut && v->uses().size() == 1 &&
         v->node()->outputs().size() == 1;
   }
@@ -1159,9 +1161,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
                     c10::intrusive_ptr<InterpreterStateImpl> state,
                     Stack stack)
                     : state_(std::move(state)), stack_(std::move(stack)) {}
-                void operator()(
-                    const IValue&,
-                    const c10::optional<c10::ivalue::Future::FutureError>&) {
+                void operator()() {
                   at::launch(InterpreterContinuation(
                       state_, std::move(stack_), getDistAutogradContextId()));
                 }

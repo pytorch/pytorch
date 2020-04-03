@@ -235,8 +235,6 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
 
     std::string error_msg;
   };
-  using Callback =
-    std::function<void(const IValue&, const c10::optional<FutureError>&)>;
 
   /**
    * Wait on the future until it completes.
@@ -291,14 +289,14 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
    * If the future has already completed,
    * this function will execute the callback immediately.
    */
-  void addCallback(const Callback& callback) {
+  void addCallback(std::function<void(void)> callback) {
     std::unique_lock<std::mutex> lock(mutex_);
     if (completed()) {
       lock.unlock();
-      callback(value_, error_);
+      callback();
       return;
     }
-    callbacks_.push_back(callback);
+    callbacks_.emplace_back(std::move(callback));
   }
 
   // Check if the current future has completed
@@ -326,13 +324,13 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
 
  private:
   void runCbs(std::unique_lock<std::mutex>& lock) {
-    std::vector<Callback> cbs;
+    std::vector<std::function<void(void)>> cbs;
     cbs.swap(callbacks_);
     lock.unlock();
 
     finished_cv_.notify_all();
     for (auto& callback : cbs) {
-      callback(value_, error_);
+      callback();
     }
   }
 
@@ -342,7 +340,7 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
 
   IValue value_; // when finished the value
   TypePtr type_;
-  std::vector<Callback> callbacks_;
+  std::vector<std::function<void(void)>> callbacks_;
   c10::optional<FutureError> error_;
 };
 

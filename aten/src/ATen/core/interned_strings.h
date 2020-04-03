@@ -256,6 +256,7 @@ namespace c10 {
   _(attr, types)                     \
   _(attr, scope)                     \
   _(attr, keepdims)                  \
+  _(attr, cache_id)                  \
   _(attr, new_axis)
 #else
 #define FORALL_NS_SYMBOLS(_) \

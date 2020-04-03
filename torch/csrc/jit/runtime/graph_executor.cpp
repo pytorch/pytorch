@@ -505,10 +505,7 @@ c10::intrusive_ptr<Future> GraphExecutorImplBase::runAsync(Stack& stack) {
   last_executed_optimized_graph = frame->plan.graph;
   if (!res->completed()) {
     // If not completed, persist the Frame until complete.
-    res->addCallback(
-        [frame](
-            const at::IValue&,
-            const c10::optional<at::ivalue::Future::FutureError>&) {});
+    res->addCallback([frame] {});
   }
   return res;
 }
@@ -753,8 +750,8 @@ void runNondiffOptimization(
     std::shared_ptr<Graph>& graph,
     bool strict_fuser_check) {
   // Run custom passes that different backends can register.
-  for (const auto& pass : getCustomPreFusionPasses()) {
-    pass(graph);
+  for (const auto& passPair : getCustomPrePasses()) {
+    passPair.first(graph);
   }
 
   // decomposition pass, decompose certain ops that will be used in the
@@ -776,8 +773,8 @@ void runNondiffOptimization(
   FuseGraph(graph, strict_fuser_check);
 
   // Run custom post-fusion passes
-  for (const auto& pass : getCustomPostFusionPasses()) {
-    pass(graph);
+  for (const auto& passPair : getCustomPostPasses()) {
+    passPair.first(graph);
   }
 }
 

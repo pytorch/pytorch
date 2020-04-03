@@ -142,7 +142,7 @@ ProcessGroupAgent::ProcessGroupAgent(
 }
 
 ProcessGroupAgent::~ProcessGroupAgent() {
-  if (rpcRunning_) {
+  if (rpcAgentRunning_) {
     shutdown();
   }
 }
@@ -240,11 +240,7 @@ void ProcessGroupAgent::sync() {
   } while (hasPendingMessage());
 }
 
-void ProcessGroupAgent::start() {
-  {
-    std::lock_guard<std::mutex> futureLock{futureMutex_};
-    rpcRunning_.store(true);
-  }
+void ProcessGroupAgent::startImpl() {
   listenerThread_ = std::thread(&ProcessGroupAgent::listenLoop, this);
   futureTimeoutThread_ =
       std::thread(&ProcessGroupAgent::pollTimedOutRPCs, this);
@@ -254,7 +250,7 @@ void ProcessGroupAgent::shutdown() {
   LOG(INFO) << "Shutting down ProcessGroupAgent on rank " << pg_->getRank()
             << ".";
   std::unique_lock<std::mutex> lock{futureMutex_};
-  if (!rpcRunning_.exchange(false)) {
+  if (!rpcAgentRunning_.exchange(false)) {
     return;
   }
   lock.unlock();
@@ -297,7 +293,7 @@ std::shared_ptr<FutureMessage> ProcessGroupAgent::send(
     }
   }
 
-  if (!rpcRunning_.load()) {
+  if (!rpcAgentRunning_.load()) {
     // We are trying to send but RPC has been shut down on this node. This can
     // happen if we are in a shutdown sequence but background threads are still
     // processing messages that result in send()s. Throw a descriptive error.
@@ -449,7 +445,7 @@ void ProcessGroupAgent::handleSend(const SendWork& work) {
   }
 
   for (auto& pendingSend : pendingSends) {
-    if (!rpcRunning_.load() || !pendingSend->wait()) {
+    if (!rpcAgentRunning_.load() || !pendingSend->wait()) {
       // Send was interrupted or RPC is not running.
       return;
     }
@@ -523,22 +519,18 @@ bool ProcessGroupAgent::handleRecv(RecvWork& work) {
       // response as a callback which fires when the future completes.
       auto fromId = work.from_.id_;
       auto requestId = work.id_;
-      futureResponse->addCallback(
-          [this, fromId, requestId, futureResponse](
-              const Message& /* unused */,
-              const c10::optional<utils::FutureError>& err) {
-            --serverActiveCalls_;
-            --serverActiveAsyncCalls_;
-            if (!err) {
-              send(
-                  getWorkerInfo(fromId),
-                  std::move(*futureResponse).moveValue());
-            } else {
-              send(
-                  getWorkerInfo(fromId),
-                  createExceptionResponse(err->what(), requestId));
-            }
-          });
+      futureResponse->addCallback([this, fromId, requestId, futureResponse]() {
+        --serverActiveCalls_;
+        --serverActiveAsyncCalls_;
+        if (!futureResponse->hasError()) {
+          send(getWorkerInfo(fromId), std::move(*futureResponse).moveValue());
+        } else {
+          send(
+              getWorkerInfo(fromId),
+              createExceptionResponse(
+                  futureResponse->error()->what(), requestId));
+        }
+      });
     }
   } else if (message.isResponse()) {
     auto id = message.id();
@@ -694,7 +686,7 @@ void ProcessGroupAgent::listenLoop() {
 }
 
 void ProcessGroupAgent::listenLoopInternal() {
-  while (rpcRunning_.load()) {
+  while (rpcAgentRunning_.load()) {
     // rank, tensor size, message type
     std::vector<torch::Tensor> preamble = {torch::empty({4}, {torch::kInt64})};
     auto work = pg_->recvAnysource(preamble, pg_->getRank());
@@ -703,7 +695,7 @@ void ProcessGroupAgent::listenLoopInternal() {
       recvWork_ = work;
     }
 
-    if (!rpcRunning_.load() || !work->wait() /* aborted */) {
+    if (!rpcAgentRunning_.load() || !work->wait() /* aborted */) {
       return;
     }
 
@@ -723,7 +715,7 @@ void ProcessGroupAgent::listenLoopInternal() {
 }
 
 void ProcessGroupAgent::pollTimedOutRPCs() {
-  while (rpcRunning_.load()) {
+  while (rpcAgentRunning_.load()) {
     std::unique_lock<std::mutex> lock{futureMutex_};
     steady_clock_time_point minEndTime;
     // Estimate amount of time the first future will time out in, and sleep
@@ -737,13 +729,13 @@ void ProcessGroupAgent::pollTimedOutRPCs() {
     }
 
     auto shouldUpdateMinEndTimePredicate = [&, this]() -> bool {
-      // Notice, whoever modifying `rpcRunning_`
+      // Notice, whoever modifying `rpcAgentRunning_`
       // must acquire lock on `futureMutex_`.
       // Otherwise, this predicate could deadlock.
       // If during evaluating the predicate, `::shutdown()` is called, then
       // the predicate missed the notification before it started waiting
       // on the cond var.
-      if (!rpcRunning_.load()) {
+      if (!rpcAgentRunning_.load()) {
         return true;
       }
       steady_clock_time_point minEndTimeInMap = kInfiniteTimeoutTimePoint;
