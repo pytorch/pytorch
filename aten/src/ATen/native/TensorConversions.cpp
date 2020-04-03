@@ -44,22 +44,24 @@ static inline Tensor to_impl(const Tensor& self, const TensorOptions& options, b
   return r;
 }
 
-Tensor to(const Tensor& self, const TensorOptions& options, bool non_blocking, bool copy) {
+Tensor to(const Tensor& self, const TensorOptions& options_, bool non_blocking, bool copy) {
 
-  TORCH_CHECK(options.requires_grad_opt() == c10::nullopt,
+  TORCH_CHECK(options_.requires_grad_opt() == c10::nullopt,
            "to(options) expects unset requires_grad flag, but got "
-           "options.requires_grad set as ", options.requires_grad());
+           "options.requires_grad set as ", options_.requires_grad());
 
-  TORCH_CHECK(!options.has_layout() || self.layout() == options.layout(),
+  TORCH_CHECK(!options_.has_layout() || self.layout() == options_.layout(),
            "to(options) doesn't support converting to a different layout, "
            "but got self.layout being ", self.layout(),
-           " and options.layout set as ", options.layout());
+           " and options.layout set as ", options_.layout());
 
+  auto options = options_;
   if (options.has_device()) {
     options = options.device(ensure_has_index(options.device()));
   }
-  auto specified_options = self.options().merge_in(options);
-  return to_impl(self, specified_options, non_blocking, copy);
+
+  auto merged_options = self.options().merge_in(options);
+  return to_impl(self, merged_options, non_blocking, copy);
 }
 
 Tensor to(const Tensor& self, Device device, ScalarType dtype, bool non_blocking, bool copy, c10::optional<c10::MemoryFormat> optional_memory_format) {

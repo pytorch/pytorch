@@ -142,8 +142,7 @@ Tensor qnnpack_add(Tensor qa, Tensor qb, double scale, int64_t zero_point) {
       qa_contig.sizes(),
       at::device(kCPU).dtype(kQUInt8).memory_format(qa.suggest_memory_format()),
       scale,
-      zero_point,
-      c10::nullopt);
+      zero_point);
 
   if (qa_contig.size(0) == 0) {
     return qy;
