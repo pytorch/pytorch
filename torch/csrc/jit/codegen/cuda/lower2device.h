@@ -103,7 +103,11 @@ struct TORCH_CUDA_API GPULower : public OptOutDispatch {
   std::vector<Expr*> getLoweredExprs();
   std::ostream& printKernel(
       std::ostream& _os,
+<<<<<<< HEAD
       const std::string& kernel_name = "CUDAGeneratedKernel");
+=======
+      std::string kernel_name = "CUDAGeneratedKernel");
+>>>>>>> Major refactor of code lowering and associated parts.
 };
 
 } // namespace fuser

@@ -246,9 +246,6 @@ Val* TensorIndex::index(int i) const {
 Allocate::Allocate(TensorView* _tv, Val* _size)
     : Expr(ExprType::Allocate), buffer_(_tv), extent_{_size} {
   if (!_size->isAnInt() || !_size->isConstScalar()) {
-    std::stringstream flat_size;
-    IRPrinter irp(flat_size);
-    irp.print_inline(_size);
     TORCH_INTERNAL_ASSERT(
         false,
         "Allocations must be based on constant integers but tried to alloc ",

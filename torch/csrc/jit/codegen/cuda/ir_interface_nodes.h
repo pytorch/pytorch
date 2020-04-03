@@ -76,7 +76,7 @@ struct TORCH_CUDA_API Int : public Val {
     return maybe_value_;
   }
 
-  bool sameAs(const Int* const other) const;
+  virtual bool sameAs(const Int* const other) const;
 
  private:
   const c10::optional<int> maybe_value_;
