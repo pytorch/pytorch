@@ -6,9 +6,12 @@
 #include <ATen/cuda/detail/TensorInfo.cuh>
 #include <ATen/cuda/detail/IndexUtils.cuh>
 #include <ATen/cuda/detail/KernelUtils.h>
+#include <ATen/native/cuda/LaunchUtils.h>
 #include <THC/THCNumerics.cuh>
 #include <c10/macros/Macros.h>
 
+#define CUDA_MAX_THREADS 1024
+#define BLOCK_STRIDE 2
 
 namespace at {
 namespace native {
@@ -28,8 +31,8 @@ __global__ void avg_pool2d_out_cuda_frame(const int nthreads,
     const int height, const int width, const int pooled_height,
     const int pooled_width, const int kernel_h, const int kernel_w,
     const int stride_h, const int stride_w, const int pad_h, const int pad_w,
-    scalar_t* const top_data, const int divisor_override, 
-    bool count_include_pad, bool use_divisor) {
+    scalar_t* const top_data, const int divisor_override,
+    const bool count_include_pad, const bool use_divisor) {
   CUDA_KERNEL_LOOP(index, nthreads) {
     const int pw = index % pooled_width;
     const int ph = (index / pooled_width) % pooled_height;
@@ -61,7 +64,111 @@ __global__ void avg_pool2d_out_cuda_frame(const int nthreads,
         divide_factor = (hend - hstart) * (wend - wstart);
       }
     }
-    top_data[index] = ScalarConvert<accscalar_t, scalar_t>::to(aveval / divide_factor);
+    // This is to make sure it gives exactly the same results as NHWC below, 
+    // div vs mul reciprocal could have 10^-5 difference for half precision. 
+    accscalar_t mul_factor = accscalar_t(1.0) / divide_factor; 
+    top_data[index] = ScalarConvert<accscalar_t, scalar_t>::to(aveval * mul_factor);
+  }
+}
+
+template <typename scalar_t, typename accscalar_t>
+C10_LAUNCH_BOUNDS_1(CUDA_MAX_THREADS)
+__global__ void avg_pool2d_out_cuda_frame_nhwc(
+    const scalar_t* bottom_data, const int nbatch, 
+    const int channels, const int height,
+    const int width, const int pooled_height, const int pooled_width,
+    const int kernel_h, const int kernel_w, const int stride_h,
+    const int stride_w, const int pad_h, const int pad_w,
+    const int in_stride_n, const int in_stride_c, 
+    const int in_stride_h, const int in_stride_w,
+    const int kernel_stride_C, const int kernel_size_C,
+    scalar_t* top_data, 
+    const int divisor_override, 
+    const bool count_include_pad, 
+    const bool use_divisor) {
+  // reserved for future use
+  const int dilation_h = 1; 
+  const int dilation_w = 1; 
+
+  extern __shared__ int smem[];
+  accscalar_t *out_cached = reinterpret_cast<accscalar_t*>(smem);
+
+  // flattening cta for pre-computation & smem initialization;
+  int thread_id = threadIdx.x + blockDim.x * (threadIdx.y + blockDim.y * threadIdx.z);
+  int block_size = blockDim.x * blockDim.y * blockDim.z;
+
+  // use shared memory to store temporary output value. This is simply to
+  // reduce register usage.
+  for (int i = thread_id; i < kernel_size_C*blockDim.x*blockDim.y*blockDim.z; i+= block_size) {
+    out_cached[i] = accscalar_t(0.0); 
+  }
+
+  __syncthreads();
+
+  int batch_id = blockIdx.x % nbatch; 
+  int channel_id = blockIdx.x / nbatch; 
+  int channel_offset = threadIdx.x + channel_id * blockDim.x; 
+
+  top_data = top_data + batch_id * pooled_height * pooled_width * channels;
+  bottom_data = bottom_data + batch_id * in_stride_n;
+
+  out_cached = &out_cached[(threadIdx.z * blockDim.y + threadIdx.y) * kernel_size_C*blockDim.x];
+
+  int oH = (pooled_height + gridDim.z-1) / gridDim.z;
+  int oW = (pooled_width + gridDim.y-1) / gridDim.y;
+  int ostartH = threadIdx.z + blockIdx.z*oH;
+  int oendH = ::min(ostartH+oH, pooled_height);
+  int ostartW = threadIdx.y + blockIdx.y*oW;
+  int oendW = ::min(ostartW+oW, pooled_width);
+
+  for (int oh = ostartH; oh < oendH; oh+=blockDim.z) {
+    int hstart = oh * stride_h - pad_h;
+    int hend = min(hstart + (kernel_h - 1) * dilation_h + 1, height + pad_h);
+    for (int ow = ostartW; ow < oendW; ow+=blockDim.y) {
+      int wstart = ow * stride_w - pad_w;
+      int wend = min(wstart + (kernel_w - 1) * dilation_w + 1, width + pad_w);
+
+      // pool_size if count_include_pad
+      const int pool_size = (hend - hstart) * (wend - wstart); 
+      while(hstart < 0)
+        hstart += dilation_h;
+      while(wstart < 0)
+        wstart += dilation_w;
+      hend = min(hend, height);
+      wend = min(wend, width);
+
+      int divide_factor;
+      if (use_divisor) {
+        divide_factor = divisor_override;
+      } else {
+        if(count_include_pad) {
+          divide_factor = pool_size;
+        } else {
+          divide_factor = (hend - hstart) * (wend - wstart);
+        }
+      }
+      // avoid division in loops
+      accscalar_t mul_factor = accscalar_t(1.0) / divide_factor;
+
+      for (int ih = hstart; ih < hend; ih++) {
+        for (int iw = wstart; iw < wend; iw++) {
+          int cached_index = threadIdx.x; 
+          const scalar_t *ptr_input = bottom_data + ih * in_stride_h + iw * in_stride_w;
+          for(int c = channel_offset; c < channels; c+= blockDim.x*kernel_stride_C) {
+            out_cached[cached_index] += ptr_input[c*in_stride_c];
+            cached_index += blockDim.x; 
+          }
+        }
+      }
+      scalar_t *ptr_output_data = top_data + (oh * pooled_width + ow) * channels;
+
+      int cached_index = threadIdx.x; 
+      for(int c = channel_offset; c < channels; c+= blockDim.x*kernel_stride_C) {
+        ptr_output_data[c] = scalar_cast<scalar_t>(out_cached[cached_index] * mul_factor);
+        out_cached[cached_index] = accscalar_t(0.0); 
+        cached_index += blockDim.x; 
+      }
+    }
   }
 }
 
@@ -148,8 +255,14 @@ void avg_pool2d_out_cuda_template(
   const int padH = safe_downcast<int, int64_t>(padding[0]);
   const int padW = padding.size() == 1 ? padH : safe_downcast<int, int64_t>(padding[1]);
 
-  TORCH_CHECK((input_.ndimension() == 3 || input_.ndimension() == 4),
-    "non-empty 3D or 4D (batch mode) tensor expected for input");
+  const auto memory_format = input_.suggest_memory_format();
+  if (memory_format == at::MemoryFormat::ChannelsLast){
+    TORCH_CHECK(input_.ndimension() == 4,
+      "non-empty 4D (batch mode) tensor expected for input with channels_last layout");
+  } else {
+    TORCH_CHECK((input_.ndimension() == 3 || input_.ndimension() == 4),
+      "non-empty 3D or 4D (batch mode) tensor expected for input");
+  }
 
   TORCH_CHECK(!divisor_override.has_value() || divisor_override.value() != 0,
     "divisor must be not zero");
@@ -169,13 +282,11 @@ void avg_pool2d_out_cuda_template(
     inputHeight, inputWidth,
     outputHeight, outputWidth);
 
-  Tensor input = input_.contiguous();
+  Tensor input = input_.contiguous(memory_format);
 
   output.resize_({nbatch, nInputPlane, outputHeight, outputWidth});
 
-  const int32_t count = safe_downcast<int32_t, int64_t>(output.numel());
-  const uint32_t  num_threads = std::min(at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, 1024);
-  const uint32_t num_blocks = cuda::ATenCeilDiv<uint32_t>(count, num_threads);
+  output.unsafeGetTensorImpl()->empty_tensor_restride(memory_format);
 
   bool use_divisor = divisor_override.has_value();
   const auto divisor_override_value = use_divisor ? divisor_override.value() : 0; 
@@ -189,20 +300,80 @@ void avg_pool2d_out_cuda_template(
         scalar_t *output_data = output.data_ptr<scalar_t>();
         scalar_t *input_data = input.data_ptr<scalar_t>();
 
-        avg_pool2d_out_cuda_frame<scalar_t, accscalar_t>
-          <<<num_blocks, num_threads, 0, at::cuda::getCurrentCUDAStream()>>>(
-            count,
-            input_data,
-            nbatch,
-            nInputPlane,
-            inputHeight, inputWidth,
-            outputHeight, outputWidth,
-            kH, kW,
-            dH, dW,
-            padH, padW,
-            output_data,
-            divisor_override_value,
-            count_include_pad, use_divisor);
+        switch (memory_format){
+          case MemoryFormat::ChannelsLast: {
+            const int64_t in_stride_n = input.stride(-4);
+            const int64_t in_stride_c = input.stride(-3);
+            const int64_t in_stride_h = input.stride(-2);
+            const int64_t in_stride_w = input.stride(-1);
+
+            const int max_threads = std::min<int>(
+                at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, CUDA_MAX_THREADS);
+            int* maxThreadsDim = at::cuda::getCurrentDeviceProperties()->maxThreadsDim;
+            int block_x = std::min<int>(
+                maxThreadsDim[0], std::min<int>(lastPow2(nInputPlane), at::cuda::warp_size()));
+            int block_y = std::min<int>(
+                maxThreadsDim[1], std::min<int>(lastPow2(outputWidth), max_threads / block_x));
+            int block_z = std::min<int>(
+                maxThreadsDim[2], std::min<int>(lastPow2(outputHeight), max_threads / block_x / block_y));
+            block_x = std::min<int>(
+                maxThreadsDim[0], std::min<int>(lastPow2(nInputPlane), max_threads / block_y / block_z));
+            const dim3 block(block_x, block_y, block_z);
+
+            int kernel_stride_C = cuda::ATenCeilDiv(
+                safe_downcast<int, int64_t>(nInputPlane), block_x * 4); 
+            int kernel_size_C = cuda::ATenCeilDiv(
+                safe_downcast<int, int64_t>(nInputPlane), block_x * kernel_stride_C); 
+
+            int grid_x = nbatch*kernel_stride_C;
+            int grid_y = std::min<int>(
+                at::cuda::getCurrentDeviceProperties()->maxGridSize[1],
+                cuda::ATenCeilDiv(safe_downcast<int, int64_t>(outputWidth), block_y*BLOCK_STRIDE));
+            int grid_z = std::min<int>(
+                at::cuda::getCurrentDeviceProperties()->maxGridSize[2],
+                cuda::ATenCeilDiv(safe_downcast<int, int64_t>(outputHeight), block_z*BLOCK_STRIDE));
+            const dim3 grid(grid_x, grid_y, grid_z);
+
+            size_t shmem_size = (kernel_size_C * block_x*block_y*block_z) * (sizeof(int) + sizeof(scalar_t));
+            AT_ASSERT(shmem_size <= at::cuda::getCurrentDeviceProperties()->sharedMemPerBlock); 
+
+            avg_pool2d_out_cuda_frame_nhwc<scalar_t, accscalar_t>
+            <<<grid, block, shmem_size, at::cuda::getCurrentCUDAStream()>>>(
+                input_data, nbatch,
+                nInputPlane, inputHeight, inputWidth, outputHeight, outputWidth,
+                kH, kW, dH, dW, padH, padW,
+                in_stride_n, in_stride_c,
+                in_stride_h, in_stride_w,
+                kernel_stride_C, kernel_size_C,
+                output_data,
+                divisor_override_value,
+                count_include_pad,
+                use_divisor);
+            break;
+          }
+          case MemoryFormat::Contiguous: {
+            const int32_t count = safe_downcast<int32_t, int64_t>(output.numel());
+            const uint32_t  num_threads = std::min(at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, 1024);
+            const uint32_t num_blocks = cuda::ATenCeilDiv<uint32_t>(count, num_threads);
+
+            avg_pool2d_out_cuda_frame<scalar_t, accscalar_t>
+              <<<num_blocks, num_threads, 0, at::cuda::getCurrentCUDAStream()>>>(
+                count,
+                input_data,
+                nbatch,
+                nInputPlane,
+                inputHeight, inputWidth,
+                outputHeight, outputWidth,
+                kH, kW,
+                dH, dW,
+                padH, padW,
+                output_data,
+                divisor_override_value,
+                count_include_pad, use_divisor);
+            break; 
+          }
+          default: TORCH_CHECK(false, "Unsupported memory format. Supports only ChannelsLast, Contiguous"); 
+        }
       });
     }
   );
