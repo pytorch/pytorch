@@ -376,6 +376,10 @@ static inline ScalarType toValueType(ScalarType t) {
 // see tensor_attributes.rst for detailed explanation and examples
 // of casting rules.
 static inline bool canCast(const ScalarType from, const ScalarType to) {
+  // We disallow complex -> non complex, e.g., float_tensor *= complex is disallowed.
+  if (isComplexType(from) && !isComplexType(to)) {
+    return false;
+  }
   // We disallow float -> integral, e.g., int_tensor *= float is disallowed.
   if (isFloatingType(from) && isIntegralType(to, false)) {
     return false;
