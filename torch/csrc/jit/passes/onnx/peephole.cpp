@@ -830,6 +830,8 @@ void removeMaxPoolUnusedOutput(Block* b) {
   }
 }
 
+// recursive function that deletes all nodes between NegativeLogLikelihoodLoss
+// and LogSoftmax
 void recursive_del(Node* node) {
   if (node->kind() == onnx::LogSoftmax) {
     return;
@@ -870,6 +872,8 @@ Node* createSoftmaxCrossEntropyNode(Block* b, graph_node_list_iterator it, std::
   return softmaxCrossEntropyNode;
 }
 
+// This optimization fuses LogSoftmax and NegativeLogLikelihoodLoss operators into
+// one operator: SoftmaxCrossEntropyLoss.
 static void fuseLogSoftmaxNllLoss(Block* b) {
   for (auto it = b->nodes().begin(), end = b->nodes().end(); it != end; ++it) {
     for (auto* child_block : it->blocks()) {
@@ -881,10 +885,12 @@ static void fuseLogSoftmaxNllLoss(Block* b) {
       Node* origNllLossNode;
       std::vector<Node*> deleteNodes;
       Node* softmaxCrossEntropyNode = nullptr;
+      // if the input is 2D
       if (prev->kind() == onnx::LogSoftmax) {
         origLogSoftmaxNode= it->input(0)->node();
         origNllLossNode = *it;
         deleteNodes.push_back(origLogSoftmaxNode);
+      // if the input is 4D
       } else if (prev->kind() == onnx::Transpose &&
                  prev->input(0)->node()->kind() == onnx::LogSoftmax) {
         auto logSoftmaxNode = prev->input(0)->node();
@@ -895,6 +901,7 @@ static void fuseLogSoftmaxNllLoss(Block* b) {
         deleteNodes.push_back(origLogSoftmaxNode);
         deleteNodes.push_back(logSoftmaxNode);
         deleteNodes.push_back(prev);
+      // if the input is 3D or > 4D
       } else if (prev->kind() == onnx::Reshape &&
                  prev->input(0)->node()->kind() == onnx::Transpose &&
                  prev->input(0)->node()->input(0)->node()->kind() == onnx::LogSoftmax) {
@@ -910,6 +917,9 @@ static void fuseLogSoftmaxNllLoss(Block* b) {
         origLogSoftmaxNode->removeAllInputs();
         deleteNodes.push_back(origLogSoftmaxNode);
         deleteNodes.push_back(transpose);
+        // when reduction=none a different graph is created and the graph doesn't end with
+        // node NegativeLogLikelihoodLoss like in all other cases and nodes that come after
+        // NegativeLogLikelihoodLoss need to be deleted.
         if (!origNllLossNode->output(0)->uses().empty()){
           auto nllloss_output = origNllLossNode->output(0)->uses()[0].user;
  
@@ -938,7 +948,7 @@ static void fuseLogSoftmaxNllLoss(Block* b) {
             shape->destroy();
             gather->destroy();
           } 
-       }
+        }
 
         recursive_del(origNllLossNode);
       } else {
@@ -947,6 +957,7 @@ static void fuseLogSoftmaxNllLoss(Block* b) {
 
       if (!softmaxCrossEntropyNode) {
         std::vector<Value*> values{origLogSoftmaxNode->inputs().at(0), origNllLossNode->inputs().at(1)};
+        // this is required for the optional weight input
         if (origNllLossNode->inputs().size() == 3) {
           values.push_back(origNllLossNode->inputs().at(2));
         }
