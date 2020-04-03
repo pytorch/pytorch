@@ -53,22 +53,27 @@ class TestFuser(JitTestCase):
     def setUp(self):
         self.old_cpu_fuser_state = torch._C._jit_can_fuse_on_cpu()
         self.old_gpu_fuser_state = torch._C._jit_can_fuse_on_gpu()
+
         torch._C._jit_override_can_fuse_on_cpu(False)
         torch._C._jit_override_can_fuse_on_gpu(False)
-        torch._C._jit_set_texpr_fuser_enabled(True)
 
         self.old_profiling_executor = torch._C._jit_set_profiling_executor(True)
         self.old_profiling_mode = torch._C._jit_set_profiling_mode(True)
+
+        torch._C._jit_set_texpr_fuser_enabled(True)
+
         if GRAPH_EXECUTOR != ProfilingMode.PROFILING:
             torch._C._jit_set_profiling_executor(self.old_profiling_executor)
             torch._C._jit_set_profiling_mode(self.old_profiling_mode)
 
     def tearDown(self):
-        torch._C._jit_override_can_fuse_on_gpu(self.old_gpu_fuser_state)
-        torch._C._jit_override_can_fuse_on_cpu(self.old_cpu_fuser_state)
-        torch._C._jit_set_texpr_fuser_enabled(False)
         torch._C._jit_set_profiling_executor(self.old_profiling_executor)
         torch._C._jit_set_profiling_mode(self.old_profiling_mode)
+
+        torch._C._jit_override_can_fuse_on_gpu(self.old_gpu_fuser_state)
+        torch._C._jit_override_can_fuse_on_cpu(self.old_cpu_fuser_state)
+
+        torch._C._jit_set_texpr_fuser_enabled(False)
 
     def assertAllFused(self, graph, except_for=()):
 
