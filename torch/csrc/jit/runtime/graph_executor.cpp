@@ -28,6 +28,7 @@
 #include <torch/csrc/jit/passes/requires_grad_analysis.h>
 #include <torch/csrc/jit/passes/shape_analysis.h>
 #include <torch/csrc/jit/passes/specialize_autogradzero.h>
+#include <torch/csrc/jit/passes/tensorexpr_fuser.h>
 #include <torch/csrc/jit/resource_guard.h>
 #include <torch/csrc/jit/runtime/argument_spec.h>
 #include <torch/csrc/jit/runtime/autodiff.h>
@@ -771,6 +772,8 @@ void runNondiffOptimization(
   QuantFusion(graph);
 
   FuseGraph(graph, strict_fuser_check);
+
+  fuseTensorExprs(graph);
 
   // Run custom post-fusion passes
   for (const auto& passPair : getCustomPostPasses()) {
