@@ -26,7 +26,7 @@ from cpp_api_parity.utils import TorchNNModuleTestParams, TORCH_NN_COMMON_TEST_H
     add_test, compute_cpp_args_construction_stmts_and_forward_arg_symbols, serialize_arg_dict_as_script_module, \
     compute_arg_dict, decorate_test_fn, compute_temp_file_path, generate_error_msg, is_torch_nn_functional_test, \
     try_remove_folder
-import cpp_api_parity
+from cpp_api_parity.sample_module import SAMPLE_MODULE_CPP_SOURCE
 
 # Expected substitutions:
 #
@@ -290,13 +290,9 @@ def generate_test_cpp_sources(test_params, template):
 # Build all C++ tests together, instead of once per test.
 def build_cpp_tests(unit_test_class, print_cpp_source=False):
     assert len(unit_test_class.module_test_params_map) > 0
-    cpp_sources = TORCH_NN_COMMON_TEST_HARNESS
+    cpp_sources = TORCH_NN_COMMON_TEST_HARNESS + SAMPLE_MODULE_CPP_SOURCE
     functions = []
-    modules_added_cpp_sources = set()
     for test_name, test_params in unit_test_class.module_test_params_map.items():
-        if test_params.module_name not in modules_added_cpp_sources:
-            cpp_sources += cpp_api_parity.module_cpp_sources.get(test_params.module_name, '')
-            modules_added_cpp_sources.add(test_params.module_name)
         cpp_sources += generate_test_cpp_sources(
             test_params=test_params, template=TORCH_NN_MODULE_TEST_FORWARD_BACKWARD)
         functions.append('{}_test_forward_backward'.format(test_params.module_variant_name))
