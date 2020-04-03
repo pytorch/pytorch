@@ -248,7 +248,7 @@ def serialize_arg_dict_as_script_module(arg_dict):
 # The mapping can take one of the following formats:
 #
 # 1. `argument_name` -> Python value
-# 2. `argument_name` -> 'input' (which means `argument_name` in C++ will be bound to `test_instance._get_input()`)
+# 2. `argument_name` -> '_get_input()' (which means `argument_name` in C++ will be bound to `test_instance._get_input()`)
 #
 # For example:
 # ```
@@ -266,7 +266,7 @@ def serialize_arg_dict_as_script_module(arg_dict):
 #                              .weight(weights.to(i.options()))
 #                              .reduction(torch::kNone))''',
 #         input_fn=lambda: torch.rand(15, 10).clamp_(2.8e-2, 1 - 2.8e-2),
-#         cpp_var_map={'i': 'input', 't': t, 'weights': weights},
+#         cpp_var_map={'i': '_get_input()', 't': t, 'weights': weights},
 #         reference_fn=lambda i, p, m: -(t * i.log() + (1 - t) * (1 - i).log()) * weights,
 #     )
 # ```
@@ -291,7 +291,7 @@ def compute_arg_dict(test_params_dict, test_instance):
     cpp_var_map = test_params_dict.get('cpp_var_map', {})
     for arg_name, arg_value in cpp_var_map.items():
         if isinstance(arg_value, str):
-            if arg_value == 'input':
+            if arg_value == '_get_input()':
                 arg_dict['other'].append(CppArg(name=arg_name, value=test_instance._get_input()))
             else:
                 raise RuntimeError("`{}` has unsupported string value: {}".format(arg_name, arg_value))
