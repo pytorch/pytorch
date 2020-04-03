@@ -81,7 +81,7 @@ void AllreduceOp<Context>::initializeHalvingDoubling() {
   }
 }
 
-// Used outside of the compilation unit
+// Used outside of the translation unit
 template void AllreduceOp<CPUContext>::initializeHalvingDoubling();
 
 template <class Context>
