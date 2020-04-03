@@ -1706,7 +1706,6 @@ class RpcTest(RpcAgentTestFixture):
         rpc._set_rpc_timeout(timedelta(seconds=60))
 
 
-
     def test_requires_process_group_agent_decorator(self):
         @requires_process_group_agent("test_func did not run")
         def test_func():
