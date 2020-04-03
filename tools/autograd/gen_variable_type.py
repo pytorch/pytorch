@@ -610,11 +610,6 @@ def emit_profiled_body(declaration):
     for a in arguments:
         processed_args.append('{}'.format(a['name']))
 
-    # for k,v in declaration.items():
-    #     print(k, v)
-
-    # abort()
-
     ret_and_arg_types = ', '.join([declaration['return_type']] + [a['type'] for a in declaration['arguments']])
 
     def check_record_function_input_type(simple_type):
