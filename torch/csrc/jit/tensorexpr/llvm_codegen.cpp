@@ -818,7 +818,7 @@ void LLVMCodeGenImpl::visit(const Load* v) {
   if (v->dtype().lanes() == 1) {
     v->base_handle()->accept(this);
     auto base = this->value_;
-    v->index()->accept(this);
+    v->flat_index()->accept(this);
     auto idx = this->value_;
 
     auto* maskimm = dynamic_cast<const IntImm*>(v->mask());
@@ -856,7 +856,7 @@ void LLVMCodeGenImpl::visit(const Load* v) {
   }
 
   // Handle the case where the load is contiguous and unmasked efficiently
-  auto* idx_ramp = dynamic_cast<const Ramp*>(v->index());
+  auto* idx_ramp = dynamic_cast<const Ramp*>(v->flat_index());
   if (unmasked_load && idx_ramp) {
     auto* stride_imm = dynamic_cast<const IntImm*>(idx_ramp->stride());
     if (stride_imm && stride_imm->value() == 1) {
@@ -876,7 +876,7 @@ void LLVMCodeGenImpl::visit(const Load* v) {
   // Fallback to a scalar implementation
   v->base_handle()->accept(this);
   auto base = this->value_;
-  v->index()->accept(this);
+  v->flat_index()->accept(this);
   auto idx = this->value_;
   v->mask()->accept(this);
   auto mask = this->value_;
@@ -983,7 +983,7 @@ void LLVMCodeGenImpl::visit(const Store* v) {
   if (v->value()->dtype().lanes() == 1) {
     v->base_handle()->accept(this);
     auto base = this->value_;
-    v->index()->accept(this);
+    v->flat_index()->accept(this);
     auto idx = this->value_;
     v->value()->accept(this);
     auto val = this->value_;
@@ -1018,7 +1018,7 @@ void LLVMCodeGenImpl::visit(const Store* v) {
   auto val = this->value_;
 
   // Handle the case where the store is contiguous and unmasked efficiently
-  auto* idx_ramp = dynamic_cast<const Ramp*>(v->index());
+  auto* idx_ramp = dynamic_cast<const Ramp*>(v->flat_index());
   if (unmasked_store && idx_ramp) {
     auto* stride_imm = dynamic_cast<const IntImm*>(idx_ramp->stride());
     if (stride_imm && stride_imm->value() == 1) {
@@ -1035,7 +1035,7 @@ void LLVMCodeGenImpl::visit(const Store* v) {
     }
   }
 
-  v->index()->accept(this);
+  v->flat_index()->accept(this);
   auto idx = this->value_;
   v->mask()->accept(this);
   auto mask = this->value_;
