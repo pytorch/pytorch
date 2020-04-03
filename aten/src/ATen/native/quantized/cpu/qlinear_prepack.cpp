@@ -1,6 +1,5 @@
 #include <ATen/ATen.h>
 #include <ATen/core/op_registration/op_registration.h>
-#include <ATen/cpp_custom_type_hack.h>
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
 #include <ATen/native/quantized/cpu/init_qnnpack.h>
 #include <ATen/native/quantized/cpu/packed_params.h>
@@ -11,18 +10,6 @@
 #include <vector>
 
 torch::jit::class_<LinearPackedParamsBase> register_linear_params();
-
-namespace caffe2 {
-#ifdef USE_FBGEMM
-// Required for cpp_custom_type_hack to work
-CAFFE_KNOWN_TYPE(PackedLinearWeight);
-CAFFE_KNOWN_TYPE(PackedLinearWeightFp16);
-#endif // USE_FBGEMM
-#ifdef USE_PYTORCH_QNNPACK
-// Required for cpp_custom_type_hack to work
-CAFFE_KNOWN_TYPE(PackedLinearWeightsQnnp);
-#endif // USE_PYTORCH_QNNPACK
-} // namespace caffe2
 
 #ifdef USE_FBGEMM
 namespace {
