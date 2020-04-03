@@ -35,7 +35,6 @@ void stopInliningCalls(Block* block) {
         cur->replaceAllUsesWith(interpolate_node);
         cur->removeAllInputs();
         cur->destroy();
-//        return;
       }
       stopInliningCalls(fun_type->function()->graph()->block());
     } else {
