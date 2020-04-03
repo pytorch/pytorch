@@ -17,8 +17,7 @@ Tensor empty_with_tail_padding(
     const IntArrayRef size,
     const caffe2::TypeMeta dtype,
     const c10::MemoryFormat memory_format) {
-  auto* allocator_ptr = get_guarding_allocator();
-
+  auto* const allocator_ptr = get_guarding_allocator();
   const int64_t nelements = prod_intlist(size);
 
   Tensor tensor(
@@ -35,17 +34,31 @@ Tensor empty_with_tail_padding(
   return tensor.resize_(size, memory_format);
 }
 
-Tensor allocate_padded_if_needed(const Tensor& input_contig) {
-  const auto* allocator = input_contig.storage().allocator();
-  const auto* guarding_allocator = get_guarding_allocator();
-  if (allocator == guarding_allocator) {
-    return input_contig;
+Tensor allocate_padded_contiguous_if_needed(
+    const Tensor& input,
+    const c10::MemoryFormat memory_format) {
+  const auto* const allocator = input.storage().allocator();
+  const auto* const guarding_allocator = get_guarding_allocator();
+
+  // If the allocators are the same and the memory is contiguous in the requested
+  // format, then there is no need to reallocate the tensor.
+
+  if ((allocator == guarding_allocator) && input.is_contiguous(memory_format)) {
+    return input;
   }
-  Tensor padded_input =
-      empty_with_tail_padding(input_contig.sizes(), input_contig.options().dtype(),
-          input_contig.suggest_memory_format());
-  padded_input.copy_(input_contig);
-  return padded_input;
+
+  // If there is a need to reallocate the tensor on the other hand, either because
+  // the allocators are not the same, or the allocators are the same but the input
+  // is not contiguous in the requested format, then reallocate and directly copy
+  // into destination.  There is no need to allocate a temporary contiguous memory
+  // only to use it as the source of the copy operation onto our final destination.
+
+  Tensor padded_input = empty_with_tail_padding(
+      input.sizes(),
+      input.options().dtype(),
+      memory_format);
+
+  return padded_input.copy_(input);
 }
 
 } // namespace internal

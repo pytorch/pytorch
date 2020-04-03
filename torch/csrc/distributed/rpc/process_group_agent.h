@@ -2,7 +2,6 @@
 
 #include <c10/core/thread_pool.h>
 #include <c10d/ProcessGroup.hpp>
-#include <torch/csrc/distributed/rpc/python_rpc_handler.h>
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
 
 #include <atomic>
@@ -152,10 +151,11 @@ class ProcessGroupAgent : public RpcAgent {
   void handleSend(const SendWork& work);
   // put RecvWork into a queue and notify the worker thread
   void enqueueRecv(RecvWork work);
-  // handle a RecvWork request. Return 1 if we should increment recvCounts, 0 if
-  // not (i.e. if the RPC timed out and we are getting a result after the
-  // timeout)
-  int handleRecv(RecvWork& work);
+  // handle a RecvWork request. Return true if we should increment recvCounts,
+  // false if not (i.e. if the RPC timed out and we are getting a result after
+  // the timeout). This ensures that the messages accounted for in
+  // hasPendingMessage() are tallied properly during a graceful shutdown.
+  bool handleRecv(RecvWork& work);
   // Loop for receiving messages. Calls listenLoopInternal and handles errors
   // such as timeouts on the process group.
   virtual void listenLoopInternal();
@@ -209,7 +209,7 @@ class ProcessGroupAgent : public RpcAgent {
 
   std::shared_ptr<c10d::ProcessGroup> pg_;
   // worker name -> rank
-  std::unordered_map<std::string, int> nameMap_;
+  std::unordered_map<std::string, worker_id_t> nameMap_;
   std::vector<WorkerInfo> allWorkerInfo_;
   // record the number of messages sent to and received from each peer. The recv
   // counter is only marked after the message is processed. Join uses allgather

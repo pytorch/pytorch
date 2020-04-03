@@ -2,7 +2,7 @@ import os
 import unittest
 
 import torch.testing._internal.common_utils as common
-from torch.testing._internal.common_utils import IS_WINDOWS
+from torch.testing._internal.common_utils import IS_WINDOWS, skipIfRocm
 from torch.testing._internal.common_cuda import TEST_CUDA
 import torch
 import torch.backends.cudnn
@@ -11,6 +11,7 @@ import torch.utils.cpp_extension
 try:
     import torch_test_cpp_extension.cpp as cpp_extension
     import torch_test_cpp_extension.msnpu as msnpu_extension
+    import torch_test_cpp_extension.rng as rng_extension
 except ImportError:
     raise RuntimeError(
         "test_cpp_extensions_aot.py cannot be invoked directly. Run "
@@ -54,6 +55,7 @@ class TestCppExtensionAOT(common.TestCase):
         expected_tensor_grad = torch.ones([4, 4], dtype=torch.double).mm(weights.t())
         self.assertEqual(tensor.grad, expected_tensor_grad)
 
+    @skipIfRocm
     @unittest.skipIf(not TEST_CUDA, "CUDA not found")
     def test_cuda_extension(self):
         import torch_test_cpp_extension.cuda as cuda_extension
@@ -140,6 +142,37 @@ class TestMSNPUTensor(common.TestCase):
         self.assertEqual(msnpu_extension.get_test_int(), 3)
         self.assertEqual(grad[0].shape, input.shape)
 
+
+class TestRNGExtension(common.TestCase):
+
+    def test_rng(self):
+        fourty_two = torch.full((10,), 42, dtype=torch.int64)
+
+        t = torch.empty(10, dtype=torch.int64).random_()
+        self.assertNotEqual(t, fourty_two)
+
+        gen = torch.Generator(device='cpu')
+        t = torch.empty(10, dtype=torch.int64).random_(generator=gen)
+        self.assertNotEqual(t, fourty_two)
+
+        self.assertEqual(rng_extension.getInstanceCount(), 0)
+        gen = rng_extension.createTestCPUGenerator(42)
+        self.assertEqual(rng_extension.getInstanceCount(), 1)
+        copy = gen
+        self.assertEqual(rng_extension.getInstanceCount(), 1)
+        self.assertEqual(gen, copy)
+        copy2 = rng_extension.identity(copy)
+        self.assertEqual(rng_extension.getInstanceCount(), 1)
+        self.assertEqual(gen, copy2)
+        t = torch.empty(10, dtype=torch.int64).random_(generator=gen)
+        self.assertEqual(rng_extension.getInstanceCount(), 1)
+        self.assertEqual(t, fourty_two)
+        del gen
+        self.assertEqual(rng_extension.getInstanceCount(), 1)
+        del copy
+        self.assertEqual(rng_extension.getInstanceCount(), 1)
+        del copy2
+        self.assertEqual(rng_extension.getInstanceCount(), 0)
 
 if __name__ == "__main__":
     common.run_tests()
