@@ -2,16 +2,7 @@
 
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
-<<<<<<< HEAD
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
-=======
-#include <torch/csrc/jit/codegen/cuda/index_compute.h>
-#include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
-#include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
-#include <torch/csrc/jit/codegen/cuda/iter_visitor.h>
-#include <torch/csrc/jit/codegen/cuda/predicate_compute.h>
-#include <torch/csrc/jit/codegen/cuda/transform_iter.h>
->>>>>>> Continue lowering refactor, split out loop nest generator, create scope/loop utils.
 
 #include <map>
 #include <ostream>
