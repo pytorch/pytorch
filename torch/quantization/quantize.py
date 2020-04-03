@@ -122,7 +122,7 @@ def add_quant_dequant(module):
         module._modules[name] = add_quant_dequant(child)
     return module
 
-def prepare(model, inplace=False):
+def prepare(model, inplace=False, qconfig_dict=None):
     r"""Prepares a copy of the model for quantization calibration or quantization-aware training.
 
     Quantization configuration should be assigned preemptively
@@ -134,10 +134,14 @@ def prepare(model, inplace=False):
     Args:
         model: input model to be modified in-place
         inplace: carry out model transformations in-place, the original module is mutated
+        qconfig_dict: dictionary that maps from name or type of submodule to
+            quantization configuration, qconfig applies to all submodules of a
+            given module unless qconfig for the submodules are specified (when
+            the submodule already has qconfig attribute)
     """
     if not inplace:
         model = copy.deepcopy(model)
-    propagate_qconfig_(model)
+    propagate_qconfig_(model, qconfig_dict=qconfig_dict)
     # sanity check common API misusage
     if not any(hasattr(m, 'qconfig') and m.qconfig for m in model.modules()):
         warnings.warn("None of the submodule got qconfig applied. Make sure you "
@@ -238,7 +242,7 @@ def quantize_dynamic(model, qconfig_spec=None, dtype=torch.qint8,
     convert(model, mapping, inplace=True)
     return model
 
-def prepare_qat(model, mapping=None, inplace=False):
+def prepare_qat(model, mapping=None, inplace=False, qconfig_dict=None):
     r"""
     Prepares a copy of the model for quantization calibration or
     quantization-aware training and convers it to quantized version.
@@ -252,10 +256,14 @@ def prepare_qat(model, mapping=None, inplace=False):
                  replaced.
         inplace: carry out model transformations in-place, the original module
                  is mutated
+        qconfig_dict: dictionary that maps from name or type of submodule to
+            quantization configuration, qconfig applies to all submodules of a
+            given module unless qconfig for the submodules are specified (when
+            the submodule already has qconfig attribute)
     """
     if mapping is None:
         mapping = DEFAULT_QAT_MODULE_MAPPING
-    model = prepare(model, inplace=inplace)
+    model = prepare(model, inplace=inplace, qconfig_dict=qconfig_dict)
     convert(model, mapping, inplace=True)
     return model
 
