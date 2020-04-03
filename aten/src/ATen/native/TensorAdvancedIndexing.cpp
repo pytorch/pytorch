@@ -76,6 +76,7 @@ DEFINE_DISPATCH(gather_stub);
 DEFINE_DISPATCH(scatter_stub);
 DEFINE_DISPATCH(scatter_fill_stub);
 DEFINE_DISPATCH(scatter_add_stub);
+DEFINE_DISPATCH(scatter_reduce_stub);
 
 static bool all_strides_match(TensorList tensors) {
   TORCH_CHECK(tensors.size() >= 1);
@@ -515,6 +516,10 @@ Tensor & scatter_cpu_(Tensor & self, int64_t dim, const Tensor & index, const Te
 Tensor & scatter_fill_cpu_(Tensor & self, int64_t dim, const Tensor & index, Scalar src) {
   scatter_fill_stub(self.device().type(), self, dim, index, src);
   return self;
+}
+
+Tensor & scatter_cpu_reduce_(Tensor & self, const int64_t dim, const Tensor & index,
+                      const Tensor & src, const std::string reduce) {
 }
 
 Tensor scatter(const Tensor & self, int64_t dim, const Tensor & index, const Tensor & source) {
