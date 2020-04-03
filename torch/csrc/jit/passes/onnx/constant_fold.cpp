@@ -299,7 +299,7 @@ c10::optional<at::Tensor> runTorchBackendForOnnx(
         inputTensorValues[0], p, node->is(attr::axes), node->i(attr::keepdims));
     return c10::optional<at::Tensor>(updated_val);
   } else if (node->kind() == onnx::Gather) {
-    assert(inputTensorValues.size() == 1);
+    assert(inputTensorValues.size() == 2);
     if (!node->hasAttributeS("axis")) {
       return c10::nullopt;
     }

@@ -410,7 +410,7 @@ class TestUtilityFuns(TestCase):
 
         for node in graph.nodes():
             assert node.kind() != "onnx::Shape"
-        assert len(list(graph.nodes())) == 4
+        assert len(list(graph.nodes())) == 1
 
     def test_strip_doc_string(self):
         class MyModule(torch.nn.Module):
