@@ -967,13 +967,13 @@ if (USE_LLVM)
       OUTPUT_VARIABLE STAT_LLVM
   )
 
-  message(STATUS "@#$ results of stat = ${STAT_LLVM}")
+  message(WARNING "@#$ results of stat = ${STAT_LLVM}")
 
   execute_process (
       COMMAND bash -c "cd  ${USE_LLVM} && ls && cd -"
       OUTPUT_VARIABLE STAT_LLVM
   )
-  message(STATUS "@#$ results of ls = ${STAT_LLVM}")
+  message(WARNING "@#$ results of ls = ${STAT_LLVM}")
   find_package(LLVM PATHS ${USE_LLVM} NO_DEFAULT_PATH)
 
   if (LLVM_FOUND)
