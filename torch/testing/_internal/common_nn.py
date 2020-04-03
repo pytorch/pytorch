@@ -4084,6 +4084,7 @@ new_criterion_tests = [
         target_fn=lambda: torch.randint(0, 14, (3, 30), dtype=torch.long),
         reference_fn=lambda i, t, il, tl, m:
             ctcloss_reference(i, t, il, tl, blank=14, reduction=get_reduction(m)),
+        desc='lengths_intlists',
         check_sum_reduction=True,
         check_gradgrad=False,
         check_half=False,
@@ -4099,6 +4100,7 @@ new_criterion_tests = [
         target_fn=lambda: torch.randint(0, 14, (3, 30), dtype=torch.long),
         reference_fn=lambda i, t, il, tl, m:
             ctcloss_reference(i, t, il, tl, blank=14, reduction=get_reduction(m)),
+        desc='lengths_tensors',
         check_sum_reduction=True,
         check_gradgrad=False,
         check_half=False,
@@ -4120,7 +4122,7 @@ new_criterion_tests = [
     # ),
     dict(
         module_name='CTCLoss',
-        desc='2d_int_target',
+        desc='2d_int_target_lengths_intlists',
         constructor_args=(0,),  # blank=0
         extra_args=([50, 50, 50], [30, 25, 20]),  # input_lengths, target_lengths
         input_fn=lambda: torch.randn(50, 3, 15).log_softmax(2),
@@ -4136,7 +4138,7 @@ new_criterion_tests = [
     ),
     dict(
         module_name='CTCLoss',
-        desc='2d_int_target',
+        desc='2d_int_target_lengths_tensors',
         constructor_args=(0,),  # blank=0
         cpp_constructor_args='torch::nn::CTCLossOptions().blank(0)',
         extra_args=(torch.tensor([50, 50, 50]), torch.tensor([30, 25, 20])),  # input_lengths, target_lengths
