@@ -6,7 +6,6 @@ namespace torch {
 namespace jit {
 
 // Inline function and method calls.
-// use_graph argument is used to preclude inlining functions for ONNX conversion
 TORCH_API void Inline(Graph& graph);
 
 } // namespace jit
