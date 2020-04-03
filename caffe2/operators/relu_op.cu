@@ -109,8 +109,14 @@ __global__ void ReluGradientCUDAKernel<half2>(
 #else
     const float2 dy = __half22float2(dY[i]);
     const float2 yy = __half22float2(Y[i]);
-    dX[i] =
-        __floats2half2_rn(yy.x > 0.0f ? dy.x : 0.0f, yy.y > 0.0f ? dy.y : 0.0f);
+    // There are explicit cast to float here, because it may otherwise cause ambiguity on ROCm and can be triggered
+    // sometimes:
+    //
+    //   error: conditional expression is ambiguous; 'const hip_impl::Scalar_accessor<float, Native_vec_, 1>' can be
+    //   converted to 'float' and vice versa
+
+     dX[i] = __floats2half2_rn(yy.x > 0.0f ? static_cast<float>(dy.x) : 0.0f,
+                               yy.y > 0.0f ? static_cast<float>(dy.y) : 0.0f);
 #endif
   }
 }

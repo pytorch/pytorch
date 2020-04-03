@@ -20,15 +20,15 @@
       # This binary build is currently broken, see https://github_com/pytorch/pytorch/issues/16710
       # - binary_linux_conda_3_6_cu90_devtoolset7_build
       - binary_linux_build:
-          name: binary_linux_libtorch_3_6m_cpu_devtoolset7_shared-with-deps_build
-          build_environment: "libtorch 3.6m cpu devtoolset7"
+          name: binary_linux_libtorch_3_7m_cpu_devtoolset7_shared-with-deps_build
+          build_environment: "libtorch 3.7m cpu devtoolset7"
           requires:
             - setup
           libtorch_variant: "shared-with-deps"
           docker_image: "pytorch/manylinux-cuda102"
       - binary_linux_build:
-          name: binary_linux_libtorch_3_6m_cpu_gcc5_4_cxx11-abi_shared-with-deps_build
-          build_environment: "libtorch 3.6m cpu gcc5.4_cxx11-abi"
+          name: binary_linux_libtorch_3_7m_cpu_gcc5_4_cxx11-abi_shared-with-deps_build
+          build_environment: "libtorch 3.7m cpu gcc5.4_cxx11-abi"
           requires:
             - setup
           libtorch_variant: "shared-with-deps"
@@ -36,8 +36,8 @@
       # TODO we should test a libtorch cuda build, but they take too long
       # - binary_linux_libtorch_3_6m_cu90_devtoolset7_static-without-deps_build
       - binary_mac_build:
-          name: binary_macos_wheel_3_6_cpu_build
-          build_environment: "wheel 3.6 cpu"
+          name: binary_macos_wheel_3_7_cpu_build
+          build_environment: "wheel 3.7 cpu"
           requires:
             - setup
           filters:
@@ -47,8 +47,8 @@
       # This job has an average run time of 3 hours o.O
       # Now only running this on master to reduce overhead
       - binary_mac_build:
-          name: binary_macos_libtorch_3_6_cpu_build
-          build_environment: "libtorch 3.6 cpu"
+          name: binary_macos_libtorch_3_7_cpu_build
+          build_environment: "libtorch 3.7 cpu"
           requires:
             - setup
           filters:
@@ -71,19 +71,19 @@
       # This binary build is currently broken, see https://github_com/pytorch/pytorch/issues/16710
       # - binary_linux_conda_3_6_cu90_devtoolset7_test:
       - binary_linux_test:
-          name: binary_linux_libtorch_3_6m_cpu_devtoolset7_shared-with-deps_test
-          build_environment: "libtorch 3.6m cpu devtoolset7"
+          name: binary_linux_libtorch_3_7m_cpu_devtoolset7_shared-with-deps_test
+          build_environment: "libtorch 3.7m cpu devtoolset7"
           requires:
             - setup
-            - binary_linux_libtorch_3_6m_cpu_devtoolset7_shared-with-deps_build
+            - binary_linux_libtorch_3_7m_cpu_devtoolset7_shared-with-deps_build
           libtorch_variant: "shared-with-deps"
           docker_image: "pytorch/manylinux-cuda102"
       - binary_linux_test:
-          name: binary_linux_libtorch_3_6m_cpu_gcc5_4_cxx11-abi_shared-with-deps_test
-          build_environment: "libtorch 3.6m cpu gcc5.4_cxx11-abi"
+          name: binary_linux_libtorch_3_7m_cpu_gcc5_4_cxx11-abi_shared-with-deps_test
+          build_environment: "libtorch 3.7m cpu gcc5.4_cxx11-abi"
           requires:
             - setup
-            - binary_linux_libtorch_3_6m_cpu_gcc5_4_cxx11-abi_shared-with-deps_build
+            - binary_linux_libtorch_3_7m_cpu_gcc5_4_cxx11-abi_shared-with-deps_build
           libtorch_variant: "shared-with-deps"
           docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
 
