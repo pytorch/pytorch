@@ -41,7 +41,8 @@ bool InterpreterState::run(Stack& stack) {
     switch (inst.op) {
       case OP: {
 #if defined(PYTORCH_MOBILE_OPERATOR_OBSERVER)
-        if (auto debug_info = at::getThreadLocalDebugInfo()) {
+        if (auto debug_info = at::ThreadLocalDebugInfo::get(
+                at::DebugInfoKind::MOBILE_RUNTIME_INFO)) {
           if (auto* mobile_debug_info =
                   dynamic_cast<MobileDebugInfo*>(debug_info.get())) {
             mobile_debug_info->setOpIdx(pc);

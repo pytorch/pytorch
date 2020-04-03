@@ -24,6 +24,7 @@ from jit.test_builtins import TestBuiltins, TestTensorBuiltins  # noqa: F401
 from jit.test_unsupported_ops import TestUnsupportedOps  # noqa: F401
 from jit.test_freezing import TestFreezing  # noqa: F401
 from jit.test_functional_blocks import TestFunctionalBlocks  # noqa: F401
+from jit.test_save_load import TestSaveLoad  # noqa: F401
 
 # Torch
 from torch import Tensor
@@ -2224,8 +2225,7 @@ graph(%input, %weight):
                 x, y = torch.chunk(x, 2)
                 x = F.dropout(x)
                 x = self.dropout(x)
-                # TODO: uncomment when sort is supported
-                # x, _ = torch.sort(x)
+                x, _ = torch.sort(x)
                 x = F.interpolate(x, 4, mode='nearest')
                 x = F.upsample(x, (32, 32))
                 x = F.upsample_bilinear(x, (32, 32))
@@ -15144,6 +15144,13 @@ a")
                 print((x, x, x).__doc__)
                 return x
 
+    def test_tuple_len(self):
+        @torch.jit.script
+        def foo():
+            return len((1, "str", None))
+
+        self.assertEqual(foo(), 3)
+
     def test_tuple_slicing(self):
         def tuple_slice(a):
             if bool(a):
@@ -18121,6 +18128,38 @@ a")
 
         f = Foo()
         torch.jit.script(f)
+
+    def test_static_if_prop(self):
+        class MaybeHasAttr(torch.nn.Module):
+            def __init__(self, add_attr):
+                super(MaybeHasAttr, self).__init__()
+                if add_attr:
+                    self.maybe_attr = 1
+
+            def forward(self):
+                if hasattr(self, "maybe_attr") and True:
+                    return self.maybe_attr
+                else:
+                    return 0
+
+        class MaybeHasAttr2(torch.nn.Module):
+            def __init__(self, add_attr):
+                super(MaybeHasAttr2, self).__init__()
+                if add_attr:
+                    self.maybe_attr = 1
+
+            def forward(self):
+                if not hasattr(self, "maybe_attr") or False:
+                    return 0
+                else:
+                    return self.maybe_attr
+
+        torch.jit.script(MaybeHasAttr(True))
+        torch.jit.script(MaybeHasAttr(False))
+        torch.jit.script(MaybeHasAttr2(True))
+        torch.jit.script(MaybeHasAttr2(False))
+
+
 
     def test_optional_tuple(self):
         def fn(x=None):
