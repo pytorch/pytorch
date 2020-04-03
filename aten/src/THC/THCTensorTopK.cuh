@@ -4,8 +4,6 @@
 #include <c10/macros/Macros.h>
 #include <ATen/native/cuda/SortingRadixSelect.cuh>
 
-using namespace at::native;
-
 template <typename T, typename IndexType, int Dim, bool Order>
 C10_LAUNCH_BOUNDS_1(1024)
 __global__ void gatherTopK(TensorInfo<T, IndexType> input,
@@ -48,7 +46,7 @@ __global__ void gatherTopK(TensorInfo<T, IndexType> input,
 
   // Find the k-th highest element in our input
   T topKValue = ScalarConvert<int, T>::to(0);
-  radixSelect<T, typename TopKTypeConfig<T>::RadixType, IndexType, Order>(
+  at::native::radixSelect<T, typename at::native::TopKTypeConfig<T>::RadixType, IndexType, Order>(
     inputSliceStart, outputSliceSize,
     inputSliceSize, inputWithinSliceStride,
     smem, &topKValue);
