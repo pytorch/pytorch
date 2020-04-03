@@ -2,7 +2,6 @@
 
 #include <c10/core/thread_pool.h>
 #include <c10d/ProcessGroup.hpp>
-#include <torch/csrc/distributed/rpc/python_rpc_handler.h>
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
 
 #include <atomic>
@@ -210,7 +209,7 @@ class ProcessGroupAgent : public RpcAgent {
 
   std::shared_ptr<c10d::ProcessGroup> pg_;
   // worker name -> rank
-  std::unordered_map<std::string, int> nameMap_;
+  std::unordered_map<std::string, worker_id_t> nameMap_;
   std::vector<WorkerInfo> allWorkerInfo_;
   // record the number of messages sent to and received from each peer. The recv
   // counter is only marked after the message is processed. Join uses allgather
