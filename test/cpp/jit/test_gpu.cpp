@@ -1,4 +1,4 @@
-// #if defined(USE_CUDA)
+#if defined(USE_CUDA)
 #include <test/cpp/jit/test_base.h>
 
 #include <torch/csrc/jit/codegen/cuda/arith.h>
@@ -977,16 +977,26 @@ void testGPU_FusionForLoop() {
   FusionGuard fg(&fusion);
 
   const auto TV0 = new TensorView(
+<<<<<<< HEAD
       new TensorDomain({new IterDomain(new Int(0), new Int(16))}),
       DataType::Float);
   const auto TV1 = new TensorView(
       new TensorDomain({new IterDomain(new Int(0), new Int(16))}),
       DataType::Float);
+=======
+      new TensorDomain({new IterDomain(new Int(16))}), DataType::Float);
+  const auto TV1 = new TensorView(
+      new TensorDomain({new IterDomain(new Int(16))}), DataType::Float);
+>>>>>>> Major refactor of code lowering and associated parts.
 
   fusion.addInput(TV0);
   fusion.addInput(TV1);
 
+<<<<<<< HEAD
   auto ID0 = new IterDomain(new Int(0), new Int(8));
+=======
+  auto ID0 = new IterDomain(new Int(8));
+>>>>>>> Major refactor of code lowering and associated parts.
 
   TensorView* TV2 = static_cast<TensorView*>(add(TV0, TV1));
   BinaryOp* op = static_cast<BinaryOp*>(TV2->getOrigin());
@@ -1069,4 +1079,4 @@ void testGPU_FusionLoopUnroll() {
 
 } // namespace jit
 } // namespace torch
-// #endif // #if defined(USE_CUDA)
+ #endif // #if defined(USE_CUDA)

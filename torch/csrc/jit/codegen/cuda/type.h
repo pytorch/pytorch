@@ -14,7 +14,7 @@ namespace jit {
 namespace fuser {
 
 // Order of strength
-enum class ValType {
+enum class TORCH_CUDA_API ValType {
   TensorIndex,
   TensorDomain,
   IterDomain,
@@ -23,9 +23,9 @@ enum class ValType {
   NamedScalar
 };
 
-enum class DataType { Float, Int, Null };
+enum class TORCH_CUDA_API DataType { Float, Int, Null };
 
-enum class ExprType {
+enum class TORCH_CUDA_API ExprType {
   UnaryOp,
   BinaryOp,
   ForLoop,

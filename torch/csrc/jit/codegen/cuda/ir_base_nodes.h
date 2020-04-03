@@ -178,6 +178,12 @@ struct TORCH_CUDA_API Val : public Statement {
     return isScalar() && dtype_ == DataType::Int;
   }
 
+  bool isConstScalar() const;
+
+  bool isAnInt() const {
+    return isScalar() && dtype_ == DataType::Int;
+  }
+
   bool isZeroInt() const;
   bool isOneInt() const;
 

@@ -329,7 +329,7 @@ struct TORCH_CUDA_API Reorder : public Expr {
 };
 
 /*
- * ForLoop provides scoping around an index through an IterDomain. Exprs placed
+ * ForLoop provides scoping around an int iterator from 0 to range. Exprs placed
  * in its body are considered inside the scope of the for loop. In the future
  * the implementation should look quite different so that we can do proper
  * dependency annalysis like in Fusion.
