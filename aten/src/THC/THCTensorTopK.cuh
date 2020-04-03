@@ -77,9 +77,9 @@ __global__ void gatherTopK(TensorInfo<T, IndexType> input,
       inRange ? doLdg(&inputSliceStart[i * inputWithinSliceStride]) : ScalarConvert<int, T>::to(0);
     bool hasTopK;
     if (Order) {
-      hasTopK = inRange && (THCNumerics<T>::gt(v, topKValue));
+      hasTopK = inRange && (v > topkValue);
     } else {
-      hasTopK = inRange && (THCNumerics<T>::lt(v, topKValue));
+      hasTopK = inRange && (v < topKValue);
     }
 
     int index;
