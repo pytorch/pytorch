@@ -346,9 +346,9 @@ void testHashDifferenceTypes() {
 void testHashLargeExpression() {
   KernelScope kernel_scope;
   constexpr int N = 1024;
-  Buffer a(VarHandle("A", kHandle), kInt, {N});
-  Buffer b(VarHandle("B", kHandle), kInt, {N});
-  Buffer c(VarHandle("C", kHandle), kInt, {N});
+  Buffer a(BufHandle("A", {N}), kInt);
+  Buffer b(BufHandle("B", {N}), kInt);
+  Buffer c(BufHandle("C", {N}), kInt);
   auto mask = IntImm::make(1);
   VarHandle i("i", kInt);
   auto memcpy_stmt = For::make(
@@ -357,25 +357,25 @@ void testHashLargeExpression() {
       N,
       Store::make(
           c,
-          i,
+          {i},
           CompareSelect::make(
-              Load::make(a, i, mask),
-              Load::make(b, i, mask),
+              Load::make(a, {i}, mask),
+              Load::make(b, {i}, mask),
               CompareSelectOperation::kEQ),
           mask));
 
-  Buffer d(VarHandle("D", kHandle), kInt, {1});
-  Buffer e(VarHandle("E", kHandle), kInt, {1});
+  Buffer d(BufHandle("D", {1}), kInt);
+  Buffer e(BufHandle("E", {1}), kInt);
   auto store_ramp_stmt = Store::make(
       e,
-      Ramp::make(0, 1, 4),
-      Load::make(d, Ramp::make(0, 1, 4), Broadcast::make(IntImm::make(1), 4)),
+      {Ramp::make(0, 1, 4)},
+      Load::make(d, {Ramp::make(0, 1, 4)}, Broadcast::make(IntImm::make(1), 4)),
       Broadcast::make(Cast::make(kInt, DoubleImm::make(1)), 4));
 
   auto if_stmt = Cond::make(
       CompareSelect::make(
-          Load::make(a, i, mask),
-          Load::make(b, i, mask),
+          Load::make(a, {i}, mask),
+          Load::make(b, {i}, mask),
           CompareSelectOperation::kGE),
       memcpy_stmt,
       store_ramp_stmt);
