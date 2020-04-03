@@ -348,7 +348,6 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
   set(TORCH_SRCS
     ${GENERATED_CXX_TORCH}
     ${GENERATED_H_TORCH}
-    ${TORCH_SRC_DIR}/csrc/ThreadLocalState.cpp
     ${TORCH_SRC_DIR}/csrc/autograd/anomaly_mode.cpp
     ${TORCH_SRC_DIR}/csrc/autograd/autograd.cpp
     ${TORCH_SRC_DIR}/csrc/autograd/custom_function.cpp
@@ -449,6 +448,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/jit/runtime/register_special_ops.cpp
     ${TORCH_SRC_DIR}/csrc/jit/ir/scope.cpp
     ${TORCH_SRC_DIR}/csrc/jit/frontend/ir_emitter.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/frontend/name_mangler.cpp
     ${TORCH_SRC_DIR}/csrc/jit/testing/file_check.cpp
     ${TORCH_SRC_DIR}/csrc/jit/frontend/convert_to_ssa.cpp
     ${TORCH_SRC_DIR}/csrc/jit/frontend/exit_transforms.cpp
@@ -466,6 +466,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/jit/runtime/jit_exception.cpp
     ${TORCH_SRC_DIR}/csrc/jit/frontend/string_to_type.cpp
     ${TORCH_SRC_DIR}/csrc/jit/serialization/source_range_serialization.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/serialization/type_name_uniquer.cpp
     ${TORCH_SRC_DIR}/csrc/jit/frontend/tracer.cpp
     ${TORCH_SRC_DIR}/csrc/jit/testing/hooks_for_testing.cpp
     ${TORCH_SRC_DIR}/csrc/utils/tensor_flatten.cpp
