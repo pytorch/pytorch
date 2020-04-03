@@ -288,7 +288,6 @@ def assorted_types_args_kwargs(
 @torch.jit.script
 def raise_script():
     raise RuntimeError("Expected error")
-    return 0
 
 
 @torch.jit.script
@@ -846,7 +845,7 @@ class JitRpcTest(RRefAPITest, LocalRRefTest, JitRpcAsyncOpTest, RpcAgentTestFixt
         def future_return_to_python(dst_rank, inputs):
             # type: (int, Tuple[Tensor, Tensor]) -> Future[Tensor]
             return rpc.rpc_async(
-                worker_name(dst_rank),
+                "worker{}".format(dst_rank),
                 two_args_two_kwargs,
                 inputs
             )
