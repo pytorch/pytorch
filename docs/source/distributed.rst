@@ -10,7 +10,7 @@ Distributed communication package - torch.distributed
 Backends
 --------
 
-``torch.distributed`` supports three backends, each with
+``torch.distributed`` supports three built-in backends, each with
 different capabilities. The table below shows which functions are available
 for use with CPU / CUDA tensors.
 MPI supports CUDA only if the implementation used to build PyTorch supports it.
@@ -407,6 +407,26 @@ of 16
 
 
 .. _distributed-launch:
+
+Third-party backends
+--------------------
+
+Besides the GLOO/MPI/NCCL backends, PyTorch distributed supports third-party backends
+through a run-time register mechanism.
+For references on how to develop a third-party backend through C++ Extension,
+please refer to `Tutorials - Custom C++ and CUDA Extensions <https://pytorch.org/
+tutorials/advanced/cpp_extension.html>`_ and `test/cpp_extensions/cpp_c10d_extension.cpp`.
+The capability of third-party backends are decided by their own implementations.
+
+The new backend derives from `c10d.ProcessGroup` and registers the backend name and the
+instantiating interface through :func:`torch.distributed.Backend.register_backend` when
+imported.
+
+When manually importing this backend and invoking :func:`torch.distributed.init_process_group`
+with the corresponding backend name, the `torch.distributed` package runs on the new backend.
+
+.. warning::
+    The support of third-party backend is experimental and subject to change.
 
 Launch utility
 --------------
