@@ -13,10 +13,6 @@ namespace jit {
 
 using ::c10::IValue;
 
-thread_local bool add_type_tags = false;
-bool getTypeTags() {
-  return add_type_tags;
-}
 
 // Protocol 2 is the highest that can be decoded by Python 2
 // See https://docs.python.org/3/library/pickle.html#data-stream-format
@@ -493,26 +489,22 @@ void Pickler::pushTensorReference(const IValue& ivalue) {
 // ivalue to the stack as a string so we can preserve type tags across
 // serialization
 void Pickler::startTypeTag() {
-  if (getTypeTags()) {
-    pushGlobal("torch.jit._pickle", "restore_type_tag");
-  }
+  pushGlobal("torch.jit._pickle", "restore_type_tag");
 }
 
 // See startTypeTag
 void Pickler::endTypeTag(const IValue& ivalue) {
-  if (getTypeTags()) {
-    TORCH_INTERNAL_ASSERT(ivalue.isGenericDict() || ivalue.isList());
+  TORCH_INTERNAL_ASSERT(ivalue.isGenericDict() || ivalue.isList());
 
-    // Push the dict type
-    TORCH_INTERNAL_ASSERT(ivalue.type());
-    pushString(ivalue.type()->python_str());
+  // Push the dict type
+  TORCH_INTERNAL_ASSERT(ivalue.type());
+  pushString(ivalue.type()->python_str());
 
-    // Pop the dict and type into a tuple
-    push<PickleOpCode>(PickleOpCode::TUPLE2);
+  // Pop the dict and type into a tuple
+  push<PickleOpCode>(PickleOpCode::TUPLE2);
 
-    // Call function via reduce
-    push<PickleOpCode>(PickleOpCode::REDUCE);
-  }
+  // Call function via reduce
+  push<PickleOpCode>(PickleOpCode::REDUCE);
 }
 
 void Pickler::pushDict(const IValue& ivalue) {
