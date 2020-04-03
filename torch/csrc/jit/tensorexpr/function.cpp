@@ -32,7 +32,8 @@ Tensor* Compute(
   unpack_dim_args(dim_args, &dims, &args);
   const Expr* body = body_func(VarVectorToVarHandleVector(args)).node();
   Function* func = new Function(func_name, dims, args, body);
-  return new Tensor(func, 0);
+  const Buf* buf = func->func_var(0);
+  return new Tensor(buf, func, 0);
 }
 
 Tensor* Compute(
@@ -48,7 +49,8 @@ Tensor* Compute(
   unpack_dim_args(dim_args, &dims, &args);
   const Expr* body = body_func(VarHandle(args[0])).node();
   Function* func = new Function(func_name, dims, args, body);
-  return new Tensor(func, 0);
+  const Buf* buf = func->func_var(0);
+  return new Tensor(buf, func, 0);
 }
 
 Tensor* Compute(
@@ -64,7 +66,8 @@ Tensor* Compute(
   unpack_dim_args(dim_args, &dims, &args);
   const Expr* body = body_func(VarHandle(args[0]), VarHandle(args[1])).node();
   Function* func = new Function(func_name, dims, args, body);
-  return new Tensor(func, 0);
+  const Buf* buf = func->func_var(0);
+  return new Tensor(buf, func, 0);
 }
 
 Tensor* Compute(
@@ -83,7 +86,8 @@ Tensor* Compute(
       body_func(VarHandle(args[0]), VarHandle(args[1]), VarHandle(args[2]))
           .node();
   Function* func = new Function(func_name, dims, args, body);
-  return new Tensor(func, 0);
+  const Buf* buf = func->func_var(0);
+  return new Tensor(buf, func, 0);
 }
 
 Tensor* Compute(
@@ -103,37 +107,20 @@ Tensor* Compute(
   auto args = VarVectorToVarHandleVector(args_nodes);
   const Expr* body = body_func(args[0], args[1], args[2], args[3]).node();
   Function* func = new Function(func_name, dims, args_nodes, body);
-  return new Tensor(func, 0);
+  const Buf* buf = func->func_var(0);
+  return new Tensor(buf, func, 0);
 }
 
 Stmt* Function::ElementStmt(size_t index) {
-  std::vector<ExprHandle> strides(dims_.size());
-  for (size_t i = 0; i < strides.size(); i++) {
-    if (i == strides.size() - 1) {
-      strides[i] = ExprHandle(1);
-      continue;
-    }
-    ExprHandle stride = ExprHandle(dims_[i + 1]);
-    for (size_t j = i + 2; j < dims_.size(); j++) {
-      stride = stride * ExprHandle(dims_[j]);
-    }
-    strides[i] = stride;
-  }
-
-  ExprHandle total_index = int32_t{0};
-  for (size_t i = 0; i < dims_.size(); i++) {
-    ExprHandle index = VarHandle(this->args_[i]) * ExprHandle(strides[i]);
-    if (i == 0) {
-      total_index = index;
-    } else {
-      total_index = total_index + index;
-    }
+  const Buf* buf = func_var(index);
+  std::vector<const Expr*> indices;
+  for (size_t i = 0; i < buf->ndim(); i++) {
+    indices.push_back(this->args_[i]);
   }
 
   const Expr* mask = new IntImm(1);
 
-  Stmt* update_stmt =
-      new Store(func_var(index), total_index.node(), body(index), mask);
+  Stmt* update_stmt = new Store(buf, indices, body(index), mask);
   return update_stmt;
 }
 
