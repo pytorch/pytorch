@@ -183,7 +183,7 @@ AdvancedIndex::AdvancedIndex(const Tensor& src, TensorList indices_list)
 
 static AdvancedIndex make_info(Tensor self, TensorList orig) {
   checkIndexTensorTypes(orig);
-  // first expand BoolTensor (masks) or ByteTensor (masks) into 1 or more LongTensors
+  // first expand BoolTensor (masks) into 1 or more LongTensors
   auto indices = expandTensors(self, orig);
   // next broadcast all index tensors together
   try {

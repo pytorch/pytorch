@@ -89,13 +89,13 @@ void cat_kernel(const c10::OperatorHandle& op, Stack* stack) {
 void __is__kernel(const c10::OperatorHandle& op, Stack* stack) {
   c10::IValue self, obj;
   pop(*stack, self, obj);
-  push(*stack, self.isSameIdentity(obj));
+  push(*stack, self.is(obj));
 }
 
 void __isnot__kernel(const c10::OperatorHandle& op, Stack* stack) {
   c10::IValue self, obj;
   pop(*stack, self, obj);
-  push(*stack, !self.isSameIdentity(obj));
+  push(*stack, !self.is(obj));
 }
 
 void log_softmax_kernel(const c10::OperatorHandle& op, Stack* stack) {
@@ -586,6 +586,9 @@ static auto registry =
                 c10::DispatchKey::CPUTensorId,
                 [](const Tensor& self) { return at::detach(self); }))
         .op("_aten::dequantize(Tensor self) -> Tensor",
+            torch::RegisterOperators::options().catchAllKernel(
+                [](const Tensor& self) { return at::dequantize(self); }))
+        .op("_aten::dequantize.self(Tensor self) -> Tensor",
             torch::RegisterOperators::options().catchAllKernel(
                 [](const Tensor& self) { return at::dequantize(self); }))
         .op("_aten::select.int(Tensor self, int dim, int index) -> Tensor",
