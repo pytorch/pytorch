@@ -1,5 +1,3 @@
-#ifdef USE_FBGEMM
-
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
 
 #include <ATen/ATen.h>
@@ -9,6 +7,15 @@
 
 #include <c10/core/QScheme.h>
 #include <c10/core/TensorOptions.h>
+
+#include <ATen/native/quantized/cpu/conv_packed_params.h>
+#include <ATen/native/quantized/cpu/qnnpack_utils.h>
+#include <torch/custom_class.h>
+
+template <int kSpatialDim>
+torch::jit::class_<ConvPackedParamsBase<kSpatialDim>> register_conv_params();
+
+#ifdef USE_FBGEMM
 
 namespace at {
 namespace native {
@@ -92,7 +99,7 @@ fbgemm::conv_param_t<3> MakeFbgemmConvParam<3>(
       groups, // groups
       {kernels[0], kernels[1], kernels[2]}, // kernels
       {strides[0], strides[1], strides[2]}, // strides
-      {pads[0], pads[1], pads[2], pads[0], pads[1], pads[2]}, // paddings
+      {pads[0], pads[1], pads[2], pads[0], pads[1], pads[2]}, // padding
       {dilations[0], dilations[1], dilations[2]}); // dilations
 }
 
@@ -197,3 +204,100 @@ Tensor ConvertToChannelsLast3dTensor(const Tensor& src) {
 } // namespace at
 
 #endif // USE_FBGEMM
+
+template <int kSpatialDim = 2>
+torch::jit::class_<ConvPackedParamsBase<kSpatialDim>> register_conv_params() {
+  using SerializationType = std::tuple<
+      at::Tensor,
+      c10::optional<at::Tensor>,
+      torch::List<int64_t>,
+      torch::List<int64_t>,
+      torch::List<int64_t>,
+      int64_t>;
+  static auto register_conv_params =
+    torch::jit::class_<ConvPackedParamsBase<kSpatialDim>>(
+        "quantized", "Conv" + c10::to_string(kSpatialDim) + "dPackedParamsBase")
+          .def_pickle(
+              [](const c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>>& params)
+                  -> SerializationType { // __getstate__
+                at::Tensor weight;
+                c10::optional<at::Tensor> bias;
+                std::tie(weight, bias) = params->unpack();
+                return std::make_tuple(
+                    std::move(weight),
+                    std::move(bias),
+                    params->stride(),
+                    params->padding(),
+                    params->dilation(),
+                    params->groups());
+              },
+              [](SerializationType state)
+              -> c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> { // __setstate__
+                at::Tensor weight;
+                c10::optional<at::Tensor> bias;
+                torch::List<int64_t> stride, padding, dilation;
+                int64_t groups;
+                weight = std::move(std::get<0>(state));
+                bias = std::move(std::get<1>(state));
+                stride = std::get<2>(state);
+                padding = std::get<3>(state);
+                dilation = std::get<4>(state);
+                groups = std::get<5>(state);
+                auto& ctx = at::globalContext();
+
+#ifdef USE_FBGEMM
+                if (ctx.qEngine() == at::QEngine::FBGEMM) {
+                  return PackedConvWeight<kSpatialDim>::prepack(
+                      std::move(weight),
+                      std::move(bias),
+                      stride,
+                      padding,
+                      dilation,
+                      groups);
+                }
+#endif // USE_FBGEMM
+#ifdef USE_PYTORCH_QNNPACK
+                if (ctx.qEngine() == at::QEngine::QNNPACK) {
+                  TORCH_CHECK(
+                      kSpatialDim == 2,
+                      "prepack/__setstate__: QNNPACK only supports Conv2d "
+                      "now.");
+                  return PackedConvWeightsQnnp<kSpatialDim>::prepack(
+                      std::move(weight),
+                      std::move(bias),
+                      stride,
+                      padding,
+                      dilation,
+                      groups);
+                }
+#endif // USE_PYTORCH_QNNPACK
+                TORCH_CHECK(
+                    false,
+                    "Didn't find engine for when deserializing ConvPackedParams: ",
+                    toString(ctx.qEngine()));
+              })
+    .def("weight", [](const c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>>& self) {
+                     at::Tensor weight;
+                     c10::optional<at::Tensor> bias;
+                     std::tie(weight, bias) = self->unpack();
+                     return weight;
+                   })
+    .def("bias", [](const c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>>& self) {
+                   at::Tensor weight;
+                   c10::optional<at::Tensor> bias;
+                   std::tie(weight, bias) = self->unpack();
+                   return bias;
+                 })
+    .def("stride", &ConvPackedParamsBase<kSpatialDim>::stride)
+    .def("padding", &ConvPackedParamsBase<kSpatialDim>::padding)
+    .def("dilation", &ConvPackedParamsBase<kSpatialDim>::dilation)
+    .def("groups", &ConvPackedParamsBase<kSpatialDim>::groups);
+  return register_conv_params;
+}
+
+namespace {
+
+static auto conv2d_params = register_conv_params<2>();
+static auto conv3d_params = register_conv_params<3>();
+
+} // namespace

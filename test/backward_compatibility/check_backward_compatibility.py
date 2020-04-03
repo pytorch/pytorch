@@ -24,6 +24,17 @@ white_list = [
     ('aten::append*', datetime.date(2020, 4, 15)),
     ('aten::real*', datetime.date(2020, 4, 15)),
     ('aten::imag*', datetime.date(2020, 4, 15)),
+    ('quantized::conv_prepack', datetime.date(2020, 4, 15)),
+    ('quantized::conv_unpack', datetime.date(2020, 4, 15)),
+    ('quantized::conv', datetime.date(2020, 4, 15)),
+    ('quantized::conv2d_prepack', datetime.date(2020, 4, 15)),
+    ('quantized::conv2d_unpack', datetime.date(2020, 4, 15)),
+    ('quantized::conv2d', datetime.date(2020, 4, 15)),
+    ('quantized::conv2d_relu', datetime.date(2020, 4, 15)),
+    ('quantized::conv3d_prepack', datetime.date(2020, 4, 15)),
+    ('quantized::conv3d_unpack', datetime.date(2020, 4, 15)),
+    ('quantized::conv3d', datetime.date(2020, 4, 15)),
+    ('quantized::conv3d_relu', datetime.date(2020, 4, 15)),
 ]
 
 
