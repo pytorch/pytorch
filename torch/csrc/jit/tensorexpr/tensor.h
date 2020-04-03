@@ -23,17 +23,17 @@ class Tensor {
   const Expr* body() const {
     return function()->body(output_index());
   }
-  const Var* func_var() const {
+  const Buf* func_var() const {
     return function()->func_var(output_index());
   }
   int ndim() const {
-    return function()->dims().size();
+    return buf_->dims().size();
   }
   const Expr* dim(int index) const {
-    return function()->dim(index);
+    return buf_->dim(index);
   }
-  const std::vector<const Expr*>& dims() const {
-    return function()->dims();
+  std::vector<const Expr*> dims() const {
+    return buf_->dims();
   }
   const Var* arg(int index) const {
     return function()->arg(index);
@@ -42,8 +42,12 @@ class Tensor {
     return function()->args();
   }
 
-  Tensor(Function* function, int output_index)
-      : function_(function), output_index_(output_index) {}
+  const Buf* buf() const {
+    return buf_;
+  }
+
+  Tensor(const Buf* buf, Function* function, int output_index)
+      : buf_(buf), function_(function), output_index_(output_index) {}
   template <typename... Ts>
   inline ExprHandle operator()(const Ts&... ts);
   template <typename T>
@@ -52,6 +56,7 @@ class Tensor {
   inline ExprHandle call(const Ts&... ts);
 
  private:
+  const Buf* buf_;
   Function* function_;
   int output_index_;
 };

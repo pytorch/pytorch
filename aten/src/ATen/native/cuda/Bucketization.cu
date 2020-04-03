@@ -136,7 +136,7 @@ Tensor searchsorted_cuda(const Tensor& sorted_sequence, const Tensor& self, bool
 }
 
 Tensor searchsorted_cuda(const Tensor& sorted_sequence, Scalar self, bool out_int32, bool right) {
-  return searchsorted_cuda(sorted_sequence, c10::scalar_to_tensor(self, sorted_sequence.device()), out_int32, right);
+  return searchsorted_cuda(sorted_sequence, searchsorted_scalar_tensor(self, sorted_sequence.device()), out_int32, right);
 }
 
 Tensor& bucketize_out_cuda(Tensor& result, const Tensor& self, const Tensor& boundaries, bool out_int32, bool right) {
@@ -154,7 +154,7 @@ Tensor bucketize_cuda(const Tensor& self, const Tensor& boundaries, bool out_int
 }
 
 Tensor bucketize_cuda(Scalar self, const Tensor& boundaries, bool out_int32, bool right) {
-  return bucketize_cuda(c10::scalar_to_tensor(self, boundaries.device()), boundaries, out_int32, right);
+  return bucketize_cuda(searchsorted_scalar_tensor(self, boundaries.device()), boundaries, out_int32, right);
 }
 
 }} // namespace at::native

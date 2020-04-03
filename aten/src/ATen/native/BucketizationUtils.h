@@ -1,6 +1,7 @@
 #pragma once
 
 #include <ATen/ATen.h>
+#include <ATen/native/TypeProperties.h>
 
 namespace at {
 namespace native {
@@ -25,13 +26,16 @@ inline void searchsorted_maybe_trim_input_tensors(
     trimmed_boundaries = raw_boundaries.contiguous();
   }
   if (raw_input.dtype() != raw_boundaries.dtype()) {
-    ScalarType input_stype = raw_input.scalar_type();
-    ScalarType boundaries_stype = raw_boundaries.scalar_type();
-    ScalarType common_stype = c10::promoteTypes(input_stype, boundaries_stype);
-    if (common_stype != input_stype) {
+    at::native::ResultTypeState state = {};
+    state = at::native::update_result_type_state(raw_boundaries, state);
+    state = at::native::update_result_type_state(raw_input, state);
+    ScalarType common_stype = at::native::result_type(state);
+
+    TORCH_INTERNAL_ASSERT(common_stype != ScalarType::Undefined);
+    if (common_stype != raw_input.scalar_type()) {
       trimmed_input = in_is_contiguous ? raw_input.to(common_stype) : trimmed_input.to(common_stype);
     }
-    if (common_stype != boundaries_stype) {
+    if (common_stype != raw_boundaries.scalar_type()) {
       trimmed_boundaries = bd_is_contiguous ? raw_boundaries.to(common_stype) : trimmed_boundaries.to(common_stype);
     }
   }
@@ -41,7 +45,6 @@ inline bool searchsorted_dims_matched_before_last_dim(const Tensor& boundaries, 
   if (boundaries.dim() != input.dim()) {
     return false;
   }
-
   const auto& dims_bd = boundaries.sizes();
   const auto& dims_in = input.sizes();
   for (int64_t dim = 0; dim + 1 < boundaries.dim(); ++dim) {
@@ -50,6 +53,14 @@ inline bool searchsorted_dims_matched_before_last_dim(const Tensor& boundaries, 
     }
   }
   return true;
+}
+
+inline Tensor searchsorted_scalar_tensor(Scalar scalar, const c10::Device& device) {
+  auto tensor = c10::scalar_to_tensor(scalar, device);
+  // This is to adopt the scalar promotion rules defined in native/TypeProperties.h
+  // So we have the same type promotion rules as binary operations.
+  tensor.unsafeGetTensorImpl()->set_wrapped_number(true);
+  return tensor;
 }
 
 inline void searchsorted_pre_check(const Tensor& boundaries, const Tensor& input, const Tensor& output, bool out_int32) {
