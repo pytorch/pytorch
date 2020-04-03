@@ -5,7 +5,7 @@
 namespace torch {
 namespace jit {
 
-const auto namespaceName = std::string("___torch_mangle_3.");
+const auto namespaceName = std::string("___torch_mangle_4."); //3
 const auto qualFuncName =
     std::string("__torch__.torch.nn.functional."); // + namespaceName;
 const auto qualFuncName2 =
@@ -21,10 +21,8 @@ void stopInliningCalls(Block* block) {
       auto fun_type =
           function_constant->output()->type()->expect<FunctionType>();
 
-      if ((fun_type->function()->qualname().qualifiedName().find(
-               qualFuncName + "interpolate") != std::string::npos) ||
-          (fun_type->function()->qualname().qualifiedName().find(
-               qualFuncName2 + "interpolate") != std::string::npos)) {
+      if (fun_type->function()->qualname().qualifiedName().find(
+               ".interpolate") != std::string::npos) {
         cur->removeInput(0);
         Node* interpolate_node = block->owningGraph()->create(
             Symbol::fromQualString("aten::__interpolate"),
@@ -36,7 +34,9 @@ void stopInliningCalls(Block* block) {
         cur->removeAllInputs();
         cur->destroy();
       }
-      stopInliningCalls(fun_type->function()->graph()->block());
+      else {
+        stopInliningCalls(fun_type->function()->graph()->block());
+      }
     } else {
       for (auto b : cur->blocks()) {
         stopInliningCalls(b);
