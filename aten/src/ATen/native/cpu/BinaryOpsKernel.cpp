@@ -19,14 +19,14 @@ void add_kernel(TensorIterator& iter, Scalar alpha_scalar) {
       using scalar_t = bool;
       auto alpha = alpha_scalar.to<scalar_t>();
       cpu_kernel(iter,
-        [=](scalar_t a, scalar_t b) -> scalar_t { return a + alpha * b; });
+        [=](scalar_t a, scalar_t b) __ubsan_ignore_undefined__ -> scalar_t { return a + alpha * b; });
   } else {
     AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(kBFloat16, iter.dtype(), "add_cpu/sub_cpu", [&]() {
       auto alpha = alpha_scalar.to<scalar_t>();
       auto alpha_vec = Vec256<scalar_t>(alpha);
       cpu_kernel_vec(iter,
-        [=](scalar_t a, scalar_t b) -> scalar_t { return a + alpha * b; },
-        [=](Vec256<scalar_t> a, Vec256<scalar_t> b) {
+        [=](scalar_t a, scalar_t b) __ubsan_ignore_undefined__ -> scalar_t { return a + alpha * b; },
+        [=](Vec256<scalar_t> a, Vec256<scalar_t> b) __ubsan_ignore_undefined__ {
           return vec256::fmadd(b, alpha_vec, a);
         });
       });

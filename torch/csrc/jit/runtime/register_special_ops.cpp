@@ -365,15 +365,6 @@ RegisterOperators reg({
         createTensorFromList<false>,
         aliasAnalysisFromSchema()),
     Operator(
-        "aten::_assert_int_or_pair(int[] vals, str name, str message) -> Tensor",
-        [](Stack& stack) {
-          // Everything is a list at the point this is used, so don't do
-          // anything
-          drop(stack, 3);
-          return 0;
-        },
-        aliasAnalysisFromSchema()),
-    Operator(
         "aten::_pack_sequence(Tensor output, Tensor batch_sizes, Tensor? sorted_indices, "
         "Tensor? unsorted_indices) -> (Tensor, Tensor, Tensor?, Tensor?)",
         [](Stack& stack) { return 0; },
