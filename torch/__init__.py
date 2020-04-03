@@ -1,4 +1,3 @@
-# @lint-ignore-every PYTHON3COMPATIMPORTS
 
 r"""
 The torch package contains data structures for multi-dimensional
@@ -70,6 +69,11 @@ if platform.system() == 'Windows':
         dll_paths = list(filter(os.path.exists, dll_paths)) + [os.environ['PATH']]
 
         os.environ['PATH'] = ';'.join(dll_paths)
+
+    import glob
+    dlls = glob.glob(os.path.join(th_dll_path, '*.dll'))
+    for dll in dlls:
+        ctypes.CDLL(dll)
 
 
 # See Note [Global dependencies]
