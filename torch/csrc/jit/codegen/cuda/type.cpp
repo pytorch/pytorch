@@ -28,17 +28,26 @@ bool is_cast_legal(const DataType& t1, const DataType& t2) {
   return true;
 }
 
-static std::unordered_map<DataType, std::string> data_type_string_map{
+template <typename T>
+struct _enum_class_hash {
+  size_t operator()(T v) const {
+    return static_cast<size_t>(v);
+  }
+};
+template <typename KeyType, typename ValType>
+using _enum_unordered_map =
+    std::unordered_map<KeyType, ValType, _enum_class_hash<KeyType>>;
+static _enum_unordered_map<DataType, std::string> data_type_string_map{
     {DataType::Float, "float"},
     {DataType::Int, "size_t"}};
-static std::unordered_map<ValType, std::string> val_type_string_map{
+static _enum_unordered_map<ValType, std::string> val_type_string_map{
     {ValType::TensorIndex, "TensorIndex"},
     {ValType::TensorView, "TensorView"},
     {ValType::TensorDomain, "TensorDomain"},
     {ValType::IterDomain, "IterDomain"},
     {ValType::Scalar, "Scalar"}};
 
-static std::unordered_map<ExprType, std::string> expr_type_string_map{
+static _enum_unordered_map<ExprType, std::string> expr_type_string_map{
     {ExprType::UnaryOp, "UnaryOp"},
     {ExprType::BinaryOp, "BinaryOp"},
     {ExprType::ForLoop, "ForLoop"},
@@ -46,12 +55,12 @@ static std::unordered_map<ExprType, std::string> expr_type_string_map{
     {ExprType::Split, "Split"},
     {ExprType::Merge, "Merge"},
     {ExprType::Reorder, "Reorder"}};
-static std::unordered_map<UnaryOpType, std::string> unary_op_type_string_map{
+static _enum_unordered_map<UnaryOpType, std::string> unary_op_type_string_map{
     {UnaryOpType::Neg, "Neg"},
     {UnaryOpType::Cast, "Cast"}};
-static std::unordered_map<UnaryOpType, std::string>
+static _enum_unordered_map<UnaryOpType, std::string>
     unary_op_type_inline_op_string_map{{UnaryOpType::Neg, "~"}};
-static std::unordered_map<BinaryOpType, std::string> binary_op_type_string_map{
+static _enum_unordered_map<BinaryOpType, std::string> binary_op_type_string_map{
     {BinaryOpType::Add, "Add"},
     {BinaryOpType::Sub, "Sub"},
     {BinaryOpType::Mul, "Mul"},
@@ -59,7 +68,7 @@ static std::unordered_map<BinaryOpType, std::string> binary_op_type_string_map{
     {BinaryOpType::Mod, "Mod"},
     {BinaryOpType::LT, "LessThan"},
     {BinaryOpType::CeilDiv, "ceilDiv"}};
-static std::unordered_map<BinaryOpType, std::string>
+static _enum_unordered_map<BinaryOpType, std::string>
     binary_op_type_inline_op_string_map{{BinaryOpType::Add, "+"},
                                         {BinaryOpType::Sub, "-"},
                                         {BinaryOpType::Mul, "*"},
@@ -67,7 +76,7 @@ static std::unordered_map<BinaryOpType, std::string>
                                         {BinaryOpType::Mod, "%"},
                                         {BinaryOpType::LT, "<"}};
 
-static std::unordered_map<ParallelType, std::string> parallel_type_string_map{
+static _enum_unordered_map<ParallelType, std::string> parallel_type_string_map{
     {ParallelType::BIDz, "blockIdx.z"},
     {ParallelType::BIDy, "blockIdx.y"},
     {ParallelType::BIDx, "blockIdx.x"},
@@ -78,7 +87,7 @@ static std::unordered_map<ParallelType, std::string> parallel_type_string_map{
     {ParallelType::Unroll, "Unroll"},
     {ParallelType::Serial, "Serial"}};
 
-static std::unordered_map<at::ScalarType, DataType> at_type_map{
+static _enum_unordered_map<at::ScalarType, DataType> at_type_map{
     {at::ScalarType::Float, DataType::Float},
     {at::ScalarType::Int, DataType::Int},
 };

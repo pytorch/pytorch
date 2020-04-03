@@ -11,18 +11,20 @@ c10::intrusive_ptr<LinearOpContext>
 XNNPackLinearOpContext::create_context(
     at::Tensor&& weight,
     c10::optional<at::Tensor>&& bias,
-    const c10::optional<double> output_min,
-    const c10::optional<double> output_max) {
+    const c10::optional<Scalar> output_min,
+    const c10::optional<Scalar> output_max) {
   auto linear_op_context =
       c10::make_intrusive<XNNPackLinearOpContext>(
           std::move(weight),
           std::move(bias),
+          output_min,
+          output_max,
           xnnpack::internal::linear::create(
               weight,
               bias,
-              output_min ? static_cast<float>(*output_min)
+              output_min ? output_min->to<float>()
                          : xnnpack::ContextLinear::kMin,
-              output_max ? static_cast<float>(*output_max)
+              output_max ? output_max->to<float>()
                          : xnnpack::ContextLinear::kMax)
           );
   return linear_op_context;
@@ -39,8 +41,8 @@ XNNPackConv2dOpContext::create_context(at::Tensor&& weight,
     std::vector<int64_t>&& stride,
     std::vector<int64_t>&& dilation,
     int64_t groups,
-    const c10::optional<double> output_min,
-    const c10::optional<double> output_max) {
+    const c10::optional<Scalar> output_min,
+    const c10::optional<Scalar> output_max) {
   auto op_context =
       xnnpack::internal::convolution2d::create(
           weight,
@@ -49,9 +51,9 @@ XNNPackConv2dOpContext::create_context(at::Tensor&& weight,
           stride,
           dilation,
           groups,
-          output_min ? static_cast<float>(*output_min)
+          output_min ? output_min->to<float>()
                      : xnnpack::ContextConv2D::kMin,
-          output_max ? static_cast<float>(*output_max)
+          output_max ? output_max->to<float>()
                      : xnnpack::ContextConv2D::kMax);
   auto conv2d_op_context =
       c10::make_intrusive<XNNPackConv2dOpContext>(
@@ -61,6 +63,8 @@ XNNPackConv2dOpContext::create_context(at::Tensor&& weight,
           std::move(stride),
           std::move(dilation),
           groups,
+          output_min,
+          output_max,
           std::move(op_context));
   return conv2d_op_context;
 }
