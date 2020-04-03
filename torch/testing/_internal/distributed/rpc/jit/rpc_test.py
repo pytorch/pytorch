@@ -198,7 +198,7 @@ class LocalRRefTest:
         if self.rank != 0:
             return
 
-        dst_worker_name = "worker{}".format((self.rank + 1) % self.world_size)
+        dst_worker_name = worker_name((self.rank + 1) % self.world_size)
 
         # Create a local RRef<MyScripClass> remotely in Python.
         rref = rpc.rpc_sync(
@@ -229,7 +229,7 @@ class LocalRRefTest:
         if self.rank != 0:
             return
 
-        dst_worker_name = "worker{}".format((self.rank + 1) % self.world_size)
+        dst_worker_name = worker_name((self.rank + 1) % self.world_size)
 
         # Create a local RRef<MyModuleInterface> remotely in Python.
         rref = rpc.rpc_sync(
@@ -307,7 +307,7 @@ class JitRpcAsyncOpTest:
         if self.rank != 0:
             return
 
-        dst_worker_name = "worker{}".format((self.rank + 1) % self.world_size)
+        dst_worker_name = worker_name((self.rank + 1) % self.world_size)
 
         args = (torch.tensor([1, 1]), torch.tensor([2, 2]))
         kwargs = {}
@@ -321,7 +321,7 @@ class JitRpcAsyncOpTest:
         if self.rank != 0:
             return
 
-        dst_worker_name = "worker{}".format((self.rank + 1) % self.world_size)
+        dst_worker_name = worker_name((self.rank + 1) % self.world_size)
 
         args = (torch.tensor([1, 1]), torch.tensor([2, 2]))
         kwargs = {"first_kwarg": torch.tensor([2, 2])}
@@ -335,7 +335,7 @@ class JitRpcAsyncOpTest:
         if self.rank != 0:
             return
 
-        dst_worker_name = "worker{}".format((self.rank + 1) % self.world_size)
+        dst_worker_name = worker_name((self.rank + 1) % self.world_size)
 
         args = (torch.tensor([1, 1]), torch.tensor([2, 2]))
         kwargs = {
@@ -352,7 +352,7 @@ class JitRpcAsyncOpTest:
         if self.rank != 0:
             return
 
-        dst_worker_name = "worker{}".format((self.rank + 1) % self.world_size)
+        dst_worker_name = worker_name((self.rank + 1) % self.world_size)
 
         @torch.jit.script
         def rpc_async_call_remote_torchscript_in_torchscript_with_extra_arg(
@@ -379,7 +379,7 @@ class JitRpcAsyncOpTest:
         if self.rank != 0:
             return
 
-        dst_worker_name = "worker{}".format((self.rank + 1) % self.world_size)
+        dst_worker_name = worker_name((self.rank + 1) % self.world_size)
 
         @torch.jit.script
         def rpc_async_call_remote_torchscript_in_torchscript_with_assorted_types(
@@ -412,7 +412,7 @@ class JitRpcAsyncOpTest:
         if self.rank != 0:
             return
 
-        dst_worker_name = "worker{}".format((self.rank + 1) % self.world_size)
+        dst_worker_name = worker_name((self.rank + 1) % self.world_size)
 
         @torch.jit.script
         def rpc_async_call_remote_torchscript_in_torchscript_without_kwargs_passed(
@@ -433,7 +433,7 @@ class JitRpcAsyncOpTest:
         if self.rank != 0:
             return
 
-        dst_worker_name = "worker{}".format((self.rank + 1) % self.world_size)
+        dst_worker_name = worker_name((self.rank + 1) % self.world_size)
 
         @torch.jit.script
         def rpc_async_call_remote_torchscript_in_torchscript_without_args_kwargs_passed(
@@ -453,7 +453,7 @@ class JitRpcAsyncOpTest:
         if self.rank != 0:
             return
 
-        dst_worker_name = "worker{}".format((self.rank + 1) % self.world_size)
+        dst_worker_name = worker_name((self.rank + 1) % self.world_size)
 
         # Notice, args matching happens during scripting.
         with self.assertRaisesRegex(RuntimeError, "Argument second_arg not provided"):
@@ -473,7 +473,7 @@ class JitRpcAsyncOpTest:
         if self.rank != 0:
             return
 
-        dst_worker_name = "worker{}".format((self.rank + 1) % self.world_size)
+        dst_worker_name = worker_name((self.rank + 1) % self.world_size)
 
         # Notice, args matching happens during scripting.
         with self.assertRaisesRegex(
@@ -502,7 +502,7 @@ class JitRpcAsyncOpTest:
         if self.rank != 0:
             return
 
-        dst_worker_name = "worker{}".format((self.rank + 1) % self.world_size)
+        dst_worker_name = worker_name((self.rank + 1) % self.world_size)
 
         # Notice, kwargs matching happens during execution.
         @torch.jit.script
@@ -528,7 +528,7 @@ class JitRpcAsyncOpTest:
         if self.rank != 0:
             return
 
-        dst_worker_name = "worker{}".format((self.rank + 1) % self.world_size)
+        dst_worker_name = worker_name((self.rank + 1) % self.world_size)
 
         @torch.jit.script
         def rpc_async_call_remote_py_function_in_torchscript(dst_worker_name: str):
@@ -549,7 +549,7 @@ class JitRpcAsyncOpTest:
         if self.rank != 0:
             return
 
-        dst_worker_name = "worker{}".format((self.rank + 1) % self.world_size)
+        dst_worker_name = worker_name((self.rank + 1) % self.world_size)
 
         # Notice, TorchScript always translates(emits) Python `raise` statement,
         # as the exception message string, "Exception",
@@ -575,7 +575,7 @@ class JitRpcAsyncOpTest:
         if self.rank != 0:
             return
 
-        dst_worker_name = "worker{}".format((self.rank + 1) % self.world_size)
+        dst_worker_name = worker_name((self.rank + 1) % self.world_size)
 
         @torch.jit.script
         def nonexisting_script():
@@ -792,7 +792,7 @@ class JitRpcTest(RRefAPITest, LocalRRefTest, JitRpcAsyncOpTest, RpcAgentTestFixt
     def _create_rref(self):
         owner_rank = (self.rank + 2) % self.world_size
         return rpc.remote(
-            "worker{}".format(owner_rank), torch.add, args=(torch.zeros(2, 2), 1)
+            worker_name(owner_rank), torch.add, args=(torch.zeros(2, 2), 1)
         )
 
     @dist_init
@@ -800,7 +800,7 @@ class JitRpcTest(RRefAPITest, LocalRRefTest, JitRpcAsyncOpTest, RpcAgentTestFixt
         dst_rank = (self.rank + 1) % self.world_size
         rref = self._create_rref()
         ret = rpc.rpc_sync(
-            "worker{}".format(dst_rank), script_check_rref_confirmed, args=(rref,)
+            worker_name(dst_rank), script_check_rref_confirmed, args=(rref,)
         )
         self.assertEqual(ret, True)
 
@@ -809,7 +809,7 @@ class JitRpcTest(RRefAPITest, LocalRRefTest, JitRpcAsyncOpTest, RpcAgentTestFixt
         dst_rank = (self.rank + 1) % self.world_size
         rref = self._create_rref()
         ret_rref = rpc.remote(
-            "worker{}".format(dst_rank), script_check_rref_confirmed, args=(rref,)
+            worker_name(dst_rank), script_check_rref_confirmed, args=(rref,)
         )
         self.assertEqual(ret_rref.to_here(), True)
 
@@ -829,7 +829,9 @@ class JitRpcTest(RRefAPITest, LocalRRefTest, JitRpcAsyncOpTest, RpcAgentTestFixt
         dst_rank = (self.rank + 1) % self.world_size
         inputs = (torch.tensor([1, 1]), torch.tensor([2, 2]))
         ret_fut = rpc.rpc_async(
-            "worker{}".format(dst_rank), two_args_two_kwargs, args=inputs
+            worker_name(dst_rank),
+            two_args_two_kwargs,
+            args=inputs
         )
         expected_res = torch.tensor([10, 10])
 
@@ -844,7 +846,9 @@ class JitRpcTest(RRefAPITest, LocalRRefTest, JitRpcAsyncOpTest, RpcAgentTestFixt
         def future_return_to_python(dst_rank, inputs):
             # type: (int, Tuple[Tensor, Tensor]) -> Future[Tensor]
             return rpc.rpc_async(
-                "worker{}".format(dst_rank), two_args_two_kwargs, inputs
+                worker_name(dst_rank),
+                two_args_two_kwargs,
+                inputs
             )
 
         fut_res = future_return_to_python(dst_rank, inputs)
@@ -852,7 +856,7 @@ class JitRpcTest(RRefAPITest, LocalRRefTest, JitRpcAsyncOpTest, RpcAgentTestFixt
 
     @dist_init
     def test_remote_script_throw(self):
-        rref = rpc.remote("worker{}".format((self.rank + 1) % self.world_size),
+        rref = rpc.remote(worker_name((self.rank + 1) % self.world_size),
                           script_raise_func,
                           args=(torch.ones(2),))
         with self.assertRaisesRegex(Exception, ".*Expected error.*"):
@@ -860,7 +864,7 @@ class JitRpcTest(RRefAPITest, LocalRRefTest, JitRpcAsyncOpTest, RpcAgentTestFixt
 
     @dist_init
     def test_remote_script_udf(self):
-        rref = rpc.remote("worker{}".format((self.rank + 1) % self.world_size),
+        rref = rpc.remote(worker_name((self.rank + 1) % self.world_size),
                           script_fork_wait_udf,
                           args=(torch.ones(2),))
         self.assertEqual(rref.to_here(), torch.ones(2) * 2)
@@ -868,7 +872,7 @@ class JitRpcTest(RRefAPITest, LocalRRefTest, JitRpcAsyncOpTest, RpcAgentTestFixt
     @dist_init
     def test_async_script_udf(self):
         future = rpc.rpc_async(
-            "worker{}".format((self.rank + 1) % self.world_size),
+            worker_name((self.rank + 1) % self.world_size),
             script_fork_wait_udf,
             args=(torch.ones(2),))
         self.assertEqual(future.wait(), torch.ones(2) * 2)
@@ -876,7 +880,7 @@ class JitRpcTest(RRefAPITest, LocalRRefTest, JitRpcAsyncOpTest, RpcAgentTestFixt
     @dist_init
     def test_async_script_throw(self):
         future = rpc.rpc_async(
-            "worker{}".format((self.rank + 1) % self.world_size),
+            worker_name((self.rank + 1) % self.world_size),
             script_fork_wait_throw,
             args=(torch.ones(2),))
         with self.assertRaisesRegex(Exception, ".*Expected error.*"):
