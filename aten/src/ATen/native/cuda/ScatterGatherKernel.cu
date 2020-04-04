@@ -195,7 +195,7 @@ struct _cuda_scatter_fill_internal_kernel {
     char* index_ptr = (char*)iter.data_ptr(1);
 
     auto offset_calc = make_offset_calculator<2>(iter);
-    legacy::launch_kernel<launch_size_nd, launch_bound2>(iter.numel(), [=]__device__(int i) {
+    _launch_scatter_gather_kernel<launch_size_nd, launch_bound2>(iter.numel(), [=]__device__(int i) {
       auto offsets = offset_calc.get(i);
 
       int64_t idx_dim = *(int64_t*)(index_ptr + offsets[1]);
