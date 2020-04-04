@@ -502,6 +502,11 @@ void initJITBindings(PyObject* module) {
           "_jit_pass_insert_prepacked_ops",
           [](script::Module& module) { return insertPrePackedOps(module); })
       .def(
+          "_jit_pass_fuse_clamp_w_prepacked_linear_conv",
+          [](script::Module& module) {
+            return fusePrePackedLinearConvWithClamp(module);
+          })
+      .def(
           "_jit_pass_fold_prepacking_ops",
           [](script::Module& module) { return FoldPrePackingOps(module); })
       .def(
@@ -528,7 +533,7 @@ void initJITBindings(PyObject* module) {
             std::map<std::string, at::Tensor> retval;
             for (auto& kv : params) {
               if (kv.second.isTensor()) {
-                retval[std::move(kv.first)] = std::move(kv.second).toTensor();
+                retval[kv.first] = std::move(kv.second).toTensor();
               }
             }
             return retval;
