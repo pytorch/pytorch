@@ -78,10 +78,8 @@ class TypeParser {
 
  private:
   TypePtr parseClassType() {
-    std::vector<std::string> expected_atoms{
-      ".", "torch", ".", "classes", "."
-    };
-    for (const auto & atom : expected_atoms) {
+    std::vector<std::string> expected_atoms{".", "torch", ".", "classes", "."};
+    for (const auto& atom : expected_atoms) {
       expect(atom);
     }
 
@@ -89,7 +87,8 @@ class TypeParser {
     expect(".");
     std::string classname = next();
 
-    return torch::getCustomClass(std::string("__torch__.torch.classes." + ns + "." + classname));
+    return torch::getCustomClass(
+        std::string("__torch__.torch.classes." + ns + "." + classname));
   }
 
   void expect(const std::string& s) {

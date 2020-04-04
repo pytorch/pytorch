@@ -447,11 +447,11 @@ class QuantizedGRU(QuantizedRNNBase):
         self.check_forward_args(input, hx, batch_sizes)
         if batch_sizes is None:
             result = torch.quantized_gru(input, hx, self.all_weights, self.bias, self.num_layers,
-                                                  float(self.dropout), self.training, self.bidirectional,
-                                                  self.batch_first)
+                                         float(self.dropout), self.training, self.bidirectional,
+                                         self.batch_first)
         else:
             result = torch.quantized_gru(input, batch_sizes, hx, self.all_weights, self.bias, self.num_layers,
-                                                  float(self.dropout), self.training, self.bidirectional)
+                                         float(self.dropout), self.training, self.bidirectional)
 
         output = result[0]
         hidden = result[1]
