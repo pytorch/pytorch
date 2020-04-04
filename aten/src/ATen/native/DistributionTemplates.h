@@ -264,22 +264,27 @@ Tensor normal_impl(const Tensor& mean, const Tensor& std, Generator gen) {
 
 template<template<typename> class uniform_kernel, typename RNG>
 at::Tensor& uniform_impl_(at::Tensor& self, double from, double to, at::Generator generator) {
-  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, self.scalar_type(), "check_uniform_bounds", [&] {
-    const auto dtype = self.dtype();
-    const auto min = static_cast<double>(std::numeric_limits<scalar_t>::lowest());
-    const auto max = static_cast<double>(std::numeric_limits<scalar_t>::max());
-    CHECK_OUT_OF_BOUNDS_AND_SHOW_WARNING(from, "from", min, max, dtype);
-    CHECK_OUT_OF_BOUNDS_AND_SHOW_WARNING(to, "to", min, max, dtype);
-    TORCH_CHECK(from <= to, "uniform_ expects to return a [from, to) range, but found from=", from, " > to=", to);
-    TORCH_CHECK((to - from) <= std::numeric_limits<scalar_t>::max(),
-          "uniform_ expects to-from <= std::numeric_limits<", toString(self.scalar_type()),
-          ">::max(), but found to=", to, " and from=", from,
-          " which result in to-from to exceed the limit");
-    from = std::min(std::max(from, min), max);
-    to = std::max(std::min(to, max), min);
-  });
-  auto iter = at::TensorIterator::nullary_op(self);
-  uniform_kernel<RNG>()(iter, from, to, generator);
+  if (self.is_complex()) {
+    auto float_tensor = at::native::view_complex_as_float(self);
+    uniform_impl_<uniform_kernel, RNG>(float_tensor, from, to, generator);
+  } else {
+    AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, self.scalar_type(), "check_uniform_bounds", [&] {
+      const auto dtype = self.dtype();
+      const auto min = static_cast<double>(std::numeric_limits<scalar_t>::lowest());
+      const auto max = static_cast<double>(std::numeric_limits<scalar_t>::max());
+      CHECK_OUT_OF_BOUNDS_AND_SHOW_WARNING(from, "from", min, max, dtype);
+      CHECK_OUT_OF_BOUNDS_AND_SHOW_WARNING(to, "to", min, max, dtype);
+      TORCH_CHECK(from <= to, "uniform_ expects to return a [from, to) range, but found from=", from, " > to=", to);
+      TORCH_CHECK((to - from) <= std::numeric_limits<scalar_t>::max(),
+            "uniform_ expects to-from <= std::numeric_limits<", toString(self.scalar_type()),
+            ">::max(), but found to=", to, " and from=", from,
+            " which result in to-from to exceed the limit");
+      from = std::min(std::max(from, min), max);
+      to = std::max(std::min(to, max), min);
+    });
+    auto iter = at::TensorIterator::nullary_op(self);
+    uniform_kernel<RNG>()(iter, from, to, generator);
+  }
   return self;
 }
 
