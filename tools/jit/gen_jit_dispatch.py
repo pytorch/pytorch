@@ -138,6 +138,9 @@ def from_ivalue(arg, value):
     return FROM_IVALUE[typ].format(value)
 
 
+CALL_UNBOXED_KERNEL = CodeTemplate("""\
+auto result_ = callUnboxedKernel<${return_type}${formals_types_with_leading_comma}>(unboxedKernel${args_with_leading_comma});
+""")
 CALL_NAMESPACE = CodeTemplate("""\
 auto result_ = at::${name}(
     ${args}
@@ -165,26 +168,38 @@ const auto options = TensorOptions()
         .dtype(${dtype})
         .layout(${layout})
         .device(${device})
-        .pinned_memory(${pin_memory});;
+        .pinned_memory(${pin_memory});
 auto result_ = (${first}).${name}(${args_with_tensor_options});
 """)
 
 CONSTRUCTOR = CodeTemplate("""\
-[](Stack & stack) {
+[](OperatorKernel* unboxedKernel, const OperatorHandle&, Stack* stack) {
+    using namespace at;
     ${lvalues}
     ${call}
-    drop(stack, ${num_inputs});
-    pack(stack, std::move(result_));
+    drop(*stack, ${num_inputs});
+    pack(*stack, std::move(result_));
+}
+""")
+
+CONSTRUCTOR_JITONLY = CodeTemplate("""\
+[](Stack* stack) {
+    ${lvalues}
+    ${call}
+    drop(*stack, ${num_inputs});
+    pack(*stack, std::move(result_));
     return 0;
 }
 """)
 
 OPERATOR = CodeTemplate("""\
-Operator(
-    "${signature}",
-    ${op},
-    atenOperatorOptions()
-),
+  .op("${signature}",
+    ${op})
+""")
+
+OPERATOR_JITONLY = CodeTemplate("""\
+  .jitOnlyOp("${signature}",
+    ${op})
 """)
 
 
@@ -308,7 +323,35 @@ def gen_jit_dispatch(declarations, out, template_path, disable_autograd=False, s
                     device=device, pin_memory=pin_memory,
                     args_with_tensor_options=pack_arguments(args_with_tensor_options[1:]),
                     first=args_with_tensor_options[0], num_inputs=num_inputs)
+        # The use_c10_dispatcher setting in native_functions.yaml now has a new option
+        # 'with_codegenerated_unboxing_wrapper' which means we take the codegened unboxing wrapper from
+        # register_aten_ops.cpp and stuff it into c10. This new argument is the default, 'unboxed_only' is not the
+        # default anymore. For the (very few) ops that don't support boxed dispatch yet (i.e. ops taking TensorOptions
+        # arguments), we set them to 'unboxed_only' and they follow the old behavior of having register_aten_ops.cpp
+        # register the jit op.
+        elif decl['use_c10_dispatcher'] == 'with_codegenerated_unboxing_wrapper':
+            if len(decl['returns']) == 0:
+                return_type = "void"
+            elif len(decl['returns']) == 1:
+                return_type = decl['returns'][0]['type']
+            else:
+                return_type = "std::tuple<{}>".format(", ".join([r['type'] for r in decl['returns']]))
+            for a in decl['arguments']:
+                if 'type' not in a:
+                    raise Exception(decl)
+            argument_types_with_leading_comma = ", ".join([a['type'] for a in decl['arguments']])
+            if argument_types_with_leading_comma != "":
+                argument_types_with_leading_comma = ", " + argument_types_with_leading_comma
+            args_with_leading_comma = pack_arguments(args)
+            if args_with_leading_comma != "":
+                args_with_leading_comma = ", " + args_with_leading_comma
+            return CALL_UNBOXED_KERNEL.substitute(name=decl['name'],
+                                                  args_with_leading_comma=args_with_leading_comma,
+                                                  num_inputs=num_inputs,
+                                                  return_type=return_type,
+                                                  formals_types_with_leading_comma=argument_types_with_leading_comma)
         else:
+            assert decl['use_c10_dispatcher'] in ['unboxed_only', 'full']
             if is_namespace_function:
                 return CALL_NAMESPACE.substitute(name=decl['name'],
                                                  args=pack_arguments(args),
@@ -324,7 +367,10 @@ def gen_jit_dispatch(declarations, out, template_path, disable_autograd=False, s
 
     def emit_decl_variant(decl):
         if ('emit_dummy_placeholder' in decl):
-            return "DUMMY_OPERATION"
+            if decl['use_c10_dispatcher'] == 'unboxed_only':
+                return "DUMMY_OPERATION_JITONLY"
+            else:
+                return "DUMMY_OPERATION"
         kw_assignments = []
 
         # mutable arguments in aten are passed as non const references
@@ -337,7 +383,7 @@ def gen_jit_dispatch(declarations, out, template_path, disable_autograd=False, s
         op_capture = ''
         order = argument_order(decl)
         for i, arg in enumerate(decl['arguments']):
-            value = from_ivalue(arg, '(std::move(peek(stack, {}, {})))'.format(order[i], num_inputs))
+            value = from_ivalue(arg, '(std::move(peek(*stack, {}, {})))'.format(order[i], num_inputs))
             if requires_lvalue(arg):
                 lvalues.append('auto {} = {};\n'.format(arg['name'], value))
                 value = arg['name']
@@ -347,12 +393,26 @@ def gen_jit_dispatch(declarations, out, template_path, disable_autograd=False, s
 
         returns = decl['returns']
 
-        constructor = CONSTRUCTOR.substitute(name=decl['name'],
-                                             call=call,
-                                             kw_assignments=kw_assignments,
-                                             num_inputs=num_inputs,
-                                             op_capture=op_capture,
-                                             lvalues=lvalues)
+        if decl['use_c10_dispatcher'] == 'unboxed_only':
+            # Ops taking TensorOptions aren't supported in this mechanism yet because boxed dispatch doesn't
+            # work for them. They use the old mechanism of registering a jitonly op for now.
+            # TODO We should get rid of this once TensorOptions are supported.
+            constructor = CONSTRUCTOR_JITONLY.substitute(name=decl['name'],
+                                                         call=call,
+                                                         kw_assignments=kw_assignments,
+                                                         num_inputs=num_inputs,
+                                                         op_capture=op_capture,
+                                                         lvalues=lvalues)
+        elif decl['use_c10_dispatcher'] == 'with_codegenerated_unboxing_wrapper':
+            constructor = CONSTRUCTOR.substitute(name=decl['name'],
+                                                 call=call,
+                                                 kw_assignments=kw_assignments,
+                                                 num_inputs=num_inputs,
+                                                 op_capture=op_capture,
+                                                 lvalues=lvalues)
+        else:
+            assert decl['use_c10_dispatcher'] == 'full'
+
         return constructor
 
     def filter_decls(jit_decls, disable_autograd, selected_op_list):
@@ -399,6 +459,7 @@ def gen_jit_dispatch(declarations, out, template_path, disable_autograd=False, s
         'method_of': ['Tensor'],
         'arguments': [{'name': 'self', 'simple_type': 'Tensor'}],
         'returns': [{'name': 'result', 'type': 'int64_t', 'dynamic_type': 'int64_t', 'simple_type': 'int64_t'}],
+        'use_c10_dispatcher': 'unboxed_only',
     } for name, schema_string in [
         ('sizes', 'aten::sizes(Tensor self) -> int'),
         ('strides', 'aten::strides(Tensor self) -> int'),
@@ -471,8 +532,14 @@ def gen_jit_dispatch(declarations, out, template_path, disable_autograd=False, s
     for group in jit_decl_groups:
         x = sum(ord(c) for c in group[0]['name']) % num_shards
         for decl in group:
-            shards[x].append(OPERATOR.substitute(signature=decl['schema_string'],
-                                                 op=emit_decl_variant(decl)))
+            if decl['use_c10_dispatcher'] == 'unboxed_only':
+                shards[x].append(OPERATOR_JITONLY.substitute(signature=decl['schema_string'],
+                                                             op=emit_decl_variant(decl)))
+            elif decl['use_c10_dispatcher'] == 'with_codegenerated_unboxing_wrapper':
+                shards[x].append(OPERATOR.substitute(signature=decl['schema_string'],
+                                                     op=emit_decl_variant(decl)))
+            else:
+                assert decl['use_c10_dispatcher'] == 'full'
 
     for i, shard in enumerate(shards):
         env = {
@@ -518,7 +585,19 @@ def needs_hacked_twin(decl):
 
 def hacked_twin(decl):
     decl_copy = copy.deepcopy(decl)
-    decl_copy['schema_string'] = decl['schema_string'].replace('Tensor?[]', 'Tensor[]')
+    old_overload_name = decl['overload_name']
+    schema_string = decl['schema_string']
+    name = decl['name']
+    schema_string = schema_string.replace('Tensor?[]', 'Tensor[]')
+    if old_overload_name:
+        new_overload_name = old_overload_name + "_hacked_twin"
+        decl_copy['overload_name'] = new_overload_name
+        decl_copy['schema_string'] = schema_string.replace(name + "." + old_overload_name,
+                                                           name + "." + new_overload_name)
+    else:
+        new_overload_name = "hacked_twin"
+        decl_copy['overload_name'] = new_overload_name
+        decl_copy['schema_string'] = schema_string.replace(name, name + "." + new_overload_name)
     for arg in decl_copy['arguments']:
         if arg['simple_type'] == 'TensorList' and arg.get('is_nullable'):
             arg['is_nullable'] = False
