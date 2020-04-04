@@ -94,13 +94,8 @@ void Fusion::removeVal(Val* val) {
 
   val_set_.erase(val);
 
-<<<<<<< HEAD
   for (auto it = val_deque_.begin(); it != val_deque_.end(); it++)
     if (*it == val) {
-=======
-  for(auto it = val_deque_.begin(); it != val_deque_.end(); it++)
-    if(*it == val){
->>>>>>> Option to return vals from fusion in registered order.
       val_deque_.erase(it);
       break;
     }
@@ -233,9 +228,12 @@ const std::deque<Val*>& Fusion::deterministic_vals() const noexcept {
 }
 
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
 
 >>>>>>> Option to return vals from fusion in registered order.
+=======
+>>>>>>> Clang.
 const std::set<Expr*>& Fusion::unordered_exprs() const noexcept {
   return expr_set_;
 }
