@@ -7,6 +7,8 @@
 #include <THC/THCBlas.h>
 #endif
 
+// yf225 TODO debug some comment
+
 #ifdef USE_MAGMA
 template <typename T>
 static inline T* th_magma_malloc_pinned(size_t n)
