@@ -270,13 +270,13 @@ TensorIndex* GPULower::getLocalProducerIndex(
     if (ranges[i]->isThread())
       continue;
     computed_inds.push_back(loopInds[i]);
-    used_ranges.push_back(used_ranges[i]);
+    used_ranges.push_back(ranges[i]);
   }
 
   for (decltype(computed_inds.size()) i{0}; i < computed_inds.size(); i++) {
     Val* ind = computed_inds[i];
     for (decltype(used_ranges.size()) j{i + 1}; j < used_ranges.size(); j++)
-      ind = mul(ind, ranges[i]);
+      ind = mul(ind, used_ranges[i]);
     computed_inds[i] = ind;
   }
 
@@ -341,13 +341,13 @@ TensorIndex* GPULower::getLocalConsumerIndex(TensorView* consumer) {
     if (ranges[i]->isThread())
       continue;
     computed_inds.push_back(loopInds[i]);
-    used_ranges.push_back(used_ranges[i]);
+    used_ranges.push_back(ranges[i]);
   }
 
   for (decltype(computed_inds.size()) i{0}; i < computed_inds.size(); i++) {
     Val* ind = computed_inds[i];
     for (decltype(used_ranges.size()) j{i + 1}; j < used_ranges.size(); j++)
-      ind = mul(ind, ranges[i]);
+      ind = mul(ind, used_ranges[i]);
     computed_inds[i] = ind;
   }
 
