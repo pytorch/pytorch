@@ -365,7 +365,6 @@ void GPULower::replaceSizes() {
           root_td->axis(i)->parallel_method(),
           root_td->axis(i)->isReduction()));
     }
-<<<<<<< HEAD
 
     TensorDomain* old_domain = tv->domain();
     TensorDomain* new_domain = TransformReplay::fullReplay(old_domain, new TensorDomain(new_domain_iters));
@@ -392,13 +391,8 @@ namespace {
 // Some pre-compilation checks
 void validate(Fusion* fusion) {
   for (Val* val : fusion->vals()) {
-<<<<<<< HEAD
     if (ir_utils::isTV(val)) {
       TensorView* tv = ir_utils::asTV(val);
-=======
-    if (isTV(val)) {
-      TensorView* tv = asTV(val);
->>>>>>> Continue lowering refactor, split out loop nest generator, create scope/loop utils.
       for (decltype(tv->nDims()) i{0}; i < tv->nDims(); i++) {
         IterDomain* id = tv->getComputeAtAxis(i);
 
@@ -421,86 +415,29 @@ void validate(Fusion* fusion) {
                 tv->getComputeAtAxis(),
                 ".");
       }
-<<<<<<< HEAD
     } // if ir_utils::isTV
-=======
-    } // if isTV
->>>>>>> Continue lowering refactor, split out loop nest generator, create scope/loop utils.
   } // for(Val* val : fusion->vals())
 
 } // validate
 } // namespace
 
-=======
-    new_tv->setDomain(new TensorDomain(new_domain));
-  }
-
-  // Now that we have the base tensor views. Lets fix its members.
-  for (auto entry : tv_map) {
-    TensorView* orig_tv = asTV(entry.first);
-    TensorView* new_tv = asTV(entry.second);
-
-    // Domain in the new TV is the root domain, replay it like the original
-    // domain.
-    TransformReplay::fullReplay(orig_tv, new_tv);
-
-    // Parallelize all iter domains
-    for (decltype(new_tv->domain()->size()) i{0}; i < new_tv->domain()->size();
-         i++)
-      new_tv->axis(i)->parallelize(orig_tv->axis(i)->parallel_method());
-
-    // Set compute at view and axis
-    TensorView* computeAtTV = orig_tv->getComputeAtView();
-    if (computeAtTV != nullptr) {
-      TORCH_INTERNAL_ASSERT(
-          tv_map.find(computeAtTV) != tv_map.end(),
-          "Expected to find a translation for ",
-          computeAtTV,
-          " but one wasn't found.");
-      new_tv->setComputeAt(
-          asTV(tv_map[computeAtTV]), (int)(orig_tv->getComputeAtAxis()));
-    }
-  }
-
-  ReplaceAll::instancesOf(tv_map);
-}
-
->>>>>>> Major refactor of code lowering and associated parts.
 // Traverse through the fusion and print CUDA code associated with it
 std::vector<Expr*> GPULower::getLoweredExprs() {
   FusionGuard fg(fusion_);
 
-<<<<<<< HEAD
   validate(fusion_);
 
   // Initialize members of the class
-=======
-  TORCH_CHECK(
-      !fusion_->lowered,
-      "Fusions can only be lowered once as of now. You could reuse the lowering using",
-      " std::vector<Expr*> GPULower::getLoweredExprs() the result can be printed as",
-      " a kernel with   IRPrinter irp(os); irp.printKernel(lowered_exprs, kernel_name);");
-
-  // Initialize members of the class
-  lowered_exprs = std::vector<Expr*>();
->>>>>>> Major refactor of code lowering and associated parts.
   active_view = nullptr;
   active_view_axis = 0;
 
   replaceSizes();
 
-<<<<<<< HEAD
   auto loop_nests = LoopNestGenerator::getLoopNest(fusion_);
-<<<<<<< HEAD
   auto unrolled_loops = UnrollPass::runPass(fusion_, loop_nests);
 
   // Run through loop nests and further lower the expressions
   for (auto* expr : unrolled_loops) {
-=======
-
-  // Run through loop nests and further lower the expressions
-  for (auto* expr : loop_nests) {
->>>>>>> Continue lowering refactor, split out loop nest generator, create scope/loop utils.
     Statement* mutated_stmt = mutate(expr);
     TORCH_INTERNAL_ASSERT(
         mutated_stmt->isExpr(),
@@ -516,22 +453,6 @@ std::ostream& GPULower::printKernel(
     std::ostream& os,
     const std::string& kernel_name) {
   FusionGuard fg(fusion_);
-=======
-  // Run through and lower the expressions
-  std::vector<Expr*> exprs = fusion_->exprs(true);
-  for (auto* expr : exprs)
-    handle(expr);
-
-  fusion_->lowered = true;
-  return lowered_exprs;
-}
-
-std::ostream& GPULower::printKernel(
-    std::ostream& os,
-    const std::string& kernel_name) {
-  FusionGuard fg(fusion_);
-
->>>>>>> Major refactor of code lowering and associated parts.
   getLoweredExprs();
 
   IRPrinter irp(os);
