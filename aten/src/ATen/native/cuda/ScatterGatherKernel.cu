@@ -94,7 +94,7 @@ struct _cuda_scatter_gather_internal_kernel {
 
     };
 
-    _launch_scatter_gather_kernel<launch_size_nd, launch_bound2>(iter.numel(), loop);
+    _launch_scatter_gather_kernel<num_threads, thread_work_size>(iter.numel(), loop);
   }
 }; // struct _cuda_scatter_fill_internal_kernel
 
@@ -214,7 +214,7 @@ struct _cuda_scatter_fill_internal_kernel {
   }
 }; // struct _cuda_scatter_fill_internal_kernel
 
-template <bool cast_to_opaque = false>
+template <bool cast_to_opaque = true>
 struct cuda_scatter_fill_base_kernel {
   template <typename func_t>
   void operator()(
@@ -256,7 +256,8 @@ struct cuda_scatter_fill_base_kernel {
         using dtype = typename std::conditional<cast_to_opaque,
           OpaqueType<sizeof(scalar_t)>, scalar_t>::type;
 
-        auto src_val = src.to<dtype>();
+        auto src_scalar_val = src.to<scalar_t>();
+        auto src_val = *(dtype*)&src_scalar_val;
 
         _cuda_scatter_fill_internal_kernel<dtype>()(
           iter, src_val, index_size, index_stride, f
