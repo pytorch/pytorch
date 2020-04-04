@@ -416,8 +416,27 @@ SHOULD_NOT_DO_GRADIENT(GenerateProposalsCPP);
 
 // clang-format off
 C10_EXPORT_CAFFE2_OP_TO_C10_CPU(
-    GenerateProposals,
+    GenerateProposals2,
     "_caffe2::GenerateProposals("
+      "Tensor scores, "
+      "Tensor bbox_deltas, "
+      "Tensor im_info, "
+      "Tensor anchors, "
+      "float spatial_scale, "
+      "int pre_nms_topN, "
+      "int post_nms_topN, "
+      "float nms_thresh, "
+      "float min_size, "
+      "bool angle_bound_on, "
+      "int angle_bound_lo, "
+      "int angle_bound_hi, "
+      "float clip_angle_thresh, "
+      "bool legacy_plus_one"
+    ") -> (Tensor output_0, Tensor output_1)",
+    caffe2::GenerateProposalsOp<caffe2::CPUContext>);
+C10_EXPORT_CAFFE2_OP_TO_C10_CPU(
+    GenerateProposals,
+    "__caffe2::GenerateProposals("
       "Tensor scores, "
       "Tensor bbox_deltas, "
       "Tensor im_info, "
