@@ -189,12 +189,16 @@ void initJITBindings(PyObject* module) {
           py::arg("is_dynamic") = false)
       .def(
           "_jit_pass_insert_quant_dequant",
-          [](Module& module, const std::string& method_name, bool inplace) {
-            return InsertQuantDeQuant(module, method_name, inplace);
+          [](Module& module,
+             const std::string& method_name,
+             bool inplace,
+             bool is_dynamic) {
+            return InsertQuantDeQuant(module, method_name, inplace, is_dynamic);
           },
           py::arg("module"),
           py::arg("method_name"),
-          py::arg("inplace") = false)
+          py::arg("inplace") = false,
+          py::arg("is_dynamic") = false)
       .def(
           "_jit_pass_insert_prepack_unpack",
           [](std::shared_ptr<Graph>& g) { return InsertPrepackUnpack(g); })
@@ -225,7 +229,13 @@ void initJITBindings(PyObject* module) {
       .def(
           "_jit_pass_swap_functional_linear",
           [](Module& module) { SwapFunctionalLinear(module); })
-      .def("_jit_pass_quant_finalize", &Finalize)
+      .def(
+          "_jit_pass_quant_finalize",
+          [](Module& module, bool is_dynamic) {
+            return Finalize(module, is_dynamic);
+          },
+          py::arg("module"),
+          py::arg("is_dynamic") = false)
       .def(
           "_jit_pass_pattern_based_rewrite",
           [](const Module& m) { return PatternBasedRewrite(m); })
@@ -365,8 +375,14 @@ void initJITBindings(PyObject* module) {
       .def("_jit_pass_canonicalize_ops", CanonicalizeOps)
       .def("_jit_pass_decompose_ops", DecomposeOps)
       .def("_jit_pass_specialize_autogradzero", specializeAutogradZero)
+      .def("_jit_can_fuse_on_cpu", &canFuseOnCPU)
+      .def("_jit_can_fuse_on_gpu", &canFuseOnGPU)
       .def("_jit_override_can_fuse_on_cpu", &overrideCanFuseOnCPU)
       .def("_jit_override_can_fuse_on_gpu", &overrideCanFuseOnGPU)
+      .def(
+          "_jit_register_tensorexpr_fuser",
+          &RegisterTensorExprFuser::registerPass)
+      .def("_jit_clear_tensorexpr_fuser", &RegisterTensorExprFuser::clearPass)
       .def("_jit_can_fuse_on_cpu", &canFuseOnCPU)
       .def("_jit_can_fuse_on_gpu", &canFuseOnGPU)
       .def(
@@ -386,7 +402,8 @@ void initJITBindings(PyObject* module) {
             auto stack = toTraceableStack(args);
             checkAliasAnnotation(g, std::move(stack), unqualified_op_name);
           })
-      .def("_jit_register_cuda_fuser", &registerCudaFuseGraph)
+      .def("_jit_register_cuda_fuser", &RegisterCudaFuseGraph::registerPass)
+      .def("_jit_clear_cuda_fuser", &RegisterCudaFuseGraph::clearPass)
       .def(
           "_jit_set_profiling_mode",
           [](bool profiling_flag) {
@@ -474,7 +491,6 @@ void initJITBindings(PyObject* module) {
             using namespace torch::jit::tensorexpr;
             return getTECudaPointwiseBlockSize() = block_size;
           })
-      .def("_jit_set_texpr_fuser_enabled", &setTensorExprFuserEnabled)
       .def(
           "_jit_fuser_get_fused_kernel_code",
           [](Graph& g, std::vector<at::Tensor> inps) {

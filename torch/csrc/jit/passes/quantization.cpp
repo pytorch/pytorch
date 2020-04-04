@@ -65,6 +65,22 @@ struct PatternsAndModules {
   Module packed_params_module;
 };
 
+std::vector<std::string> _quantizable_call_funcs = {
+    "conv2d",
+    "linear",
+};
+
+std::vector<std::string> _quantizable_aten_funcs = {
+    "conv2d",
+    "conv3d",
+    "linear",
+    "addmm",
+    "matmul",
+    "add_",
+    "add",
+    "cat",
+};
+
 // These are the prim::CallFunctions that doesn't require observation and
 // have a single input Tensor
 // example: `prim::CallFunction(%dropout, %input_tensor, ...)
@@ -81,9 +97,35 @@ std::vector<std::string> _single_input_general_call_funcs = {
     "relu",
 };
 
-std::vector<std::string> _quantizable_call_funcs = {
-    "conv2d",
-    "linear",
+// Similar to prim::CallFunctions, there are aten ops that doesn't
+// require observation and have a single input Tensor
+// e.g. `aten::max_pool2d(%input_tensor, ...)`
+std::vector<std::string> _single_input_general_aten_funcs = {
+    "max_pool2d",
+    "avg_pool2d",
+    "flatten",
+    "max",
+    "min",
+    "mean",
+    "upsample_nearest1d",
+    "upsample_nearest2d",
+    "upsample_nearest3d",
+    "adaptive_avg_pool1d",
+    "adaptive_avg_pool2d",
+    "adaptive_avg_pool3d",
+    "upsample_linear1d",
+    "upsample_bilinear2d",
+    "upsample_trilinear3d",
+    "upsample_bicubic2d",
+    "dropout",
+    "reshape",
+    "chunk",
+    "view",
+    "transpose",
+    "contiguous",
+    "permute",
+    "repeat_interleave",
+    "relu",
 };
 
 void fillQConfigMap(
@@ -167,36 +209,6 @@ bool isAddScalar(Node* n) {
 // the quantization parameters for `v` given the list of values
 std::vector<Value*> getPassThroughInputs(Value* v) {
   Node* n = v->node();
-  std::vector<std::string> single_input_aten_funcs = {
-      "max_pool2d",
-      "avg_pool2d",
-      "flatten",
-      "max",
-      "min",
-      "mean",
-      "upsample_nearest1d",
-      "upsample_nearest2d",
-      "upsample_nearest3d",
-      "adaptive_avg_pool1d",
-      "adaptive_avg_pool2d",
-      "adaptive_avg_pool3d",
-      "upsample_linear1d",
-      "upsample_bilinear2d",
-      "upsample_trilinear3d",
-      "upsample_bicubic2d",
-      "dropout",
-      "reshape",
-      "chunk",
-      "view",
-      "transpose",
-      "contiguous",
-      "permute",
-      "repeat_interleave",
-      "relu",
-      // TODO: sort returns a tuple of Tensors, we have
-      // to extend the API to support that
-      // "sort",
-  };
   if (isFunctionNode(
           n,
           // We don't have call functions
@@ -204,12 +216,14 @@ std::vector<Value*> getPassThroughInputs(Value* v) {
           /* call_funcs = */ _single_input_general_call_funcs,
           /* aten_funcs = */ {})) {
     return {n->input(1)};
-  } else if (isFunctionNode(
-                 n,
-                 // We don't have call functions
-                 // after inline
-                 /* call_funcs = */ {},
-                 /* aten_funcs = */ single_input_aten_funcs)) {
+  } else if (
+      isFunctionNode(
+          n,
+          // We don't have call functions
+          // after inline
+          /* call_funcs = */ {},
+          /* aten_funcs = */ _single_input_general_aten_funcs) ||
+      (n->kind() == Symbol::aten("sort") && v->offset() == 0)) {
     return {n->input(0)};
   } else if (n->kind() == prim::If && n->outputs().size() == 1) {
     std::vector<Value*> inputs;
@@ -243,16 +257,7 @@ bool nodeQuantizable(Node* n) {
       /* call_funcs = */
       _quantizable_call_funcs,
       /* aten_funcs = */
-      {
-          "conv2d",
-          "conv3d",
-          "linear",
-          "addmm",
-          "matmul",
-          "add_",
-          "add",
-          "cat",
-      });
+      _quantizable_aten_funcs);
 }
 
 // We don't want to analyze the graph for some `builtin` CallFunctions
@@ -621,7 +626,7 @@ class InsertObserversHelper {
   std::unordered_map<Value*, std::unordered_set<Value*>> boundary_value_map_;
   std::unordered_set<Value*> observed_values_;
   // This is used for the observed values to pass through the ops like flatten,
-  // so that output value of flatten do not need to be observed
+  // so that output value of flatten does not need to be observed
   // key is the output of the op, value is a vector of values that need
   // to be observed in order to pass the observed property to the output
   std::unordered_map<Value*, std::vector<Value*>> pass_through_value_map_;
@@ -746,17 +751,45 @@ bool isBiasOfConvOrLinear(Value* v) {
   return result;
 }
 
-bool isWeightOfConvOrLinear(Value* v) {
+bool isWeight(Value* v) {
   bool result = matchArgPattern(
       v,
-      AtenFuncArgs({{"conv2d", 1}, {"conv3d", 1}, {"linear", 1}}),
+      AtenFuncArgs({{"conv2d", 1}, {"conv3d", 1}, {"linear", 1}, {"lstm", 2}}),
       CallFuncArgs({{"linear", 2}}));
   return result;
 }
 
+// Go through the CallMethod graph to check if the value is Weight.
+bool isWeight(Module& module, Value* v) {
+  if (isWeight(v)) {
+    return true;
+  }
+  c10::optional<bool> result;
+  auto* self = v->owningGraph()->inputs()[0];
+  for (const Use& u : v->uses()) {
+    Node* n = u.user;
+    if (n->kind() == prim::CallMethod) {
+      auto m = getInvokedModule(module, n, self);
+      auto g = m.get_method(n->s(attr::name)).graph();
+      auto call_method_result = isWeight(m, g->inputs()[u.offset]);
+      if (result.has_value()) {
+        // Check to make sure all the CallMethods in the graph produce the same
+        // output.
+        TORCH_CHECK(
+            call_method_result == result.value(),
+            "Expected all CallMethods to use either weight "
+            "or non-weight value.",
+            v->debugName());
+      } else {
+        result = call_method_result;
+      }
+    }
+  }
+  return result.has_value() ? result.value() : false;
+}
+
 Module getObserverModuleFor(Value* v, const QConfig& qconfig) {
-  return isWeightOfConvOrLinear(v) ? std::get<1>(qconfig)
-                                   : std::get<0>(qconfig);
+  return isWeight(v) ? std::get<1>(qconfig) : std::get<0>(qconfig);
 }
 
 ModuleMethodVector InsertObserversHelper::getInvokedMethods(
@@ -971,6 +1004,12 @@ void InsertObserversHelper::preprocess(
   }
 }
 
+// Returns true if the value is the weight to LSTM operator.
+bool isDynamicLSTMWeight(Value* v, Use use, bool is_dynamic) {
+  return is_dynamic && use.user->kind() == Symbol::aten("lstm") &&
+      (use.offset == 2);
+}
+
 // TODO: remove this as a class method
 bool InsertObserversHelper::valueNeedsToBeQuantized(Value* v) {
   if (isBiasOfConvOrLinear(v) ||
@@ -988,7 +1027,7 @@ bool InsertObserversHelper::valueNeedsToBeQuantized(Value* v) {
   }
   // Check whether user is quantizable
   for (const auto& use : v->uses()) {
-    if (nodeQuantizable(use.user)) {
+    if (nodeQuantizable(use.user) || isDynamicLSTMWeight(v, use, is_dynamic)) {
       return true;
     }
   }
@@ -1012,7 +1051,6 @@ void InsertObserversHelper::fillValueObserverMap(
     return;
   }
   auto qconfig = *qconfig_opt;
-
   for (auto* v : graph->inputs()) {
     if (valueNeedsToBeQuantized(v)) {
       observer_for_value_[v] = getObserverModuleFor(v, qconfig);
@@ -1350,45 +1388,77 @@ void insertDeQuantCall(
 }
 
 void insertQuantDeQuantCall(
+    Module& module,
     Value* self,
     Node* observer,
     bool is_per_channel,
-    const std::vector<std::string>& qparam_names) {
+    const std::vector<std::string>& qparam_names,
+    bool is_dynamic = false) {
   Graph* g = observer->owningGraph();
-  // Original value that is observed
-  Value* v = observer->input(1);
-
+  // Observer output
+  Value* v = observer->output();
   // Inserting before insert point
   WithInsertPoint ins(v->node()->next());
-  std::vector<Value*> inputs = {v};
-  // Insert GetAttr nodes for quantization parameters
-  for (const auto& qparam_name : qparam_names) {
-    inputs.push_back(g->insertGetAttr(self, qparam_name));
-  }
+
   std::string quantize_func;
   if (is_per_channel) {
     quantize_func = "quantize_per_channel";
   } else {
     quantize_func = "quantize_per_tensor";
   }
-  Node* quant = g->create(at::Symbol::aten(quantize_func), inputs);
-  quant->output()->setDebugName(v->debugName() + ".quant");
-  g->insertNode(quant);
+  Node *quant, *choose_qparams;
+  if (is_dynamic && !isWeight(module, v)) {
+    std::string choose_qparams_func = "_choose_qparams_per_tensor";
+    auto reduce_range = g->insertConstant(false);
+    // choose_qparams_per_tensor has 2 outputs, (scale, zero_point).
+    choose_qparams = g->create(
+        at::Symbol::aten(choose_qparams_func),
+        {v, reduce_range},
+        /* num_outputs = */ 2);
+
+    choose_qparams->output(0)->setDebugName(v->debugName() + ".scale");
+    choose_qparams->output(0)->setType(FloatType::get());
+    choose_qparams->output(1)->setDebugName(v->debugName() + ".zero_point");
+    choose_qparams->output(1)->setType(IntType::get());
+    g->insertNode(choose_qparams);
+
+    std::vector<Value*> quant_inputs = {v};
+    for (auto& out : choose_qparams->outputs()) {
+      quant_inputs.push_back(out);
+    }
+    // Last argument is dtype.
+    auto dtype = g->insertGetAttr(self, qparam_names.back());
+    quant_inputs.push_back(dtype);
+    quant = g->create(at::Symbol::aten(quantize_func), quant_inputs);
+    quant->output()->setDebugName(v->debugName() + ".quant");
+    g->insertNode(quant);
+  } else {
+    std::vector<Value*> inputs = {v};
+    // Insert GetAttr nodes for quantization parameters
+    for (const auto& qparam_name : qparam_names) {
+      inputs.push_back(g->insertGetAttr(self, qparam_name));
+    }
+    quant = g->create(at::Symbol::aten(quantize_func), inputs);
+    quant->output()->setDebugName(v->debugName() + ".quant");
+    g->insertNode(quant);
+  }
+  Value* original_val = observer->input(1);
+  v->replaceAllUsesWith(original_val);
 
   // two passes to insert the dequant for every usage
-  // in first pass, identify all the nodes using "v"
+  // in first pass, identify all the nodes using original observed value.
   std::vector<Use> uses;
-  for (const auto& use : v->uses()) {
+  for (const auto& use : original_val->uses()) {
     // Skip quant node and observer node (we need to keep
     // observer nodes around since we need them to
     // find the quantization parameters)
-    if (use.user != quant && use.user != observer) {
+    if (use.user != quant && use.user != observer &&
+        use.user != choose_qparams) {
       uses.push_back(use);
     }
   }
-
-  // in second pass, replace the input "v" with dequant output
-  insertDeQuantCall(g, quant->output(), v, uses);
+  // in second pass, replace the original observed value with dequant output
+  insertDeQuantCall(g, quant->output(), original_val, uses);
 }
 
 // find the observer for Value `v` and return the name of the observer
@@ -1462,6 +1532,10 @@ class InsertQuantDeQuantHelper {
   void cleanup(Module& module, Graph* g);
   void quantizeTensors(Module& module, Graph* g, Value* self);
 
+  void setDynamicFlag(bool is_dynamic) {
+    is_dynamic_ = is_dynamic;
+  }
+
  private:
   std::unordered_map<Graph*, std::vector<std::string>>
       observer_modules_to_remove_;
@@ -1482,6 +1556,8 @@ class InsertQuantDeQuantHelper {
   // Record qscheme for every graph, this is for checking
   // each graph is only quantized with one type of QScheme
   std::unordered_map<Graph*, c10::QScheme> qscheme_for_graph_;
+
+  bool is_dynamic_ = false;
 };
 
 void InsertQuantDeQuantHelper::collectObserverNodesAndValueToQuantize(
@@ -1505,8 +1581,6 @@ void InsertQuantDeQuantHelper::collectObserverNodesAndValueToQuantize(
   nodes_to_destroy_[g].push_back(observer);
   // GetAttr node for observer module
   nodes_to_destroy_[g].push_back(observer->inputs()[0]->node());
-  Value* original_value = observer->input(1);
-  v->replaceAllUsesWith(original_value);
   observer_nodes_for_graph_[g].push_back(observer);
 }
 
@@ -1593,7 +1667,8 @@ void InsertQuantDeQuantHelper::quantizeTensors(
       module.register_attribute(qparam_name, qparam.type(), qparam);
       qparam_names.push_back(qparam_name);
     }
-    insertQuantDeQuantCall(self, n, isPerChannel(qscheme), qparam_names);
+    insertQuantDeQuantCall(
+        module, self, n, isPerChannel(qscheme), qparam_names, is_dynamic_);
   }
 }
 
@@ -2402,9 +2477,11 @@ TORCH_API Module InsertObservers(
 Module InsertQuantDeQuant(
     Module& input_module,
     const std::string& method_name,
-    bool inplace) {
+    bool inplace,
+    bool is_dynamic) {
   Module module = inplace ? input_module : input_module.clone();
   InsertQuantDeQuantHelper h;
+  h.setDynamicFlag(is_dynamic);
   h.run(module, method_name);
   h.cleanup(module);
   return module;
@@ -2540,8 +2617,14 @@ void SwapDeQuant(std::shared_ptr<Graph>& graph) {
   swapDeQuant(graph->block());
 }
 
-void QuantFusion(std::shared_ptr<Graph>& graph) {
-  for (const auto& info : quant_fusion_pattern_and_replacements()) {
+void QuantFusion(std::shared_ptr<Graph>& graph, bool is_dynamic) {
+  std::vector<QuantFusionInfo> patterns;
+  if (is_dynamic) {
+    patterns = dynamic_quant_fusion_pattern_and_replacements();
+  } else {
+    patterns = quant_fusion_pattern_and_replacements();
+  }
+  for (const auto& info : patterns) {
     SubgraphRewriter rewriter;
     rewriter.RegisterRewritePattern(info.pattern, info.replacement);
     rewriter.runOnGraph(graph, info.filter);
@@ -2829,7 +2912,7 @@ void FoldQuantizedPrepackingOps(Module& module) {
   PrePackingOpsFolder(module, filter_fn, "quantized");
 }
 
-script::Module Finalize(script::Module& module) {
+script::Module Finalize(script::Module& module, bool is_dynamic) {
   SwapFunctionalLinear(module);
   auto graph = module.get_method("forward").graph();
   Inline(*graph);
@@ -2839,7 +2922,7 @@ script::Module Finalize(script::Module& module) {
   SwapDeQuant(graph);
   InsertPrepackUnpack(graph);
   ConstantPropagation(graph);
-  QuantFusion(graph);
+  QuantFusion(graph, is_dynamic);
   auto frozen = freeze_module(module);
   FoldQuantizedPrepackingOps(frozen);
   return frozen;

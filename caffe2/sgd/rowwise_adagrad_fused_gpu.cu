@@ -1,4 +1,4 @@
-#include "adagrad_fused_gpu_common.h"
+#include "caffe2/sgd/adagrad_fused_gpu_common.h"
 
 namespace caffe2 {
 
@@ -251,7 +251,6 @@ class CUDARowWiseSparseAdagradFusedWithSparseLengthsSumGradientOp final
 
     rowwise_sparse_adagrad_fused_length_sum_gradient_kernel<IndexType, THalf, T>
         <<<len_length, std::min(maxThreads, post), 0, context_.cuda_stream()>>>(
-            // false><<<len_length, maxThreads, 0, context_.cuda_stream()>>>(
             prefix_sum_length_data,
             N,
             post,
@@ -481,3 +480,5 @@ REGISTER_CUDA_OPERATOR(
         int,
         CUDAContext>);
 } // namespace caffe2
+
+#undef SEGREDUCE_MINBLOCKS

@@ -1,4 +1,4 @@
-#include "adagrad_fused_gpu_common.h"
+#include "caffe2/sgd/adagrad_fused_gpu_common.h"
 
 namespace caffe2 {
 
@@ -494,3 +494,5 @@ REGISTER_CUDA_OPERATOR(
         int,
         CUDAContext>);
 } // namespace caffe2
+
+#undef SEGREDUCE_MINBLOCKS

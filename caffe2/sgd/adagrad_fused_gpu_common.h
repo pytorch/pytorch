@@ -1,12 +1,12 @@
 #include <algorithm>
 
-#include "caffe2/core/common_gpu.h"
-#include "caffe2/core/context_gpu.h"
-#include "caffe2/sgd/adagrad_op.h"
-
 #include <cub/block/block_reduce.cuh>
 #include <cub/device/device_reduce.cuh>
 #include <cub/device/device_scan.cuh>
+
+#include "caffe2/core/common_gpu.h"
+#include "caffe2/core/context_gpu.h"
+#include "caffe2/sgd/adagrad_op.h"
 #include "caffe2/utils/math.h"
 
 #ifdef __HIP_PLATFORM_HCC__

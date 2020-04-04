@@ -24,6 +24,7 @@ struct CompilationUnit;
 namespace c10 {
 
 struct FunctionSchema;
+struct NamedType;
 using OptNameList = c10::optional<std::vector<std::string>>;
 
 #define C10_FORALL_TYPES(_) \
@@ -66,6 +67,13 @@ CAFFE2_API const char* typeKindToString(TypeKind kind);
 
 struct Type;
 using TypePtr = std::shared_ptr<Type>;
+using ConstTypePtr = std::shared_ptr<const Type>;
+
+// Use this to customize how a Type is printed using `python_str()`. If
+// c10::nullopt is returned, `python_str()` falls through to its default
+// implementation.
+using TypePrinter =
+    std::function<c10::optional<std::string>(const ConstTypePtr&)>;
 
 struct CAFFE2_API Type : std::enable_shared_from_this<Type> {
  private:
@@ -73,6 +81,10 @@ struct CAFFE2_API Type : std::enable_shared_from_this<Type> {
 
  protected:
   Type(TypeKind kind) : kind_(kind) {}
+
+  virtual std::string python_str_impl(TypePrinter printer) const {
+    return str();
+  }
 
  public:
   virtual bool operator==(const Type& rhs) const = 0;
@@ -97,8 +109,22 @@ struct CAFFE2_API Type : std::enable_shared_from_this<Type> {
   // How this type will appear as if it were a type annotation in Python
   // which is sometimes different than how it appears in declarations (e.g.
   // int[] vs List[int])
-  virtual std::string python_str() const {
-    return str();
+  //
+  // Takes a custom printer that users can pass in to customize the output of
+  // this method.
+  std::string python_str(TypePrinter printer) const {
+    if (printer) {
+      // the printer can return nullopt to fall through to the default impl
+      if (auto renamed = printer(shared_from_this())) {
+        return *renamed;
+      }
+    }
+    return python_str_impl(printer);
+  }
+  std::string python_str() const {
+    // Overload instead of define a default value for `printer` to help
+    // debuggers out.
+    return python_str(nullptr);
   }
 
   TypeKind kind() const {
@@ -259,11 +285,6 @@ struct CAFFE2_API OptionalType
     ss << getElementType()->str() << "?";
     return ss.str();
   }
-  std::string python_str() const override {
-    std::stringstream ss;
-    ss << "Optional[" << getElementType()->python_str() << "]";
-    return ss.str();
-  }
 
   TypePtr createWithContained(
       std::vector<TypePtr> contained_types) const override {
@@ -285,6 +306,12 @@ struct CAFFE2_API OptionalType
 
  private:
   OptionalType(TypePtr elem) : SingleElementType(elem) {}
+
+  std::string python_str_impl(TypePrinter printer = nullptr) const override {
+    std::stringstream ss;
+    ss << "Optional[" << getElementType()->python_str(printer) << "]";
+    return ss.str();
+  }
 };
 
 template <typename T>
@@ -661,11 +688,6 @@ struct CAFFE2_API ListType
     ss << getElementType()->str() << "[]";
     return ss.str();
   }
-  std::string python_str() const override {
-    std::stringstream ss;
-    ss << "List[" << getElementType()->python_str() << "]";
-    return ss.str();
-  }
   TypePtr createWithContained(
       std::vector<TypePtr> contained_types) const override {
     return create(contained_types.at(0));
@@ -682,6 +704,12 @@ struct CAFFE2_API ListType
 
  private:
   ListType(TypePtr elem) : SingleElementType(elem) {}
+
+  std::string python_str_impl(TypePrinter printer = nullptr) const override {
+    std::stringstream ss;
+    ss << "List[" << getElementType()->python_str(printer) << "]";
+    return ss.str();
+  }
 };
 
 struct DictType;
@@ -711,13 +739,6 @@ struct CAFFE2_API DictType : public Type {
     std::stringstream ss;
     ss << "Dict(" << getKeyType()->str() << ", " << getValueType()->str()
        << ")";
-    return ss.str();
-  }
-
-  std::string python_str() const override {
-    std::stringstream ss;
-    ss << "Dict[" << getKeyType()->python_str() << ", "
-       << getValueType()->python_str() << "]";
     return ss.str();
   }
 
@@ -759,6 +780,14 @@ struct CAFFE2_API DictType : public Type {
         types({key, value}),
         has_free_variables(
             key->hasFreeVariables() || value->hasFreeVariables()) {}
+
+  std::string python_str_impl(TypePrinter printer = nullptr) const override {
+    std::stringstream ss;
+    ss << "Dict[" << getKeyType()->python_str(printer) << ", "
+       << getValueType()->python_str(printer) << "]";
+    return ss.str();
+  }
+
   std::vector<TypePtr> types;
   bool has_free_variables;
 };
@@ -780,11 +809,6 @@ struct CAFFE2_API FutureType
     ss << "Future(" << getElementType()->str() << ")";
     return ss.str();
   }
-  std::string python_str() const override {
-    std::stringstream ss;
-    ss << "Future[" << getElementType()->python_str() << "]";
-    return ss.str();
-  }
   TypePtr createWithContained(
       std::vector<TypePtr> contained_types) const override {
     return create(contained_types.at(0));
@@ -792,6 +816,12 @@ struct CAFFE2_API FutureType
 
  private:
   FutureType(TypePtr elem) : SingleElementType(elem) {}
+
+  std::string python_str_impl(TypePrinter printer = nullptr) const override {
+    std::stringstream ss;
+    ss << "Future[" << getElementType()->python_str(printer) << "]";
+    return ss.str();
+  }
 };
 
 struct RRefType;
@@ -811,11 +841,6 @@ struct CAFFE2_API RRefType
     ss << "RRef(" << getElementType()->str() << ")";
     return ss.str();
   }
-  std::string python_str() const override {
-    std::stringstream ss;
-    ss << "RRef[" << getElementType()->python_str() << "]";
-    return ss.str();
-  }
   TypePtr createWithContained(
       std::vector<TypePtr> contained_types) const override {
     return create(contained_types.at(0));
@@ -823,15 +848,28 @@ struct CAFFE2_API RRefType
 
  private:
   RRefType(TypePtr elem) : SingleElementType(elem) {}
+
+  std::string python_str_impl(TypePrinter printer = nullptr) const override {
+    std::stringstream ss;
+    ss << "RRef[" << getElementType()->python_str(printer) << "]";
+    return ss.str();
+  }
 };
 
 
 struct NamedType;
 using NamedTypePtr = std::shared_ptr<NamedType>;
+using ConstNamedTypePtr = std::shared_ptr<const NamedType>;
 
 struct CAFFE2_API NamedType : public Type {
   NamedType(TypeKind tk, c10::optional<QualifiedName> name)
-      : Type(tk), name_(std::move(name)) {}
+      : Type(tk), name_(std::move(name)) {
+    TORCH_INTERNAL_ASSERT(
+        tk == TypeKind::TupleType || tk == TypeKind::FunctionType ||
+            tk == TypeKind::ClassType || tk == TypeKind::InterfaceType,
+        "If you add a new kind of NamedType, ",
+        "please update the cast<NamedType> specialization and this assert");
+  }
 
   // Fully qualified name of type
   // Looks like: "foo.bar.Baz".
@@ -879,7 +917,6 @@ struct CAFFE2_API TupleType : public NamedType {
   bool isSubtypeOfExt(const TypePtr rhs_, std::ostream* why_not) const override;
 
   std::string str() const override;
-  std::string python_str() const override;
   bool hasFreeVariables() const override {
     return has_free_variables_;
   }
@@ -921,6 +958,8 @@ struct CAFFE2_API TupleType : public NamedType {
     return true;
   }
 
+  std::string python_str_impl(TypePrinter printer = nullptr) const override;
+
   std::vector<TypePtr> elements_;
   bool has_free_variables_;
   std::shared_ptr<FunctionSchema> schema_;
@@ -942,17 +981,18 @@ struct CAFFE2_API NumberType : public Type {
   std::string str() const override {
     return "Scalar"; // match what PythonArgParser says for clarity
   }
-  std::string python_str() const override {
-    return "number"; // technically not a valid python type, but
-                     // we need to use it when parsing back in annotations
-                     // for implicit conversions
-  }
   static const TypeKind Kind = TypeKind::NumberType;
   // global singleton
   static NumberTypePtr get();
 
  protected:
   NumberType(TypeKind kind = TypeKind::NumberType) : Type(kind) {}
+
+  std::string python_str_impl(TypePrinter printer = nullptr) const override {
+    return "number"; // technically not a valid python type, but
+                     // we need to use it when parsing back in annotations
+                     // for implicit conversions
+  }
 };
 
 struct FloatType;
@@ -968,9 +1008,6 @@ struct CAFFE2_API FloatType : public NumberType {
   std::string str() const override {
     return "float";
   }
-  std::string python_str() const override {
-    return "float";
-  }
   bool isSubtypeOfExt(const TypePtr rhs, std::ostream* why_not) const override {
     return rhs->kind() == TypeKind::NumberType || NumberType::isSubtypeOfExt(rhs, why_not);
   }
@@ -980,6 +1017,9 @@ struct CAFFE2_API FloatType : public NumberType {
 
  private:
   FloatType() : NumberType(TypeKind::FloatType) {}
+  std::string python_str_impl(TypePrinter printer = nullptr) const override {
+    return "float";
+  }
 };
 
 struct IntType;
@@ -995,9 +1035,6 @@ struct CAFFE2_API IntType : public NumberType {
   std::string str() const override {
     return "int";
   }
-  std::string python_str() const override {
-    return "int";
-  }
   bool isSubtypeOfExt(const TypePtr rhs, std::ostream* why_not) const override {
     return rhs->kind() == TypeKind::NumberType || NumberType::isSubtypeOfExt(rhs, why_not);
   }
@@ -1007,6 +1044,9 @@ struct CAFFE2_API IntType : public NumberType {
 
  private:
   IntType() : NumberType(TypeKind::IntType) {}
+  std::string python_str_impl(TypePrinter printer = nullptr) const override {
+    return "int";
+  }
 };
 
 struct BoolType;
@@ -1044,7 +1084,7 @@ struct CAFFE2_API StringType : public Type {
     // we only use "str" (not "string") in both FunctionSchema and script
     return python_str();
   }
-  std::string python_str() const override {
+  std::string python_str_impl(TypePrinter printer = nullptr) const override {
     return "str";
   }
   static const TypeKind Kind = TypeKind::StringType;
@@ -1072,9 +1112,6 @@ struct CAFFE2_API FunctionType : public NamedType {
   std::string str() const override {
     return "Function";
   }
-  std::string python_str() const override {
-    return "Function";
-  }
   torch::jit::Function* function() const {
     return function_;
   }
@@ -1082,6 +1119,9 @@ struct CAFFE2_API FunctionType : public NamedType {
 
  private:
   FunctionType(torch::jit::Function* function);
+  std::string python_str_impl(TypePrinter printer = nullptr) const override {
+    return "Function";
+  }
   torch::jit::Function* function_;
 };
 
@@ -1505,7 +1545,8 @@ struct CAFFE2_API ClassType : public NamedType {
       const auto& lhs_name = name().value();
       const auto& rhs_name = user_rhs->name().value();
 
-      return lhs_name == rhs_name;
+      return lhs_name == rhs_name &&
+          this->compilation_unit() == user_rhs->compilation_unit();
     }
     return false;
   }
@@ -1513,11 +1554,6 @@ struct CAFFE2_API ClassType : public NamedType {
   std::string str() const override {
      return python_str();
    }
-
-  std::string python_str() const override {
-    const auto& n = name().value();
-    return n.qualifiedName();
-  }
 
   const std::vector<torch::jit::Function*>& methods() const;
 
@@ -1775,6 +1811,11 @@ struct CAFFE2_API ClassType : public NamedType {
       std::weak_ptr<CompilationUnit> cu,
       bool is_module);
 
+  std::string python_str_impl(TypePrinter printer = nullptr) const override {
+    const auto& n = name().value();
+    return n.qualifiedName();
+  }
+
   // Mapping of attribute names -> their type.
   // NOTE: this does not contain methods, which are stored in the module
   // TODO: once modules support arbitrary ivalue attributes, we don't need this
@@ -1815,17 +1856,14 @@ struct CAFFE2_API InterfaceType : public NamedType {
 
   bool operator==(const Type& rhs) const override {
     if (auto user_rhs = rhs.cast<InterfaceType>()) {
-      return name() == user_rhs->name();
+      return isSubTypeImpl(*this, *user_rhs, nullptr) &&
+          isSubTypeImpl(*user_rhs, *this, nullptr);
     }
     return false;
   }
 
   std::string str() const override {
     return std::string("InterfaceType<") + name()->name() + ">";
-  }
-
-  std::string python_str() const override {
-    return name()->qualifiedName();
   }
 
   bool isSubtypeOfExt(const TypePtr rhs, std::ostream* why_not) const override;
@@ -1845,6 +1883,14 @@ struct CAFFE2_API InterfaceType : public NamedType {
   ~InterfaceType() override;
  private:
   InterfaceType(QualifiedName name, bool is_module);
+  static bool isSubTypeImpl(
+      const InterfaceType& lhs,
+      const InterfaceType& rhs,
+      std::ostream* why_not);
+
+  std::string python_str_impl(TypePrinter printer = nullptr) const override {
+    return name()->qualifiedName();
+  }
 
   // shared_ptr so that this header does not have to depend on
   // FunctionSchema.h
@@ -1943,7 +1989,7 @@ struct CAFFE2_API AnyTupleType : public Type {
     return "tuple";
   }
   static const TypeKind Kind = TypeKind::AnyTupleType;
-;
+
   // global singleton
   static AnyTupleTypePtr get();
 private:
@@ -1962,9 +2008,6 @@ struct CAFFE2_API AnyClassType : public Type {
   }
   bool operator==(const Type& rhs) const override {
     return rhs.kind() == kind();
-  }
-  std::string python_str() const override {
-    return "Class Type";
   }
   std::string str() const override {
     return "AnyClassType";
@@ -1994,4 +2037,21 @@ inline bool IValue::isBoolList() const {
   return isList() && static_cast<detail::ListImpl*>(payload.as_intrusive_ptr)->elementType->kind() == BoolType::Kind;
 }
 
+template<>
+inline std::shared_ptr<NamedType> Type::cast() {
+  if (kind() == TypeKind::TupleType || kind() == TypeKind::FunctionType ||
+      kind() == TypeKind::ClassType || kind() == TypeKind::InterfaceType) {
+    return std::static_pointer_cast<NamedType>(shared_from_this());
+  }
+  return nullptr;
+}
+
+template<>
+inline std::shared_ptr<const NamedType> Type::cast<NamedType>() const {
+  if (kind() == TypeKind::TupleType || kind() == TypeKind::FunctionType ||
+      kind() == TypeKind::ClassType || kind() == TypeKind::InterfaceType) {
+    return std::static_pointer_cast<const NamedType>(shared_from_this());
+  }
+  return nullptr;
+}
 } // namespace c10
