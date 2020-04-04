@@ -125,10 +125,12 @@ struct TORCH_API Operator {
 
   c10::AliasAnalysisKind aliasAnalysisKind() const {
     if (isC10Op()) {
-      // Update schema_ because its alias analysis info might have changed if new c10 registrations came in
-      // TODO We're doing an isValid check because the c10 operator might already be deregistered.
-      //      Instead, we should automatically deregister the JIT wrapper when the c10 op
-      //      gets deregistered and remove this isValid() check.
+      // Update schema_ because its alias analysis info might have changed if
+      // new c10 registrations came in
+      // TODO We're doing an isValid check because the c10 operator might
+      // already be deregistered.
+      //      Instead, we should automatically deregister the JIT wrapper when
+      //      the c10 op gets deregistered and remove this isValid() check.
       if (c10Handle_->isValid()) {
         schema_->setAliasAnalysis(c10Handle_->schema().aliasAnalysis());
       }
