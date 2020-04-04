@@ -640,7 +640,7 @@ void addInputs(
     Node* n,
     const char* name,
     ArrayRef<c10::intrusive_ptr<c10::ivalue::Object>> value,
-    ClassTypePtr class_type) {
+    const ClassTypePtr& class_type) {
   Graph* g = n->owningGraph();
   Node* list_node =
       g->insertNode(g->createList(class_type, fmap(value, getValueTrace)));

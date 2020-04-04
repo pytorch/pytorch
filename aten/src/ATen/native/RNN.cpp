@@ -102,15 +102,15 @@ struct CellParams : public CellParamsBase {
     return b_hh_;
   }
   CellParamsSerializationType __getstate__() const override {
-    throw std::runtime_error("NYI");
+    TORCH_INTERNAL_ASSERT(false, "Not yet implemented");
   }
   static c10::intrusive_ptr<CellParamsBase> __setstate__(CellParamsSerializationType state) {
-    throw std::runtime_error("NYI");
+    TORCH_INTERNAL_ASSERT(false, "Not yet implemented");
   }
 };
 
 c10::intrusive_ptr<CellParamsBase> make_quantized_cell_params(
-    at::Tensor w_ih, at::Tensor w_hh, at::Tensor bias_ih, at::Tensor bias_hh);
+    const at::Tensor& w_ih, const at::Tensor& w_hh, at::Tensor bias_ih, at::Tensor bias_hh);
 
 struct QuantizedCellParams : public CellParamsBase {
   QuantizedCellParams(Tensor _w_ih, Tensor _w_hh,
@@ -192,8 +192,8 @@ struct QuantizedCellParams : public CellParamsBase {
     TORCH_INTERNAL_ASSERT(doubles.size() == 2);
     TORCH_INTERNAL_ASSERT(longs.size() == 2);
 
-    at::Tensor w_ih = std::move(tensors[0]),
-               w_hh = std::move(tensors[1]),
+    at::Tensor qw_ih = std::move(tensors[0]),
+               qw_hh = std::move(tensors[1]),
                b_ih = std::move(tensors[2]),
                b_hh = std::move(tensors[3]),
                col_offsets_ih = std::move(tensors[4]),
@@ -203,12 +203,12 @@ struct QuantizedCellParams : public CellParamsBase {
     int64_t zero_point_ih = longs[0],
             zero_point_hh = longs[1];
 
-    at::Tensor packed_ih = at::native::fbgemm_pack_quantized_matrix(w_ih);
-    at::Tensor packed_hh = at::native::fbgemm_pack_quantized_matrix(w_hh);
+    at::Tensor packed_ih = at::native::fbgemm_pack_quantized_matrix(qw_ih);
+    at::Tensor packed_hh = at::native::fbgemm_pack_quantized_matrix(qw_hh);
 
     return c10::make_intrusive<QuantizedCellParams>(
-      /*w_ih=*/std::move(w_ih),
-      /*w_hh=*/std::move(w_hh),
+      /*w_ih=*/std::move(qw_ih),
+      /*w_hh=*/std::move(qw_hh),
       /*b_ih_=*/std::move(b_ih),
       /*b_hh_=*/std::move(b_hh),
       /*packed_ih=*/std::move(packed_ih),
@@ -224,11 +224,11 @@ struct QuantizedCellParams : public CellParamsBase {
 };
 
 c10::intrusive_ptr<CellParamsBase> make_quantized_cell_params(
-    at::Tensor w_ih, at::Tensor w_hh, at::Tensor b_ih, at::Tensor b_hh) {
-  auto make_vals = [&](at::Tensor W) {
+    const at::Tensor& w_ih, const at::Tensor& w_hh, at::Tensor b_ih, at::Tensor b_hh) {
+  auto make_vals = [&](const at::Tensor& W) {
     auto params = at::native::fbgemm_linear_quantize_weight(W);
     at::Tensor packed_weight = at::native::fbgemm_pack_quantized_matrix(std::get<0>(params));
-    return std::tuple_cat(std::make_tuple(packed_weight), params);
+    return std::tuple_cat(std::make_tuple(std::move(packed_weight)), std::move(params));
   };
 
   at::Tensor qw_ih, qw_hh, packed_ih, packed_hh, col_offsets_ih, col_offsets_hh;
@@ -238,8 +238,18 @@ c10::intrusive_ptr<CellParamsBase> make_quantized_cell_params(
   std::tie(packed_hh, qw_hh, col_offsets_hh, scale_hh, zero_point_hh) = make_vals(w_hh);
 
   return c10::make_intrusive<QuantizedCellParams>(
-    qw_ih, qw_hh, b_ih, b_hh, packed_ih, packed_hh, col_offsets_ih, col_offsets_hh,
-    scale_ih, scale_hh, zero_point_ih, zero_point_hh
+    /*qw_ih=*/std::move(qw_ih),
+    /*qw_hh=*/std::move(qw_hh),
+    /*b_ih=*/std::move(b_ih),
+    /*b_hh=*/std::move(b_hh),
+    /*packed_ih=*/std::move(packed_ih),
+    /*packed_hh=*/std::move(packed_hh),
+    /*col_offsets_ih=*/std::move(col_offsets_ih),
+    /*col_offsets_hh=*/std::move(col_offsets_hh),
+    /*scale_ih=*/std::move(scale_ih),
+    /*scale_hh=*/std::move(scale_hh),
+    /*zero_point_ih=*/std::move(zero_point_ih),
+    /*zero_point_hh=*/std::move(zero_point_hh)
   );
 }
 
@@ -350,16 +360,22 @@ struct QuantizedCellParamsDynamic : public CellParamsBase {
     TORCH_INTERNAL_ASSERT(packed_hh.size() == 1);
 
     return make_quantized_cell_params_dynamic(
-      std::move(packed_ih[0]).toTensor(), std::move(packed_hh[0]).toTensor(),
-      std::move(b_ih), std::move(b_hh));
+      /*w_ih_packed=*/std::move(packed_ih[0]).toTensor(),
+      /*w_hh_packed=*/std::move(packed_hh[0]).toTensor(),
+      /*bias_ih=*/std::move(b_ih),
+      /*bias_hh=*/std::move(b_hh));
   }
 };
 
 c10::intrusive_ptr<CellParamsBase> make_quantized_cell_params_dynamic(
     at::Tensor w_ih_packed, at::Tensor w_hh_packed, at::Tensor bias_ih, at::Tensor bias_hh) {
   return c10::make_intrusive<QuantizedCellParamsDynamic>(
-    std::move(w_ih_packed), std::move(w_hh_packed), std::move(bias_ih), std::move(bias_hh));
+    /*_packed_w_ih=*/std::move(w_ih_packed),
+    /*_packed_w_hh=*/std::move(w_hh_packed),
+    /*_b_ih=*/std::move(bias_ih),
+    /*_b_hh=*/std::move(bias_hh));
 }
+
 
 c10::intrusive_ptr<CellParamsBase> make_quantized_cell_params_fp16(
     at::Tensor w_ih_packed, at::Tensor w_hh_packed, at::Tensor b_ih, at::Tensor b_hh);

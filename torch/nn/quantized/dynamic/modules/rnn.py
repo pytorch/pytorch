@@ -1,6 +1,5 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 
-from collections import OrderedDict
 import numbers
 
 import torch
@@ -84,10 +83,8 @@ class RNNBase(torch.nn.Module):
                     # bias vector is needed in standard definition.
                     b_hh = torch.Tensor(gate_size).float()
 
-                    packed_ih = torch.ops.quantized.linear_prepack_fp16(
-                            w_ih)
-                    packed_hh = torch.ops.quantized.linear_prepack_fp16(
-                            w_hh)
+                    packed_ih = torch.ops.quantized.linear_prepack_fp16(w_ih)
+                    packed_hh = torch.ops.quantized.linear_prepack_fp16(w_hh)
                     cell_params = torch.ops.quantized.make_quantized_cell_params_fp16(
                         packed_ih, packed_hh, b_ih, b_hh)
 
@@ -184,14 +181,6 @@ class RNNBase(torch.nn.Module):
         if permutation is None:
             return hx
         return apply_permutation(hx, permutation)
-
-    # TODOJAMES
-    # @property
-    # def all_weights(self):
-    #     result = OrderedDict()
-    #     for idx, name in enumerate(self._all_weight_names):
-    #         result[name] = self._all_weight_values[idx].unpack()
-    #     return result
 
     @classmethod
     def from_float(cls, mod):
@@ -299,12 +288,12 @@ class LSTM(RNNBase):
 
         if batch_sizes is None:
             result = torch.quantized_lstm(input, hx, self._all_params, self.bias, self.num_layers,
-                                                   float(self.dropout), self.training, self.bidirectional,
-                                                   self.batch_first, dtype=self.dtype, use_dynamic=True)
+                                          float(self.dropout), self.training, self.bidirectional,
+                                          self.batch_first, dtype=self.dtype, use_dynamic=True)
         else:
             result = torch.quantized_lstm(input, batch_sizes, hx, self._all_params, self.bias,
-                                                   self.num_layers, float(self.dropout), self.training,
-                                                   self.bidirectional, dtype=self.dtype, use_dynamic=True)
+                                          self.num_layers, float(self.dropout), self.training,
+                                          self.bidirectional, dtype=self.dtype, use_dynamic=True)
         output = result[0]
         hidden = result[1:]
 

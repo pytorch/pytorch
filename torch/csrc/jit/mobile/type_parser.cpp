@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/mobile/type_parser.h>
 #include <ATen/core/jit_type.h>
 #include <torch/csrc/jit/frontend/parser_constants.h>
+#include <torch/custom_class.h>
 #include <queue>
 
 namespace torch {
@@ -62,6 +63,8 @@ class TypeParser {
       }
       expect("]");
       return TupleType::create(types);
+    } else if (token == "__torch__") {
+      return parseClassType();
     } else {
       TORCH_CHECK(
           false,
@@ -74,6 +77,20 @@ class TypeParser {
   }
 
  private:
+  TypePtr parseClassType() {
+    std::vector<std::string> expected_atoms{".", "torch", ".", "classes", "."};
+    for (const auto& atom : expected_atoms) {
+      expect(atom);
+    }
+
+    std::string ns = next();
+    expect(".");
+    std::string classname = next();
+
+    return torch::getCustomClass(
+        std::string("__torch__.torch.classes." + ns + "." + classname));
+  }
+
   void expect(const std::string& s) {
     auto token = next();
     TORCH_CHECK(
