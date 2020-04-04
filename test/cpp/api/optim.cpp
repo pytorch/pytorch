@@ -26,7 +26,7 @@ bool test_optimizer_xor(Options options) {
       Linear(8, 1),
       Functional(torch::sigmoid));
 
-  const int64_t kBatchSize = 100;
+  const int64_t kBatchSize = 200;
   const int64_t kMaximumNumberOfEpochs = 3000;
 
   OptimizerClass optimizer(model->parameters(), options);
@@ -242,12 +242,10 @@ TEST(OptimTest, XORConvergence_SGD) {
       SGDOptions(0.1).momentum(0.9).nesterov(true).weight_decay(1e-6)));
 }
 
-// Disabled because strictly depends on random numbers
-// https://github.com/pytorch/pytorch/issues/36024
-// TEST(OptimTest, XORConvergence_LBFGS) {
-//   ASSERT_TRUE(test_optimizer_xor<LBFGS>(LBFGSOptions(1.0)));
-//   ASSERT_TRUE(test_optimizer_xor<LBFGS>(LBFGSOptions(1.0).line_search_fn("strong_wolfe")));
-// }
+TEST(OptimTest, XORConvergence_LBFGS) {
+  ASSERT_TRUE(test_optimizer_xor<LBFGS>(LBFGSOptions(1.0)));
+  ASSERT_TRUE(test_optimizer_xor<LBFGS>(LBFGSOptions(1.0).line_search_fn("strong_wolfe")));
+}
 
 TEST(OptimTest, XORConvergence_Adagrad) {
   ASSERT_TRUE(test_optimizer_xor<Adagrad>(
