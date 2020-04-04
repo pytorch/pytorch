@@ -9,6 +9,8 @@
 
 #include <sstream>
 
+#include <sstream>
+
 namespace torch {
 namespace jit {
 namespace fuser {

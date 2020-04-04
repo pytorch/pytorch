@@ -73,7 +73,6 @@ struct ConstCheck : OptOutConstDispatch {
       handle(orig);
     else
       OptOutConstDispatch::handle(val);
-
   }
 
  public:
