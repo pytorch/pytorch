@@ -2,7 +2,7 @@
 
 #include <structmember.h>
 #include <ATen/ATen.h>
-#include <ATen/CPUGenerator.h>
+#include <ATen/CPUGeneratorImpl.h>
 
 #include <TH/TH.h>
 #include <torch/csrc/THP.h>
@@ -16,7 +16,7 @@
 
 #ifdef USE_CUDA
 #include <THC/THCTensorRandom.h>
-#include <ATen/CUDAGenerator.h>
+#include <ATen/CUDAGeneratorImpl.h>
 #endif
 
 using namespace at;
@@ -54,9 +54,9 @@ static PyObject * THPGenerator_pynew(PyTypeObject *type, PyObject *args, PyObjec
   THPGeneratorPtr self((THPGenerator *)type->tp_alloc(type, 0));
 #ifdef USE_CUDA
   if (device.type() == at::kCPU) {
-    self->cdata = make_generator<CPUGenerator>();
+    self->cdata = make_generator<CPUGeneratorImpl>();
   } else if (device.type() == at::kCUDA){
-    self->cdata = make_generator<CUDAGenerator>(device.index());
+    self->cdata = make_generator<CUDAGeneratorImpl>(device.index());
   } else {
     AT_ERROR("Device type ", c10::DeviceTypeName(device.type()),
              " is not supported for torch.Generator() api.");
@@ -65,7 +65,7 @@ static PyObject * THPGenerator_pynew(PyTypeObject *type, PyObject *args, PyObjec
   TORCH_CHECK(device.type() == at::kCPU,
               "Device type ", c10::DeviceTypeName(device.type()),
               " is not supported for torch.Generator() api.");
-  self->cdata = make_generator<CPUGenerator>();
+  self->cdata = make_generator<CPUGeneratorImpl>();
 #endif
   return (PyObject*)self.release();
   END_HANDLE_TH_ERRORS

@@ -5,7 +5,7 @@
 #include <ATen/Utils.h>
 #include <ATen/core/ATenGeneral.h>
 #include <ATen/core/Generator.h>
-#include <ATen/CPUGenerator.h>
+#include <ATen/CPUGeneratorImpl.h>
 #include <ATen/core/LegacyTypeDispatch.h>
 #include <ATen/detail/CUDAHooksInterface.h>
 #include <ATen/detail/HIPHooksInterface.h>
