@@ -1,9 +1,8 @@
-#pragma once
-
+#include <c10/core/MobileAllocator.h>
 #include <c10/core/CPUAllocator.h>
 
-namespace at {
-namespace native {
+namespace c10 {
+namespace {
 
 // QNNPACK AND XNNPACK may out-of-bound access the input and / or output tensors.
 // This behavior will trigger ASAN, and may result in a segfault if the accessed
@@ -15,19 +14,19 @@ namespace native {
 // PostGuardBytes: Number of guard bytes to allocate after the allocation.
 
 template <uint32_t PreGuardBytes, uint32_t PostGuardBytes>
-class GuardingAllocator final : public at::Allocator {
+class DefaultMobileCPUAllocator final : public at::Allocator {
  public:
-  GuardingAllocator() = default;
-  virtual ~GuardingAllocator() override = default;
+  DefaultMobileCPUAllocator() = default;
+  virtual ~DefaultMobileCPUAllocator() override = default;
 
-  static void deleter(void* pointer) {
+  static void deleter(void* const pointer) {
     const Cast memory{pointer};
-    c10::free_cpu(memory.as_byte_ptr - kPreGuardBytes);
+    c10::free_cpu(memory.as_byte_ptr - PreGuardBytes);
   }
 
-  virtual DataPtr allocate(size_t nbytes) const override {
-    Cast memory{c10::alloc_cpu(kPreGuardBytes + nbytes + kPostGuardBytes)};
-    memory.as_byte_ptr += kPreGuardBytes;
+  virtual DataPtr allocate(const size_t nbytes) const override {
+    Cast memory{c10::alloc_cpu(PreGuardBytes + nbytes + PostGuardBytes)};
+    memory.as_byte_ptr += PreGuardBytes;
 
     return {
       memory.as_void_ptr,
@@ -42,14 +41,27 @@ class GuardingAllocator final : public at::Allocator {
   }
 
  private:
-  static constexpr uint32_t kPreGuardBytes = PreGuardBytes;
-  static constexpr uint32_t kPostGuardBytes = PostGuardBytes;
-
   union Cast final {
     void * const as_void_ptr;
     uint8_t * as_byte_ptr;
   };
 };
 
-} // namespace native
-} // namespace at
+DefaultMobileCPUAllocator<8u, 16u> g_mobile_cpu_allocator;
+REGISTER_ALLOCATOR(DeviceType::CPU, &g_mobile_cpu_allocator);
+
+} // namespace
+
+at::Allocator* GetDefaultMobileCPUAllocator() {
+  return &g_mobile_cpu_allocator;
+}
+
+#ifdef C10_MOBILE
+
+at::Allocator* GetDefaultCPUAllocator() {
+  return GetDefaultMobileCPUAllocator();
+}
+
+#endif /* C10_Mobile */
+
+} // namespace c10
