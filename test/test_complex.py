@@ -18,7 +18,7 @@ class TestComplexTensor(TestCase):
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_exp(self):
         def exp_fn(dtype):
-            a = torch.tensor(1j, dtype=dtype) * torch.arange(4) / 3 * math.pi
+            a = torch.tensor(1j, dtype=dtype) * torch.arange(18) / 3 * math.pi
             expected = np.exp(a.numpy())
             actual = torch.exp(a)
             self.assertEqual(actual, torch.from_numpy(expected))
