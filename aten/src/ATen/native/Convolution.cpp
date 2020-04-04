@@ -246,11 +246,11 @@ auto ConvParams::use_xnnpack(
     const at::Tensor& input,
     const at::Tensor& weight,
     const at::Tensor& bias) const -> bool {
-#if defined(C10_MOBILE)
+// #if defined(C10_MOBILE)
   return xnnpack::use_convolution2d(input, weight, bias, padding, stride, dilation, groups);
-#else
-  return false;
-#endif
+// #else
+//   return false;
+// #endif
 }
 
 // We currently only have depthwise support for the case where groups ==
