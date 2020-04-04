@@ -1,37 +1,36 @@
-# In the open-source build, these are generated into
-# torch/csrc/{autgrad,jit}/generated. In fbcode, this distinction is
-# not currently relevant so they are combined into one list.
+# In both open-source and fbcode builds, these are generated into
+# torch/csrc/{autgrad,jit}/generated.i
 load("@fbcode_macros//build_defs:cpp_library.bzl", "cpp_library")
 load("@fbcode_macros//build_defs:cpp_python_extension.bzl", "cpp_python_extension")
 load("@fbsource//xplat/caffe2/caffe2/fb:defs_gpu.bzl", "gpu_library_selector")
 
 GENERATED_CPP = [
-    "Functions.cpp",
-    "VariableType_0.cpp",
-    "VariableType_1.cpp",
-    "VariableType_2.cpp",
-    "VariableType_3.cpp",
-    "VariableType_4.cpp",
-    "register_aten_ops_0.cpp",
-    "register_aten_ops_1.cpp",
-    "register_aten_ops_2.cpp",
-    "python_functions.cpp",
-    "python_nn_functions.cpp",
-    "python_torch_functions.cpp",
-    "python_variable_methods.cpp",
+    "autograd/generated/Functions.cpp",
+    "autograd/generated/VariableType_0.cpp",
+    "autograd/generated/VariableType_1.cpp",
+    "autograd/generated/VariableType_2.cpp",
+    "autograd/generated/VariableType_3.cpp",
+    "autograd/generated/VariableType_4.cpp",
+    "jit/generated/register_aten_ops_0.cpp",
+    "jit/generated/register_aten_ops_1.cpp",
+    "jit/generated/register_aten_ops_2.cpp",
+    "autograd/generated/python_functions.cpp",
+    "autograd/generated/python_nn_functions.cpp",
+    "autograd/generated/python_torch_functions.cpp",
+    "autograd/generated/python_variable_methods.cpp",
 ]
 
 # copied from https://github.com/pytorch/pytorch/blob/master/tools/cpp_build/torch/CMakeLists.txt
 libtorch_sources = [
-    ":generate-code=Functions.cpp",
-    ":generate-code=register_aten_ops_0.cpp",
-    ":generate-code=register_aten_ops_1.cpp",
-    ":generate-code=register_aten_ops_2.cpp",
-    ":generate-code=VariableType_0.cpp",
-    ":generate-code=VariableType_1.cpp",
-    ":generate-code=VariableType_2.cpp",
-    ":generate-code=VariableType_3.cpp",
-    ":generate-code=VariableType_4.cpp",
+    ":generate-code=autograd/generated/Functions.cpp",
+    ":generate-code=jit/generated/register_aten_ops_0.cpp",
+    ":generate-code=jit/generated/register_aten_ops_1.cpp",
+    ":generate-code=jit/generated/register_aten_ops_2.cpp",
+    ":generate-code=autograd/generated/VariableType_0.cpp",
+    ":generate-code=autograd/generated/VariableType_1.cpp",
+    ":generate-code=autograd/generated/VariableType_2.cpp",
+    ":generate-code=autograd/generated/VariableType_3.cpp",
+    ":generate-code=autograd/generated/VariableType_4.cpp",
     "torch/csrc/autograd/VariableTypeManual.cpp",
     "torch/csrc/autograd/anomaly_mode.cpp",
     "torch/csrc/autograd/autograd.cpp",
@@ -331,10 +330,10 @@ def add_torch_libs():
     torch_cpp_headers = native.glob(["torch/csrc/api/include/**/*.h"]) + ["torch/script.h"]
 
     libtorch_python_sources = [
-        ":generate-code=python_functions.cpp",
-        ":generate-code=python_nn_functions.cpp",
-        ":generate-code=python_torch_functions.cpp",
-        ":generate-code=python_variable_methods.cpp",
+        ":generate-code=autograd/generated/python_functions.cpp",
+        ":generate-code=autograd/generated/python_nn_functions.cpp",
+        ":generate-code=autograd/generated/python_torch_functions.cpp",
+        ":generate-code=autograd/generated/python_variable_methods.cpp",
         "torch/csrc/CudaIPCTypes.cpp",
         "torch/csrc/DataLoader.cpp",
         "torch/csrc/Device.cpp",
