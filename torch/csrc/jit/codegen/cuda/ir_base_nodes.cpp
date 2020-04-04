@@ -101,14 +101,9 @@ Expr* Val::getOrigin() {
 void Scope::insert_before(Expr* ref, Expr* expr) {
   auto it = exprs_.begin();
   while (it != exprs_.end()) {
-<<<<<<< HEAD
     if ((*it)->sameAs(ref))
       break;
     it++;
-=======
-    if (*it == ref)
-      break;
->>>>>>> Major refactor of code lowering and associated parts.
   }
   if (it != exprs_.end())
     exprs_.insert(it, expr);
@@ -119,10 +114,7 @@ void Scope::insert_after(Expr* ref, Expr* expr) {
   while (it != exprs_.end()) {
     if (*it == ref)
       break;
-<<<<<<< HEAD
     it++;
-=======
->>>>>>> Major refactor of code lowering and associated parts.
   }
   if (it != exprs_.end())
     exprs_.insert(++it, expr);
@@ -133,10 +125,7 @@ void Scope::erase(Expr* ref) {
   while (it != exprs_.end()) {
     if (*it == ref)
       break;
-<<<<<<< HEAD
     it++;
-=======
->>>>>>> Major refactor of code lowering and associated parts.
   }
   if (it != exprs_.end())
     exprs_.erase(it);
@@ -214,11 +203,7 @@ void IRInputOutput::removeInput(Val* val) {
     if ((*it) == val)
       break;
   }
-<<<<<<< HEAD
   TORCH_INTERNAL_ASSERT(it != inputs_.end());
-=======
-  assert(it != inputs_.end());
->>>>>>> Major refactor of code lowering and associated parts.
   inputs_.erase(it);
 }
 
