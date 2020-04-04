@@ -944,6 +944,12 @@ void Engine::mark_graph_task_completed(const std::shared_ptr<GraphTask>& graph_t
     graph_task->future_result_->markCompleted(
         std::move(graph_task->captured_vars_));
   } catch (std::exception& e) {
+    // If the callbacks (triggered by markCompleted) throw an exception, just
+    // propagate it further. If we don't do this, setErrorIfNeeded would just
+    // swallow the exception since the future is marked as completed.
+    if (graph_task->future_result_->completed()) {
+      std::rethrow_exception(std::current_exception());
+    }
     graph_task->future_result_->setErrorIfNeeded(e.what());
   }
 }
