@@ -581,7 +581,7 @@ void GPULower::replaceSizes() {
   std::vector<TensorView*> orig_inp_out;
   std::vector<TensorView*> orig_intermediates;
 
-  for (auto* val : fusion->vals()) {
+  for (auto* val : fusion->deterministic_vals()) {
     if (isTV(val)) {
       if (fusion->hasInput(val) || fusion->hasOutput(val)) {
         orig_inp_out.push_back(asTV(val));
