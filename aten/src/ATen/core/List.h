@@ -6,6 +6,7 @@
 #include <c10/util/intrusive_ptr.h>
 #include <c10/util/ArrayRef.h>
 #include <c10/util/Optional.h>
+#include <torch/csrc/WindowsTorchApiMacro.h>
 #include <vector>
 
 namespace at {
@@ -33,6 +34,7 @@ struct ListImpl final : public c10::intrusive_ptr_target {
   intrusive_ptr<ListImpl> copy() const {
     return make_intrusive<ListImpl>(list, elementType);
   }
+  friend TORCH_API bool operator==(const ListImpl& lhs, const ListImpl& rhs);
 };
 }
 
@@ -139,7 +141,7 @@ public:
   ListElementReference<T, Iterator> operator*() const {
     return {iterator_};
   }
-  
+
   ListElementReference<T, Iterator> operator[](typename List<T>::size_type offset) const {
     return {iterator_ + offset};
   }
@@ -173,7 +175,7 @@ private:
     return lhs.iterator_ >= rhs.iterator_;
   }
 
-  friend class ListIterator<T, typename detail::ListImpl::list_type::iterator>;
+  friend class ListIterator<T, typename c10::detail::ListImpl::list_type::iterator>;
   friend class List<T>;
 };
 

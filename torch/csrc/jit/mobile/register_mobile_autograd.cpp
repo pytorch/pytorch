@@ -102,27 +102,27 @@ void log_softmax_kernel(const c10::OperatorHandle& op, Stack* stack) {
 
 // NB! This is _aten, not aten!!!
 static auto registry =
-    torch::import("_aten")
+    torch::import()
         .impl(
-            "add.Scalar",
+            "_aten::add.Scalar",
             torch::dispatch_autograd(torch::autograd::VariableType::add_Scalar))
         .impl(
-            "mul.Tensor",
+            "_aten::mul.Tensor",
             torch::dispatch_autograd(torch::autograd::VariableType::mul_Tensor))
         .impl(
-            "conv2d",
+            "_aten::conv2d",
             torch::dispatch_autograd(
                 CppFunction::makeFromBoxedFunction<conv2d_kernel>()))
-        .impl("dropout", torch::dispatch_autograd(VariableType::dropout))
+        .impl("_aten::dropout", torch::dispatch_autograd(VariableType::dropout))
         .impl(
-            "feature_dropout",
+            "_aten::feature_dropout",
             torch::dispatch_autograd(VariableType::feature_dropout))
         .impl(
-            "log_softmax.int",
+            "_aten::log_softmax.int",
             torch::dispatch_autograd(
                 CppFunction::makeFromBoxedFunction<log_softmax_kernel>()))
         .impl(
-            "max_pool2d",
+            "_aten::max_pool2d",
             torch::dispatch_autograd([](const Tensor& self,
                                         c10::List<int64_t> kernel_size,
                                         c10::List<int64_t> stride,
@@ -137,11 +137,11 @@ static auto registry =
                   dilation.vec(),
                   ceil_mode);
             }))
-        .impl("relu", torch::dispatch_autograd(VariableType::relu))
+        .impl("_aten::relu", torch::dispatch_autograd(VariableType::relu))
         .impl(
-            "view",
+            "_aten::view",
             torch::dispatch_autograd(
                 CppFunction::makeFromBoxedFunction<view_kernel>()))
-        .impl("t", torch::dispatch_autograd(VariableType::t))
-        .impl("addmm", torch::dispatch_autograd(VariableType::addmm));
+        .impl("_aten::t", torch::dispatch_autograd(VariableType::t))
+        .impl("_aten::addmm", torch::dispatch_autograd(VariableType::addmm));
 } // anonymous namespace
