@@ -46,7 +46,7 @@ const Generator& getDefaultCUDAGenerator(DeviceIndex device_index) {
   }
   std::call_once(cuda_gens_init_flag[idx], [&] {
     default_gens_cuda[idx] = make_generator<CUDAGeneratorImpl>(idx);
-    default_gens_cuda[idx]->seed();
+    default_gens_cuda[idx].seed();
   });
   return default_gens_cuda[idx];
 }

@@ -153,7 +153,7 @@ void THTensor_(multinomialAliasDraw)(THLongTensor *self, THTensor *q, THLongTens
 void THTensor_(getRNGState)(at::Generator _generator, THTensor *self)
 {
   // See Note [Acquire lock when using random generators]
-  std::lock_guard<std::mutex> lock(_generator->mutex_);
+  std::lock_guard<std::mutex> lock(_generator.mutex());
   static const size_t size = sizeof(THGeneratorStateNew);
   THTensor_(resize1d)(self, size);
   THArgCheck(THTensor_(nElement)(self) == size, 1, "RNG state is wrong size");
@@ -193,7 +193,7 @@ void THTensor_(getRNGState)(at::Generator _generator, THTensor *self)
 void THTensor_(setRNGState)(at::Generator _generator, THTensor *self)
 {
   // See Note [Acquire lock when using random generators]
-  std::lock_guard<std::mutex> lock(_generator->mutex_);
+  std::lock_guard<std::mutex> lock(_generator.mutex());
   auto cast_generator = at::check_generator<at::CPUGeneratorImpl>(_generator);
   THArgCheck(THTensor_(isContiguous)(self), 1, "RNG state needs to be contiguous");
   static_assert(std::is_pod<THGeneratorState>::value, "THGeneratorState is not a PODType");
