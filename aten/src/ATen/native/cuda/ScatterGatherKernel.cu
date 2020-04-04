@@ -21,7 +21,7 @@ template <int N> struct alignas(N) OpaqueType { char data[N]; };
 
 // essentialy rewritten related to legacy::launch_kernel parts
 template <int nt, int vt, typename func_t>
-C10_LAUNCH_BOUNDS_2(nt, launch_bound2)
+C10_LAUNCH_BOUNDS_2(nt, vt)
 __global__ void _scatter_gather_elementwise_kernel(int N, func_t f) {
   constexpr int nv = nt * vt;
   int idx = nv * blockIdx.x + threadIdx.x;
@@ -195,7 +195,7 @@ struct _cuda_scatter_fill_internal_kernel {
     char* index_ptr = (char*)iter.data_ptr(1);
 
     auto offset_calc = make_offset_calculator<2>(iter);
-    _launch_scatter_gather_kernel<launch_size_nd, launch_bound2>(iter.numel(), [=]__device__(int i) {
+    auto loop = [=]C10_DEVICE(int i) {
       auto offsets = offset_calc.get(i);
 
       int64_t idx_dim = *(int64_t*)(index_ptr + offsets[1]);
@@ -210,7 +210,9 @@ struct _cuda_scatter_fill_internal_kernel {
         src_val
       );
 
-    });
+    };
+
+    _launch_scatter_gather_kernel<num_threads, thread_work_size>(iter.numel(), loop);
   }
 }; // struct _cuda_scatter_fill_internal_kernel
 
