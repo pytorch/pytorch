@@ -17,10 +17,10 @@ static void TestBinaryOpsForIntType(T real, T img, int_t num) {
 
 template<typename T>
 static void TestBinaryOpsForAllIntTypes(T real, T img, int8_t i) {
-  TestBinaryOpsForIntType<T, int8_t>(real, img, i, op);
-  TestBinaryOpsForIntType<T, int16_t>(real, img, i, op);
-  TestBinaryOpsForIntType<T, int32_t>(real, img, i, op);
-  TestBinaryOpsForIntType<T, int64_t>(real, img, i, op);
+  TestBinaryOpsForIntType<T, int8_t>(real, img, i);
+  TestBinaryOpsForIntType<T, int16_t>(real, img, i);
+  TestBinaryOpsForIntType<T, int32_t>(real, img, i);
+  TestBinaryOpsForIntType<T, int64_t>(real, img, i);
 }
 
 TEST(ComplexTest, Integer) {
