@@ -42,7 +42,7 @@ if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
 fi
 
 # --user breaks ppc64le builds and these packages are already in ppc64le docker
-if [[ "$BUILD_ENVIRONMENT" != *ppc64le* ]] && [[ "$BUILD_ENVIRONMENT" != *-bazel-* ]] ; then
+if [[ "$BUILD_ENVIRONMENT" != *ppc64le* ]]; then
   # JIT C++ extensions require ninja.
   pip_install --user ninja
   # ninja is installed in /var/lib/jenkins/.local/bin
@@ -251,15 +251,7 @@ test_backward_compatibility() {
   assert_git_not_dirty
 }
 
-test_bazel() {
-  set -e
-
-  get_bazel
-
-  tools/bazel test --test_tag_filters=-gpu-required --test_filter=-*_CUDA :all_tests
-}
-
-if ! [[ "${BUILD_ENVIRONMENT}" == *libtorch* || "${BUILD_ENVIRONMENT}" == *-bazel-* ]]; then
+if ! [[ "${BUILD_ENVIRONMENT}" == *libtorch* ]]; then
   (cd test && python -c "import torch; print(torch.__config__.show())")
   (cd test && python -c "import torch; print(torch.__config__.parallel_info())")
 fi
@@ -285,8 +277,6 @@ elif [[ "${BUILD_ENVIRONMENT}" == *-test2 || "${JOB_BASE_NAME}" == *-test2 ]]; t
   test_aten
   test_libtorch
   test_custom_script_ops
-elif [[ "${BUILD_ENVIRONMENT}" == *-bazel-* ]]; then
-  test_bazel
 else
   test_torchvision
   test_python_nn

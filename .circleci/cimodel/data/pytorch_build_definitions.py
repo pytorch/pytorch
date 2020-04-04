@@ -187,9 +187,9 @@ def instantiate_configs():
 
     root = get_root()
     found_configs = conf_tree.dfs(root)
+    restrict_phases = None
     for fc in found_configs:
 
-        restrict_phases = None
         distro_name = fc.find_prop("distro_name")
         compiler_name = fc.find_prop("compiler_name")
         compiler_version = fc.find_prop("compiler_version")
