@@ -230,7 +230,7 @@ function(torch_compile_options libname)
         set(MSVC_DEBINFO_OPTION "/Zi")
       endif()
 
-      target_compile_options(${libname} PUBLIC
+      target_compile_options(${libname} PRIVATE
         ${MSVC_RUNTIME_LIBRARY_OPTION}
         ${MSVC_DEBINFO_OPTION}
         /EHa
@@ -249,7 +249,7 @@ function(torch_compile_options libname)
         /bigobj
         )
     else()
-      target_compile_options(${libname} PUBLIC
+      target_compile_options(${libname} PRIVATE
         #    -std=c++14
         -Wall
         -Wextra
