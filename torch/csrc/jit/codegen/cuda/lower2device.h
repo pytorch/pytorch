@@ -72,17 +72,17 @@ struct TORCH_CUDA_API GPULower : public OptOutDispatch {
   IfThenElse* getPredicate(const TensorView* const);
 
   // Custom dispatch for Expr, want to find out of it's a TV op
-  void handle(Expr*);
+  void handle(Expr*) final;
 
   // Remake operations with TensorIndex
-  void handle(UnaryOp*);
-  void handle(BinaryOp*);
+  void handle(UnaryOp*) final;
+  void handle(BinaryOp*) final;
 
   // Ignore split/merge/reorder operations,
   // we don't want to print them.
-  void handle(Split*) {}
-  void handle(Merge*) {}
-  void handle(Reorder*) {}
+  void handle(Split*) final {}
+  void handle(Merge*) final {}
+  void handle(Reorder*) final {}
 
   // Update for loop structure based on producing provided TensorView
   void updateView(TensorView*);
@@ -103,7 +103,7 @@ struct TORCH_CUDA_API GPULower : public OptOutDispatch {
   std::vector<Expr*> getLoweredExprs();
   std::ostream& printKernel(
       std::ostream& _os,
-      std::string kernel_name = "CUDAGeneratedKernel");
+      const std::string& kernel_name = "CUDAGeneratedKernel");
 };
 
 } // namespace fuser

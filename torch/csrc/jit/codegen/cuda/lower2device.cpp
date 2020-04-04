@@ -41,15 +41,15 @@ struct parentScope_ : private OptInDispatch {
  private:
   Expr* parent_ = nullptr;
 
-  void handle(ForLoop* fl) {
+  void handle(ForLoop* fl) final {
     parent_ = fl->parentScope();
   }
 
-  void handle(IfThenElse* ite) {
+  void handle(IfThenElse* ite) final {
     parent_ = ite->parentScope();
   }
 
-  void handle(Expr* expr) {
+  void handle(Expr* expr) final {
     OptInDispatch::handle(expr);
   }
 
@@ -65,13 +65,13 @@ struct forLoopCount : private OptInDispatch {
  private:
   unsigned int count_ = 0;
 
-  void handle(ForLoop* fl) {
+  void handle(ForLoop* fl) final {
     count_++;
   }
 
-  void handle(IfThenElse* ite) {}
+  void handle(IfThenElse* ite) final {}
 
-  void handle(Expr* expr) {
+  void handle(Expr* expr) final {
     OptInDispatch::handle(expr);
   }
 
@@ -89,22 +89,25 @@ struct forLoopCount : private OptInDispatch {
 
 struct scopePushBack : private OptInDispatch {
  private:
-  Expr* _expr;
-  void handle(ForLoop* fl) {
+  Expr* _expr = nullptr;
+  void handle(ForLoop* fl) final {
     fl->body().push_back(_expr);
   }
 
-  void handle(IfThenElse* ite) {
+  void handle(IfThenElse* ite) final {
     ite->body().push_back(_expr);
   }
 
-  void handle(Expr* expr) {
+  void handle(Expr* expr) final {
     OptInDispatch::handle(expr);
   }
 
  public:
   static void pushBack(Expr* scope, Expr* expr) {
     scopePushBack pb;
+    TORCH_INTERNAL_ASSERT(
+        expr != nullptr && scope != nullptr,
+        "Cannot push back, scope or expr is a nullptr.");
     pb._expr = expr;
     pb.handle(scope);
   }
@@ -113,13 +116,13 @@ struct scopePushBack : private OptInDispatch {
 struct forLoopIndices : private OptInDispatch {
  private:
   std::vector<Val*> inds_;
-  void handle(ForLoop* fl) {
+  void handle(ForLoop* fl) final {
     inds_.insert(inds_.begin(), fl->index());
   }
 
-  void handle(IfThenElse* ite) {}
+  void handle(IfThenElse* ite) final {}
 
-  void handle(Expr* expr) {
+  void handle(Expr* expr) final {
     OptInDispatch::handle(expr);
   }
 
@@ -138,13 +141,13 @@ struct forLoopIndices : private OptInDispatch {
 struct forLoopIDs : private OptInDispatch {
  private:
   std::vector<IterDomain*> IDs_;
-  void handle(ForLoop* fl) {
+  void handle(ForLoop* fl) final {
     IDs_.insert(IDs_.begin(), fl->range());
   }
 
-  void handle(IfThenElse* ite) {}
+  void handle(IfThenElse* ite) final {}
 
-  void handle(Expr* expr) {
+  void handle(Expr* expr) final {
     OptInDispatch::handle(expr);
   }
 
@@ -392,7 +395,7 @@ Allocate* GPULower::getAlloc(TensorView* tv) {
 
   std::vector<Val*> alloc_dims;
 
-  for (auto i = tv->getComputeAtAxis(); i < tv->nDims(); i++) {
+  for (decltype(tv->nDims()) i = tv->getComputeAtAxis(); i < tv->nDims(); i++) {
     IterDomain* dim = tv->getComputeAtAxis(i);
     if (dim->isThreadDim())
       continue;
@@ -669,7 +672,7 @@ void GPULower::replaceSizes() {
           computeAtTV,
           " but one wasn't found.");
       new_tv->setComputeAt(
-          asTV(tv_map[computeAtTV]), orig_tv->getComputeAtAxis());
+          asTV(tv_map[computeAtTV]), (int)(orig_tv->getComputeAtAxis()));
     }
   }
 
@@ -702,7 +705,9 @@ std::vector<Expr*> GPULower::getLoweredExprs() {
   return lowered_exprs;
 }
 
-std::ostream& GPULower::printKernel(std::ostream& os, std::string kernel_name) {
+std::ostream& GPULower::printKernel(
+    std::ostream& os,
+    const std::string& kernel_name) {
   FusionGuard fg(fusion_);
 
   getLoweredExprs();

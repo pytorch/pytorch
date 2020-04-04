@@ -106,9 +106,11 @@ struct TORCH_CUDA_API Statement {
   }
 
   virtual bool sameType(const Statement* const other) {
-    return (
-        getValType().value() == other->getValType().value() &&
-        getExprType().value() == other->getExprType().value());
+    if (isVal() && other->isVal())
+      return getValType().value() == other->getValType().value();
+    if (isExpr() && other->isExpr())
+      return getExprType().value() == other->getExprType().value();
+    return false;
   }
 
   // Return if this statement is the same as another statement

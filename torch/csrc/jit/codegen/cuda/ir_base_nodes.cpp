@@ -45,28 +45,25 @@ namespace {
 
 struct ConstCheck : OptInConstDispatch {
  private:
-  bool is_const_;
+  bool is_const_ = false;
 
-  virtual void handle(const Float* const f) {
+  void handle(const Float* const f) override {
     is_const_ = f->isConst();
   }
 
-  virtual void handle(const Int* const i) {
+  void handle(const Int* const i) override {
     is_const_ = i->isConst();
   }
 
-  virtual void handle(const NamedScalar* const ns) {
-    is_const_ = false;
-  }
+  void handle(const NamedScalar* const ns) override {}
 
-  virtual void handle(const Val* const val) {
+  void handle(const Val* const val) override {
     OptInConstDispatch::handle(val);
   }
 
  public:
   static bool isConst(const Val* const val) {
     ConstCheck cc;
-    cc.is_const_ = false;
     cc.handle(val);
     return cc.is_const_;
   }
@@ -92,8 +89,9 @@ Expr* Val::getOrigin() {
 void Scope::insert_before(Expr* ref, Expr* expr) {
   auto it = exprs_.begin();
   while (it != exprs_.end()) {
-    if (*it == ref)
+    if ((*it)->sameAs(ref))
       break;
+    it++;
   }
   if (it != exprs_.end())
     exprs_.insert(it, expr);
@@ -104,6 +102,7 @@ void Scope::insert_after(Expr* ref, Expr* expr) {
   while (it != exprs_.end()) {
     if (*it == ref)
       break;
+    it++;
   }
   if (it != exprs_.end())
     exprs_.insert(++it, expr);
@@ -114,6 +113,7 @@ void Scope::erase(Expr* ref) {
   while (it != exprs_.end()) {
     if (*it == ref)
       break;
+    it++;
   }
   if (it != exprs_.end())
     exprs_.erase(it);

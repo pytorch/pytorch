@@ -474,11 +474,8 @@ struct TORCH_API TensorIndex : public Val {
  * of the size of the buffer that is generated from the TensorView that
  * describes the output of an operation.
  *
- * TODO:
- * 1.) Should extent_ be an Expr vs a Val?  The Val is currently used to print
- *     the Expr of the size().
- * 2.) The components of Allocate like Type and Name could be separated from the
- *     the assocated TensorView.  Perhaps that is more appropriate?
+ * TODO: The components of Allocate like Type and Name could be separated from
+ * the the assocated TensorView.  Perhaps that is more appropriate?
  */
 struct TORCH_API Allocate : public Expr {
   ~Allocate() = default;
@@ -491,7 +488,7 @@ struct TORCH_API Allocate : public Expr {
 
   Allocate(TensorView* _tv, Val* size);
 
-  DataType buf_type() const noexcept;
+  DataType buf_type() const;
   Val* extent() const noexcept {
     return extent_;
   }

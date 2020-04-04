@@ -250,7 +250,7 @@ Allocate::Allocate(TensorView* _tv, Val* _size)
   this->name_ = FusionGuard::getCurFusion()->registerExpr(this);
 }
 
-DataType Allocate::buf_type() const noexcept {
+DataType Allocate::buf_type() const {
   return buffer_->getDataType().value();
 }
 

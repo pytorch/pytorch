@@ -69,7 +69,7 @@ Statement* OptOutMutator::mutate(TensorView* tv) {
       (tv->hasComputeAt() && !tv->getComputeAtView()->sameAs(computeAtView))) {
     TensorView* mutated_tv = new TensorView(td, tv->getDataType().value());
     if (tv->hasComputeAt()) {
-      mutated_tv->setComputeAt(computeAtView, tv->getComputeAtAxis());
+      mutated_tv->setComputeAt(computeAtView, (int)(tv->getComputeAtAxis()));
     }
     registerMutation(tv, mutated_tv);
     return mutated_tv;
@@ -234,7 +234,7 @@ void ReplaceAll::instancesWithin(
   if (within == nullptr)
     return;
   FusionGuard fg(within->fusion());
-  ReplaceAll ra(replacement_map);
+  ReplaceAll ra(std::move(replacement_map));
   ra.mutate(within);
 }
 

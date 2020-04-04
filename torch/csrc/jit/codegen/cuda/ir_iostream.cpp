@@ -25,7 +25,7 @@ void check_inlineable(const IRInputOutput* const irio) {
 }
 } // namespace
 
-void IRPrinter::printHeader(Fusion* fusion, std::string kernel_name_) {
+void IRPrinter::printHeader(Fusion* fusion, const std::string& kernel_name_) {
   // ceilDiv Helper funtion
   os << "__device__ int ceilDiv(const int a, const int b) {\n"
      << "  return (a + b - 1) / b;\n"
@@ -339,7 +339,9 @@ void IRPrinter::handle(const Reorder* const ro) {
   os << "\n";
 }
 
-void IRPrinter::printKernel(std::vector<Expr*> exprs, std::string kernel_name) {
+void IRPrinter::printKernel(
+    std::vector<Expr*> exprs,
+    const std::string& kernel_name) {
   Fusion* fusion = FusionGuard::getCurFusion();
   // if(exprs.size() != 0)
   //   fusion = exprs[0]->fusion();
