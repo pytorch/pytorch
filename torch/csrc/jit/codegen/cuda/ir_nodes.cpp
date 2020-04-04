@@ -1,7 +1,10 @@
 
 #include <torch/csrc/jit/codegen/cuda/arith.h>
 #include <torch/csrc/jit/codegen/cuda/ir_interface_nodes.h>
+#include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
 #include <torch/csrc/jit/codegen/cuda/tensor.h>
+
+#include <sstream>
 
 namespace torch {
 namespace jit {
@@ -197,7 +200,7 @@ bool ForLoop::sameAs(const ForLoop* other) const {
 }
 
 IfThenElse::IfThenElse(
-    Val* _cond,
+    Int* _cond,
     const std::vector<Expr*>& _if_body,
     const std::vector<Expr*>& _else_body,
     Expr* _parent_scope)
@@ -242,9 +245,18 @@ Val* TensorIndex::index(int i) const {
 
 Allocate::Allocate(TensorView* _tv, Val* _size)
     : Expr(ExprType::Allocate), buffer_(_tv), extent_{_size} {
-  TORCH_INTERNAL_ASSERT(
-      _size->isAnInt() && _size->isConstScalar(),
-      "Allocations must be based on constant integers.");
+  if (!_size->isAnInt() || !_size->isConstScalar()) {
+    std::stringstream flat_size;
+    IRPrinter irp(flat_size);
+    irp.print_inline(_size);
+    TORCH_INTERNAL_ASSERT(
+        false,
+        "Allocations must be based on constant integers but tried to alloc ",
+        _tv,
+        " with size ",
+        flat_size.str(),
+        ".");
+  }
   addInput(_size);
   addInput(_tv);
   this->name_ = FusionGuard::getCurFusion()->registerExpr(this);

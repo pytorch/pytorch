@@ -288,6 +288,17 @@ template void Expr::dispatch(OptInDispatch, Expr*);
 template void Expr::dispatch(OptInDispatch*, Expr*);
 
 template void Statement::constDispatch(
+    OptOutConstDispatch,
+    const Statement* const);
+template void Statement::constDispatch(
+    OptOutConstDispatch*,
+    const Statement* const);
+template void Val::constDispatch(OptOutConstDispatch, const Val* const);
+template void Val::constDispatch(OptOutConstDispatch*, const Val* const);
+template void Expr::constDispatch(OptOutConstDispatch, const Expr* const);
+template void Expr::constDispatch(OptOutConstDispatch*, const Expr* const);
+
+template void Statement::constDispatch(
     OptInConstDispatch,
     const Statement* const);
 template void Statement::constDispatch(
@@ -330,6 +341,16 @@ void OptInDispatch::handle(Expr* e) {
 }
 void OptInDispatch::handle(Val* v) {
   Val::dispatch(this, v);
+}
+
+void OptOutConstDispatch::handle(const Statement* const s) {
+  Statement::constDispatch(this, s);
+}
+void OptOutConstDispatch::handle(const Expr* const e) {
+  Expr::constDispatch(this, e);
+}
+void OptOutConstDispatch::handle(const Val* const v) {
+  Val::constDispatch(this, v);
 }
 
 void OptInConstDispatch::handle(const Statement* const s) {

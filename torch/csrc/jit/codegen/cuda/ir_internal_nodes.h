@@ -146,6 +146,19 @@ struct TORCH_CUDA_API IterDomain : public Val {
 
   void parallelize(ParallelType t) {
     parallel_method_ = t;
+    if (isBlockDim()) {
+      TORCH_CHECK(
+          !isReduction(),
+          "Cannot parallelize reductions across a block dimension.");
+      if (isThreadDim())
+        TORCH_CHECK(
+            !isReduction(),
+            "Thread parallelized reductions not yet supported.");
+      TORCH_CHECK(
+          t != ParallelType::Vectorize, "Vectorization not yet supported.");
+      if (t == ParallelType::Unroll)
+        TORCH_CHECK(false, "Unrolling not yet supported.");
+    }
   }
 
   ParallelType parallel_method() const noexcept {
@@ -369,7 +382,7 @@ struct TORCH_API ForLoop : public Expr {
 struct TORCH_API IfThenElse : public Expr {
   ~IfThenElse() = default;
   IfThenElse(
-      Val* _cond,
+      Int* _cond,
       const std::vector<Expr*>& _if_body = {},
       const std::vector<Expr*>& _else_body = {},
       Expr* _parent_scope = nullptr);
@@ -380,7 +393,7 @@ struct TORCH_API IfThenElse : public Expr {
   IfThenElse(IfThenElse&& other) = delete;
   IfThenElse& operator=(IfThenElse&& other) = delete;
 
-  Val* cond() const noexcept {
+  Int* cond() const noexcept {
     return cond_;
   }
 
@@ -411,7 +424,7 @@ struct TORCH_API IfThenElse : public Expr {
   }
 
  private:
-  Val* const cond_;
+  Int* const cond_;
   Scope body_;
   Scope else_body_;
   Expr* parent_scope_;

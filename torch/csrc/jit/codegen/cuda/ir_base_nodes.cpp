@@ -43,7 +43,7 @@ Val::Val(ValType _vtype, DataType _dtype) : vtype_{_vtype}, dtype_{_dtype} {
 
 namespace {
 
-struct ConstCheck : OptInConstDispatch {
+struct ConstCheck : OptOutConstDispatch {
  private:
   bool is_const_ = false;
 
@@ -55,10 +55,22 @@ struct ConstCheck : OptInConstDispatch {
     is_const_ = i->isConst();
   }
 
-  void handle(const NamedScalar* const ns) override {}
+  void handle(const Expr* const expr) override {
+    for (auto inp : expr->inputs()) {
+      OptOutConstDispatch::handle(inp);
+    }
+  }
+
+  void handle(const NamedScalar* const ns) override {
+    is_const_ = false;
+  }
 
   void handle(const Val* const val) override {
-    OptInConstDispatch::handle(val);
+    const Expr* orig = FusionGuard::getCurFusion()->origin(val);
+    if (orig != nullptr)
+      handle(orig);
+    else
+      OptOutConstDispatch::handle(val);
   }
 
  public:
