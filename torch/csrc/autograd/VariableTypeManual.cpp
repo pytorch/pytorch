@@ -351,6 +351,9 @@ void reset_grad_accumulator(Variable & self) {
 }
 
 Tensor & set__source_Storage(Tensor & self, Storage source) {
+  if (self.has_names()) {
+    AT_ERROR("set_", named_tensors_unsupported_error);
+  }
   RECORD_FUNCTION("set_", std::vector<c10::IValue>({self}), Node::peek_at_next_sequence_nr());
   auto& self_ = unpack(self, "self", 0);
   check_inplace(self);
@@ -371,6 +374,9 @@ Tensor & set__source_Storage(Tensor & self, Storage source) {
   return self;
 }
 Tensor & set__source_Storage_storage_offset(Tensor & self, Storage source, int64_t storage_offset, IntArrayRef size, IntArrayRef stride) {
+  if (self.has_names()) {
+    AT_ERROR("set_", named_tensors_unsupported_error);
+  }
   RECORD_FUNCTION("set_", std::vector<c10::IValue>({self}), Node::peek_at_next_sequence_nr());
   auto& self_ = unpack(self, "self", 0);
   check_inplace(self);
@@ -391,6 +397,9 @@ Tensor & set__source_Storage_storage_offset(Tensor & self, Storage source, int64
   return self;
 }
 Tensor & set__source_Tensor(Tensor & self, const Tensor & source) {
+  if (self.has_names() || source.has_names()) {
+    AT_ERROR("set_", named_tensors_unsupported_error);
+  }
   RECORD_FUNCTION("set_", std::vector<c10::IValue>({self, source}), Node::peek_at_next_sequence_nr());
   auto& self_ = unpack(self, "self", 0);
   auto& source_ = unpack(source, "source", 1);
@@ -435,6 +444,10 @@ Tensor & set__source_Tensor(Tensor & self, const Tensor & source) {
   return self;
 }
 Tensor & set_(Tensor & self) {
+  if (self.has_names()) {
+    AT_ERROR("set_", named_tensors_unsupported_error);
+  }
+  const OptionalDeviceGuard device_guard(device_of(self));
   RECORD_FUNCTION("set_", std::vector<c10::IValue>({self}), Node::peek_at_next_sequence_nr());
   auto& self_ = unpack(self, "self", 0);
   check_inplace(self);
