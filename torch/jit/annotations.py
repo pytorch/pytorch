@@ -282,7 +282,7 @@ def try_ann_to_type(ann, loc):
             return OptionalType(try_ann_to_type(ann.__args__[0], loc))
         else:
             return OptionalType(try_ann_to_type(ann.__args__[1], loc))
-    elif is_rref(ann):
+    elif torch.distributed.rpc.is_available() and is_rref(ann):
         return RRefType(try_ann_to_type(ann.__args__[0], loc))
     elif is_future(ann):
         return FutureType(try_ann_to_type(ann.__args__[0], loc))

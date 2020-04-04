@@ -342,9 +342,14 @@ def _validate_rpc_args(backend, store, name, rank, world_size, rpc_backend_optio
 
 
 T = TypeVar("T")
+GenericWithOneTypeVar = Generic[T]
 
 
-class RRef(_RRefImpl, Generic[T]):
+class RRefMeta(_RRefImpl.__class__, GenericWithOneTypeVar.__class__):
+    pass
+
+
+class RRef(_RRefImpl, GenericWithOneTypeVar, metaclass=RRefMeta):
     # Combine the implementation class and the type class.
     pass
 
