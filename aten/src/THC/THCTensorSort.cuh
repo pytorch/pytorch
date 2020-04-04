@@ -15,6 +15,8 @@
 #include <thrust/system/cuda/execution_policy.h>
 #endif
 
+// yf225 TODO debug some comment
+
 template <typename T, bool handleNaN = false>
 struct ThrustGTOp {
   __device__ bool operator()(const T& lhs, const T& rhs) const {
