@@ -58,6 +58,7 @@ struct ConstCheck : OptOutConstDispatch {
     is_const_ = i->isConst();
   }
 
+<<<<<<< HEAD
   void handle(const Expr* const expr) override {
     for (auto inp : expr->inputs()) {
       OptOutConstDispatch::handle(inp);
@@ -74,6 +75,12 @@ struct ConstCheck : OptOutConstDispatch {
       handle(orig);
     else
       OptOutConstDispatch::handle(val);
+=======
+  void handle(const NamedScalar* const ns) override {}
+
+  void handle(const Val* const val) override {
+    OptInConstDispatch::handle(val);
+>>>>>>> Minor revisions.
   }
 
  public:

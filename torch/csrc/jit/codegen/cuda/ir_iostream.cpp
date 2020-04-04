@@ -25,11 +25,8 @@ void check_inlineable(const IRInputOutput* const irio) {
 }
 } // namespace
 
-<<<<<<< HEAD
 void IRPrinter::printHeader(Fusion* fusion, const std::string& kernel_name_) {
-=======
-void IRPrinter::printHeader(Fusion* fusion, std::string kernel_name_) {
->>>>>>> Major refactor of code lowering and associated parts.
+
   // ceilDiv Helper funtion
   os << "__device__ int ceilDiv(const int a, const int b) {\n"
      << "  return (a + b - 1) / b;\n"
