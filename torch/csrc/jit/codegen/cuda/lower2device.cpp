@@ -263,9 +263,8 @@ TensorIndex* GPULower::getLocalProducerIndex(
   std::vector<IterDomain*> ranges = getLoopIterDomains();
   std::vector<Val*> computed_inds;
   std::vector<IterDomain*> used_ranges;
-
   for (decltype(loopInds.size()) i{0}; i < loopInds.size(); i++) {
-    if (i < producer->getComputeAtAxis())
+    if (producer->hasComputeAt() && i < producer->getComputeAtAxis())
       continue;
     if (ranges[i]->isThread())
       continue;
@@ -276,10 +275,9 @@ TensorIndex* GPULower::getLocalProducerIndex(
   for (decltype(computed_inds.size()) i{0}; i < computed_inds.size(); i++) {
     Val* ind = computed_inds[i];
     for (decltype(used_ranges.size()) j{i + 1}; j < used_ranges.size(); j++)
-      ind = mul(ind, used_ranges[i]);
+      ind = mul(ind, used_ranges[i]->size());
     computed_inds[i] = ind;
   }
-
   if (computed_inds.size() == 0)
     computed_inds.push_back(new Int(0));
 
@@ -347,7 +345,7 @@ TensorIndex* GPULower::getLocalConsumerIndex(TensorView* consumer) {
   for (decltype(computed_inds.size()) i{0}; i < computed_inds.size(); i++) {
     Val* ind = computed_inds[i];
     for (decltype(used_ranges.size()) j{i + 1}; j < used_ranges.size(); j++)
-      ind = mul(ind, used_ranges[i]);
+      ind = mul(ind, used_ranges[i]->size());
     computed_inds[i] = ind;
   }
 
