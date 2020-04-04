@@ -120,6 +120,7 @@ DEFINE_DISPATCH(exponential_stub);
 DEFINE_DISPATCH(multinomial_stub);
 DEFINE_DISPATCH(geometric_stub);
 DEFINE_DISPATCH(log_normal_stub);
+DEFINE_DISPATCH(uniform_stub);
 DEFINE_DISPATCH(normal_stub);
 DEFINE_DISPATCH(random_stub);
 DEFINE_DISPATCH(random_from_to_stub);
@@ -217,6 +218,19 @@ Tensor& geometric_(Tensor& self, double p, Generator gen) {
   auto iter = TensorIterator::nullary_op(self);
   geometric_stub(iter.device_type(), iter, p, gen);
   return self;
+}
+
+// ==================================================== Uniform =======================================================
+
+template<typename RNG>
+struct UniformStub {
+  void operator()(TensorIterator& iter, double from, double to, Generator gen) {
+    uniform_stub(iter.device_type(), iter, from, to, gen);
+  }
+};
+
+Tensor& uniform_(Tensor& self, double from, double to, Generator gen) {
+  return at::native::templates::uniform_impl_<UniformStub, Generator>(self, from, to, gen);
 }
 
 // ==================================================== Normal ========================================================
