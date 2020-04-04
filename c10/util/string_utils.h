@@ -55,12 +55,20 @@ inline double stod(const std::string& str, std::size_t* pos = 0) {
   return val;
 }
 
-inline long long stoll(const std::string& str) {
+inline long long stoll(const std::string& str, std::size_t* pos = 0) {
   // std::stoll doesn't exist in our Android environment, we need to implement
   // it ourselves.
-  std::istringstream s(str);
+  std::stringstream ss;
+  ss << str;
   long long result = 0;
-  s >> result;
+  ss >> result;
+  if (pos) {
+    if (ss.tellg() == std::streampos(-1)) {
+      *pos = str.size();
+    } else {
+      *pos = ss.tellg();
+    }
+  }
   return result;
 }
 
