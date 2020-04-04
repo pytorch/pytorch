@@ -227,10 +227,6 @@ const std::deque<Val*>& Fusion::deterministic_vals() const noexcept {
   return val_deque_;
 }
 
-<<<<<<< HEAD
-=======
-
->>>>>>> Option to return vals from fusion in registered order.
 const std::set<Expr*>& Fusion::unordered_exprs() const noexcept {
   return expr_set_;
 }
