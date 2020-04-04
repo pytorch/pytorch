@@ -169,7 +169,8 @@ if [[ $BUILD_ENVIRONMENT == *rocm* ]]; then
   # the build process, leaving undefined symbols in the shared lib
   # which will cause undefined symbol errors when later running
   # tests. Setting MAX_JOBS to smaller number to make CI less flaky.
-  export MAX_JOBS=1
+  export MAX_JOBS=4
+  export SCCACHE_RECACHE=1
 
   ########## HIPIFY Caffe2 operators
   ${PYTHON} "${ROOT_DIR}/tools/amd_build/build_amd.py"
