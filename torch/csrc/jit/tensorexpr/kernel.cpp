@@ -1,5 +1,6 @@
 #include <torch/csrc/jit/tensorexpr/kernel.h>
 
+#include <c10/util/string_utils.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/tensorexpr/analysis.h>
 #include <torch/csrc/jit/tensorexpr/ir_printer.h>
@@ -54,7 +55,7 @@ static std::vector<DimArg> texprDims(const torch::jit::Value* v) {
   std::vector<DimArg> dimArgs;
   int i = 0;
   for (auto const& s : texprSizes(tt->sizes())) {
-    dimArgs.emplace_back(DimArg(s, "i" + std::to_string(i++)));
+    dimArgs.emplace_back(DimArg(s, "i" + c10::to_string(i++)));
   }
   return dimArgs;
 }
@@ -1044,7 +1045,7 @@ void TensorExprKernel::lowerToBackend(BackendType backendType) {
         l.setGPUThreadIndex(inner2, 0);
       } else {
         throw std::runtime_error(
-            "Invalid loop-level: " + std::to_string(loopLevels));
+            "Invalid loop-level: " + c10::to_string(loopLevels));
       }
     }
   } else if (backendType == kLLVMCodeGen) {
@@ -1147,7 +1148,7 @@ void TensorExprKernel::lowerToBackend(BackendType backendType) {
     default:
       throw std::runtime_error(
           "invalid backend type: " +
-          std::to_string(static_cast<int>(backendType_)));
+          c10::to_string(static_cast<int>(backendType_)));
   }
 
   codegenCache_.emplace(
@@ -1275,8 +1276,8 @@ void TensorExprKernel::pickAndCheckBackendType(
     // TODO: if we have to support muliptole backends with the same subgraph,
     // we need to add kernel caching.
     throw std::runtime_error(
-        "Inconsistent backendType: " + std::to_string(backendType_) + " vs " +
-        std::to_string(backendType));
+        "Inconsistent backendType: " + c10::to_string(backendType_) + " vs " +
+        c10::to_string(backendType));
   }
 }
 
@@ -1290,7 +1291,7 @@ void TensorExprKernel::codeGenRun(
       break;
     default:
       throw std::runtime_error(
-          "Invalid backend type: " + std::to_string(backendType_));
+          "Invalid backend type: " + c10::to_string(backendType_));
   }
 }
 
@@ -1319,7 +1320,7 @@ ExprHandle TensorExprKernel::createInputIndexExpr(
     // For discontiguous tensors, create a parameter to represent stride.
     if (!*contiguity[i]) {
       VarHandle v = VarHandle{
-          "stride_" + buffer.data()->name_hint() + "_" + std::to_string(i),
+          "stride_" + buffer.data()->name_hint() + "_" + c10::to_string(i),
           kInt};
       strideArgs.emplace_back(n - i, v);
       stride = v;
@@ -1364,14 +1365,14 @@ void TensorExprKernel::bindInput(const torch::jit::Value* input) {
         auto const& size = *tt->sizes()[i];
         if (size < 0) {
           VarHandle v(
-              "size_" + std::to_string(input->unique()) + "_" +
-                  std::to_string(i),
+              "size_" + c10::to_string(input->unique()) + "_" +
+                  c10::to_string(i),
               kInt);
           sizeVars.emplace(size, v);
           inputTensorDims.emplace_back(v);
         } else {
           inputTensorDims.emplace_back(
-              DimArg(IntImm::make(size), "i" + std::to_string(i)));
+              DimArg(IntImm::make(size), "i" + c10::to_string(i)));
         }
       }
 #ifdef DYNAMIC_SHAPES
