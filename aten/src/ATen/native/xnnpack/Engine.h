@@ -12,7 +12,6 @@ namespace xnnpack {
 
 bool use_clamp(
     const Tensor& input,
-    const Tensor* output,
     float output_min,
     float output_max);
 
@@ -21,8 +20,19 @@ Tensor clamp(
     float output_min,
     float output_max);
 
+bool use_clamp_(
+    Tensor& input,
+    float output_min,
+    float output_max);
+
 Tensor& clamp_(
     Tensor& input,
+    float output_min,
+    float output_max);
+
+bool use_clamp_out(
+    Tensor& output,
+    const Tensor& input,
     float output_min,
     float output_max);
 
@@ -91,6 +101,26 @@ Tensor max_pool2d(
     bool ceil_mode,
     float output_min = -std::numeric_limits<float>::infinity(),
     float output_max = +std::numeric_limits<float>::infinity());
+
+//
+// ReLU
+//
+
+inline bool use_relu(const Tensor& input) {
+  return use_clamp(input, 0.0f, std::numeric_limits<float>::infinity());
+}
+
+inline Tensor relu(const Tensor& input) {
+  return clamp(input, 0.0f, std::numeric_limits<float>::infinity());
+}
+
+inline bool use_relu_(Tensor& input) {
+  return use_clamp_(input, 0.0f, std::numeric_limits<float>::infinity());
+}
+
+inline Tensor& relu_(Tensor& input) {
+  return clamp_(input, 0.0f, std::numeric_limits<float>::infinity());
+}
 
 } // namespace xnnpack
 } // namespace native

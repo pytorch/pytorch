@@ -30,24 +30,45 @@ bool available() {
 
 bool use_clamp(
     const Tensor&,
-    const Tensor* const,
-    const Scalar,
-    const Scalar output_max) {
+    const float,
+    const float) {
+  return false;
+}
+
+Tensor clamp(
+    const Tensor&,
+    const float,
+    const float) {
+  TORCH_CHECK(false, internal::kError);
+}
+
+bool use_clamp_(
+    const Tensor&,
+    const float,
+    const float) {
   return false;
 }
 
 Tensor& clamp_(
     const Tensor&,
-    const Tensor&,
-    const Scalar,
-    const Scalar output_max) {
+    const float,
+    const float) {
   TORCH_CHECK(false, internal::kError);
 }
 
-Tensor clamp(
+bool use_clamp_out(
     const Tensor&,
-    const Scalar,
-    const Scalar output_max) {
+    const Tensor&,
+    const float,
+    const float) {
+  return false;
+}
+
+Tensor& clamp_out(
+    const Tensor&,
+    const Tensor&,
+    const float,
+    const float) {
   TORCH_CHECK(false, internal::kError);
 }
 
