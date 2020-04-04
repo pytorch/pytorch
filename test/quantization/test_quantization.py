@@ -21,7 +21,7 @@ from torch.quantization import default_histogram_observer
 from torch.quantization import default_observer
 from torch.quantization import default_per_channel_weight_observer
 from torch.quantization import default_per_channel_qconfig
-from torch.quantization._quantize_script import quantize_script
+from torch.quantization._quantize_script import quantize_script, quantize_dynamic_script
 
 from torch.testing._internal.common_utils import run_tests, TEST_WITH_UBSAN, IS_WINDOWS
 from torch.testing._internal.common_quantization import QuantizationTestCase, \
@@ -1081,6 +1081,43 @@ class GraphModePostTrainingQuantTest(QuantizationTestCase):
                 inplace=False)
             self.assertEqual(model_quantized(self.calib_data[0][0]), result_eager)
 
+    def test_single_linear_dynamic(self):
+        r"""Compare the result of dynamic quantization of single linear layer in
+        eager mode and graph mode.
+        """
+        # eager mode
+        annotated_linear_model = AnnotatedSingleLayerLinearModel().eval()
+        linear_model = SingleLayerLinearModel().eval()
+        # copy the weight from eager mode so that we can
+        # compare the result of the two quantized models later
+        linear_model.fc1.weight = torch.nn.Parameter(annotated_linear_model.fc1.module.weight.detach())
+        linear_model.fc1.bias = torch.nn.Parameter(annotated_linear_model.fc1.module.bias.detach())
+        qconfig_dict = {'': default_dynamic_qconfig}
+        model_eager = quantize_dynamic(annotated_linear_model, qconfig_dict)
+
+        model_traced = torch.jit.trace(linear_model, self.calib_data[0][0])
+        model_script = torch.jit.script(linear_model)
+        result_eager = model_eager(self.calib_data[0][0])
+
+        for model_under_test in [model_traced, model_script]:
+            model_quantized = quantize_dynamic_script(
+                model_under_test,
+                qconfig_dict,
+                test_only_eval_fn,
+                [self.calib_data])
+            self.assertEqual(model_quantized(self.calib_data[0][0]), result_eager)
+
+            # Check to make sure choose_qparams->quant->dequant->linear is numerically
+            # equivalent to the final quantized model.
+            model_fake_quantized = quantize_dynamic_script(
+                model_under_test,
+                qconfig_dict,
+                test_only_eval_fn,
+                [self.calib_data],
+                debug=True)
+            self.assertEqual(model_fake_quantized(self.calib_data[0][0]), result_eager)
+
+
 class FunctionalModuleTest(QuantizationTestCase):
     # Histogram Observers are slow, so have no-deadline to ensure test doesn't time out
     @given(train_mode=st.booleans())
@@ -1407,6 +1444,28 @@ class ObserverTest(QuantizationTestCase):
         self.assertEqual(ref[0], qparams[0])
         self.assertEqual(ref[1], qparams[1])
 
+    def test_tensor_list_observer(self):
+        from torch.quantization.observer import _MinMaxTensorListObserver
+        x = [torch.tensor([1.0, 2.5, 3.5]),
+             torch.tensor([2.0, 4.5, 3.5]),
+             torch.tensor([4.0, 2.5, 3.5]), ]
+        obs = _MinMaxTensorListObserver()
+        obs(x)
+        qparams = obs.calculate_qparams()
+        ref_min_val = []
+        ref_max_val = []
+        ref_qparams = []
+        for i in x:
+            obs_ref = MinMaxObserver()
+            obs_ref(i)
+            ref_min_val.append(obs_ref.min_val)
+            ref_max_val.append(obs_ref.max_val)
+            ref_qparams.append(obs_ref.calculate_qparams())
+        for i in range(len(x)):
+            self.assertEqual(obs.min_val[i], ref_min_val[i])
+            self.assertEqual(obs.max_val[i], ref_max_val[i])
+            self.assertEqual(torch.tensor([qparams[0][i]]), ref_qparams[i][0])
+            self.assertEqual(torch.tensor([qparams[1][i]]), ref_qparams[i][1])
 
     @given(qdtype=st.sampled_from((torch.qint8, torch.quint8)),
            qscheme=st.sampled_from((torch.per_channel_affine, torch.per_channel_symmetric)),
@@ -1510,7 +1569,6 @@ class ObserverTest(QuantizationTestCase):
             x = torch.rand(3, 4)
             obs(x)
             scripted(x)
-
             self.assertEqual(obs.calculate_qparams(), scripted.calculate_qparams())
 
             buf = io.BytesIO()
@@ -1518,6 +1576,15 @@ class ObserverTest(QuantizationTestCase):
             buf.seek(0)
             loaded = torch.jit.load(buf)
             self.assertEqual(obs.calculate_qparams(), loaded.calculate_qparams())
+
+        # Check TensorListObserver
+        from torch.quantization.observer import _MinMaxTensorListObserver
+        obs = _MinMaxTensorListObserver()
+        scripted = torch.jit.script(obs)
+        x = [torch.rand(3, 4), torch.rand(4, 5)]
+        obs(x)
+        scripted(x)
+        self.assertEqual(obs.calculate_qparams(), scripted.calculate_qparams())
 
     def test_no_qconfig_propagation(self):
         model = ModelWithNoQconfigPropagation()
