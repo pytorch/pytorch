@@ -59,6 +59,7 @@ TESTS = [
     'quantization/test_quantize_script',
     'test_sparse',
     'test_serialization',
+    'test_show_pickle',
     'test_torch',
     'test_type_info',
     'test_type_hints',
