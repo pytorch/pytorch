@@ -9,6 +9,8 @@
 // entire tensor to one value.
 //
 
+// yf225 TODO debug some comment
+
 #include <THC/THCReduceApplyUtils.cuh>
 #include <c10/macros/Macros.h>
 
