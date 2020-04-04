@@ -804,8 +804,13 @@ inline void gpu_reduce_kernel(TensorIterator& iter, const ops_t& ops, ident_t id
     // Divide the input across thread-blocks if the amount of work per-thread
     // is large enough and the size of the output is small enough. This will
     // require a reduction using global memory.
+    // If we decide to split input across blocks, as long as we can get enough
+    // number of blocks (`target_grid_size`) to balance SM, we should still
+    // make the number of values per thread large for best performance.
     int ctas_per_output1 = div_up(config.values_per_thread(), 16);
     int ctas_per_output2 = div_up(target_grid_size, grid);
+    // We want the minimum of the above two values, so that each thread can have
+    // a large number of values to deal with
     config.ctas_per_output = std::min<int>(ctas_per_output1, ctas_per_output2);
     if (config.ctas_per_output > 1) {
       config.input_mult[2] = config.split_input(config.ctas_per_output);
