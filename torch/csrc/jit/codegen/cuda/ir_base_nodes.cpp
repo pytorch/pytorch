@@ -59,6 +59,9 @@ struct ConstCheck : OptOutConstDispatch {
   }
 
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> Improve const scalar check. Add some parallelization guards. Move conditionals back to Int.
   void handle(const Expr* const expr) override {
     for (auto inp : expr->inputs()) {
       OptOutConstDispatch::handle(inp);
@@ -68,6 +71,7 @@ struct ConstCheck : OptOutConstDispatch {
   void handle(const NamedScalar* const ns) override {
     is_const_ = false;
   }
+<<<<<<< HEAD
 
   void handle(const Val* const val) override {
     const Expr* orig = FusionGuard::getCurFusion()->origin(val);
@@ -81,6 +85,15 @@ struct ConstCheck : OptOutConstDispatch {
   void handle(const Val* const val) override {
     OptInConstDispatch::handle(val);
 >>>>>>> Minor revisions.
+=======
+
+  void handle(const Val* const val) override {
+    const Expr* orig = FusionGuard::getCurFusion()->origin(val);
+    if (orig != nullptr)
+      handle(orig);
+    else
+      OptOutConstDispatch::handle(val);
+>>>>>>> Improve const scalar check. Add some parallelization guards. Move conditionals back to Int.
   }
 
  public:
