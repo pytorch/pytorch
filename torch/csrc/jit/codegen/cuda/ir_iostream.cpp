@@ -26,7 +26,6 @@ void check_inlineable(const IRInputOutput* const irio) {
 } // namespace
 
 void IRPrinter::printHeader(Fusion* fusion, const std::string& kernel_name_) {
-
   // ceilDiv Helper funtion
   os << "__device__ int ceilDiv(const int a, const int b) {\n"
      << "  return (a + b - 1) / b;\n"

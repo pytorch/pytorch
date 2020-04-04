@@ -458,7 +458,7 @@ void validate(Fusion* fusion) {
           computeAtTV,
           " but one wasn't found.");
       new_tv->setComputeAt(
-          asTV(tv_map[computeAtTV]), orig_tv->getComputeAtAxis());
+          asTV(tv_map[computeAtTV]), (int)(orig_tv->getComputeAtAxis()));
     }
   }
 
@@ -526,7 +526,9 @@ std::ostream& GPULower::printKernel(
   return lowered_exprs;
 }
 
-std::ostream& GPULower::printKernel(std::ostream& os, std::string kernel_name) {
+std::ostream& GPULower::printKernel(
+    std::ostream& os,
+    const std::string& kernel_name) {
   FusionGuard fg(fusion_);
 
 >>>>>>> Major refactor of code lowering and associated parts.
