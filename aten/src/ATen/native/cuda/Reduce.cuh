@@ -407,12 +407,13 @@ struct ReduceOp {
       }
       #pragma unroll
       for (index_t i = 0; i < vt0; i++) {
-        value_list[i] = ops.reduce(value_list[i], values[i], idx);
+        value_list[i] = ops.reduce(value_list[i], values[i], idx + i * stride);
       }
       idx += stride * vt0;
     }
 
     // tail
+    int idx_ = idx;
     #pragma unroll
     for (index_t i = 0; i < vt0; i++) {
       if (idx >= end) {
@@ -421,6 +422,7 @@ struct ReduceOp {
       values[i] = data[calc(idx)];
       idx += stride;
     }
+    idx = idx_;
     #pragma unroll
     for (index_t i = 0; i < vt0; i++) {
       if (idx >= end) {
