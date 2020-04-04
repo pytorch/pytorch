@@ -4,14 +4,15 @@
 template<typename T, typename int_t>
 static void TestBinaryOpsForIntType(T real, T img, int_t num) {
   std::complex<T> c(real, img);
-  ASSERT_EQ(c + num, std::complex<T>(real + num, img + num));
-  ASSERT_EQ(num + c, std::complex<T>(num + real, num + img));
-  ASSERT_EQ(c - num, std::complex<T>(real - num, num - num));
-  ASSERT_EQ(num - c, std::complex<T>(num - real, num - img));
+  ASSERT_EQ(c + num, std::complex<T>(real + num, img));
+  ASSERT_EQ(num + c, std::complex<T>(num + real, img));
+  ASSERT_EQ(c - num, std::complex<T>(real - num, img));
+  ASSERT_EQ(num - c, std::complex<T>(num - real, -img));
   ASSERT_EQ(c * num, std::complex<T>(real * num, img * num));
   ASSERT_EQ(num * c, std::complex<T>(num * real, num * img));
   ASSERT_EQ(c / num, std::complex<T>(real / num, img / num));
-  ASSERT_EQ(num / c, std::complex<T>(num / real, num / img));
+  T r2 = real * real + img * img;
+  ASSERT_EQ(num / c, std::complex<T>(num * real / r2, - num * img / r2));
 }
 
 template<typename T>
