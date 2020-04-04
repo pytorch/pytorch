@@ -1816,20 +1816,6 @@ class _TestTorchMixin(object):
                 self.assertEqual(x.select(dim, i), res[i])
                 self.assertEqual(x.select(dim, i), res2[i])
 
-    def test_rand(self):
-        def common_routine(dtype):
-            torch.manual_seed(123456)
-            res1 = torch.rand(SIZE, SIZE, dtype=dtype)
-            res2 = torch.tensor([], dtype=dtype)
-            torch.manual_seed(123456)
-            torch.rand(SIZE, SIZE, out=res2)
-            self.assertEqual(res1, res2)
-
-        common_routine(dtype=torch.float32)
-        common_routine(dtype=torch.float64)
-        common_routine(dtype=torch.complex64)
-        common_routine(dtype=torch.complex128)
-
     def test_randint(self):
         def seed(generator):
             if generator is None:
@@ -9644,6 +9630,15 @@ class TestTorchDeviceType(TestCase):
         res2 = torch.tensor([], dtype=dtype, device=device)
         torch.manual_seed(123456)
         torch.randn(SIZE, SIZE, out=res2)
+        self.assertEqual(res1, res2)
+
+    @dtypes(torch.float, torch.double, torch.complex64, torch.complex128)
+    def test_rand(self, device, dtype):
+        torch.manual_seed(123456)
+        res1 = torch.rand(SIZE, SIZE, dtype=dtype, device=device)
+        res2 = torch.tensor([], dtype=dtype, device=device)
+        torch.manual_seed(123456)
+        torch.rand(SIZE, SIZE, out=res2)
         self.assertEqual(res1, res2)
 
     def test_empty_strided(self, device):
