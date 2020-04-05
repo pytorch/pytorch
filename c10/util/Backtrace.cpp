@@ -230,13 +230,13 @@ std::string get_backtrace(
   HANDLE process;
   DWORD64 displacement;
   DWORD disp;
-  IMAGEHLP_LINE64* line;
+  std::unique_ptr<IMAGEHLP_LINE64> line;
 
   char buffer[sizeof(SYMBOL_INFO) + MAX_SYM_NAME * sizeof(TCHAR)];
   char module[max_name_len];
   PSYMBOL_INFO p_symbol = (PSYMBOL_INFO)buffer;
 
-  void** back_trace = new void*[maximum_number_of_frames];
+  std::unique_ptr<void*[]> back_trace(new void*[maximum_number_of_frames]);
   bool with_symbol = false;
   bool with_line = false;
 
@@ -248,7 +248,7 @@ std::string get_backtrace(
   const USHORT n_frame = CaptureStackBackTrace(
       static_cast<DWORD>(frames_to_skip),
       static_cast<DWORD>(maximum_number_of_frames),
-      back_trace,
+      back_trace.get(),
       NULL);
 
   // The backtrace string goes into here.
@@ -262,10 +262,10 @@ std::string get_backtrace(
         process, (ULONG64)back_trace[i_frame], &displacement, p_symbol);
 
     // Get the line number and the module
-    line = new IMAGEHLP_LINE64();
+    line.reset(new IMAGEHLP_LINE64());
     line->SizeOfStruct = sizeof(IMAGEHLP_LINE64);
     with_line = SymGetLineFromAddr64(
-        process, (ULONG64)back_trace[i_frame], &disp, line);
+        process, (ULONG64)back_trace[i_frame], &disp, line.get());
 
     // The pattern on Windows is
     // `<return-address> <symbol-address> <demangled-function-name> [<file-name>
@@ -286,12 +286,7 @@ std::string get_backtrace(
       stream << module << " @ <unknown line number>";
     }
     stream << "]" << std::endl;
-
-    delete line;
-    line = nullptr;
   }
-
-  delete[] back_trace;
 
   return stream.str();
 #else // !SUPPORTS_BACKTRACE && !_WIN32
