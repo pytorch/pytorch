@@ -7,8 +7,6 @@
 #include <THC/THCApply.cuh>
 #include <THC/THCNumerics.cuh>
 
-// yf225 TODO debug some comment
-
 template<typename ScalarTypeOut, typename ScalarType, typename TensorTypeOut, typename TensorType, class Op>
 void THC_logicalValue(THCState *state,
                       TensorTypeOut *self_,

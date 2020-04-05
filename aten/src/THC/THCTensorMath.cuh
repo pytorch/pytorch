@@ -3,8 +3,6 @@
 
 #include "ATen/cuda/CUDAContext.h"
 
-// yf225 TODO debug some comment
-
 // Copy the kth diagonal of a matrix B to a vector A.
 template <typename T>
 #ifdef __HIP_PLATFORM_HCC__

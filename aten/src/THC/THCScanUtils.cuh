@@ -5,8 +5,6 @@
 #include <THC/THCDeviceUtils.cuh>
 #include <c10/macros/Macros.h>
 
-// yf225 TODO debug some comment
-
 // Collection of in-kernel scan / prefix sum utilities
 
 // Inclusive Scan via an upsweep/downsweep mechanism. Assumes:

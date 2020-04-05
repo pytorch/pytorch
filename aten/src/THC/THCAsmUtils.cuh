@@ -6,8 +6,6 @@
 template <typename T>
 struct Bitfield {};
 
-// yf225 TODO debug some comment
-
 template <>
 struct Bitfield<unsigned int> {
   static __device__ __forceinline__

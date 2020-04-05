@@ -6,8 +6,6 @@
 #include <cuda_runtime.h>
 #endif
 
-// yf225 TODO debug some comment
-
 // A utility class to implement integer division by multiplication, given a fixed
 // divisor.
 //

@@ -9,8 +9,6 @@
 #include <ATen/ATen.h>
 #include <ATen/cuda/NumericLimits.cuh>
 
-// yf225 TODO debug some comment
-
 // WARNING: THCNumerics is being deprecated. Please follow the comments
 // in this file to learn about new usages.
 // Comments on usage:

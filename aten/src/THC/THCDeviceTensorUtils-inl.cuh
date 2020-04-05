@@ -1,7 +1,5 @@
 namespace detail {
 
-// yf225 TODO debug some comment
-
 // Add a layer of SFINAE to support static_assert
 template <typename T, int Dim, typename IndexT,
           template <typename U> class PtrTraits,

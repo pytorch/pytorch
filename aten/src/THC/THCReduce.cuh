@@ -8,8 +8,6 @@
 // arguments without copying or temporary storage.
 //
 
-// yf225 TODO debug some comment
-
 #include <THC/THCTensorTypeUtils.cuh>
 #include <THC/THCReduceApplyUtils.cuh>
 #include <THC/THCNumerics.cuh>

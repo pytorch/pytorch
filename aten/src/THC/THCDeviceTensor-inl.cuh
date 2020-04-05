@@ -1,7 +1,5 @@
 #include <assert.h>
 
-// yf225 TODO debug some comment
-
 namespace detail {
 
 template <typename T, int N>

@@ -10,8 +10,6 @@
 #include <THC/THCNumerics.cuh>
 #include <THC/THCReduce.cuh>
 
-// yf225 TODO debug some comment
-
 template <typename T>
 struct TensorCAddOp {
   TensorCAddOp(T v) : val(v) {}

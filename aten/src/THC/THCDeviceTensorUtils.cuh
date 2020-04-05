@@ -5,8 +5,6 @@
 #include <THC/THCTensor.hpp>
 #include <limits>
 
-// yf225 TODO debug some comment
-
 /// Constructs a DeviceTensor initialized from a THCudaTensor by
 /// upcasting or downcasting the tensor to that of a different
 /// dimension.

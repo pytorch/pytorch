@@ -7,8 +7,6 @@
 #include <THC/THCTensorCopy.hpp>
 #include <ATen/cuda/CUDAContext.h>
 
-// yf225 TODO debug some comment
-
 //
 // This file contains pointwise operation functions and kernels that
 // work on both contiguous and non-contiguous tensor arguments of

@@ -8,8 +8,6 @@
 #include <THC/THCNumerics.cuh>
 #include <THC/THCReduce.cuh>
 
-// yf225 TODO debug some comment
-
 template <typename T, typename TOut>
 struct TensorEQOp {
   __device__ inline void operator()(TOut* out, T* a, T* b) {

@@ -16,8 +16,6 @@
 #include <thrust/system/cuda/execution_policy.h>
 #endif
 
-// yf225 TODO debug some comment
-
 /*
 Reductions that (only) operate on accumulate types.
 */

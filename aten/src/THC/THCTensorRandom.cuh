@@ -10,8 +10,6 @@
 #define MAX_NUM_BLOCKS 200
 #define BLOCK_SIZE 256
 
-// yf225 TODO debug some comment
-
 template <typename T>
 __global__ void
 multinomialAliasDrawKernel(int size, int64_t *output, int64_t *J, T *q, int64_t K,  T *uniform, T *bernoulli){

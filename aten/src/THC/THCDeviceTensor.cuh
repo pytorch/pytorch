@@ -4,8 +4,6 @@
 #include <cuda.h>
 #include <cuda_runtime.h>
 
-// yf225 TODO debug some comment
-
 // A CUDA 6.5 compatible version of static_assert. Remove once on CUDA 7.0.
 template <bool>
 struct THCStaticAssert;

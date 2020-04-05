@@ -10,8 +10,6 @@
 // Maximum number of dimensions allowed for cutorch
 #define MAX_CUTORCH_DIMS 25
 
-// yf225 TODO debug some comment
-
 // Warning string for tensor arguments that are too large or have too
 // many dimensions
 #define CUTORCH_STR(X) #X

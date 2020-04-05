@@ -6,8 +6,6 @@
 #include <THC/THCNumerics.cuh>
 #include <c10/macros/Macros.h>
 
-// yf225 TODO debug some comment
-
 // Collection of kernel sort routines
 template <typename T, bool handleNaN = false>
 struct LTComp {

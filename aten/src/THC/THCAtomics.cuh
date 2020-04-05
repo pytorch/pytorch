@@ -6,8 +6,6 @@
 #include <THC/THCNumerics.cuh>
 #include <ATen/ATen.h>
 
-// yf225 TODO debug some comment
-
 template <typename T, size_t n>
 struct AtomicAddIntegerImpl;
 

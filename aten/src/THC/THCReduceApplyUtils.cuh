@@ -8,8 +8,6 @@
 #include <THC/THCDeviceUtils.cuh>
 #include <THC/THCTensorInfo.cuh>
 
-// yf225 TODO debug some comment
-
 // Enum that indicates whether tensor arguments are read/write or
 // read-only
 enum TensorArgType { ReadWrite, ReadOnly };

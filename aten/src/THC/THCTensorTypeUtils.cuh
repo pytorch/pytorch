@@ -9,8 +9,6 @@
 #include <THC/THCTensorInfo.cuh>
 #include <THC/THCTensor.hpp>
 
-// yf225 TODO debug some comment
-
 /// A utility for accessing THCuda*Tensor types in a generic manner
 
 /// Equivalent to C++11's type_traits std::is_same; used for comparing

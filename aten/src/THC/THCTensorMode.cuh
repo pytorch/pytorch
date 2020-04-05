@@ -5,8 +5,6 @@
 #include <THC/THCSortUtils.cuh>
 #include <THC/THCScanUtils.cuh>
 
-// yf225 TODO debug some comment
-
 struct ThrustHalfLess
 {
   __host__ __device__ inline bool operator()(const at::Half& lhs, const at::Half& rhs) {
