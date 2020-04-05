@@ -376,51 +376,51 @@ class TransformerDecoderLayer(Module):
         return tgt
 
 
-class MultiheadAttentionInProjection(Module):
-    r"""Process input using multi-head attention.
+# class MultiheadAttentionInProjection(Module):
+#     r"""Process input using multi-head attention.
 
-    Args:
-        embed_dim (int): Input embedding dimension
-        num_heads (int): Number of parallel attention heads.
-        head_dim (int, optional): Dimension of embedding for each attention
-            head. If not provided, then it is set to ``embed_dim / num_heads``.
+#     Args:
+#         embed_dim (int): Input embedding dimension
+#         num_heads (int): Number of parallel attention heads.
+#         head_dim (int, optional): Dimension of embedding for each attention
+#             head. If not provided, then it is set to ``embed_dim / num_heads``.
 
-    Shape:
-        - seq: :math:`(S, N, E)`
-        - Output: :math:`(N * H, S, D)`
-        where S is the sequence length, N is the batch size, H is the number of
-        attention heads, E is the embedding dimension, and D is the head
-        dimension.
+#     Shape:
+#         - seq: :math:`(S, N, E)`
+#         - Output: :math:`(N * H, S, D)`
+#         where S is the sequence length, N is the batch size, H is the number of
+#         attention heads, E is the embedding dimension, and D is the head
+#         dimension.
 
-    Attributes:
-        weight: The learnable weights of the module of shape
-            :math:`(\text{head\_dim} * \text{num\_heads}, \text{embed\_dim})`.
+#     Attributes:
+#         weight: The learnable weights of the module of shape
+#             :math:`(\text{head\_dim} * \text{num\_heads}, \text{embed\_dim})`.
 
-    Examples::
+#     Examples::
 
-        >>> # S = 21; N = 64; E = 10; D = 3; H = 4;
-        >>> MHA_in = nn.MultiheadAttentionInProjection(10, 4, 3)
-        >>> seq = torch.randn(21, 64, 10)
-        >>> s = MHA_in(seq)
-        >>> print(s.shape)
-        torch.Size([21, 256, 3])
-    """
-    __constants__ = ['embed_dim', 'num_heads', 'head_dim']
+#         >>> # S = 21; N = 64; E = 10; D = 3; H = 4;
+#         >>> MHA_in = nn.MultiheadAttentionInProjection(10, 4, 3)
+#         >>> seq = torch.randn(21, 64, 10)
+#         >>> s = MHA_in(seq)
+#         >>> print(s.shape)
+#         torch.Size([21, 256, 3])
+#     """
+#     __constants__ = ['embed_dim', 'num_heads', 'head_dim']
 
-    def __init__(self, embed_dim, num_heads, head_dim=None):
-        super(MultiheadAttentionInProjection, self).__init__()
-        if head_dim is None:
-            assert embed_dim % num_heads == 0, "embed_dim must be divisible by num_heads when head_dim=None"
-            head_dim = embed_dim // num_heads
-        self.head_dim = head_dim
-        self.embed_dim = embed_dim
-        self.num_heads = num_heads
-        self.weight = torch.nn.Parameter(torch.Tensor(head_dim * num_heads, embed_dim))
-        kaiming_uniform_(self.weight, a=sqrt(5))
+#     def __init__(self, embed_dim, num_heads, head_dim=None):
+#         super(MultiheadAttentionInProjection, self).__init__()
+#         if head_dim is None:
+#             assert embed_dim % num_heads == 0, "embed_dim must be divisible by num_heads when head_dim=None"
+#             head_dim = embed_dim // num_heads
+#         self.head_dim = head_dim
+#         self.embed_dim = embed_dim
+#         self.num_heads = num_heads
+#         self.weight = torch.nn.Parameter(torch.Tensor(head_dim * num_heads, embed_dim))
+#         kaiming_uniform_(self.weight, a=sqrt(5))
 
-    def forward(self, seq):
-        # type: Tensor -> Tensor
-        return F.multi_head_attention_in_projection(seq, self.num_heads, self.weight, in_proj_bias=None)
+#     def forward(self, seq):
+#         # type: Tensor -> Tensor
+#         return F.multi_head_attention_in_projection(seq, self.num_heads, self.weight, in_proj_bias=None)
 
 
 class ScaledDotProduct(Module):
@@ -470,52 +470,52 @@ class ScaledDotProduct(Module):
         return attn_output, attn_output_weights
 
 
-class MultiheadAttentionOutProjection(Module):
-    r"""Process attention output using multi-head attention.
+# class MultiheadAttentionOutProjection(Module):
+#     r"""Process attention output using multi-head attention.
 
-    Args:
-        embed_dim (int): Input projection dimension.
-        num_heads (int): Number of parallel attention heads.
-        head_dim (int, optional): Dimension of embedding for each attention
-            head. If not provided, then it is set to ``embed_dim / num_heads``.
+#     Args:
+#         embed_dim (int): Input projection dimension.
+#         num_heads (int): Number of parallel attention heads.
+#         head_dim (int, optional): Dimension of embedding for each attention
+#             head. If not provided, then it is set to ``embed_dim / num_heads``.
 
-    Shape:
-        - attn_output: :math:`(N * H, S, D)`
-        - Output: :math:`(S, N, E)`
-        where S is the sequence length, N is the batch size, H is the number of
-        attention heads, E is the embedding dimension, and D is the head
-        dimension.
+#     Shape:
+#         - attn_output: :math:`(N * H, S, D)`
+#         - Output: :math:`(S, N, E)`
+#         where S is the sequence length, N is the batch size, H is the number of
+#         attention heads, E is the embedding dimension, and D is the head
+#         dimension.
 
-    Attributes:
-        weight: The learnable weights of the module of shape
-            :math:`(\text{embed\_dim}, \text{head\_dim} * \text{num\_heads})`.
+#     Attributes:
+#         weight: The learnable weights of the module of shape
+#             :math:`(\text{embed\_dim}, \text{head\_dim} * \text{num\_heads})`.
 
-    Examples::
+#     Examples::
 
-        >>> # S = 21; N = 64; E = 10; D = 3; H = 4;
-        >>> MHA_out = nn.MultiheadAttentionOutProjection(10, 4, 3)
-        >>> attn_seq = torch.randn(21, 256, 3)
-        >>> a = MHA_out(attn_seq)
-        >>> print(a.shape)
-        torch.Size([21, 64, 10])
-    """
-    __constants__ = ['embed_dim', 'num_heads', 'head_dim']
+#         >>> # S = 21; N = 64; E = 10; D = 3; H = 4;
+#         >>> MHA_out = nn.MultiheadAttentionOutProjection(10, 4, 3)
+#         >>> attn_seq = torch.randn(21, 256, 3)
+#         >>> a = MHA_out(attn_seq)
+#         >>> print(a.shape)
+#         torch.Size([21, 64, 10])
+#     """
+#     __constants__ = ['embed_dim', 'num_heads', 'head_dim']
 
-    def __init__(self, embed_dim, num_heads, head_dim=None):
-        super(MultiheadAttentionOutProjection, self).__init__()
-        self.embed_dim = embed_dim
-        if head_dim is None:
-            assert embed_dim % num_heads == 0, "embed_dim must be divisible by num_heads when head_dim=None"
-            head_dim = embed_dim // num_heads
-        self.embed_dim = embed_dim
-        self.num_heads = num_heads
-        self.head_dim = head_dim
-        self.weight = torch.nn.Parameter(torch.Tensor(embed_dim, head_dim * num_heads))
-        kaiming_uniform_(self.weight, a=sqrt(5))
+#     def __init__(self, embed_dim, num_heads, head_dim=None):
+#         super(MultiheadAttentionOutProjection, self).__init__()
+#         self.embed_dim = embed_dim
+#         if head_dim is None:
+#             assert embed_dim % num_heads == 0, "embed_dim must be divisible by num_heads when head_dim=None"
+#             head_dim = embed_dim // num_heads
+#         self.embed_dim = embed_dim
+#         self.num_heads = num_heads
+#         self.head_dim = head_dim
+#         self.weight = torch.nn.Parameter(torch.Tensor(embed_dim, head_dim * num_heads))
+#         kaiming_uniform_(self.weight, a=sqrt(5))
 
-    def forward(self, attn_output):
-        # type: Tensor -> Tensor
-        return F.multi_head_attention_out_projection(attn_output, self.num_heads, self.weight, out_proj_bias=None)
+#     def forward(self, attn_output):
+#         # type: Tensor -> Tensor
+#         return F.multi_head_attention_out_projection(attn_output, self.num_heads, self.weight, out_proj_bias=None)
 
 
 def _get_clones(module, N):
