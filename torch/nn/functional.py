@@ -3955,41 +3955,41 @@ def multi_head_attention_forward(query,                           # type: Tensor
         return attn_output, None
 
 
-def multi_head_attention_in_projection(seq, num_heads, in_proj_weight, in_proj_bias=None):
-    # type: (Tensor, int, Tensor, Optional[Tensor]) -> Tensor
-    r"""Projects an input sequence using parallel attention heads.
+# def multi_head_attention_in_projection(seq, num_heads, in_proj_weight, in_proj_bias=None):
+#     # type: (Tensor, int, Tensor, Optional[Tensor]) -> Tensor
+#     r"""Projects an input sequence using parallel attention heads.
 
-    Args:
-        seq (Tensor): sequence to be projected
-        num_heads (int): number of parallel heads used.
-        in_proj_weight (Tensor): weight used for projection
-        in_proj_bias (Tensor, optional): bias used for projection.
+#     Args:
+#         seq (Tensor): sequence to be projected
+#         num_heads (int): number of parallel heads used.
+#         in_proj_weight (Tensor): weight used for projection
+#         in_proj_bias (Tensor, optional): bias used for projection.
 
-    Shape:
-        - seq: :math:`(S, N, E)`
-        - in_proj_weight: :math:`(P, E)`
-        - in_proj_bias: :math:`(P)`
-        - Output: :math:`(S, N * H, P / H)`
-        where S is the sequence length, H is the number of attention heads, N is the
-        batch size, P is the projection dimension, and E is the embedding
-        dimension.
+#     Shape:
+#         - seq: :math:`(S, N, E)`
+#         - in_proj_weight: :math:`(P, E)`
+#         - in_proj_bias: :math:`(P)`
+#         - Output: :math:`(S, N * H, P / H)`
+#         where S is the sequence length, H is the number of attention heads, N is the
+#         batch size, P is the projection dimension, and E is the embedding
+#         dimension.
 
-    """
-    if not torch.jit.is_scripting():
-        tens_ops = (seq, in_proj_weight)
-        if any([type(t) is not Tensor for t in tens_ops]) and has_torch_function(tens_ops):
-            return handle_torch_function(
-                multi_head_attention_in_projection, tens_ops,
-                seq, num_heads, in_proj_weight, in_proj_bias=in_proj_bias)
-    seq_len, bsz, _ = seq.size()
-    proj_dim = in_proj_weight.size(0)
-    assert proj_dim % num_heads == 0, "projection dimension must be divisible by num_heads"
-    head_dim = proj_dim // num_heads
+#     """
+#     if not torch.jit.is_scripting():
+#         tens_ops = (seq, in_proj_weight)
+#         if any([type(t) is not Tensor for t in tens_ops]) and has_torch_function(tens_ops):
+#             return handle_torch_function(
+#                 multi_head_attention_in_projection, tens_ops,
+#                 seq, num_heads, in_proj_weight, in_proj_bias=in_proj_bias)
+#     seq_len, bsz, _ = seq.size()
+#     proj_dim = in_proj_weight.size(0)
+#     assert proj_dim % num_heads == 0, "projection dimension must be divisible by num_heads"
+#     head_dim = proj_dim // num_heads
 
-    q = linear(seq, in_proj_weight, in_proj_bias)
-    # Shape of q: (S, N, P)
-    q = q.reshape(seq_len, bsz * num_heads, head_dim)
-    return q
+#     q = linear(seq, in_proj_weight, in_proj_bias)
+#     # Shape of q: (S, N, P)
+#     q = q.reshape(seq_len, bsz * num_heads, head_dim)
+#     return q
 
 
 def scaled_dot_product_attention(q,                         # type: Tensor
@@ -4111,35 +4111,35 @@ def scaled_dot_product_attention(q,                         # type: Tensor
     return attn_output, attn_output_weights
 
 
-def multi_head_attention_out_projection(attn_output, num_heads, out_proj_weight, out_proj_bias=None):
-    # type: (Tensor, int, Tensor, Optional[Tensor]) -> Tensor
-    r"""Projects an output sequence using parallel attention heads.
+# def multi_head_attention_out_projection(attn_output, num_heads, out_proj_weight, out_proj_bias=None):
+#     # type: (Tensor, int, Tensor, Optional[Tensor]) -> Tensor
+#     r"""Projects an output sequence using parallel attention heads.
 
-    Args:
-        attn_output (Tensor): Projection to be decoded to an embedding.
-        num_heads (int): Number of parallel attention heads
-        out_proj_weight (Tensor): weight used to decode projection.
-        out_proj_bias (Tensor, optional): bias used to decode projection.
+#     Args:
+#         attn_output (Tensor): Projection to be decoded to an embedding.
+#         num_heads (int): Number of parallel attention heads
+#         out_proj_weight (Tensor): weight used to decode projection.
+#         out_proj_bias (Tensor, optional): bias used to decode projection.
 
-    Shape:
-        - attn_output: :math:`(S, N * H, P / H)`
-        - out_proj_weight: :math:`(E, P)`
-        - out_proj_bias: :math:`(E)`
-        - Output: :math:`(S, N, E)`
-        where S is the sequence length, H is the number of attention heads, N is the
-        batch size, P is the projection dimension, and E is the embedding
-        dimension.
+#     Shape:
+#         - attn_output: :math:`(S, N * H, P / H)`
+#         - out_proj_weight: :math:`(E, P)`
+#         - out_proj_bias: :math:`(E)`
+#         - Output: :math:`(S, N, E)`
+#         where S is the sequence length, H is the number of attention heads, N is the
+#         batch size, P is the projection dimension, and E is the embedding
+#         dimension.
 
-    """
-    if not torch.jit.is_scripting():
-        tens_ops = (attn_output, out_proj_weight)
-        if any([type(t) is not Tensor for t in tens_ops]) and has_torch_function(tens_ops):
-            return handle_torch_function(
-                multi_head_attention_out_projection, tens_ops,
-                attn_output, num_heads, out_proj_weight, out_proj_bias=out_proj_bias)
-    batch_heads, seq_len, head_dim = attn_output.size()
-    embed_dim = out_proj_weight.size(0)
-    assert batch_heads % num_heads == 0, "dimension 0 of attn_output must be divisible by num_heads"
-    bsz = batch_heads // num_heads
-    attn_output = attn_output.reshape(seq_len, bsz, head_dim * num_heads)
-    return linear(attn_output, out_proj_weight, out_proj_bias)
+#     """
+#     if not torch.jit.is_scripting():
+#         tens_ops = (attn_output, out_proj_weight)
+#         if any([type(t) is not Tensor for t in tens_ops]) and has_torch_function(tens_ops):
+#             return handle_torch_function(
+#                 multi_head_attention_out_projection, tens_ops,
+#                 attn_output, num_heads, out_proj_weight, out_proj_bias=out_proj_bias)
+#     batch_heads, seq_len, head_dim = attn_output.size()
+#     embed_dim = out_proj_weight.size(0)
+#     assert batch_heads % num_heads == 0, "dimension 0 of attn_output must be divisible by num_heads"
+#     bsz = batch_heads // num_heads
+#     attn_output = attn_output.reshape(seq_len, bsz, head_dim * num_heads)
+#     return linear(attn_output, out_proj_weight, out_proj_bias)
