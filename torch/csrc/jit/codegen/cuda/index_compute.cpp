@@ -21,7 +21,7 @@ void IndexCompute::replayBackward(Merge* expr) {
       ax >= 0 && ax < indices.size(),
       "Hit an invalid MERGE transformation during IndexCompute, axis is not within bounds.");
 
-  Val* I = expr->in()->axis(ax + 1)->size();
+  Val* I = expr->in()->axis(ax + 1)->extent();
   Val* ind = indices[ax];
   indices[ax] = div(ind, I);
   indices.insert(indices.begin() + ax + 1, mod(ind, I));

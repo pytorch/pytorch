@@ -58,7 +58,7 @@ TensorView* split_(TensorView* tv, int axis, int factor) {
       new_domain.push_back(td->axis(i));
     else {
       // outer loop size
-      Val* vo = ceilDiv(id->size(), fact);
+      Val* vo = ceilDiv(id->extent(), fact);
       Int* so = static_cast<Int*>(vo);
 
       // outer loop IterDomain
@@ -96,7 +96,7 @@ TensorView* merge_(TensorView* tv, int axis) {
   assert(first->isReduction() == second->isReduction());
   assert(first->parallel_method() == second->parallel_method());
 
-  Val* merged_id_size = mul(first->size(), second->size());
+  Val* merged_id_size = mul(first->extent(), second->extent());
   IterDomain* merged_id = new IterDomain(
       static_cast<Int*>(merged_id_size),
       first->parallel_method(),
@@ -221,7 +221,7 @@ TensorView* TensorView::newForOutput(DataType dtype) const {
     // consumers and we're copying over a producer.
     if (this->axis(i)->isReduction())
       continue;
-    domain_copy.push_back(new IterDomain(this->axis(i)->size()));
+    domain_copy.push_back(new IterDomain(this->axis(i)->extent()));
   }
   TensorDomain* td = new TensorDomain(domain_copy);
   return new TensorView(td, dtype);

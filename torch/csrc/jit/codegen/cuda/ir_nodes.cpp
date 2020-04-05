@@ -56,43 +56,43 @@ bool BinaryOp::sameAs(const BinaryOp* other) const {
 }
 
 IterDomain::IterDomain(
-    Val* _size,
+    Val* _extent,
     ParallelType _parallel_method,
     bool _reduction_domain)
     : Val(ValType::IterDomain, DataType::Int),
-      size_(_size),
+      extent_(_extent),
       parallel_method_(_parallel_method),
       is_reduction_domain_(_reduction_domain) {
   TORCH_INTERNAL_ASSERT(
-      _size->isAnInt(),
-      "Cannot create an iter domain over a size that is not an int.");
+      _extent->isAnInt(),
+      "Cannot create an iter domain over an extent that is not an int.");
 }
 
 bool IterDomain::sameAs(const IterDomain* const other) const {
   bool is_same = isReduction() == other->isReduction() &&
       parallel_method() == other->parallel_method();
 
-  if (size()->getValType() == ValType::NamedScalar &&
-      other->size()->getValType() == ValType::NamedScalar) {
+  if (extent()->getValType() == ValType::NamedScalar &&
+      other->extent()->getValType() == ValType::NamedScalar) {
     is_same = is_same &&
-        (static_cast<NamedScalar*>(size())->name().compare(
-             static_cast<NamedScalar*>(other->size())->name()) == 0);
+        (static_cast<NamedScalar*>(extent())->name().compare(
+             static_cast<NamedScalar*>(other->extent())->name()) == 0);
   } else {
-    is_same = is_same && size()->sameAs(other->size());
+    is_same = is_same && extent()->sameAs(other->extent());
   }
   return is_same;
 }
 
-Val* IterDomain::size() const {
+Val* IterDomain::extent() const {
   if (isThread()) {
-    if (size_->getValType() == ValType::Scalar)
-      if (static_cast<Int*>(size_)->isConst())
-        return size_;
+    if (extent_->getValType() == ValType::Scalar)
+      if (static_cast<Int*>(extent_)->isConst())
+        return extent_;
 
     std::string parallel_dim = stringifyThreadSize(parallel_method_);
     return new NamedScalar(parallel_dim, DataType::Int);
   }
-  return size_;
+  return extent_;
 }
 
 bool TensorDomain::sameAs(const TensorDomain* const other) const {

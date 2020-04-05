@@ -113,7 +113,7 @@ TensorIndex* GPULower::getLocalProducerIndex(
   for (decltype(computed_inds.size()) i{0}; i < computed_inds.size(); i++) {
     Val* ind = computed_inds[i];
     for (decltype(used_ranges.size()) j{i + 1}; j < used_ranges.size(); j++)
-      ind = mul(ind, used_ranges[i]->size());
+      ind = mul(ind, used_ranges[i]->extent());
     computed_inds[i] = ind;
   }
   if (computed_inds.size() == 0)
@@ -184,7 +184,7 @@ TensorIndex* GPULower::getLocalConsumerIndex(TensorView* consumer) {
   for (decltype(computed_inds.size()) i{0}; i < computed_inds.size(); i++) {
     Val* ind = computed_inds[i];
     for (decltype(used_ranges.size()) j{i + 1}; j < used_ranges.size(); j++)
-      ind = mul(ind, used_ranges[i]->size());
+      ind = mul(ind, used_ranges[i]->extent());
     computed_inds[i] = ind;
   }
 
@@ -388,7 +388,7 @@ void GPULower::replaceSizes() {
     std::vector<IterDomain*> new_domain;
     TensorDomain* root_td = tv->getRootDomain();
     for (decltype(root_td->size()) i{0}; i < root_td->size(); i++) {
-      Val* orig_size = root_td->axis(i)->size();
+      Val* orig_size = root_td->axis(i)->extent();
       std::stringstream ss;
       ss << "T" << new_tv->name() << ".size[" << i << "]";
       Val* new_size =
@@ -412,7 +412,7 @@ void GPULower::replaceSizes() {
     TensorDomain* root_td = tv->getRootDomain();
 
     for (decltype(root_td->size()) i{0}; i < root_td->size(); i++) {
-      Val* new_size = root_td->axis(i)->size();
+      Val* new_size = root_td->axis(i)->extent();
       if (size_map.find(new_size) != size_map.end())
         new_size = size_map[new_size];
       new_domain.push_back(new IterDomain(

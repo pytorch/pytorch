@@ -384,22 +384,22 @@ void testGPU_FusionTVSplit() {
 
   tv = tv->split(2, 2);
   TORCH_CHECK(tv->nDims() == 4);
-  Expr* outer = tv->axis(2)->size()->getOrigin();
+  Expr* outer = tv->axis(2)->extent()->getOrigin();
 
   TORCH_CHECK(
       outer->getExprType().value() == ExprType::BinaryOp &&
       static_cast<BinaryOp*>(outer)->getBinaryOpType() ==
           BinaryOpType::CeilDiv &&
       static_cast<BinaryOp*>(outer)->lhs()->sameAs(
-          tv->getRootDomain()->axis(2)->size()) &&
+          tv->getRootDomain()->axis(2)->extent()) &&
       static_cast<Int*>(static_cast<BinaryOp*>(outer)->rhs())
           ->sameAs(new Int(2)));
 
   IterDomain* inner = static_cast<IterDomain*>(tv->axis(3));
   TORCH_CHECK(
-      inner->size()->isScalar() &&
-      static_cast<Int*>(inner->size())->isConst() &&
-      static_cast<Int*>(inner->size())->value().value() == 2);
+      inner->extent()->isScalar() &&
+      static_cast<Int*>(inner->extent())->isConst() &&
+      static_cast<Int*>(inner->extent())->value().value() == 2);
 }
 
 void testGPU_FusionTVMerge() {
@@ -409,15 +409,15 @@ void testGPU_FusionTVMerge() {
   TensorView* tv = makeDummyTensor(3);
 
   tv = tv->merge(1);
-  Expr* axisOp = tv->axis(1)->size()->getOrigin();
+  Expr* axisOp = tv->axis(1)->extent()->getOrigin();
 
   TORCH_CHECK(
       tv->nDims() == 2 && axisOp->getExprType() == ExprType::BinaryOp &&
       static_cast<BinaryOp*>(axisOp)->getBinaryOpType() == BinaryOpType::Mul &&
       static_cast<BinaryOp*>(axisOp)->lhs() ==
-          tv->getRootDomain()->axis(1)->size() &&
+          tv->getRootDomain()->axis(1)->extent() &&
       static_cast<BinaryOp*>(axisOp)->rhs() ==
-          tv->getRootDomain()->axis(2)->size());
+          tv->getRootDomain()->axis(2)->extent());
 }
 
 void testGPU_FusionTVReorder() {

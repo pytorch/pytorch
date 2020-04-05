@@ -27,7 +27,7 @@ std::vector<Int*> PredicateCompute::computePredicates(const TensorIndex* ti) {
   for (decltype(ti->size()) i{0}; i < ti->size(); i++)
 
     if (FusionGuard::getCurFusion()->origin(ti->index(i)) != nullptr) {
-      Val* pred = lt(ti->index(i), root->axis(i)->size());
+      Val* pred = lt(ti->index(i), root->axis(i)->extent());
       TORCH_CHECK(
           pred->getValType().value() == ValType::Scalar &&
           pred->getDataType().value() == DataType::Int);

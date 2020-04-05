@@ -109,7 +109,7 @@ struct TORCH_CUDA_API IterDomain : public Val {
   IterDomain() = delete;
 
   IterDomain(
-      Val* int_size,
+      Val* _extent,
       ParallelType _parallel_method = ParallelType::Serial,
       bool _reduction_domain = false);
 
@@ -165,7 +165,7 @@ struct TORCH_CUDA_API IterDomain : public Val {
     return parallel_method_;
   }
 
-  Val* size() const;
+  Val* extent() const;
 
   IterDomain(const IterDomain& other) = delete;
   IterDomain& operator=(const IterDomain& other) = delete;
@@ -174,7 +174,7 @@ struct TORCH_CUDA_API IterDomain : public Val {
   IterDomain& operator=(IterDomain&& other) = delete;
 
  private:
-  Val* const size_;
+  Val* const extent_;
   ParallelType parallel_method_ = ParallelType::Serial;
   bool is_reduction_domain_;
 };
