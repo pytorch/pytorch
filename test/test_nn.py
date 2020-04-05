@@ -3208,6 +3208,114 @@ class TestNN(NNTestCase):
         self.assertRaises(AssertionError, lambda: F.pad(inputs, (1,)))
 
     @unittest.skipIf(not TEST_NUMPY, "numpy not found")
+    def test_scaled_dot_product(self):
+        def _scaled_dot_attn_ref(Q, K, V, dims, add_zero_attn, key_padding_mask=None, attn_mask=None):
+            """ Numpy-based reference implementation of scaled dot attention
+            for testing"""
+            if add_zero_attn:
+                K = np.concatenate((K, np.zeros([K.shape[0], K.shape[1], 1, K.shape[3]])), axis=2)
+                V = np.concatenate((V, np.zeros([V.shape[0], V.shape[1], 1, V.shape[3]])), axis=2)
+
+                if attn_mask is not None:
+                    attn_mask = np.concatenate((attn_mask, np.zeros([Q.shape[2], 1])), axis=1)
+
+                if key_padding_mask is not None:
+                    key_padding_mask = np.concatenate(
+                        (key_padding_mask, np.full((K.shape[0], 1), False, dtype=bool)), axis=1)
+
+            QKT = _batchmatmul(
+                Q,
+                np.transpose(K, axes=[0, 1, 3, 2])
+                / np.sqrt(dims[3], dtype=np.float32),  # divide by sqrt(d_head)
+            )
+            b1, b2, s1, s2 = QKT.shape
+            if attn_mask is not None or key_padding_mask is not None:
+                # assert s1 == s2
+                for i in range(b1):
+                    for j in range(b2):
+                        for m in range(s1):
+                            for n in range(s2):
+                                # Ignore spots where attn_mask is 1
+                                if attn_mask is not None and attn_mask[m][n]:
+                                    QKT[i, j, m, n] = -np.inf
+                                if key_padding_mask is not None and key_padding_mask[i][n]:
+                                    QKT[i, j, m, n] = -np.inf
+
+            ref_attn_weight = _softmax(QKT)
+            ref_attn = _batchmatmul(ref_attn_weight, V)
+            return ref_attn, ref_attn_weight
+
+        def _batchmatmul(a, b):  # batchmatmul over 4 dim matrix
+            """ Numpy-based batch matrix multiply over 4 dim matrix"""
+            assert a.shape[0] == b.shape[0]
+            assert a.shape[1] == b.shape[1]
+            retval = np.zeros(
+                (a.shape[0], a.shape[1], a.shape[2], b.shape[3]), dtype=np.float32
+            )
+            for i in range(a.shape[0]):
+                for j in range(a.shape[1]):
+                    retval[i, j, :, :] = np.matmul(a[i, j, :, :], b[i, j, :, :])
+            return retval
+
+        def _softmax(x):  # softmax over 4 dim matrix
+            """ Numpy-based reference softmax over 4 dim matrix"""
+            np.seterr(invalid='ignore')
+            output = np.zeros(x.shape, dtype=np.float64)
+            for i in range(x.shape[0]):
+                for j in range(x.shape[1]):
+                    for k in range(x.shape[2]):
+                        x_curr = x[i, j, k, :]
+                        e_x = np.exp(x_curr - np.amax(x_curr))
+                        output[i, j, k, :] = e_x / np.sum(e_x)
+            return output
+
+        def _scaled_dot_product_test_helper(add_masks=False, add_zero_attn=False):
+            for _ in range(100):
+                batch_sz = random.randint(2, 10)
+                tgt_len = random.randint(2, 10)
+                src_len = random.randint(2, 10)
+                d_head = random.randint(3, 10)
+                nheads = random.randint(3, 10)
+                d_model = d_head * nheads
+
+                # Create q, k, v. _scaled_dot_attn_ref expects shape (batch_sz, nheads, seq_len, d_head)
+                q_np = np.random.rand(batch_sz, nheads, tgt_len, d_head)
+                k_np = np.random.rand(batch_sz, nheads, src_len, d_head)
+                v_np = np.random.rand(batch_sz, nheads, src_len, d_head)
+
+                # F.scaled_dot_product_attention expects shape (seq_len, batch_sz, n_heads, d_head)
+                q_th = torch.from_numpy(np.transpose(q_np, [2, 0, 1, 3]))
+                k_th = torch.from_numpy(np.transpose(k_np, [2, 0, 1, 3]))
+                v_th = torch.from_numpy(np.transpose(v_np, [2, 0, 1, 3]))
+
+                if add_masks:
+                    attn_mask_np = np.random.randint(0, 2, size=(tgt_len, src_len))
+                    key_padding_mask_np = np.random.randint(0, 2, (batch_sz, src_len), dtype=bool)
+                    attn_mask_th = torch.from_numpy(attn_mask_np).to(dtype=torch.bool)
+                    key_padding_mask_th = torch.from_numpy(key_padding_mask_np)
+                else:
+                    attn_mask_np = attn_mask_th = None
+                    key_padding_mask_np = key_padding_mask_th = None
+                # Compute scaled dot product attentionkey_padding_mask
+                ref_attn, ref_attn_weight = _scaled_dot_attn_ref(
+                    q_np, k_np, v_np, q_np.shape, add_zero_attn, key_padding_mask_np, attn_mask_np)
+
+                attn, attn_weight = F.scaled_dot_product_attention(
+                    q_th, k_th, v_th, add_zero_attn, 0.0, False, key_padding_mask_th, attn_mask_th)
+                # attn is (tgt_len, bsz, num_heads, d_head), attn_ref is (bsz, n_heads, tgt_len, d_head)
+                attn = np.transpose(attn.detach().numpy(), [1, 2, 0, 3])
+                # attn_weight is (tgt_len, bsz, num_heads, d_head), attn_weight_ref is (bsz, n_heads, tgt_len, d_head)
+                attn_weight = np.transpose(attn_weight.detach().numpy(), [1, 2, 0, 3])
+
+                np.testing.assert_allclose(attn, ref_attn, atol=1e-5)
+                np.testing.assert_allclose(attn_weight, ref_attn_weight, atol=1e-5)
+
+        _scaled_dot_product_test_helper(False, False)
+        _scaled_dot_product_test_helper(False, True)
+        _scaled_dot_product_test_helper(True, True)
+
+
+    @unittest.skipIf(not TEST_NUMPY, "numpy not found")
     def test_multihead_attention(self):
         def _scaled_dot_attn_ref(Q, K, V, dims, unseen_mask=None, key_padding_mask=None):
             """ Numpy-based reference implementation of scaled dot attention

@@ -4054,7 +4054,6 @@ def scaled_dot_product_attention(q,                         # type: Tensor
     q = q.reshape(tgt_len, batch_heads, head_dim).transpose(0, 1)
     k = k.reshape(src_len, batch_heads, head_dim).transpose(0, 1)
     v = v.reshape(src_len, batch_heads, head_dim).transpose(0, 1)
-    
 
     # Scale q
     q = q * (float(head_dim) ** -0.5)
