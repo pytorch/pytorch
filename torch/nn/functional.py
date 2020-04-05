@@ -3995,7 +3995,6 @@ def multi_head_attention_in_projection(seq, num_heads, in_proj_weight, in_proj_b
 def scaled_dot_product_attention(q,                         # type: Tensor
                                  k,                         # type: Tensor
                                  v,                         # type: Tensor
-                                 num_heads,                 # type: int
                                  add_zero_attn,             # type: bool
                                  dropout_p,                 # type: float
                                  training=True,             # type: bool
@@ -4010,7 +4009,6 @@ def scaled_dot_product_attention(q,                         # type: Tensor
         q (Tensor): Projected query
         k (Tensor): Projected key
         v (Tensor): Projected value
-        num_heads (int): Number of parallel attention heads.
         add_zero_attn (bool): Add a new batch of zeros to the projected key and
             value sequences at dimension 1.
         dropout_p (float): Probability of an element will be zeroed.
@@ -4027,12 +4025,12 @@ def scaled_dot_product_attention(q,                         # type: Tensor
             of each batch. 
 
     Shape:
-        - q: :math:`(L, N * H, P / H)`
-        - k: :math:`(S, N * H, P / H)`
-        - v: :math:`(S, N * H, P / H)`
+        - q: :math:`(L, N, H, P / H)`
+        - k: :math:`(S, N, H,  P / H)`
+        - v: :math:`(S, N, H,  P / H)`
         - key_padding_mask: :math:`(N, S)`
         - attn_mask: :math:`(L, S)` or :math:`(L, N * H, S)`
-        - Output: :math:`(L, N * H, P / H)`, :math:`(L, N * H, S)`
+        - Output: :math:`(L, N, H, P / H)`, :math:`(L, N, H, S)`
         where L is the target length, S is the source length, H is the number
         of attention heads, N is the batch size, and P is the projection
         dimension.
@@ -4046,16 +4044,16 @@ def scaled_dot_product_attention(q,                         # type: Tensor
                 q, k, v, num_heads, add_zero_attn, dropout_p,
                 training=training, key_padding_mask=key_padding_mask, attn_mask=attn_mask)
     assert k.size() == v.size(), "Shape of k, v must match"
-    assert q.size(1) % num_heads == 0, "Dimension 1 of q, k, v must be divisible by num_heads"
-    assert q.size(1) == k.size(1), "Number of batch heads for q, k, v must be equal."
-    assert q.size(2) == k.size(2), "The head dimension for q, k, v must be equal."
-    tgt_len, batch_heads, head_dim = q.size()
-    bsz = batch_heads // num_heads
-    src_len = k.size(1)
+    assert q.size(1) == k.size(1), "Number of batches for q, k, v must be equal."
+    assert q.size(2) == k.size(2), "Number of heads for q, k, v must be equal."
+    assert q.size(3) == k.size(3), "The head dimension for q, k, v must be equal."
+    tgt_len, bsz, num_heads, head_dim = q.size()
+    src_len = k.size(0)
+    batch_heads = bsz * num_heads
     # Transpose the batch_heads to be first
-    q = q.transpose(0, 1)
-    k = k.transpose(0, 1)
-    v = v.transpose(0, 1)
+    q = q.reshape(tgt_len, batch_heads, head_dim).transpose(0, 1)
+    k = k.reshape(src_len, batch_heads, head_dim).transpose(0, 1)
+    v = v.reshape(src_len, batch_heads, head_dim).transpose(0, 1)
     
 
     # Scale q
@@ -4108,9 +4106,9 @@ def scaled_dot_product_attention(q,                         # type: Tensor
 
     attn_output = torch.matmul(dropout(attn_output_weights, p=dropout_p, training=training), v)
 
-    # Reorder so (target) sequence dimension is first
-    attn_output = attn_output.transpose(0, 1)
-    attn_output_weights = attn_output_weights.transpose(0, 1)
+    # Reorder so (target) sequence dimension is first, then reshape
+    attn_output = attn_output.transpose(0, 1).reshape(tgt_len, bsz, num_heads, head_dim)
+    attn_output_weights = attn_output_weights.transpose(0, 1).reshape(tgt_len, bsz, num_heads, src_len)
     return attn_output, attn_output_weights
 
 
