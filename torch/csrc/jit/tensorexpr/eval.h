@@ -6,6 +6,8 @@
 
 #include <c10/macros/Macros.h>
 #include <c10/util/Logging.h>
+#include <c10/util/math_compat.h>
+#include <c10/util/string_utils.h>
 #include <torch/csrc/jit/tensorexpr/buffer.h>
 #include <torch/csrc/jit/tensorexpr/codegen.h>
 #include <torch/csrc/jit/tensorexpr/exceptions.h>
@@ -792,7 +794,7 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
         float intpart;
         return std::modf(v, &intpart);
       default:
-        throw std::runtime_error("invalid op_type: " + std::to_string(op_type));
+        throw std::runtime_error("Invalid op_type: " + c10::to_string(op_type));
     }
   }
 
@@ -803,11 +805,11 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
       case kFmod:
         return std::fmod(v1, v2);
       case kRemainder:
-        return std::remainderf(v1, v2);
+        return std::remainder(v1, v2);
       case kAtan2:
         return std::atan2(v1, v2);
       default:
-        throw std::runtime_error("nvalid op_type: " + std::to_string(op_type));
+        throw std::runtime_error("Invalid op_type: " + c10::to_string(op_type));
     }
   }
 
