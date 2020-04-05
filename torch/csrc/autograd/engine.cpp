@@ -631,13 +631,13 @@ void Engine::evaluate_function(
     if (auto* capture_vec = fn_info.captures_.get()) {
       // Lock mutex for writing to graph_task->captured_vars_.
       std::lock_guard<std::mutex> lock(graph_task->mutex_);
+      for (auto& hook : fn_info.hooks_) {
+        inputs.inputVariables() = (*hook)(inputs.inputVariables());
+      }
       for (auto capture : *capture_vec) {
         graph_task->captured_vars_[capture.output_idx_] =
             inputs[capture.input_idx_];
       }
-    }
-    for (auto& hook : fn_info.hooks_) {
-      (*hook)(inputs.getInputs());
     }
     if (!fn_info.needed_) {
       // Skip execution if we don't need to execute the function.

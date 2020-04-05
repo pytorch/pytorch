@@ -29,21 +29,21 @@ static constexpr char* kNumAutogradContexts = "num_autograd_contexts";
 // This hook does 2 things:
 //   1. Accumuate the gard to RPC context.
 //   2. Call post hooks of the original AccumulateGrad.
-struct DistAccumulateGradPreHook : GraphTask::GraphTaskFunctionPreHook {
-  DistAccumulateGradPreHook(
+struct DistAccumulateGradCapturePreHook : GraphTask::GradCapturePreHook {
+  DistAccumulateGradCapturePreHook(
       std::shared_ptr<AccumulateGrad> accumulateGrad,
       ContextPtr autogradContext)
       : accumulateGrad_(std::move(accumulateGrad)),
         autogradContext_(std::move(autogradContext)) {}
 
-  void operator()(const variable_list& grads) override {
+  variable_list operator()(const variable_list& grads) override {
     torch::autograd::check_input_variables("AccumulateGrad", grads, 1, 0);
     const auto& grad = grads[0];
     // It is possible that the grad is not defined since a separate
     // invocation of the autograd engine on the same node might actually
     // compute this gradient.
     if (!grad.defined()) {
-      return;
+      return grads;
     }
     autogradContext_->accumulateGrad(
         accumulateGrad_->variable, grad, 1 /* num_expected_refs */);
@@ -53,6 +53,7 @@ struct DistAccumulateGradPreHook : GraphTask::GraphTaskFunctionPreHook {
       // Discard the return value.
       (*hook)(kEmptyOuput, grads);
     }
+    return grads;
   }
 
  private:
@@ -185,7 +186,7 @@ void DistEngine::computeDependencies(
               // nodes to accumulate grads into the RPC context.
               // Note that an entry will be created in 'exec_info_' map here.
               graphTask->exec_info_[nextFn].hooks_.push_back(
-                  std::make_unique<DistAccumulateGradPreHook>(
+                  std::make_unique<DistAccumulateGradCapturePreHook>(
                       std::dynamic_pointer_cast<AccumulateGrad>(
                           accumulateGradFn->shared_from_this()),
                       autogradContext));

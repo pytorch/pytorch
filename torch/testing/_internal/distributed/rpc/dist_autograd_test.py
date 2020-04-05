@@ -2093,17 +2093,25 @@ class DistAutogradTest(RpcAgentTestFixture):
 
     @dist_init
     def test_post_hooks(self):
-        linear = torch.nn.Linear(1, 1, bias=False)
         self.hook_called_times = 0
-        def post_hook(m, grad_input, grad_output):
+
+        def post_hook_add_one(m, grad_input, grad_output):
             self.hook_called_times += 1
-        # Note: this actually doesn't install a post hook in AccumulateGrad.
-        linear.register_backward_hook(post_hook)
-        linear.register_backward_hook(post_hook)
+
+        def post_hook_add_two(m, grad_input, grad_output):
+            self.hook_called_times += 2
+
+        t = torch.rand(10, 10, requires_grad=True)
+        a = t + t
+        accumulate_grad = a.grad_fn.next_functions[0][0]
+        accumulate_grad.register_hook(post_hook_add_one)
+        accumulate_grad.register_hook(post_hook_add_two)
+
         with dist_autograd.context() as context_id:
-            loss = linear(torch.ones((1)))
+            loss = a.sum()
             dist_autograd.backward(context_id, [loss])
-            self.assertEqual(2, self.hook_called_times)
+            self.assertEqual(3, self.hook_called_times)
+            self.assertEqual(1, len(dist_autograd.get_gradients(context_id)))
 
 @unittest.skipIf(
     not torch._six.PY3,
