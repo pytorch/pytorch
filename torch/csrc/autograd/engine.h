@@ -62,19 +62,18 @@ struct GraphTask {
   std::unordered_map<Node*, InputBuffer> not_ready_;
   std::unordered_map<Node*, int> dependencies_;
 
-  // This hook will be executed when the grad is ready for an function
-  // node regardless of whether the node will be applied.
-  struct GradCapturePreHook {
-    virtual ~GradCapturePreHook() = default;
-    virtual variable_list operator()(const variable_list& grads) = 0;
-  };
-
   struct ExecInfo {
     struct Capture {
       Capture(int input_idx, int output_idx)
           : input_idx_(input_idx), output_idx_(output_idx) {}
       int input_idx_; // within Node inputs
       int output_idx_; // within the output vector of a GraphTask
+    };
+    // This hook will be executed when the grad is ready for an function
+    // node regardless of whether the node will be applied.
+    struct GradCapturePreHook {
+      virtual ~GradCapturePreHook() = default;
+      virtual variable_list operator()(const variable_list& grads) = 0;
     };
 
     bool should_execute() const {
