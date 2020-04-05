@@ -44,7 +44,7 @@
   volatile value_t x = (value_t)(1);                          \
   x = std::op(x);                                             \
   _mm256_zeroall();
-#define DL_RUNTIME_BUG_BFLOAT16() _mm256_zeroall()
+#define DL_RUNTIME_BUG_BFLOAT16() _mm256_zeroall();
 #else
 #define DL_RUNTIME_BUG(op, type)
 #define DL_RUNTIME_BUG_BFLOAT16()
