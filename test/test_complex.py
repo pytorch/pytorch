@@ -26,6 +26,12 @@ class TestComplexTensor(TestCase):
         exp_fn(torch.complex64)
         exp_fn(torch.complex128)
 
+    def test_copy_real_imag_methods(self):
+        real = torch.randn(4)
+        imag = torch.randn(4)
+        complex_tensor = real + 1j * imag
+        self.assertEqual(complex_tensor.copy_real(), real)
+        self.assertEqual(complex_tensor.copy_imag(), imag)
 
 if __name__ == '__main__':
     run_tests()
