@@ -53,6 +53,24 @@ CONFIG_TREE_DATA = OrderedDict(
             "3.7",
         ],
     )),
+    windows=(dimensions.CUDA_VERSIONS, OrderedDict(
+        wheel=dimensions.STANDARD_PYTHON_VERSIONS,
+        conda=dimensions.STANDARD_PYTHON_VERSIONS,
+        libtorch=[
+            "3.7",
+        ],
+    )),
+)
+
+CONFIG_TREE_DATA_NO_WINDOWS = OrderedDict(
+    linux=(dimensions.CUDA_VERSIONS, LINUX_PACKAGE_VARIANTS),
+    macos=([None], OrderedDict(
+        wheel=dimensions.STANDARD_PYTHON_VERSIONS,
+        conda=dimensions.STANDARD_PYTHON_VERSIONS,
+        libtorch=[
+            "2.7",
+        ],
+    )),
 )
 
 # GCC config variants:
