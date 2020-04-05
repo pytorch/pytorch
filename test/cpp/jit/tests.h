@@ -3,8 +3,8 @@
 /**
  * See README.md for instructions on how to add a new test.
  */
-#include <torch/csrc/WindowsTorchApiMacro.h>
 #include <c10/macros/Export.h>
+#include <torch/csrc/WindowsTorchApiMacro.h>
 
 namespace torch {
 namespace jit {
@@ -26,8 +26,6 @@ namespace jit {
   _(DifferentiateWithRequiresGrad)     \
   _(FromQualString)                    \
   _(InternedStrings)                   \
-  _(IValue)                            \
-  _(IValueFuture)                      \
   _(PassManagement)                    \
   _(Proto)                             \
   _(RegisterFusionCachesKernel)        \
@@ -88,8 +86,38 @@ namespace jit {
   _(LiteInterpreterWrongMethodName)    \
   _(LiteInterpreterParams)             \
   _(LiteInterpreterSetState)           \
-  _(TorchbindIValueAPI)
+  _(TorchbindIValueAPI)                \
+  _(LiteInterpreterDict)
 
+#if defined(USE_CUDA)
+#define TH_FORALL_TESTS_CUDA(_)  \
+  _(ArgumentSpec)                \
+  _(CompleteArgumentSpec)        \
+  _(Fusion)                      \
+  _(GraphExecutor)               \
+  _(ModuleConversion)            \
+  _(Interp)                      \
+  _(GPU_FusionDispatch)          \
+  _(GPU_FusionSimpleArith)       \
+  _(GPU_FusionSimpleTypePromote) \
+  _(GPU_FusionCastOp)            \
+  _(GPU_FusionMutator)           \
+  _(GPU_FusionRegister)          \
+  _(GPU_FusionTopoSort)          \
+  _(GPU_FusionTensor)            \
+  _(GPU_FusionTensorContiguity)  \
+  _(GPU_FusionTVSplit)           \
+  _(GPU_FusionTVMerge)           \
+  _(GPU_FusionTVReorder)         \
+  _(GPU_FusionEquality)          \
+  _(GPU_FusionReplaceAll)        \
+  _(GPU_FusionParser)            \
+  _(GPU_FusionDependency)        \
+  _(GPU_FusionCodeGen)           \
+  _(GPU_FusionCodeGen2)          \
+  _(GPU_FusionSimplePWise)       \
+  _(GPU_FusionExecKernel)
+#else
 #define TH_FORALL_TESTS_CUDA(_) \
   _(ArgumentSpec)               \
   _(CompleteArgumentSpec)       \
@@ -97,6 +125,7 @@ namespace jit {
   _(GraphExecutor)              \
   _(ModuleConversion)           \
   _(Interp)
+#endif
 
 #define DECLARE_JIT_TEST(name) void test##name();
 TH_FORALL_TESTS(DECLARE_JIT_TEST)

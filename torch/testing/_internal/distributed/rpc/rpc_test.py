@@ -11,7 +11,7 @@ import torch.distributed as dist
 import torch.distributed.rpc as rpc
 import torch.testing._internal.dist_utils as dist_utils
 from torch.distributed.rpc import RRef, _get_debug_info, _rref_context_get_debug_info
-from torch.distributed.rpc.api import _use_rpc_pickler
+from torch.distributed.rpc.api import _delete_all_user_rrefs, _use_rpc_pickler
 from torch.distributed.rpc.internal import PythonUDF, RPCExecMode, _internal_rpc_pickler
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import IS_MACOS, load_tests
@@ -25,6 +25,10 @@ from torch.testing._internal.dist_utils import (
 )
 from torch.testing._internal.distributed.rpc.rpc_agent_test_fixture import (
     RpcAgentTestFixture,
+)
+from torch.testing._internal.common_utils import TemporaryFileName
+from torch.testing._internal.distributed.rpc.faulty_rpc_agent_test_fixture import (
+    FaultyRpcAgentTestFixture,
 )
 
 
@@ -178,6 +182,10 @@ def my_rref_function(rref_a, rref_b):
 def no_result():
     print("do nothing")
 
+def raise_or_inc(value):
+    if value.numel() == 2:
+        raise ValueError("Expected error")
+    return value + 1
 
 def nested_rpc(dst):
     return rpc.rpc_sync(dst, torch.add, args=(torch.ones(2, 2), 1))
@@ -1498,7 +1506,6 @@ class RpcTest(RpcAgentTestFixture):
         rpc.shutdown(graceful=False)
 
     @dist_init
-    @unittest.skip("Test is flaky. see https://github.com/pytorch/pytorch/issues/31846")
     def test_debug_info(self):
         # only test keys in this test case. Values should be covered by
         # individual module debug info tests
@@ -1514,7 +1521,13 @@ class RpcTest(RpcAgentTestFixture):
         expected.update(rref_info)
         expected.update(agent_info)
         expected.update(autograd_info)
-        self.assertEqual(expected.keys(), info.keys())
+        # NB: Key ordering is only preserved in python 3.6+. So here, we
+        # manually check keys are equal.
+        for key in expected.keys():
+            self.assertIn(key, info.keys())
+
+        for key in info.keys():
+            self.assertIn(key, expected.keys())
 
     @dist_init(setup_rpc=False)
     @unittest.skipIf(
@@ -1605,7 +1618,7 @@ class RpcTest(RpcAgentTestFixture):
             num_send_recv_threads=NUM_THREADS
         )
         rpc.init_rpc(
-            name="worker{}".format(self.rank),
+            name=worker_name(self.rank),
             backend=self.rpc_backend,
             rank=self.rank,
             world_size=self.world_size,
@@ -1801,7 +1814,7 @@ class RpcTest(RpcAgentTestFixture):
     def _create_rref(self):
         owner_rank = (self.rank + 2) % self.world_size
         return rpc.remote(
-            "worker{}".format(owner_rank),
+            worker_name(owner_rank),
             torch.add,
             args=(torch.zeros(2, 2), 1)
         )
@@ -1811,7 +1824,7 @@ class RpcTest(RpcAgentTestFixture):
         dst_rank = (self.rank + 1) % self.world_size
         rref = self._create_rref()
         ret = rpc.rpc_sync(
-            "worker{}".format(dst_rank),
+            worker_name(dst_rank),
             check_rref_confirmed,
             args=(rref,)
         )
@@ -1822,8 +1835,53 @@ class RpcTest(RpcAgentTestFixture):
         dst_rank = (self.rank + 1) % self.world_size
         rref = self._create_rref()
         ret_rref = rpc.remote(
-            "worker{}".format(dst_rank),
+            worker_name(dst_rank),
             check_rref_confirmed,
             args=(rref,)
         )
         self.assertEqual(ret_rref.to_here(), True)
+
+    @dist_init
+    def test_rref_py_pickle_not_supported(self):
+        local_rref = RRef(35)
+        with TemporaryFileName() as fname:
+            with self.assertRaisesRegex(RuntimeError, "Can not pickle rref in python pickler"):
+                torch.save(local_rref, fname)
+
+    @dist_init
+    def test_remote_throw(self):
+        rref = rpc.remote(worker_name((self.rank + 1) % self.world_size),
+                          raise_or_inc,
+                          args=(torch.ones(2),))
+        with self.assertRaisesRegex(Exception, ".*Expected error.*"):
+            rref.to_here()
+
+@unittest.skipIf(
+    not torch._six.PY3,
+    "Pytorch distributed autograd package does not support python2",
+)
+class FaultyAgentRpcTest(FaultyRpcAgentTestFixture):
+
+    # no faulty_messages defined so this fails all retryable messages - see
+    # faulty_rpc_agent_test_fixture.py for the list of retryable messages.
+    @dist_init
+    def test_check_failed_messages(self):
+        if self.rank == 0:
+            dst_worker_b = worker_name((self.rank + 1) % self.world_size)
+            dst_worker_c = worker_name((self.rank + 2) % self.world_size)
+
+            # Worker0 sends RPC to Worker1 and creates an RRef there
+            rref = rpc.remote(dst_worker_b, torch.add, args=(torch.ones(2, 2), torch.ones(2, 2)))
+            # Worker0 sends an RPC to Worker2 with the RRef as an arg
+            rpc.remote(dst_worker_c, add_rref_to_value, args=(rref, torch.ones(2, 2)))
+            # check if the output is as expected
+            self.assertEqual(rref.to_here(), torch.add(torch.ones(2, 2), torch.ones(2, 2)))
+        # explicitly delete all User RRefs
+        _delete_all_user_rrefs()
+
+    @dist_init
+    def test_verify_backend_options(self):
+        self.assertEqual(self.rpc_backend, rpc.backend_registry.BackendType.FAULTY_PROCESS_GROUP)
+        self.assertEqual(self.rpc_backend_options.num_send_recv_threads, 8)
+        self.assertEqual(self.rpc_backend_options.num_fail_sends, 3)
+        self.assertEqual(len(self.rpc_backend_options.messages_to_fail), 4)

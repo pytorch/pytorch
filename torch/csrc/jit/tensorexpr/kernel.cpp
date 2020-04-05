@@ -1,10 +1,11 @@
 #include <torch/csrc/jit/tensorexpr/kernel.h>
 
+#include <c10/util/string_utils.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/tensorexpr/analysis.h>
 #include <torch/csrc/jit/tensorexpr/ir_printer.h>
 #include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
-#include <torch/csrc/jit/tensorexpr/schedule.h>
+#include <torch/csrc/jit/tensorexpr/loopnest.h>
 
 using namespace torch::jit;
 using namespace torch::jit::tensorexpr;
@@ -54,7 +55,7 @@ static std::vector<DimArg> texprDims(const torch::jit::Value* v) {
   std::vector<DimArg> dimArgs;
   int i = 0;
   for (auto const& s : texprSizes(tt->sizes())) {
-    dimArgs.emplace_back(DimArg(s, "i" + std::to_string(i++)));
+    dimArgs.emplace_back(DimArg(s, "i" + c10::to_string(i++)));
   }
   return dimArgs;
 }
@@ -990,7 +991,7 @@ void TensorExprKernel::lowerToBackend(BackendType backendType) {
     }
   }
 
-  torch::jit::tensorexpr::schedule::LoopNest l(tensorOutputs);
+  torch::jit::tensorexpr::LoopNest l(tensorOutputs);
 
   // Compute non-output tensors_ inline
   for (auto& p : tensors_) {
@@ -999,14 +1000,14 @@ void TensorExprKernel::lowerToBackend(BackendType backendType) {
     }
     Stmt* loop = l.getLoopBodyFor(p.second);
     if (torch::jit::tensorexpr::HasRand(loop).has_rand()) {
-      l.ComputeInlineWithRandom(loop);
+      l.computeInlineWithRandom(loop);
     } else {
-      l.ComputeInline(loop);
+      l.computeInline(loop);
     }
   }
   if (backendType == kCudaCodeGen) {
     for (size_t i = 0; i < tensorOutputs_.size(); i++) {
-      l.ComputeInline(l.getLoopBodyFor(tensorOutputs_[i]));
+      l.computeInline(l.getLoopBodyFor(tensorOutputs_[i]));
 
       Tensor* tensor = tensorOutputs[i];
       const Var* index = tensor->arg(0);
@@ -1024,9 +1025,9 @@ void TensorExprKernel::lowerToBackend(BackendType backendType) {
           blockSize = kDefaultBlockSize;
         }
         std::vector<For*> loops = l.getLoopStmtsFor(tensor);
-        l.SplitWithMask(loops[0], blockSize, &outer, &inner);
-        l.SetGPUBlockIndex(outer, 0);
-        l.SetGPUThreadIndex(inner, 0);
+        l.splitWithMask(loops[0], blockSize, &outer, &inner);
+        l.setGPUBlockIndex(outer, 0);
+        l.setGPUThreadIndex(inner, 0);
       } else if (loopLevels == 3) {
         For* outer;
         For* inner;
@@ -1038,17 +1039,17 @@ void TensorExprKernel::lowerToBackend(BackendType backendType) {
         blockCount = (blockCount > 0) ? blockCount : kDefaultBlockCount;
         blockSize = (blockSize > 0) ? blockSize : kDefaultBlockSize;
         std::vector<For*> loops = l.getLoopStmtsFor(tensor);
-        l.SplitWithMask(loops[0], blockCount * blockSize, &outer, &inner);
-        l.SplitWithMask(inner, blockSize, &inner1, &inner2);
-        l.SetGPUBlockIndex(inner1, 0);
-        l.SetGPUThreadIndex(inner2, 0);
+        l.splitWithMask(loops[0], blockCount * blockSize, &outer, &inner);
+        l.splitWithMask(inner, blockSize, &inner1, &inner2);
+        l.setGPUBlockIndex(inner1, 0);
+        l.setGPUThreadIndex(inner2, 0);
       } else {
         throw std::runtime_error(
-            "Invalid loop-level: " + std::to_string(loopLevels));
+            "Invalid loop-level: " + c10::to_string(loopLevels));
       }
     }
   } else if (backendType == kLLVMCodeGen) {
-    l.ApplyInlines();
+    l.prepareForCodegen();
 
     std::vector<For*> innerLoops;
     std::vector<For*> worklist;
@@ -1093,27 +1094,28 @@ void TensorExprKernel::lowerToBackend(BackendType backendType) {
       }
     }
 
-    // Vectorize inner loops.
+    // vectorize inner loops.
     for (For* loop : innerLoops) {
       For* outer1;
       For* split1;
       For* tail1;
 
-      l.SplitWithTail(loop, 8, &outer1, &split1, &tail1);
-      l.Vectorize(split1);
+      l.splitWithTail(loop, 8, &outer1, &split1, &tail1);
+      l.vectorize(split1);
 
       if (tail1) {
         For* outer2;
         For* split2;
         For* tail2;
-        l.SplitWithTail(tail1, 4, &outer2, &split2, &tail2);
-        l.Vectorize(split2);
+        l.splitWithTail(tail1, 4, &outer2, &split2, &tail2);
+        l.vectorize(split2);
       }
     }
   }
 
-  l.ApplyInlines();
+  l.prepareForCodegen();
   Stmt* stmt = l.root_stmt();
+  // Arithmetic Simplification.
   stmt = IRSimplifier::simplify(stmt);
 
   // Set up formal params (inputs, then outputs) for kernel.
@@ -1146,7 +1148,7 @@ void TensorExprKernel::lowerToBackend(BackendType backendType) {
     default:
       throw std::runtime_error(
           "invalid backend type: " +
-          std::to_string(static_cast<int>(backendType_)));
+          c10::to_string(static_cast<int>(backendType_)));
   }
 
   codegenCache_.emplace(
@@ -1274,8 +1276,8 @@ void TensorExprKernel::pickAndCheckBackendType(
     // TODO: if we have to support muliptole backends with the same subgraph,
     // we need to add kernel caching.
     throw std::runtime_error(
-        "Inconsistent backendType: " + std::to_string(backendType_) + " vs " +
-        std::to_string(backendType));
+        "Inconsistent backendType: " + c10::to_string(backendType_) + " vs " +
+        c10::to_string(backendType));
   }
 }
 
@@ -1289,7 +1291,7 @@ void TensorExprKernel::codeGenRun(
       break;
     default:
       throw std::runtime_error(
-          "Invalid backend type: " + std::to_string(backendType_));
+          "Invalid backend type: " + c10::to_string(backendType_));
   }
 }
 
@@ -1318,7 +1320,7 @@ ExprHandle TensorExprKernel::createInputIndexExpr(
     // For discontiguous tensors, create a parameter to represent stride.
     if (!*contiguity[i]) {
       VarHandle v = VarHandle{
-          "stride_" + buffer.data()->name_hint() + "_" + std::to_string(i),
+          "stride_" + buffer.data()->name_hint() + "_" + c10::to_string(i),
           kInt};
       strideArgs.emplace_back(n - i, v);
       stride = v;
@@ -1363,14 +1365,14 @@ void TensorExprKernel::bindInput(const torch::jit::Value* input) {
         auto const& size = *tt->sizes()[i];
         if (size < 0) {
           VarHandle v(
-              "size_" + std::to_string(input->unique()) + "_" +
-                  std::to_string(i),
+              "size_" + c10::to_string(input->unique()) + "_" +
+                  c10::to_string(i),
               kInt);
           sizeVars.emplace(size, v);
           inputTensorDims.emplace_back(v);
         } else {
           inputTensorDims.emplace_back(
-              DimArg(IntImm::make(size), "i" + std::to_string(i)));
+              DimArg(IntImm::make(size), "i" + c10::to_string(i)));
         }
       }
 #ifdef DYNAMIC_SHAPES

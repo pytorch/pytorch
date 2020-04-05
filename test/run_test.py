@@ -24,12 +24,14 @@ PY36 = sys.version_info >= (3, 6)
 TESTS = [
     'test_autograd',
     'test_complex',
+    'test_cpp_api_parity',
     'test_cpp_extensions_aot_no_ninja',
     'test_cpp_extensions_aot_ninja',
     'test_cpp_extensions_jit',
     'distributed/test_c10d',
     'distributed/test_c10d_spawn',
     'test_cuda',
+    'test_jit_cuda_fuser',
     'test_cuda_primary_ctx',
     'test_dataloader',
     'distributed/test_data_parallel',
@@ -37,7 +39,6 @@ TESTS = [
     'test_distributions',
     'test_docs_coverage',
     'test_expecttest',
-    'test_fake_quant',
     'test_indexing',
     'test_jit',
     'test_logging',
@@ -48,13 +49,17 @@ TESTS = [
     'test_nn',
     'test_numba_integration',
     'test_optim',
-    'test_qat',
-    'test_quantization',
-    'test_quantized',
-    'test_quantized_tensor',
-    'test_quantized_nn_mods',
+    'quantization/test_fake_quant',
+    'quantization/test_numerics',
+    'quantization/test_qat',
+    'quantization/test_quantization',
+    'quantization/test_quantized',
+    'quantization/test_quantized_tensor',
+    'quantization/test_quantized_nn_mods',
+    'quantization/test_quantize_script',
     'test_sparse',
     'test_serialization',
+    'test_show_pickle',
     'test_torch',
     'test_type_info',
     'test_type_hints',
@@ -70,16 +75,20 @@ TESTS = [
     'test_jit_disabled',
     'test_function_schema',
     'test_overrides',
+    'test_jit_fuser_te',
+    'test_tensorexpr',
 ]
 
 # skip < 3.3 because mock is added in 3.3 and is used in rpc_spawn
 # skip python2 for rpc and dist_autograd tests that do not support python2
 if PY33:
     TESTS.extend([
-        'distributed/rpc/test_rpc_spawn',
+        'distributed/rpc/faulty_agent/test_dist_autograd_spawn',
+        'distributed/rpc/faulty_agent/test_rpc_spawn',
+        'distributed/rpc/jit/test_dist_autograd_spawn',
         'distributed/rpc/test_dist_autograd_spawn',
         'distributed/rpc/test_dist_optimizer_spawn',
-        'distributed/rpc/jit/test_dist_autograd_spawn',
+        'distributed/rpc/test_rpc_spawn',
     ])
 
 # skip < 3.6 b/c fstrings added in 3.6
@@ -88,27 +97,35 @@ if PY36:
         'test_jit_py3',
         'test_determination',
         'distributed/rpc/jit/test_rpc_spawn',
+        'distributed/rpc/faulty_agent/test_rpc_spawn',
     ])
 
 WINDOWS_BLACKLIST = [
-    'distributed/test_distributed',
-    'distributed/rpc/test_rpc_spawn',
+    'distributed/rpc/faulty_agent/test_dist_autograd_spawn',
+    'distributed/rpc/faulty_agent/test_rpc_spawn',
+    'distributed/rpc/jit/test_dist_autograd_spawn',
+    'distributed/rpc/jit/test_rpc_spawn',
     'distributed/rpc/test_dist_autograd_spawn',
     'distributed/rpc/test_dist_optimizer_spawn',
-    'distributed/rpc/jit/test_rpc_spawn',
-    'distributed/rpc/jit/test_dist_autograd_spawn',
+    'distributed/rpc/test_rpc_spawn',
+    'distributed/test_distributed',
 ]
 
 ROCM_BLACKLIST = [
-    'test_cpp_extensions_aot_ninja',
-    'test_cpp_extensions_jit',
-    'test_multiprocessing',
-    'distributed/rpc/test_rpc_spawn',
+    'distributed/rpc/faulty_agent/test_dist_autograd_spawn',
+    'distributed/rpc/faulty_agent/test_rpc_spawn',
+    'distributed/rpc/jit/test_dist_autograd_spawn',
+    'distributed/rpc/jit/test_rpc_spawn',
     'distributed/rpc/test_dist_autograd_spawn',
     'distributed/rpc/test_dist_optimizer_spawn',
-    'distributed/rpc/jit/test_rpc_spawn',
-    'distributed/rpc/jit/test_dist_autograd_spawn',
+    'distributed/rpc/test_rpc_spawn',
+    'test_cpp_extensions_aot_ninja',
+    'test_cpp_extensions_jit',
     'test_determination',
+    'test_multiprocessing',
+    'test_jit_simple',
+    'test_jit_legacy',
+    'test_jit_fuser_legacy',
 ]
 
 # These tests are slow enough that it's worth calculating whether the patch
@@ -118,7 +135,6 @@ SLOW_TESTS = [
     'test_autograd',
     'test_cpp_extensions_jit',
     'test_jit_legacy',
-    'test_quantized',
     'test_dataloader',
     'test_overrides',
     'test_jit_simple',
@@ -139,7 +155,8 @@ SLOW_TESTS = [
     'test_tensorboard',
     'distributed/test_c10d',
     'distributed/test_c10d_spawn',
-    'test_quantization',
+    'quantization/test_quantized',
+    'quantization/test_quantization',
     'test_determination',
 ]
 _DEP_MODULES_CACHE = {}
@@ -148,6 +165,9 @@ DISTRIBUTED_TESTS_CONFIG = {}
 
 
 if dist.is_available():
+    DISTRIBUTED_TESTS_CONFIG['test'] = {
+        'WORLD_SIZE': '1'
+    }
     if not TEST_WITH_ROCM and dist.is_mpi_available():
         DISTRIBUTED_TESTS_CONFIG['mpi'] = {
             'WORLD_SIZE': '3',

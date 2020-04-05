@@ -21,7 +21,7 @@ if [ -n "${IN_CIRCLECI}" ]; then
     sudo apt-get -qq install --allow-downgrades --allow-change-held-packages libnccl-dev=2.5.6-1+cuda10.1 libnccl2=2.5.6-1+cuda10.1
   fi
 
-  if [[ "$BUILD_ENVIRONMENT" == *-xenial-cuda9-cudnn7-py2* ]]; then
+  if [[ "$BUILD_ENVIRONMENT" == *-xenial-cuda10.1-cudnn7-py3* ]]; then
     # TODO: move this to Docker
     sudo apt-get -qq update
     sudo apt-get -qq install --allow-downgrades --allow-change-held-packages openmpi-bin libopenmpi-dev
@@ -37,7 +37,6 @@ fi
 
 if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   # TODO: Move this to Docker
-  sudo apt-get -qq install --no-install-recommends apt-transport-https ca-certificates
   sudo apt-get -qq update
   sudo apt-get -qq install --no-install-recommends libsndfile1
 fi
@@ -152,7 +151,7 @@ test_python_ge_config_legacy() {
 }
 
 test_python_all_except_nn() {
-  time python test/run_test.py --exclude test_nn test_jit_simple test_jit_legacy test_jit_fuser_legacy --verbose --bring-to-front test_quantization test_quantized test_quantized_tensor test_quantized_nn_mods --determine-from="$DETERMINE_FROM"
+  time python test/run_test.py --exclude test_nn test_jit_simple test_jit_legacy test_jit_fuser_legacy --verbose --determine-from="$DETERMINE_FROM"
   assert_git_not_dirty
 }
 
@@ -182,21 +181,22 @@ test_aten() {
 }
 
 test_torchvision() {
-  pip_install --user git+https://github.com/pytorch/vision.git@44a5bae933655ed7ff798669a43452b833f9ce01
+  pip_install --user git+https://github.com/pytorch/vision.git@43e94b39bcdda519c093ca11d99dfa2568aa7258
 }
 
 test_libtorch() {
   if [[ "$BUILD_ENVIRONMENT" != *rocm* ]]; then
     echo "Testing libtorch"
+    mkdir -p test/test-reports/cpp-unittest
     python test/cpp/jit/tests_setup.py setup
     if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
-      build/bin/test_jit
+      build/bin/test_jit  --gtest_output=xml:test/test-reports/cpp-unittest/test_jit.xml
     else
-      build/bin/test_jit "[cpu]"
+      build/bin/test_jit  --gtest_filter='-*CUDA' --gtest_output=xml:test/test-reports/cpp-unittest/test_jit.xml
     fi
     python test/cpp/jit/tests_setup.py shutdown
     python tools/download_mnist.py --quiet -d test/cpp/api/mnist
-    OMP_NUM_THREADS=2 TORCH_CPP_TEST_MNIST_PATH="test/cpp/api/mnist" build/bin/test_api
+    OMP_NUM_THREADS=2 TORCH_CPP_TEST_MNIST_PATH="test/cpp/api/mnist" build/bin/test_api --gtest_output=xml:test/test-reports/cpp-unittest/test_api.xml
     assert_git_not_dirty
   fi
 }
@@ -270,9 +270,9 @@ elif [[ "${BUILD_ENVIRONMENT}" == *libtorch* ]]; then
   # TODO: run some C++ tests
   echo "no-op at the moment"
 elif [[ "${BUILD_ENVIRONMENT}" == *-test1 || "${JOB_BASE_NAME}" == *-test1 ]]; then
-  test_torchvision
   test_python_nn
 elif [[ "${BUILD_ENVIRONMENT}" == *-test2 || "${JOB_BASE_NAME}" == *-test2 ]]; then
+  test_torchvision
   test_python_all_except_nn
   test_aten
   test_libtorch

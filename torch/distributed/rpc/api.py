@@ -196,17 +196,17 @@ def _wait_all_workers():
 def shutdown(graceful=True):
     r"""
     Perform a shutdown of the RPC agent, and then destroy the RPC agent. This
-    stops the local agent from  accepting outstanding requests, and shuts
-    down the RPC framework by terminating all RPC threads. If graceful=True,
-    then this will block until all local and remote RPC processes reach this
-    method and wait for all outstanding work to complete. Otherwise, if
-    graceful=False, then this is a local shutdown, and it does not wait for
-    other RPC processes to reach this method.
+    stops the local agent from accepting outstanding requests, and shuts
+    down the RPC framework by terminating all RPC threads. If ``graceful=True``,
+    this will block until all local and remote RPC processes reach this method
+    and wait for all outstanding work to complete. Otherwise, if
+    ``graceful=False``, this is a local shutdown, and it does not wait for other
+    RPC processes to reach this method.
 
     Arguments:
         graceful (bool): Whether to do a graceful shutdown or not. If True,
                          this will 1) wait until there is no pending system
-                         messages for ``UserRRef``s and delete them; 2) block
+                         messages for ``UserRRefs`` and delete them; 2) block
                          until all local and remote RPC processes have reached
                          this method and wait for all outstanding work to
                          complete.
@@ -476,7 +476,7 @@ def _invoke_rpc(to, func, rpc_type, args=None, kwargs=None):
         fut = _invoke_rpc_builtin(dst_worker_info, qualified_name, rf, *args, **kwargs)
     elif isinstance(func, torch.jit.ScriptFunction):
         fut = _invoke_rpc_torchscript(
-            dst_worker_info.name, torch.jit._qualified_name(func), *args, **kwargs
+            dst_worker_info.name, torch.jit._qualified_name(func), args, kwargs
         )
     else:
         (pickled_python_udf, tensors) = _default_pickler.serialize(
