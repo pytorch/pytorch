@@ -33,6 +33,9 @@ struct InputBuffer {
 
   at::Device device() const;
 
+
+  Variable operator[](size_t pos) { return buffer[pos]; }
+
   std::vector<Variable>& inputVariables() & {
     return buffer;
   }
