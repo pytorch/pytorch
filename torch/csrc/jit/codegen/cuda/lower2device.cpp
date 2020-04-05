@@ -412,8 +412,13 @@ namespace {
 // Some pre-compilation checks
 void validate(Fusion* fusion) {
   for (Val* val : fusion->vals()) {
+<<<<<<< HEAD
     if (ir_utils::isTV(val)) {
       TensorView* tv = ir_utils::asTV(val);
+=======
+    if (isTV(val)) {
+      TensorView* tv = asTV(val);
+>>>>>>> Continue lowering refactor, split out loop nest generator, create scope/loop utils.
       for (decltype(tv->nDims()) i{0}; i < tv->nDims(); i++) {
         IterDomain* id = tv->getComputeAtAxis(i);
 
@@ -436,7 +441,11 @@ void validate(Fusion* fusion) {
                 tv->getComputeAtAxis(),
                 ".");
       }
+<<<<<<< HEAD
     } // if ir_utils::isTV
+=======
+    } // if isTV
+>>>>>>> Continue lowering refactor, split out loop nest generator, create scope/loop utils.
   } // for(Val* val : fusion->vals())
 
 } // validate
@@ -466,10 +475,16 @@ std::vector<Expr*> GPULower::getLoweredExprs() {
   replaceSizes();
 
   auto loop_nests = LoopNestGenerator::getLoopNest(fusion_);
+<<<<<<< HEAD
   auto unrolled_loops = UnrollPass::runPass(fusion_, loop_nests);
 
   // Run through loop nests and further lower the expressions
   for (auto* expr : unrolled_loops) {
+=======
+
+  // Run through loop nests and further lower the expressions
+  for (auto* expr : loop_nests) {
+>>>>>>> Continue lowering refactor, split out loop nest generator, create scope/loop utils.
     Statement* mutated_stmt = mutate(expr);
     TORCH_INTERNAL_ASSERT(
         mutated_stmt->isExpr(),
