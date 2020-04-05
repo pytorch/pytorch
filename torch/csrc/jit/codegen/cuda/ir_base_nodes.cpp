@@ -147,6 +147,10 @@ bool Scope::sameAs(const Scope& other) const {
   return true;
 }
 
+void Scope::clear() {
+  this->exprs_ = std::vector<Expr*>();
+}
+
 bool IRInputOutput::hasInput(const Val* const input) const {
   for (auto val : inputs_)
     if (val == input)

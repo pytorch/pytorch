@@ -251,6 +251,8 @@ struct TORCH_CUDA_API Scope {
 
   bool sameAs(const Scope& other) const;
 
+  void clear();
+
  private:
   std::vector<Expr*> exprs_;
 };

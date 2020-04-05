@@ -1,7 +1,8 @@
+#include <torch/csrc/jit/codegen/cuda/arith.h>
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
-#include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
+#include <torch/csrc/jit/codegen/cuda/lower_loops.h>
+#include <torch/csrc/jit/codegen/cuda/lower_utils.h>
 #include <torch/csrc/jit/codegen/cuda/mutator.h>
-#include <torch/csrc/jit/codegen/cuda/tensor.h>
 #include <torch/csrc/jit/codegen/cuda/transform_replay.h>
 #include <torch/csrc/jit/codegen/cuda/type.h>
 
@@ -37,164 +38,8 @@ const TensorView* asConstTV(const Val* const val) {
   return static_cast<const TensorView*>(val);
 }
 
-struct parentScope_ : private OptInDispatch {
- private:
-  Expr* parent_ = nullptr;
-
-  void handle(ForLoop* fl) final {
-    parent_ = fl->parentScope();
-  }
-
-  void handle(IfThenElse* ite) final {
-    parent_ = ite->parentScope();
-  }
-
-  void handle(Expr* expr) final {
-    OptInDispatch::handle(expr);
-  }
-
- public:
-  static Expr* parent(Expr* scope) {
-    parentScope_ sp;
-    sp.handle(scope);
-    return sp.parent_;
-  }
-};
-
-struct forLoopCount : private OptInDispatch {
- private:
-  unsigned int count_ = 0;
-
-  void handle(ForLoop* fl) final {
-    count_++;
-  }
-
-  void handle(IfThenElse* ite) final {}
-
-  void handle(Expr* expr) final {
-    OptInDispatch::handle(expr);
-  }
-
- public:
-  static unsigned int count(Expr* scope) {
-    forLoopCount flc;
-    Expr* it = scope;
-    while (it != nullptr) {
-      flc.handle(it);
-      it = parentScope_::parent(it);
-    }
-    return flc.count_;
-  }
-};
-
-struct scopePushBack : private OptInDispatch {
- private:
-  Expr* _expr = nullptr;
-  void handle(ForLoop* fl) final {
-    fl->body().push_back(_expr);
-  }
-
-  void handle(IfThenElse* ite) final {
-    ite->body().push_back(_expr);
-  }
-
-  void handle(Expr* expr) final {
-    OptInDispatch::handle(expr);
-  }
-
- public:
-  static void pushBack(Expr* scope, Expr* expr) {
-    scopePushBack pb;
-    TORCH_INTERNAL_ASSERT(
-        expr != nullptr && scope != nullptr,
-        "Cannot push back, scope or expr is a nullptr.");
-    pb._expr = expr;
-    pb.handle(scope);
-  }
-};
-
-struct forLoopIndices : private OptInDispatch {
- private:
-  std::vector<Val*> inds_;
-  void handle(ForLoop* fl) final {
-    inds_.insert(inds_.begin(), fl->index());
-  }
-
-  void handle(IfThenElse* ite) final {}
-
-  void handle(Expr* expr) final {
-    OptInDispatch::handle(expr);
-  }
-
- public:
-  static std::vector<Val*> get(Expr* scope) {
-    forLoopIndices fli;
-    Expr* it = scope;
-    while (it != nullptr) {
-      fli.handle(it);
-      it = parentScope_::parent(it);
-    }
-    return fli.inds_;
-  }
-};
-
-struct forLoopIDs : private OptInDispatch {
- private:
-  std::vector<IterDomain*> IDs_;
-  void handle(ForLoop* fl) final {
-    IDs_.insert(IDs_.begin(), fl->range());
-  }
-
-  void handle(IfThenElse* ite) final {}
-
-  void handle(Expr* expr) final {
-    OptInDispatch::handle(expr);
-  }
-
- public:
-  static std::vector<IterDomain*> get(Expr* scope) {
-    forLoopIDs fli;
-    Expr* it = scope;
-    while (it != nullptr) {
-      fli.handle(it);
-      it = parentScope_::parent(it);
-    }
-    return fli.IDs_;
-  }
-};
-
 } // namespace
 // END HELPER FUNCTIONS
-
-// Open a new inner most for loop
-void GPULower::openFor(IterDomain* id) {
-  ForLoop* new_scope = nullptr;
-  if (id->isThread()) {
-    new_scope = new ForLoop(
-        new NamedScalar(stringify(id->parallel_method()), DataType::Int),
-        id,
-        {},
-        active_scope);
-  } else {
-    new_scope = new ForLoop(new Int(), id, {}, active_scope);
-  }
-  pushBack(new_scope);
-  active_scope = new_scope;
-}
-
-// Close the inner most scope
-void GPULower::closeScope() {
-  TORCH_INTERNAL_ASSERT(
-      active_scope != nullptr,
-      "Tried to close the active scope, but there isn't one set.");
-  Expr* parent = parentScope_::parent(active_scope);
-  active_scope = parent;
-}
-
-// Close all scopes
-void GPULower::resetScope() {
-  active_scope = nullptr;
-}
 
 // Clear out the last recorded computeAtView
 void GPULower::clearActiveView() {
@@ -208,14 +53,6 @@ void GPULower::setActiveView(const TensorView* const tv) {
   active_view = tv->getComputeAtView();
 }
 
-std::vector<Val*> GPULower::getLoopIndices() {
-  return forLoopIndices::get(active_scope);
-}
-
-std::vector<IterDomain*> GPULower::getLoopIterDomains() {
-  return forLoopIDs::get(active_scope);
-}
-
 TensorIndex* GPULower::getGlobalProducerIndex(
     TensorView* producer,
     TensorView* consumer) {
@@ -224,11 +61,11 @@ TensorIndex* GPULower::getGlobalProducerIndex(
   // This replay will ignore reduction dimensions on the producer
   TransformReplay::fullReplay(consumer, cloned_tv);
   TORCH_INTERNAL_ASSERT(
-      getLoopIndices().size() == cloned_tv->nDims(),
+      scope_utils::getLoopIndices(active_scope).size() == cloned_tv->nDims(),
       "Dimensionality error in code generator while computing indexing.");
 
-  const std::vector<Val*> computed_inds =
-      IndexCompute::computeIndices(cloned_tv, getLoopIndices());
+  const std::vector<Val*> computed_inds = IndexCompute::computeIndices(
+      cloned_tv, scope_utils::getLoopIndices(active_scope));
 
   TORCH_INTERNAL_ASSERT(
       computed_inds.size() == producer->getRootDomain()->size(),
@@ -253,14 +90,15 @@ TensorIndex* GPULower::getLocalProducerIndex(
     TensorView* producer,
     TensorView* consumer) {
   TORCH_INTERNAL_ASSERT(
-      computeForDepth() == producer->nDims(),
+      scope_utils::computeForDepth(active_scope) == producer->nDims(),
       "Expected a tensor with ",
-      computeForDepth(),
+      scope_utils::computeForDepth(active_scope),
       " dimensions but got one with ",
       producer->nDims());
 
-  std::vector<Val*> loopInds = getLoopIndices();
-  std::vector<IterDomain*> ranges = getLoopIterDomains();
+  std::vector<Val*> loopInds = scope_utils::getLoopIndices(active_scope);
+  std::vector<IterDomain*> ranges =
+      scope_utils::getLoopIterDomains(active_scope);
   std::vector<Val*> computed_inds;
   std::vector<IterDomain*> used_ranges;
   for (decltype(loopInds.size()) i{0}; i < loopInds.size(); i++) {
@@ -295,11 +133,11 @@ TensorIndex* GPULower::getProducerIndex(
 
 TensorIndex* GPULower::getGlobalConsumerIndex(TensorView* consumer) {
   TORCH_INTERNAL_ASSERT(
-      getLoopIndices().size() == consumer->nDims(),
+      scope_utils::getLoopIndices(active_scope).size() == consumer->nDims(),
       "Dimensionality error in code generator while computing indexing.");
 
-  const std::vector<Val*> computed_inds =
-      IndexCompute::computeIndices(consumer, getLoopIndices());
+  const std::vector<Val*> computed_inds = IndexCompute::computeIndices(
+      consumer, scope_utils::getLoopIndices(active_scope));
 
   TORCH_INTERNAL_ASSERT(
       computed_inds.size() == consumer->getRootDomain()->size(),
@@ -322,14 +160,15 @@ TensorIndex* GPULower::getGlobalConsumerIndex(TensorView* consumer) {
 
 TensorIndex* GPULower::getLocalConsumerIndex(TensorView* consumer) {
   TORCH_INTERNAL_ASSERT(
-      computeForDepth() == consumer->nDims(),
+      scope_utils::computeForDepth(active_scope) == consumer->nDims(),
       "Expected a tensor with ",
-      computeForDepth(),
+      scope_utils::computeForDepth(active_scope),
       " dimensions but got one with ",
       consumer->nDims());
 
-  std::vector<Val*> loopInds = getLoopIndices();
-  std::vector<IterDomain*> ranges = getLoopIterDomains();
+  std::vector<Val*> loopInds = scope_utils::getLoopIndices(active_scope);
+  std::vector<IterDomain*> ranges =
+      scope_utils::getLoopIterDomains(active_scope);
   std::vector<Val*> computed_inds;
   std::vector<IterDomain*> used_ranges;
 
@@ -364,57 +203,11 @@ TensorIndex* GPULower::getConsumerIndex(TensorView* consumer) {
   return getLocalConsumerIndex(consumer);
 }
 
-// Track how far our for loop scope is
-unsigned int GPULower::computeForDepth() {
-  return forLoopCount::count(active_scope);
-}
-
-// Push an expr to the active scope
-void GPULower::pushBack(Expr* expr) {
-  if (active_scope == nullptr) {
-    lowered_exprs.push_back(expr);
-    return;
-  }
-  scopePushBack::pushBack(active_scope, expr);
-}
-
-// Return the parent of the active scope
-Expr* GPULower::parentScope() {
-  if (active_scope == nullptr)
-    return nullptr;
-  return parentScope_::parent(active_scope);
-}
-
-Allocate* GPULower::getAlloc(TensorView* tv) {
-  TORCH_INTERNAL_ASSERT(
-      !(FusionGuard::getCurFusion()->hasInput(tv) ||
-        FusionGuard::getCurFusion()->hasOutput(tv)),
-      "Tried to allocate an input or output tensor.");
-
-  std::vector<Val*> alloc_dims;
-
-  for (decltype(tv->nDims()) i = tv->getComputeAtAxis(); i < tv->nDims(); i++) {
-    IterDomain* dim = tv->getComputeAtAxis(i);
-    if (dim->isThreadDim())
-      continue;
-    alloc_dims.push_back(dim->size());
-  }
-
-  Val* size;
-  if (alloc_dims.size() == 0) {
-    size = new Int(1);
-  } else {
-    size = alloc_dims[0];
-    for (decltype(alloc_dims.size()) i{1}; i < alloc_dims.size(); i++) {
-      size = mul(size, alloc_dims[i]);
-    }
-  }
-  return new Allocate(tv, size);
-}
-
 IfThenElse* GPULower::getPredicate(const TensorView* const pred_tv) {
   TensorIndex* ti = new TensorIndex(
-      pred_tv, IndexCompute::computeIndices(pred_tv, getLoopIndices()));
+      pred_tv,
+      IndexCompute::computeIndices(
+          pred_tv, scope_utils::getLoopIndices(active_scope)));
 
   std::vector<Int*> all_preds = PredicateCompute::computePredicates(ti);
 
@@ -438,41 +231,92 @@ IfThenElse* GPULower::getPredicate(const TensorView* const pred_tv) {
   return new IfThenElse(cond, {}, {}, active_scope);
 }
 
-// Custom dispatch for Expr, want to find out of it's a TV op
-void GPULower::handle(Expr* expr) {
-  if (!isTVOp(expr))
-    return;
-
-  TensorView* out = static_cast<TensorView*>(expr->output(0));
-
-  updateView(out);
-
-  // 8) Run operation
-  OptOutDispatch::handle(expr);
-
-  // 9) Close predicate
-  if (active_scope != nullptr &&
-      active_scope->getExprType() == ExprType::IfThenElse)
-    closeScope();
+void GPULower::pushBack(Expr* expr) {
+  if (active_scope == nullptr)
+    lowered_exprs.push_back(expr);
+  else
+    scope_utils::pushBack(active_scope, expr);
 }
 
-void GPULower::handle(UnaryOp* uop) {
+Statement* GPULower::mutate(Expr* expr) {
+  Statement* mutated_stmt = OptOutMutator::mutate(expr);
   TORCH_INTERNAL_ASSERT(
-      isTV(uop->out()),
-      "Expected a tensor view but got ",
-      uop->out()->getValType().value());
+      mutated_stmt->isExpr(),
+      "Tried to generate a kernel but hit a non expression during lowering: ",
+      mutated_stmt);
+  return mutated_stmt;
+}
+
+Statement* GPULower::mutate(ForLoop* fl) {
+  Expr* prev_scope = active_scope;
+  active_scope = fl;
+  std::vector<Expr*> mutated_exprs;
+  bool is_mutated = false;
+  for (auto expr : fl->body().exprs()) {
+    Statement* mutated_stmt = mutate(expr);
+
+    TORCH_INTERNAL_ASSERT(
+        mutated_stmt->isExpr(),
+        "Tried to generate a kernel but hit a non expression during lowering: ",
+        mutated_stmt);
+
+    mutated_exprs.push_back(static_cast<Expr*>(mutated_stmt));
+    if (!(mutated_exprs.back()->sameAs(expr)))
+      is_mutated = true;
+  }
+
+  if (is_mutated) {
+    scope_utils::clearScope(active_scope);
+    for (auto expr : mutated_exprs)
+      pushBack(expr);
+  }
+
+  active_scope = prev_scope;
+
+  if (is_mutated)
+    return new ForLoop(
+        fl->index(), fl->range(), mutated_exprs, fl->parentScope());
+
+  return fl;
+}
+
+Statement* GPULower::mutate(UnaryOp* uop) {
+  if (!isTVOp(uop))
+    return OptOutMutator::mutate(uop);
+
+  IfThenElse* pred = getPredicate(asTV(uop->out()));
+  bool predicated = !pred->cond()->sameAs(new Int(1));
+  if (predicated) {
+    pushBack(pred);
+    active_scope = pred;
+  }
+
   TensorIndex* out = getConsumerIndex(asTV(uop->out()));
   Val* in = uop->in();
   if (isTV(in))
     in = getProducerIndex(asTV(in), asTV(uop->out()));
-  pushBack(new UnaryOp(uop->getUnaryOpType(), out, in));
+  Expr* new_op = new UnaryOp(uop->getUnaryOpType(), out, in);
+
+  if (predicated) {
+    active_scope = scope_utils::getParent(active_scope);
+    pushBack(new_op);
+    return pred;
+  }
+
+  return new_op;
 }
 
-void GPULower::handle(BinaryOp* bop) {
-  TORCH_INTERNAL_ASSERT(
-      isTV(bop->out()),
-      "Expected a tensor view but got ",
-      bop->out()->getValType().value());
+Statement* GPULower::mutate(BinaryOp* bop) {
+  if (!isTVOp(bop))
+    return OptOutMutator::mutate(bop);
+
+  IfThenElse* pred = getPredicate(asTV(bop->out()));
+  bool predicated = !pred->cond()->sameAs(new Int(1));
+  if (predicated) {
+    pushBack(pred);
+    active_scope = pred;
+  }
+
   TensorIndex* out = getConsumerIndex(asTV(bop->out()));
   Val* lhs = bop->lhs();
   Val* rhs = bop->rhs();
@@ -483,83 +327,15 @@ void GPULower::handle(BinaryOp* bop) {
   if (isTV(rhs))
     rhs = getProducerIndex(asTV(rhs), asTV(bop->out()));
 
-  pushBack(new BinaryOp(bop->getBinaryOpType(), out, lhs, rhs));
-}
+  Expr* new_op = new BinaryOp(bop->getBinaryOpType(), out, lhs, rhs);
 
-/*
- *  This is one of the most complex parts of the code lowering logic. what we
- * need to do is: 1) Reduce loop structure
- *    - Reset all loops if active_view == nullptr (I'm not the last in a series
- * of computeAts)
- *    - Else reduce to active_view_axis if loop_depth > active_view_axis
- *  2) Set active_view(_axis)
- *    - If there is a computeAt set for this TV
- *  3) Open to compute At
- *    - If there is a computeAt set for this TV
- *  4) Allocate the output.
- *  5) If this is a reduction, initialize the output (open for loops to inner
- * most, predicate, initialize, close predicate, close to computeAt) 6) Open to
- * inner most loop 7) Open predicate 8) Run operation 9) Close predicate
- */
-
-// Update fors based on tv.
-void GPULower::updateView(TensorView* tv) {
-  // 1) Reduce loop structure
-  if (active_view == nullptr) {
-    // - Reset all loops if active_view == nullptr (I'm not the last in a series
-    // of computeAts)
-    resetScope();
-  } else {
-    // - Else reduce to active_view_axis if loop_depth > active_view_axis
-    auto depth = computeForDepth();
-    for (auto i = depth; i > active_view_axis; i--) {
-      closeScope();
-    }
-  }
-  if (tv->hasComputeAt()) {
-    //  2) Set active_view(_axis)
-    //    - If there is a computeAt set for this TV
-    setActiveView(tv);
-
-    //  3) Open to compute At
-    //    - If there is a computeAt set for this TV
-    auto depth = computeForDepth();
-    for (auto i = depth; i < tv->getComputeAtAxis(); i++)
-      openFor(tv->getComputeAtAxis(i));
-  } else {
-    if (active_view != nullptr)
-      // If we're the last computeAt of a block, active view should match this
-      // tv
-      TORCH_INTERNAL_ASSERT(
-          tv->sameAs(active_view),
-          "Error detected in code lowering. Expected ",
-          active_view,
-          " but recieved ",
-          tv);
-    clearActiveView();
+  if (predicated) {
+    pushBack(new_op);
+    active_scope = scope_utils::getParent(active_scope);
+    return pred;
   }
 
-  //  4) Allocate the output.
-
-  if (!FusionGuard::getCurFusion()->hasInput(tv) &&
-      !FusionGuard::getCurFusion()->hasOutput(tv)) {
-    pushBack(getAlloc(tv));
-  }
-
-  // TODO:
-  //  5) If this is a reduction, initialize the output (open for loops to inner
-  //  most, predicate, initialize, close predicate, close to computeAt)
-
-  //  6) Open to inner most loop
-  for (decltype(tv->nDims()) i = computeForDepth(); i < tv->nDims(); i++)
-    openFor(tv->getComputeAtAxis(i));
-
-  // 7) Open predicate
-  IfThenElse* pred = getPredicate(tv);
-  if (!pred->cond()->sameAs(new Int(1))) {
-    pushBack(pred);
-    active_scope = pred;
-  }
+  return new_op;
 }
 
 // TensorViews are all based on symbolic sizes. When we first initialize them we
@@ -677,9 +453,49 @@ void GPULower::replaceSizes() {
   ReplaceAll::instancesOf(tv_map);
 }
 
+namespace {
+
+// Some pre-compilation checks
+void validate(Fusion* fusion) {
+  for (Val* val : fusion->vals()) {
+    if (isTV(val)) {
+      TensorView* tv = asTV(val);
+      for (decltype(tv->nDims()) i{0}; i < tv->nDims(); i++) {
+        IterDomain* id = tv->getComputeAtAxis(i);
+
+        if (id->isThread())
+          TORCH_CHECK(
+              !id->isReduction(),
+              "Parallelization on reduction axes not support at the moment found on, ",
+              tv,
+              ".");
+
+        if (tv->hasComputeAt())
+          if (i < tv->getComputeAtAxis())
+            TORCH_CHECK(
+                id->parallel_method() != ParallelType::Unroll,
+                "Unroll dimension cannot be outside computeAt, found on: ",
+                tv,
+                " compute at ",
+                tv->getComputeAtView(),
+                " axis = ",
+                tv->getComputeAtAxis(),
+                ".");
+      }
+    } // if isTV
+  } // for(Val* val : fusion->vals())
+
+} // validate
+} // namespace
+
 // Traverse through the fusion and print CUDA code associated with it
 std::vector<Expr*> GPULower::getLoweredExprs() {
   FusionGuard fg(fusion_);
+
+  // Likely we lowered this fusion, we can simply return the lowered expressions
+  // Not the safest approach but good enough for now.
+  if (fusion_->lowered && lowered_exprs.size() != 0)
+    return lowered_exprs;
 
   TORCH_CHECK(
       !fusion_->lowered,
@@ -687,17 +503,25 @@ std::vector<Expr*> GPULower::getLoweredExprs() {
       " std::vector<Expr*> GPULower::getLoweredExprs() the result can be printed as",
       " a kernel with   IRPrinter irp(os); irp.printKernel(lowered_exprs, kernel_name);");
 
+  validate(fusion_);
+
   // Initialize members of the class
-  lowered_exprs = std::vector<Expr*>();
   active_view = nullptr;
   active_view_axis = 0;
 
   replaceSizes();
 
-  // Run through and lower the expressions
-  std::vector<Expr*> exprs = fusion_->exprs(true);
-  for (auto* expr : exprs)
-    handle(expr);
+  auto loop_nests = LoopNestGenerator::getLoopNest(fusion_);
+
+  // Run through loop nests and further lower the expressions
+  for (auto* expr : loop_nests) {
+    Statement* mutated_stmt = mutate(expr);
+    TORCH_INTERNAL_ASSERT(
+        mutated_stmt->isExpr(),
+        "Tried to generate a kernel but hit a non expression during lowering: ",
+        mutated_stmt);
+    lowered_exprs.push_back(static_cast<Expr*>(mutated_stmt));
+  }
 
   fusion_->lowered = true;
   return lowered_exprs;
