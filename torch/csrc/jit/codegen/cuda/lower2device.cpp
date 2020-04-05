@@ -275,7 +275,7 @@ Statement* GPULower::mutate(ForLoop* fl) {
 
   if (is_mutated)
     return new ForLoop(
-        fl->index(), fl->range(), mutated_exprs, fl->parentScope());
+        fl->index(), fl->iter_domain(), mutated_exprs, fl->parentScope());
 
   return fl;
 }

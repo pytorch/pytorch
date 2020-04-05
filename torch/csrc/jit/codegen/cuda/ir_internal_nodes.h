@@ -99,7 +99,7 @@ struct TORCH_CUDA_API BinaryOp : public Expr {
 };
 
 /*
- * Simply a representation of an iterable from 0 to size. TensorDomains which
+ * Simply a representation of an iterable from start to extent. TensorDomains which
  * represent how to iterate over a tensor is made up of IterDomains. We directly
  * set parallization strategies on IterDomains.
  */
@@ -317,7 +317,7 @@ struct TORCH_CUDA_API Reorder : public Expr {
 };
 
 /*
- * ForLoop provides scoping around an int iterator from 0 to range. Exprs placed
+ * ForLoop provides scoping around an index through an IterDomain. Exprs placed
  * in its body are considered inside the scope of the for loop. In the future
  * the implementation should look quite different so that we can do proper
  * dependency annalysis like in Fusion.
@@ -329,7 +329,7 @@ struct TORCH_CUDA_API ForLoop : public Expr {
   ~ForLoop() = default;
   ForLoop(
       Val* _index,
-      IterDomain* _range,
+      IterDomain* _iter_domain,
       const std::vector<Expr*>& _body = {},
       Expr* parent_scope = nullptr);
 
@@ -343,8 +343,8 @@ struct TORCH_CUDA_API ForLoop : public Expr {
     return index_;
   }
 
-  IterDomain* range() const noexcept {
-    return range_;
+  IterDomain* iter_domain() const noexcept {
+    return iter_domain_;
   }
 
   Scope& body() noexcept {
@@ -365,7 +365,7 @@ struct TORCH_CUDA_API ForLoop : public Expr {
 
  private:
   Val* const index_;
-  IterDomain* const range_;
+  IterDomain* const iter_domain_;
   Scope body_;
   Expr* parent_scope_;
 };

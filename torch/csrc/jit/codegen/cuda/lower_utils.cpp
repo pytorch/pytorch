@@ -89,7 +89,7 @@ struct forLoopIDs : private OptInDispatch {
  private:
   std::vector<IterDomain*> IDs_;
   void handle(ForLoop* fl) final {
-    IDs_.insert(IDs_.begin(), fl->range());
+    IDs_.insert(IDs_.begin(), fl->iter_domain());
   }
 
   void handle(IfThenElse* ite) final {}

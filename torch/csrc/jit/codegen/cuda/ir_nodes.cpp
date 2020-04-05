@@ -174,25 +174,25 @@ bool Reorder::sameAs(const Reorder* const other) const {
 
 ForLoop::ForLoop(
     Val* _index,
-    IterDomain* _range,
+    IterDomain* _iter_domain,
     const std::vector<Expr*>& _body,
     Expr* _parent_scope)
     : Expr(ExprType::ForLoop),
       index_{_index},
-      range_{_range},
+      iter_domain_{_iter_domain},
       parent_scope_{_parent_scope} {
   TORCH_INTERNAL_ASSERT(
       _index->isAnInt(),
       "Cannot create a for loop with an index that is not an int.");
   addInput(_index);
-  addInput(_range);
+  addInput(_iter_domain);
   this->name_ = FusionGuard::getCurFusion()->registerExpr(this);
   for (Expr* expr : _body)
     body().push_back(expr);
 }
 
 bool ForLoop::sameAs(const ForLoop* other) const {
-  if (this->range() != other->range())
+  if (this->iter_domain() != other->iter_domain())
     return false;
   if (!(constBody().sameAs(other->constBody())))
     return false;

@@ -256,7 +256,7 @@ void IRPrinter::handle(const BinaryOp* const bop) {
 }
 
 void IRPrinter::handle(const ForLoop* const fl) {
-  if (fl->range()->isThread()) {
+  if (fl->iter_domain()->isThread()) {
     for (auto& expr : fl->constBody().exprs())
       handle(expr);
     return;
@@ -268,7 +268,7 @@ void IRPrinter::handle(const ForLoop* const fl) {
   os << "{0}; ";
   handle(fl->index());
   os << " < ";
-  print_inline(fl->range()->size());
+  print_inline(fl->iter_domain()->size());
   os << "; ++";
   handle(fl->index());
   os << " ) {\n";
