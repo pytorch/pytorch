@@ -27,7 +27,7 @@ struct TupleType;
 // For custom class __init__ registration, we need to pass in a function
 // that looks like this: [](IValue x, args...)
 
-// However, kernel_functor.h automatically sets the input types of the function
+// However, make_boxed_from_unboxed_functor.h automatically sets the input types of the function
 // by introspecting the types of the functor (which is IValue in this case).
 // However, we need the type it binds to be Foo.
 
