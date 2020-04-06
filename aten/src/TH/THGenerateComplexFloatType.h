@@ -2,7 +2,10 @@
 #error "You must define TH_GENERIC_FILE before including THGenerateComplexFloatType.h"
 #endif
 
-#define scalar_t std::complex<float>
+extern "C" {
+  #define scalar_t float complex
+}
+
 #define accreal double
 #define Real ComplexFloat
 #define TH_REAL_IS_COMPLEXFLOAT
