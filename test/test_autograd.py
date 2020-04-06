@@ -552,7 +552,7 @@ class TestAutograd(TestCase):
         z.sum().backward()
 
         self.assertEqual(counter[0], 1, 'bw_hook not called')
-        self.assertEqual(x.grad, torch.ones(5, 5) * 2)
+        self.assertEqual(x.grad, torch.ones(5, 5) * 2, atol=1e-5)
 
     def test_hook_none(self):
         # WARNING: this is a test for autograd internals.
