@@ -214,10 +214,7 @@ class TestScript(JitTestCase):
         inputs = torch.cat(inputs).view(len(inputs), 1, -1)
         m = prepare_dynamic_script(m, {'': qconfig})
         m(inputs)
-        print("Calling convert script")
         m = convert_dynamic_script(m, debug=True)
-        print(m.graph)
-        print(get_module_method(m, 'lstm', 'forward__0').graph)
         m(inputs)
         quant_func = "aten::quantize_per_tensor"
 

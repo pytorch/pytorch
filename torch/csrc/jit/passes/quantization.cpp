@@ -32,6 +32,7 @@ using NameModuleVector = std::vector<std::pair<std::string, Module>>;
 using graph_rewrite_helper::getFuncName;
 using graph_rewrite_helper::getIValue;
 using graph_rewrite_helper::getValue;
+using graph_rewrite_helper::PatternInfo;
 using graph_rewrite_helper::replaceConvolutionWithConv2d;
 
 // Map of quantization parameter name and value
@@ -39,30 +40,27 @@ using graph_rewrite_helper::replaceConvolutionWithConv2d;
 // _scalar_type and _axis(for per channel quantization)
 using QParamVector = std::vector<std::pair<std::string, IValue>>;
 
-// This struct contains a compiled IR patterns slated for use in the
-// findPatternMatches function. The struct encapsulates the common
-// information from parseIR that is used in conjunction with the
-// pattern matching facility. A const instance of this struct can
-// also be stored away to cache the compiled IR pattern and reduce
-// runtime cost
-struct PatternInfo {
-  std::string pattern_string;
-  std::unique_ptr<Graph> pattern_graph;
-  std::unordered_map<std::string, Value*> vmap;
-
-  static PatternInfo parse_from_str(std::string pattern_string) {
-    PatternInfo rv{
-        std::move(pattern_string), std::make_unique<Graph>(), decltype(vmap){}};
-    parseIR(rv.pattern_string, rv.pattern_graph.get(), rv.vmap);
-    return rv;
-  }
-};
-
 struct PatternsAndModules {
   bool is_conv;
   bool is_per_channel;
   const PatternInfo& pattern;
   Module packed_params_module;
+};
+
+std::vector<std::string> _quantizable_call_funcs = {
+    "conv2d",
+    "linear",
+};
+
+std::vector<std::string> _quantizable_aten_funcs = {
+    "conv2d",
+    "conv3d",
+    "linear",
+    "addmm",
+    "matmul",
+    "add_",
+    "add",
+    "cat",
 };
 
 // These are the prim::CallFunctions that doesn't require observation and
@@ -81,9 +79,35 @@ std::vector<std::string> _single_input_general_call_funcs = {
     "relu",
 };
 
-std::vector<std::string> _quantizable_call_funcs = {
-    "conv2d",
-    "linear",
+// Similar to prim::CallFunctions, there are aten ops that doesn't
+// require observation and have a single input Tensor
+// e.g. `aten::max_pool2d(%input_tensor, ...)`
+std::vector<std::string> _single_input_general_aten_funcs = {
+    "max_pool2d",
+    "avg_pool2d",
+    "flatten",
+    "max",
+    "min",
+    "mean",
+    "upsample_nearest1d",
+    "upsample_nearest2d",
+    "upsample_nearest3d",
+    "adaptive_avg_pool1d",
+    "adaptive_avg_pool2d",
+    "adaptive_avg_pool3d",
+    "upsample_linear1d",
+    "upsample_bilinear2d",
+    "upsample_trilinear3d",
+    "upsample_bicubic2d",
+    "dropout",
+    "reshape",
+    "chunk",
+    "view",
+    "transpose",
+    "contiguous",
+    "permute",
+    "repeat_interleave",
+    "relu",
 };
 
 void fillQConfigMap(
@@ -167,33 +191,6 @@ bool isAddScalar(Node* n) {
 // the quantization parameters for `v` given the list of values
 std::vector<Value*> getPassThroughInputs(Value* v) {
   Node* n = v->node();
-  std::vector<std::string> single_input_aten_funcs = {
-      "max_pool2d",
-      "avg_pool2d",
-      "flatten",
-      "max",
-      "min",
-      "mean",
-      "upsample_nearest1d",
-      "upsample_nearest2d",
-      "upsample_nearest3d",
-      "adaptive_avg_pool1d",
-      "adaptive_avg_pool2d",
-      "adaptive_avg_pool3d",
-      "upsample_linear1d",
-      "upsample_bilinear2d",
-      "upsample_trilinear3d",
-      "upsample_bicubic2d",
-      "dropout",
-      "reshape",
-      "chunk",
-      "view",
-      "transpose",
-      "contiguous",
-      "permute",
-      "repeat_interleave",
-      "relu",
-  };
   if (isFunctionNode(
           n,
           // We don't have call functions
@@ -207,7 +204,7 @@ std::vector<Value*> getPassThroughInputs(Value* v) {
           // We don't have call functions
           // after inline
           /* call_funcs = */ {},
-          /* aten_funcs = */ single_input_aten_funcs) ||
+          /* aten_funcs = */ _single_input_general_aten_funcs) ||
       (n->kind() == Symbol::aten("sort") && v->offset() == 0)) {
     return {n->input(0)};
   } else if (n->kind() == prim::If && n->outputs().size() == 1) {
@@ -242,16 +239,7 @@ bool nodeQuantizable(Node* n) {
       /* call_funcs = */
       _quantizable_call_funcs,
       /* aten_funcs = */
-      {
-          "conv2d",
-          "conv3d",
-          "linear",
-          "addmm",
-          "matmul",
-          "add_",
-          "add",
-          "cat",
-      });
+      _quantizable_aten_funcs);
 }
 
 // We don't want to analyze the graph for some `builtin` CallFunctions
@@ -1401,6 +1389,7 @@ void insertQuantDeQuantCall(
     quantize_func = "quantize_per_tensor";
   }
   Node *quant, *choose_qparams;
+  std::vector<Value*> quant_inputs;
   if (is_dynamic && !isWeight(module, v)) {
     std::string choose_qparams_func = "_choose_qparams_per_tensor";
     auto reduce_range = g->insertConstant(false);
@@ -1416,26 +1405,23 @@ void insertQuantDeQuantCall(
     choose_qparams->output(1)->setType(IntType::get());
     g->insertNode(choose_qparams);
 
-    std::vector<Value*> quant_inputs = {v};
+    quant_inputs.push_back(v);
     for (auto& out : choose_qparams->outputs()) {
       quant_inputs.push_back(out);
     }
     // Last argument is dtype.
     auto dtype = g->insertGetAttr(self, qparam_names.back());
     quant_inputs.push_back(dtype);
-    quant = g->create(at::Symbol::aten(quantize_func), quant_inputs);
-    quant->output()->setDebugName(v->debugName() + ".quant");
-    g->insertNode(quant);
   } else {
-    std::vector<Value*> inputs = {v};
+    quant_inputs.push_back(v);
     // Insert GetAttr nodes for quantization parameters
     for (const auto& qparam_name : qparam_names) {
-      inputs.push_back(g->insertGetAttr(self, qparam_name));
+      quant_inputs.push_back(g->insertGetAttr(self, qparam_name));
     }
-    quant = g->create(at::Symbol::aten(quantize_func), inputs);
-    quant->output()->setDebugName(v->debugName() + ".quant");
-    g->insertNode(quant);
   }
+  quant = g->create(at::Symbol::aten(quantize_func), quant_inputs);
+  quant->output()->setDebugName(v->debugName() + ".quant")->setType(v->type());
+  g->insertNode(quant);
   Value* original_val = observer->input(1);
   v->replaceAllUsesWith(original_val);
 
@@ -1721,7 +1707,6 @@ std::tuple<c10::QScheme, QParamVector> InsertQuantDeQuantHelper::
       scalar_type.toScalarType() != at::ScalarType::Undefined,
       "dtype of observer can't be undefined");
   auto tp = result.toTuple();
-
   // quantization parameters should appear in the same order as
   // the argument for quantize_per_tensor/quantize_per_channel function
   QParamVector qparams;
