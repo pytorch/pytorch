@@ -20,20 +20,6 @@
 #define TH_REAL_MIN DBL_MIN
 #endif
 
-void THTensor_(uniform)(THTensor *self, double a, double b, at::Generator _generator)
-{
-  auto gen = at::get_generator_or_default<at::CPUGenerator>(_generator, at::detail::getDefaultCPUGenerator());
-  // See Note [Acquire lock when using random generators]
-  std::lock_guard<std::mutex> lock(gen->mutex_);
-
-  #if defined(TH_REAL_IS_FLOAT)
-  at::uniform_real_distribution<float> uniform((float)a, (float)b);
-  TH_TENSOR_APPLY(scalar_t, self, *self_data = (scalar_t)uniform(gen););
-  #else
-  at::uniform_real_distribution<double> uniform(a, b);
-  TH_TENSOR_APPLY(scalar_t, self, *self_data = (scalar_t)uniform(gen););
-  #endif
-}
 
 #undef TH_REAL_MIN
 
