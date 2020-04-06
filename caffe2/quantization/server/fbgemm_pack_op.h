@@ -2,10 +2,9 @@
 
 #include "caffe2/core/operator.h"
 #include "caffe2/operators/conv_op.h"
-#include "caffe2/quantization/server/fbgemm_pack_blob.h"
-#include "caffe2/quantization/server/dnnlowp_op.h"
-#include "caffe2/operators/fully_connected_op.h"
 #include "caffe2/quantization/server/conv_pool_dnnlowp_op_base.h"
+#include "caffe2/quantization/server/fbgemm_pack_blob.h"
+#include "caffe2/quantization/server/fully_connected_dnnlowp_op.h"
 
 namespace caffe2 {
 
