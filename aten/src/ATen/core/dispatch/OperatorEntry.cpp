@@ -1,4 +1,5 @@
 #include <ATen/core/dispatch/OperatorEntry.h>
+#include <ATen/core/op_registration/infer_schema.h>
 
 namespace c10 {
 namespace impl {

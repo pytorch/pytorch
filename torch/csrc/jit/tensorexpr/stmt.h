@@ -361,9 +361,7 @@ class LoopOptions {
       throw std::runtime_error("Cannot set both gpu block and thread index");
     }
     if (is_gpu_block_index() && gpu_block_index() != index) {
-      throw std::runtime_error(
-          "Cannot set a previously set block index: " +
-          std::to_string(gpu_block_index()) + " vs " + std::to_string(index));
+      throw std::runtime_error("Cannot set a previously set block index");
     }
     gpu_block_index_ = index;
   }
@@ -397,9 +395,7 @@ class LoopOptions {
       throw std::runtime_error("Cannot set both gpu thread and block index");
     }
     if (is_gpu_thread_index() && gpu_thread_index() != index) {
-      throw std::runtime_error(
-          "Cannot set a previously set thread index: " +
-          std::to_string(gpu_thread_index()) + " vs " + std::to_string(index));
+      throw std::runtime_error("Cannot set a previously set thread index");
     }
     gpu_thread_index_ = index;
   }
