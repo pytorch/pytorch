@@ -41,7 +41,7 @@ Tensor* Compute(
     const std::vector<DimArg>& dim_args,
     const std::function<ExprHandle(const VarHandle&)>& body_func) {
   if (dim_args.size() != 1) {
-    throw malformed_input();
+    throw malformed_input("mismatch between body and arg size (1)");
   }
 
   std::vector<const Expr*> dims;
@@ -59,7 +59,7 @@ Tensor* Compute(
     const std::function<ExprHandle(const VarHandle&, const VarHandle&)>&
         body_func) {
   if (dim_args.size() != 2) {
-    throw malformed_input();
+    throw malformed_input("mismatch between body and arg size (2)");
   }
   std::vector<const Expr*> dims;
   std::vector<const Var*> args;
@@ -77,7 +77,7 @@ Tensor* Compute(
         ExprHandle(const VarHandle&, const VarHandle&, const VarHandle&)>&
         body_func) {
   if (dim_args.size() != 3) {
-    throw malformed_input();
+    throw malformed_input("mismatch between body and arg size (3)");
   }
   std::vector<const Expr*> dims;
   std::vector<const Var*> args;
@@ -99,7 +99,7 @@ Tensor* Compute(
         const VarHandle&,
         const VarHandle&)>& body_func) {
   if (dim_args.size() != 4) {
-    throw malformed_input();
+    throw malformed_input("mismatch between body and arg size (4)");
   }
   std::vector<const Expr*> dims;
   std::vector<const Var*> args_nodes;
