@@ -303,6 +303,10 @@ class TORCH_API RpcAgent {
       std::pair<std::shared_ptr<FutureMessage>, std::shared_ptr<RpcRetryInfo>>>
       futures;
 
+  // storing futures and exception messages for non-retriable error-ed futures.
+  std::vector<std::pair<std::shared_ptr<FutureMessage>, std::string>>
+      errorFutures;
+
   // Condition Variable to signal when the rpcRetryMap_ has been populated.
   std::condition_variable rpcRetryMapCV_;
 
