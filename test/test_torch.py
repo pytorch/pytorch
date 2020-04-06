@@ -15303,7 +15303,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             torch.searchsorted(boundaries, values_3d)
         with self.assertRaisesRegex(
                 RuntimeError, "boundaries tensor must be 1 dimension"):
-                torch.bucketize(values_3d, boundaries)
+            torch.bucketize(values_3d, boundaries)
         with self.assertRaisesRegex(
                 RuntimeError, "only when boundaries tensor dimension is 1"):
             torch.searchsorted(boundaries, 1)
