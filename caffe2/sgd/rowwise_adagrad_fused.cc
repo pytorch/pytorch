@@ -2,8 +2,6 @@
 
 namespace caffe2 {
 
-namespace {
-
 OPERATOR_SCHEMA(RowWiseSparseAdagradFusedWithSparseLengthsSumGradient)
     .NumInputs(6)
     .NumOutputs(2)
@@ -164,7 +162,5 @@ REGISTER_CPU_OPERATOR_WITH_ENGINE(
         float,
         int,
         rowwise_adagrad_update_inlined>);
-
-} // namespace
 
 } // namespace caffe2
