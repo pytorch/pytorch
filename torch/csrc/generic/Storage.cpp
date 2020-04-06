@@ -308,6 +308,7 @@ void THPStorage_(initCopyMethods)()
 {
   auto& h = THWStorage_(copy_functions);
   // copy from CPU types
+  // TODO: Add cross-dtype storage copy for complex storage
   #if !defined(TH_REAL_IS_COMPLEXFLOAT) && !defined(TH_REAL_IS_COMPLEXDOUBLE)
     THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THPByteStorageType, h, &THWStorage_(copyByte));
     THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THPCharStorageType, h, &THWStorage_(copyChar));

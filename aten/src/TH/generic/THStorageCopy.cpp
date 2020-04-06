@@ -25,6 +25,7 @@ void THStorage_(copy##TYPENAMESRC)(THStorage *storage, TH##TYPENAMESRC##Storage 
     data[i] = static_cast<scalar_t>(src_data[i]);                           \
 }
 
+// TODO: Add cross-dtype storage copy for complex storage
 #if !defined(TH_REAL_IS_COMPLEXFLOAT) && !defined(TH_REAL_IS_COMPLEXDOUBLE)
   IMPLEMENT_THStorage_COPY(Byte)
   IMPLEMENT_THStorage_COPY(Char)
