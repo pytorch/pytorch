@@ -186,27 +186,6 @@ void bitwise_xor_kernel(TensorIterator& iter) {
   }
 }
 
-template<typename scalar_t>
-static inline scalar_t lshift_wrapper(scalar_t a, scalar_t b) {
-  return a << b;
-}
-
-static inline int8_t lshift_wrapper(int8_t a, int8_t b) {
-  return ((uint8_t)a) << b;
-}
-
-static inline int16_t lshift_wrapper(int16_t a, int16_t b) {
-  return ((uint16_t)a) << b;
-}
-
-static inline int32_t lshift_wrapper(int32_t a, int32_t b) {
-  return ((uint32_t)a) << b;
-}
-
-static inline int64_t lshift_wrapper(int64_t a, int64_t b) {
-  return ((uint64_t)a) << b;
-}
-
 void lshift_kernel(TensorIterator& iter) {
   if (iter.dtype() == ScalarType::Float || iter.dtype() == ScalarType::Double) {
     AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "lshift_cpu", [&]() {
@@ -224,7 +203,7 @@ void lshift_kernel(TensorIterator& iter) {
     AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "lshift_cpu", [&]() {
       cpu_kernel(iter,
         [](scalar_t a, scalar_t b) -> scalar_t {
-          return lshift_wrapper(a, b);
+          return static_cast<std::make_unsigned_t<scalar_t>>(a) << b;
       });
     });
   }
@@ -290,27 +269,6 @@ void logical_xor_kernel(TensorIterator& iter) {
   }
 }
 
-template<typename scalar_t>
-static inline scalar_t rshift_wrapper(scalar_t a, scalar_t b) {
-  return a >> b;
-}
-
-static inline int8_t rshift_wrapper(int8_t a, int8_t b) {
-  return ((uint8_t)a) >> b;
-}
-
-static inline int16_t rshift_wrapper(int16_t a, int16_t b) {
-  return ((uint16_t)a) >> b;
-}
-
-static inline int32_t rshift_wrapper(int32_t a, int32_t b) {
-  return ((uint32_t)a) >> b;
-}
-
-static inline int64_t rshift_wrapper(int64_t a, int64_t b) {
-  return ((uint64_t)a) >> b;
-}
-
 void rshift_kernel(TensorIterator& iter) {
   if (iter.dtype() == ScalarType::Float || iter.dtype() == ScalarType::Double) {
     AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "rshift_cpu", [&]() {
@@ -328,7 +286,7 @@ void rshift_kernel(TensorIterator& iter) {
     AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "rshift_cpu", [&]() {
       cpu_kernel(iter,
         [](scalar_t a, scalar_t b) -> scalar_t {
-          return rshift_wrapper(a, b);
+          return static_cast<std::make_unsigned_t<scalar_t>>(a) >> b;
       });
     });
   }
