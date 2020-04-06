@@ -350,6 +350,11 @@ static void log_normal_kernel(TensorIterator& iter, double mean, double std, Gen
   });
 }
 
+void uniform_kernel(TensorIterator& iter, double from, double to, Generator gen) {
+  CPUGenerator* generator = get_generator_or_default<CPUGenerator>(gen, detail::getDefaultCPUGenerator());
+  templates::cpu::uniform_kernel(iter, from, to, generator);
+}
+
 void normal_kernel(Tensor& self, double mean, double std, Generator gen) {
   CPUGenerator* generator = get_generator_or_default<CPUGenerator>(gen, detail::getDefaultCPUGenerator());
   templates::cpu::normal_kernel(self, mean, std, generator);
@@ -458,6 +463,7 @@ REGISTER_DISPATCH(exponential_stub, &exponential_kernel);
 REGISTER_DISPATCH(geometric_stub, &geometric_kernel);
 REGISTER_DISPATCH(log_normal_stub, &log_normal_kernel);
 REGISTER_DISPATCH(normal_stub, &normal_kernel);
+REGISTER_DISPATCH(uniform_stub, &uniform_kernel);
 REGISTER_DISPATCH(random_from_to_stub, &random_from_to_kernel);
 REGISTER_DISPATCH(random_full_64_bits_range_stub, &random_full_64_bits_range_kernel);
 REGISTER_DISPATCH(random_stub, &random_kernel);
