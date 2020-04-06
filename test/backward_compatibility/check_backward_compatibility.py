@@ -24,6 +24,7 @@ white_list = [
     ('aten::append*', datetime.date(2020, 4, 15)),
     ('aten::real*', datetime.date(2020, 4, 15)),
     ('aten::imag*', datetime.date(2020, 4, 15)),
+    ('aten::quantize_per_tensor', datetime.date(2020, 4, 15)),
     ('aten::_empty_affine_quantized', datetime.date(2020, 4, 15)),
     ('aten::_empty_per_channel_affine_quantized', datetime.date(2020, 4, 15)),
 ]
