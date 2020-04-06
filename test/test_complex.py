@@ -1,7 +1,6 @@
 import math
 import torch
 from torch.testing._internal.common_utils import TestCase, run_tests, TEST_NUMPY
-from torch.testing._internal.common_device_type import (dtypes)
 import unittest
 
 if TEST_NUMPY:
@@ -38,8 +37,8 @@ class TestComplexTensor(TestCase):
     def test_bool_complex_add(self):
         a = torch.tensor((True,), dtype=torch.bool)
         b = torch.tensor((1 + 1j,), dtype=torch.complex128)
-        c = a+b
-        expected = torch.tensor((2+1j,), dtype=torch.complex128)
+        c = a + b
+        expected = torch.tensor((2 + 1j,), dtype=torch.complex128)
         self.assertEqual(c, expected)
 
 if __name__ == '__main__':
