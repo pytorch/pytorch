@@ -129,7 +129,7 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
 
   TORCH_API void call(const std::vector<CallArg>& args) override {
     if (args.size() != buffer_args().size()) {
-      throw malformed_input();
+      throw malformed_input("bad args in IREvaluator call");
     }
     for (size_t i = 0; i < args.size(); i++) {
       bind(buffer_args()[i], args[i]);
@@ -346,7 +346,7 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
     v->rhs()->accept(this);
     Value rhs_v = value_;
     if (lhs_v.dtype() != rhs_v.dtype()) {
-      throw malformed_input(v);
+      throw malformed_input("bad dtype in binary op", v);
     }
     IRNodeType expr_type = v->expr_type();
     if (expr_type == IRNodeType::kAnd || expr_type == IRNodeType::kOr ||
@@ -385,7 +385,7 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
 
     if (lhs_v.dtype() != rhs_v.dtype() ||
         ret_val1_v.dtype() != ret_val2_v.dtype()) {
-      throw malformed_input(v);
+      throw malformed_input("bad dtype in CompareSelect", v);
     }
 
     switch (lhs_v.dtype().scalar_type()) {
@@ -411,7 +411,7 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
   TORCH_API void visit(const Let* v) override {
     const Var* var = dynamic_cast<const Var*>(v->var());
     if (!var) {
-      throw malformed_input(v);
+      throw malformed_input("bad Var in Let", v);
     }
     v->value()->accept(this);
     Value value = value_;
@@ -435,7 +435,7 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
   TORCH_API void visit(const LetStmt* v) override {
     const Var* var = v->var();
     if (!var) {
-      throw malformed_input(v);
+      throw malformed_input("bad Var in LetStmt", v);
     }
 
     v->value()->accept(this);
@@ -460,7 +460,7 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
   TORCH_API void visit(const Var* v) override {
     auto iter = eval_context_.find(v);
     if (iter == eval_context_.end()) {
-      throw malformed_input(v);
+      throw malformed_input("could not find Var in context", v);
     }
 
     value_ = iter->second;
@@ -499,7 +499,7 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
     Dtype dst_dtype = v->dtype();
     Dtype src_dtype = src_value->dtype();
     if (src_dtype.lanes() != dst_dtype.lanes()) {
-      throw malformed_input(v);
+      throw malformed_input("lane mismatch in Cast", v);
     }
 
     if (src_dtype != dst_dtype) {
@@ -523,7 +523,7 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
     v->stop()->accept(this);
     int stop = value_.as<int>();
     if (eval_context_.count(var_node)) {
-      throw malformed_input(v);
+      throw malformed_input("could not find var_node in For context", v);
     }
 
     for (int i = start; i < stop; i++) {
@@ -580,7 +580,7 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
     const Var* base_node = v->base_handle();
     auto iter = buffer_mapping_.find(base_node);
     if (iter == buffer_mapping_.end()) {
-      throw malformed_input(v);
+      throw malformed_input("could not find base node in Load", v);
     }
     void* ptr = iter->second;
 
@@ -613,7 +613,7 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
     const Var* base_node = v->base_handle();
     auto iter = buffer_mapping_.find(base_node);
     if (iter == buffer_mapping_.end()) {
-      throw malformed_input(v);
+      throw malformed_input("could not find base node in Store", v);
     }
 
     void* ptr = iter->second;
@@ -624,25 +624,25 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
     v->mask()->accept(this);
     std::vector<int> mask = value().as_vec<int>();
     if (index.size() != mask.size()) {
-      throw malformed_input(v);
+      throw malformed_input("mask size mismatch in Store", v);
     }
 
     ScalarType v_sdtype = v->value()->dtype().scalar_type();
 
     switch (v_sdtype) {
-#define TYPE_CASE(Type, Name)                               \
-  case ScalarType::Name: {                                  \
-    v->value()->accept(this);                               \
-    std::vector<Type> value = this->value().as_vec<Type>(); \
-    if (index.size() != value.size()) {                     \
-      throw malformed_input(v);                             \
-    }                                                       \
-    Type* ptr##Name = static_cast<Type*>(ptr);              \
-    for (size_t i = 0; i < index.size(); i++) {             \
-      if (mask[i]) {                                        \
-        ptr##Name[index[i]] = value[i];                     \
-      }                                                     \
-    }                                                       \
+#define TYPE_CASE(Type, Name)                                   \
+  case ScalarType::Name: {                                      \
+    v->value()->accept(this);                                   \
+    std::vector<Type> value = this->value().as_vec<Type>();     \
+    if (index.size() != value.size()) {                         \
+      throw malformed_input("value size mismatch in Store", v); \
+    }                                                           \
+    Type* ptr##Name = static_cast<Type*>(ptr);                  \
+    for (size_t i = 0; i < index.size(); i++) {                 \
+      if (mask[i]) {                                            \
+        ptr##Name[index[i]] = value[i];                         \
+      }                                                         \
+    }                                                           \
   } break;
       AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, TYPE_CASE);
 #undef TYPE_CASE
@@ -669,7 +669,7 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
     if (values.size() >= 2ULL) {
       v2 = values[1].as_vec<float>();
       if (v1.size() != v2.size()) {
-        throw malformed_input(v);
+        throw malformed_input("value size mismatch in Intrinsics", v);
       }
     }
 
@@ -829,7 +829,7 @@ class VarSubMutator : public IRMutator {
       const Var* key_var = entry.first;
       const Expr* value = entry.second;
       if (!key_var) {
-        throw malformed_input();
+        throw malformed_input("missing key in VarSubMutator");
       }
       var_mapping_[key_var] = value;
     }
