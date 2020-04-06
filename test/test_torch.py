@@ -12452,18 +12452,29 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(top1, top2)
         self.assertEqual(idx1, idx2)
 
-    def test_topk_nonfinite(self, device):
-        for dtype in (torch.float, torch.double):
-            x = torch.tensor([float('nan'), float('inf'), 1e10, 0, -1e10, -float('inf')], device=device)
-            val, idx = x.topk(4)
-            expect = torch.tensor([float('nan'), float('inf'), 1e10, 0], device=device)
-            self.assertEqual(val, expect, allow_inf=True)
-            self.assertEqual(idx, [0, 1, 2, 3])
+    @dtypes(torch.int8, torch.uint8, torch.int16, torch.int32, torch.int64)
+    def test_topk_integral(self, device, dtype):
+        a = torch.randint(torch.iinfo(dtype).min, torch.iinfo(dtype).max, size=(10,),
+                          dtype=dtype, device=device)
+        sort_topk = a.sort()[0][-5:].flip(0)
+        topk = a.topk(5)
+        self.assertEqual(sort_topk, topk[0])      # check values
+        self.assertEqual(sort_topk, a[topk[1]])   # check indices
 
-            val, idx = x.topk(4, largest=False)
-            expect = torch.tensor([-float('inf'), -1e10, 0, 1e10], device=device)
-            self.assertEqual(val, expect, allow_inf=True)
-            self.assertEqual(idx, [5, 4, 3, 2])
+    @dtypesIfCUDA(*([torch.half, torch.float, torch.double]
+                  + ([torch.bfloat16] if TEST_WITH_ROCM else [])))
+    @dtypes(torch.float, torch.double)
+    def test_topk_nonfinite(self, device, dtype):
+        x = torch.tensor([float('nan'), float('inf'), 1e4, 0, -1e4, -float('inf')], device=device, dtype=dtype)
+        val, idx = x.topk(4)
+        expect = torch.tensor([float('nan'), float('inf'), 1e4, 0], device=device, dtype=dtype)
+        self.assertEqual(val, expect, allow_inf=True)
+        self.assertEqual(idx, [0, 1, 2, 3])
+
+        val, idx = x.topk(4, largest=False)
+        expect = torch.tensor([-float('inf'), -1e4, 0, 1e4], device=device, dtype=dtype)
+        self.assertEqual(val, expect, allow_inf=True)
+        self.assertEqual(idx, [5, 4, 3, 2])
 
     def test_is_signed(self, device):
         self.assertEqual(torch.IntTensor(5).to(device).is_signed(), True)
