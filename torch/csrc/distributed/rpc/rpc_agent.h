@@ -36,8 +36,8 @@ struct RpcBackendOptions {
 };
 
 // A globally unique ID to identify an RpcAgent
-struct TORCH_API WorkerInfo {
-  WorkerInfo(std::string name, int id)
+struct TORCH_API WorkerInfo : torch::CustomClassHolder {
+  WorkerInfo(std::string name, int64_t id)
       : WorkerInfo(std::move(name), (worker_id_t)id) {
     TORCH_CHECK(
         id <= std::numeric_limits<worker_id_t>::max(),
