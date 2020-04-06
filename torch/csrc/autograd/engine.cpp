@@ -583,7 +583,7 @@ static variable_list call_function(
   variable_list outputs;
 
   {
-    at::DebugInfoGuard guard(graph_task->debug_info_);
+    at::ThreadLocalStateGuard guard(graph_task->thread_locals_);
     if (has_post_hooks) {
       // In functions/accumulate_grad.cpp, there is some logic to check the
       // conditions under which the incoming gradient can be stolen directly
@@ -798,13 +798,7 @@ auto Engine::execute(const edge_list& roots,
     graph_task->init_to_execute(*graph_root, outputs);
   }
 
-  variable_list results = execute_with_graph_task(graph_task, graph_root)->wait();
-  // If it's owning thread backward call (not reentrant), local_ready_queue must
-  // be empty when we finish Engine::execute
-  if (not_reentrant_backward_call) {
-    TORCH_INTERNAL_ASSERT(local_ready_queue->empty());
-  }
-  return results;
+  return execute_with_graph_task(graph_task, graph_root)->wait();
 }
 
 void Engine::initialize_device_threads_pool() {
