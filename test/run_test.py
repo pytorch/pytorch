@@ -126,6 +126,7 @@ ROCM_BLACKLIST = [
     'test_jit_simple',
     'test_jit_legacy',
     'test_jit_fuser_legacy',
+    'test_tensorexpr',
 ]
 
 # These tests are slow enough that it's worth calculating whether the patch
