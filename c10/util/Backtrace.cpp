@@ -239,10 +239,10 @@ std::string get_backtrace(
   std::unique_ptr<void*[]> back_trace(new void*[maximum_number_of_frames]);
   bool with_symbol = false;
   bool with_line = false;
+  bool init_symbol;
 
-  // Initialize symbols
-  process = GetCurrentProcess();
-  SymInitialize(process, NULL, TRUE);
+  // The backtrace string goes into here.
+  std::ostringstream stream;
 
   // Get the frames
   const USHORT n_frame = CaptureStackBackTrace(
@@ -251,41 +251,60 @@ std::string get_backtrace(
       back_trace.get(),
       NULL);
 
-  // The backtrace string goes into here.
-  std::ostringstream stream;
+  // Initialize symbols
+  process = GetCurrentProcess();
+  init_symbol = SymInitialize(process, NULL, TRUE);
 
   for (USHORT i_frame = 0; i_frame < n_frame; ++i_frame) {
     // Get the address and the name of the symbol
-    p_symbol->SizeOfStruct = sizeof(SYMBOL_INFO);
-    p_symbol->MaxNameLen = MAX_SYM_NAME;
-    with_symbol = SymFromAddr(
-        process, (ULONG64)back_trace[i_frame], &displacement, p_symbol);
+    if (init_symbol) {
+      p_symbol->SizeOfStruct = sizeof(SYMBOL_INFO);
+      p_symbol->MaxNameLen = MAX_SYM_NAME;
+      with_symbol = SymFromAddr(
+          process, (ULONG64)back_trace[i_frame], &displacement, p_symbol);
+    }
 
     // Get the line number and the module
-    line.reset(new IMAGEHLP_LINE64());
-    line->SizeOfStruct = sizeof(IMAGEHLP_LINE64);
-    with_line = SymGetLineFromAddr64(
-        process, (ULONG64)back_trace[i_frame], &disp, line.get());
+    if (init_symbol) {
+      line.reset(new IMAGEHLP_LINE64());
+      line->SizeOfStruct = sizeof(IMAGEHLP_LINE64);
+      with_line = SymGetLineFromAddr64(
+          process, (ULONG64)back_trace[i_frame], &disp, line.get());
+    }
+
+    // Get the module basename
+    get_module_name(module, back_trace[i_frame]);
+    char* basename = nullptr;
+    char* last_slash_pos = nullptr;
+    if (module) {
+      last_slash_pos = strrchr(module, '\\');
+      if (last_slash_pos) {
+        basename = last_slash_pos + 1;
+      }
+    }
 
     // The pattern on Windows is
-    // `<return-address> <symbol-address> <demangled-function-name> [<file-name>
-    // @ <line-number>]
+    // `<return-address> <symbol-address>
+    // <module-name>!<demangled-function-name> [<file-name> @ <line-number>]
     stream << std::setfill('0') << std::setw(16) << std::uppercase << std::hex
            << back_trace[i_frame] << std::dec;
     if (with_symbol) {
       stream << std::setfill('0') << std::setw(16) << std::uppercase << std::hex
-             << p_symbol->Address << std::dec << " " << p_symbol->Name;
+             << p_symbol->Address << std::dec << " " << basename << "!" << p_symbol->Name;
     } else {
-      stream << " <unknown symbol address> <unknown symbol>";
+      stream << " <unknown symbol address> " << basename << "!<unknown symbol>";
     }
     stream << " [";
     if (with_line) {
       stream << line->FileName << " @ " << line->LineNumber;
     } else {
-      get_module_name(module, back_trace[i_frame]);
-      stream << module << " @ <unknown line number>";
+      stream << "<unknown file> @ <unknown line number>";
     }
     stream << "]" << std::endl;
+  }
+
+  if (init_symbol) {
+    SymCleanup(process);
   }
 
   return stream.str();
