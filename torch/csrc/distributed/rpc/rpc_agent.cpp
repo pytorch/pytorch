@@ -116,9 +116,15 @@ void RpcAgent::retryExpiredRpcs() {
         fm = send(earliestRpc->to_, std::move(msgCopy));
         futures.emplace_back(fm, earliestRpc);
       } catch (std::exception& e) {
+        // release lock so we don't trigger callbacks with the lock held after
+        // calling setError.
+        lock.unlock();
         std::string errorMsg =
             c10::str("send() failed while retrying RPC with error: ", e.what());
         earliestRpc->originalFuture_->setError(errorMsg);
+        // re-acquire the lock so future iterations are still performed in a
+        // thread-safe fashion.
+        lock.lock();
       }
 
       // A callback will be attached to all futures for the retries in this
