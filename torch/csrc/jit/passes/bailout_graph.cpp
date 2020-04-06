@@ -3,6 +3,7 @@
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/ir/ir_views.h>
 #include <torch/csrc/jit/jit_log.h>
+#include <torch/csrc/jit/passes/clear_profiling.h>
 #include <torch/csrc/jit/passes/constant_pooling.h>
 #include <torch/csrc/jit/passes/liveness.h>
 #include <memory>
@@ -384,8 +385,10 @@ TORCH_API std::shared_ptr<Graph> BuildBailOutGraphFrom(
       bailout_index == orig_bailout_node->i(attr::index));
   BailOutGraphBuilderForNode bg(orig, target);
   auto bailout_graph = bg.buildBailOutGraphFrom(orig_bailout_node);
-  GRAPH_DUMP("bailout_graph ", bailout_graph);
+
   removeBailouts(bailout_graph->block());
+  ClearProfilingInformation(bailout_graph);
+  GRAPH_DUMP("bailout_graph ", bailout_graph);
   return bailout_graph;
 }
 
