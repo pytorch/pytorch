@@ -207,7 +207,7 @@ struct _cuda_scatter_fill_internal_kernel {
 
       f(
         (scalar_t*)self_data + idx_dim * index_stride,
-        src_val
+        &src_val
       );
 
     };
@@ -282,8 +282,8 @@ void scatter_cuda_kernel(Tensor& self, int64_t dim, const Tensor& index, const T
 void scatter_fill_cuda_kernel(Tensor& self, int64_t dim, const Tensor& index, Scalar src) {
   cuda_scatter_fill_base_kernel<>()(
     self, dim, index, src,
-    "scatter_fill_cuda_", []C10_DEVICE(auto* lhs, auto rhs_val) {
-      *lhs = rhs_val;
+    "scatter_fill_cuda_", []C10_DEVICE(auto* lhs, const auto* rhs) {
+      *lhs = *rhs;
     }
   );
 }
