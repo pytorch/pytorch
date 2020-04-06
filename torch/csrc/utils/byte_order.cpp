@@ -280,8 +280,8 @@ void THP_encodeDoubleBuffer(uint8_t* dst, const double* src, THPByteOrder order,
 }
 
 template <typename T>
-std::vector<std::complex<T>> complex_to_float(const std::complex<T>* src, size_t len) {
-  std::vector<std::complex<T>> new_src;
+std::vector<T> complex_to_float(const std::complex<T>* src, size_t len) {
+  std::vector<T> new_src;
   new_src.reserve(2 * len);
   for (int i = 0; i < len; i++) {
     auto elem = src[i];
