@@ -15,7 +15,7 @@ void THCStorage_(copyCPU)(THCState *state, THCStorage *self, struct THStorage *s
                                   THStorage_(data)(src),
                                   self->numel() * sizeof(scalar_t),
                                   cudaMemcpyHostToDevice,
-                                  stream));
+                                  stream)); 
 #else
   THCudaCheck(cudaMemcpyAsync(THCStorage_(data)(state, self),
                               THStorage_(data)(src),
@@ -47,8 +47,6 @@ TH_CUDA_STORAGE_IMPLEMENT_COPY(Half)
 TH_CUDA_STORAGE_IMPLEMENT_COPY(Double)
 TH_CUDA_STORAGE_IMPLEMENT_COPY(Bool)
 TH_CUDA_STORAGE_IMPLEMENT_COPY(BFloat16)
-TH_CUDA_STORAGE_IMPLEMENT_COPY(ComplexFloat)
-TH_CUDA_STORAGE_IMPLEMENT_COPY(ComplexDouble)
 
 void THStorage_(copyCuda)(THCState *state, THStorage *self, struct THCStorage *src)
 {
@@ -91,8 +89,6 @@ TH_CUDA_STORAGE_IMPLEMENT_COPYTO(Half)
 TH_CUDA_STORAGE_IMPLEMENT_COPYTO(Double)
 TH_CUDA_STORAGE_IMPLEMENT_COPYTO(Bool)
 TH_CUDA_STORAGE_IMPLEMENT_COPYTO(BFloat16)
-TH_CUDA_STORAGE_IMPLEMENT_COPYTO(ComplexFloat)
-TH_CUDA_STORAGE_IMPLEMENT_COPYTO(ComplexDouble)
 
 #undef TH_CUDA_STORAGE_IMPLEMENT_COPY
 #undef TH_CUDA_STORAGE_IMPLEMENT_COPYTO

@@ -106,9 +106,6 @@ install(FILES
           THCGenerateFloatType.h
           THCGenerateFloatTypes.h
           THCGenerateDoubleType.h
-          THCGenerateComplexFloatType.h
-          THCGenerateComplexTypes.h
-          THCGenerateComplexDoubleType.h
           THCIntegerDivider.cuh
           THCNumerics.cuh
           THCTensorSort.cuh
