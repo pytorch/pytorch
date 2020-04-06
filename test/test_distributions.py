@@ -434,7 +434,7 @@ EXAMPLES = [
     Example(MixtureSameFamily, [
         {
             'mixture_distribution': Categorical(torch.rand(5, requires_grad=True)),
-            'component_distribution': Normal(torch.randn(5, requires_grad=True), 
+            'component_distribution': Normal(torch.randn(5, requires_grad=True),
                                              torch.rand(5, requires_grad=True)),
         },
         {
@@ -442,7 +442,7 @@ EXAMPLES = [
             'component_distribution': MultivariateNormal(
                 loc=torch.randn(5, 2, requires_grad=True),
                 covariance_matrix=torch.tensor([[2.0, 0.3], [0.3, 0.25]], requires_grad=True)),
-        },     
+        },
     ]),
     Example(VonMises, [
         {
@@ -1617,24 +1617,24 @@ class TestDistributions(TestCase):
             Categorical(torch.rand(5)),
             Normal(torch.randn(5), torch.rand(5)))
         normal_case_1d_batch = MixtureSameFamily(
-            Categorical(torch.rand(3, 5)), 
+            Categorical(torch.rand(3, 5)),
             Normal(torch.randn(3, 5), torch.rand(3, 5)))
         normal_case_1d_multi_batch = MixtureSameFamily(
-            Categorical(torch.rand(4, 3, 5)), 
+            Categorical(torch.rand(4, 3, 5)),
             Normal(torch.randn(4, 3, 5), torch.rand(4, 3, 5)))
         normal_case_2d = MixtureSameFamily(
             Categorical(torch.rand(5)),
             Independent(Normal(torch.randn(5, 2), torch.rand(5, 2)), 1))
         normal_case_2d_batch = MixtureSameFamily(
-            Categorical(torch.rand(3, 5)), 
+            Categorical(torch.rand(3, 5)),
             Independent(Normal(torch.randn(3, 5, 2), torch.rand(3, 5, 2)), 1))
         normal_case_2d_multi_batch = MixtureSameFamily(
-            Categorical(torch.rand(4, 3, 5)), 
+            Categorical(torch.rand(4, 3, 5)),
             Independent(Normal(torch.randn(4, 3, 5, 2), torch.rand(4, 3, 5, 2)), 1))
 
         self.assertEqual(normal_case_1d.sample().size(), ())
         self.assertEqual(normal_case_1d.sample((2,)).size(), (2,))
-        self.assertEqual(normal_case_1d.sample((2, 7)).size(), (2, 7))            
+        self.assertEqual(normal_case_1d.sample((2, 7)).size(), (2, 7))
         self.assertEqual(normal_case_1d_batch.sample().size(), (3,))
         self.assertEqual(normal_case_1d_batch.sample((2,)).size(), (2, 3))
         self.assertEqual(normal_case_1d_batch.sample((2, 7)).size(), (2, 7, 3))
@@ -1644,7 +1644,7 @@ class TestDistributions(TestCase):
 
         self.assertEqual(normal_case_2d.sample().size(), (2,))
         self.assertEqual(normal_case_2d.sample((2,)).size(), (2, 2))
-        self.assertEqual(normal_case_2d.sample((2, 7)).size(), (2, 7, 2))            
+        self.assertEqual(normal_case_2d.sample((2, 7)).size(), (2, 7, 2))
         self.assertEqual(normal_case_2d_batch.sample().size(), (3, 2))
         self.assertEqual(normal_case_2d_batch.sample((2,)).size(), (2, 3, 2))
         self.assertEqual(normal_case_2d_batch.sample((2, 7)).size(), (2, 7, 3, 2))
@@ -1668,7 +1668,7 @@ class TestDistributions(TestCase):
             self.assertAlmostEqual(log_prob, expected, places=3)
 
         self._check_log_prob(
-            MixtureSameFamily(Categorical(probs=probs), 
+            MixtureSameFamily(Categorical(probs=probs),
                               Normal(loc, scale)), ref_log_prob)
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
@@ -1695,7 +1695,7 @@ class TestDistributions(TestCase):
         self._check_sampler_sampler(
             MixtureSameFamily(Categorical(probs=probs), Normal(loc, scale)),
             ScipyMixtureNormal(probs.numpy(), loc.numpy(), scale.numpy()),
-            '''MixtureSameFamily(Categorical(probs={}), 
+            '''MixtureSameFamily(Categorical(probs={}),
             Normal(loc={}, scale={}))'''.format(probs, loc, scale))
 
     def test_normal(self):
@@ -2441,7 +2441,7 @@ class TestDistributions(TestCase):
         self.assertEqual(ContinuousBernoulli(p).entropy(), torch.tensor([-0.02938, -0.07641, -0.00682]), atol=1e-4)
         # entropy below corresponds to the clamped value of prob when using float 64
         # the value for float32 should be -1.76898
-        self.assertEqual(ContinuousBernoulli(torch.tensor([0.0])).entropy(), torch.tensor([-2.58473]))
+        self.assertEqual(ContinuousBernoulli(torch.tensor([0.0])).entropy(), torch.tensor([-2.58473]), atol=1e-5)
         self.assertEqual(ContinuousBernoulli(s).entropy(), torch.tensor(-0.02938), atol=1e-4)
 
     def test_continuous_bernoulli_3d(self):
