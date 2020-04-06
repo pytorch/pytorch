@@ -2,13 +2,13 @@
 
 #include <ATen/core/stack.h>
 #include <c10/util/TypeList.h>
-#include <ATen/core/boxing/kernel_functor.h>
-#include <ATen/core/boxing/kernel_function.h>
-#include <ATen/core/boxing/kernel_lambda.h>
 
 namespace c10 {
 
+using Stack = torch::jit::Stack; // TODO Instead of this, move torch::jit::Stack to the c10 namespace.
+
 class OperatorHandle;
+struct OperatorKernel;
 
 // This kernel implements the behavior of falling through to the next available
 // registered dispatch key.  The implementation of this function is FAST; it is
