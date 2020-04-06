@@ -1,9 +1,9 @@
 #pragma once
 
-#include <ATen/core/jit_type.h>
-#include <ATen/core/alias_info.h>
-#include <torch/csrc/jit/frontend/lexer.h>
 #include <ATen/core/Macros.h>
+#include <ATen/core/alias_info.h>
+#include <ATen/core/jit_type.h>
+#include <torch/csrc/jit/frontend/lexer.h>
 
 namespace torch {
 namespace jit {

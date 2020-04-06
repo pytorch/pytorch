@@ -42,8 +42,7 @@ static void CanonicalizeOps(Block* block) {
        ++it) {
     for (auto sub : it->blocks())
       CanonicalizeOps(sub);
-    if (
-        it->matches(
+    if (it->matches(
             "aten::add(Tensor self, Tensor other, *, Scalar alpha) -> Tensor") ||
         it->matches(
             "aten::sub(Tensor self, Tensor other, *, Scalar alpha) -> Tensor") ||
@@ -71,7 +70,8 @@ static void CanonicalizeOps(Block* block) {
         auto* graph = it->owningGraph();
         const auto chunks = it->get<int64_t>(attr::chunks).value();
         const auto dim = it->get<int64_t>(attr::dim).value();
-        auto* node = graph->insertNode(graph->create(prim::ConstantChunk, chunks));
+        auto* node =
+            graph->insertNode(graph->create(prim::ConstantChunk, chunks));
         node->addInput(self);
         node->i_(attr::chunks, chunks)->i_(attr::dim, dim);
         for (const auto& orig_out : *orig_outputs) {

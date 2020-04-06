@@ -3,8 +3,8 @@
 #include <ATen/core/alias_info.h>
 #include <c10/util/flat_hash_map.h>
 #include <torch/csrc/jit/ir/ir.h>
-#include <torch/csrc/jit/passes/utils/memory_dag.h>
 #include <torch/csrc/jit/ir/type_hashing.h>
+#include <torch/csrc/jit/passes/utils/memory_dag.h>
 
 namespace torch {
 namespace jit {
@@ -49,50 +49,50 @@ class AliasDb {
   //
   // These nodes are considered not safe to eliminate or mutate under any
   // circumstances.
-  bool writesToWildcard(Node* n);
+  bool writesToWildcard(Node* n) const;
 
   // Does `n` write to an alias of one of the values in `vs`?
   // if `recurseBlocks` is true, consider writes on the nodes in `n`s sub-blocks
-  TORCH_API bool writesToAlias(Node* n, const ValueSet& vs);
+  TORCH_API bool writesToAlias(Node* n, const ValueSet& vs) const;
 
   // Does `a` and `b` potentially share a memory location or do either
   // hold in memory any element that exists in the other
-  TORCH_API bool mayContainAlias(Value* a, Value* b);
+  TORCH_API bool mayContainAlias(Value* a, Value* b) const;
 
   // Do any values in group `a` share a memory location or hold in memory
   // any element that exists in group `b`
   TORCH_API bool mayContainAlias(
       const at::ArrayRef<Value*> a,
-      const at::ArrayRef<Value*> b);
+      const at::ArrayRef<Value*> b) const;
 
   // Do `a` and `b` potentially share a memory location?
-  TORCH_API bool mayAlias(const Value* a, const Value* b);
+  TORCH_API bool mayAlias(const Value* a, const Value* b) const;
   // Do any values in group `a` potentially share a memory location with any
   // value in group `b`? i.e. may they overlap?
-  TORCH_API bool mayAlias(const ValueSet& a, const ValueSet& b);
+  TORCH_API bool mayAlias(const ValueSet& a, const ValueSet& b) const;
 
   // Do any nodes write to an alias set input to `n`?
-  TORCH_API bool hasInputWriters(const Node* n);
+  TORCH_API bool hasInputWriters(const Node* n) const;
 
   // Do any nodes write to an alias set output by `n`?
-  TORCH_API bool hasOutputWriters(const Node* n);
+  TORCH_API bool hasOutputWriters(const Node* n) const;
 
   // Do any nodes write to an alias set inputed/outputed by `n`?
-  TORCH_API bool hasWriters(const Node* n);
+  TORCH_API bool hasWriters(const Node* n) const;
 
   // Do any nodes write to `v`s memory location?
-  TORCH_API bool hasWriters(const Value* v);
+  TORCH_API bool hasWriters(const Value* v) const;
 
   // Is the operation in-place? i.e. doesn't write anywhere but locations it
   // reads from.
-  TORCH_API bool isMutable(Node* n);
+  TORCH_API bool isMutable(Node* n) const;
 
-  TORCH_API bool escapesScope(const at::ArrayRef<Value*>& vs);
+  TORCH_API bool escapesScope(const at::ArrayRef<Value*>& vs) const;
 
   // Is it safe to change whether `a` and `b` alias each other ?
   TORCH_API bool safeToChangeAliasingRelationship(
       const at::ArrayRef<Value*>& a,
-      const at::ArrayRef<Value*>& b);
+      const at::ArrayRef<Value*>& b) const;
 
   // Move 'n' (already in the graph) after 'movePoint' in the topological order.
   //
@@ -110,8 +110,8 @@ class AliasDb {
   bool couldMoveBeforeTopologically(Node* n, Node* movePoint);
 
   // For debugging: print alias db state to stdout
-  TORCH_API void dump();
-  TORCH_API std::string toString();
+  TORCH_API void dump() const;
+  TORCH_API std::string toString() const;
 
   static bool mutableType(const Value* v);
   static bool mutableType(const TypePtr& type);
@@ -122,7 +122,7 @@ class AliasDb {
   enum class MoveSide { BEFORE, AFTER };
   bool tryMove(Node* toMove, Node* movePoint, MoveSide moveSide, bool dryRun);
   void move(Node* toMove, Node* movePoint, MoveSide moveSide);
-  bool isBeforeOrAfter(const Node* n, MoveSide moveSide);
+  bool isBeforeOrAfter(const Node* n, MoveSide moveSide) const;
 
   /**
    * Write and read internal API
@@ -131,15 +131,15 @@ class AliasDb {
   // NOTE: this only returns values directly written to, not aliases thereof
   //
   // if `recurseBlocks` is true, gather writes on the nodes in `n`s sub-blocks
-  MemoryLocations getWrites(Node* n);
-  void getWritesImpl(Node* n, MemoryLocations& ret);
+  MemoryLocations getWrites(Node* n) const;
+  void getWritesImpl(Node* n, MemoryLocations& ret) const;
   // Register the fact that `n` writes to `v`.
   void registerWrite(const Value* v, Node* n);
   void registerWrite(const Element* e, Node* n);
   // Get all the values that `n` reads from.
   // if `recurseBlocks` is true, gather reads on the nodes in `n`s sub-blocks
-  MemoryLocations getReads(Node* n);
-  void getReadsImpl(Node* n, MemoryLocations& ret);
+  MemoryLocations getReads(Node* n) const;
+  void getReadsImpl(Node* n, MemoryLocations& ret) const;
 
   /**
    * Wildcard methods
@@ -148,7 +148,7 @@ class AliasDb {
   c10::optional<Element*> setWildcard(const Value* v);
 
   // Is this a value which will not alias
-  bool nonAliasingValue(const Value* elem);
+  bool nonAliasingValue(const Value* elem) const;
 
   /**
    * Special analysis methods
@@ -202,16 +202,16 @@ class AliasDb {
   ska::flat_hash_map<const Value*, Element*> elementMap_;
   // All wildcard elements (one for each unique mutable type).
   std::unordered_map<TypePtr, Element*, HashType, EqualType> wildcardIndex_;
-  Element* getWildcard(const TypePtr& type);
+  Element* getWildcard(const TypePtr& type) const;
   c10::optional<Element*> tryGetOrCreateWildcard(const TypePtr& type);
   void addContainedTypesToFreshElement(
       Element* container_elem,
       const TypePtr& mut_type);
 
-  std::vector<Element*> getElements(at::ArrayRef<Value*> vs);
-  bool mayAliasWildcard(const Value* v);
-  bool mayAliasWildcard(const at::ArrayRef<Value*> vs);
-  bool hasWriters(const at::ArrayRef<Value*>& values);
+  std::vector<Element*> getElements(at::ArrayRef<Value*> vs) const;
+  bool mayAliasWildcard(const Value* v) const;
+  bool mayAliasWildcard(const at::ArrayRef<Value*> vs) const;
+  bool hasWriters(const at::ArrayRef<Value*>& values) const;
 
   /**
    * State for tracking write info.
@@ -221,8 +221,8 @@ class AliasDb {
   // Set of all memory locations that may have been written to.
   mutable MemoryLocations writeCache_;
   mutable bool isWriteCacheStale_ = true;
-  void rebuildWriteCache();
-  std::string getElementName(const Element* e);
+  void rebuildWriteCache() const;
+  std::string getElementName(const Element* e) const;
 };
 
 } // namespace jit

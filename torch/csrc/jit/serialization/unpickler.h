@@ -1,8 +1,8 @@
 #pragma once
 
-#include "pickler.h"
 #include <ATen/core/ivalue.h>
 #include <caffe2/serialize/inline_container.h>
+#include "pickler.h"
 
 namespace torch {
 namespace jit {
@@ -10,13 +10,13 @@ namespace jit {
 using TypeResolver =
     std::function<c10::StrongTypePtr(const c10::QualifiedName&)>;
 
-using ObjLoader =
-    std::function<c10::intrusive_ptr<c10::ivalue::Object>(at::StrongTypePtr, IValue)>;
+using ObjLoader = std::function<
+    c10::intrusive_ptr<c10::ivalue::Object>(at::StrongTypePtr, IValue)>;
 
 // [unpickler refactor] there is some cruft around PickleOpCode::BUILD,
-// PickleOpCode::NEWOBJ, and the last_opcode_ member below that should be deleted at
-// some point, the Pickler doesn't produce it and it's only around to support
-// models saved before 1.1
+// PickleOpCode::NEWOBJ, and the last_opcode_ member below that should be
+// deleted at some point, the Pickler doesn't produce it and it's only around to
+// support models saved before 1.1
 class Unpickler {
   TH_DISALLOW_COPY_AND_ASSIGN(Unpickler);
 
@@ -88,7 +88,7 @@ class Unpickler {
     }
     return item;
   }
-  void readSlowWithBuffer(char *dest, size_t sz);
+  void readSlowWithBuffer(char* dest, size_t sz);
   std::string readBytes(size_t num_bytes);
 
   double readFloat();
@@ -96,9 +96,9 @@ class Unpickler {
       const std::string& module_name,
       const std::string& class_name);
   void rebuildTensor(bool quantized);
-  #ifdef USE_DISTRIBUTED
-    void rebuildRRef();
-  #endif
+#ifdef USE_DISTRIBUTED
+  void rebuildRRef();
+#endif
   PickleOpCode readInstruction();
   PickleOpCode readOpCode() {
     return static_cast<PickleOpCode>(read<uint8_t>());
@@ -135,7 +135,6 @@ class Unpickler {
   TypeResolver type_resolver_;
   ObjLoader obj_loader_;
   IValue empty_tuple_;
-
 
   std::function<at::DataPtr(const std::string&)> read_record_;
   c10::optional<at::Device> device_;
