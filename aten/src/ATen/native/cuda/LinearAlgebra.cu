@@ -16,11 +16,11 @@ Tensor& baddbmm__cuda(Tensor& self, const Tensor& batch1, const Tensor& batch2, 
   return legacy::cuda::_th_baddbmm_out(self, self, batch1, batch2, beta, alpha);
 }
 
-Tensor bmm_cuda(const Tensor& self, const Tensor& mat2, bool deterministic) {
+Tensor bmm_cuda(const Tensor& self, const Tensor& mat2) {
   return legacy::cuda::_th_bmm(self, mat2);
 }
 
-Tensor& bmm_out_cuda(Tensor &result, const Tensor& batch1, const Tensor& batch2, bool deterministic) {
+Tensor& bmm_out_cuda(Tensor &result, const Tensor& batch1, const Tensor& batch2) {
   return legacy::cuda::_th_bmm_out(result, batch1, batch2);
 }
 
