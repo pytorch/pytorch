@@ -157,6 +157,9 @@ struct ControlFlowLoadStores {
         case prim::Store: {
           environment_stack->setVar(n->s(attr::name), n->input()->type());
         } break;
+        case prim::ComprehensionScope: {
+          addControlFlowLoadStores(n->blocks().at(0));
+        } break;
       }
     }
     return popFrame();
@@ -199,6 +202,21 @@ struct EraseLoadStores {
           TORCH_INTERNAL_ASSERT(
               var, "Typechecking should ensure the variable name is set");
           n->output()->replaceAllUsesWith(var);
+          n->destroy();
+        } break;
+        case prim::ComprehensionScope: {
+          // Comprehensions introduce their own scope, so we need to introduce a
+          // scope here so that writes within the comprehension do not leak into
+          // the rest of the graph
+          auto body = n->blocks().at(0);
+          eraseBlockLoadStores(body);
+          // inline the comprehension scope into the graph
+          for (auto it_cmpr = body->nodes().begin();
+               it_cmpr != body->nodes().end();) {
+            Node* body_node = *it_cmpr;
+            it_cmpr++;
+            body_node->moveBefore(n);
+          }
           n->destroy();
         } break;
         default: {
