@@ -54,7 +54,10 @@ class TestDocCoverage(unittest.TestCase):
             'avg_pool1d', 'conv_transpose2d', 'conv_transpose1d', 'conv3d',
             'relu_', 'pixel_shuffle', 'conv2d', 'selu_', 'celu_', 'threshold_',
             'cosine_similarity', 'rrelu_', 'conv_transpose3d', 'conv1d', 'pdist',
-            'adaptive_avg_pool1d', 'conv_tbc'
+            'adaptive_avg_pool1d', 'conv_tbc',
+
+            # TODO: https://github.com/pytorch/pytorch/issues/36091
+            'quantized_lstm', 'quantized_gru'
         }
         has_docstring = set(
             a for a in dir(torch)
@@ -87,7 +90,7 @@ class TestDocCoverage(unittest.TestCase):
         in_rst = self.parse_rst('tensors.rst', r2)
         whitelist = {
             'names', 'unflatten', 'align_as', 'rename_', 'refine_names', 'align_to',
-            'has_names', 'rename',
+            'has_names', 'rename'
         }
         classes = [torch.FloatTensor, torch.LongTensor, torch.ByteTensor]
         has_docstring = set(x for c in classes for x in dir(c) if not x.startswith('_') and getattr(c, x).__doc__)
