@@ -42,9 +42,11 @@ ${type_derived_method_definitions}
 
 }  // namespace ${Type}
 
+#ifndef USE_STATIC_DISPATCH
 namespace {
 static auto registerer = torch::import()
   ${function_registrations};
 }
+#endif
 
 }
