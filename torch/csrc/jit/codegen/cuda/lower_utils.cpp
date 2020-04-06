@@ -244,6 +244,54 @@ Expr* clearScope(Expr* scope) {
 }
 
 } // namespace scope_utils
+
+namespace ir_utils {
+
+bool isTV(const Val* const val) {
+  return val->getValType().value() == ValType::TensorView;
+}
+
+// Check if we're a TensorView op that we can generate code for.
+bool isTVOp(const Expr* expr) {
+  if (expr->nOutputs() == 1 && isTV(expr->output(0)) &&
+      (expr->getExprType().value() == ExprType::BinaryOp ||
+       expr->getExprType().value() == ExprType::UnaryOp))
+    return true;
+  return false;
+}
+
+void ASSERT_EXPR(Statement* stmt) {
+  TORCH_INTERNAL_ASSERT(
+      stmt->isExpr(),
+      "Tried to generate a kernel but hit a non expression during lowering: ",
+      stmt);
+}
+
+Expr* asExpr(Statement* stmt) {
+  ASSERT_EXPR(stmt);
+  return static_cast<Expr*>(stmt);
+}
+
+TensorView* asTV(Val* val) {
+  TORCH_INTERNAL_ASSERT(isTV(val));
+  return static_cast<TensorView*>(val);
+}
+
+const TensorView* asConstTV(const Val* const val) {
+  TORCH_INTERNAL_ASSERT(isTV(val));
+  return static_cast<const TensorView*>(val);
+}
+
+bool isUnrolledFor(const Expr* expr) {
+  if (expr->getExprType() != ExprType::ForLoop) {
+    return false;
+  }
+  return static_cast<const ForLoop*>(expr)->iter_domain()->parallel_method() ==
+      ParallelType::Unroll;
+}
+
+} // namespace ir_utils
+
 } // namespace fuser
 } // namespace jit
 } // namespace torch

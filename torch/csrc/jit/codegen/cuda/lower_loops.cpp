@@ -1,38 +1,10 @@
-#include <torch/csrc/jit/codegen/cuda/arith.h>
 #include <torch/csrc/jit/codegen/cuda/lower_loops.h>
+#include <torch/csrc/jit/codegen/cuda/arith.h>
 #include <torch/csrc/jit/codegen/cuda/lower_utils.h>
 
 namespace torch {
 namespace jit {
 namespace fuser {
-
-// HELPER NAMESPACE
-namespace {
-
-bool isTV(const Val* const val) {
-  return val->getValType().value() == ValType::TensorView;
-}
-
-// Check if we're a TensorView op that we can generate code for.
-bool isTVOp(const Expr* expr) {
-  if (expr->nOutputs() == 1 && isTV(expr->output(0)) &&
-      (expr->getExprType().value() == ExprType::BinaryOp ||
-       expr->getExprType().value() == ExprType::UnaryOp))
-    return true;
-  return false;
-}
-
-TensorView* asTV(Val* val) {
-  TORCH_INTERNAL_ASSERT(isTV(val));
-  return static_cast<TensorView*>(val);
-}
-
-const TensorView* asConstTV(const Val* const val) {
-  TORCH_INTERNAL_ASSERT(isTV(val));
-  return static_cast<const TensorView*>(val);
-}
-
-} // namespace
 
 void UnrollPass::pushBack(Expr* expr) {
   if (active_scope == nullptr)
@@ -44,10 +16,7 @@ void UnrollPass::pushBack(Expr* expr) {
 // Custom dispatch for Expr, want to find out of it's a TV op
 Statement* UnrollPass::mutate(Expr* expr) {
   Statement* mutated_stmt = OptOutMutator::mutate(expr);
-  TORCH_INTERNAL_ASSERT(
-      mutated_stmt->isExpr(),
-      "Tried to generate a kernel but hit a non expression during lowering: ",
-      mutated_stmt);
+  ir_utils::ASSERT_EXPR(mutated_stmt);
   return mutated_stmt;
 }
 
@@ -58,16 +27,12 @@ Statement* UnrollPass::mutate(ForLoop* fl) {
   std::vector<Expr*> mutated_exprs;
   bool is_mutated = false;
   for (auto expr : fl->body().exprs()) {
-    Statement* mutated_stmt = mutate(expr);
-
-    TORCH_INTERNAL_ASSERT(
-        mutated_stmt->isExpr(),
-        "Tried to generate a kernel but hit a non expression during lowering: ",
-        mutated_stmt);
-
-    mutated_exprs.push_back(static_cast<Expr*>(mutated_stmt));
-    if (!(mutated_exprs.back()->sameAs(expr)))
+    if (ir_utils::isUnrolledFor(expr)) {
       is_mutated = true;
+      mutated_exprs.push_back(expr);
+    } else {
+      mutated_exprs.push_back(expr);
+    }
   }
 
   if (is_mutated) {
@@ -115,11 +80,7 @@ void UnrollPass::runPass() {
   // Run through loop nests and further lower the expressions
   for (auto* expr : incoming_exprs_) {
     Statement* mutated_stmt = mutate(expr);
-    TORCH_INTERNAL_ASSERT(
-        mutated_stmt->isExpr(),
-        "Tried to generate a kernel but hit a non expression during lowering: ",
-        mutated_stmt);
-    lowered_exprs.push_back(static_cast<Expr*>(mutated_stmt));
+    lowered_exprs.push_back(ir_utils::asExpr(mutated_stmt));
   }
 }
 
@@ -247,7 +208,7 @@ void LoopNestGenerator::updateLoopNest(TensorView* tv) {
 
 // Custom dispatch for Expr, want to find out of it's a TV op
 void LoopNestGenerator::handle(Expr* expr) {
-  if (!isTVOp(expr))
+  if (!ir_utils::isTVOp(expr))
     return;
 
   TensorView* out = static_cast<TensorView*>(expr->output(0));

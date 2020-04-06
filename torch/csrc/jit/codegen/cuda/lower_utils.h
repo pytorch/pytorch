@@ -40,6 +40,24 @@ Expr* clearScope(Expr* scope);
 unsigned int computeForDepth(Expr* scope);
 
 } // namespace scope_utils
+
+namespace ir_utils {
+
+bool isTV(const Val* const);
+
+bool isTVOp(const Expr*);
+
+void ASSERT_EXPR(Statement*);
+
+Expr* asExpr(Statement*);
+
+TensorView* asTV(Val*);
+
+const TensorView* asConstTV(const Val* const);
+
+bool isUnrolledFor(const Expr*);
+
+} // namespace ir_utils
 } // namespace fuser
 } // namespace jit
 } // namespace torch

@@ -12,35 +12,6 @@ namespace torch {
 namespace jit {
 namespace fuser {
 
-// START HELPER FUNCTIONS
-namespace {
-
-bool isTV(const Val* const val) {
-  return val->getValType().value() == ValType::TensorView;
-}
-
-// Check if we're a TensorView op that we can generate code for.
-bool isTVOp(const Expr* expr) {
-  if (expr->nOutputs() == 1 && isTV(expr->output(0)) &&
-      (expr->getExprType().value() == ExprType::BinaryOp ||
-       expr->getExprType().value() == ExprType::UnaryOp))
-    return true;
-  return false;
-}
-
-TensorView* asTV(Val* val) {
-  TORCH_INTERNAL_ASSERT(isTV(val));
-  return static_cast<TensorView*>(val);
-}
-
-const TensorView* asConstTV(const Val* const val) {
-  TORCH_INTERNAL_ASSERT(isTV(val));
-  return static_cast<const TensorView*>(val);
-}
-
-} // namespace
-// END HELPER FUNCTIONS
-
 // Clear out the last recorded computeAtView
 void GPULower::clearActiveView() {
   active_view_axis = 0;
@@ -281,20 +252,20 @@ Statement* GPULower::mutate(ForLoop* fl) {
 }
 
 Statement* GPULower::mutate(UnaryOp* uop) {
-  if (!isTVOp(uop))
+  if (!ir_utils::isTVOp(uop))
     return OptOutMutator::mutate(uop);
 
-  IfThenElse* pred = getPredicate(asTV(uop->out()));
+  IfThenElse* pred = getPredicate(ir_utils::asTV(uop->out()));
   bool predicated = !pred->cond()->sameAs(new Int(1));
   if (predicated) {
     pushBack(pred);
     active_scope = pred;
   }
 
-  TensorIndex* out = getConsumerIndex(asTV(uop->out()));
+  TensorIndex* out = getConsumerIndex(ir_utils::asTV(uop->out()));
   Val* in = uop->in();
-  if (isTV(in))
-    in = getProducerIndex(asTV(in), asTV(uop->out()));
+  if (ir_utils::isTV(in))
+    in = getProducerIndex(ir_utils::asTV(in), ir_utils::asTV(uop->out()));
   Expr* new_op = new UnaryOp(uop->getUnaryOpType(), out, in);
 
   if (predicated) {
@@ -307,25 +278,25 @@ Statement* GPULower::mutate(UnaryOp* uop) {
 }
 
 Statement* GPULower::mutate(BinaryOp* bop) {
-  if (!isTVOp(bop))
+  if (!ir_utils::isTVOp(bop))
     return OptOutMutator::mutate(bop);
 
-  IfThenElse* pred = getPredicate(asTV(bop->out()));
+  IfThenElse* pred = getPredicate(ir_utils::asTV(bop->out()));
   bool predicated = !pred->cond()->sameAs(new Int(1));
   if (predicated) {
     pushBack(pred);
     active_scope = pred;
   }
 
-  TensorIndex* out = getConsumerIndex(asTV(bop->out()));
+  TensorIndex* out = getConsumerIndex(ir_utils::asTV(bop->out()));
   Val* lhs = bop->lhs();
   Val* rhs = bop->rhs();
 
-  if (isTV(lhs))
-    lhs = getProducerIndex(asTV(lhs), asTV(bop->out()));
+  if (ir_utils::isTV(lhs))
+    lhs = getProducerIndex(ir_utils::asTV(lhs), ir_utils::asTV(bop->out()));
 
-  if (isTV(rhs))
-    rhs = getProducerIndex(asTV(rhs), asTV(bop->out()));
+  if (ir_utils::isTV(rhs))
+    rhs = getProducerIndex(ir_utils::asTV(rhs), ir_utils::asTV(bop->out()));
 
   Expr* new_op = new BinaryOp(bop->getBinaryOpType(), out, lhs, rhs);
 
@@ -356,11 +327,11 @@ void GPULower::replaceSizes() {
   std::vector<TensorView*> orig_intermediates;
 
   for (auto* val : fusion->deterministic_vals()) {
-    if (isTV(val)) {
+    if (ir_utils::isTV(val)) {
       if (fusion->hasInput(val) || fusion->hasOutput(val)) {
-        orig_inp_out.push_back(asTV(val));
+        orig_inp_out.push_back(ir_utils::asTV(val));
       } else {
-        orig_intermediates.push_back(asTV(val));
+        orig_intermediates.push_back(ir_utils::asTV(val));
       }
     }
   }
@@ -427,8 +398,8 @@ void GPULower::replaceSizes() {
 
   // Now that we have the base tensor views. Lets fix its members.
   for (auto entry : tv_map) {
-    TensorView* orig_tv = asTV(entry.first);
-    TensorView* new_tv = asTV(entry.second);
+    TensorView* orig_tv = ir_utils::asTV(entry.first);
+    TensorView* new_tv = ir_utils::asTV(entry.second);
 
     // Domain in the new TV is the root domain, replay it like the original
     // domain.
@@ -448,7 +419,8 @@ void GPULower::replaceSizes() {
           computeAtTV,
           " but one wasn't found.");
       new_tv->setComputeAt(
-          asTV(tv_map[computeAtTV]), (int)(orig_tv->getComputeAtAxis()));
+          ir_utils::asTV(tv_map[computeAtTV]),
+          (int)(orig_tv->getComputeAtAxis()));
     }
   }
 
@@ -460,8 +432,8 @@ namespace {
 // Some pre-compilation checks
 void validate(Fusion* fusion) {
   for (Val* val : fusion->vals()) {
-    if (isTV(val)) {
-      TensorView* tv = asTV(val);
+    if (ir_utils::isTV(val)) {
+      TensorView* tv = ir_utils::asTV(val);
       for (decltype(tv->nDims()) i{0}; i < tv->nDims(); i++) {
         IterDomain* id = tv->getComputeAtAxis(i);
 
@@ -484,7 +456,7 @@ void validate(Fusion* fusion) {
                 tv->getComputeAtAxis(),
                 ".");
       }
-    } // if isTV
+    } // if ir_utils::isTV
   } // for(Val* val : fusion->vals())
 
 } // validate
