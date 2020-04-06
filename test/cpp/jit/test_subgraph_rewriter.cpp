@@ -27,17 +27,14 @@ graph(%a, %b):
   Graph pattern_graph;
   std::unordered_map<std::string, Value*> vmap;
 
-  parseIR(
-      pattern,
-      &pattern_graph,
-      vmap);
+  parseIR(pattern, &pattern_graph, vmap);
 
   auto filter = [](const Match& match,
                    const std::unordered_map<std::string, Value*>& vmap) {
-     const auto& match_vmap = match.values_map;
-     auto b_node = match_vmap.at(vmap.at("b"))->node();
-     return b_node->kind() == prim::Constant;
-   };
+    const auto& match_vmap = match.values_map;
+    auto b_node = match_vmap.at(vmap.at("b"))->node();
+    return b_node->kind() == prim::Constant;
+  };
 
   std::string replacement = R"IR(
 graph(%a, %b):
@@ -48,9 +45,7 @@ graph(%a, %b):
   rewriter.RegisterRewritePattern(pattern, replacement);
   rewriter.runOnGraph(graph, filter);
 
-  FileCheck().check("d::ddd")
-    ->check_not("c::ccc")
-    ->run(*graph);
+  FileCheck().check("d::ddd")->check_not("c::ccc")->run(*graph);
 }
 
 void testFilterNoMatch() {
@@ -71,18 +66,15 @@ graph(%a, %b):
   Graph pattern_graph;
   std::unordered_map<std::string, Value*> vmap;
 
-  parseIR(
-      pattern,
-      &pattern_graph,
-      vmap);
+  parseIR(pattern, &pattern_graph, vmap);
 
   auto filter = [](const Match& match,
                    const std::unordered_map<std::string, Value*>& vmap) {
-     const auto& match_vmap = match.values_map;
-     auto b_node = match_vmap.at(vmap.at("b"))->node();
-     // b_node is not Constant, so this won't match and we'll skip the rewrite
-     return b_node->kind() == prim::Assign;
-   };
+    const auto& match_vmap = match.values_map;
+    auto b_node = match_vmap.at(vmap.at("b"))->node();
+    // b_node is not Constant, so this won't match and we'll skip the rewrite
+    return b_node->kind() == prim::Assign;
+  };
 
   std::string replacement = R"IR(
 graph(%a, %b):
@@ -93,16 +85,13 @@ graph(%a, %b):
   rewriter.RegisterRewritePattern(pattern, replacement);
   rewriter.runOnGraph(graph, filter);
 
-  FileCheck().check("c::ccc")
-    ->check_not("d::ddd")
-    ->run(*graph);
-
+  FileCheck().check("c::ccc")->check_not("d::ddd")->run(*graph);
 }
-
 
 void testSubgraphRewriter() {
   testFilterMatch();
   testFilterNoMatch();
 }
 
-}}
+} // namespace jit
+} // namespace torch

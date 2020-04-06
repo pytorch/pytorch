@@ -1,9 +1,9 @@
 #include <torch/csrc/jit/passes/common_subexpression_elimination.h>
 
-#include <torch/csrc/jit/ir/ir.h>
-#include <torch/csrc/jit/jit_log.h>
-#include <torch/csrc/jit/ir/node_hashing.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
+#include <torch/csrc/jit/ir/ir.h>
+#include <torch/csrc/jit/ir/node_hashing.h>
+#include <torch/csrc/jit/jit_log.h>
 
 #include <unordered_map>
 
@@ -15,7 +15,7 @@ namespace {
 // Since the nodes are visited in topological order, one pass is enough.
 void EliminateCommonSubexpression(
     Block* block,
-    AliasDb& aliasDb,
+    const AliasDb& aliasDb,
     std::function<Node*(Node*)> parent_lookup_fn) {
   std::unordered_set<Node*, HashNode, EqualNode> subexprs;
   for (auto it = block->nodes().begin(); it != block->nodes().end(); ++it) {

@@ -87,7 +87,11 @@ c10::intrusive_ptr<RRef> remoteTorchscript(
         nullptr);
 
     ctx.addPendingUser(userRRefPtr->forkId(), userRRefPtr);
-    fm->addCallback(callback::confirmPendingUser);
+    fm->addCallback([forkId{userRRefPtr->forkId()}](
+                        const rpc::Message& message,
+                        const c10::optional<utils::FutureError>& futErr) {
+      callback::confirmPendingUser(message, futErr, forkId);
+    });
 
     return userRRefPtr;
   } else {

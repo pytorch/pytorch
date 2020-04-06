@@ -113,6 +113,8 @@ int CaffeToNumpyType(const TypeMeta& meta) {
       {TypeMeta::Id<bool>(), NPY_BOOL},
       {TypeMeta::Id<double>(), NPY_DOUBLE},
       {TypeMeta::Id<float>(), NPY_FLOAT},
+      {TypeMeta::Id<std::complex<double>>(), NPY_COMPLEX128},
+      {TypeMeta::Id<std::complex<float>>(), NPY_COMPLEX64},
       {TypeMeta::Id<at::Half>(), NPY_FLOAT16},
       {TypeMeta::Id<int>(), NPY_INT},
       {TypeMeta::Id<int8_t>(), NPY_INT8},
@@ -1731,6 +1733,9 @@ void addGlobalMethods(py::module& m) {
             ParseProtoFromLargeString(
                 pred_net_str.cast<std::string>(), &pred_net),
             "broken pred_net protobuf");
+        Workspace* curr_ws = GetCurrentWorkspace();
+        CAFFE_ENFORCE(curr_ws);
+        splitSparseLengthsSumSparse(&pred_net, *curr_ws);
         ShapeInfoMap shape_map;
         for (const auto& it : shapes) {
           shape_map.emplace(
@@ -1746,7 +1751,6 @@ void addGlobalMethods(py::module& m) {
         opts.merge_fp32_inputs_into_fp16 = merge_fp32_inputs_into_fp16;
         opts.use_onnx = use_onnx;
         OnnxifiTransformer ts(opts);
-        Workspace* curr_ws = GetCurrentWorkspace();
         std::unordered_set<int> blacklist_set(
             black_list.begin(), black_list.end());
         std::vector<std::string> weight_names_overwrite{};

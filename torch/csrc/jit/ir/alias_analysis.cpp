@@ -104,20 +104,20 @@ bool AliasDb::isMutableType(const Value* v) {
 }
 
 // makes use of type -> mutable cache
-bool AliasDb::isMutableTypeInternal(const TypePtr& type) {
+bool AliasDb::isMutableTypeInternal(const TypePtr& type) const {
   return isMutableTypeImpl(type, &mapped_mutable_types_);
 }
 
-bool AliasDb::isMutableTypeInternal(const Value* v) {
+bool AliasDb::isMutableTypeInternal(const Value* v) const {
   return isMutableTypeInternal(v->type());
 }
 
-c10::optional<TypePtr> AliasDb::getMutableTypePtr(const TypePtr& type) {
+c10::optional<TypePtr> AliasDb::getMutableTypePtr(const TypePtr& type) const {
   MutableTypePtrHelper helper(&mapped_mutable_types_);
   return helper.getMutableType(type);
 }
 
-bool AliasDb::isContainerType(const TypePtr& type) {
+bool AliasDb::isContainerType(const TypePtr& type) const {
   auto mut_type = getMutableTypePtr(type);
   return mut_type && (*mut_type)->containedTypes().size() > 0;
 }
@@ -131,7 +131,7 @@ AliasDb::AliasDb(std::shared_ptr<Graph> graph, bool isFrozen)
   GRAPH_DEBUG(toString());
 }
 
-bool AliasDb::isMutable(Node* n) {
+bool AliasDb::isMutable(Node* n) const {
   ValueSet vs;
   for (const auto input : n->inputs()) {
     vs.insert(input);
@@ -139,7 +139,7 @@ bool AliasDb::isMutable(Node* n) {
   return writesToAlias(n, vs);
 }
 
-bool AliasDb::hasInputWriters(const Node* n) {
+bool AliasDb::hasInputWriters(const Node* n) const {
   for (const auto input : n->inputs()) {
     if (hasWriters(input)) {
       return true;
@@ -148,7 +148,7 @@ bool AliasDb::hasInputWriters(const Node* n) {
   return false;
 }
 
-bool AliasDb::hasOutputWriters(const Node* n) {
+bool AliasDb::hasOutputWriters(const Node* n) const {
   for (const auto output : n->outputs()) {
     if (hasWriters(output)) {
       return true;
@@ -157,11 +157,11 @@ bool AliasDb::hasOutputWriters(const Node* n) {
   return false;
 }
 
-bool AliasDb::hasWriters(const Node* n) {
+bool AliasDb::hasWriters(const Node* n) const {
   return hasInputWriters(n) || hasOutputWriters(n);
 }
 
-bool AliasDb::hasWriters(const Value* v) {
+bool AliasDb::hasWriters(const Value* v) const {
   if (v->mustBeNone()) {
     return false;
   }
@@ -178,21 +178,21 @@ bool AliasDb::hasWriters(const Value* v) {
   return writeCache_.intersects(el->getMemoryLocations());
 }
 
-void AliasDb::getWritesImpl(Node* n, MemoryLocations& ret) {
+void AliasDb::getWritesImpl(Node* n, MemoryLocations& ret) const {
   if (writeIndex_.count(n)) {
     const auto& writes = writeIndex_.at(n);
     ret |= writes;
   }
 
-    for (auto block : n->blocks()) {
-      for (auto node : block->nodes()) {
-        getWritesImpl(node, ret);
-      }
+  for (auto block : n->blocks()) {
+    for (auto node : block->nodes()) {
+      getWritesImpl(node, ret);
     }
+  }
 }
 
 // Does `n` write to an alias of one of the values in `vs`?
-bool AliasDb::writesToAlias(Node* n, const ValueSet& vs) {
+bool AliasDb::writesToAlias(Node* n, const ValueSet& vs) const {
   const auto writtenTo = getWrites(n);
   if (writtenTo.empty()) {
     return false;
@@ -212,13 +212,13 @@ bool AliasDb::writesToAlias(Node* n, const ValueSet& vs) {
   return false;
 }
 
-MemoryLocations AliasDb::getWrites(Node* n) {
+MemoryLocations AliasDb::getWrites(Node* n) const {
   MemoryLocations writes;
   getWritesImpl(n, writes);
   return writes;
 }
 
-void AliasDb::getReadsImpl(Node* n, MemoryLocations& ret) {
+void AliasDb::getReadsImpl(Node* n, MemoryLocations& ret) const {
   for (const auto input : n->inputs()) {
     auto it = elementMap_.find(input);
     if (it != elementMap_.end()) {
@@ -242,13 +242,13 @@ void AliasDb::getReadsImpl(Node* n, MemoryLocations& ret) {
   }
 }
 
-MemoryLocations AliasDb::getReads(Node* n) {
+MemoryLocations AliasDb::getReads(Node* n) const {
   MemoryLocations reads;
   getReadsImpl(n, reads);
   return reads;
 }
 
-std::string AliasDb::getElementName(const Element* e) {
+std::string AliasDb::getElementName(const Element* e) const {
   if (e->value == nullptr) {
     // not the most efficient way, but given the fact there are
     // not too many types and even fewer of them will end up in
@@ -265,11 +265,11 @@ std::string AliasDb::getElementName(const Element* e) {
   }
 }
 
-void AliasDb::dump() {
+void AliasDb::dump() const {
   std::cout << toString();
 }
 
-std::string AliasDb::toString() {
+std::string AliasDb::toString() const {
   std::stringstream ss{};
 
   ss << "\n===1. GRAPH===\n";
@@ -376,7 +376,8 @@ void AliasDb::analyzeImpl(Node* node) {
           "We don't have an op for ",
           node->kind().toDisplayString(),
           " but it isn't a special case.  ",
-          "Argument types: ", oss.str());
+          "Argument types: ",
+          oss.str());
     }
   }
 
@@ -439,8 +440,8 @@ void AliasDb::analyzeImpl(Node* node) {
       }
       return;
     case prim::BailOut:
-      TORCH_INTERNAL_ASSERT(node->inputs().at(0)->node()->kind() ==
-                            prim::BailoutTemplate);
+      TORCH_INTERNAL_ASSERT(
+          node->inputs().at(0)->node()->kind() == prim::BailoutTemplate);
       makePointerTo(node->output(), node->inputs().at(1));
       return;
     case prim::Guard:
@@ -474,9 +475,10 @@ void AliasDb::analyzeImpl(Node* node) {
 
   if (node->kind().is_aten() || node->kind().is_prim()) {
     // TODO There is nothing in the system that relies on aten:: and prim::
-    // ops using AliasAnalysisKind::FROM_SCHEMA or AliasAnalysisKind::INTERNAL_SPECIAL_CASE,
-    // but this is the intended behavior for all current ops and a good error check.
-    // We can consider lifting this constraint later if we have a use case for it.
+    // ops using AliasAnalysisKind::FROM_SCHEMA or
+    // AliasAnalysisKind::INTERNAL_SPECIAL_CASE, but this is the intended
+    // behavior for all current ops and a good error check. We can consider
+    // lifting this constraint later if we have a use case for it.
     TORCH_INTERNAL_ASSERT(
         analysis == AliasAnalysisKind::FROM_SCHEMA ||
             analysis == AliasAnalysisKind::CONSERVATIVE,
@@ -521,7 +523,7 @@ void AliasDb::analyzeImpl(Node* node) {
     }
 
     // If this type cannot alias, continue. Can occur with a VarType schema
-    if (!isMutableType(actualValue)) {
+    if (!isMutableTypeInternal(actualValue)) {
       continue;
     }
 
@@ -837,7 +839,7 @@ void AliasDb::analyzeBroadcastingChunk(Node* node) {
   }
 }
 
-bool AliasDb::nonAliasingValue(const Value* elem) {
+bool AliasDb::nonAliasingValue(const Value* elem) const {
   // these are values which can point to aliasing types in the graph,
   // as with a None value pointing to an optional if node output,
   // but will never alias themselves
@@ -897,7 +899,7 @@ void AliasDb::addToContainedElements(
   memoryDAG_->addToContainedElements(elemEl, contEl);
 }
 
-bool AliasDb::mayAlias(const Value* a, const Value* b) {
+bool AliasDb::mayAlias(const Value* a, const Value* b) const {
   if (!isMutableTypeInternal(a) || !isMutableTypeInternal(b)) {
     return false;
   }
@@ -905,7 +907,7 @@ bool AliasDb::mayAlias(const Value* a, const Value* b) {
   return memoryDAG_->mayAlias(elementMap_.at(a), elementMap_.at(b));
 }
 
-bool AliasDb::mayAlias(const ValueSet& a, const ValueSet& b) {
+bool AliasDb::mayAlias(const ValueSet& a, const ValueSet& b) const {
   if (a.empty() || b.empty()) {
     return false;
   }
@@ -932,14 +934,14 @@ bool AliasDb::mayAlias(const ValueSet& a, const ValueSet& b) {
   return false;
 }
 
-bool AliasDb::mayContainAlias(Value* a, Value* b) {
+bool AliasDb::mayContainAlias(Value* a, Value* b) const {
   const std::vector<Value*> a_vec = {a};
   const std::vector<Value*> b_vec = {b};
 
   return mayContainAlias(a_vec, b_vec);
 }
 
-std::vector<Element*> AliasDb::getElements(at::ArrayRef<Value*> vs) {
+std::vector<Element*> AliasDb::getElements(at::ArrayRef<Value*> vs) const {
   std::vector<Element*> elements;
   for (const auto& val : vs) {
     if (isMutableTypeInternal(val)) {
@@ -951,9 +953,11 @@ std::vector<Element*> AliasDb::getElements(at::ArrayRef<Value*> vs) {
 
 bool AliasDb::mayContainAlias(
     const at::ArrayRef<Value*> a,
-    const at::ArrayRef<Value*> b) {
+    const at::ArrayRef<Value*> b) const {
   auto a_elems = getElements(a);
-  return a_elems.size() == 0 ? false : memoryDAG_->mayContainAlias(a_elems, getElements(b));
+  return a_elems.size() == 0
+      ? false
+      : memoryDAG_->mayContainAlias(a_elems, getElements(b));
 }
 
 // Make each value in the `from` list point to its partner in the `to` list
@@ -1011,13 +1015,13 @@ bool AliasDb::couldMoveBeforeTopologically(Node* n, Node* movePoint) {
   return tryMove(n, movePoint, MoveSide::BEFORE, /*dryRun=*/true);
 }
 
-bool AliasDb::hasWriters(const at::ArrayRef<Value*>& values) {
+bool AliasDb::hasWriters(const at::ArrayRef<Value*>& values) const {
   return std::any_of(values.begin(), values.end(), [&](Value* value) {
     return hasWriters(value);
   });
 }
 
-bool AliasDb::escapesScope(const at::ArrayRef<Value*>& vs) {
+bool AliasDb::escapesScope(const at::ArrayRef<Value*>& vs) const {
   return mayContainAlias(graph_->inputs(), vs) ||
       mayContainAlias(graph_->outputs(), vs) || mayAliasWildcard(vs);
 }
@@ -1028,7 +1032,7 @@ bool AliasDb::escapesScope(const at::ArrayRef<Value*>& vs) {
 // by aliasing a graph output or input, or by aliasing the wildcard set.
 bool AliasDb::safeToChangeAliasingRelationship(
     const at::ArrayRef<Value*>& a,
-    const at::ArrayRef<Value*>& b) {
+    const at::ArrayRef<Value*>& b) const {
   if (hasWriters(a) || hasWriters(b)) {
     return false;
   }
@@ -1039,7 +1043,7 @@ bool AliasDb::safeToChangeAliasingRelationship(
 // Helper for topologically-safe node moves. See `tryMove()` for details.
 class AliasDb::WorkingSet {
  public:
-  explicit WorkingSet(Node* mover, AliasDb& aliasDb) : aliasDb_(aliasDb) {
+  explicit WorkingSet(Node* mover, const AliasDb& aliasDb) : aliasDb_(aliasDb) {
     mover_ = mover;
     for (const auto user : getUsersSameBlock(mover_)) {
       moverUsers_.insert(user);
@@ -1071,7 +1075,7 @@ class AliasDb::WorkingSet {
   }
 
   // Does the working set depend on `n`?
-  bool dependsOn(Node* n) {
+  bool dependsOn(Node* n) const {
     if (!mover_ && nodes_.empty()) {
       return false;
     }
@@ -1080,7 +1084,7 @@ class AliasDb::WorkingSet {
   }
 
  private:
-  bool hasDataDependency(Node* n) {
+  bool hasDataDependency(Node* n) const {
     if (!mover_ && nodes_.empty()) {
       return false;
     }
@@ -1092,7 +1096,7 @@ class AliasDb::WorkingSet {
     }
   }
 
-  bool hasMutabilityDependency(Node* n) {
+  bool hasMutabilityDependency(Node* n) const {
     // Check that `n` does not write to anything used by the working set
     const auto& nWrites = aliasDb_.getWrites(n);
     if (reads_.intersects(nWrites)) {
@@ -1114,7 +1118,7 @@ class AliasDb::WorkingSet {
   }
 
   // Does the working set produce any values consumed by `n`?
-  bool producesFor(Node* n) {
+  bool producesFor(Node* n) const {
     // This equivalent to asking: does the total use-set of all the nodes in the
     // working set include `n`?
     if (mover_ && moverUsers_.count(n)) {
@@ -1124,7 +1128,7 @@ class AliasDb::WorkingSet {
   }
 
   // Does the working set consume any values produced by `n`?
-  bool consumesFrom(Node* n) {
+  bool consumesFrom(Node* n) const {
     const auto users = getUsersSameBlock(n);
 
     if (mover_ && users.count(mover_)) {
@@ -1138,7 +1142,7 @@ class AliasDb::WorkingSet {
   // Get all users of outputs of `n`, in the same block as `n`.
   // This means if there is an `if` node that uses an output of `n` in some
   // inner sub-block, we will consider the whole `if` node a user of `n`.
-  std::unordered_set<Node*> getUsersSameBlock(Node* n) {
+  std::unordered_set<Node*> getUsersSameBlock(Node* n) const {
     std::unordered_set<Node*> users;
     for (const auto output : n->outputs()) {
       for (const auto& use : output->uses()) {
@@ -1174,7 +1178,7 @@ class AliasDb::WorkingSet {
     }
   }
 
-  AliasDb& aliasDb_;
+  const AliasDb& aliasDb_;
   std::vector<Node*> nodes_;
 
   // Mover dependencies. We track these separately since we may erase the mover
@@ -1308,7 +1312,7 @@ void AliasDb::move(Node* toMove, Node* movePoint, MoveSide moveSide) {
   }
 }
 
-bool AliasDb::writesToWildcard(Node* n) {
+bool AliasDb::writesToWildcard(Node* n) const {
   if (!writeIndex_.count(n)) {
     return false;
   }
@@ -1324,7 +1328,7 @@ bool AliasDb::writesToWildcard(Node* n) {
   return false;
 }
 
-bool AliasDb::mayAliasWildcard(const Value* v) {
+bool AliasDb::mayAliasWildcard(const Value* v) const {
   if (auto e = getWildcard(v->type())) {
     return memoryDAG_->mayAlias(elementMap_.at(v), e);
   }
@@ -1332,7 +1336,7 @@ bool AliasDb::mayAliasWildcard(const Value* v) {
   return false;
 }
 
-bool AliasDb::mayAliasWildcard(const at::ArrayRef<Value*> vs) {
+bool AliasDb::mayAliasWildcard(const at::ArrayRef<Value*> vs) const {
   return std::any_of(
       vs.begin(), vs.end(), [&](Value* v) { return mayAliasWildcard(v); });
 }
@@ -1367,7 +1371,7 @@ void AliasDb::addContainedTypesToFreshElement(
 
 // Search the wildcard index for an element that corresponds to the given type.
 // Const version returns nullptr
-Element* AliasDb::getWildcard(const TypePtr& type) {
+Element* AliasDb::getWildcard(const TypePtr& type) const {
   auto maybe_mut_type = getMutableTypePtr(type);
   if (!maybe_mut_type) {
     return nullptr;
@@ -1390,7 +1394,8 @@ c10::optional<Element*> AliasDb::setWildcard(const Value* v) {
   auto wildcardElement = *maybe_wildcardElement;
   // Making a value a wildcard means that all its potential memory locations
   // may alias the wildcard set.
-  const MemoryLocations pointeeSet = getOrCreateElement(v)->getMemoryLocations();
+  const MemoryLocations pointeeSet =
+      getOrCreateElement(v)->getMemoryLocations();
   for (const auto& pointee : pointeeSet) {
     auto from = memoryDAG_->fromIndex(pointee);
     // avoid cycles where the wildcard points to itself
@@ -1410,10 +1415,10 @@ c10::optional<Element*> AliasDb::setWildcard(const Value* v) {
   return wildcardElement;
 }
 
-void AliasDb::rebuildWriteCache() {
+void AliasDb::rebuildWriteCache() const {
   for (const auto& pr : writeIndex_) {
     const auto& writtenLocs = pr.second;
-      writeCache_ |= writtenLocs;
+    writeCache_ |= writtenLocs;
   }
   isWriteCacheStale_ = false;
 }

@@ -1,8 +1,8 @@
 #include <torch/csrc/jit/passes/constant_pooling.h>
 #include <ATen/core/interned_strings.h>
+#include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/ir/node_hashing.h>
-#include <torch/csrc/jit/ir/alias_analysis.h>
 #include <unordered_set>
 
 namespace torch {
@@ -15,7 +15,7 @@ namespace {
 void ConstantPooling(
     Block* block,
     std::unordered_set<Node*, HashNode, EqualNode>& constants,
-    AliasDb& aliasDb) {
+    const AliasDb& aliasDb) {
   for (auto it = block->nodes().begin(); it != block->nodes().end();) {
     auto node = *it;
     // node may be moved to a different block so advance iterator now
@@ -43,8 +43,7 @@ void ConstantPooling(
       // if both values are the same object, we do not need to worry about
       // changing the aliasing relationship
       bool same_identity =
-          (old_ivalue && new_ivalue &&
-           (old_ivalue->isSameIdentity(new_ivalue)));
+          (old_ivalue && new_ivalue && (old_ivalue->is(new_ivalue)));
 
       if (!same_identity &&
           !aliasDb.safeToChangeAliasingRelationship(
