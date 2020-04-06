@@ -26,7 +26,8 @@ def generate_code(ninja_global=None,
                   subset=None,
                   disable_autograd=False,
                   selected_op_list_path=None,
-                  selected_op_list=None):
+                  selected_op_list=None,
+                  remove_place_holder=False):
     # cwrap depends on pyyaml, so we can't import it earlier
     root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     sys.path.insert(0, root)
@@ -62,7 +63,8 @@ def generate_code(ninja_global=None,
             tools_jit_templates,
             disable_autograd=disable_autograd,
             selected_op_list_path=selected_op_list_path,
-            selected_op_list=selected_op_list)
+            selected_op_list=selected_op_list,
+            remove_place_holder=remove_place_holder)
 
 
 def main():
@@ -92,6 +94,12 @@ def main():
         help="""List of operator names to include for custom build, in addition to those in selected-op-list-path.
         For example, --selected-op-list aten::add.Tensor aten::_convolution.""",
     )
+    parser.add_argument(
+        '--remove_place_holder',
+        default=False,
+        action='store_true',
+        help='Do not emmit place holders.',
+    )
     options = parser.parse_args()
     generate_code(
         options.ninja_global,
@@ -102,6 +110,7 @@ def main():
         options.disable_autograd,
         options.selected_op_list_path,
         options.selected_op_list,
+        options.remove_place_holder,
     )
 
 

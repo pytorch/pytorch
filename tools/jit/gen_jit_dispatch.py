@@ -285,6 +285,7 @@ def gen_jit_dispatch(
     disable_autograd=False,
     selected_op_list_path=None,
     selected_op_list=None,
+    remove_place_holder=False,
 ):
     REGISTER_ATEN_OPS_CPP = CodeTemplate.from_file(template_path + '/register_aten_ops.cpp')
 
@@ -362,13 +363,18 @@ def gen_jit_dispatch(
                                              lvalues=lvalues)
         return constructor
 
-    def filter_decls(jit_decls, disable_autograd, selected_op_list):
+    def filter_decls(jit_decls, disable_autograd, selected_op_list, remove_place_holder):
         result = []
         for decl in jit_decls:
             if disable_autograd and is_backward_op(decl):
                 continue
-            if selected_op_list and signature_without_args(decl) not in selected_op_list:
-                decl['emit_dummy_placeholder'] = True
+            # To make it consistent to aten selective code-gen, skip the overload name for now. Later the overload name can be included for finer granularity.
+            op_name = signature_without_args(decl).split('.')[0]
+            if selected_op_list and op_name not in selected_op_list:
+                if remove_place_holder:
+                    continue
+                else:
+                    decl['emit_dummy_placeholder'] = True
             result.append(decl)
         return result
 
@@ -462,7 +468,7 @@ def gen_jit_dispatch(
     if not selected_op_list:
         selected_op_list = []
     selected_op_list += load_op_list(selected_op_list_path) if selected_op_list_path else []
-    jit_decls = filter_decls(jit_decls, disable_autograd, selected_op_list)
+    jit_decls = filter_decls(jit_decls, disable_autograd, selected_op_list, remove_place_holder)
 
     # generation is deterministic
     jit_decl_groups = sort_decls(jit_decls)
