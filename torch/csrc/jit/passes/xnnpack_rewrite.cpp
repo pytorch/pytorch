@@ -3,11 +3,10 @@
 
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/ir/subgraph_matcher.h>
-#include <torch/csrc/jit/passes/constant_pooling.h>
-#include <torch/csrc/jit/passes/constant_propagation.h>
-#include <torch/csrc/jit/passes/fuse_linear.h>
+#include <torch/csrc/jit/passes/freeze_module.h>
 #include <torch/csrc/jit/passes/graph_rewrite_helper.h>
 #include <torch/csrc/jit/passes/prepack_folding.h>
+#include <torch/csrc/jit/passes/quantization.h>
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
 #include <torch/csrc/jit/passes/xnnpack_rewrite.h>
 
@@ -82,15 +81,14 @@ void insertPrePackedConv2dOp(std::shared_ptr<Graph>& graph) {
         return (%r) )";
 
   SubgraphRewriter rewriter;
-  rewriter.RegisterRewritePattern(conv_2d_pattern, prepacked_ops_conv2d_pattern);
+  rewriter.RegisterRewritePattern(
+      conv_2d_pattern, prepacked_ops_conv2d_pattern);
   rewriter.runOnGraph(graph);
 }
 
 } // namespace
 
 void insertPrePackedOps(std::shared_ptr<Graph>& graph) {
-  ConstantPooling(graph);
-  ConstantPropagation(graph);
   insertPrePackedLinearOp(graph);
   insertPrePackedConv2dOp(graph);
 }
@@ -115,6 +113,14 @@ void FoldPrePackingOps(script::Module& m) {
   PrePackingOpsFolder(m, filter_fn, "prepack_folding");
 }
 
+void optimizeForMobile(script::Module& m) {
+  m.eval();
+  m = FoldConvBatchNorm2d(m);
+  insertPrePackedOps(m);
+  m = freeze_module(m);
+  FoldPrePackingOps(m);
+}
+
 #else
 
 void insertPrePackedOps(std::shared_ptr<Graph>& graph) {
@@ -129,6 +135,12 @@ void insertPrePackedOps(script::Module& module) {
 
 void FoldPrePackingOps(script::Module& m) {
   TORCH_INTERNAL_ASSERT(
+      "XNNPACK is not enabled. Please build with USE_XNNPACK=1");
+}
+
+void optimizeForMobile(script::Module& m) {
+  TORCH_INTERNAL_ASSERT(
+      "Mobile optimizaiton only available with XNNPACK at the moment. "
       "XNNPACK is not enabled. Please build with USE_XNNPACK=1");
 }
 

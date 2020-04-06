@@ -56,6 +56,8 @@ Reducer::Reducer(
       require_final_hook_(false),
       local_used_maps_reduced_(false),
       backward_stats_base_(0) {
+  C10_LOG_API_USAGE_ONCE("torch.distributed.ddp.reducer");
+
   TORCH_CHECK(replicas_.size() >= 1, "Expected at least one model replica.");
   TORCH_CHECK(replicas_[0].size() >= 1, "Expected at least one parameter.");
 
@@ -108,65 +110,6 @@ Reducer::Reducer(
   // This can be reinitialized later after capturing runtime information.
   initialize_buckets(std::move(bucket_indices));
 
-  // All variables are expected to have their `grad_fn` set to the gradient
-  // accumulation function (since they are leafs in the autograd graph).
-  // We store pointers to these functions such that we can check if they are
-  // used in an autograd pass. If they are not, we know their grad tensors
-  // can be marked as ready for reduction.
-  {
-    const auto replica_count = replicas_.size();
-    grad_accumulators_.resize(replica_count);
-    for (size_t replica_index = 0; replica_index < replica_count;
-         replica_index++) {
-      const auto variable_count = replicas_[replica_index].size();
-      grad_accumulators_[replica_index].resize(variable_count);
-      for (size_t variable_index = 0; variable_index < variable_count;
-           variable_index++) {
-        auto& variable = replicas_[replica_index][variable_index];
-        const auto index = VariableIndex{
-            .replica_index = replica_index,
-            .variable_index = variable_index,
-        };
-
-        // The gradient accumulator function is lazily initialized once.
-        // Therefore we can use its presence in the autograd graph as
-        // evidence that the parameter has participated in an iteration.
-        auto grad_accumulator =
-            torch::autograd::impl::grad_accumulator(variable);
-
-        // Hook to execute after the gradient accumulator has executed.
-        hooks_.emplace_back(
-            // For delayed_allreduce, the actual hook only needs to be run at
-            // the end of the autograd computation. However, final_callbacks_
-            // inserted by ``queue_callback`` will be cleared at the beginning
-            // of every backward execution. Hence, we have to first insert
-            // hook on parameters, and those hooks will insert the final
-            // callback.
-            grad_accumulator->add_post_hook(torch::make_unique<LambdaPostHook>(
-                [=] {
-                    if (delay_allreduce_) {
-                      this->delayed_autograd_hook(index);
-                    } else {
-                      this->autograd_hook(index);
-                    }
-                }
-            )),
-            grad_accumulator);
-
-        // Map raw function pointer to replica index and parameter index.
-        // This is used later on when the autograd graph is traversed
-        // to check for parameters for which no gradient is computed.
-        func_[grad_accumulator.get()] = index;
-
-        // The gradient accumulator is stored as weak_ptr in the autograd
-        // metadata of the variable, so we have to keep it alive here for
-        // the raw pointer to be valid.
-        grad_accumulators_[replica_index][variable_index] =
-            std::move(grad_accumulator);
-      }
-    }
-  }
-
   // Initialize backward stats vector.
   {
     const auto replica_count = replicas_.size();
@@ -204,6 +147,68 @@ Reducer::Reducer(
       options = options.device(replicas_[i][0].device());
       local_used_maps_dev_[i] =
           at::empty({static_cast<long>(variable_count)}, options);
+    }
+  }
+
+  if (delay_allreduce_) {
+    // In delay allreduce mode, the delayed_autograd_hook is registered on the 
+    // first Tensor object in forward outputs. When fired, the 
+    // delayed_autograd_hook install a final callback to the current autograd 
+    // GraphTask. Hence, skip installing per-parameter hooks to AccumulateGrad
+    // functions below.
+    return;
+  }
+  
+  // All variables are expected to have their `grad_fn` set to the gradient
+  // accumulation function (since they are leafs in the autograd graph).
+  // We store pointers to these functions such that we can check if they are
+  // used in an autograd pass. If they are not, we know their grad tensors
+  // can be marked as ready for reduction.
+  {
+    const auto replica_count = replicas_.size();
+    grad_accumulators_.resize(replica_count);
+    for (size_t replica_index = 0; replica_index < replica_count;
+         replica_index++) {
+      const auto variable_count = replicas_[replica_index].size();
+      grad_accumulators_[replica_index].resize(variable_count);
+      for (size_t variable_index = 0; variable_index < variable_count;
+           variable_index++) {
+        auto& variable = replicas_[replica_index][variable_index];
+        const auto index = VariableIndex{
+            .replica_index = replica_index,
+            .variable_index = variable_index,
+        };
+
+        // The gradient accumulator function is lazily initialized once.
+        // Therefore we can use its presence in the autograd graph as
+        // evidence that the parameter has participated in an iteration.
+        auto grad_accumulator =
+            torch::autograd::impl::grad_accumulator(variable);
+
+        // Hook to execute after the gradient accumulator has executed.
+        hooks_.emplace_back(
+            // For delayed_allreduce, the actual hook only needs to be run at
+            // the end of the autograd computation. However, final_callbacks_
+            // inserted by ``queue_callback`` will be cleared at the beginning
+            // of every backward execution. Hence, we have to first insert
+            // hook on parameters, and those hooks will insert the final
+            // callback.
+            grad_accumulator->add_post_hook(torch::make_unique<LambdaPostHook>(
+                [=] { this->autograd_hook(index); }
+            )),
+            grad_accumulator);
+
+        // Map raw function pointer to replica index and parameter index.
+        // This is used later on when the autograd graph is traversed
+        // to check for parameters for which no gradient is computed.
+        func_[grad_accumulator.get()] = index;
+
+        // The gradient accumulator is stored as weak_ptr in the autograd
+        // metadata of the variable, so we have to keep it alive here for
+        // the raw pointer to be valid.
+        grad_accumulators_[replica_index][variable_index] =
+            std::move(grad_accumulator);
+      }
     }
   }
 }
@@ -280,51 +285,43 @@ void Reducer::mark_variable_ready_sparse(VariableIndex index) {
   replica.contents = grad;
 }
 
-// The function `autograd_hook` is called after the gradient for a
-// model parameter has been accumulated into its gradient tensor.
-// This function is only to be called from the autograd thread.
-// Comared to the vinilla autograd_hook() function, this delayed hook installs
-// a final callback to the autograd engine, and launched all communication in
-// the final callback.
-void Reducer::delayed_autograd_hook(VariableIndex index) {
+void Reducer::delayed_autograd_hook() {
   std::lock_guard<std::mutex> lock(this->mutex_);
-
-  // Since it gets here, this param has been used for this iteration. We want
-  // to mark it in local_used_maps_. During no_sync session, the same var can
-  // be set multiple times, which is OK as does not affect correctness. As long
-  // as it is used once during no_sync session, it is marked as used.
-  local_used_maps_[index.replica_index][index.variable_index] = 1;
 
   // Ignore if we don't expect to be called.
   // This may be the case if the user wants to accumulate gradients
   // for number of iterations before reducing them.
   if (!expect_autograd_hooks_) {
+    LOG(INFO) << "Skipping DDP Gradient Synchronization.";
     return;
   }
 
-  if (require_final_hook_) {
-    torch::autograd::Engine::get_default_engine().queue_callback([=] {
-      std::lock_guard<std::mutex> lock(this->mutex_);
+  TORCH_CHECK(
+      require_final_hook_, 
+      "The hook in delay allreduce mode is expected to be called only once "
+      "in each backward pass."
+  );
+  require_final_hook_ = false;
 
-      const auto replica_count = replicas_.size();
-      grad_accumulators_.resize(replica_count);
-      for (size_t replica_index = 0; replica_index < replica_count;
-           replica_index++) {
-        const auto variable_count = replicas_[replica_index].size();
-        for (size_t variable_index = 0; variable_index < variable_count;
-             variable_index++) {
-          const auto index = VariableIndex{
-              .replica_index = replica_index,
-              .variable_index = variable_index,
-          };
+  torch::autograd::Engine::get_default_engine().queue_callback([=] {
+    std::lock_guard<std::mutex> lock(this->mutex_);
 
-          mark_variable_ready(index);
-        }
+    const auto replica_count = replicas_.size();
+    for (size_t replica_index = 0; replica_index < replica_count;
+         replica_index++) {
+      const auto variable_count = replicas_[replica_index].size();
+      for (size_t variable_index = 0; variable_index < variable_count;
+           variable_index++) {
+        const auto index = VariableIndex{
+            .replica_index = replica_index,
+            .variable_index = variable_index,
+        };
+
+        local_used_maps_[index.replica_index][index.variable_index] = 1;
+        mark_variable_ready(index);
       }
-    });
-    // mark false as the final hook only needs to be inserted once
-    require_final_hook_ = false;
-  }
+    }
+  });
 }
 
 // The function `autograd_hook` is called after the gradient for a
@@ -387,9 +384,8 @@ void Reducer::mark_variable_ready(VariableIndex index) {
     // is only possible if the variable was initially deemed unused, and was
     // marked ready from the `prepare_for_backward` function, only to become
     // part of the autograd graph at a later point in time.
-    TORCH_INTERNAL_ASSERT(has_marked_unused_parameters_);
     TORCH_CHECK(
-        false,
+        has_marked_unused_parameters_,
         "Expected to mark a variable ready only once. ",
         "",
         "This error is caused by use of a module parameter outside the ",
@@ -637,12 +633,24 @@ void Reducer::prepare_for_backward(
     bucket.pending = bucket.replicas.size();
   }
 
+  if (delay_allreduce_) {
+    TORCH_CHECK(
+        !outputs.empty(),
+        "DistributedDataParallel with delay_allreduce mode expects non-empty"
+        "forward outputs.");
+
+    // Reset delayed allreduce final hook
+    require_final_hook_ = true;
+
+    outputs.front().register_hook([this](torch::autograd::Variable /*unused*/) {
+      this->delayed_autograd_hook();
+    });
+    return;
+  }
+
   // Reset unused parameter accounting.
   has_marked_unused_parameters_ = false;
   unused_parameters_.clear();
-
-  // Reset delayed allreduce final hook
-  require_final_hook_ = true;
 
   // If no outputs are specified, we assume that autograd hooks for ALL
   // variables will be called, and we don't have to search the autograd graph
@@ -650,7 +658,7 @@ void Reducer::prepare_for_backward(
   //
   // If delay_allreduce_ is True, it does not matter if there are any unused
   // parameters, as grad allreduce starts after the backward pass finishes.
-  if (outputs.empty() || delay_allreduce_) {
+  if (outputs.empty()) {
     return;
   }
 
@@ -784,7 +792,6 @@ void Reducer::finalize_backward() {
       finalize_bucket_dense(bucket);
     }
   }
-
 
   // Reset unused parameter accounting.
   for (auto& local_used : local_used_maps_) {

@@ -471,7 +471,7 @@ class DistributedDataParallel(Module):
             # because we need to figure out which parameters were used during
             # this forward pass, to ensure we short circuit reduction for any
             # unused parameters. Only if `find_unused_parameters` is set.
-            if self.find_unused_parameters:
+            if self.find_unused_parameters or self.delay_allreduce:
                 self.reducer.prepare_for_backward(list(_find_tensors(output)))
             else:
                 self.reducer.prepare_for_backward([])
