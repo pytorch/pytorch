@@ -2967,13 +2967,13 @@ class CheckpointModel(nn.Module):
     def __init__(self):
         super(CheckpointModel, self).__init__()
         self.L = 10
-        #self.linear = nn.Linear(10, 10)
+        self.linear = nn.Linear(10, 10)
         self.seq = nn.Sequential(
             *[nn.Linear(10, 10) for _ in range(self.L)]
         )
 
     def forward(self, x):
-        #x = self.linear(x)
+        x = self.linear(x)
         return checkpoint_sequential(self.seq, self.L, x)
 
 
@@ -3030,7 +3030,7 @@ class DistributedDataParallelDelayAllreduceTest(DistributedDataParallelTest):
         for i, j in zip(ddp.parameters(), net.parameters()):
             self.assertTrue(i.allclose(j))
 
-    def test_checkpoint_x(self):
+    def test_checkpoint(self):
         torch.manual_seed(1337)
 
         net = CheckpointModel()
