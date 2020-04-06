@@ -1,7 +1,7 @@
 #pragma once
 
 #include <torch/csrc/jit/tensorexpr/eval.h>
-#include <torch/csrc/jit/tensorexpr/hash_server.h>
+#include <torch/csrc/jit/tensorexpr/hash_provider.h>
 #include <torch/csrc/jit/tensorexpr/ir.h>
 #include <torch/csrc/jit/tensorexpr/ir_mutator.h>
 #include <torch/csrc/jit/tensorexpr/ir_visitor.h>
@@ -231,6 +231,12 @@ class Polynomial : public ExprNode<Polynomial> {
   void sort();
 };
 
+class RoundOff : public BinaryOpNode<RoundOff> {
+ public:
+  RoundOff(const Expr* lhs, const Expr* rhs)
+      : BinaryOpNode(lhs, rhs, IRNodeType::kRoundOff) {}
+};
+
 // Simplify the IR by combining arithmetic expressions over common terms.
 class TORCH_API PolynomialTransformer : public IRMutator {
  public:
@@ -267,6 +273,12 @@ class TORCH_API PolynomialTransformer : public IRMutator {
 
   // Multiply a Polynomial by a Term.
   const Expr* polyByTerm(const Polynomial* poly, const Term* term);
+
+  // Match a rounding pattern and create a RoundOff if found.
+  const Expr* isRoundOff(const Expr* lhs, const Expr* rhs);
+
+  // Inserts a new component into a term, simplifying if possible.
+  const Expr* insertIntoTerm(const Term* term, const Expr* expr);
 
   // Merge and simplify multiplication.
   const Expr* mutate(const Mul* v) override;
@@ -332,6 +344,10 @@ class TORCH_API PolynomialTransformer : public IRMutator {
     return evaluateOp(node);
   }
 
+  HashProvider& hasher() {
+    return hasher_;
+  }
+
   static const Expr* simplify(const Expr* e);
   static ExprHandle simplify(const ExprHandle& e);
   static Stmt* simplify(Stmt* e);
@@ -355,7 +371,10 @@ class TORCH_API TermExpander : public IRMutator {
   const Expr* factorizePolynomial(const Polynomial* poly);
 
   // Expand Polynomials out to a series of Adds.
-  const Expr* mutate(const Polynomial* v);
+  const Expr* mutate(const Polynomial* v) override;
+
+  // Expand RoundOff to it's component: Mul(Div(lhs, rhs), rhs).
+  const Expr* mutate(const RoundOff* v) override;
 };
 
 class TORCH_API IRSimplifier {

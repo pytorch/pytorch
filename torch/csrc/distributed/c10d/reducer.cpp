@@ -53,6 +53,8 @@ Reducer::Reducer(
       has_marked_unused_parameters_(false),
       local_used_maps_reduced_(false),
       backward_stats_base_(0) {
+  C10_LOG_API_USAGE_ONCE("torch.distributed.ddp.reducer");
+
   TORCH_CHECK(replicas_.size() >= 1, "Expected at least one model replica.");
   TORCH_CHECK(replicas_[0].size() >= 1, "Expected at least one parameter.");
 
@@ -324,9 +326,8 @@ void Reducer::mark_variable_ready(VariableIndex index) {
     // is only possible if the variable was initially deemed unused, and was
     // marked ready from the `prepare_for_backward` function, only to become
     // part of the autograd graph at a later point in time.
-    TORCH_INTERNAL_ASSERT(has_marked_unused_parameters_);
     TORCH_CHECK(
-        false,
+        has_marked_unused_parameters_,
         "Expected to mark a variable ready only once. ",
         "",
         "This error is caused by use of a module parameter outside the ",
