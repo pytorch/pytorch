@@ -13967,7 +13967,7 @@ a")
         def foo():
             i = 1
             x = [i if i != 5 else 3 for i in range(7)]  # noqa: C416
-            return i
+            return i, x
 
         self.assertEqual(foo(), torch.jit.script(foo)())
 
