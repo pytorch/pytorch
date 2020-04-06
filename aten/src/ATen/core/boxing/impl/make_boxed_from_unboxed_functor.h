@@ -1,7 +1,7 @@
 #pragma once
 
-#include <ATen/core/op_registration/infer_schema.h>
 #include <ATen/core/ivalue.h>
+#include <c10/util/Metaprogramming.h>
 
 namespace c10 {
 
@@ -29,7 +29,7 @@ struct CAFFE2_API OperatorKernel {
   virtual ~OperatorKernel() = default;
 };
 
-namespace detail {
+namespace impl {
   // supported_primitive_arg_types defines which primitive types we allow in
   // kernel functions as arguments or returns.
   // Additionally, we support lists, dicts and optionals containing these types.
@@ -294,20 +294,6 @@ namespace detail {
 
   private:
     std::tuple<Args...> constructor_parameters_;
-  };
-
-  template<class FuncType>
-  std::unique_ptr<FunctionSchema> inferFunctionSchemaFlattenedReturns_() {
-    return std::make_unique<FunctionSchema>(inferFunctionSchemaFlattenedReturns<FuncType>("", ""));
-  }
-
-  template<class KernelFunctor>
-  class FunctionSchemaInferer final {
-  public:
-    using func_type = typename c10::guts::infer_function_traits_t<KernelFunctor>::func_type;
-    std::unique_ptr<FunctionSchema> operator()() const {
-      return inferFunctionSchemaFlattenedReturns_<func_type>();
-    }
   };
 }
 

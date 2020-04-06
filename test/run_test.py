@@ -59,6 +59,7 @@ TESTS = [
     'quantization/test_quantize_script',
     'test_sparse',
     'test_serialization',
+    'test_show_pickle',
     'test_torch',
     'test_type_info',
     'test_type_hints',
@@ -125,6 +126,7 @@ ROCM_BLACKLIST = [
     'test_jit_simple',
     'test_jit_legacy',
     'test_jit_fuser_legacy',
+    'test_tensorexpr',
 ]
 
 # These tests are slow enough that it's worth calculating whether the patch

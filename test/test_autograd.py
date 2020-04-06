@@ -2627,16 +2627,22 @@ class TestAutograd(TestCase):
         with profile() as p:
             self.assertTrue(torch.autograd._profiler_enabled())
             y = x * 2 + 4
+        p.export_chrome_trace('/home/jamesreed/foo.json')
 
         self.assertFalse(torch.autograd._profiler_enabled())
 
         last_end = 0
-        names = ['is_complex', 'mul', 'is_complex', 'add']
+        names = ['is_complex', 'mul', 'mul', 'to', 'empty_strided', 'copy_', 'empty', 'is_complex',
+                 'add', 'add', 'to', 'empty_strided', 'copy_', 'empty']
+        top_level_names = ['is_complex', 'mul', 'is_complex', 'add']
+        top_level_iter = iter(top_level_names)
         self.assertEqual(len(p.function_events), len(names))
         for info, expected_name in zip(p.function_events, names):
-            self.assertGreater(info.cpu_interval.start, last_end)
+            if info.cpu_interval.start > last_end:
+                top_level_name_expected = next(top_level_iter)
+                self.assertEqual(info.name, top_level_name_expected)
+                last_end = info.cpu_interval.end
             self.assertEqual(info.name, expected_name)
-            last_end = info.cpu_interval.end
 
     def test_profiler_unboxed_only(self):
         x = torch.rand(3, 4)
@@ -2718,20 +2724,22 @@ class TestAutograd(TestCase):
         with profile(record_shapes=True) as prof:
             layer2(layer1(input))
 
-        # type conversion
-        assert(prof.function_events[0].input_shapes == [[30, 20]])
-        # fc (addmm)
-        assert(
-            prof.function_events[1].input_shapes ==
-            [[30], [128, 20], [20, 30], [], []]
-        )
-        assert(prof.function_events[2].input_shapes == [[40, 30]])
-        assert(
-            prof.function_events[3].input_shapes ==
-            [[40], [128, 30], [30, 40], [], []]
-        )
-        print(prof.table())
-        print(prof.key_averages(group_by_input_shape=True).table())
+        top_level_expected_events_and_shapes = [
+            ('unsigned short', [[30, 20]]),
+            ('addmm', [[30], [128, 20], [20, 30], [], []]),
+            ('unsigned short', [[40, 30]]),
+            ('addmm', [[40], [128, 30], [30, 40], [], []])
+        ]
+
+        expected_iter = iter(top_level_expected_events_and_shapes)
+        last_end = 0
+
+        for event in prof.function_events:
+            if event.cpu_interval.start > last_end:
+                name_expected, input_shape_expected = next(expected_iter)
+                self.assertEqual(event.name, name_expected)
+                self.assertEqual(event.input_shapes, input_shape_expected)
+                last_end = event.cpu_interval.end
 
     def test_profiler_no_cuda(self):
         print("")
@@ -2800,16 +2808,36 @@ class TestAutograd(TestCase):
             'outer',
             'is_complex',
             'mul',
+            'mul',
+            'to',
+            'empty_strided',
+            'copy_',
+            'empty',
             'is_complex',
             'add',
+            'add',
+            'to',
+            'empty_strided',
+            'copy_',
+            'empty',
             'profiler::_record_function_enter',
             'inner',
             'is_complex',
             'sub',
+            'sub',
+            'to',
+            'empty_strided',
+            'copy_',
+            'empty',
             'profiler::_record_function_exit',
             'profiler::_record_function_exit',
             'is_complex',
             'div',
+            'div',
+            'to',
+            'empty_strided',
+            'copy_',
+            'empty'
         ]
         self.assertEqual(len(events), len(start_order))
         for info, expected_name in zip(events, start_order):
