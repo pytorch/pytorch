@@ -207,16 +207,16 @@ Vec256<BFloat16> inline bfloat16_binary_op_as_fp32(const Vec256<BFloat16>& a, co
 }
 
 Vec256<BFloat16> inline operator+(const Vec256<BFloat16>& a, const Vec256<BFloat16>& b) {
-  return bfloat16_binary_op_as_fp32(a, b, _mm256_add_ps);
+  return bfloat16_binary_op_as_fp32(a, b, [](const __m256& x, const __m256& y) { return _mm256_add_ps(x, y); });
 }
 Vec256<BFloat16> inline operator-(const Vec256<BFloat16>& a, const Vec256<BFloat16>& b) {
-  return bfloat16_binary_op_as_fp32(a, b, _mm256_sub_ps);
+  return bfloat16_binary_op_as_fp32(a, b, [](const __m256& x, const __m256& y) { return _mm256_sub_ps(x, y); });
 }
 Vec256<BFloat16> inline operator*(const Vec256<BFloat16>& a, const Vec256<BFloat16>& b) {
-  return bfloat16_binary_op_as_fp32(a, b, _mm256_mul_ps);
+  return bfloat16_binary_op_as_fp32(a, b, [](const __m256& x, const __m256& y) { return _mm256_mul_ps(x, y); });
 }
 Vec256<BFloat16> inline operator/(const Vec256<BFloat16>& a, const Vec256<BFloat16>& b) {
-  return bfloat16_binary_op_as_fp32(a, b, _mm256_div_ps);
+  return bfloat16_binary_op_as_fp32(a, b, [](const __m256& x, const __m256& y) { return _mm256_div_ps(x, y); });
 }
 
 Vec256<BFloat16> inline operator&(const Vec256<BFloat16>& a, const Vec256<BFloat16>& b) {
