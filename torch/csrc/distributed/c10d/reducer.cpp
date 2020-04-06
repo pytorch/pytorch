@@ -187,15 +187,8 @@ Reducer::Reducer(
 
         // Hook to execute after the gradient accumulator has executed.
         hooks_.emplace_back(
-            // For delayed_allreduce, the actual hook only needs to be run at
-            // the end of the autograd computation. However, final_callbacks_
-            // inserted by ``queue_callback`` will be cleared at the beginning
-            // of every backward execution. Hence, we have to first insert
-            // hook on parameters, and those hooks will insert the final
-            // callback.
             grad_accumulator->add_post_hook(torch::make_unique<LambdaPostHook>(
-                [=] { this->autograd_hook(index); }
-            )),
+                [=] { this->autograd_hook(index); })),
             grad_accumulator);
 
         // Map raw function pointer to replica index and parameter index.
@@ -655,9 +648,6 @@ void Reducer::prepare_for_backward(
   // If no outputs are specified, we assume that autograd hooks for ALL
   // variables will be called, and we don't have to search the autograd graph
   // for presence of these hooks.
-  //
-  // If delay_allreduce_ is True, it does not matter if there are any unused
-  // parameters, as grad allreduce starts after the backward pass finishes.
   if (outputs.empty()) {
     return;
   }
