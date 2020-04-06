@@ -110,16 +110,26 @@ inline Tensor as_view(const Tensor & base, Tensor tensor, bool is_differentiable
         CreationMeta creation_meta=CreationMeta::DEFAULT) {
   auto base_var = Variable(base);
   if (base_var.is_view()) {
-    auto diff_view_meta = static_cast<DifferentiableViewMeta*>(base_var.getIntrusivePtr()->autograd_meta());
-    auto prev_fn = diff_view_meta->view_fn_;
-    // prev_func could be nullptr if base_var is a view created through MULTIOUTPUT.
-    if (prev_fn != nullptr) {
+    if (base_var.device().type() == at::kXLA) {
+      auto diff_view_meta = static_cast<DifferentiableViewMeta*>(base_var.getIntrusivePtr()->autograd_meta());
+      auto prev_fn = diff_view_meta->view_fn_;
+      // prev_fn could be nullptr if base_var is a view created through MULTIOUTPUT.
+      if (prev_fn != nullptr) {
+        func = [=](const at::Tensor& new_base) {
+          auto temp = prev_fn(new_base);
+          return func(temp);
+        };
+      }
+      base_var = base_var._base();
+    } else {
+      base_var = base_var._base();
+      auto sizes = tensor.sizes().vec();
+      auto strides = tensor.strides().vec();
+      auto offset = tensor.storage_offset() - base_var.storage_offset();
       func = [=](const at::Tensor& new_base) {
-        auto temp = prev_fn(new_base);
-        return func(temp);
+          return new_base.as_strided(sizes, strides, offset);
       };
     }
-    base_var = base_var._base();
   }
   if (is_differentiable) {
     return make_variable_differentiable_view(std::move(base_var), std::move(tensor), func, creation_meta);

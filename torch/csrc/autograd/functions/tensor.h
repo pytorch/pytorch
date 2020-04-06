@@ -31,7 +31,6 @@ struct TORCH_API CopySlices : public Node {
   CopySlices(
       const Variable& base_var,
       std::function<at::Tensor(at::Tensor)> view_fn_,
-      at::TensorGeometry view_,
       std::shared_ptr<Node> fn_);
 
   variable_list apply(variable_list&& inputs) override;
@@ -39,7 +38,6 @@ struct TORCH_API CopySlices : public Node {
 
   at::TensorGeometry base;
   std::function<at::Tensor(at::Tensor)> view_fn;
-  at::TensorGeometry view;
   std::shared_ptr<Node> fn;
 };
 

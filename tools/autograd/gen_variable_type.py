@@ -23,7 +23,6 @@
 #     differentiable subcomponents.
 #
 from __future__ import print_function
-import re
 from .utils import CodeTemplate, nested_dict, write, uninplace_api_name
 from .gen_autograd import VIEW_FUNCTIONS
 from .gen_autograd_functions import uses_single_grad
@@ -223,7 +222,7 @@ CALL_DISPATCH_VIA_NAMESPACE = CodeTemplate("""\
 at::${api_name}(${unpacked_args})""")
 
 CALL_DISPATCH_VIA_METHOD = CodeTemplate("""\
-self_.${api_name}(${unpacked_method_args})""")
+${var}.${api_name}(${unpacked_method_args})""")
 
 # If the non-variable operation has return values, we use the `tmp` variable to hold the
 # values temporarily and pass the values to the return variables outside of the
@@ -240,7 +239,7 @@ ${return_values} = ${rhs_value};
 """)
 
 ARRAYREF_TO_VEC = CodeTemplate("""\
- auto ${vec} = ${arg}.vec();
+auto ${vec} = ${arg}.vec();
 """)
 
 REPLAY_VIEW_LAMBDA_FUNC = CodeTemplate("""\
@@ -781,10 +780,40 @@ def emit_body(declaration):
         names = [ret['type'] + ' ' + ret['name'] + ';' for ret in declaration['returns']]
         return '\n'.join(names)
 
-    def wrap_output(call):
-        # Returns `wrapped_call` which is a drop-in replacement for `call`
+    def emit_view_lambda():
+        call = ''
+        input_base = 'input_base'
+        updated_unpacked_args = []
+        combined = nested_dict(env, declaration)
+        for arg in combined['unpacked_args']:
+            if arg == 'self_':
+                updated_unpacked_args.append(input_base)
+            elif combined['unpacked_args_simple_type'][arg] == 'IntArrayRef':
+                arg_vec = arg + '_vec'
+                call += ARRAYREF_TO_VEC.substitute(arg=arg, vec=arg_vec)
+                updated_unpacked_args.append(arg_vec)
+            else:
+                updated_unpacked_args.append(arg)
+        if 'namespace' in declaration['method_of']:
+            replay_view_call = CALL_DISPATCH_VIA_NAMESPACE.substitute(
+                api_name=declaration['api_name'],
+                unpacked_args=updated_unpacked_args)
+        else:
+            replay_view_call = CALL_DISPATCH_VIA_METHOD.substitute(
+                var=input_base,
+                api_name=declaration['api_name'],
+                unpacked_method_args=updated_unpacked_args[1:])
+
+        call += REPLAY_VIEW_LAMBDA_FUNC.substitute(
+            input_base=input_base,
+            replay_view_call=replay_view_call)
+        return call
+
+    def wrap_output(return_values, var):
+        call = ''
+        rhs_value = ''
         if 'Tensor' not in declaration['return_type']:
-            return call
+            rhs_value = var
         elif view_info is not None:
             # See NOTE [ Autograd View Variables ] in variable.h for details.
             differentiable_output_vars = {r['name'] for r in differentiable_outputs}
@@ -794,7 +823,7 @@ def emit_body(declaration):
 
             if len(differentiable_output_vars) == 0:
                 # no output is differentiable (.indices() for SparseTensors for example)
-                return 'as_view({}, {}, /* is_differentiable */ false)'.format(view_info, call)
+                rhs_value = 'as_view({}, {}, /* is_differentiable */ false)'.format(view_info, var)
             elif len(differentiable_output_vars) == 1:
                 # Single differentiable output (Tensor or Tensor[])
                 return_info = differentiable_outputs[0]
@@ -804,20 +833,24 @@ def emit_body(declaration):
                 # Only allow rebasing of the history if we return a single Tensor
                 # If we are in a no grad block, raise a warning
                 # See NOTE [ View + Inplace detection ] for more details about this logic
-                creation_meta = "GradMode::is_enabled() ? CreationMeta::DEFAULT: CreationMeta::NO_GRAD_MODE"
-                wrapped_call = ("as_view(/* base */ {}, /* output */ {}, /* is_differentiable */ true, "
-                                "func, /* creation_meta */ {})").format(view_info, call, creation_meta)
                 if return_info['dynamic_type'] == 'TensorList':
                     creation_meta = "CreationMeta::MULTI_OUTPUT_NODE"
-                    wrapped_call = ("as_view(/* base */ {}, /* output */ {}, /* is_differentiable */ true, "
-                                    "/* creation_meta */ {})").format(view_info, call, creation_meta)
-                return wrapped_call
+                    rhs_value = ("as_view(/* base */ {}, /* output */ {}, /* is_differentiable */ true, "
+                                 "/* creation_meta */ {})").format(view_info, var, creation_meta)
+                else:
+                    call += emit_view_lambda()
+                    creation_meta = "GradMode::is_enabled() ? CreationMeta::DEFAULT: CreationMeta::NO_GRAD_MODE"
+                    rhs_value = ("as_view(/* base */ {}, /* output */ {}, /* is_differentiable */ true, "
+                                 "func, /* creation_meta */ {})").format(view_info, var, creation_meta)
             else:
                 # This could be supported but we don't need it at the moment, so keeping things simple.
                 raise RuntimeError("Function that return multiple differentiable output "
                                    "when at least one of them is view is not supported.")
         else:
-            return 'std::move({})'.format(call)
+            rhs_value = 'std::move({})'.format(var)
+        call += RETURN_STATEMENT.substitute(return_values=return_values,
+                                            rhs_value=rhs_value)
+        return call
 
     def enforce_same_tensorimpl_and_storage(env, call):
         save_ptrs_stmts = []
@@ -842,26 +875,6 @@ def emit_body(declaration):
                 RUN_ONLY_IN_DEBUG_MODE.substitute(statements=enforce_same_ptrs_stmts)
         return call
 
-    def emit_view_lambda(declaration, base_type_call):
-        call = ''
-        # Autograd inplace updates only handles view ops with single Tensor output.
-        differentiable_output_vars = {r['name'] for r in differentiable_outputs}
-        if len(differentiable_outputs) == 1 and differentiable_outputs[0]['dynamic_type'] == 'Tensor':
-            input_base = 'input_base'
-            # FIXME
-            replay_view_call = base_type_call.replace('self_', input_base)
-            for arg in declaration['arguments']:
-                if arg['type'] == 'IntArrayRef':
-                    arg_name = arg['name']
-                    vec_name = arg_name + '_vec'
-                    call += ARRAYREF_TO_VEC.substitute(arg=arg_name, vec=vec_name)
-                    # FIXME
-                    replay_view_call = re.sub(r'\b{}\b'.format(arg_name), vec_name, replay_view_call)
-            call += REPLAY_VIEW_LAMBDA_FUNC.substitute(
-                input_base=input_base,
-                replay_view_call=replay_view_call)
-        return call
-
     def emit_call(env):
         combined = nested_dict(env, declaration)
         if strategy == 'use_derived':
@@ -875,18 +888,12 @@ def emit_body(declaration):
             else:
                 unpacked_method_args = combined['unpacked_args'][1:]
                 base_type_call = CALL_DISPATCH_VIA_METHOD.substitute(
-                    combined, unpacked_method_args=unpacked_method_args)
+                    combined, var='self_', unpacked_method_args=unpacked_method_args)
             if not modifies_arguments and not returns_void:
-                rhs_value = wrap_output('tmp')
                 call = DISPATCH_TO_NON_VAR_TYPE_WITH_RETURN_VALUES.substitute(
                     base_type_call=base_type_call)
 
-                if view_info:
-                    call += emit_view_lambda(declaration, base_type_call)
-
-                call += RETURN_STATEMENT.substitute(
-                    return_values=tie_return_values(),
-                    rhs_value=rhs_value)
+                call += wrap_output(tie_return_values(), 'tmp')
             else:
                 call = DISPATCH_TO_NON_VAR_TYPE_WITHOUT_RETURN_VALUES.substitute(
                     base_type_call=base_type_call)
