@@ -8,6 +8,7 @@ import torch.nn as nn
 from torch import Tensor  # noqa: F401
 from torch import _VF
 from torch._jit_internal import Tuple, Optional, List  # noqa: F401
+from torch.nn.quantized.modules.utils import _quantize_weight
 from torch.nn.utils.rnn import PackedSequence
 
 
@@ -267,15 +268,16 @@ class RNNBase(torch.nn.Module):
             mod, 'qconfig'), 'Input float module must have qconfig defined'
 
         if mod.qconfig is not None and mod.qconfig.weight is not None:
-            weight_observer = mod.qconfig.weight()
+            weight_observer_method = mod.qconfig.weight
         else:
             # We have the circular import issues if we import the qconfig in the beginning of this file:
             # https://github.com/pytorch/pytorch/pull/24231. The current workaround is to postpone the
             # import until we need it.
             from torch.quantization.qconfig import default_dynamic_qconfig
-            weight_observer = default_dynamic_qconfig.weight()
+            weight_observer_method = default_dynamic_qconfig.weight
 
-        dtype = weight_observer.dtype
+        qscheme = weight_observer_method().qscheme
+        dtype = weight_observer_method().dtype
         supported_scalar_types = [torch.qint8, torch.float16]
         if dtype not in supported_scalar_types:
             raise RuntimeError('Unsupported dtype for dynamic RNN quantization: {}'.format(dtype))
@@ -308,30 +310,24 @@ class RNNBase(torch.nn.Module):
                         # weights and pack parameters in this order:
                         #
                         #   w_ih, w_hh
-                        weight_observer(weight)
-                        wt_scale, wt_zp = weight_observer.calculate_qparams()
-                        qweight = torch.quantize_per_tensor(
-                            weight.float(), float(wt_scale), int(wt_zp), torch.qint8)
-                        packed_weight = \
-                            torch.ops.quantized.linear_prepack(qweight, bias)
+                        qweight = _quantize_weight(weight, weight_observer)
+                        packed_weight = torch.ops.quantized.linear_prepack(qweight, bias)
 
                         params = [packed_weight]
                         pos_names = ['w']
-                        ret_name = ['{}_{}_l{}{}'.format(
-                            name, ihhh, layer, suffix) for name in pos_names]
-                        return params, ret_name
-                    else:
+                    elif dttype == torch.float16:
                         # for each layer, for each direction we need to quantize and pack
                         # weights and pack parameters in this order:
                         #
                         #   packed_ih, packed_hh, b_ih, b_hh
-                        packed_weight = torch.fbgemm_pack_gemm_matrix_fp16(
-                            weight.float())
+                        packed_weight = torch.fbgemm_pack_gemm_matrix_fp16(weight.float())
 
                         params = [packed_weight, bias]
                         pos_names = ['packed', 'b']
-                        ret_name = ['{}_{}_l{}{}'.format(name, ihhh, layer, suffix) for name in pos_names]
-                        return params, ret_name
+                    else:
+                        raise RuntimeError('Unsupported dtype specified for dynamic quantized LSTM!')
+                    ret_name = ['{}_{}_l{}{}'.format(name, ihhh, layer, suffix) for name in pos_names]
+                    return params, ret_name
 
                 suffix = '_reverse' if direction == 1 else ''
                 ih_params, ih_param_names = process_weights('ih', layer, suffix, dtype)
