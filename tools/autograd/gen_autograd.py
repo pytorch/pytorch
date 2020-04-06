@@ -190,7 +190,7 @@ def load_deprecated_signatures(aten_decls, deprecated_path):
     return declarations
 
 
-def gen_autograd(aten_path, out, autograd_dir, disable_autograd=False, disable_trace=False):
+def gen_autograd(aten_path, out, autograd_dir, disable_autograd=False):
     aten_decls = load_aten_declarations(aten_path)
 
     # Parse and load derivatives.yaml
@@ -203,7 +203,7 @@ def gen_autograd(aten_path, out, autograd_dir, disable_autograd=False, disable_t
     # Generate VariableType.h/cpp
     if not disable_autograd:
         from .gen_variable_type import gen_variable_type
-        gen_variable_type(out, aten_decls, template_path, disable_trace)
+        gen_variable_type(out, aten_decls, template_path)
 
     # Generate Functions.h/cpp
     from .gen_autograd_functions import gen_autograd_functions_lib
@@ -213,8 +213,7 @@ def gen_autograd(aten_path, out, autograd_dir, disable_autograd=False, disable_t
     # Generate variable_factories.h
     from .gen_variable_factories import gen_variable_factories
     gen_variable_factories(
-        out, aten_decls, template_path, disable_autograd=disable_autograd,
-        disable_trace=disable_trace)
+        out, aten_decls, template_path, disable_autograd=disable_autograd)
 
 
 def gen_autograd_python(aten_path, out, autograd_dir):
