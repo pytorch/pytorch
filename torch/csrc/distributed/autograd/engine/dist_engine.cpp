@@ -222,7 +222,7 @@ std::shared_ptr<rpc::FutureMessage> DistEngine::runEngineAndAccumulateGradients(
           accumulateGradFuture->setError(errorMsg);
           return;
         }
-        const auto& grads = futureGrads->constValue();
+        const variable_list& grads = futureGrads->constValue();
         TORCH_INTERNAL_ASSERT(grads.size() == outputEdges.size());
 
         // Accumulate all the gradients in the context.
@@ -371,7 +371,7 @@ void DistEngine::cleanupBackwardPass(const ContextPtr& autogradContext) {
   // not leaking any references to the gradients anywhere else.
   const auto& futureGrads =
       autogradContext->retrieveGraphTask()->future_result_;
-  TORCH_INTERNAL_ASSERT(futureGrads.use_count() == 1);
+  TORCH_INTERNAL_ASSERT(futureGrads.use_count() <= 2);
 
   // Reset the graph task once we're done with all processing.
   autogradContext->resetGraphTask();

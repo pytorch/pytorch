@@ -123,7 +123,7 @@ class TORCH_API Future final {
     callbacks_.emplace_back(std::move(cb));
   }
 
- private:
+private:
   void setErrorInternal(
       FutureError error,
       std::unique_lock<std::mutex>& lock) {
