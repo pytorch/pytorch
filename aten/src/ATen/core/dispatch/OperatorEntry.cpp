@@ -1,4 +1,5 @@
 #include <ATen/core/dispatch/OperatorEntry.h>
+#include <ATen/core/op_registration/infer_schema.h>
 
 namespace c10 {
 namespace impl {
@@ -94,6 +95,11 @@ std::list<OperatorEntry::KernelEntry>::iterator OperatorEntry::registerKernel(
   // Add the kernel to the kernels list,
   // possibly creating the list if this is the first kernel.
   auto& k = kernels_[dispatch_key];
+
+  if (k.size() > 0) {
+    TORCH_WARN("Registering a kernel (", debug, ") for operator ", name_, " for dispatch key ", toString(dispatch_key), " that overwrote a previously registered kernel with the same dispatch key for the same operator.");
+  }
+
   k.emplace_front(std::move(kernel), std::move(inferred_function_schema), std::move(debug));
   std::list<OperatorEntry::KernelEntry>::iterator inserted = k.begin();
   // update the dispatch table, i.e. re-establish the invariant
