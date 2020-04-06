@@ -5,9 +5,9 @@ import itertools
 import unittest
 
 from torch.testing._internal.common_utils import TestCase, run_tests, load_tests, \
-    TEST_NUMPY
+    TEST_NUMPY, numpy_to_torch_dtype_dict
 from torch.testing._internal.common_device_type import (instantiate_device_type_tests, onlyOnCPUAndCUDA,
-                                                        dtypes)
+                                                        dtypes, onlyCPU)
 
 if TEST_NUMPY:
     import numpy as np
@@ -693,14 +693,59 @@ class TestTypePromotion(TestCase):
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     @float_double_default_dtype
-    @onlyOnCPUAndCUDA
-    def test_numpy_scalar_interactions(self, device):
-        a = np.array([1], dtype=np.int64)
-        b = torch.tensor([1], dtype=torch.int64)
-        self.assertEqual((a[0] * b).dtype, torch.int64)
+    @onlyCPU
+    def test_numpy_array_promotion(self, device):
+        np_types = numpy_to_torch_dtype_dict.keys()
+        torch_types = numpy_to_torch_dtype_dict.values()
 
-        a = np.array([1], dtype=np.float64)
-        self.assertEqual((a[0] * b).dtype, torch.get_default_dtype())
+        for np_type, torch_type in itertools.product(np_types, torch_types):
+            t0 = torch.tensor((1,), device=device, dtype=torch_type)
+            t1 = torch.tensor((1,), device=device, dtype=numpy_to_torch_dtype_dict[np_type])
+            a = np.array((1,), dtype=np_type)
+
+            try:
+                actual = t0 + a
+            except Exception as e:
+                actual = e
+
+            try:
+                expected = t0 + t1
+            except Exception as e:
+                expected = e
+
+            expected_failure = False
+
+            # float16 x bool, uint, int, and float16 interactions are broken
+            float16_failures = (torch.bool, torch.uint8,
+                                torch.int8, torch.int16, torch.int32, torch.int64,
+                                torch.float16)
+            if torch_type is torch.float16 and \
+               numpy_to_torch_dtype_dict[np_type] in float16_failures:
+                expected_failure = True
+
+            if torch_type in float16_failures and np_type is np.float16:
+                expected_failure = True
+
+            # bool x complex interactions are broken
+            if torch_type in (torch.complex64, torch.complex128) and np_type is np.bool:
+                expected_failure = True
+
+            if torch_type is torch.bool and np_type in (np.complex64, np.complex128):
+                expected_failure = True
+
+            if expected_failure and type(expected) == type(actual) and expected == actual:
+                msg = ("Failure: {0} == {1}. "
+                       "torch type was {2}. NumPy type was {3}. "
+                       "default type is {4}.").format(actual, expected,
+                                                      torch_type, np_type, torch.get_default_dtype())
+                self.fail(msg)
+
+            if not expected_failure and (type(expected) != type(actual) or expected != actual):
+                msg = ("Failure: {0} != {1}. "
+                       "torch type was {2}. NumPy type was {3}. "
+                       "default type is {4}.").format(actual, expected,
+                                                      torch_type, np_type, torch.get_default_dtype())
+                self.fail(msg)
 
 
 instantiate_device_type_tests(TestTypePromotion, globals())
