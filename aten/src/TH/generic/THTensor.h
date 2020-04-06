@@ -20,8 +20,6 @@
 #define THLongTensor THTensor
 #define THBoolTensor THTensor
 #define THBFloat16Tensor THTensor
-#define THComplexFloatTensor THTensor
-#define THComplexDoubleTensor THTensor
 
 /**** access methods ****/
 TH_API THStorage* THTensor_(storage)(const THTensor *self);
