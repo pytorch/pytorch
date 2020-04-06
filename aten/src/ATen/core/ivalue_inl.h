@@ -250,16 +250,15 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
    * Explicitly mark the future as completed with the output value.
    */
   void markCompleted(IValue value) {
-    std::unique_lock<std::mutex> lock(mutex_);
-    AT_ASSERT(!completed());
-    completed_ = true;
-    value_ = std::move(value);
-
     std::vector<std::function<void(void)>> cbs;
-    cbs.swap(callbacks_);
-    lock.unlock();
-
-    finished_cv_.notify_all();
+    {
+      std::unique_lock<std::mutex> lock(mutex_);
+      AT_ASSERT(!completed());
+      completed_ = true;
+      value_ = std::move(value);
+      cbs.swap(callbacks_);
+      finished_cv_.notify_all();
+    }
     for (auto& callback : cbs) {
       callback();
     }
@@ -270,17 +269,17 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
   }
 
   void markCompleted(FutureError&& error) {
-    std::unique_lock<std::mutex> lock(mutex_);
-    AT_ASSERT(!completed());
-    completed_ = true;
-    has_error_ = true;
-    error_ = std::move(error);
-
     std::vector<std::function<void(void)>> cbs;
-    cbs.swap(callbacks_);
-    lock.unlock();
+    {
+      std::unique_lock<std::mutex> lock(mutex_);
+      AT_ASSERT(!completed());
+      completed_ = true;
+      has_error_ = true;
+      error_ = std::move(error);
+      cbs.swap(callbacks_);
+      finished_cv_.notify_all();
+    }
 
-    finished_cv_.notify_all();
     for (auto& callback : cbs) {
       callback();
     }
