@@ -46,6 +46,7 @@ Allocate* LoopNestGenerator::getAlloc(TensorView* tv) {
     IterDomain* dim = tv->getComputeAtAxis(i);
     if (dim->isThreadDim())
       continue;
+    //TORCH_INTERNAL_ASSERT()
     alloc_dims.push_back(dim->extent());
   }
 

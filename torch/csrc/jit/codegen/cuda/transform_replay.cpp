@@ -67,6 +67,10 @@ TensorView* TransformReplay::replay(Split* expr, TensorView* tv) {
     TORCH_INTERNAL_ASSERT(
         real_axis != -1,
         "During transformation replay attempted to split an imaginary axis.");
+    TORCH_INTERNAL_ASSERT(
+        tv->axis(real_axis)->start()->isZeroInt(),
+        "Transform Replay tried to split an IterDomain with a start value that is not 0,",
+        " this is not currently supported.");
     // Replay split
     tv->split(real_axis, *(expr->factor()->value()));
     // Inserted a real axis, push everything in axis_map over to the right
@@ -97,6 +101,11 @@ TensorView* TransformReplay::replay(Merge* expr, TensorView* tv) {
         axis_map[axis] != -1 && axis_map[axis + 1] != -1,
         "During transformation replay attempted to merge an imaginary axis.");
     // Replay merge
+    TORCH_INTERNAL_ASSERT(
+        tv->axis(axis)->start()->isZeroInt() &&
+            tv->axis(axis + 1)->start()->isZeroInt(),
+        "Transform Replay tried to Merge IterDomains with a start value that is not 0,",
+        " this is not currently supported.");
     tv->merge(axis_map[axis]);
   } else {
     // If we aren't applying the merge, we won't change any following axis

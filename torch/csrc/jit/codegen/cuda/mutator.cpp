@@ -29,14 +29,15 @@ void OptOutMutator::mutate(Fusion* fusion) {
 // MUTATE FUNCTIONS FOR VALS
 
 Statement* OptOutMutator::mutate(IterDomain* id) {
-  Val* s = mutateAsVal(id->extent())->asVal();
-  if (!s->sameAs(id->extent())) {
-    Val* mutated_val =
-        new IterDomain(s, id->parallel_method(), id->isReduction());
-    registerMutation(id, mutated_val);
-    return mutated_val;
-  }
-  return id;
+  Val* s = mutateAsVal(id->start())->asVal();
+  Val* e = mutateAsVal(id->extent())->asVal();
+  if (s->sameAs(id->start()) && e->sameAs(id->extent()))
+    return id;
+
+  Val* mutated_val =
+      new IterDomain(s, e, id->parallel_method(), id->isReduction());
+  registerMutation(id, mutated_val);
+  return mutated_val;
 }
 
 Statement* OptOutMutator::mutate(TensorDomain* td) {

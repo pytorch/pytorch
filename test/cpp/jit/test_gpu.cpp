@@ -1,4 +1,4 @@
-//#if defined(USE_CUDA)
+#if defined(USE_CUDA)
 #include <test/cpp/jit/test_base.h>
 
 #include <torch/csrc/jit/codegen/cuda/arith.h>
@@ -27,7 +27,7 @@ using namespace torch::jit::fuser;
 TensorView* makeDummyTensor(int nDims) {
   std::vector<IterDomain*> dom;
   for (int i = 0; i < nDims; i++)
-    dom.push_back(new IterDomain(new Int()));
+    dom.push_back(new IterDomain(new Int(0), new Int()));
 
   return new TensorView(new TensorDomain(dom), DataType::Float);
 }
@@ -856,7 +856,7 @@ void testGPU_FusionSimplePWise() {
   // Set up symbolic sizes for the axes should be dimensionality of the problem
   std::vector<IterDomain*> dom;
   for (int i = 0; i < nDims; i++)
-    dom.push_back(new IterDomain(new Int()));
+    dom.push_back(new IterDomain(new Int(0), new Int()));
 
   // Set up your input tensor views
   TensorView* tv0 = new TensorView(new TensorDomain(dom), DataType::Float);
@@ -972,14 +972,16 @@ void testGPU_FusionForLoop() {
   FusionGuard fg(&fusion);
 
   const auto TV0 = new TensorView(
-      new TensorDomain({new IterDomain(new Int(16))}), DataType::Float);
+      new TensorDomain({new IterDomain(new Int(0), new Int(16))}),
+      DataType::Float);
   const auto TV1 = new TensorView(
-      new TensorDomain({new IterDomain(new Int(16))}), DataType::Float);
+      new TensorDomain({new IterDomain(new Int(0), new Int(16))}),
+      DataType::Float);
 
   fusion.addInput(TV0);
   fusion.addInput(TV1);
 
-  auto ID0 = new IterDomain(new Int(8));
+  auto ID0 = new IterDomain(new Int(0), new Int(8));
 
   TensorView* TV2 = static_cast<TensorView*>(add(TV0, TV1));
   BinaryOp* op = static_cast<BinaryOp*>(TV2->getOrigin());
@@ -1000,6 +1002,7 @@ void testGPU_FusionForLoop() {
   }
 }
 
+
 } // namespace jit
 } // namespace torch
-//#endif // #if defined(USE_CUDA)
+#endif // #if defined(USE_CUDA)

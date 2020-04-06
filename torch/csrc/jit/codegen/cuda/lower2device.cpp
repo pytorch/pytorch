@@ -396,6 +396,7 @@ void GPULower::replaceSizes() {
       size_map[orig_size] = new_size;
 
       new_domain.push_back(new IterDomain(
+          root_td->axis(i)->start(),
           new_size,
           root_td->axis(i)->parallel_method(),
           root_td->axis(i)->isReduction()));
@@ -416,6 +417,7 @@ void GPULower::replaceSizes() {
       if (size_map.find(new_size) != size_map.end())
         new_size = size_map[new_size];
       new_domain.push_back(new IterDomain(
+          root_td->axis(i)->start(),
           new_size,
           root_td->axis(i)->parallel_method(),
           root_td->axis(i)->isReduction()));
@@ -531,7 +533,6 @@ std::ostream& GPULower::printKernel(
     std::ostream& os,
     const std::string& kernel_name) {
   FusionGuard fg(fusion_);
-
   getLoweredExprs();
 
   IRPrinter irp(os);

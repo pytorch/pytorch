@@ -38,6 +38,10 @@ TensorView* split_(TensorView* tv, int axis, int factor) {
 
   IterDomain* id = td->axis(axis);
 
+  TORCH_CHECK(
+      id->start()->isZeroInt(),
+      "Splitting IterDomains with starting values that aren't 0, is not supported at this time.");
+
   if (id->parallel_method() != ParallelType::Serial)
     TORCH_CHECK(
         false,
@@ -62,13 +66,13 @@ TensorView* split_(TensorView* tv, int axis, int factor) {
       Int* so = static_cast<Int*>(vo);
 
       // outer loop IterDomain
-      IterDomain* ido =
-          new IterDomain(so, id->parallel_method(), id->isReduction());
+      IterDomain* ido = new IterDomain(
+          new Int(0), so, id->parallel_method(), id->isReduction());
       new_domain.push_back(ido);
 
       // inner loop IterDomain
-      IterDomain* idi =
-          new IterDomain(fact, id->parallel_method(), id->isReduction());
+      IterDomain* idi = new IterDomain(
+          new Int(0), fact, id->parallel_method(), id->isReduction());
       new_domain.push_back(idi);
     }
   }
@@ -93,11 +97,16 @@ TensorView* merge_(TensorView* tv, int axis) {
   IterDomain* first = td->axis(axis);
   IterDomain* second = td->axis(axis + 1);
 
+  TORCH_CHECK(
+      first->start()->isZeroInt() && second->start()->isZeroInt(),
+      "Merging IterDomains with starting values that aren't 0, is not supported at this time.");
+
   assert(first->isReduction() == second->isReduction());
   assert(first->parallel_method() == second->parallel_method());
 
   Val* merged_id_size = mul(first->extent(), second->extent());
   IterDomain* merged_id = new IterDomain(
+      new Int(0),
       static_cast<Int*>(merged_id_size),
       first->parallel_method(),
       first->isReduction());
@@ -202,7 +211,7 @@ TensorView::TensorView(const std::shared_ptr<c10::TensorType>& tensor_type)
   TORCH_CHECK(
       tensor_type->dim().has_value(), "Requires static rank for Tensor");
   for (int i = 0; i < tensor_type->dim().value(); i++) {
-    sizes.push_back(new IterDomain(new Int()));
+    sizes.push_back(new IterDomain(new Int(0), new Int()));
   }
   domain_ = new TensorDomain(sizes);
 }
@@ -221,7 +230,8 @@ TensorView* TensorView::newForOutput(DataType dtype) const {
     // consumers and we're copying over a producer.
     if (this->axis(i)->isReduction())
       continue;
-    domain_copy.push_back(new IterDomain(this->axis(i)->extent()));
+    domain_copy.push_back(
+        new IterDomain(this->axis(i)->start(), this->axis(i)->extent()));
   }
   TensorDomain* td = new TensorDomain(domain_copy);
   return new TensorView(td, dtype);

@@ -99,9 +99,9 @@ struct TORCH_CUDA_API BinaryOp : public Expr {
 };
 
 /*
- * Simply a representation of an iterable from start to extent. TensorDomains which
- * represent how to iterate over a tensor is made up of IterDomains. We directly
- * set parallization strategies on IterDomains.
+ * Simply a representation of an iterable from start to extent. TensorDomains
+ * which represent how to iterate over a tensor is made up of IterDomains. We
+ * directly set parallization strategies on IterDomains.
  */
 struct TORCH_CUDA_API IterDomain : public Val {
   ~IterDomain() = default;
@@ -109,6 +109,7 @@ struct TORCH_CUDA_API IterDomain : public Val {
   IterDomain() = delete;
 
   IterDomain(
+      Val* _start,
       Val* _extent,
       ParallelType _parallel_method = ParallelType::Serial,
       bool _reduction_domain = false);
@@ -157,7 +158,14 @@ struct TORCH_CUDA_API IterDomain : public Val {
       TORCH_CHECK(
           t != ParallelType::Vectorize, "Vectorization not yet supported.");
       if (t == ParallelType::Unroll)
-        TORCH_CHECK(false, "Unrolling not yet supported.");
+        TORCH_CHECK(
+            start()->isZeroInt() && extent()->isConstScalar(),
+            "Unrolling only supported with start = 0 and extent as a const int, but got ",
+            "a start of ",
+            start(),
+            " and extent ",
+            extent(),
+            " .");
     }
   }
 
@@ -165,6 +173,9 @@ struct TORCH_CUDA_API IterDomain : public Val {
     return parallel_method_;
   }
 
+  Val* start() const noexcept {
+    return start_;
+  }
   Val* extent() const;
 
   IterDomain(const IterDomain& other) = delete;
@@ -174,6 +185,7 @@ struct TORCH_CUDA_API IterDomain : public Val {
   IterDomain& operator=(IterDomain&& other) = delete;
 
  private:
+  Val* const start_;
   Val* const extent_;
   ParallelType parallel_method_ = ParallelType::Serial;
   bool is_reduction_domain_;

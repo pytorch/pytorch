@@ -10,6 +10,46 @@ namespace torch {
 namespace jit {
 namespace fuser {
 
+namespace {
+struct ScalarCheck : OptInDispatch {
+  Val* v1_;
+  Val* v2_;
+  bool same = false;
+
+  void handle(Float* f) {
+    same = static_cast<Float*>(v1_)->sameAs(static_cast<Float*>(v2_));
+  }
+
+  void handle(Int* i) {
+    same = static_cast<Int*>(v1_)->sameAs(static_cast<Int*>(v2_));
+  }
+
+  void handle(NamedScalar* ns) {
+    same =
+        static_cast<NamedScalar*>(v1_)->sameAs(static_cast<NamedScalar*>(v2_));
+  }
+
+  ScalarCheck(Val* _v1, Val* _v2) : v1_(_v1), v2_(_v2) {
+    OptInDispatch::handle(v1_);
+  }
+
+ public:
+  static bool sameAs(Val* v1, Val* v2) {
+    if (v1 == v2)
+      return true;
+
+    if (v1->getValType() != v2->getValType())
+      return false;
+
+    if (v1->getDataType() != v2->getDataType())
+      return false;
+
+    ScalarCheck sc(v1, v2);
+    return sc.same;
+  }
+};
+} // namespace
+
 bool Float::sameAs(const Float* const other) const {
   if (isConst() && other->isConst())
     return *value() == *(other->value());
@@ -56,30 +96,33 @@ bool BinaryOp::sameAs(const BinaryOp* other) const {
 }
 
 IterDomain::IterDomain(
+    Val* _start,
     Val* _extent,
     ParallelType _parallel_method,
     bool _reduction_domain)
     : Val(ValType::IterDomain, DataType::Int),
+      start_(_start),
       extent_(_extent),
       parallel_method_(_parallel_method),
       is_reduction_domain_(_reduction_domain) {
   TORCH_INTERNAL_ASSERT(
       _extent->isAnInt(),
-      "Cannot create an iter domain over an extent that is not an int.");
+      "Cannot create an iter domain over an extent that is not an int but recieved ",
+      _extent,
+      " .");
+  TORCH_INTERNAL_ASSERT(
+      _start->isAnInt(),
+      "Cannot create an iter domain with a start that is not an int but recieved ",
+      _extent,
+      " .");
 }
 
 bool IterDomain::sameAs(const IterDomain* const other) const {
   bool is_same = isReduction() == other->isReduction() &&
       parallel_method() == other->parallel_method();
+  is_same = is_same && ScalarCheck::sameAs(extent(), other->extent());
+  is_same = is_same && ScalarCheck::sameAs(start(), other->start());
 
-  if (extent()->getValType() == ValType::NamedScalar &&
-      other->extent()->getValType() == ValType::NamedScalar) {
-    is_same = is_same &&
-        (static_cast<NamedScalar*>(extent())->name().compare(
-             static_cast<NamedScalar*>(other->extent())->name()) == 0);
-  } else {
-    is_same = is_same && extent()->sameAs(other->extent());
-  }
   return is_same;
 }
 

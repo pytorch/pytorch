@@ -107,7 +107,12 @@ void IRPrinter::handle(const IterDomain* const id) {
     default:
       os << id->parallel_method();
   }
+
   os << "{";
+  if (!id->start()->isZeroInt()) {
+    print_inline(id->start());
+    os << " : ";
+  }
   print_inline(id->extent());
   os << "}";
 }
@@ -265,7 +270,9 @@ void IRPrinter::handle(const ForLoop* const fl) {
   indent();
   os << "for(size_t ";
   handle(fl->index());
-  os << "{0}; ";
+  os << " = ";
+  print_inline(fl->iter_domain()->start());
+  os << "; ";
   handle(fl->index());
   os << " < ";
   print_inline(fl->iter_domain()->extent());

@@ -41,6 +41,9 @@ Val::Val(ValType _vtype, DataType _dtype) : vtype_{_vtype}, dtype_{_dtype} {
   }
 }
 
+// Traverse origin of all values involved in constructing the provided val.
+// Check if all values involved are constant values, meaning the provided
+// val is also a constant value.
 namespace {
 
 struct ConstCheck : OptOutConstDispatch {
@@ -86,6 +89,14 @@ bool Val::isConstScalar() const {
   if (!isScalar())
     return false;
   return ConstCheck::isConst(this);
+}
+
+bool Val::isZeroInt() const {
+  if (isConstScalar() && getValType().value() == ValType::Scalar &&
+      getDataType().value() == DataType::Int &&
+      static_cast<const Int*>(this)->value().value() == 0)
+    return true;
+  return false;
 }
 
 c10::optional<DataType> Val::getDataType() const {
