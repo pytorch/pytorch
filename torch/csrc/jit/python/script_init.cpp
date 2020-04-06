@@ -98,9 +98,7 @@ struct PythonResolver : public Resolver {
         py::hasattr(obj, "_fields");
   }
 
-  TypePtr resolveTypeFromObject(
-      const py::object& obj,
-      const SourceRange& loc) {
+  TypePtr resolveTypeFromObject(const py::object& obj, const SourceRange& loc) {
     if (py::isinstance<ScriptClass>(obj)) {
       auto script_class = py::cast<ScriptClass>(obj);
       return script_class.class_type_.type_;
@@ -259,9 +257,15 @@ FunctionSchema getSchemaWithNameAndDefaults(
       checkMutableFunctionDefault(range, arg, it->second);
       c10::optional<IValue> value = tryCalculateDefaultParam(arg, it->second);
       if (!value) {
-        throw ErrorReport(range)
-            << "Expected a default value of type " << arg.type()->python_str()
-            << " on parameter \"" << arg.name() << "\"";
+        ErrorReport error(range);
+        error << "Expected a default value of type " << arg.type()->python_str()
+              << " on parameter \"" << arg.name() << "\".";
+        if (arg.is_inferred_type()) {
+          error << "Because \"" << arg.name()
+                << "\" was not annotated with an explicit type "
+                << "it is assumed to be type 'Tensor'.";
+        }
+        throw error;
       }
       new_args.emplace_back(
           arg.name(), arg.type(), arg.N(), *value, arg.kwarg_only());
@@ -520,7 +524,11 @@ bool ivalue_tags_match(const Module& lhs, const Module& rhs) {
       visited.emplace(item.a.internalToPointer());
     }
     if (*unshapedType(item.a.type()) != *unshapedType(item.b.type())) {
-      return false;
+      // Since named types are saved and loaded in the test suite, we cannot
+      // expect them to be equal. We should still check their slots however.
+      if (!item.a.type()->cast<c10::NamedType>()) {
+        return false;
+      }
     }
     // check tags for objects that contain subobjects
     if (item.a.isObject()) {
@@ -875,13 +883,16 @@ void initJitScriptBindings(PyObject* module) {
           [](Module& self) {
             std::vector<at::Tensor> tensors;
             std::vector<c10::NamedTypePtr> deps;
-            PythonPrint pp(tensors, deps, false);
+            PythonPrint pp(tensors, deps);
             pp.printNamedType(self.type());
             return pp.str();
           })
       .def("apply", &Module::apply)
       .def("_clone", &Module::clone)
-      .def("_clone_instance", &Module::clone_instance);
+      .def("_clone_instance", &Module::clone_instance)
+      .def_property_readonly("qualified_name", [](const Module& self) {
+        return self.type()->name()->qualifiedName();
+      });
 
   slot_dict_impl<detail::ParameterPolicy>::bind(m, "ParameterDict");
   slot_dict_impl<detail::BufferPolicy>::bind(m, "BufferDict");
@@ -975,7 +986,8 @@ void initJitScriptBindings(PyObject* module) {
           [](const StrongFunctionPtr& self) {
             std::vector<at::Tensor> tensors;
             std::vector<c10::NamedTypePtr> deps;
-            PythonPrint pp(tensors, deps, false);
+
+            PythonPrint pp(tensors, deps);
             pp.printFunction(*self.function_);
             return pp.str();
           })
@@ -1017,7 +1029,7 @@ void initJitScriptBindings(PyObject* module) {
       .def_property_readonly("code", [](Method& self) {
         std::vector<at::Tensor> tensors;
         std::vector<c10::NamedTypePtr> deps;
-        PythonPrint pp(tensors, deps, false);
+        PythonPrint pp(tensors, deps);
         pp.printMethod(self.function());
         return pp.str();
       });

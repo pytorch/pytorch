@@ -278,7 +278,7 @@ def load_op_list(path):
     return op_list
 
 
-def  gen_jit_dispatch(
+def gen_jit_dispatch(
     declarations,
     out,
     template_path,

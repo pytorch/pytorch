@@ -41,7 +41,8 @@ bool InterpreterState::run(Stack& stack) {
     switch (inst.op) {
       case OP: {
 #if defined(PYTORCH_MOBILE_OPERATOR_OBSERVER)
-        if (auto debug_info = at::getThreadLocalDebugInfo()) {
+        if (auto debug_info = at::ThreadLocalDebugInfo::get(
+                at::DebugInfoKind::MOBILE_RUNTIME_INFO)) {
           if (auto* mobile_debug_info =
                   dynamic_cast<MobileDebugInfo*>(debug_info.get())) {
             mobile_debug_info->setOpIdx(pc);
@@ -157,6 +158,16 @@ bool InterpreterState::run(Stack& stack) {
       } break;
       case TUPLE_SLICE: {
         tupleSlice(stack, inst.X, inst.X + inst.N);
+        ++pc;
+      } break;
+      case DICT_CONSTRUCT: {
+        auto type = code_->types_[inst.X]->expect<at::DictType>();
+        dictConstruct(stack, type, inst.N);
+        ++pc;
+      } break;
+      case NAMED_TUPLE_CONSTRUCT: {
+        auto type = code_->types_[inst.X]->expect<at::TupleType>();
+        namedTupleConstruct(stack, type, inst.N);
         ++pc;
       } break;
       case WARN: {
