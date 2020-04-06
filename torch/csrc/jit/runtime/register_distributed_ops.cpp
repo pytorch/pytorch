@@ -1,3 +1,4 @@
+#include "register_ops_utils.h"
 #include <ATen/ATen.h>
 #include <ATen/core/op_registration/op_registration.h>
 #include <torch/csrc/distributed/autograd/context/container.h>
@@ -31,14 +32,6 @@ at::Tensor toOptionalTensor(const c10::IValue& v) {
 
 at::Tensor optional_to_tensor(c10::optional<at::Tensor> v) {
   return v.has_value() ? *v : at::Tensor();
-}
-
-c10::AliasAnalysisKind aliasAnalysisFromSchema() {
-  return c10::AliasAnalysisKind::FROM_SCHEMA;
-}
-
-c10::AliasAnalysisKind aliasAnalysisSpecialCase() {
-  return c10::AliasAnalysisKind::INTERNAL_SPECIAL_CASE;
 }
 
 RegisterOperators reg_rpc_ops(
