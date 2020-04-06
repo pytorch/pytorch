@@ -2,6 +2,7 @@ import torch
 import torch.jit
 
 from torch.quantization._quantize_script import prepare_dynamic_script
+from torch.quantization._quantize_script import convert_dynamic_script
 from torch.quantization._quantize_script import quantize_dynamic_script
 from torch.quantization import default_dynamic_qconfig, QConfigDynamic
 
@@ -194,6 +195,37 @@ class TestScript(JitTestCase):
         assert len(attrs_with_prefix(m.lstm, '_observer_')) == 1
         FileCheck().check('_MinMaxTensorListObserver = prim::GetAttr[name="_observer_0') \
                    .check("aten::lstm") \
+                   .check("return") \
+                   .run(str(get_module_method(m, 'lstm', 'forward__0').graph))
+
+    def test_convert_dynamic_lstm(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+                self.lstm = torch.nn.LSTM(3, 3).to(dtype=torch.float)
+
+            def forward(self, x):
+                return self.lstm(x)
+        from torch.quantization.observer import default_dynamic_quant_observer, _MinMaxTensorListObserver
+        qconfig = QConfigDynamic(activation=default_dynamic_quant_observer,
+                                 weight=_MinMaxTensorListObserver)
+        m = torch.jit.script(M())
+        inputs = [torch.randn(1, 3) for _ in range(2)]
+        inputs = torch.cat(inputs).view(len(inputs), 1, -1)
+        m = prepare_dynamic_script(m, {'': qconfig})
+        m(inputs)
+        print("Calling convert script")
+        m = convert_dynamic_script(m, debug=True)
+        print(m.graph)
+        print(get_module_method(m, 'lstm', 'forward__0').graph)
+        m(inputs)
+        quant_func = "aten::quantize_per_tensor"
+
+        # quantizing weight in forward function of lstm module, no choose_qparams
+        FileCheck().check_not("aten::_choose_qparams_per_tensor") \
+                   .check(quant_func) \
+                   .check("aten::lstm") \
+                   .check_not(quant_func) \
                    .check("return") \
                    .run(str(get_module_method(m, 'lstm', 'forward__0').graph))
 

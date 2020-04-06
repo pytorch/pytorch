@@ -1681,8 +1681,8 @@ void checkGetQParamsResult(const IValue& qparams) {
   // Expect first two elements of the tuple to be Tensor
   for (size_t i = 0; i < 2; ++i) {
     TORCH_CHECK(
-        tp->elements()[i].isTensor(),
-        "Element of Tuple is expected to be Tensor, but element ",
+        tp->elements()[i].isTensor() || tp->elements()[i].isTensorList(),
+        "Element of Tuple is expected to be Tensor or TensorList, but element ",
         i,
         " has type: ",
         tp->elements()[i].tagKind());
@@ -1703,7 +1703,8 @@ std::tuple<c10::QScheme, QParamVector> InsertQuantDeQuantHelper::
   // TODO: refactor findObserverName to take Node* as input
   Value* v = n->output();
   TORCH_INTERNAL_ASSERT(
-      v->type()->isSubtypeOf(TensorType::get()),
+      v->type()->isSubtypeOf(TensorType::get()) ||
+          v->type()->isSubtypeOf(ListType::ofTensors()),
       "Expected output of observer node to be Tensor");
   auto observer_name = findObserverName(v);
   TORCH_INTERNAL_ASSERT(
@@ -1720,20 +1721,40 @@ std::tuple<c10::QScheme, QParamVector> InsertQuantDeQuantHelper::
       scalar_type.toScalarType() != at::ScalarType::Undefined,
       "dtype of observer can't be undefined");
   auto tp = result.toTuple();
-  at::Tensor scale = tp->elements()[0].toTensor().to(at::kFloat);
-  at::Tensor zero_point = tp->elements()[1].toTensor().to(at::kInt);
+
   // quantization parameters should appear in the same order as
   // the argument for quantize_per_tensor/quantize_per_channel function
   QParamVector qparams;
   auto qscheme = observer_module.attr("qscheme").toQScheme();
-  if (isPerChannel(qscheme)) {
-    qparams.push_back(std::make_pair("_scale", scale));
-    qparams.push_back(std::make_pair("_zero_point", zero_point));
-    qparams.push_back(std::make_pair("_axis", tp->elements()[2].toInt()));
+  if (tp->elements()[0].isTensor()) {
+    at::Tensor scale = tp->elements()[0].toTensor().to(at::kFloat);
+    at::Tensor zero_point = tp->elements()[1].toTensor().to(at::kInt);
+    if (isPerChannel(qscheme)) {
+      qparams.push_back(std::make_pair("_scale", scale));
+      qparams.push_back(std::make_pair("_zero_point", zero_point));
+      qparams.push_back(std::make_pair("_axis", tp->elements()[2].toInt()));
+    } else {
+      qparams.push_back(std::make_pair("_scale", scale.item<double>()));
+      qparams.push_back(
+          std::make_pair("_zero_point", zero_point.item<int64_t>()));
+    }
   } else {
-    qparams.push_back(std::make_pair("_scale", scale.item<double>()));
-    qparams.push_back(
-        std::make_pair("_zero_point", zero_point.item<int64_t>()));
+    c10::List<at::Tensor> scale = tp->elements()[0].toTensorList();
+    c10::List<at::Tensor> zero_point = tp->elements()[1].toTensorList();
+    auto size = tp->elements()[0].toTensorList().size();
+    at::Tensor scales_tensor = at::empty(size, at::dtype(at::kFloat));
+    at::Tensor zero_point_tensor = at::empty(size, at::dtype(at::kInt));
+    for (auto i = 0; i < size; ++i) {
+      at::Tensor s = scale[i];
+      at::Tensor zp = zero_point[i];
+      scales_tensor[i] = s.item<double>();
+      zero_point_tensor[i] = zp.item<int64_t>();
+    }
+    qparams.push_back(std::make_pair("_scale", scales_tensor));
+    qparams.push_back(std::make_pair("_zero_point", zero_point_tensor));
+    if (isPerChannel(qscheme)) {
+      qparams.push_back(std::make_pair("_axis", tp->elements()[2].toInt()));
+    }
   }
   qparams.push_back(std::make_pair("_scalar_type", scalar_type));
   return std::make_tuple(qscheme, qparams);
@@ -1840,7 +1861,8 @@ void InsertQuantDeQuantHelper::run(
     for (auto it = b->nodes().begin(), end = b->nodes().end(); it != end;) {
       Node* n = *it++;
       for (Value* v : n->outputs()) {
-        if (!v->type()->isSubtypeOf(TensorType::get())) {
+        if (!(v->type()->isSubtypeOf(TensorType::get()) ||
+              v->type()->isSubtypeOf(ListType::ofTensors()))) {
           continue;
         }
         collectObserverNodesAndValueToQuantize(module, v);
