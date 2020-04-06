@@ -602,6 +602,10 @@ Value* emitBuiltinCall(
     return result;
   }
 
+  if (name == aten::div_) {
+    std::cout << "saw div_" << std::endl;
+  }
+
   const auto& builtin_functions = getAllBuiltinFunctionsFor(name);
 
 

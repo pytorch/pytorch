@@ -42,8 +42,9 @@ def floordiv(self : Tensor, other : ${Rhs_Type}) -> Tensor:
   return torch.floor_divide(self, other)
 )SCRIPT");
 
-
-auto div_updater_tensor = CodeTemplate(R"SCRIPT(
+// historical tensor x tensor division is true division if either input is
+// floating or complex, floor division otherwise.
+auto div_updater_tensor_tensor = CodeTemplate(R"SCRIPT(
 def div_updater(self: Tensor, other: Tensor) -> Tensor:
   if (torch.is_floating_point(self) or
       torch.is_complex(self) or
@@ -54,33 +55,85 @@ def div_updater(self: Tensor, other: Tensor) -> Tensor:
   return torch.floor_divide(self, other)
 )SCRIPT");
 
-// TODO: update out type promotion logic for consistency
-auto div_updater_tensor_out = CodeTemplate(R"SCRIPT(
+// historical tensor x tensor x out computes in the out type
+// It would RuntimeError if:
+// - self or other is complex and out is floating or integral
+// - self or other is floating and out is integral
+// Note: computation occurs in the out type
+auto div_updater_tensor_tensor_out = CodeTemplate(R"SCRIPT(
 def div_updater(self: Tensor, other: Tensor, *, out: Tensor) -> Tensor:
+  if (torch.is_complex(self) or torch.is_complex(other)) and not torch.is_complex(out):
+    raise RuntimeError("Cannot cast complex inputs to non-complex out.")
+  if (torch.is_floating_point(self) or torch.is_floating_point(other)) and not torch.is_floating_point(out):
+    raise RuntimeError("Cannot cast floating point inputs to non-floating point out.")
+
+  if torch.is_floating_point(out) or torch.is_complex(out):
+    return torch.true_divide(self.to(out.dtype), other.to(out.dtype), out=out)
+
+  return torch.floor_divide(self.to(out.dtype), other.to(out.dtype), out=out)
+)SCRIPT");
+
+// historical tensor x scalar is equivalent to tenxor x tensor once the
+// scalar is wrapped
+auto div_updater_tensor_scalar = CodeTemplate(R"SCRIPT(
+def div_updater(self: Tensor, other: number) -> Tensor:
+  other = torch.tensor((other,))
+  if torch.is_floating_point(other):
+    other = other.float()
+
   if (torch.is_floating_point(self) or
       torch.is_complex(self) or
       torch.is_floating_point(other) or
       torch.is_complex(other)):
-    return torch.true_divide(self, other, out=out)
-
-  return torch.floor_divide(self, other, out=out)
-)SCRIPT");
-
-// TODO: other should be checked for being complex, too, but the jit
-// doesn't understand isinstance(other, complex)
-auto div_updater_tensor_scalar = CodeTemplate(R"SCRIPT(
-def div_updater(self: Tensor, other: number) -> Tensor:
-  if (torch.is_floating_point(self) or
-      torch.is_complex(self) or
-      isinstance(other, float)):
     return torch.true_divide(self, other)
 
   return torch.floor_divide(self, other)
 )SCRIPT");
 
+// historical tensor x scalar x out behavior computes in the out type
+// It would RuntimeError if:
+// - self or other is complex and out is floating or integral
+// - self or other is floating and out is integral
+// Note: computation occurs in the out type
+auto div_updater_tensor_scalar_out = CodeTemplate(R"SCRIPT(
+def div_updater(self: Tensor, other: number, out: Tensor) -> Tensor:
+  other = torch.tensor((other,))
+  if (torch.is_complex(self) or torch.is_complex(other)) and not torch.is_complex(out):
+    raise RuntimeError("Cannot cast complex inputs to non-complex out.")
+  if (torch.is_floating_point(self) or torch.is_floating_point(other)) and not torch.is_floating_point(out):
+    raise RuntimeError("Cannot cast floating point inputs to non-floating point out.")
+
+  if torch.is_floating_point(out) or torch.is_complex(out):
+    return torch.true_divide(self.to(out.dtype), other.to(out.dtype), out=out)
+
+  return torch.floor_divide(self.to(out.dtype), other.to(out.dtype), out=out)
+)SCRIPT");
+
+// historical scalar x tensor behavior uses the dtype of the tensor (other)
+// exclusively
+// Note: this behavior is not symmetric with tensor x scalar division
 auto div_updater_scalar_tensor = CodeTemplate(R"SCRIPT(
 def div_updater(self: number, other: Tensor) -> Tensor:
-  return torch.reciprocal(other).mul_(self)
+  if torch.is_floating_point(other) or torch.is_complex(other):
+    return torch.reciprocal(other).mul_(self)
+
+  return torch.reciprocal(other.double()).mul_(self).to(other.dtype)
+)SCRIPT");
+
+// historical scalar x tensor x out behavior computes in the out type
+// It would RuntimeError if:
+// - self or other is complex and out is floating or integral
+// - self or other is floating and out is integral
+// Note: computation occurs in the out type
+auto div_updater_scalar_tensor_out = CodeTemplate(R"SCRIPT(
+def div_updater(self: number, other: Tensor, out: Tensor) -> Tensor:
+  self = torch.tensor((self,))
+  if (torch.is_complex(self) or torch.is_complex(other)) and not torch.is_complex(out):
+    raise RuntimeError("Cannot cast complex inputs to non-complex out.")
+  if (torch.is_floating_point(self) or torch.is_floating_point(other)) and not torch.is_floating_point(out):
+    raise RuntimeError("Cannot cast floating point inputs to non-floating point out.")
+
+  return torch.reciprocal(other.to(out.dtype), out=out).mul_(self.to(out.dtype))
 )SCRIPT");
 
 auto tensor_properties =
@@ -168,10 +221,13 @@ struct BuiltinFunctionRegistry {
     }
 
     TemplateEnv env;
-    loadSource(div_updater_tensor.format(env), "aten");
-    loadSource(div_updater_tensor_out.format(env), "aten");
+    loadSource(div_updater_tensor_tensor.format(env), "aten");
+    loadSource(div_updater_tensor_tensor_out.format(env), "aten");
     loadSource(div_updater_tensor_scalar.format(env), "aten");
+    loadSource(div_updater_tensor_scalar_out.format(env), "aten");
     loadSource(div_updater_scalar_tensor.format(env), "aten");
+    loadSource(div_updater_scalar_tensor_out.format(env), "aten");
+
     loadSource(aten_ops, "aten");
 
     // These are under `prim` instead of `aten` since they exist to bind certain
