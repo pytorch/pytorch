@@ -146,9 +146,9 @@ class _Formatter(object):
         elif self.complex_dtype:
             p = PRINT_OPTS.precision
             # format real and imaginary values according to type
-            real_val = '({{:.0f}}.    '.format(p).format(value.real) if value.real.is_integer() \
+            real_val = '({{:.0f}}.'.format(p).format(value.real) if value.real.is_integer() \
                 else '({{:.{}f}}'.format(p).format(value.real)
-            imag_val = '{{:.0f}}.j    )'.format(p).format(value.imag) if value.imag.is_integer() \
+            imag_val = '{{:.0f}}.j)'.format(p).format(value.imag) if value.imag.is_integer() \
                 else '{{:.{}f}}j)'.format(p).format(value.imag)
             # add sign of imaginary part
             ret = "{{}} {{}} {{}}".format(p, p).format(real_val, '+-'[value.imag < 0], imag_val)
