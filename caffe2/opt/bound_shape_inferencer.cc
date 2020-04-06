@@ -45,60 +45,6 @@ int64_t SizeToDim(const TensorShape& shape, int axis) {
   }
   return r;
 }
-
-// Check precedence between two vector of TensorBoundShape::DimType.
-// If return 1: right take precedence over left
-// If return -1: left take precedence over right
-// If return 0: no precedence between left and right
-int takePrecedenceOver(
-    const std::vector<TensorBoundShape::DimType>& left,
-    const std::vector<TensorBoundShape::DimType>& right) {
-  const static std::vector<
-      std::tuple<TensorBoundShape::DimType, TensorBoundShape::DimType, int>>
-      precedence = {{TensorBoundShape_DimType_FEATURE_MAX_DEFAULT,
-                     TensorBoundShape_DimType_FEATURE_MAX,
-                     1},
-                    {TensorBoundShape_DimType_FEATURE_MAX,
-                     TensorBoundShape_DimType_FEATURE_MAX_DEFAULT,
-                     -1},
-                    {TensorBoundShape_DimType_BATCH_OF_FEATURE_MAX_DEFAULT,
-                     TensorBoundShape_DimType_BATCH_OF_FEATURE_MAX,
-                     1},
-                    {TensorBoundShape_DimType_BATCH_OF_FEATURE_MAX,
-                     TensorBoundShape_DimType_BATCH_OF_FEATURE_MAX_DEFAULT,
-                     -1}};
-
-  // If left is empty and right is not, right take precedence
-  if (left.size() == 0 || right.size() == 0) {
-    return right.size() > left.size();
-  }
-  for (int i = 0; i < right.size(); i++) {
-    // If right.size > left.size and left[0:i] == right[0:i],
-    // right take precedence
-    if (i >= left.size()) {
-      return 1;
-    }
-    auto l = left[i];
-    auto r = right[i];
-    if (l == TensorBoundShape_DimType_UNKNOWN &&
-        r != TensorBoundShape_DimType_UNKNOWN) {
-      return 1;
-    }
-    if (r == TensorBoundShape_DimType_UNKNOWN &&
-        l != TensorBoundShape_DimType_UNKNOWN) {
-      return -1;
-    }
-    for (auto [ll, rr, p] : precedence) {
-      if (l == ll && r == rr) {
-        return p;
-      }
-    }
-    if (l != r) {
-      return 0;
-    }
-  }
-  return 0;
-}
 } // namespace
 
 void BoundShapeInferencer::EnsureShapeNames(
@@ -227,32 +173,24 @@ TensorShape& BoundShapeInferencer::CheckAndSetTensorBoundShape(
     shape_info.q_info.offset.push_back(0);
     shape_info.q_info.axis = 1;
   }
-  // If the shape information exists in shape_info_ already
   if (!rt.second) {
-    // Check dim size consistency
+    // Check shape consistency
     CAFFE_ENFORCE_EQ(
         shape.dims_size(),
         bound_dims.size(),
         "Dim size inconsistency found in tensor ",
         name);
-    // Get precedence of previous shape vs new shape
-    int precedence = 0;
-    if (!shape_info.dimTypeIsSet()) {
-      precedence = 1;
-    } else {
-      precedence = takePrecedenceOver(shape_info.getDimType(), t);
-    }
-    // If precedence == 0: check whether previous shape == new shape
-    // If precedence == 1, override shape with new value
-    // If precedence == -1, previous shape takes precedence and
-    // new value is skipped.
-    if (precedence == 1) {
+    // For shapes that was provided as a hint at the input of the net, fix the
+    // batch size first.
+    if ((!shape_info.dimTypeIsSet() ||
+         (shape.dims_size() &&
+          shape_info.getDimType(0) == TensorBoundShape_DimType_UNKNOWN)) &&
+        t.size() && t[0] > TensorBoundShape_DimType_CONSTANT) {
       shape_info.setDimType(t);
-      for (int i = 0; i < bound_dims.size(); i++) {
-        shape.set_dims(i, bound_dims[i]);
-      }
-    } else if (precedence == 0 && !allow_existing_shape) {
-      // Enforce previous dims and current dims are the same.
+      shape.set_dims(0, bound_dims.front());
+    }
+
+    if (!allow_existing_shape) {
       for (int i = 0; i < shape.dims_size(); ++i) {
         CAFFE_ENFORCE_EQ(
             shape.dims(i),
@@ -270,8 +208,7 @@ TensorShape& BoundShapeInferencer::CheckAndSetTensorBoundShape(
     }
     return shape;
   }
-  // If shape information does not exist in shape_info_,
-  // set shape info according to inputs.
+
   shape_info.setDimType(t);
   shape.mutable_dims()->Clear();
   for (const auto d : bound_dims) {
@@ -737,10 +674,10 @@ void BoundShapeInferencer::InferCommonOp(const OperatorDef& op) {
     }
   } catch (const caffe2::EnforceNotMet& e) {
     LOG(ERROR) << "Enforce not met while inferring shapes for " << op.type()
-               << ": " << e.msg() << " first output: " << op.output(0);
+               << ": " << e.msg();
   } catch (const std::exception& e) {
     LOG(WARNING) << "Caught exception while inferring shapes for " << op.type()
-                 << ": " << e.what() << " first output: " << op.output(0);
+                 << ": " << e.what();
   }
 }
 
