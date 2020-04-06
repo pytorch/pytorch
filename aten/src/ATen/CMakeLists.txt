@@ -328,11 +328,13 @@ IF(USE_CUDA AND NOT USE_ROCM)
 
   IF(USE_MAGMA)
     list(APPEND ATen_CUDA_DEPENDENCY_LIBS ${MAGMA_LIBRARIES})
-    IF ($ENV{TH_BINARY_BUILD} AND MSVC)
-      # Do not do this on Linux: see Note [Extra MKL symbols for MAGMA in torch_cpu]
-      # in caffe2/CMakeLists.txt
-      list(APPEND ATen_CUDA_DEPENDENCY_LIBS
-        "${BLAS_LIBRARIES};${BLAS_LIBRARIES};${BLAS_LIBRARIES}")
+    IF ($ENV{TH_BINARY_BUILD})
+      IF (MSVC)
+        # Do not do this on Linux: see Note [Extra MKL symbols for MAGMA in torch_cpu]
+        # in caffe2/CMakeLists.txt
+        list(APPEND ATen_CUDA_DEPENDENCY_LIBS
+          "${BLAS_LIBRARIES};${BLAS_LIBRARIES};${BLAS_LIBRARIES}")
+      ENDIF(MSVC)
     ENDIF($ENV{TH_BINARY_BUILD})
   ENDIF(USE_MAGMA)
   IF ($ENV{ATEN_STATIC_CUDA})
