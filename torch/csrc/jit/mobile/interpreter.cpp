@@ -160,6 +160,16 @@ bool InterpreterState::run(Stack& stack) {
         tupleSlice(stack, inst.X, inst.X + inst.N);
         ++pc;
       } break;
+      case DICT_CONSTRUCT: {
+        auto type = code_->types_[inst.X]->expect<at::DictType>();
+        dictConstruct(stack, type, inst.N);
+        ++pc;
+      } break;
+      case NAMED_TUPLE_CONSTRUCT: {
+        auto type = code_->types_[inst.X]->expect<at::TupleType>();
+        namedTupleConstruct(stack, type, inst.N);
+        ++pc;
+      } break;
       case WARN: {
         drop(stack, 1);
         TORCH_WARN(pop(stack).toStringRef());
