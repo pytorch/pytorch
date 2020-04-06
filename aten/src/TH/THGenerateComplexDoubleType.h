@@ -2,7 +2,11 @@
 #error "You must define TH_GENERIC_FILE before including THGenerateComplexDoubleType.h"
 #endif
 
-#define scalar_t std::complex<double>
+extern "C" {
+  #define scalar_t double complex
+}
+
+
 #define accreal double
 #define Real ComplexDouble
 #define TH_REAL_IS_COMPLEXDOUBLE
