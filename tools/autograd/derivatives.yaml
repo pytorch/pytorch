@@ -1272,6 +1272,11 @@
   self: im2col_backward(grad, {self.size(2), self.size(3)}, kernel_size, dilation, padding, stride)
 
 # NN double backwards support
+- name: im2col_backward(Tensor grad_output, int[2] input_size, int[2] kernel_size, int[2] dilation, int[2] padding, int[2] stride) -> Tensor
+  grad_output: im2col(grad, kernel_size, dilation, padding, stride)
+
+- name: col2im_backward(Tensor grad_output, int[2] kernel_size, int[2] dilation, int[2] padding, int[2] stride) -> Tensor
+  grad_output: col2im(grad, {grad_output.size(2), grad_output.size(3)}, kernel_size, dilation, padding, stride)
 
 - name: _adaptive_avg_pool2d_backward(Tensor grad_output, Tensor self) -> Tensor
   grad_output: _adaptive_avg_pool2d(grad, { grad_output.size(-2), grad_output.size(-1) })
