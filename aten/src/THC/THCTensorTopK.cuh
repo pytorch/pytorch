@@ -4,8 +4,6 @@
 #include <c10/macros/Macros.h>
 #include <ATen/native/cuda/SortingRadixSelect.cuh>
 
-using namespace at::native;
-
 template <typename T, typename IndexType, int Dim, bool Order>
 C10_LAUNCH_BOUNDS_1(1024)
 __global__ void gatherTopK(TensorInfo<T, IndexType> input,
@@ -48,10 +46,11 @@ __global__ void gatherTopK(TensorInfo<T, IndexType> input,
 
   // Find the k-th highest element in our input
   T topKValue = ScalarConvert<int, T>::to(0);
-  radixSelect<T, typename TopKTypeConfig<T>::RadixType, IndexType, Order>(
+  at::native::radixSelect<T, typename at::native::TopKTypeConfig<T>::RadixType, IndexType, Order>(
     inputSliceStart, outputSliceSize,
     inputSliceSize, inputWithinSliceStride,
     smem, &topKValue);
+  const auto topKConverted = at::native::TopKTypeConfig<T>::convert(topKValue);
 
   // Every value that is strictly less/greater than `pattern`
   // (depending on sort dir) in sorted int format is in the top-K.
@@ -74,11 +73,12 @@ __global__ void gatherTopK(TensorInfo<T, IndexType> input,
     bool inRange = (i < inputSliceSize);
     T v =
       inRange ? doLdg(&inputSliceStart[i * inputWithinSliceStride]) : ScalarConvert<int, T>::to(0);
+    const auto convertedV = at::native::TopKTypeConfig<T>::convert(v);
     bool hasTopK;
     if (Order) {
-      hasTopK = inRange && (THCNumerics<T>::gt(v, topKValue));
+      hasTopK = inRange && (convertedV > topKConverted);
     } else {
-      hasTopK = inRange && (THCNumerics<T>::lt(v, topKValue));
+      hasTopK = inRange && (convertedV < topKConverted);
     }
 
     int index;
@@ -111,7 +111,8 @@ __global__ void gatherTopK(TensorInfo<T, IndexType> input,
     bool inRange = (i < inputSliceSize);
     T v =
       inRange ? doLdg(&inputSliceStart[i * inputWithinSliceStride]) : ScalarConvert<int, T>::to(0);
-    bool hasTopK = inRange && (THCNumerics<T>::eq(v, topKValue));
+    const auto convertedV = at::native::TopKTypeConfig<T>::convert(v);
+    bool hasTopK = inRange && (convertedV == topKConverted);
 
     int index;
     int carry;

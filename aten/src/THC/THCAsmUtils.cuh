@@ -7,6 +7,31 @@ template <typename T>
 struct Bitfield {};
 
 template <>
+struct Bitfield<uint16_t> {
+  static __device__ __forceinline__
+  unsigned int getBitfield(uint16_t val, int pos, int len) {
+    pos &= 0xff;
+    len &= 0xff;
+
+    unsigned int m = (1u << len) - 1u;
+    return (val >> pos) & m;
+  }
+
+  static __device__ __forceinline__
+  unsigned int setBitfield(uint16_t val, uint16_t toInsert, int pos, int len) {
+    pos &= 0xff;
+    len &= 0xff;
+
+    unsigned int m = (1u << len) - 1u;
+    toInsert &= m;
+    toInsert <<= pos;
+    m <<= pos;
+
+    return (val & ~m) | toInsert;
+  }
+};
+
+template <>
 struct Bitfield<unsigned int> {
   static __device__ __forceinline__
   unsigned int getBitfield(unsigned int val, int pos, int len) {
