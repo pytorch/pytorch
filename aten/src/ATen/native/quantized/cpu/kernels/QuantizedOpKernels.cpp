@@ -76,10 +76,10 @@ Tensor qcat_nhwc_kernel(
 
   auto output = at::_empty_affine_quantized(
       {N, C_out, H, W},
-      qx0.options(),
+      qx0.options().memory_format(MemoryFormat::ChannelsLast),
       scale,
       zero_point,
-      MemoryFormat::ChannelsLast);
+      c10::nullopt);
 
   // N, H, and W are explicitly captured here because there's a bug in GCC5
   // which causes an internal compiler error if they're not
@@ -152,15 +152,235 @@ Tensor qcat_nhwc_kernel(
   return output;
 }
 
+// horizontal sum over a range of uint8_t
+int64_t hsum(const uint8_t* A, int len) {
+  int64_t row_sum = 0;
+  int i = 0;
+
+#ifdef __AVX2__
+  __m256i sum_v = _mm256_setzero_si256();
+  __m256i one_epi16_v = _mm256_set1_epi16(1);
+  __m256i one_epi8_v = _mm256_set1_epi8(1);
+  // vectorized
+  for (; i < len / 32 * 32; i += 32) {
+    __m256i src_v = _mm256_loadu_si256(reinterpret_cast<__m256i const*>(A + i));
+    sum_v = _mm256_add_epi32(
+      sum_v,
+      _mm256_madd_epi16(
+        // first argument is unsigned, second is signed
+        _mm256_maddubs_epi16(src_v, one_epi8_v),
+      one_epi16_v)
+    );
+  }
+
+  alignas(64) int32_t temp[8];
+  _mm256_store_si256(reinterpret_cast<__m256i*>(temp), sum_v);
+  for (int k = 0; k < 8; ++k) {
+    row_sum += temp[k];
+  }
+#endif // __AVX2__
+
+  // scalar
+  for (; i < len; ++i) {
+    row_sum += A[i];
+  }
+
+  return row_sum;
+}
+
+// horizontal sum over a range of int8_t
+int64_t hsum(const int8_t* A, int len) {
+  int64_t row_sum = 0;
+  int i = 0;
+
+#ifdef __AVX2__
+  __m256i sum_v = _mm256_setzero_si256();
+  __m256i one_epi16_v = _mm256_set1_epi16(1);
+  __m256i one_epi8_v = _mm256_set1_epi8(1);
+  // vectorized
+  for (; i < len / 32 * 32; i += 32) {
+    __m256i src_v = _mm256_loadu_si256(reinterpret_cast<__m256i const*>(A + i));
+    sum_v = _mm256_add_epi32(
+      sum_v,
+      _mm256_madd_epi16(
+        // first argument is unsigned, second is signed
+        _mm256_maddubs_epi16(one_epi8_v, src_v),
+      one_epi16_v)
+    );
+  }
+
+  alignas(64) int32_t temp[8];
+  _mm256_store_si256(reinterpret_cast<__m256i*>(temp), sum_v);
+  for (int k = 0; k < 8; ++k) {
+    row_sum += temp[k];
+  }
+#endif // __AVX2__
+
+  // scalar
+  for (; i < len; ++i) {
+    row_sum += A[i];
+  }
+
+  return row_sum;
+}
+
+// horizontal sum over a range of int32_t
+int64_t hsum(const int32_t* A, int len) {
+  int64_t row_sum = 0;
+  int i = 0;
+
+#ifdef __AVX2__
+  __m256i sum_epi64 = _mm256_setzero_si256();
+  // vectorized
+  for (; i < len / 8 * 8; i += 8) {
+    __m256i src_epi32 = _mm256_loadu_si256(reinterpret_cast<__m256i const*>(A + i));
+    // widen
+    __m128i src_lo_epi32 = _mm256_castsi256_si128(src_epi32);
+    __m128i src_hi_epi32 = _mm256_extractf128_si256(src_epi32, 1);
+    __m256i src_lo_epi64 = _mm256_cvtepi32_epi64(src_lo_epi32);
+    __m256i src_hi_epi64 = _mm256_cvtepi32_epi64(src_hi_epi32);
+    // add
+    sum_epi64 = _mm256_add_epi64(sum_epi64, src_lo_epi64);
+    sum_epi64 = _mm256_add_epi64(sum_epi64, src_hi_epi64);
+  }
+
+  alignas(64) int64_t temp[4];
+  _mm256_store_si256(reinterpret_cast<__m256i*>(temp), sum_epi64);
+  for (int k = 0; k < 4; ++k) {
+    row_sum += temp[k];
+  }
+#endif // __AVX2__
+
+  // scalar
+  for (; i < len; ++i) {
+    row_sum += A[i];
+  }
+
+  return row_sum;
+}
+
+// horizontal sum of squares over a range of uint8_t
+int64_t hsum_sq(const uint8_t* A, int len) {
+  int64_t row_sum = 0;
+  int i = 0;
+
+#ifdef __AVX2__
+  __m256i sum_v_epu32 = _mm256_setzero_si256();
+  // vectorized
+  for (; i < len / 16 * 16; i += 16) {
+    // (i15, ..., i0)
+    __m128i src_epu8 = _mm_loadu_si128(reinterpret_cast<__m128i const*>(A + i));
+    __m256i src_epu16 = _mm256_cvtepu8_epi16(src_epu8);
+    // (i15 ^ 2, ..., i0 ^ 2)
+    __m256i sq_epu16 = _mm256_mullo_epi16(src_epu16, src_epu16);
+    // (i7 ^ 2, ..., i0 ^ 2)
+    __m128i sq_lo_epu16 = _mm256_castsi256_si128(sq_epu16);
+    // (i15 ^ 2, ..., i8 ^ 2)
+    __m128i sq_hi_epu16 = _mm256_extractf128_si256(sq_epu16, 1);
+    // widen to epu32
+    __m256i sq_lo_epu32 = _mm256_cvtepu16_epi32(sq_lo_epu16);
+    __m256i sq_hi_epu32 = _mm256_cvtepu16_epi32(sq_hi_epu16);
+    // add to running sum
+    sum_v_epu32 = _mm256_add_epi32(sum_v_epu32, sq_lo_epu32);
+    sum_v_epu32 = _mm256_add_epi32(sum_v_epu32, sq_hi_epu32);
+  }
+
+  alignas(64) int32_t temp[8];
+  _mm256_store_si256(reinterpret_cast<__m256i*>(temp), sum_v_epu32);
+  for (int k = 0; k < 8; ++k) {
+    row_sum += temp[k];
+  }
+#endif // __AVX2__
+
+  // scalar
+  for (; i < len; ++i) {
+    row_sum += A[i] * A[i];
+  }
+
+  return row_sum;
+}
+
+// horizontal sum of squares over a range of int8_t
+int64_t hsum_sq(const int8_t* A, int len) {
+  int64_t row_sum = 0;
+  int i = 0;
+
+#ifdef __AVX2__
+  __m256i sum_v_epi32 = _mm256_setzero_si256();
+  // vectorized
+  for (; i < len / 16 * 16; i += 16) {
+    // (i15, ..., i0)
+    __m128i src_epi8 = _mm_loadu_si128(reinterpret_cast<__m128i const*>(A + i));
+    __m256i src_epi16 = _mm256_cvtepi8_epi16(src_epi8);
+    // (i15 ^ 2, ..., i0 ^ 2)
+    __m256i sq_epi16 = _mm256_mullo_epi16(src_epi16, src_epi16);
+    // (i7 ^ 2, ..., i0 ^ 2)
+    __m128i sq_lo_epi16 = _mm256_castsi256_si128(sq_epi16);
+    // (i15 ^ 2, ..., i8 ^ 2)
+    __m128i sq_hi_epi16 = _mm256_extractf128_si256(sq_epi16, 1);
+    // widen to epi32
+    __m256i sq_lo_epi32 = _mm256_cvtepi16_epi32(sq_lo_epi16);
+    __m256i sq_hi_epi32 = _mm256_cvtepi16_epi32(sq_hi_epi16);
+    // add to running sum
+    sum_v_epi32 = _mm256_add_epi32(sum_v_epi32, sq_lo_epi32);
+    sum_v_epi32 = _mm256_add_epi32(sum_v_epi32, sq_hi_epi32);
+  }
+
+  alignas(64) int32_t temp[8];
+  _mm256_store_si256(reinterpret_cast<__m256i*>(temp), sum_v_epi32);
+  for (int k = 0; k < 8; ++k) {
+    row_sum += temp[k];
+  }
+#endif // __AVX2__
+
+  // scalar
+  for (; i < len; ++i) {
+    row_sum += A[i] * A[i];
+  }
+
+  return row_sum;
+}
+
+// horizontal sum os squares over a range of int32_t
+// floats throughout are necessary to prevent overflow
+float hsum_sq(const int32_t* A, int len) {
+  float row_sum = 0;
+  int i = 0;
+
+#ifdef __AVX2__
+  __m256 sum_ps = _mm256_setzero_ps();
+  // vectorized
+  for (; i < len / 8 * 8; i += 8) {
+    __m256i src_epi32 = _mm256_loadu_si256(reinterpret_cast<__m256i const*>(A + i));
+    __m256 src_ps = _mm256_cvtepi32_ps(src_epi32);
+    sum_ps = _mm256_add_ps(sum_ps, _mm256_mul_ps(src_ps, src_ps));
+  }
+
+  alignas(64) float temp[8];
+  _mm256_store_ps(temp, sum_ps);
+  for (int k = 0; k < 8; ++k) {
+    row_sum += static_cast<float>(temp[k]);
+  }
+#endif // __AVX2__
+
+  // scalar
+  for (; i < len; ++i) {
+    int64_t cur = static_cast<int64_t>(A[i]);
+    row_sum += (float)cur * (float)cur;
+  }
+
+  return row_sum;
+}
+
 void qrelu_kernel(const Tensor& qx, Tensor& qy) {
   const auto zero_point = qx.q_zero_point();
   AT_DISPATCH_QINT_TYPES(qx.scalar_type(), "qrelu", [&]() {
     qy = at::_empty_affine_quantized(
         qx.sizes(),
-        at::device(kCPU).dtype(SCALAR_TYPE),
+        at::device(kCPU).dtype(SCALAR_TYPE).memory_format(qx.suggest_memory_format()),
         qx.q_scale(),
         qx.q_zero_point(),
-        qx.suggest_memory_format());
+        c10::nullopt);
     using Vec = Vec256<scalar_t>;
     auto zero_point_vec = Vec(scalar_t(zero_point));
     auto iter = TensorIterator::unary_op(qy, qx);
@@ -178,10 +398,10 @@ void qrelu6_kernel(const Tensor& qx, Tensor& qy) {
   AT_DISPATCH_QINT_TYPES(qx.scalar_type(), "qrelu6", [&]() {
     qy = at::_empty_affine_quantized(
         qx.sizes(),
-        at::device(kCPU).dtype(SCALAR_TYPE),
+        at::device(kCPU).dtype(SCALAR_TYPE).memory_format(qx.suggest_memory_format()),
         qx.q_scale(),
         qx.q_zero_point(),
-        qx.suggest_memory_format());
+        c10::nullopt);
     using Vec = Vec256<scalar_t>;
     auto iter = TensorIterator::unary_op(qy, qx);
     scalar_t six =
@@ -275,10 +495,10 @@ void qsigmoid_kernel(const Tensor& qx, Tensor& qy) {
 
     qy = at::_empty_affine_quantized(
         qx.sizes(),
-        at::device(kCPU).dtype(SCALAR_TYPE),
+        at::device(kCPU).dtype(SCALAR_TYPE).memory_format(qx.suggest_memory_format()),
         output_scale,
         output_zero_point,
-        qx.suggest_memory_format());
+        c10::nullopt);
     auto iter = TensorIterator::unary_op(qy, qx);
 
     using Vec = Vec256<scalar_t>;
@@ -376,10 +596,10 @@ void qclamp_kernel(
   AT_DISPATCH_QINT_TYPES(qx.scalar_type(), "qclamp", [&]() {
     qy = at::_empty_affine_quantized(
         qx.sizes(),
-        at::device(kCPU).dtype(SCALAR_TYPE),
+        at::device(kCPU).dtype(SCALAR_TYPE).memory_format(qx.suggest_memory_format()),
         qx.q_scale(),
         qx.q_zero_point(),
-        qx.suggest_memory_format());
+        c10::nullopt);
     using Vec = Vec256<scalar_t>;
     auto iter = TensorIterator::unary_op(qy, qx);
     auto min = min_scalar.to<float>();
@@ -468,10 +688,10 @@ void qtanh_kernel(const Tensor& qx, Tensor& qy) {
 
     qy = at::_empty_affine_quantized(
         qx.sizes(),
-        at::device(kCPU).dtype(SCALAR_TYPE),
+        at::device(kCPU).dtype(SCALAR_TYPE).memory_format(qx.suggest_memory_format()),
         output_scale,
         output_zero_point,
-        qx.suggest_memory_format());
+        c10::nullopt);
     auto iter = TensorIterator::unary_op(qy, qx);
 
     using Vec = Vec256<scalar_t>;
@@ -832,6 +1052,74 @@ void qmaxpool_2d_nhwc_kernel(
 }
 
 template <typename T>
+void do_avg_pool_nhwc_on_AVX2(
+    const typename T::underlying* i_p,
+    typename T::underlying* o_p,
+    int& c_start,
+    int input_zero_point_m_size,
+    int output_zero_point,
+    float multiplier,
+    int dstart,
+    int dend,
+    int hstart,
+    int hend,
+    int wstart,
+    int wend,
+    int dsize,
+    int hsize,
+    int wsize,
+    int csize) {
+#if defined(__AVX2__) && !defined(_MSC_VER)
+  // buffer for channel accumulator, used to interchange channel-loop
+  // to inner-most, so that memory access of the input tensor data is
+  // continuous.
+  constexpr int cb_size = 16;
+  constexpr int vec_width = Vec256<T>::size() / 4;
+  constexpr int cb_step = cb_size * vec_width;
+  static Vec256<int32_t> acc_buffer[cb_size];
+  static Vec256<float> acc_buffer_fp[cb_size];
+
+  if (vec_width == 8) {
+    for (int c = c_start; c < csize; c += cb_step) {
+      int cend = std::min(cb_size, (csize - c) / vec_width);
+      // initialize loop
+      for (int ic = 0; ic < cend; ic++) {
+        acc_buffer[ic] = Vec256<int32_t>(input_zero_point_m_size);
+      }
+      // compute loop
+      for (int id = dstart; id < dend; id++) {
+        for (int ih = hstart; ih < hend; ih++) {
+          for (int iw = wstart; iw < wend; iw++) {
+            const int i_idx =
+                (id * wsize * hsize + ih * wsize + iw) *
+                    csize +
+                c;
+            for (int ic = 0; ic < cend; ic++) {
+              auto vals = vec256::convert_to_int32<typename T::underlying>(
+                  i_p + i_idx + ic * vec_width);
+              acc_buffer[ic] = acc_buffer[ic] + vals;
+            }
+          }
+        }
+      }
+      // convert int32 accumulative to fp32
+      vec256::convert((int*)acc_buffer, (float*)acc_buffer_fp, cend * vec_width);
+
+      // first quantize using AVX using 32 lanes, then 8, finally falls
+      // back to single
+      QuantizeAvx2<T>(
+          (float*)acc_buffer_fp,
+          o_p + c,
+          cend * vec_width,
+          multiplier,
+          output_zero_point);
+    }
+    c_start = csize / vec_width * vec_width;
+  }
+#endif
+}
+
+template <typename T>
 void do_avg_pool_on_AVX2(
     typename T::underlying* i_p,
     typename T::underlying* o_p,
@@ -903,6 +1191,12 @@ void qadaptive_avg_pool2d_nhwc_kernel(
     auto maximum = std::numeric_limits<scalar_t::underlying>::max();
     auto* i_p =
         reinterpret_cast<typename scalar_t::underlying*>(idata + b * istrideB);
+
+    float input_scale = qx.q_scale();
+    float output_scale = qy.q_scale();
+    int input_zero_point = qx.q_zero_point();
+    int output_zero_point = qy.q_zero_point();
+
     for (int64_t oh = 0; oh < osizeH; oh++) {
       int istartH = (int)std::floor((float)(oh * isizeH) / osizeH);
       int iendH = (int)std::ceil((float)((oh + 1) * isizeH) / osizeH);
@@ -914,7 +1208,8 @@ void qadaptive_avg_pool2d_nhwc_kernel(
         int iendW = (int)std::ceil((float)((ow + 1) * isizeW) / osizeW);
         int kW = iendW - istartW;
         int size = kH * kW;
-        float multiplier = qx.q_scale() / qy.q_scale() / size;
+        float multiplier = input_scale / output_scale / size;
+        int input_zero_point_m_size = -input_zero_point * size;
         int64_t c = 0;
         // For int8 or uint8quantization, we implicitly use int32 as
         // accumulation Or else, it will go to the slow path
@@ -928,8 +1223,8 @@ void qadaptive_avg_pool2d_nhwc_kernel(
             c,
             sizeC,
             1,
-            -qx.q_zero_point() * size,
-            qy.q_zero_point(),
+            input_zero_point_m_size,
+            output_zero_point,
             multiplier,
             0,
             1,
@@ -944,7 +1239,7 @@ void qadaptive_avg_pool2d_nhwc_kernel(
         // 1) The following loop handles the remaining channels
         // 2) It also handles the Non-AVX2 path
         for (; c < sizeC; ++c) {
-          int32_t acc_int32 = -qx.q_zero_point() * size;
+          int32_t acc_int32 = input_zero_point_m_size;
           int64_t tcntr = 0;
           for (int64_t ih = 0; ih < kH; ih++) {
             for (int64_t iw = 0; iw < kW; iw++) {
@@ -955,7 +1250,7 @@ void qadaptive_avg_pool2d_nhwc_kernel(
           }
           // clamp
           o_p[c] = at::quantize_val<scalar_t>(
-                       1.0f / multiplier, qy.q_zero_point(), acc_int32)
+                       1.0f / multiplier, output_zero_point, acc_int32)
                        .val_;
         } // c
       } // oh
@@ -983,11 +1278,17 @@ void qavg_pool2d_nhwc_kernel(
   AT_DISPATCH_QINT_TYPES(qx.scalar_type(), "avg_pool2d_nhwc", [&]() {
     scalar_t* idata = static_cast<scalar_t*>(qx.data_ptr());
     scalar_t* odata = static_cast<scalar_t*>(qy.data_ptr());
-    auto minimum = std::numeric_limits<scalar_t::underlying>::lowest();
-    auto maximum = std::numeric_limits<scalar_t::underlying>::max();
     int64_t batch_size = nInputPlane * inputWidth * inputHeight;
     auto* i_p = reinterpret_cast<typename scalar_t::underlying*>(
         idata + b * batch_size);
+
+    // lift these operations outside the loop to reduce access overheads
+    float input_scale = qx.q_scale();
+    float output_scale = qy.q_scale();
+    int input_zero_point = qx.q_zero_point();
+    int output_zero_point = qy.q_zero_point();
+    int64_t divisor_override_factor =
+        divisor_override.has_value() ? divisor_override.value() : 0;
 
     for (int64_t oh = 0; oh < outputHeight; oh++) {
       for (int64_t ow = 0; ow < outputWidth; ow++) {
@@ -1004,31 +1305,25 @@ void qavg_pool2d_nhwc_kernel(
         hend = std::min(hend, inputHeight);
         wend = std::min(wend, inputWidth);
 
-        int64_t size = (hend - hstart) * (wend - wstart);
-        int64_t divide_factor;
-        if (divisor_override.has_value()) {
-          divide_factor = divisor_override.value();
-        } else {
-          if (count_include_pad) {
-            divide_factor = pool_size;
-          } else {
-            divide_factor = (hend - hstart) * (wend - wstart);
-          }
-        }
+        int size = (hend - hstart) * (wend - wstart);
+        int divide_size = count_include_pad ? pool_size : size;
+        int divide_factor =
+            divisor_override_factor ? divisor_override_factor : divide_size;
+        float multiplier = input_scale / output_scale / divide_factor;
+        int input_zero_point_m_size = -input_zero_point * size;
 
         int64_t c = 0;
         // For int8 quantization, we implicitly use int32 as accumulation
         // Or else, it will go to the slow path
         // TODO: support 16bit, 32bit, and etc.
-        float multiplier = qx.q_scale() / qy.q_scale() / divide_factor;
         do_avg_pool_on_AVX2<scalar_t>(
             i_p,
             o_p,
             c,
             nInputPlane,
             nInputPlane,
-            -qx.q_zero_point() * size,
-            qy.q_zero_point(),
+            input_zero_point_m_size,
+            output_zero_point,
             multiplier,
             0,
             1,
@@ -1043,7 +1338,7 @@ void qavg_pool2d_nhwc_kernel(
         // 1) The following loop handles the remaining channels
         // 2) It also handles the Non-AVX2 path
         for (; c < nInputPlane; ++c) {
-          int32_t acc_int32 = -qx.q_zero_point() * size;
+          int32_t acc_int32 = input_zero_point_m_size;
           int64_t tcntr = 0;
           for (int64_t ih = hstart; ih < hend; ih++) {
             for (int64_t iw = wstart; iw < wend; iw++) {
@@ -1055,7 +1350,7 @@ void qavg_pool2d_nhwc_kernel(
           double acc_fp = acc_int32 * 1.0;
           // clamp
           o_p[c] = at::quantize_val<scalar_t>(
-                       1.0f / multiplier, qy.q_zero_point(), acc_fp)
+                       1.0f / multiplier, output_zero_point, acc_fp)
                        .val_;
         } // c
       } // ow
@@ -1088,59 +1383,60 @@ void qavg_pool3d_nhwc_kernel(
   AT_DISPATCH_QINT_TYPES(qx.scalar_type(), "avg_pool3d_nhwc", [&]() {
     scalar_t* idata = static_cast<scalar_t*>(qx.data_ptr());
     scalar_t* odata = static_cast<scalar_t*>(qy.data_ptr());
-    auto minimum = std::numeric_limits<scalar_t::underlying>::lowest();
-    auto maximum = std::numeric_limits<scalar_t::underlying>::max();
-    int64_t batch_size = nInputPlane * inputWidth * inputHeight * inputDepth;
+    int batch_size = nInputPlane * inputWidth * inputHeight * inputDepth;
     auto* i_p = reinterpret_cast<typename scalar_t::underlying*>(
         idata + b * batch_size);
 
-    for (int64_t od = 0; od < outputDepth; od++) {
-      for (int64_t oh = 0; oh < outputHeight; oh++) {
-        for (int64_t ow = 0; ow < outputWidth; ow++) {
+    // lift these operations outside the loop to reduce access overheads
+    float input_scale = qx.q_scale();
+    float output_scale = qy.q_scale();
+    int input_zero_point = qx.q_zero_point();
+    int output_zero_point = qy.q_zero_point();
+    int64_t divisor_override_factor =
+        divisor_override.has_value() ? divisor_override.value() : 0;
+
+    for (int od = 0; od < outputDepth; od++) {
+      for (int oh = 0; oh < outputHeight; oh++) {
+        for (int ow = 0; ow < outputWidth; ow++) {
           auto* o_p = reinterpret_cast<typename scalar_t::underlying*>(
-              odata + b * nInputPlane * outputWidth * outputHeight * outputDepth +
-              (od * outputHeight * outputWidth + oh * outputWidth + ow) * nInputPlane);
-          int64_t dstart = od * dD - padD;
-          int64_t hstart = oh * dH - padH;
-          int64_t wstart = ow * dW - padW;
+              odata +
+              b * nInputPlane * outputWidth * outputHeight * outputDepth +
+              (od * outputHeight * outputWidth + oh * outputWidth + ow) *
+                  nInputPlane);
+          int dstart = od * dD - padD;
+          int hstart = oh * dH - padH;
+          int wstart = ow * dW - padW;
 
-          int64_t dend = std::min(dstart + kD, inputDepth + padD);
-          int64_t hend = std::min(hstart + kH, inputHeight + padH);
-          int64_t wend = std::min(wstart + kW, inputWidth + padW);
-          int64_t pool_size = (dend - dstart) * (hend - hstart) * (wend - wstart);
+          int dend = std::min(dstart + kD, (int)inputDepth + padD);
+          int hend = std::min(hstart + kH, (int)inputHeight + padH);
+          int wend = std::min(wstart + kW, (int)inputWidth + padW);
+          int pool_size = (dend - dstart) * (hend - hstart) * (wend - wstart);
 
-          dstart = std::max(dstart, (int64_t)0);
-          hstart = std::max(hstart, (int64_t)0);
-          wstart = std::max(wstart, (int64_t)0);
-          dend = std::min(dend, inputDepth);
-          hend = std::min(hend, inputHeight);
-          wend = std::min(wend, inputWidth);
+          dstart = std::max(dstart, 0);
+          hstart = std::max(hstart, 0);
+          wstart = std::max(wstart, 0);
+          dend = std::min(dend, (int)inputDepth);
+          hend = std::min(hend, (int)inputHeight);
+          wend = std::min(wend, (int)inputWidth);
 
-          int64_t size = (dend - dstart) * (hend - hstart) * (wend - wstart);
-          int64_t divide_factor;
-          if (divisor_override.has_value()) {
-            divide_factor = divisor_override.value();
-          } else {
-            if (count_include_pad) {
-              divide_factor = pool_size;
-            } else {
-              divide_factor = size;
-            }
-          }
+          int size = (dend - dstart) * (hend - hstart) * (wend - wstart);
+          int divide_size = count_include_pad ? pool_size : size;
+          int divide_factor =
+              divisor_override_factor ? divisor_override_factor : divide_size;
+          float multiplier = input_scale / output_scale / divide_factor;
+          int input_zero_point_m_size = -input_zero_point * size;
 
-          int64_t c = 0;
+          int c_start = 0;
+
           // For int8 quantization, we implicitly use int32 as accumulation
           // Or else, it will go to the slow path
           // TODO: support 16bit, 32bit, and etc.
-          float multiplier = qx.q_scale() / qy.q_scale() / divide_factor;
-          do_avg_pool_on_AVX2<scalar_t>(
+          do_avg_pool_nhwc_on_AVX2<scalar_t>(
               i_p,
               o_p,
-              c,
-              nInputPlane,
-              nInputPlane,
-              -qx.q_zero_point() * size,
-              qy.q_zero_point(),
+              c_start,
+              input_zero_point_m_size,
+              output_zero_point,
               multiplier,
               dstart,
               dend,
@@ -1148,14 +1444,15 @@ void qavg_pool3d_nhwc_kernel(
               hend,
               wstart,
               wend,
-              1,
-              inputHeight*inputWidth,
+              inputDepth,
+              inputHeight,
               inputWidth,
-              1);
+              nInputPlane);
+
           // 1) The following loop handles the remaining channels
           // 2) It also handles the Non-AVX2 path
-          for (; c < nInputPlane; ++c) {
-            int32_t acc_int32 = -qx.q_zero_point() * size;
+          for (int c = c_start; c < nInputPlane; ++c) {
+            int32_t acc_int32 = input_zero_point_m_size;
             int64_t tcntr = 0;
             for (int64_t id = dstart; id < dend; id++) {
               for (int64_t ih = hstart; ih < hend; ih++) {
@@ -1169,14 +1466,14 @@ void qavg_pool3d_nhwc_kernel(
             double acc_fp = acc_int32 * 1.0;
             // clamp
             o_p[c] = at::quantize_val<scalar_t>(
-                         1.0f / multiplier, qy.q_zero_point(), acc_fp)
+                         1.0f / multiplier, output_zero_point, acc_fp)
                          .val_;
           } // c
         } // ow
       } // oh
     } // od
   });
-}
+} // namespace
 
 template <typename T>
 int64_t do_quantized_bilinear_on_AVX2(
@@ -1547,116 +1844,6 @@ void quantized_layer_norm_kernel_impl(
     float eps,
     Tensor* Y) {
 
-  using qVec = vec256::Vec256<T>;
-  using fVec = vec256::Vec256<float>;
-
-  TORCH_INTERNAL_ASSERT(X.numel() == M * N, "Unexpected num elements in X");
-  TORCH_INTERNAL_ASSERT(!gamma.defined() || gamma.numel() == N,
-      "Unexpected size of gamma");
-  TORCH_INTERNAL_ASSERT(!beta.defined() || beta.numel() == N,
-      "Unexpected size of beta");
-  T* X_data = X.data_ptr<T>();
-  const float* gamma_data = gamma.defined() ? gamma.data_ptr<float>() : nullptr;
-  const float* beta_data = beta.defined() ? beta.data_ptr<float>() : nullptr;
-  T* Y_data = Y->data_ptr<T>();
-  const float c = 1.0f / static_cast<float>(N);
-  const bool gamma_null = gamma_data == nullptr;
-  const bool beta_null = beta_data == nullptr;
-
-  int64_t x_zp = X.q_zero_point();
-  float x_scale = X.q_scale();
-
-  fVec x_zp_vec = fVec((float)x_zp);
-  fVec one_vec = fVec(1.0f);
-  fVec zero_vec = fVec(0.0f);
-
-  float x_fake_scale = 1.0f;
-  fVec x_fake_scale_vec = fVec(x_fake_scale);
-  fVec x_fake_scale_zp_neg_premul_vec = x_fake_scale_vec * x_zp_vec.neg();
-
-  int64_t y_zp = Y->q_zero_point();
-  float y_scale = Y->q_scale();
-  float y_inv_scale = 1.0f / y_scale;
-
-  // 8 floats in a 256 bit Vec256
-  constexpr int kFloatVLen = 8;
-  // N ints in a qVec
-  int64_t kIntVLen = kFloatVLen * qVec::float_num_vecs();
-  // portion of layer that can be vectorized
-  int64_t kNumIntVecInLayer = N / kIntVLen;
-  // remainder of layer that cannot be vectorized
-  int64_t kNonVecRemInLayer = N % kIntVLen;
-
-  at::parallel_for(0, M, 1, [&](int64_t start, int64_t end) {
-    for (int64_t i = start; i < end; ++i) {
-
-      T* X_ptr = X_data + i * N;
-      T* Y_ptr = Y_data + i * N;
-
-      // First pass: calculate mean and variance.
-
-      int64_t layerSumShifted = 0.0f;
-      int64_t layerSumSquaresShifted = 0.0f;
-      for (int64_t vecIdx = 0; vecIdx < kNumIntVecInLayer; vecIdx++) {
-        int64_t vecStartIdx = vecIdx * kIntVLen;
-        auto qXVec = qVec::loadu(X_ptr + vecStartIdx);
-        layerSumShifted += qXVec.h_sum();
-        layerSumSquaresShifted += qXVec.h_sum_sq();
-      }
-      for (int64_t remIdx = N - kNonVecRemInLayer; remIdx < N; remIdx++) {
-        auto qXVal = X_ptr[remIdx].val_;
-        layerSumShifted += qXVal;
-        layerSumSquaresShifted += qXVal * qXVal;
-      }
-
-      float layerMeanShiftedDivScaleX = static_cast<float>(layerSumShifted) / N;
-      // mean(dqX) / scale_x
-      float layerMeanDivScaleX = layerMeanShiftedDivScaleX - x_zp;
-      // var(dqX) / scale_x^2
-      float layerVarDivScaleXSq =
-        std::max(static_cast<float>(layerSumSquaresShifted) / N -
-            layerMeanShiftedDivScaleX * layerMeanShiftedDivScaleX, 0.0f);
-      // scale_x / std(dqX), scale epsilon properly
-      float scaleXDivLayerStd = 1.0f /
-        std::sqrt(layerVarDivScaleXSq + (eps * x_scale * x_scale));
-      fVec layerMeanDivScaleXVec(layerMeanDivScaleX);
-      fVec scaleXDivLayerStdVec(scaleXDivLayerStd);
-
-      // Second pass: normalize
-
-      // TODO replace with TensorIterator implementation once #33166 is fixed.
-      for (int64_t vecIdx = 0; vecIdx < kNumIntVecInLayer; vecIdx++) {
-        int64_t vecStartIdx = vecIdx * kIntVLen;
-        auto qXVec = qVec::loadu(X_ptr + vecStartIdx);
-        auto dqXVec = qXVec.dequantize(x_fake_scale_vec, x_zp_vec,
-            x_fake_scale_zp_neg_premul_vec);
-        for (int dqXVecIdx = 0; dqXVecIdx < dqXVec.size(); dqXVecIdx++) {
-          int64_t vecVecStartIdx = vecStartIdx + dqXVecIdx * kFloatVLen;
-          auto gammaVec = gamma_null
-            ? one_vec
-            : fVec::loadu(gamma_data + vecVecStartIdx);
-          auto betaVec = beta_null
-            ? zero_vec
-            : fVec::loadu(beta_data + vecVecStartIdx);
-          dqXVec[dqXVecIdx] =
-            (dqXVec[dqXVecIdx] - layerMeanDivScaleXVec) *
-              scaleXDivLayerStdVec * gammaVec + betaVec;
-          qVec::quantize(dqXVec, y_scale, y_zp, y_inv_scale)
-            .store(Y_ptr + vecStartIdx);
-        }
-      }
-      for (int64_t remIdx = N - kNonVecRemInLayer; remIdx < N; remIdx++) {
-        const float gamma_v = gamma_null ? 1.0f : gamma_data[remIdx];
-        const float beta_v = beta_null ? 0.0f : beta_data[remIdx];
-        auto qXVal = X_ptr[remIdx];
-        float dqXVal = at::dequantize_val(x_fake_scale, x_zp, qXVal);
-        float dqY =
-          ((dqXVal - layerMeanDivScaleX) * scaleXDivLayerStd) * gamma_v + beta_v;
-        Y_ptr[remIdx] = at::quantize_val<T>(y_scale, y_zp, dqY);
-      }
-
-    }
-  }); // parallel_for
 }
 
 void quantized_layer_norm_kernel(
@@ -1668,8 +1855,96 @@ void quantized_layer_norm_kernel(
     double eps,
     Tensor* Y) {
   AT_DISPATCH_QINT_TYPES(X.scalar_type(), "quantized_layer_norm_kernel_impl_cpu", [&]() {
-    quantized_layer_norm_kernel_impl<scalar_t>(
-        X, gamma, beta, M, N, static_cast<float>(eps), Y);
+    using qVec = vec256::Vec256<scalar_t>;
+    using fVec = vec256::Vec256<float>;
+
+    TORCH_INTERNAL_ASSERT(X.numel() == M * N, "Unexpected num elements in X");
+    TORCH_INTERNAL_ASSERT(!gamma.defined() || gamma.numel() == N,
+        "Unexpected size of gamma");
+    TORCH_INTERNAL_ASSERT(!beta.defined() || beta.numel() == N,
+        "Unexpected size of beta");
+    scalar_t* X_data = X.data_ptr<scalar_t>();
+    const float* gamma_data = gamma.defined() ? gamma.data_ptr<float>() : nullptr;
+    const float* beta_data = beta.defined() ? beta.data_ptr<float>() : nullptr;
+    scalar_t* Y_data = Y->data_ptr<scalar_t>();
+    const bool gamma_null = gamma_data == nullptr;
+    const bool beta_null = beta_data == nullptr;
+    int64_t x_zp = X.q_zero_point();
+    float x_scale = X.q_scale();
+    fVec x_zp_vec((float)x_zp);
+    fVec one_vec(1.0f);
+    fVec zero_vec(0.0f);
+    float x_fake_scale = 1.0f;
+    fVec x_fake_scale_vec(x_fake_scale);
+    fVec x_fake_scale_zp_neg_premul_vec = x_fake_scale_vec * x_zp_vec.neg();
+    int64_t y_zp = Y->q_zero_point();
+    float y_scale = Y->q_scale();
+    float y_inv_scale = 1.0f / y_scale;
+
+    constexpr int kFloatVLen = 8;
+    int64_t kIntVLen = kFloatVLen * qVec::float_num_vecs();
+    int64_t kNumIntVecInLayer = N / kIntVLen;
+    int64_t kNonVecRemInLayer = N % kIntVLen;
+
+    at::parallel_for(0, M, 1, [&](int64_t start, int64_t end) {
+      for (int64_t i = start; i < end; ++i) {
+
+        scalar_t* X_ptr = X_data + i * N;
+        scalar_t* Y_ptr = Y_data + i * N;
+
+        // First pass: calculate mean and variance.
+
+        scalar_t::underlying* X_ptr_underlying = reinterpret_cast<scalar_t::underlying*>(X_ptr);
+        auto l_sum_shifted = hsum(X_ptr_underlying, N);
+        auto l_sum_sq_shifted = hsum_sq(X_ptr_underlying, N);
+        float l_mean_shifted_div_scale_x = static_cast<float>(l_sum_shifted) / N;
+        // mean(dqX) / scale_x
+        float layer_mean_div_scale_x = l_mean_shifted_div_scale_x - x_zp;
+        // var(dqX) / scale_x^2
+        float layer_var_div_scale_x_sq =
+          std::max(static_cast<float>(l_sum_sq_shifted) / N -
+              l_mean_shifted_div_scale_x * l_mean_shifted_div_scale_x, 0.0f);
+        // scale_x / std(dqX), scale epsilon properly
+        float scale_x_div_layer_std = 1.0f /
+          std::sqrt(layer_var_div_scale_x_sq + (eps * x_scale * x_scale));
+        fVec layer_mean_div_scale_xVec(layer_mean_div_scale_x);
+        fVec scale_x_div_layer_stdVec(scale_x_div_layer_std);
+
+        // Second pass: normalize
+
+        // TODO replace with TensorIterator implementation once #33166 is fixed.
+        for (int64_t vecIdx = 0; vecIdx < kNumIntVecInLayer; vecIdx++) {
+          int64_t vecStartIdx = vecIdx * kIntVLen;
+          auto qXVec = qVec::loadu(X_ptr + vecStartIdx);
+          auto dqXVec = qXVec.dequantize(x_fake_scale_vec, x_zp_vec,
+              x_fake_scale_zp_neg_premul_vec);
+          for (int dqXVecIdx = 0; dqXVecIdx < dqXVec.size(); dqXVecIdx++) {
+            int64_t vecVecStartIdx = vecStartIdx + dqXVecIdx * kFloatVLen;
+            auto gammaVec = gamma_null
+              ? one_vec
+              : fVec::loadu(gamma_data + vecVecStartIdx);
+            auto betaVec = beta_null
+              ? zero_vec
+              : fVec::loadu(beta_data + vecVecStartIdx);
+            dqXVec[dqXVecIdx] =
+              (dqXVec[dqXVecIdx] - layer_mean_div_scale_xVec) *
+                scale_x_div_layer_stdVec * gammaVec + betaVec;
+            qVec::quantize(dqXVec, y_scale, y_zp, y_inv_scale)
+              .store(Y_ptr + vecStartIdx);
+          }
+        }
+        for (int64_t remIdx = N - kNonVecRemInLayer; remIdx < N; remIdx++) {
+          const float gamma_v = gamma_null ? 1.0f : gamma_data[remIdx];
+          const float beta_v = beta_null ? 0.0f : beta_data[remIdx];
+          auto qXVal = X_ptr[remIdx];
+          float dqXVal = at::dequantize_val(x_fake_scale, x_zp, qXVal);
+          float dqY =
+            ((dqXVal - layer_mean_div_scale_x) * scale_x_div_layer_std) * gamma_v + beta_v;
+          Y_ptr[remIdx] = at::quantize_val<scalar_t>(y_scale, y_zp, dqY);
+        }
+      }
+    }); // parallel_for
+
   });
 }
 

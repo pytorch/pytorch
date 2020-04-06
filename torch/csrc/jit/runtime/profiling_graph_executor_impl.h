@@ -5,7 +5,9 @@ namespace torch {
 namespace jit {
 
 struct ProfilingGraphExecutorImpl : public GraphExecutorImplBase {
-  ProfilingGraphExecutorImpl(const std::shared_ptr<Graph>& graph, std::string function_name);
+  ProfilingGraphExecutorImpl(
+      const std::shared_ptr<Graph>& graph,
+      std::string function_name);
 
   ExecutionPlan getPlanFor(Stack& stack, size_t remaining_bailout_depth)
       override;
