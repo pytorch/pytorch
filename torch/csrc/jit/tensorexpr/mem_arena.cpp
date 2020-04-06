@@ -21,6 +21,11 @@ KernelScopedObject::KernelScopedObject() {
   kernel->kernel_objects_.push_back(this);
 }
 
+static std::vector<KernelArena*>& GetKernelArenaStack() {
+  thread_local std::vector<KernelArena*> kernel_arena_stack;
+  return kernel_arena_stack;
+}
+
 void KernelArena::SetCurrentKernelArena(KernelArena* new_kernel_arena) {
   current_arena = new_kernel_arena;
 }

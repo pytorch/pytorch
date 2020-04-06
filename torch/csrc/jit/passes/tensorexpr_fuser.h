@@ -12,7 +12,15 @@ struct Graph;
 // Run TensorExpressions-based fuser.
 TORCH_API void fuseTensorExprs(std::shared_ptr<Graph>& graph);
 
-TORCH_API void setTensorExprFuserEnabled(bool val);
+struct TORCH_API RegisterTensorExprFuser
+    : public PassManager<RegisterTensorExprFuser> {
+  static void registerPass() {
+    PassManager::registerPass(fuseTensorExprs);
+  }
+  static void clearPass() {
+    PassManager::clearPass();
+  }
+};
 
 } // namespace jit
 } // namespace torch

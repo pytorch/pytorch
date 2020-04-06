@@ -371,10 +371,10 @@ class TORCH_API TermExpander : public IRMutator {
   const Expr* factorizePolynomial(const Polynomial* poly);
 
   // Expand Polynomials out to a series of Adds.
-  const Expr* mutate(const Polynomial* v) override;
+  const Expr* mutate(const Polynomial* v);
 
   // Expand RoundOff to it's component: Mul(Div(lhs, rhs), rhs).
-  const Expr* mutate(const RoundOff* v) override;
+  const Expr* mutate(const RoundOff* v);
 };
 
 class TORCH_API IRSimplifier {
