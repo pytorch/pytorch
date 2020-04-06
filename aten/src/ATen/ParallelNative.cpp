@@ -133,6 +133,8 @@ void _parallel_run(
   }
   auto task = [f, &eptr, &err_flag, &futures, begin, end, chunk_size]
       (int /* unused */, size_t task_id) {
+    // Make sure that future is valid until the end of markCompleted() call
+    auto future = futures[task_id];
     int64_t local_start = begin + task_id * chunk_size;
     if (local_start < end) {
       int64_t local_end = std::min(end, (int64_t)(chunk_size + local_start));
@@ -145,7 +147,7 @@ void _parallel_run(
         }
       }
     }
-    futures[task_id]->markCompleted();
+    future->markCompleted();
   };
   _run_with_pool(task, num_tasks);
 
