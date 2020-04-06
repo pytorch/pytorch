@@ -118,6 +118,10 @@ class TestTypePromotion(TestCase):
         b = torch.tensor([2j, 2j], device=device)
         self.assertEqual(a, b)
         self.assertEqual(a.dtype, b.dtype)
+        a = a + torch.tensor([True,])
+        b = b + 1
+        self.assertEqual(a, b)
+        self.assertEqual(a.dtype, b.dtype)
 
     @float_double_default_dtype
     def test_add_wrapped(self, device):
