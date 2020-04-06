@@ -1817,15 +1817,15 @@ new_module_tests = [
         constructor_args=((3, 3), (2, 2), (1, 1)),
         cpp_constructor_args='torch::nn::MaxPool2dOptions({3, 3}).stride({2, 2}).padding({1, 1})',
         input_size=(3, 7, 7),
-        check_with_channels_last=True,
-        desc='4d_input'
+        desc='3d_input'
     ),
     dict(
         module_name='MaxPool2d',
         constructor_args=((3, 3), (2, 2), (1, 1)),
         cpp_constructor_args='torch::nn::MaxPool2dOptions({3, 3}).stride({2, 2}).padding({1, 1})',
         input_size=(1, 3, 7, 7),
-        desc='3d_input'
+        check_with_channels_last=True,
+        desc='4d_input'
     ),
     dict(
         module_name='AvgPool1d',
