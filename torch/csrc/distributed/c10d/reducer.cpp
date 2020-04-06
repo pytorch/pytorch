@@ -326,9 +326,8 @@ void Reducer::mark_variable_ready(VariableIndex index) {
     // is only possible if the variable was initially deemed unused, and was
     // marked ready from the `prepare_for_backward` function, only to become
     // part of the autograd graph at a later point in time.
-    TORCH_INTERNAL_ASSERT(has_marked_unused_parameters_);
     TORCH_CHECK(
-        false,
+        has_marked_unused_parameters_,
         "Expected to mark a variable ready only once. ",
         "",
         "This error is caused by use of a module parameter outside the ",
