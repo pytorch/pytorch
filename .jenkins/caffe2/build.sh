@@ -249,6 +249,8 @@ else
 
   $PYTHON setup.py install --user
 
+  ls -l /var/lib/jenkins/workspace/build/caffe2/CMakeFiles/torch_hip.dir/__/aten/src/THH/
+
   report_compile_cache_stats
 fi
 
