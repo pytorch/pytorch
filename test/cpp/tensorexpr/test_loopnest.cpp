@@ -77,7 +77,7 @@ void testExprSimple02() {
     VarHandle x_inner("x_inner", kInt);
     VarHandle y("y", kInt);
     VarHandle x_tail("x_tail", kInt);
-    VarHandle f("f", kHandle);
+    BufHandle f("f", {26, 5});
     ExprHandle x_1 = x_outer * 4 + x_inner;
     ExprHandle x_outer_end = (ExprHandle(26) - 0) / 4;
     For* stmt1 = For::make(
@@ -89,13 +89,13 @@ void testExprSimple02() {
             0,
             4,
             For::make(
-                y, 0, 5, Store::make(f, x_1 * 5 + y * 1, func(x_1, y), 1))));
+                y, 0, 5, Store::make(f, {x_1, y}, func(x_1, y), 1))));
     ExprHandle x_2 = x_tail + x_outer_end * 4;
     For* stmt2 = For::make(
         x_tail,
         0,
         (ExprHandle(26) - 0) % 4,
-        For::make(y, 0, 5, Store::make(f, x_2 * 5 + y * 1, func(x_2, y), 1)));
+        For::make(y, 0, 5, Store::make(f, {x_2, y}, func(x_2, y), 1)));
     Stmt* stmt = Block::make({stmt1, stmt2});
 
     std::ostringstream oss_ref;
@@ -107,6 +107,7 @@ void testExprSimple02() {
     PaddedBuffer<float> f_v(26, 5, "f_v");
     PaddedBuffer<float> f_ref(26, 5, "f_res");
 
+    stmt = FlattenIndexes(stmt);
     SimpleIREvaluator ir_eval(stmt, tensor);
     ir_eval(f_v);
 
@@ -145,7 +146,7 @@ void testExprSplitWithTailNone() {
     VarHandle x_inner("x_inner", kInt);
     VarHandle y("y", kInt);
     VarHandle x_tail("x_tail", kInt);
-    VarHandle f("f", kHandle);
+    BufHandle f("f", {24, 5});
     ExprHandle x_1 = x_outer * 4 + x_inner;
     ExprHandle x_outer_end = (ExprHandle(24) - 0) / 4;
     For* stmt = For::make(
@@ -157,8 +158,7 @@ void testExprSplitWithTailNone() {
             0,
             4,
             For::make(
-                y, 0, 5, Store::make(f, x_1 * 5 + y * 1, func(x_1, y), 1))));
-    // Stmt stmt = Block::make({stmt1, stmt2});
+                y, 0, 5, Store::make(f, {x_1, y}, func(x_1, y), 1))));
 
     std::ostringstream oss_ref;
     oss_ref << *stmt;
@@ -429,6 +429,7 @@ void InlineFunc01Helper(const std::vector<std::string>& inline_order) {
               (c_buf(m, n) * d_buf(m, k) + a_buf(m, n) * b_buf(n, k));
         });
     LoopNest l2({z2});
+    l2.prepareForCodegen();
     Stmt* stmt2 = l2.root_stmt();
 
     std::ostringstream oss2;
@@ -454,7 +455,7 @@ void testScheduleFuserStyle() {
   const int kVectorCount = 128;
   const int kTotalSize = kVectorSize * kVectorCount;
 
-  Buffer a_buf(VarHandle("A", kHandle), kFloat, {ExprHandle(kTotalSize)});
+  Buffer a_buf(BufHandle("A", {ExprHandle(kTotalSize)}), kFloat);
 
   Tensor* b = Compute(
       "f", {{kTotalSize, "i"}}, [&](const std::vector<VarHandle>& axes) {
@@ -487,10 +488,10 @@ void testScheduleFuserThreeArg() {
   const int kVectorCount = 128;
   const int kTotalSize = kVectorSize * kVectorCount;
 
-  Buffer a(VarHandle("A", kHandle), kFloat, {ExprHandle(kTotalSize)});
-  Buffer b(VarHandle("B", kHandle), kFloat, {ExprHandle(kTotalSize)});
-  Buffer c(VarHandle("C", kHandle), kFloat, {ExprHandle(kTotalSize)});
-  Buffer d(VarHandle("D", kHandle), kFloat, {ExprHandle(kTotalSize)});
+  Buffer a(BufHandle("A", {ExprHandle(kTotalSize)}), kFloat);
+  Buffer b(BufHandle("B", {ExprHandle(kTotalSize)}), kFloat);
+  Buffer c(BufHandle("C", {ExprHandle(kTotalSize)}), kFloat);
+  Buffer d(BufHandle("D", {ExprHandle(kTotalSize)}), kFloat);
 
   Tensor* e = Compute("e", {{kTotalSize, "i"}}, [&](const VarHandle& i) {
     return a(i) + b(i);
@@ -525,8 +526,8 @@ void testScheduleDynamicShape2D() {
   auto testWithSize = [](int32_t M, int32_t N) {
     VarHandle m("m", kInt);
     VarHandle n("n", kInt);
-    Buffer a(VarHandle("a", kHandle), kFloat, {m, n});
-    Buffer b(VarHandle("b", kHandle), kFloat, {m, n});
+    Buffer a(BufHandle("a", {m, n}), kFloat);
+    Buffer b(BufHandle("b", {m, n}), kFloat);
     Tensor* c = Compute(
         "c", {{m, "m"}, {n, "n"}}, [&](const VarHandle& i, const VarHandle& j) {
           return a(i, j) + b(i, j);
