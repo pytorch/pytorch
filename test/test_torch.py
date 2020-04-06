@@ -143,8 +143,9 @@ class _TestTorchMixin(object):
                     skip_regexes.append(re.compile('^{}$'.format(re.escape(r))))
                 else:
                     skip_regexes.append(r)
+            skipnames = ['copy_real', 'copy_imag']
             for name in dir(ns):
-                if name.startswith('_'):
+                if name.startswith('_') or name in skipnames:
                     continue
                 var = getattr(ns, name)
                 if not isinstance(var, checked_types):
@@ -1815,20 +1816,6 @@ class _TestTorchMixin(object):
             for i in range(dim):
                 self.assertEqual(x.select(dim, i), res[i])
                 self.assertEqual(x.select(dim, i), res2[i])
-
-    def test_rand(self):
-        def common_routine(dtype):
-            torch.manual_seed(123456)
-            res1 = torch.rand(SIZE, SIZE, dtype=dtype)
-            res2 = torch.tensor([], dtype=dtype)
-            torch.manual_seed(123456)
-            torch.rand(SIZE, SIZE, out=res2)
-            self.assertEqual(res1, res2)
-
-        common_routine(dtype=torch.float32)
-        common_routine(dtype=torch.float64)
-        common_routine(dtype=torch.complex64)
-        common_routine(dtype=torch.complex128)
 
     def test_randint(self):
         def seed(generator):
@@ -5202,96 +5189,6 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             model = torch.nn.Conv2d(1, 1, (1, 3), stride=1, padding=0, bias=False)
             model.weight.data = weight
             out = model(input)
-
-    def test_bucketization(self):
-        for device in torch.testing.get_all_device_types():
-            values_1d = torch.tensor([1, 2, 3, 4, 5, 6, 7, 8, 9], device=device)
-            values_3d = torch.tensor([[[1, 3, 5], [2, 4, 6]], [[1, 2, 3], [4, 5, 6]]], device=device)
-
-            # regular case 3d boundary and 3d input value
-            boundaries = torch.tensor([[[1, 2, 3, 4], [3, 4, 5, 6]], [[1, 3, 5, 7], [2, 4, 6, 8]]], device=device)
-            result = torch.tensor([[[0, 2, 4], [0, 1, 3]], [[0, 1, 1], [1, 2, 2]]], device=device)
-            output = torch.zeros(2, 2, 3, device=device, dtype=torch.int64)
-            self.assertEqual(torch.equal(torch.searchsorted(boundaries, values_3d), result), True)
-            self.assertEqual(torch.equal(torch.searchsorted(boundaries, values_3d, out=output), result), True)
-            result = torch.tensor([[[1, 3, 4], [0, 2, 4]], [[1, 1, 2], [2, 2, 3]]], device=device)
-            self.assertEqual(torch.equal(torch.searchsorted(boundaries, values_3d, right=True), result), True)
-            self.assertEqual(torch.equal(torch.searchsorted(boundaries, values_3d, right=True, out=output), result), True)
-
-            # simple 1d boundary and 3d input value
-            boundaries = torch.tensor([1, 2, 3, 4, 5, 6], device=device)
-            result = torch.tensor([[[0, 2, 4], [1, 3, 5]], [[0, 1, 2], [3, 4, 5]]], device=device)
-            output = torch.zeros(2, 2, 3, device=device, dtype=torch.int64)
-            self.assertEqual(torch.equal(torch.searchsorted(boundaries, values_3d), result), True)
-            self.assertEqual(torch.equal(torch.bucketize(values_3d, boundaries), result), True)
-            self.assertEqual(torch.equal(torch.bucketize(values_3d, boundaries, out=output), result), True)
-            result = torch.tensor([[[1, 3, 5], [2, 4, 6]], [[1, 2, 3], [4, 5, 6]]], device=device)
-            self.assertEqual(torch.equal(torch.searchsorted(boundaries, values_3d, right=True), result), True)
-            self.assertEqual(torch.equal(torch.bucketize(values_3d, boundaries, right=True), result), True)
-            self.assertEqual(torch.equal(torch.bucketize(values_3d, boundaries, out=output, right=True), result), True)
-
-            # simple float 1d boundary and 1d input with output int32 type
-            values_1d_float = values_1d.to(torch.float32)
-            boundaries = torch.tensor([0.9, 1, 2, 2, 3, 3, 4, 4.1, 9, 9], device=device, dtype=torch.float32)
-            result = torch.tensor([1, 2, 4, 6, 8, 8, 8, 8, 8], device=device, dtype=torch.int32)
-            self.assertEqual(torch.equal(torch.searchsorted(boundaries, values_1d_float, out_int32=True), result), True)
-            self.assertEqual(torch.equal(torch.bucketize(values_1d_float, boundaries, out_int32=True), result), True)
-
-            # multiple dimension input with 0 elements
-            boundaries = torch.tensor([1, 2, 3, 4, 5, 6], device=device, dtype=torch.int64)
-            values_0_el = torch.tensor([[[]]], device=device, dtype=torch.int64)
-            result = values_0_el.to(torch.int64)
-            self.assertEqual(torch.equal(torch.searchsorted(boundaries, values_0_el), result), True)
-            self.assertEqual(torch.equal(torch.bucketize(values_0_el, boundaries), result), True)
-
-            # nan input
-            values_nan = torch.tensor([1.0, float('nan'), 2.0, float('nan')], device=device, dtype=torch.float64)
-            boundaries = torch.tensor([0.0, 1.0, 2.0, 3.0], device=device, dtype=torch.float64)
-            result_left = torch.tensor([1, 4, 2, 4], device=device)
-            result_right = torch.tensor([2, 4, 3, 4], device=device)
-            self.assertEqual(torch.equal(torch.searchsorted(boundaries, values_nan), result_left), True)
-            self.assertEqual(torch.equal(torch.searchsorted(boundaries, values_nan, right=True), result_right), True)
-
-            # type promotion and non contiguous tensors
-            values_3d_permute = values_3d.permute(2, 1, 0).to(torch.int32)
-            boundaries_permute = values_3d.permute(2, 1, 0).to(torch.float64)
-            result = torch.tensor([[[0, 0], [0, 1]], [[2, 0], [0, 1]], [[2, 0], [0, 0]]], device=device)
-            self.assertWarnsRegex(
-                lambda: self.assertEqual(torch.equal(torch.searchsorted(boundaries_permute, values_3d_permute), result), True),
-                "tensor is non-contiguous")
-
-            # scalar type
-            boundaries = torch.tensor([1.5, 2.5, 3.5], device=device)
-            result = torch.tensor(1, device=device)
-            self.assertEqual(torch.equal(torch.searchsorted(boundaries, 2), result), True)
-            self.assertEqual(torch.equal(torch.bucketize(torch.tensor(2, device=device), boundaries), result), True)
-            result = torch.tensor(3, device=device)
-            scalar_tensor_nan = torch.tensor(float('nan'), device=device)
-            self.assertEqual(torch.equal(torch.searchsorted(boundaries, scalar_tensor_nan), result), True)
-            self.assertEqual(torch.equal(torch.bucketize(float('nan'), boundaries, right=True), result), True)
-
-            # invalid input dimensions
-            boundaries = torch.tensor([[1, 2, 3], [4, 5, 6]], device=device)
-            with self.assertRaisesRegex(
-                    RuntimeError, "first N-1 dimensions of boundaries tensor and input value tensor must match"):
-                torch.searchsorted(boundaries, values_3d)
-            with self.assertRaisesRegex(
-                    RuntimeError, "boundaries tensor must be 1 dimension"):
-                torch.bucketize(values_3d, boundaries)
-            with self.assertRaisesRegex(
-                    RuntimeError, "only when boundaries tensor dimension is 1"):
-                torch.searchsorted(boundaries, 1)
-
-            # incompatiable output tensor's dtype
-            def test_output_dtype(dtype, is_int32):
-                result = values_1d.to(dtype)
-                with self.assertRaisesRegex(
-                        RuntimeError, "output tensor's dtype is wrong"):
-                    torch.searchsorted(values_1d, values_1d, out=result, out_int32=is_int32)
-
-            test_output_dtype(torch.float32, False)
-            test_output_dtype(torch.int32, False)
-            test_output_dtype(torch.int64, True)
 
 
 # Functions to test negative dimension wrapping
@@ -9669,6 +9566,65 @@ class TestTorchDeviceType(TestCase):
         else:
             helper(self, device, dtype, lambda x: x, lambda t: t, lambda mean: mean)
 
+    @dtypes(torch.float, torch.double)
+    @dtypesIfCUDA(torch.float, torch.double, torch.half, torch.bfloat16)
+    def test_uniform_from_to(self, device, dtype):
+        # TODO: https://github.com/pytorch/pytorch/issues/33793
+        if IS_WINDOWS and device.startswith('cuda') and dtype == torch.bfloat16:
+            # Crashes with CUDA error: unspecified launch failure
+            return
+
+        size = 2000
+        alpha = 0.1
+
+        float_min = torch.finfo(torch.float).min
+        float_max = torch.finfo(torch.float).max
+        double_min = torch.finfo(torch.double).min
+        double_max = torch.finfo(torch.double).max
+
+        if dtype == torch.bfloat16:
+            min_val = -3.389531389251535e+38
+            max_val = 3.389531389251535e+38
+        else:
+            min_val = torch.finfo(dtype).min
+            max_val = torch.finfo(dtype).max
+
+        values = [double_min, float_min, -42, 0, 42, float_max, double_max]
+
+        for from_ in values:
+            for to_ in values:
+                t = torch.empty(size, dtype=dtype, device=device)
+                if not (min_val <= from_ <= max_val) or not (min_val <= to_ <= max_val):
+                    pass
+                elif to_ < from_:
+                    self.assertRaisesRegex(
+                        RuntimeError,
+                        "uniform_ expects to return",
+                        lambda: t.uniform_(from_, to_)
+                    )
+                elif to_ - from_ > max_val:
+                    self.assertRaisesRegex(
+                        RuntimeError,
+                        "uniform_ expects to-from",
+                        lambda: t.uniform_(from_, to_)
+                    )
+                else:
+                    t.uniform_(from_, to_)
+                    range_ = to_ - from_
+                    if not (dtype == torch.bfloat16) and not (
+                            dtype == torch.half and device == 'cpu') and not torch.isnan(t).all():
+                        delta = alpha * range_
+                        double_t = t.to(torch.double)
+                        if range_ == 0:
+                            self.assertTrue(double_t.min() == from_)
+                            self.assertTrue(double_t.max() == to_)
+                        elif dtype == torch.half:
+                            self.assertTrue(from_ <= double_t.min() <= (from_ + delta))
+                            self.assertTrue((to_ - delta) <= double_t.max() <= to_)
+                        else:
+                            self.assertTrue(from_ <= double_t.min() <= (from_ + delta))
+                            self.assertTrue((to_ - delta) <= double_t.max() < to_)
+
     @dtypes(torch.float, torch.double, torch.complex64, torch.complex128)
     def test_randn(self, device, dtype):
         torch.manual_seed(123456)
@@ -9676,6 +9632,15 @@ class TestTorchDeviceType(TestCase):
         res2 = torch.tensor([], dtype=dtype, device=device)
         torch.manual_seed(123456)
         torch.randn(SIZE, SIZE, out=res2)
+        self.assertEqual(res1, res2)
+
+    @dtypes(torch.float, torch.double, torch.complex64, torch.complex128)
+    def test_rand(self, device, dtype):
+        torch.manual_seed(123456)
+        res1 = torch.rand(SIZE, SIZE, dtype=dtype, device=device)
+        res2 = torch.tensor([], dtype=dtype, device=device)
+        torch.manual_seed(123456)
+        torch.rand(SIZE, SIZE, out=res2)
         self.assertEqual(res1, res2)
 
     def test_empty_strided(self, device):
@@ -15264,6 +15229,96 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             torch.ceil(inp)
         with self.assertRaises(RuntimeError):
             torch.trunc(inp)
+
+    def test_bucketization(self, device):
+        values_1d = torch.tensor([1, 2, 3, 4, 5, 6, 7, 8, 9], device=device)
+        values_3d = torch.tensor([[[1, 3, 5], [2, 4, 6]], [[1, 2, 3], [4, 5, 6]]], device=device)
+
+        # regular case 3d boundary and 3d input value
+        boundaries = torch.tensor([[[1, 2, 3, 4], [3, 4, 5, 6]], [[1, 3, 5, 7], [2, 4, 6, 8]]], device=device)
+        expected_result = torch.tensor([[[0, 2, 4], [0, 1, 3]], [[0, 1, 1], [1, 2, 2]]], device=device)
+        output = torch.empty(2, 2, 3, device=device, dtype=torch.int64)
+        self.assertEqual(torch.searchsorted(boundaries, values_3d), expected_result)
+        self.assertEqual(torch.searchsorted(boundaries, values_3d, out=output), expected_result)
+        expected_result = torch.tensor([[[1, 3, 4], [0, 2, 4]], [[1, 1, 2], [2, 2, 3]]], device=device)
+        self.assertEqual(torch.searchsorted(boundaries, values_3d, right=True), expected_result)
+        self.assertEqual(torch.searchsorted(boundaries, values_3d, right=True, out=output), expected_result)
+
+        # simple 1d boundary and 3d input value
+        boundaries = torch.tensor([1, 2, 3, 4, 5, 6], device=device)
+        expected_result = torch.tensor([[[0, 2, 4], [1, 3, 5]], [[0, 1, 2], [3, 4, 5]]], device=device)
+        output = torch.empty(2, 2, 3, device=device, dtype=torch.int64)
+        self.assertEqual(torch.searchsorted(boundaries, values_3d), expected_result)
+        self.assertEqual(torch.bucketize(values_3d, boundaries), expected_result)
+        self.assertEqual(torch.bucketize(values_3d, boundaries, out=output), expected_result)
+        expected_result = torch.tensor([[[1, 3, 5], [2, 4, 6]], [[1, 2, 3], [4, 5, 6]]], device=device)
+        self.assertEqual(torch.searchsorted(boundaries, values_3d, right=True), expected_result)
+        self.assertEqual(torch.bucketize(values_3d, boundaries, right=True), expected_result)
+        self.assertEqual(torch.bucketize(values_3d, boundaries, out=output, right=True), expected_result)
+
+        # simple float 1d boundary and 1d input with output int32 type
+        values_1d_float = values_1d.to(torch.float32)
+        boundaries = torch.tensor([0.9, 1, 2, 2, 3, 3, 4, 4.1, 9, 9], device=device, dtype=torch.float32)
+        expected_result = torch.tensor([1, 2, 4, 6, 8, 8, 8, 8, 8], device=device, dtype=torch.int32)
+        self.assertEqual(torch.searchsorted(boundaries, values_1d_float, out_int32=True), expected_result)
+        self.assertEqual(torch.bucketize(values_1d_float, boundaries, out_int32=True), expected_result)
+
+        # multiple dimension input with 0 elements
+        boundaries = torch.tensor([1, 2, 3, 4, 5, 6], device=device, dtype=torch.int64)
+        values_0_el = torch.tensor([[[]]], device=device, dtype=torch.int64)
+        expected_result = values_0_el.to(torch.int64)
+        self.assertEqual(torch.searchsorted(boundaries, values_0_el), expected_result)
+        self.assertEqual(torch.bucketize(values_0_el, boundaries), expected_result)
+
+        # nan input
+        values_nan = torch.tensor([1.0, float('nan'), 2.0, float('nan')], device=device, dtype=torch.float64)
+        boundaries = torch.tensor([0.0, 1.0, 2.0, 3.0], device=device, dtype=torch.float64)
+        expected_result = torch.tensor([1, 4, 2, 4], device=device)
+        self.assertEqual(torch.searchsorted(boundaries, values_nan), expected_result)
+        expected_result = torch.tensor([2, 4, 3, 4], device=device)
+        self.assertEqual(torch.searchsorted(boundaries, values_nan, right=True), expected_result)
+
+        # type promotion and non contiguous tensors
+        values_3d_permute = values_3d.permute(2, 1, 0).to(torch.int32)
+        boundaries_permute = values_3d.permute(2, 1, 0).to(torch.float64)
+        expected_result = torch.tensor([[[0, 0], [0, 1]], [[2, 0], [0, 1]], [[2, 0], [0, 0]]], device=device)
+        self.assertWarnsRegex(
+            lambda: self.assertEqual(torch.searchsorted(boundaries_permute, values_3d_permute), expected_result),
+            "tensor is non-contiguous")
+
+        # scalar type
+        boundaries = torch.tensor([1.5, 2.5, 3.5], device=device)
+        expected_result = torch.tensor(1, device=device)
+        self.assertEqual(torch.searchsorted(boundaries, 2), expected_result)
+        self.assertEqual(torch.bucketize(torch.tensor(2, device=device), boundaries), expected_result)
+        expected_result = torch.tensor(3, device=device)
+        scalar_tensor_nan = torch.tensor(float('nan'), device=device)
+        self.assertEqual(torch.searchsorted(boundaries, scalar_tensor_nan), expected_result)
+        self.assertEqual(torch.bucketize(float('nan'), boundaries, right=True), expected_result)
+
+        # invalid input dimensions
+        boundaries = torch.tensor([[1, 2, 3], [4, 5, 6]], device=device)
+        with self.assertRaisesRegex(
+                RuntimeError, "first N-1 dimensions of boundaries tensor and input value tensor must match"):
+            torch.searchsorted(boundaries, values_3d)
+        with self.assertRaisesRegex(
+                RuntimeError, "boundaries tensor must be 1 dimension"):
+                torch.bucketize(values_3d, boundaries)
+        with self.assertRaisesRegex(
+                RuntimeError, "only when boundaries tensor dimension is 1"):
+            torch.searchsorted(boundaries, 1)
+
+        # incompatiable output tensor's dtype
+        def test_output_dtype(dtype, is_int32):
+            output = values_1d.to(dtype)
+            with self.assertRaisesRegex(
+                    RuntimeError, "output tensor's dtype is wrong"):
+                torch.searchsorted(values_1d, values_1d, out=output, out_int32=is_int32)
+
+        test_output_dtype(torch.float32, False)
+        test_output_dtype(torch.int32, False)
+        test_output_dtype(torch.int64, True)
+
 
 # NOTE [Linspace+Logspace precision override]
 # Our Linspace and logspace torch.half CUDA kernels are not very precise.
