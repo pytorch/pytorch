@@ -215,7 +215,7 @@ inline at::ScalarType type_from_firstarg(at::ScalarType to_type, const Tensor& a
 /********************************************************************************************************
 Templates to provide wrapper functions
 
-I'm copying the pattern used in core/boxing/kernel_function.h to extract args and return type.
+I'm copying the pattern used in core/boxing/impl/WrapFunctionIntoFunctor.h to extract args and return type.
 (see also https://stackoverflow.com/questions/46533698/how-to-deduce-argument-list-from-function-pointer)
 
 This strategy uses an exterior "WrapFunction" that extracts arguments on behalf of
@@ -279,7 +279,7 @@ struct WrapFunction_<CastPolicy::promote, Redispatch, F, Ret, guts::typelist::ty
   }
 };
 
-// Wrapper to infer return_type and parameter_types for WrapFunction_ (imitating core/boxing/kernel_function.h)
+// Wrapper to infer return_type and parameter_types for WrapFunction_ (imitating core/boxing/impl/WrapFunctionIntoFunctor.h)
 template<CastPolicy policy,
          class Registered, // The signature for which we're registering.  The dispatcher's calling code invokes our
                            // registered functions with arguments matching Registered, so we register
@@ -440,7 +440,7 @@ auto register_out_of_place = c10::import()
   KERNEL_UNBOXED_ONLY(ADD_NS(nll_loss), "aten::nll_loss", Tensor (const Tensor &, const Tensor &, const Tensor &, int64_t, int64_t), fp32)
   KERNEL_UNBOXED_ONLY(ADD_NS(nll_loss2d), "aten::nll_loss2d", Tensor (const Tensor &, const Tensor &, const Tensor &, int64_t, int64_t), fp32)
   KERNEL(ADD_NS(hinge_embedding_loss), "aten::hinge_embedding_loss", Tensor (const Tensor &, const Tensor &, double, int64_t), fp32)
-  KERNEL(ADD_NS(kl_div), "aten::kl_div", Tensor (const Tensor &, const Tensor &, int64_t), fp32)
+  KERNEL(ADD_NS(kl_div), "aten::kl_div", Tensor (const Tensor &, const Tensor &, int64_t, bool), fp32)
   KERNEL(ADD_NS(l1_loss), "aten::l1_loss", Tensor (const Tensor &, const Tensor &, int64_t), fp32)
   KERNEL(ADD_NS(smooth_l1_loss), "aten::smooth_l1_loss", Tensor (const Tensor &, const Tensor &, int64_t), fp32)
   KERNEL(ADD_NS(mse_loss), "aten::mse_loss", Tensor (const Tensor &, const Tensor &, int64_t), fp32)

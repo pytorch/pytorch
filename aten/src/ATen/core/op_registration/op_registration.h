@@ -15,6 +15,14 @@
 
 namespace c10 {
 
+namespace detail {
+template<class KernelFunctor>
+std::unique_ptr<FunctionSchema> inferFunctionSchemaFromFunctor() {
+  using func_type = typename c10::guts::infer_function_traits_t<KernelFunctor>::func_type;
+  return std::make_unique<FunctionSchema>(inferFunctionSchemaFlattenedReturns<func_type>("", ""));
+}
+}
+
 /**
  * An instance of this class handles the registration for one or more operators.
  * Make sure you keep the RegisterOperators instance around since it will
@@ -148,8 +156,8 @@ public:
 
       return std::move(*this).kernel(
         std::move(dispatch_key),
-        KernelFunction::makeFromUnboxedFunctorFactory<KernelFunctor>(detail::KernelFactory<KernelFunctor, std::decay_t<ConstructorParameters>...>(std::forward<ConstructorParameters>(constructorParameters)...)),
-        detail::FunctionSchemaInferer<KernelFunctor>()()
+        KernelFunction::makeFromUnboxedFunctorFactory<KernelFunctor>(impl::KernelFactory<KernelFunctor, std::decay_t<ConstructorParameters>...>(std::forward<ConstructorParameters>(constructorParameters)...)),
+        detail::inferFunctionSchemaFromFunctor<KernelFunctor>()
       );
     }
 
@@ -199,8 +207,8 @@ public:
 
       return std::move(*this).kernel(
         c10::nullopt,
-        KernelFunction::makeFromUnboxedFunctorFactory<KernelFunctor>(detail::KernelFactory<KernelFunctor, std::decay_t<ConstructorParameters>...>(std::forward<ConstructorParameters>(constructorParameters)...)),
-        detail::FunctionSchemaInferer<KernelFunctor>()()
+        KernelFunction::makeFromUnboxedFunctorFactory<KernelFunctor>(impl::KernelFactory<KernelFunctor, std::decay_t<ConstructorParameters>...>(std::forward<ConstructorParameters>(constructorParameters)...)),
+        detail::inferFunctionSchemaFromFunctor<KernelFunctor>()
       );
     }
 
@@ -227,8 +235,8 @@ public:
       return std::move(*this).kernel(
         std::move(dispatch_key),
         KernelFunction::makeFromUnboxedFunction<FuncType, kernel_func>(),
-        // TODO Do schema inference without relying on WrapKernelFunction
-        detail::FunctionSchemaInferer<typename detail::WrapKernelFunction<FuncType, kernel_func>::type>()()
+        // TODO Do schema inference without relying on WrapFunctionIntoFunctor
+        detail::inferFunctionSchemaFromFunctor<typename impl::WrapFunctionIntoFunctor<FuncType, kernel_func>::type>()
       );
     }
 
@@ -255,8 +263,8 @@ public:
       return std::move(*this).kernel(
         c10::nullopt,
         KernelFunction::makeFromUnboxedFunction<FuncType, kernel_func>(),
-        // TODO Do schema inference without relying on WrapKernelFunction
-        detail::FunctionSchemaInferer<typename detail::WrapKernelFunction<FuncType, kernel_func>::type>()()
+        // TODO Do schema inference without relying on WrapFunctionIntoFunctor
+        detail::inferFunctionSchemaFromFunctor<typename impl::WrapFunctionIntoFunctor<FuncType, kernel_func>::type>()
       );
     }
 
@@ -269,8 +277,8 @@ public:
       return std::move(*this).kernel(
         std::move(dispatch_key),
         KernelFunction::makeFromUnboxedRuntimeFunction(kernel_func),
-        // TODO Do schema inference without relying on WrapKernelFunction
-        detail::FunctionSchemaInferer<detail::WrapRuntimeKernelFunctor<std::decay_t<FuncType>>>()()
+        // TODO Do schema inference without relying on WrapFunctionIntoFunctor
+        detail::inferFunctionSchemaFromFunctor<impl::WrapFunctionIntoRuntimeFunctor<std::decay_t<FuncType>>>()
       );
     }
 
@@ -283,8 +291,8 @@ public:
       return std::move(*this).kernel(
         c10::nullopt,
         KernelFunction::makeFromUnboxedRuntimeFunction(kernel_func),
-        // TODO Do schema inference without relying on WrapKernelFunction
-        detail::FunctionSchemaInferer<detail::WrapRuntimeKernelFunctor<std::decay_t<FuncType>>>()()
+        // TODO Do schema inference without relying on WrapFunctionIntoFunctor
+        detail::inferFunctionSchemaFromFunctor<impl::WrapFunctionIntoRuntimeFunctor<std::decay_t<FuncType>>>()
       );
     }
 
@@ -351,8 +359,8 @@ public:
       return std::move(*this).kernel(
         std::move(dispatch_key),
         KernelFunction::makeFromUnboxedLambda(std::forward<Lambda>(functor)),
-        // TODO Do schema inference without relying on WrapRuntimeKernelFunctor
-        detail::FunctionSchemaInferer<detail::WrapRuntimeKernelFunctor<std::decay_t<Lambda>>>()()
+        // TODO Do schema inference without relying on WrapFunctionIntoRuntimeFunctor
+        detail::inferFunctionSchemaFromFunctor<impl::WrapFunctionIntoRuntimeFunctor<std::decay_t<Lambda>>>()
       );
     }
 
@@ -391,8 +399,8 @@ public:
       return std::move(*this).kernel(
         c10::nullopt,
         KernelFunction::makeFromUnboxedLambda(std::forward<Lambda>(lambda)),
-        // TODO Do schema inference without relying on WrapRuntimeKernelFunctor
-        detail::FunctionSchemaInferer<detail::WrapRuntimeKernelFunctor<std::decay_t<Lambda>>>()()
+        // TODO Do schema inference without relying on WrapFunctionIntoRuntimeFunctor
+        detail::inferFunctionSchemaFromFunctor<impl::WrapFunctionIntoRuntimeFunctor<std::decay_t<Lambda>>>()
       );
     }
 
@@ -525,8 +533,8 @@ public:
      return std::move(*this).op(std::move(options).schema(schemaOrName).kernel(
        c10::nullopt,
        KernelFunction::makeFromUnboxedRuntimeFunction<AllowLegacyTypes>(func),
-       // TODO Do schema inference without relying on WrapRuntimeKernelFunctor
-       detail::FunctionSchemaInferer<detail::WrapRuntimeKernelFunctor<std::decay_t<FuncType>>>()()
+       // TODO Do schema inference without relying on WrapFunctionIntoRuntimeFunctor
+       detail::inferFunctionSchemaFromFunctor<impl::WrapFunctionIntoRuntimeFunctor<std::decay_t<FuncType>>>()
      ));
    }
 
@@ -555,8 +563,8 @@ public:
       return std::move(*this).op(std::move(options).schema(schemaOrName).kernel(
         c10::nullopt,
         KernelFunction::makeFromUnboxedLambda<AllowLegacyTypes>(std::forward<Lambda>(lambda)),
-        // TODO Do schema inference without relying on WrapRuntimeKernelFunctor
-        detail::FunctionSchemaInferer<detail::WrapRuntimeKernelFunctor<std::decay_t<Lambda>>>()()
+        // TODO Do schema inference without relying on WrapFunctionIntoRuntimeFunctor
+        detail::inferFunctionSchemaFromFunctor<impl::WrapFunctionIntoRuntimeFunctor<std::decay_t<Lambda>>>()
       ));
     }
 
@@ -571,8 +579,8 @@ public:
       return std::move(*this).op(std::move(options).schema(schemaOrName).kernel(
         c10::nullopt,
         KernelFunction::makeFromUnboxedLambda<AllowLegacyTypes>(std::forward<Lambda>(lambda)),
-        // TODO Do schema inference without relying on WrapRuntimeKernelFunctor
-        detail::FunctionSchemaInferer<detail::WrapRuntimeKernelFunctor<std::decay_t<Lambda>>>()()
+        // TODO Do schema inference without relying on WrapFunctionIntoRuntimeFunctor
+        detail::inferFunctionSchemaFromFunctor<impl::WrapFunctionIntoRuntimeFunctor<std::decay_t<Lambda>>>()
       ));
     }
 
@@ -597,20 +605,20 @@ private:
 //
 // A quick tour of a few usage examples:
 //
-//  auto register = torch::import("aten")
+//  auto register = torch::import()
 //
 //    // Define a schema for an operator, but provide no implementation
-//    .def("mul(Tensor self, Tensor other) -> Tensor")
+//    .def("aten::mul(Tensor self, Tensor other) -> Tensor")
 //
 //    // Define a operator with exactly one implementation for all backends.
-//    .def("add(Tensor self, Tensor other) -> Tensor", &add_impl)
+//    .def("aten::add(Tensor self, Tensor other) -> Tensor", &add_impl)
 //
 //    // Provide an implementation for a defined operator (you can
 //    // provide multiple; one per backend).  We'll take care of calling
 //    // the correct implementation depending on if we get a CPU
 //    // tensor or a CUDA tensor
-//    .impl("mul", torch::dispatch(torch::kCPU, &mul_cpu_impl))
-//    .impl("mul", torch::dispatch(torch::kCUDA, &mul_cuda_impl))
+//    .impl("aten::mul", torch::dispatch(torch::kCPU, &mul_cpu_impl))
+//    .impl("aten::mul", torch::dispatch(torch::kCUDA, &mul_cuda_impl))
 //
 // Also, you can omit the top level namespace and specify it explicitly in
 // the sub-definitions, e.g.,  torch::import().impl("aten::mul", ...)
@@ -633,7 +641,7 @@ public:
   explicit CppFunction(Func* f, std::enable_if_t<guts::is_function_type<Func>::value, std::nullptr_t> = nullptr)
     : func_(c10::KernelFunction::makeFromUnboxedRuntimeFunction(f))
     // TODO: Don't go through WrapRuntimeKernelFunctor
-    , schema_(detail::FunctionSchemaInferer<detail::WrapRuntimeKernelFunctor<std::decay_t<Func>>>()())
+    , schema_(detail::inferFunctionSchemaFromFunctor<impl::WrapFunctionIntoRuntimeFunctor<std::decay_t<Func>>>())
     , debug_("Func")
     {}
 
@@ -642,7 +650,7 @@ public:
   explicit CppFunction(Lambda&& f, std::enable_if_t<guts::is_functor<std::decay_t<Lambda>>::value, std::nullptr_t> = nullptr)
     : func_(c10::KernelFunction::makeFromUnboxedLambda(std::forward<Lambda>(f)))
     // TODO: Don't go through WrapRuntimeKernelFunctor
-    , schema_(detail::FunctionSchemaInferer<detail::WrapRuntimeKernelFunctor<std::decay_t<Lambda>>>()())
+    , schema_(detail::inferFunctionSchemaFromFunctor<impl::WrapFunctionIntoRuntimeFunctor<std::decay_t<Lambda>>>())
     , debug_("Lambda")
     {}
 
@@ -768,14 +776,7 @@ namespace detail {
 }
 
 // Represents a namespace in which we can define operators.  Conventionally
-// constructed using "torch::import".  This object lets you avoid repeatedly
-// having to specify a namespace, instead you specify it once with:
-//
-//      torch::import("aten")
-//        .def("add", [](const Tensor& a, const Tensor& b) { return a + b; })
-//        .def("mul", torch::dispatch(torch::kCPU, &cpu_add))
-//
-// versus
+// constructed using "torch::import".
 //
 //      torch::import()
 //        .def("aten::add", ...)
@@ -790,7 +791,7 @@ class CAFFE2_API Module final {
   Module();
 
   // Use these as the constructors
-  friend Module import(std::string ns);
+  friend Module _import_DOES_NOT_WORK_WITH_MOBILE_CUSTOM_BUILD(std::string ns);
   friend Module import();
 
 public:
@@ -893,8 +894,16 @@ public:
   }
 };
 
+// TODO: We'd like to support this, but custom mobile build doesn't
+// understand how to interpret registration calls that have a namespace
+// call (as this requires some non-local reasoning.)  Tracked in
+// https://github.com/pytorch/pytorch/issues/35397
+//
+// So for now, we give this a scary internal name to discourage people
+// from using it
+
 // Return the namespace corresponding to the string 'ns'
-inline Module import(std::string ns) {
+inline Module _import_DOES_NOT_WORK_WITH_MOBILE_CUSTOM_BUILD(std::string ns) {
   return Module(std::move(ns));
 }
 

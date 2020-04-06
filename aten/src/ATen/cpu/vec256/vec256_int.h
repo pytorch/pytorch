@@ -669,29 +669,29 @@ Vec256<int32_t> inline convert_to_int32<uint8_t>(const uint8_t* ptr) {
   return _mm256_cvtepu8_epi32(_mm_loadl_epi64(reinterpret_cast<const __m128i*>(ptr)));
 }
 
-template <typename T>
-Vec256<T> inline intdiv_256(const Vec256<T>& a, const Vec256<T>& b) {
+template <typename T, typename Op>
+Vec256<T> inline int_elementwise_binary_256(const Vec256<T>& a, const Vec256<T>& b, Op op) {
   T values_a[Vec256<T>::size()];
   T values_b[Vec256<T>::size()];
   a.store(values_a);
   b.store(values_b);
   for (int i = 0; i != Vec256<T>::size(); i++) {
-    values_a[i] /= values_b[i];
+    values_a[i] = op(values_a[i], values_b[i]);
   }
   return Vec256<T>::loadu(values_a);
 }
 
 template <>
 Vec256<int64_t> inline operator/(const Vec256<int64_t>& a, const Vec256<int64_t>& b) {
-  return intdiv_256(a, b);
+  return int_elementwise_binary_256(a, b, std::divides<int64_t>());
 }
 template <>
 Vec256<int32_t> inline operator/(const Vec256<int32_t>& a, const Vec256<int32_t>& b) {
-  return intdiv_256(a, b);
+  return int_elementwise_binary_256(a, b, std::divides<int32_t>());
 }
 template <>
 Vec256<int16_t> inline operator/(const Vec256<int16_t>& a, const Vec256<int16_t>& b) {
-  return intdiv_256(a, b);
+  return int_elementwise_binary_256(a, b, std::divides<int16_t>());
 }
 
 template<class T, typename std::enable_if_t<std::is_base_of<Vec256i, Vec256<T>>::value, int> = 0>
