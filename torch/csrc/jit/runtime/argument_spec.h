@@ -258,7 +258,7 @@ struct CompleteArgumentSpec {
           pod.type = static_cast<int>(t.scalar_type());
           pod.device = (!t.is_cuda()) ? -1 : t.get_device();
           pod.requires_grad =
-              with_grad && autograd::as_variable_ref(t).requires_grad();
+              with_grad && t.requires_grad();
           total_dims += t.ndimension();
           auto sizes = t.sizes();
           std::copy(sizes.begin(), sizes.end(), next_dim);

@@ -44,7 +44,7 @@ Variable & checked_cast_variable(Tensor & t, const char * name, int pos) {
   if (!t.defined()) {
     AT_ERROR("Expected a Tensor of type Variable but found an undefined Tensor for argument #", pos, " '", name, "'");
   }
-  return t
+  return t;
 }
 }
 
@@ -265,7 +265,7 @@ Tensor& resize_as_(
     c10::optional<MemoryFormat> optional_memory_format) {
   auto& self_ = unpack(self, "self", 0);
   auto& the_template_ = unpack(the_template, "the_template", 1);
-  if (self.requires_grad()) {  
+  if (self.requires_grad()) {
     AT_ERROR("cannot resize variables that require grad");
   }
 #if !defined(PYTORCH_DISABLE_TRACING)
