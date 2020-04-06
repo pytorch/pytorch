@@ -514,9 +514,10 @@ std::vector<Expr*> GPULower::getLoweredExprs() {
   replaceSizes();
 
   auto loop_nests = LoopNestGenerator::getLoopNest(fusion_);
+  auto unrolled_loops = UnrollPass::runPass(fusion_, loop_nests);
 
   // Run through loop nests and further lower the expressions
-  for (auto* expr : loop_nests) {
+  for (auto* expr : unrolled_loops) {
     Statement* mutated_stmt = mutate(expr);
     TORCH_INTERNAL_ASSERT(
         mutated_stmt->isExpr(),

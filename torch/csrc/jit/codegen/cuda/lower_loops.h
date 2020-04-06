@@ -8,6 +8,45 @@ namespace torch {
 namespace jit {
 namespace fuser {
 
+struct UnrollPass : public OptOutMutator {
+ private:
+  Fusion* fusion_;
+  std::vector<Expr*> lowered_exprs;
+  const std::vector<Expr*>& incoming_exprs_;
+  Expr* active_scope = nullptr;
+
+  // Track the last computeAt TensorView and axis
+  const TensorView* active_view;
+  unsigned int active_view_axis;
+
+  // Wrap pushBack in lower_utils if active_scope is null we want it to go
+  // straight to lower_exprs
+  void pushBack(Expr*);
+
+  // Custom dispatch for Expr, want to find out of it's a TV op
+  Statement* mutate(Expr*) final;
+
+  // Open the for loop.
+  Statement* mutate(ForLoop*) final;
+
+  // Remake operations with TensorIndex
+  Statement* mutate(UnaryOp*) final;
+  Statement* mutate(BinaryOp*) final;
+
+  UnrollPass(Fusion* _fusion, const std::vector<Expr*>& _incoming_exprs)
+      : fusion_(_fusion), incoming_exprs_(_incoming_exprs) {}
+
+  void runPass();
+
+ public:
+  static std::vector<Expr*> runPass(Fusion* fusion, std::vector<Expr*> exprs) {
+    FusionGuard fg(fusion);
+    UnrollPass up(fusion, exprs);
+    up.runPass();
+    return up.lowered_exprs;
+  }
+};
+
 struct TORCH_CUDA_API LoopNestGenerator : public OptOutDispatch {
  private:
   std::vector<Expr*> lowered_exprs;

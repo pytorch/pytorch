@@ -1,5 +1,5 @@
-#include <torch/csrc/jit/codegen/cuda/lower_loops.h>
 #include <torch/csrc/jit/codegen/cuda/arith.h>
+#include <torch/csrc/jit/codegen/cuda/lower_loops.h>
 #include <torch/csrc/jit/codegen/cuda/lower_utils.h>
 
 namespace torch {
@@ -34,6 +34,95 @@ const TensorView* asConstTV(const Val* const val) {
 
 } // namespace
 
+void UnrollPass::pushBack(Expr* expr) {
+  if (active_scope == nullptr)
+    lowered_exprs.push_back(expr);
+  else
+    scope_utils::pushBack(active_scope, expr);
+}
+
+// Custom dispatch for Expr, want to find out of it's a TV op
+Statement* UnrollPass::mutate(Expr* expr) {
+  Statement* mutated_stmt = OptOutMutator::mutate(expr);
+  TORCH_INTERNAL_ASSERT(
+      mutated_stmt->isExpr(),
+      "Tried to generate a kernel but hit a non expression during lowering: ",
+      mutated_stmt);
+  return mutated_stmt;
+}
+
+// Open the for loop.
+Statement* UnrollPass::mutate(ForLoop* fl) {
+  Expr* prev_scope = active_scope;
+  active_scope = fl;
+  std::vector<Expr*> mutated_exprs;
+  bool is_mutated = false;
+  for (auto expr : fl->body().exprs()) {
+    Statement* mutated_stmt = mutate(expr);
+
+    TORCH_INTERNAL_ASSERT(
+        mutated_stmt->isExpr(),
+        "Tried to generate a kernel but hit a non expression during lowering: ",
+        mutated_stmt);
+
+    mutated_exprs.push_back(static_cast<Expr*>(mutated_stmt));
+    if (!(mutated_exprs.back()->sameAs(expr)))
+      is_mutated = true;
+  }
+
+  if (is_mutated) {
+    scope_utils::clearScope(active_scope);
+    for (auto expr : mutated_exprs)
+      pushBack(expr);
+  }
+
+  active_scope = prev_scope;
+
+  if (is_mutated)
+    return new ForLoop(
+        fl->index(), fl->iter_domain(), mutated_exprs, fl->parentScope());
+
+  return fl;
+}
+
+// Remake operations with TensorIndex
+Statement* UnrollPass::mutate(UnaryOp* uop) {
+  return uop;
+}
+Statement* UnrollPass::mutate(BinaryOp* bop) {
+  return bop;
+}
+
+// Generate the loop nest structure and place it in lowered_exprs
+void UnrollPass::runPass() {
+  FusionGuard fg(fusion_);
+
+  // Likely we lowered this fusion, we can simply return the lowered expressions
+  // Not the safest approach but good enough for now.
+  if (fusion_->lowered && incoming_exprs_.size() != 0)
+    return;
+
+  TORCH_CHECK(
+      !fusion_->lowered,
+      "Fusions can only be lowered once as of now. You could reuse the lowering using",
+      " std::vector<Expr*> GPULower::getLoweredExprs() the result can be printed as",
+      " a kernel with   IRPrinter irp(os); irp.printKernel(lowered_exprs, kernel_name);");
+
+  // Initialize members of the class
+  active_view = nullptr;
+  active_view_axis = 0;
+
+  // Run through loop nests and further lower the expressions
+  for (auto* expr : incoming_exprs_) {
+    Statement* mutated_stmt = mutate(expr);
+    TORCH_INTERNAL_ASSERT(
+        mutated_stmt->isExpr(),
+        "Tried to generate a kernel but hit a non expression during lowering: ",
+        mutated_stmt);
+    lowered_exprs.push_back(static_cast<Expr*>(mutated_stmt));
+  }
+}
+
 Allocate* LoopNestGenerator::getAlloc(TensorView* tv) {
   TORCH_INTERNAL_ASSERT(
       !(FusionGuard::getCurFusion()->hasInput(tv) ||
@@ -46,7 +135,7 @@ Allocate* LoopNestGenerator::getAlloc(TensorView* tv) {
     IterDomain* dim = tv->getComputeAtAxis(i);
     if (dim->isThreadDim())
       continue;
-    //TORCH_INTERNAL_ASSERT()
+    // TORCH_INTERNAL_ASSERT()
     alloc_dims.push_back(dim->extent());
   }
 
