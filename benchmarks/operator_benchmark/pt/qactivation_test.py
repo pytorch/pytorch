@@ -32,8 +32,13 @@ qactivation_long_configs = op_bench.cross_product_configs(
 )
 
 qactivation_short_configs = op_bench.cross_product_configs(
-    dims=((3, 4, 5),      # Rank=3
-          (2, 3, 4, 5)),  # Rank=4,
+    dims=(
+        (3, 4, 5),      # Rank=3
+        (2, 3, 4, 5),    # Rank=4,
+        # Dimensions from the floating point benchmarks
+        (512, 512),
+        (256, 1024),
+    ),
     contig=(False,),
     inplace=(False,),
     dtype=(torch.quint8, torch.qint8, torch.qint32),
@@ -42,12 +47,15 @@ qactivation_short_configs = op_bench.cross_product_configs(
 
 qactivation_ops = op_bench.op_list(
     attrs=(
-        ('relu', nnq.ReLU),
-        ('relu6', nnq.ReLU6),
+        ('relu', nnq.functional.relu),
+        ('relu6', torch.ops.quantized.relu6),
         ('functional.hardtanh', nnq.functional.hardtanh),
         ('functional.hardswish', nnq.functional.hardswish),
         ('functional.elu', nnq.functional.elu),
         ('functional.hardsigmoid', nnq.functional.hardsigmoid),
+        ('functional.leaky_relu', nnq.functional.leaky_relu),
+        ('functional.sigmoid', torch.nn.functional.sigmoid),
+        ('functional.tanh', torch.nn.functional.tanh),
     ),
     attr_names=('op_name', 'op_func'),
 )
