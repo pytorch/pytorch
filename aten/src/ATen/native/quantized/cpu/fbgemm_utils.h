@@ -46,17 +46,17 @@ struct CAFFE2_API PackedConvWeight : public ConvPackedParamsBase<kSpatialDim> {
       std::vector<float> w_scale,
       std::vector<int32_t> w_zp,
       c10::QScheme q_scheme)
-      : w(std::move(w)),
-        bias(std::move(bias)),
-        stride_(stride),
-        padding_(padding),
-        dilation_(dilation),
-        groups_(groups),
-        col_offsets(std::move(col_offsets)),
-        kernel(std::move(kernel)),
-        w_scale(std::move(w_scale)),
-        w_zp(std::move(w_zp)),
-        q_scheme(q_scheme) {}
+    : w(std::move(w)),
+    bias(bias),
+    stride_(stride),
+    padding_(padding),
+    dilation_(dilation),
+    groups_(groups),
+    col_offsets(col_offsets),
+    kernel(kernel),
+    w_scale(w_scale),
+    w_zp(w_zp),
+    q_scheme(q_scheme) {}
 
   std::unique_ptr<fbgemm::PackWeightsForConv<kSpatialDim>> w;
   c10::optional<at::Tensor> bias;

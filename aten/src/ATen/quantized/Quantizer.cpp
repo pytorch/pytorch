@@ -70,18 +70,8 @@ void checkZeroPoint(std::string fn_name, int64_t zero_point) {
 
 template <typename T>
 void checkZeroPoints(std::string fn_name, Tensor zero_points) {
-  auto zero_points_data = zero_points.data_ptr<int64_t>();
   for (size_t i = 0; i < zero_points.numel(); ++i) {
-    TORCH_CHECK(zero_points_data[i] <= std::numeric_limits<T>::max(),
-                fn_name,
-                "zero_point",
-                i,
-                "is out of range.");
-    TORCH_CHECK(zero_points_data[i] >= std::numeric_limits<T>::min(),
-                fn_name,
-                "zero_point",
-                i,
-                "is out of range.");
+    checkZeroPoint<T>(fn_name, zero_points[i].item<int64_t>());
   }
 }
 

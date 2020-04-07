@@ -79,6 +79,8 @@ class _ConvNd(nn.Module):
     #   |--- _packed_params : ConvPackedParamsBase
     def _save_to_state_dict(self, destination, prefix, keep_vars):
         super(_ConvNd, self)._save_to_state_dict(destination, prefix, keep_vars)
+        print('getting state dict:')
+        print(self._packed_params.weight())
         destination[prefix + '_packed_params'] = self._packed_params
         destination[prefix + 'scale'] = torch.tensor(self.scale)
         destination[prefix + 'zero_point'] = torch.tensor(self.zero_point)
@@ -101,7 +103,8 @@ class _ConvNd(nn.Module):
             self.output_padding,
             self.groups,
             self.padding_mode,
-            self._packed_params,
+            self._packed_params.weight(),
+            self._packed_params.bias(),
             self.scale,
             self.zero_point,
             self.training
@@ -113,6 +116,9 @@ class _ConvNd(nn.Module):
     def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
                               missing_keys, unexpected_keys, error_msgs):
         version = local_metadata.get('version', None)
+        version = 1
+        print('version:', version)
+        print('state_dict:', state_dict)
         if version is None or version < 1:
             self.set_weight_bias(
                 state_dict[prefix + 'weight'], state_dict[prefix + 'bias'])
@@ -120,6 +126,7 @@ class _ConvNd(nn.Module):
             state_dict.pop(prefix + 'bias')
         else:
             self._packed_params = state_dict[prefix + '_packed_params']
+            print('load_from_state_dict weight:', self._packed_params.weight())
             assert tuple(self.stride) == tuple(self._packed_params.stride())
             assert tuple(self.padding) == tuple(self._packed_params.padding())
             assert tuple(self.dilation) == tuple(self._packed_params.dilation())
@@ -145,16 +152,10 @@ class _ConvNd(nn.Module):
         self.output_padding = state[7]
         self.groups = state[8]
         self.padding_mode = state[9]
-        offset = 0
-        # maintain BC for models saved before
-        if len(state) == 15:
-            self.set_weight_bias(state[10], state[11])
-            offset = 1
-        else:
-            self._packed_params = state[10]
-        self.scale = state[11 + offset]
-        self.zero_point = state[12 + offset]
-        self.training = state[13 + offset]
+        self.set_weight_bias(state[10], state[11])
+        self.scale = state[12]
+        self.zero_point = state[13]
+        self.training = state[14]
 
 
 class Conv1d(_ConvNd):
@@ -316,7 +317,7 @@ class Conv2d(_ConvNd):
         >>> output = m(q_input)
 
     """
-
+    _version = 1
     _FLOAT_MODULE = nn.Conv2d
 
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
@@ -342,12 +343,9 @@ class Conv2d(_ConvNd):
         return torch.ops.quantized.conv2d_unpack(self._packed_params)
 
     def weight(self):
-        # (w, _) = torch.ops.quantized.conv2d_unpack(self._packed_params)
         return self._packed_params.weight()
 
     def bias(self):
-        # print(self._packed_params)
-        # (_, b) = torch.ops.quantized.conv2d_unpack(self._packed_params)
         return self._packed_params.bias()
 
     def forward(self, input):
@@ -442,7 +440,7 @@ class Conv3d(_ConvNd):
         >>> output = m(q_input)
 
     """
-
+    _version = 1
     _FLOAT_MODULE = nn.Conv3d
 
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
@@ -468,12 +466,10 @@ class Conv3d(_ConvNd):
         return torch.ops.quantized.conv3d_unpack(self._packed_params)
 
     def weight(self):
-        (w, _) = torch.ops.quantized.conv3d_unpack(self._packed_params)
-        return w
+        return self._packed_params.weight()
 
     def bias(self):
-        (_, b) = torch.ops.quantized.conv3d_unpack(self._packed_params)
-        return b
+        return self._packed_params.bias()
 
     def forward(self, input):
         # Temporarily using len(shape) instead of ndim due to JIT issue

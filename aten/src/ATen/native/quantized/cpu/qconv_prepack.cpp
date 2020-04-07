@@ -149,7 +149,7 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeight<kSpatialD
           col_offsets,
           kSpatialDim == 2 ? std::vector<int64_t>{kernel_h, kernel_w}
                            : std::vector<int64_t>{kernel_d, kernel_h, kernel_w},
-          scales,
+                               scales,
           zero_points,
           qtype});
 
@@ -279,8 +279,8 @@ class QConvPackWeightInt8 final : public c10::OperatorKernel {
 #ifdef USE_FBGEMM
     if (ctx.qEngine() == at::QEngine::FBGEMM) {
       return PackedConvWeight<kSpatialDim>::prepack(
-          std::move(weight),
-          std::move(bias),
+          weight,
+          bias,
           strides,
           paddings,
           dilations,
