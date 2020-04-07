@@ -9,7 +9,9 @@ namespace native {
 namespace xnnpack {
 namespace internal {
 
-Tensor allocate_padded_if_needed(const Tensor& input_contig);
+Tensor allocate_padded_contiguous_if_needed(
+    const Tensor& input,
+    c10::MemoryFormat memory_format);
 
 // TODO: Remove this function when at::native::empty() is modified to accept a
 // custom memory allocator.
@@ -17,7 +19,8 @@ Tensor allocate_padded_if_needed(const Tensor& input_contig);
 at::Tensor empty_with_tail_padding(
     IntArrayRef size,
     const caffe2::TypeMeta dtype,
-    c10::MemoryFormat memory_format);
+    c10::MemoryFormat memory_format,
+    DimnameList maybe_names);
 
 } // namespace internal
 } // namespace xnnpack

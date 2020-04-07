@@ -28,6 +28,7 @@ file(GLOB C10_SRCS
         *.cpp
         core/*.cpp
         core/boxing/*.cpp
+        core/boxing/impl/*.cpp
         core/dispatch/*.cpp
         core/op_registration/*.cpp
         core/impl/*.cpp
