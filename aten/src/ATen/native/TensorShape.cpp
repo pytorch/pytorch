@@ -457,8 +457,7 @@ Tensor block_diag(TensorList tensors) {
   int64_t cur_dim1 = 0;
 
   // Copy each tensor into the appropriate location in the result matrix
-  std::vector<Tensor>::const_iterator iter;
-  for (iter = tensors_2D.begin(); iter != tensors_2D.end(); iter++) {
+  for (auto iter = tensors_2D.begin(); iter != tensors_2D.end(); iter++) {
     const Tensor& tensor = *iter;
 
     int64_t dim0 = tensor.size(0);
