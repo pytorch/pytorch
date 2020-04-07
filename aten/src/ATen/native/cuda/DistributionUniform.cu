@@ -1,5 +1,5 @@
 #include <ATen/Dispatch.h>
-#include <ATen/CUDAGenerator.h>
+#include <ATen/CUDAGeneratorImpl.h>
 #include <ATen/native/UnaryOps.h>
 #include <ATen/native/cuda/DistributionTemplates.h>
 #include <ATen/native/Distributions.h>
@@ -8,7 +8,7 @@
 namespace at { namespace native {
 
 void uniform_kernel(TensorIterator& iter, double from, double to, Generator gen) {
-  auto generator = get_generator_or_default<CUDAGenerator>(gen, cuda::detail::getDefaultCUDAGenerator());
+  auto generator = get_generator_or_default<CUDAGeneratorImpl>(gen, cuda::detail::getDefaultCUDAGenerator());
   templates::cuda::uniform_kernel(iter, from, to, generator);
 }
 
