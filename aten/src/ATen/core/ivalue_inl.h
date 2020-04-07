@@ -244,6 +244,12 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
     while (!completed_) {
       finished_cv_.wait(lock);
     }
+    std::vector<std::function<void(void)>> cbs;
+    cbs.swap(callbacks_);
+    lock.unlock();
+    for (auto& callback : cbs) {
+      callback();
+    }
   }
 
   /**
@@ -254,15 +260,7 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
     AT_ASSERT(!completed());
     completed_ = true;
     value_ = std::move(value);
-
-    std::vector<std::function<void(void)>> cbs;
-    cbs.swap(callbacks_);
-    lock.unlock();
-
     finished_cv_.notify_all();
-    for (auto& callback : cbs) {
-      callback();
-    }
   }
 
   void markCompleted() {
@@ -275,15 +273,7 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
     completed_ = true;
     has_error_ = true;
     error_ = std::move(error);
-
-    std::vector<std::function<void(void)>> cbs;
-    cbs.swap(callbacks_);
-    lock.unlock();
-
     finished_cv_.notify_all();
-    for (auto& callback : cbs) {
-      callback();
-    }
   }
 
   // Get the result of the current future.
