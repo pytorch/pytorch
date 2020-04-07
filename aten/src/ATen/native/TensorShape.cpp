@@ -395,32 +395,22 @@ Tensor block_diag(TensorList tensors) {
   Tensor result;
   if (tensors.size() == 0) {
     result = at::empty({});
-  } else if (tensors.size() == 1) {
-    result = at::empty({}, tensors[0].options());
-  } else {
-    // Use at::result_type to find the right tensor to copy options from, so
-    // that the output data type is correct
-    const Tensor* options_tensor = &tensors[0];
-    ScalarType output_scalar_type = options_tensor->scalar_type();
-
-    for (size_t tensor_idx = 1; tensor_idx < tensors.size(); tensor_idx++) {
-      const Tensor* other_tensor = &tensors[tensor_idx];
-      ScalarType scalar_type = at::result_type(*options_tensor, *other_tensor);
-
-      if (scalar_type != output_scalar_type) {
-        output_scalar_type = scalar_type;
-        options_tensor = other_tensor;
-      }
-    }
-    result = at::empty({}, options_tensor->options());
-  }
-  return at::block_diag_out(result, tensors);
-}
-
-Tensor& block_diag_out(Tensor& result, TensorList tensors) {
-  if (tensors.size() == 0) {
-    result.resize_({0});
     return result;
+  }
+
+  // Use at::result_type to find the right tensor to copy options from, so
+  // that the output data type is correct
+  const Tensor* options_tensor = &tensors[0];
+  ScalarType output_scalar_type = options_tensor->scalar_type();
+
+  for (size_t tensor_idx = 1; tensor_idx < tensors.size(); tensor_idx++) {
+    const Tensor* other_tensor = &tensors[tensor_idx];
+    ScalarType scalar_type = at::result_type(*options_tensor, *other_tensor);
+
+    if (scalar_type != output_scalar_type) {
+      output_scalar_type = scalar_type;
+      options_tensor = other_tensor;
+    }
   }
 
   int64_t result_dim0 = 0;
@@ -453,8 +443,7 @@ Tensor& block_diag_out(Tensor& result, TensorList tensors) {
     result_dim1 += dim1;
   }
 
-  result.resize_({result_dim0, result_dim1});
-  result.zero_();
+  result = at::zeros({result_dim0, result_dim1}, options_tensor->options());
 
   int64_t cur_dim0 = 0;
   int64_t cur_dim1 = 0;
@@ -1508,7 +1497,7 @@ void apply_diag(Tensor& result, const Tensor& self, int64_t dimension) {
     auto r_stride_0 = result.stride(0);
     auto r_stride_1 = result.stride(1);
     r_data += (dimension >= 0 ? dimension*r_stride_1 : -dimension*r_stride_0);
-    
+
     for (i = 0; i < self_size; i++) {
       r_data[i * (r_stride_0 + r_stride_1)] = self_data[i * self_stride];
     }

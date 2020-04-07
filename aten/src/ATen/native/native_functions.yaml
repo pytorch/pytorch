@@ -690,10 +690,6 @@
   supports_named_tensor: True
   variants: function
 
-- func: block_diag.out(Tensor[] tensors, *, Tensor(a!) out) -> Tensor(a!)
-  supports_named_tensor: True
-  variants: function
-
 - func: ceil(Tensor self) -> Tensor
   use_c10_dispatcher: full
   supports_named_tensor: True
