@@ -9063,6 +9063,14 @@ class TestNNDeviceType(NNTestCase):
             with torch.backends.cudnn.flags(enabled=False):
                 self._test_module_empty_input(mod, inp, check_size=False)
 
+    @onlyCUDA
+    @largeCUDATensorTest('10GB')
+    def test_prelu_backward_large_discontiguous(self, device):
+        m = torch.nn.PReLU().cuda().half()
+        input_ = torch.randn(1024, 1024, 1024, 2, dtype=torch.half, device=device)
+        output = m(input_)
+        output.backward(torch.ones((), device=device).expand_as(output))
+
     def test_one_hot(self, device):
         with self.assertRaises(RuntimeError):
             torch.nn.functional.one_hot(torch.tensor([3, 4, -1, 0], device=device), -1)
