@@ -39,15 +39,9 @@ void bernoulli_tensor_cuda_kernel(
   iter.add_input(p);
   iter.build();
 
-  at::native::gpu_kernel(iter,
-    [seeds] GPU_LAMBDA (prob_t p) -> scalar_t {
+  at::native::distribution_unary_kernel(iter, seeds,
+    [seeds] GPU_LAMBDA (curandStatePhilox4_32_10_t &state, prob_t p) -> scalar_t {
       #if defined(__CUDA_ARCH__) || defined(__HIP_PLATFORM_HCC__)
-      curandStatePhilox4_32_10_t state;
-      curand_init(
-          seeds.first,
-          blockIdx.x * blockDim.x + threadIdx.x,
-          seeds.second,
-          &state);
       CUDA_KERNEL_ASSERT(0 <= p && p <= 1);
       float rand = curand_uniform(&state);
       return static_cast<scalar_t>(rand <= p);
