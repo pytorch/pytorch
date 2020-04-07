@@ -10430,66 +10430,70 @@ class TestTorchDeviceType(TestCase):
             lambda: torch.multinomial(x, 3))
 
     def test_add(self, device):
-        # [res] torch.add([res,] tensor1, tensor2)
-        m1 = torch.randn(100, 100, device=device)
-        v1 = torch.randn(100, device=device)
+        dtypes = [torch.float] + torch.testing.get_all_complex_dtypes()
+        for dtype in dtypes:
+            # [res] torch.add([res,] tensor1, tensor2)
+            m1 = torch.randn(100, 100, dtype=dtype, device=device)
+            v1 = torch.randn(100, dtype=dtype, device=device)
 
-        # contiguous
-        res1 = torch.add(m1[4], v1)
-        res2 = res1.clone().zero_()
-        for i in range(m1.size(1)):
-            res2[i] = m1[4, i] + v1[i]
-        self.assertEqual(res1, res2)
+            # contiguous
+            res1 = torch.add(m1[4], v1)
+            res2 = res1.clone().zero_()
+            for i in range(m1.size(1)):
+                res2[i] = m1[4, i] + v1[i]
+            self.assertEqual(res1, res2)
 
-        m1 = torch.randn(100, 100, device=device)
-        v1 = torch.randn(100, device=device)
+            m1 = torch.randn(100, 100, dtype=dtype, device=device)
+            v1 = torch.randn(100, dtype=dtype, device=device)
 
-        # non-contiguous
-        res1 = torch.add(m1[:, 4], v1)
-        res2 = res1.clone().zero_()
-        for i in range(m1.size(0)):
-            res2[i] = m1[i, 4] + v1[i]
-        self.assertEqual(res1, res2)
+            # non-contiguous
+            res1 = torch.add(m1[:, 4], v1)
+            res2 = res1.clone().zero_()
+            for i in range(m1.size(0)):
+                res2[i] = m1[i, 4] + v1[i]
+            self.assertEqual(res1, res2)
 
-        # [res] torch.add([res,] tensor, value)
-        m1 = torch.randn(10, 10, device=device)
+            # [res] torch.add([res,] tensor, value)
+            m1 = torch.randn(10, 10, dtype=dtype, device=device)
 
-        # contiguous
-        res1 = m1.clone()
-        res1[3].add_(2)
-        res2 = m1.clone()
-        for i in range(m1.size(1)):
-            res2[3, i] = res2[3, i] + 2
-        self.assertEqual(res1, res2)
+            # contiguous
+            res1 = m1.clone()
+            res1[3].add_(2)
+            res2 = m1.clone()
+            for i in range(m1.size(1)):
+                res2[3, i] = res2[3, i] + 2
+            self.assertEqual(res1, res2)
 
-        # non-contiguous
-        m1 = torch.randn(10, 10, device=device)
-        res1 = m1.clone()
-        res1[:, 3].add_(2)
-        res2 = m1.clone()
-        for i in range(m1.size(0)):
-            res2[i, 3] = res2[i, 3] + 2
-        self.assertEqual(res1, res2)
+            # non-contiguous
+            m1 = torch.randn(10, 10, dtype=dtype, device=device)
+            res1 = m1.clone()
+            res1[:, 3].add_(2)
+            res2 = m1.clone()
+            for i in range(m1.size(0)):
+                res2[i, 3] = res2[i, 3] + 2
+            self.assertEqual(res1, res2)
 
-        # inter-type
-        m1 = torch.randn(10, 10, device=device)
-        self.assertEqual(m1 + 3, m1 + torch.tensor(3))
-        self.assertEqual(3 + m1, torch.tensor(3) + m1)
+            # inter-type
+            m1 = torch.randn(10, 10, dtype=dtype, device=device)
+            self.assertEqual(m1 + 3, m1 + torch.tensor(3))
+            self.assertEqual(3 + m1, torch.tensor(3) + m1)
+
+            # contiguous + non-contiguous
+            m1 = torch.randn(10, 10, device=device)
+            m2 = torch.randn(10, 10, device=device).t()
+            res = m1 + m2
+            self.assertTrue(res.is_contiguous())
+            self.assertEqual(res, m1 + m2.contiguous())
+
+            # 1d + empty
+            m1 = torch.tensor([1.0], dtype=torch.float, device=device)
+            m2 = torch.tensor([], dtype=torch.float, device=device)
+            self.assertEqual(m1 + m2, [])
+
+        # inter-type uint8
         one = torch.tensor(1, dtype=torch.uint8, device=device)
         self.assertEqual(torch.add(one, 1), 2)
         self.assertEqual(torch.add(one, 1).dtype, torch.uint8)
-
-        # contiguous + non-contiguous
-        m1 = torch.randn(10, 10, device=device)
-        m2 = torch.randn(10, 10, device=device).t()
-        res = m1 + m2
-        self.assertTrue(res.is_contiguous())
-        self.assertEqual(res, m1 + m2.contiguous())
-
-        # 1d + empty
-        m1 = torch.tensor([1.0], dtype=torch.float, device=device)
-        m2 = torch.tensor([], dtype=torch.float, device=device)
-        self.assertEqual(m1 + m2, [])
 
         # bool
         m1 = torch.tensor([True, False, False, True, False, False], dtype=torch.bool, device=device)
