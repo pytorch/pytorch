@@ -2627,7 +2627,6 @@ class TestAutograd(TestCase):
         with profile() as p:
             self.assertTrue(torch.autograd._profiler_enabled())
             y = x * 2 + 4
-        p.export_chrome_trace('/home/jamesreed/foo.json')
 
         self.assertFalse(torch.autograd._profiler_enabled())
 
