@@ -111,6 +111,14 @@ TEST_F(FunctionalTest, MaxPool2d) {
   ASSERT_EQ(y.sizes(), std::vector<int64_t>({2, 2, 2}));
 }
 
+TEST_F(FunctionalTest, MaxPool2dBackward) {
+  auto input = torch::rand({1, 2, 4, 4}, torch::dtype(torch::kFloat).requires_grad(true));
+  auto output = F::max_pool2d(input, F::MaxPool2dFuncOptions(2));
+  auto s = output.sum();
+  s.backward();
+  ASSERT_TRUE(input.sizes() == input.grad().sizes());
+}
+
 TEST_F(FunctionalTest, MaxPool3d) {
   auto x = torch::ones({2, 5, 5, 5});
   auto y = F::max_pool3d(x, F::MaxPool3dFuncOptions(3).stride(2));

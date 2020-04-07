@@ -282,7 +282,7 @@ PYTORCH_CUDA_MEMCHECK = os.getenv('PYTORCH_CUDA_MEMCHECK', '0') == '1'
 # The tests in these test cases are derived from the generic tests in
 # generic_test_class.
 # See note "Generic Device Type Testing."
-def instantiate_device_type_tests(generic_test_class, scope, except_for=None):
+def instantiate_device_type_tests(generic_test_class, scope, except_for=None, only_for=None):
     # Removes the generic test class from its enclosing scope so its tests
     # are not discoverable.
     del scope[generic_test_class.__name__]
@@ -304,7 +304,12 @@ def instantiate_device_type_tests(generic_test_class, scope, except_for=None):
     # Creates device-specific test cases
     for base in device_type_test_bases:
         # Skips bases listed in except_for
+        if except_for is not None and only_for is not None:
+            assert base.device_type not in except_for or base.device_type not in only_for,\
+                "same device cannot appear in except_for and only_for"
         if except_for is not None and base.device_type in except_for:
+            continue
+        if only_for is not None and base.device_type not in only_for:
             continue
 
         class_name = generic_test_class.__name__ + base.device_type.upper()

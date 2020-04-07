@@ -236,6 +236,26 @@ struct NormalKernel {
   }
 };
 
+// ==================================================== Uniform =======================================================
+
+template<typename RNG>
+void uniform_kernel(TensorIterator& iter, double from, double to, RNG generator) {
+  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "uniform_kernel_cpu", [&]() {
+    std::lock_guard<std::mutex> lock(generator->mutex_);
+    at::uniform_real_distribution<scalar_t> uniform(static_cast<scalar_t>(from), static_cast<scalar_t>(to));
+    cpu_serial_kernel(iter, [&uniform, generator]() -> scalar_t {
+      return static_cast<scalar_t>(uniform(generator));
+    });
+  });
+}
+
+template<typename RNG>
+struct UniformKernel {
+  void operator()(TensorIterator& iter, double from, double to, Generator gen) {
+    uniform_kernel(iter, from, to, check_generator<RNG>(gen));
+  }
+};
+
 // ==================================================== Cauchy ========================================================
 
 template<typename RNG>
