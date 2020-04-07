@@ -24,6 +24,7 @@ from jit.test_builtins import TestBuiltins, TestTensorBuiltins  # noqa: F401
 from jit.test_unsupported_ops import TestUnsupportedOps  # noqa: F401
 from jit.test_freezing import TestFreezing  # noqa: F401
 from jit.test_functional_blocks import TestFunctionalBlocks  # noqa: F401
+from jit.test_save_load import TestSaveLoad  # noqa: F401
 
 # Torch
 from torch import Tensor
@@ -5352,6 +5353,15 @@ def foo(x):
 
         self.checkModule(Add(), [torch.randn(2, 2)])
 
+    def test_pybind_type_comparisons(self):
+        @torch.jit.script
+        def f():
+            return None
+
+        node = list(f.graph.nodes())[0]
+        t = node.outputsAt(0).type()
+        self.assertFalse(t == None)  # noqa
+
     @unittest.skipIf(IS_WINDOWS and sys.version_info >= (3, 8), 'TODO: need to fix the test case')
     def test_unmatched_type_annotation(self):
         message1 = re.escape("Number of type annotations (2) did not match the number of function parameters (1):")
@@ -5908,6 +5918,25 @@ def foo(x):
     def test_torchbind_instantiate_missing_class(self):
         with self.assertRaisesRegex(RuntimeError, 'Tried to instantiate class foo.IDontExist but it does not exist!'):
             torch.classes.foo.IDontExist(3, 4, 5)
+
+    @skipIfRocm
+    def test_torchbind_optional_explicit_attr(self):
+        class TorchBindOptionalExplicitAttr(torch.nn.Module):
+            foo : Optional[torch.classes._TorchScriptTesting._StackString]
+
+            def __init__(self):
+                super().__init__()
+                self.foo = torch.classes._TorchScriptTesting._StackString(["test"])
+
+            def forward(self) -> str:
+                foo_obj = self.foo
+                if foo_obj is not None:
+                    return foo_obj.pop()
+                else:
+                    return '<None>'
+
+        mod = TorchBindOptionalExplicitAttr()
+        scripted = torch.jit.script(mod)
 
     def test_jitter_bug(self):
         @torch.jit.script
@@ -15131,6 +15160,13 @@ a")
                 print((x, x, x).__doc__)
                 return x
 
+    def test_tuple_len(self):
+        @torch.jit.script
+        def foo():
+            return len((1, "str", None))
+
+        self.assertEqual(foo(), 3)
+
     def test_tuple_slicing(self):
         def tuple_slice(a):
             if bool(a):
@@ -18108,6 +18144,38 @@ a")
 
         f = Foo()
         torch.jit.script(f)
+
+    def test_static_if_prop(self):
+        class MaybeHasAttr(torch.nn.Module):
+            def __init__(self, add_attr):
+                super(MaybeHasAttr, self).__init__()
+                if add_attr:
+                    self.maybe_attr = 1
+
+            def forward(self):
+                if hasattr(self, "maybe_attr") and True:
+                    return self.maybe_attr
+                else:
+                    return 0
+
+        class MaybeHasAttr2(torch.nn.Module):
+            def __init__(self, add_attr):
+                super(MaybeHasAttr2, self).__init__()
+                if add_attr:
+                    self.maybe_attr = 1
+
+            def forward(self):
+                if not hasattr(self, "maybe_attr") or False:
+                    return 0
+                else:
+                    return self.maybe_attr
+
+        torch.jit.script(MaybeHasAttr(True))
+        torch.jit.script(MaybeHasAttr(False))
+        torch.jit.script(MaybeHasAttr2(True))
+        torch.jit.script(MaybeHasAttr2(False))
+
+
 
     def test_optional_tuple(self):
         def fn(x=None):

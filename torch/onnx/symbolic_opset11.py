@@ -45,6 +45,12 @@ def clamp(g, self, min, max):
     return g.op("Clip", self, min, max)
 
 
+# Opset 11 gather accepts negative indices
+@parse_args('v', 'i', 'v')
+def select(g, self, dim, index):
+    return g.op("Gather", self, index, axis_i=dim)
+
+
 def index_put(g, self, indices_list_value, values, accumulate=False):
     indices_list = sym_help._unpack_list(indices_list_value)
     if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
@@ -449,7 +455,9 @@ def _dim_arange(g, like, dim):
     return arange(g, stop, 4, None, None, None)
 
 
-def size(g, self, dim):
+def size(g, self, dim=None):
+    if dim is None:
+        return g.op("Shape", self)
     return sym_help._size_helper(g, self, dim)
 
 
