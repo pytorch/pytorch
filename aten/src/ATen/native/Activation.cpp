@@ -205,7 +205,7 @@ inline void _rrelu_with_noise_train(
   scalar_t* output_data = tmp_tensor.data_ptr<scalar_t>();
   scalar_t* input_data = input.data_ptr<scalar_t>();
   scalar_t* noise_data = noise.data_ptr<scalar_t>();
-  auto gen  = at::get_generator_or_default<CPUGenerator>(generator, detail::getDefaultCPUGenerator());
+  auto gen  = at::get_generator_or_default<CPUGeneratorImpl>(generator, detail::getDefaultCPUGenerator());
   std::lock_guard<std::mutex> lock(gen->mutex_);
   for (int64_t i = 0; i < input.numel(); i++) {
     if (input_data[i] <= 0) {
