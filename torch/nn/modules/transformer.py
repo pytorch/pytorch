@@ -136,7 +136,7 @@ class Transformer(Module):
                     [0.,   0.,   0.,  ...,   0.,   0., -inf],
                     [0.,   0.,   0.,  ...,   0.,   0.,   0.]])
         """
-        return torch.tensor(float('-inf'), device=device).repeat(sz, sz).triu(1)
+        return torch.tensor(float('-inf'), device=device).repeat(size, size).triu(1)
 
     def _reset_parameters(self):
         r"""Initiate parameters in the transformer model."""
