@@ -5,6 +5,7 @@
 #include <torch/csrc/jit/tensorexpr/ir_mutator.h>
 #include <torch/csrc/jit/tensorexpr/ir_printer.h>
 #include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
+#include <torch/csrc/jit/tensorexpr/ir_visitor.h>
 #include <torch/csrc/jit/tensorexpr/stmt.h>
 
 namespace torch {
@@ -22,33 +23,82 @@ namespace tensorexpr {
  *   [x] Insert alloc/free stmts
  *   [x] Compute map old->new indexes for the expression we're moving
  *   [ ] Add tests
- * [ ] Take into account how index is used when replacing (if with '-', then it
- * should be replaced with max/min instead of min/max)
- * [ ] Generally handle signed multiplication
  * [ ] Use jit_log
  * [.] Add comments and cleanup
  * [x] Buffer and FunctionCall cleanup (buffers are 1-D, functions are N-d)
+ * [.] Bounds inference API cleanup and document
+ * [ ] compute_at API cleanup and document
+ * [ ] Remove this comment
+ * Longer term:
+ *   [ ] DFG
+ *   [ ] Dead code elimination
+ *   [ ] Correctly handle non-increasing indexes
  */
 
-void AccessFinder::visit(const Load* v) {
-  std::cerr << "Load:" << *v << "\n";
-  accesses.push_back({v->buf(), kLoad, v->indices(), v->indices()});
+class BoundsInference : public IRVisitor {
+ public:
+  void visit(const FunctionCall* v);
+  void visit(const Load* v) override;
+  void visit(const Store* v) override;
+  void visit(const For* v) override;
+  void visit(const Block* v) override;
+
+  BoundsInfo accesses() const {
+    return accesses_;
+  }
+
+ private:
+  BoundsInfo accesses_;
+};
+
+void BoundsInference::visit(const Load* v) {
+  accesses_.push_back({v->buf(), kLoad, v->indices(), v->indices()});
 }
-void AccessFinder::visit(const FunctionCall* v) {
-  std::cerr << "Function call:" << *v << "\n";
-  accesses.push_back(
-      {v->tensor()->func_var(), kStore, v->params(), v->params()});
+
+void BoundsInference::visit(const FunctionCall* v) {
+  accesses_.push_back(
+      {v->tensor()->func_var(), kLoad, v->params(), v->params()});
 }
-void AccessFinder::visit(const Store* v) {
-  std::cerr << "Store:" << *v << "\n";
-  accesses.push_back({v->buf(), kStore, v->indices(), v->indices()});
+
+void BoundsInference::visit(const Store* v) {
+  accesses_.push_back({v->buf(), kStore, v->indices(), v->indices()});
   IRVisitor::visit(v);
 }
 
-void printBufVector(const std::vector<TensorAccess>& v) {
+void BoundsInference::visit(const For* v) {
+  v->body()->accept(this);
+  for (size_t i = 0; i < accesses_.size(); i++) {
+    for (size_t j = 0; j < accesses_[i].start.size(); j++) {
+      // TODO: This function assumes that all indices grow monotonically and
+      // thus for the loop:
+      //   for i in A..B:
+      //     buf[i] = i
+      // the range for i is [A, B). It should be generalized to correctly handle
+      // all cases.
+      const Expr* old_start = accesses_[i].start[j];
+      const Expr* old_stop = accesses_[i].stop[j];
+      const Expr* new_start = Substitute(old_start, {{v->var(), v->start()}});
+      const Expr* new_stop =
+          Substitute(old_stop, {{v->var(), new Sub(v->stop(), new IntImm(1))}});
+      accesses_[i].start[j] = IRSimplifier::simplify(new_start);
+      accesses_[i].stop[j] = IRSimplifier::simplify(new_stop);
+    }
+  }
+}
+
+void BoundsInference::visit(const Block* v) {
+  BoundsInfo res;
+  for (auto s : v->stmts()) {
+    s->accept(this);
+    res.insert(res.end(), accesses_.begin(), accesses_.end());
+  }
+  accesses_ = res;
+}
+
+void printBoundsInfo(const BoundsInfo& v) {
   std::cerr << "Access vector {\n";
   for (const auto& b : v) {
-    std::cerr << *b.var << " in (";
+    std::cerr << *b.buf << " in (";
     int i = 0;
     for (const auto& s : b.start) {
       if (i != 0) {
@@ -71,87 +121,75 @@ void printBufVector(const std::vector<TensorAccess>& v) {
   std::cerr << "}\n";
 }
 
-std::vector<TensorAccess> BoundsInference::inferBoundsForLoop(For* f) {
-  std::cerr << "Analyzing For loop:\n" << *f << "\n";
-  auto res = inferBoundsForBlock(f->body());
-  for (size_t i = 0; i < res.size(); i++) {
-    for (size_t j = 0; j < res[i].start.size(); j++) {
-      const Expr* old_start = res[i].start[j];
-      const Expr* old_stop = res[i].stop[j];
-      const Expr* new_start = Substitute(old_start, {{f->var(), f->start()}});
-      const Expr* new_stop =
-          Substitute(old_stop, {{f->var(), new Sub(f->stop(), new IntImm(1))}});
-      res[i].start[j] = IRSimplifier::simplify(new_start);
-      res[i].stop[j] = IRSimplifier::simplify(new_stop);
-    }
-  }
-  std::cerr << "Analyzed For loop:\n" << *f << "\n";
-  printBufVector(res);
-  return res;
-}
-
-std::vector<TensorAccess> BoundsInference::inferBoundsForBlock(Block* b) {
-  std::cerr << "Analyzing block:\n" << *b << "\n";
-  std::vector<TensorAccess> res;
-  for (auto s : b->stmts()) {
-    std::vector<TensorAccess> stmt_bufs;
-    ;
-    if (auto* f = dynamic_cast<For*>(s)) {
-      stmt_bufs = inferBoundsForLoop(f);
-    } else if (auto* st = dynamic_cast<Store*>(s)) {
-      stmt_bufs = inferBoundsForStore(st);
+// TODO: This probably should be done as a part of IR simplifier.
+static const Expr* simplifyMin(const Expr* a, const Expr* b) {
+  const Expr* diff = IRSimplifier::simplify(new Sub(a, b));
+  if (auto diff_imm = dynamic_cast<const IntImm*>(diff)) {
+    if (diff_imm->value() < 0) {
+      return a;
     } else {
-      std::cerr << "Not analyzing stmt:\n" << *s << "\n";
+      return b;
     }
-    res = mergeBufVectors(res, stmt_bufs);
   }
-  std::cerr << "Analyzed block:\n" << *b << "\nResult:\n";
-  printBufVector(res);
+  return new Min(a, b, true);
+}
+
+static const Expr* simplifyMax(const Expr* a, const Expr* b) {
+  const Expr* diff = IRSimplifier::simplify(new Sub(a, b));
+  if (auto diff_imm = dynamic_cast<const IntImm*>(diff)) {
+    if (diff_imm->value() > 0) {
+      return a;
+    } else {
+      return b;
+    }
+  }
+  return new Max(a, b, true);
+}
+
+/*
+ * Go through the given BoundsInfo vector and merge entries corresponding to
+ * the same buf. E.g. given
+ *    [{a, kLoad, 0, 100}, {b, kStore, 0, 100}, {a, kLoad, 10, 110}]
+ * produce:
+ *    [{a, kLoad, 0, 110}, {b, kStore, 0, 100}]
+ */
+static BoundsInfo mergeTensorAccesses(const BoundsInfo& unmerged) {
+  BoundsInfo res;
+  std::unordered_map<const Buf*, TensorAccessBoundsInfo> merged;
+  for (const auto& t : unmerged) {
+    if (!merged.count(t.buf)) {
+      merged[t.buf] = t;
+      continue;
+    }
+
+    // We already have some range for this buf, try to merge them
+    TensorAccessBoundsInfo old_t = merged.at(t.buf);
+    TensorAccessBoundsInfo new_t = t;
+
+    for (size_t i = 0; i < old_t.start.size(); i++) {
+      new_t.start[i] = simplifyMin(old_t.start[i], new_t.start[i]);
+    }
+    for (size_t i = 0; i < old_t.stop.size(); i++) {
+      new_t.stop[i] = simplifyMax(old_t.stop[i], new_t.stop[i]);
+    }
+    merged[t.buf] = new_t;
+  }
+
+  // Do the merge in two passes so that the original order of elements in
+  // BoundsInfo vector is preserved
+  std::unordered_set<const Buf*> added;
+  for (const auto& t : unmerged) {
+    if (added.insert(t.buf).second) {
+      res.push_back(merged.at(t.buf));
+    }
+  }
   return res;
 }
 
-std::vector<TensorAccess> BoundsInference::inferBoundsForStore(Store* st) {
-  std::cerr << "Analyzing Store:\n" << *st << "\n";
-  std::vector<TensorAccess> res;
-  //   res[st->base_handle()] = Range(st->index(), new Add(st->index(), new
-  //   IntImm(1)));
-  AccessFinder ac;
-  st->accept(&ac);
-  res = ac.accesses;
-  std::cerr << "Analyzed Store:\n" << *st << "\nResult:\n";
-  printBufVector(res);
-  return res;
-}
-
-std::vector<TensorAccess> BoundsInference::mergeBufVectors(
-    std::vector<TensorAccess> a,
-    std::vector<TensorAccess> b) {
-  std::vector<TensorAccess> res(a);
-  res.insert(a.end(), b.begin(), b.end());
-  for (const auto& p : b) {
-    //     res[p.first] = p.second;
-  }
-  return res;
-}
-
-std::unordered_map<const Var*, Range> convert(
-    const std::vector<TensorAccess>& v) {
-  std::unordered_map<const Var*, Range> r;
-  for (auto ta : v) {
-    //     r[ta.var] = Range(ta.start, ta.stop);
-  }
-  return r;
-}
-
-std::unordered_map<const Var*, Range> inferBounds(Stmt* s) {
-  BoundsInference bi;
-  std::cerr << "Given stmt:\n" << *s << "\n";
-  if (auto* b = dynamic_cast<Block*>(s)) {
-    return convert(bi.inferBoundsForBlock(b));
-  }
-  auto* f = dynamic_cast<For*>(s);
-  CHECK(f);
-  return convert(bi.inferBoundsForLoop(f));
+BoundsInfo inferBounds(Stmt* s) {
+  BoundsInference ac;
+  s->accept(&ac);
+  return mergeTensorAccesses(ac.accesses());
 }
 
 } // namespace tensorexpr

@@ -633,13 +633,13 @@ std::vector<Tensor*> LoopNest::findAllNeededTensors(
     if (all_processed) {
       result.push_back(t);
       if (processed.count(t)) {
-        throw malformed_input();
+        throw malformed_input("failure to find all processed Tensors");
       }
 
       processed.insert(t);
     } else {
       if (queued.count(t)) {
-        throw malformed_input();
+        throw malformed_input("failure to find all queued Tensors");
       }
 
       q.push(t);
@@ -687,8 +687,15 @@ Stmt* LoopNest::lowerToStmt(Tensor* t) {
     return body;
   }
 
+  if (t->buf()->ndim() == 0) {
+    throw malformed_input("Tensor lowered to zero dimensions");
+  }
+
   for (size_t i = 0; i < t->buf()->ndim(); i++) {
-    body = new For(f->arg(i), new IntImm(0), t->buf()->dim(i), body);
+    // Going in reverse order: from innermost loop to the outermost
+    size_t dim_index = t->buf()->ndim() - i - 1;
+    body = new For(
+        f->arg(dim_index), new IntImm(0), t->buf()->dim(dim_index), body);
   }
   return body;
 }
@@ -760,9 +767,9 @@ void LoopNest::splitWithTail(
     For** tail) {
   Block* p = dynamic_cast<Block*>(f->get_parent());
   if (!f) {
-    throw malformed_input(f);
+    throw malformed_input("splitWithTail attempted on null loop", f);
   } else if (!p) {
-    throw malformed_input(p);
+    throw malformed_input("splitWithTail attempted on loop with no parent", p);
   }
 
   bool tail_is_needed = true;
@@ -886,7 +893,7 @@ std::vector<For*> LoopNest::getLoopStmtsFor(Tensor* t) const {
     }
     cur_stmt = cur_stmt->get_parent();
   }
-  return result;
+  return std::vector<For*>(result.rbegin(), result.rend());
 }
 
 void LoopNest::setGPUBlockIndex(For* f, int block_index) {
@@ -910,56 +917,65 @@ Stmt* FlattenIndexes(Stmt* s) {
   return idx_flattener.flatten(s);
 }
 
-const Expr* computeMin(const Expr* a, const Expr* b) {
-  const Expr* diff = IRSimplifier::simplify(new Sub(a, b));
-  if (auto diff_imm = dynamic_cast<const IntImm*>(diff)) {
-    if (diff_imm->value() < 0) {
-      return a;
-    } else {
-      return b;
+class LoopComputeAtRewriter : public IRMutator {
+ public:
+  LoopComputeAtRewriter(
+      const Buf* var,
+      const Buf* new_var,
+      std::vector<const Expr*> offsets)
+      : var_(var), new_var_(new_var), offsets_(offsets) {}
+
+ private:
+  const Buf* var_;
+  const Buf* new_var_;
+  std::vector<const Expr*> offsets_;
+
+  const Expr* mutate(const Load* v) override {
+    if (v->buf() != var_) {
+      return v;
+    }
+    std::vector<const Expr*> new_indices;
+    for (size_t i = 0; i < v->indices().size(); i++) {
+      new_indices.push_back(
+          IRSimplifier::simplify(new Sub(v->indices()[i], offsets_[i])));
+    }
+    return new Load(v->dtype(), new_var_, new_indices, v->mask());
+  }
+  const Expr* mutate(const FunctionCall* v) override {
+    if (v->tensor()->func_var() != var_) {
+      return v;
+    }
+    std::vector<const Expr*> new_indices;
+    for (size_t i = 0; i < v->nparams(); i++) {
+      new_indices.push_back(
+          IRSimplifier::simplify(new Sub(v->param(i), offsets_[i])));
+    }
+    return new Load(v->dtype(), new_var_, new_indices, new IntImm(1));
+  }
+};
+
+Store* getStoreStmtOfProducer(Stmt* s) {
+  if (Store *st = dynamic_cast<Store*>(s)) {
+    return st;
+  }
+  if (Block *b = dynamic_cast<Block*>(s)) {
+    for (Stmt* ss : b->stmts()) {
+      if (Store* st = dynamic_cast<Store*>(ss)) {
+        return st;
+      }
     }
   }
-  return new Min(a, b, true);
+  return nullptr;
 }
-const Expr* computeMax(const Expr* a, const Expr* b) {
-  const Expr* diff = IRSimplifier::simplify(new Sub(a, b));
-  if (auto diff_imm = dynamic_cast<const IntImm*>(diff)) {
-    if (diff_imm->value() > 0) {
-      return a;
-    } else {
-      return b;
-    }
-  }
-  return new Max(a, b, true);
-}
 
-std::vector<TensorAccess> mergeTensorAccesses(std::vector<TensorAccess> a) {
-  std::vector<TensorAccess> res;
-  std::unordered_map<const Buf*, TensorAccess> merged;
-  for (const auto& t : a) {
-    if (!merged.count(t.var)) {
-      merged[t.var] = t;
-      continue;
+std::vector<const Var*> getOuterLoopIndexes(Stmt* s) {
+  std::vector<const Var*> res;
+  Stmt* cur = s;
+  while (cur) {
+    if (auto l = dynamic_cast<For*>(cur)) {
+      res.push_back(l->var());
     }
-
-    // We already have some range for this var, try to merge them
-    TensorAccess old_t = merged.at(t.var);
-    TensorAccess new_t = t;
-
-    for (size_t i = 0; i < old_t.start.size(); i++) {
-      new_t.start[i] = computeMin(old_t.start[i], new_t.start[i]);
-    }
-    for (size_t i = 0; i < old_t.stop.size(); i++) {
-      new_t.stop[i] = computeMax(old_t.stop[i], new_t.stop[i]);
-    }
-    merged[t.var] = new_t;
-  }
-
-  std::unordered_set<const Buf*> added;
-  for (const auto& t : a) {
-    if (added.insert(t.var).second) {
-      res.push_back(merged.at(t.var));
-    }
+    cur = cur->get_parent();
   }
   return res;
 }
@@ -1030,158 +1046,130 @@ std::vector<TensorAccess> mergeTensorAccesses(std::vector<TensorAccess> a) {
  * buffer with proper values. When we copy the computation we also must rewrite
  * indices used in it: old indices are referring to the old loop and are not
  * valid in the new loop.
+ *
+ * To easier follow the logic, let's examine an example. Suppose we start from
+ * the following loop nest:
+ *   for py in 0..100:
+ *     for px in 0..100:
+ *       producer[py,px] = py*px
+ *   for cy in 0..100:
+ *     for cx in 0..100:
+ *       consumer[cy,cx] = producer[cy,cx]
+ *
+ * And then we're running `compute_at(producer, cy)`.
+ *
+ * What we would like to get is the following loop nest:
+ *   for py in 0..100:
+ *     for px in 0..100:
+ *       producer[py,px] = py*px
+ *   for cy in 0..100:
+ *     Allocate(temp, {1, 100})
+ *     for ty in 0..1:
+ *       for tx in 0..100:
+ *         temp[ty,tx] = (ty+cy)*(tx+0)
+ *     for cx in 0..100:
+ *       consumer[cy,cx] = temp[0,cx]
+ *     Free(temp)
+ *
+ * NB: this loop nest can and should be simplified (e.g. the producer loop can
+ * be removed since its result is no longer used), but this clean-up
+ * optimization is performed separately (currently, not performed at all).
+ *
+ * If we examine the final loop nest, we can identify that the following steps
+ * needs to be performed:
+ *   - Bounds inference needs to tell us that we need a 1x100 buffer for temp.
+ *   - Allocate and Free statements for this buffer need to be inserted to the
+ *   loop.
+ *   - A new loop-nest should be inserted to the loop CY for computing `temp`
+ *   and it should replicate the loopnest of producer (PY,PX loops). The indices
+ *   in the loop body need to be offset by (cy, 0) - the offsets come from
+ *   bounds inference too.
+ *   - The computation of `consumer` needs to be rewritten so that it uses
+ *   `temp` instead of `producer`. The indices in the corresponding accesses
+ *   also need to be offset.
  */
-class LoopComputeAtRewriter : public IRMutator {
- public:
-  LoopComputeAtRewriter(
-      const Buf* var,
-      const Buf* new_var,
-      std::vector<const Expr*> offsets)
-      : var_(var), new_var_(new_var), offsets_(offsets) {}
-
- private:
-  const Buf* var_;
-  const Buf* new_var_;
-  std::vector<const Expr*> offsets_;
-
-  const Expr* mutate(const Load* v) override {
-    std::cerr << "Comparing " << *v << " with " << *var_ << "\n";
-    if (v->buf() != var_) {
-      return v;
-    }
-    std::cerr << "Substituting " << *v << "\n";
-    std::vector<const Expr*> new_indices;
-    for (size_t i = 0; i < v->indices().size(); i++) {
-      new_indices.push_back(
-          IRSimplifier::simplify(new Sub(v->indices()[i], offsets_[i])));
-    }
-    const Expr* l = new Load(v->dtype(), new_var_, new_indices, v->mask());
-    return l;
-  }
-  const Expr* mutate(const FunctionCall* v) override {
-    std::cerr << "Comparing " << *v << " with " << *var_ << "\n";
-    if (v->tensor()->func_var() != var_) {
-      return v;
-    }
-    std::cerr << "Substituting " << *v << "\n";
-    std::vector<const Expr*> new_indices;
-    for (size_t i = 0; i < v->nparams(); i++) {
-      new_indices.push_back(
-          IRSimplifier::simplify(new Sub(v->param(i), offsets_[i])));
-    }
-    const Expr* l = new Load(v->dtype(), new_var_, new_indices, new IntImm(1));
-    std::cerr << "New load " << *l << "\n";
-    return l;
-  }
-};
-
-Store* getStoreStmtOfProducer(Stmt* s) {
-  if (Store *st = dynamic_cast<Store*>(s)) {
-    return st;
-  }
-  if (Block *b = dynamic_cast<Block*>(s)) {
-    for (Stmt* ss : b->stmts()) {
-      if (Store* st = dynamic_cast<Store*>(ss)) {
-        return st;
-      }
-    }
-  }
-  return nullptr;
-}
-
-std::vector<const Var*> getOuterLoopIndexes(Stmt* s) {
-  std::vector<const Var*> res;
-  Stmt* cur = s;
-  while (cur) {
-    if (auto l = dynamic_cast<For*>(cur)) {
-      res.push_back(l->var());
-    }
-    cur = cur->get_parent();
-  }
-  return res;
-}
-
 void LoopNest::computeAt(Stmt* s, For* f) {
-  std::cerr << "COMPUTE AT:\n";
-
   Store* st = getStoreStmtOfProducer(s);
   if (!st) {
     return;
   }
 
-  AccessFinder ac;
-  st->accept(&ac);
+  // Infer bounds info for all accesses that we make in the loop
+  auto loop_bounds_info = inferBounds(f->body());
 
-  BoundsInference bi;
-  auto bi_result = bi.inferBoundsForBlock(f->body());
-  auto merged_bi_result = mergeTensorAccesses(bi_result);
-
-  std::cerr << "Accesses in the loop:\n";
-  printBufVector(merged_bi_result);
-  TensorAccess ta;
+  // store_bounds_info holds bounds info for the store we're trying to move to
+  // the loop. If its result isn't accessed in the loop at all - do nothing and
+  // exit early.
+  TensorAccessBoundsInfo store_bounds_info;
   bool found = false;
-  for (auto p : merged_bi_result) {
-    if (p.var == st->buf()) {
-      ta = p;
+  for (const TensorAccessBoundsInfo& p : loop_bounds_info) {
+    if (p.buf == st->buf()) {
+      store_bounds_info = p;
       found = true;
     }
   }
-
   if (!found) {
     return;
   }
 
-  std::vector<const Var*> prod_indices = getOuterLoopIndexes(s);
-
-  // Compute dims
+  // Compute dimensions of the temp buffer we would need to allocate
   std::vector<const Expr*> dims;
-  for (size_t i = 0; i < ta.start.size(); i++) {
-    const Expr* dim = IRSimplifier::simplify(
-        new Add(new Sub(ta.stop[i], ta.start[i]), new IntImm(1)));
+  for (size_t i = 0; i < store_bounds_info.start.size(); i++) {
+    const Expr* dim = IRSimplifier::simplify(new Add(
+        new Sub(store_bounds_info.stop[i], store_bounds_info.start[i]),
+        new IntImm(1)));
     dims.push_back(dim);
   }
 
-  // Generate alloc/free stmts
-  const Buf* new_var = new Buf(new Var("temp", ta.var->dtype()), dims);
-  Stmt* al = new Allocate(new_var->base_handle(), ta.var->dtype(), dims);
-  Stmt* fr = new Free(new_var->base_handle());
+  // TODO: Use name-hint of the producer instead of "temp"
+  const Buf* temp_buf =
+      new Buf(new Var("temp", store_bounds_info.buf->dtype()), dims);
 
-  // Generate computation for the moved stmt
-
-  // Generate Compute loop
-  // Generate index variables
+  // Generate index variables for 'temp'
   std::vector<const Expr*> temp_indices(dims.size());
   for (size_t i = 0; i < dims.size(); i++) {
-    // Going in reverse order: from innermost loop to the outermost
+    // TODO: Use name-hint of the producer indices instead of 'idx'
     temp_indices[i] = new Var(std::string("idx") + std::to_string(i), kInt);
   }
 
   // Prepare substitute rules for constructing the temp statement from the prod
   // statement
+  // TODO: Instead of going up the loop nest we should go through the indices in
+  // the original tensor expression. The loops in the nest might've been
+  // modified (e.g. split or merged) so that the loop indices no longer
+  // correspond to the indices of the original expression and even their number
+  // might be different. In that case, the loop below would crash.
+  std::vector<const Var*> prod_indices = getOuterLoopIndexes(s);
   std::vector<std::pair<const Var*, const Expr*>> rewrite_indices_map;
   for (size_t i = 0; i < prod_indices.size(); i++) {
-    const Expr* offset = ta.start[i];
-    std::cerr << "Rewrite index " << *prod_indices[i] << " -> "
-              << *temp_indices[i] << "+" << *offset << "\n";
+    const Expr* offset = store_bounds_info.start[i];
     rewrite_indices_map.push_back(
         {prod_indices[i], new Add(temp_indices[i], offset)});
   }
   // Construct the temp statement
-  std::vector<const Expr*> temp_indices_rev(temp_indices.rbegin(), temp_indices.rend());
   Stmt* bd = new Store(
-      new_var,
-      temp_indices_rev,
+      temp_buf,
+      temp_indices,
       Substitute(st->value(), rewrite_indices_map),
       st->mask());
 
   // Construct the loop nest for the temp computation
   for (size_t i = 0; i < dims.size(); i++) {
+    // We're creating loops from innermost to outermost, so we need to access
+    // dimensions in reversed order.
+    size_t dim_idx = dims.size() - 1 - i;
     bd = new For(
-        dynamic_cast<const Var*>(temp_indices[i]),
+        dynamic_cast<const Var*>(temp_indices[dim_idx]),
         new IntImm(0),
-        dims[i],
+        dims[dim_idx],
         bd);
   }
+
+  // Generate alloc/free stmts for 'temp'
+  Stmt* al = new Allocate(
+      temp_buf->base_handle(), store_bounds_info.buf->dtype(), dims);
+  Stmt* fr = new Free(temp_buf->base_handle());
+
 
   // Add constructed stmts to the consumer loop
   f->body()->prepend_stmt(bd);
@@ -1189,9 +1177,13 @@ void LoopNest::computeAt(Stmt* s, For* f) {
   f->body()->append_stmt(fr);
 
   // Rewrite accesses to producer in consumer with accesses to temp
-  LoopComputeAtRewriter lr(ta.var, new_var, ta.start);
+  LoopComputeAtRewriter lr(
+      store_bounds_info.buf, temp_buf, store_bounds_info.start);
   Stmt* new_f = f->accept_mutator(&lr);
-  std::cerr << "NEW FOR:\n" << *new_f << "\n";
+  if (f != new_f) {
+    Block* bb = dynamic_cast<Block*>(f->get_parent());
+    bb->replace_stmt(f, new_f);
+  }
 }
 
 } // namespace tensorexpr

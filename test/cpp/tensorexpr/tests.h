@@ -47,7 +47,6 @@ namespace jit {
   _(ScheduleFuserStyle)                   \
   _(ScheduleFuserThreeArg)                \
   _(ScheduleDynamicShape2D)               \
-  _(ScheduleBoundsInference)              \
   _(TypeTest01)                           \
   _(TypePropagation)                      \
   _(Cond01)                               \
@@ -125,7 +124,17 @@ namespace jit {
   _(SimplifyRoundModPattern)              \
   _(SimplifyRoundModPatternFactorization) \
   _(SimplifyRoundModPatternMultivar)      \
-  _(StmtClone)
+  _(StmtClone)                            \
+  _(BoundsInference_1)                    \
+  _(BoundsInference_2)                    \
+  _(BoundsInference_3)                    \
+  _(BoundsInference_4)                    \
+  _(BoundsInference_5)                    \
+  _(LoopNestComputeAt_1)                  \
+  _(LoopNestComputeAt_2)                  \
+  _(LoopNestComputeAt_3)                  \
+  _(LoopNestComputeAt_4)                  \
+  _(LoopNestComputeAt_5)
 
 #define TH_FORALL_TENSOREXPR_TESTS_LLVM(_) \
   _(LLVMByteImmTest)                       \

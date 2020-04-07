@@ -20,18 +20,14 @@ PaddedBufferBase::PaddedBufferBase(
     const std::vector<int>& dims,
     const std::string& name)
     : dims_(dims), name_(name), strides_(dims.size()) {
-  // stride[0] = 1
-  // stride[i] = stride[i-1]*dims[i-1], i > 0
-  size_t ndim = dims.size();
-  if (!ndim) {
-    total_size_ = 0;
-    return;
+  for (int i = dims.size() - 1; i >= 0; --i) {
+    if (i == dims.size() - 1) {
+      strides_[i] = 1;
+    } else {
+      strides_[i] = strides_[i + 1] * dims[i + 1];
+    }
   }
-  strides_[0] = 1;
-  for (size_t i = 1; i < ndim; ++i) {
-    strides_[i] = strides_[i - 1] * dims[i - 1];
-  }
-  total_size_ = strides_[ndim - 1] * dims[ndim - 1];
+  total_size_ = strides_[0] * dims[0];
 }
 
 } // namespace tensorexpr
