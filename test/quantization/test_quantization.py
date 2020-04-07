@@ -34,7 +34,7 @@ from torch.testing._internal.common_quantization import QuantizationTestCase, \
     test_only_eval_fn, test_only_train_fn, \
     prepare_dynamic, convert_dynamic, SingleLayerLinearDynamicModel, \
     TwoLayerLinearModel, NestedModel, ResNetBase, LSTMDynamicModel, \
-    ModelWithNoQconfigPropagation
+    ModelWithNoQconfigPropagation, ModelForFusionWithBias
 
 from torch.testing._internal.common_quantization import AnnotatedTwoLayerLinearModel, AnnotatedNestedModel, \
     AnnotatedSubNestedModel, AnnotatedCustomConfigNestedModel
@@ -1363,6 +1363,24 @@ class FusionTest(QuantizationTestCase):
         self.assertEqual(type(model.classifier[0]), nniq.LinearReLU)
         self.assertEqual(type(model.classifier[1]), nn.Identity)
 
+    def test_fusion_conv_with_bias(self):
+        model = ModelForFusionWithBias().train()
+        model = fuse_modules(model, [["conv1", "bn1", "relu1"],
+                                     ["conv2", "bn2"]])
+        model.qconfig = default_qat_qconfig
+        prepare_qat(model, inplace=True)
+        for i in range(2):
+            model(self.img_data[0][0])
+        convert(model, inplace=True)
+        model(self.img_data[0][0])
+
+        def checkQuantized(model):
+            self.assertEqual(type(model.conv1), nniq.ConvReLU2d)
+            self.assertEqual(type(model.bn1), nn.Identity)
+            self.assertEqual(type(model.relu1), nn.Identity)
+            self.assertEqual(type(model.conv2), nnq.Conv2d)
+            self.assertEqual(type(model.bn2), nn.Identity)
+        checkQuantized(model)
 
 class ObserverTest(QuantizationTestCase):
     @given(qdtype=st.sampled_from((torch.qint8, torch.quint8)),
