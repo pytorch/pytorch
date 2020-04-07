@@ -209,7 +209,7 @@ struct EraseLoadStores {
           // the rest of the graph
           auto body = n->blocks().at(0);
           eraseBlockLoadStores(body);
-          // inline the comprehension scope into the graph
+          // inline the local variable scope into the graph
           for (auto it_cmpr = body->nodes().begin();
                it_cmpr != body->nodes().end();) {
             Node* body_node = *it_cmpr;
