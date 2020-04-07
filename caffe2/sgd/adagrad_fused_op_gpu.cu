@@ -76,7 +76,7 @@ void inclusive_scan_wrapper(
       context_->cuda_stream());
 }
 
-template <typename SIndex, typename THalf, typename T, bool ExactBlock = false>
+template <typename SIndex, typename TParam, typename T, bool ExactBlock = false>
 #ifdef __HIP_PLATFORM_HCC__
 C10_LAUNCH_BOUNDS_2(1024, SEGREDUCE_MINBLOCKS)
 #endif
@@ -88,8 +88,8 @@ __global__ void sparse_adagrad_fused_length_sum_gradient_kernel(
     int post, // embedding dimension size
     int len_length, // number of segments
     const float epsilon,
-    THalf* param,
-    THalf* param_mom,
+    TParam* param,
+    TParam* param_mom,
     const SIndex* indices,
     const T* __restrict__ grad,
     const float* lr) {
@@ -138,7 +138,7 @@ __global__ void sparse_adagrad_fused_length_sum_gradient_kernel(
   }
 }
 
-template <typename SIndex, typename THalf, typename T, int NumThreads>
+template <typename SIndex, typename TParam, typename T, int NumThreads>
 #ifdef __HIP_PLATFORM_HCC__
 C10_LAUNCH_BOUNDS_2(1024, SEGREDUCE_MINBLOCKS)
 #endif
@@ -148,8 +148,8 @@ __global__ void sparse_adagrad_fused_length_weighted_sum_gradient_kernel(
     int post, // embedding dimension size
     int len_length, // number of segments
     const float epsilon,
-    THalf* param,
-    THalf* param_mom,
+    TParam* param,
+    TParam* param_mom,
     const SIndex* indices,
     const T* __restrict__ grad,
     const T* __restrict__ weights,
@@ -208,10 +208,6 @@ __global__ void sparse_adagrad_fused_length_weighted_sum_gradient_kernel(
 
     w_grad = BlockReduce(temp_storage).Reduce(w_grad, cub::Sum());
 
-    // Alternative:
-    // int valid = min(post, blockDim.x);
-    // float w_reduce_result = BlockReduce(temp_storage).Sum(w_grad, valid);
-
     if (threadIdx.x == 0) {
       weights_grad_out[line] = w_grad;
     }
@@ -219,7 +215,7 @@ __global__ void sparse_adagrad_fused_length_weighted_sum_gradient_kernel(
   }
 }
 
-template <typename SIndex, typename THalf, typename T, bool ExactBlock = false>
+template <typename SIndex, typename TParam, typename T, bool ExactBlock = false>
 #ifdef __HIP_PLATFORM_HCC__
 C10_LAUNCH_BOUNDS_2(1024, SEGREDUCE_MINBLOCKS)
 #endif
@@ -231,8 +227,8 @@ __global__ void rowwise_sparse_adagrad_fused_length_sum_gradient_kernel(
     int post, // embedding dimension size
     int len_length, // number of segments
     const float epsilon,
-    THalf* param,
-    THalf* param_mom,
+    TParam* param,
+    T* param_mom,
     const SIndex* indices,
     const T* __restrict__ grad,
     const float* lr) {
@@ -274,7 +270,7 @@ __global__ void rowwise_sparse_adagrad_fused_length_sum_gradient_kernel(
         row_sum_squares_avg = reduce_result / static_cast<float>(post);
         // AtomicAdd when the embedding dim is larger than 32.
         // param_mom[index] += row_sum_squares_avg;
-        gpuAtomicAdd(&param_mom[index], static_cast<THalf>(row_sum_squares_avg));
+        gpuAtomicAdd(&param_mom[index], static_cast<T>(row_sum_squares_avg));
       }
       __syncthreads();
 
@@ -287,10 +283,7 @@ __global__ void rowwise_sparse_adagrad_fused_length_sum_gradient_kernel(
     // TODO: Tuning NumThreads for sum_squares
     typedef cub::BlockReduce<float, CAFFE_CUDA_NUM_THREADS> BlockReduce;
     __shared__ BlockReduce::TempStorage temp_storage;
-    // int valid = min(post, CAFFE_CUDA_NUM_THREADS);
     int valid = min(post, blockDim.x);
-
-
 
     for (int line = start; line < end; ++line) {
       // line: the idx in the indices
@@ -305,12 +298,11 @@ __global__ void rowwise_sparse_adagrad_fused_length_sum_gradient_kernel(
         sum_squares += x_ij * x_ij;
       }
       float reduce_result = BlockReduce(temp_storage).Sum(sum_squares, valid);
-      // float reduce_result =
-      //     BlockReduce(temp_storage).Sum(sum_squares, blockDim.x);
 
       if (threadIdx.x == 0) {
         row_sum_squares_avg = reduce_result / static_cast<float>(post);
-        param_mom[index] += row_sum_squares_avg;
+        float mom_new = param_mom[index] + static_cast<T>(row_sum_squares_avg);
+        param_mom[index] = mom_new;
       }
       __syncthreads();
 
@@ -318,13 +310,14 @@ __global__ void rowwise_sparse_adagrad_fused_length_sum_gradient_kernel(
       float step = LR / (sqrtf(param_mom[index]) + epsilon);
       for (int i = threadIdx.x; i < post; i += blockDim.x) {
         const size_t paramIdx = index * post + i; // index for param
-        param[paramIdx] = param[paramIdx] + grad[group * post + i] * step;
+        float param_new = param[paramIdx] + grad[group * post + i] * step;
+        param[paramIdx] = param_new;
       }
     }
   }
 }
 
-template <typename SIndex, typename THalf, typename T, int NumThreads>
+template <typename SIndex, typename TParam, typename T, int NumThreads>
 #ifdef __HIP_PLATFORM_HCC__
 C10_LAUNCH_BOUNDS_2(1024, SEGREDUCE_MINBLOCKS)
 #endif
@@ -337,8 +330,8 @@ __global__
         int post, // embedding dimension size
         int len_length, // number of segments
         const float epsilon,
-        THalf* param,
-        THalf* param_mom,
+        TParam* param,
+        T* param_mom,
         const SIndex* indices,
         const T* __restrict__ grad,
         const T* __restrict__ weights,
@@ -383,7 +376,8 @@ __global__
 
     if (threadIdx.x == 0) {
       row_sum_squares_avg = reduce_result / static_cast<float>(post);
-      param_mom[index] += row_sum_squares_avg * in_weight_temp * in_weight_temp;
+      param_mom[index] +=
+          static_cast<T>(row_sum_squares_avg * in_weight_temp * in_weight_temp);
     }
     __syncthreads();
 
@@ -453,7 +447,7 @@ class CUDASparseAdagradFusedWithSparseLengthsSumGradientOp final
         this, Input(PARAM));
   }
 
-  template <typename IndexType, typename THalf>
+  template <typename IndexType, typename TParam>
   bool DoRunWithType2() {
     auto& segmentGradsInput = Input(GRAD);
     auto& lengthsInput = Input(LENGTHS);
@@ -498,8 +492,8 @@ class CUDASparseAdagradFusedWithSparseLengthsSumGradientOp final
     const auto* lr = Input(LR).template data<T>();
     const auto* indices = Input(INDICES).template data<IndexType>();
     const T* grad = Input(GRAD).template data<T>();
-    auto* paramOut = Output(OUTPUT_PARAM)->template mutable_data<THalf>();
-    auto* momentOut = Output(OUTPUT_MOMENT_1)->template mutable_data<THalf>();
+    auto* paramOut = Output(OUTPUT_PARAM)->template mutable_data<TParam>();
+    auto* momentOut = Output(OUTPUT_MOMENT_1)->template mutable_data<TParam>();
 
     int N = output_0dim;
     int post = segmentGradsInput.size_from_dim(1);
@@ -513,23 +507,26 @@ class CUDASparseAdagradFusedWithSparseLengthsSumGradientOp final
 
       // calling cuda kernel with ExactBlock = true
       // T should be rename as TGRAD ?
-      sparse_adagrad_fused_length_sum_gradient_kernel<IndexType, THalf, T, true>
-          <<<len_length, block, 0, context_.cuda_stream()>>>(
-              prefix_sum_length_data,
-              N,
-              post,
-              len_length,
-              epsilon_,
-              paramOut,
-              momentOut,
-              indices,
-              grad,
-              lr);
+      sparse_adagrad_fused_length_sum_gradient_kernel<
+          IndexType,
+          TParam,
+          T,
+          true><<<len_length, block, 0, context_.cuda_stream()>>>(
+          prefix_sum_length_data,
+          N,
+          post,
+          len_length,
+          epsilon_,
+          paramOut,
+          momentOut,
+          indices,
+          grad,
+          lr);
     } else {
       // calling cuda kernel with ExactBlock = false
       sparse_adagrad_fused_length_sum_gradient_kernel<
           IndexType,
-          THalf,
+          TParam,
           T,
           false><<<len_length, maxThreads, 0, context_.cuda_stream()>>>(
           prefix_sum_length_data,
@@ -595,7 +592,7 @@ class CUDASparseAdagradFusedWithSparseLengthsWeightedSumGradientOp final
         this, Input(PARAM));
   }
 
-  template <typename IndexType, typename THalf>
+  template <typename IndexType, typename TParam>
   bool DoRunWithType2() {
     auto& segmentGradsInput = Input(GRAD);
     auto& lengthsInput = Input(LENGTHS);
@@ -647,8 +644,8 @@ class CUDASparseAdagradFusedWithSparseLengthsWeightedSumGradientOp final
     const auto* indices = Input(INDICES).template data<IndexType>();
     const T* grad = Input(GRAD).template data<T>();
     const T* weights = weightsInput.template data<T>();
-    auto* paramOut = Output(OUTPUT_PARAM)->template mutable_data<THalf>();
-    auto* momentOut = Output(OUTPUT_MOMENT_1)->template mutable_data<THalf>();
+    auto* paramOut = Output(OUTPUT_PARAM)->template mutable_data<TParam>();
+    auto* momentOut = Output(OUTPUT_MOMENT_1)->template mutable_data<TParam>();
 
     int N = output_0dim;
     int post = segmentGradsInput.size_from_dim(1);
@@ -659,7 +656,7 @@ class CUDASparseAdagradFusedWithSparseLengthsWeightedSumGradientOp final
     if (post > 128) {
       sparse_adagrad_fused_length_weighted_sum_gradient_kernel<
           IndexType,
-          THalf,
+          TParam,
           T,
           512><<<len_length, 512, 0, context_.cuda_stream()>>>(
           prefix_sum_length_data,
@@ -677,7 +674,7 @@ class CUDASparseAdagradFusedWithSparseLengthsWeightedSumGradientOp final
     } else if (post > 64) {
       sparse_adagrad_fused_length_weighted_sum_gradient_kernel<
           IndexType,
-          THalf,
+          TParam,
           T,
           128><<<len_length, 128, 0, context_.cuda_stream()>>>(
           prefix_sum_length_data,
@@ -695,7 +692,7 @@ class CUDASparseAdagradFusedWithSparseLengthsWeightedSumGradientOp final
     } else if (post > 32) {
       sparse_adagrad_fused_length_weighted_sum_gradient_kernel<
           IndexType,
-          THalf,
+          TParam,
           T,
           64><<<len_length, 64, 0, context_.cuda_stream()>>>(
           prefix_sum_length_data,
@@ -713,7 +710,7 @@ class CUDASparseAdagradFusedWithSparseLengthsWeightedSumGradientOp final
     } else {
       sparse_adagrad_fused_length_weighted_sum_gradient_kernel<
           IndexType,
-          THalf,
+          TParam,
           T,
           32><<<len_length, 32, 0, context_.cuda_stream()>>>(
           prefix_sum_length_data,
@@ -778,7 +775,7 @@ class CUDARowWiseSparseAdagradFusedWithSparseLengthsSumGradientOp final
         this, Input(PARAM));
   }
 
-  template <typename IndexType, typename THalf>
+  template <typename IndexType, typename TParam>
   bool DoRunWithType2() {
     auto& segmentGradsInput = Input(GRAD);
     auto& lengthsInput = Input(LENGTHS);
@@ -823,8 +820,8 @@ class CUDARowWiseSparseAdagradFusedWithSparseLengthsSumGradientOp final
     const auto* lr = Input(LR).template data<T>();
     const auto* indices = Input(INDICES).template data<IndexType>();
     const T* grad = Input(GRAD).template data<T>();
-    auto* paramOut = Output(OUTPUT_PARAM)->template mutable_data<THalf>();
-    auto* momentOut = Output(OUTPUT_MOMENT_1)->template mutable_data<THalf>();
+    auto* paramOut = Output(OUTPUT_PARAM)->template mutable_data<TParam>();
+    auto* momentOut = Output(OUTPUT_MOMENT_1)->template mutable_data<T>();
 
     int N = output_0dim;
     int post = segmentGradsInput.size_from_dim(1);
@@ -840,26 +837,23 @@ class CUDARowWiseSparseAdagradFusedWithSparseLengthsSumGradientOp final
 
       rowwise_sparse_adagrad_fused_length_sum_gradient_kernel<
           IndexType,
-          THalf,
-          T, true>
-          <<<len_length,
-             block,
-             0,
-             context_.cuda_stream()>>>(
-              prefix_sum_length_data,
-              N,
-              post,
-              len_length,
-              epsilon_,
-              paramOut,
-              momentOut,
-              indices,
-              grad,
-              lr);
+          TParam,
+          T,
+          true><<<len_length, block, 0, context_.cuda_stream()>>>(
+          prefix_sum_length_data,
+          N,
+          post,
+          len_length,
+          epsilon_,
+          paramOut,
+          momentOut,
+          indices,
+          grad,
+          lr);
     } else {
       rowwise_sparse_adagrad_fused_length_sum_gradient_kernel<
           IndexType,
-          THalf,
+          TParam,
           T,
           false>
           <<<len_length,
@@ -878,8 +872,8 @@ class CUDARowWiseSparseAdagradFusedWithSparseLengthsSumGradientOp final
               lr);
     }
 
-      return true;
-    }
+    return true;
+  }
 
  private:
   // menber field to manage memory
@@ -928,7 +922,7 @@ class CUDARowWiseSparseAdagradFusedWithSparseLengthsWeightedSumGradientOp final
         this, Input(PARAM));
   }
 
-  template <typename IndexType, typename THalf>
+  template <typename IndexType, typename TParam>
   bool DoRunWithType2() {
     auto& segmentGradsInput = Input(GRAD);
     auto& lengthsInput = Input(LENGTHS);
@@ -980,8 +974,8 @@ class CUDARowWiseSparseAdagradFusedWithSparseLengthsWeightedSumGradientOp final
     const auto* indices = Input(INDICES).template data<IndexType>();
     const T* grad = Input(GRAD).template data<T>();
     const T* weights = weightsInput.template data<T>();
-    auto* paramOut = Output(OUTPUT_PARAM)->template mutable_data<THalf>();
-    auto* momentOut = Output(OUTPUT_MOMENT_1)->template mutable_data<THalf>();
+    auto* paramOut = Output(OUTPUT_PARAM)->template mutable_data<TParam>();
+    auto* momentOut = Output(OUTPUT_MOMENT_1)->template mutable_data<T>();
 
     int N = output_0dim;
     int post = segmentGradsInput.size_from_dim(1);
@@ -992,7 +986,7 @@ class CUDARowWiseSparseAdagradFusedWithSparseLengthsWeightedSumGradientOp final
     if (post > 128) {
       rowwise_sparse_adagrad_fused_length_weighted_sum_gradient_kernel<
           IndexType,
-          THalf,
+          TParam,
           T,
           512><<<len_length, 512, 0, context_.cuda_stream()>>>(
           prefix_sum_length_data,
@@ -1010,7 +1004,7 @@ class CUDARowWiseSparseAdagradFusedWithSparseLengthsWeightedSumGradientOp final
     } else if (post > 64) {
       rowwise_sparse_adagrad_fused_length_weighted_sum_gradient_kernel<
           IndexType,
-          THalf,
+          TParam,
           T,
           128><<<len_length, 128, 0, context_.cuda_stream()>>>(
           prefix_sum_length_data,
@@ -1028,7 +1022,7 @@ class CUDARowWiseSparseAdagradFusedWithSparseLengthsWeightedSumGradientOp final
     } else if (post > 32) {
       rowwise_sparse_adagrad_fused_length_weighted_sum_gradient_kernel<
           IndexType,
-          THalf,
+          TParam,
           T,
           64><<<len_length, 64, 0, context_.cuda_stream()>>>(
           prefix_sum_length_data,
@@ -1046,7 +1040,7 @@ class CUDARowWiseSparseAdagradFusedWithSparseLengthsWeightedSumGradientOp final
     } else {
       rowwise_sparse_adagrad_fused_length_weighted_sum_gradient_kernel<
           IndexType,
-          THalf,
+          TParam,
           T,
           32><<<len_length, 32, 0, context_.cuda_stream()>>>(
           prefix_sum_length_data,
