@@ -36,7 +36,7 @@ void memset_junk(void* data, size_t num) {
   }
 }
 
-void* alloc_cpu(size_t nbytes) {
+void* alloc_cpu(size_t nbytes, const size_t alignment) {
   if (nbytes == 0) {
     return nullptr;
   }
@@ -48,11 +48,11 @@ void* alloc_cpu(size_t nbytes) {
 
   void* data;
 #ifdef __ANDROID__
-  data = memalign(gAlignment, nbytes);
+  data = memalign(alignment, nbytes);
 #elif defined(_MSC_VER)
-  data = _aligned_malloc(nbytes, gAlignment);
+  data = _aligned_malloc(nbytes, alignment);
 #else
-  int err = posix_memalign(&data, gAlignment, nbytes);
+  int err = posix_memalign(&data, alignment, nbytes);
   if (err != 0) {
     CAFFE_THROW(
         "DefaultCPUAllocator: can't allocate memory: you tried to allocate ",

@@ -27,7 +27,7 @@ C10_API void NoDelete(void*);
 // or a very large integer.
 C10_API void memset_junk(void* data, size_t num);
 
-C10_API void* alloc_cpu(size_t nbytes);
+C10_API void* alloc_cpu(size_t nbytes, size_t alignment = gAlignment);
 C10_API void free_cpu(void* data);
 
 // Get the CPU Allocator.
