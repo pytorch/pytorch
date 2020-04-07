@@ -9,9 +9,9 @@ __host__ __device__ __forceinline__ T ATenCeilDiv(T a, T b) {
   return (a + b - 1) / b;
 }
 
-// Threads per block for various kernel	s
-// FIXME: use occupancy calculator instead	
-constexpr uint32_t AT_APPLY_THREADS_PER_BLOCK = 512;	
+// Threads per block for various kernels
+// FIXME: use occupancy calculator instead
+constexpr uint32_t AT_APPLY_THREADS_PER_BLOCK = 512;
 constexpr uint32_t AT_APPLY_BLOCKS_PER_SM = 4;
 
 inline dim3 getApplyBlock() {
