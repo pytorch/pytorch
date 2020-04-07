@@ -290,6 +290,9 @@ struct SourceImporterImpl : public Resolver,
 
     // Module-specific: which attrs are parameters?
     std::unordered_set<std::string> parameter_names;
+
+    std::unordered_set<QualifiedName> forward_hook_names;
+    std::unordered_set<QualifiedName> forward_pre_hook_names;
     // Process statements, splitting things into attribute and method
     // definitions.
     for (const auto& statement : class_def.body()) {
@@ -299,7 +302,21 @@ struct SourceImporterImpl : public Resolver,
           switch (assign.lhs().kind()) {
             case TK_VAR: {
               const auto name = Var(assign.lhs()).name().name();
-              if (name == "__parameters__") {
+              if (name == "__forward_hooks__") {
+                const auto fwd_hook_list =
+                    ListLiteral(assign.rhs().get()).inputs();
+                for (const auto& hook_item : fwd_hook_list) {
+                  forward_hook_names.insert(QualifiedName(Var(hook_item).name().name()));
+                }
+              }
+              else if (name == "__forward_pre_hooks__") {
+                const auto fwd_pre_hook_list =
+                    ListLiteral(assign.rhs().get()).inputs();
+                for (const auto& hook_item : fwd_pre_hook_list) {
+                  forward_pre_hook_names.insert(QualifiedName(Var(hook_item).name().name()));
+                }
+              }
+              else if (name == "__parameters__") {
                 // Populate the module parameter list. This is a field that
                 // looks like:
                 //   __parameters__ = ["foo", "bar", "baz"]
@@ -357,6 +374,14 @@ struct SourceImporterImpl : public Resolver,
               kindToString(statement.kind()));
         }
       }
+    }
+
+    for (auto item : forward_hook_names) {
+      cu_->add_forward_hook(item);
+    }
+
+    for (auto item : forward_pre_hook_names) {
+      cu_->add_forward_pre_hook(item);
     }
 
     // Populate class attributes

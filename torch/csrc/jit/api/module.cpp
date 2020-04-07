@@ -118,6 +118,44 @@ IValue Method::operator()(std::vector<IValue> stack, const Kwargs& kwargs) {
   return (*function_)(std::move(stack), kwargs);
 }
 
+IValue Module::forward(std::vector<IValue> inputs) {
+  auto cu = _ivalue()->compilation_unit();
+  auto pre_forward_hooks = cu->get_forward_pre_hooks();
+  auto forward_hooks = cu->get_forward_hooks();
+
+  // Let's go over each pre-forward hook and call them
+  for (auto hook : pre_forward_hooks) {
+    auto fn = get_method(hook.qualifiedName());
+    auto tuple_input = c10::ivalue::Tuple::create(inputs);
+    std::vector<IValue> hook_inputs;
+    hook_inputs.push_back(tuple_input);
+
+    // Make the actual call
+    IValue result = fn(hook_inputs);
+
+    // Check the result
+    if (result.isTuple()) {
+      inputs = result.toTuple()->elements();
+    }
+  }
+
+  // Now let's call forward
+  auto outputs = get_method("forward")(inputs);
+
+  // It is now time for the forward hooks
+  for (auto hook : forward_hooks) {
+    auto fn = get_method(hook.qualifiedName());
+    Kwargs output_param;
+    output_param["outputs"] = outputs;
+    auto hook_result = fn(inputs, output_param);
+    if (hook_result.isTensor()) {
+      outputs = hook_result;
+    }
+  }
+
+  return outputs;
+}
+
 void Module::clone_method(
     const Module& orig,
     const Function& method,
