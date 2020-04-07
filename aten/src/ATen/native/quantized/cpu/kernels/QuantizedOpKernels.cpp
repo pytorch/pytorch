@@ -1904,9 +1904,9 @@ void quantized_layer_norm_kernel(
         float layer_var_div_scale_x_sq =
           std::max(static_cast<float>(l_sum_sq_shifted) / N -
               l_mean_shifted_div_scale_x * l_mean_shifted_div_scale_x, 0.0f);
-        // scale_x / std(dqX), scale epsilon properly
-        float scale_x_div_layer_std = 1.0f /
-          std::sqrt(layer_var_div_scale_x_sq + (eps * x_scale * x_scale));
+        // scale_x / sqrt(var(dqX) + eps)
+        float scale_x_div_layer_std = x_scale /
+          std::sqrt(layer_var_div_scale_x_sq * x_scale * x_scale + eps);
         fVec layer_mean_div_scale_xVec(layer_mean_div_scale_x);
         fVec scale_x_div_layer_stdVec(scale_x_div_layer_std);
 
