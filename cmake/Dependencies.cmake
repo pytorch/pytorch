@@ -961,14 +961,14 @@ endif()
 # ---[ LLVM
 if(USE_LLVM)
   message(STATUS "Looking for LLVM in ${USE_LLVM}")
-  find_package(LLVM QUIET PATHS ${USE_LLVM} NO_DEFAULT_PATH)
+  find_package(LLVM PATHS ${USE_LLVM} NO_DEFAULT_PATH)
 
   if(LLVM_FOUND)
     message(STATUS "Found LLVM ${LLVM_PACKAGE_VERSION}")
     message(STATUS "Using LLVMConfig.cmake in: ${LLVM_DIR}")
 
     include_directories(${LLVM_INCLUDE_DIRS})
-    add_definitions(-DTORCH_ENABLE_LLVM ${LLVM_DEFINITIONS})
+    add_definitions(-DTORCH_ENABLE_LLVM)
   endif(LLVM_FOUND)
 endif(USE_LLVM)
 
@@ -1275,6 +1275,7 @@ endif()
 if(NOT INTERN_BUILD_MOBILE)
   set(TORCH_CUDA_ARCH_LIST $ENV{TORCH_CUDA_ARCH_LIST})
   set(TORCH_NVCC_FLAGS $ENV{TORCH_NVCC_FLAGS})
+  separate_arguments(TORCH_NVCC_FLAGS)
   set(CMAKE_POSITION_INDEPENDENT_CODE TRUE)
 
   # Top-level build config
@@ -1321,7 +1322,7 @@ if(NOT INTERN_BUILD_MOBILE)
 
   if(CUDA_HAS_FP16 OR NOT ${CUDA_VERSION} LESS 7.5)
     message(STATUS "Found CUDA with FP16 support, compiling with torch.cuda.HalfTensor")
-    list(APPEND CUDA_NVCC_FLAGS "-DCUDA_HAS_FP16=1 -D__CUDA_NO_HALF_OPERATORS__ -D__CUDA_NO_HALF_CONVERSIONS__ -D__CUDA_NO_HALF2_OPERATORS__")
+    list(APPEND CUDA_NVCC_FLAGS "-DCUDA_HAS_FP16=1" "-D__CUDA_NO_HALF_OPERATORS__" "-D__CUDA_NO_HALF_CONVERSIONS__" "-D__CUDA_NO_HALF2_OPERATORS__")
     add_compile_options(-DCUDA_HAS_FP16=1)
   else()
     message(STATUS "Could not find CUDA with FP16 support, compiling without torch.CudaHalfTensor")
