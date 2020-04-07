@@ -21,6 +21,7 @@
                 - /release\/.*/
       # This binary build is currently broken, see https://github_com/pytorch/pytorch/issues/16710
       # - binary_linux_conda_3_6_cu90_devtoolset7_build
+      # TODO rename to remove python version for libtorch
       - binary_linux_build:
           name: binary_linux_libtorch_3_7m_cpu_devtoolset7_shared-with-deps_build
           build_environment: "libtorch 3.7m cpu devtoolset7"
@@ -50,6 +51,7 @@
                 - /release\/.*/
       # This job has an average run time of 3 hours o.O
       # Now only running this on master to reduce overhead
+      # TODO rename to remove python version for libtorch
       - binary_mac_build:
           name: binary_macos_libtorch_3_7_cpu_build
           build_environment: "libtorch 3.7 cpu"
@@ -78,6 +80,7 @@
                 - /release\/.*/
       # This binary build is currently broken, see https://github_com/pytorch/pytorch/issues/16710
       # - binary_linux_conda_3_6_cu90_devtoolset7_test:
+      # TODO rename to remove python version for libtorch
       - binary_linux_test:
           name: binary_linux_libtorch_3_7m_cpu_devtoolset7_shared-with-deps_test
           build_environment: "libtorch 3.7m cpu devtoolset7"
