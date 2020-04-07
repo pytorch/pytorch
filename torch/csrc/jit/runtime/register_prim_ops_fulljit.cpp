@@ -71,7 +71,7 @@ RegisterOperators reg({
           auto callback = node->cast<ProfileOp>()->getCallback();
           return [](Stack& stack) {
             AT_ERROR(
-              "Must be lowered to Interpreter's PROFILE instruction"); // NOLINT
+                "Must be lowered to Interpreter's PROFILE instruction"); // NOLINT
             return 0;
           };
         },

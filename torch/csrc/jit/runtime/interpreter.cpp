@@ -685,7 +685,7 @@ struct CodeImpl {
 
   void emitProfile(Node* node) {
     emitLoadInputs(node->inputs());
-    insertInstruction(PROFILE, profile_function_table_.size());
+    insertInstruction(PROFILE_OP, profile_function_table_.size());
     profile_function_table_.push_back(node->cast<ProfileOp>()->getCallback());
   }
 
@@ -1212,8 +1212,8 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             stack.emplace_back(future->value());
             ++af.pc;
           } break;
-          case PROFILE: {
-            auto frame_id_ref = frames.back().id;
+          case PROFILE_OP: {
+            auto& frame_id_ref = frames.back().id;
             if (!frame_id_ref.has_value()) {
               frame_id_ref = Frame::num_frames++;
             }
