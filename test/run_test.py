@@ -53,6 +53,7 @@ TESTS = [
     'quantization/test_numerics',
     'quantization/test_qat',
     'quantization/test_quantization',
+    'quantization/test_numeric_suite',
     'quantization/test_quantized',
     'quantization/test_quantized_tensor',
     'quantization/test_quantized_nn_mods',
@@ -158,6 +159,7 @@ SLOW_TESTS = [
     'distributed/test_c10d_spawn',
     'quantization/test_quantized',
     'quantization/test_quantization',
+    'quantization/test_numeric_suite',
     'test_determination',
 ]
 _DEP_MODULES_CACHE = {}
