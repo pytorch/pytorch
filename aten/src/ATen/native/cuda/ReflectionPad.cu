@@ -3,6 +3,7 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/Utils.h>
+#include <ATen/cuda/detail/IndexUtils.cuh>
 // keeping THC headers for gpuAtomicAdd
 #include <THC/THCAtomics.cuh>
 

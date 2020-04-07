@@ -1,5 +1,4 @@
 #include "ATen/ATen.h"
-#include "ATen/cuda/CUDAApplyUtils.cuh"
 #include "ATen/cuda/CUDAContext.h"
 #include "ATen/NativeFunctions.h"
 #include "ATen/TensorUtils.h"
@@ -9,6 +8,8 @@
 #include <THC/THCGeneral.h>
 #include "THC/THCNumerics.cuh"
 #include "THC/THCDeviceUtils.cuh"
+#include <ATen/cuda/CUDAUtils.h>
+#include <ATen/cuda/detail/IndexUtils.cuh>
 
 #include <algorithm>
 #include <cfloat>

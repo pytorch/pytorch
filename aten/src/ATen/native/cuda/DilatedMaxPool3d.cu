@@ -8,6 +8,7 @@
 #include <THC/THCAtomics.cuh>
 #include <THC/THCNumerics.cuh>
 #include <c10/macros/Macros.h>
+#include <ATen/cuda/CUDAUtils.h>
 
 
 namespace at {

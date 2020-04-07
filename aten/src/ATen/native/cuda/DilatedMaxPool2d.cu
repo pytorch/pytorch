@@ -9,6 +9,7 @@
 #include <THC/THCNumerics.cuh>
 #include <c10/macros/Macros.h>
 #include <ATen/native/cuda/LaunchUtils.h>
+#include <ATen/cuda/CUDAUtils.h>
 
 namespace at {
 namespace native {

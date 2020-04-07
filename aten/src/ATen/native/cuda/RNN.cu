@@ -4,6 +4,8 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <c10/macros/Macros.h>
+#include <ATen/cuda/detail/TensorInfo.cuh>
+#include <ATen/cuda/detail/IndexUtils.cuh>
 
 namespace at { namespace native {
 
