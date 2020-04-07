@@ -217,7 +217,9 @@ std::string CompareErrorMsg(
     const PaddedBuffer<T>& v2,
     int index) {
   std::ostringstream oss;
-  oss << "index: " << index << ", names: " << v1.name() << ", " << v2.name();
+  oss << "index: " << index << ", v1: (" << v1.name() << ", " << v1(index)
+      << ")"
+      << ", v2: (" << v2.name() << ", " << v2(index) << ")";
   return oss.str();
 }
 

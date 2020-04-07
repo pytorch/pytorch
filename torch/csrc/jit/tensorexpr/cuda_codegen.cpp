@@ -52,7 +52,8 @@ class ScopedVarName {
 static int as_int(const Expr* expr) {
   auto v = dynamic_cast<const IntImm*>(expr);
   if (!v) {
-    throw malformed_input(expr);
+    throw malformed_input(
+        "cuda_codegen: non Int expr interpreted as int", expr);
   }
 
   return v->value();
@@ -164,7 +165,16 @@ void CudaPrinter::visit(const Load* v) {
     os() << "__half2float(" << *v->base_handle() << "[" << *v->flat_index()
          << "])";
   } else {
-    os() << "__ldg(" << *v->base_handle() << " + " << *v->flat_index() << ")";
+    // Detects whether the load target is also a store target.
+    // TODO: this is currently too wide. It detects whether a store-target exists
+    // within the program. In fact, this check is only necessary within a
+    // kernel.
+    if (!cuda_analysis_->is_buf_store_target(v->buf())) {
+      // Cuda __ldg can only be applied on read-only buffers.
+      os() << "__ldg(" << *v->base_handle() << " + " << *v->flat_index() << ")";
+    } else {
+      os() << *v->base_handle() << "[" << *v->flat_index() << "]";
+    }
   }
 }
 
@@ -407,9 +417,12 @@ void CudaCodeGen::Initialize() {
   // TODO: handle multiple kernels.
   // TODO: handle dynamic dimension.
   // TODO: call nvrtc.
+  // TODO: merge HasRand with CudaAnalysis.
   HasRand has_rand_func(stmt());
   has_random_ = has_rand_func.has_rand();
-  printer_ = std::make_unique<CudaPrinter>(&oss_, has_random_);
+  cuda_analysis_ = std::make_unique<CudaAnalysis>();
+  printer_ =
+      std::make_unique<CudaPrinter>(&oss_, cuda_analysis_.get(), has_random_);
 
   os() << "#define NAN __int_as_float(0x7fffffff)\n"
           "#define POS_INFINITY __int_as_float(0x7f800000)\n"
@@ -466,6 +479,7 @@ void CudaCodeGen::Initialize() {
   Stmt* stmt_v = stmt();
   PrioritizeLoad prioritize_load;
   stmt_v = prioritize_load.Process(stmt_v);
+  stmt_v->accept(cuda_analysis_.get());
   stmt_v->accept(printer_.get());
   os() << std::endl;
   os() << "}";
@@ -508,7 +522,7 @@ void CudaCodeGen::Initialize() {
 
 void CudaCodeGen::call(const std::vector<CallArg>& args) {
   if (args.size() != buffer_args().size()) {
-    throw malformed_input();
+    throw malformed_input("cuda_codegen: wrong number of args in call");
   }
 
   // TODO: move as much of this into the constructors.
@@ -517,7 +531,8 @@ void CudaCodeGen::call(const std::vector<CallArg>& args) {
   const std::vector<const Expr*>& gpu_thread_extents =
       printer_->gpu_thread_extents();
   if (gpu_block_extents.size() > 3 || gpu_thread_extents.size() > 3) {
-    throw malformed_input();
+    throw malformed_input(
+        "cuda_codegen: block or thread extent greater than 3D");
   }
 
   std::vector<int> gpu_block_extents_v(3, 1);
@@ -680,6 +695,8 @@ void CudaCodeGen::CompileToNVRTC(
       nvrtc().cuModuleGetFunction(&function_, module, func_name.c_str()));
   at::cuda::set_device(prior_device);
 }
+
+CudaCodeGen::~CudaCodeGen() {}
 
 RegisterCodeGen<CudaCodeGen> cuda_codegen_reg("cuda_codegen");
 
