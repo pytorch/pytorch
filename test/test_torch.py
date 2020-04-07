@@ -6343,28 +6343,51 @@ class TestTorchDeviceType(TestCase):
     @unittest.skipIf(not TEST_SCIPY, "Scipy not found")
     def test_block_diag_scipy(self, device):
         import scipy.linalg
-        scipy_tensors = [
-            1,
-            [2],
-            [],
-            [3, 4, 5],
-            [[], []],
-            [[6], [7.3]]
+        scipy_tensors_list = [
+            [
+                1,
+                [2],
+                [],
+                [3, 4, 5],
+                [[], []],
+                [[6], [7.3]]
+            ],
+            [
+                [[1, 2], [3, 4]],
+                [1]
+            ],
+            [
+                [[4, 9], [7, 10]],
+                [4.6, 9.12],
+                [1j + 3]
+            ]
         ]
-        torch_tensors = [torch.tensor(t, device=device) for t in scipy_tensors]
-        torch_result = torch.block_diag(*torch_tensors)
-        self.assertEqual(torch_result.dtype, torch.float32)
 
-        scipy_result = torch.tensor(
-            scipy.linalg.block_diag(*scipy_tensors),
-            device=device
-        )
+        expected_torch_types = [
+            torch.float32,
+            torch.int64,
+            torch.complex64
+        ]
 
-        if scipy_result.dtype == torch.float64:
-            # Need to convert to 64-bit to compare with scipy
-            torch_result = torch_result.double()
+        expected_scipy_types = [
+            torch.float64,
+            torch.int64,
+            torch.complex128
+        ]
 
-        self.assertEqual(torch_result, scipy_result)
+        for scipy_tensors, torch_type, scipy_type in zip(scipy_tensors_list, expected_torch_types, expected_scipy_types):
+            torch_tensors = [torch.tensor(t, device=device) for t in scipy_tensors]
+            torch_result = torch.block_diag(*torch_tensors)
+            self.assertEqual(torch_result.dtype, torch_type)
+
+            scipy_result = torch.tensor(
+                scipy.linalg.block_diag(*scipy_tensors),
+                device=device
+            )
+            self.assertEqual(scipy_result.dtype, scipy_type)
+            scipy_result = scipy_result.to(torch_type)
+
+            self.assertEqual(torch_result, scipy_result)
 
     def test_is_set_to(self, device):
         t1 = torch.empty(3, 4, 9, 10, device=device)
