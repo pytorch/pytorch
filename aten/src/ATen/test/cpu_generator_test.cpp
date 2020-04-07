@@ -2,7 +2,7 @@
 
 #include <ATen/ATen.h>
 #include <ATen/Utils.h>
-#include <ATen/CPUGenerator.h>
+#include <ATen/CPUGeneratorImpl.h>
 #include <ATen/core/PhiloxRNGEngine.h>
 #include <thread>
 #include <limits>
@@ -10,14 +10,14 @@
 
 using namespace at;
 
-TEST(CPUGenerator, TestGeneratorDynamicCast) {
+TEST(CPUGeneratorImpl, TestGeneratorDynamicCast) {
   // Test Description: Check dynamic cast for CPU
   auto foo = at::detail::createCPUGenerator();
-  auto result = check_generator<CPUGenerator>(foo);
-  ASSERT_EQ(typeid(CPUGenerator*).hash_code(), typeid(result).hash_code());
+  auto result = check_generator<CPUGeneratorImpl>(foo);
+  ASSERT_EQ(typeid(CPUGeneratorImpl*).hash_code(), typeid(result).hash_code());
 }
 
-TEST(CPUGenerator, TestDefaultGenerator) {
+TEST(CPUGeneratorImpl, TestDefaultGenerator) {
   // Test Description: 
   // Check if default generator is created only once
   // address of generator should be same in all calls
@@ -26,34 +26,34 @@ TEST(CPUGenerator, TestDefaultGenerator) {
   ASSERT_EQ(foo, bar);
 }
 
-TEST(CPUGenerator, TestCloning) {
+TEST(CPUGeneratorImpl, TestCloning) {
   // Test Description: 
   // Check cloning of new generators.
   // Note that we don't allow cloning of other
   // generator states into default generators.
   auto gen1 = at::detail::createCPUGenerator();
-  auto cpu_gen1 = check_generator<CPUGenerator>(gen1);
+  auto cpu_gen1 = check_generator<CPUGeneratorImpl>(gen1);
   cpu_gen1->random(); // advance gen1 state
   cpu_gen1->random();
   auto gen2 = at::detail::createCPUGenerator();
   gen2 = gen1.clone();
-  auto cpu_gen2 = check_generator<CPUGenerator>(gen2);
+  auto cpu_gen2 = check_generator<CPUGeneratorImpl>(gen2);
   ASSERT_EQ(cpu_gen1->random(), cpu_gen2->random());
 }
 
-void thread_func_get_engine_op(CPUGenerator* generator) {
+void thread_func_get_engine_op(CPUGeneratorImpl* generator) {
   std::lock_guard<std::mutex> lock(generator->mutex_);
   generator->random();
 }
 
-TEST(CPUGenerator, TestMultithreadingGetEngineOperator) {
+TEST(CPUGeneratorImpl, TestMultithreadingGetEngineOperator) {
   // Test Description: 
-  // Check CPUGenerator is reentrant and the engine state
+  // Check CPUGeneratorImpl is reentrant and the engine state
   // is not corrupted when multiple threads request for 
   // random samples.
   // See Note [Acquire lock when using random generators]
   auto gen1 = at::detail::createCPUGenerator();
-  auto cpu_gen1 = check_generator<CPUGenerator>(gen1);
+  auto cpu_gen1 = check_generator<CPUGeneratorImpl>(gen1);
   auto gen2 = at::detail::createCPUGenerator();
   {
     std::lock_guard<std::mutex> lock(gen1->mutex_);
@@ -66,14 +66,14 @@ TEST(CPUGenerator, TestMultithreadingGetEngineOperator) {
   t1.join();
   t2.join();
   std::lock_guard<std::mutex> lock(gen2->mutex_);
-  auto cpu_gen2 = check_generator<CPUGenerator>(gen2);
+  auto cpu_gen2 = check_generator<CPUGeneratorImpl>(gen2);
   cpu_gen2->random();
   cpu_gen2->random();
   cpu_gen2->random();
   ASSERT_EQ(cpu_gen1->random(), cpu_gen2->random());
 }
 
-TEST(CPUGenerator, TestGetSetCurrentSeed) {
+TEST(CPUGeneratorImpl, TestGetSetCurrentSeed) {
   // Test Description: 
   // Test current seed getter and setter
   // See Note [Acquire lock when using random generators]
@@ -91,7 +91,7 @@ void thread_func_get_set_current_seed(Generator generator) {
   generator->set_current_seed(current_seed);
 }
 
-TEST(CPUGenerator, TestMultithreadingGetSetCurrentSeed) {
+TEST(CPUGeneratorImpl, TestMultithreadingGetSetCurrentSeed) {
   // Test Description: 
   // Test current seed getter and setter are thread safe
   // See Note [Acquire lock when using random generators]
@@ -106,7 +106,7 @@ TEST(CPUGenerator, TestMultithreadingGetSetCurrentSeed) {
   ASSERT_EQ(gen1->current_seed(), initial_seed+3);
 }
 
-TEST(CPUGenerator, TestRNGForking) {
+TEST(CPUGeneratorImpl, TestRNGForking) {
   // Test Description: 
   // Test that state of a generator can be frozen and
   // restored
@@ -128,7 +128,7 @@ TEST(CPUGenerator, TestRNGForking) {
  * Philox CPU Engine Tests
  */
 
-TEST(CPUGenerator, TestPhiloxEngineReproducibility) {
+TEST(CPUGeneratorImpl, TestPhiloxEngineReproducibility) {
   // Test Description:
   //   Tests if same inputs give same results.
   //   launch on same thread index and create two engines.
@@ -139,7 +139,7 @@ TEST(CPUGenerator, TestPhiloxEngineReproducibility) {
   ASSERT_EQ(engine1(), engine2());
 }
 
-TEST(CPUGenerator, TestPhiloxEngineOffset1) {
+TEST(CPUGeneratorImpl, TestPhiloxEngineOffset1) {
   // Test Description:
   //   Tests offsetting in same thread index.
   //   make one engine skip the first 8 values and
@@ -160,7 +160,7 @@ TEST(CPUGenerator, TestPhiloxEngineOffset1) {
   ASSERT_EQ(engine1(), engine2());
 }
 
-TEST(CPUGenerator, TestPhiloxEngineOffset2) {
+TEST(CPUGeneratorImpl, TestPhiloxEngineOffset2) {
   // Test Description:
   //   Tests edge case at the end of the 2^190th value of the generator.
   //   launch on same thread index and create two engines.
@@ -176,7 +176,7 @@ TEST(CPUGenerator, TestPhiloxEngineOffset2) {
   ASSERT_EQ(engine1(), engine2());
 }
 
-TEST(CPUGenerator, TestPhiloxEngineOffset3) {
+TEST(CPUGeneratorImpl, TestPhiloxEngineOffset3) {
   // Test Description:
   //   Tests edge case in between thread indices.
   //   launch on same thread index and create two engines.
@@ -190,7 +190,7 @@ TEST(CPUGenerator, TestPhiloxEngineOffset3) {
   ASSERT_EQ(engine1(), engine2());
 }
 
-TEST(CPUGenerator, TestPhiloxEngineIndex) {
+TEST(CPUGeneratorImpl, TestPhiloxEngineIndex) {
   // Test Description:
   //   Tests if thread indexing is working properly.
   //   create two engines with different thread index but same offset.
@@ -204,7 +204,7 @@ TEST(CPUGenerator, TestPhiloxEngineIndex) {
  * MT19937 CPU Engine Tests
  */
 
-TEST(CPUGenerator, TestMT19937EngineReproducibility) {
+TEST(CPUGeneratorImpl, TestMT19937EngineReproducibility) {
   // Test Description:
   //   Tests if same inputs give same results when compared
   //   to std.

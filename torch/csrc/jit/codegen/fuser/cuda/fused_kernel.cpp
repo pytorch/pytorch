@@ -2,7 +2,7 @@
 #include <torch/csrc/jit/codegen/fuser/compiler.h>
 
 #include <ATen/ATen.h>
-#include <ATen/CUDAGenerator.h>
+#include <ATen/CUDAGeneratorImpl.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/nvrtc_stub/ATenNVRTC.h>
 #include <THC/THC.h>
@@ -182,7 +182,7 @@ void FusedKernelCUDA::launch_raw(
       // See Note [Acquire lock when using random generators]
       std::lock_guard<std::mutex> lock(gen->mutex_);
       philox_engine_inputs =
-          at::check_generator<at::CUDAGenerator>(gen)->philox_engine_inputs(
+          at::check_generator<at::CUDAGeneratorImpl>(gen)->philox_engine_inputs(
               rand_offset);
     }
     arguments.push_back(&philox_engine_inputs.first);
