@@ -166,8 +166,8 @@ void CudaPrinter::visit(const Load* v) {
          << "])";
   } else {
     // Detects whether the load target is also a store target.
-    // TODO: this is currently too wide. It detects whether a store-target exists
-    // within the program. In fact, this check is only necessary within a
+    // TODO: this is currently too wide. It detects whether a store-target
+    // exists within the program. In fact, this check is only necessary within a
     // kernel.
     if (!cuda_analysis_->is_buf_store_target(v->buf())) {
       // Cuda __ldg can only be applied on read-only buffers.
