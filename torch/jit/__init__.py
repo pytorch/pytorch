@@ -1811,6 +1811,14 @@ if _enabled:
                 return True
             return self_method()
 
+        def _replicate_for_data_parallel(self):
+            # we have to initialize ScriptModule properly so that
+            # it works with pybind11
+            def init_fn(script_module):
+                # Don't do anything here, we'll initialize the ScriptModule below
+                return
+            return RecursiveScriptModule._construct(self._c._replicate_for_data_parallel(), init_fn)
+
     # Need to copy all RecursiveScriptModule methods to ScriptModule.
     #
     # This is because `super(MyScriptModule, self).foo()` does not use
