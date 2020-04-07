@@ -133,7 +133,7 @@ class _Formatter(object):
     def width(self):
         return self.max_width
 
-    def format(self, value, is_float_tensor=False):
+    def format(self, value, complex_contains_float=False):
         if self.floating_dtype:
             if self.sci_mode:
                 ret = ('{{:{}.{}e}}').format(self.max_width, PRINT_OPTS.precision).format(value)
@@ -145,11 +145,10 @@ class _Formatter(object):
                 ret = ('{{:.{}f}}').format(PRINT_OPTS.precision).format(value)
         elif self.complex_dtype:
             p = PRINT_OPTS.precision
-            # format real and imaginary values according to type
-            if not is_float_tensor:
+            ret = '({{:.{}f}} {{}} {{:.{}f}}j)'.format(p, p).format(value.real, '+-'[value.imag < 0], abs(value.imag))
+            if not complex_contains_float:
+                # complex tensor contains integer elements only
                 ret = "({{:.0f}} {{}} {{:.0f}}.j)".format(p, p).format(value.real, '+-'[value.imag < 0], abs(value.imag))
-            else:
-                ret = '({{:.{}f}} {{}} {{:.{}f}}j)'.format(p, p).format(value.real, '+-'[value.imag < 0], abs(value.imag))
         else:
             ret = '{}'.format(value)
         return (self.max_width - len(ret)) * ' ' + ret
@@ -171,13 +170,13 @@ def _vector_str(self, indent, formatter, summarize):
                 [formatter.format(val) for val in self[-PRINT_OPTS.edgeitems:].tolist()])
     else:
         # variable to keep track of complex float tensors
-        is_float_tensor = False
+        contains_float = False
         for val in self.tolist():
             if isinstance(val, float) and not val.is_integer():
-                is_float_tensor = True
+                contains_float = True
             if isinstance(val, complex) and not val.imag.is_integer():
-                is_float_tensor = True
-        data = [formatter.format(val, is_float_tensor) for val in self.tolist()]
+                contains_float = True
+        data = [formatter.format(val, complex_contains_float=contains_float) for val in self.tolist()]
 
     data_lines = [data[i:i + elements_per_line] for i in range(0, len(data), elements_per_line)]
     lines = [', '.join(line) for line in data_lines]
