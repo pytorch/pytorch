@@ -1,7 +1,9 @@
+#include <ATen/native/SummaryOps.h>
+
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDAApplyUtils.cuh>
-
+#include <ATen/native/TensorIterator.h>
 #include <THC/THCAtomics.cuh>
 #include <THC/THCNumerics.cuh>
 
@@ -374,8 +376,7 @@ void histc_kernel(
   Tensor& hist,
   int64_t nbins,
   Scalar minvalue,
-  Scalar maxvalue
-) {
+  Scalar maxvalue) {
   const Tensor& self = iter.tensor(0);
   auto ret = AT_DISPATCH_ALL_TYPES(self.scalar_type(), "histc", [&] {
     return _histc_cuda_template<scalar_t>(self, nbins, minvalue.to<scalar_t>(), maxvalue.to<scalar_t>());
