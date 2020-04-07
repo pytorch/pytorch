@@ -408,7 +408,9 @@ Tensor block_diag(TensorList tensors) {
 
     TORCH_CHECK(
       other_tensor->device() == device,
-      "torch.block_diag: input tensors must all be on the same device"
+      "torch.block_diag: input tensors must all be on the same device.",
+      " Input 0 is on device ", device,
+      " and input ", tensor_idx, " is on device ", other_tensor->device()
     );
 
     ScalarType scalar_type = at::result_type(*options_tensor, *other_tensor);
