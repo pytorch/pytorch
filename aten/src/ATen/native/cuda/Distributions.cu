@@ -92,16 +92,9 @@ void gamma_cuda_kernel(
   iter.add_input(alpha);
   iter.build();
 
-  at::native::gpu_kernel(iter,
-    [seeds] GPU_LAMBDA (scalar_t alpha) {
+  at::native::distribution_unary_kernel(iter, seeds,
+    [seeds] GPU_LAMBDA (curandStatePhilox4_32_10_t &state, scalar_t alpha) {
       #if defined(__CUDA_ARCH__) || defined(__HIP_PLATFORM_HCC__)
-      curandStatePhilox4_32_10_t state;
-      curand_init(
-          seeds.first,
-          blockIdx.x * blockDim.x + threadIdx.x,
-          seeds.second,
-          &state);
-
       auto uniform_lambda = curand_uniform_wrapper(state);
       BaseSampler<accscalar_t, decltype(uniform_lambda)> standard_uniform(uniform_lambda);
 
