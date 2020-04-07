@@ -249,16 +249,14 @@ void distribution_unary_kernel(TensorIterator &iter, std::pair<uint64_t, uint64_
   if (iter.is_contiguous()) {
     distribution_unary_elementwise_kernel<<<grid, num_threads, 0, stream>>>(
       numel, f, seeds, output_data, input_data,
-      TrivialOffsetCalculator<2>(), TrivialOffsetCalculator<2>());
+      TrivialOffsetCalculator<1>(), TrivialOffsetCalculator<1>());
   } else {
     std::array<const int64_t*, 1> out_strides = {iter.strides(0).data()};
     std::array<const int64_t*, 1> inp_strides = {iter.strides(1).data()};
 
     distribution_unary_elementwise_kernel<<<grid, num_threads, 0, stream>>>(
       numel, f, seeds, output_data, input_data,
-      OffsetCalculator<1>(iter.ndim(), iter.shape().data(), inp_strides.data()),
-      OffsetCalculator<1>(iter.ndim(), iter.shape().data(), out_strides.data())
-    );
+      make_input_offset_calculator<1>(iter), make_output_offset_calculator(iter));
   }
 }
 
