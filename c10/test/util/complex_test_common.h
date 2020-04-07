@@ -110,14 +110,12 @@ void test_construct_from_thrust() {
   ASSERT_EQ(c10::complex<scalar_t>(thrust::complex<scalar_t>(num1, num2)).real(), num1);
   ASSERT_EQ(c10::complex<scalar_t>(thrust::complex<scalar_t>(num1, num2)).imag(), num2);
 }
-#endif
 
 TEST(TestConstructors, FromThrust) {
-#if defined(__CUDACC__) || defined(__HIPCC__)
   test_construct_from_thrust<float>();
   test_construct_from_thrust<double>();
-#endif
 }
+#endif
 
 
 }  // constructors
@@ -178,17 +176,15 @@ C10_HOST_DEVICE std::tuple<c10::complex<double>, c10::complex<float>> one_two_th
   ret0 = ret1 = src;
   return std::make_tuple(ret0, ret1);
 }
-#endif
 
 TEST(TestAssignment, FromThrust) {
-#if defined(__CUDACC__) || defined(__HIPCC__)
   auto tup = one_two_thrust();
   ASSERT_EQ(std::get<c10::complex<double>>(tup).real(), double(1));
   ASSERT_EQ(std::get<c10::complex<double>>(tup).imag(), double(2));
   ASSERT_EQ(std::get<c10::complex<float>>(tup).real(), float(1));
   ASSERT_EQ(std::get<c10::complex<float>>(tup).imag(), float(2));
-#endif
 }
+#endif
 
 } // namespace assignment
 
