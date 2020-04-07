@@ -2,7 +2,7 @@
 #error "You must define TH_GENERIC_FILE before including THGenerateComplexFloatType.h"
 #endif
 
-extern "C" {
+extern "C++" {
   #define scalar_t float complex
 }
 
