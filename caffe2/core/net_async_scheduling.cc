@@ -280,13 +280,7 @@ void AsyncSchedulingNet::CancelAndFinishAsyncTasks() {
       // event, and in some other cases (CUDA)
       try {
         lastTaskOp(tid)->CancelAsyncCallback();
-
-        // throw and catch exception to preserve stack trace
-        try {
-          throw AsyncNetCancelled();
-        } catch (const AsyncNetCancelled& e) {
-          event(tid).SetFinishedWithException(e.what());
-        }
+        event(tid).SetFinished("Cancelled");
       } catch (const EnforceNotMet&) {
         // ignore
       }

@@ -856,8 +856,8 @@ void do_avg_pool_nhwc_on_AVX2(
   constexpr int cb_size = 16;
   constexpr int vec_width = Vec256<T>::size() / 4;
   constexpr int cb_step = cb_size * vec_width;
-  static Vec256<int32_t> acc_buffer[cb_size];
-  static Vec256<float> acc_buffer_fp[cb_size];
+  Vec256<int32_t> acc_buffer[cb_size];
+  Vec256<float> acc_buffer_fp[cb_size];
 
   if (vec_width == 8) {
     for (int c = c_start; c < csize; c += cb_step) {
