@@ -40,7 +40,7 @@ bool Function::append_operator(
     if (op.has_value()) {
       fn = [op](Stack& stack) {
         c10::Dispatcher::singleton().callBoxed(*op, &stack);
-      };   
+      };
     } else {
       return false;
     }
