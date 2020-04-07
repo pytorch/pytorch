@@ -13,11 +13,6 @@ namespace at {
 namespace native {
 namespace {
 
-template <typename T>	
-__host__ __device__ __forceinline__ T ATenCeilDiv(T a, T b) {	
-  return (a + b - 1) / b;	
-}
-
 template <typename scalar_t, typename accscalar_t>
 C10_LAUNCH_BOUNDS_1(1024)
 __global__ void upsample_trilinear3d_out_frame(

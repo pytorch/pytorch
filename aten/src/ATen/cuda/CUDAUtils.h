@@ -4,6 +4,11 @@
 
 namespace at { namespace cuda {
 
+template <typename T>	
+__host__ __device__ __forceinline__ T ATenCeilDiv(T a, T b) {	
+  return (a + b - 1) / b;	
+}
+
 // Check if every tensor in a list of tensors matches the current
 // device.
 inline bool check_device(ArrayRef<Tensor> ts) {
