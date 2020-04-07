@@ -720,6 +720,10 @@ _(aten, zeros) \
 _(aten, zeros_like) \
 _(aten, copy_real) \
 _(aten, copy_imag) \
+_(aten, im2col) \
+_(aten, col2im) \
+_(aten, im2col_backward) \
+_(aten, col2im_backward) \
 /* nothing */
 
 #define FORALL_ATTR_BASE_SYMBOLS(_) \
