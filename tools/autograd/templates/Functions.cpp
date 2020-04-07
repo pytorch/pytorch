@@ -572,6 +572,25 @@ Tensor mm_mat2_backward(const Tensor & grad, const Tensor & mat1, IntArrayRef si
   }
 }
 
+std::tuple<Tensor, Tensor, Tensor> addmm_backward(const Tensor& grad_output, const Tensor& mat1, const Tensor& mat2,
+    const Scalar& beta, const Scalar& alpha, std::array<bool, 3> output_mask) {
+  Tensor grad1, grad2, grad3;
+  if (grad_output.is_mkldnn()) {
+    if (output_mask[1]) {
+      grad2 = at::mkldnn_linear_backward_input(mat1.sizes(), grad_output, mat2.t());
+    }
+    if (output_mask[0] || output_mask[2]) {
+      std::tie(grad3, grad1) = at::mkldnn_linear_backward_weights(grad_output, mat1, mat2.t(), output_mask[0]);
+      grad3 = grad3.t();
+    }
+  } else {
+    grad1 = maybe_multiply(grad_output, beta);
+    grad2 = mm_mat1_backward(grad_output, mat2, mat1, alpha);
+    grad3 = mm_mat2_backward(grad_output, mat1, mat2.sizes(), mat2.strides(), alpha);
+  }
+  return std::tuple<Tensor, Tensor, Tensor>{grad1, grad2, grad3};
+}
+
 Tensor _sparse_addmm_sparse_backward(const Tensor& grad, const Tensor& sparse_, const Tensor& dense, const Scalar& alpha) {
   AT_ASSERT(sparse_.is_sparse());
   auto sparse = sparse_.coalesce();

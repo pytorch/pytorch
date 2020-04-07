@@ -136,9 +136,7 @@
   tensor2: grad * tensor1 * value
 
 - name: addmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
-  self: maybe_multiply(grad, beta)
-  mat1: mm_mat1_backward(grad, mat2, mat1, alpha)
-  mat2: mm_mat2_backward(grad, mat1, mat2.sizes(), mat2.strides(), alpha)
+  self, mat1, mat2: addmm_backward(grad, mat1, mat2, beta, alpha, grad_input_mask)
 
 - name: _sparse_addmm(Tensor self, Tensor sparse, Tensor dense, *, Scalar beta=1, Scalar alpha=1) -> Tensor
   self: maybe_multiply(grad, beta)
@@ -1553,6 +1551,9 @@
 
 - name: mkldnn_convolution_backward(Tensor self, Tensor grad_output, Tensor weight, int[] padding, int[] stride, int[] dilation, int groups, bool[3] output_mask) -> (Tensor, Tensor, Tensor)
   grad_output, self, weight: _convolution_double_backward(grads[0], grads[1], grads[2], grad_output, weight, self, stride, padding, dilation, false, std::vector<int64_t>(padding.size(), 0), groups, false, false, false, grad_input_mask)
+
+- name: mkldnn_linear(Tensor self, Tensor weight, Tensor? bias=None) -> Tensor
+  self, weight, bias: mkldnn_linear_backward(self, grad, weight, grad_input_mask)
 
 # fft
 - name: _fft_with_size(Tensor self, int signal_ndim, bool complex_input, bool complex_output, bool inverse, int[] checked_signal_sizes, bool normalized, bool onesided, int[] output_sizes) -> Tensor

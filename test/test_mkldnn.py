@@ -399,6 +399,25 @@ class TestMkldnn(TestCase):
             self._test_serialization(mkldnn_linear, (x.to_mkldnn(),))
             self._test_tracing(mkldnn_linear, (x.to_mkldnn(),))
 
+    # we should first expose aten::linear, depend on https://github.com/pytorch/pytorch/pull/20039
+    def test_linear_backward(self):
+        in_features = torch.randint(3, 10, (1,)).item()
+        out_features = torch.randint(3, 100, (1,)).item()
+        x = torch.randn(3, in_features, dtype=torch.float32) * 10
+        for bias in [True, False]:
+            x1 = x.clone().requires_grad_()
+            x2 = x.clone().to_mkldnn().requires_grad_()
+            linear = torch.nn.Linear(in_features, out_features).float()
+            mkldnn_linear = copy.deepcopy(linear)
+            y1 = linear(x1).sum()
+            y2 = mkldnn_linear(x2).to_dense().sum()
+            y1.backward()
+            y2.backward()
+            self.assertEqual(x1.grad, x2.grad.to_dense())
+            self.assertEqual(linear.weight.grad, mkldnn_linear.weight.grad)
+            if bias:
+                self.assertEqual(linear.bias.grad, mkldnn_linear.bias.grad)
+
     def test_softmax(self):
         x = torch.randn(3, 4, 5, dtype=torch.float32) * 10
         for dim in range(x.ndim):
