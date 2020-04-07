@@ -89,6 +89,8 @@ Tensor& mkldnn_mul_out(Tensor& result, const Tensor& self, const Tensor& other) 
 
     return result;
   } else {
+    AT_ASSERTM(self.sizes() == other.sizes(),
+               "mkldnn_mul_out: currently mkldnn not support broadcasting");
     ideep::tensor y = itensor_from_mkldnn(other);
     ideep::binary::compute(x, y, z, dnnl::algorithm::binary_mul);
 
