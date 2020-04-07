@@ -294,27 +294,24 @@
           script="$PWD/.circleci/scripts/binary_windows_build.sh"
           cat "$script"
           source "$script"
+    - persist_to_workspace:
+        root: /c/b/windows/output
+        paths:
+            - "*"
 
   binary_windows_upload:
     <<: *binary_windows_params
-    macos:
-      xcode: "9.4.1"
+    docker:
+      - image: continuumio/miniconda
     steps:
     # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
-    - attach_scripts
-    - run:
-        <<: *binary_checkout
-    - run:
-        <<: *binary_populate_env
-    - brew_update
-    - run:
-        <<: *binary_install_miniconda
+    - checkout
     - attach_workspace: # TODO - we can `cp` from ~/workspace
-        at: /Users/distiller/project
+        at: ~/workspace
     - run:
         name: Upload
         no_output_timeout: "10m"
         command: |
-          script="/Users/distiller/project/pytorch/.circleci/scripts/binary_windows_upload.sh"
+          script="$PWD/.circleci/scripts/binary_windows_upload.sh"
           cat "$script"
           source "$script"
