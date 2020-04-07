@@ -2723,6 +2723,8 @@ class TestAutograd(TestCase):
         with profile(record_shapes=True) as prof:
             layer2(layer1(input))
 
+        print(prof.function_events)
+
         top_level_expected_events_and_shapes = [
             ('unsigned short', [[30, 20]]),
             ('addmm', [[30], [128, 20], [20, 30], [], []]),
