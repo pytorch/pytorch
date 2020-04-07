@@ -123,13 +123,20 @@ class Transformer(Module):
                               memory_key_padding_mask=memory_key_padding_mask)
         return output
 
-    def generate_square_subsequent_mask(self, sz):
+    @staticmethod
+    def generate_square_subsequent_mask(sz, device=None):
         r"""Generate a square mask for the sequence. The masked positions are filled with float('-inf').
             Unmasked positions are filled with float(0.0).
+
+            tensor([[0., -inf, -inf,  ..., -inf, -inf, -inf],
+                    [0.,   0., -inf,  ..., -inf, -inf, -inf],
+                    [0.,   0.,   0.,  ..., -inf, -inf, -inf],
+                    ...,
+                    [0.,   0.,   0.,  ...,   0., -inf, -inf],
+                    [0.,   0.,   0.,  ...,   0.,   0., -inf],
+                    [0.,   0.,   0.,  ...,   0.,   0.,   0.]])
         """
-        mask = (torch.triu(torch.ones(sz, sz)) == 1).transpose(0, 1)
-        mask = mask.float().masked_fill(mask == 0, float('-inf')).masked_fill(mask == 1, float(0.0))
-        return mask
+        return torch.tensor(float('-inf'), device=device).repeat(size, size).triu(1)
 
     def _reset_parameters(self):
         r"""Initiate parameters in the transformer model."""
