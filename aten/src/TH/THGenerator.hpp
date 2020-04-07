@@ -6,7 +6,7 @@
  * THGeneratorState is a POD class needed for memcpys
  * in torch.get_rng_state() and torch.set_rng_state().
  * It is a legacy class and even though it is replaced with
- * at::CPUGenerator, we need this class and some of its fields
+ * at::CPUGeneratorImpl, we need this class and some of its fields
  * to support backward compatibility on loading checkpoints.
  */
 struct THGeneratorState {
@@ -28,7 +28,7 @@ struct THGeneratorState {
 
 /**
  * THGeneratorStateNew is a POD class containing
- * new data introduced in at::CPUGenerator and the legacy state. It is used
+ * new data introduced in at::CPUGeneratorImpl and the legacy state. It is used
  * as a helper for torch.get_rng_state() and torch.set_rng_state()
  * functions.
  */ 
