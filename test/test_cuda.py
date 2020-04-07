@@ -2775,14 +2775,14 @@ t2.start()
         loss.backward()
 
     @skipIfRocm
-    def test_autocast_custom_disabled(self):
+    def test_autocast_custom_cast_inputs(self):
         class MyMM(torch.autograd.Function):
             @staticmethod
             @torch.cuda.amp.custom_fwd(cast_inputs=torch.float32)
-            def forward(ctx, a, container):
+            def forward(ctx, a, container, expect_type):
                 b = container[1][0]
-                self.assertTrue(a.dtype is torch.float32)
-                self.assertTrue(b.dtype is torch.float32)
+                self.assertTrue(a.dtype is expect_type)
+                self.assertTrue(b.dtype is expect_type)
                 self.assertFalse(torch.is_autocast_enabled())
                 ctx.save_for_backward(a, b)
                 return a.mm(b)
@@ -2803,9 +2803,15 @@ t2.start()
         y = (0, {0: torch.randn((8, 8), device="cuda", dtype=torch.float16, requires_grad=False)})
 
         with torch.cuda.amp.autocast():
-            output = mymm(x, y)
+            output = mymm(x, y, torch.float32)
             self.assertTrue(output.dtype is torch.float32)
             loss = output.sum()
+        loss.backward()
+
+        # Tests if custom_fwd becomes a no-op when mymm runs outside an autocast-enabled region.
+        output = mymm(x, y, torch.float16)
+        self.assertTrue(output.dtype is torch.float16)
+        loss = output.sum()
         loss.backward()
 
     @slowTest
