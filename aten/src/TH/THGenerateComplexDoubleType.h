@@ -3,7 +3,7 @@
 #endif
 
 #define scalar_t std::complex<double>
-#define accreal double
+#define accreal std::complex<double>
 #define Real ComplexDouble
 #define TH_REAL_IS_COMPLEXDOUBLE
 #line 1 TH_GENERIC_FILE
