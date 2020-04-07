@@ -34,6 +34,12 @@ void gemv_fast_path(char *trans, int *m, int *n, scalar_t *alpha, scalar_t *a, i
   TORCH_INTERNAL_ASSERT(false, "gemv_fast_path shouldn't be called for this configuration");
 }
 
+#define INSTANTIATE(scalar_t)                                                                                                                                                     \
+template bool scal_use_fast_path<scalar_t>(int64_t n, int64_t incx);                                                                                                              \
+template bool gemv_use_fast_path<scalar_t>(int64_t m, int64_t n, int64_t lda, int64_t incx, int64_t incy);                                                                        \
+template void gemv_fast_path<scalar_t>(char *trans, int *m, int *n, scalar_t *alpha, scalar_t *a, int *lda, scalar_t *x, int *incx, scalar_t *beta, scalar_t *y, int *incy);      \
+template void scal_fast_path<scalar_t>(int *n, scalar_t *a, scalar_t *x, int *incx);
+
 #if AT_BUILD_WITH_BLAS()
 template <>
 bool scal_use_fast_path<double>(int64_t n, int64_t incx) {
@@ -77,14 +83,16 @@ template <>
 void gemv_fast_path<float>(char *trans, int *m, int *n, float *alpha, float *a, int *lda, float *x, int *incx, float *beta, float *y, int *incy) {
   sgemv_(trans, m, n, alpha, a, lda, x, incx, beta, y, incy);
 }
+#else
+INSTANTIATE(float);
+INSTANTIATE(double);
 #endif // AT_BUILD_WITH_BLAS
 
-#define INSTANTIATE(scalar_t, _)                                                                                                                                                  \
-template bool scal_use_fast_path<scalar_t>(int64_t n, int64_t incx);                                                                                                              \
-template bool gemv_use_fast_path<scalar_t>(int64_t m, int64_t n, int64_t lda, int64_t incx, int64_t incy);                                                                        \
-template void gemv_fast_path<scalar_t>(char *trans, int *m, int *n, scalar_t *alpha, scalar_t *a, int *lda, scalar_t *x, int *incx, scalar_t *beta, scalar_t *y, int *incy);      \
-template void scal_fast_path<scalar_t>(int *n, scalar_t *a, scalar_t *x, int *incx);
-AT_FORALL_SCALAR_TYPES_AND(BFloat16, INSTANTIATE);
-#undef INSTANTIATE
+INSTANTIATE(uint8_t);
+INSTANTIATE(int8_t);
+INSTANTIATE(int16_t);
+INSTANTIATE(int);
+INSTANTIATE(int64_t);
+INSTANTIATE(c10::BFloat16);
 
 }}} // namespace at::native::blas_impl
