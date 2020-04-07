@@ -74,7 +74,7 @@ class ProcessGroupAgent : public RpcAgent {
 
   void sync() override;
 
-  void start() override;
+  void startImpl() override;
 
   void shutdown() override;
 
@@ -219,13 +219,6 @@ class ProcessGroupAgent : public RpcAgent {
   MessageCounter recvCounts_;
 
   std::atomic<int64_t> nextId_;
-  // atomic bool indicating if this agent is running. It is set in
-  // ProcessGroupAgent::start and unset in ProcessGroupAgent::shutdown and
-  // ProcessGroupAgent::join. It controls whether several background threads
-  // should be running.
-  // We lock access to this in shutdown() and pollTimedOutRPCs() to prevent race
-  // conditions when notifying condition variables.
-  std::atomic<bool> rpcRunning_{false};
   // one mutex per ProcessGroup rank, as ProcessGroup::send is not thread-safe
   // when using the same tag.
   std::vector<std::mutex> sendMutexes_;
