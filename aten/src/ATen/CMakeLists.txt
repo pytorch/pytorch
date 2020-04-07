@@ -283,7 +283,7 @@ if(USE_CUDA AND NOT USE_ROCM)
 
   if(USE_MAGMA)
     list(APPEND ATen_CUDA_DEPENDENCY_LIBS ${MAGMA_LIBRARIES})
-    if (MSVC)
+    if(MSVC)
       if($ENV{TH_BINARY_BUILD})
         # Do not do this on Linux: see Note [Extra MKL symbols for MAGMA in torch_cpu]
         # in caffe2/CMakeLists.txt

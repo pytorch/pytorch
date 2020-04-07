@@ -500,6 +500,11 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/jit/mobile/type_parser.cpp
     )
 
+  # Required workaround for LLVM 9 includes.
+  if (NOT MSVC)
+    set_source_files_properties(${TORCH_SRC_DIR}/csrc/jit/tensorexpr/llvm_jit.cpp PROPERTIES COMPILE_FLAGS -Wno-noexcept-type)
+  endif()
+
   if(NOT INTERN_DISABLE_MOBILE_INTERP)
     set(MOBILE_SRCS
        ${TORCH_SRC_DIR}/csrc/jit/mobile/function.cpp
@@ -992,8 +997,8 @@ if(USE_OPENMP AND OPENMP_FOUND)
   target_link_libraries(torch_cpu PRIVATE ${OpenMP_CXX_LIBRARIES})
 endif()
 
-if ($ENV{TH_BINARY_BUILD})
-  if (NOT MSVC AND USE_CUDA AND NOT APPLE)
+if($ENV{TH_BINARY_BUILD})
+  if(NOT MSVC AND USE_CUDA AND NOT APPLE)
     # Note [Extra MKL symbols for MAGMA in torch_cpu]
     #
     # When we build CUDA libraries and link against MAGMA, MAGMA makes use of
