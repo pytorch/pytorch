@@ -2364,6 +2364,131 @@ class TestSparse(TestCase):
         self.assertRaises(TypeError, lambda: t.numpy())
 
 
+    def test_softmax(self):
+        import torch.nn.functional as F
+
+        def softmax_to_dense(sparse, dim):
+            """Dense softmax of a sparse tensor. Useful only for testing softmax
+            correctness.
+
+            When computing softmax of a sparse tensor, the value of
+            unspecified items is negative infinity rather than zero so
+            that
+
+              softmax(sparse.to_dense(fill_value=-inf), dim) == softmax(sparse, dim).to_dense() 
+
+            holds for non-empty lines. One empty lines, the softmax
+            values are defined as 0 in order to preserve the sparsity
+            of result.
+
+            Note that in PyTorch, ``to_dense`` method does not
+            implement the ``fill_value`` keyword argument.
+            """
+            dtype = sparse.dtype
+            device = sparse.device
+            sparse = sparse.coalesce()
+            dense = torch.empty(sparse.shape, dtype=dtype, device=device)
+            inf = float('inf')
+            dense[:] = -inf
+            for idx, value in zip(sparse._indices().t(), sparse._values()):
+                dense[tuple(idx)] = value
+            r = F.softmax(dense, dim)
+            # softmax on empty lines results nan, replace with zeros to match the definition
+            r[r != r] = 0
+            return r
+
+        def sparse_softmax(sparse, dim):
+            """Pure Python softmax of a sparse tensor. Assuming -inf for
+            unspecified sparse tensor data. This is a prototype of
+            sparse softmax algorithm in Python.
+            """
+            dtype = sparse.dtype
+            device = sparse.device
+
+            # softmax is not linear operation, so sparse tensors must
+            # be coalesced.
+            sparse = sparse.coalesce()
+            inf = float('inf')
+            indices = sparse._indices()
+            values = sparse._values()
+
+            if dim < sparse.sparse_dim():
+                nnz = sparse._nnz()
+
+                # compute pool indices
+                size = sparse.size()
+                strides = torch.ones((sparse.sparse_dim(), 1), dtype=indices.dtype, device=indices.device)
+                for i in reversed(range(sparse.sparse_dim() - 1)):
+                    strides[i, 0] = strides[i + 1, 0] * size[i + 1]
+                strides[dim, 0] = 0
+                pool = (indices * strides).sum(dim=0)
+                i2p = {}
+                for i in range(nnz):
+                    c = int(pool[i])
+                    if c not in i2p:
+                        i2p[c] = len(i2p)
+                    pool[i] = i2p[c]
+
+                # compute max
+                dense_size = tuple(size[sparse.sparse_dim():])
+                mx = torch.empty((pool.max() + 1,) + dense_size)
+                mx[:] = -inf
+                for n in range(nnz):
+                    p = pool[n]
+                    mx[p] = torch.max(mx[p], values[n])
+
+                # apply exp to (v - mx) and sum the results
+                exp_values = torch.empty_like(values)
+                exp_sums = torch.zeros_like(mx)
+                for n in range(sparse._nnz()):
+                    p = pool[n]
+                    v = exp_values[n] = (values[n] - mx[p]).exp()
+                    exp_sums[p] = exp_sums[p] + v
+
+                # normalize with the sum of exponents
+                for n in range(sparse._nnz()):
+                    p = pool[n]
+                    exp_values[n] = exp_values[n] / exp_sums[p]
+
+                return torch.sparse_coo_tensor(indices,
+                                               exp_values,
+                                               sparse.size(),
+                                               dtype=dtype, device=device)
+
+            elif dim < sparse.sparse_dim() + sparse.dense_dim():
+                return torch.sparse_coo_tensor(indices,
+                                               F.softmax(values, dim - sparse.sparse_dim() + 1),
+                                               sparse.size(),
+                                               dtype=dtype, device=device)
+            else:
+                raise ValueError(
+                    '`dim(=%s)` must be smaller than `sparse_dim(=%s) + dense_dim(=%s)`'
+                    % (dim, sparse.sparse_dim(), sparse.dense_dim()))
+
+        def test_op(sparse_dims, nnz, with_size):
+            if isinstance(with_size, Number):
+                with_size = [with_size] * sparse_dims
+            x, i, v = self._gen_sparse(sparse_dims, nnz, with_size)
+
+            for dim in range(len(x.shape)):
+                y = sparse_softmax(x, dim)  # Python sparse softmax
+                # y = F.softmax(x, dim)      # C++ sparse softmax, TODO
+                r1 = softmax_to_dense(x, dim)
+                r2 = y.to_dense()
+                self.assertEqual(r1, r2)
+
+        test_op(1, 10, [3])
+        test_op(1, 10, [3, 2])
+        test_op(2, 10, [2, 3, 4])
+        test_op(2, 10, [3, 4])
+        test_op(2, 10, [3, 4, 2])
+        test_op(3, 10, [3, 4, 2])
+        test_op(3, 100, [3, 4, 2])
+        test_op(3, 100, [3, 4, 2, 3])
+        test_op(3, 100, [3, 4, 2, 3, 5, 2])
+        test_op(4, 100, [3, 4, 2, 3, 5, 2])
+
+
 class TestUncoalescedSparse(TestSparse):
     def setUp(self):
         super(TestUncoalescedSparse, self).setUp()
