@@ -104,7 +104,7 @@ inline int64_t prod_intlist(ArrayRef<int64_t> list) {
 template <typename T>
 static inline T * check_generator(Generator gen) {
   TORCH_CHECK(gen.defined(), "Generator with undefined implementation is not allowed");
-  TORCH_CHECK(T::device_type() == gen->device().type(), "Expected a '", T::device_type(), "' device type for generator but found '", gen->device().type(), "'");
+  TORCH_CHECK(T::device_type() == gen.device().type(), "Expected a '", T::device_type(), "' device type for generator but found '", gen.device().type(), "'");
   return gen.get<T>();
 }
 

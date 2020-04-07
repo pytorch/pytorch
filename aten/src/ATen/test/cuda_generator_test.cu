@@ -192,13 +192,13 @@ TEST(CUDAGeneratorImpl, TestCloning) {
   // generator states into default generators.
   if (!at::cuda::is_available()) return;
   auto gen1 = at::cuda::detail::createCUDAGenerator();
-  gen1->set_current_seed(123); // modify gen1 state
+  gen1.set_current_seed(123); // modify gen1 state
   auto cuda_gen1 = check_generator<CUDAGeneratorImpl>(gen1);
   cuda_gen1->set_philox_offset_per_thread(4);
   auto gen2 = at::cuda::detail::createCUDAGenerator();
   gen2 = gen1.clone();
   auto cuda_gen2 = check_generator<CUDAGeneratorImpl>(gen2);
-  ASSERT_EQ(gen1->current_seed(), gen2->current_seed());
+  ASSERT_EQ(gen1.current_seed(), gen2.current_seed());
   ASSERT_EQ(
     cuda_gen1->philox_offset_per_thread(),
     cuda_gen2->philox_offset_per_thread()
@@ -206,10 +206,10 @@ TEST(CUDAGeneratorImpl, TestCloning) {
 }
 
 void thread_func_get_set_current_seed(Generator generator) {
-  std::lock_guard<std::mutex> lock(generator->mutex_);
-  auto current_seed = generator->current_seed();
+  std::lock_guard<std::mutex> lock(generator.mutex());
+  auto current_seed = generator.current_seed();
   current_seed++;
-  generator->set_current_seed(current_seed);
+  generator.set_current_seed(current_seed);
 }
   
 TEST(CUDAGeneratorImpl, TestMultithreadingGetSetCurrentSeed) {
@@ -218,14 +218,14 @@ TEST(CUDAGeneratorImpl, TestMultithreadingGetSetCurrentSeed) {
   // See Note [Acquire lock when using random generators]
   if (!at::cuda::is_available()) return;
   auto gen1 = at::cuda::detail::getDefaultCUDAGenerator();
-  auto initial_seed = gen1->current_seed();
+  auto initial_seed = gen1.current_seed();
   std::thread t0{thread_func_get_set_current_seed, gen1};
   std::thread t1{thread_func_get_set_current_seed, gen1};
   std::thread t2{thread_func_get_set_current_seed, gen1};
   t0.join();
   t1.join();
   t2.join();
-  ASSERT_EQ(gen1->current_seed(), initial_seed+3);
+  ASSERT_EQ(gen1.current_seed(), initial_seed+3);
 }
 
 TEST(CUDAGeneratorImpl, TestRNGForking) {
@@ -237,7 +237,7 @@ TEST(CUDAGeneratorImpl, TestRNGForking) {
   auto default_gen = at::cuda::detail::getDefaultCUDAGenerator();
   auto current_gen = at::cuda::detail::createCUDAGenerator();
   {
-    std::lock_guard<std::mutex> lock(default_gen->mutex_);
+    std::lock_guard<std::mutex> lock(default_gen.mutex());
     current_gen = default_gen.clone(); // capture the current state of default generator
   }
   auto target_value = at::randn({1000}, at::kCUDA);
