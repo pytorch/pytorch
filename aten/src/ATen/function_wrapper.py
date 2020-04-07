@@ -240,8 +240,8 @@ scalar_types = [
     ('Short', 'int16_t', 'Long', False),
     ('Half', 'Half', 'Double', True),
     ('BFloat16', 'BFloat16', 'BFloat16AccrealNotDefined', True),
-    ('ComplexFloat', 'std::complex<float>', 'Double', True),
-    ('ComplexDouble', 'std::complex<double>', 'Double', True),
+    ('ComplexFloat', 'std::complex<float>', 'ComplexDouble', True),
+    ('ComplexDouble', 'std::complex<double>', 'ComplexDouble', True),
 ]
 
 static_dispatch_backends = ['CPU', 'QuantizedCPU']
