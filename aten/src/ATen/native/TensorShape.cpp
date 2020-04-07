@@ -401,9 +401,16 @@ Tensor block_diag(TensorList tensors) {
   // that the output data type is correct
   const Tensor* options_tensor = &tensors[0];
   ScalarType output_scalar_type = options_tensor->scalar_type();
+  const Device& device = tensors[0].device();
 
   for (size_t tensor_idx = 1; tensor_idx < tensors.size(); tensor_idx++) {
     const Tensor* other_tensor = &tensors[tensor_idx];
+
+    TORCH_CHECK(
+      other_tensor->device() == device,
+      "torch.block_diag: input tensors must all be on the same device"
+    );
+
     ScalarType scalar_type = at::result_type(*options_tensor, *other_tensor);
 
     if (scalar_type != output_scalar_type) {
