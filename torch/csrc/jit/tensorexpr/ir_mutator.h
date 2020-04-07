@@ -27,6 +27,7 @@ AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, IMM_DECLARE);
 
 class Cast;
 class Var;
+class Buf;
 class Let;
 class LetStmt;
 class Ramp;
@@ -71,6 +72,7 @@ class TORCH_API IRMutator {
 #undef IMM_MUTATE_DECLARE
   virtual const Expr* mutate(const Cast* v);
   virtual const Expr* mutate(const Var* v);
+  virtual const Expr* mutate(const Buf* v);
   virtual const Expr* mutate(const Let* v);
   virtual Stmt* mutate(const LetStmt* v);
   virtual const Expr* mutate(const Ramp* v);
