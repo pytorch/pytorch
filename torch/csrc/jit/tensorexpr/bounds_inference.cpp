@@ -12,6 +12,29 @@ namespace torch {
 namespace jit {
 namespace tensorexpr {
 
+/*
+ * TODO:
+ * [x] Save found accesses in a vector
+ * [x] Run simplification in the beginning
+ * [x] Compute accesses at an outer scope (replace index with its min/max)
+ * [x] Implement merging
+ * [.] Implement compute_at
+ *   [x] Compute size of temp buffer
+ *   [x] Insert alloc/free stmts
+ *   [x] Compute map old->new indexes for the expression we're moving
+ *   [ ] Add tests
+ * [ ] Use jit_log
+ * [.] Add comments and cleanup
+ * [x] Buffer and FunctionCall cleanup (buffers are 1-D, functions are N-d)
+ * [.] Bounds inference API cleanup and document
+ * [ ] compute_at API cleanup and document
+ * [ ] Remove this comment
+ * Longer term:
+ *   [ ] DFG
+ *   [ ] Dead code elimination
+ *   [ ] Correctly handle non-increasing indexes
+ */
+
 class BoundsInference : public IRVisitor {
  public:
   void visit(const FunctionCall* v);

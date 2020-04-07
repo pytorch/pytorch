@@ -129,7 +129,12 @@ namespace jit {
   _(BoundsInference_2)                    \
   _(BoundsInference_3)                    \
   _(BoundsInference_4)                    \
-  _(BoundsInference_5)
+  _(BoundsInference_5)                    \
+  _(LoopNestComputeAt_1)                  \
+  _(LoopNestComputeAt_2)                  \
+  _(LoopNestComputeAt_3)                  \
+  _(LoopNestComputeAt_4)                  \
+  _(LoopNestComputeAt_5)
 
 #define TH_FORALL_TENSOREXPR_TESTS_LLVM(_) \
   _(LLVMByteImmTest)                       \

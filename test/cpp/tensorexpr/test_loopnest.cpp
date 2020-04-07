@@ -765,6 +765,67 @@ void testBoundsInference_5() {
   }
 }
 
+void testLoopNestComputeAt_1() {
+  KernelScope kernel_scope;
+  {
+    std::cerr << "---------------------------------\n";
+    VarHandle W("W", kInt);
+    VarHandle H("H", kInt);
+    Tensor* p = Compute(
+        "p",
+        {{H + 1, "py"}, {W + 1, "px"}},
+        [&](const VarHandle& py, const VarHandle& px) { return px * py; });
+    Tensor* c = Compute(
+        "c",
+        {{H, "cy"}, {W, "cx"}},
+        [&](const VarHandle& y, const VarHandle& x) {
+          return p->call(y, x) + p->call(y + 1, x) + p->call(y, x + 1) +
+              p->call(y + 1, x + 1);
+        });
+    LoopNest l({c});
+    std::vector<For*> loops = l.getLoopStmtsFor(c);
+    std::cerr << "****\n" << *l.root_stmt() << "\n";
+    std::cerr << "****\nLoop0:\n" << *loops[0] << "\n";
+    std::cerr << "****\nLoop1:\n" << *loops[1] << "\n";
+    l.computeAt(l.getLoopBodyFor(p), loops[0]);
+    std::cerr << "****\n" << *l.root_stmt() << "\n";
+  }
+  {
+    std::cerr << "---------------------------------\n";
+    ExprHandle W(100);
+    ExprHandle H(200);
+    Tensor* p = Compute(
+        "p",
+        {{H + 1, "py"}, {W + 1, "px"}},
+        [&](const VarHandle& py, const VarHandle& px) { return px * py; });
+    Tensor* c = Compute(
+        "c",
+        {{H, "cy"}, {W, "cx"}},
+        [&](const VarHandle& y, const VarHandle& x) {
+          return p->call(y, x) + p->call(y + 1, x) + p->call(y, x + 1) +
+              p->call(y + 1, x + 1);
+        });
+    LoopNest l({c});
+    std::vector<For*> loops = l.getLoopStmtsFor(c);
+    std::cerr << "****\n" << *l.root_stmt() << "\n";
+    std::cerr << "****\nLoop0:\n" << *loops[0] << "\n";
+    std::cerr << "****\nLoop1:\n" << *loops[1] << "\n";
+    l.computeAt(l.getLoopBodyFor(p), loops[1]);
+    std::cerr << "****\n" << *l.root_stmt() << "\n";
+  }
+}
+void testLoopNestComputeAt_2() {
+  KernelScope kernel_scope;
+}
+void testLoopNestComputeAt_3() {
+  KernelScope kernel_scope;
+}
+void testLoopNestComputeAt_4() {
+  KernelScope kernel_scope;
+}
+void testLoopNestComputeAt_5() {
+  KernelScope kernel_scope;
+}
 
 } // namespace jit
 } // namespace torch
