@@ -32,6 +32,8 @@ const char* toString(DispatchKey t) {
       return "XLATensorId";
     case DispatchKey::MkldnnCPUTensorId:
       return "MkldnnCPUTensorId";
+    case DispatchKey::VulkanTensorId:
+      return "VulkanTensorId";
     case DispatchKey::QuantizedCPUTensorId:
       return "QuantizedCPUTensorId";
     case DispatchKey::VariableTensorId:

@@ -242,7 +242,7 @@ scalar_types = [
     ('BFloat16', 'BFloat16', 'BFloat16AccrealNotDefined', True),
 ]
 
-static_dispatch_backends = ['CPU', 'QuantizedCPU']
+static_dispatch_backends = ['CPU', 'QuantizedCPU', 'Vulkan']
 
 
 class NYIError(Exception):

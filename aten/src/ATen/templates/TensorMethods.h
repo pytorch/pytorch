@@ -15,6 +15,7 @@
 #include <ATen/TypeDefault.h>
 #include <ATen/CPUType.h>
 #include <ATen/QuantizedCPUType.h>
+#include <ATen/VulkanType.h>
 #endif
 
 namespace at {
@@ -128,6 +129,15 @@ inline bool Tensor::is_mkldnn() const {
 
 inline bool is_mkldnn(Tensor self) {
   return self.is_mkldnn();
+}
+
+inline bool Tensor::is_vulkan() const {
+  // NB: this is not a native function to avoid dispatching overhead.
+  return impl_->is_vulkan();
+}
+
+inline bool is_vulkan(Tensor self) {
+  return self.is_vulkan();
 }
 
 inline bool Tensor::is_quantized() const {

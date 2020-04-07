@@ -1,6 +1,11 @@
 # ---[ Generate and install header and cpp files
 include(../cmake/Codegen.cmake)
 
+# ---[ Vulkan code gen
+if(USE_VULKAN OR USE_VULKANGL)
+  include(../cmake/VulkanCodegen.cmake)
+endif()
+
 # ---[ Declare source file lists
 
 # ---[ ATen build

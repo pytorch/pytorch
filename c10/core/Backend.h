@@ -25,7 +25,7 @@ namespace c10 {
  * or "SparseCUDA"; backend in torch.backends is something like "MKL" or
  * "CUDNN".
  */
-enum class Backend { CPU, CUDA, HIP, SparseCPU, SparseCUDA, SparseHIP, MSNPU, XLA, QuantizedCPU, Undefined, MkldnnCPU, NumOptions };
+enum class Backend { CPU, CUDA, HIP, SparseCPU, SparseCUDA, SparseHIP, MSNPU, XLA, Vulkan, QuantizedCPU, Undefined, MkldnnCPU, NumOptions };
 
 static inline Backend toSparse(Backend b) {
   switch (b) {
@@ -82,6 +82,8 @@ static inline Backend dispatchKeyToBackend(DispatchKey t) {
     return Backend::MSNPU;
   } else if (t == DispatchKey::XLATensorId || t == DispatchKey::XLAPreAutograd) {
     return Backend::XLA;
+  } else if (t == DispatchKey::VulkanTensorId) {
+    return Backend::Vulkan;
   } else if (t == DispatchKey::SparseCPUTensorId) {
     return Backend::SparseCPU;
   } else if (t == DispatchKey::SparseCUDATensorId) {
@@ -119,6 +121,8 @@ static inline DispatchKey backendToDispatchKey(Backend b) {
       return DispatchKey::SparseHIPTensorId;
     case Backend::MkldnnCPU:
       return DispatchKey::MkldnnCPUTensorId;
+    case Backend::Vulkan:
+      return DispatchKey::VulkanTensorId;
     case Backend::QuantizedCPU:
       return DispatchKey::QuantizedCPUTensorId;
     case Backend::Undefined:
@@ -149,6 +153,8 @@ static inline DeviceType backendToDeviceType(Backend b) {
     case Backend::MkldnnCPU:
     case Backend::QuantizedCPU:
       return DeviceType::CPU;
+    case Backend::Vulkan:
+      return DeviceType::VULKAN;
     case Backend::Undefined:
       AT_ERROR("Undefined backend is not a valid device type");
     default:
@@ -243,6 +249,8 @@ static inline const char* toString(Backend b) {
       return "SparseHIP";
     case Backend::MkldnnCPU:
       return "MkldnnCPU";
+    case Backend::Vulkan:
+      return "Vulkan";
     case Backend::QuantizedCPU:
       return "QuantizedCPU";
     default:

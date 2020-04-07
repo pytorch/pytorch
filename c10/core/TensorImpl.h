@@ -449,6 +449,10 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return key_set_.has(DispatchKey::MkldnnCPUTensorId);
   }
 
+  bool is_vulkan() const {
+    return key_set_.has(DispatchKey::VulkanTensorId);
+  }
+
   int64_t get_device() const {
     TORCH_CHECK(
         device_opt_.has_value(),
@@ -471,6 +475,8 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
       return kSparse;
     } else if (is_mkldnn()) {
       return kMkldnn;
+    } else if (is_vulkan()) {
+      return kVulkan;
     } else {
       return kStrided;
     }
