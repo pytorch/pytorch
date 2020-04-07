@@ -249,9 +249,8 @@ namespace jit {
   _(CudaTestVectorAdd01)                   \
   _(CudaTestVectorAdd02)                   \
   _(CudaDynamicShape2D)                    \
-  _(CudaDynamicShapeSplit)                 \
-  _(CudaTrivialReduce01)                   \
-  _(CudaTestRand01)
+  _(CudaTestRand01)                        \
+  _(CudaDynamicShapeSplit)
 
 #define DECLARE_TENSOREXPR_TEST(name) void test##name();
 TH_FORALL_TENSOREXPR_TESTS(DECLARE_TENSOREXPR_TEST)
