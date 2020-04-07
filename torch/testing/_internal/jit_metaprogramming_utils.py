@@ -15,6 +15,7 @@ import math  # noqa: F401
 
 # Testing utils
 from torch._six import inf
+torch.set_default_dtype(torch.double)
 
 L = 20
 M = 10
@@ -443,6 +444,14 @@ def get_nn_mod_test_name(**kwargs):
     if 'desc' in kwargs:
         test_name = "{}_{}".format(test_name, kwargs['desc'])
     return 'test_nn_{}'.format(test_name)
+
+def get_nn_module_class_from_kwargs(**kwargs):
+    name = get_nn_module_name_from_kwargs(**kwargs)
+    index = name.find("_")
+    if index == -1:
+        return name
+    else:
+        return name[0:name.find("_")]
 
 def try_get_nn_module_compiled_mod_and_inputs(*args, **kwargs):
     name = get_nn_module_name_from_kwargs(**kwargs)
