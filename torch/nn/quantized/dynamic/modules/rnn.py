@@ -276,8 +276,9 @@ class RNNBase(torch.nn.Module):
             from torch.quantization.qconfig import default_dynamic_qconfig
             weight_observer_method = default_dynamic_qconfig.weight
 
-        qscheme = weight_observer_method().qscheme
-        dtype = weight_observer_method().dtype
+        weight_observer = weight_observer_method()
+        qscheme = weight_observer.qscheme
+        dtype = weight_observer.dtype
         supported_scalar_types = [torch.qint8, torch.float16]
         if dtype not in supported_scalar_types:
             raise RuntimeError('Unsupported dtype for dynamic RNN quantization: {}'.format(dtype))
