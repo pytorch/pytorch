@@ -26,7 +26,7 @@ namespace {
 
 
 RegisterOperators reg(
-    {     
+    {
       Operator(
          "prim::TupleUnpack(Any tup) -> ...",
          [](Stack& stack) {

@@ -104,10 +104,9 @@ class SparseLengthsFused4BitRowwiseFakeFP16Op final : public Operator<Context> {
         int64_t idx = indices_data[current];
 
         int accIdx = 0;
-        // TODO: Perhaps there is a fix to use double buffer accumulation
-        // if (output_block_size % 2 == 0 && output_block_size <= 96) {
-        //          accIdx = i % 2;
-        //}
+        if (output_block_size % 2 == 0 && output_block_size <= 96) {
+          accIdx = i % 2;
+        }
 
         if (idx < 0 || idx >= data_size) {
           return false;
@@ -186,6 +185,15 @@ class SparseLengthsFused4BitRowwiseFakeFP16Op final : public Operator<Context> {
       }
 
       if (!use_fp16_for_embedding_only) {
+        float totalWeightedOffsets =
+            sumWeightedOffsets[0] + sumWeightedOffsets[1];
+
+        fbgemm::RoundToFloat16(
+            &totalWeightedOffsets,
+            &totalWeightedOffsets,
+            1,
+            FLAGS_caffe2_fbgemm_fake_fp16_clamp);
+
         for (int j = 0; j < output_block_size; ++j) {
           out[j] = rowTempSums[0][j] + rowTempSums[1][j];
         }
@@ -196,18 +204,7 @@ class SparseLengthsFused4BitRowwiseFakeFP16Op final : public Operator<Context> {
             FLAGS_caffe2_fbgemm_fake_fp16_clamp);
 
         for (int j = 0; j < output_block_size; j++) {
-          out[j] += sumWeightedOffsets[0];
-        }
-
-        fbgemm::RoundToFloat16(
-            reinterpret_cast<const float*>(out),
-            reinterpret_cast<float*>(out),
-            output_block_size,
-            FLAGS_caffe2_fbgemm_fake_fp16_clamp);
-
-        // Fake fp16 rounding of out
-        for (int j = 0; j < output_block_size; j++) {
-          out[j] += sumWeightedOffsets[1];
+          out[j] += totalWeightedOffsets;
         }
 
         fbgemm::RoundToFloat16(
