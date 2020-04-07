@@ -91,9 +91,8 @@ void DistAutogradContext::accumulateGrad(
       variable,
       old_grad,
       new_grad,
-      // Add +1 here since we can't std::move(grad) when call
-      // AccumulateGrad::callHooks, since it is a const ref, and that incurs a
-      // refcount bump for the new_grad.
+      // Add +1 here since we can't std::move(grad) when call AccumulateGrad::callHooks,
+      // since it is a const ref, and that incurs a refcount bump for the new_grad.
       num_expected_refs + 1,
       [this, &variable](at::Tensor&& grad_update) {
         accumulatedGrads_.insert(variable, std::move(grad_update));

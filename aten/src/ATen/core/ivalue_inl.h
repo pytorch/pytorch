@@ -254,7 +254,15 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
     AT_ASSERT(!completed());
     completed_ = true;
     value_ = std::move(value);
-    runCbs(lock);
+
+    std::vector<std::function<void(void)>> cbs;
+    cbs.swap(callbacks_);
+    lock.unlock();
+
+    finished_cv_.notify_all();
+    for (auto& callback : cbs) {
+      callback();
+    }
   }
 
   void markCompleted() {
@@ -270,7 +278,15 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
     AT_ASSERT(!completed());
     completed_ = true;
     error_ = std::move(error);
-    runCbs(lock);
+
+    std::vector<std::function<void(void)>> cbs;
+    cbs.swap(callbacks_);
+    lock.unlock();
+
+    finished_cv_.notify_all();
+    for (auto& callback : cbs) {
+      callback();
+    }
   }
 
   // Get the result of the current future.
@@ -323,17 +339,6 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
   }
 
  private:
-  void runCbs(std::unique_lock<std::mutex>& lock) {
-    std::vector<std::function<void(void)>> cbs;
-    cbs.swap(callbacks_);
-    lock.unlock();
-
-    finished_cv_.notify_all();
-    for (auto& callback : cbs) {
-      callback();
-    }
-  }
-
   mutable std::mutex mutex_;
   std::atomic_bool completed_ = {false}; // is this future complete
   std::condition_variable finished_cv_;

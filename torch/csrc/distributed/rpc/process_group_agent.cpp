@@ -256,13 +256,18 @@ void ProcessGroupAgent::shutdown() {
   lock.unlock();
   futureTimeoutCV_.notify_one();
   futureTimeoutThread_.join();
+  // Abort listener thread to stop accepting new work. We need to interrupt the
+  // recvWork->wait() call the listener loop may be blocked in before joining
+  // the thread.
   {
     std::unique_lock<std::mutex> lock(recvWorkMutex_);
     if (recvWork_) {
       recvWork_->abort();
     }
   }
-  // Abort any pending sends to any destination rank.
+  listenerThread_.join();
+  // Abort any pending sends to any destination rank that have not been
+  // completed.
   {
     std::lock_guard<std::mutex> lock(pendingSendMutex_);
     for (auto& it : currentPendingSends_) {
@@ -278,8 +283,10 @@ void ProcessGroupAgent::shutdown() {
       }
     }
   }
+  // Note: calling threadPool_.waitWorkComplete() after listenerThread.join() so
+  // that we can finish any possible work enqueued into the thread pool, before
+  // python RPC handler is shutdown (see shutdown in rpc/api.py).
   threadPool_.waitWorkComplete();
-  listenerThread_.join();
 }
 
 std::shared_ptr<FutureMessage> ProcessGroupAgent::send(

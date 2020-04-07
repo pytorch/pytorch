@@ -34,8 +34,10 @@ void RpcAgent::start() {
 
 void RpcAgent::cleanup() {
   rpcAgentRunning_.store(false);
+  // We must notify the condition variable so it stops waiting in the
+  // retry thread, otherwise this thread cannot be joined.
+  rpcRetryMapCV_.notify_one();
   if (rpcRetryThread_.joinable()) {
-    rpcRetryMapCV_.notify_one();
     rpcRetryThread_.join();
   }
 }
