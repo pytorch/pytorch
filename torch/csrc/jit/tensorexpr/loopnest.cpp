@@ -631,13 +631,13 @@ std::vector<Tensor*> LoopNest::findAllNeededTensors(
     if (all_processed) {
       result.push_back(t);
       if (processed.count(t)) {
-        throw malformed_input();
+        throw malformed_input("failure to find all processed Tensors");
       }
 
       processed.insert(t);
     } else {
       if (queued.count(t)) {
-        throw malformed_input();
+        throw malformed_input("failure to find all queued Tensors");
       }
 
       q.push(t);
@@ -685,8 +685,15 @@ Stmt* LoopNest::lowerToStmt(Tensor* t) {
     return body;
   }
 
+  if (t->buf()->ndim() == 0) {
+    throw malformed_input("Tensor lowered to zero dimensions");
+  }
+
   for (size_t i = 0; i < t->buf()->ndim(); i++) {
-    body = new For(f->arg(i), new IntImm(0), t->buf()->dim(i), body);
+    // Going in reverse order: from innermost loop to the outermost
+    size_t dim_index = t->buf()->ndim() - i - 1;
+    Range r(new IntImm(0), t->buf()->dim(dim_index));
+    body = new For(f->arg(dim_index), r.start(), r.stop(), body);
   }
   return body;
 }
@@ -758,9 +765,9 @@ void LoopNest::splitWithTail(
     For** tail) {
   Block* p = dynamic_cast<Block*>(f->get_parent());
   if (!f) {
-    throw malformed_input(f);
+    throw malformed_input("splitWithTail attempted on null loop", f);
   } else if (!p) {
-    throw malformed_input(p);
+    throw malformed_input("splitWithTail attempted on loop with no parent", p);
   }
 
   bool tail_is_needed = true;
@@ -884,7 +891,7 @@ std::vector<For*> LoopNest::getLoopStmtsFor(Tensor* t) const {
     }
     cur_stmt = cur_stmt->get_parent();
   }
-  return result;
+  return std::vector<For*>(result.rbegin(), result.rend());
 }
 
 void LoopNest::setGPUBlockIndex(For* f, int block_index) {

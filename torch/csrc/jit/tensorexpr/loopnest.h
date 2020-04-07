@@ -27,11 +27,6 @@ class TORCH_API LoopNest {
     return root_stmt_;
   }
 
-  /*
-   * Return a vector of `For` statements enclosing the compute statement
-   * corresponding to the given `Tensor`. The `For` statements are ordered inner
-   * to outer.
-   */
   std::vector<For*> getLoopStmtsFor(Tensor*) const;
   Stmt* getLoopBodyFor(Tensor*) const;
   bool hasLoopBodyFor(Tensor*) const;
