@@ -37,7 +37,9 @@ void printScalar(std::ostream& stream, const Value* const value) {
 }
 
 // Note: innermost dimension is at nDims - 1 (when nDims > 0)
-void printStrides(std::ostream& stream, const c10::VaryingShape<int64_t>& strides) {
+void printStrides(
+    std::ostream& stream,
+    const c10::VaryingShape<int64_t>& strides) {
   stream << "Strides=(";
   for (size_t i = 0; i < *(strides.size()); ++i) {
     stream << *(strides[i]);
