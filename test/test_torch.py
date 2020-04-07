@@ -6336,6 +6336,10 @@ class TestTorchDeviceType(TestCase):
         result_check = tensor.expand(1, tensor.size(0))
         self.assertEqual(result, result_check)
 
+        result = torch.block_diag()
+        result_check = torch.empty(0, device=device)
+        self.assertEqual(result, result_check)
+
     @unittest.skipIf(not TEST_SCIPY, "Scipy not found")
     def test_block_diag_scipy(self, device):
         import scipy.linalg
