@@ -4,12 +4,23 @@
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
+#include <mutex>
+
 namespace torch { namespace autograd {
 
 struct TORCH_API AccumulateGrad : public Node {
   explicit AccumulateGrad(Variable variable_);
 
   variable_list apply(variable_list&& grads) override;
+
+  static at::Tensor callHooks(
+      const Variable& variable,
+      at::Tensor new_grad) {
+    for (auto& hook : impl::hooks(variable)) {
+      new_grad = (*hook)({new_grad})[0];
+    }
+    return new_grad;
+  }
 
   // Given a variable with its current grad as variable_grad, accumulates
   // new_grad into variable_grad if in place accumulation is possible.
@@ -26,16 +37,12 @@ struct TORCH_API AccumulateGrad : public Node {
   //              The argument to the function is a Tensor which
   //              is used to set a new value for the grad.
   template <typename T>
-  static void accumulateGradAndCallHooks(
+  static void accumulateGrad(
       const Variable& variable,
       at::Tensor& variable_grad,
-      at::Tensor new_grad,
+      const at::Tensor& new_grad,
       size_t num_expected_refs,
       const T& update_grad) {
-    for (auto& hook : impl::hooks(variable)) {
-      new_grad = (*hook)({new_grad})[0];
-    }
-
     if (!variable_grad.defined()) {
       // under following condition, we can avoid clone()
       if (!GradMode::is_enabled() && !new_grad.is_sparse() &&

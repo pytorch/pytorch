@@ -25,6 +25,7 @@ using qbinary_fn =
     void (*)(Tensor& /*out*/, const Tensor& /*self*/, const Tensor& /*other*/);
 using qadd_scalar_fn =
     void (*)(Tensor& /*out*/, const Tensor& /*self*/, Scalar other /*other*/);
+using qhardswish_fn = void (*)(const at::Tensor& /*qx*/, at::Tensor& /*qy*/);
 using qmaxpool_2d_fn = void (*)(
     const Tensor& qx,
     int64_t iC, // input/output channels
@@ -132,6 +133,7 @@ DECLARE_DISPATCH(qbinary_fn, qmul_stub);
 DECLARE_DISPATCH(qbinary_fn, qmul_relu_stub);
 DECLARE_DISPATCH(qadd_scalar_fn, qadd_scalar_stub);
 DECLARE_DISPATCH(qadd_scalar_fn, qadd_scalar_relu_stub);
+DECLARE_DISPATCH(qhardswish_fn, qhardswish_stub);
 DECLARE_DISPATCH(qelu_fn, qelu_stub);
 DECLARE_DISPATCH(qgelu_fn, qgelu_stub);
 DECLARE_DISPATCH(qmaxpool_2d_fn, qmaxpool_2d_nhwc_stub);

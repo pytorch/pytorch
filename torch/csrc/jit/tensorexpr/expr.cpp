@@ -203,6 +203,17 @@ ExprHandle ifThenElse(
   return IfThenElse::make(c, t, f);
 }
 
+ExprHandle Buf::make(
+    const std::string& name_hint,
+    const std::vector<ExprHandle>& dims) {
+  return ExprHandle(
+      new Buf(new Var(name_hint, kHandle), ExprHandleVectorToExprVector(dims)));
+}
+
+ExprHandle Buf::make(const std::vector<ExprHandle>& dims) {
+  return Buf::make("", dims);
+}
+
 } // namespace tensorexpr
 } // namespace jit
 } // namespace torch

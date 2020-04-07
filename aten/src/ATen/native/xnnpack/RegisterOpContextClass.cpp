@@ -17,7 +17,7 @@ using internal::convolution2d::createConv2dClampPrePackOpContext;
 namespace {
 torch::jit::class_<LinearOpContext> register_packed_linear_op_context_class() {
   static auto register_linear_op_context_class =
-      torch::jit::class_<LinearOpContext>("LinearOpContext")
+      torch::jit::class_<LinearOpContext>("xnnpack", "LinearOpContext")
           .def_pickle(
               [](const c10::intrusive_ptr<LinearOpContext>& op_context)
                   -> SerializationTypeLinearPrePack { // __getstate__
@@ -36,7 +36,7 @@ torch::jit::class_<LinearOpContext> register_packed_linear_op_context_class() {
 
 torch::jit::class_<Conv2dOpContext> register_packed_conv2d_op_context_class() {
   static auto register_conv2d_op_context_class =
-      torch::jit::class_<Conv2dOpContext>("Conv2dOpContext")
+      torch::jit::class_<Conv2dOpContext>("xnnpack", "Conv2dOpContext")
           .def_pickle(
               [](const c10::intrusive_ptr<Conv2dOpContext>& op_context)
                   -> SerializationTypeConv2dPrePack { // __getstate__
@@ -66,30 +66,30 @@ static auto registry =
   // We can refactor the code and use a better namespace.
     torch::RegisterOperators()
         .op("prepacked::linear_clamp_prepack(Tensor W, Tensor? B=None, "
-            "float? output_min=None, float? output_max=None) "
-            "-> __torch__.torch.classes.LinearOpContext",
+            "Scalar? output_min=None, Scalar? output_max=None) "
+            "-> __torch__.torch.classes.xnnpack.LinearOpContext",
             torch::RegisterOperators::options()
             .aliasAnalysis(at::AliasAnalysisKind::PURE_FUNCTION)
             .kernel<decltype(createLinearClampPrePackOpContext),
                 createLinearClampPrePackOpContext>(
                     DispatchKey::CPUTensorId))
         .op("prepacked::linear_clamp_run(Tensor X,"
-            " __torch__.torch.classes.LinearOpContext W_prepack) -> Tensor Y",
+            " __torch__.torch.classes.xnnpack.LinearOpContext W_prepack) -> Tensor Y",
             torch::RegisterOperators::options()
             .aliasAnalysis(at::AliasAnalysisKind::PURE_FUNCTION)
             .kernel<internal::linear::LinearClampRun>(
                 DispatchKey::CPUTensorId))
         .op("prepacked::conv2d_clamp_prepack(Tensor W, Tensor? B, int[2] stride, "
             "int[2] padding, int[2] dilation, int groups, "
-            "float? output_min=None, float? output_max=None) "
-            "-> __torch__.torch.classes.Conv2dOpContext",
+            "Scalar? output_min=None, Scalar? output_max=None) "
+            "-> __torch__.torch.classes.xnnpack.Conv2dOpContext",
             torch::RegisterOperators::options()
             .aliasAnalysis(at::AliasAnalysisKind::PURE_FUNCTION)
             .kernel<decltype(createConv2dClampPrePackOpContext),
                 createConv2dClampPrePackOpContext>(
                 DispatchKey::CPUTensorId))
         .op("prepacked::conv2d_clamp_run(Tensor X, "
-            "__torch__.torch.classes.Conv2dOpContext W_prepack) -> Tensor Y",
+            "__torch__.torch.classes.xnnpack.Conv2dOpContext W_prepack) -> Tensor Y",
             torch::RegisterOperators::options()
             .aliasAnalysis(at::AliasAnalysisKind::PURE_FUNCTION)
             .kernel<internal::convolution2d::Conv2dClampRun>(
