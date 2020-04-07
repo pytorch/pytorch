@@ -302,7 +302,7 @@ class TestQuantizedOps(TestCase):
                     X[i].size < 5 or
                     float(np.unique(X[i]).shape[0]) / X[i].size > 0.01) else 0
                 for i in range(X.shape[0])
-            )
+            ) > 0
             assume(enough_unique_vals_in_each_layer)
 
             X = torch.from_numpy(X)
