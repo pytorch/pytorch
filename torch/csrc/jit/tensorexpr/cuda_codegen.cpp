@@ -1,7 +1,7 @@
 #include <torch/csrc/jit/tensorexpr/cuda_codegen.h>
 #include <torch/csrc/jit/tensorexpr/cuda_half_support.h>
 
-#include <ATen/CUDAGenerator.h>
+#include <ATen/CUDAGeneratorImpl.h>
 #include <c10/cuda/CUDAFunctions.h>
 #include <torch/csrc/jit/tensorexpr/analysis.h>
 #include <torch/csrc/jit/tensorexpr/cuda_random.h>
@@ -165,16 +165,7 @@ void CudaPrinter::visit(const Load* v) {
     os() << "__half2float(" << *v->base_handle() << "[" << *v->flat_index()
          << "])";
   } else {
-    // Detects whether the load target is also a store target.
-    // TODO: this is currently too wide. It detects whether a store-target exists
-    // within the program. In fact, this check is only necessary within a
-    // kernel.
-    if (!cuda_analysis_->is_buf_store_target(v->buf())) {
-      // Cuda __ldg can only be applied on read-only buffers.
-      os() << "__ldg(" << *v->base_handle() << " + " << *v->flat_index() << ")";
-    } else {
-      os() << *v->base_handle() << "[" << *v->flat_index() << "]";
-    }
+    os() << "__ldg(" << *v->base_handle() << " + " << *v->flat_index() << ")";
   }
 }
 
@@ -417,12 +408,9 @@ void CudaCodeGen::Initialize() {
   // TODO: handle multiple kernels.
   // TODO: handle dynamic dimension.
   // TODO: call nvrtc.
-  // TODO: merge HasRand with CudaAnalysis.
   HasRand has_rand_func(stmt());
   has_random_ = has_rand_func.has_rand();
-  cuda_analysis_ = std::make_unique<CudaAnalysis>();
-  printer_ =
-      std::make_unique<CudaPrinter>(&oss_, cuda_analysis_.get(), has_random_);
+  printer_ = std::make_unique<CudaPrinter>(&oss_, has_random_);
 
   os() << "#define NAN __int_as_float(0x7fffffff)\n"
           "#define POS_INFINITY __int_as_float(0x7f800000)\n"
@@ -479,7 +467,6 @@ void CudaCodeGen::Initialize() {
   Stmt* stmt_v = stmt();
   PrioritizeLoad prioritize_load;
   stmt_v = prioritize_load.Process(stmt_v);
-  stmt_v->accept(cuda_analysis_.get());
   stmt_v->accept(printer_.get());
   os() << std::endl;
   os() << "}";
@@ -593,9 +580,9 @@ void CudaCodeGen::call(const std::vector<CallArg>& args) {
     // TODO: total hack. Switch to numel when it is available.
     int64_t total_elements_per_thread = (1LL << 28);
     {
-      std::lock_guard<std::mutex> lock(gen->mutex_);
+      std::lock_guard<std::mutex> lock(gen.mutex());
       auto philox_engine_inputs =
-          at::check_generator<at::CUDAGenerator>(gen)->philox_engine_inputs(
+          at::check_generator<at::CUDAGeneratorImpl>(gen)->philox_engine_inputs(
               total_elements_per_thread);
       rand_seed = philox_engine_inputs.first;
       rand_offset = philox_engine_inputs.second;
@@ -695,8 +682,6 @@ void CudaCodeGen::CompileToNVRTC(
       nvrtc().cuModuleGetFunction(&function_, module, func_name.c_str()));
   at::cuda::set_device(prior_device);
 }
-
-CudaCodeGen::~CudaCodeGen() {}
 
 RegisterCodeGen<CudaCodeGen> cuda_codegen_reg("cuda_codegen");
 

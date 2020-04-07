@@ -7,13 +7,13 @@
 
 namespace at {
 
-struct CAFFE2_API CPUGenerator : public c10::GeneratorImpl {
+struct CAFFE2_API CPUGeneratorImpl : public c10::GeneratorImpl {
   // Constructors
-  CPUGenerator(uint64_t seed_in = default_rng_seed_val);
-  ~CPUGenerator() = default;
+  CPUGeneratorImpl(uint64_t seed_in = default_rng_seed_val);
+  ~CPUGeneratorImpl() = default;
 
-  // CPUGenerator methods
-  std::shared_ptr<CPUGenerator> clone() const;
+  // CPUGeneratorImpl methods
+  std::shared_ptr<CPUGeneratorImpl> clone() const;
   void set_current_seed(uint64_t seed) override;
   uint64_t current_seed() const override;
   uint64_t seed() override;
@@ -28,7 +28,7 @@ struct CAFFE2_API CPUGenerator : public c10::GeneratorImpl {
   void set_engine(at::mt19937 engine);
 
 private:
-  CPUGenerator* clone_impl() const override;
+  CPUGeneratorImpl* clone_impl() const override;
   at::mt19937 engine_;
   c10::optional<float> next_float_normal_sample_;
   c10::optional<double> next_double_normal_sample_;
