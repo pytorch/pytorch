@@ -14,7 +14,7 @@ namespace tensorexpr {
 
 class BoundsInference : public IRVisitor {
  public:
-  void visit(const FunctionCall* v);
+  void visit(const FunctionCall* v) override;
   void visit(const Load* v) override;
   void visit(const Store* v) override;
   void visit(const For* v) override;
@@ -44,21 +44,21 @@ void BoundsInference::visit(const Store* v) {
 
 void BoundsInference::visit(const For* v) {
   v->body()->accept(this);
-  for (size_t i = 0; i < accesses_.size(); i++) {
-    for (size_t j = 0; j < accesses_[i].start.size(); j++) {
+  for (TensorAccessBoundsInfo& access : accesses_) {
+    for (size_t j = 0; j < access.start.size(); j++) {
       // TODO: This function assumes that all indices grow monotonically and
       // thus for the loop:
       //   for i in A..B:
       //     buf[i] = i
       // the range for i is [A, B). It should be generalized to correctly handle
       // all cases.
-      const Expr* old_start = accesses_[i].start[j];
-      const Expr* old_stop = accesses_[i].stop[j];
+      const Expr* old_start = access.start[j];
+      const Expr* old_stop = access.stop[j];
       const Expr* new_start = Substitute(old_start, {{v->var(), v->start()}});
       const Expr* new_stop =
           Substitute(old_stop, {{v->var(), new Sub(v->stop(), new IntImm(1))}});
-      accesses_[i].start[j] = IRSimplifier::simplify(new_start);
-      accesses_[i].stop[j] = IRSimplifier::simplify(new_stop);
+      access.start[j] = IRSimplifier::simplify(new_start);
+      access.stop[j] = IRSimplifier::simplify(new_stop);
     }
   }
 }
