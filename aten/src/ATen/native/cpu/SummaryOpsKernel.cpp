@@ -41,7 +41,7 @@ void histc_kernel(
     h_data = hist.data_ptr<int64_t>();
     cpu_serial_kernel(iter, [&](scalar_t val) -> void { 
       if (val >= minval && val <= maxval) {
-        const int64_t bin = (int64_t)((val-minval) / (maxval-minval) * nbins);
+        const int64_t bin = (int64_t)((val-minval) * nbins / (maxval-minval));
         h_data[std::min(bin, nbins-1)] += 1;
       }
     });
