@@ -572,25 +572,17 @@ class ModuleAPITest(QuantizationTestCase):
         if use_bias:
             self.assertEqual(packed_params.bias(), b)
         bytes_io = io.BytesIO()
-        print('torch.save:', model_dict['_packed_params'].weight())
-        torch.save(model_dict, bytes_io)
+        # Note that _use_new_zipfile_serialization=False doesn't work
+        # TODO: remove _use_new_zipfile_serialization=True
+        # after https://github.com/pytorch/pytorch/pull/32958 is landed
+        torch.save(model_dict, bytes_io, _use_new_zipfile_serialization=True)
         bytes_io.seek(0)
-        print('torch.load')
         loaded_dict = torch.load(bytes_io)
-        print('loaded weight:', loaded_dict['_packed_params'].weight())
         for key in loaded_dict:
             if key == '_packed_params':
                 m = model_dict['_packed_params']
                 l = loaded_dict['_packed_params']
-                print('m and l:', m.weight(), l.weight())
-                if m.weight().qscheme() == torch.per_channel_affine:
-                    print(m.weight().q_per_channel_scales())
-                    print(l.weight().q_per_channel_scales())
-                    print(m.weight().q_per_channel_zero_points())
-                    print(l.weight().q_per_channel_zero_points())
-                print('asseertEqual(m.weight(), l.weight()')
                 self.assertEqual(m.weight(), l.weight())
-                print('asseertEqual(m.bias(), l.bias()')
                 self.assertEqual(m.bias(), l.bias())
                 self.assertEqual(m.stride(), l.stride())
                 self.assertEqual(m.padding(), l.padding())
@@ -598,7 +590,6 @@ class ModuleAPITest(QuantizationTestCase):
                 self.assertEqual(m.groups(), l.groups())
             else:
                 self.assertEqual(model_dict[key], loaded_dict[key])
-        print('loading qconv module using state_dict')
         loaded_qconv_module = type(qconv_module)(
             in_channels, out_channels, kernel_size, stride, padding, dilation,
             groups, use_bias, padding_mode="zeros")

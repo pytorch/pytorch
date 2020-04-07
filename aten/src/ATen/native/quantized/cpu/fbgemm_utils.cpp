@@ -220,13 +220,9 @@ torch::jit::class_<ConvPackedParamsBase<kSpatialDim>> register_conv_params() {
           .def_pickle(
               [](const c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>>& params)
                   -> SerializationType { // __getstate__
-                std::cout << "in pickle __geetstate__" << std::endl;
                 at::Tensor weight;
                 c10::optional<at::Tensor> bias;
-                std::cout << "unpacking" << std::endl;
                 std::tie(weight, bias) = params->unpack();
-                std::cout << "weight in __getstate__:" << std::endl;
-                std::cout << weight << std::endl;
                 return std::make_tuple(
                     std::move(weight),
                     std::move(bias),
@@ -242,8 +238,6 @@ torch::jit::class_<ConvPackedParamsBase<kSpatialDim>> register_conv_params() {
                 torch::List<int64_t> stride, padding, dilation;
                 int64_t groups;
                 weight = std::move(std::get<0>(state));
-                std::cout << "weight in __setstate__:" << std::endl;
-                std::cout << weight << std::endl;
                 bias = std::move(std::get<1>(state));
                 stride = std::get<2>(state);
                 padding = std::get<3>(state);
