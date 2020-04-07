@@ -71,6 +71,7 @@ auto CopySlices::apply(variable_list&& inputs) -> variable_list {
   auto result = at::empty_strided(base.sizes(), base.strides(), grad.options());
   result.copy_(grad);
 
+  TORCH_CHECK(view_fn != nullptr, "view_fn is empty.")
   auto grad_slice = view_fn(result);
 
   // TODO: We clone grad_slice because we modify it below and "fn" might save

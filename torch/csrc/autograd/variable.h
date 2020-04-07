@@ -329,6 +329,10 @@ struct TORCH_API AutogradMeta : public c10::AutogradMetaInterface {
 /// creation_meta=CreationMeta::NO_GRAD_MODE for all differentiable views created
 /// in no_grad mode.
 ///
+/// See Note [View + Inplace update for base tensor]
+/// and Note [View + Inplace update for view tensor] for the details how autograd
+/// handles inplace update with view ops.
+///
 /// Non-Differentiable Views
 /// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 /// In certain cases, although function outputs share storage with inputs, they
@@ -422,17 +426,17 @@ struct TORCH_API DifferentiableViewMeta : public AutogradMeta {
 inline Variable make_variable_differentiable_view(
     Variable base,
     at::Tensor data,
-    std::function<at::Tensor(at::Tensor)> func,
+    std::function<at::Tensor(at::Tensor)> view_func,
     CreationMeta creation_meta) {
   if (data.defined()) {
     auto data_impl_copy = data.getIntrusivePtr()->shallow_copy_and_detach(
       /*version_counter=*/0,
       /*allow_tensor_metadata_change=*/true);
     data_impl_copy->set_autograd_meta(std::make_unique<DifferentiableViewMeta>(
-      data_impl_copy.get(), std::move(base), std::move(func),
+      data_impl_copy.get(), std::move(base), std::move(view_func),
       creation_meta));
     return Variable(data_impl_copy);
-    }
+  }
   return Variable();
 }
 

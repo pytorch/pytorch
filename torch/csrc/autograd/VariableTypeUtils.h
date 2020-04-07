@@ -109,11 +109,15 @@ inline Tensor as_view(const Tensor & base, Tensor tensor, bool is_differentiable
         std::function<Tensor(const Tensor&)> func=nullptr,
         CreationMeta creation_meta=CreationMeta::DEFAULT) {
   auto base_var = Variable(base);
+  // TODO: Potentially the following logic can be moved to VariableType_x.cpp through codegen
+  //       so that we only create chain lambda functions for XLA backend.
   if (base_var.is_view()) {
-    if (base_var.device().type() == at::kXLA) {
+    if (func == nullptr) {
+      // func could be nullptr if tensor is a view created through CreationMeta::MULTI_OUTPUT_NODE.
+      base_var = base_var._base();
+    } else if (base_var.device().type() == at::kXLA) {
       auto diff_view_meta = static_cast<DifferentiableViewMeta*>(base_var.getIntrusivePtr()->autograd_meta());
       auto prev_fn = diff_view_meta->view_fn_;
-      // prev_fn could be nullptr if base_var is a view created through MULTIOUTPUT.
       if (prev_fn != nullptr) {
         func = [=](const at::Tensor& new_base) {
           auto temp = prev_fn(new_base);
@@ -123,12 +127,15 @@ inline Tensor as_view(const Tensor & base, Tensor tensor, bool is_differentiable
       base_var = base_var._base();
     } else {
       base_var = base_var._base();
-      auto sizes = tensor.sizes().vec();
-      auto strides = tensor.strides().vec();
-      auto offset = tensor.storage_offset() - base_var.storage_offset();
-      func = [=](const at::Tensor& new_base) {
+      if (base_var.has_storage() && tensor.has_storage()) {
+        // Sparse tensor doesn't have a storage thus cannot be optimized using as_strided.
+        auto sizes = tensor.sizes().vec();
+        auto strides = tensor.strides().vec();
+        auto offset = tensor.storage_offset() - base_var.storage_offset();
+        func = [=](const at::Tensor& new_base) {
           return new_base.as_strided(sizes, strides, offset);
-      };
+        };
+      }
     }
   }
   if (is_differentiable) {

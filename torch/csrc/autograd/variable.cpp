@@ -343,9 +343,35 @@ const std::shared_ptr<torch::autograd::Node>& VariableHooks::grad_fn(const Tenso
       // This is an indirect rebase_history due to another view or the base being modified inplace
       handle_view_on_rebase(diff_view_meta, /* indirect */ true);
       TORCH_INTERNAL_ASSERT(diff_view_meta->output_nr_ == 0);
+      // Note [View + Inplace update for view tensor]
+      // An inplace update happened on self Tensor (which is a view).
+      // For example:
+      //   view_1 = view_op_1(diff_view_meta->base_)
+      //   view_2 = view_op_2(view_1)
+      //   ...
+      //   self = view_op_n(view_n-1)
+      //   self = inplace_op(self)
+      //
+      // For CPU/CUDA backends, we employ one AsStridedBackward Node to represent the chain of
+      // view backward ops for effienciency.
+      //
+      // However in XLA backend we don't have full support of AsStridedBackward, we instead run a full
+      // forward pass with a tensor that requires gradient to get proper grad_fn setup,
+      // then save it to DifferentiableViewMeta for future use.
+      // This is fairly cheap for XLA lazy tensor approach(but really expensive for CPU/CUDA).
+      // XLA Tensor only run thorugh VariableType dispatch and lower the forward pass to a XLA HLO graph,
+      // then we take grad_fn and never materialize the tensor content.
+      // So we only construct the graph but not execute it, which is a fairly cheap operation to do.
+      //
+      // See Note [View + Inplace update for base tensor] for what we do to base tensor when
+      // an in-place operation happens.
+      //
+      // TODO: Potentially the following logic can be moved to VariableType_x.cpp through codegen
+      //       so that we directly save a view_grad_fn in DifferentiableViewMeta.
       if (self.device().type() == at::kXLA) {
         auto diff_base = at::empty_strided(diff_view_meta->base_.sizes(), diff_view_meta->base_.strides(), diff_view_meta->base_.options().requires_grad(true));
         diff_base.copy_(diff_view_meta->base_);
+        TORCH_CHECK(diff_view_meta->view_fn_ != nullptr, "diff_view_meta->view_fn_ is empty.")
         auto diff_view = diff_view_meta->view_fn_(diff_base);
         auto fn = diff_view.grad_fn();
         diff_view_meta->grad_fn_ = std::move(fn);

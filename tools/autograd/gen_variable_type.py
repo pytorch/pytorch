@@ -796,12 +796,12 @@ def emit_body(declaration):
                 updated_unpacked_args.append(arg)
         if 'namespace' in declaration['method_of']:
             replay_view_call = CALL_DISPATCH_VIA_NAMESPACE.substitute(
-                api_name=declaration['api_name'],
+                combined,
                 unpacked_args=updated_unpacked_args)
         else:
             replay_view_call = CALL_DISPATCH_VIA_METHOD.substitute(
+                combined,
                 var=input_base,
-                api_name=declaration['api_name'],
                 unpacked_method_args=updated_unpacked_args[1:])
 
         call += REPLAY_VIEW_LAMBDA_FUNC.substitute(
