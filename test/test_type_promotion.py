@@ -210,16 +210,6 @@ class TestTypePromotion(TestCase):
         shape = [5, 5, 5]
         if dtype == torch.bool:
             tensor = torch.randint(int(remove_zeros), 2, shape, device=device, dtype=dtype)
-        elif dtype.is_complex:
-            # "_th_normal_ not supported on CPUType for Half" so simpler create and convert
-            tensor = torch.randn(shape, dtype=dtype, device=device)
-            if remove_zeros:
-                tensor_abs = torch.abs(tensor)
-                if dtype == torch.complex64:
-                    tensor_abs = tensor_abs.to(torch.float)
-                elif dtype == torch.complex128:
-                    tensor_abs = tensor_abs.to(torch.double)
-                tensor[tensor_abs < 0.05] = 5
         elif dtype.is_floating_point or dtype.is_complex:
             # "_th_normal_ not supported on CPUType for Half" so simpler create and convert
             tensor = torch.randn(shape, device=device)
@@ -694,9 +684,14 @@ class TestTypePromotion(TestCase):
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     @dtypes(torch.complex64, torch.complex128)
     def test_abs_complex_to_float(self, device, dtype):
-        np_dtype = numpy_dtype(dtype)
-        vals = (0 + 0j, 0 - 2j, 0 + 2j, 1 + 1j, 1 - 1j, 2 + .2j, -2 - .2j)
-        a = np.array(vals, dtype=np_dtype)
+        from random import random
+        # vals = (0 + 0j, 0 - 2j, 0 + 2j, 1 + 1j, 1 - 1j, 2 + .2j, -2 - .2j)
+        vals = []
+        for multiplier in (-1, 1, -10, 10, -100, 100):
+            for _ in range(10):
+                vals.append(complex(random() * multiplier, random() * multiplier))
+
+        a = np.array(vals, dtype=numpy_dtype(dtype))
         t = torch.tensor(vals, device=device, dtype=dtype)
 
         np_result = np.abs(a)
