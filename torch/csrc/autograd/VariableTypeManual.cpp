@@ -394,7 +394,7 @@ static auto registry = torch::RegisterOperators()
     .schema("aten::_version(Tensor self) -> int")
     .catchAllKernel<decltype(VariableType::_version), &VariableType::_version>())
   .op(torch::RegisterOperators::options()
-    .schema("aten::requires_grad_(Tensor(a!) self, bool _requires_grad=True) -> Tensor(a!)")
+    .schema("aten::requires_grad_(Tensor(a!) self, bool requires_grad=True) -> Tensor(a!)")
     // For requires_grad_(), we need the catch-all kernel (see comment above), but we also need the VariableTensorId backend
     // kernel, because when called with a VariableTensorId tensor, it goes through the variable fallback kernel,
     // which calls callBoxed(), which doesn't support mutable tensor arguments yet and requires_grad_() has a mutable
