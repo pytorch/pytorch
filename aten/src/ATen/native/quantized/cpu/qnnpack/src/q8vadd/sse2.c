@@ -12,6 +12,8 @@
 #include <qnnpack/q8vadd.h>
 #include <qnnpack/scalar-utils.h>
 
+#include <math.h>
+
 void pytorch_q8vadd_ukernel__sse2(
     size_t n,
     const uint8_t* a,
@@ -23,20 +25,8 @@ void pytorch_q8vadd_ukernel__sse2(
     PYTORCH_QNNP_LIKELY(n >= 8) {
       const __m128i vzero_point_product = _mm_load_si128(
           (const __m128i*)&quantization_params->sse2.zero_point_product);
-      const __m128i va_multiplier_lo = _mm_load_si128(
-          (const __m128i*)&quantization_params->sse2.a_multiplier_lo);
-      const __m128i va_multiplier_hi = _mm_load_si128(
-          (const __m128i*)&quantization_params->sse2.a_multiplier_hi);
-      const __m128i vb_multiplier_lo = _mm_load_si128(
-          (const __m128i*)&quantization_params->sse2.b_multiplier_lo);
-      const __m128i vb_multiplier_hi = _mm_load_si128(
-          (const __m128i*)&quantization_params->sse2.b_multiplier_hi);
-      const __m128i vremainder_mask = _mm_load_si128(
-          (const __m128i*)quantization_params->sse2.remainder_mask);
-      const __m128i vremainder_threshold = _mm_load_si128(
-          (const __m128i*)quantization_params->sse2.remainder_threshold);
-      const __m128i vshift =
-          _mm_cvtsi32_si128((int)quantization_params->sse2.shift);
+      const __m128 va_scale = _mm_load_ps(quantization_params->sse2.a_scale);
+      const __m128 vb_scale = _mm_load_ps(quantization_params->sse2.b_scale);
 
       const __m128i vzero = _mm_setzero_si128();
       do {
@@ -48,44 +38,28 @@ void pytorch_q8vadd_ukernel__sse2(
         const __m128i vxa = _mm_unpacklo_epi8(va, vzero);
         const __m128i vxb = _mm_unpacklo_epi8(vb, vzero);
 
-        /* Multiply by factors */
-        const __m128i va_product_lo = _mm_mullo_epi16(vxa, va_multiplier_lo);
-        const __m128i va_product_hi = _mm_add_epi16(
-            _mm_mulhi_epu16(vxa, va_multiplier_lo),
-            _mm_mullo_epi16(vxa, va_multiplier_hi));
+        const __m128i vxa_lo_32x4 = _mm_unpacklo_epi16(vxa, vzero);
+        const __m128i vxa_hi_32x4 = _mm_unpackhi_epi16(vxa, vzero);
+        const __m128i vxb_lo_32x4 = _mm_unpacklo_epi16(vxb, vzero);
+        const __m128i vxb_hi_32x4 = _mm_unpackhi_epi16(vxb, vzero);
 
-        const __m128i vb_product_lo = _mm_mullo_epi16(vxb, vb_multiplier_lo);
-        const __m128i vb_product_hi = _mm_add_epi16(
-            _mm_mulhi_epu16(vxb, vb_multiplier_lo),
-            _mm_mullo_epi16(vxb, vb_multiplier_hi));
+        const __m128 vxa_lo_32x4_f =
+          _mm_mul_ps(_mm_cvtepi32_ps(vxa_lo_32x4), va_scale);
+        const __m128 vxa_hi_32x4_f =
+          _mm_mul_ps(_mm_cvtepi32_ps(vxa_hi_32x4), va_scale);
+        const __m128 vxb_lo_32x4_f =
+          _mm_mul_ps(_mm_cvtepi32_ps(vxb_lo_32x4), vb_scale);
+        const __m128 vxb_hi_32x4_f =
+          _mm_mul_ps(_mm_cvtepi32_ps(vxb_hi_32x4), vb_scale);
 
-        /* Accumulate products */
-        __m128i vacc_lo = _mm_add_epi32(
-            vzero_point_product,
-            _mm_unpacklo_epi16(va_product_lo, va_product_hi));
-        __m128i vacc_hi = _mm_add_epi32(
-            vzero_point_product,
-            _mm_unpackhi_epi16(va_product_lo, va_product_hi));
+        const __m128 vacc_lo_f = _mm_add_ps(vxa_lo_32x4_f, vxb_lo_32x4_f);
+        const __m128 vacc_hi_f = _mm_add_ps(vxa_hi_32x4_f, vxb_hi_32x4_f);
 
-        vacc_lo = _mm_add_epi32(
-            vacc_lo, _mm_unpacklo_epi16(vb_product_lo, vb_product_hi));
-        vacc_hi = _mm_add_epi32(
-            vacc_hi, _mm_unpackhi_epi16(vb_product_lo, vb_product_hi));
+        __m128i vacc_lo = _mm_cvtps_epi32(vacc_lo_f);
+        __m128i vacc_hi = _mm_cvtps_epi32(vacc_hi_f);
 
-        /* Shift right and round */
-        const __m128i vrem_lo = _mm_add_epi32(
-            _mm_and_si128(vacc_lo, vremainder_mask),
-            _mm_cmpgt_epi32(_mm_setzero_si128(), vacc_lo));
-        const __m128i vrem_hi = _mm_add_epi32(
-            _mm_and_si128(vacc_hi, vremainder_mask),
-            _mm_cmpgt_epi32(_mm_setzero_si128(), vacc_hi));
-
-        vacc_lo = _mm_sub_epi32(
-            _mm_sra_epi32(vacc_lo, vshift),
-            _mm_cmpgt_epi32(vrem_lo, vremainder_threshold));
-        vacc_hi = _mm_sub_epi32(
-            _mm_sra_epi32(vacc_hi, vshift),
-            _mm_cmpgt_epi32(vrem_hi, vremainder_threshold));
+        vacc_lo = _mm_add_epi32(vzero_point_product, vacc_lo);
+        vacc_hi = _mm_add_epi32(vzero_point_product, vacc_hi);
 
         /* Pack, saturate, and add output zero point */
         const __m128i vy_zero_point = _mm_load_si128(
@@ -117,44 +91,28 @@ void pytorch_q8vadd_ukernel__sse2(
         const __m128i vxa = _mm_unpacklo_epi8(va, vzero);
         const __m128i vxb = _mm_unpacklo_epi8(vb, vzero);
 
-        /* Multiply by factors */
-        const __m128i va_product_lo = _mm_mullo_epi16(vxa, va_multiplier_lo);
-        const __m128i va_product_hi = _mm_add_epi16(
-            _mm_mulhi_epu16(vxa, va_multiplier_lo),
-            _mm_mullo_epi16(vxa, va_multiplier_hi));
+        const __m128i vxa_lo_32x4 = _mm_unpacklo_epi16(vxa, vzero);
+        const __m128i vxa_hi_32x4 = _mm_unpackhi_epi16(vxa, vzero);
+        const __m128i vxb_lo_32x4 = _mm_unpacklo_epi16(vxb, vzero);
+        const __m128i vxb_hi_32x4 = _mm_unpackhi_epi16(vxb, vzero);
 
-        const __m128i vb_product_lo = _mm_mullo_epi16(vxb, vb_multiplier_lo);
-        const __m128i vb_product_hi = _mm_add_epi16(
-            _mm_mulhi_epu16(vxb, vb_multiplier_lo),
-            _mm_mullo_epi16(vxb, vb_multiplier_hi));
+        const __m128 vxa_lo_32x4_f =
+          _mm_mul_ps(_mm_cvtepi32_ps(vxa_lo_32x4), va_scale);
+        const __m128 vxa_hi_32x4_f =
+          _mm_mul_ps(_mm_cvtepi32_ps(vxa_hi_32x4), va_scale);
+        const __m128 vxb_lo_32x4_f =
+          _mm_mul_ps(_mm_cvtepi32_ps(vxb_lo_32x4), vb_scale);
+        const __m128 vxb_hi_32x4_f =
+          _mm_mul_ps(_mm_cvtepi32_ps(vxb_hi_32x4), vb_scale);
 
-        /* Accumulate products */
-        __m128i vacc_lo = _mm_add_epi32(
-            vzero_point_product,
-            _mm_unpacklo_epi16(va_product_lo, va_product_hi));
-        __m128i vacc_hi = _mm_add_epi32(
-            vzero_point_product,
-            _mm_unpackhi_epi16(va_product_lo, va_product_hi));
+        const __m128 vacc_lo_f = _mm_add_ps(vxa_lo_32x4_f, vxb_lo_32x4_f);
+        const __m128 vacc_hi_f = _mm_add_ps(vxa_hi_32x4_f, vxb_hi_32x4_f);
 
-        vacc_lo = _mm_add_epi32(
-            vacc_lo, _mm_unpacklo_epi16(vb_product_lo, vb_product_hi));
-        vacc_hi = _mm_add_epi32(
-            vacc_hi, _mm_unpackhi_epi16(vb_product_lo, vb_product_hi));
+        __m128i vacc_lo = _mm_cvtps_epi32(vacc_lo_f);
+        __m128i vacc_hi = _mm_cvtps_epi32(vacc_hi_f);
 
-        /* Shift right and round */
-        const __m128i vrem_lo = _mm_add_epi32(
-            _mm_and_si128(vacc_lo, vremainder_mask),
-            _mm_cmpgt_epi32(_mm_setzero_si128(), vacc_lo));
-        const __m128i vrem_hi = _mm_add_epi32(
-            _mm_and_si128(vacc_hi, vremainder_mask),
-            _mm_cmpgt_epi32(_mm_setzero_si128(), vacc_hi));
-
-        vacc_lo = _mm_sub_epi32(
-            _mm_sra_epi32(vacc_lo, vshift),
-            _mm_cmpgt_epi32(vrem_lo, vremainder_threshold));
-        vacc_hi = _mm_sub_epi32(
-            _mm_sra_epi32(vacc_hi, vshift),
-            _mm_cmpgt_epi32(vrem_hi, vremainder_threshold));
+        vacc_lo = _mm_add_epi32(vzero_point_product, vacc_lo);
+        vacc_hi = _mm_add_epi32(vzero_point_product, vacc_hi);
 
         /* Pack, saturate, and add output zero point */
         const __m128i vy_zero_point = _mm_load_si128(
@@ -187,12 +145,8 @@ void pytorch_q8vadd_ukernel__sse2(
   else {
     const int32_t vzero_point_product =
         quantization_params->sse2.zero_point_product[0];
-    const uint32_t va_multiplier = quantization_params->sse2.a_multiplier;
-    const uint32_t vb_multiplier = quantization_params->sse2.b_multiplier;
-    const int32_t vremainder_mask = quantization_params->sse2.remainder_mask[0];
-    const int32_t vremainder_threshold =
-        quantization_params->sse2.remainder_threshold[0];
-    const uint32_t vshift = quantization_params->sse2.shift;
+    const float va_multiplier = quantization_params->sse2.a_multiplier;
+    const float vb_multiplier = quantization_params->sse2.b_multiplier;
     const int32_t vy_zero_point =
         (int32_t)quantization_params->sse2.y_zero_point[0];
     const int32_t vy_max =
@@ -205,13 +159,8 @@ void pytorch_q8vadd_ukernel__sse2(
       const uint32_t vxb = (uint32_t)*b++;
 
       /* Multiply by factors and accumulate products */
-      int32_t vacc = vzero_point_product + (int32_t)(vxa * va_multiplier) +
-          (int32_t)(vxb * vb_multiplier);
-
-      /* Shift right and round */
-      const int32_t vrem = (vacc & vremainder_mask) - (int32_t)(vacc < 0);
-
-      vacc = asr_s32(vacc, vshift) + (int32_t)(vrem > vremainder_threshold);
+      int32_t vacc = vzero_point_product + lrintf((float)vxa * va_multiplier) +
+          lrintf((float)vxb * vb_multiplier);
 
       /* Clamp and add output zero point */
       int32_t vy = vacc + vy_zero_point;

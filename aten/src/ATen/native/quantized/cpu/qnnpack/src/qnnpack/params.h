@@ -194,6 +194,13 @@ union pytorch_qnnp_add_quantization_params {
     int16_t y_zero_point;
     uint8_t y_max;
     uint8_t y_min;
+    // Following four are for nearest-ties-to-even
+    // rounding in aarch32. This saves some instructions
+    // needed otherwise.
+    float vfmax;
+    float vfmin;
+    float vfmagic;
+    int32_t vimagic;
   } neon;
 #endif
 #if CPUINFO_ARCH_X86 || CPUINFO_ARCH_X86_64
@@ -204,9 +211,8 @@ union pytorch_qnnp_add_quantization_params {
     PYTORCH_QNNP_ALIGN(16) int16_t y_zero_point[8];
     PYTORCH_QNNP_ALIGN(16) uint8_t y_max[16];
     PYTORCH_QNNP_ALIGN(16) uint8_t y_min[16];
-    uint32_t shift;
-    uint32_t a_multiplier;
-    uint32_t b_multiplier;
+    float a_multiplier;
+    float b_multiplier;
   } sse2;
 #endif
 };

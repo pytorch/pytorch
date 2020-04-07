@@ -322,6 +322,8 @@ pytorch_qnnp_compute_add_quantization_params(
     params.sse2.y_max[i] = output_max;
     params.sse2.y_min[i] = output_min;
   }
+  params.sse2.a_multiplier = a_output_scale;
+  params.sse2.b_multiplier = b_output_scale;
 #elif CPUINFO_ARCH_ARM || CPUINFO_ARCH_ARM64
   params.neon.a_zero_point = a_zero_point;
   params.neon.b_zero_point = b_zero_point;
@@ -330,6 +332,13 @@ pytorch_qnnp_compute_add_quantization_params(
   params.neon.b_scale = b_output_scale;
   params.neon.y_max = output_max;
   params.neon.y_min = output_min;
+  params.neon.vfmin = ((float)((int32_t)(uint32_t)output_min -
+      (int32_t)(uint32_t)output_zero_point));
+  params.neon.vfmax = ((float)((int32_t)(uint32_t)output_max -
+      (int32_t)(uint32_t)output_zero_point));
+  params.neon.vfmagic = 12582912.0f;
+  params.neon.vimagic = (INT32_C(0x4B400000) -
+      (int32_t)(uint32_t)output_zero_point);
 #else
   params.scalar.zero_point_product = (int32_t) -
       ((uint32_t)(a_output_scale * (float)a_zero_point) +
@@ -459,17 +468,35 @@ static inline uint8_t pytorch_qnnp_add_quantize(
     uint8_t b,
     union pytorch_qnnp_add_quantization_params params) {
   /* Multiply by factors and accumulate products */
-  int32_t acc = params.scalar.zero_point_product +
-      (int32_t)((float)a * params.scalar.a_scale) +
-      (int32_t)((float)b * params.scalar.b_scale);
+  float float_acc = (float)a * params.scalar.a_scale +
+      (float)b * params.scalar.b_scale;
 
-  /* Clamp and add output zero point */
-  int32_t y = acc + params.scalar.y_zero_point;
-  if (y >= params.scalar.y_max) {
-    y = params.scalar.y_max;
-  }
-  if (y <= params.scalar.y_min) {
-    y = params.scalar.y_min;
-  }
-  return (uint8_t)y;
+  const long lmin =
+      (long)((int32_t)(uint32_t)params.scalar.y_min -
+          (int32_t)(uint32_t)params.scalar.y_zero_point);
+  const long lmax =
+      (long)((int32_t)(uint32_t)params.scalar.y_max -
+          (int32_t)(uint32_t)params.scalar.y_zero_point);
+
+#if defined(__arm__) || defined(_M_ARM)
+  const float fmin =  (float)lmin;
+  const float fmax = (float)lmax;
+  const int32_t imagic = params.scalar.magic_less_zero_point;
+  const float fmagic = 12582912.0f;
+  const int32_t imagic = (INT32_C(0x4B400000) -
+      (int32_t)(uint32_t)params.scalar.y_zero_point);
+
+  const float acc_clamped =
+      float_acc < fmin ? fmin : float_acc > fmax ? fmax : float_acc;
+  const int32_t acc_biased = (int32_t)fp32_to_bits(acc_clamped + fmagic) - imagic;
+
+  return (uint8_t)acc_biased;
+#else
+  const long acc = lrintf(float_acc);
+  const int32_t acc_clamped = (int32_t)(
+      acc < lmin ? lmin : acc > lmax ? lmax : acc);
+  const int32_t acc_biased =
+      acc + (int32_t)(uint32_t)params.scalar.y_zero_point;
+  return (uint8_t)acc_biased;
+#endif
 }
