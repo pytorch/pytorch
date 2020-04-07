@@ -416,62 +416,6 @@ ilpReduce(int shift,
   return threadVal;
 }
 
-#if 0
-template <template<typename, typename> class Reduction1, template<typename, typename> class Reduction2, int ILP, typename T, typename AccumT>
-__device__ __forceinline__ void
-ilpReduce(int shift,
-          T* data,
-          int size,
-          AccumT* reducVal1,
-          const Reduction1<T, AccumT>& r1,
-          AccumT defaultVal1,
-          AccumT* reducVal2,
-          const Reduction2<T, AccumT>& r2,
-          AccumT defaultVal2)
-{
-  typedef typename std::aligned_storage<ILP*sizeof(T), ILP*alignof(T)>::type LoadT;
-
-  AccumT threadVal1 = defaultVal1;
-  AccumT threadVal2 = defaultVal2;
-  int offset = threadIdx.x;
-
-  // shift and do 1
-  if(shift > 0){
-    data -= shift;
-    size += shift;
-    if(threadIdx.x >= shift){
-      threadVal1 = r1(threadVal1, data[offset]);
-      threadVal2 = r2(threadVal2, data[offset]);
-    }
-    size -= blockDim.x;
-    data += blockDim.x;
-  }
-  int last = size % (ILP * blockDim.x);
-
-  T v[ILP];
-  LoadT* value = reinterpret_cast<LoadT*>(&v);
-
-  for (; offset * ILP < (size - last); offset += blockDim.x) {
-    *value = reinterpret_cast<LoadT*>(data)[offset];
-
-    for (int j = 0; j < ILP; ++j) {
-      threadVal1 = r1(threadVal1, v[j]);
-      threadVal2 = r2(threadVal2, v[j]);
-    }
-  }
-
-  offset = size - last + threadIdx.x;
-  // Epilogue
-  for (; offset < size; offset += blockDim.x) {
-    threadVal1 = r1(threadVal1, data[offset]);
-    threadVal2 = r2(threadVal2, data[offset]);
-  }
-
-  *reducVal1 = threadVal1;
-  *reducVal2 = threadVal2;
-}
-#endif
-
 template <int ILP, typename scalar_t, typename accscalar_t, typename outscalar_t, template <typename, typename, typename> class Epilogue>
 __global__ void
 cunn_SoftMaxForward(outscalar_t *output, scalar_t *input, int classes)
@@ -562,7 +506,7 @@ cunn_SoftMaxBackward(scalar_t *gradInput, outscalar_t *output, outscalar_t *grad
     *tmpGradOut_vec = *reinterpret_cast<StoreT*>(&gradOutput[offset * ILP]);
     *tmpOut_vec = *reinterpret_cast<StoreT*>(&output[offset * ILP]);
 
-#pragma unroll
+    #pragma unroll
     for (int j = 0; j < ILP; ++j) {
       tmpFinal[j] = epilogue(tmpGradOutput[j], tmpOutput[j]);
     }
