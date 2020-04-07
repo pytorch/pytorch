@@ -422,7 +422,7 @@ Tensor block_diag(TensorList tensors) {
   for (size_t tensor_idx = 0; tensor_idx < tensors.size(); tensor_idx++) {
     const Tensor& tensor = tensors[tensor_idx];
     int64_t ndims = tensor.dim();
-    TORCH_CHECK(ndims <= 2, "tensors must have 2 or fewer dimensions");
+    TORCH_CHECK(ndims <= 2, "torch.block_diag: input tensors must have 2 or fewer dimensions");
 
     int64_t dim0 = 1;
     int64_t dim1 = 1;
