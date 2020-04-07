@@ -631,13 +631,13 @@ std::vector<Tensor*> LoopNest::findAllNeededTensors(
     if (all_processed) {
       result.push_back(t);
       if (processed.count(t)) {
-        throw malformed_input();
+        throw malformed_input("failure to find all processed Tensors");
       }
 
       processed.insert(t);
     } else {
       if (queued.count(t)) {
-        throw malformed_input();
+        throw malformed_input("failure to find all queued Tensors");
       }
 
       q.push(t);
@@ -686,7 +686,7 @@ Stmt* LoopNest::lowerToStmt(Tensor* t) {
   }
 
   if (t->buf()->ndim() == 0) {
-    throw malformed_input();
+    throw malformed_input("Tensor lowered to zero dimensions");
   }
 
   for (size_t i = 0; i < t->buf()->ndim(); i++) {
@@ -765,9 +765,9 @@ void LoopNest::splitWithTail(
     For** tail) {
   Block* p = dynamic_cast<Block*>(f->get_parent());
   if (!f) {
-    throw malformed_input(f);
+    throw malformed_input("splitWithTail attempted on null loop", f);
   } else if (!p) {
-    throw malformed_input(p);
+    throw malformed_input("splitWithTail attempted on loop with no parent", p);
   }
 
   bool tail_is_needed = true;
