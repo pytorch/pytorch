@@ -179,8 +179,8 @@ Tensor run(
     const Tensor& input) {
   using namespace internal;
 
-  const Tensor input_nhwc = input.contiguous(MemoryFormat::ChannelsLast);
-  const Tensor padded_input_nhwc = allocate_padded_if_needed(input_nhwc);
+  const Tensor padded_input_nhwc = allocate_padded_contiguous_if_needed(
+      input, MemoryFormat::ChannelsLast);
 
   TORCH_CHECK(
       usable(padded_input_nhwc),
@@ -195,7 +195,8 @@ Tensor run(
           context.stride_,
           context.dilation_),
       padded_input_nhwc.options().dtype(),
-      MemoryFormat::ChannelsLast);
+      MemoryFormat::ChannelsLast,
+      padded_input_nhwc.names());
 
   const xnn_status setup_status = xnn_setup_convolution2d_nhwc_f32(
       context.op.get(),                                      // operator
@@ -229,8 +230,8 @@ c10::intrusive_ptr<xnnpack::Conv2dOpContext>
         std::vector<int64_t> padding,
         std::vector<int64_t> dilation,
         int64_t groups,
-        c10::optional<double> output_min,
-        c10::optional<double> output_max) {
+        c10::optional<Scalar> output_min,
+        c10::optional<Scalar> output_max) {
       return xnnpack::XNNPackConv2dOpContext::create_context(
           std::move(weight),
           std::move(bias),

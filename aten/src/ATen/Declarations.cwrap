@@ -706,6 +706,8 @@
       output: True
     - THTensor* self
     - long diagonal
+  backends:
+    - CUDA
 ]]
 [[
   name: _th_addmm
@@ -823,25 +825,6 @@
     - THTensor* vec
     - CONSTANT AS_REAL(0)
     - CONSTANT AS_REAL(1)
-]]
-[[
-  name: _th_mm
-  cuda_bfloat16: True
-  variants: function
-  backends:
-    - CUDA
-  return: argument 0
-  options:
-    - cname: addmm
-      arguments:
-        - arg: THTensor* result
-          output: True
-          resize: [ [self, 0], [mat2,1] ]
-        - argument 0
-        - THTensor* self
-        - THTensor* mat2
-        - CONSTANT AS_REAL(0)
-        - CONSTANT AS_REAL(1)
 ]]
 [[
   name: _th_bmm
@@ -1063,22 +1046,6 @@
     - long num_samples
     - Generator generator
 ]]
-[[
-  name: _th_uniform_
-  types:
-    - floating_point
-  backends:
-    - CPU
-  cname: uniform
-  variants: function
-  return: self
-  arguments:
-    - THTensor* self
-    - double from
-    - double to
-    - Generator generator
-]]
-
 [[
   name: _th_copy_ignoring_overlaps_
   cname: copyIgnoringOverlaps

@@ -316,12 +316,16 @@ CAFFE2_API Argument* GetMutableArgument(
     const string& name,
     const bool create_if_missing,
     OperatorDef* def);
+CAFFE2_API Argument* GetMutableArgument(
+    const string& name,
+    const bool create_if_missing,
+    NetDef* def);
 
 template <typename T>
 CAFFE2_API Argument MakeArgument(const string& name, const T& value);
 
-template <typename T>
-inline void AddArgument(const string& name, const T& value, OperatorDef* def) {
+template <typename T, typename Def>
+inline void AddArgument(const string& name, const T& value, Def* def) {
   GetMutableArgument(name, true, def)->CopyFrom(MakeArgument(name, value));
 }
 // **** End Arguments Utils *****

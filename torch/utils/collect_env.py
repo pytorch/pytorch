@@ -70,9 +70,9 @@ def run_and_parse_first_match(run_lambda, command, regex):
 
 def get_conda_packages(run_lambda):
     if get_platform() == 'win32':
-        grep_cmd = r'findstr /R "torch soumith mkl magma"'
+        grep_cmd = r'findstr /R "torch numpy cudatoolkit soumith mkl magma"'
     else:
-        grep_cmd = r'grep "torch\|soumith\|mkl\|magma"'
+        grep_cmd = r'grep "torch\|numpy\|cudatoolkit\|soumith\|mkl\|magma"'
     conda = os.environ.get('CONDA_EXE', 'conda')
     out = run_and_read_all(run_lambda, conda + ' list | ' + grep_cmd)
     if out is None:
@@ -219,6 +219,8 @@ def get_os(run_lambda):
 
 
 def get_pip_packages(run_lambda):
+    """Returns `pip list` output. Note: will also find conda-installed pytorch
+    and numpy packages."""
     # People generally have `pip` as `pip` or `pip3`
     def run_with_pip(pip):
         if get_platform() == 'win32':
