@@ -4,7 +4,6 @@
 #include <ATen/SparseTensorUtils.h>
 #include <ATen/native/sparse/cuda/SparseCUDAApplyUtils.cuh>
 #include <ATen/AccumulateType.h>
-#include <ATen/cuda/CUDAApplyUtils.cuh>
 
 #include <THC/THCThrustAllocator.cuh>
 #include <THC/THCTensorSort.cuh>

@@ -14,7 +14,6 @@
 
 #include <ATen/ATen.h>
 #include <ATen/Dispatch.h>
-#include <ATen/cuda/CUDAApplyUtils.cuh>
 
 #include <THC/THCAtomics.cuh>
 

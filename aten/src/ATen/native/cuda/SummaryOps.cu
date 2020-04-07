@@ -1,6 +1,5 @@
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAContext.h>
-#include <ATen/cuda/CUDAApplyUtils.cuh>
 
 #include <THC/THCAtomics.cuh>
 #include <THC/THCNumerics.cuh>

@@ -9,7 +9,6 @@
 #include <THC/THCGeneral.h>
 #include "THC/THCNumerics.cuh"
 #include <ATen/native/cuda/LaunchUtils.h>
-#include <ATen/cuda/CUDAApplyUtils.cuh>
 
 #include <algorithm>
 #include <cfloat>

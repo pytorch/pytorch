@@ -1,6 +1,5 @@
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
-#include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <THC/THCAtomics.cuh>
 
 namespace at { namespace native {

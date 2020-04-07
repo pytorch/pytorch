@@ -5,7 +5,6 @@
 #include <ATen/native/sparse/SparseTensorMath.h>
 #include <ATen/native/sparse/cuda/SparseCUDAApplyUtils.cuh>
 #include <ATen/native/sparse/cuda/SparseCUDABlas.cuh>
-#include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/cuda/CUDAUtils.h>
 #include <ATen/cuda/detail/IndexUtils.cuh>
 #include <ATen/WrapDimUtilsMulti.h>

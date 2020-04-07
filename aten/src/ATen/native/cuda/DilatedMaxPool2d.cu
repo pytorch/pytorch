@@ -3,14 +3,12 @@
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/native/Pool.h>
 #include <ATen/cuda/CUDAContext.h>
-#include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/cuda/detail/TensorInfo.cuh>
 #include <ATen/cuda/detail/IndexUtils.cuh>
 #include <ATen/cuda/detail/KernelUtils.h>
 #include <THC/THCNumerics.cuh>
 #include <c10/macros/Macros.h>
 #include <ATen/native/cuda/LaunchUtils.h>
-#include <ATen/cuda/CUDAApplyUtils.cuh>
 
 namespace at {
 namespace native {

@@ -1,7 +1,6 @@
 #include <ATen/ATen.h>
 #include <ATen/InitialTensorOptions.h>
 #include <ATen/NativeFunctions.h>
-#include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/native/TensorFactories.h>
 #include <ATen/native/cuda/Resize.cuh>

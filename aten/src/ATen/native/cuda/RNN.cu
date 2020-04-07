@@ -3,7 +3,6 @@
 #include <ATen/TensorUtils.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/cuda/CUDAContext.h>
-#include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <c10/macros/Macros.h>
 
 namespace at { namespace native {

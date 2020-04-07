@@ -3,7 +3,6 @@
 #include <assert.h>
 #include <c10/macros/Macros.h>
 #include <stdlib.h>
-#include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/cuda/detail/TensorInfo.cuh>
 #include <THC/THCDeviceUtils.cuh> // only for THCRoundUp?
 #include <THC/THCNumerics.cuh>

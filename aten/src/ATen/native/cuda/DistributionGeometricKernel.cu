@@ -1,7 +1,6 @@
 #include <ATen/Dispatch.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/NativeFunctions.h>
-#include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/AccumulateType.h>
 #include <ATen/CUDAGenerator.h>
 #include <ATen/native/UnaryOps.h>
