@@ -5,6 +5,7 @@
 #include <vector>
 #include <cstdarg>
 #include <exception>
+#include <sstream>
 
 #include <torch/csrc/THP.h>
 
@@ -174,13 +175,25 @@ PyWarningHandler::~PyWarningHandler() noexcept(false) {
         if (source_location.file == nullptr) {
           result = PyErr_WarnEx(PyExc_RuntimeWarning, msg.c_str(), 1);
         } else {
-          result = PyErr_WarnExplicit(
+          std::string file_name{source_location.file};
+          // Sets Python generated warning locations in the attributes
+          const std::string python_suffix{".py"};
+          if (file_name.size() > python_suffix.size() &&
+              std::equal(python_suffix.rbegin(), python_suffix.rend(), file_name.rbegin())) {
+            result = PyErr_WarnExplicit(
               /*category=*/PyExc_UserWarning,
               /*message=*/msg.c_str(),
               /*filename=*/source_location.file,
               /*lineno=*/source_location.line,
               /*module=*/nullptr,
               /*registry=*/nullptr);
+          } else {
+            // Inlines C++ generated warning locations in the message
+            std::ostringstream os;
+            os << msg << " (Triggered internally at  " << source_location.file;
+            os << ":" << source_location.line << ".)";
+            result = PyErr_WarnEx(PyExc_UserWarning, os.str().c_str(), 1);
+          }
         }
         if (result < 0) {
           break;

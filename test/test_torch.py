@@ -2898,6 +2898,7 @@ class _TestTorchMixin(object):
 
     def test_masked_scatter(self):
         with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
             for maskType in [torch.uint8, torch.bool]:
                 for dt in torch.testing.get_all_dtypes():
                     num_copy, num_dest = 3, 10
@@ -2940,6 +2941,7 @@ class _TestTorchMixin(object):
 
     def test_masked_fill(self):
         with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
             for dt in torch.testing.get_all_dtypes():
                 for dtype in [torch.uint8, torch.bool]:
                     num_dest = 10
@@ -15192,6 +15194,20 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
     def test_float_to_int_undefined_conversion(self, device, dtype):
         t = torch.tensor((-3.40282e+38, 3.40282e+38), device=device, dtype=torch.float)
         self.assertEqual(t.to(dtype).dtype, dtype)
+
+    # Note: uses deprecated indexing by uint8 to reliably trigger a warning
+    def test_cpp_to_python_warnings(self, device):
+        from inspect import currentframe, getframeinfo
+
+        indices = torch.tensor((0, 1), dtype=torch.uint8)
+        t = torch.tensor((1, 2))
+        with warnings.catch_warnings(record=True) as w:
+            t[indices]
+            frameinfo = getframeinfo(currentframe())
+            self.assertEqual(len(w), 1)
+            warning = w[0]
+            self.assertTrue(re.search(".+internally at.+[cpp|h].+", str(warning.message)) is not None)
+            self.assertEqual(frameinfo.lineno - 1, warning.lineno)
 
 
 # NOTE [Linspace+Logspace precision override]
