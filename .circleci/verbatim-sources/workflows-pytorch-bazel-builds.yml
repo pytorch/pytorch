@@ -1,0 +1,14 @@
+      - pytorch_linux_bazel_build:
+          name: pytorch_bazel_build
+          requires:
+            - setup
+          build_environment: "pytorch-linux-xenial-py3.6-gcc7-bazel-build"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-gcc7:f990c76a-a798-42bb-852f-5be5006f8026"
+          resource_class: large
+      - pytorch_linux_bazel_test:
+          name: pytorch_bazel_test
+          requires:
+            - setup
+            - pytorch_bazel_build
+          build_environment: "pytorch-linux-xenial-py3.6-gcc7-bazel-test"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-gcc7:f990c76a-a798-42bb-852f-5be5006f8026"
