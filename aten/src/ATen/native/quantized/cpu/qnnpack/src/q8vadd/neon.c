@@ -214,11 +214,6 @@ void pytorch_q8vadd_ukernel__neon(
         vacc1_0_f = vmlaq_f32(vacc1_0_f, vxb1_0_f, vb_multiplier);
         vacc1_1_f = vmlaq_f32(vacc1_1_f, vxb1_1_f, vb_multiplier);
 
-        vacc0_0_f = vminq_f32(vmaxq_f32(vacc0_0_f, vfmin), vfmax);
-        vacc0_1_f = vminq_f32(vmaxq_f32(vacc0_1_f, vfmin), vfmax);
-        vacc1_0_f = vminq_f32(vmaxq_f32(vacc1_0_f, vfmin), vfmax);
-        vacc1_1_f = vminq_f32(vmaxq_f32(vacc1_1_f, vfmin), vfmax);
-
         int32x4_t vacc0_lo = vsubq_s32(
             vreinterpretq_s32_f32(vaddq_f32(vacc0_0_f, vfmagic)), vimagic);
         int32x4_t vacc0_hi = vsubq_s32(
@@ -228,16 +223,16 @@ void pytorch_q8vadd_ukernel__neon(
         int32x4_t vacc1_hi = vsubq_s32(
             vreinterpretq_s32_f32(vaddq_f32(vacc1_1_f, vfmagic)), vimagic);
 
-
         /* Pack, saturate, and add output zero point */
-        const int16x8_t vacc0 = vqaddq_s16(
-            vcombine_s16(vqmovn_s32(vacc0_lo), vqmovn_s32(vacc0_hi)),
-            vy_zero_point);
-        const int16x8_t vacc1 = vqaddq_s16(
-            vcombine_s16(vqmovn_s32(vacc1_lo), vqmovn_s32(vacc1_hi)),
-            vy_zero_point);
+        const int16x8_t vacc0 =
+            vcombine_s16(vqmovn_s32(vacc0_lo), vqmovn_s32(vacc0_hi));
+        const int16x8_t vacc1 =
+            vcombine_s16(vqmovn_s32(vacc1_lo), vqmovn_s32(vacc1_hi));
 
         uint8x16_t vy01 = vcombine_u8(vqmovun_s16(vacc0), vqmovun_s16(vacc1));
+
+        vy01 = vmaxq_u8(vy01, vy_min);
+        vy01 = vminq_u8(vy01, vy_max);
 
         vst1q_u8(y, vy01);
         y += 16;
@@ -306,9 +301,8 @@ void pytorch_q8vadd_ukernel__neon(
         int32x4_t vacc_hi = vsubq_s32(
             vreinterpretq_s32_f32(vaddq_f32(vacc_1_f, vfmagic)), vimagic);
         /* Pack, saturate, and add output zero point */
-        const int16x8_t vacc = vqaddq_s16(
-            vcombine_s16(vqmovn_s32(vacc_lo), vqmovn_s32(vacc_hi)),
-            vy_zero_point);
+        const int16x8_t vacc =
+            vcombine_s16(vqmovn_s32(vacc_lo), vqmovn_s32(vacc_hi));
         uint8x8_t vy = vqmovun_s16(vacc);
 #endif
 
@@ -380,9 +374,8 @@ void pytorch_q8vadd_ukernel__neon(
         int32x4_t vacc_hi = vsubq_s32(
             vreinterpretq_s32_f32(vaddq_f32(vacc_1_f, vfmagic)), vimagic);
         /* Pack, saturate, and add output zero point */
-        const int16x8_t vacc = vqaddq_s16(
-            vcombine_s16(vqmovn_s32(vacc_lo), vqmovn_s32(vacc_hi)),
-            vy_zero_point);
+        const int16x8_t vacc =
+            vcombine_s16(vqmovn_s32(vacc_lo), vqmovn_s32(vacc_hi));
         uint8x8_t vy = vqmovun_s16(vacc);
 #endif
 
@@ -416,31 +409,11 @@ void pytorch_q8vadd_ukernel__neon(
       const int16x4_t vxb =
           vreinterpret_s16_u16(vget_low_u16(vsubl_u8(vb, vb_zero_point)));
 
-      /* Multiply by factors and accumulate products */
-      int32x2_t vacc =
-          vmul_s32(vget_low_s32(vmovl_s16(vxa)), vget_low_s32(va_multiplier));
-      vacc = vmla_s32(
-          vacc, vget_low_s32(vmovl_s16(vxb)), vget_low_s32(vb_multiplier));
-
-      /* Shift right and round */
-      vacc =
-          vsra_n_s32(vacc, vbic_s32(vacc, vget_low_s32(vzero_shift_mask)), 31);
-
-      vacc = vrshl_s32(vacc, vget_low_s32(vright_shift));
-
-      const int16x4_t vacc16 = vqadd_s16(
-          vqmovn_s32(vcombine_s32(vacc, vacc)), vget_low_s16(vy_zero_point));
-
-      /* Pack, saturate, and add output zero point */
-      uint8x8_t vy = vqmovun_s16(vcombine_s16(vacc16, vacc16));
-      vy = vmin_u8(vy, vget_low_u8(vy_max));
-      vy = vmax_u8(vy, vget_low_u8(vy_min));
-
       float32x2_t vxa_f = vcvt_f32_s32(vget_low_s32(vmovl_s16(vxa)));
       float32x2_t vxb_f = vcvt_f32_s32(vget_low_s32(vmovl_s16(vxb)));
 
-      float32x2_t vacc_f = vmul_f32(vxa_f, va_multiplier);
-      vacc_f = vmla_f32(vacc_f, vxb_f, vb_multiplier);
+      float32x2_t vacc_f = vmul_f32(vxa_f, vget_low_f32(va_multiplier));
+      vacc_f = vmla_f32(vacc_f, vxb_f, vget_low_f32(vb_multiplier));
 
 #ifdef __aarch64__
       int32x2_t vacc = vcvtn_s32_f32(vacc_f);
@@ -457,10 +430,9 @@ void pytorch_q8vadd_ukernel__neon(
         vmin_f32(vmax_f32(vacc_f, vget_low_s32(vfmin)), vget_low_s32(vfmax));
 
       int32x2_t vacc = vsub_s32(
-          vreinterpretq_s32_f32(vadd_f32(vacc_f, vget_low_f32(vfmagic))),
+          vreinterpret_s32_f32(vadd_f32(vacc_f, vget_low_f32(vfmagic))),
           vget_low_s32(vimagic));
-      const int16x4_t vacc16 = vqadd_s16(
-          vqmovn_s32(vcombine_s32(vacc, vacc)), vget_low_s16(vy_zero_point));
+      const int16x4_t vacc16 = vqmovn_s32(vcombine_s32(vacc, vacc));
 
       /* Pack, saturate, and add output zero point */
       uint8x8_t vy = vqmovun_s16(vcombine_s16(vacc16, vacc16));
