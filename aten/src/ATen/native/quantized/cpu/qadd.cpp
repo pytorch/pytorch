@@ -16,6 +16,8 @@ namespace native {
 
 DEFINE_DISPATCH(qadd_relu_stub);
 DEFINE_DISPATCH(qadd_stub);
+DEFINE_DISPATCH(qadd_scalar_relu_stub);
+DEFINE_DISPATCH(qadd_scalar_stub);
 
 namespace {
 
@@ -46,8 +48,9 @@ Tensor _add_out(Tensor& out, const Tensor& self, const Tensor& other) {
 
 template <bool ReLUFused = false>
 Tensor _add_scalar_out(Tensor& out, const Tensor& self, Scalar other) {
-  TORCH_CHECK(self.qscheme() == kPerTensorAffine,
-              "Only per tensor affine is supported for now!!");
+  TORCH_CHECK(
+      self.qscheme() == kPerTensorAffine,
+      "Only per tensor affine is supported for now!!");
   // To implement tensor-scalar addition in quantized space, we simply
   // adjust the quantization parameters based on the following rules:
   //
@@ -61,11 +64,11 @@ Tensor _add_scalar_out(Tensor& out, const Tensor& self, Scalar other) {
   // If q_min > z - c_q
   //   s' = [(q_max - (z - c_q)]/[q_max - q_min] * s
   //   z' = q_min
-  //   Xq' = torch.quantize_linear(Xq.dequantize() + c_q.dequantize() , s', z')
+  //   Xq' = at::requantize_from_int(Xq - z + c_q, s/s', z')
   // If q_max < z - c_q
   //   s' = [z - c_q -q_min]/[q_max - q_min] * s
   //   z' = q_max
-  //   Xq' = torch.quantize_linear(Xq.dequantize() + c_q.dequantize(), s', z')
+  //   Xq' = at::requantize_from_int(Xq - z + c_q, s/s', z')
   // Else
   //   s' = s
   //   z' = z - c_q
@@ -85,24 +88,29 @@ Tensor _add_scalar_out(Tensor& out, const Tensor& self, Scalar other) {
     if (q_min > z - c_q) {
       s_prime = (((double)q_max - (z - c_q))) / ((double)q_max - q_min) * s;
       z_prime = q_min;
-      auto dequantized_add = self.dequantize() + c_q * s;
+      out.set_quantizer_(make_per_tensor_affine_quantizer(
+          s_prime, z_prime, self.scalar_type()));
       if (ReLUFused) {
-        dequantized_add.relu_();
+        qadd_scalar_relu_stub(self.device().type(), out, self, c_q);
+      } else {
+        qadd_scalar_stub(self.device().type(), out, self, c_q);
       }
-      out.copy_(at::quantize_per_tensor(dequantized_add, s_prime, z_prime, self.scalar_type()));
     } else if (q_max < z - c_q) {
       s_prime = ((double)(z - c_q) - q_min) / ((double)q_max - q_min) * s;
       z_prime = q_max;
-      auto dequantized_add = self.dequantize() + c_q * s;
+      out.set_quantizer_(make_per_tensor_affine_quantizer(
+          s_prime, z_prime, self.scalar_type()));
       if (ReLUFused) {
-        dequantized_add.relu_();
+        qadd_scalar_relu_stub(self.device().type(), out, self, c_q);
+      } else {
+        qadd_scalar_stub(self.device().type(), out, self, c_q);
       }
-      out.copy_(at::quantize_per_tensor(dequantized_add, s_prime, z_prime, self.scalar_type()));
     } else {
       s_prime = s;
       z_prime = z - c_q;
       out.copy_(self);
-      out.set_quantizer_(make_per_tensor_affine_quantizer(s_prime, z_prime, self.scalar_type()));
+      out.set_quantizer_(make_per_tensor_affine_quantizer(
+          s_prime, z_prime, self.scalar_type()));
       if (ReLUFused) {
         at::native::quantized_relu_(out);
       }
@@ -117,8 +125,13 @@ class QAdd final : public c10::OperatorKernel {
 #ifdef USE_PYTORCH_QNNPACK
 Tensor qnnpack_add(Tensor qa, Tensor qb, double scale, int64_t zero_point) {
   TORCH_CHECK(qa.ndimension() > 0, "qnnpack_add(): Got empty input tensor.");
-  Tensor qa_contig = qa.contiguous();
-  Tensor qb_contig = qb.contiguous();
+  Tensor qa_contig = qa.contiguous(qa.suggest_memory_format());
+  // Reason for use qa's memory format for qb is that for the underlying
+  // kernel can flatten all the dims and iterate over both the tensors.
+  // In most cases, both qa and qb are in same memory format.
+  // When they are not there is a copy overhead to make it contiguous
+  // in qa's memory format.
+  Tensor qb_contig = qb.contiguous(qa.suggest_memory_format());
 
   const auto a_zero_point = qa_contig.q_zero_point();
   const auto b_zero_point = qb_contig.q_zero_point();
@@ -126,7 +139,11 @@ Tensor qnnpack_add(Tensor qa, Tensor qb, double scale, int64_t zero_point) {
   const auto b_scale = qb_contig.q_scale();
 
   Tensor qy = at::_empty_affine_quantized(
-      qa_contig.sizes(), at::device(kCPU).dtype(kQUInt8), scale, zero_point);
+      qa_contig.sizes(),
+      at::device(kCPU).dtype(kQUInt8).memory_format(qa.suggest_memory_format()),
+      scale,
+      zero_point,
+      c10::nullopt);
 
   if (qa_contig.size(0) == 0) {
     return qy;
@@ -200,10 +217,12 @@ Tensor qnnpack_add(Tensor qa, Tensor qb, double scale, int64_t zero_point) {
 #endif
     auto qc = at::_empty_affine_quantized(
         qa.sizes(),
-        at::device(kCPU).dtype(qa.scalar_type()),
+        at::device(kCPU)
+           .dtype(qa.scalar_type())
+           .memory_format(qa.suggest_memory_format()),
         scale,
         zero_point,
-        qa.suggest_memory_format());
+        c10::nullopt);
     return _add_out<ReLUFused>(qc, qa, qb);
   }
 };
@@ -242,6 +261,11 @@ class QAddScalarOut final : public c10::OperatorKernel {
 
 static auto registry = c10::RegisterOperators()
 .op("quantized::add(Tensor qa, Tensor qb, float scale, int zero_point)"
+     "-> Tensor qc",
+    c10::RegisterOperators::options()
+      .aliasAnalysis(at::AliasAnalysisKind::FROM_SCHEMA)
+      .kernel<QAdd</*ReLUFused=*/false>>(DispatchKey::QuantizedCPUTensorId))
+.op("_quantized::add(Tensor qa, Tensor qb, float scale, int zero_point)"
      "-> Tensor qc",
     c10::RegisterOperators::options()
       .aliasAnalysis(at::AliasAnalysisKind::FROM_SCHEMA)
