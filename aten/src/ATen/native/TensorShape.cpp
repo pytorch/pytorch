@@ -420,7 +420,7 @@ Tensor block_diag(TensorList tensors) {
   // and expand all 0-D and 1-D tensors so that everything
   // is 2-D
   for (size_t tensor_idx = 0; tensor_idx < tensors.size(); tensor_idx++) {
-    Tensor tensor = tensors[tensor_idx];
+    const Tensor& tensor = tensors[tensor_idx];
     int64_t ndims = tensor.dim();
     TORCH_CHECK(ndims <= 2, "tensors must have 2 or fewer dimensions");
 
@@ -448,8 +448,9 @@ Tensor block_diag(TensorList tensors) {
   int64_t cur_dim1 = 0;
 
   // Copy each tensor into the appropriate location in the result matrix
-  for (auto iter = tensors_2D.begin(); iter != tensors_2D.end(); iter++) {
-    Tensor tensor = *iter;
+  std::vector<Tensor>::const_iterator iter;
+  for (iter = tensors_2D.begin(); iter != tensors_2D.end(); iter++) {
+    const Tensor& tensor = *iter;
 
     int64_t dim0 = tensor.size(0);
     int64_t dim1 = tensor.size(1);
