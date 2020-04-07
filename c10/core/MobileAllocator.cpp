@@ -77,7 +77,7 @@ at::Allocator* GetDefaultMobileCPUAllocator() {
   return &g_mobile_cpu_allocator;
 }
 
-#ifdef C10_MOBILE
+// #ifdef C10_MOBILE
 
 // Having said that, only register the mobile CPU allocator as the default CPU
 // memory allocator on mobile builds.
@@ -88,6 +88,6 @@ at::Allocator* GetDefaultCPUAllocator() {
 
 REGISTER_ALLOCATOR(DeviceType::CPU, &g_mobile_cpu_allocator);
 
-#endif /* C10_Mobile */
+// #endif /* C10_Mobile */
 
 } // namespace c10
