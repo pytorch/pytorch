@@ -83,6 +83,22 @@ struct TORCH_API CompilationUnit {
     return true;
   }
 
+  void add_forward_hook(c10::QualifiedName hook_name) {
+    forward_hooks.push_back(hook_name);
+  }
+
+  const std::vector<c10::QualifiedName> get_forward_hooks() {
+    return forward_hooks;
+  }
+
+  void add_forward_pre_hook(c10::QualifiedName hook_name) {
+    forward_pre_hooks.push_back(hook_name);
+  }
+
+  const std::vector<c10::QualifiedName> get_forward_pre_hooks() {
+    return forward_pre_hooks;
+  }
+
   // for historic reasons, these are defined in ir_emitter.cpp
   // Returns the list of Function's just defined.
   std::vector<Function*> define(
@@ -276,6 +292,9 @@ struct TORCH_API CompilationUnit {
   // for fast lookup
   std::unordered_map<c10::QualifiedName, size_t> dict_;
   std::unordered_map<c10::QualifiedName, size_t> classDict_;
+
+  std::vector<c10::QualifiedName> forward_hooks;
+  std::vector<c10::QualifiedName> forward_pre_hooks;
 
   // [class ownership] Right now there aree two relationships between classes
   // and compilation units:
