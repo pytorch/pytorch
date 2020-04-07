@@ -1,24 +1,21 @@
 #!/bin/bash
 set -eux -o pipefail
 
-source "/Users/distiller/project/env"
-mkdir -p "$PYTORCH_FINAL_PACKAGE_DIR"
+git clone https://github.com/peterjc123/builder.git -b circleci_scripts_windows
+cd builder
 
-# For some reason `unbuffer` breaks if we change the PATH here, so we
-# write a script with the PATH change in it and unbuffer the whole
-# thing
-build_script="$workdir/build_script.sh"
-touch "$build_script"
-chmod +x "$build_script"
+configs=($BUILD_ENVIRONMENT)
+export PACKAGE_TYPE="${configs[0]}"
+export DESIRED_PYTHON="${configs[1]}"
+export CUDA_VERSION="${configs[2]/cu/}"
+export VC_YEAR=2017
+export USE_SCCACHE=1
 
-# Build
-cat >"$build_script" <<EOL
-export PATH="$workdir/miniconda/bin:$PATH"
-if [[ "$PACKAGE_TYPE" == conda ]]; then
-  "$workdir/builder/conda/build_pytorch.sh"
-else
-  export TORCH_PACKAGE_NAME="$(echo $TORCH_PACKAGE_NAME | tr '-' '_')"
-  "$workdir/builder/wheel/build_wheel.sh"
+if [[ "$PACKAGE_TYPE" == 'conda' ]]; then
+  ./windows/internal/build_conda.bat
+elif [[ "$PACKAGE_TYPE" == 'wheel' ]]; then
+  ./windows/internal/build_wheels.bat
+elif [[ "$PACKAGE_TYPE" == 'libtorch' ]]; then
+  export BUILD_PYTHONLESS=1
+  ./windows/internal/build_wheels.bat
 fi
-EOL
-unbuffer "$build_script" | ts
