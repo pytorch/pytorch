@@ -66,7 +66,7 @@ def get_weight(m):
 #    and the `cpp_var_map` entry must be
 #    `{'random_samples': random_samples}` in order to populate the C++ variable `random_samples`
 #    used in the C++ constructor argument with the Python tensor value `random_samples`.
-# 
+#
 # For NN functional:
 # 1. Make sure you already have a test dict with the functional configuration you want to test.
 # 2. If the test dict's `constructor` entry looks like `wrap_functional(F.some_functional_name, ...)`,
@@ -1816,8 +1816,16 @@ new_module_tests = [
         module_name='MaxPool2d',
         constructor_args=((3, 3), (2, 2), (1, 1)),
         cpp_constructor_args='torch::nn::MaxPool2dOptions({3, 3}).stride({2, 2}).padding({1, 1})',
+        input_size=(3, 7, 7),
+        desc='3d_input'
+    ),
+    dict(
+        module_name='MaxPool2d',
+        constructor_args=((3, 3), (2, 2), (1, 1)),
+        cpp_constructor_args='torch::nn::MaxPool2dOptions({3, 3}).stride({2, 2}).padding({1, 1})',
         input_size=(1, 3, 7, 7),
         check_with_channels_last=True,
+        desc='4d_input'
     ),
     dict(
         module_name='AvgPool1d',
