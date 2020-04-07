@@ -127,6 +127,12 @@ def infer_concrete_type_builder(nn_module):
 
         added_names.add(name)
 
+    for idx, fn in nn_module._forward_hooks.items():
+        concrete_type_builder.add_forward_hook(fn.__name__)
+
+    for idx, fn in nn_module._forward_pre_hooks.items():
+        concrete_type_builder.add_forward_pre_hook(fn.__name__)
+
     # populate constants_set
     constants_set = getattr(nn_module, "__constants__", set())
 
@@ -518,6 +524,15 @@ def infer_methods_to_compile(nn_module):
         uniquer.add(name)
 
     stubs = []
+    for idx, fn in nn_module._forward_pre_hooks.items():
+        stubs.append(make_stub(fn))
+
+    for idx, fn in nn_module._forward_hooks.items():
+        stubs.append(make_stub(fn))
+
+    for idx, fn in nn_module._backward_hooks.items():
+        stubs.append(make_stub(fn))
+
     for method in uniqued_methods:
         stubs.append(make_stub_from_method(nn_module, method))
     return overload_stubs + stubs

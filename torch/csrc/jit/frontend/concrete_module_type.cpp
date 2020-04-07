@@ -52,6 +52,14 @@ ClassTypePtr ConcreteModuleTypeBuilder::createTypeFromThis() const {
         /*is_parameter=*/false);
   }
 
+  for (const auto& hook : forward_hooks) {
+    cls->addForwardHook(hook);
+  }
+
+  for (const auto& hook : forward_pre_hooks) {
+    cls->addForwardPreHook(hook);
+  }
+
   return cls;
 }
 
@@ -221,6 +229,14 @@ void ConcreteModuleTypeBuilder::addFunctionAttribute(
       std::move(name),
       ConcreteModuleTypeBuilder::FunctionAttribute{type->expect<FunctionType>(),
                                                    std::move(pyFunction)});
+}
+
+void ConcreteModuleTypeBuilder::addForwardHook(std::string hook_name) {
+  forward_hooks.push_back(hook_name);
+}
+
+void ConcreteModuleTypeBuilder::addForwardPreHook(std::string hook_name) {
+  forward_pre_hooks.push_back(hook_name);
 }
 
 void ConcreteModuleTypeBuilder::addBuiltinFunction(

@@ -1227,6 +1227,26 @@ struct PythonPrintImpl {
         body_ << "]\n";
       }
 
+      auto forwardPreHooks = classType->getForwardPreHooks();
+      if (forwardPreHooks.size() > 0) {
+        indent();
+        body_ << "__forward_pre_hooks__ = [";
+        for (auto hook_name : forwardPreHooks) {
+          body_ << hook_name.qualifiedName() << ",";
+        }
+        body_ << "]\n";
+      }
+
+      auto forwardHooks = classType->getForwardHooks();
+      if (forwardHooks.size() > 0) {
+        indent();
+        body_ << "__forward_hooks__ = [";
+        for (auto hook_name : forwardHooks) {
+          body_ << hook_name.qualifiedName()  << ",";
+        }
+        body_ << "]\n";
+      }
+
       for (size_t i = 0; i < numAttrs; i++) {
         const auto& name = classType->getAttributeName(i);
         const auto& type = classType->getAttribute(i);
