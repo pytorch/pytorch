@@ -1,5 +1,9 @@
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAContext.h>
+#include <ATen/cuda/CUDAUtils.h>
+#include <ATen/cuda/detail/IndexUtils.cuh>
+#include <ATen/cuda/detail/TensorInfo.cuh>
+#include <THC/THCReduceApplyUtils.cuh>
 
 #include <THC/THCAtomics.cuh>
 #include <THC/THCNumerics.cuh>

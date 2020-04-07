@@ -1,5 +1,6 @@
 #include <ATen/native/cuda/Normalization.cuh>
 #include <c10/core/ScalarType.h>
+#include <ATen/cuda/detail/IndexUtils.cuh>
 
 namespace at { namespace native {
 
