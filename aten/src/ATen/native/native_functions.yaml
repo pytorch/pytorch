@@ -687,7 +687,6 @@
   supports_named_tensor: True
 
 - func: block_diag(Tensor[] tensors) -> Tensor
-  supports_named_tensor: True
   variants: function
 
 - func: ceil(Tensor self) -> Tensor
