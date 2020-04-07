@@ -164,9 +164,9 @@ class TensorExprKernel {
   ExprHandle createInputIndexExpr(
       const Buffer& buffer,
       const std::vector<VarHandle>& axes,
-      const c10::VaryingShape& sizes,
-      const c10::VaryingStrides& strides,
-      const c10::VaryingStrides& contiguity,
+      const c10::VaryingShape<int64_t>& sizes,
+      const c10::VaryingShape<int64_t>& strides,
+      const c10::VaryingShape<bool>& contiguity,
       const std::unordered_map<int64_t, VarHandle>& sizeVars);
 
  private:

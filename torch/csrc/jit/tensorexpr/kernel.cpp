@@ -38,7 +38,7 @@ static at::ScalarType tensorType(Tensor* t) {
   return static_cast<at::ScalarType>(t->body()->dtype().scalar_type());
 }
 
-static std::vector<ExprHandle> texprSizes(const c10::VaryingShape& shape) {
+static std::vector<ExprHandle> texprSizes(const c10::VaryingShape<int64_t>& shape) {
   std::vector<ExprHandle> dims;
   for (size_t i = 0; i < *shape.size(); i++) {
     dims.push_back(IntImm::make(*shape[i]));
@@ -1162,7 +1162,7 @@ static bool isValidPrimProperty(const c10::optional<T>& a, T b) {
 }
 
 static bool isValidVaryingShape(
-    const c10::VaryingShape& vs,
+    const c10::VaryingShape<int64_t>& vs,
     at::IntArrayRef sz) {
   if (!vs.size().has_value()) {
     // TODO: does it make sense to have kernels with completely unspecified
@@ -1298,9 +1298,9 @@ void TensorExprKernel::codeGenRun(
 ExprHandle TensorExprKernel::createInputIndexExpr(
     const Buffer& buffer,
     const std::vector<VarHandle>& axes,
-    const c10::VaryingShape& sizes,
-    const c10::VaryingStrides& strides,
-    const c10::VaryingStrides& contiguity,
+    const c10::VaryingShape<int64_t>& sizes,
+    const c10::VaryingShape<int64_t>& strides,
+    const c10::VaryingShape<bool>& contiguity,
     const std::unordered_map<int64_t, VarHandle>& sizeVars) {
   if (axes.size() != strides.size()) {
     throw malformed_input("axes and strides size mismatch");
