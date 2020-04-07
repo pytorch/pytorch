@@ -20,7 +20,7 @@ You can reuse your favorite Python packages such as NumPy, SciPy and Cython to e
 - [Releases and Contributing](#releases-and-contributing)
 - [The Team](#the-team)
 
-| System | 2.7 | 3.5 | 3.6 |
+| System | 3.6 | 3.7 | 3.8 |
 | :---: | :---: | :---: | :--: |
 | Linux CPU | [![Build Status](https://ci.pytorch.org/jenkins/job/pytorch-master/badge/icon)](https://ci.pytorch.org/jenkins/job/pytorch-master/) | [![Build Status](https://ci.pytorch.org/jenkins/job/pytorch-master/badge/icon)](https://ci.pytorch.org/jenkins/job/pytorch-master/) | <center>—</center> |
 | Linux GPU | [![Build Status](https://ci.pytorch.org/jenkins/job/pytorch-master/badge/icon)](https://ci.pytorch.org/jenkins/job/pytorch-master/) | [![Build Status](https://ci.pytorch.org/jenkins/job/pytorch-master/badge/icon)](https://ci.pytorch.org/jenkins/job/pytorch-master/) | <center>—</center> |
@@ -139,10 +139,8 @@ Commands to install from binaries via Conda or pip wheels are on our website:
 Python wheels for NVIDIA's Jetson Nano, Jetson TX2, and Jetson AGX Xavier are available via the following URLs:
 
 - Stable binaries:
-  - Python 2.7: https://nvidia.box.com/v/torch-stable-cp27-jetson-jp42
   - Python 3.6: https://nvidia.box.com/v/torch-stable-cp36-jetson-jp42
 - Rolling weekly binaries:
-  - Python 2.7: https://nvidia.box.com/v/torch-weekly-cp27-jetson-jp42
   - Python 3.6: https://nvidia.box.com/v/torch-weekly-cp36-jetson-jp42
 
 They require JetPack 4.2 and above, and @dusty-nv maintains them
@@ -167,9 +165,9 @@ If you are building for NVIDIA's Jetson platforms (Jetson Nano, TX1, TX2, AGX Xa
 
 #### Install Dependencies
 
-Common (only install `typing` for Python <3.5)
+Common
 ```
-conda install numpy ninja pyyaml mkl mkl-include setuptools cmake cffi typing
+conda install numpy ninja pyyaml mkl mkl-include setuptools cmake cffi
 ```
 
 On Linux
@@ -234,9 +232,6 @@ CUDA and MSVC have strong version dependencies, so even if you use VS 2017 / 201
 
 ```cmd
 cmd
-:: [Optional] Only add the next two lines if you need Python 2.7. If you use Python 3, ignore these two lines.
-set MSSdk=1
-set FORCE_PY27_BUILD=1
 
 :: [Optional] If you want to build with VS 2019 generator, please change the value in the next line to `Visual Studio 16 2019`.
 :: Note: This value is useless if Ninja is detected. However, you can force that by using `set USE_NINJA=OFF`.
@@ -246,7 +241,6 @@ set CMAKE_GENERATOR=Visual Studio 15 2017
 :: [Optional] If you want to override the underlying toolset used by Ninja and Visual Studio with CUDA, please run the following script block.
 :: "Visual Studio 2017 Developer Command Prompt" will be run automatically.
 :: Make sure you have CMake >= 3.12 before you do this when you use the Visual Studio generator.
-:: It's an essential step if you use Python 3.5.
 set CMAKE_GENERATOR_TOOLSET_VERSION=14.11
 set DISTUTILS_USE_SDK=1
 for /f "usebackq tokens=*" %i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -version [15^,16^) -products * -latest -property installationPath`) do call "%i\VC\Auxiliary\Build\vcvarsall.bat" x64 -vcvars_ver=%CMAKE_GENERATOR_TOOLSET_VERSION%

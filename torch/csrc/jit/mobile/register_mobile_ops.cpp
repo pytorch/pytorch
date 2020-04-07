@@ -588,6 +588,9 @@ static auto registry =
         .op("_aten::dequantize(Tensor self) -> Tensor",
             torch::RegisterOperators::options().catchAllKernel(
                 [](const Tensor& self) { return at::dequantize(self); }))
+        .op("_aten::dequantize.self(Tensor self) -> Tensor",
+            torch::RegisterOperators::options().catchAllKernel(
+                [](const Tensor& self) { return at::dequantize(self); }))
         .op("_aten::select.int(Tensor self, int dim, int index) -> Tensor",
             torch::RegisterOperators::options().kernel(
                 c10::DispatchKey::CPUTensorId,
