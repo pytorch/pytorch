@@ -1,4 +1,4 @@
-#include <ATen/CUDAGenerator.h>
+#include <ATen/CUDAGeneratorImpl.h>
 #include <c10/cuda/CUDAFunctions.h>
 #include <ATen/Utils.h>
 
@@ -45,14 +45,14 @@ const Generator& getDefaultCUDAGenerator(DeviceIndex device_index) {
     TORCH_CHECK(idx >= 0 && idx < num_gpus);
   }
   std::call_once(cuda_gens_init_flag[idx], [&] {
-    default_gens_cuda[idx] = make_generator<CUDAGenerator>(idx);
+    default_gens_cuda[idx] = make_generator<CUDAGeneratorImpl>(idx);
     default_gens_cuda[idx]->seed();
   });
   return default_gens_cuda[idx];
 }
 
 /**
- * Utility to create a CUDAGenerator. Returns a shared_ptr
+ * Utility to create a CUDAGeneratorImpl. Returns a shared_ptr
  */
 Generator createCUDAGenerator(DeviceIndex device_index) {
   std::call_once(num_gpu_init_flag, initCUDAGenVector);
@@ -61,8 +61,8 @@ Generator createCUDAGenerator(DeviceIndex device_index) {
     idx = c10::cuda::current_device();
   }
   TORCH_CHECK(idx >= 0 && idx < num_gpus, "The device_index is invalid.");
-  auto gen = make_generator<CUDAGenerator>(idx);
-  auto cuda_gen = check_generator<CUDAGenerator>(gen);
+  auto gen = make_generator<CUDAGeneratorImpl>(idx);
+  auto cuda_gen = check_generator<CUDAGeneratorImpl>(gen);
   cuda_gen->set_current_seed(default_rng_seed_val);
   cuda_gen->set_philox_offset_per_thread(0);
   return gen;
@@ -72,9 +72,9 @@ Generator createCUDAGenerator(DeviceIndex device_index) {
 } // namespace cuda
 
 /**
- * CUDAGenerator class implementation
+ * CUDAGeneratorImpl class implementation
  */
-CUDAGenerator::CUDAGenerator(DeviceIndex device_index)
+CUDAGeneratorImpl::CUDAGeneratorImpl(DeviceIndex device_index)
   : c10::GeneratorImpl{Device(DeviceType::CUDA, device_index),
               DispatchKeySet(c10::DispatchKey::CUDATensorId)} { }
 
@@ -84,26 +84,26 @@ CUDAGenerator::CUDAGenerator(DeviceIndex device_index)
  * 
  * See Note [Acquire lock when using random generators]
  */
-void CUDAGenerator::set_current_seed(uint64_t seed) {
+void CUDAGeneratorImpl::set_current_seed(uint64_t seed) {
   seed_ = seed;
   philox_offset_per_thread_ = 0;
 }
 
 /**
- * Gets the current seed of CUDAGenerator.
+ * Gets the current seed of CUDAGeneratorImpl.
  */
-uint64_t CUDAGenerator::current_seed() const {
+uint64_t CUDAGeneratorImpl::current_seed() const {
   return seed_;
 }
 
 /**
  * Gets a nondeterministic random number from /dev/urandom or time,
- * seeds the CPUGenerator with it and then returns that number.
+ * seeds the CPUGeneratorImpl with it and then returns that number.
  * 
  * FIXME: You can move this function to Generator.cpp if the algorithm
  * in getNonDeterministicRandom is unified for both CPU and CUDA
  */
-uint64_t CUDAGenerator::seed() {
+uint64_t CUDAGeneratorImpl::seed() {
   auto random = c10::detail::getNonDeterministicRandom(true);
   this->set_current_seed(random);
   return random;
@@ -114,14 +114,14 @@ uint64_t CUDAGenerator::seed() {
  * 
  * See Note [Acquire lock when using random generators]
  */
-void CUDAGenerator::set_philox_offset_per_thread(uint64_t offset) {
+void CUDAGeneratorImpl::set_philox_offset_per_thread(uint64_t offset) {
   philox_offset_per_thread_ = offset;
 }
 
 /**
- * Gets the current philox_offset_per_thread_ of CUDAGenerator.
+ * Gets the current philox_offset_per_thread_ of CUDAGeneratorImpl.
  */
-uint64_t CUDAGenerator::philox_offset_per_thread() {
+uint64_t CUDAGeneratorImpl::philox_offset_per_thread() {
   return philox_offset_per_thread_;
 }
 
@@ -143,17 +143,17 @@ uint64_t CUDAGenerator::philox_offset_per_thread() {
  * 
  * See Note [Acquire lock when using random generators]
  */
-std::pair<uint64_t, uint64_t> CUDAGenerator::philox_engine_inputs(uint64_t increment) {
+std::pair<uint64_t, uint64_t> CUDAGeneratorImpl::philox_engine_inputs(uint64_t increment) {
   uint64_t offset = this->philox_offset_per_thread_;
   this->philox_offset_per_thread_ += increment;
   return std::make_pair(this->seed_, offset);
 }
 
 /*
- * Gets the DeviceType of CUDAGenerator.
+ * Gets the DeviceType of CUDAGeneratorImpl.
  * Used for type checking during run time.
  */
-DeviceType CUDAGenerator::device_type() {
+DeviceType CUDAGeneratorImpl::device_type() {
   return DeviceType::CUDA;
 }
 
@@ -162,8 +162,8 @@ DeviceType CUDAGenerator::device_type() {
  * 
  * See Note [Acquire lock when using random generators]
  */
-std::shared_ptr<CUDAGenerator> CUDAGenerator::clone() const {
-  return std::shared_ptr<CUDAGenerator>(this->clone_impl());
+std::shared_ptr<CUDAGeneratorImpl> CUDAGeneratorImpl::clone() const {
+  return std::shared_ptr<CUDAGeneratorImpl>(this->clone_impl());
 }
 
 /**
@@ -171,8 +171,8 @@ std::shared_ptr<CUDAGenerator> CUDAGenerator::clone() const {
  * 
  * See Note [Acquire lock when using random generators]
  */
-CUDAGenerator* CUDAGenerator::clone_impl() const {
-  auto gen = new CUDAGenerator(this->device().index());
+CUDAGeneratorImpl* CUDAGeneratorImpl::clone_impl() const {
+  auto gen = new CUDAGeneratorImpl(this->device().index());
   gen->set_current_seed(this->seed_);
   gen->set_philox_offset_per_thread(this->philox_offset_per_thread_);
   return gen;

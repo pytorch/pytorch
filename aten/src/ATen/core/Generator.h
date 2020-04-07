@@ -31,7 +31,7 @@
  *
  * By default, there is one generator per device, and a device's generator is
  * lazily created. A user can use the torch.Generator() api to create their own generator.
- * Currently torch.Generator() can only create a CPUGenerator.
+ * Currently torch.Generator() can only create a CPUGeneratorImpl.
  */
 
 /**
