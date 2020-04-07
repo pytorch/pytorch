@@ -53,7 +53,7 @@
 #define TH_CPP_API
 #endif
 
-#define TH_API TH_EXTERNC TH_CPP_API
+#define TH_API TH_CPP_API
 
 #ifdef _WIN32
 # define TH_NO_RETURN __declspec(noreturn)
