@@ -51,6 +51,8 @@ class MutableTypePtrHelper {
         return unshapedType(type);
       case TypeKind::OptionalType:
         return getMutableType(type->cast<OptionalType>()->getElementType());
+      case TypeKind::AnyType:
+        return type;
       case TypeKind::FutureType: {
         if (auto elem =
                 getMutableType(type->cast<FutureType>()->getElementType())) {
@@ -860,11 +862,17 @@ void AliasDb::makePointerTo(const Value* from, const Value* to) {
 
   // covariant type containers can be point to types which are not
   // also mutable/immutable because we unify the contained types
+  // Any tyype can
   if (isMutableTypeInternal(from) != isMutableTypeInternal(to)) {
     auto from_kind = from->type()->kind();
+    bool expected_kind = false;
+    for (auto kind : {from->type()->kind(), to->type()->kind()}) {
+      expected_kind = expected_kind || kind == TypeKind::OptionalType ||
+          kind == TypeKind::FutureType || kind == TypeKind::TupleType ||
+          kind == TypeKind::AnyType;
+    }
     TORCH_INTERNAL_ASSERT(
-        from_kind == TypeKind::OptionalType ||
-        from_kind == TypeKind::FutureType || from_kind == TypeKind::TupleType);
+        expected_kind, from->type()->str(), to->type()->str());
     return;
   }
 
