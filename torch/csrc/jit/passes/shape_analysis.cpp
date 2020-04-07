@@ -892,6 +892,7 @@ class ShapePropagator {
               return type_vec_t{
                   type->withScalarType(out_type)->dimensionedOnly()};
             }
+            return type_vec_t{input_type->dimensionedOnly()};
           }
           return type_vec_t{};
         }};
