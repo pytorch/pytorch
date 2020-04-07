@@ -451,7 +451,10 @@ Tensor block_diag(TensorList tensors) {
     result_dim1 += dim1;
   }
 
-  result = at::zeros({result_dim0, result_dim1}, options_tensor->options());
+  result = at::zeros(
+    {result_dim0, result_dim1},
+    options_tensor->options().dtype(output_scalar_type)
+  );
 
   int64_t cur_dim0 = 0;
   int64_t cur_dim1 = 0;

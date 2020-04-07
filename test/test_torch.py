@@ -6340,6 +6340,28 @@ class TestTorchDeviceType(TestCase):
         result_check = torch.empty(0, device=device)
         self.assertEqual(result, result_check)
 
+        test_dtypes = [
+            torch.uint8,
+            torch.int8,
+            torch.int16,
+            torch.int32,
+            torch.int64,
+            torch.float16,
+            torch.float32,
+            torch.float64,
+            torch.complex64,
+            torch.complex128
+        ]
+        # Test pairs of different dtypes
+        for dtype1 in test_dtypes:
+            for dtype2 in test_dtypes:
+                a = torch.tensor(1, device=device, dtype=dtype1)
+                b = torch.tensor(2, device=device, dtype=dtype2)
+                result = torch.block_diag(a, b)
+                result_dtype = torch.result_type(a, b)
+                result_check = torch.tensor([[1, 0], [0, 2]], device=device, dtype=result_dtype)
+                self.assertEqual(result, result_check)
+
     @unittest.skipIf(not TEST_SCIPY, "Scipy not found")
     def test_block_diag_scipy(self, device):
         import scipy.linalg
