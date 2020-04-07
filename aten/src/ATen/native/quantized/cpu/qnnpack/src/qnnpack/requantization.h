@@ -305,18 +305,16 @@ pytorch_qnnp_compute_add_quantization_params(
 
   union pytorch_qnnp_add_quantization_params params;
 #if CPUINFO_ARCH_X86 || CPUINFO_ARCH_X86_64
-  const int32_t zero_point_product = (int32_t) -
-      ((uint32_t)(a_output_scale * (float)a_zero_point) +
-       (uint32_t)(b_output_scale * (float)b_zero_point));
   for (uint32_t i = 0; i < 4; i++) {
-    params.sse2.zero_point_product[i] = zero_point_product;
+    params.sse2.a_zero_point[i] = (int32_t)a_zero_point;
+    params.sse2.b_zero_point[i] = (int32_t)b_zero_point;
   }
   for (uint32_t i = 0; i < 8; i++) {
     params.sse2.y_zero_point[i] = (int16_t)(uint16_t)output_zero_point;
   }
   for (uint32_t i = 0; i < 4; i++) {
     params.sse2.a_scale[i] = a_output_scale;
-    params.sse2.a_scale[i] = b_output_scale;
+    params.sse2.b_scale[i] = b_output_scale;
   }
   for (uint32_t i = 0; i < 16; i++) {
     params.sse2.y_max[i] = output_max;
@@ -340,9 +338,8 @@ pytorch_qnnp_compute_add_quantization_params(
   params.neon.vimagic = (INT32_C(0x4B400000) -
       (int32_t)(uint32_t)output_zero_point);
 #else
-  params.scalar.zero_point_product = (int32_t) -
-      ((uint32_t)(a_output_scale * (float)a_zero_point) +
-       (uint32_t)(b_output_scale * (float)b_zero_point));
+  params.scalar.a_zero_point = (int32_t)a_zero_point;
+  params.scalar.b_zero_point = (int32_t)b_zero_point;
   params.scalar.a_scale = a_output_scale;
   params.scalar.b_scale = b_output_scale;
   params.scalar.y_zero_point = (int32_t)(uint32_t)output_zero_point;
@@ -373,9 +370,8 @@ pytorch_qnnp_compute_scalar_add_quantization_params(
   assert(max_output_scale < 0x1.0p+8f);
 
   union pytorch_qnnp_add_quantization_params params;
-  params.scalar.zero_point_product = (int32_t) -
-      ((uint32_t)(a_output_scale * (float)a_zero_point) +
-       (uint32_t)(b_output_scale * (float)b_zero_point));
+  params.scalar.a_zero_point = (int32_t)a_zero_point;
+  params.scalar.b_zero_point = (int32_t)b_zero_point;
 
   params.scalar.a_scale = a_output_scale;
   params.scalar.b_scale = b_output_scale;
@@ -468,35 +464,19 @@ static inline uint8_t pytorch_qnnp_add_quantize(
     uint8_t b,
     union pytorch_qnnp_add_quantization_params params) {
   /* Multiply by factors and accumulate products */
-  float float_acc = (float)a * params.scalar.a_scale +
-      (float)b * params.scalar.b_scale;
+  float float_acc =
+      (float)((int32_t)a - params.scalar.a_zero_point) * params.scalar.a_scale +
+      (float)((int32_t)b - params.scalar.b_zero_point) * params.scalar.b_scale;
 
-  const long lmin =
-      (long)((int32_t)(uint32_t)params.scalar.y_min -
-          (int32_t)(uint32_t)params.scalar.y_zero_point);
-  const long lmax =
-      (long)((int32_t)(uint32_t)params.scalar.y_max -
-          (int32_t)(uint32_t)params.scalar.y_zero_point);
+  const int32_t lmin =
+      (int32_t)(uint32_t)params.scalar.y_min;
+  const int32_t lmax =
+      (int32_t)(uint32_t)params.scalar.y_max;
 
-#if defined(__arm__) || defined(_M_ARM)
-  const float fmin =  (float)lmin;
-  const float fmax = (float)lmax;
-  const int32_t imagic = params.scalar.magic_less_zero_point;
-  const float fmagic = 12582912.0f;
-  const int32_t imagic = (INT32_C(0x4B400000) -
-      (int32_t)(uint32_t)params.scalar.y_zero_point);
-
-  const float acc_clamped =
-      float_acc < fmin ? fmin : float_acc > fmax ? fmax : float_acc;
-  const int32_t acc_biased = (int32_t)fp32_to_bits(acc_clamped + fmagic) - imagic;
-
-  return (uint8_t)acc_biased;
-#else
-  const long acc = lrintf(float_acc);
-  const int32_t acc_clamped = (int32_t)(
-      acc < lmin ? lmin : acc > lmax ? lmax : acc);
-  const int32_t acc_biased =
+  int32_t acc = lrintf(float_acc);
+  acc =
       acc + (int32_t)(uint32_t)params.scalar.y_zero_point;
-  return (uint8_t)acc_biased;
-#endif
+  acc = (
+      acc < lmin ? lmin : acc > lmax ? lmax : acc);
+  return (uint8_t)acc;
 }

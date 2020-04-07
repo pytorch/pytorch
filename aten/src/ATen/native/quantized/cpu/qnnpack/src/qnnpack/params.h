@@ -178,7 +178,8 @@ union pytorch_qnnp_requantization_params {
 
 union pytorch_qnnp_add_quantization_params {
   struct {
-    int32_t zero_point_product;
+    int32_t a_zero_point;
+    int32_t b_zero_point;
     float a_scale;
     float b_scale;
     int32_t y_zero_point;
@@ -205,7 +206,8 @@ union pytorch_qnnp_add_quantization_params {
 #endif
 #if CPUINFO_ARCH_X86 || CPUINFO_ARCH_X86_64
   struct {
-    PYTORCH_QNNP_ALIGN(16) int32_t zero_point_product[4];
+    PYTORCH_QNNP_ALIGN(16) int32_t a_zero_point[4];
+    PYTORCH_QNNP_ALIGN(16) int32_t b_zero_point[4];
     PYTORCH_QNNP_ALIGN(16) float a_scale[4];
     PYTORCH_QNNP_ALIGN(16) float b_scale[4];
     PYTORCH_QNNP_ALIGN(16) int16_t y_zero_point[8];
