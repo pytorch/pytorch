@@ -685,7 +685,6 @@ class TestTypePromotion(TestCase):
     @dtypes(torch.complex64, torch.complex128)
     def test_abs_complex_to_float(self, device, dtype):
         from random import random
-        # vals = (0 + 0j, 0 - 2j, 0 + 2j, 1 + 1j, 1 - 1j, 2 + .2j, -2 - .2j)
         vals = []
         for multiplier in (-1, 1, -10, 10, -100, 100):
             for _ in range(10):
