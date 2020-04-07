@@ -1189,7 +1189,7 @@ struct to_ir {
     // comprehension introduces it's own scope. no variable assigned
     // leaks into the rest of the graph
     Node* n =
-        graph->insertNode(create(prim::ComprehensionScope, lc.range(), 0));
+        graph->insertNode(create(prim::LocalVariableScope, lc.range(), 0));
     auto* comprehension_block = n->addBlock();
     pushFrame(comprehension_block);
     WithInsertPoint guard(comprehension_block);

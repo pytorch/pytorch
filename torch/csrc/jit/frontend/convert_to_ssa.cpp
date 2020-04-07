@@ -157,7 +157,7 @@ struct ControlFlowLoadStores {
         case prim::Store: {
           environment_stack->setVar(n->s(attr::name), n->input()->type());
         } break;
-        case prim::ComprehensionScope: {
+        case prim::LocalVariableScope: {
           addControlFlowLoadStores(n->blocks().at(0));
         } break;
       }
@@ -204,9 +204,8 @@ struct EraseLoadStores {
           n->output()->replaceAllUsesWith(var);
           n->destroy();
         } break;
-        case prim::ComprehensionScope: {
-          // Comprehensions introduce their own scope, so we need to introduce a
-          // scope here so that writes within the comprehension do not leak into
+        case prim::LocalVariableScope: {
+          // writes within a local variable scope do not leak into
           // the rest of the graph
           auto body = n->blocks().at(0);
           eraseBlockLoadStores(body);

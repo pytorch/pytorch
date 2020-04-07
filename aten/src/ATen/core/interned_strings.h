@@ -54,7 +54,7 @@ namespace c10 {
   _(prim, ReturnStmt)                \
   _(prim, BreakStmt)                 \
   _(prim, ContinueStmt)              \
-  _(prim, ComprehensionScope)        \
+  _(prim, LocalVariableScope)        \
   _(prim, Store)                     \
   _(prim, AutogradZero)              \
   _(prim, AutogradAnyNonZero)        \
