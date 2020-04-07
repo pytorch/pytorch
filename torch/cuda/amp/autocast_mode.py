@@ -140,7 +140,8 @@ class autocast(object):
 # may be falsely detected as "Iterables."
 def _cast(value, dtype):
     if isinstance(value, torch.Tensor):
-        return value.to(dtype) if (value.is_floating_point() and value.is_cuda) else value
+        is_eligible = (value.is_floating_point() and value.is_cuda and (value.dtype is not torch.float64))
+        return value.to(dtype) if is_eligible else value
     elif isinstance(value, string_classes):
         return value
     elif isinstance(value, np.ndarray):
