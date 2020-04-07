@@ -391,7 +391,6 @@ Tensor cat(TensorList tensors, int64_t dim) {
 }
 
 Tensor block_diag(TensorList tensors) {
-  // ScalarType
   Tensor result;
   if (tensors.size() == 0) {
     result = at::empty({});
