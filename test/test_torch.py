@@ -52,7 +52,6 @@ if TEST_LIBROSA:
 
 SIZE = 100
 
-
 # This is intentionally prefixed by an underscore. Otherwise pytest will try to
 # run its methods as test cases.
 class _TestTorchMixin(object):
@@ -143,8 +142,9 @@ class _TestTorchMixin(object):
                     skip_regexes.append(re.compile('^{}$'.format(re.escape(r))))
                 else:
                     skip_regexes.append(r)
+            skipnames = ['copy_real', 'copy_imag']
             for name in dir(ns):
-                if name.startswith('_'):
+                if name.startswith('_') or name in skipnames:
                     continue
                 var = getattr(ns, name)
                 if not isinstance(var, checked_types):
@@ -1815,20 +1815,6 @@ class _TestTorchMixin(object):
             for i in range(dim):
                 self.assertEqual(x.select(dim, i), res[i])
                 self.assertEqual(x.select(dim, i), res2[i])
-
-    def test_rand(self):
-        def common_routine(dtype):
-            torch.manual_seed(123456)
-            res1 = torch.rand(SIZE, SIZE, dtype=dtype)
-            res2 = torch.tensor([], dtype=dtype)
-            torch.manual_seed(123456)
-            torch.rand(SIZE, SIZE, out=res2)
-            self.assertEqual(res1, res2)
-
-        common_routine(dtype=torch.float32)
-        common_routine(dtype=torch.float64)
-        common_routine(dtype=torch.complex64)
-        common_routine(dtype=torch.complex128)
 
     def test_randint(self):
         def seed(generator):
@@ -5921,6 +5907,15 @@ class TestTorchDeviceType(TestCase):
         expected_inv = torch.as_tensor(inv(matrices.cpu().numpy()))
         self.assertEqual(matrices_inverse, expected_inv.to(device))
 
+    @dtypes(torch.int8, torch.int16, torch.int32, torch.int64)
+    def test_signed_shift(self, device, dtype):
+        "Ensure that signed integer bit shifting works as expected."
+        a = torch.tensor([-10, 10], device=device, dtype=dtype)  # [11...1110110, 1010]
+        expected_l = torch.tensor([-40, 40], device=device, dtype=dtype)  # [11...11011000, 101000]
+        self.assertEqual(a << 2, expected_l)
+        expected_r = torch.tensor([torch.iinfo(dtype).max - 4, 5], device=device, dtype=dtype)  # [1111...111011, 101]
+        self.assertEqual(a >> 1, expected_r)
+
     def test_bitwise_not(self, device):
         res = 0xffff - torch.arange(127, dtype=torch.int8, device=device)
         for dtype in (torch.bool, torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64):
@@ -9569,6 +9564,65 @@ class TestTorchDeviceType(TestCase):
         else:
             helper(self, device, dtype, lambda x: x, lambda t: t, lambda mean: mean)
 
+    @dtypes(torch.float, torch.double)
+    @dtypesIfCUDA(torch.float, torch.double, torch.half, torch.bfloat16)
+    def test_uniform_from_to(self, device, dtype):
+        # TODO: https://github.com/pytorch/pytorch/issues/33793
+        if IS_WINDOWS and device.startswith('cuda') and dtype == torch.bfloat16:
+            # Crashes with CUDA error: unspecified launch failure
+            return
+
+        size = 2000
+        alpha = 0.1
+
+        float_min = torch.finfo(torch.float).min
+        float_max = torch.finfo(torch.float).max
+        double_min = torch.finfo(torch.double).min
+        double_max = torch.finfo(torch.double).max
+
+        if dtype == torch.bfloat16:
+            min_val = -3.389531389251535e+38
+            max_val = 3.389531389251535e+38
+        else:
+            min_val = torch.finfo(dtype).min
+            max_val = torch.finfo(dtype).max
+
+        values = [double_min, float_min, -42, 0, 42, float_max, double_max]
+
+        for from_ in values:
+            for to_ in values:
+                t = torch.empty(size, dtype=dtype, device=device)
+                if not (min_val <= from_ <= max_val) or not (min_val <= to_ <= max_val):
+                    pass
+                elif to_ < from_:
+                    self.assertRaisesRegex(
+                        RuntimeError,
+                        "uniform_ expects to return",
+                        lambda: t.uniform_(from_, to_)
+                    )
+                elif to_ - from_ > max_val:
+                    self.assertRaisesRegex(
+                        RuntimeError,
+                        "uniform_ expects to-from",
+                        lambda: t.uniform_(from_, to_)
+                    )
+                else:
+                    t.uniform_(from_, to_)
+                    range_ = to_ - from_
+                    if not (dtype == torch.bfloat16) and not (
+                            dtype == torch.half and device == 'cpu') and not torch.isnan(t).all():
+                        delta = alpha * range_
+                        double_t = t.to(torch.double)
+                        if range_ == 0:
+                            self.assertTrue(double_t.min() == from_)
+                            self.assertTrue(double_t.max() == to_)
+                        elif dtype == torch.half:
+                            self.assertTrue(from_ <= double_t.min() <= (from_ + delta))
+                            self.assertTrue((to_ - delta) <= double_t.max() <= to_)
+                        else:
+                            self.assertTrue(from_ <= double_t.min() <= (from_ + delta))
+                            self.assertTrue((to_ - delta) <= double_t.max() < to_)
+
     @dtypes(torch.float, torch.double, torch.complex64, torch.complex128)
     def test_randn(self, device, dtype):
         torch.manual_seed(123456)
@@ -9576,6 +9630,15 @@ class TestTorchDeviceType(TestCase):
         res2 = torch.tensor([], dtype=dtype, device=device)
         torch.manual_seed(123456)
         torch.randn(SIZE, SIZE, out=res2)
+        self.assertEqual(res1, res2)
+
+    @dtypes(torch.float, torch.double, torch.complex64, torch.complex128)
+    def test_rand(self, device, dtype):
+        torch.manual_seed(123456)
+        res1 = torch.rand(SIZE, SIZE, dtype=dtype, device=device)
+        res2 = torch.tensor([], dtype=dtype, device=device)
+        torch.manual_seed(123456)
+        torch.rand(SIZE, SIZE, out=res2)
         self.assertEqual(res1, res2)
 
     def test_empty_strided(self, device):
@@ -10008,6 +10071,12 @@ class TestTorchDeviceType(TestCase):
         self.assertRaisesRegex(RuntimeError,
                                r"For integral input tensors, argument alpha must not be a floating point number\.",
                                lambda: torch.add(m1, m2, alpha=1.0))
+
+        # complex
+        m1 = torch.tensor((4.0000 + 4.0000j), dtype=torch.complex64)
+        m2 = torch.tensor(4., dtype=torch.float64)
+        self.assertRaisesRegex(RuntimeError, r"result type ComplexDouble can't be cast to the desired output type Double",
+                               lambda: torch.add(m1, m1, out=m2))
 
 
     def test_sub_typing(self, device):
@@ -12382,18 +12451,29 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(top1, top2)
         self.assertEqual(idx1, idx2)
 
-    def test_topk_nonfinite(self, device):
-        for dtype in (torch.float, torch.double):
-            x = torch.tensor([float('nan'), float('inf'), 1e10, 0, -1e10, -float('inf')], device=device)
-            val, idx = x.topk(4)
-            expect = torch.tensor([float('nan'), float('inf'), 1e10, 0], device=device)
-            self.assertEqual(val, expect, allow_inf=True)
-            self.assertEqual(idx, [0, 1, 2, 3])
+    @dtypes(torch.int8, torch.uint8, torch.int16, torch.int32, torch.int64)
+    def test_topk_integral(self, device, dtype):
+        a = torch.randint(torch.iinfo(dtype).min, torch.iinfo(dtype).max, size=(10,),
+                          dtype=dtype, device=device)
+        sort_topk = a.sort()[0][-5:].flip(0)
+        topk = a.topk(5)
+        self.assertEqual(sort_topk, topk[0])      # check values
+        self.assertEqual(sort_topk, a[topk[1]])   # check indices
 
-            val, idx = x.topk(4, largest=False)
-            expect = torch.tensor([-float('inf'), -1e10, 0, 1e10], device=device)
-            self.assertEqual(val, expect, allow_inf=True)
-            self.assertEqual(idx, [5, 4, 3, 2])
+    @dtypesIfCUDA(*([torch.half, torch.float, torch.double]
+                  + ([torch.bfloat16] if TEST_WITH_ROCM else [])))
+    @dtypes(torch.float, torch.double)
+    def test_topk_nonfinite(self, device, dtype):
+        x = torch.tensor([float('nan'), float('inf'), 1e4, 0, -1e4, -float('inf')], device=device, dtype=dtype)
+        val, idx = x.topk(4)
+        expect = torch.tensor([float('nan'), float('inf'), 1e4, 0], device=device, dtype=dtype)
+        self.assertEqual(val, expect, allow_inf=True)
+        self.assertEqual(idx, [0, 1, 2, 3])
+
+        val, idx = x.topk(4, largest=False)
+        expect = torch.tensor([-float('inf'), -1e4, 0, 1e4], device=device, dtype=dtype)
+        self.assertEqual(val, expect, allow_inf=True)
+        self.assertEqual(idx, [5, 4, 3, 2])
 
     def test_is_signed(self, device):
         self.assertEqual(torch.IntTensor(5).to(device).is_signed(), True)
@@ -15873,6 +15953,12 @@ _types = [
     torch.uint8
 ]
 
+_types_no_half = [
+    torch.float, torch.double,
+    torch.int8, torch.short, torch.int, torch.long,
+    torch.uint8
+]
+
 # _types2 adds bfloat16 type to  _types only on ROCm. Should eventually be unified
 # with _types when bfloat16 bringup is complete on all platforms.
 _types2 = _types + [torch.bfloat16] if TEST_WITH_ROCM else _types
@@ -15932,7 +16018,7 @@ def _make_tensor(shape, dtype, device, fill_ones=False):
         return torch.ones(*shape, dtype=_convert_t(dtype, device), device=device)
 
     # Returns a tensor with random integer values
-    if dtype not in _float_types2:
+    if not dtype.is_floating_point:
         t = torch.randint(0, 10, shape, device=device)
         return t.to(_convert_t(dtype, device))
 
@@ -16012,6 +16098,7 @@ def _wrap_maybe_warns(regex):
 # - torch.bfloat16 precision (=1e-5)
 # - precision (=1e-5), precision to use for all other dtypes
 # - dtype_list (=_types), a list of torch dtypes to test the op(s) with
+# - cpu_dtype_list (=[]), a list of torch dtypes to test the op(s) on cpu
 # - make_inplace_variant (=True), if true the inplace version of the op (op_) is also tested
 # - decorators (=[]), a list of decorators to apply to the test
 tensor_op_tests = [
@@ -16111,6 +16198,7 @@ tensor_op_tests = [
         1e-2, 1e-1, 1e-4, _float_types2, _cpu_types, True,
         [_wrap_maybe_warns("This overload of addr_? is deprecated")]),
     ('atan2', '', _medium_2d, lambda t, d: [_medium_2d(t, d)], 1e-2, 1e-5, 1e-5, _float_types),
+    ('angle', '', _small_3d, lambda t, d: [], 0, 0, 0, _types_no_half, [torch.bfloat16], False),
     ('fmod', 'value', _small_3d, lambda t, d: [3], 1e-3),
     ('fmod', 'tensor', _small_3d, lambda t, d: [_small_3d(t, d, has_zeros=False)], 1e-3),
     ('chunk', '', _medium_2d, lambda t, d: [4], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
@@ -16122,6 +16210,7 @@ tensor_op_tests = [
     ('clamp_max', '', _medium_2d, lambda t, d: [1], 1e-2, 1e-2, 1e-5, _types, [torch.bfloat16]),
     ('clone', '', _medium_2d, lambda t, d: [], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
     ('contiguous', '', _medium_2d, lambda t, d: [], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
+    ('conj', '', _small_3d, lambda t, d: [], 1e-5, 0, 1e-5, _types_no_half, [torch.bfloat16], False),
     ('cross', '', _new_t((_M, 3, _M)), lambda t, d: [_new_t((_M, 3, _M))(t, d)],
         1e-2, 1e-5, 1e-5, _types, _cpu_types, False),
     ('cummax', '', _small_3d_unique, lambda t, d: [1], 1e-2, 1e-5, 1e-5, _types, _cpu_types, False),
@@ -16316,13 +16405,13 @@ tensor_op_tests = [
         1e-5, 1e-5, 3e-4, _float_types_no_half, _cpu_types, False, [skipCUDAIfNoMagma]),
     ('eig', 'with_eigvec', _new_t((10, 10)), lambda t, d: [True],
         1e-5, 1e-5, 1e-5, _float_types_no_half, _cpu_types, False, [skipCUDAIfNoMagma]),
-    ('abs', '', _small_3d, lambda t, d: []),
+    ('abs', '', _small_3d, lambda t, d: [], 1e-5, 0, 1e-5, _types, [torch.bfloat16]),
     ('sign', '', _small_3d, lambda t, d: []),
     ('log', '', _small_3d, lambda t, d: [], 1e-2, 1e-1, 1e-5, _float_types2),
     ('log10', '', _small_3d, lambda t, d: [], 1e-2, 1e-1, 1e-5, _float_types2),
     ('log1p', '', _small_3d, lambda t, d: [], 1e-3, 1e-1, 1e-5, _float_types_no_half),
     ('log2', '', _small_3d, lambda t, d: [], 1e-2, 1e-1, 1e-5, _float_types2),
-    ('sigmoid', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, _float_types2),
+    ('sigmoid', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, _float_types2, [torch.bfloat16]),
     ('sin', '', _small_3d, lambda t, d: [], 1e-3, 1e-5, 1e-5, _float_types),
     ('sqrt', '', _small_3d, lambda t, d: [], 1e-3, 1e-5, 1e-5, _float_types),
     ('tanh', '', _small_3d, lambda t, d: [], 1e-3, 1e-5, 1e-5, _float_types),
@@ -16335,10 +16424,10 @@ tensor_op_tests = [
     ('erfc', '', _small_3d, lambda t, d: [], 1e-3, 1e-5, 1e-5, _float_types),
     ('exp', '', _small_3d, lambda t, d: [], 1e-2, 1e-5, 1e-5, _float_types),
     ('expm1', '', _small_3d, lambda t, d: [], 1e-2, 1e-5, 1e-5, _float_types),
-    ('reciprocal', '', _small_3d, lambda t, d: [], 1e-1, 1e-5, 1e-5, _float_types),
+    ('reciprocal', '', _small_3d, lambda t, d: [], 1e-1, 1e-1, 1e-5, _float_types, [torch.bfloat16]),
     ('floor', '', _small_3d, lambda t, d: [], 1e-5, 1e-5, 1e-5, _float_types),
-    ('frac', '', _small_3d, lambda t, d: [], 1e-5, 1e-5, 1e-5, _float_types),
-    ('neg', '', _small_3d, lambda t, d: [], 1e-5, 1e-5, 1e-5, _float_types2),
+    ('frac', '', _small_3d, lambda t, d: [], 1e-5, 1e-2, 1e-5, _float_types, [torch.bfloat16]),
+    ('neg', '', _small_3d, lambda t, d: [], 1e-5, 1e-5, 1e-5, _float_types2, [torch.bfloat16]),
     ('round', '', _small_3d, lambda t, d: [], 1e-5, 1e-5, 1e-5, _float_types),
     ('trunc', '', _small_3d, lambda t, d: [], 1e-5, 1e-5, 1e-5, _float_types),
     ('ceil', '', _small_3d, lambda t, d: [], 1e-5, 1e-5, 1e-5, _float_types),
@@ -16385,9 +16474,9 @@ def generate_test_function(cls,
         # Compares CPU and device inputs and outputs
         precision = dtype2precision.get(dtype, float_precision)
 
-        self.assertEqual(cpu_tensor, device_tensor, prec=precision, exact_dtype=False)
-        self.assertEqual(cpu_args, device_args, prec=precision, exact_dtype=False)
-        self.assertEqual(cpu_result, device_result, prec=precision, exact_dtype=False)
+        self.assertEqual(cpu_tensor, device_tensor, prec=precision, exact_dtype=False, allow_inf=True)
+        self.assertEqual(cpu_args, device_args, prec=precision, exact_dtype=False, allow_inf=True)
+        self.assertEqual(cpu_result, device_result, prec=precision, exact_dtype=False, allow_inf=True)
 
     test_name = "test_" + op_str + subtest_str
     assert not hasattr(cls, test_name), "{0} already in TestDevicePrecision".format(test_name)

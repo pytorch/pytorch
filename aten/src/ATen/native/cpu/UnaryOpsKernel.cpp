@@ -31,7 +31,7 @@ namespace {
 using namespace vec256;
 
 static void sigmoid_kernel(TensorIterator& iter) {
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(iter.dtype(), "sigmoid_cpu", [&]() {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(kBFloat16, iter.dtype(), "sigmoid_cpu", [&]() {
     cpu_kernel_vec(
         iter,
         [=](scalar_t a) -> scalar_t { return ((scalar_t)(1) / ((scalar_t)(1) + std::exp((-a)))); },
@@ -55,7 +55,7 @@ uint8_t abs_impl(uint8_t v) {
 }
 
 static void abs_kernel(TensorIterator& iter) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX(iter.dtype(), "abs_cpu", [&]() {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(kBFloat16, iter.dtype(), "abs_cpu", [&]() {
     cpu_kernel_vec(
         iter,
         [=](scalar_t a) -> scalar_t { return abs_impl(a); },
@@ -64,7 +64,7 @@ static void abs_kernel(TensorIterator& iter) {
 }
 
 static void angle_kernel(TensorIterator& iter) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX(iter.dtype(), "angle_cpu", [&]() {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(kBFloat16, iter.dtype(), "angle_cpu", [&]() {
     cpu_kernel_vec(
         iter,
         [=](scalar_t a) -> scalar_t { return angle_impl(a); },
@@ -73,7 +73,7 @@ static void angle_kernel(TensorIterator& iter) {
 }
 
 static void real_kernel(TensorIterator& iter) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX(iter.dtype(), "real_cpu", [&]() {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(kBFloat16, iter.dtype(), "real_cpu", [&]() {
     cpu_kernel_vec(
         iter,
         [=](scalar_t a) -> scalar_t { return real_impl(a); },
@@ -82,7 +82,7 @@ static void real_kernel(TensorIterator& iter) {
 }
 
 static void imag_kernel(TensorIterator& iter) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX(iter.dtype(), "imag_cpu", [&]() {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(kBFloat16, iter.dtype(), "imag_cpu", [&]() {
     cpu_kernel_vec(
         iter,
         [=](scalar_t a) -> scalar_t { return imag_impl(a); },
@@ -91,7 +91,7 @@ static void imag_kernel(TensorIterator& iter) {
 }
 
 static void conj_kernel(TensorIterator& iter) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX(iter.dtype(), "conj_cpu", [&]() {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(kBFloat16, iter.dtype(), "conj_cpu", [&]() {
     cpu_kernel_vec(
         iter,
         [=](scalar_t a) -> scalar_t { return conj_impl(a); },
@@ -120,7 +120,7 @@ static void bitwise_not_kernel(TensorIterator& iter) {
 }
 
 static void frac_kernel(TensorIterator& iter) {
-  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "frac_cpu", [&]() {
+  AT_DISPATCH_FLOATING_TYPES_AND(kBFloat16, iter.dtype(), "frac_cpu", [&]() {
     cpu_kernel_vec(
         iter,
         [=](scalar_t a) -> scalar_t { return a - std::trunc(a); },
@@ -138,7 +138,7 @@ static void logical_not_kernel(TensorIterator& iter) {
 }
 
 static void reciprocal_kernel(TensorIterator& iter) {
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(iter.dtype(), "reciprocal_cpu", [&]() {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(kBFloat16, iter.dtype(), "reciprocal_cpu", [&]() {
     cpu_kernel_vec(
         iter,
         [=](scalar_t a) -> scalar_t { return decltype(a)(1.0) / a; },
@@ -147,7 +147,7 @@ static void reciprocal_kernel(TensorIterator& iter) {
 }
 
 static void neg_kernel(TensorIterator& iter) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX(iter.dtype(), "neg_cpu", [&]() {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(kBFloat16, iter.dtype(), "neg_cpu", [&]() {
     cpu_kernel_vec(
         iter,
         [=](scalar_t a) -> scalar_t { return -a; },
@@ -159,7 +159,7 @@ static void sign_kernel(TensorIterator& iter){
   if(iter.dtype() == ScalarType::Bool){
       cpu_kernel(iter, [=](bool x) -> bool { return x; });
   } else {
-    AT_DISPATCH_ALL_TYPES_AND(ScalarType::Half, iter.dtype(), "sign_cpu", [&]() {
+    AT_DISPATCH_ALL_TYPES_AND2(kBFloat16, ScalarType::Half, iter.dtype(), "sign_cpu", [&]() {
         auto zero_vec = Vec256<scalar_t>((scalar_t)(0));
         auto one_vec = Vec256<scalar_t>((scalar_t)(1));
 
@@ -350,6 +350,11 @@ static void log_normal_kernel(TensorIterator& iter, double mean, double std, Gen
   });
 }
 
+void uniform_kernel(TensorIterator& iter, double from, double to, Generator gen) {
+  CPUGenerator* generator = get_generator_or_default<CPUGenerator>(gen, detail::getDefaultCPUGenerator());
+  templates::cpu::uniform_kernel(iter, from, to, generator);
+}
+
 void normal_kernel(Tensor& self, double mean, double std, Generator gen) {
   CPUGenerator* generator = get_generator_or_default<CPUGenerator>(gen, detail::getDefaultCPUGenerator());
   templates::cpu::normal_kernel(self, mean, std, generator);
@@ -458,6 +463,7 @@ REGISTER_DISPATCH(exponential_stub, &exponential_kernel);
 REGISTER_DISPATCH(geometric_stub, &geometric_kernel);
 REGISTER_DISPATCH(log_normal_stub, &log_normal_kernel);
 REGISTER_DISPATCH(normal_stub, &normal_kernel);
+REGISTER_DISPATCH(uniform_stub, &uniform_kernel);
 REGISTER_DISPATCH(random_from_to_stub, &random_from_to_kernel);
 REGISTER_DISPATCH(random_full_64_bits_range_stub, &random_full_64_bits_range_kernel);
 REGISTER_DISPATCH(random_stub, &random_kernel);
