@@ -257,9 +257,9 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
 
     std::vector<std::function<void(void)>> cbs;
     cbs.swap(callbacks_);
+    finished_cv_.notify_all();
     lock.unlock();
 
-    finished_cv_.notify_all();
     for (auto& callback : cbs) {
       callback();
     }
@@ -278,9 +278,9 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
 
     std::vector<std::function<void(void)>> cbs;
     cbs.swap(callbacks_);
+    finished_cv_.notify_all();
     lock.unlock();
 
-    finished_cv_.notify_all();
     for (auto& callback : cbs) {
       callback();
     }

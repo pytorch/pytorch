@@ -127,9 +127,9 @@ void _parallel_run(
 
   std::atomic_flag err_flag = ATOMIC_FLAG_INIT;
   std::exception_ptr eptr;
-  std::vector<std::shared_ptr<c10::ivalue::Future>> futures(num_tasks);
+  std::vector<c10::intrusive_ptr<c10::ivalue::Future>> futures(num_tasks);
   for (size_t task_id = 0; task_id < num_tasks; ++task_id) {
-    futures[task_id] = std::make_shared<c10::ivalue::Future>(c10::NoneType::get());
+    futures[task_id] = c10::make_intrusive<c10::ivalue::Future>(c10::NoneType::get());
   }
   auto task = [f, &eptr, &err_flag, &futures, begin, end, chunk_size]
       (int /* unused */, size_t task_id) {
