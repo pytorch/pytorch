@@ -3,9 +3,11 @@
 #include <ATen/AccumulateType.h>
 #include <ATen/Dispatch.h>
 #include <ATen/native/TensorIterator.h>
+#include <ATen/native/cuda/Loops.cuh>
 #include <c10/util/Half.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
+#include <ATen/detail/FunctionTraits.h>
 
 #include <curand.h>
 #include <curand_kernel.h>
@@ -14,7 +16,11 @@
 #include <limits>
 #include <utility>
 #include <mutex>
+#include <tuple>
+#include <type_traits>
 
+namespace at {
+namespace native {
 namespace {
 
 // launch bounds used for kernels utilizing TensorIterator
@@ -161,7 +167,103 @@ void distribution_nullary_kernel(at::TensorIterator& iter,
   AT_CUDA_CHECK(cudaGetLastError());
 }
 
+// Unary kernel
+
+template<typename func_t, typename inp_offset_calc_t, typename out_offset_calc_t>
+__global__ void distribution_unary_elementwise_kernel(
+  int numel,
+  func_t f,
+  std::pair<uint64_t, uint64_t> seeds,
+  typename binary_function_traits<func_t>::result_type *output_data,
+  const typename binary_function_traits<func_t>::arg2_t *input_data,
+  inp_offset_calc_t inp_calc,
+  out_offset_calc_t out_calc
+) {
+  using input_t = typename binary_function_traits<func_t>::arg2_t;
+  input_t inputs[THREAD_WORK_SIZE];
+
+  int base_index = BLOCK_WORK_SIZE * blockIdx.x;
+  int remaining = std::min<int>(numel - base_index, BLOCK_WORK_SIZE);
+
+  curandStatePhilox4_32_10_t state;
+  curand_init(
+    seeds.first,
+    blockIdx.x * blockDim.x + threadIdx.x,
+    seeds.second,
+    &state);
+
+  // load data into registers
+  int thread_idx = threadIdx.x;
+  #pragma unroll
+  for(int i = 0; i < THREAD_WORK_SIZE; i++) {
+    if (thread_idx >= remaining) {
+      break;
+    }
+    int input_idx = thread_idx + base_index;
+    auto offsets = inp_calc.get(input_idx);
+    inputs[i] = input_data[offsets[0]];
+    thread_idx += num_threads;
+  }
+
+  // compute and store
+  thread_idx = threadIdx.x;
+  #pragma unroll
+  for(int i = 0; i < THREAD_WORK_SIZE; i++) {
+    if (thread_idx >= remaining) {
+      break;
+    }
+    int input_idx = thread_idx + base_index;
+    auto offsets = out_calc.get(input_idx);
+    output_data[offsets[0]] = f(state, inputs[i]);
+    thread_idx += num_threads;
+  }
+}
+
+template<typename func_t>
+void distribution_unary_kernel(TensorIterator &iter, std::pair<uint64_t, uint64_t> seeds, const func_t &f) {
+  using traits = binary_function_traits<func_t>;
+  static_assert(std::is_same<typename traits::arg1_t, curandStatePhilox4_32_10_t &>::value, "the first argument of functor must be curandStatePhilox4_32_10_t");
+  using input_t = typename traits::arg2_t;
+  using output_t = typename traits::result_type;
+
+  if (!iter.can_use_32bit_indexing()) {
+    for (auto& sub_iter : iter.with_32bit_indexing()) {
+      distribution_unary_kernel(sub_iter, seeds, f);
+    }
+    return;
+  }
+
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(iter.can_use_32bit_indexing());
+
+  int64_t numel = iter.numel();
+  if (numel == 0) {
+    return;
+  }
+
+  output_t *output_data = static_cast<output_t *>(iter.data_ptr(0));
+  const input_t *input_data = static_cast<const input_t *>(iter.data_ptr(1));
+
+  int64_t grid = (numel + block_work_size - 1) / block_work_size;
+  auto stream = at::cuda::getCurrentCUDAStream();
+
+  if (iter.is_contiguous()) {
+    distribution_unary_elementwise_kernel<<<grid, num_threads, 0, stream>>>(
+      numel, f, seeds, output_data, input_data,
+      TrivialOffsetCalculator<2>(), TrivialOffsetCalculator<2>());
+  } else {
+    std::array<const int64_t*, 1> out_strides = {iter.strides(0).data()};
+    std::array<const int64_t*, 1> inp_strides = {iter.strides(1).data()};
+
+    distribution_unary_elementwise_kernel<<<grid, num_threads, 0, stream>>>(
+      numel, f, seeds, output_data, input_data,
+      OffsetCalculator<1>(iter.ndim(), iter.shape().data(), inp_strides.data()),
+      OffsetCalculator<1>(iter.ndim(), iter.shape().data(), out_strides.data())
+    );
+  }
+}
+
 } // namespace
+}} // namespace at::native
 
 namespace at {
 namespace native {
