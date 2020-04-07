@@ -33,8 +33,7 @@ class Conf:
     # TODO: Eventually we can probably just remove the cudnn7 everywhere.
     def get_cudnn_insertion(self):
 
-        omit = self.language == "onnx_py2" \
-            or self.language == "onnx_main_py3.6" \
+        omit = self.language == "onnx_main_py3.6" \
             or self.language == "onnx_ort1_py3.6" \
             or self.language == "onnx_ort2_py3.6" \
             or set(self.compiler_names).intersection({"android", "mkl", "clang"}) \
@@ -71,11 +70,10 @@ class Conf:
     def gen_docker_image(self):
 
         lang_substitutions = {
-            "onnx_py2": "py2",
             "onnx_main_py3.6": "py3.6",
             "onnx_ort1_py3.6": "py3.6",
             "onnx_ort2_py3.6": "py3.6",
-            "cmake": "py2",
+            "cmake": "py3",
         }
 
         lang = miniutils.override(self.language, lang_substitutions)
@@ -85,7 +83,7 @@ class Conf:
     def gen_workflow_params(self, phase):
         parameters = OrderedDict()
         lang_substitutions = {
-            "onnx_py2": "onnx-py2",
+            "onnx_py3": "onnx-py3",
             "onnx_main_py3.6": "onnx-main-py3.6",
             "onnx_ort1_py3.6": "onnx-ort1-py3.6",
             "onnx_ort2_py3.6": "onnx-ort2-py3.6",
