@@ -6,6 +6,7 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/native/cuda/LaunchUtils.h>
 #include <ATen/native/cuda/UpSample.cuh>
+#include <ATen/cuda/CUDAUtils.h>
 
 namespace at {
 namespace native {

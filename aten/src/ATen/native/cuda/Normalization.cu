@@ -1,4 +1,5 @@
 #include <ATen/native/cuda/Normalization.cuh>
+#include <c10/core/ScalarType.h>
 
 namespace at { namespace native {
 

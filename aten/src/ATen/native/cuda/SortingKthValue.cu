@@ -12,6 +12,8 @@
 #include <ATen/native/cuda/SortingCommon.cuh>
 #include <ATen/native/cuda/SortingRadixSelect.cuh>
 #include <ATen/NamedTensorUtils.h>
+#include <ATen/cuda/CUDAUtils.h>
+#include <ATen/cuda/detail/IndexUtils.cuh>
 
 namespace at {
 namespace native {

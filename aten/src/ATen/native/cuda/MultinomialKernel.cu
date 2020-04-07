@@ -5,6 +5,8 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/native/cuda/LaunchUtils.h>
 #include <ATen/AccumulateType.h>
+#include <ATen/detail/CUDAHooksInterface.h>
+#include <ATen/CUDAGenerator.h>
 
 #include <THC/THCReduceApplyUtils.cuh>
 #include <THC/THCTensorMathReduce.cuh>

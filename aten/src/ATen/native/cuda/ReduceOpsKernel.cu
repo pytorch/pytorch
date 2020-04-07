@@ -9,6 +9,7 @@
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/ReduceOps.h>
+#include <ATen/cuda/CUDAUtils.h>
 
 #include <limits>
 #include <tuple>

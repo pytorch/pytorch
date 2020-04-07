@@ -5,9 +5,11 @@
 #include <ATen/Dispatch.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/cuda/detail/IndexUtils.cuh>
+#include <ATen/cuda/Exceptions.h>
 #include <THC/THCDeviceUtils.cuh>
 
 #include <c10/cuda/CUDAMathCompat.h>
+#include <c10/cuda/CUDACachingAllocator.h>
 
 namespace at {
 namespace native {

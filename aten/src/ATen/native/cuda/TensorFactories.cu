@@ -4,6 +4,7 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/native/TensorFactories.h>
 #include <ATen/native/cuda/Resize.cuh>
+#include <ATen/cuda/CUDAUtils.h>
 #include <c10/util/Exception.h>
 
 #include <THC/THCGeneral.h>

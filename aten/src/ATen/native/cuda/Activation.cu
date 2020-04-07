@@ -13,6 +13,7 @@
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
 #include <ATen/native/cuda/Loops.cuh>
 #include <c10/cuda/CUDAMathCompat.h>
+#include <ATen/cuda/CUDAUtils.h>
 
 
 namespace at { namespace native {

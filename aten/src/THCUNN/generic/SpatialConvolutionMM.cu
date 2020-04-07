@@ -3,6 +3,7 @@
 #else
 
 #include <ATen/div_rtn.h>
+#include <THC/THCNumerics.cuh>
 
 static inline void THNN_(SpatialConvolutionMM_shapeCheck)(
                          THCState *state,

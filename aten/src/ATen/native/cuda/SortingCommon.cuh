@@ -8,6 +8,8 @@
 #include <THC/THCNumerics.cuh>
 #include <THC/THCScanUtils.cuh>
 #include <THC/THCTensorMathReduce.cuh> // AddOp
+#include <ATen/cuda/CUDAUtils.h>
+#include <ATen/cuda/detail/IndexUtils.cuh>
 
 namespace at {
 namespace native {
