@@ -862,7 +862,7 @@ void AliasDb::makePointerTo(const Value* from, const Value* to) {
 
   // covariant type containers can be point to types which are not
   // also mutable/immutable because we unify the contained types
-  // Any tyype can
+  // Any can point to/from immutable types
   if (isMutableTypeInternal(from) != isMutableTypeInternal(to)) {
     auto from_kind = from->type()->kind();
     bool expected_kind = false;
