@@ -27,7 +27,7 @@ struct TupleType;
 // For custom class __init__ registration, we need to pass in a function
 // that looks like this: [](IValue x, args...)
 
-// However, kernel_functor.h automatically sets the input types of the function
+// However, make_boxed_from_unboxed_functor.h automatically sets the input types of the function
 // by introspecting the types of the functor (which is IValue in this case).
 // However, we need the type it binds to be Foo.
 
@@ -196,6 +196,8 @@ struct CAFFE2_API Tuple : c10::intrusive_ptr_target {
     return std::move(elements_);
   }
   std::shared_ptr<TupleType> type() const;
+
+  friend bool operator==(const ivalue::Tuple& lhs, const ivalue::Tuple& rhs);
 
  private:
   Tuple(std::vector<IValue> elements, std::shared_ptr<TupleType> type = nullptr)
