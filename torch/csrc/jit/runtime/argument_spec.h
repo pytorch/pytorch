@@ -47,7 +47,9 @@ struct ArgumentInfo {
 
     return TensorType::create(
         type(),
-        ConvertIntToCPUOrCUDA(device()), c10::optional<size_t>(dim()), requires_grad());
+        ConvertIntToCPUOrCUDA(device()),
+        c10::optional<size_t>(dim()),
+        requires_grad());
   }
   operator TypePtr() const {
     return toType();
@@ -352,7 +354,11 @@ struct CompleteArgumentInfo {
     if (!defined())
       return TensorType::get();
     return TensorType::create(
-        type(), ConvertIntToCPUOrCUDA(device()), c10::VaryingShape<int64_t>{sizes()}, c10::VaryingShape<int64_t>{strides()}, requires_grad());
+        type(),
+        ConvertIntToCPUOrCUDA(device()),
+        c10::VaryingShape<int64_t>{sizes()},
+        c10::VaryingShape<int64_t>{strides()},
+        requires_grad());
   }
 
  private:

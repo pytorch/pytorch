@@ -179,7 +179,12 @@ void testDifferentiate() {
   auto graph = std::make_shared<Graph>();
   std::vector<int64_t> sizes{2, 3, 4};
   std::vector<int64_t> strides{12, 4, 1};
-  const auto type = TensorType::create(at::ScalarType::Float, at::kCPU, c10::VaryingShape<int64_t>{sizes}, c10::VaryingShape<int64_t>{strides}, true);
+  const auto type = TensorType::create(
+      at::ScalarType::Float,
+      at::kCPU,
+      c10::VaryingShape<int64_t>{sizes},
+      c10::VaryingShape<int64_t>{strides},
+      true);
 
   // Builds graph a * b * a + b
   auto* a = graph->addInput()->setType(type);

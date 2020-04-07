@@ -158,10 +158,7 @@ TypePtr SchemaTypeParser::parseRefinedTensor() {
       num_dims++;
     });
     ptr = at::TensorType::create(
-        dtype,
-        at::DeviceType::CPU,
-        num_dims,
-        c10::nullopt);
+        dtype, at::DeviceType::CPU, num_dims, c10::nullopt);
   } else {
     std::vector<int64_t> dims;
     parseList(TK_NOTHING, ',', ')', [&] {
@@ -175,7 +172,14 @@ TypePtr SchemaTypeParser::parseRefinedTensor() {
       dims.push_back(dim);
     });
     at::IntArrayRef dims_ref(dims);
-    ptr = at::TensorType::create(dtype, at::DeviceType::CPU, c10::VaryingShape<c10::ShapeSymbol>(dims_ref), c10::VaryingShape<int64_t>(dims_ref.size()), c10::VaryingShape<size_t>(dims_ref.size()), c10::VaryingShape<bool>(dims_ref.size()), false);
+    ptr = at::TensorType::create(
+        dtype,
+        at::DeviceType::CPU,
+        c10::VaryingShape<c10::ShapeSymbol>(dims_ref),
+        c10::VaryingShape<int64_t>(dims_ref.size()),
+        c10::VaryingShape<size_t>(dims_ref.size()),
+        c10::VaryingShape<bool>(dims_ref.size()),
+        false);
   }
   return ptr;
 }
