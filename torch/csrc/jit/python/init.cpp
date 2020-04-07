@@ -176,9 +176,9 @@ void initJITBindings(PyObject* module) {
              const py::dict& qconfig_dict,
              bool inplace,
              bool is_dynamic) {
-            auto dict = py::cast<
-                std::unordered_map<std::string, std::tuple<Module, Module>>>(
-                qconfig_dict);
+            auto dict = py::cast<std::unordered_map<
+                std::string,
+                c10::optional<std::tuple<Module, Module>>>>(qconfig_dict);
             return InsertObservers(
                 module, method_name, dict, inplace, is_dynamic);
           },
@@ -189,12 +189,16 @@ void initJITBindings(PyObject* module) {
           py::arg("is_dynamic") = false)
       .def(
           "_jit_pass_insert_quant_dequant",
-          [](Module& module, const std::string& method_name, bool inplace) {
-            return InsertQuantDeQuant(module, method_name, inplace);
+          [](Module& module,
+             const std::string& method_name,
+             bool inplace,
+             bool is_dynamic) {
+            return InsertQuantDeQuant(module, method_name, inplace, is_dynamic);
           },
           py::arg("module"),
           py::arg("method_name"),
-          py::arg("inplace") = false)
+          py::arg("inplace") = false,
+          py::arg("is_dynamic") = false)
       .def(
           "_jit_pass_insert_prepack_unpack",
           [](std::shared_ptr<Graph>& g) { return InsertPrepackUnpack(g); })
@@ -225,7 +229,13 @@ void initJITBindings(PyObject* module) {
       .def(
           "_jit_pass_swap_functional_linear",
           [](Module& module) { SwapFunctionalLinear(module); })
-      .def("_jit_pass_quant_finalize", &Finalize)
+      .def(
+          "_jit_pass_quant_finalize",
+          [](Module& module, bool is_dynamic) {
+            return Finalize(module, is_dynamic);
+          },
+          py::arg("module"),
+          py::arg("is_dynamic") = false)
       .def(
           "_jit_pass_pattern_based_rewrite",
           [](const Module& m) { return PatternBasedRewrite(m); })
@@ -365,6 +375,8 @@ void initJITBindings(PyObject* module) {
       .def("_jit_pass_canonicalize_ops", CanonicalizeOps)
       .def("_jit_pass_decompose_ops", DecomposeOps)
       .def("_jit_pass_specialize_autogradzero", specializeAutogradZero)
+      .def("_jit_can_fuse_on_cpu", &canFuseOnCPU)
+      .def("_jit_can_fuse_on_gpu", &canFuseOnGPU)
       .def("_jit_override_can_fuse_on_cpu", &overrideCanFuseOnCPU)
       .def("_jit_override_can_fuse_on_gpu", &overrideCanFuseOnGPU)
       .def("_jit_can_fuse_on_cpu", &canFuseOnCPU)
@@ -386,7 +398,8 @@ void initJITBindings(PyObject* module) {
             auto stack = toTraceableStack(args);
             checkAliasAnnotation(g, std::move(stack), unqualified_op_name);
           })
-      .def("_jit_register_cuda_fuser", &registerCudaFuseGraph)
+      .def("_jit_register_cuda_fuser", &RegisterCudaFuseGraph::registerPass)
+      .def("_jit_clear_cuda_fuser", &RegisterCudaFuseGraph::clearPass)
       .def(
           "_jit_set_profiling_mode",
           [](bool profiling_flag) {
@@ -488,6 +501,11 @@ void initJITBindings(PyObject* module) {
       .def(
           "_jit_pass_insert_prepacked_ops",
           [](script::Module& module) { return insertPrePackedOps(module); })
+      .def(
+          "_jit_pass_fuse_clamp_w_prepacked_linear_conv",
+          [](script::Module& module) {
+            return fusePrePackedLinearConvWithClamp(module);
+          })
       .def(
           "_jit_pass_fold_prepacking_ops",
           [](script::Module& module) { return FoldPrePackingOps(module); })
