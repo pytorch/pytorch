@@ -13,6 +13,9 @@ from .sparse_adam import SparseAdam
 from .adamax import Adamax
 from .asgd import ASGD
 from .sgd import SGD
+from .sradam import SRAdam
+from .sradamw import SRAdamW
+from .srsgd import SRSGD
 from .rprop import Rprop
 from .rmsprop import RMSprop
 from .optimizer import Optimizer
@@ -27,6 +30,9 @@ del sparse_adam
 del adamax
 del asgd
 del sgd
+del sradam
+del sradamw
+del srsgd
 del rprop
 del rmsprop
 del optimizer

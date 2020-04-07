@@ -129,6 +129,12 @@ Algorithms
     :members:
 .. autoclass:: SGD
     :members:
+.. autoclass:: SRAdam
+    :members:
+.. autoclass:: SRAdamW
+    :members:
+.. autoclass:: SRSGD
+    :members:
 
 How to adjust learning rate
 ---------------------------

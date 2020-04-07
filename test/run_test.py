@@ -80,6 +80,7 @@ TESTS = [
     'test_determination',
     'distributed/rpc/jit/test_rpc_spawn',
     'distributed/rpc/faulty_agent/test_rpc_spawn',
+    'test_stochastic_rounding',
 ]
 
 WINDOWS_BLACKLIST = [

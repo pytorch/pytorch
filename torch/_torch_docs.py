@@ -7637,6 +7637,29 @@ Example::
             [100, 200]], dtype=torch.uint8)
 """)
 
+add_docstr(torch.stochastic_rounding,
+           r"""
+stochastic_rounding(input, generator=None) -> Tensor
+
+Rounds a tensor to half stochastically. If the dtype of :attr:`input` is Half,
+this is equivalent to noop. This function supports only CUDA tensor.
+For a floating-point number :attr:`x` and there are two close half values :attr:`y` and :attr:`z`.
+Then :attr:`x` is rounded to :attr:`y` (:attr:`z`) with the probability of
+:math:`\dfrac{| x - z |}{| y - z |}` (:math:`\dfrac{| x - y |}{| y - z |}`).
+
+See  `Deep learning with limited numerical precision`_ for further details.
+
+.. _Deep learning with limited numerical precision: https://dl.acm.org/doi/10.5555/3045118.3045303
+
+Args:
+    input (Tensor): float tensor to round stochastically
+    generator (Generator, optional): A torch.Generator object
+
+Returns:
+    Tensor: A stochastically rounded half tensor
+
+""")
+
 add_docstr(torch._C.Generator,
            r"""
 Generator(device='cpu') -> Generator

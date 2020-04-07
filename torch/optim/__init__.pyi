@@ -11,3 +11,6 @@ from .rmsprop import RMSprop as RMSprop
 from .rprop import Rprop as Rprop
 from .sgd import SGD as SGD
 from .sparse_adam import SparseAdam as SparseAdam
+from .sradam import SRAdam
+from .sradamw import SRAdamW
+from .srsgd import SRSGD
