@@ -182,6 +182,10 @@ def my_rref_function(rref_a, rref_b):
 def no_result():
     print("do nothing")
 
+def raise_or_inc(value):
+    if value.numel() == 2:
+        raise ValueError("Expected error")
+    return value + 1
 
 def nested_rpc(dst):
     return rpc.rpc_sync(dst, torch.add, args=(torch.ones(2, 2), 1))
@@ -1614,7 +1618,7 @@ class RpcTest(RpcAgentTestFixture):
             num_send_recv_threads=NUM_THREADS
         )
         rpc.init_rpc(
-            name="worker{}".format(self.rank),
+            name=worker_name(self.rank),
             backend=self.rpc_backend,
             rank=self.rank,
             world_size=self.world_size,
@@ -1810,7 +1814,7 @@ class RpcTest(RpcAgentTestFixture):
     def _create_rref(self):
         owner_rank = (self.rank + 2) % self.world_size
         return rpc.remote(
-            "worker{}".format(owner_rank),
+            worker_name(owner_rank),
             torch.add,
             args=(torch.zeros(2, 2), 1)
         )
@@ -1820,7 +1824,7 @@ class RpcTest(RpcAgentTestFixture):
         dst_rank = (self.rank + 1) % self.world_size
         rref = self._create_rref()
         ret = rpc.rpc_sync(
-            "worker{}".format(dst_rank),
+            worker_name(dst_rank),
             check_rref_confirmed,
             args=(rref,)
         )
@@ -1831,7 +1835,7 @@ class RpcTest(RpcAgentTestFixture):
         dst_rank = (self.rank + 1) % self.world_size
         rref = self._create_rref()
         ret_rref = rpc.remote(
-            "worker{}".format(dst_rank),
+            worker_name(dst_rank),
             check_rref_confirmed,
             args=(rref,)
         )
@@ -1844,6 +1848,14 @@ class RpcTest(RpcAgentTestFixture):
             with self.assertRaisesRegex(RuntimeError, "Can not pickle rref in python pickler"):
                 torch.save(local_rref, fname)
 
+    @dist_init
+    def test_remote_throw(self):
+        rref = rpc.remote(worker_name((self.rank + 1) % self.world_size),
+                          raise_or_inc,
+                          args=(torch.ones(2),))
+        with self.assertRaisesRegex(Exception, ".*Expected error.*"):
+            rref.to_here()
+
 @unittest.skipIf(
     not torch._six.PY3,
     "Pytorch distributed autograd package does not support python2",
@@ -1855,8 +1867,8 @@ class FaultyAgentRpcTest(FaultyRpcAgentTestFixture):
     @dist_init
     def test_check_failed_messages(self):
         if self.rank == 0:
-            dst_worker_b = "worker{}".format((self.rank + 1) % self.world_size)
-            dst_worker_c = "worker{}".format((self.rank + 2) % self.world_size)
+            dst_worker_b = worker_name((self.rank + 1) % self.world_size)
+            dst_worker_c = worker_name((self.rank + 2) % self.world_size)
 
             # Worker0 sends RPC to Worker1 and creates an RRef there
             rref = rpc.remote(dst_worker_b, torch.add, args=(torch.ones(2, 2), torch.ones(2, 2)))
