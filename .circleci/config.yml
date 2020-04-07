@@ -1910,146 +1910,6 @@ workflows:
               only: /.*/
             branches:
               only: /.*/
-      # Warning: indentation here matters!
-
-      - pytorch_windows_build:
-          name: pytorch_windows_vs2017_14.11_py36_cuda10.1_build
-          cuda_version: "10"
-          python_version: "3.6"
-          vc_version: "14.11"
-          vc_year: "2017"
-          vc_product: "BuildTools"
-          use_cuda: "1"
-          requires:
-            - setup
-          filters:
-            branches:
-              only:
-                - master
-                - /ci-all\/.*/
-                - /release\/.*/
-      - pytorch_windows_test:
-          name: pytorch_windows_vs2017_14.11_py36_cuda10.1_test1
-          test_name: pytorch-windows-test1
-          cuda_version: "10"
-          python_version: "3.6"
-          vc_version: "14.11"
-          vc_year: "2017"
-          vc_product: "BuildTools"
-          use_cuda: "1"
-          requires:
-            - setup
-            - pytorch_windows_vs2017_14.11_py36_cuda10.1_build
-          filters:
-            branches:
-              only:
-                - master
-                - /ci-all\/.*/
-                - /release\/.*/
-      - pytorch_windows_test:
-          name: pytorch_windows_vs2017_14.11_py36_cuda10.1_test2
-          test_name: pytorch-windows-test2
-          cuda_version: "10"
-          python_version: "3.6"
-          vc_version: "14.11"
-          vc_year: "2017"
-          vc_product: "BuildTools"
-          use_cuda: "1"
-          requires:
-            - setup
-            - pytorch_windows_vs2017_14.11_py36_cuda10.1_build
-          filters:
-            branches:
-              only:
-                - master
-                - /ci-all\/.*/
-                - /release\/.*/
-      - pytorch_windows_build:
-          name: pytorch_windows_vs2017_14.16_py36_cuda10.1_build
-          cuda_version: "10"
-          python_version: "3.6"
-          vc_version: "14.16"
-          vc_year: "2017"
-          vc_product: "BuildTools"
-          use_cuda: "1"
-          requires:
-            - setup
-          filters:
-            branches:
-              only:
-                - master
-                - /ci-all\/.*/
-                - /release\/.*/
-      - pytorch_windows_test:
-          name: pytorch_windows_vs2017_14.16_py36_cuda10.1_test1
-          test_name: pytorch-windows-test1
-          cuda_version: "10"
-          python_version: "3.6"
-          vc_version: "14.16"
-          vc_year: "2017"
-          vc_product: "BuildTools"
-          use_cuda: "1"
-          requires:
-            - setup
-            - pytorch_windows_vs2017_14.16_py36_cuda10.1_build
-          filters:
-            branches:
-              only:
-                - master
-                - /ci-all\/.*/
-                - /release\/.*/
-      - pytorch_windows_test:
-          name: pytorch_windows_vs2017_14.16_py36_cuda10.1_test2
-          test_name: pytorch-windows-test2
-          cuda_version: "10"
-          python_version: "3.6"
-          vc_version: "14.16"
-          vc_year: "2017"
-          vc_product: "BuildTools"
-          use_cuda: "1"
-          requires:
-            - setup
-            - pytorch_windows_vs2017_14.16_py36_cuda10.1_build
-          filters:
-            branches:
-              only:
-                - master
-                - /ci-all\/.*/
-                - /release\/.*/
-      - pytorch_windows_build:
-          name: pytorch_windows_vs2019_py36_cuda10.1_build
-          cuda_version: "10"
-          python_version: "3.6"
-          vc_version: ""
-          vc_year: "2019"
-          vc_product: "Community"
-          use_cuda: "1"
-          requires:
-            - setup
-      - pytorch_windows_test:
-          name: pytorch_windows_vs2019_py36_cuda10.1_test1
-          test_name: pytorch-windows-test1
-          cuda_version: "10"
-          python_version: "3.6"
-          vc_version: ""
-          vc_year: "2019"
-          vc_product: "Community"
-          use_cuda: "1"
-          requires:
-            - setup
-            - pytorch_windows_vs2019_py36_cuda10.1_build
-      - pytorch_windows_test:
-          name: pytorch_windows_vs2019_py36_cuda10.1_test2
-          test_name: pytorch-windows-test2
-          cuda_version: "10"
-          python_version: "3.6"
-          vc_version: ""
-          vc_year: "2019"
-          vc_product: "Community"
-          use_cuda: "1"
-          requires:
-            - setup
-            - pytorch_windows_vs2019_py36_cuda10.1_build
       - binary_linux_build:
           name: binary_linux_manywheel_3_6m_cpu_devtoolset7_nightly_build
           build_environment: "manywheel 3.6m cpu devtoolset7"
@@ -2857,16 +2717,16 @@ workflows:
           build_environment: "wheel 3.7 cpu"
           requires:
             - setup
-          filters:
-            branches:
-              only: nightly
-            tags:
-              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
       - binary_windows_build:
           name: binary_windows_wheel_3_8_cpu_nightly_build
           build_environment: "wheel 3.8 cpu"
           requires:
             - setup
+          filters:
+            branches:
+              only: nightly
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
       - binary_windows_build:
           name: binary_windows_wheel_3_5_cu92_nightly_build
           build_environment: "wheel 3.5 cu92"
@@ -2972,16 +2832,16 @@ workflows:
           build_environment: "wheel 3.7 cu102"
           requires:
             - setup
-          filters:
-            branches:
-              only: nightly
-            tags:
-              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
       - binary_windows_build:
           name: binary_windows_wheel_3_8_cu102_nightly_build
           build_environment: "wheel 3.8 cu102"
           requires:
             - setup
+          filters:
+            branches:
+              only: nightly
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
       - binary_windows_build:
           name: binary_windows_conda_3_5_cpu_nightly_build
           build_environment: "conda 3.5 cpu"
@@ -3007,16 +2867,16 @@ workflows:
           build_environment: "conda 3.7 cpu"
           requires:
             - setup
-          filters:
-            branches:
-              only: nightly
-            tags:
-              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
       - binary_windows_build:
           name: binary_windows_conda_3_8_cpu_nightly_build
           build_environment: "conda 3.8 cpu"
           requires:
             - setup
+          filters:
+            branches:
+              only: nightly
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
       - binary_windows_build:
           name: binary_windows_conda_3_5_cu92_nightly_build
           build_environment: "conda 3.5 cu92"
@@ -3122,26 +2982,21 @@ workflows:
           build_environment: "conda 3.7 cu102"
           requires:
             - setup
-          filters:
-            branches:
-              only: nightly
-            tags:
-              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
       - binary_windows_build:
           name: binary_windows_conda_3_8_cu102_nightly_build
           build_environment: "conda 3.8 cu102"
           requires:
             - setup
-      - binary_windows_build:
-          name: binary_windows_libtorch_3_7_cpu_nightly_build
-          build_environment: "libtorch 3.7 cpu"
-          requires:
-            - setup
           filters:
             branches:
               only: nightly
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+      - binary_windows_build:
+          name: binary_windows_libtorch_3_7_cpu_nightly_build
+          build_environment: "libtorch 3.7 cpu"
+          requires:
+            - setup
       - binary_windows_build:
           name: binary_windows_libtorch_3_7_cu92_nightly_build
           build_environment: "libtorch 3.7 cu92"
@@ -3167,8 +3022,3 @@ workflows:
           build_environment: "libtorch 3.7 cu102"
           requires:
             - setup
-          filters:
-            branches:
-              only: nightly
-            tags:
-              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/

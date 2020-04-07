@@ -67,7 +67,7 @@ class Conf(object):
             job_def["requires"].append("update_s3_htmls_for_nightlies_devtoolset7")
             job_def["filters"] = {"branches": {"only": "postnightly"}}
         else:
-            if not (self.os == "windows" and self.cuda_version in [None, "102"] and self.parms[0] == '3.8'):
+            if not (self.os == "windows" and self.cuda_version in [None, "102"] and self.parms[0] == '3.7'):
                 job_def["filters"] = {
                     "branches": {
                         "only": "nightly"

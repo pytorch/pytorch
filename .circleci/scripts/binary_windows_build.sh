@@ -1,8 +1,8 @@
 #!/bin/bash
 set -eux -o pipefail
 
-git clone https://github.com/peterjc123/builder.git -b circleci_scripts_windows
-cd builder
+git clone https://github.com/peterjc123/builder.git -b circleci_scripts_windows "/c/b"
+cd "/c/b"
 
 configs=($BUILD_ENVIRONMENT)
 export PACKAGE_TYPE="${configs[0]}"
