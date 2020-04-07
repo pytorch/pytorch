@@ -171,7 +171,7 @@ template<typename scalar_t>
 void launch_prelu_cuda_backward_share_weights_kernel(TensorIterator &iter, const scalar_t* weight_data) {
   if (!iter.can_use_32bit_indexing()) {
     for (auto& sub_iter : iter.with_32bit_indexing()) {
-      launch_prelu_cuda_backward_share_weights_kernel(iter, weight_data);
+      launch_prelu_cuda_backward_share_weights_kernel(sub_iter, weight_data);
     }
     return;
   }
@@ -180,6 +180,8 @@ void launch_prelu_cuda_backward_share_weights_kernel(TensorIterator &iter, const
   if (numel == 0) {
     return;
   }
+  
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(iter.can_use_32bit_indexing());
 
   scalar_t *input_grad_data = static_cast<scalar_t *>(iter.data_ptr(0));
   scalar_t *weight_grad_collector_data = static_cast<scalar_t *>(iter.data_ptr(1));
