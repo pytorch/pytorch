@@ -9067,7 +9067,7 @@ class TestNNDeviceType(NNTestCase):
     @largeCUDATensorTest('10GB')
     def test_prelu_backward_large_discontiguous(self, device):
         m = torch.nn.PReLU().cuda().half()
-        input_ = torch.randn(1024, 1024, 1024, 2, dtype=torch.half, device=device)
+        input_ = torch.ones((), dtype=torch.half, device=device).expand(1024, 1024, 1024, 2)
         output = m(input_)
         output.backward(torch.ones((), device=device).expand_as(output))
 
