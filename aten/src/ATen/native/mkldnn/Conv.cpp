@@ -6,28 +6,28 @@
 
 namespace at { namespace native {
 
-at::Tensor mkldnn_convolution(
-    const at::Tensor& input, const at::Tensor& weight, const at::Tensor& bias,
+Tensor mkldnn_convolution(
+    const Tensor& input, const Tensor& weight, const Tensor& bias,
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups) {
-  AT_ERROR("mkldnn_convolution_forward: ATen not compiled with MKLDNN support");
+  TORCH_CHECK(false, "mkldnn_convolution_forward: ATen not compiled with MKLDNN support");
 }
 
 at::Tensor mkldnn_convolution_backward_input(
-    IntArrayRef input_size, const at::Tensor& grad_output, const at::Tensor& weight,
+    IntArrayRef input_size, const Tensor& grad_output, const Tensor& weight,
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups, bool bias_defined) {
-  AT_ERROR("mkldnn_convolution_backward_input: ATen not compiled with MKLDNN support");
+  TORCH_CHECK(false, "mkldnn_convolution_backward_input: ATen not compiled with MKLDNN support");
 }
 
-std::tuple<at::Tensor,at::Tensor> mkldnn_convolution_backward_weights(
-    IntArrayRef weight_size, const at::Tensor& grad_output, const at::Tensor& input,
+std::tuple<Tensor, Tensor> mkldnn_convolution_backward_weights(
+    const Tensor& weight, const Tensor& grad_output, const Tensor& input,
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups, bool bias_defined) {
-  AT_ERROR("mkldnn_convolution_backward_weights: ATen not compiled with MKLDNN support");
+  TORCH_CHECK(false, "mkldnn_convolution_backward_weights: ATen not compiled with MKLDNN support");
 }
 
-std::tuple<at::Tensor,at::Tensor,at::Tensor> mkldnn_convolution_backward(
-    const at::Tensor& input, const at::Tensor& grad_output_t, const at::Tensor& weight,
+std::tuple<Tensor, Tensor, Tensor> mkldnn_convolution_backward(
+    const Tensor& input, const Tensor& grad_output_t, const Tensor& weight,
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups, std::array<bool,3> output_mask) {
-  AT_ERROR("mkldnn_convolution_backward: ATen not compiled with MKLDNN support");
+  TORCH_CHECK(false, "mkldnn_convolution_backward: ATen not compiled with MKLDNN support");
 }
 
 }}
@@ -37,21 +37,6 @@ std::tuple<at::Tensor,at::Tensor,at::Tensor> mkldnn_convolution_backward(
 #include <ATen/native/mkldnn/MKLDNNCommon.h>
 #include <ATen/native/mkldnn/Utils.h>
 #include <ATen/native/ConvUtils.h>
-
-namespace {
-// Helper function for getting an ideep tensor out of an aten Tensor.
-// Note in case the aten Tensor is a dense tensor, the returned ideep
-// tensor is just a view of the storage of the aten dense tensor, so
-// caller needs to make sure the aten dense tensor's lifetime is
-// longer than the ideep tensor.
-inline ideep::tensor get_mkldnn_tensor(const at::Tensor& tensor) {
-  if (tensor.is_mkldnn()) {
-    return at::native::itensor_from_mkldnn(tensor);
-  } else {
-    return at::native::itensor_view_from_dense(tensor);
-  }
-}
-}
 
 namespace at { namespace native {
 
@@ -98,19 +83,19 @@ ideep::tensor _mkldnn_conv2d(
   return y;
 }
 
-at::Tensor mkldnn_convolution(
-    const at::Tensor& input,
-    const at::Tensor& weight,
-    const at::Tensor& bias,
+Tensor mkldnn_convolution(
+    const Tensor& input,
+    const Tensor& weight,
+    const Tensor& bias,
     IntArrayRef padding,
     IntArrayRef stride,
     IntArrayRef dilation,
     int64_t groups) {
-  const ideep::tensor mkldnn_input = get_mkldnn_tensor(input);
-  const ideep::tensor mkldnn_weight = get_mkldnn_tensor(weight);
+  const ideep::tensor mkldnn_input = itensor_from_tensor(input);
+  const ideep::tensor mkldnn_weight = itensor_from_tensor(weight);
   c10::optional<ideep::tensor> mkldnn_bias{c10::nullopt};
   if (bias.defined()) {
-    mkldnn_bias = get_mkldnn_tensor(bias);
+    mkldnn_bias = itensor_from_tensor(bias);
   }
 
   ideep::tensor mkldnn_output = _mkldnn_conv2d(
@@ -131,11 +116,13 @@ at::Tensor mkldnn_convolution(
 }
 
 Tensor mkldnn_convolution_backward_input(
-    IntArrayRef input_size, const at::Tensor& grad_output, const at::Tensor& weight,
+    IntArrayRef input_size, const Tensor& grad_output, const Tensor& weight,
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups, bool bias_defined)
 {
-  auto mkldnn_grad_output = get_mkldnn_tensor(grad_output);
-  auto mkldnn_weight = get_mkldnn_tensor(weight);
+  // for training case, grad_output can be cpu tensor or MKLDNN tensor,
+  // but weight and bias always cpu tensor
+  auto mkldnn_grad_output = itensor_from_tensor(grad_output);
+  auto mkldnn_weight = itensor_view_from_dense(weight);
 
   ideep::tensor mkldnn_grad_input;
   ideep::convolution_backward_data::compute(
@@ -148,19 +135,26 @@ Tensor mkldnn_convolution_backward_input(
       padding.vec(),
       padding.vec(),
       groups);
-
-  return mkldnn_to_dense(new_with_itensor_mkldnn(std::move(mkldnn_grad_input),
-                                                 grad_output.options()));
+  if (grad_output.is_mkldnn()) {
+    return new_with_itensor_mkldnn(std::move(mkldnn_grad_input), grad_output.options());
+  } else {
+    return mkldnn_to_dense(new_with_itensor_mkldnn(std::move(mkldnn_grad_input), grad_output.options()));
+  }
 }
 
-std::tuple<at::Tensor, at::Tensor> mkldnn_convolution_backward_weights(
-    IntArrayRef weight_size, const at::Tensor& grad_output, const at::Tensor& input,
+std::tuple<Tensor, Tensor> mkldnn_convolution_backward_weights(
+    const Tensor& weight, const Tensor& grad_output, const Tensor& input,
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups, bool bias_defined)
 {
-  const ideep::tensor mkldnn_grad_output = get_mkldnn_tensor(grad_output);
-  const ideep::tensor mkldnn_input = get_mkldnn_tensor(input);
+  // for training case, grad_output and input can be cpu tensor or MKLDNN tensor,
+  // but weight and bias always cpu tensor
+  const ideep::tensor mkldnn_grad_output = itensor_from_tensor(grad_output);
+  const ideep::tensor mkldnn_input = itensor_from_tensor(input);
 
   ideep::tensor mkldnn_grad_weight, mkldnn_grad_bias;
+  auto diff_weight_type = get_mkldnn_dtype(weight.scalar_type());
+  auto weight_size = weight.sizes();
+
   if (bias_defined) {
     ideep::convolution_backward_weights::compute(
         mkldnn_input,
@@ -172,7 +166,8 @@ std::tuple<at::Tensor, at::Tensor> mkldnn_convolution_backward_weights(
         dilation.vec(),
         padding.vec(),
         padding.vec(),
-        groups);
+        groups,
+        diff_weight_type);
   } else {
     ideep::convolution_backward_weights::compute(
         mkldnn_input,
@@ -183,22 +178,22 @@ std::tuple<at::Tensor, at::Tensor> mkldnn_convolution_backward_weights(
         dilation.vec(),
         padding.vec(),
         padding.vec(),
-        groups);
+        groups,
+        diff_weight_type);
   }
 
   return std::make_tuple(
       mkldnn_to_dense(new_with_itensor_mkldnn(std::move(mkldnn_grad_weight),
-                                              grad_output.options())),
+                                              weight.options())),
       mkldnn_to_dense(new_with_itensor_mkldnn(std::move(mkldnn_grad_bias),
-                                              grad_output.options())));
+                                              weight.options())));
 }
 
 std::tuple<at::Tensor,at::Tensor,at::Tensor> mkldnn_convolution_backward(
-    const at::Tensor& input, const at::Tensor& grad_output_t, const at::Tensor& weight,
+    const Tensor& input, const Tensor& grad_output_t, const Tensor& weight,
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups, std::array<bool,3> output_mask)
 {
-  Tensor grad_output = grad_output_t.contiguous();
-
+  Tensor grad_output = grad_output_t.is_mkldnn() ? grad_output_t : grad_output_t.contiguous();
   Tensor grad_input, grad_weight, grad_bias;
   if (output_mask[0]) {
     grad_input = at::mkldnn_convolution_backward_input(
@@ -206,7 +201,7 @@ std::tuple<at::Tensor,at::Tensor,at::Tensor> mkldnn_convolution_backward(
   }
   if (output_mask[1] || output_mask[2]) {
     std::tie(grad_weight, grad_bias) = at::mkldnn_convolution_backward_weights(
-      weight.sizes(), grad_output, input, padding, stride, dilation, groups, output_mask[2]);
+      weight, grad_output, input, padding, stride, dilation, groups, output_mask[2]);
   }
 
   return std::make_tuple(grad_input, grad_weight, grad_bias);
