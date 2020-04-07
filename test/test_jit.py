@@ -5620,6 +5620,32 @@ def foo(x):
         with self.assertRaisesRegex(Exception, "backward hooks assigned"):
             torch.jit.trace(n, (torch.tensor(1.0),))
 
+    def test_scripting_forward_hooks(self):
+        class Net(nn.Module):
+            def __init__(self):
+                super(Net, self).__init__()
+
+            def forward(self, x):
+                return x + x
+
+        def forward_pre_hook(self, inputs):
+            return (inputs[0] + 10,)
+
+        def forward_hook(self, inputs, outputs):
+            return outputs + 30
+
+        n = Net()
+        n.register_forward_pre_hook(forward_pre_hook)
+        scripted_n = torch.jit.script(n)
+
+        m = Net()
+        m.register_forward_hook(forward_hook)
+        scripted_m = torch.jit.script(m)
+
+        t = torch.tensor([3, 4, 5])
+        self.assertEqual(n(t), scripted_n(t))
+        self.assertEqual(m(t), scripted_m(t))
+
     def test_python_op_builtins(self):
         @torch.jit.unused
         def fn(x):

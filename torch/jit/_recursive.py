@@ -394,6 +394,16 @@ def create_script_module_impl(nn_module, concrete_type, stubs_fn):
         if _jit_internal.get_torchscript_modifier(item) is _jit_internal.FunctionModifiers.COPY_TO_SCRIPT_WRAPPER:
             add_python_attr_to_scripted_model(script_module, nn_module, name)
 
+    # Set up hooks for eager mode
+    for idx, fn in nn_module._forward_pre_hooks.items():
+        script_module._forward_pre_hooks[idx] = fn
+
+    for idx, fn in nn_module._forward_hooks.items():
+        script_module._forward_hooks[idx] = fn
+
+    for idx, fn in nn_module._backward_hooks.items():
+        script_module._backward_hooks[idx] = fn
+
     return script_module
 
 
