@@ -198,6 +198,13 @@ MAYBE_GLOBAL void test_complex_literals() {
   static_assert(std::is_same<decltype(0.5_id), c10::complex<double>>::value, "");
   static_assert((0.5_id).real() == float(), "");
   static_assert((0.5_id).imag() == float(0.5), "");
+
+  static_assert(std::is_same<decltype(1_if), c10::complex<float>>::value, "");
+  static_assert((1_if).real() == float(), "");
+  static_assert((1_if).imag() == float(1), "");
+  static_assert(std::is_same<decltype(1_id), c10::complex<double>>::value, "");
+  static_assert((1_id).real() == double(), "");
+  static_assert((1_id).imag() == double(1), "");
 }
 
 } // namespace literals

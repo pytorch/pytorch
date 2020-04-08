@@ -280,6 +280,14 @@ constexpr complex<double> operator"" _id(long double imag) {
   return complex<double>(double(), static_cast<double>(imag));
 }
 
+constexpr complex<float> operator"" _if(unsigned long long imag) {
+  return complex<float>(float(), static_cast<float>(imag));
+}
+
+constexpr complex<double> operator"" _id(unsigned long long imag) {
+  return complex<double>(double(), static_cast<double>(imag));
+}
+
 } // namespace complex_literals
 
 } // namespace c10
