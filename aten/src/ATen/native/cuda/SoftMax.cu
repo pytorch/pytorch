@@ -143,7 +143,17 @@ void SpatialSoftMax_getLaunchSizes(
 inline dim3 SoftMax_getBlockSize(int ILP, uint64_t dim_size) {
   uint64_t block_size = 1;
   uint64_t max_block_size = std::min(dim_size / ILP, static_cast<uint64_t>(max_threads));
-  while (block_size < (max_block_size/2)) block_size *= 2;
+
+  // In the vectorized case we want to trade off allowing more of the buffers to be accessed
+  // in a vectorized way against wanting a larger block size to get better utilisation.
+  // In general with ILP you can have (ILP-1)/ILP of the buffer accessed vectorised, at the risk
+  // of having a very small block size. We choose to keep >= 1/2 of the buffer vectorised while
+  // allowing a larger block size.
+  if (ILP > 1) {
+    max_block_size /= 2;
+  }
+
+  while (block_size < (max_block_size)) block_size *= 2;
   // Launch at least a single warp - the kernel assumes that.
   block_size = std::max(block_size, static_cast<uint64_t>(C10_WARP_SIZE));
   return dim3(block_size);
@@ -381,7 +391,7 @@ ilpReduce(int shift,
           const Reduction<T, AccumT>& r,
           AccumT defaultVal)
 {
-  typedef typename std::aligned_storage<ILP*sizeof(T), ILP*alignof(T)>::type LoadT;
+  using LoadT = at::native::memory::aligned_vector<T, ILP>;
   AccumT threadVal = defaultVal;
   int offset = threadIdx.x;
 
@@ -403,6 +413,7 @@ ilpReduce(int shift,
   for (; offset * ILP < (size - last); offset += blockDim.x) {
     *value = reinterpret_cast<LoadT*>(data)[offset];
 
+    #pragma unroll
     for (int j = 0; j < ILP; ++j) {
       threadVal = r(threadVal, v[j]);
     }
@@ -483,7 +494,7 @@ cunn_SoftMaxBackward(scalar_t *gradInput, outscalar_t *output, outscalar_t *grad
   output += blockIdx.x * classes;
   gradOutput += blockIdx.x * classes;
 
-	const int shift = ((uint64_t)gradInput) % ALIGN_BYTES / sizeof(scalar_t);
+  const int shift = ((uint64_t)gradInput) % ALIGN_BYTES / sizeof(scalar_t);
 
   accscalar_t threadSum = ilpReduce<AddFloat, 4, outscalar_t, accscalar_t>(
       shift, gradOutput, classes, AddFloat<outscalar_t, accscalar_t>(), accscalar_t(0));
@@ -541,9 +552,7 @@ Tensor host_softmax(const Tensor & input_, const int64_t dim_, const bool half_t
     // XXX: it assumes that inner_size == 1
 
     if (inner_size == 1) {
-      const int ILP = 4;
       dim3 grid(outer_size);
-      dim3 block = SoftMax_getBlockSize(ILP, dim_size);
       AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, input.scalar_type(), "host_softmax", [&] {
       AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "host_softmax", [&] {
       using accscalar_t = acc_type<scalar_t, true>;
@@ -552,6 +561,8 @@ Tensor host_softmax(const Tensor & input_, const int64_t dim_, const bool half_t
           dispatch_softmax_forward<scalar_t, scalar_t, accscalar_t, is_log_softmax>(
               output.data_ptr<scalar_t>(), input.data_ptr<scalar_t>(), dim_size, dim_size, outer_size);
         } else {
+          const int ILP = sizeof(float4) / sizeof(scalar_t);
+          dim3 block = SoftMax_getBlockSize(ILP, dim_size);
           cunn_SoftMaxForward<ILP, scalar_t, accscalar_t, scalar_t, Epilogue>
             <<<grid, block, block.x * sizeof(accscalar_t), stream>>>(
               output.data_ptr<scalar_t>(), input.data_ptr<scalar_t>(), dim_size
@@ -562,6 +573,8 @@ Tensor host_softmax(const Tensor & input_, const int64_t dim_, const bool half_t
           dispatch_softmax_forward<scalar_t, accscalar_t, accscalar_t, is_log_softmax>(
               output.data_ptr<accscalar_t>(), input.data_ptr<scalar_t>(), dim_size, dim_size, outer_size);
         } else {
+          const int ILP = sizeof(float4) / std::max(sizeof(scalar_t), sizeof(accscalar_t));
+          dim3 block = SoftMax_getBlockSize(ILP, dim_size);
           cunn_SoftMaxForward<ILP, scalar_t, accscalar_t, accscalar_t, Epilogue>
             <<<grid, block, block.x * sizeof(accscalar_t), stream>>>(
               output.data_ptr<accscalar_t>(), input.data_ptr<scalar_t>(), dim_size
@@ -629,9 +642,7 @@ Tensor host_softmax_backward(const Tensor &grad_, const Tensor &output_, int64_t
 // See descriptions of kernels above.
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
   if (inner_size == 1) {
-    const int ILP = 4;
     dim3 grid(outer_size);
-    dim3 block = SoftMax_getBlockSize(ILP, dim_size);
     AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, gI.scalar_type(), "host_softmax_backward", [&] {
     AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "host_softmax_backward", [&] {
     using accscalar_t = acc_type<scalar_t, true>;
@@ -640,6 +651,8 @@ Tensor host_softmax_backward(const Tensor &grad_, const Tensor &output_, int64_t
         dispatch_softmax_backward<scalar_t, scalar_t, accscalar_t, is_log_softmax>(
             gI.data_ptr<scalar_t>(), grad.data_ptr<scalar_t>(), output.data_ptr<scalar_t>(), dim_size, dim_size, outer_size);
       } else {
+        const int ILP = sizeof(float4) / sizeof(scalar_t);
+        dim3 block = SoftMax_getBlockSize(ILP, dim_size);
         cunn_SoftMaxBackward<ILP, scalar_t, accscalar_t, scalar_t, Epilogue>
          <<<grid, block, block.x * sizeof(accscalar_t), stream>>>(
             gI.data_ptr<scalar_t>(), output.data_ptr<scalar_t>(), grad.data_ptr<scalar_t>(), dim_size
@@ -650,6 +663,8 @@ Tensor host_softmax_backward(const Tensor &grad_, const Tensor &output_, int64_t
         dispatch_softmax_backward<accscalar_t, scalar_t, accscalar_t, is_log_softmax>(
             gI.data_ptr<scalar_t>(), grad.data_ptr<accscalar_t>(), output.data_ptr<accscalar_t>(), dim_size, dim_size, outer_size);
       } else {
+        const int ILP = sizeof(float4) / std::max(sizeof(scalar_t), sizeof(accscalar_t));
+        dim3 block = SoftMax_getBlockSize(ILP, dim_size);
         cunn_SoftMaxBackward<ILP, scalar_t, accscalar_t, accscalar_t, Epilogue>
          <<<grid, block, block.x * sizeof(accscalar_t), stream>>>(
             gI.data_ptr<scalar_t>(), output.data_ptr<accscalar_t>(), grad.data_ptr<accscalar_t>(), dim_size
