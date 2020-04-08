@@ -35,7 +35,9 @@ void RpcAgent::start() {
 }
 
 void RpcAgent::shutdown() {
+  std::unique_lock<std::mutex> lock(rpcRetryMutex_);
   rpcAgentRunning_.store(false);
+  lock.unlock();
   rpcRetryMapCV_.notify_one();
   if (rpcRetryThread_.joinable()) {
     rpcRetryThread_.join();
