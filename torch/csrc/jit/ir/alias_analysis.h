@@ -4,8 +4,8 @@
 #include <c10/util/flat_hash_map.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/ir/type_hashing.h>
-#include <torch/csrc/jit/passes/utils/memory_dag.h>
 #include <torch/csrc/jit/passes/create_functional_graphs.h>
+#include <torch/csrc/jit/passes/utils/memory_dag.h>
 
 namespace torch {
 namespace jit {
@@ -192,11 +192,11 @@ class AliasDb {
   Element* getOrCreateElement(const Value* value);
 
   // In the Value * -> Element * map replaces the mapping
-  // of Value * existing -> Element * existing_elem with 
+  // of Value * existing -> Element * existing_elem with
   // Value * new_value -> Element * existing_elem
   // Callers are expected to maintain graph invariants & specify
   // own correctness conditions
-  void replaceMemoryLocation(Value * existing, Value* new_value);
+  void replaceMemoryLocation(Value* existing, Value* new_value);
 
   c10::optional<TypePtr> getMutableTypePtr(const TypePtr& type) const;
 

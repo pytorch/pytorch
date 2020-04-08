@@ -992,7 +992,7 @@ Element* AliasDb::getOrCreateElement(const Value* value) {
   return elementMap_.at(value);
 }
 
-void AliasDb::replaceMemoryLocation(Value * existing, Value* new_value) {
+void AliasDb::replaceMemoryLocation(Value* existing, Value* new_value) {
   if (!isMutableTypeInternal(existing)) {
     return;
   }

@@ -396,8 +396,6 @@ struct MutationRemover {
   std::shared_ptr<Graph> graph_;
 };
 
-
-
 void CreateFunctionalGraphs(const std::shared_ptr<Graph>& graph) {
   // Run Constant Pooling so constants get hoisted
   ConstantPooling(graph);
