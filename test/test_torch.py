@@ -4651,8 +4651,12 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         self.assertRaises(RuntimeError, lambda: torch.randn(2, 3, 4).t_())
 
     def test_new_different_device(self):
-        # TODO: check which of those modules apply
-        modules = [ 'torch', 'torch.cuda', 'torch.sparse', 'torch.cuda.sparse' ]
+        modules1 = [ 'torch', 'torch.sparse' ]
+        modules2 = [ 'torch' ]
+        if torch.cuda.is_available:
+            modules1.append('torch.cuda')
+            modules1.append('torch.cuda.sparse')
+            modules2.append('torch.cuda')
         types = [
             'ByteTensor',
             'CharTensor',
@@ -4662,14 +4666,13 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             'DoubleTensor',
             'LongTensor',
         ]
-        for m1 in modules:
-            for m2 in modules:
+        for m1 in modules1:
+            for m2 in modules2:
                 for t in types:
                     TensorType1 = eval(m1 + "." + t)
                     TensorType2 = eval(m2 + "." + t)
                     tensor1 = TensorType1((1,))
                     tensor2 = TensorType2(tensor1)
-
 
     # unit test for special case transposed copy (see ATen/native/Copy.cpp for details)
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
