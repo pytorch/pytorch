@@ -23,6 +23,7 @@ PY36 = sys.version_info >= (3, 6)
 
 TESTS = [
     'test_autograd',
+    'test_bundled_inputs',
     'test_complex',
     'test_cpp_api_parity',
     'test_cpp_extensions_aot_no_ninja',
@@ -59,6 +60,7 @@ TESTS = [
     'quantization/test_quantize_script',
     'test_sparse',
     'test_serialization',
+    'test_show_pickle',
     'test_torch',
     'test_type_info',
     'test_type_hints',
@@ -125,6 +127,7 @@ ROCM_BLACKLIST = [
     'test_jit_simple',
     'test_jit_legacy',
     'test_jit_fuser_legacy',
+    'test_tensorexpr',
 ]
 
 # These tests are slow enough that it's worth calculating whether the patch
