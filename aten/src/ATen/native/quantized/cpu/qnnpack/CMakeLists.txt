@@ -143,6 +143,7 @@ set(PYTORCH_QNNPACK_INIT_SRCS
   src/fc-prepack.cc
   src/fully-connected.c
   src/global-average-pooling.c
+  src/hardswish.c
   src/leaky-relu.c
   src/max-pooling.c
   src/sigmoid.c
@@ -461,6 +462,15 @@ if(PYTORCH_QNNPACK_BUILD_TESTS)
   target_link_libraries(tanh-test PRIVATE pytorch_qnnpack cpuinfo gtest gtest_main)
   add_test(tanh-test tanh-test)
 
+  add_executable(hardswish-test test/hardswish.cc)
+  set_target_properties(hardswish-test PROPERTIES
+    CXX_STANDARD 14
+    CXX_STANDARD_REQUIRED YES
+    CXX_EXTENSIONS NO)
+  target_include_directories(hardswish-test PRIVATE src test)
+  target_link_libraries(hardswish-test PRIVATE pytorch_qnnpack cpuinfo gtest gtest_main)
+  add_test(hardswish-test hardswish-test)
+
   add_executable(max-pooling-test test/max-pooling.cc)
   set_target_properties(max-pooling-test PROPERTIES
     CXX_STANDARD 14
@@ -688,6 +698,13 @@ if(PYTORCH_QNNPACK_BUILD_BENCHMARKS)
     CXX_STANDARD_REQUIRED YES
     CXX_EXTENSIONS NO)
   target_link_libraries(tanh-bench PRIVATE pytorch_qnnpack benchmark)
+
+  add_executable(hardswish-bench bench/hardswish.cc)
+  set_target_properties(hardswish-bench PROPERTIES
+    CXX_STANDARD 14
+    CXX_STANDARD_REQUIRED YES
+    CXX_EXTENSIONS NO)
+  target_link_libraries(hardswish-bench PRIVATE pytorch_qnnpack benchmark)
 
   add_executable(q8gemm-bench bench/q8gemm.cc)
   set_target_properties(q8gemm-bench PROPERTIES
