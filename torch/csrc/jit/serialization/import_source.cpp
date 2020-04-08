@@ -306,17 +306,17 @@ struct SourceImporterImpl : public Resolver,
                 const auto fwd_hook_list =
                     ListLiteral(assign.rhs().get()).inputs();
                 for (const auto& hook_item : fwd_hook_list) {
-                  forward_hook_names.insert(QualifiedName(Var(hook_item).name().name()));
+                  forward_hook_names.insert(
+                      QualifiedName(Var(hook_item).name().name()));
                 }
-              }
-              else if (name == "__forward_pre_hooks__") {
+              } else if (name == "__forward_pre_hooks__") {
                 const auto fwd_pre_hook_list =
                     ListLiteral(assign.rhs().get()).inputs();
                 for (const auto& hook_item : fwd_pre_hook_list) {
-                  forward_pre_hook_names.insert(QualifiedName(Var(hook_item).name().name()));
+                  forward_pre_hook_names.insert(
+                      QualifiedName(Var(hook_item).name().name()));
                 }
-              }
-              else if (name == "__parameters__") {
+              } else if (name == "__parameters__") {
                 // Populate the module parameter list. This is a field that
                 // looks like:
                 //   __parameters__ = ["foo", "bar", "baz"]
@@ -376,11 +376,11 @@ struct SourceImporterImpl : public Resolver,
       }
     }
 
-    for (auto item : forward_hook_names) {
+    for (const auto& item : forward_hook_names) {
       cu_->add_forward_hook(item);
     }
 
-    for (auto item : forward_pre_hook_names) {
+    for (const auto& item : forward_pre_hook_names) {
       cu_->add_forward_pre_hook(item);
     }
 
