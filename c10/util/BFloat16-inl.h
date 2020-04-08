@@ -282,7 +282,7 @@ inline c10::BFloat16 tanh(c10::BFloat16 a) { return std::tanh(float(a));}
 inline c10::BFloat16 trunc(c10::BFloat16 a) { return std::trunc(float(a));}
 inline c10::BFloat16 lgamma(c10::BFloat16 a) { return std::lgamma(float(a));}
 inline c10::BFloat16 sqrt(c10::BFloat16 a) { return std::sqrt(float(a));}
-inline c10::BFloat16 rsqrt(c10::BFloat16 a) { return std::rsqrt(float(a));}
+inline c10::BFloat16 rsqrt(c10::BFloat16 a) { return 1.0 / std::sqrt(float(a));}
 inline c10::BFloat16 abs(c10::BFloat16 a) { return std::abs(float(a));}
 inline c10::BFloat16 min(c10::BFloat16 a, c10::BFloat16 b) { return std::min(float(a), float(b));}
 inline c10::BFloat16 max(c10::BFloat16 a, c10::BFloat16 b) { return std::max(float(a), float(b));}
