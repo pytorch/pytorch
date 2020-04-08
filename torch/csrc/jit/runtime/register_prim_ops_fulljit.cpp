@@ -69,8 +69,9 @@ RegisterOperators reg({
         prim::profile,
         [](const Node* node) -> Operation {
           auto callback = node->cast<ProfileOp>()->getCallback();
-          return [callback](Stack& stack) {
-            callback(stack);
+          return [](Stack& stack) {
+            AT_ERROR(
+                "Must be lowered to Interpreter's PROFILE instruction"); // NOLINT
             return 0;
           };
         },
