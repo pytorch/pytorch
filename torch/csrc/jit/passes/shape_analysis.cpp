@@ -1835,14 +1835,16 @@ class ShapePropagator {
       // These nodes handle tensors of different shapes internally, so there's
       // no need to insert explicit expand nodes.
       return PropagateShapeOnNodeByRunningIt(node);
-    } else if (node->matches("aten::div(Tensor self, Tensor other) -> Tensor")) {
+    } else if (node->matches(
+                   "aten::div(Tensor self, Tensor other) -> Tensor")) {
       // "div" handle tensors of different shapes internally, so there's no need
       // to insert explicit expand nodes.
       // Note that this function could be merged to the one above , but "div" is
       // not always safe to run by itself due to integer divide-by-zero.
       // We fake the execution by running "mul" operation instead.
       auto op = getOperatorForLiteral(
-          "aten::mul(Tensor self, Tensor other) -> Tensor")->getOperation();
+                    "aten::mul(Tensor self, Tensor other) -> Tensor")
+                    ->getOperation();
       return PropagateShapeOnNodeByRunningIt(node, op);
     } else if (node->matches(
                    "aten::pow(Tensor self, Scalar exponent) -> Tensor")) {
