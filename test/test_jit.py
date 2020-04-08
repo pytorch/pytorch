@@ -5089,7 +5089,7 @@ def foo(x):
         with self.capture_stdout():
             traced = torch.jit.trace(fn, [torch.ones(2, 2)])
 
-        FileCheck().check("goodbye").check("hello").run(traced.graph)
+        FileCheck().check("goodbye").run(traced.graph)
 
     def test_big_int_literals(self):
         def ok():
@@ -11022,6 +11022,12 @@ a")
             self.checkModule(M(), (inp, name))
             self.checkModule(M2(), (inp, name))
 
+    def test_list_keyword(self):
+        def foo():
+            return list([1, 2, 3]), list(("a", "b")), list(range(5)), list("abcdefg")  # noqa: C410
+
+        self.checkScript(foo, ())
+
     def test_custom_container_forward(self):
         class Inner(torch.nn.Module):
             def forward(self, x):
@@ -11359,6 +11365,18 @@ a")
 
         imported = self.getExportImportCopy(traced)
         check(imported)
+
+    def test_inlining_cleanup(self):
+        def foo(x):
+            return F.linear(x, x)
+
+        @torch.jit.script
+        def fee(x):
+            return foo(x)
+
+        # inlining optimizations should have cleaned up linear if statement
+        self.run_pass("inline", fee.graph)
+        FileCheck().check_not("prim::If").run(fee.graph)
 
     def test_trace_export_fns_recursive(self):
         class Foo(torch.nn.Module):
@@ -13980,6 +13998,15 @@ a")
 
         with self.assertRaisesRegex(Exception, "Expected list type annotation"):
             torch.jit.script(bad_type_annotation)
+
+    def test_list_comprehension_variable_write(self):
+        # i in comprehension doesn't write to function scope
+        def foo():
+            i = 1
+            x = [i if i != 5 else 3 for i in range(7)]  # noqa: C416
+            return i, x
+
+        self.assertEqual(foo(), torch.jit.script(foo)())
 
     def test_for_in_zip(self):
         def fn(x, y):
