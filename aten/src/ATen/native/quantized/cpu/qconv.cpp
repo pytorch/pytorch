@@ -8,6 +8,7 @@
 #include <ATen/core/op_registration/op_registration.h>
 #include <ATen/cpp_custom_type_hack.h>
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
+#include <ATen/native/quantized/cpu/qmkldnn_utils.h>
 #include <ATen/native/quantized/cpu/qnnpack_utils.h>
 #include <caffe2/utils/threadpool/ThreadPoolMobile.h>
 
@@ -179,7 +180,44 @@ class QConvInt8 final : public c10::OperatorKernel {
     auto& ctx = at::globalContext();
 
 #ifdef USE_FBGEMM
-    if (ctx.qEngine() == at::QEngine::FBGEMM) {
+#if AT_MKLDNN_ENABLED()
+    if (cpp_custom_type_hack::isa<PackedWeightQmkldnn>(packed_weight)) {
+      if (can_dispatch_to_mkldnn(act, output_zero_point, kReluFused)) {
+        return mkldnn_qconv2d(
+            act,
+            packed_weight,
+            stride,
+            padding,
+            dilation,
+            groups,
+            output_scale,
+            output_zero_point);
+        // We will fallback to FBGEMM if input don't meet mkldnn requirement even
+        // if weights is mkldnn tensor.
+      } else {
+        Tensor repacked_weight;
+        auto weights_org = mkldnn_conv_unpack(packed_weight);
+        repacked_weight = fbgemm_utils::fbgemm_conv_prepack<kSpatialDim>(
+            std::get<0>(weights_org),
+            std::get<1>(weights_org),
+            stride,
+            padding,
+            dilation,
+            groups);
+        return FbgemmConv(
+            act,
+            repacked_weight,
+            stride,
+            padding,
+            dilation,
+            groups,
+            output_scale,
+            output_zero_point);
+      }
+    }
+#endif // AT_MKLDNN_ENABLED()
+    if (cpp_custom_type_hack::isa<PackedConvWeight<kSpatialDim>>(
+            packed_weight)) {
       return FbgemmConv(
           act,
           packed_weight,
@@ -496,6 +534,132 @@ class QConvInt8 final : public c10::OperatorKernel {
 
     return output;
   }
+
+#if AT_MKLDNN_ENABLED()
+  Tensor mkldnn_qconv2d(
+      Tensor& act,
+      Tensor& packed_weight,
+      torch::List<int64_t>& stride,
+      torch::List<int64_t>& padding,
+      torch::List<int64_t>& dilation,
+      int64_t groups,
+      double output_scale,
+      int64_t output_zero_point) {
+    TORCH_CHECK(
+        act.scalar_type() == ScalarType::QUInt8,
+        "Only QUInt8 ScalarType activations are support")
+    TORCH_CHECK(
+        output_zero_point == 0,
+        "Only 0 point are support for MKL-DNN");
+    ConvDimChecks<kSpatialDim>(
+        act.ndimension(), stride.size(), padding.size(), dilation.size());
+
+    auto& pack_ptr =
+        cpp_custom_type_hack::cast<PackedWeightQmkldnn>(packed_weight);
+    TORCH_CHECK(
+        pack_ptr.w_scale.size() == pack_ptr.w_zp.size(),
+        "Weight scales and zero points vectors should have the same size.");
+    ideep::tensor weight_ = *pack_ptr.w.get();
+    TORCH_CHECK(
+        weight_.ndims() == 4 || weight_.ndims() == 5,
+        "Packed weights are supposed to have 4 or 5 dimensions.");
+
+    int N = act.size(0);
+    int C = act.size(1);
+    int H = act.size(2);
+    int W = act.size(3);
+
+    int K;
+    std::vector<int64_t> kernel;
+    auto weight_shape = weight_.get_dims();
+
+    if (weight_.ndims() == act.ndimension() + 1) {
+      TORCH_CHECK(
+          groups > 1,
+          "Only weights of group 2d convolution could have been prepacked to 5d");
+      K = weight_shape[0] * weight_shape[1];
+      kernel = {weight_shape[3], weight_shape[4]};
+    } else {
+      K = weight_shape[0];
+      kernel = {weight_shape[2], weight_shape[3]};
+    }
+
+    auto outShape =
+        MakeConvOutputShape<kSpatialDim>(N, K, {H, W}, kernel, stride, padding, dilation);
+
+    TORCH_CHECK(
+        std::all_of(
+            outShape.begin(), outShape.end(), [](int64_t i) { return i > 0; }),
+        "[QConv2D] each dimension of output tensor should be greater than 0")
+
+    ideep::tensor act_, output_;
+    float act_scale = act.q_scale();
+    Tensor act_contig = act.contiguous();
+    auto act_dtype = get_mkldnn_dtype(act.scalar_type());
+    auto act_ptr = reinterpret_cast<uint8_t*>(act_contig.data_ptr());
+  
+    ideep::tensor::dims inputShape {N, C, H, W};
+    act_.init(inputShape, act_dtype, act_ptr);
+    act_.set_scale(ConvertScales({act_scale}));
+
+    // TODO fuse sum / sum+relu
+    auto attr_ = kReluFused ?
+        ideep::attr_t::fuse_relu() :
+        ideep::attr_t();
+
+    Tensor output = _empty_affine_quantized(
+        outShape,
+        device(kCPU).dtype(kQUInt8),
+        output_scale,
+        output_zero_point,
+        MemoryFormat::ChannelsLast);
+    uint8_t* output_ptr = reinterpret_cast<uint8_t*>(output.data_ptr());
+
+    // nhwc format's logical dimensions come in the order: (n, c, h, w) in mkldnn
+    ideep::tensor::dims outShape_in {N, K, outShape[2], outShape[3]};
+    output_.init(
+        outShape_in,
+        ideep::tensor::data_type::u8,
+        ideep::format_tag::nhwc,
+        output_ptr);
+    ideep::scale_t output_scale_ = ConvertScales({output_scale});
+    output_.set_scale(output_scale_);
+
+    if (pack_ptr.bias.has_value()) {
+      at::Tensor bias = pack_ptr.bias.value();
+      TORCH_CHECK(
+          bias.dtype() == at::kFloat,
+          "[QConv2D] The 'bias' tensor must have 'torch.float' dtype");
+      bias = bias.contiguous();
+      TORCH_CHECK(bias.dim() == 1, "bias should be a vector (1D Tensor)");
+      TORCH_CHECK(
+          bias.size(0) == K,
+          "bias should have K elements: " + std::to_string(K));
+      auto bias_ptr = reinterpret_cast<float*>(bias.data_ptr<float>());
+
+      ideep::tensor bias_({K}, ideep::tensor::data_type::f32, bias_ptr);
+
+      ideep::convolution_forward::compute(
+          act_, weight_, bias_, outShape_in, output_,
+          {stride.begin(), stride.end()}, {dilation.begin(), dilation.end()},
+          {padding.begin(), padding.end()}, {padding.begin(), padding.end()},
+          groups, ideep::scale_t(), ideep::scale_t(), output_scale_, attr_,
+          ideep::algorithm::convolution_direct, // TODO winograd
+          ideep::prop_kind::forward_inference,
+          ideep::lowp_kind::LOWP_U8S8); // TODO s8s8
+    } else {
+      ideep::convolution_forward::compute(
+          act_, weight_, outShape_in, output_,
+          {stride.begin(), stride.end()}, {dilation.begin(), dilation.end()},
+          {padding.begin(), padding.end()}, {padding.begin(), padding.end()},
+          groups, ideep::scale_t(), ideep::scale_t(), output_scale_, attr_,
+          ideep::algorithm::convolution_direct,
+          ideep::prop_kind::forward_inference,
+          ideep::lowp_kind::LOWP_U8S8);
+    }
+    return output;
+  }
+#endif // AT_MKLDNN_ENABLED()
 #endif
 
 #ifdef USE_PYTORCH_QNNPACK

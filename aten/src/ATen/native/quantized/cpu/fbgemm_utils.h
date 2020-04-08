@@ -108,6 +108,15 @@ Tensor MakeEmptyPerChannelAffineQuantizedChannelsLast3dTensor(
 
 Tensor ConvertToChannelsLast3dTensor(const Tensor& src);
 
+template <int kSpatialDim = 2>
+Tensor fbgemm_conv_prepack(
+    Tensor weight,
+    c10::optional<Tensor> bias,
+    torch::List<int64_t> stride,
+    torch::List<int64_t> padding,
+    torch::List<int64_t> dilation,
+    int64_t groups);
+
 } // namespace fbgemm_utils
 } // namespace native
 } // namespace at

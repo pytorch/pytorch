@@ -2440,5 +2440,229 @@ class TestQMKLDNNOps(TestCase):
         if use_bias:
             self.assertEqual(bias_ref, bias_mkldnn)
 
+    @given(batch_size=st.integers(1, 3),
+           input_channels_per_group=st.sampled_from([2, 4, 5, 8, 16, 32]),
+           height=st.integers(10, 16),
+           width=st.integers(7, 14),
+           output_channels_per_group=st.sampled_from([2, 4, 5, 8, 16, 32]),
+           groups=st.integers(1, 3),
+           kernel_h=st.integers(1, 7),
+           kernel_w=st.integers(1, 7),
+           stride_h=st.integers(1, 2),
+           stride_w=st.integers(1, 2),
+           pad_h=st.integers(0, 2),
+           pad_w=st.integers(0, 2),
+           dilation=st.integers(1, 1),
+           X_scale=st.floats(0.5, 0.9),
+           X_zero_point=st.integers(0, 4),
+           W_scale=st.lists(st.floats(0.5, 0.9), min_size=1, max_size=2),
+           W_ZP=st.sampled_from([0, 5]),
+           Y_scale=st.floats(0.5, 0.9),
+           use_bias=st.booleans(),
+           use_channelwise=st.booleans())
+    def test_qconv_qmkldnn(
+            self,
+            batch_size,
+            input_channels_per_group,
+            height,
+            width,
+            output_channels_per_group,
+            groups,
+            kernel_h,
+            kernel_w,
+            stride_h,
+            stride_w,
+            pad_h,
+            pad_w,
+            dilation,
+            X_scale,
+            X_zero_point,
+            W_scale,
+            W_ZP,
+            Y_scale,
+            use_bias,
+            use_channelwise
+    ):
+        W_zero_point = [0, W_ZP]
+        Y_zero_point = 0
+        qconv = torch.ops.quantized.conv2d_relu
+        qconv_prepack = torch.ops.quantized.conv_prepack
+
+        # C
+        input_channels = input_channels_per_group * groups
+        # K
+        output_channels = output_channels_per_group * groups
+
+        dilation_h = dilation_w = dilation
+
+        # Padded input size should be at least as big as dilated kernel
+        assume(height + 2 * pad_h >= dilation_h * (kernel_h - 1) + 1)
+        assume(width + 2 * pad_w >= dilation_w * (kernel_w - 1) + 1)
+
+        W_scale = W_scale * output_channels
+        W_zero_point = W_zero_point * output_channels
+        # Resize W_scale and W_zero_points arrays equal to output_channels
+        W_scale = W_scale[:output_channels]
+        W_zero_point = W_zero_point[:output_channels]
+
+        # For testing, we use small values for weights and for activations so that no overflow occurs
+        # in vpmaddubsw instruction. If the overflow occurs in qconv implementation and if there is no overflow
+        # in reference we can't exactly match the results with reference.
+        # Please see the comment in qconv implementation file (aten/src/ATen/native/quantized/cpu/qconv.cpp)
+        # for more details.
+        W_value_min = -5
+        W_value_max = 5
+
+        # the operator expects them in the format (output_channels, input_channels/groups, kernel_h, kernel_w)
+        W_init = torch.from_numpy(
+            np.random.randint(
+                W_value_min,
+                W_value_max,
+                (output_channels, int(input_channels / groups), kernel_h, kernel_w)),
+        )
+        b_init = torch.from_numpy(np.random.randint(0, 10, (output_channels,)))
+
+        stride = [stride_h, stride_w]
+        pad = [pad_h, pad_w]
+        dilation = [dilation_h, dilation_w]
+
+        X_value_min = 0
+        X_value_max = 10
+        X_init = torch.from_numpy(np.random.randint(
+            X_value_min, X_value_max, (batch_size, input_channels, height, width)))
+
+        X = X_scale * (X_init - X_zero_point).to(dtype=torch.float)
+
+        if use_channelwise:
+            W_scales_tensor = torch.tensor(W_scale, dtype=torch.float)
+            W_zero_points_tensor = torch.tensor(W_zero_point, dtype=torch.float)
+            W = W_scales_tensor.reshape(-1, 1, 1, 1) * (W_init.to(dtype=torch.float) -
+                                                        W_zero_points_tensor.reshape(-1, 1, 1, 1)).to(dtype=torch.float)
+            b = X_scale * W_scales_tensor * (b_init - 0).to(dtype=torch.float)
+        else:
+            W = W_scale[0] * (W_init - W_zero_point[0]).to(dtype=torch.float)
+            b = X_scale * W_scale[0] * (b_init - 0).to(dtype=torch.float)
+
+        X_q = torch.quantize_per_tensor(X, scale=X_scale, zero_point=X_zero_point, dtype=torch.quint8)
+        if use_channelwise:
+            W_q = torch.quantize_per_channel(W,
+                                             W_scales_tensor.to(dtype=torch.double),
+                                             W_zero_points_tensor.to(dtype=torch.long),
+                                             0,
+                                             dtype=torch.qint8)
+        else:
+            W_q = torch.quantize_per_tensor(W, scale=W_scale[0], zero_point=W_zero_point[0], dtype=torch.qint8)
+
+        bias_float = b if use_bias else None
+
+        # reference results
+        torch.backends.quantized.engine = 'fbgemm'
+        W_prepack = qconv_prepack(W_q, bias_float, stride, pad, dilation, groups)
+
+        Y_ref_q = qconv(
+            X_q,
+            W_prepack,
+            stride,
+            pad,
+            dilation,
+            groups,
+            Y_scale,
+            Y_zero_point,
+        )
+
+        # MKLDNN results
+        torch.backends.quantized.engine = 'mkldnn'
+        W_mkldnn_prepack = qconv_prepack(W_q, bias_float, stride, pad, dilation, groups)
+
+        Y_mkldnn_q = qconv(
+            X_q,
+            W_mkldnn_prepack,
+            stride,
+            pad,
+            dilation,
+            groups,
+            Y_scale,
+            Y_zero_point,
+        )
+
+        # ignore off-by-1 differences
+        np.testing.assert_array_almost_equal(
+            Y_ref_q.int_repr().numpy(), Y_mkldnn_q.int_repr().numpy(), decimal=0)
+
+    @given(output_channels_per_group=st.integers(3, 7),
+           input_channels_per_group=st.integers(3, 7),
+           H=st.integers(5, 7),
+           W=st.integers(5, 7),
+           padH=st.integers(1, 3), padW=st.integers(1, 3),
+           sH=st.integers(1, 1), sW=st.integers(1, 1),
+           dH=st.integers(1, 1), dW=st.integers(1, 1),
+           G=st.integers(3, 7),
+           W_scale=st.lists(st.floats(0.2, 1.6), min_size=1, max_size=2),
+           W_ZP=st.sampled_from([0, 5]),
+           use_bias=st.booleans(),
+           use_channelwise=st.booleans())
+    def test_prepack_unpack_conv_qmkldnn(self, output_channels_per_group, input_channels_per_group, H, W,
+                                         padH, padW, sH, sW, dH, dW, G, W_scale, W_ZP, use_bias, use_channelwise):
+        output_channels = G * output_channels_per_group
+        input_channels = G * input_channels_per_group
+        stride = (sH, sW)
+        i_padding = (padH, padW)
+        dilation = (dH, dW)
+
+        X_scale = 0.7
+        W_zero_point = [0, W_ZP]
+        W_value_min = -100
+        W_value_max = 100
+
+        W_scale = W_scale * output_channels
+        W_zero_point = W_zero_point * output_channels
+        # Resize W_scale and W_zero_points arrays equal to output_channels
+        W_scale = W_scale[:output_channels]
+        W_zero_point = W_zero_point[:output_channels]
+
+        # the operator expects them in the format (output_channels, input_channels/groups, kernel_h, kernel_w)
+        W_init = torch.from_numpy(
+            np.random.randint(
+                W_value_min,
+                W_value_max,
+                (output_channels, input_channels_per_group, H, W)),
+        )
+        b_init = torch.from_numpy(np.random.randint(0, 10, (output_channels,)))
+        if use_channelwise:
+            W_scales_tensor = torch.tensor(W_scale, dtype=torch.float)
+            W_zero_points_tensor = torch.tensor(W_zero_point, dtype=torch.float)
+            W = W_scales_tensor.reshape(-1, 1, 1, 1) * (W_init.to(dtype=torch.float) -
+                                                        W_zero_points_tensor.reshape(-1, 1, 1, 1)).to(dtype=torch.float)
+            b = X_scale * W_scales_tensor * (b_init - 0).to(dtype=torch.float)
+        else:
+            W = W_scale[0] * (W_init - W_zero_point[0]).to(dtype=torch.float)
+            b = X_scale * W_scale[0] * (b_init - 0).to(dtype=torch.float)
+
+        if use_channelwise:
+            W_q = torch.quantize_per_channel(W,
+                                             W_scales_tensor.to(dtype=torch.double),
+                                             W_zero_points_tensor.to(dtype=torch.long),
+                                             0,
+                                             dtype=torch.qint8)
+        else:
+            W_q = torch.quantize_per_tensor(W, scale=W_scale[0], zero_point=W_zero_point[0], dtype=torch.qint8)
+
+        bias_float = b if use_bias else None
+        # Reference result
+        torch.backends.quantized.engine = 'fbgemm'
+        W_q_ref = torch.ops.quantized.conv_prepack(W_q, bias_float, stride, i_padding, dilation, G)
+        W_q_unpack_ref, bias_ref = torch.ops.quantized.conv_unpack(W_q_ref)
+
+        # mkldnn result
+        torch.backends.quantized.engine = 'mkldnn'
+        W_q_mkldnn = torch.ops.quantized.conv_prepack(W_q, bias_float, stride, i_padding, dilation, G)
+        W_q_unpack_mkldnn, bias_mkldnn = torch.ops.quantized.conv_unpack(W_q_mkldnn)
+
+        self.assertEqual(W_q_unpack_ref.qscheme(), W_q_unpack_mkldnn.qscheme())
+        self.assertEqual(W_q_unpack_ref.int_repr().to(torch.int32), W_q_unpack_mkldnn.int_repr().to(torch.int32))
+        if use_bias:
+            self.assertEqual(bias_ref, bias_mkldnn)
+
+
 if __name__ == "__main__":
     run_tests()
