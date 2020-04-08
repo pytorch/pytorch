@@ -288,6 +288,7 @@ std::ostream& print(std::ostream& stream, const Tensor & tensor_, int64_t linesi
         stream << ", zero_points: ";
         Tensor zero_points = tensor_.q_per_channel_zero_points();
         print(stream, zero_points, linesize);
+        stream << ", axis: " << tensor_.q_per_channel_axis();
       }
     }
     stream << " ]";
