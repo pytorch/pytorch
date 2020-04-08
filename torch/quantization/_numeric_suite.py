@@ -1,7 +1,7 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 
 
-def find_match(str_list, key_str, postfix):
+def _find_match(str_list, key_str, postfix):
     split_str = key_str.split(".")
     if split_str[-1] == postfix:
         match_string = "".join(key_str.split(".")[0:-1])
@@ -17,9 +17,16 @@ def find_match(str_list, key_str, postfix):
 
 
 def compare_weights(float_dict, quantized_dict):
+    r"""Returns a dict with key corresponding to module names and each entry being
+    a dictionary with two keys 'float' and 'quantized', containing the float and
+    quantized weights
+    Args:
+        float_dict: state dict of the float model
+        quantized_dict: state dict of the quantized model
+    """
     weight_dict = {}
     for key in quantized_dict:
-        match_key = find_match(float_dict, key, "weight")
+        match_key = _find_match(float_dict, key, "weight")
         if match_key is not None:
             weight_dict[key] = {}
             weight_dict[key]["float"] = float_dict[match_key]
