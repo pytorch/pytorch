@@ -121,7 +121,7 @@ int listRemove<at::Tensor>(Stack& stack) {
 }
 
 void checkImplicitTensorToNum(at::Tensor t, bool toInt) {
-  if (autograd::as_variable_ref(t).requires_grad()) {
+  if (t.requires_grad()) {
     throw std::runtime_error(
         "Cannot input a tensor that requires grad as a scalar argument");
   }
