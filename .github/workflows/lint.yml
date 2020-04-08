@@ -161,6 +161,8 @@ jobs:
             -g"-torch/csrc/jit/import.cpp"            \
             -g"-torch/csrc/jit/netdef_converter.cpp"  \
             -g"-torch/csrc/onnx/init.cpp"             \
+            -g"-torch/csrc/cuda/nccl.*"               \
+            -g"-torch/csrc/cuda/python_nccl.cpp"      \
             "$@" > ${GITHUB_WORKSPACE}/clang-tidy-output.txt
 
           cat ${GITHUB_WORKSPACE}/clang-tidy-output.txt
