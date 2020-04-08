@@ -183,7 +183,9 @@ function get_exit_code() {
 function file_diff_from_base() {
   # The fetch may fail on Docker hosts, but it's not always necessary.
   set +e
+  git remote -v
   git fetch origin release/1.5 --quiet
+  git merge-base origin release/1.5 HEAD)
   set -e
   git diff --name-only "$(git merge-base origin release/1.5 HEAD)" > "$1"
 }
