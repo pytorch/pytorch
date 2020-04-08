@@ -1,5 +1,6 @@
 #pragma once
 
+#include <tensorpipe/core/message.h>
 #include <torch/csrc/distributed/rpc/rpc_command_base.h>
 
 namespace torch {
@@ -38,6 +39,18 @@ TORCH_API std::string wireSerialize(
 TORCH_API std::pair<std::vector<char>, std::vector<at::Tensor>> wireDeserialize(
     const void* data,
     size_t data_size);
+
+// Tensorpipe message conversion
+struct TensorPipeEntry {
+  tensorpipe::Message message;
+  std::vector<torch::Tensor> reservedTensors;
+  std::vector<std::vector<uint8_t>> copiedTensors;
+};
+
+TORCH_API TensorPipeEntry tensorpipeSerialize(const Message& rpcMessage);
+
+TORCH_API Message
+tensorpipeAllocateMessage(const tensorpipe::Message& tpMessage);
 
 // Some Tensors are effectively views of larger Tensors, where only a small
 // subset of the Storage data is referenced. This normally is good and avoids

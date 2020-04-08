@@ -524,6 +524,7 @@ def add_torch_libs():
             "//caffe2/caffe2:caffe2_cpu",
             "//caffe2/caffe2/quantization/server:dnnlowp_ops",
             "//caffe2/torch/lib/libshm:libshm",
+            "//tensorpipe/core:core",
         ],
         external_deps = [
             ("nanopb", None, "protobuf-nanopb"),
