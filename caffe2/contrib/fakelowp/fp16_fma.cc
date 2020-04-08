@@ -65,14 +65,18 @@ void fma_fp16(int N, const float* A, const float* B, float* Out) {
 
     __m256i cmp = _mm256_cmpgt_epi64(_mm256_set1_epi64x(-14), mExpv);
 
-    __m256i mExpoBouncer = _mm256_and_pd(cmp, _mm256_set1_epi64x(28));
+    __m256d mExpoBouncer = _mm256_and_pd(
+        _mm256_castsi256_pd(cmp), _mm256_castsi256_pd(_mm256_set1_epi64x(28)));
     mExpoBouncer = _mm256_or_pd(
         mExpoBouncer,
-        _mm256_andnot_pd(cmp, _mm256_add_epi64(_mm256_set1_epi64x(42), mExpv)));
+        _mm256_andnot_pd(
+            _mm256_castsi256_pd(cmp),
+            _mm256_castsi256_pd(
+                _mm256_add_epi64(_mm256_set1_epi64x(42), mExpv))));
 
-    __m256 mBouncer = _mm256_add_epi64(
+    __m256i mBouncer = _mm256_add_epi64(
         _mm256_set1_epi64x(dbl_threehalf),
-        _mm256_slli_epi64(mExpoBouncer, shift_bits));
+        (__m256i)_mm256_slli_epi64((__m256i)mExpoBouncer, shift_bits));
 
     mOut = _mm256_sub_pd(
         _mm256_add_pd(_mm256_castsi256_pd(mBouncer), mOut),
