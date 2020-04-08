@@ -325,7 +325,7 @@ struct TORCH_CUDA_API Reorder : public Expr {
  * TODO: Change implmentation of Exprs contained in the scope to be more similar
  * to Fusion where we can do proper dependency analysis.
  */
-struct TORCH_API ForLoop : public Expr {
+struct TORCH_CUDA_API ForLoop : public Expr {
   ~ForLoop() = default;
   ForLoop(
       Val* _index,
@@ -379,7 +379,7 @@ struct TORCH_API ForLoop : public Expr {
  * TODO: Change implmentation of Exprs contained in the scope to be more similar
  * to Fusion where we can do proper dependency analysis.
  */
-struct TORCH_API IfThenElse : public Expr {
+struct TORCH_CUDA_API IfThenElse : public Expr {
   ~IfThenElse() = default;
   IfThenElse(
       Int* _cond,
@@ -435,7 +435,7 @@ struct TORCH_API IfThenElse : public Expr {
  * TensorView. It is not the flattened index, which needs to be computed using
  * stride information.
  */
-struct TORCH_API TensorIndex : public Val {
+struct TORCH_CUDA_API TensorIndex : public Val {
   ~TensorIndex() = default;
 
   TensorIndex(const TensorIndex& other) = delete;
@@ -490,7 +490,7 @@ struct TORCH_API TensorIndex : public Val {
  * TODO: The components of Allocate like Type and Name could be separated from
  * the the assocated TensorView.  Perhaps that is more appropriate?
  */
-struct TORCH_API Allocate : public Expr {
+struct TORCH_CUDA_API Allocate : public Expr {
   ~Allocate() = default;
 
   Allocate(const Allocate& other) = delete;
