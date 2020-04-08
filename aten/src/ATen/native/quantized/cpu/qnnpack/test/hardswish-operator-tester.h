@@ -91,11 +91,11 @@ class HardswishOperatorTester {
   }
 
   inline float outputScale() const {
-    return 1.0f / 128.0f;
+    return this->inputScale_;
   }
 
   inline uint8_t outputZeroPoint() const {
-    return 128;
+    return this->inputZeroPoint_;
   }
 
   inline HardswishOperatorTester& qmin(uint8_t qmin) {

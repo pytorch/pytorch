@@ -69,17 +69,17 @@ enum pytorch_qnnp_status pytorch_qnnp_create_hardswish_nc_q8(
 
   status = pytorch_qnnp_status_unsupported_parameter;
 
-  if (output_scale != 0x2.0p-8f) {  // [-1, 1] range in 8 bits = 2.0 / 256
+  if (output_scale != input_scale) {
     pytorch_qnnp_log_error(
-        "failed to create Hardswish operator with %.7g output scale: only output scale of 2/256 is supported",
+        "failed to create Hardswish operator with %.7g output scale: only output scale equal to input scale is supported",
         output_scale);
     goto error;
   }
 
-  if (output_zero_point != 128) {
+  if (output_zero_point != input_zero_point) {
     pytorch_qnnp_log_error(
         "failed to create Hardswish operator with %" PRIu8
-        " output zero point: only output zero point of 128 is supported",
+        " output zero point: only output zero point equal to input zero point is supported",
         output_zero_point);
     goto error;
   }
@@ -104,6 +104,7 @@ enum pytorch_qnnp_status pytorch_qnnp_create_hardswish_nc_q8(
   uint8_t* lookup_table = hardswish_op->lookup_table;
   const float scaled_min = (float)(int32_t)output_min;
   const float scaled_max = (float)(int32_t)output_max;
+  const float inv_output_scale = 1.0f / output_scale;
   for (int32_t i = 0; i < 256; i++) {
     float x =
         input_scale * (float)(i - (int32_t)(uint32_t)input_zero_point);
@@ -112,10 +113,7 @@ enum pytorch_qnnp_status pytorch_qnnp_create_hardswish_nc_q8(
     x2 = x2 > 0.0f ? x2 : 0.0f;
     x2 = x2 < 6.0f ? x2 : 6.0f;
     x2 = x * x2 / 6.0f;
-    /* Scale hardswish(x) by 1 / output scale = 128.0
-       Also, offset by the zero_point from the scaled value, as we assume UINT8
-    */
-    float scaled_hardswish_x = 128.0f * x2 + 128.0f;
+    float scaled_hardswish_x = inv_output_scale * x2 + output_zero_point;
     if (scaled_hardswish_x < scaled_min) {
       scaled_hardswish_x = scaled_min;
     }
