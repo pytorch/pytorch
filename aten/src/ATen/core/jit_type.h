@@ -1777,6 +1777,22 @@ struct CAFFE2_API ClassType : public NamedType {
     return parameterSlots_->at(slot);
   }
 
+  void addForwardPreHook(QualifiedName hook_name) {
+    forward_pre_hooks.push_back(hook_name);
+  }
+
+  void addForwardHook(QualifiedName hook_name) {
+    forward_hooks.push_back(hook_name);
+  }
+
+  std::vector<QualifiedName> getForwardHooks() {
+    return forward_hooks;
+  }
+
+  std::vector<QualifiedName> getForwardPreHooks() {
+    return forward_pre_hooks;
+  }
+
   void addMethod(torch::jit::Function* method);
   torch::jit::Function* getMethod(const std::string& name) const;
 
@@ -1837,6 +1853,8 @@ struct CAFFE2_API ClassType : public NamedType {
   // List of methods associated with this class.
   std::vector<torch::jit::Function*> methods_;
 
+  std::vector<QualifiedName> forward_hooks;
+  std::vector<QualifiedName> forward_pre_hooks;
 };
 
 struct InterfaceType;

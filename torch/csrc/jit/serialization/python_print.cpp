@@ -1242,7 +1242,7 @@ struct PythonPrintImpl {
         indent();
         body_ << "__forward_hooks__ = [";
         for (auto hook_name : forwardHooks) {
-          body_ << hook_name.qualifiedName()  << ",";
+          body_ << hook_name.qualifiedName() << ",";
         }
         body_ << "]\n";
       }

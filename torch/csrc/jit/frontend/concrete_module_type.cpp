@@ -231,11 +231,11 @@ void ConcreteModuleTypeBuilder::addFunctionAttribute(
                                                    std::move(pyFunction)});
 }
 
-void ConcreteModuleTypeBuilder::addForwardHook(std::string hook_name) {
+void ConcreteModuleTypeBuilder::addForwardHook(std::string &hook_name) {
   forward_hooks.push_back(hook_name);
 }
 
-void ConcreteModuleTypeBuilder::addForwardPreHook(std::string hook_name) {
+void ConcreteModuleTypeBuilder::addForwardPreHook(std::string &hook_name) {
   forward_pre_hooks.push_back(hook_name);
 }
 

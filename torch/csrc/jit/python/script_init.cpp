@@ -1294,7 +1294,8 @@ void initJitScriptBindings(PyObject* module) {
       .def("add_constant", &ConcreteModuleTypeBuilder::addConstant)
       .def("add_attribute", &ConcreteModuleTypeBuilder::addAttribute)
       .def("add_forward_hook", &ConcreteModuleTypeBuilder::addForwardHook)
-      .def("add_forward_pre_hook", &ConcreteModuleTypeBuilder::addForwardPreHook)
+      .def(
+          "add_forward_pre_hook", &ConcreteModuleTypeBuilder::addForwardPreHook)
       .def(
           "add_function_attribute",
           &ConcreteModuleTypeBuilder::addFunctionAttribute)
