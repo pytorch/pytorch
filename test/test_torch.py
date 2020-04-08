@@ -11061,9 +11061,11 @@ class TestTorchDeviceType(TestCase):
 
     @dtypes(*torch.testing.get_all_dtypes())
     def test_masked_select(self, device, dtype):
-        warn = 'masked_select received a mask with dtype torch.uint8,'
-        maskTypes = [torch.uint8, torch.bool] if device == 'cpu' else [torch.bool]
-        for maskType in maskTypes:
+        if device == 'cpu':
+            warn = 'masked_select received a mask with dtype torch.uint8,'
+        else:
+            warn = 'indexing with dtype torch.uint8 is now deprecated, pl'
+        for maskType in [torch.uint8, torch.bool]:
             num_src = 10
             src = torch.tensor([0, 0, 0, 0, 0, 0, 0, 0, 0, 0], dtype=dtype, device=device)
             mask = torch.rand(num_src, device=device).clamp(0, 1).mul(2).floor().to(maskType)
