@@ -397,7 +397,7 @@ Tensor block_diag(TensorList tensors) {
     return result;
   }
 
-  // Use at::result_type to find the right tensor to copy options from, so
+  // Use at::native::result_type to find the right tensor to copy options from, so
   // that the output data type is correct
   const Tensor* options_tensor = &tensors[0];
   ScalarType output_scalar_type = options_tensor->scalar_type();
@@ -413,7 +413,7 @@ Tensor block_diag(TensorList tensors) {
       " and input ", tensor_idx, " is on device ", other_tensor->device()
     );
 
-    ScalarType scalar_type = at::result_type(*options_tensor, *other_tensor);
+    ScalarType scalar_type = at::native::result_type(*options_tensor, *other_tensor);
 
     if (scalar_type != output_scalar_type) {
       output_scalar_type = scalar_type;
