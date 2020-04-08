@@ -47,7 +47,7 @@ struct Add;
  */
 
 struct TORCH_CUDA_API IRPrinter : public OptInConstDispatch {
-public:
+ public:
   std::ostream& os;
   bool print_inline_ = false;
 

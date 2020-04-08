@@ -937,7 +937,7 @@ void testGPU_FusionExecKernel() {
   fusion.addOutput(tv3);
 
   tv3->split(0, 4);
-  
+
   // For all inputs, computeAt the output inline, temporaries should be squeezed
   // between them
   tv0->computeAt(tv3, 1);
@@ -1062,7 +1062,6 @@ void testGPU_FusionLoopUnroll() {
   at::Tensor check = at::full({1, 128}, 4, options);
   ;
   TORCH_CHECK(output.equal(check));
-
 }
 
 } // namespace jit

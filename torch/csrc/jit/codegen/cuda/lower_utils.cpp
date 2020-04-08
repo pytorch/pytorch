@@ -167,47 +167,47 @@ void assertScope(Expr* expr) {
 }
 
 struct CloneLoopNest : public OptOutMutator {
-private:
-
+ private:
   Expr* parent_scope_ = nullptr;
   Expr* to_clone_ = nullptr;
 
-  Statement* mutate(ForLoop* fl){
+  Statement* mutate(ForLoop* fl) {
     std::vector<Expr*> mutated_exprs;
-    for(Expr* expr : fl->body().exprs()){
+    for (Expr* expr : fl->body().exprs()) {
       mutated_exprs.push_back(ir_utils::asExpr(OptOutMutator::mutate(expr)));
     }
-    if( fl == to_clone_ )
-      return new ForLoop(fl->index(), fl->iter_domain(), mutated_exprs, parent_scope_);
-    return new ForLoop(fl->index(), fl->iter_domain(), mutated_exprs, fl->parentScope());
-    
+    if (fl == to_clone_)
+      return new ForLoop(
+          fl->index(), fl->iter_domain(), mutated_exprs, parent_scope_);
+    return new ForLoop(
+        fl->index(), fl->iter_domain(), mutated_exprs, fl->parentScope());
   }
 
-  CloneLoopNest(Expr* _to_clone, Expr* _parent_scope) : parent_scope_(_parent_scope), to_clone_(_to_clone) {}
+  CloneLoopNest(Expr* _to_clone, Expr* _parent_scope)
+      : parent_scope_(_parent_scope), to_clone_(_to_clone) {}
 
-public:
-  static ForLoop* getClone(ForLoop* _to_clone, Expr* _parent_scope){
-    TORCH_INTERNAL_ASSERT(_to_clone != nullptr, "Tried to clone a scope, but received a nullptr.");
+ public:
+  static ForLoop* getClone(ForLoop* _to_clone, Expr* _parent_scope) {
+    TORCH_INTERNAL_ASSERT(
+        _to_clone != nullptr,
+        "Tried to clone a scope, but received a nullptr.");
     CloneLoopNest cln(_to_clone, _parent_scope);
     return ir_utils::asForLoop(ir_utils::asExpr(cln.mutate(_to_clone)));
   }
-
 };
 
 struct ReplaceExprsInScope : public OptOutDispatch {
-private:
-
+ private:
   std::unordered_map<Expr*, Expr*> replacement_map_;
 
-
-  void handle(Expr* expr){
+  void handle(Expr* expr) {
     OptOutDispatch::handle(expr);
   }
 
-  void handle(ForLoop* fl){
-    for(Expr* expr : fl->body().exprs()){
+  void handle(ForLoop* fl) {
+    for (Expr* expr : fl->body().exprs()) {
       auto it = replacement_map_.find(expr);
-      if(it == replacement_map_.end()){
+      if (it == replacement_map_.end()) {
         handle(expr);
         continue;
       }
@@ -216,19 +216,19 @@ private:
     }
   }
 
-  void handle(IfThenElse* ite){
-    for(Expr* expr : ite->body().exprs()){
+  void handle(IfThenElse* ite) {
+    for (Expr* expr : ite->body().exprs()) {
       auto it = replacement_map_.find(expr);
-      if(it == replacement_map_.end()){
+      if (it == replacement_map_.end()) {
         handle(expr);
         continue;
       }
       ite->body().insert_before(expr, replacement_map_[expr]);
       ite->body().erase(expr);
     }
-    for(Expr* expr : ite->elseBody().exprs()){
+    for (Expr* expr : ite->elseBody().exprs()) {
       auto it = replacement_map_.find(expr);
-      if(it == replacement_map_.end()){
+      if (it == replacement_map_.end()) {
         handle(expr);
         continue;
       }
@@ -237,14 +237,16 @@ private:
     }
   }
 
-  ReplaceExprsInScope(std::unordered_map<Expr*, Expr*> _replacement_map) : replacement_map_(_replacement_map){}
+  ReplaceExprsInScope(std::unordered_map<Expr*, Expr*> _replacement_map)
+      : replacement_map_(_replacement_map) {}
 
-public:
-  static void replace(Expr* scope, std::unordered_map<Expr*, Expr*> replacement_map){
+ public:
+  static void replace(
+      Expr* scope,
+      std::unordered_map<Expr*, Expr*> replacement_map) {
     ReplaceExprsInScope reis(replacement_map);
     reis.handle(scope);
   }
-
 };
 
 struct FirstInnerMostScope : private OptInDispatch {
@@ -252,8 +254,8 @@ struct FirstInnerMostScope : private OptInDispatch {
   Expr* active_scope = nullptr;
 
   void handle(ForLoop* fl) final {
-    for(auto expr : fl->body().exprs()){
-      if(ir_utils::isScope(expr)){
+    for (auto expr : fl->body().exprs()) {
+      if (ir_utils::isScope(expr)) {
         active_scope = expr;
         return;
       }
@@ -262,14 +264,14 @@ struct FirstInnerMostScope : private OptInDispatch {
   }
 
   void handle(IfThenElse* ite) final {
-    for(auto expr : ite->body().exprs()){
-      if(ir_utils::isScope(expr)){
+    for (auto expr : ite->body().exprs()) {
+      if (ir_utils::isScope(expr)) {
         active_scope = expr;
         return;
       }
     }
-    for(auto expr : ite->elseBody().exprs()){
-      if(ir_utils::isScope(expr)){
+    for (auto expr : ite->elseBody().exprs()) {
+      if (ir_utils::isScope(expr)) {
         active_scope = expr;
         return;
       }
@@ -373,18 +375,20 @@ Expr* clearScope(Expr* scope) {
   return scope;
 }
 
-
-ForLoop* cloneLoopNest(ForLoop* to_clone, Expr* parent_scope){
+ForLoop* cloneLoopNest(ForLoop* to_clone, Expr* parent_scope) {
   return CloneLoopNest::getClone(to_clone, parent_scope);
 }
 
-void replaceExprsInScope(Expr* scope, std::unordered_map<Expr*, Expr*> replacement_map){
-  TORCH_INTERNAL_ASSERT(replacement_map.find(scope) == replacement_map.end(),
-    "Error trying to replace expressions in a scope, scope wants to be replaced entirely.");
+void replaceExprsInScope(
+    Expr* scope,
+    std::unordered_map<Expr*, Expr*> replacement_map) {
+  TORCH_INTERNAL_ASSERT(
+      replacement_map.find(scope) == replacement_map.end(),
+      "Error trying to replace expressions in a scope, scope wants to be replaced entirely.");
   ReplaceExprsInScope::replace(std::move(scope), std::move(replacement_map));
 }
 
-Expr* firstInnerMostScope(Expr* scope){
+Expr* firstInnerMostScope(Expr* scope) {
   return FirstInnerMostScope::get(scope);
 }
 
@@ -422,8 +426,9 @@ TensorView* asTV(Val* val) {
   return static_cast<TensorView*>(val);
 }
 
-bool isScope(const Expr* expr){
-  return expr->getExprType() == ExprType::ForLoop || expr->getExprType() == ExprType::IfThenElse;
+bool isScope(const Expr* expr) {
+  return expr->getExprType() == ExprType::ForLoop ||
+      expr->getExprType() == ExprType::IfThenElse;
 }
 
 ForLoop* asForLoop(Statement* stmt) {

@@ -177,7 +177,6 @@ Statement* OptOutMutator::mutate(BinaryOp* bop) {
 }
 
 Statement* OptOutMutator::mutate(ForLoop* fl) {
-  
   Val* index = mutateAsVal(fl->index())->asVal();
   Val* val_id = mutateAsVal(fl->iter_domain())->asVal();
 
@@ -199,9 +198,8 @@ Statement* OptOutMutator::mutate(ForLoop* fl) {
     is_mutated = is_mutated | (mutated_expr != expr);
   }
 
-  if (is_mutated){
-    auto newFL = new ForLoop(
-        index, id, mutated_exprs, fl->parentScope());
+  if (is_mutated) {
+    auto newFL = new ForLoop(index, id, mutated_exprs, fl->parentScope());
     return newFL;
   }
 
@@ -209,7 +207,6 @@ Statement* OptOutMutator::mutate(ForLoop* fl) {
 }
 
 Statement* OptOutMutator::mutate(IfThenElse* ite) {
-  
   Val* val_cond = mutateAsVal(ite->cond())->asVal();
   TORCH_INTERNAL_ASSERT(
       val_cond->getValType().value() == ValType::Scalar &&
@@ -242,7 +239,7 @@ Statement* OptOutMutator::mutate(IfThenElse* ite) {
     is_mutated = is_mutated | (mutated_expr != expr);
   }
 
-  if (is_mutated){
+  if (is_mutated) {
     auto newITE = new IfThenElse(
         cond, ite->body().exprs(), ite->elseBody().exprs(), ite->parentScope());
     return newITE;

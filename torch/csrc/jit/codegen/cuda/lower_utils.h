@@ -40,12 +40,13 @@ Expr* clearScope(Expr* scope);
 ForLoop* cloneLoopNest(ForLoop* to_clone, Expr* parent_scope);
 
 // Run through a scope and replace expressions inside with replacement_map
-void replaceExprsInScope(Expr* scope, std::unordered_map<Expr*, Expr*> replacement_map);
+void replaceExprsInScope(
+    Expr* scope,
+    std::unordered_map<Expr*, Expr*> replacement_map);
 
 Expr* firstInnerMostScope(Expr* scope);
 
 } // namespace scope_utils
-
 
 namespace ir_utils {
 

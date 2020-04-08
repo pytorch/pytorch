@@ -291,7 +291,6 @@ void IRPrinter::handle(const ForLoop* const fl) {
 void IRPrinter::handle(const IfThenElse* const ite) {
   indent();
 
-
   // IF
   os << "if ( ";
   print_inline(ite->cond());

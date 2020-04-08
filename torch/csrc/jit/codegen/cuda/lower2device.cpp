@@ -225,7 +225,7 @@ Statement* GPULower::mutate(IfThenElse* ite) {
 
   active_scope = prev_scope;
 
-  if (is_mutated){
+  if (is_mutated) {
     auto new_ite = new IfThenElse(
         ite->cond(), mutated_exprs, mutated_else_exprs, ite->parentScope());
     return new_ite;
@@ -248,7 +248,7 @@ Statement* GPULower::mutate(ForLoop* fl) {
 
   active_scope = prev_scope;
 
-  if (is_mutated){
+  if (is_mutated) {
     auto newFL = new ForLoop(
         fl->index(), fl->iter_domain(), mutated_exprs, fl->parentScope());
     return newFL;

@@ -1,5 +1,5 @@
-#include <torch/csrc/jit/codegen/cuda/arith.h>
 #include <torch/csrc/jit/codegen/cuda/lower_loops.h>
+#include <torch/csrc/jit/codegen/cuda/arith.h>
 #include <torch/csrc/jit/codegen/cuda/lower_utils.h>
 
 #include <torch/csrc/jit/codegen/cuda/index_compute.h>
@@ -31,7 +31,7 @@ for( i : ceil(I/4) ) {
 
 // Custom dispatch for Expr, want to find out of it's a TV op
 void UnrollPass::handle(Expr* expr) {
-   OptOutDispatch::handle(expr);
+  OptOutDispatch::handle(expr);
 }
 
 namespace {
@@ -59,7 +59,6 @@ Int* getPredicate(const TensorView* const pred_tv, std::vector<Val*> indices) {
 
 // Open the for loop.
 void UnrollPass::handle(ForLoop* fl) {
-
   // Setup for loop scoping
   for_loops.push_back(fl);
   bool prev_unroll = within_unroll;
@@ -101,26 +100,31 @@ void UnrollPass::handle(ForLoop* fl) {
         }
 
         // Tensorview of the predicate determining op
-        TensorView* out =
-            ir_utils::asTV(ir_utils::asExpr(expr)->outputs()[0]);
-        
+        TensorView* out = ir_utils::asTV(ir_utils::asExpr(expr)->outputs()[0]);
+
         // Make predicates for the unrolling, and the epilogue
         Int* unroll_predicate = getPredicate(out, unroll_pred_inds);
         Int* inline_predicate =
             getPredicate(out, scope_utils::getLoopIndices(for_loops.back()));
-        
+
         // Make the IfThenElse controlling the unrolling
-        IfThenElse* unroll_ite = new IfThenElse(unroll_predicate, {}, {}, first_unroll->parentScope() );
+        IfThenElse* unroll_ite = new IfThenElse(
+            unroll_predicate, {}, {}, first_unroll->parentScope());
         // Get the loop nest for the unrolled path
-        ForLoop* unrolled_loop = scope_utils::cloneLoopNest(first_unroll, unroll_ite);
-        ForLoop* inlined_loop = scope_utils::cloneLoopNest(first_unroll, unroll_ite);
-        Expr* inner_most_inlined_loop = scope_utils::firstInnerMostScope(inlined_loop);
+        ForLoop* unrolled_loop =
+            scope_utils::cloneLoopNest(first_unroll, unroll_ite);
+        ForLoop* inlined_loop =
+            scope_utils::cloneLoopNest(first_unroll, unroll_ite);
+        Expr* inner_most_inlined_loop =
+            scope_utils::firstInnerMostScope(inlined_loop);
         // Get the predicate for the non-unrolled (inline) path
-        IfThenElse* inline_ite =
-          new IfThenElse(inline_predicate, {expr}, {}, inner_most_inlined_loop);
+        IfThenElse* inline_ite = new IfThenElse(
+            inline_predicate, {expr}, {}, inner_most_inlined_loop);
         std::unordered_map<Expr*, Expr*> inline_replacement_map;
-        inline_replacement_map.emplace( std::pair<Expr*, Expr*>(expr, inline_ite));
-        scope_utils::replaceExprsInScope(inner_most_inlined_loop, inline_replacement_map);
+        inline_replacement_map.emplace(
+            std::pair<Expr*, Expr*>(expr, inline_ite));
+        scope_utils::replaceExprsInScope(
+            inner_most_inlined_loop, inline_replacement_map);
 
         unroll_ite->body().push_back(unrolled_loop);
         unroll_ite->elseBody().push_back(inlined_loop);
@@ -129,20 +133,19 @@ void UnrollPass::handle(ForLoop* fl) {
 
       } else {
         // ! within_unroll
-        TensorView* out =
-          ir_utils::asTV(ir_utils::asExpr(expr)->outputs()[0]);
+        TensorView* out = ir_utils::asTV(ir_utils::asExpr(expr)->outputs()[0]);
         Int* pred =
             getPredicate(out, scope_utils::getLoopIndices(for_loops.back()));
-        if(!pred->isOneInt()){
+        if (!pred->isOneInt()) {
           IfThenElse* inline_ite =
-            new IfThenElse(pred, {expr}, {}, for_loops.back());
+              new IfThenElse(pred, {expr}, {}, for_loops.back());
           for_loops.back()->body().insert_before(expr, inline_ite);
           for_loops.back()->body().erase(expr);
         }
       }
     } // if (ir_utils::isTVOp(expr))
   } // for (auto expr : fl->body().exprs())
-  
+
   for_loops.pop_back();
   bool within_unroll = prev_unroll;
 }
@@ -172,22 +175,24 @@ void UnrollPass::computeMap() {
   }
 }
 
-  std::vector<Expr*> UnrollPass::runPass(Fusion* fusion, std::vector<Expr*> exprs) {
-    FusionGuard fg(fusion);
-    UnrollPass up(fusion, exprs);
-    up.computeMap();
-    std::vector<Expr*> mutated_exprs;
-    for(Expr* expr : exprs){
-      if(up.loop_replacement_map.find(expr) != up.loop_replacement_map.end()){
-        mutated_exprs.push_back(up.loop_replacement_map[expr]);
-      }else{
-        if(ir_utils::isScope(expr))
-          scope_utils::replaceExprsInScope(expr, up.loop_replacement_map);
-        mutated_exprs.push_back(expr);
-      }
+std::vector<Expr*> UnrollPass::runPass(
+    Fusion* fusion,
+    std::vector<Expr*> exprs) {
+  FusionGuard fg(fusion);
+  UnrollPass up(fusion, exprs);
+  up.computeMap();
+  std::vector<Expr*> mutated_exprs;
+  for (Expr* expr : exprs) {
+    if (up.loop_replacement_map.find(expr) != up.loop_replacement_map.end()) {
+      mutated_exprs.push_back(up.loop_replacement_map[expr]);
+    } else {
+      if (ir_utils::isScope(expr))
+        scope_utils::replaceExprsInScope(expr, up.loop_replacement_map);
+      mutated_exprs.push_back(expr);
     }
-    return mutated_exprs;
   }
+  return mutated_exprs;
+}
 
 Allocate* LoopNestGenerator::getAlloc(TensorView* tv) {
   TORCH_INTERNAL_ASSERT(
