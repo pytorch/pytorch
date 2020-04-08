@@ -377,11 +377,11 @@ struct SourceImporterImpl : public Resolver,
     }
 
     for (const auto& item : forward_hook_names) {
-      cu_->add_forward_hook(item);
+      class_type->addForwardHook(item);
     }
 
     for (const auto& item : forward_pre_hook_names) {
-      cu_->add_forward_pre_hook(item);
+      class_type->addForwardPreHook(item);
     }
 
     // Populate class attributes
