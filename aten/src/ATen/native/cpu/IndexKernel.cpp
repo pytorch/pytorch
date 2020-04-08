@@ -187,7 +187,7 @@ void cpu_masked_select_kernel(TensorIterator& iter, const func_t& f) {
 }
 
 void masked_select_kernel(TensorIterator& iter) {
-  AT_DISPATCH_ALL_TYPES_AND2(at::ScalarType::Bool, at::ScalarType::BFloat16,
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(at::ScalarType::Bool, at::ScalarType::BFloat16,
     iter.dtype(), "masked_select", [&] {
       auto mask_dtype = iter.input_dtype(1);
       if (mask_dtype == at::ScalarType::Bool) {

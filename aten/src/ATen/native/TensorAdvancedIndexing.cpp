@@ -685,15 +685,14 @@ static Tensor & masked_select_out_impl_cpu(Tensor & result, const Tensor & self,
   return result;
 }
 
-Tensor masked_select_cpu(const Tensor & self, const Tensor & mask) {
-  namedinference::compute_broadcast_outnames(self, mask);
-  Tensor result = at::empty({0}, self.options());
-  return masked_select_out_impl_cpu(result, self, mask);
-}
-
 Tensor & masked_select_out_cpu(Tensor & result, const Tensor & self, const Tensor & mask) {
   namedinference::compute_broadcast_outnames(self, mask);
   return masked_select_out_impl_cpu(result, self, mask);
+}
+
+Tensor masked_select_cpu(const Tensor & self, const Tensor & mask) {
+  Tensor result = at::empty({0}, self.options());
+  return masked_select_out_cpu(result, self, mask);
 }
 
 Tensor _gather_sparse_backward(const Tensor& self, int64_t dim, const Tensor& index, const Tensor& grad){
