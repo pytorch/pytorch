@@ -3532,7 +3532,9 @@ workflows:
             - setup
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
+                - /release\/.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           docker_image: "pytorch/manylinux-cuda102"
@@ -3543,7 +3545,9 @@ workflows:
             - setup
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
+                - /release\/.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           docker_image: "pytorch/manylinux-cuda102"
@@ -3554,7 +3558,9 @@ workflows:
             - setup
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
+                - /release\/.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           docker_image: "pytorch/manylinux-cuda102"
@@ -3565,7 +3571,9 @@ workflows:
             - setup
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
+                - /release\/.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           docker_image: "pytorch/manylinux-cuda92"
@@ -3576,7 +3584,9 @@ workflows:
             - setup
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
+                - /release\/.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           docker_image: "pytorch/manylinux-cuda92"
@@ -3587,7 +3597,9 @@ workflows:
             - setup
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
+                - /release\/.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           docker_image: "pytorch/manylinux-cuda92"
@@ -3598,7 +3610,9 @@ workflows:
             - setup
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
+                - /release\/.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           docker_image: "pytorch/manylinux-cuda101"
@@ -3609,7 +3623,9 @@ workflows:
             - setup
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
+                - /release\/.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           docker_image: "pytorch/manylinux-cuda101"
@@ -3620,7 +3636,9 @@ workflows:
             - setup
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
+                - /release\/.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           docker_image: "pytorch/manylinux-cuda101"
@@ -3631,7 +3649,9 @@ workflows:
             - setup
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
+                - /release\/.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           docker_image: "pytorch/manylinux-cuda102"
@@ -3642,7 +3662,9 @@ workflows:
             - setup
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
+                - /release\/.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           docker_image: "pytorch/manylinux-cuda102"
@@ -3653,7 +3675,9 @@ workflows:
             - setup
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
+                - /release\/.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           docker_image: "pytorch/manylinux-cuda102"
@@ -3664,7 +3688,9 @@ workflows:
             - setup
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
+                - /release\/.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           docker_image: "pytorch/conda-cuda"
@@ -3675,7 +3701,9 @@ workflows:
             - setup
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
+                - /release\/.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           docker_image: "pytorch/conda-cuda"
@@ -3686,7 +3714,9 @@ workflows:
             - setup
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
+                - /release\/.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           docker_image: "pytorch/conda-cuda"
@@ -3697,7 +3727,9 @@ workflows:
             - setup
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
+                - /release\/.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           docker_image: "pytorch/conda-cuda"
@@ -3708,7 +3740,9 @@ workflows:
             - setup
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
+                - /release\/.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           docker_image: "pytorch/conda-cuda"
@@ -3719,7 +3753,9 @@ workflows:
             - setup
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
+                - /release\/.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           docker_image: "pytorch/conda-cuda"
@@ -3730,7 +3766,9 @@ workflows:
             - setup
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
+                - /release\/.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           docker_image: "pytorch/conda-cuda"
@@ -3741,7 +3779,9 @@ workflows:
             - setup
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
+                - /release\/.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           docker_image: "pytorch/conda-cuda"
@@ -3752,7 +3792,9 @@ workflows:
             - setup
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
+                - /release\/.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           docker_image: "pytorch/conda-cuda"
@@ -3763,7 +3805,9 @@ workflows:
             - setup
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
+                - /release\/.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           docker_image: "pytorch/conda-cuda"
@@ -3774,7 +3818,9 @@ workflows:
             - setup
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
+                - /release\/.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           docker_image: "pytorch/conda-cuda"
@@ -3785,7 +3831,9 @@ workflows:
             - setup
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
+                - /release\/.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           docker_image: "pytorch/conda-cuda"
@@ -3796,7 +3844,9 @@ workflows:
             - setup
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
+                - /release\/.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           docker_image: "pytorch/conda-cuda"
@@ -3807,7 +3857,9 @@ workflows:
             - setup
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
+                - /release\/.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           docker_image: "pytorch/conda-cuda"
@@ -3818,7 +3870,9 @@ workflows:
             - setup
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
+                - /release\/.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           docker_image: "pytorch/conda-cuda"
@@ -3829,7 +3883,9 @@ workflows:
             - setup
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
+                - /release\/.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           docker_image: "pytorch/conda-cuda"
@@ -3840,7 +3896,9 @@ workflows:
             - setup
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
+                - /release\/.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           libtorch_variant: "shared-with-deps"
@@ -3852,7 +3910,9 @@ workflows:
             - setup
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
+                - /release\/.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           libtorch_variant: "shared-without-deps"
@@ -3864,7 +3924,9 @@ workflows:
             - setup
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
+                - /release\/.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           libtorch_variant: "static-with-deps"
@@ -3876,7 +3938,9 @@ workflows:
             - setup
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
+                - /release\/.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           libtorch_variant: "static-without-deps"
@@ -3888,7 +3952,9 @@ workflows:
             - setup
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
+                - /release\/.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           libtorch_variant: "shared-with-deps"
@@ -3900,7 +3966,9 @@ workflows:
             - setup
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
+                - /release\/.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           libtorch_variant: "shared-without-deps"
@@ -3912,7 +3980,9 @@ workflows:
             - setup
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
+                - /release\/.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           libtorch_variant: "static-with-deps"
@@ -3924,7 +3994,9 @@ workflows:
             - setup
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
+                - /release\/.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           libtorch_variant: "static-without-deps"
@@ -3936,7 +4008,9 @@ workflows:
             - setup
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
+                - /release\/.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           libtorch_variant: "shared-with-deps"
@@ -3948,7 +4022,9 @@ workflows:
             - setup
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
+                - /release\/.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           libtorch_variant: "shared-without-deps"
@@ -3960,7 +4036,9 @@ workflows:
             - setup
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
+                - /release\/.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           libtorch_variant: "static-with-deps"
@@ -3972,7 +4050,9 @@ workflows:
             - setup
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
+                - /release\/.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           libtorch_variant: "static-without-deps"
@@ -3984,7 +4064,9 @@ workflows:
             - setup
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
+                - /release\/.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           libtorch_variant: "shared-with-deps"
@@ -3996,7 +4078,9 @@ workflows:
             - setup
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
+                - /release\/.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           libtorch_variant: "shared-without-deps"
@@ -4008,7 +4092,9 @@ workflows:
             - setup
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
+                - /release\/.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           libtorch_variant: "static-with-deps"
@@ -4020,7 +4106,9 @@ workflows:
             - setup
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
+                - /release\/.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           libtorch_variant: "static-without-deps"
@@ -4032,7 +4120,9 @@ workflows:
             - setup
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
+                - /release\/.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           libtorch_variant: "shared-with-deps"
@@ -4044,7 +4134,9 @@ workflows:
             - setup
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
+                - /release\/.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           libtorch_variant: "shared-without-deps"
@@ -4056,7 +4148,9 @@ workflows:
             - setup
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
+                - /release\/.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           libtorch_variant: "static-with-deps"
@@ -4068,7 +4162,9 @@ workflows:
             - setup
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
+                - /release\/.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           libtorch_variant: "static-without-deps"
@@ -4080,7 +4176,9 @@ workflows:
             - setup
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
+                - /release\/.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           libtorch_variant: "shared-with-deps"
@@ -4092,7 +4190,9 @@ workflows:
             - setup
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
+                - /release\/.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           libtorch_variant: "shared-without-deps"
@@ -4104,7 +4204,9 @@ workflows:
             - setup
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
+                - /release\/.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           libtorch_variant: "static-with-deps"
@@ -4116,7 +4218,9 @@ workflows:
             - setup
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
+                - /release\/.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           libtorch_variant: "static-without-deps"
@@ -4128,7 +4232,9 @@ workflows:
             - setup
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
+                - /release\/.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           libtorch_variant: "shared-with-deps"
@@ -4140,7 +4246,9 @@ workflows:
             - setup
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
+                - /release\/.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           libtorch_variant: "shared-without-deps"
@@ -4152,7 +4260,9 @@ workflows:
             - setup
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
+                - /release\/.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           libtorch_variant: "static-with-deps"
@@ -4164,7 +4274,9 @@ workflows:
             - setup
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
+                - /release\/.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           libtorch_variant: "static-without-deps"
@@ -4176,7 +4288,9 @@ workflows:
             - setup
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
+                - /release\/.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           libtorch_variant: "shared-with-deps"
@@ -4188,7 +4302,9 @@ workflows:
             - setup
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
+                - /release\/.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           libtorch_variant: "shared-without-deps"
@@ -4200,7 +4316,9 @@ workflows:
             - setup
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
+                - /release\/.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           libtorch_variant: "static-with-deps"
@@ -4212,7 +4330,9 @@ workflows:
             - setup
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
+                - /release\/.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           libtorch_variant: "static-without-deps"
@@ -4224,7 +4344,9 @@ workflows:
             - setup
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
+                - /release\/.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
       - binary_mac_build:
@@ -4234,7 +4356,9 @@ workflows:
             - setup
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
+                - /release\/.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
       - binary_mac_build:
@@ -4244,7 +4368,9 @@ workflows:
             - setup
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
+                - /release\/.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
       - binary_mac_build:
@@ -4254,7 +4380,9 @@ workflows:
             - setup
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
+                - /release\/.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
       - binary_mac_build:
@@ -4264,7 +4392,9 @@ workflows:
             - setup
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
+                - /release\/.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
       - binary_mac_build:
@@ -4274,7 +4404,9 @@ workflows:
             - setup
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
+                - /release\/.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
       - binary_mac_build:
@@ -4284,7 +4416,9 @@ workflows:
             - setup
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
+                - /release\/.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
       - binary_mac_build:
@@ -4294,7 +4428,9 @@ workflows:
             - setup
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
+                - /release\/.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
       - binary_mac_build:
@@ -4304,7 +4440,9 @@ workflows:
             - setup
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
+                - /release\/.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
       # Pytorch iOS binary builds
@@ -4407,7 +4545,9 @@ workflows:
             - binary_linux_manywheel_3_6m_cpu_devtoolset7_nightly_build
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
+                - /release\/.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           docker_image: "pytorch/manylinux-cuda102"
@@ -4419,7 +4559,9 @@ workflows:
             - binary_linux_manywheel_3_7m_cpu_devtoolset7_nightly_build
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
+                - /release\/.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           docker_image: "pytorch/manylinux-cuda102"
@@ -4431,7 +4573,9 @@ workflows:
             - binary_linux_manywheel_3_8m_cpu_devtoolset7_nightly_build
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
+                - /release\/.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           docker_image: "pytorch/manylinux-cuda102"
@@ -4443,7 +4587,9 @@ workflows:
             - binary_linux_manywheel_3_6m_cu92_devtoolset7_nightly_build
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
+                - /release\/.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           docker_image: "pytorch/manylinux-cuda92"
@@ -4457,7 +4603,9 @@ workflows:
             - binary_linux_manywheel_3_7m_cu92_devtoolset7_nightly_build
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
+                - /release\/.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           docker_image: "pytorch/manylinux-cuda92"
@@ -4471,7 +4619,9 @@ workflows:
             - binary_linux_manywheel_3_8m_cu92_devtoolset7_nightly_build
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
+                - /release\/.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           docker_image: "pytorch/manylinux-cuda92"
@@ -4485,7 +4635,9 @@ workflows:
             - binary_linux_manywheel_3_6m_cu101_devtoolset7_nightly_build
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
+                - /release\/.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           docker_image: "pytorch/manylinux-cuda101"
@@ -4499,7 +4651,9 @@ workflows:
             - binary_linux_manywheel_3_7m_cu101_devtoolset7_nightly_build
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
+                - /release\/.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           docker_image: "pytorch/manylinux-cuda101"
@@ -4513,7 +4667,9 @@ workflows:
             - binary_linux_manywheel_3_8m_cu101_devtoolset7_nightly_build
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
+                - /release\/.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           docker_image: "pytorch/manylinux-cuda101"
@@ -4527,7 +4683,9 @@ workflows:
             - binary_linux_manywheel_3_6m_cu102_devtoolset7_nightly_build
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
+                - /release\/.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           docker_image: "pytorch/manylinux-cuda102"
@@ -4541,7 +4699,9 @@ workflows:
             - binary_linux_manywheel_3_7m_cu102_devtoolset7_nightly_build
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
+                - /release\/.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           docker_image: "pytorch/manylinux-cuda102"
@@ -4555,7 +4715,9 @@ workflows:
             - binary_linux_manywheel_3_8m_cu102_devtoolset7_nightly_build
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
+                - /release\/.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           docker_image: "pytorch/manylinux-cuda102"
@@ -4569,7 +4731,9 @@ workflows:
             - binary_linux_conda_3_5_cpu_devtoolset7_nightly_build
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
+                - /release\/.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           docker_image: "pytorch/conda-cuda"
@@ -4581,7 +4745,9 @@ workflows:
             - binary_linux_conda_3_6_cpu_devtoolset7_nightly_build
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
+                - /release\/.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           docker_image: "pytorch/conda-cuda"
@@ -4593,7 +4759,9 @@ workflows:
             - binary_linux_conda_3_7_cpu_devtoolset7_nightly_build
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
+                - /release\/.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           docker_image: "pytorch/conda-cuda"
@@ -4605,7 +4773,9 @@ workflows:
             - binary_linux_conda_3_8_cpu_devtoolset7_nightly_build
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
+                - /release\/.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           docker_image: "pytorch/conda-cuda"
@@ -4617,7 +4787,9 @@ workflows:
             - binary_linux_conda_3_5_cu92_devtoolset7_nightly_build
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
+                - /release\/.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           docker_image: "pytorch/conda-cuda"
@@ -4631,7 +4803,9 @@ workflows:
             - binary_linux_conda_3_6_cu92_devtoolset7_nightly_build
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
+                - /release\/.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           docker_image: "pytorch/conda-cuda"
@@ -4645,7 +4819,9 @@ workflows:
             - binary_linux_conda_3_7_cu92_devtoolset7_nightly_build
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
+                - /release\/.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           docker_image: "pytorch/conda-cuda"
@@ -4659,7 +4835,9 @@ workflows:
             - binary_linux_conda_3_8_cu92_devtoolset7_nightly_build
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
+                - /release\/.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           docker_image: "pytorch/conda-cuda"
@@ -4673,7 +4851,9 @@ workflows:
             - binary_linux_conda_3_5_cu101_devtoolset7_nightly_build
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
+                - /release\/.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           docker_image: "pytorch/conda-cuda"
@@ -4687,7 +4867,9 @@ workflows:
             - binary_linux_conda_3_6_cu101_devtoolset7_nightly_build
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
+                - /release\/.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           docker_image: "pytorch/conda-cuda"
@@ -4701,7 +4883,9 @@ workflows:
             - binary_linux_conda_3_7_cu101_devtoolset7_nightly_build
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
+                - /release\/.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           docker_image: "pytorch/conda-cuda"
@@ -4715,7 +4899,9 @@ workflows:
             - binary_linux_conda_3_8_cu101_devtoolset7_nightly_build
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
+                - /release\/.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           docker_image: "pytorch/conda-cuda"
@@ -4729,7 +4915,9 @@ workflows:
             - binary_linux_conda_3_5_cu102_devtoolset7_nightly_build
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
+                - /release\/.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           docker_image: "pytorch/conda-cuda"
@@ -4743,7 +4931,9 @@ workflows:
             - binary_linux_conda_3_6_cu102_devtoolset7_nightly_build
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
+                - /release\/.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           docker_image: "pytorch/conda-cuda"
@@ -4757,7 +4947,9 @@ workflows:
             - binary_linux_conda_3_7_cu102_devtoolset7_nightly_build
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
+                - /release\/.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           docker_image: "pytorch/conda-cuda"
@@ -4771,7 +4963,9 @@ workflows:
             - binary_linux_conda_3_8_cu102_devtoolset7_nightly_build
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
+                - /release\/.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           docker_image: "pytorch/conda-cuda"
@@ -4785,7 +4979,9 @@ workflows:
             - binary_linux_libtorch_3_7m_cpu_devtoolset7_nightly_shared-with-deps_build
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
+                - /release\/.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           libtorch_variant: "shared-with-deps"
@@ -4798,7 +4994,9 @@ workflows:
             - binary_linux_libtorch_3_7m_cpu_devtoolset7_nightly_shared-without-deps_build
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
+                - /release\/.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           libtorch_variant: "shared-without-deps"
@@ -4811,7 +5009,9 @@ workflows:
             - binary_linux_libtorch_3_7m_cpu_devtoolset7_nightly_static-with-deps_build
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
+                - /release\/.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           libtorch_variant: "static-with-deps"
@@ -4824,7 +5024,9 @@ workflows:
             - binary_linux_libtorch_3_7m_cpu_devtoolset7_nightly_static-without-deps_build
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
+                - /release\/.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           libtorch_variant: "static-without-deps"
@@ -4837,7 +5039,9 @@ workflows:
             - binary_linux_libtorch_3_7m_cu92_devtoolset7_nightly_shared-with-deps_build
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
+                - /release\/.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           libtorch_variant: "shared-with-deps"
@@ -4852,7 +5056,9 @@ workflows:
             - binary_linux_libtorch_3_7m_cu92_devtoolset7_nightly_shared-without-deps_build
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
+                - /release\/.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           libtorch_variant: "shared-without-deps"
@@ -4867,7 +5073,9 @@ workflows:
             - binary_linux_libtorch_3_7m_cu92_devtoolset7_nightly_static-with-deps_build
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
+                - /release\/.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           libtorch_variant: "static-with-deps"
@@ -4882,7 +5090,9 @@ workflows:
             - binary_linux_libtorch_3_7m_cu92_devtoolset7_nightly_static-without-deps_build
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
+                - /release\/.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           libtorch_variant: "static-without-deps"
@@ -4897,7 +5107,9 @@ workflows:
             - binary_linux_libtorch_3_7m_cu101_devtoolset7_nightly_shared-with-deps_build
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
+                - /release\/.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           libtorch_variant: "shared-with-deps"
@@ -4912,7 +5124,9 @@ workflows:
             - binary_linux_libtorch_3_7m_cu101_devtoolset7_nightly_shared-without-deps_build
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
+                - /release\/.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           libtorch_variant: "shared-without-deps"
@@ -4927,7 +5141,9 @@ workflows:
             - binary_linux_libtorch_3_7m_cu101_devtoolset7_nightly_static-with-deps_build
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
+                - /release\/.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           libtorch_variant: "static-with-deps"
@@ -4942,7 +5158,9 @@ workflows:
             - binary_linux_libtorch_3_7m_cu101_devtoolset7_nightly_static-without-deps_build
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
+                - /release\/.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           libtorch_variant: "static-without-deps"
@@ -4957,7 +5175,9 @@ workflows:
             - binary_linux_libtorch_3_7m_cu102_devtoolset7_nightly_shared-with-deps_build
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
+                - /release\/.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           libtorch_variant: "shared-with-deps"
@@ -4972,7 +5192,9 @@ workflows:
             - binary_linux_libtorch_3_7m_cu102_devtoolset7_nightly_shared-without-deps_build
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
+                - /release\/.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           libtorch_variant: "shared-without-deps"
@@ -4987,7 +5209,9 @@ workflows:
             - binary_linux_libtorch_3_7m_cu102_devtoolset7_nightly_static-with-deps_build
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
+                - /release\/.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           libtorch_variant: "static-with-deps"
@@ -5002,7 +5226,9 @@ workflows:
             - binary_linux_libtorch_3_7m_cu102_devtoolset7_nightly_static-without-deps_build
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
+                - /release\/.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           libtorch_variant: "static-without-deps"
@@ -5017,7 +5243,9 @@ workflows:
             - binary_linux_libtorch_3_7m_cpu_gcc5_4_cxx11-abi_nightly_shared-with-deps_build
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
+                - /release\/.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           libtorch_variant: "shared-with-deps"
@@ -5030,7 +5258,9 @@ workflows:
             - binary_linux_libtorch_3_7m_cpu_gcc5_4_cxx11-abi_nightly_shared-without-deps_build
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
+                - /release\/.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           libtorch_variant: "shared-without-deps"
@@ -5043,7 +5273,9 @@ workflows:
             - binary_linux_libtorch_3_7m_cpu_gcc5_4_cxx11-abi_nightly_static-with-deps_build
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
+                - /release\/.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           libtorch_variant: "static-with-deps"
@@ -5056,7 +5288,9 @@ workflows:
             - binary_linux_libtorch_3_7m_cpu_gcc5_4_cxx11-abi_nightly_static-without-deps_build
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
+                - /release\/.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           libtorch_variant: "static-without-deps"
@@ -5069,7 +5303,9 @@ workflows:
             - binary_linux_libtorch_3_7m_cu92_gcc5_4_cxx11-abi_nightly_shared-with-deps_build
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
+                - /release\/.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           libtorch_variant: "shared-with-deps"
@@ -5084,7 +5320,9 @@ workflows:
             - binary_linux_libtorch_3_7m_cu92_gcc5_4_cxx11-abi_nightly_shared-without-deps_build
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
+                - /release\/.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           libtorch_variant: "shared-without-deps"
@@ -5099,7 +5337,9 @@ workflows:
             - binary_linux_libtorch_3_7m_cu92_gcc5_4_cxx11-abi_nightly_static-with-deps_build
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
+                - /release\/.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           libtorch_variant: "static-with-deps"
@@ -5114,7 +5354,9 @@ workflows:
             - binary_linux_libtorch_3_7m_cu92_gcc5_4_cxx11-abi_nightly_static-without-deps_build
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
+                - /release\/.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           libtorch_variant: "static-without-deps"
@@ -5129,7 +5371,9 @@ workflows:
             - binary_linux_libtorch_3_7m_cu101_gcc5_4_cxx11-abi_nightly_shared-with-deps_build
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
+                - /release\/.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           libtorch_variant: "shared-with-deps"
@@ -5144,7 +5388,9 @@ workflows:
             - binary_linux_libtorch_3_7m_cu101_gcc5_4_cxx11-abi_nightly_shared-without-deps_build
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
+                - /release\/.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           libtorch_variant: "shared-without-deps"
@@ -5159,7 +5405,9 @@ workflows:
             - binary_linux_libtorch_3_7m_cu101_gcc5_4_cxx11-abi_nightly_static-with-deps_build
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
+                - /release\/.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           libtorch_variant: "static-with-deps"
@@ -5174,7 +5422,9 @@ workflows:
             - binary_linux_libtorch_3_7m_cu101_gcc5_4_cxx11-abi_nightly_static-without-deps_build
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
+                - /release\/.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           libtorch_variant: "static-without-deps"
@@ -5189,7 +5439,9 @@ workflows:
             - binary_linux_libtorch_3_7m_cu102_gcc5_4_cxx11-abi_nightly_shared-with-deps_build
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
+                - /release\/.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           libtorch_variant: "shared-with-deps"
@@ -5204,7 +5456,9 @@ workflows:
             - binary_linux_libtorch_3_7m_cu102_gcc5_4_cxx11-abi_nightly_shared-without-deps_build
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
+                - /release\/.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           libtorch_variant: "shared-without-deps"
@@ -5219,7 +5473,9 @@ workflows:
             - binary_linux_libtorch_3_7m_cu102_gcc5_4_cxx11-abi_nightly_static-with-deps_build
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
+                - /release\/.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           libtorch_variant: "static-with-deps"
@@ -5234,7 +5490,9 @@ workflows:
             - binary_linux_libtorch_3_7m_cu102_gcc5_4_cxx11-abi_nightly_static-without-deps_build
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
+                - /release\/.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           libtorch_variant: "static-without-deps"
@@ -5257,7 +5515,8 @@ workflows:
             - binary_linux_manywheel_3_6m_cpu_devtoolset7_nightly_test
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           context: org-member
@@ -5269,7 +5528,8 @@ workflows:
             - binary_linux_manywheel_3_7m_cpu_devtoolset7_nightly_test
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           context: org-member
@@ -5281,7 +5541,8 @@ workflows:
             - binary_linux_manywheel_3_8m_cpu_devtoolset7_nightly_test
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           context: org-member
@@ -5293,7 +5554,8 @@ workflows:
             - binary_linux_manywheel_3_6m_cu92_devtoolset7_nightly_test
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           context: org-member
@@ -5305,7 +5567,8 @@ workflows:
             - binary_linux_manywheel_3_7m_cu92_devtoolset7_nightly_test
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           context: org-member
@@ -5317,7 +5580,8 @@ workflows:
             - binary_linux_manywheel_3_8m_cu92_devtoolset7_nightly_test
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           context: org-member
@@ -5329,7 +5593,8 @@ workflows:
             - binary_linux_manywheel_3_6m_cu101_devtoolset7_nightly_test
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           context: org-member
@@ -5341,7 +5606,8 @@ workflows:
             - binary_linux_manywheel_3_7m_cu101_devtoolset7_nightly_test
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           context: org-member
@@ -5353,7 +5619,8 @@ workflows:
             - binary_linux_manywheel_3_8m_cu101_devtoolset7_nightly_test
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           context: org-member
@@ -5365,7 +5632,8 @@ workflows:
             - binary_linux_manywheel_3_6m_cu102_devtoolset7_nightly_test
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           context: org-member
@@ -5377,7 +5645,8 @@ workflows:
             - binary_linux_manywheel_3_7m_cu102_devtoolset7_nightly_test
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           context: org-member
@@ -5389,7 +5658,8 @@ workflows:
             - binary_linux_manywheel_3_8m_cu102_devtoolset7_nightly_test
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           context: org-member
@@ -5401,7 +5671,8 @@ workflows:
             - binary_linux_conda_3_5_cpu_devtoolset7_nightly_test
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           context: org-member
@@ -5413,7 +5684,8 @@ workflows:
             - binary_linux_conda_3_6_cpu_devtoolset7_nightly_test
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           context: org-member
@@ -5425,7 +5697,8 @@ workflows:
             - binary_linux_conda_3_7_cpu_devtoolset7_nightly_test
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           context: org-member
@@ -5437,7 +5710,8 @@ workflows:
             - binary_linux_conda_3_8_cpu_devtoolset7_nightly_test
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           context: org-member
@@ -5449,7 +5723,8 @@ workflows:
             - binary_linux_conda_3_5_cu92_devtoolset7_nightly_test
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           context: org-member
@@ -5461,7 +5736,8 @@ workflows:
             - binary_linux_conda_3_6_cu92_devtoolset7_nightly_test
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           context: org-member
@@ -5473,7 +5749,8 @@ workflows:
             - binary_linux_conda_3_7_cu92_devtoolset7_nightly_test
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           context: org-member
@@ -5485,7 +5762,8 @@ workflows:
             - binary_linux_conda_3_8_cu92_devtoolset7_nightly_test
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           context: org-member
@@ -5497,7 +5775,8 @@ workflows:
             - binary_linux_conda_3_5_cu101_devtoolset7_nightly_test
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           context: org-member
@@ -5509,7 +5788,8 @@ workflows:
             - binary_linux_conda_3_6_cu101_devtoolset7_nightly_test
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           context: org-member
@@ -5521,7 +5801,8 @@ workflows:
             - binary_linux_conda_3_7_cu101_devtoolset7_nightly_test
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           context: org-member
@@ -5533,7 +5814,8 @@ workflows:
             - binary_linux_conda_3_8_cu101_devtoolset7_nightly_test
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           context: org-member
@@ -5545,7 +5827,8 @@ workflows:
             - binary_linux_conda_3_5_cu102_devtoolset7_nightly_test
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           context: org-member
@@ -5557,7 +5840,8 @@ workflows:
             - binary_linux_conda_3_6_cu102_devtoolset7_nightly_test
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           context: org-member
@@ -5569,7 +5853,8 @@ workflows:
             - binary_linux_conda_3_7_cu102_devtoolset7_nightly_test
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           context: org-member
@@ -5581,7 +5866,8 @@ workflows:
             - binary_linux_conda_3_8_cu102_devtoolset7_nightly_test
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           context: org-member
@@ -5593,7 +5879,8 @@ workflows:
             - binary_linux_libtorch_3_7m_cpu_devtoolset7_nightly_shared-with-deps_test
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           libtorch_variant: "shared-with-deps"
@@ -5606,7 +5893,8 @@ workflows:
             - binary_linux_libtorch_3_7m_cpu_devtoolset7_nightly_shared-without-deps_test
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           libtorch_variant: "shared-without-deps"
@@ -5619,7 +5907,8 @@ workflows:
             - binary_linux_libtorch_3_7m_cpu_devtoolset7_nightly_static-with-deps_test
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           libtorch_variant: "static-with-deps"
@@ -5632,7 +5921,8 @@ workflows:
             - binary_linux_libtorch_3_7m_cpu_devtoolset7_nightly_static-without-deps_test
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           libtorch_variant: "static-without-deps"
@@ -5645,7 +5935,8 @@ workflows:
             - binary_linux_libtorch_3_7m_cu92_devtoolset7_nightly_shared-with-deps_test
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           libtorch_variant: "shared-with-deps"
@@ -5658,7 +5949,8 @@ workflows:
             - binary_linux_libtorch_3_7m_cu92_devtoolset7_nightly_shared-without-deps_test
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           libtorch_variant: "shared-without-deps"
@@ -5671,7 +5963,8 @@ workflows:
             - binary_linux_libtorch_3_7m_cu92_devtoolset7_nightly_static-with-deps_test
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           libtorch_variant: "static-with-deps"
@@ -5684,7 +5977,8 @@ workflows:
             - binary_linux_libtorch_3_7m_cu92_devtoolset7_nightly_static-without-deps_test
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           libtorch_variant: "static-without-deps"
@@ -5697,7 +5991,8 @@ workflows:
             - binary_linux_libtorch_3_7m_cu101_devtoolset7_nightly_shared-with-deps_test
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           libtorch_variant: "shared-with-deps"
@@ -5710,7 +6005,8 @@ workflows:
             - binary_linux_libtorch_3_7m_cu101_devtoolset7_nightly_shared-without-deps_test
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           libtorch_variant: "shared-without-deps"
@@ -5723,7 +6019,8 @@ workflows:
             - binary_linux_libtorch_3_7m_cu101_devtoolset7_nightly_static-with-deps_test
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           libtorch_variant: "static-with-deps"
@@ -5736,7 +6033,8 @@ workflows:
             - binary_linux_libtorch_3_7m_cu101_devtoolset7_nightly_static-without-deps_test
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           libtorch_variant: "static-without-deps"
@@ -5749,7 +6047,8 @@ workflows:
             - binary_linux_libtorch_3_7m_cu102_devtoolset7_nightly_shared-with-deps_test
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           libtorch_variant: "shared-with-deps"
@@ -5762,7 +6061,8 @@ workflows:
             - binary_linux_libtorch_3_7m_cu102_devtoolset7_nightly_shared-without-deps_test
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           libtorch_variant: "shared-without-deps"
@@ -5775,7 +6075,8 @@ workflows:
             - binary_linux_libtorch_3_7m_cu102_devtoolset7_nightly_static-with-deps_test
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           libtorch_variant: "static-with-deps"
@@ -5788,7 +6089,8 @@ workflows:
             - binary_linux_libtorch_3_7m_cu102_devtoolset7_nightly_static-without-deps_test
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           libtorch_variant: "static-without-deps"
@@ -5801,7 +6103,8 @@ workflows:
             - binary_linux_libtorch_3_7m_cpu_gcc5_4_cxx11-abi_nightly_shared-with-deps_test
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           libtorch_variant: "shared-with-deps"
@@ -5814,7 +6117,8 @@ workflows:
             - binary_linux_libtorch_3_7m_cpu_gcc5_4_cxx11-abi_nightly_shared-without-deps_test
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           libtorch_variant: "shared-without-deps"
@@ -5827,7 +6131,8 @@ workflows:
             - binary_linux_libtorch_3_7m_cpu_gcc5_4_cxx11-abi_nightly_static-with-deps_test
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           libtorch_variant: "static-with-deps"
@@ -5840,7 +6145,8 @@ workflows:
             - binary_linux_libtorch_3_7m_cpu_gcc5_4_cxx11-abi_nightly_static-without-deps_test
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           libtorch_variant: "static-without-deps"
@@ -5853,7 +6159,8 @@ workflows:
             - binary_linux_libtorch_3_7m_cu92_gcc5_4_cxx11-abi_nightly_shared-with-deps_test
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           libtorch_variant: "shared-with-deps"
@@ -5866,7 +6173,8 @@ workflows:
             - binary_linux_libtorch_3_7m_cu92_gcc5_4_cxx11-abi_nightly_shared-without-deps_test
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           libtorch_variant: "shared-without-deps"
@@ -5879,7 +6187,8 @@ workflows:
             - binary_linux_libtorch_3_7m_cu92_gcc5_4_cxx11-abi_nightly_static-with-deps_test
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           libtorch_variant: "static-with-deps"
@@ -5892,7 +6201,8 @@ workflows:
             - binary_linux_libtorch_3_7m_cu92_gcc5_4_cxx11-abi_nightly_static-without-deps_test
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           libtorch_variant: "static-without-deps"
@@ -5905,7 +6215,8 @@ workflows:
             - binary_linux_libtorch_3_7m_cu101_gcc5_4_cxx11-abi_nightly_shared-with-deps_test
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           libtorch_variant: "shared-with-deps"
@@ -5918,7 +6229,8 @@ workflows:
             - binary_linux_libtorch_3_7m_cu101_gcc5_4_cxx11-abi_nightly_shared-without-deps_test
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           libtorch_variant: "shared-without-deps"
@@ -5931,7 +6243,8 @@ workflows:
             - binary_linux_libtorch_3_7m_cu101_gcc5_4_cxx11-abi_nightly_static-with-deps_test
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           libtorch_variant: "static-with-deps"
@@ -5944,7 +6257,8 @@ workflows:
             - binary_linux_libtorch_3_7m_cu101_gcc5_4_cxx11-abi_nightly_static-without-deps_test
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           libtorch_variant: "static-without-deps"
@@ -5957,7 +6271,8 @@ workflows:
             - binary_linux_libtorch_3_7m_cu102_gcc5_4_cxx11-abi_nightly_shared-with-deps_test
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           libtorch_variant: "shared-with-deps"
@@ -5970,7 +6285,8 @@ workflows:
             - binary_linux_libtorch_3_7m_cu102_gcc5_4_cxx11-abi_nightly_shared-without-deps_test
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           libtorch_variant: "shared-without-deps"
@@ -5983,7 +6299,8 @@ workflows:
             - binary_linux_libtorch_3_7m_cu102_gcc5_4_cxx11-abi_nightly_static-with-deps_test
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           libtorch_variant: "static-with-deps"
@@ -5996,7 +6313,8 @@ workflows:
             - binary_linux_libtorch_3_7m_cu102_gcc5_4_cxx11-abi_nightly_static-without-deps_test
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           libtorch_variant: "static-without-deps"
@@ -6009,7 +6327,8 @@ workflows:
             - binary_macos_wheel_3_5_cpu_nightly_build
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           context: org-member
@@ -6021,7 +6340,8 @@ workflows:
             - binary_macos_wheel_3_6_cpu_nightly_build
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           context: org-member
@@ -6033,7 +6353,8 @@ workflows:
             - binary_macos_wheel_3_7_cpu_nightly_build
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           context: org-member
@@ -6045,7 +6366,8 @@ workflows:
             - binary_macos_wheel_3_8_cpu_nightly_build
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           context: org-member
@@ -6057,7 +6379,8 @@ workflows:
             - binary_macos_conda_3_5_cpu_nightly_build
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           context: org-member
@@ -6069,7 +6392,8 @@ workflows:
             - binary_macos_conda_3_6_cpu_nightly_build
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           context: org-member
@@ -6081,7 +6405,8 @@ workflows:
             - binary_macos_conda_3_7_cpu_nightly_build
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           context: org-member
@@ -6093,7 +6418,8 @@ workflows:
             - binary_macos_conda_3_8_cpu_nightly_build
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           context: org-member
@@ -6105,7 +6431,8 @@ workflows:
             - binary_macos_libtorch_3_7_cpu_nightly_build
           filters:
             branches:
-              only: nightly
+              only:
+                - nightly
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           context: org-member
