@@ -1629,9 +1629,7 @@
   requires_tensor: True
 
 - func: mkldnn_linear_backward(Tensor self, Tensor grad_output, Tensor weight, bool[3] output_mask) -> (Tensor, Tensor, Tensor)
-  python_module: nn
-  dispatch:
-    MkldnnCPU: mkldnn_linear_backward
+  requires_tensor: True
 
 - func: fbgemm_linear_int8_weight_fp32_activation(Tensor input, Tensor weight, Tensor packed, Tensor col_offsets, Scalar weight_scale, Scalar weight_zero_point, Tensor bias) -> Tensor
 
