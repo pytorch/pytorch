@@ -176,6 +176,17 @@ void ProfilingRecord::instrumentBlock(Block* block) {
       instrumentBlock(b);
     }
   }
+
+  // inserting profile nodes on block outputs
+  // allows us to eliminate more guards as
+  // the use of a guard is now in the same
+  // block as opposed to being separated from
+  // the definition by block boundaries
+  for (auto i : block->return_node()->inputs()) {
+    if (i->type()->isSubtypeOf(TensorType::get())) {
+      insertShapeProfile(block->return_node(), i);
+    }
+  }
 }
 
 std::unique_ptr<ProfilingRecord> ProfilingRecord::instrumentGraph(
@@ -187,11 +198,6 @@ std::unique_ptr<ProfilingRecord> ProfilingRecord::instrumentGraph(
   unprofileBlock(new_g->block());
   pr->instrumentBlock(new_g->block());
 
-  for (auto i : new_g->return_node()->inputs()) {
-    if (i->type()->isSubtypeOf(TensorType::get())) {
-      pr->insertShapeProfile(new_g->return_node(), i);
-    }
-  }
   std::function<void(Stack&)> counter = [raw_pr](Stack& stack) {
     int64_t frame_id;
     pop(stack, frame_id);
