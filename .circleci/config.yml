@@ -817,6 +817,13 @@ jobs:
               echo "Not updating compiler"
             fi
     - run:
+        name: Inject CUDA_SEPARABLE_COMPILATION
+        command: |
+          # Makes sure only to inject this for manywheel builds that are CUDA 10+
+          if [[ "<< parameters.build_environment >>" =~ *manywheel*cu10* ]]; then
+            echo 'export CUDA_SEPARABLE_COMPILATION=YES' >> "${BASH_ENV}"
+          fi
+    - run:
         name: Build
         no_output_timeout: "1h"
         command: |
