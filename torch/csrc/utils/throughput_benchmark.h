@@ -8,6 +8,7 @@
 
 #include <iostream>
 #include <memory>
+#include <string>
 #include <vector>
 
 namespace py = pybind11;
@@ -24,7 +25,7 @@ struct BenchmarkExecutionStats {
   int64_t num_iters{-1};
 };
 
-std::ostream& operator<<(std::ostream& os, const BenchmarkExecutionStats& value);
+C10_EXPORT std::ostream& operator<<(std::ostream& os, const BenchmarkExecutionStats& value);
 
 /**
  * Use this struct in order to configure a throughput benchmark run.
@@ -52,6 +53,10 @@ struct BenchmarkConfig {
   // Number of iterations the benchmark should run with. This number is separate
   // from the warmup iterations
   int64_t num_iters{100};
+  // If set autograd profiler will be enabled. I.e. this variable would be created
+  // before the main benchmark loop (but after the warmup):
+  // RecordProfile guard(profiler_output_path);
+  std::string profiler_output_path{""};
 };
 
 namespace detail {
@@ -60,7 +65,7 @@ namespace detail {
  * A helper class to abstract out different models we test throughput of
  */
 template <class Input, class Output, class Model>
-class BenchmarkHelper {
+class C10_EXPORT BenchmarkHelper {
 public:
   BenchmarkHelper();
   explicit BenchmarkHelper(Model model): model_(model), initialized_(true) {}
