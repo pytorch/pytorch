@@ -4108,18 +4108,6 @@ for shape in [(1,), ()]:
         with self.assertRaisesRegex(RuntimeError, "must implement the backward"):
             BadBw.apply(inp).sum().backward()
 
-    def test_leaky_relu_inplace_with_neg_slope(self):
-        for device in torch.testing.get_all_device_types():
-            a = torch.tensor([-1., 1.], device=device, requires_grad=True)
-            b = torch.nn.functional.leaky_relu_(a.clone(), -2)
-            with self.assertRaisesRegex(RuntimeError, "call out-of-place version"):
-                b.backward(torch.ones(2, device=device))
-
-            a = torch.tensor([-1., 1.], device=device, requires_grad=True)
-            b = torch.nn.functional.rrelu_(a.clone(), -5.0, 1.0)
-            with self.assertRaisesRegex(RuntimeError, "call out-of-place version"):
-                b.backward(torch.ones(2, device=device))
-
     def test_custom_function_local_inplace(self):
         class MyFn(torch.autograd.Function):
             @staticmethod
@@ -5703,6 +5691,18 @@ class TestAutogradDeviceType(TestCase):
         self.assertTrue("Cudnn" in str(loss_cudnn.grad_fn))
         grad_cudnn, = torch.autograd.grad(loss_cudnn, log_probs, grad_out)
         self.assertEqual(grad_cudnn, grad_native, prec=1e-4)
+
+    @skipCUDAIfRocm
+    def test_leaky_relu_inplace_with_neg_slope(self, device):
+        a = torch.tensor([-1., 1.], device=device, requires_grad=True)
+        b = torch.nn.functional.leaky_relu_(a.clone(), -2)
+        with self.assertRaisesRegex(RuntimeError, "call out-of-place version"):
+            b.backward(torch.ones(2, device=device))
+
+        a = torch.tensor([-1., 1.], device=device, requires_grad=True)
+        b = torch.nn.functional.rrelu_(a.clone(), -5.0, 1.0)
+        with self.assertRaisesRegex(RuntimeError, "call out-of-place version"):
+            b.backward(torch.ones(2, device=device))
 
     @onlyCUDA
     def test_free_unneeded_tensor(self, device):
