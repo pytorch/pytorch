@@ -936,13 +936,18 @@ void testGPU_FusionExecKernel() {
   // Register your outputs
   fusion.addOutput(tv3);
 
+  tv3->split(0, 4);
+  
   // For all inputs, computeAt the output inline, temporaries should be squeezed
   // between them
-  tv0->computeAt(tv3, -1);
-  tv1->computeAt(tv3, -1);
+  tv0->computeAt(tv3, 1);
+  tv1->computeAt(tv3, 1);
 
   // Parallelize TV3
   tv3->axis(0)->parallelize(ParallelType::BIDx);
+  tv2->axis(1)->parallelize(ParallelType::Unroll);
+  tv3->axis(1)->parallelize(ParallelType::Unroll);
+  tv2->axis(-1)->parallelize(ParallelType::TIDx);
   tv3->axis(-1)->parallelize(ParallelType::TIDx);
 
   torch::jit::fuser::cuda::CudaKernel prog;
@@ -1002,6 +1007,63 @@ void testGPU_FusionForLoop() {
   }
 }
 
+void testGPU_FusionLoopUnroll() {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  // Set up your input tensor views
+  TensorView* tv0 = makeDummyTensor(1);
+  TensorView* tv1 = makeDummyTensor(1);
+
+  // Register your inputs
+  fusion.addInput(tv0);
+  fusion.addInput(tv1);
+
+  // Do math with it, it returns a `Val*` but can be static_casted back to
+  // TensorView
+  TensorView* tv2 = static_cast<TensorView*>(add(tv1, new Float(2.0)));
+  TensorView* tv3 = static_cast<TensorView*>(add(tv0, tv2));
+
+  // Register your outputs
+  fusion.addOutput(tv3);
+
+  tv3->split(0, 16);
+  tv3->split(0, 4);
+
+  // For all inputs, computeAt the output inline, temporaries should be squeezed
+  // between them
+  tv0->computeAt(tv3, 1);
+  tv1->computeAt(tv3, 1);
+
+  // Parallelize
+  tv2->axis(1)->parallelize(ParallelType::Unroll);
+  tv3->axis(1)->parallelize(ParallelType::Unroll);
+  tv2->axis(-1)->parallelize(ParallelType::TIDx);
+  tv3->axis(-1)->parallelize(ParallelType::TIDx);
+  tv3->axis(0)->parallelize(ParallelType::BIDx);
+
+  torch::jit::fuser::cuda::CudaKernel prog;
+  prog.device_ = 0;
+  prog.grid(1); // 1 CTA
+  prog.block(128); // 128 Threads
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+
+  at::Tensor input1 = at::ones({1, 128}, options);
+  at::Tensor input2 = at::ones_like(input1);
+  ;
+  at::Tensor output = at::empty_like(input1);
+  std::vector<at::Tensor> inputs{{input1, input2}};
+  std::vector<at::Tensor> outputs{{output}};
+
+  torch::jit::fuser::cuda::compileKernel(fusion, prog);
+  torch::jit::fuser::cuda::runTestKernel(prog, inputs, outputs);
+
+  at::Tensor check = at::full({1, 128}, 4, options);
+  ;
+  TORCH_CHECK(output.equal(check));
+
+}
 
 } // namespace jit
 } // namespace torch

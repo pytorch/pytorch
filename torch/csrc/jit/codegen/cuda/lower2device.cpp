@@ -1,8 +1,12 @@
 #include <torch/csrc/jit/codegen/cuda/arith.h>
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
+#include <torch/csrc/jit/codegen/cuda/index_compute.h>
+#include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
 #include <torch/csrc/jit/codegen/cuda/lower_loops.h>
 #include <torch/csrc/jit/codegen/cuda/lower_utils.h>
 #include <torch/csrc/jit/codegen/cuda/mutator.h>
+#include <torch/csrc/jit/codegen/cuda/predicate_compute.h>
+#include <torch/csrc/jit/codegen/cuda/transform_iter.h>
 #include <torch/csrc/jit/codegen/cuda/transform_replay.h>
 #include <torch/csrc/jit/codegen/cuda/type.h>
 
@@ -174,34 +178,6 @@ TensorIndex* GPULower::getConsumerIndex(TensorView* consumer) {
   return getLocalConsumerIndex(consumer);
 }
 
-IfThenElse* GPULower::getPredicate(const TensorView* const pred_tv) {
-  TensorIndex* ti = new TensorIndex(
-      pred_tv,
-      IndexCompute::computeIndices(
-          pred_tv, scope_utils::getLoopIndices(active_scope)));
-
-  std::vector<Int*> all_preds = PredicateCompute::computePredicates(ti);
-
-  std::vector<Int*> preds;
-
-  Int* one = new Int(1);
-
-  for (Int* pred : all_preds)
-    if (!pred->sameAs(one))
-      preds.push_back(pred);
-
-  if (preds.size() == 0) {
-    return new IfThenElse(one, {}, {}, active_scope);
-  }
-
-  Int* cond = preds[0];
-
-  for (decltype(preds.size()) i{1}; i < preds.size(); i++)
-    cond = static_cast<Int*>(andOp(cond, preds[i]));
-
-  return new IfThenElse(cond, {}, {}, active_scope);
-}
-
 void GPULower::pushBack(Expr* expr) {
   if (active_scope == nullptr)
     lowered_exprs.push_back(expr);
@@ -218,6 +194,46 @@ Statement* GPULower::mutate(Expr* expr) {
   return mutated_stmt;
 }
 
+Statement* GPULower::mutate(IfThenElse* ite) {
+  Expr* prev_scope = active_scope;
+  active_scope = ite;
+  std::vector<Expr*> mutated_exprs;
+  bool is_mutated = false;
+  for (auto expr : ite->body().exprs()) {
+    Statement* mutated_stmt = mutate(expr);
+    Expr* mutated_expr = ir_utils::asExpr(mutated_stmt);
+    mutated_exprs.push_back(mutated_expr);
+    is_mutated = is_mutated | (mutated_expr != expr);
+  }
+
+  std::vector<Expr*> mutated_else_exprs;
+  for (auto expr : ite->elseBody().exprs()) {
+    Statement* mutated_stmt = mutate(expr);
+    Expr* mutated_expr = ir_utils::asExpr(mutated_stmt);
+    mutated_else_exprs.push_back(mutated_expr);
+    is_mutated = is_mutated | (mutated_expr != expr);
+  }
+
+  if (is_mutated) {
+    ite->body().clear();
+    for (auto expr : mutated_exprs)
+      ite->body().push_back(expr);
+    ite->elseBody().clear();
+    for (auto expr : mutated_else_exprs)
+      ite->elseBody().push_back(expr);
+  }
+
+  active_scope = prev_scope;
+
+  if (is_mutated){
+    auto new_ite = new IfThenElse(
+        ite->cond(), mutated_exprs, mutated_else_exprs, ite->parentScope());
+    return new_ite;
+  }
+
+  return ite;
+}
+
 Statement* GPULower::mutate(ForLoop* fl) {
   Expr* prev_scope = active_scope;
   active_scope = fl;
@@ -225,28 +241,18 @@ Statement* GPULower::mutate(ForLoop* fl) {
   bool is_mutated = false;
   for (auto expr : fl->body().exprs()) {
     Statement* mutated_stmt = mutate(expr);
-
-    TORCH_INTERNAL_ASSERT(
-        mutated_stmt->isExpr(),
-        "Tried to generate a kernel but hit a non expression during lowering: ",
-        mutated_stmt);
-
-    mutated_exprs.push_back(static_cast<Expr*>(mutated_stmt));
-    if (!(mutated_exprs.back()->sameAs(expr)))
-      is_mutated = true;
-  }
-
-  if (is_mutated) {
-    scope_utils::clearScope(active_scope);
-    for (auto expr : mutated_exprs)
-      pushBack(expr);
+    Expr* mutated_expr = ir_utils::asExpr(mutated_stmt);
+    mutated_exprs.push_back(mutated_expr);
+    is_mutated = is_mutated | (mutated_expr != expr);
   }
 
   active_scope = prev_scope;
 
-  if (is_mutated)
-    return new ForLoop(
+  if (is_mutated){
+    auto newFL = new ForLoop(
         fl->index(), fl->iter_domain(), mutated_exprs, fl->parentScope());
+    return newFL;
+  }
 
   return fl;
 }
@@ -255,24 +261,11 @@ Statement* GPULower::mutate(UnaryOp* uop) {
   if (!ir_utils::isTVOp(uop))
     return OptOutMutator::mutate(uop);
 
-  IfThenElse* pred = getPredicate(ir_utils::asTV(uop->out()));
-  bool predicated = !pred->cond()->sameAs(new Int(1));
-  if (predicated) {
-    pushBack(pred);
-    active_scope = pred;
-  }
-
   TensorIndex* out = getConsumerIndex(ir_utils::asTV(uop->out()));
   Val* in = uop->in();
   if (ir_utils::isTV(in))
     in = getProducerIndex(ir_utils::asTV(in), ir_utils::asTV(uop->out()));
   Expr* new_op = new UnaryOp(uop->getUnaryOpType(), out, in);
-
-  if (predicated) {
-    active_scope = scope_utils::getParent(active_scope);
-    pushBack(new_op);
-    return pred;
-  }
 
   return new_op;
 }
@@ -280,13 +273,6 @@ Statement* GPULower::mutate(UnaryOp* uop) {
 Statement* GPULower::mutate(BinaryOp* bop) {
   if (!ir_utils::isTVOp(bop))
     return OptOutMutator::mutate(bop);
-
-  IfThenElse* pred = getPredicate(ir_utils::asTV(bop->out()));
-  bool predicated = !pred->cond()->sameAs(new Int(1));
-  if (predicated) {
-    pushBack(pred);
-    active_scope = pred;
-  }
 
   TensorIndex* out = getConsumerIndex(ir_utils::asTV(bop->out()));
   Val* lhs = bop->lhs();
@@ -299,12 +285,6 @@ Statement* GPULower::mutate(BinaryOp* bop) {
     rhs = getProducerIndex(ir_utils::asTV(rhs), ir_utils::asTV(bop->out()));
 
   Expr* new_op = new BinaryOp(bop->getBinaryOpType(), out, lhs, rhs);
-
-  if (predicated) {
-    pushBack(new_op);
-    active_scope = scope_utils::getParent(active_scope);
-    return pred;
-  }
 
   return new_op;
 }

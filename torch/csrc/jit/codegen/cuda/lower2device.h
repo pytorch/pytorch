@@ -2,12 +2,7 @@
 
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
-#include <torch/csrc/jit/codegen/cuda/index_compute.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
-#include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
-#include <torch/csrc/jit/codegen/cuda/iter_visitor.h>
-#include <torch/csrc/jit/codegen/cuda/predicate_compute.h>
-#include <torch/csrc/jit/codegen/cuda/transform_iter.h>
 
 #include <map>
 #include <ostream>
@@ -69,6 +64,9 @@ struct TORCH_CUDA_API GPULower : public OptOutMutator {
 
   // Open the for loop.
   Statement* mutate(ForLoop*) final;
+
+  // Open the for loop.
+  Statement* mutate(IfThenElse*) final;
 
   // Remake operations with TensorIndex
   Statement* mutate(UnaryOp*) final;

@@ -2,49 +2,43 @@
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
 #include <torch/csrc/jit/codegen/cuda/dispatch.h>
+
+#include <torch/csrc/jit/codegen/cuda/mutator.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
 
 namespace torch {
 namespace jit {
 namespace fuser {
 
-struct UnrollPass : public OptOutMutator {
+struct UnrollPass : public OptOutDispatch {
  private:
+  std::unordered_map<Expr*, Expr*> loop_replacement_map;
   Fusion* fusion_;
-  std::vector<Expr*> lowered_exprs;
   const std::vector<Expr*>& incoming_exprs_;
-  Expr* active_scope = nullptr;
+
+  // Keep all for loops conveniently to make unrolling easier
+  std::vector<ForLoop*> for_loops;
+
+  // keep track if we're within an unrolled loop
+  bool within_unroll = false;
 
   // Track the last computeAt TensorView and axis
   const TensorView* active_view;
   unsigned int active_view_axis;
 
-  // Wrap pushBack in lower_utils if active_scope is null we want it to go
-  // straight to lower_exprs
-  void pushBack(Expr*);
-
   // Custom dispatch for Expr, want to find out of it's a TV op
-  Statement* mutate(Expr*) final;
+  void handle(Expr*) final;
 
   // Open the for loop.
-  Statement* mutate(ForLoop*) final;
-
-  // Remake operations with TensorIndex
-  Statement* mutate(UnaryOp*) final;
-  Statement* mutate(BinaryOp*) final;
+  void handle(ForLoop*) final;
 
   UnrollPass(Fusion* _fusion, const std::vector<Expr*>& _incoming_exprs)
       : fusion_(_fusion), incoming_exprs_(_incoming_exprs) {}
 
-  void runPass();
+  void computeMap();
 
  public:
-  static std::vector<Expr*> runPass(Fusion* fusion, std::vector<Expr*> exprs) {
-    FusionGuard fg(fusion);
-    UnrollPass up(fusion, exprs);
-    up.runPass();
-    return up.lowered_exprs;
-  }
+  static std::vector<Expr*> runPass(Fusion* fusion, std::vector<Expr*> exprs);
 };
 
 struct TORCH_CUDA_API LoopNestGenerator : public OptOutDispatch {

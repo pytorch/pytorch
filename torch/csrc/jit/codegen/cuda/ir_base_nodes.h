@@ -179,6 +179,7 @@ struct TORCH_CUDA_API Val : public Statement {
   }
 
   bool isZeroInt() const;
+  bool isOneInt() const;
 
   // Returns the Expr that this value is an output of, returns nullptr if none
   // was found

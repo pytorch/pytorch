@@ -36,10 +36,16 @@ Expr* closeScope(Expr* scope);
 // Clear all expressions from the scope
 Expr* clearScope(Expr* scope);
 
-// Track how far our for loop scope is
-unsigned int computeForDepth(Expr* scope);
+// Provide a new for loop matching the one provided
+ForLoop* cloneLoopNest(ForLoop* to_clone, Expr* parent_scope);
+
+// Run through a scope and replace expressions inside with replacement_map
+void replaceExprsInScope(Expr* scope, std::unordered_map<Expr*, Expr*> replacement_map);
+
+Expr* firstInnerMostScope(Expr* scope);
 
 } // namespace scope_utils
+
 
 namespace ir_utils {
 
@@ -49,9 +55,13 @@ bool isTVOp(const Expr*);
 
 void ASSERT_EXPR(Statement*);
 
+bool isScope(const Expr*);
+
 Expr* asExpr(Statement*);
 
 TensorView* asTV(Val*);
+
+ForLoop* asForLoop(Statement*);
 
 const TensorView* asConstTV(const Val* const);
 

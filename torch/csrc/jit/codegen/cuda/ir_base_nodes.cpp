@@ -99,6 +99,14 @@ bool Val::isZeroInt() const {
   return false;
 }
 
+bool Val::isOneInt() const {
+  if (isConstScalar() && getValType().value() == ValType::Scalar &&
+      getDataType().value() == DataType::Int &&
+      static_cast<const Int*>(this)->value().value() == 1)
+    return true;
+  return false;
+}
+
 c10::optional<DataType> Val::getDataType() const {
   TORCH_INTERNAL_ASSERT(
       dtype_ != DataType::Null, "Value does not have a data type.");
