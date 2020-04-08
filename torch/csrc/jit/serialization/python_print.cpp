@@ -606,21 +606,21 @@ struct PythonPrintImpl {
   //   _0 = x.add_(b)
   //   _1 = some_long + expression
   //   r = foo(_0, _1)
-  void splitLongInlines(at::ArrayRef<Value*> inputs) {
-    size_t long_inline_slice = 0;
-    // find the last input that is too long
-    for (size_t i = 0; i < inputs.size(); ++i) {
-      if (isLongInline(inputs[i]->node())) {
-        long_inline_slice = i + 1;
+  void splitLongInlines(Node* n) {
+    std::vector<Value*> to_split_reversed;
+    to_split_reversed.push_back(n->output());
+    do {
+      Use u = n->output()->uses().at(0);
+      for (size_t i = u.offset; i > 0; --i) {
+        Value* prev_arg = u.user->input(i - 1);
+        if (isNonConstantInline(prev_arg)) {
+          to_split_reversed.push_back(prev_arg);
+        }
       }
-    }
-    // un-inline everything through the last long line
-    // constants are ignored since long constants are never inlined in the
-    // first place
-    for (size_t i = 0; i < long_inline_slice; ++i) {
-      if (isNonConstantInline(inputs[i])) {
-        printOutputDefinition(inputs[i]->node(), *useOf(inputs[i]));
-      }
+      n = u.user;
+    } while (output_inline_.count(n));
+    for (auto it = to_split_reversed.rbegin(), end = to_split_reversed.rend(); it != end; ++it) {
+      printOutputDefinition((*it)->node(), *useOf(*it));
     }
   }
 
@@ -682,7 +682,6 @@ struct PythonPrintImpl {
     scanTypeDependencies(node);
     if (!print_const && node->kind() == prim::Constant)
       return;
-    splitLongInlines(node->inputs());
     switch (node->kind()) {
       case prim::Return:
         if (enforce_importable_ && node->inputs().size() != 1) {
@@ -774,6 +773,9 @@ struct PythonPrintImpl {
           // this node is safe to inline, so assign the output value
           // to that expression directly
           assignValue(node->output(), ss);
+          if (isLongLine(ss->str())) {
+            splitLongInlines(node);
+          }
         }
     }
   }
