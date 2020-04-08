@@ -197,7 +197,7 @@ class TestDispatch(TestCase):
 name: test::foo
 schema: test::foo(Tensor x) -> (Tensor)
 alias analysis kind: FROM_SCHEMA
-VariableTensorId: impl_t_t :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
+Autograd: impl_t_t :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
 catchall: impl_t_t :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
 ''')
 
@@ -223,7 +223,7 @@ catchall: impl_t_t :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
 name: test::foo
 schema: test::foo(Tensor _0) -> (Tensor _0)
 alias analysis kind: CONSERVATIVE
-VariableTensorId: impl_t_t :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
+Autograd: impl_t_t :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
 catchall: default_def_name_t_t :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
 ''')
 
@@ -248,7 +248,7 @@ alias analysis kind: FROM_SCHEMA
         self.assertExpectedInline(r, '''\
 name: test::foo
 schema: (none)
-VariableTensorId: impl_t_t :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
+Autograd: impl_t_t :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
 catchall: impl_t_t :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
 ''')
 

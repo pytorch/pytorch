@@ -283,7 +283,7 @@ static auto registry = torch::RegisterOperators().op(
     "float output_scale, "
     "int output_zero_point) -> Tensor",
     torch::RegisterOperators::options().kernel<QBatchNorm2d<false>>(
-        DispatchKey::QuantizedCPUTensorId))
+        DispatchKey::QuantizedCPU))
 .op(
     "quantized::batch_norm2d_relu(Tensor qx, "
     "Tensor weight, "
@@ -294,7 +294,7 @@ static auto registry = torch::RegisterOperators().op(
     "float output_scale, "
     "int output_zero_point) -> Tensor",
     torch::RegisterOperators::options().kernel<QBatchNorm2d<true>>(
-        DispatchKey::QuantizedCPUTensorId))
+        DispatchKey::QuantizedCPU))
 .op(
     "quantized::batch_norm3d(Tensor qx, "
     "Tensor weight, "
@@ -305,7 +305,7 @@ static auto registry = torch::RegisterOperators().op(
     "float output_scale, "
     "int output_zero_point) -> Tensor",
     torch::RegisterOperators::options().kernel<QBatchNorm3d<false>>(
-        DispatchKey::QuantizedCPUTensorId))
+        DispatchKey::QuantizedCPU))
 .op(
     "quantized::batch_norm3d_relu(Tensor qx, "
     "Tensor weight, "
@@ -316,7 +316,7 @@ static auto registry = torch::RegisterOperators().op(
     "float output_scale, "
     "int output_zero_point) -> Tensor",
     torch::RegisterOperators::options().kernel<QBatchNorm3d<true>>(
-        DispatchKey::QuantizedCPUTensorId));
+        DispatchKey::QuantizedCPU));
 
 } // namespace
 } // namespace native

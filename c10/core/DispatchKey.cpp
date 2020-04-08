@@ -6,44 +6,44 @@ const char* toString(DispatchKey t) {
   switch (t) {
     case DispatchKey::Undefined:
       return "Undefined";
-    case DispatchKey::CPUTensorId:
-      return "CPUTensorId";
-    case DispatchKey::CUDATensorId:
-      return "CUDATensorId";
-    case DispatchKey::SparseCPUTensorId:
-      return "SparseCPUTensorId";
-    case DispatchKey::SparseCUDATensorId:
-      return "SparseCUDATensorId";
-    case DispatchKey::MKLDNNTensorId:
-      return "MKLDNNTensorId";
-    case DispatchKey::OpenGLTensorId:
-      return "OpenGLTensorId";
-    case DispatchKey::OpenCLTensorId:
-      return "OpenCLTensorId";
-    case DispatchKey::IDEEPTensorId:
-      return "IDEEPTensorId";
-    case DispatchKey::HIPTensorId:
-      return "HIPTensorId";
-    case DispatchKey::SparseHIPTensorId:
-      return "SparseHIPTensorId";
-    case DispatchKey::MSNPUTensorId:
-      return "MSNPUTensorId";
-    case DispatchKey::XLATensorId:
-      return "XLATensorId";
-    case DispatchKey::MkldnnCPUTensorId:
-      return "MkldnnCPUTensorId";
-    case DispatchKey::QuantizedCPUTensorId:
-      return "QuantizedCPUTensorId";
-    case DispatchKey::VariableTensorId:
-      return "VariableTensorId";
+    case DispatchKey::CPU:
+      return "CPU";
+    case DispatchKey::CUDA:
+      return "CUDA";
+    case DispatchKey::SparseCPU:
+      return "SparseCPU";
+    case DispatchKey::SparseCUDA:
+      return "SparseCUDA";
+    case DispatchKey::MKLDNN:
+      return "MKLDNN";
+    case DispatchKey::OpenGL:
+      return "OpenGL";
+    case DispatchKey::OpenCL:
+      return "OpenCL";
+    case DispatchKey::IDEEP:
+      return "IDEEP";
+    case DispatchKey::HIP:
+      return "HIP";
+    case DispatchKey::SparseHIP:
+      return "SparseHIP";
+    case DispatchKey::MSNPU:
+      return "MSNPU";
+    case DispatchKey::XLA:
+      return "XLA";
+    case DispatchKey::MkldnnCPU:
+      return "MkldnnCPU";
+    case DispatchKey::QuantizedCPU:
+      return "QuantizedCPU";
+    case DispatchKey::Autograd:
+      return "Autograd";
     case DispatchKey::BackendSelect:
       return "BackendSelect";
-    case DispatchKey::TESTING_ONLY_GenericModeTensorId:
-      return "TESTING_ONLY_GenericModeTensorId";
-    case DispatchKey::AutocastTensorId:
-      return "AutocastTensorId";
-    case DispatchKey::TESTING_ONLY_GenericWrapperTensorId:
-      return "TESTING_ONLY_GenericWrapperTensorId";
+    case DispatchKey::TESTING_ONLY_GenericMode:
+      return "TESTING_ONLY_GenericMode";
+    case DispatchKey::Autocast:
+      return "Autocast";
+    case DispatchKey::TESTING_ONLY_GenericWrapper:
+      return "TESTING_ONLY_GenericWrapper";
     default:
       return "UNKNOWN_TENSOR_TYPE_ID";
   }

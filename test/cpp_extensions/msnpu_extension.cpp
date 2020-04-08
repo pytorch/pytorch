@@ -10,7 +10,7 @@ Tensor get_tensor(caffe2::TypeMeta dtype, IntArrayRef size) {
   auto tensor_impl = c10::make_intrusive<TensorImpl, UndefinedTensorImpl>(
       Storage(
           dtype, 0, at::DataPtr(nullptr, Device(DeviceType::MSNPU, 0)), nullptr, false),
-      DispatchKey::MSNPUTensorId);
+      DispatchKey::MSNPU);
   // This is a hack to workaround the shape checks in _convolution.
   tensor_impl->set_sizes_contiguous(size);
   return Tensor(std::move(tensor_impl));

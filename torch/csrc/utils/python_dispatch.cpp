@@ -16,10 +16,10 @@ namespace dispatch {
 
 c10::optional<c10::DispatchKey> parseDispatchKey(const std::string& k) {
   static std::unordered_map<std::string, c10::DispatchKey> key_map = {
-    {"cpu", c10::DispatchKey::CPUTensorId},
-    {"cuda", c10::DispatchKey::CUDATensorId},
-    {"xla", c10::DispatchKey::XLATensorId},
-    {"autograd", c10::DispatchKey::VariableTensorId},
+    {"cpu", c10::DispatchKey::CPU},
+    {"cuda", c10::DispatchKey::CUDA},
+    {"xla", c10::DispatchKey::XLA},
+    {"autograd", c10::DispatchKey::Autograd},
     {"", c10::DispatchKey::Undefined},
   };
   auto it = key_map.find(k);

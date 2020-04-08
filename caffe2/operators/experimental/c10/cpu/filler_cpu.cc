@@ -148,27 +148,27 @@ static auto registry =
             c10::RegisterOperators::options()
               .kernel<
                 decltype(constant_fill_op_cpu_impl),
-                &constant_fill_op_cpu_impl>(DispatchKey::CPUTensorId))
+                &constant_fill_op_cpu_impl>(DispatchKey::CPU))
         .op("_c10_experimental::UniformFill",
             c10::RegisterOperators::options()
               .kernel<
                 decltype(uniform_fill_op_cpu_impl),
-                &uniform_fill_op_cpu_impl>(DispatchKey::CPUTensorId))
+                &uniform_fill_op_cpu_impl>(DispatchKey::CPU))
         .op("_c10_experimental::GivenTensorFill",
             c10::RegisterOperators::options()
               .kernel<
                 decltype(given_tensor_fill_op_cpu_impl<float, CPUContext>),
-                &given_tensor_fill_op_cpu_impl<float, CPUContext>>(DispatchKey::CPUTensorId))
+                &given_tensor_fill_op_cpu_impl<float, CPUContext>>(DispatchKey::CPU))
         .op("_c10_experimental::GivenTensorIntFill",
             c10::RegisterOperators::options()
               .kernel<
                 decltype(given_tensor_fill_op_cpu_impl<int, CPUContext>),
-                &given_tensor_fill_op_cpu_impl<int, CPUContext>>(DispatchKey::CPUTensorId))
+                &given_tensor_fill_op_cpu_impl<int, CPUContext>>(DispatchKey::CPU))
         .op("_c10_experimental::GivenTensorInt64Fill",
             c10::RegisterOperators::options()
               .kernel<
                 decltype(given_tensor_fill_op_cpu_impl<int, CPUContext>),
-                &given_tensor_fill_op_cpu_impl<int, CPUContext>>(DispatchKey::CPUTensorId));
+                &given_tensor_fill_op_cpu_impl<int, CPUContext>>(DispatchKey::CPU));
 
 } // namespace
 

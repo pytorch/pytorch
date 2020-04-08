@@ -84,7 +84,7 @@ static auto registry = c10::RegisterOperators().op(
     "quantized::clamp(Tensor qx, Scalar? min, Scalar? max) -> Tensor qy",
     c10::RegisterOperators::options()
         .aliasAnalysis(at::AliasAnalysisKind::FROM_SCHEMA)
-        .kernel<QClamp>(DispatchKey::QuantizedCPUTensorId));
+        .kernel<QClamp>(DispatchKey::QuantizedCPU));
 } // namespace
 
 } // namespace native

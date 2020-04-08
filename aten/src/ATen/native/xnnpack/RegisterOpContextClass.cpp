@@ -72,13 +72,13 @@ static auto registry =
             .aliasAnalysis(at::AliasAnalysisKind::PURE_FUNCTION)
             .kernel<decltype(createLinearClampPrePackOpContext),
                 createLinearClampPrePackOpContext>(
-                    DispatchKey::CPUTensorId))
+                    DispatchKey::CPU))
         .op("prepacked::linear_clamp_run(Tensor X,"
             " __torch__.torch.classes.xnnpack.LinearOpContext W_prepack) -> Tensor Y",
             torch::RegisterOperators::options()
             .aliasAnalysis(at::AliasAnalysisKind::PURE_FUNCTION)
             .kernel<internal::linear::LinearClampRun>(
-                DispatchKey::CPUTensorId))
+                DispatchKey::CPU))
         .op("prepacked::conv2d_clamp_prepack(Tensor W, Tensor? B, int[2] stride, "
             "int[2] padding, int[2] dilation, int groups, "
             "Scalar? output_min=None, Scalar? output_max=None) "
@@ -87,13 +87,13 @@ static auto registry =
             .aliasAnalysis(at::AliasAnalysisKind::PURE_FUNCTION)
             .kernel<decltype(createConv2dClampPrePackOpContext),
                 createConv2dClampPrePackOpContext>(
-                DispatchKey::CPUTensorId))
+                DispatchKey::CPU))
         .op("prepacked::conv2d_clamp_run(Tensor X, "
             "__torch__.torch.classes.xnnpack.Conv2dOpContext W_prepack) -> Tensor Y",
             torch::RegisterOperators::options()
             .aliasAnalysis(at::AliasAnalysisKind::PURE_FUNCTION)
             .kernel<internal::convolution2d::Conv2dClampRun>(
-                DispatchKey::CPUTensorId));
+                DispatchKey::CPU));
 } // namespace
 
 } // namespace xnnpack

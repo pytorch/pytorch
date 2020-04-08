@@ -66,32 +66,32 @@ void expectCallsDecrement(DispatchKey dispatch_key) {
 
 TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernel_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators().op("_test::my_op(Tensor dummy, int input) -> int", &incrementKernel);
-  expectCallsIncrement(DispatchKey::CPUTensorId);
+  expectCallsIncrement(DispatchKey::CPU);
 }
 
 TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernel_whenRegisteredInConstructor_thenCanBeCalled) {
   auto registrar = RegisterOperators("_test::my_op(Tensor dummy, int input) -> int", &incrementKernel);
-  expectCallsIncrement(DispatchKey::CPUTensorId);
+  expectCallsIncrement(DispatchKey::CPU);
 }
 
 TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenMultipleOperatorsAndKernels_whenRegisteredInOneRegistrar_thenCallsRightKernel) {
   auto registrar = RegisterOperators()
       .op("_test::my_op(Tensor dummy, int input) -> int", &incrementKernel)
       .op("_test::error(Tensor dummy, int input) -> int", &errorKernel);
-  expectCallsIncrement(DispatchKey::CPUTensorId);
+  expectCallsIncrement(DispatchKey::CPU);
 }
 
 TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenMultipleOperatorsAndKernels_whenRegisteredInMultipleRegistrars_thenCallsRightKernel) {
   auto registrar1 = RegisterOperators().op("_test::my_op(Tensor dummy, int input) -> int", &incrementKernel);
   auto registrar2 = RegisterOperators().op("_test::error(Tensor dummy, int input) -> int", &errorKernel);
-  expectCallsIncrement(DispatchKey::CPUTensorId);
+  expectCallsIncrement(DispatchKey::CPU);
 }
 
 TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernel_whenRegistrationRunsOutOfScope_thenCannotBeCalledAnymore) {
   {
     auto registrar = RegisterOperators().op("_test::my_op(Tensor dummy, int input) -> int", &incrementKernel);
 
-    expectCallsIncrement(DispatchKey::CPUTensorId);
+    expectCallsIncrement(DispatchKey::CPU);
   }
 
   // now the registrar is destructed. Assert that the schema is gone.
@@ -110,7 +110,7 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithoutOutpu
   auto op = c10::Dispatcher::singleton().findSchema({"_test::no_return", ""});
   ASSERT_TRUE(op.has_value());
   was_called = false;
-  auto result = callOp(*op, dummyTensor(DispatchKey::CPUTensorId));
+  auto result = callOp(*op, dummyTensor(DispatchKey::CPU));
   EXPECT_TRUE(was_called);
   EXPECT_EQ(0, result.size());
 }
@@ -126,7 +126,7 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithZeroOutp
   auto op = c10::Dispatcher::singleton().findSchema({"_test::zero_outputs", ""});
   ASSERT_TRUE(op.has_value());
   was_called = false;
-  auto result = callOp(*op, dummyTensor(DispatchKey::CPUTensorId));
+  auto result = callOp(*op, dummyTensor(DispatchKey::CPU));
   EXPECT_TRUE(was_called);
   EXPECT_EQ(0, result.size());
 }
@@ -142,7 +142,7 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithIntOutpu
   auto op = c10::Dispatcher::singleton().findSchema({"_test::int_output", ""});
   ASSERT_TRUE(op.has_value());
 
-  auto result = callOp(*op, dummyTensor(DispatchKey::CPUTensorId), 3, 6);
+  auto result = callOp(*op, dummyTensor(DispatchKey::CPU), 3, 6);
   EXPECT_EQ(1, result.size());
   EXPECT_EQ(9, result[0].toInt());
 }
@@ -158,13 +158,13 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithTensorOu
   auto op = c10::Dispatcher::singleton().findSchema({"_test::returning_tensor", ""});
   ASSERT_TRUE(op.has_value());
 
-  auto result = callOp(*op, dummyTensor(DispatchKey::CPUTensorId));
+  auto result = callOp(*op, dummyTensor(DispatchKey::CPU));
   EXPECT_EQ(1, result.size());
-  EXPECT_EQ(DispatchKey::CPUTensorId, extractDispatchKey(result[0].toTensor()));
+  EXPECT_EQ(DispatchKey::CPU, extractDispatchKey(result[0].toTensor()));
 
-  result = callOp(*op, dummyTensor(DispatchKey::CUDATensorId));
+  result = callOp(*op, dummyTensor(DispatchKey::CUDA));
   EXPECT_EQ(1, result.size());
-  EXPECT_EQ(DispatchKey::CUDATensorId, extractDispatchKey(result[0].toTensor()));
+  EXPECT_EQ(DispatchKey::CUDA, extractDispatchKey(result[0].toTensor()));
 }
 
 std::vector<Tensor> kernelWithTensorListOutput(const Tensor& input1, const Tensor& input2, const Tensor& input3) {
@@ -178,12 +178,12 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithTensorLi
   auto op = c10::Dispatcher::singleton().findSchema({"_test::list_output", ""});
   ASSERT_TRUE(op.has_value());
 
-  auto result = callOp(*op, dummyTensor(DispatchKey::CPUTensorId), dummyTensor(DispatchKey::CUDATensorId), dummyTensor(DispatchKey::CPUTensorId));
+  auto result = callOp(*op, dummyTensor(DispatchKey::CPU), dummyTensor(DispatchKey::CUDA), dummyTensor(DispatchKey::CPU));
   EXPECT_EQ(1, result.size());
   EXPECT_EQ(3, result[0].toTensorVector().size());
-  EXPECT_EQ(DispatchKey::CPUTensorId, extractDispatchKey(result[0].toTensorVector()[0]));
-  EXPECT_EQ(DispatchKey::CUDATensorId, extractDispatchKey(result[0].toTensorVector()[1]));
-  EXPECT_EQ(DispatchKey::CPUTensorId, extractDispatchKey(result[0].toTensorVector()[2]));
+  EXPECT_EQ(DispatchKey::CPU, extractDispatchKey(result[0].toTensorVector()[0]));
+  EXPECT_EQ(DispatchKey::CUDA, extractDispatchKey(result[0].toTensorVector()[1]));
+  EXPECT_EQ(DispatchKey::CPU, extractDispatchKey(result[0].toTensorVector()[2]));
 }
 
 std::vector<int64_t> kernelWithIntListOutput(const Tensor&, int64_t input1, int64_t input2, int64_t input3) {
@@ -197,7 +197,7 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithIntListO
   auto op = c10::Dispatcher::singleton().findSchema({"_test::list_output", ""});
   ASSERT_TRUE(op.has_value());
 
-  auto result = callOp(*op, dummyTensor(DispatchKey::CPUTensorId), 2, 4, 6);
+  auto result = callOp(*op, dummyTensor(DispatchKey::CPU), 2, 4, 6);
   EXPECT_EQ(1, result.size());
   EXPECT_EQ(3, result[0].toIntVector().size());
   EXPECT_EQ(2, result[0].toIntVector()[0]);
@@ -207,12 +207,12 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithIntListO
 
 std::tuple<Tensor, int64_t, std::vector<Tensor>, c10::optional<int64_t>, Dict<string, Tensor>> kernelWithMultipleOutputs(Tensor) {
   Dict<string, Tensor> dict;
-  dict.insert("first", dummyTensor(DispatchKey::CPUTensorId));
-  dict.insert("second", dummyTensor(DispatchKey::CUDATensorId));
+  dict.insert("first", dummyTensor(DispatchKey::CPU));
+  dict.insert("second", dummyTensor(DispatchKey::CUDA));
   return std::tuple<Tensor, int64_t, std::vector<Tensor>, c10::optional<int64_t>, Dict<string, Tensor>>(
-    dummyTensor(DispatchKey::CUDATensorId),
+    dummyTensor(DispatchKey::CUDA),
     5,
-    {dummyTensor(DispatchKey::CPUTensorId), dummyTensor(DispatchKey::CUDATensorId)},
+    {dummyTensor(DispatchKey::CPU), dummyTensor(DispatchKey::CUDA)},
     c10::optional<int64_t>(c10::in_place, 0),
     dict
   );
@@ -225,18 +225,18 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithMultiple
   auto op = c10::Dispatcher::singleton().findSchema({"_test::multiple_outputs", ""});
   ASSERT_TRUE(op.has_value());
 
-  auto result = callOp(*op, dummyTensor(DispatchKey::CPUTensorId));
+  auto result = callOp(*op, dummyTensor(DispatchKey::CPU));
   EXPECT_EQ(5, result.size());
-  EXPECT_EQ(DispatchKey::CUDATensorId, extractDispatchKey(result[0].toTensor()));
+  EXPECT_EQ(DispatchKey::CUDA, extractDispatchKey(result[0].toTensor()));
   EXPECT_EQ(5, result[1].toInt());
   EXPECT_EQ(2, result[2].toTensorVector().size());
-  EXPECT_EQ(DispatchKey::CPUTensorId, extractDispatchKey(result[2].toTensorVector()[0]));
-  EXPECT_EQ(DispatchKey::CUDATensorId, extractDispatchKey(result[2].toTensorVector()[1]));
+  EXPECT_EQ(DispatchKey::CPU, extractDispatchKey(result[2].toTensorVector()[0]));
+  EXPECT_EQ(DispatchKey::CUDA, extractDispatchKey(result[2].toTensorVector()[1]));
   EXPECT_EQ(0, result[3].toInt());
   auto result_dict = c10::impl::toTypedDict<string, Tensor>(result[4].toGenericDict());
   EXPECT_EQ(2, result_dict.size());
-  EXPECT_EQ(DispatchKey::CPUTensorId, extractDispatchKey(result_dict.at("first")));
-  EXPECT_EQ(DispatchKey::CUDATensorId, extractDispatchKey(result_dict.at("second")));
+  EXPECT_EQ(DispatchKey::CPU, extractDispatchKey(result_dict.at("first")));
+  EXPECT_EQ(DispatchKey::CUDA, extractDispatchKey(result_dict.at("second")));
 }
 
 Tensor kernelWithTensorInputByReferenceWithOutput(const Tensor& input1) {
@@ -253,13 +253,13 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithTensorIn
   auto op = c10::Dispatcher::singleton().findSchema({"_test::tensor_input", ""});
   ASSERT_TRUE(op.has_value());
 
-  auto result = callOp(*op, dummyTensor(DispatchKey::CPUTensorId));
+  auto result = callOp(*op, dummyTensor(DispatchKey::CPU));
   EXPECT_EQ(1, result.size());
-  EXPECT_EQ(DispatchKey::CPUTensorId, extractDispatchKey(result[0].toTensor()));
+  EXPECT_EQ(DispatchKey::CPU, extractDispatchKey(result[0].toTensor()));
 
-  result = callOp(*op, dummyTensor(DispatchKey::CUDATensorId));
+  result = callOp(*op, dummyTensor(DispatchKey::CUDA));
   EXPECT_EQ(1, result.size());
-  EXPECT_EQ(DispatchKey::CUDATensorId, extractDispatchKey(result[0].toTensor()));
+  EXPECT_EQ(DispatchKey::CUDA, extractDispatchKey(result[0].toTensor()));
 }
 
 TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithTensorInputByValue_withOutput_whenRegistered_thenCanBeCalled) {
@@ -269,13 +269,13 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithTensorIn
   auto op = c10::Dispatcher::singleton().findSchema({"_test::tensor_input", ""});
   ASSERT_TRUE(op.has_value());
 
-  auto result = callOp(*op, dummyTensor(DispatchKey::CPUTensorId));
+  auto result = callOp(*op, dummyTensor(DispatchKey::CPU));
   EXPECT_EQ(1, result.size());
-  EXPECT_EQ(DispatchKey::CPUTensorId, extractDispatchKey(result[0].toTensor()));
+  EXPECT_EQ(DispatchKey::CPU, extractDispatchKey(result[0].toTensor()));
 
-  result = callOp(*op, dummyTensor(DispatchKey::CUDATensorId));
+  result = callOp(*op, dummyTensor(DispatchKey::CUDA));
   EXPECT_EQ(1, result.size());
-  EXPECT_EQ(DispatchKey::CUDATensorId, extractDispatchKey(result[0].toTensor()));
+  EXPECT_EQ(DispatchKey::CUDA, extractDispatchKey(result[0].toTensor()));
 }
 
 Tensor captured_input;
@@ -295,13 +295,13 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithTensorIn
   auto op = c10::Dispatcher::singleton().findSchema({"_test::tensor_input", ""});
   ASSERT_TRUE(op.has_value());
 
-  auto outputs = callOp(*op, dummyTensor(DispatchKey::CPUTensorId));
+  auto outputs = callOp(*op, dummyTensor(DispatchKey::CPU));
   EXPECT_EQ(0, outputs.size());
-  EXPECT_EQ(DispatchKey::CPUTensorId, extractDispatchKey(captured_input));
+  EXPECT_EQ(DispatchKey::CPU, extractDispatchKey(captured_input));
 
-  outputs = callOp(*op, dummyTensor(DispatchKey::CUDATensorId));
+  outputs = callOp(*op, dummyTensor(DispatchKey::CUDA));
   EXPECT_EQ(0, outputs.size());
-  EXPECT_EQ(DispatchKey::CUDATensorId, extractDispatchKey(captured_input));
+  EXPECT_EQ(DispatchKey::CUDA, extractDispatchKey(captured_input));
 }
 
 TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithTensorInputByValue_withoutOutput_whenRegistered_thenCanBeCalled) {
@@ -311,13 +311,13 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithTensorIn
   auto op = c10::Dispatcher::singleton().findSchema({"_test::tensor_input", ""});
   ASSERT_TRUE(op.has_value());
 
-  auto outputs = callOp(*op, dummyTensor(DispatchKey::CPUTensorId));
+  auto outputs = callOp(*op, dummyTensor(DispatchKey::CPU));
   EXPECT_EQ(0, outputs.size());
-  EXPECT_EQ(DispatchKey::CPUTensorId, extractDispatchKey(captured_input));
+  EXPECT_EQ(DispatchKey::CPU, extractDispatchKey(captured_input));
 
-  outputs = callOp(*op, dummyTensor(DispatchKey::CUDATensorId));
+  outputs = callOp(*op, dummyTensor(DispatchKey::CUDA));
   EXPECT_EQ(0, outputs.size());
-  EXPECT_EQ(DispatchKey::CUDATensorId, extractDispatchKey(captured_input));
+  EXPECT_EQ(DispatchKey::CUDA, extractDispatchKey(captured_input));
 }
 
 int64_t captured_int_input = 0;
@@ -334,7 +334,7 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithIntInput
   ASSERT_TRUE(op.has_value());
 
   captured_int_input = 0;
-  auto outputs = callOp(*op, dummyTensor(DispatchKey::CPUTensorId), 3);
+  auto outputs = callOp(*op, dummyTensor(DispatchKey::CPU), 3);
   EXPECT_EQ(0, outputs.size());
   EXPECT_EQ(3, captured_int_input);
 }
@@ -350,7 +350,7 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithIntInput
   auto op = c10::Dispatcher::singleton().findSchema({"_test::int_input", ""});
   ASSERT_TRUE(op.has_value());
 
-  auto outputs = callOp(*op, dummyTensor(DispatchKey::CPUTensorId), 3);
+  auto outputs = callOp(*op, dummyTensor(DispatchKey::CPU), 3);
   EXPECT_EQ(1, outputs.size());
   EXPECT_EQ(4, outputs[0].toInt());
 }
@@ -369,7 +369,7 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithIntListI
   ASSERT_TRUE(op.has_value());
 
   captured_input_list_size = 0;
-  auto outputs = callOp(*op, dummyTensor(DispatchKey::CPUTensorId), c10::List<int64_t>({2, 4, 6}));
+  auto outputs = callOp(*op, dummyTensor(DispatchKey::CPU), c10::List<int64_t>({2, 4, 6}));
   EXPECT_EQ(0, outputs.size());
   EXPECT_EQ(3, captured_input_list_size);
 }
@@ -385,7 +385,7 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithIntListI
   auto op = c10::Dispatcher::singleton().findSchema({"_test::int_list_input", ""});
   ASSERT_TRUE(op.has_value());
 
-  auto outputs = callOp(*op, dummyTensor(DispatchKey::CPUTensorId), c10::List<int64_t>({2, 4, 6}));
+  auto outputs = callOp(*op, dummyTensor(DispatchKey::CPU), c10::List<int64_t>({2, 4, 6}));
   EXPECT_EQ(1, outputs.size());
   EXPECT_EQ(3, outputs[0].toInt());
 }
@@ -402,7 +402,7 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithTensorLi
   ASSERT_TRUE(op.has_value());
 
   captured_input_list_size = 0;
-  auto outputs = callOp(*op, c10::List<Tensor>({dummyTensor(DispatchKey::CPUTensorId), dummyTensor(DispatchKey::CPUTensorId)}));
+  auto outputs = callOp(*op, c10::List<Tensor>({dummyTensor(DispatchKey::CPU), dummyTensor(DispatchKey::CPU)}));
   EXPECT_EQ(0, outputs.size());
   EXPECT_EQ(2, captured_input_list_size);
 }
@@ -418,7 +418,7 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithTensorLi
   auto op = c10::Dispatcher::singleton().findSchema({"_test::tensor_list_input", ""});
   ASSERT_TRUE(op.has_value());
 
-  auto outputs = callOp(*op, c10::List<Tensor>({dummyTensor(DispatchKey::CPUTensorId), dummyTensor(DispatchKey::CPUTensorId)}));
+  auto outputs = callOp(*op, c10::List<Tensor>({dummyTensor(DispatchKey::CPU), dummyTensor(DispatchKey::CPU)}));
   EXPECT_EQ(1, outputs.size());
   EXPECT_EQ(2, outputs[0].toInt());
 }
@@ -435,7 +435,7 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithLegacyTe
   ASSERT_TRUE(op.has_value());
 
   captured_input_list_size = 0;
-  auto outputs = callOp(*op, c10::List<Tensor>({dummyTensor(DispatchKey::CPUTensorId), dummyTensor(DispatchKey::CPUTensorId)}));
+  auto outputs = callOp(*op, c10::List<Tensor>({dummyTensor(DispatchKey::CPU), dummyTensor(DispatchKey::CPU)}));
   EXPECT_EQ(0, outputs.size());
   EXPECT_EQ(2, captured_input_list_size);
 }
@@ -451,7 +451,7 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithLegacyTe
   auto op = c10::Dispatcher::singleton().findSchema({"_test::tensor_list_input", ""});
   ASSERT_TRUE(op.has_value());
 
-  auto outputs = callOp(*op, c10::List<Tensor>({dummyTensor(DispatchKey::CPUTensorId), dummyTensor(DispatchKey::CPUTensorId)}));
+  auto outputs = callOp(*op, c10::List<Tensor>({dummyTensor(DispatchKey::CPU), dummyTensor(DispatchKey::CPU)}));
   EXPECT_EQ(1, outputs.size());
   EXPECT_EQ(2, outputs[0].toInt());
 }
@@ -468,7 +468,7 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithLegacyTe
   ASSERT_TRUE(op.has_value());
 
   captured_input_list_size = 0;
-  auto outputs = callOp(*op, c10::List<Tensor>({dummyTensor(DispatchKey::CPUTensorId), dummyTensor(DispatchKey::CPUTensorId)}));
+  auto outputs = callOp(*op, c10::List<Tensor>({dummyTensor(DispatchKey::CPU), dummyTensor(DispatchKey::CPU)}));
   EXPECT_EQ(0, outputs.size());
   EXPECT_EQ(2, captured_input_list_size);
 }
@@ -484,7 +484,7 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithLegacyTe
   auto op = c10::Dispatcher::singleton().findSchema({"_test::tensor_list_input", ""});
   ASSERT_TRUE(op.has_value());
 
-  auto outputs = callOp(*op, c10::List<Tensor>({dummyTensor(DispatchKey::CPUTensorId), dummyTensor(DispatchKey::CPUTensorId)}));
+  auto outputs = callOp(*op, c10::List<Tensor>({dummyTensor(DispatchKey::CPU), dummyTensor(DispatchKey::CPU)}));
   EXPECT_EQ(1, outputs.size());
   EXPECT_EQ(2, outputs[0].toInt());
 }
@@ -525,8 +525,8 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithDictInpu
 
   captured_dict_size = 0;
   Dict<string, Tensor> dict;
-  dict.insert("key1", dummyTensor(DispatchKey::CPUTensorId));
-  dict.insert("key2", dummyTensor(DispatchKey::CUDATensorId));
+  dict.insert("key1", dummyTensor(DispatchKey::CPU));
+  dict.insert("key2", dummyTensor(DispatchKey::CUDA));
   auto outputs = callOp(*op, dict);
   EXPECT_EQ(0, outputs.size());
   EXPECT_EQ(2, captured_dict_size);
@@ -587,8 +587,8 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithUnordere
 
   captured_dict_size = 0;
   c10::Dict<string, Tensor> dict;
-  dict.insert("key1", dummyTensor(DispatchKey::CPUTensorId));
-  dict.insert("key2", dummyTensor(DispatchKey::CUDATensorId));
+  dict.insert("key1", dummyTensor(DispatchKey::CPU));
+  dict.insert("key2", dummyTensor(DispatchKey::CUDA));
   auto outputs = callOp(*op, dict);
   EXPECT_EQ(0, outputs.size());
   EXPECT_EQ(2, captured_dict_size);
@@ -823,18 +823,18 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithOptional
   ASSERT_TRUE(op.has_value());
 
   called = false;
-  auto outputs = callOp(*op, dummyTensor(DispatchKey::CPUTensorId), dummyTensor(DispatchKey::CUDATensorId), c10::IValue(), std::string("text"));
+  auto outputs = callOp(*op, dummyTensor(DispatchKey::CPU), dummyTensor(DispatchKey::CUDA), c10::IValue(), std::string("text"));
   EXPECT_EQ(0, outputs.size());
 
   EXPECT_TRUE(called);
   EXPECT_TRUE(called_arg2.has_value());
-  EXPECT_EQ(extractDispatchKey(*called_arg2), DispatchKey::CUDATensorId);
+  EXPECT_EQ(extractDispatchKey(*called_arg2), DispatchKey::CUDA);
   EXPECT_FALSE(called_arg3.has_value());
   EXPECT_TRUE(called_arg4.has_value());
   EXPECT_EQ(*called_arg4, "text");
 
   called = false;
-  outputs = callOp(*op, dummyTensor(DispatchKey::CPUTensorId), c10::IValue(), 4, c10::IValue());
+  outputs = callOp(*op, dummyTensor(DispatchKey::CPU), c10::IValue(), 4, c10::IValue());
   EXPECT_EQ(0, outputs.size());
 
   EXPECT_TRUE(called);
@@ -858,19 +858,19 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithOptional
   ASSERT_TRUE(op.has_value());
 
   called = false;
-  auto outputs = callOp(*op, dummyTensor(DispatchKey::CPUTensorId), dummyTensor(DispatchKey::CUDATensorId), c10::IValue(), std::string("text"));
+  auto outputs = callOp(*op, dummyTensor(DispatchKey::CPU), dummyTensor(DispatchKey::CUDA), c10::IValue(), std::string("text"));
   EXPECT_EQ(1, outputs.size());
-  EXPECT_EQ(DispatchKey::CUDATensorId, extractDispatchKey(outputs[0].toTensor()));
+  EXPECT_EQ(DispatchKey::CUDA, extractDispatchKey(outputs[0].toTensor()));
 
   EXPECT_TRUE(called);
   EXPECT_TRUE(called_arg2.has_value());
-  EXPECT_EQ(extractDispatchKey(*called_arg2), DispatchKey::CUDATensorId);
+  EXPECT_EQ(extractDispatchKey(*called_arg2), DispatchKey::CUDA);
   EXPECT_FALSE(called_arg3.has_value());
   EXPECT_TRUE(called_arg4.has_value());
   EXPECT_EQ(*called_arg4, "text");
 
   called = false;
-  outputs = callOp(*op, dummyTensor(DispatchKey::CPUTensorId), c10::IValue(), 4, c10::IValue());
+  outputs = callOp(*op, dummyTensor(DispatchKey::CPU), c10::IValue(), 4, c10::IValue());
   EXPECT_EQ(1, outputs.size());
   EXPECT_TRUE(outputs[0].isNone());
 
@@ -891,13 +891,13 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithOptional
   auto op = c10::Dispatcher::singleton().findSchema({"_test::opt_input", ""});
   ASSERT_TRUE(op.has_value());
 
-  auto outputs = callOp(*op, dummyTensor(DispatchKey::CPUTensorId), dummyTensor(DispatchKey::CUDATensorId), c10::IValue(), std::string("text"));
+  auto outputs = callOp(*op, dummyTensor(DispatchKey::CPU), dummyTensor(DispatchKey::CUDA), c10::IValue(), std::string("text"));
   EXPECT_EQ(3, outputs.size());
-  EXPECT_EQ(DispatchKey::CUDATensorId, extractDispatchKey(outputs[0].toTensor()));
+  EXPECT_EQ(DispatchKey::CUDA, extractDispatchKey(outputs[0].toTensor()));
   EXPECT_TRUE(outputs[1].isNone());
   EXPECT_EQ("text", outputs[2].toString()->string());
 
-  outputs = callOp(*op, dummyTensor(DispatchKey::CPUTensorId), c10::IValue(), 4, c10::IValue());
+  outputs = callOp(*op, dummyTensor(DispatchKey::CPU), c10::IValue(), 4, c10::IValue());
   EXPECT_EQ(3, outputs.size());
   EXPECT_TRUE(outputs[0].isNone());
   EXPECT_EQ(4, outputs[1].toInt());
@@ -920,7 +920,7 @@ void expectCallsConcatUnboxed(DispatchKey dispatch_key) {
 
 TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernel_whenRegistered_thenCanBeCalledUnboxed) {
   auto registrar = RegisterOperators().op("_test::my_op(Tensor dummy, str a, str b, int c) -> str", &concatKernel);
-  expectCallsConcatUnboxed(DispatchKey::CPUTensorId);
+  expectCallsConcatUnboxed(DispatchKey::CPU);
 }
 
 std::tuple<int64_t, Tensor> kernelForSchemaInference(Tensor arg1, int64_t arg2, const std::vector<Tensor>& arg3) {

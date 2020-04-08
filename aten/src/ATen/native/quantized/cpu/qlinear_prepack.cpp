@@ -300,19 +300,19 @@ static auto registry =
         .op("quantized::linear_prepack(Tensor W, Tensor? B=None) -> Tensor W_prepack",
             c10::RegisterOperators::options()
             .aliasAnalysis(at::AliasAnalysisKind::PURE_FUNCTION)
-            .kernel<QLinearPackWeightInt8>(DispatchKey::QuantizedCPUTensorId))
+            .kernel<QLinearPackWeightInt8>(DispatchKey::QuantizedCPU))
         .op("quantized::linear_prepack_fp16(Tensor W, Tensor? B=None) -> Tensor W_prepack",
             c10::RegisterOperators::options()
             .aliasAnalysis(at::AliasAnalysisKind::PURE_FUNCTION)
-            .kernel<QLinearPackWeightFp16>(DispatchKey::CPUTensorId))
+            .kernel<QLinearPackWeightFp16>(DispatchKey::CPU))
         .op("_quantized::linear_prepack(Tensor W, Tensor? B=None) -> Tensor W_prepack",
             c10::RegisterOperators::options()
             .aliasAnalysis(at::AliasAnalysisKind::PURE_FUNCTION)
-            .kernel<QLinearPackWeightInt8>(DispatchKey::QuantizedCPUTensorId))
+            .kernel<QLinearPackWeightInt8>(DispatchKey::QuantizedCPU))
         .op("_quantized::linear_prepack_fp16(Tensor W, Tensor? B=None) -> Tensor W_prepack",
             c10::RegisterOperators::options()
             .aliasAnalysis(at::AliasAnalysisKind::PURE_FUNCTION)
-            .kernel<QLinearPackWeightFp16>(DispatchKey::CPUTensorId));
+            .kernel<QLinearPackWeightFp16>(DispatchKey::CPU));
 
 } // namespace
 } // namespace native

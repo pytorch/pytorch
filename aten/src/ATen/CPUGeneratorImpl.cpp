@@ -40,7 +40,7 @@ inline uint64_t make64BitsFrom32Bits(uint32_t hi, uint32_t lo) {
  * CPUGeneratorImpl class implementation
  */
 CPUGeneratorImpl::CPUGeneratorImpl(uint64_t seed_in)
-  : c10::GeneratorImpl{Device(DeviceType::CPU), DispatchKeySet(c10::DispatchKey::CPUTensorId)},
+  : c10::GeneratorImpl{Device(DeviceType::CPU), DispatchKeySet(c10::DispatchKey::CPU)},
     engine_{seed_in},
     next_float_normal_sample_{c10::optional<float>()},
     next_double_normal_sample_{c10::optional<double>()} { }

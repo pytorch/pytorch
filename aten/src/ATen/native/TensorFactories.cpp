@@ -126,7 +126,7 @@ Tensor empty_cpu(IntArrayRef size, const TensorOptions& options_, c10::optional<
     allocator,
     /*resizeable=*/true);
 
-  auto tensor = detail::make_tensor<TensorImpl>(std::move(storage_impl), at::DispatchKey::CPUTensorId);
+  auto tensor = detail::make_tensor<TensorImpl>(std::move(storage_impl), at::DispatchKey::CPU);
   // Default TensorImpl has size [0]
   if (size.size() != 1 || size[0] != 0) {
     tensor.unsafeGetTensorImpl()->set_sizes_contiguous(size);
@@ -955,7 +955,7 @@ Tensor from_file(std::string filename, c10::optional<bool> shared, c10::optional
           filename.c_str(), flags, my_size * dtype.itemsize(), nullptr),
       /*allocator=*/nullptr,
       /*resizable=*/false);
-    auto tensor = detail::make_tensor<at::TensorImpl>(storage_impl, at::DispatchKey::CPUTensorId);
+    auto tensor = detail::make_tensor<at::TensorImpl>(storage_impl, at::DispatchKey::CPU);
     tensor.unsafeGetTensorImpl()->set_sizes_contiguous({storage_impl->numel()});
     return tensor;
 }

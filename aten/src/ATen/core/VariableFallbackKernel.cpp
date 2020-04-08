@@ -3,8 +3,8 @@
 
 /*
  * This file implements a variable fallback kernel for custom operators.
- * Since tensors always have the VariableTensorId set, but custom operators
- * usually don't have a kernel registered for VariableTensorId, the dispatcher
+ * Since tensors always have the Autograd set, but custom operators
+ * usually don't have a kernel registered for Autograd, the dispatcher
  * will call into this fallback kernel instead.
  * Note that this is not a correct autograd implementation. It will just
  * fallthrough to the custom operator implementation.
@@ -33,7 +33,7 @@ void variable_fallback_kernel(const OperatorHandle& op, Stack* stack) {
 }
 
 static auto registry = Dispatcher::singleton().registerFallback(
-    DispatchKey::VariableTensorId,
+    DispatchKey::Autograd,
 #ifdef C10_MOBILE
     // As custom mobile build might not include variable kernels, we need
     // leverage variable fallback mechanism as well. The goals are:

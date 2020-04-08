@@ -142,10 +142,10 @@ static auto registry =
     c10::RegisterOperators()
         .op("quantized::linear_unpack(Tensor W_prepack) -> (Tensor W_origin, Tensor? B_origin)",
             c10::RegisterOperators::options().kernel<QLinearUnpackWeightInt8>(
-                DispatchKey::CPUTensorId))
+                DispatchKey::CPU))
         .op("quantized::linear_unpack_fp16(Tensor W_prepack) -> (Tensor W_origin, Tensor? B_origin)",
             c10::RegisterOperators::options().kernel<QLinearUnpackWeightFp16>(
-                DispatchKey::CPUTensorId));
+                DispatchKey::CPU));
 
 } // namespace
 } // namespace native

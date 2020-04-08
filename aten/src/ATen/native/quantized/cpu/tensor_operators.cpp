@@ -81,7 +81,7 @@ Tensor& quantized_resize_cpu_(
 static auto registry = torch::RegisterOperators()
   .op(torch::RegisterOperators::options()
     .schema("aten::resize_(Tensor(a!) self, int[] size, *, MemoryFormat? memory_format=None) -> Tensor(a!)")
-    .impl_unboxedOnlyKernel<decltype(quantized_resize_cpu_), &quantized_resize_cpu_>(DispatchKey::QuantizedCPUTensorId))
+    .impl_unboxedOnlyKernel<decltype(quantized_resize_cpu_), &quantized_resize_cpu_>(DispatchKey::QuantizedCPU))
   ;
 
 }  // namespcae
