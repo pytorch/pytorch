@@ -379,7 +379,7 @@ void Reducer::mark_variable_ready(VariableIndex index) {
         "This error is caused by one of the following reasons: ",
         "1) Use of a module parameter outside the `forward` function. ",
         "Please make sure model parameters are not shared across multiple ",
-        "concurrent forward-backward passes"
+        "concurrent forward-backward passes",
         "2) Reused parameters in multiple reentrant backward passes. For ",
         "example, if you use multiple `checkpoint` functions to wrap the ",
         "same part of your model, it would result in the same set of ",
@@ -394,7 +394,7 @@ void Reducer::mark_variable_ready(VariableIndex index) {
         "wrapper to figure out if any of the module's parameters went ",
         "unused. For unused parameters, DDP would not expect gradients from ",
         "then. However, if an unused parameter becomes part of the autograd ",
-        "graph at a later point in time (e.g., in a reentrant backward when ", 
+        "graph at a later point in time (e.g., in a reentrant backward when ",
         "using `checkpoint`), the gradient will show up unexpectedly. If all ",
         "parameters in the model participate in the backward pass, you can ",
         "disable unused parameter detection by passing the keyword argument ",
