@@ -892,6 +892,21 @@ class TestOperators(TestCase):
         y = torch.empty(3, dtype=torch.long).random_(5)
         self.assertONNX(torch.nn.CrossEntropyLoss(weight=torch.randn(5)), (x, y), opset_version=12)
 
+    def test_softmaxcrossentropy_3d(self):
+        x = torch.randn(3, 5, 2)
+        y = torch.empty(3, 2, dtype=torch.long).random_(5)
+        self.assertONNX(torch.nn.CrossEntropyLoss(), (x, y), opset_version=12)
+
+    def test_softmaxcrossentropy_3d_none(self):
+        x = torch.randn(3, 5, 2)
+        y = torch.empty(3, 2, dtype=torch.long).random_(5)
+        self.assertONNX(torch.nn.CrossEntropyLoss(reduction='none'), (x, y), opset_version=12)
+
+    def test_softmaxcrossentropy_4d(self):
+        x = torch.randn(3, 5, 2, 1)
+        y = torch.empty(3, 2, 1, dtype=torch.long).random_(5)
+        self.assertONNX(torch.nn.CrossEntropyLoss(), (x, y), opset_version=12)
+
 if __name__ == '__main__':
     no_onnx_dep_flag = '--no-onnx'
     _onnx_dep = no_onnx_dep_flag not in common.UNITTEST_ARGS
