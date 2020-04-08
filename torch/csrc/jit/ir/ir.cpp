@@ -1046,6 +1046,7 @@ bool Node::hasSideEffects() const {
     case prim::profile:
     case prim::BailOut:
     case prim::Guard:
+    case prim::rpc_async: // It represents RPC message sent.
     case aten::wait: // It can represent RPC message received.
       return true;
   }

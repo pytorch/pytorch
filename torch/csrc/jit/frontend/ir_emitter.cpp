@@ -470,7 +470,7 @@ struct Environment {
           {"all", std::make_shared<BuiltinFunction>(aten::all, at::nullopt)},
           {"divmod",
            std::make_shared<BuiltinFunction>(aten::divmod, at::nullopt)},
-          {"list", std::make_shared<BuiltinFunction>(aten::list, at::nullopt)},
+          {"list", SpecialFormValue::create(prim::list)},
           {"ord", std::make_shared<BuiltinFunction>(aten::ord, at::nullopt)},
           {"chr", std::make_shared<BuiltinFunction>(aten::chr, at::nullopt)},
           {"bin", std::make_shared<BuiltinFunction>(aten::bin, at::nullopt)},
@@ -1185,6 +1185,14 @@ struct to_ir {
       list_value->setType(type_hint);
       type_set = true;
     }
+
+    // comprehension introduces it's own scope. no variable assigned
+    // leaks into the rest of the graph
+    Node* n =
+        graph->insertNode(create(prim::LocalVariableScope, lc.range(), 0));
+    auto* comprehension_block = n->addBlock();
+    pushFrame(comprehension_block);
+    WithInsertPoint guard(comprehension_block);
     auto emit_body = [&]() {
       auto comprehension_out = emitExpr(lc.elt());
       if (!type_set) {
@@ -1196,6 +1204,7 @@ struct to_ir {
       emitBuiltinCall(loc, *graph, aten::append, {input}, {}, self);
     };
     emitFor(targets_list, itrs, loc, emit_body);
+    popFrame();
     return list_value;
   }
 
@@ -2622,6 +2631,17 @@ struct to_ir {
           iterable_tree->addChild(apply.range(), method, iterable);
         }
         return iterable_tree;
+      }
+      case prim::list: {
+        // list(iter) desugars to [_elem for _elem in iter]
+        checkApplyNumInputs(apply, 1);
+        auto iter = apply.inputs()[0];
+        const std::string& elem_name = createTempName("$_elem");
+        auto ident =
+            Var::create(apply.range(), Ident::create(apply.range(), elem_name));
+        auto lc = ListComp::create(apply.range(), ident, ident, iter);
+        return std::make_shared<SimpleValue>(
+            emitListComprehension(lc, nullptr));
       }
       default:
         TORCH_INTERNAL_ASSERT(false, "unknown special form: ", form);

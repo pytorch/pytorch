@@ -13,6 +13,22 @@
 namespace torch {
 namespace jit {
 
+static bool texpr_fuser_enabled_ = false;
+void setTensorExprFuserEnabled(bool val) {
+  texpr_fuser_enabled_ = val;
+}
+
+static bool tensorExprFuserEnabled() {
+  static const char* enable_c_str = std::getenv("PYTORCH_TENSOREXPR");
+  if (!enable_c_str) {
+    return texpr_fuser_enabled_;
+  }
+  if (std::string(enable_c_str) == "0") {
+    return false;
+  }
+  return true;
+}
+
 const Symbol& getTensorExprSymbol() {
   static Symbol s = Symbol::fromQualString("tensorexpr::Group");
   return s;
@@ -250,6 +266,9 @@ std::pair<graph_node_list::iterator, bool> scanNode(
 }
 
 void fuseTensorExprs(std::shared_ptr<Graph>& graph) {
+  if (!tensorExprFuserEnabled()) {
+    return;
+  }
   GRAPH_DUMP("Before TExprFuser: ", graph);
 
   // Get rid of dead code so that we don't waste effort fusing it.

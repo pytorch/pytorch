@@ -283,10 +283,7 @@ class TORCH_API PolynomialTransformer : public IRMutator {
   // Merge and simplify multiplication.
   const Expr* mutate(const Mul* v) override;
 
-  const Expr* mutate(const Div* v) override {
-    // TODO div simplification will require a rational node.
-    return mutateBinaryOp(v, this);
-  }
+  const Expr* mutate(const Div* v) override;
 
   const Expr* mutate(const Mod* v) override {
     return mutateBinaryOp(v, this);
@@ -371,10 +368,10 @@ class TORCH_API TermExpander : public IRMutator {
   const Expr* factorizePolynomial(const Polynomial* poly);
 
   // Expand Polynomials out to a series of Adds.
-  const Expr* mutate(const Polynomial* v);
+  const Expr* mutate(const Polynomial* v) override;
 
   // Expand RoundOff to it's component: Mul(Div(lhs, rhs), rhs).
-  const Expr* mutate(const RoundOff* v);
+  const Expr* mutate(const RoundOff* v) override;
 };
 
 class TORCH_API IRSimplifier {

@@ -4,6 +4,15 @@ namespace torch {
 namespace jit {
 namespace tensorexpr {
 
+// Simple recursive GCD.
+template <typename T>
+T gcd(T a, T b) {
+  if (b == 0) {
+    return a;
+  }
+  return gcd(b, a % b);
+}
+
 SimplifierHashType Term::hashVars() const {
   SimplifierHashType hash;
   for (auto* v : variables_) {
@@ -332,6 +341,13 @@ const Expr* PolynomialTransformer::mutate(const Add* v) {
   // If we now have a poly and a term, we can insert.
   if (poly) {
     return insertTerm(poly, lhsTerm ? lhsTerm : rhsTerm);
+  }
+
+  if (lhsTerm->hashVars() == rhsTerm->hashVars()) {
+    return new Term(
+        hasher_,
+        evaluateOp(new Add(lhsTerm->scalar(), rhsTerm->scalar())),
+        lhsTerm->variables());
   }
 
   // If all else fails we have a new Polynomial with two new variable Terms.
@@ -831,6 +847,79 @@ const Expr* PolynomialTransformer::mutate(const Mul* v) {
   return new Term(hasher_, getImmediateByType(v->dtype(), 1), lhs_new, rhs_new);
 }
 
+const Expr* factorizeDivision(const Expr* lhs_new, const Expr* rhs_new) {
+  if (!lhs_new || !rhs_new) {
+    return nullptr;
+  }
+
+  const Expr* leftScalar = lhs_new->isConstant() ? lhs_new : nullptr;
+  const Expr* rightScalar = rhs_new->isConstant() ? rhs_new : nullptr;
+
+  auto* lhsTerm = dynamic_cast<const Term*>(lhs_new);
+  auto* rhsTerm = dynamic_cast<const Term*>(rhs_new);
+  if (lhsTerm) {
+    leftScalar = lhsTerm->scalar();
+  }
+
+  if (rhsTerm) {
+    rightScalar = rhsTerm->scalar();
+  }
+
+  if (!leftScalar || !rightScalar) {
+    return nullptr;
+  }
+
+  long left = immediateAs<long>(leftScalar);
+  long right = immediateAs<long>(rightScalar);
+
+  long GCD = gcd<long>(left, right);
+  if (GCD <= 1) {
+    return nullptr;
+  }
+
+  leftScalar = evaluateOp(
+      new Div(leftScalar, getImmediateByType(leftScalar->dtype(), GCD)));
+  rightScalar = evaluateOp(
+      new Div(rightScalar, getImmediateByType(rightScalar->dtype(), GCD)));
+
+  if (lhsTerm) {
+    lhs_new = new Term(lhsTerm->hasher(), leftScalar, lhsTerm->variables());
+  } else {
+    lhs_new = leftScalar;
+  }
+
+  if (rhsTerm) {
+    rhs_new = new Term(rhsTerm->hasher(), rightScalar, rhsTerm->variables());
+  } else {
+    rhs_new = rightScalar;
+  }
+
+  return new Div(lhs_new, rhs_new);
+}
+
+const Expr* PolynomialTransformer::mutate(const Div* v) {
+  const Expr* lhs_new = v->lhs()->accept_mutator(this);
+  const Expr* rhs_new = v->rhs()->accept_mutator(this);
+
+  // Constant Folding.
+  if (lhs_new->isConstant() && rhs_new->isConstant()) {
+    return evaluateOp(new Div(lhs_new, rhs_new));
+  }
+
+  // If this is a floating point Div then order of operations is important, we
+  // dont want to combine ops.
+  if (lhs_new->dtype().is_floating_point() ||
+      rhs_new->dtype().is_floating_point()) {
+    return new Div(lhs_new, rhs_new);
+  }
+
+  if (auto ret = factorizeDivision(lhs_new, rhs_new)) {
+    return ret;
+  }
+
+  return new Div(lhs_new, rhs_new);
+}
+
 const Expr* PolynomialTransformer::mutate(const Intrinsics* v) {
   std::vector<const Expr*> new_params;
   bool changed = false;
@@ -953,15 +1042,6 @@ const Expr* TermExpander::mutate(const Term* v) {
   }
 
   return lastNode;
-}
-
-// Simple recursive GCD.
-template <typename T>
-T gcd(T a, T b) {
-  if (b == 0) {
-    return a;
-  }
-  return gcd(b, a % b);
 }
 
 // Returns an immediate containing the greatest common divisor of all terms
