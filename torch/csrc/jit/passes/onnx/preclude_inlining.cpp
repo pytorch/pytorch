@@ -9,43 +9,65 @@ void functionCallSubstitution(Block* block) {
   for (auto it = block->nodes().begin(), end = block->nodes().end();
        it != end;) {
     Node* cur = *it++;
-    if (cur->kind() == prim::CallFunction) {
-      AT_ASSERT(cur->input(0)->node()->kind() == prim::Constant);
-      auto function_constant = cur->input(0)->node();
-      auto fun_type =
-          function_constant->output()->type()->expect<FunctionType>();
+    switch (cur->kind()) {
+      case prim::CallFunction: {
+        AT_ASSERT(cur->input(0)->node()->kind() == prim::Constant);
+        auto function_constant = cur->input(0)->node();
+        auto fun_type =
+            function_constant->output()->type()->expect<FunctionType>();
 
-      if ((fun_type->function()->qualname().qualifiedName().find(
-               "__torch__.torch.nn.functional") != std::string::npos) &&
-          (fun_type->function()->qualname().qualifiedName().find(
-               "interpolate") != std::string::npos)) {
-        cur->removeInput(0);
-        Node* interpolate_node = block->owningGraph()->create(
-            Symbol::fromQualString("aten::__interpolate"),
-            {cur->inputs()},
-            cur->outputs().size());
-        interpolate_node->output()->copyMetadata(cur->output());
-        interpolate_node->insertAfter(cur);
-        cur->replaceAllUsesWith(interpolate_node);
-        cur->removeAllInputs();
-        cur->destroy();
-      } else {
-        cur->removeInput(0);
-        GRAPH_UPDATE(
-            "Inlining in ONNX preclude inlining function '",
-            fun_type->function()->name(),
-            "' to ",
-            *cur);
-        GRAPH_UPDATE(
-            "Function in ONNX preclude inlining body: ",
-            *fun_type->function()->optimized_graph());
-        functionCallSubstitution(fun_type->function()->graph()->block());
-        inlineCallTo(cur, fun_type->function(), false);
-      }
-    } else {
-      for (auto b : cur->blocks()) {
-        functionCallSubstitution(b);
-      }
+        if ((fun_type->function()->qualname().qualifiedName().find(
+                 "torch.nn.functional") != std::string::npos) &&
+            (fun_type->function()->qualname().qualifiedName().find(
+                 "interpolate") != std::string::npos)) {
+          cur->removeInput(0);
+          Node* interpolate_node = block->owningGraph()->create(
+              Symbol::fromQualString("aten::__interpolate"),
+              {cur->inputs()},
+              cur->outputs().size());
+          interpolate_node->output()->copyMetadata(cur->output());
+          interpolate_node->insertAfter(cur);
+          cur->replaceAllUsesWith(interpolate_node);
+          cur->removeAllInputs();
+          cur->destroy();
+        } else {
+          cur->removeInput(0);
+          functionCallSubstitution(fun_type->function()->graph()->block());
+          GRAPH_UPDATE(
+              "Inlining in ONNX preclude inlining function '",
+              fun_type->function()->name(),
+              "' to ",
+              *cur);
+          GRAPH_UPDATE(
+              "Function in ONNX preclude inlining body: ",
+              *fun_type->function()->optimized_graph());
+          inlineCallTo(cur, fun_type->function(), false);
+        }
+      } break;
+      case prim::CallMethod: {
+        const std::string& name = cur->s(attr::name);
+        if (auto class_type = cur->input(0)->type()->cast<ClassType>()) {
+          auto function = class_type->getMethod(name);
+          if (!function->isGraphFunction()) {
+            continue;
+          }
+          functionCallSubstitution(function->graph()->block());
+          GRAPH_UPDATE(
+              "Inlining in ONNX preclude inlining function '",
+              function->name(),
+              "' to ",
+              *cur);
+          GRAPH_UPDATE(
+              "Function in ONNX preclude inlining body: ",
+              function->optimized_graph());
+          inlineCallTo(cur, function, false);
+        }
+      } break;
+      default: {
+        for (auto b : cur->blocks()) {
+          functionCallSubstitution(b);
+        }
+      } break;
     }
   }
 }
