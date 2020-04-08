@@ -412,6 +412,10 @@ class LoopOptions {
     return oss.str();
   }
 
+  bool isDefault() const {
+    return gpu_block_index_ == -1 && gpu_thread_index_ == -1;
+  }
+
  private:
   int gpu_block_index_ = -1;
   int gpu_thread_index_ = -1;
