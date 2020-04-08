@@ -6337,8 +6337,9 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(result, result_check)
 
         result = torch.block_diag()
-        result_check = torch.empty(0, device=device)
+        result_check = torch.empty(1, 0, device=device)
         self.assertEqual(result, result_check)
+        self.assertEqual(result.device.type, 'cpu')
 
         test_dtypes = [
             torch.uint8,
@@ -6382,20 +6383,23 @@ class TestTorchDeviceType(TestCase):
                 [[4, 9], [7, 10]],
                 [4.6, 9.12],
                 [1j + 3]
-            ]
+            ],
+            []
         ]
 
         expected_torch_types = [
             torch.float32,
             torch.int64,
-            torch.complex64
+            torch.complex64,
+            torch.float32
         ]
 
         expected_scipy_types = [
             torch.float64,
             # windows scipy block_diag returns int32 types
             torch.int32 if IS_WINDOWS else torch.int64,
-            torch.complex128
+            torch.complex128,
+            torch.float64
         ]
 
         for scipy_tensors, torch_type, scipy_type in zip(scipy_tensors_list, expected_torch_types, expected_scipy_types):

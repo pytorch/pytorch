@@ -393,7 +393,7 @@ Tensor cat(TensorList tensors, int64_t dim) {
 Tensor block_diag(TensorList tensors) {
   Tensor result;
   if (tensors.size() == 0) {
-    result = at::empty({0});
+    result = at::empty({1, 0});
     return result;
   }
 
