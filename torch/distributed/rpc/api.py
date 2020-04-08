@@ -105,29 +105,28 @@ _wait_all_workers_sequence_id_to_states = collections.defaultdict(WaitAllWorkers
 
 
 def _on_leader_follower_report_shutdown_intent(sequence_id, worker_name):
-    assert (
-        worker_name in _ALL_WORKER_NAMES
-    ), "{worker_name} is not expected by leader.".format(worker_name=worker_name)
-    intent_worker_names = _wait_all_workers_sequence_id_to_states[
-        sequence_id
-    ].intent_worker_names
-    assert (
-        worker_name not in intent_worker_names
-    ), "{worker_name} reported intent sequence id {sequence_id} twice. ".format(
-        worker_name=worker_name, sequence_id=sequence_id
-    )
-    intent_worker_names.add(worker_name)
-    if _ALL_WORKER_NAMES == intent_worker_names:
-        _set_proceed_shutdown_signal(sequence_id)
+    with _wait_all_workers_dict_lock:
+        assert (
+            worker_name in _ALL_WORKER_NAMES
+        ), "{worker_name} is not expected by leader.".format(worker_name=worker_name)
+        intent_worker_names = _wait_all_workers_sequence_id_to_states[
+            sequence_id
+        ].intent_worker_names
+        assert (
+            worker_name not in intent_worker_names
+        ), "{worker_name} reported intent sequence id {sequence_id} twice. ".format(
+            worker_name=worker_name, sequence_id=sequence_id
+        )
+        intent_worker_names.add(worker_name)
+        if _ALL_WORKER_NAMES == intent_worker_names:
+            _set_proceed_shutdown_signal(sequence_id)
 
 
 def _set_proceed_shutdown_signal(sequence_id):
     proceed_signal = _wait_all_workers_sequence_id_to_states[sequence_id].proceed_signal
     assert (
         not proceed_signal.is_set()
-    ), "Termination signal sequence id {} got set twice.".format(
-        sequence_id=sequence_id
-    )
+    ), "Termination signal sequence id {} got set twice.".format(sequence_id)
     proceed_signal.set()
 
 
