@@ -102,9 +102,9 @@ static Tensor & masked_select_out_cuda_impl(Tensor & result, const Tensor & self
   TORCH_CHECK(self.scalar_type() == result.scalar_type(),
               "masked_select(): self and result must have the same scalar type");
 
-  Tensor _mask, _self;
-  std::tie(_mask, _self) = expand_outplace(mask, self);
-
+  Tensor _mask = (mask.dim() == 0) ? mask.unsqueeze(0) : mask;
+  Tensor _self = (self.dim() == 0) ? self.unsqueeze(0) : self;
+  std::tie(_mask, _self) = expand_outplace(_mask, _self);
   at::native::index_out(result, _self, _mask);
 
   return result;
