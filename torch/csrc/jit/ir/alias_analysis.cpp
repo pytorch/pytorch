@@ -860,16 +860,17 @@ void AliasDb::makePointerTo(const Value* from, const Value* to) {
     return;
   }
 
-  // covariant type containers can be point to types which are not
-  // also mutable/immutable because we unify the contained types
-  // Any can point to/from immutable types
+  // the contained types of immutable type containers (optional, tuple, future)
+  // are unified, so these types can be mutable or immutable
+  // and point to a type which is mutable or immutable.
+  // Any is mutable but can point to a immutable type through refinement
   if (isMutableTypeInternal(from) != isMutableTypeInternal(to)) {
-    auto from_kind = from->type()->kind();
     bool expected_kind = false;
     for (auto kind : {from->type()->kind(), to->type()->kind()}) {
-      expected_kind = expected_kind || kind == TypeKind::OptionalType ||
-          kind == TypeKind::FutureType || kind == TypeKind::TupleType ||
-          kind == TypeKind::AnyType;
+      expected_kind = expected_kind ||
+          (kind == TypeKind::OptionalType || kind == TypeKind::FutureType ||
+           kind == TypeKind::TupleType) // immutable type containers
+          || kind == TypeKind::AnyType;
     }
     TORCH_INTERNAL_ASSERT(
         expected_kind, from->type()->str(), to->type()->str());
