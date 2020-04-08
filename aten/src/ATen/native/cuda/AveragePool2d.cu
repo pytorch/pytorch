@@ -14,9 +14,6 @@ namespace at {
 namespace native {
 namespace {
 
-#define CUDA_MAX_THREADS 1024
-#define BLOCK_STRIDE 2
-
 __device__ inline int min(int a, int b) {
   return a <= b ? a : b;
 }
@@ -25,14 +22,6 @@ __device__ inline int max(int a, int b) {
   return a >= b ? a : b;
 }
   
-static __device__ inline int p_start(int size, int pad, int kernel, int dilation, int stride) {
-  return (size + pad < ((kernel - 1) * dilation + 1)) ? 0 : (size + pad - ((kernel - 1) * dilation + 1)) / stride + 1;
-}
-
-static __device__ inline int p_end(int size, int pad, int pooled_size, int stride) {
-  return min((size + pad) / stride + 1, pooled_size);
-}
-
 template <typename scalar_t, typename accscalar_t>
 __global__ void avg_pool2d_out_cuda_frame(const int nthreads,
     const scalar_t* const bottom_data, const int num, const int channels,
@@ -167,108 +156,6 @@ __global__ void avg_pool2d_backward_out_cuda_frame(const int nthreads, const sca
       }
     }
     bottom_diff[index] = ScalarConvert<accscalar_t, scalar_t>::to(gradient);
-  }
-}
-
-template <typename scalar_t, typename accscalar_t>
-C10_LAUNCH_BOUNDS_1(CUDA_MAX_THREADS)
-__global__ void avg_pool2d_backward_out_cuda_frame_nhwc_old(
-    const int nthreads, const scalar_t* top_diff,
-    const int nbatch, const int channels, const int height, const int width,
-    const int pooled_height, const int pooled_width,
-    const int kernel_h, const int kernel_w,
-    const int stride_h, const int stride_w,
-    const int pad_h, const int pad_w,
-    const int out_stride_c, const int out_stride_h, const int out_stride_w,
-    const int in_stride_n, const int in_stride_c,
-    const int in_stride_h, const int in_stride_w,
-    const int kernel_stride_C, const int kernel_size_C,
-    scalar_t* bottom_diff,
-    const int divisor_override, const bool count_include_pad, const bool use_divisor) {
-  // reserved for future use
-  const int dilation_h = 1;
-  const int dilation_w = 1;
-
-  extern __shared__ int smem[];
-  accscalar_t *out_cached = reinterpret_cast<accscalar_t*>(smem);
-
-  int thread_id = threadIdx.x + blockDim.x * (threadIdx.y + blockDim.y * threadIdx.z);
-  int block_size = blockDim.x * blockDim.y * blockDim.z;
-
-  for (int i = thread_id; i < kernel_size_C*blockDim.x*blockDim.y*blockDim.z; i+= block_size) {
-    out_cached[i] = accscalar_t(0.0);
-  }
-
-  __syncthreads();
-
-  int batch_id = blockIdx.x % nbatch;
-  int channel_id = blockIdx.x / nbatch;
-  int channel_offset = threadIdx.x + channel_id * blockDim.x;
-
-  bottom_diff = bottom_diff + batch_id * height * width * channels;
-  top_diff = top_diff + batch_id * pooled_height * pooled_width * channels;
-
-  out_cached = &out_cached[(threadIdx.z * blockDim.y + threadIdx.y) * kernel_size_C*blockDim.x];
-
-  int iH = (height + gridDim.z-1) / gridDim.z;
-  int iW = (width + gridDim.y-1) / gridDim.y;
-  int istartH = threadIdx.z + blockIdx.z*iH;
-  int iendH = ::min(istartH+iH, height);
-  int istartW = threadIdx.y + blockIdx.y*iW;
-  int iendW = ::min(istartW+iW, width);
-
-  for (int ih = istartH; ih < iendH; ih+=blockDim.z) {
-    int phstart = p_start(ih, pad_h, kernel_h, dilation_h, stride_h);
-    int phend = p_end(ih, pad_h, pooled_height, stride_h);
-    for (int iw = istartW; iw < iendW; iw+=blockDim.y) {
-      int pwstart = p_start(iw, pad_w, kernel_w, dilation_w, stride_w);
-      int pwend = p_end(iw, pad_w, pooled_width, stride_w);
-
-      int index_shift = ih * width + iw;
-      for(int oh = phstart; oh < phend; ++oh) {
-        int hstart = oh * stride_h - pad_h;
-        int hend = min(hstart + kernel_h, height + pad_h);
-        for(int ow = pwstart; ow < pwend; ++ow) {
-          int wstart = ow * stride_w - pad_w;
-          int wend = min(wstart + kernel_w, width + pad_w);
-
-          // pool_size if count_include_pad
-          int pool_size = (hend - hstart) * (wend - wstart);
-
-          while (hstart < 0) hstart += dilation_h;
-          while (wstart < 0) wstart += dilation_w;
-          hend = min(hend, height);
-          wend = min(wend, width);
-
-          int divide_factor;
-          if (use_divisor) {
-            divide_factor = divisor_override;
-          } else {
-            if(count_include_pad) {
-              divide_factor = pool_size;
-            } else {
-              divide_factor = (hend - hstart) * (wend - wstart);
-            }
-          }
-          // avoid division in loops
-          accscalar_t mul_factor = 1.0 / divide_factor;
-
-          const scalar_t* ptr_top_diff = top_diff + oh*out_stride_h + ow*out_stride_w;
-          int cached_index = threadIdx.x;
-          for (int c = channel_offset; c < channels; c += blockDim.x*kernel_stride_C) {
-            out_cached[cached_index] += ptr_top_diff[c*out_stride_c] * mul_factor;
-            cached_index += blockDim.x;
-          }
-        }
-      }
-      scalar_t *ptr_bottom_diff = bottom_diff + index_shift * channels;
-      int cached_index = threadIdx.x;
-      for (int c = channel_offset; c < channels; c += blockDim.x*kernel_stride_C) {
-        ptr_bottom_diff[c] = scalar_cast<scalar_t>(out_cached[cached_index]);
-        out_cached[cached_index] = accscalar_t(0.0);
-        cached_index += blockDim.x;
-      }
-    }
   }
 }
 
