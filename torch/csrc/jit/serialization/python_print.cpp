@@ -1231,7 +1231,7 @@ struct PythonPrintImpl {
       if (forwardPreHooks.size() > 0) {
         indent();
         body_ << "__forward_pre_hooks__ = [";
-        for (auto hook_name : forwardPreHooks) {
+        for (const auto& hook_name : forwardPreHooks) {
           body_ << hook_name.qualifiedName() << ",";
         }
         body_ << "]\n";
@@ -1241,7 +1241,7 @@ struct PythonPrintImpl {
       if (forwardHooks.size() > 0) {
         indent();
         body_ << "__forward_hooks__ = [";
-        for (auto hook_name : forwardHooks) {
+        for (const auto& hook_name : forwardHooks) {
           body_ << hook_name.qualifiedName() << ",";
         }
         body_ << "]\n";
