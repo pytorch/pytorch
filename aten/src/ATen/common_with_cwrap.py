@@ -21,6 +21,8 @@ def parse_arguments(args):
 
 def set_declaration_defaults(declaration):
     if 'schema_string' not in declaration:
+        # This happens for legacy TH bindings like
+        # _thnn_conv_depthwise2d_backward
         declaration['schema_string'] = ''
     if 'matches_jit_signature' not in declaration:
         declaration['matches_jit_signature'] = False
@@ -40,6 +42,12 @@ def set_declaration_defaults(declaration):
         declaration['type_wrapper_name'] = declaration['name']
     # TODO: Uggggh, parsing the schema string here, really???
     declaration['operator_name_with_overload'] = declaration['schema_string'].split('(')[0]
+    if declaration['schema_string']:
+        declaration['unqual_schema_string'] = declaration['schema_string'].split('::')[1]
+        declaration['unqual_operator_name_with_overload'] = declaration['operator_name_with_overload'].split('::')[1]
+    else:
+        declaration['unqual_schema_string'] = ''
+        declaration['unqual_operator_name_with_overload'] = ''
     # Simulate multiple dispatch, even if it's not necessary
     if 'options' not in declaration:
         declaration['options'] = [{'arguments': declaration['arguments']}]

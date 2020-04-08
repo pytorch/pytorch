@@ -109,15 +109,17 @@ ${return_type} ${type_wrapper_name}(${type_method_formals}) {
 # better to do it once at a schema registration so that we don't have to
 # repeat ourselves everywhere else.
 SCHEMA_REGISTRATION = CodeTemplate("""\
-m.def("${schema_string}");
+m.def("${unqual_schema_string}");
 """)
 
+# NB: Specifiction of the namespace is handled by the enclosing
+# TORCH_LIBRARY macro invocation
 DEFAULT_UNBOXEDONLY_FUNCTION_REGISTRATION = CodeTemplate("""\
-m.impl("${operator_name_with_overload}",
+m.impl("${unqual_operator_name_with_overload}",
        CppFunction::makeUnboxedOnly(TypeDefault::${type_wrapper_name}));
 """)
 DEFAULT_FUNCTION_REGISTRATION = CodeTemplate("""\
-m.impl("${operator_name_with_overload}", &TypeDefault::${type_wrapper_name});
+m.impl("${unqual_operator_name_with_overload}", &TypeDefault::${type_wrapper_name});
 """)
 # NB: Specification of the backend is handled by the enclosing
 # TORCH_LIBRARY_IMPL macro invocation
