@@ -16,7 +16,7 @@ import torch
 from .file_baton import FileBaton
 from ._cpp_extension_versioner import ExtensionVersioner
 from .hipify import hipify_python
-from .hipify.hipify_python import get_hip_file_path
+from .hipify.hipify_python import get_hip_file_path, GeneratedFileCleaner
 
 from setuptools.command.build_ext import build_ext
 
@@ -816,7 +816,8 @@ def load(name,
          build_directory=None,
          verbose=False,
          with_cuda=None,
-         is_python_module=True):
+         is_python_module=True,
+         keep_intermediates=False):
     '''
     Loads a PyTorch C++ extension just-in-time (JIT).
 
@@ -897,7 +898,8 @@ def load(name,
         build_directory or _get_build_directory(name, verbose),
         verbose,
         with_cuda,
-        is_python_module)
+        is_python_module,
+        keep_intermediates=keep_intermediates)
 
 
 def load_inline(name,
@@ -912,7 +914,8 @@ def load_inline(name,
                 verbose=False,
                 with_cuda=None,
                 is_python_module=True,
-                with_pytorch_error_handling=True):
+                with_pytorch_error_handling=True,
+                keep_intermediates=True):
     '''
     Loads a PyTorch C++ extension just-in-time (JIT) from string sources.
 
@@ -1045,7 +1048,8 @@ def load_inline(name,
         build_directory,
         verbose,
         with_cuda,
-        is_python_module)
+        is_python_module,
+        keep_intermediates=keep_intermediates)
 
 
 def _jit_compile(name,
@@ -1057,19 +1061,12 @@ def _jit_compile(name,
                  build_directory,
                  verbose,
                  with_cuda,
-                 is_python_module):
+                 is_python_module,
+                 keep_intermediates=False):
+
     if with_cuda is None:
         with_cuda = any(map(_is_cuda_file, sources))
     with_cudnn = any(['cudnn' in f for f in extra_ldflags or []])
-    if IS_HIP_EXTENSION and (with_cuda or with_cudnn):
-        hipify_python.hipify(
-            project_directory=build_directory,
-            output_directory=build_directory,
-            includes=os.path.join(build_directory, '*'),
-            extra_files=[os.path.abspath(s) for s in sources],
-            show_detailed=verbose,
-            is_pytorch_extension=True,
-        )
     old_version = JIT_EXTENSION_VERSIONER.get_version(name)
     version = JIT_EXTENSION_VERSIONER.bump_version_if_changed(
         name,
@@ -1088,16 +1085,27 @@ def _jit_compile(name,
         baton = FileBaton(os.path.join(build_directory, 'lock'))
         if baton.try_acquire():
             try:
-                _write_ninja_file_and_build_library(
-                    name=name,
-                    sources=sources,
-                    extra_cflags=extra_cflags or [],
-                    extra_cuda_cflags=extra_cuda_cflags or [],
-                    extra_ldflags=extra_ldflags or [],
-                    extra_include_paths=extra_include_paths or [],
-                    build_directory=build_directory,
-                    verbose=verbose,
-                    with_cuda=with_cuda)
+                with GeneratedFileCleaner(keep_intermediates=keep_intermediates) as clean_ctx:
+                    if IS_HIP_EXTENSION and (with_cuda or with_cudnn):
+                        hipify_python.hipify(
+                            project_directory=build_directory,
+                            output_directory=build_directory,
+                            includes=os.path.join(build_directory, '*'),
+                            extra_files=[os.path.abspath(s) for s in sources],
+                            show_detailed=verbose,
+                            is_pytorch_extension=True,
+                            clean_ctx=clean_ctx
+                        )
+                    _write_ninja_file_and_build_library(
+                        name=name,
+                        sources=sources,
+                        extra_cflags=extra_cflags or [],
+                        extra_cuda_cflags=extra_cuda_cflags or [],
+                        extra_ldflags=extra_ldflags or [],
+                        extra_include_paths=extra_include_paths or [],
+                        build_directory=build_directory,
+                        verbose=verbose,
+                        with_cuda=with_cuda)
             finally:
                 baton.release()
         else:

@@ -72,6 +72,39 @@ class bcolors:
     BOLD = '\033[1m'
     UNDERLINE = '\033[4m'
 
+class GeneratedFileCleaner:
+    """Context Manager to clean up generated files"""
+    def __init__(self, keep_intermediates=False):
+        self.keep_intermediates = keep_intermediates
+        self.files_to_clean = set()
+        self.dirs_to_clean = []
+
+    def __enter__(self):
+        return self
+
+    def open(self, fn, *args):
+        if not os.path.exists(fn):
+            self.files_to_clean.add(os.path.abspath(fn))
+        return open(fn, *args)
+
+    def makedirs(self, dn, exist_ok=False):
+        parent, n = os.path.split(dn)
+        if not n:
+            parent, n = os.path.split(parent)
+        if parent and n and not os.path.exists(parent):
+            self.makedirs(parent, exist_ok=True)
+        try:
+            os.mkdir(dn)
+        except OSError:
+            if not exist_ok or not os.path.isdir(dn):
+                raise
+
+    def __exit__(self, type, value, traceback):
+        if not self.keep_intermediates:
+            for f in self.files_to_clean:
+                os.unlink(f)
+            for d in self.dirs_to_clean[::-1]:
+                os.rmdir(d)
 
 def matched_files_iter(root_path, includes=('*',), ignores=(), extensions=(), out_of_place_only=False):
     def _fnmatch(filepath, patterns):
@@ -120,7 +153,8 @@ def preprocess(
         show_detailed=False,
         show_progress=True,
         hip_clang_launch=False,
-        is_pytorch_extension=False):
+        is_pytorch_extension=False,
+        clean_ctx=None):
     """
     Call preprocessor on selected files.
 
@@ -128,11 +162,14 @@ def preprocess(
         show_detailed - Show a detailed summary of the transpilation process.
     """
 
+    if clean_ctx is None:
+        clean_ctx = GeneratedFileCleaner(keep_intermediates=True)
+
     # Preprocessing statistics.
     stats = {"unsupported_calls": [], "kernel_launches": []}
 
     for filepath in all_files:
-        result = preprocessor(output_directory, filepath, stats, hip_clang_launch, is_pytorch_extension)
+        result = preprocessor(output_directory, filepath, stats, hip_clang_launch, is_pytorch_extension, clean_ctx)
 
         # Show what happened
         if show_progress:
@@ -607,7 +644,7 @@ RE_ANGLE_HEADER = re.compile(r'#include <([^>]+)>')
 RE_THC_GENERIC_FILE = re.compile(r'#define THC_GENERIC_FILE "([^"]+)"')
 RE_CU_SUFFIX = re.compile(r'\.cu\b')  # be careful not to pick up .cuh
 
-def preprocessor(output_directory, filepath, stats, hip_clang_launch, is_pytorch_extension):
+def preprocessor(output_directory, filepath, stats, hip_clang_launch, is_pytorch_extension, clean_ctx):
     """ Executes the CUDA -> HIP conversion on the specified file. """
     fin_path = os.path.join(output_directory, filepath)
     with open(fin_path, 'r') as fin:
@@ -615,7 +652,7 @@ def preprocessor(output_directory, filepath, stats, hip_clang_launch, is_pytorch
 
     fout_path = os.path.join(output_directory, get_hip_file_path(filepath))
     if not os.path.exists(os.path.dirname(fout_path)):
-        os.makedirs(os.path.dirname(fout_path))
+        clean_ctx.makedirs(os.path.dirname(fout_path))
 
     # unsupported_calls statistics reporting is broken atm
     def pt_repl(m):
@@ -676,7 +713,7 @@ def preprocessor(output_directory, filepath, stats, hip_clang_launch, is_pytorch
         with open(fout_path, 'r') as fout_old:
             do_write = fout_old.read() != output_source
     if do_write:
-        with open(fout_path, 'w') as fout:
+        with clean_ctx.open(fout_path, 'w') as fout:
             fout.write(output_source)
         return "ok"
     else:
@@ -783,6 +820,7 @@ def hipify(
     show_progress=True,
     hip_clang_launch=False,
     is_pytorch_extension=False,
+    clean_ctx=None
 ):
     if project_directory == "":
         project_directory = os.getcwd()
@@ -814,4 +852,5 @@ def hipify(
         show_detailed=show_detailed,
         show_progress=show_progress,
         hip_clang_launch=hip_clang_launch,
-        is_pytorch_extension=is_pytorch_extension)
+        is_pytorch_extension=is_pytorch_extension,
+        clean_ctx=clean_ctx)
