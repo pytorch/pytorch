@@ -115,7 +115,7 @@ struct TORCH_CUDA_API Statement {
 
   // Return if this statement is the same as another statement
   // TODO: should this run through dispatch on this and other?
-  virtual bool sameAs(const Statement* const other) const {
+  bool sameAs(const Statement* const other) const {
     return this == other;
   }
 

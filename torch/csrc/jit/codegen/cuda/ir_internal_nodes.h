@@ -540,7 +540,7 @@ struct TORCH_CUDA_API NamedScalar : public Val {
     return name_;
   }
 
-  virtual bool sameAs(const NamedScalar* const other) const {
+  bool sameAs(const NamedScalar* const other) const {
     return other->name().compare(name()) == 0;
   }
 
