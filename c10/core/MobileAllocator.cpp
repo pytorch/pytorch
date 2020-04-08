@@ -34,11 +34,24 @@ class DefaultMobileCPUAllocator final : public at::Allocator {
   virtual ~DefaultMobileCPUAllocator() override = default;
 
   static void deleter(void* const pointer) {
+    if (C10_UNLIKELY(!pointer)) {
+      return;
+    }
+
     const Cast memory{pointer};
     c10::free_cpu(memory.as_byte_ptr - PreGuardBytes);
   }
 
   virtual DataPtr allocate(const size_t nbytes) const override {
+    if (C10_UNLIKELY(0u == nbytes)) {
+      return {
+        nullptr,
+        nullptr,
+        &deleter,
+        at::Device(DeviceType::CPU),
+      };
+    }
+
     Cast memory{
       c10::alloc_cpu(
         PreGuardBytes + nbytes + PostGuardBytes,
