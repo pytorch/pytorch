@@ -28,6 +28,7 @@
 #include <torch/csrc/jit/passes/requires_grad_analysis.h>
 #include <torch/csrc/jit/passes/shape_analysis.h>
 #include <torch/csrc/jit/passes/specialize_autogradzero.h>
+#include <torch/csrc/jit/passes/tensorexpr_fuser.h>
 #include <torch/csrc/jit/resource_guard.h>
 #include <torch/csrc/jit/runtime/argument_spec.h>
 #include <torch/csrc/jit/runtime/autodiff.h>
@@ -657,7 +658,7 @@ GraphExecutor::GraphExecutor(
     std::shared_ptr<Graph> graph,
     std::string function_name)
     : pImpl(
-          getExecutorMode()
+          IsNewExecutorEnabled()
               ? dynamic_cast<GraphExecutorImplBase*>(
                     new ProfilingGraphExecutorImpl(
                         graph,
@@ -689,6 +690,13 @@ std::shared_ptr<Graph> GraphExecutor::graph() const {
 
 GraphExecutorState GraphExecutor::getDebugState() {
   return pImpl->getDebugState();
+}
+
+TORCH_API bool IsNewExecutorEnabled() {
+  static const auto disable_new_executor =
+      std::getenv("TORCH_JIT_DISABLE_NEW_EXECUTOR");
+  return getExecutorMode() && FLAGS_torch_jit_enable_new_executor &&
+      !disable_new_executor;
 }
 
 void runRequiredPasses(const std::shared_ptr<Graph>& g) {
@@ -771,6 +779,8 @@ void runNondiffOptimization(
   QuantFusion(graph);
 
   FuseGraph(graph, strict_fuser_check);
+
+  fuseTensorExprs(graph);
 
   // Run custom post-fusion passes
   for (const auto& passPair : getCustomPostPasses()) {
