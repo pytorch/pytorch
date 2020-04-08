@@ -90,13 +90,13 @@ class Transformer(Module):
             - memory_key_padding_mask: :math:`(N, S)`.
 
             Note: [src/tgt/memory]_mask ensures that position i is allowed to attend the unmasked
-            positions. If a ByteTensor is provided, positions with ``1`` are not allowed to attend
-            while ``0`` values will be unchanged. If a bool Tensor is provided, positions with ``True``
+            positions. If a ByteTensor is provided, positions with non-zero are not allowed to attend
+            while zero values will be unchanged. If a bool Tensor is provided, positions with ``True``
             are not allowed to attend while ``False`` values will be unchanged. If a float tensor
             is provided, it will be added to the attention weight. 
             [src/tgt/memory]_key_padding_mask provides specified elements in the key to be ignored by
-            the attention. If a ByteTensor is provided, the positions with the value of ``1`` will be ignored while the position
-            with the value of ``0`` will be unchanged. If a bool tensor is provided, the positions with the
+            the attention. If a ByteTensor is provided, the positions with the value of non-zero will be ignored while the position
+            with the value of zero will be unchanged. If a bool tensor is provided, the positions with the
             value of ``True`` will be ignored while the position with the value of ``False`` will be unchanged.
 
             - output: :math:`(T, N, E)`.
