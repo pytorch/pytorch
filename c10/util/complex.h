@@ -273,19 +273,19 @@ constexpr complex<double>::complex(const complex<float> &other): complex_common(
 namespace complex_literals {
 
 constexpr complex<float> operator"" _if(long double imag) {
-  return complex<float>(float(), static_cast<float>(imag));
+  return complex<float>(0.0f, static_cast<float>(imag));
 }
 
 constexpr complex<double> operator"" _id(long double imag) {
-  return complex<double>(double(), static_cast<double>(imag));
+  return complex<double>(0.0, static_cast<double>(imag));
 }
 
 constexpr complex<float> operator"" _if(unsigned long long imag) {
-  return complex<float>(float(), static_cast<float>(imag));
+  return complex<float>(0.0f, static_cast<float>(imag));
 }
 
 constexpr complex<double> operator"" _id(unsigned long long imag) {
-  return complex<double>(double(), static_cast<double>(imag));
+  return complex<double>(0.0, static_cast<double>(imag));
 }
 
 } // namespace complex_literals
