@@ -23,7 +23,7 @@ PyObject* multiprocessing_init(PyObject* _unused, PyObject *noargs) {
 #if __has_feature(address_sanitizer)
   TORCH_WARN(
     "torch.multiprocessing: your pytorch binary has address sanitizer (asan) built in, "
-    "asan is currently not compatiable with spawn-based (start method is 'spawn') multiprocessing "
+    "asan is currently not compatible with spawn-based (start method is 'spawn') multiprocessing "
     "which is provided in this module, you might get unexpected behavior (eg. missing attribute, crash, etc.), "
     "please rebuild pytorch without asan if you need spawn-based multiprocessing");
 #endif
