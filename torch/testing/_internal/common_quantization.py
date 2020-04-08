@@ -556,6 +556,26 @@ class ModelWithSequentialFusion(nn.Module):
         x = self.dequant(x)
         return x
 
+class ModelForFusionWithBias(nn.Module):
+    def __init__(self):
+        super(ModelForFusionWithBias, self).__init__()
+        self.conv1 = nn.Conv2d(3, 2, 5, bias=True).to(dtype=torch.float)
+        self.bn1 = nn.BatchNorm2d(2).to(dtype=torch.float)
+        self.relu1 = nn.ReLU(inplace=True).to(dtype=torch.float)
+        self.conv2 = nn.Conv2d(2, 2, 1, bias=True).to(dtype=torch.float)
+        self.bn2 = nn.BatchNorm2d(2).to(dtype=torch.float)
+        self.quant = QuantStub()
+        self.dequant = DeQuantStub()
+
+    def forward(self, x):
+        x = self.quant(x)
+        x = self.conv1(x)
+        x = self.bn1(x)
+        x = self.relu1(x)
+        x = self.conv2(x)
+        x = self.bn2(x)
+        x = self.dequant(x)
+        return x
 
 class DummyObserver(torch.nn.Module):
     def calculate_qparams(self):
