@@ -1290,12 +1290,8 @@ TEST(OperatorRegistrationTest, testAvailableArgTypes) {
     "(Dict(str, Dict(int, str)?[])[] a) -> Dict(str, Dict(int, str)?[])[]");
 }
 
-// Variants for ease of testing
-#define MAKE_TORCH_LIBRARY(ns) c10::Library(#ns, __FILE__, __LINE__)
-#define MAKE_TORCH_LIBRARY_IMPL(k) c10::Library(c10::DispatchKey::k, __FILE__, __LINE__)
-
 TEST(NewOperatorRegistrationTest, testBasics) {
-  auto m = MAKE_TORCH_LIBRARY(_test);
+  auto m = c10::Library("_test", __FILE__, __LINE__);
   m.def("dummy(Tensor self) -> Tensor");
   m.def("dummy1(Tensor self) -> Tensor");
   m.def("dummy2(Tensor self) -> Tensor");
@@ -1316,12 +1312,12 @@ TEST(NewOperatorRegistrationTest, testBasics) {
 }
 
 TEST(NewOperatorRegistrationTest, importTopLevel) {
-  auto m = MAKE_TORCH_LIBRARY("test");
+  auto m = c10::Library("test", __FILE__, __LINE__);
   m.def("def1(Tensor self) -> Tensor");
   m.def("def2(Tensor self) -> Tensor", [](const Tensor& x) { return x; });
   m.def("def3", [](const Tensor& x) { return x; });
 
-  auto m2 = MAKE_TORCH_LIBRARY_IMPL(CatchAll);
+  auto m2 = c10::Library(DispatchKey::CatchAll, __FILE__, __LINE__);
   m2.impl("test::impl1", [](const Tensor& x) { return x; });
 
   ASSERT_TRUE(Dispatcher::singleton().findSchema({"test::def1", ""}).has_value());
@@ -1334,7 +1330,7 @@ TEST(NewOperatorRegistrationTest, importTopLevel) {
 }
 
 TEST(NewOperatorRegistrationTest, overload) {
-  auto m = MAKE_TORCH_LIBRARY(test);
+  auto m = c10::Library("test", __FILE__, __LINE__);
   m.def("fn(Tensor self) -> Tensor");
   m.def("fn.overload1(Tensor self, Tensor other) -> Tensor");
   m.def("fn.overload2(Tensor self, Tensor other, Tensor alpha) -> Tensor");
@@ -1345,7 +1341,7 @@ TEST(NewOperatorRegistrationTest, overload) {
 }
 
 TEST(NewOperatorRegistrationTest, importNamespace) {
-  auto m = MAKE_TORCH_LIBRARY(test);
+  auto m = c10::Library("test", __FILE__, __LINE__);
   m.def("def1(Tensor self) -> Tensor");
   m.def("def2(Tensor self) -> Tensor", [](const Tensor& x) { return x; });
   m.def("def3", [](const Tensor& x) { return x; });
@@ -1361,7 +1357,7 @@ TEST(NewOperatorRegistrationTest, importNamespace) {
 }
 
 TEST(NewOperatorRegistrationTest, schema) {
-  auto m = MAKE_TORCH_LIBRARY(test);
+  auto m = c10::Library("test", __FILE__, __LINE__);
   m.def("def1(Tensor self) -> Tensor");
   m.def(torch::schema("def2(Tensor self) -> Tensor"));
   m.def(torch::schema("def3(Tensor self) -> Tensor", c10::AliasAnalysisKind::PURE_FUNCTION));
@@ -1382,10 +1378,10 @@ TEST(NewOperatorRegistrationTest, dispatch) {
   bool cpu_called = false;
   bool cuda_called = false;
   bool autograd_called = false;
-  auto m = MAKE_TORCH_LIBRARY(test);
-  m.def("test::fn_cpu", torch::dispatch(c10::DispatchKey::CPU, [&](const Tensor& x) { cpu_called = true; return x; }));
-  m.def("test::fn_cuda", torch::dispatch(c10::kCUDA, [&](const Tensor& x) { cuda_called = true; return x; }));
-  m.def("test::fn_autograd", torch::dispatch(c10::kAutograd, [&](const Tensor& x) { autograd_called = true; return x; }));
+  auto m = c10::Library("test", __FILE__, __LINE__);
+  m.def("fn_cpu", torch::dispatch(c10::DispatchKey::CPU, [&](const Tensor& x) { cpu_called = true; return x; }));
+  m.def("fn_cuda", torch::dispatch(c10::kCUDA, [&](const Tensor& x) { cuda_called = true; return x; }));
+  m.def("fn_autograd", torch::dispatch(c10::kAutograd, [&](const Tensor& x) { autograd_called = true; return x; }));
 
   {
     auto op = Dispatcher::singleton().findSchema({"test::fn_cpu", ""});
@@ -1416,7 +1412,7 @@ TEST(NewOperatorRegistrationTest, dispatchMultiple) {
   bool cpu_called = false;
   bool cuda_called = false;
   bool autograd_called = false;
-  auto m = MAKE_TORCH_LIBRARY(test);
+  auto m = c10::Library("test", __FILE__, __LINE__);
   m.def("fn(Tensor self) -> Tensor");
   // NB: Direct use of DispatchKey is discouraged; use the DeviceType
   // k-synonyms instead
@@ -1444,7 +1440,7 @@ TEST(NewOperatorRegistrationTest, dispatchMultiple) {
 }
 
 TEST(NewOperatorRegistrationTest, fallback) {
-  auto m = MAKE_TORCH_LIBRARY_IMPL(CPU);
+  auto m = c10::Library(DispatchKey::CPU, __FILE__, __LINE__);
   m.fallback(c10::CppFunction::makeFromBoxedFunction<&backend_fallback_kernel>());
 
   auto registrar1 = c10::RegisterOperators().op("_test::dummy(Tensor dummy, str input) -> ()");
@@ -1457,7 +1453,7 @@ TEST(NewOperatorRegistrationTest, fallback) {
 TEST(NewOperatorRegistrationTest, BackendSelectRedispatchesToCPU) {
   bool cpu_called = false;
   bool backend_generic_called = false;
-  auto m = MAKE_TORCH_LIBRARY(test);
+  auto m = c10::Library("test", __FILE__, __LINE__);
   m.def("fn(Tensor self) -> Tensor");
   m.impl("fn", c10::kCPU, [&](const Tensor& x) { cpu_called = true; return x; });
   m.impl("fn", c10::DispatchKey::BackendSelect, [&](const Tensor& x) {
@@ -1479,16 +1475,16 @@ Tensor dummy_fn(const Tensor& x) {
 
 TEST(NewOperatorRegistrationTest, CppFunction) {
   // Just show off the possible ways to register functions
-  auto m = MAKE_TORCH_LIBRARY(test);
-  m.def("test::fn1", &dummy_fn);
+  auto m = c10::Library("test", __FILE__, __LINE__);
+  m.def("fn1", &dummy_fn);
   // C++ will implicitly convert function to function pointer
   // c.f. https://en.cppreference.com/w/cpp/language/implicit_conversion#Function_to_pointer
-  m.def("test::fn2", dummy_fn);
-  m.def("test::fn3", [](const Tensor& x) { return x; });
+  m.def("fn2", dummy_fn);
+  m.def("fn3", [](const Tensor& x) { return x; });
   // These require explicit schema
-  m.def("test::fn4(Tensor x) -> Tensor", c10::CppFunction::makeFallthrough());
-  m.def("test::fn5(Tensor x) -> Tensor", c10::CppFunction::makeUnboxedOnly(dummy_fn));
-  m.def("test::fn6(Tensor x) -> Tensor", c10::CppFunction::makeFromBoxedFunction<&backend_fallback_kernel>());
+  m.def("fn4(Tensor x) -> Tensor", c10::CppFunction::makeFallthrough());
+  m.def("fn5(Tensor x) -> Tensor", c10::CppFunction::makeUnboxedOnly(dummy_fn));
+  m.def("fn6(Tensor x) -> Tensor", c10::CppFunction::makeFromBoxedFunction<&backend_fallback_kernel>());
 }
 
 // Some internal tests that have to be done from C++
@@ -1512,12 +1508,12 @@ TEST(NewOperatorRegistrationTest, testDelayedListener) {
   int64_t initial_num_deregisters = listener_ptr->num_deregisters_;
   auto op = Dispatcher::singleton().findOp({"_test::dummy", ""});
   ASSERT_FALSE(op.has_value());
-  auto m1 = MAKE_TORCH_LIBRARY_IMPL(CatchAll);
+  auto m1 = c10::Library(DispatchKey::CPU, __FILE__, __LINE__);
   m1.impl("_test::dummy", [](const Tensor& self) { return self; });
   EXPECT_EQ(initial_num_registers, listener_ptr->num_registers_);
   {
-    auto m2 = MAKE_TORCH_LIBRARY(_test);
-    m2.def("_test::dummy(Tensor self) -> Tensor");
+    auto m2 = c10::Library("_test", __FILE__, __LINE__);
+    m2.def("dummy(Tensor self) -> Tensor");
     EXPECT_EQ(initial_num_registers + 1, listener_ptr->num_registers_);
   }
   EXPECT_EQ(initial_num_deregisters + 1, listener_ptr->num_deregisters_);

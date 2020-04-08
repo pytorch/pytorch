@@ -320,8 +320,8 @@ public:
     alias_kind_ = v;
   }
 
-  void setNamespaceIfNotSet(const char* ns) {
-    name_.setNamespaceIfNotSet(ns);
+  bool setNamespaceIfNotSet(const char* ns) {
+    return name_.setNamespaceIfNotSet(ns);
   }
 
   // can a function with this schema be substituted for a function of rhs's

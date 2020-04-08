@@ -131,9 +131,9 @@ void initDispatchBindings(PyObject* module) {
 
   m.def("_dispatch_import", [](std::string name) {
     if (name.empty()) {
-      return std::make_unique<c10::Library>(c10::DispatchKey::CatchAll, __FILE__, __LINE__);
+      return std::make_unique<c10::Library>(c10::DispatchKey::CatchAll, "/dev/null", 0);
     } else {
-      return std::make_unique<c10::Library>(name, __FILE__, __LINE__);
+      return std::make_unique<c10::Library>(name, "/dev/null", 0);
     }
   });
 

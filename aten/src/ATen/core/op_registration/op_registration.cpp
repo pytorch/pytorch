@@ -144,7 +144,9 @@ Library::Library(DispatchKey k, const char* file, uint32_t line)
 // merge everything
 
 Library& Library::_def(FunctionSchema&& schema) & {
-  if (ns_.has_value()) schema.setNamespaceIfNotSet(ns_->c_str());
+  if (ns_.has_value()) {
+    TORCH_CHECK(schema.setNamespaceIfNotSet(ns_->c_str()), "Attempted to def ", toString(schema.operator_name()), " which is explicitly qualified with a namespace inside a TORCH_LIBRARY, which is not allowed.  If TORCH_LIBRARY's namespace matches the explicitly given namespace, remove the qualifier; otherwise, move your def into a TORCH_LIBRARY block with the correct namespace, or give it a different namespace.  Registration site was ", file_, ":", line_);
+  }
   registrars_.emplace_back(Dispatcher::singleton().registerDef(std::move(schema), debugString("", file_, line_)));
   return *this;
 }
@@ -163,7 +165,9 @@ Library& Library::_def(c10::either<OperatorName, FunctionSchema>&& name_or_schem
       return s;
     }
   }();
-  if (ns_.has_value()) schema.setNamespaceIfNotSet(ns_->c_str());
+  if (ns_.has_value()) {
+    TORCH_CHECK(schema.setNamespaceIfNotSet(ns_->c_str()), "Attempted to def ", toString(schema.operator_name()), " which is explicitly qualified with a namespace inside a TORCH_LIBRARY, which is not allowed.  If TORCH_LIBRARY's namespace matches the explicitly given namespace, remove the qualifier; otherwise, please move your def into a TORCH_LIBRARY block with the correct namespace, or give it a different namespace.  Registration site was ", file_, ":", line_);
+  }
   TORCH_CHECK(!(f.dispatch_key_.has_value() && dispatch_key_.has_value()), "Cannot specify a different dispatch key inside a TORCH_LIBRARY_IMPL; please declare a separate TORCH_LIBRARY_IMPL for your dispatch key.  Registration site was ", file_, ":", line_);
   auto dispatch_key = f.dispatch_key_.has_value() ? f.dispatch_key_ : dispatch_key_;
   // Retain the OperatorName for Impl call
@@ -175,7 +179,9 @@ Library& Library::_def(c10::either<OperatorName, FunctionSchema>&& name_or_schem
 
 Library& Library::_impl(const char* name_str, CppFunction&& f) & {
   auto name = torch::jit::parseName(name_str);
-  if (ns_.has_value()) name.setNamespaceIfNotSet(ns_->c_str());
+  if (ns_.has_value()) {
+    TORCH_CHECK(name.setNamespaceIfNotSet(ns_->c_str()), "Attempted to impl ", toString(name), " which is explicitly qualified with a namespace inside a TORCH_LIBRARY, which is not allowed.  If TORCH_LIBRARY's namespace matches the explicitly given namespace, remove the qualifier; otherwise, please place it in an separate TORCH_LIBRARY_IMPL block to make it clear that you are overriding behavior for an operator in a different library.  Registration site was ", file_, ":", line_);
+  }
   TORCH_CHECK(!(f.dispatch_key_.has_value() && dispatch_key_.has_value()), "Cannot specify a different dispatch key inside a TORCH_LIBRARY_IMPL; please declare a separate TORCH_LIBRARY_IMPL for your dispatch key.  Registration site was ", file_, ":", line_);
   auto dispatch_key = f.dispatch_key_.has_value() ? f.dispatch_key_ : dispatch_key_;
   registrars_.emplace_back(
