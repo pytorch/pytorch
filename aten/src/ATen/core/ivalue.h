@@ -454,6 +454,10 @@ struct CAFFE2_API IValue final {
     return i;
   }
 
+  bool isUninitialized() {
+    return Tag::Uninitialized == tag;
+  }
+
   // Scalar, which gets encoded as either an Int or a Double
   IValue(at::Scalar s)
   : IValue() {

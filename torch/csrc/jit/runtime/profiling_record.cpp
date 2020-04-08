@@ -216,6 +216,10 @@ std::unique_ptr<ProfilingRecord> ProfilingRecord::instrumentGraph(
           " records for run ",
           frame_id);
 
+      if (raw_pr->profiled_types_per_frame_.size() == 0) {
+        return;
+      }
+
       auto profiled_types_iter = raw_pr->profiled_types_per_frame_.begin();
       // scratch symbol table and symbol sets for merging profiling information
       // from multiple runs

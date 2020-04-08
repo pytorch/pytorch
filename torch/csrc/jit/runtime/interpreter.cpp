@@ -427,6 +427,8 @@ struct CodeImpl {
     }
     n_inputs = graph_->inputs().size();
     // std::cout << *graph_ << "\n";
+
+    GRAPH_DUMP("Emitting code for ", graph_);
     emitCodeForBlock(graph_->block());
     insertInstruction(RET);
     // we deferred the emission of bailout blocks so they appear at the end
@@ -941,6 +943,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
 
     // unique to every frame with prim::profile across all threads
     c10::optional<size_t> id;
+    ShapeSymbolTable symbols2dims;
     static std::atomic<size_t> num_frames;
   };
 
@@ -953,8 +956,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
     Function** functions;
     std::function<void(std::vector<IValue>&)>* profile_functions;
     TypePtr* types;
-    ShapeSymbolTable symbols2dims;
-
+    
     ActiveFrame(const Frame& frame)
         : pc(frame.pc),
           instructions(frame.function->instructions_.data()),
@@ -1026,7 +1028,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
   }
 
   bool bindSymbolicShapes(
-      ActiveFrame& af,
+      ShapeSymbolTable& symbols2dims,
       at::IntArrayRef new_sizes,
       const c10::VaryingShape<c10::ShapeSymbol>& sym_shapes) {
     if (!sym_shapes.size().has_value()) {
@@ -1040,12 +1042,12 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
         continue;
       }
       auto symbol = *sym_shapes[i];
-      if (!af.symbols2dims.isBound(symbol)) {
-        af.symbols2dims.assign(symbol, new_sizes[i]);
+      if (!symbols2dims.isBound(symbol)) {
+        symbols2dims.assign(symbol, new_sizes[i]);
         continue;
       }
 
-      if (af.symbols2dims.getValue(symbol) != new_sizes[i]) {
+      if (symbols2dims.getValue(symbol) != new_sizes[i]) {
         return false;
       }
     }
@@ -1246,6 +1248,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             if (!frame_id_ref.has_value()) {
               frame_id_ref = Frame::num_frames++;
             }
+            GRAPH_DEBUG("frame ", &(frames.back()), "receives id of ", *frame_id_ref);
             auto callback = af.profile_functions[inst.X];
             push(stack, c10::IValue{static_cast<int64_t>(*frame_id_ref)});
             callback(stack);
@@ -1262,19 +1265,23 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             break;
           }
           case GUARD: {
-            auto t = stack.back().toTensor();
-            auto pttp = tensorTypeInCurrentExecutionContext(t);
-            const TypePtr& expected = af.types[inst.X];
-            auto expected_type = expected->cast<TensorType>();
-            bool pass = true;
-            if (t.defined()) {
-              pass &= bindSymbolicShapes(
-                  af, t.sizes(), expected_type->symbolic_sizes());
-              if (pass) {
-                pttp = expected_type->merge(pttp, false);
+            if (stack.back().isUninitialized()) {
+              push(stack, true);
+            } else {
+              auto t = stack.back().toTensor();
+              auto pttp = tensorTypeInCurrentExecutionContext(t);
+              const TypePtr& expected = af.types[inst.X];
+              auto expected_type = expected->cast<TensorType>();
+              bool pass = true;
+              if (t.defined()) {
+                pass &= bindSymbolicShapes(
+                    frames.back().symbols2dims, t.sizes(), expected_type->symbolic_sizes());
+                if (pass) {
+                  pttp = expected_type->merge(pttp, false);
+                }
               }
+              push(stack, pttp->isSubtypeOf(expected_type));
             }
-            push(stack, pttp->isSubtypeOf(expected_type));
             ++af.pc;
           } break;
           case TAIL_CALL: {
