@@ -157,6 +157,8 @@ class SymbolHelper {
  private:
   SymbolHelper() {
     process = GetCurrentProcess();
+    DWORD flags = SymGetOptions();
+    SymSetOptions(flags | SYMOPT_DEFERRED_LOADS);
     inited = SymInitialize(process, NULL, TRUE);
   }
   ~SymbolHelper() {
