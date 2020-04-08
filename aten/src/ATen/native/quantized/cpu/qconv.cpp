@@ -520,7 +520,7 @@ at::Tensor PackedConvWeightsQnnp<kSpatialDim>::apply_impl(
         orig_weight.contiguous(c10::MemoryFormat::ChannelsLast);
     auto bias_fp32 = bias;
     int8_t* w_data =
-        reinterpret_cast<int8_t*>(weight_contig.data_ptr<c10::qint8>());
+        reinterpret_cast<int8_t*>(weight_contig.template data_ptr<c10::qint8>());
     at::Tensor qnnp_weight = at::_empty_affine_quantized(
         weight_contig.sizes(),
         at::device(c10::kCPU)
@@ -529,7 +529,7 @@ at::Tensor PackedConvWeightsQnnp<kSpatialDim>::apply_impl(
         kernel_scale,
         kernel_zp,
         c10::nullopt);
-    auto* qnnp_w_data = qnnp_weight.data_ptr<c10::quint8>();
+    auto* qnnp_w_data = qnnp_weight.template data_ptr<c10::quint8>();
     auto wt_numel = weight_contig.numel();
     for (int i = 0; i < wt_numel; ++i) {
       qnnp_w_data[i] = static_cast<c10::quint8>(w_data[i] + 128);
@@ -543,7 +543,7 @@ at::Tensor PackedConvWeightsQnnp<kSpatialDim>::apply_impl(
     w = std::make_unique<qnnpack::PrePackConvWeights>(
         conv_p,
         reinterpret_cast<uint8_t*>(qnnp_w_data),
-        reinterpret_cast<int32_t*>(bias.data_ptr<c10::qint32>()));
+        reinterpret_cast<int32_t*>(bias.template data_ptr<c10::qint32>()));
     pack_w = w.get();
   }
   TORCH_INTERNAL_ASSERT(pack_w != nullptr, "Packed Weights are NULL");
@@ -575,10 +575,10 @@ at::Tensor PackedConvWeightsQnnp<kSpatialDim>::apply_impl(
       W,
       act_nhwc.q_scale(),
       act_nhwc.q_zero_point(),
-      reinterpret_cast<uint8_t*>(act_nhwc.data_ptr<c10::quint8>()),
+      reinterpret_cast<uint8_t*>(act_nhwc.template data_ptr<c10::quint8>()),
       output.q_scale(),
       output.q_zero_point(),
-      reinterpret_cast<uint8_t*>(output.data_ptr<c10::quint8>()),
+      reinterpret_cast<uint8_t*>(output.template data_ptr<c10::quint8>()),
       caffe2::mobile_pthreadpool());
 
   TORCH_INTERNAL_ASSERT(
@@ -671,8 +671,6 @@ class QConvInt8 final : public c10::OperatorKernel {
       const c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>>& packed_weight,
       double output_scale,
       int64_t output_zero_point) {
-    auto& ctx = at::globalContext();
-
     if (kReluFused) {
       return packed_weight->apply_relu(act, output_scale, output_zero_point);
     } else {
