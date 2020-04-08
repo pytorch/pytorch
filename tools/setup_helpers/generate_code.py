@@ -27,7 +27,7 @@ def generate_code(ninja_global=None,
                   disable_autograd=False,
                   selected_op_list_path=None,
                   selected_op_list=None,
-                  remove_place_holder=False):
+                  force_schema_registration=True):
     # cwrap depends on pyyaml, so we can't import it earlier
     root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     sys.path.insert(0, root)
@@ -64,7 +64,7 @@ def generate_code(ninja_global=None,
             disable_autograd=disable_autograd,
             selected_op_list_path=selected_op_list_path,
             selected_op_list=selected_op_list,
-            remove_place_holder=remove_place_holder)
+            force_schema_registration=force_schema_registration)
 
 
 def main():
@@ -95,10 +95,10 @@ def main():
         For example, --selected-op-list aten::add.Tensor aten::_convolution.""",
     )
     parser.add_argument(
-        '--remove_place_holder',
-        default=False,
+        '--force_schema_registration',
         action='store_true',
-        help='Do not emmit place holders.',
+        help='force it to generate schema-only registrations for ops that are not'
+        'listed on --selected-op-list'
     )
     options = parser.parse_args()
     generate_code(
@@ -110,7 +110,7 @@ def main():
         options.disable_autograd,
         options.selected_op_list_path,
         options.selected_op_list,
-        options.remove_place_holder,
+        options.force_schema_registration,
     )
 
 
