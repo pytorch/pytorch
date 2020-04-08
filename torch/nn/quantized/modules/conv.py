@@ -76,7 +76,7 @@ class _ConvNd(nn.Module):
     #
     # Version 1
     #   self
-    #   |--- _packed_params : ConvPackedParamsBase
+    #   |--- _packed_params : Conv2dPackedParamsBase or Conv3dPackedParamsBase
     def _save_to_state_dict(self, destination, prefix, keep_vars):
         super(_ConvNd, self)._save_to_state_dict(destination, prefix, keep_vars)
         destination[prefix + '_packed_params'] = self._packed_params
@@ -90,6 +90,7 @@ class _ConvNd(nn.Module):
                 'torch.save() is not currently supported for quantized modules.'
                 ' See https://github.com/pytorch/pytorch/issues/24045.'
                 ' Please use state_dict or torch.jit serialization.')
+        (w, b) = self._weight_bias()
         return (
             self.in_channels,
             self.out_channels,
@@ -101,8 +102,8 @@ class _ConvNd(nn.Module):
             self.output_padding,
             self.groups,
             self.padding_mode,
-            self._packed_params.weight(),
-            self._packed_params.bias(),
+            w,
+            b,
             self.scale,
             self.zero_point,
             self.training
@@ -226,7 +227,7 @@ class Conv1d(_ConvNd):
             w, b, self.stride, self.padding, self.dilation, self.groups)
 
     def _weight_bias(self):
-        w, b = torch.ops.quantized.conv2d_unpack(self._packed_params)
+        w, b = self._packed_params.unpack()
         w = w.squeeze(dim=self._SQUEEZE_DIM)
         return w, b
 
@@ -333,13 +334,13 @@ class Conv2d(_ConvNd):
             w, b, self.stride, self.padding, self.dilation, self.groups)
 
     def _weight_bias(self):
-        return torch.ops.quantized.conv2d_unpack(self._packed_params)
+        return self._packed_params.unpack()
 
     def weight(self):
-        return self._packed_params.weight()
+        return self._weight_bias()[0]
 
     def bias(self):
-        return self._packed_params.bias()
+        return self._weight_bias()[1]
 
     def forward(self, input):
         # Temporarily using len(shape) instead of ndim due to JIT issue

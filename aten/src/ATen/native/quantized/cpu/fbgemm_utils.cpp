@@ -288,6 +288,7 @@ torch::jit::class_<ConvPackedParamsBase<kSpatialDim>> register_conv_params() {
                    std::tie(weight, bias) = self->unpack();
                    return bias;
                  })
+    .def("unpack", &ConvPackedParamsBase<kSpatialDim>::unpack)
     .def("stride", &ConvPackedParamsBase<kSpatialDim>::stride)
     .def("padding", &ConvPackedParamsBase<kSpatialDim>::padding)
     .def("dilation", &ConvPackedParamsBase<kSpatialDim>::dilation)
