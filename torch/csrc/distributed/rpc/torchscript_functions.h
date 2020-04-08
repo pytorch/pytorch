@@ -23,13 +23,15 @@ c10::intrusive_ptr<c10::ivalue::Future> TORCH_API rpcTorchscript(
     const std::string& dstWorkerName,
     const c10::QualifiedName& qualifiedName,
     const c10::FunctionSchema& functionSchema,
-    std::vector<c10::IValue>& stack);
+    std::vector<c10::IValue>& stack,
+    const std::shared_ptr<torch::autograd::profiler::RecordFunction>& rf);
 
 c10::intrusive_ptr<RRef> TORCH_API remoteTorchscript(
     const std::string& dstWorkerName,
     const c10::QualifiedName& qualifiedName,
     const c10::FunctionSchema& functionSchema,
-    std::vector<c10::IValue>& stack);
+    std::vector<c10::IValue>& stack,
+    const std::shared_ptr<torch::autograd::profiler::RecordFunction>& rf);
 
 } // namespace rpc
 } // namespace distributed

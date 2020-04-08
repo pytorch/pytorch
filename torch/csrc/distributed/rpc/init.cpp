@@ -477,9 +477,9 @@ If the future completes with an error, an exception is thrown.
       "_invoke_remote_torchscript",
       [](const std::string& dstWorkerName,
          const std::string& qualifiedNameStr,
-         const std::shared_ptr<torch::autograd::profiler::RecordFunction>&
-             rf const py::args& args,
-         const py::kwargs& kwargs, ) {
+         const std::shared_ptr<torch::autograd::profiler::RecordFunction>& rf,
+         const py::args& args,
+         const py::kwargs& kwargs) {
         DCHECK(!PyGILState_Check());
         auto qualifiedName = c10::QualifiedName(qualifiedNameStr);
         auto functionSchema = PythonRpcHandler::getInstance()

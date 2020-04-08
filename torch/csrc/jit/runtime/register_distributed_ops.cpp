@@ -211,7 +211,8 @@ RegisterOperators reg_rpc_ops(
                  dstWorkerNameStr,
                  qualifiedName,
                  functionSchema,
-                 userCallableStack);
+                 userCallableStack,
+                 nullptr /* record_function */);
 
              // Push output to the stack.
              drop(stack, num_inputs);
