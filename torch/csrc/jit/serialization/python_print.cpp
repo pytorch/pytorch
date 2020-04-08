@@ -606,21 +606,36 @@ struct PythonPrintImpl {
   //   _0 = x.add_(b)
   //   _1 = some_long + expression
   //   r = foo(_0, _1)
-  void splitLongInlines(Node* n) {
+
+  void splitLongInlines(Value* v) {
     std::vector<Value*> to_split_reversed;
-    to_split_reversed.push_back(n->output());
-    do {
-      Use u = n->output()->uses().at(0);
-      for (size_t i = u.offset; i > 0; --i) {
-        Value* prev_arg = u.user->input(i - 1);
-        if (isNonConstantInline(prev_arg)) {
-          to_split_reversed.push_back(prev_arg);
-        }
-      }
-      n = u.user;
-    } while (output_inline_.count(n));
-    for (auto it = to_split_reversed.rbegin(), end = to_split_reversed.rend(); it != end; ++it) {
+    Use u = v->uses().at(0);
+    scanLongInlines(u.user, u.offset, to_split_reversed);
+    for (auto it = to_split_reversed.rbegin(), end = to_split_reversed.rend();
+         it != end;
+         ++it) {
       printOutputDefinition((*it)->node(), *useOf(*it));
+    }
+  }
+
+  void scanLongInlines(
+      Node* user,
+      int64_t offset,
+      std::vector<Value*>& to_split_reversed) {
+    auto it = visited_split_inline_uses_.find(user);
+    bool present = it != visited_split_inline_uses_.end();
+    for (int64_t i = offset; i >= (present ? it->second + 1 : 0); --i) {
+      Value* prev_arg = user->input(i);
+      if (isNonConstantInline(prev_arg)) {
+        to_split_reversed.push_back(prev_arg);
+      }
+    }
+    visited_split_inline_uses_[user] = offset;
+    if (!present && output_inline_.count(user)) {
+      Use u = user->output()->uses().at(0);
+      scanLongInlines(u.user, int64_t(u.offset) - 1, to_split_reversed);
+      // -1 because the actual use is still being
+      // emitted so it cannot be split
     }
   }
 
@@ -774,7 +789,7 @@ struct PythonPrintImpl {
           // to that expression directly
           assignValue(node->output(), ss);
           if (isLongLine(ss->str())) {
-            splitLongInlines(node);
+            splitLongInlines(node->output());
           }
         }
     }
@@ -1334,6 +1349,12 @@ struct PythonPrintImpl {
   // When printing this node, is it safe to write it inline (i.e. without
   // assigning a temporary variable
   std::unordered_set<Node*> output_inline_;
+
+  // see [reordering of inlines] 
+  // used to track parts of an inline statement we already scanned
+  // for splitting long lines, so that we do not revisit them causing n^2 behavior.
+  // stores the maximum offset into inputs that has already been scanned for the node.
+  std::unordered_map<Node*, int64_t> visited_split_inline_uses_;
 
   // what valid identifiers are in use for the current function
   std::unordered_set<std::string> used_names_;
