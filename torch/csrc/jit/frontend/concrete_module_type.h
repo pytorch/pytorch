@@ -67,8 +67,8 @@ class VISIBILITY_HIDDEN ConcreteModuleTypeBuilder {
       const TypePtr& type,
       py::object pyFunction);
 
-  void addForwardHook(std::string hook_name);
-  void addForwardPreHook(std::string hook_name);
+  void addForwardHook(std::string& hook_name);
+  void addForwardPreHook(std::string& hook_name);
 
   std::vector<std::string> getForwardHooks() {
     return forward_hooks;
