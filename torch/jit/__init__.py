@@ -517,7 +517,7 @@ class TracingCheckError(Exception):
 
 # Check the traced module against a set of user-provided validation inputs
 @torch.no_grad()
-def _check_trace(check_inputs, func, traced_func, check_tolerance,
+def _check_trace(check_inputs, func, traced_func, check_tolerance, strict,
                  force_outplace, is_trace_module, _module_class):
     # Note: tracing is independent of optimizations, which consume the trace
     for inputs in check_inputs:
@@ -533,6 +533,7 @@ def _check_trace(check_inputs, func, traced_func, check_tolerance,
                 func.__self__ if hasattr(func, '__self__') else func,
                 copied_dict,
                 check_trace=False,
+                strict=strict,
                 _force_outplace=force_outplace,
                 _module_class=_module_class,
                 _compilation_unit=torch._C.CompilationUnit(),
@@ -546,6 +547,7 @@ def _check_trace(check_inputs, func, traced_func, check_tolerance,
                 func,
                 _clone_inputs(inputs),
                 check_trace=False,
+                strict=strict,
                 _force_outplace=force_outplace,
                 _module_class=_module_class,
             )
@@ -730,6 +732,7 @@ def trace(func,
           check_trace=True,
           check_inputs=None,
           check_tolerance=1e-5,
+          strict=True,
           _force_outplace=False,
           _module_class=None,
           _compilation_unit=_python_cu):
@@ -807,6 +810,10 @@ def trace(func,
         check_tolerance (float, optional): Floating-point comparison tolerance to use in the checker procedure.
                                            This can be used to relax the checker strictness in the event that
                                            results diverge numerically for a known reason, such as operator fusion.
+        strict (bool, optional): run the tracer in a strict mode or not (default: True). Only turn this off when you
+                                 want the tracer to record your mutable container types (currently list/dict) and you
+                                 are sure that the list/dict that you are using in your problem is a `constant` structure
+                                 and does not get used as control flow (if, for) conditions.
 
     Returns:
         If ``callable`` is ``nn.Module`` or ``forward`` of ``nn.Module``, ``trace`` returns
@@ -871,13 +878,13 @@ def trace(func,
     if isinstance(func, torch.nn.Module):
         return trace_module(func, {'forward': example_inputs}, None,
                             check_trace, wrap_check_inputs(check_inputs),
-                            check_tolerance, _force_outplace, _module_class)
+                            check_tolerance, strict, _force_outplace, _module_class)
 
     if (hasattr(func, '__self__') and isinstance(func.__self__, torch.nn.Module) and
             func.__name__ == 'forward'):
         return trace_module(func.__self__, {'forward': example_inputs}, None,
                             check_trace, wrap_check_inputs(check_inputs),
-                            check_tolerance, _force_outplace, _module_class)
+                            check_tolerance, strict, _force_outplace, _module_class)
 
     # Special case for common case of passing a single Tensor
     if isinstance(example_inputs, (torch.Tensor, dict)):
@@ -895,14 +902,15 @@ def trace(func,
     name = _qualified_name(func)
     traced = torch._C._create_function_from_trace(name, func, example_inputs,
                                                   var_lookup_fn,
+                                                  strict,
                                                   _force_outplace)
 
     # Check the trace against new traces created from user-specified inputs
     if check_trace:
         if check_inputs is not None:
-            _check_trace(check_inputs, func, traced, check_tolerance, _force_outplace, False, _module_class)
+            _check_trace(check_inputs, func, traced, check_tolerance, strict, _force_outplace, False, _module_class)
         else:
-            _check_trace([example_inputs], func, traced, check_tolerance, _force_outplace, False, _module_class)
+            _check_trace([example_inputs], func, traced, check_tolerance, strict, _force_outplace, False, _module_class)
 
     return traced
 
@@ -914,6 +922,7 @@ def trace_module(mod,
                  check_trace=True,
                  check_inputs=None,
                  check_tolerance=1e-5,
+                 strict=True,
                  _force_outplace=False,
                  _module_class=None,
                  _compilation_unit=_python_cu):
@@ -1023,17 +1032,17 @@ def trace_module(mod,
             # this is needed since Module.__call__ sets up some extra tracing
             func = mod if method_name == "forward" else getattr(mod, method_name)
             example_inputs = make_tuple(example_inputs)
-            module._c._create_method_from_trace(method_name, func, example_inputs, var_lookup_fn, _force_outplace)
+            module._c._create_method_from_trace(method_name, func, example_inputs, var_lookup_fn, strict, _force_outplace)
             check_trace_method = module._c._get_method(method_name)
 
             # Check the trace against new traces created from user-specified inputs
             if check_trace:
                 if check_inputs is not None:
                     _check_trace(check_inputs, func, check_trace_method,
-                                 check_tolerance, _force_outplace, True, _module_class)
+                                 check_tolerance, strict, _force_outplace, True, _module_class)
                 else:
                     _check_trace([inputs], func, check_trace_method,
-                                 check_tolerance, _force_outplace, True, _module_class)
+                                 check_tolerance, strict, _force_outplace, True, _module_class)
     finally:
         torch.jit._trace_module_map = old_module_map
 
