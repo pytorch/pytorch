@@ -175,7 +175,7 @@ private:
     return lhs.iterator_ >= rhs.iterator_;
   }
 
-  friend class ListIterator<T, typename detail::ListImpl::list_type::iterator>;
+  friend class ListIterator<T, typename c10::detail::ListImpl::list_type::iterator>;
   friend class List<T>;
 };
 
@@ -206,15 +206,15 @@ private:
   // This is an intrusive_ptr because List is a pointer type.
   // Invariant: This will never be a nullptr, there will always be a valid
   // ListImpl.
-  c10::intrusive_ptr<detail::ListImpl> impl_;
+  c10::intrusive_ptr<c10::detail::ListImpl> impl_;
 
-  using internal_reference_type = impl::ListElementReference<T, typename detail::ListImpl::list_type::iterator>;
+  using internal_reference_type = impl::ListElementReference<T, typename c10::detail::ListImpl::list_type::iterator>;
 
 public:
   using value_type = T;
-  using size_type = typename detail::ListImpl::list_type::size_type;
-  using iterator = impl::ListIterator<T, typename detail::ListImpl::list_type::iterator>;
-  using reverse_iterator = impl::ListIterator<T, typename detail::ListImpl::list_type::reverse_iterator>;
+  using size_type = typename c10::detail::ListImpl::list_type::size_type;
+  using iterator = impl::ListIterator<T, typename c10::detail::ListImpl::list_type::iterator>;
+  using reverse_iterator = impl::ListIterator<T, typename c10::detail::ListImpl::list_type::reverse_iterator>;
 
   /**
    * Constructs an empty list.
@@ -428,7 +428,7 @@ public:
   void unsafeSetElementType(TypePtr t);
 
 private:
-  explicit List(c10::intrusive_ptr<detail::ListImpl>&& elements);
+  explicit List(c10::intrusive_ptr<c10::detail::ListImpl>&& elements);
   friend struct IValue;
   template<class T_> friend List<T_> impl::toTypedList(List<IValue>);
   template<class T_> friend List<IValue> impl::toList(List<T_>);
