@@ -1344,12 +1344,12 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
   }
 
   void handleError(const ExceptionMessage& msg, bool is_jit_exception) {
-    std::stringstream ss;
+    std::ostringstream ss;
     ss << "The following operation failed in the TorchScript interpreter.\n";
     formatStackTrace(ss);
     ss << "RuntimeError: " << msg << "\n";
     if (future_) {
-      future_->markCompleted(Future::FutureError(ss.str()));
+      future_->setError(Future::FutureError(ss.str()));
     } else if (is_jit_exception) {
       throw JITException(ss.str());
     } else {
