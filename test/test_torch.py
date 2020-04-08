@@ -5670,6 +5670,12 @@ class TestTorchDeviceType(TestCase):
                 self.assertEqual((), torch.nn.functional.multi_margin_loss(input, target, reduction='mean').shape)
                 self.assertEqual((), torch.nn.functional.multi_margin_loss(input, target, reduction='sum').shape)
 
+    @onlyCUDA
+    @dtypes(torch.float)
+    def test_new_different_device(self, _device, dtype):
+        x = torch.ones((2,), device='cpu', dtype=dtype)
+        torch.cuda.FloatTensor(x)
+
     @onlyCPU
     @dtypes(torch.float)
     def test_diag(self, device, dtype):
