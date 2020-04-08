@@ -72,6 +72,7 @@ int main(int argc, char** argv) {
     " --model=<model_file>"
     " --input_dims=\"1,3,224,224\""
     " --input_type=float"
+    " --input_format=NHWC"
     " --warmup=5"
     " --iter=20");
   if (!c10::ParseCommandLineFlags(&argc, &argv)) {
@@ -102,28 +103,30 @@ int main(int argc, char** argv) {
       input_dims.push_back(c10::stoi(s));
     }
 
-    at::TensorOptions input_tensor_options;
-
-    at::MemoryFormat input_memory_format;
-    if (input_format_list[i] == "NHWC") {
-      input_tensor_options.memory_format(at::MemoryFormat::ChannelsLast);
-    } else if (input_format_list[i] == "NCHW") {
-      input_tensor_options.memory_format(at::MemoryFormat::Contiguous);
-    } else {
-      CAFFE_THROW("Unsupported input format: ", input_format_list[i]);
-    }
-
+    at::ScalarType input_type;
     if (input_type_list[i] == "float") {
-      input_tensor_options.dtype(at::ScalarType::Float);
+      input_type = at::ScalarType::Float;
     } else if (input_type_list[i] == "uint8_t") {
-      input_tensor_options.dtype(at::ScalarType::Byte);
+      input_type = at::ScalarType::Byte;
     } else if (input_type_list[i] == "int64") {
-      input_tensor_options.dtype(torch::kI64);
+      input_type = at::ScalarType::Long;
     } else {
       CAFFE_THROW("Unsupported input type: ", input_type_list[i]);
     }
 
-    inputs.push_back(torch::ones(input_dims, input_tensor_options));
+    at::MemoryFormat input_memory_format;
+    if (input_format_list[i] == "NHWC") {
+      input_memory_format = at::MemoryFormat::ChannelsLast;
+    } else if (input_format_list[i] == "NCHW") {
+      input_memory_format = at::MemoryFormat::Contiguous;
+    } else {
+      CAFFE_THROW("Unsupported input format: ", input_format_list[i]);
+    }
+
+    inputs.push_back(
+        torch::ones(
+            input_dims,
+            at::TensorOptions(input_type).memory_format(input_memory_format)));
   }
 
   if (FLAGS_pytext_len > 0) {
