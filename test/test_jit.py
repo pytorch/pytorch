@@ -4311,8 +4311,8 @@ graph(%Ra, %Rb):
                 return {a: b, b: a}
 
         x = (torch.rand(3), torch.rand(3))
-        # with self.assertRaisesRegex(RuntimeError, r"Encountering a dict at the output"): 
-        #     torch.jit.trace(TraceDictStrTensor(), x)
+        with self.assertRaisesRegex(RuntimeError, r"Encountering a dict at the output"): 
+            torch.jit.trace(TraceDictStrTensor(), x)
 
         traced_dict_str_mod = torch.jit.trace(TraceDictStrTensor(), x, strict=False)
         self.assertEqual(traced_dict_str_mod(*x), {'a': x[0], 'b': x[1]})
