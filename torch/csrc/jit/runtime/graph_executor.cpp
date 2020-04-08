@@ -658,7 +658,7 @@ GraphExecutor::GraphExecutor(
     std::shared_ptr<Graph> graph,
     std::string function_name)
     : pImpl(
-          getExecutorMode()
+          IsNewExecutorEnabled()
               ? dynamic_cast<GraphExecutorImplBase*>(
                     new ProfilingGraphExecutorImpl(
                         graph,
@@ -690,6 +690,13 @@ std::shared_ptr<Graph> GraphExecutor::graph() const {
 
 GraphExecutorState GraphExecutor::getDebugState() {
   return pImpl->getDebugState();
+}
+
+TORCH_API bool IsNewExecutorEnabled() {
+  static const auto disable_new_executor =
+      std::getenv("TORCH_JIT_DISABLE_NEW_EXECUTOR");
+  return getExecutorMode() && FLAGS_torch_jit_enable_new_executor &&
+      !disable_new_executor;
 }
 
 void runRequiredPasses(const std::shared_ptr<Graph>& g) {
