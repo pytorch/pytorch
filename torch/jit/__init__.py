@@ -1575,6 +1575,8 @@ if _enabled:
             ast = torch._C._parse_source_def(src)
             self._methods[ast.name().name] = ScriptMethodStub(rcb, ast, None)
 
+        def _replicate_for_data_parallel(self):
+            return self._actual_script_module._replicate_for_data_parallel()
 
     class RecursiveScriptModule(ScriptModule):
         # XXX: RecursiveScriptModule inherits from ScriptModule for the sole
