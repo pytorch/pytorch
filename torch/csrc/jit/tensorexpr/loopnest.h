@@ -41,6 +41,10 @@ class TORCH_API LoopNest {
   void setGPUBlockIndex(For* f, int idx);
   void setGPUThreadIndex(For* f, int idx);
 
+  // Insert a temporary computation of statement S in the scope of loop AT.
+  // S is assumed to be a Store or a Block containing a Store. Along with the
+  // computation itself, this transformation inserts Alloc/Free statements for
+  // the temporary buffer used in the computation.
   void computeAt(Stmt* s, For* at);
 
  private:

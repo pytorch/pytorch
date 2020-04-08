@@ -917,21 +917,23 @@ Stmt* FlattenIndexes(Stmt* s) {
   return idx_flattener.flatten(s);
 }
 
+// Auxiliary class for rewriting we're doing in `compute_at`. See
+// LoopNest::computeAt for more details.
 class LoopComputeAtRewriter : public IRMutator {
  public:
   LoopComputeAtRewriter(
-      const Buf* var,
-      const Buf* new_var,
+      const Buf* buf,
+      const Buf* new_buf,
       std::vector<const Expr*> offsets)
-      : var_(var), new_var_(new_var), offsets_(offsets) {}
+      : buf_(buf), new_buf_(new_buf), offsets_(offsets) {}
 
  private:
-  const Buf* var_;
-  const Buf* new_var_;
+  const Buf* buf_;
+  const Buf* new_buf_;
   std::vector<const Expr*> offsets_;
 
   const Expr* mutate(const Load* v) override {
-    if (v->buf() != var_) {
+    if (v->buf() != buf_) {
       return v;
     }
     std::vector<const Expr*> new_indices;
@@ -939,10 +941,10 @@ class LoopComputeAtRewriter : public IRMutator {
       new_indices.push_back(
           IRSimplifier::simplify(new Sub(v->indices()[i], offsets_[i])));
     }
-    return new Load(v->dtype(), new_var_, new_indices, v->mask());
+    return new Load(v->dtype(), new_buf_, new_indices, v->mask());
   }
   const Expr* mutate(const FunctionCall* v) override {
-    if (v->tensor()->func_var() != var_) {
+    if (v->tensor()->func_var() != buf_) {
       return v;
     }
     std::vector<const Expr*> new_indices;
@@ -950,15 +952,15 @@ class LoopComputeAtRewriter : public IRMutator {
       new_indices.push_back(
           IRSimplifier::simplify(new Sub(v->param(i), offsets_[i])));
     }
-    return new Load(v->dtype(), new_var_, new_indices, new IntImm(1));
+    return new Load(v->dtype(), new_buf_, new_indices, new IntImm(1));
   }
 };
 
-Store* getStoreStmtOfProducer(Stmt* s) {
-  if (Store *st = dynamic_cast<Store*>(s)) {
+static Store* getStoreStmtOfProducer(Stmt* s) {
+  if (Store* st = dynamic_cast<Store*>(s)) {
     return st;
   }
-  if (Block *b = dynamic_cast<Block*>(s)) {
+  if (Block* b = dynamic_cast<Block*>(s)) {
     for (Stmt* ss : b->stmts()) {
       if (Store* st = dynamic_cast<Store*>(ss)) {
         return st;
@@ -968,7 +970,7 @@ Store* getStoreStmtOfProducer(Stmt* s) {
   return nullptr;
 }
 
-std::vector<const Var*> getOuterLoopIndexes(Stmt* s) {
+static std::vector<const Var*> getOuterLoopIndexes(Stmt* s) {
   std::vector<const Var*> res;
   Stmt* cur = s;
   while (cur) {
@@ -1166,10 +1168,8 @@ void LoopNest::computeAt(Stmt* s, For* f) {
   }
 
   // Generate alloc/free stmts for 'temp'
-  Stmt* al = new Allocate(
-      temp_buf->base_handle(), store_bounds_info.buf->dtype(), dims);
+  Stmt* al = new Allocate(temp_buf->base_handle(), st->value()->dtype(), dims);
   Stmt* fr = new Free(temp_buf->base_handle());
-
 
   // Add constructed stmts to the consumer loop
   f->body()->prepend_stmt(bd);

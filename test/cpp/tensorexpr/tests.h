@@ -131,10 +131,7 @@ namespace jit {
   _(BoundsInference_4)                    \
   _(BoundsInference_5)                    \
   _(LoopNestComputeAt_1)                  \
-  _(LoopNestComputeAt_2)                  \
-  _(LoopNestComputeAt_3)                  \
-  _(LoopNestComputeAt_4)                  \
-  _(LoopNestComputeAt_5)
+  _(LoopNestComputeAt_2)
 
 #define TH_FORALL_TENSOREXPR_TESTS_LLVM(_) \
   _(LLVMByteImmTest)                       \
@@ -259,8 +256,9 @@ namespace jit {
   _(CudaTestVectorAdd01)                   \
   _(CudaTestVectorAdd02)                   \
   _(CudaDynamicShape2D)                    \
-  _(CudaTestRand01)                        \
-  _(CudaDynamicShapeSplit)
+  _(CudaDynamicShapeSplit)                 \
+  _(CudaTrivialReduce01)                   \
+  _(CudaTestRand01)
 
 #define DECLARE_TENSOREXPR_TEST(name) void test##name();
 TH_FORALL_TENSOREXPR_TESTS(DECLARE_TENSOREXPR_TEST)
