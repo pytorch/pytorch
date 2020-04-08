@@ -19,10 +19,17 @@ def _find_match(str_list, key_str, postfix):
 def compare_weights(float_dict, quantized_dict):
     r"""Returns a dict with key corresponding to module names and each entry being
     a dictionary with two keys 'float' and 'quantized', containing the float and
-    quantized weights
+    quantized weights. This dict can be used to compare and compute the quantization
+    error of the weights of float and quantized models .
+
     Args:
         float_dict: state dict of the float model
         quantized_dict: state dict of the quantized model
+
+    Return:
+        weight_dict: dict with key corresponding to module names and each entry being
+        a dictionary with two keys 'float' and 'quantized', containing the float and
+        quantized weights
     """
     weight_dict = {}
     for key in quantized_dict:
