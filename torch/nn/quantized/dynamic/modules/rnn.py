@@ -311,12 +311,14 @@ class RNNBase(torch.nn.Module):
                         # weights and pack parameters in this order:
                         #
                         #   w_ih, w_hh
+                        weight_observer = weight_observer_method()
+                        weight_observer(weight)
                         qweight = _quantize_weight(weight, weight_observer)
                         packed_weight = torch.ops.quantized.linear_prepack(qweight, bias)
 
                         params = [packed_weight]
                         pos_names = ['w']
-                    elif dttype == torch.float16:
+                    elif dtype == torch.float16:
                         # for each layer, for each direction we need to quantize and pack
                         # weights and pack parameters in this order:
                         #
