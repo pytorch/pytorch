@@ -6393,7 +6393,8 @@ class TestTorchDeviceType(TestCase):
 
         expected_scipy_types = [
             torch.float64,
-            torch.int64,
+            # windows scipy block_diag returns int32 types
+            torch.int32 if IS_WINDOWS else torch.int64,
             torch.complex128
         ]
 
