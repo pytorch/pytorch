@@ -997,6 +997,31 @@ if(USE_OPENMP AND OPENMP_FOUND)
   target_link_libraries(torch_cpu PRIVATE ${OpenMP_CXX_LIBRARIES})
 endif()
 
+if($ENV{TH_BINARY_BUILD})
+  if(NOT MSVC AND USE_CUDA AND NOT APPLE)
+    # Note [Extra MKL symbols for MAGMA in torch_cpu]
+    #
+    # When we build CUDA libraries and link against MAGMA, MAGMA makes use of
+    # some BLAS symbols in its CPU fallbacks when it has no GPU versions
+    # of kernels.  Previously, we ensured the BLAS symbols were filled in by
+    # MKL by linking torch_cuda with BLAS, but when we are statically linking
+    # against MKL (when we do wheel builds), this actually ends up pulling in a
+    # decent chunk of MKL into torch_cuda, inflating our torch_cuda binary
+    # size by 8M.  torch_cpu exposes most of the MKL symbols we need, but
+    # empirically we determined that there are four which it doesn't provide.  If
+    # we link torch_cpu with these --undefined symbols, we can ensure they
+    # do get pulled in, and then we can avoid statically linking in MKL to
+    # torch_cuda at all!
+    #
+    # We aren't really optimizing for binary size on Windows (and this link
+    # line doesn't work on Windows), so don't do it there.
+    #
+    # These linker commands do not work on OS X, do not attempt this there.
+    # (It shouldn't matter anyway, though, because OS X has dropped CUDA support)
+    set_target_properties(torch_cpu PROPERTIES LINK_FLAGS "-Wl,--undefined=mkl_lapack_slaed0 -Wl,--undefined=mkl_lapack_dlaed0 -Wl,--undefined=mkl_lapack_dormql -Wl,--undefined=mkl_lapack_sormql")
+  endif()
+endif()
+
 target_link_libraries(torch_cpu PUBLIC c10)
 target_link_libraries(torch_cpu PUBLIC ${Caffe2_PUBLIC_DEPENDENCY_LIBS})
 target_link_libraries(torch_cpu PRIVATE ${Caffe2_DEPENDENCY_LIBS})
