@@ -5,6 +5,18 @@
 
 namespace c10 {
 
+namespace {
+  // TODO: Consider representing debug info as a struct instead so you
+  // don't have to allocate strings all the time
+  std::string debugString(std::string debug, const char* file, uint32_t line) {
+    if (debug.empty()) {
+      return c10::str("registered at ", file, ":", line);
+    } else {
+      return std::move(debug);
+    }
+  }
+}
+
 static_assert(std::is_nothrow_move_constructible<c10::optional<RegistrationHandleRAII>>::value, "");
 static_assert(std::is_nothrow_move_assignable<c10::optional<RegistrationHandleRAII>>::value, "");
 
@@ -92,12 +104,12 @@ void RegisterOperators::registerOp_(Options&& options) {
   OperatorName op_name = schema.operator_name();
 
   registrars_.emplace_back(
-    Dispatcher::singleton().registerDef(std::move(schema))
+    Dispatcher::singleton().registerDef(std::move(schema), "registered by RegisterOperators")
   );
 
   for (auto& kernel : options.kernels) {
     registrars_.emplace_back(
-      Dispatcher::singleton().registerImpl(op_name, kernel.dispatch_key, std::move(kernel.func), std::move(kernel.inferred_function_schema), "legacy kernel from RegisterOperators")
+      Dispatcher::singleton().registerImpl(op_name, kernel.dispatch_key, std::move(kernel.func), std::move(kernel.inferred_function_schema), "registered by RegisterOperators")
     );
   }
 }
@@ -117,11 +129,15 @@ CppFunction::CppFunction(KernelFunction func, std::unique_ptr<c10::FunctionSchem
 Library::Library(std::string ns, const char* file, uint32_t line)
   : ns_(std::move(ns))
   , dispatch_key_(c10::nullopt)
+  , file_(file)
+  , line_(line)
   {}
 
 Library::Library(DispatchKey k, const char* file, uint32_t line)
   : ns_(c10::nullopt)
   , dispatch_key_(k == DispatchKey::CatchAll ? c10::nullopt : c10::make_optional(k))
+  , file_(file)
+  , line_(line)
   {}
 
 // TODO: Error if an operator is def'ed multiple times.  Right now we just
@@ -129,7 +145,7 @@ Library::Library(DispatchKey k, const char* file, uint32_t line)
 
 Library& Library::_def(FunctionSchema&& schema) & {
   if (ns_.has_value()) schema.setNamespaceIfNotSet(ns_->c_str());
-  registrars_.emplace_back(Dispatcher::singleton().registerDef(std::move(schema)));
+  registrars_.emplace_back(Dispatcher::singleton().registerDef(std::move(schema), debugString("", file_, line_)));
   return *this;
 }
 
@@ -140,7 +156,7 @@ Library& Library::_def(c10::either<OperatorName, FunctionSchema>&& name_or_schem
     } else {
       // it's a name; use the inferred schema
       TORCH_CHECK(f.schema_, "Library::def(): schema was not specified, and we "
-          "couldn't infer schema either.  Please explicitly provide schema.");
+          "couldn't infer schema either.  Please explicitly provide schema.  Registration site was ", file_, ":", line_);
       OperatorName name = std::move(name_or_schema).left();
       FunctionSchema s = f.schema_->cloneWithName(std::move(name.name), std::move(name.overload_name));
       s.setAliasAnalysis(c10::AliasAnalysisKind::CONSERVATIVE);
@@ -148,19 +164,19 @@ Library& Library::_def(c10::either<OperatorName, FunctionSchema>&& name_or_schem
     }
   }();
   if (ns_.has_value()) schema.setNamespaceIfNotSet(ns_->c_str());
-  TORCH_CHECK(!(f.dispatch_key_.has_value() && dispatch_key_.has_value()), "Cannot specify a different dispatch key inside a TORCH_LIBRARY_IMPL; please declare a separate TORCH_LIBRARY_IMPL for your dispatch key");
+  TORCH_CHECK(!(f.dispatch_key_.has_value() && dispatch_key_.has_value()), "Cannot specify a different dispatch key inside a TORCH_LIBRARY_IMPL; please declare a separate TORCH_LIBRARY_IMPL for your dispatch key.  Registration site was ", file_, ":", line_);
   auto dispatch_key = f.dispatch_key_.has_value() ? f.dispatch_key_ : dispatch_key_;
   // Retain the OperatorName for Impl call
   OperatorName name = schema.operator_name();
-  registrars_.emplace_back(Dispatcher::singleton().registerDef(std::move(schema)));
-  registrars_.emplace_back(Dispatcher::singleton().registerImpl(name, dispatch_key, std::move(f.func_), std::move(f.schema_), std::move(f.debug_)));
+  registrars_.emplace_back(Dispatcher::singleton().registerDef(std::move(schema), debugString("", file_, line_)));
+  registrars_.emplace_back(Dispatcher::singleton().registerImpl(name, dispatch_key, std::move(f.func_), std::move(f.schema_), debugString(std::move(f.debug_), file_, line_)));
   return *this;
 }
 
 Library& Library::_impl(const char* name_str, CppFunction&& f) & {
   auto name = torch::jit::parseName(name_str);
   if (ns_.has_value()) name.setNamespaceIfNotSet(ns_->c_str());
-  TORCH_CHECK(!(f.dispatch_key_.has_value() && dispatch_key_.has_value()), "Cannot specify a different dispatch key inside a TORCH_LIBRARY_IMPL; please declare a separate TORCH_LIBRARY_IMPL for your dispatch key");
+  TORCH_CHECK(!(f.dispatch_key_.has_value() && dispatch_key_.has_value()), "Cannot specify a different dispatch key inside a TORCH_LIBRARY_IMPL; please declare a separate TORCH_LIBRARY_IMPL for your dispatch key.  Registration site was ", file_, ":", line_);
   auto dispatch_key = f.dispatch_key_.has_value() ? f.dispatch_key_ : dispatch_key_;
   registrars_.emplace_back(
     Dispatcher::singleton().registerImpl(
@@ -168,17 +184,23 @@ Library& Library::_impl(const char* name_str, CppFunction&& f) & {
       dispatch_key,
       std::move(f.func_),
       std::move(f.schema_),
-      std::move(f.debug_)
+      debugString(std::move(f.debug_), file_, line_)
     )
   );
   return *this;
 }
 
 Library& Library::_fallback(CppFunction&& f) & {
-  TORCH_CHECK(!ns_, "Cannot define a fallback in TORCH_LIBRARY (it would affect operators outside of your library); did you mean to use TORCH_LIBRARY_IMPL instead");
+  TORCH_CHECK(!ns_, "Cannot define a fallback in TORCH_LIBRARY (it would affect operators outside of your library); did you mean to use TORCH_LIBRARY_IMPL instead.  Registration site was ", file_, ":", line_);
   auto dispatch_key = f.dispatch_key_.has_value() ? f.dispatch_key_ : dispatch_key_;
   TORCH_CHECK(dispatch_key.has_value(), "Fallback for catch all function not supported");
-  registrars_.emplace_back(Dispatcher::singleton().registerFallback(*dispatch_key, std::move(f.func_)));
+  registrars_.emplace_back(
+    Dispatcher::singleton().registerFallback(
+      *dispatch_key,
+      std::move(f.func_),
+      debugString(std::move(f.debug_), file_, line_)
+    )
+  );
   return *this;
 }
 

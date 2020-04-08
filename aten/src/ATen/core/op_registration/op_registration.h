@@ -796,6 +796,8 @@ namespace detail {
 class CAFFE2_API Library final {
   c10::optional<std::string> ns_;
   c10::optional<DispatchKey> dispatch_key_;
+  const char* file_;
+  uint32_t line_;
 
   std::vector<RegistrationHandleRAII> registrars_;
 

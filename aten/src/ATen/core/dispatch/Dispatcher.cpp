@@ -106,7 +106,7 @@ OperatorHandle Dispatcher::findOrRegisterName_(const OperatorName& op_name) {
 }
 
 
-RegistrationHandleRAII Dispatcher::registerDef(FunctionSchema schema) {
+RegistrationHandleRAII Dispatcher::registerDef(FunctionSchema schema, std::string debug) {
   // we need a lock to avoid concurrent writes
   std::lock_guard<std::mutex> lock(mutex_);
 
@@ -115,10 +115,10 @@ RegistrationHandleRAII Dispatcher::registerDef(FunctionSchema schema) {
 
   if (op.operatorIterator_->def_count == 0) {
     // NB: registerSchema is not idempotent! Only do it once!
-    op.operatorIterator_->op.registerSchema(std::move(schema));
+    op.operatorIterator_->op.registerSchema(std::move(schema), std::move(debug));
     listeners_->callOnOperatorRegistered(op);
   } else {
-    checkSchemaCompatibility(op, schema);
+    checkSchemaCompatibility(op, schema, debug);
   }
 
   // NB: do not increment the counts until AFTER error checking
@@ -130,8 +130,8 @@ RegistrationHandleRAII Dispatcher::registerDef(FunctionSchema schema) {
   });
 }
 
-void Dispatcher::checkSchemaCompatibility(const OperatorHandle& op, const FunctionSchema& schema) {
-  TORCH_CHECK(op.schema() == schema, "Tried to register multiple operators with the same name and the same overload name but different schemas: ", schema, " vs ", op.schema());
+void Dispatcher::checkSchemaCompatibility(const OperatorHandle& op, const FunctionSchema& schema, const std::string& debug) {
+  TORCH_CHECK(op.schema() == schema, "Tried to register multiple operators with the same name and the same overload name but different schemas: ", schema, " (", debug, ") vs ", op.schema(), " (", op.debug(), ")");
   if (schema.isDefaultAliasAnalysisKind()) {
     // [BACKWARDS COMPAT] If the *new* schema is the default alias analysis
     // kind, for BC, we will accept it.  If we don't accept it, most extensions
@@ -145,7 +145,7 @@ void Dispatcher::checkSchemaCompatibility(const OperatorHandle& op, const Functi
   } else {
     TORCH_CHECK(op.schema().aliasAnalysis() == schema.aliasAnalysis(),
       "Tried to define the schema for ", toString(op.operator_name()), " with different alias analysis kinds: ",
-      toString(op.schema().aliasAnalysis()), " vs ", toString(schema.aliasAnalysis()));
+      toString(op.schema().aliasAnalysis()), " (", op.debug(), ") vs ", toString(schema.aliasAnalysis()), " (", debug, ")");
   }
 }
 
@@ -217,7 +217,7 @@ void Dispatcher::cleanup(const OperatorHandle& op, const OperatorName& op_name) 
   }
 }
 
-RegistrationHandleRAII Dispatcher::registerFallback(DispatchKey dispatchKey, KernelFunction kernel) {
+RegistrationHandleRAII Dispatcher::registerFallback(DispatchKey dispatchKey, KernelFunction kernel, std::string debug) {
   // TODO: fallbacks clobber each other completely unsafely, unlike regular
   // kernels
   backendFallbackKernels_.setKernel(dispatchKey, std::move(kernel));
