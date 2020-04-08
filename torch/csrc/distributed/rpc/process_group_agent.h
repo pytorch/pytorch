@@ -249,6 +249,8 @@ class ProcessGroupAgent : public RpcAgent {
   //     NB: Ideally, this should be addressed by supporting asynchronous UDF.
   //         This is just a temporary solution for (2).
   ThreadPool threadPool_;
+  // Atomic to indicate whether the timeout thread is enabled.
+  std::atomic<bool> timeoutThreadEnabled_;
   // Mapping of request id to FutureInfo struct.
   std::unordered_map<int64_t, FutureInfo> futures_;
   // A map to keep track of when futures time out. The map is keyed by the time
