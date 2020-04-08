@@ -58,7 +58,7 @@ def _find_rocm_home():
         # Guess #2
         try:
             hipcc = subprocess.check_output(
-                ['which', 'hipcc']).decode().rstrip('\r\n')
+                ['which', 'hipcc'], stderr=subprocess.DEVNULL).decode().rstrip('\r\n')
             # this will be either <ROCM_HOME>/hip/bin/hipcc or <ROCM_HOME>/bin/hipcc
             rocm_home = os.path.dirname(os.path.dirname(hipcc))
             if os.path.basename(rocm_home) == 'hip':
@@ -133,7 +133,7 @@ CUDNN_HOME = os.environ.get('CUDNN_HOME') or os.environ.get('CUDNN_PATH')
 # it the below pattern.
 BUILT_FROM_SOURCE_VERSION_PATTERN = re.compile(r'\d+\.\d+\.\d+\w+\+\w+')
 
-COMMON_MSVC_FLAGS = ['/MD', '/wd4819', '/EHsc']
+COMMON_MSVC_FLAGS = ['/MD', '/wd4819', '/wd4251', '/EHsc']
 
 COMMON_NVCC_FLAGS = [
     '-D__CUDA_NO_HALF_OPERATORS__',
@@ -1222,7 +1222,7 @@ def _prepare_ldflags(extra_ldflags, with_cuda, verbose):
             extra_ldflags.append('torch_cuda.lib')
             # /INCLUDE is used to ensure torch_cuda is linked against in a project that relies on it.
             # Related issue: https://github.com/pytorch/pytorch/issues/31611
-            extra_ldflags.append('/INCLUDE:\"?warp_size@cuda@at@@YAHXZ\"')
+            extra_ldflags.append('-INCLUDE:?warp_size@cuda@at@@YAHXZ')
         extra_ldflags.append('torch.lib')
         extra_ldflags.append('torch_python.lib')
         extra_ldflags.append('/LIBPATH:{}'.format(python_lib_path))

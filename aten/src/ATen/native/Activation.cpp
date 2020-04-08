@@ -23,6 +23,8 @@ DEFINE_DISPATCH(threshold_stub);
 DEFINE_DISPATCH(hardtanh_backward_stub);
 DEFINE_DISPATCH(hardsigmoid_stub);
 DEFINE_DISPATCH(hardsigmoid_backward_stub);
+DEFINE_DISPATCH(hardswish_stub);
+DEFINE_DISPATCH(hardswish_backward_stub);
 DEFINE_DISPATCH(hardshrink_stub);
 DEFINE_DISPATCH(softshrink_stub);
 DEFINE_DISPATCH(shrink_backward_stub);
@@ -136,6 +138,32 @@ Tensor elu_backward(
   return iter.output();
 }
 
+Tensor hardswish(const Tensor& self) {
+  Tensor result;
+  auto iter = TensorIterator::unary_op(result, self);
+  hardswish_stub(iter.device_type(), iter);
+  return iter.output();
+}
+
+Tensor& hardswish_out(Tensor& result, const Tensor& self) {
+  auto iter = TensorIterator::unary_op(result, self);
+  hardswish_stub(iter.device_type(), iter);
+  return result;
+}
+
+Tensor& hardswish_(Tensor& self) {
+  auto iter = TensorIterator::unary_op(self, self);
+  hardswish_stub(iter.device_type(), iter);
+  return self;
+}
+
+Tensor hardswish_backward(const Tensor& grad_output, const Tensor& self) {
+  Tensor grad_input;
+  auto iter = TensorIterator::binary_op(grad_input, grad_output, self);
+  hardswish_backward_stub(iter.device_type(), iter);
+  return iter.output();
+}
+
 Tensor relu(const Tensor & self) {
   return at::threshold(self, 0, 0);
 }
@@ -177,7 +205,7 @@ inline void _rrelu_with_noise_train(
   scalar_t* output_data = tmp_tensor.data_ptr<scalar_t>();
   scalar_t* input_data = input.data_ptr<scalar_t>();
   scalar_t* noise_data = noise.data_ptr<scalar_t>();
-  auto gen  = at::get_generator_or_default<CPUGenerator>(generator, detail::getDefaultCPUGenerator());
+  auto gen  = at::get_generator_or_default<CPUGeneratorImpl>(generator, detail::getDefaultCPUGenerator());
   std::lock_guard<std::mutex> lock(gen->mutex_);
   for (int64_t i = 0; i < input.numel(); i++) {
     if (input_data[i] <= 0) {
