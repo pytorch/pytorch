@@ -4,6 +4,7 @@
 #include <torch/nn/cloneable.h>
 #include <torch/nn/init.h>
 #include <torch/nn/modules/common.h>
+#include <torch/nn/modules/utils.h>
 #include <torch/nn/options/conv.h>
 #include <torch/nn/pimpl.h>
 #include <torch/types.h>
@@ -31,6 +32,8 @@ class ConvNdImpl : public torch::nn::Cloneable<Derived> {
     TORCH_CHECK(
       options.out_channels() % options.groups() == 0,
       "out_channels must be divisible by groups");
+
+    _padding_repeated_twice = torch::nn::modules::utils::_repeat_vector(options.padding(), 2);
 
     if (options.transposed()) {
       std::vector<int64_t> weight_sizes = {
@@ -106,6 +109,9 @@ class ConvNdImpl : public torch::nn::Cloneable<Derived> {
 
   /// The learned bias. Only defined if the `bias` option was true.
   Tensor bias;
+
+ protected:
+  std::vector<int64_t> _padding_repeated_twice;
 };
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Conv1d ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -163,6 +169,9 @@ class TORCH_API Conv2dImpl : public ConvNdImpl<2, Conv2dImpl> {
   }
   explicit Conv2dImpl(Conv2dOptions options_);
   Tensor forward(const Tensor& input);
+
+ protected:
+  Tensor _conv_forward(const Tensor& input, const Tensor& weight);
 };
 
 /// A `ModuleHolder` subclass for `Conv2dImpl`.

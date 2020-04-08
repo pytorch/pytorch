@@ -6,7 +6,7 @@
 #include <TH/TH.h>
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAContext.h>
-#include <ATen/CUDAGenerator.h>
+#include <ATen/CUDAGeneratorImpl.h>
 #include <c10/cuda/CUDAFunctions.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 #ifdef USE_NCCL
@@ -426,7 +426,7 @@ static PyObject * THCPModule_initExtension(PyObject *self, PyObject *noargs)
 #if __has_feature(address_sanitizer)
   TORCH_WARN(
     "torch.cuda: your pytorch binary has address sanitizer (asan) built in, "
-    "asan is currently not compatiable with torch.cuda module, "
+    "asan is currently not compatible with torch.cuda module, "
     "you might get unexpected behavior (eg. out of memory, crash, etc.), "
     "please rebuild pytorch without asan if you need to use this module");
 #endif

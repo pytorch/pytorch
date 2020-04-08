@@ -16,6 +16,7 @@ struct TORCH_API ${op} : public ${superclass} {
   variable_list apply(variable_list&& grads) override;
   std::string name() const override { return "${op}"; }
   void release_variables() override {
+    ${thread_lock}
     ${release_variables}
   }
   ${will_release_variables}
@@ -33,6 +34,7 @@ void will_release_variables() override {
 
 FUNCTION_DEFINITION = CodeTemplate("""\
 variable_list ${op}::apply(variable_list&& grads) {
+  ${thread_lock}
   ${asserts}
   IndexRangeGenerator gen;
   ${compute_index_ranges}
@@ -171,6 +173,13 @@ def process_function(func):
     env['release_variables'] = release_variables
     env['saved_list_sizes'] = saved_list_sizes
     env['asserts'] = asserts
+
+    # lock the mutex when we release variables and in Node::apply to protect thread safety
+    # see Note [Thread Safety on Autograd Node]
+    if len(release_variables) > 0:
+        env['thread_lock'] = "std::lock_guard<std::mutex> lock(mutex_);"
+    else:
+        env['thread_lock'] = ''
 
     if uses_retain_variables(func):
         env['will_release_variables'] = WILL_RELEASE_VARIABLES.substitute()
