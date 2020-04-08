@@ -4650,6 +4650,27 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         self.assertRaises(RuntimeError, lambda: torch.randn(2, 3, 4).t())
         self.assertRaises(RuntimeError, lambda: torch.randn(2, 3, 4).t_())
 
+    def test_new_different_device(self):
+        # TODO: check which of those modules apply
+        modules = [ 'torch', 'torch.cuda', 'torch.sparse', 'torch.cuda.sparse' ]
+        types = [
+            'ByteTensor',
+            'CharTensor',
+            'ShortTensor',
+            'IntTensor',
+            'FloatTensor',
+            'DoubleTensor',
+            'LongTensor',
+        ]
+        for m1 in modules:
+            for m2 in modules:
+                for t in types:
+                    TensorType1 = eval(m1 + "." + t)
+                    TensorType2 = eval(m2 + "." + t)
+                    tensor1 = TensorType1((1,))
+                    tensor2 = TensorType2(tensor1)
+
+
     # unit test for special case transposed copy (see ATen/native/Copy.cpp for details)
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_big_transpose(self):
@@ -5669,12 +5690,6 @@ class TestTorchDeviceType(TestCase):
                 self.assertEqual(target.shape, torch.nn.functional.multi_margin_loss(input, target, reduction='none').shape)
                 self.assertEqual((), torch.nn.functional.multi_margin_loss(input, target, reduction='mean').shape)
                 self.assertEqual((), torch.nn.functional.multi_margin_loss(input, target, reduction='sum').shape)
-
-    @onlyCUDA
-    @dtypes(torch.float)
-    def test_new_different_device(self, _device, dtype):
-        x = torch.ones((2,), device='cpu', dtype=dtype)
-        torch.cuda.FloatTensor(x)
 
     @onlyCPU
     @dtypes(torch.float)
