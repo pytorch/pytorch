@@ -121,8 +121,11 @@ class _ConvBnNd(nn.modules.conv._ConvNd):
             self.running_var = exponential_average_factor * unbiased_batch_var.detach() + \
                 (1 - exponential_average_factor) * self.running_var
         else:
-            conv = conv + (self.beta - self.gamma * self.running_mean /
-                           running_std).reshape([1, -1, 1, 1])
+            if self.bias is None:
+                conv = conv + (self.beta - self.gamma * self.running_mean /
+                               running_std).reshape([1, -1, 1, 1])
+            else:
+                conv = conv + (self.gamma * (self.bias - self.running_mean) / running_std + self.beta).reshape([1, -1, 1, 1])
         return conv
 
     def extra_repr(self):
