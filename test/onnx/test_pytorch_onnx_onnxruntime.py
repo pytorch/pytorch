@@ -2230,7 +2230,6 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(TensorFactory(), x)
 
     @skipIfUnsupportedMinOpsetVersion(9)
-    @unittest.skip("peephole removed")
     def test_tensor_factories_script(self):
         class TensorFactory(torch.jit.ScriptModule):
             @torch.jit.script_method
