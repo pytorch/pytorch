@@ -37,7 +37,7 @@ struct Indexer {
       int64_t value = *(int64_t*)&indexers[j][idx * indexer_strides[j]];
       int64_t size = original_sizes[j];
       if (value < -size || value >= size) {
-        AT_INDEX_ERROR("index ", value, " is out of bounds for dimension ", j, " with size ", size);
+        TORCH_CHECK_INDEX(false, "index ", value, " is out of bounds for dimension ", j, " with size ", size);
       }
       if (value < 0) {
         value += size;

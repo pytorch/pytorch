@@ -5,7 +5,6 @@
 #include <torch/csrc/jit/passes/utils/subgraph_utils.h>
 #include <torch/csrc/utils/memory.h>
 
-
 #include <cstddef>
 #include <limits>
 
@@ -156,8 +155,7 @@ struct FunctionalGraphSlicer {
       is_functional_node = is_functional_node && functional_block;
     }
 
-    // mutated_values_ already populated with inputs to this node
-    is_functional_node = is_functional_node && !aliasDb_->writeOccursAtNode(n);
+    is_functional_node = is_functional_node && !aliasDb_->isMutable(n);
     if (is_functional_node) {
       functional_nodes_.insert(n);
     }
@@ -180,9 +178,9 @@ struct FunctionalGraphSlicer {
         mutated_values_.insert(v);
       }
     }
-    // if a block output is not functional, then the corresponding output for the node 
-    // that contains the block will not be functional either, 
-    // so we do not need to analyze the block outputs here.
+    // if a block output is not functional, then the corresponding output for
+    // the node that contains the block will not be functional either, so we do
+    // not need to analyze the block outputs here.
     for (Node* n : block->nodes()) {
       bool functional = AnalyzeFunctionalSubset(n);
       is_functional_block = is_functional_block && functional;

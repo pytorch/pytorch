@@ -70,23 +70,32 @@ In foo.cc, do:
 #define BASE_DO(funcname, ...) return funcname##__base(__VA_ARGS__);
 
 #ifdef CAFFE2_PERF_WITH_AVX512
-#define AVX512_DO(funcname, ...)                       \
-  if (GetCpuId().avx512f() && GetCpuId().avx512dq() && \
-      GetCpuId().avx512vl()) {                         \
-    return funcname##__avx512(__VA_ARGS__);            \
+#define AVX512_DO(funcname, ...)                                              \
+  {                                                                           \
+    static const bool isDo = GetCpuId().avx512f() && GetCpuId().avx512dq() && \
+        GetCpuId().avx512vl();                                                \
+    if (isDo) {                                                               \
+      return funcname##__avx512(__VA_ARGS__);                                 \
+    }                                                                         \
   }
 #else // CAFFE2_PERF_WITH_AVX512
 #define AVX512_DO(funcname, ...)
 #endif // CAFFE2_PERF_WITH_AVX512
 
 #ifdef CAFFE2_PERF_WITH_AVX2
-#define AVX2_DO(funcname, ...)            \
-  if (GetCpuId().avx2()) {                \
-    return funcname##__avx2(__VA_ARGS__); \
+#define AVX2_DO(funcname, ...)                  \
+  {                                             \
+    static const bool isDo = GetCpuId().avx2(); \
+    if (isDo) {                                 \
+      return funcname##__avx2(__VA_ARGS__);     \
+    }                                           \
   }
-#define AVX2_FMA_DO(funcname, ...)             \
-  if (GetCpuId().avx2() && GetCpuId().fma()) { \
-    return funcname##__avx2_fma(__VA_ARGS__);  \
+#define AVX2_FMA_DO(funcname, ...)                                  \
+  {                                                                 \
+    static const bool isDo = GetCpuId().avx2() && GetCpuId().fma(); \
+    if (isDo) {                                                     \
+      return funcname##__avx2_fma(__VA_ARGS__);                     \
+    }                                                               \
   }
 #else // CAFFE2_PERF_WITH_AVX2
 #define AVX2_DO(funcname, ...)
@@ -94,13 +103,19 @@ In foo.cc, do:
 #endif // CAFFE2_PERF_WITH_AVX2
 
 #ifdef CAFFE2_PERF_WITH_AVX
-#define AVX_DO(funcname, ...)            \
-  if (GetCpuId().avx()) {                \
-    return funcname##__avx(__VA_ARGS__); \
+#define AVX_DO(funcname, ...)                  \
+  {                                            \
+    static const bool isDo = GetCpuId().avx(); \
+    if (isDo) {                                \
+      return funcname##__avx(__VA_ARGS__);     \
+    }                                          \
   }
-#define AVX_F16C_DO(funcname, ...)             \
-  if (GetCpuId().avx() && GetCpuId().f16c()) { \
-    return funcname##__avx_f16c(__VA_ARGS__);  \
+#define AVX_F16C_DO(funcname, ...)                                  \
+  {                                                                 \
+    static const bool isDo = GetCpuId().avx() && GetCpuId().f16c(); \
+    if (isDo) {                                                     \
+      return funcname##__avx_f16c(__VA_ARGS__);                     \
+    }                                                               \
   }
 #else // CAFFE2_PERF_WITH_AVX
 #define AVX_DO(funcname, ...)

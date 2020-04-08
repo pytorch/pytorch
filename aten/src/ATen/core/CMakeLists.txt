@@ -1,13 +1,13 @@
 # This file solely exists to let Caffe2 Android build get at the list
 # of core files without having to trundle through all of ATen's CMakeLists.txt
 
-FILE(GLOB_RECURSE ATen_CORE_HEADERS "*.h")
-FILE(GLOB_RECURSE ATen_CORE_SRCS "*.cpp")
-FILE(GLOB_RECURSE ATen_CORE_TEST_SRCS "*_test.cpp")
+file(GLOB_RECURSE ATen_CORE_HEADERS "*.h")
+file(GLOB_RECURSE ATen_CORE_SRCS "*.cpp")
+file(GLOB_RECURSE ATen_CORE_TEST_SRCS "*_test.cpp")
 EXCLUDE(ATen_CORE_SRCS "${ATen_CORE_SRCS}" ${ATen_CORE_TEST_SRCS})
 
 # Add files needed from jit folders
-LIST(APPEND ATen_CORE_HEADERS
+list(APPEND ATen_CORE_HEADERS
     ${Caffe2_SOURCE_DIR}/torch/csrc/jit/frontend/source_range.h
     ${Caffe2_SOURCE_DIR}/torch/csrc/jit/frontend/function_schema_parser.h
     ${Caffe2_SOURCE_DIR}/torch/csrc/jit/frontend/lexer.h
@@ -17,7 +17,7 @@ LIST(APPEND ATen_CORE_HEADERS
     ${Caffe2_SOURCE_DIR}/torch/csrc/jit/frontend/error_report.h
     ${Caffe2_SOURCE_DIR}/torch/csrc/jit/frontend/tree.h
 )
-LIST(APPEND ATen_CORE_SRCS
+list(APPEND ATen_CORE_SRCS
     ${Caffe2_SOURCE_DIR}/torch/csrc/jit/frontend/error_report.cpp
     ${Caffe2_SOURCE_DIR}/torch/csrc/jit/frontend/function_schema_parser.cpp
     ${Caffe2_SOURCE_DIR}/torch/csrc/jit/frontend/lexer.cpp
