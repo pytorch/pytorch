@@ -770,10 +770,10 @@ void testLoopNestComputeAt_1() {
   // Verify that compute_at works on the following example:
   //
   // for (int i_a = 0; i_a < N; i_a++) {
-  //   A[i_a] = sin(i_a);
+  //   A[i_a] = i_a * i_a
   // }
   // for (int i_b = 0; i_b < N; i_b++) {
-  //   B[i_b] = A[i_b] * A[[i_b]
+  //   B[i_b] = A[i_b]
   // }
   //
   // After the transformation the i_b loop should have an allocation for a temp
