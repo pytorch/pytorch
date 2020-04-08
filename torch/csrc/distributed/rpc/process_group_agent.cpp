@@ -526,22 +526,18 @@ bool ProcessGroupAgent::handleRecv(RecvWork& work) {
       // response as a callback which fires when the future completes.
       auto fromId = work.from_.id_;
       auto requestId = work.id_;
-      futureResponse->addCallback(
-          [this, fromId, requestId, futureResponse](
-              const Message& /* unused */,
-              const c10::optional<utils::FutureError>& err) {
-            --serverActiveCalls_;
-            --serverActiveAsyncCalls_;
-            if (!err) {
-              send(
-                  getWorkerInfo(fromId),
-                  std::move(*futureResponse).moveValue());
-            } else {
-              send(
-                  getWorkerInfo(fromId),
-                  createExceptionResponse(err->what(), requestId));
-            }
-          });
+      futureResponse->addCallback([this, fromId, requestId, futureResponse]() {
+        --serverActiveCalls_;
+        --serverActiveAsyncCalls_;
+        if (!futureResponse->hasError()) {
+          send(getWorkerInfo(fromId), std::move(*futureResponse).moveValue());
+        } else {
+          send(
+              getWorkerInfo(fromId),
+              createExceptionResponse(
+                  futureResponse->error()->what(), requestId));
+        }
+      });
     }
   } else if (message.isResponse()) {
     auto id = message.id();

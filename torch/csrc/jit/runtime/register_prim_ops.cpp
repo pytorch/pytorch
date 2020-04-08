@@ -673,17 +673,17 @@ RegisterOperators reg(
          aliasAnalysisSpecialCase()),
      Operator(
          "prim::BroadcastSizes(...) -> int[]",
-         [](Stack& stack) {
-           auto num_inputs = pop(stack).toInt();
-           std::vector<int64_t> size;
-           size.reserve(8);
-           for (auto i = 0; i < num_inputs; ++i) {
-             size =
-                 at::infer_size(size, peek(stack, i, num_inputs).toIntVector());
-           }
-           drop(stack, num_inputs);
-           push(stack, IValue(std::move(size)));
-           return 0;
+          [](Stack& stack) {
+             auto num_inputs = pop(stack).toInt();
+             std::vector<int64_t> size;
+             size.reserve(8);
+             for (auto i = 0; i < num_inputs; ++i) {
+               size = at::infer_size(
+                   size, peek(stack, i, num_inputs).toIntVector());
+             }
+             drop(stack, num_inputs);
+             push(stack, IValue(std::move(size)));
+             return 0;
          },
          aliasAnalysisSpecialCase()),
      Operator(
@@ -719,9 +719,9 @@ RegisterOperators reg(
      Operator(
          "aten::warn(str message, int stacklevel=2) -> ()",
          [](Stack& stack) {
-           TORCH_CHECK(
+            TORCH_CHECK(
                false, "warn is implemented directly in the interpreter");
-           return 0;
+            return 0;
          },
          aliasAnalysisFromSchema()),
 
@@ -754,31 +754,31 @@ RegisterOperators reg(
          aliasAnalysisSpecialCase()),
      Operator(
          "prim::AutogradAnyNonZero(...) -> bool",
-         [](Stack& stack) {
-           auto num_inputs = pop(stack).toInt();
-           bool result = false;
-           for (const IValue& v : last(stack, num_inputs)) {
-             if (v.isTensor()) {
-               if (v.toTensor().defined()) {
-                 result = true;
-                 break;
-               }
-             } else if (v.isTensorList()) {
-               for (const at::Tensor& t : v.toTensorVector()) {
-                 if (t.defined()) {
+           [](Stack& stack) {
+             auto num_inputs = pop(stack).toInt();
+             bool result = false;
+             for (const IValue& v : last(stack, num_inputs)) {
+               if (v.isTensor()) {
+                 if (v.toTensor().defined()) {
                    result = true;
+                   break;
                  }
+               } else if (v.isTensorList()) {
+                 for (const at::Tensor& t : v.toTensorVector()) {
+                   if (t.defined()) {
+                     result = true;
+                   }
+                 }
+                 if (result) {
+                   break;
+                 }
+               } else {
+                 TORCH_INTERNAL_ASSERT(false);
                }
-               if (result) {
-                 break;
-               }
-             } else {
-               TORCH_INTERNAL_ASSERT(false);
              }
-           }
-           drop(stack, num_inputs);
-           stack.emplace_back(result);
-           return 0;
+             drop(stack, num_inputs);
+             stack.emplace_back(result);
+             return 0;
          },
          aliasAnalysisFromSchema()),
      Operator(
@@ -828,8 +828,7 @@ RegisterOperators reg(
          },
          aliasAnalysisFromSchema()),
      Operator(
-         // note the compiler knows to type TupleIndex more accurately than it
-         // is listed here.
+         // note the compiler knows to type TupleIndex more accurately than it is listed here.
          "prim::TupleIndex(Any tup, int i) -> Any",
          [](Stack& stack) {
            int64_t index = pop(stack).toInt();
@@ -843,11 +842,10 @@ RegisterOperators reg(
            return 0;
          },
          aliasAnalysisSpecialCase()),
-     Operator(
-         "prim::TupleUnpack(Any tup) -> ...",
+      Operator("prim::TupleUnpack(Any tup) -> ...",
          [](Stack& stack) {
-           tupleUnpack(stack);
-           return 0;
+             tupleUnpack(stack);
+             return 0;
          },
          aliasAnalysisSpecialCase()),
      Operator(
@@ -983,10 +981,7 @@ RegisterOperators reg(
          "prim::unchecked_unwrap_optional(t(a)? optional) -> t(a)",
          noop,
          aliasAnalysisFromSchema()),
-     Operator(
-         "prim::unchecked_cast(t x) -> t",
-         noop,
-         aliasAnalysisSpecialCase()),
+     Operator("prim::unchecked_cast(t x) -> t", noop, aliasAnalysisSpecialCase()),
      Operator(
          "aten::wait(Future(t) self) -> t",
          [](Stack& stack) {
