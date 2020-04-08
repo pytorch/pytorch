@@ -111,6 +111,7 @@ backend_test.exclude(r'(test_hardsigmoid'  # Does not support Hardsigmoid.
                      '|test_momentum.*'
                      '|test_nesterov_momentum'
                      '|test_adagrad.*'
+                     '|test_pow_types.*'
                      ')')
 
 # Quick patch to unbreak master CI, is working on the debugging.
