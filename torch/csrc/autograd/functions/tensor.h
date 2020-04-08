@@ -58,14 +58,20 @@ struct TORCH_API CopyBackwards : public Node {
 // What do we save in view_fn_/CopySlices Node?
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 // All arguments in view_fn_ are copyied by **value**.
-// In CPU/CUDA case we save int[] sizes, int[] strides, and int storage_offset.
-// In XLA cases we save arguments passed into forward view op.
-// E.g for at::narrow, int dim, int start, in length are saved.
-
-// Theorectically we could also save Variable view in CopySlices Node, but
-// it's far more expensive than what we currently save. We cannot afford
-// keeping large tensors alive to recover views, TensorGeometry or a few arguments
-// are sufficient to do it.
+//   - For CPU/CUDA we save arguments needed by as_strided,
+//     E.g. int[] sizes, int[] strides, and int storage_offset.
+//   - For XLA we save arguments passed into forward view op.
+//     E.g for at::narrow, int dim, int start, in length are saved.
+//
+// Theorectically we could also save Tensor view in CopySlices Node, but
+// it's far more expensive than what we currently save.
+//   1. We cannot afford keeping large tensors alive to recover views only.
+//   2. There are inplace checks when Tensors are loaded back to make sure
+//      they haven't been changed (including size metadata).
+// So saving metadata like TensorGeometry/view arguments is much better
+// because it is minimal information needed to recover views, as well as it
+// allows the user to modify the original Tensor without preventing the
+// backward pass from running.
 //
 // When an in-place operation is done on a differentiable view, the base's
 // grad_fn is updated to become a `CopySlice` wrapping the backward of the

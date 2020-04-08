@@ -116,7 +116,7 @@ inline Tensor as_view(const Tensor & base, Tensor tensor, bool is_differentiable
       // func could be nullptr if tensor is a view created through CreationMeta::MULTI_OUTPUT_NODE.
       base_var = base_var._base();
     } else if (base_var.device().type() == at::kXLA) {
-      auto diff_view_meta = static_cast<DifferentiableViewMeta*>(base_var.getIntrusivePtr()->autograd_meta());
+      auto diff_view_meta = static_cast<DifferentiableViewMeta*>(torch::autograd::impl::get_autograd_meta(base_var));
       auto prev_fn = diff_view_meta->view_fn_;
       if (prev_fn != nullptr) {
         func = [=](const at::Tensor& new_base) {
@@ -139,7 +139,7 @@ inline Tensor as_view(const Tensor & base, Tensor tensor, bool is_differentiable
     }
   }
   if (is_differentiable) {
-    return make_variable_differentiable_view(std::move(base_var), std::move(tensor), func, creation_meta);
+    return make_variable_differentiable_view(std::move(base_var), std::move(tensor), std::move(func), creation_meta);
   } else {
     TORCH_CHECK(creation_meta == CreationMeta::DEFAULT,
                 "Non-differentiable views must have creation_meta=CreationMeta::DEFAULT");

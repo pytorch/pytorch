@@ -42,7 +42,6 @@ DifferentiableViewMeta::DifferentiableViewMeta(at::TensorImpl* self_impl, Variab
 
 DifferentiableViewMeta::~DifferentiableViewMeta() {
   base_.reset();
-  view_fn_ = nullptr;
 }
 
 namespace {
@@ -358,7 +357,7 @@ const std::shared_ptr<torch::autograd::Node>& VariableHooks::grad_fn(const Tenso
       // However in XLA backend we don't have full support of AsStridedBackward, we instead run a full
       // forward pass with a tensor that requires gradient to get proper grad_fn setup,
       // then save it to DifferentiableViewMeta for future use.
-      // This is fairly cheap for XLA lazy tensor approach(but really expensive for CPU/CUDA).
+      // This is fairly cheap for XLA lazy tensor approach (but would be really expensive for CPU/CUDA).
       // XLA Tensor only run thorugh VariableType dispatch and lower the forward pass to a XLA HLO graph,
       // then we take grad_fn and never materialize the tensor content.
       // So we only construct the graph but not execute it, which is a fairly cheap operation to do.
@@ -369,11 +368,12 @@ const std::shared_ptr<torch::autograd::Node>& VariableHooks::grad_fn(const Tenso
       // TODO: Potentially the following logic can be moved to VariableType_x.cpp through codegen
       //       so that we directly save a view_grad_fn in DifferentiableViewMeta.
       if (self.device().type() == at::kXLA) {
-        auto diff_base = at::empty_strided(diff_view_meta->base_.sizes(), diff_view_meta->base_.strides(), diff_view_meta->base_.options().requires_grad(true));
-        diff_base.copy_(diff_view_meta->base_);
-        TORCH_CHECK(diff_view_meta->view_fn_ != nullptr, "diff_view_meta->view_fn_ is empty.")
+        auto diff_base = at::empty_strided(diff_view_meta->base_.sizes(), diff_view_meta->base_.strides(), diff_view_meta->base_.options());
+        diff_base.requires_grad_(true);
+        AT_ASSERT(diff_view_meta->view_fn_ != nullptr);
         auto diff_view = diff_view_meta->view_fn_(diff_base);
         auto fn = diff_view.grad_fn();
+        fn->set_next_edges(torch::autograd::collect_next_edges(diff_view_meta->base_));
         diff_view_meta->grad_fn_ = std::move(fn);
 	  } else {
         auto fn = std::make_shared<torch::autograd::generated::AsStridedBackward>();
@@ -383,9 +383,9 @@ const std::shared_ptr<torch::autograd::Node>& VariableHooks::grad_fn(const Tenso
         fn->storage_offset = self.storage_offset();
         fn->set_next_edges(torch::autograd::collect_next_edges(diff_view_meta->base_));
         fn->add_input_metadata(
-          diff_view_meta->base_.options()
-        , self.sizes() // Note: sizes(), not base_.sizes(), is intentional
-        , diff_view_meta->base_.device());
+          diff_view_meta->base_.options(),
+          self.sizes(), // Note: sizes(), not base_.sizes(), is intentional
+          diff_view_meta->base_.device());
         diff_view_meta->grad_fn_ = std::move(fn);
       }
       diff_view_meta->attr_version = current_version;
