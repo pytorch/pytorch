@@ -34,7 +34,7 @@ detail::types<void, Types...> init() {
 /// calls needed. For example, to register a class named Foo, you might
 /// create a global variable like so:
 ///
-///     static auto register_foo = torch::class_<Foo>("Foo")
+///     static auto register_foo = torch::class_<Foo>("myclasses", "Foo")
 ///       .def("myMethod", &Foo::myMethod)
 ///       .def("lambdaMethod", [](const c10::intrusive_ptr<Foo>& self) {
 ///         // Do something with `self`
@@ -51,12 +51,16 @@ class class_ {
 
  public:
   /// This constructor actually registers the class type.
-  /// String argument `className_` is the name you would like to
+  /// String argument `namespaceName` is an identifier for the
+  /// namespace you would like this class to appear in.
+  /// String argument `className` is the name you would like to
   /// see this class exposed as in Python and TorchScript. For example, if
-  /// you pass in "MyStack" here, the class will appear as
-  /// `torch.classes.MyStack` in both Python and TorchScript.
-  explicit class_(const std::string& className) : className(std::move(className)) {
-    qualClassName = topModule + "." + parentModule + "." + className;
+  /// you pass `foo` as the namespace name and `Bar` as the className, the
+  /// class will appear as `torch.classes.foo.Bar` in Python and TorchScript
+  explicit class_(const std::string& namespaceName, const std::string& className) {
+    detail::checkValidIdent(namespaceName, "Namespace name");
+    detail::checkValidIdent(className, "Class name");
+    qualClassName = std::string("__torch__.torch.classes.") + namespaceName + "." + className;
 
     classTypePtr = at::ClassType::create(
         c10::QualifiedName(qualClassName),
@@ -219,23 +223,19 @@ class class_ {
           typename c10::guts::infer_function_traits_t<Func>::return_type;
       detail::BoxedProxy<RetType, Func>()(stack, func);
     };
-    auto method = std::make_shared<jit::BuiltinOpFunction>(
+    auto method = std::make_unique<jit::BuiltinOpFunction>(
         qualMethodName, std::move(schema), std::move(wrapped_func));
 
     // Register the method here to keep the Method alive.
     // ClassTypes do not hold ownership of their methods (normally it
     // those are held by the CompilationUnit), so we need a proxy for
     // that behavior here.
-    registerCustomClassMethod(method);
     classTypePtr->addMethod(method.get());
+    registerCustomClassMethod(std::move(method));
   }
 
-  std::string className;
   std::string qualClassName;
   at::ClassTypePtr classTypePtr;
-
-  const std::string parentModule = "classes";
-  const std::string topModule = "__torch__.torch";
 };
 
 /// make_custom_class() is a convenient way to create an instance of a registered

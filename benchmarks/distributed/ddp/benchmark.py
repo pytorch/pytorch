@@ -126,7 +126,7 @@ def sweep(benchmark):
 
     def local_print(msg):
         if dist.get_rank() == 0:
-            print(msg, end='', flush=True) # noqa: E999
+            print(msg, end='', flush=True)  # noqa: E999
 
     def print_header():
         local_print("\n")

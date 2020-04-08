@@ -16,14 +16,6 @@
 #include <numeric>
 #include <memory>
 
-#if defined(__clang__)
-#define __ubsan_ignore_float_divide_by_zero__ __attribute__((no_sanitize("float-divide-by-zero")))
-#define __ubsan_ignore_vptr__ __attribute__((no_sanitize("vptr")))
-#else
-#define __ubsan_ignore_float_divide_by_zero__
-#define __ubsan_ignore_vptr__
-#endif
-
 #define AT_DISALLOW_COPY_AND_ASSIGN(TypeName) \
   TypeName(const TypeName&) = delete; \
   void operator=(const TypeName&) = delete
@@ -107,12 +99,12 @@ inline int64_t prod_intlist(ArrayRef<int64_t> list) {
 
 /**
  * Utility function to static cast input Generator* to
- * the backend generator type (CPU/CUDAGenerator etc.)
+ * the backend generator type (CPU/CUDAGeneratorImpl etc.)
  */
 template <typename T>
 static inline T * check_generator(Generator gen) {
   TORCH_CHECK(gen.defined(), "Generator with undefined implementation is not allowed");
-  TORCH_CHECK(T::device_type() == gen->device().type(), "Expected a '", T::device_type(), "' device type for generator but found '", gen->device().type(), "'");
+  TORCH_CHECK(T::device_type() == gen.device().type(), "Expected a '", T::device_type(), "' device type for generator but found '", gen.device().type(), "'");
   return gen.get<T>();
 }
 
@@ -120,7 +112,7 @@ static inline T * check_generator(Generator gen) {
  * Utility function used in tensor implementations, which
  * supplies the default generator to tensors, if an input generator
  * is not supplied. The input Generator* is also static casted to
- * the backend generator type (CPU/CUDAGenerator etc.)
+ * the backend generator type (CPU/CUDAGeneratorImpl etc.)
  */
 template <typename T>
 static inline T* get_generator_or_default(const Generator& gen, const Generator& default_gen) {

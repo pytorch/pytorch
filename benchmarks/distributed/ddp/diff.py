@@ -53,9 +53,9 @@ def main():
 
         # Print header
         print("")
-        print("{:>10s}".format(""), end='') # noqa: E999
+        print("{:>10s}".format(""), end='')  # noqa: E999
         for _ in [75, 95]:
-            print("{:>16s}{:>10s}{:>10s}".format("sec/iter", "ex/sec", "diff"), end='') # noqa: E999
+            print("{:>16s}{:>10s}{:>10s}".format("sec/iter", "ex/sec", "diff"), end='')  # noqa: E999
         print("")
 
         # Print measurements
@@ -70,13 +70,13 @@ def main():
             ngpus = len(xa["ranks"])
             ma = sorted(xa["measurements"])
             mb = sorted(xb["measurements"])
-            print("{:>4d} GPUs:".format(ngpus), end='') # noqa: E999
+            print("{:>4d} GPUs:".format(ngpus), end='')  # noqa: E999
             for p in [75, 95]:
                 va = np.percentile(ma, p)
                 vb = np.percentile(mb, p)
                 # We're measuring time, so lower is better (hence the negation)
                 delta = -100 * ((vb - va) / va)
-                print("  p{:02d}: {:8.3f}s {:7d}/s {:+8.1f}%".format(p, vb, int(batch_size / vb), delta), end='') # noqa: E999
+                print("  p{:02d}: {:8.3f}s {:7d}/s {:+8.1f}%".format(p, vb, int(batch_size / vb), delta), end='')  # noqa: E999
             print("")
         print("")
 
