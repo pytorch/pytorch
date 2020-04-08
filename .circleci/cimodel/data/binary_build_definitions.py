@@ -67,9 +67,14 @@ class Conf(object):
             job_def["requires"].append("update_s3_htmls_for_nightlies_devtoolset7")
             job_def["filters"] = {"branches": {"only": "postnightly"}}
         else:
+            filter_branches = ["nightly"]
+            # we only want to add the release branch filter if we aren't
+            # uploading
+            if phase not in ["upload"]:
+                filter_branches.append(r"/release\/.*/")
             job_def["filters"] = {
                 "branches": {
-                    "only": "nightly"
+                    "only": filter_branches
                 },
                 # Will run on tags like v1.5.0-rc1, etc.
                 "tags": {
