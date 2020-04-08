@@ -157,7 +157,9 @@ PyRRef pyRemoteBuiltin(
         *agent, dst, std::move(*scriptRemoteCall).toMessage(), false, rf);
 
     ctx.addPendingUser(userRRef->forkId(), userRRef);
-    fm->addCallback(callback::confirmPendingUser);
+    fm->addCallback([forkId{userRRef->forkId()}, fm]() {
+      callback::confirmPendingUser(fm, forkId);
+    });
     return PyRRef(userRRef);
   } else {
     auto ownerRRef = ctx.createOwnerRRef(returnType);
@@ -171,7 +173,7 @@ PyRRef pyRemoteBuiltin(
 
     // Builtin operators does not return py::object, and hence does not require
     // GIL for destructing the potentially deleted OwerRRef.
-    fm->addCallback(callback::finishCreatingOwnerRRef);
+    fm->addCallback([fm]() { callback::finishCreatingOwnerRRef(fm); });
     return PyRRef(ownerRRef);
   }
 }
@@ -204,7 +206,6 @@ PyRRef pyRemotePythonUdf(
       SerializedPyObj(std::move(pickledPythonUDF), std::move(tensors));
   if (ctx.getWorkerId() != dst.id_) {
     auto userRRef = ctx.createUserRRef(dst.id_, PyObjectType::get());
-    ctx.addPendingUser(userRRef->forkId(), userRRef);
     auto fm = sendPythonRemoteCall(
         dst,
         std::move(serializedPyObj),
@@ -212,7 +213,10 @@ PyRRef pyRemotePythonUdf(
         userRRef->forkId().toIValue(),
         rf);
 
-    fm->addCallback(callback::confirmPendingUser);
+    ctx.addPendingUser(userRRef->forkId(), userRRef);
+    fm->addCallback([forkId{userRRef->forkId()}, fm]() {
+      callback::confirmPendingUser(fm, forkId);
+    });
     return PyRRef(userRRef);
   } else {
     auto ownerRRef = ctx.createOwnerRRef(PyObjectType::get());
@@ -225,9 +229,8 @@ PyRRef pyRemotePythonUdf(
         ownerRRef->rrefId().toIValue(),
         rf);
 
-    fm->addCallback([](const Message& message,
-                       const c10::optional<utils::FutureError>& futErr) {
-      auto deletedRRef = callback::finishCreatingOwnerRRef(message, futErr);
+    fm->addCallback([fm]() {
+      auto deletedRRef = callback::finishCreatingOwnerRRef(fm);
       if (deletedRRef && deletedRRef->isPyObj()) {
         pybind11::gil_scoped_acquire ag;
         deletedRRef.reset();

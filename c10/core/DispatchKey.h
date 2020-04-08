@@ -71,7 +71,7 @@ enum class DispatchKey : uint8_t {
 
   // This backend is to support custom RNGs; it lets you go
   // to a different kernel if you pass in a generator that is not a
-  // traditional CPUGenerator/CUDAGenerator.  To make use of this
+  // traditional CPUGeneratorImpl/CUDAGeneratorImpl.  To make use of this
   // key:
   //  1) set it as a second parameter of at::Generator constructor call in
   //     the user-defined PRNG class.
@@ -126,6 +126,10 @@ enum class DispatchKey : uint8_t {
   // you are responsible for handling autograd yourself, or deferring to other
   // operators which support autograd.
   XLAPreAutograd,
+
+  // Autocasting precedes VariableTypeId, to ensure casts are autograd-exposed
+  // and inputs are saved for backward in the post-autocast type.
+  AutocastTensorId,
 
   // Here are some reserved pre-autograd keys for user-defined backends, see Note [Private use TensorId]
   PrivateUse1_PreAutogradTensorId,
