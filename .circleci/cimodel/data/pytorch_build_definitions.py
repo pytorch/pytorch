@@ -114,7 +114,7 @@ class Conf:
         if not self.is_important:
             # If you update this, update
             # caffe2_build_definitions.py too
-            job_def["filters"] = {"branches": {"only": ["master", r"/ci-all\/.*/"]}}
+            job_def["filters"] = {"branches": {"only": ["master", r"/ci-all\/.*/", r"/release\/.*/"]}}
         job_def.update(self.gen_workflow_params(phase))
 
         return {job_name : job_def}
@@ -187,9 +187,9 @@ def instantiate_configs():
 
     root = get_root()
     found_configs = conf_tree.dfs(root)
-    restrict_phases = None
     for fc in found_configs:
 
+        restrict_phases = None
         distro_name = fc.find_prop("distro_name")
         compiler_name = fc.find_prop("compiler_name")
         compiler_version = fc.find_prop("compiler_version")

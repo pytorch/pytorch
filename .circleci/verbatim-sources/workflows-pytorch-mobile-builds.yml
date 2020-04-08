@@ -31,6 +31,7 @@
               only:
                 - master
                 - /ci-all\/.*/
+                - /release\/.*/
           build_environment: "pytorch-linux-xenial-py3-clang5-mobile-code-analysis"
           build_only: "1"
           # Use LLVM-DEV toolchain in android-ndk-r19c docker image
