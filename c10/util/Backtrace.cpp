@@ -8,16 +8,6 @@
 #include <string>
 #include <vector>
 
-#ifdef _MSC_VER
-#ifndef WIN32_LEAN_AND_MEAN
-#define WIN32_LEAN_AND_MEAN
-#endif
-#include <iomanip>
-#include <Windows.h>
-#include <dbghelp.h>
-#pragma comment(lib, "Dbghelp.lib")
-#endif
-
 #if (defined(__ANDROID__)) ||                                                 \
     (defined(__APPLE__) &&                                                    \
      (TARGET_IPHONE_SIMULATOR || TARGET_OS_SIMULATOR || TARGET_OS_IPHONE)) || \
@@ -32,6 +22,11 @@
 
 namespace c10 {
 
+// TODO: This backtrace retrieval can be implemented on Windows via the Windows
+// API using `CaptureStackBackTrace` and `SymFromAddr`.
+// https://stackoverflow.com/questions/5693192/win32-backtrace-from-c-code
+// https://stackoverflow.com/questions/26398064/counterpart-to-glibcs-backtrace-and-backtrace-symbols-on-windows
+// https://msdn.microsoft.com/en-us/library/windows/desktop/bb204633%28v=vs.85%29.aspx.
 #if SUPPORTS_BACKTRACE
 namespace {
 
@@ -120,22 +115,7 @@ c10::optional<FrameInformation> parse_frame_information(
   frame.function_name = demangle(mangled_function_name.c_str());
   return frame;
 }
-} // anonymous namespace
-#elif defined(_MSC_VER)
-namespace {
-const int max_name_len = 256;
-void get_module_name(char* module, void* addr) {
-  HMODULE h_module;
-  strcpy(module, "");
-  GetModuleHandleEx(
-      GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
-          GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-      (LPCTSTR)addr,
-      &h_module);
-  if (h_module != NULL) {
-    GetModuleFileNameA(h_module, module, max_name_len);
-  }
-}
+
 } // anonymous namespace
 #endif // SUPPORTS_BACKTRACE
 
@@ -214,101 +194,7 @@ std::string get_backtrace(
   }
 
   return stream.str();
-#elif defined(_MSC_VER) // !SUPPORTS_BACKTRACE
-  // This backtrace retrieval is implemented on Windows via the Windows
-  // API using `CaptureStackBackTrace`, `SymFromAddr` and `SymGetLineFromAddr64`.
-  // https://stackoverflow.com/questions/5693192/win32-backtrace-from-c-code
-  // https://stackoverflow.com/questions/26398064/counterpart-to-glibcs-backtrace-and-backtrace-symbols-on-windows
-  // https://docs.microsoft.com/en-us/windows/win32/debug/capturestackbacktrace
-  // https://docs.microsoft.com/en-us/windows/win32/api/dbghelp/nf-dbghelp-symfromaddr
-  // https://docs.microsoft.com/en-us/windows/win32/api/dbghelp/nf-dbghelp-symgetlinefromaddr64
-  // TODO: Support skipping python frames
-
-  // We always skip this frame (backtrace).
-  frames_to_skip += 1;
-
-  HANDLE process;
-  DWORD64 displacement;
-  DWORD disp;
-  std::unique_ptr<IMAGEHLP_LINE64> line;
-
-  char buffer[sizeof(SYMBOL_INFO) + MAX_SYM_NAME * sizeof(TCHAR)];
-  char module[max_name_len];
-  PSYMBOL_INFO p_symbol = (PSYMBOL_INFO)buffer;
-
-  std::unique_ptr<void*[]> back_trace(new void*[maximum_number_of_frames]);
-  bool with_symbol = false;
-  bool with_line = false;
-  bool init_symbol;
-
-  // The backtrace string goes into here.
-  std::ostringstream stream;
-
-  // Get the frames
-  const USHORT n_frame = CaptureStackBackTrace(
-      static_cast<DWORD>(frames_to_skip),
-      static_cast<DWORD>(maximum_number_of_frames),
-      back_trace.get(),
-      NULL);
-
-  // Initialize symbols
-  process = GetCurrentProcess();
-  init_symbol = SymInitialize(process, NULL, TRUE);
-
-  for (USHORT i_frame = 0; i_frame < n_frame; ++i_frame) {
-    // Get the address and the name of the symbol
-    if (init_symbol) {
-      p_symbol->SizeOfStruct = sizeof(SYMBOL_INFO);
-      p_symbol->MaxNameLen = MAX_SYM_NAME;
-      with_symbol = SymFromAddr(
-          process, (ULONG64)back_trace[i_frame], &displacement, p_symbol);
-    }
-
-    // Get the line number and the module
-    if (init_symbol) {
-      line.reset(new IMAGEHLP_LINE64());
-      line->SizeOfStruct = sizeof(IMAGEHLP_LINE64);
-      with_line = SymGetLineFromAddr64(
-          process, (ULONG64)back_trace[i_frame], &disp, line.get());
-    }
-
-    // Get the module basename
-    get_module_name(module, back_trace[i_frame]);
-    char* basename = nullptr;
-    char* last_slash_pos = nullptr;
-    if (module) {
-      last_slash_pos = strrchr(module, '\\');
-      if (last_slash_pos) {
-        basename = last_slash_pos + 1;
-      }
-    }
-
-    // The pattern on Windows is
-    // `<return-address> <symbol-address>
-    // <module-name>!<demangled-function-name> [<file-name> @ <line-number>]
-    stream << std::setfill('0') << std::setw(16) << std::uppercase << std::hex
-           << back_trace[i_frame] << std::dec;
-    if (with_symbol) {
-      stream << std::setfill('0') << std::setw(16) << std::uppercase << std::hex
-             << p_symbol->Address << std::dec << " " << basename << "!" << p_symbol->Name;
-    } else {
-      stream << " <unknown symbol address> " << basename << "!<unknown symbol>";
-    }
-    stream << " [";
-    if (with_line) {
-      stream << line->FileName << " @ " << line->LineNumber;
-    } else {
-      stream << "<unknown file> @ <unknown line number>";
-    }
-    stream << "]" << std::endl;
-  }
-
-  if (init_symbol) {
-    SymCleanup(process);
-  }
-
-  return stream.str();
-#else // !SUPPORTS_BACKTRACE && !_WIN32
+#else // !SUPPORTS_BACKTRACE
   return "(no backtrace available)";
 #endif // SUPPORTS_BACKTRACE
 }
