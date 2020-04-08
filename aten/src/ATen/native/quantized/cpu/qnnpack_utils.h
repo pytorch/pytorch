@@ -45,16 +45,16 @@ struct PackedConvWeightsQnnp : public ConvPackedParamsBase<kSpatialDim> {
       double w_scale,
       int64_t w_zp)
       : w(std::move(w)),
-        orig_weight(orig_weight),
-        bias(bias),
-        stride_(stride),
-        padding_(padding),
-        dilation_(dilation),
+        orig_weight(std::move(orig_weight)),
+        bias(std::move(bias)),
+        stride_(std::move(stride)),
+        padding_(std::move(padding)),
+        dilation_(std::move(dilation)),
         groups_(groups),
         input_scale(input_scale),
-        kernel(kernel),
-        w_scale(w_scale),
-        w_zp(w_zp) {}
+        kernel(std::move(kernel)),
+        w_scale(std::move(w_scale)),
+        w_zp(std::move(w_zp)) {}
 
   std::unique_ptr<qnnpack::PrePackConvWeights> w;
   at::Tensor orig_weight;

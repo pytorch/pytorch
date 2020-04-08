@@ -164,9 +164,9 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeightsQnnp<kSpa
     prepack(
         at::Tensor weight,
         c10::optional<at::Tensor> bias_in,
-        torch::List<int64_t> strides,
-        torch::List<int64_t> paddings,
-        torch::List<int64_t> dilations,
+        torch::List<int64_t> stride,
+        torch::List<int64_t> padding,
+        torch::List<int64_t> dilation,
         int64_t groups) {
   TORCH_CHECK(
       weight.ndimension() == 4,
@@ -178,14 +178,14 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeightsQnnp<kSpa
       "quantized::conv2d_prepack (qnnpack): only supports Per Tensor "
       "Quantization Scheme")
   TORCH_CHECK(
-      strides.size() == 2,
+      stride.size() == 2,
       "quantized::conv2d_prepack (qnnpack): 2D convolution only");
   TORCH_CHECK(
-      paddings.size() == 2,
+      padding.size() == 2,
       "quantized::conv2d_prepack (qnnpack): Specify top/left padding only. "
       "bottom/right padding assumed to be equal to top/left");
   TORCH_CHECK(
-      dilations.size() == 2,
+      dilation.size() == 2,
       " quantized::conv2d_prepack (qnnpack): 2D convolution only");
 
   at::native::initQNNPACK();
@@ -214,12 +214,12 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeightsQnnp<kSpa
       bias_fp32.sizes(),
       " instead");
 
-  uint32_t stride_h = strides[0];
-  uint32_t stride_w = strides[1];
-  uint32_t pad_t = paddings[0];
-  uint32_t pad_l = paddings[1];
-  uint32_t dilation_h = dilations[0];
-  uint32_t dilation_w = dilations[1];
+  uint32_t stride_h = stride[0];
+  uint32_t stride_w = stride[1];
+  uint32_t pad_t = padding[0];
+  uint32_t pad_l = padding[1];
+  uint32_t dilation_h = dilation[0];
+  uint32_t dilation_w = dilation[1];
 
   qnnpack::conv_param_t conv_p(
       {kernel_w, kernel_h},
@@ -247,9 +247,9 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeightsQnnp<kSpa
               nullptr, /* PrePackConvWeights */
               weight_contig, /* int8_t weight */
               bias_fp32.contiguous(), /* fp32 bias */
-              strides,
-              paddings,
-              dilations,
+              stride,
+              padding,
+              dilation,
               groups,
               c10::nullopt, /* input_scale */
               {kernel_h, kernel_w},
@@ -271,9 +271,9 @@ class QConvPackWeightInt8 final : public c10::OperatorKernel {
   c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> operator()(
       Tensor weight,
       c10::optional<Tensor> bias,
-      torch::List<int64_t> strides,
-      torch::List<int64_t> paddings,
-      torch::List<int64_t> dilations,
+      torch::List<int64_t> stride,
+      torch::List<int64_t> padding,
+      torch::List<int64_t> dilation,
       int64_t groups) {
     auto& ctx = at::globalContext();
 #ifdef USE_FBGEMM
@@ -281,9 +281,9 @@ class QConvPackWeightInt8 final : public c10::OperatorKernel {
       return PackedConvWeight<kSpatialDim>::prepack(
           weight,
           bias,
-          strides,
-          paddings,
-          dilations,
+          stride,
+          padding,
+          dilation,
           groups);
     }
 #endif
@@ -295,7 +295,7 @@ class QConvPackWeightInt8 final : public c10::OperatorKernel {
           "quantized::conv2d_prepack (qnnpack): QNNPACK only supports Conv2d "
           "now.");
       return PackedConvWeightsQnnp<kSpatialDim>::prepack(
-          weight, bias, strides, paddings, dilations, groups);
+          weight, bias, stride, padding, dilation, groups);
     }
 #endif
 

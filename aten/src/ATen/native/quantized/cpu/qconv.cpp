@@ -407,46 +407,6 @@ at::Tensor PackedConvWeight<kSpatialDim>::apply_impl(
   return output;
 }
 
-template at::Tensor PackedConvWeight<2>::apply_impl<true>(
-    at::Tensor act,
-    double output_scale,
-    int64_t output_zero_point);
-
-template at::Tensor PackedConvWeight<2>::apply_impl<false>(
-    at::Tensor act,
-    double output_scale,
-    int64_t output_zero_point);
-
-template at::Tensor PackedConvWeight<2>::apply(
-    at::Tensor act,
-    double output_scale,
-    int64_t output_zero_point);
-
-template at::Tensor PackedConvWeight<2>::apply_relu(
-    at::Tensor act,
-    double output_scale,
-    int64_t output_zero_point);
-
-template at::Tensor PackedConvWeight<3>::apply_impl<true>(
-    at::Tensor act,
-    double output_scale,
-    int64_t output_zero_point);
-
-template at::Tensor PackedConvWeight<3>::apply_impl<false>(
-    at::Tensor act,
-    double output_scale,
-    int64_t output_zero_point);
-
-template at::Tensor PackedConvWeight<3>::apply(
-    at::Tensor act,
-    double output_scale,
-    int64_t output_zero_point);
-
-template at::Tensor PackedConvWeight<3>::apply_relu(
-    at::Tensor act,
-    double output_scale,
-    int64_t output_zero_point);
-
 #endif // USE_FBGEMM
 
 #ifdef USE_PYTORCH_QNNPACK
@@ -587,46 +547,6 @@ at::Tensor PackedConvWeightsQnnp<kSpatialDim>::apply_impl(
 
   return output;
 }
-
-template at::Tensor PackedConvWeightsQnnp<2>::apply_impl<true>(
-    at::Tensor act,
-    double output_scale,
-    int64_t output_zero_point);
-
-template at::Tensor PackedConvWeightsQnnp<2>::apply_impl<false>(
-    at::Tensor act,
-    double output_scale,
-    int64_t output_zero_point);
-
-template at::Tensor PackedConvWeightsQnnp<2>::apply(
-    at::Tensor act,
-    double output_scale,
-    int64_t output_zero_point);
-
-template at::Tensor PackedConvWeightsQnnp<2>::apply_relu(
-    at::Tensor act,
-    double output_scale,
-    int64_t output_zero_point);
-
-template at::Tensor PackedConvWeightsQnnp<3>::apply_impl<true>(
-    at::Tensor act,
-    double output_scale,
-    int64_t output_zero_point);
-
-template at::Tensor PackedConvWeightsQnnp<3>::apply_impl<false>(
-    at::Tensor act,
-    double output_scale,
-    int64_t output_zero_point);
-
-template at::Tensor PackedConvWeightsQnnp<3>::apply(
-    at::Tensor act,
-    double output_scale,
-    int64_t output_zero_point);
-
-template at::Tensor PackedConvWeightsQnnp<3>::apply_relu(
-    at::Tensor act,
-    double output_scale,
-    int64_t output_zero_point);
 
 #endif // USE_PYTORCH_QNNPACK
 

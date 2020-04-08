@@ -99,7 +99,7 @@ fbgemm::conv_param_t<3> MakeFbgemmConvParam<3>(
       groups, // groups
       {kernels[0], kernels[1], kernels[2]}, // kernels
       {strides[0], strides[1], strides[2]}, // strides
-      {pads[0], pads[1], pads[2], pads[0], pads[1], pads[2]}, // padding
+      {pads[0], pads[1], pads[2], pads[0], pads[1], pads[2]}, // paddings
       {dilations[0], dilations[1], dilations[2]}); // dilations
 }
 
