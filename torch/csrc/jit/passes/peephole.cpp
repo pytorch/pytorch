@@ -1,11 +1,11 @@
 #include <torch/csrc/jit/passes/peephole.h>
 #include <ATen/core/jit_type.h>
-#include <torch/csrc/jit/graph_executor.h>
-#include <torch/csrc/jit/ir_views.h>
+#include <torch/csrc/jit/ir/alias_analysis.h>
+#include <torch/csrc/jit/ir/ir_views.h>
 #include <torch/csrc/jit/jit_log.h>
-#include <torch/csrc/jit/passes/alias_analysis.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/peephole.h>
+#include <torch/csrc/jit/runtime/graph_executor.h>
 #include <torch/csrc/utils/memory.h>
 
 namespace torch {
@@ -19,13 +19,11 @@ static bool mustBeEqual(const c10::optional<T>& a, const c10::optional<T>& b) {
 }
 
 struct PeepholeOptimizeImpl {
-  PeepholeOptimizeImpl(
-      const std::shared_ptr<Graph>& graph,
-      bool addmm_fusion_enabled)
+  PeepholeOptimizeImpl(const std::shared_ptr<Graph>& graph, bool onnx_export)
       : aliasDb_(nullptr),
         graph_(graph),
         changed_(true),
-        addmm_fusion_enabled_(addmm_fusion_enabled) {
+        onnx_export_(onnx_export) {
     run(graph->block());
   }
 
@@ -38,7 +36,8 @@ struct PeepholeOptimizeImpl {
   //
   // TODO: Decide what kind of fixed point strategy we will have
   //
-  // The parameter `addmm_fusion_enabled` exists because, as it is today, fusing
+  // The parameter `onnx_export` exists because, we do some optimizations only
+  // for onnx. as it is today, fusing
   // add + mm has no benefit within PyTorch running ATen ops. However, we rely
   // on seeing the fused version of addmm for ONNX export, since after ONNX
   // translation we would see redundant Gemm ops with sub-optimal inputs. This
@@ -50,6 +49,18 @@ struct PeepholeOptimizeImpl {
 
       for (Block* sub_block : node->blocks()) {
         run(sub_block);
+      }
+
+      if (node->kind() != prim::Constant) {
+        WithInsertPoint guard(node);
+        // Any Value whose type is None should be replaced with a Constant
+        // This can occur if a module has an optional attribute, and it is
+        // initialized as None.
+        for (Value* output : node->outputs()) {
+          if (output->type()->cast<NoneType>()) {
+            output->replaceAllUsesWith(graph_->insertConstant(IValue()));
+          }
+        }
       }
 
       // XXX: remember that if you want to simplify an expression by combining
@@ -71,7 +82,7 @@ struct PeepholeOptimizeImpl {
         // doesn't even result in fewer reads, because mm won't even load C
         // (because beta
         // == 0 for it).
-        if (addmm_fusion_enabled_ &&
+        if (onnx_export_ &&
             node->get<at::Scalar>(attr::alpha).value().toDouble() == 1.) {
           // Look for mm from both sides of the add
           for (size_t mm_side = 0; mm_side < 2; mm_side++) {
@@ -165,7 +176,7 @@ struct PeepholeOptimizeImpl {
               "aten::_grad_sum_to_size(Tensor(a) self, int[]? size) -> Tensor(a)")) {
         if (node->input(1)->mustBeNone()) {
           GRAPH_UPDATE(
-              *node,
+              getHeader(node),
               " (x._grad_sum_to_size(x, None) == x) is replaced with ",
               node->input(0)->debugName());
           node->output()->replaceAllUsesWith(node->input(0));
@@ -177,7 +188,7 @@ struct PeepholeOptimizeImpl {
                     "aten::_grad_sum_to_size(Tensor(a) self, int[]? size) -> Tensor(a)") &&
                 u.user->input(1)->type()->isSubtypeOf(ListType::ofInts())) {
               GRAPH_UPDATE(
-                  *node,
+                  getHeader(node),
                   " (x._grad_sum_to_size(y)._grad_sum_to_size(z) == x._grad_sum_to_size(z)) is replaced with ",
                   node->inputs().at(0)->debugName());
               u.user->replaceInput(0, node->inputs().at(0));
@@ -197,7 +208,7 @@ struct PeepholeOptimizeImpl {
           if (expanded_sizes.has_value() && input_type_sizes &&
               expanded_sizes->vec() == *input_type_sizes) {
             GRAPH_UPDATE(
-                *node,
+                getHeader(node),
                 " (x.expand(x.size()) == x) is replaced with ",
                 node->namedInput(attr::self)->debugName());
             node->output()->replaceAllUsesWith(node->namedInput(attr::self));
@@ -209,7 +220,7 @@ struct PeepholeOptimizeImpl {
         Node* input_node = node->input()->node();
         if (input_node->matches("aten::t(Tensor self) -> Tensor")) {
           GRAPH_UPDATE(
-              *node,
+              getHeader(node),
               " (x.t().t() == x) is replaced with ",
               input_node->input()->debugName());
           node->output()->replaceAllUsesWith(input_node->input());
@@ -223,7 +234,7 @@ struct PeepholeOptimizeImpl {
         if (mustBeEqual(self_type->scalarType(), other_type->scalarType()) &&
             mustBeEqual(self_type->device(), other_type->device())) {
           GRAPH_UPDATE(
-              *node,
+              getHeader(node),
               " (x.type_as(y) == x) is replaced with ",
               node->input(0)->debugName());
           node->output()->replaceAllUsesWith(node->input(0));
@@ -231,12 +242,14 @@ struct PeepholeOptimizeImpl {
         }
       } else if (
           node->kind() == aten::Float || node->kind() == aten::Int ||
-          node->kind() == prim::ImplicitTensorToNum) {
+          node->kind() == aten::FloatImplicit ||
+          node->kind() == aten::IntImplicit ||
+          node->kind() == aten::ScalarImplicit) {
         Node* input_node = node->input()->node();
         if (input_node->kind() == prim::NumToTensor) {
           GRAPH_UPDATE(
-              *node,
-              " (x.NumToTensor().ImplicitTensorToNum() == x.NumToTensor()) is replaced with ",
+              getHeader(node),
+              " (x.NumToTensor().TensorToNum() == x.NumToTensor()) is replaced with ",
               node->input()->debugName());
           node->output()->replaceAllUsesWith(input_node->input());
           changed_ = true;
@@ -244,6 +257,10 @@ struct PeepholeOptimizeImpl {
       } else if (node->matches("aten::size(Tensor self) -> int[]")) {
         if (auto ptt = node->input()->type()->cast<TensorType>()) {
           if (auto sizes = ptt->sizes().concrete_sizes()) {
+            GRAPH_UPDATE(
+                getHeader(node),
+                " (x.size()) is replaced with ",
+                node->input()->debugName());
             WithInsertPoint guard(node);
             IValue ival(sizes);
             auto const_sizes_val = node->owningGraph()->insertConstant(ival);
@@ -290,7 +307,8 @@ struct PeepholeOptimizeImpl {
             WithInsertPoint guard(node);
             auto output = node->owningGraph()->insertConstant(
                 node->kind() == aten::__isnot__);
-            GRAPH_UPDATE("Folding ", *node, " to ", output->debugName());
+            GRAPH_UPDATE(
+                "Folding ", getHeader(node), " to ", output->debugName());
             node->output()->replaceAllUsesWith(output);
             changed_ = true;
           }
@@ -303,7 +321,7 @@ struct PeepholeOptimizeImpl {
         if (input->mustNotBeNone()) {
           GRAPH_UPDATE(
               "Unwrapping ",
-              *node,
+              getHeader(node),
               " as ",
               node->input(),
               " can't be optional");
@@ -317,7 +335,9 @@ struct PeepholeOptimizeImpl {
         auto output_type = unshapedType(node->output()->type());
         if (input_type->isSubtypeOf(output_type)) {
           GRAPH_UPDATE(
-              "Removing ", *node, " as input type subtypes output type");
+              "Removing ",
+              getHeader(node),
+              " as input type subtypes output type");
           node->output()->replaceAllUsesWith(node->input());
         }
       } else if (node->matches("prim::dtype(Tensor a) -> int")) {
@@ -328,7 +348,7 @@ struct PeepholeOptimizeImpl {
               static_cast<int64_t>(*ptt->scalarType()));
           GRAPH_UPDATE(
               "Replacing ",
-              *node,
+              getHeader(node),
               " with a type constant ",
               output->debugName());
           node->output()->replaceAllUsesWith(output);
@@ -341,7 +361,7 @@ struct PeepholeOptimizeImpl {
           auto output = node->owningGraph()->insertConstant(*ptt->device());
           GRAPH_UPDATE(
               "Replacing ",
-              *node,
+              getHeader(node),
               " with a device constant ",
               output->debugName());
           node->output()->replaceAllUsesWith(output);
@@ -355,7 +375,7 @@ struct PeepholeOptimizeImpl {
               node->owningGraph()->insertConstant(static_cast<int64_t>(*dim));
           GRAPH_UPDATE(
               "Replacing ",
-              *node,
+              getHeader(node),
               " with a \"dim\" constant ",
               output->debugName());
           node->output()->replaceAllUsesWith(output);
@@ -369,7 +389,7 @@ struct PeepholeOptimizeImpl {
               node->owningGraph()->insertConstant((*ptt->device()).is_cuda());
           GRAPH_UPDATE(
               "Replacing ",
-              *node,
+              getHeader(node),
               " with a is_cuda constant ",
               output->debugName());
           node->output()->replaceAllUsesWith(output);
@@ -417,7 +437,7 @@ struct PeepholeOptimizeImpl {
           return;
         }
         GRAPH_UPDATE(
-            *node,
+            getHeader(node),
             " (x + 0 == x - 0 == x) is replaced with ",
             node->input(0)->debugName());
         node->output()->replaceAllUsesWith(node->input(0));
@@ -436,7 +456,7 @@ struct PeepholeOptimizeImpl {
           return;
         }
         GRAPH_UPDATE(
-            *node,
+            getHeader(node),
             " (x * 1 == x / 1 == x) is replaced with ",
             node->input(0)->debugName());
         node->output()->replaceAllUsesWith(node->input(0));
@@ -449,7 +469,7 @@ struct PeepholeOptimizeImpl {
   std::unique_ptr<AliasDb> aliasDb_ = nullptr;
   std::shared_ptr<Graph> graph_;
   bool changed_;
-  bool addmm_fusion_enabled_;
+  bool onnx_export_;
 };
 
 void PeepholeOptimize(

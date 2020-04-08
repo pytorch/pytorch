@@ -1,6 +1,8 @@
 from collections import OrderedDict, namedtuple
 import functools
 import itertools
+import weakref
+import warnings
 
 import torch
 from ..parameter import Parameter
@@ -13,6 +15,14 @@ class _IncompatibleKeys(namedtuple('IncompatibleKeys', ['missing_keys', 'unexpec
         return super(_IncompatibleKeys, self).__repr__()
 
     __str__ = __repr__
+
+
+class ModuleAttributeError(AttributeError):
+    """ When `__getattr__` raises AttributeError inside a property,
+    AttributeError is raised with the property name instead of the
+    attribute that initially raised AttributeError, making the error
+    message uninformative. Using `ModuleAttributeError` instead
+    fixes this issue."""
 
 
 def _addindent(s_, numSpaces):
@@ -347,6 +357,14 @@ class Module(object):
         """
         return self._apply(lambda t: t.half() if t.is_floating_point() else t)
 
+    def bfloat16(self):
+        r"""Casts all floating point parameters and buffers to ``bfloat16`` datatype.
+
+        Returns:
+            Module: self
+        """
+        return self._apply(lambda t: t.bfloat16() if t.is_floating_point() else t)
+
     def to(self, *args, **kwargs):
         r"""Moves and/or casts the parameters and buffers.
 
@@ -580,7 +598,7 @@ class Module(object):
             modules = self.__dict__['_modules']
             if name in modules:
                 return modules[name]
-        raise AttributeError("'{}' object has no attribute '{}'".format(
+        raise ModuleAttributeError("'{}' object has no attribute '{}'".format(
             type(self).__name__, name))
 
     def __setattr__(self, name, value):
@@ -1164,4 +1182,21 @@ class Module(object):
         replica._parameters = replica._parameters.copy()
         replica._buffers = replica._buffers.copy()
         replica._modules = replica._modules.copy()
+
+        # Warn users that gradients don't behave as expected on replica modules
+        old_zero_grad = replica.__class__.zero_grad
+        weak_self = weakref.ref(replica)
+
+        def zero_grad():
+            warnings.warn(
+                "Calling .zero_grad() from a module that was passed to a nn.DataParallel() has no effect. "
+                "The parameters are copied (in a differentiable manner) from the original module. "
+                "This means they are not leaf nodes in autograd and so don't accumulate gradients. "
+                "If you need gradients in your forward method, consider using autograd.grad instead.")
+            replica = weak_self()
+            if replica:
+                old_zero_grad(replica)
+
+        replica.zero_grad = zero_grad
+
         return replica

@@ -115,6 +115,33 @@ from torch.testing._internal.common_utils import TestCase, TEST_WITH_ROCM, TEST_
 # setUpClass is called AFTER tests have been created and BEFORE and ONLY IF
 # they are run. This makes it useful for initializing devices and dependencies.
 #
+# Note [Overriding methods in generic tests]
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# Device generic tests look a lot like normal test classes, but they differ
+# from ordinary classes in some important ways.  In particular, overriding
+# methods in generic tests doesn't work quite the way you expect.
+#
+#     class TestFooDeviceType(TestCase):
+#         # Intention is to override
+#         def assertEqual(self, x, y):
+#             # This DOESN'T WORK!
+#             super(TestFooDeviceType, self).assertEqual(x, y)
+#
+# If you try to run this code, you'll get an error saying that TestFooDeviceType
+# is not in scope.  This is because after instantiating our classes, we delete
+# it from the parent scope.  Instead, you need to hardcode a direct invocation
+# of the desired subclass call, e.g.,
+#
+#     class TestFooDeviceType(TestCase):
+#         # Intention is to override
+#         def assertEqual(self, x, y):
+#             TestCase.assertEqual(x, y)
+#
+# However, a less error-prone way of customizing the behavior of TestCase
+# is to either (1) add your functionality to TestCase and make it toggled
+# by a class attribute, or (2) create your own subclass of TestCase, and
+# then inherit from it for your generic test.
+#
 
 # List of device type test bases that can be used to instantiate tests.
 # See below for how this list is populated. If you're adding a device type
@@ -255,7 +282,7 @@ PYTORCH_CUDA_MEMCHECK = os.getenv('PYTORCH_CUDA_MEMCHECK', '0') == '1'
 # The tests in these test cases are derived from the generic tests in
 # generic_test_class.
 # See note "Generic Device Type Testing."
-def instantiate_device_type_tests(generic_test_class, scope, except_for=None):
+def instantiate_device_type_tests(generic_test_class, scope, except_for=None, only_for=None):
     # Removes the generic test class from its enclosing scope so its tests
     # are not discoverable.
     del scope[generic_test_class.__name__]
@@ -270,13 +297,19 @@ def instantiate_device_type_tests(generic_test_class, scope, except_for=None):
     empty_class = type(empty_name, generic_test_class.__bases__, {})
 
     # Acquires members names
-    generic_members = set(dir(generic_test_class)) - set(dir(empty_class))
+    # See Note [Overriding methods in generic tests]
+    generic_members = set(generic_test_class.__dict__.keys()) - set(empty_class.__dict__.keys())
     generic_tests = [x for x in generic_members if x.startswith('test')]
 
     # Creates device-specific test cases
     for base in device_type_test_bases:
         # Skips bases listed in except_for
+        if except_for is not None and only_for is not None:
+            assert base.device_type not in except_for or base.device_type not in only_for,\
+                "same device cannot appear in except_for and only_for"
         if except_for is not None and base.device_type in except_for:
+            continue
+        if only_for is not None and base.device_type not in only_for:
             continue
 
         class_name = generic_test_class.__name__ + base.device_type.upper()
@@ -294,7 +327,7 @@ def instantiate_device_type_tests(generic_test_class, scope, except_for=None):
                 # Instantiates the device-specific tests
                 device_type_test_class.instantiate_test(name, test)
             else:  # Ports non-test member
-                assert not hasattr(device_type_test_class, name), "Redefinition of non-test member {0}".format(name)
+                assert name not in device_type_test_class.__dict__, "Redefinition of directly defined member {0}".format(name)
 
                 # Unwraps to functions (when available) for Python2 compat
                 nontest = getattr(generic_test_class, name)
@@ -350,6 +383,15 @@ class skipCUDAIf(skipIf):
 
     def __init__(self, dep, reason):
         super(skipCUDAIf, self).__init__(dep, reason, device_type='cuda')
+
+
+# Only runs on cuda, and only run when there is enough GPU RAM
+def largeCUDATensorTest(size):
+    if isinstance(size, str):
+        assert size.endswith("GB") or size.endswith("gb"), "only bytes or GB supported"
+        size = 1024 ** 3 * int(size[:-2])
+    valid = torch.cuda.is_available() and torch.cuda.get_device_properties(0).total_memory >= size
+    return unittest.skipIf(not valid, "No CUDA or Has CUDA but GPU RAM is not large enough")
 
 
 class expectedFailure(object):
@@ -468,7 +510,6 @@ class dtypes(object):
     # Note: *args, **kwargs for Python2 compat.
     # Python 3 allows (self, *args, device_type='all').
     def __init__(self, *args, **kwargs):
-        assert args is not None and len(args) != 0, "No dtypes given"
         assert all(isinstance(arg, torch.dtype) for arg in args), "Unknown dtype in {0}".format(str(args))
         self.args = args
         self.device_type = kwargs.get('device_type', 'all')
@@ -507,10 +548,6 @@ def expectedFailureCUDA(fn):
     return expectedFailure('cuda')(fn)
 
 
-def expectedFailureXLA(fn):
-    return expectedFailure('xla')(fn)
-
-
 # Skips a test on CPU if LAPACK is not available.
 def skipCPUIfNoLapack(fn):
     return skipCPUIf(not torch._C.has_lapack, "PyTorch compiled without Lapack")(fn)
@@ -529,6 +566,10 @@ def skipCUDAIfNoMagma(fn):
 # Skips a test on CUDA when using ROCm.
 def skipCUDAIfRocm(fn):
     return skipCUDAIf(TEST_WITH_ROCM, "test doesn't currently work on the ROCm stack")(fn)
+
+# Skips a test on CUDA when not using ROCm.
+def skipCUDAIfNotRocm(fn):
+    return skipCUDAIf(not TEST_WITH_ROCM, "test doesn't currently work on the CUDA stack")(fn)
 
 
 # Skips a test on CUDA if cuDNN is unavailable or its version is lower than requested.

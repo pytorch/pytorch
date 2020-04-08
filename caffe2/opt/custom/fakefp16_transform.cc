@@ -22,10 +22,15 @@ std::unordered_map<std::string, std::string> getFakeFp16OpMapping(
     bool use_nnpi) {
   std::unordered_map<std::string, std::string> fake_fp16_op_conversion_map = {
       {"FC", "Fp16FCAcc32NNPI"},
+      {"Int8FC", "Int8FCFakeAcc32NNPI"},
       {"FbFCPacked", "Fp16FCAcc32NNPI"},
       {"SparseLengthsSum", "SparseLengthsSumFakeFP16AccFP16"},
       {"SparseLengthsWeightedSum", "SparseLengthsWeightedSumFakeFP16AccFP16"},
       {"SparseLengthsMean", "SparseLengthsMeanFakeFP16AccFP16"},
+      {"SparseLengthsSumFused4BitRowwise",
+       "SparseLengthsSumFused4BitRowwiseFakeFP16NNPI"},
+      {"SparseLengthsWeightedSumFused4BitRowwise",
+       "SparseLengthsWeightedSumFused4BitRowwiseFakeFP16NNPI"},
       {"SparseLengthsSumFused8BitRowwise",
        "SparseLengthsSumFused8BitRowwiseFakeFP16NNPI"},
       {"SparseLengthsWeightedSumFused8BitRowwise",
@@ -34,6 +39,7 @@ std::unordered_map<std::string, std::string> getFakeFp16OpMapping(
        "SparseLengthsMeanFused8BitRowwiseFakeFP16AccFP16"},
       {"BatchMatMul", "BatchMatMulFP16Acc32Fake"},
       {"Sigmoid", "SigmoidFakeFp16"},
+      {"SpatialBN", "SpatialBNFakeFp16NNPI"},
       {"Tanh", "TanhFakeFp16"},
       {"Relu", "ReluFakeFp16"},
       {"Add", "AddFakeFp16"},

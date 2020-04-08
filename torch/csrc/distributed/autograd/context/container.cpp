@@ -9,6 +9,7 @@ namespace autograd {
 constexpr int kAutoIncrementBits = 48;
 constexpr int64_t kAutoIncrementMask = (1LL << kAutoIncrementBits) - 1;
 constexpr int kMaxWorkerId = 65535;
+constexpr int kNumCleanupContextRetries = 20;
 
 constexpr int64_t kInvalidContextId = -1;
 
@@ -59,8 +60,9 @@ DistAutogradContainer& DistAutogradContainer::getInstance() {
 }
 
 DistAutogradContainer& DistAutogradContainer::getInstanceInternal() {
-  static DistAutogradContainer container;
-  return container;
+  // Leaky singleton to avoid module destructor race.
+  static DistAutogradContainer* container = new DistAutogradContainer();
+  return *container;
 }
 
 int64_t DistAutogradContainer::newAutogradMessageId() {
@@ -156,14 +158,52 @@ void DistAutogradContainer::releaseContext(int64_t context_id) {
 }
 
 void DistAutogradContainer::sendReleaseContextRpc(int64_t context_id) {
-  // notify other workers to clean up their contexts.
+  // Best-effort notification to other workers to clean up their Dist autograd
+  // context, in order to reduce memory usage.
   auto workerIds =
       autograd_context_.find(context_id)->second->getKnownWorkerIds();
-  auto agent = rpc::RpcAgent::getCurrentRpcAgent();
+  // agent.send() or getCurrentRpcAgent may throw an error in the case of an
+  // ungraceful shutdown, where we are shutting down RPC and also processing
+  // this message in a separate thread concurrently. In this case, don't throw
+  // here.
+  std::shared_ptr<rpc::RpcAgent> agent;
+  try {
+    agent = rpc::RpcAgent::getCurrentRpcAgent();
+  } catch (const std::exception& e) {
+    LOG(INFO)
+        << "Failed to send RPC to clear Dist Autograd context to all workers: "
+        << e.what();
+    return;
+  }
+
+  TORCH_INTERNAL_ASSERT(agent, "RPC Agent should be set.");
+
+  rpc::RpcRetryOptions options;
+  options.maxRetries = kNumCleanupContextRetries;
   for (const auto& worker_id : workerIds) {
-    agent->send(
-        agent->getWorkerInfo(worker_id),
-        CleanupAutogradContextReq(context_id).toMessage());
+    try {
+      auto cleanupFuture = agent->sendWithRetries(
+          agent->getWorkerInfo(worker_id),
+          CleanupAutogradContextReq(context_id).toMessage(),
+          options);
+
+      cleanupFuture->addCallback(
+          [](const rpc::Message& message /* unused */,
+             const c10::optional<torch::utils::FutureError>& error) {
+            if (error) {
+              std::string errorMsg = c10::str(
+                  "Could not release Dist Autograd Context after ",
+                  kNumCleanupContextRetries,
+                  " attempts.");
+              LOG(ERROR) << errorMsg;
+              return;
+            }
+          });
+    } catch (const std::exception& e) {
+      LOG(INFO)
+          << "Failed to send RPC to clear Dist Autograd context to worker id: "
+          << worker_id << " : " << e.what();
+    }
   }
 }
 
@@ -174,6 +214,14 @@ void DistAutogradContainer::eraseContextIdAndReset(int64_t context_id) {
     // Reset the thread_local current context id, since it is no longer valid.
     current_context_id_ = kInvalidContextId;
   }
+}
+
+void DistAutogradContainer::isValidContext(int64_t context_id) {
+  std::lock_guard<std::mutex> guard(autograd_context_lock_);
+  TORCH_CHECK(
+      autograd_context_.find(context_id) != autograd_context_.end(),
+      "Could not find autograd context with id: ",
+      context_id);
 }
 
 ContextPtr DistAutogradContainer::retrieveContext(int64_t context_id) {
@@ -187,6 +235,10 @@ ContextPtr DistAutogradContainer::retrieveContext(int64_t context_id) {
 
 int64_t DistAutogradContainer::getMaxId() {
   return max_id_;
+}
+
+void DistAutogradContainer::forceCurrentContextId(int64_t contextId) {
+  current_context_id_ = contextId;
 }
 
 void DistAutogradContainer::setCurrentContextId(int64_t contextId) {
@@ -203,6 +255,10 @@ void DistAutogradContainer::clearCurrentContext() {
 size_t DistAutogradContainer::numAutogradContexts() const {
   std::lock_guard<std::mutex> guard(autograd_context_lock_);
   return autograd_context_.size();
+}
+
+int64_t DistAutogradContainer::currentContextId() {
+  return current_context_id_;
 }
 
 } // namespace autograd

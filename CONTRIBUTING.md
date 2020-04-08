@@ -10,7 +10,7 @@
   * [Previewing changes](#previewing-changes)
     + [Submitting changes for review](#submitting-changes-for-review)
   * [Adding documentation tests](#adding-documentation-tests)
-- [Profiling with `py-spy`](#profiling-with--py-spy-)
+- [Profiling with `py-spy`](#profiling-with-py-spy)
 - [Managing multiple build trees](#managing-multiple-build-trees)
 - [C++ development tips](#c---development-tips)
   * [Build only what you need](#build-only-what-you-need)
@@ -129,7 +129,6 @@ and `python setup.py clean`. Then you can install in `develop` mode again.
   * [src](aten/src)
     * [TH](aten/src/TH)
       [THC](aten/src/THC)
-      [THNN](aten/src/THNN)
       [THCUNN](aten/src/THCUNN) - Legacy library code from the original
       Torch. Try not to add things here; we're slowly porting these to
       [native](aten/src/ATen/native).
@@ -458,10 +457,11 @@ variables `DEBUG`, `USE_DISTRIBUTED`, `USE_MKLDNN`, `USE_CUDA`, `BUILD_TEST`, `U
 - `USE_FBGEMM=0` will disable using FBGEMM (quantized 8-bit server operators).
 - `USE_NNPACK=0` will disable compiling with NNPACK.
 - `USE_QNNPACK=0` will disable QNNPACK build (quantized 8-bit operators).
+- `USE_XNNPACK=0` will disable compiling with XNNPACK.
 
 For example:
 ```bash
-DEBUG=1 USE_DISTRIBUTED=0 USE_MKLDNN=0 USE_CUDA=0 BUILD_TEST=0 USE_FBGEMM=0 USE_NNPACK=0 USE_QNNPACK=0 python setup.py develop
+DEBUG=1 USE_DISTRIBUTED=0 USE_MKLDNN=0 USE_CUDA=0 BUILD_TEST=0 USE_FBGEMM=0 USE_NNPACK=0 USE_QNNPACK=0 USE_XNNPACK=0 python setup.py develop
 ```
 
 For subsequent builds (i.e., when `build/CMakeCache.txt` exists), the build
@@ -775,7 +775,7 @@ static_assert(std::is_same(A*, decltype(A::singleton()))::value, "hmm");
   we have AliasAnalysisKind::PURE_FUNCTION and not AliasAnalysisKind::PURE.
   The same is likely true for other identifiers that we just didn't try to use yet.
 
-### Running clang-tidy
+## Running clang-tidy
 
 [Clang-Tidy](https://clang.llvm.org/extra/clang-tidy/index.html) is a C++
 linter and static analysis tool based on the clang compiler. We run clang-tidy
@@ -806,7 +806,7 @@ root folder if you used `setup.py build`. You can use `-c <clang-tidy-binary>`
 to change the clang-tidy this script uses. Make sure you have PyYaml installed,
 which is in PyTorch's `requirements.txt`.
 
-### Pre-commit tidy/linting hook
+## Pre-commit tidy/linting hook
 
 We use clang-tidy and flake8 (installed with flake8-bugbear,
 flake8-comprehensions, flake8-mypy, and flake8-pyi) to perform additional
@@ -821,7 +821,7 @@ You'll need to install an appropriately configured flake8; see
 [Lint as you type](https://github.com/pytorch/pytorch/wiki/Lint-as-you-type)
 for documentation on how to do this.
 
-### Building PyTorch with ASAN
+## Building PyTorch with ASAN
 
 [ASAN](https://github.com/google/sanitizers/wiki/AddressSanitizer) is very
 useful for debugging memory errors in C++. We run it in CI, but here's how to
@@ -847,7 +847,7 @@ build_with_asan()
   LDFLAGS="-stdlib=libstdc++" \
   CFLAGS="-fsanitize=address -fno-sanitize-recover=all -shared-libasan -pthread" \
   CXX_FLAGS="-pthread" \
-  NO_CUDA=1 USE_OPENMP=0 BUILD_CAFFE2_OPS=0 NO_DISTRIBUTED=1 DEBUG=1 \
+  USE_CUDA=0 USE_OPENMP=0 BUILD_CAFFE2_OPS=0 USE_DISTRIBUTED=0 DEBUG=1 \
   python setup.py develop
 }
 
@@ -869,7 +869,7 @@ suo-devfair ~/pytorch ❯ build_with_asan
 suo-devfair ~/pytorch ❯ run_with_asan python test/test_jit.py
 ```
 
-#### Getting `ccache` to work
+### Getting `ccache` to work
 
 The scripts above specify the `clang` and `clang++` binaries directly, which
 bypasses `ccache`. Here's how to get `ccache` to work:
@@ -880,7 +880,7 @@ bypasses `ccache`. Here's how to get `ccache` to work:
 3. Change the `CC` and `CXX` variables in `build_with_asan()` to point
    directly to `clang` and `clang++`.
 
-#### Why this stuff with `LD_PRELOAD` and `LIBASAN_RT`?
+### Why this stuff with `LD_PRELOAD` and `LIBASAN_RT`?
 
 The “standard” workflow for ASAN assumes you have a standalone binary:
 
@@ -901,7 +901,7 @@ workaround for cases like this:
 More information can be found
 [here](https://github.com/google/sanitizers/wiki/AddressSanitizerAsDso).
 
-#### Why LD_PRELOAD in the build function?
+### Why LD_PRELOAD in the build function?
 
 We need `LD_PRELOAD` because there is a cmake check that ensures that a
 simple program builds and runs. If we are building with ASAN as a shared
@@ -910,7 +910,7 @@ dynamic linker errors and the check will fail.
 
 We don’t actually need either of these if we fix the cmake checks.
 
-#### Why no leak detection?
+### Why no leak detection?
 
 Python leaks a lot of memory. Possibly we could configure a suppression file,
 but we haven’t gotten around to it.

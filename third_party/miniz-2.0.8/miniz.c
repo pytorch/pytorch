@@ -4522,7 +4522,9 @@ void *mz_zip_reader_extract_file_to_heap(mz_zip_archive *pZip, const char *pFile
 mz_bool mz_zip_reader_extract_to_callback(mz_zip_archive *pZip, mz_uint file_index, mz_file_write_func pCallback, void *pOpaque, mz_uint flags)
 {
     int status = TINFL_STATUS_DONE;
+#ifndef MINIZ_DISABLE_ZIP_READER_CRC32_CHECKS
     mz_uint file_crc32 = MZ_CRC32_INIT;
+#endif
     mz_uint64 read_buf_size, read_buf_ofs = 0, read_buf_avail, comp_remaining, out_buf_ofs = 0, cur_file_ofs;
     mz_zip_archive_file_stat file_stat;
     void *pRead_buf = NULL;

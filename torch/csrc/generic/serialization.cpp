@@ -6,8 +6,11 @@
 #include <c10/cuda/CUDAGuard.h>
 #endif
 
+// save_save is necessary since the old eager format saved storages as
+// [size + data], but the v1.5 eager format removes this since size is saved in
+// the filesize.
 template <class io>
-void THPStorage_(writeFileRaw)(THWStorage *self, io fd)
+void THPStorage_(writeFileRaw)(THWStorage *self, io fd, bool save_size)
 {
 #ifdef THC_GENERIC_FILE
   c10::cuda::CUDAGuard guard(self->device());
@@ -22,17 +25,19 @@ void THPStorage_(writeFileRaw)(THWStorage *self, io fd)
   data = (scalar_t*)cpu_data.get();
   THCudaCheck(cudaMemcpy(data, THWStorage_(data)(LIBRARY_STATE self), size * sizeof(scalar_t), cudaMemcpyDeviceToHost));
 #endif
-  if (torch::utils::THP_nativeByteOrder() ==
-      torch::utils::THPByteOrder::THP_LITTLE_ENDIAN)
-    doWrite(fd, &size, sizeof(int64_t));
-  else {
-    int64_t nsize; // convert big endian cpu to little endian storage
-    torch::utils::THP_encodeInt64Buffer(
-        (uint8_t*)&nsize,
-        (const int64_t*)&size,
-        torch::utils::THPByteOrder::THP_LITTLE_ENDIAN,
-        1);
-    doWrite(fd, &nsize, sizeof(int64_t));
+  if (save_size) {
+    if (torch::utils::THP_nativeByteOrder() ==
+        torch::utils::THPByteOrder::THP_LITTLE_ENDIAN)
+      doWrite(fd, &size, sizeof(int64_t));
+    else {
+      int64_t nsize; // convert big endian cpu to little endian storage
+      torch::utils::THP_encodeInt64Buffer(
+          (uint8_t*)&nsize,
+          (const int64_t*)&size,
+          torch::utils::THPByteOrder::THP_LITTLE_ENDIAN,
+          1);
+      doWrite(fd, &nsize, sizeof(int64_t));
+    }
   }
   // fast track for bytes and little endian
   if (sizeof(scalar_t) == 1 ||
@@ -68,8 +73,8 @@ void THPStorage_(writeFileRaw)(THWStorage *self, io fd)
   }
 }
 
-template void THPStorage_(writeFileRaw<int>)(THWStorage *self, int fd);
-template void THPStorage_(writeFileRaw<PyObject*>)(THWStorage *self, PyObject* fd);
+template void THPStorage_(writeFileRaw<int>)(THWStorage *self, int fd, bool save_size);
+template void THPStorage_(writeFileRaw<PyObject*>)(THWStorage *self, PyObject* fd, bool save_size);
 
 template <class io>
 THWStorage * THPStorage_(readFileRaw)(io file, THWStorage *_storage)

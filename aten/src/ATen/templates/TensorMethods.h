@@ -15,7 +15,6 @@
 #include <ATen/TypeDefault.h>
 #include <ATen/CPUType.h>
 #include <ATen/QuantizedCPUType.h>
-#include <ATen/SparseCPUType.h>
 #endif
 
 namespace at {

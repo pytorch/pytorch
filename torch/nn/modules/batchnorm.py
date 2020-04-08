@@ -11,8 +11,7 @@ from .. import init
 class _NormBase(Module):
     """Common base of _InstanceNorm and _BatchNorm"""
     _version = 2
-    __constants__ = ['track_running_stats', 'momentum', 'eps', 'weight', 'bias',
-                     'running_mean', 'running_var', 'num_batches_tracked',
+    __constants__ = ['track_running_stats', 'momentum', 'eps',
                      'num_features', 'affine']
 
     def __init__(self, num_features, eps=1e-5, momentum=0.1, affine=True,
@@ -85,7 +84,7 @@ class _BatchNorm(_NormBase):
         self._check_input_dim(input)
 
         # exponential_average_factor is set to self.momentum
-        # (when it is available) only so that if gets updated
+        # (when it is available) only so that it gets updated
         # in ONNX graph when this node is exported to ONNX.
         if self.momentum is None:
             exponential_average_factor = 0.0
@@ -436,7 +435,7 @@ class SyncBatchNorm(_BatchNorm):
         self._check_input_dim(input)
 
         # exponential_average_factor is set to self.momentum
-        # (when it is available) only so that if gets updated
+        # (when it is available) only so that it gets updated
         # in ONNX graph when this node is exported to ONNX.
         if self.momentum is None:
             exponential_average_factor = 0.0

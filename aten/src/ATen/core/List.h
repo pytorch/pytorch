@@ -6,6 +6,7 @@
 #include <c10/util/intrusive_ptr.h>
 #include <c10/util/ArrayRef.h>
 #include <c10/util/Optional.h>
+#include <torch/csrc/WindowsTorchApiMacro.h>
 #include <vector>
 
 namespace at {
@@ -33,6 +34,7 @@ struct ListImpl final : public c10::intrusive_ptr_target {
   intrusive_ptr<ListImpl> copy() const {
     return make_intrusive<ListImpl>(list, elementType);
   }
+  friend TORCH_API bool operator==(const ListImpl& lhs, const ListImpl& rhs);
 };
 }
 
@@ -140,6 +142,10 @@ public:
     return {iterator_};
   }
 
+  ListElementReference<T, Iterator> operator[](typename List<T>::size_type offset) const {
+    return {iterator_ + offset};
+  }
+
 private:
   explicit ListIterator(Iterator iterator): iterator_(std::move(iterator)) {}
 
@@ -169,7 +175,7 @@ private:
     return lhs.iterator_ >= rhs.iterator_;
   }
 
-  friend class ListIterator<T, typename detail::ListImpl::list_type::iterator>;
+  friend class ListIterator<T, typename c10::detail::ListImpl::list_type::iterator>;
   friend class List<T>;
 };
 
@@ -177,7 +183,6 @@ template<class T> List<T> toTypedList(List<IValue> list);
 template<class T> List<IValue> toList(List<T> list);
 const IValue* ptr_to_first_element(const List<IValue>& list);
 }
-template<class T> bool list_is_equal(const List<T>& lhs, const List<T>& rhs);
 
 /**
  * An object of this class stores a list of values of type T.
@@ -201,15 +206,15 @@ private:
   // This is an intrusive_ptr because List is a pointer type.
   // Invariant: This will never be a nullptr, there will always be a valid
   // ListImpl.
-  c10::intrusive_ptr<detail::ListImpl> impl_;
+  c10::intrusive_ptr<c10::detail::ListImpl> impl_;
 
-  using internal_reference_type = impl::ListElementReference<T, typename detail::ListImpl::list_type::iterator>;
+  using internal_reference_type = impl::ListElementReference<T, typename c10::detail::ListImpl::list_type::iterator>;
 
 public:
   using value_type = T;
-  using size_type = typename detail::ListImpl::list_type::size_type;
-  using iterator = impl::ListIterator<T, typename detail::ListImpl::list_type::iterator>;
-  using reverse_iterator = impl::ListIterator<T, typename detail::ListImpl::list_type::reverse_iterator>;
+  using size_type = typename c10::detail::ListImpl::list_type::size_type;
+  using iterator = impl::ListIterator<T, typename c10::detail::ListImpl::list_type::iterator>;
+  using reverse_iterator = impl::ListIterator<T, typename c10::detail::ListImpl::list_type::reverse_iterator>;
 
   /**
    * Constructs an empty list.
@@ -392,12 +397,21 @@ public:
   void resize(size_type count, const T& value) const;
 
   /**
-   * Compares two lists for equality. Two lists are equal if they have the
-   * same number of elements and for each list position the elements at
-   * that position are equal.
+   * Value equality comparison. This function implements Python-like semantics for
+   * equality: two lists with the same identity (e.g. same pointer) trivially
+   * compare equal, otherwise each element is compared for equality.
    */
-  friend bool list_is_equal<T>(const List& lhs, const List& rhs);
+  template <class T_>
+  friend bool operator==(const List<T_>& lhs, const List<T_>& rhs);
 
+  template <class T_>
+  friend bool operator!=(const List<T_>& lhs, const List<T_>& rhs);
+
+  /**
+   * Identity comparison. Returns true if and only if `rhs` represents the same
+   * List object as `this`.
+   */
+  bool is(const List<T>& rhs) const;
 
   std::vector<T> vec() const;
 
@@ -414,7 +428,7 @@ public:
   void unsafeSetElementType(TypePtr t);
 
 private:
-  explicit List(c10::intrusive_ptr<detail::ListImpl>&& elements);
+  explicit List(c10::intrusive_ptr<c10::detail::ListImpl>&& elements);
   friend struct IValue;
   template<class T_> friend List<T_> impl::toTypedList(List<IValue>);
   template<class T_> friend List<IValue> impl::toList(List<T_>);

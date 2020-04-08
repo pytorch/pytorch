@@ -21,7 +21,7 @@
 #include "caffe2/core/timer.h"
 #include "caffe2/utils/string_utils.h"
 #include "torch/csrc/autograd/grad_mode.h"
-#include "torch/csrc/jit/import.h"
+#include "torch/csrc/jit/serialization/import.h"
 #include "torch/script.h"
 
 #include <chrono>
@@ -111,10 +111,6 @@ int main(int argc, char** argv) {
     inputs.push_back(stensor);
   }
 
-  auto qengines = at::globalContext().supportedQEngines();
-  if (std::find(qengines.begin(), qengines.end(), at::QEngine::QNNPACK) != qengines.end()) {
-    at::globalContext().setQEngine(at::QEngine::QNNPACK);
-  }
   torch::autograd::AutoGradMode guard(false);
   torch::jit::GraphOptimizerEnabledGuard no_optimizer_guard(false);
   auto module = torch::jit::load(FLAGS_model);

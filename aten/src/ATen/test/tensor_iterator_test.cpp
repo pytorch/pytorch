@@ -46,6 +46,8 @@ TEST(TensorIteratorTest, MixedDevices) {
 Tensor random_tensor_for_type(at::ScalarType scalar_type) {
   if (at::isFloatingType(scalar_type)) {
     return at::randn({5, 5}, at::device(kCPU).dtype(scalar_type));
+  } else if (scalar_type == kBool) {
+    return at::randint(0, 2, {5, 5}, at::device(kCPU).dtype(scalar_type));
   } else {
     return at::randint(1, 10, {5, 5}, at::device(kCPU).dtype(scalar_type));
   }

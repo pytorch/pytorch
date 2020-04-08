@@ -144,8 +144,7 @@ void checkChainingAndRun(
   Workspace ws;
   ws.CreateBlob("in");
   NetDef net_def;
-  CAFFE_ENFORCE(
-      TextFormat::ParseFromString(spec, &net_def));
+  CAFFE_ENFORCE(TextFormat::ParseFromString(spec, &net_def));
   {
     net_def.set_num_workers(4);
     std::unique_ptr<NetBase> net(CreateNet(net_def, &ws));
@@ -161,8 +160,7 @@ void checkNumChainsAndRun(const char* spec, const int expected_num_chains) {
   Workspace ws;
 
   NetDef net_def;
-  CAFFE_ENFORCE(
-      TextFormat::ParseFromString(spec, &net_def));
+  CAFFE_ENFORCE(TextFormat::ParseFromString(spec, &net_def));
   net_def.set_num_workers(4);
 
   // Create all external inputs
@@ -557,8 +555,7 @@ TEST(NetTest, DISABLED_FailingOperator) {
   ws.CreateBlob("in");
 
   NetDef net_def;
-  CAFFE_ENFORCE(
-      TextFormat::ParseFromString(spec, &net_def));
+  CAFFE_ENFORCE(TextFormat::ParseFromString(spec, &net_def));
 
   {
     net_def.set_num_workers(4);
@@ -612,8 +609,7 @@ TEST(NetTest, OperatorWithExecutorHelper) {
 )DOC";
 
   NetDef net_def;
-  CAFFE_ENFORCE(
-      TextFormat::ParseFromString(spec, &net_def));
+  CAFFE_ENFORCE(TextFormat::ParseFromString(spec, &net_def));
 
   Workspace ws;
   net_def.set_num_workers(kTestPoolSize);
@@ -641,8 +637,7 @@ TEST(NetTest, DISABLED_OperatorWithDisabledEvent) {
   ws.CreateBlob("in");
 
   NetDef net_def;
-  CAFFE_ENFORCE(
-      TextFormat::ParseFromString(spec, &net_def));
+  CAFFE_ENFORCE(TextFormat::ParseFromString(spec, &net_def));
 
   {
     std::unique_ptr<NetBase> net(CreateNet(net_def, &ws));
@@ -665,8 +660,7 @@ TEST(NetTest, ExecutorOverride) {
   )DOC";
 
   NetDef net_def;
-  CAFFE_ENFORCE(
-      TextFormat::ParseFromString(spec, &net_def));
+  CAFFE_ENFORCE(TextFormat::ParseFromString(spec, &net_def));
 
   {
     Workspace ws;
@@ -689,8 +683,7 @@ TEST(NetTest, AsyncEmptyNet) {
 
   Workspace ws;
   NetDef net_def;
-  CAFFE_ENFORCE(
-      TextFormat::ParseFromString(spec, &net_def));
+  CAFFE_ENFORCE(TextFormat::ParseFromString(spec, &net_def));
 
   {
     std::unique_ptr<NetBase> net(CreateNet(net_def, &ws));
@@ -723,8 +716,7 @@ TEST(NetTest, DISABLED_RunAsyncFailure) {
   ws.CreateBlob("in");
 
   NetDef net_def;
-  CAFFE_ENFORCE(
-      TextFormat::ParseFromString(spec, &net_def));
+  CAFFE_ENFORCE(TextFormat::ParseFromString(spec, &net_def));
 
   {
     std::unique_ptr<NetBase> net(CreateNet(net_def, &ws));
@@ -746,8 +738,7 @@ TEST(NetTest, NoTypeNet) {
 
   Workspace ws;
   NetDef net_def;
-  CAFFE_ENFORCE(
-      TextFormat::ParseFromString(spec, &net_def));
+  CAFFE_ENFORCE(TextFormat::ParseFromString(spec, &net_def));
 
   {
     std::unique_ptr<NetBase> net(CreateNet(net_def, &ws));
@@ -791,8 +782,7 @@ TEST(NetTest, PendingOpsAndNetFailure) {
 )DOC";
 
   NetDef net_def;
-  CAFFE_ENFORCE(
-      TextFormat::ParseFromString(spec, &net_def));
+  CAFFE_ENFORCE(TextFormat::ParseFromString(spec, &net_def));
 
   Workspace ws;
   std::unique_ptr<NetBase> net(CreateNet(net_def, &ws));
@@ -906,7 +896,9 @@ TEST(NetTest, AsyncErrorOpTest) {
 
   // Throw in sync part
   auto net = AsyncErrorNet(&ws, "net1", /*throw_*/ true, /*fail_in_sync*/ true);
+#ifdef CAFFE2_USE_EXCEPTION_PTR
   ASSERT_THROW(net->Run(), std::logic_error);
+#endif
 
   // Return false in sync part
   net = AsyncErrorNet(&ws, "net2", /*throw_*/ false, /*fail_in_sync*/ true);
@@ -914,7 +906,9 @@ TEST(NetTest, AsyncErrorOpTest) {
 
   // SetFinishedWithException in async part
   net = AsyncErrorNet(&ws, "net3", /*throw_*/ true, /*fail_in_sync*/ false);
+#ifdef CAFFE2_USE_EXCEPTION_PTR
   ASSERT_THROW(net->Run(), std::logic_error);
+#endif
 
   // SetFinished(err) in async part
   net = AsyncErrorNet(&ws, "net4", /*throw_*/ false, /*fail_in_sync*/ false);
@@ -1046,7 +1040,9 @@ TEST(NetTest, ChainErrorTest) {
   Workspace ws;
 
   auto net = ChainErrorNet(&ws, "net1", /*throw_*/ true);
+#ifdef CAFFE2_USE_EXCEPTION_PTR
   ASSERT_THROW(net->Run(), std::logic_error);
+#endif
 
   net = ChainErrorNet(&ws, "net2", /*throw_*/ false);
   ASSERT_FALSE(net->Run());

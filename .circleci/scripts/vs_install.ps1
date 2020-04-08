@@ -8,7 +8,6 @@ $VS_INSTALL_ARGS = @("--nocache","--quiet","--wait", "--add Microsoft.VisualStud
                                                      "--add Microsoft.VisualStudio.Component.VC.Redist.14.Latest",
                                                      "--add Microsoft.VisualStudio.ComponentGroup.NativeDesktop.Core",
                                                      "--add Microsoft.VisualStudio.Component.VC.Tools.x86.x64",
-                                                     "--add Microsoft.VisualStudio.Component.VC.Tools.14.11",
                                                      "--add Microsoft.VisualStudio.ComponentGroup.NativeDesktop.Win81")
 
 curl.exe --retry 3 -kL $VS_DOWNLOAD_LINK --output vs_installer.exe

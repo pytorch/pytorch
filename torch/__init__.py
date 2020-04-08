@@ -1,4 +1,3 @@
-# @lint-ignore-every PYTHON3COMPATIMPORTS
 
 r"""
 The torch package contains data structures for multi-dimensional
@@ -14,6 +13,10 @@ import os
 import sys
 import platform
 import ctypes
+
+if sys.version_info < (3,):
+    raise Exception("Python 2 has reached end-of-life and is no longer supported by PyTorch.")
+
 from ._utils import _import_dotted_name
 from ._utils_internal import get_file_path, prepare_multiprocessing_environment, \
     USE_RTLD_GLOBAL_WITH_LIBTORCH
@@ -29,6 +32,7 @@ __all__ = [
     'ShortStorage', 'CharStorage', 'ByteStorage', 'BoolStorage',
     'DoubleTensor', 'FloatTensor', 'LongTensor', 'IntTensor',
     'ShortTensor', 'CharTensor', 'ByteTensor', 'BoolTensor', 'Tensor',
+    'lobpcg',
 ]
 
 ################################################################################
@@ -58,16 +62,22 @@ if platform.system() == 'Windows':
     else:
         cuda_path = ''
 
-    if not is_conda and sys.version_info >= (3, 8):
+    if sys.version_info >= (3, 8):
         dll_paths = list(filter(os.path.exists, [th_dll_path, py_dll_path, nvtoolsext_dll_path, cuda_path]))
 
         for dll_path in dll_paths:
             os.add_dll_directory(dll_path)
-    else:
+
+    if is_conda or sys.version_info < (3, 8):
         dll_paths = [th_dll_path, py_dll_path, nvtoolsext_dll_path, cuda_path]
         dll_paths = list(filter(os.path.exists, dll_paths)) + [os.environ['PATH']]
 
         os.environ['PATH'] = ';'.join(dll_paths)
+
+    import glob
+    dlls = glob.glob(os.path.join(th_dll_path, '*.dll'))
+    for dll in dlls:
+        ctypes.CDLL(dll)
 
 
 # See Note [Global dependencies]
@@ -393,3 +403,7 @@ legacy_contiguous_format = contiguous_format
 from torch.multiprocessing._atfork import register_after_fork
 register_after_fork(torch.get_num_threads)
 del register_after_fork
+
+# Import tools that require fully imported torch (for applying
+# torch.jit.script as a decorator, for instance):
+from ._lobpcg import lobpcg

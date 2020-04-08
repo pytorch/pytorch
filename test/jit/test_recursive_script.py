@@ -5,7 +5,6 @@ from typing import List, Dict, Optional, Tuple
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 from torch import Tensor
 from torch.testing import FileCheck
 from collections import OrderedDict
@@ -65,7 +64,7 @@ class TestRecursiveScript(JitTestCase):
             def forward(self, x):
                 return self.fn(x)
 
-        mod = M(F.sigmoid)
+        mod = M(torch.sigmoid)
 
         self.checkModule(mod, (torch.randn(2, 2),))
 

@@ -4,8 +4,8 @@ namespace c10 {
 
 const char* toString(DispatchKey t) {
   switch (t) {
-    case DispatchKey::UndefinedTensorId:
-      return "UndefinedTensorId";
+    case DispatchKey::Undefined:
+      return "Undefined";
     case DispatchKey::CPUTensorId:
       return "CPUTensorId";
     case DispatchKey::CUDATensorId:
@@ -34,14 +34,14 @@ const char* toString(DispatchKey t) {
       return "MkldnnCPUTensorId";
     case DispatchKey::QuantizedCPUTensorId:
       return "QuantizedCPUTensorId";
-    case DispatchKey::ComplexCPUTensorId:
-      return "ComplexCPUTensorId";
-    case DispatchKey::ComplexCUDATensorId:
-      return "ComplexCUDATensorId";
     case DispatchKey::VariableTensorId:
       return "VariableTensorId";
+    case DispatchKey::BackendSelect:
+      return "BackendSelect";
     case DispatchKey::TESTING_ONLY_GenericModeTensorId:
       return "TESTING_ONLY_GenericModeTensorId";
+    case DispatchKey::AutocastTensorId:
+      return "AutocastTensorId";
     case DispatchKey::TESTING_ONLY_GenericWrapperTensorId:
       return "TESTING_ONLY_GenericWrapperTensorId";
     default:

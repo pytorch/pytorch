@@ -27,8 +27,6 @@ def argument_to_declaration(param, func=None):
         arg['type'] = 'THIndexTensor*'
     elif arg['type'] == 'Scalar':
         arg['type'] = 'accreal'
-    elif arg['type'] == 'Generator*':
-        arg['type'] = 'THGenerator*'
 
     match = re.match(r'IntArrayRef\[(\d+)\]', arg['type'])
     if match:
@@ -40,11 +38,6 @@ def argument_to_declaration(param, func=None):
         arg['optional'] = True
         arg['default'] = default
     arg['name'] = name
-
-    if func is not None:
-        wrap_dims = func.get('wrap_dim', {})
-        if name in wrap_dims:
-            arg['wrap_dim'] = wrap_dims[name]
 
     return arg
 

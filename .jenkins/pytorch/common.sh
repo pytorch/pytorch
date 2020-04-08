@@ -179,3 +179,20 @@ function get_exit_code() {
   set -e
   return $retcode
 }
+
+function file_diff_from_base() {
+  # The fetch may fail on Docker hosts, but it's not always necessary.
+  set +e
+  git fetch origin master --quiet
+  set -e
+  git diff --name-only "$(git merge-base origin master HEAD)" > "$1"
+}
+
+function get_bazel() {
+  # download bazel version
+  wget https://github.com/bazelbuild/bazel/releases/download/2.2.0/bazel-2.2.0-linux-x86_64 -O tools/bazel
+  # verify content
+  echo 'b2f002ea0e6194a181af6ac84cd94bd8dc797722eb2354690bebac92dda233ff tools/bazel' | sha256sum --quiet -c
+
+  chmod +x tools/bazel
+}

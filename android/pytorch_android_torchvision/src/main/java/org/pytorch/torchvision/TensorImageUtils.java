@@ -3,32 +3,30 @@ package org.pytorch.torchvision;
 import android.graphics.Bitmap;
 import android.graphics.ImageFormat;
 import android.media.Image;
-
 import com.facebook.soloader.nativeloader.NativeLoader;
 import com.facebook.soloader.nativeloader.SystemDelegate;
-
-import org.pytorch.Tensor;
-
 import java.nio.Buffer;
 import java.nio.ByteBuffer;
 import java.nio.FloatBuffer;
 import java.util.Locale;
+import org.pytorch.Tensor;
 
 /**
- * Contains utility functions for {@link org.pytorch.Tensor} creation from
- * {@link android.graphics.Bitmap} or {@link android.media.Image} source.
+ * Contains utility functions for {@link org.pytorch.Tensor} creation from {@link
+ * android.graphics.Bitmap} or {@link android.media.Image} source.
  */
 public final class TensorImageUtils {
 
-  public static float[] TORCHVISION_NORM_MEAN_RGB = new float[]{0.485f, 0.456f, 0.406f};
-  public static float[] TORCHVISION_NORM_STD_RGB = new float[]{0.229f, 0.224f, 0.225f};
+  public static float[] TORCHVISION_NORM_MEAN_RGB = new float[] {0.485f, 0.456f, 0.406f};
+  public static float[] TORCHVISION_NORM_STD_RGB = new float[] {0.229f, 0.224f, 0.225f};
 
   /**
    * Creates new {@link org.pytorch.Tensor} from full {@link android.graphics.Bitmap}, normalized
    * with specified in parameters mean and std.
    *
    * @param normMeanRGB means for RGB channels normalization, length must equal 3, RGB order
-   * @param normStdRGB  standard deviation for RGB channels normalization, length must equal 3, RGB order
+   * @param normStdRGB standard deviation for RGB channels normalization, length must equal 3, RGB
+   *     order
    */
   public static Tensor bitmapToFloat32Tensor(
       final Bitmap bitmap, final float[] normMeanRGB, final float normStdRGB[]) {
@@ -40,17 +38,17 @@ public final class TensorImageUtils {
   }
 
   /**
-   * Writes tensor content from specified {@link android.graphics.Bitmap},
-   * normalized with specified in parameters mean and std to specified {@link java.nio.FloatBuffer}
-   * with specified offset.
+   * Writes tensor content from specified {@link android.graphics.Bitmap}, normalized with specified
+   * in parameters mean and std to specified {@link java.nio.FloatBuffer} with specified offset.
    *
-   * @param bitmap      {@link android.graphics.Bitmap} as a source for Tensor data
-   * @param x           - x coordinate of top left corner of bitmap's area
-   * @param y           - y coordinate of top left corner of bitmap's area
-   * @param width       - width of bitmap's area
-   * @param height      - height of bitmap's area
+   * @param bitmap {@link android.graphics.Bitmap} as a source for Tensor data
+   * @param x - x coordinate of top left corner of bitmap's area
+   * @param y - y coordinate of top left corner of bitmap's area
+   * @param width - width of bitmap's area
+   * @param height - height of bitmap's area
    * @param normMeanRGB means for RGB channels normalization, length must equal 3, RGB order
-   * @param normStdRGB  standard deviation for RGB channels normalization, length must equal 3, RGB order
+   * @param normStdRGB standard deviation for RGB channels normalization, length must equal 3, RGB
+   *     order
    */
   public static void bitmapToFloatBuffer(
       final Bitmap bitmap,
@@ -89,13 +87,14 @@ public final class TensorImageUtils {
    * Creates new {@link org.pytorch.Tensor} from specified area of {@link android.graphics.Bitmap},
    * normalized with specified in parameters mean and std.
    *
-   * @param bitmap      {@link android.graphics.Bitmap} as a source for Tensor data
-   * @param x           - x coordinate of top left corner of bitmap's area
-   * @param y           - y coordinate of top left corner of bitmap's area
-   * @param width       - width of bitmap's area
-   * @param height      - height of bitmap's area
+   * @param bitmap {@link android.graphics.Bitmap} as a source for Tensor data
+   * @param x - x coordinate of top left corner of bitmap's area
+   * @param y - y coordinate of top left corner of bitmap's area
+   * @param width - width of bitmap's area
+   * @param height - height of bitmap's area
    * @param normMeanRGB means for RGB channels normalization, length must equal 3, RGB order
-   * @param normStdRGB  standard deviation for RGB channels normalization, length must equal 3, RGB order
+   * @param normStdRGB standard deviation for RGB channels normalization, length must equal 3, RGB
+   *     order
    */
   public static Tensor bitmapToFloat32Tensor(
       final Bitmap bitmap,
@@ -110,20 +109,21 @@ public final class TensorImageUtils {
 
     final FloatBuffer floatBuffer = Tensor.allocateFloatBuffer(3 * width * height);
     bitmapToFloatBuffer(bitmap, x, y, width, height, normMeanRGB, normStdRGB, floatBuffer, 0);
-    return Tensor.fromBlob(floatBuffer, new long[]{1, 3, height, width});
+    return Tensor.fromBlob(floatBuffer, new long[] {1, 3, height, width});
   }
 
   /**
    * Creates new {@link org.pytorch.Tensor} from specified area of {@link android.media.Image},
    * doing optional rotation, scaling (nearest) and center cropping.
    *
-   * @param image           {@link android.media.Image} as a source for Tensor data
+   * @param image {@link android.media.Image} as a source for Tensor data
    * @param rotateCWDegrees Clockwise angle through which the input image needs to be rotated to be
-   *                        upright. Range of valid values: 0, 90, 180, 270
-   * @param tensorWidth     return tensor width, must be positive
-   * @param tensorHeight    return tensor height, must be positive
-   * @param normMeanRGB     means for RGB channels normalization, length must equal 3, RGB order
-   * @param normStdRGB      standard deviation for RGB channels normalization, length must equal 3, RGB order
+   *     upright. Range of valid values: 0, 90, 180, 270
+   * @param tensorWidth return tensor width, must be positive
+   * @param tensorHeight return tensor height, must be positive
+   * @param normMeanRGB means for RGB channels normalization, length must equal 3, RGB order
+   * @param normStdRGB standard deviation for RGB channels normalization, length must equal 3, RGB
+   *     order
    */
   public static Tensor imageYUV420CenterCropToFloat32Tensor(
       final Image image,
@@ -145,26 +145,24 @@ public final class TensorImageUtils {
 
     final FloatBuffer floatBuffer = Tensor.allocateFloatBuffer(3 * tensorWidth * tensorHeight);
     imageYUV420CenterCropToFloatBuffer(
-        image,
-        rotateCWDegrees,
-        tensorWidth,
-        tensorHeight,
-        normMeanRGB, normStdRGB, floatBuffer, 0);
-    return Tensor.fromBlob(floatBuffer, new long[]{1, 3, tensorHeight, tensorWidth});
+        image, rotateCWDegrees, tensorWidth, tensorHeight, normMeanRGB, normStdRGB, floatBuffer, 0);
+    return Tensor.fromBlob(floatBuffer, new long[] {1, 3, tensorHeight, tensorWidth});
   }
 
   /**
    * Writes tensor content from specified {@link android.media.Image}, doing optional rotation,
-   * scaling (nearest) and center cropping to specified {@link java.nio.FloatBuffer} with specified offset.
+   * scaling (nearest) and center cropping to specified {@link java.nio.FloatBuffer} with specified
+   * offset.
    *
-   * @param image           {@link android.media.Image} as a source for Tensor data
+   * @param image {@link android.media.Image} as a source for Tensor data
    * @param rotateCWDegrees Clockwise angle through which the input image needs to be rotated to be
-   *                        upright. Range of valid values: 0, 90, 180, 270
-   * @param tensorWidth     return tensor width, must be positive
-   * @param tensorHeight    return tensor height, must be positive
-   * @param normMeanRGB     means for RGB channels normalization, length must equal 3, RGB order
-   * @param normStdRGB      standard deviation for RGB channels normalization, length must equal 3, RGB order
-   * @param outBuffer       Output buffer, where tensor content will be written
+   *     upright. Range of valid values: 0, 90, 180, 270
+   * @param tensorWidth return tensor width, must be positive
+   * @param tensorHeight return tensor height, must be positive
+   * @param normMeanRGB means for RGB channels normalization, length must equal 3, RGB order
+   * @param normStdRGB standard deviation for RGB channels normalization, length must equal 3, RGB
+   *     order
+   * @param outBuffer Output buffer, where tensor content will be written
    * @param outBufferOffset Output buffer offset with which tensor content will be written
    */
   public static void imageYUV420CenterCropToFloatBuffer(
@@ -210,8 +208,7 @@ public final class TensorImageUtils {
         normMeanRGB,
         normStdRGB,
         outBuffer,
-        outBufferOffset
-    );
+        outBufferOffset);
   }
 
   private static class NativePeer {
@@ -238,11 +235,11 @@ public final class TensorImageUtils {
         float[] normMeanRgb,
         float[] normStdRgb,
         Buffer outBuffer,
-        int outBufferOffset
-    );
+        int outBufferOffset);
   }
 
-  private static void checkOutBufferCapacity(FloatBuffer outBuffer, int outBufferOffset, int tensorWidth, int tensorHeight) {
+  private static void checkOutBufferCapacity(
+      FloatBuffer outBuffer, int outBufferOffset, int tensorWidth, int tensorHeight) {
     if (outBufferOffset + 3 * tensorWidth * tensorHeight > outBuffer.capacity()) {
       throw new IllegalStateException("Buffer underflow");
     }

@@ -69,9 +69,12 @@ namespace at { namespace native {
 DEFINE_DISPATCH(index_stub);
 DEFINE_DISPATCH(index_put_stub);
 DEFINE_DISPATCH(index_put_accum_stub);
+DEFINE_DISPATCH(masked_fill_stub);
 REGISTER_NO_CPU_DISPATCH(index_put_accum_stub, index_put_accum_fn);
 
 DEFINE_DISPATCH(gather_stub);
+DEFINE_DISPATCH(scatter_stub);
+DEFINE_DISPATCH(scatter_fill_stub);
 DEFINE_DISPATCH(scatter_add_stub);
 
 static bool all_strides_match(TensorList tensors) {
@@ -458,11 +461,15 @@ Tensor & index_select_out_cpu_(Tensor & result, const Tensor & self, int64_t dim
     AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Bool, self.scalar_type(), "index_select", [&] {
       auto self_stride = self.dim() == 0 ? 1 : self.stride(dim);
       auto result_stride = result.dim() == 0 ? 1 : result.stride(dim);
+
+      auto self_data_ptr = self.data_ptr<scalar_t>();
+      auto result_data_ptr = result.data_ptr<scalar_t>();
+      auto self_numel = self.numel();
       for (auto i = 0; i < numel; i++) {
         auto self_i = index_data[i];
-        TORCH_CHECK_INDEX((self_i >= 0) && (self_i < self.numel()), "index out of range in self");
-        scalar_t *self_ip = self.data_ptr<scalar_t>() + self_i * self_stride;
-        *(result.data_ptr<scalar_t>() + i * result_stride) = *self_ip;
+        TORCH_CHECK_INDEX((self_i >= 0) && (self_i < self_numel), "index out of range in self");
+        scalar_t *self_ip = self_data_ptr + self_i * self_stride;
+        *(result_data_ptr + i * result_stride) = *self_ip;
       }
     });
   }
@@ -500,6 +507,16 @@ Tensor gather_cpu(const Tensor & self, int64_t dim, const Tensor & index, bool s
   return gather_out_cpu(result, self, dim, index, sparse_grad);
 }
 
+Tensor & scatter_cpu_(Tensor & self, int64_t dim, const Tensor & index, const Tensor & src) {
+  scatter_stub(self.device().type(), self, dim, index, src);
+  return self;
+}
+
+Tensor & scatter_fill_cpu_(Tensor & self, int64_t dim, const Tensor & index, Scalar src) {
+  scatter_fill_stub(self.device().type(), self, dim, index, src);
+  return self;
+}
+
 Tensor scatter(const Tensor & self, int64_t dim, const Tensor & index, const Tensor & source) {
   return self.clone(at::MemoryFormat::Preserve).scatter_(dim, index, source);
 }
@@ -523,6 +540,42 @@ Tensor masked_scatter(const Tensor & self, const Tensor & mask, const Tensor & s
   return _self.clone(at::MemoryFormat::Contiguous).masked_scatter_(_mask, source);
 }
 
+static Tensor & masked_fill_impl_cpu(Tensor & self, const Tensor & mask, Scalar value) {
+  NoNamesGuard guard;
+  if (mask.dtype() == ScalarType::Byte) {
+    TORCH_WARN("masked_fill_ received a mask with dtype torch.uint8, this behavior is now deprecated," \
+            "please use a mask with dtype torch.bool instead.");
+  }
+
+  auto iter = TensorIterator();
+  iter.dont_compute_common_dtype();
+  iter.dont_resize_outputs();
+  iter.add_output(self);
+  iter.add_input(mask);
+  iter.build();
+
+  masked_fill_stub(iter.device_type(), iter, value);
+  return self;
+}
+
+Tensor & masked_fill__cpu(Tensor& self, const Tensor & mask, Scalar value) {
+  auto maybe_outnames = namedinference::broadcast_to_outnames(self, mask, "masked_fill_");
+
+  masked_fill_impl_cpu(self, mask, value);
+  namedinference::propagate_names_if_nonempty(self, maybe_outnames);
+  return self;
+}
+
+Tensor & masked_fill__cpu(Tensor& self, const Tensor & mask, const Tensor & value) {
+  auto maybe_outnames = namedinference::broadcast_to_outnames(self, mask, "masked_fill_");
+  TORCH_CHECK(value.dim() == 0, "masked_fill_ only supports a 0-dimensional value tensor, but got tensor "
+      "with ", value.dim(), " dimension(s).");
+
+  masked_fill_impl_cpu(self, mask, value.item());
+  namedinference::propagate_names_if_nonempty(self, maybe_outnames);
+  return self;
+}
+
 Tensor masked_fill(const Tensor & self, const Tensor & mask, Scalar source) {
   Tensor result;
   auto maybe_outnames = namedinference::broadcast_to_outnames(mask, self, "masked_fill");
@@ -542,10 +595,10 @@ Tensor masked_fill(const Tensor & self, const Tensor & mask, const Tensor & sour
   auto maybe_outnames = namedinference::broadcast_to_outnames(mask, self, "masked_fill");
   {
     NoNamesGuard guard;
-  Tensor _mask, _self;
-  std::tie(_mask, _self) = expand_outplace(mask, self);
-  result = _self.clone(at::MemoryFormat::Contiguous);
-  result.masked_fill_(mask, source);
+    Tensor _mask, _self;
+    std::tie(_mask, _self) = expand_outplace(mask, self);
+    result = _self.clone(at::MemoryFormat::Contiguous);
+    result.masked_fill_(mask, source);
   }
   namedinference::propagate_names_if_nonempty(result, maybe_outnames);
   return result;

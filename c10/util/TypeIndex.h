@@ -118,9 +118,9 @@ inline C10_TYPENAME_CONSTEXPR c10::string_view fully_qualified_type_name_impl() 
 #endif
 }
 
+#if !defined(__CUDA_ARCH__)
 template <typename T>
 inline constexpr uint64_t type_index_impl() {
-#if !defined(__CUDA_ARCH__)
 // Idea: __PRETTY_FUNCTION__ (or __FUNCSIG__ on msvc) contains a qualified name
 // of this function, including its template parameter, i.e. including the
 // type we want an id for. We use this name and run crc64 on it to get a type
@@ -132,10 +132,8 @@ inline constexpr uint64_t type_index_impl() {
 #elif defined(__GNUC__)
   return crc64(__PRETTY_FUNCTION__, sizeof(__PRETTY_FUNCTION__)).checksum();
 #endif
-#else
-  throw std::logic_error("This should not be called on device code");
-#endif
 }
+#endif
 
 } // namespace detail
 

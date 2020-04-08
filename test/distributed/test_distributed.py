@@ -17,7 +17,8 @@ import torch.cuda
 import torch.distributed as dist
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.testing._internal.common_utils import TestCase, run_tests, skipIfRocm
+from torch.testing._internal.common_utils import TestCase, run_tests, find_free_port
+from torch.distributed.distributed_c10d import _get_default_group
 from torch._utils_internal import TEST_MASTER_ADDR as MASTER_ADDR
 from torch._utils_internal import TEST_MASTER_PORT as MASTER_PORT
 from torch.testing._internal.common_distributed import simple_sparse_reduce_tests, skip_if_rocm
@@ -30,6 +31,12 @@ except ImportError:
 
 
 skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
+
+CPP_EXTENSIONS_WARNING = """
+Ninja (https://ninja-build.org) must be available to run C++ extensions tests,
+but it could not be found. Install ninja with `pip install ninja`
+or `conda install ninja`.
+"""
 
 BACKEND = os.environ["BACKEND"]
 TEMP_DIR = os.environ["TEMP_DIR"]
@@ -105,6 +112,7 @@ SKIP_IF_NO_CUDA_EXIT_CODE = 75
 SKIP_IF_NO_GPU_EXIT_CODE = 76
 SKIP_IF_SMALL_WORLDSIZE_EXIT_CODE = 77
 SKIP_IF_BACKEND_UNAVAILABLE = 78
+SKIP_IF_ROCM_EXIT_CODE = 79
 
 
 def skip_if_no_cuda_distributed(func):
@@ -148,6 +156,21 @@ def skip_if_small_worldsize(func):
 
     return wrapper
 
+
+def skip_if_no_ninja(func):
+
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        try:
+            import torch.utils.cpp_extension
+            torch.utils.cpp_extension.verify_ninja_availability()
+        except RuntimeError:
+            print(CPP_EXTENSIONS_WARNING)
+            return 0
+
+        return func(*args, **kwargs)
+
+    return wrapper
 
 def require_backend(backends):
     if BACKEND not in backends:
@@ -288,13 +311,13 @@ class _DistTestBase(object):
         return (group, group_id, rank)
 
     def _init_full_group_test(self, **kwargs):
-        group = [i for i in range(0, dist.get_world_size())]
+        group = list(range(0, dist.get_world_size()))
         group_id = dist.new_group(**kwargs)
         rank = dist.get_rank()
         return (group, group_id, rank)
 
     def _init_global_test(self):
-        group = [i for i in range(0, dist.get_world_size())]
+        group = list(range(0, dist.get_world_size()))
         group_id = dist.group.WORLD
         rank = dist.get_rank()
         return (group, group_id, rank)
@@ -498,12 +521,14 @@ class _DistTestBase(object):
     @require_backends_available({"gloo", "nccl"})
     @require_world_size(3)
     @require_num_gpus(2)
+    @skip_if_rocm
     def test_backend_group(self):
         self._test_group_override_backend(self._init_group_test)
 
     @require_backend({"gloo", "nccl"})
     @require_backends_available({"gloo", "nccl"})
     @require_num_gpus(3)
+    @skip_if_rocm
     def test_backend_full_group(self):
         self._test_group_override_backend(self._init_full_group_test)
 
@@ -725,7 +750,7 @@ class _DistTestBase(object):
     @unittest.skipIf(BACKEND != "nccl", "Only Nccl supports CUDA reduce")
     @skip_if_no_cuda_distributed
     @skip_if_no_gpu
-    @skipIfRocm
+    @skip_if_rocm
     def test_reduce_sum_cuda(self):
         group, group_id, rank = self._init_global_test()
         rank_to_GPU = self._init_multigpu_helper()
@@ -1509,6 +1534,92 @@ class _DistTestBase(object):
             output_tensors_lists, input_tensors, expected_tensors, group_id)
         self._barrier()
 
+    # AllToAll
+    def _test_all_to_all_single_equal_split_helper(self, group, group_id, rank):
+        if group_id is not None:
+            size = len(group)
+            in_tensor = torch.ones([size, size]) * rank
+            expected_tensor = torch.cat([torch.ones([1, size]) * i for i in group])
+            out_tensor = torch.ones([size, size]) * -1
+            dist.all_to_all_single(out_tensor, in_tensor, group=group_id)
+            self.assertEqual(out_tensor, expected_tensor)
+        self._barrier()
+
+    def _test_all_to_all_single_unequal_split_helper(self, group, group_id, rank):
+        if group_id is not None:
+            size = len(group)
+            in_splits = [i + 1 for i in group]
+            out_splits = [rank + 1 for _ in group]
+            in_tensor = torch.ones([sum(in_splits), size]) * rank
+            out_tensor = torch.ones([(rank + 1) * size, size])
+            expected_tensor = torch.cat([torch.ones([rank + 1, size]) * i for i in group])
+            dist.all_to_all_single(
+                out_tensor, in_tensor, out_splits, in_splits, group=group_id)
+            self.assertEqual(out_tensor, expected_tensor)
+        self._barrier()
+
+    def _test_all_to_all_helper(self, group, group_id, rank):
+        if group_id is not None:
+            size = len(group)
+            in_splits = [i + 1 for i in group]
+            in_tensors = [
+                torch.ones([in_splits[i], size]) * rank for i, _ in enumerate(group)
+            ]
+            out_tensors = [torch.ones([(rank + 1), size]) for _ in group]
+            expected_tensors = [torch.ones([rank + 1, size]) * i for i in group]
+            dist.all_to_all(out_tensors, in_tensors, group=group_id)
+            for t1, t2 in zip(out_tensors, expected_tensors):
+                self.assertEqual(t1, t2)
+        self._barrier()
+
+    @unittest.skipIf(BACKEND != "mpi", "Only MPI supports all_to_all_single")
+    def test_all_to_all_single_equal_split(self):
+        group, group_id, rank = self._init_global_test()
+        self._test_all_to_all_single_equal_split_helper(group, group_id, rank)
+
+    @unittest.skipIf(BACKEND != "mpi", "Only MPI supports all_to_all_single")
+    def test_all_to_all_single_unequal_split(self):
+        group, group_id, rank = self._init_global_test()
+        self._test_all_to_all_single_unequal_split_helper(group, group_id, rank)
+
+    @unittest.skipIf(BACKEND != "mpi", "Only MPI supports all_to_all")
+    def test_all_to_all(self):
+        group, group_id, rank = self._init_global_test()
+        self._test_all_to_all_helper(group, group_id, rank)
+
+    @unittest.skipIf(BACKEND != "mpi", "Only MPI supports all_to_all_single")
+    @skip_if_small_worldsize
+    def test_all_to_all_single_equal_split_group(self):
+        group, group_id, rank = self._init_group_test()
+        self._test_all_to_all_single_equal_split_helper(group, group_id, rank)
+
+    @unittest.skipIf(BACKEND != "mpi", "Only MPI supports all_to_all_single")
+    @skip_if_small_worldsize
+    def test_all_to_all_single_unequal_split_group(self):
+        group, group_id, rank = self._init_group_test()
+        self._test_all_to_all_single_unequal_split_helper(group, group_id, rank)
+
+    @unittest.skipIf(BACKEND != "mpi", "Only MPI supports all_to_all")
+    @skip_if_small_worldsize
+    def test_all_to_all_group(self):
+        group, group_id, rank = self._init_group_test()
+        self._test_all_to_all_helper(group, group_id, rank)
+
+    @unittest.skipIf(BACKEND != "mpi", "Only MPI supports all_to_all_single")
+    def test_all_to_all_single_equal_split_full_group(self):
+        group, group_id, rank = self._init_full_group_test()
+        self._test_all_to_all_single_equal_split_helper(group, group_id, rank)
+
+    @unittest.skipIf(BACKEND != "mpi", "Only MPI supports all_to_all_single")
+    def test_all_to_all_single_unequal_split_full_group(self):
+        group, group_id, rank = self._init_full_group_test()
+        self._test_all_to_all_single_unequal_split_helper(group, group_id, rank)
+
+    @unittest.skipIf(BACKEND != "mpi", "Only MPI supports all_to_all")
+    def test_all_to_all_full_group(self):
+        group, group_id, rank = self._init_full_group_test()
+        self._test_all_to_all_helper(group, group_id, rank)
+
     # BARRIER
     def _test_barrier_helper(
             self, group, group_id, rank, cuda=False, rank_to_GPU=None):
@@ -1549,7 +1660,7 @@ class _DistTestBase(object):
     @skip_if_small_worldsize
     @skip_if_no_gpu
     @unittest.skipIf(BACKEND == "mpi", "MPI doesn't supports GPU barrier")
-    @skipIfRocm
+    @skip_if_rocm
     def test_barrier_group_cuda(self):
         group, group_id, rank = self._init_group_test()
         rank_to_GPU = self._init_multigpu_helper()
@@ -1679,7 +1790,7 @@ class _DistTestBase(object):
 
     @unittest.skipIf(BACKEND != "nccl", "Only Nccl backend supports reduce multigpu")
     @skip_if_no_gpu
-    @skipIfRocm
+    @skip_if_rocm
     def test_reduce_multigpu(self):
         group, group_id, rank = self._init_global_test()
         rank_to_GPU = self._init_multigpu_helper()
@@ -1729,7 +1840,8 @@ class _DistTestBase(object):
     def _model_step(self, model):
         for param in model.parameters():
             if param.grad is not None:
-                param.data += param.grad
+                with torch.no_grad():
+                    param += param.grad
                 param.grad = None
 
     def _prepare_dummy_data(self, local_bs):
@@ -1867,6 +1979,7 @@ class _DistTestBase(object):
                      "Only Nccl & Gloo backend support DistributedDataParallel")
     @skip_if_no_cuda_distributed
     @skip_if_no_gpu
+    @skip_if_rocm
     def test_DistributedDataParallel(self):
         group, group_id, rank = self._init_global_test()
         rank_to_GPU = self._init_multigpu_helper()
@@ -1925,7 +2038,6 @@ class _DistTestBase(object):
                      "Only Nccl & Gloo backend support DistributedDataParallel")
     @skip_if_no_cuda_distributed
     @skip_if_no_gpu
-    @skipIfRocm
     def test_DistributedDataParallel_SyncBatchNorm(self):
         group, group_id, rank = self._init_global_test()
         rank_to_GPU = self._init_multigpu_helper()
@@ -1945,6 +2057,7 @@ class _DistTestBase(object):
                      "Only Nccl & Gloo backend support DistributedDataParallel")
     @skip_if_no_cuda_distributed
     @skip_if_no_gpu
+    @skip_if_rocm
     def test_DistributedDataParallel_SyncBatchNorm_2D_Input(self):
         group, group_id, rank = self._init_global_test()
         rank_to_GPU = self._init_multigpu_helper()
@@ -2128,7 +2241,8 @@ if BACKEND == "gloo" or BACKEND == "nccl":
             skip_ok = (
                 getattr(fn, "skip_if_no_cuda_distributed", False) or
                 getattr(fn, "skip_if_no_gpu", False) or
-                getattr(fn, "skip_if_small_worldsize", False)
+                getattr(fn, "skip_if_small_worldsize", False) or
+                getattr(fn, "skip_if_rocm", False)
             )
             join_timeout = get_timeout(self.id())
             for rank, process in enumerate(self.processes):
@@ -2151,8 +2265,9 @@ if BACKEND == "gloo" or BACKEND == "nccl":
                     first_process.exitcode == 0 or
                     first_process.exitcode == SKIP_IF_NO_CUDA_EXIT_CODE or
                     first_process.exitcode == SKIP_IF_NO_GPU_EXIT_CODE or
-                    first_process.exitcode == SKIP_IF_SMALL_WORLDSIZE_EXIT_CODE
-                )
+                    first_process.exitcode == SKIP_IF_SMALL_WORLDSIZE_EXIT_CODE or
+                    first_process.exitcode == SKIP_IF_ROCM_EXIT_CODE
+                ), "unexpected exit code {}".format(first_process.exitcode)
 
                 if first_process.exitcode == SKIP_IF_NO_CUDA_EXIT_CODE:
                     raise unittest.SkipTest("cuda is not available")
@@ -2162,8 +2277,14 @@ if BACKEND == "gloo" or BACKEND == "nccl":
                     )
                 if first_process.exitcode == SKIP_IF_SMALL_WORLDSIZE_EXIT_CODE:
                     raise unittest.SkipTest("worldsize is too small to run group tests")
+                if first_process.exitcode == SKIP_IF_ROCM_EXIT_CODE:
+                    raise unittest.SkipTest("Test skipped for ROCm")
 
-            self.assertEqual(first_process.exitcode, 0)
+            self.assertEqual(
+                first_process.exitcode,
+                0,
+                "Expect 0 exit code, but got {}".format(first_process.exitcode)
+            )
 
 
 elif BACKEND == "mpi":
@@ -2173,6 +2294,45 @@ elif BACKEND == "mpi":
     class TestMPI(TestCase, _DistTestBase):
         pass
 
+elif BACKEND == "test":
+    class TestBackendDynamicLoad(TestCase):
+        def setUp(self):
+            super(TestBackendDynamicLoad, self).setUp()
+
+        def _load_test_backend(self):
+            temp_dir = tempfile.mkdtemp()
+            src = "{}/../cpp_extensions/cpp_c10d_extension.cpp".format(os.path.abspath(os.path.dirname(__file__)))
+            extension = torch.utils.cpp_extension.load(
+                name="torch_test",
+                sources=[src],
+                build_directory=temp_dir
+            )
+
+        @skip_if_no_ninja
+        def test_backend_apis(self):
+            self._load_test_backend()
+
+            os.environ['WORLD_SIZE'] = '1'
+            os.environ['MASTER_ADDR'] = '127.0.0.1'
+            os.environ['MASTER_PORT'] = str(find_free_port())
+            os.environ['RANK'] = '0'
+
+            dist.init_process_group(backend='test', init_method='env://', world_size=1, rank=0)
+            self.assertEqual(dist.get_rank(), 0)
+            self.assertEqual(dist.get_world_size(), 1)
+
+            process_group = _get_default_group()
+            work = process_group.allreduce([torch.rand(1), torch.rand(1)])
+            self.assertTrue(work.wait())
+            self.assertTrue(work.is_completed())
+            self.assertTrue(work.is_success())
+
+            work = process_group.broadcast([torch.rand(1)])
+            self.assertTrue(work.wait())
+            self.assertTrue(work.is_completed())
+            self.assertTrue(work.is_success())
+
+            dist.destroy_process_group()
 
 if __name__ == "__main__":
     assert (

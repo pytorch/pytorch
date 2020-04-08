@@ -89,7 +89,7 @@ class File {
       // Only retry when the file doesn't exist, since we are waiting for the
       // file to be created in this case to address the following issue:
       // https://github.com/pytorch/pytorch/issues/13750
-      if (fd_ >= 0 || (fd_ < 0 && errno != ENOENT)) {
+      if (fd_ >= 0 || errno != ENOENT) {
         break;
       }
       const auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(

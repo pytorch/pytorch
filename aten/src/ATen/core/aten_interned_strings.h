@@ -509,6 +509,7 @@ _(aten, bitwise_and) \
 _(aten, bitwise_not) \
 _(aten, bitwise_or) \
 _(aten, bitwise_xor) \
+_(aten, element_size) \
 _(aten, nll_loss) \
 _(aten, nll_loss2d) \
 _(aten, nll_loss2d_backward) \
@@ -718,6 +719,8 @@ _(aten, where) \
 _(aten, zero) \
 _(aten, zeros) \
 _(aten, zeros_like) \
+_(aten, copy_real) \
+_(aten, copy_imag) \
 /* nothing */
 
 #define FORALL_ATTR_BASE_SYMBOLS(_) \

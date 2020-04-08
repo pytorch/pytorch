@@ -65,6 +65,7 @@ ${return_type} ${method_prefix_derived}${api_name}(${type_method_formals}) {
 """)
 LEGACY_TH_DEFINITION_SWITCH_STATEMENT = CodeTemplate("""\
 ${dispatch_scalar_type_declaration}
+${switch_prologue}
 switch (dispatch_scalar_type) {
     ${cases}
     default:
@@ -83,11 +84,11 @@ case ScalarType::${ScalarName}: {
 # In this case, it will be called for all backends, but can be overwritten on a
 # per backend basis.
 NATIVE_DISPATCH_DECLARATION = CodeTemplate("""\
-${return_type} ${api_name}(${type_method_formals});
+${return_type} ${type_wrapper_name}(${type_method_formals});
 """)
 
 NATIVE_DISPATCH_DEFINITION_DEFAULT = CodeTemplate("""\
-${return_type} ${api_name}(${type_method_formals}) {
+${return_type} ${type_wrapper_name}(${type_method_formals}) {
     ${named_guard_declaration}
     ${device_guard_declaration}
     ${return_call} at::native::${native_type_method_dispatch}(${native_actuals});
@@ -95,41 +96,37 @@ ${return_type} ${api_name}(${type_method_formals}) {
 """)
 
 NATIVE_DISPATCH_DEFINITION_BACKEND = CodeTemplate("""\
-${return_type} ${api_name}(${type_method_formals}) {
+${return_type} ${type_wrapper_name}(${type_method_formals}) {
     ${named_guard_declaration}
     ${device_guard_declaration}
     ${return_call} at::native::${native_type_method_dispatch}(${native_actuals});
 }
 """)
 
+# A schema registration specifies alias analysis for an operator, but doesn't
+# actually provide an implementation.  Although our registration API allows you
+# to specify all of this information at a function registration site, it's
+# better to do it once at a schema registration so that we don't have to
+# repeat ourselves everywhere else.
+SCHEMA_REGISTRATION = CodeTemplate("""\
+.def("${schema_string}")
+""")
+
 DEFAULT_UNBOXEDONLY_FUNCTION_REGISTRATION = CodeTemplate("""\
-.op(torch::RegisterOperators::options()
-  .schema("${schema_string}")
-  .impl_unboxedOnlyCatchAllKernel<${return_type} (${formals_types}), &TypeDefault::${api_name}>()
-  .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
+.impl("${operator_name_with_overload}",
+      CppFunction::makeUnboxedOnly(TypeDefault::${type_wrapper_name}))
 """)
 BACKEND_UNBOXEDONLY_FUNCTION_REGISTRATION = CodeTemplate("""\
-.op(torch::RegisterOperators::options()
-  .schema("${schema_string}")
-  .impl_unboxedOnlyKernel<${return_type} (${formals_types}), &${Type}::${api_name}>(DispatchKey::${Backend}TensorId)
-  .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
+.impl("${operator_name_with_overload}", torch::dispatch(
+    DispatchKey::${Backend}TensorId,
+    CppFunction::makeUnboxedOnly(${Type}::${type_wrapper_name})))
 """)
 DEFAULT_FUNCTION_REGISTRATION = CodeTemplate("""\
-.op(torch::RegisterOperators::options()
-  .schema("${schema_string}")
-  .catchAllKernel<${return_type} (${formals_types})>(&TypeDefault::${api_name})
-  .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
-""")
-DEFAULT_SCHEMA_REGISTRATION = CodeTemplate("""\
-.op(torch::RegisterOperators::options()
-  .schema("${schema_string}")
-  .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
+.impl("${operator_name_with_overload}", &TypeDefault::${type_wrapper_name})
 """)
 BACKEND_FUNCTION_REGISTRATION = CodeTemplate("""\
-.op(torch::RegisterOperators::options()
-  .schema("${schema_string}")
-  .kernel<${return_type} (${formals_types})>(DispatchKey::${Backend}TensorId, &${Type}::${api_name})
-  .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
+.impl("${operator_name_with_overload}",
+      torch::dispatch(DispatchKey::${Backend}TensorId, &${Type}::${type_wrapper_name}))
 """)
 
 # add non-virtual declaration to TensorBody.h
@@ -177,11 +174,12 @@ static inline ${return_type} ${api_name}(${formals}) {
 # the time you get to the implementation.
 STATIC_DISPATCH_FUNCTION_DEFAULT_BODY = CodeTemplate("""\
 at::AutoNonVariableTypeMode _var_guard(true);
-${return_call} TypeDefault::${native_type_method_dispatch}(${native_arguments});
+${return_call} TypeDefault::${type_wrapper_name}(${native_arguments});
 """)
 STATIC_DISPATCH_FUNCTION_SWITCH_BODY = CodeTemplate("""\
 at::AutoNonVariableTypeMode _var_guard(true);
-switch(dispatchKeyToBackend(c10::impl::dispatchTypeId(${key_set}, c10::DispatchKeySet(c10::DispatchKeySet::FULL)))) {
+switch(dispatchKeyToBackend(c10::impl::dispatchTypeId(${key_set},
+                            c10::DispatchKeySet(c10::DispatchKeySet::FULL).remove(DispatchKey::BackendSelect)))) {
     ${static_dispatch_function_switches}
     default:
         AT_ERROR("${api_name} not implemented for ", at::toString(${key_set}));
@@ -189,7 +187,7 @@ switch(dispatchKeyToBackend(c10::impl::dispatchTypeId(${key_set}, c10::DispatchK
 """)
 STATIC_DISPATCH_FUNCTION_SWITCH_STATEMENT = CodeTemplate("""\
 case Backend::${backend}:
-    ${return_call} ${backend}Type::${api_name}(${native_arguments});
+    ${return_call} ${backend}Type::${type_wrapper_name}(${native_arguments});
     break;
 """)
 
@@ -244,7 +242,7 @@ scalar_types = [
     ('BFloat16', 'BFloat16', 'BFloat16AccrealNotDefined', True),
 ]
 
-static_dispatch_backends = ['CPU', 'QuantizedCPU', 'SparseCPU']
+static_dispatch_backends = ['CPU', 'QuantizedCPU']
 
 
 class NYIError(Exception):
@@ -261,8 +259,6 @@ TYPE_FORMAL_GENERIC = {
     'THByteTensor*': 'Tensor &',
     'THIndexTensor*': 'Tensor &',
     'THBoolTensor*': 'Tensor &',
-    'THStorage*': 'Storage',
-    'THGenerator*': 'Generator *',
     'IntArrayRefSize': 'IntArrayRef',
     'accreal': 'Scalar',
     'real': 'Scalar',
@@ -274,8 +270,6 @@ DYNAMIC_TYPE = {
     'THByteTensor*': 'ByteTensor',
     'THBoolTensor*': 'BoolTensor',
     'THIndexTensor*': 'IndexTensor',
-    'THStorage*': 'Storage',
-    'THGenerator*': 'Generator*',
     'IntArrayRefSize': 'IntArrayRef',
     'accreal': 'accreal',
     'real': 'real',
@@ -302,7 +296,7 @@ CHECKED_CAST = {
         CodeTemplate(
             'checked_dense_tensor_unwrap('
             '${arg_name}, "${arg_name}", ${arg_pos}, "${api_name}", ${null_okay}, '
-            'DeviceType::${DeviceType}, ScalarType::${ScalarName})'),
+            'DeviceType::${DeviceType}, ${scalar_type})'),
     'THByteTensor*':
         CodeTemplate(
             'checked_dense_tensor_unwrap('
@@ -318,20 +312,13 @@ CHECKED_CAST = {
             'checked_dense_tensor_unwrap('
             '${arg_name}, "${arg_name}", ${arg_pos}, "${api_name}", ${null_okay}, '
             'DeviceType::${DeviceType}, ScalarType::Long)'),
-    'THStorage*':
-        CodeTemplate(
-            'checked_storage('
-            '${arg_name}, "${arg_name}", ${arg_pos}, '
-            # We're punning here (Backend and DeviceType constructors coincide)
-            # but DeviceType is the correct way to classify storages
-            'DeviceType::${Backend}, at::scalarTypeToTypeMeta(ScalarType::${ScalarName}))'),
     # This is a cast done via direct-construction
     'IntArrayRefStride': CodeTemplate('at::IntArrayRef ${result_name} = get_intlist_stride_th(${arg_name});'),
     'real': CodeTemplate('${arg_name}.to${ScalarName}()'),
     'accreal': CodeTemplate('${arg_name}.to${AccScalarName}()'),
     'TensorList': CodeTemplate(
-            'checked_tensor_list_unwrap(${arg_name},"${arg_name}",${arg_pos}, '
-            'Backend::${Backend}, ScalarType::${ScalarName})'),
+            'checked_dense_tensor_list_unwrap(${arg_name},"${arg_name}",${arg_pos}, '
+            'DeviceType::${DeviceType}, ${scalar_type})'),
     'IntArrayRef': CodeTemplate('check_intlist<${size}>(${arg_name}, "${arg_name}", ${arg_pos})')
 }
 
@@ -340,7 +327,6 @@ CHECKED_USE = {
     'THIndexTensor*': '{}_',
     'THByteTensor*': '{}_',
     'THBoolTensor*': '{}_',
-    'THStorage*': '{}_.unsafeGetStorageImpl()',
     'TensorList': "{0}_.data(), {0}_.size()",
 }
 
@@ -348,7 +334,7 @@ CHECKED_USE_NULLABLE = CodeTemplate('${arg_name}_ ? ${usage} : NULL')
 
 ALLOC_NOARGS_WRAP = {
     'THTensor*': 'c10::make_intrusive<TensorImpl, UndefinedTensorImpl>'
-                 '(c10::Storage(caffe2::TypeMeta::Make<${ScalarType}>(), 0, allocator(), true),'
+                 '(c10::Storage(scalarTypeToTypeMeta(${ScalarName}), 0, allocator(), true),'
                  'DispatchKey::${Backend}TensorId).release()',
     'THByteTensor*': 'c10::make_intrusive<TensorImpl, UndefinedTensorImpl>'
                      '(c10::Storage(scalarTypeToTypeMeta(ScalarType::Byte), 0, allocator(), true),'
@@ -359,13 +345,6 @@ ALLOC_NOARGS_WRAP = {
     'THIndexTensor*': 'c10::make_intrusive<TensorImpl, UndefinedTensorImpl>'
                      '(c10::Storage(scalarTypeToTypeMeta(ScalarType::Long), 0, allocator(), true),'
                      'DispatchKey::${Backend}TensorId).release()',
-}
-
-ALLOC_WRAP = {
-    'THTensor*': '${arguments}',
-    'THByteTensor*': '${arguments}',
-    'THBoolTensor*': '${arguments}',
-    'THIndexTensor*': '${arguments}',
 }
 
 # Replacements for constants when calling into TH
@@ -429,13 +408,12 @@ THFormal = TypedDict('THFormal', {
     'default': str,
     'output': bool,
     'size': int,
+    'annotation': str,
     'allocate': bool,
     'mask': bool,
-    'wrap_dim': str,
     # Broadcast is originally a str but gets unwrapped to a List or Dict in-place
     'broadcast': Any,
     'resize': str,
-    'cpu_zero': bool,
     'zero': bool,
 }, total=False)
 
@@ -450,6 +428,7 @@ AtFormal = TypedDict('AtFormal', {
     'default': str,
     'output': bool,
     'size': int,
+    'annotation': str,
 }, total=False)
 
 # Note [field_name versus name]
@@ -491,6 +470,11 @@ NNBuffer = TypedDict('NNBuffer', {
 FunctionOption = TypedDict('FunctionOption', {
     'actuals': List[str],
     'api_name': str,
+    # Like api_name, but it is the name of the internal
+    # CPUType/CUDAType/TypeDefault function that wraps
+    # the actual native call.  This name is NOT user
+    # visible and is mangled with the overload name
+    'type_wrapper_name': str,
     'arguments': List[THFormal],
     'backend_types': Dict[str, List[str]],
     'backends': List[str],
@@ -593,6 +577,7 @@ FunctionCode = NamedTuple('FunctionCode', [
 OpRegistration = NamedTuple('OpRegistration', [
     ('operator_name', str),
     ('registration_code', str),
+    ('schema_registration_code', str),
 ])
 
 
@@ -620,10 +605,7 @@ def named_guard(option, tensors, tensorlists):
         named_conditions.append('at::has_names({})'.format(tensorlist))
     return ("""\
 if ({named_conditions}) {{
-    AT_ERROR(
-        "{op} is not yet supported with named tensors. Please drop names via "
-        "`tensor = tensor.rename(None)`, call the op with an unnamed tensor, "
-        "and set names on the result of the operation.");
+    AT_ERROR("{op}", named_tensors_unsupported_error);
 }}""".format(named_conditions=' || '.join(named_conditions), op=option['name']))
 
 
@@ -989,7 +971,18 @@ def create_generic(top_env, declarations):
             if argument.get('is_nullable') and argument['type'] not in translate_map(False).keys():
                 argument['type'] = "c10::optional<{}>".format(argument['type'])
 
-            if (option['inplace'] and argument['name'] == 'self') or argument.get('output', False):
+            # Note: the 'self' trap is here only to preserve the const arg 0 for set_data.
+            # I.e., the signature of the cpp implementation currently fits the code
+            # generated from a misread schema, but the alias annotation is the truth.
+            # TODO fix the signature of set_data's cpp impl to match correct codegen from
+            # the current schema.
+            # then remove this
+            if argument['name'] == 'self':
+                is_mutable = option['inplace']
+            else:
+                is_mutable = '!' in (argument['annotation'] or '')
+
+            if is_mutable:
                 argument['type'] = translate_map(False).get(argument['type'], argument['type'])
             else:
                 argument['type'] = translate_map(True).get(argument['type'], argument['type'])
@@ -1205,23 +1198,29 @@ def create_generic(top_env, declarations):
             abstract = True
             # Having manual_kernel_registration for an abstract method doesn't make sense.
             assert not option['manual_kernel_registration']
+            op_registrations.append(OpRegistration(
+                operator_name=OPERATOR_NAME.substitute(option),
+                registration_code=SCHEMA_REGISTRATION.substitute(option),
+                schema_registration_code=SCHEMA_REGISTRATION.substitute(option)))
         else:
             top_env['type_method_declarations'].append(NATIVE_DISPATCH_DECLARATION.substitute(option))
             top_env['type_method_definitions'].append(NATIVE_DISPATCH_DEFINITION_DEFAULT.substitute(option))
-            if option['manual_kernel_registration']:
+            if not option['manual_kernel_registration']:
                 op_registrations.append(OpRegistration(
                     operator_name=OPERATOR_NAME.substitute(option),
-                    registration_code=DEFAULT_SCHEMA_REGISTRATION.substitute(option)))
-            else:
+                    registration_code=SCHEMA_REGISTRATION.substitute(option),
+                    schema_registration_code=SCHEMA_REGISTRATION.substitute(option)))
                 if option['use_c10_dispatcher'] == 'full':
                     op_registrations.append(OpRegistration(
                         operator_name=OPERATOR_NAME.substitute(option),
-                        registration_code=DEFAULT_FUNCTION_REGISTRATION.substitute(option)))
+                        registration_code=DEFAULT_FUNCTION_REGISTRATION.substitute(option),
+                        schema_registration_code=SCHEMA_REGISTRATION.substitute(option)))
                 else:
                     assert option['use_c10_dispatcher'] == 'unboxed_only'
                     op_registrations.append(OpRegistration(
                         operator_name=OPERATOR_NAME.substitute(option),
-                        registration_code=DEFAULT_UNBOXEDONLY_FUNCTION_REGISTRATION.substitute(option)))
+                        registration_code=DEFAULT_UNBOXEDONLY_FUNCTION_REGISTRATION.substitute(option),
+                        schema_registration_code=SCHEMA_REGISTRATION.substitute(option)))
 
         # generate the at::native function declarations (i.e. what the user will implement)
         if isinstance(type_method_dispatch, dict):
@@ -1344,16 +1343,8 @@ def create_derived(backend_type_env, declarations):
         return [get_argument(env, argument, option)
                 for argument in arguments]
 
-    def is_actual_return_long(env, ret):
-        # type: (Environment, ReturnDecl) -> bool
-        if ret['type'] == 'long':
-            return True
-        if ret['type'] == 'real':
-            return env['ScalarName'] == 'Long'
-        if ret['type'] == 'accreal':
-            return env['AccScalarName'] == 'Long'
-        return False
-
+    # TODO: Delete this per https://github.com/pytorch/pytorch/issues/33094
+    # after all TH uses are ported
     def handle_zero_dim(env, option):
         # type: (Environment, FunctionOption) -> List[str]
         zero_dim_dispatch = option.get('zero_dim_dispatch_when_scalar', '')
@@ -1369,10 +1360,10 @@ def create_derived(backend_type_env, declarations):
                             for arg in option['formals_list']]
         return [ZERO_DIM_CHECK.substitute(env, check_name=zero_dim_dispatch, zero_dim_actuals=zero_dim_actuals)]
 
-    def allocate_arg(env, arg, output_count):
-        # type: (Environment, THFormal, int) -> List[str]
+    def allocate_arg(arg, output_count, backend, scalar_name):
+        # type: (THFormal, int, str, str) -> List[str]
         name = arg['name']
-        allocation = CodeTemplate(ALLOC_NOARGS_WRAP[arg['type']]).substitute(env)
+        allocation = CodeTemplate(ALLOC_NOARGS_WRAP[arg['type']]).substitute(Backend=backend, ScalarName=scalar_name)
         tensor_arg = '{}_'.format(name)
         if arg.get('mask', False):
             allocation = 'output_mask[{}] ? {} : nullptr'.format(output_count, allocation)
@@ -1390,11 +1381,7 @@ def create_derived(backend_type_env, declarations):
         if isinstance(resize, str):
             return "{}.resize_({}.sizes());".format(arg['name'], resize)
         else:
-            resize_scalar = arg.get('resize_scalar', False)
-            if resize_scalar:
-                dims = ['{}.dim() == 0 ? 1 : {}.size({})'.format(name, name, dim) for name, dim in resize]
-            else:
-                dims = ['{}.size({})'.format(name, dim) for name, dim in resize]
+            dims = ['{}.size({})'.format(name, dim) for name, dim in resize]
             return "{}.resize_({{ {} }});".format(arg['name'], ','.join(dims))
 
     def handle_call(env, option, cimpl):
@@ -1425,16 +1412,23 @@ def create_derived(backend_type_env, declarations):
         body = []  # type: List[str]
         body += handle_zero_dim(env, option)
 
+        switch_prologue = []  # type: List[str]
+        output_count = 0
         cases = []
+
+        for arg in option['arguments']:
+            # make a new allocation of TensorImpl, then wrap a Tensor around it.
+            if arg.get('allocate', False):
+                switch_prologue += allocate_arg(arg, output_count, env['Backend'], 'dispatch_scalar_type')
+                output_count += 1
+
         for scalar_name, c_type, accreal, _ in scalar_types:
             if scalar_name in scalar_type_cases:
-                case_body = []
+                case_body = []  # type: List[str]
                 # arguments are potentially duplicated because of one argument
                 # referencing another
                 seen_names = set()  # type: Set[str]
-                seen_tensorlists = set()  # type: Set[str]
                 count = 0
-                output_count = 0
 
                 case_env = {
                     'Backend': env['Backend'],
@@ -1454,38 +1448,23 @@ def create_derived(backend_type_env, declarations):
                 for arg in option['arguments']:
                     if is_real_argument_to_wrapper(arg):
                         count += 1
-                    if arg['type'] == 'TensorList':
-                        seen_tensorlists.add(arg['name'])
-
-                    wrap_dim_target = arg.get('wrap_dim', None)
-                    if wrap_dim_target is not None:
-                        # for Tensors, "name_" is the TensorImpl, but for TensorLists, it is an
-                        # std::vector of TH*s.  Since TH*s have different dimension rules, we used
-                        # "name" instead, but keep "name_" for tensor to avoid an extra function call.
-                        if wrap_dim_target not in seen_tensorlists:
-                            wrap_dim_target = wrap_dim_target + "_"
-                        case_body.append("{} = maybe_wrap_dim({}, {});".format(
-                            arg['name'], arg['name'], wrap_dim_target))
 
                     # only generated checked casts the first time we see it
                     if arg['name'] not in seen_names and requires_checked_cast(arg):
                         seen_names.add(arg['name'])
 
                         # make a new allocation of TensorImpl, then wrap a Tensor around it.
-                        if arg.get('allocate', False):
-                            case_body += allocate_arg(case_env, arg, output_count)
-                            output_count += 1
-                        # extract the TensorImpl from an existing tensor (or Storage, etc.)
-                        else:
+                        if not arg.get('allocate', False):
                             # special case where we allow undefined Tensors, and thus
                             # the checked cast succeeds even if the Tensor is not
                             # defined
                             null_okay = 'true' if nullable_argument(arg) else 'false'
 
+                            # extract the TensorImpl from an existing tensor
                             check_cast = CHECKED_CAST[arg['type']].substitute(
                                 case_env, arg_name=arg['name'], arg_pos=count,
                                 api_name=option['api_name'], null_okay=null_okay,
-                                size=arg.get('size'))
+                                size=arg.get('size'), scalar_type='dispatch_scalar_type')
                             case_body.append("auto {}_ = {};".format(
                                 arg['name'], check_cast))
 
@@ -1496,7 +1475,7 @@ def create_derived(backend_type_env, declarations):
                             initializers.append(resize_arg(arg))
 
                         # also special handling where we zero some outputs.
-                        if arg.get('zero', False) or (arg.get('cpu_zero', False) and not is_cuda):
+                        if arg.get('zero', False):
                             initializers.append("{}.zero_();".format(arg['name']))
 
                         # only initialize non-null arguments
@@ -1534,32 +1513,20 @@ def create_derived(backend_type_env, declarations):
                     assert len(calls) == 1
                     call = calls[0]
 
-                    if ret['type'] in ALLOC_WRAP.keys():
-                        wrapped_tensor = CodeTemplate(ALLOC_WRAP[ret['type']]).substitute(
-                            case_env, arguments=[call])
-                        return_tensor = (
-                            "return Tensor(" +
-                            "c10::intrusive_ptr<TensorImpl, UndefinedTensorImpl>::reclaim(" +
-                            "(${wrapped_tensor})));")
-                        case_body.append(CodeTemplate(return_tensor).substitute(
-                            case_env, wrapped_tensor=wrapped_tensor))
                     # return the same underlying Tensor type for both real and accreal; this ensures
                     # e.g. x.sum(0) and x.sum() return the same type. We explicitly cast to the
                     # ScalarType before constructing the scalar_tensor to avoid overflow checking.
-                    elif ret['type'] == 'accreal' or ret['type'] == 'real':
+                    if ret['type'] == 'accreal' or ret['type'] == 'real':
                         return_scalar = ('return at::scalar_tensor(convert<${ScalarType}>(${call}), '
                                          'options(ScalarType::${ScalarName}));')
                         case_body.append(CodeTemplate(return_scalar).substitute(case_env, call=call))
                     else:
-                        # we using int64_t for long in the API, so correct it here...
-                        if is_actual_return_long(case_env, ret):
-                            call = "static_cast<int64_t>({})".format(call)
                         case_body.append("return {};".format(call))
                 else:
                     raise Exception("NYI - return handling")
 
                 cases.append(LEGACY_TH_DEFINITION_CASE.substitute(case_env, case_body=case_body))
-        body.append(LEGACY_TH_DEFINITION_SWITCH_STATEMENT.substitute(env, cases=cases))
+        body.append(LEGACY_TH_DEFINITION_SWITCH_STATEMENT.substitute(env, cases=cases, switch_prologue=switch_prologue))
         return body
 
     def process_legacy_th_option(option):
@@ -1601,12 +1568,14 @@ def create_derived(backend_type_env, declarations):
                     if option['use_c10_dispatcher'] == 'full':
                         op_registrations.append(OpRegistration(
                             operator_name=OPERATOR_NAME.substitute(option),
-                            registration_code=BACKEND_FUNCTION_REGISTRATION.substitute(env)))
+                            registration_code=BACKEND_FUNCTION_REGISTRATION.substitute(env),
+                            schema_registration_code=SCHEMA_REGISTRATION.substitute(option)))
                     else:
                         assert option['use_c10_dispatcher'] == 'unboxed_only'
                         op_registrations.append(OpRegistration(
                             operator_name=OPERATOR_NAME.substitute(option),
-                            registration_code=BACKEND_UNBOXEDONLY_FUNCTION_REGISTRATION.substitute(env)))
+                            registration_code=BACKEND_UNBOXEDONLY_FUNCTION_REGISTRATION.substitute(env),
+                            schema_registration_code=SCHEMA_REGISTRATION.substitute(option)))
 
     for declaration in declarations:
         for option in declaration['options']:

@@ -59,7 +59,7 @@ class Threshold(Module):
 class ReLU(Module):
     r"""Applies the rectified linear unit function element-wise:
 
-    :math:`\text{ReLU}(x)= \max(0, x)`
+    :math:`\text{ReLU}(x) = (x)^+ = \max(0, x)`
 
     Args:
         inplace: can optionally do the operation in-place. Default: ``False``
@@ -250,7 +250,7 @@ class Sigmoid(Module):
     r"""Applies the element-wise function:
 
     .. math::
-        \text{Sigmoid}(x) = \frac{1}{1 + \exp(-x)}
+        \text{Sigmoid}(x) = \sigma(x) = \frac{1}{1 + \exp(-x)}
 
 
     Shape:
@@ -271,11 +271,38 @@ class Sigmoid(Module):
         return torch.sigmoid(input)
 
 
+class Hardsigmoid(Module):
+    r"""Applies the element-wise function:
+
+    .. math::
+        \text{Hardsigmoid}(x) = \begin{cases}
+            0 & \text{if~} x \le -3, \\
+            1 & \text{if~} x \ge +3, \\
+            x / 6 & \text{otherwise}
+        \end{cases}
+
+
+    Shape:
+        - Input: :math:`(N, *)` where `*` means, any number of additional
+          dimensions
+        - Output: :math:`(N, *)`, same shape as the input
+
+    Examples::
+
+        >>> m = nn.Hardsigmoid()
+        >>> input = torch.randn(2)
+        >>> output = m(input)
+    """
+
+    def forward(self, input):
+        return F.hardsigmoid(input)
+
+
 class Tanh(Module):
     r"""Applies the element-wise function:
 
     .. math::
-        \text{Tanh}(x) = \tanh(x) = \frac{e^x - e^{-x}} {e^x + e^{-x}}
+        \text{Tanh}(x) = \tanh(x) = \frac{\exp(x) - \exp(-x)} {\exp(x) + \exp(-x)}
 
     Shape:
         - Input: :math:`(N, *)` where `*` means, any number of additional
@@ -293,6 +320,37 @@ class Tanh(Module):
 
     def forward(self, input):
         return torch.tanh(input)
+
+
+class Hardswish(Module):
+    r"""Applies the hardswish function, element-wise, as described in the paper:
+
+    `Searching for MobileNetV3`_.
+
+    .. math::
+        \text{Hardswish}(x) = \begin{cases}
+            0 & \text{if~} x \le -3, \\
+            x & \text{if~} x \ge +3, \\
+            x^2/6 & \text{otherwise}
+        \end{cases}
+
+    Shape:
+        - Input: :math:`(N, *)` where `*` means, any number of additional
+          dimensions
+        - Output: :math:`(N, *)`, same shape as the input
+
+    Examples::
+
+        >>> m = nn.Hardswish()
+        >>> input = torch.randn(2)
+        >>> output = m(input)
+
+    .. _`Searching for MobileNetV3`:
+        https://arxiv.org/abs/1905.02244
+    """
+
+    def forward(self, input):
+        return F.hardswish(input)
 
 
 class ELU(Module):
@@ -597,7 +655,7 @@ class Softplus(Module):
     to constrain the output of a machine to always be positive.
 
     For numerical stability the implementation reverts to the linear function
-    for inputs above :attr:`threshold` (default ``20``).
+    when :math:`input \times \beta > threshold`.
 
     Args:
         beta: the :math:`\beta` value for the Softplus formulation. Default: 1
@@ -642,7 +700,7 @@ class Softshrink(Module):
         \end{cases}
 
     Args:
-        lambd: the :math:`\lambda` value for the Softshrink formulation. Default: 0.5
+        lambd: the :math:`\lambda` (must be no less than zero) value for the Softshrink formulation. Default: 0.5
 
     Shape:
         - Input: :math:`(N, *)` where `*` means, any number of additional
@@ -913,7 +971,7 @@ class Tanhshrink(Module):
     r"""Applies the element-wise function:
 
     .. math::
-        \text{Tanhshrink}(x) = x - \text{Tanh}(x)
+        \text{Tanhshrink}(x) = x - \tanh(x)
 
     Shape:
         - Input: :math:`(N, *)` where `*` means, any number of additional
