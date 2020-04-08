@@ -203,7 +203,7 @@ void IRInputOutput::removeInput(Val* val) {
     if ((*it) == val)
       break;
   }
-  assert(it != inputs_.end());
+  TORCH_INTERNAL_ASSERT(it != inputs_.end());
   inputs_.erase(it);
 }
 
@@ -213,7 +213,7 @@ void IRInputOutput::removeOutput(Val* val) {
     if ((*it) == val)
       break;
   }
-  assert(it != outputs_.end());
+  TORCH_INTERNAL_ASSERT(it != outputs_.end());
   outputs_.erase(it);
 }
 
