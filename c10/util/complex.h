@@ -67,7 +67,7 @@ namespace c10 {
 //
 // [Operator ""]
 //
-// std::complex has custom literals `i`, `if` and `if` defined in namespace `std::literals::complex_literals`.
+// std::complex has custom literals `i`, `if` and `il` defined in namespace `std::literals::complex_literals`.
 // We define our own custom literals in the namespace `c10::complex_literals`. Our custom literals does not
 // follow the same behavior as in std::complex, instead, we define _if, _id to construct float/double
 // complex literals.
