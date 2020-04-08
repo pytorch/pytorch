@@ -2703,8 +2703,8 @@ class TestONNXRuntime(unittest.TestCase):
                 out = input * 2
                 out *= out.dim()
                 return out
-        empty_input = torch.ones(0, requires_grad=True)
-        multi_dim_input = torch.ones(1, 2, 3, requires_grad=True)
+        empty_input = torch.randn(0, requires_grad=True)
+        multi_dim_input = torch.randn(1, 2, 3, requires_grad=True)
         self.run_test(DimModel(), empty_input)
         self.run_test(DimModel(), multi_dim_input)
 
