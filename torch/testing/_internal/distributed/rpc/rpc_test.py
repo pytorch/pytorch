@@ -639,19 +639,6 @@ class RpcTest(RpcAgentTestFixture):
         )
         self.assertEqual(ret, my_function(n, n + 1, n + 2))
 
-    @dist_init
-    def test_profiler_with_script(self):
-        func = my_script_func
-        args = (torch.tensor(1),)
-        dst = (self.rank + 1) % self.world_size
-        if self.rank == 1:
-            with torch.autograd.profiler.profile() as prof:
-                rpc.remote(worker_name(dst), func, args=args)
-                wait_until_pending_users_flushed()
-                import time ; time.sleep(0.5)
-            print("DONE")
-            print(prof.key_averages())
-
     def _profiler_test_with_rpc(self, rpc_exec_mode, func, args, use_record_function=False):
         dst = (self.rank + 1) % self.world_size
         # only run profiler on rank 1.
