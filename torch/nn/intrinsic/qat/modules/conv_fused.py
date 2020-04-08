@@ -6,7 +6,7 @@ import torch.nn.qat as nnqat
 import torch.nn.functional as F
 from torch.nn import init
 from torch.nn.modules.utils import _pair
-
+from torch.nn.parameter import Parameter
 
 class _ConvBnNd(nn.modules.conv._ConvNd):
     def __init__(self,
@@ -26,7 +26,7 @@ class _ConvBnNd(nn.modules.conv._ConvNd):
                  qconfig=None):
         nn.modules.conv._ConvNd.__init__(self, in_channels, out_channels, kernel_size,
                                          stride, padding, dilation, transposed,
-                                         output_padding, groups, False if bias is None else True, padding_mode)
+                                         output_padding, groups, False, padding_mode)
         assert qconfig, 'qconfig must be provided for QAT module'
         self.qconfig = qconfig
         self.eps = eps
@@ -43,6 +43,10 @@ class _ConvBnNd(nn.modules.conv._ConvNd):
         self.activation_post_process = self.qconfig.activation()
         self.weight_fake_quant = self.qconfig.weight()
         self.reset_bn_parameters()
+        if bias:
+            self.bias = Parameter(torch.Tensor(out_channels))
+        else:
+            self.register_parameter('bias', None)
 
     def reset_running_stats(self):
         self.running_mean.zero_()
@@ -53,6 +57,10 @@ class _ConvBnNd(nn.modules.conv._ConvNd):
         self.reset_running_stats()
         init.uniform_(self.gamma)
         init.zeros_(self.beta)
+        if self.bias is not None:
+            fan_in, _ = init._calculate_fan_in_and_fan_out(self.weight)
+            bound = 1 / math.sqrt(fan_in)
+            init.uniform_(self.bias, -bound, bound)
 
     def reset_parameters(self):
         super(_ConvBnNd, self).reset_parameters()
@@ -140,7 +148,7 @@ class _ConvBnNd(nn.modules.conv._ConvNd):
         conv, bn = mod[0], mod[1]
         qat_convbn = cls(conv.in_channels, conv.out_channels, conv.kernel_size,
                          conv.stride, conv.padding, conv.dilation,
-                         conv.groups, conv.bias,
+                         conv.groups, conv.bias is not None,
                          conv.padding_mode,
                          bn.eps, bn.momentum,
                          False,
