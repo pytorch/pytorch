@@ -119,9 +119,8 @@ IValue Method::operator()(std::vector<IValue> stack, const Kwargs& kwargs) {
 }
 
 IValue Module::forward(std::vector<IValue> inputs) {
-  auto cu = _ivalue()->compilation_unit();
-  auto pre_forward_hooks = cu->get_forward_pre_hooks();
-  auto forward_hooks = cu->get_forward_hooks();
+  const auto& pre_forward_hooks = type()->getForwardPreHooks();
+  const auto& forward_hooks = type()->getForwardHooks();
 
   // Let's go over each pre-forward hook and call them
   for (const auto& hook : pre_forward_hooks) {
