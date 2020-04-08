@@ -830,50 +830,10 @@ void removeMaxPoolUnusedOutput(Block* b) {
   }
 }
 
-// recursive function that deletes all nodes between NegativeLogLikelihoodLoss
-// and LogSoftmax
-void recursive_del(Node* node) {
-  if (node->kind() == onnx::LogSoftmax) {
-    return;
-  }
-
-  std::vector<Node*> nodeList;
-  for (size_t i = 0; i < node->inputs().size(); ++i) {
-    nodeList.push_back(node->input(i)->node());
-  }
-  node->removeAllInputs();
-
-  if (node->kind() != onnx::NegativeLogLikelihoodLoss) {
-    bool del = true;
-    for (size_t i = 0; i < node->outputs().size(); ++i) {
-      if (!node->outputs()[i]->uses().empty()) {
-        del = false;
-        break;
-      }
-    }
-    if (del) {
-      node->destroy();
-    }
-  }
-
-  for (Node* n: nodeList) {
-    recursive_del(n);
-  }
-}
-
-Node* createSoftmaxCrossEntropyNode(Block* b, graph_node_list_iterator it, std::vector<Value*> values) {
-  Node* softmaxCrossEntropyNode = b->owningGraph()->create(onnx::SoftmaxCrossEntropyLoss, it->outputs().size());
-  for (size_t i = 0; i < softmaxCrossEntropyNode->outputs().size(); ++i) {
-    softmaxCrossEntropyNode->outputs()[i]->copyMetadata(it->outputs()[i]);
-  }
-  for (Value* value : values) {
-    softmaxCrossEntropyNode->addInput(value);
-  }
-  return softmaxCrossEntropyNode;
-}
-
 // This optimization fuses LogSoftmax and NegativeLogLikelihoodLoss operators into
-// one operator: SoftmaxCrossEntropyLoss.
+// one operator: SoftmaxCrossEntropyLoss, and depending on the dimensions of the input
+// and different attributes there will be different subgraphs of LogSoftmax and
+// NegativeLogLikelihoodLoss.
 static void fuseLogSoftmaxNllLoss(Block* b) {
   for (auto it = b->nodes().begin(), end = b->nodes().end(); it != end; ++it) {
     for (auto* child_block : it->blocks()) {
@@ -881,98 +841,92 @@ static void fuseLogSoftmaxNllLoss(Block* b) {
     }
     if (it->kind() == onnx::NegativeLogLikelihoodLoss) {
       auto prev = it->input(0)->node();
+      Node* origNllLossNode = *it;
       Node* origLogSoftmaxNode;
-      Node* origNllLossNode;
-      std::vector<Node*> deleteNodes;
-      Node* softmaxCrossEntropyNode = nullptr;
       // if the input is 2D
+      // graph(%input : Float(3, 5),
+      // %target : Long(3)):
+      // %4 : Float(3, 5) = onnx::LogSoftmaxaxis=1
+      // %8 : Float(3) = onnx::NegativeLogLikelihoodLoss[reduction="none"]
+      // return (%8)
       if (prev->kind() == onnx::LogSoftmax) {
         origLogSoftmaxNode= it->input(0)->node();
-        origNllLossNode = *it;
-        deleteNodes.push_back(origLogSoftmaxNode);
       // if the input is 4D
+      // graph(%input : Float(3, 5, 2, 7),
+      // %target : Long(3, 2, 7)):
+      // %4 : Tensor = onnx::Transpose[perm=[0, 3, 2, 1]] (%input)
+      // %5 : Tensor = onnx::LogSoftmax[axis=3] (%4)
+      // %6 : Float(3, 5, 2, 7) = onnx::Transpose[perm=[0, 3, 2, 1]] (%5)
+      // %10 : Float(3, 2, 7) = onnx::NegativeLogLikelihoodLoss[reduction="none"](%6, %target)
+      // return (%10)
       } else if (prev->kind() == onnx::Transpose &&
                  prev->input(0)->node()->kind() == onnx::LogSoftmax) {
-        auto logSoftmaxNode = prev->input(0)->node();
-        origLogSoftmaxNode = logSoftmaxNode->input(0)->node();
-        origNllLossNode = *it;
-        prev->removeAllInputs();
-        logSoftmaxNode->removeAllInputs();
-        deleteNodes.push_back(origLogSoftmaxNode);
-        deleteNodes.push_back(logSoftmaxNode);
-        deleteNodes.push_back(prev);
+        origLogSoftmaxNode = prev->input(0)->node();
+        auto logSoftmaxNode = origLogSoftmaxNode->input(0)->node();
+        origLogSoftmaxNode->replaceInput(0, logSoftmaxNode->inputs().at(0));
       // if the input is 3D or > 4D
+      // graph(%input : Float(3, 5, 2),
+      // %target.1 : Long(3, 2)):
+      // %4 : Tensor = onnx::Transpose[perm=[0, 2, 1]] (%input)
+      // %5 : Tensor = onnx::LogSoftmax[axis=2] (%4)
+      // %6 : Float(3, 5, 2) = onnx::Transpose[perm=[0, 2, 1]] (%5)
+      // ...
+      // %22 : Float(3, 5, 1, 2) = onnx::Reshape(%6, %21)
+      // ...
+      // %26 : Long(3, 1, 2) = onnx::Reshape(%target.1, %25)
+      // %30 : Float() = onnx::NegativeLogLikelihoodLoss[reduction="sum"](%22, %26)
+      // return (%30)
       } else if (prev->kind() == onnx::Reshape &&
                  prev->input(0)->node()->kind() == onnx::Transpose &&
                  prev->input(0)->node()->input(0)->node()->kind() == onnx::LogSoftmax) {
         origLogSoftmaxNode = prev->input(0)->node()->input(0)->node();
-        auto transpose = origLogSoftmaxNode->input(0)->node();
-        origNllLossNode = *it;
+        auto logSoftmaxNode = origLogSoftmaxNode->input(0)->node();
+        origLogSoftmaxNode->replaceInput(0, logSoftmaxNode->inputs().at(0));
         auto reshape = origNllLossNode->input(1)->node();
-        std::vector<Value*> values{transpose->inputs().at(0), reshape->inputs().at(0)};
-        if (origNllLossNode->inputs().size() == 3) {
-          values.push_back(origNllLossNode->inputs().at(2));
-        }
-        softmaxCrossEntropyNode = createSoftmaxCrossEntropyNode(b, it, values);
-        origLogSoftmaxNode->removeAllInputs();
-        deleteNodes.push_back(origLogSoftmaxNode);
-        deleteNodes.push_back(transpose);
+        origNllLossNode->replaceInput(1, reshape->inputs().at(0));
         // when reduction=none a different graph is created and the graph doesn't end with
-        // node NegativeLogLikelihoodLoss like in all other cases and nodes that come after
-        // NegativeLogLikelihoodLoss need to be deleted.
-        if (!origNllLossNode->output(0)->uses().empty()){
-          auto nllloss_output = origNllLossNode->output(0)->uses()[0].user;
- 
-          if (nllloss_output->kind() == onnx::Reshape &&
-              nllloss_output->inputs()[1]->node()->kind() == prim::ListConstruct) {
-            auto reshape_after = nllloss_output;
-            auto listconstruct = nllloss_output->inputs()[1]->node(); 
- 
-            //make output of reshape the output of nllloss
-            reshape_after->replaceAllUsesWith(origNllLossNode);
- 
-            reshape_after->removeAllInputs();
-            reshape_after->destroy();
- 
-            auto gather = listconstruct->input(1)->node();
-  
-            listconstruct->removeAllInputs();
-            listconstruct->destroy();
- 
-            auto shape = gather->input(0)->node();
-            auto constant = gather->input(1)->node();
-            constant->removeAllInputs();
-            shape->removeAllInputs();
-            gather->removeAllInputs();
-            constant->destroy();
-            shape->destroy();
-            gather->destroy();
-          } 
+        // node NegativeLogLikelihoodLoss like in all other cases.
+        // graph(%input : Float(3, 5, 2),
+        // %target.1 : Long(3, 2)):
+        // %4 : Tensor = onnx::Transposeperm=[0, 2, 1]
+        // %5 : Tensor = onnx::LogSoftmaxaxis=2
+        // %6 : Float(3, 5, 2) = onnx::Transposeperm=[0, 2, 1]
+        // ...
+        // %27 : Float(3, 5, 1, 2) = onnx::Reshape(%6, %26)
+        // %31 : Long(3, 1, 2) = onnx::Reshape(%target.1, %30)
+        // %35 : Float(3, 1, 2) = onnx::NegativeLogLikelihoodLoss[reduction="none"](%27, %31)
+        // %36 : int[] = prim::ListConstruct(%11, %21)
+        // %37 : Float(3, 2) = onnx::Reshape(%35, %36)
+        // return (%37)
+        if (!origNllLossNode->output(0)->uses().empty() &&
+            origNllLossNode->s(attr::reduction) == "none"){
+          auto nllloss_output = origNllLossNode->output(0)->uses()[0].user; 
+          assert(nllloss_output->kind() == onnx::Reshape);
+          assert(nllloss_output->inputs()[1]->node()->kind() == prim::ListConstruct);
+          auto reshape_after = nllloss_output;
+          //make output of reshape the output of nllloss
+          reshape_after->replaceAllUsesWith(origNllLossNode); 
         }
-
-        recursive_del(origNllLossNode);
       } else {
-        break;
+        continue;
       }
 
-      if (!softmaxCrossEntropyNode) {
-        std::vector<Value*> values{origLogSoftmaxNode->inputs().at(0), origNllLossNode->inputs().at(1)};
-        // this is required for the optional weight input
-        if (origNllLossNode->inputs().size() == 3) {
-          values.push_back(origNllLossNode->inputs().at(2));
-        }
-        softmaxCrossEntropyNode = createSoftmaxCrossEntropyNode(b, it, values);
-      }
-
+      Node* softmaxCrossEntropyNode = b->owningGraph()->create(onnx::SoftmaxCrossEntropyLoss, it->outputs().size());
+      for (size_t i = 0; i < softmaxCrossEntropyNode->outputs().size(); ++i) {
+        softmaxCrossEntropyNode->outputs()[i]->copyMetadata(it->outputs()[i]);
+      } 
       softmaxCrossEntropyNode->copyAttributes(*origNllLossNode);
       softmaxCrossEntropyNode->insertBefore(origNllLossNode);
+      softmaxCrossEntropyNode->addInput(origLogSoftmaxNode->inputs().at(0));
+      softmaxCrossEntropyNode->addInput(origNllLossNode->inputs().at(1));
+      // optional weight input is provided
+      if (origNllLossNode->inputs().size() == 3) {
+        softmaxCrossEntropyNode->addInput(origNllLossNode->inputs().at(2));
+      }
+
       it->replaceAllUsesWith(softmaxCrossEntropyNode);
       it->removeAllInputs();
-      for (Node* node : deleteNodes) {
-        node->destroy();
-      }
       it.destroyCurrent();
-      continue;
     } 
   }
 }
