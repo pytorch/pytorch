@@ -37,12 +37,13 @@ C10_DEFINE_string(
     "semicolon to separate the dimension of different "
     "tensors.");
 C10_DEFINE_string(input_type, "", "Input type (uint8_t/float)");
+C10_DEFINE_string(input_format, "", "Input memory format (NHWC/NCHW)");
 C10_DEFINE_bool(
   print_output,
   false,
   "Whether to print output with all one input tensor.");
-C10_DEFINE_int(warmup, 0, "The number of iterations to warm up.");
-C10_DEFINE_int(iter, 10, "The number of iterations to run.");
+C10_DEFINE_int(warmup, 10, "The number of iterations to warm up.");
+C10_DEFINE_int(iter, 100, "The number of iterations to run.");
 C10_DEFINE_bool(
   report_pep,
   false,
@@ -83,10 +84,15 @@ int main(int argc, char** argv) {
 
   std::vector<std::string> input_dims_list = split(';', FLAGS_input_dims);
   std::vector<std::string> input_type_list = split(';', FLAGS_input_type);
+  std::vector<std::string> input_format_list = split(';', FLAGS_input_format);
   CAFFE_ENFORCE_EQ(
       input_dims_list.size(),
       input_type_list.size(),
       "Input dims and type should have the same number of items.");
+  CAFFE_ENFORCE_EQ(
+      input_dims_list.size(),
+      input_format_list.size(),
+      "Input dims and format should have the same number of items.");
 
   std::vector<c10::IValue> inputs;
   for (size_t i = 0; i < input_dims_list.size(); ++i) {
@@ -95,15 +101,29 @@ int main(int argc, char** argv) {
     for (const auto& s : input_dims_str) {
       input_dims.push_back(c10::stoi(s));
     }
+
+    at::TensorOptions input_tensor_options;
+
+    at::MemoryFormat input_memory_format;
+    if (input_format_list[i] == "NHWC") {
+      input_tensor_options.memory_format(at::MemoryFormat::ChannelsLast);
+    } else if (input_format_list[i] == "NCHW") {
+      input_tensor_options.memory_format(at::MemoryFormat::Contiguous);
+    } else {
+      CAFFE_THROW("Unsupported input format: ", input_format_list[i]);
+    }
+
     if (input_type_list[i] == "float") {
-      inputs.push_back(torch::ones(input_dims, at::ScalarType::Float));
+      input_tensor_options.dtype(at::ScalarType::Float);
     } else if (input_type_list[i] == "uint8_t") {
-      inputs.push_back(torch::ones(input_dims, at::ScalarType::Byte));
+      input_tensor_options.dtype(at::ScalarType::Byte);
     } else if (input_type_list[i] == "int64") {
-      inputs.push_back(torch::ones(input_dims, torch::kI64));
+      input_tensor_options.dtype(torch::kI64);
     } else {
       CAFFE_THROW("Unsupported input type: ", input_type_list[i]);
     }
+
+    inputs.push_back(torch::ones(input_dims, input_tensor_options));
   }
 
   if (FLAGS_pytext_len > 0) {
