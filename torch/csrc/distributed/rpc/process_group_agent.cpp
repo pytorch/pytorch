@@ -246,14 +246,9 @@ void ProcessGroupAgent::startImpl() {
       std::thread(&ProcessGroupAgent::pollTimedOutRPCs, this);
 }
 
-void ProcessGroupAgent::shutdown() {
+void ProcessGroupAgent::shutdownImpl() {
   LOG(INFO) << "Shutting down ProcessGroupAgent on rank " << pg_->getRank()
             << ".";
-  std::unique_lock<std::mutex> lock{futureMutex_};
-  if (!rpcAgentRunning_.exchange(false)) {
-    return;
-  }
-  lock.unlock();
   futureTimeoutCV_.notify_one();
   futureTimeoutThread_.join();
   // Abort listener thread to stop accepting new work. We need to interrupt the
