@@ -31,7 +31,7 @@
 #include <torch/csrc/jit/passes/onnx/fixup_onnx_conditionals.h>
 #include <torch/csrc/jit/passes/onnx/fixup_onnx_loop.h>
 #include <torch/csrc/jit/passes/onnx/peephole.h>
-#include <torch/csrc/jit/passes/onnx/preclude_inlining.h>
+#include <torch/csrc/jit/passes/onnx/function_substitution.h>
 #include <torch/csrc/jit/passes/onnx/prepare_division_for_onnx.h>
 #include <torch/csrc/jit/passes/onnx/prepare_inplace_ops_for_onnx.h>
 #include <torch/csrc/jit/passes/onnx/scalar_type_analysis.h>

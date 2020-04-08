@@ -1,4 +1,4 @@
-#include <torch/csrc/jit/passes/onnx/preclude_inlining.h>
+#include <torch/csrc/jit/passes/onnx/function_substitution.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/onnx/helper.h>
 
@@ -34,12 +34,12 @@ void functionCallSubstitution(Block* block) {
           cur->removeInput(0);
           functionCallSubstitution(fun_type->function()->graph()->block());
           GRAPH_UPDATE(
-              "Inlining in ONNX preclude inlining function '",
+              "ONNX function call substitution function: '",
               fun_type->function()->name(),
               "' to ",
               *cur);
           GRAPH_UPDATE(
-              "Function in ONNX preclude inlining body: ",
+              "Function in ONNX function call substitution body: ",
               *fun_type->function()->optimized_graph());
           inlineCallTo(cur, fun_type->function(), false);
         }
@@ -53,12 +53,12 @@ void functionCallSubstitution(Block* block) {
           }
           functionCallSubstitution(function->graph()->block());
           GRAPH_UPDATE(
-              "Inlining in ONNX preclude inlining function '",
+              "ONNX function call substitution method: '",
               function->name(),
               "' to ",
               *cur);
           GRAPH_UPDATE(
-              "Function in ONNX preclude inlining body: ",
+              "Method in ONNX function call substitution body: ",
               function->optimized_graph());
           inlineCallTo(cur, function, false);
         }
