@@ -50,7 +50,7 @@ class TestFreezing(JitTestCase):
                 self.h = {"layer" : [torch.tensor([7.7], requires_grad=True)]}
                 self.t = torch.tensor([1.2, 2.4], requires_grad=True)  # folded
                 self.ts = [torch.tensor([1.0, 2.0], requires_grad=True), torch.tensor([3.0, 4.0], requires_grad=True)]  # folded
-                self.tt = [[torch.tensor([3.3, 2.3], requires_grad=True), None]]  # not folded. Generic list not yet folded
+                self.tt = [[torch.tensor([3.3, 2.3], requires_grad=True), None]]  # not folded. TODO: fold Generic list
 
             def forward(self, x):
                 return str(self.a) + str(self.b) + self.c + str(self.d) + \
@@ -62,6 +62,14 @@ class TestFreezing(JitTestCase):
         input = torch.randn(2, 2)
         output_s = m.forward(input)
         m._c = torch._C._freeze_module(m._c)
+
+        # Check if frozen module looks as below:
+        # module m {
+        #   attributes {
+        #     tt = ...
+        #   }
+        #   ...
+        # }
         self.assertFalse(m._c.hasattr('a'))
         self.assertFalse(m._c.hasattr('b'))
         self.assertFalse(m._c.hasattr('c'))
@@ -113,6 +121,24 @@ class TestFreezing(JitTestCase):
         input = torch.randn(2, 2)
         output_s = m.forward(input)
         mf = torch._C._freeze_module(m._c)
+
+        # Check if frozen module looks as below:
+        # module m {
+        #   attributes {
+        #     sub2 = ...
+        #      b =
+        #   }
+        #   ...
+        #   submodule {
+        #     module m {
+        #       attributes {
+        #         sub2 = ...
+        #         b =
+        #       }
+        #       ...
+        #     }
+        #   }
+        # }
         self.assertFalse(mf.hasattr('sub1'))
         self.assertFalse(mf.hasattr('a'))
         self.assertTrue(mf.hasattr('b'))
@@ -168,6 +194,40 @@ class TestFreezing(JitTestCase):
         input = torch.randn(2, 2)
         output_s = m.forward(input)
         mf = torch._C._freeze_module(m._c)
+
+        # Checking if  Frozen module looks as  below
+        # module mf {
+        #   attributes {
+        #     sub1 = ...
+        #     sub2 = ...
+        #   }
+        #   ...
+        #   submodules {
+        #     module sub1 {
+        #       attributes {
+        #         a = ...
+        #         b = ...
+        #       }
+        #       ...
+        #     }
+        #     module sub2 {
+        #       attributes {
+        #         sub = ...
+        #       }
+        #       ...
+        #       submodule {
+        #         module sub {
+        #           attributes {
+        #             a = ...
+        #             b = ...
+        #           }
+        #           ...
+        #         }
+        #       }
+        #     }
+        #   }
+        # }
+
         self.assertTrue(mf.hasattr('sub1'))
         self.assertTrue(mf.sub1.hasattr('a'))
         self.assertTrue(mf.sub1.hasattr('b'))

@@ -6,8 +6,9 @@
 
 #include <torch/csrc/jit/python/pybind_utils.h>
 
-#include <vector>
+#include <iostream>
 #include <memory>
+#include <vector>
 
 namespace py = pybind11;
 
@@ -22,6 +23,8 @@ struct BenchmarkExecutionStats {
   float latency_avg_ms{-1};
   int64_t num_iters{-1};
 };
+
+std::ostream& operator<<(std::ostream& os, const BenchmarkExecutionStats& value);
 
 /**
  * Use this struct in order to configure a throughput benchmark run.
@@ -72,6 +75,7 @@ public:
   // Aggregate input in the format Model expects in order to avoid further
   // conversions at the benchmark time
   void addInput(py::args&&, py::kwargs&&);
+  void addInput(Input&&);
   BenchmarkExecutionStats benchmark(const BenchmarkConfig& config) const;
 
   bool initialized() const { return initialized_; }
@@ -135,6 +139,9 @@ ModuleOutput ModuleBenchmark::runOnce(py::args&& args, py::kwargs&& kwargs)
 
 template <>
 void ScriptModuleBenchmark::addInput(py::args&& args, py::kwargs&& kwargs);
+template <>
+void ScriptModuleBenchmark::addInput(ScriptModuleInput&& input);
+
 
 template <>
 void ModuleBenchmark::addInput(py::args&& args, py::kwargs&& kwargs);

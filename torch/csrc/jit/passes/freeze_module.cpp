@@ -1,5 +1,5 @@
-#include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/freeze_module.h>
+#include <torch/csrc/jit/jit_log.h>
 
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/passes/inliner.h>
@@ -87,7 +87,7 @@ class AttributePropagator {
     }
 
     auto attr = attrModule.attr(name);
-    if (!AliasDb::mutableType(attr.type())) {
+    if (!AliasDb::isMutableType(attr.type())) {
       auto it = preservedScalarAttrs_.find(attrModule._ivalue());
       return it == preservedScalarAttrs_.end() || !it->second.count(name);
     }
@@ -109,7 +109,7 @@ class AttributePropagator {
       const std::string& name,
       const IValue& attr,
       const ModulePtr& attrModule) {
-    if (AliasDb::mutableType(attr.type())) {
+    if (AliasDb::isMutableType(attr.type())) {
       preservedAttrs_.insert(attr);
     } else {
       preservedScalarAttrs_[attrModule].insert(name);
@@ -147,7 +147,7 @@ class AttributePropagator {
             auto type = n->output()->type();
             // Do not record submodules. Their attributes are tracked
             // individually.
-            if (attr.isObject() || !AliasDb::mutableType(attr.type())) {
+            if (attr.isObject() || !AliasDb::isMutableType(attr.type())) {
               continue;
             }
             usedAttrs.insert(attr);
@@ -185,7 +185,7 @@ class AttributePropagator {
     if (attr.isTensor()) {
       auto t = attr.toTensor();
       if (t.requires_grad()) {
-        t = autograd::as_variable_ref(t).detach();
+        t = t.detach();
         t.set_requires_grad(false);
         attr = IValue(t);
       }
@@ -293,7 +293,7 @@ class AttributePropagator {
 
   bool moduleEscapes(Module& subModule, std::shared_ptr<Graph>& graph) {
     for (auto& output : graph->outputs()) {
-      if (output->type() == subModule.type()) {
+      if (subModule.type()->isSubtypeOf(output->type())) {
         return true;
       }
     }
@@ -364,7 +364,7 @@ class AttributePropagator {
       auto name = type->getAttributeName(i);
       auto attr = module.attr(name);
       bool isMutable;
-      if (AliasDb::mutableType(attrTy)) {
+      if (AliasDb::isMutableType(attrTy)) {
         isMutable = preservedAttrs_.count(attr);
       } else {
         isMutable =
@@ -399,7 +399,7 @@ class AttributePropagator {
       }
       for (auto& fn : type->methods()) {
         auto& name = fn->name();
-        if ("forward" == name && type == module_.type())
+        if ("forward" == name && *type == *module_.type())
           continue;
         funcsToRemove.push_back(fn);
       }
