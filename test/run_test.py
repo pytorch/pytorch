@@ -634,18 +634,19 @@ def main():
         selected_tests = filter(lambda test_name: "jit" in test_name, TESTS)
 
     if options.determine_from is not None and os.path.exists(options.determine_from):
-        with open(options.determine_from, 'r') as fh:
-            touched_files = [
-                os.path.normpath(name.strip()) for name in fh.read().split('\n')
-                if len(name.strip()) > 0
-            ]
-        # HACK: Ensure the 'test' paths can be traversed by Modulefinder
-        sys.path.append('test')
-        selected_tests = [
-            test for test in selected_tests
-            if determine_target(test, touched_files, options)
-        ]
-        sys.path.remove('test')
+        pass
+        # with open(options.determine_from, 'r') as fh:
+        #     touched_files = [
+        #         os.path.normpath(name.strip()) for name in fh.read().split('\n')
+        #         if len(name.strip()) > 0
+        #     ]
+        # # HACK: Ensure the 'test' paths can be traversed by Modulefinder
+        # sys.path.append('test')
+        # selected_tests = [
+        #     test for test in selected_tests
+        #     if determine_target(test, touched_files, options)
+        # ]
+        # sys.path.remove('test')
 
     for test in selected_tests:
 
