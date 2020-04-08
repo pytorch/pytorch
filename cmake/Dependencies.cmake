@@ -961,14 +961,14 @@ endif()
 # ---[ LLVM
 if(USE_LLVM)
   message(STATUS "Looking for LLVM in ${USE_LLVM}")
-  find_package(LLVM QUIET PATHS ${USE_LLVM} NO_DEFAULT_PATH)
+  find_package(LLVM PATHS ${USE_LLVM} NO_DEFAULT_PATH)
 
   if(LLVM_FOUND)
     message(STATUS "Found LLVM ${LLVM_PACKAGE_VERSION}")
     message(STATUS "Using LLVMConfig.cmake in: ${LLVM_DIR}")
 
     include_directories(${LLVM_INCLUDE_DIRS})
-    add_definitions(-DTORCH_ENABLE_LLVM ${LLVM_DEFINITIONS})
+    add_definitions(-DTORCH_ENABLE_LLVM)
   endif(LLVM_FOUND)
 endif(USE_LLVM)
 
