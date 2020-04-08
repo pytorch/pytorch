@@ -742,7 +742,7 @@ def emit_body(declaration):
                     assert not is_output
                 if inplace and is_output:
                     var = 'self'
-                    is_inplace_view = "as_variable_ref({}).is_view()".format(var)
+                    is_inplace_view = "{}.is_view()".format(var)
                     expr = 'SavedVariable({}, {}, {})'.format(var, str(is_output).lower(), is_inplace_view)
                 else:
                     expr = 'SavedVariable({}, {})'.format(var, str(is_output).lower())
