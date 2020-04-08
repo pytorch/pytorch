@@ -1182,7 +1182,7 @@ class Module(object):
 
         # replicas do not have parameters themselves, the replicas reference the original
         # module.
-        replica._parameters = []
+        replica._parameters = OrderedDict()
         replica._buffers = replica._buffers.copy()
         replica._modules = replica._modules.copy()
 
