@@ -1,2 +1,5 @@
 c10/core/TensorOptions.h:614:
 inline DeviceType computeDeviceType(DispatchKey tid) {
+
+torch/csrc/tensor/python_tensor.cpp:276:
+initialize_aten_types
