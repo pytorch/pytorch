@@ -340,7 +340,7 @@ void IRPrinter::handle(const Reorder* const ro) {
 }
 
 void IRPrinter::printKernel(
-    std::vector<Expr*> exprs,
+    const std::vector<Expr*>& exprs,
     const std::string& kernel_name) {
   Fusion* fusion = FusionGuard::getCurFusion();
   // if(exprs.size() != 0)

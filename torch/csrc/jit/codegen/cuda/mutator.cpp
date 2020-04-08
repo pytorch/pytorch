@@ -92,9 +92,9 @@ Statement* OptOutMutator::mutate(TensorIndex* ti) {
   if (!changed)
     return ti;
 
-  std::vector<Val*> valInds;
-  for (auto* ind : inds)
-    valInds.push_back(ind->asVal());
+  std::vector<Val*> valInds(inds.size(), nullptr);
+  for (decltype(inds.size()) i{0}; i < inds.size(); i++)
+    valInds[i] = inds[i]->asVal();
 
   Val* mutated_val = new TensorIndex(ti->view(), valInds);
   registerMutation(ti, mutated_val);

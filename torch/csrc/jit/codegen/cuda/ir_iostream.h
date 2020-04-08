@@ -119,7 +119,9 @@ struct TORCH_CUDA_API IRPrinter : public OptInConstDispatch {
     print_inline_ = prev;
   }
 
-  void printKernel(std::vector<Expr*> exprs, const std::string& kernel_name);
+  void printKernel(
+      const std::vector<Expr*>& exprs,
+      const std::string& kernel_name);
 };
 
 TORCH_CUDA_API std::ostream& operator<<(
