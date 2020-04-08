@@ -109,6 +109,7 @@ backend_test.exclude(r'(test_hardsigmoid'  # Does not support Hardsigmoid.
                      '|test_mean_square_distance.*'
                      '|test_unfoldtodepth.*'
                      '|test_momentum.*'
+                     '|test_nesterov_momentum'
                      '|test_adagrad.*'
                      ')')
 
