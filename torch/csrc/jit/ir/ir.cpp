@@ -1821,7 +1821,7 @@ at::ArrayRef<Value*> createTupleUnpack(Value* v) {
   return g.insertNode(g.createTupleUnpack(v))->outputs();
 }
 
-// inline_optimized_graph argument is used to preclude inlining functions for
+// inline_optimized_graph argument is used in substitute function call for
 // ONNX conversion
 std::vector<Value*> inlineCallTo(
     Node* to_replace,
