@@ -9,7 +9,7 @@
 #include <c10/util/Optional.h>
 
 #include <ATen/Utils.h>
-#include <ATen/CPUGenerator.h>
+#include <ATen/CPUGeneratorImpl.h>
 #include <ATen/core/DistributionsHelper.h>
 #include <ATen/native/Distributions.h>
 #include <ATen/native/DispatchStub.h>
@@ -57,7 +57,7 @@ namespace {
  */
 
 
-int64_t sample_poisson(double lambda, at::CPUGenerator* generator) {
+int64_t sample_poisson(double lambda, at::CPUGeneratorImpl* generator) {
   TORCH_CHECK(lambda >= 0, "invalid Poisson rate, expected rate to be non-negative");
   at::uniform_real_distribution<double> standard_uniform(0.0, 1.0);
   if (lambda >= 10) {
@@ -120,6 +120,7 @@ DEFINE_DISPATCH(exponential_stub);
 DEFINE_DISPATCH(multinomial_stub);
 DEFINE_DISPATCH(geometric_stub);
 DEFINE_DISPATCH(log_normal_stub);
+DEFINE_DISPATCH(uniform_stub);
 DEFINE_DISPATCH(normal_stub);
 DEFINE_DISPATCH(random_stub);
 DEFINE_DISPATCH(random_from_to_stub);
@@ -145,7 +146,7 @@ Tensor& bernoulli_out(Tensor& result, const Tensor& self, Generator gen) {
 Tensor& bernoulli_tensor_cpu_(Tensor& self, const Tensor& p_, Generator gen) {
   NoNamesGuard guard;
   AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Bool, self.scalar_type(), "bernoulli_tensor_cpu_self_", [&] {
-    CPUGenerator* generator = get_generator_or_default<CPUGenerator>(gen, detail::getDefaultCPUGenerator());
+    CPUGeneratorImpl* generator = get_generator_or_default<CPUGeneratorImpl>(gen, detail::getDefaultCPUGenerator());
     // See Note [Acquire lock when using random generators]
     std::lock_guard<std::mutex> lock(generator->mutex_);
     using self_t = scalar_t;
@@ -180,7 +181,7 @@ Tensor& bernoulli_scalar_cpu_(Tensor& self, double p, Generator gen) {
   }
 #endif
   AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Bool, self.scalar_type(), "bernoulli_scalar_cpu_", [&] {
-    CPUGenerator* generator = get_generator_or_default<CPUGenerator>(gen, detail::getDefaultCPUGenerator());
+    CPUGeneratorImpl* generator = get_generator_or_default<CPUGeneratorImpl>(gen, detail::getDefaultCPUGenerator());
     // See Note [Acquire lock when using random generators]
     std::lock_guard<std::mutex> lock(generator->mutex_);
     CPU_tensor_apply1<scalar_t>(
@@ -217,6 +218,19 @@ Tensor& geometric_(Tensor& self, double p, Generator gen) {
   auto iter = TensorIterator::nullary_op(self);
   geometric_stub(iter.device_type(), iter, p, gen);
   return self;
+}
+
+// ==================================================== Uniform =======================================================
+
+template<typename RNG>
+struct UniformStub {
+  void operator()(TensorIterator& iter, double from, double to, Generator gen) {
+    uniform_stub(iter.device_type(), iter, from, to, gen);
+  }
+};
+
+Tensor& uniform_(Tensor& self, double from, double to, Generator gen) {
+  return at::native::templates::uniform_impl_<UniformStub, Generator>(self, from, to, gen);
 }
 
 // ==================================================== Normal ========================================================
@@ -320,7 +334,7 @@ Tensor _dirichlet_grad_cpu(const Tensor& x, const Tensor& alpha, const Tensor& t
 Tensor _s_poisson_cpu(const Tensor& lambda, Generator gen) {
   Tensor ret = at::zeros(lambda.sizes(), lambda.options());
   AT_DISPATCH_FLOATING_TYPES(ret.scalar_type(), "poisson_cpu", [&] {
-    CPUGenerator* generator = get_generator_or_default<CPUGenerator>(gen, detail::getDefaultCPUGenerator());
+    CPUGeneratorImpl* generator = get_generator_or_default<CPUGeneratorImpl>(gen, detail::getDefaultCPUGenerator());
     // See Note [Acquire lock when using random generators]
     std::lock_guard<std::mutex> lock(generator->mutex_);
     CPU_tensor_apply2<scalar_t, scalar_t>(ret, lambda,
@@ -335,7 +349,7 @@ Tensor _s_poisson_cpu(const Tensor& lambda, Generator gen) {
 Tensor _s_gamma_cpu(const Tensor& alpha, Generator gen) {
   Tensor ret = at::zeros(alpha.sizes(), alpha.options());
   AT_DISPATCH_FLOATING_TYPES(ret.scalar_type(), "gamma_cpu", [&] {
-    CPUGenerator* generator = get_generator_or_default<CPUGenerator>(gen, detail::getDefaultCPUGenerator());
+    CPUGeneratorImpl* generator = get_generator_or_default<CPUGeneratorImpl>(gen, detail::getDefaultCPUGenerator());
     // See Note [Acquire lock when using random generators]
     std::lock_guard<std::mutex> lock(generator->mutex_);
     CPU_tensor_apply2<scalar_t, scalar_t>(ret, alpha,
@@ -365,7 +379,7 @@ Tensor _s_dirichlet_cpu(const Tensor& alpha, Generator gen) {
   Tensor ret = at::zeros(alpha.sizes(), alpha.options());
   AT_DISPATCH_FLOATING_TYPES(ret.scalar_type(), "dirichlet", [&] {
     Tensor gamma = at::zeros(alpha.sizes(), alpha.options().dtype(ScalarType::Double));
-    CPUGenerator* generator = get_generator_or_default<CPUGenerator>(gen, detail::getDefaultCPUGenerator());
+    CPUGeneratorImpl* generator = get_generator_or_default<CPUGeneratorImpl>(gen, detail::getDefaultCPUGenerator());
     // See Note [Acquire lock when using random generators]
     std::lock_guard<std::mutex> lock(generator->mutex_);
     /* Generate gamma sample by casting alpha to double to prevent underflow. */

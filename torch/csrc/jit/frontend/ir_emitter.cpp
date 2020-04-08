@@ -470,7 +470,7 @@ struct Environment {
           {"all", std::make_shared<BuiltinFunction>(aten::all, at::nullopt)},
           {"divmod",
            std::make_shared<BuiltinFunction>(aten::divmod, at::nullopt)},
-          {"list", std::make_shared<BuiltinFunction>(aten::list, at::nullopt)},
+          {"list", SpecialFormValue::create(prim::list)},
           {"ord", std::make_shared<BuiltinFunction>(aten::ord, at::nullopt)},
           {"chr", std::make_shared<BuiltinFunction>(aten::chr, at::nullopt)},
           {"bin", std::make_shared<BuiltinFunction>(aten::bin, at::nullopt)},
@@ -1132,7 +1132,7 @@ struct to_ir {
             }
           }
         }
-        auto expr_out = emitToBool(emitExpr(expr));
+        auto expr_out = emitToBool(expr.range(), emitExpr(expr));
         c10::optional<bool> static_if = c10::nullopt;
         if (expr_out->node()->kind() == aten::is_scripting) {
           static_if = true;
@@ -1239,13 +1239,19 @@ struct to_ir {
     if (is_or) {
       new_result = emitIfExpr(loc, lhs, get_const_expr, get_continue_expr);
       refinements = lhs.refinements().Or(rhs->refinements());
-      if (lhs.staticIf() && rhs->staticIf()) {
+      if ((lhs.staticIf() && *lhs.staticIf()) ||
+          (rhs->staticIf() && *rhs->staticIf())) {
+        static_if = true;
+      } else if (lhs.staticIf() && rhs->staticIf()) {
         static_if = *lhs.staticIf() || *rhs->staticIf();
       }
     } else {
       new_result = emitIfExpr(loc, lhs, get_continue_expr, get_const_expr);
       refinements = lhs.refinements().And(rhs->refinements());
-      if (lhs.staticIf() && rhs->staticIf()) {
+      if (((lhs.staticIf() && !*lhs.staticIf()) ||
+           (rhs->staticIf() && !*rhs->staticIf()))) {
+        static_if = false;
+      } else if (lhs.staticIf() && rhs->staticIf()) {
         static_if = *lhs.staticIf() && *rhs->staticIf();
       }
     }
@@ -1292,8 +1298,7 @@ struct to_ir {
 
     return expr_value;
   }
-  Value* emitToBool(Value* v) {
-    SourceRange loc = v->node()->sourceRange();
+  Value* emitToBool(const SourceRange& loc, Value* v) {
     Value* out;
     try {
       auto bool_cast = environment_stack->getSugaredVar("bool", loc);
@@ -1622,7 +1627,7 @@ struct to_ir {
       Value* out;
       if (cond) {
         WithInsertPoint insert(condition_block);
-        out = emitToBool(emitExpr(cond.value()));
+        out = emitToBool(cond.value().range(), emitExpr(cond.value()));
       } else {
         WithInsertPoint insert(n);
         out = graph->insertConstant(true, range);
@@ -2617,6 +2622,17 @@ struct to_ir {
           iterable_tree->addChild(apply.range(), method, iterable);
         }
         return iterable_tree;
+      }
+      case prim::list: {
+        // list(iter) desugars to [_elem for _elem in iter]
+        checkApplyNumInputs(apply, 1);
+        auto iter = apply.inputs()[0];
+        const std::string& elem_name = createTempName("$_elem");
+        auto ident =
+            Var::create(apply.range(), Ident::create(apply.range(), elem_name));
+        auto lc = ListComp::create(apply.range(), ident, ident, iter);
+        return std::make_shared<SimpleValue>(
+            emitListComprehension(lc, nullptr));
       }
       default:
         TORCH_INTERNAL_ASSERT(false, "unknown special form: ", form);
