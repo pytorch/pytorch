@@ -130,12 +130,7 @@ std::shared_ptr<FutureMessage> sendMessageWithAutograd(
     // lifetime of the future. When the future is completed, this will run the
     // end() callbacks associated with the RecordFunction, so that async RPCs
     // can be profiled correctly.
-    fut->addCallback(
-        [rf](
-            const Message& /* unused */,
-            const c10::optional<utils::FutureError>& /* unused */) {
-          rf->end();
-        });
+    fut->addCallback([rf]() { rf->_end(); });
   }
   return fut;
 }

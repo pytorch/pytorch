@@ -124,13 +124,16 @@ white_list = [
     ('_xnnpack::linear_packed', datetime.date(2020, 4, 2)),
     ('_xnnpack::linear_prepack', datetime.date(2020, 4, 2)),
     ('_aten', datetime.date(2020, 4, 15)),
+    ('aten::append*', datetime.date(2020, 4, 15)),
+    ('aten::real*', datetime.date(2020, 4, 15)),
+    ('aten::imag*', datetime.date(2020, 4, 15)),
+    ('aten::quantize_per_tensor', datetime.date(2020, 4, 15)),
 ]
 
 
 # The nightly will fail to parse newly added syntax to schema declarations
 # Add new schemas that will fail the nightly here
 dont_parse_list = [
-    ("prim::id", datetime.date(2020, 4, 1)),
 ]
 
 
@@ -160,7 +163,7 @@ def check_bc(new_schema_dict):
     broken_ops = []
     for existing_schema in existing_schemas:
         if white_listed(existing_schema, white_list):
-            print("skipping schema: ", str(existing_schema))
+            print("Black list, skipping schema: ", str(existing_schema))
             continue
         print("processing existing schema: ", str(existing_schema))
         new_schemas = new_schema_dict.get(existing_schema.name, [])
@@ -202,10 +205,6 @@ if __name__ == '__main__':
             line = f.readline()
             if not line:
                 break
-            if "torch.classes" in line:
-                # TODO Fix type __torch__.torch.classes.xxx
-                continue
-
             if dont_parse(line.strip()):
                 print("Not parsing schema line: ", line.strip())
                 continue

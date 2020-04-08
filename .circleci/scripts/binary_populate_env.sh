@@ -58,7 +58,7 @@ PIP_UPLOAD_FOLDER='nightly/'
 # We put this here so that OVERRIDE_PACKAGE_VERSION below can read from it
 export DATE="$(date -u +%Y%m%d)"
 #TODO: We should be pulling semver version from the base version.txt
-BASE_BUILD_VERSION="1.5.0.dev$DATE"
+BASE_BUILD_VERSION="1.6.0.dev$DATE"
 # Change BASE_BUILD_VERSION to git tag when on a git tag
 # Use 'git -C' to make doubly sure we're in the correct directory for checking
 # the git tag
@@ -66,11 +66,11 @@ if tagged_version >/dev/null; then
   # Switch upload folder to 'test/' if we are on a tag
   PIP_UPLOAD_FOLDER='test/'
   # Grab git tag, remove prefixed v and remove everything after -
-  # Used to clean up tags that are for release candidates like v1.5.0-rc1
-  # Turns tag v1.5.0-rc1 -> v1.5.0
+  # Used to clean up tags that are for release candidates like v1.6.0-rc1
+  # Turns tag v1.6.0-rc1 -> v1.6.0
   BASE_BUILD_VERSION="$(tagged_version | sed -e 's/^v//' -e 's/-.*$//')"
 fi
-if [[ "$(uname)" == 'Darwin' ]] || [[ "$DESIRED_CUDA" == "cu101" ]] || [[ "$PACKAGE_TYPE" == conda ]]; then
+if [[ "$(uname)" == 'Darwin' ]] || [[ "$DESIRED_CUDA" == "cu102" ]] || [[ "$PACKAGE_TYPE" == conda ]]; then
   export PYTORCH_BUILD_VERSION="${BASE_BUILD_VERSION}"
 else
   export PYTORCH_BUILD_VERSION="${BASE_BUILD_VERSION}+$DESIRED_CUDA"
@@ -111,7 +111,7 @@ export BUILD_PYTHONLESS="${BUILD_PYTHONLESS:-}"
 export DESIRED_DEVTOOLSET="$DESIRED_DEVTOOLSET"
 
 export DATE="$DATE"
-export NIGHTLIES_DATE_PREAMBLE=1.5.0.dev
+export NIGHTLIES_DATE_PREAMBLE=1.6.0.dev
 export PYTORCH_BUILD_VERSION="$PYTORCH_BUILD_VERSION"
 export PYTORCH_BUILD_NUMBER="$PYTORCH_BUILD_NUMBER"
 export OVERRIDE_PACKAGE_VERSION="$PYTORCH_BUILD_VERSION"

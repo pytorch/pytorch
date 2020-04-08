@@ -180,7 +180,8 @@ TORCH_API void registerOperator(Operator&& op);
 TORCH_API void deregisterOperator(const FunctionSchema& schema);
 
 // XXX: this function is meant to be used with string literals only!
-std::shared_ptr<Operator> getOperatorForLiteral(const char* signature);
+TORCH_API std::shared_ptr<Operator> getOperatorForLiteral(
+    const char* signature);
 
 // Ensure the thing that registers c10 ops is defined.
 // Otherwise, our registry will not have c10 ops. You can run into this

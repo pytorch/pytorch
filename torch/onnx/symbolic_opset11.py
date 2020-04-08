@@ -21,7 +21,7 @@ from torch.nn.modules.utils import _single, _pair, _triple
 @parse_args('v', 'f', 'f')
 def hardtanh(g, self, min_val, max_val):
     dtype = self.type().scalarType()
-    if dtype is not None:
+    if dtype is None:
         dtype = 6  # float
     else:
         dtype = sym_help.scalar_type_to_onnx.index(sym_help.cast_pytorch_to_onnx[dtype])
@@ -43,6 +43,12 @@ def clamp(g, self, min, max):
         min = _cast_if_not_none(min, dtype)
         max = _cast_if_not_none(max, dtype)
     return g.op("Clip", self, min, max)
+
+
+# Opset 11 gather accepts negative indices
+@parse_args('v', 'i', 'v')
+def select(g, self, dim, index):
+    return g.op("Gather", self, index, axis_i=dim)
 
 
 def index_put(g, self, indices_list_value, values, accumulate=False):
@@ -452,8 +458,7 @@ def _dim_arange(g, like, dim):
 def size(g, self, dim=None):
     if dim is None:
         return g.op("Shape", self)
-    else:
-        return sym_help._size_helper(g, self, dim)
+    return sym_help._size_helper(g, self, dim)
 
 
 def squeeze(g, self, dim=None):

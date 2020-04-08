@@ -275,7 +275,11 @@ class Hardsigmoid(Module):
     r"""Applies the element-wise function:
 
     .. math::
-        \text{Hardsigmoid}(x) = \frac{ReLU6(x + 3)}{6}
+        \text{Hardsigmoid}(x) = \begin{cases}
+            0 & \text{if~} x \le -3, \\
+            1 & \text{if~} x \ge +3, \\
+            x / 6 & \text{otherwise}
+        \end{cases}
 
 
     Shape:
@@ -324,7 +328,11 @@ class Hardswish(Module):
     `Searching for MobileNetV3`_.
 
     .. math::
-        \text{Hardswish}(x) = x * \frac{ReLU6(x + 3)}{6}
+        \text{Hardswish}(x) = \begin{cases}
+            0 & \text{if~} x \le -3, \\
+            x & \text{if~} x \ge +3, \\
+            x^2/6 & \text{otherwise}
+        \end{cases}
 
     Shape:
         - Input: :math:`(N, *)` where `*` means, any number of additional

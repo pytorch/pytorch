@@ -13,9 +13,6 @@ https://github.com/pytorch/pytorch/issues/24015 and
 https://www.numpy.org/neps/nep-0018-array-function-protocol.html
 )
 
-If changing this file in a way that can affect ``__torch_function__`` overhead,
-please report the benchmarks in ``benchmarks/overrides_benchmark``. See the
-instructions in the ``README.md`` in that directory.
 """
 
 import __future__
@@ -305,6 +302,7 @@ def get_testing_overrides():
         torch.histc: lambda input, bins=100, min=0, max=0, out=None: -1,
         torch.hspmm: lambda mat1, mat2, out=None: -1,
         torch.ifft: lambda input, signal_ndim, normalized=False: -1,
+        torch.copy_imag: lambda input, out=None: -1,
         torch.imag: lambda input, out=None: -1,
         torch.index_add: lambda input, dim, index, source: -1,
         torch.index_copy: lambda input, dim, index, source: -1,
@@ -326,7 +324,7 @@ def get_testing_overrides():
         torch.is_signed: lambda input: -1,
         torch.isclose: lambda input, other, rtol=1e-05, atol=1e-08, equal_nan=False: -1,
         torch.isnan: lambda input: -1,
-        torch.kl_div: lambda input, target, size_average=None, reduce=None, reduction='mean': -1,
+        torch.kl_div: lambda input, target, size_average=None, reduce=None, reduction='mean', log_target=False: -1,
         torch.kthvalue: lambda input, k, dim=None, keepdim=False, out=None: -1,
         torch.layer_norm: lambda input, normalized_shape, weight=None, bias=None, esp=1e-05, cudnn_enabled=True: -1,
         torch.le: lambda input, other, out=None: -1,
@@ -451,7 +449,7 @@ def get_testing_overrides():
                                             use_input_stats=True, momentum=0.1, eps=1e-05: -1),
         torch.nn.functional.interpolate: (lambda input, size=None, scale_factor=None, mode='nearest', align_corners=None,
                                           recompute_scale_factor=None: -1),
-        torch.nn.functional.kl_div: lambda input, target, size_average=None, reduce=None, reduction='mean': -1,
+        torch.nn.functional.kl_div: lambda input, target, size_average=None, reduce=None, reduction='mean', log_target=False: -1,
         torch.nn.functional.l1_loss: lambda input, target, size_average=None, reduce=None, reduction='mean': -1,
         torch.nn.functional.layer_norm: lambda input, normalized_shape, weight=None, bias=None, eps=1e-05: -1,
         torch.nn.functional.leaky_relu: lambda input, negative_slope=0.01, inplace=False: -1,
@@ -560,6 +558,7 @@ def get_testing_overrides():
         torch.randint_like: lambda input, low, high, dtype=None, layout=torch.strided, device=None, requires_grad=False: -1,
         torch.randn_like: lambda input, dtype=None, layout=None, device=None, requires_grad=False: -1,
         torch.real: lambda input, out=None: -1,
+        torch.copy_real: lambda input, out=None: -1,
         torch.reciprocal: lambda input, out=None: -1,
         torch.relu: lambda input, inplace=False: -1,
         torch.remainder: lambda input, other, out=None: -1,
