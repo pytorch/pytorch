@@ -1,6 +1,7 @@
 #pragma once
 
 #include <c10/macros/Macros.h>
+#include <c10/util/Exception.h>
 #include <string>
 #include <utility>
 #include <ostream>
@@ -21,6 +22,11 @@ struct OperatorName final {
     if (name.find("::") == std::string::npos) {
       oss << ns << "::" << name;
       name = oss.str();
+    } else {
+      // TODO: This error message assumes that this is called only from
+      // the op registration API (which is currently true
+      TORCH_CHECK(false,
+        "Attempted to def/impl operator ", name, " which is explicitly qualified with a namespace, but you were defining a TORCH_LIBRARY for ", ns, ".  This is not allowed; all TORCH_LIBRARY definitions must be unqualified.  Did you mean to use TORCH_LIBRARY_IMPL?");
     }
   }
 };

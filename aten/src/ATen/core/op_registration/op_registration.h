@@ -939,10 +939,6 @@ public:
   ); \
   void TORCH_LIBRARY_IMPL_init_ ## k (c10::Library& m)
 
-// Variants for ease of testing
-#define MAKE_TORCH_LIBRARY(ns) c10::Library(#ns, __FILE__, __LINE__)
-#define MAKE_TORCH_LIBRARY_IMPL(k) c10::Library(c10::DispatchKey::k, __FILE__, __LINE__)
-
 namespace torch {
   // Old-style API
   using RegisterOperators = c10::RegisterOperators;

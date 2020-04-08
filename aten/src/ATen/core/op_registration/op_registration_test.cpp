@@ -1290,6 +1290,10 @@ TEST(OperatorRegistrationTest, testAvailableArgTypes) {
     "(Dict(str, Dict(int, str)?[])[] a) -> Dict(str, Dict(int, str)?[])[]");
 }
 
+// Variants for ease of testing
+#define MAKE_TORCH_LIBRARY(ns) c10::Library(#ns, __FILE__, __LINE__)
+#define MAKE_TORCH_LIBRARY_IMPL(k) c10::Library(c10::DispatchKey::k, __FILE__, __LINE__)
+
 TEST(NewOperatorRegistrationTest, testBasics) {
   auto m = MAKE_TORCH_LIBRARY(_test);
   m.def("dummy(Tensor self) -> Tensor");
@@ -1346,28 +1350,22 @@ TEST(NewOperatorRegistrationTest, importNamespace) {
   m.def("def2(Tensor self) -> Tensor", [](const Tensor& x) { return x; });
   m.def("def3", [](const Tensor& x) { return x; });
   m.impl("impl1", [](const Tensor& x) { return x; });
-  // TODO: disallow these
-  m.def("retest::def1(Tensor self) -> Tensor");
-  m.def("retest::def2(Tensor self) -> Tensor", [](const Tensor& x) { return x; });
-  m.def("retest::def3", [](const Tensor& x) { return x; });
-  m.impl("retest::impl1", [](const Tensor& x) { return x; });
+  expectThrows<c10::Error>([&] {
+    m.def("retest::def1(Tensor self) -> Tensor");
+  }, "");
 
   ASSERT_TRUE(Dispatcher::singleton().findSchema({"test::def1", ""}).has_value());
   ASSERT_TRUE(Dispatcher::singleton().findSchema({"test::def2", ""}).has_value());
   ASSERT_TRUE(Dispatcher::singleton().findSchema({"test::def3", ""}).has_value());
   ASSERT_TRUE(Dispatcher::singleton().findOp({"test::impl1", ""}).has_value());
-  ASSERT_TRUE(Dispatcher::singleton().findSchema({"retest::def1", ""}).has_value());
-  ASSERT_TRUE(Dispatcher::singleton().findSchema({"retest::def2", ""}).has_value());
-  ASSERT_TRUE(Dispatcher::singleton().findSchema({"retest::def3", ""}).has_value());
-  ASSERT_TRUE(Dispatcher::singleton().findOp({"retest::impl1", ""}).has_value());
 }
 
 TEST(NewOperatorRegistrationTest, schema) {
   auto m = MAKE_TORCH_LIBRARY(test);
-  m.def("test::def1(Tensor self) -> Tensor");
-  m.def(torch::schema("test::def2(Tensor self) -> Tensor"));
-  m.def(torch::schema("test::def3(Tensor self) -> Tensor", c10::AliasAnalysisKind::PURE_FUNCTION));
-  m.def(torch::jit::parseSchema("test::def4(Tensor self) -> Tensor"));
+  m.def("def1(Tensor self) -> Tensor");
+  m.def(torch::schema("def2(Tensor self) -> Tensor"));
+  m.def(torch::schema("def3(Tensor self) -> Tensor", c10::AliasAnalysisKind::PURE_FUNCTION));
+  m.def(torch::jit::parseSchema("def4(Tensor self) -> Tensor"));
 
   ASSERT_TRUE(Dispatcher::singleton().findSchema({"test::def1", ""}).has_value());
   ASSERT_TRUE(Dispatcher::singleton().findSchema({"test::def2", ""}).has_value());

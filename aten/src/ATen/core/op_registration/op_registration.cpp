@@ -148,6 +148,7 @@ Library& Library::_def(c10::either<OperatorName, FunctionSchema>&& name_or_schem
     }
   }();
   if (ns_.has_value()) schema.setNamespaceIfNotSet(ns_->c_str());
+  TORCH_CHECK(!(f.dispatch_key_.has_value() && dispatch_key_.has_value()), "Cannot specify a different dispatch key inside a TORCH_LIBRARY_IMPL; please declare a separate TORCH_LIBRARY_IMPL for your dispatch key");
   auto dispatch_key = f.dispatch_key_.has_value() ? f.dispatch_key_ : dispatch_key_;
   // Retain the OperatorName for Impl call
   OperatorName name = schema.operator_name();
@@ -159,6 +160,7 @@ Library& Library::_def(c10::either<OperatorName, FunctionSchema>&& name_or_schem
 Library& Library::_impl(const char* name_str, CppFunction&& f) & {
   auto name = torch::jit::parseName(name_str);
   if (ns_.has_value()) name.setNamespaceIfNotSet(ns_->c_str());
+  TORCH_CHECK(!(f.dispatch_key_.has_value() && dispatch_key_.has_value()), "Cannot specify a different dispatch key inside a TORCH_LIBRARY_IMPL; please declare a separate TORCH_LIBRARY_IMPL for your dispatch key");
   auto dispatch_key = f.dispatch_key_.has_value() ? f.dispatch_key_ : dispatch_key_;
   registrars_.emplace_back(
     Dispatcher::singleton().registerImpl(
