@@ -60,7 +60,7 @@ int64_t update_to(int64_t to) {
 }
 
 template<template<typename> class random_kernel, typename RNG>
-at::Tensor& random_impl(at::Tensor& self, at::Generator generator) {
+at::Tensor& random_impl(at::Tensor& self, c10::optional<Generator> generator) {
   auto iter = at::TensorIterator::nullary_op(self);
   random_kernel<RNG>()(iter, generator);
   return self;
@@ -93,7 +93,7 @@ static void check_from_to_in_range(int64_t from, int64_t to_inc, caffe2::TypeMet
 }
 
 template<template<typename> class random_from_to_kernel, typename RNG>
-at::Tensor& random_from_to_impl(at::Tensor& self, int64_t from, c10::optional<int64_t> to_opt, at::Generator generator) {
+at::Tensor& random_from_to_impl(at::Tensor& self, int64_t from, c10::optional<int64_t> to_opt, c10::optional<Generator> generator) {
   uint64_t range = 0;
   auto iter = at::TensorIterator::nullary_op(self);
   if (to_opt.has_value()) {
@@ -185,7 +185,7 @@ static bool resize_output_for_normal(at::Tensor& output, const at::Tensor& mean,
 }
 
 template<template<typename> class normal_kernel, typename RNG>
-Tensor& normal_impl_(Tensor& self, double mean, double std, Generator gen) {
+Tensor& normal_impl_(Tensor& self, double mean, double std, c10::optional<Generator> gen) {
   TORCH_CHECK(std > 0.0, "normal_ expects std > 0.0, but found std=", std);
   if (self.is_complex()) {
     // note: float_tensor lives only as long as the self tensor lives
@@ -200,14 +200,14 @@ Tensor& normal_impl_(Tensor& self, double mean, double std, Generator gen) {
 }
 
 template<template<typename> class normal_kernel, typename RNG>
-Tensor& normal_out_impl(Tensor& output, const Tensor& mean, double std, Generator gen) {
+Tensor& normal_out_impl(Tensor& output, const Tensor& mean, double std, c10::optional<Generator> gen) {
   normal_impl_<normal_kernel, RNG>(output, 0, std, gen);
   output.add_(mean);
   return output;
 }
 
 template<template<typename> class normal_kernel, typename RNG>
-Tensor& normal_out_impl(Tensor& output, double mean, const Tensor& std, Generator gen) {
+Tensor& normal_out_impl(Tensor& output, double mean, const Tensor& std, c10::optional<Generator> gen) {
   TORCH_CHECK(!std.is_complex(), "normal expects standard deviation to be non-complex");
   normal_impl_<normal_kernel, RNG>(output, 0, 1, gen);
   auto mean_tensor = at::full({}, mean, output.options());
@@ -221,7 +221,7 @@ Tensor& normal_out_impl(Tensor& output, double mean, const Tensor& std, Generato
 }
 
 template<template<typename> class normal_kernel, typename RNG>
-Tensor& normal_out_impl(Tensor& output, const Tensor& mean, const Tensor& std, Generator gen) {
+Tensor& normal_out_impl(Tensor& output, const Tensor& mean, const Tensor& std, c10::optional<Generator> gen) {
   TORCH_CHECK(!std.is_complex(), "normal expects standard deviation to be non-complex");
   bool is_deprecated_th_impl = resize_output_for_normal(output, mean, std);
   normal_impl_<normal_kernel, RNG>(output, 0, 1, gen);
@@ -240,21 +240,21 @@ Tensor& normal_out_impl(Tensor& output, const Tensor& mean, const Tensor& std, G
 }
 
 template<template<typename> class normal_kernel, typename RNG>
-Tensor normal_impl(const Tensor& mean, double std, Generator gen) {
+Tensor normal_impl(const Tensor& mean, double std, c10::optional<Generator> gen) {
   Tensor ret = at::empty_like(mean, MemoryFormat::Contiguous);
   normal_out_impl<normal_kernel, RNG>(ret, mean, std, gen);
   return ret;
 }
 
 template<template<typename> class normal_kernel, typename RNG>
-Tensor normal_impl(double mean, const Tensor& std, Generator gen) {
+Tensor normal_impl(double mean, const Tensor& std, c10::optional<Generator> gen) {
   Tensor ret = at::empty_like(std, MemoryFormat::Contiguous);
   normal_out_impl<normal_kernel, RNG>(ret, mean, std, gen);
   return ret;
 }
 
 template<template<typename> class normal_kernel, typename RNG>
-Tensor normal_impl(const Tensor& mean, const Tensor& std, Generator gen) {
+Tensor normal_impl(const Tensor& mean, const Tensor& std, c10::optional<Generator> gen) {
   Tensor ret = at::empty({0}, mean.options(), MemoryFormat::Contiguous);
   normal_out_impl<normal_kernel, RNG>(ret, mean, std, gen);
   return ret;
@@ -263,7 +263,7 @@ Tensor normal_impl(const Tensor& mean, const Tensor& std, Generator gen) {
 // ==================================================== Uniform =======================================================
 
 template<template<typename> class uniform_kernel, typename RNG>
-at::Tensor& uniform_impl_(at::Tensor& self, double from, double to, at::Generator generator) {
+at::Tensor& uniform_impl_(at::Tensor& self, double from, double to, c10::optional<Generator> generator) {
   if (self.is_complex()) {
     auto float_tensor = at::native::view_complex_as_float(self);
     uniform_impl_<uniform_kernel, RNG>(float_tensor, from, to, generator);

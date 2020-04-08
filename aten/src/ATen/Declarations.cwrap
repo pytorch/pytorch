@@ -1044,7 +1044,7 @@
     - THTensor* q
     - THIndexTensor* J
     - long num_samples
-    - Generator generator
+    - c10::optional<Generator> generator
 ]]
 [[
   name: _th_copy_ignoring_overlaps_
