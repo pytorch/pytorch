@@ -693,7 +693,7 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_tensor_index_advanced_indexing_masked(self):
         self._test_index_generic(
-            lambda input: input[:, torch.tensor([1, 0, 1, 0], dtype=torch.bool), torch.tensor([[1, 3], [4, 0]]), None])
+            lambda input: input[:, torch.tensor([1, 0, 1, 0], dtype=torch.uint8), torch.tensor([[1, 3], [4, 0]]), None])
 
     def test_chunk(self):
         class MyModel(torch.nn.Module):
@@ -2296,7 +2296,7 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
     def test_masked_fill(self):
         class MaskedFillModel(torch.nn.Module):
             def forward(self, x):
-                mask = torch.tensor([[0, 0, 1], [1, 1, 0]], dtype=torch.bool)
+                mask = torch.tensor([[0, 0, 1], [1, 1, 0]], dtype=torch.uint8)
                 return x.masked_fill(mask, 2)
 
         x = torch.zeros(4, 2, 3, requires_grad=True)

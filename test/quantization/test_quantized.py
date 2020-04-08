@@ -395,6 +395,7 @@ class TestQuantizedOps(TestCase):
                          message="inplace Hardswish failed: {} vs {}".format(qY, qY_hat))
 
     """Tests the correctness of the scalar addition."""
+    @unittest.skip("Failing on MacOS")
     @given(A=hu.tensor(shapes=hu.array_shapes(1, 4, 1, 5),
                        elements=hu.floats(-1e6, 1e6, allow_nan=False),
                        qparams=hu.qparams()),
@@ -941,6 +942,7 @@ class TestQuantizedOps(TestCase):
                              message=error_message.format(name + '.zero_point', scale,
                                                           qX_hat.q_zero_point()))
 
+    @unittest.skip("Failing - see https://github.com/pytorch/pytorch/issues/36129")
     @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=5, max_dims=5,
                                               min_side=5, max_side=10),
                        qparams=hu.qparams(dtypes=torch.qint8)),

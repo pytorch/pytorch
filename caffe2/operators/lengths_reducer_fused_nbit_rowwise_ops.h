@@ -92,7 +92,7 @@ class SparseLengthsFusedNBitRowwiseOp final : public Operator<Context> {
             block_size,
             weights != nullptr,
             is_mean,
-            /*prefetch distance*/ 16,
+            /*prefetch distance*/ 8,
             /*is_weight_positional*/ false,
             /*use_offsets*/ false);
       } else {
@@ -102,7 +102,7 @@ class SparseLengthsFusedNBitRowwiseOp final : public Operator<Context> {
             block_size,
             weights != nullptr,
             is_mean,
-            /*prefetch distance*/ 16,
+            /*prefetch distance*/ 8,
             /*is_weight_positional*/ false,
             /*use_offsets*/ false);
       }
