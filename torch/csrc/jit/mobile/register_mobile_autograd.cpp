@@ -101,32 +101,25 @@ void log_softmax_kernel(const c10::OperatorHandle& op, Stack* stack) {
 }
 
 // NB! This is _aten, not aten!!!
-static auto registry =
-    torch::import()
-        .impl(
+TORCH_LIBRARY_IMPL(Autograd, m) {
+       m.impl(
             "_aten::add.Scalar",
-            torch::kAutograd,
-            torch::autograd::VariableType::add_Scalar)
-        .impl(
+            torch::autograd::VariableType::add_Scalar);
+       m.impl(
             "_aten::mul.Tensor",
-            torch::kAutograd,
-            torch::autograd::VariableType::mul_Tensor)
-        .impl(
+            torch::autograd::VariableType::mul_Tensor);
+       m.impl(
             "_aten::conv2d",
-            torch::kAutograd,
-            CppFunction::makeFromBoxedFunction<conv2d_kernel>())
-        .impl("_aten::dropout", torch::kAutograd, VariableType::dropout)
-        .impl(
+            CppFunction::makeFromBoxedFunction<conv2d_kernel>());
+       m.impl("_aten::dropout", VariableType::dropout);
+       m.impl(
             "_aten::feature_dropout",
-            torch::kAutograd,
-            VariableType::feature_dropout)
-        .impl(
+            VariableType::feature_dropout);
+       m.impl(
             "_aten::log_softmax.int",
-            torch::kAutograd,
-            CppFunction::makeFromBoxedFunction<log_softmax_kernel>())
-        .impl(
+            CppFunction::makeFromBoxedFunction<log_softmax_kernel>());
+       m.impl(
             "_aten::max_pool2d",
-            torch::kAutograd,
             [](const Tensor& self,
                c10::List<int64_t> kernel_size,
                c10::List<int64_t> stride,
@@ -140,12 +133,12 @@ static auto registry =
                   padding.vec(),
                   dilation.vec(),
                   ceil_mode);
-            })
-        .impl("_aten::relu", torch::kAutograd, VariableType::relu)
-        .impl(
+            });
+       m.impl("_aten::relu", VariableType::relu);
+       m.impl(
             "_aten::view",
-            torch::kAutograd,
-            CppFunction::makeFromBoxedFunction<view_kernel>())
-        .impl("_aten::t", torch::kAutograd, VariableType::t)
-        .impl("_aten::addmm", torch::kAutograd, VariableType::addmm);
+            CppFunction::makeFromBoxedFunction<view_kernel>());
+       m.impl("_aten::t", VariableType::t);
+       m.impl("_aten::addmm", VariableType::addmm);
+}
 } // anonymous namespace

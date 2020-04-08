@@ -445,7 +445,7 @@ public:
     std::vector<KernelRegistrationConfig> kernels;
     optional<AliasAnalysisKind> aliasAnalysisKind_;
     friend class RegisterOperators;
-    friend class Module;
+    friend class Library;
   };
 
   /**
@@ -605,23 +605,22 @@ private:
 //
 // A quick tour of a few usage examples:
 //
-//  auto register = torch::import()
-//
+//  // Specify a namespace.  This namespace must not be used by any
+//  // other system
+//  TORCH_LIBRARY(aten, m) {
 //    // Define a schema for an operator, but provide no implementation
-//    .def("aten::mul(Tensor self, Tensor other) -> Tensor")
+//    m.def("mul(Tensor self, Tensor other) -> Tensor");
 //
 //    // Define a operator with exactly one implementation for all backends.
-//    .def("aten::add(Tensor self, Tensor other) -> Tensor", &add_impl)
+//    m.def("add(Tensor self, Tensor other) -> Tensor", &add_impl);
 //
 //    // Provide an implementation for a defined operator (you can
 //    // provide multiple; one per backend).  We'll take care of calling
 //    // the correct implementation depending on if we get a CPU
 //    // tensor or a CUDA tensor
-//    .impl("aten::mul", torch::kCPU, &mul_cpu_impl)
-//    .impl("aten::mul", torch::kCUDA, &mul_cuda_impl)
-//
-// Also, you can omit the top level namespace and specify it explicitly in
-// the sub-definitions, e.g.,  torch::import().impl("aten::mul", ...)
+//    m.impl("mul", torch::kCPU, &mul_cpu_impl);
+//    m.impl("mul", torch::kCUDA, &mul_cuda_impl);
+//  }
 
 
 // Represents a C++ function that implements an operator.  Most users won't
@@ -705,7 +704,7 @@ private:
   // The only class which actually pulls out values from CppFunction (does so
   // destructively, felt too lazy to write accessors that I don't even
   // want users to use)
-  friend class Module;
+  friend class Library;
 
   CppFunction(KernelFunction func, std::unique_ptr<c10::FunctionSchema> schema, std::string debug);
 };
@@ -717,7 +716,11 @@ private:
 template <typename Func>
 inline CppFunction dispatch(c10::DispatchKey k, Func&& raw_f) {
   CppFunction f(std::forward<Func>(raw_f));
-  f.dispatch_key_ = k;
+  if (k == c10::DispatchKey::CatchAll) {
+    f.dispatch_key_ = c10::nullopt;
+  } else {
+    f.dispatch_key_ = k;
+  }
   return f;
 }
 
@@ -774,45 +777,50 @@ namespace detail {
 
 }
 
-// Represents a namespace in which we can define operators.  Conventionally
-// constructed using "torch::import".
+namespace detail {
+  class TorchLibraryInit;
+}
+
+// This is the "handle" by which functions defined in TORCH_LIBRARY
+// and TORCH_LIBRARY_IMPL can define operators and override implementations
+// at certain backends.
 //
-//      torch::import()
-//        .def("aten::add", ...)
-//        .def("aten::mul", ...)
+// Conventionally, you get access to it using those two macros:
 //
-class CAFFE2_API Module final {
+// TORCH_LIBRARY(torchvision, m) {
+//    // m is a c10::Library
+//    m.def("roi_align", ...);
+//    ...
+// }
+//
+class CAFFE2_API Library final {
   c10::optional<std::string> ns_;
+  c10::optional<DispatchKey> dispatch_key_;
 
   std::vector<RegistrationHandleRAII> registrars_;
 
-  Module(std::string ns);
-  Module();
-
-  // Use these as the constructors
-  friend Module _import_DOES_NOT_WORK_WITH_MOBILE_CUSTOM_BUILD(std::string ns);
-  friend Module import();
+  friend detail::TorchLibraryInit;
 
 private:
   // Non-user visible actual implementations of functions.  These aren't
   // public because we only implement & qualifier and not && qualifier
-  Module& _def(FunctionSchema&& schema) &;
-  Module& _def(c10::either<OperatorName, FunctionSchema>&&, CppFunction&& f) &;
-  Module& _impl(const char* name, CppFunction&& f) &;
-  Module& _fallback(CppFunction&& f) &;
+  Library& _def(FunctionSchema&& schema) &;
+  Library& _def(c10::either<OperatorName, FunctionSchema>&&, CppFunction&& f) &;
+  Library& _impl(const char* name, CppFunction&& f) &;
+  Library& _fallback(CppFunction&& f) &;
 
 public:
-  Module(const Module&) = delete;
-  Module& operator=(const Module&) = delete;
+  // Use TORCH_LIBRARY/TORCH_LIBRARY_IMPL instead of these constructors directly
+  Library(std::string ns, const char* file, uint32_t line);
+  Library(DispatchKey k, const char* file, uint32_t line);
 
-  Module(Module&&);
-  Module& operator=(Module&&);
+  Library(const Library&) = delete;
+  Library& operator=(const Library&) = delete;
+  Library(Library&&) = default;
+  Library& operator=(Library&&) = default;
 
   // Some notes about the API design here.  We had the following constraints:
   //
-  //  - We wanted to support both method chaining to a static variable (&& ref
-  //    qualifier) as well as regular allocate the object and then mutate it (&
-  //    ref qualifier)
   //  - We need to support multiple "types" of arguments for schema and
   //    functions (e.g., unnamed lambda types, regular functions, const char*,
   //    fully instantiated schemas)
@@ -832,22 +840,14 @@ public:
   // function to resolve the argument to a real type.  You get the good error
   // messages from overloads, but at the same time you only need to write the
   // overload for any given argument type once.
-  //
-  // We still have to 2x all functions in the API so we can do both && and &
-  // ref qualifiers, c'est la vie.
 
   // Declare an operator with a schema, but don't provide any implementations
   // for it.  You're expected to then provide implementations using the
   // impl() method.
   template <typename Schema>
-  Module& def(Schema&& raw_schema) & {
+  Library& def(Schema&& raw_schema) & {
     FunctionSchema s = schema(std::forward<Schema>(raw_schema));
     return _def(std::move(s));
-  }
-  template <typename Schema>
-  Module&& def(Schema&& raw_schema) && {
-    def(std::forward<Schema>(raw_schema));
-    return std::move(*this);
   }
 
   // Convenience method to define an operator for a schema and then register
@@ -855,15 +855,10 @@ public:
   // except that if n is not a schema, then the schema is inferred from the
   // static type of f.
   template <typename NameOrSchema, typename Func>
-  Module& def(NameOrSchema&& raw_name_or_schema, Func&& raw_f) & {
+  Library& def(NameOrSchema&& raw_name_or_schema, Func&& raw_f) & {
     CppFunction f(std::forward<Func>(raw_f));
     auto name_or_schema = detail::constructSchemaOrName(std::forward<NameOrSchema>(raw_name_or_schema));
     return _def(std::move(name_or_schema), std::move(f));
-  }
-  template <typename NameOrSchema, typename Func>
-  Module&& def(NameOrSchema&& raw_name_or_schema, Func&& raw_f) && {
-    def(std::forward<NameOrSchema>(raw_name_or_schema), std::forward<Func>(raw_f));
-    return std::move(*this);
   }
 
   // Register an implementation for an operator.  You may register multiple
@@ -871,97 +866,82 @@ public:
   // (see torch::dispatch).  Implementations must have a corresponding
   // declaration (from def), otherwise they are invalid.
   template <typename Func>
-  Module& impl(const char* name, Func&& raw_f) & {
+  Library& impl(const char* name, Func&& raw_f) & {
     CppFunction f(std::forward<Func>(raw_f));
     return _impl(name, std::move(f));
   }
-  template <typename Func>
-  Module&& impl(const char* name, Func&& raw_f) && {
-    impl(name, std::forward<Func>(raw_f));
-    return std::move(*this);
-  }
+
   // Convenience overload for directly specifying the dispatch key.  Dispatch
   // can validly be either DeviceType or DispatchKey; check torch::dispatch for
   // the canonical list of accepted overloads.
   template <typename Dispatch, typename Func>
-  Module& impl(const char* name, Dispatch&& key, Func&& raw_f) & {
+  Library& impl(const char* name, Dispatch&& key, Func&& raw_f) & {
     return impl(name, dispatch(std::forward<Dispatch>(key), std::forward<Func>(raw_f)));
   }
-  template <typename Dispatch, typename Func>
-  Module&& impl(const char* name, Dispatch&& key, Func&& raw_f) && {
-    impl(name, std::forward<Dispatch>(key), std::forward<Func>(raw_f));
-    return std::move(*this);
-  }
+
   // Convenience overload for unboxed only kernels.  These are quite common
   // but will be eventually eliminated; this function makes it easy to grep for
   // them.
   //
-  // If you're looking how to def or impl with no DispatchKey, use the
-  // CppFunction::makeUnboxedOnly factory directly (the API is compositional;
-  // it's just that we have a LOT of impl calls that are unboxed, so there is
-  // just a little syntax sugar for this case.)
-  //
   // TODO: Remove these overloads once the makeUnboxedOnly incidence rate
   // goes way down
-  template <typename Dispatch, typename Func>
-  Module& impl_UNBOXED(const char* name, Dispatch&& key, Func* raw_f) & {
-    return impl(name, dispatch(std::forward<Dispatch>(key), CppFunction::makeUnboxedOnly(raw_f)));
-  }
-  template <typename Dispatch, typename Func>
-  Module&& impl_UNBOXED(const char* name, Dispatch&& key, Func* raw_f) && {
-    impl_UNBOXED(name, std::forward<Dispatch>(key), raw_f);
-    return std::move(*this);
+  template <typename Func>
+  Library& impl_UNBOXED(const char* name, Func* raw_f) & {
+    return impl(name, CppFunction::makeUnboxedOnly(raw_f));
   }
 
   // Register a fallback implementation for all operators which will be used
   // if there is not a specific implementation for an operator available.
-  // Providing a DispatchKey is MANDATORY for fallback at the moment.
-  //
-  // Dispatch can validly be either DeviceType or DispatchKey; check
-  // torch::dispatch for the canonical list of accepted overloads.
-  template <typename Dispatch, typename Func>
-  Module& fallback(Dispatch&& key, Func&& raw_f) & {
-    return fallback(c10::dispatch(std::forward<Dispatch>(key), std::forward<Func>(raw_f)));
-  }
-  template <typename Dispatch, typename Func>
-  Module&& fallback(Dispatch&& key, Func&& raw_f) && {
-    fallback(std::forward<Dispatch>(key), std::forward<Func>(raw_f));
-    return std::move(*this);
-  }
+  // Providing a DispatchKey is MANDATORY for fallback at the moment; e.g.,
+  // only call this from TORCH_LIBRARY_IMPL
+
   // NB: these overloads are here for completeness, but you'll probably want to
   // use the direct Dispatch overload
   template <typename Func>
-  Module& fallback(Func&& raw_f) & {
+  Library& fallback(Func&& raw_f) & {
     CppFunction f((std::forward<Func>(raw_f)));
     return _fallback(std::move(f));
   }
-  template <typename Func>
-  Module&& fallback(Func&& raw_f) && {
-    fallback(std::forward<Func>(raw_f));
-    return std::move(*this);
+};
+
+namespace detail {
+
+class TorchLibraryInit {
+private:
+  using InitFn = void(Library&);
+  Library lib_;
+public:
+  TorchLibraryInit(InitFn* fn, const char* ns, const char* file, uint32_t line)
+    : lib_(ns, file, line) {
+    fn(lib_);
+  }
+  TorchLibraryInit(InitFn* fn, DispatchKey k, const char* file, uint32_t line)
+    : lib_(k, file, line) {
+    fn(lib_);
   }
 };
 
-// TODO: We'd like to support this, but custom mobile build doesn't
-// understand how to interpret registration calls that have a namespace
-// call (as this requires some non-local reasoning.)  Tracked in
-// https://github.com/pytorch/pytorch/issues/35397
-//
-// So for now, we give this a scary internal name to discourage people
-// from using it
-
-// Return the namespace corresponding to the string 'ns'
-inline Module _import_DOES_NOT_WORK_WITH_MOBILE_CUSTOM_BUILD(std::string ns) {
-  return Module(std::move(ns));
-}
-
-// Return the "top-level" namespace; subsequent definitions must be explicitly
-// namespaced
-inline Module import() {
-  return Module();
-}
+} // namespace detail
 
 } // namespace c10
+
+#define TORCH_LIBRARY(ns, m) \
+  static void TORCH_LIBRARY_init_ ## ns (c10::Library&); \
+  static c10::detail::TorchLibraryInit TORCH_LIBRARY_static_init_ ## ns ( \
+    &TORCH_LIBRARY_init_ ## ns, #ns, __FILE__, __LINE__ \
+  ); \
+  void TORCH_LIBRARY_init_ ## ns (c10::Library& m)
+
+#define TORCH_LIBRARY_IMPL(k, m) \
+  static void TORCH_LIBRARY_IMPL_init_ ## k (c10::Library&); \
+  static c10::detail::TorchLibraryInit TORCH_LIBRARY_IMPL_static_init_ ## k ( \
+    & TORCH_LIBRARY_IMPL_init_ ## k, c10::DispatchKey::k, __FILE__, __LINE__ \
+  ); \
+  void TORCH_LIBRARY_IMPL_init_ ## k (c10::Library& m)
+
+// Variants for ease of testing
+#define MAKE_TORCH_LIBRARY(ns) c10::Library(#ns, __FILE__, __LINE__)
+#define MAKE_TORCH_LIBRARY_IMPL(k) c10::Library(c10::DispatchKey::k, __FILE__, __LINE__)
 
 namespace torch {
   // Old-style API
@@ -970,5 +950,4 @@ namespace torch {
   // New-style API
   using c10::dispatch;
   using c10::schema;
-  using c10::import;
 }

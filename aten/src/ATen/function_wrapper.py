@@ -109,24 +109,23 @@ ${return_type} ${type_wrapper_name}(${type_method_formals}) {
 # better to do it once at a schema registration so that we don't have to
 # repeat ourselves everywhere else.
 SCHEMA_REGISTRATION = CodeTemplate("""\
-.def("${schema_string}")
+m.def("${schema_string}");
 """)
 
 DEFAULT_UNBOXEDONLY_FUNCTION_REGISTRATION = CodeTemplate("""\
-.impl("${operator_name_with_overload}",
-      CppFunction::makeUnboxedOnly(TypeDefault::${type_wrapper_name}))
-""")
-BACKEND_UNBOXEDONLY_FUNCTION_REGISTRATION = CodeTemplate("""\
-.impl_UNBOXED("${operator_name_with_overload}",
-              DispatchKey::${Backend},
-              ${Type}::${type_wrapper_name})
+m.impl("${operator_name_with_overload}",
+       CppFunction::makeUnboxedOnly(TypeDefault::${type_wrapper_name}));
 """)
 DEFAULT_FUNCTION_REGISTRATION = CodeTemplate("""\
-.impl("${operator_name_with_overload}", &TypeDefault::${type_wrapper_name})
+m.impl("${operator_name_with_overload}", &TypeDefault::${type_wrapper_name});
+""")
+# NB: Specification of the backend is handled by the enclosing
+# TORCH_LIBRARY_IMPL macro invocation
+BACKEND_UNBOXEDONLY_FUNCTION_REGISTRATION = CodeTemplate("""\
+m.impl_UNBOXED("${operator_name_with_overload}", ${Type}::${type_wrapper_name});
 """)
 BACKEND_FUNCTION_REGISTRATION = CodeTemplate("""\
-.impl("${operator_name_with_overload}",
-      DispatchKey::${Backend}, &${Type}::${type_wrapper_name})
+m.impl("${operator_name_with_overload}",  &${Type}::${type_wrapper_name});
 """)
 
 # add non-virtual declaration to TensorBody.h

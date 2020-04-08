@@ -135,15 +135,12 @@ TEST(BackendFallbackTest, TestBackendFallbackWithWrapper) {
   ASSERT_EQ(override_call_count, 1);
 }
 
-TEST(BackendFallbackTest, TestFallthroughBackendFallback) {
-  // By default fallthrough
-  auto registry = c10::import()
-    .fallback(DispatchKey::TESTING_ONLY_GenericMode,
-              c10::CppFunction::makeFallthrough())
-    .impl("aten::mul.Tensor",
-          DispatchKey::TESTING_ONLY_GenericMode,
-          c10::CppFunction::makeFromBoxedFunction<&generic_mode_fallback>());
+TORCH_LIBRARY_IMPL(TESTING_ONLY_GenericMode, m) {
+  m.fallback(c10::CppFunction::makeFallthrough());
+  m.impl("aten::mul.Tensor", c10::CppFunction::makeFromBoxedFunction<&generic_mode_fallback>());
+}
 
+TEST(BackendFallbackTest, TestFallthroughBackendFallback) {
   c10::impl::IncludeDispatchKeyGuard guard(DispatchKey::TESTING_ONLY_GenericMode);
 
   override_call_count = 0;
