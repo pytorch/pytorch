@@ -153,18 +153,18 @@ void SetCPUAllocator(at::Allocator* alloc) {
   SetAllocator(DeviceType::CPU, alloc);
 }
 
-// #ifndef C10_MOBILE
+#ifndef C10_MOBILE
 
-// // Global default CPU Allocator
-// static DefaultCPUAllocator g_cpu_alloc;
+// Global default CPU Allocator
+static DefaultCPUAllocator g_cpu_alloc;
 
-// at::Allocator* GetDefaultCPUAllocator() {
-//   return &g_cpu_alloc;
-// }
+at::Allocator* GetDefaultCPUAllocator() {
+  return &g_cpu_alloc;
+}
 
-// REGISTER_ALLOCATOR(DeviceType::CPU, &g_cpu_alloc);
+REGISTER_ALLOCATOR(DeviceType::CPU, &g_cpu_alloc);
 
-// #endif /* C10_Mobile */
+#endif /* C10_Mobile */
 
 void MemoryAllocationReporter::New(void* ptr, size_t nbytes) {
   std::lock_guard<std::mutex> guard(mutex_);
