@@ -1571,6 +1571,7 @@ def sigmoid(input):
 
 
 def hardsigmoid(input, inplace=False):
+    # type: (Tensor, bool) -> Tensor
     r"""hardsigmoid(input) -> Tensor
 
     Applies the element-wise function
@@ -1645,6 +1646,7 @@ def bilinear(input1, input2, weight, bias=None):
 
 
 def hardswish(input, inplace=False):
+    # type: (Tensor, bool) -> Tensor
     r"""Applies the hardswish function, element-wise, as described in the paper:
 
     `Searching for MobileNetV3`_.
