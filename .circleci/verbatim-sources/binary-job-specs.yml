@@ -295,7 +295,7 @@
           cat "$script"
           source "$script"
     - persist_to_workspace:
-        root: /c/b/windows/output
+        root: "C:/b/windows/output"
         paths:
             - "*"
 

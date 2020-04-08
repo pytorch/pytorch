@@ -1113,7 +1113,7 @@ jobs:
           cat "$script"
           source "$script"
     - persist_to_workspace:
-        root: /c/b/windows/output
+        root: "C:/b/windows/output"
         paths:
             - "*"
 
@@ -1130,7 +1130,7 @@ jobs:
         name: Upload
         no_output_timeout: "10m"
         command: |
-          script="/Users/distiller/project/pytorch/.circleci/scripts/binary_windows_upload.sh"
+          script="$PWD/.circleci/scripts/binary_windows_upload.sh"
           cat "$script"
           source "$script"
 
