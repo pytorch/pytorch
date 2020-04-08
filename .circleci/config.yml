@@ -223,7 +223,7 @@ pytorch_windows_params: &pytorch_windows_params
       default: "3.6"
     vc_version:
       type: string
-      default: "14.11"
+      default: "14.12"
     vc_year:
       type: string
       default: "2017"
@@ -498,7 +498,7 @@ jobs:
         default: "3.6"
       vc_version:
         type: string
-        default: "14.11"
+        default: "14.12"
       vc_year:
         type: string
         default: "2017"
@@ -576,7 +576,7 @@ jobs:
         default: "3.6"
       vc_version:
         type: string
-        default: "14.11"
+        default: "14.12"
       vc_year:
         type: string
         default: "2017"
@@ -1862,10 +1862,10 @@ workflows:
       # Warning: indentation here matters!
 
       - pytorch_windows_build:
-          name: pytorch_windows_vs2017_14.11_py36_cuda10.1_build
+          name: pytorch_windows_vs2017_14.12_py36_cuda10.1_build
           cuda_version: "10"
           python_version: "3.6"
-          vc_version: "14.11"
+          vc_version: "14.12"
           vc_year: "2017"
           vc_product: "BuildTools"
           use_cuda: "1"
@@ -1878,17 +1878,17 @@ workflows:
                 - /ci-all\/.*/
                 - /release\/.*/
       - pytorch_windows_test:
-          name: pytorch_windows_vs2017_14.11_py36_cuda10.1_test1
+          name: pytorch_windows_vs2017_14.12_py36_cuda10.1_test1
           test_name: pytorch-windows-test1
           cuda_version: "10"
           python_version: "3.6"
-          vc_version: "14.11"
+          vc_version: "14.12"
           vc_year: "2017"
           vc_product: "BuildTools"
           use_cuda: "1"
           requires:
             - setup
-            - pytorch_windows_vs2017_14.11_py36_cuda10.1_build
+            - pytorch_windows_vs2017_14.12_py36_cuda10.1_build
           filters:
             branches:
               only:
@@ -1896,17 +1896,17 @@ workflows:
                 - /ci-all\/.*/
                 - /release\/.*/
       - pytorch_windows_test:
-          name: pytorch_windows_vs2017_14.11_py36_cuda10.1_test2
+          name: pytorch_windows_vs2017_14.12_py36_cuda10.1_test2
           test_name: pytorch-windows-test2
           cuda_version: "10"
           python_version: "3.6"
-          vc_version: "14.11"
+          vc_version: "14.12"
           vc_year: "2017"
           vc_product: "BuildTools"
           use_cuda: "1"
           requires:
             - setup
-            - pytorch_windows_vs2017_14.11_py36_cuda10.1_build
+            - pytorch_windows_vs2017_14.12_py36_cuda10.1_build
           filters:
             branches:
               only:

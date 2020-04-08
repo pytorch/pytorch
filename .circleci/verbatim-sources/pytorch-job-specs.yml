@@ -153,7 +153,7 @@ jobs:
         default: "3.6"
       vc_version:
         type: string
-        default: "14.11"
+        default: "14.12"
       vc_year:
         type: string
         default: "2017"
@@ -231,7 +231,7 @@ jobs:
         default: "3.6"
       vc_version:
         type: string
-        default: "14.11"
+        default: "14.12"
       vc_year:
         type: string
         default: "2017"
