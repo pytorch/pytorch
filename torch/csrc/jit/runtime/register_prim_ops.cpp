@@ -83,7 +83,7 @@ c10::AliasAnalysisKind aliasAnalysisSpecialCase() {
 // tensor cannot have grad set, tensor must be 0 dim,
 // and if the dest is an int the source must be integral type
 void checkImplicitTensorToNum(at::Tensor t, bool toInt) {
-  if (autograd::as_variable_ref(t).requires_grad()) {
+  if (t.requires_grad()) {
     throw std::runtime_error(
         "Cannot input a tensor that requires grad as a scalar argument");
   }
