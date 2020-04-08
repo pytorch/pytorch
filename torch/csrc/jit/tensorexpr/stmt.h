@@ -77,7 +77,7 @@ class LetStmt : public StmtNode<LetStmt> {
       const ExprHandle& value,
       Stmt* body) {
     if (body->get_parent()) {
-      throw malformed_input(body);
+      throw malformed_input("LetStmt body has existing parent", body);
     }
 
     return new LetStmt(var.node(), value.node(), body);
@@ -114,7 +114,7 @@ class Block : public StmtNode<Block> {
 
   void prepend_stmt(Stmt* s) {
     if (s->get_parent()) {
-      throw malformed_input(s);
+      throw malformed_input("Block prepend Stmt with existing parent", s);
     }
 
     stmts_.push_front(s);
@@ -122,7 +122,7 @@ class Block : public StmtNode<Block> {
   }
   void append_stmt(Stmt* s) {
     if (s->get_parent()) {
-      throw malformed_input(s);
+      throw malformed_input("Block append Stmt with existing parent", s);
     }
 
     stmts_.push_back(s);
@@ -130,7 +130,8 @@ class Block : public StmtNode<Block> {
   }
   bool replace_stmt(Stmt* old_stmt, Stmt* new_stmt) {
     if (new_stmt->get_parent()) {
-      throw malformed_input(new_stmt);
+      throw malformed_input(
+          "Block replace Stmt wiith existing parent", new_stmt);
     }
 
     auto pos = std::find(stmts_.begin(), stmts_.end(), old_stmt);
@@ -150,7 +151,8 @@ class Block : public StmtNode<Block> {
   explicit Block(const std::vector<Stmt*>& stmts) {
     for (Stmt* s : stmts) {
       if (s->get_parent()) {
-        throw malformed_input(s);
+        throw malformed_input(
+            "Block creation has Stmt with existing parent", s);
       }
 
       stmts_.push_back(s);
@@ -339,7 +341,7 @@ class LoopOptions {
 
   std::string gpu_block_index_str() const {
     if (!is_gpu_block_index()) {
-      throw malformed_input();
+      throw malformed_input("Has no GPU block index");
     }
 
     static const char* kBlockIndexNames[] = {
@@ -350,7 +352,7 @@ class LoopOptions {
     };
 
     if (gpu_block_index_ < 0 || gpu_block_index_ >= 4) {
-      throw malformed_input();
+      throw malformed_input("invalid GPU block index");
     }
 
     return kBlockIndexNames[gpu_block_index_];
@@ -377,14 +379,14 @@ class LoopOptions {
 
   std::string gpu_thread_index_str() const {
     if (!is_gpu_thread_index()) {
-      throw malformed_input();
+      throw malformed_input("has no GPU thread index");
     }
 
     static const char* kThreadIndexNames[] = {
         "threadIdx.x", "threadIdx.y", "threadIdx.z", "threadIdx.w"};
 
     if (gpu_thread_index_ < 0 || gpu_thread_index_ >= 4) {
-      throw malformed_input();
+      throw malformed_input("invalid GPU thread index");
     }
 
     return kThreadIndexNames[gpu_thread_index_];
@@ -457,13 +459,13 @@ class For : public StmtNode<For> {
   For(const Var* var, const Expr* start, const Expr* stop, Stmt* body)
       : var_(var), start_(start), stop_(stop) {
     if (!var) {
-      throw malformed_input(var);
+      throw malformed_input("invalid Var in For loop", var);
     } else if (!start) {
-      throw malformed_input(start);
+      throw malformed_input("invalid Start in For loop", start);
     } else if (!stop) {
-      throw malformed_input(stop);
+      throw malformed_input("invalid Stop in For loop", stop);
     } else if (!body || body->get_parent()) {
-      throw malformed_input(body);
+      throw malformed_input("invalid Body in For loop", body);
     }
 
     Block* b = dynamic_cast<Block*>(body);
@@ -481,13 +483,13 @@ class For : public StmtNode<For> {
       const LoopOptions& loop_options)
       : var_(var), start_(start), stop_(stop), loop_options_(loop_options) {
     if (!var) {
-      throw malformed_input(var);
+      throw malformed_input("invalid Var in For loop", var);
     } else if (!start) {
-      throw malformed_input(start);
+      throw malformed_input("invalid Start in For loop", start);
     } else if (!stop) {
-      throw malformed_input(stop);
+      throw malformed_input("invalid Stop in For loop", stop);
     } else if (!body || body->get_parent()) {
-      throw malformed_input(body);
+      throw malformed_input("invalid Body in For loop", body);
     }
 
     Block* b = dynamic_cast<Block*>(body);
