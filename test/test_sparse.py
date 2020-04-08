@@ -10,7 +10,7 @@ import random
 import sys
 import unittest
 from torch.testing._internal.common_utils import TestCase, run_tests, skipIfRocm, do_test_dtypes, \
-    do_test_empty_full, load_tests, TEST_NUMPY, TEST_WITH_ROCM
+    do_test_empty_full, load_tests, TEST_NUMPY, TEST_WITH_ROCM, IS_WINDOWS
 from torch.testing._internal.common_cuda import TEST_CUDA
 from numbers import Number
 from torch.autograd.gradcheck import gradcheck
@@ -913,6 +913,10 @@ class TestSparse(TestCase):
         test_shape(10, 100, 0, 0)
         test_shape(10, 100, 0, 20)
 
+    @unittest.skipIf(
+        IS_WINDOWS and TEST_CUDA,
+        "bmm sparse-dense CUDA is not yet supported in Windows, at least up to CUDA 10.1"
+    )
     def test_bmm(self):
         def test_shape(num_mats, dim_i, dim_j, dim_k, nnz):
             a_list = []
@@ -979,8 +983,8 @@ class TestSparse(TestCase):
 
             a = torch.stack(a_list).cuda()
             b = torch.stack(b_list).cuda()
-            ab_nondeterministic = a.bmm(b, deterministic=False)
-            ab_deterministic = a.bmm(b, deterministic=True)
+            ab_nondeterministic = torch._bmm(a, b, deterministic=False)
+            ab_deterministic = torch._bmm(a, b, deterministic=True)
             self.assertEqual(ab_nondeterministic, ab_deterministic)
 
         test_shape(10, 10, 100, 99, 20)

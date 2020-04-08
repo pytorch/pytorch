@@ -732,7 +732,7 @@ Tensor _bmm_sparse_cuda(const SparseTensor& self, const Tensor& mat2, bool deter
   return _bmm_out_sparse_cuda(result, self, mat2, deterministic);
 }
 
-#ifndef __HIP_PLATFORM_HCC__
+#if !(defined(__HIP_PLATFORM_HCC__) || defined(_WIN32))
 __global__ void search_end_matrix_indices_cuda_kernel(
   int64_t* mat_el_end_indices,
   int64_t num_matrices,
@@ -815,8 +815,10 @@ Tensor& bmm_out_sparse_cuda(Tensor& result, const SparseTensor& self, const Tens
 }
 
 Tensor& _bmm_out_sparse_cuda(Tensor& result, const SparseTensor& self, const Tensor& mat2, bool deterministic) {
-#ifdef __HIP_PLATFORM_HCC__
-  TORCH_CHECK(false, "bmm sparse-dense is not supported on HIP")
+#if defined __HIP_PLATFORM_HCC__
+  TORCH_INTERNAL_ASSERT("bmm sparse-dense is not supported on HIP");
+#elif defined _WIN32
+  TORCH_INTERNAL_ASSERT("bmm sparse-dense CUDA is not supported on Windows");
 #else
 
   TORCH_CHECK(!mat2.is_sparse(), "bmm_sparse: Tensor 'mat2' must be dense");
