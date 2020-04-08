@@ -1380,8 +1380,7 @@ class FusionTest(QuantizationTestCase):
         model.qconfig = default_qat_qconfig
         prepare_qat(model, inplace=True)
 
-        out_fq = model(self.img_data[0][0])
-        SQNRdB = 20 * torch.log10(torch.norm(out_ref) / torch.norm(out_ref - out_fq))
+        model(self.img_data[0][0])
 
         def checkQAT(model):
             self.assertEqual(type(model.conv1), nniqat.ConvBnReLU2d)
