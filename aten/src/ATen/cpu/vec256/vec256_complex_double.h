@@ -56,7 +56,8 @@ public:
     return _mm256_blendv_pd(a.values, b.values, mask_);
 
   }
-  static Vec256<std::complex<double>> arange(std::complex<double> base = 0., std::complex<double> step = 1.) {
+  template<typename step_t>
+  static Vec256<std::complex<double>> arange(std::complex<double> base = 0., step_t step = static_cast<step_t>(1)) {
     return Vec256<std::complex<double>>(base,
                                         base + step);
   }
@@ -209,7 +210,8 @@ public:
     exp = _mm256_blend_pd(exp, _mm256_permute_pd(exp, 0x05), 0x0A);   //exp(a)           exp(a)
 
     auto sin_cos = Sleef_sincosd4_u10(values);                        //[sin(a), cos(a)] [sin(b), cos(b)]
-    auto cos_sin = _mm256_blend_pd(sin_cos.y, sin_cos.x, 0x0A);       //cos(b)           sin(b)
+    auto cos_sin = _mm256_blend_pd(_mm256_permute_pd(sin_cos.y, 0x05),
+                                   sin_cos.x, 0x0A);                  //cos(b)           sin(b)
     return _mm256_mul_pd(exp, cos_sin);
   }
   Vec256<std::complex<double>> expm1() const {

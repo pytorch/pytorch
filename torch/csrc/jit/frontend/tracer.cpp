@@ -204,6 +204,7 @@ bool TracingState::hasValue(const IValue& var) const {
 }
 
 Value* TracingState::getOutput(const IValue& iv, size_t i) {
+  bool tracing_mode_strict = getTracingState()->strict;
   if (iv.isTensor()) {
     at::Tensor var = iv.toTensor();
     if (!var.defined()) {
@@ -224,6 +225,10 @@ Value* TracingState::getOutput(const IValue& iv, size_t i) {
     }
     return it->second;
   } else if (iv.isTensorList()) {
+    if (tracing_mode_strict) {
+      tracer::warn(
+          "Encountering a list at the output of the tracer", STRICT_TRACER_MSG);
+    }
     return graph
         ->insertNode(graph->createList(
             TensorType::get(),
@@ -238,6 +243,11 @@ Value* TracingState::getOutput(const IValue& iv, size_t i) {
     graph->insertNode(tuple_node);
     return tuple_node->output();
   } else if (iv.isGenericDict()) {
+    if (tracing_mode_strict) {
+      throw std::runtime_error(
+          "Encountering a dict at the output of the tracer" +
+          std::string(STRICT_TRACER_MSG));
+    }
     auto dict = iv.toGenericDict();
     TypePtr key_type = dict.keyType();
     TypePtr value_type = dict.valueType();
@@ -253,7 +263,7 @@ Value* TracingState::getOutput(const IValue& iv, size_t i) {
     const auto order = iterationOrder(dict);
     std::vector<Value*> keys;
     std::vector<Value*> values;
-    for (const auto &pair : order) {
+    for (const auto& pair : order) {
       keys.emplace_back(getValue(pair.first));
       values.emplace_back(getOutput(pair.second, i));
     }
@@ -306,7 +316,7 @@ static IValue addInput(
     for (size_t i = 0; i < num_elems; ++i) {
       elems[i] = addInput(state, elems.at(i), elem_types[i], elem_values[i]);
     }
-    return std::move(tuple);
+    return tuple;
   } else if (auto dict_type = type->cast<DictType>()) {
     auto dict = input.toGenericDict();
 
@@ -328,7 +338,7 @@ static IValue addInput(
               state, pair.second, dict_type->getValueType(), elem_values[i++]));
     }
 
-    return std::move(dict);
+    return dict;
   } else if (auto list_type = type->cast<ListType>()) {
     size_t num_elems = input.isList() ? input.toListRef().size()
                                       : input.toTensorVector().size();
@@ -399,6 +409,7 @@ std::pair<std::shared_ptr<TracingState>, Stack> trace(
     Stack inputs,
     const std::function<Stack(Stack)>& traced_fn,
     std::function<std::string(const Variable&)> var_name_lookup_fn,
+    bool strict,
     bool force_outplace,
     Module* self) {
   try {
@@ -425,6 +436,7 @@ std::pair<std::shared_ptr<TracingState>, Stack> trace(
     auto graph = state->graph;
 
     getTracingState()->lookup_var_name_fn = std::move(var_name_lookup_fn);
+    getTracingState()->strict = strict;
     getTracingState()->force_outplace = force_outplace;
 
     // Invoke the traced function
@@ -735,7 +747,7 @@ void addOutput(Node* node, const at::Tensor& output) {
 void setOutput(Value* value, const at::Tensor& output) {
   if (output.defined()) {
     value->inferTypeFrom(output);
-    setValueTrace(autograd::as_variable_ref(output), value);
+    setValueTrace(output, value);
   }
 }
 
@@ -891,7 +903,12 @@ const char* WARN_RESIZE =
     " can't be represented in the JIT at the moment, so we won't connect any uses of "
     "this value with its current trace. If you happen to use it again, it will show "
     "up as a constant in the graph.";
-
+const char* STRICT_TRACER_MSG =
+    " might cause the trace to be incorrect, this is only valid if the container "
+    "structure (i.e. dict keys) does not change based on the module's inputs, consider "
+    "using constant container structure instead(i.e. Tuple, NamedTuple) to avoid this "
+    "warning/error, If you absolutely need this and know the side effects, pass "
+    "strict=False to trace() to allow this behavior.";
 // XXX: _kind can be a nullptr
 void _do_warn(const char* _reason, const char* _kind) {
   std::string reason{_reason};

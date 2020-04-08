@@ -30,6 +30,7 @@ jobs:
       - name: Run clang-format
         run: |
           set -eux
-          echo "Run tools/clang_format.py to fix formatting errors"
-          tools/clang_format.py --verbose --diff > ${GITHUB_WORKSPACE}/clang-format-output.txt
-          cat ${GITHUB_WORKSPACE}/clang-format-output.txt
+          echo "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"
+          echo "| Run tools/clang_format.py to fix formatting errors |"
+          echo "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"
+          tools/clang_format.py --verbose --diff

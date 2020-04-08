@@ -45,6 +45,7 @@ struct TORCH_API TracingState
 
   std::shared_ptr<Graph> graph;
   bool warn = true;
+  bool strict = true;
   bool force_outplace = false;
   std::function<std::string(const Variable& var)> lookup_var_name_fn =
       [](const Variable& var) { return ""; };
@@ -153,6 +154,7 @@ using warn_fn_type = void (*)(const std::string& msg);
 TORCH_API extern const char* WARN_PYTHON_DATAFLOW;
 TORCH_API extern const char* WARN_CONSTRUCTOR;
 TORCH_API extern const char* WARN_RESIZE;
+TORCH_API extern const char* STRICT_TRACER_MSG;
 TORCH_API void _do_warn(const char* _reason, const char* _kind);
 inline void warn(const char* _reason, const char* _kind = nullptr) {
   if (const auto& state = getTracingState()) {
@@ -206,6 +208,7 @@ TORCH_API std::pair<std::shared_ptr<TracingState>, Stack> trace(
     Stack inputs,
     const std::function<Stack(Stack)>& traced_fn,
     std::function<std::string(const Variable&)> var_name_lookup_fn,
+    bool strict = true,
     bool force_outplace = false,
     Module* self = nullptr);
 

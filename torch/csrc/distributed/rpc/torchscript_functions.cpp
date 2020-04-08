@@ -43,7 +43,7 @@ c10::intrusive_ptr<c10::ivalue::Future> rpcTorchscript(
                               const c10::optional<utils::FutureError>& futErr) {
     if (futErr) {
       c10::ivalue::Future::FutureError jitFutErr(std::string((*futErr).what()));
-      futPtr->markCompleted(std::move(jitFutErr));
+      futPtr->setError(std::move(jitFutErr));
     } else {
       futPtr->markCompleted(deserializeRespToIValue(message));
     }
@@ -87,7 +87,11 @@ c10::intrusive_ptr<RRef> remoteTorchscript(
         nullptr);
 
     ctx.addPendingUser(userRRefPtr->forkId(), userRRefPtr);
-    fm->addCallback(callback::confirmPendingUser);
+    fm->addCallback([forkId{userRRefPtr->forkId()}](
+                        const rpc::Message& message,
+                        const c10::optional<utils::FutureError>& futErr) {
+      callback::confirmPendingUser(message, futErr, forkId);
+    });
 
     return userRRefPtr;
   } else {
