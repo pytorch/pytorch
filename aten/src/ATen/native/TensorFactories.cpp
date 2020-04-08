@@ -7,7 +7,7 @@
 #endif
 
 #include <ATen/ATen.h>
-#include <ATen/CPUGenerator.h>
+#include <ATen/CPUGeneratorImpl.h>
 #include <ATen/Utils.h>
 #include <ATen/Dispatch.h>
 #include <ATen/NativeFunctions.h>
@@ -20,7 +20,6 @@
 #include <ATen/detail/CUDAHooksInterface.h>
 #include <c10/util/Exception.h>
 #include <ATen/NamedTensorUtils.h>
-#include <ATen/native/ComplexHelper.h>
 
 #include <algorithm>
 #include <cctype>
@@ -476,12 +475,6 @@ Tensor rand(IntArrayRef size, const TensorOptions& options) {
 
 Tensor rand(IntArrayRef size, Generator generator, const TensorOptions& options) {
   auto result = at::empty(size, options);
-  if (result.is_complex()) {
-    auto float_tensor = at::native::view_complex_as_float(result);
-    float_tensor.uniform_(0, 1, generator);
-    // we want to return complex tensor not underlying float tensor.
-    return result;
-  }
   return result.uniform_(0, 1, generator);
 }
 
@@ -491,10 +484,6 @@ Tensor& rand_out(Tensor& result, IntArrayRef size) {
 
 Tensor& rand_out(Tensor& result, IntArrayRef size, Generator generator) {
   result.resize_(size);
-  if (result.is_complex()) {
-    auto float_tensor = at::native::view_complex_as_float(result);
-    return float_tensor.uniform_(0, 1, generator);
-  }
   return result.uniform_(0, 1, generator);
 }
 
@@ -628,7 +617,7 @@ Tensor randn_like(
 
 namespace {
 template <typename scalar_t>
-void randperm_cpu(Tensor& result, int64_t n, CPUGenerator* generator) {
+void randperm_cpu(Tensor& result, int64_t n, CPUGeneratorImpl* generator) {
   scalar_t *r__data = result.data_ptr<scalar_t>();
 
   result.resize_({n});
@@ -667,7 +656,7 @@ Tensor& randperm_out_cpu(Tensor& result, int64_t n, Generator generator) {
   TORCH_CHECK(n >= 0, "n must be non-negative, got", n);
   check_supported_max_int_with_precision(n, result);
   result.resize_({n});
-  auto gen = get_generator_or_default<CPUGenerator>(generator, detail::getDefaultCPUGenerator());
+  auto gen = get_generator_or_default<CPUGeneratorImpl>(generator, detail::getDefaultCPUGenerator());
   // See Note [Acquire lock when using random generators]
   std::lock_guard<std::mutex> lock(gen->mutex_);
   AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half, result.scalar_type(), "randperm", [&]() -> void {

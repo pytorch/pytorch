@@ -24,12 +24,14 @@ PY36 = sys.version_info >= (3, 6)
 TESTS = [
     'test_autograd',
     'test_complex',
+    'test_cpp_api_parity',
     'test_cpp_extensions_aot_no_ninja',
     'test_cpp_extensions_aot_ninja',
     'test_cpp_extensions_jit',
     'distributed/test_c10d',
     'distributed/test_c10d_spawn',
     'test_cuda',
+    'test_jit_cuda_fuser',
     'test_cuda_primary_ctx',
     'test_dataloader',
     'distributed/test_data_parallel',
@@ -57,6 +59,7 @@ TESTS = [
     'quantization/test_quantize_script',
     'test_sparse',
     'test_serialization',
+    'test_show_pickle',
     'test_torch',
     'test_type_info',
     'test_type_hints',
@@ -73,6 +76,7 @@ TESTS = [
     'test_function_schema',
     'test_overrides',
     'test_jit_fuser_te',
+    'test_tensorexpr',
 ]
 
 # skip < 3.3 because mock is added in 3.3 and is used in rpc_spawn
@@ -122,6 +126,7 @@ ROCM_BLACKLIST = [
     'test_jit_simple',
     'test_jit_legacy',
     'test_jit_fuser_legacy',
+    'test_tensorexpr',
 ]
 
 # These tests are slow enough that it's worth calculating whether the patch
@@ -161,6 +166,9 @@ DISTRIBUTED_TESTS_CONFIG = {}
 
 
 if dist.is_available():
+    DISTRIBUTED_TESTS_CONFIG['test'] = {
+        'WORLD_SIZE': '1'
+    }
     if not TEST_WITH_ROCM and dist.is_mpi_available():
         DISTRIBUTED_TESTS_CONFIG['mpi'] = {
             'WORLD_SIZE': '3',

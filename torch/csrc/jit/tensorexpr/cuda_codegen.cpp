@@ -1,7 +1,7 @@
 #include <torch/csrc/jit/tensorexpr/cuda_codegen.h>
 #include <torch/csrc/jit/tensorexpr/cuda_half_support.h>
 
-#include <ATen/CUDAGenerator.h>
+#include <ATen/CUDAGeneratorImpl.h>
 #include <c10/cuda/CUDAFunctions.h>
 #include <torch/csrc/jit/tensorexpr/analysis.h>
 #include <torch/csrc/jit/tensorexpr/cuda_random.h>
@@ -52,7 +52,8 @@ class ScopedVarName {
 static int as_int(const Expr* expr) {
   auto v = dynamic_cast<const IntImm*>(expr);
   if (!v) {
-    throw malformed_input(expr);
+    throw malformed_input(
+        "cuda_codegen: non Int expr interpreted as int", expr);
   }
 
   return v->value();
@@ -161,14 +162,15 @@ void CudaPrinter::visit(const Intrinsics* v) {
 void CudaPrinter::visit(const Load* v) {
   // TODO: find a better metric in using ldg or not. Support different dtypes.
   if (v->dtype().scalar_type() == ScalarType::Half) {
-    os() << "__half2float(" << *v->base_handle() << "[" << *v->index() << "])";
+    os() << "__half2float(" << *v->base_handle() << "[" << *v->flat_index()
+         << "])";
   } else {
-    os() << "__ldg(" << *v->base_handle() << " + " << *v->index() << ")";
+    os() << "__ldg(" << *v->base_handle() << " + " << *v->flat_index() << ")";
   }
 }
 
 void CudaPrinter::visit(const Store* v) {
-  os() << *v->base_handle() << "[" << *v->index() << "] = ";
+  os() << *v->base_handle() << "[" << *v->flat_index() << "] = ";
   if (v->value()->dtype().scalar_type() == ScalarType::Half) {
     os() << "__float2half(" << *v->value() << ");";
   } else {
@@ -507,7 +509,7 @@ void CudaCodeGen::Initialize() {
 
 void CudaCodeGen::call(const std::vector<CallArg>& args) {
   if (args.size() != buffer_args().size()) {
-    throw malformed_input();
+    throw malformed_input("cuda_codegen: wrong number of args in call");
   }
 
   // TODO: move as much of this into the constructors.
@@ -516,7 +518,8 @@ void CudaCodeGen::call(const std::vector<CallArg>& args) {
   const std::vector<const Expr*>& gpu_thread_extents =
       printer_->gpu_thread_extents();
   if (gpu_block_extents.size() > 3 || gpu_thread_extents.size() > 3) {
-    throw malformed_input();
+    throw malformed_input(
+        "cuda_codegen: block or thread extent greater than 3D");
   }
 
   std::vector<int> gpu_block_extents_v(3, 1);
@@ -577,9 +580,9 @@ void CudaCodeGen::call(const std::vector<CallArg>& args) {
     // TODO: total hack. Switch to numel when it is available.
     int64_t total_elements_per_thread = (1LL << 28);
     {
-      std::lock_guard<std::mutex> lock(gen->mutex_);
+      std::lock_guard<std::mutex> lock(gen.mutex());
       auto philox_engine_inputs =
-          at::check_generator<at::CUDAGenerator>(gen)->philox_engine_inputs(
+          at::check_generator<at::CUDAGeneratorImpl>(gen)->philox_engine_inputs(
               total_elements_per_thread);
       rand_seed = philox_engine_inputs.first;
       rand_offset = philox_engine_inputs.second;

@@ -54,6 +54,7 @@ namespace c10 {
   _(prim, ReturnStmt)                \
   _(prim, BreakStmt)                 \
   _(prim, ContinueStmt)              \
+  _(prim, LocalVariableScope)        \
   _(prim, Store)                     \
   _(prim, AutogradZero)              \
   _(prim, AutogradAnyNonZero)        \
@@ -98,6 +99,7 @@ namespace c10 {
   _(prim, zip)                       \
   _(prim, enumerate)                 \
   _(prim, range)                     \
+  _(prim, list)                      \
   _(prim, rangelist)                 \
   _(prim, isinstance)                \
   _(prim, tolist)                    \
@@ -256,6 +258,7 @@ namespace c10 {
   _(attr, types)                     \
   _(attr, scope)                     \
   _(attr, keepdims)                  \
+  _(attr, cache_id)                  \
   _(attr, new_axis)
 #else
 #define FORALL_NS_SYMBOLS(_) \
