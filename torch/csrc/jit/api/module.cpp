@@ -147,7 +147,7 @@ IValue Module::forward(std::vector<IValue> inputs) {
     Kwargs output_param;
     output_param["outputs"] = outputs;
     auto hook_result = fn(inputs, output_param);
-    if (hook_result.isTensor()) {
+    if (!hook_result.isNone()) {
       outputs = hook_result;
     }
   }
