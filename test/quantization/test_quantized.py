@@ -10,7 +10,7 @@ import torch.nn.functional as F
 from torch.nn.modules.utils import _single, _pair
 
 from hypothesis import settings, HealthCheck
-from hypothesis import assume, given
+from hypothesis import assume, given, note
 from hypothesis import strategies as st
 import torch.testing._internal.hypothesis_utils as hu
 hu.assert_deadline_disabled()
@@ -317,8 +317,6 @@ class TestQuantizedOps(TestCase):
             ) == dqX.shape[0]
             assume(enough_unique_vals_in_each_layer)
 
-            print(dqX)
-
             # Initialize the weights non-randomly for reproducibility, to avoid
             # flaky tests
             weight = torch.ones(*qX.size()[1:], dtype=torch.float) * 0.5
@@ -334,10 +332,18 @@ class TestQuantizedOps(TestCase):
             qY_hat = torch.quantize_per_tensor(
                 Y_hat, scale=Y_scale, zero_point=Y_zero_point, dtype=torch_type)
 
-            self.assertEqual(
-                qY,
-                qY_hat,
-                message="LayerNorm failed:\n {} input vs\n {} actual vs \n{} expected".format(X, qY, qY_hat))
+            # Due to the numerics difference mentioned above between calculating
+            # the variance in float vs int, the results can still be slightly
+            # different.
+            dqY = qY.dequantize()
+            dqY_hat = qY_hat.dequantize()
+            diff = dqY - dqY_hat
+            num_diff = torch.sum(diff > 1e-10)
+            pct_diff = float(num_diff) / diff.numel()
+            note("LayerNorm failed:\n {} input vs\n {} actual vs \n{} expected"
+                 .format(X, qY, qY_hat))
+
+            self.assertTrue(pct_diff < 0.001)
 
 
     """Tests the correctness of the quantized::qnnpack_tanh op."""
