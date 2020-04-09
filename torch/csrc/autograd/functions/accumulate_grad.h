@@ -89,9 +89,9 @@ struct TORCH_API AccumulateGrad : public Node {
       // This case is not strictly necessary, but it makes the first-order only
       // case slightly more efficient.
       if (variable_grad.is_sparse() && !new_grad.is_sparse()) {
-        // If `variable_grad` is sparse and `new_grad` is not sparse, their
+        // If `grad_variable` is sparse and `new_grad` is not sparse, their
         // sum is not sparse, and we must change the TensorImpl type of
-        // `variable_grad` for it to store the result. However, changing the
+        // `grad_variable` for it to store the result. However, changing the
         // TensorImpl type of a tensor requires changing the tensor itself, and
         // thus in this case we have to change the grad tensor.
         update_grad(new_grad + variable_grad);
@@ -99,13 +99,13 @@ struct TORCH_API AccumulateGrad : public Node {
         // In this case we can avoid changing the grad tensor. There are three
         // scenarios when we'll hit this case:
         //
-        // 1. `variable_grad` is sparse, and `new_grad` is sparse.
-        // 2. `variable_grad` is dense, and `new_grad` is sparse.
-        // 3. `variable_grad` is dense, and `new_grad` is dense.
+        // 1. `grad_variable` is sparse, and `new_grad` is sparse.
+        // 2. `grad_variable` is dense, and `new_grad` is sparse.
+        // 3. `grad_variable` is dense, and `new_grad` is dense.
         //
-        // In all of these three cases, `variable_grad += new_grad` is a
-        // valid operation which adds `new_grad` to `variable_grad` in
-        // place. `variable_grad` is thus still referring to the same tensor
+        // In all of these three cases, `grad_variable += new_grad` is a
+        // valid operation which adds `new_grad` to `grad_variable` in
+        // place. `grad_variable` is thus still referring to the same tensor
         // after the operation.
         variable_grad += new_grad;
       }
