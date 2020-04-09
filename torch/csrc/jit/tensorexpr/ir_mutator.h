@@ -49,6 +49,7 @@ class Stmt;
 class Term;
 class Polynomial;
 class RoundOff;
+class AtomicAdd;
 
 class TORCH_API IRMutator {
  public:
@@ -97,6 +98,7 @@ class TORCH_API IRMutator {
   virtual Stmt* mutate(const For* v);
   virtual Stmt* mutate(const Block* v);
   virtual Stmt* mutate(const Store* v);
+  virtual Stmt* mutate(const AtomicAdd* v);
 
   virtual Stmt* mutate(const Allocate* v);
   virtual Stmt* mutate(const Free* v);

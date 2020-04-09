@@ -64,6 +64,7 @@ class CudaPrinter : public IRPrinter {
 
   void visit(const Load* v) override;
   void visit(const Store* v) override;
+  void visit(const AtomicAdd* v) override;
   void visit(const Max* v) override;
   void visit(const Min* v) override;
   void visit(const LetStmt* v) override;
