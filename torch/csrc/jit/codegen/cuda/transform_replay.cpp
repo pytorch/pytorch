@@ -54,11 +54,11 @@ TensorDomain* TransformReplay::replayBackward(
 }
 
 /*
- * Replay functions, takes a TensorView and steps through the operations in
+ * Replay functions, takes a TensorDomain and steps through the operations in
  * "record" based on influence axes. Will also update influence and propagate
  * it forward.
  */
-TensorView* TransformReplay::replay(Split* expr, TensorView* tv) {
+TensorDomain* TransformReplay::replay(Split* expr, TensorDomain* td) {
   int axis = expr->axis();
   // Forward prop influence
   if (influence[axis]) {
@@ -68,11 +68,11 @@ TensorView* TransformReplay::replay(Split* expr, TensorView* tv) {
         real_axis != -1,
         "During transformation replay attempted to split an imaginary axis.");
     TORCH_INTERNAL_ASSERT(
-        tv->axis(real_axis)->start()->isZeroInt(),
+        td->axis(real_axis)->start()->isZeroInt(),
         "Transform Replay tried to split an IterDomain with a start value that is not 0,",
         " this is not currently supported.");
     // Replay split
-    tv->split(real_axis, *(expr->factor()->value()));
+    td->split(real_axis, *(expr->factor()->value()));
     // Inserted a real axis, push everything in axis_map over to the right
     // after this inserted axis
     for (decltype(axis_map.size()) i{0}; i < axis_map.size(); i++)
@@ -89,10 +89,10 @@ TensorView* TransformReplay::replay(Split* expr, TensorView* tv) {
 
   influence.insert(influence.begin() + axis + 1, influence[axis]);
 
-  return tv;
+  return td;
 }
 
-TensorView* TransformReplay::replay(Merge* expr, TensorView* tv) {
+TensorDomain* TransformReplay::replay(Merge* expr, TensorDomain* td) {
   int axis = expr->axis();
 
   if (influence[axis] || influence[axis + 1]) {
@@ -102,11 +102,11 @@ TensorView* TransformReplay::replay(Merge* expr, TensorView* tv) {
         "During transformation replay attempted to merge an imaginary axis.");
     // Replay merge
     TORCH_INTERNAL_ASSERT(
-        tv->axis(axis)->start()->isZeroInt() &&
-            tv->axis(axis + 1)->start()->isZeroInt(),
+        td->axis(axis)->start()->isZeroInt() &&
+            td->axis(axis + 1)->start()->isZeroInt(),
         "Transform Replay tried to Merge IterDomains with a start value that is not 0,",
         " this is not currently supported.");
-    tv->merge(axis_map[axis]);
+    td->merge(axis_map[axis]);
   } else {
     // If we aren't applying the merge, we won't change any following axis
     // Doesn't matter which axis we propagate for the merge in the axis_map
@@ -122,10 +122,10 @@ TensorView* TransformReplay::replay(Merge* expr, TensorView* tv) {
   influence[axis] = influence[axis] || influence[axis + 1];
   influence.erase(influence.begin() + axis + 1);
 
-  return tv;
+  return td;
 }
 
-TensorView* TransformReplay::replay(Reorder* expr, TensorView* tv) {
+TensorDomain* TransformReplay::replay(Reorder* expr, TensorDomain* td) {
   // axis2pos[old_pos] = new_pos is sent to reorder, Reorder holds
   // pos2axis[new_pos] = old_pos Generate new axis2pos map
   std::unordered_map<int, int> axis2pos;
@@ -170,13 +170,13 @@ TensorView* TransformReplay::replay(Reorder* expr, TensorView* tv) {
     axis2pos[entry.first] = axis++;
   }
 
-  for (decltype(tv->nDims()) i{0}; i < tv->nDims(); i++) {
+  for (decltype(td->size()) i{0}; i < td->size(); i++) {
     if (axis2pos.find(i) == axis2pos.end())
       axis2pos[i] = axis++;
   }
 
   // replay reorder
-  tv->reorder(axis2pos);
+  td->reorder(axis2pos);
 
   // Fake transform:
   for (decltype(pos2axis.size()) i = 0; i < pos2axis.size(); i++) {
@@ -190,7 +190,7 @@ TensorView* TransformReplay::replay(Reorder* expr, TensorView* tv) {
   influence = reordered_influence;
   axis_map = reordered_axis_map;
 
-  return tv;
+  return td;
 }
 
 /*

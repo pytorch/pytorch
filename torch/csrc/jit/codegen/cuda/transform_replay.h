@@ -136,9 +136,9 @@ struct TORCH_CUDA_API TransformReplay : public TransformIter {
    * "record" based on influence axes. Will also update influence and propagate
    * it forward.
    */
-  TensorView* replay(Split* expr, TensorView* tv);
-  TensorView* replay(Merge* expr, TensorView* tv);
-  TensorView* replay(Reorder* expr, TensorView* tv);
+  TensorDomain* replay(Split* expr, TensorDomain* tv);
+  TensorDomain* replay(Merge* expr, TensorDomain* tv);
+  TensorDomain* replay(Reorder* expr, TensorDomain* tv);
 
   /*
    * Takes replay_ref and replays its transformations on replay_target
