@@ -58,9 +58,6 @@ namespace detail {
     void operator()(const at::Tensor& x) {
       ts = ts | x.key_set();
     }
-    void operator()(const TensorOptions& x) {
-      ts = ts | x.key_set();
-    }
     void operator()(at::ArrayRef<at::Tensor> xs) {
       for (const auto& x : xs) {
         ts = ts | x.key_set();

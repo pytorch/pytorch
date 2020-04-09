@@ -43,6 +43,7 @@ else:
 LEGACY_TH_DECLARATION_BROADCAST = CodeTemplate("""\
 ${return_type} ${api_name}(${type_method_formals});
 """)
+
 LEGACY_TH_DEFINITION_BROADCAST = CodeTemplate("""\
 ${return_type} ${api_name}(${type_method_formals}) {
     ${named_guard_declaration}
@@ -56,6 +57,7 @@ ${return_type} ${api_name}(${type_method_formals}) {
 LEGACY_TH_DECLARATION = CodeTemplate("""\
 ${return_type} ${method_prefix_derived}${api_name}(${type_method_formals});
 """)
+
 LEGACY_TH_DEFINITION = CodeTemplate("""\
 ${return_type} ${method_prefix_derived}${api_name}(${type_method_formals}) {
     ${named_guard_declaration}
@@ -63,6 +65,7 @@ ${return_type} ${method_prefix_derived}${api_name}(${type_method_formals}) {
     ${type_definition_body}
 }
 """)
+
 LEGACY_TH_DEFINITION_SWITCH_STATEMENT = CodeTemplate("""\
 ${dispatch_scalar_type_declaration}
 ${switch_prologue}
@@ -72,6 +75,7 @@ switch (dispatch_scalar_type) {
         AT_ERROR("${api_name} not supported on ${Type} for ", dispatch_scalar_type);
 }
 """)
+
 LEGACY_TH_DEFINITION_CASE = CodeTemplate("""\
 case ScalarType::${ScalarName}: {
     ${case_body}
@@ -116,14 +120,17 @@ DEFAULT_UNBOXEDONLY_FUNCTION_REGISTRATION = CodeTemplate("""\
 .impl("${operator_name_with_overload}",
       CppFunction::makeUnboxedOnly(TypeDefault::${type_wrapper_name}))
 """)
+
 BACKEND_UNBOXEDONLY_FUNCTION_REGISTRATION = CodeTemplate("""\
 .impl("${operator_name_with_overload}", torch::dispatch(
     DispatchKey::${Backend}TensorId,
     CppFunction::makeUnboxedOnly(${Type}::${type_wrapper_name})))
 """)
+
 DEFAULT_FUNCTION_REGISTRATION = CodeTemplate("""\
 .impl("${operator_name_with_overload}", &TypeDefault::${type_wrapper_name})
 """)
+
 BACKEND_FUNCTION_REGISTRATION = CodeTemplate("""\
 .impl("${operator_name_with_overload}",
       torch::dispatch(DispatchKey::${Backend}TensorId, &${Type}::${type_wrapper_name}))
@@ -133,8 +140,11 @@ BACKEND_FUNCTION_REGISTRATION = CodeTemplate("""\
 TENSOR_METHOD_DECLARATION = CodeTemplate("""\
 ${return_type} ${api_name}(${method_formals_with_defaults}) const;
 """)
+
 # add non-virtual declaration to Tensor.cpp
 C10_TENSOR_METHOD_DEFINITION = CodeTemplate("""\
+
+// ${schema_string}
 inline ${return_type} Tensor::${api_name}(${method_formals}) const {
 #ifdef USE_STATIC_DISPATCH
     ${static_dispatch_method_body}
@@ -144,16 +154,21 @@ inline ${return_type} Tensor::${api_name}(${method_formals}) const {
 #endif
 }
 """)
+
 # add a method declaration in Functions.h
 FUNCTION_DECLARATION = CodeTemplate("""\
 static inline ${return_type} ${api_name}(${formals_with_defaults});
 """)
+
 # add a method declaration in Functions.h
 DEPRECATED_FUNCTION_DECLARATION = CodeTemplate("""\
 C10_DEPRECATED static inline ${return_type} ${api_name}(${formals_with_defaults});
 """)
+
 # add method definition in Functions.h
 C10_FUNCTION_DEFINITION = CodeTemplate("""\
+
+// ${schema_string}
 static inline ${return_type} ${api_name}(${formals}) {
 #ifdef USE_STATIC_DISPATCH
     ${static_dispatch_function_body}
@@ -176,6 +191,7 @@ STATIC_DISPATCH_FUNCTION_DEFAULT_BODY = CodeTemplate("""\
 at::AutoNonVariableTypeMode _var_guard(true);
 ${return_call} TypeDefault::${type_wrapper_name}(${native_arguments});
 """)
+
 STATIC_DISPATCH_FUNCTION_SWITCH_BODY = CodeTemplate("""\
 at::AutoNonVariableTypeMode _var_guard(true);
 switch(dispatchKeyToBackend(c10::impl::dispatchTypeId(${key_set},
@@ -185,6 +201,7 @@ switch(dispatchKeyToBackend(c10::impl::dispatchTypeId(${key_set},
         AT_ERROR("${api_name} not implemented for ", at::toString(${key_set}));
 }
 """)
+
 STATIC_DISPATCH_FUNCTION_SWITCH_STATEMENT = CodeTemplate("""\
 case Backend::${backend}:
     ${return_call} ${backend}Type::${type_wrapper_name}(${native_arguments});
@@ -194,20 +211,6 @@ case Backend::${backend}:
 # add a native declaration for a native function
 NATIVE_DECLARATION = CodeTemplate("""\
 CAFFE2_API ${return_type} ${native_type_method_dispatch}(${formals_with_defaults});
-""")
-
-# special method definition for factory functions in Functions.h that initializes backends
-C10_FACTORY_DEFINITION = CodeTemplate("""\
-static inline ${return_type} ${api_name}(${formals}) {
-#ifdef USE_STATIC_DISPATCH
-    ${static_dispatch_function_body}
-#else
-    globalLegacyTypeDispatch().initForDispatchKeySet(${inferred_key_set});
-    static c10::OperatorHandle op = c10::Dispatcher::singleton()
-        .findSchemaOrThrow("aten::${operator_name}", "${overload_name}");
-    return op.callUnboxed<${formals_types_with_return}>(${native_actuals});
-#endif
-}
 """)
 
 ZERO_DIM_CHECK = CodeTemplate("""\
@@ -1136,12 +1139,9 @@ def create_generic(top_env, declarations):
                 static_dispatch_function_body = STATIC_DISPATCH_FUNCTION_DEFAULT_BODY.substitute(
                     option, native_arguments=option['native_actuals'])
 
-            if is_factory_method:
-                fn_definition = C10_FACTORY_DEFINITION.substitute(
-                    option, static_dispatch_function_body=static_dispatch_function_body)
-            else:
-                fn_definition = C10_FUNCTION_DEFINITION.substitute(
-                    option, static_dispatch_function_body=static_dispatch_function_body)
+            fn_definition = C10_FUNCTION_DEFINITION.substitute(
+                option, static_dispatch_function_body=static_dispatch_function_body)
+
             return FunctionCode(definition=fn_definition, declaration=fn_declaration)
 
         assert find_formal('Type', formals) is None, \
