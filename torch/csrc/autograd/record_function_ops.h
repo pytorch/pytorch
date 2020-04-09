@@ -37,10 +37,11 @@ void _call_end_callbacks_on_fut(
       });
 }
 
+// Same as _call_end_callbacks_on_fut but takes an ivalue future. These
+// functions should be merged once the two existing futures are merged.
 void _call_end_callbacks_on_jit_fut(
     const at::Tensor& handle,
     const c10::intrusive_ptr<c10::ivalue::Future>& fut);
-
 
 // Ends the profiling scope created with record_function_enter.
 void record_function_exit(const at::Tensor& handle);

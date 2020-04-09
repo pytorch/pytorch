@@ -162,10 +162,12 @@ def _wait_all_workers():
         rpc_sync(
             leader_worker_name,
             _on_leader_follower_report_shutdown_intent,
-            args=(sequence_id, self_worker_name),
+            args=(sequence_id, self_worker_name,),
         )
 
-    proceed_signal = _wait_all_workers_sequence_id_to_states[sequence_id].proceed_signal
+    proceed_signal = _wait_all_workers_sequence_id_to_states[
+        sequence_id
+    ].proceed_signal
     proceed_signal.wait()
 
     # Phase 2: Leader asks followers to proceed.
@@ -177,9 +179,7 @@ def _wait_all_workers():
         _set_rpc_timeout(timeout)
         worker_name_to_response_future_dict = dict()
         for follower_worker_name in _ALL_WORKER_NAMES - {leader_worker_name}:
-            fut = rpc_async(
-                follower_worker_name, _set_proceed_shutdown_signal, args=(sequence_id,)
-            )
+            fut = rpc_async(follower_worker_name, _set_proceed_shutdown_signal, args=(sequence_id,))
             worker_name_to_response_future_dict[follower_worker_name] = fut
         for follower_worker_name, fut in worker_name_to_response_future_dict.items():
             try:
