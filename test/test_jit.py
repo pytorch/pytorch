@@ -39,27 +39,8 @@ import torch.jit
 import torch.jit._logging
 import torch.jit.frontend
 import torch.jit.quantized
-from torch.jit._recursive import wrap_cpp_module
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.nn.quantized.modules.linear import LinearPackedParams
-from torch.quantization import QConfig
-from torch.quantization._quantize_script import ConvPackedParams
-from torch.quantization._quantize_script import script_qconfig
-from torch.quantization._quantize_script import prepare_script
-from torch.quantization._quantize_script import convert_script
-from torch.quantization._quantize_script import quantize_script
-from torch.quantization import default_observer
-from torch.quantization import default_weight_observer
-from torch.quantization import default_per_channel_weight_observer
-from torch.quantization import default_qconfig
-from torch.quantization import get_default_qconfig
-
-from torch.quantization import quantize
-from torch.testing._internal.common_quantization import SingleLayerLinearModel, AnnotatedSingleLayerLinearModel
-from torch.testing._internal.common_quantization import ConvModel, AnnotatedConvModel
-from torch.testing._internal.common_quantization import test_only_eval_fn as _test_only_eval_fn
-
 
 # Testing utils
 from torch.testing._internal import jit_utils
@@ -70,7 +51,6 @@ from torch.testing._internal.common_utils import run_tests, IS_WINDOWS, TEST_WIT
 from torch.testing._internal.jit_utils import JitTestCase, enable_cpu_fuser, disable_autodiff_subgraph_inlining, \
     _trace, enable_cpu_fuser_if, do_input_map, get_execution_plan, \
     execWrapper, _inline_everything, _tmp_donotuse_dont_inline_everything, \
-    get_forward, get_forward_graph, get_module_method, \
     RUN_CUDA, RUN_CUDA_MULTI_GPU
 from torch.testing._internal.jit_utils import attrs_with_prefix
 from torch.testing._internal.jit_metaprogramming_utils import create_script_fn, nn_functional_tests, get_script_args, \

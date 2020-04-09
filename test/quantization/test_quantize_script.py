@@ -1,17 +1,55 @@
+# -*- coding: utf-8 -*-
+# torch
 import torch
+import torch.nn as nn
+import torch.nn.functional as F
 import torch.jit
+from torch._C import parse_ir
 
+# TODO: remove this global setting
+# JIT tests use double as the default dtype
+torch.set_default_dtype(torch.double)
+
+# torch.quantization
+from torch.quantization import QConfig
+from torch.quantization import default_dynamic_qconfig
+from torch.quantization import QConfigDynamic
+from torch.quantization import default_observer
+from torch.quantization import default_weight_observer
+from torch.quantization import default_per_channel_weight_observer
+from torch.quantization import default_qconfig
+from torch.quantization import get_default_qconfig
+from torch.quantization import quantize
+
+# torch.quantization._quantize_script
+from torch.nn.quantized.modules.linear import LinearPackedParams
+from torch.quantization._quantize_script import ConvPackedParams
+from torch.quantization._quantize_script import script_qconfig
+from torch.quantization._quantize_script import prepare_script
+from torch.quantization._quantize_script import convert_script
+from torch.quantization._quantize_script import quantize_script
 from torch.quantization._quantize_script import prepare_dynamic_script
 from torch.quantization._quantize_script import quantize_dynamic_script
-from torch.quantization import default_dynamic_qconfig, QConfigDynamic
 
+# Testing utils
 from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_quantization import SingleLayerLinearModel, AnnotatedSingleLayerLinearModel
+from torch.testing._internal.common_quantization import ConvModel, AnnotatedConvModel
+from torch.testing._internal.common_quantization import test_only_eval_fn as _test_only_eval_fn
+
 from torch.testing import FileCheck
 from torch.testing._internal.jit_utils import attrs_with_prefix
-from torch.testing._internal.jit_utils import JitTestCase, get_forward_graph, get_module_method
+from torch.testing._internal.jit_utils import JitTestCase
+from torch.testing._internal.jit_utils import get_forward
+from torch.testing._internal.jit_utils import get_forward_graph
+from torch.testing._internal.jit_utils import get_module_method
 from torch.testing._internal.common_quantization import test_only_eval_fn as _test_only_eval_fn
 
 from torch.jit._recursive import wrap_cpp_module
+
+# Standard library
+import itertools
+import unittest
 
 class TestQuantizeScript(JitTestCase):
     def test_insert_observers(self):
@@ -519,7 +557,6 @@ class TestQuantizeScript(JitTestCase):
         data = torch.randn(1, 1, 10, 10, dtype=torch.float)
         m(data)
         m = convert_script(m, True)
-        print(m.graph_for(data))
         FileCheck().check_not("aten::conv2d") \
                    .check_not("aten::relu") \
                    .check("quantized::conv2d_relu") \
@@ -974,7 +1011,6 @@ graph(%input, %weight):
             torch._C._jit_pass_fuse_linear(graph)
             FileCheck().run(input_str, graph)
 
-    @_tmp_donotuse_dont_inline_everything
     def test_fold_quantize(self):
         class M(torch.nn.Module):
             def __init__(self):
