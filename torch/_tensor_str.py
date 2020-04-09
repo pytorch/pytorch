@@ -80,8 +80,18 @@ class _Formatter(object):
             tensor_view = tensor.reshape(-1)
 
         if not self.floating_dtype:
+            complex_has_decimal = False
+            if self.complex_dtype:
+                # max width for complex tensors depends on whether or not tensor contains ints only
+                complex_has_decimal = sum([not (value.item().real.is_integer() and value.item().imag.is_integer()) \
+                    for value in tensor_view])
             for value in tensor_view:
-                value_str = '{}'.format(value)
+                if self.complex_dtype and complex_has_decimal:
+                    value_str = ('{{:.{}f}}').format(PRINT_OPTS.precision).format(value)
+                elif self.complex_dtype and not complex_has_decimal:
+                    value_str = "{:.0f}".format(value.item())
+                else:
+                    value_str = '{}'.format(value)
                 self.max_width = max(self.max_width, len(value_str))
 
         else:
