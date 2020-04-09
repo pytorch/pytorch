@@ -296,7 +296,7 @@ Generator create_CUDA_CSPRNG_Generator() {
 
 void registerOps() {
   static auto registry = torch::import()
-    .impl("aten::random_", torch::dispatch(DispatchKey::CustomRNGKeyId, CppFunction::makeUnboxedOnly(random_)));
+    .impl_UNBOXED("aten::random_", DispatchKey::CustomRNGKeyId, random_);
 }
   
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
