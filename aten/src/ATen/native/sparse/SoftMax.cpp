@@ -9,7 +9,7 @@ namespace at {
 namespace native {
 namespace {
 
-template <typename scalar_t, typename iscalar_t>
+template <typename scalar_t, typename iscalar_t, bool LogSoftMax>
 void cpu_sparse_coo_softmax(Tensor output, const Tensor& input, const int64_t dim) {
   /*
     See test/test_sparse.py:test_softmax:sparse_softmax for the Python
@@ -26,8 +26,13 @@ void cpu_sparse_coo_softmax(Tensor output, const Tensor& input, const int64_t di
   out_indices.copy_(indices);
 
   if (dim >= sparse_dim) {
-    auto new_values = softmax_cpu(values, dim - sparse_dim + 1, false);
-    out_values.copy_(new_values);
+    if (LogSoftMax) {
+      auto new_values = log_softmax_cpu(values, dim - sparse_dim + 1, false);
+      out_values.copy_(new_values);
+    } else {
+      auto new_values = softmax_cpu(values, dim - sparse_dim + 1, false);
+      out_values.copy_(new_values);
+    }
     return;
   }
 
@@ -108,18 +113,32 @@ void cpu_sparse_coo_softmax(Tensor output, const Tensor& input, const int64_t di
     scalar_t* exp_sums_data = exp_sums_data_base + p * nvalues;
     for (int64_t j=0; j < nvalues; j++) {
       auto v = std::exp(values_data[j] - mx_data[j]);
-      out_values_data[j] = v;
+      if (!LogSoftMax) {
+        out_values_data[j] = v;
+      }
       exp_sums_data[j] += v;
+    }
+  }
+
+  if (LogSoftMax) {
+    for (int64_t j=0; j < nvalues * (mx_p + 1); j++) {
+      mx_data_base[j] += std::log(exp_sums_data_base[j]);
     }
   }
 
   /* normalize with the sum of exponents */
   for (int64_t i=0; i < nnz; i++) {
     auto p = pool[i];
+    scalar_t* values_data = values_data_base + i * nvalues;
     scalar_t* out_values_data = out_values_data_base + i * nvalues;
     scalar_t* exp_sums_data = exp_sums_data_base + p * nvalues;
+    scalar_t* mx_data = mx_data_base + p * nvalues;
     for (int64_t j=0; j < nvalues; j++) {
-      out_values_data[j] /= exp_sums_data[j];
+      if (LogSoftMax) {
+        out_values_data[j] = values_data[j] - mx_data[j];
+      } else {
+        out_values_data[j] /= exp_sums_data[j];
+      }
     }
   }
 
@@ -139,7 +158,24 @@ Tensor softmax_sparse_cpu(const Tensor& input_, const int64_t dim_, const bool h
               "dim must be non-negative and less than input dimensions");
   AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "softmax", [&] {
       // assuming that the type of input._indices() entries is int64_t
-      cpu_sparse_coo_softmax<scalar_t, int64_t>(output, input, dim_);
+      cpu_sparse_coo_softmax<scalar_t, int64_t, false>(output, input, dim_);
+  });
+  return output;
+}
+
+Tensor log_softmax_sparse_cpu(const Tensor& input_, const int64_t dim_, const bool half_to_float) {
+  AT_ASSERT(input_.is_sparse());
+  AT_ASSERTM(!half_to_float, "log_softmax with half to float conversion is not supported on CPU");
+  auto input = input_.coalesce();
+  Tensor output = at::native::empty_like(input);
+  if (input.numel() == 0) {
+    return output;
+  }
+  TORCH_CHECK(dim_ >= 0 && dim_ < input.dim(),
+              "dim must be non-negative and less than input dimensions");
+  AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "log_softmax", [&] {
+      // assuming that the type of input._indices() entries is int64_t
+      cpu_sparse_coo_softmax<scalar_t, int64_t, true>(output, input, dim_);
   });
   return output;
 }

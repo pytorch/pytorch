@@ -2472,6 +2472,10 @@ class TestSparse(TestCase):
 
             x, i, v = self._gen_sparse(sparse_dims, nnz, with_size)
 
+            def sparse_log(x):
+                return torch.sparse_coo_tensor(x._indices(), x._values().log(),
+                                               x.size(), dtype=x.dtype, device=x.device)
+
             for dim in range(len(x.shape)):
                 # check sparse softmax definition using dense softmax:
                 y = sparse_softmax(x, dim)  # Python sparse softmax
@@ -2481,6 +2485,9 @@ class TestSparse(TestCase):
                 # check C++ sparse softmax
                 y1 = F.softmax(x, dim)      # C++ sparse softmax
                 self.assertEqual(y, y1)
+                # check C++ sparse log_softmax
+                ly1 = F.log_softmax(x, dim)
+                self.assertEqual(ly1, sparse_log(y1))
 
         test_op(1, 10, [3])
         test_op(1, 10, [3, 2])
