@@ -1889,6 +1889,120 @@ void fake_quant_grad_per_channel_cpu(TensorIterator &iter, int64_t quant_min, in
     });
 }
 
+template <typename T>
+void quantized_layer_norm_kernel_impl(
+    const Tensor& X,
+    const Tensor& gamma,
+    const Tensor& beta,
+    int64_t M,
+    int64_t N,
+    float eps,
+    Tensor* Y) {
+
+}
+
+void quantized_layer_norm_kernel(
+    const Tensor& X,
+    const Tensor& gamma,
+    const Tensor& beta,
+    int64_t M,
+    int64_t N,
+    double eps,
+    Tensor* Y) {
+  AT_DISPATCH_QINT_TYPES(X.scalar_type(), "quantized_layer_norm_kernel_impl_cpu", [&]() {
+    using qVec = vec256::Vec256<scalar_t>;
+    using fVec = vec256::Vec256<float>;
+
+    TORCH_INTERNAL_ASSERT(X.numel() == M * N, "Unexpected num elements in X");
+    TORCH_INTERNAL_ASSERT(!gamma.defined() || gamma.numel() == N,
+        "Unexpected size of gamma");
+    TORCH_INTERNAL_ASSERT(!beta.defined() || beta.numel() == N,
+        "Unexpected size of beta");
+    scalar_t* X_data = X.data_ptr<scalar_t>();
+    const float* gamma_data = gamma.defined() ? gamma.data_ptr<float>() : nullptr;
+    const float* beta_data = beta.defined() ? beta.data_ptr<float>() : nullptr;
+    scalar_t* Y_data = Y->data_ptr<scalar_t>();
+    const bool gamma_null = gamma_data == nullptr;
+    const bool beta_null = beta_data == nullptr;
+    int64_t x_zp = X.q_zero_point();
+    float x_scale = X.q_scale();
+    fVec x_zp_vec((float)x_zp);
+    fVec one_vec(1.0f);
+    fVec zero_vec(0.0f);
+    float x_fake_scale = 1.0f;
+    fVec x_fake_scale_vec(x_fake_scale);
+    fVec x_fake_scale_zp_neg_premul_vec = x_fake_scale_vec * x_zp_vec.neg();
+    int64_t y_zp = Y->q_zero_point();
+    float y_scale = Y->q_scale();
+    float y_inv_scale = 1.0f / y_scale;
+
+    constexpr int kFloatVLen = 8;
+    int64_t kIntVLen = kFloatVLen * qVec::float_num_vecs();
+    int64_t kNumIntVecInLayer = N / kIntVLen;
+    int64_t kNonVecRemInLayer = N % kIntVLen;
+
+    at::parallel_for(0, M, 1, [&](int64_t start, int64_t end) {
+      for (int64_t i = start; i < end; ++i) {
+
+        scalar_t* X_ptr = X_data + i * N;
+        scalar_t* Y_ptr = Y_data + i * N;
+
+        // First pass: calculate mean and variance.
+
+        scalar_t::underlying* X_ptr_underlying = reinterpret_cast<scalar_t::underlying*>(X_ptr);
+        auto l_sum_shifted = hsum(X_ptr_underlying, N);
+        auto l_sum_sq_shifted = hsum_sq(X_ptr_underlying, N);
+        float l_mean_shifted_div_scale_x = static_cast<float>(l_sum_shifted) / N;
+        // mean(dqX) / scale_x
+        float layer_mean_div_scale_x = l_mean_shifted_div_scale_x - x_zp;
+        // var(dqX) / scale_x^2
+        float layer_var_div_scale_x_sq =
+          std::max(static_cast<float>(l_sum_sq_shifted) / N -
+              l_mean_shifted_div_scale_x * l_mean_shifted_div_scale_x, 0.0f);
+        // scale_x / sqrt(var(dqX) + eps)
+        float scale_x_div_layer_std = x_scale /
+          std::sqrt(layer_var_div_scale_x_sq * x_scale * x_scale + eps);
+        fVec layer_mean_div_scale_xVec(layer_mean_div_scale_x);
+        fVec scale_x_div_layer_stdVec(scale_x_div_layer_std);
+
+        // Second pass: normalize
+
+        // TODO replace with TensorIterator implementation once #33166 is fixed.
+        for (int64_t vecIdx = 0; vecIdx < kNumIntVecInLayer; vecIdx++) {
+          int64_t vecStartIdx = vecIdx * kIntVLen;
+          auto qXVec = qVec::loadu(X_ptr + vecStartIdx);
+          auto dqXVec = qXVec.dequantize(x_fake_scale_vec, x_zp_vec,
+              x_fake_scale_zp_neg_premul_vec);
+          for (int dqXVecIdx = 0; dqXVecIdx < dqXVec.size(); dqXVecIdx++) {
+            int64_t vecVecStartIdx = vecStartIdx + dqXVecIdx * kFloatVLen;
+            auto gammaVec = gamma_null
+              ? one_vec
+              : fVec::loadu(gamma_data + vecVecStartIdx);
+            auto betaVec = beta_null
+              ? zero_vec
+              : fVec::loadu(beta_data + vecVecStartIdx);
+            dqXVec[dqXVecIdx] =
+              (dqXVec[dqXVecIdx] - layer_mean_div_scale_xVec) *
+                scale_x_div_layer_stdVec * gammaVec + betaVec;
+            qVec::quantize(dqXVec, y_scale, y_zp, y_inv_scale)
+              .store(Y_ptr + vecStartIdx);
+          }
+        }
+        for (int64_t remIdx = N - kNonVecRemInLayer; remIdx < N; remIdx++) {
+          const float gamma_v = gamma_null ? 1.0f : gamma_data[remIdx];
+          const float beta_v = beta_null ? 0.0f : beta_data[remIdx];
+          auto qXVal = X_ptr[remIdx];
+          float dqXVal = at::dequantize_val(x_fake_scale, x_zp, qXVal);
+          float dqY =
+            ((dqXVal - layer_mean_div_scale_x) * scale_x_div_layer_std) * gamma_v + beta_v;
+          Y_ptr[remIdx] = at::quantize_val<scalar_t>(y_scale, y_zp, dqY);
+        }
+      }
+    }); // parallel_for
+
+  });
+}
+
 } // namespace
 
 REGISTER_DISPATCH(qrelu_stub, &qrelu_kernel);
@@ -1924,6 +2038,7 @@ REGISTER_DISPATCH(fake_quant_tensor_stub, &fake_quantize_tensor_kernel);
 REGISTER_DISPATCH(fake_quant_grad_tensor_stub, &fake_quantize_grad_tensor_kernel);
 REGISTER_DISPATCH(fake_quant_per_channel_stub, &fake_quant_per_channel_cpu);
 REGISTER_DISPATCH(fake_quant_grad_per_channel_stub, &fake_quant_grad_per_channel_cpu);
+REGISTER_DISPATCH(quantized_layer_norm_stub, &quantized_layer_norm_kernel);
 
 } // namespace native
 } // namespace at
