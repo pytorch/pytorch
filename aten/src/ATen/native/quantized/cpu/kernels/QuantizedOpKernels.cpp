@@ -1485,6 +1485,38 @@ void qtopk_kernel(Tensor& values,
   });
 }
 
+template <typename T>
+inline void do_bn_compute(
+    typename T::underlying* X_ptr,
+    typename T::underlying* Y_ptr,
+    Vec256<float> & fake_scale,
+    Vec256<float> & in_zp_vec,
+    Vec256<float> & scale_neg_zp_premul,
+    int64_t out_zero_point,
+    Vec256<T> & out_zero_point_v,
+    float*  alpha,
+    float* beta,
+    int64_t vec_num,
+    bool ReluFused,
+    int64_t kVLen
+) {
+  using Vec = Vec256<T>;
+  auto vals_q = Vec::loadu(X_ptr);
+  // Fake scale of 1.0 here, should not affect performance (FMA in place of sub)
+  auto vals_dq = vals_q.dequantize(fake_scale, in_zp_vec, scale_neg_zp_premul);
+  for (size_t idx = 0; idx < vec_num; ++idx) {
+    auto alpha_v = Vec256<float>::loadu(alpha + idx * kVLen);
+    auto beta_v = Vec256<float>::loadu(beta + idx * kVLen);
+    vals_dq[idx] = vec256::fmadd(alpha_v, vals_dq[idx], beta_v);
+  }
+  auto outputs_q = Vec::quantize(vals_dq, /*output_scale=*/1.0f, out_zero_point, /*inv_output_scale=*/1.0f);
+  // Fake scale again
+  if (ReluFused) {
+    outputs_q = outputs_q.maximum(out_zero_point_v);
+  }
+  outputs_q.store(Y_ptr, vec_num * kVLen);
+}
+
 template <bool ReluFused>
 void q_batch_norm_kernel(
     int64_t N,
@@ -1500,6 +1532,8 @@ void q_batch_norm_kernel(
   AT_DISPATCH_QINT_TYPES(input.scalar_type(), "qbatch_norm", [&]() {
     float* alpha = a.data_ptr<float>();
     float* beta = b.data_ptr<float>();
+    auto minimum = std::numeric_limits<scalar_t::underlying>::lowest();
+    auto maximum = std::numeric_limits<scalar_t::underlying>::max();
     scalar_t::underlying* X =
         reinterpret_cast<scalar_t::underlying*>(input.data_ptr());
     scalar_t::underlying* Y = reinterpret_cast<scalar_t::underlying*>(output.data_ptr());
@@ -1512,41 +1546,62 @@ void q_batch_norm_kernel(
     auto fake_scale = Vec256<float>(1.0f);
     auto scale_neg_zp_premul = fake_scale * in_zp_vec.neg();
     auto out_zero_point_v = Vec(scalar_t(out_zero_point));
-
-    // TODO replace with TensorIterator implementation once #33166 is fixed.
+    size_t lanes = Vec::float_num_vecs() * kVLen;
     for (int64_t i = 0; i < outer_size; ++i) {
-      int64_t n = C / (Vec::float_num_vecs() * kVLen) * (Vec::float_num_vecs() * kVLen);
-      int64_t r = C % (Vec::float_num_vecs() * kVLen);
       auto* X_ptr = reinterpret_cast<typename scalar_t::underlying*>(X + i * C);
       auto* Y_ptr = reinterpret_cast<typename scalar_t::underlying*>(Y + i * C);
+      int64_t ch = 0;
 
-      for (int64_t j = 0; j < n; j += Vec::float_num_vecs() * kVLen) {
-        auto vals_q = Vec::loadu(X_ptr + j);
-        // Fake scale of 1.0 here, should not affect performance (FMA in place of sub)
-        auto vals_dq = vals_q.dequantize(fake_scale, in_zp_vec, scale_neg_zp_premul);
-        for (size_t idx = 0; idx < vals_dq.size(); ++idx) {
-          auto alpha_v = Vec256<float>::loadu(alpha + j + idx * kVLen);
-          auto beta_v = Vec256<float>::loadu(beta + j + idx * kVLen);
-          vals_dq[idx] = vec256::fmadd(alpha_v, vals_dq[idx], beta_v);
-        }
-        // Fake scale again
-        auto outputs_q = Vec::quantize(vals_dq, /*output_scale=*/1.0f, out_zero_point, /*inv_output_scale=*/1.0f);
-        if (ReluFused) {
-          outputs_q = outputs_q.relu(out_zero_point_v);
-        }
-        outputs_q.store(Y_ptr + j);
+      for(; ch + lanes <= C; ch += lanes ) {
+        do_bn_compute<scalar_t>(
+          X_ptr + ch,
+          Y_ptr + ch,
+          fake_scale,
+          in_zp_vec,
+          scale_neg_zp_premul,
+          out_zero_point,
+          out_zero_point_v,
+          alpha + ch,
+          beta + ch,
+          Vec::float_num_vecs(),
+          ReluFused,
+          kVLen
+        );
       }
 
-      for (int64_t j = 0; j < r; ++j) {
+      // for channel between 8 and 32, still use 32 width for performance
+      // Benchmark shows it is faster than doing 8 channels each time
+      int64_t elem_size = C - ch;
+      if ((lanes == 32) && elem_size >= kVLen) {
+        int64_t vec_num = elem_size / kVLen;
+        std::vector<typename scalar_t::underlying> buf_in(lanes);
+        memcpy(buf_in.data(), X_ptr + ch, vec_num * kVLen); // 3 cycles
+        do_bn_compute<scalar_t>(
+          buf_in.data(),
+          Y_ptr + ch,
+          fake_scale,
+          in_zp_vec,
+          scale_neg_zp_premul,
+          out_zero_point,
+          out_zero_point_v,
+          alpha + ch,
+          beta + ch,
+          vec_num,
+          ReluFused,
+          kVLen
+        );
+        ch += vec_num * kVLen;
+      }
+      // for channels less than 8
+      for (; ch < C; ++ch) {
         long quantized_down = out_zero_point +
-            lrintf(alpha[n + j] * (X_ptr[n + j] - in_zero_point) +
-                        beta[n + j]);
+            lrintf(alpha[ch] * (X_ptr[ch] - in_zero_point) +
+                        beta[ch]);
         if (ReluFused) { // static if
           quantized_down = std::max<long>(quantized_down, out_zero_point);
         }
-        Y_ptr[n + j] = std::min<long>(
-            std::max<long>(quantized_down, std::numeric_limits<scalar_t::underlying>::min()),
-            std::numeric_limits<scalar_t::underlying>::max());
+        Y_ptr[ch] = std::min<long>(
+            std::max<long>(quantized_down, minimum), maximum);
       }
     }
 });

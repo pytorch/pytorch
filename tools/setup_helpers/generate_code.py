@@ -27,7 +27,7 @@ def generate_code(ninja_global=None,
                   disable_autograd=False,
                   selected_op_list_path=None,
                   selected_op_list=None,
-                  force_schema_registration=True):
+                  force_schema_registration=False):
     # cwrap depends on pyyaml, so we can't import it earlier
     root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     sys.path.insert(0, root)

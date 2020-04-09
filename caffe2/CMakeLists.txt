@@ -310,6 +310,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       --nn-path "aten/src"
       $<$<BOOL:${INTERN_DISABLE_AUTOGRAD}>:--disable-autograd>
       $<$<BOOL:${SELECTED_OP_LIST}>:--selected-op-list-path="${SELECTED_OP_LIST}">
+      --force_schema_registration
     DEPENDS
     "${CMAKE_BINARY_DIR}/aten/src/ATen/Declarations.yaml"
     "${TOOLS_PATH}/autograd/templates/VariableType.h"

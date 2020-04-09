@@ -285,7 +285,7 @@ def gen_jit_dispatch(
     disable_autograd=False,
     selected_op_list_path=None,
     selected_op_list=None,
-    force_schema_registration=True,
+    force_schema_registration=False,
 ):
     REGISTER_ATEN_OPS_CPP = CodeTemplate.from_file(template_path + '/register_aten_ops.cpp')
 
@@ -368,9 +368,7 @@ def gen_jit_dispatch(
         for decl in jit_decls:
             if disable_autograd and is_backward_op(decl):
                 continue
-            # To make it consistent to aten selective code-gen, skip the overload name for now. 
-            # Later the overload name can be included for finer granularity.
-            op_name = signature_without_args(decl).split('.')[0]
+            op_name = signature_without_args(decl)
             if selected_op_list and op_name not in selected_op_list:
                 if force_schema_registration:
                     decl['emit_dummy_placeholder'] = True
@@ -542,7 +540,7 @@ def hacked_twin(decl):
 
 
 def signature_without_args(decl):
-    name = decl['name'] if not is_out_variant(decl) else decl['name'][:-4]
+    name = operator_name_from_decl(decl)
     overload_name = '.' + decl['overload_name'] if not decl['overload_name'] == '' else ''
     return 'aten::{}{}'.format(name, overload_name)
 
