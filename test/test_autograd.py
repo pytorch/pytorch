@@ -2930,7 +2930,7 @@ class TestAutograd(TestCase):
         self._test_lerp_tensor_weights(lambda t: t)
 
     def test_reduce_dtype(self):
-        def test_reduction(op, has_no_dim):
+        def test_reduction(op, has_no_dim, takes_dtype=True):
             x = torch.randn(3, 3, dtype=torch.float, requires_grad=True)
 
             if has_no_dim:
@@ -2941,7 +2941,10 @@ class TestAutograd(TestCase):
 
             gi = torch.randn(op(x, dim=0).shape, dtype=torch.float)
             grad1, = torch.autograd.grad([op(x, dim=0)], [x], gi)
-            grad2, = torch.autograd.grad([op(x, dim=0, dtype=torch.double)], [x], gi.double())
+            if takes_dtype:
+                grad2, = torch.autograd.grad([op(x, dim=0, dtype=torch.double)], [x], gi.double())
+            else:
+                grad2, = torch.autograd.grad([op(x.double(), dim=0)], [x], gi.double())
             self.assertEqual(grad1, grad2)
             self.assertEqual(grad2.dtype, torch.float)
 
@@ -2949,6 +2952,7 @@ class TestAutograd(TestCase):
         test_reduction(torch.prod, True)
         test_reduction(torch.cumsum, False)
         test_reduction(torch.cumprod, False)
+        test_reduction(torch.logcumsumexp, False, takes_dtype=False)
 
     def test_inplace_view_backprop_base(self):
         # modify view and back-prop through base
