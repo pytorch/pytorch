@@ -8,6 +8,7 @@
 #include <c10/util/Exception.h>
 #include <c10/util/Optional.h>
 #include <ATen/native/Resize.h>
+#include <ATen/native/TypeProperties.h>
 #include <ATen/SparseTensorUtils.h>
 #include <ATen/quantized/QTensorImpl.h>
 #include <ATen/NamedTensorUtils.h>
@@ -397,30 +398,20 @@ Tensor block_diag(TensorList tensors) {
     return result;
   }
 
-  // Use at::native::result_type to find the right tensor to copy options from, so
-  // that the output data type is correct
-  const Tensor* options_tensor = &tensors[0];
-  ScalarType output_scalar_type = options_tensor->scalar_type();
   const Device& device = tensors[0].device();
 
   for (size_t tensor_idx = 1; tensor_idx < tensors.size(); tensor_idx++) {
-    const Tensor* other_tensor = &tensors[tensor_idx];
+    const Tensor& tensor = tensors[tensor_idx];
 
     TORCH_CHECK(
-      other_tensor->device() == device,
+      tensor.device() == device,
       "torch.block_diag: input tensors must all be on the same device.",
       " Input 0 is on device ", device,
-      " and input ", tensor_idx, " is on device ", other_tensor->device()
+      " and input ", tensor_idx, " is on device ", tensor.device()
     );
-
-    ScalarType scalar_type = at::native::result_type(*options_tensor, *other_tensor);
-
-    if (scalar_type != output_scalar_type) {
-      output_scalar_type = scalar_type;
-      options_tensor = other_tensor;
-    }
   }
 
+  ScalarType output_scalar_type = native::result_type(tensors);
   int64_t result_dim0 = 0;
   int64_t result_dim1 = 0;
   std::vector<Tensor> tensors_2D(tensors.size());
@@ -457,7 +448,7 @@ Tensor block_diag(TensorList tensors) {
 
   result = at::zeros(
     {result_dim0, result_dim1},
-    options_tensor->options().dtype(output_scalar_type)
+    tensors[0].options().dtype(output_scalar_type)
   );
 
   int64_t cur_dim0 = 0;
