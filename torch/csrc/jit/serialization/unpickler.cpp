@@ -7,7 +7,7 @@
 #include <torch/csrc/jit/mobile/type_parser.h>
 #include <torch/csrc/jit/serialization/pickler.h>
 #include <string>
-#include "unpickler.h"
+#include <torch/csrc/jit/serialization/unpickler.h>
 
 namespace torch {
 namespace jit {

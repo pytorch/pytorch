@@ -1,4 +1,4 @@
-#include "memory_dag.h"
+#include <torch/csrc/jit/passes/utils/memory_dag.h>
 
 #include <c10/util/flat_hash_map.h>
 #include <torch/csrc/utils/memory.h>

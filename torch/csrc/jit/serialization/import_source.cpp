@@ -1,4 +1,4 @@
-#include "import_source.h"
+#include <torch/csrc/jit/serialization/import_source.h>
 
 #include <ATen/core/qualified_name.h>
 #include <torch/csrc/jit/frontend/parser.h>

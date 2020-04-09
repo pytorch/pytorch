@@ -2,7 +2,7 @@
 
 #include <string>
 #include <vector>
-#include "ATen/core/qualified_name.h"
+#include <ATen/core/qualified_name.h>
 
 #include <ATen/core/ivalue.h>
 #include <ATen/core/jit_type.h>

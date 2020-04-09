@@ -12,9 +12,9 @@
 #include <torch/csrc/jit/serialization/source_range_serialization.h>
 #include <torch/csrc/jit/serialization/unpickler.h>
 
-#include "caffe2/serialize/file_adapter.h"
-#include "caffe2/serialize/inline_container.h"
-#include "caffe2/serialize/istream_adapter.h"
+#include <caffe2/serialize/file_adapter.h>
+#include <caffe2/serialize/inline_container.h>
+#include <caffe2/serialize/istream_adapter.h>
 
 #include <ATen/ATen.h>
 

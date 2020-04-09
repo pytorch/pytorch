@@ -64,7 +64,7 @@ class CudaKernel {
 // include IO data structure for stringification
 #define STRINGIFY(...) #__VA_ARGS__
 static auto typeinfo =
-#include "data_struct_str.h"
+#include <torch/csrc/jit/codegen/cuda/data_struct_str.h>
     ;
 #undef STRINGIFY
 

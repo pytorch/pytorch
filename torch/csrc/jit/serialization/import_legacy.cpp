@@ -9,11 +9,11 @@
 #include <torch/csrc/jit/serialization/source_range_serialization.h>
 #include <torch/csrc/jit/serialization/source_range_serialization_impl.h>
 
-#include "caffe2/core/common.h"
-#include "caffe2/core/types.h"
-#include "caffe2/proto/caffe2_pb.h"
-#include "caffe2/proto/torch_pb.h"
-#include "caffe2/serialize/inline_container.h"
+#include <caffe2/core/common.h>
+#include <caffe2/core/types.h>
+#include <caffe2/proto/caffe2_pb.h>
+#include <caffe2/proto/torch_pb.h>
+#include <caffe2/serialize/inline_container.h>
 
 #include <ATen/ATen.h>
 
