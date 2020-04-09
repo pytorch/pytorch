@@ -218,11 +218,16 @@ class TORCH_API RRef : public RRefInterface {
     return type_;
   }
 
+  // Save the future corresponding to the creation of this RRef on a remote
+  // node. Note that this is only set when processing requests invoked with
+  // rpc.remote. This is only used to get the future corresponding to the rref
+  // for profiling use cases.
   inline void registerCreatingFuture(std::shared_ptr<FutureMessage> fut) {
     creatingFuture_ = fut;
   }
 
-  virtual std::shared_ptr<FutureMessage> getCreatingFuture() const {
+  // Get the future corresponding to the creation of this rref.
+  inline std::shared_ptr<FutureMessage> getCreatingFuture() const {
     return creatingFuture_;
   };
 

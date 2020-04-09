@@ -1516,7 +1516,6 @@ class RpcTest(RpcAgentTestFixture):
     def test_rref_get_future(self):
         # Tests that we can obtain the future corresponding to the creation of
         # the RRef on remote end
-        # TODO: Are there any conditions that we can test when we know this future is completed?
         if self.rank == 0:
             # Builtin
             rref = rpc.remote(worker_name(1), torch.add, args=(1, 1))
