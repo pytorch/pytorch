@@ -71,15 +71,12 @@ struct PackedConvWeightsQnnp : public ConvPackedParamsBase<kSpatialDim> {
   at::Tensor apply(
       at::Tensor input,
       double output_scale,
-      int64_t output_zero_point) override {
-    return apply_impl<false>(input, output_scale, output_zero_point);
-  }
+      int64_t output_zero_point) override;
+
   at::Tensor apply_relu(
       at::Tensor input,
       double output_scale,
-      int64_t output_zero_point) override {
-    return apply_impl<false>(input, output_scale, output_zero_point);
-  }
+      int64_t output_zero_point) override;
 
   std::tuple<at::Tensor, c10::optional<at::Tensor>> unpack() override;
 

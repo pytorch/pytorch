@@ -177,6 +177,22 @@ void PackedConvWeight<kSpatialDim>::GetQuantizationParams(
 }
 
 template <int kSpatialDim>
+at::Tensor PackedConvWeight<kSpatialDim>::apply(
+    at::Tensor input,
+    double output_scale,
+    int64_t output_zero_point) {
+  return apply_impl<false>(input, output_scale, output_zero_point);
+}
+
+template <int kSpatialDim>
+at::Tensor PackedConvWeight<kSpatialDim>::apply_relu(
+    at::Tensor input,
+    double output_scale,
+    int64_t output_zero_point) {
+  return apply_impl<true>(input, output_scale, output_zero_point);
+}
+
+template <int kSpatialDim>
 template <bool kReluFused>
 at::Tensor PackedConvWeight<kSpatialDim>::apply_impl(
     at::Tensor act,
@@ -450,6 +466,22 @@ template at::Tensor PackedConvWeight<3>::apply_relu(
 #endif // USE_FBGEMM
 
 #ifdef USE_PYTORCH_QNNPACK
+
+template <int kSpatialDim>
+at::Tensor PackedConvWeightsQnnp<kSpatialDim>::apply(
+    at::Tensor input,
+    double output_scale,
+    int64_t output_zero_point) {
+  return apply_impl<false>(input, output_scale, output_zero_point);
+}
+
+template <int kSpatialDim>
+at::Tensor PackedConvWeightsQnnp<kSpatialDim>::apply_relu(
+    at::Tensor input,
+    double output_scale,
+    int64_t output_zero_point) {
+  return apply_impl<false>(input, output_scale, output_zero_point);
+}
 
 template <int kSpatialDim>
 template <bool kReluFused>
