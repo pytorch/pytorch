@@ -1,6 +1,6 @@
 #pragma once
 
-#include <ATen/core/boxing/kernel_functor.h>
+#include <ATen/core/boxing/impl/make_boxed_from_unboxed_functor.h>
 #include <ATen/core/function.h>
 #include <c10/util/Metaprogramming.h>
 #include <c10/util/TypeTraits.h>
@@ -77,7 +77,8 @@ call_torchbind_method_from_stack(
 
   using IValueArgTypes =
       typename c10::guts::infer_function_traits_t<Functor>::parameter_types;
-  return (functor)(c10::detail::ivalue_to_arg<
+  // TODO We shouldn't use c10::impl stuff directly here. We should use the KernelFunction API instead.
+  return (functor)(c10::impl::ivalue_to_arg<
                    std::remove_cv_t<std::remove_reference_t<
                        c10::guts::typelist::
                            element_t<ivalue_arg_indices, IValueArgTypes>>>,
@@ -136,7 +137,7 @@ inline void checkValidIdent(const std::string& str, const char *type) {
 } // namespace detail
 
 TORCH_API void registerCustomClass(at::ClassTypePtr class_type);
-TORCH_API void registerCustomClassMethod(std::shared_ptr<jit::Function> method);
+TORCH_API void registerCustomClassMethod(std::unique_ptr<jit::Function> method);
 
 // Given a qualified name (e.g. __torch__.torch.classes.Foo), return
 // the ClassType pointer to the Type that describes that custom class,

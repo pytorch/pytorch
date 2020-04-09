@@ -54,6 +54,7 @@ namespace c10 {
   _(prim, ReturnStmt)                \
   _(prim, BreakStmt)                 \
   _(prim, ContinueStmt)              \
+  _(prim, LocalVariableScope)        \
   _(prim, Store)                     \
   _(prim, AutogradZero)              \
   _(prim, AutogradAnyNonZero)        \
@@ -78,7 +79,6 @@ namespace c10 {
   _(aten, Delete)                    \
   _(prim, device)                    \
   _(prim, dtype)                     \
-  _(prim, shape)                     \
   _(prim, id)                        \
   _(prim, requires_grad)             \
   _(prim, MakeTestTensor) /* test */ \
@@ -223,6 +223,8 @@ namespace c10 {
   _(onnx, SequenceInsert)            \
   _(onnx, ConcatFromSequence)        \
   _(onnx, Identity)                  \
+  _(onnx, ReduceL1)                  \
+  _(onnx, ReduceL2)                  \
   FORALL_ATTR_BASE_SYMBOLS(_)        \
   _(attr, Subgraph)                  \
   _(attr, ReverseSubgraph)           \
@@ -255,6 +257,7 @@ namespace c10 {
   _(attr, types)                     \
   _(attr, scope)                     \
   _(attr, keepdims)                  \
+  _(attr, cache_id)                  \
   _(attr, new_axis)
 #else
 #define FORALL_NS_SYMBOLS(_) \
