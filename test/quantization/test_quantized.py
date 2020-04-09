@@ -272,20 +272,18 @@ class TestQuantizedOps(TestCase):
 
 
     """Tests the correctness of the quantized::qlayer_norm op."""
-    # TODO: improve hypothesis utils and remove these checks
-    @settings(suppress_health_check=(HealthCheck.filter_too_much, HealthCheck.too_slow, HealthCheck.data_too_large))
-    @given(X=hu.tensor(shapes=hu.array_shapes(3, 5, 1, 32),
-                       elements=hu.floats(-1e3, 1e3, allow_nan=False, allow_infinity=False),
-                       qparams=hu.qparams()),
+    @given(shapes=hu.array_shapes(3, 5, 1, 32),
+           qparams=hu.qparams(scale_max=1e3),
+           X_rand_scale=st.floats(0.01, 1e3),
            Y_scale=st.floats(0.2, 2.6),
            Y_zero_point=st.integers(0, 5),
-           qengine=st.sampled_from(("qnnpack", "fbgemm")))
-    def test_qlayer_norm(self, X, Y_scale, Y_zero_point, qengine):
+           qengine=st.sampled_from(("qnnpack", "fbgemm"))
+           )
+    def test_qlayer_norm(self, shapes, qparams, X_rand_scale, Y_scale, Y_zero_point, qengine):
         if qengine not in torch.backends.quantized.supported_engines:
             return
 
         with override_quantized_engine(qengine):
-            X, (scale, zero_point, torch_type) = X
 
             # As the variance of the input array approaches zero, the quantized
             # calculation gets more accurate compared to floating point
@@ -293,7 +291,13 @@ class TestQuantizedOps(TestCase):
             # from calculating sums and sums of squares in the FP kernel. If needed
             # in the future, we can change the quantized kernel to calculate sums
             # using floats, which would be slower but match numerics. Until then,
-            # make assumptions about layer variance and num of unique values
+            # make assumptions about layer variance and num of unique values.
+            # Also, don't use hypothesis to generate the tensor, as it's challenging
+            # to make it treat this failure as expected.
+            # TODO: improve hypothesis_utils.py and clean this up
+            X = (np.random.rand(*shapes).astype(np.float32) - 0.5) * X_rand_scale
+            (scale, zero_point, torch_type) = qparams
+
             nonzero_var_in_each_layer = sum(
                 1 if ((X[i] - X[i].min()) / (X[i].max() - X[i].min() + 1e-5)).std() > 1e-2 else 0
                 for i in range(X.shape[0])
