@@ -13,21 +13,23 @@ thread_local bool RRefContext::recording = false;
 
 namespace callback {
 void confirmPendingUser(
-    const std::shared_ptr<FutureMessage>& futureMessage,
+    const rpc::Message& message,
+    const c10::optional<utils::FutureError>& futErr,
     const ForkId& expectedForkId) {
-  if (!futureMessage->hasError()) {
-    auto rr = RemoteRet::fromMessage(futureMessage->constValue());
+  if (!futErr) {
+    auto rr = RemoteRet::fromMessage(message);
     TORCH_INTERNAL_ASSERT(rr->forkId() == expectedForkId);
   }
   RRefContext::getInstance().delPendingUser(expectedForkId);
   // Potentially propagate to the userRRef?
-  RRefContext::handleException(futureMessage);
+  RRefContext::handleException(futErr);
 }
 
 c10::intrusive_ptr<RRef> finishCreatingOwnerRRef(
-    const std::shared_ptr<FutureMessage>& futureMessage) {
-  RRefContext::handleException(futureMessage);
-  auto rr = RemoteRet::fromMessage(futureMessage->constValue());
+    const Message& message,
+    const c10::optional<utils::FutureError>& futErr) {
+  RRefContext::handleException(futErr);
+  auto rr = RemoteRet::fromMessage(message);
   TORCH_INTERNAL_ASSERT(
       rr->rrefId() == rr->forkId(),
       "Expecting an OwnerRRef as RemoteRet but got a fork.");
@@ -68,11 +70,12 @@ std::vector<c10::intrusive_ptr<RRef>> RRefContext::destroyInstance(
   return deletedRRefs;
 }
 
-void RRefContext::handleException(const std::shared_ptr<FutureMessage>& fm) {
-  if (fm->hasError()) {
+void RRefContext::handleException(
+    const c10::optional<utils::FutureError>& futErr) {
+  if (futErr) {
     // TODO: allow users to register an error handler and call it here.
-    VLOG(1) << "Got exception: " << fm->error()->what();
-    throw std::runtime_error(fm->error()->what());
+    VLOG(1) << "Got exception: " << (*futErr).what();
+    throw std::runtime_error((*futErr).what());
   }
 }
 
@@ -178,7 +181,10 @@ void RRefContext::delUser(
           agent_->getWorkerInfo(owner),
           RRefUserDelete(rrefId, forkId).toMessage());
 
-      fm->addCallback([fm]() { handleException(fm); });
+      fm->addCallback([](const Message& /* unused */,
+                         const c10::optional<utils::FutureError>& futErr) {
+        handleException(futErr);
+      });
     }
   }
 
@@ -387,15 +393,20 @@ void RRefContext::notifyOwnerAndParentOfFork(
     // with this fork ID.
     auto fm = agent_->sendWithRetries(
         agent_->getWorkerInfo(parent), RRefChildAccept(forkId).toMessage());
-    fm->addCallback([fm]() { handleException(fm); });
+    fm->addCallback([](const Message& /* unused */,
+                       const c10::optional<utils::FutureError>& futErr) {
+      handleException(futErr);
+    });
   } else {
     auto fm = agent_->sendWithRetries(
         agent_->getWorkerInfo(rref->owner()),
         RRefForkRequest(rref->rrefId(), forkId).toMessage());
 
     addPendingUser(forkId, rref);
-    fm->addCallback([this, forkId, parent, fm]() {
-      handleException(fm);
+    fm->addCallback([this, forkId, parent](
+                        const Message& /* unused */,
+                        const c10::optional<utils::FutureError>& futErr) {
+      handleException(futErr);
       this->finishForkRequest(forkId, parent);
     });
   }
@@ -540,12 +551,15 @@ std::shared_ptr<torch::utils::Future<bool>> RRefContext::
     auto remainingRRefs =
         std::make_shared<std::atomic<uint64_t>>(userTable_.size());
     for (auto& state : userTable_) {
-      state->future_.addCallback([future, remainingRRefs]() {
-        auto localCount = remainingRRefs->fetch_sub(1);
-        if (localCount == 1) {
-          future->markCompleted(true);
-        }
-      });
+      state->future_.addCallback(
+          [future, remainingRRefs](
+              const bool& /* unused */,
+              const c10::optional<utils::FutureError>& /* unused */) {
+            auto localCount = remainingRRefs->fetch_sub(1);
+            if (localCount == 1) {
+              future->markCompleted(true);
+            }
+          });
     }
     userTable_.clear();
   }
@@ -563,7 +577,10 @@ void RRefContext::finishForkRequest(const ForkId& forkId, worker_id_t parent) {
   auto fm = agent_->sendWithRetries(
       agent_->getWorkerInfo(parent), RRefChildAccept(forkId).toMessage());
 
-  fm->addCallback([fm]() { handleException(fm); });
+  fm->addCallback([](const Message& /* unused */,
+                     const c10::optional<utils::FutureError>& futErr) {
+    handleException(futErr);
+  });
 }
 
 void RRefContext::addSelfAsFork(c10::intrusive_ptr<OwnerRRef>& rref) {

@@ -586,6 +586,16 @@ void testSimplifyAdds() {
     IS_VAR_WITH_NAME(rhs->lhs(), "y");
     IS_VAR_WITH_NAME(rhs->rhs(), "x");
   }
+
+  {
+    // (x + x + x + x) => 4 * x
+    ExprHandle body = (x + x + x + x);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_NODE_WITH_NAME(Mul, simplified.node(), root);
+    IS_IMM_WITH_VAL(Int, root->lhs(), 4);
+    IS_VAR_WITH_NAME(root->rhs(), "x");
+  }
 }
 
 void testSimplifyMuls() {
@@ -1390,6 +1400,78 @@ void testSimplifyRoundModPatternMultivar() {
     IS_NODE_WITH_NAME(Mod, add->rhs(), zMod);
     IS_VAR_WITH_NAME(zMod->lhs(), "z");
     IS_IMM_WITH_VAL(Int, zMod->rhs(), 8);
+  }
+}
+
+void testSimplifyDivisionScalarFactorization() {
+  KernelScope kernel_scope;
+
+  {
+    // Simple factorization of numerator and denominator.
+    // 8x / 4y => 2x / y.
+    VarHandle x("x", kInt);
+    VarHandle y("y", kInt);
+    ExprHandle body = (x * 8) / (y * 4);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(Div, simplified.node(), div);
+    IS_NODE_WITH_NAME(Mul, div->lhs(), lhs);
+    IS_IMM_WITH_VAL(Int, lhs->lhs(), 2);
+    IS_VAR_WITH_NAME(lhs->rhs(), "x");
+    IS_VAR_WITH_NAME(div->rhs(), "y");
+  }
+
+  {
+    // Don't change anything if we can't factorize.
+    VarHandle x("x", kInt);
+    VarHandle y("y", kInt);
+    ExprHandle body = (x * 7) / (y * 4);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(Div, simplified.node(), div);
+    IS_NODE_WITH_NAME(Mul, div->lhs(), lhs);
+    IS_IMM_WITH_VAL(Int, lhs->lhs(), 7);
+    IS_VAR_WITH_NAME(lhs->rhs(), "x");
+    IS_NODE_WITH_NAME(Mul, div->rhs(), rhs);
+    IS_IMM_WITH_VAL(Int, rhs->lhs(), 4);
+    IS_VAR_WITH_NAME(rhs->rhs(), "y");
+  }
+
+  {
+    // Don't reorder floats.
+    VarHandle x("x", kFloat);
+    VarHandle y("y", kFloat);
+    ExprHandle body = (x * 8) / (y * 4);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(Div, simplified.node(), div);
+    IS_NODE_WITH_NAME(Mul, div->lhs(), lhs);
+    IS_VAR_WITH_NAME(lhs->lhs(), "x");
+    IS_IMM_WITH_VAL(Float, lhs->rhs(), 8.f);
+    IS_NODE_WITH_NAME(Mul, div->rhs(), rhs);
+    IS_VAR_WITH_NAME(rhs->lhs(), "y");
+    IS_IMM_WITH_VAL(Float, rhs->rhs(), 4.f);
+  }
+
+  {
+    // Sanity check we do nothing if there are only scalar parts.
+    VarHandle x("x", kInt);
+    VarHandle y("y", kInt);
+    ExprHandle body = (x * 1) / (y * 1);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(Div, simplified.node(), div);
+    IS_VAR_WITH_NAME(div->lhs(), "x");
+    IS_VAR_WITH_NAME(div->rhs(), "y");
+  }
+
+  {
+    // Can factorize amounts of variables.
+    VarHandle x("x", kInt);
+    VarHandle y("y", kInt);
+    ExprHandle body = (x + x + x + x) / (y + y);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(Div, simplified.node(), div);
+    IS_NODE_WITH_NAME(Mul, div->lhs(), lhs);
+    IS_IMM_WITH_VAL(Int, lhs->lhs(), 2);
+    IS_VAR_WITH_NAME(lhs->rhs(), "x");
+    IS_VAR_WITH_NAME(div->rhs(), "y");
   }
 }
 

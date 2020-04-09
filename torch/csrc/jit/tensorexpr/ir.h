@@ -337,41 +337,6 @@ bool immediateIsNegative(const T* e) {
   return false;
 }
 
-// Creates a new Expr of the given type with the provided lhs and rhs.
-static const Expr* newBinaryOpOfType(
-    IRNodeType expr_type,
-    const Expr* lhs,
-    const Expr* rhs,
-    bool option) {
-  switch (expr_type) {
-    case IRNodeType::kAdd:
-      return new Add(lhs, rhs);
-    case IRNodeType::kSub:
-      return new Sub(lhs, rhs);
-    case IRNodeType::kMul:
-      return new Mul(lhs, rhs);
-    case IRNodeType::kDiv:
-      return new Div(lhs, rhs);
-    case IRNodeType::kMod:
-      return new Mod(lhs, rhs);
-    case IRNodeType::kMax:
-      return new Max(lhs, rhs, option);
-    case IRNodeType::kMin:
-      return new Min(lhs, rhs, option);
-    case IRNodeType::kAnd:
-      return new And(lhs, rhs);
-    case IRNodeType::kXor:
-      return new Xor(lhs, rhs);
-    case IRNodeType::kLshift:
-      return new Lshift(lhs, rhs);
-    case IRNodeType::kRshift:
-      return new Rshift(lhs, rhs);
-    default:
-      LOG(FATAL) << "unsupported expr_type: " << static_cast<int>(expr_type);
-      return nullptr;
-  }
-}
-
 // Bind the value to the var and evaluate the body.
 class Let : public ExprNode<Let> {
  public:
