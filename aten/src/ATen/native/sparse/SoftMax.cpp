@@ -120,9 +120,11 @@ void cpu_sparse_coo_softmax(Tensor output, const Tensor& input, const int64_t di
     }
   }
 
-  if (LogSoftMax) {
-    for (int64_t j=0; j < nvalues * (mx_p + 1); j++) {
+  for (int64_t j=0; j < nvalues * (mx_p + 1); j++) {
+    if (LogSoftMax) {
       mx_data_base[j] += std::log(exp_sums_data_base[j]);
+    } else {
+      exp_sums_data_base[j] = 1.0 / exp_sums_data_base[j];
     }
   }
 
@@ -137,7 +139,7 @@ void cpu_sparse_coo_softmax(Tensor output, const Tensor& input, const int64_t di
       if (LogSoftMax) {
         out_values_data[j] = values_data[j] - mx_data[j];
       } else {
-        out_values_data[j] /= exp_sums_data[j];
+        out_values_data[j] *= exp_sums_data[j];
       }
     }
   }
