@@ -540,7 +540,7 @@ def hacked_twin(decl):
 
 
 def signature_without_args(decl):
-    name = operator_name_from_decl(decl)
+    name = decl['name'] if not is_out_variant(decl) else decl['name'][:-4]
     overload_name = '.' + decl['overload_name'] if not decl['overload_name'] == '' else ''
     return 'aten::{}{}'.format(name, overload_name)
 
