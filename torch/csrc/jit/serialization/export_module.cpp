@@ -14,10 +14,10 @@
 
 #include <ATen/ATen.h>
 
-#include <string>
-#include <vector>
 #include <ATen/core/jit_type.h>
 #include <ATen/core/qualified_name.h>
+#include <string>
+#include <vector>
 
 namespace torch {
 namespace jit {
