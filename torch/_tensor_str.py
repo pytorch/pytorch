@@ -158,10 +158,10 @@ class _Formatter(object):
                 ret = ('{{:.{}f}}').format(PRINT_OPTS.precision).format(value)
         elif self.complex_dtype:
             p = PRINT_OPTS.precision
-            ret = '({{:.{}f}} {{}} {{:.{}f}}j)'.format(p, p).format(value.real, '+-'[value.imag < 0], abs(value.imag))
+            ret = '({{:.{}f}}{{}}{{:.{}f}}j)'.format(p, p).format(value.real, '+-'[value.imag < 0], abs(value.imag))
             if not self.has_non_zero_decimal_val:
                 # complex tensor contains integer elements only
-                ret = "({{:.0f}}. {{}} {{:.0f}}.j)".format(p, p).format(value.real, '+-'[value.imag < 0], abs(value.imag))
+                ret = "({{:.0f}}.{{}}{{:.0f}}.j)".format(p, p).format(value.real, '+-'[value.imag < 0], abs(value.imag))
         else:
             ret = '{}'.format(value)
         return (self.max_width - len(ret)) * ' ' + ret
