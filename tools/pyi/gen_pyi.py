@@ -545,6 +545,7 @@ def gen_pyi(declarations_path, out):
                'def to(self, other: Tensor, non_blocking: _bool=False, copy: _bool=False) -> Tensor: ...',
                ],
         'item': ["def item(self) -> Number: ..."],
+        'copy_': ["def copy_(self, src: Tensor, non_blocking: _bool=False) -> Tensor: ..."],
     })
     for binop in ['mul', 'div', 'true_divide', 'floor_divide']:
         for inplace in [False, True]:
