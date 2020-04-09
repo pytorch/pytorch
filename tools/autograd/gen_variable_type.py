@@ -319,7 +319,7 @@ ${return_type} ${api_name}(${type_method_formals}); // {"schema": "${schema_stri
 
 # ProfiledType templates
 PROFILE_DISPATCH_UNBOXED = CodeTemplate("""\
-auto op = c10::Dispatcher::singleton().findSchema({"aten::${operator_name}", "${overload_name}"});
+static auto op = c10::Dispatcher::singleton().findSchema({"aten::${operator_name}", "${overload_name}"});
 TORCH_INTERNAL_ASSERT(op);
 RECORD_FUNCTION("${name}", std::vector<c10::IValue>({${input_names}}), Node::peek_at_next_sequence_nr());
 return c10::Dispatcher::singleton().callUnboxedRedispatch<${ret_and_arg_types}>(${profiled_dispatch_args});
@@ -571,20 +571,18 @@ def gen_variable_type_shard(out, aten_declarations, template_path, suffix, heade
                 wrapper_registrations.append(UNBOXEDONLY_WRAPPER_REGISTRATION.substitute(
                     declaration, formal_types=formal_types))
 
-        # TODO: ????? type mismatch in generated wrapper?
-        if declaration['name'] != 'polygamma':
-            # Emit ProfiledType code
-            profiled_body = emit_profiled_body(declaration)
-            profiled_method_definitions.append(METHOD_DEFINITION.substitute(
-                declaration, type_definition_body=profiled_body))
+        # Emit ProfiledType code
+        profiled_body = emit_profiled_body(declaration)
+        profiled_method_definitions.append(METHOD_DEFINITION.substitute(
+            declaration, type_definition_body=profiled_body))
 
-            if declaration['use_c10_dispatcher'] == 'full':
-                profiled_wrapper_registrations.append(PROFILE_WRAPPER_REGISTRATION.substitute(
-                    declaration, formal_types=formal_types))
-            else:
-                assert declaration['use_c10_dispatcher'] == 'unboxed_only'
-                profiled_wrapper_registrations.append(PROFILE_UNBOXEDONLY_WRAPPER_REGISTRATION.substitute(
-                    declaration, formal_types=formal_types))
+        if declaration['use_c10_dispatcher'] == 'full':
+            profiled_wrapper_registrations.append(PROFILE_WRAPPER_REGISTRATION.substitute(
+                declaration, formal_types=formal_types))
+        else:
+            assert declaration['use_c10_dispatcher'] == 'unboxed_only'
+            profiled_wrapper_registrations.append(PROFILE_UNBOXEDONLY_WRAPPER_REGISTRATION.substitute(
+                declaration, formal_types=formal_types))
 
     env = {
         'type_derived_method_declarations': type_declarations,
@@ -822,7 +820,7 @@ def emit_body(declaration):
                     assert not is_output
                 if inplace and is_output:
                     var = 'self'
-                    is_inplace_view = "as_variable_ref({}).is_view()".format(var)
+                    is_inplace_view = "{}.is_view()".format(var)
                     expr = 'SavedVariable({}, {}, {})'.format(var, str(is_output).lower(), is_inplace_view)
                 else:
                     expr = 'SavedVariable({}, {})'.format(var, str(is_output).lower())
