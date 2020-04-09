@@ -238,9 +238,6 @@ class TORCH_API DisableRecordFunctionGuard : public RecordFunctionGuard {
   virtual ~DisableRecordFunctionGuard() {}
 };
 
-// Returns whether there're callbacks registered with pushCallback
-TORCH_API bool hasCallbacks();
-
 // Internal only, do not use:
 // use C++ RECORD_* or python context manager record_function() instead;
 // Given a record function, run the (possibly sampled) start callbacks that have
@@ -347,6 +344,11 @@ TORCH_API void pushCallback(
  *  WARNING: not thread safe if is_thread_local = false
  */
 TORCH_API void popCallback(bool is_thread_local = true);
+
+// Returns whether there're callbacks registered with pushCallback
+TORCH_API bool hasCallbacks();
+TORCH_API bool hasGlobalCallbacks();
+TORCH_API bool hasThreadLocalCallbacks();
 
 } // namespace profiler
 }} // namespace torch::autograd

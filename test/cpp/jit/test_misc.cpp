@@ -755,9 +755,12 @@ void checkTracedInputs(const TracedTestInputs& inputs) {
 
 using namespace torch::autograd;
 
-void cleanUpScopeCallbacks() {
-  while (profiler::hasCallbacks()) {
-    profiler::popCallback();
+void cleanUpCallbacks() {
+  while (profiler::hasGlobalCallbacks()) {
+    profiler::popCallback(/* is_thread_local */ false);
+  }
+  while (profiler::hasThreadLocalCallbacks()) {
+    profiler::popCallback(/* is_thread_local */ true);
   }
 }
 
@@ -880,7 +883,7 @@ void testRecordFunction() {
 
   checkTracedInputs(eager_inputs);
   checkTracedInputs(jit_inputs);
-  cleanUpScopeCallbacks();
+  cleanUpCallbacks();
 
   // test sampled callbacks
   int sampled_cb_ctr = 0;
@@ -893,7 +896,9 @@ void testRecordFunction() {
       },
       [](const autograd::profiler::RecordFunction&) {},
       /* needs_inputs */ false,
-      /* sampling_prob */ 0.5);
+      /* sampling_prob */ 0.5,
+      /* scopes */ {},
+      /* thread_local */ false);
 
   int non_sampled_cb_ctr = 0;
   autograd::profiler::pushCallback(
@@ -904,7 +909,10 @@ void testRecordFunction() {
         return true;
       },
       [](const autograd::profiler::RecordFunction&) {},
-      /* needs_inputs */ false);
+      /* needs_inputs */ false,
+      /* sampling_prob */ 1.0,
+      /* scopes */ {},
+      /* thread_local */ false);
 
   auto run_test_function = []() {
     auto t = torch::randn({1, 2, 3}, at::kCPU);
@@ -931,11 +939,11 @@ void testRecordFunction() {
   TORCH_CHECK(non_sampled_cb_ctr == 3000);
   TORCH_CHECK(sampled_cb_ctr == 1000);
   autograd::profiler::TEST_unsetGlobalSamplingProbability();
-  cleanUpScopeCallbacks();
+  cleanUpCallbacks();
 
   // test the scope of the callbacks
   checkScopeCallbacks();
-  cleanUpScopeCallbacks();
+  cleanUpCallbacks();
 
   // check record function guard
   std::vector<std::string> fn_names;
@@ -967,7 +975,7 @@ void testRecordFunction() {
   }
   TORCH_CHECK(fn_names.size() == 1);
   TORCH_CHECK(fn_names[0] == "B");
-  cleanUpScopeCallbacks();
+  cleanUpCallbacks();
 }
 
 class TestThreadLocalDebugInfo : public at::DebugInfoBase {

@@ -40,9 +40,13 @@ class RecordFunctionCallback {
 
   RecordFunctionCallback& scopes(
       std::unordered_set<RecordScope, std::hash<RecordScope>> scopes) {
-    scopes_.fill(false);
-    for (auto sc : scopes) {
-      scopes_[static_cast<size_t>(sc)] = true;
+    if (!scopes.empty()) {
+      scopes_.fill(false);
+      for (auto sc : scopes) {
+        scopes_[static_cast<size_t>(sc)] = true;
+      }
+    } else {
+      scopes_.fill(true);
     }
     return *this;
   }
@@ -105,8 +109,12 @@ class CallbackManager {
     }
   }
 
-  inline bool hasCallbacks() const {
-    return !callbacks_.empty() || !tls_callbacks_.empty();
+  inline bool hasGlobalCallbacks() const {
+    return !callbacks_.empty();
+  }
+
+  inline bool hasThreadLocalCallbacks() const {
+    return !tls_callbacks_.empty();
   }
 
   inline bool needsInputs() const {
@@ -229,7 +237,15 @@ inline CallbackManager& manager() {
 } // namespace
 
 bool hasCallbacks() {
-  return manager().hasCallbacks();
+  return manager().hasGlobalCallbacks() || manager().hasThreadLocalCallbacks();
+}
+
+bool hasGlobalCallbacks() {
+  return manager().hasGlobalCallbacks();
+}
+
+bool hasThreadLocalCallbacks() {
+  return manager().hasThreadLocalCallbacks();
 }
 
 void pushCallback(
