@@ -384,7 +384,7 @@ class FunctionInliner : public IRMutator {
 
     if (should_inline(func)) {
       // Insert the caller/callee pair into the mapping.
-      for (int i = 0; i < buf->ndim(); i++) {
+      for (size_t i = 0; i < buf->ndim(); i++) {
         const Var* func_callee_arg = dynamic_cast<const Var*>(func->arg(i));
         const Expr* func_caller_param = v->param(i);
         auto iter = inline_mapping_.find(func_callee_arg);
@@ -400,7 +400,7 @@ class FunctionInliner : public IRMutator {
       const Expr* result = body->accept_mutator(this);
 
       // Remove the caller/callee relationship.
-      for (int i = 0; i < buf->ndim(); i++) {
+      for (size_t i = 0; i < buf->ndim(); i++) {
         const Var* func_callee_arg = dynamic_cast<const Var*>(func->arg(i));
         auto iter = inline_mapping_.find(func_callee_arg);
         if (iter == inline_mapping_.end()) {
@@ -1172,6 +1172,8 @@ void LoopNest::computeAt(Stmt* s, For* f) {
   Stmt* fr = new Free(temp_buf->base_handle());
 
   // Add constructed stmts to the consumer loop
+  // TODO: Revisit this place later: we might want to move allocation out of the
+  // loop.
   f->body()->prepend_stmt(bd);
   f->body()->prepend_stmt(al);
   f->body()->append_stmt(fr);

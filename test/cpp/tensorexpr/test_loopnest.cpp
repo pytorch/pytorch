@@ -993,5 +993,129 @@ void testLoopNestComputeAt_2() {
   }
 }
 
+void testLoopNestComputeAt_3() {
+  // Verify that compute_at works on the following example:
+  //
+  // A(x,y) = x*y
+  // B(x,y) = A(x, y)
+  // C(x,y) = B(x+1, y)
+  // D(x,y) = A(x, y+1) + C(x, y)
+  //
+  // i.e. when 'A' comes to 'D' directly and indirectly through 'C'.
+  KernelScope kernel_scope;
+
+  const int kW = 16, kH = 16;
+  VarHandle W("W", kInt);
+  VarHandle H("H", kInt);
+  Tensor* A = Compute(
+      "A",
+      {{H + 1, "ay"}, {W + 1, "ax"}},
+      [&](const VarHandle& ay, const VarHandle& ax) { return ax * ay; });
+  Tensor* B = Compute(
+      "B",
+      {{H + 1, "by"}, {W + 1, "bx"}},
+      [&](const VarHandle& by, const VarHandle& bx) {
+        return A->call(by, bx);
+      });
+  Tensor* C = Compute(
+      "C",
+      {{H, "cy"}, {W, "cx"}},
+      [&](const VarHandle& cy, const VarHandle& cx) {
+        return B->call(cy, cx + 1);
+      });
+  Tensor* D = Compute(
+      "D",
+      {{H, "dy"}, {W, "dx"}},
+      [&](const VarHandle& dy, const VarHandle& dx) {
+        return A->call(dy + 1, dx) + C->call(dy, dx);
+      });
+
+  std::vector<int> c_ref(kW * kH, 0);
+  for (int y = 0; y < kH; y++) {
+    for (int x = 0; x < kW; x++) {
+      c_ref[y * kW + x] = (y + 1) * x + y * (x + 1);
+    }
+  }
+
+  {
+    // First let's try to compute A at axis dy (the outer loop)
+    LoopNest l({D});
+    std::vector<For*> loops = l.getLoopStmtsFor(D);
+    l.computeAt(l.getLoopBodyFor(A), loops[0]);
+    l.prepareForCodegen();
+    Stmt* s = l.root_stmt();
+
+    std::ostringstream oss;
+    oss << *s;
+
+    // Check the IR we produced
+    const std::string& verification_pattern =
+        R"IR(
+# CHECK: for (int ay = 0; ay < H + 1; ay++)
+# CHECK:   for (int ax = 0; ax < W + 1; ax++)
+# CHECK:     A[
+# CHECK: for (int by = 0; by < H + 1; by++)
+# CHECK:   for (int bx = 0; bx < W + 1; bx++)
+# CHECK:     B[
+# CHECK: for (int cy = 0; cy < H; cy++)
+# CHECK:   for (int cx = 0; cx < W; cx++)
+# CHECK:     C[
+# CHECK: for (int dy = 0; dy < H; dy++)
+# CHECK:  {1, W}
+# CHECK:   for (int dx = 0; dx < W; dx++)
+# CHECK-NOT: A[
+# CHECK:  Free)IR";
+    torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+
+    // Now check that the loop still produces the correct result.
+    std::vector<int> c_data(kW * kH, 0);
+    SimpleIREvaluator cg(s, {D, W, H});
+    cg.call({c_data, kW, kH});
+
+    assertAllEqual(c_data, c_ref);
+  }
+  {
+    // Now let's try to compute A at axis dx (the inner loop)
+    LoopNest l({D});
+    std::vector<For*> loops = l.getLoopStmtsFor(D);
+    l.computeAt(l.getLoopBodyFor(A), loops[1]);
+    l.prepareForCodegen();
+    Stmt* s = l.root_stmt();
+
+    std::ostringstream oss;
+    oss << *s;
+
+    // Check the IR we produced
+    const std::string& verification_pattern =
+        R"IR(
+# CHECK: for (int ay = 0; ay < H + 1; ay++)
+# CHECK:   for (int ax = 0; ax < W + 1; ax++)
+# CHECK:     A[
+# CHECK: for (int by = 0; by < H + 1; by++)
+# CHECK:   for (int bx = 0; bx < W + 1; bx++)
+# CHECK:     B[
+# CHECK: for (int cy = 0; cy < H; cy++)
+# CHECK:   for (int cx = 0; cx < W; cx++)
+# CHECK:     C[
+# CHECK: for (int dy = 0; dy < H; dy++)
+# CHECK:   for (int dx = 0; dx < W; dx++)
+# CHECK:  {1, 1}
+# CHECK-NOT: A[
+# CHECK:  Free)IR";
+    torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+
+    // Now check that the loop still produces the correct result.
+    std::vector<int> c_data(kW * kH, 0);
+    SimpleIREvaluator cg(s, {D, W, H});
+    cg.call({c_data, kW, kH});
+
+    assertAllEqual(c_data, c_ref);
+  }
+}
+
+void testLoopNestComputeAt_4() {
+  // TODO: Verify that computeAt works with reduction axis
+}
+
 } // namespace jit
 } // namespace torch

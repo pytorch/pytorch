@@ -13,6 +13,13 @@ T gcd(T a, T b) {
   return gcd(b, a % b);
 }
 
+// Helper for determining if an Expr is a multi-lane primitive (e.g. Broadcast
+// or Ramp).
+bool isMultilanePrimitive(const Expr* e) {
+  return e->expr_type() == IRNodeType::kBroadcast ||
+      e->expr_type() == IRNodeType::kRamp;
+}
+
 SimplifierHashType Term::hashVars() const {
   SimplifierHashType hash;
   for (auto* v : variables_) {
