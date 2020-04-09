@@ -52,7 +52,6 @@ from torch.testing._internal.jit_utils import JitTestCase, enable_cpu_fuser, dis
     _trace, enable_cpu_fuser_if, do_input_map, get_execution_plan, \
     execWrapper, _inline_everything, _tmp_donotuse_dont_inline_everything, \
     RUN_CUDA, RUN_CUDA_MULTI_GPU
-from torch.testing._internal.jit_utils import attrs_with_prefix
 from torch.testing._internal.jit_metaprogramming_utils import create_script_fn, nn_functional_tests, get_script_args, \
     get_call, script_template, EXCLUDE_SCRIPT, additional_module_tests, EXCLUDE_SCRIPT_MODULES, \
     get_nn_module_name_from_kwargs, script_method_template

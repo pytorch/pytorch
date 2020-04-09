@@ -43,7 +43,6 @@ from torch.testing._internal.jit_utils import JitTestCase
 from torch.testing._internal.jit_utils import get_forward
 from torch.testing._internal.jit_utils import get_forward_graph
 from torch.testing._internal.jit_utils import get_module_method
-from torch.testing._internal.common_quantization import test_only_eval_fn as _test_only_eval_fn
 
 from torch.jit._recursive import wrap_cpp_module
 
