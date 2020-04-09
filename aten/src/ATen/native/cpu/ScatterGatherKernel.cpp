@@ -118,7 +118,8 @@ struct cpu_scatter_gather_base_kernel {
     const Tensor& index, const Tensor& src,
     const std::string& method_name,
     const func_t& f,
-    bool serial_exec = true
+    bool serial_exec,
+    const REDUCE_OPERATOR& reduce=REDUCE_OPERATOR::NONE
   ) {
     // no-op if index is empty
     if (index.numel() == 0) {
@@ -285,9 +286,40 @@ void scatter_add_cpu_kernel(Tensor& self, int64_t dim, const Tensor& index, cons
   );
 }
 
+class ReduceFunctor {
+public:
+  ReduceFunctor() {};
+  template <typename scalar_t, typename func_t>
+  void operator() (scalar_t* self_data, scalar_t* src_data, func_t op) {
+    op(self_data, src_data);
+  }
+};
+ReduceFunctor reduce_fn;
+
+auto reduce_sum = [](auto * self_data, auto * src_data) {
+                    *self_data += *src_data;
+                  };
+auto reduce_subtract = [](auto * self_data, auto * src_data) {
+                         *self_data -= *src_data;
+                       };
+auto reduce_multiply = [](auto * self_data, auto * src_data) {
+                         *self_data *= *src_data;
+                       };
+auto reduce_divide = [](auto * self_data, auto * src_data) {
+                       *self_data /= *src_data;
+                     };
+
+
 void scatter_reduce_cpu_kernel(Tensor& self, const int64_t dim, const Tensor& index,
                                const Tensor& src, const REDUCE_OPERATOR& reduce) {
-
+  cpu_scatter_gather_base_kernel<>()(
+    self, dim, index, src,
+    "scatter_add_", [] (auto* lhs, const auto* rhs) {
+      *lhs += *rhs;
+    },
+    /*serial_exec=*/true,
+    reduce
+  );
 }
 
 } // anonymous namespace
