@@ -59,6 +59,10 @@ TORCH_CUDA_API std::uint64_t version();
 
 bool is_available(at::TensorList tensors);
 
+TORCH_CUDA_API void get_unique_id(ncclUniqueId& id);
+TORCH_CUDA_API ncclComm_t comm_init_rank(int nranks, const ncclUniqueId& comm_id, int rank);
+TORCH_CUDA_API void comm_destroy(ncclComm_t comm);
+
 TORCH_CUDA_API void broadcast(
     at::TensorList tensors,
     const stream_list& streams = {},
@@ -78,6 +82,26 @@ TORCH_CUDA_API void reduce(
     std::vector<at::Tensor>& inputs,
     int32_t root = 0,
     int32_t op = ncclSum,
+    const stream_list& streams = {},
+    const comm_list& user_comms = {});
+
+TORCH_CUDA_API void all_reduce(
+    const std::vector<at::Tensor>& inputs,
+    std::vector<at::Tensor>& outputs,
+    int32_t op = ncclSum,
+    const stream_list& streams = {},
+    const comm_list& user_comms = {});
+
+TORCH_CUDA_API void reduce_scatter(
+    const std::vector<at::Tensor>& inputs,
+    std::vector<at::Tensor>& outputs,
+    int32_t op = ncclSum,
+    const stream_list& streams = {},
+    const comm_list& user_comms = {});
+
+TORCH_CUDA_API void all_gather(
+    const std::vector<at::Tensor>& inputs,
+    std::vector<at::Tensor>& outputs,
     const stream_list& streams = {},
     const comm_list& user_comms = {});
 
