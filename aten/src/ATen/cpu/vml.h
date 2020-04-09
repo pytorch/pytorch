@@ -91,7 +91,9 @@ inline void vrsqrt(scalar_t* out, scalar_t* in, int64_t size) {
           end - begin);                                                           \
     });                                                                           \
   }                                                                               \
-  inline void v##op(c10::BFloat16* out, const c10::BFloat16* in, int64_t size) {  \
+  template <>                                                                     \
+  inline void v##op<c10::BFloat16>(                                               \
+      c10::BFloat16* out, const c10::BFloat16* in, int64_t size) {                \
     parallel_for(0, size, 2048, [out, in](int64_t begin, int64_t end) {           \
       DL_RUNTIME_BUG_BFLOAT16()                                                   \
       map([](const Vec256<c10::BFloat16>& x) { return x.op(); },                  \
