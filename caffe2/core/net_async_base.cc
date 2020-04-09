@@ -119,14 +119,14 @@ bool AsyncNetBase::handleRunError() {
   for (int task_id = 0; task_id < tasksNum(); ++task_id) {
     if (event(task_id).HasException()) {
       if (first_exc_task_id >= 0) {
-        auto exc_ts = event(task_id).ErrorTimestamp();
+        auto exc_ts = event(task_id).ExceptionTimestamp();
         if (exc_ts < first_exc_ts) {
           first_exc_task_id = task_id;
           first_exc_ts = exc_ts;
         }
       } else {
         first_exc_task_id = task_id;
-        first_exc_ts = event(task_id).ErrorTimestamp();
+        first_exc_ts = event(task_id).ExceptionTimestamp();
       }
     }
   }
@@ -497,13 +497,7 @@ void AsyncNetBase::finalizeEvents() {
                 if (op != pending_op) {
                   try {
                     op->CancelAsyncCallback();
-
-                    // throw and catch exception to preserve stack trace
-                    try {
-                      throw AsyncNetCancelled();
-                    } catch (const AsyncNetCancelled& e) {
-                      op->event().SetFinishedWithException(e.what());
-                    }
+                    op->event().SetFinished("Cancelled");
                   } catch (const EnforceNotMet&) {
                     // ignore
                   }

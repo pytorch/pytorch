@@ -283,10 +283,7 @@ class TORCH_API PolynomialTransformer : public IRMutator {
   // Merge and simplify multiplication.
   const Expr* mutate(const Mul* v) override;
 
-  const Expr* mutate(const Div* v) override {
-    // TODO div simplification will require a rational node.
-    return mutateBinaryOp(v, this);
-  }
+  const Expr* mutate(const Div* v) override;
 
   const Expr* mutate(const Mod* v) override {
     return mutateBinaryOp(v, this);

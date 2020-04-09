@@ -124,12 +124,14 @@ namespace jit {
   _(SimplifyRoundModPattern)              \
   _(SimplifyRoundModPatternFactorization) \
   _(SimplifyRoundModPatternMultivar)      \
+  _(SimplifyDivisionScalarFactorization)  \
   _(StmtClone)                            \
   _(BoundsInference_1)                    \
   _(BoundsInference_2)                    \
   _(BoundsInference_3)                    \
   _(BoundsInference_4)                    \
   _(BoundsInference_5)                    \
+  _(BoundsInference_6)                    \
   _(LoopNestComputeAt_1)                  \
   _(LoopNestComputeAt_2)
 
@@ -256,9 +258,8 @@ namespace jit {
   _(CudaTestVectorAdd01)                   \
   _(CudaTestVectorAdd02)                   \
   _(CudaDynamicShape2D)                    \
-  _(CudaDynamicShapeSplit)                 \
-  _(CudaTrivialReduce01)                   \
-  _(CudaTestRand01)
+  _(CudaTestRand01)                        \
+  _(CudaDynamicShapeSplit)
 
 #define DECLARE_TENSOREXPR_TEST(name) void test##name();
 TH_FORALL_TENSOREXPR_TESTS(DECLARE_TENSOREXPR_TEST)
