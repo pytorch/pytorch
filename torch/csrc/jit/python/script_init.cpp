@@ -858,6 +858,14 @@ void initJitScriptBindings(PyObject* module) {
             didFinishEmitModule(m);
           })
       .def(
+          "_register_attribute",
+          [](Module& m,
+             const std::string& name,
+             TypePtr type,
+             py::handle value) {
+            m.register_attribute(name, type, toIValue(value, type));
+          })
+      .def(
           "_create_method_from_trace",
           [](Module& self,
              const std::string& name,

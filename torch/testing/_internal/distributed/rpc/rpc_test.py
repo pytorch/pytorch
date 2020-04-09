@@ -250,6 +250,10 @@ def heavy_rpc_torchscript(tensor):
         tensor /= i + 1
     return 0
 
+@torch.jit.script
+def my_script_func(tensor):
+    return torch.add(tensor, tensor)
+
 def raise_func():
     raise ValueError("Expected error")
 
@@ -679,7 +683,10 @@ class RpcTest(RpcAgentTestFixture):
             dst_worker_name = worker_name(dst)
             self.assertTrue(self_worker_name in rpc_event.name)
             self.assertTrue(dst_worker_name in rpc_event.name)
-            self.assertTrue(func.__name__ in rpc_event.name)
+            if isinstance(func, torch.jit.ScriptFunction):
+                self.assertTrue(torch.jit._qualified_name(func) in rpc_event.name)
+            else:
+                self.assertTrue(func.__name__ in rpc_event.name)
             self.assertTrue(rpc_exec_mode.value in rpc_event.name)
             self.assertEqual(rpc_event.count, 1)
             if use_record_function:
@@ -736,6 +743,44 @@ class RpcTest(RpcAgentTestFixture):
             RPCExecMode.REMOTE, torch.add, args=(torch.ones(1), torch.ones(1)),
             use_record_function=True
         )
+
+    @dist_init
+    def test_profiler_with_script_async_rpc(self):
+        self._profiler_test_with_rpc(
+            RPCExecMode.ASYNC, my_script_func, args=(torch.tensor(1),)
+        )
+        self._profiler_test_with_rpc(
+            RPCExecMode.ASYNC,
+            my_script_func,
+            args=(torch.tensor(1),),
+            use_record_function=True,
+        )
+
+    @dist_init
+    def test_profiler_with_script_sync_rpc(self):
+        self._profiler_test_with_rpc(
+            RPCExecMode.SYNC, my_script_func, args=(torch.tensor(1),)
+        )
+        self._profiler_test_with_rpc(
+            RPCExecMode.SYNC,
+            my_script_func,
+            args=(torch.tensor(1),),
+            use_record_function=True,
+        )
+
+    @dist_init
+    def test_profiler_with_script_remote_rpc(self):
+        self._profiler_test_with_rpc(
+            RPCExecMode.REMOTE, my_script_func, args=(torch.tensor(1),)
+        )
+        self._profiler_test_with_rpc(
+            RPCExecMode.REMOTE,
+            my_script_func,
+            args=(torch.tensor(1),),
+            use_record_function=True,
+        )
+
+
 
     @dist_init
     def test_py_class_constructor(self):
