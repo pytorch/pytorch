@@ -653,7 +653,18 @@ Tensor _fused_dropout_backward(Tensor grad, Tensor mask, double p1m) {
 
 Tensor select_equals_backward(Tensor grad, const Tensor & input, const Tensor & value) {
   auto grad_input = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  grad_input.masked_fill_(input == value, grad);
+
+  // find indices of the first element for which input[idx] == value
+  auto first_value_idx = (input == value).nonzero().select(0, 0);
+
+  // grad_input[first_value_idx]
+  auto grad_input_value = grad_input;
+  for (int64_t dim = 0; dim < grad_input.sizes().size(); ++dim) {
+    grad_input_value = grad_input_value.select(0, first_value_idx[dim].item().to<int64_t>());
+  }
+  // grad_input[first_value_idx] = grad
+  grad_input_value.copy_(grad);
+
   return grad_input;
 }
 
