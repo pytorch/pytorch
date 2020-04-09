@@ -2662,7 +2662,8 @@ class _TestTorchMixin(object):
                         # in a separate test
                         continue
 
-                    if dt == torch.half:
+                    # TODO: update test when masked scatter is supported for complex
+                    if dt == torch.half or dt.is_complex:
                         self.assertRaises(RuntimeError, lambda: dest.masked_scatter_(mask, src))
                         continue
 
@@ -2715,8 +2716,8 @@ class _TestTorchMixin(object):
                     dst.masked_fill_((dst > 0).to(dtype), val)
                     dst2.masked_fill_((dst2 > 0).to(dtype), val)
                     self.assertEqual(dst, dst2, 0)
-            # Only 27 (not 28) here as the warning in the assertRaises are not caught on the python side
-            self.assertEqual(len(w), 27)
+            # Only 33 (not 32) here as the warning in the assertRaises are not caught on the python side
+            self.assertEqual(len(w), 33)
 
             warn = 'masked_fill_ received a mask with dtype torch.uint8,'
             for wi in w:
@@ -6063,7 +6064,7 @@ class TestTorchDeviceType(TestCase):
     def test_logical_not(self, device):
         for dtype in torch.testing.get_all_dtypes():
             a = torch.tensor([10, 1, 0], dtype=dtype, device=device)
-            if dtype == torch.bfloat16:
+            if dtype == torch.bfloat16 or dtype.is_complex:
                 self.assertRaises(RuntimeError, lambda: a.logical_not())
                 continue
             expected_res = torch.tensor([0, 0, 1], dtype=dtype, device=device)
@@ -6072,7 +6073,7 @@ class TestTorchDeviceType(TestCase):
             # out
             for out_dtype in torch.testing.get_all_dtypes():
                 b = torch.empty(0, dtype=out_dtype, device=device)
-                if out_dtype == torch.bfloat16:
+                if out_dtype == torch.bfloat16 or out_dtype.is_complex:
                     self.assertRaises(RuntimeError, lambda: torch.logical_not(a, out=b))
                     continue
                 torch.logical_not(a, out=b)
@@ -6086,6 +6087,8 @@ class TestTorchDeviceType(TestCase):
             expected_res = torch.tensor(expected_res_, dtype=dtype, device=device)
             a = torch.tensor(a_, dtype=dtype, device=device)
             for other_dtype in torch.testing.get_all_dtypes():
+                if other_dtype.is_complex:
+                    continue
                 b = torch.tensor(b_, dtype=other_dtype, device=device)
 
                 # Skip bfloat16 on CUDA. Remove this after bfloat16 is supported on CUDA.
@@ -6096,6 +6099,11 @@ class TestTorchDeviceType(TestCase):
                 # TODO Remove this skipping after bfloat16 can be handled nicely with other dtypes.
                 # Skip only if either dtype or other_dtype is bfloat16.
                 if (dtype == torch.bfloat16) != (other_dtype == torch.bfloat16):
+                    with self.assertRaises(RuntimeError):
+                        getattr(a, op)(b)
+                    continue
+
+                if dtype.is_complex or other_dtype.is_complex:
                     with self.assertRaises(RuntimeError):
                         getattr(a, op)(b)
                     continue
@@ -6111,6 +6119,10 @@ class TestTorchDeviceType(TestCase):
             b = torch.tensor(b_, dtype=dtype, device=device)
             # Skip bfloat16 on CUDA. Remove this after bfloat16 is supported on CUDA.
             if device.startswith('cuda') and dtype == torch.bfloat16:
+                with self.assertRaises(RuntimeError):
+                    getattr(a, op + '_')(b)
+                continue
+            if dtype.is_complex or other_dtype.is_complex:
                 with self.assertRaises(RuntimeError):
                     getattr(a, op + '_')(b)
                 continue
@@ -10655,10 +10667,10 @@ class TestTorchDeviceType(TestCase):
                 # TODO: https://github.com/pytorch/pytorch/issues/33793
                 self.assertRaises(RuntimeError, lambda: torch.randint(5, (0, 1, 3, 0), dtype=dt, device=device))
             elif dt == torch.bool:
-                x = torch.randint(2, (0, 1, 3, 0), dtype=dt, device=device)
+                x = torch.empty((0, 1, 3, 0), dtype=dt, device=device)
                 self.assertEqual((0, 1, 1, 0, 3), x.unfold(2, 3, 2).shape)
             else:
-                x = torch.randint(5, (0, 1, 3, 0), dtype=dt, device=device)
+                x = torch.empty((0, 1, 3, 0), dtype=dt, device=device)
                 self.assertEqual((0, 1, 1, 0, 3), x.unfold(2, 3, 2).shape)
 
     def test_unfold_scalars(self, device):
@@ -10673,6 +10685,10 @@ class TestTorchDeviceType(TestCase):
     def test_copy_all_dtypes_and_devices(self, device):
         from copy import copy
         for dt in torch.testing.get_all_dtypes():
+            #TODO: add test for complex when complex storage type is supported
+            if dt.is_complex:
+                self.assertRaises(RuntimeError, lambda: copy(torch.tensor([1], dtype=dt, device=device).clone()))
+                continue
             x = torch.tensor([1, 2, 3, 4], dtype=dt, device=device)
             x_clone = x.clone()
             y = copy(x)
@@ -10756,14 +10772,16 @@ class TestTorchDeviceType(TestCase):
                 elif dt == torch.bool:
                     self.assertEqual(shape, torch.randint(2, shape, device=device, dtype=dt).shape)
                     self.assertEqual(shape, torch.randint_like(torch.zeros(shape, device=device, dtype=dt), 2).shape)
+                elif dt.is_complex:
+                    self.assertRaises(RuntimeError, lambda: torch.randint(6, shape, device=device, dtype=dt).shape)
                 else:
                     self.assertEqual(shape, torch.randint(6, shape, device=device, dtype=dt).shape)
                     self.assertEqual(shape, torch.randint_like(torch.zeros(shape, device=device, dtype=dt), 6).shape)
 
-                if dt not in {torch.double, torch.float, torch.half, torch.bfloat16}:
+                if dt not in {torch.double, torch.float, torch.half, torch.bfloat16, torch.complex64, torch.complex128}:
                     self.assertRaises(RuntimeError, lambda: torch.rand(shape, device=device, dtype=dt).shape)
 
-                if dt == torch.double or dt == torch.float:
+                if dt == torch.double or dt == torch.float or dt.is_complex:
                     self.assertEqual(shape, torch.randn(shape, device=device, dtype=dt).shape)
                     self.assertEqual(shape, torch.randn_like(torch.zeros(shape, device=device, dtype=dt)).shape)
 
@@ -10786,7 +10804,9 @@ class TestTorchDeviceType(TestCase):
         for dtype in torch.testing.get_all_dtypes():
             if dtype == torch.bfloat16:
                 continue
-
+            if dt.is_complex:
+                self.assertRaises(RuntimeError, lambda: torch.eye(2, device=device, dtype=dtype))
+                continue
             for n, m in product([3, 5, 7], repeat=2):
                 # Construct identity using diagonal and fill
                 res1 = torch.eye(n, m, device=device, dtype=dtype)
@@ -10983,6 +11003,8 @@ class TestTorchDeviceType(TestCase):
 
     def test_logical(self, device):
         for dt in torch.testing.get_all_dtypes():
+            if dt.is_complex:
+                continue
             x = torch.tensor([1, 2, 3, 4], device=device, dtype=dt)
             b = torch.tensor([2], device=device, dtype=dt)
 
@@ -11093,6 +11115,14 @@ class TestTorchDeviceType(TestCase):
         dest = torch.index_select(src, 0, idx)
         self.assertEqual(torch.tensor([True]), dest)
 
+        # Complex Tensor
+        src = torch.randn(3, 4, 5, dtype=torch.complex64, device=device)
+        idx = torch.tensor([2, 1, 0, 1, 2], dtype=torch.long, device=device)
+        dest = torch.index_select(src, 0, idx)
+        self.assertEqual(dest.shape, (5, 4, 5))
+        for i in range(idx.size(0)):
+            self.assertEqual(dest[i], src[idx[i]])
+
     def test_take_empty(self, device):
         for input_shape in [(0,), (0, 1, 2, 0), (1, 2, 3)]:
             for indices_shape in [(0,), (0, 1, 2, 0)]:
@@ -11169,7 +11199,7 @@ class TestTorchDeviceType(TestCase):
             src = torch.tensor([0, 0, 0, 0, 0, 0, 0, 0, 0, 0], dtype=dtype, device=device)
             mask = torch.rand(num_src, device=device).clamp(0, 1).mul(2).floor().to(maskType)
 
-            if dtype == torch.half and torch.device(device).type == 'cpu':
+            if dtype.is_complex or (dtype == torch.half and torch.device(device).type == 'cpu'):
                 self.assertRaises(RuntimeError, lambda: src.masked_select(mask))
                 continue
 
@@ -11188,8 +11218,8 @@ class TestTorchDeviceType(TestCase):
             torch.masked_select(src, mask, out=dst3)
             self.assertEqual(dst3, torch.tensor(dst2, dtype=dst3.dtype), 0)
 
-        # Since half is not supported on CPU, need to skip the remaining test cases
-        if dtype == torch.half and torch.device(device).type == 'cpu':
+        # Since complex and half on CPU is not supported, need to skip the remaining test cases
+        if dtype.is_complex or (dtype == torch.half and torch.device(device).type == 'cpu'):
             return
 
         # Ensure that masks are expanded to match tensor properly
@@ -12967,7 +12997,7 @@ class TestTorchDeviceType(TestCase):
                 self.assertEqual(expected_inverse.view(additional_shape), y_inverse)
                 self.assertEqual(expected_counts, y_counts)
 
-    @dtypes(*set(torch.testing.get_all_dtypes()) - {torch.bfloat16})
+    @dtypes(*set(torch.testing.get_all_dtypes()) - {torch.bfloat16, torch.complex64, torch.complex128})
     def test_unique(self, device, dtype):
         if dtype is torch.half and self.device_type == 'cpu':
             return  # CPU does not have half support
@@ -13025,7 +13055,7 @@ class TestTorchDeviceType(TestCase):
                                     count += 1
                             self.assertEqual(j, count)
 
-    @dtypes(*set(torch.testing.get_all_dtypes()) - {torch.bfloat16})
+    @dtypes(*set(torch.testing.get_all_dtypes()) - {torch.bfloat16, torch.complex64, torch.complex128})
     def test_unique_consecutive(self, device, dtype):
         if dtype is torch.half and self.device_type == 'cpu':
             return  # CPU does not have half support
