@@ -52,7 +52,7 @@ struct TopoMoveTestFixture {
       const std::vector<std::string>& inputNames,
       const std::vector<std::string>& blockInputNames = {}) {
     std::vector<Value*> inputs;
-    for (const auto name : inputNames) {
+    for (const auto& name : inputNames) {
       inputs.push_back(nodes.at(name)->output());
     }
     auto node = graph->appendNode(graph->create(prim::AutogradZero, inputs));
@@ -62,7 +62,7 @@ struct TopoMoveTestFixture {
     if (blockInputNames.size() != 0) {
       node->addBlock();
       std::vector<Value*> blockDeps;
-      for (const auto name : blockInputNames) {
+      for (const auto& name : blockInputNames) {
         blockDeps.push_back(nodes.at(name)->output());
       }
 
@@ -1037,7 +1037,7 @@ void testMemoryDAG() {
     // a <- e
     // f <- e
     // g is by itself
-    MemoryDAG t;
+    MemoryDAGBuilder t;
     auto a = t.makeFreshValue(aValue);
     auto b = t.makeFreshValue(bValue);
     auto c = t.makeFreshValue(cValue);
@@ -1051,40 +1051,32 @@ void testMemoryDAG() {
     t.makePointerTo(e, a);
     t.makePointerTo(e, f);
 
+    const auto& dag = t.build();
+
     /**
      * Test mayAlias()
      */
     // Values should alias themselves
-    ASSERT_TRUE(t.mayAlias(a, a));
-    ASSERT_TRUE(t.mayAlias(g, g));
+    ASSERT_TRUE(dag->mayAlias(a, a));
+    ASSERT_TRUE(dag->mayAlias(g, g));
 
     // Values that point to the same location should alias
-    ASSERT_TRUE(t.mayAlias(a, b));
-    ASSERT_TRUE(t.mayAlias(a, c));
-    ASSERT_TRUE(t.mayAlias(c, d));
+    ASSERT_TRUE(dag->mayAlias(a, b));
+    ASSERT_TRUE(dag->mayAlias(a, c));
+    ASSERT_TRUE(dag->mayAlias(c, d));
 
     // e may point to a OR f
-    ASSERT_TRUE(t.mayAlias(e, a));
-    ASSERT_TRUE(t.mayAlias(e, f));
+    ASSERT_TRUE(dag->mayAlias(e, a));
+    ASSERT_TRUE(dag->mayAlias(e, f));
     // But a and f don't alias
-    ASSERT_FALSE(t.mayAlias(a, f));
-  }
-  {
-    // Test invalidation of memory locations
-    MemoryDAG t;
-    auto a = t.makeFreshValue(aValue);
-    auto b = t.makeFreshValue(bValue);
-    // `a` does not point to `b`
-    ASSERT_FALSE(a->getMemoryLocations().test(b->index));
-    t.makePointerTo(a, b);
-    ASSERT_TRUE(a->getMemoryLocations().test(b->index));
+    ASSERT_FALSE(dag->mayAlias(a, f));
   }
   {
     // x(y) -> x contains y
 
     // b(a)
     // c(a)
-    MemoryDAG t;
+    MemoryDAGBuilder t;
     auto a = t.makeFreshValue(aValue);
     auto b = t.makeFreshValue(bValue);
     t.addToContainedElements(a, b);
@@ -1092,43 +1084,67 @@ void testMemoryDAG() {
     auto c = t.makeFreshValue(cValue);
     t.addToContainedElements(a, c);
 
-    AT_ASSERT(t.mayContainAlias(a, b));
-    AT_ASSERT(t.mayContainAlias(b, a));
+    const auto& dag = t.build();
+    AT_ASSERT(dag->mayContainAlias(a, b));
+    AT_ASSERT(dag->mayContainAlias(b, a));
 
-    AT_ASSERT(t.mayContainAlias(a, c));
-    AT_ASSERT(t.mayContainAlias(c, a));
+    AT_ASSERT(dag->mayContainAlias(a, c));
+    AT_ASSERT(dag->mayContainAlias(c, a));
 
-    AT_ASSERT(t.mayContainAlias(b, c));
-    AT_ASSERT(t.mayContainAlias(c, b));
+    AT_ASSERT(dag->mayContainAlias(b, c));
+    AT_ASSERT(dag->mayContainAlias(c, b));
 
     // containers contain an element in themselves
-    AT_ASSERT(t.mayContainAlias(b, b));
-    AT_ASSERT(t.mayContainAlias(c, c));
-    AT_ASSERT(t.mayContainAlias(a, a));
-
-    auto d = t.makeFreshValue(dValue);
-
+    AT_ASSERT(dag->mayContainAlias(b, b));
+    AT_ASSERT(dag->mayContainAlias(c, c));
+    AT_ASSERT(dag->mayContainAlias(a, a));
+  }
+  {
     // b(a)
     // c(a)
     // d(b(a))
+    MemoryDAGBuilder t;
+    auto a = t.makeFreshValue(aValue);
+    auto b = t.makeFreshValue(bValue);
+    t.addToContainedElements(a, b);
+
+    auto c = t.makeFreshValue(cValue);
+    t.addToContainedElements(a, c);
+
+    auto d = t.makeFreshValue(dValue);
     t.addToContainedElements(b, d);
-    AT_ASSERT(t.mayContainAlias(b, d));
-    AT_ASSERT(t.mayContainAlias(d, b));
 
-    AT_ASSERT(t.mayContainAlias(c, d));
-    AT_ASSERT(t.mayContainAlias(d, c));
+    const auto& dag = t.build();
+    AT_ASSERT(dag->mayContainAlias(b, d));
+    AT_ASSERT(dag->mayContainAlias(d, b));
 
-    AT_ASSERT(t.mayContainAlias(a, d));
+    AT_ASSERT(dag->mayContainAlias(c, d));
+    AT_ASSERT(dag->mayContainAlias(d, c));
 
+    AT_ASSERT(dag->mayContainAlias(a, d));
+  }
+  {
     // f(e)
+    MemoryDAGBuilder t;
+    auto a = t.makeFreshValue(aValue);
+    auto b = t.makeFreshValue(bValue);
+    t.addToContainedElements(a, b);
+
+    auto c = t.makeFreshValue(cValue);
+    t.addToContainedElements(a, c);
+
+    auto d = t.makeFreshValue(dValue);
+    t.addToContainedElements(b, d);
+
     auto f = t.makeFreshValue(aValue);
     auto e = t.makeFreshValue(bValue);
 
     t.addToContainedElements(f, e);
 
+    const auto& dag = t.build();
     for (auto elem : {a, b, c, d}) {
-      AT_ASSERT(!t.mayContainAlias(f, elem));
-      AT_ASSERT(!t.mayContainAlias(e, elem));
+      AT_ASSERT(!dag->mayContainAlias(f, elem));
+      AT_ASSERT(!dag->mayContainAlias(e, elem));
     }
   }
 }
