@@ -413,6 +413,20 @@ def _avgpool_helper(tuple_fn, padding, kernel_size, stride, divisor_override, na
     padding = tuple(tuple_fn(padding))
     return padding
 
+def assert_training_mode(op_mode, op_name):
+    global _training_mode
+    op_mode = True if op_mode == 1 else False
+    if op_mode != _training_mode:
+        op_mode = "training " if op_mode else "inference"
+        training_mode = "training " if _training_mode else "inference"
+        # setting the model mode could result in op_mode != _training_mode
+        # if the model is a FuncModule. In this case we warn the user of
+        # the state and export depending on training_mode
+        warnings.warn("ONNX export mode is set to " + training_mode +
+                      " mode, but operator " + op_name + " is set to " +
+                      op_mode + " mode. The model will be exported in " +
+                      training_mode + ", as specified by the export mode.")
+
 # ---------------------------------------------------------------------
 # ONNX operator version
 # ---------------------------------------------------------------------
@@ -460,6 +474,11 @@ _operator_export_type = None
 def _set_operator_export_type(operator_export_type):
     global _operator_export_type
     _operator_export_type = operator_export_type
+
+_training_mode = None
+def _set_training_mode(training_mode):
+    global _training_mode
+    _training_mode = training_mode
 
 # Metaprogram symbolics for each ATen native specialized cast operator.
 # For e.g. we specify a function named `_cast_uint8_t` that instantiates an

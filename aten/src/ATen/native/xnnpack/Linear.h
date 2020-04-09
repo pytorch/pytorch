@@ -15,8 +15,8 @@ namespace linear {
 c10::intrusive_ptr<xnnpack::LinearOpContext> createLinearClampPrePackOpContext(
     Tensor weight,
     c10::optional<Tensor> bias,
-    c10::optional<double> output_min,
-    c10::optional<double> output_max);
+    c10::optional<Scalar> output_min,
+    c10::optional<Scalar> output_max);
 
 class LinearClampRun final : public torch::OperatorKernel {
  public:
