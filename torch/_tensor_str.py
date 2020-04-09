@@ -182,7 +182,6 @@ def _vector_str(self, indent, formatter, summarize):
                 [' ...'] +
                 [formatter.format(val) for val in self[-PRINT_OPTS.edgeitems:].tolist()])
     else:
-        # variable to keep track of complex float tensors
         data = [formatter.format(val) for val in self.tolist()]
 
     data_lines = [data[i:i + elements_per_line] for i in range(0, len(data), elements_per_line)]
