@@ -84,7 +84,7 @@ class _Formatter(object):
             if self.complex_dtype:
                 # max width for complex tensors depends on whether or not tensor contains ints only
                 complex_has_decimal = sum([not (value.item().real.is_integer() and value.item().imag.is_integer())
-                                            for value in tensor_view])
+                                        for value in tensor_view])
             for value in tensor_view:
                 if self.complex_dtype and complex_has_decimal:
                     value_str = ('{{:.{}f}}').format(PRINT_OPTS.precision).format(value)
