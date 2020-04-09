@@ -210,7 +210,7 @@ class TORCH_API RpcAgent {
 
   // Stop accepting requests and shutdown the RPC framework as soon as possible
   // by terminating all RPC threads.
-  virtual void shutdown();
+  void shutdown();
 
   // Derived classes must override this function to start accepting requests.
   // THis is used to clean up any backend-specific state. Users must call
