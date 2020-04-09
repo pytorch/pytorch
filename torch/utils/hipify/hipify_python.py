@@ -93,11 +93,9 @@ class GeneratedFileCleaner:
             parent, n = os.path.split(parent)
         if parent and n and not os.path.exists(parent):
             self.makedirs(parent, exist_ok=True)
-        try:
+        if not os.path.isdir(dn) or not exist_ok:
             os.mkdir(dn)
-        except OSError:
-            if not exist_ok or not os.path.isdir(dn):
-                raise
+            self.dirs_to_clean.append(os.path.abspath(dn))
 
     def __exit__(self, type, value, traceback):
         if not self.keep_intermediates:
