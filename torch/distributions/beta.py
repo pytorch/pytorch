@@ -71,16 +71,14 @@ class Beta(ExponentialFamily):
         result = self._dirichlet.concentration[..., 0]
         if isinstance(result, Number):
             return torch.tensor([result])
-        else:
-            return result
+        return result
 
     @property
     def concentration0(self):
         result = self._dirichlet.concentration[..., 1]
         if isinstance(result, Number):
             return torch.tensor([result])
-        else:
-            return result
+        return result
 
     @property
     def _natural_params(self):
