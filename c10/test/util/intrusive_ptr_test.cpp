@@ -1573,7 +1573,11 @@ TEST(IntrusivePtrTest, givenStackObject_whenReclaimed_thenCrashes) {
   // Better to crash early on creation.
   SomeClass obj;
   intrusive_ptr<SomeClass> ptr;
+#ifdef NDEBUG
+  EXPECT_NO_THROW(ptr = intrusive_ptr<SomeClass>::reclaim(&obj));
+#else
   EXPECT_ANY_THROW(ptr = intrusive_ptr<SomeClass>::reclaim(&obj));
+#endif
 }*/
 
 TEST(IntrusivePtrTest, givenPtr_whenNonOwningReclaimed_thenDoesntCrash) {
@@ -3372,5 +3376,9 @@ TEST(WeakIntrusivePtrTest, givenStackObject_whenReclaimed_thenCrashes) {
   // Better to crash early on creation.
   SomeClass obj;
   weak_intrusive_ptr<SomeClass> ptr = make_invalid_weak<SomeClass>();
+#ifdef NDEBUG
+  EXPECT_NO_THROW(ptr = weak_intrusive_ptr<SomeClass>::reclaim(&obj));
+#else
   EXPECT_ANY_THROW(ptr = weak_intrusive_ptr<SomeClass>::reclaim(&obj));
+#endif
 }

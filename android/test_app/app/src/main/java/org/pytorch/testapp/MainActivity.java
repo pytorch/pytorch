@@ -1,29 +1,20 @@
 package org.pytorch.testapp;
 
-import android.content.Context;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.HandlerThread;
 import android.os.SystemClock;
 import android.util.Log;
 import android.widget.TextView;
-
-import org.pytorch.IValue;
-import org.pytorch.Module;
-import org.pytorch.Tensor;
-import org.pytorch.PyTorchAndroid;
-
-import java.io.File;
-import java.io.FileOutputStream;
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.OutputStream;
-import java.nio.FloatBuffer;
-
 import androidx.annotation.Nullable;
 import androidx.annotation.UiThread;
 import androidx.annotation.WorkerThread;
 import androidx.appcompat.app.AppCompatActivity;
+import java.nio.FloatBuffer;
+import org.pytorch.IValue;
+import org.pytorch.Module;
+import org.pytorch.PyTorchAndroid;
+import org.pytorch.Tensor;
 
 public class MainActivity extends AppCompatActivity {
 
@@ -39,21 +30,23 @@ public class MainActivity extends AppCompatActivity {
   private Tensor mInputTensor;
   private StringBuilder mTextViewStringBuilder = new StringBuilder();
 
-  private final Runnable mModuleForwardRunnable = new Runnable() {
-    @Override
-    public void run() {
-      final Result result = doModuleForward();
-      runOnUiThread(new Runnable() {
+  private final Runnable mModuleForwardRunnable =
+      new Runnable() {
         @Override
         public void run() {
-          handleResult(result);
-          if (mBackgroundHandler != null) {
-            mBackgroundHandler.post(mModuleForwardRunnable);
-          }
+          final Result result = doModuleForward();
+          runOnUiThread(
+              new Runnable() {
+                @Override
+                public void run() {
+                  handleResult(result);
+                  if (mBackgroundHandler != null) {
+                    mBackgroundHandler.post(mModuleForwardRunnable);
+                  }
+                }
+              });
         }
-      });
-    }
-  };
+      };
 
   @Override
   protected void onCreate(Bundle savedInstanceState) {
@@ -91,9 +84,15 @@ public class MainActivity extends AppCompatActivity {
   @Nullable
   protected Result doModuleForward() {
     if (mModule == null) {
+      final long[] shape = BuildConfig.INPUT_TENSOR_SHAPE;
+      long numElements = 1;
+      for (int i = 0; i < shape.length; i++) {
+        numElements *= shape[i];
+      }
+      mInputTensorBuffer = Tensor.allocateFloatBuffer((int) numElements);
+      mInputTensor = Tensor.fromBlob(mInputTensorBuffer, BuildConfig.INPUT_TENSOR_SHAPE);
+      PyTorchAndroid.setNumThreads(1);
       mModule = PyTorchAndroid.loadModuleFromAsset(getAssets(), BuildConfig.MODULE_ASSET_NAME);
-      mInputTensorBuffer = Tensor.allocateFloatBuffer(3 * 224 * 224);
-      mInputTensor = Tensor.fromBlob(mInputTensorBuffer, new long[]{1, 3, 224, 224});
     }
 
     final long startTime = SystemClock.elapsedRealtime();

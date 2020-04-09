@@ -351,7 +351,7 @@ c10::optional<std::vector<int64_t>> computeStride(
     return newstride;
   }
 
-  int64_t view_d = newshape.size() - 1;
+  int64_t view_d = (int64_t)newshape.size() - 1;
   // stride for each subspace in the chunk
   int64_t chunk_base_stride = oldstride.back();
   // numel in current chunk

@@ -27,8 +27,6 @@ def argument_to_declaration(param, func=None):
         arg['type'] = 'THIndexTensor*'
     elif arg['type'] == 'Scalar':
         arg['type'] = 'accreal'
-    elif arg['type'] == 'Generator*':
-        arg['type'] = 'THGenerator*'
 
     match = re.match(r'IntArrayRef\[(\d+)\]', arg['type'])
     if match:
@@ -40,11 +38,6 @@ def argument_to_declaration(param, func=None):
         arg['optional'] = True
         arg['default'] = default
     arg['name'] = name
-
-    if func is not None:
-        wrap_dims = func.get('wrap_dim', {})
-        if name in wrap_dims:
-            arg['wrap_dim'] = wrap_dims[name]
 
     return arg
 
@@ -233,6 +226,8 @@ def function_info(name, arguments, cimpls, buffers, backends, inplace, backend_t
         'name': name,
         'cpu_bfloat16': True if backend_types is not None and 'CPU' in backend_types and
                 'BFloat16' in backend_types['CPU'] else False,
+        'cuda_bfloat16': True if backend_types is not None and 'CUDA' in backend_types and
+                'BFloat16' in backend_types['CUDA'] else False,
         'backend_types': backend_types,
         'arguments': arguments,
         'return': 'argument 0' if inplace else get_return(arguments),
@@ -284,21 +279,6 @@ def backward_declaration(base, thnn_functions, backend_types):
     arguments += [copy.deepcopy(arg) for arg in base['arguments']
                   if arg['name'] != 'inplace']
     arguments += base['buffers']
-
-    if 'upsample' in base['name']:
-        # Add input_size as parameter to upsample backwards functions
-        # Note that input_size is 4-dim for upsample_xxx2d
-        size = 2 + int(re.search(r'(\d+)d', base['name']).group(1))
-        input_size_arg = {'type': 'IntArrayRef', 'name': 'input_size', 'size': size}
-        for output_size_idx, arg in enumerate(arguments):
-            if arg['name'] == 'output_size':
-                break
-        arguments.insert(output_size_idx + 1, input_size_arg)
-
-    if 'im2col' in base['name']:
-        # Add input_size as parameter to im2col backwards function
-        input_size_arg = {'type': 'IntArrayRef', 'name': 'input_size', 'size': 2}
-        arguments.insert(2, input_size_arg)
 
     # outputs from the forward may be inputs to the backwards
     for arg in arguments:

@@ -5,17 +5,17 @@ require 'optparse'
 options = {}
 option_parser = OptionParser.new do |opts|
  opts.banner = 'Script for setting up TestApp.xcodeproj'
- opts.on('-t', '--team_id ', 'developemnt team ID') { |value|
+ opts.on('-t', '--team_id ', 'development team ID') { |value|
     options[:team_id] = value
  }
 end.parse!
 puts "Current directory: #{Dir.pwd}"
 install_path = File.expand_path("../../../build_ios/install")
-if not Dir.exist? (install_path) 
+if not Dir.exist? (install_path)
     raise "path doesn't exist:#{install_path}!"
 end
 xcodeproj_path = File.expand_path("../TestApp.xcodeproj")
-if not File.exist? (xcodeproj_path) 
+if not File.exist? (xcodeproj_path)
     raise "path doesn't exist:#{xcodeproj_path}!"
 end
 puts "Setting up TestApp.xcodeproj..."
@@ -63,7 +63,7 @@ targets.each do |target|
     target.resources_build_phase.add_file_reference(config_file_ref, true)
 end
 puts "Linking static libraries..."
-libs = ['libc10.a', 'libclog.a', 'libnnpack.a', 'libeigen_blas.a', 'libcpuinfo.a', 'libpytorch_qnnpack.a', 'libtorch_cpu.a', 'libtorch.a']
+libs = ['libc10.a', 'libclog.a', 'libnnpack.a', 'libXNNPACK.a', 'libeigen_blas.a', 'libcpuinfo.a', 'libpytorch_qnnpack.a', 'libtorch_cpu.a', 'libtorch.a']
 targets.each do |target|
     target.frameworks_build_phases.clear
     for lib in libs do

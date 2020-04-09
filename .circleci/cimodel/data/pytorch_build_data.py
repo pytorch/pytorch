@@ -4,17 +4,14 @@ from cimodel.lib.conf_tree import ConfigNode, X, XImportant
 CONFIG_TREE_DATA = [
     ("xenial", [
         (None, [
-            XImportant("2.7.9"),
-            X("2.7"),
-            XImportant("3.5"),  # Not run on all PRs, but should be included on [test all]
             X("nightly"),
         ]),
         ("gcc", [
             ("5.4", [  # All this subtree rebases to master and then build
                 XImportant("3.6"),
                 ("3.6", [
-                    ("parallel_tbb", [XImportant(True)]),
-                    ("parallel_native", [XImportant(True)]),
+                    ("parallel_tbb", [X(True)]),
+                    ("parallel_native", [X(True)]),
                 ]),
             ]),
             # TODO: bring back libtorch test
@@ -39,14 +36,16 @@ CONFIG_TREE_DATA = [
                 # and
                 # https://github.com/pytorch/pytorch/blob/master/.jenkins/pytorch/build.sh#L153
                 # (from https://github.com/pytorch/pytorch/pull/17323#discussion_r259453144)
+                X("3.6"),
+            ]),
+            ("9.2", [X("3.6")]),
+            ("10.1", [X("3.6")]),
+            ("10.2", [
                 XImportant("3.6"),
                 ("3.6", [
                     ("libtorch", [XImportant(True)])
                 ]),
             ]),
-            ("9.2", [X("3.6")]),
-            ("10", [X("3.6")]),
-            ("10.1", [X("3.6")]),
         ]),
         ("android", [
             ("r19c", [

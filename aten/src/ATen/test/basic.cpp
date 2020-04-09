@@ -3,10 +3,11 @@
 #include <ATen/ATen.h>
 #include <ATen/core/Reduction.h>
 #include <torch/cuda.h>
+#include "test_assert.h"
 
 // for TH compat test only...
 struct THFloatTensor;
-extern "C" THFloatTensor * THFloatTensor_newWithSize2d(size_t a, size_t b);
+extern "C" THFloatTensor * THFloatTensor_newWithSize1d(size_t a, size_t b);
 extern "C" void THFloatTensor_fill(THFloatTensor *, float v);
 
 #include <iostream>
@@ -206,7 +207,7 @@ void TestZeroDim(DeprecatedTypeProperties& type) {
 
 void TestTensorFromTH() {
   int a = 4;
-  THFloatTensor* t = THFloatTensor_newWithSize2d(a, a);
+  THFloatTensor* t = THFloatTensor_newWithSize1d(a, a);
   THFloatTensor_fill(t, a);
   ASSERT_NO_THROW(at::unsafeTensorFromTH(t, false));
 }
@@ -405,6 +406,7 @@ TEST(BasicTest, FactoryMethodsTest) {
     ASSERT_EQ(tensor1.dtype(), at::kHalf);
     ASSERT_EQ(tensor1.layout(), at::kSparse);
     ASSERT_TRUE(tensor1.device().is_cuda());
+    ASSERT_THROWS(tensor1.nbytes());
 
     // This is a bug
     // Issue https://github.com/pytorch/pytorch/issues/30405
@@ -413,5 +415,17 @@ TEST(BasicTest, FactoryMethodsTest) {
     // This will cause an exception
     // Issue https://github.com/pytorch/pytorch/issues/30405
     ASSERT_ANY_THROW(tensor1.is_pinned());
+  }
+
+  // Test _like variants
+  if (torch::cuda::is_available()) {
+    // Issue https://github.com/pytorch/pytorch/issues/28093
+    at::Tensor proto = at::empty({1}, at::kDouble);
+    tensor0 = at::empty_like(proto, at::kCUDA);
+    ASSERT_EQ(tensor0.dtype(), at::kDouble);
+    ASSERT_EQ(tensor0.layout(), at::kStrided);
+    ASSERT_TRUE(tensor0.device().is_cuda());
+    ASSERT_FALSE(tensor0.requires_grad());
+    ASSERT_FALSE(tensor0.is_pinned());
   }
 }

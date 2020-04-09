@@ -75,7 +75,7 @@ static auto registry = c10::RegisterOperators().op(
     c10::RegisterOperators::options()
       .kernel<
         decltype(sigmoid_cross_entropy_with_logits_op_cpu_impl),
-        &sigmoid_cross_entropy_with_logits_op_cpu_impl>(TensorTypeId::CPUTensorId));
+        &sigmoid_cross_entropy_with_logits_op_cpu_impl>(DispatchKey::CPUTensorId));
 
 } // namespace
 

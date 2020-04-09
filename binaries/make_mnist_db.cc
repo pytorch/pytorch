@@ -89,7 +89,7 @@ void convert_dataset(const char* image_filename, const char* label_filename,
   char label_value;
   std::vector<char> pixels(rows * cols);
   int count = 0;
-  const int kMaxKeyLength = 10;
+  const int kMaxKeyLength = 11;
   char key_cstr[kMaxKeyLength];
   string value;
 

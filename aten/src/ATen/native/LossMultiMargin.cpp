@@ -59,7 +59,7 @@ static inline void multi_margin_loss_cpu_kernel(
   using accscalar_t = at::acc_type<scalar_t, false>;
 
   // dim() != 0 check is for 1d input which produces a scalar output (that
-  // cannot be handeld by TensorAccessor)
+  // cannot be handled by TensorAccessor)
   if (reduction == Reduction::None && output.dim() > 0) {
     auto output_acc = output.accessor<scalar_t, 1>();
     for (int64_t t = 0; t < nframe; t++) {

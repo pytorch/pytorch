@@ -53,6 +53,8 @@ Reducer::Reducer(
       has_marked_unused_parameters_(false),
       local_used_maps_reduced_(false),
       backward_stats_base_(0) {
+  C10_LOG_API_USAGE_ONCE("torch.distributed.ddp.reducer");
+
   TORCH_CHECK(replicas_.size() >= 1, "Expected at least one model replica.");
   TORCH_CHECK(replicas_[0].size() >= 1, "Expected at least one parameter.");
 
@@ -723,7 +725,7 @@ void Reducer::finalize_backward() {
   // Due to the lazy wait, it is possible that reduction of the current
   // iteration is still going when the one for next iteration gets kicked off.
   // For such case, we want to wait explicitly to make sure the reduction does
-  // complete before kicking off next one. Otherwise the prevous one may
+  // complete before kicking off next one. Otherwise the previous one may
   // interfere, write to the device-side memory and clobber the content of
   // local_unused_maps_dev_.
   if (!local_used_maps_reduced_) {

@@ -20,13 +20,13 @@ You can reuse your favorite Python packages such as NumPy, SciPy and Cython to e
 - [Releases and Contributing](#releases-and-contributing)
 - [The Team](#the-team)
 
-| System | 2.7 | 3.5 | 3.6 |
+| System | 3.6 | 3.7 | 3.8 |
 | :---: | :---: | :---: | :--: |
 | Linux CPU | [![Build Status](https://ci.pytorch.org/jenkins/job/pytorch-master/badge/icon)](https://ci.pytorch.org/jenkins/job/pytorch-master/) | [![Build Status](https://ci.pytorch.org/jenkins/job/pytorch-master/badge/icon)](https://ci.pytorch.org/jenkins/job/pytorch-master/) | <center>—</center> |
 | Linux GPU | [![Build Status](https://ci.pytorch.org/jenkins/job/pytorch-master/badge/icon)](https://ci.pytorch.org/jenkins/job/pytorch-master/) | [![Build Status](https://ci.pytorch.org/jenkins/job/pytorch-master/badge/icon)](https://ci.pytorch.org/jenkins/job/pytorch-master/) | <center>—</center> |
 | Windows CPU / GPU | <center>—</center> | [![Build Status](https://ci.pytorch.org/jenkins/job/pytorch-builds/job/pytorch-win-ws2016-cuda9-cudnn7-py3-trigger/badge/icon)](https://ci.pytorch.org/jenkins/job/pytorch-builds/job/pytorch-win-ws2016-cuda9-cudnn7-py3-trigger/) |  <center>—</center> |
-| Linux (ppc64le) CPU | [![Build Status](https://powerci.osuosl.org/job/pytorch-master-nightly-py2-linux-ppc64le/badge/icon)](https://powerci.osuosl.org/job/pytorch-master-nightly-py2-linux-ppc64le/) | — | [![Build Status](https://powerci.osuosl.org/job/pytorch-master-nightly-py3-linux-ppc64le/badge/icon)](https://powerci.osuosl.org/job/pytorch-master-nightly-py3-linux-ppc64le/) |
-| Linux (ppc64le) GPU | [![Build Status](https://powerci.osuosl.org/job/pytorch-linux-cuda9-cudnn7-py2-mpi-build-test-gpu/badge/icon)](https://powerci.osuosl.org/job/pytorch-linux-cuda9-cudnn7-py2-mpi-build-test-gpu/) | — | [![Build Status](https://powerci.osuosl.org/job/pytorch-linux-cuda92-cudnn7-py3-mpi-build-test-gpu/badge/icon)](https://powerci.osuosl.org/job/pytorch-linux-cuda92-cudnn7-py3-mpi-build-test-gpu/) |
+| Linux (ppc64le) CPU | <center>—</center> | <center>—</center> | [![Build Status](https://powerci.osuosl.org/job/pytorch-master-nightly-py3-linux-ppc64le/badge/icon)](https://powerci.osuosl.org/job/pytorch-master-nightly-py3-linux-ppc64le/) |
+| Linux (ppc64le) GPU | <center>—</center> | <center>—</center> | [![Build Status](https://powerci.osuosl.org/job/pytorch-linux-cuda92-cudnn7-py3-mpi-build-test-gpu/badge/icon)](https://powerci.osuosl.org/job/pytorch-linux-cuda92-cudnn7-py3-mpi-build-test-gpu/) |
 
 See also the [ci.pytorch.org HUD](https://ezyang.github.io/pytorch-ci-hud/build/pytorch-master).
 
@@ -53,7 +53,7 @@ Elaborating further:
 
 ### A GPU-Ready Tensor Library
 
-If you use NumPy, then you have used Tensors (a.k.a ndarray).
+If you use NumPy, then you have used Tensors (a.k.a. ndarray).
 
 ![Tensor illustration](./docs/source/_static/img/tensor_illustration.png)
 
@@ -139,10 +139,8 @@ Commands to install from binaries via Conda or pip wheels are on our website:
 Python wheels for NVIDIA's Jetson Nano, Jetson TX2, and Jetson AGX Xavier are available via the following URLs:
 
 - Stable binaries:
-  - Python 2.7: https://nvidia.box.com/v/torch-stable-cp27-jetson-jp42
   - Python 3.6: https://nvidia.box.com/v/torch-stable-cp36-jetson-jp42
 - Rolling weekly binaries:
-  - Python 2.7: https://nvidia.box.com/v/torch-weekly-cp27-jetson-jp42
   - Python 3.6: https://nvidia.box.com/v/torch-weekly-cp36-jetson-jp42
 
 They require JetPack 4.2 and above, and @dusty-nv maintains them
@@ -167,9 +165,9 @@ If you are building for NVIDIA's Jetson platforms (Jetson Nano, TX1, TX2, AGX Xa
 
 #### Install Dependencies
 
-Common (only install `typing` for Python <3.5)
+Common
 ```
-conda install numpy ninja pyyaml mkl mkl-include setuptools cmake cffi typing
+conda install numpy ninja pyyaml mkl mkl-include setuptools cmake cffi
 ```
 
 On Linux
@@ -234,9 +232,6 @@ CUDA and MSVC have strong version dependencies, so even if you use VS 2017 / 201
 
 ```cmd
 cmd
-:: [Optional] Only add the next two lines if you need Python 2.7. If you use Python 3, ignore these two lines.
-set MSSdk=1
-set FORCE_PY27_BUILD=1
 
 :: [Optional] If you want to build with VS 2019 generator, please change the value in the next line to `Visual Studio 16 2019`.
 :: Note: This value is useless if Ninja is detected. However, you can force that by using `set USE_NINJA=OFF`.
@@ -246,7 +241,6 @@ set CMAKE_GENERATOR=Visual Studio 15 2017
 :: [Optional] If you want to override the underlying toolset used by Ninja and Visual Studio with CUDA, please run the following script block.
 :: "Visual Studio 2017 Developer Command Prompt" will be run automatically.
 :: Make sure you have CMake >= 3.12 before you do this when you use the Visual Studio generator.
-:: It's an essential step if you use Python 3.5.
 set CMAKE_GENERATOR_TOOLSET_VERSION=14.11
 set DISTUTILS_USE_SDK=1
 for /f "usebackq tokens=*" %i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -version [15^,16^) -products * -latest -property installationPath`) do call "%i\VC\Auxiliary\Build\vcvarsall.bat" x64 -vcvars_ver=%CMAKE_GENERATOR_TOOLSET_VERSION%
@@ -280,19 +274,29 @@ ccmake build  # or cmake-gui build
 
 ### Docker Image
 
-Dockerfile is supplied to build images with cuda support and cudnn v7. You can pass `-e PYTHON_VERSION=x.y` flag to specify which Python version is to be used by Miniconda, or leave it unset to use the default. Build from pytorch repo directory as docker needs to copy git repo into docker filesystem while building the image.
-```
-docker build -t pytorch -f docker/pytorch/Dockerfile .  # [optional] --build-arg WITH_TORCHVISION=0
+#### Using pre-built images
+
+You can also pull a pre-built docker image from Docker Hub and run with docker v19.03+
+
+```bash
+docker run --gpus all --rm -ti --ipc=host pytorch/pytorch:latest
 ```
 
-You can also pull a pre-built docker image from Docker Hub and run with nvidia-docker,
-but this is not currently maintained and will pull PyTorch 0.2.
-```
-nvidia-docker run --rm -ti --ipc=host pytorch/pytorch:latest
-```
 Please note that PyTorch uses shared memory to share data between processes, so if torch multiprocessing is used (e.g.
 for multithreaded data loaders) the default shared memory segment size that container runs with is not enough, and you
 should increase shared memory size either with `--ipc=host` or `--shm-size` command line options to `nvidia-docker run`.
+
+#### Building the image yourself
+
+**NOTE:** Must be built with a docker version > 18.06
+
+The `Dockerfile` is supplied to build images with cuda support and cudnn v7.
+You can pass `PYTHON_VERSION=x.y` make variable to specify which Python version is to be used by Miniconda, or leave it
+unset to use the default.
+```bash
+make -f docker.Makefile
+# images are tagged as docker.io/${your_docker_username}/pytorch
+```
 
 ### Building the Documentation
 
@@ -324,6 +328,7 @@ Three pointers to get you started:
 * GitHub issues: bug reports, feature requests, install issues, RFCs, thoughts, etc.
 * Slack: The [PyTorch Slack](https://pytorch.slack.com/) hosts a primary audience of moderate to experienced PyTorch users and developers for general chat, online discussions, collaboration etc. If you are a beginner looking for help, the primary medium is [PyTorch Forums](https://discuss.pytorch.org). If you need a slack invite, please fill this form: https://goo.gl/forms/PP1AGvNHpSaJP8to1
 * newsletter: no-noise, one-way email newsletter with important announcements about pytorch. You can sign-up here: https://eepurl.com/cbG0rv
+* for brand guidelines, please visit our website at [pytorch.org](https://pytorch.org/)
 
 ## Releases and Contributing
 

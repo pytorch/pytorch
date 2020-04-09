@@ -279,6 +279,8 @@ _(aten, cudnn_convolution_transpose_backward_weight) \
 _(aten, cudnn_grid_sampler) \
 _(aten, cudnn_grid_sampler_backward) \
 _(aten, cudnn_is_acceptable) \
+_(aten, cummax) \
+_(aten, cummin) \
 _(aten, cumprod) \
 _(aten, cumsum) \
 _(aten, data_ptr) \
@@ -502,8 +504,11 @@ _(aten, native_tensor) \
 _(aten, native_zero) \
 _(aten, ne) \
 _(aten, neg) \
+_(aten, bitwise_and) \
 _(aten, bitwise_not) \
+_(aten, bitwise_or) \
 _(aten, bitwise_xor) \
+_(aten, element_size) \
 _(aten, nll_loss) \
 _(aten, nll_loss2d) \
 _(aten, nll_loss2d_backward) \
@@ -713,6 +718,8 @@ _(aten, where) \
 _(aten, zero) \
 _(aten, zeros) \
 _(aten, zeros_like) \
+_(aten, copy_real) \
+_(aten, copy_imag) \
 /* nothing */
 
 #define FORALL_ATTR_BASE_SYMBOLS(_) \

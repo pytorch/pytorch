@@ -10,12 +10,45 @@
 namespace c10 {
 namespace util {
 
-#if defined(_MSC_VER) || (!defined(__clang__) && !defined(_MSC_VER) && defined(__GNUC__) && __GNUC__ < 9)
-// MSVC and GCC<9 have issues with our implementation for constexpr typenames.
-// Any version of Clang and GCC 9 are fine with it.
 // TODO Make it work for more compilers
+
+// Clang works
+#if defined(__clang__)
+
+// except for NVCC
+#if defined(__CUDACC__)
 #define C10_TYPENAME_SUPPORTS_CONSTEXPR 0
 #define C10_TYPENAME_CONSTEXPR
+#else
+#define C10_TYPENAME_SUPPORTS_CONSTEXPR 1
+#define C10_TYPENAME_CONSTEXPR constexpr
+#endif
+
+// Windows works
+#elif defined(_MSC_VER)
+
+// except for NVCC
+#if defined(__CUDACC__)
+#define C10_TYPENAME_SUPPORTS_CONSTEXPR 0
+#define C10_TYPENAME_CONSTEXPR
+#else
+#define C10_TYPENAME_SUPPORTS_CONSTEXPR 1
+#define C10_TYPENAME_CONSTEXPR constexpr
+#endif
+
+// GCC works
+#elif defined(__GNUC__)
+
+// except when gcc < 9
+#if (__GNUC__ < 9)
+#define C10_TYPENAME_SUPPORTS_CONSTEXPR 0
+#define C10_TYPENAME_CONSTEXPR
+#else
+#define C10_TYPENAME_SUPPORTS_CONSTEXPR 1
+#define C10_TYPENAME_CONSTEXPR constexpr
+#endif
+
+// some other compiler we don't know about
 #else
 #define C10_TYPENAME_SUPPORTS_CONSTEXPR 1
 #define C10_TYPENAME_CONSTEXPR constexpr
@@ -43,6 +76,11 @@ namespace detail {
 #error "You're running a too old version of GCC. We need GCC 5 or later."
 #endif
 
+#if defined(__clang__) && __clang_major__ < 4
+// Getting __PRETTY_FUNCTION__ at compile time only works with Clang >= 4
+#error "You're running a too old version of Clang. We need Clang 4 or later."
+#endif
+
 inline constexpr string_view extract(
     string_view prefix,
     string_view suffix,
@@ -57,10 +95,10 @@ inline constexpr string_view extract(
 }
 
 template <typename T>
-inline C10_TYPENAME_CONSTEXPR string_view fully_qualified_type_name_impl() noexcept {
-#if defined(_MSC_VER)
+inline C10_TYPENAME_CONSTEXPR c10::string_view fully_qualified_type_name_impl() {
+#if defined(_MSC_VER) && !defined(__clang__)
   return extract(
-      "class c10::string_view __cdecl c10::util::detail::fully_qualified_type_name_impl<",
+      "class c10::basic_string_view<char> __cdecl c10::util::detail::fully_qualified_type_name_impl<",
       ">(void)",
       __FUNCSIG__);
 #elif defined(__clang__)
@@ -80,9 +118,9 @@ inline C10_TYPENAME_CONSTEXPR string_view fully_qualified_type_name_impl() noexc
 #endif
 }
 
+#if !defined(__CUDA_ARCH__)
 template <typename T>
 inline constexpr uint64_t type_index_impl() {
-#if !defined(__CUDA_ARCH__)
 // Idea: __PRETTY_FUNCTION__ (or __FUNCSIG__ on msvc) contains a qualified name
 // of this function, including its template parameter, i.e. including the
 // type we want an id for. We use this name and run crc64 on it to get a type
@@ -94,15 +132,13 @@ inline constexpr uint64_t type_index_impl() {
 #elif defined(__GNUC__)
   return crc64(__PRETTY_FUNCTION__, sizeof(__PRETTY_FUNCTION__)).checksum();
 #endif
-#else
-  throw std::logic_error("This should not be called on device code");
-#endif
 }
+#endif
 
 } // namespace detail
 
 template <typename T>
-inline constexpr type_index get_type_index() noexcept {
+inline constexpr type_index get_type_index() {
 #if !defined(__CUDA_ARCH__)
   // To enforce that this is really computed at compile time, we pass the
   // type index through std::integral_constant.

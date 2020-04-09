@@ -148,7 +148,12 @@ class TensorHybrid : public facebook::jni::HybridClass<TensorHybrid> {
   }
 
   static facebook::jni::local_ref<TensorHybrid::javaobject>
-  newJTensorFromAtTensor(const at::Tensor& tensor) {
+  newJTensorFromAtTensor(const at::Tensor& input_tensor) {
+    // Java wrapper currently only supports contiguous tensors.
+    at::Tensor tensor = input_tensor.is_contiguous()
+      ? input_tensor
+      : input_tensor.contiguous();
+
     const auto scalarType = tensor.scalar_type();
     int jdtype = 0;
     if (at::kFloat == scalarType) {
@@ -181,7 +186,7 @@ class TensorHybrid : public facebook::jni::HybridClass<TensorHybrid> {
     static auto cls = TensorHybrid::javaClassStatic();
     facebook::jni::local_ref<facebook::jni::JByteBuffer> jTensorBuffer =
         facebook::jni::JByteBuffer::wrapBytes(
-            (uint8_t*)tensor.storage().data(), tensor.nbytes());
+            (uint8_t*)tensor.data_ptr(), tensor.nbytes());
     jTensorBuffer->order(facebook::jni::JByteOrder::nativeOrder());
 
     static const auto jMethodNewTensor =
@@ -194,12 +199,25 @@ class TensorHybrid : public facebook::jni::HybridClass<TensorHybrid> {
         cls, jTensorBuffer, jTensorShape, jdtype, makeCxxInstance(tensor));
   }
 
-  at::Tensor tensor() const {
-    return tensor_;
+  static at::Tensor newAtTensorFromJTensor(
+      facebook::jni::alias_ref<TensorHybrid::javaobject> jtensor) {
+    static auto cls = TensorHybrid::javaClassStatic();
+    static const auto dtypeMethod = cls->getMethod<jint()>("dtypeJniCode");
+    jint jdtype = dtypeMethod(jtensor);
+
+    static const auto shapeField = cls->getField<jlongArray>("shape");
+    auto jshape = jtensor->getFieldValue(shapeField);
+
+    static auto dataBufferMethod = cls->getMethod<
+        facebook::jni::local_ref<facebook::jni::JBuffer::javaobject>()>(
+        "getRawDataBuffer");
+    facebook::jni::local_ref<facebook::jni::JBuffer> jbuffer =
+        dataBufferMethod(jtensor);
+    return newAtTensor(jbuffer, jshape, jdtype);
   }
 
-  static void registerNatives() {
-    registerHybrid({makeNativeMethod("initHybrid", TensorHybrid::initHybrid)});
+  at::Tensor tensor() const {
+    return tensor_;
   }
 
  private:
@@ -322,8 +340,8 @@ facebook::jni::local_ref<JIValue> JIValue::newJIValueFromAtIValue(
       (*jArray)[index++] = TensorHybrid::newJTensorFromAtTensor(e);
     }
     return jMethodTensorListArr(JIValue::javaClassStatic(), jArray);
-  } else if (ivalue.isGenericList()) {
-    auto list = ivalue.toGenericList();
+  } else if (ivalue.isList()) {
+    auto list = ivalue.toList();
     static auto jMethodListArr =
         JIValue::javaClassStatic()
             ->getStaticMethod<facebook::jni::local_ref<JIValue>(
@@ -410,7 +428,7 @@ at::IValue JIValue::JIValueToAtIValue(
         JIValue::javaClassStatic()
             ->getMethod<facebook::jni::alias_ref<TensorHybrid::javaobject>()>(
                 "toTensor");
-    return jMethodGetTensor(jivalue)->cthis()->tensor();
+    return TensorHybrid::newAtTensorFromJTensor(jMethodGetTensor(jivalue));
   } else if (JIValue::kTypeCodeBool == typeCode) {
     static const auto jMethodGetBool =
         JIValue::javaClassStatic()->getMethod<jboolean()>("toBool");
@@ -493,7 +511,8 @@ at::IValue JIValue::JIValueToAtIValue(
     c10::List<at::Tensor> list{};
     list.reserve(n);
     for (size_t i = 0; i < n; ++i) {
-      list.push_back(jArray->getElement(i)->cthis()->tensor());
+      list.push_back(
+          TensorHybrid::newAtTensorFromJTensor(jArray->getElement(i)));
     }
     return at::IValue{std::move(list)};
   } else if (JIValue::kTypeCodeList == typeCode) {
@@ -593,7 +612,6 @@ class PyTorchAndroidJni : public facebook::jni::JavaClass<PyTorchAndroidJni> {
 
 void common_registerNatives() {
   static const int once = []() {
-    pytorch_jni::TensorHybrid::registerNatives();
 #if defined(__ANDROID__)
     pytorch_jni::PyTorchAndroidJni::registerNatives();
 #endif

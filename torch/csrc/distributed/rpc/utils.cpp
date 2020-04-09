@@ -3,7 +3,9 @@
 #include <torch/csrc/distributed/autograd/rpc_messages/cleanup_autograd_context_req.h>
 #include <torch/csrc/distributed/autograd/rpc_messages/cleanup_autograd_context_resp.h>
 #include <torch/csrc/distributed/autograd/rpc_messages/propagate_gradients_req.h>
+#include <torch/csrc/distributed/autograd/rpc_messages/propagate_gradients_resp.h>
 #include <torch/csrc/distributed/autograd/rpc_messages/rpc_with_autograd.h>
+#include <torch/csrc/distributed/autograd/utils.h>
 #include <torch/csrc/distributed/rpc/python_call.h>
 #include <torch/csrc/distributed/rpc/python_remote_call.h>
 #include <torch/csrc/distributed/rpc/python_resp.h>
@@ -11,8 +13,8 @@
 #include <torch/csrc/distributed/rpc/script_call.h>
 #include <torch/csrc/distributed/rpc/script_remote_call.h>
 #include <torch/csrc/distributed/rpc/script_resp.h>
-#include <torch/csrc/jit/pickler.h>
-#include <torch/csrc/jit/unpickler.h>
+#include <torch/csrc/jit/serialization/pickler.h>
+#include <torch/csrc/jit/serialization/unpickler.h>
 
 namespace torch {
 namespace distributed {
@@ -63,7 +65,9 @@ std::unique_ptr<RpcCommandBase> deserializeRequest(const Message& request) {
   }
 }
 
-std::unique_ptr<RpcCommandBase> deserializeResponse(const Message& response) {
+std::unique_ptr<RpcCommandBase> deserializeResponse(
+    const Message& response,
+    MessageType& wrappedMsgType) {
   switch (response.type()) {
     case MessageType::SCRIPT_RET: {
       return ScriptResp::fromMessage(response);
@@ -84,10 +88,23 @@ std::unique_ptr<RpcCommandBase> deserializeResponse(const Message& response) {
       return RRefAck::fromMessage(response);
     }
     case MessageType::FORWARD_AUTOGRAD_RESP: {
-      return autograd::RpcWithAutograd::fromMessage(response);
+      std::unique_ptr<RpcCommandBase> rpcPtr =
+          autograd::RpcWithAutograd::fromMessage(response);
+      RpcCommandBase& rpc = *rpcPtr;
+      auto& rpcWithAutograd = static_cast<autograd::RpcWithAutograd&>(rpc);
+
+      // Attach 'recv' autograd function.
+      addRecvRpcBackward(
+          rpcWithAutograd.autogradMetadata(),
+          rpcWithAutograd.tensors(),
+          rpcWithAutograd.fromWorkerId());
+
+      wrappedMsgType = rpcWithAutograd.wrappedMessageType();
+
+      return std::move(rpcWithAutograd).moveWrappedRpc();
     }
     case MessageType::BACKWARD_AUTOGRAD_RESP: {
-      return autograd::RpcWithAutograd::fromMessage(response);
+      return autograd::PropagateGradientsResp::fromMessage(response);
     }
     case MessageType::CLEANUP_AUTOGRAD_CONTEXT_RESP: {
       return autograd::CleanupAutogradContextResp::fromMessage(response);
@@ -97,6 +114,30 @@ std::unique_ptr<RpcCommandBase> deserializeResponse(const Message& response) {
           false, "Response type ", response.type(), " not supported.");
     }
   }
+}
+
+IValue deserializeResptoIValueInternal(
+    RpcCommandBase& rpc,
+    MessageType messageType) {
+  switch (messageType) {
+    case MessageType::SCRIPT_RET: {
+      auto& ret = static_cast<ScriptResp&>(rpc);
+      return ret.value();
+    }
+    default: {
+      TORCH_INTERNAL_ASSERT(
+          false,
+          "Response type ",
+          messageType,
+          " is not supported to be deserialized to IValue.");
+    }
+  }
+}
+
+IValue deserializeRespToIValue(const Message& message) {
+  MessageType msgType = message.type();
+  auto response = deserializeResponse(message, msgType);
+  return deserializeResptoIValueInternal(*response, msgType);
 }
 
 namespace {
@@ -173,9 +214,42 @@ static const char* kMeta = "meta";
 static const char* kPayload = "payload";
 }; // namespace
 
+c10::List<at::Tensor> cloneSparseTensors(
+    const std::vector<at::Tensor>& tensors) {
+  // Sanity-check: If the majority of bits don't need to go over the wire,
+  // force a clone(). Some Tensors are effectively small views, only using
+  // ~1% of the underlying Storage.
+  auto worthRecopying = [](const at::Tensor& t) -> bool {
+    if (!t.has_storage()) {
+      return false; // avoid throwing below.
+    }
+    auto storageSize = t.storage().elementSize() * t.storage().numel();
+    auto usefulSize = t.element_size() * t.numel();
+    constexpr size_t kMinMultiple = 2;
+    constexpr size_t kMinRecopyBytes = 8 * 1024;
+    return storageSize >= kMinRecopyBytes &&
+        storageSize >= usefulSize * kMinMultiple;
+  };
+  c10::List<at::Tensor> pTensors;
+  pTensors.reserve(tensors.size());
+  for (const auto& t : tensors) {
+    pTensors.push_back(worthRecopying(t) ? t.clone() : t);
+  }
+  return pTensors;
+}
+
 std::string wireSerialize(
     const std::vector<char>& payload,
     const std::vector<at::Tensor>& tensors) {
+  for (const auto& tensor : tensors) {
+    TORCH_CHECK(
+        tensor.device().is_cpu(),
+        "ProcessGroup RPC backend only supports",
+        " CPU tensors, please move your tensors to CPU before sending ",
+        "them over RPC. Found tensor on device: ",
+        tensor.device());
+  }
+
   struct Ent {
     std::string name;
     const char* data;
@@ -190,14 +264,12 @@ std::string wireSerialize(
   }
 
   if (!tensors.empty()) {
-    torch::jit::Pickler pickler(
-        [&](const void* buf, size_t sz) -> size_t {
-          metaEntry.append(static_cast<const char*>(buf), sz);
-          return sz;
-        },
-        nullptr);
+    torch::jit::Pickler pickler([&](const void* buf, size_t sz) -> size_t {
+      metaEntry.append(static_cast<const char*>(buf), sz);
+      return sz;
+    });
     pickler.protocol();
-    pickler.pushIValue(tensors);
+    pickler.pushIValue(cloneSparseTensors(tensors));
     pickler.stop();
     // tensorData is in function scope so that the data() pointers stay valid.
     tensorData = pickler.tensorData();
@@ -269,6 +341,8 @@ std::pair<std::vector<char>, std::vector<at::Tensor>> wireDeserialize(
       return dptr;
     };
 
+    // No need to pass typeResolver here, as it always processes string and
+    // tensors only
     torch::jit::Unpickler unpickler(
         metaDataReadFunc, nullptr, nullptr, sectionReadFunc, {});
     auto ival = unpickler.parse_ivalue();

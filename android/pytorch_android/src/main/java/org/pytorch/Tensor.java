@@ -1,8 +1,7 @@
 package org.pytorch;
 
-import com.facebook.jni.annotations.DoNotStrip;
 import com.facebook.jni.HybridData;
-
+import com.facebook.jni.annotations.DoNotStrip;
 import java.nio.Buffer;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
@@ -34,7 +33,6 @@ public abstract class Tensor {
   private static final String ERROR_MSG_DATA_BUFFER_NOT_NULL = "Data buffer must be not null";
   private static final String ERROR_MSG_DATA_ARRAY_NOT_NULL = "Data array must be not null";
   private static final String ERROR_MSG_SHAPE_NOT_NULL = "Shape must be not null";
-  private static final String ERROR_MSG_SHAPE_NOT_EMPTY = "Shape must be not empty";
   private static final String ERROR_MSG_SHAPE_NON_NEGATIVE = "Shape elements must be non negative";
   private static final String ERROR_MSG_DATA_BUFFER_MUST_HAVE_NATIVE_BYTE_ORDER =
       "Data buffer must have native byte order (java.nio.ByteOrder#nativeOrder)";
@@ -121,7 +119,7 @@ public abstract class Tensor {
     checkShapeAndDataCapacityConsistency(data.length, shape);
     final ByteBuffer byteBuffer = allocateByteBuffer((int) numel(shape));
     byteBuffer.put(data);
-    return initHybrid(new Tensor_uint8(byteBuffer, shape));
+    return new Tensor_uint8(byteBuffer, shape);
   }
 
   /**
@@ -138,7 +136,7 @@ public abstract class Tensor {
     checkShapeAndDataCapacityConsistency(data.length, shape);
     final ByteBuffer byteBuffer = allocateByteBuffer((int) numel(shape));
     byteBuffer.put(data);
-    return initHybrid(new Tensor_int8(byteBuffer, shape));
+    return new Tensor_int8(byteBuffer, shape);
   }
 
   /**
@@ -155,7 +153,7 @@ public abstract class Tensor {
     checkShapeAndDataCapacityConsistency(data.length, shape);
     final IntBuffer intBuffer = allocateIntBuffer((int) numel(shape));
     intBuffer.put(data);
-    return initHybrid(new Tensor_int32(intBuffer, shape));
+    return new Tensor_int32(intBuffer, shape);
   }
 
   /**
@@ -172,7 +170,7 @@ public abstract class Tensor {
     checkShapeAndDataCapacityConsistency(data.length, shape);
     final FloatBuffer floatBuffer = allocateFloatBuffer((int) numel(shape));
     floatBuffer.put(data);
-    return initHybrid(new Tensor_float32(floatBuffer, shape));
+    return new Tensor_float32(floatBuffer, shape);
   }
 
   /**
@@ -189,7 +187,7 @@ public abstract class Tensor {
     checkShapeAndDataCapacityConsistency(data.length, shape);
     final LongBuffer longBuffer = allocateLongBuffer((int) numel(shape));
     longBuffer.put(data);
-    return initHybrid(new Tensor_int64(longBuffer, shape));
+    return new Tensor_int64(longBuffer, shape);
   }
 
   /**
@@ -206,7 +204,7 @@ public abstract class Tensor {
     checkShapeAndDataCapacityConsistency(data.length, shape);
     final DoubleBuffer doubleBuffer = allocateDoubleBuffer((int) numel(shape));
     doubleBuffer.put(data);
-    return initHybrid(new Tensor_float64(doubleBuffer, shape));
+    return new Tensor_float64(doubleBuffer, shape);
   }
 
   /**
@@ -226,7 +224,7 @@ public abstract class Tensor {
     checkArgument(
         (data.order() == ByteOrder.nativeOrder()),
         ERROR_MSG_DATA_BUFFER_MUST_HAVE_NATIVE_BYTE_ORDER);
-    return initHybrid(new Tensor_uint8(data, shape));
+    return new Tensor_uint8(data, shape);
   }
 
   /**
@@ -246,7 +244,7 @@ public abstract class Tensor {
     checkArgument(
         (data.order() == ByteOrder.nativeOrder()),
         ERROR_MSG_DATA_BUFFER_MUST_HAVE_NATIVE_BYTE_ORDER);
-    return initHybrid(new Tensor_int8(data, shape));
+    return new Tensor_int8(data, shape);
   }
 
   /**
@@ -266,7 +264,7 @@ public abstract class Tensor {
     checkArgument(
         (data.order() == ByteOrder.nativeOrder()),
         ERROR_MSG_DATA_BUFFER_MUST_HAVE_NATIVE_BYTE_ORDER);
-    return initHybrid(new Tensor_int32(data, shape));
+    return new Tensor_int32(data, shape);
   }
 
   /**
@@ -286,7 +284,7 @@ public abstract class Tensor {
     checkArgument(
         (data.order() == ByteOrder.nativeOrder()),
         ERROR_MSG_DATA_BUFFER_MUST_HAVE_NATIVE_BYTE_ORDER);
-    return initHybrid(new Tensor_float32(data, shape));
+    return new Tensor_float32(data, shape);
   }
 
   /**
@@ -306,7 +304,7 @@ public abstract class Tensor {
     checkArgument(
         (data.order() == ByteOrder.nativeOrder()),
         ERROR_MSG_DATA_BUFFER_MUST_HAVE_NATIVE_BYTE_ORDER);
-    return initHybrid(new Tensor_int64(data, shape));
+    return new Tensor_int64(data, shape);
   }
 
   /**
@@ -326,17 +324,10 @@ public abstract class Tensor {
     checkArgument(
         (data.order() == ByteOrder.nativeOrder()),
         ERROR_MSG_DATA_BUFFER_MUST_HAVE_NATIVE_BYTE_ORDER);
-    return initHybrid(new Tensor_float64(data, shape));
+    return new Tensor_float64(data, shape);
   }
 
   @DoNotStrip private HybridData mHybridData;
-
-  @DoNotStrip private native HybridData initHybrid();
-
-  private static Tensor initHybrid(Tensor tensor) {
-    tensor.mHybridData = tensor.initHybrid();
-    return tensor;
-  }
 
   private Tensor(long[] shape) {
     checkShape(shape);
@@ -633,7 +624,6 @@ public abstract class Tensor {
 
   private static void checkShape(long[] shape) {
     checkArgument(shape != null, ERROR_MSG_SHAPE_NOT_NULL);
-    checkArgument(shape.length > 0, ERROR_MSG_SHAPE_NOT_EMPTY);
     for (int i = 0; i < shape.length; i++) {
       checkArgument(shape[i] >= 0, ERROR_MSG_SHAPE_NON_NEGATIVE);
     }
@@ -652,7 +642,8 @@ public abstract class Tensor {
 
   // Called from native
   @DoNotStrip
-  private static Tensor nativeNewTensor(ByteBuffer data, long[] shape, int dtype, HybridData hybridData) {
+  private static Tensor nativeNewTensor(
+      ByteBuffer data, long[] shape, int dtype, HybridData hybridData) {
     Tensor tensor = null;
     if (DType.FLOAT32.jniCode == dtype) {
       tensor = new Tensor_float32(data.asFloatBuffer(), shape);

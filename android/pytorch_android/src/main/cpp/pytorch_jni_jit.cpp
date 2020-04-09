@@ -7,6 +7,7 @@
 #include <fbjni/fbjni.h>
 
 #include <torch/csrc/autograd/record_function.h>
+#include <torch/csrc/jit/runtime/print_handler.h>
 #include <torch/script.h>
 #include "caffe2/serialize/read_adapter_interface.h"
 
@@ -15,7 +16,10 @@
 #ifdef __ANDROID__
 #include <android/asset_manager.h>
 #include <android/asset_manager_jni.h>
+#include <android/log.h>
 #endif
+
+using namespace torch::autograd::profiler;
 
 namespace pytorch_jni {
 
@@ -24,6 +28,12 @@ namespace {
 struct JITCallGuard {
   // AutoGrad is disabled for mobile by default.
   torch::autograd::AutoGradMode no_autograd_guard{false};
+  // VariableType dispatch is not included in default mobile build. We need set
+  // this guard globally to avoid dispatch error (only for dynamic dispatch).
+  // Thanks to the unification of Variable class and Tensor class it's no longer
+  // required to toggle the NonVariableTypeMode per op - so it doesn't hurt to
+  // always set NonVariableTypeMode for inference only use case.
+  torch::AutoNonVariableTypeMode non_var_guard{true};
   // Disable graph optimizer to ensure list of unused ops are not changed for
   // custom mobile build.
   torch::jit::GraphOptimizerEnabledGuard no_optimizer_guard{false};
@@ -56,7 +66,7 @@ class MemoryReadAdapter final : public caffe2::serialize::ReadAdapterInterface {
 class PytorchJni : public facebook::jni::HybridClass<PytorchJni> {
  private:
   friend HybridBase;
-  torch::jit::script::Module module_;
+  torch::jit::Module module_;
 
  public:
   constexpr static auto kJavaDescriptor = "Lorg/pytorch/NativePeer;";
@@ -77,34 +87,51 @@ class PytorchJni : public facebook::jni::HybridClass<PytorchJni> {
 #endif
 
 #ifdef TRACE_ENABLED
-  static void onFunctionEnter(
-      const torch::autograd::profiler::RecordFunction& fn) {
+  static bool onFunctionEnter(
+      const RecordFunction& fn) {
     Trace::beginSection(fn.name().str());
+    return true;
   }
 
-  static void onFunctionExit(const torch::autograd::profiler::RecordFunction&) {
+  static void onFunctionExit(const RecordFunction&) {
     Trace::endSection();
   }
 #endif
 
-  void preModuleLoadSetup() {
+  static void preModuleLoadSetupOnce() {
     auto qengines = at::globalContext().supportedQEngines();
     if (std::find(qengines.begin(), qengines.end(), at::QEngine::QNNPACK) !=
         qengines.end()) {
       at::globalContext().setQEngine(at::QEngine::QNNPACK);
     }
+
+#ifdef __ANDROID__
+    torch::jit::setPrintHandler([](const std::string& s) {
+      __android_log_print(ANDROID_LOG_DEBUG, "pytorch-print", "%s", s.c_str());
+    });
+#endif
+
 #ifdef TRACE_ENABLED
-    torch::autograd::profiler::pushCallback(
+    pushCallback(
         &onFunctionEnter,
         &onFunctionExit,
         /* need_inputs */ false,
-        /* sampled */ false);
+        /* sampling_prob */ 1.0,
+        /* scopes */ {RecordScope::FUNCTION, RecordScope::USER_SCOPE});
 #endif
-    JITCallGuard guard;
+  }
+
+  void preModuleLoadSetup() {
+    static const int once = []() {
+      preModuleLoadSetupOnce();
+      return 0;
+    }();
+    ((void)once);
   }
 
   PytorchJni(facebook::jni::alias_ref<jstring> modelPath) {
     preModuleLoadSetup();
+    JITCallGuard guard;
     module_ = torch::jit::load(std::move(modelPath->toStdString()));
     module_.eval();
   }
@@ -136,6 +163,7 @@ class PytorchJni : public facebook::jni::HybridClass<PytorchJni> {
           "Could not get buffer for asset '%s'",
           assetName->toStdString().c_str());
     }
+    JITCallGuard guard;
     module_ = torch::jit::load(torch::make_unique<MemoryReadAdapter>(
         assetBuffer, AAsset_getLength(asset)));
     AAsset_close(asset);

@@ -17,6 +17,8 @@ T_co = TypeVar('T_co', covariant=True)
 
 
 class Module(Generic[T_co]):
+    training: bool
+
     def __init__(self) -> None: ...
 
     forward: Callable[..., T_co]

@@ -126,17 +126,18 @@ cl::opt<RegexOpt, true, cl::parser<std::string>> OpInvocationPattern(
     cl::Required,
     cl::ValueRequired);
 
-enum class OutputFormatType { Dot, YAML };
+enum class OutputFormatType { Dot, PY, YAML };
 cl::opt<OutputFormatType> OutputFormat(
     "format",
     cl::desc("Output format."),
     cl::values(clEnumValN(OutputFormatType::Dot, "dot", "print as dot"),
+               clEnumValN(OutputFormatType::PY, "py", "print as python source"),
                clEnumValN(OutputFormatType::YAML, "yaml", "print as yaml")));
 
 cl::opt<bool> TransitiveClosure(
     "closure",
     cl::desc("Output transitive closure."),
-    cl::init(true));
+    cl::init(false));
 
 cl::opt<int> Verbose(
     "v",
@@ -217,10 +218,18 @@ public:
     std::shared_ptr<PATH> path = DebugPath ? std::make_shared<PATH>() : nullptr;
     simplifyGraph(deps, opSchemaStrs, &result, path.get());
 
-    if (OutputFormat == OutputFormatType::Dot) {
-      printAsDot(std::cout, opSchemaStrs, result);
-    } else if (OutputFormat == OutputFormatType::YAML) {
-      printAsYAML(std::cout, opSchemaStrs, result, path.get());
+    switch (OutputFormat) {
+      case OutputFormatType::Dot:
+        printAsDot(std::cout, opSchemaStrs, result);
+        break;
+      case OutputFormatType::PY:
+        printAsPython(std::cout, opSchemaStrs, result);
+        break;
+      case OutputFormatType::YAML:
+        printAsYAML(std::cout, opSchemaStrs, result, path.get());
+        break;
+      default:
+        break;
     }
 
     return false;
@@ -248,7 +257,9 @@ private:
             // One registration/invocation API might call another registration/
             // invocation API in which case we can skip processing the nested
             // call. This is a simple trick to avoid "cannot find registered/
-            // invoked op" warning and doesn't affect correctness.
+            // invoked op" warning and doesn't affect correctness, because
+            // later in scanOpRegistration we'll walk the transitively reachable
+            // IR graph again from each registration instance.
             if (!OpRegistrationPatternLoc.pattern->match(callerDemangled) &&
                 OpRegistrationPatternLoc.pattern->match(calleeDemangled)) {
               (*opRegistrationInsts).insert(&I);
@@ -695,17 +706,37 @@ private:
     out << "digraph {" << std::endl;
     out << "layout=\"circo\";" << std::endl;
     for (const auto& K : keys) {
-      auto key = demangle(K);
       auto it = graph.find(K);
       if (it == graph.end()) {
         continue;
       }
+      auto key = demangle(K);
       for (const auto& value : it->second) {
         out << '"' << key << '"'
             << " -> "
             << '"' << demangle(value) << "\";"
             << std::endl;
       }
+    }
+    out << "}" << std::endl;
+  }
+
+  static void printAsPython(
+      std::ostream& out, const SET& keys, const GRAPH& graph) {
+    out << "{" << std::endl;
+    for (const auto& K : keys) {
+      auto it = graph.find(K);
+      if (it == graph.end() || it->second.empty()) {
+        continue;
+      }
+      out << "    \"" << demangle(K) << "\": [" << std::endl;
+      for (const auto& value : it->second) {
+        if (value == K) { // skip itself
+          continue;
+        }
+        out << "        \"" << demangle(value) << "\"," << std::endl;
+      }
+      out << "    ]," << std::endl;
     }
     out << "}" << std::endl;
   }

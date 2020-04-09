@@ -278,7 +278,7 @@ class THCCachingAllocator {
         // Note that at this point cuda_malloc_with_retry has already returned all
         // possible "cached" memory to the driver. The only remaining "cached"
         // memory is split from a larger block that is partially in-use.
-        AT_ERROR(
+        TORCH_CHECK_WITH(CUDAOutOfMemoryError, false,
           "CUDA out of memory. Tried to allocate ", format_size(alloc_size),
           " (GPU ", device, "; ",
           format_size(device_total), " total capacity; ",
@@ -960,6 +960,15 @@ void* raw_alloc(size_t nbytes) {
   C10_CUDA_CHECK(cudaGetDevice(&device));
   void* r = nullptr;
   caching_allocator.malloc(&r, nbytes, cuda::getCurrentCUDAStream(device));
+  return r;
+}
+
+void* raw_alloc_with_stream(size_t nbytes, cudaStream_t stream) {
+  if (nbytes == 0) {
+    return nullptr;
+  }
+  void* r = nullptr;
+  caching_allocator.malloc(&r, nbytes, stream);
   return r;
 }
 

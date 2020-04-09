@@ -6,8 +6,11 @@
 - [Writing documentation](#writing-documentation)
   * [Building documentation](#building-documentation)
     + [Tips](#tips)
+    + [Building C++ Documentation](#building-c---documentation)
+  * [Previewing changes](#previewing-changes)
+    + [Submitting changes for review](#submitting-changes-for-review)
   * [Adding documentation tests](#adding-documentation-tests)
-- [Profiling with `py-spy`](#profiling-with--py-spy-)
+- [Profiling with `py-spy`](#profiling-with-py-spy)
 - [Managing multiple build trees](#managing-multiple-build-trees)
 - [C++ development tips](#c---development-tips)
   * [Build only what you need](#build-only-what-you-need)
@@ -16,6 +19,7 @@
     + [Use Ninja](#use-ninja)
     + [Use CCache](#use-ccache)
     + [Use a faster linker](#use-a-faster-linker)
+  * [C++ frontend development tips](#c---frontend-development-tips)
 - [CUDA development tips](#cuda-development-tips)
 - [Windows development tips](#windows-development-tips)
   * [Known MSVC (and MSVC with NVCC) bugs](#known-msvc--and-msvc-with-nvcc--bugs)
@@ -125,7 +129,6 @@ and `python setup.py clean`. Then you can install in `develop` mode again.
   * [src](aten/src)
     * [TH](aten/src/TH)
       [THC](aten/src/THC)
-      [THNN](aten/src/THNN)
       [THCUNN](aten/src/THCUNN) - Legacy library code from the original
       Torch. Try not to add things here; we're slowly porting these to
       [native](aten/src/ATen/native).
@@ -221,19 +224,6 @@ PyTorch uses [Google style](http://sphinxcontrib-napoleon.readthedocs.io/en/late
 for formatting docstrings. Length of line inside docstrings block must be limited to 80 characters to
 fit into Jupyter documentation popups.
 
-For C++ documentation (https://pytorch.org/cppdocs), we use
-[Doxygen](http://www.doxygen.nl/) and then convert it to
-[Sphinx](http://www.sphinx-doc.org/) via
-[Breathe](https://github.com/michaeljones/breathe) and
-[Exhale](https://github.com/svenevs/exhale). Check the [Doxygen
-reference](http://www.stack.nl/~dimitri/doxygen/manual/index.html) for more
-information on the documentation syntax. To build the documentation locally,
-`cd` into `docs/cpp` and then `make html`.
-
-We run Doxygen in CI (Travis) to verify that you do not use invalid Doxygen
-commands. To run this check locally, run `./check-doxygen.sh` from inside
-`docs/cpp`.
-
 ### Building documentation
 
 To build the documentation:
@@ -259,28 +249,6 @@ cd docs
 make html
 ```
 
-4. To view HTML files, you must start an HTTP server. For example
-
-```bash
-# Start a server from the current directory (Python 3 only)
-cd docs/build/html
-python -m http.server
-```
-
-If you are developing on a remote machine, you can set up an SSH tunnel so that
-you can access the HTTP server on the remote machine on your local machine. To map
-remote port 8086 to local port 8086, use either of the following commands.
-
-```bash
-# For SSH
-ssh my_machine -L 8086:my_machine:8086
-
-# For Eternal Terminal
-et my_machine -t="8086:8086"
-```
-
-Then navigate to `localhost:8086` in your web browser.
-
 #### Tips
 
 The `.rst` source files live in [docs/source](docs/source). Some of the `.rst`
@@ -300,6 +268,78 @@ ls | grep rst | grep -v index | grep -v jit | xargs rm
 git add index.rst jit.rst
 ...
 ```
+
+#### Building C++ Documentation
+For C++ documentation (https://pytorch.org/cppdocs), we use
+[Doxygen](http://www.doxygen.nl/) and then convert it to
+[Sphinx](http://www.sphinx-doc.org/) via
+[Breathe](https://github.com/michaeljones/breathe) and
+[Exhale](https://github.com/svenevs/exhale). Check the [Doxygen
+reference](http://www.stack.nl/~dimitri/doxygen/manual/index.html) for more
+information on the documentation syntax.
+
+We run Doxygen in CI (Travis) to verify that you do not use invalid Doxygen
+commands. To run this check locally, run `./check-doxygen.sh` from inside
+`docs/cpp`.
+
+To build the documentation, follow the same steps as above, but run them from
+`docs/cpp` instead of `docs`.
+
+### Previewing changes
+
+To view HTML files locally, you can open the files in your web browser. For example,
+navigate to `file:///your_pytorch_folder/docs/build/html/index.html` in a web
+browser.
+
+If you are developing on a remote machine, you can set up an SSH tunnel so that
+you can access the HTTP server on the remote machine from your local machine. To map
+remote port 8000 to local port 8000, use either of the following commands.
+
+```bash
+# For SSH
+ssh my_machine -L 8000:my_machine:8000
+
+# For Eternal Terminal
+et my_machine -t="8000:8000"
+```
+
+Then navigate to `localhost:8000` in your web browser.
+
+#### Submitting changes for review
+
+It is helpful when submitting a PR that changes the docs to provide a rendered
+version of the result. If your change is small, you can add a screenshot of the
+changed docs to your PR.
+
+If your change to the docs is large and affects multiple pages, you can host
+the docs yourself with the following steps, then add a link to the output in your
+PR. These instructions use GitHub pages to host the docs
+you have built. To do so, follow [these steps](https://guides.github.com/features/pages/)
+to make a repo to host your changed documentation.
+
+GitHub pages expects to be hosting a Jekyll generated website which does not work
+well with the static resource paths used in the PyTorch documentation. To get around
+this, you must add an empty file called `.nojekyll` to your repo.
+
+```bash
+cd your_github_pages_repo
+touch .nojekyll
+git add .
+git commit
+git push
+```
+
+Then, copy built documentation and push the changes:
+
+```bash
+cd your_github_pages_repo
+cp -r ~/my_pytorch_path/docs/build/html/* .
+git add .
+git commit
+git push
+```
+
+Then you should be able to see the changes at your_github_username.github.com/your_github_pages_repo.
 
 
 ### Adding documentation tests
@@ -417,10 +457,11 @@ variables `DEBUG`, `USE_DISTRIBUTED`, `USE_MKLDNN`, `USE_CUDA`, `BUILD_TEST`, `U
 - `USE_FBGEMM=0` will disable using FBGEMM (quantized 8-bit server operators).
 - `USE_NNPACK=0` will disable compiling with NNPACK.
 - `USE_QNNPACK=0` will disable QNNPACK build (quantized 8-bit operators).
+- `USE_XNNPACK=0` will disable compiling with XNNPACK.
 
 For example:
 ```bash
-DEBUG=1 USE_DISTRIBUTED=0 USE_MKLDNN=0 USE_CUDA=0 BUILD_TEST=0 USE_FBGEMM=0 USE_NNPACK=0 USE_QNNPACK=0 python setup.py develop
+DEBUG=1 USE_DISTRIBUTED=0 USE_MKLDNN=0 USE_CUDA=0 BUILD_TEST=0 USE_FBGEMM=0 USE_NNPACK=0 USE_QNNPACK=0 USE_XNNPACK=0 python setup.py develop
 ```
 
 For subsequent builds (i.e., when `build/CMakeCache.txt` exists), the build
@@ -564,6 +605,16 @@ The easiest way to use `lld` this is download the
 ln -s /path/to/downloaded/ld.lld /usr/local/bin/ld
 ```
 
+### C++ frontend development tips
+
+We have very extensive tests in the [test/cpp/api](test/cpp/api) folder. The
+tests are a great way to see how certain components are intended to be used.
+When compiling PyTorch from source, the test runner binary will be written to
+`build/bin/test_api`. The tests use the [GoogleTest](https://github.com/google/googletest/blob/master/googletest)
+framework, which you can read up about to learn how to configure the test runner. When
+submitting a new feature, we care very much that you write appropriate tests.
+Please follow the lead of the other tests to see how to write a new test case.
+
 ## CUDA development tips
 
 If you are working on the CUDA code, here are some useful CUDA debugging tips:
@@ -573,7 +624,7 @@ If you are working on the CUDA code, here are some useful CUDA debugging tips:
     slow down the build process for about 50% (compared to only `DEBUG=1`), so use wisely.
 2. `cuda-gdb` and `cuda-memcheck` are your best CUDA debugging friends. Unlike`gdb`,
    `cuda-gdb` can display actual values in a CUDA tensor (rather than all zeros).
-3. CUDA supports a lot of C++11 features such as, `std::numeric_limits`, `std::nextafter`,
+3. CUDA supports a lot of C++11/14 features such as, `std::numeric_limits`, `std::nextafter`,
    `std::tuple` etc. in device code. Many of such features are possible because of the
    [--expt-relaxed-constexpr](https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#constexpr-functions)
    nvcc flag. There is a known [issue](https://github.com/ROCm-Developer-Tools/HIP/issues/374)
@@ -724,7 +775,7 @@ static_assert(std::is_same(A*, decltype(A::singleton()))::value, "hmm");
   we have AliasAnalysisKind::PURE_FUNCTION and not AliasAnalysisKind::PURE.
   The same is likely true for other identifiers that we just didn't try to use yet.
 
-### Running clang-tidy
+## Running clang-tidy
 
 [Clang-Tidy](https://clang.llvm.org/extra/clang-tidy/index.html) is a C++
 linter and static analysis tool based on the clang compiler. We run clang-tidy
@@ -755,7 +806,7 @@ root folder if you used `setup.py build`. You can use `-c <clang-tidy-binary>`
 to change the clang-tidy this script uses. Make sure you have PyYaml installed,
 which is in PyTorch's `requirements.txt`.
 
-### Pre-commit tidy/linting hook
+## Pre-commit tidy/linting hook
 
 We use clang-tidy and flake8 (installed with flake8-bugbear,
 flake8-comprehensions, flake8-mypy, and flake8-pyi) to perform additional
@@ -770,7 +821,7 @@ You'll need to install an appropriately configured flake8; see
 [Lint as you type](https://github.com/pytorch/pytorch/wiki/Lint-as-you-type)
 for documentation on how to do this.
 
-### Building PyTorch with ASAN
+## Building PyTorch with ASAN
 
 [ASAN](https://github.com/google/sanitizers/wiki/AddressSanitizer) is very
 useful for debugging memory errors in C++. We run it in CI, but here's how to
@@ -796,7 +847,7 @@ build_with_asan()
   LDFLAGS="-stdlib=libstdc++" \
   CFLAGS="-fsanitize=address -fno-sanitize-recover=all -shared-libasan -pthread" \
   CXX_FLAGS="-pthread" \
-  NO_CUDA=1 USE_OPENMP=0 BUILD_CAFFE2_OPS=0 NO_DISTRIBUTED=1 DEBUG=1 \
+  USE_CUDA=0 USE_OPENMP=0 BUILD_CAFFE2_OPS=0 USE_DISTRIBUTED=0 DEBUG=1 \
   python setup.py develop
 }
 
@@ -818,7 +869,7 @@ suo-devfair ~/pytorch ❯ build_with_asan
 suo-devfair ~/pytorch ❯ run_with_asan python test/test_jit.py
 ```
 
-#### Getting `ccache` to work
+### Getting `ccache` to work
 
 The scripts above specify the `clang` and `clang++` binaries directly, which
 bypasses `ccache`. Here's how to get `ccache` to work:
@@ -829,7 +880,7 @@ bypasses `ccache`. Here's how to get `ccache` to work:
 3. Change the `CC` and `CXX` variables in `build_with_asan()` to point
    directly to `clang` and `clang++`.
 
-#### Why this stuff with `LD_PRELOAD` and `LIBASAN_RT`?
+### Why this stuff with `LD_PRELOAD` and `LIBASAN_RT`?
 
 The “standard” workflow for ASAN assumes you have a standalone binary:
 
@@ -850,7 +901,7 @@ workaround for cases like this:
 More information can be found
 [here](https://github.com/google/sanitizers/wiki/AddressSanitizerAsDso).
 
-#### Why LD_PRELOAD in the build function?
+### Why LD_PRELOAD in the build function?
 
 We need `LD_PRELOAD` because there is a cmake check that ensures that a
 simple program builds and runs. If we are building with ASAN as a shared
@@ -859,7 +910,7 @@ dynamic linker errors and the check will fail.
 
 We don’t actually need either of these if we fix the cmake checks.
 
-#### Why no leak detection?
+### Why no leak detection?
 
 Python leaks a lot of memory. Possibly we could configure a suppression file,
 but we haven’t gotten around to it.

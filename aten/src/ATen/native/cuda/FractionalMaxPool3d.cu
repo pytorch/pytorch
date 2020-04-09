@@ -9,6 +9,7 @@
 #include <ATen/TensorUtils.h>
 #include <ATen/Utils.h>
 #include <c10/util/Exception.h>
+#include <THC/THCAtomics.cuh>
 
 #include <algorithm>
 #include <cfloat>
@@ -135,7 +136,7 @@ __global__ void fractional_max_pool3d_backward_out_frame(
       gradInput.size(4));
     assert(inputT < gradInput.size(2));
 
-    atomicAdd(
+    gpuAtomicAdd(
       &gradInput[batch][plane][inputT][inputH][inputW],
       gradOutput[batch][plane][outputT][outputH][outputW]
       );
@@ -244,9 +245,7 @@ void fractional_max_pool3d_out_cuda_template(
         );
       }
     );
-    TORCH_CHECK(cudaGetLastError() == cudaSuccess,
-          "fractional_max_pool2d_out_cuda_template failed with error code ",
-          cudaGetLastError());
+    AT_CUDA_CHECK(cudaGetLastError()); 
   }
 
 void fractional_max_pool3d_backward_out_cuda_template(
@@ -332,9 +331,7 @@ void fractional_max_pool3d_backward_out_cuda_template(
         );
       }
     );
-    TORCH_CHECK(cudaGetLastError() == cudaSuccess,
-          "fractional_max_pool2d_out_cuda_template failed with error code ",
-          cudaGetLastError());
+    AT_CUDA_CHECK(cudaGetLastError()); 
   }
 
 }// namespace

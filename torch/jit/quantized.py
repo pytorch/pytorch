@@ -2,8 +2,7 @@ import torch
 
 from torch._jit_internal import Tuple, Optional, List  # noqa: F401
 
-from torch import Tensor  # noqa: F401
-from torch.nn import _VF
+from torch import Tensor, _VF  # noqa: F401
 
 from torch.nn.utils.rnn import PackedSequence
 
@@ -237,10 +236,10 @@ class QuantizedGRUCell(QuantizedRNNCellBase):
         )
 
 
-@torch.jit.script
 def apply_permutation(tensor, permutation, dim=1):
     # type: (Tensor, Tensor, int) -> Tensor
     return tensor.index_select(dim, permutation)
+
 
 class QuantizedRNNBase(torch.jit.ScriptModule):
     __constants__ = ['mode', 'input_size', 'hidden_size', 'num_layers', 'bias',

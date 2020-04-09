@@ -71,7 +71,7 @@ class CAFFE2_API BaseContext {
   template <typename T>
   inline void CopySameDevice(size_t n, const T* src, T* dst) {
     static_assert(
-        std::is_fundamental<T>::value,
+        c10::guts::is_fundamental<T>::value,
         "CopySameDevice requires fundamental types");
     CopyBytesSameDevice(
         n * sizeof(T), static_cast<const void*>(src), static_cast<void*>(dst));
@@ -80,7 +80,7 @@ class CAFFE2_API BaseContext {
   template <typename T>
   inline void CopyFromCPU(size_t n, const T* src, T* dst) {
     static_assert(
-        std::is_fundamental<T>::value,
+        c10::guts::is_fundamental<T>::value,
         "CopyFromCPU requires fundamental types");
     CopyBytesFromCPU(
         n * sizeof(T), static_cast<const void*>(src), static_cast<void*>(dst));
@@ -89,7 +89,7 @@ class CAFFE2_API BaseContext {
   template <typename T>
   inline void CopyToCPU(size_t n, const T* src, T* dst) {
     static_assert(
-        std::is_fundamental<T>::value, "CopyToCPU requires fundamental types");
+        c10::guts::is_fundamental<T>::value, "CopyToCPU requires fundamental types");
     CopyBytesToCPU(
         n * sizeof(T), static_cast<const void*>(src), static_cast<void*>(dst));
   }

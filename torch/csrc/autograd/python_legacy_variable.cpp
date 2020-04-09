@@ -6,7 +6,7 @@
 #include <torch/csrc/autograd/python_function.h>
 #include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/tensor/python_tensor.h>
-#include <torch/csrc/jit/tracer.h>
+#include <torch/csrc/jit/frontend/tracer.h>
 
 using namespace at;
 
@@ -46,11 +46,11 @@ static PyObject *THPVariable_pynew(PyTypeObject* type, PyObject *args, PyObject 
   if (!data || data == Py_None) {
     // For legacy serialization code, create an empty tensor. This is also used
     // by nn.Parameter() with no arguments.
-    auto type_id = torch::tensors::get_default_tensor_type_id();
+    auto type_id = torch::tensors::get_default_dispatch_key();
     auto scalar_type = torch::tensors::get_default_scalar_type();
     auto options = TensorOptions(scalar_type)
         .device(computeDeviceType(type_id))
-        .layout(layout_from_backend(tensorTypeIdToBackend(type_id)));
+        .layout(layout_from_backend(dispatchKeyToBackend(type_id)));
     var = at::empty({0}, options);
   } else if (THPVariable_Check(data)) {
     var = ((THPVariable*)data)->cdata.detach();

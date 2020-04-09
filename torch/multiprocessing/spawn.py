@@ -4,6 +4,7 @@ import multiprocessing
 import multiprocessing.connection
 import signal
 import sys
+import warnings
 
 from . import _prctl_pr_set_pdeathsig
 
@@ -182,13 +183,18 @@ def spawn(fn, args=(), nprocs=1, join=True, daemon=False, start_method='spawn'):
         join (bool): Perform a blocking join on all processes.
         daemon (bool): The spawned processes' daemon flag. If set to True,
                        daemonic processes will be created.
-        start_method (string): The multiprocessing start method to be used
-            to create new processes. It CUDA is available and used, it must
-            be set to ``spawn``.
+        start_method (string): (deprecated) this method will always use ``spawn``
+                               as the start method. To use a different start method
+                               use ``start_processes()``.
 
     Returns:
         None if ``join`` is ``True``,
         :class:`~ProcessContext` if ``join`` is ``False``
 
     """
+    if start_method != 'spawn':
+        msg = ('This method only supports start_method=spawn (got: %s).\n'
+               'To use a different start_method use:\n\t\t'
+               ' torch.multiprocessing.start_process(...)' % start_method)
+        warnings.warn(msg)
     return start_processes(fn, args, nprocs, join, daemon, start_method='spawn')

@@ -5,6 +5,7 @@ from sys import maxsize
 import torch
 import torch.onnx.symbolic_helper as sym_help
 import warnings
+import numpy
 
 from torch.onnx.symbolic_helper import parse_args, _unimplemented
 from torch.onnx.symbolic_opset9 import expand
@@ -20,7 +21,7 @@ from torch.nn.modules.utils import _single, _pair, _triple
 @parse_args('v', 'f', 'f')
 def hardtanh(g, self, min_val, max_val):
     dtype = self.type().scalarType()
-    if dtype is not None:
+    if dtype is None:
         dtype = 6  # float
     else:
         dtype = sym_help.scalar_type_to_onnx.index(sym_help.cast_pytorch_to_onnx[dtype])
@@ -42,6 +43,12 @@ def clamp(g, self, min, max):
         min = _cast_if_not_none(min, dtype)
         max = _cast_if_not_none(max, dtype)
     return g.op("Clip", self, min, max)
+
+
+# Opset 11 gather accepts negative indices
+@parse_args('v', 'i', 'v')
+def select(g, self, dim, index):
+    return g.op("Gather", self, index, axis_i=dim)
 
 
 def index_put(g, self, indices_list_value, values, accumulate=False):
@@ -136,7 +143,7 @@ upsample_trilinear3d = _interpolate('upsample_trilinear3d', 5, "linear")
 upsample_bicubic2d = _interpolate('upsample_bicubic2d', 4, "cubic")
 
 
-def __interpolate(g, input, size, scale_factor, mode, align_corners, use_scale_factor):
+def __interpolate(g, input, size, scale_factor, mode, align_corners, recompute_scale_factor):
     mode = sym_help._maybe_get_const(mode, 's')
     if 'linear' in mode:
         mode = 'linear'
@@ -248,7 +255,12 @@ def _len(g, self):
 
 
 def __getitem_(g, self, i):
-    return g.op("SequenceAt", self, i)
+    if self.type().isSubtypeOf(torch._C.ListType.ofTensors()):
+        # SequenceAt requires that the input be a List of Tensors
+        return g.op("SequenceAt", self, i)
+    else:
+        from torch.onnx.symbolic_opset9 import __getitem_ as getitem
+        return getitem(g, self, i)
 
 
 def append(g, self, tensor):
@@ -291,6 +303,8 @@ def _avg_pool(name, tuple_fn):
     @parse_args('v', 'is', 'is', 'is', 'i', 'i', 'none')
     def symbolic_fn(g, input, kernel_size, stride, padding, ceil_mode, count_include_pad, divisor_override=None):
         padding = sym_help._avgpool_helper(tuple_fn, padding, kernel_size, stride, divisor_override, name)
+        if not stride:
+            stride = kernel_size
         if count_include_pad:
             input = g.op("Pad", input,
                          g.op("Constant", value_t=torch.tensor(((0,) * 2 + padding) * 2)), mode_s='constant')
@@ -327,6 +341,14 @@ def sort(g, self, dim, decending, out=None):
 
 def round(g, self):
     return g.op("Round", self)
+
+
+@parse_args('v', 'v', 'i')
+def split_with_sizes(g, self, split_sizes, dim):
+    if sym_help._is_value(split_sizes) and split_sizes.node().kind() == 'prim::ListConstruct':
+        return g.op("SplitToSequence", self, split_sizes, axis_i=dim)
+    else:
+        return torch.onnx.symbolic_opset9.split_with_sizes(g, self, split_sizes, dim)
 
 
 # Generate paddings in ONNX order based on pad in pytorch.
@@ -433,7 +455,9 @@ def _dim_arange(g, like, dim):
     return arange(g, stop, 4, None, None, None)
 
 
-def size(g, self, dim):
+def size(g, self, dim=None):
+    if dim is None:
+        return g.op("Shape", self)
     return sym_help._size_helper(g, self, dim)
 
 
@@ -512,6 +536,101 @@ def __lshift_(g, self, other):
 
     lshift = g.op('Mul', self, two_pow)
     return lshift
+
+
+def _get_im2col_indices_along_dim(g, input_d, kernel_size_d, dilation_d, padding_d, stride_d):
+    # Input is always 4-D (N, C, H, W)
+    # Calculate indices of sliding blocks along spatial dimension
+    # Slide kernel over input each dim d:
+    # each dimension d ranges from 0 to input[d]+2xpadding[d]-dilation[d]x(kernel_size[d]-1)
+    # with steps = stride
+
+    blocks_d = g.op("Add", input_d, g.op("Constant", value_t=torch.tensor(padding_d * 2)))
+    blocks_d = g.op("Sub", blocks_d, g.op("Constant", value_t=torch.tensor(dilation_d * (kernel_size_d - 1))))
+
+    # Stride kernel over input and find starting indices along dim d
+    blocks_d_indices = g.op("Range", g.op("Constant", value_t=torch.tensor(0)),
+                            blocks_d, g.op("Constant", value_t=torch.tensor(stride_d)))
+
+    # Apply dilation on kernel and find its indices along dim d
+    kernel_grid = numpy.arange(0, kernel_size_d * dilation_d, dilation_d)
+    kernel_grid = g.op("Constant", value_t=torch.tensor([kernel_grid]))
+
+    # Broadcast and add kernel staring positions (indices) with
+    # kernel_grid along dim d, to get block indices along dim d
+    blocks_d_indices = g.op('Unsqueeze', blocks_d_indices, axes_i=[0])  # Reshape to [1, -1]
+    kernel_mask = g.op('Reshape', kernel_grid, g.op('Constant', value_t=torch.tensor([-1, 1])))
+    block_mask = g.op("Add", blocks_d_indices, kernel_mask)
+
+    return block_mask
+
+
+def _get_im2col_padded_input(g, input, padding_h, padding_w):
+    # Input is always 4-D tensor (N, C, H, W)
+    # Padding tensor has the following format: (padding_h, padding_w)
+    # Reshape the padding to follow ONNX format: (dim1_begin, dim2_begin,...,dim1_end, dim2_end,...)
+    pad = g.op("Constant", value_t=torch.LongTensor([0, 0, padding_h, padding_w] * 2))
+    return g.op("Pad", input, pad)
+
+
+def _get_im2col_output_shape(g, input, kernel_h, kernel_w):
+    batch_dim = size(g, input, g.op("Constant", value_t=torch.tensor(0)))
+    channel_dim = size(g, input, g.op("Constant", value_t=torch.tensor(1)))
+    channel_unfolded = g.op("Mul", channel_dim,
+                            g.op("Constant", value_t=torch.tensor(kernel_h * kernel_w)))
+
+    return g.op("Concat",
+                g.op("Unsqueeze", batch_dim, axes_i=[0]),
+                g.op("Unsqueeze", channel_unfolded, axes_i=[0]),
+                g.op("Constant", value_t=torch.tensor([-1])), axis_i=0)
+
+
+@parse_args('v', 'is', 'is', 'is', 'is')
+def im2col(g, input, kernel_size, dilation, padding, stride):
+    # Input is always 4-D tensor (N, C, H, W)
+    # All other args are int[2]
+
+    input_h = size(g, input, g.op("Constant", value_t=torch.tensor(2)))
+    input_w = size(g, input, g.op("Constant", value_t=torch.tensor(3)))
+
+    stride_h, stride_w = stride[0], stride[1]
+    padding_h, padding_w = padding[0], padding[1]
+    dilation_h, dilation_w = dilation[0], dilation[1]
+    kernel_h, kernel_w = kernel_size[0], kernel_size[1]
+
+    blocks_row_indices = _get_im2col_indices_along_dim(g, input_h, kernel_h, dilation_h, padding_h, stride_h)
+    blocks_col_indices = _get_im2col_indices_along_dim(g, input_w, kernel_w, dilation_w, padding_w, stride_w)
+
+    output_shape = _get_im2col_output_shape(g, input, kernel_h, kernel_w)
+    padded_input = _get_im2col_padded_input(g, input, padding_h, padding_w)
+
+    # For a 4D matrix of size (1, 1, 3, 3) as below with kernel_size=2, stride=1, and dilation=1
+    # [[[[1., 2., 3.,],
+    #    [4., 5., 6.,],
+    #    [7., 8., 9.,]]]]
+    # First gather indices along rows (dim=2) with blocks_row_indices = [[0,1], [1,2]] to get:
+    # [[[[[1., 2., 3.],
+    #     [4., 5., 6.]],
+    #    [[4., 5., 6.],
+    #     [7., 8., 9.]]]]]
+    # And then gather along cols (dim=4) with blocks_row_indices = [[0,1], [1,2]] to get:
+    # [[[[[[1., 2.],
+    #      [4., 5.]],
+    #     [[2., 3.],
+    #      [5., 6]]],
+    #    [[[4., 5.],
+    #      [7., 8.]],
+    #     [[5., 6.],
+    #      [8., 9.]]]]]]
+    # Transpose dims 3 (depth) and 4 (rows), and then reshape to output shape (1, 1, 4, 4) to get:
+    #  [[[1., 2., 4., 5.],
+    #    [2., 3., 5., 6.],
+    #    [4., 5., 7., 8.],
+    #    [5., 6., 8., 9.]]]
+    output = g.op("Gather", padded_input, blocks_row_indices, axis_i=2)
+    output = g.op("Gather", output, blocks_col_indices, axis_i=4)
+    output = g.op("Transpose", output, perm_i=[0, 1, 2, 4, 3, 5])
+    return g.op("Reshape", output, output_shape)
 
 
 @parse_args('v', 'i', 'i')

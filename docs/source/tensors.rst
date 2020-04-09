@@ -103,8 +103,11 @@ A tensor can be created with :attr:`requires_grad=True` so that
             [ 2.0000,  2.0000]])
 
 Each tensor has an associated :class:`torch.Storage`, which holds its data.
-The tensor class provides multi-dimensional, `strided <https://en.wikipedia.org/wiki/Stride_of_an_array>`_
+The tensor class also provides multi-dimensional, `strided <https://en.wikipedia.org/wiki/Stride_of_an_array>`_
 view of a storage and defines numeric operations on it.
+
+.. note::
+   For more information on tensor views, see :ref:`tensor-view-doc`.
 
 .. note::
    For more information on the :class:`torch.dtype`, :class:`torch.device`, and
@@ -146,6 +149,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: new_zeros
 
    .. autoattribute:: is_cuda
+   .. autoattribute:: is_quantized
    .. autoattribute:: device
    .. autoattribute:: grad
       :noindex:
@@ -193,6 +197,10 @@ view of a storage and defines numeric operations on it.
    .. automethod:: bincount
    .. automethod:: bitwise_not
    .. automethod:: bitwise_not_
+   .. automethod:: bitwise_and
+   .. automethod:: bitwise_and_
+   .. automethod:: bitwise_or
+   .. automethod:: bitwise_or_
    .. automethod:: bitwise_xor
    .. automethod:: bitwise_xor_
    .. automethod:: bmm
@@ -219,6 +227,8 @@ view of a storage and defines numeric operations on it.
    .. automethod:: cpu
    .. automethod:: cross
    .. automethod:: cuda
+   .. automethod:: cummax
+   .. automethod:: cummin
    .. automethod:: cumprod
    .. automethod:: cumsum
    .. automethod:: data_ptr
@@ -267,6 +277,8 @@ view of a storage and defines numeric operations on it.
    .. automethod:: float
    .. automethod:: floor
    .. automethod:: floor_
+   .. automethod:: floor_divide
+   .. automethod:: floor_divide_
    .. automethod:: fmod
    .. automethod:: fmod_
    .. automethod:: frac
@@ -284,7 +296,6 @@ view of a storage and defines numeric operations on it.
    .. automethod:: hardshrink
    .. automethod:: histc
    .. automethod:: ifft
-   .. automethod:: imag
    .. automethod:: index_add_
    .. automethod:: index_add
    .. automethod:: index_copy_
@@ -300,6 +311,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: inverse
    .. automethod:: irfft
    .. automethod:: is_contiguous
+   .. automethod:: is_complex
    .. automethod:: is_floating_point
    .. autoattribute:: is_leaf
       :noindex:
@@ -400,7 +412,6 @@ view of a storage and defines numeric operations on it.
       :noindex:
    .. automethod:: remainder
    .. automethod:: remainder_
-   .. automethod:: real
    .. automethod:: renorm
    .. automethod:: renorm_
    .. automethod:: repeat
@@ -482,6 +493,8 @@ view of a storage and defines numeric operations on it.
    .. automethod:: tril_
    .. automethod:: triu
    .. automethod:: triu_
+   .. automethod:: true_divide
+   .. automethod:: true_divide_
    .. automethod:: trunc
    .. automethod:: trunc_
    .. automethod:: type

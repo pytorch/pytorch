@@ -17,7 +17,6 @@ set(C10_USE_GFLAGS ${USE_GFLAGS}) # used in cmake_macros.h.in
 set(C10_USE_GLOG ${USE_GLOG}) # used in cmake_macros.h.in
 set(C10_BUILD_SHARED_LIBS ${BUILD_SHARED_LIBS}) # used in cmake_macros.h.in
 set(C10_USE_NUMA ${USE_NUMA})
-set(C10_DISABLE_NUMA ${CAFFE2_DISABLE_NUMA}) # used in cmake_macros.h.in
 configure_file(
     ${CMAKE_CURRENT_LIST_DIR}/macros/cmake_macros.h.in
     ${CMAKE_BINARY_DIR}/c10/macros/cmake_macros.h)
@@ -29,6 +28,7 @@ file(GLOB C10_SRCS
         *.cpp
         core/*.cpp
         core/boxing/*.cpp
+        core/boxing/impl/*.cpp
         core/dispatch/*.cpp
         core/op_registration/*.cpp
         core/impl/*.cpp
@@ -41,34 +41,30 @@ add_library(c10 ${C10_SRCS} ${C10_HEADERS})
 # If building shared library, set dllimport/dllexport proper.
 target_compile_options(c10 PRIVATE "-DC10_BUILD_MAIN_LIB")
 # Enable hidden visibility if compiler supports it.
-if (${COMPILER_SUPPORTS_HIDDEN_VISIBILITY})
+if(${COMPILER_SUPPORTS_HIDDEN_VISIBILITY})
   target_compile_options(c10 PRIVATE "-fvisibility=hidden")
 endif()
 
 # ---[ Dependency of c10
-if (${USE_GFLAGS})
+if(${USE_GFLAGS})
    target_link_libraries(c10 PUBLIC gflags)
 endif()
 
-if (${USE_GLOG})
+if(${USE_GLOG})
     target_link_libraries(c10 PUBLIC glog::glog)
 endif()
 
-if (USE_NUMA)
-  if (NOT CAFFE2_DISABLE_NUMA)
-    message(STATUS "NUMA paths:")
-    message(STATUS ${Numa_INCLUDE_DIR})
-    message(STATUS ${Numa_LIBRARIES})
-    include_directories(SYSTEM ${Numa_INCLUDE_DIR})
-    target_link_libraries(c10 PRIVATE ${Numa_LIBRARIES})
-  else()
-    message(STATUS "NUMA is disabled")
-  endif()
+if(USE_NUMA)
+  message(STATUS "NUMA paths:")
+  message(STATUS ${Numa_INCLUDE_DIR})
+  message(STATUS ${Numa_LIBRARIES})
+  include_directories(SYSTEM ${Numa_INCLUDE_DIR})
+  target_link_libraries(c10 PRIVATE ${Numa_LIBRARIES})
 else()
   message(STATUS "don't use NUMA")
 endif()
 
-if (ANDROID)
+if(ANDROID)
     target_link_libraries(c10 PRIVATE log)
 endif()
 
@@ -102,6 +98,6 @@ install(DIRECTORY ${CMAKE_CURRENT_LIST_DIR}
 install(FILES ${CMAKE_BINARY_DIR}/c10/macros/cmake_macros.h
         DESTINATION include/c10/macros)
 
-if (MSVC AND C10_BUILD_SHARED_LIBS)
+if(MSVC AND C10_BUILD_SHARED_LIBS)
   install(FILES $<TARGET_PDB_FILE:c10> DESTINATION lib OPTIONAL)
 endif()

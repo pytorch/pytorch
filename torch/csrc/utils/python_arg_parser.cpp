@@ -74,6 +74,8 @@ static bool should_allow_numbers_as_tensors(const std::string& name) {
     "div", "div_", "div_out",
     "mul", "mul_", "mul_out",
     "sub", "sub_", "sub_out",
+    "true_divide", "true_divide_", "true_divide_out",
+    "floor_divide", "floor_divide_", "floor_divide_out"
   };
   return allowed.find(name) != allowed.end();
 }
@@ -129,6 +131,55 @@ FunctionParameter::FunctionParameter(const std::string& fmt, bool keyword_only)
       numpy_python_names.push_back(THPUtils_internString(str));
     }
   }
+}
+
+auto handle_torch_function(PythonArgs &r, PyObject* args, PyObject* kwargs, PyObject* torch_api, const char* module_name) -> PyObject* {
+  py::object torch_api_function = PyObject_FastGetAttrString(torch_api, (char*)r.get_func_name().c_str());
+  TORCH_INTERNAL_ASSERT(torch_api_function.ptr() != nullptr, "torch API function must exist");
+  py::object ret;
+
+  // overloaded_args already all have unique types
+  std::vector<py::object> overloaded_types;
+  overloaded_types.reserve(r.signature.overloaded_args.size());
+  for (auto &arg : r.signature.overloaded_args) {
+    overloaded_types.push_back(py::reinterpret_borrow<py::object>((PyObject *) Py_TYPE(arg.ptr())));
+  }
+  py::tuple py_types = py::cast(overloaded_types);
+
+  for (auto &arg : r.signature.overloaded_args) {
+    py::object torch_function = PyObject_FastGetAttrString(arg.ptr(), "__torch_function__");
+    ret = py::reinterpret_steal<py::object>(PyObject_CallFunctionObjArgs(torch_function.ptr(), torch_api_function.ptr(), py_types.ptr(), args, kwargs, NULL));
+    if (ret.ptr() != Py_NotImplemented) {
+      // Return the reference to the result. This also covers the case where ret
+      // is NULL and __torch_function__ raised an exception, which we throw below
+      break;
+    }
+  }
+  if (ret.ptr() == nullptr) {
+    // if an exception occurred in a user's implementation of
+    // __array_function__, throw it
+    throw python_error();
+  }
+  else if (ret.ptr() == Py_NotImplemented) {
+    // all __torch_function__ implementations in overloaded_args
+    // returned NotImplemented, so we raise a TypeError.
+    std::stringstream ss;
+    ss << "no implementation found for '" << module_name << "." << r.get_func_name()
+       << "' on types that implement __torch_function__: [";
+    for (auto &arg : r.signature.overloaded_args) {
+      ss << arg.ptr()->ob_type->tp_name;
+      if (!arg.is(r.signature.overloaded_args.back())) {
+        ss << ", ";
+      }
+      else {
+        ss << "]";
+      }
+    }
+    const std::string& tmp = ss.str();
+    PyErr_SetString(PyExc_TypeError, tmp.c_str());
+    throw python_error();
+  }
+  return ret.release().ptr();
 }
 
 /*
@@ -373,11 +424,11 @@ void FunctionParameter::set_default_str(const std::string& str) {
     }
   } else if (type_ == ParameterType::LAYOUT) {
     if (str == "None") {
-      default_layout = nullptr;
+      TORCH_INTERNAL_ASSERT_DEBUG_ONLY(allow_none);
     } else if (str == "torch.strided") {
-      default_layout = torch::getLayout(at::Backend::CPU);
+      default_layout = at::Layout::Strided;
     } else if (str == "torch.sparse_coo") {
-      default_layout = torch::getLayout(at::Backend::SparseCPU);
+      default_layout = at::Layout::Sparse;
     } else {
       throw std::runtime_error("invalid default value for layout: " + str);
     }
@@ -392,10 +443,11 @@ void FunctionParameter::set_default_str(const std::string& str) {
   }
 }
 
-FunctionSignature::FunctionSignature(const std::string& fmt)
+FunctionSignature::FunctionSignature(const std::string& fmt, int index)
   : min_args(0)
   , max_args(0)
   , max_pos_args(0)
+  , index(index)
   , hidden(false)
   , deprecated(false)
 {
@@ -475,16 +527,17 @@ std::string FunctionSignature::toString() const {
 
 [[noreturn]]
 static void extra_args(const FunctionSignature& signature, ssize_t nargs) {
-  auto max_pos_args = signature.max_pos_args;
-  auto min_args = signature.min_args;
+  const long max_pos_args = signature.max_pos_args;
+  const long min_args = signature.min_args;
+  const long nargs_ = nargs;
   if (min_args != max_pos_args) {
-    throw TypeError("%s() takes from %d to %d positional arguments but %d were given",
-        signature.name.c_str(), min_args, max_pos_args, nargs);
+    throw TypeError("%s() takes from %ld to %ld positional arguments but %ld were given",
+        signature.name.c_str(), min_args, max_pos_args, nargs_);
   }
-  throw TypeError("%s() takes %d positional argument%s but %d %s given",
+  throw TypeError("%s() takes %ld positional argument%s but %ld %s given",
       signature.name.c_str(),
       max_pos_args, max_pos_args == 1 ? "" : "s",
-      nargs, nargs == 1 ? "was" : "were");
+      nargs_, nargs == 1 ? "was" : "were");
 }
 
 [[noreturn]]
@@ -630,8 +683,8 @@ bool FunctionSignature::parse(PyObject* args, PyObject* kwargs, PyObject* dst[],
             Py_TYPE(obj)->tp_name);
       } else {
         // foo(): argument 'other' (position 2) must be str, not int
-        throw TypeError("%s(): argument '%s' (position %d) must be %s, not %s",
-            name.c_str(), param.name.c_str(), arg_pos + 1,
+        throw TypeError("%s(): argument '%s' (position %ld) must be %s, not %s",
+            name.c_str(), param.name.c_str(), static_cast<long>(arg_pos + 1),
             param.type_name().c_str(), Py_TYPE(obj)->tp_name);
       }
     } else {
@@ -659,8 +712,10 @@ PythonArgParser::PythonArgParser(std::vector<std::string> fmts, bool traceable)
  : max_args(0)
  , traceable(traceable)
 {
+  int index = 0;
   for (auto& fmt : fmts) {
-    signatures_.emplace_back(fmt);
+    signatures_.emplace_back(fmt, index);
+    ++index;
   }
   for (auto& signature : signatures_) {
     if (signature.max_args > max_args) {
@@ -670,21 +725,45 @@ PythonArgParser::PythonArgParser(std::vector<std::string> fmts, bool traceable)
   if (signatures_.size() > 0) {
     function_name = signatures_[0].name;
   }
+
+  // Check deprecated signatures last
+  std::stable_partition(signatures_.begin(), signatures_.end(),
+    [](const FunctionSignature & sig) {
+      return !sig.deprecated;
+    });
+}
+
+void PythonArgParser::check_deprecated(const FunctionSignature & signature) {
+  if (signature.deprecated) {
+    auto msg = c10::str(
+      "This overload of ", signature.name, " is deprecated:\n\t",
+      signature.name, signature.toString());
+    auto signatures = get_signatures();
+    if (!signatures.empty()) {
+      msg += "\nConsider using one of the following signatures instead:";
+      for (const auto & sig : signatures) {
+        msg += "\n\t";
+        msg += signature.name;
+        msg += sig;
+      }
+    }
+    TORCH_WARN_ONCE(msg);
+  }
 }
 
 PythonArgs PythonArgParser::raw_parse(PyObject* args, PyObject* kwargs, PyObject* parsed_args[]) {
   if (signatures_.size() == 1) {
     auto& signature = signatures_[0];
     signature.parse(args, kwargs, parsed_args, true);
-    return PythonArgs(0, traceable, signature, parsed_args);
+    check_deprecated(signature);
+    return PythonArgs(traceable, signature, parsed_args);
   }
 
-  int i = 0;
   for (auto& signature : signatures_) {
     if (signature.parse(args, kwargs, parsed_args, false)) {
-      return PythonArgs(i, traceable, signature, parsed_args);
+      check_deprecated(signature);
+      return PythonArgs(traceable, signature, parsed_args);
     }
-    i++;
   }
 
   print_error(args, kwargs, parsed_args);
@@ -706,15 +785,19 @@ void PythonArgParser::print_error(PyObject* args, PyObject* kwargs, PyObject* pa
     signature.parse(args, kwargs, parsed_args, true);
   }
 
+  auto options = get_signatures();
+  auto msg = torch::format_invalid_args(args, kwargs, function_name + "()", options);
+  throw TypeError("%s", msg.c_str());
+}
+
+std::vector<std::string> PythonArgParser::get_signatures() const {
   std::vector<std::string> options;
   for (auto& signature : signatures_) {
     if (!signature.hidden) {
       options.push_back(signature.toString());
     }
   }
-
-  auto msg = torch::format_invalid_args(args, kwargs, function_name + "()", options);
-  throw TypeError("%s", msg.c_str());
+  return options;
 }
 
 at::Tensor PythonArgs::tensor_slow(int i) {

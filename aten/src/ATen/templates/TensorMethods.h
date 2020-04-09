@@ -15,7 +15,6 @@
 #include <ATen/TypeDefault.h>
 #include <ATen/CPUType.h>
 #include <ATen/QuantizedCPUType.h>
-#include <ATen/SparseCPUType.h>
 #endif
 
 namespace at {
@@ -92,6 +91,11 @@ inline const NamedTensorMeta* Tensor::get_named_tensor_meta() const {
 }
 
 inline bool Tensor::has_names() const {
+  // If a user is using unnamed tensors, then we can short-circuit right here.
+  // Otherwise, impl::has_names attempts to retrieve names.
+  if (!impl_->has_named_tensor_meta()) {
+    return false;
+  }
   return impl::has_names(unsafeGetTensorImpl());
 }
 

@@ -14,13 +14,13 @@ source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 # (2) build with NCCL and MPI
 # (3) build with only MPI
 # (4) build with neither
-if [[ "$BUILD_ENVIRONMENT" == *-xenial-cuda9-* ]]; then
+if [[ "$BUILD_ENVIRONMENT" == *-xenial-cuda10.1-* ]]; then
   # TODO: move this to Docker
   sudo apt-get -qq update
-  sudo apt-get -qq install --allow-downgrades --allow-change-held-packages libnccl-dev=2.2.13-1+cuda9.0 libnccl2=2.2.13-1+cuda9.0
+  sudo apt-get -qq install --allow-downgrades --allow-change-held-packages libnccl-dev=2.5.6-1+cuda10.1 libnccl2=2.5.6-1+cuda10.1
 fi
 
-if [[ "$BUILD_ENVIRONMENT" == *-xenial-cuda9*gcc7* ]] || [[ "$BUILD_ENVIRONMENT" == *-xenial-cuda9-* ]] || [[ "$BUILD_ENVIRONMENT" == *-trusty-py2.7.9* ]]; then
+if [[ "$BUILD_ENVIRONMENT" == *-xenial-cuda9*gcc7* ]] || [[ "$BUILD_ENVIRONMENT" == *-xenial-cuda10.1-* ]] || [[ "$BUILD_ENVIRONMENT" == *-trusty-py2.7.9* ]]; then
   # TODO: move this to Docker
   sudo apt-get -qq update
   if [[ "$BUILD_ENVIRONMENT" == *-trusty-py2.7.9* ]]; then
@@ -36,8 +36,12 @@ if [[ "$BUILD_ENVIRONMENT" == *-linux-xenial-py3-clang5-asan* ]]; then
   exec "$(dirname "${BASH_SOURCE[0]}")/build-asan.sh" "$@"
 fi
 
-if [[ "$BUILD_ENVIRONMENT" == *-linux-xenial-py3-clang5-mobile* ]]; then
+if [[ "$BUILD_ENVIRONMENT" == *-mobile-*build* ]]; then
   exec "$(dirname "${BASH_SOURCE[0]}")/build-mobile.sh" "$@"
+fi
+
+if [[ "$BUILD_ENVIRONMENT" == *-mobile-code-analysis* ]]; then
+  exec "$(dirname "${BASH_SOURCE[0]}")/build-mobile-code-analysis.sh" "$@"
 fi
 
 echo "Python version:"
@@ -49,15 +53,24 @@ gcc --version
 echo "CMake version:"
 cmake --version
 
+if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
+  echo "NVCC version:"
+  nvcc --version
+fi
+
 # TODO: Don't run this...
 pip_install -r requirements.txt || true
+
+# Enable LLVM dependency for TensorExpr testing
+export USE_LLVM=/opt/llvm
+export LLVM_DIR=/opt/llvm/lib/cmake/llvm
 
 # TODO: Don't install this here
 if ! which conda; then
   # In ROCm CIs, we are doing cross compilation on build machines with
   # intel cpu and later run tests on machines with amd cpu.
   # Also leave out two builds to make sure non-mkldnn builds still work.
-  if [[ "$BUILD_ENVIRONMENT" != *rocm* && "$BUILD_ENVIRONMENT" != *-trusty-py3.5-* && "$BUILD_ENVIRONMENT" != *-xenial-cuda9-cudnn7-py3-* ]]; then
+  if [[ "$BUILD_ENVIRONMENT" != *rocm* && "$BUILD_ENVIRONMENT" != *-trusty-py3.5-* && "$BUILD_ENVIRONMENT" != *-xenial-cuda10.1-cudnn7-py3-* ]]; then
     pip_install mkl mkl-devel
     export USE_MKLDNN=1
   else
@@ -96,7 +109,6 @@ if [[ "${BUILD_ENVIRONMENT}" == *-android* ]]; then
   elif [[ "${BUILD_ENVIRONMENT}" == *-x86_64* ]]; then
     build_args+=("-DANDROID_ABI=x86_64")
   fi
-  export BUILD_PYTORCH_MOBILE=1
   exec ./scripts/build_android.sh "${build_args[@]}" "$@"
 fi
 
@@ -168,75 +180,72 @@ if [[ "${BUILD_ENVIRONMENT}" == *clang* ]]; then
   export CXX=clang++
 fi
 
+if [[ "$BUILD_ENVIRONMENT" == *-bazel-* ]]; then
+  set -e
 
-# check that setup.py would fail with bad arguments
-echo "The next three invocations are expected to fail with invalid command error messages."
-( ! get_exit_code python setup.py bad_argument )
-( ! get_exit_code python setup.py clean] )
-( ! get_exit_code python setup.py clean bad_argument )
+  get_bazel
 
-if [[ "$BUILD_ENVIRONMENT" != *libtorch* ]]; then
-
-  # ppc64le build fails when WERROR=1
-  # set only when building other architectures
-  # only use for "python setup.py install" line
-  if [[ "$BUILD_ENVIRONMENT" != *ppc64le*  && "$BUILD_ENVIRONMENT" != *clang* ]]; then
-    WERROR=1 python setup.py install
-  else
-    python setup.py install
-  fi
-
-  # TODO: I'm not sure why, but somehow we lose verbose commands
-  set -x
-
-  if which sccache > /dev/null; then
-    echo 'PyTorch Build Statistics'
-    sccache --show-stats
-  fi
-
-  assert_git_not_dirty
-
-  # Test documentation build
-  if [[ "$BUILD_ENVIRONMENT" == *xenial-cuda9-cudnn7-py3* ]]; then
-    pushd docs
-    # TODO: Don't run this here
-    pip_install -r requirements.txt || true
-    LC_ALL=C make html
-    popd
-    assert_git_not_dirty
-  fi
-
-  # Build custom operator tests.
-  CUSTOM_OP_BUILD="$PWD/../custom-op-build"
-  CUSTOM_OP_TEST="$PWD/test/custom_operator"
-  python --version
-  SITE_PACKAGES="$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')"
-  mkdir "$CUSTOM_OP_BUILD"
-  pushd "$CUSTOM_OP_BUILD"
-  cmake "$CUSTOM_OP_TEST" -DCMAKE_PREFIX_PATH="$SITE_PACKAGES/torch" -DPYTHON_EXECUTABLE="$(which python)"
-  make VERBOSE=1
-  popd
-  assert_git_not_dirty
+  tools/bazel build :torch
 else
-  # Test standalone c10 build
-  if [[ "$BUILD_ENVIRONMENT" == *xenial-cuda9-cudnn7-py3* ]]; then
-    mkdir -p c10/build
-    pushd c10/build
-    cmake ..
-    make -j
+  # check that setup.py would fail with bad arguments
+  echo "The next three invocations are expected to fail with invalid command error messages."
+  ( ! get_exit_code python setup.py bad_argument )
+  ( ! get_exit_code python setup.py clean] )
+  ( ! get_exit_code python setup.py clean bad_argument )
+
+  if [[ "$BUILD_ENVIRONMENT" != *libtorch* ]]; then
+
+    # ppc64le build fails when WERROR=1
+    # set only when building other architectures
+    # only use for "python setup.py install" line
+    if [[ "$BUILD_ENVIRONMENT" != *ppc64le*  && "$BUILD_ENVIRONMENT" != *clang* ]]; then
+      WERROR=1 python setup.py install
+    else
+      python setup.py install
+    fi
+
+    # TODO: I'm not sure why, but somehow we lose verbose commands
+    set -x
+
+    if which sccache > /dev/null; then
+      echo 'PyTorch Build Statistics'
+      sccache --show-stats
+    fi
+
+    assert_git_not_dirty
+
+    # Build custom operator tests.
+    CUSTOM_OP_BUILD="$PWD/../custom-op-build"
+    CUSTOM_OP_TEST="$PWD/test/custom_operator"
+    python --version
+    SITE_PACKAGES="$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')"
+    mkdir "$CUSTOM_OP_BUILD"
+    pushd "$CUSTOM_OP_BUILD"
+    cmake "$CUSTOM_OP_TEST" -DCMAKE_PREFIX_PATH="$SITE_PACKAGES/torch" -DPYTHON_EXECUTABLE="$(which python)"
+    make VERBOSE=1
     popd
     assert_git_not_dirty
-  fi
+  else
+    # Test standalone c10 build
+    if [[ "$BUILD_ENVIRONMENT" == *xenial-cuda10.1-cudnn7-py3* ]]; then
+      mkdir -p c10/build
+      pushd c10/build
+      cmake ..
+      make -j
+      popd
+      assert_git_not_dirty
+    fi
 
-  # Test no-Python build
-  echo "Building libtorch"
-  # NB: Install outside of source directory (at the same level as the root
-  # pytorch folder) so that it doesn't get cleaned away prior to docker push.
-  BUILD_LIBTORCH_PY=$PWD/tools/build_libtorch.py
-  mkdir -p ../cpp-build/caffe2
-  pushd ../cpp-build/caffe2
-  WERROR=1 VERBOSE=1 DEBUG=1 python $BUILD_LIBTORCH_PY
-  popd
+    # Test no-Python build
+    echo "Building libtorch"
+    # NB: Install outside of source directory (at the same level as the root
+    # pytorch folder) so that it doesn't get cleaned away prior to docker push.
+    BUILD_LIBTORCH_PY=$PWD/tools/build_libtorch.py
+    mkdir -p ../cpp-build/caffe2
+    pushd ../cpp-build/caffe2
+    WERROR=1 VERBOSE=1 DEBUG=1 python $BUILD_LIBTORCH_PY
+    popd
+  fi
 fi
 
 # Test XLA build
@@ -246,30 +255,24 @@ if [[ "${BUILD_ENVIRONMENT}" == *xla* ]]; then
   pip_install lark-parser
 
   # Bazel doesn't work with sccache gcc. https://github.com/bazelbuild/bazel/issues/3642
-  sudo add-apt-repository "deb http://apt.llvm.org/xenial/ llvm-toolchain-xenial-7 main"
+  sudo add-apt-repository "deb http://apt.llvm.org/xenial/ llvm-toolchain-xenial-8 main"
   wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key|sudo apt-key add -
   sudo apt-get -qq update
 
-  # Install clang-7 clang++-7 for xla
-  sudo apt-get -qq install clang-7 clang++-7
+  # Install clang-8 clang++-8 for xla
+  sudo apt-get -qq install clang-8 clang++-8
 
-  # Bazel dependencies
-  sudo apt-get -qq install pkg-config zip zlib1g-dev unzip
-  # XLA build requires Bazel
-  wget https://github.com/bazelbuild/bazel/releases/download/1.1.0/bazel-1.1.0-installer-linux-x86_64.sh
-  chmod +x bazel-*.sh
-  sudo ./bazel-*.sh
-  BAZEL="$(which bazel)"
-  if [ -z "${BAZEL}" ]; then
-    echo "Unable to find bazel..."
-    exit 1
-  fi
-
-  # Install bazels3cache for cloud cache
   sudo apt-get -qq install npm
   npm config set strict-ssl false
   curl -sL --retry 3 https://deb.nodesource.com/setup_6.x | sudo -E bash -
   sudo apt-get install -qq nodejs
+
+  # XLA build requires Bazel
+  # We use bazelisk to avoid updating Bazel version manually.
+  sudo npm install -g @bazel/bazelisk
+  sudo ln -s "$(command -v bazelisk)" /usr/bin/bazel
+
+  # Install bazels3cache for cloud cache
   sudo npm install -g bazels3cache
   BAZELS3CACHE="$(which bazels3cache)"
   if [ -z "${BAZELS3CACHE}" ]; then
@@ -279,7 +282,7 @@ if [[ "${BUILD_ENVIRONMENT}" == *xla* ]]; then
 
   bazels3cache --bucket=${XLA_CLANG_CACHE_S3_BUCKET_NAME} --maxEntrySizeBytes=0
   pushd xla
-  export CC=clang-7 CXX=clang++-7
+  export CC=clang-8 CXX=clang++-8
   # Use cloud cache to build when available.
   sed -i '/bazel build/ a --remote_http_cache=http://localhost:7777 \\' build_torch_xla_libs.sh
 

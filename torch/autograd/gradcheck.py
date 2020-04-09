@@ -4,12 +4,11 @@ import torch.testing
 from itertools import product
 import warnings
 
-
 def zero_gradients(x):
     if isinstance(x, torch.Tensor):
         if x.grad is not None:
             x.grad.detach_()
-            x.grad.data.zero_()
+            x.grad.zero_()
     elif isinstance(x, container_abcs.Iterable):
         for elem in x:
             zero_gradients(elem)
@@ -58,13 +57,14 @@ def get_numerical_jacobian(fn, input, target=None, eps=1e-3):
     # It's much easier to iterate over flattened lists of tensors.
     # These are reference to the same objects in jacobian, so any changes
     # will be reflected in it as well.
-    x_tensors = [t for t in iter_tensors(target, True)]
-    j_tensors = [t for t in iter_tensors(jacobian)]
+    x_tensors = iter_tensors(target, True)
+    j_tensors = iter_tensors(jacobian)
 
     # TODO: compare structure
     for x_tensor, d_tensor in zip(x_tensors, j_tensors):
-        # need data here to get around the version check because without .data,
-        # the following code updates version but doesn't change content
+        is_complex = x_tensor.dtype.is_complex
+        if is_complex:
+            eps *= (1 + 1j)
         if x_tensor.is_sparse:
             def get_stride(size):
                 dim = len(size)
@@ -78,8 +78,11 @@ def get_numerical_jacobian(fn, input, target=None, eps=1e-3):
             x_nnz = x_tensor._nnz()
             x_size = list(x_tensor.size())
             x_indices = x_tensor._indices().t()
-            x_values = x_tensor._values().data
+            x_values = x_tensor._values()
             x_stride = get_stride(x_size)
+
+            # Use .data here to get around the version check
+            x_values = x_values.data
 
             for i in range(x_nnz):
                 x_value = x_values[i]
@@ -93,12 +96,15 @@ def get_numerical_jacobian(fn, input, target=None, eps=1e-3):
                     outb = fn(input).clone()
                     x_value[x_idx] = orig
                     r = (outb - outa) / (2 * eps)
+                    if is_complex:
+                        r = r.abs()
                     d_tensor[d_idx] = r.detach().reshape(-1)
         elif x_tensor.layout == torch._mkldnn:
+            # Use .data here to get around the version check
+            x_tensor = x_tensor.data
             if len(input) != 1:
                 raise ValueError('gradcheck currently only supports functions with 1 input, but got: ',
                                  len(input))
-            x_tensor = x_tensor.data
             for d_idx, x_idx in enumerate(product(*[range(m) for m in x_tensor.size()])):
                 # this is really inefficient, but without indexing implemented, there's
                 # not really a better way than converting back and forth
@@ -114,8 +120,11 @@ def get_numerical_jacobian(fn, input, target=None, eps=1e-3):
                 outb = fn([x_tensor_mkl])
 
                 r = (outb - outa) / (2 * eps)
+                if is_complex:
+                    r = r.abs()
                 d_tensor[d_idx] = r.detach().reshape(-1)
         else:
+            # Use .data here to get around the version check
             x_tensor = x_tensor.data
             for d_idx, x_idx in enumerate(product(*[range(m) for m in x_tensor.size()])):
                 orig = x_tensor[x_idx].item()
@@ -125,6 +134,8 @@ def get_numerical_jacobian(fn, input, target=None, eps=1e-3):
                 outb = fn(input).clone()
                 x_tensor[x_idx] = orig
                 r = (outb - outa) / (2 * eps)
+                if is_complex:
+                    r = r.abs()
                 d_tensor[d_idx] = r.detach().reshape(-1)
 
     return jacobian

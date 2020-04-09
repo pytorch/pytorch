@@ -13,7 +13,7 @@ DOCKER_IMAGE_PATH_BASE = "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/"
 
 # ARE YOU EDITING THIS NUMBER?  MAKE SURE YOU READ THE GUIDANCE AT THE
 # TOP OF .circleci/config.yml
-DOCKER_IMAGE_VERSION = 405
+DOCKER_IMAGE_VERSION = "e43973a9-9d5a-4138-9181-a08a0fc55e2f"
 
 
 @dataclass
@@ -114,7 +114,7 @@ class Conf:
         if not self.is_important:
             # If you update this, update
             # caffe2_build_definitions.py too
-            job_def["filters"] = {"branches": {"only": ["master", r"/ci-all\/.*/"]}}
+            job_def["filters"] = {"branches": {"only": ["master", r"/ci-all\/.*/", r"/release\/.*/"]}}
         job_def.update(self.gen_workflow_params(phase))
 
         return {job_name : job_def}
@@ -160,6 +160,11 @@ def gen_dependent_configs(xenial_parent_config):
 
         configs.append(c)
 
+    return configs
+
+def gen_docs_configs(xenial_parent_config):
+    configs = []
+
     for x in ["pytorch_python_doc_push", "pytorch_cpp_doc_push"]:
         configs.append(HiddenConf(x, parent_build=xenial_parent_config))
 
@@ -182,9 +187,9 @@ def instantiate_configs():
 
     root = get_root()
     found_configs = conf_tree.dfs(root)
-    restrict_phases = None
     for fc in found_configs:
 
+        restrict_phases = None
         distro_name = fc.find_prop("distro_name")
         compiler_name = fc.find_prop("compiler_name")
         compiler_version = fc.find_prop("compiler_version")
@@ -221,7 +226,7 @@ def instantiate_configs():
                 python_version = fc.find_prop("pyver")
                 parms_list[0] = fc.find_prop("abbreviated_pyver")
 
-        if cuda_version in ["9.2", "10", "10.1"]:
+        if cuda_version in ["9.2", "10", "10.1", "10.2"]:
             # TODO The gcc version is orthogonal to CUDA version?
             parms_list.append("gcc7")
 
@@ -247,7 +252,16 @@ def instantiate_configs():
             parallel_backend=parallel_backend,
         )
 
-        if cuda_version == "9" and python_version == "3.6" and not is_libtorch:
+        # run docs builds on "pytorch-linux-xenial-py3.6-gcc5.4". Docs builds
+        # should run on a CPU-only build that runs on all PRs.
+        if distro_name == 'xenial' and fc.find_prop("pyver") == '3.6' \
+                and cuda_version is None \
+                and parallel_backend is None \
+                and compiler_name == 'gcc' \
+                and fc.find_prop('compiler_version') == '5.4':
+            c.dependent_tests = gen_docs_configs(c)
+
+        if cuda_version == "10.1" and python_version == "3.6" and not is_libtorch:
             c.dependent_tests = gen_dependent_configs(c)
 
         if (compiler_name == "gcc"
@@ -274,7 +288,7 @@ def get_workflow_jobs():
 
     config_list = instantiate_configs()
 
-    x = ["setup"]
+    x = []
     for conf_options in config_list:
 
         phases = conf_options.restrict_phases or dimensions.PHASES

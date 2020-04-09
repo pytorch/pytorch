@@ -105,7 +105,7 @@ public class IValue {
 
   @DoNotStrip
   public boolean isList() {
-    return TYPE_CODE_TENSOR_LIST == this.mTypeCode;
+    return TYPE_CODE_LIST == this.mTypeCode;
   }
 
   @DoNotStrip

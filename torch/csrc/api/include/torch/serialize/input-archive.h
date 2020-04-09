@@ -4,7 +4,7 @@
 #include <c10/core/Device.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/types.h>
-#include <torch/csrc/jit/script/module.h>
+#include <torch/csrc/jit/api/module.h>
 
 #include <iosfwd>
 #include <memory>
@@ -18,9 +18,7 @@ class Tensor;
 namespace torch {
 using at::Tensor;
 namespace jit {
-namespace script {
 struct Module;
-} // namespace script
 } // namespace jit
 } // namespace torch
 
@@ -47,6 +45,10 @@ class TORCH_API InputArchive final {
 
   /// Reads an `IValue` associated with a given `key`.
   void read(const std::string& key, c10::IValue& ivalue);
+
+  /// Reads an `IValue` associated with a given `key`. If there is no `IValue`
+  /// associated with the `key`, this returns false, otherwise it returns true.
+  bool try_read(const std::string& key, c10::IValue& ivalue);
 
   /// Reads a `tensor` associated with a given `key`. If there is no `tensor`
   /// associated with the `key`, this returns false, otherwise it returns true.
@@ -92,6 +94,9 @@ class TORCH_API InputArchive final {
        const std::function<size_t(void)>& size_func,
        c10::optional<torch::Device> device = c10::nullopt);
 
+  // Returns the vector of keys in the input archive.
+  std::vector<std::string> keys();
+
   /// Forwards all arguments to `read()`.
   /// Useful for generic code that can be re-used for both `InputArchive` and
   /// `OutputArchive` (where `operator()` forwards to `write()`).
@@ -101,7 +106,7 @@ class TORCH_API InputArchive final {
   }
 
  private:
-  jit::script::Module module_;
+  jit::Module module_;
   std::string hierarchy_prefix_;
 };
 } // namespace serialize

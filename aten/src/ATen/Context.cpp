@@ -141,6 +141,14 @@ const std::vector<at::QEngine>& Context::supportedQEngines() const {
   return supported_qengines;
 }
 
+bool Context::isXNNPACKAvailable() const {
+#ifdef USE_XNNPACK
+  return true;
+#else
+  return false;
+#endif
+}
+
 bool Context::setFlushDenormal(bool on) {
   return at::cpu::set_flush_denormal(on);
 }

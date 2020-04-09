@@ -93,7 +93,7 @@ def _build_test(configs, bench_op, OperatorTestCase, run_backward, op_name_funct
                 tags = attr["tags"]
                 continue
 
-            # if 'cuda' is sepcified in input shape but the testing machines doesn't
+            # if 'cuda' is specified in input shape but the testing machines doesn't
             # support, we will skip this input
             if 'cuda' in attr.values():
                 if not torch.cuda.is_available():

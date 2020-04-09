@@ -1,6 +1,8 @@
 // define constants like M_PI and C keywords for MSVC
 #ifdef _MSC_VER
+#ifndef _USE_MATH_DEFINES
 #define _USE_MATH_DEFINES
+#endif
 #include <math.h>
 #endif
 
@@ -71,11 +73,25 @@ Tensor& abs_(Tensor& self) { return unary_op_impl_(self, at::abs_out); }
 Tensor& angle_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, angle_stub); }
 Tensor angle(const Tensor& self) { return unary_op_impl(self, at::angle_out); }
 
-Tensor& real_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, real_stub); }
-Tensor real(const Tensor& self) { return unary_op_impl(self, at::real_out); }
+Tensor real(const Tensor& self) {
+  TORCH_CHECK(!self.is_complex(), "real is not yet implemented for complex tensors.");
+  return self;
+}
 
-Tensor& imag_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, imag_stub); }
-Tensor imag(const Tensor& self) { return unary_op_impl(self, at::imag_out); }
+Tensor imag(const Tensor& self) {
+  TORCH_CHECK(false, "imag is not yet implemented.");
+
+  // Note: unreachable
+  return at::zeros_like(self);
+}
+
+Tensor& copy_real_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, real_stub); }
+
+Tensor copy_real(const Tensor& self) { return unary_op_impl(self, at::copy_real_out); }
+
+Tensor& copy_imag_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, imag_stub); }
+
+Tensor copy_imag(const Tensor& self) { return unary_op_impl(self, at::copy_imag_out); }
 
 Tensor& conj_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, conj_stub); }
 Tensor conj(const Tensor& self) { return unary_op_impl(self, at::conj_out); }
@@ -84,7 +100,13 @@ Tensor& bitwise_not_out(Tensor& result, const Tensor& self) { return unary_op_im
 Tensor bitwise_not(const Tensor& self) { return unary_op_impl(self, at::bitwise_not_out); }
 Tensor& bitwise_not_(Tensor& self) { return unary_op_impl_(self, at::bitwise_not_out); }
 
-Tensor& ceil_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, ceil_stub); }
+Tensor& ceil_out(Tensor& result, const Tensor& self) {
+  // Note: this is consistent with NumPy
+  TORCH_CHECK(!self.is_complex(),
+    "ceil is not supported for complex inputs");
+
+  return unary_op_impl_out(result, self, ceil_stub);
+}
 Tensor ceil(const Tensor& self) { return unary_op_impl(self, at::ceil_out); }
 Tensor& ceil_(Tensor& self) { return unary_op_impl_(self, at::ceil_out); }
 
@@ -96,7 +118,13 @@ Tensor& frac_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(
 Tensor frac(const Tensor& self) { return unary_op_impl(self, at::frac_out); }
 Tensor& frac_(Tensor& self) { return unary_op_impl_(self, at::frac_out); }
 
-Tensor& floor_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, floor_stub); }
+Tensor& floor_out(Tensor& result, const Tensor& self) {
+  // Note: this is consistent with NumPy
+  TORCH_CHECK(!self.is_complex(),
+    "floor is not supported for complex inputs");
+
+  return unary_op_impl_out(result, self, floor_stub);
+}
 Tensor floor(const Tensor& self) { return unary_op_impl(self, at::floor_out); }
 Tensor& floor_(Tensor& self) { return unary_op_impl_(self, at::floor_out); }
 
@@ -155,7 +183,13 @@ Tensor& sigmoid_out(Tensor& result, const Tensor& self) { return unary_op_impl_o
 Tensor sigmoid(const Tensor& self) { return unary_op_impl(self, at::sigmoid_out);  }
 Tensor& sigmoid_(Tensor& self) { return unary_op_impl_(self, at::sigmoid_out);  }
 
-Tensor& trunc_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, trunc_stub); }
+Tensor& trunc_out(Tensor& result, const Tensor& self) {
+  // Note: this is consistent with NumPy
+  TORCH_CHECK(!self.is_complex(),
+    "trunc is not supported for complex inputs");
+
+  return unary_op_impl_out(result, self, trunc_stub);
+}
 Tensor trunc(const Tensor& self) { return unary_op_impl(self, at::trunc_out); }
 Tensor& trunc_(Tensor& self) { return unary_op_impl_(self, at::trunc_out); }
 
@@ -229,7 +263,10 @@ Tensor& _clamp_out_cpu(
     optional<Scalar> min,
     optional<Scalar> max) {
   if (min && max) {
-    checkBackend("clamp", result, Backend::CPU);
+    TORCH_CHECK(self.device().type() == DeviceType::CPU,
+                "clamp only supports CPU device type, got: ", self.device().type());
+    TORCH_CHECK(self.layout() == Layout::Strided,
+                "clamp only supports strided layout, got: ", self.layout());
     auto iter = TensorIterator::unary_op(result, self,
         /*check_mem_overlap=*/true);
     clamp_stub(iter.device_type(), iter, *min, *max);
@@ -248,7 +285,10 @@ Tensor& _clamp_max__cpu(Tensor& self, Scalar max) {
 }
 
 Tensor& _clamp_max_out_cpu(Tensor& result, const Tensor& self, Scalar max) {
-  checkBackend("clamp_max", result, Backend::CPU);
+  TORCH_CHECK(self.device().type() == DeviceType::CPU,
+              "clamp_max only supports CPU device type, got: ", self.device().type());
+  TORCH_CHECK(self.layout() == Layout::Strided,
+              "clamp_max only supports strided layout, got: ", self.layout());
   auto iter = TensorIterator::unary_op(result, self,
       /*check_mem_overlap=*/true);
   clamp_max_stub(iter.device_type(), iter, max);
@@ -260,30 +300,33 @@ Tensor& _clamp_min__cpu(Tensor& self, Scalar min) {
 }
 
 Tensor& _clamp_min_out_cpu(Tensor& result, const Tensor& self, Scalar min) {
-  checkBackend("clamp_min", result, Backend::CPU);
+  TORCH_CHECK(self.device().type() == DeviceType::CPU,
+              "clamp_min only supports CPU device type, got: ", self.device().type());
+  TORCH_CHECK(self.layout() == Layout::Strided,
+              "clamp_min only supports strided layout, got: ", self.layout());
   auto iter = TensorIterator::unary_op(result, self,
       /*check_mem_overlap=*/true);
   clamp_min_stub(iter.device_type(), iter, min);
   return result;
 }
 
-Tensor mvlgamma(const Tensor& self, int64_t p) {
+static inline void mvlgamma_check(const Tensor& self, int64_t p) {
   TORCH_CHECK(at::isFloatingType(self.scalar_type()),
-           "mvlgamma is not implemented for ", self.scalar_type());
-  TORCH_CHECK((self > 0.5 * (p - 1.)).all().item<uint8_t>(),
-           "Condition for computing multivariate log-gamma not met");
+              "mvlgamma is not implemented for ", self.scalar_type());
+  TORCH_CHECK((self > 0.5f * (p - 1)).all().item<bool>(),
+              "All elements must be greater than (p-1)/2");
   TORCH_CHECK(p >= 1, "p has to be greater than or equal to 1");
+}
+
+Tensor mvlgamma(const Tensor& self, int64_t p) {
+  mvlgamma_check(self, p);
   Tensor args = native::arange(-p / 2. + 0.5, 0.5, 0.5, self.options());
   args = args.add(self.unsqueeze(-1));
   return args.lgamma_().sum(-1).add_(p * (p - 1) * std::log(M_PI) / 4.);
 }
 
 Tensor& mvlgamma_(Tensor& self, int64_t p) {
-  TORCH_CHECK(at::isFloatingType(self.scalar_type()),
-           "mvlgamma is not implemented for ", self.scalar_type());
-  TORCH_CHECK((self > 0.5 * (p - 1.)).all().item<uint8_t>(),
-           "Condition for computing multivariate log-gamma not met");
-  TORCH_CHECK(p >= 1, "p has to be greater than or equal to 1");
+  mvlgamma_check(self, p);
   Tensor args = native::arange(-p / 2. + 0.5, 0.5, 0.5, self.options());
   args = args.add(self.unsqueeze(-1));
   return self.copy_(args.lgamma_().sum(-1).add_(p * (p - 1) * std::log(M_PI) / 4.));
