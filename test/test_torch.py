@@ -10318,9 +10318,9 @@ class TestTorchDeviceType(TestCase):
         b = torch.randn(5, 2, device=device, dtype=torch.float64)
         inplace_out = torch.zeros(5, 2, device=device, dtype=torch.float32)
         with self.assertRaisesRegex(
-                    RuntimeError,
-                    'expected scalar_type Double but found Float'):
-                torch.logcumsumexp(b, axis, out=inplace_out)
+                RuntimeError,
+                'expected scalar_type Double but found Float'):
+            torch.logcumsumexp(b, axis, out=inplace_out)
 
     def test_std_mean(self, device):
         x = torch.rand(100, 50, 20, device=device)
