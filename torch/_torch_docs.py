@@ -1402,8 +1402,10 @@ logcumsumexp(input, dim, out=None) -> Tensor
 Returns the logarithm of the cumulative summation of the exponentiation of
 elements of :attr:`input` in the dimension :attr:`dim`. 
 
+For summation index :math:`j` given by `dim` and other indices :math:`i`, the result is
+
 .. math::
-    \text{{logsumexp}}(x)_{{i}} = \log \sum_j \exp(x_{{ij}})
+    \text{{logcumsumexp}}(x)_{{i}} = \log \cumsum_j \exp(x_{{ij}})
 Args:
     {input}
     dim  (int): the dimension to do the operation over
