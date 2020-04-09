@@ -64,7 +64,7 @@ def _assert_int_or_pair(vals: List[int], name: str, message: str):
 // Implementations of historic symbol behaviors are defined here
 // See note [Versioned Symbols]
 auto subcmul_0_2 = R"SCRIPT(
-def _subcmul_0_2(self: Tensor, other:Tensor, alpha: number=1) -> Tensor:
+def _subcmul_0_2(self: Tensor, other:Tensor, alpha: number=2) -> Tensor:
   return other - (self * alpha)
 )SCRIPT";
 
