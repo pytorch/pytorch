@@ -1,5 +1,5 @@
-import benchmark
-import tensor_engine
+from . import benchmark
+from . import tensor_engine
 
 
 class NormalizationBench(benchmark.Benchmark):

@@ -423,6 +423,9 @@
 - name: imag(Tensor self) -> Tensor
   self: Scalar(std::complex<double>{0.0, 1.0})*grad.to(self.scalar_type())
 
+- name: copy_imag(Tensor self) -> Tensor
+  self: Scalar(std::complex<double>{0.0, 1.0})*grad.to(self.scalar_type())
+
 - name: index.Tensor(Tensor self, Tensor?[] indices) -> Tensor
   self: index_backward(zeros_like(self), indices, grad)
   indices: TensorList()
@@ -733,6 +736,9 @@
 - name: real(Tensor self) -> Tensor
   self: at::real(grad)
 
+- name: copy_real(Tensor self) -> Tensor
+  self: grad.copy_real()
+
 - name: reciprocal(Tensor self) -> Tensor
   self: -grad * result * result
 
@@ -1034,9 +1040,9 @@
   indices: non_differentiable
   self: not_implemented("embedding_renorm")
 
-- name: kl_div(Tensor self, Tensor target, int reduction=Mean) -> Tensor
-  self: kl_div_backward(grad, self, target, reduction)
-  target: kl_div_target_backward(grad, self, target, reduction)
+- name: kl_div(Tensor self, Tensor target, int reduction=Mean, *, bool log_target=False) -> Tensor
+  self: kl_div_backward(grad, self, target, reduction, log_target)
+  target: kl_div_target_backward(grad, self, target, reduction, log_target)
 
 - name: l1_loss(Tensor self, Tensor target, int reduction=Mean) -> Tensor
   self: l1_loss_backward(grad, self, target, reduction)
@@ -1311,8 +1317,8 @@
   grad_output: hardtanh_backward(grad, self, min_val, max_val)
   self: zeros_like(grad, at::MemoryFormat::Preserve)
 
-- name: kl_div_backward(Tensor grad_output, Tensor self, Tensor target, int reduction=Mean) -> Tensor
-  grad_output: kl_div_double_backward_grad_output(grad, self, target, reduction)
+- name: kl_div_backward(Tensor grad_output, Tensor self, Tensor target, int reduction=Mean, *, bool log_target=False) -> Tensor
+  grad_output: kl_div_double_backward_grad_output(grad, self, target, reduction, log_target)
   self: zeros_like(grad, at::MemoryFormat::Preserve)
   target: zeros_like(grad, at::MemoryFormat::Preserve)
 

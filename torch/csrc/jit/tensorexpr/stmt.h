@@ -77,7 +77,7 @@ class LetStmt : public StmtNode<LetStmt> {
       const ExprHandle& value,
       Stmt* body) {
     if (body->get_parent()) {
-      throw malformed_input(body);
+      throw malformed_input("LetStmt body has existing parent", body);
     }
 
     return new LetStmt(var.node(), value.node(), body);
@@ -114,7 +114,7 @@ class Block : public StmtNode<Block> {
 
   void prepend_stmt(Stmt* s) {
     if (s->get_parent()) {
-      throw malformed_input(s);
+      throw malformed_input("Block prepend Stmt with existing parent", s);
     }
 
     stmts_.push_front(s);
@@ -122,7 +122,7 @@ class Block : public StmtNode<Block> {
   }
   void append_stmt(Stmt* s) {
     if (s->get_parent()) {
-      throw malformed_input(s);
+      throw malformed_input("Block append Stmt with existing parent", s);
     }
 
     stmts_.push_back(s);
@@ -130,7 +130,8 @@ class Block : public StmtNode<Block> {
   }
   bool replace_stmt(Stmt* old_stmt, Stmt* new_stmt) {
     if (new_stmt->get_parent()) {
-      throw malformed_input(new_stmt);
+      throw malformed_input(
+          "Block replace Stmt wiith existing parent", new_stmt);
     }
 
     auto pos = std::find(stmts_.begin(), stmts_.end(), old_stmt);
@@ -150,7 +151,8 @@ class Block : public StmtNode<Block> {
   explicit Block(const std::vector<Stmt*>& stmts) {
     for (Stmt* s : stmts) {
       if (s->get_parent()) {
-        throw malformed_input(s);
+        throw malformed_input(
+            "Block creation has Stmt with existing parent", s);
       }
 
       stmts_.push_back(s);
@@ -165,10 +167,14 @@ class Block : public StmtNode<Block> {
 class TORCH_API Store : public StmtNode<Store> {
  public:
   const Var* base_handle() const {
-    return base_handle_;
+    return buf_->base_handle();
   }
-  const Expr* index() const {
-    return index_;
+  std::vector<const Expr*> indices() const {
+    return indices_;
+  }
+  const Expr* flat_index() const {
+    TORCH_CHECK(indices_.size() == 1, "Indices haven't been flattened.");
+    return indices_[0];
   }
   const Expr* value() const {
     return value_;
@@ -176,62 +182,43 @@ class TORCH_API Store : public StmtNode<Store> {
   const Expr* mask() const {
     return mask_;
   }
+  const Buf* buf() const {
+    return buf_;
+  }
 
   static Store* make(
       const Buffer& buffer,
-      const ExprHandle& index,
+      const std::vector<ExprHandle>& indices,
       const ExprHandle& value,
-      const ExprHandle& mask) {
-    return new Store(buffer, index.node(), value.node(), mask.node());
-  }
+      const ExprHandle& mask);
 
   static Store* make(
-      const VarHandle& base_handle,
-      const ExprHandle& index,
+      const BufHandle& buf,
+      const std::vector<ExprHandle>& indices,
       const ExprHandle& value,
-      const ExprHandle& mask) {
-    return new Store(
-        base_handle.node(), index.node(), value.node(), mask.node());
-  }
+      const ExprHandle& mask);
 
   static Store* make(
-      const VarHandle& base_handle,
-      const ExprHandle& index,
-      const ExprHandle& value) {
-    return new Store(
-        base_handle.node(), index.node(), value.node(), ExprHandle(1).node());
-  }
+      const BufHandle& buf,
+      const std::vector<ExprHandle>& indices,
+      const ExprHandle& value);
 
   // TODO: merge this with Load.
   Store(
       const Buffer& buffer,
-      const Expr* index,
+      const std::vector<const Expr*>& indices,
       const Expr* value,
       const Expr* mask);
 
   Store(
-      const Var* base_handle,
-      const Expr* index,
+      const Buf* buf,
+      std::vector<const Expr*> indices,
       const Expr* value,
-      const Expr* mask)
-      : base_handle_(base_handle), index_(index), value_(value), mask_(mask) {
-    if (base_handle_->dtype() != kHandle) {
-      throw malformed_input(base_handle);
-    }
-
-    if (index->dtype().lanes() != mask->dtype().lanes() ||
-        index->dtype().lanes() != value->dtype().lanes()) {
-      throw malformed_input();
-    }
-
-    if (index->dtype().scalar_type() != ScalarType::Int) {
-      throw unsupported_dtype();
-    }
-  }
+      const Expr* mask);
 
  private:
-  const Var* base_handle_;
-  const Expr* index_;
+  const Buf* buf_;
+  std::vector<const Expr*> indices_;
   const Expr* value_;
   const Expr* mask_;
 };
@@ -354,7 +341,7 @@ class LoopOptions {
 
   std::string gpu_block_index_str() const {
     if (!is_gpu_block_index()) {
-      throw malformed_input();
+      throw malformed_input("Has no GPU block index");
     }
 
     static const char* kBlockIndexNames[] = {
@@ -365,7 +352,7 @@ class LoopOptions {
     };
 
     if (gpu_block_index_ < 0 || gpu_block_index_ >= 4) {
-      throw malformed_input();
+      throw malformed_input("invalid GPU block index");
     }
 
     return kBlockIndexNames[gpu_block_index_];
@@ -376,9 +363,7 @@ class LoopOptions {
       throw std::runtime_error("Cannot set both gpu block and thread index");
     }
     if (is_gpu_block_index() && gpu_block_index() != index) {
-      throw std::runtime_error(
-          "Cannot set a previously set block index: " +
-          std::to_string(gpu_block_index()) + " vs " + std::to_string(index));
+      throw std::runtime_error("Cannot set a previously set block index");
     }
     gpu_block_index_ = index;
   }
@@ -394,14 +379,14 @@ class LoopOptions {
 
   std::string gpu_thread_index_str() const {
     if (!is_gpu_thread_index()) {
-      throw malformed_input();
+      throw malformed_input("has no GPU thread index");
     }
 
     static const char* kThreadIndexNames[] = {
         "threadIdx.x", "threadIdx.y", "threadIdx.z", "threadIdx.w"};
 
     if (gpu_thread_index_ < 0 || gpu_thread_index_ >= 4) {
-      throw malformed_input();
+      throw malformed_input("invalid GPU thread index");
     }
 
     return kThreadIndexNames[gpu_thread_index_];
@@ -412,9 +397,7 @@ class LoopOptions {
       throw std::runtime_error("Cannot set both gpu thread and block index");
     }
     if (is_gpu_thread_index() && gpu_thread_index() != index) {
-      throw std::runtime_error(
-          "Cannot set a previously set thread index: " +
-          std::to_string(gpu_thread_index()) + " vs " + std::to_string(index));
+      throw std::runtime_error("Cannot set a previously set thread index");
     }
     gpu_thread_index_ = index;
   }
@@ -476,13 +459,13 @@ class For : public StmtNode<For> {
   For(const Var* var, const Expr* start, const Expr* stop, Stmt* body)
       : var_(var), start_(start), stop_(stop) {
     if (!var) {
-      throw malformed_input(var);
+      throw malformed_input("invalid Var in For loop", var);
     } else if (!start) {
-      throw malformed_input(start);
+      throw malformed_input("invalid Start in For loop", start);
     } else if (!stop) {
-      throw malformed_input(stop);
+      throw malformed_input("invalid Stop in For loop", stop);
     } else if (!body || body->get_parent()) {
-      throw malformed_input(body);
+      throw malformed_input("invalid Body in For loop", body);
     }
 
     Block* b = dynamic_cast<Block*>(body);
@@ -500,13 +483,13 @@ class For : public StmtNode<For> {
       const LoopOptions& loop_options)
       : var_(var), start_(start), stop_(stop), loop_options_(loop_options) {
     if (!var) {
-      throw malformed_input(var);
+      throw malformed_input("invalid Var in For loop", var);
     } else if (!start) {
-      throw malformed_input(start);
+      throw malformed_input("invalid Start in For loop", start);
     } else if (!stop) {
-      throw malformed_input(stop);
+      throw malformed_input("invalid Stop in For loop", stop);
     } else if (!body || body->get_parent()) {
-      throw malformed_input(body);
+      throw malformed_input("invalid Body in For loop", body);
     }
 
     Block* b = dynamic_cast<Block*>(body);
