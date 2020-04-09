@@ -149,17 +149,25 @@ endif(BLAS_FOUND)
 
 if(LAPACK_FOUND)
   list(APPEND ATen_CPU_DEPENDENCY_LIBS ${LAPACK_LIBRARIES})
-  if(USE_CUDA AND MSVC)
-    # Although Lapack provides CPU (and thus, one might expect that ATen_cuda
-    # would not need this at all), some of our libraries (magma in particular)
-    # backend to CPU BLAS/LAPACK implementations, and so it is very important
-    # we get the *right* implementation, because even if the symbols are the
-    # same, LAPACK implementions may have different calling conventions.
-    # This caused https://github.com/pytorch/pytorch/issues/7353
-    #
-    # We do NOT do this on Linux, since we just rely on torch_cpu to
-    # provide all of the symbols we need
-    list(APPEND ATen_CUDA_DEPENDENCY_LIBS ${LAPACK_LIBRARIES})
+  if($ENV{TH_BINARY_BUILD})
+    if(USE_CUDA AND MSVC)
+      # Although Lapack provides CPU (and thus, one might expect that ATen_cuda
+      # would not need this at all), some of our libraries (magma in particular)
+      # backend to CPU BLAS/LAPACK implementations, and so it is very important
+      # we get the *right* implementation, because even if the symbols are the
+      # same, LAPACK implementions may have different calling conventions.
+      # This caused https://github.com/pytorch/pytorch/issues/7353
+      #
+      # We do NOT do this on Linux, since we just rely on torch_cpu to
+      # provide all of the symbols we need
+      list(APPEND ATen_CUDA_DEPENDENCY_LIBS ${LAPACK_LIBRARIES})
+    endif()
+  else()
+    # If we're dynamically linking (not TH_BINARY_BUILD), just always
+    # link against lapack, it's safer
+    if(USE_CUDA)
+      list(APPEND ATen_CUDA_DEPENDENCY_LIBS ${LAPACK_LIBRARIES})
+    endif()
   endif()
 endif(LAPACK_FOUND)
 
