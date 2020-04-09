@@ -55,6 +55,7 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
   m.def("_disable_profiler", disableProfiler);
   m.def("_profiler_enabled", profilerEnabled);
 
+  // TODO: remove when jit future can hold PyObject
   m.def(
       "_call_end_callbacks_on_fut",
       [](const at::Tensor& handle,

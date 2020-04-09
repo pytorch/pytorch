@@ -13,9 +13,7 @@ namespace rpc {
 class PyRRef {
  public:
   explicit PyRRef(const py::object& value, const py::object& type_hint);
-  explicit PyRRef(
-      c10::intrusive_ptr<RRef> rref,
-      const std::shared_ptr<FutureMessage> fm = nullptr);
+  explicit PyRRef(c10::intrusive_ptr<RRef> rref);
 
   bool isOwner() const;
   bool confirmedByOwner() const;
@@ -32,7 +30,6 @@ class PyRRef {
 
  private:
   c10::intrusive_ptr<RRef> rref_;
-  const std::shared_ptr<FutureMessage> fm_;
 };
 
 } // namespace rpc

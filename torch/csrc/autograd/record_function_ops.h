@@ -37,6 +37,11 @@ void _call_end_callbacks_on_fut(
       });
 }
 
+void _call_end_callbacks_on_jit_fut(
+    const at::Tensor& handle,
+    const c10::intrusive_ptr<c10::ivalue::Future>& fut);
+
+
 // Ends the profiling scope created with record_function_enter.
 void record_function_exit(const at::Tensor& handle);
 

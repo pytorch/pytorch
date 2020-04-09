@@ -4,6 +4,22 @@ namespace torch {
 namespace jit {
 namespace tensorexpr {
 
+// Simple recursive GCD.
+template <typename T>
+T gcd(T a, T b) {
+  if (b == 0) {
+    return a;
+  }
+  return gcd(b, a % b);
+}
+
+// Helper for determining if an Expr is a multi-lane primitive (e.g. Broadcast
+// or Ramp).
+bool isMultilanePrimitive(const Expr* e) {
+  return e->expr_type() == IRNodeType::kBroadcast ||
+      e->expr_type() == IRNodeType::kRamp;
+}
+
 SimplifierHashType Term::hashVars() const {
   SimplifierHashType hash;
   for (auto* v : variables_) {
@@ -334,6 +350,13 @@ const Expr* PolynomialTransformer::mutate(const Add* v) {
     return insertTerm(poly, lhsTerm ? lhsTerm : rhsTerm);
   }
 
+  if (lhsTerm->hashVars() == rhsTerm->hashVars()) {
+    return new Term(
+        hasher_,
+        evaluateOp(new Add(lhsTerm->scalar(), rhsTerm->scalar())),
+        lhsTerm->variables());
+  }
+
   // If all else fails we have a new Polynomial with two new variable Terms.
   return new Polynomial(
       hasher_, getImmediateByType(v->dtype(), 0), lhsTerm, rhsTerm);
@@ -651,6 +674,67 @@ const Expr* PolynomialTransformer::polyByTerm(
   return new Polynomial(hasher_, scalar, std::move(newTerms));
 }
 
+// Does multiplying these two expressions make a Rounding Off operation.
+// e.g. LHS = (x/y),  RHS = y => (x / y) * y => RoundOff(x, y).
+const Expr* PolynomialTransformer::isRoundOff(
+    const Expr* lhs,
+    const Expr* rhs) {
+  const Div* div{nullptr};
+  const Expr* other{nullptr};
+
+  if ((div = dynamic_cast<const Div*>(lhs))) {
+    other = rhs;
+  } else if ((div = dynamic_cast<const Div*>(rhs))) {
+    other = lhs;
+  } else {
+    return nullptr;
+  }
+
+  if (hasher_.hash(div->rhs()) == hasher_.hash(other)) {
+    // If the denominator is equal to the other, then yes it's a RoundOff.
+    return new RoundOff(div->lhs(), rhs);
+  }
+
+  if (div->rhs()->isConstant() && other->isConstant()) {
+    // If they are both scalar we may be able to find a common factor.
+    if (immediateEquals(evaluateOp(new Mod(other, div->rhs())), 0)) {
+      Expr* scalar = evaluateOp(new Div(other, div->rhs()));
+      Expr* newDenom = evaluateOp(new Div(other, scalar));
+      return new Term(hasher_, scalar, new RoundOff(div->lhs(), newDenom));
+    }
+  }
+
+  return nullptr;
+}
+
+// Inserts a new component into a term, looking for opportunities to simplify.
+const Expr* PolynomialTransformer::insertIntoTerm(
+    const Term* term,
+    const Expr* expr) {
+  std::vector<const Expr*> vars;
+
+  // Search for RoundOffs.
+  bool merged{false};
+  for (auto* component : term->variables()) {
+    if (auto* roundoff = isRoundOff(component, expr)) {
+      vars.push_back(roundoff);
+      merged = true;
+    } else {
+      vars.push_back(component);
+    }
+  }
+
+  if (!merged) {
+    vars.push_back(expr);
+  }
+
+  if (vars.size() == 1 && immediateEquals(term->scalar(), 1)) {
+    return vars[0];
+  }
+
+  return new Term(hasher_, term->scalar(), vars);
+}
+
 const Expr* PolynomialTransformer::mutate(const Mul* v) {
   const Expr* lhs_new = v->lhs()->accept_mutator(this);
   const Expr* rhs_new = v->rhs()->accept_mutator(this);
@@ -672,6 +756,11 @@ const Expr* PolynomialTransformer::mutate(const Mul* v) {
   if (lhs_new->dtype().is_floating_point() ||
       rhs_new->dtype().is_floating_point()) {
     return new Mul(lhs_new, rhs_new);
+  }
+
+  // Catch cases of rounding (Div(A/B) * B).
+  if (auto* ret = isRoundOff(lhs_new, rhs_new)) {
+    return ret;
   }
 
   const Polynomial* lhsPoly = dynamic_cast<const Polynomial*>(lhs_new);
@@ -755,18 +844,87 @@ const Expr* PolynomialTransformer::mutate(const Mul* v) {
   // Multiplying Term by a variable is equivalent to adding the variable to
   // the term's list of vars.
   if (lhsTerm) {
-    std::vector<const Expr*> vars = lhsTerm->variables();
-    vars.push_back(rhs_new);
-    return new Term(hasher_, lhsTerm->scalar(), vars);
+    return insertIntoTerm(lhsTerm, rhs_new);
   }
   if (rhsTerm) {
-    std::vector<const Expr*> vars = rhsTerm->variables();
-    vars.push_back(lhs_new);
-    return new Term(hasher_, rhsTerm->scalar(), vars);
+    return insertIntoTerm(rhsTerm, lhs_new);
   }
 
   // Two variables, create a new Term.
   return new Term(hasher_, getImmediateByType(v->dtype(), 1), lhs_new, rhs_new);
+}
+
+const Expr* factorizeDivision(const Expr* lhs_new, const Expr* rhs_new) {
+  if (!lhs_new || !rhs_new) {
+    return nullptr;
+  }
+
+  const Expr* leftScalar = lhs_new->isConstant() ? lhs_new : nullptr;
+  const Expr* rightScalar = rhs_new->isConstant() ? rhs_new : nullptr;
+
+  auto* lhsTerm = dynamic_cast<const Term*>(lhs_new);
+  auto* rhsTerm = dynamic_cast<const Term*>(rhs_new);
+  if (lhsTerm) {
+    leftScalar = lhsTerm->scalar();
+  }
+
+  if (rhsTerm) {
+    rightScalar = rhsTerm->scalar();
+  }
+
+  if (!leftScalar || !rightScalar) {
+    return nullptr;
+  }
+
+  long left = immediateAs<long>(leftScalar);
+  long right = immediateAs<long>(rightScalar);
+
+  long GCD = gcd<long>(left, right);
+  if (GCD <= 1) {
+    return nullptr;
+  }
+
+  leftScalar = evaluateOp(
+      new Div(leftScalar, getImmediateByType(leftScalar->dtype(), GCD)));
+  rightScalar = evaluateOp(
+      new Div(rightScalar, getImmediateByType(rightScalar->dtype(), GCD)));
+
+  if (lhsTerm) {
+    lhs_new = new Term(lhsTerm->hasher(), leftScalar, lhsTerm->variables());
+  } else {
+    lhs_new = leftScalar;
+  }
+
+  if (rhsTerm) {
+    rhs_new = new Term(rhsTerm->hasher(), rightScalar, rhsTerm->variables());
+  } else {
+    rhs_new = rightScalar;
+  }
+
+  return new Div(lhs_new, rhs_new);
+}
+
+const Expr* PolynomialTransformer::mutate(const Div* v) {
+  const Expr* lhs_new = v->lhs()->accept_mutator(this);
+  const Expr* rhs_new = v->rhs()->accept_mutator(this);
+
+  // Constant Folding.
+  if (lhs_new->isConstant() && rhs_new->isConstant()) {
+    return evaluateOp(new Div(lhs_new, rhs_new));
+  }
+
+  // If this is a floating point Div then order of operations is important, we
+  // dont want to combine ops.
+  if (lhs_new->dtype().is_floating_point() ||
+      rhs_new->dtype().is_floating_point()) {
+    return new Div(lhs_new, rhs_new);
+  }
+
+  if (auto ret = factorizeDivision(lhs_new, rhs_new)) {
+    return ret;
+  }
+
+  return new Div(lhs_new, rhs_new);
 }
 
 const Expr* PolynomialTransformer::mutate(const Intrinsics* v) {
@@ -893,15 +1051,6 @@ const Expr* TermExpander::mutate(const Term* v) {
   return lastNode;
 }
 
-// Simple recursive GCD.
-template <typename T>
-T gcd(T a, T b) {
-  if (b == 0) {
-    return a;
-  }
-  return gcd(b, a % b);
-}
-
 // Returns an immediate containing the greatest common divisor of all terms
 // (inc. the scalar term) in the polynomial. If the GCD is uninteresting
 // (e.g. 1) then returns nullptr.
@@ -946,27 +1095,89 @@ const Expr* polyGCD(const Polynomial* poly) {
   return getImmediateByType(poly->dtype(), GCD);
 }
 
+// Searches the polynomial for Terms that can be merged in the Round + Mod
+// pattern: (x/y) * y + x % y => RoundOff(x,y) + Mod(x, y) => x.
+const Expr* simplifyRoundModPattern(const Polynomial* poly) {
+  std::set<const Term*> rounds;
+  std::set<const Term*> mods;
+  std::vector<const Term*> others;
+
+  // Split out the RoundOffs and Mod operations so we can inspect.
+  for (auto* c : poly->variables()) {
+    if (c->variables().size() > 1) {
+      others.push_back(c);
+      continue;
+    }
+
+    const Expr* e = c->variables()[0];
+
+    if (e->expr_type() == IRNodeType::kRoundOff) {
+      rounds.insert(c);
+    } else if (e->expr_type() == IRNodeType::kMod) {
+      mods.insert(c);
+    } else {
+      others.push_back(c);
+    }
+  }
+
+  // Can't continue without at least one RoundOff and one Mod.
+  if (rounds.empty() || mods.empty()) {
+    return nullptr;
+  }
+
+  HashProvider& hasher = poly->hasher();
+  bool didAnything = false;
+
+  for (auto* r : rounds) {
+    bool merged = false;
+    const RoundOff* roundoff = dynamic_cast<const RoundOff*>(r->variables()[0]);
+    CHECK(roundoff);
+
+    for (auto* m : mods) {
+      // TODO: for now don't attempt partial factorization of this optimization.
+      // E.g. it's possible to do: 2 * (x/y) * y + (x%y) => x + (x/y) * y but
+      // unsure thats actually much better, particulary with CSE.
+      if (!immediateEquals(evaluateOp(new Sub(r->scalar(), m->scalar())), 0)) {
+        continue;
+      }
+
+      const Mod* mod = dynamic_cast<const Mod*>(m->variables()[0]);
+      CHECK(mod);
+
+      // Valid optimization if LHS and RHS are equal for both.
+      if (hasher.hash(roundoff->lhs()) == hasher.hash(mod->lhs()) &&
+          hasher.hash(roundoff->rhs()) == hasher.hash(mod->rhs())) {
+        others.push_back(new Term(hasher, r->scalar(), roundoff->lhs()));
+        merged = true;
+        didAnything = true;
+        mods.erase(m);
+        break;
+      }
+    }
+
+    // If we didn't merge, keep the roundoff.
+    if (!merged) {
+      others.push_back(r);
+    }
+  }
+
+  // If we made no changes, just exit.
+  if (!didAnything) {
+    return nullptr;
+  }
+
+  // Keep remaining Mods.
+  for (auto* m : mods) {
+    others.push_back(m);
+  }
+
+  return new Polynomial(hasher, poly->scalar(), others);
+}
+
 // Trivially factorize terms by GCD of scalar components.
 const Expr* TermExpander::factorizePolynomial(const Polynomial* poly) {
   const Expr* scalar = poly->scalar();
   const std::vector<const Term*>& variables = poly->variables();
-  bool floatScalars = false;
-
-  // Check types.
-  for (auto& p : variables) {
-    if (is_floating_point(p->dtype().scalar_type()) ||
-        is_floating_point(p->scalar()->dtype().scalar_type())) {
-      floatScalars = true;
-    }
-  }
-  if (is_floating_point(scalar->dtype().scalar_type())) {
-    floatScalars = true;
-  }
-
-  // floating point isn't generally distributive.
-  if (floatScalars) {
-    return nullptr;
-  }
 
   // Compute the GCD of terms.
   const Expr* GCD = polyGCD(poly);
@@ -993,6 +1204,11 @@ const Expr* TermExpander::factorizePolynomial(const Polynomial* poly) {
 const Expr* TermExpander::mutate(const Polynomial* v) {
   if (v->variables().empty()) {
     return v->scalar();
+  }
+
+  // If this Polynomial can be factorized: do it, then expand the result.
+  if (const Expr* simplified = simplifyRoundModPattern(v)) {
+    return simplified->accept_mutator(this);
   }
 
   // If this Polynomial can be factorized: do it, then expand the result.
@@ -1086,6 +1302,17 @@ const Expr* TermExpander::mutate(const Polynomial* v) {
   }
 
   return lastNode;
+}
+
+// Expands RoundOff(x, y) => Term(1, Div(x, y), y), which will later be expanded
+// to Mul(Div(x, y), y).
+const Expr* TermExpander::mutate(const RoundOff* v) {
+  Term* term = new Term(
+      simplifier_->hasher(),
+      getImmediateByType(v->dtype(), 1),
+      new Div(v->lhs(), v->rhs()),
+      v->rhs());
+  return term->accept_mutator(this);
 }
 
 } // namespace tensorexpr

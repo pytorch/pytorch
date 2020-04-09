@@ -388,7 +388,7 @@ class record_function(ContextDecorator):
         times.
 
         Arguments:
-            fut: (torch.distributed.rpc.Future): future for which to schedule
+            fut: (torch.distributed.rpc.Future or torch._C.Future): future for which to schedule
             callback for.
         """
         # Throw if we have already attached a callback onto the future.
@@ -400,11 +400,12 @@ class record_function(ContextDecorator):
         self.run_callbacks_on_exit = False
         # TODO: Currently, we have two different futures that can be returned,
         # thus, two different code paths. We should clean this up when the
-        # futures are merged (https://github.com/pytorch/pytorch/issues/34999).
+        # futures are merged and rpc_async returns a consistent type (https://github.com/pytorch/pytorch/issues/34999).
         if isinstance(fut, torch.distributed.rpc.Future):
             torch.autograd._call_end_callbacks_on_fut(self.handle, fut)
         else:
-            raise NotImplementedError("Future type {} is not supported".format(type(fut)))
+            # jit Future, call jit operator
+            torch.ops.profiler._call_end_callbacks_on_jit_fut(self.handle, fut)
 
 
 class emit_nvtx(object):

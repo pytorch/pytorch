@@ -240,9 +240,14 @@ PyObject* rpc_init(PyObject* /* unused */) {
               &PyRRef::unpickle,
               py::call_guard<py::gil_scoped_release>())
           .def(
-              "_get_creating_future",
+              "_get_future",
               &PyRRef::getFuture,
-              py::call_guard<py::gil_scoped_release>())
+              py::call_guard<py::gil_scoped_release>(),
+              R"(
+                  Returns the future that corresponds to the creation of this RRef
+                  on the remote node. This is for internal use cases such as profiling
+                  only.
+              )")
           // not releasing GIL to avoid context switch
           .def("__str__", &PyRRef::str);
 
@@ -504,7 +509,6 @@ If the future completes with an error, an exception is thrown.
          std::string& pickledPythonUDF,
          std::vector<torch::Tensor>& tensors) {
         DCHECK(!PyGILState_Check());
-        LOG(INFO) << "In invoke remote python UDF";
         return pyRemotePythonUdf(dst, pickledPythonUDF, tensors);
       },
       py::call_guard<py::gil_scoped_release>(),

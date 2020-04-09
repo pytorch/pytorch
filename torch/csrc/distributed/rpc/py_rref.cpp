@@ -63,13 +63,16 @@ TypePtr tryInferTypeWithTypeHint(
                                   .attr("_qualified_name")(type_hint)));
     TypePtr type_hint_ptr =
         jit::get_python_cu()->get_interface(type_qualified_name);
+    std::ostringstream subtype_check_msg;
     TORCH_CHECK(
         type_hint_ptr != nullptr &&
-            module.value().type()->isSubtypeOf(type_hint_ptr),
+            module.value().type()->isSubtypeOfExt(
+                type_hint_ptr, &subtype_check_msg),
         module.value().type()->python_str(),
         " is not a subtype of the type hint: ",
         type_qualified_name.qualifiedName(),
-        ", did you pass a valid interface type?");
+        ", did you pass a valid interface type?\n",
+        subtype_check_msg.str());
     return type_hint_ptr;
   } else {
     TORCH_CHECK(
@@ -95,10 +98,7 @@ TypePtr tryInferTypeWithTypeHint(
 
 ///////////////////////////  PyRRef  //////////////////////////////////
 
-PyRRef::PyRRef(
-    c10::intrusive_ptr<RRef> rref,
-    const std::shared_ptr<FutureMessage> fm)
-    : rref_(std::move(rref)), fm_(fm) {
+PyRRef::PyRRef(c10::intrusive_ptr<RRef> rref) : rref_(std::move(rref)) {
   TORCH_CHECK(rref_, "PyRRef must not wrap nullptr");
 }
 
@@ -113,7 +113,7 @@ PyRRef::PyRRef(const py::object& value, const py::object& type_hint)
       }()) {}
 
 const std::shared_ptr<FutureMessage> PyRRef::getFuture() {
-  return fm_;
+  return rref_->getCreatingFuture();
 }
 
 bool PyRRef::isOwner() const {

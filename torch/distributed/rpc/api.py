@@ -106,29 +106,28 @@ _wait_all_workers_sequence_id_to_states = collections.defaultdict(WaitAllWorkers
 
 
 def _on_leader_follower_report_shutdown_intent(sequence_id, worker_name):
-    assert (
-        worker_name in _ALL_WORKER_NAMES
-    ), "{worker_name} is not expected by leader.".format(worker_name=worker_name)
-    intent_worker_names = _wait_all_workers_sequence_id_to_states[
-        sequence_id
-    ].intent_worker_names
-    assert (
-        worker_name not in intent_worker_names
-    ), "{worker_name} reported intent sequence id {sequence_id} twice. ".format(
-        worker_name=worker_name, sequence_id=sequence_id
-    )
-    intent_worker_names.add(worker_name)
-    if _ALL_WORKER_NAMES == intent_worker_names:
-        _set_proceed_shutdown_signal(sequence_id)
+    with _wait_all_workers_dict_lock:
+        assert (
+            worker_name in _ALL_WORKER_NAMES
+        ), "{worker_name} is not expected by leader.".format(worker_name=worker_name)
+        intent_worker_names = _wait_all_workers_sequence_id_to_states[
+            sequence_id
+        ].intent_worker_names
+        assert (
+            worker_name not in intent_worker_names
+        ), "{worker_name} reported intent sequence id {sequence_id} twice. ".format(
+            worker_name=worker_name, sequence_id=sequence_id
+        )
+        intent_worker_names.add(worker_name)
+        if _ALL_WORKER_NAMES == intent_worker_names:
+            _set_proceed_shutdown_signal(sequence_id)
 
 
 def _set_proceed_shutdown_signal(sequence_id):
     proceed_signal = _wait_all_workers_sequence_id_to_states[sequence_id].proceed_signal
     assert (
         not proceed_signal.is_set()
-    ), "Termination signal sequence id {} got set twice.".format(
-        sequence_id=sequence_id
-    )
+    ), "Termination signal sequence id {} got set twice.".format(sequence_id)
     proceed_signal.set()
 
 
@@ -431,10 +430,20 @@ def remote(to, func, args=None, kwargs=None):
 
     ctx_manager = contextlib.suppress()
     if should_profile:
+        # Create appropriate string representation based on type of func
+        # (builtin, script, python)
+        if qualified_name is None:
+            func_name = (
+                torch.jit._qualified_name(func)
+                if isinstance(func, torch.jit.ScriptFunction)
+                else func.__qualname__
+            )
+        else:
+            func_name = qualified_name
         # Build RPC profiling key.
         rpc_profiling_key = build_rpc_profiling_key(
             RPCExecMode.REMOTE,
-            str(qualified_name) if qualified_name is not None else func.__qualname__,
+            func_name,
             get_worker_info().name,
             dst_worker_info.name,
         )
@@ -445,10 +454,6 @@ def remote(to, func, args=None, kwargs=None):
         kwargs = kwargs if kwargs else {}
         if qualified_name is not None:
             rref = _invoke_remote_builtin(dst_worker_info, qualified_name, *args, **kwargs)
-            # attach profiling information
-            if should_profile:
-                assert rf is not None
-                rf._call_end_callbacks_on_future(rref._get_creating_future())
         elif isinstance(func, torch.jit.ScriptFunction):
             rref = _invoke_remote_torchscript(
                 dst_worker_info.name,
@@ -461,10 +466,13 @@ def remote(to, func, args=None, kwargs=None):
                 PythonUDF(func, args, kwargs)
             )
             rref = _invoke_remote_python_udf(dst_worker_info, pickled_python_udf, tensors)
-            # attach profiling information
-            if should_profile:
-                assert rf is not None
-                rf._call_end_callbacks_on_future(rref._get_creating_future())
+        # attach profiling information
+        if should_profile:
+            assert torch.autograd._profiler_enabled()
+            assert rf is not None
+            print("PROFILING IN RREF")
+            print("Future type is {}".format(type(rref._get_future())))
+            rf._call_end_callbacks_on_future(rref._get_future())
 
     return rref
 
@@ -481,10 +489,20 @@ def _invoke_rpc(to, func, rpc_type, args=None, kwargs=None):
 
     ctx_manager = contextlib.suppress()
     if should_profile:
+        # Create appropriate string representation based on type of func
+        # (builtin, script, python)
+        if qualified_name is None:
+            func_name = (
+                torch.jit._qualified_name(func)
+                if isinstance(func, torch.jit.ScriptFunction)
+                else func.__qualname__
+            )
+        else:
+            func_name = qualified_name
         # Build RPC profiling key.
         rpc_profiling_key = build_rpc_profiling_key(
             rpc_type,
-            str(qualified_name) if qualified_name is not None else func.__qualname__,
+            func_name,
             get_worker_info().name,
             dst_worker_info.name,
         )
@@ -505,8 +523,8 @@ def _invoke_rpc(to, func, rpc_type, args=None, kwargs=None):
                 PythonUDF(func, args, kwargs)
             )
             fut = _invoke_rpc_python_udf(dst_worker_info, pickled_python_udf, tensors)
-        # NOTE: profiling not yet supported for JIT futures (https://github.com/pytorch/pytorch/issues/34997)
-        if should_profile and isinstance(fut, torch.distributed.rpc.Future):
+        if should_profile:
+            assert torch.autograd._profiler_enabled()
             assert rf is not None
             # Schedule profiling callbacks to run when the future completes.
             rf._call_end_callbacks_on_future(fut)

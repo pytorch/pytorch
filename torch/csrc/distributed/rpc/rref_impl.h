@@ -218,6 +218,14 @@ class TORCH_API RRef : public RRefInterface {
     return type_;
   }
 
+  inline void registerCreatingFuture(std::shared_ptr<FutureMessage> fut) {
+    creatingFuture_ = fut;
+  }
+
+  virtual std::shared_ptr<FutureMessage> getCreatingFuture() const {
+    return creatingFuture_;
+  };
+
   // Send delete UserRRef request to Owner,
   // if the request hasn't been sent yet.
   // There are 2 cases to call it,
@@ -239,6 +247,8 @@ class TORCH_API RRef : public RRefInterface {
   // type field to denote the type of the element that the RRef is holding
   // it could be any TypePtr that JIT support, including PyObjectType
   const TypePtr type_;
+  // Future corresponding to request to create RRef on remote node.
+  std::shared_ptr<FutureMessage> creatingFuture_;
 };
 
 // ``UserRRef`` represents a user of an RRef. Besides the ``RRefId``, each user

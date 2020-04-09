@@ -3,7 +3,7 @@
 #else
 
 #include <ATen/cuda/CUDAContext.h>
-#include <ATen/CUDAGenerator.h>
+#include <ATen/CUDAGeneratorImpl.h>
 #include <ATen/Utils.h>
 #include <utility>
 
@@ -88,8 +88,8 @@ void THCTensor_(multinomialAliasDraw)(THCState *state, THCudaLongTensor *self, T
 
   auto out_uniform = THTensor_wrap(uniform);
   auto out_bernoulli = THTensor_wrap(bernoulli);
-  at::native::uniform_cuda_(out_uniform, 0, K, gen_);
-  at::native::uniform_cuda_(out_bernoulli, 0, 1, gen_);
+  at::native::uniform_(out_uniform, 0, K, gen_);
+  at::native::uniform_(out_bernoulli, 0, 1, gen_);
 
   multinomialAliasDrawKernel
     <<<THCCeilDiv((int)n_sample+BLOCK_SIZE-1, BLOCK_SIZE), BLOCK_SIZE, 0, c10::cuda::getCurrentCUDAStream()>>>(

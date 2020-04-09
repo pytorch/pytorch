@@ -152,13 +152,12 @@ PyRRef pyRemoteBuiltin(
     auto fm = sendMessageWithAutograd(
         *agent, dst, std::move(*scriptRemoteCall).toMessage(), false);
 
+    userRRef->registerCreatingFuture(fm);
     ctx.addPendingUser(userRRef->forkId(), userRRef);
-    fm->addCallback([forkId{userRRef->forkId()}](
-                        const rpc::Message& message,
-                        const c10::optional<utils::FutureError>& futErr) {
-      callback::confirmPendingUser(message, futErr, forkId);
+    fm->addCallback([forkId{userRRef->forkId()}, fm]() {
+      callback::confirmPendingUser(fm, forkId);
     });
-    return PyRRef(userRRef, fm);
+    return PyRRef(userRRef);
   } else {
     auto ownerRRef = ctx.createOwnerRRef(returnType);
     // prevent this owner RRef being deleted due to other forks
@@ -169,10 +168,12 @@ PyRRef pyRemoteBuiltin(
     auto fm = sendMessageWithAutograd(
         *agent, dst, std::move(*scriptRemoteCall).toMessage(), false);
 
+    ownerRRef->registerCreatingFuture(fm);
+
     // Builtin operators does not return py::object, and hence does not require
     // GIL for destructing the potentially deleted OwerRRef.
-    fm->addCallback(callback::finishCreatingOwnerRRef);
-    return PyRRef(ownerRRef, fm);
+    fm->addCallback([fm]() { callback::finishCreatingOwnerRRef(fm); });
+    return PyRRef(ownerRRef);
   }
 }
 
@@ -207,13 +208,13 @@ PyRRef pyRemotePythonUdf(
         userRRef->rrefId().toIValue(),
         userRRef->forkId().toIValue());
 
+    userRRef->registerCreatingFuture(fm);
+
     ctx.addPendingUser(userRRef->forkId(), userRRef);
-    fm->addCallback([forkId{userRRef->forkId()}](
-                        const rpc::Message& message,
-                        const c10::optional<utils::FutureError>& futErr) {
-      callback::confirmPendingUser(message, futErr, forkId);
+    fm->addCallback([forkId{userRRef->forkId()}, fm]() {
+      callback::confirmPendingUser(fm, forkId);
     });
-    return PyRRef(userRRef, fm);
+    return PyRRef(userRRef);
   } else {
     auto ownerRRef = ctx.createOwnerRRef(PyObjectType::get());
     // prevent this owner RRef being deleted due to other forks
@@ -224,15 +225,16 @@ PyRRef pyRemotePythonUdf(
         ownerRRef->rrefId().toIValue(),
         ownerRRef->rrefId().toIValue());
 
-    fm->addCallback([](const Message& message,
-                       const c10::optional<utils::FutureError>& futErr) {
-      auto deletedRRef = callback::finishCreatingOwnerRRef(message, futErr);
+    ownerRRef->registerCreatingFuture(fm);
+
+    fm->addCallback([fm]() {
+      auto deletedRRef = callback::finishCreatingOwnerRRef(fm);
       if (deletedRRef && deletedRRef->isPyObj()) {
         pybind11::gil_scoped_acquire ag;
         deletedRRef.reset();
       }
     });
-    return PyRRef(ownerRRef, fm);
+    return PyRRef(ownerRRef);
   }
 }
 

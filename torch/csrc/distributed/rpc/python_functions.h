@@ -1,6 +1,5 @@
 #pragma once
 
-#include <torch/csrc/autograd/profiler.h>
 #include <torch/csrc/distributed/rpc/py_rref.h>
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
 #include <torch/csrc/utils/pybind.h>

@@ -190,7 +190,7 @@ def build_rpc_profiling_key(exec_type, func_name, current_worker_name, dst_worke
     """
     profile_key = "rpc_{rpc_type}#{func_name}({current_worker} -> {dst_worker})".format(
         rpc_type=exec_type.value,
-        func_name=str(func_name),
+        func_name=func_name,
         current_worker=current_worker_name,
         dst_worker=dst_worker_name,
     )

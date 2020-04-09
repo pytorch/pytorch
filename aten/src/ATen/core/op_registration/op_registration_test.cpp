@@ -10,7 +10,7 @@
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
 
-#include <ATen/core/boxing/test_helpers.h>
+#include <ATen/core/boxing/impl/test_helpers.h>
 #include <ATen/core/op_registration/op_registration.h>
 #include <ATen/core/Tensor.h>
 #include <functional>
@@ -1447,6 +1447,25 @@ TEST(NewOperatorRegistrationTest, fallback) {
   ASSERT_TRUE(op.has_value());
   auto stack = callOp(*op, dummyTensor(c10::DispatchKey::CPUTensorId), "hello ");
   EXPECT_EQ("hello _test::dummy", stack[1].toString()->string());
+}
+
+TEST(NewOperatorRegistrationTest, BackendSelectRedispatchesToCPU) {
+  bool cpu_called = false;
+  bool backend_generic_called = false;
+  auto registrar = c10::import()
+    .def("test::fn(Tensor self) -> Tensor")
+    .impl("test::fn", torch::dispatch(c10::kCPU, [&](const Tensor& x) { cpu_called = true; return x; }))
+    .impl("test::fn", torch::dispatch(c10::DispatchKey::BackendSelect, [&](const Tensor& x) {
+      backend_generic_called = true;
+      auto op = c10::Dispatcher::singleton().findSchema({"test::fn", ""});
+      return c10::Dispatcher::singleton().callUnboxedRedispatch<Tensor, const Tensor&>(*op, c10::DispatchKey::BackendSelect, x);
+    }))
+  ;
+  auto op = Dispatcher::singleton().findSchema({"test::fn", ""});
+  ASSERT_TRUE(op.has_value());
+  callOp(*op, dummyTensor(c10::DispatchKey::CPUTensorId));
+  ASSERT_TRUE(cpu_called);
+  ASSERT_TRUE(backend_generic_called);
 }
 
 Tensor dummy_fn(const Tensor& x) {

@@ -48,9 +48,7 @@ sendMessageWithAutograd(
     rpc::RpcAgent& agent,
     const rpc::WorkerInfo& dst,
     rpc::Message&& wrappedRpcMsg,
-    bool forceGradRecording = false,
-    const std::shared_ptr<torch::autograd::profiler::RecordFunction>& rf =
-        nullptr);
+    bool forceGradRecording = false);
 
 } // namespace autograd
 } // namespace distributed
