@@ -23,7 +23,6 @@ if TEST_CUDA and torch.version.cuda is not None:  # the skip CUDNN test for ROCm
     TEST_CUDNN = (
         TEST_CUDA and CUDNN_HEADER_EXISTS and torch.backends.cudnn.is_available()
     )
-
 IS_WINDOWS = sys.platform == "win32"
 
 
@@ -111,6 +110,7 @@ class TestCppExtensionJIT(common.TestCase):
             ],
             extra_cuda_cflags=["-O2"],
             verbose=True,
+            keep_intermediates=False,
         )
 
         x = torch.zeros(100, device="cuda", dtype=torch.float32)

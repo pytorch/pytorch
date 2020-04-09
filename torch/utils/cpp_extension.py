@@ -817,7 +817,7 @@ def load(name,
          verbose=False,
          with_cuda=None,
          is_python_module=True,
-         keep_intermediates=False):
+         keep_intermediates=True):
     '''
     Loads a PyTorch C++ extension just-in-time (JIT).
 
@@ -1062,8 +1062,7 @@ def _jit_compile(name,
                  verbose,
                  with_cuda,
                  is_python_module,
-                 keep_intermediates=False):
-
+                 keep_intermediates=True):
     if with_cuda is None:
         with_cuda = any(map(_is_cuda_file, sources))
     with_cudnn = any(['cudnn' in f for f in extra_ldflags or []])
@@ -1116,7 +1115,6 @@ def _jit_compile(name,
 
     if verbose:
         print('Loading extension module {}...'.format(name))
-
     return _import_module_from_library(name, build_directory, is_python_module)
 
 
@@ -1490,6 +1488,7 @@ def _write_ninja_file_to_build_library(path,
 
     if with_cuda and IS_HIP_EXTENSION:
         cuda_flags = ['-DWITH_HIP'] + cflags + COMMON_HIPCC_FLAGS
+        cuda_flags += extra_cuda_cflags
         cuda_flags += _get_rocm_arch_flags(cuda_flags)
         sources = [s if not _is_cuda_file(s) else
                    os.path.abspath(os.path.join(
