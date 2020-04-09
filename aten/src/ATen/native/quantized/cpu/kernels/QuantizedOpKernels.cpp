@@ -152,6 +152,226 @@ Tensor qcat_nhwc_kernel(
   return output;
 }
 
+// horizontal sum over a range of uint8_t
+int64_t hsum(const uint8_t* A, int len) {
+  int64_t row_sum = 0;
+  int i = 0;
+
+#ifdef __AVX2__
+  __m256i sum_v = _mm256_setzero_si256();
+  __m256i one_epi16_v = _mm256_set1_epi16(1);
+  __m256i one_epi8_v = _mm256_set1_epi8(1);
+  // vectorized
+  for (; i < len / 32 * 32; i += 32) {
+    __m256i src_v = _mm256_loadu_si256(reinterpret_cast<__m256i const*>(A + i));
+    sum_v = _mm256_add_epi32(
+      sum_v,
+      _mm256_madd_epi16(
+        // first argument is unsigned, second is signed
+        _mm256_maddubs_epi16(src_v, one_epi8_v),
+      one_epi16_v)
+    );
+  }
+
+  alignas(64) int32_t temp[8];
+  _mm256_store_si256(reinterpret_cast<__m256i*>(temp), sum_v);
+  for (int k = 0; k < 8; ++k) {
+    row_sum += temp[k];
+  }
+#endif // __AVX2__
+
+  // scalar
+  for (; i < len; ++i) {
+    row_sum += A[i];
+  }
+
+  return row_sum;
+}
+
+// horizontal sum over a range of int8_t
+int64_t hsum(const int8_t* A, int len) {
+  int64_t row_sum = 0;
+  int i = 0;
+
+#ifdef __AVX2__
+  __m256i sum_v = _mm256_setzero_si256();
+  __m256i one_epi16_v = _mm256_set1_epi16(1);
+  __m256i one_epi8_v = _mm256_set1_epi8(1);
+  // vectorized
+  for (; i < len / 32 * 32; i += 32) {
+    __m256i src_v = _mm256_loadu_si256(reinterpret_cast<__m256i const*>(A + i));
+    sum_v = _mm256_add_epi32(
+      sum_v,
+      _mm256_madd_epi16(
+        // first argument is unsigned, second is signed
+        _mm256_maddubs_epi16(one_epi8_v, src_v),
+      one_epi16_v)
+    );
+  }
+
+  alignas(64) int32_t temp[8];
+  _mm256_store_si256(reinterpret_cast<__m256i*>(temp), sum_v);
+  for (int k = 0; k < 8; ++k) {
+    row_sum += temp[k];
+  }
+#endif // __AVX2__
+
+  // scalar
+  for (; i < len; ++i) {
+    row_sum += A[i];
+  }
+
+  return row_sum;
+}
+
+// horizontal sum over a range of int32_t
+int64_t hsum(const int32_t* A, int len) {
+  int64_t row_sum = 0;
+  int i = 0;
+
+#ifdef __AVX2__
+  __m256i sum_epi64 = _mm256_setzero_si256();
+  // vectorized
+  for (; i < len / 8 * 8; i += 8) {
+    __m256i src_epi32 = _mm256_loadu_si256(reinterpret_cast<__m256i const*>(A + i));
+    // widen
+    __m128i src_lo_epi32 = _mm256_castsi256_si128(src_epi32);
+    __m128i src_hi_epi32 = _mm256_extractf128_si256(src_epi32, 1);
+    __m256i src_lo_epi64 = _mm256_cvtepi32_epi64(src_lo_epi32);
+    __m256i src_hi_epi64 = _mm256_cvtepi32_epi64(src_hi_epi32);
+    // add
+    sum_epi64 = _mm256_add_epi64(sum_epi64, src_lo_epi64);
+    sum_epi64 = _mm256_add_epi64(sum_epi64, src_hi_epi64);
+  }
+
+  alignas(64) int64_t temp[4];
+  _mm256_store_si256(reinterpret_cast<__m256i*>(temp), sum_epi64);
+  for (int k = 0; k < 4; ++k) {
+    row_sum += temp[k];
+  }
+#endif // __AVX2__
+
+  // scalar
+  for (; i < len; ++i) {
+    row_sum += A[i];
+  }
+
+  return row_sum;
+}
+
+// horizontal sum of squares over a range of uint8_t
+int64_t hsum_sq(const uint8_t* A, int len) {
+  int64_t row_sum = 0;
+  int i = 0;
+
+#ifdef __AVX2__
+  __m256i sum_v_epu32 = _mm256_setzero_si256();
+  // vectorized
+  for (; i < len / 16 * 16; i += 16) {
+    // (i15, ..., i0)
+    __m128i src_epu8 = _mm_loadu_si128(reinterpret_cast<__m128i const*>(A + i));
+    __m256i src_epu16 = _mm256_cvtepu8_epi16(src_epu8);
+    // (i15 ^ 2, ..., i0 ^ 2)
+    __m256i sq_epu16 = _mm256_mullo_epi16(src_epu16, src_epu16);
+    // (i7 ^ 2, ..., i0 ^ 2)
+    __m128i sq_lo_epu16 = _mm256_castsi256_si128(sq_epu16);
+    // (i15 ^ 2, ..., i8 ^ 2)
+    __m128i sq_hi_epu16 = _mm256_extractf128_si256(sq_epu16, 1);
+    // widen to epu32
+    __m256i sq_lo_epu32 = _mm256_cvtepu16_epi32(sq_lo_epu16);
+    __m256i sq_hi_epu32 = _mm256_cvtepu16_epi32(sq_hi_epu16);
+    // add to running sum
+    sum_v_epu32 = _mm256_add_epi32(sum_v_epu32, sq_lo_epu32);
+    sum_v_epu32 = _mm256_add_epi32(sum_v_epu32, sq_hi_epu32);
+  }
+
+  alignas(64) int32_t temp[8];
+  _mm256_store_si256(reinterpret_cast<__m256i*>(temp), sum_v_epu32);
+  for (int k = 0; k < 8; ++k) {
+    row_sum += temp[k];
+  }
+#endif // __AVX2__
+
+  // scalar
+  for (; i < len; ++i) {
+    row_sum += A[i] * A[i];
+  }
+
+  return row_sum;
+}
+
+// horizontal sum of squares over a range of int8_t
+int64_t hsum_sq(const int8_t* A, int len) {
+  int64_t row_sum = 0;
+  int i = 0;
+
+#ifdef __AVX2__
+  __m256i sum_v_epi32 = _mm256_setzero_si256();
+  // vectorized
+  for (; i < len / 16 * 16; i += 16) {
+    // (i15, ..., i0)
+    __m128i src_epi8 = _mm_loadu_si128(reinterpret_cast<__m128i const*>(A + i));
+    __m256i src_epi16 = _mm256_cvtepi8_epi16(src_epi8);
+    // (i15 ^ 2, ..., i0 ^ 2)
+    __m256i sq_epi16 = _mm256_mullo_epi16(src_epi16, src_epi16);
+    // (i7 ^ 2, ..., i0 ^ 2)
+    __m128i sq_lo_epi16 = _mm256_castsi256_si128(sq_epi16);
+    // (i15 ^ 2, ..., i8 ^ 2)
+    __m128i sq_hi_epi16 = _mm256_extractf128_si256(sq_epi16, 1);
+    // widen to epi32
+    __m256i sq_lo_epi32 = _mm256_cvtepi16_epi32(sq_lo_epi16);
+    __m256i sq_hi_epi32 = _mm256_cvtepi16_epi32(sq_hi_epi16);
+    // add to running sum
+    sum_v_epi32 = _mm256_add_epi32(sum_v_epi32, sq_lo_epi32);
+    sum_v_epi32 = _mm256_add_epi32(sum_v_epi32, sq_hi_epi32);
+  }
+
+  alignas(64) int32_t temp[8];
+  _mm256_store_si256(reinterpret_cast<__m256i*>(temp), sum_v_epi32);
+  for (int k = 0; k < 8; ++k) {
+    row_sum += temp[k];
+  }
+#endif // __AVX2__
+
+  // scalar
+  for (; i < len; ++i) {
+    row_sum += A[i] * A[i];
+  }
+
+  return row_sum;
+}
+
+// horizontal sum os squares over a range of int32_t
+// floats throughout are necessary to prevent overflow
+float hsum_sq(const int32_t* A, int len) {
+  float row_sum = 0;
+  int i = 0;
+
+#ifdef __AVX2__
+  __m256 sum_ps = _mm256_setzero_ps();
+  // vectorized
+  for (; i < len / 8 * 8; i += 8) {
+    __m256i src_epi32 = _mm256_loadu_si256(reinterpret_cast<__m256i const*>(A + i));
+    __m256 src_ps = _mm256_cvtepi32_ps(src_epi32);
+    sum_ps = _mm256_add_ps(sum_ps, _mm256_mul_ps(src_ps, src_ps));
+  }
+
+  alignas(64) float temp[8];
+  _mm256_store_ps(temp, sum_ps);
+  for (int k = 0; k < 8; ++k) {
+    row_sum += static_cast<float>(temp[k]);
+  }
+#endif // __AVX2__
+
+  // scalar
+  for (; i < len; ++i) {
+    int64_t cur = static_cast<int64_t>(A[i]);
+    row_sum += (float)cur * (float)cur;
+  }
+
+  return row_sum;
+}
+
 void qrelu_kernel(const Tensor& qx, Tensor& qy) {
   const auto zero_point = qx.q_zero_point();
   AT_DISPATCH_QINT_TYPES(qx.scalar_type(), "qrelu", [&]() {
@@ -1485,6 +1705,38 @@ void qtopk_kernel(Tensor& values,
   });
 }
 
+template <typename T>
+inline void do_bn_compute(
+    typename T::underlying* X_ptr,
+    typename T::underlying* Y_ptr,
+    Vec256<float> & fake_scale,
+    Vec256<float> & in_zp_vec,
+    Vec256<float> & scale_neg_zp_premul,
+    int64_t out_zero_point,
+    Vec256<T> & out_zero_point_v,
+    float*  alpha,
+    float* beta,
+    int64_t vec_num,
+    bool ReluFused,
+    int64_t kVLen
+) {
+  using Vec = Vec256<T>;
+  auto vals_q = Vec::loadu(X_ptr);
+  // Fake scale of 1.0 here, should not affect performance (FMA in place of sub)
+  auto vals_dq = vals_q.dequantize(fake_scale, in_zp_vec, scale_neg_zp_premul);
+  for (size_t idx = 0; idx < vec_num; ++idx) {
+    auto alpha_v = Vec256<float>::loadu(alpha + idx * kVLen);
+    auto beta_v = Vec256<float>::loadu(beta + idx * kVLen);
+    vals_dq[idx] = vec256::fmadd(alpha_v, vals_dq[idx], beta_v);
+  }
+  auto outputs_q = Vec::quantize(vals_dq, /*output_scale=*/1.0f, out_zero_point, /*inv_output_scale=*/1.0f);
+  // Fake scale again
+  if (ReluFused) {
+    outputs_q = outputs_q.maximum(out_zero_point_v);
+  }
+  outputs_q.store(Y_ptr, vec_num * kVLen);
+}
+
 template <bool ReluFused>
 void q_batch_norm_kernel(
     int64_t N,
@@ -1500,6 +1752,8 @@ void q_batch_norm_kernel(
   AT_DISPATCH_QINT_TYPES(input.scalar_type(), "qbatch_norm", [&]() {
     float* alpha = a.data_ptr<float>();
     float* beta = b.data_ptr<float>();
+    auto minimum = std::numeric_limits<scalar_t::underlying>::lowest();
+    auto maximum = std::numeric_limits<scalar_t::underlying>::max();
     scalar_t::underlying* X =
         reinterpret_cast<scalar_t::underlying*>(input.data_ptr());
     scalar_t::underlying* Y = reinterpret_cast<scalar_t::underlying*>(output.data_ptr());
@@ -1512,41 +1766,62 @@ void q_batch_norm_kernel(
     auto fake_scale = Vec256<float>(1.0f);
     auto scale_neg_zp_premul = fake_scale * in_zp_vec.neg();
     auto out_zero_point_v = Vec(scalar_t(out_zero_point));
-
-    // TODO replace with TensorIterator implementation once #33166 is fixed.
+    size_t lanes = Vec::float_num_vecs() * kVLen;
     for (int64_t i = 0; i < outer_size; ++i) {
-      int64_t n = C / (Vec::float_num_vecs() * kVLen) * (Vec::float_num_vecs() * kVLen);
-      int64_t r = C % (Vec::float_num_vecs() * kVLen);
       auto* X_ptr = reinterpret_cast<typename scalar_t::underlying*>(X + i * C);
       auto* Y_ptr = reinterpret_cast<typename scalar_t::underlying*>(Y + i * C);
+      int64_t ch = 0;
 
-      for (int64_t j = 0; j < n; j += Vec::float_num_vecs() * kVLen) {
-        auto vals_q = Vec::loadu(X_ptr + j);
-        // Fake scale of 1.0 here, should not affect performance (FMA in place of sub)
-        auto vals_dq = vals_q.dequantize(fake_scale, in_zp_vec, scale_neg_zp_premul);
-        for (size_t idx = 0; idx < vals_dq.size(); ++idx) {
-          auto alpha_v = Vec256<float>::loadu(alpha + j + idx * kVLen);
-          auto beta_v = Vec256<float>::loadu(beta + j + idx * kVLen);
-          vals_dq[idx] = vec256::fmadd(alpha_v, vals_dq[idx], beta_v);
-        }
-        // Fake scale again
-        auto outputs_q = Vec::quantize(vals_dq, /*output_scale=*/1.0f, out_zero_point, /*inv_output_scale=*/1.0f);
-        if (ReluFused) {
-          outputs_q = outputs_q.relu(out_zero_point_v);
-        }
-        outputs_q.store(Y_ptr + j);
+      for(; ch + lanes <= C; ch += lanes ) {
+        do_bn_compute<scalar_t>(
+          X_ptr + ch,
+          Y_ptr + ch,
+          fake_scale,
+          in_zp_vec,
+          scale_neg_zp_premul,
+          out_zero_point,
+          out_zero_point_v,
+          alpha + ch,
+          beta + ch,
+          Vec::float_num_vecs(),
+          ReluFused,
+          kVLen
+        );
       }
 
-      for (int64_t j = 0; j < r; ++j) {
+      // for channel between 8 and 32, still use 32 width for performance
+      // Benchmark shows it is faster than doing 8 channels each time
+      int64_t elem_size = C - ch;
+      if ((lanes == 32) && elem_size >= kVLen) {
+        int64_t vec_num = elem_size / kVLen;
+        std::vector<typename scalar_t::underlying> buf_in(lanes);
+        memcpy(buf_in.data(), X_ptr + ch, vec_num * kVLen); // 3 cycles
+        do_bn_compute<scalar_t>(
+          buf_in.data(),
+          Y_ptr + ch,
+          fake_scale,
+          in_zp_vec,
+          scale_neg_zp_premul,
+          out_zero_point,
+          out_zero_point_v,
+          alpha + ch,
+          beta + ch,
+          vec_num,
+          ReluFused,
+          kVLen
+        );
+        ch += vec_num * kVLen;
+      }
+      // for channels less than 8
+      for (; ch < C; ++ch) {
         long quantized_down = out_zero_point +
-            lrintf(alpha[n + j] * (X_ptr[n + j] - in_zero_point) +
-                        beta[n + j]);
+            lrintf(alpha[ch] * (X_ptr[ch] - in_zero_point) +
+                        beta[ch]);
         if (ReluFused) { // static if
           quantized_down = std::max<long>(quantized_down, out_zero_point);
         }
-        Y_ptr[n + j] = std::min<long>(
-            std::max<long>(quantized_down, std::numeric_limits<scalar_t::underlying>::min()),
-            std::numeric_limits<scalar_t::underlying>::max());
+        Y_ptr[ch] = std::min<long>(
+            std::max<long>(quantized_down, minimum), maximum);
       }
     }
 });
@@ -1614,6 +1889,120 @@ void fake_quant_grad_per_channel_cpu(TensorIterator &iter, int64_t quant_min, in
     });
 }
 
+template <typename T>
+void quantized_layer_norm_kernel_impl(
+    const Tensor& X,
+    const Tensor& gamma,
+    const Tensor& beta,
+    int64_t M,
+    int64_t N,
+    float eps,
+    Tensor* Y) {
+
+}
+
+void quantized_layer_norm_kernel(
+    const Tensor& X,
+    const Tensor& gamma,
+    const Tensor& beta,
+    int64_t M,
+    int64_t N,
+    double eps,
+    Tensor* Y) {
+  AT_DISPATCH_QINT_TYPES(X.scalar_type(), "quantized_layer_norm_kernel_impl_cpu", [&]() {
+    using qVec = vec256::Vec256<scalar_t>;
+    using fVec = vec256::Vec256<float>;
+
+    TORCH_INTERNAL_ASSERT(X.numel() == M * N, "Unexpected num elements in X");
+    TORCH_INTERNAL_ASSERT(!gamma.defined() || gamma.numel() == N,
+        "Unexpected size of gamma");
+    TORCH_INTERNAL_ASSERT(!beta.defined() || beta.numel() == N,
+        "Unexpected size of beta");
+    scalar_t* X_data = X.data_ptr<scalar_t>();
+    const float* gamma_data = gamma.defined() ? gamma.data_ptr<float>() : nullptr;
+    const float* beta_data = beta.defined() ? beta.data_ptr<float>() : nullptr;
+    scalar_t* Y_data = Y->data_ptr<scalar_t>();
+    const bool gamma_null = gamma_data == nullptr;
+    const bool beta_null = beta_data == nullptr;
+    int64_t x_zp = X.q_zero_point();
+    float x_scale = X.q_scale();
+    fVec x_zp_vec((float)x_zp);
+    fVec one_vec(1.0f);
+    fVec zero_vec(0.0f);
+    float x_fake_scale = 1.0f;
+    fVec x_fake_scale_vec(x_fake_scale);
+    fVec x_fake_scale_zp_neg_premul_vec = x_fake_scale_vec * x_zp_vec.neg();
+    int64_t y_zp = Y->q_zero_point();
+    float y_scale = Y->q_scale();
+    float y_inv_scale = 1.0f / y_scale;
+
+    constexpr int kFloatVLen = 8;
+    int64_t kIntVLen = kFloatVLen * qVec::float_num_vecs();
+    int64_t kNumIntVecInLayer = N / kIntVLen;
+    int64_t kNonVecRemInLayer = N % kIntVLen;
+
+    at::parallel_for(0, M, 1, [&](int64_t start, int64_t end) {
+      for (int64_t i = start; i < end; ++i) {
+
+        scalar_t* X_ptr = X_data + i * N;
+        scalar_t* Y_ptr = Y_data + i * N;
+
+        // First pass: calculate mean and variance.
+
+        scalar_t::underlying* X_ptr_underlying = reinterpret_cast<scalar_t::underlying*>(X_ptr);
+        auto l_sum_shifted = hsum(X_ptr_underlying, N);
+        auto l_sum_sq_shifted = hsum_sq(X_ptr_underlying, N);
+        float l_mean_shifted_div_scale_x = static_cast<float>(l_sum_shifted) / N;
+        // mean(dqX) / scale_x
+        float layer_mean_div_scale_x = l_mean_shifted_div_scale_x - x_zp;
+        // var(dqX) / scale_x^2
+        float layer_var_div_scale_x_sq =
+          std::max(static_cast<float>(l_sum_sq_shifted) / N -
+              l_mean_shifted_div_scale_x * l_mean_shifted_div_scale_x, 0.0f);
+        // scale_x / sqrt(var(dqX) + eps)
+        float scale_x_div_layer_std = x_scale /
+          std::sqrt(layer_var_div_scale_x_sq * x_scale * x_scale + eps);
+        fVec layer_mean_div_scale_xVec(layer_mean_div_scale_x);
+        fVec scale_x_div_layer_stdVec(scale_x_div_layer_std);
+
+        // Second pass: normalize
+
+        // TODO replace with TensorIterator implementation once #33166 is fixed.
+        for (int64_t vecIdx = 0; vecIdx < kNumIntVecInLayer; vecIdx++) {
+          int64_t vecStartIdx = vecIdx * kIntVLen;
+          auto qXVec = qVec::loadu(X_ptr + vecStartIdx);
+          auto dqXVec = qXVec.dequantize(x_fake_scale_vec, x_zp_vec,
+              x_fake_scale_zp_neg_premul_vec);
+          for (int dqXVecIdx = 0; dqXVecIdx < dqXVec.size(); dqXVecIdx++) {
+            int64_t vecVecStartIdx = vecStartIdx + dqXVecIdx * kFloatVLen;
+            auto gammaVec = gamma_null
+              ? one_vec
+              : fVec::loadu(gamma_data + vecVecStartIdx);
+            auto betaVec = beta_null
+              ? zero_vec
+              : fVec::loadu(beta_data + vecVecStartIdx);
+            dqXVec[dqXVecIdx] =
+              (dqXVec[dqXVecIdx] - layer_mean_div_scale_xVec) *
+                scale_x_div_layer_stdVec * gammaVec + betaVec;
+            qVec::quantize(dqXVec, y_scale, y_zp, y_inv_scale)
+              .store(Y_ptr + vecStartIdx);
+          }
+        }
+        for (int64_t remIdx = N - kNonVecRemInLayer; remIdx < N; remIdx++) {
+          const float gamma_v = gamma_null ? 1.0f : gamma_data[remIdx];
+          const float beta_v = beta_null ? 0.0f : beta_data[remIdx];
+          auto qXVal = X_ptr[remIdx];
+          float dqXVal = at::dequantize_val(x_fake_scale, x_zp, qXVal);
+          float dqY =
+            ((dqXVal - layer_mean_div_scale_x) * scale_x_div_layer_std) * gamma_v + beta_v;
+          Y_ptr[remIdx] = at::quantize_val<scalar_t>(y_scale, y_zp, dqY);
+        }
+      }
+    }); // parallel_for
+
+  });
+}
+
 } // namespace
 
 REGISTER_DISPATCH(qrelu_stub, &qrelu_kernel);
@@ -1649,6 +2038,7 @@ REGISTER_DISPATCH(fake_quant_tensor_stub, &fake_quantize_tensor_kernel);
 REGISTER_DISPATCH(fake_quant_grad_tensor_stub, &fake_quantize_grad_tensor_kernel);
 REGISTER_DISPATCH(fake_quant_per_channel_stub, &fake_quant_per_channel_cpu);
 REGISTER_DISPATCH(fake_quant_grad_per_channel_stub, &fake_quant_grad_per_channel_cpu);
+REGISTER_DISPATCH(quantized_layer_norm_stub, &quantized_layer_norm_kernel);
 
 } // namespace native
 } // namespace at
