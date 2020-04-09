@@ -6,7 +6,6 @@
 #include <ATen/cuda/detail/TensorInfo.cuh>
 #include <ATen/cuda/detail/IndexUtils.cuh>
 #include <ATen/cuda/detail/KernelUtils.h>
-#include <ATen/native/cuda/LaunchUtils.h>
 #include <THC/THCNumerics.cuh>
 #include <c10/macros/Macros.h>
 
@@ -21,7 +20,7 @@ __device__ inline int min(int a, int b) {
 __device__ inline int max(int a, int b) {
   return a >= b ? a : b;
 }
-  
+
 template <typename scalar_t, typename accscalar_t>
 __global__ void avg_pool2d_out_cuda_frame(const int nthreads,
     const scalar_t* const bottom_data, const int num, const int channels,
@@ -272,8 +271,6 @@ void avg_pool2d_out_cuda_template(
 
   output.resize_({nbatch, nInputPlane, outputHeight, outputWidth});
 
-  output.unsafeGetTensorImpl()->empty_tensor_restride(memory_format);
-
   const int32_t count = safe_downcast<int32_t, int64_t>(output.numel());
   const uint32_t num_threads = std::min(at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, 1024);
   const uint32_t num_blocks = cuda::ATenCeilDiv<uint32_t>(count, num_threads);
@@ -292,7 +289,8 @@ void avg_pool2d_out_cuda_template(
 
         switch (memory_format){
           case MemoryFormat::ChannelsLast: {
-             avg_pool2d_out_cuda_frame_nhwc<scalar_t, accscalar_t>
+            output.unsafeGetTensorImpl()->empty_tensor_restride(MemoryFormat::ChannelsLast);
+            avg_pool2d_out_cuda_frame_nhwc<scalar_t, accscalar_t>
                <<<num_blocks, num_threads, 0, at::cuda::getCurrentCUDAStream()>>>(
                  count,
                  input_data,
@@ -406,7 +404,6 @@ Tensor& avg_pool2d_backward_out_cuda_template(
     outputHeight, outputWidth);
 
   gradInput.resize_as_(input);
-  gradInput.unsafeGetTensorImpl()->empty_tensor_restride(memory_format);
 
   const int32_t count = safe_downcast<int32_t, int64_t>(input.numel());
   const uint32_t num_threads = std::min(at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, 1024);
@@ -426,6 +423,7 @@ Tensor& avg_pool2d_backward_out_cuda_template(
 
         switch (memory_format) {
           case MemoryFormat::ChannelsLast: {
+            gradInput.unsafeGetTensorImpl()->empty_tensor_restride(MemoryFormat::ChannelsLast);
             avg_pool2d_backward_out_cuda_frame_nhwc<scalar_t, accscalar_t>
               <<<num_blocks, num_threads, 0, at::cuda::getCurrentCUDAStream()>>>(
                 count,
