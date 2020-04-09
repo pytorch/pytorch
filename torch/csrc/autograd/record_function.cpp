@@ -98,7 +98,7 @@ class CallbackManager {
 
   void popCallback(bool is_thread_local) {
     auto& cb_list = is_thread_local ? tls_callbacks_ : callbacks_;
-    TORCH_CHECK(!callbacks_.empty(), "Empty callbacks stack");
+    TORCH_CHECK(!cb_list.empty(), "Empty callbacks stack");
     cb_list.pop_back();
     if (!is_thread_local) {
       ++global_callbacks_version_;
