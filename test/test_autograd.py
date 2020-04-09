@@ -2202,6 +2202,15 @@ class TestAutograd(TestCase):
                               lambda a, b, c, d: torch.broadcast_tensors(a, b, c, d),
                               True, f_args_variable, f_args_tensor)
 
+    def test_block_diag(self):
+        f_args_variable = (torch.randn(1, S, requires_grad=True),
+                           torch.randn(2, S, requires_grad=True),
+                           torch.randn(3, S, requires_grad=True))
+        f_args_tensor = deepcopy(unpack_variables(f_args_variable))
+        run_functional_checks(self, "test_block_diag", "block_diag",
+                              lambda a, b, c: torch.block_diag(a, b, c),
+                              True, f_args_variable, f_args_tensor)
+
     def test_cat(self):
         f_args_variable = (torch.randn(1, S, S, requires_grad=True),
                            torch.randn(2, S, S, requires_grad=True),
