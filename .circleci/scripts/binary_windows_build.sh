@@ -15,6 +15,12 @@ export CUDA_VERSION="${configs[2]/cu/}"
 export LIBTORCH_CONFIG="${configs[3]}"
 export VC_YEAR=2017
 export USE_SCCACHE=1
+export SCCACHE_BUCKET=ossci-compiler-cache-circleci-v2
+
+set +x
+export AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_SCCACHE_S3_BUCKET_V4:-}
+export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_SCCACHE_S3_BUCKET_V4:-}
+set -x
 
 if [[ "$PACKAGE_TYPE" == 'conda' ]]; then
   ./windows/internal/build_conda.bat
