@@ -987,8 +987,8 @@ void export_opnames(const script::Module& m, std::set<std::string>& opnames) {
           op_item.size() == 2,
           "There should be two parts in an operator name.");
       opnames.emplace(
-          op_item[0].toString()->string() + "." +
-          op_item[1].toString()->string());
+          operator_str(op_item[0].toString()->string(),
+          op_item[1].toString()->string()));
     }
   }
 }

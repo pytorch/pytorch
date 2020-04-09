@@ -61,6 +61,15 @@ IValue expect_field(
   return row->elements().at(1);
 }
 
+std::string operator_str(const std::string& name,
+    const std::string& overloadname) {
+  std::string result = name;
+  if (!overloadname.empty()) {
+    result += "." + overloadname;
+  }
+  return result;
+}
+
 namespace {
 void print_unsupported_ops_and_throw(
     const std::unordered_set<std::string>& unsupported_ops) {
@@ -120,8 +129,8 @@ void parseMethods(
           op_item[0].toString()->string(), op_item[1].toString()->string());
       if (!op_found) {
         unsupported_op_names.emplace(
-            op_item[0].toString()->string() + "." +
-            op_item[1].toString()->string());
+            operator_str(op_item[0].toString()->string(),
+            op_item[1].toString()->string()));
       }
     }
 
