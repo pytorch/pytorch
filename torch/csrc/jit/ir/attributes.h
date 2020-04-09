@@ -21,21 +21,35 @@ constexpr int max_tensor_display_size = 10;
 
 enum class AttributeKind { f, fs, i, is, s, ss, t, ts, g, gs, ty, tys, ival };
 static inline const char* toString(AttributeKind kind) {
-  static const char* names[] = {"f",
-                                "fs",
-                                "i",
-                                "is",
-                                "s",
-                                "ss",
-                                "t",
-                                "ts",
-                                "g",
-                                "gs",
-                                "ty",
-                                "tys",
-                                "ival"};
-  AT_ASSERT(size_t(kind) < sizeof(names) / sizeof(AttributeKind));
-  return names[int(kind)];
+  switch (kind) {
+    case AttributeKind::f:
+      return "f";
+    case AttributeKind::fs:
+      return "fs";
+    case AttributeKind::i:
+      return "i";
+    case AttributeKind::is:
+      return "is";
+    case AttributeKind::s:
+      return "s";
+    case AttributeKind::ss:
+      return "ss";
+    case AttributeKind::t:
+      return "t";
+    case AttributeKind::ts:
+      return "ts";
+    case AttributeKind::g:
+      return "g";
+    case AttributeKind::gs:
+      return "gs";
+    case AttributeKind::ty:
+      return "ty";
+    case AttributeKind::tys:
+      return "tys";
+    case AttributeKind::ival:
+      return "ival";
+  }
+  TORCH_INTERNAL_ASSERT(false, "should never get here");
 }
 
 struct AttributeValue {
