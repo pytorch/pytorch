@@ -6122,7 +6122,7 @@ class TestTorchDeviceType(TestCase):
                 with self.assertRaises(RuntimeError):
                     getattr(a, op + '_')(b)
                 continue
-            if dtype.is_complex or other_dtype.is_complex:
+            if dtype.is_complex:
                 with self.assertRaises(RuntimeError):
                     getattr(a, op + '_')(b)
                 continue
@@ -10685,7 +10685,7 @@ class TestTorchDeviceType(TestCase):
     def test_copy_all_dtypes_and_devices(self, device):
         from copy import copy
         for dt in torch.testing.get_all_dtypes():
-            #TODO: add test for complex when complex storage type is supported
+            # TODO: add test for complex when complex storage type is supported
             if dt.is_complex:
                 self.assertRaises(RuntimeError, lambda: copy(torch.tensor([1], dtype=dt, device=device).clone()))
                 continue
@@ -10804,7 +10804,7 @@ class TestTorchDeviceType(TestCase):
         for dtype in torch.testing.get_all_dtypes():
             if dtype == torch.bfloat16:
                 continue
-            if dt.is_complex:
+            if dtype.is_complex:
                 self.assertRaises(RuntimeError, lambda: torch.eye(2, device=device, dtype=dtype))
                 continue
             for n, m in product([3, 5, 7], repeat=2):
@@ -11083,11 +11083,11 @@ class TestTorchDeviceType(TestCase):
 
     def test_index_fill(self, device):
         for dt in torch.testing.get_all_dtypes():
-            if dt == torch.half or dt == torch.bfloat16:
-                continue
-
             x = torch.tensor([[1, 2], [4, 5]], dtype=dt, device=device)
             index = torch.tensor([0], device=device)
+            if dt == torch.half or dt == torch.bfloat16 or dt.is_complex:
+                self.assertRaises(RuntimeError, lambda: x.index_fill_(1, index, 0))
+                continue
             x.index_fill_(1, index, 0)
             self.assertEqual(x, torch.tensor([[0, 2], [0, 5]], dtype=dt, device=device))
 
