@@ -52,6 +52,10 @@ public:
     return bitset_ & (static_cast<long long int>(1) << index);
   }
 
+  constexpr bool is_entirely_unset() const noexcept {
+    return 0 == bitset_;
+  }
+
   // Call the given functor with the index of each bit that is set
   template <class Func>
   void for_each_set_bit(Func&& func) const {
@@ -82,9 +86,17 @@ private:
       return __builtin_ffsll(bitset_);
     #endif
   }
+
+  friend bool operator==(bitset lhs, bitset rhs) noexcept {
+    return lhs.bitset_ == rhs.bitset_;
+  }
   
   bitset_type bitset_;
 };
+
+inline bool operator!=(bitset lhs, bitset rhs) noexcept {
+  return !(lhs == rhs);
+}
 
 } // namespace utils
 } // namespace c10
