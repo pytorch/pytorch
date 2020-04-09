@@ -23,7 +23,7 @@ bool _unused = []() {
       GradMode::set_enabled(v.value);
     }
 #else
-    []() { return false; },
+    []() { return SettingValue{.value = false};
     [](SettingValue v) {}
 #endif
   );
