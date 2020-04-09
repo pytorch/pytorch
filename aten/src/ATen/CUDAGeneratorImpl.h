@@ -7,13 +7,13 @@
 
 namespace at {
 
-struct TORCH_CUDA_API CUDAGenerator : public c10::GeneratorImpl {
+struct TORCH_CUDA_API CUDAGeneratorImpl : public c10::GeneratorImpl {
   // Constructors
-  CUDAGenerator(DeviceIndex device_index = -1);
-  ~CUDAGenerator() = default;
+  CUDAGeneratorImpl(DeviceIndex device_index = -1);
+  ~CUDAGeneratorImpl() = default;
 
-  // CUDAGenerator methods
-  std::shared_ptr<CUDAGenerator> clone() const;
+  // CUDAGeneratorImpl methods
+  std::shared_ptr<CUDAGeneratorImpl> clone() const;
   void set_current_seed(uint64_t seed) override;
   uint64_t current_seed() const override;
   uint64_t seed() override;
@@ -23,7 +23,7 @@ struct TORCH_CUDA_API CUDAGenerator : public c10::GeneratorImpl {
   static DeviceType device_type();
 
 private:
-  CUDAGenerator* clone_impl() const override;
+  CUDAGeneratorImpl* clone_impl() const override;
   uint64_t seed_ = default_rng_seed_val;
   uint64_t philox_offset_per_thread_ = 0;
 };
