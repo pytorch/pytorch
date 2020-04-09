@@ -761,7 +761,7 @@ jobs:
             # Install Anaconda if we need to
             if [ -n "${CAFFE2_USE_ANACONDA}" ]; then
               rm -rf ${TMPDIR}/anaconda
-              curl --retry 3 -o ${TMPDIR}/conda.sh https://repo.continuum.io/miniconda/Miniconda${ANACONDA_VERSION}-latest-MacOSX-x86_64.sh
+              curl --retry 3 -o ${TMPDIR}/conda.sh https://repo.anaconda.com/miniconda/Miniconda${ANACONDA_VERSION}-latest-MacOSX-x86_64.sh
               chmod +x ${TMPDIR}/conda.sh
               /bin/bash ${TMPDIR}/conda.sh -b -p ${TMPDIR}/anaconda
               rm -f ${TMPDIR}/conda.sh
@@ -1119,7 +1119,7 @@ jobs:
     environment:
       BUILD_ENVIRONMENT: pytorch-python-doc-push
       # TODO: stop hardcoding this
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-gcc5.4:f990c76a-a798-42bb-852f-5be5006f8026"
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-gcc5.4:e43973a9-9d5a-4138-9181-a08a0fc55e2f"
     resource_class: large
     machine:
       image: ubuntu-1604:201903-01
@@ -1164,7 +1164,7 @@ jobs:
   pytorch_cpp_doc_push:
     environment:
       BUILD_ENVIRONMENT: pytorch-cpp-doc-push
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-gcc5.4:f990c76a-a798-42bb-852f-5be5006f8026"
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-gcc5.4:e43973a9-9d5a-4138-9181-a08a0fc55e2f"
     resource_class: large
     machine:
       image: ubuntu-1604:201903-01
@@ -1274,7 +1274,7 @@ jobs:
   pytorch_android_gradle_build:
     environment:
       BUILD_ENVIRONMENT: pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-build
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c:f990c76a-a798-42bb-852f-5be5006f8026"
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c:e43973a9-9d5a-4138-9181-a08a0fc55e2f"
       PYTHON_VERSION: "3.6"
     resource_class: large
     machine:
@@ -1360,7 +1360,7 @@ jobs:
   pytorch_android_publish_snapshot:
     environment:
       BUILD_ENVIRONMENT: pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-publish-snapshot
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c:f990c76a-a798-42bb-852f-5be5006f8026"
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c:e43973a9-9d5a-4138-9181-a08a0fc55e2f"
       PYTHON_VERSION: "3.6"
     resource_class: large
     machine:
@@ -1396,7 +1396,7 @@ jobs:
   pytorch_android_gradle_build-x86_32:
     environment:
       BUILD_ENVIRONMENT: pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-build-only-x86_32
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c:f990c76a-a798-42bb-852f-5be5006f8026"
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c:e43973a9-9d5a-4138-9181-a08a0fc55e2f"
       PYTHON_VERSION: "3.6"
     resource_class: large
     machine:
@@ -1557,6 +1557,77 @@ jobs:
             cd ${PROJ_ROOT}/ios/TestApp
             instruments -s -devices
             fastlane scan
+  pytorch_linux_bazel_build:
+    <<: *pytorch_params
+    machine:
+      image: ubuntu-1604:201903-01
+    steps:
+    # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
+    - attach_scripts
+    - setup_linux_system_environment
+    - checkout
+    - setup_ci_environment
+    - run:
+        name: Bazel Build
+        no_output_timeout: "1h"
+        command: |
+          set -e
+          # Pull Docker image and run build
+          echo "DOCKER_IMAGE: "${DOCKER_IMAGE}
+          time docker pull ${DOCKER_IMAGE} >/dev/null
+          export id=$(docker run --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -t -d -w /var/lib/jenkins ${DOCKER_IMAGE})
+
+          echo "Do NOT merge master branch into $CIRCLE_BRANCH in environment $BUILD_ENVIRONMENT"
+
+          git submodule sync && git submodule update -q --init --recursive
+
+          docker cp /home/circleci/project/. $id:/var/lib/jenkins/workspace
+
+          export COMMAND='((echo "export BUILD_ENVIRONMENT=${BUILD_ENVIRONMENT}" && echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace && cd workspace && .jenkins/pytorch/build.sh") | docker exec -u jenkins -i "$id" bash) 2>&1'
+
+          echo ${COMMAND} > ./command.sh && unbuffer bash ./command.sh | ts
+
+          # Push intermediate Docker image for next phase to use
+          if [ -z "${BUILD_ONLY}" ]; then
+            # Augment our output image name with bazel to avoid collisions
+            output_image=${DOCKER_IMAGE}-bazel-${CIRCLE_SHA1}
+            export COMMIT_DOCKER_IMAGE=$output_image
+            docker commit "$id" ${COMMIT_DOCKER_IMAGE}
+            time docker push ${COMMIT_DOCKER_IMAGE}
+          fi
+
+  pytorch_linux_bazel_test:
+    <<: *pytorch_params
+    machine:
+      image: ubuntu-1604:201903-01
+    steps:
+    # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
+    - attach_scripts
+    - setup_linux_system_environment
+    - setup_ci_environment
+    - run:
+        name: Test
+        no_output_timeout: "90m"
+        command: |
+          set -e
+          output_image=${DOCKER_IMAGE}-bazel-${CIRCLE_SHA1}
+          export COMMIT_DOCKER_IMAGE=$output_image
+          echo "DOCKER_IMAGE: "${COMMIT_DOCKER_IMAGE}
+
+          time docker pull ${COMMIT_DOCKER_IMAGE} >/dev/null
+
+          if [ -n "${USE_CUDA_DOCKER_RUNTIME}" ]; then
+            export id=$(docker run --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --runtime=nvidia -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
+          else
+            export id=$(docker run --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
+          fi
+
+          if [[ ${BUILD_ENVIRONMENT} == *"multigpu"* ]]; then
+            export COMMAND='((echo "export BUILD_ENVIRONMENT=${BUILD_ENVIRONMENT}" && echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace && cd workspace && .jenkins/pytorch/multigpu-test.sh") | docker exec -u jenkins -i "$id" bash) 2>&1'
+          else
+            export COMMAND='((echo "export BUILD_ENVIRONMENT=${BUILD_ENVIRONMENT}" && echo "export CIRCLE_PULL_REQUEST=${CIRCLE_PULL_REQUEST}" && echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace && cd workspace && .jenkins/pytorch/test.sh") | docker exec -u jenkins -i "$id" bash) 2>&1'
+          fi
+          echo ${COMMAND} > ./command.sh && unbuffer bash ./command.sh | ts
 
   promote_s3:
     <<: *promote_common
@@ -1805,6 +1876,7 @@ workflows:
               only:
                 - master
                 - /ci-all\/.*/
+                - /release\/.*/
       - pytorch_windows_test:
           name: pytorch_windows_vs2017_14.11_py36_cuda10.1_test1
           test_name: pytorch-windows-test1
@@ -1822,6 +1894,7 @@ workflows:
               only:
                 - master
                 - /ci-all\/.*/
+                - /release\/.*/
       - pytorch_windows_test:
           name: pytorch_windows_vs2017_14.11_py36_cuda10.1_test2
           test_name: pytorch-windows-test2
@@ -1839,6 +1912,7 @@ workflows:
               only:
                 - master
                 - /ci-all\/.*/
+                - /release\/.*/
       - pytorch_windows_build:
           name: pytorch_windows_vs2017_14.16_py36_cuda10.1_build
           cuda_version: "10"
@@ -1854,6 +1928,7 @@ workflows:
               only:
                 - master
                 - /ci-all\/.*/
+                - /release\/.*/
       - pytorch_windows_test:
           name: pytorch_windows_vs2017_14.16_py36_cuda10.1_test1
           test_name: pytorch-windows-test1
@@ -1871,6 +1946,7 @@ workflows:
               only:
                 - master
                 - /ci-all\/.*/
+                - /release\/.*/
       - pytorch_windows_test:
           name: pytorch_windows_vs2017_14.16_py36_cuda10.1_test2
           test_name: pytorch-windows-test2
@@ -1888,6 +1964,7 @@ workflows:
               only:
                 - master
                 - /ci-all\/.*/
+                - /release\/.*/
       - pytorch_windows_build:
           name: pytorch_windows_vs2019_py36_cuda10.1_build
           cuda_version: "10"
@@ -1931,8 +2008,9 @@ workflows:
               only:
                 - master
                 - /ci-all\/.*/
+                - /release\/.*/
           build_environment: "pytorch-linux-xenial-pynightly-build"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-pynightly:f990c76a-a798-42bb-852f-5be5006f8026"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-pynightly:e43973a9-9d5a-4138-9181-a08a0fc55e2f"
       - pytorch_linux_test:
           name: pytorch_linux_xenial_pynightly_test
           requires:
@@ -1943,22 +2021,23 @@ workflows:
               only:
                 - master
                 - /ci-all\/.*/
+                - /release\/.*/
           build_environment: "pytorch-linux-xenial-pynightly-test"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-pynightly:f990c76a-a798-42bb-852f-5be5006f8026"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-pynightly:e43973a9-9d5a-4138-9181-a08a0fc55e2f"
           resource_class: large
       - pytorch_linux_build:
           name: pytorch_linux_xenial_py3_6_gcc5_4_build
           requires:
             - setup
           build_environment: "pytorch-linux-xenial-py3.6-gcc5.4-build"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-gcc5.4:f990c76a-a798-42bb-852f-5be5006f8026"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-gcc5.4:e43973a9-9d5a-4138-9181-a08a0fc55e2f"
       - pytorch_linux_test:
           name: pytorch_linux_xenial_py3_6_gcc5_4_test
           requires:
             - setup
             - pytorch_linux_xenial_py3_6_gcc5_4_build
           build_environment: "pytorch-linux-xenial-py3.6-gcc5.4-test"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-gcc5.4:f990c76a-a798-42bb-852f-5be5006f8026"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-gcc5.4:e43973a9-9d5a-4138-9181-a08a0fc55e2f"
           resource_class: large
       - pytorch_python_doc_push:
           requires:
@@ -1972,7 +2051,7 @@ workflows:
             - setup
             - pytorch_linux_xenial_py3_6_gcc5_4_build
           build_environment: "pytorch-linux-backward-compatibility-check-test"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-gcc5.4:f990c76a-a798-42bb-852f-5be5006f8026"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-gcc5.4:e43973a9-9d5a-4138-9181-a08a0fc55e2f"
           resource_class: large
       - pytorch_linux_build:
           name: pytorch_paralleltbb_linux_xenial_py3_6_gcc5_4_build
@@ -1983,8 +2062,9 @@ workflows:
               only:
                 - master
                 - /ci-all\/.*/
+                - /release\/.*/
           build_environment: "pytorch-paralleltbb-linux-xenial-py3.6-gcc5.4-build"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-gcc5.4:f990c76a-a798-42bb-852f-5be5006f8026"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-gcc5.4:e43973a9-9d5a-4138-9181-a08a0fc55e2f"
       - pytorch_linux_test:
           name: pytorch_paralleltbb_linux_xenial_py3_6_gcc5_4_test
           requires:
@@ -1995,8 +2075,9 @@ workflows:
               only:
                 - master
                 - /ci-all\/.*/
+                - /release\/.*/
           build_environment: "pytorch-paralleltbb-linux-xenial-py3.6-gcc5.4-test"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-gcc5.4:f990c76a-a798-42bb-852f-5be5006f8026"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-gcc5.4:e43973a9-9d5a-4138-9181-a08a0fc55e2f"
           resource_class: large
       - pytorch_linux_build:
           name: pytorch_parallelnative_linux_xenial_py3_6_gcc5_4_build
@@ -2007,8 +2088,9 @@ workflows:
               only:
                 - master
                 - /ci-all\/.*/
+                - /release\/.*/
           build_environment: "pytorch-parallelnative-linux-xenial-py3.6-gcc5.4-build"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-gcc5.4:f990c76a-a798-42bb-852f-5be5006f8026"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-gcc5.4:e43973a9-9d5a-4138-9181-a08a0fc55e2f"
       - pytorch_linux_test:
           name: pytorch_parallelnative_linux_xenial_py3_6_gcc5_4_test
           requires:
@@ -2019,8 +2101,9 @@ workflows:
               only:
                 - master
                 - /ci-all\/.*/
+                - /release\/.*/
           build_environment: "pytorch-parallelnative-linux-xenial-py3.6-gcc5.4-test"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-gcc5.4:f990c76a-a798-42bb-852f-5be5006f8026"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-gcc5.4:e43973a9-9d5a-4138-9181-a08a0fc55e2f"
           resource_class: large
       - pytorch_linux_build:
           name: pytorch_linux_xenial_py3_6_gcc7_build
@@ -2031,8 +2114,9 @@ workflows:
               only:
                 - master
                 - /ci-all\/.*/
+                - /release\/.*/
           build_environment: "pytorch-linux-xenial-py3.6-gcc7-build"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-gcc7:f990c76a-a798-42bb-852f-5be5006f8026"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-gcc7:e43973a9-9d5a-4138-9181-a08a0fc55e2f"
       - pytorch_linux_test:
           name: pytorch_linux_xenial_py3_6_gcc7_test
           requires:
@@ -2043,36 +2127,37 @@ workflows:
               only:
                 - master
                 - /ci-all\/.*/
+                - /release\/.*/
           build_environment: "pytorch-linux-xenial-py3.6-gcc7-test"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-gcc7:f990c76a-a798-42bb-852f-5be5006f8026"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-gcc7:e43973a9-9d5a-4138-9181-a08a0fc55e2f"
           resource_class: large
       - pytorch_linux_build:
           name: pytorch_linux_xenial_py3_clang5_asan_build
           requires:
             - setup
           build_environment: "pytorch-linux-xenial-py3-clang5-asan-build"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-asan:f990c76a-a798-42bb-852f-5be5006f8026"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-asan:e43973a9-9d5a-4138-9181-a08a0fc55e2f"
       - pytorch_linux_test:
           name: pytorch_linux_xenial_py3_clang5_asan_test
           requires:
             - setup
             - pytorch_linux_xenial_py3_clang5_asan_build
           build_environment: "pytorch-linux-xenial-py3-clang5-asan-test"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-asan:f990c76a-a798-42bb-852f-5be5006f8026"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-asan:e43973a9-9d5a-4138-9181-a08a0fc55e2f"
           resource_class: large
       - pytorch_linux_build:
           name: pytorch_xla_linux_xenial_py3_6_clang7_build
           requires:
             - setup
           build_environment: "pytorch-xla-linux-xenial-py3.6-clang7-build"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-clang7:f990c76a-a798-42bb-852f-5be5006f8026"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-clang7:e43973a9-9d5a-4138-9181-a08a0fc55e2f"
       - pytorch_linux_test:
           name: pytorch_xla_linux_xenial_py3_6_clang7_test
           requires:
             - setup
             - pytorch_xla_linux_xenial_py3_6_clang7_build
           build_environment: "pytorch-xla-linux-xenial-py3.6-clang7-test"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-clang7:f990c76a-a798-42bb-852f-5be5006f8026"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-clang7:e43973a9-9d5a-4138-9181-a08a0fc55e2f"
           resource_class: large
       - pytorch_linux_build:
           name: pytorch_linux_xenial_cuda9_cudnn7_py3_build
@@ -2083,8 +2168,9 @@ workflows:
               only:
                 - master
                 - /ci-all\/.*/
+                - /release\/.*/
           build_environment: "pytorch-linux-xenial-cuda9-cudnn7-py3-build"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9-cudnn7-py3:f990c76a-a798-42bb-852f-5be5006f8026"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9-cudnn7-py3:e43973a9-9d5a-4138-9181-a08a0fc55e2f"
       - pytorch_linux_test:
           name: pytorch_linux_xenial_cuda9_cudnn7_py3_test
           requires:
@@ -2095,8 +2181,9 @@ workflows:
               only:
                 - master
                 - /ci-all\/.*/
+                - /release\/.*/
           build_environment: "pytorch-linux-xenial-cuda9-cudnn7-py3-test"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9-cudnn7-py3:f990c76a-a798-42bb-852f-5be5006f8026"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9-cudnn7-py3:e43973a9-9d5a-4138-9181-a08a0fc55e2f"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - pytorch_linux_build:
@@ -2108,8 +2195,9 @@ workflows:
               only:
                 - master
                 - /ci-all\/.*/
+                - /release\/.*/
           build_environment: "pytorch-linux-xenial-cuda9.2-cudnn7-py3-gcc7-build"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9.2-cudnn7-py3-gcc7:f990c76a-a798-42bb-852f-5be5006f8026"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9.2-cudnn7-py3-gcc7:e43973a9-9d5a-4138-9181-a08a0fc55e2f"
       - pytorch_linux_test:
           name: pytorch_linux_xenial_cuda9_2_cudnn7_py3_gcc7_test
           requires:
@@ -2120,8 +2208,9 @@ workflows:
               only:
                 - master
                 - /ci-all\/.*/
+                - /release\/.*/
           build_environment: "pytorch-linux-xenial-cuda9.2-cudnn7-py3-gcc7-test"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9.2-cudnn7-py3-gcc7:f990c76a-a798-42bb-852f-5be5006f8026"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9.2-cudnn7-py3-gcc7:e43973a9-9d5a-4138-9181-a08a0fc55e2f"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - pytorch_linux_build:
@@ -2133,8 +2222,9 @@ workflows:
               only:
                 - master
                 - /ci-all\/.*/
+                - /release\/.*/
           build_environment: "pytorch-linux-xenial-cuda10.1-cudnn7-py3-gcc7-build"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda10.1-cudnn7-py3-gcc7:f990c76a-a798-42bb-852f-5be5006f8026"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda10.1-cudnn7-py3-gcc7:e43973a9-9d5a-4138-9181-a08a0fc55e2f"
       - pytorch_linux_test:
           name: pytorch_linux_xenial_cuda10_1_cudnn7_py3_gcc7_test
           requires:
@@ -2145,8 +2235,9 @@ workflows:
               only:
                 - master
                 - /ci-all\/.*/
+                - /release\/.*/
           build_environment: "pytorch-linux-xenial-cuda10.1-cudnn7-py3-gcc7-test"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda10.1-cudnn7-py3-gcc7:f990c76a-a798-42bb-852f-5be5006f8026"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda10.1-cudnn7-py3-gcc7:e43973a9-9d5a-4138-9181-a08a0fc55e2f"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - pytorch_linux_test:
@@ -2159,8 +2250,9 @@ workflows:
               only:
                 - master
                 - /ci-all\/.*/
+                - /release\/.*/
           build_environment: "pytorch-linux-xenial-cuda10.1-cudnn7-py3-multigpu-test"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda10.1-cudnn7-py3-gcc7:f990c76a-a798-42bb-852f-5be5006f8026"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda10.1-cudnn7-py3-gcc7:e43973a9-9d5a-4138-9181-a08a0fc55e2f"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.large
       - pytorch_linux_test:
@@ -2173,8 +2265,9 @@ workflows:
               only:
                 - master
                 - /ci-all\/.*/
+                - /release\/.*/
           build_environment: "pytorch-linux-xenial-cuda10.1-cudnn7-py3-NO_AVX2-test"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda10.1-cudnn7-py3-gcc7:f990c76a-a798-42bb-852f-5be5006f8026"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda10.1-cudnn7-py3-gcc7:e43973a9-9d5a-4138-9181-a08a0fc55e2f"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - pytorch_linux_test:
@@ -2187,8 +2280,9 @@ workflows:
               only:
                 - master
                 - /ci-all\/.*/
+                - /release\/.*/
           build_environment: "pytorch-linux-xenial-cuda10.1-cudnn7-py3-NO_AVX-NO_AVX2-test"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda10.1-cudnn7-py3-gcc7:f990c76a-a798-42bb-852f-5be5006f8026"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda10.1-cudnn7-py3-gcc7:e43973a9-9d5a-4138-9181-a08a0fc55e2f"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - pytorch_linux_test:
@@ -2201,8 +2295,9 @@ workflows:
               only:
                 - master
                 - /ci-all\/.*/
+                - /release\/.*/
           build_environment: "pytorch-linux-xenial-cuda10.1-cudnn7-py3-slow-test"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda10.1-cudnn7-py3-gcc7:f990c76a-a798-42bb-852f-5be5006f8026"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda10.1-cudnn7-py3-gcc7:e43973a9-9d5a-4138-9181-a08a0fc55e2f"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - pytorch_linux_test:
@@ -2215,22 +2310,23 @@ workflows:
               only:
                 - master
                 - /ci-all\/.*/
+                - /release\/.*/
           build_environment: "pytorch-linux-xenial-cuda10.1-cudnn7-py3-nogpu-test"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda10.1-cudnn7-py3-gcc7:f990c76a-a798-42bb-852f-5be5006f8026"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda10.1-cudnn7-py3-gcc7:e43973a9-9d5a-4138-9181-a08a0fc55e2f"
           resource_class: large
       - pytorch_linux_build:
           name: pytorch_linux_xenial_cuda10_2_cudnn7_py3_gcc7_build
           requires:
             - setup
           build_environment: "pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7-build"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7:f990c76a-a798-42bb-852f-5be5006f8026"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7:e43973a9-9d5a-4138-9181-a08a0fc55e2f"
       - pytorch_linux_test:
           name: pytorch_linux_xenial_cuda10_2_cudnn7_py3_gcc7_test
           requires:
             - setup
             - pytorch_linux_xenial_cuda10_2_cudnn7_py3_gcc7_build
           build_environment: "pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7-test"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7:f990c76a-a798-42bb-852f-5be5006f8026"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7:e43973a9-9d5a-4138-9181-a08a0fc55e2f"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - pytorch_linux_build:
@@ -2238,14 +2334,14 @@ workflows:
           requires:
             - setup
           build_environment: "pytorch-libtorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7-build"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7:f990c76a-a798-42bb-852f-5be5006f8026"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7:e43973a9-9d5a-4138-9181-a08a0fc55e2f"
       - pytorch_linux_test:
           name: pytorch_libtorch_linux_xenial_cuda10_2_cudnn7_py3_gcc7_test
           requires:
             - setup
             - pytorch_libtorch_linux_xenial_cuda10_2_cudnn7_py3_gcc7_build
           build_environment: "pytorch-libtorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7-test"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7:f990c76a-a798-42bb-852f-5be5006f8026"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7:e43973a9-9d5a-4138-9181-a08a0fc55e2f"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - pytorch_linux_build:
@@ -2253,7 +2349,7 @@ workflows:
           requires:
             - setup
           build_environment: "pytorch-linux-xenial-py3-clang5-android-ndk-r19c-x86_32-build"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c:f990c76a-a798-42bb-852f-5be5006f8026"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c:e43973a9-9d5a-4138-9181-a08a0fc55e2f"
       - pytorch_linux_build:
           name: pytorch_linux_xenial_py3_clang5_android_ndk_r19c_x86_64_build
           requires:
@@ -2263,8 +2359,9 @@ workflows:
               only:
                 - master
                 - /ci-all\/.*/
+                - /release\/.*/
           build_environment: "pytorch-linux-xenial-py3-clang5-android-ndk-r19c-x86_64-build"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c:f990c76a-a798-42bb-852f-5be5006f8026"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c:e43973a9-9d5a-4138-9181-a08a0fc55e2f"
       - pytorch_linux_build:
           name: pytorch_linux_xenial_py3_clang5_android_ndk_r19c_arm_v7a_build
           requires:
@@ -2274,8 +2371,9 @@ workflows:
               only:
                 - master
                 - /ci-all\/.*/
+                - /release\/.*/
           build_environment: "pytorch-linux-xenial-py3-clang5-android-ndk-r19c-arm-v7a-build"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c:f990c76a-a798-42bb-852f-5be5006f8026"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c:e43973a9-9d5a-4138-9181-a08a0fc55e2f"
       - pytorch_linux_build:
           name: pytorch_linux_xenial_py3_clang5_android_ndk_r19c_arm_v8a_build
           requires:
@@ -2285,8 +2383,9 @@ workflows:
               only:
                 - master
                 - /ci-all\/.*/
+                - /release\/.*/
           build_environment: "pytorch-linux-xenial-py3-clang5-android-ndk-r19c-arm-v8a-build"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c:f990c76a-a798-42bb-852f-5be5006f8026"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c:e43973a9-9d5a-4138-9181-a08a0fc55e2f"
       # Warning: indentation here matters!
 
       # Pytorch MacOS builds
@@ -2303,6 +2402,8 @@ workflows:
             branches:
               only:
                 - master
+                - /ci-all\/.*/
+                - /release\/.*/
           requires:
             - pytorch_linux_xenial_py3_clang5_android_ndk_r19c_x86_32_build
 
@@ -2312,6 +2413,8 @@ workflows:
             branches:
               only:
                 - master
+                - /ci-all\/.*/
+                - /release\/.*/
           requires:
             - pytorch_linux_xenial_py3_clang5_android_ndk_r19c_x86_32_build
             - pytorch_linux_xenial_py3_clang5_android_ndk_r19c_x86_64_build
@@ -2350,14 +2453,14 @@ workflows:
             - setup
           build_environment: "pytorch-linux-xenial-py3-clang5-mobile-build"
           build_only: "1"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-asan:f990c76a-a798-42bb-852f-5be5006f8026"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-asan:e43973a9-9d5a-4138-9181-a08a0fc55e2f"
       - pytorch_linux_build:
           name: pytorch_linux_xenial_py3_clang5_mobile_custom_build_static
           requires:
             - setup
           build_environment: "pytorch-linux-xenial-py3-clang5-mobile-custom-build-static"
           build_only: "1"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-asan:f990c76a-a798-42bb-852f-5be5006f8026"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-asan:e43973a9-9d5a-4138-9181-a08a0fc55e2f"
       - pytorch_linux_build:
           name: pytorch_linux_xenial_py3_clang5_mobile_custom_build_dynamic
           requires:
@@ -2365,7 +2468,7 @@ workflows:
           build_environment: "pytorch-linux-xenial-py3-clang5-mobile-custom-build-dynamic"
           build_only: "1"
           # Use LLVM-DEV toolchain in android-ndk-r19c docker image
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c:f990c76a-a798-42bb-852f-5be5006f8026"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c:e43973a9-9d5a-4138-9181-a08a0fc55e2f"
       - pytorch_linux_build:
           name: pytorch_linux_xenial_py3_clang5_mobile_code_analysis
           requires:
@@ -2376,17 +2479,18 @@ workflows:
               only:
                 - master
                 - /ci-all\/.*/
+                - /release\/.*/
           build_environment: "pytorch-linux-xenial-py3-clang5-mobile-code-analysis"
           build_only: "1"
           # Use LLVM-DEV toolchain in android-ndk-r19c docker image
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c:f990c76a-a798-42bb-852f-5be5006f8026"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c:e43973a9-9d5a-4138-9181-a08a0fc55e2f"
       - pytorch_linux_test:
           name: pytorch_linux_xenial_py3_6_gcc5_4_ge_config_legacy_test
           requires:
             - setup
             - pytorch_linux_xenial_py3_6_gcc5_4_build
           build_environment: "pytorch-linux-xenial-py3.6-gcc5.4-ge_config_legacy-test"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-gcc5.4:f990c76a-a798-42bb-852f-5be5006f8026"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-gcc5.4:e43973a9-9d5a-4138-9181-a08a0fc55e2f"
           resource_class: large
       - pytorch_linux_test:
           name: pytorch_linux_xenial_py3_6_gcc5_4_ge_config_simple_test
@@ -2394,7 +2498,7 @@ workflows:
             - setup
             - pytorch_linux_xenial_py3_6_gcc5_4_build
           build_environment: "pytorch-linux-xenial-py3.6-gcc5.4-ge_config_simple-test"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-gcc5.4:f990c76a-a798-42bb-852f-5be5006f8026"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-gcc5.4:e43973a9-9d5a-4138-9181-a08a0fc55e2f"
           resource_class: large
       - pytorch_linux_test:
           name: pytorch_linux_xenial_cuda10_2_cudnn7_py3_ge_config_legacy_test
@@ -2402,9 +2506,23 @@ workflows:
             - setup
             - pytorch_linux_xenial_cuda10_2_cudnn7_py3_gcc7_build
           build_environment: "pytorch-linux-xenial-cuda10.1-cudnn7-ge_config_legacy-test"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7:f990c76a-a798-42bb-852f-5be5006f8026"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7:e43973a9-9d5a-4138-9181-a08a0fc55e2f"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
+      - pytorch_linux_bazel_build:
+          name: pytorch_bazel_build
+          requires:
+            - setup
+          build_environment: "pytorch-linux-xenial-py3.6-gcc7-bazel-build"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-gcc7:f990c76a-a798-42bb-852f-5be5006f8026"
+          resource_class: large
+      - pytorch_linux_bazel_test:
+          name: pytorch_bazel_test
+          requires:
+            - setup
+            - pytorch_bazel_build
+          build_environment: "pytorch-linux-xenial-py3.6-gcc7-bazel-test"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-gcc7:f990c76a-a798-42bb-852f-5be5006f8026"
       - caffe2_linux_build:
           name: caffe2_onnx_main_py3_6_clang7_ubuntu16_04_build
           requires:
@@ -2454,18 +2572,20 @@ workflows:
             branches:
               only:
                 - master
+                - /ci-all\/.*/
+                - /release\/.*/
       # This binary build is currently broken, see https://github_com/pytorch/pytorch/issues/16710
       # - binary_linux_conda_3_6_cu90_devtoolset7_build
       - binary_linux_build:
-          name: binary_linux_libtorch_3_6m_cpu_devtoolset7_shared-with-deps_build
-          build_environment: "libtorch 3.6m cpu devtoolset7"
+          name: binary_linux_libtorch_3_7m_cpu_devtoolset7_shared-with-deps_build
+          build_environment: "libtorch 3.7m cpu devtoolset7"
           requires:
             - setup
           libtorch_variant: "shared-with-deps"
           docker_image: "pytorch/manylinux-cuda102"
       - binary_linux_build:
-          name: binary_linux_libtorch_3_6m_cpu_gcc5_4_cxx11-abi_shared-with-deps_build
-          build_environment: "libtorch 3.6m cpu gcc5.4_cxx11-abi"
+          name: binary_linux_libtorch_3_7m_cpu_gcc5_4_cxx11-abi_shared-with-deps_build
+          build_environment: "libtorch 3.7m cpu gcc5.4_cxx11-abi"
           requires:
             - setup
           libtorch_variant: "shared-with-deps"
@@ -2473,25 +2593,29 @@ workflows:
       # TODO we should test a libtorch cuda build, but they take too long
       # - binary_linux_libtorch_3_6m_cu90_devtoolset7_static-without-deps_build
       - binary_mac_build:
-          name: binary_macos_wheel_3_6_cpu_build
-          build_environment: "wheel 3.6 cpu"
+          name: binary_macos_wheel_3_7_cpu_build
+          build_environment: "wheel 3.7 cpu"
           requires:
             - setup
           filters:
             branches:
               only:
                 - master
+                - /ci-all\/.*/
+                - /release\/.*/
       # This job has an average run time of 3 hours o.O
       # Now only running this on master to reduce overhead
       - binary_mac_build:
-          name: binary_macos_libtorch_3_6_cpu_build
-          build_environment: "libtorch 3.6 cpu"
+          name: binary_macos_libtorch_3_7_cpu_build
+          build_environment: "libtorch 3.7 cpu"
           requires:
             - setup
           filters:
             branches:
               only:
                 - master
+                - /ci-all\/.*/
+                - /release\/.*/
       - binary_linux_test:
           name: binary_linux_manywheel_3_7m_cu102_devtoolset7_test
           build_environment: "manywheel 3.7m cu102 devtoolset7"
@@ -2505,22 +2629,24 @@ workflows:
             branches:
               only:
                 - master
+                - /ci-all\/.*/
+                - /release\/.*/
       # This binary build is currently broken, see https://github_com/pytorch/pytorch/issues/16710
       # - binary_linux_conda_3_6_cu90_devtoolset7_test:
       - binary_linux_test:
-          name: binary_linux_libtorch_3_6m_cpu_devtoolset7_shared-with-deps_test
-          build_environment: "libtorch 3.6m cpu devtoolset7"
+          name: binary_linux_libtorch_3_7m_cpu_devtoolset7_shared-with-deps_test
+          build_environment: "libtorch 3.7m cpu devtoolset7"
           requires:
             - setup
-            - binary_linux_libtorch_3_6m_cpu_devtoolset7_shared-with-deps_build
+            - binary_linux_libtorch_3_7m_cpu_devtoolset7_shared-with-deps_build
           libtorch_variant: "shared-with-deps"
           docker_image: "pytorch/manylinux-cuda102"
       - binary_linux_test:
-          name: binary_linux_libtorch_3_6m_cpu_gcc5_4_cxx11-abi_shared-with-deps_test
-          build_environment: "libtorch 3.6m cpu gcc5.4_cxx11-abi"
+          name: binary_linux_libtorch_3_7m_cpu_gcc5_4_cxx11-abi_shared-with-deps_test
+          build_environment: "libtorch 3.7m cpu gcc5.4_cxx11-abi"
           requires:
             - setup
-            - binary_linux_libtorch_3_6m_cpu_gcc5_4_cxx11-abi_shared-with-deps_build
+            - binary_linux_libtorch_3_7m_cpu_gcc5_4_cxx11-abi_shared-with-deps_build
           libtorch_variant: "shared-with-deps"
           docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
 
@@ -2875,8 +3001,8 @@ workflows:
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - smoke_linux_test:
-          name: smoke_linux_libtorch_3_6m_cpu_devtoolset7_nightly_shared-with-deps
-          build_environment: "libtorch 3.6m cpu devtoolset7"
+          name: smoke_linux_libtorch_3_7m_cpu_devtoolset7_nightly_shared-with-deps
+          build_environment: "libtorch 3.7m cpu devtoolset7"
           requires:
             - setup
             - update_s3_htmls_for_nightlies
@@ -2887,8 +3013,8 @@ workflows:
           libtorch_variant: "shared-with-deps"
           docker_image: "pytorch/manylinux-cuda102"
       - smoke_linux_test:
-          name: smoke_linux_libtorch_3_6m_cpu_devtoolset7_nightly_shared-without-deps
-          build_environment: "libtorch 3.6m cpu devtoolset7"
+          name: smoke_linux_libtorch_3_7m_cpu_devtoolset7_nightly_shared-without-deps
+          build_environment: "libtorch 3.7m cpu devtoolset7"
           requires:
             - setup
             - update_s3_htmls_for_nightlies
@@ -2899,8 +3025,8 @@ workflows:
           libtorch_variant: "shared-without-deps"
           docker_image: "pytorch/manylinux-cuda102"
       - smoke_linux_test:
-          name: smoke_linux_libtorch_3_6m_cpu_devtoolset7_nightly_static-with-deps
-          build_environment: "libtorch 3.6m cpu devtoolset7"
+          name: smoke_linux_libtorch_3_7m_cpu_devtoolset7_nightly_static-with-deps
+          build_environment: "libtorch 3.7m cpu devtoolset7"
           requires:
             - setup
             - update_s3_htmls_for_nightlies
@@ -2911,8 +3037,8 @@ workflows:
           libtorch_variant: "static-with-deps"
           docker_image: "pytorch/manylinux-cuda102"
       - smoke_linux_test:
-          name: smoke_linux_libtorch_3_6m_cpu_devtoolset7_nightly_static-without-deps
-          build_environment: "libtorch 3.6m cpu devtoolset7"
+          name: smoke_linux_libtorch_3_7m_cpu_devtoolset7_nightly_static-without-deps
+          build_environment: "libtorch 3.7m cpu devtoolset7"
           requires:
             - setup
             - update_s3_htmls_for_nightlies
@@ -2923,8 +3049,8 @@ workflows:
           libtorch_variant: "static-without-deps"
           docker_image: "pytorch/manylinux-cuda102"
       - smoke_linux_test:
-          name: smoke_linux_libtorch_3_6m_cu92_devtoolset7_nightly_shared-with-deps
-          build_environment: "libtorch 3.6m cu92 devtoolset7"
+          name: smoke_linux_libtorch_3_7m_cu92_devtoolset7_nightly_shared-with-deps
+          build_environment: "libtorch 3.7m cu92 devtoolset7"
           requires:
             - setup
             - update_s3_htmls_for_nightlies
@@ -2937,8 +3063,8 @@ workflows:
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - smoke_linux_test:
-          name: smoke_linux_libtorch_3_6m_cu92_devtoolset7_nightly_shared-without-deps
-          build_environment: "libtorch 3.6m cu92 devtoolset7"
+          name: smoke_linux_libtorch_3_7m_cu92_devtoolset7_nightly_shared-without-deps
+          build_environment: "libtorch 3.7m cu92 devtoolset7"
           requires:
             - setup
             - update_s3_htmls_for_nightlies
@@ -2951,8 +3077,8 @@ workflows:
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - smoke_linux_test:
-          name: smoke_linux_libtorch_3_6m_cu92_devtoolset7_nightly_static-with-deps
-          build_environment: "libtorch 3.6m cu92 devtoolset7"
+          name: smoke_linux_libtorch_3_7m_cu92_devtoolset7_nightly_static-with-deps
+          build_environment: "libtorch 3.7m cu92 devtoolset7"
           requires:
             - setup
             - update_s3_htmls_for_nightlies
@@ -2965,8 +3091,8 @@ workflows:
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - smoke_linux_test:
-          name: smoke_linux_libtorch_3_6m_cu92_devtoolset7_nightly_static-without-deps
-          build_environment: "libtorch 3.6m cu92 devtoolset7"
+          name: smoke_linux_libtorch_3_7m_cu92_devtoolset7_nightly_static-without-deps
+          build_environment: "libtorch 3.7m cu92 devtoolset7"
           requires:
             - setup
             - update_s3_htmls_for_nightlies
@@ -2979,8 +3105,8 @@ workflows:
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - smoke_linux_test:
-          name: smoke_linux_libtorch_3_6m_cu101_devtoolset7_nightly_shared-with-deps
-          build_environment: "libtorch 3.6m cu101 devtoolset7"
+          name: smoke_linux_libtorch_3_7m_cu101_devtoolset7_nightly_shared-with-deps
+          build_environment: "libtorch 3.7m cu101 devtoolset7"
           requires:
             - setup
             - update_s3_htmls_for_nightlies
@@ -2993,8 +3119,8 @@ workflows:
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - smoke_linux_test:
-          name: smoke_linux_libtorch_3_6m_cu101_devtoolset7_nightly_shared-without-deps
-          build_environment: "libtorch 3.6m cu101 devtoolset7"
+          name: smoke_linux_libtorch_3_7m_cu101_devtoolset7_nightly_shared-without-deps
+          build_environment: "libtorch 3.7m cu101 devtoolset7"
           requires:
             - setup
             - update_s3_htmls_for_nightlies
@@ -3007,8 +3133,8 @@ workflows:
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - smoke_linux_test:
-          name: smoke_linux_libtorch_3_6m_cu101_devtoolset7_nightly_static-with-deps
-          build_environment: "libtorch 3.6m cu101 devtoolset7"
+          name: smoke_linux_libtorch_3_7m_cu101_devtoolset7_nightly_static-with-deps
+          build_environment: "libtorch 3.7m cu101 devtoolset7"
           requires:
             - setup
             - update_s3_htmls_for_nightlies
@@ -3021,8 +3147,8 @@ workflows:
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - smoke_linux_test:
-          name: smoke_linux_libtorch_3_6m_cu101_devtoolset7_nightly_static-without-deps
-          build_environment: "libtorch 3.6m cu101 devtoolset7"
+          name: smoke_linux_libtorch_3_7m_cu101_devtoolset7_nightly_static-without-deps
+          build_environment: "libtorch 3.7m cu101 devtoolset7"
           requires:
             - setup
             - update_s3_htmls_for_nightlies
@@ -3035,8 +3161,8 @@ workflows:
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - smoke_linux_test:
-          name: smoke_linux_libtorch_3_6m_cu102_devtoolset7_nightly_shared-with-deps
-          build_environment: "libtorch 3.6m cu102 devtoolset7"
+          name: smoke_linux_libtorch_3_7m_cu102_devtoolset7_nightly_shared-with-deps
+          build_environment: "libtorch 3.7m cu102 devtoolset7"
           requires:
             - setup
             - update_s3_htmls_for_nightlies
@@ -3049,8 +3175,8 @@ workflows:
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - smoke_linux_test:
-          name: smoke_linux_libtorch_3_6m_cu102_devtoolset7_nightly_shared-without-deps
-          build_environment: "libtorch 3.6m cu102 devtoolset7"
+          name: smoke_linux_libtorch_3_7m_cu102_devtoolset7_nightly_shared-without-deps
+          build_environment: "libtorch 3.7m cu102 devtoolset7"
           requires:
             - setup
             - update_s3_htmls_for_nightlies
@@ -3063,8 +3189,8 @@ workflows:
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - smoke_linux_test:
-          name: smoke_linux_libtorch_3_6m_cu102_devtoolset7_nightly_static-with-deps
-          build_environment: "libtorch 3.6m cu102 devtoolset7"
+          name: smoke_linux_libtorch_3_7m_cu102_devtoolset7_nightly_static-with-deps
+          build_environment: "libtorch 3.7m cu102 devtoolset7"
           requires:
             - setup
             - update_s3_htmls_for_nightlies
@@ -3077,8 +3203,8 @@ workflows:
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - smoke_linux_test:
-          name: smoke_linux_libtorch_3_6m_cu102_devtoolset7_nightly_static-without-deps
-          build_environment: "libtorch 3.6m cu102 devtoolset7"
+          name: smoke_linux_libtorch_3_7m_cu102_devtoolset7_nightly_static-without-deps
+          build_environment: "libtorch 3.7m cu102 devtoolset7"
           requires:
             - setup
             - update_s3_htmls_for_nightlies
@@ -3091,8 +3217,8 @@ workflows:
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - smoke_linux_test:
-          name: smoke_linux_libtorch_3_6m_cpu_gcc5_4_cxx11-abi_nightly_shared-with-deps
-          build_environment: "libtorch 3.6m cpu gcc5.4_cxx11-abi"
+          name: smoke_linux_libtorch_3_7m_cpu_gcc5_4_cxx11-abi_nightly_shared-with-deps
+          build_environment: "libtorch 3.7m cpu gcc5.4_cxx11-abi"
           requires:
             - setup
             - update_s3_htmls_for_nightlies
@@ -3103,8 +3229,8 @@ workflows:
           libtorch_variant: "shared-with-deps"
           docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
       - smoke_linux_test:
-          name: smoke_linux_libtorch_3_6m_cpu_gcc5_4_cxx11-abi_nightly_shared-without-deps
-          build_environment: "libtorch 3.6m cpu gcc5.4_cxx11-abi"
+          name: smoke_linux_libtorch_3_7m_cpu_gcc5_4_cxx11-abi_nightly_shared-without-deps
+          build_environment: "libtorch 3.7m cpu gcc5.4_cxx11-abi"
           requires:
             - setup
             - update_s3_htmls_for_nightlies
@@ -3115,8 +3241,8 @@ workflows:
           libtorch_variant: "shared-without-deps"
           docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
       - smoke_linux_test:
-          name: smoke_linux_libtorch_3_6m_cpu_gcc5_4_cxx11-abi_nightly_static-with-deps
-          build_environment: "libtorch 3.6m cpu gcc5.4_cxx11-abi"
+          name: smoke_linux_libtorch_3_7m_cpu_gcc5_4_cxx11-abi_nightly_static-with-deps
+          build_environment: "libtorch 3.7m cpu gcc5.4_cxx11-abi"
           requires:
             - setup
             - update_s3_htmls_for_nightlies
@@ -3127,8 +3253,8 @@ workflows:
           libtorch_variant: "static-with-deps"
           docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
       - smoke_linux_test:
-          name: smoke_linux_libtorch_3_6m_cpu_gcc5_4_cxx11-abi_nightly_static-without-deps
-          build_environment: "libtorch 3.6m cpu gcc5.4_cxx11-abi"
+          name: smoke_linux_libtorch_3_7m_cpu_gcc5_4_cxx11-abi_nightly_static-without-deps
+          build_environment: "libtorch 3.7m cpu gcc5.4_cxx11-abi"
           requires:
             - setup
             - update_s3_htmls_for_nightlies
@@ -3139,8 +3265,8 @@ workflows:
           libtorch_variant: "static-without-deps"
           docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
       - smoke_linux_test:
-          name: smoke_linux_libtorch_3_6m_cu92_gcc5_4_cxx11-abi_nightly_shared-with-deps
-          build_environment: "libtorch 3.6m cu92 gcc5.4_cxx11-abi"
+          name: smoke_linux_libtorch_3_7m_cu92_gcc5_4_cxx11-abi_nightly_shared-with-deps
+          build_environment: "libtorch 3.7m cu92 gcc5.4_cxx11-abi"
           requires:
             - setup
             - update_s3_htmls_for_nightlies
@@ -3153,8 +3279,8 @@ workflows:
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - smoke_linux_test:
-          name: smoke_linux_libtorch_3_6m_cu92_gcc5_4_cxx11-abi_nightly_shared-without-deps
-          build_environment: "libtorch 3.6m cu92 gcc5.4_cxx11-abi"
+          name: smoke_linux_libtorch_3_7m_cu92_gcc5_4_cxx11-abi_nightly_shared-without-deps
+          build_environment: "libtorch 3.7m cu92 gcc5.4_cxx11-abi"
           requires:
             - setup
             - update_s3_htmls_for_nightlies
@@ -3167,8 +3293,8 @@ workflows:
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - smoke_linux_test:
-          name: smoke_linux_libtorch_3_6m_cu92_gcc5_4_cxx11-abi_nightly_static-with-deps
-          build_environment: "libtorch 3.6m cu92 gcc5.4_cxx11-abi"
+          name: smoke_linux_libtorch_3_7m_cu92_gcc5_4_cxx11-abi_nightly_static-with-deps
+          build_environment: "libtorch 3.7m cu92 gcc5.4_cxx11-abi"
           requires:
             - setup
             - update_s3_htmls_for_nightlies
@@ -3181,64 +3307,8 @@ workflows:
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - smoke_linux_test:
-          name: smoke_linux_libtorch_3_6m_cu92_gcc5_4_cxx11-abi_nightly_static-without-deps
-          build_environment: "libtorch 3.6m cu92 gcc5.4_cxx11-abi"
-          requires:
-            - setup
-            - update_s3_htmls_for_nightlies
-            - update_s3_htmls_for_nightlies_devtoolset7
-          filters:
-            branches:
-              only: postnightly
-          libtorch_variant: "static-without-deps"
-          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
-          use_cuda_docker_runtime: "1"
-          resource_class: gpu.medium
-      - smoke_linux_test:
-          name: smoke_linux_libtorch_3_6m_cu101_gcc5_4_cxx11-abi_nightly_shared-with-deps
-          build_environment: "libtorch 3.6m cu101 gcc5.4_cxx11-abi"
-          requires:
-            - setup
-            - update_s3_htmls_for_nightlies
-            - update_s3_htmls_for_nightlies_devtoolset7
-          filters:
-            branches:
-              only: postnightly
-          libtorch_variant: "shared-with-deps"
-          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
-          use_cuda_docker_runtime: "1"
-          resource_class: gpu.medium
-      - smoke_linux_test:
-          name: smoke_linux_libtorch_3_6m_cu101_gcc5_4_cxx11-abi_nightly_shared-without-deps
-          build_environment: "libtorch 3.6m cu101 gcc5.4_cxx11-abi"
-          requires:
-            - setup
-            - update_s3_htmls_for_nightlies
-            - update_s3_htmls_for_nightlies_devtoolset7
-          filters:
-            branches:
-              only: postnightly
-          libtorch_variant: "shared-without-deps"
-          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
-          use_cuda_docker_runtime: "1"
-          resource_class: gpu.medium
-      - smoke_linux_test:
-          name: smoke_linux_libtorch_3_6m_cu101_gcc5_4_cxx11-abi_nightly_static-with-deps
-          build_environment: "libtorch 3.6m cu101 gcc5.4_cxx11-abi"
-          requires:
-            - setup
-            - update_s3_htmls_for_nightlies
-            - update_s3_htmls_for_nightlies_devtoolset7
-          filters:
-            branches:
-              only: postnightly
-          libtorch_variant: "static-with-deps"
-          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
-          use_cuda_docker_runtime: "1"
-          resource_class: gpu.medium
-      - smoke_linux_test:
-          name: smoke_linux_libtorch_3_6m_cu101_gcc5_4_cxx11-abi_nightly_static-without-deps
-          build_environment: "libtorch 3.6m cu101 gcc5.4_cxx11-abi"
+          name: smoke_linux_libtorch_3_7m_cu92_gcc5_4_cxx11-abi_nightly_static-without-deps
+          build_environment: "libtorch 3.7m cu92 gcc5.4_cxx11-abi"
           requires:
             - setup
             - update_s3_htmls_for_nightlies
@@ -3251,8 +3321,8 @@ workflows:
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - smoke_linux_test:
-          name: smoke_linux_libtorch_3_6m_cu102_gcc5_4_cxx11-abi_nightly_shared-with-deps
-          build_environment: "libtorch 3.6m cu102 gcc5.4_cxx11-abi"
+          name: smoke_linux_libtorch_3_7m_cu101_gcc5_4_cxx11-abi_nightly_shared-with-deps
+          build_environment: "libtorch 3.7m cu101 gcc5.4_cxx11-abi"
           requires:
             - setup
             - update_s3_htmls_for_nightlies
@@ -3265,8 +3335,8 @@ workflows:
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - smoke_linux_test:
-          name: smoke_linux_libtorch_3_6m_cu102_gcc5_4_cxx11-abi_nightly_shared-without-deps
-          build_environment: "libtorch 3.6m cu102 gcc5.4_cxx11-abi"
+          name: smoke_linux_libtorch_3_7m_cu101_gcc5_4_cxx11-abi_nightly_shared-without-deps
+          build_environment: "libtorch 3.7m cu101 gcc5.4_cxx11-abi"
           requires:
             - setup
             - update_s3_htmls_for_nightlies
@@ -3279,8 +3349,8 @@ workflows:
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - smoke_linux_test:
-          name: smoke_linux_libtorch_3_6m_cu102_gcc5_4_cxx11-abi_nightly_static-with-deps
-          build_environment: "libtorch 3.6m cu102 gcc5.4_cxx11-abi"
+          name: smoke_linux_libtorch_3_7m_cu101_gcc5_4_cxx11-abi_nightly_static-with-deps
+          build_environment: "libtorch 3.7m cu101 gcc5.4_cxx11-abi"
           requires:
             - setup
             - update_s3_htmls_for_nightlies
@@ -3293,8 +3363,64 @@ workflows:
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - smoke_linux_test:
-          name: smoke_linux_libtorch_3_6m_cu102_gcc5_4_cxx11-abi_nightly_static-without-deps
-          build_environment: "libtorch 3.6m cu102 gcc5.4_cxx11-abi"
+          name: smoke_linux_libtorch_3_7m_cu101_gcc5_4_cxx11-abi_nightly_static-without-deps
+          build_environment: "libtorch 3.7m cu101 gcc5.4_cxx11-abi"
+          requires:
+            - setup
+            - update_s3_htmls_for_nightlies
+            - update_s3_htmls_for_nightlies_devtoolset7
+          filters:
+            branches:
+              only: postnightly
+          libtorch_variant: "static-without-deps"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
+          use_cuda_docker_runtime: "1"
+          resource_class: gpu.medium
+      - smoke_linux_test:
+          name: smoke_linux_libtorch_3_7m_cu102_gcc5_4_cxx11-abi_nightly_shared-with-deps
+          build_environment: "libtorch 3.7m cu102 gcc5.4_cxx11-abi"
+          requires:
+            - setup
+            - update_s3_htmls_for_nightlies
+            - update_s3_htmls_for_nightlies_devtoolset7
+          filters:
+            branches:
+              only: postnightly
+          libtorch_variant: "shared-with-deps"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
+          use_cuda_docker_runtime: "1"
+          resource_class: gpu.medium
+      - smoke_linux_test:
+          name: smoke_linux_libtorch_3_7m_cu102_gcc5_4_cxx11-abi_nightly_shared-without-deps
+          build_environment: "libtorch 3.7m cu102 gcc5.4_cxx11-abi"
+          requires:
+            - setup
+            - update_s3_htmls_for_nightlies
+            - update_s3_htmls_for_nightlies_devtoolset7
+          filters:
+            branches:
+              only: postnightly
+          libtorch_variant: "shared-without-deps"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
+          use_cuda_docker_runtime: "1"
+          resource_class: gpu.medium
+      - smoke_linux_test:
+          name: smoke_linux_libtorch_3_7m_cu102_gcc5_4_cxx11-abi_nightly_static-with-deps
+          build_environment: "libtorch 3.7m cu102 gcc5.4_cxx11-abi"
+          requires:
+            - setup
+            - update_s3_htmls_for_nightlies
+            - update_s3_htmls_for_nightlies_devtoolset7
+          filters:
+            branches:
+              only: postnightly
+          libtorch_variant: "static-with-deps"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
+          use_cuda_docker_runtime: "1"
+          resource_class: gpu.medium
+      - smoke_linux_test:
+          name: smoke_linux_libtorch_3_7m_cu102_gcc5_4_cxx11-abi_nightly_static-without-deps
+          build_environment: "libtorch 3.7m cu102 gcc5.4_cxx11-abi"
           requires:
             - setup
             - update_s3_htmls_for_nightlies
@@ -3387,8 +3513,8 @@ workflows:
             branches:
               only: postnightly
       - smoke_mac_test:
-          name: smoke_macos_libtorch_3_6_cpu_nightly
-          build_environment: "libtorch 3.6 cpu"
+          name: smoke_macos_libtorch_3_7_cpu_nightly
+          build_environment: "libtorch 3.7 cpu"
           requires:
             - setup
             - update_s3_htmls_for_nightlies
@@ -3705,8 +3831,8 @@ workflows:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           docker_image: "pytorch/conda-cuda"
       - binary_linux_build:
-          name: binary_linux_libtorch_3_6m_cpu_devtoolset7_nightly_shared-with-deps_build
-          build_environment: "libtorch 3.6m cpu devtoolset7"
+          name: binary_linux_libtorch_3_7m_cpu_devtoolset7_nightly_shared-with-deps_build
+          build_environment: "libtorch 3.7m cpu devtoolset7"
           requires:
             - setup
           filters:
@@ -3717,8 +3843,8 @@ workflows:
           libtorch_variant: "shared-with-deps"
           docker_image: "pytorch/manylinux-cuda102"
       - binary_linux_build:
-          name: binary_linux_libtorch_3_6m_cpu_devtoolset7_nightly_shared-without-deps_build
-          build_environment: "libtorch 3.6m cpu devtoolset7"
+          name: binary_linux_libtorch_3_7m_cpu_devtoolset7_nightly_shared-without-deps_build
+          build_environment: "libtorch 3.7m cpu devtoolset7"
           requires:
             - setup
           filters:
@@ -3729,8 +3855,8 @@ workflows:
           libtorch_variant: "shared-without-deps"
           docker_image: "pytorch/manylinux-cuda102"
       - binary_linux_build:
-          name: binary_linux_libtorch_3_6m_cpu_devtoolset7_nightly_static-with-deps_build
-          build_environment: "libtorch 3.6m cpu devtoolset7"
+          name: binary_linux_libtorch_3_7m_cpu_devtoolset7_nightly_static-with-deps_build
+          build_environment: "libtorch 3.7m cpu devtoolset7"
           requires:
             - setup
           filters:
@@ -3741,8 +3867,8 @@ workflows:
           libtorch_variant: "static-with-deps"
           docker_image: "pytorch/manylinux-cuda102"
       - binary_linux_build:
-          name: binary_linux_libtorch_3_6m_cpu_devtoolset7_nightly_static-without-deps_build
-          build_environment: "libtorch 3.6m cpu devtoolset7"
+          name: binary_linux_libtorch_3_7m_cpu_devtoolset7_nightly_static-without-deps_build
+          build_environment: "libtorch 3.7m cpu devtoolset7"
           requires:
             - setup
           filters:
@@ -3753,8 +3879,8 @@ workflows:
           libtorch_variant: "static-without-deps"
           docker_image: "pytorch/manylinux-cuda102"
       - binary_linux_build:
-          name: binary_linux_libtorch_3_6m_cu92_devtoolset7_nightly_shared-with-deps_build
-          build_environment: "libtorch 3.6m cu92 devtoolset7"
+          name: binary_linux_libtorch_3_7m_cu92_devtoolset7_nightly_shared-with-deps_build
+          build_environment: "libtorch 3.7m cu92 devtoolset7"
           requires:
             - setup
           filters:
@@ -3765,8 +3891,8 @@ workflows:
           libtorch_variant: "shared-with-deps"
           docker_image: "pytorch/manylinux-cuda92"
       - binary_linux_build:
-          name: binary_linux_libtorch_3_6m_cu92_devtoolset7_nightly_shared-without-deps_build
-          build_environment: "libtorch 3.6m cu92 devtoolset7"
+          name: binary_linux_libtorch_3_7m_cu92_devtoolset7_nightly_shared-without-deps_build
+          build_environment: "libtorch 3.7m cu92 devtoolset7"
           requires:
             - setup
           filters:
@@ -3777,8 +3903,8 @@ workflows:
           libtorch_variant: "shared-without-deps"
           docker_image: "pytorch/manylinux-cuda92"
       - binary_linux_build:
-          name: binary_linux_libtorch_3_6m_cu92_devtoolset7_nightly_static-with-deps_build
-          build_environment: "libtorch 3.6m cu92 devtoolset7"
+          name: binary_linux_libtorch_3_7m_cu92_devtoolset7_nightly_static-with-deps_build
+          build_environment: "libtorch 3.7m cu92 devtoolset7"
           requires:
             - setup
           filters:
@@ -3789,8 +3915,8 @@ workflows:
           libtorch_variant: "static-with-deps"
           docker_image: "pytorch/manylinux-cuda92"
       - binary_linux_build:
-          name: binary_linux_libtorch_3_6m_cu92_devtoolset7_nightly_static-without-deps_build
-          build_environment: "libtorch 3.6m cu92 devtoolset7"
+          name: binary_linux_libtorch_3_7m_cu92_devtoolset7_nightly_static-without-deps_build
+          build_environment: "libtorch 3.7m cu92 devtoolset7"
           requires:
             - setup
           filters:
@@ -3801,8 +3927,8 @@ workflows:
           libtorch_variant: "static-without-deps"
           docker_image: "pytorch/manylinux-cuda92"
       - binary_linux_build:
-          name: binary_linux_libtorch_3_6m_cu101_devtoolset7_nightly_shared-with-deps_build
-          build_environment: "libtorch 3.6m cu101 devtoolset7"
+          name: binary_linux_libtorch_3_7m_cu101_devtoolset7_nightly_shared-with-deps_build
+          build_environment: "libtorch 3.7m cu101 devtoolset7"
           requires:
             - setup
           filters:
@@ -3813,8 +3939,8 @@ workflows:
           libtorch_variant: "shared-with-deps"
           docker_image: "pytorch/manylinux-cuda101"
       - binary_linux_build:
-          name: binary_linux_libtorch_3_6m_cu101_devtoolset7_nightly_shared-without-deps_build
-          build_environment: "libtorch 3.6m cu101 devtoolset7"
+          name: binary_linux_libtorch_3_7m_cu101_devtoolset7_nightly_shared-without-deps_build
+          build_environment: "libtorch 3.7m cu101 devtoolset7"
           requires:
             - setup
           filters:
@@ -3825,8 +3951,8 @@ workflows:
           libtorch_variant: "shared-without-deps"
           docker_image: "pytorch/manylinux-cuda101"
       - binary_linux_build:
-          name: binary_linux_libtorch_3_6m_cu101_devtoolset7_nightly_static-with-deps_build
-          build_environment: "libtorch 3.6m cu101 devtoolset7"
+          name: binary_linux_libtorch_3_7m_cu101_devtoolset7_nightly_static-with-deps_build
+          build_environment: "libtorch 3.7m cu101 devtoolset7"
           requires:
             - setup
           filters:
@@ -3837,8 +3963,8 @@ workflows:
           libtorch_variant: "static-with-deps"
           docker_image: "pytorch/manylinux-cuda101"
       - binary_linux_build:
-          name: binary_linux_libtorch_3_6m_cu101_devtoolset7_nightly_static-without-deps_build
-          build_environment: "libtorch 3.6m cu101 devtoolset7"
+          name: binary_linux_libtorch_3_7m_cu101_devtoolset7_nightly_static-without-deps_build
+          build_environment: "libtorch 3.7m cu101 devtoolset7"
           requires:
             - setup
           filters:
@@ -3849,8 +3975,8 @@ workflows:
           libtorch_variant: "static-without-deps"
           docker_image: "pytorch/manylinux-cuda101"
       - binary_linux_build:
-          name: binary_linux_libtorch_3_6m_cu102_devtoolset7_nightly_shared-with-deps_build
-          build_environment: "libtorch 3.6m cu102 devtoolset7"
+          name: binary_linux_libtorch_3_7m_cu102_devtoolset7_nightly_shared-with-deps_build
+          build_environment: "libtorch 3.7m cu102 devtoolset7"
           requires:
             - setup
           filters:
@@ -3861,8 +3987,8 @@ workflows:
           libtorch_variant: "shared-with-deps"
           docker_image: "pytorch/manylinux-cuda102"
       - binary_linux_build:
-          name: binary_linux_libtorch_3_6m_cu102_devtoolset7_nightly_shared-without-deps_build
-          build_environment: "libtorch 3.6m cu102 devtoolset7"
+          name: binary_linux_libtorch_3_7m_cu102_devtoolset7_nightly_shared-without-deps_build
+          build_environment: "libtorch 3.7m cu102 devtoolset7"
           requires:
             - setup
           filters:
@@ -3873,8 +3999,8 @@ workflows:
           libtorch_variant: "shared-without-deps"
           docker_image: "pytorch/manylinux-cuda102"
       - binary_linux_build:
-          name: binary_linux_libtorch_3_6m_cu102_devtoolset7_nightly_static-with-deps_build
-          build_environment: "libtorch 3.6m cu102 devtoolset7"
+          name: binary_linux_libtorch_3_7m_cu102_devtoolset7_nightly_static-with-deps_build
+          build_environment: "libtorch 3.7m cu102 devtoolset7"
           requires:
             - setup
           filters:
@@ -3885,8 +4011,8 @@ workflows:
           libtorch_variant: "static-with-deps"
           docker_image: "pytorch/manylinux-cuda102"
       - binary_linux_build:
-          name: binary_linux_libtorch_3_6m_cu102_devtoolset7_nightly_static-without-deps_build
-          build_environment: "libtorch 3.6m cu102 devtoolset7"
+          name: binary_linux_libtorch_3_7m_cu102_devtoolset7_nightly_static-without-deps_build
+          build_environment: "libtorch 3.7m cu102 devtoolset7"
           requires:
             - setup
           filters:
@@ -3897,8 +4023,8 @@ workflows:
           libtorch_variant: "static-without-deps"
           docker_image: "pytorch/manylinux-cuda102"
       - binary_linux_build:
-          name: binary_linux_libtorch_3_6m_cpu_gcc5_4_cxx11-abi_nightly_shared-with-deps_build
-          build_environment: "libtorch 3.6m cpu gcc5.4_cxx11-abi"
+          name: binary_linux_libtorch_3_7m_cpu_gcc5_4_cxx11-abi_nightly_shared-with-deps_build
+          build_environment: "libtorch 3.7m cpu gcc5.4_cxx11-abi"
           requires:
             - setup
           filters:
@@ -3909,8 +4035,8 @@ workflows:
           libtorch_variant: "shared-with-deps"
           docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
       - binary_linux_build:
-          name: binary_linux_libtorch_3_6m_cpu_gcc5_4_cxx11-abi_nightly_shared-without-deps_build
-          build_environment: "libtorch 3.6m cpu gcc5.4_cxx11-abi"
+          name: binary_linux_libtorch_3_7m_cpu_gcc5_4_cxx11-abi_nightly_shared-without-deps_build
+          build_environment: "libtorch 3.7m cpu gcc5.4_cxx11-abi"
           requires:
             - setup
           filters:
@@ -3921,8 +4047,8 @@ workflows:
           libtorch_variant: "shared-without-deps"
           docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
       - binary_linux_build:
-          name: binary_linux_libtorch_3_6m_cpu_gcc5_4_cxx11-abi_nightly_static-with-deps_build
-          build_environment: "libtorch 3.6m cpu gcc5.4_cxx11-abi"
+          name: binary_linux_libtorch_3_7m_cpu_gcc5_4_cxx11-abi_nightly_static-with-deps_build
+          build_environment: "libtorch 3.7m cpu gcc5.4_cxx11-abi"
           requires:
             - setup
           filters:
@@ -3933,8 +4059,8 @@ workflows:
           libtorch_variant: "static-with-deps"
           docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
       - binary_linux_build:
-          name: binary_linux_libtorch_3_6m_cpu_gcc5_4_cxx11-abi_nightly_static-without-deps_build
-          build_environment: "libtorch 3.6m cpu gcc5.4_cxx11-abi"
+          name: binary_linux_libtorch_3_7m_cpu_gcc5_4_cxx11-abi_nightly_static-without-deps_build
+          build_environment: "libtorch 3.7m cpu gcc5.4_cxx11-abi"
           requires:
             - setup
           filters:
@@ -3945,8 +4071,8 @@ workflows:
           libtorch_variant: "static-without-deps"
           docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
       - binary_linux_build:
-          name: binary_linux_libtorch_3_6m_cu92_gcc5_4_cxx11-abi_nightly_shared-with-deps_build
-          build_environment: "libtorch 3.6m cu92 gcc5.4_cxx11-abi"
+          name: binary_linux_libtorch_3_7m_cu92_gcc5_4_cxx11-abi_nightly_shared-with-deps_build
+          build_environment: "libtorch 3.7m cu92 gcc5.4_cxx11-abi"
           requires:
             - setup
           filters:
@@ -3957,8 +4083,8 @@ workflows:
           libtorch_variant: "shared-with-deps"
           docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
       - binary_linux_build:
-          name: binary_linux_libtorch_3_6m_cu92_gcc5_4_cxx11-abi_nightly_shared-without-deps_build
-          build_environment: "libtorch 3.6m cu92 gcc5.4_cxx11-abi"
+          name: binary_linux_libtorch_3_7m_cu92_gcc5_4_cxx11-abi_nightly_shared-without-deps_build
+          build_environment: "libtorch 3.7m cu92 gcc5.4_cxx11-abi"
           requires:
             - setup
           filters:
@@ -3969,8 +4095,8 @@ workflows:
           libtorch_variant: "shared-without-deps"
           docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
       - binary_linux_build:
-          name: binary_linux_libtorch_3_6m_cu92_gcc5_4_cxx11-abi_nightly_static-with-deps_build
-          build_environment: "libtorch 3.6m cu92 gcc5.4_cxx11-abi"
+          name: binary_linux_libtorch_3_7m_cu92_gcc5_4_cxx11-abi_nightly_static-with-deps_build
+          build_environment: "libtorch 3.7m cu92 gcc5.4_cxx11-abi"
           requires:
             - setup
           filters:
@@ -3981,8 +4107,8 @@ workflows:
           libtorch_variant: "static-with-deps"
           docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
       - binary_linux_build:
-          name: binary_linux_libtorch_3_6m_cu92_gcc5_4_cxx11-abi_nightly_static-without-deps_build
-          build_environment: "libtorch 3.6m cu92 gcc5.4_cxx11-abi"
+          name: binary_linux_libtorch_3_7m_cu92_gcc5_4_cxx11-abi_nightly_static-without-deps_build
+          build_environment: "libtorch 3.7m cu92 gcc5.4_cxx11-abi"
           requires:
             - setup
           filters:
@@ -3993,8 +4119,8 @@ workflows:
           libtorch_variant: "static-without-deps"
           docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
       - binary_linux_build:
-          name: binary_linux_libtorch_3_6m_cu101_gcc5_4_cxx11-abi_nightly_shared-with-deps_build
-          build_environment: "libtorch 3.6m cu101 gcc5.4_cxx11-abi"
+          name: binary_linux_libtorch_3_7m_cu101_gcc5_4_cxx11-abi_nightly_shared-with-deps_build
+          build_environment: "libtorch 3.7m cu101 gcc5.4_cxx11-abi"
           requires:
             - setup
           filters:
@@ -4005,8 +4131,8 @@ workflows:
           libtorch_variant: "shared-with-deps"
           docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
       - binary_linux_build:
-          name: binary_linux_libtorch_3_6m_cu101_gcc5_4_cxx11-abi_nightly_shared-without-deps_build
-          build_environment: "libtorch 3.6m cu101 gcc5.4_cxx11-abi"
+          name: binary_linux_libtorch_3_7m_cu101_gcc5_4_cxx11-abi_nightly_shared-without-deps_build
+          build_environment: "libtorch 3.7m cu101 gcc5.4_cxx11-abi"
           requires:
             - setup
           filters:
@@ -4017,8 +4143,8 @@ workflows:
           libtorch_variant: "shared-without-deps"
           docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
       - binary_linux_build:
-          name: binary_linux_libtorch_3_6m_cu101_gcc5_4_cxx11-abi_nightly_static-with-deps_build
-          build_environment: "libtorch 3.6m cu101 gcc5.4_cxx11-abi"
+          name: binary_linux_libtorch_3_7m_cu101_gcc5_4_cxx11-abi_nightly_static-with-deps_build
+          build_environment: "libtorch 3.7m cu101 gcc5.4_cxx11-abi"
           requires:
             - setup
           filters:
@@ -4029,8 +4155,8 @@ workflows:
           libtorch_variant: "static-with-deps"
           docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
       - binary_linux_build:
-          name: binary_linux_libtorch_3_6m_cu101_gcc5_4_cxx11-abi_nightly_static-without-deps_build
-          build_environment: "libtorch 3.6m cu101 gcc5.4_cxx11-abi"
+          name: binary_linux_libtorch_3_7m_cu101_gcc5_4_cxx11-abi_nightly_static-without-deps_build
+          build_environment: "libtorch 3.7m cu101 gcc5.4_cxx11-abi"
           requires:
             - setup
           filters:
@@ -4041,8 +4167,8 @@ workflows:
           libtorch_variant: "static-without-deps"
           docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
       - binary_linux_build:
-          name: binary_linux_libtorch_3_6m_cu102_gcc5_4_cxx11-abi_nightly_shared-with-deps_build
-          build_environment: "libtorch 3.6m cu102 gcc5.4_cxx11-abi"
+          name: binary_linux_libtorch_3_7m_cu102_gcc5_4_cxx11-abi_nightly_shared-with-deps_build
+          build_environment: "libtorch 3.7m cu102 gcc5.4_cxx11-abi"
           requires:
             - setup
           filters:
@@ -4053,8 +4179,8 @@ workflows:
           libtorch_variant: "shared-with-deps"
           docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
       - binary_linux_build:
-          name: binary_linux_libtorch_3_6m_cu102_gcc5_4_cxx11-abi_nightly_shared-without-deps_build
-          build_environment: "libtorch 3.6m cu102 gcc5.4_cxx11-abi"
+          name: binary_linux_libtorch_3_7m_cu102_gcc5_4_cxx11-abi_nightly_shared-without-deps_build
+          build_environment: "libtorch 3.7m cu102 gcc5.4_cxx11-abi"
           requires:
             - setup
           filters:
@@ -4065,8 +4191,8 @@ workflows:
           libtorch_variant: "shared-without-deps"
           docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
       - binary_linux_build:
-          name: binary_linux_libtorch_3_6m_cu102_gcc5_4_cxx11-abi_nightly_static-with-deps_build
-          build_environment: "libtorch 3.6m cu102 gcc5.4_cxx11-abi"
+          name: binary_linux_libtorch_3_7m_cu102_gcc5_4_cxx11-abi_nightly_static-with-deps_build
+          build_environment: "libtorch 3.7m cu102 gcc5.4_cxx11-abi"
           requires:
             - setup
           filters:
@@ -4077,8 +4203,8 @@ workflows:
           libtorch_variant: "static-with-deps"
           docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
       - binary_linux_build:
-          name: binary_linux_libtorch_3_6m_cu102_gcc5_4_cxx11-abi_nightly_static-without-deps_build
-          build_environment: "libtorch 3.6m cu102 gcc5.4_cxx11-abi"
+          name: binary_linux_libtorch_3_7m_cu102_gcc5_4_cxx11-abi_nightly_static-without-deps_build
+          build_environment: "libtorch 3.7m cu102 gcc5.4_cxx11-abi"
           requires:
             - setup
           filters:
@@ -4169,8 +4295,8 @@ workflows:
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
       - binary_mac_build:
-          name: binary_macos_libtorch_3_6_cpu_nightly_build
-          build_environment: "libtorch 3.6 cpu"
+          name: binary_macos_libtorch_3_7_cpu_nightly_build
+          build_environment: "libtorch 3.7 cpu"
           requires:
             - setup
           filters:
@@ -4216,7 +4342,7 @@ workflows:
           build_environment: "pytorch-linux-xenial-py3-clang5-android-ndk-r19c-x86_32"
           requires:
             - setup
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c:f990c76a-a798-42bb-852f-5be5006f8026"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c:e43973a9-9d5a-4138-9181-a08a0fc55e2f"
           filters:
             branches:
               only: nightly
@@ -4225,7 +4351,7 @@ workflows:
           build_environment: "pytorch-linux-xenial-py3-clang5-android-ndk-r19c-x86_64"
           requires:
             - setup
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c:f990c76a-a798-42bb-852f-5be5006f8026"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c:e43973a9-9d5a-4138-9181-a08a0fc55e2f"
           filters:
             branches:
               only: nightly
@@ -4234,7 +4360,7 @@ workflows:
           build_environment: "pytorch-linux-xenial-py3-clang5-android-ndk-r19c-arm-v7a"
           requires:
             - setup
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c:f990c76a-a798-42bb-852f-5be5006f8026"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c:e43973a9-9d5a-4138-9181-a08a0fc55e2f"
           filters:
             branches:
               only: nightly
@@ -4243,7 +4369,7 @@ workflows:
           build_environment: "pytorch-linux-xenial-py3-clang5-android-ndk-r19c-arm-v8a"
           requires:
             - setup
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c:f990c76a-a798-42bb-852f-5be5006f8026"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c:e43973a9-9d5a-4138-9181-a08a0fc55e2f"
           filters:
             branches:
               only: nightly
@@ -4649,11 +4775,11 @@ workflows:
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - binary_linux_test:
-          name: binary_linux_libtorch_3_6m_cpu_devtoolset7_nightly_shared-with-deps_test
-          build_environment: "libtorch 3.6m cpu devtoolset7"
+          name: binary_linux_libtorch_3_7m_cpu_devtoolset7_nightly_shared-with-deps_test
+          build_environment: "libtorch 3.7m cpu devtoolset7"
           requires:
             - setup
-            - binary_linux_libtorch_3_6m_cpu_devtoolset7_nightly_shared-with-deps_build
+            - binary_linux_libtorch_3_7m_cpu_devtoolset7_nightly_shared-with-deps_build
           filters:
             branches:
               only: nightly
@@ -4662,11 +4788,11 @@ workflows:
           libtorch_variant: "shared-with-deps"
           docker_image: "pytorch/manylinux-cuda102"
       - binary_linux_test:
-          name: binary_linux_libtorch_3_6m_cpu_devtoolset7_nightly_shared-without-deps_test
-          build_environment: "libtorch 3.6m cpu devtoolset7"
+          name: binary_linux_libtorch_3_7m_cpu_devtoolset7_nightly_shared-without-deps_test
+          build_environment: "libtorch 3.7m cpu devtoolset7"
           requires:
             - setup
-            - binary_linux_libtorch_3_6m_cpu_devtoolset7_nightly_shared-without-deps_build
+            - binary_linux_libtorch_3_7m_cpu_devtoolset7_nightly_shared-without-deps_build
           filters:
             branches:
               only: nightly
@@ -4675,11 +4801,11 @@ workflows:
           libtorch_variant: "shared-without-deps"
           docker_image: "pytorch/manylinux-cuda102"
       - binary_linux_test:
-          name: binary_linux_libtorch_3_6m_cpu_devtoolset7_nightly_static-with-deps_test
-          build_environment: "libtorch 3.6m cpu devtoolset7"
+          name: binary_linux_libtorch_3_7m_cpu_devtoolset7_nightly_static-with-deps_test
+          build_environment: "libtorch 3.7m cpu devtoolset7"
           requires:
             - setup
-            - binary_linux_libtorch_3_6m_cpu_devtoolset7_nightly_static-with-deps_build
+            - binary_linux_libtorch_3_7m_cpu_devtoolset7_nightly_static-with-deps_build
           filters:
             branches:
               only: nightly
@@ -4688,11 +4814,11 @@ workflows:
           libtorch_variant: "static-with-deps"
           docker_image: "pytorch/manylinux-cuda102"
       - binary_linux_test:
-          name: binary_linux_libtorch_3_6m_cpu_devtoolset7_nightly_static-without-deps_test
-          build_environment: "libtorch 3.6m cpu devtoolset7"
+          name: binary_linux_libtorch_3_7m_cpu_devtoolset7_nightly_static-without-deps_test
+          build_environment: "libtorch 3.7m cpu devtoolset7"
           requires:
             - setup
-            - binary_linux_libtorch_3_6m_cpu_devtoolset7_nightly_static-without-deps_build
+            - binary_linux_libtorch_3_7m_cpu_devtoolset7_nightly_static-without-deps_build
           filters:
             branches:
               only: nightly
@@ -4701,11 +4827,11 @@ workflows:
           libtorch_variant: "static-without-deps"
           docker_image: "pytorch/manylinux-cuda102"
       - binary_linux_test:
-          name: binary_linux_libtorch_3_6m_cu92_devtoolset7_nightly_shared-with-deps_test
-          build_environment: "libtorch 3.6m cu92 devtoolset7"
+          name: binary_linux_libtorch_3_7m_cu92_devtoolset7_nightly_shared-with-deps_test
+          build_environment: "libtorch 3.7m cu92 devtoolset7"
           requires:
             - setup
-            - binary_linux_libtorch_3_6m_cu92_devtoolset7_nightly_shared-with-deps_build
+            - binary_linux_libtorch_3_7m_cu92_devtoolset7_nightly_shared-with-deps_build
           filters:
             branches:
               only: nightly
@@ -4716,11 +4842,11 @@ workflows:
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - binary_linux_test:
-          name: binary_linux_libtorch_3_6m_cu92_devtoolset7_nightly_shared-without-deps_test
-          build_environment: "libtorch 3.6m cu92 devtoolset7"
+          name: binary_linux_libtorch_3_7m_cu92_devtoolset7_nightly_shared-without-deps_test
+          build_environment: "libtorch 3.7m cu92 devtoolset7"
           requires:
             - setup
-            - binary_linux_libtorch_3_6m_cu92_devtoolset7_nightly_shared-without-deps_build
+            - binary_linux_libtorch_3_7m_cu92_devtoolset7_nightly_shared-without-deps_build
           filters:
             branches:
               only: nightly
@@ -4731,11 +4857,11 @@ workflows:
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - binary_linux_test:
-          name: binary_linux_libtorch_3_6m_cu92_devtoolset7_nightly_static-with-deps_test
-          build_environment: "libtorch 3.6m cu92 devtoolset7"
+          name: binary_linux_libtorch_3_7m_cu92_devtoolset7_nightly_static-with-deps_test
+          build_environment: "libtorch 3.7m cu92 devtoolset7"
           requires:
             - setup
-            - binary_linux_libtorch_3_6m_cu92_devtoolset7_nightly_static-with-deps_build
+            - binary_linux_libtorch_3_7m_cu92_devtoolset7_nightly_static-with-deps_build
           filters:
             branches:
               only: nightly
@@ -4746,11 +4872,11 @@ workflows:
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - binary_linux_test:
-          name: binary_linux_libtorch_3_6m_cu92_devtoolset7_nightly_static-without-deps_test
-          build_environment: "libtorch 3.6m cu92 devtoolset7"
+          name: binary_linux_libtorch_3_7m_cu92_devtoolset7_nightly_static-without-deps_test
+          build_environment: "libtorch 3.7m cu92 devtoolset7"
           requires:
             - setup
-            - binary_linux_libtorch_3_6m_cu92_devtoolset7_nightly_static-without-deps_build
+            - binary_linux_libtorch_3_7m_cu92_devtoolset7_nightly_static-without-deps_build
           filters:
             branches:
               only: nightly
@@ -4761,11 +4887,11 @@ workflows:
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - binary_linux_test:
-          name: binary_linux_libtorch_3_6m_cu101_devtoolset7_nightly_shared-with-deps_test
-          build_environment: "libtorch 3.6m cu101 devtoolset7"
+          name: binary_linux_libtorch_3_7m_cu101_devtoolset7_nightly_shared-with-deps_test
+          build_environment: "libtorch 3.7m cu101 devtoolset7"
           requires:
             - setup
-            - binary_linux_libtorch_3_6m_cu101_devtoolset7_nightly_shared-with-deps_build
+            - binary_linux_libtorch_3_7m_cu101_devtoolset7_nightly_shared-with-deps_build
           filters:
             branches:
               only: nightly
@@ -4776,11 +4902,11 @@ workflows:
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - binary_linux_test:
-          name: binary_linux_libtorch_3_6m_cu101_devtoolset7_nightly_shared-without-deps_test
-          build_environment: "libtorch 3.6m cu101 devtoolset7"
+          name: binary_linux_libtorch_3_7m_cu101_devtoolset7_nightly_shared-without-deps_test
+          build_environment: "libtorch 3.7m cu101 devtoolset7"
           requires:
             - setup
-            - binary_linux_libtorch_3_6m_cu101_devtoolset7_nightly_shared-without-deps_build
+            - binary_linux_libtorch_3_7m_cu101_devtoolset7_nightly_shared-without-deps_build
           filters:
             branches:
               only: nightly
@@ -4791,11 +4917,11 @@ workflows:
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - binary_linux_test:
-          name: binary_linux_libtorch_3_6m_cu101_devtoolset7_nightly_static-with-deps_test
-          build_environment: "libtorch 3.6m cu101 devtoolset7"
+          name: binary_linux_libtorch_3_7m_cu101_devtoolset7_nightly_static-with-deps_test
+          build_environment: "libtorch 3.7m cu101 devtoolset7"
           requires:
             - setup
-            - binary_linux_libtorch_3_6m_cu101_devtoolset7_nightly_static-with-deps_build
+            - binary_linux_libtorch_3_7m_cu101_devtoolset7_nightly_static-with-deps_build
           filters:
             branches:
               only: nightly
@@ -4806,11 +4932,11 @@ workflows:
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - binary_linux_test:
-          name: binary_linux_libtorch_3_6m_cu101_devtoolset7_nightly_static-without-deps_test
-          build_environment: "libtorch 3.6m cu101 devtoolset7"
+          name: binary_linux_libtorch_3_7m_cu101_devtoolset7_nightly_static-without-deps_test
+          build_environment: "libtorch 3.7m cu101 devtoolset7"
           requires:
             - setup
-            - binary_linux_libtorch_3_6m_cu101_devtoolset7_nightly_static-without-deps_build
+            - binary_linux_libtorch_3_7m_cu101_devtoolset7_nightly_static-without-deps_build
           filters:
             branches:
               only: nightly
@@ -4821,11 +4947,11 @@ workflows:
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - binary_linux_test:
-          name: binary_linux_libtorch_3_6m_cu102_devtoolset7_nightly_shared-with-deps_test
-          build_environment: "libtorch 3.6m cu102 devtoolset7"
+          name: binary_linux_libtorch_3_7m_cu102_devtoolset7_nightly_shared-with-deps_test
+          build_environment: "libtorch 3.7m cu102 devtoolset7"
           requires:
             - setup
-            - binary_linux_libtorch_3_6m_cu102_devtoolset7_nightly_shared-with-deps_build
+            - binary_linux_libtorch_3_7m_cu102_devtoolset7_nightly_shared-with-deps_build
           filters:
             branches:
               only: nightly
@@ -4836,11 +4962,11 @@ workflows:
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - binary_linux_test:
-          name: binary_linux_libtorch_3_6m_cu102_devtoolset7_nightly_shared-without-deps_test
-          build_environment: "libtorch 3.6m cu102 devtoolset7"
+          name: binary_linux_libtorch_3_7m_cu102_devtoolset7_nightly_shared-without-deps_test
+          build_environment: "libtorch 3.7m cu102 devtoolset7"
           requires:
             - setup
-            - binary_linux_libtorch_3_6m_cu102_devtoolset7_nightly_shared-without-deps_build
+            - binary_linux_libtorch_3_7m_cu102_devtoolset7_nightly_shared-without-deps_build
           filters:
             branches:
               only: nightly
@@ -4851,11 +4977,11 @@ workflows:
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - binary_linux_test:
-          name: binary_linux_libtorch_3_6m_cu102_devtoolset7_nightly_static-with-deps_test
-          build_environment: "libtorch 3.6m cu102 devtoolset7"
+          name: binary_linux_libtorch_3_7m_cu102_devtoolset7_nightly_static-with-deps_test
+          build_environment: "libtorch 3.7m cu102 devtoolset7"
           requires:
             - setup
-            - binary_linux_libtorch_3_6m_cu102_devtoolset7_nightly_static-with-deps_build
+            - binary_linux_libtorch_3_7m_cu102_devtoolset7_nightly_static-with-deps_build
           filters:
             branches:
               only: nightly
@@ -4866,11 +4992,11 @@ workflows:
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - binary_linux_test:
-          name: binary_linux_libtorch_3_6m_cu102_devtoolset7_nightly_static-without-deps_test
-          build_environment: "libtorch 3.6m cu102 devtoolset7"
+          name: binary_linux_libtorch_3_7m_cu102_devtoolset7_nightly_static-without-deps_test
+          build_environment: "libtorch 3.7m cu102 devtoolset7"
           requires:
             - setup
-            - binary_linux_libtorch_3_6m_cu102_devtoolset7_nightly_static-without-deps_build
+            - binary_linux_libtorch_3_7m_cu102_devtoolset7_nightly_static-without-deps_build
           filters:
             branches:
               only: nightly
@@ -4881,11 +5007,11 @@ workflows:
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - binary_linux_test:
-          name: binary_linux_libtorch_3_6m_cpu_gcc5_4_cxx11-abi_nightly_shared-with-deps_test
-          build_environment: "libtorch 3.6m cpu gcc5.4_cxx11-abi"
+          name: binary_linux_libtorch_3_7m_cpu_gcc5_4_cxx11-abi_nightly_shared-with-deps_test
+          build_environment: "libtorch 3.7m cpu gcc5.4_cxx11-abi"
           requires:
             - setup
-            - binary_linux_libtorch_3_6m_cpu_gcc5_4_cxx11-abi_nightly_shared-with-deps_build
+            - binary_linux_libtorch_3_7m_cpu_gcc5_4_cxx11-abi_nightly_shared-with-deps_build
           filters:
             branches:
               only: nightly
@@ -4894,11 +5020,11 @@ workflows:
           libtorch_variant: "shared-with-deps"
           docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
       - binary_linux_test:
-          name: binary_linux_libtorch_3_6m_cpu_gcc5_4_cxx11-abi_nightly_shared-without-deps_test
-          build_environment: "libtorch 3.6m cpu gcc5.4_cxx11-abi"
+          name: binary_linux_libtorch_3_7m_cpu_gcc5_4_cxx11-abi_nightly_shared-without-deps_test
+          build_environment: "libtorch 3.7m cpu gcc5.4_cxx11-abi"
           requires:
             - setup
-            - binary_linux_libtorch_3_6m_cpu_gcc5_4_cxx11-abi_nightly_shared-without-deps_build
+            - binary_linux_libtorch_3_7m_cpu_gcc5_4_cxx11-abi_nightly_shared-without-deps_build
           filters:
             branches:
               only: nightly
@@ -4907,11 +5033,11 @@ workflows:
           libtorch_variant: "shared-without-deps"
           docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
       - binary_linux_test:
-          name: binary_linux_libtorch_3_6m_cpu_gcc5_4_cxx11-abi_nightly_static-with-deps_test
-          build_environment: "libtorch 3.6m cpu gcc5.4_cxx11-abi"
+          name: binary_linux_libtorch_3_7m_cpu_gcc5_4_cxx11-abi_nightly_static-with-deps_test
+          build_environment: "libtorch 3.7m cpu gcc5.4_cxx11-abi"
           requires:
             - setup
-            - binary_linux_libtorch_3_6m_cpu_gcc5_4_cxx11-abi_nightly_static-with-deps_build
+            - binary_linux_libtorch_3_7m_cpu_gcc5_4_cxx11-abi_nightly_static-with-deps_build
           filters:
             branches:
               only: nightly
@@ -4920,11 +5046,11 @@ workflows:
           libtorch_variant: "static-with-deps"
           docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
       - binary_linux_test:
-          name: binary_linux_libtorch_3_6m_cpu_gcc5_4_cxx11-abi_nightly_static-without-deps_test
-          build_environment: "libtorch 3.6m cpu gcc5.4_cxx11-abi"
+          name: binary_linux_libtorch_3_7m_cpu_gcc5_4_cxx11-abi_nightly_static-without-deps_test
+          build_environment: "libtorch 3.7m cpu gcc5.4_cxx11-abi"
           requires:
             - setup
-            - binary_linux_libtorch_3_6m_cpu_gcc5_4_cxx11-abi_nightly_static-without-deps_build
+            - binary_linux_libtorch_3_7m_cpu_gcc5_4_cxx11-abi_nightly_static-without-deps_build
           filters:
             branches:
               only: nightly
@@ -4933,11 +5059,11 @@ workflows:
           libtorch_variant: "static-without-deps"
           docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
       - binary_linux_test:
-          name: binary_linux_libtorch_3_6m_cu92_gcc5_4_cxx11-abi_nightly_shared-with-deps_test
-          build_environment: "libtorch 3.6m cu92 gcc5.4_cxx11-abi"
+          name: binary_linux_libtorch_3_7m_cu92_gcc5_4_cxx11-abi_nightly_shared-with-deps_test
+          build_environment: "libtorch 3.7m cu92 gcc5.4_cxx11-abi"
           requires:
             - setup
-            - binary_linux_libtorch_3_6m_cu92_gcc5_4_cxx11-abi_nightly_shared-with-deps_build
+            - binary_linux_libtorch_3_7m_cu92_gcc5_4_cxx11-abi_nightly_shared-with-deps_build
           filters:
             branches:
               only: nightly
@@ -4948,11 +5074,11 @@ workflows:
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - binary_linux_test:
-          name: binary_linux_libtorch_3_6m_cu92_gcc5_4_cxx11-abi_nightly_shared-without-deps_test
-          build_environment: "libtorch 3.6m cu92 gcc5.4_cxx11-abi"
+          name: binary_linux_libtorch_3_7m_cu92_gcc5_4_cxx11-abi_nightly_shared-without-deps_test
+          build_environment: "libtorch 3.7m cu92 gcc5.4_cxx11-abi"
           requires:
             - setup
-            - binary_linux_libtorch_3_6m_cu92_gcc5_4_cxx11-abi_nightly_shared-without-deps_build
+            - binary_linux_libtorch_3_7m_cu92_gcc5_4_cxx11-abi_nightly_shared-without-deps_build
           filters:
             branches:
               only: nightly
@@ -4963,11 +5089,11 @@ workflows:
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - binary_linux_test:
-          name: binary_linux_libtorch_3_6m_cu92_gcc5_4_cxx11-abi_nightly_static-with-deps_test
-          build_environment: "libtorch 3.6m cu92 gcc5.4_cxx11-abi"
+          name: binary_linux_libtorch_3_7m_cu92_gcc5_4_cxx11-abi_nightly_static-with-deps_test
+          build_environment: "libtorch 3.7m cu92 gcc5.4_cxx11-abi"
           requires:
             - setup
-            - binary_linux_libtorch_3_6m_cu92_gcc5_4_cxx11-abi_nightly_static-with-deps_build
+            - binary_linux_libtorch_3_7m_cu92_gcc5_4_cxx11-abi_nightly_static-with-deps_build
           filters:
             branches:
               only: nightly
@@ -4978,71 +5104,11 @@ workflows:
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - binary_linux_test:
-          name: binary_linux_libtorch_3_6m_cu92_gcc5_4_cxx11-abi_nightly_static-without-deps_test
-          build_environment: "libtorch 3.6m cu92 gcc5.4_cxx11-abi"
+          name: binary_linux_libtorch_3_7m_cu92_gcc5_4_cxx11-abi_nightly_static-without-deps_test
+          build_environment: "libtorch 3.7m cu92 gcc5.4_cxx11-abi"
           requires:
             - setup
-            - binary_linux_libtorch_3_6m_cu92_gcc5_4_cxx11-abi_nightly_static-without-deps_build
-          filters:
-            branches:
-              only: nightly
-            tags:
-              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          libtorch_variant: "static-without-deps"
-          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
-          use_cuda_docker_runtime: "1"
-          resource_class: gpu.medium
-      - binary_linux_test:
-          name: binary_linux_libtorch_3_6m_cu101_gcc5_4_cxx11-abi_nightly_shared-with-deps_test
-          build_environment: "libtorch 3.6m cu101 gcc5.4_cxx11-abi"
-          requires:
-            - setup
-            - binary_linux_libtorch_3_6m_cu101_gcc5_4_cxx11-abi_nightly_shared-with-deps_build
-          filters:
-            branches:
-              only: nightly
-            tags:
-              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          libtorch_variant: "shared-with-deps"
-          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
-          use_cuda_docker_runtime: "1"
-          resource_class: gpu.medium
-      - binary_linux_test:
-          name: binary_linux_libtorch_3_6m_cu101_gcc5_4_cxx11-abi_nightly_shared-without-deps_test
-          build_environment: "libtorch 3.6m cu101 gcc5.4_cxx11-abi"
-          requires:
-            - setup
-            - binary_linux_libtorch_3_6m_cu101_gcc5_4_cxx11-abi_nightly_shared-without-deps_build
-          filters:
-            branches:
-              only: nightly
-            tags:
-              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          libtorch_variant: "shared-without-deps"
-          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
-          use_cuda_docker_runtime: "1"
-          resource_class: gpu.medium
-      - binary_linux_test:
-          name: binary_linux_libtorch_3_6m_cu101_gcc5_4_cxx11-abi_nightly_static-with-deps_test
-          build_environment: "libtorch 3.6m cu101 gcc5.4_cxx11-abi"
-          requires:
-            - setup
-            - binary_linux_libtorch_3_6m_cu101_gcc5_4_cxx11-abi_nightly_static-with-deps_build
-          filters:
-            branches:
-              only: nightly
-            tags:
-              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          libtorch_variant: "static-with-deps"
-          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
-          use_cuda_docker_runtime: "1"
-          resource_class: gpu.medium
-      - binary_linux_test:
-          name: binary_linux_libtorch_3_6m_cu101_gcc5_4_cxx11-abi_nightly_static-without-deps_test
-          build_environment: "libtorch 3.6m cu101 gcc5.4_cxx11-abi"
-          requires:
-            - setup
-            - binary_linux_libtorch_3_6m_cu101_gcc5_4_cxx11-abi_nightly_static-without-deps_build
+            - binary_linux_libtorch_3_7m_cu92_gcc5_4_cxx11-abi_nightly_static-without-deps_build
           filters:
             branches:
               only: nightly
@@ -5053,11 +5119,11 @@ workflows:
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - binary_linux_test:
-          name: binary_linux_libtorch_3_6m_cu102_gcc5_4_cxx11-abi_nightly_shared-with-deps_test
-          build_environment: "libtorch 3.6m cu102 gcc5.4_cxx11-abi"
+          name: binary_linux_libtorch_3_7m_cu101_gcc5_4_cxx11-abi_nightly_shared-with-deps_test
+          build_environment: "libtorch 3.7m cu101 gcc5.4_cxx11-abi"
           requires:
             - setup
-            - binary_linux_libtorch_3_6m_cu102_gcc5_4_cxx11-abi_nightly_shared-with-deps_build
+            - binary_linux_libtorch_3_7m_cu101_gcc5_4_cxx11-abi_nightly_shared-with-deps_build
           filters:
             branches:
               only: nightly
@@ -5068,11 +5134,11 @@ workflows:
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - binary_linux_test:
-          name: binary_linux_libtorch_3_6m_cu102_gcc5_4_cxx11-abi_nightly_shared-without-deps_test
-          build_environment: "libtorch 3.6m cu102 gcc5.4_cxx11-abi"
+          name: binary_linux_libtorch_3_7m_cu101_gcc5_4_cxx11-abi_nightly_shared-without-deps_test
+          build_environment: "libtorch 3.7m cu101 gcc5.4_cxx11-abi"
           requires:
             - setup
-            - binary_linux_libtorch_3_6m_cu102_gcc5_4_cxx11-abi_nightly_shared-without-deps_build
+            - binary_linux_libtorch_3_7m_cu101_gcc5_4_cxx11-abi_nightly_shared-without-deps_build
           filters:
             branches:
               only: nightly
@@ -5083,11 +5149,11 @@ workflows:
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - binary_linux_test:
-          name: binary_linux_libtorch_3_6m_cu102_gcc5_4_cxx11-abi_nightly_static-with-deps_test
-          build_environment: "libtorch 3.6m cu102 gcc5.4_cxx11-abi"
+          name: binary_linux_libtorch_3_7m_cu101_gcc5_4_cxx11-abi_nightly_static-with-deps_test
+          build_environment: "libtorch 3.7m cu101 gcc5.4_cxx11-abi"
           requires:
             - setup
-            - binary_linux_libtorch_3_6m_cu102_gcc5_4_cxx11-abi_nightly_static-with-deps_build
+            - binary_linux_libtorch_3_7m_cu101_gcc5_4_cxx11-abi_nightly_static-with-deps_build
           filters:
             branches:
               only: nightly
@@ -5098,11 +5164,71 @@ workflows:
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - binary_linux_test:
-          name: binary_linux_libtorch_3_6m_cu102_gcc5_4_cxx11-abi_nightly_static-without-deps_test
-          build_environment: "libtorch 3.6m cu102 gcc5.4_cxx11-abi"
+          name: binary_linux_libtorch_3_7m_cu101_gcc5_4_cxx11-abi_nightly_static-without-deps_test
+          build_environment: "libtorch 3.7m cu101 gcc5.4_cxx11-abi"
           requires:
             - setup
-            - binary_linux_libtorch_3_6m_cu102_gcc5_4_cxx11-abi_nightly_static-without-deps_build
+            - binary_linux_libtorch_3_7m_cu101_gcc5_4_cxx11-abi_nightly_static-without-deps_build
+          filters:
+            branches:
+              only: nightly
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+          libtorch_variant: "static-without-deps"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
+          use_cuda_docker_runtime: "1"
+          resource_class: gpu.medium
+      - binary_linux_test:
+          name: binary_linux_libtorch_3_7m_cu102_gcc5_4_cxx11-abi_nightly_shared-with-deps_test
+          build_environment: "libtorch 3.7m cu102 gcc5.4_cxx11-abi"
+          requires:
+            - setup
+            - binary_linux_libtorch_3_7m_cu102_gcc5_4_cxx11-abi_nightly_shared-with-deps_build
+          filters:
+            branches:
+              only: nightly
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+          libtorch_variant: "shared-with-deps"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
+          use_cuda_docker_runtime: "1"
+          resource_class: gpu.medium
+      - binary_linux_test:
+          name: binary_linux_libtorch_3_7m_cu102_gcc5_4_cxx11-abi_nightly_shared-without-deps_test
+          build_environment: "libtorch 3.7m cu102 gcc5.4_cxx11-abi"
+          requires:
+            - setup
+            - binary_linux_libtorch_3_7m_cu102_gcc5_4_cxx11-abi_nightly_shared-without-deps_build
+          filters:
+            branches:
+              only: nightly
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+          libtorch_variant: "shared-without-deps"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
+          use_cuda_docker_runtime: "1"
+          resource_class: gpu.medium
+      - binary_linux_test:
+          name: binary_linux_libtorch_3_7m_cu102_gcc5_4_cxx11-abi_nightly_static-with-deps_test
+          build_environment: "libtorch 3.7m cu102 gcc5.4_cxx11-abi"
+          requires:
+            - setup
+            - binary_linux_libtorch_3_7m_cu102_gcc5_4_cxx11-abi_nightly_static-with-deps_build
+          filters:
+            branches:
+              only: nightly
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+          libtorch_variant: "static-with-deps"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
+          use_cuda_docker_runtime: "1"
+          resource_class: gpu.medium
+      - binary_linux_test:
+          name: binary_linux_libtorch_3_7m_cu102_gcc5_4_cxx11-abi_nightly_static-without-deps_test
+          build_environment: "libtorch 3.7m cu102 gcc5.4_cxx11-abi"
+          requires:
+            - setup
+            - binary_linux_libtorch_3_7m_cu102_gcc5_4_cxx11-abi_nightly_static-without-deps_build
           filters:
             branches:
               only: nightly
@@ -5457,11 +5583,11 @@ workflows:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           context: org-member
       - binary_linux_upload:
-          name: binary_linux_libtorch_3_6m_cpu_devtoolset7_nightly_shared-with-deps_upload
-          build_environment: "libtorch 3.6m cpu devtoolset7"
+          name: binary_linux_libtorch_3_7m_cpu_devtoolset7_nightly_shared-with-deps_upload
+          build_environment: "libtorch 3.7m cpu devtoolset7"
           requires:
             - setup
-            - binary_linux_libtorch_3_6m_cpu_devtoolset7_nightly_shared-with-deps_test
+            - binary_linux_libtorch_3_7m_cpu_devtoolset7_nightly_shared-with-deps_test
           filters:
             branches:
               only: nightly
@@ -5470,11 +5596,11 @@ workflows:
           libtorch_variant: "shared-with-deps"
           context: org-member
       - binary_linux_upload:
-          name: binary_linux_libtorch_3_6m_cpu_devtoolset7_nightly_shared-without-deps_upload
-          build_environment: "libtorch 3.6m cpu devtoolset7"
+          name: binary_linux_libtorch_3_7m_cpu_devtoolset7_nightly_shared-without-deps_upload
+          build_environment: "libtorch 3.7m cpu devtoolset7"
           requires:
             - setup
-            - binary_linux_libtorch_3_6m_cpu_devtoolset7_nightly_shared-without-deps_test
+            - binary_linux_libtorch_3_7m_cpu_devtoolset7_nightly_shared-without-deps_test
           filters:
             branches:
               only: nightly
@@ -5483,11 +5609,11 @@ workflows:
           libtorch_variant: "shared-without-deps"
           context: org-member
       - binary_linux_upload:
-          name: binary_linux_libtorch_3_6m_cpu_devtoolset7_nightly_static-with-deps_upload
-          build_environment: "libtorch 3.6m cpu devtoolset7"
+          name: binary_linux_libtorch_3_7m_cpu_devtoolset7_nightly_static-with-deps_upload
+          build_environment: "libtorch 3.7m cpu devtoolset7"
           requires:
             - setup
-            - binary_linux_libtorch_3_6m_cpu_devtoolset7_nightly_static-with-deps_test
+            - binary_linux_libtorch_3_7m_cpu_devtoolset7_nightly_static-with-deps_test
           filters:
             branches:
               only: nightly
@@ -5496,11 +5622,11 @@ workflows:
           libtorch_variant: "static-with-deps"
           context: org-member
       - binary_linux_upload:
-          name: binary_linux_libtorch_3_6m_cpu_devtoolset7_nightly_static-without-deps_upload
-          build_environment: "libtorch 3.6m cpu devtoolset7"
+          name: binary_linux_libtorch_3_7m_cpu_devtoolset7_nightly_static-without-deps_upload
+          build_environment: "libtorch 3.7m cpu devtoolset7"
           requires:
             - setup
-            - binary_linux_libtorch_3_6m_cpu_devtoolset7_nightly_static-without-deps_test
+            - binary_linux_libtorch_3_7m_cpu_devtoolset7_nightly_static-without-deps_test
           filters:
             branches:
               only: nightly
@@ -5509,11 +5635,11 @@ workflows:
           libtorch_variant: "static-without-deps"
           context: org-member
       - binary_linux_upload:
-          name: binary_linux_libtorch_3_6m_cu92_devtoolset7_nightly_shared-with-deps_upload
-          build_environment: "libtorch 3.6m cu92 devtoolset7"
+          name: binary_linux_libtorch_3_7m_cu92_devtoolset7_nightly_shared-with-deps_upload
+          build_environment: "libtorch 3.7m cu92 devtoolset7"
           requires:
             - setup
-            - binary_linux_libtorch_3_6m_cu92_devtoolset7_nightly_shared-with-deps_test
+            - binary_linux_libtorch_3_7m_cu92_devtoolset7_nightly_shared-with-deps_test
           filters:
             branches:
               only: nightly
@@ -5522,11 +5648,11 @@ workflows:
           libtorch_variant: "shared-with-deps"
           context: org-member
       - binary_linux_upload:
-          name: binary_linux_libtorch_3_6m_cu92_devtoolset7_nightly_shared-without-deps_upload
-          build_environment: "libtorch 3.6m cu92 devtoolset7"
+          name: binary_linux_libtorch_3_7m_cu92_devtoolset7_nightly_shared-without-deps_upload
+          build_environment: "libtorch 3.7m cu92 devtoolset7"
           requires:
             - setup
-            - binary_linux_libtorch_3_6m_cu92_devtoolset7_nightly_shared-without-deps_test
+            - binary_linux_libtorch_3_7m_cu92_devtoolset7_nightly_shared-without-deps_test
           filters:
             branches:
               only: nightly
@@ -5535,11 +5661,11 @@ workflows:
           libtorch_variant: "shared-without-deps"
           context: org-member
       - binary_linux_upload:
-          name: binary_linux_libtorch_3_6m_cu92_devtoolset7_nightly_static-with-deps_upload
-          build_environment: "libtorch 3.6m cu92 devtoolset7"
+          name: binary_linux_libtorch_3_7m_cu92_devtoolset7_nightly_static-with-deps_upload
+          build_environment: "libtorch 3.7m cu92 devtoolset7"
           requires:
             - setup
-            - binary_linux_libtorch_3_6m_cu92_devtoolset7_nightly_static-with-deps_test
+            - binary_linux_libtorch_3_7m_cu92_devtoolset7_nightly_static-with-deps_test
           filters:
             branches:
               only: nightly
@@ -5548,11 +5674,11 @@ workflows:
           libtorch_variant: "static-with-deps"
           context: org-member
       - binary_linux_upload:
-          name: binary_linux_libtorch_3_6m_cu92_devtoolset7_nightly_static-without-deps_upload
-          build_environment: "libtorch 3.6m cu92 devtoolset7"
+          name: binary_linux_libtorch_3_7m_cu92_devtoolset7_nightly_static-without-deps_upload
+          build_environment: "libtorch 3.7m cu92 devtoolset7"
           requires:
             - setup
-            - binary_linux_libtorch_3_6m_cu92_devtoolset7_nightly_static-without-deps_test
+            - binary_linux_libtorch_3_7m_cu92_devtoolset7_nightly_static-without-deps_test
           filters:
             branches:
               only: nightly
@@ -5561,11 +5687,11 @@ workflows:
           libtorch_variant: "static-without-deps"
           context: org-member
       - binary_linux_upload:
-          name: binary_linux_libtorch_3_6m_cu101_devtoolset7_nightly_shared-with-deps_upload
-          build_environment: "libtorch 3.6m cu101 devtoolset7"
+          name: binary_linux_libtorch_3_7m_cu101_devtoolset7_nightly_shared-with-deps_upload
+          build_environment: "libtorch 3.7m cu101 devtoolset7"
           requires:
             - setup
-            - binary_linux_libtorch_3_6m_cu101_devtoolset7_nightly_shared-with-deps_test
+            - binary_linux_libtorch_3_7m_cu101_devtoolset7_nightly_shared-with-deps_test
           filters:
             branches:
               only: nightly
@@ -5574,11 +5700,11 @@ workflows:
           libtorch_variant: "shared-with-deps"
           context: org-member
       - binary_linux_upload:
-          name: binary_linux_libtorch_3_6m_cu101_devtoolset7_nightly_shared-without-deps_upload
-          build_environment: "libtorch 3.6m cu101 devtoolset7"
+          name: binary_linux_libtorch_3_7m_cu101_devtoolset7_nightly_shared-without-deps_upload
+          build_environment: "libtorch 3.7m cu101 devtoolset7"
           requires:
             - setup
-            - binary_linux_libtorch_3_6m_cu101_devtoolset7_nightly_shared-without-deps_test
+            - binary_linux_libtorch_3_7m_cu101_devtoolset7_nightly_shared-without-deps_test
           filters:
             branches:
               only: nightly
@@ -5587,11 +5713,11 @@ workflows:
           libtorch_variant: "shared-without-deps"
           context: org-member
       - binary_linux_upload:
-          name: binary_linux_libtorch_3_6m_cu101_devtoolset7_nightly_static-with-deps_upload
-          build_environment: "libtorch 3.6m cu101 devtoolset7"
+          name: binary_linux_libtorch_3_7m_cu101_devtoolset7_nightly_static-with-deps_upload
+          build_environment: "libtorch 3.7m cu101 devtoolset7"
           requires:
             - setup
-            - binary_linux_libtorch_3_6m_cu101_devtoolset7_nightly_static-with-deps_test
+            - binary_linux_libtorch_3_7m_cu101_devtoolset7_nightly_static-with-deps_test
           filters:
             branches:
               only: nightly
@@ -5600,11 +5726,11 @@ workflows:
           libtorch_variant: "static-with-deps"
           context: org-member
       - binary_linux_upload:
-          name: binary_linux_libtorch_3_6m_cu101_devtoolset7_nightly_static-without-deps_upload
-          build_environment: "libtorch 3.6m cu101 devtoolset7"
+          name: binary_linux_libtorch_3_7m_cu101_devtoolset7_nightly_static-without-deps_upload
+          build_environment: "libtorch 3.7m cu101 devtoolset7"
           requires:
             - setup
-            - binary_linux_libtorch_3_6m_cu101_devtoolset7_nightly_static-without-deps_test
+            - binary_linux_libtorch_3_7m_cu101_devtoolset7_nightly_static-without-deps_test
           filters:
             branches:
               only: nightly
@@ -5613,11 +5739,11 @@ workflows:
           libtorch_variant: "static-without-deps"
           context: org-member
       - binary_linux_upload:
-          name: binary_linux_libtorch_3_6m_cu102_devtoolset7_nightly_shared-with-deps_upload
-          build_environment: "libtorch 3.6m cu102 devtoolset7"
+          name: binary_linux_libtorch_3_7m_cu102_devtoolset7_nightly_shared-with-deps_upload
+          build_environment: "libtorch 3.7m cu102 devtoolset7"
           requires:
             - setup
-            - binary_linux_libtorch_3_6m_cu102_devtoolset7_nightly_shared-with-deps_test
+            - binary_linux_libtorch_3_7m_cu102_devtoolset7_nightly_shared-with-deps_test
           filters:
             branches:
               only: nightly
@@ -5626,11 +5752,11 @@ workflows:
           libtorch_variant: "shared-with-deps"
           context: org-member
       - binary_linux_upload:
-          name: binary_linux_libtorch_3_6m_cu102_devtoolset7_nightly_shared-without-deps_upload
-          build_environment: "libtorch 3.6m cu102 devtoolset7"
+          name: binary_linux_libtorch_3_7m_cu102_devtoolset7_nightly_shared-without-deps_upload
+          build_environment: "libtorch 3.7m cu102 devtoolset7"
           requires:
             - setup
-            - binary_linux_libtorch_3_6m_cu102_devtoolset7_nightly_shared-without-deps_test
+            - binary_linux_libtorch_3_7m_cu102_devtoolset7_nightly_shared-without-deps_test
           filters:
             branches:
               only: nightly
@@ -5639,11 +5765,11 @@ workflows:
           libtorch_variant: "shared-without-deps"
           context: org-member
       - binary_linux_upload:
-          name: binary_linux_libtorch_3_6m_cu102_devtoolset7_nightly_static-with-deps_upload
-          build_environment: "libtorch 3.6m cu102 devtoolset7"
+          name: binary_linux_libtorch_3_7m_cu102_devtoolset7_nightly_static-with-deps_upload
+          build_environment: "libtorch 3.7m cu102 devtoolset7"
           requires:
             - setup
-            - binary_linux_libtorch_3_6m_cu102_devtoolset7_nightly_static-with-deps_test
+            - binary_linux_libtorch_3_7m_cu102_devtoolset7_nightly_static-with-deps_test
           filters:
             branches:
               only: nightly
@@ -5652,11 +5778,11 @@ workflows:
           libtorch_variant: "static-with-deps"
           context: org-member
       - binary_linux_upload:
-          name: binary_linux_libtorch_3_6m_cu102_devtoolset7_nightly_static-without-deps_upload
-          build_environment: "libtorch 3.6m cu102 devtoolset7"
+          name: binary_linux_libtorch_3_7m_cu102_devtoolset7_nightly_static-without-deps_upload
+          build_environment: "libtorch 3.7m cu102 devtoolset7"
           requires:
             - setup
-            - binary_linux_libtorch_3_6m_cu102_devtoolset7_nightly_static-without-deps_test
+            - binary_linux_libtorch_3_7m_cu102_devtoolset7_nightly_static-without-deps_test
           filters:
             branches:
               only: nightly
@@ -5665,11 +5791,11 @@ workflows:
           libtorch_variant: "static-without-deps"
           context: org-member
       - binary_linux_upload:
-          name: binary_linux_libtorch_3_6m_cpu_gcc5_4_cxx11-abi_nightly_shared-with-deps_upload
-          build_environment: "libtorch 3.6m cpu gcc5.4_cxx11-abi"
+          name: binary_linux_libtorch_3_7m_cpu_gcc5_4_cxx11-abi_nightly_shared-with-deps_upload
+          build_environment: "libtorch 3.7m cpu gcc5.4_cxx11-abi"
           requires:
             - setup
-            - binary_linux_libtorch_3_6m_cpu_gcc5_4_cxx11-abi_nightly_shared-with-deps_test
+            - binary_linux_libtorch_3_7m_cpu_gcc5_4_cxx11-abi_nightly_shared-with-deps_test
           filters:
             branches:
               only: nightly
@@ -5678,11 +5804,11 @@ workflows:
           libtorch_variant: "shared-with-deps"
           context: org-member
       - binary_linux_upload:
-          name: binary_linux_libtorch_3_6m_cpu_gcc5_4_cxx11-abi_nightly_shared-without-deps_upload
-          build_environment: "libtorch 3.6m cpu gcc5.4_cxx11-abi"
+          name: binary_linux_libtorch_3_7m_cpu_gcc5_4_cxx11-abi_nightly_shared-without-deps_upload
+          build_environment: "libtorch 3.7m cpu gcc5.4_cxx11-abi"
           requires:
             - setup
-            - binary_linux_libtorch_3_6m_cpu_gcc5_4_cxx11-abi_nightly_shared-without-deps_test
+            - binary_linux_libtorch_3_7m_cpu_gcc5_4_cxx11-abi_nightly_shared-without-deps_test
           filters:
             branches:
               only: nightly
@@ -5691,11 +5817,11 @@ workflows:
           libtorch_variant: "shared-without-deps"
           context: org-member
       - binary_linux_upload:
-          name: binary_linux_libtorch_3_6m_cpu_gcc5_4_cxx11-abi_nightly_static-with-deps_upload
-          build_environment: "libtorch 3.6m cpu gcc5.4_cxx11-abi"
+          name: binary_linux_libtorch_3_7m_cpu_gcc5_4_cxx11-abi_nightly_static-with-deps_upload
+          build_environment: "libtorch 3.7m cpu gcc5.4_cxx11-abi"
           requires:
             - setup
-            - binary_linux_libtorch_3_6m_cpu_gcc5_4_cxx11-abi_nightly_static-with-deps_test
+            - binary_linux_libtorch_3_7m_cpu_gcc5_4_cxx11-abi_nightly_static-with-deps_test
           filters:
             branches:
               only: nightly
@@ -5704,11 +5830,11 @@ workflows:
           libtorch_variant: "static-with-deps"
           context: org-member
       - binary_linux_upload:
-          name: binary_linux_libtorch_3_6m_cpu_gcc5_4_cxx11-abi_nightly_static-without-deps_upload
-          build_environment: "libtorch 3.6m cpu gcc5.4_cxx11-abi"
+          name: binary_linux_libtorch_3_7m_cpu_gcc5_4_cxx11-abi_nightly_static-without-deps_upload
+          build_environment: "libtorch 3.7m cpu gcc5.4_cxx11-abi"
           requires:
             - setup
-            - binary_linux_libtorch_3_6m_cpu_gcc5_4_cxx11-abi_nightly_static-without-deps_test
+            - binary_linux_libtorch_3_7m_cpu_gcc5_4_cxx11-abi_nightly_static-without-deps_test
           filters:
             branches:
               only: nightly
@@ -5717,11 +5843,11 @@ workflows:
           libtorch_variant: "static-without-deps"
           context: org-member
       - binary_linux_upload:
-          name: binary_linux_libtorch_3_6m_cu92_gcc5_4_cxx11-abi_nightly_shared-with-deps_upload
-          build_environment: "libtorch 3.6m cu92 gcc5.4_cxx11-abi"
+          name: binary_linux_libtorch_3_7m_cu92_gcc5_4_cxx11-abi_nightly_shared-with-deps_upload
+          build_environment: "libtorch 3.7m cu92 gcc5.4_cxx11-abi"
           requires:
             - setup
-            - binary_linux_libtorch_3_6m_cu92_gcc5_4_cxx11-abi_nightly_shared-with-deps_test
+            - binary_linux_libtorch_3_7m_cu92_gcc5_4_cxx11-abi_nightly_shared-with-deps_test
           filters:
             branches:
               only: nightly
@@ -5730,11 +5856,11 @@ workflows:
           libtorch_variant: "shared-with-deps"
           context: org-member
       - binary_linux_upload:
-          name: binary_linux_libtorch_3_6m_cu92_gcc5_4_cxx11-abi_nightly_shared-without-deps_upload
-          build_environment: "libtorch 3.6m cu92 gcc5.4_cxx11-abi"
+          name: binary_linux_libtorch_3_7m_cu92_gcc5_4_cxx11-abi_nightly_shared-without-deps_upload
+          build_environment: "libtorch 3.7m cu92 gcc5.4_cxx11-abi"
           requires:
             - setup
-            - binary_linux_libtorch_3_6m_cu92_gcc5_4_cxx11-abi_nightly_shared-without-deps_test
+            - binary_linux_libtorch_3_7m_cu92_gcc5_4_cxx11-abi_nightly_shared-without-deps_test
           filters:
             branches:
               only: nightly
@@ -5743,11 +5869,11 @@ workflows:
           libtorch_variant: "shared-without-deps"
           context: org-member
       - binary_linux_upload:
-          name: binary_linux_libtorch_3_6m_cu92_gcc5_4_cxx11-abi_nightly_static-with-deps_upload
-          build_environment: "libtorch 3.6m cu92 gcc5.4_cxx11-abi"
+          name: binary_linux_libtorch_3_7m_cu92_gcc5_4_cxx11-abi_nightly_static-with-deps_upload
+          build_environment: "libtorch 3.7m cu92 gcc5.4_cxx11-abi"
           requires:
             - setup
-            - binary_linux_libtorch_3_6m_cu92_gcc5_4_cxx11-abi_nightly_static-with-deps_test
+            - binary_linux_libtorch_3_7m_cu92_gcc5_4_cxx11-abi_nightly_static-with-deps_test
           filters:
             branches:
               only: nightly
@@ -5756,11 +5882,11 @@ workflows:
           libtorch_variant: "static-with-deps"
           context: org-member
       - binary_linux_upload:
-          name: binary_linux_libtorch_3_6m_cu92_gcc5_4_cxx11-abi_nightly_static-without-deps_upload
-          build_environment: "libtorch 3.6m cu92 gcc5.4_cxx11-abi"
+          name: binary_linux_libtorch_3_7m_cu92_gcc5_4_cxx11-abi_nightly_static-without-deps_upload
+          build_environment: "libtorch 3.7m cu92 gcc5.4_cxx11-abi"
           requires:
             - setup
-            - binary_linux_libtorch_3_6m_cu92_gcc5_4_cxx11-abi_nightly_static-without-deps_test
+            - binary_linux_libtorch_3_7m_cu92_gcc5_4_cxx11-abi_nightly_static-without-deps_test
           filters:
             branches:
               only: nightly
@@ -5769,11 +5895,11 @@ workflows:
           libtorch_variant: "static-without-deps"
           context: org-member
       - binary_linux_upload:
-          name: binary_linux_libtorch_3_6m_cu101_gcc5_4_cxx11-abi_nightly_shared-with-deps_upload
-          build_environment: "libtorch 3.6m cu101 gcc5.4_cxx11-abi"
+          name: binary_linux_libtorch_3_7m_cu101_gcc5_4_cxx11-abi_nightly_shared-with-deps_upload
+          build_environment: "libtorch 3.7m cu101 gcc5.4_cxx11-abi"
           requires:
             - setup
-            - binary_linux_libtorch_3_6m_cu101_gcc5_4_cxx11-abi_nightly_shared-with-deps_test
+            - binary_linux_libtorch_3_7m_cu101_gcc5_4_cxx11-abi_nightly_shared-with-deps_test
           filters:
             branches:
               only: nightly
@@ -5782,11 +5908,11 @@ workflows:
           libtorch_variant: "shared-with-deps"
           context: org-member
       - binary_linux_upload:
-          name: binary_linux_libtorch_3_6m_cu101_gcc5_4_cxx11-abi_nightly_shared-without-deps_upload
-          build_environment: "libtorch 3.6m cu101 gcc5.4_cxx11-abi"
+          name: binary_linux_libtorch_3_7m_cu101_gcc5_4_cxx11-abi_nightly_shared-without-deps_upload
+          build_environment: "libtorch 3.7m cu101 gcc5.4_cxx11-abi"
           requires:
             - setup
-            - binary_linux_libtorch_3_6m_cu101_gcc5_4_cxx11-abi_nightly_shared-without-deps_test
+            - binary_linux_libtorch_3_7m_cu101_gcc5_4_cxx11-abi_nightly_shared-without-deps_test
           filters:
             branches:
               only: nightly
@@ -5795,11 +5921,11 @@ workflows:
           libtorch_variant: "shared-without-deps"
           context: org-member
       - binary_linux_upload:
-          name: binary_linux_libtorch_3_6m_cu101_gcc5_4_cxx11-abi_nightly_static-with-deps_upload
-          build_environment: "libtorch 3.6m cu101 gcc5.4_cxx11-abi"
+          name: binary_linux_libtorch_3_7m_cu101_gcc5_4_cxx11-abi_nightly_static-with-deps_upload
+          build_environment: "libtorch 3.7m cu101 gcc5.4_cxx11-abi"
           requires:
             - setup
-            - binary_linux_libtorch_3_6m_cu101_gcc5_4_cxx11-abi_nightly_static-with-deps_test
+            - binary_linux_libtorch_3_7m_cu101_gcc5_4_cxx11-abi_nightly_static-with-deps_test
           filters:
             branches:
               only: nightly
@@ -5808,11 +5934,11 @@ workflows:
           libtorch_variant: "static-with-deps"
           context: org-member
       - binary_linux_upload:
-          name: binary_linux_libtorch_3_6m_cu101_gcc5_4_cxx11-abi_nightly_static-without-deps_upload
-          build_environment: "libtorch 3.6m cu101 gcc5.4_cxx11-abi"
+          name: binary_linux_libtorch_3_7m_cu101_gcc5_4_cxx11-abi_nightly_static-without-deps_upload
+          build_environment: "libtorch 3.7m cu101 gcc5.4_cxx11-abi"
           requires:
             - setup
-            - binary_linux_libtorch_3_6m_cu101_gcc5_4_cxx11-abi_nightly_static-without-deps_test
+            - binary_linux_libtorch_3_7m_cu101_gcc5_4_cxx11-abi_nightly_static-without-deps_test
           filters:
             branches:
               only: nightly
@@ -5821,11 +5947,11 @@ workflows:
           libtorch_variant: "static-without-deps"
           context: org-member
       - binary_linux_upload:
-          name: binary_linux_libtorch_3_6m_cu102_gcc5_4_cxx11-abi_nightly_shared-with-deps_upload
-          build_environment: "libtorch 3.6m cu102 gcc5.4_cxx11-abi"
+          name: binary_linux_libtorch_3_7m_cu102_gcc5_4_cxx11-abi_nightly_shared-with-deps_upload
+          build_environment: "libtorch 3.7m cu102 gcc5.4_cxx11-abi"
           requires:
             - setup
-            - binary_linux_libtorch_3_6m_cu102_gcc5_4_cxx11-abi_nightly_shared-with-deps_test
+            - binary_linux_libtorch_3_7m_cu102_gcc5_4_cxx11-abi_nightly_shared-with-deps_test
           filters:
             branches:
               only: nightly
@@ -5834,11 +5960,11 @@ workflows:
           libtorch_variant: "shared-with-deps"
           context: org-member
       - binary_linux_upload:
-          name: binary_linux_libtorch_3_6m_cu102_gcc5_4_cxx11-abi_nightly_shared-without-deps_upload
-          build_environment: "libtorch 3.6m cu102 gcc5.4_cxx11-abi"
+          name: binary_linux_libtorch_3_7m_cu102_gcc5_4_cxx11-abi_nightly_shared-without-deps_upload
+          build_environment: "libtorch 3.7m cu102 gcc5.4_cxx11-abi"
           requires:
             - setup
-            - binary_linux_libtorch_3_6m_cu102_gcc5_4_cxx11-abi_nightly_shared-without-deps_test
+            - binary_linux_libtorch_3_7m_cu102_gcc5_4_cxx11-abi_nightly_shared-without-deps_test
           filters:
             branches:
               only: nightly
@@ -5847,11 +5973,11 @@ workflows:
           libtorch_variant: "shared-without-deps"
           context: org-member
       - binary_linux_upload:
-          name: binary_linux_libtorch_3_6m_cu102_gcc5_4_cxx11-abi_nightly_static-with-deps_upload
-          build_environment: "libtorch 3.6m cu102 gcc5.4_cxx11-abi"
+          name: binary_linux_libtorch_3_7m_cu102_gcc5_4_cxx11-abi_nightly_static-with-deps_upload
+          build_environment: "libtorch 3.7m cu102 gcc5.4_cxx11-abi"
           requires:
             - setup
-            - binary_linux_libtorch_3_6m_cu102_gcc5_4_cxx11-abi_nightly_static-with-deps_test
+            - binary_linux_libtorch_3_7m_cu102_gcc5_4_cxx11-abi_nightly_static-with-deps_test
           filters:
             branches:
               only: nightly
@@ -5860,11 +5986,11 @@ workflows:
           libtorch_variant: "static-with-deps"
           context: org-member
       - binary_linux_upload:
-          name: binary_linux_libtorch_3_6m_cu102_gcc5_4_cxx11-abi_nightly_static-without-deps_upload
-          build_environment: "libtorch 3.6m cu102 gcc5.4_cxx11-abi"
+          name: binary_linux_libtorch_3_7m_cu102_gcc5_4_cxx11-abi_nightly_static-without-deps_upload
+          build_environment: "libtorch 3.7m cu102 gcc5.4_cxx11-abi"
           requires:
             - setup
-            - binary_linux_libtorch_3_6m_cu102_gcc5_4_cxx11-abi_nightly_static-without-deps_test
+            - binary_linux_libtorch_3_7m_cu102_gcc5_4_cxx11-abi_nightly_static-without-deps_test
           filters:
             branches:
               only: nightly
@@ -5969,11 +6095,11 @@ workflows:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           context: org-member
       - binary_mac_upload:
-          name: binary_macos_libtorch_3_6_cpu_nightly_upload
-          build_environment: "libtorch 3.6 cpu"
+          name: binary_macos_libtorch_3_7_cpu_nightly_upload
+          build_environment: "libtorch 3.7 cpu"
           requires:
             - setup
-            - binary_macos_libtorch_3_6_cpu_nightly_build
+            - binary_macos_libtorch_3_7_cpu_nightly_build
           filters:
             branches:
               only: nightly
@@ -6069,7 +6195,7 @@ workflows:
       - ecr_gc_job:
             name: ecr_gc_job_for_pytorch
             project: pytorch
-            tags_to_keep: "271,262,256,278,282,291,300,323,327,347,389,401,402,403,405,a8006f9a-272d-4478-b137-d121c6f05c83,6e7b11da-a919-49e5-b2ba-da66e3d4bb0a,f990c76a-a798-42bb-852f-5be5006f8026"
+            tags_to_keep: "271,262,256,278,282,291,300,323,327,347,389,401,402,403,405,a8006f9a-272d-4478-b137-d121c6f05c83,6e7b11da-a919-49e5-b2ba-da66e3d4bb0a,f990c76a-a798-42bb-852f-5be5006f8026,e43973a9-9d5a-4138-9181-a08a0fc55e2f"
       - ecr_gc_job:
             name: ecr_gc_job_for_caffe2
             project: caffe2

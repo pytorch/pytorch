@@ -14,6 +14,14 @@ namespace torch {
 namespace jit {
 namespace fuser {
 
+// https://stackoverflow.com/questions/18837857/cant-use-enum-class-as-unordered-map-key
+struct TypeHash {
+  template <typename T>
+  std::size_t operator()(T t) const {
+    return static_cast<std::size_t>(t);
+  }
+};
+
 /*
  * Usage: FusionGuard and Fusion are required user interfaces for any operation
  * underlying the code generator. In order to create values, expressions, and
@@ -151,6 +159,8 @@ struct TORCH_CUDA_API Fusion : public IRInputOutput {
 
   // Return the set of Vals registered with this fusion
   const std::set<Val*>& vals() const noexcept;
+  // Return in insertion order
+  const std::deque<Val*>& deterministic_vals() const noexcept;
 
   // Return the set of Exprs registered with this fusion
   const std::set<Expr*>& unordered_exprs() const noexcept;
@@ -164,9 +174,12 @@ struct TORCH_CUDA_API Fusion : public IRInputOutput {
   // Return the Expr that produces val (const version)
   const Expr* origin(const Val* val) const;
 
+  bool lowered = false;
+
  private:
   // Sets of all Vals/Exprs registered with this fusion
   std::set<Val*> val_set_;
+  std::deque<Val*> val_deque_;
   std::set<Expr*> expr_set_;
 
   // Return an int that monotonically increases for each val/expr, some are
@@ -175,7 +188,7 @@ struct TORCH_CUDA_API Fusion : public IRInputOutput {
   StmtNameType getExprName();
 
   // map from valtype to individual name counters
-  std::unordered_map<ValType, StmtNameType> val_type_name_map = {
+  std::unordered_map<ValType, StmtNameType, TypeHash> val_type_name_map = {
       {ValType::TensorView, 0},
       {ValType::TensorDomain, 0},
       {ValType::IterDomain, 0},

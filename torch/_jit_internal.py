@@ -720,4 +720,4 @@ class SourceContext(torch._C._jit_tree_views.SourceRangeFactory):
 
 
 def fake_range():
-    return SourceContext('', None, 0, 0)
+    return SourceContext('', None, 0, 0).make_raw_range(0, 1)

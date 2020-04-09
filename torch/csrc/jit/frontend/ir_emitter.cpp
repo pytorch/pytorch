@@ -1132,7 +1132,7 @@ struct to_ir {
             }
           }
         }
-        auto expr_out = emitToBool(emitExpr(expr));
+        auto expr_out = emitToBool(expr.range(), emitExpr(expr));
         c10::optional<bool> static_if = c10::nullopt;
         if (expr_out->node()->kind() == aten::is_scripting) {
           static_if = true;
@@ -1185,6 +1185,14 @@ struct to_ir {
       list_value->setType(type_hint);
       type_set = true;
     }
+
+    // comprehension introduces it's own scope. no variable assigned
+    // leaks into the rest of the graph
+    Node* n =
+        graph->insertNode(create(prim::LocalVariableScope, lc.range(), 0));
+    auto* comprehension_block = n->addBlock();
+    pushFrame(comprehension_block);
+    WithInsertPoint guard(comprehension_block);
     auto emit_body = [&]() {
       auto comprehension_out = emitExpr(lc.elt());
       if (!type_set) {
@@ -1196,6 +1204,7 @@ struct to_ir {
       emitBuiltinCall(loc, *graph, aten::append, {input}, {}, self);
     };
     emitFor(targets_list, itrs, loc, emit_body);
+    popFrame();
     return list_value;
   }
 
@@ -1298,8 +1307,7 @@ struct to_ir {
 
     return expr_value;
   }
-  Value* emitToBool(Value* v) {
-    SourceRange loc = v->node()->sourceRange();
+  Value* emitToBool(const SourceRange& loc, Value* v) {
     Value* out;
     try {
       auto bool_cast = environment_stack->getSugaredVar("bool", loc);
@@ -1628,7 +1636,7 @@ struct to_ir {
       Value* out;
       if (cond) {
         WithInsertPoint insert(condition_block);
-        out = emitToBool(emitExpr(cond.value()));
+        out = emitToBool(cond.value().range(), emitExpr(cond.value()));
       } else {
         WithInsertPoint insert(n);
         out = graph->insertConstant(true, range);

@@ -215,7 +215,7 @@ inline at::ScalarType type_from_firstarg(at::ScalarType to_type, const Tensor& a
 /********************************************************************************************************
 Templates to provide wrapper functions
 
-I'm copying the pattern used in core/boxing/kernel_function.h to extract args and return type.
+I'm copying the pattern used in core/boxing/impl/WrapFunctionIntoFunctor.h to extract args and return type.
 (see also https://stackoverflow.com/questions/46533698/how-to-deduce-argument-list-from-function-pointer)
 
 This strategy uses an exterior "WrapFunction" that extracts arguments on behalf of
@@ -279,7 +279,7 @@ struct WrapFunction_<CastPolicy::promote, Redispatch, F, Ret, guts::typelist::ty
   }
 };
 
-// Wrapper to infer return_type and parameter_types for WrapFunction_ (imitating core/boxing/kernel_function.h)
+// Wrapper to infer return_type and parameter_types for WrapFunction_ (imitating core/boxing/impl/WrapFunctionIntoFunctor.h)
 template<CastPolicy policy,
          class Registered, // The signature for which we're registering.  The dispatcher's calling code invokes our
                            // registered functions with arguments matching Registered, so we register
@@ -452,7 +452,7 @@ auto register_out_of_place = c10::import()
   KERNEL_UNBOXED_ONLY(ADD_NS(binary_cross_entropy_with_logits), "aten::binary_cross_entropy_with_logits", Tensor (const Tensor &, const Tensor &, const Tensor &, const Tensor &, int64_t), fp32)
   KERNEL(ADD_NS(dist), "aten::dist", Tensor (const Tensor &, const Tensor &, Scalar), fp32)
   KERNEL(ADD_NS(pdist), "aten::pdist", Tensor (const Tensor &, double), fp32)
-  KERNEL(ADD_NS(cdist), "aten::cdist", Tensor (const Tensor &, const Tensor &, double, c10::optional<int64_t>), fp32)
+  KERNEL_UNBOXED_ONLY(ADD_NS(cdist), "aten::cdist", Tensor (const Tensor &, const Tensor &, double, c10::optional<int64_t>), fp32)
   KERNEL(ADD_NS(renorm), "aten::renorm", Tensor (const Tensor &, Scalar, int64_t, Scalar), fp32)
   // fp32_set_opt_dtype
   KERNEL_UNBOXED_ONLY(ADD_NS(prod), "aten::prod", Tensor (const Tensor &, c10::optional<ScalarType>), fp32_set_opt_dtype)

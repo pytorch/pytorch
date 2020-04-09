@@ -5089,7 +5089,7 @@ def foo(x):
         with self.capture_stdout():
             traced = torch.jit.trace(fn, [torch.ones(2, 2)])
 
-        FileCheck().check("goodbye").check("hello").run(traced.graph)
+        FileCheck().check("goodbye").run(traced.graph)
 
     def test_big_int_literals(self):
         def ok():
@@ -5352,6 +5352,15 @@ def foo(x):
                 return self.add(input, input)
 
         self.checkModule(Add(), [torch.randn(2, 2)])
+
+    def test_pybind_type_comparisons(self):
+        @torch.jit.script
+        def f():
+            return None
+
+        node = list(f.graph.nodes())[0]
+        t = node.outputsAt(0).type()
+        self.assertFalse(t == None)  # noqa
 
     @unittest.skipIf(IS_WINDOWS and sys.version_info >= (3, 8), 'TODO: need to fix the test case')
     def test_unmatched_type_annotation(self):
@@ -5909,6 +5918,25 @@ def foo(x):
     def test_torchbind_instantiate_missing_class(self):
         with self.assertRaisesRegex(RuntimeError, 'Tried to instantiate class foo.IDontExist but it does not exist!'):
             torch.classes.foo.IDontExist(3, 4, 5)
+
+    @skipIfRocm
+    def test_torchbind_optional_explicit_attr(self):
+        class TorchBindOptionalExplicitAttr(torch.nn.Module):
+            foo : Optional[torch.classes._TorchScriptTesting._StackString]
+
+            def __init__(self):
+                super().__init__()
+                self.foo = torch.classes._TorchScriptTesting._StackString(["test"])
+
+            def forward(self) -> str:
+                foo_obj = self.foo
+                if foo_obj is not None:
+                    return foo_obj.pop()
+                else:
+                    return '<None>'
+
+        mod = TorchBindOptionalExplicitAttr()
+        scripted = torch.jit.script(mod)
 
     def test_jitter_bug(self):
         @torch.jit.script
@@ -11332,6 +11360,18 @@ a")
         imported = self.getExportImportCopy(traced)
         check(imported)
 
+    def test_inlining_cleanup(self):
+        def foo(x):
+            return F.linear(x, x)
+
+        @torch.jit.script
+        def fee(x):
+            return foo(x)
+
+        # inlining optimizations should have cleaned up linear if statement
+        self.run_pass("inline", fee.graph)
+        FileCheck().check_not("prim::If").run(fee.graph)
+
     def test_trace_export_fns_recursive(self):
         class Foo(torch.nn.Module):
             def __init__(self):
@@ -13952,6 +13992,15 @@ a")
 
         with self.assertRaisesRegex(Exception, "Expected list type annotation"):
             torch.jit.script(bad_type_annotation)
+
+    def test_list_comprehension_variable_write(self):
+        # i in comprehension doesn't write to function scope
+        def foo():
+            i = 1
+            x = [i if i != 5 else 3 for i in range(7)]  # noqa: C416
+            return i, x
+
+        self.assertEqual(foo(), torch.jit.script(foo)())
 
     def test_for_in_zip(self):
         def fn(x, y):
