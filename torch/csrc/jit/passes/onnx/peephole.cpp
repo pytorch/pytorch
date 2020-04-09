@@ -843,14 +843,17 @@ static void fuseLogSoftmaxNllLoss(Block* b) {
       auto prev = it->input(0)->node();
       Node* origNllLossNode = *it;
       Node* origLogSoftmaxNode;
-      // if the input is 2D
-      // graph(%input : Float(3, 5),
-      // %target : Long(3)):
-      // %4 : Float(3, 5) = onnx::LogSoftmaxaxis=1
-      // %8 : Float(3) = onnx::NegativeLogLikelihoodLoss[reduction="none"]
-      // return (%8)
       if (prev->kind() == onnx::LogSoftmax) {
+        // if the input is 2D
+        // graph(%input : Float(3, 5),
+        // %target : Long(3)):
+        // %4 : Float(3, 5) = onnx::LogSoftmaxaxis=1
+        // %8 : Float(3) = onnx::NegativeLogLikelihoodLoss[reduction="none"]
+        // return (%8)
         origLogSoftmaxNode = it->input(0)->node();
+      } else if (
+          prev->kind() == onnx::Transpose &&
+          prev->input(0)->node()->kind() == onnx::LogSoftmax) {
         // if the input is 4D
         // graph(%input : Float(3, 5, 2, 7),
         // %target : Long(3, 2, 7)):
@@ -860,12 +863,14 @@ static void fuseLogSoftmaxNllLoss(Block* b) {
         // %10 : Float(3, 2, 7) =
         // onnx::NegativeLogLikelihoodLoss[reduction="none"](%6, %target) return
         // (%10)
-      } else if (
-          prev->kind() == onnx::Transpose &&
-          prev->input(0)->node()->kind() == onnx::LogSoftmax) {
         origLogSoftmaxNode = prev->input(0)->node();
-        auto logSoftmaxNode = origLogSoftmaxNode->input(0)->node();
-        origLogSoftmaxNode->replaceInput(0, logSoftmaxNode->inputs().at(0));
+        auto transpose = origLogSoftmaxNode->input(0)->node();
+        origLogSoftmaxNode->replaceInput(0, transpose->inputs().at(0));
+      } else if (
+          prev->kind() == onnx::Reshape &&
+          prev->input(0)->node()->kind() == onnx::Transpose &&
+          prev->input(0)->node()->input(0)->node()->kind() ==
+              onnx::LogSoftmax) {
         // if the input is 3D or > 4D
         // graph(%input : Float(3, 5, 2),
         // %target.1 : Long(3, 2)):
@@ -878,39 +883,33 @@ static void fuseLogSoftmaxNllLoss(Block* b) {
         // %26 : Long(3, 1, 2) = onnx::Reshape(%target.1, %25)
         // %30 : Float() = onnx::NegativeLogLikelihoodLoss[reduction="sum"](%22,
         // %26) return (%30)
-      } else if (
-          prev->kind() == onnx::Reshape &&
-          prev->input(0)->node()->kind() == onnx::Transpose &&
-          prev->input(0)->node()->input(0)->node()->kind() ==
-              onnx::LogSoftmax) {
         origLogSoftmaxNode = prev->input(0)->node()->input(0)->node();
-        auto logSoftmaxNode = origLogSoftmaxNode->input(0)->node();
-        origLogSoftmaxNode->replaceInput(0, logSoftmaxNode->inputs().at(0));
+        auto transpose = origLogSoftmaxNode->input(0)->node();
+        origLogSoftmaxNode->replaceInput(0, transpose->inputs().at(0));
         auto reshape = origNllLossNode->input(1)->node();
         origNllLossNode->replaceInput(1, reshape->inputs().at(0));
-        // when reduction=none a different graph is created and the graph
-        // doesn't end with node NegativeLogLikelihoodLoss like in all other
-        // cases. graph(%input : Float(3, 5, 2), %target.1 : Long(3, 2)): %4 :
-        // Tensor = onnx::Transposeperm=[0, 2, 1] %5 : Tensor =
-        // onnx::LogSoftmaxaxis=2 %6 : Float(3, 5, 2) = onnx::Transposeperm=[0,
-        // 2, 1]
-        // ...
-        // %27 : Float(3, 5, 1, 2) = onnx::Reshape(%6, %26)
-        // %31 : Long(3, 1, 2) = onnx::Reshape(%target.1, %30)
-        // %35 : Float(3, 1, 2) =
-        // onnx::NegativeLogLikelihoodLoss[reduction="none"](%27, %31) %36 :
-        // int[] = prim::ListConstruct(%11, %21) %37 : Float(3, 2) =
-        // onnx::Reshape(%35, %36) return (%37)
-        if (!origNllLossNode->output(0)->uses().empty() &&
-            origNllLossNode->s(attr::reduction) == "none") {
+        if (origNllLossNode->s(attr::reduction) == "none") {
+          // when reduction=none a different graph is created and the graph
+          // doesn't end with node NegativeLogLikelihoodLoss like in all other
+          // cases.
+          // graph(%input : Float(3, 5, 2), %target.1 : Long(3, 2)):
+          // %4 : Tensor = onnx::Transposeperm=[0, 2, 1]
+          // %5 : Tensor = onnx::LogSoftmaxaxis=2
+          // %6 : Float(3, 5, 2) = onnx::Transposeperm=[0, 2, 1]
+          // ...
+          // %27 : Float(3, 5, 1, 2) = onnx::Reshape(%6, %26)
+          // %31 : Long(3, 1, 2) = onnx::Reshape(%target.1, %30)
+          // %35 : Float(3, 1, 2) =
+          // onnx::NegativeLogLikelihoodLoss[reduction="none"](%27, %31) %36 :
+          // int[] = prim::ListConstruct(%11, %21) %37 : Float(3, 2) =
+          // onnx::Reshape(%35, %36) return (%37)
           auto nllloss_output = origNllLossNode->output(0)->uses()[0].user;
           assert(nllloss_output->kind() == onnx::Reshape);
           assert(
               nllloss_output->inputs()[1]->node()->kind() ==
               prim::ListConstruct);
-          auto reshape_after = nllloss_output;
           // make output of reshape the output of nllloss
-          reshape_after->replaceAllUsesWith(origNllLossNode);
+          nllloss_output->replaceAllUsesWith(origNllLossNode);
         }
       } else {
         continue;
