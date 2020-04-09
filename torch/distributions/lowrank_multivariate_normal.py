@@ -198,5 +198,4 @@ class LowRankMultivariateNormal(Distribution):
         H = 0.5 * (self._event_shape[0] * (1.0 + math.log(2 * math.pi)) + log_det)
         if len(self._batch_shape) == 0:
             return H
-        else:
-            return H.expand(self._batch_shape)
+        return H.expand(self._batch_shape)
