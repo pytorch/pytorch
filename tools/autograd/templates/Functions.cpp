@@ -472,8 +472,8 @@ Tensor logcumsumexp_backward(Tensor grad, const Tensor & self, Tensor result, in
   if (grad.dim() == 0 || grad.numel() == 0) {
     return grad;
   }
-  auto ret = grad*(result.exp())*cumsum_backward(result, dim);
-  return ret;
+  auto log_grad = grad * (-result).exp();
+  return cumsum_backward(log_grad, dim) * self.exp();
 }
 
 Tensor unbind_backward(const variable_list& grads, int64_t dim) {
