@@ -452,7 +452,7 @@ auto register_out_of_place = c10::import()
   KERNEL_UNBOXED_ONLY(ADD_NS(binary_cross_entropy_with_logits), "aten::binary_cross_entropy_with_logits", Tensor (const Tensor &, const Tensor &, const Tensor &, const Tensor &, int64_t), fp32)
   KERNEL(ADD_NS(dist), "aten::dist", Tensor (const Tensor &, const Tensor &, Scalar), fp32)
   KERNEL(ADD_NS(pdist), "aten::pdist", Tensor (const Tensor &, double), fp32)
-  KERNEL(ADD_NS(cdist), "aten::cdist", Tensor (const Tensor &, const Tensor &, double, c10::optional<int64_t>), fp32)
+  KERNEL_UNBOXED_ONLY(ADD_NS(cdist), "aten::cdist", Tensor (const Tensor &, const Tensor &, double, c10::optional<int64_t>), fp32)
   KERNEL(ADD_NS(renorm), "aten::renorm", Tensor (const Tensor &, Scalar, int64_t, Scalar), fp32)
   // fp32_set_opt_dtype
   KERNEL_UNBOXED_ONLY(ADD_NS(prod), "aten::prod", Tensor (const Tensor &, c10::optional<ScalarType>), fp32_set_opt_dtype)

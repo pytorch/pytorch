@@ -52,21 +52,18 @@ __global__ void searchsorted_cuda_kernel(
   bool right,
   bool is_1d_boundaries) {
 
-  int64_t tid = blockIdx.x * blockDim.x + threadIdx.x;
-  if (tid >= numel_in) {
-    return;
+  for (int64_t tid = blockIdx.x * blockDim.x + threadIdx.x; tid < numel_in; tid += blockDim.x * gridDim.x) {
+    // If boundaries tensor is 1d, we always search the entire boundary tensor
+    int64_t start_bd = is_1d_boundaries ? 0 : tid / idim_in * idim_bd;
+    int64_t end_bd = start_bd + idim_bd;
+
+    int64_t pos = !right ?
+      lower_bound<input_t>(data_bd, start_bd, end_bd, data_in[tid]) - start_bd :
+      upper_bound<input_t>(data_bd, start_bd, end_bd, data_in[tid]) - start_bd;
+
+    // type conversion might happen here
+    data_out[tid] = pos;
   }
-
-  // If boundaries tensor is 1d, we always search the entire boundary tensor
-  int64_t start_bd = is_1d_boundaries ? 0 : tid / idim_in * idim_bd;
-  int64_t end_bd = start_bd + idim_bd;
-
-  int64_t pos = !right ?
-    lower_bound<input_t>(data_bd, start_bd, end_bd, data_in[tid]) - start_bd :
-    upper_bound<input_t>(data_bd, start_bd, end_bd, data_in[tid]) - start_bd;
-
-  // type conversion might happen here
-  data_out[tid] = pos;
 }
 
 template<typename input_t, typename output_t>
@@ -81,8 +78,10 @@ void searchsorted_cuda_contiguous(Tensor& result, const Tensor& input, const Ten
   const input_t *data_bd = boundaries.data_ptr<input_t>();
   output_t *data_out = result.data_ptr<output_t>();
 
-  dim3 block = dim3(at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock);
-  dim3 grid  = dim3(cuda::ATenCeilDiv<int64_t>(numel_in, block.x));
+  int64_t maxThread = at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock;
+  int64_t maxGrid = 1024;
+  dim3 block = dim3(std::min(maxThread, numel_in));
+  dim3 grid  = dim3(std::min(maxGrid, cuda::ATenCeilDiv<int64_t>(numel_in, block.x)));
   at::cuda::CUDAStream stream = at::cuda::getCurrentCUDAStream();
 
   searchsorted_cuda_kernel<<<grid, block, 0, stream>>>(

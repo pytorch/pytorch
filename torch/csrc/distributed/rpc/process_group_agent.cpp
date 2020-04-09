@@ -698,6 +698,7 @@ void ProcessGroupAgent::listenLoopInternal() {
     std::vector<torch::Tensor> preamble = {torch::empty({4}, {torch::kInt64})};
     auto work = pg_->recvAnysource(preamble, pg_->getRank());
     {
+      // Write class variable so it can be aborted by shutdown()
       std::lock_guard<std::mutex> guard(recvWorkMutex_);
       recvWork_ = work;
     }
@@ -714,7 +715,16 @@ void ProcessGroupAgent::listenLoopInternal() {
     int64_t id = preamble_items[3];
 
     std::vector<torch::Tensor> tensors = {torch::empty({size}, {torch::kChar})};
-    pg_->recv(tensors, srcRank, pg_->getRank())->wait();
+    work = pg_->recv(tensors, srcRank, pg_->getRank());
+    {
+      // Write class variable so it can be aborted by shutdown()
+      std::lock_guard<std::mutex> guard(recvWorkMutex_);
+      recvWork_ = work;
+    }
+
+    if (!rpcAgentRunning_.load() || !work->wait() /* aborted */) {
+      return;
+    }
 
     enqueueRecv(
         RecvWork(allWorkerInfo_[srcRank], type, id, std::move(tensors[0])));
