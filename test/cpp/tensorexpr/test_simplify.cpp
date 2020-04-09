@@ -748,6 +748,20 @@ void testSimplifySubs() {
 
     IS_IMM_WITH_VAL(Int, simplified.node(), 0);
   }
+
+  {
+    // Cancel out opaque modulus.
+    ExprHandle body = (x % y + 2) - (x % y);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_IMM_WITH_VAL(Int, simplified.node(), 2);
+  }
+
+  {
+    // Cancel out opaque modulus with a bit more going on.
+    ExprHandle body = (x % y + (x * 2 - x - y * 0) - x + 2) - (x % y);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_IMM_WITH_VAL(Int, simplified.node(), 2);
+  }
 }
 
 // Test that mixing ops together simplifies as expected.
