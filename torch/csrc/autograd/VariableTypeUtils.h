@@ -106,37 +106,24 @@ template<typename... Args> inline variable_list flatten_tensor_args(Args&&... ar
 
 // See NOTE [ Autograd View Variables ] for details.
 inline Tensor as_view(const Tensor & base, Tensor tensor, bool is_differentiable,
-        std::function<Tensor(const Tensor&)> func=nullptr,
+        std::function<Tensor(const Tensor&)> func={},
         CreationMeta creation_meta=CreationMeta::DEFAULT) {
   auto base_var = Variable(base);
-  // TODO: Potentially the following logic can be moved to VariableType_x.cpp through codegen
-  //       so that we only create chain lambda functions for XLA backend.
   if (base_var.is_view()) {
-    if (func == nullptr) {
-      // func could be nullptr if tensor is a view created through CreationMeta::MULTI_OUTPUT_NODE.
-      base_var = base_var._base();
-    } else if (base_var.device().type() == at::kXLA) {
+    // `func` is used to recover views in backward when as_strided is not supported.
+    // See Note [View + Inplace update on base tensor] and [View + Inplace update on view tensor]
+    // for more details how we use this function in backward.
+    if (func) {
       auto diff_view_meta = static_cast<DifferentiableViewMeta*>(torch::autograd::impl::get_autograd_meta(base_var));
       auto prev_fn = diff_view_meta->view_fn_;
-      if (prev_fn != nullptr) {
+      if (prev_fn) {
         func = [=](const at::Tensor& new_base) {
           auto temp = prev_fn(new_base);
           return func(temp);
         };
       }
-      base_var = base_var._base();
-    } else {
-      base_var = base_var._base();
-      if (base_var.has_storage() && tensor.has_storage()) {
-        // Sparse tensor doesn't have a storage thus cannot be optimized using as_strided.
-        auto sizes = tensor.sizes().vec();
-        auto strides = tensor.strides().vec();
-        auto offset = tensor.storage_offset() - base_var.storage_offset();
-        func = [=](const at::Tensor& new_base) {
-          return new_base.as_strided(sizes, strides, offset);
-        };
-      }
     }
+    base_var = base_var._base();
   }
   if (is_differentiable) {
     return make_variable_differentiable_view(std::move(base_var), std::move(tensor), std::move(func), creation_meta);
@@ -156,7 +143,7 @@ inline std::vector<Tensor> as_view(const Tensor & base, std::vector<Tensor> tens
   }
   for(Tensor &tensor : tensors) {
     if (is_differentiable) {
-      tensor = make_variable_differentiable_view(base_var, std::move(tensor), nullptr, creation_meta);
+      tensor = make_variable_differentiable_view(base_var, std::move(tensor), {}, creation_meta);
     } else {
       TORCH_CHECK(creation_meta == CreationMeta::DEFAULT,
                   "Non-differentiable views must have creation_meta=CreationMeta::DEFAULT");

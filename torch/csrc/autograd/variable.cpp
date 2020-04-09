@@ -89,7 +89,7 @@ namespace impl {
           "Functions which modify views in-place must return a single Variable");
       diff_view_meta->output_nr_ = gradient_edge.input_nr;
       auto copy_slices = std::make_shared<CopySlices>(
-          diff_view_meta->base_, diff_view_meta->view_fn_, std::move(gradient_edge.function));
+          diff_view_meta->base_, at::TensorGeometry(self), diff_view_meta->view_fn_, std::move(gradient_edge.function));
       set_gradient_edge(diff_view_meta->base_, {std::move(copy_slices), 0});
       self.grad_fn(); // trigger an update to the view's grad_fn
     } else {
@@ -367,13 +367,9 @@ const std::shared_ptr<torch::autograd::Node>& VariableHooks::grad_fn(const Tenso
       //
       // TODO: Potentially the following logic can be moved to VariableType_x.cpp through codegen
       //       so that we directly save a view_grad_fn in DifferentiableViewMeta.
-      if (self.device().type() == at::kXLA) {
-        auto diff_base = at::empty_strided(diff_view_meta->base_.sizes(), diff_view_meta->base_.strides(), diff_view_meta->base_.options());
-        diff_base.requires_grad_(true);
-        AT_ASSERT(diff_view_meta->view_fn_ != nullptr);
-        auto diff_view = diff_view_meta->view_fn_(diff_base);
+      if (diff_view_meta->view_fn_) {
+        auto diff_view = diff_view_meta->view_fn_(diff_view_meta->base_);
         auto fn = diff_view.grad_fn();
-        fn->set_next_edges(torch::autograd::collect_next_edges(diff_view_meta->base_));
         diff_view_meta->grad_fn_ = std::move(fn);
 	  } else {
         auto fn = std::make_shared<torch::autograd::generated::AsStridedBackward>();

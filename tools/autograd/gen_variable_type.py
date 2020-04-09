@@ -242,8 +242,15 @@ ARRAYREF_TO_VEC = CodeTemplate("""\
 auto ${vec} = ${arg}.vec();
 """)
 
+SETUP_REPLAY_VIEW_IF_NOT_SUPPORT_AS_STRIDED = CodeTemplate("""\
+std::function<at::Tensor(const at::Tensor&)> func;
+if (!self.support_as_strided()) {
+  ${replay_view_func}
+}
+""")
+
 REPLAY_VIEW_LAMBDA_FUNC = CodeTemplate("""\
-auto func = [=](const at::Tensor& ${input_base}) {
+func = [=](const at::Tensor& ${input_base}) {
   return ${replay_view_call};
 };
 """)
@@ -781,8 +788,8 @@ def emit_body(declaration):
         return '\n'.join(names)
 
     def emit_view_lambda():
-        call = ''
         input_base = 'input_base'
+        replay_view_func = ''
         updated_unpacked_args = []
         combined = nested_dict(env, declaration)
         for arg in combined['unpacked_args']:
@@ -790,7 +797,7 @@ def emit_body(declaration):
                 updated_unpacked_args.append(input_base)
             elif combined['unpacked_args_simple_type'][arg] == 'IntArrayRef':
                 arg_vec = arg + '_vec'
-                call += ARRAYREF_TO_VEC.substitute(arg=arg, vec=arg_vec)
+                replay_view_func += ARRAYREF_TO_VEC.substitute(arg=arg, vec=arg_vec)
                 updated_unpacked_args.append(arg_vec)
             else:
                 updated_unpacked_args.append(arg)
@@ -804,10 +811,11 @@ def emit_body(declaration):
                 var=input_base,
                 unpacked_method_args=updated_unpacked_args[1:])
 
-        call += REPLAY_VIEW_LAMBDA_FUNC.substitute(
+        replay_view_func += REPLAY_VIEW_LAMBDA_FUNC.substitute(
             input_base=input_base,
             replay_view_call=replay_view_call)
-        return call
+        return SETUP_REPLAY_VIEW_IF_NOT_SUPPORT_AS_STRIDED.substitute(
+            replay_view_func=replay_view_func)
 
     def wrap_output(return_values, var):
         call = ''
@@ -838,6 +846,9 @@ def emit_body(declaration):
                     rhs_value = ("as_view(/* base */ {}, /* output */ {}, /* is_differentiable */ true, "
                                  "/* creation_meta */ {})").format(view_info, var, creation_meta)
                 else:
+                    # Generate an additional lambda function to recover views in backward when as_strided is not supported.
+                    # See Note [View + Inplace update for base tensor] and [View + Inplace update for view tensor]
+                    # for more details about how we use this function.
                     call += emit_view_lambda()
                     creation_meta = "GradMode::is_enabled() ? CreationMeta::DEFAULT: CreationMeta::NO_GRAD_MODE"
                     rhs_value = ("as_view(/* base */ {}, /* output */ {}, /* is_differentiable */ true, "

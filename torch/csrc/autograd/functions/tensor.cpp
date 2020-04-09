@@ -39,10 +39,12 @@ auto CopyBackwards::apply(variable_list&& grads) -> variable_list {
 
 CopySlices::CopySlices(
     const Variable& base_var,
-    std::function<at::Tensor(at::Tensor)> view_fn_,
+    at::TensorGeometry view_,
+    std::function<at::Tensor(const at::Tensor&)> view_fn_,
     std::shared_ptr<Node> fn_)
     : Node(),
       base(base_var),
+      view(std::move(view_)),
       view_fn(std::move(view_fn_)),
       fn(std::move(fn_)) {
   // Take the next_edges of fn as our own, except for index 0 which goes
@@ -71,8 +73,13 @@ auto CopySlices::apply(variable_list&& inputs) -> variable_list {
   auto result = at::empty_strided(base.sizes(), base.strides(), grad.options());
   result.copy_(grad);
 
-  AT_ASSERT(view_fn != nullptr);
-  auto grad_slice = view_fn(result);
+  at::Tensor grad_slice;
+  if (view_fn) {
+    grad_slice = view_fn(result);
+  } else {
+    auto offset = view.storage_offset() - base.storage_offset();
+    grad_slice = result.as_strided(view.sizes(), view.strides(), offset);
+  }
 
   // TODO: We clone grad_slice because we modify it below and "fn" might save
   // it for the backward of res. We might be able to avoid the clone() if

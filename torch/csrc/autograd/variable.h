@@ -426,7 +426,7 @@ struct TORCH_API DifferentiableViewMeta : public AutogradMeta {
 inline Variable make_variable_differentiable_view(
     Variable base,
     at::Tensor data,
-    std::function<at::Tensor(at::Tensor)> view_func,
+    std::function<at::Tensor(const at::Tensor&)> view_func,
     CreationMeta creation_meta) {
   if (data.defined()) {
     auto data_impl_copy = data.getIntrusivePtr()->shallow_copy_and_detach(
