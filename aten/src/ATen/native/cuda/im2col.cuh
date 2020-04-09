@@ -61,10 +61,10 @@ __global__ void im2col_kernel(
       for (int64_t j = 0; j < kernel_width; ++j) {
         int64_t h = h_in + i * dilation_height;
         int64_t w = w_in + j * dilation_width;
-        *data_col = (h >= 0 && w >= 0 && h < height && w < width)
-            ? data_im[i * dilation_height * width + j * dilation_width]
+        *col = (h >= 0 && w >= 0 && h < height && w < width)
+            ? im[i * dilation_height * width + j * dilation_width]
             : ScalarConvert<int, dt>::to(0);
-        data_col += height_col * width_col;
+        col += height_col * width_col;
       }
     }
   }
