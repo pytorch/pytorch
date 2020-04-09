@@ -20,7 +20,7 @@ from test_pytorch_common import (skipIfUnsupportedMinOpsetVersion, enableScriptT
 from test_pytorch_common import BATCH_SIZE
 from test_pytorch_common import RNN_BATCH_SIZE, RNN_SEQUENCE_LENGTH, RNN_INPUT_SIZE, RNN_HIDDEN_SIZE
 import model_defs.word_language_model as word_language_model
-# import torchvision
+import torchvision
 import onnx
 
 

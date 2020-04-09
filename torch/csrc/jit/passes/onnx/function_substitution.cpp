@@ -30,17 +30,16 @@ void functionCallSubstitution(Block* block) {
           cur->replaceAllUsesWith(interpolate_node);
           cur->removeAllInputs();
           cur->destroy();
-        } else {
-          cur->removeInput(0);
-          functionCallSubstitution(fun_type->function()->graph()->block());
           GRAPH_UPDATE(
               "ONNX function call substitution function: '",
               fun_type->function()->name(),
-              "' to ",
-              *cur);
+              "' to aten::__interpolate");
           GRAPH_UPDATE(
               "Function in ONNX function call substitution body: ",
               *fun_type->function()->optimized_graph());
+        } else {
+          cur->removeInput(0);
+          functionCallSubstitution(fun_type->function()->graph()->block());
           inlineCallTo(cur, fun_type->function(), false);
         }
       } break;
@@ -52,14 +51,6 @@ void functionCallSubstitution(Block* block) {
             continue;
           }
           functionCallSubstitution(function->graph()->block());
-          GRAPH_UPDATE(
-              "ONNX function call substitution method: '",
-              function->name(),
-              "' to ",
-              *cur);
-          GRAPH_UPDATE(
-              "Method in ONNX function call substitution body: ",
-              function->optimized_graph());
           inlineCallTo(cur, function, false);
         }
       } break;
@@ -78,9 +69,9 @@ void functionCallSubstitution(Block* block) {
 // maintain the behavior for ONNX conversion, we replace these function calls
 // with the aten symbolic which can still be used by the ONNX converter.
 void ONNXFunctionCallSubstitution(Graph& graph) {
-  GRAPH_DUMP("Before stop-inlining calls: ", &graph);
+  GRAPH_DUMP("Before function call substitution calls: ", &graph);
   functionCallSubstitution(graph.block());
-  GRAPH_DUMP("After stop-inlining calls: ", &graph);
+  GRAPH_DUMP("After function call substitution calls: ", &graph);
 }
 
 } // namespace jit
