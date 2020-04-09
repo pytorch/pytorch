@@ -651,7 +651,7 @@ Tensor _fused_dropout_backward(Tensor grad, Tensor mask, double p1m) {
   }
 }
 
-Tensor select_equals_backward(Tensor grad, const Tensor & input, const Tensor & value) {
+Tensor select_first_equal_backward(Tensor grad, const Tensor & input, const Tensor & value) {
   auto grad_input = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
 
   // find indices of the first element for which input[idx] == value
