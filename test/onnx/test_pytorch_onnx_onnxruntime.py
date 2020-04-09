@@ -1296,11 +1296,12 @@ class TestONNXRuntime(unittest.TestCase):
     def test_interpolate_upsample(self):
         self._interpolate_tests(True)
 
+    @skipIfUnsupportedMinOpsetVersion(10)
     def test_interpolate_function_substitution(self):
         class ScriptModel(torch.jit.ScriptModule):
             @torch.jit.script_method
             def forward(self, x):
-                return torch.nn.functional.interpolate(x, mode="bilinear", size=[16, 32])
+                return torch.nn.functional.interpolate(x, mode="nearest", scale_factor=0.5)
 
         class ScriptModule(torch.jit.ScriptModule):
             def __init__(self):
@@ -1311,12 +1312,12 @@ class TestONNXRuntime(unittest.TestCase):
             def forward(self, input):
                 return self.submodule(input)
 
-        x = torch.randn(1, 2, 4, 6)
+        x = torch.randn(1, 2, 4, 4, 6)
         self.run_test(ScriptModule(), (x,))
 
         @torch.jit.script
         def script_method(x):
-            return torch.nn.functional.interpolate(x, mode="bilinear", size=[16, 32])
+            return torch.nn.functional.interpolate(x, mode="nearest", scale_factor=0.5)
 
         class TracingModule(torch.nn.Module):
             def forward(self, x):
