@@ -29,8 +29,18 @@ using backward_fn = void (*)(
     Tensor* /* dgamma */,
     Tensor* /* dbeta */);
 
+using forward_quantized_fn = void (*)(
+    const Tensor& /* X */,
+    const Tensor& /* gamma */,
+    const Tensor& /* beta */,
+    int64_t /* M */,
+    int64_t /* N */,
+    double /* eps */,
+    Tensor* /* Y */);
+
 DECLARE_DISPATCH(forward_fn, LayerNormKernel);
 DECLARE_DISPATCH(backward_fn, LayerNormBackwardKernel);
+DECLARE_DISPATCH(forward_quantized_fn, quantized_layer_norm_stub);
 
 } // namespace native
 } // namespace at
