@@ -42,61 +42,6 @@ def floordiv(self : Tensor, other : ${Rhs_Type}) -> Tensor:
   return torch.floor_divide(self, other)
 )SCRIPT");
 
-// historical tensor x tensor division is true division if either input is
-// floating or complex, floor division otherwise.
-auto div_updater_tensor_tensor = CodeTemplate(R"SCRIPT(
-def div_updater(self: Tensor, other: Tensor) -> Tensor:
-  if (torch.is_floating_point(self) or
-      torch.is_complex(self) or
-      torch.is_floating_point(other) or
-      torch.is_complex(other)):
-    return torch.true_divide(self, other)
-
-  return torch.floor_divide(self, other)
-)SCRIPT");
-
-// historical tensor x tensor x out computes in the out type
-// It would RuntimeError if:
-// - self or other is complex and out is floating or integral
-// - self or other is floating and out is integral
-// Note: computation occurs in the out type
-auto div_updater_tensor_tensor_out = CodeTemplate(R"SCRIPT(
-def div_updater(self: Tensor, other: Tensor, *, out: Tensor) -> Tensor:
-  if (torch.is_complex(self) or torch.is_complex(other)) and not torch.is_complex(out):
-    raise RuntimeError("Cannot cast complex inputs to non-complex out.")
-  if (torch.is_floating_point(self) or torch.is_floating_point(other)) and not torch.is_floating_point(out):
-    raise RuntimeError("Cannot cast floating point inputs to non-floating point out.")
-
-  if torch.is_floating_point(out) or torch.is_complex(out):
-    return torch.true_divide(self.to(out.dtype), other.to(out.dtype), out=out)
-
-  return torch.floor_divide(self.to(out.dtype), other.to(out.dtype), out=out)
-)SCRIPT");
-
-// historical tensor x scalar is equivalent to tensor x tensor division
-// once the scalar is wrapped
-auto div_updater_tensor_scalar = CodeTemplate(R"SCRIPT(
-def div_updater(self: Tensor, other: number) -> Tensor:
-  wrapped = torch.tensor((other,))
-  if (torch.is_floating_point(self) or
-      torch.is_complex(self) or
-      torch.is_floating_point(wrapped) or
-      torch.is_complex(wrapped)):
-    return torch.true_divide(self, other)
-
-  return torch.floor_divide(self, other)
-)SCRIPT");
-
-// historical scalar x tensor behavior uses the dtype of the tensor (other)
-// exclusively
-// Note: this behavior is not symmetric with tensor x scalar division
-// Note: this would throw a RunTime error if other was not a floating or
-// complex type.
-auto div_updater_scalar_tensor = CodeTemplate(R"SCRIPT(
-def div_updater(self: number, other: Tensor) -> Tensor:
-  return torch.reciprocal(other).mul_(self)
-)SCRIPT");
-
 auto tensor_properties =
     R"SCRIPT(
 def ndim(a : Tensor) -> int:
@@ -114,6 +59,13 @@ auto aten_ops =
     R"SCRIPT(
 def _assert_int_or_pair(vals: List[int], name: str, message: str):
   pass
+)SCRIPT";
+
+// Implementations of historic symbol behaviors are defined here
+// See note [Versioned Symbols]
+auto subcmul_0_2 = R"SCRIPT(
+def _subcmul_0_2(self: Tensor, other:Tensor, alpha: number=1) -> Tensor:
+  return other - (self * alpha)
 )SCRIPT";
 
 struct BuiltinFunctionRegistry {
@@ -181,13 +133,10 @@ struct BuiltinFunctionRegistry {
       loadSource(floordiv.format(env), "aten");
     }
 
-    TemplateEnv env;
-    loadSource(div_updater_tensor_tensor.format(env), "aten");
-    loadSource(div_updater_tensor_tensor_out.format(env), "aten");
-    loadSource(div_updater_tensor_scalar.format(env), "aten");
-    loadSource(div_updater_scalar_tensor.format(env), "aten");
-
     loadSource(aten_ops, "aten");
+
+    // Loads upgraders, see note [Versioned Symbols]
+    loadSource(subcmul_0_2, "aten");
 
     // These are under `prim` instead of `aten` since they exist to bind certain
     // tensor property getters to correpsonding methods

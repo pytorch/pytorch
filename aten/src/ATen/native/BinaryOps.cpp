@@ -742,4 +742,11 @@ Tensor& true_divide_(Tensor& self, Scalar divisor) {
   return self.true_divide_(wrapped_scalar_tensor(divisor)); // redispatch!
 }
 
+// Note: this function is only for testing.
+// It is undocumented and should not be used outside of tests.
+Tensor subcmul(const Tensor& self, const Tensor& other, Scalar alpha) {
+  return self - (other * alpha);
+}
+
+
 }}  // at::native

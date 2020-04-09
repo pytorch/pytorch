@@ -176,6 +176,7 @@ libtorch_sources = [
     "torch/csrc/jit/serialization/import_source.cpp",
     "torch/csrc/jit/testing/hooks_for_testing.cpp",
     "torch/csrc/jit/frontend/builtin_functions.cpp",
+    "torch/csrc/jit/frontend/versioned_symbols.cpp",
     "torch/csrc/jit/api/module.cpp",
     "torch/csrc/jit/api/module_save.cpp",
     "torch/csrc/jit/api/object.cpp",
