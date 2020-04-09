@@ -6,9 +6,9 @@
 #include <string>
 #include <vector>
 
+#include <fbgemm/FbgemmFakeFP16.h>
 #include "caffe2/core/context.h"
 #include "caffe2/core/operator.h"
-#include "caffe2/fb/fbgemm/fbgemm_fp16/include/fbgemm/FbgemmFloat16.h"
 #include "caffe2/utils/eigen_utils.h"
 #include "caffe2/utils/math.h"
 #include "fp16_fma.h"
