@@ -464,7 +464,7 @@ def generate_schema_registration(schema_registrations):
     if not options.force_schema_registration:
         return
     file_manager.write('SchemaRegister.cpp', SCHEMA_REGISTER_CPP, {
-        'schema_registrations': schema_registrations,
+        'schema_registrations': sorted(set(schema_registrations)),
     })
 
 
