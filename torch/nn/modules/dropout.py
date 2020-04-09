@@ -217,6 +217,6 @@ class FeatureAlphaDropout(_DropoutNd):
     .. _Efficient Object Localization Using Convolutional Networks:
        http://arxiv.org/abs/1411.4280
     """
-    
+
     def forward(self, input):
         return F.feature_alpha_dropout(input, self.p, self.training)
