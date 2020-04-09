@@ -37,7 +37,6 @@ void testIRPrinterBasicValueTest02() {
 void testIRPrinterLetTest01() {
   KernelScope kernel_scope;
   VarHandle x("x", kFloat);
-  ExprHandle value = ExprHandle(3.f);
   ExprHandle body = ExprHandle(2.f) + (x * ExprHandle(3.f) + ExprHandle(4.f));
   ExprHandle result = Let::make(x, ExprHandle(3.f), body);
 
@@ -50,7 +49,6 @@ void testIRPrinterLetTest02() {
   KernelScope kernel_scope;
   VarHandle x("x", kFloat);
   VarHandle y("y", kFloat);
-  ExprHandle value = ExprHandle(3.f);
   ExprHandle body =
       ExprHandle(2.f) + (x * ExprHandle(3.f) + ExprHandle(4.f) * y);
   ExprHandle e1 = Let::make(x, ExprHandle(3.f), body);
@@ -66,7 +64,6 @@ void testIRPrinterCastTest() {
   KernelScope kernel_scope;
   VarHandle x("x", kFloat);
   VarHandle y("y", kFloat);
-  ExprHandle value = ExprHandle(3.f);
   ExprHandle body =
       ExprHandle(2.f) + (x * ExprHandle(3.f) + ExprHandle(4.f) * y);
   ExprHandle e1 = Let::make(x, Cast::make(kInt, ExprHandle(3.f)), body);
