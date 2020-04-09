@@ -78,7 +78,7 @@ auto registerer = torch::import()
   .def("aten::BB(Tensor self) -> Tensor", &BB_op)
   .impl("aten::CC", kCPU, &CC_op)
   .impl("aten::DD", &DD_op)
-  .def("aten::EE(Tensor self) -> Tensor", torch::dispatch(kCPU, CppFunction::makeUnboxedOnly(EE_op)))
+  .impl_UNBOXED("aten::EE", kCPU, EE_op)
   .def("aten::FF(Tensor self) -> Tensor", CppFunction::makeUnboxedOnly(FF_op))
   .impl("aten::GG",
     kCPU, [] (Tensor a) -> Tensor {
