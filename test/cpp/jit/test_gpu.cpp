@@ -1,4 +1,4 @@
-#if defined(USE_CUDA)
+// #if defined(USE_CUDA)
 #include <test/cpp/jit/test_base.h>
 
 #include <torch/csrc/jit/codegen/cuda/arith.h>
@@ -1044,14 +1044,17 @@ void testGPU_FusionLoopUnroll() {
 
   torch::jit::fuser::cuda::CudaKernel prog;
   prog.device_ = 0;
-  prog.grid(1); // 1 CTA
-  prog.block(128); // 128 Threads
+  prog.grid(2);
+  prog.block(16);
+
+  // GPULower lower(&fusion);
+  // lower.printKernel(std::cout);
 
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
 
-  at::Tensor input1 = at::ones({1, 128}, options);
+  at::Tensor input1 = at::ones({128}, options);
   at::Tensor input2 = at::ones_like(input1);
-  ;
+
   at::Tensor output = at::empty_like(input1);
   std::vector<at::Tensor> inputs{{input1, input2}};
   std::vector<at::Tensor> outputs{{output}};
@@ -1059,11 +1062,11 @@ void testGPU_FusionLoopUnroll() {
   torch::jit::fuser::cuda::compileKernel(fusion, prog);
   torch::jit::fuser::cuda::runTestKernel(prog, inputs, outputs);
 
-  at::Tensor check = at::full({1, 128}, 4, options);
-  ;
+  at::Tensor check = at::full({128}, 4, options);
+
   TORCH_CHECK(output.equal(check));
 }
 
 } // namespace jit
 } // namespace torch
-#endif // #if defined(USE_CUDA)
+// #endif // #if defined(USE_CUDA)
