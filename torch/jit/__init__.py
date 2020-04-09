@@ -237,7 +237,7 @@ def export_opnames(m):
     """
     return torch._C._export_opnames(m._c)
 
-def _get_trace_graph(f, args=(), kwargs=None, _force_outplace=False,
+def _get_trace_graph(f, args=(), kwargs=None, strict=True, _force_outplace=False,
                      return_inputs=False, _return_inputs_states=False):
     """
     .. warning::
@@ -274,7 +274,7 @@ def _get_trace_graph(f, args=(), kwargs=None, _force_outplace=False,
         kwargs = {}
     if not isinstance(args, tuple):
         args = (args,)
-    outs = ONNXTracedModule(f, _force_outplace, return_inputs, _return_inputs_states)(*args, **kwargs)
+    outs = ONNXTracedModule(f, strict, _force_outplace, return_inputs, _return_inputs_states)(*args, **kwargs)
     return outs
 
 
@@ -318,12 +318,13 @@ def _create_interpreter_name_lookup_fn(frames_up=1):
 
 
 class ONNXTracedModule(Module):
-    def __init__(self, inner, force_outplace=False, return_inputs=False, return_inputs_states=False):
+    def __init__(self, inner, strict=True, force_outplace=False, return_inputs=False, return_inputs_states=False):
         super(ONNXTracedModule, self).__init__()
         # inner may be a Module, or it may be an arbitrary callable
         # If it's a Module, we get its parameters automatically, which lets
         # us avoid a special casing functions versus modules.
         self.inner = inner
+        self.strict = strict
         self._force_outplace = force_outplace
         self._return_inputs = return_inputs
         self._return_inputs_states = return_inputs_states
@@ -357,6 +358,7 @@ class ONNXTracedModule(Module):
             wrapper,
             in_vars + module_state,
             _create_interpreter_name_lookup_fn(),
+            self.strict,
             self._force_outplace,
         )
 

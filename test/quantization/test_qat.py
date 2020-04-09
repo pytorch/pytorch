@@ -89,6 +89,7 @@ class IntrinsicQATModuleTest(TestCase):
                 (pad_h, pad_w),
                 (dilation_h, dilation_w),
                 groups,
+                None,  # bias
                 padding_mode,
                 eps,
                 momentum,
