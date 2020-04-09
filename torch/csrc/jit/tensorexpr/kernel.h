@@ -12,7 +12,7 @@ namespace tensorexpr {
 template <typename T>
 inline std::vector<int64_t> bufferSizes(const T& t) {
   std::vector<int64_t> sizes;
-  for (int i = 0; i < t->buf()->ndim(); i++) {
+  for (size_t i = 0; i < t->buf()->ndim(); i++) {
     sizes.push_back(dynamic_cast<const IntImm*>(t->buf()->dim(i))->value());
   }
   return sizes;

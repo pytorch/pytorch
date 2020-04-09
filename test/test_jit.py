@@ -25,6 +25,7 @@ from jit.test_unsupported_ops import TestUnsupportedOps  # noqa: F401
 from jit.test_freezing import TestFreezing  # noqa: F401
 from jit.test_functional_blocks import TestFunctionalBlocks  # noqa: F401
 from jit.test_save_load import TestSaveLoad  # noqa: F401
+from jit.test_python_ir import TestPythonIr  # noqa: F401
 
 # Torch
 from torch import Tensor
@@ -11021,12 +11022,6 @@ a")
             inp = torch.tensor(1)
             self.checkModule(M(), (inp, name))
             self.checkModule(M2(), (inp, name))
-
-    def test_list_keyword(self):
-        def foo():
-            return list([1, 2, 3]), list(("a", "b")), list(range(5)), list("abcdefg")  # noqa: C410
-
-        self.checkScript(foo, ())
 
     def test_custom_container_forward(self):
         class Inner(torch.nn.Module):
