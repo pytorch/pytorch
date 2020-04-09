@@ -72,6 +72,10 @@ class bcolors:
     BOLD = '\033[1m'
     UNDERLINE = '\033[4m'
 
+# To the programmer, the output of hipify most likely are intermediates.
+# This class allows users of hipify to ask for a cleanup by running the
+# hipify and compilation in a with instantiating this context manager class
+# with keep_intermediates=False.
 class GeneratedFileCleaner:
     """Context Manager to clean up generated files"""
     def __init__(self, keep_intermediates=False):
