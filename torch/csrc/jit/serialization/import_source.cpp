@@ -291,8 +291,8 @@ struct SourceImporterImpl : public Resolver,
     // Module-specific: which attrs are parameters?
     std::unordered_set<std::string> parameter_names;
 
-    std::unordered_set<QualifiedName> forward_hook_names;
-    std::unordered_set<QualifiedName> forward_pre_hook_names;
+    std::vector<QualifiedName> forward_hook_names;
+    std::vector<QualifiedName> forward_pre_hook_names;
     // Process statements, splitting things into attribute and method
     // definitions.
     for (const auto& statement : class_def.body()) {
@@ -306,14 +306,14 @@ struct SourceImporterImpl : public Resolver,
                 const auto fwd_hook_list =
                     ListLiteral(assign.rhs().get()).inputs();
                 for (const auto& hook_item : fwd_hook_list) {
-                  forward_hook_names.insert(
+                  forward_hook_names.emplace_back(
                       QualifiedName(Var(hook_item).name().name()));
                 }
               } else if (name == "__forward_pre_hooks__") {
                 const auto fwd_pre_hook_list =
                     ListLiteral(assign.rhs().get()).inputs();
                 for (const auto& hook_item : fwd_pre_hook_list) {
-                  forward_pre_hook_names.insert(
+                  forward_pre_hook_names.emplace_back(
                       QualifiedName(Var(hook_item).name().name()));
                 }
               } else if (name == "__parameters__") {
