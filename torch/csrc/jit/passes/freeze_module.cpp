@@ -1,9 +1,9 @@
-#include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/freeze_module.h>
+#include <torch/csrc/jit/jit_log.h>
 
-#include <torch/csrc/jit/runtime/graph_executor_impl.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/passes/inliner.h>
+#include <torch/csrc/jit/runtime/graph_executor_impl.h>
 
 #include <stack>
 
@@ -90,7 +90,7 @@ class AttributePropagator {
     }
 
     auto attr = attrModule.attr(name);
-    if (!AliasDb::mutableType(attr.type())) {
+    if (!AliasDb::isMutableType(attr.type())) {
       auto it = preservedScalarAttrs_.find(attrModule._ivalue());
       return it == preservedScalarAttrs_.end() || !it->second.count(name);
     }
@@ -116,7 +116,7 @@ class AttributePropagator {
       const std::string& name,
       const IValue& attr,
       Module& attrModule) {
-    if (AliasDb::mutableType(attr.type())) {
+    if (AliasDb::isMutableType(attr.type())) {
       preservedAttrs_[attrModule._ivalue()].insert(attr);
     } else {
       preservedScalarAttrs_[attrModule._ivalue()].insert(name);
@@ -154,7 +154,7 @@ class AttributePropagator {
             auto type = n->output()->type();
             // Do not record submodules. Their attributes are tracked
             // individually.
-            if (attr.isObject() || !AliasDb::mutableType(attr.type())) {
+            if (attr.isObject() || !AliasDb::isMutableType(attr.type())) {
               continue;
             }
             usedAttrs.insert(attr);
@@ -213,7 +213,7 @@ class AttributePropagator {
     if (attr.isTensor()) {
       auto t = attr.toTensor();
       if (t.requires_grad()) {
-        t = autograd::as_variable_ref(t).detach();
+        t = t.detach();
         t.set_requires_grad(false);
         attr = IValue(t);
       }
@@ -241,9 +241,7 @@ class AttributePropagator {
   }
 
   void propagateAttributes(std::shared_ptr<Graph>& graph) {
-    std::unordered_map<
-        ModulePtr,
-        std::unordered_map<std::string, Value*>>
+    std::unordered_map<ModulePtr, std::unordered_map<std::string, Value*>>
         attrValues;
     auto isEval = !module_.hasattr("training") || !module_.is_training();
     GRAPH_DEBUG("Freezing Module in ", isEval ? "eval mode" : "training mode");
@@ -336,7 +334,7 @@ class AttributePropagator {
       auto name = type->getAttributeName(i);
       auto attr = module_.attr(name);
       bool immutable;
-      if (AliasDb::mutableType(attrTy)) {
+      if (AliasDb::isMutableType(attrTy)) {
         immutable = it == preservedAttrs_.end() || !it->second.count(attr);
       } else {
         immutable =
@@ -360,8 +358,7 @@ class AttributePropagator {
   }
 
   // Contains attributes that can't be folded or user directs to keep them.
-  std::unordered_map<ModulePtr, IValue::HashAliasedIValues>
-      preservedAttrs_;
+  std::unordered_map<ModulePtr, IValue::HashAliasedIValues> preservedAttrs_;
   // Tracked immutable types (Scalars) by their attribute names not
   // IValues.
   std::unordered_map<ModulePtr, std::unordered_set<std::string>>

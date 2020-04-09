@@ -27,7 +27,7 @@ struct TupleType;
 // For custom class __init__ registration, we need to pass in a function
 // that looks like this: [](IValue x, args...)
 
-// However, kernel_functor.h automatically sets the input types of the function
+// However, make_boxed_from_unboxed_functor.h automatically sets the input types of the function
 // by introspecting the types of the functor (which is IValue in this case).
 // However, we need the type it binds to be Foo.
 
@@ -127,6 +127,14 @@ inline c10::intrusive_ptr<torch::CustomClassHolder> IValue::toCapsule() const & 
   TORCH_INTERNAL_ASSERT(isCapsule());
   return toIntrusivePtr<torch::CustomClassHolder>();
 }
+inline at::Generator IValue::toGenerator() && {
+  AT_ASSERT(isGenerator(), "Expected Generator but got ", tagKind());
+  return at::Generator(moveToIntrusivePtr<at::GeneratorImpl>());
+}
+inline at::Generator IValue::toGenerator() const & {
+  AT_ASSERT(isGenerator(), "Expected Generator but got ", tagKind());
+  return at::Generator(toIntrusivePtr<at::GeneratorImpl>());
+}
 
 namespace ivalue {
 
@@ -197,6 +205,8 @@ struct CAFFE2_API Tuple : c10::intrusive_ptr_target {
   }
   std::shared_ptr<TupleType> type() const;
 
+  friend bool operator==(const ivalue::Tuple& lhs, const ivalue::Tuple& rhs);
+
  private:
   Tuple(std::vector<IValue> elements, std::shared_ptr<TupleType> type = nullptr)
     : elements_(std::move(elements)), type_(std::move(type)) {}
@@ -222,7 +232,7 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
  public:
   Future(TypePtr type) : type_(type) {}
   struct CAFFE2_API FutureError final : public std::exception {
-    FutureError(std::string&& error_msg_)
+    explicit FutureError(std::string&& error_msg_)
         : error_msg(std::move(error_msg_)) {}
 
     FutureError() = default;
@@ -235,8 +245,8 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
   };
 
   /**
-  * Wait on the future until it completes.
-  */
+   * Wait on the future until it completes.
+   */
   void wait() {
     std::unique_lock<std::mutex> lock(mutex_);
     while (!completed_) {
@@ -267,11 +277,14 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
     markCompleted(IValue {});
   }
 
-  void markCompleted(FutureError&& error) {
+  void setError(std::string err) {
+    setError(FutureError(std::move(err)));
+  }
+
+  void setError(FutureError&& error) {
     std::unique_lock<std::mutex> lock(mutex_);
     AT_ASSERT(!completed());
     completed_ = true;
-    has_error_ = true;
     error_ = std::move(error);
 
     std::vector<std::function<void(void)>> cbs;
@@ -288,8 +301,8 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
   IValue value() {
     std::unique_lock<std::mutex> lock(mutex_);
     AT_ASSERT(completed());
-    if (has_error_) {
-      throw error_;
+    if (error_) {
+      throw *error_;
     }
     return value_;
   }
@@ -307,12 +320,22 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
       callback();
       return;
     }
-    callbacks_.push_back(callback);
+    callbacks_.emplace_back(std::move(callback));
   }
 
   // Check if the current future has completed
   bool completed() const{
     return completed_;
+  }
+
+  bool hasError() const {
+    std::unique_lock<std::mutex> lock(mutex_);
+    return error_ ? true : false;
+  }
+
+  c10::optional<FutureError> error() const {
+    std::unique_lock<std::mutex> lock(mutex_);
+    return error_;
   }
 
   CAFFE2_API friend std::ostream& operator<<(
@@ -324,15 +347,14 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
   }
 
  private:
-  std::mutex mutex_;
+  mutable std::mutex mutex_;
   std::atomic_bool completed_ = {false}; // is this future complete
   std::condition_variable finished_cv_;
 
   IValue value_; // when finished the value
   TypePtr type_;
   std::vector<std::function<void(void)>> callbacks_;
-  bool has_error_ = false;
-  FutureError error_;
+  c10::optional<FutureError> error_;
 };
 
 // User-defined object.
@@ -494,6 +516,7 @@ DEFINE_TO(at::ScalarType, toScalarType)
 DEFINE_TO(at::Layout, toLayout)
 DEFINE_TO(at::MemoryFormat, toMemoryFormat)
 DEFINE_TO(at::QScheme, toQScheme)
+DEFINE_TO(at::Generator, toGenerator)
 
 template <class T>
 struct _fake_type {};

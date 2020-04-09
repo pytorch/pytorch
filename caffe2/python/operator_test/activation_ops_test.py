@@ -39,9 +39,9 @@ class TestActivations(serial.SerializedTestCase):
         X += 0.02 * np.sign(X)
         X[X == 0.0] += 0.02
 
-        self.assertReferenceChecks(gc, op, [X], relu_ref)
+        self.assertReferenceChecks(gc, op, [X], relu_ref, ensure_outputs_are_inferred=True)
         self.assertDeviceChecks(dc, op, [X], [0])
-        self.assertGradientChecks(gc, op, [X], 0, [0])
+        self.assertGradientChecks(gc, op, [X], 0, [0], ensure_outputs_are_inferred=True)
 
     @given(N=st.integers(1, 10), M=st.integers(1, 10), in_place=st.booleans(),
            **hu.gcs)
@@ -57,9 +57,9 @@ class TestActivations(serial.SerializedTestCase):
 
         X = np.random.randn(0, N, M).astype(np.float32)
 
-        self.assertReferenceChecks(gc, op, [X], relu_ref)
+        self.assertReferenceChecks(gc, op, [X], relu_ref, ensure_outputs_are_inferred=True)
         self.assertDeviceChecks(dc, op, [X], [0])
-        self.assertGradientChecks(gc, op, [X], 0, [0])
+        self.assertGradientChecks(gc, op, [X], 0, [0], ensure_outputs_are_inferred=True)
 
     @unittest.skipIf(not workspace.has_gpu_support,
                      "Relu for float16 can only run on GPU now.")
@@ -119,9 +119,10 @@ class TestActivations(serial.SerializedTestCase):
         X[X == 0.0] -= 0.02
         X += n
 
-        self.assertReferenceChecks(gc, op, [X], relu_n_ref)
+        self.assertReferenceChecks(gc, op, [X], relu_n_ref, ensure_outputs_are_inferred=True)
         self.assertDeviceChecks(dc, op, [X], [0])
-        self.assertGradientChecks(gc, op, [X], 0, [0], stepsize=0.005)
+        self.assertGradientChecks(gc, op, [X], 0, [0], stepsize=0.005,
+                                  ensure_outputs_are_inferred=True)
 
     @serial.given(X=hu.tensor(),
                   alpha=st.floats(min_value=0.1, max_value=2.0),
@@ -145,9 +146,9 @@ class TestActivations(serial.SerializedTestCase):
         X += 0.04 * np.sign(X)
         X[X == 0.0] += 0.04
 
-        self.assertReferenceChecks(gc, op, [X], elu_ref)
+        self.assertReferenceChecks(gc, op, [X], elu_ref, ensure_outputs_are_inferred=True)
         self.assertDeviceChecks(dc, op, [X], [0])
-        self.assertGradientChecks(gc, op, [X], 0, [0], stepsize=1e-2)
+        self.assertGradientChecks(gc, op, [X], 0, [0], stepsize=1e-2, ensure_outputs_are_inferred=True)
 
     @given(X=hu.tensor(min_dim=4, max_dim=4),
            alpha=st.floats(min_value=0.1, max_value=2.0),
@@ -182,15 +183,15 @@ class TestActivations(serial.SerializedTestCase):
         op = core.CreateOperator(
             "PRelu", ["X", "W"], ["Y" if not inplace else "X"],
             alpha=alpha, order=order)
-        self.assertReferenceChecks(gc, op, [X, W], prelu_ref)
+        self.assertReferenceChecks(gc, op, [X, W], prelu_ref, ensure_outputs_are_inferred=True)
         # Check over multiple devices
         self.assertDeviceChecks(dc, op, [X, W], [0])
 
         if not inplace:
             # Gradient check wrt X
-            self.assertGradientChecks(gc, op, [X, W], 0, [0], stepsize=1e-2)
+            self.assertGradientChecks(gc, op, [X, W], 0, [0], stepsize=1e-2, ensure_outputs_are_inferred=True)
             # Gradient check wrt W
-            self.assertGradientChecks(gc, op, [X, W], 1, [0], stepsize=1e-2)
+            self.assertGradientChecks(gc, op, [X, W], 1, [0], stepsize=1e-2, ensure_outputs_are_inferred=True)
 
     @serial.given(X=hu.tensor(),
                   alpha=st.floats(min_value=0.1, max_value=2.0),
@@ -211,7 +212,8 @@ class TestActivations(serial.SerializedTestCase):
             "LeakyRelu",
             ["X"], ["Y" if not inplace else "X"],
             alpha=alpha)
-        self.assertReferenceChecks(gc, op, [X], leaky_relu_ref)
+        self.assertReferenceChecks(gc, op, [X], leaky_relu_ref,
+                                   ensure_outputs_are_inferred=True)
         # Check over multiple devices
         self.assertDeviceChecks(dc, op, [X], [0])
 
@@ -251,9 +253,11 @@ class TestActivations(serial.SerializedTestCase):
             return (X * norm.cdf(X),)
 
         tol = 1e-3 if fast_gelu else 1e-4
-        self.assertReferenceChecks(gc, op, [X], gelu_ref, threshold=tol)
+        self.assertReferenceChecks(gc, op, [X], gelu_ref, threshold=tol,
+                                   ensure_outputs_are_inferred=True)
         self.assertDeviceChecks(dc, op, [X], [0])
-        self.assertGradientChecks(gc, op, [X], 0, [0])
+        self.assertGradientChecks(gc, op, [X], 0, [0],
+                                  ensure_outputs_are_inferred=True)
 
 
 if __name__ == "__main__":

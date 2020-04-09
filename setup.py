@@ -42,7 +42,7 @@
 #   USE_MKLDNN=0
 #     disables use of MKLDNN
 #
-#   MKLDNN_THREADING
+#   MKLDNN_CPU_RUNTIME
 #     MKL-DNN threading mode: TBB or OMP (default)
 #
 #   USE_NNPACK=0
@@ -219,7 +219,7 @@ for i, arg in enumerate(sys.argv):
         break
     if arg == '-q' or arg == '--quiet':
         VERBOSE_SCRIPT = False
-    if arg == 'clean':
+    if arg == 'clean' or arg == 'egg_info':
         RUN_BUILD_DEPS = False
     filtered_args.append(arg)
 sys.argv = filtered_args
@@ -353,9 +353,6 @@ def build_deps():
 
 # the list of runtime dependencies required by this built package
 install_requires = ['future']
-
-if sys.version_info <= (2, 7):
-    install_requires += ['typing']
 
 missing_pydep = '''
 Missing build dependency: Unable to `import {importname}`.
@@ -580,14 +577,6 @@ def configure_extension_build():
                               '/wd4267', '/wd4251', '/wd4522', '/wd4522', '/wd4838',
                               '/wd4305', '/wd4244', '/wd4190', '/wd4101', '/wd4996',
                               '/wd4275']
-        if sys.version_info[0] == 2:
-            if not check_env_flag('FORCE_PY27_BUILD'):
-                report('The support for PyTorch with Python 2.7 on Windows is very experimental.')
-                report('Please set the flag `FORCE_PY27_BUILD` to 1 to continue build.')
-                sys.exit(1)
-            # /bigobj increases number of sections in .obj file, which is needed to link
-            # against libaries in Python 2.7 under Windows
-            extra_compile_args.append('/bigobj')
     else:
         extra_link_args = []
         extra_compile_args = [
@@ -804,6 +793,7 @@ if __name__ == '__main__':
                 'include/c10/macros/*.h',
                 'include/c10/core/*.h',
                 'include/ATen/core/boxing/*.h',
+                'include/ATen/core/boxing/impl/*.h',
                 'include/ATen/core/dispatch/*.h',
                 'include/ATen/core/op_registration/*.h',
                 'include/c10/core/impl/*.h',
@@ -812,6 +802,7 @@ if __name__ == '__main__':
                 'include/c10/cuda/impl/*.h',
                 'include/c10/hip/*.h',
                 'include/c10/hip/impl/*.h',
+                'include/c10d/*.hpp',
                 'include/caffe2/**/*.h',
                 'include/torch/*.h',
                 'include/torch/csrc/*.h',
@@ -880,7 +871,7 @@ if __name__ == '__main__':
         download_url='https://github.com/pytorch/pytorch/tags',
         author='PyTorch Team',
         author_email='packages@pytorch.org',
-        python_requires='>=2.7, !=3.0.*, !=3.1.*, !=3.2.*, !=3.3.*, !=3.4.*, !=3.6.0',
+        python_requires='>=3.6.1',
         # PyPI package information.
         classifiers=[
             'Development Status :: 5 - Production/Stable',
@@ -889,12 +880,10 @@ if __name__ == '__main__':
             'Intended Audience :: Science/Research',
             'License :: OSI Approved :: BSD License',
             'Programming Language :: C++',
-            'Programming Language :: Python :: 2',
-            'Programming Language :: Python :: 2.7',
             'Programming Language :: Python :: 3',
-            'Programming Language :: Python :: 3.5',
             'Programming Language :: Python :: 3.6',
             'Programming Language :: Python :: 3.7',
+            'Programming Language :: Python :: 3.8',
             'Topic :: Scientific/Engineering',
             'Topic :: Scientific/Engineering :: Mathematics',
             'Topic :: Scientific/Engineering :: Artificial Intelligence',

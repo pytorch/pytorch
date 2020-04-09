@@ -71,9 +71,9 @@ A **binary configuration** is a collection of
 * release or nightly
     * releases are stable, nightlies are beta and built every night
 * python version
-    * linux: 2.7m, 2.7mu, 3.5m, 3.6m 3.7m (mu is wide unicode or something like that. It usually doesn't matter but you should know that it exists)
-    * macos: 2.7, 3.5, 3.6, 3.7
-    * windows: 3.5, 3.6, 3.7
+    * linux: 3.5m, 3.6m 3.7m (mu is wide unicode or something like that. It usually doesn't matter but you should know that it exists)
+    * macos: 3.6, 3.7, 3.8
+    * windows: 3.6, 3.7, 3.8
 * cpu version
     * cpu, cuda 9.0, cuda 10.0
     * The supported cuda versions occasionally change
@@ -466,7 +466,7 @@ But if you want to try, then I’d recommend
 # Always install miniconda 3, even if building for Python <3
 new_conda="~/my_new_conda"
 conda_sh="$new_conda/install_miniconda.sh"
-curl -o "$conda_sh" https://repo.continuum.io/miniconda/Miniconda3-latest-MacOSX-x86_64.sh
+curl -o "$conda_sh" https://repo.anaconda.com/miniconda/Miniconda3-latest-MacOSX-x86_64.sh
 chmod +x "$conda_sh"
 "$conda_sh" -b -p "$MINICONDA_ROOT"
 rm -f "$conda_sh"

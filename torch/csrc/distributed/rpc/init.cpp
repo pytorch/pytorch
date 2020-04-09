@@ -430,23 +430,23 @@ If the future completes with an error, an exception is thrown.
   module.def(
       "_invoke_rpc_torchscript",
       [](const std::string& dstWorkerName,
-         const py::object& userCallable,
+         const std::string& qualifiedNameStr,
+         const std::shared_ptr<torch::autograd::profiler::RecordFunction>& rf,
          const py::tuple& argsTuple,
          const py::dict& kwargsDict) {
-        DCHECK(!PyGILState_Check());
         // No need to catch exception here, if function can not be found,
         // exception will be thrown in get_function() call; if args do not match
         // with function schema, exception will be thrown in
         // createStackForSchema() call.
-        auto& pythonRpcHandler = PythonRpcHandler::getInstance();
-        c10::QualifiedName qualifiedName =
-            pythonRpcHandler.getQualifiedName(userCallable);
-        c10::FunctionSchema functionSchema =
-            pythonRpcHandler.jitCompilationUnit()
-                ->get_function(qualifiedName)
-                .getSchema();
+        DCHECK(!PyGILState_Check());
+        const c10::QualifiedName qualifiedName(qualifiedNameStr);
+        auto functionSchema = PythonRpcHandler::getInstance()
+                                  .jitCompilationUnit()
+                                  ->get_function(qualifiedName)
+                                  .getSchema();
         Stack stack;
         {
+          // Acquire GIL for py::args and py::kwargs processing.
           py::gil_scoped_acquire acquire;
           stack = torch::jit::createStackForSchema(
               functionSchema,
@@ -455,8 +455,8 @@ If the future completes with an error, an exception is thrown.
               c10::nullopt);
         }
         DCHECK(!PyGILState_Check());
-        c10::intrusive_ptr<c10::ivalue::Future> fut =
-            rpcTorchscript(dstWorkerName, qualifiedName, functionSchema, stack);
+        c10::intrusive_ptr<c10::ivalue::Future> fut = rpcTorchscript(
+            dstWorkerName, qualifiedName, functionSchema, stack, rf);
         return torch::jit::PythonFutureWrapper(fut);
       },
       py::call_guard<py::gil_scoped_release>());
@@ -477,6 +477,7 @@ If the future completes with an error, an exception is thrown.
       "_invoke_remote_torchscript",
       [](const std::string& dstWorkerName,
          const std::string& qualifiedNameStr,
+         const std::shared_ptr<torch::autograd::profiler::RecordFunction>& rf,
          const py::args& args,
          const py::kwargs& kwargs) {
         DCHECK(!PyGILState_Check());
@@ -494,7 +495,7 @@ If the future completes with an error, an exception is thrown.
         }
         DCHECK(!PyGILState_Check());
         auto rrefPtr = remoteTorchscript(
-            dstWorkerName, qualifiedName, functionSchema, stack);
+            dstWorkerName, qualifiedName, functionSchema, stack, rf);
         return PyRRef(rrefPtr);
       },
       py::call_guard<py::gil_scoped_release>());
