@@ -14,8 +14,10 @@ using namespace at;
 
 namespace {
 
+constexpr auto kCustomRNG = DispatchKey::CustomRNGKeyId;
+
 struct TestCPUGenerator : public c10::GeneratorImpl {
-  TestCPUGenerator(uint64_t value) : GeneratorImpl{Device(DeviceType::CPU), DispatchKeySet(DispatchKey::CustomRNGKeyId)}, value_(value) { }
+  TestCPUGenerator(uint64_t value) : GeneratorImpl{Device(DeviceType::CPU), DispatchKeySet(kCustomRNG)}, value_(value) { }
   ~TestCPUGenerator() = default;
   uint32_t random() { return value_; }
   uint64_t random64() { return value_; }
@@ -98,21 +100,20 @@ class RNGTest : public ::testing::Test {
   void SetUp() override {
     static auto registry = torch::import()
       // Random
-      .impl("aten::random_.from", torch::dispatch(DispatchKey::CustomRNGKeyId, CppFunction::makeUnboxedOnly(random_from_to)))
-      .impl("aten::random_.to",   torch::dispatch(DispatchKey::CustomRNGKeyId, CppFunction::makeUnboxedOnly(random_to)))
-      .impl("aten::random_",      torch::dispatch(DispatchKey::CustomRNGKeyId, CppFunction::makeUnboxedOnly(random_)))
+      .impl("aten::random_.from", kCustomRNG, CppFunction::makeUnboxedOnly(random_from_to))
+      .impl("aten::random_.to",   kCustomRNG, CppFunction::makeUnboxedOnly(random_to))
+      .impl("aten::random_",      kCustomRNG, CppFunction::makeUnboxedOnly(random_))
       // Normal
-      .impl("aten::normal_",                  torch::dispatch(DispatchKey::CustomRNGKeyId, CppFunction::makeUnboxedOnly(normal_)))
-      .impl("aten::normal.Tensor_float_out",  torch::dispatch(DispatchKey::CustomRNGKeyId, CppFunction::makeUnboxedOnly(normal_Tensor_float_out)))
-      .impl("aten::normal.float_Tensor_out",  torch::dispatch(DispatchKey::CustomRNGKeyId, CppFunction::makeUnboxedOnly(normal_float_Tensor_out)))
-      .impl("aten::normal.Tensor_Tensor_out", torch::dispatch(DispatchKey::CustomRNGKeyId, CppFunction::makeUnboxedOnly(normal_Tensor_Tensor_out)))
-      .impl("aten::normal.Tensor_float",      torch::dispatch(DispatchKey::CustomRNGKeyId, CppFunction::makeUnboxedOnly(normal_Tensor_float)))
-      .impl("aten::normal.float_Tensor",      torch::dispatch(DispatchKey::CustomRNGKeyId, CppFunction::makeUnboxedOnly(normal_float_Tensor)))
-      .impl("aten::normal.Tensor_Tensor",     torch::dispatch(DispatchKey::CustomRNGKeyId, CppFunction::makeUnboxedOnly(normal_Tensor_Tensor)))
-      // Uniform
-      .impl("aten::uniform_",     torch::dispatch(DispatchKey::CustomRNGKeyId, CppFunction::makeUnboxedOnly(uniform_)))
+      .impl("aten::normal_",      kCustomRNG, CppFunction::makeUnboxedOnly(normal_))
+      .impl("aten::normal.Tensor_float_out",  kCustomRNG, CppFunction::makeUnboxedOnly(normal_Tensor_float_out))
+      .impl("aten::normal.float_Tensor_out",  kCustomRNG, CppFunction::makeUnboxedOnly(normal_float_Tensor_out))
+      .impl("aten::normal.Tensor_Tensor_out", kCustomRNG, CppFunction::makeUnboxedOnly(normal_Tensor_Tensor_out))
+      .impl("aten::normal.Tensor_float",      kCustomRNG, CppFunction::makeUnboxedOnly(normal_Tensor_float))
+      .impl("aten::normal.float_Tensor",      kCustomRNG, CppFunction::makeUnboxedOnly(normal_float_Tensor))
+      .impl("aten::normal.Tensor_Tensor",     kCustomRNG, CppFunction::makeUnboxedOnly(normal_Tensor_Tensor))
+      .impl("aten::uniform_",                 kCustomRNG, CppFunction::makeUnboxedOnly(uniform_))
       // Cauchy
-      .impl("aten::cauchy_",      torch::dispatch(DispatchKey::CustomRNGKeyId, CppFunction::makeUnboxedOnly(custom_rng_cauchy_)))
+      .impl("aten::cauchy_",      kCustomRNG, CppFunction::makeUnboxedOnly(custom_rng_cauchy_))
     ;
   }
 };
