@@ -3,7 +3,7 @@
 #else
 
 #include <ATen/cuda/CUDAContext.h>
-#include <ATen/CUDAGenerator.h>
+#include <ATen/CUDAGeneratorImpl.h>
 #include <ATen/Utils.h>
 #include <utility>
 
