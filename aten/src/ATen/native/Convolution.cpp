@@ -7,7 +7,7 @@
 
 #include <ATen/Config.h>
 #if AT_NNPACK_ENABLED()
-#include "nnpack.h"
+#include <nnpack.h>
 #endif
 
 constexpr int MIOPEN_DIM_MAX = 5;

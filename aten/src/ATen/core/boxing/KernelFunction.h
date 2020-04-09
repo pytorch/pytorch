@@ -241,4 +241,4 @@ private:
 
 }
 
-#include "KernelFunction_impl.h"
+#include <ATen/core/boxing/KernelFunction_impl.h>

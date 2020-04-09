@@ -8,7 +8,7 @@
 
 #include <gtest/gtest.h>
 
-#include "sigmoid-operator-tester.h"
+#include <sigmoid-operator-tester.h>
 
 #include <qnnpack/params.h>
 

@@ -12,7 +12,7 @@
 #include <qnnpack/isa-checks.h>
 #include <qnnpack/q8gavgpool.h>
 
-#include "gavgpool-microkernel-tester.h"
+#include <gavgpool-microkernel-tester.h>
 
 #if CPUINFO_ARCH_ARM || CPUINFO_ARCH_ARM64
 TEST(Q8GAVGPOOL_UP8x7__NEON, n_eq_8_all_m) {

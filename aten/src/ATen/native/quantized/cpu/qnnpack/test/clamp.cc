@@ -8,7 +8,7 @@
 
 #include <gtest/gtest.h>
 
-#include "clamp-operator-tester.h"
+#include <clamp-operator-tester.h>
 
 TEST(CLAMP_OP, zero_batch) {
   ClampOperatorTester().batchSize(0).channels(2).iterations(1).testU8();

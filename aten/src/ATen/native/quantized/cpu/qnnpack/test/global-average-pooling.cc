@@ -8,7 +8,7 @@
 
 #include <gtest/gtest.h>
 
-#include "global-average-pooling-operator-tester.h"
+#include <global-average-pooling-operator-tester.h>
 
 #include <qnnpack/params.h>
 

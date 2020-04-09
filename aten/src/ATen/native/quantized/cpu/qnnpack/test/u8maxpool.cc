@@ -12,7 +12,7 @@
 #include <qnnpack/isa-checks.h>
 #include <qnnpack/u8maxpool.h>
 
-#include "maxpool-microkernel-tester.h"
+#include <maxpool-microkernel-tester.h>
 
 #if CPUINFO_ARCH_ARM || CPUINFO_ARCH_ARM64
 TEST(U8MAXPOOL_SUB16__NEON, kc_lt_16_mx1_pool) {

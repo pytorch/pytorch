@@ -8,7 +8,7 @@
 
 #include <gtest/gtest.h>
 
-#include "tanh-operator-tester.h"
+#include <tanh-operator-tester.h>
 
 #include <qnnpack/params.h>
 

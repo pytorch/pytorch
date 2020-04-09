@@ -12,7 +12,7 @@
 #include <qnnpack/isa-checks.h>
 #include <qnnpack/x8zip.h>
 
-#include "zip-microkernel-tester.h"
+#include <zip-microkernel-tester.h>
 
 #if CPUINFO_ARCH_ARM || CPUINFO_ARCH_ARM64
 TEST(X8ZIP_X2__NEON, n_eq_8) {

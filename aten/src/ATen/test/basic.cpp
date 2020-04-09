@@ -3,7 +3,7 @@
 #include <ATen/ATen.h>
 #include <ATen/core/Reduction.h>
 #include <torch/cuda.h>
-#include "test_assert.h"
+#include <ATen/test/test_assert.h>
 
 // for TH compat test only...
 struct THFloatTensor;

@@ -12,7 +12,7 @@
 #include <qnnpack/isa-checks.h>
 #include <qnnpack/q8vadd.h>
 
-#include "vadd-microkernel-tester.h"
+#include <vadd-microkernel-tester.h>
 
 #if CPUINFO_ARCH_X86 || CPUINFO_ARCH_X86_64
 TEST(Q8VADD__SSE2, n_eq_8) {

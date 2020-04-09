@@ -10,7 +10,7 @@
 
 #include <qnnpack/params.h>
 
-#include "convolution-operator-tester.h"
+#include <convolution-operator-tester.h>
 
 TEST(CONVOLUTION_OP, zero_batch) {
   ConvolutionOperatorTester()

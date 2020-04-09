@@ -12,7 +12,7 @@
 #include <qnnpack/isa-checks.h>
 #include <qnnpack/q8dwconv.h>
 
-#include "dwconv-microkernel-tester.h"
+#include <dwconv-microkernel-tester.h>
 
 #if CPUINFO_ARCH_ARM || CPUINFO_ARCH_ARM64
 TEST(Q8DWCONV_UP8x9__NEON, single_output_channels_eq_8) {

@@ -8,7 +8,7 @@
 
 #include <gtest/gtest.h>
 
-#include "fully-connected-operator-tester.h"
+#include <fully-connected-operator-tester.h>
 
 TEST(FULLY_CONNECTED_OP, integration_test_static) {
   FullyConnectedOperatorTester()

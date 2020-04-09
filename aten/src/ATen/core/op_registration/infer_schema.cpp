@@ -1,4 +1,4 @@
-#include "infer_schema.h"
+#include <ATen/core/op_registration/infer_schema.h>
 #include <sstream>
 
 namespace c10 {

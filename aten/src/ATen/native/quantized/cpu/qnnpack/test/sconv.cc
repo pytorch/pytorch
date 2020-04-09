@@ -12,7 +12,7 @@
 #include <qnnpack/isa-checks.h>
 #include <qnnpack/sconv.h>
 
-#include "gemm-microkernel-tester.h"
+#include <gemm-microkernel-tester.h>
 
 TEST(SCONV_6x8__PSIMD, k_eq_1) {
   GemmMicrokernelTester()

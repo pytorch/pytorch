@@ -8,7 +8,7 @@
 
 #include <gtest/gtest.h>
 
-#include "deconvolution-operator-tester.h"
+#include <deconvolution-operator-tester.h>
 
 TEST(DECONVOLUTION_OP, zero_batch) {
   DeconvolutionOperatorTester()

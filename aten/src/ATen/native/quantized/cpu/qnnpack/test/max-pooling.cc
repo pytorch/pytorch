@@ -8,7 +8,7 @@
 
 #include <gtest/gtest.h>
 
-#include "max-pooling-operator-tester.h"
+#include <max-pooling-operator-tester.h>
 
 #include <qnnpack/params.h>
 
