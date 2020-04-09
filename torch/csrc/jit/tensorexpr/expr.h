@@ -36,7 +36,8 @@ enum IRNodeType {
   kPolynomial,
   kTerm,
   kRoundOff,
-  kNone
+  kNone,
+  kExtra
 };
 
 // The common base between all expression node.
@@ -181,10 +182,10 @@ class TORCH_API Buf : public ExprNode<Buf> {
     TORCH_CHECK(var);
   }
 
-  int ndim() const {
+  size_t ndim() const {
     return dims_.size();
   }
-  const Expr* dim(int index) const {
+  const Expr* dim(size_t index) const {
     return dims_[index];
   }
   std::vector<const Expr*> dims() const {
