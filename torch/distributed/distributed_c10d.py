@@ -666,9 +666,8 @@ def irecv(tensor,
     if group == GroupMember.WORLD:
         _check_default_pg()
         return _default_pg.recv([tensor], src, tag)
-    else:
-        group_src_rank = _get_group_rank(group, src)
-        return group.recv([tensor], group_src_rank, tag)
+    group_src_rank = _get_group_rank(group, src)
+    return group.recv([tensor], group_src_rank, tag)
 
 
 def send(tensor,
