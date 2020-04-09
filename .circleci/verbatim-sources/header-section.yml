@@ -27,10 +27,3 @@ executors:
       resource_class: windows.xlarge
       image: windows-server-2019-vs2019:stable
       shell: bash.exe
-
-  windows-cpu-barebone:
-    machine:
-      # we will change to CPU host when it's ready
-      resource_class: windows.xlarge
-      image: windows-server-2019:201908-08
-      shell: bash.exe
