@@ -7,9 +7,9 @@
 #
 # But factory functions don't take Tensors, so we need to get dispatch keys from other arguments.
 # Rather than teaching the dispatcher how to extract dispatch keys from types besides Tensor, we
-# we register an extra kernel for each factory op, under the `BackendSelect` dispatch key.
-# This key has higher precedence over the dispatch keys for actual backends, so a BackendSelect
-# kernel will front-run other kernels registered for the same op.
+# register an extra kernel for each factory op, under the `BackendSelect` dispatch key. This key
+# has higher precedence than dispatch keys for actual backends, so a BackendSelect kernel will
+# front-run other kernels registered for the same op.
 #
 # It's the responsibility of the BackendSelect factory kernels to extract the "real" dispatch
 # key from non-Tensor arguments, and redispatch using this key. Here, we generate implementations
