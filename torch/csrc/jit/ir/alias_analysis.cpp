@@ -992,6 +992,16 @@ Element* AliasDb::getOrCreateElement(const Value* value) {
   return elementMap_.at(value);
 }
 
+void AliasDb::replaceMemoryLocation(Value* existing, Value* new_value) {
+  if (!isMutableTypeInternal(existing)) {
+    return;
+  }
+  auto existing_elem = elementMap_.at(existing);
+  elementMap_[new_value] = existing_elem;
+  elementMap_.erase(existing);
+  existing_elem->value = new_value;
+}
+
 bool AliasDb::moveAfterTopologicallyValid(Node* n, Node* movePoint) {
   return tryMove(n, movePoint, MoveSide::AFTER, /*dryRun=*/false);
 }
@@ -1416,6 +1426,7 @@ c10::optional<Element*> AliasDb::setWildcard(const Value* v) {
 }
 
 void AliasDb::rebuildWriteCache() const {
+  writeCache_ = {};
   for (const auto& pr : writeIndex_) {
     const auto& writtenLocs = pr.second;
     writeCache_ |= writtenLocs;
