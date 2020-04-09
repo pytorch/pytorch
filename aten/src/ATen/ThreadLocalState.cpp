@@ -12,7 +12,7 @@ thread_local bool is_record_function_enabled_ = true;
 std::array<std::function<SettingValue()>, (size_t)ThreadLocalSetting::NUM_SETTINGS> getters_;
 std::array<std::function<void(SettingValue)>, (size_t)ThreadLocalSetting::NUM_SETTINGS> setters_;
 
-bool _unused = [&getters_, &setters_]() {
+bool _unused = []() {
   ThreadLocalState::registerThreadLocalSetting(
     ThreadLocalSetting::GRAD_MODE,
 #if !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
@@ -49,7 +49,7 @@ ThreadLocalState::ThreadLocalState(bool keep_grad_mode)
   for (auto st = (size_t)ThreadLocalSetting::GRAD_MODE;
         st < (size_t)ThreadLocalSetting::NUM_SETTINGS; ++st) {
     if (!getters_[st] ||
-        st == (size_t)ThreadLocalSetting::GRAD_MODE && !keep_grad_mode_) {
+        (st == (size_t)ThreadLocalSetting::GRAD_MODE && !keep_grad_mode_)) {
       continue;
     }
     settings_[st] = getters_[st]();
@@ -62,7 +62,7 @@ void ThreadLocalState::setThreadLocalState(
 for (auto st = (size_t)ThreadLocalSetting::GRAD_MODE;
         st < (size_t)ThreadLocalSetting::NUM_SETTINGS; ++st) {
     if (!setters_[st] ||
-        st == (size_t)ThreadLocalSetting::GRAD_MODE && !state.keep_grad_mode_) {
+        (st == (size_t)ThreadLocalSetting::GRAD_MODE && !state.keep_grad_mode_)) {
       continue;
     }
     setters_[st](state.settings_[st]);
