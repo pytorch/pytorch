@@ -66,8 +66,8 @@ Tensor& asin_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(
 Tensor asin(const Tensor& self) { return unary_op_impl(self, at::asin_out); }
 Tensor& asin_(Tensor& self) { return unary_op_impl_(self, at::asin_out); }
 
-// Note [Complex Abs]
-// Abs, in NumPy and C++, returns a float value when given a complex input.
+// Note [Complex abs]
+// abs, in NumPy and C++, returns a float value when given a complex input.
 // This makes sense mathematically since the absolute value of a complex
 // number has no imaginary part.
 Tensor& abs_out(Tensor& result, const Tensor& self) {
@@ -101,7 +101,7 @@ Tensor& abs_out(Tensor& result, const Tensor& self) {
 }
 Tensor abs(const Tensor& self) {
   // Overrides default return type to be floating point when given a
-  // complex input. See note [Complex Abs].
+  // complex input. See note [Complex abs].
   if (self.is_complex()) {
     const auto float_type = c10::toValueType(c10::typeMetaToScalarType(self.dtype()));
     Tensor result = at::empty({0}, self.options().dtype(float_type));
