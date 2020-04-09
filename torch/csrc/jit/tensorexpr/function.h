@@ -33,7 +33,7 @@ class Function : public KernelScopedObject {
     }
   }
 
-  const Var* arg(int index) const {
+  const Var* arg(size_t index) const {
     if (index < 0 || index >= args_.size()) {
       throw out_of_range_index();
     }
