@@ -93,6 +93,8 @@ TypePtr IValue::type() const {
       return CapsuleType::get();
     case Tag::Tuple:
       return toTuple()->type();
+    case Tag::Generator:
+      return GeneratorType::get();
   }
   // switch above is complete but this silences compiler warnings
   TORCH_INTERNAL_ASSERT(false, "unhandled case in IValue::type()");
@@ -219,6 +221,7 @@ IValue IValue::equals(const IValue& rhs) const {
     case Tag::Object:
     case Tag::PyObject:
     case Tag::Capsule:
+    case Tag::Generator:
       return ptrEqual(lhs, rhs);
     case Tag::Uninitialized:
       // Unitialized ivalues show up in no-ops when the compiler can prove a
@@ -445,6 +448,8 @@ std::ostream& operator<<(std::ostream & out, const IValue & v) {
       auto py_obj = v.toPyObject();
       return out << "<PyObject at" << py_obj << ">";
     }
+    case IValue::Tag::Generator:
+      return out << "Generator";
     case IValue::Tag::Object: {
       // TODO we should attempt to call __str__ if the object defines it.
       auto obj = v.toObject();
