@@ -319,7 +319,7 @@ def generate_storage_type_and_tensor(backend, density, declarations, per_op_regi
         env['state'] = ['globalContext().getTHCState()']
         env['isCUDA'] = 'true'
         env['storage_device'] = 'return storage->device;'
-        env['Generator'] = 'CUDAGenerator'
+        env['Generator'] = 'CUDAGeneratorImpl'
         env['allocator'] = 'at::cuda::getCUDADeviceAllocator()'
     else:
         env['th_headers'] = [
@@ -330,7 +330,7 @@ def generate_storage_type_and_tensor(backend, density, declarations, per_op_regi
         env['state'] = []
         env['isCUDA'] = 'false'
         env['storage_device'] = 'throw std::runtime_error("CPU storage has no device");'
-        env['Generator'] = 'CPUGenerator'
+        env['Generator'] = 'CPUGeneratorImpl'
         env['allocator'] = 'getCPUAllocator()'
 
     declarations, definitions, op_registrations, th_declarations, th_definitions = function_wrapper.create_derived(

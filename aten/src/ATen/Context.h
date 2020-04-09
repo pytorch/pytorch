@@ -5,7 +5,7 @@
 #include <ATen/Utils.h>
 #include <ATen/core/ATenGeneral.h>
 #include <ATen/core/Generator.h>
-#include <ATen/CPUGenerator.h>
+#include <ATen/CPUGeneratorImpl.h>
 #include <ATen/core/LegacyTypeDispatch.h>
 #include <ATen/detail/CUDAHooksInterface.h>
 #include <ATen/detail/HIPHooksInterface.h>
@@ -217,8 +217,8 @@ static inline void manual_seed(uint64_t seed) {
   auto gen = globalContext().defaultGenerator(DeviceType::CPU);
   {
     // See Note [Acquire lock when using random generators]
-    std::lock_guard<std::mutex> lock(gen->mutex_);
-    gen->set_current_seed(seed);
+    std::lock_guard<std::mutex> lock(gen.mutex());
+    gen.set_current_seed(seed);
   }
   // NB: Sometimes we build with CUDA, but we don't have any GPUs
   // available. In that case, we must not seed CUDA; it will fail!
@@ -228,8 +228,8 @@ static inline void manual_seed(uint64_t seed) {
       auto cuda_gen = globalContext().defaultGenerator(Device(at::kCUDA, i));
       {
         // See Note [Acquire lock when using random generators]
-        std::lock_guard<std::mutex> lock(cuda_gen->mutex_);
-        cuda_gen->set_current_seed(seed);
+        std::lock_guard<std::mutex> lock(cuda_gen.mutex());
+        cuda_gen.set_current_seed(seed);
       }
     }
   }
