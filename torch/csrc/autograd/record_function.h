@@ -171,16 +171,16 @@ struct TORCH_API RecordFunction {
   // Returns whether some of the callbacks require function inputs
   static bool _needsInputs();
 
-  inline uint64_t _callbacksVersion() const {
+  inline uint64_t _globalCallbacksVersion() const {
     return callbacks_version_;
   }
 
-  inline void _setCallbacksVersion(uint64_t cv) {
+  inline void _setGlobalCallbacksVersion(uint64_t cv) {
     callbacks_version_ = cv;
   }
 
-  // Returns boolean set of active (ran start callback) callbacks
-  inline c10::SmallVector<bool, kSoftLimitCallbacks>& _activeCallbacks() {
+  // Returns boolean set of active (ran start callback) global callbacks
+  inline c10::SmallVector<bool, kSoftLimitCallbacks>& _activeGlobalCallbacks() {
     return active_callbacks_;
   }
 
@@ -195,10 +195,9 @@ struct TORCH_API RecordFunction {
   // only to be used together with RECORD_FUNCTION macro
   RecordFunction* parent_ = nullptr;
 
-  // Holds the status of the callbacks after executing start callbacks.
-  // If a start callback was not called (sampling) or returned false
-  // (error or skipping the run), then the corresponding value in
-  // the small vector is false and the end callback won't be called,
+  // Holds the status of the global callbacks after executing start callbacks.
+  // If a start callback was not called (sampling), then the corresponding
+  // value in the small vector is false and the end callback won't be called,
   // otherwise the value is true.
   c10::SmallVector<bool, kSoftLimitCallbacks> active_callbacks_;
 
@@ -213,7 +212,7 @@ struct TORCH_API RecordFunction {
   // The logical thread_id that this RecordFunction was created with.
   uint16_t thread_id_ = 0;
 
-  // Callbacks' version this record function was started with.
+  // Global callbacks version this record function was started with.
   // Used to ensure that the set of callbacks was not changed
   // during the record function's lifetime, between start and
   // end invocations.
@@ -281,21 +280,54 @@ TORCH_API void TEST_unsetGlobalSamplingProbability();
   RECORD_FUNCTION_WITH_SCOPE( \
     torch::autograd::profiler::RecordScope::USER_SCOPE, fn, {})
 
+// Notes:
+//  - for performance and interface simplicity reasons we split the set
+//    of callbacks (observers) into the two subsets - thread local and
+//    global callbacks:
+//     - thread local callbacks are added/removed only for the given thread
+//       and are stored locally for each thread and separately from the list
+//       of the global callbacks
+//     - global callbacks are stored in a single per process list and are
+//       invoked by every RecordFunction, in addition to the thread local
+//       callbacks specific to the given thread
+//     - we allow global callbacks to be sampled, by specifying a sampling
+//       probability for each global callback pair, if the start callback is
+//       not picked to run, the corresponding end callback won't be called
+//     - a typical use case for the global callbacks is passive monitoring
+//       in the background (e.g. fleet-wide monitoring), without focusing on
+//       the specific peice of code
+//     - in contrast, thread local callbacks are enabled locally, on demand,
+//       for specific piece of code (range) and are not sampled
+//     - a typical use case for thread local callbacks is profiler and
+//       code execution tracer
+//       - note, that some functionality (e.g. profiler) can automatically
+//         propagate itself across threads by using ThreadLocalState mechanism
+//     - unlike global callbacks, thread local callbacks do not require
+//       RecordFunction to store their state internally and allow an easy,
+//       frequent and thread-safe adding/removing of callbacks for a particular
+//       thread
+//     - global callbacks (pairs) are sampled, this requires RecordFunction
+//       to store the state of their execution (which callbacks were picked and
+//       the 'version' of the global list of the callbacks)
+//     - for performance reasons RecordFunction does not copy the callbacks
+//       into the internal state
+//     - adding/removing global callbacks is not thread safe and should be done
+//       only when no other code is running, e.g. during the initialization
+
 /**
  * pushCallback adds a pair of callbacks to run with RecordFunction:
- *  start, end - the callbacks to run when entering and exiting the scope;
- *    if start callback returns false, end callback won't be executed;
- *  needs_inputs - whether the callbacks need the inputs passed from the observed
- *    function/range; NOTE: passing the inputs incurs an additional overhead;
- *  sampling_prob - whether the callbacks are sampled and the sampling
- *    probability;
- *  scopes - types of scopes to execute the callbacks on (see RecordScope);
- *    passing empty set means the callbacks will be executed for all possible
- *    scope types
- *  is_thread_local - whether this pair callbacks should be set only for
- *    the current thread or globally (per process)
+ *   start, end - the callbacks to run when entering and exiting the scope;
+ *   needs_inputs - whether the callbacks need the inputs passed from the observed
+ *     function/range; NOTE: passing the inputs incurs an additional overhead;
+ *   sampling_prob - whether the callbacks are sampled and the sampling
+ *     probability
+ *   scopes - types of scopes to execute the callbacks on (see RecordScope);
+ *     passing empty set means the callbacks will be executed for all possible
+ *     scope types
+ *  is_thread_local - whether this pair of callbacks should be set
+ *    only for the current thread or globally (per process)
+ *  NOTE: only global callbacks support sampling
  *  WARNING: not thread safe if is_thread_local = false
- *
  */
 TORCH_API void pushCallback(
     std::function<bool(const RecordFunction&)> start,
@@ -308,10 +340,10 @@ TORCH_API void pushCallback(
     bool is_thread_local = true);
 
 /**
- * popCallback removes the last pair of thread local callbacks previously added
+ * popCallback removes the last pair of callbacks added earlier
  * with pushCallback:
- *  is_thread_local - whether to remove the last thread_local or global pair of
- *    callbacks added with pushCallback
+ *  is_thread_local - whether to remove the last thread_local or
+ *    global pair of callbacks added earlier with pushCallback
  *  WARNING: not thread safe if is_thread_local = false
  */
 TORCH_API void popCallback(bool is_thread_local = true);
