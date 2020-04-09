@@ -2,13 +2,13 @@
 
 #include <ATen/core/stack.h>
 #include <c10/util/TypeList.h>
-#include <ATen/core/boxing/kernel_functor.h>
-#include <ATen/core/boxing/kernel_function.h>
-#include <ATen/core/boxing/kernel_lambda.h>
 
 namespace c10 {
 
+using Stack = torch::jit::Stack; // TODO Instead of this, move torch::jit::Stack to the c10 namespace.
+
 class OperatorHandle;
+struct OperatorKernel;
 
 // This kernel implements the behavior of falling through to the next available
 // registered dispatch key.  The implementation of this function is FAST; it is
@@ -208,6 +208,10 @@ public:
    */
   template<bool AllowLegacyTypes = false, class Lambda>
   static KernelFunction makeFromUnboxedLambda(Lambda&& lambda);
+
+  std::string dumpState() const;
+  // For testing internal invariants only
+  bool _equalsBoxedAndUnboxed(const KernelFunction&) const;
 
   // This function is a temporary hack that allows register_aten_ops.cpp to register its codegen'ed
   // unboxing wrapper for aten operators. We still need those for some operators because not all work

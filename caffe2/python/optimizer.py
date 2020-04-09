@@ -437,7 +437,7 @@ class FP16SgdOptimizer(SgdOptimizer):
                     param = param_info.blob_copy[core.DataType.FLOAT16]
                     param_fp32 = param_info.blob
                 else:
-                    assert (False), (
+                    AssertionError(
                         "Unrecognized parameter format to be updated "
                         "by FP16 Optimizer. Parameter: {}".format(param_info.name)
                     )
@@ -520,7 +520,7 @@ class AdagradOptimizer(Optimizer):
                  sparse_dedup_aggregator=None, rowWise=False, engine='',
                  lars=None, output_effective_lr=False,
                  output_effective_lr_and_update=False,
-                 pruning_options=None, **kwargs):
+                 pruning_options=None, swa_options=None, weight_scale=None, **kwargs):
         super(AdagradOptimizer, self).__init__()
         self.alpha = alpha
         self.epsilon = epsilon
@@ -533,8 +533,19 @@ class AdagradOptimizer(Optimizer):
         self.output_effective_lr = output_effective_lr
         self.output_effective_lr_and_update = output_effective_lr_and_update
         self.init_kwargs = kwargs
+        self.weight_scale = weight_scale
 
         self._process_pruning_options(pruning_options)
+        self._process_swa_options(swa_options)
+
+    def _process_swa_options(self, swa_options):
+        self.swa_enabled = True if swa_options else False
+        if self.swa_enabled:
+            self.swa_avg_start_it = swa_options.get("swa_avg_start_it", None)
+            self.swa_avg_end_it = swa_options.get("swa_avg_end_it", None)
+            self.swa_feedback_start_it = swa_options.get("swa_feedback_start_it", None)
+            self.swa_feedback_step = swa_options.get("swa_feedback_step", None)
+            self.swa_feedback_end_it = swa_options.get("swa_feedback_end_it", None)
 
     def _process_pruning_options(self, pruning_options):
         self.use_mask = False
@@ -598,7 +609,7 @@ class AdagradOptimizer(Optimizer):
                     and core.IsGPUDeviceType(current_scope.device_type)),
             )
 
-        lr, _ = self.build_lr(
+        lr, lr_iteration = self.build_lr(
             net, param_init_net,
             base_learning_rate=self.alpha,
             policy=self.policy,
@@ -730,6 +741,38 @@ class AdagradOptimizer(Optimizer):
                     decay=float(self.decay),
                     engine=self.engine
                 )
+
+                if self.swa_enabled:
+                    param_swa = str(param) + "_swa"
+                    if not param_init_net.BlobIsDefined(param_swa):
+                        param_init_net.ConstantFill(
+                            [param], param_swa, value=0.0, 
+                        )
+                        self._aux_params.local.append(param_swa)  
+
+                    net.SWA(
+                        [param, param_swa, lr_iteration],
+                        [param, param_swa],
+                        avg_start=self.swa_avg_start_it,
+                        avg_end=self.swa_avg_end_it,
+                        feedback_start=self.swa_feedback_start_it,
+                        feedback_step=self.swa_feedback_step,
+                        feedback_end=self.swa_feedback_end_it,
+                    )      
+        if self.weight_scale:
+            net.WeightScale(
+                [param, lr_iteration],
+                [param],
+                stepsize=self.weight_scale.stepsize,
+                upper_bound_iter=self.weight_scale.upper_bound_iter,
+                scale=float(self.weight_scale.scale))
+            if self.weight_scale.to_aux:
+                net.WeightScale(
+                    [param_squared_sum, lr_iteration],
+                    [param_squared_sum],
+                    stepsize=self.weight_scale.stepsize,
+                    upper_bound_iter=self.weight_scale.upper_bound_iter,
+                    scale=float(self.weight_scale.scale))   
 
     def scale_learning_rate(self, scale):
         self.alpha *= scale
