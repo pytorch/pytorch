@@ -66,9 +66,9 @@ static OpSchema::Cost CostInferenceForSparseAdagrad(
   return c;
 }
 
-REGISTER_CPU_OPERATOR(SparseAdagrad, SparseAdagradOp<>);
+REGISTER_CPU_OPERATOR(SparseAdagrad, SparseAdagradOp);
 // For backward compatibility
-REGISTER_CPU_OPERATOR_WITH_ENGINE(SparseAdagrad, SIMD, SparseAdagradOp<>);
+REGISTER_CPU_OPERATOR_WITH_ENGINE(SparseAdagrad, SIMD, SparseAdagradOp);
 OPERATOR_SCHEMA(SparseAdagrad)
     .NumInputs(5)
     .NumOutputs(2)

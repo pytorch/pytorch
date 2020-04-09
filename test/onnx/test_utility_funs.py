@@ -260,7 +260,7 @@ class TestUtilityFuns(TestCase):
             assert node.kind() != "onnx::Concat"
             assert node.kind() != "onnx::Cast"
             assert node.kind() != "onnx::Constant"
-        assert len(list(graph.nodes())) == 2
+        assert len(list(graph.nodes())) == 1
 
     # TODO : enable when constant folding is enabled for opset 12
     @skipIfUnsupportedOpsetVersion([12])
@@ -369,6 +369,58 @@ class TestUtilityFuns(TestCase):
         for node in graph.nodes():
             assert node.kind() != "onnx::Mul"
         assert len(list(graph.nodes())) == 1
+
+    # TODO : enable when constant folding is enabled for opset 12
+    @skipIfUnsupportedOpsetVersion([12])
+    def test_constant_fold_add(self):
+        class Module(torch.nn.Module):
+            def __init__(self, ):
+                super(Module, self).__init__()
+                self.register_buffer("weight", torch.ones(5))
+
+            def forward(self, x):
+                add = self.weight + torch.tensor([1, 2, 3, 4, 5])
+                return add - x
+
+        x = torch.randn(2, 5)
+        _set_opset_version(self.opset_version)
+        _set_operator_export_type(OperatorExportTypes.ONNX)
+        graph, params_dict, __ = utils._model_to_graph(
+            Module(), (x, ), do_constant_folding=True,
+            operator_export_type=OperatorExportTypes.ONNX)
+        for node in graph.nodes():
+            self.assertTrue(node.kind() != "onnx::Add")
+        self.assertEqual(len(list(graph.nodes())), 1)
+        params = list(params_dict.values())
+        self.assertEqual(len(params), 1)
+        weight = params[0]
+        self.assertEqual(weight, torch.tensor([2, 3, 4, 5, 6]))
+
+    # TODO : enable when constant folding is enabled for opset 12
+    @skipIfUnsupportedOpsetVersion([12])
+    def test_constant_fold_sub(self):
+        class Module(torch.nn.Module):
+            def __init__(self, ):
+                super(Module, self).__init__()
+                self.register_buffer("weight", torch.ones(5))
+
+            def forward(self, x):
+                sub = self.weight - torch.tensor([1, 2, 3, 4, 5])
+                return sub + x
+
+        x = torch.randn(2, 5)
+        _set_opset_version(self.opset_version)
+        _set_operator_export_type(OperatorExportTypes.ONNX)
+        graph, params_dict, __ = utils._model_to_graph(
+            Module(), (x, ), do_constant_folding=True,
+            operator_export_type=OperatorExportTypes.ONNX)
+        for node in graph.nodes():
+            assert node.kind() != "onnx::Sub"
+        self.assertEqual(len(list(graph.nodes())), 1)
+        params = list(params_dict.values())
+        self.assertEqual(len(params), 1)
+        weight = params[0]
+        self.assertEqual(weight, torch.tensor([0, -1, -2, -3, -4]))
 
     # TODO : enable when constant folding is enabled for opset 12
     @skipIfUnsupportedOpsetVersion([12])
