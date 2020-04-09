@@ -339,20 +339,22 @@ void hardsigmoid_kernel(TensorIterator& iter) {
 
 void hardsigmoid_backward_kernel(TensorIterator& iter) {
   AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "hardsigmoid_backward", [&] {
-    auto zero = scalar_t(0.0f);
-    auto one = scalar_t(1.0f);
+    const scalar_t zero(0.0f);
+    const scalar_t three(3.0f);
+    const scalar_t neg_three(-3.0f);
+    const scalar_t one_sixth(1.0f / 6.0f);
     using Vec = Vec256<scalar_t>;
     Vec kZeroVec(0.0f);
     Vec kOneSixthVec(1.0f / 6.0f);
     cpu_kernel_vec(
         iter,
         [=](scalar_t grad_val, scalar_t self_val) {
-          return (self_val >= zero && self_val <= one)
-            ? grad_val / 6.0f
-            : scalar_t(0);
+          return (self_val >= neg_three && self_val <= three)
+            ? grad_val * one_sixth
+            : zero;
         },
         [=](Vec grad_val, Vec self_val) {
-          Vec gradNonZeroMask = (self_val > zero) & (self_val < one);
+          Vec gradNonZeroMask = (self_val > neg_three) & (self_val < three);
           return Vec::blendv(kZeroVec, grad_val * kOneSixthVec, gradNonZeroMask);
         });
   });
