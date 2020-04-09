@@ -10290,11 +10290,7 @@ class TestTorchDeviceType(TestCase):
 
     def test_logcumsumexp(self, device):
         def logcumsumexp(a, axis):
-            max_vals, _ = torch.cummax(a, axis=axis)
-            result = torch.exp(a - max_vals)
-            result = torch.cumsum(result, axis=axis)
-            result.log_().add_(max_vals)
-            return result
+            return torch.cumsum(a.exp(), axis=axis).log_()
 
         axis = 1
         a = torch.randn(100, 100, device=device)
