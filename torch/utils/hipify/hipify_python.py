@@ -76,6 +76,10 @@ class bcolors:
 # This class allows users of hipify to ask for a cleanup by running the
 # hipify and compilation in a with instantiating this context manager class
 # with keep_intermediates=False.
+# The main usecase is the cpp_extensions, specifically the load method.
+# It is a good idea to keep intermediates (in case of errors or to
+# not recompile unchanged files), but in cases where you don't want to
+# keep them (e.g. in the CI), this can be used to remove files.
 class GeneratedFileCleaner:
     """Context Manager to clean up generated files"""
     def __init__(self, keep_intermediates=False):
