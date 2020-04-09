@@ -873,28 +873,3 @@ Example:
             return self.some_dict[input] + self.my_int
 
     f = torch.jit.script(Foo({'hi': 2}))
-
-
-    .. testcode::
-
-        from typing import List, Dict
-
-        class Foo(nn.Module):
-            __annotations__ = {'words': List[str], 'some_dict': Dict[str, int]}
-
-            def __init__(self, a_dict):
-                super(Foo, self).__init__()
-                self.words = []
-                self.some_dict = a_dict
-
-                # `int`s can be inferred
-                self.my_int = 10
-
-            def forward(self, input):
-                # type: (str) -> int
-                self.words.append(input)
-                return self.some_dict[input] + self.my_int
-
-        f = torch.jit.script(Foo({'hi': 2}))
-
-    |
