@@ -15,7 +15,7 @@ class Buffer {
     }
 
     std::vector<ExprHandle> stride_handles(ndim());
-    for (int i = ndim() - 1; i >= 0; i--) {
+    for (int i = (int)ndim() - 1; i >= 0; i--) {
       if (i == ndim() - 1) {
         stride_handles[i] = 1;
       } else {
