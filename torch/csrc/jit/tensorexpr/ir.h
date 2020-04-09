@@ -159,7 +159,7 @@ class And : public BinaryOpNode<And> {
       throw unsupported_dtype();
     }
     if (lhs->dtype() != rhs->dtype()) {
-      throw malformed_input();
+      throw malformed_input("bad dtype in And");
     }
   }
 };
@@ -172,7 +172,7 @@ class Or : public BinaryOpNode<Or> {
       throw unsupported_dtype();
     }
     if (lhs->dtype() != rhs->dtype()) {
-      throw malformed_input();
+      throw malformed_input("bad dtype in Or");
     }
   }
 };
@@ -185,7 +185,7 @@ class Xor : public BinaryOpNode<Xor> {
       throw unsupported_dtype();
     }
     if (lhs->dtype() != rhs->dtype()) {
-      throw malformed_input();
+      throw malformed_input("bad dtype in Xor");
     }
   }
 };
@@ -198,7 +198,7 @@ class Lshift : public BinaryOpNode<Lshift> {
       throw unsupported_dtype();
     }
     if (lhs->dtype() != rhs->dtype()) {
-      throw malformed_input();
+      throw malformed_input("bad dtype in Lshift");
     }
   }
 };
@@ -211,7 +211,7 @@ class Rshift : public BinaryOpNode<Rshift> {
       throw unsupported_dtype();
     }
     if (lhs->dtype() != rhs->dtype()) {
-      throw malformed_input();
+      throw malformed_input("bad dtype in Rshift");
     }
   }
 };
@@ -337,41 +337,6 @@ bool immediateIsNegative(const T* e) {
   return false;
 }
 
-// Creates a new Expr of the given type with the provided lhs and rhs.
-static const Expr* newBinaryOpOfType(
-    IRNodeType expr_type,
-    const Expr* lhs,
-    const Expr* rhs,
-    bool option) {
-  switch (expr_type) {
-    case IRNodeType::kAdd:
-      return new Add(lhs, rhs);
-    case IRNodeType::kSub:
-      return new Sub(lhs, rhs);
-    case IRNodeType::kMul:
-      return new Mul(lhs, rhs);
-    case IRNodeType::kDiv:
-      return new Div(lhs, rhs);
-    case IRNodeType::kMod:
-      return new Mod(lhs, rhs);
-    case IRNodeType::kMax:
-      return new Max(lhs, rhs, option);
-    case IRNodeType::kMin:
-      return new Min(lhs, rhs, option);
-    case IRNodeType::kAnd:
-      return new And(lhs, rhs);
-    case IRNodeType::kXor:
-      return new Xor(lhs, rhs);
-    case IRNodeType::kLshift:
-      return new Lshift(lhs, rhs);
-    case IRNodeType::kRshift:
-      return new Rshift(lhs, rhs);
-    default:
-      LOG(FATAL) << "unsupported expr_type: " << static_cast<int>(expr_type);
-      return nullptr;
-  }
-}
-
 // Bind the value to the var and evaluate the body.
 class Let : public ExprNode<Let> {
  public:
@@ -430,7 +395,7 @@ class Ramp : public ExprNode<Ramp> {
         stride_(stride),
         lanes_(lanes) {
     if (stride->dtype() != base->dtype()) {
-      throw malformed_input();
+      throw malformed_input("Bad stride in Ramp");
     }
   }
 
@@ -537,7 +502,7 @@ class IfThenElse : public ExprNode<IfThenElse> {
       throw unsupported_dtype();
     }
     if (t->dtype() != f->dtype()) {
-      throw malformed_input();
+      throw malformed_input("Bad dtype in IfThenElse");
     }
   }
 
@@ -622,7 +587,7 @@ class TORCH_API CompareSelect : public ExprNode<CompareSelect> {
       const ExprHandle& rhs,
       CompareSelectOperation cmp_op) {
     if (lhs.dtype() != rhs.dtype()) {
-      throw malformed_input();
+      throw malformed_input("bad dtype in CompareSelect");
     }
     return ExprHandle(new CompareSelect(
         lhs.node(),
@@ -639,7 +604,7 @@ class TORCH_API CompareSelect : public ExprNode<CompareSelect> {
       const ExprHandle& ret_val2,
       CompareSelectOperation cmp_op) {
     if (lhs.dtype() != rhs.dtype() || ret_val1.dtype() != ret_val2.dtype()) {
-      throw malformed_input();
+      throw malformed_input("bad dtype in CompareSelect");
     }
     return ExprHandle(new CompareSelect(
         lhs.node(), rhs.node(), ret_val1.node(), ret_val2.node(), cmp_op));
@@ -665,7 +630,7 @@ class TORCH_API CompareSelect : public ExprNode<CompareSelect> {
         ret_val2_(ret_val2),
         compare_op_(cmp_op) {
     if (ret_val1->dtype() != ret_val2->dtype()) {
-      throw malformed_input();
+      throw malformed_input("bad dtype in CompareSelect");
     }
   }
 };
@@ -810,7 +775,7 @@ class Intrinsics : public CallNode<Intrinsics> {
       : BaseClass(IntrinsicsDtype(op_type, dtype), kIntrinsics, {}),
         op_type_(op_type) {
     if (OpArgCount(op_type) != 0) {
-      throw malformed_input();
+      throw malformed_input("bad arg count in Intrinsics");
     }
   }
 
@@ -818,7 +783,7 @@ class Intrinsics : public CallNode<Intrinsics> {
       : BaseClass(IntrinsicsDtype(op_type, v1->dtype()), kIntrinsics, {v1}),
         op_type_(op_type) {
     if (OpArgCount(op_type) != 1) {
-      throw malformed_input();
+      throw malformed_input("bad arg count in Intrinsics");
     }
   }
 
@@ -829,7 +794,7 @@ class Intrinsics : public CallNode<Intrinsics> {
             {v1, v2}),
         op_type_(op_type) {
     if (OpArgCount(op_type) != 2) {
-      throw malformed_input();
+      throw malformed_input("bad arg count in Intrinsics");
     }
   }
 
@@ -837,7 +802,7 @@ class Intrinsics : public CallNode<Intrinsics> {
       : BaseClass(IntrinsicsDtype(op_type, params), kIntrinsics, params),
         op_type_(op_type) {
     if (OpArgCount(op_type) != nparams()) {
-      throw malformed_input();
+      throw malformed_input("bad arg count in Intrinsics");
     }
   }
 
