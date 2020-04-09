@@ -1,5 +1,5 @@
-#include <torch/csrc/api/include/torch/jit.h>
 #include <torch/csrc/jit/frontend/versioned_symbols.h>
+#include <torch/csrc/api/include/torch/jit.h>
 
 #include <unordered_map>
 
