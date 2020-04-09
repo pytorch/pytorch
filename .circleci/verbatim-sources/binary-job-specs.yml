@@ -279,7 +279,7 @@
   binary_windows_build:
     <<: *binary_windows_params
     executor:
-      name: windows-cpu-with-nvidia-cuda
+      name: windows-cpu-barebone
     steps:
     # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
     # - attach_scripts
