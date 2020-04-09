@@ -99,9 +99,10 @@ struct TORCH_CUDA_API BinaryOp : public Expr {
 };
 
 /*
- * Simply a representation of an iterable from start to extent. TensorDomains
- * which represent how to iterate over a tensor is made up of IterDomains. We
- * directly set parallization strategies on IterDomains.
+ * Simply a representation of an annotated 1D iterable from start to extent.
+ * TensorDomains which represent how to iterate over a tensor is made up of
+ * IterDomains to form an ND iterable. We directly set parallization strategies
+ * on IterDomains.
  */
 struct TORCH_CUDA_API IterDomain : public Val {
   ~IterDomain() = default;
@@ -190,8 +191,19 @@ struct TORCH_CUDA_API IterDomain : public Val {
   ParallelType parallel_method_ = ParallelType::Serial;
   bool is_reduction_domain_;
 };
-
-// A list of IterDomains representing how to iterate across a given Tensor.
+/*
+ * TensorDomain holds a vector of IterDomains. It holds an IterDomain for every
+ * logical axis in its associated tensor. TensorDomain does not directly hold
+ * the Tensor it is associated with, and in theory could be associated with
+ * multiple tensors. TensorDomain's primary responsibility is to provide a
+ * mechanism to access history of transformations that were used to generate it.
+ * This is done through the normal interaction of Expr/Val in Fusion. i.e. if we
+ * want to know the previous operation generating a particular TensorDomain we
+ * can simply call FusionGuard::getCurFusion()->origin(a_tensor_domain) which
+ * should give us an operation in the list [split, merge, reorder] or similar
+ * operations that take in a TensorDomain, applies a transformation and outputs
+ * a tensor domain.
+ */
 struct TORCH_CUDA_API TensorDomain : public Val {
   ~TensorDomain() = default;
 
@@ -219,6 +231,18 @@ struct TORCH_CUDA_API TensorDomain : public Val {
   // i here is int, as we want to accept negative value and ::size_type can be a
   // uint.
   IterDomain* axis(int i) const;
+
+  // Split "axis" into 2 axes where the inner axes is size of "factor"
+  // and outer axis is size axis.size() / factor
+  TensorDomain* split(int axis, int factor);
+
+  // Merge "axis" and "axis+1" into 1 dimension
+  TensorDomain* merge(int axis);
+
+  // Reorder axes according to map[old_pos] = new_pos
+  TensorDomain* reorder(const std::unordered_map<int, int>& axis2pos);
+
+  TensorDomain* rootDomain();
 
  private:
   std::vector<IterDomain*> domain_;

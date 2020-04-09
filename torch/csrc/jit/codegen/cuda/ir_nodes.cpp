@@ -3,6 +3,7 @@
 #include <torch/csrc/jit/codegen/cuda/ir_interface_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
 #include <torch/csrc/jit/codegen/cuda/tensor.h>
+#include <torch/csrc/jit/codegen/cuda/transform_iter.h>
 
 #include <sstream>
 
@@ -165,6 +166,210 @@ IterDomain* TensorDomain::axis(int i) const {
   TORCH_CHECK(
       i >= 0 && i < size(), "Tried to access axis ", i, " in domain ", this);
   return domain_[i];
+}
+
+// Split "axis" into 2 axes where the inner axes is size of "factor"
+// and outer axis is size axis.size() / factor
+TensorDomain* TensorDomain::split(int axis_, int factor){
+    if (axis_ < 0)
+    axis_ += size();
+
+  TORCH_INTERNAL_ASSERT(axis_ >= 0 && axis_ < size(),
+    "Tried to split on axis outside TensorDomain's range.");
+
+  IterDomain* id = axis(axis_);
+
+  TORCH_CHECK(
+      id->start()->isZeroInt(),
+      "Splitting IterDomains with starting values that aren't 0, is not supported at this time.");
+
+  if (id->parallel_method() != ParallelType::Serial)
+    TORCH_CHECK(
+        false,
+        "Splitting an axis of non-Serial iteration is not supported at this time."
+        " Parallelization strategy must be set after calling split.");
+
+  std::vector<IterDomain*> new_domain;
+
+  Int* fact = new Int(factor);
+  Int* one = new Int(1);
+
+  for (decltype(size()) i = 0; i < size(); i++) {
+    if (i != axis_)
+      new_domain.push_back(axis(i));
+    else {
+      // outer loop size
+      Val* vo = ceilDiv(id->extent(), fact);
+      Int* so = static_cast<Int*>(vo);
+
+      // outer loop IterDomain
+      IterDomain* ido = new IterDomain(
+          new Int(0), so, id->parallel_method(), id->isReduction());
+      new_domain.push_back(ido);
+
+      // inner loop IterDomain
+      IterDomain* idi = new IterDomain(
+          new Int(0), fact, id->parallel_method(), id->isReduction());
+      new_domain.push_back(idi);
+    }
+  }
+  TensorDomain* split_td = new TensorDomain(new_domain);
+  Split* split_node = new Split(split_td, this, axis_, fact); // For record keeping
+  return split_td;
+}
+
+
+// Merge "axis" and "axis+1" into 1 dimension
+TensorDomain* TensorDomain::merge(int axis_){
+
+  if (axis_ < 0)
+    axis_ += size();
+
+  TORCH_CHECK(axis_ >= 0 && axis_ + 1 < size(),
+    "Trying to merge axis_ outside of TensorView's range.");
+
+  IterDomain* first = axis(axis_);
+  IterDomain* second = axis(axis_ + 1);
+
+  TORCH_CHECK(
+      first->start()->isZeroInt() && second->start()->isZeroInt(),
+      "Merging IterDomains with starting values that aren't 0, is not supported at this time.");
+  TORCH_CHECK(
+      first->isReduction() == second->isReduction(),
+      "Merging domains requires that they're either both a reduction axis_, or both an iteration axis_.");
+  TORCH_CHECK(
+      first->parallel_method() == second->parallel_method(),
+      "Axes must have matching parallel types.");
+
+  Val* merged_id_size = mul(first->extent(), second->extent());
+  IterDomain* merged_id = new IterDomain(
+      new Int(0),
+      static_cast<Int*>(merged_id_size),
+      first->parallel_method(),
+      first->isReduction());
+
+  std::vector<IterDomain*> new_domain;
+  for (decltype(size()) i = 0; i < size(); i++) {
+    if (i < axis_ || i > axis_ + 1)
+      new_domain.push_back(axis(i));
+    else if (i == axis_) {
+      new_domain.push_back(merged_id);
+    }
+  }
+  TensorDomain* merged_td = new TensorDomain(new_domain);
+  Merge* merge_node = new Merge(merged_td, this, axis_); // For record keeping
+  return merged_td;
+}
+
+// Reorder axes according to map[old_pos] = new_pos
+TensorDomain* TensorDomain::reorder(const std::unordered_map<int, int>& axis2pos_) {
+  
+  
+  // START VALIDATION CHECKS
+  // Eventhough these checks are already in TensorView, we want to redo them as
+  // we can enter this function from other places, not through TensorView
+
+  // adjust based on negative values (any negative values gets nDims added to
+  // it)
+  std::unordered_map<int, int> axis2pos;
+  auto ndims = size();
+  std::transform(axis2pos_.begin(), axis2pos_.end(), std::inserter(axis2pos, axis2pos.begin()),
+    [ndims] (std::unordered_map<int, int>::value_type entry){
+      return std::unordered_map<int, int>::value_type({
+        entry.first < 0 ? entry.first + ndims : entry.first,
+        entry.second < 0 ? entry.second + ndims : entry.second,
+      });
+    }
+  );
+
+  // Check if any adjusted values are < 0, or >= nDims, which are invalid
+  bool out_of_range =
+      std::any_of(axis2pos.begin(), axis2pos.end(), [ndims](std::unordered_map<int, int>::value_type entry) {
+        return entry.first < 0 || entry.first >= ndims || entry.second < 0 || entry.second >= ndims;
+      });
+
+  TORCH_CHECK(
+      !out_of_range,
+      "TensorView reorder axes are outside the number of dimensions in the TensorView.")
+
+  //Going to use sets, to see if any duplicate values are in the map.
+
+  std::set<int> old_pos_set;
+  std::transform(
+    axis2pos.begin(),
+    axis2pos.end(),
+    std::inserter(old_pos_set, old_pos_set.begin()),
+    [](std::unordered_map<int, int>::value_type entry){return entry.first;});
+
+  std::set<int> new_pos_set;
+  std::transform(
+    axis2pos.begin(),
+    axis2pos.end(),
+    std::inserter(new_pos_set, new_pos_set.begin()),
+    [](std::unordered_map<int, int>::value_type entry){return entry.first;});
+
+  // Error out if duplicate values are found.
+  TORCH_CHECK(old_pos_set.size() == axis2pos.size() && new_pos_set.size() == axis2pos.size(),
+    "Duplicate entries in transformation map sent to TensorView reorder.");
+
+  // END VALIDATION CHECKS
+
+  // Map to save, from previous order, to new order.
+  std::vector<int> pos2axis(ndims, -1);
+
+   // Go through each old and new position, make sure they're within 0-ndims
+  for (std::pair<int, int> elem : axis2pos) {
+    int old_pos = elem.first;
+    int new_pos = elem.second;
+
+    assert(old_pos >= 0 && old_pos < ndims && new_pos >= 0 && new_pos < ndims);
+
+    if (pos2axis[new_pos] != -1)
+      TORCH_CHECK(false, "Reorder found duplicate destination positions.");
+
+    pos2axis[new_pos] = old_pos;
+  }
+
+  std::set<int> old_positions(pos2axis.begin(), pos2axis.end());
+  old_positions.erase(-1);
+
+  if (old_positions.size() != axis2pos.size())
+    TORCH_INTERNAL_ASSERT(
+        false, "Reorder found duplicate destination positions.");
+
+  std::set<int> all_positions;
+  for (decltype(ndims) i{0}; i < ndims; i++)
+    all_positions.insert(i);
+
+  // Check what positions haven't been specified.
+  std::set<int> positions_left;
+  std::set_difference(
+      all_positions.begin(),
+      all_positions.end(),
+      old_positions.begin(),
+      old_positions.end(),
+      std::inserter(positions_left, positions_left.end()));
+
+  // Fill in positions that weren't specified, in relative order,
+  // in empty spots in the set of new positions.
+  // pos2axis[new_position] = old_position
+  auto it = positions_left.begin(); // old positions left
+  for (decltype(pos2axis.size()) i = 0; i < pos2axis.size(); i++) {
+    if (pos2axis[i] == -1)
+      pos2axis[i] = *it++;
+  }
+
+  std::vector<IterDomain*> reordered_domain;
+  for (int entry : pos2axis)
+    reordered_domain.push_back(axis(entry));
+
+  TensorDomain* reordered_td = new TensorDomain(reordered_domain);
+  Reorder* merge_node = new Reorder(reordered_td, this, pos2axis);
+  return reordered_td;
+}
+
+TensorDomain* TensorDomain::rootDomain() {
+  return TransformIter::getRoot(this);
 }
 
 Split::Split(TensorDomain* _out, TensorDomain* _in, int _axis, Int* _factor)
