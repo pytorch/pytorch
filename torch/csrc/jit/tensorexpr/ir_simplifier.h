@@ -85,12 +85,63 @@ Dtype promoteTypesVar(const ExprType* e, Args... es) {
   return promoteTypes(lhs, rhs);
 }
 
-// Helper for determining if an Expr is a multi-lane primitive (e.g. Broadcast
-// or Ramp).
-bool isMultilanePrimitive(const Expr* e) {
-  return e->expr_type() == IRNodeType::kBroadcast ||
-      e->expr_type() == IRNodeType::kRamp;
+// Creates a new Expr of the given type with the provided lhs and rhs.
+static const Expr* newBinaryOpOfType(
+    IRNodeType expr_type,
+    const Expr* lhs,
+    const Expr* rhs,
+    bool option) {
+  switch (expr_type) {
+    case IRNodeType::kAdd:
+      return new Add(lhs, rhs);
+    case IRNodeType::kSub:
+      return new Sub(lhs, rhs);
+    case IRNodeType::kMul:
+      return new Mul(lhs, rhs);
+    case IRNodeType::kDiv:
+      return new Div(lhs, rhs);
+    case IRNodeType::kMod:
+      return new Mod(lhs, rhs);
+    case IRNodeType::kMax:
+      return new Max(lhs, rhs, option);
+    case IRNodeType::kMin:
+      return new Min(lhs, rhs, option);
+    case IRNodeType::kAnd:
+      return new And(lhs, rhs);
+    case IRNodeType::kXor:
+      return new Xor(lhs, rhs);
+    case IRNodeType::kLshift:
+      return new Lshift(lhs, rhs);
+    case IRNodeType::kRshift:
+      return new Rshift(lhs, rhs);
+    default:
+      LOG(FATAL) << "unsupported expr_type: " << static_cast<int>(expr_type);
+      return nullptr;
+  }
 }
+
+// Uses the evaluator to fold an Expression with constant terms.
+// E.g. evaluateOp(Add(3, 4)) => 7.
+// Expr v must not have any unbound Vars.
+static Expr* evaluateOp(const Expr* v) {
+  ExprHandle handle(v);
+  ExprEval<SimpleIREvaluator> eval(handle);
+
+  switch (v->dtype().scalar_type()) {
+#define TYPE_CASE(Type, Name)                                 \
+  case ScalarType::Name: {                                    \
+    Type val = eval.value<Type>();                            \
+    return getImmediateByType(v->dtype().scalar_type(), val); \
+  }
+    AT_FORALL_SCALAR_TYPES_AND(Half, TYPE_CASE);
+#undef TYPE_CASE
+    default:
+      LOG(FATAL) << "Unsupported datatype: " << v->dtype();
+      return nullptr;
+  }
+  return nullptr;
+}
+
 } // namespace
 
 // A Term represents a grouping of Exprs through multiplication.
