@@ -10,7 +10,7 @@ import torch.nn.functional as F
 from torch.nn.modules.utils import _single, _pair
 
 from hypothesis import settings, HealthCheck
-from hypothesis import assume, given
+from hypothesis import assume, given, note
 from hypothesis import strategies as st
 import torch.testing._internal.hypothesis_utils as hu
 hu.assert_deadline_disabled()
@@ -269,6 +269,81 @@ class TestQuantizedOps(TestCase):
         qY = torch.nn.quantized.functional.hardsigmoid(qX)
         self.assertEqual(qY, qY_hat,
                          message="Hardsigmoid failed: {} vs. {}".format(qY, qY_hat))
+
+
+    """Tests the correctness of the quantized::qlayer_norm op."""
+    @given(shapes=hu.array_shapes(3, 5, 1, 32),
+           qparams=hu.qparams(scale_max=1e3),
+           X_rand_scale=st.floats(0.01, 1e3),
+           Y_scale=st.floats(0.2, 2.6),
+           Y_zero_point=st.integers(0, 5),
+           qengine=st.sampled_from(("qnnpack", "fbgemm"))
+           )
+    def test_qlayer_norm(self, shapes, qparams, X_rand_scale, Y_scale, Y_zero_point, qengine):
+        if qengine not in torch.backends.quantized.supported_engines:
+            return
+
+        with override_quantized_engine(qengine):
+
+            # As the variance of the input array approaches zero, the quantized
+            # calculation gets more accurate compared to floating point
+            # calculation on the dequantized integers, due to loss of precision
+            # from calculating sums and sums of squares in the FP kernel. If needed
+            # in the future, we can change the quantized kernel to calculate sums
+            # using floats, which would be slower but match numerics. Until then,
+            # make assumptions about layer variance and num of unique values.
+            # Also, don't use hypothesis to generate the tensor, as it's challenging
+            # to make it treat this failure as expected.
+            # TODO: improve hypothesis_utils.py and clean this up
+            X = (np.random.rand(*shapes).astype(np.float32) - 0.5) * X_rand_scale
+            (scale, zero_point, torch_type) = qparams
+
+            X = torch.from_numpy(X)
+            qX = torch.quantize_per_tensor(X, scale=scale,
+                                           zero_point=zero_point,
+                                           dtype=torch_type)
+            dqX = qX.dequantize()
+
+            nonzero_var_in_each_layer = sum(
+                1 if ((dqX[i] - dqX[i].min()) / (dqX[i].max() - dqX[i].min() + 1e-5)).std() > 1e-2 else 0
+                for i in range(dqX.shape[0])
+            ) == dqX.shape[0]
+            assume(nonzero_var_in_each_layer)
+            enough_unique_vals_in_each_layer = sum(
+                1 if (
+                    dqX[i].shape[0] < 5 or
+                    float(torch.unique(dqX[i]).shape[0]) / dqX[i].shape[0] > 0.01) else 0
+                for i in range(dqX.shape[0])
+            ) == dqX.shape[0]
+            assume(enough_unique_vals_in_each_layer)
+
+            # Initialize the weights non-randomly for reproducibility, to avoid
+            # flaky tests
+            weight = torch.ones(*qX.size()[1:], dtype=torch.float) * 0.5
+            bias = torch.ones(*qX.size()[1:], dtype=torch.float) * 1
+            epsilon = 1e-5
+
+            qY = torch.ops.quantized.layer_norm(
+                qX, qX.size()[1:], weight=weight, bias=bias, eps=epsilon,
+                output_scale=Y_scale, output_zero_point=Y_zero_point)
+
+            Y_hat = F.layer_norm(
+                dqX, dqX.size()[1:], weight=weight, bias=bias, eps=epsilon)
+            qY_hat = torch.quantize_per_tensor(
+                Y_hat, scale=Y_scale, zero_point=Y_zero_point, dtype=torch_type)
+
+            # Due to the numerics difference mentioned above between calculating
+            # the variance in float vs int, the results can still be slightly
+            # different.
+            dqY = qY.dequantize()
+            dqY_hat = qY_hat.dequantize()
+            diff = dqY - dqY_hat
+            num_diff = torch.sum(diff > 1e-10)
+            pct_diff = float(num_diff) / diff.numel()
+            note("LayerNorm failed:\n {} input vs\n {} actual vs \n{} expected"
+                 .format(X, qY, qY_hat))
+
+            self.assertTrue(pct_diff < 0.001)
 
 
     """Tests the correctness of the quantized::qnnpack_tanh op."""
