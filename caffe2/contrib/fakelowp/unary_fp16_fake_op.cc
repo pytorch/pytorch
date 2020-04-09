@@ -1,5 +1,5 @@
 #include "unary_fp16_fake_op.h"
-#include "caffe2/fb/fbgemm/fbgemm_fp16/include/fbgemm/FbgemmFloat16.h"
+#include <fbgemm/FbgemmFakeFP16.h>
 
 #include "caffe2/utils/eigen_utils.h"
 
