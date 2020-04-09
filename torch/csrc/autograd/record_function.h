@@ -292,8 +292,10 @@ TORCH_API void TEST_unsetGlobalSamplingProbability();
  *  scopes - types of scopes to execute the callbacks on (see RecordScope);
  *    passing empty set means the callbacks will be executed for all possible
  *    scope types
+ *  is_thread_local - whether this pair callbacks should be set only for
+ *    the current thread or globally (per process)
+ *  WARNING: not thread safe if is_thread_local = false
  *
- * WARNING: not thread safe, must not overlap with other PyTorch code execution
  */
 TORCH_API void pushCallback(
     std::function<bool(const RecordFunction&)> start,
@@ -302,15 +304,17 @@ TORCH_API void pushCallback(
     bool needs_inputs = false,
     double sampling_prob = 1.0,
     std::unordered_set<RecordScope, std::hash<RecordScope>> scopes =
-        std::unordered_set<RecordScope, std::hash<RecordScope>>());
+        std::unordered_set<RecordScope, std::hash<RecordScope>>(),
+    bool is_thread_local = true);
 
 /**
- * popCallback removes the last pair of callbacks previously added with
- *  pushCallback
- *
- * WARNING: not thread safe, must not overlap with other PyTorch code execution
+ * popCallback removes the last pair of thread local callbacks previously added
+ * with pushCallback:
+ *  is_thread_local - whether to remove the last thread_local or global pair of
+ *    callbacks added with pushCallback
+ *  WARNING: not thread safe if is_thread_local = false
  */
-TORCH_API void popCallback();
+TORCH_API void popCallback(bool is_thread_local = true);
 
 } // namespace profiler
 }} // namespace torch::autograd

@@ -230,14 +230,15 @@ struct RangeEventList {
     }
 };
 
-TORCH_API RangeEventList& getEventList();
 TORCH_API void mark(std::string name, bool include_cuda = true);
 
 using thread_event_lists = std::vector<std::vector<Event>>;
-// NOTE: changing profiler modes is **NOT THREAD SAFE**. You should ensure that
-// there no autograd functions are being executed when these function are used.
-TORCH_API void enableProfiler(ProfilerConfig);
-TORCH_API thread_event_lists disableProfiler();
+// NOTE: profiler mode is thread local, with automatic propagation
+// across thread boundary (e.g. at::launch tasks)
+TORCH_API void enableProfiler(ProfilerConfig,
+    bool emit_start = true);
+TORCH_API thread_event_lists disableProfiler(
+    bool consolidate_results = true);
 TORCH_API bool profilerEnabled();
 
 

@@ -183,7 +183,14 @@ thread_local uint16_t current_thread_id_ = 0;
 // points to the currently active RecordFunction
 thread_local RecordFunction* current_record_func_ = nullptr;
 
-inline CallbackManager& manager() {
+thread_local std::unique_ptr<CallbackManager> tls_manager_;
+inline CallbackManager& manager(bool is_thread_local) {
+  if (is_thread_local) {
+    if (!tls_manager_) {
+      tls_manager_ = std::make_unique<CallbackManager>();
+    }
+    return *tls_manager_;
+  }
   static CallbackManager _manager;
   return _manager;
 }
@@ -191,7 +198,8 @@ inline CallbackManager& manager() {
 } // namespace
 
 bool hasCallbacks() {
-  return manager().hasCallbacks();
+  return manager(/* is_thread_local */ true).hasCallbacks() ||
+         manager(/* is_thread_local */ false).hasCallbacks();
 }
 
 void pushCallback(
@@ -199,8 +207,9 @@ void pushCallback(
     std::function<void(const RecordFunction&)> end,
     bool needs_inputs,
     double sampling_prob,
-    std::unordered_set<RecordScope, std::hash<RecordScope>> scopes) {
-  manager().pushCallback(
+    std::unordered_set<RecordScope, std::hash<RecordScope>> scopes,
+    bool is_thread_local) {
+  manager(is_thread_local).pushCallback(
       std::move(start),
       std::move(end),
       needs_inputs,
@@ -208,8 +217,8 @@ void pushCallback(
       std::move(scopes));
 }
 
-void popCallback() {
-  manager().popCallback();
+void popCallback(bool is_thread_local) {
+  manager(is_thread_local).popCallback();
 }
 
 void _runBeforeCallbacks(RecordFunction* rf, const std::string& funcName) {
@@ -218,7 +227,7 @@ void _runBeforeCallbacks(RecordFunction* rf, const std::string& funcName) {
 }
 
 RecordFunction::RecordFunction(RecordScope scope) : scope_(scope) {
-  if (manager().hasCallbacks() && at::_tls_is_record_function_enabled()) {
+  if (hasCallbacks() && at::_tls_is_record_function_enabled()) {
     active_ = true;
   }
 }
@@ -231,15 +240,18 @@ void RecordFunction::_setCurrent() {
 
 /* static */
 bool RecordFunction::_needsInputs() {
-  return manager().needsInputs();
+  return manager(/* is_thread_local */ false).needsInputs() ||
+         manager(/* is_thread_local */ true).needsInputs();
 }
 
 void TEST_setGlobalSamplingProbability(double sampling_prob) {
-  manager().TEST_setGlobalSamplingProbability(sampling_prob);
+  manager(/* is_thread_local */ false).TEST_setGlobalSamplingProbability(sampling_prob);
+  manager(/* is_thread_local */ true).TEST_setGlobalSamplingProbability(sampling_prob);
 }
 
 void TEST_unsetGlobalSamplingProbability() {
-  manager().TEST_unsetGlobalSamplingProbability();
+  manager(/* is_thread_local */ false).TEST_unsetGlobalSamplingProbability();
+  manager(/* is_thread_local */ true).TEST_unsetGlobalSamplingProbability();
 }
 
 /* static */
@@ -285,7 +297,8 @@ void RecordFunction::_before(Node* fn, int64_t sequence_nr) {
 
 void RecordFunction::processCallbacks() {
   thread_id_ = currentThreadId();
-  manager().runStartCallbacks(*this);
+  manager(/* is_thread_local */ false).runStartCallbacks(*this);
+  manager(/* is_thread_local */ true).runStartCallbacks(*this);
 }
 
 RecordFunction::~RecordFunction() {
@@ -294,7 +307,8 @@ RecordFunction::~RecordFunction() {
 
 void RecordFunction::_end() {
   if (active_) {
-    manager().runEndCallbacks(*this);
+    manager(/* is_thread_local */ false).runEndCallbacks(*this);
+    manager(/* is_thread_local */ true).runEndCallbacks(*this);
     active_ = false;
   }
   if (is_current_) {
