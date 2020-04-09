@@ -432,19 +432,6 @@ Tensor solve_backward_A(const Tensor & grad, const Tensor & self, const Tensor &
   return -at::matmul(grad_self, solution.transpose(-2, -1));
 }
 
-Tensor logcumsumexp_backward(Tensor grad, const Tensor & self, Tensor result, int64_t dim) {
-  grad = grad*(-result).exp();
-  if (grad.dim() == 0 || grad.numel() == 0) {
-    return grad;
-  }
-  grad = grad*(-result).exp();
-  auto ret = at::cumsum(grad, dim);
-  auto ret_sum = ret.narrow(dim, ret.size(dim) - 1, 1).clone(at::MemoryFormat::Preserve);
-  ret -= ret_sum.expand(ret.sizes());
-  ret += grad;
-  return grad*self.exp();
-}
-
 Tensor cumsum_backward(const Tensor & x, int64_t dim) {
   // Need to check numel to see if there are no values (such as shape [0,2], and dim to see if x is a scalar.
   if (x.dim() == 0 || x.numel() == 0) {
@@ -479,6 +466,14 @@ Tensor logsumexp_backward(Tensor grad, const Tensor & self, Tensor result, IntAr
     result = unsqueeze_multiple(result, dim, self.sizes().size());
   }
   return grad * (self - result).exp();
+}
+
+Tensor logcumsumexp_backward(Tensor grad, const Tensor & self, Tensor result, int64_t dim) {
+  if (grad.dim() == 0 || grad.numel() == 0) {
+    return grad;
+  }
+  auto ret = grad*(result.exp())*cumsum_backward(result, dim);
+  return ret;
 }
 
 Tensor unbind_backward(const variable_list& grads, int64_t dim) {
