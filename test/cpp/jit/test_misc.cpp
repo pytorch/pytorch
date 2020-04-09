@@ -856,10 +856,10 @@ void testRecordFunction() {
       [](const autograd::profiler::RecordFunction&) {},
       /* needs_inputs */ true);
 
-
   TracedTestInputs eager_inputs, jit_inputs;
   {
-    c10::impl::IncludeDispatchKeyGuard profile_guard(c10::DispatchKey::Profiler);
+    c10::impl::IncludeDispatchKeyGuard profile_guard(
+        c10::DispatchKey::Profiler);
 
     auto t = torch::randn({1, 2, 3}, at::kCPU);
     t.set_requires_grad(true);
