@@ -442,7 +442,7 @@ cunn_SoftMaxForward(outscalar_t *output, scalar_t *input, int classes)
   input += blockIdx.x * classes;
   output += blockIdx.x * classes;
 
-	const int shift = ((uint64_t)input) % ALIGN_BYTES / sizeof(scalar_t);
+  const int shift = ((uint64_t)input) % ALIGN_BYTES / sizeof(scalar_t);
   // find the max
   accscalar_t threadMax = ilpReduce<MaxFloat, ILP, scalar_t, accscalar_t>(
       shift, input, classes, MaxFloat<scalar_t, accscalar_t>(), -at::numeric_limits<accscalar_t>::max());
