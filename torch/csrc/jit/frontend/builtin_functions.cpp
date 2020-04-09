@@ -135,7 +135,8 @@ struct BuiltinFunctionRegistry {
 
     loadSource(aten_ops, "aten");
 
-    // Loads functions implementing historic behavior, see note [Versioned Symbols]
+    // Loads functions implementing historic behavior, see note [Versioned
+    // Symbols]
     loadSource(subcmul_0_2, "aten");
 
     // These are under `prim` instead of `aten` since they exist to bind certain

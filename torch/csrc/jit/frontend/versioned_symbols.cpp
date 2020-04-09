@@ -1,7 +1,7 @@
-#include <torch/csrc/jit/frontend/upgraders.h>
 #include <torch/csrc/api/include/torch/jit.h>
 #include <torch/csrc/jit/frontend/code_template.h>
 #include <torch/csrc/jit/frontend/resolver.h>
+#include <torch/csrc/jit/frontend/upgraders.h>
 
 #include <unordered_map>
 
@@ -47,28 +47,25 @@ namespace jit {
 //    loads the same module and verifies it exhibits the current behavior.
 //    See test_versioned_symbols for an example.
 
-
 // Helper to hold the version range (inclusive on both ends) and the symbol
 // to map to for that range.
 struct SymbolRange {
   SymbolRange(
-    const uint64_t _start_version,
-    const uint64_t _end_version,
-    const Symbol _sym)
-    : start_version_{_start_version},
-      end_version_{_end_version},
-      sym_{_sym} { }
+      const uint64_t _start_version,
+      const uint64_t _end_version,
+      const Symbol _sym)
+      : start_version_{_start_version},
+        end_version_{_end_version},
+        sym_{_sym} {}
 
-    const uint64_t start_version_;
-    const uint64_t end_version_;
-    const Symbol sym_;
+  const uint64_t start_version_;
+  const uint64_t end_version_;
+  const Symbol sym_;
 };
 
 static std::unordered_map<Symbol, SymbolRange> symbol_range_map({
-  {
-    Symbol::fromQualString("aten::_subcmul"),
-    {0, 2, Symbol::fromQualString("aten::_subcmul_0_2")}
-  },
+    {Symbol::fromQualString("aten::_subcmul"),
+     {0, 2, Symbol::fromQualString("aten::_subcmul_0_2")}},
 });
 
 Symbol get_symbol_for_version(const Symbol name, const uint64_t version) {
