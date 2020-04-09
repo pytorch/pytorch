@@ -565,8 +565,7 @@ static auto registry =
                 }))
         .op("_aten::quantize_per_tensor(Tensor self, float scale, int zero_point, ScalarType dtype) -> Tensor",
             torch::RegisterOperators::options()
-                .kernel<&quantize_per_tensor_kernel>(
-                    c10::DispatchKey::CPU))
+                .kernel<&quantize_per_tensor_kernel>(c10::DispatchKey::CPU))
         .op("_aten::floor(Tensor self) -> Tensor",
             torch::RegisterOperators::options().kernel(
                 c10::DispatchKey::CPU,
