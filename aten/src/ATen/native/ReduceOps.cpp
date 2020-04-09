@@ -197,10 +197,9 @@ Tensor& logcumsumexp_out(Tensor& result, const Tensor& self, int64_t dim) {
   {
     NoNamesGuard guard;
     result.resize_(self.sizes());
-    auto cummax_values = std::get<0>(at::cummax(self, dim));
-    at::exp_out(result, self - cummax_values);
+    at::exp_out(result, self);
     at::cumsum_out(result, result, dim);
-    result.log_().add_(cummax_values);
+    result.log_();
   }
   namedinference::propagate_names(result, self);
   return result;
