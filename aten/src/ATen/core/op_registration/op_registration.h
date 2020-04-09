@@ -892,6 +892,26 @@ public:
     impl(name, std::forward<Dispatch>(key), std::forward<Func>(raw_f));
     return std::move(*this);
   }
+  // Convenience overload for unboxed only kernels.  These are quite common
+  // but will be eventually eliminated; this function makes it easy to grep for
+  // them.
+  //
+  // If you're looking how to def or impl with no DispatchKey, use the
+  // CppFunction::makeUnboxedOnly factory directly (the API is compositional;
+  // it's just that we have a LOT of impl calls that are unboxed, so there is
+  // just a little syntax sugar for this case.)
+  //
+  // TODO: Remove these overloads once the makeUnboxedOnly incidence rate
+  // goes way down
+  template <typename Dispatch, typename Func>
+  Module& impl_UNBOXED(const char* name, Dispatch&& key, Func* raw_f) & {
+    return impl(name, dispatch(std::forward<Dispatch>(key), CppFunction::makeUnboxedOnly(raw_f)));
+  }
+  template <typename Dispatch, typename Func>
+  Module&& impl_UNBOXED(const char* name, Dispatch&& key, Func* raw_f) && {
+    impl_UNBOXED(name, std::forward<Dispatch>(key), raw_f);
+    return std::move(*this);
+  }
 
   // Register a fallback implementation for all operators which will be used
   // if there is not a specific implementation for an operator available.

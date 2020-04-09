@@ -117,9 +117,9 @@ DEFAULT_UNBOXEDONLY_FUNCTION_REGISTRATION = CodeTemplate("""\
       CppFunction::makeUnboxedOnly(TypeDefault::${type_wrapper_name}))
 """)
 BACKEND_UNBOXEDONLY_FUNCTION_REGISTRATION = CodeTemplate("""\
-.impl("${operator_name_with_overload}",
-    DispatchKey::${Backend}TensorId,
-    CppFunction::makeUnboxedOnly(${Type}::${type_wrapper_name}))
+.impl_UNBOXED("${operator_name_with_overload}",
+              DispatchKey::${Backend}TensorId,
+              ${Type}::${type_wrapper_name})
 """)
 DEFAULT_FUNCTION_REGISTRATION = CodeTemplate("""\
 .impl("${operator_name_with_overload}", &TypeDefault::${type_wrapper_name})

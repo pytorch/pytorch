@@ -100,20 +100,20 @@ class RNGTest : public ::testing::Test {
   void SetUp() override {
     static auto registry = torch::import()
       // Random
-      .impl("aten::random_.from", kCustomRNG, CppFunction::makeUnboxedOnly(random_from_to))
-      .impl("aten::random_.to",   kCustomRNG, CppFunction::makeUnboxedOnly(random_to))
-      .impl("aten::random_",      kCustomRNG, CppFunction::makeUnboxedOnly(random_))
+      .impl_UNBOXED("aten::random_.from",             kCustomRNG, random_from_to)
+      .impl_UNBOXED("aten::random_.to",               kCustomRNG, random_to)
+      .impl_UNBOXED("aten::random_",                  kCustomRNG, random_)
       // Normal
-      .impl("aten::normal_",      kCustomRNG, CppFunction::makeUnboxedOnly(normal_))
-      .impl("aten::normal.Tensor_float_out",  kCustomRNG, CppFunction::makeUnboxedOnly(normal_Tensor_float_out))
-      .impl("aten::normal.float_Tensor_out",  kCustomRNG, CppFunction::makeUnboxedOnly(normal_float_Tensor_out))
-      .impl("aten::normal.Tensor_Tensor_out", kCustomRNG, CppFunction::makeUnboxedOnly(normal_Tensor_Tensor_out))
-      .impl("aten::normal.Tensor_float",      kCustomRNG, CppFunction::makeUnboxedOnly(normal_Tensor_float))
-      .impl("aten::normal.float_Tensor",      kCustomRNG, CppFunction::makeUnboxedOnly(normal_float_Tensor))
-      .impl("aten::normal.Tensor_Tensor",     kCustomRNG, CppFunction::makeUnboxedOnly(normal_Tensor_Tensor))
-      .impl("aten::uniform_",                 kCustomRNG, CppFunction::makeUnboxedOnly(uniform_))
+      .impl_UNBOXED("aten::normal_",                  kCustomRNG, normal_)
+      .impl_UNBOXED("aten::normal.Tensor_float_out",  kCustomRNG, normal_Tensor_float_out)
+      .impl_UNBOXED("aten::normal.float_Tensor_out",  kCustomRNG, normal_float_Tensor_out)
+      .impl_UNBOXED("aten::normal.Tensor_Tensor_out", kCustomRNG, normal_Tensor_Tensor_out)
+      .impl_UNBOXED("aten::normal.Tensor_float",      kCustomRNG, normal_Tensor_float)
+      .impl_UNBOXED("aten::normal.float_Tensor",      kCustomRNG, normal_float_Tensor)
+      .impl_UNBOXED("aten::normal.Tensor_Tensor",     kCustomRNG, normal_Tensor_Tensor)
+      .impl_UNBOXED("aten::uniform_",                 kCustomRNG, uniform_)
       // Cauchy
-      .impl("aten::cauchy_",      kCustomRNG, CppFunction::makeUnboxedOnly(custom_rng_cauchy_))
+      .impl_UNBOXED("aten::cauchy_",                  kCustomRNG, custom_rng_cauchy_)
     ;
   }
 };
