@@ -156,15 +156,16 @@ jobs:
           # Run Clang-Tidy
           # The negative filters below are to exclude files that include onnx_pb.h or
           # caffe2_pb.h, otherwise we'd have to build protos as part of this CI job.
-          python tools/clang_tidy.py                        \
-            --verbose                                       \
-            --paths torch/csrc/                             \
-            --diff "$MERGE_BASE"                            \
-            -g"-torch/csrc/jit/serialization/export.cpp"    \
-            -g"-torch/csrc/jit/serialization/import.cpp"    \
-            -g"-torch/csrc/onnx/init.cpp"                   \
-            -g"-torch/csrc/cuda/nccl.*"                     \
-            -g"-torch/csrc/cuda/python_nccl.cpp"            \
+          python tools/clang_tidy.py                               \
+            --verbose                                              \
+            --paths torch/csrc/                                    \
+            --diff "$MERGE_BASE"                                   \
+            -g"-torch/csrc/jit/serialization/export.cpp"           \
+            -g"-torch/csrc/jit/serialization/import.cpp"           \
+            -g"-torch/csrc/jit/serialization/import_legacy.cpp"    \
+            -g"-torch/csrc/onnx/init.cpp"                          \
+            -g"-torch/csrc/cuda/nccl.*"                            \
+            -g"-torch/csrc/cuda/python_nccl.cpp"                   \
             "$@" > ${GITHUB_WORKSPACE}/clang-tidy-output.txt
 
           cat ${GITHUB_WORKSPACE}/clang-tidy-output.txt
