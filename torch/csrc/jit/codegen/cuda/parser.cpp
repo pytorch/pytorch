@@ -1,8 +1,8 @@
 #include <torch/csrc/jit/codegen/cuda/parser.h>
 
 #include <torch/csrc/jit/codegen/cuda/arith.h>
-#include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
+#include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
 
 #include <torch/csrc/jit/frontend/function_schema_parser.h>
 #include <torch/csrc/jit/ir/constants.h>

@@ -776,18 +776,22 @@ void testGPU_FusionCodeGen2() {
       << "  return (a + b - 1) / b;\n"
       << "}\n"
       << "\n"
-      << "__global__ void CUDAGeneratedKernel(Tensor<float> T0, Tensor<float> T1, Tensor<float> T3){\n"
+      << "__global__ void CUDAGeneratedKernel(Tensor<float> T0, Tensor<float>
+  T1, Tensor<float> T3){\n"
       << "  for(size_t i33 = 0; i33 < 4; ++i33 ) {\n"
       << "    for(size_t i34 = 0; i34 < T3.size[1]; ++i34 ) {\n"
       << "      float T2[1];\n"
       << "      if ( ( ( ( blockIdx.x * 4 ) + i33 ) < T3.size[0] ) ) { \n"
       << "        T2[ 0 ]\n"
-      << "           = T1[ ( ( ( blockIdx.x * 4 ) + i33 ) * T1.stride[0] ) + ( i34 * T1.stride[1] ) + ( threadIdx.x * T1.stride[2] ) ]\n"
+      << "           = T1[ ( ( ( blockIdx.x * 4 ) + i33 ) * T1.stride[0] ) + (
+  i34 * T1.stride[1] ) + ( threadIdx.x * T1.stride[2] ) ]\n"
       << "           + float(2);\n"
       << "      }\n"
       << "      if ( ( ( ( blockIdx.x * 4 ) + i33 ) < T3.size[0] ) ) { \n"
-      << "        T3[ ( ( ( blockIdx.x * 4 ) + i33 ) * T3.stride[0] ) + ( i34 * T3.stride[1] ) + ( threadIdx.x * T3.stride[2] ) ]\n"
-      << "           = T0[ ( ( ( blockIdx.x * 4 ) + i33 ) * T0.stride[0] ) + ( i34 * T0.stride[1] ) + ( threadIdx.x * T0.stride[2] ) ]\n"
+      << "        T3[ ( ( ( blockIdx.x * 4 ) + i33 ) * T3.stride[0] ) + ( i34 *
+  T3.stride[1] ) + ( threadIdx.x * T3.stride[2] ) ]\n"
+      << "           = T0[ ( ( ( blockIdx.x * 4 ) + i33 ) * T0.stride[0] ) + (
+  i34 * T0.stride[1] ) + ( threadIdx.x * T0.stride[2] ) ]\n"
       << "           + T2[ 0 ];\n"
       << "      }\n"
       << "    }\n"
