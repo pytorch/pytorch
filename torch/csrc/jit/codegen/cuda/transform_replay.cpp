@@ -60,8 +60,13 @@ TensorDomain* TransformReplay::replayBackward(
  */
 TensorDomain* TransformReplay::replay(Split* expr, TensorDomain* td) {
   int axis = expr->axis();
+  bool run_split =  influence[axis];
+
+  //Propagate influence
+  influence.insert(influence.begin() + axis + 1, influence[axis]);
+  
   // Forward prop influence
-  if (influence[axis]) {
+  if (run_split) {
     // Make sure split axis is real.
     int real_axis = axis_map[expr->axis()];
     TORCH_INTERNAL_ASSERT(
@@ -71,8 +76,6 @@ TensorDomain* TransformReplay::replay(Split* expr, TensorDomain* td) {
         td->axis(real_axis)->start()->isZeroInt(),
         "Transform Replay tried to split an IterDomain with a start value that is not 0,",
         " this is not currently supported.");
-    // Replay split
-    td->split(real_axis, *(expr->factor()->value()));
     // Inserted a real axis, push everything in axis_map over to the right
     // after this inserted axis
     for (decltype(axis_map.size()) i{0}; i < axis_map.size(); i++)
@@ -82,36 +85,20 @@ TensorDomain* TransformReplay::replay(Split* expr, TensorDomain* td) {
     axis_map.insert(
         axis_map.begin() + expr->axis() + 1,
         real_axis + 1); // insert axis at position axis.
+        
+    // Replay split
+    return td->split(real_axis, *(expr->factor()->value()));
   } else {
     // Fake it
     axis_map.insert(axis_map.begin() + expr->axis() + 1, -1);
   }
-
-  influence.insert(influence.begin() + axis + 1, influence[axis]);
 
   return td;
 }
 
 TensorDomain* TransformReplay::replay(Merge* expr, TensorDomain* td) {
   int axis = expr->axis();
-
-  if (influence[axis] || influence[axis + 1]) {
-    // Make sure both merge axes are real.
-    TORCH_INTERNAL_ASSERT(
-        axis_map[axis] != -1 && axis_map[axis + 1] != -1,
-        "During transformation replay attempted to merge an imaginary axis.");
-    // Replay merge
-    TORCH_INTERNAL_ASSERT(
-        td->axis(axis)->start()->isZeroInt() &&
-            td->axis(axis + 1)->start()->isZeroInt(),
-        "Transform Replay tried to Merge IterDomains with a start value that is not 0,",
-        " this is not currently supported.");
-    td->merge(axis_map[axis]);
-  } else {
-    // If we aren't applying the merge, we won't change any following axis
-    // Doesn't matter which axis we propagate for the merge in the axis_map
-    assert(axis_map[axis + 1] == -1);
-  }
+  bool merge = influence[axis] || influence[axis + 1];
   axis_map.erase(axis_map.begin() + expr->axis() + 1);
 
   for (decltype(axis_map.size()) i = expr->axis() + 1; i < axis_map.size(); i++)
@@ -122,7 +109,25 @@ TensorDomain* TransformReplay::replay(Merge* expr, TensorDomain* td) {
   influence[axis] = influence[axis] || influence[axis + 1];
   influence.erase(influence.begin() + axis + 1);
 
-  return td;
+  if (merge) {
+    // Make sure both merge axes are real.
+    TORCH_INTERNAL_ASSERT(
+        axis_map[axis] != -1 && axis_map[axis + 1] != -1,
+        "During transformation replay attempted to merge an imaginary axis.");
+    // Replay merge
+    TORCH_INTERNAL_ASSERT(
+        td->axis(axis)->start()->isZeroInt() &&
+            td->axis(axis + 1)->start()->isZeroInt(),
+        "Transform Replay tried to Merge IterDomains with a start value that is not 0,",
+        " this is not currently supported.");
+    return td->merge(axis_map[axis]);
+  } else {
+    // If we aren't applying the merge, we won't change any following axis
+    // Doesn't matter which axis we propagate for the merge in the axis_map
+    assert(axis_map[axis + 1] == -1);
+    return td;
+  }
+
 }
 
 TensorDomain* TransformReplay::replay(Reorder* expr, TensorDomain* td) {
@@ -176,7 +181,7 @@ TensorDomain* TransformReplay::replay(Reorder* expr, TensorDomain* td) {
   }
 
   // replay reorder
-  td->reorder(axis2pos);
+  TensorDomain* reordered_td = td->reorder(axis2pos);
 
   // Fake transform:
   for (decltype(pos2axis.size()) i = 0; i < pos2axis.size(); i++) {
@@ -190,7 +195,7 @@ TensorDomain* TransformReplay::replay(Reorder* expr, TensorDomain* td) {
   influence = reordered_influence;
   axis_map = reordered_axis_map;
 
-  return td;
+  return reordered_td;
 }
 
 /*
@@ -275,9 +280,10 @@ TensorView* TransformReplay::runReplay(
   }
 
   /*
-   * TODO: Decide if the following check is reasonable, when we're parsing the
-   * JIT graph, we are using symbolic sizes for each tensor individually, so
-   * they won't all have the same size.
+   * TODO: The JIT graph has symbolic sizes, so inputs may actually have the
+   * same sizes (assuming no broadcasts/reductions), we at some point want to
+   * have some size matching, and sizes should actually match at this point, but
+   * the check below won't work.
    */
 
   // for (decltype(axis_map.size()) i{0}; i < axis_map.size(); i++) {
@@ -287,7 +293,7 @@ TensorView* TransformReplay::runReplay(
   //       "Transforms cannot be replayed as source and destinations do not have
   //       the same root sizes.");
   // }
-
+  
   /* STEP 3 */
   // Replay operations while forward propagating influence. The resulting
   // influence can be different in forward propagation, than in backward

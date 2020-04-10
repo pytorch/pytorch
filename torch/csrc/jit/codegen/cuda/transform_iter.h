@@ -32,12 +32,12 @@ struct TORCH_CUDA_API TransformIter : public IterVisitor {
   // order operations root->td.
   TensorDomain* runBackward(TensorDomain* td, bool generate_record);
 
-  virtual TensorView* replay(Split* expr, TensorView* tv);
-  virtual TensorView* replay(Merge* expr, TensorView* tv);
-  virtual TensorView* replay(Reorder* expr, TensorView* tv);
+  virtual TensorDomain* replay(Split* expr, TensorDomain* tv);
+  virtual TensorDomain* replay(Merge* expr, TensorDomain* tv);
+  virtual TensorDomain* replay(Reorder* expr, TensorDomain* tv);
 
   // dispatch
-  TensorView* replay(Expr* expr, TensorView* tv);
+  TensorDomain* replay(Expr* expr, TensorDomain* tv);
 
   // Runs through operations recorded in record from root-> present
   TensorView* runReplay(TensorView* tv);

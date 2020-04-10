@@ -83,6 +83,7 @@ struct TORCH_CUDA_API Int : public Val {
 };
 
 struct TransformReplay;
+struct TransformIter;
 struct OptOutMutator;
 struct GPULower;
 /*
@@ -172,8 +173,9 @@ struct TORCH_CUDA_API TensorView : public Val {
   // Reorder axes according to axis2pos[old_pos] = new_pos
   TensorView* reorder(const std::unordered_map<int, int>& axis2pos);
 
-  friend TORCH_CUDA_API OptOutMutator;
   friend TORCH_CUDA_API TransformReplay;
+  friend TORCH_CUDA_API TransformIter;
+  friend TORCH_CUDA_API OptOutMutator;
   friend TORCH_CUDA_API GPULower;
 
  protected:

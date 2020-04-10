@@ -5,6 +5,8 @@
 #include <torch/csrc/jit/codegen/cuda/tensor.h>
 #include <torch/csrc/jit/codegen/cuda/transform_iter.h>
 
+#include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
+
 #include <sstream>
 
 namespace torch {
