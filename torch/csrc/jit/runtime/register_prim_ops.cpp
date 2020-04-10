@@ -1,4 +1,4 @@
-#include "register_ops_utils.h"
+#include <torch/csrc/jit/runtime/register_ops_utils.h>
 
 #include <algorithm>
 #include <bitset>
