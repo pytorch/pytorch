@@ -8,7 +8,9 @@
 #include <torch/csrc/autograd/record_function_ops.h>
 #include <torch/csrc/autograd/python_function.h>
 #include <torch/csrc/autograd/function.h>
+#ifdef USE_DISTRIBUTED
 #include <torch/csrc/distributed/rpc/message.h>
+#endif
 
 PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
   using namespace torch::autograd::profiler;
@@ -56,12 +58,20 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
   m.def("_profiler_enabled", profilerEnabled);
 
   // TODO: remove when jit future can hold PyObject
+#ifdef USE_DISTRIBUTED
   m.def(
       "_call_end_callbacks_on_fut",
       [](const at::Tensor& handle,
          const std::shared_ptr<torch::distributed::rpc::FutureMessage>& fut) {
         torch::autograd::profiler::_call_end_callbacks_on_fut(handle, fut);
       });
+#else
+  m.def("_call_end_callbacks_on_fut", []() {
+    TORCH_INTERNAL_ASSERT(
+        false,
+        "_call_end_callbacks_on_fut is only supported with the distributed package");
+  });
+#endif
 
   Py_RETURN_TRUE;
 }
