@@ -17,6 +17,11 @@ from torch.nn.quantized.modules.utils import _pair_from_first
 from torch.nn.quantized.modules.utils import _quantize_weight
 from torch.nn.utils import fuse_conv_bn_weights
 
+try:
+    from typing_extensions import Final
+except:
+    from torch.jit import Final
+
 class _ConvNd(nn.Module):
     def __init__(self, in_channels, out_channels, kernel_size, stride,
                  padding, dilation,
@@ -178,7 +183,7 @@ class Conv1d(_ConvNd):
 
     # We are using Conv2d to run the Conv1d. For that we need to know which
     # dimension is squeezed/unsqueezed.
-    _SQUEEZE_DIM = -2  # -2 is faster than -1.
+    _SQUEEZE_DIM: Final[int] = -2  # -2 is faster than -1.
 
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
                  padding=0, dilation=1, groups=1, bias=True,
