@@ -13,7 +13,7 @@ namespace at { namespace native {
 
 enum class REDUCE_OPERATOR: uint8_t {  NONE=0,SUM, SUBTRACT, MULTIPLY, DIVIDE };
 enum class SCATTER_GATHER_OP: uint8_t {NONE=0, REDUCE_ADD, REDUCE_SUBTRACT, REDUCE_MULTIPLY,
-                                       REDUCE_DIVIDE, ASSIGN};
+                                       REDUCE_DIVIDE, TENSOR_ASSIGN, SCALAR_ASSIGN};
 
 using index_fn = void(*)(TensorIterator &, IntArrayRef indexed_sizes, IntArrayRef indexed_strides);
 using index_put_fn = void(*)(TensorIterator &, IntArrayRef indexed_sizes, IntArrayRef indexed_strides, bool accumulate);
