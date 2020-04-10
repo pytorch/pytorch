@@ -12,7 +12,7 @@
 #include <qnnpack/isa-checks.h>
 #include <qnnpack/q8avgpool.h>
 
-#include <avgpool-microkernel-tester.h>
+#include <ATen/native/quantized/cpu/qnnpack/test/avgpool-microkernel-tester.h>
 
 #if CPUINFO_ARCH_ARM || CPUINFO_ARCH_ARM64
 TEST(Q8AVGPOOL_UP8xM__NEON, kc_lt_8_small_ks) {

@@ -12,7 +12,7 @@
 #include <qnnpack/isa-checks.h>
 #include <qnnpack/q8gemm.h>
 
-#include <gemm-microkernel-tester.h>
+#include <ATen/native/quantized/cpu/qnnpack/test/gemm-microkernel-tester.h>
 
 #if CPUINFO_ARCH_ARM
 TEST(Q8GEMM_4x8__AARCH32_NEON, k_eq_8) {

@@ -8,7 +8,7 @@
 
 #include <gtest/gtest.h>
 
-#include <add-operator-tester.h>
+#include <ATen/native/quantized/cpu/qnnpack/test/add-operator-tester.h>
 
 TEST(ADD_OP, zero_batch) {
   AddOperatorTester().batchSize(0).channels(2).iterations(1).testQ8();

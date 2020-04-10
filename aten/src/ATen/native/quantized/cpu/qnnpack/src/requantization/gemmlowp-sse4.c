@@ -14,7 +14,7 @@
 #include <fp16/bitcasts.h>
 #include <qnnpack/requantization-stubs.h>
 
-#include <gemmlowp-sse.h>
+#include <ATen/native/quantized/cpu/qnnpack/src/requantization/gemmlowp-sse.h>
 
 void pytorch_qnnp_requantize_gemmlowp__sse4(
     size_t n,

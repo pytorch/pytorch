@@ -63,6 +63,7 @@ struct PyObjectHolder;
   _(Uninitialized) \
   _(Capsule) \
   _(RRef) \
+  _(Generator) \
 
 // [doxygen private]
 // These methods are not actually private but we don't want to document them, so
@@ -517,6 +518,19 @@ struct CAFFE2_API IValue final {
     return static_cast<at::QScheme>(toInt());
   }
 
+  // Generator
+  IValue(at::Generator g)
+  : tag(Tag::Generator), is_intrusive_ptr(g.defined())  {
+    // Note: the undefined generator is not refcounted, so while it
+    // is tagged as a generator, is_intrusive_ptr is set to false.
+    // This is not an optional optimization: our incref call
+    // *will not* do the right thing when called on an
+    // undefined generator.
+    payload.as_intrusive_ptr = g.unsafeReleaseGeneratorImpl();
+  }
+  bool isGenerator() const { return Tag::Generator == tag; }
+  at::Generator toGenerator() &&;
+  at::Generator toGenerator() const &;
 
   // for debugging
   std::string tagKind() const {

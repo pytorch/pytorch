@@ -8,7 +8,7 @@
 
 #include <gtest/gtest.h>
 
-#include <tanh-operator-tester.h>
+#include <ATen/native/quantized/cpu/qnnpack/test/tanh-operator-tester.h>
 
 #include <qnnpack/params.h>
 

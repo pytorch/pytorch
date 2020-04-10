@@ -8,7 +8,7 @@
 
 #include <gtest/gtest.h>
 
-#include <leaky-relu-operator-tester.h>
+#include <ATen/native/quantized/cpu/qnnpack/test/leaky-relu-operator-tester.h>
 
 TEST(LEAKY_RELU_OP, zero_batch) {
   LeakyReLUOperatorTester().batchSize(0).channels(2).iterations(1).testQ8();
