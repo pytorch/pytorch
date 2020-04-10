@@ -796,27 +796,6 @@ class RpcTest(RpcAgentTestFixture):
         )
 
     @dist_init
-    def test_remote_script_prof(self):
-        dst_rank = (self.rank + 1) % self.world_size
-        if self.rank == 1:
-            with torch.autograd.profiler.profile() as p:
-                rref = rpc.remote(worker_name(dst_rank), my_script_func, args=(torch.tensor(1), ))
-                rref.to_here()
-                wait_until_pending_users_flushed()
-            print("DONE")
-            print(p.key_averages())
-
-    @dist_init
-    def test_rpc_script_prof(self):
-        dst_rank = (self.rank + 1) % self.world_size
-        if self.rank == 1:
-            with torch.autograd.profiler.profile() as p:
-                fut = rpc.rpc_async(worker_name(dst_rank), my_script_func, args=(torch.tensor(1),))
-                fut.wait()
-            print("DONE")
-            print(p.key_averages())
-
-    @dist_init
     def test_async_record_function_double_end_callbacks(self):
         # We need to disable the internal profiling implementation so we can check
         # it here without any duplicated calls.

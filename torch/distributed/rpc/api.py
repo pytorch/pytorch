@@ -470,8 +470,6 @@ def remote(to, func, args=None, kwargs=None):
         if should_profile:
             assert torch.autograd._profiler_enabled()
             assert rf is not None
-            print("PROFILING IN RREF")
-            print("Future type is {}".format(type(rref._get_future())))
             rf._call_end_callbacks_on_future(rref._get_future())
 
     return rref
