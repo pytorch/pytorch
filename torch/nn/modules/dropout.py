@@ -181,11 +181,16 @@ class AlphaDropout(_DropoutNd):
 
 
 class FeatureAlphaDropout(_DropoutNd):
-    r"""Randomly zero out entire channels (a channel is a 3D feature map,
-    e.g., the :math:`j`-th channel of the :math:`i`-th sample in the
-    batched input is a 3D tensor :math:`\text{input}[i, j]`).
-    Each channel will be zeroed out independently on every forward call with
-    probability :attr:`p` using samples from a Bernoulli distribution.
+    r"""Randomly masks out entire channels (a channel is a feature map, 
+    e.g. the :math:`j`-th channel of the :math:`i`-th sample in the batch input 
+    is a tensor :math:`\text{input}[i, j]`) of the input tensor). Instead of 
+    setting activations to zero, as in regular Dropout, the activations are set 
+    to the negative saturation value of the SELU activation function.
+
+    Each element will be masked independently for each sample on every forward 
+    call with probability :attr:`p` using samples from a Bernoulli distribution.
+    The elements to be masked are randomized on every forward call, and scaled
+    and shifted to maintain zero mean and unit variance.
 
     Usually the input comes from :class:`nn.Conv3d` modules.
 
@@ -214,8 +219,7 @@ class FeatureAlphaDropout(_DropoutNd):
         >>> input = torch.randn(20, 16, 4, 32, 32)
         >>> output = m(input)
 
-    .. _Efficient Object Localization Using Convolutional Networks:
-       http://arxiv.org/abs/1411.4280
+    .. _Self-Normalizing Neural Networks: https://arxiv.org/abs/1706.02515
     """
 
     def forward(self, input):
