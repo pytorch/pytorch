@@ -128,7 +128,7 @@ static void init(void) {
       .sum_rows = pytorch_q8sumrows_ukernel_4x__neon,
       .m = 4,
   };
-  pytorch_qnnp_params.q8vadd = pytorch_q8vadd_ukernel__neon;
+  pytorch_qnnp_params.q8vadd = pytorch_q8vadd_ukernel__aarch32_neon;
   pytorch_qnnp_params.q8gavgpool = (struct pytorch_q8gavgpool_parameters){
       .ltnr = pytorch_q8gavgpool_ukernel_up8xm__neon,
       .genr_lemr = pytorch_q8gavgpool_ukernel_up8x7__neon,

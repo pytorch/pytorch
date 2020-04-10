@@ -1,32 +1,23 @@
-	.text
-	.syntax unified
-	.eabi_attribute	67, "2.09"	@ Tag_conformance
-	.eabi_attribute	6, 10	@ Tag_CPU_arch
-	.eabi_attribute	7, 65	@ Tag_CPU_arch_profile
-	.eabi_attribute	8, 1	@ Tag_ARM_ISA_use
-	.eabi_attribute	9, 2	@ Tag_THUMB_ISA_use
-	.fpu	neon
-	.eabi_attribute	34, 1	@ Tag_CPU_unaligned_access
-	.eabi_attribute	15, 1	@ Tag_ABI_PCS_RW_data
-	.eabi_attribute	16, 1	@ Tag_ABI_PCS_RO_data
-	.eabi_attribute	17, 2	@ Tag_ABI_PCS_GOT_use
-	.eabi_attribute	20, 1	@ Tag_ABI_FP_denormal
-	.eabi_attribute	21, 1	@ Tag_ABI_FP_exceptions
-	.eabi_attribute	23, 3	@ Tag_ABI_FP_number_model
-	.eabi_attribute	24, 1	@ Tag_ABI_align_needed
-	.eabi_attribute	25, 1	@ Tag_ABI_align_preserved
-	.eabi_attribute	38, 1	@ Tag_ABI_FP_16bit_format
-	.eabi_attribute	18, 4	@ Tag_ABI_PCS_wchar_t
-	.eabi_attribute	26, 2	@ Tag_ABI_enum_size
-	.eabi_attribute	14, 0	@ Tag_ABI_PCS_R9_use
-	.file	"neon.c"
-	.hidden	pytorch_q8vadd_ukernel__neon @ -- Begin function pytorch_q8vadd_ukernel__neon
-	.globl	pytorch_q8vadd_ukernel__neon
-	.p2align	2
-	.type	pytorch_q8vadd_ukernel__neon,%function
-	.code	32                      @ @pytorch_q8vadd_ukernel__neon
-pytorch_q8vadd_ukernel__neon:
+/*
+ * Copyright (c) 2020 - Facebook, Inc. and its affiliates.
+ * All rights reserved.
+ *
+ * This source code is licensed under the BSD-style license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+#include <qnnpack/assembly.h>
+#include <requantization/runtime-assembly.h>
+
+.syntax unified
+
 	.fnstart
+BEGIN_FUNCTION pytorch_q8vadd_ukernel__aarch32_neon
+    .arm
+#ifndef __APPLE__
+    .arch armv7-a
+    .fpu neon
+#endif
 @ %bb.0:
 	.save	{r4, r5, r6, r10, r11, lr}
 	push	{r4, r5, r6, r10, r11, lr}
@@ -280,11 +271,5 @@ pytorch_q8vadd_ukernel__neon:
 @ %bb.19:
 .LCPI0_0:
 	.long	0                       @ float 0
-.Lfunc_end0:
-	.size	pytorch_q8vadd_ukernel__neon, .Lfunc_end0-pytorch_q8vadd_ukernel__neon
-	.cantunwind
 	.fnend
-                                        @ -- End function
-
-	.ident	"Android (5900059 based on r365631c) clang version 9.0.8 (https://android.googlesource.com/toolchain/llvm-project 207d7abc1a2abf3ef8d4301736d6a7ebc224a290) (based on LLVM 9.0.8svn)"
-	.section	".note.GNU-stack","",%progbits
+END_FUNCTION pytorch_q8vadd_ukernel__aarch32_neon

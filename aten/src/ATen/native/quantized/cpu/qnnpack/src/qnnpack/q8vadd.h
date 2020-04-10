@@ -27,6 +27,7 @@ extern "C" {
       const union pytorch_qnnp_add_quantization_params* quantization_params);
 
 DECLARE_PYTORCH_Q8VADD_UKERNEL_FUNCTION(pytorch_q8vadd_ukernel__neon)
+DECLARE_PYTORCH_Q8VADD_UKERNEL_FUNCTION(pytorch_q8vadd_ukernel__aarch32_neon)
 DECLARE_PYTORCH_Q8VADD_UKERNEL_FUNCTION(pytorch_q8vadd_ukernel__sse2)
 
 #ifdef __cplusplus
