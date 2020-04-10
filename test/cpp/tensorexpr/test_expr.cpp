@@ -44,7 +44,6 @@ void testExprBasicValueTest02() {
 void testExprLetTest01() {
   KernelScope kernel_scope;
   VarHandle x("x", kFloat);
-  ExprHandle value = ExprHandle(3.f);
   ExprHandle body = ExprHandle(2.f) + (x * ExprHandle(3.f) + ExprHandle(4.f));
   ExprHandle result = Let::make(x, ExprHandle(3.f), body);
   SimpleIRExprEval eval(result);
@@ -55,7 +54,6 @@ void testExprLetTest02() {
   KernelScope kernel_scope;
   VarHandle x("x", kFloat);
   VarHandle y("y", kFloat);
-  ExprHandle value = ExprHandle(3.f);
   ExprHandle body =
       ExprHandle(2.f) + (x * ExprHandle(3.f) + ExprHandle(4.f) * y);
   ExprHandle e1 = Let::make(x, ExprHandle(3.f), body);
@@ -86,14 +84,9 @@ void testExprLetStmtTest01() {
   ExpectAllNear(b_v, b_ref, 1e-5);
 }
 
-static ExprHandle test_01(const ExprHandle& expr) {
-  return expr;
-}
-
 void testExprIntTest() {
   KernelScope kernel_scope;
   VarHandle x("x", kInt);
-  ExprHandle value = ExprHandle(3);
   ExprHandle body = ExprHandle(2) + (x * ExprHandle(3) + ExprHandle(4));
   ExprHandle result = Let::make(x, ExprHandle(3), body);
   SimpleIRExprEval eval(result);
@@ -103,7 +96,6 @@ void testExprIntTest() {
 void testExprFloatTest() {
   KernelScope kernel_scope;
   VarHandle x("x", kFloat);
-  ExprHandle value = ExprHandle((float)3);
   ExprHandle body =
       ExprHandle((float)2) + (x * ExprHandle((float)3) + ExprHandle((float)4));
   ExprHandle result = Let::make(x, ExprHandle((float)3), body);
@@ -114,7 +106,6 @@ void testExprFloatTest() {
 void testExprByteTest() {
   KernelScope kernel_scope;
   VarHandle x("x", kByte);
-  ExprHandle value = ExprHandle((uint8_t)3);
   ExprHandle body = ExprHandle((uint8_t)2) +
       (x * ExprHandle((uint8_t)3) + ExprHandle((uint8_t)4));
   ExprHandle result = Let::make(x, ExprHandle((uint8_t)3), body);
@@ -125,7 +116,6 @@ void testExprByteTest() {
 void testExprCharTest() {
   KernelScope kernel_scope;
   VarHandle x("x", kChar);
-  ExprHandle value = ExprHandle((int8_t)3);
   ExprHandle body = ExprHandle((int8_t)2) +
       (x * ExprHandle((int8_t)3) + ExprHandle((int8_t)4));
   ExprHandle result = Let::make(x, ExprHandle((int8_t)3), body);
@@ -136,7 +126,6 @@ void testExprCharTest() {
 void testExprShortTest() {
   KernelScope kernel_scope;
   VarHandle x("x", kShort);
-  ExprHandle value = ExprHandle((int16_t)3);
   ExprHandle body = ExprHandle((int16_t)2) +
       (x * ExprHandle((int16_t)3) + ExprHandle((int16_t)4));
   ExprHandle result = Let::make(x, ExprHandle((int16_t)3), body);
@@ -147,7 +136,6 @@ void testExprShortTest() {
 void testExprLongTest() {
   KernelScope kernel_scope;
   VarHandle x("x", kLong);
-  ExprHandle value = ExprHandle((int64_t)3);
   ExprHandle body = ExprHandle((int64_t)2) +
       (x * ExprHandle((int64_t)3) + ExprHandle((int64_t)4));
   ExprHandle result = Let::make(x, ExprHandle((int64_t)3), body);
@@ -158,7 +146,6 @@ void testExprLongTest() {
 void testExprHalfTest() {
   KernelScope kernel_scope;
   VarHandle x("x", kHalf);
-  ExprHandle value = ExprHandle((at::Half)3);
   ExprHandle body = ExprHandle((at::Half)2) +
       (x * ExprHandle((at::Half)3) + ExprHandle((at::Half)4));
   ExprHandle result = Let::make(x, ExprHandle((at::Half)3), body);
@@ -169,7 +156,6 @@ void testExprHalfTest() {
 void testExprDoubleTest() {
   KernelScope kernel_scope;
   VarHandle x("x", kDouble);
-  ExprHandle value = ExprHandle((double)3);
   ExprHandle body = ExprHandle((double)2) +
       (x * ExprHandle((double)3) + ExprHandle((double)4));
   ExprHandle result = Let::make(x, ExprHandle((double)3), body);
@@ -475,8 +461,7 @@ void testStmtClone() {
 
   Buffer a_buf("a", kInt, {N});
   VarHandle index = VarHandle("index", kInt);
-  Stmt* body =
-      Store::make(BufHandle(a_buf.data()), {index}, 5, 1);
+  Stmt* body = Store::make(BufHandle(a_buf.data()), {index}, 5, 1);
   Stmt* loop = For::make(index, 0, N, body);
 
   Stmt* cloned_loop = Stmt::clone(loop);

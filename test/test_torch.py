@@ -920,6 +920,61 @@ class _TestTorchMixin(object):
         d = torch.autograd.Variable(torch.DoubleTensor(2, 3))
         self.assertRaises(RuntimeError, lambda: torch.zeros((2, 3), out=d, dtype=torch.float32))
 
+    def test_as_subclass(self):
+        class SubTensor(torch.Tensor):
+            member_var = object()
+
+        t0 = torch.tensor(0)
+        t1 = torch.tensor([1, 2])
+        t2 = torch.tensor([[3, 4], [5, 6]])
+
+        s0 = t0.as_subclass(SubTensor)
+        s1 = t1.as_subclass(SubTensor)
+        s2 = t2.as_subclass(SubTensor)
+
+        # Check that the correct type is returned.
+        self.assertTrue(type(s0) is SubTensor)
+        self.assertTrue(type(s1) is SubTensor)
+        self.assertTrue(type(s2) is SubTensor)
+
+        # Check that the data is equal.
+        self.assertEqual(t0, s0)
+        self.assertEqual(t1, s1)
+        self.assertEqual(t2, s2)
+
+        t0[()] = 1
+        t1[1] = 3
+        t2[1, 1] = 7
+
+        # Check that the data is equal even after modification.
+        self.assertEqual(t0, s0)
+        self.assertEqual(t1, s1)
+        self.assertEqual(t2, s2)
+
+        # Check that member variables are passed through.
+        self.assertTrue(s0.member_var is SubTensor.member_var)
+        self.assertTrue(s1.member_var is SubTensor.member_var)
+        self.assertTrue(s2.member_var is SubTensor.member_var)
+
+        # Test that autograd is propagated.
+        t = torch.tensor(5, dtype=torch.float32, requires_grad=True)
+
+        # Run a calculation on the tensor.
+        exp_t = torch.exp(t)
+
+        # Cast exp_t to a subclass.
+        exp_s = exp_t.as_subclass(SubTensor)
+
+        # Make sure that t.grad was initially None
+        self.assertTrue(t.grad is None)
+
+        # Run the autograd calculation.
+        exp_s.backward()
+
+        # Make sure autograd was propagated to the original tensor
+        # declared with requires_grad.
+        self.assertTrue(t.grad is not None)
+
     def test_constructor_dtypes(self):
         default_type = torch.Tensor().type()
         self.assertIs(torch.Tensor().dtype, torch.get_default_dtype())
@@ -10990,32 +11045,57 @@ class TestTorchDeviceType(TestCase):
         dst = dst.masked_scatter(mask, src)
         self.assertEqual(dst, torch.tensor([True, True, True], device=device))
 
-    def test_masked_select(self, device):
-        warn = 'masked_select received a mask with dtype torch.uint8,'
-        for dt in torch.testing.get_all_dtypes():
+    @dtypes(*torch.testing.get_all_dtypes())
+    def test_masked_select(self, device, dtype):
+        if device == 'cpu':
+            warn = 'masked_select received a mask with dtype torch.uint8,'
+        else:
+            warn = 'indexing with dtype torch.uint8 is now deprecated, pl'
+        for maskType in [torch.uint8, torch.bool]:
+            num_src = 10
+            src = torch.tensor([0, 0, 0, 0, 0, 0, 0, 0, 0, 0], dtype=dtype, device=device)
+            mask = torch.rand(num_src, device=device).clamp(0, 1).mul(2).floor().to(maskType)
+
+            if dtype == torch.half and torch.device(device).type == 'cpu':
+                self.assertRaises(RuntimeError, lambda: src.masked_select(mask))
+                continue
+
             with warnings.catch_warnings(record=True) as w:
-                for maskType in [torch.uint8, torch.bool]:
-                    num_src = 10
-                    src = torch.tensor([0, 0, 0, 0, 0, 0, 0, 0, 0, 0], dtype=dt, device=device)
-                    mask = torch.rand(num_src, device=device).clamp(0, 1).mul(2).floor().to(maskType)
+                dst = src.masked_select(mask)
+                if maskType is torch.uint8:
+                    self.assertEqual(len(w), 1)
+                    self.assertEqual(str(w[0].message)[0:53], str(warn))
+            dst2 = []
+            for i in range(num_src):
+                if mask[i]:
+                    dst2 += [src[i]]
+            self.assertEqual(dst, torch.tensor(dst2), 0)
 
-                    if dt == torch.half and torch.device(device).type == 'cpu':
-                        self.assertRaises(RuntimeError, lambda: src.masked_select(mask))
-                        continue
+            dst3 = torch.empty_like(src, device=device)
+            torch.masked_select(src, mask, out=dst3)
+            self.assertEqual(dst3, torch.tensor(dst2, dtype=dst3.dtype), 0)
 
-                    dst = src.masked_select(mask)
-                    dst2 = []
-                    for i in range(num_src):
-                        if mask[i]:
-                            dst2 += [src[i]]
-                    self.assertEqual(dst, torch.tensor(dst2), 0)
+        # Since half is not supported on CPU, need to skip the remaining test cases
+        if dtype == torch.half and torch.device(device).type == 'cpu':
+            return
 
-                    dst3 = torch.empty_like(src, device=device)
-                    torch.masked_select(src, mask, out=dst3)
-                    self.assertEqual(dst3, torch.tensor(dst2, dtype=dst3.dtype), 0)
-                    if maskType is torch.uint8:
-                        self.assertEqual(len(w), 1)
-                        self.assertEqual(str(w[0].message)[0:53], str(warn))
+        # Ensure that masks are expanded to match tensor properly
+        a = torch.rand(100, 100, device=device).mul(100).to(dtype)
+        mask_first_el_each_row = torch.zeros(100, device=device).bool()
+        mask_first_el_each_row[0] = True
+        a_masked = a.masked_select(mask_first_el_each_row)
+        self.assertEqual(a_masked, a[:, 0])
+
+        mask_first_row = torch.zeros(100, 1, device=device, dtype=dtype).bool()
+        mask_first_row[0][0] = True
+        a_masked = a.masked_select(mask_first_row)
+        self.assertEqual(a_masked, a[0, :])
+
+        # Ensure that tensor is expanded to match mask properly
+        a = torch.rand(100, device=device).mul(100).to(maskType)
+        mask_copy_3_times = torch.tensor([[True], [True], [False], [True]], device=device)
+        a_masked = a.masked_select(mask_copy_3_times)
+        self.assertEqual(a_masked, a.unsqueeze(0).expand(3, 100).flatten())
 
     def test_masked_fill_bool_tensor(self, device):
         dst = torch.tensor([True, False, True], device=device)
@@ -14102,7 +14182,6 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         b = torch.exp(torch.ones(1, dtype=dtype, device=device))
         self.assertEqual(a, b.expand(2 ** 31))
 
-    @onlyCPU
     @dtypes(torch.float, torch.double)
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_hardswish(self, device, dtype):

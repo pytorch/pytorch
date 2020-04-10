@@ -213,7 +213,7 @@ class AttributePropagator {
     if (attr.isTensor()) {
       auto t = attr.toTensor();
       if (t.requires_grad()) {
-        t = autograd::as_variable_ref(t).detach();
+        t = t.detach();
         t.set_requires_grad(false);
         attr = IValue(t);
       }

@@ -890,7 +890,6 @@ class TestQuantizedOps(TestCase):
                              message=error_message.format(name + '.zero_point', scale,
                              X_hat.q_zero_point()))
 
-    @unittest.skip("Fix me! to stop breaking the builds")
     @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=5, max_dims=5,
                                               min_side=5, max_side=10),
                        qparams=hu.qparams(dtypes=torch.quint8)),
@@ -943,7 +942,6 @@ class TestQuantizedOps(TestCase):
                              message=error_message.format(name + '.zero_point', scale,
                                                           qX_hat.q_zero_point()))
 
-    @unittest.skip("Failing - see https://github.com/pytorch/pytorch/issues/36129")
     @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=5, max_dims=5,
                                               min_side=5, max_side=10),
                        qparams=hu.qparams(dtypes=torch.qint8)),

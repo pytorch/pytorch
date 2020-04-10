@@ -1,7 +1,6 @@
 #pragma once
 
 #include <stdint.h>
-#include <memory>
 #include <mutex>
 #include <deque>
 #include <atomic>
@@ -10,6 +9,7 @@
 
 #include <c10/util/Exception.h>
 #include <c10/util/C++17.h>
+#include <c10/util/intrusive_ptr.h>
 #include <c10/core/Device.h>
 #include <c10/core/DispatchKeySet.h>
 #include <c10/util/python_stub.h>
@@ -30,7 +30,7 @@
  *
  * By default, there is one generator per device, and a device's generator is
  * lazily created. A user can use the torch.Generator() api to create their own generator.
- * Currently torch.Generator() can only create a CPUGenerator.
+ * Currently torch.Generator() can only create a CPUGeneratorImpl.
  */
 
 /**
@@ -54,7 +54,7 @@ namespace c10 {
 // with good distribution of 0s and 1s in bit representation
 constexpr uint64_t default_rng_seed_val = 67280421310721;
 
-struct C10_API GeneratorImpl {
+struct C10_API GeneratorImpl : public c10::intrusive_ptr_target {
   // Constructors
   GeneratorImpl(Device device_in, DispatchKeySet key_set);
 
@@ -65,7 +65,7 @@ struct C10_API GeneratorImpl {
   GeneratorImpl& operator=(const GeneratorImpl& other) = delete;
 
   virtual ~GeneratorImpl() = default;
-  std::shared_ptr<GeneratorImpl> clone() const;
+  c10::intrusive_ptr<GeneratorImpl> clone() const;
 
   // Common methods for all generators
   virtual void set_current_seed(uint64_t seed) = 0;
