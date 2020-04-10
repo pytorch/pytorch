@@ -797,20 +797,18 @@ const Expr* PolynomialTransformer::mutate(const Mul* v) {
     variable = lhs_new;
   }
 
+  // If there is a scalar and its zero then return zero.
+  if (scalar && immediateEquals(scalar, 0)) {
+    return scalar;
+  }
+
   if (scalar && lhsTerm) {
     const Expr* newScalar = evaluateOp(new Mul(scalar, lhsTerm->scalar()));
-    if (immediateEquals(newScalar, 0)) {
-      return newScalar;
-    }
     return new Term(hasher_, newScalar, lhsTerm->variables());
   }
 
   if (scalar && rhsTerm) {
     const Expr* newScalar = evaluateOp(new Mul(scalar, rhsTerm->scalar()));
-
-    if (immediateEquals(newScalar, 0)) {
-      return newScalar;
-    }
     return new Term(hasher_, newScalar, rhsTerm->variables());
   }
 
