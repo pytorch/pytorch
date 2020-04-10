@@ -7,6 +7,7 @@
 #include <vector>
 
 #include <c10/util/Logging.h>
+#include <c10/util/string_utils.h>
 #include <torch/csrc/jit/tensorexpr/bounds_inference.h>
 #include <torch/csrc/jit/tensorexpr/eval.h>
 #include <torch/csrc/jit/tensorexpr/expr.h>
@@ -924,7 +925,7 @@ class LoopComputeAtRewriter : public IRMutator {
   LoopComputeAtRewriter(
       const Buf* buf,
       const Buf* new_buf,
-      std::vector<const Expr*> offsets)
+      const std::vector<const Expr*>& offsets)
       : buf_(buf), new_buf_(new_buf), offsets_(offsets) {}
 
  private:
@@ -1131,7 +1132,7 @@ void LoopNest::computeAt(Stmt* s, For* f) {
   std::vector<const Expr*> temp_indices(dims.size());
   for (size_t i = 0; i < dims.size(); i++) {
     // TODO: Use name-hint of the producer indices instead of 'idx'
-    temp_indices[i] = new Var(std::string("idx") + std::to_string(i), kInt);
+    temp_indices[i] = new Var(std::string("idx") + c10::to_string(i), kInt);
   }
 
   // Prepare substitute rules for constructing the temp statement from the prod
