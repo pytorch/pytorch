@@ -605,8 +605,9 @@ private:
 //
 // A quick tour of a few usage examples:
 //
-//  // Specify a namespace.  This namespace must not be used by any
-//  // other system
+//  // Define a library whose operators live in the namespace 'aten'.
+//  // You must define all of the operators for this library in
+//  // this namespace.
 //  TORCH_LIBRARY(aten, m) {
 //    // Define a schema for an operator, but provide no implementation
 //    m.def("mul(Tensor self, Tensor other) -> Tensor");
@@ -620,6 +621,14 @@ private:
 //    // tensor or a CUDA tensor
 //    m.impl("mul", torch::kCPU, &mul_cpu_impl);
 //    m.impl("mul", torch::kCUDA, &mul_cuda_impl);
+//  }
+//
+//  // Define implementations for operators for a non-standard backend,
+//  // e.g., XLA (valid values are entries of DispatchKey).  These
+//  // operator names are not namespaced; you can define implementations
+//  // for any namespace.
+//  TORCH_LIBRARY_IMPL(XLA, m) {
+//    m.impl("aten::mul", &mul_xla_impl);
 //  }
 
 
@@ -793,6 +802,12 @@ namespace detail {
 //    ...
 // }
 //
+// TORCH_LIBRARY_IMPL(XLA, m) {
+//    // m is a c10::Library
+//    m.impl("aten::add", ...);
+//    ...
+// }
+//
 class CAFFE2_API Library final {
   c10::optional<std::string> ns_;
   c10::optional<DispatchKey> dispatch_key_;
@@ -885,7 +900,7 @@ public:
   // but will be eventually eliminated; this function makes it easy to grep for
   // them.
   //
-  // TODO: Remove these overloads once the makeUnboxedOnly incidence rate
+  // TODO: Remove this overload once the makeUnboxedOnly incidence rate
   // goes way down
   template <typename Func>
   Library& impl_UNBOXED(const char* name, Func* raw_f) & {
@@ -896,9 +911,6 @@ public:
   // if there is not a specific implementation for an operator available.
   // Providing a DispatchKey is MANDATORY for fallback at the moment; e.g.,
   // only call this from TORCH_LIBRARY_IMPL
-
-  // NB: these overloads are here for completeness, but you'll probably want to
-  // use the direct Dispatch overload
   template <typename Func>
   Library& fallback(Func&& raw_f) & {
     CppFunction f((std::forward<Func>(raw_f)));

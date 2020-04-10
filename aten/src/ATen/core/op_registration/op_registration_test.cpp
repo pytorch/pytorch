@@ -1519,6 +1519,19 @@ TEST(NewOperatorRegistrationTest, testDelayedListener) {
   EXPECT_EQ(initial_num_deregisters + 1, listener_ptr->num_deregisters_);
 }
 
+TEST(OperatorRegistrationTest, whenDeregisteringOp_thenHandleBecomesInvalid) {
+  c10::optional<OperatorHandle> handle;
+  {
+    auto m = c10::Library("_test", __FILE__, __LINE__);
+    m.def("dummy(Tensor dummy) -> Tensor");
+    handle = Dispatcher::singleton().findSchema({"_test::dummy", ""});
+    EXPECT_TRUE(handle.has_value());
+    EXPECT_TRUE(handle->isValid());
+  }
+  // Now the RegistrationHandleRAII went out of scope and the op is deregistered
+  EXPECT_FALSE(handle->isValid());
+}
+
 }
 
 #pragma GCC diagnostic pop

@@ -4,6 +4,7 @@
 
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
 #include <torch/csrc/jit/codegen/cuda/ir_base_nodes.h>
+#include <torch/csrc/jit/codegen/cuda/ir_interface_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/tensor_meta.h>
 
 /*
@@ -108,11 +109,6 @@ struct TORCH_CUDA_API IterDomain : public Val {
   IterDomain() = delete;
 
   IterDomain(
-      Int* _size,
-      ParallelType _parallel_method = ParallelType::Serial,
-      bool _reduction_domain = false);
-
-  IterDomain(
       Val* int_size,
       ParallelType _parallel_method = ParallelType::Serial,
       bool _reduction_domain = false);
@@ -127,6 +123,7 @@ struct TORCH_CUDA_API IterDomain : public Val {
     return parallel_method_ != ParallelType::Serial;
   }
 
+  // Return if this iter domain is mapped to a grid dimension
   bool isBlockDim() const {
     return (
         parallel_method_ == ParallelType::BIDz ||
@@ -134,6 +131,7 @@ struct TORCH_CUDA_API IterDomain : public Val {
         parallel_method_ == ParallelType::BIDx);
   }
 
+  // Return if this iter domain is mapped to a block dimension
   bool isThreadDim() const {
     return (
         parallel_method_ == ParallelType::TIDz ||
@@ -141,21 +139,33 @@ struct TORCH_CUDA_API IterDomain : public Val {
         parallel_method_ == ParallelType::TIDx);
   }
 
+  // Return if this iter domain is either mapped to a block or grid dimension
   bool isThread() const {
     return (isBlockDim() || isThreadDim());
   }
 
   void parallelize(ParallelType t) {
     parallel_method_ = t;
+    if (isBlockDim()) {
+      TORCH_CHECK(
+          !isReduction(),
+          "Cannot parallelize reductions across a block dimension.");
+      if (isThreadDim())
+        TORCH_CHECK(
+            !isReduction(),
+            "Thread parallelized reductions not yet supported.");
+      TORCH_CHECK(
+          t != ParallelType::Vectorize, "Vectorization not yet supported.");
+      if (t == ParallelType::Unroll)
+        TORCH_CHECK(false, "Unrolling not yet supported.");
+    }
   }
 
   ParallelType parallel_method() const noexcept {
     return parallel_method_;
   }
 
-  Int* size() const noexcept {
-    return size_;
-  }
+  Val* size() const;
 
   IterDomain(const IterDomain& other) = delete;
   IterDomain& operator=(const IterDomain& other) = delete;
@@ -164,7 +174,7 @@ struct TORCH_CUDA_API IterDomain : public Val {
   IterDomain& operator=(IterDomain&& other) = delete;
 
  private:
-  Int* const size_;
+  Val* const size_;
   ParallelType parallel_method_ = ParallelType::Serial;
   bool is_reduction_domain_;
 };
@@ -179,14 +189,18 @@ struct TORCH_CUDA_API TensorDomain : public Val {
   TensorDomain(TensorDomain&& other) = delete;
   TensorDomain& operator=(TensorDomain&& other) = delete;
 
-  TensorDomain(std::vector<IterDomain*> domain_)
-      : Val(ValType::TensorDomain), domain(domain_) {}
+  TensorDomain(std::vector<IterDomain*> _domain)
+      : Val(ValType::TensorDomain), domain_(_domain) {}
 
   std::vector<IterDomain*>::size_type size() const {
-    return domain.size();
+    return domain_.size();
   }
 
   bool sameAs(const TensorDomain* const other) const;
+
+  const std::vector<IterDomain*>& domain() const noexcept {
+    return domain_;
+  }
 
   TensorDomain* noReductions() const;
 
@@ -195,7 +209,7 @@ struct TORCH_CUDA_API TensorDomain : public Val {
   IterDomain* axis(int i) const;
 
  private:
-  std::vector<IterDomain*> domain;
+  std::vector<IterDomain*> domain_;
 };
 
 /*
@@ -300,6 +314,238 @@ struct TORCH_CUDA_API Reorder : public Expr {
   TensorDomain* const out_;
   TensorDomain* const in_;
   const std::vector<int> pos2axis_;
+};
+
+/*
+ * ForLoop provides scoping around an int iterator from 0 to range. Exprs placed
+ * in its body are considered inside the scope of the for loop. In the future
+ * the implementation should look quite different so that we can do proper
+ * dependency annalysis like in Fusion.
+ *
+ * TODO: Change implmentation of Exprs contained in the scope to be more similar
+ * to Fusion where we can do proper dependency analysis.
+ */
+struct TORCH_CUDA_API ForLoop : public Expr {
+  ~ForLoop() = default;
+  ForLoop(
+      Val* _index,
+      IterDomain* _range,
+      const std::vector<Expr*>& _body = {},
+      Expr* parent_scope = nullptr);
+
+  ForLoop(const ForLoop& other) = delete;
+  ForLoop& operator=(const ForLoop& other) = delete;
+
+  ForLoop(ForLoop&& other) = delete;
+  ForLoop& operator=(ForLoop&& other) = delete;
+
+  Val* index() const noexcept {
+    return index_;
+  }
+
+  IterDomain* range() const noexcept {
+    return range_;
+  }
+
+  Scope& body() noexcept {
+    return body_;
+  }
+
+  const Scope& constBody() const noexcept {
+    return body_;
+  }
+
+  bool sameAs(const ForLoop* other) const;
+  Expr* parentScope() const noexcept {
+    return parent_scope_;
+  }
+  bool hasParentScope() const noexcept {
+    return parent_scope_ == nullptr;
+  }
+
+ private:
+  Val* const index_;
+  IterDomain* const range_;
+  Scope body_;
+  Expr* parent_scope_;
+};
+
+/*
+ * IfThenElse provides scoping for an boolean operator. Exprs placed in its body
+ * are considered inside the scope of the if statement. In the future the
+ * implementation should look quite different so that we can do proper
+ * dependency annalysis like in Fusion.
+ *
+ * TODO: Change implmentation of Exprs contained in the scope to be more similar
+ * to Fusion where we can do proper dependency analysis.
+ */
+struct TORCH_CUDA_API IfThenElse : public Expr {
+  ~IfThenElse() = default;
+  IfThenElse(
+      Int* _cond,
+      const std::vector<Expr*>& _if_body = {},
+      const std::vector<Expr*>& _else_body = {},
+      Expr* _parent_scope = nullptr);
+
+  IfThenElse(const IfThenElse& other) = delete;
+  IfThenElse& operator=(const IfThenElse& other) = delete;
+
+  IfThenElse(IfThenElse&& other) = delete;
+  IfThenElse& operator=(IfThenElse&& other) = delete;
+
+  Int* cond() const noexcept {
+    return cond_;
+  }
+
+  const Scope& constBody() const noexcept {
+    return body_;
+  }
+
+  const Scope& constElseBody() const noexcept {
+    return else_body_;
+  }
+
+  Scope& body() noexcept {
+    return body_;
+  }
+
+  Scope& elseBody() noexcept {
+    return else_body_;
+  }
+
+  bool hasElse() const noexcept {
+    return !else_body_.empty();
+  }
+
+  bool sameAs(const IfThenElse* other) const;
+
+  Expr* parentScope() const noexcept {
+    return parent_scope_;
+  }
+
+ private:
+  Int* const cond_;
+  Scope body_;
+  Scope else_body_;
+  Expr* parent_scope_;
+};
+
+/*
+ * TODO: Fill out TensorIndex, which is a list of Ints used to directly index a
+ * TensorView. It is not the flattened index, which needs to be computed using
+ * stride information.
+ */
+struct TORCH_CUDA_API TensorIndex : public Val {
+  ~TensorIndex() = default;
+
+  TensorIndex(const TensorIndex& other) = delete;
+  TensorIndex& operator=(const TensorIndex& other) = delete;
+
+  TensorIndex(TensorIndex&& other) = delete;
+  TensorIndex& operator=(TensorIndex&& other) = delete;
+
+  TensorIndex(const TensorView* const _view, std::vector<Val*> _indices)
+      : Val(ValType::TensorIndex), view_(_view), indices_(_indices) {
+    TORCH_INTERNAL_ASSERT(
+        std::all_of(
+            _indices.begin(),
+            _indices.end(),
+            [](Val* v) {
+              return (v->getValType() == ValType::Scalar ||
+                      v->getValType() == ValType::NamedScalar) &&
+                  v->getDataType() == DataType::Int;
+            }),
+        "Cannot index with a value other than an int.");
+  }
+
+  std::vector<Val*>::size_type size() const {
+    return indices_.size();
+  }
+
+  // i here is int, as we want to accept negative value and ::size_type can be a
+  // uint.
+  Val* index(int i) const;
+
+  const std::vector<Val*>& indices() const noexcept {
+    return indices_;
+  }
+
+  const TensorView* view() const noexcept {
+    return view_;
+  }
+
+  bool sameAs(const TensorIndex* const other) const;
+
+ private:
+  const TensorView* view_;
+  std::vector<Val*> indices_;
+};
+
+/*
+ * Allocate is a lower level Node that describes a buffer of memory that
+ * is required as an intermediate within a kernel.  The extent is the expression
+ * of the size of the buffer that is generated from the TensorView that
+ * describes the output of an operation.
+ *
+ * TODO: The components of Allocate like Type and Name could be separated from
+ * the the assocated TensorView.  Perhaps that is more appropriate?
+ */
+struct TORCH_CUDA_API Allocate : public Expr {
+  ~Allocate() = default;
+
+  Allocate(const Allocate& other) = delete;
+  Allocate& operator=(const Allocate& other) = delete;
+
+  Allocate(Allocate&& other) = delete;
+  Allocate& operator=(Allocate&& other) = delete;
+
+  Allocate(TensorView* _tv, Val* size);
+
+  DataType buf_type() const;
+  Val* extent() const noexcept {
+    return extent_;
+  }
+  TensorView* buffer() const noexcept {
+    return buffer_;
+  }
+
+  bool sameAs(const Allocate* other) const;
+
+ private:
+  TensorView* buffer_;
+  Val* extent_;
+};
+
+/*
+ * Integer value which has a special name. These could be:
+ * - threadIdx.x
+ * - blockIdx.y
+ * - blockDim.z
+ * - T3.stride[2]
+ */
+struct TORCH_CUDA_API NamedScalar : public Val {
+  ~NamedScalar() = default;
+  NamedScalar() = delete;
+
+  NamedScalar(std::string _name, DataType dtype)
+      : Val(ValType::NamedScalar, dtype), name_(_name) {}
+
+  NamedScalar(const NamedScalar& other) = delete;
+  NamedScalar& operator=(const NamedScalar& other) = delete;
+
+  NamedScalar(NamedScalar&& other) = delete;
+  NamedScalar& operator=(NamedScalar&& other) = delete;
+
+  const std::string& name() const noexcept {
+    return name_;
+  }
+
+  bool sameAs(const NamedScalar* const other) const {
+    return other->name().compare(name()) == 0;
+  }
+
+ private:
+  std::string name_;
 };
 
 } // namespace fuser

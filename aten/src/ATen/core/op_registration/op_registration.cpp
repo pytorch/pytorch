@@ -197,7 +197,7 @@ Library& Library::_impl(const char* name_str, CppFunction&& f) & {
 }
 
 Library& Library::_fallback(CppFunction&& f) & {
-  TORCH_CHECK(!ns_, "Cannot define a fallback in TORCH_LIBRARY (it would affect operators outside of your library); did you mean to use TORCH_LIBRARY_IMPL instead.  Registration site was ", file_, ":", line_);
+  TORCH_CHECK(!ns_, "Cannot define a fallback in TORCH_LIBRARY (it would affect operators outside of your library).  Registration site was ", file_, ":", line_);
   auto dispatch_key = f.dispatch_key_.has_value() ? f.dispatch_key_ : dispatch_key_;
   TORCH_CHECK(dispatch_key.has_value(), "Fallback for catch all function not supported");
   registrars_.emplace_back(

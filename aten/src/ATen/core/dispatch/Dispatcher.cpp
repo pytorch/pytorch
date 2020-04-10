@@ -282,4 +282,17 @@ void Dispatcher::checkInvariants() const {
   }
 }
 
+void Dispatcher::setManuallyBoxedKernelFor_(const OperatorHandle& op, KernelFunction::InternalBoxedKernelFunction* func) {
+  op.operatorIterator_->op.setManuallyBoxedKernel_(func);
+}
+
+bool Dispatcher::isValid(const OperatorHandle& op) const {
+  for (auto iter = operators_.begin(); iter != operators_.end(); ++iter) {
+    if (iter == op.operatorIterator_) {
+      return true;
+    }
+  }
+  return false;
+}
+
 }
