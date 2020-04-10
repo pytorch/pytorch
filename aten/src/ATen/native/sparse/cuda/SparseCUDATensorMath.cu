@@ -875,14 +875,14 @@ Tensor& _bmm_out_sparse_cuda(Tensor& result, const SparseTensor& self, const Ten
   int64_t mat_el_end_indices_host[num_matrices];
   int64_t* mat_el_end_indices_device;
 
-  TORCH_CUDASPARSE_CHECK(cudaMalloc(&mat_el_end_indices_device, num_matrices*sizeof(int64_t)));
+  cudaMalloc(&mat_el_end_indices_device, num_matrices*sizeof(int64_t));
   search_end_matrix_indices(mat_el_end_indices_device, num_matrices, indices_dim0);
-  TORCH_CUDASPARSE_CHECK(cudaMemcpy(
+  cudaMemcpy(
     mat_el_end_indices_host,
     mat_el_end_indices_device,
     num_matrices*sizeof(int64_t),
     cudaMemcpyDeviceToHost
-  ));
+  );
   cudaFree(mat_el_end_indices_device);
 
   // Need a pointer to an array to access within a lambda
