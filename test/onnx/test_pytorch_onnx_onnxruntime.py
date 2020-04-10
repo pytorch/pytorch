@@ -458,6 +458,16 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.arange(-5, 5).to(dtype=torch.float32)
         self.run_test(MyModel(), x)
 
+    @skipIfUnsupportedMinOpsetVersion(12)
+    @unittest.skip("Enable once inverse is supported in ORT")
+    def test_inverse(self):
+        class Inverse(torch.nn.Module):
+            def forward(self, x):
+                return torch.inverse(x)
+
+        x = torch.randn(2, 3, 4, 4)
+        self.run_test(Inverse(), x)
+
     def test_clamp(self):
         class ClampModel(torch.nn.Module):
             def forward(self, x):
@@ -1200,7 +1210,7 @@ class TestONNXRuntime(unittest.TestCase):
 
     def _interpolate_script(self, x, mode, use_size, is_upsample, align_corners=False):
         # test disabled
-        return 
+        return
 
         class MyModel(torch.jit.ScriptModule):
             __constants__ = ['mode', 'use_size', 'is_upsample', 'size', 'scale', 'size_array', 'scale_array', 'align_corners']
@@ -2220,7 +2230,6 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(TensorFactory(), x)
 
     @skipIfUnsupportedMinOpsetVersion(9)
-    @unittest.skip("peephole removed")
     def test_tensor_factories_script(self):
         class TensorFactory(torch.jit.ScriptModule):
             @torch.jit.script_method

@@ -4,6 +4,22 @@ namespace torch {
 namespace jit {
 namespace tensorexpr {
 
+// Simple recursive GCD.
+template <typename T>
+T gcd(T a, T b) {
+  if (b == 0) {
+    return a;
+  }
+  return gcd(b, a % b);
+}
+
+// Helper for determining if an Expr is a multi-lane primitive (e.g. Broadcast
+// or Ramp).
+bool isMultilanePrimitive(const Expr* e) {
+  return e->expr_type() == IRNodeType::kBroadcast ||
+      e->expr_type() == IRNodeType::kRamp;
+}
+
 SimplifierHashType Term::hashVars() const {
   SimplifierHashType hash;
   for (auto* v : variables_) {
@@ -332,6 +348,13 @@ const Expr* PolynomialTransformer::mutate(const Add* v) {
   // If we now have a poly and a term, we can insert.
   if (poly) {
     return insertTerm(poly, lhsTerm ? lhsTerm : rhsTerm);
+  }
+
+  if (lhsTerm->hashVars() == rhsTerm->hashVars()) {
+    return new Term(
+        hasher_,
+        evaluateOp(new Add(lhsTerm->scalar(), rhsTerm->scalar())),
+        lhsTerm->variables());
   }
 
   // If all else fails we have a new Polynomial with two new variable Terms.
@@ -774,20 +797,18 @@ const Expr* PolynomialTransformer::mutate(const Mul* v) {
     variable = lhs_new;
   }
 
+  // If there is a scalar and its zero then return zero.
+  if (scalar && immediateEquals(scalar, 0)) {
+    return scalar;
+  }
+
   if (scalar && lhsTerm) {
     const Expr* newScalar = evaluateOp(new Mul(scalar, lhsTerm->scalar()));
-    if (immediateEquals(newScalar, 0)) {
-      return newScalar;
-    }
     return new Term(hasher_, newScalar, lhsTerm->variables());
   }
 
   if (scalar && rhsTerm) {
     const Expr* newScalar = evaluateOp(new Mul(scalar, rhsTerm->scalar()));
-
-    if (immediateEquals(newScalar, 0)) {
-      return newScalar;
-    }
     return new Term(hasher_, newScalar, rhsTerm->variables());
   }
 
@@ -829,6 +850,79 @@ const Expr* PolynomialTransformer::mutate(const Mul* v) {
 
   // Two variables, create a new Term.
   return new Term(hasher_, getImmediateByType(v->dtype(), 1), lhs_new, rhs_new);
+}
+
+const Expr* factorizeDivision(const Expr* lhs_new, const Expr* rhs_new) {
+  if (!lhs_new || !rhs_new) {
+    return nullptr;
+  }
+
+  const Expr* leftScalar = lhs_new->isConstant() ? lhs_new : nullptr;
+  const Expr* rightScalar = rhs_new->isConstant() ? rhs_new : nullptr;
+
+  auto* lhsTerm = dynamic_cast<const Term*>(lhs_new);
+  auto* rhsTerm = dynamic_cast<const Term*>(rhs_new);
+  if (lhsTerm) {
+    leftScalar = lhsTerm->scalar();
+  }
+
+  if (rhsTerm) {
+    rightScalar = rhsTerm->scalar();
+  }
+
+  if (!leftScalar || !rightScalar) {
+    return nullptr;
+  }
+
+  long left = immediateAs<long>(leftScalar);
+  long right = immediateAs<long>(rightScalar);
+
+  long GCD = gcd<long>(left, right);
+  if (GCD <= 1) {
+    return nullptr;
+  }
+
+  leftScalar = evaluateOp(
+      new Div(leftScalar, getImmediateByType(leftScalar->dtype(), GCD)));
+  rightScalar = evaluateOp(
+      new Div(rightScalar, getImmediateByType(rightScalar->dtype(), GCD)));
+
+  if (lhsTerm) {
+    lhs_new = new Term(lhsTerm->hasher(), leftScalar, lhsTerm->variables());
+  } else {
+    lhs_new = leftScalar;
+  }
+
+  if (rhsTerm) {
+    rhs_new = new Term(rhsTerm->hasher(), rightScalar, rhsTerm->variables());
+  } else {
+    rhs_new = rightScalar;
+  }
+
+  return new Div(lhs_new, rhs_new);
+}
+
+const Expr* PolynomialTransformer::mutate(const Div* v) {
+  const Expr* lhs_new = v->lhs()->accept_mutator(this);
+  const Expr* rhs_new = v->rhs()->accept_mutator(this);
+
+  // Constant Folding.
+  if (lhs_new->isConstant() && rhs_new->isConstant()) {
+    return evaluateOp(new Div(lhs_new, rhs_new));
+  }
+
+  // If this is a floating point Div then order of operations is important, we
+  // dont want to combine ops.
+  if (lhs_new->dtype().is_floating_point() ||
+      rhs_new->dtype().is_floating_point()) {
+    return new Div(lhs_new, rhs_new);
+  }
+
+  if (auto ret = factorizeDivision(lhs_new, rhs_new)) {
+    return ret;
+  }
+
+  return new Div(lhs_new, rhs_new);
 }
 
 const Expr* PolynomialTransformer::mutate(const Intrinsics* v) {
@@ -878,6 +972,74 @@ const Expr* PolynomialTransformer::mutate(const Cast* v) {
   }
 
   return new Cast(v->dtype(), node);
+}
+
+const Expr* PolynomialTransformer::mutate(const IfThenElse* v) {
+  const Expr* condition = v->condition();
+  const Expr* true_value = v->true_value();
+  const Expr* false_value = v->false_value();
+  const Expr* condition_new = condition->accept_mutator(this);
+  const Expr* true_value_new = true_value->accept_mutator(this);
+  const Expr* false_value_new = false_value->accept_mutator(this);
+
+  // If the condition is constant then we can choose the right branch now.
+  if (condition_new->isConstant()) {
+    if (!immediateEquals(condition_new, 0)) {
+      return true_value_new;
+    } else {
+      return false_value_new;
+    }
+  }
+
+  // If both branches are the same then don't do the condition.
+  if (hasher_.hash(true_value_new) == hasher_.hash(false_value_new)) {
+    return true_value_new;
+  }
+
+  if (condition == condition_new && true_value == true_value_new &&
+      false_value == false_value_new) {
+    return v;
+  }
+
+  return new IfThenElse(condition_new, true_value_new, false_value_new);
+}
+
+Stmt* PolynomialTransformer::mutate(const Cond* v) {
+  const Expr* cond_old = v->condition();
+  Stmt* true_old = v->true_stmt();
+  Stmt* false_old = v->false_stmt();
+
+  const Expr* cond_new = cond_old->accept_mutator(this);
+  Stmt* true_new = true_old ? true_old->accept_mutator(this) : true_old;
+  Stmt* false_new = false_old ? false_old->accept_mutator(this) : false_old;
+
+  // If the condition is constant then we can choose the right branch now.
+  if (cond_new->isConstant()) {
+    if (!immediateEquals(cond_new, 0)) {
+      return Stmt::clone(true_new);
+    } else {
+      return Stmt::clone(false_new);
+    }
+  }
+
+  // If both branches are the same then don't do the condition.
+  if (true_new && false_new &&
+      hasher_.hash(true_new) == hasher_.hash(false_new)) {
+    return Stmt::clone(true_new);
+  }
+
+  if (cond_old == cond_new && true_old == true_new && false_old == false_new) {
+    return (Stmt*)v;
+  }
+
+  if (true_old && true_new == true_old) {
+    true_new = Stmt::clone(true_old);
+  }
+  if (false_old && false_new == false_old) {
+    false_new = Stmt::clone(false_old);
+  }
+
+  return new Cond(cond_new, true_new, false_new);
 }
 
 // TermExpander
@@ -953,15 +1115,6 @@ const Expr* TermExpander::mutate(const Term* v) {
   }
 
   return lastNode;
-}
-
-// Simple recursive GCD.
-template <typename T>
-T gcd(T a, T b) {
-  if (b == 0) {
-    return a;
-  }
-  return gcd(b, a % b);
 }
 
 // Returns an immediate containing the greatest common divisor of all terms

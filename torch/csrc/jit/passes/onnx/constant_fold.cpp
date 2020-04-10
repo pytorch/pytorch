@@ -233,6 +233,12 @@ c10::optional<at::Tensor> runTorchBackendForOnnx(
   } else if (node->kind() == onnx::Mul) {
     updated_val = at::mul(inputTensorValues[0], inputTensorValues[1]);
     return c10::optional<at::Tensor>(updated_val);
+  } else if (node->kind() == onnx::Sub) {
+    updated_val = at::sub(inputTensorValues[0], inputTensorValues[1]);
+    return c10::optional<at::Tensor>(updated_val);
+  } else if (node->kind() == onnx::Add) {
+    updated_val = at::add(inputTensorValues[0], inputTensorValues[1]);
+    return c10::optional<at::Tensor>(updated_val);
   } else if (node->kind() == onnx::Unsqueeze) {
     assert(inputTensorValues.size() == 1);
     if (!node->hasAttributeS("axes")) {
