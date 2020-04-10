@@ -67,33 +67,30 @@ Tensor asin(const Tensor& self) { return unary_op_impl(self, at::asin_out); }
 Tensor& asin_(Tensor& self) { return unary_op_impl_(self, at::asin_out); }
 
 // Note [Complex abs]
-// abs, in NumPy and C++, returns a float value when given a complex input.
+// Complex inputs to abs return float results by default.
+// abs, in both NumPy and C++, returns a float result when given a complex input.
 // This makes sense mathematically since the absolute value of a complex
 // number has no imaginary part.
 Tensor& abs_out(Tensor& result, const Tensor& self) {
   // Mimics abs returning a floating point tensor for complex inputs by default
-  // Note: This is done by running the operation as usual, then checking
-  // for a valid cast from float, not complex, and copying the operation's
-  // result to the expected result type.
+  // Note: This is done by running the operation as usual and then copying the
+  // operation's result to the expected result type.
   if (self.is_complex() && !result.is_complex()) {
-    // Runs the function complex->complex, as TensorIterator expects
-    Tensor complex_result = at::empty({0}, self.options());
-    auto iter = TensorIterator::unary_op(complex_result, self,
-      /*check_mem_overlap=*/false);
-    abs_stub(iter.device_type(), iter);
-
     // Checks if the corresponding float type can be cast to the desired dtype
     const auto float_type = c10::toValueType(c10::typeMetaToScalarType(self.dtype()));
     TORCH_CHECK(canCast(float_type, c10::typeMetaToScalarType(result.dtype())),
           "result type ", float_type, " can't be cast to the desired output type ",
           result.dtype());
 
-    // Copies the complex result to the actual result, resizing if needed
-    if (!result.sizes().equals(complex_result.sizes())) {
-      result.resize_(complex_result.sizes());
-    }
-    result.copy_(complex_result);
+    // Runs the function complex->complex, as TensorIterator expects
+    Tensor complex_result = at::empty({0}, self.options());
+    auto iter = TensorIterator::unary_op(complex_result, self,
+      /*check_mem_overlap=*/false);
+    abs_stub(iter.device_type(), iter);
 
+    // Copies the complex result to the actual result and returns it
+    result.resize_(complex_result.sizes());
+    result.copy_(complex_result);
     return result;
   }
 
