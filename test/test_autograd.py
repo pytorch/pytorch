@@ -3720,8 +3720,8 @@ for shape in [(1,), ()]:
 
                         return tmp.sum()
 
-                    a = torch.ones(2, requires_grad=True)
-                    b = torch.ones(2, requires_grad=True)
+                    a = torch.ones(2, dtype=torch.complex64, requires_grad=True)
+                    b = torch.ones(2, dtype=torch.complex64, requires_grad=True)
 
 
                     if fn_id == "two_output" and inplace and output_is_a_view:
