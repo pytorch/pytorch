@@ -2,7 +2,7 @@
 
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/native/xnnpack/Factory.h>
-#include <c10/core/MobileAllocator.h>
+#include <c10/core/CPUAllocator.h>
 
 namespace at {
 namespace native {
@@ -34,15 +34,14 @@ Tensor empty_with_tail_padding(
 }
 
 bool can_avoid_reallocation(
-    const Tensor &input,
+    const Tensor& input,
     const c10::MemoryFormat memory_format) {
   const auto* const allocator = input.storage().allocator();
   const auto* const mobile_allocator = c10::GetDefaultMobileCPUAllocator();
 
   // If the allocators are the same and the memory is contiguous in the requested
   // format, then there is no need to reallocate the tensor.
-  return (allocator == mobile_allocator) &&
-         input.is_contiguous(memory_format);
+  return (allocator == mobile_allocator) && input.is_contiguous(memory_format);
 }
 
 Tensor allocate_padded_contiguous_if_needed(

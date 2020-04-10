@@ -5,9 +5,9 @@
 #include <ATen/Dispatch.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/native/TensorIterator.h>
-#include <ATen/native/xnnpack/Engine.h>
 #include <ATen/Parallel.h>
 #include <ATen/core/DistributionsHelper.h>
+#include <ATen/native/xnnpack/Engine.h>
 
 namespace at { namespace native {
 
@@ -33,47 +33,14 @@ DEFINE_DISPATCH(leaky_relu_stub);
 DEFINE_DISPATCH(leaky_relu_backward_stub);
 
 Tensor hardtanh(const Tensor& self, Scalar min, Scalar max) {
-// #if defined(C10_MOBILE)
-  if (min.isFloatingPoint() && max.isFloatingPoint()) {
-    const float min_float = min.to<float>();
-    const float max_float = max.to<float>();
-
-    if (xnnpack::use_clamp(self, min_float, max_float)) {
-      return xnnpack::clamp(self, min_float, max_float);
-    }
-  }
-// #endif
-
   return at::clamp(self, min, max);
 }
 
 Tensor& hardtanh_out(Tensor& result, const Tensor& self, Scalar min, Scalar max) {
-// #if defined(C10_MOBILE)
-  if (min.isFloatingPoint() && max.isFloatingPoint()) {
-    const float min_float = min.to<float>();
-    const float max_float = max.to<float>();
-
-    if (xnnpack::use_clamp_out(result, self, min_float, max_float)) {
-      return xnnpack::clamp_out(result, self, min_float, max_float);
-    }
-  }
-// #endif
-
   return at::clamp_out(result, self, min, max);
 }
 
 Tensor& hardtanh_(Tensor& self, Scalar min, Scalar max) {
-// #if defined(C10_MOBILE)
-  if (min.isFloatingPoint() && max.isFloatingPoint()) {
-    const float min_float = min.to<float>();
-    const float max_float = max.to<float>();
-
-    if (xnnpack::use_clamp_(self, min_float, max_float)) {
-      return xnnpack::clamp_(self, min_float, max_float);
-    }
-  }
-// #endif
-
   return at::clamp_(self, min, max);
 }
 
@@ -199,22 +166,10 @@ Tensor hardswish_backward(const Tensor& grad_output, const Tensor& self) {
 }
 
 Tensor relu(const Tensor & self) {
-// #if defined(C10_MOBILE)
-  if (xnnpack::use_relu(self)) {
-    return xnnpack::relu(self);
-  }
-// #endif
-
   return at::threshold(self, 0, 0);
 }
 
 Tensor & relu_(Tensor & self) {
-// #if defined(C10_MOBILE)
-  if (xnnpack::use_relu_(self)) {
-    return xnnpack::relu_(self);
-  }
-// #endif
-
   return at::threshold_(self, 0, 0);
 }
 
