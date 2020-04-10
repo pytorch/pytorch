@@ -920,6 +920,61 @@ class _TestTorchMixin(object):
         d = torch.autograd.Variable(torch.DoubleTensor(2, 3))
         self.assertRaises(RuntimeError, lambda: torch.zeros((2, 3), out=d, dtype=torch.float32))
 
+    def test_as_subclass(self):
+        class SubTensor(torch.Tensor):
+            member_var = object()
+
+        t0 = torch.tensor(0)
+        t1 = torch.tensor([1, 2])
+        t2 = torch.tensor([[3, 4], [5, 6]])
+
+        s0 = t0.as_subclass(SubTensor)
+        s1 = t1.as_subclass(SubTensor)
+        s2 = t2.as_subclass(SubTensor)
+
+        # Check that the correct type is returned.
+        self.assertTrue(type(s0) is SubTensor)
+        self.assertTrue(type(s1) is SubTensor)
+        self.assertTrue(type(s2) is SubTensor)
+
+        # Check that the data is equal.
+        self.assertEqual(t0, s0)
+        self.assertEqual(t1, s1)
+        self.assertEqual(t2, s2)
+
+        t0[()] = 1
+        t1[1] = 3
+        t2[1, 1] = 7
+
+        # Check that the data is equal even after modification.
+        self.assertEqual(t0, s0)
+        self.assertEqual(t1, s1)
+        self.assertEqual(t2, s2)
+
+        # Check that member variables are passed through.
+        self.assertTrue(s0.member_var is SubTensor.member_var)
+        self.assertTrue(s1.member_var is SubTensor.member_var)
+        self.assertTrue(s2.member_var is SubTensor.member_var)
+
+        # Test that autograd is propagated.
+        t = torch.tensor(5, dtype=torch.float32, requires_grad=True)
+
+        # Run a calculation on the tensor.
+        exp_t = torch.exp(t)
+
+        # Cast exp_t to a subclass.
+        exp_s = exp_t.as_subclass(SubTensor)
+
+        # Make sure that t.grad was initially None
+        self.assertTrue(t.grad is None)
+
+        # Run the autograd calculation.
+        exp_s.backward()
+
+        # Make sure autograd was propagated to the original tensor
+        # declared with requires_grad.
+        self.assertTrue(t.grad is not None)
+
     def test_constructor_dtypes(self):
         default_type = torch.Tensor().type()
         self.assertIs(torch.Tensor().dtype, torch.get_default_dtype())
