@@ -3656,3 +3656,12 @@ Is this Tensor with its dimensions reversed.
 If ``n`` is the number of dimensions in ``x``,
 ``x.T`` is equivalent to ``x.permute(n-1, n-2, ..., 0)``.
 """)
+
+add_docstr_all('as_subclass',
+               r"""
+as_subclass(cls) -> Tensor
+
+Makes a ``cls`` instance with the same data pointer as ``self``. Changes
+in the output mirror changes in ``self``, and the output stays attached
+to the autograd graph. ``cls`` must be a subclass of ``Tensor``.
+""")
