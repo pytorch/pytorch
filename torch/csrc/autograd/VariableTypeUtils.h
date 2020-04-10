@@ -106,27 +106,29 @@ template<typename... Args> inline variable_list flatten_tensor_args(Args&&... ar
 
 // See NOTE [ Autograd View Variables ] for details.
 inline Tensor as_view(const Tensor & base, Tensor tensor, bool is_differentiable,
-        std::function<Tensor(const Tensor&)> func={},
+        c10::optional<std::function<Tensor(const Tensor&)>> func=c10::nullopt,
         CreationMeta creation_meta=CreationMeta::DEFAULT) {
   auto base_var = Variable(base);
   if (base_var.is_view()) {
+    // Set `func` using the root base as input.
     // `func` is used to recover views in backward when as_strided is not supported.
     // See Note [View + Inplace update on base tensor] and [View + Inplace update on view tensor]
     // for more details how we use this function in backward.
-    if (func) {
+    if (func.has_value()) {
+      auto fn = func.value();
       auto diff_view_meta = static_cast<DifferentiableViewMeta*>(torch::autograd::impl::get_autograd_meta(base_var));
-      auto prev_fn = diff_view_meta->view_fn_;
-      if (prev_fn) {
-        func = [=](const at::Tensor& new_base) {
-          auto temp = prev_fn(new_base);
-          return func(temp);
+      if (!diff_view_meta->support_as_strided()) {
+        auto prev_fn = diff_view_meta->view_fn();
+        func = [=](const at::Tensor& root_base) {
+          auto temp = prev_fn(root_base);
+          return fn(temp);
         };
       }
     }
     base_var = base_var._base();
   }
   if (is_differentiable) {
-    return make_variable_differentiable_view(std::move(base_var), std::move(tensor), std::move(func), creation_meta);
+    return make_variable_differentiable_view(std::move(base_var), std::move(tensor), creation_meta, std::move(func));
   } else {
     TORCH_CHECK(creation_meta == CreationMeta::DEFAULT,
                 "Non-differentiable views must have creation_meta=CreationMeta::DEFAULT");
@@ -143,7 +145,7 @@ inline std::vector<Tensor> as_view(const Tensor & base, std::vector<Tensor> tens
   }
   for(Tensor &tensor : tensors) {
     if (is_differentiable) {
-      tensor = make_variable_differentiable_view(base_var, std::move(tensor), {}, creation_meta);
+      tensor = make_variable_differentiable_view(base_var, std::move(tensor), creation_meta);
     } else {
       TORCH_CHECK(creation_meta == CreationMeta::DEFAULT,
                   "Non-differentiable views must have creation_meta=CreationMeta::DEFAULT");

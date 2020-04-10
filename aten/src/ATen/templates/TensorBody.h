@@ -319,11 +319,6 @@ class CAFFE2_API Tensor {
   /// Returns if a `Tensor` has quantized backend.
   bool is_quantized() const;
 
-  /// Returns true if a `Tensor` supports as_strided.
-  bool support_as_strided() const {
-    return impl_->support_as_strided();
-  }
-
   /// If a tensor is a quantized tensor, returns its quantizer
   /// TODO: it's not in native_functions.yaml yet as it's not exposed to python
   QuantizerPtr quantizer() const;

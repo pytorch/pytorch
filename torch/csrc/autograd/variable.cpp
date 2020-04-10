@@ -26,7 +26,7 @@ namespace autograd {
 
 
 DifferentiableViewMeta::DifferentiableViewMeta(at::TensorImpl* self_impl, Variable base,
-  std::function<at::Tensor(const at::Tensor&)> view_fn,
+  c10::optional<std::function<at::Tensor(const at::Tensor&)>> view_fn,
   CreationMeta creation_meta)
     : AutogradMeta(self_impl), creation_meta(creation_meta) {
   base_ = std::move(base);
@@ -343,7 +343,7 @@ const std::shared_ptr<torch::autograd::Node>& VariableHooks::grad_fn(const Tenso
       handle_view_on_rebase(diff_view_meta, /* indirect */ true);
       TORCH_INTERNAL_ASSERT(diff_view_meta->output_nr_ == 0);
       // Note [View + Inplace update for view tensor]
-      // An inplace update happened on self Tensor (which is a view).
+      // An inplace update happened on Tensor `self` (which is a view).
       // For example:
       //   view_1 = view_op_1(diff_view_meta->base_)
       //   view_2 = view_op_2(view_1)
@@ -367,11 +367,11 @@ const std::shared_ptr<torch::autograd::Node>& VariableHooks::grad_fn(const Tenso
       //
       // TODO: Potentially the following logic can be moved to VariableType_x.cpp through codegen
       //       so that we directly save a view_grad_fn in DifferentiableViewMeta.
-      if (diff_view_meta->view_fn_) {
-        auto diff_view = diff_view_meta->view_fn_(diff_view_meta->base_);
-        auto fn = diff_view.grad_fn();
-        diff_view_meta->grad_fn_ = std::move(fn);
-	  } else {
+      if (!diff_view_meta->support_as_strided()) {
+        auto view_fn = diff_view_meta->view_fn();
+        auto diff_view = view_fn(diff_view_meta->base_);
+        diff_view_meta->grad_fn_ = diff_view.grad_fn();
+      } else {
         auto fn = std::make_shared<torch::autograd::generated::AsStridedBackward>();
         fn->self_geometry = at::TensorGeometry(diff_view_meta->base_);
         fn->size = self.sizes().vec();

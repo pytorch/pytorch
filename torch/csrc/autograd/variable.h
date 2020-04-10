@@ -388,7 +388,10 @@ struct TORCH_API DifferentiableViewMeta : public AutogradMeta {
   /// version_counter.current_version().
   uint32_t attr_version;
 
-  std::function<at::Tensor(const at::Tensor&)> view_fn_;
+  /// By default we use as_strided to recover views which is more efficient.
+  /// view_fn is only saved when as_strided is not supported.
+  /// If view_fn has value, we use it to recover views in backward.
+  c10::optional<std::function<at::Tensor(const at::Tensor&)>> view_fn_;
 
   CreationMeta creation_meta;
 
@@ -396,7 +399,15 @@ struct TORCH_API DifferentiableViewMeta : public AutogradMeta {
     return requires_grad_ || grad_fn_ || (is_view_ && base_.requires_grad());
   }
 
-  DifferentiableViewMeta(at::TensorImpl* self_impl, Variable base, std::function<at::Tensor(const at::Tensor&)> view_fn,
+  bool support_as_strided() const {
+    return !view_fn_.has_value();
+  }
+
+  std::function<at::Tensor(const at::Tensor&)> view_fn() const {
+    return view_fn_.value();
+  }
+
+  DifferentiableViewMeta(at::TensorImpl* self_impl, Variable base, c10::optional<std::function<at::Tensor(const at::Tensor&)>> view_fn,
                          CreationMeta creation_meta=CreationMeta::DEFAULT);
   ~DifferentiableViewMeta();
 };
@@ -426,8 +437,8 @@ struct TORCH_API DifferentiableViewMeta : public AutogradMeta {
 inline Variable make_variable_differentiable_view(
     Variable base,
     at::Tensor data,
-    std::function<at::Tensor(const at::Tensor&)> view_func,
-    CreationMeta creation_meta) {
+    CreationMeta creation_meta,
+    c10::optional<std::function<at::Tensor(const at::Tensor&)>> view_func = c10::nullopt) {
   if (data.defined()) {
     auto data_impl_copy = data.getIntrusivePtr()->shallow_copy_and_detach(
       /*version_counter=*/0,

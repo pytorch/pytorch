@@ -21,12 +21,17 @@ struct TORCH_API CopyBackwards : public Node {
 };
 
 // Note [View + Inplace update for base tensor]
-// Performs grad_view = fn(grad_view), but out-of-place. The view tensor
-// grad_view is done by grad_view = view_fn_(grad_base). view_fn_ is a
-// lambda function saved in DifferentiableViewMeta in forward pass,
-// where view = view_fn_(base).
-// This view_fn_ is represented using `as_strided` in CPU/CUDA backends for
-// effieciency.
+// Performs grad_view = fn(grad_view), but out-of-place.
+// view_fn_ is an optional lambda function saved in DifferentiableViewMeta
+// from forward pass, so that we can recover we when as_strided is not supported.
+// It preserves the invariants:
+//   view = view_fn_(base)
+//   grad_view = view_fn_(grad_base)
+//
+// When as_strided is supported (e.g. strided CPU/CUDA Tensors), view_fn_
+// is empty and we save TensorGeometry(view) instead.
+// With the TensorGeometry information we can use `as_strided` call which
+// is more efficient to recover views in backward.
 //
 // For example:
 //   view_1 = view_op_1(base)
@@ -38,10 +43,7 @@ struct TORCH_API CopyBackwards : public Node {
 // In CPU/CUDA case where we support efficient as_strided implementation,
 // grad_view_n can be calculated through 1 step.
 //
-//   view_fn_ = [=](const at::Tensor& new_base) {
-//       return new_base.as_strided(view_sizes, view_strides, view_offset);
-//   };
-//   grad_view_n = view_fn_(grad_base)
+//   grad_view_n = grad_base.as_strided(view_sizes, view_strides, view_offset);
 //
 // But in XLA backend where we don't have full support of as_strided,
 // it has to save a chained lambda function view_fn_, to exactly
@@ -55,15 +57,16 @@ struct TORCH_API CopyBackwards : public Node {
 // efficient than the as_strided one so we should be careful to only use it when
 // necessary.
 //
-// What do we save in view_fn_/CopySlices Node?
+// What do we use in CopySlices backward?
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-// All arguments in view_fn_ are copyied by **value**.
-//   - For CPU/CUDA we save arguments needed by as_strided,
+//   - For CPU/CUDA we save TensorGeometry of both base and view tensors,
+//     That's all we need to pass into as_strided.
 //     E.g. int[] sizes, int[] strides, and int storage_offset.
-//   - For XLA we save arguments passed into forward view op.
+//   - For XLA we use view_fn_, which captures all forward view op arguments
+//     by **value**.
 //     E.g for at::narrow, int dim, int start, in length are saved.
 //
-// Theorectically we could also save Tensor view in CopySlices Node, but
+// Theorectically we could also save Tensor `view` in CopySlices Node, but
 // it's far more expensive than what we currently save.
 //   1. We cannot afford keeping large tensors alive to recover views only.
 //   2. There are inplace checks when Tensors are loaded back to make sure
@@ -83,7 +86,7 @@ struct TORCH_API CopySlices : public Node {
   CopySlices(
       const Variable& base_var,
       at::TensorGeometry view_,
-      std::function<at::Tensor(const at::Tensor&)> view_fn_,
+      c10::optional<std::function<at::Tensor(const at::Tensor&)>> view_fn_,
       std::shared_ptr<Node> fn_);
 
   variable_list apply(variable_list&& inputs) override;
@@ -91,7 +94,7 @@ struct TORCH_API CopySlices : public Node {
 
   at::TensorGeometry base;
   at::TensorGeometry view;
-  std::function<at::Tensor(const at::Tensor&)> view_fn;
+  c10::optional<std::function<at::Tensor(const at::Tensor&)>> view_fn;
   std::shared_ptr<Node> fn;
 };
 

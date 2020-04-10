@@ -227,7 +227,7 @@ ${var}.${api_name}(${unpacked_method_args})""")
 # If the non-variable operation has return values, we use the `tmp` variable to hold the
 # values temporarily and pass the values to the return variables outside of the
 # `at::AutoNonVariableTypeMode` guard block.
-DISPATCH_TO_NON_VAR_TYPE_WITH_RETURN_VALUES = CodeTemplate("""\
+DISPATCH_TO_NON_VAR_TYPE_WITH_TMP_RETURN_VALUES = CodeTemplate("""\
 auto tmp = ([&]() {
   at::AutoNonVariableTypeMode non_var_type_mode(true);
   return ${base_type_call};
@@ -242,9 +242,13 @@ ARRAYREF_TO_VEC = CodeTemplate("""\
 auto ${vec} = ${arg}.vec();
 """)
 
+OPTIONAL_TO_VAL = CodeTemplate("""\
+auto ${val} = ${arg}.value_or(${default});
+""")
+
 SETUP_REPLAY_VIEW_IF_NOT_SUPPORT_AS_STRIDED = CodeTemplate("""\
-std::function<at::Tensor(const at::Tensor&)> func;
-if (!self.support_as_strided()) {
+c10::optional<std::function<at::Tensor(const at::Tensor&)>> func=c10::nullopt;
+if (!self.unsafeGetTensorImpl()->support_as_strided()) {
   ${replay_view_func}
 }
 """)
@@ -787,30 +791,53 @@ def emit_body(declaration):
         names = [ret['type'] + ' ' + ret['name'] + ';' for ret in declaration['returns']]
         return '\n'.join(names)
 
+    def emit_dispatch_call(combined, input_base, unpacked_args):
+        """ Dispatch call via function in a namespace or method on Tensor."""
+        if 'namespace' in declaration['method_of']:
+            call = CALL_DISPATCH_VIA_NAMESPACE.substitute(
+                combined,
+                unpacked_args=unpacked_args)
+        else:
+            call = CALL_DISPATCH_VIA_METHOD.substitute(
+                combined,
+                var=input_base,
+                unpacked_method_args=unpacked_args[1:])
+        return call
+
     def emit_view_lambda():
+        """ Generate an additional lambda function to recover views in backward when as_strided is not supported.
+        See Note [View + Inplace update for base tensor] and [View + Inplace update for view tensor] for more details."""
         input_base = 'input_base'
         replay_view_func = ''
         updated_unpacked_args = []
         combined = nested_dict(env, declaration)
+        known_view_arg_simple_types = ['int64_t', 'int64_t?', 'bool', 'IntArrayRef']
         for arg in combined['unpacked_args']:
             if arg == 'self_':
                 updated_unpacked_args.append(input_base)
-            elif combined['unpacked_args_simple_type'][arg] == 'IntArrayRef':
+                continue
+            arg_type = combined['unpacked_args_simple_type'][arg]
+            if arg_type not in known_view_arg_simple_types:
+                raise TypeError('You are adding an {} {} argument to op {} in addition to known types: {}. '
+                                'Please update the list or materialize it so that it can be closed over by value, '
+                                'also add a test in pytorch/xla/test/test_operations.py where this code is exercised.'
+                                .format(arg_type, arg, declaration['name'], ', '.join(known_view_arg_simple_types)))
+
+            if arg_type == 'IntArrayRef':
+                # It's not safe to close over IntArrayRef by value, since this is a
+                # reference type, so materialize a vector to close over by value
                 arg_vec = arg + '_vec'
                 replay_view_func += ARRAYREF_TO_VEC.substitute(arg=arg, vec=arg_vec)
                 updated_unpacked_args.append(arg_vec)
+            elif arg_type == 'int64_t?':
+                # Materialize int64_t? to int64_t
+                arg_value = arg + '_val'
+                replay_view_func += OPTIONAL_TO_VAL.substitute(arg=arg, val=arg_value, default='0')
+                updated_unpacked_args.append(arg_value)
             else:
                 updated_unpacked_args.append(arg)
-        if 'namespace' in declaration['method_of']:
-            replay_view_call = CALL_DISPATCH_VIA_NAMESPACE.substitute(
-                combined,
-                unpacked_args=updated_unpacked_args)
-        else:
-            replay_view_call = CALL_DISPATCH_VIA_METHOD.substitute(
-                combined,
-                var=input_base,
-                unpacked_method_args=updated_unpacked_args[1:])
 
+        replay_view_call = emit_dispatch_call(combined, input_base, updated_unpacked_args)
         replay_view_func += REPLAY_VIEW_LAMBDA_FUNC.substitute(
             input_base=input_base,
             replay_view_call=replay_view_call)
@@ -846,9 +873,6 @@ def emit_body(declaration):
                     rhs_value = ("as_view(/* base */ {}, /* output */ {}, /* is_differentiable */ true, "
                                  "/* creation_meta */ {})").format(view_info, var, creation_meta)
                 else:
-                    # Generate an additional lambda function to recover views in backward when as_strided is not supported.
-                    # See Note [View + Inplace update for base tensor] and [View + Inplace update for view tensor]
-                    # for more details about how we use this function.
                     call += emit_view_lambda()
                     creation_meta = "GradMode::is_enabled() ? CreationMeta::DEFAULT: CreationMeta::NO_GRAD_MODE"
                     rhs_value = ("as_view(/* base */ {}, /* output */ {}, /* is_differentiable */ true, "
@@ -894,14 +918,9 @@ def emit_body(declaration):
             # the baseType operations still dispatch to non-Variable type, even if the arguments passed
             # in are now Variables.
             # See NOTE [ Treating Variables as non-Variables in type dispatch ] for details.
-            if 'namespace' in declaration['method_of']:
-                base_type_call = CALL_DISPATCH_VIA_NAMESPACE.substitute(combined)
-            else:
-                unpacked_method_args = combined['unpacked_args'][1:]
-                base_type_call = CALL_DISPATCH_VIA_METHOD.substitute(
-                    combined, var='self_', unpacked_method_args=unpacked_method_args)
+            base_type_call = emit_dispatch_call(combined, 'self_', combined['unpacked_args'])
             if not modifies_arguments and not returns_void:
-                call = DISPATCH_TO_NON_VAR_TYPE_WITH_RETURN_VALUES.substitute(
+                call = DISPATCH_TO_NON_VAR_TYPE_WITH_TMP_RETURN_VALUES.substitute(
                     base_type_call=base_type_call)
 
                 call += wrap_output(tie_return_values(), 'tmp')
