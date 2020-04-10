@@ -4,8 +4,8 @@ import torch
 import itertools
 import unittest
 
-from torch.testing._internal.common_utils import TestCase, run_tests, load_tests, \
-    TEST_NUMPY, numpy_to_torch_dtype_dict
+from torch.testing._internal.common_utils import (TestCase, run_tests, load_tests,
+                                                  TEST_NUMPY, numpy_to_torch_dtype_dict)
 from torch.testing._internal.common_device_type import (instantiate_device_type_tests, onlyOnCPUAndCUDA,
                                                         dtypes, onlyCPU)
 
@@ -694,7 +694,8 @@ class TestTypePromotion(TestCase):
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     @float_double_default_dtype
     @onlyCPU
-    def test_numpy_array_promotion(self, device):
+    def test_numpy_array_binary_ufunc_promotion(self, device):
+        import operator
         np_types = numpy_to_torch_dtype_dict.keys()
         torch_types = numpy_to_torch_dtype_dict.values()
 
@@ -703,49 +704,81 @@ class TestTypePromotion(TestCase):
             t1 = torch.tensor((1,), device=device, dtype=numpy_to_torch_dtype_dict[np_type])
             a = np.array((1,), dtype=np_type)
 
-            try:
-                actual = t0 + a
-            except Exception as e:
-                actual = e
+            for np_first in (True, False):
+                for op in (operator.add, torch.add):
 
-            try:
-                expected = t0 + t1
-            except Exception as e:
-                expected = e
+                    # Acquires results of binary ufunc type promotion.
+                    try:
+                        actual = op(a, t0) if np_first else op(t0, a)
+                    except Exception as e:
+                        actual = e
 
-            expected_failure = False
+                    try:
+                        expected = op(t1, t0) if np_first else op(t0, t1)
+                    except Exception as e:
+                        expected = e
 
-            # float16 x bool, uint, int, and float16 interactions are broken
-            float16_failures = (torch.bool, torch.uint8,
-                                torch.int8, torch.int16, torch.int32, torch.int64,
-                                torch.float16)
-            if torch_type is torch.float16 and \
-               numpy_to_torch_dtype_dict[np_type] in float16_failures:
-                expected_failure = True
+                    same_result = (type(expected) == type(actual)) and expected == actual
 
-            if torch_type in float16_failures and np_type is np.float16:
-                expected_failure = True
+                    # Note An "undesired failure," as opposed to an "expected failure"
+                    # is both expected (we know the test will fail) and
+                    # undesirable (if PyTorch was working properly the test would
+                    # not fail). This test is affected by three issues (see below)
+                    # that will cause undesired failures. It detects when these
+                    # issues will occur and updates this bool accordingly.
+                    undesired_failure = False
 
-            # bool x complex interactions are broken
-            if torch_type in (torch.complex64, torch.complex128) and np_type is np.bool:
-                expected_failure = True
+                    # A NumPy array as the first argument to the plus operator
+                    # or as any argument to torch.add is not working as
+                    # intended.
+                    # See https://github.com/pytorch/pytorch/issues/36363.
+                    if np_first and op is operator.add:
+                        undesired_failure = True
+                    if op is torch.add:
+                        undesired_failure = True
 
-            if torch_type is torch.bool and np_type in (np.complex64, np.complex128):
-                expected_failure = True
+                    # float16 x bool, uint, int, and float16 interactions are not
+                    # working as intended.
+                    # See https://github.com/pytorch/pytorch/issues/36058.
+                    float16_failures = (torch.bool, torch.uint8,
+                                        torch.int8, torch.int16, torch.int32, torch.int64,
+                                        torch.float16)
+                    if torch_type is torch.float16 and \
+                            numpy_to_torch_dtype_dict[np_type] in float16_failures:
+                        undesired_failure = True
 
-            if expected_failure and type(expected) == type(actual) and expected == actual:
-                msg = ("Failure: {0} == {1}. "
-                       "torch type was {2}. NumPy type was {3}. "
-                       "default type is {4}.").format(actual, expected,
-                                                      torch_type, np_type, torch.get_default_dtype())
-                self.fail(msg)
+                    if torch_type in float16_failures and np_type is np.float16:
+                        undesired_failure = True
 
-            if not expected_failure and (type(expected) != type(actual) or expected != actual):
-                msg = ("Failure: {0} != {1}. "
-                       "torch type was {2}. NumPy type was {3}. "
-                       "default type is {4}.").format(actual, expected,
-                                                      torch_type, np_type, torch.get_default_dtype())
-                self.fail(msg)
+                    # bool x complex interactions are not working as intended.
+                    # See https://github.com/pytorch/pytorch/issues/36057.
+                    if torch_type in (torch.complex64, torch.complex128) and np_type is np.bool:
+                        undesired_failure = True
+
+                    if torch_type is torch.bool and np_type in (np.complex64, np.complex128):
+                        undesired_failure = True
+
+                    # Expects the same result if undesired_failure is false
+                    # and a different result otherwise.
+                    # Note: These cases prettyprint the failing inputs to make
+                    # debugging test failures easier.
+                    if undesired_failure and same_result:
+                        msg = ("Failure: {0} == {1}. "
+                               "torch type was {2}. NumPy type was {3}. np_first is {4} "
+                               "default type is {5}.").format(actual, expected,
+                                                              torch_type, np_type,
+                                                              np_first,
+                                                              torch.get_default_dtype())
+                        self.fail(msg)
+
+                    if not undesired_failure and not same_result:
+                        msg = ("Failure: {0} != {1}. "
+                               "torch type was {2}. NumPy type was {3}. np_first is {4} "
+                               "default type is {5}.").format(actual, expected,
+                                                              torch_type, np_type,
+                                                              np_first,
+                                                              torch.get_default_dtype())
+                        self.fail(msg)
 
 
 instantiate_device_type_tests(TestTypePromotion, globals())
