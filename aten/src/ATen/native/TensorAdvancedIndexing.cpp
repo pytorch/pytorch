@@ -77,6 +77,7 @@ DEFINE_DISPATCH(scatter_stub);
 DEFINE_DISPATCH(scatter_fill_stub);
 DEFINE_DISPATCH(scatter_add_stub);
 DEFINE_DISPATCH(scatter_reduce_stub);
+DEFINE_DISPATCH(scatter_scalar_reduce_stub);
 
 static bool all_strides_match(TensorList tensors) {
   TORCH_CHECK(tensors.size() >= 1);
@@ -518,26 +519,35 @@ Tensor & scatter_fill_cpu_(Tensor & self, int64_t dim, const Tensor & index, Sca
   return self;
 }
 
+    REDUCE_OPERATOR get_reduce_operator(const std::string& reduce) {
+      if (reduce == "sum") {
+        return REDUCE_OPERATOR::SUM;
+      }
+      else if (reduce == "subtract") {
+        return REDUCE_OPERATOR::SUBTRACT;
+      }
+      else if (reduce == "multiply") {
+        return REDUCE_OPERATOR::MULTIPLY;
+      }
+      else if (reduce == "divide") {
+        return REDUCE_OPERATOR::DIVIDE;
+      }
+      else {
+        TORCH_CHECK(false,
+                    "reduce argument must be either of add, subtract, multiply or divide.");
+      }
+    }
+
+Tensor& scatter_cpu_scalar_reduce_(Tensor& self, const int64_t dim, const Tensor& index,
+                                   const Scalar value, const std::string reduce) {
+  REDUCE_OPERATOR op = get_reduce_operator(reduce);
+  scatter_scalar_reduce_stub(self.device().type(), self, dim, index, value, op);
+  return self;
+}
+
 Tensor & scatter_cpu_reduce_(Tensor & self, const int64_t dim, const Tensor & index,
                       const Tensor & src, const std::string reduce) {
-  REDUCE_OPERATOR op;
-  if (reduce == "sum") {
-    op = REDUCE_OPERATOR::SUM;
-  }
-  else if (reduce == "subtract") {
-    op = REDUCE_OPERATOR::SUBTRACT;
-  }
-  else if (reduce == "multiply") {
-    op = REDUCE_OPERATOR::MULTIPLY;
-  }
-  else if (reduce == "divide") {
-    op = REDUCE_OPERATOR::DIVIDE;
-  }
-  else {
-    TORCH_CHECK(false,
-                "reduce argument must be either of add, subtract, multiply or divide.");
-  }
-
+  REDUCE_OPERATOR op = get_reduce_operator(reduce);
   scatter_reduce_stub(self.device().type(), self, dim, index, src, op);
   return self;
 }

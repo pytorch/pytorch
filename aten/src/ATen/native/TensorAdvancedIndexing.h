@@ -25,6 +25,8 @@ using scatter_add_fn = void(*)(Tensor& self, int64_t dim, const Tensor& index, c
 using scatter_reduce_fn = void(*)(Tensor& self, const int64_t dim, const Tensor& index,
                                   const Tensor& src,
                                   const REDUCE_OPERATOR& reduce);
+using scatter_scalar_reduce_fn = void(*)(Tensor& self, const int64_t dim, const Tensor& index,
+                                         const Scalar& value, const REDUCE_OPERATOR& reduce);
     
 DECLARE_DISPATCH(index_fn, index_stub);
 DECLARE_DISPATCH(index_put_fn, index_put_stub);
@@ -36,5 +38,6 @@ DECLARE_DISPATCH(scatter_fn, scatter_stub);
 DECLARE_DISPATCH(scatter_fill_fn, scatter_fill_stub);
 DECLARE_DISPATCH(scatter_add_fn, scatter_add_stub);
 DECLARE_DISPATCH(scatter_reduce_fn, scatter_reduce_stub);
+DECLARE_DISPATCH(scatter_scalar_reduce_fn, scatter_scalar_reduce_stub);
 
 }} // namespace at::native
