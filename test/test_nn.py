@@ -10943,58 +10943,58 @@ class TestNNDeviceType(NNTestCase):
             self.assertEqual(wg_native, wg_python)
 
     def test_fold_double_backwards(self, device):
-            class Col2Im(torch.autograd.Function):
-                @staticmethod
-                def forward(ctx, x, shape, kernel_size, padding):
-                    ctx.kernel_size, ctx.padding = (kernel_size, padding)
-                    out = F.fold(x, shape, kernel_size=kernel_size, padding=padding)
-                    return out
+        class Col2Im(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x, shape, kernel_size, padding):
+                ctx.kernel_size, ctx.padding = (kernel_size, padding)
+                out = F.fold(x, shape, kernel_size=kernel_size, padding=padding)
+                return out
 
-                @staticmethod
-                def backward(ctx, grad_output):
-                    out = F.unfold(grad_output, kernel_size=ctx.kernel_size, padding=ctx.padding)
-                    return (out, None, None, None)
+            @staticmethod
+            def backward(ctx, grad_output):
+                out = F.unfold(grad_output, kernel_size=ctx.kernel_size, padding=ctx.padding)
+                return (out, None, None, None)
 
-            def col2im(x, shape, kernel_size=3, padding=0):
-                return Col2Im.apply(x, shape, kernel_size, padding)
+        def col2im(x, shape, kernel_size=3, padding=0):
+            return Col2Im.apply(x, shape, kernel_size, padding)
 
 
-            seeds = (44, 83, 71, 25, 999)
-            for sd in seeds:
-                torch.manual_seed(sd)
-                # kernel size   
-                ks = 2
-                out_sz = (4, 5)
-                fold = nn.Fold(output_size=out_sz, kernel_size=(ks, ks)).to(device)
-                linear = nn.Linear(60, 60, bias=False).to(device)
-                # fix the weight to be unit matrix 
-                linear.weight = torch.nn.Parameter(torch.eye(60).to(device))
-                linear.zero_grad()
+        seeds = (44, 83, 71, 25, 999)
+        for sd in seeds:
+            torch.manual_seed(sd)
+            # kernel size   
+            ks = 2
+            out_sz = (4, 5)
+            fold = nn.Fold(output_size=out_sz, kernel_size=(ks, ks)).to(device)
+            linear = nn.Linear(60, 60, bias=False).to(device)
+            # fix the weight to be unit matrix 
+            linear.weight = torch.nn.Parameter(torch.eye(60).to(device))
+            linear.zero_grad()
 
-                x = torch.randn(1, 12, 12, requires_grad=True).to(device)
-                # use the python implmentation of fold with double backwards
-                # perturb the gradgrad of fold with relu
-                latent = F.relu(col2im(x, shape=out_sz, kernel_size=ks))
-                y = linear(latent.view(1, -1))
-                grad_outputs = torch.randn(y.size()).to(device)
-                grads = torch.autograd.grad(outputs=y, inputs=x, grad_outputs=grad_outputs, create_graph=True, retain_graph=True)[0]
-                grads1 = grads.sum() + 1
-                grads1.backward()
-                wg_native = linear.weight.grad.clone()
-                linear.zero_grad()
+            x = torch.randn(1, 12, 12, requires_grad=True).to(device)
+            # use the python implmentation of fold with double backwards
+            # perturb the gradgrad of fold with relu
+            latent = F.relu(col2im(x, shape=out_sz, kernel_size=ks))
+            y = linear(latent.view(1, -1))
+            grad_outputs = torch.randn(y.size()).to(device)
+            grads = torch.autograd.grad(outputs=y, inputs=x, grad_outputs=grad_outputs, create_graph=True, retain_graph=True)[0]
+            grads1 = grads.sum() + 1
+            grads1.backward()
+            wg_native = linear.weight.grad.clone()
+            linear.zero_grad()
 
-                # use the native implmentation of fold with double backwards
-                # perturb the gradgrad of fold with relu
-                lat = F.relu(fold(x))
-                y = linear(lat.view(1, -1))
-                grads = torch.autograd.grad(outputs=y, inputs=x, grad_outputs=grad_outputs, create_graph=True, retain_graph=True)[0]
-                grads1 = grads.sum() + 1
-                grads1.backward()
-                wg_python = linear.weight.grad.clone()
-                linear.zero_grad()
-                # implicitly comparing the gradgrad of fold 
-                # by comparing weights grad of linear op
-                self.assertEqual(wg_native, wg_python)
+            # use the native implmentation of fold with double backwards
+            # perturb the gradgrad of fold with relu
+            lat = F.relu(fold(x))
+            y = linear(lat.view(1, -1))
+            grads = torch.autograd.grad(outputs=y, inputs=x, grad_outputs=grad_outputs, create_graph=True, retain_graph=True)[0]
+            grads1 = grads.sum() + 1
+            grads1.backward()
+            wg_python = linear.weight.grad.clone()
+            linear.zero_grad()
+            # implicitly comparing the gradgrad of fold 
+            # by comparing weights grad of linear op
+            self.assertEqual(wg_native, wg_python)
 
 instantiate_device_type_tests(TestNNDeviceType, globals())
 
