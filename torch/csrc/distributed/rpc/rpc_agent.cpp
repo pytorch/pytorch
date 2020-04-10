@@ -23,7 +23,9 @@ RpcAgent::RpcAgent(
       rpcAgentRunning_(false) {}
 
 RpcAgent::~RpcAgent() {
-  cleanup();
+  if (rpcAgentRunning_.load()) {
+    shutdown();
+  }
 }
 
 void RpcAgent::start() {
@@ -32,14 +34,15 @@ void RpcAgent::start() {
   startImpl();
 }
 
-void RpcAgent::cleanup() {
+void RpcAgent::shutdown() {
+  std::unique_lock<std::mutex> lock(rpcRetryMutex_);
   rpcAgentRunning_.store(false);
-  // We must notify the condition variable so it stops waiting in the
-  // retry thread, otherwise this thread cannot be joined.
+  lock.unlock();
   rpcRetryMapCV_.notify_one();
   if (rpcRetryThread_.joinable()) {
     rpcRetryThread_.join();
   }
+  shutdownImpl();
 }
 
 std::shared_ptr<FutureMessage> RpcAgent::sendWithRetries(
