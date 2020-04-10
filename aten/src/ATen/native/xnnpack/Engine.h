@@ -38,7 +38,7 @@ bool use_clamp_out(
 
 Tensor& clamp_out(
     Tensor& output,
-    const Tensor & input,
+    const Tensor& input,
     float output_min,
     float output_max);
 

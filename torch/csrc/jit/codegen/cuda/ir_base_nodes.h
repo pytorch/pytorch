@@ -16,8 +16,9 @@
 #include <unordered_map>
 #include <vector>
 
-//  TODO: Add more types (int32, int64)
-//  TODO: add scopes (like the region of a loop) more similarly to Fusion
+// TODO: Add more types (int32, int64)
+// TODO: sameAs should have better logic to check against any type and return
+// gracefully
 
 /*
  * This file defines the base IR structure. Any IR node in this system will
@@ -40,6 +41,7 @@ constexpr StmtNameType UNINITIALIZED_STMTNAMETYPE =
 struct Fusion;
 struct FusionGuard;
 struct Expr;
+struct Val;
 struct UnaryOp;
 struct BinaryOp;
 struct IterDomain;
@@ -87,6 +89,12 @@ struct TORCH_CUDA_API Statement {
     return getExprType() != c10::nullopt;
   }
 
+  // Make sure this is a Val and return it as a Val*
+  Val* asVal();
+
+  // Make sure this is an Expr and return it as an Expr*
+  Expr* asExpr();
+
   // Return the fusion this statement belongs to
   Fusion* fusion() const noexcept {
     return fusion_;
@@ -97,7 +105,16 @@ struct TORCH_CUDA_API Statement {
     return name_;
   }
 
+  virtual bool sameType(const Statement* const other) {
+    if (isVal() && other->isVal())
+      return getValType().value() == other->getValType().value();
+    if (isExpr() && other->isExpr())
+      return getExprType().value() == other->getExprType().value();
+    return false;
+  }
+
   // Return if this statement is the same as another statement
+  // TODO: should this run through dispatch on this and other?
   bool sameAs(const Statement* const other) const {
     return this == other;
   }
@@ -125,7 +142,7 @@ struct TORCH_CUDA_API Statement {
  *     - Must call Val constructor, Val constructor registers with fusion
  *     - Implementation of bool sameAs(...)
  * 2) dispatch.h/.cpp must be updated to include dispatch of the new Val
- * 3) Default mutator function should be added to mutator.h/.cpp
+ * 3) Default mutator function should be added to mutator.cpp
  * 4) Printing functions should be added to ir_iostream.h/.cpp
  * 5) An enum value must be added to ValType in type.h
  * 6) A string entry must be added in val_type_string_map
@@ -151,13 +168,24 @@ struct TORCH_CUDA_API Val : public Statement {
   // Throws if no DataType is found. Vals must have a DataType
   c10::optional<DataType> getDataType() const override;
 
-  bool isScalar() {
-    return vtype_ == ValType::Scalar;
+  bool isScalar() const {
+    return vtype_ == ValType::Scalar || vtype_ == ValType::NamedScalar;
+  }
+
+  bool isConstScalar() const;
+
+  bool isAnInt() const {
+    return isScalar() && dtype_ == DataType::Int;
   }
 
   // Returns the Expr that this value is an output of, returns nullptr if none
   // was found
   Expr* getOrigin();
+
+  virtual bool sameType(const Statement* const other) {
+    return Statement::sameType(other) &&
+        getDataType() == static_cast<const Val* const>(other)->getDataType();
+  }
 
   // TODO: Make this more sophisticated. A value being the same as another value
   // should be evaluated based on the DAG that created it, and that DAGs leaf
@@ -179,6 +207,52 @@ struct TORCH_CUDA_API Val : public Statement {
  protected:
   const ValType vtype_;
   const DataType dtype_;
+};
+
+// TODO: We should use this for the following:
+//    Fusion
+//    IfThenElse
+//    ForLoop
+struct TORCH_CUDA_API Scope {
+ public:
+  const std::vector<Expr*>& exprs() const noexcept {
+    return exprs_;
+  }
+
+  void push_back(Expr* e) {
+    exprs_.push_back(e);
+  }
+
+  void insert(std::vector<Expr*>::iterator it, Expr* expr) {
+    exprs_.insert(it, expr);
+  }
+
+  void erase(std::vector<Expr*>::iterator it) {
+    exprs_.erase(it);
+  }
+
+  bool empty() const {
+    return exprs_.empty();
+  }
+
+  auto size() const {
+    return exprs_.size();
+  }
+
+  // Insert expr before ref
+  void insert_before(Expr* ref, Expr* expr);
+
+  // Insert expr after ref
+  void insert_after(Expr* ref, Expr* expr);
+
+  bool contains(Expr* expr) const;
+
+  void erase(Expr* ref);
+
+  bool sameAs(const Scope& other) const;
+
+ private:
+  std::vector<Expr*> exprs_;
 };
 
 /*
@@ -229,6 +303,10 @@ struct TORCH_CUDA_API IRInputOutput {
     outputs_.push_back(output);
   }
 
+  void replaceInput(Val* replace, Val* with);
+  void replaceOutput(Val* replace, Val* with);
+
+  void removeInput(Val* val);
   void removeOutput(Val* val);
 
   std::deque<Val*>::size_type nInputs() const noexcept {
@@ -275,9 +353,9 @@ struct TORCH_CUDA_API IRInputOutput {
  * 2) dispatch.h/.cpp must be updated to include dispatch of the new Val
  * 3) Default mutator function should be added to mutator.h/.cpp
  * 4) Printing functions should be added to ir_iostream.h/.cpp
- * 5) Lower case convenience functions should be added to arith.h/.cpp
- * 6) An enum value must be added to ExprType in type.h
- * 7) A string entry must be added in expr_type_string_map
+ * 5) Lower case convenience functions should be added to arith.h/.cpp (If user
+ * facing) 6) An enum value must be added to ExprType in type.h 7) A string
+ * entry must be added in expr_type_string_map
  */
 struct TORCH_CUDA_API Expr : public Statement, IRInputOutput {
  public:

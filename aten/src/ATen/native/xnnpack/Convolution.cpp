@@ -121,6 +121,9 @@ ContextConv2D create(
   const auto stride_expanded = expand_param_if_needed(stride, "stride", 2);
   const auto dilation_expanded = expand_param_if_needed(dilation, "dilation", 2);
   const Tensor weight_nhwc = weight.contiguous(MemoryFormat::ChannelsLast);
+  const float* const bias_contig_ptr = (bias && bias->defined())
+      ? bias->contiguous().data_ptr<float>()
+      : nullptr;
 
   TORCH_CHECK(
       available(
@@ -155,7 +158,7 @@ ContextConv2D create(
       weight_nhwc.size(Layout::Filter::input) * groups,               // input_pixel_stride
       weight_nhwc.size(Layout::Filter::output),                       // output_pixel_stride
       weight_nhwc.data_ptr<float>(),                                  // kernel
-      (bias && bias->defined()) ? bias->data_ptr<float>() : nullptr,  // bias
+      bias_contig_ptr,                                                // bias
       output_min,                                                     // output_min
       output_max,                                                     // output_max
       0u,                                                             // flags

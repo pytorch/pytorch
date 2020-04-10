@@ -37,7 +37,14 @@ C10_DEFINE_string(
     "semicolon to separate the dimension of different "
     "tensors.");
 C10_DEFINE_string(input_type, "", "Input type (uint8_t/float)");
-C10_DEFINE_string(input_format, "", "Input memory format (NHWC/NCHW)");
+C10_DEFINE_string(
+    input_memory_format,
+    "contiguous_format",
+    "Input memory format (contiguous_format/channels_last)");
+C10_DEFINE_bool(
+  no_inputs,
+  false,
+  "Whether the model has any input. Will ignore other input arugments if true");
 C10_DEFINE_bool(
   print_output,
   false,
@@ -64,20 +71,9 @@ split(char separator, const std::string& string, bool ignore_empty = true) {
   return pieces;
 }
 
-int main(int argc, char** argv) {
-  c10::SetUsageMessage(
-    "Run speed benchmark for pytorch model.\n"
-    "Example usage:\n"
-    "./speed_benchmark_torch"
-    " --model=<model_file>"
-    " --input_dims=\"1,3,224,224\""
-    " --input_type=float"
-    " --input_format=NHWC"
-    " --warmup=5"
-    " --iter=20");
-  if (!c10::ParseCommandLineFlags(&argc, &argv)) {
-    std::cerr << "Failed to parse command line flags!" << std::endl;
-    return 1;
+std::vector<c10::IValue> create_inputs() {
+  if (FLAGS_no_inputs) {
+    return {};
   }
 
   CAFFE_ENFORCE_GE(FLAGS_input_dims.size(), 0, "Input dims must be specified.");
@@ -85,14 +81,16 @@ int main(int argc, char** argv) {
 
   std::vector<std::string> input_dims_list = split(';', FLAGS_input_dims);
   std::vector<std::string> input_type_list = split(';', FLAGS_input_type);
-  std::vector<std::string> input_format_list = split(';', FLAGS_input_format);
+  std::vector<std::string> input_memory_format_list =
+      split(';', FLAGS_input_memory_format);
+
   CAFFE_ENFORCE_EQ(
       input_dims_list.size(),
       input_type_list.size(),
       "Input dims and type should have the same number of items.");
   CAFFE_ENFORCE_EQ(
       input_dims_list.size(),
-      input_format_list.size(),
+      input_memory_format_list.size(),
       "Input dims and format should have the same number of items.");
 
   std::vector<c10::IValue> inputs;
@@ -115,24 +113,49 @@ int main(int argc, char** argv) {
     }
 
     at::MemoryFormat input_memory_format;
-    if (input_format_list[i] == "NHWC") {
+    if (input_memory_format_list[i] == "channels_last") {
+      if (input_dims.size() != 4u) {
+        CAFFE_THROW(
+            "channels_last memory format only available on 4D tensors!");
+      }
       input_memory_format = at::MemoryFormat::ChannelsLast;
-    } else if (input_format_list[i] == "NCHW") {
+    } else if (input_memory_format_list[i] == "contiguous_format") {
       input_memory_format = at::MemoryFormat::Contiguous;
     } else {
-      CAFFE_THROW("Unsupported input format: ", input_format_list[i]);
+      CAFFE_THROW(
+          "Unsupported input memory format: ", input_memory_format_list[i]);
     }
 
-    inputs.push_back(
-        torch::ones(
-            input_dims,
-            at::TensorOptions(input_type).memory_format(input_memory_format)));
+    inputs.push_back(torch::ones(
+        input_dims,
+        at::TensorOptions(input_type).memory_format(input_memory_format)));
   }
 
   if (FLAGS_pytext_len > 0) {
     auto stensor = FLAGS_pytext_len * at::ones({1}, torch::kI64);
     inputs.push_back(stensor);
   }
+
+  return inputs;
+}
+
+int main(int argc, char** argv) {
+  c10::SetUsageMessage(
+      "Run speed benchmark for pytorch model.\n"
+      "Example usage:\n"
+      "./speed_benchmark_torch"
+      " --model=<model_file>"
+      " --input_dims=\"1,3,224,224\""
+      " --input_type=float"
+      " --input_memory_format=channels_last"
+      " --warmup=5"
+      " --iter=20");
+  if (!c10::ParseCommandLineFlags(&argc, &argv)) {
+    std::cerr << "Failed to parse command line flags!" << std::endl;
+    return 1;
+  }
+
+  std::vector<c10::IValue> inputs = create_inputs();
 
   torch::autograd::AutoGradMode guard(false);
   torch::jit::GraphOptimizerEnabledGuard no_optimizer_guard(false);
