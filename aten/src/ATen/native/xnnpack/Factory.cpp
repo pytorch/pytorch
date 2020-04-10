@@ -2,7 +2,7 @@
 
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/native/xnnpack/Factory.h>
-#include <c10/core/MobileAllocator.h>
+#include <c10/core/CPUAllocator.h>
 
 namespace at {
 namespace native {

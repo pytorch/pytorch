@@ -12,6 +12,7 @@ TORCH_CUDA_API Val* newValLike(const Val* const val, DataType dtype) {
   switch (val->getValType().value()) {
     case (ValType::TensorView):
       return static_cast<const TensorView* const>(val)->newForOutput(dtype);
+    case (ValType::NamedScalar):
     case (ValType::Scalar):
       switch (dtype) {
         case (DataType::Float):
@@ -116,6 +117,10 @@ TORCH_CUDA_API Val* lt(Val* v1, Val* v2) {
 
 TORCH_CUDA_API Val* ceilDiv(Val* v1, Val* v2) {
   return binaryOp(BinaryOpType::CeilDiv, v1, v2);
+}
+
+TORCH_CUDA_API Val* andOp(Val* v1, Val* v2) {
+  return binaryOp(BinaryOpType::And, v1, v2);
 }
 
 } // namespace fuser
