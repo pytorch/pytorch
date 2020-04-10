@@ -555,17 +555,17 @@ void testGPU_FusionParser() {
       << "  return (a + b - 1) / b;\n"
       << "}\n"
       << "\n"
-      << "__global__ void CUDAGeneratedKernel(Tensor<float> T4, Tensor<float> T5, Tensor<float> T6){\n"
-      << "  float T7[1];\n"
-      << "  if ( ( ( ( ( ( ( ( blockIdx.x * 128 ) + threadIdx.x ) / T5.size[2] ) / T5.size[1] ) < T5.size[0] ) && ( ( ( ( ( blockIdx.x * 128 ) + threadIdx.x ) / T5.size[2] ) % T5.size[1] ) < T5.size[1] ) ) && ( ( ( ( blockIdx.x * 128 ) + threadIdx.x ) % T5.size[2] ) < T5.size[2] ) ) ) { \n"
-      << "    T7[ 0 ]\n"
-      << "       = T4[ ( ( ( ( ( blockIdx.x * 128 ) + threadIdx.x ) / T4.size[2] ) / T4.size[1] ) * T4.stride[0] ) + ( ( ( ( ( blockIdx.x * 128 ) + threadIdx.x ) / T4.size[2] ) % T4.size[1] ) * T4.stride[1] ) + ( ( ( ( blockIdx.x * 128 ) + threadIdx.x ) % T4.size[2] ) * T4.stride[2] ) ]\n"
-      << "       * T5[ ( ( ( ( ( blockIdx.x * 128 ) + threadIdx.x ) / T5.size[2] ) / T5.size[1] ) * T5.stride[0] ) + ( ( ( ( ( blockIdx.x * 128 ) + threadIdx.x ) / T5.size[2] ) % T5.size[1] ) * T5.stride[1] ) + ( ( ( ( blockIdx.x * 128 ) + threadIdx.x ) % T5.size[2] ) * T5.stride[2] ) ];\n"
+      << "__global__ void CUDAGeneratedKernel(Tensor<float> T0, Tensor<float> T1, Tensor<float> T3){\n"
+      << "  float T2[1];\n"
+      << "  if ( ( ( ( ( ( ( ( blockIdx.x * 128 ) + threadIdx.x ) / T1.size[2] ) / T1.size[1] ) < T1.size[0] ) && ( ( ( ( ( blockIdx.x * 128 ) + threadIdx.x ) / T1.size[2] ) % T1.size[1] ) < T1.size[1] ) ) && ( ( ( ( blockIdx.x * 128 ) + threadIdx.x ) % T1.size[2] ) < T1.size[2] ) ) ) { \n"
+      << "    T2[ 0 ]\n"
+      << "       = T0[ ( ( ( ( ( blockIdx.x * 128 ) + threadIdx.x ) / T3.size[2] ) / T3.size[1] ) * T0.stride[0] ) + ( ( ( ( ( blockIdx.x * 128 ) + threadIdx.x ) / T3.size[2] ) % T3.size[1] ) * T0.stride[1] ) + ( ( ( ( blockIdx.x * 128 ) + threadIdx.x ) % T3.size[2] ) * T0.stride[2] ) ]\n"
+      << "       * T1[ ( ( ( ( ( blockIdx.x * 128 ) + threadIdx.x ) / T1.size[2] ) / T1.size[1] ) * T1.stride[0] ) + ( ( ( ( ( blockIdx.x * 128 ) + threadIdx.x ) / T1.size[2] ) % T1.size[1] ) * T1.stride[1] ) + ( ( ( ( blockIdx.x * 128 ) + threadIdx.x ) % T1.size[2] ) * T1.stride[2] ) ];\n"
       << "  }\n"
-      << "  if ( ( ( ( ( ( ( ( blockIdx.x * 128 ) + threadIdx.x ) / T6.size[2] ) / T6.size[1] ) < T6.size[0] ) && ( ( ( ( ( blockIdx.x * 128 ) + threadIdx.x ) / T6.size[2] ) % T6.size[1] ) < T6.size[1] ) ) && ( ( ( ( blockIdx.x * 128 ) + threadIdx.x ) % T6.size[2] ) < T6.size[2] ) ) ) { \n"
-      << "    T6[ ( ( ( ( ( blockIdx.x * 128 ) + threadIdx.x ) / T6.size[2] ) / T6.size[1] ) * T6.stride[0] ) + ( ( ( ( ( blockIdx.x * 128 ) + threadIdx.x ) / T6.size[2] ) % T6.size[1] ) * T6.stride[1] ) + ( ( ( ( blockIdx.x * 128 ) + threadIdx.x ) % T6.size[2] ) * T6.stride[2] ) ]\n"
-      << "       = T7[ 0 ]\n"
-      << "       * T4[ ( ( ( ( ( blockIdx.x * 128 ) + threadIdx.x ) / T4.size[2] ) / T4.size[1] ) * T4.stride[0] ) + ( ( ( ( ( blockIdx.x * 128 ) + threadIdx.x ) / T4.size[2] ) % T4.size[1] ) * T4.stride[1] ) + ( ( ( ( blockIdx.x * 128 ) + threadIdx.x ) % T4.size[2] ) * T4.stride[2] ) ];\n"
+      << "  if ( ( ( ( ( ( ( ( blockIdx.x * 128 ) + threadIdx.x ) / T3.size[2] ) / T3.size[1] ) < T3.size[0] ) && ( ( ( ( ( blockIdx.x * 128 ) + threadIdx.x ) / T3.size[2] ) % T3.size[1] ) < T3.size[1] ) ) && ( ( ( ( blockIdx.x * 128 ) + threadIdx.x ) % T3.size[2] ) < T3.size[2] ) ) ) { \n"
+      << "    T3[ ( ( ( ( ( blockIdx.x * 128 ) + threadIdx.x ) / T3.size[2] ) / T3.size[1] ) * T3.stride[0] ) + ( ( ( ( ( blockIdx.x * 128 ) + threadIdx.x ) / T3.size[2] ) % T3.size[1] ) * T3.stride[1] ) + ( ( ( ( blockIdx.x * 128 ) + threadIdx.x ) % T3.size[2] ) * T3.stride[2] ) ]\n"
+      << "       = T2[ 0 ]\n"
+      << "       * T0[ ( ( ( ( ( blockIdx.x * 128 ) + threadIdx.x ) / T3.size[2] ) / T3.size[1] ) * T0.stride[0] ) + ( ( ( ( ( blockIdx.x * 128 ) + threadIdx.x ) / T3.size[2] ) % T3.size[1] ) * T0.stride[1] ) + ( ( ( ( blockIdx.x * 128 ) + threadIdx.x ) % T3.size[2] ) * T0.stride[2] ) ];\n"
       << "  }\n"
       << "}\n";
 
@@ -675,63 +675,54 @@ void testGPU_FusionCodeGen() {
   fusion.addOutput(tv2);
 
   tv0->computeAt(tv2, -1);
-  /*
-    std::stringstream ref;
-    ref
-    << "__device__ int ceilDiv(const int a, const int b) {\n"
-    << "  return (a + b - 1) / b;\n"
-    << "}\n"
-    << "\n"
-    << "__global__ void CUDAGeneratedKernel(Tensor<float> T3){\n"
-    << "  for(size_t i49{0}; i49 < i38; ++i49 ) {\n"
-    << "    for(size_t i50{0}; i50 < i37; ++i50 ) {\n"
-    << "      for(size_t i51{0}; i51 < 2; ++i51 ) {\n"
-    << "        for(size_t i52{0}; i52 < i41; ++i52 ) {\n"
-    << "          float T5[1];\n"
-    << "          if ( ( ( ( ( ( i50 * 4 ) + ( i49 / T3.size[1] ) ) < T3.size[0]
-    ) && ( ( i49 % T3.size[1] ) < T3.size[1] ) ) && ( ( ( i52 * 2 ) + i51 ) <
-    T3.size[2] ) ) ) { \n"
-    << "            T5[ 0 ]\n"
-    << "               = float(0)\n"
-    << "               + float(1);\n"
-    << "          }\n"
-    << "          float T4[1];\n"
-    << "          if ( ( ( ( ( ( i50 * 4 ) + ( i49 / T3.size[1] ) ) < T3.size[0]
-    ) && ( ( i49 % T3.size[1] ) < T3.size[1] ) ) && ( ( ( i52 * 2 ) + i51 ) <
-    T3.size[2] ) ) ) { \n"
-    << "            T4[ 0 ]\n"
-    << "               = T5[ 0 ]\n"
-    << "               + float(2);\n"
-    << "          }\n"
-    << "          if ( ( ( ( ( ( i50 * 4 ) + ( i49 / T3.size[1] ) ) < T3.size[0]
-    ) && ( ( i49 % T3.size[1] ) < T3.size[1] ) ) && ( ( ( i52 * 2 ) + i51 ) <
-    T3.size[2] ) ) ) { \n"
-    << "            T3[ ( ( i50 * 4 ) + ( i49 / T3.size[1] ) ) + ( i49 %
-    T3.size[1] ) + ( ( i52 * 2 ) + i51 ) ]\n"
-    << "               = T4[ 0 ]\n"
-    << "               + float(3);\n"
-    << "          }\n"
-    << "        }\n"
-    << "      }\n"
-    << "    }\n"
-    << "  }\n"
-    << "}\n"
-    ;
 
-    GPULower gpulw(&fusion);
-    std::stringstream cdg;
-    gpulw.printKernel(cdg);
+  std::stringstream ref;
+  ref << "__device__ int ceilDiv(const int a, const int b) {\n"
+      << "  return (a + b - 1) / b;\n"
+      << "}\n"
+      << "\n"
+      << "__global__ void CUDAGeneratedKernel(Tensor<float> T2){\n"
+      << "  for(size_t i82 = 0; i82 < ( 4 * T2.size[1] ); ++i82 ) {\n"
+      << "    for(size_t i83 = 0; i83 < ( ceilDiv(T2.size[0], 4) ); ++i83 ) {\n"
+      << "      for(size_t i84 = 0; i84 < 2; ++i84 ) {\n"
+      << "        for(size_t i85 = 0; i85 < ( ceilDiv(T2.size[2], 2) ); ++i85 ) {\n"
+      << "          float T0[1];\n"
+      << "          if ( ( ( ( ( ( i83 * 4 ) + ( i82 / T2.size[1] ) ) < T2.size[0] ) && ( ( i82 % T2.size[1] ) < T2.size[1] ) ) && ( ( ( i85 * 2 ) + i84 ) < T2.size[2] ) ) ) { \n"
+      << "            T0[ 0 ]\n"
+      << "               = float(0)\n"
+      << "               + float(1);\n"
+      << "          }\n"
+      << "          float T1[1];\n"
+      << "          if ( ( ( ( ( ( i83 * 4 ) + ( i82 / T2.size[1] ) ) < T2.size[0] ) && ( ( i82 % T2.size[1] ) < T2.size[1] ) ) && ( ( ( i85 * 2 ) + i84 ) < T2.size[2] ) ) ) { \n"
+      << "            T1[ 0 ]\n"
+      << "               = T0[ 0 ]\n"
+      << "               + float(2);\n"
+      << "          }\n"
+      << "          if ( ( ( ( ( ( i83 * 4 ) + ( i82 / T2.size[1] ) ) < T2.size[0] ) && ( ( i82 % T2.size[1] ) < T2.size[1] ) ) && ( ( ( i85 * 2 ) + i84 ) < T2.size[2] ) ) ) { \n"
+      << "            T2[ ( ( ( i83 * 4 ) + ( i82 / T2.size[1] ) ) * T2.stride[0] ) + ( ( i82 % T2.size[1] ) * T2.stride[1] ) + ( ( ( i85 * 2 ) + i84 ) * T2.stride[2] ) ]\n"
+      << "               = T1[ 0 ]\n"
+      << "               + float(3);\n"
+      << "          }\n"
+      << "        }\n"
+      << "      }\n"
+      << "    }\n"
+      << "  }\n"
+      << "}\n";
 
-    if (ref.str().size() != cdg.str().size() ||
-        ref.str().compare(cdg.str()) != 0) {
-      std::cerr
-          << " Codegen mismatch, codegen possibly changed, or is incorrect. "
-          << " \n ========= REF ========= \n"
-          << ref.str() << "\n========= RESULT ========== \n"
-          << cdg.str() << "\n=================" << std::endl;
-      TORCH_CHECK(false);
-    }
-  */
+  GPULower gpulw(&fusion);
+  std::stringstream cdg;
+  gpulw.printKernel(cdg);
+
+  if (ref.str().size() != cdg.str().size() ||
+      ref.str().compare(cdg.str()) != 0) {
+    std::cerr
+        << " Codegen mismatch, codegen possibly changed, or is incorrect. "
+        << " \n ========= REF ========= \n"
+        << ref.str() << "\n========= RESULT ========== \n"
+        << cdg.str() << "\n=================" << std::endl;
+    TORCH_CHECK(false);
+  }
+
   torch::jit::fuser::cuda::CudaKernel prog;
   prog.device_ = 0;
   // These can be set to anything as there are no bindings!
@@ -780,35 +771,28 @@ void testGPU_FusionCodeGen2() {
   tv3->axis(0)->parallelize(ParallelType::BIDx);
   tv3->axis(-1)->parallelize(ParallelType::TIDx);
 
-  /*
   std::stringstream ref;
-  ref
-  << "__device__ int ceilDiv(const int a, const int b) {\n"
-  << "  return (a + b - 1) / b;\n"
-  << "}\n"
-  << "\n"
-  << "__global__ void kernel(Tensor<float> T0, Tensor<float> T1, Tensor<float>
-  T3){\n"
-  << "  for( size_t i13 = 0; i13 < 4; ++i13 ) {\n"
-  << "    for( size_t i15 = 0; i15 < T1.size[1]; ++i15 ) {\n"
-  << "      float T2[1];\n"
-  << "      if( ( ( ( blockIdx.x * 4 ) + i13 ) < T1.size[0] ) ) {\n"
-  << "        T2[0]\n"
-  << "          = T1[( ( blockIdx.x * 4 ) + i13 ) * T1.stride[0] + i15 *
-  T1.stride[1] + threadIdx.x * T1.stride[2]]\n"
-  << "          + float(2);\n"
-  << "      }\n"
-  << "      if( ( ( ( blockIdx.x * 4 ) + i13 ) < T1.size[0] ) ) {\n"
-  << "        T3[( ( blockIdx.x * 4 ) + i13 ) * T3.stride[0] + i15 *
-  T3.stride[1] + threadIdx.x * T3.stride[2]]\n"
-  << "          = T0[( ( blockIdx.x * 4 ) + i13 ) * T0.stride[0] + i15 *
-  T0.stride[1] + threadIdx.x * T0.stride[2]]\n"
-  << "          + T2[0];\n"
-  << "      }\n"
-  << "    }\n"
-  << "  }\n"
-  << "}\n"
-  ;
+  ref << "__device__ int ceilDiv(const int a, const int b) {\n"
+      << "  return (a + b - 1) / b;\n"
+      << "}\n"
+      << "\n"
+      << "__global__ void CUDAGeneratedKernel(Tensor<float> T0, Tensor<float> T1, Tensor<float> T3){\n"
+      << "  for(size_t i33 = 0; i33 < 4; ++i33 ) {\n"
+      << "    for(size_t i34 = 0; i34 < T3.size[1]; ++i34 ) {\n"
+      << "      float T2[1];\n"
+      << "      if ( ( ( ( blockIdx.x * 4 ) + i33 ) < T3.size[0] ) ) { \n"
+      << "        T2[ 0 ]\n"
+      << "           = T1[ ( ( ( blockIdx.x * 4 ) + i33 ) * T1.stride[0] ) + ( i34 * T1.stride[1] ) + ( threadIdx.x * T1.stride[2] ) ]\n"
+      << "           + float(2);\n"
+      << "      }\n"
+      << "      if ( ( ( ( blockIdx.x * 4 ) + i33 ) < T3.size[0] ) ) { \n"
+      << "        T3[ ( ( ( blockIdx.x * 4 ) + i33 ) * T3.stride[0] ) + ( i34 * T3.stride[1] ) + ( threadIdx.x * T3.stride[2] ) ]\n"
+      << "           = T0[ ( ( ( blockIdx.x * 4 ) + i33 ) * T0.stride[0] ) + ( i34 * T0.stride[1] ) + ( threadIdx.x * T0.stride[2] ) ]\n"
+      << "           + T2[ 0 ];\n"
+      << "      }\n"
+      << "    }\n"
+      << "  }\n"
+      << "}\n";
 
   GPULower gpulw(&fusion);
   std::stringstream cdg;
@@ -823,7 +807,7 @@ void testGPU_FusionCodeGen2() {
         << cdg.str() << "\n=================" << std::endl;
     TORCH_CHECK(false);
   }
-  */
+  
   torch::jit::fuser::cuda::CudaKernel prog;
   prog.device_ = 0;
   prog.grid(4);

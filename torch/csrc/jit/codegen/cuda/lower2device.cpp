@@ -299,20 +299,22 @@ void GPULower::replaceSizes() {
   Fusion* fusion = FusionGuard::getCurFusion();
   // Sizes of inputs/outputs -> T.size[...]
   std::unordered_map<Val*, Val*> size_map;
-  // Replacement of full tensor views
-  std::unordered_map<Val*, Val*> tv_map;
 
   // Grab inputs and outputs
   std::vector<TensorView*> orig_inp_out;
-  std::vector<TensorView*> orig_intermediates;
+  std::vector<TensorView*> all_tvs;
+
+  for (auto* val : fusion->inputs())
+    if(ir_utils::isTV(val))
+        orig_inp_out.push_back(ir_utils::asTV(val));
+
+  for (auto* val : fusion->outputs())
+    if(ir_utils::isTV(val))
+        orig_inp_out.push_back(ir_utils::asTV(val));
 
   for (auto* val : fusion->deterministic_vals()) {
     if (ir_utils::isTV(val)) {
-      if (fusion->hasInput(val) || fusion->hasOutput(val)) {
-        orig_inp_out.push_back(ir_utils::asTV(val));
-      } else {
-        orig_intermediates.push_back(ir_utils::asTV(val));
-      }
+      all_tvs.push_back(ir_utils::asTV(val));
     }
   }
 
@@ -329,82 +331,59 @@ void GPULower::replaceSizes() {
   // option which seems less elegant but would also work is build up the domain
   // on the new tensor, and then simply replace it into the original one.
   for (TensorView* tv : orig_inp_out) {
-    TensorView* new_tv =
-        new TensorView(tv->domain(), tv->getDataType().value());
-
-    // We can place the new_tv in the map right away.
-    tv_map[tv] = new_tv;
 
     // Replace the domain with one based on Ti.size[j]
-    std::vector<IterDomain*> new_domain;
+    std::vector<IterDomain*> new_domain_iters;
     TensorDomain* root_td = tv->getRootDomain();
     for (decltype(root_td->nDims()) i{0}; i < root_td->nDims(); i++) {
       Val* orig_size = root_td->axis(i)->extent();
       std::stringstream ss;
-      ss << "T" << new_tv->name() << ".size[" << i << "]";
+      ss << "T" << tv->name() << ".size[" << i << "]";
       Val* new_size =
           new NamedScalar(ss.str(), orig_size->getDataType().value());
-      size_map[orig_size] = new_size;
-
-      new_domain.push_back(new IterDomain(
-          root_td->axis(i)->start(),
-          new_size,
-          root_td->axis(i)->parallel_method(),
-          root_td->axis(i)->isReduction()));
+      if(!orig_size->sameAs(new_size) || size_map.find(orig_size) == size_map.end() )
+        size_map[orig_size] = new_size;
     }
-    new_tv->setDomain(new TensorDomain(new_domain));
   }
 
-  for (TensorView* tv : orig_intermediates) {
-    TensorView* new_tv =
-        new TensorView(tv->domain(), tv->getDataType().value());
-    tv_map[tv] = new_tv;
+  // If we already lowered all inputs/outputs we can just return.
+  if(size_map.size() == 0)
+    return;
 
-    std::vector<IterDomain*> new_domain;
+  for (TensorView* tv : all_tvs) {
+
+    std::vector<IterDomain*> new_domain_iters;
     TensorDomain* root_td = tv->getRootDomain();
 
     for (decltype(root_td->nDims()) i{0}; i < root_td->nDims(); i++) {
       Val* new_size = root_td->axis(i)->extent();
       if (size_map.find(new_size) != size_map.end())
         new_size = size_map[new_size];
-      new_domain.push_back(new IterDomain(
+      new_domain_iters.push_back(new IterDomain(
           root_td->axis(i)->start(),
           new_size,
           root_td->axis(i)->parallel_method(),
           root_td->axis(i)->isReduction()));
     }
-    new_tv->setDomain(new TensorDomain(new_domain));
-  }
 
-  // Now that we have the base tensor views. Lets fix its members.
-  for (auto entry : tv_map) {
-    TensorView* orig_tv = ir_utils::asTV(entry.first);
-    TensorView* new_tv = ir_utils::asTV(entry.second);
+    TensorDomain* old_domain = tv->domain();
+    TensorDomain* new_domain = TransformReplay::fullReplay(old_domain, new TensorDomain(new_domain_iters));
 
-    // Domain in the new TV is the root domain, replay it like the original
-    // domain.
-    TransformReplay::fullReplay(orig_tv, new_tv);
-
+    TORCH_INTERNAL_ASSERT(
+        old_domain->nDims() == new_domain->nDims(),
+        "Tried to set symbolic sizes through the kernel, but hit a snag, Replayed domain should be the same size as the target domain, but got ",
+        new_domain->nDims(),
+        " and ",
+        old_domain->nDims());
     // Parallelize all iter domains
-    for (decltype(new_tv->domain()->nDims()) i{0}; i < new_tv->domain()->nDims();
+    for (decltype(new_domain->nDims()) i{0}; i < new_domain->nDims();
          i++)
-      new_tv->axis(i)->parallelize(orig_tv->axis(i)->parallel_method());
+      new_domain->axis(i)->parallelize(old_domain->axis(i)->parallel_method());
 
-    // Set compute at view and axis
-    TensorView* computeAtTV = orig_tv->getComputeAtView();
-    if (computeAtTV != nullptr) {
-      TORCH_INTERNAL_ASSERT(
-          tv_map.find(computeAtTV) != tv_map.end(),
-          "Expected to find a translation for ",
-          computeAtTV,
-          " but one wasn't found.");
-      new_tv->setComputeAt(
-          ir_utils::asTV(tv_map[computeAtTV]),
-          (int)(orig_tv->getComputeAtAxis()));
-    }
+    tv->setDomain(new_domain);
+
   }
 
-  ReplaceAll::instancesOf(tv_map);
 }
 
 namespace {
@@ -455,17 +434,6 @@ void validate(Fusion* fusion) {
 std::vector<Expr*> GPULower::getLoweredExprs() {
   FusionGuard fg(fusion_);
 
-  // Likely we lowered this fusion, we can simply return the lowered expressions
-  // Not the safest approach but good enough for now.
-  if (fusion_->lowered && lowered_exprs.size() != 0)
-    return lowered_exprs;
-
-  TORCH_CHECK(
-      !fusion_->lowered,
-      "Fusions can only be lowered once as of now. You could reuse the lowering using",
-      " std::vector<Expr*> GPULower::getLoweredExprs() the result can be printed as",
-      " a kernel with   IRPrinter irp(os); irp.printKernel(lowered_exprs, kernel_name);");
-
   validate(fusion_);
 
   // Initialize members of the class
@@ -493,7 +461,6 @@ std::vector<Expr*> GPULower::getLoweredExprs() {
     lowered_exprs.push_back(static_cast<Expr*>(mutated_stmt));
   }
 
-  fusion_->lowered = true;
   return lowered_exprs;
 }
 

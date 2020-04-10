@@ -154,17 +154,6 @@ void UnrollPass::handle(ForLoop* fl) {
 void UnrollPass::computeMap() {
   FusionGuard fg(fusion_);
 
-  // Likely we lowered this fusion, we can simply return the lowered expressions
-  // Not the safest approach but good enough for now.
-  if (fusion_->lowered && incoming_exprs_.size() != 0)
-    return;
-
-  TORCH_CHECK(
-      !fusion_->lowered,
-      "Fusions can only be lowered once as of now. You could reuse the lowering using",
-      " std::vector<Expr*> GPULower::getLoweredExprs() the result can be printed as",
-      " a kernel with   IRPrinter irp(os); irp.printKernel(lowered_exprs, kernel_name);");
-
   // Initialize members of the class
   active_view = nullptr;
   active_view_axis = 0;
@@ -330,17 +319,6 @@ void LoopNestGenerator::handle(Expr* expr) {
 // Generate the loop nest structure and place it in lowered_exprs
 void LoopNestGenerator::generate() {
   FusionGuard fg(fusion_);
-
-  // Likely we lowered this fusion, we can simply return the lowered expressions
-  // Not the safest approach but good enough for now.
-  if (fusion_->lowered && lowered_exprs.size() != 0)
-    return;
-
-  TORCH_CHECK(
-      !fusion_->lowered,
-      "Fusions can only be lowered once as of now. You could reuse the lowering using",
-      " std::vector<Expr*> GPULower::getLoweredExprs() the result can be printed as",
-      " a kernel with   IRPrinter irp(os); irp.printKernel(lowered_exprs, kernel_name);");
 
   // Initialize members of the class
   lowered_exprs = std::vector<Expr*>();

@@ -174,8 +174,6 @@ struct TORCH_CUDA_API Fusion : public IRInputOutput {
   // Return the Expr that produces val (const version)
   const Expr* origin(const Val* val) const;
 
-  bool lowered = false;
-
  private:
   // Sets of all Vals/Exprs registered with this fusion
   std::set<Val*> val_set_;

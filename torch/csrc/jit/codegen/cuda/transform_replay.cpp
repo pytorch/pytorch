@@ -340,16 +340,14 @@ TensorView* TransformReplay::fullReplay(
     TensorView* replay_ref,
     TensorView* replay_target) {
   TransformReplay tr;
-  tr.runReplay(replay_ref, replay_target, -1);
-  return replay_target;
+  return tr.runReplay(replay_ref, replay_target, -1);
 }
 
 TensorDomain* TransformReplay::fullReplay(
     TensorDomain* replay_ref,
     TensorDomain* replay_target) {
   TransformReplay tr;
-  tr.runReplay(replay_ref, replay_target, -1);
-  return replay_target;
+  return tr.runReplay(replay_ref, replay_target, -1);
 }
 
 } // namespace fuser
