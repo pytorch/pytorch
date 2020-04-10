@@ -4,10 +4,10 @@
 
 using namespace at;
 
-std::vector<std::vector<int64_t>> sizes = {{4, 4, 4, 4}, {4, 4, 1, 1}, {4, 1, 4, 4}, {4, 1, 4, 1}, {4, 1, 1, 4}, {1, 4, 1, 4}, {1, 4, 4, 1}};
+std::vector<std::vector<int64_t>> tensor_sizes = {{4, 4, 4, 4}, {4, 4, 1, 1}, {4, 1, 4, 4}, {4, 1, 4, 1}, {4, 1, 1, 4}, {1, 4, 1, 4}, {1, 4, 4, 1}};
 
 TEST(MemoryFormatTest, SetMemoryFormat) {
-  for (auto size : sizes) {
+  for (auto size : tensor_sizes) {
     Tensor t = at::rand(size);
     for (auto memory_format : {at::MemoryFormat::ChannelsLast, at::MemoryFormat::Contiguous}) {
       t.resize_(size, memory_format);
