@@ -112,15 +112,15 @@ struct _cpu_scatter_gather_dim_loop {
   }
 };
 
-class ReduceFunctor {
+class BinaryFunctor {
 public:
-  ReduceFunctor() {};
+  BinaryFunctor() {};
   template <typename scalar_t, typename func_t>
   void operator() (scalar_t* self_data, scalar_t* src_data, func_t op) {
     op(self_data, src_data);
   }
 };
-ReduceFunctor reduce_fn;
+BinaryFunctor binary_fn;
 
 auto reduce_sum = [](auto * self_data, auto * src_data) {
                     *self_data += *src_data;
@@ -134,41 +134,23 @@ auto reduce_multiply = [](auto * self_data, auto * src_data) {
 auto reduce_divide = [](auto * self_data, auto * src_data) {
                        *self_data /= *src_data;
                      };
+auto assign = [](auto * self_data, auto * src_data) {
+                *self_data = *src_data;
+              };
 
-  template <bool is_scatter_like=true>
-  struct cpu_scatter_gather_reduce_base_kernel{
-    void operator()(
-      Tensor& self, int64_t dim,
-      const Tensor& index, const Tensor& src,
-      bool serial_exec, REDUCE_OPERATOR reduce) {
-      
-    }
-  };
-
-  template <bool is_scatter_like=true>
-  struct cpu_scatter_gather_pointwise_base_kernel{
-    template <typename func_t>
-    void operator()(
-      Tensor& self, int64_t dim,
-      const Tensor& index, const Tensor& src,
-      const std::string& method_name,
-      const func_t& f,
-      bool serial_exec) {
-    }
-  };
-
-template <bool is_scatter_like=true>
-class cpu_scatter_gather_base {
-  int64_t dim;
-public:
-  cpu_scatter_gather_base(Tensor& self, const int64_t dim, const Tensor& index,
-                          const Tensor& src, const std::string& method_name, bool serial_exec) {
+template <bool is_scatter_like = true>
+struct cpu_scatter_gather_base_kernel1 {
+  void operator()(Tensor& self, int64_t dim,
+    const Tensor& index, const Tensor& src,
+    const std::string& method_name,
+    bool serial_exec,
+    const SCATTER_GATHER_OP& func_enum) {
     // no-op if index is empty
     if (index.numel() == 0) {
       return;
     }
 
-    this->dim = maybe_wrap_dim(dim, self.dim());
+    dim = maybe_wrap_dim(dim, self.dim());
 
     if (is_scatter_like) {
       scatter_shape_check(self, dim, index, src);
@@ -194,8 +176,8 @@ public:
     auto self_restrided = restride_dim(self, dim, index_sizes);
     auto index_restrided = index.as_strided(index_sizes, index_strides);
     auto src_restrided = restride_dim(src, dim, index_sizes);
-    
-    TensorIterator iter;
+
+    auto iter = TensorIterator();
     iter.dont_compute_common_dtype();
     iter.dont_resize_outputs();
     iter.add_output(self_restrided);
@@ -214,13 +196,23 @@ public:
 
     auto index_upper_bound = is_scatter_like ? self_dim_size : src_dim_size;
 
-    auto this.dispatch_iterator = [&](const auto& kernel_func) {
-      AT_DISPATCH_ALL_TYPES_AND2(
-        ScalarType::Bool, ScalarType::Half, iter.dtype(),
-        method_name, [&] {
-                       constexpr auto SELF_ITER_STRIDE_IDX = 0;
-                       constexpr auto INDEX_ITER_STRIDE_IDX = 2;
-                       constexpr auto SRC_ITER_STRIDE_IDX = 1;
+    AT_DISPATCH_ALL_TYPES_AND2(
+      ScalarType::Bool, ScalarType::Half, iter.dtype(),
+      method_name, [&] {
+        constexpr auto SELF_ITER_STRIDE_IDX = 0;
+        constexpr auto INDEX_ITER_STRIDE_IDX = 2;
+        constexpr auto SRC_ITER_STRIDE_IDX = 1;
+
+        using binary_func_t = std::function<void(scalar_t*, scalar_t*)>;
+        std::unordered_map<const SCATTER_GATHER_OP, binary_func_t> binary_funcs({
+          {SCATTER_GATHER_OP::REDUCE_ADD, reduce_sum},
+          {SCATTER_GATHER_OP::REDUCE_SUBTRACT, reduce_subtract},
+          {SCATTER_GATHER_OP::REDUCE_MULTIPLY, reduce_multiply},
+          {SCATTER_GATHER_OP::REDUCE_DIVIDE, reduce_divide},
+          {SCATTER_GATHER_OP::ASSIGN, assign}
+        });
+
+        auto run_loop = [&](const auto& kernel_func) {
           auto loop = [&](char** data, const int64_t* strides, int64_t n) {
             auto* self_data_bytes = data[SELF_ITER_STRIDE_IDX];
             auto* index_data_bytes = data[INDEX_ITER_STRIDE_IDX];
@@ -279,21 +271,27 @@ public:
           else {
             iter.for_each(loop);
           }
-        }
-                                 );
-    };
-  };
+        };
 
-  template <typename func_t>
-  void cpu_pointwise_kernel(const func_t& f) {
-    
-  };
-
-  void cpu_reduce_kernel(const REDUCE_OPERATOR& reduce) {
-    
-  };
+        run_loop(binary_funcs[func_enum]);
+        // if (reduce != REDUCE_OPERATOR::NONE) {
+        //   using reduce_func_t = std::function<void(scalar_t*, scalar_t*)>;
+        //   std::unordered_map<const REDUCE_OPERATOR, reduce_func_t> reduce_funcs({
+        //     {REDUCE_OPERATOR::SUM, reduce_sum},
+        //     {REDUCE_OPERATOR::SUBTRACT, reduce_subtract},
+        //     {REDUCE_OPERATOR::MULTIPLY, reduce_multiply},
+        //     {REDUCE_OPERATOR::DIVIDE, reduce_divide}
+        //   });
+        //   run_loop(reduce_funcs[reduce]);
+        // }
+        // else {
+        //   run_loop(f);
+        // }
+      }
+    );
+  }
 };
-
+  
 template <bool is_scatter_like = true>
 struct cpu_scatter_gather_base_kernel {
   template <typename func_t>
@@ -453,12 +451,8 @@ void gather_cpu_kernel(Tensor& result, const Tensor& self, int64_t dim, const Te
 }
 
 void scatter_cpu_kernel(Tensor& self, int64_t dim, const Tensor& index, const Tensor& src) {
-  cpu_scatter_gather_base_kernel<>()(
-    self, dim, index, src,
-    "scatter_cpu_", [] (auto* lhs, const auto* rhs) {
-      *lhs = *rhs;
-    },
-    /*serial_exec=*/false
+  cpu_scatter_gather_base_kernel1<>()(
+    self, dim, index, src, "scatter_cpu_", false, SCATTER_GATHER_OP::ASSIGN
   );
 }
 
@@ -484,25 +478,9 @@ void scatter_add_cpu_kernel(Tensor& self, int64_t dim, const Tensor& index, cons
 }
 
 void scatter_reduce_cpu_kernel(Tensor& self, const int64_t dim, const Tensor& index,
-                               const Tensor& src, const REDUCE_OPERATOR& reduce) {
-  cpu_scatter_gather_base_kernel<>()(
-    self, dim, index, src,
-    "scatter_add_", [] (auto* lhs, const auto* rhs) {
-      *lhs += *rhs;
-    },
-    /*serial_exec=*/true,
-    reduce
-  );
-
-  cpu_scatter_gather_reduce_base_kernel<>() (
-    self, dim, index, src, true, reduce);
-
-  cpu_scatter_gather_base<>(self, dim, index, src, "scatter_add_", true).
-    cpu_pointwise_kernel(
-      [](auto* lhs, const auto* rhs) {
-      *lhs += *rhs;
-    }
-  );
+                               const Tensor& src, const SCATTER_GATHER_OP& reduce) {
+  cpu_scatter_gather_base_kernel1<>()(self, dim, index, src,
+                                    "scatter_reduce_", true, reduce);
 }
 
 void scatter_scalar_reduce_cpu_kernel(Tensor& self, const int64_t dim, const Tensor& index,
