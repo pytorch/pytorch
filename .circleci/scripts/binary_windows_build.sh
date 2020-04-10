@@ -20,13 +20,6 @@ export SCCACHE_BUCKET=ossci-compiler-cache-circleci-v2
 set +x
 export AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_SCCACHE_S3_BUCKET_V4:-}
 export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_SCCACHE_S3_BUCKET_V4:-}
-
-cat >"$HOME/sccache_init.bat" <<EOL
-@echo off
-set SCCACHE_BUCKET=${SCCACHE_BUCKET}
-set AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
-set AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
-EOL
 set -x
 
 if [[ "$CIRCLECI" == 'true' && -d "C:\\Program Files (x86)\\Microsoft Visual Studio\\2019" ]]; then
