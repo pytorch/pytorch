@@ -35,15 +35,11 @@ namespace fuser {
 
 struct PredicateCompute {
   // Return if there are any predicates
-  static bool hasPredicates(
-      const TensorView* tv,
-      const std::vector<Int*>& _indices);
+  static bool hasPredicates(const TensorIndex*);
 
   // Return the series of predicates, if an axis doesn't have a predicate
   // reutrns 1
-  static std::vector<Int*> computePredicates(
-      const TensorView* tv,
-      const std::vector<Int*>& _indices);
+  static std::vector<Int*> computePredicates(const TensorIndex*);
 };
 
 } // namespace fuser
