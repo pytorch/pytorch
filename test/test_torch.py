@@ -15249,6 +15249,8 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             torch.min(t, dim=0)
         with self.assertRaises(RuntimeError):
             torch.min(t, t)
+        with self.assertRaises(RuntimeError):
+            torch.min(t, t, out=t)
 
         with self.assertRaises(RuntimeError):
             torch.max(t)
@@ -15258,6 +15260,8 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             torch.max(t, dim=0)
         with self.assertRaises(RuntimeError):
             torch.max(t, t)
+        with self.assertRaises(RuntimeError):
+            torch.max(t, t, out=t)
 
 
 # NOTE [Linspace+Logspace precision override]
