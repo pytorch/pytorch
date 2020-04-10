@@ -120,6 +120,7 @@ BenchmarkExecutionStats BenchmarkHelper<Input, Output, Model>::benchmark(
         lock, [&]() { return finished == config.num_calling_threads; });
   }
   auto end_time = std::chrono::high_resolution_clock::now();
+  profiler_guard.reset();
   LOG(INFO) << "Finished benchmark";
 
   BenchmarkExecutionStats stats;

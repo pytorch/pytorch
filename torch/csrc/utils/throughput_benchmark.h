@@ -25,7 +25,7 @@ struct BenchmarkExecutionStats {
   int64_t num_iters{-1};
 };
 
-C10_EXPORT std::ostream& operator<<(std::ostream& os, const BenchmarkExecutionStats& value);
+std::ostream& operator<<(std::ostream& os, const BenchmarkExecutionStats& value);
 
 /**
  * Use this struct in order to configure a throughput benchmark run.
@@ -65,7 +65,7 @@ namespace detail {
  * A helper class to abstract out different models we test throughput of
  */
 template <class Input, class Output, class Model>
-class C10_EXPORT BenchmarkHelper {
+class BenchmarkHelper {
 public:
   BenchmarkHelper();
   explicit BenchmarkHelper(Model model): model_(model), initialized_(true) {}
