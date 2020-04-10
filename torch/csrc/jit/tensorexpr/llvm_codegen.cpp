@@ -236,7 +236,7 @@ LLVMCodeGenImpl::LLVMCodeGenImpl(
   // Emit prototype and bind argument Vars to parameter indices.
   llvm::Type* retTy = dtypeToLLVM(dtype);
   std::vector<llvm::Type*> params;
-  for (int i = 0; i < args.size(); i++) {
+  for (size_t i = 0; i < args.size(); i++) {
     auto const& arg = args[i];
     if (arg.isVar()) {
       params.push_back(dtypeToLLVM(arg.dtype()));
@@ -248,7 +248,7 @@ LLVMCodeGenImpl::LLVMCodeGenImpl(
   llvm::FunctionType* fntype = llvm::FunctionType::get(retTy, params, false);
   fn_ = llvm::Function::Create(
       fntype, llvm::Function::PrivateLinkage, "pytorch", module_.get());
-  for (int i = 0; i < args.size(); i++) {
+  for (size_t i = 0; i < args.size(); i++) {
     if (!args[i].isVar()) {
       fn_->addParamAttr(i, llvm::Attribute::NoAlias);
     }
@@ -961,7 +961,6 @@ void LLVMCodeGenImpl::emitMaskedStore(
     llvm::Value* mask,
     llvm::Value* val) {
   // Create block structure for the masked store.
-  auto preheader = irb_.GetInsertBlock();
   auto condblock = llvm::BasicBlock::Create(getContext(), "cond", fn_);
   auto tailblock = llvm::BasicBlock::Create(getContext(), "tail", fn_);
 
