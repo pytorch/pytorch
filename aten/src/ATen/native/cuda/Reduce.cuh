@@ -789,15 +789,29 @@ inline void gpu_reduce_kernel(TensorIterator& iter, const ops_t& ops, ident_t id
     config.output_mult[1] = config.split_output(block_height);
   }
 
-  if (config.input_mult[1] != 0 && config.values_per_thread() >= 256 && num_outputs <= 4096) {
+  constexpr int min_values_per_thread = 16;
+  constexpr int max_values_per_thread = 256;
+  const int blocks_per_sm = at::cuda::getCurrentDeviceProperties()->maxThreadsPerMultiProcessor / (block_width * block_height);
+  const int num_mp = at::cuda::getCurrentDeviceProperties()->multiProcessorCount;
+  const int target_grid_size = num_mp * blocks_per_sm;
+  int grid = config.grid().x;
+  if (config.input_mult[1] != 0 && config.values_per_thread() >= max_values_per_thread && grid <= target_grid_size) {
     // Divide the input across thread-blocks if the amount of work per-thread
     // is large enough and the size of the output is small enough. This will
     // require a reduction using global memory.
-    config.ctas_per_output = div_up(config.values_per_thread(), 16);
-    if (config.ctas_per_output > 65535) {
-      config.ctas_per_output = 65535;
+    // If we decide to split input across blocks, as long as we can get enough
+    // number of blocks (`target_grid_size`) to balance SM, we should still
+    // make the number of values per thread large for best performance.
+    int ctas_per_output1 = div_up(target_grid_size, grid);
+    int ctas_per_output2 = div_up(config.values_per_thread(), min_values_per_thread);
+    int ctas_per_output3 = div_up(config.values_per_thread(), max_values_per_thread);
+    // We want the minimum of ctas_per_output1 and ctas_per_output2, so that each thread can have
+    // a large number of values to deal with. But we don't want values_per_thread to be larger than
+    // max_values_per_thread
+    config.ctas_per_output = std::max(std::min<int>(ctas_per_output1, ctas_per_output2), ctas_per_output3);
+    if (config.ctas_per_output > 1) {
+      config.input_mult[2] = config.split_input(config.ctas_per_output);
     }
-    config.input_mult[2] = config.split_input(config.ctas_per_output);
   }
 
   at::DataPtr buffer;
