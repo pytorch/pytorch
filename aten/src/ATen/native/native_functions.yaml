@@ -106,6 +106,24 @@
   variants: method
   supports_named_tensor: True
 
+- func: numel(Tensor(a) self) -> int
+  use_c10_dispatcher: full
+  supports_named_tensor: True
+
+- func: sizes(Tensor self) -> int[]
+  supports_named_tensor: True
+
+- func: strides(Tensor self) -> int[]
+  supports_named_tensor: True
+
+- func: element_size(Tensor self) -> int
+  use_c10_dispatcher: full
+  supports_named_tensor: True
+
+- func: dim(Tensor self) -> int
+  use_c10_dispatcher: full
+  supports_named_tensor: True
+
 - func: align_to(Tensor(a) self, Dimname[] names) -> Tensor(a)
   variants: method
   supports_named_tensor: True

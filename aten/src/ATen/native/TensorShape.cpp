@@ -1308,7 +1308,23 @@ Tensor view_as(const Tensor& self, const Tensor& other) {
 }
 
 int64_t numel(const Tensor& self) {
-  return self.unsafeGetTensorImpl()->numel();
+  return self.numel();
+}
+
+IntArrayRef sizes(const Tensor& self) {
+  return self.sizes();
+}
+
+IntArrayRef strides(const Tensor& self) {
+  return self.strides();
+}
+
+int64_t element_size(const Tensor& self) {
+  return self.element_size();
+}
+
+int64_t dim(const Tensor& self) {
+  return self.dim();
 }
 
 std::vector<Tensor> unbind(const Tensor &self, int64_t dim) {
