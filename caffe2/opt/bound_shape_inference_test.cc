@@ -426,6 +426,11 @@ TEST(BoundShapeInference, ElementwiseInferInputBackwards) {
       "I0",
       {TensorBoundShape_DimType_BATCH, TensorBoundShape_DimType_CONSTANT},
       {spec.max_batch_size, 60});
+  verifyShapeInfo(
+      out_shape,
+      "I1",
+      {TensorBoundShape_DimType_BATCH, TensorBoundShape_DimType_CONSTANT},
+      {spec.max_batch_size, 60});
 }
 
 TEST(BoundShapeInference, Bucketize) {
