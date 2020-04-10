@@ -1070,7 +1070,7 @@ def create_generic(top_env, declarations):
             return None
 
         def gen_dispatch_key_init(var_name, formals):
-            # type: (str, List[AtFormal]) -> str
+            # type: (str, List[AtFormal]) -> List[str]
             topt_formals = []
             non_topt_formals = []
             for f in find_multidispatch_formals(formals):
