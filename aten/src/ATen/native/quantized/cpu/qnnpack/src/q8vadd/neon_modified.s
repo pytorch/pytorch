@@ -66,15 +66,16 @@ pytorch_q8vadd_ukernel__neon:
 	vdup.8	q0, r4
 	bic	r12, r6, #15
 	vld1.8	{d4, d5}, [r2]
+	add	r2, r2, #16
 	mov	lr, r0
 	vld1.8	{d2, d3}, [r1]
-	vst1.64	{d6, d7}, [sp:128]      @ 16-byte Spill
-.LBB0_3:                                @ =>This Inner Loop Header: Depth=1
-	vsubl.u8	q3, d5, d21
-	add	r2, r2, #16
-	vsubl.u8	q2, d4, d21
 	add	r1, r1, #16
+	vst1.64	{d6, d7}, [sp:128]      @ 16-byte Spill
+	vsubl.u8	q3, d5, d21
+	vsubl.u8	q2, d4, d21
 	vsubl.u8	q5, d3, d20
+	vsubl.u8	q1, d2, d20
+.LBB0_3:                                @ =>This Inner Loop Header: Depth=1
 	sub	lr, lr, #16
 	vmovl.s16	q8, d7
 	cmp	lr, #31
@@ -82,7 +83,6 @@ pytorch_q8vadd_ukernel__neon:
 	vmovl.s16	q7, d6
 	vmovl.s16	q4, d4
 	vcvt.f32.s32	q8, q8
-	vsubl.u8	q1, d2, d20
 	vcvt.f32.s32	q7, q7
 	vcvt.f32.s32	q6, q6
 	vmovl.s16	q3, d10
@@ -92,16 +92,20 @@ pytorch_q8vadd_ukernel__neon:
 	vmovl.s16	q1, d2
 	vcvt.f32.s32	q5, q5
 	vmul.f32	q8, q13, q8
-	vcvt.f32.s32	q3, q3
 	vcvt.f32.s32	q2, q2
 	vmul.f32	q7, q13, q7
 	vmul.f32	q6, q13, q6
+	vcvt.f32.s32	q3, q3
 	vcvt.f32.s32	q1, q1
 	vmul.f32	q4, q13, q4
 	vmla.f32	q8, q14, q5
 	vmla.f32	q6, q14, q2
 	vmla.f32	q7, q14, q3
 	vmla.f32	q4, q14, q1
+	vld1.8	{d4, d5}, [r2]
+	add	r2, r2, #16
+	vld1.8	{d2, d3}, [r1]
+	add	r1, r1, #16
 	vadd.f32	q8, q11, q8
 	vadd.f32	q7, q11, q7
 	vadd.f32	q6, q11, q6
@@ -114,16 +118,20 @@ pytorch_q8vadd_ukernel__neon:
 	vqmovn.s32	d16, q7
 	vqmovn.s32	d15, q6
 	vqmovn.s32	d14, q4
-	vld1.8	{d4, d5}, [r2]
+	vsubl.u8	q3, d5, d21
 	vqmovun.s16	d17, q8
 	vqmovun.s16	d16, q7
-	vld1.8	{d2, d3}, [r1]
+	vsubl.u8	q2, d4, d21
+	vsubl.u8	q5, d3, d20
+	vsubl.u8	q1, d2, d20
 	vmax.u8	q8, q8, q15
 	vmin.u8	q8, q8, q0
 	vst1.8	{d16, d17}, [r3]!
 	bhi	.LBB0_3
 @ %bb.4:
 	sub	r0, r0, r12
+	sub	r2, r2, #16
+	sub	r1, r1, #16
 	vld1.64	{d6, d7}, [sp:128]      @ 16-byte Reload
 	sub	r0, r0, #16
 	cmp	r0, #8
