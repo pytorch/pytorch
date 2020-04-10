@@ -516,7 +516,7 @@ class For : public StmtNode<For> {
   LoopOptions loop_options_;
 };
 
-// A Cuda specific IR Node that implements atomic-add.
+// A backend specific IR Node that implements atomic-add.
 // This node could only shows up as an internal with GPU backends.
 // TODO: move to this an internal IR.
 // TODO: make IR nodes extensible.

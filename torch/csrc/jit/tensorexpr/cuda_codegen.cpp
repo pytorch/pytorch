@@ -569,14 +569,7 @@ void CudaCodeGen::Initialize() {
   ;
 #endif
 
-#if 1
   CompileToNVRTC(oss_.str(), func_name);
-#else
-  std::ifstream t("/home/ubuntu/projects/pytorch_v3/pytorch/01.txt");
-  std::string str(
-      (std::istreambuf_iterator<char>(t)), std::istreambuf_iterator<char>());
-  CompileToNVRTC(str, func_name);
-#endif
   USE_TRIGGER(cuda_codegen_created);
 }
 
