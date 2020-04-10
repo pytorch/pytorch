@@ -159,7 +159,7 @@ ContextConv2D create(
       weight_nhwc.data_ptr<float>(),                                  // kernel
       (bias && bias->defined())
           ? bias->contiguous().data_ptr<float>()
-          : nullptr;,                                                 // bias
+          : nullptr,                                                  // bias
       output_min,                                                     // output_min
       output_max,                                                     // output_max
       0u,                                                             // flags
