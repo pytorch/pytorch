@@ -1,7 +1,6 @@
 #pragma once
 
 #include <stdint.h>
-#include <memory>
 #include <mutex>
 #include <deque>
 #include <atomic>
@@ -11,6 +10,7 @@
 
 #include <c10/util/Exception.h>
 #include <c10/util/C++17.h>
+#include <c10/util/intrusive_ptr.h>
 #include <c10/core/Device.h>
 #include <c10/core/DispatchKeySet.h>
 #include <c10/core/GeneratorImpl.h>
@@ -54,7 +54,7 @@ namespace at {
 struct CAFFE2_API Generator {
   Generator() {}
 
-  explicit Generator(std::shared_ptr<c10::GeneratorImpl> gen_impl)
+  explicit Generator(c10::intrusive_ptr<c10::GeneratorImpl> gen_impl)
    : impl_(std::move(gen_impl)) {
     if (impl_.get() == nullptr) {
       throw std::runtime_error("GeneratorImpl with nullptr is not supported");
@@ -76,7 +76,17 @@ struct CAFFE2_API Generator {
     return static_cast<bool>(impl_);
   }
 
-  // c10::GeneratorImpl* operator->() const { return impl_.get(); }
+  c10::GeneratorImpl* unsafeGetGeneratorImpl() const {
+    return impl_.get();
+  }
+
+  c10::GeneratorImpl* unsafeReleaseGeneratorImpl() {
+    return impl_.release();
+  }
+
+  const c10::intrusive_ptr<c10::GeneratorImpl>& getIntrusivePtr() const {
+    return impl_;
+  }
 
   void set_current_seed(uint64_t seed) { impl_->set_current_seed(seed); }
 
@@ -110,12 +120,12 @@ struct CAFFE2_API Generator {
   }
 
  private:
-  std::shared_ptr<c10::GeneratorImpl> impl_;
+  c10::intrusive_ptr<c10::GeneratorImpl> impl_;
 };
 
 template<class Impl, class... Args>
 Generator make_generator(Args&&... args) {
-  return Generator(std::make_shared<Impl>(args...));
+  return Generator(c10::make_intrusive<Impl>(std::forward<Args>(args)...));
 }
 
 } // namespace at

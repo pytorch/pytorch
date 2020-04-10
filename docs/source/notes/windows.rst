@@ -151,6 +151,11 @@ Package not found in win-32 channel.
 PyTorch doesn't work on 32-bit system. Please use Windows and
 Python 64-bit version.
 
+Why are there no Python 2 packages for Windows?
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Because it's not stable enough. There're some issues that need to
+be solved before we officially release it. You can build it by yourself.
 
 Import error
 ^^^^^^^^^^^^
@@ -285,3 +290,4 @@ tensors cannot succeed, there are two alternatives for this.
 
 2. Share CPU tensors instead. Make sure your custom
 :class:`~torch.utils.data.DataSet` returns CPU tensors.
+
