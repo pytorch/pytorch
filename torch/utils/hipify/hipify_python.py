@@ -820,7 +820,7 @@ def hipify(
     extensions=(".cu", ".cuh", ".c", ".cc", ".cpp", ".h", ".in", ".hpp"),
     output_directory="",
     includes=(),
-    extra_files=[],
+    extra_files=(),
     out_of_place_only=False,
     ignores=(),
     show_progress=True,
