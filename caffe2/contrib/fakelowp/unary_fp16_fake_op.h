@@ -2,7 +2,7 @@
 
 #include <vector>
 
-#include <fbgemm/FbgemmFakeFP16.h>
+#include <fbgemm/FbgemmConvert.h>
 #include "caffe2/operators/elementwise_ops.h"
 #include "caffe2/utils/math.h"
 

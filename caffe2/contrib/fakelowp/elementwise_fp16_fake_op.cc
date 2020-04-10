@@ -1,4 +1,4 @@
-#include <fbgemm/FbgemmFakeFP16.h>
+#include <fbgemm/FbgemmConvert.h>
 #include "caffe2/caffe2/operators/elementwise_add_op.h"
 #include "caffe2/caffe2/operators/elementwise_div_op.h"
 #include "caffe2/caffe2/operators/elementwise_mul_op.h"
