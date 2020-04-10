@@ -22,11 +22,19 @@ inline Tensor view_complex_as_float(const Tensor& self) {
   new_sizes.emplace_back(2);
   auto new_strides = computeStrideForComplex(self.strides());
   if(self.scalar_type() == at::kComplexFloat) {
-    float* data = reinterpret_cast<float*>(self.data_ptr<std::complex<float>>());
-    return at::from_blob(data, new_sizes, new_strides, self.options().dtype(at::kFloat));
+    if (self.numel() == 0) {
+      return at::empty(new_sizes, self.options().dtype(at::kFloat));
+    } else {
+      float* data = reinterpret_cast<float*>(self.data_ptr<std::complex<float>>());
+      return at::from_blob(data, new_sizes, new_strides, self.options().dtype(at::kFloat));
+    }
   } else {
-    double* data = reinterpret_cast<double*>(self.data_ptr<std::complex<double>>());
-    return at::from_blob(data, new_sizes, new_strides, self.options().dtype(at::kDouble));
+    if (self.numel() == 0) {
+      return at::empty(new_sizes, self.options().dtype(at::kDouble));
+    } else {
+      double* data = reinterpret_cast<double*>(self.data_ptr<std::complex<double>>());
+      return at::from_blob(data, new_sizes, new_strides, self.options().dtype(at::kDouble));
+    }
   }
 }
 
