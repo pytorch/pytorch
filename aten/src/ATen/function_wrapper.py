@@ -122,9 +122,9 @@ DEFAULT_UNBOXEDONLY_FUNCTION_REGISTRATION = CodeTemplate("""\
 """)
 
 BACKEND_UNBOXEDONLY_FUNCTION_REGISTRATION = CodeTemplate("""\
-.impl("${operator_name_with_overload}", torch::dispatch(
-    DispatchKey::${Backend}TensorId,
-    CppFunction::makeUnboxedOnly(${Type}::${type_wrapper_name})))
+.impl_UNBOXED("${operator_name_with_overload}",
+              DispatchKey::${Backend}TensorId,
+              ${Type}::${type_wrapper_name})
 """)
 
 DEFAULT_FUNCTION_REGISTRATION = CodeTemplate("""\
@@ -133,7 +133,7 @@ DEFAULT_FUNCTION_REGISTRATION = CodeTemplate("""\
 
 BACKEND_FUNCTION_REGISTRATION = CodeTemplate("""\
 .impl("${operator_name_with_overload}",
-      torch::dispatch(DispatchKey::${Backend}TensorId, &${Type}::${type_wrapper_name}))
+      DispatchKey::${Backend}TensorId, &${Type}::${type_wrapper_name})
 """)
 
 # add non-virtual declaration to TensorBody.h
@@ -194,15 +194,15 @@ ${return_call} TypeDefault::${type_wrapper_name}(${native_arguments});
 
 STATIC_DISPATCH_FUNCTION_SWITCH_BODY = CodeTemplate("""\
 at::AutoNonVariableTypeMode _var_guard(true);
-switch(dispatchKeyToBackend(c10::impl::dispatchTypeId(${key_set},
-                            c10::DispatchKeySet(c10::DispatchKeySet::FULL).remove(DispatchKey::BackendSelect)))) {
-    ${static_dispatch_function_switches}
+${dispatch_key_init}
+switch (dispatchKeyToBackend(${dispatch_key_var_name})) {
+    ${static_dispatch_function_cases}
     default:
-        AT_ERROR("${api_name} not implemented for ", at::toString(${key_set}));
+        AT_ERROR("${api_name} not implemented for ", at::toString(${dispatch_key_var_name}));
 }
 """)
 
-STATIC_DISPATCH_FUNCTION_SWITCH_STATEMENT = CodeTemplate("""\
+STATIC_DISPATCH_FUNCTION_SWITCH_CASE = CodeTemplate("""\
 case Backend::${backend}:
     ${return_call} ${backend}Type::${type_wrapper_name}(${native_arguments});
     break;
@@ -387,7 +387,8 @@ TopEnvironment = TypedDict('TopEnvironment', {
     'type_registrations': List[str],
     'type_headers': List[str],
     'function_registrations': List[str],
-    'list_of_aten_ops': List[str],
+    'aten_ops_with_unboxing_already_handled_by_c10': List[str],
+    'aten_ops_with_unboxing_not_handled_by_c10_yet': List[str],
     'type_method_declarations': List[str],
     'type_method_definitions': List[str],
     'tensor_method_declarations': List[str],
@@ -511,7 +512,7 @@ FunctionOption = TypedDict('FunctionOption', {
     'formals': List[str],
     'formals_types': List[str],
     'formals_types_with_return': List[str],
-    'inferred_key_set': str,
+    # 'inferred_key_set': str,
     'inplace': bool,
     'matches_jit_signature': bool,
     # This controls whether or not we generate the interface in Type or
@@ -804,9 +805,13 @@ def create_generic(top_env, declarations):
 
         return None
 
-    def find_multidispatch_tensors(formals):
-        # type: (List[AtFormal]) -> List[str]
-        # Compute the list of all tensor arguments which should be considered
+    def is_multidispatch_formal(formal):
+        # type: (AtFormal) -> bool
+        return formal['dynamic_type'] in ['TensorOptions', 'TensorList'] or is_any_tensor_type(formal)
+
+    def find_multidispatch_formals(formals):
+        # type: (List[AtFormal]) -> List[AtFormal]
+        # Compute the list of all arguments which should be considered
         # for multiple dispatch.  Note that this doesn't completely replace
         # find_dispatch_tensor because we use the "dispatch tensor" to determine
         # device guards.  TensorOptions is included as part of this calculation.
@@ -820,11 +825,7 @@ def create_generic(top_env, declarations):
         # the end tensor that should be produced here is a CPU one.  The
         # upshot is that if you have an operator with mixed TensorOptions
         # and Tensor arguments, you MUST only ever register it generically.
-        r = []
-        for formal in formals:
-            if formal['dynamic_type'] in ['TensorOptions', 'TensorList'] or is_any_tensor_type(formal):
-                r.append(formal['name'])
-        return r
+        return [f for f in formals if is_multidispatch_formal(f)]
 
     def format_formal(f):
         # type: (AtFormal) -> str
@@ -1068,19 +1069,47 @@ def create_generic(top_env, declarations):
                     return formal
             return None
 
-        def gen_tensor_method(option, multidispatch_tensors):
-            # type: (Any, List[str]) -> FunctionCode
-            def swizzle_self(t):  # blegh
-                if t == 'self':
-                    return '*this'
+        def gen_dispatch_key_init(var_name, formals):
+            # type: (List[AtFormal]) -> str
+            topt_formals = []
+            non_topt_formals = []
+            for f in find_multidispatch_formals(formals):
+                if f['dynamic_type'] == 'TensorOptions':
+                    topt_formals.append(f)
                 else:
-                    return t
-            option['inferred_key_set'] = 'c10::detail::multi_dispatch_key_set({})'.format(
-                ', '.join(swizzle_self(t) for t in multidispatch_tensors)
-            )
+                    non_topt_formals.append(f)
+
+            if len(topt_formals) == 1 and non_topt_formals == []:
+                topt = topt_formals[0]
+                return ['DispatchKey {} = {}.computeDispatchKey();'.format(var_name, topt['name'])]
+
+            subexprs = []
+            for f in topt_formals:
+                subexprs.append('DispatchKeySet({}.computeDispatchKey())'.format(f['name']))
+            if non_topt_formals != []:
+                args = ', '.join([f['name'] for f in non_topt_formals])
+                subexprs.append('c10::detail::multi_dispatch_key_set({})'.format(args))
+            return [
+                'DispatchKeySet _dk_set = {};'.format(' | '.join(subexprs)),
+                'DispatchKeySet _dk_mask = c10::DispatchKeySet(c10::DispatchKeySet::FULL).remove(DispatchKey::BackendSelect);',
+                'DispatchKey {} = c10::impl::dispatchTypeId(_dk_set, _dk_mask);'.format(var_name),
+            ]
+
+        def gen_tensor_method(option, formals):
+            # type: (Any, List[AtFormal]) -> FunctionCode
+            def swizzle_self(f):  # blegh
+                if f['name'] == 'self':
+                    fc = f.copy()
+                    fc['name'] = '*this'
+                    return fc
+                else:
+                    return f
+
+            dispatch_key_var_name = '_dk'
+            dispatch_key_init = gen_dispatch_key_init(dispatch_key_var_name, [swizzle_self(f) for f in formals])
 
             if isinstance(type_method_dispatch, dict):
-                static_dispatch_function_switches = []
+                static_dispatch_function_cases = []
                 # NB: As this code is currently written, there will NEVER be
                 # a backend generated for variable dispatch.  There is nothing
                 # stopping us from actually implementing this, however, if you
@@ -1095,15 +1124,17 @@ def create_generic(top_env, declarations):
                 # calling code.
                 for backend in static_dispatch_backends:
                     if backend in type_method_dispatch:
-                        static_dispatch_function_switches.append(STATIC_DISPATCH_FUNCTION_SWITCH_STATEMENT.substitute(
+                        static_dispatch_function_cases.append(STATIC_DISPATCH_FUNCTION_SWITCH_CASE.substitute(
                             option,
                             backend=backend,
                             backend_function=type_method_dispatch[backend],
                             native_arguments=option['method_actuals']))
+
                 static_dispatch_method_body = STATIC_DISPATCH_FUNCTION_SWITCH_BODY.substitute(
                     option,
-                    key_set='key_set()',
-                    static_dispatch_function_switches=static_dispatch_function_switches)
+                    dispatch_key_var_name=dispatch_key_var_name,
+                    dispatch_key_init=dispatch_key_init,
+                    static_dispatch_function_cases=static_dispatch_function_cases)
             else:
                 static_dispatch_method_body = STATIC_DISPATCH_FUNCTION_DEFAULT_BODY.substitute(
                     option, native_arguments=option['method_actuals'])
@@ -1115,26 +1146,29 @@ def create_generic(top_env, declarations):
                 definition=method_definition.substitute(
                     option, static_dispatch_method_body=static_dispatch_method_body))
 
-        def gen_namespace_function(option, multidispatch_tensors):
-            # type: (Any, List[str]) -> FunctionCode
-            option['inferred_key_set'] = (
-                'c10::detail::multi_dispatch_key_set({})'.format(', '.join(multidispatch_tensors)))
+        def gen_namespace_function(option, multidispatch_formals):
+            # type: (Any, List[AtFormal]) -> FunctionCode
+
+            dispatch_key_var_name = '_dk'
+            dispatch_key_init = gen_dispatch_key_init(dispatch_key_var_name, formals)
+
             declaration = DEPRECATED_FUNCTION_DECLARATION if option['deprecated'] else FUNCTION_DECLARATION
             fn_declaration = declaration.substitute(option)
 
             if isinstance(type_method_dispatch, dict):
-                static_dispatch_function_switches = []
+                static_dispatch_function_cases = []
                 for backend in static_dispatch_backends:
                     if backend in type_method_dispatch:
-                        static_dispatch_function_switches.append(STATIC_DISPATCH_FUNCTION_SWITCH_STATEMENT.substitute(
+                        static_dispatch_function_cases.append(STATIC_DISPATCH_FUNCTION_SWITCH_CASE.substitute(
                             option,
                             backend=backend,
                             backend_function=type_method_dispatch[backend],
                             native_arguments=option['native_actuals']))
                 static_dispatch_function_body = STATIC_DISPATCH_FUNCTION_SWITCH_BODY.substitute(
                     option,
-                    key_set=option['inferred_key_set'],
-                    static_dispatch_function_switches=static_dispatch_function_switches)
+                    dispatch_key_var_name=dispatch_key_var_name,
+                    dispatch_key_init=dispatch_key_init,
+                    static_dispatch_function_cases=static_dispatch_function_cases)
             else:
                 static_dispatch_function_body = STATIC_DISPATCH_FUNCTION_DEFAULT_BODY.substitute(
                     option, native_arguments=option['native_actuals'])
@@ -1149,8 +1183,6 @@ def create_generic(top_env, declarations):
                 option['name'], ", ".join(option['method_formals_with_defaults']))
 
         type_method_dispatch = option['type_method_definition_dispatch']
-
-        multidispatch_tensors = find_multidispatch_tensors(formals)
 
         option['type_method_formals'] = [format_formal(f) for f in formals]
         option['type_method_actuals'] = [f['name'] for f in formals]
@@ -1181,8 +1213,12 @@ def create_generic(top_env, declarations):
         if broadcast_arg is not None:
             raise Exception("broadcasting is not yet supported for native functions, "
                             "but specified for function {}", option['name'])
+        if option['use_c10_dispatcher'] == 'unboxed_only':
+            top_env['aten_ops_with_unboxing_not_handled_by_c10_yet'].append(OPERATOR_NAME_FULL.substitute(option))
+        else:
+            assert option['use_c10_dispatcher'] in ['with_codegenerated_unboxing_wrapper', 'full']
+            top_env['aten_ops_with_unboxing_already_handled_by_c10'].append(OPERATOR_NAME_FULL.substitute(option))
 
-        top_env['list_of_aten_ops'].append(OPERATOR_NAME_FULL.substitute(option))
         option['native_type_method_dispatch'] = type_method_dispatch
 
         # Note [Abstract ATen methods]
@@ -1216,7 +1252,7 @@ def create_generic(top_env, declarations):
                         registration_code=DEFAULT_FUNCTION_REGISTRATION.substitute(option),
                         schema_registration_code=SCHEMA_REGISTRATION.substitute(option)))
                 else:
-                    assert option['use_c10_dispatcher'] == 'unboxed_only'
+                    assert option['use_c10_dispatcher'] in ['unboxed_only', 'with_codegenerated_unboxing_wrapper']
                     op_registrations.append(OpRegistration(
                         operator_name=OPERATOR_NAME.substitute(option),
                         registration_code=DEFAULT_UNBOXEDONLY_FUNCTION_REGISTRATION.substitute(option),
@@ -1239,13 +1275,13 @@ def create_generic(top_env, declarations):
 
         method_of = ['Type']
         if is_method:
-            code = gen_tensor_method(option, multidispatch_tensors)
+            code = gen_tensor_method(option, formals)
             top_env['tensor_method_declarations'].append(code.declaration)
             top_env['tensor_method_definitions'].append(code.definition)
             method_of.append('Tensor')
 
         if is_namespace_function:
-            code = gen_namespace_function(option, multidispatch_tensors)
+            code = gen_namespace_function(option, formals)
             top_env['function_definitions'].append(code.definition)
             top_env['function_declarations'].append(code.declaration)
             method_of.append('namespace')
@@ -1571,7 +1607,7 @@ def create_derived(backend_type_env, declarations):
                             registration_code=BACKEND_FUNCTION_REGISTRATION.substitute(env),
                             schema_registration_code=SCHEMA_REGISTRATION.substitute(option)))
                     else:
-                        assert option['use_c10_dispatcher'] == 'unboxed_only'
+                        assert option['use_c10_dispatcher'] in ['unboxed_only', 'with_codegenerated_unboxing_wrapper']
                         op_registrations.append(OpRegistration(
                             operator_name=OPERATOR_NAME.substitute(option),
                             registration_code=BACKEND_UNBOXEDONLY_FUNCTION_REGISTRATION.substitute(env),
