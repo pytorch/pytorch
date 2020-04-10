@@ -14182,7 +14182,6 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         b = torch.exp(torch.ones(1, dtype=dtype, device=device))
         self.assertEqual(a, b.expand(2 ** 31))
 
-    @onlyCPU
     @dtypes(torch.float, torch.double)
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_hardswish(self, device, dtype):
