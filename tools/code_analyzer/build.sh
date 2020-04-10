@@ -140,7 +140,7 @@ check_test_result() {
     echo "Test result is the same as expected."
   else
     echo "Test result is DIFFERENT from expected!"
-    diff "${OUTPUT}" "${TEST_SRC_ROOT}/expected_deps.yaml"
+    diff -u "${TEST_SRC_ROOT}/expected_deps.yaml" "${OUTPUT}"
     exit 1
   fi
 }
