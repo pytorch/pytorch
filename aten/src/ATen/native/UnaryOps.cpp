@@ -223,21 +223,25 @@ Tensor& logical_not_out(Tensor& result, const Tensor& self) {
 }
 
 Tensor clamp(const Tensor& self, optional<Scalar> min, optional<Scalar> max) {
+  TORCH_CHECK(!self.is_complex(), "clamp is not yet implemented for complex tensors.");
   Tensor result = at::empty({0}, self.options());
   return clamp_out(result, self, min, max);
 }
 
 Tensor clamp_max(const Tensor& self, Scalar max) {
+  TORCH_CHECK(!self.is_complex(), "clamp is not yet implemented for complex tensors.");
   Tensor result = at::empty({0}, self.options());
   return clamp_max_out(result, self, max);
 }
 
 Tensor clamp_min(const Tensor& self, Scalar min) {
+  TORCH_CHECK(!self.is_complex(), "clamp is not yet implemented for complex tensors.");
   Tensor result = at::empty({0}, self.options());
   return clamp_min_out(result, self, min);
 }
 
 Tensor& _clamp__cpu(Tensor& self, optional<Scalar> min, optional<Scalar> max) {
+  TORCH_CHECK(!self.is_complex(), "clamp is not yet implemented for complex tensors.");
   return clamp_out(self, self, min, max);
 }
 
@@ -262,6 +266,7 @@ Tensor& _clamp_out_cpu(
     const Tensor& self,
     optional<Scalar> min,
     optional<Scalar> max) {
+  TORCH_CHECK(!self.is_complex(), "clamp is not yet implemented for complex tensors.");
   if (min && max) {
     TORCH_CHECK(self.device().type() == DeviceType::CPU,
                 "clamp only supports CPU device type, got: ", self.device().type());
@@ -281,10 +286,12 @@ Tensor& _clamp_out_cpu(
 }
 
 Tensor& _clamp_max__cpu(Tensor& self, Scalar max) {
+  TORCH_CHECK(!self.is_complex(), "clamp is not yet implemented for complex tensors.");
   return clamp_max_out(self, self, max);
 }
 
 Tensor& _clamp_max_out_cpu(Tensor& result, const Tensor& self, Scalar max) {
+  TORCH_CHECK(!self.is_complex(), "clamp is not yet implemented for complex tensors.");
   TORCH_CHECK(self.device().type() == DeviceType::CPU,
               "clamp_max only supports CPU device type, got: ", self.device().type());
   TORCH_CHECK(self.layout() == Layout::Strided,
@@ -296,10 +303,12 @@ Tensor& _clamp_max_out_cpu(Tensor& result, const Tensor& self, Scalar max) {
 }
 
 Tensor& _clamp_min__cpu(Tensor& self, Scalar min) {
+  TORCH_CHECK(!self.is_complex(), "clamp is not yet implemented for complex tensors.");
   return clamp_min_out(self, self, min);
 }
 
 Tensor& _clamp_min_out_cpu(Tensor& result, const Tensor& self, Scalar min) {
+  TORCH_CHECK(!self.is_complex(), "clamp is not yet implemented for complex tensors.");
   TORCH_CHECK(self.device().type() == DeviceType::CPU,
               "clamp_min only supports CPU device type, got: ", self.device().type());
   TORCH_CHECK(self.layout() == Layout::Strided,
