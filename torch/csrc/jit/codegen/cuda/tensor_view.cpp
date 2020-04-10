@@ -184,8 +184,9 @@ TensorView* TensorView::split(int axis, int factor) {
   if (axis < 0)
     axis += domain()->nDims();
 
-  TORCH_CHECK(axis >= 0 && axis < domain()->nDims(),
-    "Trying to split axis outside of TensorView's range.");
+  TORCH_CHECK(
+      axis >= 0 && axis < domain()->nDims(),
+      "Trying to split axis outside of TensorView's range.");
 
   if (getComputeAtView() != nullptr)
     if (axis < getComputeAtAxis())
@@ -200,8 +201,9 @@ TensorView* TensorView::merge(int axis) {
   if (axis < 0)
     axis += domain()->nDims();
 
-  TORCH_CHECK(axis >= 0 && axis + 1 < domain()->nDims(),
-    "Trying to merge axis outside of TensorView's range.");
+  TORCH_CHECK(
+      axis >= 0 && axis + 1 < domain()->nDims(),
+      "Trying to merge axis outside of TensorView's range.");
 
   if (getComputeAtView() != nullptr)
     if (axis + 1 < getComputeAtAxis())
@@ -213,59 +215,75 @@ TensorView* TensorView::merge(int axis) {
 
 // Reorder axes according to map[old_pos] = new_pos
 TensorView* TensorView::reorder(const std::unordered_map<int, int>& axis2pos_) {
-
   // START VALIDATION CHECKS
-  // adjust based on negative values (any negative values gets nDims added to it)
+  // adjust based on negative values (any negative values gets nDims added to
+  // it)
   std::unordered_map<int, int> axis2pos;
   auto ndims = nDims();
-  std::transform(axis2pos_.begin(), axis2pos_.end(), std::inserter(axis2pos, axis2pos.begin()),
-    [ndims] (std::unordered_map<int, int>::value_type entry){
-      return std::unordered_map<int, int>::value_type({
-        entry.first < 0 ? entry.first + ndims : entry.first,
-        entry.second < 0 ? entry.second + ndims : entry.second,
+  std::transform(
+      axis2pos_.begin(),
+      axis2pos_.end(),
+      std::inserter(axis2pos, axis2pos.begin()),
+      [ndims](std::unordered_map<int, int>::value_type entry) {
+        return std::unordered_map<int, int>::value_type({
+            entry.first < 0 ? entry.first + ndims : entry.first,
+            entry.second < 0 ? entry.second + ndims : entry.second,
+        });
       });
-    }
-  );
 
   // Check if any adjusted values are < 0, or >= nDims, which are invalid
-  bool out_of_range =
-      std::any_of(axis2pos.begin(), axis2pos.end(), [ndims](std::unordered_map<int, int>::value_type entry) {
-        return entry.first < 0 || entry.first >= ndims || entry.second < 0 || entry.second >= ndims;
+  bool out_of_range = std::any_of(
+      axis2pos.begin(),
+      axis2pos.end(),
+      [ndims](std::unordered_map<int, int>::value_type entry) {
+        return entry.first < 0 || entry.first >= ndims || entry.second < 0 ||
+            entry.second >= ndims;
       });
 
   TORCH_CHECK(
       !out_of_range,
       "TensorView reorder axes are outside the number of dimensions in the TensorView.")
 
-  //Going to use sets, to see if any duplicate values are in the map.
+  // Going to use sets, to see if any duplicate values are in the map.
 
   std::set<int> old_pos_set;
   std::transform(
-    axis2pos.begin(),
-    axis2pos.end(),
-    std::inserter(old_pos_set, old_pos_set.begin()),
-    [](std::unordered_map<int, int>::value_type entry){return entry.first;});
+      axis2pos.begin(),
+      axis2pos.end(),
+      std::inserter(old_pos_set, old_pos_set.begin()),
+      [](std::unordered_map<int, int>::value_type entry) {
+        return entry.first;
+      });
 
   std::set<int> new_pos_set;
   std::transform(
-    axis2pos.begin(),
-    axis2pos.end(),
-    std::inserter(new_pos_set, new_pos_set.begin()),
-    [](std::unordered_map<int, int>::value_type entry){return entry.first;});
+      axis2pos.begin(),
+      axis2pos.end(),
+      std::inserter(new_pos_set, new_pos_set.begin()),
+      [](std::unordered_map<int, int>::value_type entry) {
+        return entry.first;
+      });
 
   // Error out if duplicate values are found.
-  TORCH_CHECK(old_pos_set.size() == axis2pos.size() && new_pos_set.size() == axis2pos.size(),
-    "Duplicate entries in transformation map sent to TensorView reorder.");
+  TORCH_CHECK(
+      old_pos_set.size() == axis2pos.size() &&
+          new_pos_set.size() == axis2pos.size(),
+      "Duplicate entries in transformation map sent to TensorView reorder.");
 
   // Check if we're trying to reorder any values outside of the computeAt axis
 
-  if(hasComputeAt()){
+  if (hasComputeAt()) {
     auto compute_at_axis = getComputeAtAxis();
-    bool outside_computeat =
-      std::any_of(axis2pos.begin(), axis2pos.end(), [compute_at_axis](std::unordered_map<int, int>::value_type entry) {
-        return entry.first < compute_at_axis  || entry.second < compute_at_axis;
-      });
-    TORCH_CHECK(!outside_computeat, "Cannot reorder dimensions that are outside computeAt axis.");
+    bool outside_computeat = std::any_of(
+        axis2pos.begin(),
+        axis2pos.end(),
+        [compute_at_axis](std::unordered_map<int, int>::value_type entry) {
+          return entry.first < compute_at_axis ||
+              entry.second < compute_at_axis;
+        });
+    TORCH_CHECK(
+        !outside_computeat,
+        "Cannot reorder dimensions that are outside computeAt axis.");
   }
   // END VALIDATION CHECKS
   setDomain(domain()->reorder(axis2pos_));

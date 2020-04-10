@@ -127,8 +127,8 @@ struct scopeInsertBefore : private OptInDispatch {
   void handle(Expr* expr) final {
     OptInDispatch::handle(expr);
   }
-  
-  scopeInsertBefore(Expr* ref, Expr* expr):ref_(ref), expr_(expr) {}
+
+  scopeInsertBefore(Expr* ref, Expr* expr) : ref_(ref), expr_(expr) {}
 
  public:
   static void insert(Expr* scope, Expr* ref, Expr* expr) {
@@ -363,7 +363,7 @@ void pushBack(Expr* scope, Expr* expr) {
 }
 
 // Insert expr in scope before ref
-void insertBefore(Expr* scope, Expr* ref, Expr* expr){
+void insertBefore(Expr* scope, Expr* ref, Expr* expr) {
   scopeInsertBefore::insert(scope, ref, expr);
 }
 

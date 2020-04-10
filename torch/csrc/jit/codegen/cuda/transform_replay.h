@@ -185,11 +185,10 @@ struct TORCH_CUDA_API TransformReplay : public TransformIter {
   static TensorView* fullReplay(
       TensorView* replay_ref,
       TensorView* replay_target);
-    
+
   static TensorDomain* fullReplay(
       TensorDomain* replay_ref,
       TensorDomain* replay_target);
-
 };
 
 } // namespace fuser

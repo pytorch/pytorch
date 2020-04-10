@@ -78,9 +78,10 @@ TensorIndex* GPULower::getLocalProducerIndex(
   std::vector<IterDomain*> used_ranges;
   bool unrolled = false;
   for (decltype(loopInds.size()) i{0}; i < loopInds.size(); i++) {
-    if(ranges[i]->parallel_method() == ParallelType::Unroll)
+    if (ranges[i]->parallel_method() == ParallelType::Unroll)
       unrolled = true;
-    if (!unrolled && producer->hasComputeAt() && i < producer->getComputeAtAxis())
+    if (!unrolled && producer->hasComputeAt() &&
+        i < producer->getComputeAtAxis())
       continue;
     if (ranges[i]->isThread())
       continue;
@@ -151,9 +152,10 @@ TensorIndex* GPULower::getLocalConsumerIndex(TensorView* consumer) {
   std::vector<IterDomain*> used_ranges;
   bool unrolled = false;
   for (decltype(loopInds.size()) i{0}; i < loopInds.size(); i++) {
-    if(ranges[i]->parallel_method() == ParallelType::Unroll)
+    if (ranges[i]->parallel_method() == ParallelType::Unroll)
       unrolled = true;
-    if (!unrolled && consumer->hasComputeAt() && i < consumer->getComputeAtAxis())
+    if (!unrolled && consumer->hasComputeAt() &&
+        i < consumer->getComputeAtAxis())
       continue;
     if (ranges[i]->isThread())
       continue;
@@ -310,12 +312,12 @@ void GPULower::replaceSizes() {
   std::vector<TensorView*> all_tvs;
 
   for (auto* val : fusion->inputs())
-    if(ir_utils::isTV(val))
-        orig_inp_out.push_back(ir_utils::asTV(val));
+    if (ir_utils::isTV(val))
+      orig_inp_out.push_back(ir_utils::asTV(val));
 
   for (auto* val : fusion->outputs())
-    if(ir_utils::isTV(val))
-        orig_inp_out.push_back(ir_utils::asTV(val));
+    if (ir_utils::isTV(val))
+      orig_inp_out.push_back(ir_utils::asTV(val));
 
   for (auto* val : fusion->deterministic_vals()) {
     if (ir_utils::isTV(val)) {
@@ -336,7 +338,6 @@ void GPULower::replaceSizes() {
   // option which seems less elegant but would also work is build up the domain
   // on the new tensor, and then simply replace it into the original one.
   for (TensorView* tv : orig_inp_out) {
-
     // Replace the domain with one based on Ti.size[j]
     std::vector<IterDomain*> new_domain_iters;
     TensorDomain* root_td = tv->getRootDomain();
@@ -346,17 +347,17 @@ void GPULower::replaceSizes() {
       ss << "T" << tv->name() << ".size[" << i << "]";
       Val* new_size =
           new NamedScalar(ss.str(), orig_size->getDataType().value());
-      if(!orig_size->sameAs(new_size) || size_map.find(orig_size) == size_map.end() )
+      if (!orig_size->sameAs(new_size) ||
+          size_map.find(orig_size) == size_map.end())
         size_map[orig_size] = new_size;
     }
   }
 
   // If we already lowered all inputs/outputs we can just return.
-  if(size_map.size() == 0)
+  if (size_map.size() == 0)
     return;
 
   for (TensorView* tv : all_tvs) {
-
     std::vector<IterDomain*> new_domain_iters;
     TensorDomain* root_td = tv->getRootDomain();
 
@@ -372,7 +373,8 @@ void GPULower::replaceSizes() {
     }
 
     TensorDomain* old_domain = tv->domain();
-    TensorDomain* new_domain = TransformReplay::fullReplay(old_domain, new TensorDomain(new_domain_iters));
+    TensorDomain* new_domain = TransformReplay::fullReplay(
+        old_domain, new TensorDomain(new_domain_iters));
 
     TORCH_INTERNAL_ASSERT(
         old_domain->nDims() == new_domain->nDims(),
@@ -381,14 +383,11 @@ void GPULower::replaceSizes() {
         " and ",
         old_domain->nDims());
     // Parallelize all iter domains
-    for (decltype(new_domain->nDims()) i{0}; i < new_domain->nDims();
-         i++)
+    for (decltype(new_domain->nDims()) i{0}; i < new_domain->nDims(); i++)
       new_domain->axis(i)->parallelize(old_domain->axis(i)->parallel_method());
 
     tv->setDomain(new_domain);
-
   }
-
 }
 
 namespace {

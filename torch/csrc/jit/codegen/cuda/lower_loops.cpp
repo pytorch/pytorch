@@ -70,8 +70,8 @@ void UnrollPass::handle(ForLoop* fl) {
 
   TensorView* out;
   bool has_TV_op = false;
-  for(Expr* expr : fl->body().exprs())
-    if(ir_utils::isTVOp(expr)){
+  for (Expr* expr : fl->body().exprs())
+    if (ir_utils::isTVOp(expr)) {
       // Predicate determining op for unroll
       out = ir_utils::asTV(expr->output(0));
       has_TV_op = true;
@@ -135,7 +135,7 @@ void UnrollPass::handle(ForLoop* fl) {
       if (!ir_utils::isTVOp(expr))
         continue;
 
-      // Setup the expressions that need predicates around them.    
+      // Setup the expressions that need predicates around them.
       Int* inline_predicate =
           getPredicate(out, scope_utils::getLoopIndices(for_loops.back()));
       IfThenElse* inline_ite =
@@ -147,9 +147,8 @@ void UnrollPass::handle(ForLoop* fl) {
 
     } // for expr
 
-
   } else { //  if(!within_unroll)
-      
+
     for (auto expr : fl->body().exprs()) {
       if (!ir_utils::isTVOp(expr))
         continue;
@@ -212,16 +211,17 @@ void LoopNestGenerator::pushAlloc(TensorView* tv) {
   // Compute at axis can be == tv->nDims() meaning it's inline
   decltype(tv->nDims()) alloc_pos = 0;
   bool reset = true;
-  while(alloc_pos <= tv->nDims() ){
-    if(tv->hasComputeAt() && alloc_pos == tv->getComputeAtAxis()){
+  while (alloc_pos <= tv->nDims()) {
+    if (tv->hasComputeAt() && alloc_pos == tv->getComputeAtAxis()) {
       reset = false;
       break;
     }
-    if( alloc_pos < tv->nDims() &&
-      tv->getComputeAtAxis(alloc_pos)->parallel_method() == ParallelType::Unroll){
-        reset = false;
-        break;
-      }
+    if (alloc_pos < tv->nDims() &&
+        tv->getComputeAtAxis(alloc_pos)->parallel_method() ==
+            ParallelType::Unroll) {
+      reset = false;
+      break;
+    }
     alloc_pos++;
   }
   alloc_pos = reset ? 0 : alloc_pos;
@@ -245,15 +245,15 @@ void LoopNestGenerator::pushAlloc(TensorView* tv) {
     }
   }
   Allocate* alloc = new Allocate(tv, size);
-  if(alloc_pos == 0){
+  if (alloc_pos == 0) {
     lowered_exprs.insert(lowered_exprs.begin(), alloc);
-  } else if(alloc_pos == for_loops.size()){
+  } else if (alloc_pos == for_loops.size()) {
     // inline
-    scope_utils::pushBack(for_loops[alloc_pos-1], alloc);
+    scope_utils::pushBack(for_loops[alloc_pos - 1], alloc);
   } else {
-    scope_utils::insertBefore(for_loops[alloc_pos-1], for_loops[alloc_pos], alloc);
+    scope_utils::insertBefore(
+        for_loops[alloc_pos - 1], for_loops[alloc_pos], alloc);
   }
-  
 }
 
 // Clear out the last recorded computeAtView
@@ -269,7 +269,7 @@ void LoopNestGenerator::setActiveView(const TensorView* const tv) {
 }
 
 void LoopNestGenerator::openFor(IterDomain* id) {
-  if( for_loops.size() > 0){
+  if (for_loops.size() > 0) {
     ForLoop* new_scope = scope_utils::openFor(for_loops.back(), id);
     for_loops.push_back(new_scope);
   } else {
@@ -352,7 +352,6 @@ void LoopNestGenerator::updateLoopNest(TensorView* tv) {
 
 // Custom dispatch for Expr, want to find out of it's a TV op
 void LoopNestGenerator::handle(Expr* expr) {
-
   if (!ir_utils::isTVOp(expr))
     return;
 

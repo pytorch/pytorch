@@ -60,11 +60,11 @@ TensorDomain* TransformReplay::replayBackward(
  */
 TensorDomain* TransformReplay::replay(Split* expr, TensorDomain* td) {
   int axis = expr->axis();
-  bool run_split =  influence[axis];
+  bool run_split = influence[axis];
 
-  //Propagate influence
+  // Propagate influence
   influence.insert(influence.begin() + axis + 1, influence[axis]);
-  
+
   // Forward prop influence
   if (run_split) {
     // Make sure split axis is real.
@@ -85,7 +85,7 @@ TensorDomain* TransformReplay::replay(Split* expr, TensorDomain* td) {
     axis_map.insert(
         axis_map.begin() + expr->axis() + 1,
         real_axis + 1); // insert axis at position axis.
-        
+
     // Replay split
     return td->split(real_axis, *(expr->factor()->value()));
   } else {
@@ -127,7 +127,6 @@ TensorDomain* TransformReplay::replay(Merge* expr, TensorDomain* td) {
     assert(axis_map[axis + 1] == -1);
     return td;
   }
-
 }
 
 TensorDomain* TransformReplay::replay(Reorder* expr, TensorDomain* td) {
@@ -237,7 +236,6 @@ TensorDomain* TransformReplay::runReplay(
     TensorDomain* replay_ref,
     TensorDomain* replay_target,
     int compute_at_axis) {
-
   if (compute_at_axis < 0)
     compute_at_axis += int(replay_ref->nDims()) + 1;
 
@@ -296,7 +294,7 @@ TensorDomain* TransformReplay::runReplay(
   //       "Transforms cannot be replayed as source and destinations do not have
   //       the same root sizes.");
   // }
-  
+
   /* STEP 3 */
   // Replay operations while forward propagating influence. The resulting
   // influence can be different in forward propagation, than in backward
