@@ -77,8 +77,8 @@ TEST(BoundShapeInference, SparseLengthsSum) {
   verifyShapeInfo(
       out_shape,
       "Data",
-      {TensorBoundShape_DimType_FEATURE_MAX_DEFAULT},
-      {spec.max_seq_size},
+      {TensorBoundShape_DimType_BATCH_OF_FEATURE_MAX_DEFAULT},
+      {spec.max_batch_size * spec.max_seq_size},
       TensorProto_DataType_INT64);
   verifyShapeInfo(
       out_shape,
@@ -122,8 +122,8 @@ TEST(BoundShapeInference, SparseLengthsSumFused8BitRowwise) {
   verifyShapeInfo(
       out_shape,
       "Data",
-      {TensorBoundShape_DimType_FEATURE_MAX_DEFAULT},
-      {spec.max_seq_size},
+      {TensorBoundShape_DimType_BATCH_OF_FEATURE_MAX_DEFAULT},
+      {spec.max_batch_size * spec.max_seq_size},
       TensorProto_DataType_INT64);
   verifyShapeInfo(
       out_shape,
@@ -167,8 +167,8 @@ TEST(BoundShapeInference, SparseLengthsSumFused4BitRowwise) {
   verifyShapeInfo(
       out_shape,
       "Data",
-      {TensorBoundShape_DimType_FEATURE_MAX_DEFAULT},
-      {spec.max_seq_size},
+      {TensorBoundShape_DimType_BATCH_OF_FEATURE_MAX_DEFAULT},
+      {spec.max_batch_size * spec.max_seq_size},
       TensorProto_DataType_INT64);
   verifyShapeInfo(
       out_shape,
@@ -202,14 +202,14 @@ TEST(BoundShapeInference, LengthsRangeFill) {
   verifyShapeInfo(
       out_shape,
       "Y",
-      {TensorBoundShape_DimType_FEATURE_MAX_DEFAULT},
-      {spec.max_seq_size},
+      {TensorBoundShape_DimType_BATCH_OF_FEATURE_MAX_DEFAULT},
+      {spec.max_batch_size * spec.max_seq_size},
       TensorProto_DataType_INT32);
   verifyShapeInfo(
       out_shape,
       "Z",
-      {TensorBoundShape_DimType_FEATURE_MAX_DEFAULT},
-      {spec.max_seq_size},
+      {TensorBoundShape_DimType_BATCH_OF_FEATURE_MAX_DEFAULT},
+      {spec.max_batch_size * spec.max_seq_size},
       TensorProto_DataType_INT32);
 }
 

@@ -10,9 +10,11 @@
 #include <unordered_set>
 
 namespace caffe2 {
-// This struct stores the max bound size for batch in the general sense. We have
-// the conventioal batch size and the look-up sequence, which is also batch in a
-// sense.
+// This struct stores the max bound size for batch in the general sense.
+// max_batch_size is the upper bound of batch_size.
+// max_seq_size is the upper bound of length of every item in a batch.
+// Upper bound of length of a batch of items should be max_batch_size *
+// max_seq_size.
 struct CAFFE2_API BoundShapeSpec {
   explicit BoundShapeSpec(int64_t b, int64_t q)
       : max_batch_size(b), max_seq_size(q) {}
