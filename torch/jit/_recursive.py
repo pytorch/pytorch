@@ -394,6 +394,14 @@ def create_script_module_impl(nn_module, concrete_type, stubs_fn):
         # nn.Module.forward)
         script_module.__dict__[name] = script_method
 
+        for idx, fn in nn_module._forward_pre_hooks.items():
+            if stub.original_method is fn:
+                script_module._forward_pre_hooks[idx] = script_method
+
+        for idx, fn in nn_module._forward_hooks.items():
+            if stub.original_method is fn:
+                script_module._forward_hooks[idx] = script_method
+
 
     # copy over python methods to script module if they aren't defined on the script module
     # this is currently an internal api used only on module containers

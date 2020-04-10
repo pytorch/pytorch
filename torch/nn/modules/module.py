@@ -547,7 +547,10 @@ class Module(object):
 
     def __call__(self, *input, **kwargs):
         for hook in self._forward_pre_hooks.values():
-            result = hook(self, input)
+            if isinstance(hook, torch._C.ScriptMethod):
+                result = hook(input)
+            else:
+                result = hook(self, input)
             if result is not None:
                 if not isinstance(result, tuple):
                     result = (result,)
@@ -557,7 +560,11 @@ class Module(object):
         else:
             result = self.forward(*input, **kwargs)
         for hook in self._forward_hooks.values():
-            hook_result = hook(self, input, result)
+            if isinstance(hook, torch._C.ScriptMethod):
+                inputs = [*input]
+                hook_result = hook(inputs[0], result)
+            else:
+                hook_result = hook(self, input, result)
             if hook_result is not None:
                 result = hook_result
         if len(self._backward_hooks) > 0:
