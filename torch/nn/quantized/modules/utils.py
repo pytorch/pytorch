@@ -1,4 +1,5 @@
 import torch
+from torch._six import container_abcs
 
 def _quantize_weight(float_wt, observer):
     wt_scale, wt_zp = observer.calculate_qparams()
@@ -14,3 +15,14 @@ def _quantize_weight(float_wt, observer):
     else:
         raise ValueError("Unexpected qscheme " + observer.qscheme)
     return qweight
+
+def _ntuple_from_first(n):
+    """Converts the argument to a tuple of size n
+    with the first element repeated."""
+    def parse(x):
+        while isinstance(x, container_abcs.Iterable):
+            x = x[0]
+        return tuple(repeat(x, n))
+    return parse
+
+_pair_from_first = _ntuple_from_first(2)
