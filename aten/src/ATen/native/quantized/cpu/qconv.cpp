@@ -711,6 +711,26 @@ class QConvInt8 final : public c10::OperatorKernel {
   }
 };
 
+// kernel for maintaining backward compatibility
+template <int kSpatialDim>
+class QConvInt8ForBC final : public c10::OperatorKernel {
+ public:
+  Tensor operator()(
+      Tensor act,
+      const c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>>& packed_weight,
+      torch::List<int64_t> stride,
+      torch::List<int64_t> padding,
+      torch::List<int64_t> dilation,
+      int64_t groups,
+      double output_scale,
+      int64_t output_zero_point) {
+    TORCH_CHECK(false, "Arguments [stride, padding, dilation, groups] in \
+     ops.quantized.conv" + c10::to_string(kSpatialDim) + "d, " +
+     "ops.quantized.conv" + c10::to_string(kSpatialDim) + "d_relu, \
+     have been removed, please update your model to remove these arguments.");
+  }
+};
+
 static auto registry =
     c10::RegisterOperators()
         .op("quantized::conv2d",
@@ -730,6 +750,18 @@ static auto registry =
                 DispatchKey::QuantizedCPUTensorId))
         .op("quantized::conv3d_relu",
             c10::RegisterOperators::options().kernel<QConvInt8<3, true>>(
+                DispatchKey::QuantizedCPUTensorId))
+        .op("quantized::conv2d.deprecated",
+            c10::RegisterOperators::options().kernel<QConvInt8ForBC<2>>(
+                DispatchKey::QuantizedCPUTensorId))
+        .op("quantized::conv2d_relu.deprecated",
+            c10::RegisterOperators::options().kernel<QConvInt8ForBC<2>>(
+                DispatchKey::QuantizedCPUTensorId))
+        .op("quantized::conv3d.deprecated",
+            c10::RegisterOperators::options().kernel<QConvInt8ForBC<3>>(
+                DispatchKey::QuantizedCPUTensorId))
+        .op("quantized::conv3d_relu.deprecated",
+            c10::RegisterOperators::options().kernel<QConvInt8ForBC<3>>(
                 DispatchKey::QuantizedCPUTensorId));
 
 } // namespace

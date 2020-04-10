@@ -159,18 +159,15 @@ static auto registry =
     c10::RegisterOperators()
         .op(c10::RegisterOperators::options()
             .schema("quantized::conv_unpack(__torch__.torch.classes.quantized.Conv2dPackedParamsBase packed_weight) -> (Tensor W_origin, Tensor? B_origin)")
-            .kernel<QConvUnpackWeightsInt8<2>>(
-                DispatchKey::CPUTensorId)) // conv_unpack is deprecated, please
+            .catchAllKernel<QConvUnpackWeightsInt8<2>>()) // conv_unpack is deprecated, please
         // use conv2d_unpack for 2D conv.
         .op(c10::RegisterOperators::options()
             .schema("quantized::conv2d_unpack(__torch__.torch.classes.quantized.Conv2dPackedParamsBase packed_weight) -> (Tensor W_origin, Tensor? B_origin)")
-            .kernel<QConvUnpackWeightsInt8<2>>(
-                DispatchKey::CPUTensorId)) // We use  conv2d_unpack to be
+            .catchAllKernel<QConvUnpackWeightsInt8<2>>()) // We use  conv2d_unpack to be
                                            // consistent with conv3d_unpack
         .op(c10::RegisterOperators::options()
             .schema("quantized::conv3d_unpack(__torch__.torch.classes.quantized.Conv3dPackedParamsBase packed_weight) -> (Tensor W_origin, Tensor? B_origin)")
-            .kernel<QConvUnpackWeightsInt8<3>>(
-                DispatchKey::CPUTensorId));
+            .catchAllKernel<QConvUnpackWeightsInt8<3>>());
 
 } // namespace
 } // namespace native
