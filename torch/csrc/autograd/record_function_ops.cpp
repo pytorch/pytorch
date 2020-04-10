@@ -51,7 +51,7 @@ void record_function_exit(const at::Tensor& handle) {
 }
 
 // TODO: once python and JIT futures are merged, consolidate this with
-// call_end_callbacks_on_fut.
+// call_end_callbacks_on_fut (https://github.com/pytorch/pytorch/issues/34999).
 void _call_end_callbacks_on_jit_fut(
     const at::Tensor& handle,
     const c10::intrusive_ptr<c10::ivalue::Future>& fut) {

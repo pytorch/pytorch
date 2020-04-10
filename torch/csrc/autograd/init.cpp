@@ -57,7 +57,7 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
   m.def("_disable_profiler", disableProfiler);
   m.def("_profiler_enabled", profilerEnabled);
 
-  // TODO: remove when jit future can hold PyObject
+  // TODO: remove when jit future can hold PyObject (https://github.com/pytorch/pytorch/issues/34999)
 #ifdef USE_DISTRIBUTED
   m.def(
       "_call_end_callbacks_on_fut",

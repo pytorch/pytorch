@@ -482,7 +482,7 @@ def _invoke_rpc(to, func, rpc_type, args=None, kwargs=None):
     dst_worker_info = _to_worker_info(to)
 
     # TODO: profiling logic does not really belong in invoke_rpc, it should be
-    # added as part of a context manager or decorator so it can be reused.
+    # added as part of a context manager or helper (https://github.com/pytorch/pytorch/issues/36360)
     should_profile = torch.autograd._profiler_enabled() and _profiling_enabled()
 
     ctx_manager = contextlib.suppress()
