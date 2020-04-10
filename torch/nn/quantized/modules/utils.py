@@ -22,6 +22,8 @@ def _ntuple_from_first(n):
     with the first element repeated."""
     def parse(x):
         while isinstance(x, container_abcs.Iterable):
+            if len(x) == n:
+                break
             x = x[0]
         return tuple(repeat(x, n))
     return parse
