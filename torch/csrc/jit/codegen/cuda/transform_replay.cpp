@@ -233,16 +233,19 @@ TensorDomain* TransformReplay::replay(Reorder* expr, TensorDomain* td) {
  * outside of compute_at_axis.
  *
  */
-TensorView* TransformReplay::runReplay(
-    TensorView* replay_ref,
-    TensorView* replay_target,
+TensorDomain* TransformReplay::runReplay(
+    TensorDomain* replay_ref,
+    TensorDomain* replay_target,
     int compute_at_axis) {
+
   if (compute_at_axis < 0)
     compute_at_axis += int(replay_ref->nDims()) + 1;
 
   TORCH_CHECK(
       compute_at_axis >= 0 && compute_at_axis < int(replay_ref->nDims()) + 1,
-      "Transform replay cannot be performed as the compute_at_axis is not in the valid range.");
+      "Transform replay cannot be performed as the compute_at_axis is not in the valid range, it should be 0 or greater, and less than ",
+      int(replay_ref->nDims()) + 1,
+      ".");
 
   this->compute_at_axis = compute_at_axis;
 
@@ -250,7 +253,7 @@ TensorView* TransformReplay::runReplay(
   // Reset the tensor domain of the target, this is the only way we can be
   // certain That we can actually replay the ops of ref.
   // Trace back to the root TensorDomain's of ref and target
-  replay_target->resetView();
+  replay_target = replay_target->rootDomain();
 
   /* STEP 2 */
   // Mark compute_at_axis and below as "influenced", trace back through
@@ -258,7 +261,7 @@ TensorView* TransformReplay::runReplay(
   // produce these axis
   // As we trace the ref, record the operations to go from replay_ref ->
   // ref_root, save in "record"
-  TensorDomain* ref_root = replayBackward(replay_ref->domain(), true);
+  TensorDomain* ref_root = replayBackward(replay_ref, true);
   // We're going to save a copy of this vector, class member influnce will be
   // used during replay to forward propagate influence.
   std::vector<bool> root_influence_vector = influence;
@@ -303,7 +306,7 @@ TensorView* TransformReplay::runReplay(
   // actually execute those based on influence. If we didn't track all
   // axes, we wouldn't know what axis split/merge/reorder are referencing
   // as they're relative to the "full" replay that produced the reference.
-  TensorView* replayed = TransformIter::runReplay(replay_target);
+  TensorDomain* replayed = TransformIter::runReplay(replay_target);
 
   for (decltype(replayed->nDims()) i{0}; i < compute_at_axis; i++)
     if (replayed->axis(i)->isReduction())
@@ -312,6 +315,16 @@ TensorView* TransformReplay::runReplay(
           "Generated a compute_at dependency where a reduction would be used before computed.");
 
   return replayed;
+}
+
+TensorView* TransformReplay::runReplay(
+    TensorView* replay_ref,
+    TensorView* replay_target,
+    int compute_at_axis) {
+  TensorDomain* td =
+      runReplay(replay_ref->domain(), replay_target->domain(), compute_at_axis);
+  replay_target->setDomain(td);
+  return replay_target;
 }
 
 TensorView* TransformReplay::replay(
@@ -326,6 +339,14 @@ TensorView* TransformReplay::replay(
 TensorView* TransformReplay::fullReplay(
     TensorView* replay_ref,
     TensorView* replay_target) {
+  TransformReplay tr;
+  tr.runReplay(replay_ref, replay_target, -1);
+  return replay_target;
+}
+
+TensorDomain* TransformReplay::fullReplay(
+    TensorDomain* replay_ref,
+    TensorDomain* replay_target) {
   TransformReplay tr;
   tr.runReplay(replay_ref, replay_target, -1);
   return replay_target;

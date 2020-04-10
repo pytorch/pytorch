@@ -40,7 +40,7 @@ struct TORCH_CUDA_API TransformIter : public IterVisitor {
   TensorDomain* replay(Expr* expr, TensorDomain* tv);
 
   // Runs through operations recorded in record from root-> present
-  TensorView* runReplay(TensorView* tv);
+  TensorDomain* runReplay(TensorDomain* tv);
 
   // Forward record from root, to replay_ref/ref_root
   std::vector<Expr*> record;

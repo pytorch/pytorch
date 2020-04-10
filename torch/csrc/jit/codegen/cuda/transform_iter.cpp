@@ -110,13 +110,11 @@ TensorDomain* TransformIter::replay(Expr* expr, TensorDomain* td) {
   }
 }
 
-TensorView* TransformIter::runReplay(TensorView* tv) {
-  TensorDomain *td = tv->domain();
+TensorDomain* TransformIter::runReplay(TensorDomain* td) {
   for (auto it = record.begin(); it < record.end(); ++it) {
     td = TransformIter::replay(*it, td);
   }
-  tv->setDomain(td);
-  return tv;
+  return td;
 }
 
 } // namespace fuser

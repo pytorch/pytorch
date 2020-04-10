@@ -146,6 +146,17 @@ struct TORCH_CUDA_API TransformReplay : public TransformIter {
    * and find a common ancestor to start from, but likely not a worthwhile
    * optimization.
    */
+  TensorDomain* runReplay(
+      TensorDomain* replay_ref,
+      TensorDomain* replay_target,
+      int compute_at_axis);
+
+  /*
+   * Takes replay_ref and replays its transformations on replay_target
+   * Replays from begining of both TensorDomains. could be more efficient to try
+   * and find a common ancestor to start from, but likely not a worthwhile
+   * optimization.
+   */
   TensorView* runReplay(
       TensorView* replay_ref,
       TensorView* replay_target,
@@ -174,6 +185,10 @@ struct TORCH_CUDA_API TransformReplay : public TransformIter {
   static TensorView* fullReplay(
       TensorView* replay_ref,
       TensorView* replay_target);
+    
+  static TensorDomain* fullReplay(
+      TensorDomain* replay_ref,
+      TensorDomain* replay_target);
 
 };
 
