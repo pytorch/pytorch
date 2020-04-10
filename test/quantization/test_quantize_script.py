@@ -502,9 +502,9 @@ graph(%input, %weight):
         }
         m = wrap_cpp_module(torch._C._jit_pass_insert_observers(m._c, "forward", qconfig_dict, False))
         activation_dtypes = set(obs.getattr('dtype') for x, obs in m._modules._c.items()
-                                 if x.startswith('_observer_'))
+                                if x.startswith('_observer_'))
         weight_dtypes = set(obs.getattr('dtype') for x, obs in m.conv._modules._c.items()
-                             if x.startswith('_observer_'))
+                            if x.startswith('_observer_'))
         assert len(activation_dtypes) == 1, 'Expected to have 1 activation dtype'
         assert len(weight_dtypes) == 1, 'Expected to have 1 weight dtype'
         assert list(activation_dtypes)[0] != list(weight_dtypes)[0], 'Expected activation dtype to '
