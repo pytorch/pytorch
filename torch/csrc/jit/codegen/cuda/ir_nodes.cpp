@@ -1,6 +1,10 @@
 
+#include <torch/csrc/jit/codegen/cuda/arith.h>
 #include <torch/csrc/jit/codegen/cuda/ir_interface_nodes.h>
+#include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
 #include <torch/csrc/jit/codegen/cuda/tensor.h>
+
+#include <sstream>
 
 namespace torch {
 namespace jit {
@@ -52,31 +56,43 @@ bool BinaryOp::sameAs(const BinaryOp* other) const {
 }
 
 IterDomain::IterDomain(
-    Int* _size,
+    Val* _size,
     ParallelType _parallel_method,
     bool _reduction_domain)
     : Val(ValType::IterDomain, DataType::Int),
       size_(_size),
       parallel_method_(_parallel_method),
-      is_reduction_domain_(_reduction_domain) {}
-
-IterDomain::IterDomain(
-    Val* int_size,
-    ParallelType _parallel_method,
-    bool _reduction_domain)
-    : Val(ValType::IterDomain, DataType::Int),
-      size_(static_cast<Int*>(int_size)),
-      parallel_method_(_parallel_method),
       is_reduction_domain_(_reduction_domain) {
-  assert(int_size->isVal());
-  assert(int_size->getDataType() == DataType::Int);
+  TORCH_INTERNAL_ASSERT(
+      _size->isAnInt(),
+      "Cannot create an iter domain over a size that is not an int.");
 }
 
 bool IterDomain::sameAs(const IterDomain* const other) const {
-  return (
-      isReduction() == other->isReduction() &&
-      parallel_method() == other->parallel_method() &&
-      size()->sameAs(other->size()));
+  bool is_same = isReduction() == other->isReduction() &&
+      parallel_method() == other->parallel_method();
+
+  if (size()->getValType() == ValType::NamedScalar &&
+      other->size()->getValType() == ValType::NamedScalar) {
+    is_same = is_same &&
+        (static_cast<NamedScalar*>(size())->name().compare(
+             static_cast<NamedScalar*>(other->size())->name()) == 0);
+  } else {
+    is_same = is_same && size()->sameAs(other->size());
+  }
+  return is_same;
+}
+
+Val* IterDomain::size() const {
+  if (isThread()) {
+    if (size_->getValType() == ValType::Scalar)
+      if (static_cast<Int*>(size_)->isConst())
+        return size_;
+
+    std::string parallel_dim = stringifyThreadSize(parallel_method_);
+    return new NamedScalar(parallel_dim, DataType::Int);
+  }
+  return size_;
 }
 
 bool TensorDomain::sameAs(const TensorDomain* const other) const {
@@ -92,7 +108,7 @@ bool TensorDomain::sameAs(const TensorDomain* const other) const {
 
 TensorDomain* TensorDomain::noReductions() const {
   std::vector<IterDomain*> noReductionDomain;
-  for (IterDomain* id : domain)
+  for (IterDomain* id : domain_)
     if (!id->isReduction())
       noReductionDomain.push_back(id);
   return new TensorDomain(noReductionDomain);
@@ -103,8 +119,9 @@ TensorDomain* TensorDomain::noReductions() const {
 IterDomain* TensorDomain::axis(int i) const {
   if (i < 0)
     i += size();
-  assert(i >= 0 && i < size());
-  return domain[i];
+  TORCH_CHECK(
+      i >= 0 && i < size(), "Tried to access axis ", i, " in domain ", this);
+  return domain_[i];
 }
 
 Split::Split(TensorDomain* _out, TensorDomain* _in, int _axis, Int* _factor)
@@ -153,6 +170,111 @@ Reorder::Reorder(
 bool Reorder::sameAs(const Reorder* const other) const {
   // Implicitly in and out matching means pos2axis matches
   return (out()->sameAs(other->out()) && in()->sameAs(other->in()));
+}
+
+ForLoop::ForLoop(
+    Val* _index,
+    IterDomain* _range,
+    const std::vector<Expr*>& _body,
+    Expr* _parent_scope)
+    : Expr(ExprType::ForLoop),
+      index_{_index},
+      range_{_range},
+      parent_scope_{_parent_scope} {
+  TORCH_INTERNAL_ASSERT(
+      _index->isAnInt(),
+      "Cannot create a for loop with an index that is not an int.");
+  addInput(_index);
+  addInput(_range);
+  this->name_ = FusionGuard::getCurFusion()->registerExpr(this);
+  for (Expr* expr : _body)
+    body().push_back(expr);
+}
+
+bool ForLoop::sameAs(const ForLoop* other) const {
+  if (this->range() != other->range())
+    return false;
+  if (!(constBody().sameAs(other->constBody())))
+    return false;
+  return other == this;
+}
+
+IfThenElse::IfThenElse(
+    Int* _cond,
+    const std::vector<Expr*>& _if_body,
+    const std::vector<Expr*>& _else_body,
+    Expr* _parent_scope)
+    : Expr(ExprType::IfThenElse), cond_{_cond}, parent_scope_(_parent_scope) {
+  addInput(_cond);
+  this->name_ = FusionGuard::getCurFusion()->registerExpr(this);
+
+  for (auto* expr : _if_body)
+    body_.push_back(expr);
+  for (auto* expr : _else_body)
+    else_body_.push_back(expr);
+}
+
+bool IfThenElse::sameAs(const IfThenElse* other) const {
+  if (!(this->cond()->sameAs(other->cond()) &&
+        this->constBody().sameAs(other->constBody()) &&
+        this->constElseBody().sameAs(other->constElseBody())))
+    return false;
+  return true;
+}
+
+bool TensorIndex::sameAs(const TensorIndex* const other) const {
+  if (size() != other->size())
+    return false;
+
+  if (!view()->sameAs(other->view()))
+    return false;
+
+  for (decltype(size()) i = 0; i < size(); i++)
+    if (!(index(i)->sameAs(other->index(i))))
+      return false;
+
+  return true;
+}
+
+Val* TensorIndex::index(int i) const {
+  if (i < 0)
+    i += size();
+  assert(i >= 0 && i < size());
+  return indices_[i];
+}
+
+Allocate::Allocate(TensorView* _tv, Val* _size)
+    : Expr(ExprType::Allocate), buffer_(_tv), extent_{_size} {
+  if (!_size->isAnInt() || !_size->isConstScalar()) {
+    std::stringstream flat_size;
+    IRPrinter irp(flat_size);
+    irp.print_inline(_size);
+    TORCH_INTERNAL_ASSERT(
+        false,
+        "Allocations must be based on constant integers but tried to alloc ",
+        _tv,
+        " with size ",
+        flat_size.str(),
+        ".");
+  }
+  addInput(_size);
+  addInput(_tv);
+  this->name_ = FusionGuard::getCurFusion()->registerExpr(this);
+}
+
+DataType Allocate::buf_type() const {
+  return buffer_->getDataType().value();
+}
+
+bool Allocate::sameAs(const Allocate* other) const {
+  if (!this->buffer_->sameAs(other->buffer()))
+    return false;
+  if (!this->extent()->sameAs(other->extent()))
+    return false;
+  if (this->type() != other->type())
+    return false;
+
+  return true;
 }
 
 } // namespace fuser

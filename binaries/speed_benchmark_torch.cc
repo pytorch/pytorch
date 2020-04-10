@@ -38,6 +38,10 @@ C10_DEFINE_string(
     "tensors.");
 C10_DEFINE_string(input_type, "", "Input type (uint8_t/float)");
 C10_DEFINE_bool(
+  no_inputs,
+  false,
+  "Whether the model has any input. Will ignore other input arugments if true");
+C10_DEFINE_bool(
   print_output,
   false,
   "Whether to print output with all one input tensor.");
@@ -63,19 +67,9 @@ split(char separator, const std::string& string, bool ignore_empty = true) {
   return pieces;
 }
 
-int main(int argc, char** argv) {
-  c10::SetUsageMessage(
-    "Run speed benchmark for pytorch model.\n"
-    "Example usage:\n"
-    "./speed_benchmark_torch"
-    " --model=<model_file>"
-    " --input_dims=\"1,3,224,224\""
-    " --input_type=float"
-    " --warmup=5"
-    " --iter=20");
-  if (!c10::ParseCommandLineFlags(&argc, &argv)) {
-    std::cerr << "Failed to parse command line flags!" << std::endl;
-    return 1;
+std::vector<c10::IValue> create_inputs() {
+  if (FLAGS_no_inputs) {
+    return {};
   }
 
   CAFFE_ENFORCE_GE(FLAGS_input_dims.size(), 0, "Input dims must be specified.");
@@ -110,6 +104,26 @@ int main(int argc, char** argv) {
     auto stensor = FLAGS_pytext_len * at::ones({1}, torch::kI64);
     inputs.push_back(stensor);
   }
+
+  return inputs;
+}
+
+int main(int argc, char** argv) {
+  c10::SetUsageMessage(
+    "Run speed benchmark for pytorch model.\n"
+    "Example usage:\n"
+    "./speed_benchmark_torch"
+    " --model=<model_file>"
+    " --input_dims=\"1,3,224,224\""
+    " --input_type=float"
+    " --warmup=5"
+    " --iter=20");
+  if (!c10::ParseCommandLineFlags(&argc, &argv)) {
+    std::cerr << "Failed to parse command line flags!" << std::endl;
+    return 1;
+  }
+
+  std::vector<c10::IValue> inputs = create_inputs();
 
   torch::autograd::AutoGradMode guard(false);
   torch::jit::GraphOptimizerEnabledGuard no_optimizer_guard(false);
