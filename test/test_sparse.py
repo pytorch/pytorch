@@ -985,7 +985,13 @@ class TestSparse(TestCase):
             b = torch.stack(b_list).cuda()
             ab_nondeterministic = torch._bmm(a, b, deterministic=False)
             ab_deterministic = torch._bmm(a, b, deterministic=True)
-            self.assertEqual(ab_nondeterministic, ab_deterministic)
+            diff_abs = (ab_deterministic - ab_nondeterministic).abs()
+            diff_rel = diff_abs / ab_deterministic.abs()
+
+            # deterministic and non-deterministic results should either be
+            # equal or within a small relative difference
+            equal_abs_or_rel = diff_abs.eq(0).logical_or(diff_rel.lt(0.001))
+            self.assertTrue(equal_abs_or_rel.all())
 
         test_shape(10, 10, 100, 99, 20)
         test_shape(10, 100, 1000, 200, 20)
