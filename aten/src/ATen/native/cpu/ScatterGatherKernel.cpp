@@ -1,7 +1,9 @@
 #include <ATen/native/ScatterGatherShapeChecks.h>
 #include <ATen/native/ReduceOpsUtils.h>
 #include <ATen/native/TensorIterator.h>
+#include <ATen/native/TensorAdvancedIndexing.h>
 #include <ATen/Parallel.h>
+#include <unordered_map>
 
 namespace at { namespace native {
 
@@ -110,6 +112,30 @@ struct _cpu_scatter_gather_dim_loop {
   }
 };
 
+class ReduceFunctor {
+public:
+  ReduceFunctor() {};
+  template <typename scalar_t, typename func_t>
+  void operator() (scalar_t* self_data, scalar_t* src_data, func_t op) {
+    op(self_data, src_data);
+  }
+};
+ReduceFunctor reduce_fn;
+
+auto reduce_sum = [](auto * self_data, auto * src_data) {
+                    *self_data += *src_data;
+                  };
+auto reduce_subtract = [](auto * self_data, auto * src_data) {
+                         *self_data -= *src_data;
+                       };
+auto reduce_multiply = [](auto * self_data, auto * src_data) {
+                         *self_data *= *src_data;
+                       };
+auto reduce_divide = [](auto * self_data, auto * src_data) {
+                       *self_data /= *src_data;
+                     };
+
+
 template <bool is_scatter_like = true>
 struct cpu_scatter_gather_base_kernel {
   template <typename func_t>
@@ -119,7 +145,7 @@ struct cpu_scatter_gather_base_kernel {
     const std::string& method_name,
     const func_t& f,
     bool serial_exec,
-    const REDUCE_OPERATOR& reduce=REDUCE_OPERATOR::NONE
+    REDUCE_OPERATOR reduce=REDUCE_OPERATOR::NONE
   ) {
     // no-op if index is empty
     if (index.numel() == 0) {
@@ -175,11 +201,21 @@ struct cpu_scatter_gather_base_kernel {
     AT_DISPATCH_ALL_TYPES_AND2(
       ScalarType::Bool, ScalarType::Half, iter.dtype(),
       method_name, [&] {
-        auto loop = [&](char** data, const int64_t* strides, int64_t n) {
-          constexpr auto SELF_ITER_STRIDE_IDX = 0;
-          constexpr auto INDEX_ITER_STRIDE_IDX = 2;
-          constexpr auto SRC_ITER_STRIDE_IDX = 1;
+        constexpr auto SELF_ITER_STRIDE_IDX = 0;
+        constexpr auto INDEX_ITER_STRIDE_IDX = 2;
+        constexpr auto SRC_ITER_STRIDE_IDX = 1;
 
+        if (reduce != REDUCE_OPERATOR::NONE) {
+          using reduce_func_t = std::function<void(scalar_t*, scalar_t*)>;
+          std::unordered_map<const REDUCE_OPERATOR, reduce_func_t> reduce_funcs({
+            {REDUCE_OPERATOR::SUM, reduce_sum},
+            {REDUCE_OPERATOR::SUBTRACT, reduce_subtract},
+            {REDUCE_OPERATOR::MULTIPLY, reduce_multiply},
+            {REDUCE_OPERATOR::DIVIDE, reduce_divide}
+          });
+        }
+
+        auto loop = [&](char** data, const int64_t* strides, int64_t n) {
           auto* self_data_bytes = data[SELF_ITER_STRIDE_IDX];
           auto* index_data_bytes = data[INDEX_ITER_STRIDE_IDX];
           auto* src_data_bytes = data[SRC_ITER_STRIDE_IDX];
@@ -285,30 +321,6 @@ void scatter_add_cpu_kernel(Tensor& self, int64_t dim, const Tensor& index, cons
     /*serial_exec=*/true
   );
 }
-
-class ReduceFunctor {
-public:
-  ReduceFunctor() {};
-  template <typename scalar_t, typename func_t>
-  void operator() (scalar_t* self_data, scalar_t* src_data, func_t op) {
-    op(self_data, src_data);
-  }
-};
-ReduceFunctor reduce_fn;
-
-auto reduce_sum = [](auto * self_data, auto * src_data) {
-                    *self_data += *src_data;
-                  };
-auto reduce_subtract = [](auto * self_data, auto * src_data) {
-                         *self_data -= *src_data;
-                       };
-auto reduce_multiply = [](auto * self_data, auto * src_data) {
-                         *self_data *= *src_data;
-                       };
-auto reduce_divide = [](auto * self_data, auto * src_data) {
-                       *self_data /= *src_data;
-                     };
-
 
 void scatter_reduce_cpu_kernel(Tensor& self, const int64_t dim, const Tensor& index,
                                const Tensor& src, const REDUCE_OPERATOR& reduce) {
