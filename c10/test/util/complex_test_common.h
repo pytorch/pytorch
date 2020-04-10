@@ -16,13 +16,13 @@
 namespace memory {
 
 MAYBE_GLOBAL void test_size() {
-  static_assert(sizeof(c10::complex<float>) == 8, "");
-  static_assert(sizeof(c10::complex<double>) == 16, "");
+  static_assert(sizeof(c10::complex<float>) == 2 * sizeof(float), "");
+  static_assert(sizeof(c10::complex<double>) == 2 * sizeof(double), "");
 }
 
 MAYBE_GLOBAL void test_align() {
-  static_assert(alignof(c10::complex<float>) == 8, "");
-  static_assert(alignof(c10::complex<double>) == 16, "");
+  static_assert(alignof(c10::complex<float>) == 2 * sizeof(float), "");
+  static_assert(alignof(c10::complex<double>) == 2 * sizeof(double), "");
 }
 
 MAYBE_GLOBAL void test_pod() {
