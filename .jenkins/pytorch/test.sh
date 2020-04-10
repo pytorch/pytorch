@@ -289,10 +289,5 @@ elif [[ "${BUILD_ENVIRONMENT}" == *-test2 || "${JOB_BASE_NAME}" == *-test2 ]]; t
 elif [[ "${BUILD_ENVIRONMENT}" == *-bazel-* ]]; then
   test_bazel
 else
-  test_torchvision
-  test_python_nn
-  test_python_all_except_nn
-  test_aten
-  test_libtorch
-  test_custom_script_ops
+  time python test/run_test.py --include test_torch --verbose --determine-from="$DETERMINE_FROM"
 fi
