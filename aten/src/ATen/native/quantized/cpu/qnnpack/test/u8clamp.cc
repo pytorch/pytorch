@@ -12,7 +12,7 @@
 #include <qnnpack/isa-checks.h>
 #include <qnnpack/u8clamp.h>
 
-#include <clamp-microkernel-tester.h>
+#include <ATen/native/quantized/cpu/qnnpack/test/clamp-microkernel-tester.h>
 
 #if CPUINFO_ARCH_ARM || CPUINFO_ARCH_ARM64
 TEST(U8CLAMP__NEON, n_eq_8) {

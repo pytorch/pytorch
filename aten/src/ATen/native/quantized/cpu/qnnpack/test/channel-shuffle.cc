@@ -8,7 +8,7 @@
 
 #include <gtest/gtest.h>
 
-#include <channel-shuffle-operator-tester.h>
+#include <ATen/native/quantized/cpu/qnnpack/test/channel-shuffle-operator-tester.h>
 
 TEST(CHANNEL_SHUFFLE_OP, zero_batch) {
   ChannelShuffleOperatorTester()

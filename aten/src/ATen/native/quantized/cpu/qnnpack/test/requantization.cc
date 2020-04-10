@@ -14,7 +14,7 @@
 #include <gtest/gtest.h>
 #include <qnnpack/requantization-stubs.h>
 
-#include <requantization-tester.h>
+#include <ATen/native/quantized/cpu/qnnpack/test/requantization-tester.h>
 
 /*
  * Precise scalar implementation using unsigned 32-bit arithmetics.

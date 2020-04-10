@@ -12,7 +12,7 @@
 #include <qnnpack/isa-checks.h>
 #include <qnnpack/u8rmax.h>
 
-#include <rmax-microkernel-tester.h>
+#include <ATen/native/quantized/cpu/qnnpack/test/rmax-microkernel-tester.h>
 
 #if CPUINFO_ARCH_ARM || CPUINFO_ARCH_ARM64
 TEST(U8RMAX__NEON, n_lt_16) {

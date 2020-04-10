@@ -8,7 +8,7 @@
 
 #include <gtest/gtest.h>
 
-#include <softargmax-operator-tester.h>
+#include <ATen/native/quantized/cpu/qnnpack/test/softargmax-operator-tester.h>
 
 #include <qnnpack/params.h>
 

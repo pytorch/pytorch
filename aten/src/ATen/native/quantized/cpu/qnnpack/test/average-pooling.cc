@@ -10,7 +10,7 @@
 
 #include <qnnpack/params.h>
 
-#include <average-pooling-operator-tester.h>
+#include <ATen/native/quantized/cpu/qnnpack/test/average-pooling-operator-tester.h>
 
 TEST(AVERAGE_POOLING_OP, zero_batch) {
   ASSERT_EQ(pytorch_qnnp_status_success, pytorch_qnnp_initialize());
