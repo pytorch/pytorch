@@ -7131,6 +7131,32 @@ class TestNN(NNTestCase):
 
             assert np.abs(scipy_ary - gridsample_ary).max() < 1e-5
 
+    def test_channel_shuffle(self):
+        x = torch.tensor(
+                [[[[1, 2],
+                   [3, 4]],
+                  [[5, 6],
+                   [7, 8]],
+                  [[9, 10],
+                   [11, 12]],
+                  [[13, 14],
+                   [15, 16]],
+                 ]]
+                )
+        y_ref = torch.tensor(
+                [[[[1, 2],
+                   [3, 4]],
+                  [[9, 10],
+                   [11, 12]],
+                  [[5, 6],
+                   [7, 8]],
+                  [[13, 14],
+                   [15, 16]],
+                 ]]
+                )
+        y = F.channel_shuffle(x, 2)
+        self.assertEqual(y, y_ref)
+
     def test_upsamplingNearest1d(self):
         m = nn.Upsample(size=4, mode='nearest')
         in_t = torch.ones(1, 1, 2)
@@ -9442,7 +9468,7 @@ class TestNNDeviceType(NNTestCase):
             result = torch.nn.functional.grid_sample(image, grid, padding_mode='zeros')
             self.assertEqual(result, torch.tensor([[[[[27., 26., 25.], [24., 23., 22.], [21., 20., 19.]],
                                                      [[18., 17., 16.], [15., 0., 13.], [12., 11., 10.]],
-                                                     [[9., 8., 7.], [6., 5., 4.], [3., 2., 1.]]]]], 
+                                                     [[9., 8., 7.], [6., 5., 4.], [3., 2., 1.]]]]],
                                                   device=device, dtype=dtype))
             result.backward(torch.ones_like(result))
             expected_grad = torch.ones_like(image)
