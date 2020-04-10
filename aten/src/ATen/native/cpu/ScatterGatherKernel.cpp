@@ -235,6 +235,13 @@ struct cpu_scatter_gather_base_kernel {
               src_data_bytes += strides[SRC_ITER_STRIDE_IDX];
             }
           };
+
+          if (serial_exec) {
+            iter.serial_for_each(loop, {0, iter.numel()});
+          }
+          else {
+            iter.for_each(loop);
+          }
         }
         else {
           auto loop = [&](char** data, const int64_t* strides, int64_t n) {
@@ -290,7 +297,6 @@ struct cpu_scatter_gather_base_kernel {
               }
             }
           };
-
           if (serial_exec) {
             iter.serial_for_each(loop, {0, iter.numel()});
           }
