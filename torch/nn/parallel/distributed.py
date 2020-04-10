@@ -231,6 +231,7 @@ class DistributedDataParallel(Module):
                  process_group=None, bucket_cap_mb=25,
                  find_unused_parameters=False,
                  check_reduction=False):
+        torch._C._log_api_usage_once("python.ddp")
 
         super(DistributedDataParallel, self).__init__()
 
