@@ -50,7 +50,7 @@ from torch.jit._recursive import wrap_cpp_module
 import itertools
 import unittest
 
-class TestQuantizeScriptPasses(JitTestCase):
+class TestQuantizeScriptJitPasses(JitTestCase):
     """ Test graph mode quantization passes used by quantize_script
     """
     def test_foldbn_trivial(self):
