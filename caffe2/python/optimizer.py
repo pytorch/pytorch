@@ -560,6 +560,9 @@ class AdagradOptimizer(Optimizer):
         self.mask_db_path = pruning_options.get("mask_db_path", None)
         self.mask_db_type = pruning_options.get("mask_db_type", None)
         self.mask_blob_name = pruning_options.get("mask_blob_name", None)
+        self.prune_delays = pruning_options.get("prune_delays", [])
+        self.prune_ratios = pruning_options.get("prune_ratios", [])
+        self.prune_block_size = pruning_options.get("prune_block_size", 1)
 
         if self.mask_tensor is not None:
             assert type(self.mask_tensor) is np.ndarray, "mask_tensor must be a numpy array!"
@@ -570,16 +573,21 @@ class AdagradOptimizer(Optimizer):
             assert self.mask_blob_name is None, "mask can be provided through either a numpy array "\
                 "or a db path, not both"
             self.use_mask = True
-        if self.mask_db_path is not None or self.mask_db_type is not None\
-                or self.mask_blob_name is not None:
+
+        if self.mask_db_path is not None or self.mask_db_type is not None:
             assert self.mask_db_path is not None, "when mask is provided through db, "\
                 "db path, db type, and blob name are all needed"
             assert self.mask_db_type is not None, "when mask is provided through db, "\
                 "db path, db type, and blob name are all needed"
-            assert self.mask_blob_name is not None, "when mask is provided through db, "\
-                "db path, db type, and blob name are all needed"
             assert self.mask_tensor is None, "mask can be provided through either a numpy array "\
                 "or a db path, not both"
+            self.use_mask = True
+
+        if self.prune_delays:
+            assert self.prune_ratios is not None and len(self.prune_delays) == len(self.prune_ratios),\
+                "Prune Delays and prune ratios should be of the same length"
+            assert self.mask_tensor is None, "Mask Tensor should be None with prune ratios"
+            assert self.mask_db_path is None, "Mask DB Path should be None with prune ratios"
             self.use_mask = True
 
     def _run(self, net, param_init_net, param_info):
@@ -606,7 +614,7 @@ class AdagradOptimizer(Optimizer):
             self._add_local_lr_multiplier(
                 lr_lars_multiplier,
                 is_gpu_blob=(current_scope is not None
-                    and core.IsGPUDeviceType(current_scope.device_type)),
+                             and core.IsGPUDeviceType(current_scope.device_type)),
             )
 
         lr, lr_iteration = self.build_lr(
@@ -666,21 +674,43 @@ class AdagradOptimizer(Optimizer):
         if self.use_mask is True:
             if self.mask_tensor is not None:
                 if not isinstance(grad, core.GradientSlice):
-                    mask_blob = param_init_net.GivenTensorFill([], [str(param) + "_mask"], values=self.mask_tensor, shape=self.mask_tensor.shape)
+                    mask_blob = param_init_net.GivenTensorFill([], [str(param) + "_mask"],
+                                                               values=self.mask_tensor, shape=self.mask_tensor.shape)
                 else:
                     self.mask_tensor = self.mask_tensor.astype(np.uint8)
-                    mask_blob = param_init_net.GivenTensorBoolFill([], [str(param) + "_mask"], values=self.mask_tensor, shape=self.mask_tensor.shape)
+                    mask_blob = param_init_net.GivenTensorBoolFill([], [str(param) + "_mask"],
+                                                                   values=self.mask_tensor, shape=self.mask_tensor.shape)
                     mask_blob = param_init_net.Cast(mask_blob, to=core.DataType.UINT8)
-                    mask_changed_blob = param_init_net.ConstantFill([], [str(param) + "_mask_changed_blob"], value=False, dtype=core.DataType.BOOL, shape=[1])
-            elif self.mask_db_path is not None or self.mask_db_type is not None\
-                    or self.mask_blob_name is not None:  # mask is provided through a db file
+                    mask_changed_blob = param_init_net.ConstantFill([], [str(param) + "_mask_changed_blob"],
+                                                                    value=False, dtype=core.DataType.BOOL, shape=[1])
+            elif self.mask_db_path is not None or self.mask_db_type is not None:  # mask is provided through a db file
+                # if mask_blob_name is not given use the param name to derive mask name
+                self.mask_blob_name = self.mask_blob_name or str(param) + "_mask"
+
                 mask_blob = param_init_net.Load(
-                    [], self.mask_blob_name, db=self.mask_db_path, db_type=self.mask_db_type, absolute_path=True
+                    [], self.mask_blob_name, db=self.mask_db_path,
+                    db_type=self.mask_db_type, absolute_path=True
                 )
+
                 if isinstance(grad, core.GradientSlice):
-                    mask_changed_blob = param_init_net.ConstantFill([], [str(param) + "_mask_changed_blob"], value=False, dtype=core.DataType.BOOL, shape=[1])
+                    mask_changed_blob = param_init_net.ConstantFill([], [str(param) + "_mask_changed_blob"],
+                                                                    value=False, dtype=core.DataType.BOOL, shape=[1])
+            elif self.prune_delays:
+                last_mask_updated_iter = param_init_net.ConstantFill([], [str(param) + "_last_mask_updated_iter"],
+                                                                     value=-1, dtype=core.DataType.INT64 , shape=[1])
+
+
+                if isinstance(grad, core.GradientSlice):
+                    AssertionError(
+                        "Prune Delays and Prune Ratios are currently not supported"
+                        "for sparse operators"
+                    )
+                else:
+                    mask_blob = param_init_net.GivenTensorFill([], [str(param) + "_empty_mask"],
+                                                               values=[], dtype=core.DataType.FLOAT, shape=[0])
             else:
-                raise NotImplementedError("If mask is used, it needs to be provided through a numpy array or a db file")
+                raise NotImplementedError("If mask is used, it needs a numpy array or a db file or"
+                                          "a delay iter needs to be provided")
 
         self._aux_params.local.append(param_squared_sum)
 
@@ -695,6 +725,7 @@ class AdagradOptimizer(Optimizer):
             grad = self.dedup(net, self.sparse_dedup_aggregator, grad)
 
             input_args = [param, param_squared_sum, grad.indices, grad.values, lr]
+            output_args = [param, param_squared_sum]
             if self.rowWise:
                 if self.use_mask is True:
                     op = 'MaskedRowWiseSparseAdagrad'
@@ -707,14 +738,21 @@ class AdagradOptimizer(Optimizer):
                     input_args += [mask_blob, mask_changed_blob]
                 else:
                     op = 'SparseAdagrad'
+
+            if self.prune_delays:
+                input_args += [lr_iteration, last_mask_updated_iter]
+                output_args += [mask_blob, last_mask_updated_iter]
+
             net.__getattr__(op)(
                 input_args,
-                [param, param_squared_sum],
+                output_args,
                 epsilon=self.epsilon,
                 engine=self.engine,
             )
         else:
+            input_args = [param, param_squared_sum, grad, lr]
             output_args = [param, param_squared_sum]
+
             if self.output_effective_lr_and_update:
                 assert self.use_mask is False, \
                     "MaskedAdagrad doesn't support outputting effective_lr_and_update"
@@ -725,17 +763,27 @@ class AdagradOptimizer(Optimizer):
                     "MaskedAdagrad doesn't support outputting effective_lr"
                 output_args.append(str(param) + '_effective_lr')
 
+            if self.use_mask is True:
+                input_args += [mask_blob]
+
+            if self.prune_delays:
+                input_args += [lr_iteration, last_mask_updated_iter]
+                output_args += [mask_blob, last_mask_updated_iter]
+
             if self.use_mask:
                 net.MaskedAdagrad(
-                    [param, param_squared_sum, grad, lr, mask_blob],
+                    input_args,
                     output_args,
                     epsilon=self.epsilon,
                     decay=float(self.decay),
-                    engine=self.engine
+                    block_size=self.prune_block_size,
+                    delays=self.prune_delays,
+                    prune_ratios=self.prune_ratios,
+                    engine=self.engine,
                 )
             else:
                 net.Adagrad(
-                    [param, param_squared_sum, grad, lr],
+                    input_args,
                     output_args,
                     epsilon=self.epsilon,
                     decay=float(self.decay),
@@ -746,9 +794,9 @@ class AdagradOptimizer(Optimizer):
                     param_swa = str(param) + "_swa"
                     if not param_init_net.BlobIsDefined(param_swa):
                         param_init_net.ConstantFill(
-                            [param], param_swa, value=0.0, 
+                            [param], param_swa, value=0.0,
                         )
-                        self._aux_params.local.append(param_swa)  
+                        self._aux_params.local.append(param_swa)
 
                     net.SWA(
                         [param, param_swa, lr_iteration],
@@ -758,7 +806,7 @@ class AdagradOptimizer(Optimizer):
                         feedback_start=self.swa_feedback_start_it,
                         feedback_step=self.swa_feedback_step,
                         feedback_end=self.swa_feedback_end_it,
-                    )      
+                    )
         if self.weight_scale:
             net.WeightScale(
                 [param, lr_iteration],
@@ -772,7 +820,7 @@ class AdagradOptimizer(Optimizer):
                     [param_squared_sum],
                     stepsize=self.weight_scale.stepsize,
                     upper_bound_iter=self.weight_scale.upper_bound_iter,
-                    scale=float(self.weight_scale.scale))   
+                    scale=float(self.weight_scale.scale))
 
     def scale_learning_rate(self, scale):
         self.alpha *= scale

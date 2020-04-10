@@ -164,6 +164,12 @@ enum class DispatchKey : uint8_t {
 
   // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ FIN ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
   NumDispatchKeys, // Sentinel
+
+  // ~~~~~~~~~~~~~~~~~~~~~~~~~ BC ALIASES ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
+  // The aliases exist for backwards compatibility reasons, they shouldn't
+  // be used
+  CPUTensorId = CPU,
+  CUDATensorId = CUDA,
 };
 
 
