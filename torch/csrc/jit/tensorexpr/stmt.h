@@ -111,6 +111,9 @@ class Block : public StmtNode<Block> {
   int nstmts() const {
     return stmts_.size();
   }
+  bool empty() const {
+    return stmts_.empty();
+  }
 
   void prepend_stmt(Stmt* s) {
     if (s->get_parent()) {
@@ -144,6 +147,18 @@ class Block : public StmtNode<Block> {
     set_parent(new_stmt, this);
     return true;
   }
+
+  bool remove_stmt(Stmt* stmt) {
+    auto pos = std::find(stmts_.begin(), stmts_.end(), stmt);
+    if (pos == stmts_.end()) {
+      return false;
+    }
+
+    set_parent(stmt, nullptr);
+    stmts_.erase(pos);
+    return true;
+  }
+
   std::list<Stmt*> stmts() const {
     return stmts_;
   }
@@ -510,6 +525,10 @@ class For : public StmtNode<For> {
 
   void set_gpu_thread_index(int thread_index) {
     loop_options_.set_gpu_thread_index(thread_index);
+  }
+
+  For* cloneWithNewBody(Stmt* body) const {
+    return new For(var_, start_, stop_, body, loop_options_);
   }
 
  private:
