@@ -1,8 +1,8 @@
 #pragma once
 
-#include <vector>
 #include <unordered_map>
 #include <unordered_set>
+#include <vector>
 
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
@@ -56,6 +56,8 @@ class TORCH_API LoopNest {
   std::unordered_set<Tensor*> output_tensors_;
   std::unordered_set<Tensor*> intermediate_tensors_;
 };
+
+TORCH_API Stmt* FlattenIndexes(Stmt* s);
 
 // represent a range [start, stop)
 class Range {

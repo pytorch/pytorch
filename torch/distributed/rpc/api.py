@@ -475,7 +475,9 @@ def _invoke_rpc(to, func, rpc_type, args=None, kwargs=None):
     if qualified_name is not None:
         fut = _invoke_rpc_builtin(dst_worker_info, qualified_name, rf, *args, **kwargs)
     elif isinstance(func, torch.jit.ScriptFunction):
-        fut = _invoke_rpc_torchscript(dst_worker_info.name, func, args, kwargs)
+        fut = _invoke_rpc_torchscript(
+            dst_worker_info.name, torch.jit._qualified_name(func), args, kwargs
+        )
     else:
         (pickled_python_udf, tensors) = _default_pickler.serialize(
             PythonUDF(func, args, kwargs)

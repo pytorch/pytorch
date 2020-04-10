@@ -81,44 +81,6 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  flake8-py2:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Setup Python
-        uses: actions/setup-python@v1
-        with:
-          python-version: 2.x
-          architecture: x64
-      - name: Fetch PyTorch
-        uses: actions/checkout@v1
-      - name: Checkout PR tip
-        run: |
-          set -eux
-          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
-            # We are on a PR, so actions/checkout leaves us on a merge commit.
-            # Check out the actual tip of the branch.
-            git checkout ${{ github.event.pull_request.head.sha }}
-          fi
-          echo ::set-output name=commit_sha::$(git rev-parse HEAD)
-        id: get_pr_tip
-      - name: Run flake8
-        run: |
-          set -eux
-          pip install flake8
-          rm -rf .circleci tools/clang_format_new.py
-          flake8 --exit-zero > ${GITHUB_WORKSPACE}/flake8-output.txt
-          cat ${GITHUB_WORKSPACE}/flake8-output.txt
-      - name: Add annotations
-        uses: pytorch/add-annotations-github-action@master
-        with:
-          check_name: 'flake8-py2'
-          linter_output_path: 'flake8-output.txt'
-          commit_sha: ${{ steps.get_pr_tip.outputs.commit_sha }}
-          regex: '^(?<filename>.*?):(?<lineNumber>\d+):(?<columnNumber>\d+): (?<errorCode>\w\d+) (?<errorDesc>.*)'
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-
   clang-tidy:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
@@ -198,6 +160,7 @@ jobs:
             -g"-torch/csrc/jit/export.cpp"            \
             -g"-torch/csrc/jit/import.cpp"            \
             -g"-torch/csrc/jit/netdef_converter.cpp"  \
+            -g"-torch/csrc/onnx/init.cpp"             \
             "$@" > ${GITHUB_WORKSPACE}/clang-tidy-output.txt
 
           cat ${GITHUB_WORKSPACE}/clang-tidy-output.txt
@@ -210,3 +173,32 @@ jobs:
           regex: '^(?<filename>.*?):(?<lineNumber>\d+):(?<columnNumber>\d+): (?<errorDesc>.*?) \[(?<errorCode>.*)\]'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  cmakelint:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Setup Python
+        uses: actions/setup-python@v1
+        with:
+          python-version: 3.x
+          architecture: x64
+      - name: Fetch PyTorch
+        uses: actions/checkout@v1
+      - name: Checkout PR tip
+        run: |
+          set -eux
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            # We are on a PR, so actions/checkout leaves us on a merge commit.
+            # Check out the actual tip of the branch.
+            git checkout ${{ github.event.pull_request.head.sha }}
+          fi
+          echo ::set-output name=commit_sha::$(git rev-parse HEAD)
+        id: get_pr_tip
+      - name: Run cmakelint
+        run: |
+          set -eux
+          pip install cmakelint
+          cmakelint --version
+          git ls-files -z -- bootstrap '*.cmake' '*.cmake.in' '*CMakeLists.txt' | \
+          grep -E -z -v '^(cmake/Modules/|cmake/Modules_CUDA_fix/)' | \
+          xargs -0 cmakelint --config=.cmakelintrc --spaces=2 --quiet
