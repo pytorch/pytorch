@@ -36,6 +36,47 @@ RegisterOperators reg({
         "prim::unchecked_cast(t x) -> t",
         noop,
         aliasAnalysisSpecialCase()),
+     Operator(
+         "aten::IntImplicit(Tensor a) -> int",
+         [](Stack& stack) {
+           at::Tensor a;
+           pop(stack, a);
+           checkImplicitTensorToNum(a, /*to int*/ true);
+           push(stack, a.item<int64_t>());
+           return 0;
+         },
+         aliasAnalysisFromSchema()),
+     Operator(
+         "aten::FloatImplicit(Tensor a) -> float",
+         [](Stack& stack) {
+           at::Tensor a;
+           pop(stack, a);
+           checkImplicitTensorToNum(a, /*to int*/ false);
+           push(stack, a.item<double>());
+           return 0;
+         },
+         aliasAnalysisFromSchema()),
+     Operator(
+         "aten::ScalarImplicit(Tensor a) -> Scalar",
+         [](Stack& stack) {
+           at::Tensor a;
+           pop(stack, a);
+           checkImplicitTensorToNum(a, /*to int*/ false);
+           push(stack, a.item());
+           return 0;
+         },
+         aliasAnalysisFromSchema()),
+      Operator(
+         "prim::TupleUnpack(Any tup) -> ...",
+         [](Stack& stack) {
+           tupleUnpack(stack);
+           return 0;
+         },
+         aliasAnalysisSpecialCase()),
+     Operator(
+         "prim::unchecked_cast(t x) -> t",
+         noop,
+         aliasAnalysisSpecialCase()),
     Operator(
         "aten::format(str self, ...) -> str",
         [](Stack& stack) {
