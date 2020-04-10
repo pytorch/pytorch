@@ -34,11 +34,11 @@ static void sigmoid_kernel(TensorIterator& iter) {
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(kBFloat16, iter.dtype(), "sigmoid_cpu", [&]() {
     cpu_kernel_vec(
         iter,
-        [=](scalar_t a) -> scalar_t { return ((scalar_t)(1) / ((scalar_t)(1) + std::exp((-a)))); },
+        [=](scalar_t a) -> scalar_t { return (static_cast<scalar_t>(1) / (static_cast<scalar_t>(1) + std::exp((-a)))); },
         [=](Vec256<scalar_t> a) {
-          a = Vec256<scalar_t>((scalar_t)(0)) - a;
+          a = Vec256<scalar_t>(static_cast<scalar_t>(0)) - a;
           a = a.exp();
-          a = Vec256<scalar_t>((scalar_t)(1)) + a;
+          a = Vec256<scalar_t>(static_cast<scalar_t>(1)) + a;
           a = a.reciprocal();
           return a;
         });
@@ -141,7 +141,7 @@ static void reciprocal_kernel(TensorIterator& iter) {
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(kBFloat16, iter.dtype(), "reciprocal_cpu", [&]() {
     cpu_kernel_vec(
         iter,
-        [=](scalar_t a) -> scalar_t { return decltype(a)(1.0) / a; },
+        [=](scalar_t a) -> scalar_t { return static_cast<scalar_t>(1.0) / a; },
         [=](Vec256<scalar_t> a) { return a.reciprocal(); });
   });
 }
@@ -160,8 +160,8 @@ static void sign_kernel(TensorIterator& iter){
       cpu_kernel(iter, [=](bool x) -> bool { return x; });
   } else {
     AT_DISPATCH_ALL_TYPES_AND2(kBFloat16, ScalarType::Half, iter.dtype(), "sign_cpu", [&]() {
-        auto zero_vec = Vec256<scalar_t>((scalar_t)(0));
-        auto one_vec = Vec256<scalar_t>((scalar_t)(1));
+        auto zero_vec = Vec256<scalar_t>(static_cast<scalar_t>(0));
+        auto one_vec = Vec256<scalar_t>(static_cast<scalar_t>(1));
 
         cpu_kernel_vec(
             iter,
@@ -383,7 +383,7 @@ static void rsqrt_kernel(TensorIterator& iter) {
     cpu_kernel_vec(
         iter,
         [=](scalar_t a) -> scalar_t {
-          return ((scalar_t)1) / std::sqrt(a);
+          return (static_cast<scalar_t>(1)) / std::sqrt(a);
         },
         [=](Vec256<scalar_t> a) { return a.rsqrt(); });
   });
