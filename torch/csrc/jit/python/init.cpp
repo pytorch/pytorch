@@ -691,6 +691,26 @@ void initJITBindings(PyObject* module) {
             std::tie(data, size) = self.getRecord(key);
             return py::bytes(reinterpret_cast<const char*>(data.get()), size);
           })
+      .def(
+          "get_storage_record",
+          [](PyTorchStreamReader& self, const std::string& key, size_t numel) {
+            at::DataPtr data;
+            size_t size;
+            std::tie(data, size) = self.getRecord(key);
+            at::Allocator* allocator = nullptr;
+            auto storage = c10::Storage(
+              caffe2::TypeMeta::Make<float>(),
+              numel,
+              std::move(data),
+              allocator,
+              allocator != nullptr
+            );
+            // TODO: Fix DispatchKeySet
+            auto ptr = c10::make_intrusive<at::TensorImpl, at::UndefinedTensorImpl>(
+              std::move(storage), at::DispatchKeySet()
+            );
+            return at::Tensor(std::move(ptr));
+          })
       .def("get_all_records", [](PyTorchStreamReader& self) {
         return self.getAllRecords();
       });
