@@ -222,24 +222,6 @@ static OffsetCalculator<1, index_t> make_input_calculator(const TensorIterator& 
   return OffsetCalculator<1, index_t>(num_reduce_dims, iter.shape().data(), strides.data());
 }
 
-template <int vt, typename index_t, typename func_t>
-__device__ void strided_iterate(func_t f, index_t begin, index_t end, index_t stride) {
-  if (begin + (vt - 1) * stride < end) {
-    #pragma unroll
-    for (index_t i = 0; i < vt; i++) {
-      f(i, begin + i * stride);
-    }
-  } else {
-    #pragma unroll
-    for (index_t i = 0; i < vt; i++) {
-      index_t idx = begin + i * stride;
-      if (idx < end) {
-        f(i, idx);
-      }
-    }
-  }
-}
-
 template <typename out_scalar_t, typename func_t>
 struct func_wrapper_t {
   using arg_t = typename binary_function_traits<func_t>::arg1_t;
@@ -392,38 +374,65 @@ struct ReduceOp {
   }
 
   C10_DEVICE arg_t thread_reduce(const scalar_t* data) const {
+    index_t element_stride = input_calc.strides_[0][0] / sizeof(scalar_t);
+    bool is_contiguous = (input_calc.dims == 1 && element_stride == 1);
+    if (is_contiguous) {
+      return thread_reduce_impl(data, [](index_t idx) { return idx; });
+    } else if (input_calc.dims == 1) {
+      return thread_reduce_impl(data, [&](index_t idx) { return idx * element_stride; });
+    } else {
+      return thread_reduce_impl(data, [&](index_t idx) { return input_calc.get(idx)[0] / sizeof(scalar_t); });
+    }
+  }
+
+  template<typename offset_calc_t>
+  C10_DEVICE arg_t thread_reduce_impl(const scalar_t* data, offset_calc_t calc) const {
     index_t idx = config.input_idx();
+    const index_t end = config.num_inputs;
+    const index_t stride = config.step_input;
+
     // Multiple accumulators to remove dependency between unrolled loops.
     arg_t value_list[vt0];
     #pragma unroll
     for (int i = 0; i < vt0; i++) {
       value_list[i] = ident;
     }
-    index_t end = config.num_inputs;
-    index_t stride = config.step_input;
-    index_t element_stride = input_calc.strides_[0][0] / sizeof(scalar_t);
 
-    // Reducing layers of function calls so compiler could do proper loop unroll
-    // that exposes instruction level parallelism.
-    while (idx < config.num_inputs) {
-      // load input
-      Array<scalar_t, vt0> values;
-      if (input_calc.dims == 1) {
-        strided_iterate<vt0>([&](index_t i, index_t idx) {
-          values[i] = data[idx * element_stride];
-        }, idx, end, stride);
-      } else {
-        strided_iterate<vt0>([&](index_t i, index_t idx) {
-          values[i] = data[input_calc.get(idx)[0] / sizeof(scalar_t)];
-        }, idx, end, stride);
+    scalar_t values[vt0];
+
+    while (idx + (vt0 - 1) * stride < end) {
+      #pragma unroll
+      for (index_t i = 0; i < vt0; i++) {
+        values[i] = data[calc(idx + i * stride)];
       }
-      // compute
-      strided_iterate<vt0, index_t>([&](index_t i, index_t idx) {
-        value_list[i] = ops.reduce(value_list[i], values[i], idx);
-      }, idx, config.num_inputs, config.step_input);
-      // step offset
-      idx += config.step_input * vt0;
+      #pragma unroll
+      for (index_t i = 0; i < vt0; i++) {
+        value_list[i] = ops.reduce(value_list[i], values[i], idx + i * stride);
+      }
+      idx += stride * vt0;
     }
+
+    // tail
+    int idx_ = idx;
+    #pragma unroll
+    for (index_t i = 0; i < vt0; i++) {
+      if (idx >= end) {
+        break;
+      }
+      values[i] = data[calc(idx)];
+      idx += stride;
+    }
+    idx = idx_;
+    #pragma unroll
+    for (index_t i = 0; i < vt0; i++) {
+      if (idx >= end) {
+        break;
+      }
+      value_list[i] = ops.reduce(value_list[i], values[i], idx);
+      idx += stride;
+    }
+
+    // combine accumulators
     #pragma unroll
     for (int i = 1; i < vt0; i++) {
       value_list[0] = ops.combine(value_list[0], value_list[i]);
