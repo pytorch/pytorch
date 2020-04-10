@@ -128,13 +128,13 @@ Module& Module::operator=(Module&&) = default;
 // TODO: Error if an operator is def'ed multiple times.  Right now we just
 // merge everything
 
-Module& Module::def(FunctionSchema&& schema) & {
+Module& Module::_def(FunctionSchema&& schema) & {
   if (ns_.has_value()) schema.setNamespaceIfNotSet(ns_->c_str());
   registrars_.emplace_back(Dispatcher::singleton().registerDef(std::move(schema)));
   return *this;
 }
 
-Module& Module::def(c10::either<OperatorName, FunctionSchema>&& name_or_schema, CppFunction&& f) & {
+Module& Module::_def(c10::either<OperatorName, FunctionSchema>&& name_or_schema, CppFunction&& f) & {
   FunctionSchema schema = [&] {
     if (name_or_schema.is_right()) {
       return std::move(name_or_schema).right();
@@ -156,7 +156,7 @@ Module& Module::def(c10::either<OperatorName, FunctionSchema>&& name_or_schema, 
   return *this;
 }
 
-Module& Module::impl(const char* name_str, CppFunction&& f) & {
+Module& Module::_impl(const char* name_str, CppFunction&& f) & {
   auto name = torch::jit::parseName(name_str);
   if (ns_.has_value()) name.setNamespaceIfNotSet(ns_->c_str());
   registrars_.emplace_back(
@@ -171,7 +171,7 @@ Module& Module::impl(const char* name_str, CppFunction&& f) & {
   return *this;
 }
 
-Module& Module::fallback(CppFunction&& f) & {
+Module& Module::_fallback(CppFunction&& f) & {
   TORCH_CHECK(!ns_, "Cannot define fallbacks from namespaces, use c10::import().fallback() instead");
   TORCH_CHECK(f.dispatch_key_, "Fallback for catch all function not supported");
   registrars_.emplace_back(Dispatcher::singleton().registerFallback(*f.dispatch_key_, std::move(f.func_)));
