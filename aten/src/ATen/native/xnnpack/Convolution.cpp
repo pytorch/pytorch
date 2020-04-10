@@ -46,8 +46,8 @@ bool available(
          ((bias && bias->defined()) ? ((1 == bias->ndimension()) &&
                                       (c10::DeviceType::CPU == bias->device().type()) &&
                                       (kFloat == bias->scalar_type()) &&
-                                      (weight.size(Layout::Filter::output)) == bias->size(0)) &&
-                                      !bias->requires_grad()
+                                      (weight.size(Layout::Filter::output)) == bias->size(0) &&
+                                      !bias->requires_grad())
                                     : true) &&
          // Padding
          (padding[Layout::Parameter::height] >= 0) &&
