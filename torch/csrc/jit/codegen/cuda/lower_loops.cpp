@@ -210,15 +210,21 @@ void LoopNestGenerator::pushAlloc(TensorView* tv) {
       "Tried to allocate an input or output tensor.");
 
   // Compute at axis can be == tv->nDims() meaning it's inline
-  decltype(tv->nDims()) alloc_pos = tv->nDims();
-  while(alloc_pos > 0){
-    if(tv->hasComputeAt() && alloc_pos == tv->getComputeAtAxis())
+  decltype(tv->nDims()) alloc_pos = 0;
+  bool reset = true;
+  while(alloc_pos <= tv->nDims() ){
+    if(tv->hasComputeAt() && alloc_pos == tv->getComputeAtAxis()){
+      reset = false;
       break;
+    }
     if( alloc_pos < tv->nDims() &&
-      tv->getComputeAtAxis(alloc_pos)->parallel_method() == ParallelType::Unroll)
-      break;
-    alloc_pos--;
+      tv->getComputeAtAxis(alloc_pos)->parallel_method() == ParallelType::Unroll){
+        reset = false;
+        break;
+      }
+    alloc_pos++;
   }
+  alloc_pos = reset ? 0 : alloc_pos;
 
   std::vector<Val*> alloc_dims;
   for (auto i = alloc_pos; i < tv->nDims(); i++) {
@@ -247,6 +253,7 @@ void LoopNestGenerator::pushAlloc(TensorView* tv) {
   } else {
     scope_utils::insertBefore(for_loops[alloc_pos-1], for_loops[alloc_pos], alloc);
   }
+  
 }
 
 // Clear out the last recorded computeAtView

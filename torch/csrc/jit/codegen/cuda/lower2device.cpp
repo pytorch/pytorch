@@ -76,8 +76,11 @@ TensorIndex* GPULower::getLocalProducerIndex(
       scope_utils::getLoopIterDomains(active_scope);
   std::vector<Val*> computed_inds;
   std::vector<IterDomain*> used_ranges;
+  bool unrolled = false;
   for (decltype(loopInds.size()) i{0}; i < loopInds.size(); i++) {
-    if (producer->hasComputeAt() && i < producer->getComputeAtAxis())
+    if(ranges[i]->parallel_method() == ParallelType::Unroll)
+      unrolled = true;
+    if (!unrolled && producer->hasComputeAt() && i < producer->getComputeAtAxis())
       continue;
     if (ranges[i]->isThread())
       continue;
@@ -146,9 +149,11 @@ TensorIndex* GPULower::getLocalConsumerIndex(TensorView* consumer) {
       scope_utils::getLoopIterDomains(active_scope);
   std::vector<Val*> computed_inds;
   std::vector<IterDomain*> used_ranges;
-
+  bool unrolled = false;
   for (decltype(loopInds.size()) i{0}; i < loopInds.size(); i++) {
-    if (i < consumer->getComputeAtAxis())
+    if(ranges[i]->parallel_method() == ParallelType::Unroll)
+      unrolled = true;
+    if (!unrolled && consumer->hasComputeAt() && i < consumer->getComputeAtAxis())
       continue;
     if (ranges[i]->isThread())
       continue;
