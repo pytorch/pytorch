@@ -66,13 +66,13 @@ struct TORCH_CUDA_API Int : public Val {
   Int(Int&& other) = delete;
   Int& operator=(Int&& other) = delete;
 
-  bool isSymbolic() const {
+  virtual bool isSymbolic() const {
     return !(maybe_value_.has_value());
   }
-  bool isConst() const {
+  virtual bool isConst() const {
     return maybe_value_.has_value();
   }
-  c10::optional<int> value() const noexcept {
+  virtual c10::optional<int> value() const noexcept {
     return maybe_value_;
   }
 
@@ -83,6 +83,8 @@ struct TORCH_CUDA_API Int : public Val {
 };
 
 struct TransformReplay;
+struct OptOutMutator;
+struct GPULower;
 /*
  * TensorView is our primitive Tensor Type used in code generation. It can be
  * thought of as representing physical memory, however, its dimensionality is
@@ -124,7 +126,7 @@ struct TORCH_CUDA_API TensorView : public Val {
   }
 
   // Return the TensorView we're computing at
-  const TensorView* getComputeAtView() const noexcept {
+  TensorView* getComputeAtView() const noexcept {
     return compute_at_view_;
   }
 
@@ -132,7 +134,7 @@ struct TORCH_CUDA_API TensorView : public Val {
   std::vector<IterDomain*>::size_type nDims() const;
   IterDomain* axis(int pos) const;
 
-  int getComputeAtAxis() const noexcept {
+  unsigned int getComputeAtAxis() const noexcept {
     return compute_at_axis_;
   }
 
@@ -174,17 +176,24 @@ struct TORCH_CUDA_API TensorView : public Val {
   friend TORCH_CUDA_API TensorView* reorder_(
       TensorView*,
       const std::unordered_map<int, int>&);
+  friend TORCH_CUDA_API OptOutMutator;
   friend TORCH_CUDA_API TransformReplay;
+  friend TORCH_CUDA_API GPULower;
 
  protected:
   void setDomain(TensorDomain* td) {
     domain_ = td;
   }
 
+  void setComputeAt(TensorView* computeAtView, int axis) {
+    compute_at_view_ = computeAtView;
+    compute_at_axis_ = axis;
+  }
+
  private:
   TensorDomain* domain_;
   TensorView* compute_at_view_ = nullptr;
-  int compute_at_axis_ = 0;
+  unsigned int compute_at_axis_ = 0;
 
   // Make a copy of the domain (used for Tensor based constructor), likely to be
   // removed soon.
