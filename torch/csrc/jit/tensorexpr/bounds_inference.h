@@ -13,9 +13,9 @@ class Expr;
 class Buf;
 class Stmt;
 
-enum TensorAccessKind { kLoad, kStore };
+enum TORCH_API TensorAccessKind { kLoad, kStore };
 
-struct TensorAccessBoundsInfo {
+struct TORCH_API TensorAccessBoundsInfo {
   const Buf* buf;
   TensorAccessKind kind;
   std::vector<const Expr*> start;
