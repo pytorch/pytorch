@@ -32,7 +32,6 @@ import pickle
 import sys
 import tempfile
 import textwrap
-import warnings
 
 RUN_CUDA = torch.cuda.is_available()
 RUN_CUDA_MULTI_GPU = RUN_CUDA and torch.cuda.device_count() > 1
@@ -527,12 +526,6 @@ class JitTestCase(TestCase):
                 self.assertTrue(torch.allclose(g2, g2_ge, atol=8e-4, rtol=8e-4))
 
         return ge
-
-    def checkTracerWarning(self, *args, **kwargs):
-        with warnings.catch_warnings(record=True) as warns:
-            torch.jit.trace(*args, **kwargs)
-        self.assertGreater(len(warns), 0)
-        self.assertTrue(any(["cause the trace to be incorrect" in str(warn.message) for warn in warns]))
 
     def createFunctionFromGraph(self, trace):
         graph = trace if isinstance(trace, torch._C.Graph) else trace.graph()

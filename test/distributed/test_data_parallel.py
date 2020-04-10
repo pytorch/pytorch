@@ -645,8 +645,9 @@ class TestDataParallel(TestCase):
 
             def forward(self, x):
                 self._testcase.assertWarnsRegex(
-                    lambda: self.zero_grad(),
-                    r"Calling \.zero_grad\(\) from a module that was passed to a nn\.DataParallel\(\) has no effect.")
+                    UserWarning,
+                    r"Calling \.zero_grad\(\) from a module that was passed to a nn\.DataParallel\(\) has no effect.",
+                    lambda: self.zero_grad())
                 return x
 
         module = Net(self).cuda()

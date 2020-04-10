@@ -866,9 +866,9 @@ const char* WARN_RESIZE =
     "up as a constant in the graph.";
 const char* STRICT_TRACER_MSG =
     " might cause the trace to be incorrect, this is only valid if the container "
-    "structure (i.e. dict keys) does not change based on the module's inputs, consider "
-    "using constant container structure instead(i.e. Tuple, NamedTuple) to avoid this "
-    "warning/error, If you absolutely need this and know the side effects, pass "
+    "structure does not change based on the module's inputs. Consider using a constant "
+    "container instead (e.g. for `list`, use a `tuple` instead. for `dict`, use a "
+    "`NamedTuple` instead). If you absolutely need this and know the side effects, pass "
     "strict=False to trace() to allow this behavior.";
 // XXX: _kind can be a nullptr
 void _do_warn(const char* _reason, const char* _kind) {
