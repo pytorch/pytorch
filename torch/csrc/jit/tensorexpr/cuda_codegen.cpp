@@ -220,7 +220,7 @@ class AtomicAddFuser : public IRMutator {
     if (isAtomicAdd(v)) {
       return new AtomicAdd(buf, indices, value);
     }
-    return const_cast<Store*>(v);
+    return const_cast<Store*>(v); // NOLINT
   }
 };
 
