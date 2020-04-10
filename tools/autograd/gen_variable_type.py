@@ -183,17 +183,15 @@ ${return_type} ${type_wrapper_name}(${type_method_formals}) {
 """)
 
 UNBOXEDONLY_WRAPPER_REGISTRATION = CodeTemplate("""\
-.impl("${operator_name_with_overload}",
-      torch::dispatch_autograd(
-        CppFunction::makeUnboxedOnly(VariableType::${type_wrapper_name})
-      ))
+.impl_UNBOXED("${operator_name_with_overload}", torch::kAutograd,
+        VariableType::${type_wrapper_name}
+      )
 """)
 
 WRAPPER_REGISTRATION = CodeTemplate("""\
-.impl("${operator_name_with_overload}",
-      torch::dispatch_autograd(
-        &VariableType::${type_wrapper_name}
-     ))
+.impl("${operator_name_with_overload}", torch::kAutograd,
+        VariableType::${type_wrapper_name}
+     )
 """)
 
 UNPACK_TENSOR = CodeTemplate("""\
@@ -541,7 +539,7 @@ def gen_variable_type_shard(out, aten_declarations, template_path, suffix, heade
                 wrapper_registrations.append(WRAPPER_REGISTRATION.substitute(
                     declaration, formal_types=formal_types))
             else:
-                assert declaration['use_c10_dispatcher'] == 'unboxed_only'
+                assert declaration['use_c10_dispatcher'] in ['unboxed_only', 'with_codegenerated_unboxing_wrapper']
                 wrapper_registrations.append(UNBOXEDONLY_WRAPPER_REGISTRATION.substitute(
                     declaration, formal_types=formal_types))
 

@@ -84,6 +84,11 @@ class TORCH_API Future final {
   void setErrorIfNeeded(std::string errorMsg) {
     std::unique_lock<std::mutex> lock(mutex_);
     if (completed_) {
+      // This should be rare and shouldn't cause log spew. Its important to
+      // log errors and thats why we have this log here.
+      LOG (INFO) << "Skipping setting following error on the Future since " <<
+        "it is already marked completed (this is not neccessarily an error): "
+        << errorMsg;
       return;
     } else {
       setErrorInternal(FutureError(std::move(errorMsg)), lock);
@@ -123,7 +128,13 @@ class TORCH_API Future final {
     callbacks_.emplace_back(std::move(cb));
   }
 
-private:
+  // Remove this once we've migrated underlying use-cases.
+  void addCallback(const std::function<
+                   void(const T&, const c10::optional<torch::utils::FutureError>&)>& cb) {
+    addCallback([cb,this]() { cb(value_, error_); });
+  }
+
+  private:
   void setErrorInternal(
       FutureError error,
       std::unique_lock<std::mutex>& lock) {
