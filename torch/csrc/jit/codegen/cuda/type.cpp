@@ -9,13 +9,23 @@ namespace fuser {
 
 // Return highest on list (smallest enum val)
 DataType promote_type(const DataType& t1, const DataType& t2) {
-  TORCH_CHECK(DataType::Null != t1 && DataType::Null != t2);
+  TORCH_CHECK(
+      DataType::Null != t1 && DataType::Null != t2,
+      "Expected promotable DataTypes but got: ",
+      t1,
+      " and ",
+      t2);
   return t1 < t2 ? t1 : t2;
 }
 
 // Return highest on list (smallest enum val)
 ValType promote_type(const ValType& t1, const ValType& t2) {
-  TORCH_CHECK(t1 >= ValType::TensorView && t2 >= ValType::TensorView);
+  TORCH_CHECK(
+      t1 >= ValType::TensorView && t2 >= ValType::TensorView,
+      "Expected promotable ValTypes but got: ",
+      t1,
+      " and ",
+      t2);
   // Check that it's a promotable type (with dtype)
   // static_assert??
   return t1 < t2 ? t1 : t2;
@@ -45,13 +55,15 @@ static _enum_unordered_map<ValType, std::string> val_type_string_map{
     {ValType::TensorView, "TensorView"},
     {ValType::TensorDomain, "TensorDomain"},
     {ValType::IterDomain, "IterDomain"},
-    {ValType::Scalar, "Scalar"}};
+    {ValType::Scalar, "Scalar"},
+    {ValType::NamedScalar, "NamedScalar"}};
 
 static _enum_unordered_map<ExprType, std::string> expr_type_string_map{
     {ExprType::UnaryOp, "UnaryOp"},
     {ExprType::BinaryOp, "BinaryOp"},
     {ExprType::ForLoop, "ForLoop"},
     {ExprType::IfThenElse, "IfThenElse"},
+    {ExprType::Allocate, "Allocate"},
     {ExprType::Split, "Split"},
     {ExprType::Merge, "Merge"},
     {ExprType::Reorder, "Reorder"}};
@@ -67,14 +79,16 @@ static _enum_unordered_map<BinaryOpType, std::string> binary_op_type_string_map{
     {BinaryOpType::Div, "Div"},
     {BinaryOpType::Mod, "Mod"},
     {BinaryOpType::LT, "LessThan"},
-    {BinaryOpType::CeilDiv, "ceilDiv"}};
+    {BinaryOpType::CeilDiv, "ceilDiv"},
+    {BinaryOpType::And, "And"}};
 static _enum_unordered_map<BinaryOpType, std::string>
     binary_op_type_inline_op_string_map{{BinaryOpType::Add, "+"},
                                         {BinaryOpType::Sub, "-"},
                                         {BinaryOpType::Mul, "*"},
                                         {BinaryOpType::Div, "/"},
                                         {BinaryOpType::Mod, "%"},
-                                        {BinaryOpType::LT, "<"}};
+                                        {BinaryOpType::LT, "<"},
+                                        {BinaryOpType::And, "&&"}};
 
 static _enum_unordered_map<ParallelType, std::string> parallel_type_string_map{
     {ParallelType::BIDz, "blockIdx.z"},
@@ -89,8 +103,15 @@ static _enum_unordered_map<ParallelType, std::string> parallel_type_string_map{
 
 static _enum_unordered_map<at::ScalarType, DataType> at_type_map{
     {at::ScalarType::Float, DataType::Float},
-    {at::ScalarType::Int, DataType::Int},
-};
+    {at::ScalarType::Int, DataType::Int}};
+
+static _enum_unordered_map<ParallelType, std::string> thread_size_string_map{
+    {ParallelType::BIDz, "gridDim.z"},
+    {ParallelType::BIDy, "gridDim.y"},
+    {ParallelType::BIDx, "gridDim.x"},
+    {ParallelType::TIDz, "blockDim.z"},
+    {ParallelType::TIDy, "blockDim.y"},
+    {ParallelType::TIDx, "blockDim.x"}};
 
 DataType aten_to_data_type(const at::ScalarType& scalar_type) {
   TORCH_INTERNAL_ASSERT(
@@ -140,13 +161,17 @@ TORCH_CUDA_API std::ostream& operator<<(
   return out << binary_op_type_string_map[botype];
 }
 
-TORCH_CUDA_API std::ostream& operator<<(
-    std::ostream& out,
-    const ParallelType ptype) {
+std::string stringify(const ParallelType ptype) {
   TORCH_INTERNAL_ASSERT(
       parallel_type_string_map.count(ptype) != 0,
       "No string found for parallel type.");
-  return out << parallel_type_string_map[ptype];
+  return parallel_type_string_map[ptype];
+}
+
+TORCH_CUDA_API std::ostream& operator<<(
+    std::ostream& out,
+    const ParallelType ptype) {
+  return out << stringify(ptype);
 }
 
 TORCH_CUDA_API c10::optional<std::string> inline_op_str(
@@ -169,6 +194,13 @@ TORCH_CUDA_API c10::optional<std::string> inline_op_str(
   }
 }
 
+std::string stringifyThreadSize(const ParallelType ptype) {
+  TORCH_INTERNAL_ASSERT(
+      thread_size_string_map.find(ptype) != thread_size_string_map.end(),
+      "Could not find size of the thread type ",
+      ptype);
+  return thread_size_string_map[ptype];
+}
 } // namespace fuser
 } // namespace jit
 } // namespace torch

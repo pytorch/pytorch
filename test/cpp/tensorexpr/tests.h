@@ -125,6 +125,8 @@ namespace jit {
   _(SimplifyRoundModPatternFactorization) \
   _(SimplifyRoundModPatternMultivar)      \
   _(SimplifyDivisionScalarFactorization)  \
+  _(SimplifyConstantBranches)             \
+  _(SimplifyConstantCond)                 \
   _(StmtClone)                            \
   _(BoundsInference_1)                    \
   _(BoundsInference_2)                    \
