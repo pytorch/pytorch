@@ -415,7 +415,7 @@ void testCudaOneBlockMultiThreadGlobalReduce1() {
 
   Buffer a_buf("a", kFloat, {N});
   Buffer b_buf("b", kFloat, {1});
-  
+
   Store* init_store = Store::make(b_buf, {0}, 0.f, 1);
   VarHandle t("t", kInt);
   VarHandle b("b", kInt);
@@ -438,7 +438,7 @@ void testCudaOneBlockMultiThreadGlobalReduce1() {
   For* for_b = For::make(t, 0, N, store_b, thread_idx_options);
 
   Stmt* reduce_block = Block::make({for_init, for_b});
-  
+
   VarHandle block_idx("bidx", kInt);
   LoopOptions block_idx_options;
   block_idx_options.set_gpu_block_index(0);
