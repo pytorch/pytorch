@@ -511,11 +511,10 @@ _embedding_bag_cpu(const Tensor &weight, const Tensor &indices,
   }
 }
 
-Tensor _embedding_bag_sparse_backward_cpu_sum_fast(
-    const Tensor &grad, const Tensor &indices, const Tensor &offsets, int64_t num_weights, int64_t mode, const Tensor& per_sample_weights) {
+inline Tensor _embedding_bag_sparse_backward_cpu_sum_fast(
+    const Tensor grad, const Tensor indices, const Tensor offsets, int64_t num_weights, int64_t mode) {
 
-  AT_ASSERT(mode == MODE_SUM);
-  AT_ASSERT((grad.scalar_type() == kFloat)&& (grad.stride(1) == 1) && !per_sample_weights.defined());
+  AT_ASSERT((mode == MODE_SUM) && (grad.scalar_type() == kFloat) && (grad.stride(1) == 1));
 
   int64_t indices_size0 = indices.size(0);
   int64_t ddim = grad.size(1);
@@ -556,10 +555,9 @@ Tensor _embedding_bag_sparse_backward_cpu_sum_fast(
 }
 
 Tensor _embedding_bag_dense_backward_cpu_sum_fast(
-    const Tensor &grad, const Tensor &indices, const Tensor &offsets, int64_t num_weights, int64_t mode, const Tensor& per_sample_weights) {
+    const Tensor grad, const Tensor indices, const Tensor offsets, int64_t num_weights, int64_t mode) {
 
-  AT_ASSERT(mode == MODE_SUM);
-  AT_ASSERT((grad.scalar_type() == kFloat)&& (grad.stride(1) == 1) && !per_sample_weights.defined());
+  AT_ASSERT((mode == MODE_SUM) && (grad.scalar_type() == kFloat) && (grad.stride(1) == 1));
 
   int64_t indices_numel = indices.numel();
   auto offset_numel = offsets.numel();
@@ -600,7 +598,6 @@ Tensor _embedding_bag_dense_backward_cpu_sum_fast(
   auto* offset2bag_data = offset2bag.data_ptr<int64_t>();
   auto* grad_data = grad.data_ptr<float>();
   auto* gradout_data = index_grad_weight.data_ptr<float>();
-  int64_t grad_stride0 = grad.stride(0);
   at::parallel_for(0, max_threads, 0, [&](int64_t start, int64_t end) {
     for(auto k = start; k < end; k++) {
       int64_t chunk_start = chuck_sum_size[k];
@@ -609,7 +606,7 @@ Tensor _embedding_bag_dense_backward_cpu_sum_fast(
         int64_t index = indices_data[mb];
         if (index >= chunk_start && index < chunk_end) {
           auto s = offset2bag_data[mb];
-          THBlas_axpy<float>(ddim, 1.0, grad_data + grad_stride0 * s, 1, gradout_data + ddim * index, 1);
+          THBlas_axpy<float>(ddim, 1.0, grad_data + ddim * s, 1, gradout_data + ddim * index, 1);
         }
       }
     }
@@ -620,17 +617,14 @@ Tensor _embedding_bag_dense_backward_cpu_sum_fast(
 
 // To save compute, if we are going to go down the fast path case for the 'sum'
 // mode, we skip calculating offset2bag, since it is not going to be used.
-static inline bool _embedding_bag_fast_path_sum(const Tensor& grad,
-      const Tensor &indices,
-      const Tensor &offset2bag,
-      const Tensor& per_sample_weights,
-       bool scale_grad_by_freq,
-      int64_t mode) {
+static inline bool _embedding_bag_fast_path_sum(const Tensor grad, const Tensor indices,
+  const Tensor offset2bag, const Tensor per_sample_weights, bool scale_grad_by_freq, int64_t mode) {
 
   if (at::get_num_threads() == 1) return false;
-  if (offset2bag.numel() != 0 || indices.numel() == 0) return false;
-  if (mode != MODE_SUM || grad.scalar_type() != kFloat) return false;
-  if (per_sample_weights.defined() || scale_grad_by_freq) return false;
+  if ((mode != MODE_SUM) || (grad.scalar_type() != kFloat)) return false;
+  if ((grad.stride(1) != 1) || per_sample_weights.defined()) return false;
+  if ((offset2bag.numel() != 0) || (indices.numel() == 0) || scale_grad_by_freq) return false;
+
   return true;
 }
 
@@ -654,9 +648,9 @@ Tensor _embedding_bag_backward_cpu(const Tensor &grad, const Tensor &indices,
 
   if (_embedding_bag_fast_path_sum(grad, indices, offset2bag, per_sample_weights, scale_grad_by_freq, mode)) {
     if (sparse) {
-      return _embedding_bag_sparse_backward_cpu_sum_fast(grad.contiguous(), indices, offsets, num_weights, mode, per_sample_weights);
+      return _embedding_bag_sparse_backward_cpu_sum_fast(grad, indices, offsets, num_weights, mode);
     } else {
-      return _embedding_bag_dense_backward_cpu_sum_fast(grad.contiguous(), indices, offsets, num_weights, mode, per_sample_weights);
+      return _embedding_bag_dense_backward_cpu_sum_fast(grad.contiguous(), indices, offsets, num_weights, mode);
     }
   }
 
