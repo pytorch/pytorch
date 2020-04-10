@@ -214,7 +214,27 @@ struct cpu_scatter_gather_base_kernel {
             {REDUCE_OPERATOR::DIVIDE, reduce_divide}
           });
 
-          
+          auto loop = [&](char** data, const int64_t* strides, int64_t n) {
+                        auto* self_data_bytes = data[SELF_ITER_STRIDE_IDX];
+            auto* index_data_bytes = data[INDEX_ITER_STRIDE_IDX];
+            auto* src_data_bytes = data[SRC_ITER_STRIDE_IDX];
+
+            for (int64_t nelem = 0; nelem < n; ++nelem) {
+              // dim loop is a separate code block
+              // for better performance
+              _cpu_scatter_gather_dim_loop<is_scatter_like>()(
+                                                              (scalar_t*)self_data_bytes, self_dim_stride,
+                                                              (int64_t*)index_data_bytes, index_dim_stride,
+                                                              (scalar_t*)src_data_bytes, src_dim_stride,
+                                                              dim, index_dim_size, index_upper_bound,
+                                                              reduce_funcs[reduce]
+                                                              );
+
+              self_data_bytes += strides[SELF_ITER_STRIDE_IDX];
+              index_data_bytes += strides[INDEX_ITER_STRIDE_IDX];
+              src_data_bytes += strides[SRC_ITER_STRIDE_IDX];
+            }
+          };
         }
         else {
           auto loop = [&](char** data, const int64_t* strides, int64_t n) {
