@@ -364,11 +364,10 @@ class PythonOpBase : public Operator<Context> {
                      OperatorBase::template GetSingleArgument<bool>(
                          "pass_workspace", false)});
       } catch (const py::error_already_set& e) {
-        std::stringstream error;
-        error << "Python exception encountered while creating PythonOp: "
-              << e.what();
-        LOG(ERROR) << error.str();
-        CAFFE_THROW(error.str());
+        LOG(ERROR) << "Python exception encountered while creating PythonOp: "
+                   << e.what();
+        // Rethrow exception to preserve python exception type.
+        throw;
       }
     }
   }
@@ -439,11 +438,10 @@ class PythonOpBase : public Operator<Context> {
           pyFunc->py_func(inputs, outputs);
         }
       } catch (const py::error_already_set& e) {
-        std::stringstream error;
-        error << "Exception encountered running PythonOp function: "
-              << e.what();
-        LOG(ERROR) << error.str();
-        CAFFE_THROW(error.str());
+        LOG(ERROR) << "Exception encountered running PythonOp function: "
+                   << e.what();
+        // Rethrow exception to preserve python exception type.
+        throw;
       }
     }
     return true;
