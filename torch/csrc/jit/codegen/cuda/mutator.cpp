@@ -43,7 +43,7 @@ Statement* OptOutMutator::mutate(IterDomain* id) {
 Statement* OptOutMutator::mutate(TensorDomain* td) {
   std::vector<IterDomain*> dom;
   bool mutated = false;
-  for (decltype(td->size()) i = 0; i < td->size(); i++) {
+  for (decltype(td->nDims()) i = 0; i < td->nDims(); i++) {
     IterDomain* id = static_cast<IterDomain*>(mutateAsVal(td->axis(i)));
     dom.push_back(id);
     if (!id->sameAs(td->axis(i)))

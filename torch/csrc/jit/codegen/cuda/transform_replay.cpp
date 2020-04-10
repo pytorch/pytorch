@@ -47,7 +47,7 @@ void TransformReplay::replayBackward(Reorder* expr) {
 TensorDomain* TransformReplay::replayBackward(
     TensorDomain* td,
     bool create_record) {
-  influence = std::vector<bool>(td->size(), false);
+  influence = std::vector<bool>(td->nDims(), false);
   for (int i = 0; i < compute_at_axis; i++)
     influence[i] = true;
   return TransformIter::runBackward(td, create_record);
@@ -175,7 +175,7 @@ TensorDomain* TransformReplay::replay(Reorder* expr, TensorDomain* td) {
     axis2pos[entry.first] = axis++;
   }
 
-  for (decltype(td->size()) i{0}; i < td->size(); i++) {
+  for (decltype(td->nDims()) i{0}; i < td->nDims(); i++) {
     if (axis2pos.find(i) == axis2pos.end())
       axis2pos[i] = axis++;
   }
@@ -271,7 +271,7 @@ TensorView* TransformReplay::runReplay(
       axis_map.push_back(i);
 
   // Domain sizes must match at root for replay.
-  if (axis_map.size() != ref_root->size()) {
+  if (axis_map.size() != ref_root->nDims()) {
     std::stringstream err_msg;
     err_msg
         << "Transforms cannot be replayed as source and destinations do not have the same root sizes."

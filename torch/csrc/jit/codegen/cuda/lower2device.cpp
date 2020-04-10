@@ -43,7 +43,7 @@ TensorIndex* GPULower::getGlobalProducerIndex(
       cloned_tv, scope_utils::getLoopIndices(active_scope));
 
   TORCH_INTERNAL_ASSERT(
-      computed_inds.size() == producer->getRootDomain()->size(),
+      computed_inds.size() == producer->getRootDomain()->nDims(),
       "Dimensionality error in code generator while computing indexing.");
 
   std::vector<Val*> strided_inds;
@@ -115,7 +115,7 @@ TensorIndex* GPULower::getGlobalConsumerIndex(TensorView* consumer) {
       consumer, scope_utils::getLoopIndices(active_scope));
 
   TORCH_INTERNAL_ASSERT(
-      computed_inds.size() == consumer->getRootDomain()->size(),
+      computed_inds.size() == consumer->getRootDomain()->nDims(),
       "Dimensionality error in code generator while computing indexing.");
 
   std::vector<Val*> strided_inds;
@@ -338,7 +338,7 @@ void GPULower::replaceSizes() {
     // Replace the domain with one based on Ti.size[j]
     std::vector<IterDomain*> new_domain;
     TensorDomain* root_td = tv->getRootDomain();
-    for (decltype(root_td->size()) i{0}; i < root_td->size(); i++) {
+    for (decltype(root_td->nDims()) i{0}; i < root_td->nDims(); i++) {
       Val* orig_size = root_td->axis(i)->extent();
       std::stringstream ss;
       ss << "T" << new_tv->name() << ".size[" << i << "]";
@@ -363,7 +363,7 @@ void GPULower::replaceSizes() {
     std::vector<IterDomain*> new_domain;
     TensorDomain* root_td = tv->getRootDomain();
 
-    for (decltype(root_td->size()) i{0}; i < root_td->size(); i++) {
+    for (decltype(root_td->nDims()) i{0}; i < root_td->nDims(); i++) {
       Val* new_size = root_td->axis(i)->extent();
       if (size_map.find(new_size) != size_map.end())
         new_size = size_map[new_size];
@@ -386,7 +386,7 @@ void GPULower::replaceSizes() {
     TransformReplay::fullReplay(orig_tv, new_tv);
 
     // Parallelize all iter domains
-    for (decltype(new_tv->domain()->size()) i{0}; i < new_tv->domain()->size();
+    for (decltype(new_tv->domain()->nDims()) i{0}; i < new_tv->domain()->nDims();
          i++)
       new_tv->axis(i)->parallelize(orig_tv->axis(i)->parallel_method());
 

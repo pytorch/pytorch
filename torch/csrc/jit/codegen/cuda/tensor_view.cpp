@@ -74,14 +74,14 @@ void TensorView::resetView() {
 }
 
 std::vector<IterDomain*>::size_type TensorView::nDims() const {
-  return domain()->size();
+  return domain()->nDims();
 }
 
 IterDomain* TensorView::axis(int pos) const {
   if (pos < 0)
-    pos += domain()->size();
+    pos += domain()->nDims();
   TORCH_CHECK(
-      pos >= 0 && pos < domain()->size(),
+      pos >= 0 && pos < domain()->nDims(),
       "Tried to access position ",
       pos,
       " in domain: ",
@@ -91,7 +91,7 @@ IterDomain* TensorView::axis(int pos) const {
 
 void TensorView::copyDomain(const TensorDomain* td) {
   std::vector<IterDomain*> idv;
-  for (decltype(td->size()) i = 0; i < td->size(); i++)
+  for (decltype(td->nDims()) i = 0; i < td->nDims(); i++)
     idv.push_back(td->axis(i));
   setDomain(new TensorDomain(idv));
 }
@@ -182,9 +182,9 @@ TensorView* TensorView::computeAt(TensorView* consumer, int axis) {
 
 TensorView* TensorView::split(int axis, int factor) {
   if (axis < 0)
-    axis += domain()->size();
+    axis += domain()->nDims();
 
-  TORCH_CHECK(axis >= 0 && axis < domain()->size(),
+  TORCH_CHECK(axis >= 0 && axis < domain()->nDims(),
     "Trying to split axis outside of TensorView's range.");
 
   if (getComputeAtView() != nullptr)
@@ -198,9 +198,9 @@ TensorView* TensorView::split(int axis, int factor) {
 // Merge "axis" and "axis+1" into 1 dimension
 TensorView* TensorView::merge(int axis) {
   if (axis < 0)
-    axis += domain()->size();
+    axis += domain()->nDims();
 
-  TORCH_CHECK(axis >= 0 && axis + 1 < domain()->size(),
+  TORCH_CHECK(axis >= 0 && axis + 1 < domain()->nDims(),
     "Trying to merge axis outside of TensorView's range.");
 
   if (getComputeAtView() != nullptr)

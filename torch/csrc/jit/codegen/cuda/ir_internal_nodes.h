@@ -216,7 +216,7 @@ struct TORCH_CUDA_API TensorDomain : public Val {
   TensorDomain(std::vector<IterDomain*> _domain)
       : Val(ValType::TensorDomain), domain_(_domain) {}
 
-  std::vector<IterDomain*>::size_type size() const {
+  std::vector<IterDomain*>::size_type nDims() const {
     return domain_.size();
   }
 

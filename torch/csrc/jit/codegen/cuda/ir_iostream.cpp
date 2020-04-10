@@ -71,9 +71,9 @@ void IRPrinter::handle(Fusion* fusion) {
 
 void IRPrinter::handle(const TensorDomain* const td) {
   os << "[ ";
-  for (std::vector<const IterDomain*>::size_type i = 0; i < td->size(); i++) {
+  for (std::vector<const IterDomain*>::size_type i = 0; i < td->nDims(); i++) {
     handle(td->axis(i));
-    if (i != td->size() - 1)
+    if (i != td->nDims() - 1)
       os << ", ";
   }
   os << " ]";

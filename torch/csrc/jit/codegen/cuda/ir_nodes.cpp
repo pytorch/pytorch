@@ -142,10 +142,10 @@ Val* IterDomain::extent() const {
 }
 
 bool TensorDomain::sameAs(const TensorDomain* const other) const {
-  if (size() != other->size())
+  if (nDims() != other->nDims())
     return false;
 
-  for (decltype(size()) i = 0; i < size(); i++)
+  for (decltype(nDims()) i = 0; i < nDims(); i++)
     if (!(axis(i)->sameAs(other->axis(i))))
       return false;
 
@@ -164,19 +164,19 @@ TensorDomain* TensorDomain::noReductions() const {
 // uint.
 IterDomain* TensorDomain::axis(int i) const {
   if (i < 0)
-    i += size();
+    i += nDims();
   TORCH_CHECK(
-      i >= 0 && i < size(), "Tried to access axis ", i, " in domain ", this);
+      i >= 0 && i < nDims(), "Tried to access axis ", i, " in domain ", this);
   return domain_[i];
 }
 
 // Split "axis" into 2 axes where the inner axes is size of "factor"
-// and outer axis is size axis.size() / factor
+// and outer axis is size axis.extent() / factor
 TensorDomain* TensorDomain::split(int axis_, int factor){
     if (axis_ < 0)
-    axis_ += size();
+    axis_ += nDims();
 
-  TORCH_INTERNAL_ASSERT(axis_ >= 0 && axis_ < size(),
+  TORCH_INTERNAL_ASSERT(axis_ >= 0 && axis_ < nDims(),
     "Tried to split on axis outside TensorDomain's range.");
 
   IterDomain* id = axis(axis_);
@@ -196,7 +196,7 @@ TensorDomain* TensorDomain::split(int axis_, int factor){
   Int* fact = new Int(factor);
   Int* one = new Int(1);
 
-  for (decltype(size()) i = 0; i < size(); i++) {
+  for (decltype(nDims()) i = 0; i < nDims(); i++) {
     if (i != axis_)
       new_domain.push_back(axis(i));
     else {
@@ -225,9 +225,9 @@ TensorDomain* TensorDomain::split(int axis_, int factor){
 TensorDomain* TensorDomain::merge(int axis_){
 
   if (axis_ < 0)
-    axis_ += size();
+    axis_ += nDims();
 
-  TORCH_CHECK(axis_ >= 0 && axis_ + 1 < size(),
+  TORCH_CHECK(axis_ >= 0 && axis_ + 1 < nDims(),
     "Trying to merge axis_ outside of TensorView's range.");
 
   IterDomain* first = axis(axis_);
@@ -251,7 +251,7 @@ TensorDomain* TensorDomain::merge(int axis_){
       first->isReduction());
 
   std::vector<IterDomain*> new_domain;
-  for (decltype(size()) i = 0; i < size(); i++) {
+  for (decltype(nDims()) i = 0; i < nDims(); i++) {
     if (i < axis_ || i > axis_ + 1)
       new_domain.push_back(axis(i));
     else if (i == axis_) {
@@ -274,7 +274,7 @@ TensorDomain* TensorDomain::reorder(const std::unordered_map<int, int>& axis2pos
   // adjust based on negative values (any negative values gets nDims added to
   // it)
   std::unordered_map<int, int> axis2pos;
-  auto ndims = size();
+  auto ndims = nDims();
   std::transform(axis2pos_.begin(), axis2pos_.end(), std::inserter(axis2pos, axis2pos.begin()),
     [ndims] (std::unordered_map<int, int>::value_type entry){
       return std::unordered_map<int, int>::value_type({
