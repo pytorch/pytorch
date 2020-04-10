@@ -586,6 +586,16 @@ void testSimplifyAdds() {
     IS_VAR_WITH_NAME(rhs->lhs(), "y");
     IS_VAR_WITH_NAME(rhs->rhs(), "x");
   }
+
+  {
+    // (x + x + x + x) => 4 * x
+    ExprHandle body = (x + x + x + x);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_NODE_WITH_NAME(Mul, simplified.node(), root);
+    IS_IMM_WITH_VAL(Int, root->lhs(), 4);
+    IS_VAR_WITH_NAME(root->rhs(), "x");
+  }
 }
 
 void testSimplifyMuls() {
@@ -737,6 +747,20 @@ void testSimplifySubs() {
     ExprHandle simplified = IRSimplifier::simplify(body);
 
     IS_IMM_WITH_VAL(Int, simplified.node(), 0);
+  }
+
+  {
+    // Cancel out opaque modulus.
+    ExprHandle body = (x % y + 2) - (x % y);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_IMM_WITH_VAL(Int, simplified.node(), 2);
+  }
+
+  {
+    // Cancel out opaque modulus with a bit more going on.
+    ExprHandle body = (x % y + (x * 2 - x - y * 0) - x + 2) - (x % y);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_IMM_WITH_VAL(Int, simplified.node(), 2);
   }
 }
 
@@ -1390,6 +1414,236 @@ void testSimplifyRoundModPatternMultivar() {
     IS_NODE_WITH_NAME(Mod, add->rhs(), zMod);
     IS_VAR_WITH_NAME(zMod->lhs(), "z");
     IS_IMM_WITH_VAL(Int, zMod->rhs(), 8);
+  }
+}
+
+void testSimplifyDivisionScalarFactorization() {
+  KernelScope kernel_scope;
+
+  {
+    // Simple factorization of numerator and denominator.
+    // 8x / 4y => 2x / y.
+    VarHandle x("x", kInt);
+    VarHandle y("y", kInt);
+    ExprHandle body = (x * 8) / (y * 4);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(Div, simplified.node(), div);
+    IS_NODE_WITH_NAME(Mul, div->lhs(), lhs);
+    IS_IMM_WITH_VAL(Int, lhs->lhs(), 2);
+    IS_VAR_WITH_NAME(lhs->rhs(), "x");
+    IS_VAR_WITH_NAME(div->rhs(), "y");
+  }
+
+  {
+    // Don't change anything if we can't factorize.
+    VarHandle x("x", kInt);
+    VarHandle y("y", kInt);
+    ExprHandle body = (x * 7) / (y * 4);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(Div, simplified.node(), div);
+    IS_NODE_WITH_NAME(Mul, div->lhs(), lhs);
+    IS_IMM_WITH_VAL(Int, lhs->lhs(), 7);
+    IS_VAR_WITH_NAME(lhs->rhs(), "x");
+    IS_NODE_WITH_NAME(Mul, div->rhs(), rhs);
+    IS_IMM_WITH_VAL(Int, rhs->lhs(), 4);
+    IS_VAR_WITH_NAME(rhs->rhs(), "y");
+  }
+
+  {
+    // Don't reorder floats.
+    VarHandle x("x", kFloat);
+    VarHandle y("y", kFloat);
+    ExprHandle body = (x * 8) / (y * 4);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(Div, simplified.node(), div);
+    IS_NODE_WITH_NAME(Mul, div->lhs(), lhs);
+    IS_VAR_WITH_NAME(lhs->lhs(), "x");
+    IS_IMM_WITH_VAL(Float, lhs->rhs(), 8.f);
+    IS_NODE_WITH_NAME(Mul, div->rhs(), rhs);
+    IS_VAR_WITH_NAME(rhs->lhs(), "y");
+    IS_IMM_WITH_VAL(Float, rhs->rhs(), 4.f);
+  }
+
+  {
+    // Sanity check we do nothing if there are only scalar parts.
+    VarHandle x("x", kInt);
+    VarHandle y("y", kInt);
+    ExprHandle body = (x * 1) / (y * 1);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(Div, simplified.node(), div);
+    IS_VAR_WITH_NAME(div->lhs(), "x");
+    IS_VAR_WITH_NAME(div->rhs(), "y");
+  }
+
+  {
+    // Can factorize amounts of variables.
+    VarHandle x("x", kInt);
+    VarHandle y("y", kInt);
+    ExprHandle body = (x + x + x + x) / (y + y);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(Div, simplified.node(), div);
+    IS_NODE_WITH_NAME(Mul, div->lhs(), lhs);
+    IS_IMM_WITH_VAL(Int, lhs->lhs(), 2);
+    IS_VAR_WITH_NAME(lhs->rhs(), "x");
+    IS_VAR_WITH_NAME(div->rhs(), "y");
+  }
+}
+
+void testSimplifyConstantBranches() {
+  KernelScope kernel_scope;
+
+  {
+    // If the condition is constant true then take the true_value.
+    // 1 ? x : y => x
+    VarHandle x("x", kInt);
+    VarHandle y("y", kInt);
+    ExprHandle t(1);
+    ExprHandle body = IfThenElse::make(t, x, y);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_VAR_WITH_NAME(simplified.node(), "x");
+  }
+
+  {
+    // If the condition is constant false then take the false_value.
+    // 0 ? x : y => y
+    VarHandle x("x", kInt);
+    VarHandle y("y", kInt);
+    ExprHandle t(0);
+    ExprHandle body = IfThenElse::make(t, x, y);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_VAR_WITH_NAME(simplified.node(), "y");
+  }
+
+  {
+    // condition is simplified before checking.
+    // (x-x) ? x : y => y
+    VarHandle x("x", kInt);
+    VarHandle y("y", kInt);
+    ExprHandle body = IfThenElse::make(x - x, x, y);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_VAR_WITH_NAME(simplified.node(), "y");
+  }
+
+  {
+    // If both branches are the same then don't do the condition.
+    // y ? x : x => x
+    VarHandle x("x", kInt);
+    VarHandle y("y", kInt);
+    ExprHandle body = IfThenElse::make(y, x, x);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_VAR_WITH_NAME(simplified.node(), "x");
+  }
+
+  {
+    // If both branches simplify to the same thing it still works.
+    // y ? (x + x) : (2 * x) => x
+    VarHandle x("x", kInt);
+    VarHandle y("y", kInt);
+    ExprHandle body = IfThenElse::make(y, x + x, ExprHandle(2) * x);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(Mul, simplified.node(), mul);
+    IS_IMM_WITH_VAL(Int, mul->lhs(), 2);
+    IS_VAR_WITH_NAME(mul->rhs(), "x");
+  }
+}
+
+void testSimplifyConstantCond() {
+  KernelScope kernel_scope;
+
+  {
+    // If the condition is constant true then take the true_value.
+    // 1 ? A[0] = 1 : B[0] = 1 => A[0] = 1
+    Buffer a(BufHandle("A", {1}), kInt);
+    Buffer b(BufHandle("B", {1}), kInt);
+    ExprHandle condition(1);
+    Stmt* true_val = Store::make(a, {0}, 1, 1);
+    Stmt* false_val = Store::make(b, {0}, 1, 1);
+
+    Cond* body = new Cond(condition.node(), true_val, false_val);
+    Stmt* simplified = IRSimplifier::simplify(body);
+    Block* block = static_cast<Block*>(simplified);
+    IS_NODE_WITH_NAME(Store, block->stmts().front(), store);
+    IS_VAR_WITH_NAME(store->base_handle(), "A");
+  }
+
+  {
+    // If the condition is constant false then take the false_value.
+    // 0 ? A[0] = 1 : B[0] = 1 => B[0] = 1
+    Buffer a(BufHandle("A", {1}), kInt);
+    Buffer b(BufHandle("B", {1}), kInt);
+    ExprHandle condition(0);
+    Stmt* true_val = Store::make(a, {0}, 1, 1);
+    Stmt* false_val = Store::make(b, {0}, 1, 1);
+
+    Stmt* body = new Cond(condition.node(), true_val, false_val);
+    Stmt* simplified = IRSimplifier::simplify(body);
+    Block* block = static_cast<Block*>(simplified);
+    IS_NODE_WITH_NAME(Store, block->stmts().front(), store);
+    IS_VAR_WITH_NAME(store->base_handle(), "B");
+  }
+
+  {
+    // condition is simplified before checking.
+    // (x-x) ? A[0] = 1 : B[0] = 1 => B[0] = 1
+    VarHandle x("x", kInt);
+    Buffer a(BufHandle("A", {1}), kInt);
+    Buffer b(BufHandle("B", {1}), kInt);
+    ExprHandle condition(x - x);
+    Stmt* true_val = Store::make(a, {0}, 1, 1);
+    Stmt* false_val = Store::make(b, {0}, 1, 1);
+
+    Stmt* body = new Cond(condition.node(), true_val, false_val);
+    Stmt* simplified = IRSimplifier::simplify(body);
+    Block* block = static_cast<Block*>(simplified);
+    IS_NODE_WITH_NAME(Store, block->stmts().front(), store);
+    IS_VAR_WITH_NAME(store->base_handle(), "B");
+  }
+
+  {
+    // If both branches are the same then don't do the condition.
+    // x ? A[0] = x : A[0] = x => A[0] = x
+    VarHandle x("x", kInt);
+    Buffer a(BufHandle("A", {1}), kInt);
+    ExprHandle condition(x - x);
+    Stmt* true_val = Store::make(a, {0}, x, 1);
+    Stmt* false_val = Store::make(a, {0}, x, 1);
+
+    Stmt* body = new Cond(condition.node(), true_val, false_val);
+    Stmt* simplified = IRSimplifier::simplify(body);
+    Block* block = static_cast<Block*>(simplified);
+    IS_NODE_WITH_NAME(Store, block->stmts().front(), store);
+    IS_VAR_WITH_NAME(store->base_handle(), "A");
+  }
+
+  {
+    // If both branches simplify to the same thing it still works.
+    // x ? (x + x) : (2 * x) => x
+    VarHandle x("x", kInt);
+    Buffer a(BufHandle("A", {1}), kInt);
+    ExprHandle condition(x - x);
+    Stmt* true_val = Store::make(a, {0}, ExprHandle(2) * x, 1);
+    Stmt* false_val = Store::make(a, {0}, x + x, 1);
+
+    Stmt* body = new Cond(condition.node(), true_val, false_val);
+    Stmt* simplified = IRSimplifier::simplify(body);
+    Block* block = static_cast<Block*>(simplified);
+    IS_NODE_WITH_NAME(Store, block->stmts().front(), store);
+    IS_VAR_WITH_NAME(store->base_handle(), "A");
+  }
+
+  {
+    // But not if they dont
+    // x ? x : (2 * x) => x ? x : (2 * x)
+    VarHandle x("x", kInt);
+    Buffer a(BufHandle("A", {1}), kInt);
+    ExprHandle condition(x);
+    Stmt* true_val = Store::make(a, {0}, x, 1);
+    Stmt* false_val = Store::make(a, {0}, ExprHandle(2) * x, 1);
+
+    Stmt* body = new Cond(condition.node(), true_val, false_val);
+    Stmt* simplified = IRSimplifier::simplify(body);
+    Block* block = dynamic_cast<Block*>(simplified);
+    ASSERT_EQ(block, nullptr);
   }
 }
 
