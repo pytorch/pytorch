@@ -211,21 +211,21 @@ std::shared_ptr<rpc::FutureMessage> DistEngine::runEngineAndAccumulateGradients(
       [autogradContext, outputEdges, accumulateGradFuture](
           const variable_list& grads,
           const c10::optional<torch::utils::FutureError>& error) {
-        try {
-          if (error) {
-            // Don't accumulate gradients if we receive an error.
-            // We must add the node information here since DistEngine::execute
-            // waits on accumulateGradFuture and will throw an exception once we
-            // set the error below.
-            std::string errorMsg = c10::str(
-                "Error on Node ",
-                DistAutogradContainer::getInstance().getWorkerId(),
-                ": ",
-                error->what());
-            accumulateGradFuture->setError(errorMsg);
-            return;
-          }
+        if (error) {
+          // Don't accumulate gradients if we receive an error.
+          // We must add the node information here since DistEngine::execute
+          // waits on accumulateGradFuture and will throw an exception once we
+          // set the error below.
+          std::string errorMsg = c10::str(
+              "Error on Node ",
+              DistAutogradContainer::getInstance().getWorkerId(),
+              ": ",
+              error->what());
+          accumulateGradFuture->setError(errorMsg);
+          return;
+        }
 
+        try {
           TORCH_INTERNAL_ASSERT(grads.size() == outputEdges.size());
 
           // Accumulate all the gradients in the context.
@@ -310,15 +310,16 @@ std::shared_ptr<rpc::FutureMessage> DistEngine::executeSendFunctionAsync(
                     // we mark the future as completed).
                     DistEngine::getInstance().cleanupBackwardPass(
                         autogradContext);
-
-                    // Finally mark the 'uber' future as completed.
-                    if (!error) {
-                      callbackFuture->markCompleted(rpc::Message());
-                    } else {
-                      callbackFuture->setError(error->what());
-                    }
                   } catch (std::exception& e) {
                     callbackFuture->setErrorIfNeeded(e.what());
+                    return;
+                  }
+
+                  // Finally mark the 'uber' future as completed.
+                  if (!error) {
+                    callbackFuture->markCompleted(rpc::Message());
+                  } else {
+                    callbackFuture->setError(error->what());
                   }
                 });
           } catch (std::exception& e) {

@@ -136,11 +136,9 @@ struct FunctionalGraphSlicer {
     // relationships. If an output of a functional graph escapes scope
     // or is mutated then we might change semantics of the program if
     // aliasing relationships are changed.
-    // For now, we don't allow any values which are mutated into the functional
-    // graph, and we don't allow any nodes which have outputs that escape scope.
-    // Possible Future Improvements:
-    // - allow inputs to have mutations so long as there are no mutations in the
-    // graph
+    // We don't allow any node in the functional graph to output a value
+    // that escapes scope or is mutated, and we don't allow any mutating nodes
+    // into the graph.
     // - allow functional graphs to have at most one value that can escape scope
     // - allow outputs which alias the wildcard set but do not "re-escape"
     for (Value* v : n->outputs()) {
@@ -157,12 +155,7 @@ struct FunctionalGraphSlicer {
       is_functional_node = is_functional_node && functional_block;
     }
 
-    // mutated_values_ already populated with inputs to this node
-    auto inputs = n->inputs();
-    is_functional_node = is_functional_node &&
-        std::all_of(inputs.begin(), inputs.end(), [&](Value* v) {
-                           return !mutated_values_.count(v);
-                         });
+    is_functional_node = is_functional_node && !aliasDb_->isMutable(n);
     if (is_functional_node) {
       functional_nodes_.insert(n);
     }
@@ -214,6 +207,8 @@ void InlineFunctionalGraphs(Block* block) {
     }
   }
 }
+
+} // namespace
 
 struct MutationRemover {
   MutationRemover(const std::shared_ptr<Graph>& graph)
@@ -314,13 +309,21 @@ struct MutationRemover {
         continue;
       }
 
+      // We rewrite something like:
+      // x = {v0}
+      // x.append(v1)
+      // to:
+      // x = {v0, v1}
+      // We can remove x.append from the the alias db list of writes.
+      // All other aliasing properties remain valid.
       Node* list_construct = mutated_value->node();
       list_construct->addInput(node->inputs().at(1));
       node->output()->replaceAllUsesWith(mutated_value);
+      aliasDb_->writeIndex_.erase(node);
       node->destroy();
 
-      // :(  TODO: incremental update ?
-      aliasDb_ = torch::make_unique<AliasDb>(graph_);
+      // TODO: don't strictly need to reset write cache, evaluate on models
+      aliasDb_->isWriteCacheStale_ = true;
     }
   }
 
@@ -358,10 +361,33 @@ struct MutationRemover {
       new_node->output()->setType(node->output()->type());
       mutated_value->replaceAllUsesAfterNodeWith(node, new_node->output());
       node->output()->replaceAllUsesWith(new_node->output());
+
+      // We rewrite something like:
+      // x = torch.zeros()
+      // x.add_(1)
+      // x.add_(2)
+      // to:
+      // x = torch.zeros()
+      // x0 = x.add(1)
+      // x0.add_(2)
+      // For the remainder of the function, x0 will have the
+      // same aliasing relationships as the original x.
+      // To avoid rebuilding the entire alias db, we can replace
+      // the memory dag element of x with x0.
+      aliasDb_->replaceMemoryLocation(mutated_value, new_node->output());
+
+      // it is an invariant that all mutable types have an element in the memory
+      // dag so we must regive x an alias db element. We have already verified
+      // that the mutated value is a fresh alias with a single use.
+      aliasDb_->giveFreshAlias(mutated_value);
+
+      // We must erase the destroyed node from the AliasDb lists of writes
+      aliasDb_->writeIndex_.erase(node);
       node->destroy();
 
-      // :(  TODO: incremental update ?
-      aliasDb_ = torch::make_unique<AliasDb>(graph_);
+      // now that we have removed a mutating op, the write cache is stale
+      // TODO: don't strictly need to reset write cache, evaluate on models
+      aliasDb_->isWriteCacheStale_ = true;
     }
   }
 
@@ -369,8 +395,6 @@ struct MutationRemover {
   std::unique_ptr<AliasDb> aliasDb_ = nullptr;
   std::shared_ptr<Graph> graph_;
 };
-
-} // namespace
 
 void CreateFunctionalGraphs(const std::shared_ptr<Graph>& graph) {
   // Run Constant Pooling so constants get hoisted

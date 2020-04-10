@@ -127,7 +127,7 @@ class Conf:
             job_name = "caffe2_" + self.get_platform() + "_build"
 
         if not self.is_important:
-            job_def["filters"] = {"branches": {"only": ["master", r"/ci-all\/.*/"]}}
+            job_def["filters"] = {"branches": {"only": ["master", r"/ci-all\/.*/", r"/release\/.*/"]}}
         job_def.update(self.gen_workflow_params(phase))
         return {job_name : job_def}
 
