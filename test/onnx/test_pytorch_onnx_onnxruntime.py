@@ -353,7 +353,6 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(model, (images,), rtol=1e-3, atol=1e-5)
 
     @skipIfUnsupportedMinOpsetVersion(11)
-    @unittest.skip("Disabled w removal of aten::__interpolate")
     def test_keypoint_rcnn(self):
         class KeyPointRCNN(torch.nn.Module):
             def __init__(self):
