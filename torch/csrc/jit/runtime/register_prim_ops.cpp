@@ -24,20 +24,18 @@ namespace jit {
 
 namespace {
 
-
-RegisterOperators reg(
-    {
-      Operator(
-         "prim::TupleUnpack(Any tup) -> ...",
-         [](Stack& stack) {
-           tupleUnpack(stack);
-           return 0;
-         },
-         aliasAnalysisSpecialCase()),
-     Operator(
-         "prim::unchecked_cast(t x) -> t",
-         noop,
-         aliasAnalysisSpecialCase()),
+RegisterOperators reg({
+    Operator(
+        "prim::TupleUnpack(Any tup) -> ...",
+        [](Stack& stack) {
+          tupleUnpack(stack);
+          return 0;
+        },
+        aliasAnalysisSpecialCase()),
+    Operator(
+        "prim::unchecked_cast(t x) -> t",
+        noop,
+        aliasAnalysisSpecialCase()),
     Operator(
         "aten::format(str self, ...) -> str",
         [](Stack& stack) {
@@ -46,15 +44,15 @@ RegisterOperators reg(
           return 0;
         },
         aliasAnalysisFromSchema()),
-     Operator(
-         "prim::NumToTensor.Scalar(Scalar a) -> Tensor",
-         [](Stack& stack) {
-           at::Scalar s;
-           pop(stack, s);
-           push(stack, at::scalar_to_tensor(s));
-           return 0;
-         },
-         aliasAnalysisFromSchema()),
+    Operator(
+        "prim::NumToTensor.Scalar(Scalar a) -> Tensor",
+        [](Stack& stack) {
+          at::Scalar s;
+          pop(stack, s);
+          push(stack, at::scalar_to_tensor(s));
+          return 0;
+        },
+        aliasAnalysisFromSchema()),
     Operator(
         "aten::__not__(bool self) -> bool",
         [](Stack& stack) {
@@ -158,7 +156,7 @@ RegisterOperators reg(
     DEFINE_COMPARISON_OP(aten::gt, a > b),
     DEFINE_COMPARISON_OP(aten::le, a <= b),
     DEFINE_COMPARISON_OP(aten::ge, a >= b),
-  });
+});
 
 } // namespace
 } // namespace jit
