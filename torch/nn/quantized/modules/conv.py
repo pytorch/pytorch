@@ -183,6 +183,7 @@ class Conv1d(_ConvNd):
 
     # We are using Conv2d to run the Conv1d. For that we need to know which
     # dimension is squeezed/unsqueezed.
+    __constants__ = ['_SQUEEZE_DIM']
     _SQUEEZE_DIM: Final[int] = -2  # -2 is faster than -1.
 
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
