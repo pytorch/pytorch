@@ -90,6 +90,14 @@ public:
   std::string dumpState() const;
   void checkInvariants() const;
 
+  // This function is a temporary hack that allows register_aten_ops.cpp to register its codegen'ed
+  // unboxing wrapper for aten operators. We still need those for some operators because not all work
+  // with the templated unboxing logic yet.
+  // TODO Delete setManuallyBoxedKernel_ once all operators work with the templated boxing logic
+  void setManuallyBoxedKernel_(KernelFunction::InternalBoxedKernelFunction* func) {
+    dispatchTable_.setManuallyBoxedKernel_(func);
+  }
+
 private:
 
   OperatorName name_;
