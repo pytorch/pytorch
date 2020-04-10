@@ -19,11 +19,13 @@ static bool mustBeEqual(const c10::optional<T>& a, const c10::optional<T>& b) {
 }
 
 struct PeepholeOptimizeImpl {
-  PeepholeOptimizeImpl(const std::shared_ptr<Graph>& graph, bool onnx_export)
+  PeepholeOptimizeImpl(
+      const std::shared_ptr<Graph>& graph,
+      bool disable_shape_peepholes)
       : aliasDb_(nullptr),
         graph_(graph),
         changed_(true),
-        onnx_export_(onnx_export) {
+        shape_peepholes_(!disable_shape_peepholes) {
     run(graph->block());
   }
 
@@ -36,13 +38,6 @@ struct PeepholeOptimizeImpl {
   //
   // TODO: Decide what kind of fixed point strategy we will have
   //
-  // The parameter `onnx_export` exists because, we do some optimizations only
-  // for onnx. as it is today, fusing
-  // add + mm has no benefit within PyTorch running ATen ops. However, we rely
-  // on seeing the fused version of addmm for ONNX export, since after ONNX
-  // translation we would see redundant Gemm ops with sub-optimal inputs. This
-  // flag is exposed so that ONNX export can pass `true` to get the fused
-  // behavior, but normal JIT peephole optimization is left alone.
   void run(Block* block) {
     for (auto it = block->nodes().begin(); it != block->nodes().end(); ++it) {
       auto* node = *it;
@@ -62,117 +57,12 @@ struct PeepholeOptimizeImpl {
           }
         }
       }
-
       // XXX: remember that if you want to simplify an expression by combining
       // multiple nodes into a different one, then you need to check that they
       // all belong to the given block
+      // TODO: this doesn't work with Scalar-Tensor ops! We should
+      // canonicalize those
       if (node->matches(
-              "aten::add(Tensor self, Tensor other, *, Scalar alpha) -> Tensor",
-              /*const_inputs=*/attr::alpha)) {
-        // z + x.mm(y) == z.addmm(x, y) == x.mm(y) + z
-        // This optimization has been disabled at the moment, because it's not
-        // helpful at all until we will be able to represent torch.addmm(a, b,
-        // c, out=a). That's because addmm dispatches internally to gemm, which
-        // computes:
-        //   C = beta * C + alpha * A @ B
-        // but aten::addmm(a, b, c, 1, 1) is really:
-        //   D = beta * C + alpha * A @ B
-        // and because it works out of place on C, we're only trading off an
-        // explicit add for a copy inside the addmm function. Note that it
-        // doesn't even result in fewer reads, because mm won't even load C
-        // (because beta
-        // == 0 for it).
-        if (onnx_export_ &&
-            node->get<at::Scalar>(attr::alpha).value().toDouble() == 1.) {
-          // Look for mm from both sides of the add
-          for (size_t mm_side = 0; mm_side < 2; mm_side++) {
-            // Add will accept tensors of mismatched scalar types, as long as
-            // one of them is a scalar. Addmm will throw in that case, so we can
-            // only perform this fusion if we're sure that it is correct, and
-            // for that we need the add_mat_type. An alternative would be to
-            // insert a type_as conditional on the tensor shape being a scalar,
-            // but that might add overhead, and make analysis harder.
-            auto add_mat_type =
-                node->input(1 - mm_side)->type()->expect<TensorType>();
-            // if we don't have the rank, we can't tell if the bias is a scalar
-            if (!add_mat_type->sizes().size()) {
-              continue;
-            }
-
-            if (node->input(mm_side)->node()->matches(
-                    "aten::mm(Tensor self, Tensor mat2) -> Tensor")) {
-              WithInsertPoint guard(node);
-
-              auto* graph = node->owningGraph();
-              auto* mm_node = node->input(mm_side)->node();
-              auto* add_mat = node->input(1 - mm_side);
-              auto* mat1 = mm_node->input(0);
-              auto* mat2 = mm_node->input(1);
-
-              // Attempts to find a matrix with a defined scalar type to type as
-              auto* type_as_mat = mat1;
-              if (!type_as_mat->type()->expect<TensorType>()->scalarType()) {
-                type_as_mat = mat2;
-              }
-              auto mat_scalar_type =
-                  type_as_mat->type()->expect<TensorType>()->scalarType();
-
-              // we can't use type_as if we don't know the target type (mm), the
-              // bias needs to be coerced to
-              if (!mat_scalar_type) {
-                continue;
-              }
-
-              // We insert the type_as if we're sure that the added element is a
-              // scalar, and we either don't know what is the type of the
-              // scalar, or know the type, and know that it's
-              // mismatched.
-              if (add_mat_type->sizes().size() &&
-                  *add_mat_type->sizes().size() == 0 &&
-                  !mustBeEqual(add_mat_type->scalarType(), mat_scalar_type)) {
-                auto* type_as_node =
-                    graph->insertNode(graph->create(aten::type_as, 1));
-                type_as_node->addInput(add_mat);
-                type_as_node->addInput(type_as_mat);
-                add_mat = type_as_node->output();
-                if (add_mat_type->isComplete()) {
-                  auto new_type = add_mat_type->withScalarType(mat_scalar_type)
-                                      ->contiguous();
-                  add_mat->setType(new_type);
-                }
-              }
-
-              auto* cOne = graph->insertConstant(1);
-              auto* addmm_node =
-                  graph->insertNode(graph->create(aten::addmm, 1));
-              addmm_node->addInput(add_mat);
-              addmm_node->addInput(mat1);
-              addmm_node->addInput(mat2);
-              addmm_node->addInput(cOne);
-              addmm_node->addInput(cOne);
-              auto* addmm_value = addmm_node->output();
-
-              // Copy shape information from output node
-              addmm_value->copyMetadata(node->output());
-              GRAPH_UPDATE(
-                  "Fusing ",
-                  mm_node->input(0)->debugName(),
-                  ", ",
-                  mm_node->input(1)->debugName(),
-                  " and ",
-                  node->input(1 - mm_side)->debugName(),
-                  " into ",
-                  addmm_value->debugName());
-              node->output()->replaceAllUsesWith(addmm_value);
-              changed_ = true;
-              continue;
-            }
-          }
-        }
-        // TODO: this doesn't work with Scalar-Tensor ops! We should
-        // canonicalize those
-      } else if (
-          node->matches(
               "aten::_grad_sum_to_size(Tensor(a) self, int[]? size) -> Tensor(a)")) {
         if (node->input(1)->mustBeNone()) {
           GRAPH_UPDATE(
@@ -255,7 +145,8 @@ struct PeepholeOptimizeImpl {
           changed_ = true;
         }
       } else if (
-          node->matches("aten::size(Tensor self) -> int[]") && !onnx_export_) {
+          node->matches("aten::size(Tensor self) -> int[]") &&
+          shape_peepholes_) {
         if (auto ptt = node->input()->type()->cast<TensorType>()) {
           if (auto sizes = ptt->sizes().concrete_sizes()) {
             GRAPH_UPDATE(
@@ -369,7 +260,7 @@ struct PeepholeOptimizeImpl {
           changed_ = true;
         }
       } else if (
-          node->matches("aten::dim(Tensor self) -> int") && !onnx_export_) {
+          node->matches("aten::dim(Tensor self) -> int") && shape_peepholes_) {
         auto ptt = node->input()->type()->expect<TensorType>();
         if (auto dim = ptt->sizes().size()) {
           WithInsertPoint guard(node);
@@ -471,8 +362,131 @@ struct PeepholeOptimizeImpl {
   std::unique_ptr<AliasDb> aliasDb_ = nullptr;
   std::shared_ptr<Graph> graph_;
   bool changed_;
-  bool onnx_export_;
+  bool shape_peepholes_;
 };
+
+void FuseAddMM(Block* block) {
+  for (Node* node : block->nodes()) {
+    // XXX: remember that if you want to simplify an expression by combining
+    // multiple nodes into a different one, then you need to check that they
+    // all belong to the given block
+    if (node->matches(
+            "aten::add(Tensor self, Tensor other, *, Scalar alpha) -> Tensor",
+            /*const_inputs=*/attr::alpha)) {
+      // z + x.mm(y) == z.addmm(x, y) == x.mm(y) + z
+      // This optimization has been disabled at the moment, because it's not
+      // helpful at all until we will be able to represent torch.addmm(a, b,
+      // c, out=a). That's because addmm dispatches internally to gemm, which
+      // computes:
+      //   C = beta * C + alpha * A @ B
+      // but aten::addmm(a, b, c, 1, 1) is really:
+      //   D = beta * C + alpha * A @ B
+      // and because it works out of place on C, we're only trading off an
+      // explicit add for a copy inside the addmm function. Note that it
+      // doesn't even result in fewer reads, because mm won't even load C
+      // (because beta
+      // == 0 for it).
+      if (node->get<at::Scalar>(attr::alpha).value().toDouble() == 1.) {
+        // Look for mm from both sides of the add
+        for (size_t mm_side = 0; mm_side < 2; mm_side++) {
+          // Add will accept tensors of mismatched scalar types, as long as
+          // one of them is a scalar. Addmm will throw in that case, so we can
+          // only perform this fusion if we're sure that it is correct, and
+          // for that we need the add_mat_type. An alternative would be to
+          // insert a type_as conditional on the tensor shape being a scalar,
+          // but that might add overhead, and make analysis harder.
+          auto add_mat_type =
+              node->input(1 - mm_side)->type()->expect<TensorType>();
+          // if we don't have the rank, we can't tell if the bias is a scalar
+          if (!add_mat_type->sizes().size()) {
+            continue;
+          }
+
+          if (node->input(mm_side)->node()->matches(
+                  "aten::mm(Tensor self, Tensor mat2) -> Tensor")) {
+            WithInsertPoint guard(node);
+
+            auto* graph = node->owningGraph();
+            auto* mm_node = node->input(mm_side)->node();
+            auto* add_mat = node->input(1 - mm_side);
+            auto* mat1 = mm_node->input(0);
+            auto* mat2 = mm_node->input(1);
+
+            // Attempts to find a matrix with a defined scalar type to type as
+            auto* type_as_mat = mat1;
+            if (!type_as_mat->type()->expect<TensorType>()->scalarType()) {
+              type_as_mat = mat2;
+            }
+            auto mat_scalar_type =
+                type_as_mat->type()->expect<TensorType>()->scalarType();
+
+            // we can't use type_as if we don't know the target type (mm), the
+            // bias needs to be coerced to
+            if (!mat_scalar_type) {
+              continue;
+            }
+
+            // We insert the type_as if we're sure that the added element is a
+            // scalar, and we either don't know what is the type of the
+            // scalar, or know the type, and know that it's
+            // mismatched.
+            if (add_mat_type->sizes().size() &&
+                *add_mat_type->sizes().size() == 0 &&
+                !mustBeEqual(add_mat_type->scalarType(), mat_scalar_type)) {
+              auto* type_as_node =
+                  graph->insertNode(graph->create(aten::type_as, 1));
+              type_as_node->addInput(add_mat);
+              type_as_node->addInput(type_as_mat);
+              add_mat = type_as_node->output();
+              if (add_mat_type->isComplete()) {
+                auto new_type =
+                    add_mat_type->withScalarType(mat_scalar_type)->contiguous();
+                add_mat->setType(new_type);
+              }
+            }
+
+            auto* cOne = graph->insertConstant(1);
+            auto* addmm_node = graph->insertNode(graph->create(aten::addmm, 1));
+            addmm_node->addInput(add_mat);
+            addmm_node->addInput(mat1);
+            addmm_node->addInput(mat2);
+            addmm_node->addInput(cOne);
+            addmm_node->addInput(cOne);
+            auto* addmm_value = addmm_node->output();
+
+            // Copy shape information from output node
+            addmm_value->copyMetadata(node->output());
+            GRAPH_UPDATE(
+                "Fusing ",
+                mm_node->input(0)->debugName(),
+                ", ",
+                mm_node->input(1)->debugName(),
+                " and ",
+                node->input(1 - mm_side)->debugName(),
+                " into ",
+                addmm_value->debugName());
+            node->output()->replaceAllUsesWith(addmm_value);
+            continue;
+          }
+        }
+      }
+    }
+    for (Block* b : node->blocks()) {
+      FuseAddMM(b);
+    }
+  }
+}
+
+// FuseAddMM is a separate pass from peephole optimize because it is currently
+// only done as an optimization for onnx.
+// as it is today, fusing add + mm has no benefit within PyTorch running ATen
+// ops. However, we rely on seeing the fused version of addmm for ONNX export,
+// since after ONNX translation we would see redundant Gemm ops with sub-optimal
+// inputs. This flag is exposed so that ONNX export can pass `true` to get the
+// fused behavior, but normal JIT peephole optimization is left alone.
+void FuseAddMM(const std::shared_ptr<Graph>& graph) {
+  FuseAddMM(graph->block());
+}
 
 void PeepholeOptimize(
     const std::shared_ptr<Graph>& graph,
