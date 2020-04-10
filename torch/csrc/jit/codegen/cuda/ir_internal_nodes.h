@@ -494,7 +494,7 @@ struct TORCH_CUDA_API TensorIndex : public Val {
         "Cannot index with a value other than an int.");
   }
 
-  std::vector<Val*>::size_type size() const {
+  std::vector<Val*>::size_type nDims() const {
     return indices_.size();
   }
 

@@ -473,13 +473,13 @@ bool IfThenElse::sameAs(const IfThenElse* other) const {
 }
 
 bool TensorIndex::sameAs(const TensorIndex* const other) const {
-  if (size() != other->size())
+  if (nDims() != other->nDims())
     return false;
 
   if (!view()->sameAs(other->view()))
     return false;
 
-  for (decltype(size()) i = 0; i < size(); i++)
+  for (decltype(nDims()) i = 0; i < nDims(); i++)
     if (!(index(i)->sameAs(other->index(i))))
       return false;
 
@@ -488,8 +488,8 @@ bool TensorIndex::sameAs(const TensorIndex* const other) const {
 
 Val* TensorIndex::index(int i) const {
   if (i < 0)
-    i += size();
-  assert(i >= 0 && i < size());
+    i += nDims();
+  assert(i >= 0 && i < nDims());
   return indices_[i];
 }
 
