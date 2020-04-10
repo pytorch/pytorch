@@ -19,7 +19,7 @@ from torch.nn.utils import fuse_conv_bn_weights
 
 try:
     from typing_extensions import Final
-except:
+except ImportError:
     from torch.jit import Final
 
 class _ConvNd(nn.Module):
