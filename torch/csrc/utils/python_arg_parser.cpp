@@ -215,6 +215,10 @@ auto handle_torch_function(PythonArgs &r, PyObject* args, PyObject* kwargs, PyOb
  *  precedence.
  *
  *  'obj' is an object to check for a __torch_function__ implementation
+ * 
+ * If changing this file in a way that can affect the __torch_function__
+ * overhead, please report the benchmarks in 'benchmarks/overrides_benchmark'.
+ * See the instructions in the 'README.md' in that directory.
  *
  */
 
