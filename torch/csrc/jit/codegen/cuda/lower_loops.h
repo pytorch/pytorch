@@ -48,11 +48,11 @@ struct TORCH_CUDA_API LoopNestGenerator : public OptOutDispatch {
   const TensorView* active_view;
   unsigned int active_view_axis;
 
-  // Active IfThenElse or ForLoop
-  Expr* active_scope = nullptr;
+  // Keep all for loops conveniently to make unrolling easier
+  std::vector<ForLoop*> for_loops;
 
   // Get Register allocation statement for tensorview
-  Allocate* getAlloc(TensorView*);
+  void pushAlloc(TensorView*);
 
   // Clear out the last recorded computeAtView
   void clearActiveView();

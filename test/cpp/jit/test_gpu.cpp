@@ -1012,13 +1012,15 @@ void testGPU_FusionLoopUnroll() {
   // Register your outputs
   fusion.addOutput(tv3);
 
-  tv3->split(0, 16);
+  int block_size = 16;
+
+  tv3->split(0, block_size);
   tv3->split(0, 4);
 
   // For all inputs, computeAt the output inline, temporaries should be squeezed
   // between them
-  tv0->computeAt(tv3, 1);
-  tv1->computeAt(tv3, 1);
+  tv0->computeAt(tv3, -1);
+  tv1->computeAt(tv3, -1);
 
   // Parallelize
   tv2->axis(1)->parallelize(ParallelType::Unroll);
@@ -1027,17 +1029,19 @@ void testGPU_FusionLoopUnroll() {
   tv3->axis(-1)->parallelize(ParallelType::TIDx);
   tv3->axis(0)->parallelize(ParallelType::BIDx);
 
-  torch::jit::fuser::cuda::CudaKernel prog;
-  prog.device_ = 0;
-  prog.grid(2);
-  prog.block(16);
-
   // GPULower lower(&fusion);
   // lower.printKernel(std::cout);
 
+  int inp_size = 129;
+
+  torch::jit::fuser::cuda::CudaKernel prog;
+  prog.device_ = 0;
+  prog.grid( ( inp_size + 63 ) / 64);
+  prog.block(block_size);
+
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
 
-  at::Tensor input1 = at::ones({128}, options);
+  at::Tensor input1 = at::ones({inp_size}, options);
   at::Tensor input2 = at::ones_like(input1);
 
   at::Tensor output = at::empty_like(input1);
@@ -1047,7 +1051,7 @@ void testGPU_FusionLoopUnroll() {
   torch::jit::fuser::cuda::compileKernel(fusion, prog);
   torch::jit::fuser::cuda::runTestKernel(prog, inputs, outputs);
 
-  at::Tensor check = at::full({128}, 4, options);
+  at::Tensor check = at::full({inp_size}, 4, options);
 
   TORCH_CHECK(output.equal(check));
 }

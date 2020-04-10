@@ -24,11 +24,14 @@ unsigned int computeForDepth(Expr* scope);
 // Push back an expr to scope
 void pushBack(Expr* scope, Expr* expr);
 
+// Insert expr in scope before ref
+void insertBefore(Expr* scope, Expr* ref, Expr* expr);
+
 // Return the parent of the active scope
 Expr* getParent(Expr* scope);
 
 // Open a new inner most for loop
-Expr* openFor(Expr* scope, IterDomain*);
+ForLoop* openFor(Expr* scope, IterDomain*);
 
 // Close the inner most for loop
 Expr* closeScope(Expr* scope);

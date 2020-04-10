@@ -87,27 +87,56 @@ struct forLoopCount : private OptInDispatch {
 
 struct scopePushBack : private OptInDispatch {
  private:
-  Expr* _expr = nullptr;
+  Expr* expr_;
   void handle(ForLoop* fl) final {
-    fl->body().push_back(_expr);
+    fl->body().push_back(expr_);
   }
 
   void handle(IfThenElse* ite) final {
-    ite->body().push_back(_expr);
+    ite->body().push_back(expr_);
   }
 
   void handle(Expr* expr) final {
     OptInDispatch::handle(expr);
   }
 
+  scopePushBack(Expr* expr) : expr_(expr) {}
+
  public:
   static void push(Expr* scope, Expr* expr) {
-    scopePushBack pb;
+    scopePushBack pb(expr);
     TORCH_INTERNAL_ASSERT(
         expr != nullptr && scope != nullptr,
         "Cannot push back, scope or expr is a nullptr.");
-    pb._expr = expr;
     pb.handle(scope);
+  }
+};
+
+struct scopeInsertBefore : private OptInDispatch {
+ private:
+  Expr* expr_;
+  Expr* ref_;
+  void handle(ForLoop* fl) final {
+    fl->body().insert_before(ref_, expr_);
+  }
+
+  void handle(IfThenElse* ite) final {
+    ite->body().insert_before(ref_, expr_);
+  }
+
+  void handle(Expr* expr) final {
+    OptInDispatch::handle(expr);
+  }
+  
+  scopeInsertBefore(Expr* ref, Expr* expr):ref_(ref), expr_(expr) {}
+
+ public:
+  static void insert(Expr* scope, Expr* ref, Expr* expr) {
+    scopeInsertBefore scb(ref, expr);
+    TORCH_INTERNAL_ASSERT(
+        expr != nullptr && scope != nullptr,
+        "Cannot push back, scope or expr is a nullptr.");
+    scb.handle(scope);
   }
 };
 
@@ -333,6 +362,11 @@ void pushBack(Expr* scope, Expr* expr) {
   scopePushBack::push(scope, expr);
 }
 
+// Insert expr in scope before ref
+void insertBefore(Expr* scope, Expr* ref, Expr* expr){
+  scopeInsertBefore::insert(scope, ref, expr);
+}
+
 // Return the parent of the active scope
 Expr* getParent(Expr* scope) {
   TORCH_INTERNAL_ASSERT(
@@ -343,7 +377,7 @@ Expr* getParent(Expr* scope) {
 }
 
 // Open a new inner most for loop
-Expr* openFor(Expr* scope, IterDomain* id) {
+ForLoop* openFor(Expr* scope, IterDomain* id) {
   ForLoop* new_scope = nullptr;
   if (id->isThread()) {
     new_scope = new ForLoop(

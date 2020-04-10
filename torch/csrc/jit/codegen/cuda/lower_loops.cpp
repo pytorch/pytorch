@@ -66,86 +66,106 @@ void UnrollPass::handle(ForLoop* fl) {
 
   for (auto expr : fl->body().exprs()) {
     OptOutDispatch::handle(expr);
+  }
 
-    if (ir_utils::isTVOp(expr)) {
-      if (within_unroll) {
-        TORCH_INTERNAL_ASSERT(
-            fl->body().size() == 1,
-            "Expected to only find a single expr in an inner most for loop inside an unrolled scope.");
+  TensorView* out;
+  bool has_TV_op = false;
+  for(Expr* expr : fl->body().exprs())
+    if(ir_utils::isTVOp(expr)){
+      // Predicate determining op for unroll
+      out = ir_utils::asTV(expr->output(0));
+      has_TV_op = true;
+      break;
+    }
 
-        // Indices used to detect when we can unroll a loop safely
-        // For loops outside the unroll, it's just he index, for loops inside
-        // the unroll, if it's a thread it's the thread index, otherwise it's
-        // the size-1
-        std::vector<Val*> unroll_pred_inds;
-        auto it = for_loops.begin();
-        while (it != for_loops.end()) {
-          if (ir_utils::isUnrolledFor(*it))
-            break;
-          unroll_pred_inds.push_back((*it)->index());
-          it++;
-        }
+  if (within_unroll && has_TV_op) {
+    // Setup unrolled loop information:
 
-        // This is the outer most loop that needs to be unrolled
-        ForLoop* first_unroll = *it;
+    // Indices used to detect when we can unroll a loop safely
+    // For loops outside the unroll, it's just he index, for loops inside
+    // the unroll, if it's a thread it's the thread index, otherwise it's
+    // the size-1
+    std::vector<Val*> unroll_pred_inds;
+    auto it = for_loops.begin();
+    while (it != for_loops.end()) {
+      if (ir_utils::isUnrolledFor(*it))
+        break;
+      unroll_pred_inds.push_back((*it)->index());
+      it++;
+    }
 
-        // Indicies inside the unroll
-        while (it != for_loops.end()) {
-          IterDomain* id = (*it)->iter_domain();
-          if (id->isThread())
-            unroll_pred_inds.push_back((*it)->index());
-          else
-            unroll_pred_inds.push_back(sub(id->extent(), new Int(1)));
-          it++;
-        }
+    // This is the outer most loop that needs to be unrolled
+    ForLoop* first_unroll = *it;
 
-        // Tensorview of the predicate determining op
-        TensorView* out = ir_utils::asTV(ir_utils::asExpr(expr)->outputs()[0]);
+    // Indicies inside the unroll
+    while (it != for_loops.end()) {
+      IterDomain* id = (*it)->iter_domain();
+      if (id->isThread())
+        unroll_pred_inds.push_back((*it)->index());
+      else
+        unroll_pred_inds.push_back(sub(id->extent(), new Int(1)));
+      it++;
+    }
 
-        // Make predicates for the unrolling, and the epilogue
-        Int* unroll_predicate = getPredicate(out, unroll_pred_inds);
-        Int* inline_predicate =
-            getPredicate(out, scope_utils::getLoopIndices(for_loops.back()));
+    // Make predicates for the unrolling, and the epilogue
+    Int* unroll_predicate = getPredicate(out, unroll_pred_inds);
 
-        // Make the IfThenElse controlling the unrolling
-        IfThenElse* unroll_ite = new IfThenElse(
-            unroll_predicate, {}, {}, first_unroll->parentScope());
-        // Get the loop nest for the unrolled path
-        ForLoop* unrolled_loop =
-            scope_utils::cloneLoopNest(first_unroll, unroll_ite);
-        ForLoop* inlined_loop =
-            scope_utils::cloneLoopNest(first_unroll, unroll_ite);
-        Expr* inner_most_inlined_loop =
-            scope_utils::firstInnerMostScope(inlined_loop);
-        // Get the predicate for the non-unrolled (inline) path
-        IfThenElse* inline_ite = new IfThenElse(
-            inline_predicate, {expr}, {}, inner_most_inlined_loop);
-        std::unordered_map<Expr*, Expr*> inline_replacement_map;
-        inline_replacement_map.emplace(
-            std::pair<Expr*, Expr*>(expr, inline_ite));
-        scope_utils::replaceExprsInScope(
-            inner_most_inlined_loop, inline_replacement_map);
+    // Make the IfThenElse controlling the unrolling
+    IfThenElse* unroll_ite =
+        new IfThenElse(unroll_predicate, {}, {}, first_unroll->parentScope());
 
-        unroll_ite->body().push_back(unrolled_loop);
-        unroll_ite->elseBody().push_back(inlined_loop);
+    // Get the loop nest for the unrolled path
+    ForLoop* unrolled_loop =
+        scope_utils::cloneLoopNest(first_unroll, unroll_ite);
+    unroll_ite->body().push_back(unrolled_loop);
 
-        loop_replacement_map.insert({first_unroll, unroll_ite});
+    // Loop nest for inlined path
+    ForLoop* inlined_loop =
+        scope_utils::cloneLoopNest(first_unroll, unroll_ite);
+    unroll_ite->elseBody().push_back(inlined_loop);
 
-      } else {
-        // ! within_unroll
-        TensorView* out = ir_utils::asTV(ir_utils::asExpr(expr)->outputs()[0]);
-        Int* pred =
-            getPredicate(out, scope_utils::getLoopIndices(for_loops.back()));
-        if (!pred->isOneInt()) {
-          IfThenElse* inline_ite =
-              new IfThenElse(pred, {expr}, {}, for_loops.back());
-          for_loops.back()->body().insert_before(expr, inline_ite);
-          for_loops.back()->body().erase(expr);
-        }
+    // Inner most inlined loop
+    Expr* inner_most_inlined_loop =
+        scope_utils::firstInnerMostScope(inlined_loop);
+
+    loop_replacement_map.insert({first_unroll, unroll_ite});
+
+    bool first_expr = true;
+    for (auto expr : fl->body().exprs()) {
+      if (!ir_utils::isTVOp(expr))
+        continue;
+
+      // Setup the expressions that need predicates around them.    
+      Int* inline_predicate =
+          getPredicate(out, scope_utils::getLoopIndices(for_loops.back()));
+      IfThenElse* inline_ite =
+          new IfThenElse(inline_predicate, {expr}, {}, inner_most_inlined_loop);
+      std::unordered_map<Expr*, Expr*> inline_replacement_map;
+      inline_replacement_map.emplace(std::pair<Expr*, Expr*>(expr, inline_ite));
+      scope_utils::replaceExprsInScope(
+          inner_most_inlined_loop, inline_replacement_map);
+
+    } // for expr
+
+
+  } else { //  if(!within_unroll)
+      
+    for (auto expr : fl->body().exprs()) {
+      if (!ir_utils::isTVOp(expr))
+        continue;
+
+      // ! within_unroll
+      TensorView* out = ir_utils::asTV(ir_utils::asExpr(expr)->outputs()[0]);
+      Int* pred =
+          getPredicate(out, scope_utils::getLoopIndices(for_loops.back()));
+      if (!pred->isOneInt()) {
+        IfThenElse* inline_ite =
+            new IfThenElse(pred, {expr}, {}, for_loops.back());
+        for_loops.back()->body().insert_before(expr, inline_ite);
+        for_loops.back()->body().erase(expr);
       }
-    } // if (ir_utils::isTVOp(expr))
-  } // for (auto expr : fl->body().exprs())
-
+    }
+  } // else (if(!within_unroll))
   for_loops.pop_back();
   bool within_unroll = prev_unroll;
 }
@@ -183,15 +203,25 @@ std::vector<Expr*> UnrollPass::runPass(
   return mutated_exprs;
 }
 
-Allocate* LoopNestGenerator::getAlloc(TensorView* tv) {
+void LoopNestGenerator::pushAlloc(TensorView* tv) {
   TORCH_INTERNAL_ASSERT(
       !(FusionGuard::getCurFusion()->hasInput(tv) ||
         FusionGuard::getCurFusion()->hasOutput(tv)),
       "Tried to allocate an input or output tensor.");
 
-  std::vector<Val*> alloc_dims;
+  // Compute at axis can be == tv->nDims() meaning it's inline
+  decltype(tv->nDims()) alloc_pos = tv->nDims();
+  while(alloc_pos > 0){
+    if(tv->hasComputeAt() && alloc_pos == tv->getComputeAtAxis())
+      break;
+    if( alloc_pos < tv->nDims() &&
+      tv->getComputeAtAxis(alloc_pos)->parallel_method() == ParallelType::Unroll)
+      break;
+    alloc_pos--;
+  }
 
-  for (decltype(tv->nDims()) i = tv->getComputeAtAxis(); i < tv->nDims(); i++) {
+  std::vector<Val*> alloc_dims;
+  for (auto i = alloc_pos; i < tv->nDims(); i++) {
     IterDomain* dim = tv->getComputeAtAxis(i);
     if (dim->isThreadDim())
       continue;
@@ -208,7 +238,15 @@ Allocate* LoopNestGenerator::getAlloc(TensorView* tv) {
       size = mul(size, alloc_dims[i]);
     }
   }
-  return new Allocate(tv, size);
+  Allocate* alloc = new Allocate(tv, size);
+  if(alloc_pos == 0){
+    lowered_exprs.insert(lowered_exprs.begin(), alloc);
+  } else if(alloc_pos == for_loops.size()){
+    // inline
+    scope_utils::pushBack(for_loops[alloc_pos-1], alloc);
+  } else {
+    scope_utils::insertBefore(for_loops[alloc_pos-1], for_loops[alloc_pos], alloc);
+  }
 }
 
 // Clear out the last recorded computeAtView
@@ -224,18 +262,20 @@ void LoopNestGenerator::setActiveView(const TensorView* const tv) {
 }
 
 void LoopNestGenerator::openFor(IterDomain* id) {
-  Expr* new_scope = scope_utils::openFor(active_scope, id);
-  if (active_scope == nullptr) {
-    pushBack(new_scope);
+  if( for_loops.size() > 0){
+    ForLoop* new_scope = scope_utils::openFor(for_loops.back(), id);
+    for_loops.push_back(new_scope);
+  } else {
+    for_loops.push_back(scope_utils::openFor(nullptr, id));
+    lowered_exprs.push_back(for_loops.back());
   }
-  active_scope = new_scope;
 }
 
 void LoopNestGenerator::pushBack(Expr* expr) {
-  if (active_scope == nullptr)
+  if (for_loops.size() == 0)
     lowered_exprs.push_back(expr);
   else
-    scope_utils::pushBack(active_scope, expr);
+    scope_utils::pushBack(for_loops.back(), expr);
 }
 
 /*
@@ -259,9 +299,9 @@ void LoopNestGenerator::updateLoopNest(TensorView* tv) {
   // 1) Reduce loop structure
   if (active_view != nullptr) {
     // - Else reduce to active_view_axis if loop_depth > active_view_axis
-    auto depth = scope_utils::computeForDepth(active_scope);
+    auto depth = for_loops.size();
     for (auto i = depth; i > active_view_axis; i--) {
-      active_scope = scope_utils::closeScope(active_scope);
+      for_loops.pop_back();
     }
   }
 
@@ -272,7 +312,7 @@ void LoopNestGenerator::updateLoopNest(TensorView* tv) {
 
     //  3) Open to compute At
     //    - If there is a computeAt set for this TV
-    auto depth = scope_utils::computeForDepth(active_scope);
+    auto depth = for_loops.size();
 
     for (auto i = depth; i < tv->getComputeAtAxis(); i++)
       openFor(tv->getComputeAtAxis(i));
@@ -292,21 +332,20 @@ void LoopNestGenerator::updateLoopNest(TensorView* tv) {
   //  4) Allocate the output.
   if (!FusionGuard::getCurFusion()->hasInput(tv) &&
       !FusionGuard::getCurFusion()->hasOutput(tv)) {
-    pushBack(getAlloc(tv));
+    pushAlloc(tv);
   }
   // TODO:
   //  5) If this is a reduction, initialize the output (open for loops to inner
   //  most, predicate, initialize, close predicate, close to computeAt)
 
   //  6) Open to inner most loop
-  for (decltype(tv->nDims()) i = scope_utils::computeForDepth(active_scope);
-       i < tv->nDims();
-       i++)
+  for (decltype(tv->nDims()) i = for_loops.size(); i < tv->nDims(); i++)
     openFor(tv->getComputeAtAxis(i));
 }
 
 // Custom dispatch for Expr, want to find out of it's a TV op
 void LoopNestGenerator::handle(Expr* expr) {
+
   if (!ir_utils::isTVOp(expr))
     return;
 

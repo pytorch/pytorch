@@ -402,18 +402,6 @@ void validate(Fusion* fusion) {
               "Parallelization on reduction axes not support at the moment found on, ",
               tv,
               ".");
-
-        if (tv->hasComputeAt())
-          if (i < tv->getComputeAtAxis())
-            TORCH_CHECK(
-                id->parallel_method() != ParallelType::Unroll,
-                "Unroll dimension cannot be outside computeAt, found on: ",
-                tv,
-                " compute at ",
-                tv->getComputeAtView(),
-                " axis = ",
-                tv->getComputeAtAxis(),
-                ".");
       }
     } // if ir_utils::isTV
   } // for(Val* val : fusion->vals())
@@ -435,7 +423,6 @@ std::vector<Expr*> GPULower::getLoweredExprs() {
 
   auto loop_nests = LoopNestGenerator::getLoopNest(fusion_);
   auto unrolled_loops = UnrollPass::runPass(fusion_, loop_nests);
-
   // Run through loop nests and further lower the expressions
   for (auto* expr : unrolled_loops) {
     Statement* mutated_stmt = mutate(expr);
