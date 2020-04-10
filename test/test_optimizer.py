@@ -1,4 +1,3 @@
-import io
 import unittest
 import torch
 import torch.utils.optimizer
@@ -64,18 +63,14 @@ class TestOptimizer(unittest.TestCase):
         scripted_model.eval()
         initial_result = scripted_model(input_data)
 
-        torch.utils.optimizer.optimize_for_mobile(scripted_model)
-
-        buffer = io.BytesIO()
-        torch.jit.save(scripted_model, buffer)
-        buffer.seek(0)
-        optimized_script_model = torch.jit.load(buffer)
+        optimized_script_model = torch.utils.optimizer.optimize_for_mobile(scripted_model)
 
         pattern_count_map = {"Tensor = aten::conv2d": -1,
-                             "prepacked::conv2d_clamp_prepack": 1,
-                             "prepacked::conv2d_clamp_run": 1,
-                             "prepacked::linear_clamp_prepack": 1,
-                             "prepacked::linear_clamp_run": 1}
+                            "Tensor = prim::CallFunction": -1,
+                            "prepacked::conv2d_clamp_prepack": -1,
+                            "prepacked::conv2d_clamp_run": 1,
+                            "prepacked::linear_clamp_prepack": -1,
+                            "prepacked::linear_clamp_run": 1,}
         for pattern, v in pattern_count_map.items():
             if (v == 0):
                 FileCheck().check(pattern).run(optimized_script_model.graph)
@@ -85,7 +80,7 @@ class TestOptimizer(unittest.TestCase):
                 FileCheck().check_count(pattern, v, exactly=True).run(optimized_script_model.graph)
 
         optimized_result = optimized_script_model(input_data)
-        torch.testing.assert_allclose(result, optimized_result, rtol=1e-2, atol=1e-3)
+        torch.testing.assert_allclose(initial_result, optimized_result, rtol=1e-2, atol=1e-3)
 
-if __name__ == '__main__':
+if __name__ == '__main__':git
     unittest.main()
