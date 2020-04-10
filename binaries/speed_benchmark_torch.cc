@@ -49,8 +49,8 @@ C10_DEFINE_bool(
   print_output,
   false,
   "Whether to print output with all one input tensor.");
-C10_DEFINE_int(warmup, 10, "The number of iterations to warm up.");
-C10_DEFINE_int(iter, 100, "The number of iterations to run.");
+C10_DEFINE_int(warmup, 0, "The number of iterations to warm up.");
+C10_DEFINE_int(iter, 10, "The number of iterations to run.");
 C10_DEFINE_bool(
   report_pep,
   false,
