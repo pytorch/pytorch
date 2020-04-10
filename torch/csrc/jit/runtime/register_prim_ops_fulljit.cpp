@@ -24,201 +24,201 @@ namespace jit {
 
 namespace {
 
-RegisterOperators reg({
-    Operator(
-        prim::profile,
-        [](const Node* node) -> Operation {
-          auto callback = node->cast<ProfileOp>()->getCallback();
-          return [](Stack& stack) {
-            AT_ERROR(
-                "Must be lowered to Interpreter's PROFILE instruction"); // NOLINT
-            return 0;
-          };
-        },
-        aliasAnalysisSpecialCase()),
-    Operator(
-        prim::CudaFusionGroup,
-        [](const Node* node) -> Operation {
-          const auto key = registerFusion(node);
-          return [key](Stack& stack) {
-            RECORD_FUNCTION("CudaFusionGroup", std::vector<c10::IValue>());
-            runFusion(key, stack);
-            return 0;
-          };
-        },
-        aliasAnalysisSpecialCase()),
-    Operator(
-        prim::FusionGroup,
-        [](const Node* node) -> Operation {
-          const auto key = registerFusion(node);
-          return [key](Stack& stack) {
-            RECORD_FUNCTION("FusionGroup", std::vector<c10::IValue>());
-            runFusion(key, stack);
-            return 0;
-          };
-        },
-        aliasAnalysisSpecialCase()),
-    Operator(
-        "prim::Guard(Tensor(a) t) -> Tensor(a)",
-        [](Stack& stack) {
-          AT_ERROR("Should be replaced by prim::BailOut");
-          return 0;
-        },
-        aliasAnalysisFromSchema()),
-    Operator(
-        "prim::BailOut(...) -> Tensor(a)",
-        [](Stack& /* stack */) {
-          AT_ERROR("prim::BailOut not yet implemented"); // NOLINT
-          return 0;
-        },
-        aliasAnalysisFromSchema()),
-    Operator(
-        "prim::BailoutTemplate() -> int",
-        [](Stack& stack) {
-          // TODO: today, we put a single bailout template at the front to
-          // carry the un-optimized graph for bailout nodes to use. Ideally
-          // this should never run, but we haven't written the code to remove
-          // it yet.
-          // TORCH_INTERNAL_ASSERT(false);
+RegisterOperators reg(
+    {Operator(
+         prim::profile,
+         [](const Node* node) -> Operation {
+           auto callback = node->cast<ProfileOp>()->getCallback();
+           return [](Stack& stack) {
+             AT_ERROR(
+                 "Must be lowered to Interpreter's PROFILE instruction"); // NOLINT
+             return 0;
+           };
+         },
+         aliasAnalysisSpecialCase()),
+     Operator(
+         prim::CudaFusionGroup,
+         [](const Node* node) -> Operation {
+           const auto key = registerFusion(node);
+           return [key](Stack& stack) {
+             RECORD_FUNCTION("CudaFusionGroup", std::vector<c10::IValue>());
+             runFusion(key, stack);
+             return 0;
+           };
+         },
+         aliasAnalysisSpecialCase()),
+     Operator(
+         prim::FusionGroup,
+         [](const Node* node) -> Operation {
+           const auto key = registerFusion(node);
+           return [key](Stack& stack) {
+             RECORD_FUNCTION("FusionGroup", std::vector<c10::IValue>());
+             runFusion(key, stack);
+             return 0;
+           };
+         },
+         aliasAnalysisSpecialCase()),
+     Operator(
+         "prim::Guard(Tensor(a) t) -> Tensor(a)",
+         [](Stack& stack) {
+           AT_ERROR("Should be replaced by prim::BailOut");
+           return 0;
+         },
+         aliasAnalysisFromSchema()),
+     Operator(
+         "prim::BailOut(...) -> Tensor(a)",
+         [](Stack& /* stack */) {
+           AT_ERROR("prim::BailOut not yet implemented"); // NOLINT
+           return 0;
+         },
+         aliasAnalysisFromSchema()),
+     Operator(
+         "prim::BailoutTemplate() -> int",
+         [](Stack& stack) {
+           // TODO: today, we put a single bailout template at the front to
+           // carry the un-optimized graph for bailout nodes to use. Ideally
+           // this should never run, but we haven't written the code to remove
+           // it yet.
+           // TORCH_INTERNAL_ASSERT(false);
 
-          // Returns an int so that we have an easy way to do graph traversal
-          push(stack, 1);
-          return 0;
-        },
-        aliasAnalysisFromSchema()),
-    Operator(
-        "aten::grad(Tensor[] outputs, Tensor[] inputs, Tensor?[]? grad_outputs=None, bool? retain_graph=None, bool create_graph=False, bool allow_unused=False) -> Tensor?[]",
-        [](Stack& stack) {
-          bool allow_unused = pop(stack).toBool();
-          bool create_graph = pop(stack).toBool();
-          auto retain_graph = pop(stack).toOptional<bool>();
-          auto grad_outputs = pop(stack);
-          auto inputs = pop(stack).toTensorList();
-          auto outputs = pop(stack).toTensorList();
-          std::vector<torch::autograd::Variable> input_vars(
-              inputs.begin(), inputs.end());
-          std::vector<torch::autograd::Variable> output_vars(
-              outputs.begin(), outputs.end());
-          std::vector<torch::autograd::Variable> gradients;
+           // Returns an int so that we have an easy way to do graph traversal
+           push(stack, 1);
+           return 0;
+         },
+         aliasAnalysisFromSchema()),
+     Operator(
+         "aten::grad(Tensor[] outputs, Tensor[] inputs, Tensor?[]? grad_outputs=None, bool? retain_graph=None, bool create_graph=False, bool allow_unused=False) -> Tensor?[]",
+         [](Stack& stack) {
+           bool allow_unused = pop(stack).toBool();
+           bool create_graph = pop(stack).toBool();
+           auto retain_graph = pop(stack).toOptional<bool>();
+           auto grad_outputs = pop(stack);
+           auto inputs = pop(stack).toTensorList();
+           auto outputs = pop(stack).toTensorList();
+           std::vector<torch::autograd::Variable> input_vars(
+               inputs.begin(), inputs.end());
+           std::vector<torch::autograd::Variable> output_vars(
+               outputs.begin(), outputs.end());
+           std::vector<torch::autograd::Variable> gradients;
 
-          if (!grad_outputs.isNone()) {
-            for (const IValue& v : grad_outputs.toListRef()) {
-              gradients.emplace_back(v.isNone() ? at::Tensor() : v.toTensor());
-            }
-          }
+           if (!grad_outputs.isNone()) {
+             for (const IValue& v : grad_outputs.toListRef()) {
+               gradients.emplace_back(v.isNone() ? at::Tensor() : v.toTensor());
+             }
+           }
 
-          auto res = torch::autograd::grad(
-              output_vars,
-              input_vars,
-              gradients,
-              retain_graph,
-              create_graph,
-              allow_unused);
+           auto res = torch::autograd::grad(
+               output_vars,
+               input_vars,
+               gradients,
+               retain_graph,
+               create_graph,
+               allow_unused);
 
-          c10::impl::GenericList res_list{OptionalType::ofTensor()};
-          for (const at::Tensor& t : res) {
-            res_list.emplace_back(t.defined() ? t : IValue());
-          }
-          push(stack, res_list);
-          return 0;
-        },
-        aliasAnalysisFromSchema()),
-    // NB: backward op might write to every input tensors in the graph and it's
-    // much more expensive to analayze the leaves and sometimes it might retain
-    // the whole gradients in every tensor of the Autograd graph with
-    // create_graph=True so we use aliasAnalysisConservative for these two OPs
-    Operator(
-        "aten::backward(Tensor[](a!) tensors, Tensor?[]? grad_tensors=None, bool? retain_graph=None, bool create_graph=False) -> ()",
-        [](Stack& stack) {
-          bool create_graph = pop(stack).toBool();
-          auto retain_graph = pop(stack).toOptional<bool>();
-          auto grad_tensors = pop(stack);
-          auto outputs = pop(stack).toTensorList();
-          std::vector<torch::autograd::Variable> output_vars(
-              outputs.begin(), outputs.end());
-          std::vector<torch::autograd::Variable> gradients;
+           c10::impl::GenericList res_list{OptionalType::ofTensor()};
+           for (const at::Tensor& t : res) {
+             res_list.emplace_back(t.defined() ? t : IValue());
+           }
+           push(stack, res_list);
+           return 0;
+         },
+         aliasAnalysisFromSchema()),
+     // NB: backward op might write to every input tensors in the graph and it's
+     // much more expensive to analayze the leaves and sometimes it might retain
+     // the whole gradients in every tensor of the Autograd graph with
+     // create_graph=True so we use aliasAnalysisConservative for these two OPs
+     Operator(
+         "aten::backward(Tensor[](a!) tensors, Tensor?[]? grad_tensors=None, bool? retain_graph=None, bool create_graph=False) -> ()",
+         [](Stack& stack) {
+           bool create_graph = pop(stack).toBool();
+           auto retain_graph = pop(stack).toOptional<bool>();
+           auto grad_tensors = pop(stack);
+           auto outputs = pop(stack).toTensorList();
+           std::vector<torch::autograd::Variable> output_vars(
+               outputs.begin(), outputs.end());
+           std::vector<torch::autograd::Variable> gradients;
 
-          if (!grad_tensors.isNone()) {
-            for (const IValue& v : grad_tensors.toListRef()) {
-              gradients.emplace_back(v.isNone() ? at::Tensor() : v.toTensor());
-            }
-          }
+           if (!grad_tensors.isNone()) {
+             for (const IValue& v : grad_tensors.toListRef()) {
+               gradients.emplace_back(v.isNone() ? at::Tensor() : v.toTensor());
+             }
+           }
 
-          torch::autograd::backward(
-              output_vars, gradients, retain_graph, create_graph);
-          return 0;
-        },
-        aliasAnalysisConservative()),
-    Operator(
-        "aten::backward(Tensor(a!) self, Tensor? gradient=None, bool? retain_graph=None, bool create_graph=False) -> ()",
-        [](Stack& stack) {
-          bool create_graph = pop(stack).toBool();
-          auto retain_graph = pop(stack).toOptional<bool>();
-          IValue gradient_ivalue = pop(stack);
-          at::Tensor gradient = gradient_ivalue.isNone()
-              ? at::Tensor()
-              : gradient_ivalue.toTensor();
-          at::Tensor self = pop(stack).toTensor();
-          bool keep_graph = retain_graph ? retain_graph.value() : create_graph;
-          self.backward(gradient, keep_graph, create_graph);
-          return 0;
-        },
-        aliasAnalysisConservative()),
-    Operator(
-        "aten::save(t item, str filename) -> ()",
-        [](Stack& stack) {
-          auto filename = pop(stack).toStringRef();
-          auto ivalue = pop(stack);
+           torch::autograd::backward(
+               output_vars, gradients, retain_graph, create_graph);
+           return 0;
+         },
+         aliasAnalysisConservative()),
+     Operator(
+         "aten::backward(Tensor(a!) self, Tensor? gradient=None, bool? retain_graph=None, bool create_graph=False) -> ()",
+         [](Stack& stack) {
+           bool create_graph = pop(stack).toBool();
+           auto retain_graph = pop(stack).toOptional<bool>();
+           IValue gradient_ivalue = pop(stack);
+           at::Tensor gradient = gradient_ivalue.isNone()
+               ? at::Tensor()
+               : gradient_ivalue.toTensor();
+           at::Tensor self = pop(stack).toTensor();
+           bool keep_graph = retain_graph ? retain_graph.value() : create_graph;
+           self.backward(gradient, keep_graph, create_graph);
+           return 0;
+         },
+         aliasAnalysisConservative()),
+     Operator(
+         "aten::save(t item, str filename) -> ()",
+         [](Stack& stack) {
+           auto filename = pop(stack).toStringRef();
+           auto ivalue = pop(stack);
 
-          // Pickle the tensor
-          auto data = jit::pickle_save(ivalue);
+           // Pickle the tensor
+           auto data = jit::pickle_save(ivalue);
 
-          // Write file
-          std::fstream output(filename, std::ios::out | std::ios::binary);
-          output.write(data.data(), data.size());
-          return 0;
-        },
-        aliasAnalysisFromSchema()),
-    Operator(
-        "prim::Print(...) -> ()",
-        [](Stack& stack) {
-          auto num_inputs = pop(stack).toInt();
-          std::stringstream ss;
-          bool first = true;
-          for (const IValue& i : last(stack, num_inputs)) {
-            if (!first)
-              ss << " ";
-            first = false;
-            ss << i;
-          }
-          drop(stack, num_inputs);
-          ss << std::endl;
-          auto* handler = getPrintHandler();
-          TORCH_INTERNAL_ASSERT(handler);
-          handler(ss.str());
-          return 0;
-        },
-        aliasAnalysisSpecialCase()),
-    Operator(
-        "prim::RaiseException(str msg) -> ()",
-        [](Stack& stack) {
-          throw JITException(pop(stack).toStringRef());
-          return 0;
-        },
-        aliasAnalysisFromSchema()),
-    Operator(
-        "prim::IgnoredPythonOp(...) -> None",
-        [](Stack& stack) {
-          throw JITException(
-              "This Python function is annotated to be ignored"
-              " and cannot be and has not been included in the exported"
-              " binary, meaning that it cannot be executed now."
-              " Make sure that ignored operations are never executed after"
-              " import");
-          return 0;
-        },
-        aliasAnalysisFromSchema()),
-    Operator(
+           // Write file
+           std::fstream output(filename, std::ios::out | std::ios::binary);
+           output.write(data.data(), data.size());
+           return 0;
+         },
+         aliasAnalysisFromSchema()),
+     Operator(
+         "prim::Print(...) -> ()",
+         [](Stack& stack) {
+           auto num_inputs = pop(stack).toInt();
+           std::stringstream ss;
+           bool first = true;
+           for (const IValue& i : last(stack, num_inputs)) {
+             if (!first)
+               ss << " ";
+             first = false;
+             ss << i;
+           }
+           drop(stack, num_inputs);
+           ss << std::endl;
+           auto* handler = getPrintHandler();
+           TORCH_INTERNAL_ASSERT(handler);
+           handler(ss.str());
+           return 0;
+         },
+         aliasAnalysisSpecialCase()),
+     Operator(
+         "prim::RaiseException(str msg) -> ()",
+         [](Stack& stack) {
+           throw JITException(pop(stack).toStringRef());
+           return 0;
+         },
+         aliasAnalysisFromSchema()),
+     Operator(
+         "prim::IgnoredPythonOp(...) -> None",
+         [](Stack& stack) {
+           throw JITException(
+               "This Python function is annotated to be ignored"
+               " and cannot be and has not been included in the exported"
+               " binary, meaning that it cannot be executed now."
+               " Make sure that ignored operations are never executed after"
+               " import");
+           return 0;
+         },
+         aliasAnalysisFromSchema()),
+     Operator(
          "prim::rangelist(int n) -> int[]",
          [](Stack& stack) {
            int64_t n;
