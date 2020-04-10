@@ -165,7 +165,7 @@ void setItem(const c10::List<T>& list, int64_t idx, T&& value) {
 
 int listAppend(Stack& stack);
 
-int listReverse(Stack& stack) ;
+int listReverse(Stack& stack);
 
 template <typename T>
 int minList(Stack& stack) {
@@ -593,5 +593,5 @@ int listSetItem(Stack& stack);
       },                                   \
       aliasAnalysisFromSchema())
 
-}
-}
+} // namespace jit
+} // namespace torch
