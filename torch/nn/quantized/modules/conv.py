@@ -178,19 +178,19 @@ class Conv1d(_ConvNd):
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
                  padding=0, dilation=1, groups=1, bias=True,
                  padding_mode='zeros'):
-        kernel_size = list(_pair(kernel_size))
+        kernel_size = list(_pair(kernel_size[0]))
         kernel_size[self._SQUEEZE_DIM] = 1
         kernel_size = tuple(kernel_size)
 
-        stride = list(_pair(stride))
+        stride = list(_pair(stride[0]))
         stride[self._SQUEEZE_DIM] = 1
         stride = tuple(stride)
 
-        padding = list(_pair(padding))
+        padding = list(_pair(padding[0]))
         padding[self._SQUEEZE_DIM] = 0
         padding = tuple(padding)
 
-        dilation = list(_pair(dilation))
+        dilation = list(_pair(dilation[0]))
         dilation[self._SQUEEZE_DIM] = 1
         dilation = tuple(dilation)
 
