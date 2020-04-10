@@ -85,7 +85,7 @@ static int64_t floordiv(int64_t a, int64_t b) {
     return (r.rem) ? r.quot - 1 : r.quot;
   }
 }
-void checkDoubleInRange(double a);
+TORCH_API void checkDoubleInRange(double a);
 static int64_t floor(double a) {
   checkDoubleInRange(a);
   return std::floor(a);
