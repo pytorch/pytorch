@@ -215,7 +215,6 @@ set(PYTORCH_QNNPACK_AARCH32_ASM_UKERNELS
   src/q8dwconv/up8x9-aarch32-neon-per-channel.S
   src/q8gemm/4x8-aarch32-neon.S
   src/q8gemm/4x8-dq-aarch32-neon.S
-  src/q8vadd/neon_modified.s
   src/q8vadd/neon-aarch32-neon.S
   src/q8gemm/4x8c2-xzp-aarch32-neon.S
   src/q8gemm_sparse/4x4-packA-aarch32-neon.S

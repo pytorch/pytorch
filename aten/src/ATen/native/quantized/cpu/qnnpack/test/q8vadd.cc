@@ -294,7 +294,9 @@ TEST(Q8VADD__NEON, qmax) {
         pytorch_q8vadd_ukernel__neon);
   }
 }
+#endif /* CPUINFO_ARCH_ARM || CPUINFO_ARCH_ARM64 */
 
+#if CPUINFO_ARCH_ARM
 // Test ASM kernels
 TEST(Q8VADD__AARCH32_NEON, n_eq_8) {
   TEST_REQUIRES_ARM_NEON;

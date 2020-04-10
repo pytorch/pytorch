@@ -127,14 +127,14 @@ void pytorch_q8vadd_ukernel__neon(
         float32x4_t vacc3_0_f = vmulq_f32(vxa3_0_f, va_multiplier);
         float32x4_t vacc3_1_f = vmulq_f32(vxa3_1_f, va_multiplier);
 
-        vacc0_0_f = vmlaq_f32(vacc0_0_f, vxb0_0_f, vb_multiplier);
-        vacc0_1_f = vmlaq_f32(vacc0_1_f, vxb0_1_f, vb_multiplier);
-        vacc1_0_f = vmlaq_f32(vacc1_0_f, vxb1_0_f, vb_multiplier);
-        vacc1_1_f = vmlaq_f32(vacc1_1_f, vxb1_1_f, vb_multiplier);
-        vacc2_0_f = vmlaq_f32(vacc2_0_f, vxb2_0_f, vb_multiplier);
-        vacc2_1_f = vmlaq_f32(vacc2_1_f, vxb2_1_f, vb_multiplier);
-        vacc3_0_f = vmlaq_f32(vacc3_0_f, vxb3_0_f, vb_multiplier);
-        vacc3_1_f = vmlaq_f32(vacc3_1_f, vxb3_1_f, vb_multiplier);
+        vacc0_0_f = vfmaq_f32(vacc0_0_f, vxb0_0_f, vb_multiplier);
+        vacc0_1_f = vfmaq_f32(vacc0_1_f, vxb0_1_f, vb_multiplier);
+        vacc1_0_f = vfmaq_f32(vacc1_0_f, vxb1_0_f, vb_multiplier);
+        vacc1_1_f = vfmaq_f32(vacc1_1_f, vxb1_1_f, vb_multiplier);
+        vacc2_0_f = vfmaq_f32(vacc2_0_f, vxb2_0_f, vb_multiplier);
+        vacc2_1_f = vfmaq_f32(vacc2_1_f, vxb2_1_f, vb_multiplier);
+        vacc3_0_f = vfmaq_f32(vacc3_0_f, vxb3_0_f, vb_multiplier);
+        vacc3_1_f = vfmaq_f32(vacc3_1_f, vxb3_1_f, vb_multiplier);
 
         int32x4_t vacc0_lo = vcvtnq_s32_f32(vacc0_0_f);
         int32x4_t vacc0_hi = vcvtnq_s32_f32(vacc0_1_f);
