@@ -22,7 +22,7 @@ at::Tensor record_function_enter(const std::string& name) {
   auto rec = std::make_unique<RecordFunction>(RecordScope::USER_SCOPE);
   // Only add new scope if profiling is enabled.
   if (auto* current = rec->current()) {
-    AT_ASSERT(
+    TORCH_INTERNAL_ASSERT(
         current->name() == StringView("profiler::_record_function_enter"));
     // RecordFunction requires parent_ to be alive for it's entire lifetime.
     // Since the currently active RecordFunction will only live for the lifetime
@@ -44,7 +44,7 @@ void record_function_exit(const at::Tensor& handle) {
   // lifetime until now.
   auto& rec = getRecordFunctionFromTensor(handle);
   if (auto* current = RecordFunction::current()) {
-    AT_ASSERT(current->name() == StringView("profiler::_record_function_exit"));
+    TORCH_INTERNAL_ASSERT(current->name() == StringView("profiler::_record_function_exit"));
     current->_end();
   }
   rec._end();
