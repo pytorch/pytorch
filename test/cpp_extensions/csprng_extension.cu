@@ -17,7 +17,8 @@ struct CUDA_CSPRNG_GeneratorImpl : public at::CPUGeneratorImpl {
   }
 };
 
-const size_t block_cipher_size = 16;
+typedef ulonglong2 block_t;
+constexpr size_t block_t_size = sizeof(block_t);
 
 // =========================================================== AES ===========================================================
 
@@ -177,37 +178,54 @@ __device__ void encrypt(uint8_t *block, uint8_t *key) {
 // ===========================================================================================================================
 
 template<typename scalar_t, typename uint_t, typename cipher_t, typename transform_t>
-__global__ void block_cipher_contiguous_kernel(scalar_t* data, int numel, cipher_t cipher, transform_t transform) {
+__global__ void block_cipher_contiguous_kernel(scalar_t* data, int numel, cipher_t cipher, transform_t transform_func) {
   const auto idx = blockIdx.x * blockDim.x + threadIdx.x;
-  if (idx < numel) {
-    data[idx] = transform(cipher(idx));
+  constexpr auto unroll_factor = block_t_size / sizeof(uint_t);
+  if (unroll_factor * idx < numel) {
+    auto block = cipher(idx);
+    #pragma unroll
+    for (auto i = 0; i < unroll_factor; ++i) {
+      const auto li = unroll_factor * idx + i;
+      if (li < numel) {
+        data[li] = transform_func((reinterpret_cast<uint_t*>(&block))[i]);
+      }
+    }
   }
 }
 
 template<typename scalar_t, typename uint_t, typename cipher_t, typename transform_t>
-__global__ void block_cipher_kernel(scalar_t* data, int numel, cipher_t cipher, transform_t transform, OffsetCalculator<1> offset_calc) {
+__global__ void block_cipher_kernel(scalar_t* data, int numel, cipher_t cipher, transform_t transform_func, OffsetCalculator<1> offset_calc) {
   const auto idx = blockIdx.x * blockDim.x + threadIdx.x;
-  if (idx < numel) {
-    auto offsets = offset_calc.get(idx);
-    data[offsets[0] / sizeof(scalar_t)] = transform(cipher(idx));
+  constexpr auto unroll_factor = block_t_size / sizeof(uint_t);
+  if (unroll_factor * idx < numel) {
+    auto block = cipher(idx);
+    #pragma unroll
+    for (auto i = 0; i < unroll_factor; ++i) {
+      const auto li = unroll_factor * idx + i;
+      if (li < numel) {
+        const auto offsets = offset_calc.get(li);
+        data[offsets[0] / sizeof(scalar_t)] = transform_func((reinterpret_cast<uint_t*>(&block))[i]);
+      }
+    }
   }
 }
 
 template<typename scalar_t, typename uint_t, typename cipher_t, typename transform_t>
-void block_cipher_ctr_mode(at::TensorIterator& iter, cipher_t cipher, transform_t transform) {
+void block_cipher_ctr_mode(at::TensorIterator& iter, cipher_t cipher, transform_t transform_func) {
   const auto numel = iter.numel();
   if (numel == 0) {
     return;
   }
+  constexpr auto unroll_factor = block_t_size / sizeof(uint_t);
   const auto block = 256;
-  const auto grid = (numel + block - 1) / block;
+  const auto grid = (numel + (block * unroll_factor) - 1) / (block * unroll_factor);
   scalar_t* data = (scalar_t*)iter.data_ptr(0);
   auto stream = at::cuda::getCurrentCUDAStream();
   if (iter.output(0).is_contiguous()) {
-    block_cipher_contiguous_kernel<scalar_t, uint_t, cipher_t, transform_t><<<grid, block, 0, stream>>>(data, numel, cipher, transform);
+    block_cipher_contiguous_kernel<scalar_t, uint_t, cipher_t, transform_t><<<grid, block, 0, stream>>>(data, numel, cipher, transform_func);
   } else {
     auto offset_calc = make_offset_calculator<1>(iter);
-    block_cipher_kernel<scalar_t, uint_t, cipher_t, transform_t><<<grid, block, 0, stream>>>(data, numel, cipher, transform, offset_calc);
+    block_cipher_kernel<scalar_t, uint_t, cipher_t, transform_t><<<grid, block, 0, stream>>>(data, numel, cipher, transform_func, offset_calc);
   }
   AT_CUDA_CHECK(cudaGetLastError());
 }
@@ -215,16 +233,16 @@ void block_cipher_ctr_mode(at::TensorIterator& iter, cipher_t cipher, transform_
 // ===========================================================================================================================
 
 template<typename scalar_t, typename uint_t, typename transform_t>
-void random_kernel_helper(TensorIterator& iter, uint8_t* key, transform_t transform) {
+void random_kernel_helper(TensorIterator& iter, uint8_t* key, transform_t transform_func) {
   block_cipher_ctr_mode<scalar_t, uint_t>(iter,
-    [key] __device__ (unsigned int idx) -> uint_t {
-      uint8_t block[block_cipher_size];
-      memset(block, 0, block_cipher_size);
-      *(reinterpret_cast<unsigned int*>(block)) = idx;
-      encrypt(block, key);
-      return *(reinterpret_cast<uint_t*>(block));
+    [key] __device__ (unsigned int idx) -> block_t {
+      block_t block;
+      memset(&block, 0, block_t_size);
+      *(reinterpret_cast<unsigned int*>(&block)) = idx;
+      encrypt(reinterpret_cast<uint8_t*>(&block), key);
+      return block;
     },
-    transform
+    transform_func
   );
 }
 

@@ -185,23 +185,47 @@ class TestCUDA_CSPRNG_Generator(common.TestCase):
         super(TestCUDA_CSPRNG_Generator, self).setUp()
         csprng_extension.registerOps()
 
-    def test_csprng(self):
-        gen = csprng_extension.create_CUDA_CSPRNG_Generator()
-        for dtype in [torch.bool, torch.uint8, torch.int8, torch.int16, 
-                      torch.int32, torch.int64, torch.float, torch.double]:
-            t = torch.empty(100, dtype=dtype, device='cuda').random_(generator=gen)
-            print(t)
+    # def test_csprng(self):
+    #     gen = csprng_extension.create_CUDA_CSPRNG_Generator()
+    #     for dtype in [torch.bool, torch.uint8, torch.int8, torch.int16, 
+    #                   torch.int32, torch.int64, torch.float, torch.double]:
+    #         t = torch.empty(100, dtype=dtype, device='cuda').random_(generator=gen)
+    #         print(t)
 
-    def test_csprng2(self):
+    # def test_csprng2(self):
+    #     gen = csprng_extension.create_CUDA_CSPRNG_Generator()
+    #     s = torch.zeros(20, 20, dtype=torch.uint8, device='cuda')
+    #     t = s[:, 7]
+    #     self.assertFalse(t.is_contiguous())
+    #     t.random_(generator=gen)
+    #     t = s[7, :]
+    #     self.assertTrue(t.is_contiguous())
+    #     t.random_(generator=gen)
+    #     print(s)
+    
+    def test_bool(self):
         gen = csprng_extension.create_CUDA_CSPRNG_Generator()
-        s = torch.zeros(20, 20, dtype=torch.uint8, device='cuda')
-        t = s[:, 7]
-        self.assertFalse(t.is_contiguous())
-        t.random_(generator=gen)
-        t = s[7, :]
-        self.assertTrue(t.is_contiguous())
-        t.random_(generator=gen)
-        print(s)
+        size = 10000
+        for i in range(100):
+            t = torch.empty(size, dtype=torch.bool, device='cuda').random_(generator=gen)
+            percentage = (t.eq(True)).to(torch.int).sum().item() / size
+            # print(percentage)
+            self.assertTrue(0.48 < percentage < 0.52)
+
+    def test_ints(self):
+        gen = csprng_extension.create_CUDA_CSPRNG_Generator()
+        for (dtype, size, prec) in [(torch.uint8, 10000, 1), (torch.int8, 10000, 1), (torch.int16, 100000, 10)]:
+            t = torch.empty(size, dtype=dtype, device='cuda').random_(generator=gen)
+            avg = t.sum().item() / size
+            print(avg)
+            print(torch.iinfo(dtype).max / 2)
+            self.assertEqual(avg, torch.iinfo(dtype).max / 2, prec=prec)
+        for (dtype, size, prec) in [(torch.int32, 1000000, 1e6), (torch.int64, 10000000, 1e16)]:
+            t = torch.empty(size, dtype=dtype, device='cuda').random_(generator=gen)
+            avg = (t / size).sum().item()
+            print(avg)
+            print(torch.iinfo(dtype).max / 2)
+            self.assertEqual(avg, torch.iinfo(dtype).max / 2, prec=prec)
 
 if __name__ == "__main__":
     common.run_tests()
