@@ -50,6 +50,7 @@ TESTS = [
     'test_nn',
     'test_numba_integration',
     'test_optim',
+    'test_optimizer'
     'quantization/test_fake_quant',
     'quantization/test_numerics',
     'quantization/test_qat',
