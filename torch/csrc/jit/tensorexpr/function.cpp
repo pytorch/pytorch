@@ -1,27 +1,14 @@
 #include <torch/csrc/jit/tensorexpr/function.h>
 
 #include <c10/util/Logging.h>
+#include <torch/csrc/jit/tensorexpr/buffer.h>
+#include <torch/csrc/jit/tensorexpr/dim_arg.h>
+#include <torch/csrc/jit/tensorexpr/reduction.h>
 #include <torch/csrc/jit/tensorexpr/tensor.h>
 
 namespace torch {
 namespace jit {
 namespace tensorexpr {
-
-namespace {
-
-static void unpack_dim_args(
-    const std::vector<DimArg>& dim_args,
-    std::vector<const Expr*>* dims,
-    std::vector<const Var*>* vars) {
-  dims->clear();
-  vars->clear();
-  for (const DimArg& dim_arg : dim_args) {
-    dims->push_back(dim_arg.dim().node());
-    vars->push_back(new Var(dim_arg.name_hint(), kInt));
-  }
-}
-
-} // namespace
 
 Tensor* Compute(
     const std::string& func_name,
@@ -122,6 +109,20 @@ Stmt* Function::ElementStmt(size_t index) {
 
   Stmt* update_stmt = new Store(buf, indices, body(index), mask);
   return update_stmt;
+}
+
+Tensor* Reduce(
+    const std::string& func_name,
+    const std::vector<DimArg>& dim_args,
+    const Reducer& reducer,
+    const Buffer& buffer,
+    const std::vector<DimArg>& reduce_args) {
+  return Reduce(
+      func_name,
+      dim_args,
+      reducer,
+      [&](ParameterList& p) { return buffer.call(p); },
+      reduce_args);
 }
 
 } // namespace tensorexpr

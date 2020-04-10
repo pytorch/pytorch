@@ -246,10 +246,12 @@ void random_kernel_helper(TensorIterator& iter, uint8_t* key, transform_t transf
   );
 }
 
+// ===========================================================================================================================
+
 template<typename scalar_t, typename uint_t>
 void random_kernel_helper_fp(TensorIterator& iter, uint8_t* key) {
   random_kernel_helper<scalar_t, uint_t>(iter, key,
-    [] __device__ (uint_t rand) {
+    [] __device__ (uint_t rand) -> scalar_t {
       return static_cast<scalar_t>(rand % static_cast<uint64_t>((1ULL << std::numeric_limits<scalar_t>::digits) + 1));
     }
   );
@@ -258,7 +260,7 @@ void random_kernel_helper_fp(TensorIterator& iter, uint8_t* key) {
 template<typename scalar_t, typename uint_t>
 void random_kernel_helper_int(TensorIterator& iter, uint8_t* key) {
   random_kernel_helper<scalar_t, uint_t>(iter, key,
-    [] __device__ (uint_t rand) {
+    [] __device__ (uint_t rand) -> scalar_t {
       return static_cast<scalar_t>(rand % (static_cast<uint64_t>(std::numeric_limits<scalar_t>::max()) + 1));
     }
   );
@@ -266,7 +268,7 @@ void random_kernel_helper_int(TensorIterator& iter, uint8_t* key) {
 
 void random_kernel_helper_bool(TensorIterator& iter, uint8_t* key) {
   random_kernel_helper<bool, uint32_t>(iter, key,
-    [] __device__ (uint32_t rand) {
+    [] __device__ (uint32_t rand) -> bool {
       return static_cast<bool>(rand & 1);
     }
   );
@@ -307,6 +309,61 @@ Tensor& random_(Tensor& self, Generator generator) {
   return native::templates::random_impl<RandomKernel, CUDA_CSPRNG_GeneratorImpl>(self, generator);
 }
 
+// ===========================================================================================================================
+
+template<typename scalar_t, typename uint_t>
+void uniform_kernel_helper_fp(TensorIterator& iter, uint8_t* key, scalar_t from, scalar_t to) {
+  constexpr uint_t SCALAR_T_MASK = (static_cast<uint_t>(1) << std::numeric_limits<scalar_t>::digits) - 1;
+  constexpr scalar_t SCALAR_T_DIVISOR = static_cast<scalar_t>(1) / (1ULL << std::numeric_limits<scalar_t>::digits);
+  random_kernel_helper<scalar_t, uint_t>(iter, key,
+    [from, to] __device__ (uint_t rand) -> scalar_t {
+      return ((rand & SCALAR_T_MASK) * SCALAR_T_DIVISOR) * (to - from) + from;
+    }
+  );
+}
+
+void uniform_kernel(TensorIterator& iter, Tensor key_tensor, double from, double to) {
+  const auto key = key_tensor.data_ptr<uint8_t>();
+  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "uniform_kernel_cuda", [&] {
+    if (std::is_same<scalar_t, double>::value) {
+      uniform_kernel_helper_fp<scalar_t, uint64_t>(iter, key, from, to);
+    } else {
+      uniform_kernel_helper_fp<scalar_t, uint32_t>(iter, key, from, to);
+    }
+  });
+}
+
+template<typename RNG>
+struct UniformKernel {
+  void operator()(TensorIterator& iter, double from, double to, Generator generator) {
+    const auto key_tensor = torch::empty({16}, torch::kUInt8).random_(0, 256, generator).to(kCUDA);
+    uniform_kernel(iter, key_tensor, from, to);
+  }
+};
+
+Tensor& uniform_(Tensor& self, double from, double to, Generator generator) {
+  return at::native::templates::uniform_impl_<UniformKernel, CUDA_CSPRNG_GeneratorImpl>(self, from, to, generator);
+}
+
+// ===========================================================================================================================
+
+template<typename RNG>
+void normal_kernel(Tensor& self, double mean_, double std_, RNG gen) {
+  // TODO
+}
+
+template<typename RNG>
+struct NormalKernel {
+  void operator()(Tensor& self, double mean, double std, Generator gen) {
+    normal_kernel(self, mean, std, check_generator<RNG>(gen));
+  }
+};
+
+Tensor& normal_(Tensor& self, double mean, double std, Generator gen) {
+  return at::native::templates::normal_impl_<NormalKernel, CUDA_CSPRNG_GeneratorImpl>(self, mean, std, gen);
+}
+
+// ===========================================================================================================================
 
 Generator create_CUDA_CSPRNG_Generator() {
   return make_generator<CUDA_CSPRNG_GeneratorImpl>();
@@ -314,7 +371,9 @@ Generator create_CUDA_CSPRNG_Generator() {
 
 void registerOps() {
   static auto registry = torch::import()
-    .impl_UNBOXED("aten::random_", DispatchKey::CustomRNGKeyId, random_);
+    .impl_UNBOXED("aten::random_", DispatchKey::CustomRNGKeyId, random_)
+    .impl_UNBOXED("aten::uniform_", DispatchKey::CustomRNGKeyId, uniform_)
+    .impl_UNBOXED("aten::normal_", DispatchKey::CustomRNGKeyId, normal_);
 }
   
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
