@@ -77,7 +77,7 @@ private:
   size_t find_first_set() const {
     #if defined(_MSC_VER)
       unsigned long result;
-      bool has_bits_set = (0 == _BitScanForward64(&result, bitset_));
+      bool has_bits_set = (0 != _BitScanForward64(&result, bitset_));
       if (!has_bits_set) {
         return 0;
       }
