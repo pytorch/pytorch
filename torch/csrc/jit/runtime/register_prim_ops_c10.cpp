@@ -42,8 +42,10 @@ static auto registry_prim =
                         std::string::size_type sz;
                         int64_t val = static_cast<int64_t>(c10::stoll(str, &sz));
                         if (sz != str.size()) {
-                            throw std::runtime_error(
-                                "int() only accepts a string of a single integer");
+                            std::stringstream error_str;
+                            error_str << "invalid literal for int() "
+                                      << "with base 10: '" << str << "'";
+                            throw std::runtime_error(error_str.str());
                         }
                         return val;
                     })

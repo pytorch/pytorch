@@ -6466,6 +6466,12 @@ a")
         self.assertEqual(2147483647, to_int('2147483647'))
         self.assertEqual(-2147483648, to_int('-2147483648'))
 
+        with self.assertRaisesRegex(RuntimeError, "invalid literal for int()"):
+            to_int('0x20')
+
+        with self.assertRaisesRegex(RuntimeError, "invalid literal for int()"):
+            to_int('0b0001')
+
     def test_python_frontend(self):
         def fn(x, y, z):
             q = None
