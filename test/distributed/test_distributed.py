@@ -1856,7 +1856,7 @@ class _DistTestBase(object):
     def _test_DDP_helper(self, model, input_var, target, loss, scale_factor=1.0):
         model.train()
         output = model(input_var)
-        l = loss(output, target)*scale_factor
+        l = loss(output, target) * scale_factor
         l.backward()
 
     def _assert_equal_param(self, param_gpu, param_DDP):
@@ -2174,7 +2174,7 @@ class _DistTestBase(object):
                 input[bs_offset : bs_offset + rank + 2],
                 target[bs_offset : bs_offset + rank + 2],
                 loss,
-                num_processes * (rank+2) / global_bs,
+                num_processes * (rank + 2) / global_bs,
             )
 
             # Update weights and run a second iteration to shake out errors
