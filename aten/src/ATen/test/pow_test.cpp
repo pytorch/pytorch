@@ -1,7 +1,6 @@
 #include <gtest/gtest.h>
 
 #include <ATen/native/Pow.h>
-#include <c10/test/util/Macros.h>
 
 #include <torch/types.h>
 #include <torch/utils.h>
@@ -9,6 +8,12 @@
 #include <iostream>
 #include <vector>
 #include <type_traits>
+
+#ifdef _WIN32
+#define DISABLED_ON_WINDOWS(x) DISABLED_##x
+#else
+#define DISABLED_ON_WINDOWS(x) x
+#endif
 
 using namespace at;
 
