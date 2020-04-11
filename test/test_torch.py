@@ -9680,21 +9680,23 @@ class TestTorchDeviceType(TestCase):
 
     @dtypes(torch.float, torch.double, torch.complex64, torch.complex128)
     def test_randn(self, device, dtype):
-        torch.manual_seed(123456)
-        res1 = torch.randn(SIZE, SIZE, dtype=dtype, device=device)
-        res2 = torch.tensor([], dtype=dtype, device=device)
-        torch.manual_seed(123456)
-        torch.randn(SIZE, SIZE, out=res2)
-        self.assertEqual(res1, res2)
+        for size in [0, SIZE]:
+            torch.manual_seed(123456)
+            res1 = torch.randn(size, size, dtype=dtype, device=device)
+            res2 = torch.tensor([], dtype=dtype, device=device)
+            torch.manual_seed(123456)
+            torch.randn(size, size, out=res2)
+            self.assertEqual(res1, res2)
 
     @dtypes(torch.float, torch.double, torch.complex64, torch.complex128)
     def test_rand(self, device, dtype):
-        torch.manual_seed(123456)
-        res1 = torch.rand(SIZE, SIZE, dtype=dtype, device=device)
-        res2 = torch.tensor([], dtype=dtype, device=device)
-        torch.manual_seed(123456)
-        torch.rand(SIZE, SIZE, out=res2)
-        self.assertEqual(res1, res2)
+        for size in [0, SIZE]:
+            torch.manual_seed(123456)
+            res1 = torch.rand(size, size, dtype=dtype, device=device)
+            res2 = torch.tensor([], dtype=dtype, device=device)
+            torch.manual_seed(123456)
+            torch.rand(size, size, out=res2)
+            self.assertEqual(res1, res2)
 
     def test_empty_strided(self, device):
         for shape in [(2, 3, 4), (0, 2, 0)]:
@@ -15281,17 +15283,42 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
                 else:
                     self.assertEqual(from_tensor, to_tensor, exact_dtype=False)
 
-    @onlyCPU
     @dtypes(torch.complex64, torch.complex128)
     def test_complex_unsupported(self, device, dtype):
-        inp = torch.tensor((1 + 1j), device=device, dtype=dtype)
+        t = torch.tensor((1 + 1j), device=device, dtype=dtype)
         # Note: this is consistent with NumPy
         with self.assertRaises(RuntimeError):
-            torch.floor(inp)
+            torch.floor(t)
         with self.assertRaises(RuntimeError):
-            torch.ceil(inp)
+            torch.ceil(t)
         with self.assertRaises(RuntimeError):
-            torch.trunc(inp)
+            torch.trunc(t)
+
+        # Tests min and max variants with complex inputs
+        # Note: these are undesired failures. While expected, ideally
+        # min and max would be implemented for complex inputs.
+        with self.assertRaises(RuntimeError):
+            torch.min(t)
+        with self.assertRaises(RuntimeError):
+            t.min()
+        with self.assertRaises(RuntimeError):
+            torch.min(t, dim=0)
+        with self.assertRaises(RuntimeError):
+            torch.min(t, t)
+        with self.assertRaises(RuntimeError):
+            torch.min(t, t, out=t)
+
+        with self.assertRaises(RuntimeError):
+            torch.max(t)
+        with self.assertRaises(RuntimeError):
+            t.max()
+        with self.assertRaises(RuntimeError):
+            torch.max(t, dim=0)
+        with self.assertRaises(RuntimeError):
+            torch.max(t, t)
+        with self.assertRaises(RuntimeError):
+            torch.max(t, t, out=t)
+
 
 # NOTE [Linspace+Logspace precision override]
 # Our Linspace and logspace torch.half CUDA kernels are not very precise.
