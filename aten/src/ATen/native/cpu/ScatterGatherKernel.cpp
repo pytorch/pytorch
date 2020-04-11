@@ -137,18 +137,111 @@ auto reduce_divide = [](auto * self_data, auto * src_data) {
 auto tensor_assign = [](auto * self_data, auto * src_data) {
                 *self_data = *src_data;
               };
-auto scalar_assign = [](auto * self_data, auto * src_data) {
-                       // using scalar_t = typename std::remove_pointer<decltype(self_data)>::type;
-                       // *self_data = (*src_data).to<scalar_t>();
+auto scalar_assign = [](auto * self_data, Scalar src_data) {
+                       using scalar_t = typename std::remove_pointer<decltype(self_data)>::type;
+                       *self_data = src_data.to<scalar_t>();
                      };
 
 template <bool is_scatter_like = true>
 struct cpu_scatter_gather_base_kernel {
   void operator()(Tensor& self, int64_t dim,
-    const Tensor& index, Scalar& src,
+    const Tensor& index, Scalar& value,
     const std::string& method_name,
     bool serial_exec, const SCATTER_GATHER_OP& func_enum) {
-    
+    // no-op if index is empty
+    if (index.numel() == 0) {
+      return;
+    }
+
+    dim = maybe_wrap_dim(dim, self.dim());
+
+    if (is_scatter_like) {
+      scatter_shape_check(self, dim, index, self);
+    }
+    else {
+      gather_shape_check(self, dim, index);
+    }
+
+    auto index_sizes = ensure_nonempty_vec(index.sizes().vec());
+    auto index_strides = ensure_nonempty_vec(index.strides().vec());
+
+    // `dim` is traversed in the kernel,
+    // that is why index.stride(dim) = 0 and index.size(dim) = 1.
+    // Also, index.size(dim) = 1 makes sure that TensorIterator.DimCounter
+    // has the following form : (i_1,..., i_{dim-1}, 0, i_{dim+1},...,i_n).
+    index_sizes[dim] = 1;
+    index_strides[dim] = 0;
+
+    // set self.shape = src.shape = index.shape,
+    // this defines the number of elements to iterate over,
+    // and set self.stride(dim) = src.stride(dim) = 0,
+    // because `dim` is traversed in the kernel.
+    auto self_restrided = restride_dim(self, dim, index_sizes);
+    auto index_restrided = index.as_strided(index_sizes, index_strides);
+
+    auto iter = TensorIterator();
+    iter.dont_compute_common_dtype();
+    iter.dont_resize_outputs();
+    iter.add_output(self_restrided);
+    iter.add_input(index_restrided);
+    iter.build();
+
+    auto self_dim_stride = ensure_nonempty_stride(self, dim);
+    auto self_dim_size = ensure_nonempty_size(self, dim);
+
+    auto index_dim_stride = ensure_nonempty_stride(index, dim);
+    auto index_dim_size = ensure_nonempty_size(index, dim);
+
+    auto index_upper_bound = self_dim_size;
+
+    AT_DISPATCH_ALL_TYPES_AND2(
+      ScalarType::Bool, ScalarType::Half, iter.dtype(),
+      method_name, [&] {
+        constexpr auto SELF_ITER_STRIDE_IDX = 0;
+        constexpr auto INDEX_ITER_STRIDE_IDX = 1;
+        // using binary_func_t = binary_fn;
+        using binary_func_t = std::function<void(scalar_t*, Scalar)>;
+        std::unordered_map<const SCATTER_GATHER_OP, binary_func_t> binary_funcs({
+          {SCATTER_GATHER_OP::SCALAR_ASSIGN, scalar_assign}
+        });
+
+        auto run_loop = [&](const auto& kernel_func) {
+          auto loop = [&](char** data, const int64_t* strides, int64_t n) {
+            auto* self_data_bytes = data[SELF_ITER_STRIDE_IDX];
+            auto* index_data_bytes = data[INDEX_ITER_STRIDE_IDX];
+
+            for (int64_t i = 0; i < index_dim_size; ++i) {
+              auto* self_data = self_data_bytes;
+              auto* index_data = (char*)((int64_t*)index_data_bytes + i * index_dim_stride);
+              
+              for (int64_t nelem = 0; nelem < n; ++nelem) {
+                int64_t idx_dim = *(int64_t*)index_data;
+                // we are not putting idx_dim in the error message because it disables
+                // loop optimization in clang-7
+                TORCH_CHECK(idx_dim >= 0 && idx_dim < index_upper_bound,
+                            "index ", *(int64_t*)index_data,
+                            " is out of bounds for dimension ", dim,
+                            " with size ", index_upper_bound);
+
+                kernel_func(
+                  (scalar_t*)self_data + (is_scatter_like ? idx_dim : i) * self_dim_stride, value);
+
+                self_data += strides[SELF_ITER_STRIDE_IDX];
+                index_data += strides[INDEX_ITER_STRIDE_IDX];
+              }
+            }
+          };
+          if (serial_exec) {
+            iter.serial_for_each(loop, {0, iter.numel()});
+          }
+          else {
+            iter.for_each(loop);
+          }
+        };
+
+        run_loop(binary_funcs[func_enum]);
+      }
+    );
   }
   
   void operator()(Tensor& self, int64_t dim,
@@ -220,8 +313,7 @@ struct cpu_scatter_gather_base_kernel {
           {SCATTER_GATHER_OP::REDUCE_SUBTRACT, reduce_subtract},
           {SCATTER_GATHER_OP::REDUCE_MULTIPLY, reduce_multiply},
           {SCATTER_GATHER_OP::REDUCE_DIVIDE, reduce_divide},
-          {SCATTER_GATHER_OP::TENSOR_ASSIGN, tensor_assign},
-          {SCATTER_GATHER_OP::SCALAR_ASSIGN, scalar_assign}
+          {SCATTER_GATHER_OP::TENSOR_ASSIGN, tensor_assign}
         });
 
         auto run_loop = [&](const auto& kernel_func) {
@@ -301,20 +393,9 @@ void scatter_cpu_kernel(Tensor& self, int64_t dim, const Tensor& index, const Te
 }
 
 void scatter_fill_cpu_kernel(Tensor& self, int64_t dim, const Tensor& index, Scalar src) {
-  // Tensor copy(src);
-  // cpu_scatter_gather_base_kernel<>()(
-  //   self, dim, index, self,
-  //   "scatter_fill_cpu_", /*serial_exec=*/false, SCATTER_GATHER_OP::SCALAR_ASSIGN);
-
-  //    cpu_scatter_gather_base_kernel<>()(
-  //    self, dim, index, self,
-  //   "scatter_fill_cpu_", [src] (auto* lhs, const auto* rhs) {
-  //     using scalar_t = typename std::remove_pointer<decltype(lhs)>::type;
-  //     *lhs = src.to<scalar_t>();
-  //   },
-  //   /*serial_exec=*/false
-  // );
-
+  cpu_scatter_gather_base_kernel<>()(
+    self, dim, index, src, "scatter_fill_cpu_", /*serial_exec=*/false,
+    SCATTER_GATHER_OP::SCALAR_ASSIGN);
 }
 
 void scatter_add_cpu_kernel(Tensor& self, int64_t dim, const Tensor& index, const Tensor& src) {
