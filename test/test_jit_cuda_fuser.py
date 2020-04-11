@@ -135,7 +135,7 @@ class TestCudaFuser(JitTestCase):
         jit_o = t_jit(x, y, z)
         o = t(x, y, z)
         self.assertEqual(o, jit_o)
-        #can't fuse it now
+        # Currently cannot fuse this
         self.assertFalse(self._has_cuda_fusion_group(t_jit.graph_for(x, y, z)))
 
 if __name__ == '__main__':
