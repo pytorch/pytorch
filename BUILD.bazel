@@ -1630,7 +1630,6 @@ cc_library(
         "caffe2/ideep/utils/*.h",
         "caffe2/onnx/*.h",
         "caffe2/operators/*.h",
-        "caffe2/operators/experimental/c10/cpu/*.h",
         "caffe2/operators/rnn/*.h",
         "caffe2/opt/*.h",
         "caffe2/perfkernels/*.h",
