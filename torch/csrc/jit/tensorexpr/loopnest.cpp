@@ -978,8 +978,8 @@ class LoopComputeAtRewriter : public IRMutator {
   LoopComputeAtRewriter(
       const Buf* buf,
       const Buf* new_buf,
-      const std::vector<const Expr*>& offsets)
-      : buf_(buf), new_buf_(new_buf), offsets_(offsets) {}
+      std::vector<const Expr*> offsets)
+      : buf_(buf), new_buf_(new_buf), offsets_(std::move(offsets)) {}
 
  private:
   const Buf* buf_;
