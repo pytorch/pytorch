@@ -36,5 +36,6 @@ DECLARE_DISPATCH(reduce_fn_flag, norm_stub);
 using cum_fn = void (*)(Tensor&, const Tensor&, int64_t);
 DECLARE_DISPATCH(cum_fn, cumsum_stub);
 DECLARE_DISPATCH(cum_fn, cumprod_stub);
+DECLARE_DISPATCH(cum_fn, logcumsumexp_stub);
 
 }} // namespace at::native
