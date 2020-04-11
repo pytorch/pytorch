@@ -5,7 +5,8 @@ import itertools
 import unittest
 
 from torch.testing._internal.common_utils import (TestCase, run_tests, load_tests,
-                                                  TEST_NUMPY, numpy_to_torch_dtype_dict)
+                                                  TEST_NUMPY, numpy_to_torch_dtype_dict,
+                                                  torch_to_numpy_dtype_dict)
 from torch.testing._internal.common_device_type import (instantiate_device_type_tests, onlyOnCPUAndCUDA,
                                                         dtypes, onlyCPU)
 
@@ -693,27 +694,27 @@ class TestTypePromotion(TestCase):
         torch_types = numpy_to_torch_dtype_dict.values()
 
         for np_type, torch_type in itertools.product(np_types, torch_types):
-            t0 = torch.tensor((1,), device=device, dtype=torch_type)
-            t1 = torch.tensor((1,), device=device, dtype=numpy_to_torch_dtype_dict[np_type])
+            t = torch.tensor((1,), device=device, dtype=torch_type)
             a = np.array((1,), dtype=np_type)
+            a_as_t = torch.from_numpy(a).to(device=device)
 
             for np_first in (True, False):
                 for op in (operator.add, torch.add):
 
                     # Acquires results of binary ufunc type promotion.
                     try:
-                        actual = op(a, t0) if np_first else op(t0, a)
+                        actual = op(a, t) if np_first else op(t, a)
                     except Exception as e:
                         actual = e
 
                     try:
-                        expected = op(t1, t0) if np_first else op(t0, t1)
+                        expected = op(a_as_t, t) if np_first else op(t, a_as_t)
                     except Exception as e:
                         expected = e
 
                     same_result = (type(expected) == type(actual)) and expected == actual
 
-                    # Note An "undesired failure," as opposed to an "expected failure"
+                    # Note: An "undesired failure," as opposed to an "expected failure"
                     # is both expected (we know the test will fail) and
                     # undesirable (if PyTorch was working properly the test would
                     # not fail). This test is affected by three issues (see below)
