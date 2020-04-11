@@ -89,9 +89,7 @@ struct InputsOf : public IterVisitor {
   void handle(TensorView* tv) override;
 
  public:
-  static std::vector<TensorView*> output(
-      Fusion* fusion,
-      Val* output_);
+  static std::vector<TensorView*> output(Fusion* fusion, Val* output_);
 };
 
 /*
@@ -155,7 +153,6 @@ struct TORCH_CUDA_API Fusion : public IRInputOutput {
       bool breadth_first = false);
 
   std::vector<TensorView*> inputsOf(Val* val);
-
 
   // Print this fusion to cout.
   void print();

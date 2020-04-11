@@ -82,30 +82,28 @@ class IrParser {
       out->axis(-1)->parallelize(ParallelType::TIDx);
     }
 
-    
     // Run through outputs, grab all inputs of outputs
     // squeeze with computeAt to set overall structure.
     for (auto jit_output : block->outputs()) {
       TensorView* out =
           static_cast<TensorView*>(value_maps_[jit_output->unique()]);
 
-      for(TensorView* inp : fusion_->inputsOf(out)){
+      for (TensorView* inp : fusion_->inputsOf(out)) {
         inp->computeAt(out, 1);
       }
     }
 
     // Run through intermediates, unroll, and bind their axes
-    for(auto entry : value_maps_){
+    for (auto entry : value_maps_) {
       CgValue val = entry.second;
-      if(fusion_->hasInput(val) || fusion_->hasOutput(val))
+      if (fusion_->hasInput(val) || fusion_->hasOutput(val))
         continue;
-      if(val->getValType().value() != ValType::TensorView)
+      if (val->getValType().value() != ValType::TensorView)
         continue;
       TensorView* tv = static_cast<TensorView*>(val);
       tv->axis(-2)->parallelize(ParallelType::Unroll);
       tv->axis(-1)->parallelize(ParallelType::TIDx);
     }
-
   }
 
   static bool canParseNode(const Node* const node) {
