@@ -486,6 +486,42 @@ void leaky_relu_backward_kernel(TensorIterator& iter, Scalar negval_) {
   });
 }
 
+void hardswish_kernel(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "hardswish_cuda", [&]() {
+    AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "hardswish_cuda", [&] {
+      const scalar_t zero(0.0f);
+      const scalar_t one_sixth(1.0f / 6.0f);
+      const scalar_t three(3.0f);
+      const scalar_t six(6.0f);
+      gpu_kernel(iter, [zero, one_sixth, three, six]GPU_LAMBDA(scalar_t self_val) -> scalar_t {
+        return self_val * std::min(std::max(self_val + three, zero), six) * one_sixth;
+      });
+    });
+  });
+}
+
+void hardswish_backward_kernel(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "hardswish_backward_cuda", [&]() {
+    AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "hardswish_backward_cuda", [&] {
+      const scalar_t zero(0.0f);
+      const scalar_t three(3.0f);
+      const scalar_t neg_three(-3.0f);
+      const scalar_t one_half(0.5f);
+      gpu_kernel(
+        iter, 
+        [zero, three, neg_three, one_half]GPU_LAMBDA(scalar_t grad_val, scalar_t self_val) -> scalar_t {
+          if (self_val < neg_three) {
+            return zero;
+          } else if (self_val <= three) {
+            return grad_val * ((self_val / three) + one_half);
+          } else {
+            return grad_val;
+          }
+      });
+    });
+  });
+}
+
 } // namespace
 
 Tensor gelu_cuda(const Tensor& self) {
@@ -542,6 +578,8 @@ REGISTER_DISPATCH(elu_stub, &elu_kernel);
 REGISTER_DISPATCH(elu_backward_stub, &elu_backward_kernel);
 REGISTER_DISPATCH(leaky_relu_stub, &leaky_relu_kernel);
 REGISTER_DISPATCH(leaky_relu_backward_stub, &leaky_relu_backward_kernel);
+REGISTER_DISPATCH(hardswish_stub, &hardswish_kernel);
+REGISTER_DISPATCH(hardswish_backward_stub, &hardswish_backward_kernel);
 REGISTER_DISPATCH(softplus_stub, &softplus_kernel);
 REGISTER_DISPATCH(softplus_backward_stub, &softplus_backward_kernel);
 

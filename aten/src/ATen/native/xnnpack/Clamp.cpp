@@ -21,14 +21,20 @@ bool use_clamp(
 
   return xnnpack::internal::available() &&
       // Input
-      (input.dim() > 0) && (Layout::ActivationND::channel(input.sizes()) > 0) &&
+      (input.dim() > 0) &&
+      (Layout::ActivationND::channel(input.sizes()) > 0) &&
       (c10::DeviceType::CPU == input.device().type()) &&
-      (kFloat == input.scalar_type()) && !input.requires_grad() &&
+      (kFloat == input.scalar_type()) &&
+      !input.requires_grad() &&
       // Output Min / Max
-      (output_max > output_min) && true;
+      (output_max > output_min) &&
+      true;
 }
 
-bool use_clamp_(Tensor& input, const float output_min, const float output_max) {
+bool use_clamp_(
+    Tensor& input,
+    const float output_min,
+    const float output_max) {
   using namespace internal;
 
   // In place clamp.  Input / output pre-allocated and have no control over it.
@@ -119,7 +125,10 @@ Tensor clamp(
       output_padded_contig, input_padded_contig, output_min, output_max);
 }
 
-Tensor& clamp_(Tensor& input, const float output_min, const float output_max) {
+Tensor& clamp_(
+    Tensor& input,
+    const float output_min,
+    const float output_max) {
   return internal::clamp(input, input, output_min, output_max);
 }
 
