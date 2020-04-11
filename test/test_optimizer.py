@@ -22,6 +22,8 @@ conv_weight_shape = (output_channels, input_channels_per_group, kernel_h, kernel
 conv_bias_shape = (output_channels)
 
 input_data = torch.rand((batch_size, input_channels, height, width))
+conv_weight = torch.rand((output_channels, input_channels_per_group, kernel_h, kernel_w))
+conv_bias = torch.rand((output_channels))
 result = F.conv2d(input_data, conv_weight, conv_bias, strides, paddings, dilations, groups)
 weight_output_dim = 24
 linear_input_shape = result.shape[1]
