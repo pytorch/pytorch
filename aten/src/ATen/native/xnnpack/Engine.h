@@ -42,6 +42,54 @@ Tensor& clamp_out(
     float output_min,
     float output_max);
 
+template <typename Function, typename... Arguments>
+inline bool use_clamp_optional(
+    Function&& function,
+    const optional<Scalar> output_min_,
+    const optional<Scalar> output_max_,
+    Arguments&&... arguments) {
+  if (output_min_ && !output_min_->isFloatingPoint()) {
+    return false;
+  }
+
+  if (output_max_ && !output_max_->isFloatingPoint()) {
+    return false;
+  }
+
+  const float output_min = output_min_ ?
+      output_min_->to<float>() :
+      -std::numeric_limits<float>::infinity();
+
+  const float output_max = output_max_ ?
+      output_max_->to<float>() :
+      std::numeric_limits<float>::infinity();
+
+  return function(
+      std::forward<Arguments>(arguments)...,
+      output_min,
+      output_max);
+}
+
+template <typename Function, typename... Arguments>
+auto clamp_optional(
+    Function&& function,
+    const optional<Scalar> output_min_,
+    const optional<Scalar> output_max_,
+    Arguments&&... arguments) -> decltype(auto) {
+  const float output_min = output_min_ ?
+      output_min_->to<float>() :
+      -std::numeric_limits<float>::infinity();
+
+  const float output_max = output_max_ ?
+      output_max_->to<float>() :
+      std::numeric_limits<float>::infinity();
+
+  return function(
+      std::forward<Arguments>(arguments)...,
+      output_min,
+      output_max);
+}
+
 //
 // Convolution
 //
@@ -107,19 +155,31 @@ Tensor max_pool2d(
 //
 
 inline bool use_relu(const Tensor& input) {
-  return use_clamp(input, 0.0f, std::numeric_limits<float>::infinity());
+  return use_clamp(
+      input,
+      0.0f,
+      std::numeric_limits<float>::infinity());
 }
 
 inline Tensor relu(const Tensor& input) {
-  return clamp(input, 0.0f, std::numeric_limits<float>::infinity());
+  return clamp(
+      input,
+      0.0f,
+      std::numeric_limits<float>::infinity());
 }
 
 inline bool use_relu_(Tensor& input) {
-  return use_clamp_(input, 0.0f, std::numeric_limits<float>::infinity());
+  return use_clamp_(
+      input,
+      0.0f,
+      std::numeric_limits<float>::infinity());
 }
 
 inline Tensor& relu_(Tensor& input) {
-  return clamp_(input, 0.0f, std::numeric_limits<float>::infinity());
+  return clamp_(
+      input,
+      0.0f,
+      std::numeric_limits<float>::infinity());
 }
 
 } // namespace xnnpack

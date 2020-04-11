@@ -259,14 +259,6 @@ RegisterOperators reg({
           return 0;
         },
         aliasAnalysisFromSchema()),
-    Operator(
-        "aten::format(str self, ...) -> str",
-        [](Stack& stack) {
-          size_t num_inputs = pop(stack).toInt();
-          format(stack, num_inputs);
-          return 0;
-        },
-        aliasAnalysisFromSchema()),
 
 #define DEFINE_TORCH_TENSOR_OP(operator_type, c_type, tensor_creation_op)  \
   Operator(                                                                \
