@@ -310,6 +310,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       --nn-path "aten/src"
       $<$<BOOL:${INTERN_DISABLE_AUTOGRAD}>:--disable-autograd>
       $<$<BOOL:${SELECTED_OP_LIST}>:--selected-op-list-path="${SELECTED_OP_LIST}">
+      --force_schema_registration
     DEPENDS
     "${CMAKE_BINARY_DIR}/aten/src/ATen/Declarations.yaml"
     "${TOOLS_PATH}/autograd/templates/VariableType.h"
@@ -442,6 +443,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/jit/runtime/print_handler.cpp
     ${TORCH_SRC_DIR}/csrc/jit/codegen/fuser/interface.cpp
     ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/interface.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/runtime/register_ops_utils.cpp
     ${TORCH_SRC_DIR}/csrc/jit/runtime/register_prim_ops.cpp
     ${TORCH_SRC_DIR}/csrc/jit/runtime/register_prim_ops_fulljit.cpp
     ${TORCH_SRC_DIR}/csrc/jit/runtime/register_prim_ops_c10.cpp

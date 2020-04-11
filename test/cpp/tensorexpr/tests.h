@@ -47,6 +47,18 @@ namespace jit {
   _(ScheduleFuserStyle)                   \
   _(ScheduleFuserThreeArg)                \
   _(ScheduleDynamicShape2D)               \
+  _(ReduceSum1D)                          \
+  _(ReduceSum2D)                          \
+  _(ReduceSum3D)                          \
+  _(ReduceSum10D)                         \
+  _(ReduceProduct)                        \
+  _(ReduceMax)                            \
+  _(ReduceMinCustomInitializer)           \
+  _(ReduceAnyAll)                         \
+  _(ReduceMatmul2D)                       \
+  _(ReduceRfactorLike)                    \
+  _(SplitReduceAxis)                      \
+  _(SplitNonReduceAxis)                   \
   _(TypeTest01)                           \
   _(TypePropagation)                      \
   _(Cond01)                               \
