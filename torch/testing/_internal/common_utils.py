@@ -311,11 +311,8 @@ if TEST_NUMPY:
         numpy.complex128 : torch.complex128
     }
 
+    # Dict of torch dtype -> NumPy dtype
     torch_to_numpy_dtype_dict = {value : key for (key, value) in numpy_to_torch_dtype_dict.items()}
-
-def numpy_dtype(dtype):
-    assert TEST_NUMPY
-    return torch_to_numpy_dtype_dict[dtype]
 
 ALL_TENSORTYPES = [torch.float,
                    torch.double,
@@ -860,12 +857,6 @@ class TestCase(expecttest.TestCase):
                         # TODO: modify abs to return float/double for ComplexFloat/ComplexDouble
                         if diff.is_signed() and diff.dtype != torch.int8:
                             diff = diff.abs()
-                            # if diff is complex, the imaginary component for diff will be 0
-                            # from the previous step, hence converting it to float and double is fine.
-                            if diff.dtype == torch.complex64:
-                                diff = diff.to(torch.float)
-                            elif diff.dtype == torch.complex128:
-                                diff = diff.to(torch.double)
                         max_err = diff.max()
                         self.assertLessEqual(max_err, prec, message)
             super(TestCase, self).assertEqual(x.is_sparse, y.is_sparse, message)
