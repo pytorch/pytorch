@@ -66,47 +66,8 @@ Tensor& asin_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(
 Tensor asin(const Tensor& self) { return unary_op_impl(self, at::asin_out); }
 Tensor& asin_(Tensor& self) { return unary_op_impl_(self, at::asin_out); }
 
-// Note [Complex abs]
-// Complex inputs to abs return float results by default.
-// abs, in both NumPy and C++, returns a float result when given a complex input.
-// This makes sense mathematically since the absolute value of a complex
-// number has no imaginary part.
-Tensor& abs_out(Tensor& result, const Tensor& self) {
-  // Mimics abs returning a floating point tensor for complex inputs by default
-  // Note: This is done by running the operation as usual and then copying the
-  // operation's result to the expected result type.
-  if (self.is_complex() && !result.is_complex()) {
-    // Checks if the corresponding float type can be cast to the desired dtype
-    const auto float_type = c10::toValueType(c10::typeMetaToScalarType(self.dtype()));
-    TORCH_CHECK(canCast(float_type, c10::typeMetaToScalarType(result.dtype())),
-          "result type ", float_type, " can't be cast to the desired output type ",
-          result.dtype());
-
-    // Runs the function complex->complex, as TensorIterator expects
-    Tensor complex_result = at::empty({0}, self.options());
-    auto iter = TensorIterator::unary_op(complex_result, self,
-      /*check_mem_overlap=*/false);
-    abs_stub(iter.device_type(), iter);
-
-    // Copies the complex result to the actual result and returns it
-    result.resize_(complex_result.sizes());
-    result.copy_(complex_result);
-    return result;
-  }
-
-  return unary_op_impl_out(result, self, abs_stub);
-}
-Tensor abs(const Tensor& self) {
-  // Overrides default return type to be floating point when given a
-  // complex input. See note [Complex abs].
-  if (self.is_complex()) {
-    const auto float_type = c10::toValueType(c10::typeMetaToScalarType(self.dtype()));
-    Tensor result = at::empty({0}, self.options().dtype(float_type));
-    return at::abs_out(result, self);
-  }
-
-  return unary_op_impl(self, at::abs_out);
-}
+Tensor& abs_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, abs_stub); }
+Tensor abs(const Tensor& self) { return unary_op_impl(self, at::abs_out); }
 Tensor& abs_(Tensor& self) { return unary_op_impl_(self, at::abs_out); }
 
 Tensor& angle_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, angle_stub); }
