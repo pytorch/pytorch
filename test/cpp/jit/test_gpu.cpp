@@ -526,10 +526,10 @@ void testGPU_FusionReplaceAll() {
 void testGPU_FusionParser() {
   auto g = std::make_shared<Graph>();
   const auto graph0_string = R"IR(
-    graph(%0 : Float(2, 3, 4),
-          %1 : Float(2, 3, 4)):
-      %c0 : Float(2, 3, 4) = aten::mul(%0, %1)
-      %d0 : Float(2, 3, 4) = aten::mul(%c0, %0)
+    graph(%0 : Float(2),
+          %1 : Float(2)):
+      %c0 : Float(2) = aten::mul(%0, %1)
+      %d0 : Float(2) = aten::mul(%c0, %0)
       return (%d0))IR";
   torch::jit::parseIR(graph0_string, g.get());
 
@@ -554,17 +554,37 @@ void testGPU_FusionParser() {
       << "  return (a + b - 1) / b;\n"
       << "}\n"
       << "\n"
-      << "__global__ void CUDAGeneratedKernel(Tensor<float, 3> T0, Tensor<float, 3> T1, Tensor<float, 3> T3){\n"
-      << "  float T2[1];\n"
-      << "  if ( ( ( ( ( ( ( ( blockIdx.x * 128 ) + threadIdx.x ) / T1.size[2] ) / T1.size[1] ) < T1.size[0] ) && ( ( ( ( ( blockIdx.x * 128 ) + threadIdx.x ) / T1.size[2] ) % T1.size[1] ) < T1.size[1] ) ) && ( ( ( ( blockIdx.x * 128 ) + threadIdx.x ) % T1.size[2] ) < T1.size[2] ) ) ) { \n"
-      << "    T2[ 0 ]\n"
-      << "       = T0[ ( ( ( ( ( blockIdx.x * 128 ) + threadIdx.x ) / T3.size[2] ) / T3.size[1] ) * T0.stride[0] ) + ( ( ( ( ( blockIdx.x * 128 ) + threadIdx.x ) / T3.size[2] ) % T3.size[1] ) * T0.stride[1] ) + ( ( ( ( blockIdx.x * 128 ) + threadIdx.x ) % T3.size[2] ) * T0.stride[2] ) ]\n"
-      << "       * T1[ ( ( ( ( ( blockIdx.x * 128 ) + threadIdx.x ) / T1.size[2] ) / T1.size[1] ) * T1.stride[0] ) + ( ( ( ( ( blockIdx.x * 128 ) + threadIdx.x ) / T1.size[2] ) % T1.size[1] ) * T1.stride[1] ) + ( ( ( ( blockIdx.x * 128 ) + threadIdx.x ) % T1.size[2] ) * T1.stride[2] ) ];\n"
+      << "__global__ void CUDAGeneratedKernel(Tensor<float, 1> T0, Tensor<float, 1> T1, Tensor<float, 1> T3){\n"
+      << "  float T2[4];\n"
+      << "  if ( ( ( ( ( ( blockIdx.x * 4 ) + ( 4 - 1 ) ) * 128 ) + threadIdx.x ) < T1.size[0] ) ) { \n"
+      << "    for(size_t i64 = 0; i64 < 4; ++i64 ) {\n"
+      << "      T2[ i64 ]\n"
+      << "         = T0[ ( ( ( ( ( blockIdx.x * 4 ) + i64 ) * 128 ) + threadIdx.x ) * T0.stride[0] ) ]\n"
+      << "         * T1[ ( ( ( ( ( blockIdx.x * 4 ) + i64 ) * 128 ) + threadIdx.x ) * T1.stride[0] ) ];\n"
+      << "    }\n"
+      << "  } else { \n"
+      << "    for(size_t i64 = 0; i64 < 4; ++i64 ) {\n"
+      << "      if ( ( ( ( ( ( blockIdx.x * 4 ) + i64 ) * 128 ) + threadIdx.x ) < T1.size[0] ) ) { \n"
+      << "        T2[ i64 ]\n"
+      << "           = T0[ ( ( ( ( ( blockIdx.x * 4 ) + i64 ) * 128 ) + threadIdx.x ) * T0.stride[0] ) ]\n"
+      << "           * T1[ ( ( ( ( ( blockIdx.x * 4 ) + i64 ) * 128 ) + threadIdx.x ) * T1.stride[0] ) ];\n"
+      << "      }\n"
+      << "    }\n"
       << "  }\n"
-      << "  if ( ( ( ( ( ( ( ( blockIdx.x * 128 ) + threadIdx.x ) / T3.size[2] ) / T3.size[1] ) < T3.size[0] ) && ( ( ( ( ( blockIdx.x * 128 ) + threadIdx.x ) / T3.size[2] ) % T3.size[1] ) < T3.size[1] ) ) && ( ( ( ( blockIdx.x * 128 ) + threadIdx.x ) % T3.size[2] ) < T3.size[2] ) ) ) { \n"
-      << "    T3[ ( ( ( ( ( blockIdx.x * 128 ) + threadIdx.x ) / T3.size[2] ) / T3.size[1] ) * T3.stride[0] ) + ( ( ( ( ( blockIdx.x * 128 ) + threadIdx.x ) / T3.size[2] ) % T3.size[1] ) * T3.stride[1] ) + ( ( ( ( blockIdx.x * 128 ) + threadIdx.x ) % T3.size[2] ) * T3.stride[2] ) ]\n"
-      << "       = T2[ 0 ]\n"
-      << "       * T0[ ( ( ( ( ( blockIdx.x * 128 ) + threadIdx.x ) / T3.size[2] ) / T3.size[1] ) * T0.stride[0] ) + ( ( ( ( ( blockIdx.x * 128 ) + threadIdx.x ) / T3.size[2] ) % T3.size[1] ) * T0.stride[1] ) + ( ( ( ( blockIdx.x * 128 ) + threadIdx.x ) % T3.size[2] ) * T0.stride[2] ) ];\n"
+      << "  if ( ( ( ( ( ( blockIdx.x * 4 ) + ( 4 - 1 ) ) * 128 ) + threadIdx.x ) < T3.size[0] ) ) { \n"
+      << "    for(size_t i65 = 0; i65 < 4; ++i65 ) {\n"
+      << "      T3[ ( ( ( ( ( blockIdx.x * 4 ) + i65 ) * 128 ) + threadIdx.x ) * T3.stride[0] ) ]\n"
+      << "         = T2[ i65 ]\n"
+      << "         * T0[ ( ( ( ( ( blockIdx.x * 4 ) + i65 ) * 128 ) + threadIdx.x ) * T0.stride[0] ) ];\n"
+      << "    }\n"
+      << "  } else { \n"
+      << "    for(size_t i65 = 0; i65 < 4; ++i65 ) {\n"
+      << "      if ( ( ( ( ( ( blockIdx.x * 4 ) + i65 ) * 128 ) + threadIdx.x ) < T3.size[0] ) ) { \n"
+      << "        T3[ ( ( ( ( ( blockIdx.x * 4 ) + i65 ) * 128 ) + threadIdx.x ) * T3.stride[0] ) ]\n"
+      << "           = T2[ i65 ]\n"
+      << "           * T0[ ( ( ( ( ( blockIdx.x * 4 ) + i65 ) * 128 ) + threadIdx.x ) * T0.stride[0] ) ];\n"
+      << "      }\n"
+      << "    }\n"
       << "  }\n"
       << "}\n";
 
@@ -1017,8 +1037,8 @@ void testGPU_FusionLoopUnroll() {
 
   // For all inputs, computeAt the output inline, temporaries should be squeezed
   // between them
-  tv0->computeAt(tv3, -1);
-  tv1->computeAt(tv3, -1);
+  tv0->computeAt(tv3, 1);
+  tv1->computeAt(tv3, 1);
 
   // Parallelize
   tv2->axis(1)->parallelize(ParallelType::Unroll);
