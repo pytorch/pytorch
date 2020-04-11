@@ -139,7 +139,13 @@ namespace jit {
   _(SimplifyDivisionScalarFactorization)  \
   _(SimplifyConstantBranches)             \
   _(SimplifyConstantCond)                 \
-  _(StmtClone)
+  _(StmtClone)                            \
+  _(BoundsInference_1)                    \
+  _(BoundsInference_2)                    \
+  _(BoundsInference_3)                    \
+  _(BoundsInference_4)                    \
+  _(BoundsInference_5)                    \
+  _(BoundsInference_6)
 
 #define TH_FORALL_TENSOREXPR_TESTS_LLVM(_) \
   _(LLVMByteImmTest)                       \
