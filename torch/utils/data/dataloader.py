@@ -255,9 +255,9 @@ class DataLoader(object):
                     multiprocessing_context = multiprocessing.get_context(multiprocessing_context)
 
                 if not isinstance(multiprocessing_context, python_multiprocessing.context.BaseContext):
-                    raise ValueError(('multiprocessing_context option should be a valid context '
-                                      'object or a string specifying the start method, but got '
-                                      'multiprocessing_context={}').format(multiprocessing_context))
+                    raise TypeError(('multiprocessing_context option should be a valid context '
+                                     'object or a string specifying the start method, but got '
+                                     'multiprocessing_context={}').format(multiprocessing_context))
             else:
                 raise ValueError(('multiprocessing_context can only be used with '
                                   'multi-process loading (num_workers > 0), but got '
