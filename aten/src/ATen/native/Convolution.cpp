@@ -43,10 +43,7 @@ struct ConvParams {
   bool use_miopen(const at::Tensor& input, bool bias_defined) const;
   bool use_mkldnn(const at::Tensor& input) const;
   bool use_nnpack(const at::Tensor& input) const;
-  bool use_xnnpack(
-      const at::Tensor& input,
-      const at::Tensor& weight,
-      const at::Tensor& bias) const;
+  bool use_xnnpack(const at::Tensor& input, const at::Tensor& weight, const at::Tensor& bias) const;
   bool is_depthwise(const at::Tensor& input, const at::Tensor& weight) const;
 };
 
@@ -249,12 +246,12 @@ auto ConvParams::use_xnnpack(
     const at::Tensor& input,
     const at::Tensor& weight,
     const at::Tensor& bias) const -> bool {
-// #if defined(C10_MOBILE)
+#ifdef C10_MOBILE
   if (!transposed) {
     return xnnpack::use_convolution2d(
         input, weight, bias, padding, stride, dilation, groups);
   }
-// #endif
+#endif
   return false;
 }
 
