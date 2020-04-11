@@ -145,6 +145,13 @@ auto scalar_assign = [](auto * self_data, auto * src_data) {
 template <bool is_scatter_like = true>
 struct cpu_scatter_gather_base_kernel {
   void operator()(Tensor& self, int64_t dim,
+    const Tensor& index, Scalar& src,
+    const std::string& method_name,
+    bool serial_exec, const SCATTER_GATHER_OP& func_enum) {
+    
+  }
+  
+  void operator()(Tensor& self, int64_t dim,
     const Tensor& index, const Tensor& src,
     const std::string& method_name,
     bool serial_exec,
@@ -290,11 +297,11 @@ void gather_cpu_kernel(Tensor& result, const Tensor& self, int64_t dim, const Te
 
 void scatter_cpu_kernel(Tensor& self, int64_t dim, const Tensor& index, const Tensor& src) {
   cpu_scatter_gather_base_kernel<>()(
-    self, dim, index, src, "scatter_cpu_", false, SCATTER_GATHER_OP::TENSOR_ASSIGN
-  );
+    self, dim, index, src, "scatter_cpu_", false, SCATTER_GATHER_OP::TENSOR_ASSIGN);
 }
 
 void scatter_fill_cpu_kernel(Tensor& self, int64_t dim, const Tensor& index, Scalar src) {
+  // Tensor copy(src);
   // cpu_scatter_gather_base_kernel<>()(
   //   self, dim, index, self,
   //   "scatter_fill_cpu_", /*serial_exec=*/false, SCATTER_GATHER_OP::SCALAR_ASSIGN);
