@@ -102,7 +102,7 @@ struct KernelArgumentHolder {
     }
   }
 
-  template<typename T>
+  template <typename T>
   void push_scalar(T scalar) {
     // TODO: we should probably worry about alignment here;
     T* ptr = reinterpret_cast<T*>(buffer_ptr);
@@ -241,7 +241,7 @@ void runKernel(
   size_t numel = outputs[0].numel();
 
   // TODO: we can't randomly clap down this until we got striding.
-  //const auto nBlocks = std::min(entry->max_blocks_, ceilDiv(numel, 128));
+  // const auto nBlocks = std::min(entry->max_blocks_, ceilDiv(numel, 128));
   const auto nBlocks = ceilDiv(numel, 128);
 
   // TODO: Proper API to tranform JIT I/O Tensor to CodeGen I/O Tensor
@@ -251,18 +251,13 @@ void runKernel(
   // Naive I/O setup, I'm ignoring all the potential transformation (i.e. I/O
   // allocated here from the subgraph could be, and very likely are, different
   // from I/O expected by the generated CUDA kernel.
-  printf("prepare input\n");
   for (auto& input : inputs) {
-    printf(" get input\n");
     prepare_argument(kernel_arg_holder, input, outputs[0].sizes());
   }
-  printf("prepare output\n");
   for (auto& output : outputs) {
-    printf(" get output\n");
     prepare_argument(kernel_arg_holder, output);
   }
 
-  printf("launching\n");
   // launch kernel;
   AT_CUDA_DRIVER_CHECK(nvrtc().cuLaunchKernel(
       entry->function_,
@@ -279,7 +274,6 @@ void runKernel(
 
   // Resets device (see at::DeviceGuard notes above)
   at::cuda::set_device(prior_device);
-
 }
 
 // WARNING:

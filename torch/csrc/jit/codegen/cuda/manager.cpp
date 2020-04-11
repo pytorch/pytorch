@@ -1,7 +1,7 @@
 #include <torch/csrc/jit/codegen/cuda/manager.h>
-#include <torch/csrc/jit/codegen/cuda/parser.h>
-#include <torch/csrc/jit/codegen/cuda/kernel_cache.h>
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
+#include <torch/csrc/jit/codegen/cuda/kernel_cache.h>
+#include <torch/csrc/jit/codegen/cuda/parser.h>
 #include <torch/csrc/jit/codegen/cuda/utils.h>
 #include <torch/csrc/jit/passes/canonicalize.h>
 #include <torch/csrc/jit/passes/shape_analysis.h>
@@ -76,16 +76,17 @@ class CudaFusionManager {
       const at::ArrayRef<IValue> inputs,
       std::vector<at::Tensor> outputs) {
     std::lock_guard<std::mutex> guard(mutex_);
-    TORCH_CHECK(kernel_cache_.count(kernel_id) != 0, "kernel id not recognized");
+    TORCH_CHECK(
+        kernel_cache_.count(kernel_id) != 0, "kernel id not recognized");
 
     // TODO: temporary hack
-    auto cuda_kernel = kernel_cache_[kernel_id].getKernelPtr(outputs[0].sizes());
+    auto cuda_kernel =
+        kernel_cache_[kernel_id].getKernelPtr(outputs[0].sizes());
     if (cuda_kernel) {
       // TODO: update launch config for specific sizes;
       //       maybe we should store it in CudaKernel and compute it later
       runKernel(*cuda_kernel, inputs, outputs);
     } else {
-
       // major HACK!
       auto kernel_arg_req = expandSizeSupport(outputs[0].sizes());
       cuda_kernel =
@@ -164,7 +165,7 @@ void runCudaFusionGroup(const Node* const fusion_node, Stack& stack) {
     auto& static_input = graph->inputs()[i];
     auto& dynamic_input = inputs[i]; // this is FILO stack
     if ((*dynamic_input.type()) != (*static_input->type())) {
-      matched_static_inputs  = false;
+      matched_static_inputs = false;
       break;
     }
     if (dynamic_input.isTensor()) {
@@ -173,14 +174,15 @@ void runCudaFusionGroup(const Node* const fusion_node, Stack& stack) {
       // even though it is compatible with profiling graph.
       // TODO: we could relax on a bunch of checks here, like strides & gradient
       if (!static_input->type()->cast<TensorType>()->sizes().isComplete() ||
-          !static_input->type()->cast<TensorType>()
-          ->isCompatibleWithInCurrentExecutionContext(inp_tensor)) {
-        matched_static_inputs  = false;
+          !static_input->type()
+               ->cast<TensorType>()
+               ->isCompatibleWithInCurrentExecutionContext(inp_tensor)) {
+        matched_static_inputs = false;
         break;
       }
     }
   }
-  
+
   // TODO: expose the API to populate shape inference. This allows separate CI
   // tests
   // matched_static_inputs = false;
@@ -221,7 +223,8 @@ void runCudaFusionGroup(const Node* const fusion_node, Stack& stack) {
     outputs.push_back(tensor);
   }
 
-  CudaFusionManager::getManager().runFusionNode(kernel_id, graph, inputs, outputs);
+  CudaFusionManager::getManager().runFusionNode(
+      kernel_id, graph, inputs, outputs);
 
   drop(stack, inputs.size());
   stack.insert(

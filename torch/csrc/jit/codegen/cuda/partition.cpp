@@ -1,6 +1,6 @@
 #include <torch/csrc/jit/codegen/cuda/partition.h>
-#include <torch/csrc/jit/codegen/cuda/parser.h>
 #include <ATen/core/jit_type.h>
+#include <torch/csrc/jit/codegen/cuda/parser.h>
 
 namespace torch {
 namespace jit {
@@ -59,8 +59,7 @@ inline bool isFusableNode(const Node* const node) {
 static bool compatible_broadcast_shape(
     const c10::VaryingShape& e,
     const c10::VaryingShape& a) {
-  if (e.isComplete() &&
-      a.isComplete()) {
+  if (e.isComplete() && a.isComplete()) {
     auto e_size = e.concrete_sizes().value();
     auto a_size = a.concrete_sizes().value();
     for (size_t i = 0; i < e_size.size(); i++) {
@@ -104,7 +103,8 @@ bool isFusableCudaFusionGroup(
           // if the output is not used by outside, there's no need to check its
           // shape
           if (output_tensor &&
-              !compatible_broadcast_shape(tensor_type->sizes() , output_type->sizes())) {
+              !compatible_broadcast_shape(
+                  tensor_type->sizes(), output_type->sizes())) {
             return false;
           }
         }

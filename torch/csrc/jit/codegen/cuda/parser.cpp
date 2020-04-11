@@ -201,7 +201,7 @@ class IrParser {
     }
   }
 
-  bool registerValue(const JitValue* val, int broadcast_dim=-1) {
+  bool registerValue(const JitValue* val, int broadcast_dim = -1) {
     return registerTensor(val, broadcast_dim) || registerScalar(val);
   }
 
@@ -229,7 +229,7 @@ class IrParser {
     return false;
   }
 
-  bool registerTensor(const JitValue* val, int broadcast_dim=-1) {
+  bool registerTensor(const JitValue* val, int broadcast_dim = -1) {
     CgValue* cg_val;
     if (val->isCompleteTensor()) {
       auto tensor_type = val->type()->cast<TensorType>();

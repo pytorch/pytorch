@@ -41,7 +41,9 @@ void IRPrinter::printHeader(Fusion* fusion, const std::string& kernel_name_) {
   for (Val* val : vals) {
     switch (val->getValType().value()) {
       case (ValType::TensorView):
-        os << "Tensor<" << val->getDataType().value() << "> T" << val->name();
+        os << "Tensor<" << val->getDataType().value() << ", "
+           << static_cast<TensorView*>(val)->getRootDomain()->nDims() << "> T"
+           << val->name();
         break;
       case (ValType::Scalar):
         os << val->getDataType().value() << " " << val;
@@ -349,8 +351,6 @@ void IRPrinter::printKernel(
     const std::vector<Expr*>& exprs,
     const std::string& kernel_name) {
   Fusion* fusion = FusionGuard::getCurFusion();
-  // if(exprs.size() != 0)
-  //   fusion = exprs[0]->fusion();
 
   printHeader(fusion, kernel_name);
   for (auto* expr : exprs) {

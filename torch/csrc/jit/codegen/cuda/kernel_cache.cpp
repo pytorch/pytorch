@@ -8,7 +8,8 @@ namespace jit {
 namespace fuser {
 namespace cuda {
 
-at::optional<CudaKernel*> CudaKernelCache::getKernelPtr(c10::IntArrayRef sizes) {
+at::optional<CudaKernel*> CudaKernelCache::getKernelPtr(
+    c10::IntArrayRef sizes) {
   for (auto& iter : kernels_) {
     if (iter.first.matchKernelSize(sizes)) {
       return &(iter.second);
@@ -17,8 +18,7 @@ at::optional<CudaKernel*> CudaKernelCache::getKernelPtr(c10::IntArrayRef sizes) 
   return at::nullopt;
 }
 
-CudaKernel* CudaKernelCache::allocateKernelInCache(
-    KernelArgsReq args_req) {
+CudaKernel* CudaKernelCache::allocateKernelInCache(KernelArgsReq args_req) {
   kernels_.emplace_back(std::make_pair(std::move(args_req), CudaKernel()));
   return &(kernels_.back().second);
 }
