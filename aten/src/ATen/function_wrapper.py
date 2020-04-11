@@ -691,7 +691,7 @@ def find_dispatch_tensor(formals):
     # otherwise dispatch to the first Tensor or TensorList
     for formal in formals:
         if 'TensorList' == formal['dynamic_type'] or is_any_tensor_type(formal) and \
-            not formal.get('is_nullable', False):
+                not formal.get('is_nullable', False):
             return formal['name']
 
     return None
