@@ -660,6 +660,110 @@ def to_return_type(arg, option):
     }
 
 
+def is_any_tensor_type(formal):
+    return (formal['dynamic_type'] == 'Tensor' or formal['dynamic_type'] == 'ByteTensor'
+            or formal['dynamic_type'] == 'IndexTensor' or formal['dynamic_type'] == 'BoolTensor')
+
+
+def find_tensors(formals):
+    # type: (List[AtFormal]) -> List[str]
+    return [formal['name'] for formal in formals if is_any_tensor_type(formal)]
+
+
+def find_tensorlists(formals):
+    # type: (List[AtFormal]) -> List[str]
+    return [formal['name'] for formal in formals if formal['dynamic_type'] == 'TensorList']
+
+
+def find_dispatch_tensor(formals):
+    # type: (List[AtFormal]) -> Optional[str]
+    # Determine legacy TH-style single dispatch tensor.
+    #
+    # Also used to determine what tensor should be used to provide a default
+    # DeviceGuard.  Unlike dispatch, we don't guard on ALL tensor arguments
+    # (because this is not actually a thing you can do.)  Guarding on the
+    # first argument is best effort to help people avoid doing this
+    # themselves.
+
+    for formal in formals:
+        if formal['name'] == 'self' and is_any_tensor_type(formal) and not formal.get('is_nullable', False):
+            return formal['name']
+    # otherwise dispatch to the first Tensor or TensorList
+    for formal in formals:
+        if 'TensorList' == formal['dynamic_type'] or is_any_tensor_type(formal) and \
+            not formal.get('is_nullable', False):
+            return formal['name']
+
+    return None
+
+
+def is_multidispatch_formal(formal):
+    # type: (AtFormal) -> bool
+    return formal['dynamic_type'] in ['TensorOptions', 'TensorList'] or is_any_tensor_type(formal)
+
+
+def find_multidispatch_formals(formals):
+    # type: (List[AtFormal]) -> List[AtFormal]
+    # Compute the list of all arguments which should be considered
+    # for multiple dispatch.  Note that this doesn't completely replace
+    # find_dispatch_tensor because we use the "dispatch tensor" to determine
+    # device guards.  TensorOptions is included as part of this calculation.
+    #
+    # The interaction of multiple dispatch with TensorOptions
+    # is quite interesting.  In particular, suppose I have:
+    #
+    #   cuda_tensor.new_like(1, device='cpu')
+    #
+    # Multiple dispatch will attempt a dispatch to CUDA, even though
+    # the end tensor that should be produced here is a CPU one.  The
+    # upshot is that if you have an operator with mixed TensorOptions
+    # and Tensor arguments, you MUST only ever register it generically.
+    return [f for f in formals if is_multidispatch_formal(f)]
+
+
+def format_formal(f):
+    # type: (AtFormal) -> str
+    return '{} {}'.format(f['type'], f['name'])
+
+
+def formal_with_default(f):
+    # type: (AtFormal) -> str
+    s = format_formal(f)
+    v = f.get('default')
+    if v is None:
+        return s
+    if isinstance(v, bool):
+        v = str(v).lower()
+    return '{}={}'.format(s, v)
+
+
+def gen_dispatch_key_init(var_name, formals):
+    # type: (str, List[AtFormal]) -> List[str]
+    topt_formals = []
+    non_topt_formals = []
+    for f in find_multidispatch_formals(formals):
+        if f['dynamic_type'] == 'TensorOptions':
+            topt_formals.append(f)
+        else:
+            non_topt_formals.append(f)
+
+    if len(topt_formals) == 1 and non_topt_formals == []:
+        topt = topt_formals[0]
+        return ['DispatchKey {} = {}.computeDispatchKey();'.format(var_name, topt['name'])]
+
+    subexprs = []
+    for f in topt_formals:
+        subexprs.append('DispatchKeySet({}.computeDispatchKey())'.format(f['name']))
+    if non_topt_formals != []:
+        args = ', '.join([f['name'] for f in non_topt_formals])
+        subexprs.append('c10::detail::multi_dispatch_key_set({})'.format(args))
+    return [
+        'DispatchKeySet _dk_set = {};'.format(' | '.join(subexprs)),
+        'DispatchKeySet _dk_mask = c10::DispatchKeySet(c10::DispatchKeySet::FULL).remove(DispatchKey::BackendSelect);',
+        'DispatchKey {} = c10::impl::dispatchTypeId(_dk_set, _dk_mask);'.format(var_name),
+    ]
+
+
 def create_generic(top_env, declarations):
     # type: (TopEnvironment, List[FunctionOption]) -> Tuple[List[OutputDeclaration], List[OpRegistration]]
     # translates defaults from cwrap types to C++ values
@@ -771,75 +875,6 @@ def create_generic(top_env, declarations):
         elif len(return_types) == 1:
             return return_types[0]['type']
         return "std::tuple<{}>".format(','.join(r['type'] for r in return_types))
-
-    def is_any_tensor_type(formal):
-        return (formal['dynamic_type'] == 'Tensor' or formal['dynamic_type'] == 'ByteTensor'
-                or formal['dynamic_type'] == 'IndexTensor' or formal['dynamic_type'] == 'BoolTensor')
-
-    def find_tensors(formals):
-        # type: (List[AtFormal]) -> List[str]
-        return [formal['name'] for formal in formals if is_any_tensor_type(formal)]
-
-    def find_tensorlists(formals):
-        # type: (List[AtFormal]) -> List[str]
-        return [formal['name'] for formal in formals if formal['dynamic_type'] == 'TensorList']
-
-    def find_dispatch_tensor(formals):
-        # type: (List[AtFormal]) -> Optional[str]
-        # Determine legacy TH-style single dispatch tensor.
-        #
-        # Also used to determine what tensor should be used to provide a default
-        # DeviceGuard.  Unlike dispatch, we don't guard on ALL tensor arguments
-        # (because this is not actually a thing you can do.)  Guarding on the
-        # first argument is best effort to help people avoid doing this
-        # themselves.
-
-        for formal in formals:
-            if formal['name'] == 'self' and is_any_tensor_type(formal) and not formal.get('is_nullable', False):
-                return formal['name']
-        # otherwise dispatch to the first Tensor or TensorList
-        for formal in formals:
-            if 'TensorList' == formal['dynamic_type'] or is_any_tensor_type(formal) and \
-               not formal.get('is_nullable', False):
-                return formal['name']
-
-        return None
-
-    def is_multidispatch_formal(formal):
-        # type: (AtFormal) -> bool
-        return formal['dynamic_type'] in ['TensorOptions', 'TensorList'] or is_any_tensor_type(formal)
-
-    def find_multidispatch_formals(formals):
-        # type: (List[AtFormal]) -> List[AtFormal]
-        # Compute the list of all arguments which should be considered
-        # for multiple dispatch.  Note that this doesn't completely replace
-        # find_dispatch_tensor because we use the "dispatch tensor" to determine
-        # device guards.  TensorOptions is included as part of this calculation.
-        #
-        # The interaction of multiple dispatch with TensorOptions
-        # is quite interesting.  In particular, suppose I have:
-        #
-        #   cuda_tensor.new_like(1, device='cpu')
-        #
-        # Multiple dispatch will attempt a dispatch to CUDA, even though
-        # the end tensor that should be produced here is a CPU one.  The
-        # upshot is that if you have an operator with mixed TensorOptions
-        # and Tensor arguments, you MUST only ever register it generically.
-        return [f for f in formals if is_multidispatch_formal(f)]
-
-    def format_formal(f):
-        # type: (AtFormal) -> str
-        return '{} {}'.format(f['type'], f['name'])
-
-    def formal_with_default(f):
-        # type: (AtFormal) -> str
-        s = format_formal(f)
-        v = f.get('default')
-        if v is None:
-            return s
-        if isinstance(v, bool):
-            v = str(v).lower()
-        return '{}={}'.format(s, v)
 
     def get_broadcast_argument(option):
         # type: (FunctionOption) -> Optional[THFormal]
@@ -1068,32 +1103,6 @@ def create_generic(top_env, declarations):
                 if formal_name == formal['dynamic_type']:
                     return formal
             return None
-
-        def gen_dispatch_key_init(var_name, formals):
-            # type: (str, List[AtFormal]) -> List[str]
-            topt_formals = []
-            non_topt_formals = []
-            for f in find_multidispatch_formals(formals):
-                if f['dynamic_type'] == 'TensorOptions':
-                    topt_formals.append(f)
-                else:
-                    non_topt_formals.append(f)
-
-            if len(topt_formals) == 1 and non_topt_formals == []:
-                topt = topt_formals[0]
-                return ['DispatchKey {} = {}.computeDispatchKey();'.format(var_name, topt['name'])]
-
-            subexprs = []
-            for f in topt_formals:
-                subexprs.append('DispatchKeySet({}.computeDispatchKey())'.format(f['name']))
-            if non_topt_formals != []:
-                args = ', '.join([f['name'] for f in non_topt_formals])
-                subexprs.append('c10::detail::multi_dispatch_key_set({})'.format(args))
-            return [
-                'DispatchKeySet _dk_set = {};'.format(' | '.join(subexprs)),
-                'DispatchKeySet _dk_mask = c10::DispatchKeySet(c10::DispatchKeySet::FULL).remove(DispatchKey::BackendSelect);',
-                'DispatchKey {} = c10::impl::dispatchTypeId(_dk_set, _dk_mask);'.format(var_name),
-            ]
 
         def gen_tensor_method(option, formals):
             # type: (Any, List[AtFormal]) -> FunctionCode

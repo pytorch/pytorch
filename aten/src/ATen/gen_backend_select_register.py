@@ -19,6 +19,7 @@
 # all factory functions that have 'backend_select' flag in its native_functions.yaml definition.
 
 from code_template import CodeTemplate
+from function_wrapper import gen_dispatch_key_init
 
 GENERATED_COMMENT = CodeTemplate(
     "@" + "generated from ${filename}")
@@ -34,7 +35,7 @@ FUNCTION_DEFINITION = CodeTemplate("""\
 // ${schema_string}
 Tensor ${function_name}(${method_formals}) {
   static OperatorHandle OP = c10::Dispatcher::singleton().findSchemaOrThrow("aten::${name}", "${overload_name}");
-  DispatchKey _dk = options.computeDispatchKey();
+  ${dispatch_key_init}
   globalLegacyTypeDispatch().initForDispatchKey(_dk);
   return OP.callUnboxedWithDispatchKey<${formals_types}>(_dk, ${type_method_actuals});
 }
@@ -66,11 +67,14 @@ def register_backend_select_methods(declarations, template_path, file_manager):
                 func_reg = FUNCTION_REGISTRATION.substitute(schema_string=option['schema_string'],
                                                             function_name=name)
 
+                dispatch_key_init = gen_dispatch_key_init('_dk', option['formals_list'])
+
                 method_def = FUNCTION_DEFINITION.substitute(function_name=name,
                                                             schema_string=option['schema_string'],
                                                             method_formals=option['formals_with_defaults'],
                                                             name=option['name'],
                                                             overload_name=option['overload_name'],
+                                                            dispatch_key_init=dispatch_key_init,
                                                             formals_types=option['formals_types_with_return'],
                                                             type_method_actuals=option['type_method_actuals'])
 
