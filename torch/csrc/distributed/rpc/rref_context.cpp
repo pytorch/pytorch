@@ -9,7 +9,7 @@ namespace rpc {
 
 thread_local std::vector<std::shared_ptr<RRefContext::PendingUserState>>
     RRefContext::userTable_;
-thread_local bool RRefContext::recording = false;
+thread_local bool RRefContext::recording_ = false;
 
 namespace callback {
 void confirmPendingUser(
@@ -455,7 +455,7 @@ void RRefContext::addPendingUser(
       !rref->isOwner(), "Attempt to add an OwnerRRef as a pending User.");
 
   auto state = std::make_shared<PendingUserState>(rref);
-  if (recording) {
+  if (recording_) {
     // adding and waiting for pending users are guaranteed to be called from the
     // same thread, but deleting pending users will be called from another
     // thread. As the delPendingUser will not be able to access the same
@@ -528,15 +528,16 @@ void RRefContext::recordThreadLocalPendingRRefs() {
   TORCH_INTERNAL_ASSERT(
       userTable_.empty(),
       "User RRef Table should be empty when start recording");
-  recording = true;
+  recording_ = true;
 }
 
 std::shared_ptr<torch::utils::Future<bool>> RRefContext::
     waitForThreadLocalPendingRRefs() {
-  auto future = std::make_shared<torch::utils::Future<bool>>();
+  std::shared_ptr<torch::utils::Future<bool>> future;
   if (userTable_.empty()) {
-    future->markCompleted(true);
+    future = std::make_shared<torch::utils::Future<bool>>(true);
   } else {
+    future = std::make_shared<torch::utils::Future<bool>>();
     auto remainingRRefs =
         std::make_shared<std::atomic<uint64_t>>(userTable_.size());
     for (auto& state : userTable_) {
@@ -549,13 +550,13 @@ std::shared_ptr<torch::utils::Future<bool>> RRefContext::
     }
     userTable_.clear();
   }
-  recording = false;
+  recording_ = false;
   return future;
 }
 
 void RRefContext::clearRecordedPendingRRefsOnError() {
   userTable_.clear();
-  recording = false;
+  recording_ = false;
 }
 
 void RRefContext::finishForkRequest(const ForkId& forkId, worker_id_t parent) {
