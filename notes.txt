@@ -1,5 +1,0 @@
-tools/autograd/gen_variable_type.py:536:
-type_definitions[] (eventually turns into contents of VariableType_2.cpp)
-  uses variable: ${type_definition_body}
-    filled from emit_body(    gen_variable_type.py:557
-                declaration)  <-- element of output of load_aten_declarations(path) (gen_autogra.py:94)
