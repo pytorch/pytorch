@@ -58,6 +58,56 @@ class IndexFlattener : public IRMutator {
   }
 };
 
+class ReductionExpander : public IRMutator {
+ public:
+  Stmt* expand(Stmt* s) {
+    return s->accept_mutator(this);
+  }
+
+  Stmt* mutate(const For* v) override {
+    LoopOptions loop_options = v->loop_options();
+    Stmt* body_new = v->body()->accept_mutator(this);
+    if (body_new == v->body()) {
+      body_new = Stmt::clone(v->body());
+    }
+    Stmt* ret =
+        new For(v->var(), v->start(), v->stop(), body_new, loop_options);
+
+    for (size_t i = 0; i < initializers_.size();) {
+      std::vector<const Var*>& vars = initializers_[i].second;
+
+      auto end = std::remove(vars.begin(), vars.end(), v->var());
+      if (end == vars.end()) {
+        i++;
+        continue;
+      }
+
+      vars.erase(end);
+      if (vars.empty()) {
+        if (Block* b = dynamic_cast<Block*>(ret)) {
+          b->prepend_stmt(initializers_[i].first);
+        } else {
+          ret = new Block({initializers_[i].first, ret});
+        }
+        initializers_.erase(initializers_.begin() + i);
+        continue;
+      }
+
+      i++;
+    }
+    return ret;
+  }
+
+  const Expr* mutate(const ReduceOp* v) override {
+    std::vector<const Var*> reduce_vars(v->reduce_args());
+    initializers_.push_back(std::make_pair(v->initializer(), reduce_vars));
+    return v->complete().node();
+  }
+
+ private:
+  std::vector<std::pair<Stmt*, std::vector<const Var*>>> initializers_;
+};
+
 class Vectorizer : public IRMutator {
  public:
   Stmt* vectorize(const For* v) {
@@ -382,7 +432,7 @@ class FunctionInliner : public IRMutator {
 
     if (should_inline(func)) {
       // Insert the caller/callee pair into the mapping.
-      for (int i = 0; i < buf->ndim(); i++) {
+      for (size_t i = 0; i < buf->ndim(); i++) {
         const Var* func_callee_arg = dynamic_cast<const Var*>(func->arg(i));
         const Expr* func_caller_param = v->param(i);
         auto iter = inline_mapping_.find(func_callee_arg);
@@ -398,7 +448,7 @@ class FunctionInliner : public IRMutator {
       const Expr* result = body->accept_mutator(this);
 
       // Remove the caller/callee relationship.
-      for (int i = 0; i < buf->ndim(); i++) {
+      for (size_t i = 0; i < buf->ndim(); i++) {
         const Var* func_callee_arg = dynamic_cast<const Var*>(func->arg(i));
         auto iter = inline_mapping_.find(func_callee_arg);
         if (iter == inline_mapping_.end()) {
@@ -631,13 +681,13 @@ std::vector<Tensor*> LoopNest::findAllNeededTensors(
     if (all_processed) {
       result.push_back(t);
       if (processed.count(t)) {
-        throw malformed_input();
+        throw malformed_input("failure to find all processed Tensors");
       }
 
       processed.insert(t);
     } else {
       if (queued.count(t)) {
-        throw malformed_input();
+        throw malformed_input("failure to find all queued Tensors");
       }
 
       q.push(t);
@@ -681,18 +731,18 @@ Stmt* LoopNest::lowerToStmt(Tensor* t) {
   stmt_to_tensor_[body] = t;
   tensor_to_stmt_[t] = body;
 
-  if (t->buf()->ndim() == 0) {
+  if (f->ndim() == 0) {
     return body;
   }
 
-  if (t->buf()->ndim() == 0) {
-    throw malformed_input();
+  if (f->ndim() == 0) {
+    throw malformed_input("Tensor lowered to zero dimensions");
   }
 
-  for (size_t i = 0; i < t->buf()->ndim(); i++) {
+  for (size_t i = 0; i < f->ndim(); i++) {
     // Going in reverse order: from innermost loop to the outermost
-    size_t dim_index = t->buf()->ndim() - i - 1;
-    Range r(new IntImm(0), t->buf()->dim(dim_index));
+    size_t dim_index = f->ndim() - i - 1;
+    Range r(new IntImm(0), f->dim(dim_index));
     body = new For(f->arg(dim_index), r.start(), r.stop(), body);
   }
   return body;
@@ -747,6 +797,10 @@ void LoopNest::prepareForCodegen() {
   root_stmt_ = InjectInlines(root_stmt_, inlined_functions_vec);
   root_stmt_ = InlineRandom(root_stmt_, inlined_randoms_vec);
 
+  // Expand reduction ops.
+  ReductionExpander reduceExpander;
+  root_stmt_ = reduceExpander.expand(root_stmt_);
+
   // Flatten function calls.
   Flattener flattener;
   root_stmt_ = root_stmt_->accept_mutator(&flattener);
@@ -765,9 +819,9 @@ void LoopNest::splitWithTail(
     For** tail) {
   Block* p = dynamic_cast<Block*>(f->get_parent());
   if (!f) {
-    throw malformed_input(f);
+    throw malformed_input("splitWithTail attempted on null loop", f);
   } else if (!p) {
-    throw malformed_input(p);
+    throw malformed_input("splitWithTail attempted on loop with no parent", p);
   }
 
   bool tail_is_needed = true;

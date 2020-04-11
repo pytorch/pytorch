@@ -16,6 +16,7 @@ namespace {
 template <> class Vec256<std::complex<double>> {
 private:
   __m256d values;
+  static const Vec256<std::complex<double>> ones;
 public:
   using value_type = std::complex<double>;
   static constexpr int size() {
@@ -210,7 +211,8 @@ public:
     exp = _mm256_blend_pd(exp, _mm256_permute_pd(exp, 0x05), 0x0A);   //exp(a)           exp(a)
 
     auto sin_cos = Sleef_sincosd4_u10(values);                        //[sin(a), cos(a)] [sin(b), cos(b)]
-    auto cos_sin = _mm256_blend_pd(sin_cos.y, sin_cos.x, 0x0A);       //cos(b)           sin(b)
+    auto cos_sin = _mm256_blend_pd(_mm256_permute_pd(sin_cos.y, 0x05),
+                                   sin_cos.x, 0x0A);                  //cos(b)           sin(b)
     return _mm256_mul_pd(exp, cos_sin);
   }
   Vec256<std::complex<double>> expm1() const {
@@ -299,6 +301,13 @@ public:
   Vec256<std::complex<double>> operator>=(const Vec256<std::complex<double>>& other) const {
     AT_ERROR("not supported for complex numbers");
   }
+
+  Vec256<std::complex<double>> eq(const Vec256<std::complex<double>>& other) const;
+  Vec256<std::complex<double>> ne(const Vec256<std::complex<double>>& other) const;
+  Vec256<std::complex<double>> lt(const Vec256<std::complex<double>>& other) const;
+  Vec256<std::complex<double>> le(const Vec256<std::complex<double>>& other) const;
+  Vec256<std::complex<double>> gt(const Vec256<std::complex<double>>& other) const;
+  Vec256<std::complex<double>> ge(const Vec256<std::complex<double>>& other) const;
 };
 
 template <> Vec256<std::complex<double>> inline operator+(const Vec256<std::complex<double>> &a, const Vec256<std::complex<double>> &b) {
@@ -419,6 +428,16 @@ Vec256<std::complex<double>> inline operator|(const Vec256<std::complex<double>>
 template <>
 Vec256<std::complex<double>> inline operator^(const Vec256<std::complex<double>>& a, const Vec256<std::complex<double>>& b) {
   return _mm256_xor_pd(a, b);
+}
+
+const Vec256<std::complex<double>> Vec256<std::complex<double>>::ones(_mm256_set1_pd(1.0));
+
+Vec256<std::complex<double>> Vec256<std::complex<double>>::eq(const Vec256<std::complex<double>>& other) const {
+  return (*this == other) & Vec256<std::complex<double>>::ones;
+}
+
+Vec256<std::complex<double>> Vec256<std::complex<double>>::ne(const Vec256<std::complex<double>>& other) const {
+  return (*this != other) & Vec256<std::complex<double>>::ones;
 }
 
 #ifdef __AVX2__
