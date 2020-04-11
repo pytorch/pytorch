@@ -225,25 +225,29 @@ std::shared_ptr<rpc::FutureMessage> DistEngine::runEngineAndAccumulateGradients(
           return;
         }
 
-        TORCH_INTERNAL_ASSERT(grads.size() == outputEdges.size());
+        try {
+          TORCH_INTERNAL_ASSERT(grads.size() == outputEdges.size());
 
-        // Accumulate all the gradients in the context.
-        for (size_t i = 0; i < grads.size(); i++) {
-          // It is possible that the grad is not defined since a separate
-          // invocation of the autograd engine on the same node might actually
-          // compute this gradient. Also accumulate grads only for
-          // AccumulateGrad function.
-          if (grads[i].defined() &&
-              dynamic_cast<AccumulateGrad*>(outputEdges[i].function.get())) {
-            auto& variable = std::static_pointer_cast<AccumulateGrad>(
-                                 outputEdges[i].function)
-                                 ->variable;
-            autogradContext->accumulateGrad(
-                variable, grads[i], 1 /* num_expected_refs */);
+          // Accumulate all the gradients in the context.
+          for (size_t i = 0; i < grads.size(); i++) {
+            // It is possible that the grad is not defined since a separate
+            // invocation of the autograd engine on the same node might actually
+            // compute this gradient. Also accumulate grads only for
+            // AccumulateGrad function.
+            if (grads[i].defined() &&
+                dynamic_cast<AccumulateGrad*>(outputEdges[i].function.get())) {
+              auto& variable = std::static_pointer_cast<AccumulateGrad>(
+                                   outputEdges[i].function)
+                                   ->variable;
+              autogradContext->accumulateGrad(
+                  variable, grads[i], 1 /* num_expected_refs */);
+            }
           }
-        }
 
-        accumulateGradFuture->markCompleted(rpc::Message());
+          accumulateGradFuture->markCompleted(rpc::Message());
+        } catch (std::exception& e) {
+          accumulateGradFuture->setErrorIfNeeded(e.what());
+        }
       });
 
   return accumulateGradFuture;
@@ -283,34 +287,44 @@ std::shared_ptr<rpc::FutureMessage> DistEngine::executeSendFunctionAsync(
         [autogradContext, callbackFuture](
             const rpc::Message& message /* unused */,
             const c10::optional<torch::utils::FutureError>& error) {
-          if (error) {
-            // Perform cleanup at the end of the backward pass (before we mark
-            // the future as completed).
-            DistEngine::getInstance().cleanupBackwardPass(autogradContext);
+          try {
+            if (error) {
+              // Perform cleanup at the end of the backward pass (before we mark
+              // the future as completed).
+              DistEngine::getInstance().cleanupBackwardPass(autogradContext);
 
-            // Skip any further processing on errors.
-            callbackFuture->setError(error->what());
-            return;
+              // Skip any further processing on errors.
+              callbackFuture->setError(error->what());
+              return;
+            }
+
+            // Wait for all RPCs after the autograd engine is done.
+            auto rpcFuture =
+                autogradContext->clearAndWaitForOutstandingRpcsAsync();
+            rpcFuture->addCallback(
+                [callbackFuture, autogradContext](
+                    const rpc::Message& /* unused */,
+                    const c10::optional<torch::utils::FutureError>& error) {
+                  try {
+                    // Perform cleanup at the end of the backward pass (before
+                    // we mark the future as completed).
+                    DistEngine::getInstance().cleanupBackwardPass(
+                        autogradContext);
+                  } catch (std::exception& e) {
+                    callbackFuture->setErrorIfNeeded(e.what());
+                    return;
+                  }
+
+                  // Finally mark the 'uber' future as completed.
+                  if (!error) {
+                    callbackFuture->markCompleted(rpc::Message());
+                  } else {
+                    callbackFuture->setError(error->what());
+                  }
+                });
+          } catch (std::exception& e) {
+            callbackFuture->setErrorIfNeeded(e.what());
           }
-
-          // Wait for all RPCs after the autograd engine is done.
-          auto rpcFuture =
-              autogradContext->clearAndWaitForOutstandingRpcsAsync();
-          rpcFuture->addCallback(
-              [callbackFuture, autogradContext](
-                  const rpc::Message& /* unused */,
-                  const c10::optional<torch::utils::FutureError>& error) {
-                // Perform cleanup at the end of the backward pass (before we
-                // mark the future as completed).
-                DistEngine::getInstance().cleanupBackwardPass(autogradContext);
-
-                // Finally mark the 'uber' future as completed.
-                if (!error) {
-                  callbackFuture->markCompleted(rpc::Message());
-                } else {
-                  callbackFuture->setError(error->what());
-                }
-              });
         });
 
     // Return the future which waits for all async processing to be done.
