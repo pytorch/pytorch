@@ -10255,7 +10255,8 @@ class TestNNDeviceType(NNTestCase):
 
 
     def test_hardsigmoid_grad(self, device):
-        inputs = torch.randn(4, 16, 16, requires_grad=True, device=device)
+        inputs = (torch.randn(4, 16, 16, device=device) - 0.5) * 10
+        inputs.requires_grad = True
         self.assertTrue(gradcheck(F.hardsigmoid, (inputs,)))
 
 
