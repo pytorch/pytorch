@@ -24,37 +24,36 @@ using torch::autograd::variable_list;
 static constexpr char* kNumBackwardPasses = "num_current_backward_passes";
 static constexpr char* kNumAutogradContexts = "num_autograd_contexts";
 
-// This hook will be executed when the grad is ready for an AccumulateGrad node
-// regardless of whether the node will be applied.
 // This hook does 2 things:
 //   1. Accumuate the gard to RPC context.
 //   2. Call post hooks of the original AccumulateGrad.
 struct DistAccumulateGradCapturePreHook
-    : GraphTask::ExecInfo::GradCapturePreHook {
+    : GraphTask::ExecInfo::Capture::GradCapturePreHook {
   DistAccumulateGradCapturePreHook(
       std::shared_ptr<AccumulateGrad> accumulateGrad,
       ContextPtr autogradContext)
       : accumulateGrad_(std::move(accumulateGrad)),
         autogradContext_(std::move(autogradContext)) {}
 
-  variable_list operator()(const variable_list& grads) override {
-    torch::autograd::check_input_variables("AccumulateGrad", grads, 1, 0);
-    const auto& grad = grads[0];
+  torch::Tensor operator()(const torch::Tensor& grad) override {
     // It is possible that the grad is not defined since a separate
     // invocation of the autograd engine on the same node might actually
     // compute this gradient.
     if (!grad.defined()) {
-      return grads;
+      return grad;
     }
     autogradContext_->accumulateGrad(
         accumulateGrad_->variable, grad, 1 /* num_expected_refs */);
 
-    const variable_list kEmptyOuput;
-    for (const auto& hook : accumulateGrad_->post_hooks()) {
-      // Discard the return value.
-      (*hook)(kEmptyOuput, grads);
+    if (!accumulateGrad_->post_hooks().empty()) {
+      const variable_list kEmptyOuput;
+      const variable_list inputGrads = {grad};
+      for (const auto& hook : accumulateGrad_->post_hooks()) {
+        // Discard the return value.
+        (*hook)(kEmptyOuput, inputGrads);
+      }
     }
-    return grads;
+    return grad;
   }
 
  private:
@@ -181,16 +180,6 @@ void DistEngine::computeDependencies(
             //  its ancestors need to be executed as well.
             if (dynamic_cast<RecvRpcBackward*>(nextFn)) {
               recvBackwardEdges.emplace_back(edge);
-            } else if (
-                auto accumulateGradFn = dynamic_cast<AccumulateGrad*>(nextFn)) {
-              // Install graph task function pre hooks for all AccumulateGrad
-              // nodes to accumulate grads into the RPC context.
-              // Note that an entry will be created in 'exec_info_' map here.
-              graphTask->exec_info_[nextFn].hooks_.push_back(
-                  std::make_unique<DistAccumulateGradCapturePreHook>(
-                      std::dynamic_pointer_cast<AccumulateGrad>(
-                          accumulateGradFn->shared_from_this()),
-                      autogradContext));
             }
             outputEdges.emplace_back(edge);
           }
@@ -228,6 +217,22 @@ void DistEngine::computeDependencies(
     // Create a dummy GraphRoot and run init_to_execute with it.
     GraphRoot dummyRoot(edges, {});
     graphTask->init_to_execute(dummyRoot, outputEdges);
+    for (auto& pr : graphTask->exec_info_) {
+      auto fn = pr.first;
+      auto& execInfo = pr.second;
+      if (!execInfo.captures_) {
+        continue;
+      }
+      if (auto accumulateGradFn = dynamic_cast<AccumulateGrad*>(fn)) {
+        for (auto& capture : *execInfo.captures_) {
+          capture.hooks_.push_back(
+              std::make_unique<DistAccumulateGradCapturePreHook>(
+                  std::dynamic_pointer_cast<AccumulateGrad>(
+                      accumulateGradFn->shared_from_this()),
+                  autogradContext));
+        }
+      }
+    }
 
     // Mark all 'RecvRPCBackward' as needing execution.
     for (const auto& recvBackwardEdge : recvBackwardEdges) {

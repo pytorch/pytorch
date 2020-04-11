@@ -10,6 +10,7 @@
 #include <torch/csrc/autograd/functions/basic_ops.h>
 #include <torch/csrc/autograd/input_buffer.h>
 #include <torch/csrc/utils/future.h>
+#include <torch/types.h>
 
 #include <deque>
 #include <exception>
@@ -64,16 +65,21 @@ struct GraphTask {
 
   struct ExecInfo {
     struct Capture {
+      Capture(const Capture&) = delete;
+      Capture(Capture&&) = default;
+
       Capture(int input_idx, int output_idx)
           : input_idx_(input_idx), output_idx_(output_idx) {}
       int input_idx_; // within Node inputs
       int output_idx_; // within the output vector of a GraphTask
-    };
-    // This hook will be executed when the grad is ready for an function
-    // node regardless of whether the node will be applied.
-    struct GradCapturePreHook {
-      virtual ~GradCapturePreHook() = default;
-      virtual variable_list operator()(const variable_list& grads) = 0;
+
+      // This hook will be executed before a grad is captured. The engine will
+      // capture the returned value.
+      struct GradCapturePreHook {
+        virtual ~GradCapturePreHook() = default;
+        virtual torch::Tensor operator()(const torch::Tensor& grad) = 0;
+      };
+      std::vector<std::unique_ptr<GradCapturePreHook>> hooks_;
     };
 
     bool should_execute() const {
@@ -82,9 +88,6 @@ struct GraphTask {
 
     bool needed_ = false;
     std::unique_ptr<std::vector<Capture>> captures_;
-    // The hooks will be executed, as long as 'captures_' is not nullptr,
-    // regardless of 'needed_' is true or false.
-    std::vector<std::unique_ptr<GradCapturePreHook>> hooks_;
   };
   // Exec info has a bit complicated semantics. If it's empty, it means the task
   // is run in a "default" mode, which means that all next_edges we encounter
