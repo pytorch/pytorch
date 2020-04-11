@@ -12,7 +12,8 @@ static Dtype ChooseDtype(const Dtype& buffer_dtype, const Dtype& index_dtype) {
 
 static Dtype dtypeOfIndices(const std::vector<const Expr*>& indices) {
   if (!indices.size()) {
-    throw malformed_input("cant get dtype of empty indices");
+    // Return something so we can handle scalar buffers.
+    return kInt;
   }
   Dtype dt = indices.at(0)->dtype();
   for (size_t i = 1; i < indices.size(); ++i) {
@@ -25,7 +26,7 @@ static Dtype dtypeOfIndices(const std::vector<const Expr*>& indices) {
 
 static bool indicesValid(const std::vector<const Expr*>& indices) {
   if (indices.size() == 0) {
-    return false;
+    return true;
   }
   Dtype index_dtype = dtypeOfIndices(indices);
   if (indices.size() > 1 && index_dtype.lanes() > 1) {
@@ -58,6 +59,7 @@ Load::Load(
     throw malformed_input(
         "Load base handle dtype must be Handle", buf->base_handle());
   }
+
   if (!indicesValid(indices)) {
     throw malformed_input("invalid indices in Load");
   }
