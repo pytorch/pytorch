@@ -127,23 +127,25 @@ class SubsetRandomSampler(Sampler):
         return len(self.indices)
  
 class SequentialSubsetSampler(Sampler):
-    """Samples elements sequentially given a list of indices,
+    r"""Samples elements sequentially given a list of indices,
 
     Arguments:
         indices (sequence): a sequence of indices
         
     """
     def __init__(self, indices):
-        self.indices = indices
+        if not isinstance(indices, torch.Tensor):
+            indices = torch.as_tensor(indices, dtype=torch.int64)
+        self.indices = indices.tolist()
 
     def __iter__(self):
-        return iter(self.indices.tolist())
+        return iter(self.indices)
 
     def __len__(self):
         return len(self.indices)
 
 class WeightedSubsetSampler(Sampler):
-    """Samples elements randomly given a weighting, from a defined subset.
+    r"""Samples elements randomly given a weighting, from a defined subset.
     Arguments:
         weights (sequence): a sequence of weights, not necessary summing up to one
         indices (sequence): a sequence of indices
@@ -161,11 +163,11 @@ class WeightedSubsetSampler(Sampler):
                              "replacement={}".format(replacement))
         self.weights = torch.as_tensor(weights, dtype=torch.double)
         self.num_samples = num_samples
-        self.indices=indices
+        self.indices = torch.as_tensor(indices, dtype=torch.int64)
         self.replacement = replacement
 
     def __iter__(self):
-        return iter(self.indices[torch.multinomial(self.weights[self.indices], self.num_samples, self.replacement)])
+        return iter(self.indices[torch.multinomial(self.weights[self.indices], self.num_samples, self.replacement)].tolist())
 
     def __len__(self):
         return self.num_samples
