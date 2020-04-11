@@ -75,12 +75,12 @@ void print_unsupported_ops_and_throw(
 void parseMethods(
     const std::vector<IValue>& vals,
     mobile::CompilationUnit& mcu) {
-  int64_t version = 1;
+  int64_t model_version = 1;
   for (const auto& element : vals) {
     const auto& m_tuple = element.toTuple()->elements();
     const std::string& function_name = m_tuple[0].toStringRef();
     if (function_name == BYTECODE_VERSION_STR) {
-      auto model_version = m_tuple[1].toInt();
+      model_version = m_tuple[1].toInt();
       TORCH_CHECK(
           model_version == BYTECODE_VERSION_NUMBER,
           "Lite Interpreter verson number does not match. ",
