@@ -75,71 +75,85 @@ void print_unsupported_ops_and_throw(
 void parseMethods(
     const std::vector<IValue>& vals,
     mobile::CompilationUnit& mcu) {
+  int64_t version = 1;
   for (const auto& element : vals) {
     const auto& m_tuple = element.toTuple()->elements();
     const std::string& function_name = m_tuple[0].toStringRef();
-    IValue table = m_tuple[1];
-
-    auto function = std::unique_ptr<mobile::Function>(
-        new mobile::Function(c10::QualifiedName(function_name)));
-
-    const auto& ins_list =
-        expect_field(table, "instructions", BYTECODE_INDEX_INSTRUCTION)
-            .toTuple()
-            ->elements();
-    const auto& ops_list =
-        expect_field(table, "operators", BYTECODE_INDEX_OPERATOR)
-            .toTuple()
-            ->elements();
-    const auto& consts_list =
-        expect_field(table, "constants", BYTECODE_INDEX_CONSTANT)
-            .toTuple()
-            ->elements();
-    const auto& types_list =
-        expect_field(table, "types", BYTECODE_INDEX_TYPE).toTuple()->elements();
-    const auto& register_size = expect_field(table, "register_size", 4).toInt();
-
-    for (const auto& ins : ins_list) {
-      auto ins_item = ins.toTuple()->elements();
+    if (function_name == BYTECODE_VERSION_STR) {
+      auto model_version = m_tuple[1].toInt();
       TORCH_CHECK(
-          ins_item.size() == 3,
-          "There should be three parts in an instruction.");
-      OpCode op_code = parseOpCode(ins_item[0].toString()->string().c_str());
-      int X = ins_item[1].toInt();
-      int N = ins_item[2].toInt();
-      function->append_instruction(op_code, X, N);
-    }
+          model_version == BYTECODE_VERSION_NUMBER,
+          "Lite Interpreter verson number does not match. ",
+          "The code version is ",
+          BYTECODE_VERSION_NUMBER,
+          " but the model version is ",
+          model_version);
+    } else {
+      IValue table = m_tuple[1];
 
-    std::unordered_set<std::string> unsupported_op_names;
-    for (const auto& op : ops_list) {
-      auto op_item = op.toTuple()->elements();
-      TORCH_CHECK(
-          op_item.size() == 2,
-          "There should be two parts in an operator name.");
-      auto op_found = function->append_operator(
-          op_item[0].toString()->string(), op_item[1].toString()->string());
-      if (!op_found) {
-        unsupported_op_names.emplace(
-            op_item[0].toString()->string() + "." +
-            op_item[1].toString()->string());
+      auto function = std::unique_ptr<mobile::Function>(
+          new mobile::Function(c10::QualifiedName(function_name)));
+
+      const auto& ins_list =
+          expect_field(table, "instructions", BYTECODE_INDEX_INSTRUCTION)
+              .toTuple()
+              ->elements();
+      const auto& ops_list =
+          expect_field(table, "operators", BYTECODE_INDEX_OPERATOR)
+              .toTuple()
+              ->elements();
+      const auto& consts_list =
+          expect_field(table, "constants", BYTECODE_INDEX_CONSTANT)
+              .toTuple()
+              ->elements();
+      const auto& types_list = expect_field(table, "types", BYTECODE_INDEX_TYPE)
+                                   .toTuple()
+                                   ->elements();
+      const auto& register_size =
+          expect_field(table, "register_size", 4).toInt();
+
+      for (const auto& ins : ins_list) {
+        auto ins_item = ins.toTuple()->elements();
+        TORCH_CHECK(
+            ins_item.size() == 3,
+            "There should be three parts in an instruction.");
+        OpCode op_code = parseOpCode(ins_item[0].toString()->string().c_str());
+        int X = ins_item[1].toInt();
+        int N = ins_item[2].toInt();
+        function->append_instruction(op_code, X, N);
       }
+
+      std::unordered_set<std::string> unsupported_op_names;
+      for (const auto& op : ops_list) {
+        auto op_item = op.toTuple()->elements();
+        TORCH_CHECK(
+            op_item.size() == 2,
+            "There should be two parts in an operator name.");
+        auto op_found = function->append_operator(
+            op_item[0].toString()->string(), op_item[1].toString()->string());
+        if (!op_found) {
+          unsupported_op_names.emplace(
+              op_item[0].toString()->string() + "." +
+              op_item[1].toString()->string());
+        }
+      }
+
+      if (!unsupported_op_names.empty()) {
+        print_unsupported_ops_and_throw(unsupported_op_names);
+      };
+
+      for (const auto& constant : consts_list) {
+        function->append_constant(constant);
+      }
+
+      for (const auto& t : types_list) {
+        function->append_type(c10::parseType(t.toStringRef()));
+      }
+
+      function->set_register_size(register_size);
+
+      mcu.register_function(std::move(function));
     }
-
-    if (!unsupported_op_names.empty()) {
-      print_unsupported_ops_and_throw(unsupported_op_names);
-    };
-
-    for (const auto& constant : consts_list) {
-      function->append_constant(constant);
-    }
-
-    for (const auto& t : types_list) {
-      function->append_type(c10::parseType(t.toStringRef()));
-    }
-
-    function->set_register_size(register_size);
-
-    mcu.register_function(std::move(function));
   }
 }
 

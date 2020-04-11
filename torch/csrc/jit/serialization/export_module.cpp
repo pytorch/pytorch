@@ -4,6 +4,7 @@
 #include <torch/csrc/jit/ir/type_hashing.h>
 #include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/runtime/instruction.h>
+#include <torch/csrc/jit/serialization/import_export_constants.h>
 #include <torch/csrc/jit/serialization/import_export_helpers.h>
 #include <torch/csrc/jit/serialization/pickle.h>
 #include <torch/csrc/jit/serialization/python_print.h>
@@ -277,6 +278,7 @@ class ScriptModuleSerializer {
 
   void writeByteCode(const Module& module) {
     std::vector<c10::IValue> elements;
+    elements.emplace_back(Tup({BYTECODE_VERSION_STR, BYTECODE_VERSION_NUMBER}));
     moduleMethodsTuple(module, elements);
     auto telements = Tup(std::move(elements));
     writeArchive("bytecode", telements);
