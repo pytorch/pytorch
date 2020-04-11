@@ -888,16 +888,21 @@ class ShapePropagator {
             "aten::abs(Tensor self) -> Tensor",
         },
         [](Node* node) -> type_vec_t {
-          if (auto type = node->input(0)->type()->cast<TensorType>()) {
-            const auto scalar_type = *(type->scalarType());
+          auto input_type = node->input(0)->type()->cast<TensorType>();
+
+          // Maps complex -> float
+          if (input_type->scalarType()) {
+            const auto scalar_type = *(input_type->scalarType());
             if (isComplexType(scalar_type)) {
               const auto out_type = c10::toValueType(scalar_type);
               return type_vec_t{
-                  type->withScalarType(out_type)->dimensionedOnly()};
+                input_type->dimensionedOnly()->withScalarType(out_type)
+              };
             }
-            return type_vec_t{type->dimensionedOnly()};
           }
-          return type_vec_t{};
+
+          return input_type ? type_vec_t{input_type->dimensionedOnly()}
+                            : type_vec_t{};
         }};
 
     // Requirements:
