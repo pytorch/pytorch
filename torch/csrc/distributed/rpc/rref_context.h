@@ -298,7 +298,7 @@ class TORCH_API RRefContext {
   // without confirmation is OK, because the creator would either call to_here
   // or forward the UserRRef, and both would then require confirmations from the
   // owner.
-  static thread_local bool recording;
+  static thread_local bool recording_;
 };
 
 } // namespace rpc
