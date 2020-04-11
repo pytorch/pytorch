@@ -7,6 +7,7 @@
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/jit/runtime/custom_operator.h>
 #include <torch/csrc/jit/runtime/operator.h>
+#include "register_ops_utils.h"
 
 using at::Scalar;
 using at::Tensor;
