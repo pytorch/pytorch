@@ -1310,6 +1310,7 @@ def create_generic(top_env, declarations):
             overload_name=option['overload_name'],
             use_c10_dispatcher=option['use_c10_dispatcher'],
             manual_kernel_registration=option['manual_kernel_registration'],
+            reset_grad_accumulator=option['reset_grad_accumulator'],
             category_override=option['category_override'],
             matches_jit_signature=option["matches_jit_signature"],
             schema_string=option["schema_string"],
