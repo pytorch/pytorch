@@ -1956,6 +1956,7 @@ TORCH_COPTS = COMMON_COPTS + [
 filegroup(
     name = "torch_srcs",
     srcs = [
+        "torch/csrc/jit/tensorexpr/bounds_inference.cpp",
         "torch/csrc/jit/tensorexpr/codegen.cpp",
         "torch/csrc/jit/tensorexpr/eval.cpp",
         "torch/csrc/jit/tensorexpr/expr.cpp",
