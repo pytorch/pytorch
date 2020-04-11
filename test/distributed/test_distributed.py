@@ -1853,10 +1853,10 @@ class _DistTestBase(object):
         return global_bs, input_cpu, target, loss
 
     # END TO END TEST FOR DISTRIBUTEDDATAPARALLEL
-    def _test_DDP_helper(self, model, input_var, target, loss):
+    def _test_DDP_helper(self, model, input_var, target, loss, scale_factor=1.0):
         model.train()
         output = model(input_var)
-        l = loss(output, target)
+        l = loss(output, target)*scale_factor
         l.backward()
 
     def _assert_equal_param(self, param_gpu, param_DDP):
@@ -2131,6 +2131,63 @@ class _DistTestBase(object):
         running_mean, running_var = model.module.running_mean, model.module.running_var
         torch.testing.assert_allclose(running_mean, all_input_var.mean(1))
         torch.testing.assert_allclose(running_var, all_input_var.var(1))
+
+    @unittest.skipIf(BACKEND != 'nccl' and BACKEND != 'gloo',
+                     "Only Nccl & Gloo backend support DistributedDataParallel")
+    @skip_if_no_cuda_distributed
+    @skip_if_no_gpu
+    def test_DistributedDataParallel_SyncBatchNorm_Diff_Input_Sizes_gradient(self):
+        group, group_id, rank = self._init_global_test()
+        # only do single GPU per process
+        gpu = rank
+
+        # cpu training setup
+        model = BN_NET
+
+        # single gpu training setup
+        model_gpu = copy.deepcopy(model)
+        model_gpu.cuda(gpu)
+
+        # DDP training setup
+        model_DDP = nn.SyncBatchNorm.convert_sync_batchnorm(copy.deepcopy(model))
+        model_DDP.cuda(gpu)
+        model_DDP = nn.parallel.DistributedDataParallel(
+            model_DDP, device_ids=[gpu]
+        )
+
+        # dummy data initialization
+        # varying input batch size -> rank i with batch_size i+2
+        num_processes = int(WORLD_SIZE)
+        global_bs = int((num_processes + 3) * num_processes / 2)
+        input = torch.randn(global_bs, 2).cuda(gpu)
+        target = torch.randn(global_bs, 4).cuda(gpu)
+        loss = nn.MSELoss()
+        bs_offset = int((rank + 3) * rank / 2)
+
+        # check two model parameters over 5 iterations
+        for idx in range(5):
+            # single cpu/gpu training
+            self._test_DDP_helper(model_gpu, input, target, loss)
+            # DDP training, DDP scatters subsets of input_cpu to nodes/GPUs
+            self._test_DDP_helper(
+                model_DDP,
+                input[bs_offset : bs_offset + rank + 2],
+                target[bs_offset : bs_offset + rank + 2],
+                loss,
+                num_processes * (rank+2) / global_bs,
+            )
+
+            # Update weights and run a second iteration to shake out errors
+            self._model_step(model_gpu)
+            self._model_step(model_DDP)
+            self._assert_equal_param(
+                list(model_gpu.parameters()), list(model_DDP.module.parameters())
+            )
+
+            # Shuffle the input so that DDP input is different
+            input = input[torch.randperm(global_bs)]
+
+        self._barrier()
 
     @skipIfNoTorchVision
     def test_SyncBatchNorm_process_group(self):
