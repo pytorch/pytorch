@@ -49,6 +49,8 @@ int64_t update_to(int64_t to) {
     std::is_floating_point<scalar_t>::value ||
     std::is_same<scalar_t, at::Half>::value ||
     std::is_same<scalar_t, at::BFloat16>::value, "scalar_t must be floating-point type");
+  constexpr auto delta = static_cast<int64_t>(1) << (62 - std::numeric_limits<scalar_t>::digits);
+  to = std::min(to, std::numeric_limits<int64_t>::max() - delta);
   const auto to_minus_1 = static_cast<int64_t>(static_cast<scalar_t>(to - 1));
   if (to_minus_1 >= to) {
     int64_t to_ = std::abs(to - 1);
