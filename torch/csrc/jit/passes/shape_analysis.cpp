@@ -896,8 +896,7 @@ class ShapePropagator {
             if (isComplexType(scalar_type)) {
               const auto out_type = c10::toValueType(scalar_type);
               return type_vec_t{
-                input_type->dimensionedOnly()->withScalarType(out_type)
-              };
+                  input_type->dimensionedOnly()->withScalarType(out_type)};
             }
           }
 
