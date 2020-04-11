@@ -413,10 +413,10 @@ class TestQuantizedTensor(TestCase):
         q1 = torch._make_per_tensor_quantized_tensor(a_int, scale=scale, zero_point=zero_point)
         err_str = "requested resize to*"
         with self.assertRaisesRegex(RuntimeError, err_str):
-            b.resize(*sizes1[:-1])
+            q2 = q1.resize(*sizes1[:-1])
         # resize on both contiguous and non-contiguous tensor should be fine
-        b.resize(*sizes2)
-        b.contiguous().resize(*sizes2)
+        q3 = q1.resize(*sizes2)
+        q4 = q1.contiguous().resize(*sizes2)
 
     def test_qtensor_reshape(self):
         scale, zero_point, dtype = 1.0, 2, torch.uint8
