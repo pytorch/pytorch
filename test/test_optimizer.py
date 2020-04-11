@@ -15,16 +15,12 @@ pad_h = pad_w = 1
 dilation = 1
 input_channels = input_channels_per_group * groups
 output_channels = output_channels_per_group * groups
-kernels = (kernel_h, kernel_w)
 strides = (stride_h, stride_w)
 paddings = (pad_h, pad_w)
 dilations = (dilation, dilation)
 conv_weight_shape = (output_channels, input_channels_per_group, kernel_h, kernel_w)
 conv_bias_shape = (output_channels)
 
-input_data = torch.rand((batch_size, input_channels, height, width))
-conv_weight = torch.rand((output_channels, input_channels_per_group, kernel_h, kernel_w))
-conv_bias = torch.rand((output_channels))
 result = F.conv2d(input_data, conv_weight, conv_bias, strides, paddings, dilations, groups)
 weight_output_dim = 24
 linear_input_shape = result.shape[1]
@@ -66,11 +62,11 @@ class TestOptimizer(unittest.TestCase):
         optimized_script_model = torch.utils.optimizer.optimize_for_mobile(scripted_model)
 
         pattern_count_map = {"Tensor = aten::conv2d": -1,
-                            "Tensor = prim::CallFunction": -1,
-                            "prepacked::conv2d_clamp_prepack": -1,
-                            "prepacked::conv2d_clamp_run": 1,
-                            "prepacked::linear_clamp_prepack": -1,
-                            "prepacked::linear_clamp_run": 1,}
+                             "Tensor = prim::CallFunction": -1,
+                             "prepacked::conv2d_clamp_prepack": -1,
+                             "prepacked::conv2d_clamp_run": 1,
+                             "prepacked::linear_clamp_prepack": -1,
+                             "prepacked::linear_clamp_run": 1}
         for pattern, v in pattern_count_map.items():
             if (v == 0):
                 FileCheck().check(pattern).run(optimized_script_model.graph)
@@ -82,5 +78,5 @@ class TestOptimizer(unittest.TestCase):
         optimized_result = optimized_script_model(input_data)
         torch.testing.assert_allclose(initial_result, optimized_result, rtol=1e-2, atol=1e-3)
 
-if __name__ == '__main__':git
+if __name__ == '__main__':
     unittest.main()
