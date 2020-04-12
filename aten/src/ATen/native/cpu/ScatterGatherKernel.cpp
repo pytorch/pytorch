@@ -139,16 +139,6 @@ struct _cpu_scatter_gather_dim_loop {
   }
 };
 
-class BinaryFunctor {
-public:
-  BinaryFunctor() {};
-  template <typename scalar_t, typename func_t>
-  void operator() (scalar_t* self_data, scalar_t* src_data, func_t op) {
-    op(self_data, src_data);
-  }
-};
-BinaryFunctor binary_fn;
-
 auto reduce_sum = [](auto * self_data, auto * src_data) {
                     *self_data += *src_data;
                   };
