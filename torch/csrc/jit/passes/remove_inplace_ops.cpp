@@ -9,8 +9,7 @@ static const std::unordered_map<NodeKind, NodeKind> inPlaceToOutOfPlace = {
     {aten::div_, aten::div},
     {aten::mul_, aten::mul},
     {aten::zero_, aten::zeros_like},
-    {aten::fill_, aten::full_like}
-    };
+    {aten::fill_, aten::full_like}};
 
 // This is a horrible no good awful hack to "fill in" the TensorOptions
 // arguments of zeros_like and full_like so that the defaults are filled
@@ -55,7 +54,8 @@ void RemoveInplaceOps(Block* block) {
 
       int additionalInputCount = 0;
       if (expectedInputCount.find(node->kind()) != expectedInputCount.end()) {
-        additionalInputCount = expectedInputCount.at(node->kind()) - static_cast<int>(newNode->inputs().size());
+        additionalInputCount = expectedInputCount.at(node->kind()) -
+            static_cast<int>(newNode->inputs().size());
       }
 
       for (int i = 0; i < additionalInputCount; ++i) {
@@ -67,7 +67,8 @@ void RemoveInplaceOps(Block* block) {
       // Create a new output node and replace all uses of self with it
       newNode->output()->copyMetadata(node->output());
       node->replaceAllUsesWith(newNode);
-      node->inputs()[0]->replaceAllUsesAfterNodeWith(newNode, newNode->output());
+      node->inputs()[0]->replaceAllUsesAfterNodeWith(
+          newNode, newNode->output());
       node->destroy();
     }
   }

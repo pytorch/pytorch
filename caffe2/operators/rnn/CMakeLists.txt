@@ -1,6 +1,6 @@
 # ---[ GPU files
 # ------[ cuDNN
-if (USE_CUDNN)
+if(USE_CUDNN)
   file(GLOB tmp *_cudnn.cc)
   set(Caffe2_GPU_SRCS ${Caffe2_GPU_SRCS} ${tmp})
 endif()
@@ -38,7 +38,7 @@ exclude(Caffe2_CPU_SRCS "${Caffe2_CPU_SRCS}" ${Caffe2_GPU_SRCS} ${Caffe2_HIP_SRC
 
 # ---[ GPU test files
 # ------[ cuDNN
-if (USE_CUDNN)
+if(USE_CUDNN)
   file(GLOB tmp *_cudnn_test.cc)
   set(Caffe2_GPU_TEST_SRCS ${Caffe2_GPU_TEST_SRCS} ${tmp})
 endif()

@@ -173,7 +173,7 @@ ScalarType infer_scalar_type(PyObject *obj) {
     switch (torch::tensors::get_default_scalar_type()) {
       case ScalarType::Float: return ScalarType::ComplexFloat;
       case ScalarType::Double: return ScalarType::ComplexDouble;
-      default: AT_CHECK(0, "invalid default scalar type for complex");
+      default: TORCH_CHECK(false, "invalid default scalar type for complex");
     }
   }
   if (THPVariable_Check(obj)) {

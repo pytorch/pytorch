@@ -55,7 +55,8 @@ void checkONNXCompatibility(const c10::FunctionSchema& schema) {
       AT_ASSERT(type->kind() != TypeKind::OptionalType);
     }
     if (type->kind() == TypeKind::ListType) {
-      const auto& elem_type = reinterpret_cast<ListType*>(type.get())->getElementType();
+      const auto& elem_type =
+          reinterpret_cast<ListType*>(type.get())->getElementType();
       if (elem_type->isSubtypeOf(TensorType::get())) {
         AT_ASSERTM(
             !has_tensor_list,
@@ -114,7 +115,8 @@ void preprocessCaffe2Ops(Block* block) {
         } else if (type->kind() == TypeKind::ListType) {
           const auto& list_node = origin_input->node();
           AT_ASSERT(list_node->kind() == prim::ListConstruct);
-          const auto& elem_type = reinterpret_cast<ListType*>(type.get())->getElementType();
+          const auto& elem_type =
+              reinterpret_cast<ListType*>(type.get())->getElementType();
           if (elem_type->isSubtypeOf(TensorType::get())) {
             const auto& tensor_list = origin_input->node()->inputs();
             for (const auto& t : tensor_list) {
@@ -124,7 +126,8 @@ void preprocessCaffe2Ops(Block* block) {
               elem_type->kind() == TypeKind::IntType ||
               elem_type->kind() == TypeKind::BoolType) {
             // TODO support list of ints and bools, needs c10 op for testing
-            throw std::runtime_error("List[int] and List[bool] are not supported yet.");
+            throw std::runtime_error(
+                "List[int] and List[bool] are not supported yet.");
           } else if (elem_type->kind() == TypeKind::FloatType) {
             std::vector<double> values;
             for (const auto* elem_input : list_node->inputs()) {
@@ -134,18 +137,20 @@ void preprocessCaffe2Ops(Block* block) {
             }
             it->fs_(Symbol::attr(arg.name()), values);
           } else {
-            throw std::runtime_error("Unhandled scalar arg: " + arg.name() +
+            throw std::runtime_error(
+                "Unhandled scalar arg: " + arg.name() +
                 ", type: " + c10::typeKindToString(elem_type->kind()));
           }
         } else {
-          throw std::runtime_error("Unsupported input type of arg " +
-              arg.name() + " in Caffe2 operator: " +
-              c10::typeKindToString(type->kind()));
+          throw std::runtime_error(
+              "Unsupported input type of arg " + arg.name() +
+              " in Caffe2 operator: " + c10::typeKindToString(type->kind()));
         }
       }
     }
   }
-  EliminateDeadCode(block, true, DCESideEffectPolicy::ALLOW_DELETING_NODES_WITH_SIDE_EFFECTS);
+  EliminateDeadCode(
+      block, true, DCESideEffectPolicy::ALLOW_DELETING_NODES_WITH_SIDE_EFFECTS);
 }
 
 void PreprocessCaffe2Ops(std::shared_ptr<Graph>& graph) {
@@ -209,7 +214,8 @@ void BlockToONNX(
         // Unfortunately, they are on the hook for all internal nodes
         // (though in practice, the types are not computed.)
         auto old_tensor_type = old->type()->cast<TensorType>();
-        if (old_tensor_type == nullptr || old_tensor_type->scalarType().has_value()) {
+        if (old_tensor_type == nullptr ||
+            old_tensor_type->scalarType().has_value()) {
           // Check if Tensor has scalartype when overwriting output type
           outputs[i]->setType(old->type());
         }
@@ -336,7 +342,8 @@ void BlockToONNX(
     // Use a little trampoline function so we can give good error messages
     // upon argument mismatch
     py::object opset_version = onnx_symbolic.attr("_export_onnx_opset_version");
-    onnx_registry.attr("register_op")(op->name(), pyobj.attr("symbolic"), "", opset_version);
+    onnx_registry.attr("register_op")(
+        op->name(), pyobj.attr("symbolic"), "", opset_version);
     py::object raw_output = onnx.attr("_run_symbolic_method")(
         op->name(), pyobj.attr("symbolic"), py_symbolic_args);
 
@@ -358,7 +365,10 @@ void BlockToONNX(
     ctx.block->registerOutput(env.at(output));
     env.at(output)->setType(output->type());
   }
-  EliminateDeadCode(ctx.block, true, DCESideEffectPolicy::ALLOW_DELETING_NODES_WITH_SIDE_EFFECTS);
+  EliminateDeadCode(
+      ctx.block,
+      true,
+      DCESideEffectPolicy::ALLOW_DELETING_NODES_WITH_SIDE_EFFECTS);
 }
 
 } // namespace jit

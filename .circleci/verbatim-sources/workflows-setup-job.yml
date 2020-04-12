@@ -1,0 +1,8 @@
+      - setup:
+          # Run this job on everything since it is
+          # the dependency for everything.
+          filters:
+            tags:
+              only: /.*/
+            branches:
+              only: /.*/

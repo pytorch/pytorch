@@ -20,7 +20,6 @@
 
 import itertools
 import sys
-import builtins
 import types
 import inspect
 
@@ -28,6 +27,13 @@ import inspect
 PY2 = sys.version_info[0] == 2
 PY3 = sys.version_info[0] == 3
 PY37 = sys.version_info[0] == 3 and sys.version_info[1] == 7
+
+
+if PY2:
+    import __builtin__ as builtins
+elif PY3:
+    import builtins
+
 
 if PY2:
     inf = float('inf')
@@ -134,11 +140,6 @@ if PY2:
 elif PY3:
     def get_function_from_type(cls, name):
         return getattr(cls, name, None)
-
-if PY2:
-    import __builtin__ as builtins
-elif PY3:
-    import builtins
 
 if PY2:
     import StringIO

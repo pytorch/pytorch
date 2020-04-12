@@ -1,4 +1,4 @@
-#include "c10/core/DispatchKey.h"
+#include <c10/core/DispatchKey.h>
 
 namespace c10 {
 
@@ -40,6 +40,8 @@ const char* toString(DispatchKey t) {
       return "BackendSelect";
     case DispatchKey::TESTING_ONLY_GenericModeTensorId:
       return "TESTING_ONLY_GenericModeTensorId";
+    case DispatchKey::AutocastTensorId:
+      return "AutocastTensorId";
     case DispatchKey::TESTING_ONLY_GenericWrapperTensorId:
       return "TESTING_ONLY_GenericWrapperTensorId";
     default:
