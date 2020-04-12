@@ -34,7 +34,7 @@ DeviceType parse_type(const std::string& device_string) {
     return device->second;
   }
   AT_ERROR(
-      "Expected one of cpu, cuda, mkldnn, opengl, opencl, ideep, hip, msnpu device type at start of device string: ", device_string);
+      "Expected one of cpu, cuda, mkldnn, opengl, opencl, ideep, hip, msnpu, xla device type at start of device string: ", device_string);
 }
 } // namespace
 
