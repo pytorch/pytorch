@@ -198,23 +198,6 @@ Tensor& _logcumsumexp_out_cpu(Tensor& result, const Tensor& self, int64_t dim) {
   return result;
 }
 
-Tensor _logcumsumexp_cuda(const Tensor& self, int64_t dim) {
-  Tensor result = at::empty_like(self, MemoryFormat::Contiguous);
-  result.resize_(self.sizes());
-  at::exp_out(result, self);
-  at::cumsum_out(result, result, dim);
-  result.log_();
-  return result;
-}
-
-Tensor& _logcumsumexp_out_cuda(Tensor& result, const Tensor& self, int64_t dim) {
-  result.resize_(self.sizes());
-  at::exp_out(result, self);
-  at::cumsum_out(result, result, dim);
-  result.log_();
-  return result;
-}
-
 Tensor logcumsumexp(const Tensor& self, int64_t dim) {
   auto result = [&]() {
     NoNamesGuard guard;
