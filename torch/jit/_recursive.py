@@ -600,6 +600,16 @@ def wrap_cpp_module(cpp_module):
         for name, cpp_module in torch._C.ModuleDict(script_module._c).items():
             setattr(script_module, name, wrap_cpp_module(cpp_module))
         script_module._concrete_type = torch._C.ConcreteModuleType.from_jit_type(script_module._c._type())
+        idx = 0
+        for fn_name in script_module._concrete_type.get_forward_pre_hooks():
+            fn = script_module._c._get_method(fn_name)
+            script_module._forward_pre_hooks[idx] = fn
+            idx = idx + 1
+        idx = 0
+        for fn_name in script_module._concrete_type.get_forward_hooks():
+            fn = script_module._c._get_method(fn_name)
+            script_module._forward_hooks[idx] = fn
+            idx = idx + 1
     return torch.jit.RecursiveScriptModule._construct(cpp_module, init_fn)
 
 def compile_unbound_method(concrete_type, fn):

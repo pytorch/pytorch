@@ -293,6 +293,26 @@ void ConcreteModuleType::dump() const {
   }
 }
 
+std::vector<std::string> ConcreteModuleType::getForwardPreHooksPy() const {
+  std::vector<std::string> hooks;
+  if (auto cls = jitType_->cast<ClassType>()) {
+    for (const auto& item : cls->getForwardPreHooks()) {
+      hooks.emplace_back(item.name());
+    }
+  }
+  return hooks;
+}
+
+std::vector<std::string> ConcreteModuleType::getForwardHooksPy() const {
+  std::vector<std::string> hooks;
+  if (auto cls = jitType_->cast<ClassType>()) {
+    for (const auto& item : cls->getForwardHooks()) {
+      hooks.emplace_back(item.name());
+    }
+  }
+  return hooks;
+}
+
 std::unordered_map<std::string, py::object> ConcreteModuleType::getConstantsPy()
     const {
   // Convert to a more pybind-friendly representation, so we don't

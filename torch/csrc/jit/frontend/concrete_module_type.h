@@ -70,14 +70,6 @@ class VISIBILITY_HIDDEN ConcreteModuleTypeBuilder {
   void addForwardHook(std::string& hook_name);
   void addForwardPreHook(std::string& hook_name);
 
-  std::vector<std::string> getForwardHooks() {
-    return forward_hooks;
-  }
-
-  std::vector<std::string> getForwardPreHooks() {
-    return forward_pre_hooks;
-  }
-
   void addModule(std::string name, std::shared_ptr<ConcreteModuleType> meta);
 
   void addOverload(
@@ -218,6 +210,8 @@ class VISIBILITY_HIDDEN ConcreteModuleType {
       const;
   std::vector<std::pair<std::string, std::shared_ptr<ConcreteModuleType>>>
   getModulesPy() const;
+  std::vector<std::string> getForwardPreHooksPy() const;
+  std::vector<std::string> getForwardHooksPy() const;
 
   bool equals(const ConcreteModuleType& other) const {
     if (jitType_ == other.jitType_) {
