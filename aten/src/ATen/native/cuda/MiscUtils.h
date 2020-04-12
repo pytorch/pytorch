@@ -1,4 +1,8 @@
+#pragma once
 #include <ATen/ATen.h>
+#include <ATen/cuda/Exceptions.h>
+#include <ATen/cuda/CUDAContext.h>
+#include <ATen/cuda/PinnedMemoryAllocator.h>
 #include <THC/THC.h>  // for USE_MAGMA
 
 #ifdef USE_MAGMA
@@ -49,6 +53,25 @@ static inline magma_int_t magma_int_cast(int64_t value, const char* varname) {
   }
   return result;
 }
+
+// MAGMA functions that don't take a magma_queue_t aren't stream safe
+// Work around this by synchronizing with the default stream
+struct MagmaStreamSyncGuard {
+  MagmaStreamSyncGuard() {
+    auto stream = at::cuda::getCurrentCUDAStream();
+    if (stream != 0) {
+      AT_CUDA_CHECK(cudaStreamSynchronize(stream));
+    }
+  }
+
+  ~MagmaStreamSyncGuard() noexcept(false) {
+    if (at::cuda::getCurrentCUDAStream() == 0) {
+      AT_CUDA_CHECK(cudaGetLastError());
+    } else {
+      AT_CUDA_CHECK(cudaStreamSynchronize(0));
+    }
+  }
+};
 #endif
 
 // Creates an array of size elements of type T, backed by pinned memory
