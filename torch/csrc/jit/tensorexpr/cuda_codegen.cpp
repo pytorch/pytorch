@@ -193,7 +193,7 @@ static bool CheckEqual(const Expr* lhs, const Expr* rhs) {
 }
 
 // Identify the pattern: a[e1] = a[e1] + e2.
-static bool isAtomicAdd(const Store* v) {
+static bool isAtomicAdd(const Store* v, const Expr** atomic_add_value) {
   ScalarType dtype = v->value()->dtype().scalar_type();
   if (dtype != ScalarType::Float && dtype != ScalarType::Double) {
     return false;
@@ -209,7 +209,11 @@ static bool isAtomicAdd(const Store* v) {
   if (v->base_handle() != load_v->base_handle()) {
     return false;
   }
-  return CheckEqual(v->flat_index(), load_v->flat_index());
+  bool index_equal = CheckEqual(v->flat_index(), load_v->flat_index());
+  if (index_equal) {
+    *atomic_add_value = add_v->rhs();
+  }
+  return index_equal;
 }
 
 class AtomicAddFuser : public IRMutator {
@@ -217,8 +221,9 @@ class AtomicAddFuser : public IRMutator {
     const Buf* buf = v->buf();
     const std::vector<const Expr*>& indices = v->indices();
     const Expr* value = v->value();
-    if (isAtomicAdd(v)) {
-      return new AtomicAdd(buf, indices, value);
+    const Expr* atomic_add_value = nullptr;
+    if (isAtomicAdd(v, &atomic_add_value)) {
+      return new AtomicAdd(buf, indices, atomic_add_value);
     }
     return const_cast<Store*>(v); // NOLINT
   }

@@ -423,8 +423,8 @@ void testCudaOneBlockMultiThreadGlobalReduce1() {
   //  for t in 0..1024: // thread-idx
   //    if t < 1:
   //      b[0] = 0
-  ExprHandle cond_t_lt_0 = CompareSelect::make(t, 1, CompareSelectOperation::kLT);
-  Cond* masked_init_b = Cond::make(cond_t_lt_0, init_store, nullptr);
+  ExprHandle cond_t_lt_1 = CompareSelect::make(t, 1, CompareSelectOperation::kLT);
+  Cond* masked_init_b = Cond::make(cond_t_lt_1, init_store, nullptr);
   LoopOptions thread_idx_options;
   thread_idx_options.set_gpu_thread_index(0);
   For* for_init = For::make(t, 0, N, masked_init_b, thread_idx_options);
