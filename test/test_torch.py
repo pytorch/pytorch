@@ -15295,8 +15295,9 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             torch.trunc(t)
 
         # Tests min and max variants with complex inputs
-        # Note: these are undesired failures. While expected, ideally
-        # min and max would be implemented for complex inputs.
+        # Note: whether PyTorch should support min and max on complex
+        # tensors is an open question.
+        # See https://github.com/pytorch/pytorch/issues/36374
         with self.assertRaises(RuntimeError):
             torch.min(t)
         with self.assertRaises(RuntimeError):
@@ -15318,6 +15319,26 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             torch.max(t, t)
         with self.assertRaises(RuntimeError):
             torch.max(t, t, out=t)
+
+        # Tests clamp variants with complex inputs
+        # Note: whether PyTorch should support clamp on complex
+        # tensors is an open question.
+        # See https://github.com/pytorch/pytorch/issues/33568
+        min_val = 1 + 1j
+        max_val = 4 + 4j
+        out = torch.empty((0,), device=device, dtype=dtype)
+        with self.assertRaises(RuntimeError):
+            torch.clamp(t, min=min_val)
+        with self.assertRaises(RuntimeError):
+            torch.clamp(t, max=max_val)
+        with self.assertRaises(RuntimeError):
+            torch.clamp(t, min_val, max_val)
+        with self.assertRaises(RuntimeError):
+            torch.clamp(t, min=min_val, out=out)
+        with self.assertRaises(RuntimeError):
+            torch.clamp(t, max=max_val, out=out)
+        with self.assertRaises(RuntimeError):
+            torch.clamp(t, min_val, max_val, out=out)
 
 
 # NOTE [Linspace+Logspace precision override]
