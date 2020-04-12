@@ -520,42 +520,42 @@ Tensor & scatter_fill_cpu_(Tensor & self, int64_t dim, const Tensor & index, Sca
 }
 
 SCATTER_GATHER_OP get_operator_enum(const std::string& reduce) {
-      if (reduce == "sum") {
-        return SCATTER_GATHER_OP::REDUCE_ADD;
-      }
-      else if (reduce == "subtract") {
-        return SCATTER_GATHER_OP::REDUCE_SUBTRACT;
-      }
-      else if (reduce == "multiply") {
-        return SCATTER_GATHER_OP::REDUCE_MULTIPLY;
-      }
-      else if (reduce == "divide") {
-        return SCATTER_GATHER_OP::REDUCE_DIVIDE;
-      }
-      else {
-        TORCH_CHECK(false,
-                    "reduce argument must be either of add, subtract, multiply or divide.");
-      } 
-    }
+  if (reduce == "sum") {
+    return SCATTER_GATHER_OP::REDUCE_ADD;
+  }
+  else if (reduce == "subtract") {
+    return SCATTER_GATHER_OP::REDUCE_SUBTRACT;
+  }
+  else if (reduce == "multiply") {
+    return SCATTER_GATHER_OP::REDUCE_MULTIPLY;
+  }
+  else if (reduce == "divide") {
+    return SCATTER_GATHER_OP::REDUCE_DIVIDE;
+  }
+  else {
+    TORCH_CHECK(false,
+                "reduce argument must be either of add, subtract, multiply or divide.");
+  } 
+}
 
-    SCATTER_GATHER_OP get_scalar_operator_enum(const std::string& reduce) {
-      if (reduce == "sum") {
-        return SCATTER_GATHER_OP::SCALAR_REDUCE_ADD;
-      }
-      else if (reduce == "subtract") {
-        return SCATTER_GATHER_OP::SCALAR_REDUCE_SUBTRACT;
-      }
-      else if (reduce == "multiply") {
-        return SCATTER_GATHER_OP::SCALAR_REDUCE_MULTIPLY;
-      }
-      else if (reduce == "divide") {
-        return SCATTER_GATHER_OP::SCALAR_REDUCE_DIVIDE;
-      }
-      else {
-        TORCH_CHECK(false,
-                    "reduce argument must be either of add, subtract, multiply or divide.");
-      }      
-    }
+SCATTER_GATHER_OP get_scalar_operator_enum(const std::string& reduce) {
+  if (reduce == "sum") {
+    return SCATTER_GATHER_OP::SCALAR_REDUCE_ADD;
+  }
+  else if (reduce == "subtract") {
+    return SCATTER_GATHER_OP::SCALAR_REDUCE_SUBTRACT;
+  }
+  else if (reduce == "multiply") {
+    return SCATTER_GATHER_OP::SCALAR_REDUCE_MULTIPLY;
+  }
+  else if (reduce == "divide") {
+    return SCATTER_GATHER_OP::SCALAR_REDUCE_DIVIDE;
+  }
+  else {
+    TORCH_CHECK(false,
+                "reduce argument must be either of add, subtract, multiply or divide.");
+  }      
+}
 
 Tensor& scatter_cpu_scalar_reduce_(Tensor& self, const int64_t dim, const Tensor& index,
                                    Scalar value, const std::string reduce) {

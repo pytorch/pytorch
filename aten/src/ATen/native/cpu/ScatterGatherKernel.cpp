@@ -110,6 +110,33 @@ struct _cpu_scatter_gather_dim_loop {
       );
     }
   }
+
+  template <typename scalar_t, typename func_t>
+  void operator()(
+    scalar_t* self_data, int64_t self_dim_stride,
+    int64_t* index_data, int64_t index_dim_stride,
+    Scalar value,
+    int64_t dim, int64_t index_dim_size,
+    int64_t index_upper_bound,
+    const func_t& f
+  ) {
+
+    for (int64_t i = 0; i < index_dim_size; ++i) {
+      int64_t idx_dim = index_data[i * index_dim_stride];
+      // we are not putting idx_dim in the error message because it disables
+      // loop optimization in clang-7
+      TORCH_CHECK(idx_dim >= 0 && idx_dim < index_upper_bound,
+        "index ", index_data[i * index_dim_stride],
+        " is out of bounds for dimension ", dim,
+        " with size ", index_upper_bound
+      );
+
+      f(
+        self_data + (is_scatter_like ? idx_dim : i) * self_dim_stride,
+        value
+      );
+    }
+  }
 };
 
 class BinaryFunctor {
@@ -215,7 +242,6 @@ struct cpu_scatter_gather_base_kernel {
 
     auto index_upper_bound = is_scatter_like ? self_dim_size : src_dim_size;
 
-
     AT_DISPATCH_ALL_TYPES_AND2(
       ScalarType::Bool, ScalarType::Half, iter.dtype(),
       method_name, [&] {
@@ -242,29 +268,47 @@ struct cpu_scatter_gather_base_kernel {
             // whether dim is the last dimension and/or
             // whether `n` is smaller than `index_dim_size`
 
-            for (int64_t i = 0; i < index_dim_size; ++i) {
-              auto* self_data = self_data_bytes;
-              auto* index_data = (char*)((int64_t*)index_data_bytes + i * index_dim_stride);
-              auto* src_data = src_data_bytes;
+            if ((dim== self.dim() - 1) || (n < index_dim_size)) {
               for (int64_t nelem = 0; nelem < n; ++nelem) {
-                int64_t idx_dim = *(int64_t*)index_data;
-                // we are not putting idx_dim in the error message because it disables
-                // loop optimization in clang-7
-                TORCH_CHECK(idx_dim >= 0 && idx_dim < index_upper_bound,
-                            "index ", *(int64_t*)index_data,
-                            " is out of bounds for dimension ", dim,
-                            " with size ", index_upper_bound);
+                // dim loop is a separate code block
+                // for better performance
+                _cpu_scatter_gather_dim_loop<is_scatter_like>()(
+                                                                (scalar_t*)self_data_bytes, self_dim_stride,
+                                                                (int64_t*)index_data_bytes, index_dim_stride,
+                                                                value, dim, index_dim_size, index_upper_bound,
+                                                                kernel_func);
 
-                kernel_func(
-                  (scalar_t*)self_data + (is_scatter_like ? idx_dim : i) * self_dim_stride,
-                  value);
+                self_data_bytes += strides[SELF_ITER_STRIDE_IDX];
+                index_data_bytes += strides[INDEX_ITER_STRIDE_IDX];
+                src_data_bytes += strides[SRC_ITER_STRIDE_IDX];
+              }
+            }
+            else {
+              for (int64_t i = 0; i < index_dim_size; ++i) {
+                auto* self_data = self_data_bytes;
+                auto* index_data = (char*)((int64_t*)index_data_bytes + i * index_dim_stride);
+                auto* src_data = src_data_bytes;
+                for (int64_t nelem = 0; nelem < n; ++nelem) {
+                  int64_t idx_dim = *(int64_t*)index_data;
+                  // we are not putting idx_dim in the error message because it disables
+                  // loop optimization in clang-7
+                  TORCH_CHECK(idx_dim >= 0 && idx_dim < index_upper_bound,
+                              "index ", *(int64_t*)index_data,
+                              " is out of bounds for dimension ", dim,
+                              " with size ", index_upper_bound);
+
+                  kernel_func(
+                              (scalar_t*)self_data + (is_scatter_like ? idx_dim : i) * self_dim_stride,
+                              value);
 
                   self_data += strides[SELF_ITER_STRIDE_IDX];
                   index_data += strides[INDEX_ITER_STRIDE_IDX];
                   src_data += strides[SRC_ITER_STRIDE_IDX];
+                }
               }
             }
           };
+          
           if (serial_exec) {
             iter.serial_for_each(loop, {0, iter.numel()});
           }
