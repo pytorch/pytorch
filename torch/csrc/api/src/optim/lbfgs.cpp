@@ -509,7 +509,6 @@ Tensor LBFGS::step(LossClosure closure) {
       TORCH_CHECK(*line_search_fn == "strong_wolfe", "only 'strong_wolfe' is supported");
       auto x_init = _clone_param();
       auto obj_func = [&](const std::vector<Tensor>& x, double t, const Tensor& d) { return _directional_evaluate(closure, x, t, d); };
-      auto strong_wolfe_res = _strong_wolfe(obj_func, x_init, t, d, loss, flat_grad, gtd);
       std::tie(loss, flat_grad, t, ls_func_evals) = _strong_wolfe(obj_func, x_init, t, d, loss, flat_grad, gtd);
       _add_grad(t, d);
       opt_cond = (val(flat_grad.abs().max()) <= tolerance_grad);
