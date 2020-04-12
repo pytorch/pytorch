@@ -421,7 +421,7 @@ class _TestTorchMixin(object):
 
     def test_where_tensor(self):
         def rand_tensor(size, dtype, device):
-            if dtype.is_floating_point:
+            if dtype.is_floating_point or dtype.is_complex:
                 return torch.rand(size=size, dtype=dtype, device=device)
             elif dtype == torch.uint8:
                 return torch.randint(1, 5, size=size, dtype=dtype, device=device)
@@ -452,6 +452,9 @@ class _TestTorchMixin(object):
                         else:
                             if x1.is_floating_point():
                                 condition = (x1 < 0.5)
+                            elif x1.is_complex():
+                                #TODO: modify this after abs is updated for complex
+                                condition = (x1.abs().to(float) < 0.5)
                             else:
                                 condition = (x1 == 1)
                             expected = condition.to(x1.dtype) * x1 + (~condition).to(x2.dtype) * x2
@@ -592,7 +595,7 @@ class _TestTorchMixin(object):
             lambda n, d: logsumexp(n, d),
             use_integral=False)
 
-    def _test_reduce_integer_upcast(self, fn, has_out=True):
+    def _test_reduce_integer_upcast(self, fn, has_out=True, test_complex = True):
         shape = (3, 4, 5)
         reduced_shape = fn(torch.ones(shape)).shape
 
@@ -609,25 +612,28 @@ class _TestTorchMixin(object):
 
         for dtype in [dtype for dtype in torch.testing.get_all_math_dtypes('cpu') if dtype != torch.float16]:
             x = torch.ones(shape, dtype=dtype)
-            expected_dtype = dtype if dtype.is_floating_point else torch.int64
+            expected_dtype = dtype if dtype.is_floating_point or dtype.is_complex else torch.int64
             self.assertIs(expected_dtype, fn(x).dtype)
             self.assertEqual(fn(x.type(expected_dtype)), fn(x))
 
             if dtype.is_floating_point:
                 other_dtype = torch.float32 if dtype == torch.float64 else torch.float64
+            elif dtype.is_complex:
+                other_dtype = torch.complex64 if dtype == torch.complex128 else torch.complex128
             else:
                 other_dtype = torch.int32 if dtype != torch.int32 else torch.int16
             self.assertIs(other_dtype, fn(x, dtype=other_dtype).dtype)
             self.assertEqual(fn(x.type(other_dtype)), fn(x, dtype=other_dtype), exact_dtype=False)
 
-            # test mixed int/float
-            mixed_dtype = torch.int32 if dtype.is_floating_point else torch.float32
-            self.assertIs(mixed_dtype, fn(x, dtype=mixed_dtype).dtype)
-            self.assertEqual(fn(x.type(mixed_dtype)), fn(x, dtype=mixed_dtype), exact_dtype=False)
+            # test mixed int/float/complex
+            for mixed_dtype_ in [torch.int32, torch.complex64]:
+                mixed_dtype = mixed_dtype_ if dtype.is_floating_point else torch.float32
+                self.assertIs(mixed_dtype, fn(x, dtype=mixed_dtype).dtype)
+                self.assertEqual(fn(x.type(mixed_dtype)), fn(x, dtype=mixed_dtype), exact_dtype=False)
 
-            if has_out:
-                _test_out(dtype, other_dtype)
-                _test_out(dtype, mixed_dtype)
+                if has_out:
+                    _test_out(dtype, other_dtype)
+                    _test_out(dtype, mixed_dtype)
 
     def test_sum_integer_upcast(self):
         self._test_reduce_integer_upcast(lambda x, **kwargs: torch.sum(x, **kwargs), False)
@@ -2366,7 +2372,7 @@ class _TestTorchMixin(object):
         for device in torch.testing.get_all_device_types():
             for dtype in torch.testing.get_all_math_dtypes(device):
                 size = [5, 5]
-                if dtype.is_floating_point:
+                if dtype.is_floating_point or dtype.is_complex:
                     tensor = torch.rand(size, dtype=dtype, device=device)
                 elif dtype.is_signed:
                     tensor = torch.randint(-5, 15, size, dtype=dtype, device=device)
@@ -5976,7 +5982,7 @@ class TestTorchDeviceType(TestCase):
                 continue
 
             m1 = torch.empty(0, dtype=dtype, device=device)
-            if m1.is_floating_point():
+            if m1.is_floating_point() or m1.is_complex():
                 m1 = torch.rand(100, 100, dtype=dtype, device=device) + 0.5
             else:
                 # math.pow will overflow and throw exceptions for large integers
@@ -11085,7 +11091,7 @@ class TestTorchDeviceType(TestCase):
 
     def test_addcmul(self, device):
         def rand_tensor(size, dtype, device):
-            if dtype.is_floating_point:
+            if dtype.is_floating_point or dtype.is_complex:
                 return torch.rand(size=size, dtype=dtype, device=device)
             if dtype == torch.uint8:
                 return torch.randint(1, 5, size=size, dtype=dtype, device=device)
@@ -11093,10 +11099,13 @@ class TestTorchDeviceType(TestCase):
                 return torch.randint(-5, 5, size=size, dtype=dtype, device=device)
 
         for dtype in torch.testing.get_all_math_dtypes(device):
+            # TODO: update this after torch.isclose is landed for complex
+            if dtype.is_complex:
+                continue
             a = rand_tensor((2, 2), dtype=dtype, device=device)
             b = rand_tensor((2, 2), dtype=dtype, device=device)
             c = rand_tensor((2, 2), dtype=dtype, device=device)
-            if dtype.is_floating_point:
+            if dtype.is_floating_point or dtype.is_complex:
                 alpha = 0.1
             else:
                 alpha = 3
@@ -12025,7 +12034,7 @@ class TestTorchDeviceType(TestCase):
                 self.assertEqual(actual, torch.addcdiv(a, alpha, b, c))
 
         def non_zero_rand(size, dtype, device):
-            if dtype.is_floating_point:
+            if dtype.is_floating_point or dtype.is_complex:
                 a = torch.rand(size=size, dtype=dtype, device=device)
             elif dtype == torch.uint8:
                 a = torch.randint(1, 5, size=size, dtype=dtype, device=device)
@@ -12034,11 +12043,13 @@ class TestTorchDeviceType(TestCase):
             return a + (a == 0).type(dtype)
 
         for dtype in torch.testing.get_all_math_dtypes(device):
-            _test_addcdiv(
-                non_zero_rand((2, 2), dtype=dtype, device=device),
-                0.5,
-                non_zero_rand((2, 2), dtype=dtype, device=device),
-                non_zero_rand((2, 2), dtype=dtype, device=device))
+            # TODO: update this after torch.allclose is added for complex
+            if not dtype.is_complex:
+                _test_addcdiv(
+                    non_zero_rand((2, 2), dtype=dtype, device=device),
+                    0.5,
+                    non_zero_rand((2, 2), dtype=dtype, device=device),
+                    non_zero_rand((2, 2), dtype=dtype, device=device))
 
     # TODO: run on non-native device types
     @dtypes(torch.double)
@@ -14730,7 +14741,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
     @onlyCPU
     @dtypes(*torch.testing.get_all_math_dtypes('cpu'))
     def test_threshold(self, device, dtype):
-        if dtype != torch.uint8 and dtype != torch.float16:
+        if dtype != torch.uint8 and dtype != torch.float16 and not dtype.is_complex:
             # 100 is wide enough to use AVX2 instructions for all types
             x = torch.randn(100, dtype=torch.float, device=device).sign().to(dtype=dtype)
             y = torch.threshold(x, 0, 0)
@@ -14764,8 +14775,8 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
                              0.01)
             self.assertEqual(a1.div(a2), a1 / a2)
 
-    @dtypesIfCUDA(*torch.testing.get_all_math_dtypes('cuda'))
-    @dtypes(*torch.testing.get_all_math_dtypes('cpu'))
+    @dtypesIfCUDA(*set(torch.testing.get_all_math_dtypes('cuda')) - {torch.complex64, torch.complex128})
+    @dtypes(*set(torch.testing.get_all_math_dtypes('cpu')) - {torch.complex64, torch.complex128})
     def test_floor_divide_tensor(self, device, dtype):
         x = torch.randn(10, device=device).mul(30).to(dtype)
         y = torch.arange(1, 11, dtype=dtype, device=device)
@@ -14776,8 +14787,8 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         self.assertEqual(z.dtype, x.dtype)
         self.assertEqual(z, z_alt)
 
-    @dtypesIfCUDA(*torch.testing.get_all_math_dtypes('cuda'))
-    @dtypes(*torch.testing.get_all_math_dtypes('cpu'))
+    @dtypesIfCUDA(*torch.testing.get_all_math_dtypes('cuda') - {torch.complex64, torch.complex128})
+    @dtypes(*torch.testing.get_all_math_dtypes('cpu') - {torch.complex64, torch.complex128})
     def test_floor_divide_scalar(self, device, dtype):
         x = torch.randn(100, device=device).mul(10).to(dtype)
 
