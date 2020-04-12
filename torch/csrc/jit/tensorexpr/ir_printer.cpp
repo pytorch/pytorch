@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/tensorexpr/ir_printer.h>
 
 #include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
+#include <torch/csrc/jit/tensorexpr/reduction.h>
 
 namespace torch {
 namespace jit {
@@ -271,6 +272,9 @@ void IRPrinter::visit(const Load* v) {
     }
     ind->accept(this);
   }
+  if (v->indices().empty()) {
+    os() << "0";
+  }
   os() << "]";
 }
 
@@ -311,6 +315,9 @@ void IRPrinter::visit(const Store* v) {
       os() << ", ";
     }
     ind->accept(this);
+  }
+  if (v->indices().empty()) {
+    os() << "0";
   }
   os() << "] = " << *v->value() << ";";
 }
@@ -420,6 +427,21 @@ void IRPrinter::visit(const RoundOff* v) {
   os() << ", ";
   v->rhs()->accept(this);
   os() << ")";
+}
+
+void IRPrinter::visit(const ReduceOp* v) {
+  os() << "ReduceOp(";
+  os() << *v->initializer() << ", ";
+  os() << v->complete() << ", {";
+  bool first = true;
+  for (auto* d : v->reduce_args()) {
+    if (!first) {
+      os() << ", ";
+    }
+    os() << d->name_hint();
+    first = false;
+  }
+  os() << "})";
 }
 
 void IRPrinter::emitIndent() {

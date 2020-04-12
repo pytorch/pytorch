@@ -1,9 +1,9 @@
 #ifndef C10_UTIL_EXCEPTION_H_
 #define C10_UTIL_EXCEPTION_H_
 
-#include "c10/macros/Macros.h"
-#include "c10/util/StringUtil.h"
-#include "c10/util/Deprecated.h"
+#include <c10/macros/Macros.h>
+#include <c10/util/StringUtil.h>
+#include <c10/util/Deprecated.h>
 
 #include <cstddef>
 #include <exception>
