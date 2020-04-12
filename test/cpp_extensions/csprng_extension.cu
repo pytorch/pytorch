@@ -313,7 +313,7 @@ Tensor& random_(Tensor& self, Generator generator) {
 
 template<typename scalar_t, typename uint_t>
 void uniform_kernel_helper_fp(TensorIterator& iter, uint8_t* key, scalar_t from, scalar_t to) {
-  constexpr uint_t SCALAR_T_MASK = (static_cast<uint_t>(1) << std::numeric_limits<scalar_t>::digits) - 1;
+  constexpr uint_t SCALAR_T_MASK = (static_cast<uint64_t>(1) << std::numeric_limits<scalar_t>::digits) - 1;
   constexpr scalar_t SCALAR_T_DIVISOR = static_cast<scalar_t>(1) / (1ULL << std::numeric_limits<scalar_t>::digits);
   random_kernel_helper<scalar_t, uint_t>(iter, key,
     [from, to] __device__ (uint_t rand) -> scalar_t {

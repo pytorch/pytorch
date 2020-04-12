@@ -114,18 +114,18 @@ class _ConvBnNd(nn.modules.conv._ConvNd):
             unbiased_batch_var = batch_var * (n / (n - 1))
             batch_rstd = torch.ones_like(batch_var, memory_format=torch.contiguous_format) / torch.sqrt(batch_var + self.eps)
 
-            conv = (self.gamma * batch_rstd).reshape([1, -1, 1, 1]) * conv_orig
-            conv += (self.beta - self.gamma * batch_rstd * batch_mean).reshape([1, -1, 1, 1])
+            conv = (self.gamma * batch_rstd).reshape([1, -1, 1, 1]) * conv_orig + \
+                (self.beta - self.gamma * batch_rstd * batch_mean).reshape([1, -1, 1, 1])
             self.running_mean = exponential_average_factor * batch_mean.detach() + \
                 (1 - exponential_average_factor) * self.running_mean
             self.running_var = exponential_average_factor * unbiased_batch_var.detach() + \
                 (1 - exponential_average_factor) * self.running_var
         else:
             if self.bias is None:
-                conv += (self.beta - self.gamma * self.running_mean /
+                conv = conv + (self.beta - self.gamma * self.running_mean /
                                running_std).reshape([1, -1, 1, 1])
             else:
-                conv += (self.gamma * (self.bias - self.running_mean) / running_std + self.beta).reshape([1, -1, 1, 1])
+                conv = conv + (self.gamma * (self.bias - self.running_mean) / running_std + self.beta).reshape([1, -1, 1, 1])
         return conv
 
     def extra_repr(self):
@@ -252,7 +252,7 @@ class ConvBnReLU2d(ConvBn2d):
                                            qconfig)
 
     def forward(self, input):
-        return self.activation_post_process(F.relu(ConvBn2d._forward(self, input), inplace=True))
+        return self.activation_post_process(F.relu(ConvBn2d._forward(self, input)))
 
     @classmethod
     def from_float(cls, mod, qconfig=None):
@@ -289,7 +289,7 @@ class ConvReLU2d(nnqat.Conv2d):
 
     def forward(self, input):
         return self.activation_post_process(F.relu(
-            self._conv_forward(input, self.weight_fake_quant(self.weight)), inplace=True))
+            self._conv_forward(input, self.weight_fake_quant(self.weight))))
 
     @classmethod
     def from_float(cls, mod, qconfig=None):
