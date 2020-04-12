@@ -481,7 +481,7 @@ __global__ void tensor_kernel_scan_outer_dim(scalar_t *tgt_, scalar_t *src_,
       scalar_t *tgt = tgt_ + orow * row_size * num_irows + irow;
       scalar_t acc = init;
 
-      for (unsigned col = 0; col < row_size; ++col) {
+      for (int col = 0; col < row_size; ++col) {
         acc = binary_op(acc, *src);
         *tgt = acc;
 
@@ -618,11 +618,11 @@ void scan_dim(const Tensor& self, Tensor& result,
      int64_t dim, scalar_t init, BinaryFunction binary_op) {
   int ndim = self.dim();
   Tensor self_ = self.contiguous();
-  Tensor result_ = result.contiguous();
+  result = result.contiguous();
   if (dim == ndim - 1) {
-    scan_innermost_dim<scalar_t>(self, result, init, binary_op);
+    scan_innermost_dim<scalar_t>(self_, result, init, binary_op);
   } else {
-    scan_outer_dim<scalar_t>(self, result, dim, init, binary_op);
+    scan_outer_dim<scalar_t>(self_, result, dim, init, binary_op);
   }
 }
 
