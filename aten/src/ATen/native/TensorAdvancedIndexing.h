@@ -13,7 +13,8 @@ namespace at { namespace native {
 
 enum class REDUCE_OPERATOR: uint8_t {  NONE=0,SUM, SUBTRACT, MULTIPLY, DIVIDE };
 enum class SCATTER_GATHER_OP: uint8_t {NONE=0, REDUCE_ADD, REDUCE_SUBTRACT, REDUCE_MULTIPLY,
-                                       REDUCE_DIVIDE, TENSOR_ASSIGN, SCALAR_ASSIGN};
+  REDUCE_DIVIDE, TENSOR_ASSIGN, SCALAR_ASSIGN, SCALAR_REDUCE_ADD, SCALAR_REDUCE_SUBTRACT,
+  SCALAR_REDUCE_MULTIPLY, SCALAR_REDUCE_DIVIDE };
 
 using index_fn = void(*)(TensorIterator &, IntArrayRef indexed_sizes, IntArrayRef indexed_strides);
 using index_put_fn = void(*)(TensorIterator &, IntArrayRef indexed_sizes, IntArrayRef indexed_strides, bool accumulate);
@@ -27,7 +28,7 @@ using scatter_add_fn = void(*)(Tensor& self, int64_t dim, const Tensor& index, c
 using scatter_reduce_fn = void(*)(Tensor& self, const int64_t dim, const Tensor& index,
                                   const Tensor& src, const SCATTER_GATHER_OP& reduce);
 using scatter_scalar_reduce_fn = void(*)(Tensor& self, const int64_t dim, const Tensor& index,
-                                         const Scalar& value, const REDUCE_OPERATOR& reduce);
+                                         Scalar& value, const SCATTER_GATHER_OP& reduce);
     
 DECLARE_DISPATCH(index_fn, index_stub);
 DECLARE_DISPATCH(index_put_fn, index_put_stub);

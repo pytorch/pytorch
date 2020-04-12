@@ -519,26 +519,7 @@ Tensor & scatter_fill_cpu_(Tensor & self, int64_t dim, const Tensor & index, Sca
   return self;
 }
 
-    REDUCE_OPERATOR get_reduce_operator(const std::string& reduce) {
-      if (reduce == "sum") {
-        return REDUCE_OPERATOR::SUM;
-      }
-      else if (reduce == "subtract") {
-        return REDUCE_OPERATOR::SUBTRACT;
-      }
-      else if (reduce == "multiply") {
-        return REDUCE_OPERATOR::MULTIPLY;
-      }
-      else if (reduce == "divide") {
-        return REDUCE_OPERATOR::DIVIDE;
-      }
-      else {
-        TORCH_CHECK(false,
-                    "reduce argument must be either of add, subtract, multiply or divide.");
-      }
-    }
-
-    SCATTER_GATHER_OP get_operator_enum(const std::string& reduce) {
+SCATTER_GATHER_OP get_operator_enum(const std::string& reduce) {
       if (reduce == "sum") {
         return SCATTER_GATHER_OP::REDUCE_ADD;
       }
@@ -554,12 +535,31 @@ Tensor & scatter_fill_cpu_(Tensor & self, int64_t dim, const Tensor & index, Sca
       else {
         TORCH_CHECK(false,
                     "reduce argument must be either of add, subtract, multiply or divide.");
+      } 
+    }
+
+    SCATTER_GATHER_OP get_scalar_operator_enum(const std::string& reduce) {
+      if (reduce == "sum") {
+        return SCATTER_GATHER_OP::SCALAR_REDUCE_ADD;
+      }
+      else if (reduce == "subtract") {
+        return SCATTER_GATHER_OP::SCALAR_REDUCE_SUBTRACT;
+      }
+      else if (reduce == "multiply") {
+        return SCATTER_GATHER_OP::SCALAR_REDUCE_MULTIPLY;
+      }
+      else if (reduce == "divide") {
+        return SCATTER_GATHER_OP::SCALAR_REDUCE_DIVIDE;
+      }
+      else {
+        TORCH_CHECK(false,
+                    "reduce argument must be either of add, subtract, multiply or divide.");
       }      
     }
 
 Tensor& scatter_cpu_scalar_reduce_(Tensor& self, const int64_t dim, const Tensor& index,
-                                   const Scalar value, const std::string reduce) {
-  REDUCE_OPERATOR op = get_reduce_operator(reduce);
+                                   Scalar value, const std::string reduce) {
+  SCATTER_GATHER_OP op = get_scalar_operator_enum(reduce);
   scatter_scalar_reduce_stub(self.device().type(), self, dim, index, value, op);
   return self;
 }

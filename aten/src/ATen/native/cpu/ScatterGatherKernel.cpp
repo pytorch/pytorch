@@ -141,6 +141,22 @@ auto scalar_assign = [](auto * self_data, Scalar src_data) {
                        using scalar_t = typename std::remove_pointer<decltype(self_data)>::type;
                        *self_data = src_data.to<scalar_t>();
                      };
+auto scalar_reduce_add = [](auto * self_data, Scalar src_data) {
+                       using scalar_t = typename std::remove_pointer<decltype(self_data)>::type;
+                       *self_data += src_data.to<scalar_t>();
+                     };
+auto scalar_reduce_subtract = [](auto * self_data, Scalar src_data) {
+                       using scalar_t = typename std::remove_pointer<decltype(self_data)>::type;
+                       *self_data -= src_data.to<scalar_t>();
+                     };
+auto scalar_reduce_multiply = [](auto * self_data, Scalar src_data) {
+                       using scalar_t = typename std::remove_pointer<decltype(self_data)>::type;
+                       *self_data *= src_data.to<scalar_t>();
+                     };
+auto scalar_reduce_divide = [](auto * self_data, Scalar src_data) {
+                       using scalar_t = typename std::remove_pointer<decltype(self_data)>::type;
+                       *self_data /= src_data.to<scalar_t>();
+                     };
 
 template <bool is_scatter_like = true>
 struct cpu_scatter_gather_base_kernel {
@@ -220,7 +236,11 @@ struct cpu_scatter_gather_base_kernel {
         // using binary_func_t = binary_fn;
         using binary_func_t = std::function<void(scalar_t*, Scalar)>;
         std::unordered_map<const SCATTER_GATHER_OP, binary_func_t> binary_funcs({
-          {SCATTER_GATHER_OP::SCALAR_ASSIGN, scalar_assign}
+          {SCATTER_GATHER_OP::SCALAR_ASSIGN, scalar_assign},
+          {SCATTER_GATHER_OP::SCALAR_REDUCE_ADD, scalar_reduce_add},
+          {SCATTER_GATHER_OP::SCALAR_REDUCE_SUBTRACT, scalar_reduce_subtract},
+          {SCATTER_GATHER_OP::SCALAR_REDUCE_MULTIPLY, scalar_reduce_multiply},
+          {SCATTER_GATHER_OP::SCALAR_REDUCE_DIVIDE, scalar_reduce_divide},
         });
 
         auto run_loop = [&](const auto& kernel_func) {
@@ -368,9 +388,9 @@ void scatter_cpu_kernel(Tensor& self, int64_t dim, const Tensor& index, const Te
     self, dim, index, src, "scatter_cpu_", false, SCATTER_GATHER_OP::TENSOR_ASSIGN);
 }
 
-void scatter_fill_cpu_kernel(Tensor& self, int64_t dim, const Tensor& index, Scalar src) {
+void scatter_fill_cpu_kernel(Tensor& self, int64_t dim, const Tensor& index, Scalar value) {
   cpu_scatter_gather_base_kernel<>()(
-    self, dim, index, src, "scatter_fill_cpu_", /*serial_exec=*/false,
+    self, dim, index, value, "scatter_fill_cpu_", /*serial_exec=*/false,
     SCATTER_GATHER_OP::SCALAR_ASSIGN);
 }
 
@@ -387,7 +407,9 @@ void scatter_reduce_cpu_kernel(Tensor& self, const int64_t dim, const Tensor& in
 }
 
 void scatter_scalar_reduce_cpu_kernel(Tensor& self, const int64_t dim, const Tensor& index,
-                                        const Scalar& value, const REDUCE_OPERATOR& reduce) {
+                                      Scalar& value, const SCATTER_GATHER_OP& reduce) {
+  cpu_scatter_gather_base_kernel<>()(self, dim, index, value,
+                                     "scatter_scalar_reduce_", true, reduce);
 }
 
 } // anonymous namespace
