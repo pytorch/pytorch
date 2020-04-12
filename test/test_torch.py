@@ -16066,6 +16066,8 @@ _cpu_types = []
 
 _unsigned_types = [torch.uint8]
 
+_complex_and_float_types_no_half = [torch.complex64, torch.complex128] + _float_types_no_half
+
 # Helper values and functions for producing tensors and scalars to use in tensor op tests.
 # Tensor dimension sizes (Small, Medium, Large, Giant)
 _S = 5
@@ -16615,7 +16617,13 @@ def _generate_reference_input(dtype, device):
     input.append(torch.randn(10).tolist())
     input.append((torch.randn(10) * 1e6).tolist())
     input.append([math.pi * (x / 2) for x in range(-5, 5)])
-    return torch.tensor(input, dtype=dtype, device=device)
+
+    input_tensor = torch.tensor(input, dtype=dtype, device=device)
+
+    if dtype.is_complex:
+        input_tensor = (input_tensor + 1j) * 1j
+
+    return input_tensor
 
 def _generate_gamma_input(dtype, device, test_poles=True):
     input = []
@@ -16687,7 +16695,7 @@ torch_op_tests = [_TorchMathTestMeta('sin'),
                   _TorchMathTestMeta('sqrt'),
                   _TorchMathTestMeta('erf', ref_backend='scipy'),
                   _TorchMathTestMeta('erfc', ref_backend='scipy'),
-                  _TorchMathTestMeta('exp'),
+                  _TorchMathTestMeta('exp', dtypes=_complex_and_float_types_no_half),
                   _TorchMathTestMeta('expm1'),
                   _TorchMathTestMeta('floor'),
                   _TorchMathTestMeta('ceil'),

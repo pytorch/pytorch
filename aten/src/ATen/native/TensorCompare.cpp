@@ -44,12 +44,10 @@ Tensor isclose(const Tensor& self, const Tensor& other, double rtol, double atol
 
   auto close = actual_error <= max_error;
 
-  if (isFloatingType(self.scalar_type()) && isFloatingType(other.scalar_type())) {
+  if (isFloatingType(self.scalar_type()) && isFloatingType(other.scalar_type())
+  || isComplexType(self.scalar_type()) && isComplexType(other.scalar_type())) {
     // Handle +/-inf
     close.__ior__(self == other);
-    close.__iand__((self == INFINITY) == (other == INFINITY));
-    close.__iand__((self == -INFINITY) == (other == -INFINITY));
-
     if (equal_nan) {
       close.__ior__((self != self).__and__((other != other)));
     }

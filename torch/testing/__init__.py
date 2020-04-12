@@ -27,6 +27,11 @@ def assert_allclose(actual, expected, rtol=None, atol=None, equal_nan=True):
             raise ValueError("rtol and atol must both be specified or both be unspecified")
         rtol, atol = _get_default_tolerance(actual, expected)
 
+    if actual.is_complex() and expected.is_complex():
+        close_real = torch.isclose(actual.copy_real(), expected.copy_real())
+        close_imag = torch.isclose(actual.copy_imag(), expected.copy_imag())
+        if close_real.all() and close_imag.all():
+            return
     close = torch.isclose(actual, expected, rtol, atol, equal_nan)
     if close.all():
         return

@@ -6,7 +6,7 @@ in one of the `cpp` files in this directory.
 
 Like all ATen methods/functions, native functions are made available
 from both ATen's C++ and Python APIs.  In C++, they are made available
-either as methods on `Tensor` (`t.mymeth()`) and functions in the ATen
+either as methods on `Tensor` (`t.mymeth()`) or functions in the ATen
 namespace (`at::myfunc()`).  In PyTorch, they are made available as
 methods on `Variable` or as functions on `torch._C._FunctionBase`
 (it is the user's responsibility to re-exporting these functions in
