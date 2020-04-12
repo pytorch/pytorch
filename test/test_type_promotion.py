@@ -230,8 +230,8 @@ class TestTypePromotion(TestCase):
         # Can also include half on CPU in cases where it will be promoted to a
         # supported dtype
         complex_dtypes = torch.testing.get_all_complex_dtypes()
-        dtypes1 = torch.testing.get_all_math_dtypes('cuda') + complex_dtypes
-        dtypes2 = torch.testing.get_all_math_dtypes(device) + complex_dtypes
+        dtypes1 = torch.testing.get_all_math_dtypes('cuda')
+        dtypes2 = torch.testing.get_all_math_dtypes(device)
         ops = [torch.add, torch.sub, torch.mul, torch.div, torch.rsub]
         for dt1, dt2 in itertools.product(dtypes1, dtypes2):
             for op, non_contiguous in itertools.product(ops, [True, False]):
@@ -380,6 +380,8 @@ class TestTypePromotion(TestCase):
         for op in comparison_ops:
             for dt1 in torch.testing.get_all_math_dtypes(device):
                 for dt2 in torch.testing.get_all_math_dtypes(device):
+                    if dt1.is_complex or dt2.is_complex:
+                        continue
                     val1 = value_for_type[dt1]
                     val2 = value_for_type[dt2]
                     t1 = torch.tensor([val1], dtype=dt1, device=device)
@@ -418,6 +420,8 @@ class TestTypePromotion(TestCase):
     @float_double_default_dtype
     def test_lt_with_type_promotion(self, device):
         for dt in torch.testing.get_all_math_dtypes(device):
+            if dt.is_complex:
+                continue
             x = torch.tensor([0], dtype=dt, device=device)
             expected = torch.tensor([True], dtype=torch.bool, device=device)
 
@@ -632,6 +636,8 @@ class TestTypePromotion(TestCase):
     def _run_all_tests_for_sparse_op(self, op_name, device):
         dtypes = torch.testing.get_all_math_dtypes(device)
         for dtype1, dtype2 in itertools.product(dtypes, dtypes):
+            if dtype1.is_complex or dtype2.is_complex:
+                continue
             for inplace, coalesced in itertools.product([True, False], [True, False]):
                 self._test_sparse_op(op_name, inplace, dtype1, dtype2, device, coalesced)
 
