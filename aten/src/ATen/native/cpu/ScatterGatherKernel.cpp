@@ -144,10 +144,11 @@ auto scalar_assign = [](auto * self_data, Scalar src_data) {
 
 template <bool is_scatter_like = true>
 struct cpu_scatter_gather_base_kernel {
-  void operator()(Tensor& self, int64_t dim,
-    const Tensor& index, Scalar& value,
-    const std::string& method_name,
-    bool serial_exec, const SCATTER_GATHER_OP& func_enum) {
+  void run_kernel(Tensor& self, int64_t& dim, const Tensor& index, const Tensor& src,
+                  const std::string& method_name, bool serial_exec, TensorIterator& iter,
+                  int64_t& self_dim_stride, int64_t& index_dim_stride,
+                  int64_t& src_dim_stride, int64_t& index_dim_size,
+                  int64_t& index_upper_bound) {
     // no-op if index is empty
     if (index.numel() == 0) {
       return;
@@ -156,7 +157,7 @@ struct cpu_scatter_gather_base_kernel {
     dim = maybe_wrap_dim(dim, self.dim());
 
     if (is_scatter_like) {
-      scatter_shape_check(self, dim, index, self);
+      scatter_shape_check(self, dim, index, src);
     }
     else {
       gather_shape_check(self, dim, index);
@@ -178,21 +179,38 @@ struct cpu_scatter_gather_base_kernel {
     // because `dim` is traversed in the kernel.
     auto self_restrided = restride_dim(self, dim, index_sizes);
     auto index_restrided = index.as_strided(index_sizes, index_strides);
+    auto src_restrided = restride_dim(src, dim, index_sizes);
 
-    auto iter = TensorIterator();
     iter.dont_compute_common_dtype();
     iter.dont_resize_outputs();
     iter.add_output(self_restrided);
+    iter.add_input(src_restrided, src.device(), src.scalar_type());
     iter.add_input(index_restrided);
     iter.build();
 
-    auto self_dim_stride = ensure_nonempty_stride(self, dim);
+    self_dim_stride = ensure_nonempty_stride(self, dim);
     auto self_dim_size = ensure_nonempty_size(self, dim);
 
-    auto index_dim_stride = ensure_nonempty_stride(index, dim);
-    auto index_dim_size = ensure_nonempty_size(index, dim);
+    index_dim_stride = ensure_nonempty_stride(index, dim);
+    index_dim_size = ensure_nonempty_size(index, dim);
+    
+    src_dim_stride = ensure_nonempty_stride(src, dim);
+    auto src_dim_size = ensure_nonempty_size(src, dim);
 
-    auto index_upper_bound = self_dim_size;
+    index_upper_bound = is_scatter_like ? self_dim_size : src_dim_size;
+  }
+  
+  void operator()(Tensor& self, int64_t dim,
+    const Tensor& index, Scalar& value,
+    const std::string& method_name,
+    bool serial_exec, const SCATTER_GATHER_OP& func_enum) {
+    auto iter = TensorIterator();
+    int64_t self_dim_stride, index_dim_stride, src_dim_stride, index_dim_size,
+      index_upper_bound;
+    
+    run_kernel(self, dim, index, self, method_name, serial_exec, iter,
+               self_dim_stride, index_dim_stride, src_dim_stride, index_dim_size,
+               index_upper_bound);    
 
     AT_DISPATCH_ALL_TYPES_AND2(
       ScalarType::Bool, ScalarType::Half, iter.dtype(),
@@ -249,57 +267,15 @@ struct cpu_scatter_gather_base_kernel {
     const std::string& method_name,
     bool serial_exec,
     const SCATTER_GATHER_OP& func_enum) {
-    // no-op if index is empty
-    if (index.numel() == 0) {
-      return;
-    }
-
-    dim = maybe_wrap_dim(dim, self.dim());
-
-    if (is_scatter_like) {
-      scatter_shape_check(self, dim, index, src);
-    }
-    else {
-      gather_shape_check(self, dim, index);
-    }
-
-    auto index_sizes = ensure_nonempty_vec(index.sizes().vec());
-    auto index_strides = ensure_nonempty_vec(index.strides().vec());
-
-    // `dim` is traversed in the kernel,
-    // that is why index.stride(dim) = 0 and index.size(dim) = 1.
-    // Also, index.size(dim) = 1 makes sure that TensorIterator.DimCounter
-    // has the following form : (i_1,..., i_{dim-1}, 0, i_{dim+1},...,i_n).
-    index_sizes[dim] = 1;
-    index_strides[dim] = 0;
-
-    // set self.shape = src.shape = index.shape,
-    // this defines the number of elements to iterate over,
-    // and set self.stride(dim) = src.stride(dim) = 0,
-    // because `dim` is traversed in the kernel.
-    auto self_restrided = restride_dim(self, dim, index_sizes);
-    auto index_restrided = index.as_strided(index_sizes, index_strides);
-    auto src_restrided = restride_dim(src, dim, index_sizes);
 
     auto iter = TensorIterator();
-    iter.dont_compute_common_dtype();
-    iter.dont_resize_outputs();
-    iter.add_output(self_restrided);
-    iter.add_input(src_restrided, src.device(), src.scalar_type());
-    iter.add_input(index_restrided);
-    iter.build();
-
-    auto self_dim_stride = ensure_nonempty_stride(self, dim);
-    auto self_dim_size = ensure_nonempty_size(self, dim);
-
-    auto index_dim_stride = ensure_nonempty_stride(index, dim);
-    auto index_dim_size = ensure_nonempty_size(index, dim);
-
-    auto src_dim_stride = ensure_nonempty_stride(src, dim);
-    auto src_dim_size = ensure_nonempty_size(src, dim);
-
-    auto index_upper_bound = is_scatter_like ? self_dim_size : src_dim_size;
-
+    int64_t self_dim_stride, index_dim_stride, src_dim_stride, index_dim_size,
+      index_upper_bound;
+    
+    run_kernel(self, dim, index, src, method_name, serial_exec, iter,
+               self_dim_stride, index_dim_stride, src_dim_stride, index_dim_size,
+               index_upper_bound);
+    
     AT_DISPATCH_ALL_TYPES_AND2(
       ScalarType::Bool, ScalarType::Half, iter.dtype(),
       method_name, [&] {
