@@ -667,6 +667,68 @@ Tensor _logcumsumexp_cuda(const Tensor& self, int64_t dim) {
   return _logcumsumexp_out_cuda(result, self, dim);
 }
 
+Tensor& _cumsum_out_cuda(Tensor& result, const Tensor& self, int64_t dim) {
+  result.resize_(self.sizes());
+  if (self.dim() == 0) {
+    result.fill_(self);
+    return result;
+  }
+  auto wrap_dim = maybe_wrap_dim(dim, self.dim());
+
+  TensorArg output_arg{result, "output", 1};
+  TensorArg input_arg{self, "input", 2};
+  checkAllSameGPU("cumsum", {output_arg, input_arg});
+
+  AT_DISPATCH_ALL_TYPES_AND(
+      at::ScalarType::Half, self.scalar_type(), "cumsum_cuda", [&]() {
+        scalar_t init = 0;
+        scan_dim<scalar_t>(
+            self,
+            result,
+            wrap_dim,
+            init,
+            std::plus<scalar_t>());
+      });
+
+  return result;
+}
+
+Tensor _cumsum_cuda(const Tensor& self, int64_t dim) {
+  Tensor result = at::empty_like(self, MemoryFormat::Contiguous);
+  return _cumsum_out_cuda(result, self, dim);
+}
+
+Tensor& _cumprod_out_cuda(Tensor& result, const Tensor& self, int64_t dim) {
+  result.resize_(self.sizes());
+  if (self.dim() == 0) {
+    result.fill_(self);
+    return result;
+  }
+  auto wrap_dim = maybe_wrap_dim(dim, self.dim());
+
+  TensorArg output_arg{result, "output", 1};
+  TensorArg input_arg{self, "input", 2};
+  checkAllSameGPU("cumprod", {output_arg, input_arg});
+
+  AT_DISPATCH_ALL_TYPES_AND(
+      at::ScalarType::Half, self.scalar_type(), "cumprod_cuda", [&]() {
+        scalar_t init = 1;
+        scan_dim<scalar_t>(
+            self,
+            result,
+            wrap_dim,
+            init,
+            std::multiplies<scalar_t>());
+      });
+
+  return result;
+}
+
+Tensor _cumprod_cuda(const Tensor& self, int64_t dim) {
+  Tensor result = at::empty_like(self, MemoryFormat::Contiguous);
+  return _cumprod_out_cuda(result, self, dim);
+}
+
 REGISTER_DISPATCH(std_var_stub, &std_var_kernel_cuda);
 REGISTER_DISPATCH(sum_stub, &sum_kernel_cuda);
 REGISTER_DISPATCH(prod_stub, &prod_kernel_cuda);
