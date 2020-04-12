@@ -221,13 +221,11 @@ struct cpu_scatter_gather_base_kernel {
     // because `dim` is traversed in the kernel.
     auto self_restrided = restride_dim(self, dim, index_sizes);
     auto index_restrided = index.as_strided(index_sizes, index_strides);
-    auto src_restrided = restride_dim(self, dim, index_sizes);
 
     auto iter = TensorIterator();
     iter.dont_compute_common_dtype();
     iter.dont_resize_outputs();
     iter.add_output(self_restrided);
-    iter.add_input(src_restrided, self.device(), self.scalar_type());
     iter.add_input(index_restrided);
     iter.build();
 
@@ -237,17 +235,13 @@ struct cpu_scatter_gather_base_kernel {
     auto index_dim_stride = ensure_nonempty_stride(index, dim);
     auto index_dim_size = ensure_nonempty_size(index, dim);
     
-    auto src_dim_stride = ensure_nonempty_stride(self, dim);
-    auto src_dim_size = ensure_nonempty_size(self, dim);
-
-    auto index_upper_bound = is_scatter_like ? self_dim_size : src_dim_size;
+    auto index_upper_bound = self_dim_size;
 
     AT_DISPATCH_ALL_TYPES_AND2(
       ScalarType::Bool, ScalarType::Half, iter.dtype(),
       method_name, [&] {
         constexpr auto SELF_ITER_STRIDE_IDX = 0;
-        constexpr auto INDEX_ITER_STRIDE_IDX = 2;
-        constexpr auto SRC_ITER_STRIDE_IDX = 1;
+        constexpr auto INDEX_ITER_STRIDE_IDX = 1;
 
         using binary_func_t = std::function<void(scalar_t*, Scalar)>;
         std::unordered_map<const SCATTER_GATHER_OP, binary_func_t> binary_funcs({
@@ -262,7 +256,6 @@ struct cpu_scatter_gather_base_kernel {
           auto loop = [&](char** data, const int64_t* strides, int64_t n) {
             auto* self_data_bytes = data[SELF_ITER_STRIDE_IDX];
             auto* index_data_bytes = data[INDEX_ITER_STRIDE_IDX];
-            auto* src_data_bytes = data[SRC_ITER_STRIDE_IDX];
             // we change the order of TensorIterator-dim loop
             // vs dim-TensorIterator loop order depending on
             // whether dim is the last dimension and/or
@@ -280,14 +273,12 @@ struct cpu_scatter_gather_base_kernel {
 
                 self_data_bytes += strides[SELF_ITER_STRIDE_IDX];
                 index_data_bytes += strides[INDEX_ITER_STRIDE_IDX];
-                src_data_bytes += strides[SRC_ITER_STRIDE_IDX];
               }
             }
             else {
               for (int64_t i = 0; i < index_dim_size; ++i) {
                 auto* self_data = self_data_bytes;
                 auto* index_data = (char*)((int64_t*)index_data_bytes + i * index_dim_stride);
-                auto* src_data = src_data_bytes;
                 for (int64_t nelem = 0; nelem < n; ++nelem) {
                   int64_t idx_dim = *(int64_t*)index_data;
                   // we are not putting idx_dim in the error message because it disables
@@ -303,7 +294,6 @@ struct cpu_scatter_gather_base_kernel {
 
                   self_data += strides[SELF_ITER_STRIDE_IDX];
                   index_data += strides[INDEX_ITER_STRIDE_IDX];
-                  src_data += strides[SRC_ITER_STRIDE_IDX];
                 }
               }
             }
