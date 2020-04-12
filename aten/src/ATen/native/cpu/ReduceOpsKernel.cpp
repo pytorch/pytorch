@@ -119,7 +119,7 @@ static void logcumsumexp_cpu_kernel(Tensor& result, const Tensor& self, int64_t 
 
           // Reference : https://www.tensorflow.org/api_docs/python/tf/math/cumulative_logsumexp
           auto log_add_exp = [](scalar_t x, scalar_t y) -> scalar_t {
-            return std::log(1 + std::exp(std::min(x, y) - std::max(x, y))) + std::max(x, y);
+            return std::log1p(std::exp(std::min(x, y) - std::max(x, y))) + std::max(x, y);
           };
           cum_number = log_add_exp(x, cum_number);
           result_data[i * result_dim_stride] = static_cast<scalar_t>(cum_number);
