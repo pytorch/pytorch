@@ -79,10 +79,10 @@ struct Layout final {
         return -1;
       }
 
-      // 1D tensors have a batch size of 0.
+      // 1D tensors have a batch size of 1.
       // This single dimension is to be considered as channels.
       if (tensor.size() == 1) {
-        return 0;
+        return 1;
       }
 
       // For 2D tensors, or above:
