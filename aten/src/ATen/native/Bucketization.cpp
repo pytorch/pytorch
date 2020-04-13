@@ -27,6 +27,22 @@ namespace {
 // minimal size for searchsorted_cpu_contiguous to run parallel (multithread)
 constexpr int64_t SEARCHSORTED_GRAIN_SIZE = 200;
 
+// customized lower_bound func to ensure the low bound of 'nan', 'inf' etc. be the end of boundary
+// std::lower_bound can not be used here since its customized comparator need strict weak ordering
+template<typename input_t>
+const input_t* cus_lower_bound(const input_t* start, const input_t* end, input_t val) {
+  while (start < end) {
+    const input_t* mid = start + ((end - start) >> 1);
+    if (!(*mid >= val)) {
+      start = mid + 1;
+    }
+    else {
+      end = mid;
+    }
+  }
+  return start;
+}
+
 template<typename input_t, typename output_t>
 void searchsorted_cpu_contiguous(Tensor& result, const Tensor& input, const Tensor& boundaries, const bool& right) {
   int64_t numel_in = input.numel();
@@ -47,9 +63,7 @@ void searchsorted_cpu_contiguous(Tensor& result, const Tensor& input, const Tens
       const input_t *data_bd_start = &data_bd[start_bd];
 
       int64_t pos = !right ?
-        std::lower_bound(data_bd_start, data_bd_start + idim_bd, data_in[i],
-          // custom comparator to ensure the low bound of 'nan', 'inf' etc. be the end of boundary
-          [](const input_t& data, const input_t& val){ return !(data >= val); }) - data_bd_start :
+        cus_lower_bound(data_bd_start, data_bd_start + idim_bd, data_in[i]) - data_bd_start :
         std::upper_bound(data_bd_start, data_bd_start + idim_bd, data_in[i]) - data_bd_start;
 
       // type conversion might happen here
