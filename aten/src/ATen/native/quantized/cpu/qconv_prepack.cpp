@@ -306,6 +306,13 @@ class QConvPackWeightInt8 final : public c10::OperatorKernel {
   }
 };
 
+namespace {
+
+static auto conv2d_params = register_conv_params<2>();
+static auto conv3d_params = register_conv_params<3>();
+
+} // namespace
+
 static auto registry =
     c10::RegisterOperators()
         .op("quantized::conv_prepack", // conv_prepack is deprecated, please use
