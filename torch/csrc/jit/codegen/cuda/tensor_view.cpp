@@ -242,6 +242,14 @@ std::vector<IterDomain*>::size_type TensorView::nDims() const {
 }
 
 IterDomain* TensorView::axis(int pos) const {
+  if (pos < 0)
+    pos += domain()->size();
+  TORCH_CHECK(
+      pos >= 0 && pos < domain()->size(),
+      "Tried to access position ",
+      pos,
+      " in domain: ",
+      domain());
   return domain()->axis(pos);
 }
 
@@ -332,7 +340,7 @@ TensorView* TensorView::computeAt(TensorView* consumer, int axis) {
   this->compute_at_axis_ = -1;
   TransformReplay::replay(running_consumer, this, axis);
   this->compute_at_view_ = running_consumer;
-  this->compute_at_axis_ = axis;
+  this->compute_at_axis_ = (unsigned int)axis;
   return this;
 }
 

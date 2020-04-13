@@ -37,14 +37,14 @@ const Variable & checked_cast_variable(const Tensor & t, const char * name, int 
   if (!t.defined()) {
     AT_ERROR("Expected a Tensor of type Variable but found an undefined Tensor for argument #", pos, " '", name, "'");
   }
-  return as_variable_ref(t);
+  return t;
 }
 
 Variable & checked_cast_variable(Tensor & t, const char * name, int pos) {
   if (!t.defined()) {
     AT_ERROR("Expected a Tensor of type Variable but found an undefined Tensor for argument #", pos, " '", name, "'");
   }
-  return as_variable_ref(t);
+  return t;
 }
 }
 
@@ -120,7 +120,7 @@ void set_data(const Tensor & self, const Tensor & new_data) {
 }
 
 Tensor data(const Tensor & self) {
-  return as_variable_ref(self).variable_data();
+  return self.variable_data();
 }
 
 bool is_leaf(const Tensor & self) {
@@ -228,7 +228,7 @@ Tensor & copy_(Tensor & self, const Tensor & src, bool non_blocking) {
     self_.copy_(src_, non_blocking);
   }
   increment_version(self);
-  rebase_history(as_variable_ref( self ), std::move(grad_fn));
+  rebase_history(self , std::move(grad_fn));
 #if !defined(PYTORCH_DISABLE_TRACING)
   if(torch::jit::tracer::isTracing()) {
     jit::tracer::setOutput(output, self);
@@ -242,7 +242,7 @@ Tensor& resize_(
     IntArrayRef size,
     c10::optional<MemoryFormat> optional_memory_format) {
   auto& self_ = unpack(self, "self", 0);
-  if (as_variable_ref(self).requires_grad()) {
+  if (self.requires_grad()) {
     AT_ERROR("cannot resize variables that require grad");
   }
 #if !defined(PYTORCH_DISABLE_TRACING)
@@ -265,7 +265,7 @@ Tensor& resize_as_(
     c10::optional<MemoryFormat> optional_memory_format) {
   auto& self_ = unpack(self, "self", 0);
   auto& the_template_ = unpack(the_template, "the_template", 1);
-  if (as_variable_ref(self).requires_grad()) {
+  if (self.requires_grad()) {
     AT_ERROR("cannot resize variables that require grad");
   }
 #if !defined(PYTORCH_DISABLE_TRACING)
@@ -321,7 +321,7 @@ Tensor & detach_(Tensor & self) {
   }
 #endif
   // <NON_GENERATED_CODE>
-  if (as_variable_ref(self).is_view()) {
+  if (self.is_view()) {
     AT_ERROR("Can't detach views in-place. Use detach() instead");
   }
   // I think the choice here is conservative.  In principle, doing
@@ -330,7 +330,7 @@ Tensor & detach_(Tensor & self) {
   // grad_fn and output_nr; there's other metadata like debug name
   // and hooks which aren't cleared.  Is this function supposed to
   // clear those too? I'm not too sure, so I'm leaving it be for now.
-  auto autograd_meta = impl::materialize_autograd_meta(as_variable_ref(self));
+  auto autograd_meta = impl::materialize_autograd_meta(self);
   autograd_meta->set_requires_grad(false, self.unsafeGetTensorImpl());
   autograd_meta->grad_fn_.reset();
   autograd_meta->output_nr_ = 0;
@@ -355,21 +355,27 @@ Tensor & detach_(Tensor & self) {
 static auto registry = torch::RegisterOperators()
   .op(torch::RegisterOperators::options()
     .schema("aten::resize_(Tensor(a!) self, int[] size, *, MemoryFormat? memory_format=None) -> Tensor(a!)")
+    .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
     .impl_unboxedOnlyKernel<decltype(VariableType::resize_), &VariableType::resize_>(DispatchKey::VariableTensorId))
   .op(torch::RegisterOperators::options()
     .schema("aten::resize_as_(Tensor(a!) self, Tensor the_template, *, MemoryFormat? memory_format=None) -> Tensor(a!)")
+    .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
     .impl_unboxedOnlyKernel<decltype(VariableType::resize_as_), &VariableType::resize_as_>(DispatchKey::VariableTensorId))
   .op(torch::RegisterOperators::options()
     .schema("aten::detach(Tensor self) -> Tensor")
+    .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
     .kernel<decltype(VariableType::detach)>(DispatchKey::VariableTensorId, &VariableType::detach))
   .op(torch::RegisterOperators::options()
     .schema("aten::detach_(Tensor(a!) self) -> Tensor(a!)")
+    .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
     .impl_unboxedOnlyKernel<decltype(VariableType::detach_), &VariableType::detach_>(DispatchKey::VariableTensorId))
   .op(torch::RegisterOperators::options()
     .schema("aten::copy_(Tensor(a!) self, Tensor src, bool non_blocking=False) -> Tensor(a!)")
+    .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
     .impl_unboxedOnlyKernel<decltype(VariableType::copy_), &VariableType::copy_>(DispatchKey::VariableTensorId))
   .op(torch::RegisterOperators::options()
     .schema("aten::backward(Tensor self, Tensor? gradient=None, bool keep_graph=False, bool create_graph=False) -> ()")
+    .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
     // For backward(), we need the catch-all kernel (see comment above), but we also need the VariableTensorId backend
     // kernel, because when called with a VariableTensorId tensor, it goes through the variable fallback kernel,
     // which calls callBoxed(), which doesn't support optional tensor arguments yet and backward() has an optional
@@ -380,21 +386,27 @@ static auto registry = torch::RegisterOperators()
     .impl_unboxedOnlyCatchAllKernel<decltype(VariableType::backward), &VariableType::backward>())
   .op(torch::RegisterOperators::options()
     .schema("aten::set_data(Tensor(a!) self, Tensor new_data) -> ()")
+    .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
     .catchAllKernel<decltype(VariableType::set_data), &VariableType::set_data>())
   .op(torch::RegisterOperators::options()
     .schema("aten::data(Tensor self) -> Tensor")
+    .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
     .catchAllKernel<decltype(VariableType::data), &VariableType::data>())
   .op(torch::RegisterOperators::options()
     .schema("aten::is_leaf(Tensor self) -> bool")
+    .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
     .catchAllKernel<decltype(VariableType::is_leaf), &VariableType::is_leaf>())
   .op(torch::RegisterOperators::options()
     .schema("aten::output_nr(Tensor self) -> int")
+    .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
     .catchAllKernel<decltype(VariableType::output_nr), &VariableType::output_nr>())
   .op(torch::RegisterOperators::options()
     .schema("aten::_version(Tensor self) -> int")
+    .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
     .catchAllKernel<decltype(VariableType::_version), &VariableType::_version>())
   .op(torch::RegisterOperators::options()
-    .schema("aten::requires_grad_(Tensor(a!) self, bool _requires_grad=True) -> Tensor(a!)")
+    .schema("aten::requires_grad_(Tensor(a!) self, bool requires_grad=True) -> Tensor(a!)")
+    .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
     // For requires_grad_(), we need the catch-all kernel (see comment above), but we also need the VariableTensorId backend
     // kernel, because when called with a VariableTensorId tensor, it goes through the variable fallback kernel,
     // which calls callBoxed(), which doesn't support mutable tensor arguments yet and requires_grad_() has a mutable
@@ -405,6 +417,7 @@ static auto registry = torch::RegisterOperators()
     .impl_unboxedOnlyCatchAllKernel<decltype(VariableType::requires_grad_), &VariableType::requires_grad_>())
   .op(torch::RegisterOperators::options()
     .schema("aten::retain_grad(Tensor(a!) self) -> ()")
+    .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
     .catchAllKernel<decltype(VariableType::retain_grad), &VariableType::retain_grad>())
   ;
 

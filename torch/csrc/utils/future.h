@@ -28,9 +28,6 @@ class TORCH_API FutureError final : public std::exception {
 template <typename T>
 class TORCH_API Future final {
  public:
-  using Callback =
-      std::function<void(const T&, const c10::optional<FutureError>&)>;
-
   Future() = default;
 
   Future(T value) : completed_(true), value_(std::move(value)) {}
@@ -38,7 +35,6 @@ class TORCH_API Future final {
   const T& wait() {
     std::unique_lock<std::mutex> lock(mutex_);
     finished_cv_.wait(lock, [this] { return completed_.load(); });
-
     if (error_) {
       throw *error_;
     }
@@ -51,8 +47,15 @@ class TORCH_API Future final {
     return value_;
   }
 
+  const T& constValue() const {
+    std::unique_lock<std::mutex> lock(mutex_);
+    AT_ASSERT(completed_);
+    return value_;
+  }
+
   T&& moveValue() && {
     std::unique_lock<std::mutex> lock(mutex_);
+    AT_ASSERT(completed_);
     return std::move(value_);
   }
 
@@ -65,15 +68,13 @@ class TORCH_API Future final {
 
     // Move callbacks to a vector on the stack so we can access it without
     // holding a lock
-    std::vector<Callback> cbs;
+    std::vector<std::function<void(void)>> cbs;
     cbs.swap(callbacks_);
     lock.unlock();
     finished_cv_.notify_all();
     // There is no need to protect callbacks_ with the lock.
-    // Once completed_ is set to true, no one can add new callback to the
-    // list. pass value_, error_ for callback to easily check state.
     for (auto& callback : cbs) {
-      callback(value_, error_);
+      callback();
     }
   }
 
@@ -83,15 +84,24 @@ class TORCH_API Future final {
   void setErrorIfNeeded(std::string errorMsg) {
     std::unique_lock<std::mutex> lock(mutex_);
     if (completed_) {
+      // This should be rare and shouldn't cause log spew. Its important to
+      // log errors and thats why we have this log here.
+      LOG (INFO) << "Skipping setting following error on the Future since " <<
+        "it is already marked completed (this is not neccessarily an error): "
+        << errorMsg;
       return;
     } else {
-      setErrorInternal(std::move(errorMsg), lock);
+      setErrorInternal(FutureError(std::move(errorMsg)), lock);
     }
   }
 
-  void setError(std::string errorMsg) {
+  void setError(FutureError error) {
     std::unique_lock<std::mutex> lock(mutex_);
-    setErrorInternal(std::move(errorMsg), lock);
+    setErrorInternal(std::move(error), lock);
+  }
+
+  void setError(std::string errorMsg) {
+    setError(FutureError(std::move(errorMsg)));
   }
 
   bool completed() const {
@@ -109,41 +119,46 @@ class TORCH_API Future final {
   }
 
   // If completed() the callback will be invoked in-place.
-  void addCallback(const Callback& callback) {
+  void addCallback(std::function<void(void)> cb) {
     std::unique_lock<std::mutex> lock(mutex_);
     if (completed_) {
       lock.unlock();
-      callback(value_, error_);
-      return;
+      cb();
     }
-    callbacks_.push_back(callback);
+    callbacks_.emplace_back(std::move(cb));
   }
 
- private:
+  // Remove this once we've migrated underlying use-cases.
+  void addCallback(const std::function<
+                   void(const T&, const c10::optional<torch::utils::FutureError>&)>& cb) {
+    addCallback([cb,this]() { cb(value_, error_); });
+  }
+
+  private:
   void setErrorInternal(
-      std::string errorMsg,
+      FutureError error,
       std::unique_lock<std::mutex>& lock) {
     TORCH_CHECK(!completed_);
-    error_ = FutureError(std::move(errorMsg));
+    error_ = std::move(error);
     completed_ = true;
 
     // Move callbacks to a vector on the stack so we can access it without
     // holding a lock
-    std::vector<Callback> cbs(std::move(callbacks_));
+    std::vector<std::function<void(void)>> cbs(std::move(callbacks_));
     lock.unlock();
     finished_cv_.notify_all();
     // There is no need to protect callbacks_ with the lock.
     // Once completed_ is set to true, no one can add new callback to the
     // list. pass value_, error_ for callback to easily check state.
     for (auto& callback : cbs) {
-      callback(value_, error_);
+      callback();
     }
   }
 
   mutable std::mutex mutex_;
   std::atomic_bool completed_{false}; // is this future complete
   std::condition_variable finished_cv_;
-  std::vector<Callback> callbacks_;
+  std::vector<std::function<void(void)>> callbacks_;
   T value_;
   c10::optional<FutureError> error_;
 };
