@@ -643,6 +643,10 @@ Tensor& _logcumsumexp_out_cuda(Tensor& result, const Tensor& self, int64_t dim) 
     result.fill_(self);
     return result;
   }
+  if (self.numel() == 0) {
+    result.zero_();
+    return result;
+  }
   auto wrap_dim = maybe_wrap_dim(dim, self.dim());
 
   TensorArg output_arg{ result, "output", 1 };
@@ -653,7 +657,7 @@ Tensor& _logcumsumexp_out_cuda(Tensor& result, const Tensor& self, int64_t dim) 
     self.scalar_type(), "logcumsumexp_cuda", [&]() {
     scalar_t init = -std::numeric_limits<scalar_t>::infinity();
     auto log_add_exp = [] GPU_LAMBDA (scalar_t x, scalar_t y) -> scalar_t {
-      return std::log(1 + std::exp(std::min(x, y) - std::max(x, y))) +
+      return ::log1p(std::exp(std::min(x, y) - std::max(x, y))) +
           std::max(x, y);
     };
     scan_dim<scalar_t>(self, result, wrap_dim, init, log_add_exp);
