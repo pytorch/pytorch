@@ -13,7 +13,7 @@ DOCKER_IMAGE_PATH_BASE = "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/"
 
 # ARE YOU EDITING THIS NUMBER?  MAKE SURE YOU READ THE GUIDANCE AT THE
 # TOP OF .circleci/config.yml
-DOCKER_IMAGE_VERSION = "90407bcd-9294-4e78-a343-baadcd837f41"
+DOCKER_IMAGE_VERSION = "8fcf46ef-4a34-480b-a8ee-b0a30a4d3e59"
 
 
 @dataclass
