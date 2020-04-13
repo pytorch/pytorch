@@ -152,6 +152,7 @@ libtorch_sources = [
     "torch/csrc/jit/passes/utils/memory_dag.cpp",
     "torch/csrc/jit/passes/freeze_module.cpp",
     "torch/csrc/jit/runtime/print_handler.cpp",
+    "torch/csrc/jit/runtime/register_ops_utils.cpp",
     "torch/csrc/jit/runtime/register_prim_ops.cpp",
     "torch/csrc/jit/runtime/register_prim_ops_fulljit.cpp",
     "torch/csrc/jit/runtime/register_prim_ops_c10.cpp",
@@ -325,8 +326,6 @@ libtorch_python_cuda_sources = [
 ]
 
 def glob_libtorch_python_sources():
-
-
     _libtorch_python_sources = [
         ":generate-code=autograd/generated/python_functions.cpp",
         ":generate-code=autograd/generated/python_nn_functions.cpp",
@@ -464,7 +463,6 @@ def glob_libtorch_python_sources():
     _libtorch_python_sources.extend(native.glob(["test/cpp/tensorexpr/test_*.cpp"]))
 
     return _libtorch_python_sources
-
 
 def add_torch_libs():
     r = {}

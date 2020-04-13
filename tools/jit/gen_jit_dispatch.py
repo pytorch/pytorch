@@ -294,7 +294,15 @@ def load_op_list(path):
     return op_list
 
 
-def gen_jit_dispatch(declarations, out, template_path, disable_autograd=False, selected_op_list_path=None):
+def gen_jit_dispatch(
+    declarations,
+    out,
+    template_path,
+    disable_autograd=False,
+    selected_op_list_path=None,
+    selected_op_list=None,
+    force_schema_registration=False,
+):
     REGISTER_ATEN_OPS_CPP = CodeTemplate.from_file(template_path + '/register_aten_ops.cpp')
 
     ops = []
@@ -330,7 +338,7 @@ def gen_jit_dispatch(declarations, out, template_path, disable_autograd=False, s
         # default anymore. For the (very few) ops that don't support boxed dispatch yet (i.e. ops taking TensorOptions
         # arguments), we set them to 'unboxed_only' and they follow the old behavior of having register_aten_ops.cpp
         # register the jit op.
-        elif decl['use_c10_dispatcher'] == 'with_codegenerated_unboxing_wrapper' and not needs_hacked_twin(decl):
+        elif decl['use_c10_dispatcher'] == 'with_codegenerated_unboxing_wrapper':
             if len(decl['returns']) == 0:
                 return_type = "void"
             elif len(decl['returns']) == 1:
@@ -352,7 +360,7 @@ def gen_jit_dispatch(declarations, out, template_path, disable_autograd=False, s
                                                   return_type=return_type,
                                                   formals_types_with_leading_comma=argument_types_with_leading_comma)
         else:
-            assert decl['use_c10_dispatcher'] in ['unboxed_only', 'full'] or needs_hacked_twin(decl)
+            assert decl['use_c10_dispatcher'] in ['unboxed_only', 'full']
             if is_namespace_function:
                 return CALL_NAMESPACE.substitute(name=decl['name'],
                                                  args=pack_arguments(args),
@@ -368,7 +376,7 @@ def gen_jit_dispatch(declarations, out, template_path, disable_autograd=False, s
 
     def emit_decl_variant(decl):
         if ('emit_dummy_placeholder' in decl):
-            if decl['use_c10_dispatcher'] == 'unboxed_only' or needs_hacked_twin(decl):
+            if decl['use_c10_dispatcher'] == 'unboxed_only':
                 return "DUMMY_OPERATION_JITONLY"
             else:
                 return "DUMMY_OPERATION"
@@ -394,7 +402,7 @@ def gen_jit_dispatch(declarations, out, template_path, disable_autograd=False, s
 
         returns = decl['returns']
 
-        if decl['use_c10_dispatcher'] == 'unboxed_only' or needs_hacked_twin(decl):
+        if decl['use_c10_dispatcher'] == 'unboxed_only':
             # Ops taking TensorOptions aren't supported in this mechanism yet because boxed dispatch doesn't
             # work for them. They use the old mechanism of registering a jitonly op for now.
             # TODO We should get rid of this once TensorOptions are supported.
@@ -416,13 +424,17 @@ def gen_jit_dispatch(declarations, out, template_path, disable_autograd=False, s
 
         return constructor
 
-    def filter_decls(jit_decls, disable_autograd, selected_op_list):
+    def filter_decls(jit_decls, disable_autograd, selected_op_list, force_schema_registration):
         result = []
         for decl in jit_decls:
             if disable_autograd and is_backward_op(decl):
                 continue
-            if selected_op_list and signature_without_args(decl) not in selected_op_list:
-                decl['emit_dummy_placeholder'] = True
+            op_name = signature_without_args(decl)
+            if selected_op_list and op_name not in selected_op_list:
+                if force_schema_registration:
+                    decl['emit_dummy_placeholder'] = True
+                else:
+                    continue
             result.append(decl)
         return result
 
@@ -514,8 +526,10 @@ def gen_jit_dispatch(declarations, out, template_path, disable_autograd=False, s
             additional_jit_decls.append(hacked_twin(decl))
 
     jit_decls.extend(additional_jit_decls)
-    selected_op_list = load_op_list(selected_op_list_path) if selected_op_list_path else None
-    jit_decls = filter_decls(jit_decls, disable_autograd, selected_op_list)
+    if not selected_op_list:
+        selected_op_list = []
+    selected_op_list += load_op_list(selected_op_list_path) if selected_op_list_path else []
+    jit_decls = filter_decls(jit_decls, disable_autograd, selected_op_list, force_schema_registration)
 
     # generation is deterministic
     jit_decl_groups = sort_decls(jit_decls)
@@ -533,7 +547,7 @@ def gen_jit_dispatch(declarations, out, template_path, disable_autograd=False, s
     for group in jit_decl_groups:
         x = sum(ord(c) for c in group[0]['name']) % num_shards
         for decl in group:
-            if decl['use_c10_dispatcher'] == 'unboxed_only' or needs_hacked_twin(decl):
+            if decl['use_c10_dispatcher'] == 'unboxed_only':
                 shards[x].append(OPERATOR_JITONLY.substitute(signature=decl['schema_string'],
                                                              op=emit_decl_variant(decl)))
             elif decl['use_c10_dispatcher'] == 'with_codegenerated_unboxing_wrapper':

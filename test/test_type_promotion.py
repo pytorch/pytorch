@@ -2,10 +2,15 @@ from functools import wraps
 
 import torch
 import itertools
+import unittest
 
-from torch.testing._internal.common_utils import TestCase, run_tests, load_tests
+from torch.testing._internal.common_utils import TestCase, run_tests, load_tests, \
+    TEST_NUMPY, numpy_dtype
 from torch.testing._internal.common_device_type import (instantiate_device_type_tests, onlyOnCPUAndCUDA,
                                                         dtypes)
+
+if TEST_NUMPY:
+    import numpy as np
 
 # load_tests from torch.testing._internal.common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -205,16 +210,6 @@ class TestTypePromotion(TestCase):
         shape = [5, 5, 5]
         if dtype == torch.bool:
             tensor = torch.randint(int(remove_zeros), 2, shape, device=device, dtype=dtype)
-        elif dtype.is_complex:
-            # "_th_normal_ not supported on CPUType for Half" so simpler create and convert
-            tensor = torch.randn(shape, dtype=dtype, device=device)
-            if remove_zeros:
-                tensor_abs = torch.abs(tensor)
-                if dtype == torch.complex64:
-                    tensor_abs = tensor_abs.to(torch.float)
-                elif dtype == torch.complex128:
-                    tensor_abs = tensor_abs.to(torch.double)
-                tensor[tensor_abs < 0.05] = 5
         elif dtype.is_floating_point or dtype.is_complex:
             # "_th_normal_ not supported on CPUType for Half" so simpler create and convert
             tensor = torch.randn(shape, device=device)
@@ -686,6 +681,59 @@ class TestTypePromotion(TestCase):
         with self.maybeWarnsRegex(UserWarning, '^Integer division.+is deprecated.+'):
             torch.addcdiv(a, b, b, out=o)
 
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    @dtypes(torch.complex64, torch.complex128)
+    def test_abs_complex_to_float(self, device, dtype):
+        # Constructs random complex values
+        from random import random
+        random_vals = []
+        for multiplier in (-1, 1, -10, 10, -100, 100):
+            for _ in range(10):
+                random_vals.append(complex(random() * multiplier, random() * multiplier))
+
+        for vals in (random_vals, []):
+            a = np.array(vals, dtype=numpy_dtype(dtype))
+            t = torch.tensor(vals, device=device, dtype=dtype)
+
+            # Tests abs
+            np_result = torch.from_numpy(np.abs(a))
+            torch_result = torch.abs(t).cpu()
+            self.assertEqual(np_result, torch_result, exact_dtype=True)
+
+            # Tests float out
+            float_dtype = torch.float32 if dtype is torch.complex64 else torch.float64
+            np_float_out = np.empty_like(a).astype(np.float32)
+            np.abs(a, out=np_float_out)
+            float_out = torch.empty_like(t).float()
+            torch.abs(t, out=float_out)
+            self.assertEqual(torch.from_numpy(np_float_out), float_out.cpu())
+
+            # Tests float out (resized out)
+            float_out = torch.empty(1, device=device, dtype=float_dtype)
+            torch.abs(t, out=float_out)
+            self.assertEqual(torch.from_numpy(np_float_out), float_out.cpu())
+
+            # Tests complex out
+            np_complex_out = np.empty_like(a)
+            np.abs(a, out=np_complex_out)
+            complex_out = torch.empty_like(t)
+            torch.abs(t, out=complex_out)
+            self.assertEqual(torch.from_numpy(np_complex_out), complex_out.cpu())
+
+            # Tests complex out (resized out)
+            complex_out = torch.empty(1, device=device, dtype=dtype)
+            torch.abs(t, out=complex_out)
+            self.assertEqual(torch.from_numpy(np_complex_out), complex_out.cpu())
+
+            # Tests long out behavior (expected failure)
+            long_out = torch.empty(0, device=device, dtype=torch.long)
+            with self.assertRaises(RuntimeError):
+                torch.abs(t, out=long_out)
+
+            # Tests inplace
+            np.abs(a, out=a)
+            t.abs_()
+            self.assertEqual(torch.from_numpy(a), t.cpu())
 
 
 instantiate_device_type_tests(TestTypePromotion, globals())

@@ -793,7 +793,6 @@ class ShapePropagator {
     //   - First input should be the only tensor input
     static const register_formula_for simple_unary_ops{
         {
-            "aten::abs(Tensor self) -> Tensor",
             "aten::acos(Tensor self) -> Tensor",
             "aten::neg(Tensor self) -> Tensor",
             "aten::t(Tensor self) -> Tensor",
@@ -874,6 +873,31 @@ class ShapePropagator {
           auto input_type = node->input(0)->type()->cast<TensorType>();
           return input_type ? type_vec_t{input_type->dimensionedOnly()}
                             : type_vec_t{};
+        }};
+
+    // Requirements:
+    //   dims           : preserved
+    //   scalar type    : preserved, except complex maps to float
+    //   device         : preserved
+    //   tensor inputs  : 1
+    //   tensor outputs : 1
+    // Additionally:
+    //   - First input should be the only tensor input
+    static const register_formula_for simple_unary_ops_complex_to_float{
+        {
+            "aten::abs(Tensor self) -> Tensor",
+        },
+        [](Node* node) -> type_vec_t {
+          if (auto type = node->input(0)->type()->cast<TensorType>()) {
+            const auto scalar_type = *(type->scalarType());
+            if (isComplexType(scalar_type)) {
+              const auto out_type = c10::toValueType(scalar_type);
+              return type_vec_t{
+                  type->withScalarType(out_type)->dimensionedOnly()};
+            }
+            return type_vec_t{type->dimensionedOnly()};
+          }
+          return type_vec_t{};
         }};
 
     // Requirements:
