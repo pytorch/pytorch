@@ -252,8 +252,11 @@ Value* TracingState::getOutput(const IValue& iv, size_t i) {
     TypePtr key_type = dict.keyType();
     TypePtr value_type = dict.valueType();
 
-    if (!(key_type->cast<StringType>() || key_type->cast<TensorType>()) ||
-        !value_type->cast<TensorType>()) {
+    bool key_type_valid = key_type->isSubtypeOf(StringType::get()) ||
+        key_type->isSubtypeOf(TensorType::get());
+    bool value_type_valid = value_type->isSubtypeOf(TensorType::get());
+
+    if (!key_type_valid || !value_type_valid) {
       std::ostringstream os;
       os << "output " << i << " (" << dict << ") of traced region "
          << "cannot be understood by the tracer, only dict[str, Tensor] "

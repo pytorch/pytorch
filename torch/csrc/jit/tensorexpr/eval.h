@@ -17,6 +17,7 @@
 #include <torch/csrc/jit/tensorexpr/ir_printer.h>
 #include <torch/csrc/jit/tensorexpr/tensor.h>
 #include <torch/csrc/jit/tensorexpr/types.h>
+#include <torch/csrc/jit/tensorexpr/var_substitutor.h>
 
 namespace torch {
 namespace jit {
@@ -818,33 +819,6 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
   std::unordered_map<const Var*, void*> buffer_mapping_;
   std::unordered_map<const Var*, std::unique_ptr<std::vector<int>>>
       internal_buffers_;
-};
-
-using VarMapping = std::vector<std::pair<const Var*, const Expr*>>;
-
-class VarSubMutator : public IRMutator {
- public:
-  VarSubMutator(const VarMapping& var_mapping) {
-    for (const auto& entry : var_mapping) {
-      const Var* key_var = entry.first;
-      const Expr* value = entry.second;
-      if (!key_var) {
-        throw malformed_input("missing key in VarSubMutator");
-      }
-      var_mapping_[key_var] = value;
-    }
-  }
-
-  const Expr* mutate(const Var* var) override {
-    auto iter = var_mapping_.find(var);
-    if (iter == var_mapping_.end()) {
-      return var;
-    }
-    return iter->second;
-  }
-
- private:
-  std::unordered_map<const Var*, const Expr*> var_mapping_;
 };
 
 template <class CodeGenType>

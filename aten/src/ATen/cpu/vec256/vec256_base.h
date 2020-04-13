@@ -403,6 +403,7 @@ public:
 private:
   template <typename Op>
   inline Vec256<T> binary_pred(const Vec256<T>& other, Op op) const {
+    // All bits are set to 1 if the pred is true, otherwise 0.
     Vec256<T> vec;
     for (int64_t i = 0; i != size(); i++) {
       if (op(values[i], other.values[i])) {
@@ -421,6 +422,25 @@ public:
   Vec256<T> operator<=(const Vec256<T>& other) const { return binary_pred(other, std::less_equal<T>()); }
   Vec256<T> operator>(const Vec256<T>& other) const { return binary_pred(other, std::greater<T>()); }
   Vec256<T> operator<(const Vec256<T>& other) const { return binary_pred(other, std::less<T>()); }
+
+private:
+  template <typename Op>
+  inline Vec256<T> binary_pred_bool(const Vec256<T>& other, Op op) const {
+    // 1 if the pred is true, otherwise 0.
+    Vec256<T> vec;
+    for (int i = 0; i != size(); ++ i) {
+      vec[i] = bool(op(values[i], other.values[i]));
+    }
+    return vec;
+  }
+
+public:
+  Vec256<T> eq(const Vec256<T>& other) const { return binary_pred_bool(other, std::equal_to<T>()); }
+  Vec256<T> ne(const Vec256<T>& other) const { return binary_pred_bool(other, std::not_equal_to<T>()); }
+  Vec256<T> gt(const Vec256<T>& other) const { return binary_pred_bool(other, std::greater<T>()); }
+  Vec256<T> ge(const Vec256<T>& other) const { return binary_pred_bool(other, std::greater_equal<T>()); }
+  Vec256<T> lt(const Vec256<T>& other) const { return binary_pred_bool(other, std::less<T>()); }
+  Vec256<T> le(const Vec256<T>& other) const { return binary_pred_bool(other, std::less_equal<T>()); }
 };
 
 template <class T> Vec256<T> inline operator+(const Vec256<T> &a, const Vec256<T> &b) {
