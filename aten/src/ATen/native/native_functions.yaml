@@ -5758,12 +5758,14 @@
   python_module: nn
   dispatch:
     CPU: hardswish
+    CUDA: hardswish
     QuantizedCPU: quantized_hardswish
 
 - func: hardswish_(Tensor(a!) self) -> Tensor(a!)
   python_module: nn
   dispatch:
     CPU: hardswish_
+    CUDA: hardswish_
     QuantizedCPU: quantized_hardswish_
 
 - func: hardswish_backward(Tensor grad_output, Tensor self) -> Tensor
