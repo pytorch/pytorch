@@ -39,8 +39,8 @@
 
 # Computes the gradient of current tensor w.r.t. graph leaves.
 - func: backward(Tensor self, Tensor? gradient=None, bool keep_graph=False, bool create_graph=False) -> ()
-  manual_kernel_registration: True
   use_c10_dispatcher: unboxed_only
+  manual_kernel_registration: True
   variants: method
 
 # DEPRECATED. Sets the tensor data held by this `Variable` to be the same as
@@ -51,19 +51,19 @@
 # where Variables *are* Tensors (as opposed to them containing tensors, which
 # is what the previous interpretation was.)
 - func: set_data(Tensor(a!) self, Tensor new_data) -> ()
+  use_c10_dispatcher: full
   manual_kernel_registration: True
-  use_c10_dispatcher: unboxed_only
   variants: method
 
 - func: data(Tensor self) -> Tensor
+  use_c10_dispatcher: full
   manual_kernel_registration: True
-  use_c10_dispatcher: unboxed_only
   variants: method
 
 # True if this `Variable` is a leaf and thus does not have a `grad_fn`.
 - func: is_leaf(Tensor self) -> bool
+  use_c10_dispatcher: full
   manual_kernel_registration: True
-  use_c10_dispatcher: unboxed_only
   variants: method
 
 # Returns the output index of this variable from the forward operation that
@@ -89,7 +89,6 @@
 
 - func: requires_grad_(Tensor(a!) self, bool _requires_grad=True) -> Tensor(a!)
   manual_kernel_registration: True
-  use_c10_dispatcher: unboxed_only
   variants: method
 
 # Enables .grad attribute for non-leaf Tensors.
@@ -820,7 +819,6 @@
 
 - func: copy_(Tensor(a!) self, Tensor src, bool non_blocking=False) -> Tensor(a!)
   manual_kernel_registration: True
-  use_c10_dispatcher: unboxed_only
   variants: method
   device_guard: False
   supports_named_tensor: True
@@ -1191,7 +1189,6 @@
 
 - func: resize_(Tensor(a!) self, int[] size, *, MemoryFormat? memory_format=None) -> Tensor(a!)
   manual_kernel_registration: True
-  use_c10_dispatcher: unboxed_only
   supports_named_tensor: True
   variants: method
   device_guard: False
@@ -2592,7 +2589,6 @@
 # this. If this `Variable` is a view, throws an `std::runtime_error()`.
 - func: detach_(Tensor(a!) self) -> Tensor(a!)
   manual_kernel_registration: True
-  use_c10_dispatcher: unboxed_only
   supports_named_tensor: True
   variants: function, method
 
@@ -3250,7 +3246,6 @@
 
 - func: resize_as_(Tensor(a!) self, Tensor the_template, *, MemoryFormat? memory_format=None) -> Tensor(a!)
   manual_kernel_registration: True
-  use_c10_dispatcher: unboxed_only
   supports_named_tensor: True
   variants: function, method
 
