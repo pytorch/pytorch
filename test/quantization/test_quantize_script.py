@@ -1390,6 +1390,22 @@ class TestQuantizeScriptPTSQOps(JitTestCase):
                    .check("quantized::cat") \
                    .run(m.graph_for(data, data))
 
+    def test_qbatch_norm(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+                self.bn = torch.nn.BatchNorm2d(3).to('cpu', torch.float)
+
+            def forward(self, x):
+                return self.bn(x)
+
+        data = [(torch.rand((1, 3, 10, 10), dtype=torch.float), torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
+        model = self._test_op_impl(M, data, "quantized::batch_norm2d")
+
+        FileCheck().check_not("aten::batch_norm") \
+                   .run(model.graph)
+
+
     def test_swap_dequantize_all_ops(self):
         """ A test that checks dequantize will be swapped for
         all supported general ops without actually checking for execution of these ops
@@ -1449,25 +1465,6 @@ class TestQuantizeScriptPTSQOps(JitTestCase):
                    .check("aten::dequantize") \
                    .run(m.graph)
 
-
-    def test_qbatch_norm(self):
-        class M(torch.nn.Module):
-            def __init__(self):
-                super(M, self).__init__()
-                self.bn = torch.nn.BatchNorm2d(4).to('cpu', torch.float)
-
-            def forward(self, x):
-                return self.bn(x)
-
-        m = torch.jit.script(M().eval())
-        m.training = False
-        m = prepare_script(m, {'': default_qconfig}, True)
-        data = torch.randn((2, 4, 6, 8), dtype=torch.float)
-        m(data)
-        m = convert_script(m, True)
-        FileCheck().check_not("aten::batch_norm") \
-                   .check("quantized::batch_norm2d") \
-                   .run(m.graph_for(data))
 
 class TestQuantizeDynamicScript(JitTestCase):
     def test_prepare_dynamic(self):
