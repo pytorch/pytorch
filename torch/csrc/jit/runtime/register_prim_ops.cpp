@@ -37,6 +37,118 @@ RegisterOperators reg({
         noop,
         aliasAnalysisSpecialCase()),
     Operator(
+        "aten::IntImplicit(Tensor a) -> int",
+        [](Stack& stack) {
+          at::Tensor a;
+          pop(stack, a);
+          checkImplicitTensorToNum(a, /*to int*/ true);
+          push(stack, a.item<int64_t>());
+          return 0;
+        },
+        aliasAnalysisFromSchema()),
+    Operator(
+        "aten::FloatImplicit(Tensor a) -> float",
+        [](Stack& stack) {
+          at::Tensor a;
+          pop(stack, a);
+          checkImplicitTensorToNum(a, /*to int*/ false);
+          push(stack, a.item<double>());
+          return 0;
+        },
+        aliasAnalysisFromSchema()),
+    Operator(
+        "aten::ScalarImplicit(Tensor a) -> Scalar",
+        [](Stack& stack) {
+          at::Tensor a;
+          pop(stack, a);
+          checkImplicitTensorToNum(a, /*to int*/ false);
+          push(stack, a.item());
+          return 0;
+        },
+        aliasAnalysisFromSchema()),
+    Operator(
+        "aten::Bool.Tensor(Tensor a) -> bool",
+        [](Stack& stack) {
+          at::Tensor a;
+          pop(stack, a);
+          push(stack, a.is_nonzero());
+          return 0;
+        },
+        aliasAnalysisFromSchema()),
+    Operator(
+        "aten::Bool.int(int a) -> bool",
+        [](Stack& stack) {
+          int64_t i;
+          pop(stack, i);
+          push(stack, (bool)i);
+          return 0;
+        },
+        aliasAnalysisFromSchema()),
+    Operator(
+        "aten::Bool.float(float a) -> bool",
+        [](Stack& stack) {
+          double d;
+          pop(stack, d);
+          push(stack, (bool)d);
+          return 0;
+        },
+        aliasAnalysisFromSchema()),
+    Operator(
+        "aten::Float.Tensor(Tensor a) -> float",
+        [](Stack& stack) {
+          at::Tensor a;
+          pop(stack, a);
+          push(stack, a.item<double>());
+          return 0;
+        },
+        aliasAnalysisFromSchema()),
+    Operator(
+        "aten::Float.Scalar(Scalar a) -> float",
+        [](Stack& stack) {
+          IValue scalar;
+          pop(stack, scalar);
+          if (scalar.isDouble()) {
+            push(stack, std::move(scalar));
+          } else {
+            push(stack, static_cast<double>(scalar.toInt()));
+          }
+          return 0;
+        },
+        aliasAnalysisFromSchema()),
+    Operator(
+        "aten::Float.int(int a) -> float",
+        [](Stack& stack) {
+          int64_t i;
+          pop(stack, i);
+          push(stack, (float)i);
+          return 0;
+        },
+        aliasAnalysisFromSchema()),
+    Operator(
+        "aten::Float.bool(bool a) -> float",
+        [](Stack& stack) {
+          bool b;
+          pop(stack, b);
+          push(stack, (float)b);
+          return 0;
+        },
+        aliasAnalysisFromSchema()),
+    Operator(
+        "aten::Float.str(str a) -> float",
+        [](Stack& stack) {
+          auto s = pop(stack).toString();
+          std::string::size_type sz;
+          double b = c10::stod(s->string(), &sz);
+          if (sz == s->string().size()) {
+            push(stack, b);
+          } else {
+            throw std::runtime_error(
+                "float() only accepts a string of single float number");
+          }
+          return 0;
+        },
+        aliasAnalysisFromSchema()),
+    Operator(
         "aten::format(str self, ...) -> str",
         [](Stack& stack) {
           size_t num_inputs = pop(stack).toInt();
