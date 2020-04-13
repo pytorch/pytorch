@@ -1015,8 +1015,8 @@ class TestSparse(TestCase):
         a = torch.rand(2, 2, 2).to_sparse().cuda()
         b = torch.rand(2, 2, 2).cuda()
         with self.assertRaisesRegex(
-            RuntimeError,
-            "bmm sparse-dense CUDA is not supported on Windows"):
+                RuntimeError,
+                "bmm sparse-dense CUDA is not supported on Windows"):
             ab = a.bmm(b)
 
     @cpu_only
