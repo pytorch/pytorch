@@ -136,7 +136,8 @@ cl::opt<RegexOpt, true, cl::parser<std::string>> OpInvocationPattern(
 // symbols, too. It will dump ALL the registered ops without any filtering.
 //
 // Can we use some fixed entry point like `main()`?
-// The target to be analyzed can be DSO that doesn't have a `main()`.
+// The target to be analyzed can be DSO that doesn't have a `main()`. And
+// sometimes we want to get ops that could (but not yet) be called.
 //
 // This temporary flag will be deprecated by better alternatives in the future.
 RegexOpt RootSymbolPatternLoc;
