@@ -1,5 +1,4 @@
 #import "ViewController.h"
-#import <torch/script.h>
 #import "Benchmark.h"
 
 @interface ViewController ()
