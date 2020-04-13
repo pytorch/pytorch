@@ -1022,7 +1022,7 @@ def emit_body(declaration):
     if requires_derivative:
         body.append(emit_save_outputs())
     if reset_grad_accumulator:
-        body.append('reset_grad_accumulator(self_);');
+        body.append('reset_grad_accumulator(self_);')
     if not returns_void:
         body.append('return {};'.format(get_return_value()))
     return body
