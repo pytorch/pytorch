@@ -1872,6 +1872,89 @@ class QuadraGpuNet(nn.Module):
 
 
 @unittest.skipIf(TEST_WITH_TSAN, "TSAN is not fork-safe since we're forking in a multi-threaded environment")
+class DistributedDataParallelSingleProcessTest(TestCase):
+    def setUp(self):
+        self.rank = 0
+        self.world_size = 1
+        self.file = tempfile.NamedTemporaryFile(delete=False)
+
+    def _test_base(self, net, inp):
+        store = c10d.FileStore(self.file.name, self.world_size)
+        process_group = c10d.ProcessGroupGloo(store, self.rank, self.world_size)
+
+        ddp = nn.parallel.DistributedDataParallel(
+            copy.deepcopy(net),
+            process_group=process_group
+        )
+
+        net_opt = torch.optim.Adam(net.parameters(), lr=0.001)
+        ddp_opt = torch.optim.Adam(ddp.parameters(), lr=0.001)
+
+        for i, j in zip(ddp.parameters(), net.parameters()):
+            self.assertTrue(i.allclose(j))
+
+        for _ in range(1):
+            net_out = net(*inp)
+            ddp_out = ddp(*inp)
+
+            net_out.sum().backward()
+            ddp_out.sum().backward()
+
+            net_opt.step()
+            ddp_opt.step()
+
+        for i, j in zip(ddp.parameters(), net.parameters()):
+            self.assertTrue(i.allclose(j))
+
+    @requires_gloo()
+    def test_cpu(self):
+        self._test_base(nn.Linear(2, 2), [torch.randn(30, 2)])
+
+    @requires_gloo()
+    @skip_if_lt_x_gpu(1)
+    def test_cuda(self):
+        self._test_base(nn.Linear(2, 2).to(0), [torch.randn(30, 2).to(0)])
+
+    @requires_gloo()
+    @skip_if_lt_x_gpu(1)
+    def test_rnn(self):
+        # This test is inspired by the bug reported in
+        # https://github.com/pytorch/pytorch/issues/36268
+        BATCH_SIZE = 4
+        INPUT_DIM = 256
+        OUTPUT_DIM = 256
+        HIDDEN_DIM = 256
+        N_LAYERS = 3
+        SEQ_LEN = 100
+
+        class Net(nn.Module):
+            def __init__(self, input_dim, hidden_dim, output_dim, hidden_layers):
+                super(Net, self).__init__()
+                self.input_dim = input_dim
+                self.hidden_dim = hidden_dim
+                self.output_dim = output_dim
+                self.hidden_layers = hidden_layers
+
+                self.lstm = nn.LSTM(input_dim, hidden_dim, hidden_layers, batch_first=True)
+                self.h2o = nn.Linear(hidden_dim, output_dim)
+
+            def forward(self, x, y):
+                self.lstm.flatten_parameters()
+                h_t, _ = self.lstm(x)
+                output = self.h2o(h_t)
+                loss = F.mse_loss(output, y)
+                return loss
+
+        net = Net(INPUT_DIM, HIDDEN_DIM, OUTPUT_DIM, N_LAYERS).to(0)
+        inp = [
+            torch.randn((BATCH_SIZE, SEQ_LEN, INPUT_DIM)).to(0),
+            torch.rand((BATCH_SIZE, SEQ_LEN, OUTPUT_DIM)).to(0)
+        ]
+
+        self._test_base(net, inp)
+
+
+@unittest.skipIf(TEST_WITH_TSAN, "TSAN is not fork-safe since we're forking in a multi-threaded environment")
 class DistributedDataParallelTest(MultiProcessTestCase):
     def setUp(self):
         super(DistributedDataParallelTest, self).setUp()
