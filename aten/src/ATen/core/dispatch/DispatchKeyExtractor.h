@@ -114,9 +114,6 @@ public:
   }
 
   DispatchKey getDispatchKeyBoxed(DispatchKeySet backendsWithoutFallthrough, const torch::jit::Stack* stack) const {
-    // TODO Unboxed dispatch supports TensorOptions (i.e. ScalarType/Device/Layout) arguments
-    //      but boxed doesn't yet. See https://github.com/pytorch/pytorch/issues/26428
-
     DispatchKeySet ks;
     for (const auto& ivalue : torch::jit::last(*stack, num_args_)) {
       if (C10_LIKELY(ivalue.isTensor())) {
