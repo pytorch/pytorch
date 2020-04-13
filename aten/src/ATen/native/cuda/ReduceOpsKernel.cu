@@ -643,6 +643,10 @@ Tensor& _logcumsumexp_out_cuda(Tensor& result, const Tensor& self, int64_t dim) 
     result.fill_(self);
     return result;
   }
+  if (self.numel() == 0) {
+    result.zero_();
+    return result;
+  }
   auto wrap_dim = maybe_wrap_dim(dim, self.dim());
 
   TensorArg output_arg{ result, "output", 1 };
