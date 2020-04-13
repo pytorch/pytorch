@@ -5,7 +5,6 @@ import logging
 import numbers
 import sys
 import threading
-from datetime import timedelta
 
 import torch
 import torch.distributed as dist
@@ -521,13 +520,13 @@ def rpc_sync(to, func, args=None, kwargs=None, timeout=UNSET_RPC_TIMEOUT):
         args (tuple): the argument tuple for the ``func`` invocation.
         kwargs (dict): is a dictionary of keyword arguments for the ``func``
                        invocation.
-        timeout (datetime.timedelta, optional): timeout to use for this RPC. If the RPC
-                                                does not complete in this amount of
-                                                time, an exception indicating it has
-                                                timed out will be raised. If not
-                                                provided, the default value set during
-                                                initialization or with `_set_rpc_timeout`
-                                                is used.
+        timeout (float, optional): timeout to use for this RPC. If the RPC
+                                   does not complete in this amount of
+                                   time, an exception indicating it has
+                                   timed out will be raised. If not
+                                   provided, the default value set during
+                                   initialization or with `_set_rpc_timeout`
+                                   is used.
 
     Returns:
         Returns the result of running ``func`` with ``args`` and ``kwargs``.
@@ -599,13 +598,13 @@ def rpc_async(to, func, args=None, kwargs=None, timeout=UNSET_RPC_TIMEOUT):
         args (tuple): the argument tuple for the ``func`` invocation.
         kwargs (dict): is a dictionary of keyword arguments for the ``func``
                        invocation.
-        timeout (datetime.timedelta, optional): timeout to use for this RPC. If the RPC
-                                                does not complete in this amount of
-                                                time, an exception indicating it has
-                                                timed out will be raised. If not
-                                                provided, the default value set during
-                                                initialization or with `_set_rpc_timeout`
-                                                is used.
+        timeout (float, optional): timeout to use for this RPC. If the RPC
+                                   does not complete in this amount of
+                                   time, an exception indicating it has
+                                   timed out will be raised. If not
+                                   provided, the default value set during
+                                   initialization or with `_set_rpc_timeout`
+                                   is used.
 
 
     Returns:
