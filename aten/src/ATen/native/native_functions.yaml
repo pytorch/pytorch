@@ -87,7 +87,7 @@
   manual_kernel_registration: True
   variants: method
 
-- func: requires_grad_(Tensor(a!) self, bool _requires_grad=True) -> Tensor(a!)
+- func: requires_grad_(Tensor(a!) self, bool requires_grad=True) -> Tensor(a!)
   manual_kernel_registration: True
   variants: method
 
@@ -694,6 +694,9 @@
 
 - func: cat.names_out(Tensor[] tensors, Dimname dim, *, Tensor(a!) out) -> Tensor(a!)
   supports_named_tensor: True
+
+- func: block_diag(Tensor[] tensors) -> Tensor
+  variants: function
 
 - func: ceil(Tensor self) -> Tensor
   use_c10_dispatcher: full

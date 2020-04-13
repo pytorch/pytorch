@@ -72,6 +72,45 @@ class bcolors:
     BOLD = '\033[1m'
     UNDERLINE = '\033[4m'
 
+# To the programmer, the output of hipify most likely are intermediates.
+# This class allows users of hipify to ask for a cleanup by running the
+# hipify and compilation in a with instantiating this context manager class
+# with keep_intermediates=False.
+# The main usecase is the cpp_extensions, specifically the load method.
+# It is a good idea to keep intermediates (in case of errors or to
+# not recompile unchanged files), but in cases where you don't want to
+# keep them (e.g. in the CI), this can be used to remove files.
+class GeneratedFileCleaner:
+    """Context Manager to clean up generated files"""
+    def __init__(self, keep_intermediates=False):
+        self.keep_intermediates = keep_intermediates
+        self.files_to_clean = set()
+        self.dirs_to_clean = []
+
+    def __enter__(self):
+        return self
+
+    def open(self, fn, *args):
+        if not os.path.exists(fn):
+            self.files_to_clean.add(os.path.abspath(fn))
+        return open(fn, *args)
+
+    def makedirs(self, dn, exist_ok=False):
+        parent, n = os.path.split(dn)
+        if not n:
+            parent, n = os.path.split(parent)
+        if parent and n and not os.path.exists(parent):
+            self.makedirs(parent, exist_ok=True)
+        if not os.path.isdir(dn) or not exist_ok:
+            os.mkdir(dn)
+            self.dirs_to_clean.append(os.path.abspath(dn))
+
+    def __exit__(self, type, value, traceback):
+        if not self.keep_intermediates:
+            for f in self.files_to_clean:
+                os.unlink(f)
+            for d in self.dirs_to_clean[::-1]:
+                os.rmdir(d)
 
 def matched_files_iter(root_path, includes=('*',), ignores=(), extensions=(), out_of_place_only=False):
     def _fnmatch(filepath, patterns):
@@ -120,7 +159,8 @@ def preprocess(
         show_detailed=False,
         show_progress=True,
         hip_clang_launch=False,
-        is_pytorch_extension=False):
+        is_pytorch_extension=False,
+        clean_ctx=None):
     """
     Call preprocessor on selected files.
 
@@ -128,11 +168,15 @@ def preprocess(
         show_detailed - Show a detailed summary of the transpilation process.
     """
 
+    if clean_ctx is None:
+        clean_ctx = GeneratedFileCleaner(keep_intermediates=True)
+
     # Preprocessing statistics.
     stats = {"unsupported_calls": [], "kernel_launches": []}
 
     for filepath in all_files:
-        result = preprocessor(output_directory, filepath, stats, hip_clang_launch, is_pytorch_extension)
+        result = preprocessor(output_directory, filepath, stats, hip_clang_launch, is_pytorch_extension, clean_ctx)
+
         # Show what happened
         if show_progress:
             print(
@@ -606,7 +650,7 @@ RE_ANGLE_HEADER = re.compile(r'#include <([^>]+)>')
 RE_THC_GENERIC_FILE = re.compile(r'#define THC_GENERIC_FILE "([^"]+)"')
 RE_CU_SUFFIX = re.compile(r'\.cu\b')  # be careful not to pick up .cuh
 
-def preprocessor(output_directory, filepath, stats, hip_clang_launch, is_pytorch_extension):
+def preprocessor(output_directory, filepath, stats, hip_clang_launch, is_pytorch_extension, clean_ctx):
     """ Executes the CUDA -> HIP conversion on the specified file. """
     fin_path = os.path.join(output_directory, filepath)
     with open(fin_path, 'r') as fin:
@@ -614,7 +658,7 @@ def preprocessor(output_directory, filepath, stats, hip_clang_launch, is_pytorch
 
     fout_path = os.path.join(output_directory, get_hip_file_path(filepath))
     if not os.path.exists(os.path.dirname(fout_path)):
-        os.makedirs(os.path.dirname(fout_path))
+        clean_ctx.makedirs(os.path.dirname(fout_path))
 
     # unsupported_calls statistics reporting is broken atm
     def pt_repl(m):
@@ -675,7 +719,7 @@ def preprocessor(output_directory, filepath, stats, hip_clang_launch, is_pytorch
         with open(fout_path, 'r') as fout_old:
             do_write = fout_old.read() != output_source
     if do_write:
-        with open(fout_path, 'w') as fout:
+        with clean_ctx.open(fout_path, 'w') as fout:
             fout.write(output_source)
         return "ok"
     else:
@@ -776,11 +820,13 @@ def hipify(
     extensions=(".cu", ".cuh", ".c", ".cc", ".cpp", ".h", ".in", ".hpp"),
     output_directory="",
     includes=(),
+    extra_files=(),
     out_of_place_only=False,
     ignores=(),
     show_progress=True,
     hip_clang_launch=False,
     is_pytorch_extension=False,
+    clean_ctx=None
 ):
     if project_directory == "":
         project_directory = os.getcwd()
@@ -802,6 +848,8 @@ def hipify(
     all_files = list(matched_files_iter(output_directory, includes=includes,
                                         ignores=ignores, extensions=extensions,
                                         out_of_place_only=out_of_place_only))
+    all_files_set = set(all_files)
+    all_files += [f for f in extra_files if f not in all_files_set]
 
     # Start Preprocessor
     preprocess(
@@ -810,4 +858,5 @@ def hipify(
         show_detailed=show_detailed,
         show_progress=show_progress,
         hip_clang_launch=hip_clang_launch,
-        is_pytorch_extension=is_pytorch_extension)
+        is_pytorch_extension=is_pytorch_extension,
+        clean_ctx=clean_ctx)
