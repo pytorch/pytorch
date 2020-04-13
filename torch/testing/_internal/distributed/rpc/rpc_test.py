@@ -1748,6 +1748,9 @@ class RpcTest(RpcAgentTestFixture):
         sec_to_ms = 1000
         rpc.rpc_async(dst_worker, my_sleep_func, args=(1,), timeout=5 * sec_to_ms).wait()
         rpc.rpc_sync(dst_worker, my_sleep_func, args=(1,), timeout=5 * sec_to_ms)
+        # Passing in a zero timeout should ensure that the RPC wont time out.
+        rpc.rpc_async(dst_worker, my_sleep_func, args=(1,), timeout=0).wait()
+        rpc.rpc_sync(dst_worker, my_sleep_func, args=(1,), timeout=0)
         # Reset for clean shutdown
         rpc._set_rpc_timeout(timedelta(seconds=60))
 
