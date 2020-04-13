@@ -3974,7 +3974,6 @@ class TestNN(NNTestCase):
         i1 = i.data[:, :2].contiguous().requires_grad_(True)
         output1 = m1(i1)
         output1.backward(grad_output[:, :8].contiguous())
-        # torch.autograd.gradcheck(m1, (i1.clone(),))
 
         m2 = nn.Conv3d(2, 8, kernel_size=3, bias=False).to("cpu", torch.float)
         m2.weight.data.copy_(m.weight.data[8:])

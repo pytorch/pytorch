@@ -797,8 +797,12 @@ at::Tensor _convolution_nogroup(
     } else if (dim == 5) { /* dim == 5, CPU, non-dilated */
       /* CPU implementation has specialized MM kernels
          for non-dilated case here */
+
       // This path is already overwritten with the fast impl in _convolution
-      return at::slow_conv3d(input, weight, kernel_size, bias, stride, padding);
+      // See: https://github.com/pytorch/pytorch/pull/3635
+      return at::slow_conv3d(
+          input, weight, kernel_size, bias,
+          stride, padding);
     }
   }
 
@@ -840,9 +844,13 @@ std::tuple<Tensor,Tensor,Tensor> _convolution_double_backward(
   params.dilation = dilation_.vec();
   params.transposed = transposed_;
   params.output_padding = output_padding_.vec();
-  // TODO: hacky way of inferring the groups number
-  // should pass the parameter through autograd
-  params.groups = input.size(1) / weight.size(1);
+  // TODO: hacky way of inferring the groups number for grouped Conv3D
+  // See: https://github.com/pytorch/pytorch/pull/36355
+  if (!params.transposed && input.dim() > 4) {
+    params.groups = input.size(1) / weight.size(1);
+  } else {
+    params.groups = groups_;
+  }
   params.benchmark = benchmark;
   params.deterministic = deterministic;
   params.cudnn_enabled = cudnn_enabled;
