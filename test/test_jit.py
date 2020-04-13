@@ -8070,6 +8070,16 @@ a")
         self.assertEqual(any_refinement(3, 4), 7)
         self.assertEqual(any_refinement(3, "hi"), 0)
 
+        @torch.jit.script
+        def any_refinement2(a):
+            # type: (Any) -> Tensor
+            if isinstance(a, Tensor):
+                return a
+            return torch.tensor(3)
+
+        self.assertEqual(any_refinement2(3), torch.tensor(3))
+        self.assertEqual(any_refinement2(torch.tensor(5)), torch.tensor(5))
+
     def test_any_in_class_fails(self):
         with self.assertRaisesRegex(RuntimeError, "contains an Any"):
             @torch.jit.script
