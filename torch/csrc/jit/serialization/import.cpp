@@ -180,7 +180,7 @@ IValue ScriptModuleDeserializer::readArchive(const std::string& archive_name) {
       archive_name, type_resolver, obj_loader, device_, *reader_.get());
 }
 
-void  rewriteQuantizedConvForBC(const Module& module) {
+void rewriteQuantizedConvForBC(const Module& module) {
   const std::string& old_quantized_conv2d = R"(
 graph(%x, %packed_params, %stride, %padding, %dilation, %groups, %r_scale, %r_zero_point):
          %r = quantized::conv2d(%x, %packed_params, %stride, %padding, %dilation, %groups, %r_scale, %r_zero_point)
@@ -222,10 +222,10 @@ graph(%x, %packed_params, %stride, %padding, %dilation, %groups, %r_scale, %r_ze
 
   SubgraphRewriter rewriter;
   std::vector<std::vector<std::string>> patterns_and_replacements = {
-    {old_quantized_conv2d, new_quantized_conv2d},
-    {old_quantized_conv2d_relu, new_quantized_conv2d_relu},
-    {old_quantized_conv3d, new_quantized_conv3d},
-    {old_quantized_conv3d_relu, new_quantized_conv3d_relu},
+      {old_quantized_conv2d, new_quantized_conv2d},
+      {old_quantized_conv2d_relu, new_quantized_conv2d_relu},
+      {old_quantized_conv3d, new_quantized_conv3d},
+      {old_quantized_conv3d_relu, new_quantized_conv3d_relu},
   };
   rewriter.runOnModule(module);
   for (const Module& child : module.children()) {

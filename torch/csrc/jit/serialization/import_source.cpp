@@ -262,14 +262,16 @@ struct SourceImporterImpl : public Resolver,
     }
   }
 
-c10::optional<Assign> qconvAttributeAssignmentSpecialHandlingHack(
+  c10::optional<Assign> qconvAttributeAssignmentSpecialHandlingHack(
       const QualifiedName& qualified_classname,
       const Assign& assign) {
     std::regex mangle_re("\\.___torch_mangle_\\d+");
     auto replaced_string =
         std::regex_replace(qualified_classname.qualifiedName(), mangle_re, "");
-    const std::string& conv2d_type = "__torch__.torch.nn.quantized.modules.conv.Conv2d";
-    const std::string& conv3d_type = "__torch__.torch.nn.quantized.modules.conv.Conv3d";
+    const std::string& conv2d_type =
+        "__torch__.torch.nn.quantized.modules.conv.Conv2d";
+    const std::string& conv3d_type =
+        "__torch__.torch.nn.quantized.modules.conv.Conv3d";
     if (replaced_string == conv2d_type || replaced_string == conv3d_type) {
       auto lhs = Var(assign.lhs());
       if (!assign.type().present() || assign.type().get().kind() != TK_VAR) {
@@ -278,9 +280,9 @@ c10::optional<Assign> qconvAttributeAssignmentSpecialHandlingHack(
       auto type = Var(assign.type().get());
       if (lhs.name().name() == "_packed_params" &&
           type.name().name() == "Tensor") {
-        std::string packed_params_typename = replaced_string == conv2d_type ?
-          "__torch__.torch.classes.quantized.Conv2dPackedParamsBase" :
-          "__torch__.torch.classes.quantized.Conv3dPackedParamsBase";
+        std::string packed_params_typename = replaced_string == conv2d_type
+            ? "__torch__.torch.classes.quantized.Conv2dPackedParamsBase"
+            : "__torch__.torch.classes.quantized.Conv3dPackedParamsBase";
         Parser p(std::make_shared<Source>(std::move(packed_params_typename)));
         auto typename_expr = p.parseExp();
         auto maybe_typename =

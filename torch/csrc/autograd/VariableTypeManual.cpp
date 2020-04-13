@@ -405,7 +405,7 @@ static auto registry = torch::RegisterOperators()
     .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
     .catchAllKernel<decltype(VariableType::_version), &VariableType::_version>())
   .op(torch::RegisterOperators::options()
-    .schema("aten::requires_grad_(Tensor(a!) self, bool _requires_grad=True) -> Tensor(a!)")
+    .schema("aten::requires_grad_(Tensor(a!) self, bool requires_grad=True) -> Tensor(a!)")
     .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
     // For requires_grad_(), we need the catch-all kernel (see comment above), but we also need the VariableTensorId backend
     // kernel, because when called with a VariableTensorId tensor, it goes through the variable fallback kernel,
