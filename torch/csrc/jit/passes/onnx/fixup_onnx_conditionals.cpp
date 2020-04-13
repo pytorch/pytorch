@@ -3,7 +3,7 @@
 namespace torch {
 namespace jit {
 
-namespace onnx{
+namespace onnx {
 using namespace ::c10::onnx;
 }
 
@@ -15,7 +15,8 @@ void FixupONNXIfs(Block* block) {
       for (Block* block : node->blocks()) {
         FixupONNXIfs(block);
         if (block->nodes().begin() == block->nodes().end()) {
-          //ONNX does not support empty blocks, must use some op which does nothing
+          // ONNX does not support empty blocks, must use some op which does
+          // nothing
           Value* output = block->outputs()[0];
           Node* id_node = graph->create(onnx::Identity);
           id_node->insertBefore(block->return_node());
@@ -24,8 +25,7 @@ void FixupONNXIfs(Block* block) {
           block->return_node()->replaceInputWith(output, id_node->output());
         }
       }
-    }
-    else {
+    } else {
       for (Block* block : node->blocks()) {
         FixupONNXIfs(block);
       }
@@ -37,5 +37,5 @@ void FixupONNXConditionals(std::shared_ptr<Graph>& graph) {
   FixupONNXIfs(graph->block());
 }
 
-} //jit
-} //torch
+} // namespace jit
+} // namespace torch

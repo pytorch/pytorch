@@ -13,18 +13,17 @@ namespace autograd {
 namespace profiler {
 
 at::Tensor record_function_enter(const std::string& name) {
-  auto rec = std::make_unique<RecordFunction>();
+  auto rec = std::make_unique<RecordFunction>(RecordScope::USER_SCOPE);
   // Only add new scope if profiling is enabled.
-  if (auto* current = RecordFunction::current()) {
+  if (auto* current = rec->current()) {
     AT_ASSERT(
         current->name() == StringView("profiler::_record_function_enter"));
     // RecordFunction requires parent_ to be alive for it's entire lifetime.
     // Since the currently active RecordFunction will only live for the lifetime
     // of this op we need to end it early so the new RecordFunction we create is
     // a direct child of the parent RecordFunction.
-    current->end();
-
-    runBeforeCallbacks(rec.get(), name);
+    current->_end();
+    rec->_before(name);
   }
   return at::cpp_custom_type_hack::create(std::move(rec), at::TensorOptions());
 }
@@ -33,15 +32,14 @@ void record_function_exit(const at::Tensor& handle) {
   // We don't actually need to do anything with handle just need to persist the
   // lifetime until now.
   auto& rec = at::cpp_custom_type_hack::cast<RecordFunction>(handle);
-  if (auto* current = RecordFunction::current()) {
+  if (auto* current = rec.current()) {
     AT_ASSERT(
         current->name() == StringView("profiler::_record_function_exit"));
   }
-  if (rec.active()) {
-    rec.end();
-  }
+  rec._end();
 }
 
+// Internal only, do not use directly, use Python's record_function()
 static auto registry =
     RegisterOperators()
         .op("profiler::_record_function_enter", &record_function_enter)

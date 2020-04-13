@@ -1,15 +1,28 @@
 #pragma once
 
+#include <c10/macros/Macros.h>
 #include <string>
 #include <utility>
+#include <ostream>
 
 namespace c10 {
 
+// TODO: consider storing namespace separately too
 struct OperatorName final {
   std::string name;
   std::string overload_name;
   OperatorName(std::string name, std::string overload_name)
       : name(std::move(name)), overload_name(std::move(overload_name)) {}
+
+  void setNamespaceIfNotSet(const char* ns) {
+    // TODO: slow!  Fix internal data structures so I don't have to paste the
+    // names together
+    std::ostringstream oss;
+    if (name.find("::") == std::string::npos) {
+      oss << ns << "::" << name;
+      name = oss.str();
+    }
+  }
 };
 
 inline bool operator==(const OperatorName& lhs, const OperatorName& rhs) {
@@ -20,15 +33,10 @@ inline bool operator!=(const OperatorName& lhs, const OperatorName& rhs) {
   return !operator==(lhs, rhs);
 }
 
-inline std::string toString(const OperatorName& opName) {
-  std::string result = opName.name;
-  if (opName.overload_name.size() != 0) {
-    result += "." + opName.overload_name;
-  }
-  return result;
-}
+CAFFE2_API std::string toString(const OperatorName& opName);
+CAFFE2_API std::ostream& operator<<(std::ostream&, const OperatorName&);
 
-}
+} // namespace c10
 
 namespace std {
   template <>

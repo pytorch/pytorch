@@ -112,7 +112,13 @@ Y:
     .Output(0, "Y", "(*Tensor*): sliced output tensor")
     .InheritOnnxSchema();
 
-GRADIENT_OPERATOR_SCHEMA(SliceGradient);
+GRADIENT_OPERATOR_SCHEMA(SliceGradient)
+    .TensorInferenceFunction([](const OperatorDef& /*def*/,
+                                const vector<TensorShape>& in) {
+      vector<TensorShape> out(1);
+      out.at(0) = in.at(0);
+      return out;
+    });
 
 namespace {
 struct GetSliceGradient : public GradientMakerBase {
@@ -133,6 +139,6 @@ struct GetSliceGradient : public GradientMakerBase {
     }
   }
 };
-}
+} // namespace
 REGISTER_GRADIENT(Slice, GetSliceGradient);
 } // namespace caffe2

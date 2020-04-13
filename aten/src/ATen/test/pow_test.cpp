@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <ATen/native/Pow.h>
+#include <c10/test/util/Macros.h>
 
 #include <torch/types.h>
 #include <torch/utils.h>
@@ -228,7 +229,8 @@ TEST(PowTest, IntTensorPowAllScalars) {
   tensor_pow_scalar(ints, c10::kInt, doubles, c10::kDouble);
 }
 
-TEST(PowTest, LongTensorPowAllScalars) {
+// See https://github.com/pytorch/pytorch/issues/35548
+TEST(PowTest, DISABLED_ON_WINDOWS(LongTensorPowAllScalars)) {
   tensor_pow_scalar(longs, c10::kLong, non_neg_ints, c10::kInt);
   tensor_pow_scalar(longs, c10::kLong, non_neg_longs, c10::kLong);
   tensor_pow_scalar(longs, c10::kLong, floats, c10::kFloat);

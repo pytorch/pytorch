@@ -1,12 +1,12 @@
 #include <torch/csrc/python_headers.h>
 
-#include <torch/csrc/jit/serialization/export.h>
+#include <torch/csrc/jit/frontend/tracer.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/passes/lower_tuples.h>
 #include <torch/csrc/jit/python/pybind.h>
 #include <torch/csrc/jit/python/python_tracer.h>
-#include <torch/csrc/jit/frontend/tracer.h>
+#include <torch/csrc/jit/serialization/export.h>
 #include <torch/csrc/utils/python_strings.h>
 
 #include <c10/util/Exception.h>
@@ -158,9 +158,14 @@ void initPythonTracerBindings(PyObject* module) {
       .def("graph", [](TracingState& s) { return s.graph; });
 
   m.def("_tracer_warn_use_python", []() { tracer::setWarn(pythonWarn); });
-  m.def("_create_graph_by_tracing", createGraphByTracing,
-    py::arg("func"), py::arg("inputs"), py::arg("var_name_lookup_fn"),
-    py::arg("force_outplace"), py::arg("self") = nullptr);
+  m.def(
+      "_create_graph_by_tracing",
+      createGraphByTracing,
+      py::arg("func"),
+      py::arg("inputs"),
+      py::arg("var_name_lookup_fn"),
+      py::arg("force_outplace"),
+      py::arg("self") = nullptr);
   m.def("_get_tracing_state", []() { return getTracingState(); });
   m.def("_set_tracing_state", [](std::shared_ptr<TracingState> state) {
     return setTracingState(state);

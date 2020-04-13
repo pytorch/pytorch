@@ -33,7 +33,7 @@ class IDEEPConvPoolOpBase : public ConvPoolOpBase<IDEEPContext> {
       const ideep::tensor& input,
       int output_channel) {
     CAFFE_ENFORCE_GT(input.get_size(), 0);
-    ideep::tensor::dims output_dims;
+    std::vector<int> output_dims;
     const auto input_dims = input.get_dims();
     std::vector<std::int64_t> input_Tdims(
         input_dims.cbegin(), input_dims.cend());
@@ -48,7 +48,7 @@ class IDEEPConvPoolOpBase : public ConvPoolOpBase<IDEEPContext> {
         &kernel_,
         &pads_,
         &output_dims);
-    return output_dims;
+    return {output_dims.begin(), output_dims.end()};
   }
 
   bool RunOnDevice() override {

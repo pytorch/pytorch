@@ -11,6 +11,7 @@ from .rendezvous import rendezvous, register_rendezvous_handler  # noqa: F401
 from . import (
     AllreduceOptions,
     AllreduceCoalescedOptions,
+    AllToAllOptions,
     BroadcastOptions,
     GatherOptions,
     ReduceOptions,
@@ -44,7 +45,8 @@ except ImportError:
 
 class Backend(object):
     """
-    An enum-like class of available backends: GLOO, NCCL, and MPI.
+    An enum-like class of available backends: GLOO, NCCL, MPI, and other registered
+    backends.
 
     The values of this class are lowercase strings, e.g., ``"gloo"``. They can
     be accessed as attributes, e.g., ``Backend.NCCL``.
@@ -75,7 +77,28 @@ class Backend(object):
                              "on CPU tensors.")
         elif value == Backend.UNDEFINED:
             raise ValueError("Invalid backend: '{}'".format(name))
+        elif value != Backend.GLOO and value != Backend.NCCL and value != Backend.MPI:
+            value = name
         return value
+
+    @classmethod
+    def register_backend(cls, name, func):
+        """
+        Registers a new backend.
+
+        This class method is used by 3rd party cpp extension to register new backend.
+
+        Arguments:
+            name (str): Backend name matching with the one in `init_process_group()`.
+            func (function): Function handler that instantiates the backend.
+                             The function should be implemented in the backend cpp extension
+                             and takes four arguments, including prefix_store, rank,
+                             world_size, and timeout.
+
+        .. note:: This support of 3rd party backend is experimental and subject to change.
+
+        """ 
+        setattr(Backend, name.upper(), func)
 
 # `_backend`, `dist_backend`, and `reduce_op` are here to maintain backward
 # compatibility with pre-c10d distributed package.
@@ -483,7 +506,13 @@ def _new_process_group_helper(world_size,
             _pg_map[pg] = (Backend.NCCL, store)
             _pg_names[pg] = group_name
         else:
-            raise RuntimeError("Unsupported distributed backend by group")
+            pg = getattr(Backend, backend.upper())(
+                prefix_store,
+                rank,
+                world_size,
+                timeout)
+            _pg_map[pg] = (backend, store)
+            _pg_names[pg] = group_name
 
     return pg
 
@@ -1454,6 +1483,193 @@ def reduce_scatter(output,
         work = _default_pg.reduce_scatter([output], [input_list], opts)
     else:
         work = group.reduce_scatter([output], [input_list], opts)
+
+    if async_op:
+        return work
+    else:
+        work.wait()
+
+
+def all_to_all_single(output,
+                      input,
+                      output_split_sizes=None,
+                      input_split_sizes=None,
+                      group=group.WORLD,
+                      async_op=False):
+    """
+    Each process splits input tensor and then scatters the split list
+    to all processes in a group. Then concatenate the received tensors from all
+    the processes in the group and return single output tensor.
+
+    Arguments:
+        output (Tensor): Gathered cancatenated output tensor.
+        input (Tensor): Input tensor to scatter.
+        output_split_sizes: (list[Int], optional): Output split sizes for dim 0
+            if specified None or empty, dim 0 of ``output`` tensor must divide
+            equally by ``world_size``.
+        input_split_sizes: (list[Int], optional): Input split sizes for dim 0
+            if specified None or empty, dim 0 of ``input`` tensor must divide
+            equally by ``world_size``.
+        group (ProcessGroup, optional): The process group to work on.
+        async_op (bool, optional): Whether this op should be an async op.
+
+    Returns:
+        Async work handle, if async_op is set to True.
+        None, if not async_op or if not part of the group.
+
+    .. warning::
+        `all_to_all_single` is experimental and subject to change.
+
+    Examples:
+        >>> input = torch.arange(4) + rank * 4
+        >>> input
+        tensor([0, 1, 2, 3])     # Rank 0
+        tensor([4, 5, 6, 7])     # Rank 1
+        tensor([8, 9, 10, 11])   # Rank 2
+        tensor([12, 13, 14, 15]) # Rank 3
+        >>> output = torch.empty([4], dtype=torch.int64)
+        >>> dist.all_to_all_single(output, input)
+        >>> output
+        tensor([0, 4, 8, 12])    # Rank 0
+        tensor([1, 5, 9, 13])    # Rank 1
+        tensor([2, 6, 10, 14])   # Rank 2
+        tensor([3, 7, 11, 15])   # Rank 3
+
+        >>> # Essentially, it is similar to following operation:
+        >>> scatter_list = list(input.chunk(world_size))
+        >>> gather_list  = list(output.chunk(world_size))
+        >>> for i in range(world_size):
+        >>>   dist.scatter(gather_list[i], scatter_list if i == rank else [], src = i)
+
+        >>> # Another example with uneven split
+        >>> input
+        tensor([0, 1, 2, 3, 4, 5])                                       # Rank 0
+        tensor([10, 11, 12, 13, 14, 15, 16, 17, 18])                     # Rank 1
+        tensor([20, 21, 22, 23, 24])                                     # Rank 2
+        tensor([30, 31, 32, 33, 34, 35, 36])                             # Rank 3
+        >>> input_splits
+        [2, 2, 1, 1]                                                     # Rank 0
+        [3, 2, 2, 2]                                                     # Rank 1
+        [2, 1, 1, 1]                                                     # Rank 2
+        [2, 2, 2, 1]                                                     # Rank 3
+        >>> output_splits
+        [2, 3, 2, 2]                                                     # Rank 0
+        [2, 2, 1, 2]                                                     # Rank 1
+        [1, 2, 1, 2]                                                     # Rank 2
+        [1, 2, 1, 1]                                                     # Rank 3
+        >>> output = ...
+        >>> dist.all_to_all_single(output, input, output_splits, input_splits)
+        >>> output
+        tensor([ 0,  1, 10, 11, 12, 20, 21, 30, 31])                     # Rank 0
+        tensor([ 2,  3, 13, 14, 22, 32, 33])                             # Rank 1
+        tensor([ 4, 15, 16, 23, 34, 35])                                 # Rank 2
+        tensor([ 5, 17, 18, 24, 36])                                     # Rank 3
+    """
+    if _rank_not_in_group(group):
+        return
+
+    opts = AllToAllOptions()
+    _check_single_tensor(output, "output")
+    _check_single_tensor(input, "input")
+    output_split_sizes = [] if output_split_sizes is None else output_split_sizes
+    input_split_sizes = [] if input_split_sizes is None else input_split_sizes
+
+    if group == GroupMember.WORLD:
+        _check_default_pg()
+        work = _default_pg.alltoall_base(output, input, output_split_sizes, input_split_sizes, opts)
+    else:
+        work = group.alltoall_base(output, input, output_split_sizes, input_split_sizes, opts)
+
+    if async_op:
+        return work
+    else:
+        work.wait()
+
+def all_to_all(output_tensor_list,
+               input_tensor_list,
+               group=group.WORLD,
+               async_op=False):
+    """
+    Each process scatters list of input tensors to all processes in a group and
+    return gathered list of tensors in output list.
+
+    Arguments:
+        output_tensor_list (list[Tensor]): List of tensors to be gathered one 
+            per rank.
+        input_tensor_list (list[Tensor]): List of tensors to scatter one per rank.
+        group (ProcessGroup, optional): The process group to work on.
+        async_op (bool, optional): Whether this op should be an async op.
+
+    Returns:
+        Async work handle, if async_op is set to True.
+        None, if not async_op or if not part of the group.
+
+    .. warning::
+        `all_to_all` is experimental and subject to change.
+
+    Examples:
+        >>> input = torch.arange(4) + rank * 4
+        >>> input = list(input.chunk(4))
+        >>> input
+        [tensor([0]), tensor([1]), tensor([2]), tensor([3])]     # Rank 0
+        [tensor([4]), tensor([5]), tensor([6]), tensor([7])]     # Rank 1
+        [tensor([8]), tensor([9]), tensor([10]), tensor([11])]   # Rank 2
+        [tensor([12]), tensor([13]), tensor([14]), tensor([15])] # Rank 3
+        >>> output = list(torch.empty([4], dtype=torch.int64).chunk(4))
+        >>> dist.all_to_all(output, input)
+        >>> output
+        [tensor([0]), tensor([4]), tensor([8]), tensor([12])]    # Rank 0
+        [tensor([1]), tensor([5]), tensor([9]), tensor([13])]    # Rank 1
+        [tensor([2]), tensor([6]), tensor([10]), tensor([14])]   # Rank 2
+        [tensor([3]), tensor([7]), tensor([11]), tensor([15])]   # Rank 3
+
+        >>> # Essentially, it is similar to following operation:
+        >>> scatter_list = input
+        >>> gather_list  = output
+        >>> for i in range(world_size):
+        >>>   dist.scatter(gather_list[i], scatter_list if i == rank else [], src = i)
+
+        >>> input
+        tensor([0, 1, 2, 3, 4, 5])                                       # Rank 0
+        tensor([10, 11, 12, 13, 14, 15, 16, 17, 18])                     # Rank 1
+        tensor([20, 21, 22, 23, 24])                                     # Rank 2
+        tensor([30, 31, 32, 33, 34, 35, 36])                             # Rank 3
+        >>> input_splits
+        [2, 2, 1, 1]                                                     # Rank 0
+        [3, 2, 2, 2]                                                     # Rank 1
+        [2, 1, 1, 1]                                                     # Rank 2
+        [2, 2, 2, 1]                                                     # Rank 3
+        >>> output_splits
+        [2, 3, 2, 2]                                                     # Rank 0
+        [2, 2, 1, 2]                                                     # Rank 1
+        [1, 2, 1, 2]                                                     # Rank 2
+        [1, 2, 1, 1]                                                     # Rank 3
+        >>> input = list(input.split(input_splits))
+        >>> input
+        [tensor([0, 1]), tensor([2, 3]), tensor([4]), tensor([5])]                   # Rank 0
+        [tensor([10, 11, 12]), tensor([13, 14]), tensor([15, 16]), tensor([17, 18])] # Rank 1
+        [tensor([20, 21]), tensor([22]), tensor([23]), tensor([24])]                 # Rank 2
+        [tensor([30, 31]), tensor([32, 33]), tensor([34, 35]), tensor([36])]         # Rank 3
+        >>> output = ...
+        >>> dist.all_to_all(output, input)
+        >>> output
+        [tensor([0, 1]), tensor([10, 11, 12]), tensor([20, 21]), tensor([30, 31])]   # Rank 0
+        [tensor([2, 3]), tensor([13, 14]), tensor([22]), tensor([32, 33])]           # Rank 1
+        [tensor([4]), tensor([15, 16]), tensor([23]), tensor([34, 35])]              # Rank 2
+        [tensor([5]), tensor([17, 18]), tensor([24]), tensor([36])]                  # Rank 3
+    """
+    if _rank_not_in_group(group):
+        return
+
+    opts = AllToAllOptions()
+    _check_tensor_list(output_tensor_list, "output_tensor_list")
+    _check_tensor_list(input_tensor_list, "input_tensor_list")
+
+    if group == GroupMember.WORLD:
+        _check_default_pg()
+        work = _default_pg.alltoall(output_tensor_list, input_tensor_list, opts)
+    else:
+        work = group.alltoall(output_tensor_list, input_tensor_list, opts)
 
     if async_op:
         return work

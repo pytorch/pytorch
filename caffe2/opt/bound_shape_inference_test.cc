@@ -1,3 +1,4 @@
+#include <c10/test/util/Macros.h>
 #include <gtest/gtest.h>
 #include "caffe2/core/common.h"
 #include "caffe2/core/logging.h"
@@ -296,7 +297,10 @@ TEST(BoundShapeInference, ConcatMissingInput) {
       {spec.max_batch_size, 2, 60});
 }
 
-TEST(BoundShapeInference, Int8QuantizeInferInputBackwards) {
+// See https://github.com/pytorch/pytorch/issues/35544
+TEST(
+    BoundShapeInference,
+    DISABLED_ON_WINDOWS(Int8QuantizeInferInputBackwards)) {
   NetDef net;
   net.add_op()->CopyFrom(CreateOperatorDef(
       "Int8Quantize",
@@ -401,6 +405,32 @@ TEST(BoundShapeInference, ConcatInferInputBackwards) {
       "I1",
       {TensorBoundShape_DimType_BATCH, TensorBoundShape_DimType_CONSTANT},
       {spec.max_batch_size, 101 - 60});
+}
+
+TEST(BoundShapeInference, ElementwiseInferInputBackwards) {
+  NetDef net;
+  net.add_op()->CopyFrom(CreateOperatorDef(
+      "Mul", "", {"I0", "I1"}, {"Out"}, {MakeArgument<int>("broadcast", 1)}));
+  BoundShapeSpec spec(20, 1000);
+  ShapeInfoMap shape_map;
+  shape_map.emplace(
+      "Out",
+      makeTensorInfo(
+          {TensorBoundShape_DimType_BATCH, TensorBoundShape_DimType_CONSTANT},
+          {spec.max_batch_size, 60}));
+  BoundShapeInferencer eng(spec);
+  eng.InferBoundShapeAndType(net, shape_map, nullptr);
+  const auto& out_shape = eng.shape_info();
+  verifyShapeInfo(
+      out_shape,
+      "I0",
+      {TensorBoundShape_DimType_BATCH, TensorBoundShape_DimType_CONSTANT},
+      {spec.max_batch_size, 60});
+  verifyShapeInfo(
+      out_shape,
+      "I1",
+      {TensorBoundShape_DimType_BATCH, TensorBoundShape_DimType_CONSTANT},
+      {spec.max_batch_size, 60});
 }
 
 TEST(BoundShapeInference, Bucketize) {

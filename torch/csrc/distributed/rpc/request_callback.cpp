@@ -9,45 +9,14 @@ namespace rpc {
 
 using namespace torch::distributed::autograd;
 
-namespace {
-
-// When request message has autograd info, processMessage() will set up valid
-// current context id properly. This struct is used to clean up current context
-// id after processMessage() is done.
-struct ClearAutogradContextGuard {
-  ClearAutogradContextGuard() = default;
-  ~ClearAutogradContextGuard() {
-    clear();
-  }
-
-  void clear() {
-    auto& autogradContainer = DistAutogradContainer::getInstance();
-    autogradContainer.clearCurrentContext();
-  }
-};
-
-} // anonymous namespace
-
 std::shared_ptr<FutureMessage> RequestCallback::operator()(
     Message& request) const {
-  // For a recv thread, current context id should be invalid outside
-  // processMessage().
-  ClearAutogradContextGuard guard;
-  try {
-    return processMessage(request);
-  } catch (std::exception& e) {
-    LOG(ERROR) << "Received error while processing request type "
-               << request.type() << ": " << e.what();
-    // Adding node information to the error here since all processed RPC
-    // requests should be going through this function.
-    std::string errorMsg = c10::str(
-        "Error on Node ",
-        DistAutogradContainer::getInstance().getWorkerId(),
-        ": ",
-        e.what());
-    return std::make_shared<FutureMessage>(
-        createExceptionResponse(request, errorMsg));
-  }
+  // NB: cannot clear autograd context id here because the processMessage method
+  // might pause waiting for all RRefs in the arguments to be confirmed by their
+  // owners and resumne processing in a different thread. Hence, the
+  // thread_local context id needs to be set and cleared in the thread that
+  // indeed carries out the processing logic.
+  return processMessage(request);
 }
 
 } // namespace rpc

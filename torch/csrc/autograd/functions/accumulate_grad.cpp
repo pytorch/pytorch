@@ -23,7 +23,6 @@ AccumulateGrad::AccumulateGrad(Variable variable_)
 }
 
 auto AccumulateGrad::apply(variable_list&& grads) -> variable_list {
-  // XXX: this method is not thread-safe!
   check_input_variables("AccumulateGrad", grads, 1, 0);
 
   if (!grads[0].defined())
@@ -35,16 +34,27 @@ auto AccumulateGrad::apply(variable_list&& grads) -> variable_list {
     return {};
 
   at::Tensor& grad = variable.grad();
+
+  // std::move(grads[0]) to avoid bumping up refcount
+  at::Tensor new_grad = callHooks(variable, std::move(grads[0]));
+
+  // Acquire lock to here protect thread safety on variable, this ensures
+  // AccumulateGrad does not race to shared variable from different threads
+  // when updating the gradients. We don't ensure thread safety on hooks
+  // and rely on user to provide thread safe hooks
+  // see Note [Thread Safety on Autograd Node]
+  std::lock_guard<std::mutex> lock(mutex_);
+
   // If the function has post hooks (for example, a DDP allreduce hook),
   // call_function in Engine.cpp will temporarily bump the expected refcount
   // by one, hence the addition of !post_hooks().empty() for 'num_expected_refs'
   // in addition to the one reference that we're holding.
   // 'num_expected_refs' is used to determine whether or not we should clone
   // the grad or can steal the grad.
-  accumulateGradAndCallHooks(
+  accumulateGrad(
       variable,
       grad,
-      std::move(grads[0]),
+      new_grad,
       1 + !post_hooks().empty() /* num_expected_refs */,
       [&grad](at::Tensor&& grad_update) { grad = std::move(grad_update); });
 
