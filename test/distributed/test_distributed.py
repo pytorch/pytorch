@@ -2057,14 +2057,31 @@ class _DistTestBase(object):
         bs_offset = int(rank * 2)
         global_bs = int(num_processes * 2)
 
-        self._test_DistributedDataParallel_SyncBatchNorm(gpu_subset=gpus, rank=rank, local_bs=local_bs, global_bs=global_bs, offset=bs_offset)
+        self._test_DistributedDataParallel_SyncBatchNorm(
+            gpu_subset=gpus,
+            rank=rank,
+            local_bs=local_bs,
+            global_bs=global_bs,
+            offset=bs_offset)
 
         # test output_device
-        self._test_DistributedDataParallel_SyncBatchNorm(gpu_subset=gpus, rank=rank, local_bs=local_bs, global_bs=global_bs, offset=bs_offset, output_device=torch.device('cuda'))
+        self._test_DistributedDataParallel_SyncBatchNorm(
+            gpu_subset=gpus,
+            rank=rank,
+            local_bs=local_bs,
+            global_bs=global_bs,
+            offset=bs_offset,
+            output_device=torch.device('cuda'))
 
         # test device_ids
         gpus = list(map(lambda i: torch.device('cuda:' + str(i)), gpus))
-        self._test_DistributedDataParallel_SyncBatchNorm(gpu_subset=gpus, rank=rank, local_bs=local_bs, global_bs=global_bs, offset=bs_offset, output_device=torch.device('cuda'))
+        self._test_DistributedDataParallel_SyncBatchNorm(
+            gpu_subset=gpus,
+            rank=rank,
+            local_bs=local_bs,
+            global_bs=global_bs,
+            offset=bs_offset,
+            output_device=torch.device('cuda'))
 
     @unittest.skipIf(BACKEND != 'nccl' and BACKEND != 'gloo',
                      "Only Nccl & Gloo backend support DistributedDataParallel")
@@ -2163,7 +2180,11 @@ class _DistTestBase(object):
         global_bs = int((num_processes + 3) * num_processes / 2)
 
         self._test_DistributedDataParallel_SyncBatchNorm(
-            gpu_subset=gpus, rank=rank, local_bs=local_bs, global_bs=global_bs, offset=bs_offset)
+            gpu_subset=gpus,
+            rank=rank,
+            local_bs=local_bs,
+            global_bs=global_bs,
+            offset=bs_offset)
 
     @skipIfNoTorchVision
     def test_SyncBatchNorm_process_group(self):
