@@ -59,6 +59,7 @@ DECLARE_DISPATCH(void(*)(TensorIterator&, const double, const double, Generator)
 DECLARE_DISPATCH(void(*)(TensorIterator&, const double, Generator), exponential_stub);
 DECLARE_DISPATCH(void(*)(TensorIterator&, const double, Generator), geometric_stub);
 DECLARE_DISPATCH(void(*)(TensorIterator&, const double, const double, Generator), log_normal_stub);
+DECLARE_DISPATCH(void(*)(TensorIterator&, const double, const double, Generator), uniform_stub);
 DECLARE_DISPATCH(void(*)(Tensor&, const double, const double, Generator), normal_stub);
 DECLARE_DISPATCH(void(*)(TensorIterator&, const uint64_t, const int64_t, Generator), random_from_to_stub);
 DECLARE_DISPATCH(void(*)(TensorIterator&, Generator), random_full_64_bits_range_stub);

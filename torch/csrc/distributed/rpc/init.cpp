@@ -413,7 +413,7 @@ If the future completes with an error, an exception is thrown.
       [](const WorkerInfo& dst,
          const std::string& opName,
          const std::shared_ptr<torch::autograd::profiler::RecordFunction>& rf,
-         const std::chrono::milliseconds& rpcTimeout,
+         const float rpcTimeout,
          const py::args& args,
          const py::kwargs& kwargs) {
         DCHECK(PyGILState_Check());
@@ -427,7 +427,7 @@ If the future completes with an error, an exception is thrown.
          std::string& pickledPythonUDF,
          std::vector<torch::Tensor>& tensors,
          const std::shared_ptr<torch::autograd::profiler::RecordFunction>& rf,
-         const std::chrono::milliseconds& rpcTimeout) {
+         const float rpcTimeout) {
         DCHECK(!PyGILState_Check());
         return pyRpcPythonUdf(dst, pickledPythonUDF, tensors, rf, rpcTimeout);
       },
@@ -442,9 +442,10 @@ If the future completes with an error, an exception is thrown.
       "_invoke_rpc_torchscript",
       [](const std::string& dstWorkerName,
          const std::string& qualifiedNameStr,
+         const std::shared_ptr<torch::autograd::profiler::RecordFunction>& rf,
          const py::tuple& argsTuple,
          const py::dict& kwargsDict,
-         const std::chrono::milliseconds& rpcTimeout) {
+         const float rpcTimeout) {
         // No need to catch exception here, if function can not be found,
         // exception will be thrown in get_function() call; if args do not match
         // with function schema, exception will be thrown in
@@ -467,7 +468,12 @@ If the future completes with an error, an exception is thrown.
         }
         DCHECK(!PyGILState_Check());
         c10::intrusive_ptr<c10::ivalue::Future> fut = rpcTorchscript(
-            dstWorkerName, qualifiedName, functionSchema, stack, rpcTimeout);
+            dstWorkerName,
+            qualifiedName,
+            functionSchema,
+            stack,
+            rpcTimeout,
+            rf);
         return torch::jit::PythonFutureWrapper(fut);
       },
       py::call_guard<py::gil_scoped_release>());
@@ -488,6 +494,7 @@ If the future completes with an error, an exception is thrown.
       "_invoke_remote_torchscript",
       [](const std::string& dstWorkerName,
          const std::string& qualifiedNameStr,
+         const std::shared_ptr<torch::autograd::profiler::RecordFunction>& rf,
          const py::args& args,
          const py::kwargs& kwargs) {
         DCHECK(!PyGILState_Check());
@@ -505,7 +512,7 @@ If the future completes with an error, an exception is thrown.
         }
         DCHECK(!PyGILState_Check());
         auto rrefPtr = remoteTorchscript(
-            dstWorkerName, qualifiedName, functionSchema, stack);
+            dstWorkerName, qualifiedName, functionSchema, stack, rf);
         return PyRRef(rrefPtr);
       },
       py::call_guard<py::gil_scoped_release>());

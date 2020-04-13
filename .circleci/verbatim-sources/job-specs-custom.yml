@@ -2,7 +2,7 @@
     environment:
       BUILD_ENVIRONMENT: pytorch-python-doc-push
       # TODO: stop hardcoding this
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-gcc5.4:f990c76a-a798-42bb-852f-5be5006f8026"
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-gcc5.4:e43973a9-9d5a-4138-9181-a08a0fc55e2f"
     resource_class: large
     machine:
       image: ubuntu-1604:201903-01
@@ -47,7 +47,7 @@
   pytorch_cpp_doc_push:
     environment:
       BUILD_ENVIRONMENT: pytorch-cpp-doc-push
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-gcc5.4:f990c76a-a798-42bb-852f-5be5006f8026"
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-gcc5.4:e43973a9-9d5a-4138-9181-a08a0fc55e2f"
     resource_class: large
     machine:
       image: ubuntu-1604:201903-01
@@ -157,7 +157,7 @@
   pytorch_android_gradle_build:
     environment:
       BUILD_ENVIRONMENT: pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-build
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c:f990c76a-a798-42bb-852f-5be5006f8026"
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c:e43973a9-9d5a-4138-9181-a08a0fc55e2f"
       PYTHON_VERSION: "3.6"
     resource_class: large
     machine:
@@ -243,7 +243,7 @@
   pytorch_android_publish_snapshot:
     environment:
       BUILD_ENVIRONMENT: pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-publish-snapshot
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c:f990c76a-a798-42bb-852f-5be5006f8026"
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c:e43973a9-9d5a-4138-9181-a08a0fc55e2f"
       PYTHON_VERSION: "3.6"
     resource_class: large
     machine:
@@ -279,7 +279,7 @@
   pytorch_android_gradle_build-x86_32:
     environment:
       BUILD_ENVIRONMENT: pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-build-only-x86_32
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c:f990c76a-a798-42bb-852f-5be5006f8026"
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c:e43973a9-9d5a-4138-9181-a08a0fc55e2f"
       PYTHON_VERSION: "3.6"
     resource_class: large
     machine:
@@ -440,3 +440,74 @@
             cd ${PROJ_ROOT}/ios/TestApp
             instruments -s -devices
             fastlane scan
+  pytorch_linux_bazel_build:
+    <<: *pytorch_params
+    machine:
+      image: ubuntu-1604:201903-01
+    steps:
+    # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
+    - attach_scripts
+    - setup_linux_system_environment
+    - checkout
+    - setup_ci_environment
+    - run:
+        name: Bazel Build
+        no_output_timeout: "1h"
+        command: |
+          set -e
+          # Pull Docker image and run build
+          echo "DOCKER_IMAGE: "${DOCKER_IMAGE}
+          time docker pull ${DOCKER_IMAGE} >/dev/null
+          export id=$(docker run --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -t -d -w /var/lib/jenkins ${DOCKER_IMAGE})
+
+          echo "Do NOT merge master branch into $CIRCLE_BRANCH in environment $BUILD_ENVIRONMENT"
+
+          git submodule sync && git submodule update -q --init --recursive
+
+          docker cp /home/circleci/project/. $id:/var/lib/jenkins/workspace
+
+          export COMMAND='((echo "export BUILD_ENVIRONMENT=${BUILD_ENVIRONMENT}" && echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace && cd workspace && .jenkins/pytorch/build.sh") | docker exec -u jenkins -i "$id" bash) 2>&1'
+
+          echo ${COMMAND} > ./command.sh && unbuffer bash ./command.sh | ts
+
+          # Push intermediate Docker image for next phase to use
+          if [ -z "${BUILD_ONLY}" ]; then
+            # Augment our output image name with bazel to avoid collisions
+            output_image=${DOCKER_IMAGE}-bazel-${CIRCLE_SHA1}
+            export COMMIT_DOCKER_IMAGE=$output_image
+            docker commit "$id" ${COMMIT_DOCKER_IMAGE}
+            time docker push ${COMMIT_DOCKER_IMAGE}
+          fi
+
+  pytorch_linux_bazel_test:
+    <<: *pytorch_params
+    machine:
+      image: ubuntu-1604:201903-01
+    steps:
+    # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
+    - attach_scripts
+    - setup_linux_system_environment
+    - setup_ci_environment
+    - run:
+        name: Test
+        no_output_timeout: "90m"
+        command: |
+          set -e
+          output_image=${DOCKER_IMAGE}-bazel-${CIRCLE_SHA1}
+          export COMMIT_DOCKER_IMAGE=$output_image
+          echo "DOCKER_IMAGE: "${COMMIT_DOCKER_IMAGE}
+
+          time docker pull ${COMMIT_DOCKER_IMAGE} >/dev/null
+
+          if [ -n "${USE_CUDA_DOCKER_RUNTIME}" ]; then
+            export id=$(docker run --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --runtime=nvidia -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
+          else
+            export id=$(docker run --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
+          fi
+
+          if [[ ${BUILD_ENVIRONMENT} == *"multigpu"* ]]; then
+            export COMMAND='((echo "export BUILD_ENVIRONMENT=${BUILD_ENVIRONMENT}" && echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace && cd workspace && .jenkins/pytorch/multigpu-test.sh") | docker exec -u jenkins -i "$id" bash) 2>&1'
+          else
+            export COMMAND='((echo "export BUILD_ENVIRONMENT=${BUILD_ENVIRONMENT}" && echo "export CIRCLE_PULL_REQUEST=${CIRCLE_PULL_REQUEST}" && echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace && cd workspace && .jenkins/pytorch/test.sh") | docker exec -u jenkins -i "$id" bash) 2>&1'
+          fi
+          echo ${COMMAND} > ./command.sh && unbuffer bash ./command.sh | ts

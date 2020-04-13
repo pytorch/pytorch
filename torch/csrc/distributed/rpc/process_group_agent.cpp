@@ -103,7 +103,8 @@ ProcessGroupAgent::ProcessGroupAgent(
       recvCounts_(pg_->getSize()),
       nextId_(0),
       sendMutexes_(pg_->getSize()),
-      threadPool_(numSendRecvThreads) {
+      threadPool_(numSendRecvThreads),
+      timeoutThreadEnabled_{false} {
   // initialize metric info counters
   metrics_.resize(ProcessGroupAgentMetrics::N_METRICS);
   metrics_[ProcessGroupAgentMetrics::GIL_WAIT_TIME] =
@@ -241,28 +242,33 @@ void ProcessGroupAgent::sync() {
 }
 
 void ProcessGroupAgent::startImpl() {
+  timeoutThreadEnabled_.store(true);
   listenerThread_ = std::thread(&ProcessGroupAgent::listenLoop, this);
   futureTimeoutThread_ =
       std::thread(&ProcessGroupAgent::pollTimedOutRPCs, this);
 }
 
-void ProcessGroupAgent::shutdown() {
+void ProcessGroupAgent::shutdownImpl() {
   LOG(INFO) << "Shutting down ProcessGroupAgent on rank " << pg_->getRank()
             << ".";
-  std::unique_lock<std::mutex> lock{futureMutex_};
-  if (!rpcAgentRunning_.exchange(false)) {
-    return;
+  {
+    std::unique_lock<std::mutex> lock(futureMutex_);
+    timeoutThreadEnabled_.store(false);
   }
-  lock.unlock();
   futureTimeoutCV_.notify_one();
   futureTimeoutThread_.join();
+  // Abort listener thread to stop accepting new work. We need to interrupt the
+  // recvWork->wait() call the listener loop may be blocked in before joining
+  // the thread.
   {
     std::unique_lock<std::mutex> lock(recvWorkMutex_);
     if (recvWork_) {
       recvWork_->abort();
     }
   }
-  // Abort any pending sends to any destination rank.
+  listenerThread_.join();
+  // Abort any pending sends to any destination rank that have not been
+  // completed.
   {
     std::lock_guard<std::mutex> lock(pendingSendMutex_);
     for (auto& it : currentPendingSends_) {
@@ -278,14 +284,16 @@ void ProcessGroupAgent::shutdown() {
       }
     }
   }
+  // Note: calling threadPool_.waitWorkComplete() after listenerThread.join() so
+  // that we can finish any possible work enqueued into the thread pool, before
+  // python RPC handler is shutdown (see shutdown in rpc/api.py).
   threadPool_.waitWorkComplete();
-  listenerThread_.join();
 }
 
 std::shared_ptr<FutureMessage> ProcessGroupAgent::send(
     const WorkerInfo& to,
     Message&& message,
-    const std::chrono::milliseconds& rpcTimeout) {
+    const float rpcTimeout) {
   // Throw if we previously encountered an exception in ::listenLoop.
   {
     std::unique_lock<std::mutex> guard(listenLoopExceptionMutex_);
@@ -320,8 +328,9 @@ std::shared_ptr<FutureMessage> ProcessGroupAgent::send(
     auto futureStartTime = std::chrono::steady_clock::now();
     // if passed in timeout is unset, then use the currently set default timeout
     // for all RPCs.
-    auto& timeout =
-        rpcTimeout == kUnsetRpcTimeout ? getRpcTimeout() : rpcTimeout;
+    auto timeout = rpcTimeout == kUnsetRpcTimeout
+        ? getRpcTimeout()
+        : std::chrono::milliseconds((int)rpcTimeout);
 
     // Prepare endTime from timeout. Set infinite timeout if
     // specified.
@@ -524,22 +533,18 @@ bool ProcessGroupAgent::handleRecv(RecvWork& work) {
       // response as a callback which fires when the future completes.
       auto fromId = work.from_.id_;
       auto requestId = work.id_;
-      futureResponse->addCallback(
-          [this, fromId, requestId, futureResponse](
-              const Message& /* unused */,
-              const c10::optional<utils::FutureError>& err) {
-            --serverActiveCalls_;
-            --serverActiveAsyncCalls_;
-            if (!err) {
-              send(
-                  getWorkerInfo(fromId),
-                  std::move(*futureResponse).moveValue());
-            } else {
-              send(
-                  getWorkerInfo(fromId),
-                  createExceptionResponse(err->what(), requestId));
-            }
-          });
+      futureResponse->addCallback([this, fromId, requestId, futureResponse]() {
+        --serverActiveCalls_;
+        --serverActiveAsyncCalls_;
+        if (!futureResponse->hasError()) {
+          send(getWorkerInfo(fromId), std::move(*futureResponse).moveValue());
+        } else {
+          send(
+              getWorkerInfo(fromId),
+              createExceptionResponse(
+                  futureResponse->error()->what(), requestId));
+        }
+      });
     }
   } else if (message.isResponse()) {
     auto id = message.id();
@@ -700,6 +705,7 @@ void ProcessGroupAgent::listenLoopInternal() {
     std::vector<torch::Tensor> preamble = {torch::empty({4}, {torch::kInt64})};
     auto work = pg_->recvAnysource(preamble, pg_->getRank());
     {
+      // Write class variable so it can be aborted by shutdown()
       std::lock_guard<std::mutex> guard(recvWorkMutex_);
       recvWork_ = work;
     }
@@ -716,7 +722,16 @@ void ProcessGroupAgent::listenLoopInternal() {
     int64_t id = preamble_items[3];
 
     std::vector<torch::Tensor> tensors = {torch::empty({size}, {torch::kChar})};
-    pg_->recv(tensors, srcRank, pg_->getRank())->wait();
+    work = pg_->recv(tensors, srcRank, pg_->getRank());
+    {
+      // Write class variable so it can be aborted by shutdown()
+      std::lock_guard<std::mutex> guard(recvWorkMutex_);
+      recvWork_ = work;
+    }
+
+    if (!rpcAgentRunning_.load() || !work->wait() /* aborted */) {
+      return;
+    }
 
     enqueueRecv(
         RecvWork(allWorkerInfo_[srcRank], type, id, std::move(tensors[0])));
@@ -724,7 +739,7 @@ void ProcessGroupAgent::listenLoopInternal() {
 }
 
 void ProcessGroupAgent::pollTimedOutRPCs() {
-  while (rpcAgentRunning_.load()) {
+  while (timeoutThreadEnabled_.load()) {
     std::unique_lock<std::mutex> lock{futureMutex_};
     steady_clock_time_point minEndTime;
     // Estimate amount of time the first future will time out in, and sleep
@@ -738,13 +753,13 @@ void ProcessGroupAgent::pollTimedOutRPCs() {
     }
 
     auto shouldUpdateMinEndTimePredicate = [&, this]() -> bool {
-      // Notice, whoever modifying `rpcAgentRunning_`
-      // must acquire lock on `futureMutex_`.
+      // Notice, whoever modifies `timeoutThreadEnabled_`
+      // must acquire a lock on `futureMutex_`.
       // Otherwise, this predicate could deadlock.
       // If during evaluating the predicate, `::shutdown()` is called, then
       // the predicate missed the notification before it started waiting
       // on the cond var.
-      if (!rpcAgentRunning_.load()) {
+      if (!timeoutThreadEnabled_.load()) {
         return true;
       }
       steady_clock_time_point minEndTimeInMap = kInfiniteTimeoutTimePoint;
