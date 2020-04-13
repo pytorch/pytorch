@@ -107,6 +107,7 @@ class CAFFE2_API BoundShapeInferencer : public BoundShapeInferencerBase {
   void InferInt8QuantizeInput(const OperatorDef& op);
   void InferElementwiseOpInput(const OperatorDef& op);
 
+  void InferElementwiseOp(const OperatorDef& op);
   void InferGivenTensorFill(const OperatorDef& op);
   void InferSparseLengthsSum(const OperatorDef& op);
   void InferFC(const OperatorDef& op);
