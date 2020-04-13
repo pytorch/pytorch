@@ -1012,8 +1012,8 @@ class TestSparse(TestCase):
         "this test ensures bmm sparse-dense CUDA gives an error when run on Windows"
     )
     def test_bmm_windows_error(self):
-        a = torch.rand(2,2,2).to_sparse().cuda()
-        b = torch.rand(2,2,2).cuda()
+        a = torch.rand(2, 2, 2).to_sparse().cuda()
+        b = torch.rand(2, 2, 2).cuda()
         with self.assertRaisesRegex(
             RuntimeError,
             "bmm sparse-dense CUDA is not supported on Windows"):
