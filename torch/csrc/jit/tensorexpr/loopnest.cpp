@@ -7,11 +7,14 @@
 #include <vector>
 
 #include <c10/util/Logging.h>
+#include <c10/util/string_utils.h>
+#include <torch/csrc/jit/tensorexpr/bounds_inference.h>
 #include <torch/csrc/jit/tensorexpr/eval.h>
 #include <torch/csrc/jit/tensorexpr/expr.h>
 #include <torch/csrc/jit/tensorexpr/ir.h>
 #include <torch/csrc/jit/tensorexpr/ir_mutator.h>
 #include <torch/csrc/jit/tensorexpr/ir_printer.h>
+#include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
 #include <torch/csrc/jit/tensorexpr/tensor.h>
 
 namespace torch {
@@ -56,6 +59,56 @@ class IndexFlattener : public IRMutator {
         new_value,
         v->mask());
   }
+};
+
+class ReductionExpander : public IRMutator {
+ public:
+  Stmt* expand(Stmt* s) {
+    return s->accept_mutator(this);
+  }
+
+  Stmt* mutate(const For* v) override {
+    LoopOptions loop_options = v->loop_options();
+    Stmt* body_new = v->body()->accept_mutator(this);
+    if (body_new == v->body()) {
+      body_new = Stmt::clone(v->body());
+    }
+    Stmt* ret =
+        new For(v->var(), v->start(), v->stop(), body_new, loop_options);
+
+    for (size_t i = 0; i < initializers_.size();) {
+      std::vector<const Var*>& vars = initializers_[i].second;
+
+      auto end = std::remove(vars.begin(), vars.end(), v->var());
+      if (end == vars.end()) {
+        i++;
+        continue;
+      }
+
+      vars.erase(end);
+      if (vars.empty()) {
+        if (Block* b = dynamic_cast<Block*>(ret)) {
+          b->prepend_stmt(initializers_[i].first);
+        } else {
+          ret = new Block({initializers_[i].first, ret});
+        }
+        initializers_.erase(initializers_.begin() + i);
+        continue;
+      }
+
+      i++;
+    }
+    return ret;
+  }
+
+  const Expr* mutate(const ReduceOp* v) override {
+    std::vector<const Var*> reduce_vars(v->reduce_args());
+    initializers_.push_back(std::make_pair(v->initializer(), reduce_vars));
+    return v->complete().node();
+  }
+
+ private:
+  std::vector<std::pair<Stmt*, std::vector<const Var*>>> initializers_;
 };
 
 class Vectorizer : public IRMutator {
@@ -382,7 +435,7 @@ class FunctionInliner : public IRMutator {
 
     if (should_inline(func)) {
       // Insert the caller/callee pair into the mapping.
-      for (int i = 0; i < buf->ndim(); i++) {
+      for (size_t i = 0; i < buf->ndim(); i++) {
         const Var* func_callee_arg = dynamic_cast<const Var*>(func->arg(i));
         const Expr* func_caller_param = v->param(i);
         auto iter = inline_mapping_.find(func_callee_arg);
@@ -398,7 +451,7 @@ class FunctionInliner : public IRMutator {
       const Expr* result = body->accept_mutator(this);
 
       // Remove the caller/callee relationship.
-      for (int i = 0; i < buf->ndim(); i++) {
+      for (size_t i = 0; i < buf->ndim(); i++) {
         const Var* func_callee_arg = dynamic_cast<const Var*>(func->arg(i));
         auto iter = inline_mapping_.find(func_callee_arg);
         if (iter == inline_mapping_.end()) {
@@ -631,13 +684,13 @@ std::vector<Tensor*> LoopNest::findAllNeededTensors(
     if (all_processed) {
       result.push_back(t);
       if (processed.count(t)) {
-        throw malformed_input();
+        throw malformed_input("failure to find all processed Tensors");
       }
 
       processed.insert(t);
     } else {
       if (queued.count(t)) {
-        throw malformed_input();
+        throw malformed_input("failure to find all queued Tensors");
       }
 
       q.push(t);
@@ -681,19 +734,18 @@ Stmt* LoopNest::lowerToStmt(Tensor* t) {
   stmt_to_tensor_[body] = t;
   tensor_to_stmt_[t] = body;
 
-  if (t->buf()->ndim() == 0) {
+  if (f->ndim() == 0) {
     return body;
   }
 
-  if (t->buf()->ndim() == 0) {
-    throw malformed_input();
+  if (f->ndim() == 0) {
+    throw malformed_input("Tensor lowered to zero dimensions");
   }
 
-  for (size_t i = 0; i < t->buf()->ndim(); i++) {
+  for (size_t i = 0; i < f->ndim(); i++) {
     // Going in reverse order: from innermost loop to the outermost
-    size_t dim_index = t->buf()->ndim() - i - 1;
-    Range r(new IntImm(0), t->buf()->dim(dim_index));
-    body = new For(f->arg(dim_index), r.start(), r.stop(), body);
+    size_t dim_index = f->ndim() - i - 1;
+    body = new For(f->arg(dim_index), new IntImm(0), f->dim(dim_index), body);
   }
   return body;
 }
@@ -747,6 +799,10 @@ void LoopNest::prepareForCodegen() {
   root_stmt_ = InjectInlines(root_stmt_, inlined_functions_vec);
   root_stmt_ = InlineRandom(root_stmt_, inlined_randoms_vec);
 
+  // Expand reduction ops.
+  ReductionExpander reduceExpander;
+  root_stmt_ = reduceExpander.expand(root_stmt_);
+
   // Flatten function calls.
   Flattener flattener;
   root_stmt_ = root_stmt_->accept_mutator(&flattener);
@@ -765,9 +821,9 @@ void LoopNest::splitWithTail(
     For** tail) {
   Block* p = dynamic_cast<Block*>(f->get_parent());
   if (!f) {
-    throw malformed_input(f);
+    throw malformed_input("splitWithTail attempted on null loop", f);
   } else if (!p) {
-    throw malformed_input(p);
+    throw malformed_input("splitWithTail attempted on loop with no parent", p);
   }
 
   bool tail_is_needed = true;
@@ -913,6 +969,277 @@ bool LoopNest::hasLoopBodyFor(Tensor* t) const {
 Stmt* FlattenIndexes(Stmt* s) {
   IndexFlattener idx_flattener;
   return idx_flattener.flatten(s);
+}
+
+// Auxiliary class for rewriting we're doing in `compute_at`. See
+// LoopNest::computeAt for more details.
+class LoopComputeAtRewriter : public IRMutator {
+ public:
+  LoopComputeAtRewriter(
+      const Buf* buf,
+      const Buf* new_buf,
+      std::vector<const Expr*> offsets)
+      : buf_(buf), new_buf_(new_buf), offsets_(std::move(offsets)) {}
+
+ private:
+  const Buf* buf_;
+  const Buf* new_buf_;
+  std::vector<const Expr*> offsets_;
+
+  const Expr* mutate(const Load* v) override {
+    if (v->buf() != buf_) {
+      return v;
+    }
+    std::vector<const Expr*> new_indices;
+    for (size_t i = 0; i < v->indices().size(); i++) {
+      new_indices.push_back(
+          IRSimplifier::simplify(new Sub(v->indices()[i], offsets_[i])));
+    }
+    return new Load(v->dtype(), new_buf_, new_indices, v->mask());
+  }
+  const Expr* mutate(const FunctionCall* v) override {
+    if (v->tensor()->func_var() != buf_) {
+      return v;
+    }
+    std::vector<const Expr*> new_indices;
+    for (size_t i = 0; i < v->nparams(); i++) {
+      new_indices.push_back(
+          IRSimplifier::simplify(new Sub(v->param(i), offsets_[i])));
+    }
+    return new Load(v->dtype(), new_buf_, new_indices, new IntImm(1));
+  }
+};
+
+static Store* getStoreStmtOfProducer(Stmt* s) {
+  if (Store* st = dynamic_cast<Store*>(s)) {
+    return st;
+  }
+  if (Block* b = dynamic_cast<Block*>(s)) {
+    for (Stmt* ss : b->stmts()) {
+      if (Store* st = dynamic_cast<Store*>(ss)) {
+        return st;
+      }
+    }
+  }
+  return nullptr;
+}
+
+static std::vector<const Var*> getOuterLoopIndexes(Stmt* s) {
+  std::vector<const Var*> res;
+  Stmt* cur = s;
+  while (cur) {
+    if (auto l = dynamic_cast<For*>(cur)) {
+      res.push_back(l->var());
+    }
+    cur = cur->get_parent();
+  }
+  return res;
+}
+
+/*
+ * WHAT COMPUTE_AT DOES
+ * ====================
+ *
+ * Suppose we have two loops:
+ *
+ * for i in 0..100:
+ *   for j in 0..200:
+ *     A[i,j] = sin(i*j)
+ * for i in 0..100:
+ *   for j in 0..199:
+ *     B[i,j] = A[i,j] + A[i, j+1]
+ *
+ * If we compute these loops as is, we would have to allocate two buffers:
+ * 100x200 for A and 100x199 for B. To decrease the memory usage one can use
+ * compute_inline primitive, which would result in the following:
+ *
+ * for i in 0..100:
+ *   for j in 0..199:
+ *     B[i,j] = sin(i*j) + sin(i*(j+1))
+ *
+ * We now need only one buffer - 100x199 for B. However, we're now doing some
+ * redundant computations: we're calling `sin` twice as much as in the first
+ * version.
+ *
+ * Ultimately, we nede to choose at what point we prefer to compute values of
+ * A[i,j] - we can do it in the very beginning for the entire buffer A (the
+ * first option) or compute it on the fly when we compute B (the second option).
+ * There are also options in between those two: we can compute a part of B which
+ * is required for a computation of part of B, e.g. for a single row of B. The
+ * code would then look like:
+ *
+ * for i in 0..100:
+ *   for j in 0..200:
+ *     A[j] = sin(i*j)
+ *   for j in 0..199:
+ *     B[i,j] = A[j] + A[j+1]
+ *
+ * In this case we're only using 1x200 for A, and we're avoiding redundant
+ * computations.
+ *
+ * The purpose of `compute_at` is to achieve exactly this transformation.
+ *
+ * compute_at requires to specify What to compute and Where to compute: in our
+ * example we would call compute_at(What=`A[i,j] = sin(i*j)`, Where=`for i in
+ * 0..100`).
+ *
+ * More info about compute_at could be found in Halide's tutorials:
+ * https://halide-lang.org/tutorials/tutorial_lesson_08_scheduling_2.html
+ *
+ * HOW COMPUTE_AT WORKS
+ * ====================
+ *
+ * The most important part of compute_at is bounds inference: we need to figure
+ * out what part of the used tensors we need to compute when we move the
+ * computation to a new scope. In the example above, we need bounds inference to
+ * tell us that in order to compute A at each iteration of the outer loop, we
+ * need to compute A within indices [i:i+1,0:200].
+ *
+ * This info allows us to conclude that we need a temp buffer of size 1x200.
+ *
+ * Once this is known we need to insert statements for allocation and freeing
+ * the temporary buffer and copy the original computation to fill the temp
+ * buffer with proper values. When we copy the computation we also must rewrite
+ * indices used in it: old indices are referring to the old loop and are not
+ * valid in the new loop.
+ *
+ * To easier follow the logic, let's examine an example. Suppose we start from
+ * the following loop nest:
+ *   for py in 0..100:
+ *     for px in 0..100:
+ *       producer[py,px] = py*px
+ *   for cy in 0..100:
+ *     for cx in 0..100:
+ *       consumer[cy,cx] = producer[cy,cx]
+ *
+ * And then we're running `compute_at(producer, cy)`.
+ *
+ * What we would like to get is the following loop nest:
+ *   for py in 0..100:
+ *     for px in 0..100:
+ *       producer[py,px] = py*px
+ *   for cy in 0..100:
+ *     Allocate(temp, {1, 100})
+ *     for ty in 0..1:
+ *       for tx in 0..100:
+ *         temp[ty,tx] = (ty+cy)*(tx+0)
+ *     for cx in 0..100:
+ *       consumer[cy,cx] = temp[0,cx]
+ *     Free(temp)
+ *
+ * NB: this loop nest can and should be simplified (e.g. the producer loop can
+ * be removed since its result is no longer used), but this clean-up
+ * optimization is performed separately (currently, not performed at all).
+ *
+ * If we examine the final loop nest, we can identify that the following steps
+ * needs to be performed:
+ *   - Bounds inference needs to tell us that we need a 1x100 buffer for temp.
+ *   - Allocate and Free statements for this buffer need to be inserted to the
+ *   loop.
+ *   - A new loop-nest should be inserted to the loop CY for computing `temp`
+ *   and it should replicate the loopnest of producer (PY,PX loops). The indices
+ *   in the loop body need to be offset by (cy, 0) - the offsets come from
+ *   bounds inference too.
+ *   - The computation of `consumer` needs to be rewritten so that it uses
+ *   `temp` instead of `producer`. The indices in the corresponding accesses
+ *   also need to be offset.
+ */
+void LoopNest::computeAt(Stmt* s, For* f) {
+  Store* st = getStoreStmtOfProducer(s);
+  if (!st) {
+    return;
+  }
+
+  // Infer bounds info for all accesses that we make in the loop
+  auto loop_bounds_info = inferBounds(f->body());
+
+  // store_bounds_info holds bounds info for the store we're trying to move to
+  // the loop. If its result isn't accessed in the loop at all - do nothing and
+  // exit early.
+  TensorAccessBoundsInfo store_bounds_info;
+  bool found = false;
+  for (const TensorAccessBoundsInfo& p : loop_bounds_info) {
+    if (p.buf == st->buf()) {
+      store_bounds_info = p;
+      found = true;
+    }
+  }
+  if (!found) {
+    return;
+  }
+
+  // Compute dimensions of the temp buffer we would need to allocate
+  std::vector<const Expr*> dims;
+  for (size_t i = 0; i < store_bounds_info.start.size(); i++) {
+    const Expr* dim = IRSimplifier::simplify(new Add(
+        new Sub(store_bounds_info.stop[i], store_bounds_info.start[i]),
+        new IntImm(1)));
+    dims.push_back(dim);
+  }
+
+  // TODO: Use name-hint of the producer instead of "temp"
+  const Buf* temp_buf =
+      new Buf(new Var("temp", store_bounds_info.buf->dtype()), dims);
+
+  // Generate index variables for 'temp'
+  std::vector<const Expr*> temp_indices(dims.size());
+  for (size_t i = 0; i < dims.size(); i++) {
+    // TODO: Use name-hint of the producer indices instead of 'idx'
+    temp_indices[i] = new Var(std::string("idx") + c10::to_string(i), kInt);
+  }
+
+  // Prepare substitute rules for constructing the temp statement from the prod
+  // statement
+  // TODO: Instead of going up the loop nest we should go through the indices in
+  // the original tensor expression. The loops in the nest might've been
+  // modified (e.g. split or merged) so that the loop indices no longer
+  // correspond to the indices of the original expression and even their number
+  // might be different. In that case, the loop below would crash.
+  std::vector<const Var*> prod_indices = getOuterLoopIndexes(s);
+  std::vector<std::pair<const Var*, const Expr*>> rewrite_indices_map;
+  for (size_t i = 0; i < prod_indices.size(); i++) {
+    const Expr* offset = store_bounds_info.start[i];
+    rewrite_indices_map.push_back(
+        {prod_indices[i], new Add(temp_indices[i], offset)});
+  }
+  // Construct the temp statement
+  Stmt* bd = new Store(
+      temp_buf,
+      temp_indices,
+      Substitute(st->value(), rewrite_indices_map),
+      st->mask());
+
+  // Construct the loop nest for the temp computation
+  for (size_t i = 0; i < dims.size(); i++) {
+    // We're creating loops from innermost to outermost, so we need to access
+    // dimensions in reversed order.
+    size_t dim_idx = dims.size() - 1 - i;
+    bd = new For(
+        dynamic_cast<const Var*>(temp_indices[dim_idx]),
+        new IntImm(0),
+        dims[dim_idx],
+        bd);
+  }
+
+  // Generate alloc/free stmts for 'temp'
+  Stmt* al = new Allocate(temp_buf->base_handle(), st->value()->dtype(), dims);
+  Stmt* fr = new Free(temp_buf->base_handle());
+
+  // Add constructed stmts to the consumer loop
+  // TODO: Revisit this place later: we might want to move allocation out of the
+  // loop.
+  f->body()->prepend_stmt(bd);
+  f->body()->prepend_stmt(al);
+  f->body()->append_stmt(fr);
+
+  // Rewrite accesses to producer in consumer with accesses to temp
+  LoopComputeAtRewriter lr(
+      store_bounds_info.buf, temp_buf, store_bounds_info.start);
+  Stmt* new_f = f->accept_mutator(&lr);
+  if (f != new_f) {
+    Block* bb = dynamic_cast<Block*>(f->get_parent());
+    bb->replace_stmt(f, new_f);
+  }
 }
 
 } // namespace tensorexpr

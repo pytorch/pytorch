@@ -1,6 +1,7 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 
 import torch
+import tempfile
 from torch.utils import ThroughputBenchmark
 from torch.testing import assert_allclose
 
@@ -34,7 +35,7 @@ class TwoLayerNetModule(torch.nn.Module):
         return y_pred
 
 class TestThroughputBenchmark(TestCase):
-    def linear_test(self, Module):
+    def linear_test(self, Module, profiler_output_path=""):
         D_in = 10
         H = 5
         D_out = 15
@@ -63,6 +64,7 @@ class TestThroughputBenchmark(TestCase):
             num_calling_threads=4,
             num_warmup_iters=100,
             num_iters=1000,
+            profiler_output_path=profiler_output_path,
         )
 
         print(stats)
@@ -73,6 +75,11 @@ class TestThroughputBenchmark(TestCase):
 
     def test_module(self):
         self.linear_test(TwoLayerNetModule)
+
+    def test_profiling(self):
+        with tempfile.NamedTemporaryFile(delete=False) as f:
+            self.linear_test(TwoLayerNetModule, profiler_output_path=f.name)
+
 
 if __name__ == '__main__':
     run_tests()

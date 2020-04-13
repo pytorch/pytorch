@@ -684,11 +684,17 @@ void initPythonIRBindings(PyObject* module_) {
       .def(
           "__eq__",
           [](std::shared_ptr<Type>& self, std::shared_ptr<Type>& other) {
+            if (!other) {
+              return false;
+            }
             return *self == *other;
           })
       .def(
           "isSubtypeOf",
           [](std::shared_ptr<Type>& self, std::shared_ptr<Type> other) {
+            if (!other) {
+              return false;
+            }
             return self->isSubtypeOf(other);
           })
       .def("is_interface_type", [](const std::shared_ptr<Type>& self) {

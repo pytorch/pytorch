@@ -13,7 +13,7 @@ namespace {
 
 template<typename scalar_t>
 void multinomial_apply(Tensor& result, const Tensor& self, const int64_t n_sample, const bool with_replacement, Generator generator) {
-  auto gen = get_generator_or_default<CPUGenerator>(generator, detail::getDefaultCPUGenerator());
+  auto gen = get_generator_or_default<CPUGeneratorImpl>(generator, detail::getDefaultCPUGenerator());
   // See Note [Acquire lock when using random generators]
   std::lock_guard<std::mutex> lock(gen->mutex_);
 
