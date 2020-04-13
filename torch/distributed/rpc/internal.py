@@ -16,7 +16,7 @@ _thread_local_tensor_tables = threading.local()
 
 # Flag to enable and disable RPC profiling with the autograd profiler. Only disabled
 # in some unit tests to test the profiler functionality at a granular level.
-profiling_flag = True
+_profiling_flag = True
 
 
 class RPCExecMode(Enum):
@@ -167,14 +167,14 @@ def _handle_exception(result):
         raise result.exception_type(result.msg)
 
 def _disable_profiling_for_testing():
-    global profiling_flag
-    profiling_flag = False
+    global _profiling_flag
+    _profiling_flag = False
 
 def _profiling_enabled():
-    global profiling_flag
-    return profiling_flag
+    global _profiling_flag
+    return _profiling_flag
 
-def build_rpc_profiling_key(exec_type, func_name, current_worker_name, dst_worker_name):
+def _build_rpc_profiling_key(exec_type, func_name, current_worker_name, dst_worker_name):
     """
     Builds the key that RPC calls are profiled with using the autograd profiler.
     This will be the name of the corresponding Event recorded in the profiler.
@@ -186,7 +186,7 @@ def build_rpc_profiling_key(exec_type, func_name, current_worker_name, dst_worke
         dst_worker_name (str): Name of the destination worker.
 
     Returns:
-        str
+        String representing profiling key
     """
     profile_key = "rpc_{rpc_type}#{func_name}({current_worker} -> {dst_worker})".format(
         rpc_type=exec_type.value,

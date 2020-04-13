@@ -34,7 +34,7 @@ from .internal import (
     RPCExecMode,
     _internal_rpc_pickler,
     _profiling_enabled,
-    build_rpc_profiling_key,
+    _build_rpc_profiling_key,
 )
 
 
@@ -441,7 +441,7 @@ def remote(to, func, args=None, kwargs=None):
         else:
             func_name = qualified_name
         # Build RPC profiling key.
-        rpc_profiling_key = build_rpc_profiling_key(
+        rpc_profiling_key = _build_rpc_profiling_key(
             RPCExecMode.REMOTE,
             func_name,
             get_worker_info().name,
@@ -498,7 +498,7 @@ def _invoke_rpc(to, func, rpc_type, args=None, kwargs=None):
         else:
             func_name = qualified_name
         # Build RPC profiling key.
-        rpc_profiling_key = build_rpc_profiling_key(
+        rpc_profiling_key = _build_rpc_profiling_key(
             rpc_type,
             func_name,
             get_worker_info().name,

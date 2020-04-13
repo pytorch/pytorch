@@ -17,7 +17,7 @@ from torch.distributed.rpc.internal import (
     RPCExecMode,
     _disable_profiling_for_testing,
     _internal_rpc_pickler,
-    build_rpc_profiling_key,
+    _build_rpc_profiling_key,
 )
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import IS_MACOS, load_tests
@@ -650,7 +650,7 @@ class RpcTest(RpcAgentTestFixture):
         # Tests that the name that shows up as an Event in profiling RPCs has all
         # the necessary information.
         for exec_mode in [RPCExecMode.SYNC, RPCExecMode.ASYNC, RPCExecMode.REMOTE]:
-            rpc_profiling_key = build_rpc_profiling_key(exec_mode, "foo", "worker0", "worker1")
+            rpc_profiling_key = _build_rpc_profiling_key(exec_mode, "foo", "worker0", "worker1")
             self.assertIn(exec_mode.value, rpc_profiling_key)
             self.assertIn("foo", rpc_profiling_key)
             self.assertIn("worker0", rpc_profiling_key)
@@ -878,7 +878,7 @@ class RpcTest(RpcAgentTestFixture):
         _disable_profiling_for_testing()
         if self.rank == 1:
             with torch.autograd.profiler.profile() as pf:
-                key = build_rpc_profiling_key(
+                key = _build_rpc_profiling_key(
                     RPCExecMode.ASYNC,
                     torch.jit._qualified_name(my_script_func),
                     "worker1",

@@ -223,7 +223,7 @@ class TORCH_API RRef : public RRefInterface {
   // rpc.remote. This is only used to get the future corresponding to the rref
   // for profiling use cases.
   inline void registerCreatingFuture(std::shared_ptr<FutureMessage> fut) {
-    creatingFuture_ = fut;
+    creatingFuture_ = std::move(fut);
   }
 
   // Get the future corresponding to the creation of this rref.
