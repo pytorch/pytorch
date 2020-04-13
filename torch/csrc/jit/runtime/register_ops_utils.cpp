@@ -496,5 +496,5 @@ int listSetItem(Stack& stack) {
   push(stack, std::move(list));
   return 0;
 }
-}
-}
+} // namespace jit
+} // namespace torch
