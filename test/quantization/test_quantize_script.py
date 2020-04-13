@@ -1449,6 +1449,26 @@ class TestQuantizeScriptPTSQOps(JitTestCase):
                    .check("aten::dequantize") \
                    .run(m.graph)
 
+
+    def test_qbatch_norm(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+                self.bn = torch.nn.BatchNorm2d(4).to('cpu', torch.float)
+
+            def forward(self, x):
+                return self.bn(x)
+
+        m = torch.jit.script(M().eval())
+        m.training = False
+        m = prepare_script(m, {'': default_qconfig}, True)
+        data = torch.randn((2, 4, 6, 8), dtype=torch.float)
+        m(data)
+        m = convert_script(m, True)
+        FileCheck().check_not("aten::batch_norm") \
+                   .check("quantized::batch_norm2d") \
+                   .run(m.graph_for(data))
+
 class TestQuantizeDynamicScript(JitTestCase):
     def test_prepare_dynamic(self):
         class M(torch.nn.Module):

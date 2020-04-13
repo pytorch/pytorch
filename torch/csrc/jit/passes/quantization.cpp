@@ -50,6 +50,7 @@ struct PatternsAndModules {
 std::vector<std::string> _quantizable_call_funcs = {
     "conv2d",
     "linear",
+    "batch_norm",
 };
 
 std::vector<std::string> _quantizable_aten_funcs = {
@@ -240,6 +241,16 @@ bool nodeQuantizable(Node* n) {
       _quantizable_call_funcs,
       /* aten_funcs = */
       _quantizable_aten_funcs);
+}
+
+bool nodeInputQuantizable(Node* n, size_t offset) {
+  // batch_norm
+  if (n->kind() == prim::CallFunction &&
+      getFuncName(n->inputs()[0]) == "batch_norm") {
+    return offset == 1;
+  }
+
+  return true;
 }
 
 // We don't want to analyze the graph for some `builtin` CallFunctions
@@ -1009,7 +1020,8 @@ bool InsertObserversHelper::valueNeedsToBeQuantized(Value* v) {
   }
   // Check whether user is quantizable
   for (const auto& use : v->uses()) {
-    if (nodeQuantizable(use.user) || isDynamicLSTMWeight(v, use, is_dynamic)) {
+    if ((nodeQuantizable(use.user) && nodeInputQuantizable(use.user, use.offset)) ||
+        isDynamicLSTMWeight(v, use, is_dynamic)) {
       return true;
     }
   }
