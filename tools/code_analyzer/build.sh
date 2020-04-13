@@ -16,6 +16,13 @@
 # 3. Analyze torch and generate yaml file of op dependency with debug path:
 # LLVM_DIR=${HOME}/src/llvm8/build/install \
 # ANALYZE_TORCH=1 tools/code_analyzer/build.sh -debug_path=true
+#
+# If you're a Facebook employee, chances are you're running on CentOS 8.
+# If that's the case, you can install all the dependencies you need with:
+#
+#   sudo dnf install llvm-devel llvm-static clang ncurses-devel
+#
+# and then set LLVM_DIR=/usr
 
 set -ex
 
@@ -133,7 +140,7 @@ check_test_result() {
     echo "Test result is the same as expected."
   else
     echo "Test result is DIFFERENT from expected!"
-    diff "${OUTPUT}" "${TEST_SRC_ROOT}/expected_deps.yaml"
+    diff -u "${TEST_SRC_ROOT}/expected_deps.yaml" "${OUTPUT}"
     exit 1
   fi
 }

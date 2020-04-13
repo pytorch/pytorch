@@ -215,7 +215,7 @@ inline at::ScalarType type_from_firstarg(at::ScalarType to_type, const Tensor& a
 /********************************************************************************************************
 Templates to provide wrapper functions
 
-I'm copying the pattern used in core/boxing/kernel_function.h to extract args and return type.
+I'm copying the pattern used in core/boxing/impl/WrapFunctionIntoFunctor.h to extract args and return type.
 (see also https://stackoverflow.com/questions/46533698/how-to-deduce-argument-list-from-function-pointer)
 
 This strategy uses an exterior "WrapFunction" that extracts arguments on behalf of
@@ -279,7 +279,7 @@ struct WrapFunction_<CastPolicy::promote, Redispatch, F, Ret, guts::typelist::ty
   }
 };
 
-// Wrapper to infer return_type and parameter_types for WrapFunction_ (imitating core/boxing/kernel_function.h)
+// Wrapper to infer return_type and parameter_types for WrapFunction_ (imitating core/boxing/impl/WrapFunctionIntoFunctor.h)
 template<CastPolicy policy,
          class Registered, // The signature for which we're registering.  The dispatcher's calling code invokes our
                            // registered functions with arguments matching Registered, so we register
@@ -332,8 +332,7 @@ I think Option 2 is the right answer for all ops, not just convolutions.  Option
 *****************************************************************************************************************/
 
 auto register_fallthrough = c10::import()
-  .fallback(c10::dispatch(c10::DispatchKey::AutocastTensorId,
-                          c10::CppFunction::makeFallthrough()));
+  .fallback(c10::DispatchKey::AutocastTensorId, c10::CppFunction::makeFallthrough());
 
 /********************************************************************************************************************
 Explicit registration for out-of-place ops
@@ -361,17 +360,17 @@ Therefore, for the moment, this is all copy pasted in from VariableTypeEverythin
 // Common cases where registration signature matches redispatch signature
 // (that's why SIGNATURE is repeated in the WrapFunction instantiation)
 #define KERNEL(FUNC, REGISTER_NAME, SIGNATURE, POLICY) \
-  .impl(REGISTER_NAME, c10::dispatch(DispatchKey::AutocastTensorId, \
-    &WrapFunction<CastPolicy::POLICY, SIGNATURE, SIGNATURE, &FUNC>::type::call))
+  .impl(REGISTER_NAME, DispatchKey::AutocastTensorId, \
+    &WrapFunction<CastPolicy::POLICY, SIGNATURE, SIGNATURE, &FUNC>::type::call)
 
 #define KERNEL_UNBOXED_ONLY(FUNC, REGISTER_NAME, SIGNATURE, POLICY) \
-  .impl(REGISTER_NAME, c10::dispatch(DispatchKey::AutocastTensorId, \
-    c10::CppFunction::makeUnboxedOnly(&WrapFunction<CastPolicy::POLICY, SIGNATURE, SIGNATURE, &FUNC>::type::call)))
+  .impl_UNBOXED(REGISTER_NAME, DispatchKey::AutocastTensorId, \
+    &WrapFunction<CastPolicy::POLICY, SIGNATURE, SIGNATURE, &FUNC>::type::call)
 
 // Less-common but still useful case: redispatching to a function with a new signature (e.g. appending a dtype)
 #define KERNEL_UNBOXED_ONLY_DIFFERENT_REDISPATCH_SIGNATURE(REDISPATCH_FUNC, REGISTER_NAME, REGISTER_SIGNATURE, REDISPATCH_SIGNATURE, POLICY) \
-  .impl(REGISTER_NAME, c10::dispatch(DispatchKey::AutocastTensorId, \
-    c10::CppFunction::makeUnboxedOnly(&WrapFunction<CastPolicy::POLICY, REGISTER_SIGNATURE, REDISPATCH_SIGNATURE, &REDISPATCH_FUNC>::type::call)))
+  .impl_UNBOXED(REGISTER_NAME, DispatchKey::AutocastTensorId, \
+    &WrapFunction<CastPolicy::POLICY, REGISTER_SIGNATURE, REDISPATCH_SIGNATURE, &REDISPATCH_FUNC>::type::call)
 
 /*****************************************
 Explicit registration for out-of-place ops
@@ -426,9 +425,8 @@ auto register_out_of_place = c10::import()
   KERNEL(ADD_NS(gelu), "aten::gelu", Tensor (const Tensor &), fp32)
   KERNEL_UNBOXED_ONLY(ADD_NS(layer_norm), "aten::layer_norm", Tensor (const Tensor &, IntArrayRef, const Tensor &, const Tensor &, double, bool), fp32)
   // The macro doesn't like this one so I had to write it out manually.
-  .impl("aten::native_layer_norm",
-    c10::dispatch(DispatchKey::AutocastTensorId,
-      CppFunction::makeUnboxedOnly(&WrapFunction<CastPolicy::fp32, std::tuple<Tensor,Tensor,Tensor> (const Tensor &, const Tensor &, const Tensor &, int64_t, int64_t, double), std::tuple<Tensor,Tensor,Tensor> (const Tensor &, const Tensor &, const Tensor &, int64_t, int64_t, double), &ADD_NS(native_layer_norm)>::type::call)))
+  .impl_UNBOXED("aten::native_layer_norm", DispatchKey::AutocastTensorId,
+                &WrapFunction<CastPolicy::fp32, std::tuple<Tensor,Tensor,Tensor> (const Tensor &, const Tensor &, const Tensor &, int64_t, int64_t, double), std::tuple<Tensor,Tensor,Tensor> (const Tensor &, const Tensor &, const Tensor &, int64_t, int64_t, double), &ADD_NS(native_layer_norm)>::type::call)
   KERNEL_UNBOXED_ONLY(ADD_NS(group_norm), "aten::group_norm", Tensor (const Tensor &, int64_t, const Tensor &, const Tensor &, double, bool), fp32)
   KERNEL_UNBOXED_ONLY(ADD_NS(frobenius_norm), "aten::frobenius_norm", Tensor (const Tensor &), fp32)
   KERNEL_UNBOXED_ONLY(ADD_NS(frobenius_norm), "aten::frobenius_norm.dim", Tensor (const Tensor &, IntArrayRef, bool), fp32)
@@ -452,7 +450,7 @@ auto register_out_of_place = c10::import()
   KERNEL_UNBOXED_ONLY(ADD_NS(binary_cross_entropy_with_logits), "aten::binary_cross_entropy_with_logits", Tensor (const Tensor &, const Tensor &, const Tensor &, const Tensor &, int64_t), fp32)
   KERNEL(ADD_NS(dist), "aten::dist", Tensor (const Tensor &, const Tensor &, Scalar), fp32)
   KERNEL(ADD_NS(pdist), "aten::pdist", Tensor (const Tensor &, double), fp32)
-  KERNEL(ADD_NS(cdist), "aten::cdist", Tensor (const Tensor &, const Tensor &, double, c10::optional<int64_t>), fp32)
+  KERNEL_UNBOXED_ONLY(ADD_NS(cdist), "aten::cdist", Tensor (const Tensor &, const Tensor &, double, c10::optional<int64_t>), fp32)
   KERNEL(ADD_NS(renorm), "aten::renorm", Tensor (const Tensor &, Scalar, int64_t, Scalar), fp32)
   // fp32_set_opt_dtype
   KERNEL_UNBOXED_ONLY(ADD_NS(prod), "aten::prod", Tensor (const Tensor &, c10::optional<ScalarType>), fp32_set_opt_dtype)
@@ -496,9 +494,8 @@ auto register_out_of_place = c10::import()
   ;
 
 auto register_banned = torch::import()
-  .impl("aten::binary_cross_entropy",
-    torch::dispatch(DispatchKey::AutocastTensorId,
-                    CppFunction::makeUnboxedOnly(&at::autocast::binary_cross_entropy_banned)));
+  .impl_UNBOXED("aten::binary_cross_entropy", DispatchKey::AutocastTensorId,
+                &at::autocast::binary_cross_entropy_banned);
 }
 #endif
 

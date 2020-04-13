@@ -1,5 +1,6 @@
 #ifdef USE_XNNPACK
 
+#include <ATen/NamedTensorUtils.h>
 #include <ATen/native/xnnpack/Factory.h>
 #include <ATen/native/utils/Allocator.h>
 
@@ -16,7 +17,8 @@ GuardingAllocator<0u, XNN_EXTRA_BYTES>* get_guarding_allocator() {
 Tensor empty_with_tail_padding(
     const IntArrayRef size,
     const caffe2::TypeMeta dtype,
-    const c10::MemoryFormat memory_format) {
+    const c10::MemoryFormat memory_format,
+    const DimnameList maybe_names) {
   auto* const allocator_ptr = get_guarding_allocator();
   const int64_t nelements = prod_intlist(size);
 
@@ -31,7 +33,9 @@ Tensor empty_with_tail_padding(
           },
           DispatchKeySet{DispatchKey::CPUTensorId}));
 
-  return tensor.resize_(size, memory_format);
+  return namedinference::propagate_names_if_nonempty(
+      tensor.resize_(size, memory_format),
+      maybe_names);
 }
 
 Tensor allocate_padded_contiguous_if_needed(
@@ -56,7 +60,8 @@ Tensor allocate_padded_contiguous_if_needed(
   Tensor padded_input = empty_with_tail_padding(
       input.sizes(),
       input.options().dtype(),
-      memory_format);
+      memory_format,
+      input.names());
 
   return padded_input.copy_(input);
 }

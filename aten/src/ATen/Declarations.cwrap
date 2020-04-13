@@ -1047,22 +1047,6 @@
     - Generator generator
 ]]
 [[
-  name: _th_uniform_
-  types:
-    - floating_point
-  backends:
-    - CPU
-  cname: uniform
-  variants: function
-  return: self
-  arguments:
-    - THTensor* self
-    - double from
-    - double to
-    - Generator generator
-]]
-
-[[
   name: _th_copy_ignoring_overlaps_
   cname: copyIgnoringOverlaps
   return: self
