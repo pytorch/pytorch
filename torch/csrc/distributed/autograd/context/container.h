@@ -91,6 +91,18 @@ class TORCH_API DistAutogradContainer {
   static int64_t currentContextId();
 
  private:
+  // Structure holding one shard of the sharded autograd context map.
+  struct ContextsShard {
+    // Map storing autograd contexts for this shard.
+    std::unordered_map<int64_t, ContextPtr> contexts;
+
+    // Lock for this shard.
+    mutable std::mutex lock;
+  };
+
+  // Number of shards for the map storing autograd contexts.
+  static constexpr int16_t kNumShards = 256;
+
   DistAutogradContainer();
   ~DistAutogradContainer() = default;
 
@@ -101,31 +113,32 @@ class TORCH_API DistAutogradContainer {
 
   static DistAutogradContainer& getInstanceInternal();
 
+  // Retrieve the shard for given context_id.
+  ContextsShard& getShard(int64_t context_id);
+
   // Sends an RPC to the workers that have a context corresponding to passed in
   // context_id. This function should be called with the lock.
-  void sendReleaseContextRpc(int64_t context_id);
+  void sendReleaseContextRpc(
+      const std::unordered_set<rpc::worker_id_t>& workerIds,
+      int64_t context_id);
 
   // Erase context_id from the autograd context map, and reset the thread local
   // current context id if it corresponds to the passed in context id. This
   // function should be called with the lock.
-  void eraseContextIdAndReset(int64_t context_id);
+  void eraseContextIdAndReset(ContextsShard& shard, int64_t context_id);
 
   // Auto incrementing context id used to identify unique autograd passes.
   // Initialized with the first 16 bits being the worker_id.
-  int64_t next_context_id_;
+  std::atomic<int64_t> next_context_id_;
 
   // Unique id to identify a worker in the distributed setting.
   int16_t worker_id_;
 
-  // Map from autograd_context_id to DistAutogradContext.
-  std::unordered_map<int64_t, ContextPtr> autograd_context_;
-
   // Whether or not the container has been initialized appropriately.
   bool initialized_;
 
-  // Lock to protect next_context_id_ and autograd_context map. initialized_
-  // and worker_id_ are immutable.
-  mutable std::mutex autograd_context_lock_;
+  // Sharded autograd context map.
+  std::vector<ContextsShard> autograd_contexts_;
 
   // Autograd message id to identify unique send/recv autograd function pairs.
   std::atomic<int64_t> next_autograd_message_id_;
