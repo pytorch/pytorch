@@ -1317,8 +1317,8 @@ TEST(NewOperatorRegistrationTest, importTopLevel) {
   m.def("def2(Tensor self) -> Tensor", [](const Tensor& x) { return x; });
   m.def("def3", [](const Tensor& x) { return x; });
 
-  auto m2 = c10::Library(DispatchKey::CatchAll, __FILE__, __LINE__);
-  m2.impl("test::impl1", [](const Tensor& x) { return x; });
+  auto m2 = c10::Library("test", DispatchKey::CatchAll, __FILE__, __LINE__);
+  m2.impl("impl1", [](const Tensor& x) { return x; });
 
   ASSERT_TRUE(Dispatcher::singleton().findSchema({"test::def1", ""}).has_value());
   ASSERT_TRUE(Dispatcher::singleton().findSchema({"test::def2", ""}).has_value());
@@ -1440,10 +1440,11 @@ TEST(NewOperatorRegistrationTest, dispatchMultiple) {
 }
 
 TEST(NewOperatorRegistrationTest, fallback) {
-  auto m = c10::Library(DispatchKey::CPU, __FILE__, __LINE__);
+  auto m = c10::Library("_", DispatchKey::CPU, __FILE__, __LINE__);
   m.fallback(c10::CppFunction::makeFromBoxedFunction<&backend_fallback_kernel>());
 
   auto registrar1 = c10::RegisterOperators().op("_test::dummy(Tensor dummy, str input) -> ()");
+
   auto op = Dispatcher::singleton().findSchema({"_test::dummy", ""});
   ASSERT_TRUE(op.has_value());
   auto stack = callOp(*op, dummyTensor(c10::DispatchKey::CPU), "hello ");
@@ -1508,8 +1509,8 @@ TEST(NewOperatorRegistrationTest, testDelayedListener) {
   int64_t initial_num_deregisters = listener_ptr->num_deregisters_;
   auto op = Dispatcher::singleton().findOp({"_test::dummy", ""});
   ASSERT_FALSE(op.has_value());
-  auto m1 = c10::Library(DispatchKey::CPU, __FILE__, __LINE__);
-  m1.impl("_test::dummy", [](const Tensor& self) { return self; });
+  auto m1 = c10::Library("_test", DispatchKey::CPU, __FILE__, __LINE__);
+  m1.impl("dummy", [](const Tensor& self) { return self; });
   EXPECT_EQ(initial_num_registers, listener_ptr->num_registers_);
   {
     auto m2 = c10::Library("_test", __FILE__, __LINE__);

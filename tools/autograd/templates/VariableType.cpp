@@ -42,7 +42,7 @@ ${type_derived_method_definitions}
 
 namespace {
 
-TORCH_LIBRARY_IMPL(Autograd, m) {
+TORCH_LIBRARY_IMPL(aten, Autograd, m) {
   ${wrapper_registrations}
 }
 
