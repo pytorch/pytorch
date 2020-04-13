@@ -2,6 +2,7 @@
 
 #include <c10/macros/Macros.h>
 #include <limits>
+#include <c10/util/math_compat.h>
 
 namespace c10 {
 
