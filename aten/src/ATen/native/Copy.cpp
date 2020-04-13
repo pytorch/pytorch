@@ -163,7 +163,7 @@ Tensor& copy_(Tensor& self, const Tensor& src, bool non_blocking) {
   return self;
 }
 
-TORCH_LIBRARY_IMPL(CatchAll, m) { m.impl_UNBOXED("aten::copy_", copy_); }
+TORCH_LIBRARY_IMPL(aten, CatchAll, m) { m.impl_UNBOXED("copy_", copy_); }
 DEFINE_DISPATCH(copy_stub);
 
 } // namespace native

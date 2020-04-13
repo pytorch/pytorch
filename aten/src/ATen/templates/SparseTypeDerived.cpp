@@ -42,7 +42,7 @@ ${type_derived_method_definitions}
 
 }  // namespace ${Type}
 
-TORCH_LIBRARY_IMPL(${Backend}, m) {
+TORCH_LIBRARY_IMPL(aten, ${Backend}, m) {
   ${function_registrations};
 }
 

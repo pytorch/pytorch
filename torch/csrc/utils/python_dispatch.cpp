@@ -130,8 +130,10 @@ void initDispatchBindings(PyObject* module) {
   ;
 
   m.def("_dispatch_import", [](std::string name) {
+    // This is a wee bit dodgy right now, but the "underlying" API is much
+    // easier to test than the high level (using TORCH_LIBRARY, e.g.)
     if (name.empty()) {
-      return std::make_unique<c10::Library>(c10::DispatchKey::CatchAll, __FILE__, __LINE__);
+      return std::make_unique<c10::Library>("_", c10::DispatchKey::CatchAll, __FILE__, __LINE__);
     } else {
       return std::make_unique<c10::Library>(name, __FILE__, __LINE__);
     }

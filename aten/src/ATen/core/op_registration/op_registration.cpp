@@ -115,12 +115,12 @@ CppFunction::CppFunction(KernelFunction func, std::unique_ptr<c10::FunctionSchem
   {}
 
 Library::Library(std::string ns, const char* file, uint32_t line)
-  : ns_(std::move(ns))
+  : ns_(ns == "_" ? c10::nullopt : c10::make_optional(std::move(ns)))
   , dispatch_key_(c10::nullopt)
   {}
 
-Library::Library(DispatchKey k, const char* file, uint32_t line)
-  : ns_(c10::nullopt)
+Library::Library(std::string ns, DispatchKey k, const char* file, uint32_t line)
+  : ns_(ns == "_" ? c10::nullopt : c10::make_optional(std::move(ns)))
   , dispatch_key_(k == DispatchKey::CatchAll ? c10::nullopt : c10::make_optional(k))
   {}
 
@@ -175,9 +175,9 @@ Library& Library::_impl(const char* name_str, CppFunction&& f) & {
 }
 
 Library& Library::_fallback(CppFunction&& f) & {
-  TORCH_CHECK(!ns_, "Cannot define a fallback in TORCH_LIBRARY (it would affect operators outside of your library)");
+  TORCH_CHECK(!ns_.has_value(), "Cannot define a fallback in a namespaced TORCH_LIBRARY (fallbacks always affect operators outside of your library).  Instead, use TORCH_LIBRARY_IMPL(_, Backend, m) { m.fallback(...); }");
   auto dispatch_key = f.dispatch_key_.has_value() ? f.dispatch_key_ : dispatch_key_;
-  TORCH_CHECK(dispatch_key.has_value(), "Fallback for catch all function not supported");
+  TORCH_CHECK(dispatch_key.has_value(), "Fallback must be defined for a specific backend, e.g., inside a TORCH_LIBRARY_IMPL");
   registrars_.emplace_back(Dispatcher::singleton().registerFallback(*dispatch_key, std::move(f.func_)));
   return *this;
 }

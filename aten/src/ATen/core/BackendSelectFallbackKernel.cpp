@@ -2,7 +2,7 @@
 
 namespace {
 
-TORCH_LIBRARY_IMPL(BackendSelect, m) {
+TORCH_LIBRARY_IMPL(_, BackendSelect, m) {
   m.fallback(c10::CppFunction::makeFallthrough());
 }
 

@@ -156,7 +156,7 @@ public:
 
       return std::move(*this).kernel(
         std::move(dispatch_key),
-        KernelFunction::makeFromUnboxedFunctorFactory<KernelFunctor>(impl::KernelFactory<KernelFunctor, std::decay_t<ConstructorParameters>...>(std::forward<ConstructorParameters>(constructorParameters)...)),
+        KernelFunction::makeFromUnboxedFunctor<false, KernelFunctor>(std::make_unique<KernelFunctor>(std::forward<ConstructorParameters>(constructorParameters)...)),
         detail::inferFunctionSchemaFromFunctor<KernelFunctor>()
       );
     }
@@ -207,7 +207,7 @@ public:
 
       return std::move(*this).kernel(
         c10::nullopt,
-        KernelFunction::makeFromUnboxedFunctorFactory<KernelFunctor>(impl::KernelFactory<KernelFunctor, std::decay_t<ConstructorParameters>...>(std::forward<ConstructorParameters>(constructorParameters)...)),
+        KernelFunction::makeFromUnboxedFunctor<false, KernelFunctor>(std::make_unique<KernelFunctor>(std::forward<ConstructorParameters>(constructorParameters)...)),
         detail::inferFunctionSchemaFromFunctor<KernelFunctor>()
       );
     }
@@ -627,8 +627,8 @@ private:
 //  // e.g., XLA (valid values are entries of DispatchKey).  These
 //  // operator names are not namespaced; you can define implementations
 //  // for any namespace.
-//  TORCH_LIBRARY_IMPL(XLA, m) {
-//    m.impl("aten::mul", &mul_xla_impl);
+//  TORCH_LIBRARY_IMPL(aten, XLA, m) {
+//    m.impl("mul", &mul_xla_impl);
 //  }
 
 
@@ -802,10 +802,18 @@ namespace detail {
 //    ...
 // }
 //
-// TORCH_LIBRARY_IMPL(XLA, m) {
+// TORCH_LIBRARY_IMPL(aten, XLA, m) {
 //    // m is a c10::Library
-//    m.impl("aten::add", ...);
+//    m.impl("add", ...);
 //    ...
+// }
+//
+// In some cases, you need to define something that applies to all namespaces,
+// not just one namespace (usually a fallback).  In that case, use the reserved
+// namespace _, e.g.,
+//
+// TORCH_LIBRARY_IMPL(_, XLA, m) {
+//    m.fallback(xla_fallback);
 // }
 //
 class CAFFE2_API Library final {
@@ -827,7 +835,7 @@ private:
 public:
   // Use TORCH_LIBRARY/TORCH_LIBRARY_IMPL instead of these constructors directly
   Library(std::string ns, const char* file, uint32_t line);
-  Library(DispatchKey k, const char* file, uint32_t line);
+  Library(std::string ns, DispatchKey k, const char* file, uint32_t line);
 
   Library(const Library&) = delete;
   Library& operator=(const Library&) = delete;
@@ -927,8 +935,8 @@ public:
     : lib_(ns, file, line) {
     fn(lib_);
   }
-  TorchLibraryInit(InitFn* fn, DispatchKey k, const char* file, uint32_t line)
-    : lib_(k, file, line) {
+  TorchLibraryInit(InitFn* fn, const char* ns, DispatchKey k, const char* file, uint32_t line)
+    : lib_(ns, k, file, line) {
     fn(lib_);
   }
 };
@@ -944,12 +952,12 @@ public:
   ); \
   void TORCH_LIBRARY_init_ ## ns (c10::Library& m)
 
-#define TORCH_LIBRARY_IMPL(k, m) \
-  static void TORCH_LIBRARY_IMPL_init_ ## k (c10::Library&); \
-  static c10::detail::TorchLibraryInit TORCH_LIBRARY_IMPL_static_init_ ## k ( \
-    & TORCH_LIBRARY_IMPL_init_ ## k, c10::DispatchKey::k, __FILE__, __LINE__ \
+#define TORCH_LIBRARY_IMPL(ns, k, m) \
+  static void TORCH_LIBRARY_IMPL_init_ ## ns ## _ ## k (c10::Library&); \
+  static c10::detail::TorchLibraryInit TORCH_LIBRARY_IMPL_static_init_ ## ns ## _ ## k ( \
+    & TORCH_LIBRARY_IMPL_init_ ## ns ## _ ## k, #ns, c10::DispatchKey::k, __FILE__, __LINE__ \
   ); \
-  void TORCH_LIBRARY_IMPL_init_ ## k (c10::Library& m)
+  void TORCH_LIBRARY_IMPL_init_ ## ns ## _ ## k (c10::Library& m)
 
 namespace torch {
   // Old-style API

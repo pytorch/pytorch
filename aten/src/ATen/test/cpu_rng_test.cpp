@@ -95,22 +95,22 @@ Tensor& custom_rng_cauchy_(Tensor& self, double median, double sigma, Generator 
   return self;
 }
 
-TORCH_LIBRARY_IMPL(CustomRNGKeyId, m) {
+TORCH_LIBRARY_IMPL(aten, CustomRNGKeyId, m) {
   // Random
-  m.impl_UNBOXED("aten::random_.from",             random_from_to);
-  m.impl_UNBOXED("aten::random_.to",               random_to);
-  m.impl_UNBOXED("aten::random_",                  random_);
+  m.impl_UNBOXED("random_.from",             random_from_to);
+  m.impl_UNBOXED("random_.to",               random_to);
+  m.impl_UNBOXED("random_",                  random_);
   // Normal
-  m.impl_UNBOXED("aten::normal_",                  normal_);
-  m.impl_UNBOXED("aten::normal.Tensor_float_out",  normal_Tensor_float_out);
-  m.impl_UNBOXED("aten::normal.float_Tensor_out",  normal_float_Tensor_out);
-  m.impl_UNBOXED("aten::normal.Tensor_Tensor_out", normal_Tensor_Tensor_out);
-  m.impl_UNBOXED("aten::normal.Tensor_float",      normal_Tensor_float);
-  m.impl_UNBOXED("aten::normal.float_Tensor",      normal_float_Tensor);
-  m.impl_UNBOXED("aten::normal.Tensor_Tensor",     normal_Tensor_Tensor);
-  m.impl_UNBOXED("aten::uniform_",                 uniform_);
+  m.impl_UNBOXED("normal_",                  normal_);
+  m.impl_UNBOXED("normal.Tensor_float_out",  normal_Tensor_float_out);
+  m.impl_UNBOXED("normal.float_Tensor_out",  normal_float_Tensor_out);
+  m.impl_UNBOXED("normal.Tensor_Tensor_out", normal_Tensor_Tensor_out);
+  m.impl_UNBOXED("normal.Tensor_float",      normal_Tensor_float);
+  m.impl_UNBOXED("normal.float_Tensor",      normal_float_Tensor);
+  m.impl_UNBOXED("normal.Tensor_Tensor",     normal_Tensor_Tensor);
+  m.impl_UNBOXED("uniform_",                 uniform_);
   // Cauchy
-  m.impl_UNBOXED("aten::cauchy_",                  custom_rng_cauchy_);
+  m.impl_UNBOXED("cauchy_",                  custom_rng_cauchy_);
 }
 
 class RNGTest : public ::testing::Test {
