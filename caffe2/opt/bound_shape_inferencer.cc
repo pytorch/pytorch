@@ -450,7 +450,14 @@ void BoundShapeInferencer::InferElementwiseOpInput(const OperatorDef& op) {
   const bool broadcast = helper.GetSingleArgument<bool>("broadcast", false);
   if (broadcast) {
     auto input_shape_info = it->second;
-    shape_info_.emplace(op.input(0), std::move(input_shape_info));
+    shape_info_.emplace(op.input(0), input_shape_info);
+    // From definition of Add/Mul:
+    // "When broadcasting is specified,
+    // the second tensor can either be of size 1 (a scalar value),
+    // or having its shape as a contiguous subset of the first tensors shape."
+    // shape info of second input is always subset of first input.
+    // Set bound shape of second input same as first input.
+    shape_info_.emplace(op.input(1), std::move(input_shape_info));
   }
 }
 

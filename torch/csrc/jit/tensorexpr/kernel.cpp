@@ -1010,7 +1010,6 @@ void TensorExprKernel::lowerToBackend(BackendType backendType) {
       l.computeInline(l.getLoopBodyFor(tensorOutputs_[i]));
 
       Tensor* tensor = tensorOutputs[i];
-      const Var* index = tensor->arg(0);
       int loopLevels = getTECudaPointwiseLoopLevels();
       const int kDefaultLoopLevels = 2;
       loopLevels = (loopLevels > 0) ? loopLevels : kDefaultLoopLevels;
