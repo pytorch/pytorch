@@ -132,7 +132,7 @@ static inline void slow_conv3d_shape_check(
     if (weight.dim() == 2) {
       n_input_plane /= (kernel_height * kernel_width);
     }
-    // to support grouped conv we need to check if input.size(dim_planes) 
+    // to support grouped conv we need to check if input.size(dim_planes)
     // is multiple of weight.size(dim_planes)
     TORCH_CHECK(groups > 0, "none zero group size expected");
     check_dim_size(input, ndim, dim_planes, n_input_plane * groups);
@@ -214,10 +214,10 @@ static void slow_conv3d_update_output_frame(
         output.reshape({groups,
                         n_output_plane / groups,
                         output_depth * output_height * output_width});
-    auto weight_g = weight.reshape({groups,
-                                    n_output_plane / groups,
-                                    n_input_plane / groups * kernel_depth *
-                                        kernel_height * kernel_width});
+    auto weight_g = weight.reshape(
+        {groups,
+         n_output_plane / groups,
+         n_input_plane / groups * kernel_depth * kernel_height * kernel_width});
     auto finput_g = finput.reshape(
         {groups,
          n_input_plane / groups * kernel_depth * kernel_width * kernel_height,
@@ -231,8 +231,6 @@ static void slow_conv3d_update_output_frame(
     } else {
       at::bmm_out(output2d, weight_g, finput_g);
     }
-    // output = output2d.reshape(
-    //     {n_output_plane, output_depth * output_height * output_width});
   } else {
     auto output2d = output.reshape(
         {n_output_plane, output_depth * output_height * output_width});
@@ -267,17 +265,17 @@ void slow_conv3d_backward_update_grad_input_frame(
     auto d = grad_output.size(1);
     auto h = grad_output.size(2);
     auto w = grad_output.size(3);
-    auto grad_output_2d = grad_output.reshape(
-            {groups, n / groups, d * h * w});
-    auto weight_g = weight.reshape({groups, weight.size(0), weight.size(1) / groups});
+    auto grad_output_2d = grad_output.reshape({groups, n / groups, d * h * w});
+    auto weight_g =
+        weight.reshape({groups, weight.size(0), weight.size(1) / groups});
     auto fgrad_input_g = fgrad_input.reshape(
         {groups, fgrad_input.size(0) / groups, fgrad_input.size(1)});
 
     at::bmm_out(fgrad_input_g, weight_g, grad_output_2d);
   } else {
     auto grad_output_2d = grad_output.reshape(
-            {grad_output.size(0),
-             grad_output.size(1) * grad_output.size(2) * grad_output.size(3)});
+        {grad_output.size(0),
+         grad_output.size(1) * grad_output.size(2) * grad_output.size(3)});
     at::mm_out(fgrad_input, weight, grad_output_2d);
   }
   Unfold3dAccCPU(
@@ -419,14 +417,12 @@ void slow_conv3d_backward_parameters_frame(
         Tensor tfinput = finput_g[g].transpose(0, 1);
         grad_weight_g[g].addmm_(grad_output_2d[g], tfinput);
       }
-    }
-    else {
+    } else {
       const Tensor tfinput = finput.transpose(0, 1);
       grad_weight.addmm_(grad_output_2d, tfinput);
     }
   }
 
-  // TODO: check correctness
   if (grad_bias.defined()) {
     AT_DISPATCH_FLOATING_TYPES_AND(
         at::ScalarType::BFloat16,
@@ -530,8 +526,7 @@ std::tuple<Tensor&, Tensor&, Tensor&> slow_conv3d_forward_out_cpu(
     IntArrayRef kernel_size,
     const Tensor& bias,
     IntArrayRef stride,
-    IntArrayRef padding,
-    int64_t groups) {
+    IntArrayRef padding) {
   const int64_t kernel_depth = kernel_size[0];
   const int64_t kernel_height = kernel_size[1];
   const int64_t kernel_width = kernel_size[2];
@@ -541,6 +536,10 @@ std::tuple<Tensor&, Tensor&, Tensor&> slow_conv3d_forward_out_cpu(
   const int64_t stride_depth = stride[0];
   const int64_t stride_height = stride[1];
   const int64_t stride_width = stride[2];
+
+  // TODO: hacky way of deciding the groups
+  // Assuming the group size is checked in upstream functions
+  const int64_t groups = self.size(1) / weight.size(1);
 
   slow_conv3d_shape_check(
       self,
@@ -630,8 +629,7 @@ std::tuple<Tensor, Tensor, Tensor> slow_conv3d_forward_cpu(
     IntArrayRef kernel_size,
     const Tensor& bias,
     IntArrayRef stride,
-    IntArrayRef padding,
-    int64_t groups) {
+    IntArrayRef padding) {
   auto output = at::empty({0}, self.options());
   auto finput = at::empty({0}, self.options());
   auto fgrad_input = at::empty({0}, self.options());
@@ -644,17 +642,8 @@ std::tuple<Tensor, Tensor, Tensor> slow_conv3d_forward_cpu(
       kernel_size,
       bias,
       stride,
-      padding,
-      groups);
+      padding);
   return std::make_tuple(output, finput, fgrad_input);
-}
-
-static at::Tensor subtensor(const Tensor& tensor, int dim, int groups, int g) {
-  if (!tensor.defined()) {
-    return at::Tensor();
-  }
-  int64_t n = tensor.sizes()[dim] / groups;
-  return tensor.narrow(dim, n * g, n).contiguous();
 }
 
 std::tuple<Tensor&, Tensor&, Tensor&> slow_conv3d_backward_out_cpu(
@@ -763,8 +752,7 @@ Tensor& slow_conv3d_out(
     IntArrayRef kernel_size,
     const Tensor& bias,
     IntArrayRef stride,
-    IntArrayRef padding,
-    int64_t groups) {
+    IntArrayRef padding) {
   Tensor finput = at::empty({0}, self.options());
   Tensor fgrad_input = at::empty({0}, self.options());
   return std::get<0>(at::slow_conv3d_forward_out(
@@ -776,8 +764,7 @@ Tensor& slow_conv3d_out(
       kernel_size,
       bias,
       stride,
-      padding,
-      groups));
+      padding));
 }
 
 Tensor slow_conv3d(
@@ -786,10 +773,9 @@ Tensor slow_conv3d(
     IntArrayRef kernel_size,
     const Tensor& bias,
     IntArrayRef stride,
-    IntArrayRef padding,
-    int64_t groups) {
+    IntArrayRef padding) {
   return std::get<0>(at::slow_conv3d_forward(
-      self, weight, kernel_size, bias, stride, padding, groups));
+      self, weight, kernel_size, bias, stride, padding));
 }
 
 } // namespace native

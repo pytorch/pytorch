@@ -3960,7 +3960,7 @@ class TestNN(NNTestCase):
                              1e-1 if dtype == torch.half else dtype2prec_DONTUSE[dtype])
 
     # CPU-only test for group conv3d fast implementation using bmm
-    # See:
+    # See: https://github.com/pytorch/pytorch/pull/36355
     def test_Conv3d_groups_nobias(self):
         torch.manual_seed(123)
         m = nn.Conv3d(4, 16, kernel_size=3, groups=2, bias=False).to("cpu", torch.float)
@@ -3974,6 +3974,7 @@ class TestNN(NNTestCase):
         i1 = i.data[:, :2].contiguous().requires_grad_(True)
         output1 = m1(i1)
         output1.backward(grad_output[:, :8].contiguous())
+        # torch.autograd.gradcheck(m1, (i1.clone(),))
 
         m2 = nn.Conv3d(2, 8, kernel_size=3, bias=False).to("cpu", torch.float)
         m2.weight.data.copy_(m.weight.data[8:])
@@ -4021,10 +4022,6 @@ class TestNN(NNTestCase):
         self.assertEqual(m.bias.grad.data,
                          torch.cat([m1.bias.grad.data, m2.bias.grad.data], 0),
                          dtype2prec_DONTUSE[torch.float])
-
-    # CPU-only test for fast pass of 1x1 
-    def test_Conv_1x1(self):
-        pass
 
     # Very similar to test_Conv2d_naive_groups but with special care to handle
     # the number of groups == number of input channels

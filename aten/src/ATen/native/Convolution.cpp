@@ -701,7 +701,8 @@ at::Tensor _convolution(
         input.device().type(), input, weight, bias, params.stride, params.padding, params.groups);
     } else if (
         !params.transposed && (input.ndimension() == 5) &&
-        (input.device().type() == c10::DeviceType::CPU) && !params.is_dilated()) {
+        (input.device().type() == c10::DeviceType::CPU) &&
+        !params.is_dilated()) {
       // fast path for grouped conv3d
       output = at::slow_conv3d(
           input,
@@ -709,8 +710,7 @@ at::Tensor _convolution(
           weight.sizes().slice(2),
           bias,
           params.stride,
-          params.padding,
-          params.groups);
+          params.padding);
     } else if (params.groups == 1) {
       output = at::_convolution_nogroup(
           input.contiguous(), weight, bias, params.stride, params.padding, params.dilation, params.transposed, params.output_padding);
@@ -798,8 +798,7 @@ at::Tensor _convolution_nogroup(
       /* CPU implementation has specialized MM kernels
          for non-dilated case here */
       // This path is already overwritten with the fast impl in _convolution
-      return at::slow_conv3d(
-          input, weight, kernel_size, bias, stride, padding, 1 /* groups */);
+      return at::slow_conv3d(input, weight, kernel_size, bias, stride, padding);
     }
   }
 
@@ -841,7 +840,9 @@ std::tuple<Tensor,Tensor,Tensor> _convolution_double_backward(
   params.dilation = dilation_.vec();
   params.transposed = transposed_;
   params.output_padding = output_padding_.vec();
-  params.groups = groups_;
+  // TODO: hacky way of inferring the groups number
+  // should pass the parameter through autograd
+  params.groups = input.size(1) / weight.size(1);
   params.benchmark = benchmark;
   params.deterministic = deterministic;
   params.cudnn_enabled = cudnn_enabled;
@@ -914,7 +915,6 @@ std::tuple<Tensor,Tensor,Tensor> _convolution_double_backward(
         if (gOt.is_cuda()) {
           gOt = gOt.contiguous();
         }
-
         // Compute conv
         if (params.transposed) {
           gw_conv_params.transposed = false;
