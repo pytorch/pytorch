@@ -43,21 +43,21 @@ Tensor clamp(
 }
 
 bool use_clamp_(
-    const Tensor&,
+    Tensor&,
     const float,
     const float) {
   return false;
 }
 
 Tensor& clamp_(
-    const Tensor&,
+    Tensor&,
     const float,
     const float) {
   TORCH_CHECK(false, internal::kError);
 }
 
 bool use_clamp_out(
-    const Tensor&,
+    Tensor&,
     const Tensor&,
     const float,
     const float) {
@@ -65,7 +65,7 @@ bool use_clamp_out(
 }
 
 Tensor& clamp_out(
-    const Tensor&,
+    Tensor&,
     const Tensor&,
     const float,
     const float) {
