@@ -52,7 +52,6 @@ set(ATen_CUDA_SRCS ${ATen_CUDA_SRCS}
   ${CMAKE_CURRENT_SOURCE_DIR}/THCTensorMathMagma.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/THCTensorMathPairwise.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/THCTensorMathReduce.cu
-  ${CMAKE_CURRENT_SOURCE_DIR}/THCTensorMathScan.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/THCTensorIndex.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/THCTensorRandom.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/THCTensorScatterGather.cu
