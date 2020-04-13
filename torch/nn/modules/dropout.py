@@ -194,8 +194,7 @@ class FeatureAlphaDropout(_DropoutNd):
 
     Usually the input comes from :class:`nn.Conv3d` modules.
 
-    As described in the paper
-    `Efficient Object Localization Using Convolutional Networks`_ ,
+    As described in the paper `Self-Normalizing Neural Networks`_ ,
     if adjacent pixels within feature maps are strongly correlated
     (as is normally the case in early convolution layers) then i.i.d. dropout
     will not regularize the activations and will otherwise just result
