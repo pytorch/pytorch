@@ -203,6 +203,7 @@ void InlineFunctionalGraphs(Block* block) {
       InlineFunctionalGraphs(b);
     }
     if (n->kind() == prim::FunctionalGraph) {
+      EnsureOutputsDontAliasInputs(n->g(attr::Subgraph));
       SubgraphUtils::unmergeSubgraph(n);
     }
   }
@@ -396,6 +397,60 @@ struct MutationRemover {
   std::shared_ptr<Graph> graph_;
 };
 
+struct OutputsInputsAliasingRemover {
+  OutputsInputsAliasingRemover(const std::shared_ptr<Graph>& graph)
+      : aliasDb_(nullptr), graph_(graph) {
+    aliasDb_ = torch::make_unique<AliasDb>(graph_);
+  }
+
+  void run() {
+    // There are very few optimizations that introduce aliasing relationships
+    // between values, and with any sizeable graph the likelihood that the
+    // outputs alias the inputs is extremely low, and a clone is cheap. For now,
+    // use a simple algorithm to break aliasing.
+
+    std::vector<Value*> aliased_inputs;
+    std::vector<Value*> aliased_outputs;
+    for (Value* input : graph_->inputs()) {
+      for (Value* output : graph_->outputs()) {
+        if (aliasDb_->mayAlias(input, output)) {
+          aliased_inputs.push_back(input);
+          aliased_outputs.push_back(output);
+        }
+      }
+    }
+
+    if (aliased_inputs.size() == 0) {
+      return;
+    }
+
+    WithInsertPoint block(graph_->block());
+    Value* none_value = graph_->insertConstant(IValue());
+
+    Node* insert_node;
+    at::ArrayRef<Value*> cloned_set;
+    if (aliased_inputs.size() < aliased_outputs.size()) {
+      insert_node = graph_->param_node();
+      cloned_set = aliased_inputs;
+    } else {
+      insert_node = graph_->return_node();
+      cloned_set = aliased_outputs;
+    }
+
+    WithInsertPoint guard(insert_node);
+    for (Value* v : cloned_set) {
+      auto new_value =
+          graph_->insertNode(graph_->create(aten::clone, {v, none_value}, 1))
+              ->output();
+      v->replaceAllUsesAfterNodeWith(new_value->node(), new_value);
+    }
+  }
+
+ private:
+  std::unique_ptr<AliasDb> aliasDb_ = nullptr;
+  std::shared_ptr<Graph> graph_;
+};
+
 void CreateFunctionalGraphs(const std::shared_ptr<Graph>& graph) {
   // Run Constant Pooling so constants get hoisted
   ConstantPooling(graph);
@@ -412,6 +467,11 @@ void InlineFunctionalGraphs(const std::shared_ptr<Graph>& graph) {
 void RemoveMutation(const std::shared_ptr<Graph>& graph) {
   MutationRemover mr(graph);
   mr.run();
+}
+
+void EnsureOutputsDontAliasInputs(const std::shared_ptr<Graph>& graph) {
+  OutputsInputsAliasingRemover ar(graph);
+  ar.run();
 }
 
 } // namespace jit

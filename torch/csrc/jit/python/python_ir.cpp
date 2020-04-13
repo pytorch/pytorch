@@ -467,6 +467,7 @@ void initPythonIRBindings(PyObject* module_) {
       .def("sourceRange", [](Node& n) { return n.sourceRange().str(); })
       .def("hasMultipleOutputs", [](Node& n) { return n.outputs().size() > 1; })
       .def("outputsSize", [](Node& n) { return n.outputs().size(); })
+      .def("subgraph", [](Node& n) { return n.g(attr::Subgraph); })
       .NS(kind)
       .def("inputsAt", [](Node& n, size_t i) { return n.inputs().at(i); })
       .def(

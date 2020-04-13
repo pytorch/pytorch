@@ -41,6 +41,39 @@ class TestFunctionalBlocks(JitTestCase):
         # z + 1, z.add_(2) considered non functional, z = z * z should be considered functional
         FileCheck().check("add").check("add_").check_not("mul").check("FunctionalGraph").run(graph)
 
+    def test_remove_mutation_copies_inserted(self):
+        # toy pass removing x + 0 nodes
+        def remove_plus_zero_nodes(block):
+            changed = True
+            # iter gets invalidated so just rerun on changes
+            while changed:
+                changed = False
+                for node in block.nodes():
+                    if node.kind() == "aten::add":
+                        inps = list(node.inputs())
+                        if inps[1].toIValue() == 0 and inps[2].toIValue() == 1:
+                            node.output().replaceAllUsesWith(inps[0])
+                            node.destroy()
+                            changed = True
+                            break
+
+        def remove_copies():
+            x = torch.tensor(3)
+            y = x + 0 + 0 + 0 + 0 + 0 + 0
+            x.add_(1)
+            return y + 3, x
+
+        script_fn = torch.jit.script(remove_copies)
+        graph = script_fn.graph
+        self.run_pass('create_functional_graphs', graph)
+        subgraph = graph.findNode('prim::FunctionalGraph').subgraph()
+        remove_plus_zero_nodes(subgraph)
+        FileCheck().check_count("aten::add(", 1, exactly=True).run(graph)  # final y + 3
+        self.run_pass("inline_functional_graphs", graph)
+        # copies inserted to make semantically valid again
+        FileCheck().check("aten::clone").run(graph)
+        self.assertEqual(script_fn(), remove_copies())
+
     def test_lower_linear(self):
         # linear is one of main use cases of removing mutation so add test so it doesnt regress
         @torch.jit.script
