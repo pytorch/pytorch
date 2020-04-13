@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/codegen/cuda/kernel.h>
+#include <torch/csrc/jit/codegen/cuda/kernel_resource_strings.h>
 #include <torch/csrc/jit/codegen/cuda/lower2device.h>
 #include <iostream>
 
@@ -7,6 +8,7 @@
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/util/ArrayRef.h>
 #include <torch/csrc/jit/resource_guard.h>
+#include <torch/csrc/jit/codegen/fuser/cuda/resource_strings.h>
 
 namespace torch {
 namespace jit {
@@ -26,20 +28,6 @@ static int ceilDiv(const int a, const int b) {
   return (a + b - 1) / b;
 }
 
-// IO data structure for kernel code;
-static auto typeinfo = R"(
-template<typename T, int N>
-struct Tensor {
-  T& operator[](int ind) {
-    return data[ind];
-  };
-
-  T* data;
-  int size[N];
-  int stride[N];
-};
-)";
-
 // include IO data structure for host code
 struct KernelArgumentHolder {
   std::vector<void*> arguments;
@@ -50,7 +38,7 @@ struct KernelArgumentHolder {
     arguments.reserve(n_inputs);
     // We are being generous here on the allocated buffer;
     buffer.resize(
-        n_inputs * (sizeof(void*) + 2 * sizeof(int) * n_dimension_per_tensor));
+        n_inputs * (sizeof(void*) + 2 * sizeof(int64_t) * n_dimension_per_tensor));
     buffer_ptr = buffer.data();
   }
 
@@ -58,7 +46,7 @@ struct KernelArgumentHolder {
     return arguments.data();
   }
 
-  // this should comply to the storage of Tensor object defined in typeinfo;
+  // this should comply to the storage of Tensor object defined in code_template_tensor_struct;
   void push_tensor(
       const at::Tensor& val,
       c10::optional<at::IntArrayRef> broadcasted_size = c10::nullopt) {
@@ -73,8 +61,8 @@ struct KernelArgumentHolder {
       auto b_dim = broadcasted_size->size();
       auto o_dim = val.dim();
       TORCH_CHECK(b_dim >= o_dim);
-      int* sizes = reinterpret_cast<int*>(buffer_ptr);
-      int* strides = &sizes[b_dim];
+      int64_t* sizes = reinterpret_cast<int64_t*>(buffer_ptr);
+      int64_t* strides = &sizes[b_dim];
       for (int i = 0; i < b_dim; i++) {
         sizes[i] = broadcasted_size->at(i);
         int index = i + o_dim - b_dim;
@@ -92,8 +80,8 @@ struct KernelArgumentHolder {
       buffer_ptr = &strides[b_dim];
     } else {
       auto o_dim = val.dim();
-      int* sizes = reinterpret_cast<int*>(buffer_ptr);
-      int* strides = &sizes[o_dim];
+      int64_t* sizes = reinterpret_cast<int64_t*>(buffer_ptr);
+      int64_t* strides = &sizes[o_dim];
       for (decltype(val.dim()) i{0}; i < o_dim; i++) {
         sizes[i] = val.sizes()[i];
         strides[i] = val.strides()[i];
@@ -114,8 +102,7 @@ struct KernelArgumentHolder {
 
 std::pair<std::string, std::string> codeGeneration(Fusion& fusion) {
   std::stringstream str_stream;
-
-  str_stream << "namespace " << CG_NAMESPACE << " {\n" << typeinfo << "\n";
+  str_stream << "namespace " << CG_NAMESPACE << " {\n" << code_template_tensor_struct << "\n";
   std::stringstream cdg;
   GPULower gpulw(&fusion);
   gpulw.printKernel(str_stream, KERNEL_NAME);
