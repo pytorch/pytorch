@@ -361,7 +361,7 @@ Consider a custom function that requires ``torch.float32`` inputs.
 Apply :func:`custom_fwd(cast_inputs=torch.float32)<custom_fwd>` to ``forward``
 and :func:`custom_bwd<custom_bwd>` (with no arguments) to ``backward``.
 If ``forward`` runs in an autocast-enabled region, the decorators cast floating-point CUDA Tensor
-inputs to ``float32``, and locally disable autocast during ``forward`` and ``backward``.
+inputs to ``float32``, and locally disable autocast during ``forward`` and ``backward``::
 
     class MyFloat32Func(torch.autograd.Function):
         @staticmethod
