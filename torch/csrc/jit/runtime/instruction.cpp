@@ -74,7 +74,8 @@ bool isOpSupportedInMobile(OpCode op) {
   static constexpr OpCode supported_ops_in_mobile[] {
       OP, OPN, LOAD, MOVE, STOREN, STORE, DROP, DROPR, LOADC, JF, JMP, LOOP,
       RET, GET_ATTR, SET_ATTR, LIST_CONSTRUCT, TUPLE_CONSTRUCT, WARN,
-      INTERFACE_CALL, LIST_UNPACK, TUPLE_SLICE
+      INTERFACE_CALL, LIST_UNPACK, TUPLE_SLICE, DICT_CONSTRUCT,
+      NAMED_TUPLE_CONSTRUCT
   };
   // clang-format on
 

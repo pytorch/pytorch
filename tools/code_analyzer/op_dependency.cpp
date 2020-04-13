@@ -126,6 +126,19 @@ cl::opt<RegexOpt, true, cl::parser<std::string>> OpInvocationPattern(
     cl::Required,
     cl::ValueRequired);
 
+// The `root_symbol_pattern` is used to specify the seeds of C++ symbols
+// from which it searches for transitively reachable ops which need to be
+// kept for these C++ APIs to be able to run.
+//
+// Why not dump ops that are reachable from any visible C++ symbols? Why
+// limit it to a subset of root symbols?
+// Because op registration callsites in static initializer are visible root
+// symbols, too. It will dump ALL the registered ops without any filtering.
+//
+// Can we use some fixed entry point like `main()`?
+// The target to be analyzed can be DSO that doesn't have a `main()`.
+//
+// This temporary flag will be deprecated by better alternatives in the future.
 RegexOpt RootSymbolPatternLoc;
 cl::opt<RegexOpt, true, cl::parser<std::string>> RootSymbolPattern(
     "root_symbol_pattern",
@@ -279,7 +292,9 @@ private:
             // One registration/invocation API might call another registration/
             // invocation API in which case we can skip processing the nested
             // call. This is a simple trick to avoid "cannot find registered/
-            // invoked op" warning and doesn't affect correctness.
+            // invoked op" warning and doesn't affect correctness, because
+            // later in scanOpRegistration we'll walk the transitively reachable
+            // IR graph again from each registration instance.
             if (!OpRegistrationPatternLoc.pattern->match(callerDemangled) &&
                 OpRegistrationPatternLoc.pattern->match(calleeDemangled)) {
               (*opRegistrationInsts).insert(&I);

@@ -10,7 +10,7 @@
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
 
-#include <ATen/core/boxing/test_helpers.h>
+#include <ATen/core/boxing/impl/test_helpers.h>
 #include <ATen/core/op_registration/op_registration.h>
 #include <ATen/core/Tensor.h>
 #include <functional>
@@ -1297,11 +1297,11 @@ TEST(NewOperatorRegistrationTest, testBasics) {
     .def("_test::dummy2(Tensor self) -> Tensor")
     .def("_test::dummy3(Tensor self, Tensor other) -> Tensor", [](const Tensor& self, const Tensor& other) { return self; })
     .def("_test::dummy4", [](const Tensor& self, const Tensor& other) { return other; })
-    .impl("_test::dummy", c10::dispatch(c10::DeviceType::CPU, [](const Tensor& self) { return self; }))
-    .impl("_test::dummy", c10::dispatch(c10::DeviceType::XLA, [](const Tensor& self) { return self; }))
+    .impl("_test::dummy", c10::DeviceType::CPU, [](const Tensor& self) { return self; })
+    .impl("_test::dummy", c10::DeviceType::XLA, [](const Tensor& self) { return self; })
     // Internal API
-    .impl("_test::dummy2", c10::dispatch(c10::DispatchKey::CPUTensorId, [](const Tensor& self) { return self; }))
-    .impl("_test::dummy2", c10::dispatch(c10::DispatchKey::XLATensorId, [](const Tensor& self) { return self; }));
+    .impl("_test::dummy2", c10::DispatchKey::CPUTensorId, [](const Tensor& self) { return self; })
+    .impl("_test::dummy2", c10::DispatchKey::XLATensorId, [](const Tensor& self) { return self; });
 
   ASSERT_TRUE(Dispatcher::singleton().findSchema({"_test::dummy", ""}).has_value());
   // Should have a schema even if there are no impls
@@ -1382,7 +1382,7 @@ TEST(NewOperatorRegistrationTest, dispatch) {
   auto registrar = c10::import()
     .def("test::fn_cpu", torch::dispatch(c10::DispatchKey::CPUTensorId, [&](const Tensor& x) { cpu_called = true; return x; }))
     .def("test::fn_cuda", torch::dispatch(c10::kCUDA, [&](const Tensor& x) { cuda_called = true; return x; }))
-    .def("test::fn_autograd", torch::dispatch_autograd([&](const Tensor& x) { autograd_called = true; return x; }));
+    .def("test::fn_autograd", torch::dispatch(c10::kAutograd, [&](const Tensor& x) { autograd_called = true; return x; }));
 
   {
     auto op = Dispatcher::singleton().findSchema({"test::fn_cpu", ""});
@@ -1415,9 +1415,11 @@ TEST(NewOperatorRegistrationTest, dispatchMultiple) {
   bool autograd_called = false;
   auto registrar = c10::import()
     .def("test::fn(Tensor self) -> Tensor")
-    .impl("test::fn", torch::dispatch(c10::DispatchKey::CPUTensorId, [&](const Tensor& x) { cpu_called = true; return x; }))
-    .impl("test::fn", torch::dispatch(c10::kCUDA, [&](const Tensor& x) { cuda_called = true; return x; }))
-    .impl("test::fn", torch::dispatch_autograd([&](const Tensor& x) { autograd_called = true; return x; }));
+    // NB: Direct use of DispatchKey is discouraged; use the DeviceType
+    // k-synonyms instead
+    .impl("test::fn", c10::DispatchKey::CPUTensorId, [&](const Tensor& x) { cpu_called = true; return x; })
+    .impl("test::fn", c10::kCUDA, [&](const Tensor& x) { cuda_called = true; return x; })
+    .impl("test::fn", c10::kAutograd, [&](const Tensor& x) { autograd_called = true; return x; });
 
   auto op = Dispatcher::singleton().findSchema({"test::fn", ""});
   ASSERT_TRUE(op.has_value());
@@ -1440,7 +1442,7 @@ TEST(NewOperatorRegistrationTest, dispatchMultiple) {
 
 TEST(NewOperatorRegistrationTest, fallback) {
   auto registrar = c10::import()
-    .fallback(torch::dispatch(c10::kCPU, c10::CppFunction::makeFromBoxedFunction<&backend_fallback_kernel>()));
+    .fallback(c10::kCPU, c10::CppFunction::makeFromBoxedFunction<&backend_fallback_kernel>());
 
   auto registrar1 = c10::RegisterOperators().op("_test::dummy(Tensor dummy, str input) -> ()");
   auto op = Dispatcher::singleton().findSchema({"_test::dummy", ""});
@@ -1454,12 +1456,12 @@ TEST(NewOperatorRegistrationTest, BackendSelectRedispatchesToCPU) {
   bool backend_generic_called = false;
   auto registrar = c10::import()
     .def("test::fn(Tensor self) -> Tensor")
-    .impl("test::fn", torch::dispatch(c10::kCPU, [&](const Tensor& x) { cpu_called = true; return x; }))
-    .impl("test::fn", torch::dispatch(c10::DispatchKey::BackendSelect, [&](const Tensor& x) {
+    .impl("test::fn", c10::kCPU, [&](const Tensor& x) { cpu_called = true; return x; })
+    .impl("test::fn", c10::DispatchKey::BackendSelect, [&](const Tensor& x) {
       backend_generic_called = true;
       auto op = c10::Dispatcher::singleton().findSchema({"test::fn", ""});
       return c10::Dispatcher::singleton().callUnboxedRedispatch<Tensor, const Tensor&>(*op, c10::DispatchKey::BackendSelect, x);
-    }))
+    })
   ;
   auto op = Dispatcher::singleton().findSchema({"test::fn", ""});
   ASSERT_TRUE(op.has_value());
@@ -1514,6 +1516,19 @@ TEST(NewOperatorRegistrationTest, testDelayedListener) {
     EXPECT_EQ(initial_num_registers + 1, listener_ptr->num_registers_);
   }
   EXPECT_EQ(initial_num_deregisters + 1, listener_ptr->num_deregisters_);
+}
+
+TEST(OperatorRegistrationTest, whenDeregisteringOp_thenHandleBecomesInvalid) {
+  c10::optional<OperatorHandle> handle;
+  {
+    auto registrar = c10::import()
+      .def("_test::dummy(Tensor dummy) -> Tensor");
+    handle = Dispatcher::singleton().findSchema({"_test::dummy", ""});
+    EXPECT_TRUE(handle.has_value());
+    EXPECT_TRUE(handle->isValid());
+  }
+  // Now the RegistrationHandleRAII went out of scope and the op is deregistered
+  EXPECT_FALSE(handle->isValid());
 }
 
 }

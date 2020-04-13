@@ -2,7 +2,7 @@
 
 #include <iostream>
 #include <string>
-#include "c10/macros/Macros.h"
+#include <c10/macros/Macros.h>
 
 namespace c10 {
 
@@ -71,7 +71,7 @@ enum class DispatchKey : uint8_t {
 
   // This backend is to support custom RNGs; it lets you go
   // to a different kernel if you pass in a generator that is not a
-  // traditional CPUGenerator/CUDAGenerator.  To make use of this
+  // traditional CPUGeneratorImpl/CUDAGeneratorImpl.  To make use of this
   // key:
   //  1) set it as a second parameter of at::Generator constructor call in
   //     the user-defined PRNG class.
@@ -204,7 +204,20 @@ static inline DispatchKey XLATensorId() {
   return DispatchKey::XLATensorId;
 }
 
+// These are some convenience identifiers for dispatch keys which are
+// shorter to type than their long counterparts.  Note that some of these
+// dispatch keys directly correspond to DeviceType; and most APIs that
+// accept DispatchKey also accept DeviceType; e.g.,
+// torch::dispatch(torch::kCPU, ...) is also valid.
+constexpr DispatchKey kAutograd = DispatchKey::VariableTensorId;
+
 } // namespace c10
+
+namespace torch {
+  // Expose the constant, but not the TYPE (DispatchKey is an implementation
+  // detail!)
+  using c10::kAutograd;
+}
 
 // NB: You really shouldn't use this instance; this enum is guaranteed
 // to be pretty small so a regular array should be acceptable.
