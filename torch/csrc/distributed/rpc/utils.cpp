@@ -241,6 +241,15 @@ c10::List<at::Tensor> cloneSparseTensors(
 std::string wireSerialize(
     const std::vector<char>& payload,
     const std::vector<at::Tensor>& tensors) {
+  for (const auto& tensor : tensors) {
+    TORCH_CHECK(
+        tensor.device().is_cpu(),
+        "ProcessGroup RPC backend only supports",
+        " CPU tensors, please move your tensors to CPU before sending ",
+        "them over RPC. Found tensor on device: ",
+        tensor.device());
+  }
+
   struct Ent {
     std::string name;
     const char* data;
@@ -255,12 +264,10 @@ std::string wireSerialize(
   }
 
   if (!tensors.empty()) {
-    torch::jit::Pickler pickler(
-        [&](const void* buf, size_t sz) -> size_t {
-          metaEntry.append(static_cast<const char*>(buf), sz);
-          return sz;
-        },
-        nullptr);
+    torch::jit::Pickler pickler([&](const void* buf, size_t sz) -> size_t {
+      metaEntry.append(static_cast<const char*>(buf), sz);
+      return sz;
+    });
     pickler.protocol();
     pickler.pushIValue(cloneSparseTensors(tensors));
     pickler.stop();

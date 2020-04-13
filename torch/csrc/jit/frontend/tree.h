@@ -5,9 +5,9 @@
 #include <unordered_map>
 #include <vector>
 
-#include <torch/csrc/jit/frontend/lexer.h>
-#include <c10/util/intrusive_ptr.h>
 #include <c10/util/SmallVector.h>
+#include <c10/util/intrusive_ptr.h>
+#include <torch/csrc/jit/frontend/lexer.h>
 
 namespace torch {
 namespace jit {

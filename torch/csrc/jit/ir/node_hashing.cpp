@@ -194,9 +194,12 @@ size_t HashNode::operator()(const Node* k) const {
   size_t constant_hash = 0;
   if (k->kind() == prim::Constant) {
     TypePtr type = k->output()->type();
-    if (type->isSubtypeOf(NumberType::get()) && k->kindOf(attr::value) == AttributeKind::i) {
+    if (type->isSubtypeOf(NumberType::get()) &&
+        k->kindOf(attr::value) == AttributeKind::i) {
       constant_hash = std::hash<int64_t>{}(k->i(attr::value));
-    } else if (type->isSubtypeOf(NumberType::get()) && k->kindOf(attr::value) == AttributeKind::f) {
+    } else if (
+        type->isSubtypeOf(NumberType::get()) &&
+        k->kindOf(attr::value) == AttributeKind::f) {
       constant_hash = std::hash<float>{}(k->f(attr::value));
     } else if (type->isSubtypeOf(BoolType::get())) {
       constant_hash = std::hash<bool>{}(k->i(attr::value));

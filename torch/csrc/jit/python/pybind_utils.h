@@ -9,15 +9,15 @@
 #include <torch/csrc/Layout.h>
 #include <torch/csrc/QScheme.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
-#include <torch/csrc/jit/runtime/operator.h>
+#include <torch/csrc/jit/api/module.h>
+#include <torch/csrc/jit/frontend/schema_matching.h>
+#include <torch/csrc/jit/frontend/tracer.h>
+#include <torch/csrc/jit/python/module_python.h>
 #include <torch/csrc/jit/python/python_custom_class.h>
 #include <torch/csrc/jit/python/python_ivalue.h>
 #include <torch/csrc/jit/python/python_tracer.h>
 #include <torch/csrc/jit/resource_guard.h>
-#include <torch/csrc/jit/api/module.h>
-#include <torch/csrc/jit/python/module_python.h>
-#include <torch/csrc/jit/frontend/schema_matching.h>
-#include <torch/csrc/jit/frontend/tracer.h>
+#include <torch/csrc/jit/runtime/operator.h>
 #include <torch/csrc/utils/auto_gil.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/six.h>
@@ -45,6 +45,26 @@
 
 namespace torch {
 namespace jit {
+
+// The PythonFutureWrapper for ivalue::Future
+struct PythonFutureWrapper {
+  explicit PythonFutureWrapper(c10::intrusive_ptr<c10::ivalue::Future> fut)
+      : fut(std::move(fut)) {}
+
+  IValue wait() {
+    fut->wait();
+    if (jit::tracer::isTracing()) {
+      auto graph = jit::tracer::getTracingState()->graph;
+
+      Value* fut_val = jit::tracer::getValueTrace(fut);
+      auto output = graph->insert(aten::wait, {fut_val});
+      jit::tracer::setValueTrace(fut->value(), output);
+    }
+    return fut->value();
+  }
+
+  c10::intrusive_ptr<c10::ivalue::Future> fut;
+};
 
 // error reporting: when reporting user-caused errors, these functions should
 // not use AT_ERROR macros, since these macros add stack trace information
@@ -362,7 +382,8 @@ inline IValue createGenericDict(
 
 template <class T>
 inline void guardAgainstNamedTensor(const T& var) {
-  TORCH_CHECK(!var.has_names(),
+  TORCH_CHECK(
+      !var.has_names(),
       "NYI: Named tensors are currently unsupported in TorchScript. As a  "
       "workaround please drop names via `tensor = tensor.rename(None)`.");
 }
@@ -477,7 +498,9 @@ inline IValue toIValue(
     case TypeKind::DictType: {
       const auto& dict_type = type->expect<DictType>();
       return createGenericDict(
-          py::cast<py::dict>(obj), dict_type->getKeyType(), dict_type->getValueType());
+          py::cast<py::dict>(obj),
+          dict_type->getKeyType(),
+          dict_type->getValueType());
     }
     case TypeKind::OptionalType: {
       // check if it's a none obj since optional accepts NoneType
@@ -583,23 +606,29 @@ inline IValue toIValue(
     } break;
     case TypeKind::PyObjectType:
       // convert a py::handle to the IValue that holds the py::object
-      return c10::ivalue::ConcretePyObjectHolder::create(obj.cast<py::object>());
+      return c10::ivalue::ConcretePyObjectHolder::create(
+          obj.cast<py::object>());
 
     case TypeKind::CapsuleType: {
-      return py::cast<c10::intrusive_ptr<CustomClassHolder>>(obj);
-    } break;
+      return IValue::make_capsule(
+          py::cast<c10::intrusive_ptr<CustomClassHolder>>(obj));
+    }
+    case TypeKind::FutureType: {
+      return obj.cast<PythonFutureWrapper>().fut;
+    }
     case TypeKind::AnyType:
       return toTypeInferredIValue(obj);
     case TypeKind::FunctionType:
     case TypeKind::GeneratorType:
     case TypeKind::VarType:
-    case TypeKind::FutureType:
     case TypeKind::QSchemeType:
     case TypeKind::AnyListType:
     case TypeKind::AnyTupleType:
+    case TypeKind::AnyClassType:
       break;
   }
-  AT_ERROR("toIValue() cannot handle converting to type: ", type->python_str());
+  throw py::cast_error(c10::str(
+      "toIValue() cannot handle converting to type: ", type->python_str()));
 }
 
 // Small wrapper around getting the type name string from Python to make
@@ -626,6 +655,14 @@ inline std::string friendlyTypeName(py::handle obj) {
   }
 }
 
+// Thrown when trying to create a schema for a list of python
+// arguments that cannot be converted.
+// Can be caught by the caller to attempt to use other schema
+// when there is an overloaded operator.
+struct schema_match_error : public std::runtime_error {
+  using std::runtime_error::runtime_error;
+};
+
 inline IValue argumentToIValue(
     const FunctionSchema& schema,
     size_t argumentPosition,
@@ -634,14 +671,14 @@ inline IValue argumentToIValue(
   try {
     return toIValue(object, argument.type(), argument.N());
   } catch (const py::cast_error& error) {
-    throw std::runtime_error(c10::str(
-      schema.formatTypeMismatchMsg(
-        argument,
-        friendlyTypeName(object),
-        argumentPosition,
-        py::repr(object)),
-      "\nCast error details: ",
-      error.what()));
+    throw schema_match_error(c10::str(
+        schema.formatTypeMismatchMsg(
+            argument,
+            friendlyTypeName(object),
+            argumentPosition,
+            py::repr(object)),
+        "\nCast error details: ",
+        error.what()));
   }
 }
 
@@ -705,8 +742,7 @@ inline py::object toPyObject(IValue ivalue) {
           tuple->type()->schema()->arguments(),
           [](const Argument& arg) { return arg.name(); });
       return py::module::import("torch.jit")
-          .attr("_create_named_tuple")(
-              t, unqualName, fieldNames);
+          .attr("_create_named_tuple")(t, unqualName, fieldNames);
     } else {
       return std::move(t);
     }
@@ -716,7 +752,8 @@ inline py::object toPyObject(IValue ivalue) {
     auto dict = std::move(ivalue).toGenericDict();
     py::dict py_dict;
     for (auto& pair : dict) {
-      py_dict[toPyObject(IValue{pair.key()})] = toPyObject(IValue{pair.value()});
+      py_dict[toPyObject(IValue{pair.key()})] =
+          toPyObject(IValue{pair.value()});
     }
     return std::move(py_dict);
   } else if (ivalue.isRRef()) {
@@ -760,10 +797,13 @@ inline py::object toPyObject(IValue ivalue) {
     }
     return pyObj;
   } else if (ivalue.isPyObject()) {
-    // return borrowed reference to ensure it correctly incref the underlying PyObject
+    // return borrowed reference to ensure it correctly incref the underlying
+    // PyObject
     return py::reinterpret_borrow<py::object>(ivalue.toPyObject());
   } else if (ivalue.isCapsule()) {
     return py::cast(ivalue.toCapsule());
+  } else if (ivalue.isFuture()) {
+    return py::cast(PythonFutureWrapper(ivalue.toFuture()));
   } else if (ivalue.isRRef()) {
 #ifdef USE_DISTRIBUTED
     return py::cast(torch::distributed::rpc::PyRRef(
@@ -813,7 +853,7 @@ inline Stack createStackForSchema(
     c10::optional<IValue> self) {
   size_t all_arguments = (self ? 1 : 0) + args.size() + kwargs.size();
   if (all_arguments > schema.arguments().size()) {
-    throw std::runtime_error(c10::str(
+    throw schema_match_error(c10::str(
         schema.name(),
         "() expected at most ",
         schema.arguments().size(),
@@ -846,7 +886,7 @@ inline Stack createStackForSchema(
     } else if (arg.default_value()) {
       push(stack, *arg.default_value());
     } else {
-      throw std::runtime_error(c10::str(
+      throw schema_match_error(c10::str(
           schema.name(),
           "() is missing value for argument '",
           arg.name(),
@@ -860,7 +900,7 @@ inline Stack createStackForSchema(
     for (const auto& kwarg : kwargs) {
       names.emplace_back(py::cast<std::string>(kwarg.first));
     }
-    schema.findErrorInKwargs(names);
+    throw schema_match_error(schema.findErrorInKwargs(names));
   }
 
   return stack;
@@ -913,8 +953,7 @@ inline py::object runAndInsertCall(
     c10::optional<IValue> self,
     // Lambda that tells this function how to insert `callee` into the graph if
     // we're tracing.
-    std::function<Value*(Graph&, const MatchedSchema& match)>
-        callInserter) {
+    std::function<Value*(Graph&, const MatchedSchema& match)> callInserter) {
   auto stack = createStackForSchema(
       callee.getSchema(), std::move(args), std::move(kwargs), std::move(self));
   auto tracing_state = tracer::getTracingState();
@@ -1006,15 +1045,39 @@ inline py::object invokeScriptMethodFromPython(
 }
 
 inline py::object invokeOperatorFromPython(
-    const Operator& op,
+    const std::vector<std::shared_ptr<Operator>>& operations,
     py::args args,
     py::kwargs kwargs) {
-  // Create a stack full of the arguments and keyword arguments.
-  auto stack = createStackForSchema(
-      op.schema(), std::move(args), std::move(kwargs), c10::nullopt);
+  Stack stack;
 
-  // Invoke the operation, which puts the return values onto the stack.
-  op.getOperation()(stack);
+  if (operations.size() == 1) {
+    const Operator& op = *operations.at(0);
+    // Create a stack full of the arguments and keyword arguments.
+    stack = createStackForSchema(
+        op.schema(), std::move(args), std::move(kwargs), c10::nullopt);
+    op.getOperation()(stack);
+  } else {
+    std::vector<schema_match_error> errors;
+    std::shared_ptr<Operator> found_op = nullptr;
+    for (const auto& op : operations) {
+      try {
+        stack = createStackForSchema(op->schema(), args, kwargs, c10::nullopt);
+        found_op = op;
+        break;
+      } catch (schema_match_error& error) {
+        errors.push_back(std::move(error));
+      }
+    }
+    if (!found_op) {
+      std::stringstream ss;
+      ss << "Overloaded torch operator invoked from Python failed to many any schema:\n";
+      for (const auto& err : errors) {
+        ss << err.what() << "\n\n";
+      }
+      throw std::runtime_error(ss.str());
+    }
+    found_op->getOperation()(stack);
+  }
 
   return createPyObjectForStack(std::move(stack));
 }

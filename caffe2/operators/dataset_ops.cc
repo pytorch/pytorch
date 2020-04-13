@@ -1054,14 +1054,14 @@ OPERATOR_SCHEMA(CreateTreeCursor)
     .NumOutputs(1)
     .SetDoc(R"DOC(
 Creates a cursor to iterate through a list of tensors, where some of those
-tensors contains the lengths in a nested schema. The schema is determined by
+tensors contain the lengths in a nested schema. The schema is determined by
 the `fields` arguments.
 
 For example, to represent the following schema:
 
   Struct(
       a=Int(),
-      b=List(List(Int),
+      b=List(List(Int)),
       c=List(
           Struct(
              c1=String,
@@ -1315,9 +1315,18 @@ A:
 </details>
 
 )DOC")
-    .Input(0, "A", "(*Tensor*): base input tensor of shape $(N, d_1, d_2, ..., d_n)$")
-    .Input(1, "B", "(*Tensor*): second input tensor of shape $(M, d_1, d_2, ..., d_n)$ to be appended to the base")
-    .Output(0, "A", "(*Tensor*): output tensor of shape $(N+M, d_1, d_2, ..., d_n)$");
+    .Input(
+        0,
+        "A",
+        "(*Tensor*): base input tensor of shape $(N, d_1, d_2, ..., d_n)$")
+    .Input(
+        1,
+        "B",
+        "(*Tensor*): second input tensor of shape $(M, d_1, d_2, ..., d_n)$ to be appended to the base")
+    .Output(
+        0,
+        "A",
+        "(*Tensor*): output tensor of shape $(N+M, d_1, d_2, ..., d_n)$");
 
 OPERATOR_SCHEMA(AtomicAppend)
     .NumInputs(3, INT_MAX)
@@ -1366,7 +1375,7 @@ OPERATOR_SCHEMA(PackRecords)
     .NumInputs(1, INT_MAX)
     .NumOutputs(1)
     .SetDoc(R"DOC(
-Given a dataset under a schema specified by the `fields` argument will pack all
+Given a dataset under a schema specified by the `fields` argument, pack all
 the input tensors into one, where each tensor element represents a row of data
 (batch of size 1). This format allows easier use with the rest of Caffe2
 operators.
@@ -1401,7 +1410,7 @@ OPERATOR_SCHEMA(UnPackRecords)
     .NumOutputs(1, INT_MAX)
     .SetDoc(R"DOC(
 Given a packed dataset (packed by the PackRecordsOp) and the `fields` argument
-describing the datasets schema returns the original dataset format. Number of
+describing the datasets schema, return the original dataset format. Number of
 returned tensors is equal to the number of fields in the `fields` argument.
 
 The first input is the packed tensor to be unpacked. Optionally, you can provide

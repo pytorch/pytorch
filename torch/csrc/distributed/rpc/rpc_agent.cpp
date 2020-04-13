@@ -20,20 +20,29 @@ RpcAgent::RpcAgent(
       cb_(std::move(cb)),
       rpcTimeout_(rpcTimeout),
       profilingEnabled_(false),
-      rpcAgentRunning_(true) {
-  rpcRetryThread_ = std::thread(&RpcAgent::retryExpiredRpcs, this);
-}
+      rpcAgentRunning_(false) {}
 
 RpcAgent::~RpcAgent() {
-  cleanup();
+  if (rpcAgentRunning_.load()) {
+    shutdown();
+  }
 }
 
-void RpcAgent::cleanup() {
-  if (!rpcAgentRunning_.exchange(false)) {
-    return;
-  }
+void RpcAgent::start() {
+  rpcAgentRunning_.store(true);
+  rpcRetryThread_ = std::thread(&RpcAgent::retryExpiredRpcs, this);
+  startImpl();
+}
+
+void RpcAgent::shutdown() {
+  std::unique_lock<std::mutex> lock(rpcRetryMutex_);
+  rpcAgentRunning_.store(false);
+  lock.unlock();
   rpcRetryMapCV_.notify_one();
-  rpcRetryThread_.join();
+  if (rpcRetryThread_.joinable()) {
+    rpcRetryThread_.join();
+  }
+  shutdownImpl();
 }
 
 std::shared_ptr<FutureMessage> RpcAgent::sendWithRetries(
@@ -61,10 +70,8 @@ std::shared_ptr<FutureMessage> RpcAgent::sendWithRetries(
       /* retryCount */ 0,
       retryOptions);
 
-  fm->addCallback([this, newTime, firstRetryRpc](
-                      const rpc::Message& lambdaMessage,
-                      const c10::optional<utils::FutureError>& futErr) {
-    rpcRetryCallback(lambdaMessage, futErr, newTime, firstRetryRpc);
+  fm->addCallback([this, newTime, firstRetryRpc, fm]() {
+    rpcRetryCallback(fm, newTime, firstRetryRpc);
   });
 
   return originalFuture;
@@ -126,10 +133,8 @@ void RpcAgent::retryExpiredRpcs() {
           earliestRpc->options_, earliestRpc->retryCount_);
       earliestRpc->retryCount_++;
 
-      fm->addCallback([this, newTime, earliestRpc](
-                          const rpc::Message& message,
-                          const c10::optional<utils::FutureError>& futErr) {
-        rpcRetryCallback(message, futErr, newTime, earliestRpc);
+      fm->addCallback([this, newTime, earliestRpc, fm]() {
+        rpcRetryCallback(fm, newTime, earliestRpc);
       });
     }
 
@@ -147,16 +152,24 @@ void RpcAgent::retryExpiredRpcs() {
 }
 
 void RpcAgent::rpcRetryCallback(
-    const rpc::Message& message,
-    const c10::optional<utils::FutureError>& futErr,
+    const std::shared_ptr<FutureMessage>& futureMessage,
     steady_clock_time_point newTime,
     std::shared_ptr<RpcRetryInfo> earliestRpc) {
-  if (futErr) {
+  if (futureMessage->hasError()) {
     // Adding one since we want to include the original send as well and not
     // just the retry count.
     LOG(INFO) << "Send try " << std::to_string(earliestRpc->retryCount_ + 1)
               << " failed";
-    if (earliestRpc->retryCount_ < earliestRpc->options_.maxRetries) {
+    if (!rpcAgentRunning_.load()) {
+      // If the RPC Agent has shutdown, we cannot retry messages. Thus we mark
+      // the future with an error since the RPC was never completed
+      // successfully.
+      std::string errorMessage = c10::str(
+          "RPC Agent is no longer running on Node ",
+          RpcAgent::getWorkerInfo().id_,
+          ". Cannot retry message.");
+      earliestRpc->originalFuture_->setError(*futureMessage->error());
+    } else if (earliestRpc->retryCount_ < earliestRpc->options_.maxRetries) {
       // If the previous future completed with an error and we haven't
       // completed maxRetries send attempts, we move the earliestRpc
       // struct to a new time point in the retry map (effectively
@@ -179,7 +192,8 @@ void RpcAgent::rpcRetryCallback(
     }
   } else {
     // This try succeeded, so we can make the original future as complete.
-    earliestRpc->originalFuture_->markCompleted(message);
+    earliestRpc->originalFuture_->markCompleted(
+        std::move(*futureMessage).moveValue());
   }
 }
 

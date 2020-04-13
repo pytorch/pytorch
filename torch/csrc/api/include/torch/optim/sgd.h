@@ -22,7 +22,7 @@ namespace torch {
 namespace optim {
 
 struct TORCH_API SGDOptions : public OptimizerCloneableOptions<SGDOptions> {
-  /* implicit */ SGDOptions(double lr);
+  SGDOptions(double lr);
   TORCH_ARG(double, lr);
   TORCH_ARG(double, momentum) = 0;
   TORCH_ARG(double, dampening) = 0;
@@ -58,19 +58,7 @@ class TORCH_API SGD : public Optimizer {
   explicit SGD(std::vector<Tensor> params,
       SGDOptions defaults) : SGD({std::move(OptimizerParamGroup(params))}, defaults) {}
 
-  void step() override;
-
-  /// Adds the given vector of parameters to the optimizer's parameter list.
-  void add_parameters(const std::vector<Tensor>& parameters) override;
-
-  /// Provides a const reference to the parameters this optimizer holds.
-  const std::vector<Tensor>& parameters() const noexcept override;
-
-  /// Provides a reference to the parameters this optimizer holds.
-  std::vector<Tensor>& parameters() noexcept override;
-
-  /// Returns the number of parameters referenced by the optimizer.
-  size_t size() const noexcept override;
+  torch::Tensor step(LossClosure closure = nullptr) override;
 
   void save(serialize::OutputArchive& archive) const override;
   void load(serialize::InputArchive& archive) override;

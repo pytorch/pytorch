@@ -1,9 +1,9 @@
 #pragma once
 
-#include <torch/csrc/jit/python/pybind_utils.h>
-#include <torch/csrc/jit/frontend/concrete_module_type.h>
 #include <torch/csrc/jit/api/module.h>
+#include <torch/csrc/jit/frontend/concrete_module_type.h>
 #include <torch/csrc/jit/frontend/sugared_value.h>
+#include <torch/csrc/jit/python/pybind_utils.h>
 #include <memory>
 #include <sstream>
 #include <string>
@@ -183,6 +183,9 @@ struct VISIBILITY_HIDDEN ModuleValue : public SugaredValue {
   Value* self_;
   std::shared_ptr<ConcreteModuleType> concreteType_;
 };
+
+bool isNamedTupleClass(const py::object& obj);
+TypePtr registerNamedTuple(const py::object& obj, const SourceRange& loc);
 
 void recurseThroughNestedModules(
     const SourceRange& loc,

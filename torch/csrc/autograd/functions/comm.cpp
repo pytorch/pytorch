@@ -85,7 +85,7 @@ variable_list Gather::apply(variable_list&& inputs) {
 
   const bool unsqueeze_scalars = all_are_zero_dim && dim_ == 0;
   if (unsqueeze_scalars) {
-    AT_WARN(
+    TORCH_WARN(
         "Was asked to gather along dimension 0, but all "
         "input tensors were scalars; will instead unsqueeze "
         "and return a vector.");

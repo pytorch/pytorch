@@ -3,13 +3,12 @@
 // it now to implement correct semantic checking for script
 #pragma once
 
+#include <ATen/core/dispatch/Dispatcher.h>
+#include <ATen/core/dispatch/OperatorOptions.h>
 #include <ATen/core/stack.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/jit/frontend/function_schema_parser.h>
 #include <torch/csrc/jit/runtime/operator_options.h>
-#include <ATen/core/stack.h>
-#include <ATen/core/dispatch/Dispatcher.h>
-#include <ATen/core/dispatch/OperatorOptions.h>
 
 #include <ATen/ATen.h>
 #include <ATen/core/function_schema.h>
@@ -27,8 +26,8 @@ namespace torch {
 namespace jit {
 
 struct Node;
-using ::c10::Symbol;
 using ::c10::FunctionSchema;
+using ::c10::Symbol;
 
 using OperationCreator = Operation (*)(const Node*);
 
@@ -71,7 +70,6 @@ public:
         std::move(opHandle), std::move(operation)
       })) {}
 
-
   Operator(
       std::string schema,
       Operation op,
@@ -82,7 +80,6 @@ public:
             alias_analysis}),
           c10::make_left<Operation, OperationCreator>(std::move(op))
       })) {}
-
 
   Operator(
       std::string schema,
@@ -186,16 +183,19 @@ TORCH_API const std::vector<std::shared_ptr<Operator>> getAllOperators();
 TORCH_API const std::vector<std::shared_ptr<Operator>>& getAllOperatorsFor(
     Symbol name);
 
-// given a operator with an overload name, find the specific operator related to it,
-// may return nullptr if no operator exists.
-TORCH_API std::shared_ptr<Operator> findOperatorFor(const c10::OperatorName& full_name);
+// given a operator with an overload name, find the specific operator related to
+// it, may return nullptr if no operator exists.
+TORCH_API std::shared_ptr<Operator> findOperatorFor(
+    const c10::OperatorName& full_name);
 
 TORCH_API std::vector<Symbol> findSimilarOperators(Symbol input_op);
 
 TORCH_API void registerOperator(Operator&& op);
+TORCH_API void deregisterOperator(const FunctionSchema& schema);
 
 // XXX: this function is meant to be used with string literals only!
-std::shared_ptr<Operator> getOperatorForLiteral(const char* signature);
+TORCH_API std::shared_ptr<Operator> getOperatorForLiteral(
+    const char* signature);
 
 // Ensure the thing that registers c10 ops is defined.
 // Otherwise, our registry will not have c10 ops. You can run into this

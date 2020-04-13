@@ -63,13 +63,16 @@ TypePtr tryInferTypeWithTypeHint(
                                   .attr("_qualified_name")(type_hint)));
     TypePtr type_hint_ptr =
         jit::get_python_cu()->get_interface(type_qualified_name);
+    std::ostringstream subtype_check_msg;
     TORCH_CHECK(
         type_hint_ptr != nullptr &&
-            module.value().type()->isSubtypeOf(type_hint_ptr),
+            module.value().type()->isSubtypeOfExt(
+                type_hint_ptr, &subtype_check_msg),
         module.value().type()->python_str(),
         " is not a subtype of the type hint: ",
         type_qualified_name.qualifiedName(),
-        ", did you pass a valid interface type?");
+        ", did you pass a valid interface type?\n",
+        subtype_check_msg.str());
     return type_hint_ptr;
   } else {
     TORCH_CHECK(
@@ -113,8 +116,16 @@ bool PyRRef::isOwner() const {
   return rref_->isOwner();
 }
 
+bool PyRRef::confirmedByOwner() const {
+  return rref_->confirmedByOwner();
+}
+
 WorkerInfo PyRRef::owner() const {
   return RRefContext::getInstance().agent()->getWorkerInfo(rref_->owner());
+}
+
+std::string PyRRef::ownerName() const {
+  return rref_->ownerName();
 }
 
 py::object PyRRef::toHere() {
@@ -176,10 +187,6 @@ std::string PyRRef::str() const {
 
 py::tuple PyRRef::pickle() const {
   auto& ctx = RRefContext::getInstance();
-  // TODO: use a dispatch table to pickle/unpickle an RRef, and only only
-  // install the dispatch table only when there are indeed RPC activities. As
-  // a counter example, checkpointing a model with RRefs should not trigger
-  // forks to be added as a fork or a child.
   auto rrefForkData = ctx.prepareChildFork(rref_);
   return toPyTuple(rrefForkData);
 }

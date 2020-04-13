@@ -5,8 +5,8 @@
  */
 #pragma once
 
-#include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/api/module.h>
+#include <torch/csrc/jit/ir/ir.h>
 
 /** \brief Freeze Module, i.e., Assume all atrributes are constants.
  *

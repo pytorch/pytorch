@@ -23,6 +23,9 @@ ext_modules = [
     CppExtension(
         'torch_test_cpp_extension.msnpu', ['msnpu_extension.cpp'],
         extra_compile_args=CXX_FLAGS),
+    CppExtension(
+        'torch_test_cpp_extension.rng', ['rng_extension.cpp'],
+        extra_compile_args=CXX_FLAGS),
 ]
 
 if torch.cuda.is_available() and CUDA_HOME is not None:

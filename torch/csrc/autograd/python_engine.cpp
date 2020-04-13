@@ -38,6 +38,7 @@ Engine& PythonEngine::get_python_engine() {
   // backwards threads hold a lock, we'll probably deadlock in the engine
   // destructor.
   if (_reinitialize_engine) {
+    engine.release_workers();
     engine.~PythonEngine();
     new (&engine) torch::autograd::python::PythonEngine();
     _reinitialize_engine = false;
@@ -45,13 +46,13 @@ Engine& PythonEngine::get_python_engine() {
   return engine;
 }
 
-void PythonEngine::thread_init(int device) {
+void PythonEngine::thread_init(int device, const std::shared_ptr<ReadyQueue>& ready_queue) {
   // Create a PyThreadState, but release the GIL. This lets pybind11::gil_scoped_acquire calls
   // inside thread_main acquire the GIL without having to create a new
   // PyThreadState each time.
   pybind11::gil_scoped_acquire gil;
   pybind11::gil_scoped_release no_gil;
-  Engine::thread_init(device);
+  Engine::thread_init(device, ready_queue);
 }
 
 void PythonEngine::thread_on_exception(
@@ -89,9 +90,10 @@ variable_list PythonEngine::execute(
 
 std::shared_ptr<FutureVariableList> PythonEngine::execute_with_graph_task(
     const std::shared_ptr<GraphTask>& graph_task,
-    std::shared_ptr<Node> graph_root) {
+    std::shared_ptr<Node> graph_root,
+    bool async_mode) {
   try {
-    return Engine::execute_with_graph_task(graph_task, graph_root);
+    return Engine::execute_with_graph_task(graph_task, graph_root, async_mode);
   } catch (python_error& e) {
     pybind11::gil_scoped_acquire gil;
     if (!PyErr_Occurred()) {

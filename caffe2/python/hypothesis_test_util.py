@@ -428,6 +428,7 @@ class HypothesisTestCase(test_util.TestCase):
         threshold=0.005,
         stepsize=0.05,
         input_device_options=None,
+        ensure_outputs_are_inferred=False,
     ):
         """
         Implements a standard numerical gradient checker for the operator
@@ -455,7 +456,8 @@ class HypothesisTestCase(test_util.TestCase):
         res, grad, grad_estimated = gc.CheckSimple(
             op, inputs, outputs_to_check, outputs_with_grads,
             grad_ops=grad_ops,
-            input_device_options=input_device_options
+            input_device_options=input_device_options,
+            ensure_outputs_are_inferred=ensure_outputs_are_inferred,
         )
         self.assertEqual(grad.shape, grad_estimated.shape)
         self.assertTrue(
@@ -555,7 +557,7 @@ class HypothesisTestCase(test_util.TestCase):
             # Temporarily catch these assertion errors when validating
             # inferred shape and type info
             logging.warning(str(e))
-            if os.getenv('CAFFE2_ASSERT_SHAPEINFERENCE') == '1':
+            if os.getenv('CAFFE2_ASSERT_SHAPEINFERENCE') == '1' or ensure_output_is_inferred:
                 raise e
 
     def assertReferenceChecks(
@@ -619,7 +621,7 @@ class HypothesisTestCase(test_util.TestCase):
                 # Temporarily catch runtime errors when inferring shape
                 # and type info
                 logging.warning(str(e))
-                if os.getenv('CAFFE2_ASSERT_SHAPEINFERENCE') == '1':
+                if os.getenv('CAFFE2_ASSERT_SHAPEINFERENCE') == '1' or ensure_outputs_are_inferred:
                     raise e
             workspace.RunNetOnce(net)
             reference_outputs = reference(*inputs)
