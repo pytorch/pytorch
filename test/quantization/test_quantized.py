@@ -90,6 +90,8 @@ def pool_output_shape(input_size, kernel_size, padding, stride,
 
 """Common logic for hardswish testing, called from fbgemm and qnnpack testers"""
 def _test_hardswish(self, X, engine):
+    if engine not in torch.backends.quantized.supported_engines:
+        return
     with override_quantized_engine(engine):
         X, (scale, zero_point, torch_type) = X
         X = torch.from_numpy(X)
