@@ -2903,6 +2903,19 @@ class TestONNXRuntime(unittest.TestCase):
         mat2 = torch.randn(3, 3)
         self.run_test(M(), input=(mat1, mat2))
 
+    def test_shape_constant_fold(self):
+        class ShapeModule(torch.nn.Module):
+            def __init__(self):
+                super(ShapeModule, self).__init__()
+                self.register_buffer("weight", torch.ones(5))
+
+            def forward(self, x):
+                shape = self.weight.shape[0]
+                return x + shape
+
+        x = torch.randn(2, 5)
+        self.run_test(ShapeModule(), (x,), rtol=1e-3, atol=1e-5) 
+
     def test_onnx_proto_checker(self):
         class Model(torch.nn.Module):
             def __init__(self):
