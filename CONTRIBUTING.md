@@ -974,7 +974,3 @@ following steps:
 4. Now you can find the pytorch working directory, which could be
    `~/workspace` or `~/project`, and run commands locally to debug
    the failure.
-
-Alternatively, if your CI failure is not hardware-related, you can
-download the CI job's docker image and run it
-on your own machine using the instructions [here](https://github.com/Quansight/pytorch/wiki/Reproducing-build-failures-with-Docker-images-on-QGPU).
