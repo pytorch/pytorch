@@ -320,6 +320,8 @@ public:
     alias_kind_ = v;
   }
 
+  // Returns true if we successfully set the namespace (as there
+  // was none set, and false otherwise)
   bool setNamespaceIfNotSet(const char* ns) {
     return name_.setNamespaceIfNotSet(ns);
   }
