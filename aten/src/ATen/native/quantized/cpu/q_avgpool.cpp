@@ -286,7 +286,10 @@ Tensor q_avg_pool2d(
     return output;
   }
 }
+} // namespace
+
 #ifdef USE_PYTORCH_QNNPACK
+namespace qnnp_avgpool_helper {
 Tensor qnnpack_avg_pool2d(
     Tensor input,
     IntArrayRef kernel_size,
@@ -380,8 +383,8 @@ Tensor qnnpack_avg_pool2d(
       "failed to run QNNPACK Average Pool operator");
   return output.contiguous(input.suggest_memory_format());
 }
+} // qnnp_avgpool_helper
 #endif
-} // namespace
 
 Tensor quantized_avg_pool2d(
     const Tensor& input,
@@ -395,7 +398,7 @@ Tensor quantized_avg_pool2d(
 #ifdef USE_PYTORCH_QNNPACK
   if (at::globalContext().qEngine() == at::QEngine::QNNPACK &&
       input.scalar_type() == kQUInt8) {
-    return qnnpack_avg_pool2d(
+    return at::native::qnnp_avgpool_helper::qnnpack_avg_pool2d(
         input,
         kernel_size,
         stride,
