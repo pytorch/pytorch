@@ -917,7 +917,7 @@ class TestDataLoader(TestCase):
                 DataLoader(self.dataset, num_workers=0, multiprocessing_context=valid_ctx)
             with self.assertRaisesRegex(ValueError, "should specify a valid start method in"):
                 DataLoader(self.dataset, num_workers=1, multiprocessing_context='bad')
-            with self.assertRaisesRegex(ValueError, "multiprocessing_context option should be a valid context "):
+            with self.assertRaisesRegex(TypeError, "multiprocessing_context option should be a valid context "):
                 DataLoader(self.dataset, num_workers=1, multiprocessing_context=object())
         else:
             with self.assertRaisesRegex(ValueError, "multiprocessing_context relies on Python >= 3.4"):

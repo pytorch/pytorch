@@ -159,6 +159,8 @@ struct TORCH_CUDA_API Fusion : public IRInputOutput {
 
   // Return the set of Vals registered with this fusion
   const std::set<Val*>& vals() const noexcept;
+  // Return in insertion order
+  const std::deque<Val*>& deterministic_vals() const noexcept;
 
   // Return the set of Exprs registered with this fusion
   const std::set<Expr*>& unordered_exprs() const noexcept;
@@ -172,9 +174,12 @@ struct TORCH_CUDA_API Fusion : public IRInputOutput {
   // Return the Expr that produces val (const version)
   const Expr* origin(const Val* val) const;
 
+  bool lowered = false;
+
  private:
   // Sets of all Vals/Exprs registered with this fusion
   std::set<Val*> val_set_;
+  std::deque<Val*> val_deque_;
   std::set<Expr*> expr_set_;
 
   // Return an int that monotonically increases for each val/expr, some are

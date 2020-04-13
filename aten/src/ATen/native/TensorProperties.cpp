@@ -73,9 +73,11 @@ Tensor & detach_(Tensor & self) {
 static auto registry = torch::RegisterOperators()
   .op(torch::RegisterOperators::options()
     .schema("aten::detach(Tensor self) -> Tensor")
+    .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
     .catchAllKernel<decltype(detach), &detach>())
   .op(torch::RegisterOperators::options()
     .schema("aten::detach_(Tensor(a!) self) -> Tensor(a!)")
+    .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
     .impl_unboxedOnlyCatchAllKernel<decltype(detach_), &detach_>())
   ;
 
