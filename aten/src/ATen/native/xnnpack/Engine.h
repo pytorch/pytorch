@@ -64,7 +64,7 @@ inline bool use_clamp_optional(
       output_max_->to<float>() :
       std::numeric_limits<float>::infinity();
 
-  return function(
+  return std::forward<Function>(function)(
       std::forward<Arguments>(arguments)...,
       output_min,
       output_max);
@@ -84,7 +84,7 @@ inline auto clamp_optional(
       output_max_->to<float>() :
       std::numeric_limits<float>::infinity();
 
-  return function(
+  return std::forward<Function>(function)(
       std::forward<Arguments>(arguments)...,
       output_min,
       output_max);
