@@ -48,7 +48,7 @@ class BatchNorm2d(torch.nn.BatchNorm2d):
 
     def forward(self, input):
         return torch.ops.quantized.batch_norm2d(input, self.weight, self.bias, self.running_mean,
-                                              self.running_var, self.eps, self.scale, self.zero_point)
+                                                self.running_var, self.eps, self.scale, self.zero_point)
 
     def _get_name(self):
         return 'QuantizedBatchNorm2d'

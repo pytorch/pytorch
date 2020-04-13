@@ -221,7 +221,7 @@ Tensor q_batch_norm3d_impl(
 
 } // namespace
 
-Tensor quantized_batch_norm2d(
+Tensor quantized_batch_norm(
     const Tensor& qx,
     const Tensor& weight /* optional */,
     const Tensor& bias /* optional */,
