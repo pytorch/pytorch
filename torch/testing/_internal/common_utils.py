@@ -296,18 +296,23 @@ TEST_SKIP_FAST = os.getenv('PYTORCH_TEST_SKIP_FAST', '0') == '1'
 if TEST_NUMPY:
     import numpy
 
-def numpy_dtype(dtype):
-    assert TEST_NUMPY
-
-    torch_to_numpy_dtype = {
-        torch.half       : numpy.float16,
-        torch.float      : numpy.float32,
-        torch.double     : numpy.float64,
-        torch.complex64  : numpy.complex64,
-        torch.complex128 : numpy.complex128
+    # Dict of NumPy dtype -> torch dtype (when the correspondence exists)
+    numpy_to_torch_dtype_dict = {
+        numpy.bool       : torch.bool,
+        numpy.uint8      : torch.uint8,
+        numpy.int8       : torch.int8,
+        numpy.int16      : torch.int16,
+        numpy.int32      : torch.int32,
+        numpy.int64      : torch.int64,
+        numpy.float16    : torch.float16,
+        numpy.float32    : torch.float32,
+        numpy.float64    : torch.float64,
+        numpy.complex64  : torch.complex64,
+        numpy.complex128 : torch.complex128
     }
 
-    return torch_to_numpy_dtype[dtype]
+    # Dict of torch dtype -> NumPy dtype
+    torch_to_numpy_dtype_dict = {value : key for (key, value) in numpy_to_torch_dtype_dict.items()}
 
 ALL_TENSORTYPES = [torch.float,
                    torch.double,
@@ -852,6 +857,12 @@ class TestCase(expecttest.TestCase):
                         # TODO: modify abs to return float/double for ComplexFloat/ComplexDouble
                         if diff.is_signed() and diff.dtype != torch.int8:
                             diff = diff.abs()
+                            # if diff is complex, the imaginary component for diff will be 0
+                            # from the previous step, hence converting it to float and double is fine.
+                            if diff.dtype == torch.complex64:
+                                diff = diff.to(torch.float)
+                            elif diff.dtype == torch.complex128:
+                                diff = diff.to(torch.double)
                         max_err = diff.max()
                         self.assertLessEqual(max_err, prec, message)
             super(TestCase, self).assertEqual(x.is_sparse, y.is_sparse, message)
