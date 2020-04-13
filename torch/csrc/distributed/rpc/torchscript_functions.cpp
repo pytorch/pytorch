@@ -15,7 +15,8 @@ c10::intrusive_ptr<c10::ivalue::Future> rpcTorchscript(
     const std::string& dstWorkerName,
     const c10::QualifiedName& qualifiedName,
     const c10::FunctionSchema& functionSchema,
-    std::vector<c10::IValue>& stack) {
+    std::vector<c10::IValue>& stack,
+    const std::shared_ptr<torch::autograd::profiler::RecordFunction>& rf) {
   auto scriptCall =
       std::make_unique<ScriptCall>(qualifiedName, std::move(stack));
   auto rpcAgentPtr = RpcAgent::getCurrentRpcAgent();
@@ -23,7 +24,8 @@ c10::intrusive_ptr<c10::ivalue::Future> rpcTorchscript(
       *rpcAgentPtr,
       rpcAgentPtr->getWorkerInfo(dstWorkerName),
       std::move(*scriptCall).toMessage(),
-      true /*forceGradRecording*/);
+      true /*forceGradRecording*/,
+      rf);
 
   // Get function return type to construct c10::ivalue::Future.
   auto returns = functionSchema.returns();
@@ -53,7 +55,8 @@ c10::intrusive_ptr<RRef> remoteTorchscript(
     const std::string& dstWorkerName,
     const c10::QualifiedName& qualifiedName,
     const c10::FunctionSchema& functionSchema,
-    std::vector<c10::IValue>& stack) {
+    std::vector<c10::IValue>& stack,
+    const std::shared_ptr<torch::autograd::profiler::RecordFunction>& rf) {
   auto rpcAgentPtr = RpcAgent::getCurrentRpcAgent();
   auto dstWorkerInfo = rpcAgentPtr->getWorkerInfo(dstWorkerName);
   auto& ctx = RRefContext::getInstance();
@@ -82,7 +85,7 @@ c10::intrusive_ptr<RRef> remoteTorchscript(
         dstWorkerInfo,
         std::move(*scriptRemoteCall).toMessage(),
         true /*forceGradRecording*/,
-        nullptr);
+        rf);
 
     ctx.addPendingUser(userRRefPtr->forkId(), userRRefPtr);
     fm->addCallback([forkId{userRRefPtr->forkId()}, fm]() {
@@ -106,7 +109,7 @@ c10::intrusive_ptr<RRef> remoteTorchscript(
         dstWorkerInfo,
         std::move(*scriptRemoteCall).toMessage(),
         true /*forceGradRecording*/,
-        nullptr);
+        rf);
 
     fm->addCallback([fm]() { callback::finishCreatingOwnerRRef(fm); });
     return ownerRRefPtr;
