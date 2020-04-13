@@ -75,7 +75,7 @@ struct TORCH_API AccumulateGrad : public Node {
         // earlier we would clone the entire SparseTensor which cloned indices
         // and values.
         // For details see https://github.com/pytorch/pytorch/issues/34375.
-        update_grad(at::sparse_coo_tensor(
+        update_grad(at::_sparse_coo_tensor_unsafe(
             new_grad._indices(),
             new_grad._values(),
             new_grad.sizes(),
