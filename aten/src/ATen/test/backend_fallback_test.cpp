@@ -109,7 +109,7 @@ void generic_wrapper_fallback(const c10::OperatorHandle& op, torch::jit::Stack* 
 }
 
 TEST(BackendFallbackTest, TestBackendFallbackWithMode) {
-  auto m = c10::Library(DispatchKey::TESTING_ONLY_GenericMode, __FILE__, __LINE__);
+  auto m = c10::Library("_", DispatchKey::TESTING_ONLY_GenericMode, __FILE__, __LINE__);
   m.fallback(CppFunction::makeFromBoxedFunction<&generic_mode_fallback>());
 
   c10::impl::IncludeDispatchKeyGuard guard(DispatchKey::TESTING_ONLY_GenericMode);
@@ -121,7 +121,7 @@ TEST(BackendFallbackTest, TestBackendFallbackWithMode) {
 }
 
 TEST(BackendFallbackTest, TestBackendFallbackWithWrapper) {
-  auto m = c10::Library(DispatchKey::TESTING_ONLY_GenericWrapper, __FILE__, __LINE__);
+  auto m = c10::Library("_", DispatchKey::TESTING_ONLY_GenericWrapper, __FILE__, __LINE__);
   m.fallback(CppFunction::makeFromBoxedFunction<&generic_wrapper_fallback>());
 
   override_call_count = 0;
@@ -131,9 +131,11 @@ TEST(BackendFallbackTest, TestBackendFallbackWithWrapper) {
 }
 
 TEST(BackendFallbackTest, TestFallthroughBackendFallback) {
-  auto m = c10::Library(DispatchKey::TESTING_ONLY_GenericMode, __FILE__, __LINE__);
-  m.fallback(c10::CppFunction::makeFallthrough());
-  m.impl("aten::mul.Tensor", c10::CppFunction::makeFromBoxedFunction<&generic_mode_fallback>());
+  auto m = c10::Library("aten", DispatchKey::TESTING_ONLY_GenericMode, __FILE__, __LINE__);
+  m.impl("mul.Tensor", c10::CppFunction::makeFromBoxedFunction<&generic_mode_fallback>());
+
+  auto gm = c10::Library("_", DispatchKey::TESTING_ONLY_GenericMode, __FILE__, __LINE__);
+  gm.fallback(c10::CppFunction::makeFallthrough());
 
   c10::impl::IncludeDispatchKeyGuard guard(DispatchKey::TESTING_ONLY_GenericMode);
 
