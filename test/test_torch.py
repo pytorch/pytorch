@@ -11059,6 +11059,7 @@ class TestTorchDeviceType(TestCase):
         dst = dst.masked_scatter(mask, src)
         self.assertEqual(dst, torch.tensor([True, True, True], device=device))
 
+    @dtypesIfCUDA(*[dtype for dtype in torch.testing.get_all_dtypes() if dtype not in [torch.bfloat16]])
     @dtypes(*torch.testing.get_all_dtypes())
     def test_masked_select(self, device, dtype):
         if device == 'cpu':
