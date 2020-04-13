@@ -84,9 +84,9 @@ class SyncBatchNorm(Function):
             sum_dy_all_reduce.wait()
             sum_dy_xmu_all_reduce.wait()
 
-            dividor = count_tensor.sum() 
-            mean_dy = sum_dy / dividor
-            mean_dy_xmu = sum_dy_xmu / dividor
+            divisor = count_tensor.sum()
+            mean_dy = sum_dy / divisor
+            mean_dy_xmu = sum_dy_xmu / divisor
             # backward pass for gradient calculation
             grad_input = torch.batch_norm_backward_elemt(
                 grad_output,
