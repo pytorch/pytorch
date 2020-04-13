@@ -12,13 +12,16 @@ import torch.nn.intrinsic as nni
 import torch.nn.intrinsic.qat as nniqat
 
 from torch._ops import ops
-from torch.nn.modules.utils import _pair, _triple
+from torch.nn.modules.utils import _single, _pair, _triple
+from torch.nn.quantized.modules.utils import _pair_from_first
 from torch.nn.quantized.modules.utils import _quantize_weight
 from torch.nn.utils import fuse_conv_bn_weights
 
 class _ConvNd(nn.Module):
-    def __init__(self, in_channels, out_channels, kernel_size, stride=1,
-                 padding=0, dilation=1, groups=1, bias=True,
+    def __init__(self, in_channels, out_channels, kernel_size, stride,
+                 padding, dilation,
+                 transposed, output_padding,
+                 groups, bias,
                  padding_mode='zeros'):
         super(_ConvNd, self).__init__()
         if padding_mode != 'zeros':
@@ -34,8 +37,8 @@ class _ConvNd(nn.Module):
         self.stride = stride
         self.padding = padding
         self.dilation = dilation
-        self.transposed = False
-        self.output_padding = 0
+        self.transposed = transposed
+        self.output_padding = output_padding
         self.groups = groups
         self.padding_mode = padding_mode
         # Initialize as NCHW. set_weight will internally transpose to NHWC.
@@ -56,6 +59,8 @@ class _ConvNd(nn.Module):
             s += ', padding={padding}'
         if self.dilation != (1,) * len(self.dilation):
             s += ', dilation={dilation}'
+        if self.output_padding != (0,) * len(self.output_padding):
+            s += ', output_padding={output_padding}'
         if self.groups != 1:
             s += ', groups={groups}'
         if self.bias() is None:
@@ -178,25 +183,25 @@ class Conv1d(_ConvNd):
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
                  padding=0, dilation=1, groups=1, bias=True,
                  padding_mode='zeros'):
-        kernel_size = list(_pair(kernel_size))
+        kernel_size = list(_pair_from_first(kernel_size))
         kernel_size[self._SQUEEZE_DIM] = 1
         kernel_size = tuple(kernel_size)
 
-        stride = list(_pair(stride))
+        stride = list(_pair_from_first(stride))
         stride[self._SQUEEZE_DIM] = 1
         stride = tuple(stride)
 
-        padding = list(_pair(padding))
+        padding = list(_pair_from_first(padding))
         padding[self._SQUEEZE_DIM] = 0
         padding = tuple(padding)
 
-        dilation = list(_pair(dilation))
+        dilation = list(_pair_from_first(dilation))
         dilation[self._SQUEEZE_DIM] = 1
         dilation = tuple(dilation)
 
         super(Conv1d, self).__init__(
             in_channels, out_channels, kernel_size, stride, padding, dilation,
-            groups, bias, padding_mode)
+            False, _single(0), groups, bias, padding_mode)
 
     def _get_name(self):
         return 'QuantizedConv1d'
@@ -308,7 +313,7 @@ class Conv2d(_ConvNd):
         dilation = _pair(dilation)
         super(Conv2d, self).__init__(
             in_channels, out_channels, kernel_size, stride, padding, dilation,
-            groups, bias, padding_mode)
+            False, _pair(0), groups, bias, padding_mode)
 
     def _get_name(self):
         return 'QuantizedConv2d'
@@ -434,7 +439,7 @@ class Conv3d(_ConvNd):
         dilation = _triple(dilation)
         super(Conv3d, self).__init__(
             in_channels, out_channels, kernel_size, stride, padding, dilation,
-            groups, bias, padding_mode)
+            False, _triple(0), groups, bias, padding_mode)
 
     def _get_name(self):
         return 'QuantizedConv3d'
@@ -498,3 +503,29 @@ class Conv3d(_ConvNd):
         qconv.zero_point = int(act_zp)
 
         return qconv
+
+
+# === Transposed Convolutions ===
+
+# Note: The MRO should make sure that the `super` in the `_ConvNd` will be
+#       called, while the one in the `nn._ConvTransposeNd` it won't.
+
+class _ConvTransposeNd(_ConvNd, nn.modules.conv._ConvTransposeNd):
+    def __init__(self, in_channels, out_channels, kernel_size, stride,
+                 padding, dilation, transposed, output_padding,
+                 groups, bias, padding_mode):
+        if padding_mode != 'zeros':
+            raise ValueError('Only "zeros" padding mode is supported for {}'.format(self.__class__.__name__))
+
+        super(_ConvTransposeNd, self).__init__(
+            in_channels, out_channels, kernel_size, stride,
+            padding, dilation, transposed, output_padding,
+            groups, bias, padding_mode)
+
+    def _input_padding(self, kernel_size, dilation, padding):
+        # type: (List[int], List[int], List[int]) -> List[int]
+        res = torch.jit.annotate(List[int], [])
+        for kdx in range(len(kernel_size)):
+            pad = (dilation[kdx] * (kernel_size[kdx] - 1) - padding[kdx])
+            res.append(pad)
+        return res

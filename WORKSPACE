@@ -79,7 +79,7 @@ new_local_repository(
 
 new_local_repository(
     name = "fbgemm",
-    build_file = "//third_party:fbgemm.BUILD",
+    build_file = "//third_party:fbgemm/BUILD.bazel",
     path = "third_party/fbgemm",
 )
 
@@ -103,7 +103,7 @@ new_local_repository(
 
 new_local_repository(
     name = "asmjit",
-    build_file = "//third_party:asmjit.BUILD",
+    build_file = "//third_party:fbgemm/third_party/asmjit.BUILD",
     path = "third_party/fbgemm/third_party/asmjit",
 )
 

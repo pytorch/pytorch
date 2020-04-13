@@ -1575,6 +1575,8 @@ if _enabled:
             ast = torch._C._parse_source_def(src)
             self._methods[ast.name().name] = ScriptMethodStub(rcb, ast, None)
 
+        def _replicate_for_data_parallel(self):
+            return self._actual_script_module._replicate_for_data_parallel()
 
     class RecursiveScriptModule(ScriptModule):
         # XXX: RecursiveScriptModule inherits from ScriptModule for the sole
@@ -1810,6 +1812,14 @@ if _enabled:
             if self_method.__func__ == get_function_from_type(RecursiveScriptModule, "__bool__"):
                 return True
             return self_method()
+
+        def _replicate_for_data_parallel(self):
+            # we have to initialize ScriptModule properly so that
+            # it works with pybind11
+            def init_fn(script_module):
+                # Don't do anything here, we'll initialize the ScriptModule below
+                return
+            return RecursiveScriptModule._construct(self._c._replicate_for_data_parallel(), init_fn)
 
     # Need to copy all RecursiveScriptModule methods to ScriptModule.
     #

@@ -67,6 +67,7 @@ TYPE_MAP = {
     'bool': 'bool',
     'bool?': 'bool?',
     'Generator': 'Generator?',
+    'Generator?': 'Generator?',
 }
 
 
@@ -126,7 +127,7 @@ FROM_IVALUE = {
     'int64_t': '{}.toInt()',
     'int64_t?': '{}.toOptional<int64_t>()',
     'std::string': '{}.toStringRef()',
-    'Generator': 'nullptr',
+    'Generator?': '{}.toOptional<at::Generator>()',
     'std::array<bool,2>': 'as_bool_array<2>({}.toBoolList())',
     'std::array<bool,3>': 'as_bool_array<3>({}.toBoolList())',
     'std::array<bool,4>': 'as_bool_array<4>({}.toBoolList())',
@@ -294,7 +295,15 @@ def load_op_list(path):
     return op_list
 
 
-def gen_jit_dispatch(declarations, out, template_path, disable_autograd=False, selected_op_list_path=None):
+def gen_jit_dispatch(
+    declarations,
+    out,
+    template_path,
+    disable_autograd=False,
+    selected_op_list_path=None,
+    selected_op_list=None,
+    force_schema_registration=False,
+):
     REGISTER_ATEN_OPS_CPP = CodeTemplate.from_file(template_path + '/register_aten_ops.cpp')
 
     ops = []
@@ -416,13 +425,17 @@ def gen_jit_dispatch(declarations, out, template_path, disable_autograd=False, s
 
         return constructor
 
-    def filter_decls(jit_decls, disable_autograd, selected_op_list):
+    def filter_decls(jit_decls, disable_autograd, selected_op_list, force_schema_registration):
         result = []
         for decl in jit_decls:
             if disable_autograd and is_backward_op(decl):
                 continue
-            if selected_op_list and signature_without_args(decl) not in selected_op_list:
-                decl['emit_dummy_placeholder'] = True
+            op_name = signature_without_args(decl)
+            if selected_op_list and op_name not in selected_op_list:
+                if force_schema_registration:
+                    decl['emit_dummy_placeholder'] = True
+                else:
+                    continue
             result.append(decl)
         return result
 
@@ -514,8 +527,10 @@ def gen_jit_dispatch(declarations, out, template_path, disable_autograd=False, s
             additional_jit_decls.append(hacked_twin(decl))
 
     jit_decls.extend(additional_jit_decls)
-    selected_op_list = load_op_list(selected_op_list_path) if selected_op_list_path else None
-    jit_decls = filter_decls(jit_decls, disable_autograd, selected_op_list)
+    if not selected_op_list:
+        selected_op_list = []
+    selected_op_list += load_op_list(selected_op_list_path) if selected_op_list_path else []
+    jit_decls = filter_decls(jit_decls, disable_autograd, selected_op_list, force_schema_registration)
 
     # generation is deterministic
     jit_decl_groups = sort_decls(jit_decls)
