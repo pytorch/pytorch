@@ -1508,9 +1508,6 @@ def sort(g, self, dim, decending, out=None):
 
 def numel(g, self):
     shape = g.op("Shape", self)
-    dtype = shape.type().scalarType()
-    if dtype is None:  # dtype could be None for a script module
-        shape = g.op("Cast", shape, to_i=sym_help.cast_pytorch_to_onnx['Long'])
     return g.op("ReduceProd", shape, keepdims_i=0)
 
 
