@@ -1505,6 +1505,14 @@ def sort(g, self, dim, decending, out=None):
 
     return g.op("TopK", self, k_i=self.type().sizes()[dim], axis_i=dim, outputs=2)
 
+
+def numel(g, self):
+    shape = g.op("Shape", self)
+    shape = g.op("Cast", shape, to_i=sym_help.cast_pytorch_to_onnx['Int'])
+    prod = g.op("ReduceProd", shape, keepdims_i=0)
+    return g.op("Cast", prod, to_i=sym_help.cast_pytorch_to_onnx['Long'])
+
+
 @parse_args('v', 'i', 'i', 'i', 'i', 'none')
 def topk(g, self, k, dim, largest, sorted, out=None):
     if out is not None:
@@ -1522,10 +1530,16 @@ def to(g, self, *args):
             # aten::to(Tensor, Device, bool, bool, memory_format)
             return self
         else:
-            # aten::to(Tensor, ScalarType, bool, bool, memory_format)
-            dtype = sym_help._get_const(args[0], 'i', 'dtype')
-            # memory_format is ignored
-            return g.op("Cast", self, to_i=sym_help.scalar_type_to_onnx[dtype])
+            dtype = sym_help._maybe_get_const(args[0], 'i')
+            if sym_help._is_value(dtype):
+                # aten::to(Tensor, Tensor, bool, bool, memory_format)
+                other = args[0]
+                dtype = other.type().scalarType()
+                return g.op("Cast", self, to_i=sym_help.cast_pytorch_to_onnx[dtype])
+            else:
+                # aten::to(Tensor, ScalarType, bool, bool, memory_format)
+                # memory_format is ignored
+                return g.op("Cast", self, to_i=sym_help.scalar_type_to_onnx[dtype])
     elif len(args) == 5:
         # aten::to(Tensor, Device, ScalarType, bool, bool, memory_format)
         dtype = sym_help._get_const(args[1], 'i', 'dtype')

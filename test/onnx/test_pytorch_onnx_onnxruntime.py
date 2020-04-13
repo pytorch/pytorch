@@ -2571,6 +2571,37 @@ class TestONNXRuntime(unittest.TestCase):
         model = MyModule()
         self.run_test(model, (x, batch1, batch2))
 
+    def test_numel(self):
+        class MyModule(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, input):
+                return input.numel() * input
+
+        x = torch.randn(2, 3, 5)
+        model = MyModule()
+        self.run_test(model, (x,))
+
+    def test_numel_empty(self):
+        class MyModule(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, input):
+                return input.numel() * input
+
+        x = torch.randn(0)
+        model = MyModule()
+        self.run_test(model, (x,))
+
+    def test_cast_to(self):
+        class MyModule(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, input, other):
+                return input.to(other) + other
+
+        x = torch.randn(2, 3, 4)
+        y = torch.tensor([1], dtype=torch.int64)
+        model = MyModule()
+        self.run_test(model, (x, y))
+
     def test_baddbmm_dynamic(self):
         class MyModule(torch.nn.Module):
             def forward(self, input, batch1, batch2, alpha, beta):
