@@ -1,5 +1,5 @@
 #include <torch/csrc/jit/codegen/cuda/kernel.h>
-#include <torch/csrc/jit/codegen/cuda/code_write.h>
+#include <torch/csrc/jit/codegen/cuda/lower2device.h>
 #include <iostream>
 
 #include <ATen/cuda/CUDAContext.h>
@@ -29,9 +29,10 @@ std::pair<std::string, std::string> codeGeneration(Fusion& fusion) {
   std::stringstream str_stream;
 
   str_stream << "namespace " << CG_NAMESPACE << " {\n" << typeinfo << "\n";
-  CodeWrite cw(str_stream, KERNEL_NAME);
-  cw.traverse(&fusion);
-  str_stream << "\n}";
+  std::stringstream cdg;
+  GPULower gpulw(&fusion);
+  gpulw.printKernel(str_stream, KERNEL_NAME);
+  str_stream << "\n} // namespace";
 
   std::string func_name = std::string(CG_NAMESPACE) + "::" + KERNEL_NAME;
 
@@ -128,7 +129,9 @@ void compileKernel(Fusion& fusion, CudaKernel& entry) {
     nvrtc().nvrtcGetProgramLogSize(program, &logsize);
     std::vector<char> log(logsize);
     nvrtc().nvrtcGetProgramLog(program, log.data());
-    TORCH_INTERNAL_ASSERT(false, "NVRTC COMPILE ERROR: ", log.data());
+
+    TORCH_INTERNAL_ASSERT(
+        false, "CUDA NVRTC compile error: ", log.data(), "\n", code.c_str());
   }
   const char* lowered_kernel_name;
   nvrtc().nvrtcGetLoweredName(program, func_name.c_str(), &lowered_kernel_name);
