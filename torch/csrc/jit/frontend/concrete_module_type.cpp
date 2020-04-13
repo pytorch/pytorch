@@ -103,7 +103,9 @@ bool ConcreteModuleTypeBuilder::equals(
       attributes_ == other.attributes_ &&
       overloads_ == other.overloads_ &&
       functionAttributes_ == other.functionAttributes_ &&
-      builtinFunctions_ == other.builtinFunctions_;
+      builtinFunctions_ == other.builtinFunctions_ &&
+      forward_hooks == other.forward_hooks &&
+      forward_pre_hooks == other.forward_pre_hooks;
   // clang-format on
   if (!equal) {
     return false;
