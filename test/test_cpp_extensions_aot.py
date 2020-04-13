@@ -227,11 +227,23 @@ class TestCUDA_CSPRNG_Generator(common.TestCase):
             # print(torch.iinfo(dtype).max / 2)
             self.assertEqual(avg, torch.iinfo(dtype).max / 2, prec=prec)
 
-    def test_normal(self):
+    def test_uniform(self):
         gen = csprng_extension.create_CUDA_CSPRNG_Generator()
         size = 1000
         for dtype in [torch.float, torch.double]:
             t = torch.empty(size, dtype=dtype, device='cuda').uniform_(generator=gen)
+            # print('================================================== ' + str(dtype) + ' uniform =================================================')
+            # for elem in t:
+            #     print(elem.item())
+
+    def test_normal(self):
+        gen = csprng_extension.create_CUDA_CSPRNG_Generator()
+        size = 1000
+        for dtype in [torch.float, torch.double]:
+            t = torch.empty(size, dtype=dtype, device='cuda').normal_(generator=gen)
+            # print('================================================== ' + str(dtype) + ' normal =================================================')
+            # for elem in t:
+            #     print(elem.item())
 
 if __name__ == "__main__":
     common.run_tests()
