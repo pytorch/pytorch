@@ -85,7 +85,7 @@ static int64_t floordiv(int64_t a, int64_t b) {
     return (r.rem) ? r.quot - 1 : r.quot;
   }
 }
-void checkDoubleInRange(double a);
+TORCH_API void checkDoubleInRange(double a);
 static int64_t floor(double a) {
   checkDoubleInRange(a);
   return std::floor(a);
@@ -165,7 +165,7 @@ void setItem(const c10::List<T>& list, int64_t idx, T&& value) {
 
 int listAppend(Stack& stack);
 
-int listReverse(Stack& stack) ;
+int listReverse(Stack& stack);
 
 template <typename T>
 int minList(Stack& stack) {
@@ -593,5 +593,5 @@ int listSetItem(Stack& stack);
       },                                   \
       aliasAnalysisFromSchema())
 
-}
-}
+} // namespace jit
+} // namespace torch
