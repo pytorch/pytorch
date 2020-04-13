@@ -7,7 +7,7 @@ import unittest
 import caffe2.python.fakelowp.init_shared_libs  # noqa
 import numpy as np
 from caffe2.proto import caffe2_pb2
-from caffe2.python import core, workspace, dyndep
+from caffe2.python import core, workspace
 from caffe2.python.onnx.onnxifi import onnxifi_caffe2_net
 from caffe2.python.fakelowp.test_utils import print_test_debug_info
 
@@ -18,7 +18,6 @@ workspace.GlobalInit(
         "--glow_global_fp16=1",
         "--glow_global_fused_scale_offset_fp16=1",
         "--glow_global_force_sls_fp16_accum=1",
-	"--glow_onnxifi_backend=Interpreter",
     ]
 )
 GLOW_MATMUL_ATOL = 1e-5
