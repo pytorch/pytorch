@@ -220,8 +220,9 @@ public:
 
   bool runOnModule(Module& M) override {
     // Scan all functions and instructions to construct function -> function
-    // dependency graph and to find out instructions that might register or
-    // invoke operators, respectively.
+    // dependency graph and to find out:
+    // - visible functions matching `root_symbol_pattern` option;
+    // - instructions that might register or invoke operators, respectively.
     GRAPH deps;
     VALUE_SET visibleFuncs, opRegistrationInsts, opInvocationInsts;
     scanAllFunctions(
