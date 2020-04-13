@@ -69,6 +69,7 @@ TESTS = [
     'test_overrides',
     'test_jit_fuser_te',
     'test_tensorexpr',
+    'test_openmp',
     'distributed/rpc/faulty_agent/test_dist_autograd_spawn',
     'distributed/rpc/faulty_agent/test_rpc_spawn',
     'distributed/rpc/jit/test_dist_autograd_spawn',
