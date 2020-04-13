@@ -421,13 +421,17 @@ class MergeMultiScalarFeatureTensorsOp : public Operator<Context> {
       for (int inputIndex = 0; inputIndex < numInputs_; ++inputIndex) {
         const int32_t* inLengthsData =
             Input(kNumTensorsPerInput * inputIndex).template data<int32_t>();
-        const int64_t* inKeysData = Input(kNumTensorsPerInput * inputIndex + 1)
-                                        .template data<int64_t>();
+        auto inputKeysBlobIdx = kNumTensorsPerInput * inputIndex + 1;
+        const int64_t* inKeysData =
+            Input(inputKeysBlobIdx).template data<int64_t>();
         const T* inValuesData =
             Input(kNumTensorsPerInput * inputIndex + 2).template data<T>();
         outLengthsData[exampleIndex] += inLengthsData[exampleIndex];
         for (int featureIndex = 0; featureIndex < inLengthsData[exampleIndex];
              ++featureIndex) {
+          CAFFE_ENFORCE_LT(outKeysOffset, totalNumFeatures);
+          CAFFE_ENFORCE_LT(
+              inKeysOffset_[inputIndex], Input(inputKeysBlobIdx).numel());
           outKeysData[outKeysOffset] = inKeysData[inKeysOffset_[inputIndex]];
           outValuesData[outKeysOffset] =
               inValuesData[inKeysOffset_[inputIndex]];

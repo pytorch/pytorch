@@ -161,7 +161,6 @@ void testLLVMByteToDoubleCastTest() {
 void testLLVMLetTest01() {
   KernelScope kernel_scope;
   VarHandle x("x", kFloat);
-  ExprHandle value = ExprHandle(3.f);
   ExprHandle body = ExprHandle(2.f) + (x * ExprHandle(3.f) + ExprHandle(4.f));
   ExprHandle result = Let::make(x, ExprHandle(3.f), body);
   LLVMExprEval cg(result, {});
@@ -172,7 +171,6 @@ void testLLVMLetTest02() {
   KernelScope kernel_scope;
   VarHandle x("x", kFloat);
   VarHandle y("y", kFloat);
-  ExprHandle value = ExprHandle(3.f);
   ExprHandle body =
       ExprHandle(2.f) + (x * ExprHandle(3.f) + ExprHandle(4.f) * y);
   ExprHandle e1 = Let::make(x, ExprHandle(3.f), body);
@@ -185,7 +183,6 @@ void testLLVMLetTestMultitype() {
   KernelScope kernel_scope;
   VarHandle x("x", kByte);
   VarHandle y("y", kHalf);
-  ExprHandle value = ExprHandle((short)3);
   ExprHandle body = ExprHandle((double)2.f) +
       (x * ExprHandle(3) + ExprHandle((int64_t)4) * y);
   ExprHandle e1 = Let::make(x, ExprHandle((uint8_t)3), body);
@@ -293,8 +290,8 @@ void testLLVMVecLoadStoreTest() {
 #define FLOAT_INTRINSICS_TEST(Name, Lanes)                       \
   void testLLVMVecFloat_##Name##Lane##Lanes##Test() {            \
     KernelScope kernel_scope;                                    \
-    Buffer a(BufHandle("A", {1}), kFloat);              \
-    Buffer b(BufHandle("B", {1}), kFloat);              \
+    Buffer a(BufHandle("A", {1}), kFloat);                       \
+    Buffer b(BufHandle("B", {1}), kFloat);                       \
     float val = 0.5f;                                            \
     std::vector<float> a_buffer(Lanes, val);                     \
     std::vector<float> b_buffer(Lanes, val);                     \
@@ -308,7 +305,6 @@ void testLLVMVecLoadStoreTest() {
         Broadcast::make(IntImm::make(1), Lanes));                \
     LLVMCodeGen cg(store, {a, b});                               \
     std::vector<void*> args({a_buffer.data(), b_buffer.data()}); \
-    float ref = std::Name(0.5f);                                 \
     ASSERT_EQ(cg.value<int>(args), 0);                           \
     for (int i = 0; i < Lanes; i++) {                            \
       ASSERT_FLOAT_EQ(a_buffer[i], val);                         \
@@ -339,8 +335,8 @@ FLOAT_INTRINSICS_TEST(lgamma, 8)
 #define DOUBLE_INTRINSICS_TEST(Name, Lanes)                      \
   void testLLVMVecDouble_##Name##Lane##Lanes##Test() {           \
     KernelScope kernel_scope;                                    \
-    Buffer a(BufHandle("A", {1}), kDouble);             \
-    Buffer b(BufHandle("B", {1}), kDouble);             \
+    Buffer a(BufHandle("A", {1}), kDouble);                      \
+    Buffer b(BufHandle("B", {1}), kDouble);                      \
     float val = 0.5f;                                            \
     std::vector<double> a_buffer(Lanes, val);                    \
     std::vector<double> b_buffer(Lanes, val);                    \
@@ -354,7 +350,6 @@ FLOAT_INTRINSICS_TEST(lgamma, 8)
         Broadcast::make(IntImm::make(1), Lanes));                \
     LLVMCodeGen cg(store, {a, b});                               \
     std::vector<void*> args({a_buffer.data(), b_buffer.data()}); \
-    float ref = std::Name(0.5f);                                 \
     ASSERT_EQ(cg.value<int>(args), 0);                           \
     for (int i = 0; i < Lanes; i++) {                            \
       ASSERT_FLOAT_EQ(a_buffer[i], val);                         \
@@ -501,7 +496,8 @@ void testLLVMElemwiseAddFloat() {
       i,
       0,
       N,
-      Store::make(c, {i}, Load::make(a, {i}, mask) + Load::make(b, {i}, mask), mask));
+      Store::make(
+          c, {i}, Load::make(a, {i}, mask) + Load::make(b, {i}, mask), mask));
 
   LLVMCodeGen cg(expr, {a, b, c});
 

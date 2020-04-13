@@ -68,6 +68,12 @@ struct BuiltinOpFunction : public Function {
       "special case on Function::isGraphFunction()");
   }
 
+  void clear_execution_info() override {
+    TORCH_INTERNAL_ASSERT(false , "BuiltinFunction had a graph requested "
+      "from it. This probably indicates that the JIT calling context needs a "
+      "special case on Function::isGraphFunction()");
+  }
+
   GraphExecutor& get_executor() override {
     TORCH_INTERNAL_ASSERT(false , "BuiltinFunction had a GraphExecutor requested "
       "from it. This probably indicates that the JIT calling context needs a "

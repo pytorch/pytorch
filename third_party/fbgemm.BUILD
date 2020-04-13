@@ -22,7 +22,6 @@ cc_library(
         "src/FbgemmFloat16Convert.cc",
         "src/FbgemmI64.cc",
         "src/FbgemmI8Spmdm.cc",
-        "src/GenerateI8Depthwise.cc",
         "src/GenerateKernelU8S8S32ACC16.cc",
         "src/GenerateKernelU8S8S32ACC16Avx512.cc",
         "src/GenerateKernelU8S8S32ACC16Avx512VNNI.cc",
@@ -50,7 +49,6 @@ cc_library(
         "src/ExecuteKernelGeneric.h",
         "src/ExecuteKernelU8S8.h",
         "src/FbgemmFP16Common.h",
-        "src/GenerateI8Depthwise.h",
         "src/GenerateKernel.h",
         "src/GroupwiseConv.h",
         "src/RefImplementations.h",
@@ -110,6 +108,7 @@ cc_library(
         "src/FbgemmI8Depthwise3x3Avx2.cc",
         "src/FbgemmI8DepthwiseAvx2.cc",
         "src/FbgemmI8DepthwisePerChannelQuantAvx2.cc",
+        "src/GenerateI8Depthwise.cc",
         "src/OptimizedKernelsAvx2.cc",
         "src/PackDepthwiseConvMatrixAvx2.cc",
         "src/QuantUtilsAvx2.cc",
@@ -117,6 +116,8 @@ cc_library(
         # Inline Assembly sources
         "src/FbgemmFP16UKernelsAvx2.cc",
         # Private headers
+        "src/CodeCache.h",
+        "src/CodeGenHelpers.h",
         "src/FbgemmFP16Common.h",
         "src/FbgemmFP16UKernelsAvx2.h",
         "src/FbgemmI8Depthwise2DAvx2-inl.h",
@@ -136,6 +137,7 @@ cc_library(
     ],
     deps = [
         ":fbgemm_headers",
+        "@asmjit",
     ],
     linkstatic = 1,
 )
