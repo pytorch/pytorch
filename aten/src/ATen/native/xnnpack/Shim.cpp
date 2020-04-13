@@ -28,6 +28,10 @@ bool available() {
     return false;
 }
 
+//
+// Clamp
+//
+
 bool use_clamp(
     const Tensor&,
     const float,
