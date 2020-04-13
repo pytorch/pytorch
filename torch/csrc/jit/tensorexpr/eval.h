@@ -719,6 +719,7 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
           "Free a buffer that is not currently bound: " +
           buffer_var->name_hint());
     }
+    buffer_mapping_.erase(buffer_var);
   }
 
   void visit(const Cond* v) override {
