@@ -23,6 +23,7 @@ PY36 = sys.version_info >= (3, 6)
 
 TESTS = [
     'test_autograd',
+    'test_bundled_inputs',
     'test_complex',
     'test_cpp_api_parity',
     'test_cpp_extensions_aot_no_ninja',
@@ -120,7 +121,6 @@ ROCM_BLACKLIST = [
     'distributed/rpc/test_dist_optimizer_spawn',
     'distributed/rpc/test_rpc_spawn',
     'test_cpp_extensions_aot_ninja',
-    'test_cpp_extensions_jit',
     'test_determination',
     'test_multiprocessing',
     'test_jit_simple',
