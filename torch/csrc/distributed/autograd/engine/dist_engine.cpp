@@ -398,7 +398,7 @@ void DistEngine::cleanupBackwardPass(const ContextPtr& autogradContext) {
   // not leaking any references to the gradients anywhere else.
   const auto& futureGrads =
       autogradContext->retrieveGraphTask()->future_result_;
-  TORCH_INTERNAL_ASSERT(futureGrads.use_count() == 1);
+  TORCH_INTERNAL_ASSERT(futureGrads.use_count() <= 2);
 
   // Reset the graph task once we're done with all processing.
   autogradContext->resetGraphTask();
