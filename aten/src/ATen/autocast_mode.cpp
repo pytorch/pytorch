@@ -372,9 +372,11 @@ Therefore, for the moment, this is all copy pasted in from VariableTypeEverythin
 /*****************************************
 Explicit registration for out-of-place ops
 *****************************************/
-TORCH_LIBRARY_IMPL(aten, Autocast, m) {
+TORCH_LIBRARY_IMPL(_, Autocast, m) {
   m.fallback(c10::CppFunction::makeFallthrough());
+}
 
+TORCH_LIBRARY_IMPL(aten, Autocast, m) {
   KERNEL_UNBOXED_ONLY(ADD_NS(_convolution), "_convolution", Tensor (const Tensor &, const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, bool, IntArrayRef, int64_t, bool, bool, bool), fp16)
   KERNEL_UNBOXED_ONLY(ADD_NS(_convolution_nogroup), "_convolution_nogroup", Tensor (const Tensor &, const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, bool, IntArrayRef), fp16)
   KERNEL_UNBOXED_ONLY(ADD_NS(conv1d), "conv1d", Tensor (const Tensor &, const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, int64_t), fp16)
