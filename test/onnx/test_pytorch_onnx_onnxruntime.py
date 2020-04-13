@@ -346,7 +346,6 @@ class TestONNXRuntime(unittest.TestCase):
         return images
 
     @skipIfUnsupportedMinOpsetVersion(11)
-    @unittest.skip("disabled due to removal of aten::__interpolate")
     def test_mask_rcnn(self):
         model = torchvision.models.detection.mask_rcnn.maskrcnn_resnet50_fpn(pretrained=True, min_size=200,
                                                                              max_size=300)
@@ -354,7 +353,6 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(model, (images,), rtol=1e-3, atol=1e-5)
 
     @skipIfUnsupportedMinOpsetVersion(11)
-    @unittest.skip("Disabled w removal of aten::__interpolate")
     def test_keypoint_rcnn(self):
         class KeyPointRCNN(torch.nn.Module):
             def __init__(self):
@@ -1209,9 +1207,6 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(MyModel(), x)
 
     def _interpolate_script(self, x, mode, use_size, is_upsample, align_corners=False):
-        # test disabled
-        return
-
         class MyModel(torch.jit.ScriptModule):
             __constants__ = ['mode', 'use_size', 'is_upsample', 'size', 'scale', 'size_array', 'scale_array', 'align_corners']
 
@@ -1298,6 +1293,35 @@ class TestONNXRuntime(unittest.TestCase):
 
     def test_interpolate_upsample(self):
         self._interpolate_tests(True)
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_interpolate_function_substitution(self):
+        class ScriptModel(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, x):
+                return torch.nn.functional.interpolate(x, mode="nearest", scale_factor=2.)
+
+        class ScriptModule(torch.jit.ScriptModule):
+            def __init__(self):
+                super(ScriptModule, self).__init__()
+                self.submodule = ScriptModel()
+
+            @torch.jit.script_method
+            def forward(self, input):
+                return self.submodule(input)
+
+        x = torch.randn(1, 2, 4, 4, 6)
+        self.run_test(ScriptModule(), (x,))
+
+        @torch.jit.script
+        def script_method(x):
+            return torch.nn.functional.interpolate(x, mode="nearest", scale_factor=2.)
+
+        class TracingModule(torch.nn.Module):
+            def forward(self, x):
+                return script_method(x)
+
+        self.run_test(TracingModule(), (x,))
 
     @skipIfUnsupportedMinOpsetVersion(10)
     def test_interpolate_downsample(self):
