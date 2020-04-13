@@ -149,8 +149,6 @@ install(FILES
           generic/THCTensorMathPointwise.cu
           generic/THCTensorMathReduce.h
           generic/THCTensorMathReduce.cu
-          generic/THCTensorMathScan.h
-          generic/THCTensorMathScan.cu
           generic/THCTensorScatterGather.h
           generic/THCTensorScatterGather.cu
           generic/THCTensorIndex.h

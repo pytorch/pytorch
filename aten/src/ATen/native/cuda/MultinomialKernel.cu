@@ -410,7 +410,7 @@ void multinomial_kernel_impl(Tensor& result, const Tensor& self, const int64_t n
       renormRows(normDist);
 
       // Prefix sum along rows
-      legacy::cuda::_th_cumsum_out(prefixSum, normDist, 1);
+      at::_cumsum_out(prefixSum, normDist, 1);
 
       std::pair<uint64_t, uint64_t> rng_engine_inputs;
 
@@ -464,7 +464,7 @@ void multinomial_kernel_impl(Tensor& result, const Tensor& self, const int64_t n
             renormRows(normDist);
 
             // Prefix sum along rows
-            legacy::cuda::_th_cumsum_out(prefixSum, normDist, 1);
+            at::_cumsum_out(prefixSum, normDist, 1);
           }
           {
             // See Note [Acquire lock when using random generators]
