@@ -10,7 +10,7 @@ Automatic Mixed Precision examples
     :class:`GradScaler` is only useful if you manually run regions of your model in ``float16``.
     If you aren't sure how to choose op precision manually, the master branch and nightly pip/conda
     builds include a context manager that chooses op precision automatically wherever it's enabled.
-    See the `master documentation<https://pytorch.org/docs/master/amp.html>`_ for details.
+    See the `master documentation <https://pytorch.org/docs/master/amp.html>`_ for details.
 
 .. contents:: :local:
 
