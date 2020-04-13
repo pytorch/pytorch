@@ -140,6 +140,16 @@ Library::Library(std::string ns, DispatchKey k, const char* file, uint32_t line)
   , line_(line)
   {}
 
+Library& Library::_ensure_torch_library_once() & {
+  TORCH_CHECK(
+    ns_.has_value(),
+    "TORCH_LIBRARY macro cannot be used with wildcard library name _.  "
+    "Registration site was ", file_, ":", line_
+  );
+  registrars_.emplace_back(Dispatcher::singleton().registerLibrary(*ns_, debugString("", file_, line_)));
+  return *this;
+}
+
 // TODO: Error if an operator is def'ed multiple times.  Right now we just
 // merge everything
 

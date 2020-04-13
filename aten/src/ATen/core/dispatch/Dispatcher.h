@@ -166,6 +166,13 @@ public:
    */
   RegistrationHandleRAII registerFallback(DispatchKey dispatch_key, KernelFunction kernel, std::string debug);
 
+  /**
+   * Use to register whenever we had a TORCH_LIBRARY declaration in the frontend
+   * API.  These invocations are only permitted once per program, so we raise
+   * an error if this is called again for the same namespace.
+   */
+  RegistrationHandleRAII registerLibrary(std::string ns, std::string debug);
+
   // This function is a temporary hack that allows register_aten_ops.cpp to register its codegen'ed
   // unboxing wrapper for aten operators. We still need those for some operators because not all work
   // with the templated unboxing logic yet.
@@ -201,6 +208,7 @@ private:
     c10::optional<DispatchKey> dispatch_key,
     std::list<impl::OperatorEntry::KernelEntry>::iterator kernel_handle);
   void deregisterFallback_(DispatchKey dispatchKey);
+  void deregisterLibrary_(const std::string& ns);
   void cleanup(const OperatorHandle& op, const OperatorName& op_name);
   void checkSchemaCompatibility(const OperatorHandle& op, const FunctionSchema& schema, const std::string& debug);
 
@@ -210,6 +218,8 @@ private:
 
   std::list<OperatorDef> operators_;
   LeftRight<ska::flat_hash_map<OperatorName, OperatorHandle>> operatorLookupTable_;
+  // Map from namespace to debug string (saying, e.g., where the library was defined)
+  ska::flat_hash_map<std::string, std::string> libraries_;
   impl::KernelFunctionTable backendFallbackKernels_;
   // Set of backends which have specified they do NOT want fallthrough behavior
   // (we store the inverse because it avoids a negation when we use this for

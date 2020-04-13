@@ -1470,6 +1470,25 @@ TEST(NewOperatorRegistrationTest, BackendSelectRedispatchesToCPU) {
   ASSERT_TRUE(backend_generic_called);
 }
 
+// TORCH_LIBRARY macro is manually inlined here so that we can make
+// the initializer non-static.  Unlike other tests, we don't test
+// directly with Library API because the details of how TorchLibraryInit
+// are implemented are also under test.
+static void _empty_init(c10::Library& m) {
+  // nothing
+}
+
+TEST(NewOperatorRegistrationTest, TorchLibraryTwiceIsError) {
+  {
+    c10::detail::TorchLibraryInit init1(&_empty_init, "_twice_test", __FILE__, __LINE__);
+    expectThrows<c10::Error>([] {
+      c10::detail::TorchLibraryInit init2(&_empty_init, "_twice_test", __FILE__, __LINE__);
+    }, "Only a single TORCH_LIBRARY");
+  }
+  // Ensure it's ok after deregistering
+  c10::detail::TorchLibraryInit init1(&_empty_init, "_twice_test", __FILE__, __LINE__);
+}
+
 Tensor dummy_fn(const Tensor& x) {
   return x;
 }

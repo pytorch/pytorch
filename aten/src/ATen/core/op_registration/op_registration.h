@@ -834,6 +834,10 @@ private:
   Library& _impl(const char* name, CppFunction&& f) &;
   Library& _fallback(CppFunction&& f) &;
 
+  // This is used to ensure that for any given namespace, we only
+  // register a library for it once
+  Library& _ensure_torch_library_once() &;
+
 public:
   // Use TORCH_LIBRARY/TORCH_LIBRARY_IMPL instead of these constructors directly
   Library(std::string ns, const char* file, uint32_t line);
@@ -935,6 +939,7 @@ private:
 public:
   TorchLibraryInit(InitFn* fn, const char* ns, const char* file, uint32_t line)
     : lib_(ns, file, line) {
+    lib_._ensure_torch_library_once();
     fn(lib_);
   }
   TorchLibraryInit(InitFn* fn, const char* ns, DispatchKey k, const char* file, uint32_t line)
