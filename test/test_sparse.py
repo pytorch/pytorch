@@ -973,6 +973,10 @@ class TestSparse(TestCase):
         self.assertEqual(ab, ab_traspose_check)
 
     @cuda_only
+    @unittest.skipIf(
+        IS_WINDOWS and TEST_CUDA,
+        "bmm sparse-dense CUDA is not yet supported in Windows, at least up to CUDA 10.1"
+    )
     def test_bmm_deterministic(self):
         def test_shape(num_mats, dim_i, dim_j, dim_k, nnz):
             a_list = []
@@ -989,12 +993,9 @@ class TestSparse(TestCase):
             diff_rel = diff_abs / ab_deterministic.abs()
             diff_rel[torch.isnan(diff_rel)] = 0
 
-            if 0 not in [num_mats, dim_i, dim_j, dim_k]:
-                print("max relative difference: %f" % (diff_rel.max()))
-
             # deterministic and non-deterministic results should either be
             # equal or within a small relative difference
-            equal_abs_or_rel = diff_abs.eq(0).logical_or(diff_rel.lt(0.1))
+            equal_abs_or_rel = diff_abs.eq(0).logical_or(diff_rel.lt(0.001))
             self.assertTrue(equal_abs_or_rel.all())
 
         test_shape(10, 10, 100, 99, 20)
