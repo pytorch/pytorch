@@ -2005,7 +2005,6 @@ cc_library(
             "torch/csrc/api/src/serialize/*.cpp",
             "torch/csrc/autograd/*.cpp",
             "torch/csrc/autograd/functions/*.cpp",
-            "torch/csrc/autograd/generated/*.cpp",
             "torch/csrc/distributed/autograd/*.cpp",
             "torch/csrc/distributed/autograd/context/*.cpp",
             "torch/csrc/distributed/autograd/functions/*.cpp",
@@ -2019,7 +2018,6 @@ cc_library(
             "torch/csrc/jit/fuser/*.cpp",
             "torch/csrc/jit/fuser/cpu/*.cpp",
             "torch/csrc/jit/ir/*.cpp",
-            "torch/csrc/jit/generated/*.cpp",
             "torch/csrc/jit/passes/*.cpp",
             "torch/csrc/jit/passes/onnx/*.cpp",
             "torch/csrc/jit/passes/utils/*.cpp",
@@ -2039,7 +2037,6 @@ cc_library(
             "torch/csrc/autograd/*_cuda.cpp",
         ]) + [
             "torch/csrc/autograd/functions/comm.cpp",
-            "torch/csrc/autograd/generated/VariableTypeEverything.cpp",
             "torch/lib/libshm/manager.cpp",
             "torch/lib/c10d/NCCLUtils.cpp",
             "torch/lib/c10d/ProcessGroupMPI.cpp",
