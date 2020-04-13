@@ -71,7 +71,7 @@ inline bool use_clamp_optional(
 }
 
 template <typename Function, typename... Arguments>
-auto clamp_optional(
+inline auto clamp_optional(
     Function&& function,
     const optional<Scalar> output_min_,
     const optional<Scalar> output_max_,
