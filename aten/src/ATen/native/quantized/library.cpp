@@ -61,12 +61,3 @@ TORCH_LIBRARY(_quantized, m) {
   m.def("linear_prepack(Tensor W, Tensor? B=None) -> Tensor W_prepack");
   m.def("linear_prepack_fp16(Tensor W, Tensor? B=None) -> Tensor W_prepack");
 }
-
-// TODO: These should probably be in an xnnpack namespace?
-// https://github.com/pytorch/pytorch/issues/36517
-TORCH_LIBRARY(prepacked, m) {
-  m.def("linear_clamp_prepack(Tensor W, Tensor? B=None, Scalar? output_min=None, Scalar? output_max=None) -> __torch__.torch.classes.xnnpack.LinearOpContext");
-  m.def("linear_clamp_run(Tensor X, __torch__.torch.classes.xnnpack.LinearOpContext W_prepack) -> Tensor Y");
-  m.def("conv2d_clamp_prepack(Tensor W, Tensor? B, int[2] stride, int[2] padding, int[2] dilation, int groups, Scalar? output_min=None, Scalar? output_max=None) -> __torch__.torch.classes.xnnpack.Conv2dOpContext");
-  m.def("conv2d_clamp_run(Tensor X, __torch__.torch.classes.xnnpack.Conv2dOpContext W_prepack) -> Tensor Y");
-}
