@@ -41,13 +41,11 @@ bool available(
          (weight.size(Layout::Filter::width) > 0) &&
          (c10::DeviceType::CPU == weight.device().type()) &&
          (kFloat == weight.scalar_type()) &&
-         !weight.requires_grad() &&
          // Bias
          ((bias && bias->defined()) ? ((1 == bias->ndimension()) &&
                                       (c10::DeviceType::CPU == bias->device().type()) &&
                                       (kFloat == bias->scalar_type()) &&
-                                      (weight.size(Layout::Filter::output)) == bias->size(0) &&
-                                      !bias->requires_grad())
+                                      (weight.size(Layout::Filter::output)) == bias->size(0))
                                     : true) &&
          // Padding
          (padding[Layout::Parameter::height] >= 0) &&
