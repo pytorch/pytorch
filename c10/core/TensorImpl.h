@@ -699,7 +699,9 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * sizes/strides are in bounds for the storage that is allocated;
    * this is the responsibility of the caller
    */
-  void set_sizes_contiguous(IntArrayRef new_size) {
+  void set_sizes_contiguous(
+      IntArrayRef new_size,
+      MemoryFormat memory_format=MemoryFormat::Contiguous) {
     TORCH_CHECK(allow_tensor_metadata_change(), "set_sizes_contiguous ", err_msg_tensor_metadata_change_not_allowed);
     auto new_dim = new_size.size();
 
@@ -709,7 +711,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     }
 
     refresh_numel();
-    empty_tensor_restride(MemoryFormat::Contiguous);
+    empty_tensor_restride(memory_format);
   }
 
   /**
