@@ -150,7 +150,9 @@ public:
     if(C10_LIKELY(schemaRef.name() != "aten::backward")) {
       // note: we exclude aten::backward from this check because
       // it has alias info to denote mutability of its self argument
-      // but apart from that is AliasAnalysisKind::FROM_SCHEMA.
+      // but apart from that is AliasAnalysisKind::CONSERVATIVE
+      // and has to be CONSERVATIVE because it has side-effects
+      // that affect more than just its own arguments.
       // TODO Find a better way to do this.
       TORCH_CHECK(
           alias_analysis == AliasAnalysisKind::FROM_SCHEMA ||
