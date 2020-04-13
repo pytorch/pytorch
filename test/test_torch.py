@@ -3618,6 +3618,18 @@ class _TestTorchMixin(object):
         engine_3d.fast_forward(2)
         self.assertEqual(engine_3d.draw(5), actual_3d[5:])
 
+    def test_sobolengine_scrambled_lowdim_default_rng(self):
+        expected_1d = [0.039826, 0.484409, 0.953192, 0.799275, 0.267996]
+        torch.manual_seed(123456)
+        engine_1d = torch.quasirandom.SobolEngine(1, scramble=True)
+        actual_1d = engine_1d.draw(5)
+        self.assertEqual(actual_1d[:, 0], expected_1d)
+        torch.manual_seed(123456)
+        expected_3d = [0.133490, 0.480183, 0.855304, 0.970967, 0.345844]
+        engine_3d = torch.quasirandom.SobolEngine(3, scramble=True)
+        actual_3d = engine_3d.draw(5)
+        self.assertEqual(actual_3d[:, 0], expected_3d)
+
     def test_sobolengine_scrambled_highdim(self):
         engine = torch.quasirandom.SobolEngine(1111, scramble=True)
         draws = engine.draw(1000)
