@@ -26,7 +26,7 @@ from torch.testing._internal.common_utils import TestCase, iter_indices, TEST_NU
     TEST_LIBROSA, TEST_WITH_ROCM, run_tests, skipIfNoLapack, suppress_warnings, \
     IS_WINDOWS, PY3, NO_MULTIPROCESSING_SPAWN, do_test_dtypes, do_test_empty_full, \
     IS_SANDCASTLE, load_tests, slowTest, skipCUDANonDefaultStreamIf, skipCUDAMemoryLeakCheckIf, \
-    BytesIOContext, skipIfRocm, numpy_dtype
+    BytesIOContext, skipIfRocm, torch_to_numpy_dtype_dict
 from multiprocessing.reduction import ForkingPickler
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, \
     skipCPUIfNoLapack, skipCUDAIfNoMagma, skipCUDAIfRocm, skipCUDAIfNotRocm, onlyCUDA, onlyCPU, \
@@ -919,6 +919,61 @@ class _TestTorchMixin(object):
     def test_dtype_out_match(self):
         d = torch.autograd.Variable(torch.DoubleTensor(2, 3))
         self.assertRaises(RuntimeError, lambda: torch.zeros((2, 3), out=d, dtype=torch.float32))
+
+    def test_as_subclass(self):
+        class SubTensor(torch.Tensor):
+            member_var = object()
+
+        t0 = torch.tensor(0)
+        t1 = torch.tensor([1, 2])
+        t2 = torch.tensor([[3, 4], [5, 6]])
+
+        s0 = t0.as_subclass(SubTensor)
+        s1 = t1.as_subclass(SubTensor)
+        s2 = t2.as_subclass(SubTensor)
+
+        # Check that the correct type is returned.
+        self.assertTrue(type(s0) is SubTensor)
+        self.assertTrue(type(s1) is SubTensor)
+        self.assertTrue(type(s2) is SubTensor)
+
+        # Check that the data is equal.
+        self.assertEqual(t0, s0)
+        self.assertEqual(t1, s1)
+        self.assertEqual(t2, s2)
+
+        t0[()] = 1
+        t1[1] = 3
+        t2[1, 1] = 7
+
+        # Check that the data is equal even after modification.
+        self.assertEqual(t0, s0)
+        self.assertEqual(t1, s1)
+        self.assertEqual(t2, s2)
+
+        # Check that member variables are passed through.
+        self.assertTrue(s0.member_var is SubTensor.member_var)
+        self.assertTrue(s1.member_var is SubTensor.member_var)
+        self.assertTrue(s2.member_var is SubTensor.member_var)
+
+        # Test that autograd is propagated.
+        t = torch.tensor(5, dtype=torch.float32, requires_grad=True)
+
+        # Run a calculation on the tensor.
+        exp_t = torch.exp(t)
+
+        # Cast exp_t to a subclass.
+        exp_s = exp_t.as_subclass(SubTensor)
+
+        # Make sure that t.grad was initially None
+        self.assertTrue(t.grad is None)
+
+        # Run the autograd calculation.
+        exp_s.backward()
+
+        # Make sure autograd was propagated to the original tensor
+        # declared with requires_grad.
+        self.assertTrue(t.grad is not None)
 
     def test_constructor_dtypes(self):
         default_type = torch.Tensor().type()
@@ -9625,21 +9680,23 @@ class TestTorchDeviceType(TestCase):
 
     @dtypes(torch.float, torch.double, torch.complex64, torch.complex128)
     def test_randn(self, device, dtype):
-        torch.manual_seed(123456)
-        res1 = torch.randn(SIZE, SIZE, dtype=dtype, device=device)
-        res2 = torch.tensor([], dtype=dtype, device=device)
-        torch.manual_seed(123456)
-        torch.randn(SIZE, SIZE, out=res2)
-        self.assertEqual(res1, res2)
+        for size in [0, SIZE]:
+            torch.manual_seed(123456)
+            res1 = torch.randn(size, size, dtype=dtype, device=device)
+            res2 = torch.tensor([], dtype=dtype, device=device)
+            torch.manual_seed(123456)
+            torch.randn(size, size, out=res2)
+            self.assertEqual(res1, res2)
 
     @dtypes(torch.float, torch.double, torch.complex64, torch.complex128)
     def test_rand(self, device, dtype):
-        torch.manual_seed(123456)
-        res1 = torch.rand(SIZE, SIZE, dtype=dtype, device=device)
-        res2 = torch.tensor([], dtype=dtype, device=device)
-        torch.manual_seed(123456)
-        torch.rand(SIZE, SIZE, out=res2)
-        self.assertEqual(res1, res2)
+        for size in [0, SIZE]:
+            torch.manual_seed(123456)
+            res1 = torch.rand(size, size, dtype=dtype, device=device)
+            res2 = torch.tensor([], dtype=dtype, device=device)
+            torch.manual_seed(123456)
+            torch.rand(size, size, out=res2)
+            self.assertEqual(res1, res2)
 
     def test_empty_strided(self, device):
         for shape in [(2, 3, 4), (0, 2, 0)]:
@@ -10780,7 +10837,7 @@ class TestTorchDeviceType(TestCase):
 
         for steps in [1, 2, 3, 5, 11, 256, 257, 2**22]:
             t = torch.linspace(start, end, steps, device=device, dtype=dtype)
-            a = np.linspace(start, end, steps, dtype=numpy_dtype(dtype))
+            a = np.linspace(start, end, steps, dtype=torch_to_numpy_dtype_dict[dtype])
             t = t.cpu()
             self.assertEqual(t, torch.from_numpy(a))
             self.assertTrue(t[0] == a[0])
@@ -10795,7 +10852,7 @@ class TestTorchDeviceType(TestCase):
 
         for steps in [1, 2, 3, 5, 11, 256, 257, 2**22]:
             t = torch.logspace(start, end, steps, device=device, dtype=dtype)
-            a = np.logspace(start, end, steps, dtype=numpy_dtype(dtype))
+            a = np.logspace(start, end, steps, dtype=torch_to_numpy_dtype_dict[dtype])
             t = t.cpu()
             self.assertEqual(t, torch.from_numpy(a))
             self.assertEqual(t[0], a[0])
@@ -14102,7 +14159,6 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         b = torch.exp(torch.ones(1, dtype=dtype, device=device))
         self.assertEqual(a, b.expand(2 ** 31))
 
-    @onlyCPU
     @dtypes(torch.float, torch.double)
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_hardswish(self, device, dtype):
@@ -15227,17 +15283,63 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
                 else:
                     self.assertEqual(from_tensor, to_tensor, exact_dtype=False)
 
-    @onlyCPU
     @dtypes(torch.complex64, torch.complex128)
     def test_complex_unsupported(self, device, dtype):
-        inp = torch.tensor((1 + 1j), device=device, dtype=dtype)
+        t = torch.tensor((1 + 1j), device=device, dtype=dtype)
         # Note: this is consistent with NumPy
         with self.assertRaises(RuntimeError):
-            torch.floor(inp)
+            torch.floor(t)
         with self.assertRaises(RuntimeError):
-            torch.ceil(inp)
+            torch.ceil(t)
         with self.assertRaises(RuntimeError):
-            torch.trunc(inp)
+            torch.trunc(t)
+
+        # Tests min and max variants with complex inputs
+        # Note: whether PyTorch should support min and max on complex
+        # tensors is an open question.
+        # See https://github.com/pytorch/pytorch/issues/36374
+        with self.assertRaises(RuntimeError):
+            torch.min(t)
+        with self.assertRaises(RuntimeError):
+            t.min()
+        with self.assertRaises(RuntimeError):
+            torch.min(t, dim=0)
+        with self.assertRaises(RuntimeError):
+            torch.min(t, t)
+        with self.assertRaises(RuntimeError):
+            torch.min(t, t, out=t)
+
+        with self.assertRaises(RuntimeError):
+            torch.max(t)
+        with self.assertRaises(RuntimeError):
+            t.max()
+        with self.assertRaises(RuntimeError):
+            torch.max(t, dim=0)
+        with self.assertRaises(RuntimeError):
+            torch.max(t, t)
+        with self.assertRaises(RuntimeError):
+            torch.max(t, t, out=t)
+
+        # Tests clamp variants with complex inputs
+        # Note: whether PyTorch should support clamp on complex
+        # tensors is an open question.
+        # See https://github.com/pytorch/pytorch/issues/33568
+        min_val = 1 + 1j
+        max_val = 4 + 4j
+        out = torch.empty((0,), device=device, dtype=dtype)
+        with self.assertRaises(RuntimeError):
+            torch.clamp(t, min=min_val)
+        with self.assertRaises(RuntimeError):
+            torch.clamp(t, max=max_val)
+        with self.assertRaises(RuntimeError):
+            torch.clamp(t, min_val, max_val)
+        with self.assertRaises(RuntimeError):
+            torch.clamp(t, min=min_val, out=out)
+        with self.assertRaises(RuntimeError):
+            torch.clamp(t, max=max_val, out=out)
+        with self.assertRaises(RuntimeError):
+            torch.clamp(t, min_val, max_val, out=out)
+
 
 # NOTE [Linspace+Logspace precision override]
 # Our Linspace and logspace torch.half CUDA kernels are not very precise.

@@ -1177,15 +1177,18 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
                 Callback(
                     c10::intrusive_ptr<InterpreterStateImpl> state,
                     Stack stack)
-                    : state_(std::move(state)), stack_(std::move(stack)) {}
+                    : state_(std::move(state)), stack_(std::move(stack)) {
+                  dist_autograd_context_id_ = getDistAutogradContextId();
+                }
                 void operator()() {
                   at::launch(InterpreterContinuation(
-                      state_, std::move(stack_), getDistAutogradContextId()));
+                      state_, std::move(stack_), dist_autograd_context_id_));
                 }
 
                private:
                 InterpreterState state_;
                 Stack stack_;
+                int64_t dist_autograd_context_id_;
               };
 
               // we are suspending, so we need to reset the stack to where we
