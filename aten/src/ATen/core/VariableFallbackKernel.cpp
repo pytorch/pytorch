@@ -33,7 +33,7 @@ void variable_fallback_kernel(const OperatorHandle& op, Stack* stack) {
     Dispatcher::singleton().callBoxed(op, stack);
 }
 
-TORCH_LIBRARY_IMPL(Autograd, m) {
+TORCH_LIBRARY_IMPL(_, Autograd, m) {
 #ifdef C10_MOBILE
   // As custom mobile build might not include variable kernels, we need
   // leverage variable fallback mechanism as well. The goals are:
