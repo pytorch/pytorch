@@ -302,11 +302,13 @@ elif [[ "${BUILD_ENVIRONMENT}" == *-test2 || "${JOB_BASE_NAME}" == *-test2 ]]; t
 elif [[ "${BUILD_ENVIRONMENT}" == *-bazel-* ]]; then
   test_bazel
 else
-  test_torchvision
-  test_python_nn
-  test_python_all_except_nn
-  test_aten
-  test_libtorch
-  test_custom_script_ops
-  test_torch_function_benchmark
+  echo "O_o o_O"
+  python test_torch.py TestTorchDeviceTypeCUDA.test_svd_cuda_float64
+  # test_torchvision
+  # test_python_nn
+  # test_python_all_except_nn
+  # test_aten
+  # test_libtorch
+  # test_custom_script_ops
+  # test_torch_function_benchmark
 fi
