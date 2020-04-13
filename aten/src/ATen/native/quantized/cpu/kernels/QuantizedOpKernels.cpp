@@ -152,6 +152,226 @@ Tensor qcat_nhwc_kernel(
   return output;
 }
 
+// horizontal sum over a range of uint8_t
+int64_t hsum(const uint8_t* A, int len) {
+  int64_t row_sum = 0;
+  int i = 0;
+
+#ifdef __AVX2__
+  __m256i sum_v = _mm256_setzero_si256();
+  __m256i one_epi16_v = _mm256_set1_epi16(1);
+  __m256i one_epi8_v = _mm256_set1_epi8(1);
+  // vectorized
+  for (; i < len / 32 * 32; i += 32) {
+    __m256i src_v = _mm256_loadu_si256(reinterpret_cast<__m256i const*>(A + i));
+    sum_v = _mm256_add_epi32(
+      sum_v,
+      _mm256_madd_epi16(
+        // first argument is unsigned, second is signed
+        _mm256_maddubs_epi16(src_v, one_epi8_v),
+      one_epi16_v)
+    );
+  }
+
+  alignas(64) int32_t temp[8];
+  _mm256_store_si256(reinterpret_cast<__m256i*>(temp), sum_v);
+  for (int k = 0; k < 8; ++k) {
+    row_sum += temp[k];
+  }
+#endif // __AVX2__
+
+  // scalar
+  for (; i < len; ++i) {
+    row_sum += A[i];
+  }
+
+  return row_sum;
+}
+
+// horizontal sum over a range of int8_t
+int64_t hsum(const int8_t* A, int len) {
+  int64_t row_sum = 0;
+  int i = 0;
+
+#ifdef __AVX2__
+  __m256i sum_v = _mm256_setzero_si256();
+  __m256i one_epi16_v = _mm256_set1_epi16(1);
+  __m256i one_epi8_v = _mm256_set1_epi8(1);
+  // vectorized
+  for (; i < len / 32 * 32; i += 32) {
+    __m256i src_v = _mm256_loadu_si256(reinterpret_cast<__m256i const*>(A + i));
+    sum_v = _mm256_add_epi32(
+      sum_v,
+      _mm256_madd_epi16(
+        // first argument is unsigned, second is signed
+        _mm256_maddubs_epi16(one_epi8_v, src_v),
+      one_epi16_v)
+    );
+  }
+
+  alignas(64) int32_t temp[8];
+  _mm256_store_si256(reinterpret_cast<__m256i*>(temp), sum_v);
+  for (int k = 0; k < 8; ++k) {
+    row_sum += temp[k];
+  }
+#endif // __AVX2__
+
+  // scalar
+  for (; i < len; ++i) {
+    row_sum += A[i];
+  }
+
+  return row_sum;
+}
+
+// horizontal sum over a range of int32_t
+int64_t hsum(const int32_t* A, int len) {
+  int64_t row_sum = 0;
+  int i = 0;
+
+#ifdef __AVX2__
+  __m256i sum_epi64 = _mm256_setzero_si256();
+  // vectorized
+  for (; i < len / 8 * 8; i += 8) {
+    __m256i src_epi32 = _mm256_loadu_si256(reinterpret_cast<__m256i const*>(A + i));
+    // widen
+    __m128i src_lo_epi32 = _mm256_castsi256_si128(src_epi32);
+    __m128i src_hi_epi32 = _mm256_extractf128_si256(src_epi32, 1);
+    __m256i src_lo_epi64 = _mm256_cvtepi32_epi64(src_lo_epi32);
+    __m256i src_hi_epi64 = _mm256_cvtepi32_epi64(src_hi_epi32);
+    // add
+    sum_epi64 = _mm256_add_epi64(sum_epi64, src_lo_epi64);
+    sum_epi64 = _mm256_add_epi64(sum_epi64, src_hi_epi64);
+  }
+
+  alignas(64) int64_t temp[4];
+  _mm256_store_si256(reinterpret_cast<__m256i*>(temp), sum_epi64);
+  for (int k = 0; k < 4; ++k) {
+    row_sum += temp[k];
+  }
+#endif // __AVX2__
+
+  // scalar
+  for (; i < len; ++i) {
+    row_sum += A[i];
+  }
+
+  return row_sum;
+}
+
+// horizontal sum of squares over a range of uint8_t
+int64_t hsum_sq(const uint8_t* A, int len) {
+  int64_t row_sum = 0;
+  int i = 0;
+
+#ifdef __AVX2__
+  __m256i sum_v_epu32 = _mm256_setzero_si256();
+  // vectorized
+  for (; i < len / 16 * 16; i += 16) {
+    // (i15, ..., i0)
+    __m128i src_epu8 = _mm_loadu_si128(reinterpret_cast<__m128i const*>(A + i));
+    __m256i src_epu16 = _mm256_cvtepu8_epi16(src_epu8);
+    // (i15 ^ 2, ..., i0 ^ 2)
+    __m256i sq_epu16 = _mm256_mullo_epi16(src_epu16, src_epu16);
+    // (i7 ^ 2, ..., i0 ^ 2)
+    __m128i sq_lo_epu16 = _mm256_castsi256_si128(sq_epu16);
+    // (i15 ^ 2, ..., i8 ^ 2)
+    __m128i sq_hi_epu16 = _mm256_extractf128_si256(sq_epu16, 1);
+    // widen to epu32
+    __m256i sq_lo_epu32 = _mm256_cvtepu16_epi32(sq_lo_epu16);
+    __m256i sq_hi_epu32 = _mm256_cvtepu16_epi32(sq_hi_epu16);
+    // add to running sum
+    sum_v_epu32 = _mm256_add_epi32(sum_v_epu32, sq_lo_epu32);
+    sum_v_epu32 = _mm256_add_epi32(sum_v_epu32, sq_hi_epu32);
+  }
+
+  alignas(64) int32_t temp[8];
+  _mm256_store_si256(reinterpret_cast<__m256i*>(temp), sum_v_epu32);
+  for (int k = 0; k < 8; ++k) {
+    row_sum += temp[k];
+  }
+#endif // __AVX2__
+
+  // scalar
+  for (; i < len; ++i) {
+    row_sum += A[i] * A[i];
+  }
+
+  return row_sum;
+}
+
+// horizontal sum of squares over a range of int8_t
+int64_t hsum_sq(const int8_t* A, int len) {
+  int64_t row_sum = 0;
+  int i = 0;
+
+#ifdef __AVX2__
+  __m256i sum_v_epi32 = _mm256_setzero_si256();
+  // vectorized
+  for (; i < len / 16 * 16; i += 16) {
+    // (i15, ..., i0)
+    __m128i src_epi8 = _mm_loadu_si128(reinterpret_cast<__m128i const*>(A + i));
+    __m256i src_epi16 = _mm256_cvtepi8_epi16(src_epi8);
+    // (i15 ^ 2, ..., i0 ^ 2)
+    __m256i sq_epi16 = _mm256_mullo_epi16(src_epi16, src_epi16);
+    // (i7 ^ 2, ..., i0 ^ 2)
+    __m128i sq_lo_epi16 = _mm256_castsi256_si128(sq_epi16);
+    // (i15 ^ 2, ..., i8 ^ 2)
+    __m128i sq_hi_epi16 = _mm256_extractf128_si256(sq_epi16, 1);
+    // widen to epi32
+    __m256i sq_lo_epi32 = _mm256_cvtepi16_epi32(sq_lo_epi16);
+    __m256i sq_hi_epi32 = _mm256_cvtepi16_epi32(sq_hi_epi16);
+    // add to running sum
+    sum_v_epi32 = _mm256_add_epi32(sum_v_epi32, sq_lo_epi32);
+    sum_v_epi32 = _mm256_add_epi32(sum_v_epi32, sq_hi_epi32);
+  }
+
+  alignas(64) int32_t temp[8];
+  _mm256_store_si256(reinterpret_cast<__m256i*>(temp), sum_v_epi32);
+  for (int k = 0; k < 8; ++k) {
+    row_sum += temp[k];
+  }
+#endif // __AVX2__
+
+  // scalar
+  for (; i < len; ++i) {
+    row_sum += A[i] * A[i];
+  }
+
+  return row_sum;
+}
+
+// horizontal sum os squares over a range of int32_t
+// floats throughout are necessary to prevent overflow
+float hsum_sq(const int32_t* A, int len) {
+  float row_sum = 0;
+  int i = 0;
+
+#ifdef __AVX2__
+  __m256 sum_ps = _mm256_setzero_ps();
+  // vectorized
+  for (; i < len / 8 * 8; i += 8) {
+    __m256i src_epi32 = _mm256_loadu_si256(reinterpret_cast<__m256i const*>(A + i));
+    __m256 src_ps = _mm256_cvtepi32_ps(src_epi32);
+    sum_ps = _mm256_add_ps(sum_ps, _mm256_mul_ps(src_ps, src_ps));
+  }
+
+  alignas(64) float temp[8];
+  _mm256_store_ps(temp, sum_ps);
+  for (int k = 0; k < 8; ++k) {
+    row_sum += static_cast<float>(temp[k]);
+  }
+#endif // __AVX2__
+
+  // scalar
+  for (; i < len; ++i) {
+    int64_t cur = static_cast<int64_t>(A[i]);
+    row_sum += (float)cur * (float)cur;
+  }
+
+  return row_sum;
+}
+
 void qrelu_kernel(const Tensor& qx, Tensor& qy) {
   const auto zero_point = qx.q_zero_point();
   AT_DISPATCH_QINT_TYPES(qx.scalar_type(), "qrelu", [&]() {

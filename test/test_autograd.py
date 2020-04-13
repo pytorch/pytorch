@@ -2950,128 +2950,6 @@ class TestAutograd(TestCase):
         test_reduction(torch.cumsum, False)
         test_reduction(torch.cumprod, False)
 
-    def test_inplace_view_backprop_base(self):
-        # modify view and back-prop through base
-        root = torch.randn(2, 2, requires_grad=True)
-        x = root.clone()
-        v1 = x.narrow(0, 0, 1)
-        v1.mul_(2)
-        x.sum().backward()
-        self.assertEqual(root.grad.tolist(), [[2, 2], [1, 1]])
-
-    def test_inplace_view_backprop_view_of_view(self):
-        # modify view and backprop through view-of-view
-        root = torch.randn(2, 2, requires_grad=True)
-        x = root.clone()
-        v1 = x.narrow(0, 0, 1)
-        v2 = x.narrow(0, 0, 1)
-        v1.mul_(2)
-        v2.sum().backward()
-        self.assertEqual(root.grad.tolist(), [[2, 2], [0, 0]])
-
-    def test_inplace_view_of_view(self):
-        # modify view-of-view and backprop through base
-        root = torch.randn(2, 2, requires_grad=True)
-        x = root.clone()
-        v1 = x.narrow(0, 0, 1)
-        v2 = v1.narrow(1, 1, 1)
-        v2.mul_(2)
-        x.sum().backward()
-        self.assertEqual(root.grad.tolist(), [[1, 2], [1, 1]])
-
-    def test_inplace_view_gradcheck(self):
-        # gradcheck modifications to views
-        a = torch.randn(4, 4, requires_grad=True)
-        b = torch.randn(2, 2, requires_grad=True)
-
-        def func(root, b):
-            x = root.clone()
-            x.narrow(1, 2, 2).narrow(0, 1, 2).mul_(b)
-            x.narrow(1, 0, 2).narrow(0, 1, 2).mul_(b)
-            return x
-
-        gradcheck(func, [a, b], raise_exception=True)
-        go = torch.randn(a.size(), requires_grad=True)
-        gradgradcheck(func, (a, b), (go,))
-
-    def test_inplace_view_makes_base_require_grad(self):
-        # in-place modification to view makes base require grad
-        a = torch.randn(4, 4, requires_grad=False)
-        b = torch.randn(4, 2, requires_grad=True)
-
-        def func(root, b):
-            x = root.clone()
-            self.assertFalse(x.requires_grad)
-            x.narrow(1, 2, 2).mul_(b)
-            self.assertTrue(x.requires_grad)
-            return x
-
-        gradcheck(func, [a, b], raise_exception=True)
-        go = torch.randn(a.size(), requires_grad=True)
-        gradgradcheck(func, (a, b), (go,))
-
-    def test_inplace_view_backprop_view(self):
-        # modify view and backprop through view
-        a = Variable(torch.Tensor([2, 5]), requires_grad=False)
-        b = Variable(torch.Tensor([3]), requires_grad=True)
-        res = a.narrow(0, 1, 1).mul_(b)
-        res.sum().backward()
-        self.assertEqual(b.grad.tolist(), [5])
-        self.assertIsNone(a.grad)
-
-    def test_inplace_view_modify_base(self):
-        # Test that an in-place operation on a base that forced it to require
-        # grad also forces any previous views to require grad and backprop
-        # correctly
-        r = torch.ones(1, requires_grad=True)
-
-        def fn(r):
-            x = torch.ones(5)
-            v = x.select(0, 1)
-            self.assertFalse(v.requires_grad)
-            self.assertIsNone(v.grad_fn)
-            x.add_(r)  # v is now dependent on r due to the in-place op on x
-            self.assertTrue(v.requires_grad)
-            return v
-
-        gradcheck(fn, [r])
-        gradgradcheck(fn, [r])
-
-    def test_inplace_view_python(self):
-        # in-place modifications of Python-autograd created view
-        a = torch.randn(4, 4, requires_grad=True)
-        b = torch.randn(2, 2, requires_grad=True)
-
-        class PyAdd(torch.autograd.Function):
-            @staticmethod
-            def forward(ctx, x, y):
-                ctx.mark_dirty(x)
-                x.add_(y)
-                return x
-
-            @staticmethod
-            def backward(ctx, grad):
-                return grad, grad
-
-        def func(root, b):
-            x = root.clone()
-            PyAdd.apply(x.narrow(1, 2, 2).narrow(0, 1, 2), b)
-            PyAdd.apply(x.narrow(1, 0, 2).narrow(0, 1, 2), b)
-            return x
-
-        gradcheck(func, [a, b], raise_exception=True)
-        go = torch.randn(a.size(), requires_grad=True)
-        gradgradcheck(func, (a, b), (go,))
-
-    def test_inplace_view_non_contig(self):
-        root = torch.ones(2, 3, 2).select(2, 1).t().requires_grad_(True)
-        x = root.clone()
-        v1 = x.narrow(0, 0, 1)
-        v2 = v1.narrow(1, 1, 1)
-        v2.mul_(2)
-        x.sum().backward()
-        self.assertEqual(root.grad.tolist(), [[1, 2], [1, 1], [1, 1]])
-
     def test_inplace_view_saved_output(self):
         # Test an in-place operation on a view in which the in-place op saves
         # its output. Previously, this created a reference cycle.
@@ -5948,6 +5826,128 @@ class TestAutogradDeviceType(TestCase):
         # This will segfault if the empty NodeTask is not handled properly in the
         # gpu thread ReadyQueue
         out.sum().backward()
+
+    def test_inplace_view_backprop_base(self, device):
+        # modify view and back-prop through base
+        root = torch.randn(2, 2, device=device, requires_grad=True)
+        x = root.clone()
+        v1 = x.narrow(0, 0, 1)
+        v1.mul_(2)
+        x.sum().backward()
+        self.assertEqual(root.grad.tolist(), [[2, 2], [1, 1]])
+
+    def test_inplace_view_backprop_view_of_view(self, device):
+        # modify view and backprop through view-of-view
+        root = torch.randn(2, 2, device=device, requires_grad=True)
+        x = root.clone()
+        v1 = x.narrow(0, 0, 1)
+        v2 = x.narrow(0, 0, 1)
+        v1.mul_(2)
+        v2.sum().backward()
+        self.assertEqual(root.grad.tolist(), [[2, 2], [0, 0]])
+
+    def test_inplace_view_of_view(self, device):
+        # modify view-of-view and backprop through base
+        root = torch.randn(2, 2, device=device, requires_grad=True)
+        x = root.clone()
+        v1 = x.narrow(0, 0, 1)
+        v2 = v1.narrow(1, 1, 1)
+        v2.mul_(2)
+        x.sum().backward()
+        self.assertEqual(root.grad.tolist(), [[1, 2], [1, 1]])
+
+    def test_inplace_view_gradcheck(self, device):
+        # gradcheck modifications to views
+        a = torch.randn(4, 4, device=device, requires_grad=True)
+        b = torch.randn(2, 2, device=device, requires_grad=True)
+
+        def func(root, b):
+            x = root.clone()
+            x.narrow(1, 2, 2).narrow(0, 1, 2).mul_(b)
+            x.narrow(1, 0, 2).narrow(0, 1, 2).mul_(b)
+            return x
+
+        gradcheck(func, [a, b], raise_exception=True)
+        go = torch.randn(a.size(), device=device, requires_grad=True)
+        gradgradcheck(func, (a, b), (go,))
+
+    def test_inplace_view_makes_base_require_grad(self, device):
+        # in-place modification to view makes base require grad
+        a = torch.randn(4, 4, device=device, requires_grad=False)
+        b = torch.randn(4, 2, device=device, requires_grad=True)
+
+        def func(root, b):
+            x = root.clone()
+            self.assertFalse(x.requires_grad)
+            x.narrow(1, 2, 2).mul_(b)
+            self.assertTrue(x.requires_grad)
+            return x
+
+        gradcheck(func, [a, b], raise_exception=True)
+        go = torch.randn(a.size(), device=device, requires_grad=True)
+        gradgradcheck(func, (a, b), (go,))
+
+    def test_inplace_view_backprop_view(self, device):
+        # modify view and backprop through view
+        a = torch.tensor([2., 5.], device=device, requires_grad=False)
+        b = torch.tensor([3.], device=device, requires_grad=True)
+        res = a.narrow(0, 1, 1).mul_(b)
+        res.sum().backward()
+        self.assertEqual(b.grad.tolist(), [5])
+        self.assertIsNone(a.grad)
+
+    def test_inplace_view_modify_base(self, device):
+        # Test that an in-place operation on a base that forced it to require
+        # grad also forces any previous views to require grad and backprop
+        # correctly
+        r = torch.ones(1, device=device, requires_grad=True)
+
+        def fn(r):
+            x = torch.ones(5, device=device)
+            v = x.select(0, 1)
+            self.assertFalse(v.requires_grad)
+            self.assertIsNone(v.grad_fn)
+            x.add_(r)  # v is now dependent on r due to the in-place op on x
+            self.assertTrue(v.requires_grad)
+            return v
+
+        gradcheck(fn, [r])
+        gradgradcheck(fn, [r])
+
+    def test_inplace_view_python(self, device):
+        # in-place modifications of Python-autograd created view
+        a = torch.randn(4, 4, device=device, requires_grad=True)
+        b = torch.randn(2, 2, device=device, requires_grad=True)
+
+        class PyAdd(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x, y):
+                ctx.mark_dirty(x)
+                x.add_(y)
+                return x
+
+            @staticmethod
+            def backward(ctx, grad):
+                return grad, grad
+
+        def func(root, b):
+            x = root.clone()
+            PyAdd.apply(x.narrow(1, 2, 2).narrow(0, 1, 2), b)
+            PyAdd.apply(x.narrow(1, 0, 2).narrow(0, 1, 2), b)
+            return x
+
+        gradcheck(func, [a, b], raise_exception=True)
+        go = torch.randn(a.size(), device=device, requires_grad=True)
+        gradgradcheck(func, (a, b), (go,))
+
+    def test_inplace_view_non_contig(self, device):
+        root = torch.ones(2, 3, 2, device=device).select(2, 1).t().requires_grad_(True)
+        x = root.clone()
+        v1 = x.narrow(0, 0, 1)
+        v2 = v1.narrow(1, 1, 1)
+        v2.mul_(2)
+        x.sum().backward()
+        self.assertEqual(root.grad.tolist(), [[1, 2], [1, 1], [1, 1]])
 
 class TestMultithreadAutograd(TestCase):
     def _run_py_multithread_fn(self, fn, args=(), num_threads=10, kwargs=None):
