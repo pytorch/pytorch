@@ -249,7 +249,6 @@ bool nodeInputQuantizable(Node* n, size_t offset) {
       getFuncName(n->inputs()[0]) == "batch_norm") {
     return offset == 1;
   }
-
   return true;
 }
 
@@ -1020,7 +1019,8 @@ bool InsertObserversHelper::valueNeedsToBeQuantized(Value* v) {
   }
   // Check whether user is quantizable
   for (const auto& use : v->uses()) {
-    if ((nodeQuantizable(use.user) && nodeInputQuantizable(use.user, use.offset)) ||
+    if ((nodeQuantizable(use.user) &&
+         nodeInputQuantizable(use.user, use.offset)) ||
         isDynamicLSTMWeight(v, use, is_dynamic)) {
       return true;
     }
