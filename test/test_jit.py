@@ -406,7 +406,7 @@ class TestJit(JitTestCase):
             def __init__(self, cpu_device_str):
                 super(M, self).__init__()
                 self.p0 = nn.Parameter(torch.tensor([0.3], dtype=torch.float,
-                                       device=cpu_device_str))
+                                                    device=cpu_device_str))
                 self.b0 = torch.tensor([0.9], dtype=torch.float,
                                        device=cpu_device_str)
 
@@ -14263,12 +14263,6 @@ a")
             torch.testing.assert_allclose(y_int8, y_ref, rtol=0.0001, atol=1e-3)
             torch.testing.assert_allclose(y_fp16, y_ref, rtol=0.0001, atol=1e-3)
 
-    def checkTracerWarning(self, *args, **kwargs):
-        with warnings.catch_warnings(record=True) as warns:
-            torch.jit.trace(*args, **kwargs)
-        self.assertGreater(len(warns), 0)
-        self.assertTrue(any(["cause the trace to be incorrect" in str(warn.message) for warn in warns]))
-
     def test_trace_checker_slice_lhs(self):
         def foo(x):
             for i in range(3):
@@ -14282,18 +14276,21 @@ a")
             x.view(-1).add_(-x.view(-1))
             return x
 
-        self.assertWarnsRegex(lambda: torch.jit.trace(foo,
-                                                      torch.rand(3, 4),
-                                                      check_inputs=[torch.rand(5, 6)],
-                                                      _force_outplace=True),
-                              'Output nr 1. of the traced function does not match the '
-                              'corresponding output of the Python function')
+        with self.assertWarnsRegex(torch.jit.TracerWarning,
+                                   'Output nr 1. of the traced function does not match the '
+                                   'corresponding output of the Python function'):
+            torch.jit.trace(foo,
+                            torch.rand(3, 4),
+                            check_inputs=[torch.rand(5, 6)],
+                            _force_outplace=True)
 
     def test_lhs_index_fails(self):
         def foo(x):
             x[0, 1] = 4
             return x
-        self.checkTracerWarning(foo, torch.rand(3, 4), _force_outplace=True)
+
+        with self.assertWarnsRegex(torch.jit.TracerWarning, "cause the trace to be incorrect"):
+            torch.jit.trace(foo, torch.rand(3, 4), _force_outplace=True)
 
     def test_lhs_index_trivial(self):
         def foo(y, x):
@@ -14305,18 +14302,23 @@ a")
         def foo(x):
             x.view(-1).add_(-x.view(-1))
             return x
-        self.checkTracerWarning(foo, torch.rand(3, 4), _force_outplace=True)
+
+        with self.assertWarnsRegex(torch.jit.TracerWarning, "cause the trace to be incorrect"):
+            torch.jit.trace(foo, torch.rand(3, 4), _force_outplace=True)
 
     @suppress_warnings
     def test_trace_checker_dropout_train(self):
         def foo(x):
             return torch.dropout(x, p=0.5, train=True)
 
-        self.assertWarnsRegex(lambda: torch.jit.trace(foo, torch.rand(3, 4), check_inputs=[torch.rand(5, 6)]),
-                              'Output nr 1. of the traced function does not match the '
-                              'corresponding output of the Python function')
-        self.assertWarnsRegex(lambda: torch.jit.trace(foo, torch.rand(3, 4), check_inputs=[torch.rand(5, 6)]),
-                              'Trace had nondeterministic nodes')
+        with self.assertWarnsRegex(torch.jit.TracerWarning,
+                                   'Output nr 1. of the traced function does not match the '
+                                   'corresponding output of the Python function'):
+            torch.jit.trace(foo, torch.rand(3, 4), check_inputs=[torch.rand(5, 6)])
+
+        with self.assertWarnsRegex(torch.jit.TracerWarning,
+                                   'Trace had nondeterministic nodes'):
+            torch.jit.trace(foo, torch.rand(3, 4), check_inputs=[torch.rand(5, 6)])
 
     def test_trace_checker_dropout_notrain(self):
         input = torch.rand(3, 4)

@@ -443,6 +443,27 @@ class TestUtilityFuns(TestCase):
             assert node.kind() != "onnx::Sqrt"
         assert len(list(graph.nodes())) == 1
 
+    def test_constant_fold_shape(self):
+        class ShapeModule(torch.nn.Module):
+            def __init__(self):
+                super(ShapeModule, self).__init__()
+                self.register_buffer("weight", torch.ones(5))
+
+            def forward(self, x):
+                shape = self.weight.shape[0]
+                return x + shape
+
+        x = torch.randn(2, 5)
+        _set_opset_version(self.opset_version)
+        _set_operator_export_type(OperatorExportTypes.ONNX)
+        graph, _, __ = utils._model_to_graph(ShapeModule(), (x, ), do_constant_folding=True,
+                                             _disable_torch_constant_prop=True,
+                                             operator_export_type=OperatorExportTypes.ONNX)
+
+        for node in graph.nodes():
+            assert node.kind() != "onnx::Shape"
+        assert len(list(graph.nodes())) == 1
+
     def test_strip_doc_string(self):
         class MyModule(torch.nn.Module):
             def forward(self, input):
