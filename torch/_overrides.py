@@ -200,6 +200,7 @@ def get_testing_overrides():
         torch.bitwise_not: lambda input, out=None: -1,
         torch.bitwise_or: lambda input, other, out=None: -1,
         torch.bitwise_xor: lambda input, other, out=None: -1,
+        torch.block_diag: lambda *tensors: -1,
         torch.bmm: lambda input, mat2, out=None: -1,
         torch.broadcast_tensors: lambda *tensors: -1,
         torch.cartesian_prod: lambda *tensors: -1,
