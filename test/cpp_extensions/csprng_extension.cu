@@ -177,6 +177,12 @@ __device__ void encrypt(uint8_t *block, uint8_t *key) {
 
 // ===========================================================================================================================
 
+struct DummyRNG {
+  uint64_t uint64_val;
+  uint32_t __device__ random() { return static_cast<uint32_t>(uint64_val); }
+  uint64_t __device__ random64() { return uint64_val; }
+};
+
 template<typename scalar_t, typename uint_t, typename cipher_t, typename transform_t>
 __global__ void block_cipher_contiguous_kernel(scalar_t* data, int numel, cipher_t cipher, transform_t transform_func) {
   const auto idx = blockIdx.x * blockDim.x + threadIdx.x;
@@ -187,7 +193,8 @@ __global__ void block_cipher_contiguous_kernel(scalar_t* data, int numel, cipher
     for (auto i = 0; i < unroll_factor; ++i) {
       const auto li = unroll_factor * idx + i;
       if (li < numel) {
-        data[li] = transform_func((reinterpret_cast<uint_t*>(&block))[i]);
+        DummyRNG rng{(reinterpret_cast<uint_t*>(&block))[i]};
+        data[li] = transform_func(&rng);
       }
     }
   }
@@ -203,8 +210,8 @@ __global__ void block_cipher_kernel(scalar_t* data, int numel, cipher_t cipher, 
     for (auto i = 0; i < unroll_factor; ++i) {
       const auto li = unroll_factor * idx + i;
       if (li < numel) {
-        const auto offsets = offset_calc.get(li);
-        data[offsets[0] / sizeof(scalar_t)] = transform_func((reinterpret_cast<uint_t*>(&block))[i]);
+        DummyRNG rng{(reinterpret_cast<uint_t*>(&block))[i]};
+        data[offset_calc.get(li)[0] / sizeof(scalar_t)] = transform_func(&rng);
       }
     }
   }
@@ -233,7 +240,7 @@ void block_cipher_ctr_mode(at::TensorIterator& iter, cipher_t cipher, transform_
 // ===========================================================================================================================
 
 template<typename scalar_t, typename uint_t, typename transform_t>
-void random_kernel_helper(TensorIterator& iter, uint8_t* key, transform_t transform_func) {
+void block_cipher_helper(TensorIterator& iter, uint8_t* key, transform_t transform_func) {
   block_cipher_ctr_mode<scalar_t, uint_t>(iter,
     [key] __device__ (unsigned int idx) -> block_t {
       block_t block;
@@ -250,26 +257,34 @@ void random_kernel_helper(TensorIterator& iter, uint8_t* key, transform_t transf
 
 template<typename scalar_t, typename uint_t>
 void random_kernel_helper_fp(TensorIterator& iter, uint8_t* key) {
-  random_kernel_helper<scalar_t, uint_t>(iter, key,
-    [] __device__ (uint_t rand) -> scalar_t {
-      return static_cast<scalar_t>(rand % static_cast<uint64_t>((1ULL << std::numeric_limits<scalar_t>::digits) + 1));
+  block_cipher_helper<scalar_t, uint_t>(iter, key,
+    [] __device__ (DummyRNG* generator) -> scalar_t {
+      if (std::is_same<scalar_t, double>::value) {
+        return static_cast<scalar_t>(generator->random64() % static_cast<uint64_t>((1ULL << std::numeric_limits<scalar_t>::digits) + 1));
+      } else {
+        return static_cast<scalar_t>(generator->random() % static_cast<uint64_t>((1ULL << std::numeric_limits<scalar_t>::digits) + 1));
+      }
     }
   );
 }
 
 template<typename scalar_t, typename uint_t>
 void random_kernel_helper_int(TensorIterator& iter, uint8_t* key) {
-  random_kernel_helper<scalar_t, uint_t>(iter, key,
-    [] __device__ (uint_t rand) -> scalar_t {
-      return static_cast<scalar_t>(rand % (static_cast<uint64_t>(std::numeric_limits<scalar_t>::max()) + 1));
+  block_cipher_helper<scalar_t, uint_t>(iter, key,
+    [] __device__ (DummyRNG* generator) -> scalar_t {
+      if (std::is_same<scalar_t, long>::value) {
+        return static_cast<scalar_t>(generator->random64() % (static_cast<uint64_t>(std::numeric_limits<scalar_t>::max()) + 1));
+      } else {
+        return static_cast<scalar_t>(generator->random() % (static_cast<uint64_t>(std::numeric_limits<scalar_t>::max()) + 1));
+      }
     }
   );
 }
 
 void random_kernel_helper_bool(TensorIterator& iter, uint8_t* key) {
-  random_kernel_helper<bool, uint32_t>(iter, key,
-    [] __device__ (uint32_t rand) -> bool {
-      return static_cast<bool>(rand & 1);
+  block_cipher_helper<bool, uint32_t>(iter, key,
+    [] __device__ (DummyRNG* generator) -> bool {
+      return static_cast<bool>(generator->random() & 1);
     }
   );
 }
@@ -313,11 +328,15 @@ Tensor& random_(Tensor& self, Generator generator) {
 
 template<typename scalar_t, typename uint_t>
 void uniform_kernel_helper_fp(TensorIterator& iter, uint8_t* key, scalar_t from, scalar_t to) {
-  constexpr uint_t SCALAR_T_MASK = (static_cast<uint64_t>(1) << std::numeric_limits<scalar_t>::digits) - 1;
-  constexpr scalar_t SCALAR_T_DIVISOR = static_cast<scalar_t>(1) / (1ULL << std::numeric_limits<scalar_t>::digits);
-  random_kernel_helper<scalar_t, uint_t>(iter, key,
-    [from, to] __device__ (uint_t rand) -> scalar_t {
-      return ((rand & SCALAR_T_MASK) * SCALAR_T_DIVISOR) * (to - from) + from;
+  constexpr uint_t MASK = (static_cast<uint64_t>(1) << std::numeric_limits<scalar_t>::digits) - 1;
+  constexpr scalar_t DIVISOR = static_cast<scalar_t>(1) / (1ULL << std::numeric_limits<scalar_t>::digits);
+  block_cipher_helper<scalar_t, uint_t>(iter, key,
+    [from, to] __device__ (DummyRNG* generator) -> scalar_t {
+      if (std::is_same<scalar_t, double>::value) {
+        return ((generator->random64() & MASK) * DIVISOR) * (to - from) + from;
+      } else {
+        return ((generator->random() & MASK) * DIVISOR) * (to - from) + from;
+      }
     }
   );
 }
