@@ -816,9 +816,9 @@ Tensor& bmm_out_sparse_cuda(Tensor& result, const SparseTensor& self, const Tens
 
 Tensor& _bmm_out_sparse_cuda(Tensor& result, const SparseTensor& self, const Tensor& mat2, bool deterministic) {
 #if defined __HIP_PLATFORM_HCC__
-  TORCH_INTERNAL_ASSERT("bmm sparse-dense is not supported on HIP");
+  TORCH_CHECK(false, "bmm sparse-dense is not supported on HIP");
 #elif defined(_WIN32) || defined(_WIN64)
-  TORCH_INTERNAL_ASSERT("bmm sparse-dense CUDA is not supported on Windows");
+  TORCH_CHECK(false, "bmm sparse-dense CUDA is not supported on Windows");
 #else
 
   TORCH_CHECK(!mat2.is_sparse(), "bmm_sparse: Tensor 'mat2' must be dense");
