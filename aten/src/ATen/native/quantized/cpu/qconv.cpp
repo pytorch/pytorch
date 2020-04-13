@@ -419,10 +419,12 @@ class QConvInt8 final : public c10::OperatorKernel {
     Tensor output = kSpatialDim == 2
         ? _empty_affine_quantized(
               output_shape,
-              device(kCPU).dtype(kQUInt8),
+              device(kCPU)
+                .dtype(kQUInt8)
+                .memory_format(MemoryFormat::ChannelsLast),
               output_scale,
               output_zero_point,
-              MemoryFormat::ChannelsLast)
+              c10::nullopt)
         : fbgemm_utils::MakeEmptyAffineQuantizedChannelsLast3dTensor(
               output_shape[0],
               output_shape[1],
@@ -574,10 +576,12 @@ class QConvInt8 final : public c10::OperatorKernel {
           reinterpret_cast<int8_t*>(weight_contig.data_ptr<c10::qint8>());
       Tensor qnnp_weight = at::_empty_affine_quantized(
           weight_contig.sizes(),
-          at::device(kCPU).dtype(kQUInt8),
+          at::device(kCPU)
+             .dtype(kQUInt8)
+             .memory_format(MemoryFormat::ChannelsLast),
           kernel_scale,
           kernel_zp,
-          MemoryFormat::ChannelsLast);
+          c10::nullopt);
       auto* qnnp_w_data = qnnp_weight.data_ptr<c10::quint8>();
       auto wt_numel = weight_contig.numel();
       for (int i = 0; i < wt_numel; ++i) {
@@ -609,10 +613,12 @@ class QConvInt8 final : public c10::OperatorKernel {
     // Allocate output Tensor and a buffer for QNNPACK to use
     Tensor output = at::_empty_affine_quantized(
         output_shape,
-        at::device(kCPU).dtype(kQUInt8),
+        at::device(kCPU)
+           .dtype(kQUInt8)
+           .memory_format(MemoryFormat::ChannelsLast),
         output_scale,
         output_zero_point,
-        MemoryFormat::ChannelsLast);
+        c10::nullopt);
 
     const pytorch_qnnp_status run_status = qnnpack::qnnpackConv(
         conv_p,
@@ -642,7 +648,13 @@ static auto registry =
         .op("quantized::conv2d",
             c10::RegisterOperators::options().kernel<QConvInt8<2, false>>(
                 DispatchKey::QuantizedCPUTensorId))
+        .op("_quantized::conv2d",
+            c10::RegisterOperators::options().kernel<QConvInt8<2, false>>(
+                DispatchKey::QuantizedCPUTensorId))
         .op("quantized::conv2d_relu",
+            c10::RegisterOperators::options().kernel<QConvInt8<2, true>>(
+                DispatchKey::QuantizedCPUTensorId))
+        .op("_quantized::conv2d_relu",
             c10::RegisterOperators::options().kernel<QConvInt8<2, true>>(
                 DispatchKey::QuantizedCPUTensorId))
         .op("quantized::conv3d",

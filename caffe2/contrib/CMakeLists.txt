@@ -3,7 +3,7 @@ add_subdirectory(nccl)
 add_subdirectory(opencl)
 add_subdirectory(prof)
 add_subdirectory(shm_mutex)
-if (USE_TENSORRT)
+if(USE_TENSORRT)
 add_subdirectory(tensorrt)
 endif()
 

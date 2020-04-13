@@ -93,7 +93,7 @@ Y: [1.15841695 0.5541099  0.03216984 1.09924557 0.49732079]
 OPERATOR_SCHEMA(SinhGradient)
     .NumInputs(2)
     .NumOutputs(1)
-    .IdenticalTypeAndShape();
+    .IdenticalTypeAndShapeOfInput(0);
 
 namespace {
 

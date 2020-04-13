@@ -4,6 +4,15 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
+// Thread local flag to enforce rref JIT pickling to be allowed only
+// in the scope of an rpc call. For other scopes like when model is
+// saved by calling torch.save(), rref is not allowed to be pickled directly.
+static thread_local bool allowJitRRefPickle = false;
+
+bool getAllowJitRRefPickle() {
+  return allowJitRRefPickle;
+}
+
 static_assert(
     std::numeric_limits<local_id_t>::max() <=
         std::numeric_limits<int64_t>::max(),
@@ -12,6 +21,14 @@ static_assert(
     std::numeric_limits<worker_id_t>::max() <=
         std::numeric_limits<int64_t>::max(),
     "The max value of worker_id_t must be within the range of int64_t");
+
+///////////////////////////  JitRRefPickleGuard   ///////////////////////////
+JitRRefPickleGuard::JitRRefPickleGuard() {
+  allowJitRRefPickle = true;
+}
+JitRRefPickleGuard::~JitRRefPickleGuard() {
+  allowJitRRefPickle = false;
+}
 
 ///////////////////////////  GloballyUniqueId   ///////////////////////////
 

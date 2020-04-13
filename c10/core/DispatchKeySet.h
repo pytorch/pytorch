@@ -34,6 +34,7 @@ namespace c10 {
 class DispatchKeySet final {
 public:
   enum Full { FULL };
+  enum FullAfter { FULL_AFTER };
   enum Raw { RAW };
 
   // NB: default constructor representation as zero is MANDATORY as
@@ -42,6 +43,9 @@ public:
     : repr_(0) {}
   DispatchKeySet(Full)
     : repr_(std::numeric_limits<decltype(repr_)>::max()) {}
+  DispatchKeySet(FullAfter, DispatchKey t)
+    // LSB after t are OK, but not t itself.
+    : repr_((1ULL << (static_cast<uint8_t>(t) - 1)) - 1) {}
   // Public version of DispatchKeySet(uint64_t) API; external users
   // must be explicit when they do this!
   DispatchKeySet(Raw, uint64_t x)
@@ -122,15 +126,10 @@ static inline DispatchKey legacyExtractDispatchKey(DispatchKeySet s) {
   // NB: If you add any extra keys that can be stored in TensorImpl on
   // top of existing "normal" keys like CPU/CUDA, you need to add it
   // here.  At the moment, RequiresGrad (replacement for Variable)
-  // is the most likely key that will need this treatment.
-
-  // BackendSelect is a very special dispatch key that doesn't have a dedicated backend.
-  // It was introduced only for the factory functions with TensorOptions. The logic that
-  // uses legacyExtractDispatchKey doesnt expect BackendSelect and VariableTensorId keys.
-  // VariableTensorId is being excluded from a DispatchKeySet right after dispatching
-  // (See variable_excluded_from_dispatch in TensorBody.h)
-  // Now we are getting rid of BackendSelect.
-  return s.remove(DispatchKey::BackendSelect).highestPriorityTypeId();
+  // is the most likely key that will need this treatment; note that
+  // VariableTensorId does NOT need this as it is applied universally
+  // (and doesn't show up in TensorImpl)
+  return s.highestPriorityTypeId();
 }
 
 }

@@ -1,9 +1,9 @@
-#include <ATen/core/ivalue.h>
-#include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/csrc/jit/serialization/pickle.h>
+#include <ATen/core/ivalue.h>
+#include <caffe2/serialize/inline_container.h>
+#include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/csrc/jit/serialization/export.h>
 #include <torch/csrc/jit/serialization/import.h>
-#include <caffe2/serialize/inline_container.h>
 
 namespace torch {
 namespace jit {
@@ -12,7 +12,7 @@ void pickle(
     std::function<void(const char* data_start, size_t data_len)> writer,
     const IValue& ivalue,
     std::vector<at::Tensor>* tensor_table) {
-  Pickler pickler(std::move(writer), tensor_table);
+  Pickler pickler(std::move(writer), tensor_table, nullptr, nullptr);
   pickler.protocol();
   pickler.pushIValue(ivalue);
   pickler.stop();
@@ -39,12 +39,9 @@ std::vector<char> pickle_save(const at::IValue& ivalue) {
 #ifndef C10_MOBILE
   // Pickle the IValue into an array of bytes
   std::vector<char> pickle_data;
-  Pickler pickler(
-      [&](const char* buf, size_t size) {
-        pickle_data.insert(pickle_data.end(), buf, buf + size);
-      },
-      /*tensor_table=*/nullptr,
-      /*class_table=*/nullptr);
+  Pickler pickler([&](const char* buf, size_t size) {
+    pickle_data.insert(pickle_data.end(), buf, buf + size);
+  });
   pickler.protocol();
   pickler.pushIValue(ivalue);
   pickler.stop();
@@ -77,25 +74,24 @@ std::vector<char> pickle_save(const at::IValue& ivalue) {
 
 #ifndef C10_MOBILE
 class VectorReader : public caffe2::serialize::ReadAdapterInterface {
-   public:
-    VectorReader(const std::vector<char>& data) : data_(std::move(data)) {}
+ public:
+  VectorReader(const std::vector<char>& data) : data_(std::move(data)) {}
 
-    size_t size() const override {
-      return data_.size();
-    }
+  size_t size() const override {
+    return data_.size();
+  }
 
-    size_t read(uint64_t pos, void* buf, size_t n, const char* what)
-        const override {
-      std::copy(
+  size_t read(uint64_t pos, void* buf, size_t n, const char* what)
+      const override {
+    std::copy(
         data_.data() + pos,
         data_.data() + pos + n,
-        reinterpret_cast<char*>(buf)
-      );
-      return n;
-    }
+        reinterpret_cast<char*>(buf));
+    return n;
+  }
 
-private:
-    std::vector<char> data_;
+ private:
+  std::vector<char> data_;
 };
 #endif
 
