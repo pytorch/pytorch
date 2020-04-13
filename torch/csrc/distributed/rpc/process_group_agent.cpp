@@ -103,7 +103,8 @@ ProcessGroupAgent::ProcessGroupAgent(
       recvCounts_(pg_->getSize()),
       nextId_(0),
       sendMutexes_(pg_->getSize()),
-      threadPool_(numSendRecvThreads) {
+      threadPool_(numSendRecvThreads),
+      timeoutThreadEnabled_{false} {
   // initialize metric info counters
   metrics_.resize(ProcessGroupAgentMetrics::N_METRICS);
   metrics_[ProcessGroupAgentMetrics::GIL_WAIT_TIME] =
@@ -241,19 +242,19 @@ void ProcessGroupAgent::sync() {
 }
 
 void ProcessGroupAgent::startImpl() {
+  timeoutThreadEnabled_.store(true);
   listenerThread_ = std::thread(&ProcessGroupAgent::listenLoop, this);
   futureTimeoutThread_ =
       std::thread(&ProcessGroupAgent::pollTimedOutRPCs, this);
 }
 
-void ProcessGroupAgent::shutdown() {
+void ProcessGroupAgent::shutdownImpl() {
   LOG(INFO) << "Shutting down ProcessGroupAgent on rank " << pg_->getRank()
             << ".";
-  std::unique_lock<std::mutex> lock{futureMutex_};
-  if (!rpcAgentRunning_.exchange(false)) {
-    return;
+  {
+    std::unique_lock<std::mutex> lock(futureMutex_);
+    timeoutThreadEnabled_.store(false);
   }
-  lock.unlock();
   futureTimeoutCV_.notify_one();
   futureTimeoutThread_.join();
   // Abort listener thread to stop accepting new work. We need to interrupt the
@@ -732,7 +733,7 @@ void ProcessGroupAgent::listenLoopInternal() {
 }
 
 void ProcessGroupAgent::pollTimedOutRPCs() {
-  while (rpcAgentRunning_.load()) {
+  while (timeoutThreadEnabled_.load()) {
     std::unique_lock<std::mutex> lock{futureMutex_};
     steady_clock_time_point minEndTime;
     // Estimate amount of time the first future will time out in, and sleep
@@ -746,13 +747,13 @@ void ProcessGroupAgent::pollTimedOutRPCs() {
     }
 
     auto shouldUpdateMinEndTimePredicate = [&, this]() -> bool {
-      // Notice, whoever modifying `rpcAgentRunning_`
-      // must acquire lock on `futureMutex_`.
+      // Notice, whoever modifies `timeoutThreadEnabled_`
+      // must acquire a lock on `futureMutex_`.
       // Otherwise, this predicate could deadlock.
       // If during evaluating the predicate, `::shutdown()` is called, then
       // the predicate missed the notification before it started waiting
       // on the cond var.
-      if (!rpcAgentRunning_.load()) {
+      if (!timeoutThreadEnabled_.load()) {
         return true;
       }
       steady_clock_time_point minEndTimeInMap = kInfiniteTimeoutTimePoint;

@@ -6,7 +6,7 @@
 #include <string>
 #include <vector>
 
-#include <fbgemm/FbgemmFakeFP16.h>
+#include <fbgemm/FbgemmConvert.h>
 #include "caffe2/core/context.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/utils/eigen_utils.h"
