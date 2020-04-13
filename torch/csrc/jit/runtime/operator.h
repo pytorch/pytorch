@@ -55,12 +55,15 @@ private:
     c10::OperatorHandle handle_;
     Operation op_;
   };
-  struct UnmaterializedFunctionSchema final {
+  struct UnparsedFunctionSchema final {
     std::string schema_string_;
     mutable c10::optional<c10::AliasAnalysisKind> alias_analysis_;
   };
   struct JitOnlyOperator final {
-    mutable c10::either<FunctionSchema, UnmaterializedFunctionSchema> schema_;
+    // The only valid transition for schema_ is from right->left, i.e.
+    // when the schema gets parsed.
+    mutable c10::either<FunctionSchema, UnparsedFunctionSchema> schema_;
+    
     c10::either<Operation, OperationCreator> op_;
   };
 public:
@@ -75,7 +78,7 @@ public:
       Operation op,
       c10::AliasAnalysisKind alias_analysis)
       : op_(c10::make_right<C10Operator, JitOnlyOperator>(JitOnlyOperator {
-          c10::make_right<FunctionSchema, UnmaterializedFunctionSchema>(UnmaterializedFunctionSchema{
+          c10::make_right<FunctionSchema, UnparsedFunctionSchema>(UnparsedFunctionSchema{
             std::move(schema),
             alias_analysis}),
           c10::make_left<Operation, OperationCreator>(std::move(op))
@@ -86,7 +89,7 @@ public:
       OperationCreator op_creator,
       c10::AliasAnalysisKind alias_analysis)
       : op_(c10::make_right<C10Operator, JitOnlyOperator>(JitOnlyOperator {
-          c10::make_right<FunctionSchema, UnmaterializedFunctionSchema>(UnmaterializedFunctionSchema {
+          c10::make_right<FunctionSchema, UnparsedFunctionSchema>(UnparsedFunctionSchema {
             std::move(schema),
             alias_analysis}),
           c10::make_right<Operation, OperationCreator>(std::move(op_creator))
@@ -101,7 +104,7 @@ public:
       OperationCreator op_creator,
       c10::AliasAnalysisKind alias_analysis)
       : op_(c10::make_right<C10Operator, JitOnlyOperator>(JitOnlyOperator{
-          c10::make_left<FunctionSchema, UnmaterializedFunctionSchema>(varArgSchemaWithName(name, alias_analysis)),
+          c10::make_left<FunctionSchema, UnparsedFunctionSchema>(varArgSchemaWithName(name, alias_analysis)),
           c10::make_right<Operation, OperationCreator>(std::move(op_creator))
       })) {}
 
@@ -130,7 +133,7 @@ public:
           // TODO What if it gets set later?
           schema.setAliasAnalysis(*unmaterializedSchema.alias_analysis_);
         }
-        op.schema_ = c10::make_left<FunctionSchema, UnmaterializedFunctionSchema>(std::move(schema));
+        op.schema_ = c10::make_left<FunctionSchema, UnparsedFunctionSchema>(std::move(schema));
       }
       return op.schema_.left();
     });
