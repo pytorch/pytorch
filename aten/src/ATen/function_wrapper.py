@@ -124,10 +124,10 @@ m.impl("${unqual_operator_name_with_overload}", &TypeDefault::${type_wrapper_nam
 # NB: Specification of the backend is handled by the enclosing
 # TORCH_LIBRARY_IMPL macro invocation
 BACKEND_UNBOXEDONLY_FUNCTION_REGISTRATION = CodeTemplate("""\
-m.impl_UNBOXED("${operator_name_with_overload}", ${Type}::${type_wrapper_name});
+m.impl_UNBOXED("${unqual_operator_name_with_overload}", ${Type}::${type_wrapper_name});
 """)
 BACKEND_FUNCTION_REGISTRATION = CodeTemplate("""\
-m.impl("${operator_name_with_overload}",  &${Type}::${type_wrapper_name});
+m.impl("${unqual_operator_name_with_overload}",  &${Type}::${type_wrapper_name});
 """)
 
 # add non-virtual declaration to TensorBody.h
