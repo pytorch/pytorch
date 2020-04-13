@@ -13,6 +13,7 @@ __all__ = [
     'align_tensors',
     'broadcast_tensors',
     'cartesian_prod',
+    'block_diag',
     'cdist',
     'chain_matmul',
     'einsum',
@@ -647,7 +648,6 @@ def tensordot(a, b, dims=2):
         dims_b = list(range(dims))
     return _VF.tensordot(a, b, dims_a, dims_b)
 
-
 def cartesian_prod(*tensors):
     """Do cartesian product of the given sequence of tensors. The behavior is similar to
     python's `itertools.product`.
@@ -680,6 +680,40 @@ def cartesian_prod(*tensors):
         if any(type(t) is not Tensor for t in tensors) and has_torch_function(tensors):
             return handle_torch_function(cartesian_prod, tensors, *tensors)
     return _VF.cartesian_prod(tensors)
+
+def block_diag(*tensors):
+    """Create a block diagonal matrix from provided tensors.
+
+    Arguments:
+        *tensors: One or more tensors with 0, 1, or 2 dimensions.
+
+    Returns:
+        Tensor: A 2 dimensional tensor with all the input tensors arranged in
+            order such that their upper left and lower right corners are
+            diagonally adjacent. All other elements are set to 0.
+
+    Example::
+
+        >>> import torch
+        >>> A = torch.tensor([[0, 1], [1, 0]])
+        >>> B = torch.tensor([[3, 4, 5], [6, 7, 8]])
+        >>> C = torch.tensor(7)
+        >>> D = torch.tensor([1, 2, 3])
+        >>> E = torch.tensor([[4], [5], [6]])
+        >>> torch.block_diag(A, B, C, D, E)
+        tensor([[0, 1, 0, 0, 0, 0, 0, 0, 0, 0],
+                [1, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+                [0, 0, 3, 4, 5, 0, 0, 0, 0, 0],
+                [0, 0, 6, 7, 8, 0, 0, 0, 0, 0],
+                [0, 0, 0, 0, 0, 7, 0, 0, 0, 0],
+                [0, 0, 0, 0, 0, 0, 1, 2, 3, 0],
+                [0, 0, 0, 0, 0, 0, 0, 0, 0, 4],
+                [0, 0, 0, 0, 0, 0, 0, 0, 0, 5],
+                [0, 0, 0, 0, 0, 0, 0, 0, 0, 6]])
+    """
+    if any(type(t) is not Tensor for t in tensors) and has_torch_function(tensors):
+        return handle_torch_function(block_diag, tensors, *tensors)
+    return torch._C._VariableFunctions.block_diag(tensors)
 
 
 def cdist(x1, x2, p=2., compute_mode='use_mm_for_euclid_dist_if_necessary'):
@@ -924,7 +958,7 @@ def chain_matmul(*matrices):
 
 
 def _lu_impl(A, pivot=True, get_infos=False, out=None):
-    # type: (Tensor, bool, bool, Any) -> Tuple[Tensor, Tensor, Tensor] 
+    # type: (Tensor, bool, bool, Any) -> Tuple[Tensor, Tensor, Tensor]
     r"""Computes the LU factorization of a matrix or batches of matrices
     :attr:`A`. Returns a tuple containing the LU factorization and
     pivots of :attr:`A`.  Pivoting is done if :attr:`pivot` is set to
@@ -995,7 +1029,7 @@ def _lu_impl(A, pivot=True, get_infos=False, out=None):
     return torch._lu_with_info(A, pivot=pivot, check_errors=(not get_infos))
 
 def _check_list_size(out_len, get_infos, out):
-    # type: (int, bool, List[Tensor]) -> None   
+    # type: (int, bool, List[Tensor]) -> None
     get_infos_int = 1 if get_infos else 0
     if out_len - get_infos_int != 2:
         raise TypeError("expected tuple of {} elements but got {}"
@@ -1020,8 +1054,8 @@ def _lu_with_infos(A, pivot=True, get_infos=False, out=None):
         return result  # A_LU, pivots, infos
 
 def _lu_no_infos(A, pivot=True, get_infos=False, out=None):
-    # type: (Tensor, bool, bool, Optional[Tuple[Tensor, Tensor]]) -> Tuple[Tensor, Tensor] 
-    # need to check for torch_function here so that we exit if 
+    # type: (Tensor, bool, bool, Optional[Tuple[Tensor, Tensor]]) -> Tuple[Tensor, Tensor]
+    # need to check for torch_function here so that we exit if
     if not torch.jit.is_scripting():
         if type(A) is not Tensor and has_torch_function((A,)):
             return handle_torch_function(
@@ -1036,7 +1070,7 @@ def _lu_no_infos(A, pivot=True, get_infos=False, out=None):
         return result[0], result[1]  # A_LU, pivots
 
 # The return type of lu depends on `get_infos`, so in order to resolve the output type
-# of lu in TorchScript we need to statically know the value of `get_infos` 
+# of lu in TorchScript we need to statically know the value of `get_infos`
 lu = boolean_dispatch(
     arg_name='get_infos',
     arg_index=2,
