@@ -188,9 +188,10 @@ void DistAutogradContainer::sendReleaseContextRpc(int64_t context_id) {
           options);
 
       cleanupFuture->addCallback(
-          [](const rpc::Message& message /* unused */,
-             const c10::optional<torch::utils::FutureError>& error) {
-            if (error) {
+          [weak = std::weak_ptr<rpc::FutureMessage>(cleanupFuture)]() {
+            auto cleanupFuture = weak.lock();
+            TORCH_INTERNAL_ASSERT(cleanupFuture);
+            if (cleanupFuture->hasError()) {
               std::string errorMsg = c10::str(
                   "Could not release Dist Autograd Context after ",
                   kNumCleanupContextRetries,

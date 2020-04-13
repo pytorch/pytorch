@@ -178,7 +178,11 @@ void RRefContext::delUser(
           agent_->getWorkerInfo(owner),
           RRefUserDelete(rrefId, forkId).toMessage());
 
-      fm->addCallback([fm]() { handleException(fm); });
+      fm->addCallback([weak = std::weak_ptr<FutureMessage>(fm)]() {
+        auto fm = weak.lock();
+        TORCH_INTERNAL_ASSERT(fm);
+        handleException(fm);
+      });
     }
   }
 
@@ -387,17 +391,24 @@ void RRefContext::notifyOwnerAndParentOfFork(
     // with this fork ID.
     auto fm = agent_->sendWithRetries(
         agent_->getWorkerInfo(parent), RRefChildAccept(forkId).toMessage());
-    fm->addCallback([fm]() { handleException(fm); });
+    fm->addCallback([weak = std::weak_ptr<FutureMessage>(fm)]() {
+      auto fm = weak.lock();
+      TORCH_INTERNAL_ASSERT(fm);
+      handleException(fm);
+    });
   } else {
     auto fm = agent_->sendWithRetries(
         agent_->getWorkerInfo(rref->owner()),
         RRefForkRequest(rref->rrefId(), forkId).toMessage());
 
     addPendingUser(forkId, rref);
-    fm->addCallback([this, forkId, parent, fm]() {
-      handleException(fm);
-      this->finishForkRequest(forkId, parent);
-    });
+    fm->addCallback(
+        [this, forkId, parent, weak = std::weak_ptr<FutureMessage>(fm)]() {
+          auto fm = weak.lock();
+          TORCH_INTERNAL_ASSERT(fm);
+          handleException(fm);
+          this->finishForkRequest(forkId, parent);
+        });
   }
 }
 
@@ -564,7 +575,11 @@ void RRefContext::finishForkRequest(const ForkId& forkId, worker_id_t parent) {
   auto fm = agent_->sendWithRetries(
       agent_->getWorkerInfo(parent), RRefChildAccept(forkId).toMessage());
 
-  fm->addCallback([fm]() { handleException(fm); });
+  fm->addCallback([weak = std::weak_ptr<FutureMessage>(fm)]() {
+    auto fm = weak.lock();
+    TORCH_INTERNAL_ASSERT(fm);
+    handleException(fm);
+  });
 }
 
 void RRefContext::addSelfAsFork(c10::intrusive_ptr<OwnerRRef>& rref) {

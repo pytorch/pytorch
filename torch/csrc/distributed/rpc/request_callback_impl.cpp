@@ -320,7 +320,12 @@ void RequestCallbackImpl::processRpc(
         auto whenValueSet = rref->getFuture();
         // Our response is satisfied when the rpcs come back.
         whenValueSet->addCallback(
-            [responseFuture, messageId, rref, whenValueSet]() {
+            [responseFuture,
+             messageId,
+             rref,
+             weak = std::weak_ptr<FutureMessage>(whenValueSet)]() {
+              auto whenValueSet = weak.lock();
+              TORCH_INTERNAL_ASSERT(whenValueSet);
               if (whenValueSet->hasError()) {
                 responseFuture->setError(*whenValueSet->error());
                 return;
@@ -358,7 +363,12 @@ void RequestCallbackImpl::processRpc(
 
       // Our response is satisfied when the rpcs come back.
       whenValueSet->addCallback(
-          [responseFuture, messageId, rref, whenValueSet]() {
+          [responseFuture,
+           messageId,
+           rref,
+           weak = std::weak_ptr<FutureMessage>(whenValueSet)]() {
+            auto whenValueSet = weak.lock();
+            TORCH_INTERNAL_ASSERT(whenValueSet);
             if (whenValueSet->hasError()) {
               responseFuture->setError(*whenValueSet->error());
               return;
@@ -441,22 +451,26 @@ void RequestCallbackImpl::processRpc(
       auto fromWorkerId = rpcWithAutograd.fromWorkerId();
       // The original future needs to be marked as completed when the wrapped
       // one completes, with the autograd context information wrapped.
-      wrappedRpcResponseFuture->addCallback([responseFuture,
-                                             messageId,
-                                             fromWorkerId,
-                                             wrappedRpcResponseFuture]() {
-        if (wrappedRpcResponseFuture->hasError()) {
-          // Propagate error to responseFuture if we had one.
-          responseFuture->setError(wrappedRpcResponseFuture->error()->what());
-        } else {
-          auto msg = getMessageWithAutograd(
-              fromWorkerId,
-              std::move(*wrappedRpcResponseFuture).moveValue(),
-              MessageType::FORWARD_AUTOGRAD_RESP);
-          msg.setId(messageId);
-          responseFuture->markCompleted(std::move(msg));
-        }
-      });
+      wrappedRpcResponseFuture->addCallback(
+          [responseFuture,
+           messageId,
+           fromWorkerId,
+           weak = std::weak_ptr<FutureMessage>(wrappedRpcResponseFuture)]() {
+            auto wrappedRpcResponseFuture = weak.lock();
+            TORCH_INTERNAL_ASSERT(wrappedRpcResponseFuture);
+            if (wrappedRpcResponseFuture->hasError()) {
+              // Propagate error to responseFuture if we had one.
+              responseFuture->setError(
+                  wrappedRpcResponseFuture->error()->what());
+            } else {
+              auto msg = getMessageWithAutograd(
+                  fromWorkerId,
+                  std::move(*wrappedRpcResponseFuture).moveValue(),
+                  MessageType::FORWARD_AUTOGRAD_RESP);
+              msg.setId(messageId);
+              responseFuture->markCompleted(std::move(msg));
+            }
+          });
       return;
     }
     case MessageType::BACKWARD_AUTOGRAD_REQ: {
@@ -481,15 +495,20 @@ void RequestCallbackImpl::processRpc(
           autogradContext, sendFunction, gradientsCall.retainGraph());
 
       // Our response is satisfied when the rpcs come back.
-      execFuture->addCallback([responseFuture, messageId, execFuture]() {
-        if (!execFuture->hasError()) {
-          Message m = std::move(PropagateGradientsResp()).toMessage();
-          m.setId(messageId);
-          responseFuture->markCompleted(std::move(m));
-        } else {
-          responseFuture->setError(*(execFuture->error()));
-        }
-      });
+      execFuture->addCallback(
+          [responseFuture,
+           messageId,
+           weak = std::weak_ptr<FutureMessage>(execFuture)]() {
+            auto execFuture = weak.lock();
+            TORCH_INTERNAL_ASSERT(execFuture);
+            if (!execFuture->hasError()) {
+              Message m = std::move(PropagateGradientsResp()).toMessage();
+              m.setId(messageId);
+              responseFuture->markCompleted(std::move(m));
+            } else {
+              responseFuture->setError(*(execFuture->error()));
+            }
+          });
       return;
     };
     case MessageType::CLEANUP_AUTOGRAD_CONTEXT_REQ: {

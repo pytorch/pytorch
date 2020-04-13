@@ -157,7 +157,10 @@ PyRRef pyRemoteBuiltin(
         *agent, dst, std::move(*scriptRemoteCall).toMessage(), false, rf);
 
     ctx.addPendingUser(userRRef->forkId(), userRRef);
-    fm->addCallback([forkId{userRRef->forkId()}, fm]() {
+    fm->addCallback([forkId{userRRef->forkId()},
+                     weak = std::weak_ptr<FutureMessage>(fm)]() {
+      auto fm = weak.lock();
+      TORCH_INTERNAL_ASSERT(fm);
       callback::confirmPendingUser(fm, forkId);
     });
     return PyRRef(userRRef);
@@ -173,7 +176,11 @@ PyRRef pyRemoteBuiltin(
 
     // Builtin operators does not return py::object, and hence does not require
     // GIL for destructing the potentially deleted OwerRRef.
-    fm->addCallback([fm]() { callback::finishCreatingOwnerRRef(fm); });
+    fm->addCallback([weak = std::weak_ptr<FutureMessage>(fm)]() {
+      auto fm = weak.lock();
+      TORCH_INTERNAL_ASSERT(fm);
+      callback::finishCreatingOwnerRRef(fm);
+    });
     return PyRRef(ownerRRef);
   }
 }
@@ -214,7 +221,10 @@ PyRRef pyRemotePythonUdf(
         rf);
 
     ctx.addPendingUser(userRRef->forkId(), userRRef);
-    fm->addCallback([forkId{userRRef->forkId()}, fm]() {
+    fm->addCallback([forkId{userRRef->forkId()},
+                     weak = std::weak_ptr<FutureMessage>(fm)]() {
+      auto fm = weak.lock();
+      TORCH_INTERNAL_ASSERT(fm);
       callback::confirmPendingUser(fm, forkId);
     });
     return PyRRef(userRRef);
@@ -229,7 +239,9 @@ PyRRef pyRemotePythonUdf(
         ownerRRef->rrefId().toIValue(),
         rf);
 
-    fm->addCallback([fm]() {
+    fm->addCallback([weak = std::weak_ptr<FutureMessage>(fm)]() {
+      auto fm = weak.lock();
+      TORCH_INTERNAL_ASSERT(fm);
       auto deletedRRef = callback::finishCreatingOwnerRRef(fm);
       if (deletedRRef && deletedRRef->isPyObj()) {
         pybind11::gil_scoped_acquire ag;

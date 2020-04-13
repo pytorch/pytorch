@@ -40,7 +40,10 @@ c10::intrusive_ptr<c10::ivalue::Future> rpcTorchscript(
   // Create a JIT future and pass it to futMessage's callback to set state
   // of the JIT future.
   auto futPtr = c10::make_intrusive<c10::ivalue::Future>(returnType);
-  futMessage->addCallback([futPtr, futMessage]() {
+  futMessage->addCallback([futPtr,
+                           weak = std::weak_ptr<FutureMessage>(futMessage)]() {
+    auto futMessage = weak.lock();
+    TORCH_INTERNAL_ASSERT(futMessage);
     if (futMessage->hasError()) {
       c10::ivalue::Future::FutureError jitFutErr(futMessage->error()->what());
       futPtr->setError(std::move(jitFutErr));
@@ -88,7 +91,10 @@ c10::intrusive_ptr<RRef> remoteTorchscript(
         rf);
 
     ctx.addPendingUser(userRRefPtr->forkId(), userRRefPtr);
-    fm->addCallback([forkId{userRRefPtr->forkId()}, fm]() {
+    fm->addCallback([forkId{userRRefPtr->forkId()},
+                     weak = std::weak_ptr<FutureMessage>(fm)]() {
+      auto fm = weak.lock();
+      TORCH_INTERNAL_ASSERT(fm);
       callback::confirmPendingUser(fm, forkId);
     });
 
@@ -111,7 +117,11 @@ c10::intrusive_ptr<RRef> remoteTorchscript(
         true /*forceGradRecording*/,
         rf);
 
-    fm->addCallback([fm]() { callback::finishCreatingOwnerRRef(fm); });
+    fm->addCallback([weak = std::weak_ptr<FutureMessage>(fm)]() {
+      auto fm = weak.lock();
+      TORCH_INTERNAL_ASSERT(fm);
+      callback::finishCreatingOwnerRRef(fm);
+    });
     return ownerRRefPtr;
   }
 }

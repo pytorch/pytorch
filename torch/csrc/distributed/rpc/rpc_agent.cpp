@@ -69,8 +69,12 @@ std::shared_ptr<FutureMessage> RpcAgent::sendWithRetries(
       originalFuture,
       /* retryCount */ 0,
       retryOptions);
-
-  fm->addCallback([this, newTime, firstRetryRpc, fm]() {
+  fm->addCallback([this,
+                   newTime,
+                   firstRetryRpc,
+                   weak = std::weak_ptr<FutureMessage>(fm)]() {
+    auto fm = weak.lock();
+    TORCH_INTERNAL_ASSERT(fm);
     rpcRetryCallback(fm, newTime, firstRetryRpc);
   });
 
@@ -133,7 +137,12 @@ void RpcAgent::retryExpiredRpcs() {
           earliestRpc->options_, earliestRpc->retryCount_);
       earliestRpc->retryCount_++;
 
-      fm->addCallback([this, newTime, earliestRpc, fm]() {
+      fm->addCallback([this,
+                       newTime,
+                       earliestRpc,
+                       weak = std::weak_ptr<FutureMessage>(fm)]() {
+        auto fm = weak.lock();
+        TORCH_INTERNAL_ASSERT(fm);
         rpcRetryCallback(fm, newTime, earliestRpc);
       });
     }

@@ -527,7 +527,13 @@ bool ProcessGroupAgent::handleRecv(RecvWork& work) {
       // response as a callback which fires when the future completes.
       auto fromId = work.from_.id_;
       auto requestId = work.id_;
-      futureResponse->addCallback([this, fromId, requestId, futureResponse]() {
+      futureResponse->addCallback([this,
+                                   fromId,
+                                   requestId,
+                                   weak = std::weak_ptr<FutureMessage>(
+                                       futureResponse)]() {
+        auto futureResponse = weak.lock();
+        TORCH_INTERNAL_ASSERT(futureResponse);
         --serverActiveCalls_;
         --serverActiveAsyncCalls_;
         if (!futureResponse->hasError()) {
