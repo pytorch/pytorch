@@ -333,7 +333,9 @@ def _model_to_graph(model, args, verbose=False,
     if isinstance(model, torch.jit.ScriptModule):
         assert example_outputs is not None, "example_outputs must be provided when exporting a ScriptModule"
         try:
+            model._c.dump(True, False, False)
             method_graph, params = torch._C._jit_pass_lower_graph(model.forward.graph, model._c)
+            print('args:', args, 'params:', params)
             in_vars, in_desc = torch.jit._flatten(tuple(args) + tuple(params))
             graph = _propagate_and_assign_input_shapes(
                 method_graph, tuple(in_vars), False, propagate)
@@ -399,6 +401,9 @@ def _model_to_graph(model, args, verbose=False,
 
     if verbose:
         print(graph)
+
+    params_dict = torch._C._jit_pass_filter_non_tensor_arguments(params_dict)
+    torch._C._jit_decay_packed_param_input_types(graph)
 
     return graph, params_dict, torch_out
 

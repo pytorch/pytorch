@@ -459,6 +459,7 @@ class Tensor(torch._C._TensorBase):
         # indexes of hiddens[0] before hiddens[1], while the generator
         # map will interleave them.)
         if self.dim() == 0:
+            print('0-dim tensor:', self)
             raise TypeError('iteration over a 0-d tensor')
         if torch._C._get_tracing_state():
             warnings.warn('Iterating over a tensor might cause the trace to be incorrect. '

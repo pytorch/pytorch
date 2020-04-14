@@ -127,6 +127,18 @@ Node* CreateQuantizedBias(
   return const_node;
 }
 
+Node* createIntTuple(std::vector<int64_t> is, std::shared_ptr<Graph>& graph) {
+  Node* const_node = graph->create(Symbol::onnx("Constant"));
+  const_node->is_(Symbol::attr("value"), is);
+  return const_node;
+}
+
+Node* createInt(int64_t i, std::shared_ptr<Graph>& graph) {
+  Node* const_node = graph->create(Symbol::onnx("Constant"));
+  const_node->i_(Symbol::attr("value"), i);
+  return const_node;
+}
+
 // This is called before the onnx pass. Using pattern matching we
 // find the relevant nodes and extract the packed_params. The packed_params are
 // passed to the appropriate unpack function using c10::Dispatcher. We insert
@@ -134,7 +146,7 @@ Node* CreateQuantizedBias(
 // caffe2::Int8GivenTensorFill nodes.
 void unpackQuantizedWeightsHelper(
     std::shared_ptr<Graph>& graph,
-    std::map<std::string, at::Tensor>& paramsDict,
+    std::map<std::string, IValue>& paramsDict,
     const std::string& pattern,
     const std::string& unpack_fn) {
   Graph pattern_graph;
@@ -153,13 +165,49 @@ void unpackQuantizedWeightsHelper(
       throw std::runtime_error(
           "getValues: Quantized weight value not found amongst constant parameters.");
     }
-    at::Tensor packed_weight = itr->second;
-    auto op = Dispatcher::singleton().findSchema({unpack_fn, ""});
-    assert(op.has_value());
-    std::tuple<at::Tensor, c10::optional<at::Tensor>> result = callOpUnboxed<
-        std::tuple<at::Tensor, c10::optional<at::Tensor>>,
-        at::Tensor>(*op, packed_weight);
-    at::Tensor unpacked_weight = std::get<0>(result);
+    at::Tensor unpacked_weight;
+    c10::optional<at::Tensor> bias;
+    c10::optional<torch::List<int64_t>> stride, padding, dilation;
+    c10::optional<int64_t> groups;
+
+    if (itr->second.isTuple()) {
+      // Pre-unpacked weights. Comes from Conv weights which are
+      // stored as bound C++ classes.
+      auto ser_tup = itr->second.toTuple();
+      unpacked_weight = ser_tup->elements()[0].toTensor();
+      bias = ser_tup->elements()[1].toOptional<at::Tensor>();
+      // conv only parameters
+      if (ser_tup->elements().size() > 2) {
+        auto stride_ivalue = ser_tup->elements()[2].toListRef();
+        auto padding_ivalue = ser_tup->elements()[3].toListRef();
+        auto dilation_ivalue = ser_tup->elements()[4].toListRef();
+        auto groups_ivalue = ser_tup->elements()[5];
+        torch::List<int64_t> stride_int, padding_int, dilation_int;
+        int64_t groups_int;
+        for (auto s : stride_ivalue) {
+          stride_int.emplace_back(s.toTensor()[0].item<int64_t>());
+        }
+        for (auto p : padding_ivalue) {
+          padding_int.emplace_back(p.toTensor()[0].item<int64_t>());
+        }
+        for (auto d : dilation_ivalue) {
+          dilation_int.emplace_back(d.toTensor()[0].item<int64_t>());
+        }
+        groups_int = groups_ivalue.toTensor()[0].item<int64_t>();
+        stride = stride_int;
+        padding = padding_int;
+        dilation = dilation_int;
+        groups = groups_int;
+      }
+    } else {
+      TORCH_INTERNAL_ASSERT(itr->second.isTensor());
+      at::Tensor packed_weight = itr->second.toTensor();
+      auto op = Dispatcher::singleton().findSchema({unpack_fn, ""});
+      assert(op.has_value());
+      std::tie(unpacked_weight, bias) = callOpUnboxed<
+          std::tuple<at::Tensor, c10::optional<at::Tensor>>,
+          at::Tensor>(*op, packed_weight);
+    }
 
     // Permute weights
     std::vector<int64_t> wt_sizes = unpacked_weight.sizes().vec();
@@ -194,8 +242,8 @@ void unpackQuantizedWeightsHelper(
 
     // Add bias
     at::Tensor original_bias;
-    if (std::get<1>(result).has_value()) {
-      original_bias = std::get<1>(result).value();
+    if (bias.has_value()) {
+      original_bias = bias.value();
       original_bias.set_requires_grad(false);
     } else {
       // Caffe2 ops always expect bias tensor so if not present create empty
@@ -233,6 +281,25 @@ void unpackQuantizedWeightsHelper(
     c2_bias->insertBefore(qlinear_node);
     qlinear_node->insertInput(2, c2_bias->output());
 
+    // add conv arguemnts: stride, padding, dilation, groups
+    if (stride.has_value() && padding.has_value() && dilation.has_value() &&
+        groups.has_value()) {
+      Node* stride_node = createIntTuple(stride.value().vec(), graph);
+      stride_node->insertBefore(qlinear_node);
+      qlinear_node->insertInput(3, stride_node->output());
+
+      Node* padding_node = createIntTuple(padding.value().vec(), graph);
+      padding_node->insertBefore(qlinear_node);
+      qlinear_node->insertInput(4, padding_node->output());
+
+      Node* dilation_node = createIntTuple(dilation.value().vec(), graph);
+      dilation_node->insertBefore(qlinear_node);
+      qlinear_node->insertInput(5, dilation_node->output());
+
+      Node* groups_node = createInt(groups.value(), graph);
+      groups_node->insertBefore(qlinear_node);
+      qlinear_node->insertInput(6, groups_node->output());
+    }
     auto b = graph->block();
     auto valsToParamsMap = buildValueToParamsMap(b, paramsDict);
     eraseUnusedValuesFromMap(valsToParamsMap);
@@ -240,25 +307,25 @@ void unpackQuantizedWeightsHelper(
 }
 void UnpackQuantizedWeights(
     std::shared_ptr<Graph>& graph,
-    std::map<std::string, at::Tensor>& paramsDict) {
+    std::map<std::string, IValue>& paramsDict) {
   std::string qlinear = R"(
   graph(%input, %packed_weight, %w_scale, %w_zero_point):
         %r = quantized::linear(%input, %packed_weight, %w_scale, %w_zero_point)
         return (%r) )";
-  std::string qconv = R"(
-  graph(%input, %packed_weight, %stride, %padding, %dilation, %groups, %w_scale, %w_zero_point):
-        %r = quantized::conv2d(%input, %packed_weight, %stride, %padding, %dilation, %groups, %w_scale, %w_zero_point)
+  std::string qconv2d = R"(
+  graph(%input, %packed_params, %scale, %zero_point):
+        %r = quantized::conv2d(%input, %packed_params, %scale, %zero_point)
         return (%r) )";
-  std::string qconv_relu = R"(
-  graph(%input, %packed_weight, %stride, %padding, %dilation, %groups, %w_scale, %w_zero_point):
-        %r = quantized::conv2d_relu(%input, %packed_weight, %stride, %padding, %dilation, %groups, %w_scale, %w_zero_point)
+  std::string qconv2d_relu = R"(
+  graph(%input, %packed_params, %scale, %zero_point):
+        %r = quantized::conv2d_relu(%input, %packed_params, %scale, %zero_point)
         return (%r) )";
   unpackQuantizedWeightsHelper(
       graph, paramsDict, qlinear, "quantized::linear_unpack");
   unpackQuantizedWeightsHelper(
-      graph, paramsDict, qconv, "quantized::conv_unpack");
+      graph, paramsDict, qconv2d, "quantized::conv2d_unpack");
   unpackQuantizedWeightsHelper(
-      graph, paramsDict, qconv_relu, "quantized::conv_unpack");
+      graph, paramsDict, qconv2d_relu, "quantized::conv2d_unpack");
 }
 
 // Caffe2 expects quantized ops to be in NHWC format while pytorch inputs are in
@@ -266,7 +333,7 @@ void UnpackQuantizedWeights(
 // conv op and add another permute from NHWC to NCHW after the conv op.
 void insertPermutesHelper(
     std::shared_ptr<Graph>& graph,
-    std::map<std::string, at::Tensor>& paramsDict,
+    std::map<std::string, IValue>& paramsDict,
     const std::string& pattern) {
   Graph pattern_graph;
   std::unordered_map<std::string, Value*> vmap;
@@ -298,7 +365,7 @@ void insertPermutesHelper(
 
 void insertPermutes(
     std::shared_ptr<Graph>& graph,
-    std::map<std::string, at::Tensor>& paramsDict) {
+    std::map<std::string, IValue>& paramsDict) {
   std::string qconv = R"(
   graph(%input, %weight, %bias, %stride, %padding, %dilation, %groups, %w_scale, %w_zero_point):
         %r = quantized::conv2d(%input, %weight, %bias, %stride, %padding, %dilation, %groups, %w_scale, %w_zero_point)

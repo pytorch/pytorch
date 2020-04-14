@@ -210,10 +210,13 @@ torch::jit::class_<ConvPackedParamsBase<kSpatialDim>> register_conv_params() {
   using SerializationType = std::tuple<
       at::Tensor,
       c10::optional<at::Tensor>,
-      torch::List<int64_t>,
-      torch::List<int64_t>,
-      torch::List<int64_t>,
-      int64_t>;
+      // these are meant to be torch::List<int64_t> but
+      // it's not supported by onnx, so we'll use Tensor as
+      // a workaround
+      torch::List<at::Tensor>,
+      torch::List<at::Tensor>,
+      torch::List<at::Tensor>,
+      at::Tensor>;
   static auto register_conv_params =
     torch::jit::class_<ConvPackedParamsBase<kSpatialDim>>(
         "quantized", "Conv" + c10::to_string(kSpatialDim) + "dPackedParamsBase")
@@ -223,26 +226,53 @@ torch::jit::class_<ConvPackedParamsBase<kSpatialDim>> register_conv_params() {
                 at::Tensor weight;
                 c10::optional<at::Tensor> bias;
                 std::tie(weight, bias) = params->unpack();
+                torch::List<at::Tensor> stride;
+                torch::List<at::Tensor> padding;
+                torch::List<at::Tensor> dilation;
+                at::Tensor groups;
+                for (int64_t s : params->stride()) {
+                  stride.emplace_back(at::tensor(s));
+                }
+                for (int64_t p : params->padding()) {
+                  padding.emplace_back(at::tensor(p));
+                }
+                for (int64_t d : params->dilation()) {
+                  dilation.emplace_back(at::tensor(d));
+                }
+                groups = at::tensor(params->groups());
                 return std::make_tuple(
                     std::move(weight),
                     std::move(bias),
-                    params->stride(),
-                    params->padding(),
-                    params->dilation(),
-                    params->groups());
+                    stride,
+                    padding,
+                    dilation,
+                    groups);
               },
               [](SerializationType state)
               -> c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> { // __setstate__
                 at::Tensor weight;
                 c10::optional<at::Tensor> bias;
+                torch::List<at::Tensor> stride_tensor, padding_tensor,
+                  dilation_tensor;
+                at::Tensor groups_tensor;
                 torch::List<int64_t> stride, padding, dilation;
                 int64_t groups;
                 weight = std::move(std::get<0>(state));
                 bias = std::move(std::get<1>(state));
-                stride = std::get<2>(state);
-                padding = std::get<3>(state);
-                dilation = std::get<4>(state);
-                groups = std::get<5>(state);
+                stride_tensor = std::get<2>(state);
+                padding_tensor = std::get<3>(state);
+                dilation_tensor = std::get<4>(state);
+                groups_tensor = std::get<5>(state);
+                for (at::Tensor s : stride_tensor) {
+                  stride.emplace_back(s[0].item<int64_t>());
+                }
+                for (at::Tensor p : padding_tensor) {
+                  padding.emplace_back(p[0].item<int64_t>());
+                }
+                for (at::Tensor d : dilation_tensor) {
+                  dilation.emplace_back(d[0].item<int64_t>());
+                }
+                groups = groups_tensor[0].item<int64_t>();
                 auto& ctx = at::globalContext();
 
 #ifdef USE_FBGEMM

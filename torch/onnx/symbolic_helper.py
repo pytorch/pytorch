@@ -46,7 +46,7 @@ from functools import wraps
 # Helper functions
 # ---------------------------------------------------------------------------------
 
-# Save some builtins as locals, because we'll shadown them below
+# Save some builtins as locals, because we'll shadow them below
 _sum = sum
 
 
@@ -125,6 +125,8 @@ def parse_args(*arg_descriptors):
         def wrapper(g, *args):
             # some args may be optional, so the length may be smaller
             assert len(arg_descriptors) >= len(args)
+            print('arg_decriptors:', arg_descriptors)
+            print('args:', args)
             args = [_parse_arg(arg, arg_desc) for arg, arg_desc in zip(args, arg_descriptors)]
             return fn(g, *args)
         # In Python 2 functools.wraps chokes on partially applied functions, so we need this as a workaround

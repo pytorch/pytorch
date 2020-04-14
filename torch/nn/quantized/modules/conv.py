@@ -18,7 +18,6 @@ from torch.nn.quantized.modules.utils import _quantize_weight
 from torch.nn.utils import fuse_conv_bn_weights
 
 class _ConvNd(nn.Module):
-    _version = 1
 
     def __init__(self, in_channels, out_channels, kernel_size, stride,
                  padding, dilation,
@@ -74,17 +73,19 @@ class _ConvNd(nn.Module):
     # their regular QTensor form for serialization. Packed weights should not
     # live outside the process in which they were created, rather they should be
     # derived from the QTensor weight.
-    # Version 0
     #   self
     #   |--- weight : Tensor
     #   |--- bias : Tensor
     #
-    # Version 1
+    # TODO: maybe change to this when https://github.com/pytorch/pytorch/pull/32958 is landed
     #   self
     #   |--- _packed_params : Conv2dPackedParamsBase or Conv3dPackedParamsBase
     def _save_to_state_dict(self, destination, prefix, keep_vars):
         super(_ConvNd, self)._save_to_state_dict(destination, prefix, keep_vars)
-        destination[prefix + '_packed_params'] = self._packed_params
+        (w, b) = self._weight_bias()
+        destination[prefix + 'weight'] = w
+        destination[prefix + 'bias'] = b
+        destination[prefix + 'scale'] = torch.tensor(self.scale)
         destination[prefix + 'scale'] = torch.tensor(self.scale)
         destination[prefix + 'zero_point'] = torch.tensor(self.zero_point)
 
@@ -120,18 +121,10 @@ class _ConvNd(nn.Module):
     def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
                               missing_keys, unexpected_keys, error_msgs):
         version = local_metadata.get('version', None)
-        if version is None or version < 1:
-            self.set_weight_bias(
-                state_dict[prefix + 'weight'], state_dict[prefix + 'bias'])
-            state_dict.pop(prefix + 'weight')
-            state_dict.pop(prefix + 'bias')
-        else:
-            self._packed_params = state_dict[prefix + '_packed_params']
-            assert tuple(self.stride) == tuple(self._packed_params.stride())
-            assert tuple(self.padding) == tuple(self._packed_params.padding())
-            assert tuple(self.dilation) == tuple(self._packed_params.dilation())
-            assert self.groups == self._packed_params.groups()
-            state_dict.pop(prefix + '_packed_params')
+        self.set_weight_bias(
+            state_dict[prefix + 'weight'], state_dict[prefix + 'bias'])
+        state_dict.pop(prefix + 'weight')
+        state_dict.pop(prefix + 'bias')
         self.scale = float(state_dict[prefix + 'scale'])
         state_dict.pop(prefix + 'scale')
         self.zero_point = int(state_dict[prefix + 'zero_point'])
