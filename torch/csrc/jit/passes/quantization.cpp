@@ -678,26 +678,24 @@ graph(%self, %a, %b, %inplace):
 // Check if `use` is an aten function of name `func_name` and if value
 // `v` is the nth argument (if provided) of the function.
 bool matchAtenFuncToUse(
-    Node* use,
+    const Use& use,
     const std::string& func_name,
-    c10::optional<Value*> v,
     c10::optional<int> n) {
-  return use->kind() == Symbol::aten(func_name) &&
-      (n.has_value() && v.has_value() ? v.value() == use->inputs().at(n.value())
-                                      : true);
+  Node* node = use.user;
+  return node->kind() == Symbol::aten(func_name) &&
+      (n.has_value() ? (n.value() == use.offset) : true);
 }
 
 // Check if `use` is a CallFunction of name `func_name` and if value
 // `v` is the nth argument (if provided) of the function
 bool matchCallFuncToUse(
-    Node* use,
+    const Use& use,
     const std::string& func_name,
-    c10::optional<Value*> v,
     c10::optional<int> n) {
-  return use->kind() == prim::CallFunction &&
-      getFuncName(use->inputs()[0]) == func_name &&
-      (n.has_value() && v.has_value() ? v.value() == use->inputs().at(n.value())
-                                      : false);
+  Node* node = use.user;
+  return node->kind() == prim::CallFunction &&
+      getFuncName(node->inputs()[0]) == func_name &&
+      (n.has_value() ? (n.value() == use.offset) : false);
 }
 
 struct FuncArg {
@@ -715,15 +713,13 @@ bool matchArgPattern(
     const CallFuncArgs& call_func_args) {
   for (const Use& u : v->uses()) {
     for (const auto& func_arg : aten_func_args) {
-      if (matchAtenFuncToUse(
-              u.user, func_arg.func_name, v, func_arg.arg_index)) {
+      if (matchAtenFuncToUse(u, func_arg.func_name, func_arg.arg_index)) {
         return true;
       }
     }
 
     for (const auto& func_arg : call_func_args) {
-      if (matchCallFuncToUse(
-              u.user, func_arg.func_name, v, func_arg.arg_index)) {
+      if (matchCallFuncToUse(u, func_arg.func_name, func_arg.arg_index)) {
         return true;
       }
     }
@@ -992,9 +988,8 @@ void InsertObserversHelper::preprocess(
   }
 }
 
-bool useQuantizable(Use use, bool is_dynamic) {
-  Node* n = use.user;
-  bool result = nodeQuantizable(n);
+bool useQuantizable(const Use& use, bool is_dynamic) {
+  bool result = nodeQuantizable(use.user);
   if (!result) {
     return false;
   }
@@ -1004,13 +999,13 @@ bool useQuantizable(Use use, bool is_dynamic) {
   const AtenFuncArgs& aten_func_args = AtenFuncArgs({{"lstm", 2}});
   const CallFuncArgs& call_func_args = CallFuncArgs({});
   for (const auto& func_arg : aten_func_args) {
-    if (matchAtenFuncToUse(n, func_arg.func_name, c10::nullopt, c10::nullopt)) {
+    if (matchAtenFuncToUse(use, func_arg.func_name, c10::nullopt)) {
       return use.offset == func_arg.arg_index;
     }
   }
 
   for (const auto& func_arg : call_func_args) {
-    if (matchCallFuncToUse(n, func_arg.func_name, c10::nullopt, c10::nullopt)) {
+    if (matchCallFuncToUse(use, func_arg.func_name, c10::nullopt)) {
       return use.offset == func_arg.arg_index;
     }
   }
