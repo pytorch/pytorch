@@ -217,20 +217,20 @@ void DistEngine::computeDependencies(
     // Create a dummy GraphRoot and run init_to_execute with it.
     GraphRoot dummyRoot(edges, {});
     graphTask->init_to_execute(dummyRoot, outputEdges);
-    for (auto& pr : graphTask->exec_info_) {
-      auto fn = pr.first;
-      auto& execInfo = pr.second;
+    for (auto& mapEntry : graphTask->exec_info_) {
+      auto& execInfo = mapEntry.second;
       if (!execInfo.captures_) {
         continue;
       }
-      if (auto accumulateGradFn = dynamic_cast<AccumulateGrad*>(fn)) {
-        for (auto& capture : *execInfo.captures_) {
-          capture.hooks_.push_back(
-              std::make_unique<DistAccumulateGradCapturePreHook>(
-                  std::dynamic_pointer_cast<AccumulateGrad>(
-                      accumulateGradFn->shared_from_this()),
-                  autogradContext));
-        }
+      auto fn = mapEntry.first;
+      auto accumulateGradFn = dynamic_cast<AccumulateGrad*>(fn);
+      TORCH_INTERNAL_ASSERT(accumulateGradFn);
+      for (auto& capture : *execInfo.captures_) {
+        capture.hooks_.push_back(
+            std::make_unique<DistAccumulateGradCapturePreHook>(
+                std::dynamic_pointer_cast<AccumulateGrad>(
+                    accumulateGradFn->shared_from_this()),
+                autogradContext));
       }
     }
 
