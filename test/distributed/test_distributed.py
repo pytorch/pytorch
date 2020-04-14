@@ -2212,7 +2212,8 @@ if BACKEND == "gloo" or BACKEND == "nccl":
             # enable spawn mode and refactor this suite to inherit from
             # common_distributed.MultiProcessTestCase.
             if six.PY3:
-                # Note: explicitly specifying fork, as spawn is the default in py3.8+.
+                # Note: explicitly specifying fork, as spawn is the default in
+                # py3.8+ on macos.
                 proc_handler = multiprocessing.get_context("fork").Process
             else:
                 # fork is the default on Python 2
