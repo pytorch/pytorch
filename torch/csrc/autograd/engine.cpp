@@ -807,19 +807,15 @@ void Engine::initialize_device_threads_pool() {
   std::call_once(start_device_threads_flag_, &Engine::start_device_threads, this);
 }
 
-void Engine::enqueue_blocked_task_on_cpu(NodeTask task) {
+std::shared_ptr<FutureVariableList> Engine::execute_graph_task_until_ready_queue_empty(
+    const std::shared_ptr<GraphTask>& graph_task,
+    std::shared_ptr<Node> root_to_execute,
+    bool incrementOutstandingTasks) {
   initialize_device_threads_pool();
-  std::shared_ptr<GraphTask> graph_task = task.base_.lock();
-  // The graph_task must be alive at this point, because internal autograd machinary
-  // who calls this API (Distributed Autograd Engine) increases outstanding_tasks_
-  // outside this API to keep the GraphTask alive
-  TORCH_INTERNAL_ASSERT(graph_task, "GraphTask is no longer valid!");
-  ready_queue(graph_task, at::kCPU)->push(
-      std::move(task), /* incrementOutstandingTasks */ false);
-}
-
-void Engine::execute_graph_task_with_continuation(const std::shared_ptr<GraphTask>& graph_task) {
   std::shared_ptr<ReadyQueue> graph_task_rq = graph_task->cpu_ready_queue_;
+  graph_task_rq->push(
+      NodeTask(graph_task, std::move(root_to_execute), InputBuffer(0)),
+      incrementOutstandingTasks);
   while(!graph_task_rq->empty()) {
     NodeTask task = graph_task_rq->pop();
     std::shared_ptr<GraphTask> local_graph_task;
@@ -835,7 +831,7 @@ void Engine::execute_graph_task_with_continuation(const std::shared_ptr<GraphTas
           thread_on_exception(local_graph_task, task.fn_, e);
           // early return in error so that we immediately stop the execution
           // of this GraphTask and return the future with proper ErrorMessage
-          return;
+          break;
         }
       }
     }
@@ -848,19 +844,13 @@ void Engine::execute_graph_task_with_continuation(const std::shared_ptr<GraphTas
     // 'mark_graph_task_completed' would mark the Future as completed and this
     // would notify the owner thread that the task has been completed.
     mark_graph_task_completed(graph_task);
-  } else {
-    // schedule a continuation
-    at::launch([this, graph_task]() {
-        execute_graph_task_with_continuation(graph_task);
-    });
   }
-
+  return graph_task->future_result_;
 }
 
 std::shared_ptr<FutureVariableList> Engine::execute_with_graph_task(
     const std::shared_ptr<GraphTask>& graph_task,
-    std::shared_ptr<Node> graph_root,
-    bool async_mode) {
+    std::shared_ptr<Node> graph_root) {
   initialize_device_threads_pool();
   // Lock mutex for GraphTask.
   std::unique_lock<std::mutex> lock(graph_task->mutex_);
@@ -882,22 +872,14 @@ std::shared_ptr<FutureVariableList> Engine::execute_with_graph_task(
     // The owning thread start to drive the engine execution with the GraphTask
     // that has already been pushed to the current CPU thread's ready_queue
     lock.unlock();
-    if (async_mode) {
-      at::launch([this, graph_task]() {
-          execute_graph_task_with_continuation(graph_task);
-      });
-    } else {
-      thread_main(nullptr, false);
-      TORCH_INTERNAL_ASSERT(graph_task->future_result_->completed());
-    }
+    thread_main(nullptr, false);
+    TORCH_INTERNAL_ASSERT(graph_task->future_result_->completed());
     // reset the worker_device after the completion of the graph_task, this is so
     // that the initial state of the engine remains the same across every backward()
     // or grad() call, we don't need to reset local_ready_queue as we could possibly
     // reuse it for new backward calls.
     worker_device = NO_DEVICE;
   } else {
-    TORCH_CHECK(!async_mode, "The async_mode of autograd engine is only supposed"
-                " to be used by non-reentrant backward calls");
     // If worker_device is any devices (i.e. CPU, CUDA): this is a re-entrant
     //    backward call from that device.
     graph_task->owner_ = worker_device;

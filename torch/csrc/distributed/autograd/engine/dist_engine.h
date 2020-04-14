@@ -94,7 +94,8 @@ class TORCH_API DistEngine {
   std::shared_ptr<rpc::FutureMessage> runEngineAndAccumulateGradients(
       const ContextPtr& autogradContext,
       const std::shared_ptr<torch::autograd::Node>& graphRoot,
-      const torch::autograd::edge_list& outputEdges);
+      const torch::autograd::edge_list& outputEdges,
+      bool incrementOutStandingTasks=true);
 
   // Run after the backward pass is done to appropriately cleanup structures.
   void cleanupBackwardPass(const ContextPtr& autogradContext);

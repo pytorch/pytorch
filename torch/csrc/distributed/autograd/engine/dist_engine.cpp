@@ -194,13 +194,17 @@ void DistEngine::computeDependencies(
 std::shared_ptr<rpc::FutureMessage> DistEngine::runEngineAndAccumulateGradients(
     const ContextPtr& autogradContext,
     const std::shared_ptr<Node>& graphRoot,
-    const edge_list& outputEdges) {
+    const edge_list& outputEdges,
+    bool incrementOutstandingTasks) {
   // Cleanup previous state for outstanding RPCs. Outstanding RPCs could be
   // lingering if we're running backward multiple times and some of the
   // passes ran into errors.
   autogradContext->clearOutstandingRpcs();
 
-  auto futureGrads = engine_.execute_with_graph_task(autogradContext->retrieveGraphTask(), graphRoot, /*async_mode=*/true);
+  auto graphTask = autogradContext->retrieveGraphTask();
+  auto futureGrads = engine_.execute_graph_task_until_ready_queue_empty(/*graph_task*/graphTask,
+                                                                        /*root_to_execute*/graphRoot,
+                                                                        /*incrementOutstandingTasks*/incrementOutstandingTasks);
 
   // Build a future that waits for the callbacks to execute (since callbacks
   // execute after the original future is completed). This ensures we return a
@@ -273,12 +277,9 @@ std::shared_ptr<rpc::FutureMessage> DistEngine::executeSendFunctionAsync(
 
     // Enqueue the current send function.
     auto graphTask = autogradContext->retrieveGraphTask();
-    engine_.enqueue_blocked_task_on_cpu(torch::autograd::NodeTask(
-        graphTask, sendFunction, torch::autograd::InputBuffer(0)));
-
     // Run the autograd engine.
     auto accumulateGradFuture = runEngineAndAccumulateGradients(
-        autogradContext, dummyRoot, outputEdges);
+        autogradContext, sendFunction, outputEdges, /*incrementOutstandingTasks=*/false);
 
     // Build the 'uber' future that waits for everything.
     auto callbackFuture = std::make_shared<rpc::FutureMessage>();
@@ -332,8 +333,9 @@ std::shared_ptr<rpc::FutureMessage> DistEngine::executeSendFunctionAsync(
   } else {
     lock.unlock();
     auto graphTask = autogradContext->retrieveGraphTask();
-    engine_.enqueue_blocked_task_on_cpu(torch::autograd::NodeTask(
-        graphTask, sendFunction, torch::autograd::InputBuffer(0)));
+    engine_.execute_graph_task_until_ready_queue_empty(/*graph_task*/graphTask,
+                                                       /*root_to_execute*/sendFunction,
+                                                       /*incrementOutstandingTasks*/false);
     return std::make_shared<rpc::FutureMessage>(rpc::Message());
   }
 }

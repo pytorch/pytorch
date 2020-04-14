@@ -248,8 +248,7 @@ struct TORCH_API Engine {
   // machinery and shouldn't be exposed to users in anyway.
   virtual std::shared_ptr<FutureVariableList> execute_with_graph_task(
       const std::shared_ptr<GraphTask>& graph_task,
-      std::shared_ptr<Node> graph_root,
-      bool async_mode = false);
+      std::shared_ptr<Node> graph_root);
 
   // Enqueues a blocked task for execution on the CPU thread. A blocked task is
   // basically a task that isn't triggered automatically to be
@@ -263,7 +262,10 @@ struct TORCH_API Engine {
   // 'outstanding_tasks_' first to indicate the local autograd engine needs to
   // wait for this task, but the task might actually be received later over the
   // network for execution.
-  void enqueue_blocked_task_on_cpu(NodeTask task);
+ std::shared_ptr<FutureVariableList> execute_graph_task_until_ready_queue_empty(
+     const std::shared_ptr<GraphTask>& graph_task,
+     std::shared_ptr<Node> root_to_execute,
+     bool incrementOutstandingTasks=true);
 
   virtual std::unique_ptr<AnomalyMetadata> make_anomaly_metadata() {
     return nullptr;
@@ -355,8 +357,6 @@ private:
   std::condition_variable non_reentrant_device_thread_finish_;
   std::mutex non_reentrant_device_thread_finish_mutex_;
 
- void execute_graph_task_with_continuation(
-     const std::shared_ptr<GraphTask>& graph_task);
  void graph_task_exec_post_processing(
      const std::shared_ptr<GraphTask>& graph_task);
  void mark_graph_task_completed(const std::shared_ptr<GraphTask>& graph_task);
