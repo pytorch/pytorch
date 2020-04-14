@@ -319,11 +319,11 @@ void BoundShapeInferencer::InferLengthsRangeFill(const OperatorDef& op) {
       false);
   CheckAndSetTensorBoundShape(
       op.output(0),
-      {TensorBoundShape_DimType_FEATURE_MAX_DEFAULT},
-      {spec_.max_seq_size},
+      {TensorBoundShape_DimType_BATCH_OF_FEATURE_MAX_DEFAULT},
+      {spec_.max_batch_size * spec_.max_seq_size},
       TensorProto_DataType_INT32,
       false);
-  current_dim_type_ = TensorBoundShape_DimType_FEATURE_MAX_DEFAULT;
+  current_dim_type_ = TensorBoundShape_DimType_BATCH_OF_FEATURE_MAX_DEFAULT;
 }
 
 void BoundShapeInferencer::InferSparseLengthsSum(const OperatorDef& op) {
@@ -356,8 +356,8 @@ void BoundShapeInferencer::InferSparseLengthsSum(const OperatorDef& op) {
         op.input_size(), 4, "SparseLengthsWeightedSum must have 4 inputs");
     SetTensorBoundShapeIfNotExist(
         op.input(weight),
-        {TensorBoundShape_DimType_FEATURE_MAX_DEFAULT},
-        {spec_.max_seq_size},
+        {TensorBoundShape_DimType_BATCH_OF_FEATURE_MAX_DEFAULT},
+        {spec_.max_batch_size * spec_.max_seq_size},
         TensorProto_DataType_FLOAT,
         false);
   }
@@ -365,8 +365,8 @@ void BoundShapeInferencer::InferSparseLengthsSum(const OperatorDef& op) {
   // Bound inputs
   SetTensorBoundShapeIfNotExist(
       op.input(1 + weight),
-      {TensorBoundShape_DimType_FEATURE_MAX_DEFAULT},
-      {spec_.max_seq_size},
+      {TensorBoundShape_DimType_BATCH_OF_FEATURE_MAX_DEFAULT},
+      {spec_.max_batch_size * spec_.max_seq_size},
       TensorProto_DataType_INT64,
       false);
   CheckAndSetTensorBoundShape(
