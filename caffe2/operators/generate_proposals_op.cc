@@ -417,7 +417,7 @@ SHOULD_NOT_DO_GRADIENT(GenerateProposalsCPP);
 // clang-format off
 C10_EXPORT_CAFFE2_OP_TO_C10_CPU(
     GenerateProposals2,
-    "_caffe2::GenerateProposals("
+    "__caffe2::GenerateProposals("
       "Tensor scores, "
       "Tensor bbox_deltas, "
       "Tensor im_info, "
@@ -436,7 +436,7 @@ C10_EXPORT_CAFFE2_OP_TO_C10_CPU(
     caffe2::GenerateProposalsOp<caffe2::CPUContext>);
 C10_EXPORT_CAFFE2_OP_TO_C10_CPU(
     GenerateProposals,
-    "__caffe2::GenerateProposals("
+    "_caffe2::GenerateProposals("
       "Tensor scores, "
       "Tensor bbox_deltas, "
       "Tensor im_info, "
