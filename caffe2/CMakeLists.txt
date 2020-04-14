@@ -310,6 +310,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       --nn-path "aten/src"
       $<$<BOOL:${INTERN_DISABLE_AUTOGRAD}>:--disable-autograd>
       $<$<BOOL:${SELECTED_OP_LIST}>:--selected-op-list-path="${SELECTED_OP_LIST}">
+      --force_schema_registration
     DEPENDS
     "${CMAKE_BINARY_DIR}/aten/src/ATen/Declarations.yaml"
     "${TOOLS_PATH}/autograd/templates/VariableType.h"
@@ -442,6 +443,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/jit/runtime/print_handler.cpp
     ${TORCH_SRC_DIR}/csrc/jit/codegen/fuser/interface.cpp
     ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/interface.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/runtime/register_ops_utils.cpp
     ${TORCH_SRC_DIR}/csrc/jit/runtime/register_prim_ops.cpp
     ${TORCH_SRC_DIR}/csrc/jit/runtime/register_prim_ops_fulljit.cpp
     ${TORCH_SRC_DIR}/csrc/jit/runtime/register_prim_ops_c10.cpp
@@ -479,6 +481,8 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/jit/codegen/fuser/fallback.cpp
     ${TORCH_SRC_DIR}/csrc/jit/api/function_impl.cpp
     ${TORCH_SRC_DIR}/csrc/jit/runtime/vararg_functions.cpp
+
+    ${TORCH_SRC_DIR}/csrc/jit/tensorexpr/bounds_inference.cpp
     ${TORCH_SRC_DIR}/csrc/jit/tensorexpr/codegen.cpp
     ${TORCH_SRC_DIR}/csrc/jit/tensorexpr/eval.cpp
     ${TORCH_SRC_DIR}/csrc/jit/tensorexpr/expr.cpp
@@ -499,6 +503,11 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/jit/tensorexpr/unique_name_manager.cpp
     ${TORCH_SRC_DIR}/csrc/jit/mobile/type_parser.cpp
     )
+
+  # Required workaround for LLVM 9 includes.
+  if(NOT MSVC)
+    set_source_files_properties(${TORCH_SRC_DIR}/csrc/jit/tensorexpr/llvm_jit.cpp PROPERTIES COMPILE_FLAGS -Wno-noexcept-type)
+  endif()
 
   if(NOT INTERN_DISABLE_MOBILE_INTERP)
     set(MOBILE_SRCS
@@ -568,7 +577,6 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       ${TORCH_SRC_DIR}/csrc/autograd/functions/comm.cpp
       ${TORCH_SRC_DIR}/csrc/cuda/comm.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/arith.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/code_write.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/dispatch.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/fusion.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/graph_fuser.cpp
@@ -580,6 +588,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/kernel.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/manager.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/mutator.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/lower2device.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/parser.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/partition.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/predicate_compute.cpp
@@ -990,6 +999,31 @@ if(USE_OPENMP AND OPENMP_FOUND)
     "OpenMP CXX_FLAGS: ${OpenMP_CXX_FLAGS}. \n"
     "OpenMP libraries: ${OpenMP_CXX_LIBRARIES}.")
   target_link_libraries(torch_cpu PRIVATE ${OpenMP_CXX_LIBRARIES})
+endif()
+
+if($ENV{TH_BINARY_BUILD})
+  if(NOT MSVC AND USE_CUDA AND NOT APPLE)
+    # Note [Extra MKL symbols for MAGMA in torch_cpu]
+    #
+    # When we build CUDA libraries and link against MAGMA, MAGMA makes use of
+    # some BLAS symbols in its CPU fallbacks when it has no GPU versions
+    # of kernels.  Previously, we ensured the BLAS symbols were filled in by
+    # MKL by linking torch_cuda with BLAS, but when we are statically linking
+    # against MKL (when we do wheel builds), this actually ends up pulling in a
+    # decent chunk of MKL into torch_cuda, inflating our torch_cuda binary
+    # size by 8M.  torch_cpu exposes most of the MKL symbols we need, but
+    # empirically we determined that there are four which it doesn't provide.  If
+    # we link torch_cpu with these --undefined symbols, we can ensure they
+    # do get pulled in, and then we can avoid statically linking in MKL to
+    # torch_cuda at all!
+    #
+    # We aren't really optimizing for binary size on Windows (and this link
+    # line doesn't work on Windows), so don't do it there.
+    #
+    # These linker commands do not work on OS X, do not attempt this there.
+    # (It shouldn't matter anyway, though, because OS X has dropped CUDA support)
+    set_target_properties(torch_cpu PROPERTIES LINK_FLAGS "-Wl,--undefined=mkl_lapack_slaed0 -Wl,--undefined=mkl_lapack_dlaed0 -Wl,--undefined=mkl_lapack_dormql -Wl,--undefined=mkl_lapack_sormql")
+  endif()
 endif()
 
 target_link_libraries(torch_cpu PUBLIC c10)

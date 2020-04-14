@@ -3,7 +3,7 @@
 #else
 
 #include <TH/generic/THTensorApply.hpp>
-#include <ATen/CPUGenerator.h>
+#include <ATen/CPUGeneratorImpl.h>
 #include <ATen/Utils.h>
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/WrapDimUtils.h>
