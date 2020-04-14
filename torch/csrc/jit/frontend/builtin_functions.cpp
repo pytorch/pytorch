@@ -129,7 +129,7 @@ struct BuiltinFunctionRegistry {
     }
     for (auto rhs : {"number", "Tensor"}) {
       TemplateEnv env;
-      env.s("Rhs_Type", rhs);s
+      env.s("Rhs_Type", rhs);
       loadSource(floordiv.format(env), "aten");
     }
 
