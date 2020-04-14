@@ -22,10 +22,7 @@ struct Tensor {
 };
 )";
 
-
-
-
-}
-}
-}
-}
+} // namespace cuda
+} // namespace fuser
+} // namespace jit
+} // namespace torch

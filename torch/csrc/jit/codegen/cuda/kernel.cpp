@@ -1,8 +1,8 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/nvrtc_stub/ATenNVRTC.h>
+#include <c10/core/ScalarType.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/util/ArrayRef.h>
-#include <c10/core/ScalarType.h>
 
 #include <torch/csrc/jit/codegen/cuda/kernel.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_arg.h>
@@ -67,14 +67,15 @@ struct ExtractSizeStride {
 };
 
 struct KernelArgumentHolder {
-private:
+ private:
   std::vector<ArgAbstract*> arguments;
   std::vector<char> buffer;
   std::vector<void*> arg_ptrs;
   bool changed = true;
-public:
-  virtual ~KernelArgumentHolder(){
-    for(auto  arg: arguments)
+
+ public:
+  virtual ~KernelArgumentHolder() {
+    for (auto arg : arguments)
       delete arg;
   }
 
@@ -83,13 +84,13 @@ public:
       const at::Tensor& val,
       c10::optional<at::IntArrayRef> broadcasted_size = c10::nullopt) {
     changed = true;
-    ExtractSizeStride ess (val, broadcasted_size);
+    ExtractSizeStride ess(val, broadcasted_size);
     int nDims = ess.sizes.size();
-    
+
     c10::ScalarType dtype = val.scalar_type();
-    TensorArgAbstract *tensor_arg = getTensorArg(dtype, nDims);
+    TensorArgAbstract* tensor_arg = getTensorArg(dtype, nDims);
     tensor_arg->setPointer(val.data_ptr());
-    for(int i=0; i<nDims; i++){
+    for (int i = 0; i < nDims; i++) {
       tensor_arg->setSize(i, ess.sizes[i]);
       tensor_arg->setStride(i, ess.strides[i]);
     }
@@ -99,50 +100,56 @@ public:
   // Push a scalar or integer to the arguments
   void push(const IValue& val) {
     changed = true;
-    TORCH_INTERNAL_ASSERT(val.isScalar(),
-      "Tried to push an arg to run in a fused kernel, expected a scalar but got, ", val);
-    switch(val.toScalar().type()){
-      case(c10::ScalarType::Double):
-        arguments.push_back(new FloatArg((float) val.toDouble()));
+    TORCH_INTERNAL_ASSERT(
+        val.isScalar(),
+        "Tried to push an arg to run in a fused kernel, expected a scalar but got, ",
+        val);
+    switch (val.toScalar().type()) {
+      case (c10::ScalarType::Double):
+        arguments.push_back(new FloatArg((float)val.toDouble()));
         return;
-      case(c10::ScalarType::Long):
-        arguments.push_back(new IntArg((int) val.toInt()));
+      case (c10::ScalarType::Long):
+        arguments.push_back(new IntArg((int)val.toInt()));
         return;
       default:
-        TORCH_INTERNAL_ASSERT(false,
-        " Tried to create argument to send to a fused kernel, but got an expected type: ");
+        TORCH_INTERNAL_ASSERT(
+            false,
+            " Tried to create argument to send to a fused kernel, but got an expected type: ");
     }
-          TORCH_INTERNAL_ASSERT(false,
-      " Tried to create argument to send to a fused kernel, but got a non-tensor, non-scalar type.");
+    TORCH_INTERNAL_ASSERT(
+        false,
+        " Tried to create argument to send to a fused kernel, but got a non-tensor, non-scalar type.");
   }
 
-  // Create buffer, flatten arguments into it, align by 8 Bytes, return pointers in the buffer
-  void** getBuffer(){
-    if(!changed) return arg_ptrs.data();
+  // Create buffer, flatten arguments into it, align by 8 Bytes, return pointers
+  // in the buffer
+  void** getBuffer() {
+    if (!changed)
+      return arg_ptrs.data();
 
     std::vector<size_t> offsets;
 
     size_t buffer_size = 0;
-    //align args to 64bit
-    for(auto arg : arguments){
+    // align args to 64bit
+    for (auto arg : arguments) {
       offsets.push_back(buffer_size);
       buffer_size += arg->getSizeof();
       buffer_size += buffer_size % 8;
     }
-    
+
     arg_ptrs = std::vector<void*>(arguments.size(), nullptr);
 
     buffer.resize(buffer_size);
-    for(decltype(arguments.size()) i{0}; i<arguments.size(); i++){
+    for (decltype(arguments.size()) i{0}; i < arguments.size(); i++) {
       arg_ptrs[i] = buffer.data() + offsets[i];
       memcpy(arg_ptrs[i], arguments[i]->arg(), arguments[i]->getSizeof());
     }
 
-    TensorArgCodegen<float, 4>* last_arg = static_cast<TensorArgCodegen<float, 4>* >(arg_ptrs[arg_ptrs.size()-1]);
+    TensorArgCodegen<float, 4>* last_arg =
+        static_cast<TensorArgCodegen<float, 4>*>(arg_ptrs[arg_ptrs.size() - 1]);
 
     return arg_ptrs.data();
   }
-
 };
 
 std::pair<std::string, std::string> codeGeneration(Fusion& fusion) {
@@ -267,8 +274,8 @@ void runKernel(
   // Naive I/O setup, I'm ignoring all the potential transformation (i.e. I/O
   // allocated here from the subgraph could be, and very likely are, different
   // from I/O expected by the generated CUDA kernel.
-  for (auto& input : inputs) { 
-    if(input.isTensor()){
+  for (auto& input : inputs) {
+    if (input.isTensor()) {
       kernel_args.push(input.toTensor(), outputs[0].sizes());
     } else {
       kernel_args.push(input);
@@ -276,7 +283,7 @@ void runKernel(
   }
 
   for (auto& output : outputs) {
-      kernel_args.push(output);
+    kernel_args.push(output);
   }
 
   // launch kernel;
@@ -303,8 +310,6 @@ void runTestKernel(
     CudaKernel& entry,
     const std::vector<at::Tensor>& inputs,
     std::vector<at::Tensor>& outputs) {
-
-    
   const auto prior_device = at::cuda::current_device();
   at::cuda::set_device(entry.device_);
   auto stream = at::cuda::getCurrentCUDAStream();
@@ -314,12 +319,12 @@ void runTestKernel(
   // Naive I/O setup, I'm ignoring all the potential transformation (i.e. I/O
   // allocated here from the subgraph could be, and very likely are, different
   // from I/O expected by the generated CUDA kernel.
-  for (auto& input : inputs) { 
+  for (auto& input : inputs) {
     kernel_args.push(input, outputs[0].sizes());
   }
 
   for (auto& output : outputs) {
-      kernel_args.push(output);
+    kernel_args.push(output);
   }
 
   // launch kernel;
