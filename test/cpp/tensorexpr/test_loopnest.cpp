@@ -79,7 +79,7 @@ void testExprSimple02() {
     VarHandle x_inner("x_inner", kInt);
     VarHandle y("y", kInt);
     VarHandle x_tail("x_tail", kInt);
-    BufHandle f("f", {26, 5});
+    BufHandle f("f", {26, 5}, kFloat);
     ExprHandle x_1 = x_outer * 4 + x_inner;
     ExprHandle x_outer_end = (ExprHandle(26) - 0) / 4;
     For* stmt1 = For::make(
@@ -148,7 +148,7 @@ void testExprSplitWithTailNone() {
     VarHandle x_inner("x_inner", kInt);
     VarHandle y("y", kInt);
     VarHandle x_tail("x_tail", kInt);
-    BufHandle f("f", {24, 5});
+    BufHandle f("f", {24, 5}, kFloat);
     ExprHandle x_1 = x_outer * 4 + x_inner;
     ExprHandle x_outer_end = (ExprHandle(24) - 0) / 4;
     For* stmt = For::make(
@@ -457,7 +457,7 @@ void testScheduleFuserStyle() {
   const int kVectorCount = 128;
   const int kTotalSize = kVectorSize * kVectorCount;
 
-  Buffer a_buf(BufHandle("A", {ExprHandle(kTotalSize)}), kFloat);
+  Buffer a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kFloat));
 
   Tensor* b = Compute(
       "f", {{kTotalSize, "i"}}, [&](const std::vector<VarHandle>& axes) {
@@ -490,10 +490,10 @@ void testScheduleFuserThreeArg() {
   const int kVectorCount = 128;
   const int kTotalSize = kVectorSize * kVectorCount;
 
-  Buffer a(BufHandle("A", {ExprHandle(kTotalSize)}), kFloat);
-  Buffer b(BufHandle("B", {ExprHandle(kTotalSize)}), kFloat);
-  Buffer c(BufHandle("C", {ExprHandle(kTotalSize)}), kFloat);
-  Buffer d(BufHandle("D", {ExprHandle(kTotalSize)}), kFloat);
+  Buffer a(BufHandle("A", {ExprHandle(kTotalSize)}, kFloat));
+  Buffer b(BufHandle("B", {ExprHandle(kTotalSize)}, kFloat));
+  Buffer c(BufHandle("C", {ExprHandle(kTotalSize)}, kFloat));
+  Buffer d(BufHandle("D", {ExprHandle(kTotalSize)}, kFloat));
 
   Tensor* e = Compute("e", {{kTotalSize, "i"}}, [&](const VarHandle& i) {
     return a(i) + b(i);
@@ -528,8 +528,8 @@ void testScheduleDynamicShape2D() {
   auto testWithSize = [](int32_t M, int32_t N) {
     VarHandle m("m", kInt);
     VarHandle n("n", kInt);
-    Buffer a(BufHandle("a", {m, n}), kFloat);
-    Buffer b(BufHandle("b", {m, n}), kFloat);
+    Buffer a(BufHandle("a", {m, n}, kFloat));
+    Buffer b(BufHandle("b", {m, n}, kFloat));
     Tensor* c = Compute(
         "c", {{m, "m"}, {n, "n"}}, [&](const VarHandle& i, const VarHandle& j) {
           return a(i, j) + b(i, j);
@@ -585,7 +585,7 @@ void testBoundsInference_1() {
   // {{b, kStore, 0, 99}, {a, kLoad, 0, 99}}
   KernelScope kernel_scope;
   ExprHandle n(100);
-  Buffer a(BufHandle("a", {n}), kFloat);
+  Buffer a(BufHandle("a", {n}, kFloat));
   Tensor* b =
       Compute("b", {{n, "i"}}, [&](const VarHandle& i) { return a(i); });
   LoopNest l({b});
@@ -609,7 +609,7 @@ void testBoundsInference_2() {
   // {{b, kStore, 0, n-1}, {a, kLoad, 0, n-1}}
   KernelScope kernel_scope;
   VarHandle n("n", kInt);
-  Buffer a(BufHandle("a", {n}), kFloat);
+  Buffer a(BufHandle("a", {n}, kFloat));
   Tensor* b =
       Compute("b", {{n, "i"}}, [&](const VarHandle& i) { return a(i); });
   LoopNest l({b});
@@ -633,7 +633,7 @@ void testBoundsInference_3() {
   // {{b, kStore, 0, 99}, {a, kLoad, 0, 109}}
   KernelScope kernel_scope;
   ExprHandle n(100);
-  Buffer a(BufHandle("a", {n + 10}), kFloat);
+  Buffer a(BufHandle("a", {n + 10}, kFloat));
   Tensor* b = Compute(
       "b", {{n, "i"}}, [&](const VarHandle& i) { return a(i) * a(i + 10); });
   LoopNest l({b});
@@ -661,7 +661,7 @@ void testBoundsInference_4() {
   KernelScope kernel_scope;
   ExprHandle W(320);
   ExprHandle H(200);
-  Buffer a(BufHandle("a", {H, W}), kFloat);
+  Buffer a(BufHandle("a", {H, W}, kFloat));
   Tensor* b = Compute(
       "b", {{H, "y"}, {W, "x"}}, [&](const VarHandle& y, const VarHandle& x) {
         return x * y;
@@ -734,7 +734,7 @@ void testBoundsInference_5() {
   //   b[i_tail + (100/16)*16] = a[i_tail + (100/16)*16];
   KernelScope kernel_scope;
   ExprHandle n(100);
-  Buffer a(BufHandle("a", {n}), kFloat);
+  Buffer a(BufHandle("a", {n}, kFloat));
   Tensor* b =
       Compute("b", {{n, "i"}}, [&](const VarHandle& i) { return a(i); });
   LoopNest l({b});
@@ -780,7 +780,7 @@ void testBoundsInference_6() {
   ExprHandle H(200);
   ExprHandle CW(32);
   ExprHandle CH(20);
-  Buffer a(BufHandle("a", {H, W}), kFloat);
+  Buffer a(BufHandle("a", {H, W}, kFloat));
   Tensor* b = Compute(
       "b", {{H, "y"}, {W, "x"}}, [&](const VarHandle& y, const VarHandle& x) {
         return x * y;

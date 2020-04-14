@@ -396,7 +396,7 @@ class Flattener : public IRMutator {
   Expr* mutate(const FunctionCall* v) override {
     const Tensor* t = v->tensor();
     const Buf* b = t->buf();
-    Buffer buffer(BufHandle(b), t->body()->dtype());
+    Buffer buffer = Buffer(BufHandle(b));
     const std::vector<const Expr*>& params = v->params();
     std::vector<ExprHandle> params_expr(params.size());
     for (size_t i = 0; i < params.size(); i++) {
@@ -1179,7 +1179,7 @@ void LoopNest::computeAt(Stmt* s, For* f) {
 
   // TODO: Use name-hint of the producer instead of "temp"
   const Buf* temp_buf =
-      new Buf(new Var("temp", store_bounds_info.buf->dtype()), dims);
+      new Buf(new Var("temp", kHandle), dims, st->value()->dtype());
 
   // Generate index variables for 'temp'
   std::vector<const Expr*> temp_indices(dims.size());

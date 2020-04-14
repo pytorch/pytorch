@@ -346,9 +346,9 @@ void testHashDifferenceTypes() {
 void testHashLargeExpression() {
   KernelScope kernel_scope;
   constexpr int N = 1024;
-  Buffer a(BufHandle("A", {N}), kInt);
-  Buffer b(BufHandle("B", {N}), kInt);
-  Buffer c(BufHandle("C", {N}), kInt);
+  Buffer a(BufHandle("A", {N}, kInt));
+  Buffer b(BufHandle("B", {N}, kInt));
+  Buffer c(BufHandle("C", {N}, kInt));
   auto mask = IntImm::make(1);
   VarHandle i("i", kInt);
   auto memcpy_stmt = For::make(
@@ -364,8 +364,8 @@ void testHashLargeExpression() {
               CompareSelectOperation::kEQ),
           mask));
 
-  Buffer d(BufHandle("D", {1}), kInt);
-  Buffer e(BufHandle("E", {1}), kInt);
+  Buffer d(BufHandle("D", {1}, kInt));
+  Buffer e(BufHandle("E", {1}, kInt));
   auto store_ramp_stmt = Store::make(
       e,
       {Ramp::make(0, 1, 4)},
@@ -1553,8 +1553,8 @@ void testSimplifyConstantCond() {
   {
     // If the condition is constant true then take the true_value.
     // 1 ? A[0] = 1 : B[0] = 1 => A[0] = 1
-    Buffer a(BufHandle("A", {1}), kInt);
-    Buffer b(BufHandle("B", {1}), kInt);
+    Buffer a(BufHandle("A", {1}, kInt));
+    Buffer b(BufHandle("B", {1}, kInt));
     ExprHandle condition(1);
     Stmt* true_val = Store::make(a, {0}, 1, 1);
     Stmt* false_val = Store::make(b, {0}, 1, 1);
@@ -1569,8 +1569,8 @@ void testSimplifyConstantCond() {
   {
     // If the condition is constant false then take the false_value.
     // 0 ? A[0] = 1 : B[0] = 1 => B[0] = 1
-    Buffer a(BufHandle("A", {1}), kInt);
-    Buffer b(BufHandle("B", {1}), kInt);
+    Buffer a(BufHandle("A", {1}, kInt));
+    Buffer b(BufHandle("B", {1}, kInt));
     ExprHandle condition(0);
     Stmt* true_val = Store::make(a, {0}, 1, 1);
     Stmt* false_val = Store::make(b, {0}, 1, 1);
@@ -1586,8 +1586,8 @@ void testSimplifyConstantCond() {
     // condition is simplified before checking.
     // (x-x) ? A[0] = 1 : B[0] = 1 => B[0] = 1
     VarHandle x("x", kInt);
-    Buffer a(BufHandle("A", {1}), kInt);
-    Buffer b(BufHandle("B", {1}), kInt);
+    Buffer a(BufHandle("A", {1}, kInt));
+    Buffer b(BufHandle("B", {1}, kInt));
     ExprHandle condition(x - x);
     Stmt* true_val = Store::make(a, {0}, 1, 1);
     Stmt* false_val = Store::make(b, {0}, 1, 1);
@@ -1603,7 +1603,7 @@ void testSimplifyConstantCond() {
     // If both branches are the same then don't do the condition.
     // x ? A[0] = x : A[0] = x => A[0] = x
     VarHandle x("x", kInt);
-    Buffer a(BufHandle("A", {1}), kInt);
+    Buffer a(BufHandle("A", {1}, kInt));
     ExprHandle condition(x - x);
     Stmt* true_val = Store::make(a, {0}, x, 1);
     Stmt* false_val = Store::make(a, {0}, x, 1);
@@ -1619,7 +1619,7 @@ void testSimplifyConstantCond() {
     // If both branches simplify to the same thing it still works.
     // x ? (x + x) : (2 * x) => x
     VarHandle x("x", kInt);
-    Buffer a(BufHandle("A", {1}), kInt);
+    Buffer a(BufHandle("A", {1}, kInt));
     ExprHandle condition(x - x);
     Stmt* true_val = Store::make(a, {0}, ExprHandle(2) * x, 1);
     Stmt* false_val = Store::make(a, {0}, x + x, 1);
@@ -1635,7 +1635,7 @@ void testSimplifyConstantCond() {
     // But not if they dont
     // x ? x : (2 * x) => x ? x : (2 * x)
     VarHandle x("x", kInt);
-    Buffer a(BufHandle("A", {1}), kInt);
+    Buffer a(BufHandle("A", {1}, kInt));
     ExprHandle condition(x);
     Stmt* true_val = Store::make(a, {0}, x, 1);
     Stmt* false_val = Store::make(a, {0}, ExprHandle(2) * x, 1);
