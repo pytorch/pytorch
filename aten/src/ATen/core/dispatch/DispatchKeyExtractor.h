@@ -15,7 +15,7 @@ namespace impl {
 // Some keys are ALWAYS considered for inclusion by default, so they are
 // included in the set here.  (const appears to be sufficient for
 // always_included to get inlined, constexpr not necessary)
-const DispatchKeySet always_included{DispatchKey::VariableTensorId, DispatchKey::BackendSelect};
+const DispatchKeySet always_included{DispatchKey::Autograd, DispatchKey::BackendSelect};
 
 // Take a DispatchKeySet for a Tensor and determine what the actual dispatch
 // DispatchKey should be, taking into account TLS, and skipping backends which
