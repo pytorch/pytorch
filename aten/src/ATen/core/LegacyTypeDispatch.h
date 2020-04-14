@@ -23,7 +23,7 @@ class CAFFE2_API LegacyTypeDispatch {
   void initForDispatchKeySet(DispatchKeySet ts) {
     // TODO: Avoid use of legacyExtractDispatchKey here.  The key
     // problem is that you may get a DispatchKeySet with
-    // VariableTensorId set; should you initialize the "underlying"
+    // Autograd set; should you initialize the "underlying"
     // type in that case?  Hard to say.
     auto b = dispatchKeyToBackend(legacyExtractDispatchKey(ts));
     auto p = backendToDeviceType(b);
@@ -82,7 +82,7 @@ struct CAFFE2_API AutoNonVariableTypeMode {
   // NB: The enabled parameter must ALWAYS be black, as Henry Ford used to say.
   // TODO: Eliminate this parameter entirely
   AutoNonVariableTypeMode(bool enabled = true) :
-    guard_(DispatchKey::VariableTensorId) {
+    guard_(DispatchKey::Autograd) {
 
     TORCH_INTERNAL_ASSERT(enabled);
   }

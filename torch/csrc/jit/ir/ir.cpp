@@ -1339,7 +1339,11 @@ Node* Node::insertAfter(Node* n) {
   AT_ASSERT(n->owningBlock());
   AT_ASSERTM(
       n->kind() != prim::Return,
-      "Attempting to insert a Node after the Return node or before the Param node");
+      "Attempting to insert a Node after the Return node or before the Param node. Tried to insert",
+      *this,
+      " after ",
+      *n,
+      ".");
   this->owning_block_ = n->owningBlock();
   Node* next = n->next();
   n->next() = this;

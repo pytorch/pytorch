@@ -257,7 +257,9 @@ private:
             // One registration/invocation API might call another registration/
             // invocation API in which case we can skip processing the nested
             // call. This is a simple trick to avoid "cannot find registered/
-            // invoked op" warning and doesn't affect correctness.
+            // invoked op" warning and doesn't affect correctness, because
+            // later in scanOpRegistration we'll walk the transitively reachable
+            // IR graph again from each registration instance.
             if (!OpRegistrationPatternLoc.pattern->match(callerDemangled) &&
                 OpRegistrationPatternLoc.pattern->match(calleeDemangled)) {
               (*opRegistrationInsts).insert(&I);

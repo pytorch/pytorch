@@ -429,16 +429,16 @@ static auto registry =
     torch::RegisterOperators()
         .op("quantized::linear_dynamic(Tensor X, __torch__.torch.classes.quantized.LinearPackedParamsBase W_prepack) -> Tensor Y",
             torch::RegisterOperators::options()
-                .kernel<QLinearDynamicInt8<false>>(DispatchKey::CPUTensorId))
+                .kernel<QLinearDynamicInt8<false>>(DispatchKey::CPU))
         .op("_quantized::linear_dynamic(Tensor X, __torch__.torch.classes.quantized.LinearPackedParamsBase W_prepack) -> Tensor Y",
             torch::RegisterOperators::options()
-                .kernel<QLinearDynamicInt8<false>>(DispatchKey::CPUTensorId))
+                .kernel<QLinearDynamicInt8<false>>(DispatchKey::CPU))
         .op("quantized::linear_relu_dynamic(Tensor X, __torch__.torch.classes.quantized.LinearPackedParamsBase W_prepack) -> Tensor Y",
             torch::RegisterOperators::options()
-                .kernel<QLinearDynamicInt8<true>>(DispatchKey::CPUTensorId))
-        .op("quantized::linear_dynamic_fp16(Tensor X, __torch__.torch.classes.quantized.LinearPackedParamsBase W_prepack) ->  Tensor Y",
+                .kernel<QLinearDynamicInt8<true>>(DispatchKey::CPU))
+        .op("quantized::linear_dynamic_fp16(Tensor X, __torch__.torch.classes.quantized.LinearPackedParamsBase W_prepack) -> Tensor Y",
             torch::RegisterOperators::options()
-                .kernel<QLinearDynamicFp16<false>>(DispatchKey::CPUTensorId));
+                .kernel<QLinearDynamicFp16<false>>(DispatchKey::CPU));
 
 } // namespace
 } // namespace native

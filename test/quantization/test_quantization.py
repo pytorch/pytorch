@@ -34,7 +34,7 @@ from torch.testing._internal.common_quantization import QuantizationTestCase, \
     test_only_eval_fn, test_only_train_fn, \
     prepare_dynamic, convert_dynamic, SingleLayerLinearDynamicModel, \
     TwoLayerLinearModel, NestedModel, ResNetBase, LSTMDynamicModel, \
-    ModelWithNoQconfigPropagation
+    ModelWithNoQconfigPropagation, ModelForFusionWithBias
 
 from torch.testing._internal.common_quantization import AnnotatedTwoLayerLinearModel, AnnotatedNestedModel, \
     AnnotatedSubNestedModel, AnnotatedCustomConfigNestedModel
@@ -1363,6 +1363,33 @@ class FusionTest(QuantizationTestCase):
         self.assertEqual(type(model.classifier[0]), nniq.LinearReLU)
         self.assertEqual(type(model.classifier[1]), nn.Identity)
 
+    def test_fusion_conv_with_bias(self):
+        model = ModelForFusionWithBias().train()
+        # output with no fusion.
+        out_ref = model(self.img_data[0][0])
+
+        model.qconfig = QConfig(activation=torch.nn.Identity,
+                                weight=torch.nn.Identity)
+        model = fuse_modules(model, [["conv1", "bn1", "relu1"],
+                                     ["conv2", "bn2"]])
+        prep_model = prepare_qat(model, inplace=False)
+        # output with fusion but no observers.
+        out_fused = prep_model(self.img_data[0][0])
+        self.assertEqual(out_ref, out_fused)
+
+        model.qconfig = default_qat_qconfig
+        prepare_qat(model, inplace=True)
+
+        model(self.img_data[0][0])
+
+        def checkQAT(model):
+            self.assertEqual(type(model.conv1), nniqat.ConvBnReLU2d)
+            self.assertEqual(type(model.bn1), nn.Identity)
+            self.assertEqual(type(model.relu1), nn.Identity)
+            self.assertEqual(type(model.conv2), nniqat.ConvBn2d)
+            self.assertEqual(type(model.bn2), nn.Identity)
+
+        checkQAT(model)
 
 class ObserverTest(QuantizationTestCase):
     @given(qdtype=st.sampled_from((torch.qint8, torch.quint8)),

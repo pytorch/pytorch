@@ -376,13 +376,13 @@ static auto registry =
     torch::RegisterOperators()
         .op("quantized::linear(Tensor X, __torch__.torch.classes.quantized.LinearPackedParamsBase W_prepack, float Y_scale_i, int Y_zero_point_i) -> Tensor Y",
             torch::RegisterOperators::options().kernel<QLinearInt8<false>>(
-                DispatchKey::QuantizedCPUTensorId))
+                DispatchKey::QuantizedCPU))
         .op("_quantized::linear(Tensor X, __torch__.torch.classes.quantized.LinearPackedParamsBase W_prepack, float Y_scale_i, int Y_zero_point_i) -> Tensor Y",
             torch::RegisterOperators::options().kernel<QLinearInt8<false>>(
-                DispatchKey::QuantizedCPUTensorId))
+                DispatchKey::QuantizedCPU))
         .op("quantized::linear_relu(Tensor X, __torch__.torch.classes.quantized.LinearPackedParamsBase W_prepack, float Y_scale_i, int Y_zero_point_i) -> Tensor Y",
             torch::RegisterOperators::options().kernel<QLinearInt8<true>>(
-                DispatchKey::QuantizedCPUTensorId));
+                DispatchKey::QuantizedCPU));
 } // namespace
 } // namespace native
 } // namespace at

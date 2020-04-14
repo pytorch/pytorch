@@ -101,16 +101,10 @@ static auto siof = register_linear_params();
 
 static auto registry =
     c10::RegisterOperators()
-        .op(c10::RegisterOperators::options()
-                .aliasAnalysis(AliasAnalysisKind::PURE_FUNCTION)
-                .schema(
-                    "quantized::linear_unpack(__torch__.torch.classes.quantized.LinearPackedParamsBase W_prepack) -> (Tensor W_origin, Tensor? B_origin)")
-                .catchAllKernel<QLinearUnpackWeightInt8>())
-        .op(c10::RegisterOperators::options()
-                .aliasAnalysis(AliasAnalysisKind::PURE_FUNCTION)
-                .schema(
-                    "quantized::linear_unpack_fp16(__torch__.torch.classes.quantized.LinearPackedParamsBase W_prepack) -> (Tensor W_origin, Tensor? B_origin)")
-                .catchAllKernel<QLinearUnpackWeightFp16>());
+        .op("quantized::linear_unpack(__torch__.torch.classes.quantized.LinearPackedParamsBase W_prepack) -> (Tensor W_origin, Tensor? B_origin)",
+            c10::RegisterOperators::options().catchAllKernel<QLinearUnpackWeightInt8>())
+        .op("quantized::linear_unpack_fp16(__torch__.torch.classes.quantized.LinearPackedParamsBase W_prepack) -> (Tensor W_origin, Tensor? B_origin)",
+            c10::RegisterOperators::options().catchAllKernel<QLinearUnpackWeightFp16>());
 
 } // namespace
 } // namespace native

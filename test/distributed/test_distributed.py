@@ -1853,10 +1853,10 @@ class _DistTestBase(object):
         return global_bs, input_cpu, target, loss
 
     # END TO END TEST FOR DISTRIBUTEDDATAPARALLEL
-    def _test_DDP_helper(self, model, input_var, target, loss):
+    def _test_DDP_helper(self, model, input_var, target, loss, scale_factor=1.0):
         model.train()
         output = model(input_var)
-        l = loss(output, target)
+        l = loss(output, target) * scale_factor
         l.backward()
 
     def _assert_equal_param(self, param_gpu, param_DDP):
@@ -1865,18 +1865,22 @@ class _DistTestBase(object):
             self.assertEqual(p_gpu, p_DDP)
 
     def _test_DDP_5iter(
-        self, model_base, model_DDP, input, target, loss, local_bs, rank, batch_size, test_save
+        self, model_base, model_DDP, input, target, loss, local_bs, rank, batch_size, test_save, offset=None, world_size=0
     ):
         for idx in range(5):
             # single cpu/gpu training
             self._test_DDP_helper(model_base, input, target, loss)
 
+            if offset is None:
+                offset = rank * local_bs
+
             # DDP training, DDP scatters subsets of input_cpu to nodes/GPUs
             self._test_DDP_helper(
                 model_DDP,
-                input[rank * local_bs: (rank + 1) * local_bs],
-                target[rank * local_bs: (rank + 1) * local_bs],
+                input[offset: offset + local_bs],
+                target[offset: offset + local_bs],
                 loss,
+                world_size * local_bs / batch_size if world_size != 0 else 1,
             )
 
             # Update weights and run a second iteration to shake out errors
@@ -1993,7 +1997,7 @@ class _DistTestBase(object):
         gpus = list(map(lambda i: torch.device('cuda:' + str(i)), gpus))
         self._test_DistributedDataParallel(gpu_subset=gpus, rank=rank, output_device=torch.device('cuda'))
 
-    def _test_DistributedDataParallel_SyncBatchNorm(self, gpu_subset, rank, output_device=None):
+    def _test_DistributedDataParallel_SyncBatchNorm(self, gpu_subset, rank, local_bs, global_bs, offset, output_device=None):
         # Run a simple end to end DDP model, use result of single node model
         # as baseline
 
@@ -2016,9 +2020,10 @@ class _DistTestBase(object):
             torch.save(model_DDP, tmp.name)
             model_DDP = torch.load(tmp.name)
 
-        # dummy data initialization
-        local_bs = len(gpu_subset)
-        global_bs, input_cpu, target, loss = self._prepare_dummy_data(local_bs)
+        # data initialization
+        input_cpu = torch.randn(global_bs, 2)
+        target = torch.randn(global_bs, 4)
+        loss = nn.MSELoss()
 
         # check two model parameters over 5 iterations
         self._test_DDP_5iter(
@@ -2030,7 +2035,9 @@ class _DistTestBase(object):
             local_bs,
             rank,
             global_bs,
-            True
+            True,
+            offset,
+            int(WORLD_SIZE)
         )
         self._barrier()
 
@@ -2044,14 +2051,37 @@ class _DistTestBase(object):
         # DDP does not support replicating BN layers within a process, hence
         # testing with one module replica per process
         gpus = [rank]
-        self._test_DistributedDataParallel_SyncBatchNorm(gpu_subset=gpus, rank=rank)
+
+        num_processes = int(WORLD_SIZE)
+        local_bs = 2
+        bs_offset = int(rank * 2)
+        global_bs = int(num_processes * 2)
+
+        self._test_DistributedDataParallel_SyncBatchNorm(
+            gpu_subset=gpus,
+            rank=rank,
+            local_bs=local_bs,
+            global_bs=global_bs,
+            offset=bs_offset)
 
         # test output_device
-        self._test_DistributedDataParallel_SyncBatchNorm(gpu_subset=gpus, rank=rank, output_device=torch.device('cuda'))
+        self._test_DistributedDataParallel_SyncBatchNorm(
+            gpu_subset=gpus,
+            rank=rank,
+            local_bs=local_bs,
+            global_bs=global_bs,
+            offset=bs_offset,
+            output_device=torch.device('cuda'))
 
         # test device_ids
         gpus = list(map(lambda i: torch.device('cuda:' + str(i)), gpus))
-        self._test_DistributedDataParallel_SyncBatchNorm(gpu_subset=gpus, rank=rank, output_device=torch.device('cuda'))
+        self._test_DistributedDataParallel_SyncBatchNorm(
+            gpu_subset=gpus,
+            rank=rank,
+            local_bs=local_bs,
+            global_bs=global_bs,
+            offset=bs_offset,
+            output_device=torch.device('cuda'))
 
     @unittest.skipIf(BACKEND != 'nccl' and BACKEND != 'gloo',
                      "Only Nccl & Gloo backend support DistributedDataParallel")
@@ -2131,6 +2161,30 @@ class _DistTestBase(object):
         running_mean, running_var = model.module.running_mean, model.module.running_var
         torch.testing.assert_allclose(running_mean, all_input_var.mean(1))
         torch.testing.assert_allclose(running_var, all_input_var.var(1))
+
+    @unittest.skipIf(BACKEND != 'nccl' and BACKEND != 'gloo',
+                     "Only Nccl & Gloo backend support DistributedDataParallel")
+    @skip_if_no_cuda_distributed
+    @skip_if_no_gpu
+    def test_DistributedDataParallel_SyncBatchNorm_Diff_Input_Sizes_gradient(self):
+        group, group_id, rank = self._init_global_test()
+        # only do single GPU per process
+        gpus = [rank]
+
+        # cpu training setup
+        model = BN_NET
+
+        num_processes = int(WORLD_SIZE)
+        local_bs = rank + 2
+        bs_offset = int((rank + 3) * rank / 2)
+        global_bs = int((num_processes + 3) * num_processes / 2)
+
+        self._test_DistributedDataParallel_SyncBatchNorm(
+            gpu_subset=gpus,
+            rank=rank,
+            local_bs=local_bs,
+            global_bs=global_bs,
+            offset=bs_offset)
 
     @skipIfNoTorchVision
     def test_SyncBatchNorm_process_group(self):
