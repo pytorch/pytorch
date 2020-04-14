@@ -76,12 +76,25 @@ class _Formatter(object):
         self.sci_mode = False
         self.max_width = 1
 
+        # only used for complex tensors
+        self.has_non_zero_decimal_val = False
+
         with torch.no_grad():
             tensor_view = tensor.reshape(-1)
 
         if not self.floating_dtype:
+            if self.complex_dtype:
+                # max width for complex tensors depends on whether or not tensor contains ints only
+                self.has_non_zero_decimal_val = sum([not (value.item().real.is_integer() and value.item().imag.is_integer())
+                                                     for value in tensor_view])
             for value in tensor_view:
-                value_str = '{}'.format(value)
+                if self.complex_dtype:
+                    if self.has_non_zero_decimal_val:
+                        value_str = ('{{:.{}f}}').format(PRINT_OPTS.precision).format(value)
+                    else:
+                        value_str = "{:.0f}".format(value.item())
+                else:
+                    value_str = '{}'.format(value)
                 self.max_width = max(self.max_width, len(value_str))
 
         else:
@@ -133,7 +146,7 @@ class _Formatter(object):
     def width(self):
         return self.max_width
 
-    def format(self, value, has_non_zero_decimal_val=False):
+    def format(self, value):
         if self.floating_dtype:
             if self.sci_mode:
                 ret = ('{{:{}.{}e}}').format(self.max_width, PRINT_OPTS.precision).format(value)
@@ -145,10 +158,10 @@ class _Formatter(object):
                 ret = ('{{:.{}f}}').format(PRINT_OPTS.precision).format(value)
         elif self.complex_dtype:
             p = PRINT_OPTS.precision
-            ret = '({{:.{}f}} {{}} {{:.{}f}}j)'.format(p, p).format(value.real, '+-'[value.imag < 0], abs(value.imag))
-            if not has_non_zero_decimal_val:
+            ret = '({{:.{}f}}{{}}{{:.{}f}}j)'.format(p, p).format(value.real, '+-'[value.imag < 0], abs(value.imag))
+            if not self.has_non_zero_decimal_val:
                 # complex tensor contains integer elements only
-                ret = "({{:.0f}} {{}} {{:.0f}}.j)".format(p, p).format(value.real, '+-'[value.imag < 0], abs(value.imag))
+                ret = "({{:.0f}}.{{}}{{:.0f}}.j)".format(p, p).format(value.real, '+-'[value.imag < 0], abs(value.imag))
         else:
             ret = '{}'.format(value)
         return (self.max_width - len(ret)) * ' ' + ret
@@ -169,14 +182,7 @@ def _vector_str(self, indent, formatter, summarize):
                 [' ...'] +
                 [formatter.format(val) for val in self[-PRINT_OPTS.edgeitems:].tolist()])
     else:
-        # variable to keep track of complex float tensors
-        contains_decimal = False
-        for val in self.tolist():
-            if isinstance(val, float) and not val.is_integer():
-                contains_decimal = True
-            if isinstance(val, complex) and not val.imag.is_integer():
-                contains_decimal = True
-        data = [formatter.format(val, has_non_zero_decimal_val=contains_decimal) for val in self.tolist()]
+        data = [formatter.format(val) for val in self.tolist()]
 
     data_lines = [data[i:i + elements_per_line] for i in range(0, len(data), elements_per_line)]
     lines = [', '.join(line) for line in data_lines]
