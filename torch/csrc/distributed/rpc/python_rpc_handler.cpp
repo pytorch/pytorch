@@ -77,14 +77,6 @@ PythonRpcHandler::PythonRpcHandler() {
   jitCompilationUnit_ = torch::jit::get_python_cu();
   typeParser_ = std::make_shared<jit::ScriptTypeParser>(
       std::make_shared<PythonTypeResolver>());
-
-
-  //py::object rrefUtils = py::module::import("torch.distributed.rpc.rref_utils");
-  //rrefProxyCtor_ = getFunction(rrefUtils, "TestRRefProxy");
-
-  //auto testRRefProxy = rrefProxyCtor_();
-  //auto testFn = getFunction(testRRefProxy, "test");
-  //testFn();
 }
 
 void PythonRpcHandler::cleanup() {

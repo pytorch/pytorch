@@ -71,7 +71,6 @@ class PYBIND11_EXPORT PythonRpcHandler {
   const RRefProxyFunctions& getRRefProxyFunctions() const;
 
  private:
-
   PythonRpcHandler();
   ~PythonRpcHandler() = default;
 

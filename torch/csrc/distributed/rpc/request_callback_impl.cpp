@@ -175,7 +175,6 @@ void RequestCallbackImpl::processRpc(
       }
       markComplete(
           std::move(PythonResp(std::move(*serializedPyObj))).toMessage());
-
       return;
     }
     case MessageType::SCRIPT_REMOTE_CALL: {

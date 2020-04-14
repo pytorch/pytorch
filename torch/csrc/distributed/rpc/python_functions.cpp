@@ -183,13 +183,11 @@ std::shared_ptr<FutureMessage> pyRpcPythonUdf(
     std::string& pickledPythonUDF,
     std::vector<torch::Tensor>& tensors,
     const std::shared_ptr<torch::autograd::profiler::RecordFunction>& rf) {
-
   auto serializedPyObj =
       SerializedPyObj(std::move(pickledPythonUDF), std::move(tensors));
   auto pythonCall = std::make_unique<PythonCall>(std::move(serializedPyObj));
 
   auto agent = RpcAgent::getCurrentRpcAgent();
-
   return sendMessageWithAutograd(
       *agent,
       dst,
