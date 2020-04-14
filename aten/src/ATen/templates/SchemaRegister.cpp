@@ -5,5 +5,6 @@
 
 using namespace at;
 
-static auto registerer = torch::import()
-  ${schema_registrations};
+TORCH_LIBRARY(aten, m) {
+  ${schema_registrations}
+}
