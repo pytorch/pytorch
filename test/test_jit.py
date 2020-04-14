@@ -4279,9 +4279,6 @@ def foo(x):
 
     def test_scripting_hooks(self):
         class Net(nn.Module):
-            def __init__(self):
-                super(Net, self).__init__()
-
             def forward(self, x):
                 return x + x
 
@@ -4294,21 +4291,16 @@ def foo(x):
 
         n = Net()
         n.register_forward_pre_hook(forward_pre_hook)
-        scripted_n = torch.jit.script(n)
 
         m = Net()
         m.register_forward_hook(forward_hook)
-        scripted_m = torch.jit.script(m)
 
         t = torch.tensor([3, 4, 5])
-        self.assertEqual(n(t), scripted_n(t))
-        self.assertEqual(m(t), scripted_m(t))
+        self.checkModule(n, [t])
+        self.checkModule(m, [t])
 
     def test_scripting_forward_hook(self):
         class Net(nn.Module):
-            def __init__(self):
-                super(Net, self).__init__()
-
             def forward(self, x):
                 return x + x
 
@@ -4317,16 +4309,12 @@ def foo(x):
 
         n = Net()
         n.register_forward_hook(forward_hook)
-        scripted_n = torch.jit.script(n)
 
         t = torch.tensor([3, 4, 5])
-        self.assertEqual(n(t), scripted_n(t))
+        self.checkModule(n, [t])
 
     def test_multiple_forward_hooks(self):
         class Net(nn.Module):
-            def __init__(self):
-                super(Net, self).__init__()
-
             def forward(self, x):
                 return x + x
 
@@ -4339,16 +4327,12 @@ def foo(x):
         n = Net()
         n.register_forward_hook(forward_hook1)
         n.register_forward_hook(forward_hook2)
-        scripted_n = torch.jit.script(n)
 
         t = torch.tensor([3, 4, 5])
-        self.assertEqual(n(t), scripted_n(t))
+        self.checkModule(n, [t])
 
     def test_scripting_forward_pre_hook(self):
         class Net(nn.Module):
-            def __init__(self):
-                super(Net, self).__init__()
-
             def forward(self, x):
                 return x + x
 
@@ -4358,16 +4342,12 @@ def foo(x):
 
         n = Net()
         n.register_forward_pre_hook(forward_pre_hook)
-        scripted_n = torch.jit.script(n)
 
         t = torch.tensor([3, 4, 5])
-        self.assertEqual(n(t), scripted_n(t))
+        self.checkModule(n, [t])
 
     def test_load_with_hooks(self):
         class Net(nn.Module):
-            def __init__(self):
-                super(Net, self).__init__()
-
             def forward(self, x):
                 return x + x
 
@@ -4383,10 +4363,16 @@ def foo(x):
         n.register_forward_hook(forward_hook)
         scripted_n = torch.jit.script(n)
 
-        scripted_n.save("model1.gz")
-        n_loaded1 = torch.jit.load("model1.gz")
-        n_loaded1.save("model2.gz")
-        n_loaded2 = torch.jit.load("model2.gz")
+
+        b1 = io.BytesIO()
+        torch.jit.save(scripted_n, b1)
+        b1.seek(0)
+        n_loaded1 = torch.jit.load(b1)
+
+        b2 = io.BytesIO()
+        torch.jit.save(n_loaded1, b2)
+        b2.seek(0)
+        n_loaded2 = torch.jit.load(b2)
 
         t = torch.tensor([3, 4, 5])
         self.assertEqual(n(t), n_loaded2(t))
