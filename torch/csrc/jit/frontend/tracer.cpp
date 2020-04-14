@@ -543,7 +543,10 @@ void addInputs(Node* n, const char* name, const std::string& value) {
 void addInputs(Node* n, const char* name, const at::Tensor& value) {
   n->addInput(getValueTrace(value));
 }
-void addInputs(Node* n, const char* name, const c10::optional<at::Generator>& value) {
+void addInputs(
+    Node* n,
+    const char* name,
+    const c10::optional<at::Generator>& value) {
   if (value.has_value() && value->defined()) {
     detail::badArgType(*value);
   }
