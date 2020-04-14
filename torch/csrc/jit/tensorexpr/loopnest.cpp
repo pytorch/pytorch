@@ -788,10 +788,10 @@ Stmt* LoopNest::insertAllocFree(Stmt* stmt) {
     b->prepend_stmt(alloc);
     b->append_stmt(free);
   }
-  for (size_t i = 0; i < temp_bufs_.size(); i++) {
-    const Buf* buf = temp_bufs_[i].first;
+  for (const auto& temp_buf : temp_bufs_) {
+    const Buf* buf = temp_buf.first;
     Stmt* alloc =
-        new Allocate(buf->base_handle(), temp_bufs_[i].second, buf->dims());
+        new Allocate(buf->base_handle(), temp_buf.second, buf->dims());
     Stmt* free = new Free(buf->base_handle());
     b->prepend_stmt(alloc);
     b->append_stmt(free);
