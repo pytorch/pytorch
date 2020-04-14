@@ -270,6 +270,28 @@ public:
   }
 
 private:
+  static void insertRoot(
+      const VALUE_SET& visibleFuncs, GRAPH* deps, SET* keyNodes) {
+    if (!RootSymbolPatternLoc.pattern) {
+      return;
+    }
+    SET roots;
+    for (const auto& F : visibleFuncs) {
+      std::string name = F->getName();
+      auto demangled = demangle(name);
+      if (RootSymbolPatternLoc.pattern->match(demangled)) {
+        roots.insert(name);
+        if (Verbose) {
+          std::cerr << "[DEBUG][ROOT_FUNC] " << demangled << std::endl;
+        }
+      }
+    }
+
+    static const std::string ROOT_NODE{"__ROOT__"};
+    deps->emplace(ROOT_NODE, std::move(roots));
+    keyNodes->insert(ROOT_NODE);
+  }
+
   // Scan the entire IR graph to construct function -> function dependency graph
   // as well as instructions that might register or invoke operators.
   static void scanAllFunctions(
@@ -433,28 +455,6 @@ private:
         CB(cur);
       }
     }
-  }
-
-  static void insertRoot(
-      const VALUE_SET& visibleFuncs, GRAPH* deps, SET* keyNodes) {
-    if (!RootSymbolPatternLoc.pattern) {
-      return;
-    }
-    SET roots;
-    for (const auto& F : visibleFuncs) {
-      std::string name = F->getName();
-      auto demangled = demangle(name);
-      if (RootSymbolPatternLoc.pattern->match(demangled)) {
-        roots.insert(name);
-        if (Verbose) {
-          std::cerr << "[DEBUG][ROOT_FUNC] " << demangled << std::endl;
-        }
-      }
-    }
-
-    static const std::string ROOT_NODE{"__ROOT__"};
-    deps->emplace(ROOT_NODE, std::move(roots));
-    keyNodes->insert(ROOT_NODE);
   }
 
   // Calculate transitive closure and remove intermediate (non-key) nodes.
