@@ -7892,6 +7892,17 @@ a")
         inp = torch.randn(3, 4)
         self.checkScript(test_as_tensor_tensor_input, (inp,))
 
+    def test_torch_tensor_dtype(self):
+        def foo(s: float):
+            return torch.tensor(s)
+
+        scripted_foo = torch.jit.script(foo)
+        self.assertEqual(scripted_foo(1.).dtype, foo(1.).dtype)
+        saved_dtype = torch.get_default_dtype()
+        torch.set_default_dtype(torch.float32)
+        self.assertEqual(scripted_foo(1.).dtype, foo(1.).dtype)
+        torch.set_default_dtype(saved_dtype)
+
     def test_empty_like_memory_format_bc(self):
         def f(x):
             # type: (Tensor) -> Tensor

@@ -2,6 +2,7 @@
 
 #include <ATen/core/jit_type.h>
 #include <aten/src/ATen/ExpandUtils.h>
+#include <c10/core/DefaultDtype.h>
 #include <torch/csrc/api/include/torch/utils.h>
 #include <torch/csrc/autograd/profiler.h>
 #include <torch/csrc/jit/ir/ir.h>
@@ -293,7 +294,12 @@ RegisterOperators reg({
           },                                                               \
           aliasAnalysisFromSchema()),
 
-    DEFINE_TORCH_TENSOR_OP(float, double, at::scalar_to_tensor(scalar_val))
+    DEFINE_TORCH_TENSOR_OP(
+        float,
+        double,
+        at::native::scalar_tensor(
+            scalar_val,
+            at::device(at::kCPU).dtype(c10::get_default_dtype())))
         DEFINE_TORCH_TENSOR_OP(int, int64_t, at::scalar_to_tensor(scalar_val))
             DEFINE_TORCH_TENSOR_OP(
                 bool,
