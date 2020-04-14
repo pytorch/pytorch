@@ -2813,8 +2813,6 @@ class TestAutograd(TestCase):
         with profile() as p:
             forward(x)
 
-        p.export_chrome_trace('/home/jamesreed/foo.json')
-
         events = p.function_events
         important_events = [
             'outer',
