@@ -544,10 +544,10 @@ private:
       if (auto schemaStr = extractOpSchema(contextualNamespace, V)) {
         if (visitedOps) {
           // NB: Some debug string constants might be connected to the
-          // registration instruction, e.g.: "Lambda". Since we has factored
+          // registration instruction, e.g.: "Lambda". Since we have factored
           // out namespace from op schema string, there is no longer a simple
           // way to identify these fake ops. For now we simply take the first
-          // instance as the actual op name is cloest to the seed instruction
+          // instance as the real op name is closest to the seed instruction
           // in BFS order.
           if (!visitedOps->empty()) {
             if (Verbose) {
