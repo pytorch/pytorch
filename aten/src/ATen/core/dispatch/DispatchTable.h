@@ -222,6 +222,10 @@ class DispatchTable final {
     }
   }
 
+  c10::optional<KernelFunction::InternalBoxedKernelFunction*> manuallyBoxedKernel() const {
+    return manuallyBoxedKernel_;
+  }
+
 private:
 
   impl::KernelFunctionTable kernels_;
