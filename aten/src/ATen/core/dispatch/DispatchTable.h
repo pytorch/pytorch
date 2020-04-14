@@ -76,7 +76,7 @@ private:
  * table for various kernels provided for this operator.  For example, if we
  * consider the operator add(Tensor, Tensor), the dispatch table for this
  * operator may contain implementations for various dynamic tensor types, such
- * as CPUTensorId, CUDATensorId, etc.
+ * as CPU, CUDA, etc.
  */
 class DispatchTable final {
  public:
