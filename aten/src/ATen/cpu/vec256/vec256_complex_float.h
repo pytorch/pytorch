@@ -16,6 +16,7 @@ namespace {
 template <> class Vec256<std::complex<float>> {
 private:
   __m256 values;
+  static const Vec256<std::complex<float>> ones;
 public:
   using value_type = std::complex<float>;
   static constexpr int size() {
@@ -338,6 +339,13 @@ public:
   Vec256<std::complex<float>> operator>=(const Vec256<std::complex<float>>& other) const {
     AT_ERROR("not supported for complex numbers");
   }
+
+  Vec256<std::complex<float>> eq(const Vec256<std::complex<float>>& other) const;
+  Vec256<std::complex<float>> ne(const Vec256<std::complex<float>>& other) const;
+  Vec256<std::complex<float>> lt(const Vec256<std::complex<float>>& other) const;
+  Vec256<std::complex<float>> le(const Vec256<std::complex<float>>& other) const;
+  Vec256<std::complex<float>> gt(const Vec256<std::complex<float>>& other) const;
+  Vec256<std::complex<float>> ge(const Vec256<std::complex<float>>& other) const;
 };
 
 template <> Vec256<std::complex<float>> inline operator+(const Vec256<std::complex<float>> &a, const Vec256<std::complex<float>> &b) {
@@ -460,6 +468,18 @@ Vec256<std::complex<float>> inline operator|(const Vec256<std::complex<float>>& 
 template <>
 Vec256<std::complex<float>> inline operator^(const Vec256<std::complex<float>>& a, const Vec256<std::complex<float>>& b) {
   return _mm256_xor_ps(a, b);
+}
+
+const Vec256<std::complex<float>> Vec256<std::complex<float>>::ones(_mm256_set1_ps(1.0f));
+
+Vec256<std::complex<float>> Vec256<std::complex<float>>::eq(
+    const Vec256<std::complex<float>>& other) const {
+  return (*this == other) & Vec256<std::complex<float>>::ones;
+}
+
+Vec256<std::complex<float>> Vec256<std::complex<float>>::ne(
+    const Vec256<std::complex<float>>& other) const {
+  return (*this != other) & Vec256<std::complex<float>>::ones;
 }
 
 #ifdef __AVX2__
