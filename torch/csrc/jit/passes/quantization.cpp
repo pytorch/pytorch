@@ -69,8 +69,11 @@ std::vector<std::string> _quantizable_aten_funcs = {
 // so we propagate observed property from %input_tensor to the
 // output of the `prim::CallFunction`
 std::vector<std::string> _single_input_general_call_funcs = {
+    "adaptive_avg_pool1d",
     "adaptive_avg_pool2d",
+    "adaptive_avg_pool3d",
     "_max_pool2d",
+    "_max_pool3d",
     "dropout",
     "interpolate",
     "upsample",
@@ -85,6 +88,7 @@ std::vector<std::string> _single_input_general_call_funcs = {
 std::vector<std::string> _single_input_general_aten_funcs = {
     "max_pool2d",
     "avg_pool2d",
+    "avg_pool3d",
     "flatten",
     "max",
     "min",

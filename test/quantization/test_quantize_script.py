@@ -1401,6 +1401,7 @@ class TestQuantizeScriptPTSQOps(JitTestCase):
                 self.adaptive_avgpool = torch.nn.AdaptiveAvgPool2d((1, 1))
                 self.dropout = torch.nn.Dropout()
                 self.avgpool = torch.nn.AvgPool2d(3)
+                self.avgpool3d = torch.nn.AvgPool3d(3)
                 self.conv = torch.nn.Conv2d(3, 3, 3)
 
             def forward(self, x):
@@ -1408,7 +1409,12 @@ class TestQuantizeScriptPTSQOps(JitTestCase):
                 x = self.maxpool(x)
                 x = self.adaptive_avgpool(x)
                 x = self.avgpool(x)
+                x = self.avgpool3d(x)
                 x = torch.flatten(x)
+                x = F._max_pool2d(x, kernel_size=3)
+                x = F._max_pool3d(x, kernel_size=3)
+                x = F.adaptive_avg_pool2d(x, (1, 1))
+                x = F.adaptive_avg_pool3d(x, (1, 1, 1))
                 x = torch.max(x)
                 x = torch.min(x)
                 x = torch.mean(x)
