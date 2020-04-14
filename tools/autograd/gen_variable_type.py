@@ -234,7 +234,7 @@ auto tmp = ([&]() {
 })();
 """)
 
-RETURN_STATEMENT = CodeTemplate("""\
+ASSIGN_RETURN_VALUE = CodeTemplate("""\
 ${return_values} = ${rhs_value};
 """)
 
@@ -791,15 +791,15 @@ def emit_body(declaration):
         names = [ret['type'] + ' ' + ret['name'] + ';' for ret in declaration['returns']]
         return '\n'.join(names)
 
-    def emit_dispatch_call(combined, input_base, unpacked_args):
+    def emit_dispatch_call(api_name, input_base, unpacked_args):
         """ Dispatch call via function in a namespace or method on Tensor."""
         if 'namespace' in declaration['method_of']:
             call = CALL_DISPATCH_VIA_NAMESPACE.substitute(
-                combined,
+                api_name=api_name,
                 unpacked_args=unpacked_args)
         else:
             call = CALL_DISPATCH_VIA_METHOD.substitute(
-                combined,
+                api_name=api_name,
                 var=input_base,
                 unpacked_method_args=unpacked_args[1:])
         return call
@@ -837,7 +837,7 @@ def emit_body(declaration):
             else:
                 updated_unpacked_args.append(arg)
 
-        replay_view_call = emit_dispatch_call(combined, input_base, updated_unpacked_args)
+        replay_view_call = emit_dispatch_call(combined['api_name'], input_base, updated_unpacked_args)
         replay_view_func += REPLAY_VIEW_LAMBDA_FUNC.substitute(
             input_base=input_base,
             replay_view_call=replay_view_call)
@@ -846,7 +846,7 @@ def emit_body(declaration):
 
     def wrap_output(return_values, var):
         call = ''
-        rhs_value = ''
+        rhs_value = None
         if 'Tensor' not in declaration['return_type']:
             rhs_value = var
         elif view_info is not None:
@@ -876,15 +876,16 @@ def emit_body(declaration):
                     call += emit_view_lambda()
                     creation_meta = "GradMode::is_enabled() ? CreationMeta::DEFAULT: CreationMeta::NO_GRAD_MODE"
                     rhs_value = ("as_view(/* base */ {}, /* output */ {}, /* is_differentiable */ true, "
-                                 "func, /* creation_meta */ {})").format(view_info, var, creation_meta)
+                                 "/* view_func */ func, /* creation_meta */ {})").format(view_info, var, creation_meta)
             else:
                 # This could be supported but we don't need it at the moment, so keeping things simple.
                 raise RuntimeError("Function that return multiple differentiable output "
                                    "when at least one of them is view is not supported.")
         else:
             rhs_value = 'std::move({})'.format(var)
-        call += RETURN_STATEMENT.substitute(return_values=return_values,
-                                            rhs_value=rhs_value)
+        assert rhs_value is not None
+        call += ASSIGN_RETURN_VALUE.substitute(return_values=return_values,
+                                               rhs_value=rhs_value)
         return call
 
     def enforce_same_tensorimpl_and_storage(env, call):
@@ -918,7 +919,7 @@ def emit_body(declaration):
             # the baseType operations still dispatch to non-Variable type, even if the arguments passed
             # in are now Variables.
             # See NOTE [ Treating Variables as non-Variables in type dispatch ] for details.
-            base_type_call = emit_dispatch_call(combined, 'self_', combined['unpacked_args'])
+            base_type_call = emit_dispatch_call(combined['api_name'], 'self_', combined['unpacked_args'])
             if not modifies_arguments and not returns_void:
                 call = DISPATCH_TO_NON_VAR_TYPE_WITH_TMP_RETURN_VALUES.substitute(
                     base_type_call=base_type_call)

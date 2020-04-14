@@ -93,6 +93,8 @@ struct TORCH_API CopySlices : public Node {
   void release_variables() override;
 
   at::TensorGeometry base;
+  // view and view_fn are redundant and view_fn will be used if available.
+  // See Note [View + Inplace update for base tensor] for details.
   at::TensorGeometry view;
   c10::optional<std::function<at::Tensor(const at::Tensor&)>> view_fn;
   std::shared_ptr<Node> fn;

@@ -399,11 +399,12 @@ struct TORCH_API DifferentiableViewMeta : public AutogradMeta {
     return requires_grad_ || grad_fn_ || (is_view_ && base_.requires_grad());
   }
 
-  bool support_as_strided() const {
-    return !view_fn_.has_value();
+  bool has_view_fn() const {
+    return view_fn_.has_value();
   }
 
   std::function<at::Tensor(const at::Tensor&)> view_fn() const {
+    TORCH_CHECK(has_view_fn(), "view_fn is not set.");
     return view_fn_.value();
   }
 

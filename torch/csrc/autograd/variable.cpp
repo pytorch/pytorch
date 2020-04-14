@@ -365,9 +365,9 @@ const std::shared_ptr<torch::autograd::Node>& VariableHooks::grad_fn(const Tenso
       // See Note [View + Inplace update for base tensor] for what we do to base tensor when
       // an in-place operation happens.
       //
-      // TODO: Potentially the following logic can be moved to VariableType_x.cpp through codegen
-      //       so that we directly save a view_grad_fn in DifferentiableViewMeta.
-      if (!diff_view_meta->support_as_strided()) {
+      // TODO: Potentially the following logic can be replaced by special logic in VariableType_x.cpp
+      //       that would provide a way to recreate the grad_fn chain.
+      if (diff_view_meta->has_view_fn()) {
         auto view_fn = diff_view_meta->view_fn();
         auto diff_view = view_fn(diff_view_meta->base_);
         diff_view_meta->grad_fn_ = diff_view.grad_fn();
