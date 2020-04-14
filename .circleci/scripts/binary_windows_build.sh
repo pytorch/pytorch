@@ -5,7 +5,7 @@ retry () {
     $*  || (sleep 1 && $*) || (sleep 2 && $*) || (sleep 4 && $*) || (sleep 8 && $*)
 }
 
-retry git clone https://github.com/peterjc123/builder.git -b circleci_scripts_windows "/c/b"
+retry git clone https://github.com/pytorch/builder.git "/c/b"
 cd "/c/b"
 
 configs=($BUILD_ENVIRONMENT)
