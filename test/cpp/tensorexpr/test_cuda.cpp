@@ -574,6 +574,118 @@ void testCudaNoThreadIdxWrite_1() {
   cudaFree(b_dev);
 }
 
+void testCudaSharedMemReduce_1() {
+  KernelScope kernel_scope;
+  // This test does the following:
+  //  for k in 0..1:  // block-idx
+  //    alloc(c, 64)
+  //    for n in 0..64:  // thread-idx
+  //      c(n) = 0
+  //	for m in 0..128:
+  //      for n in 0..64:  // thread_idx
+  //        c(n) = c(n) + a(k, m, n)
+  //    b(k) = 0
+  //    for n in 0..64:  // thread_idx
+  //      b(k) = b(k) + c(n)
+
+  const int M = 128;
+  const int N = 64;
+  const int kTotalSize = M * N;
+  LoopOptions thread_idx_opt;
+  thread_idx_opt.set_gpu_thread_index(0);
+  LoopOptions block_idx_opt;
+  block_idx_opt.set_gpu_block_index(0);
+
+  Buffer a("a", kFloat, {1, M, N});
+  Buffer b("b", kFloat, {1});
+  VarHandle k("k", kInt);
+  VarHandle m("m", kInt);
+  VarHandle n("n", kInt);
+
+  std::vector<Stmt*> block;
+  VarHandle c_var("c", kHandle);
+  std::vector<const Expr*> dims;
+  dims.push_back(ExprHandle(N).node());
+  BufHandle c{new Buf(c_var.node(), dims)};
+  {
+    // alloc(c, 64);
+    Allocate* alloc = Allocate::make(c_var, kFloat, {N});
+    block.push_back(alloc);
+  }
+
+  {
+    //    for n in 0..64:  // thread-idx
+    //      c(n) = 0
+    Store* store_cn_0 = Store::make(c, {n}, 0.f, 1);
+    For* loop_n1 = For::make(n, 0, N, store_cn_0, thread_idx_opt);
+    block.push_back(loop_n1);
+  }
+
+  {
+    //	for m in 0..128:
+    //      for n in 0..64:  // thread_idx
+    //        c(n) = c(n) + a(k, m, n)
+    ExprHandle load_cn = Load::make(kFloat, c, {n}, 1);
+    ExprHandle a_kmn = Load::make(a, {k * (M * N) + m * N + n}, 1);
+    ExprHandle v_add = load_cn + a_kmn;
+    Store* store_cn_v = Store::make(c, {n}, v_add);
+    For* loop_n2 = For::make(n, 0, N, store_cn_v, thread_idx_opt);
+    For* loop_m1 = For::make(m, 0, M, loop_n2);
+    block.push_back(loop_m1);
+  }
+
+  {
+    //    b(k) = 0
+    //    for n in 0..64:  // thread_idx
+    //      b(k) = b(k) + c(n)
+    Store* store_bk_0 = Store::make(b, {k}, 0.f, 1);
+    block.push_back(store_bk_0);
+    ExprHandle load_bk = Load::make(b, {k}, 1);
+    ExprHandle load_cn = Load::make(kFloat, c, {n}, 1);
+    ExprHandle v_add = load_bk + load_cn;
+    Store* store_bk = Store::make(b, {k}, v_add, 1);
+    For* loop_n3 = For::make(n, 0, N, store_bk, thread_idx_opt);
+    block.push_back(loop_n3);
+  }
+
+  Block* reduce_body = Block::make(block);
+  For* loop_k1 = For::make(k, 0, 1, reduce_body, block_idx_opt);
+
+  CudaCodeGen cuda_cg(loop_k1, a, b);
+  PaddedBuffer<float> a_v(1, M, N, "a_v");
+  PaddedBuffer<float> b_v(1, "b_v");
+  PaddedBuffer<float> b_ref(1, "b_ref");
+
+  b_ref(0) = 0;
+  for (int i = 0; i < M; i++) {
+    for (int j = 0; j < N; j++) {
+      int v = i + j;
+      a_v(0, i, j) = v;
+      b_ref(0) += v;
+    }
+  }
+
+  float* a_dev = nullptr;
+  cudaMalloc(&a_dev, kTotalSize * sizeof(float));
+  cudaMemcpy(
+      a_dev, a_v.data(), kTotalSize * sizeof(float), cudaMemcpyHostToDevice);
+  float* b_dev = nullptr;
+  cudaMalloc(&b_dev, 1 * sizeof(float));
+  cudaDeviceSynchronize();
+
+  cuda_cg(a_dev, b_dev);
+
+  cudaDeviceSynchronize();
+  cudaMemcpy(
+      b_v.data(), b_dev, 1 * sizeof(float), cudaMemcpyDeviceToHost);
+  cudaDeviceSynchronize();
+
+  ExpectAllNear(b_v, b_ref, 1e-5);
+
+  cudaFree(a_dev);
+  cudaFree(b_dev);
+}
+
 } // namespace jit
 } // namespace torch
 

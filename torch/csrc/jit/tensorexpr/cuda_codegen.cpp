@@ -97,7 +97,67 @@ static void getMajorMinor(
   minor = dev_version.second;
 }
 
+void CudaPrinter::maybe_insert_sync() {
+  if (need_sync_) {
+    os() << "__syncthreads();" << std::endl;
+    need_sync_ = false;
+  }
+}
+
+std::string cudaDtypeCppString(const Dtype& dtype) {
+  switch (dtype.scalar_type()) {
+    case ScalarType::Half:
+      return "half";
+    case ScalarType::Char:
+      return "char";
+    case ScalarType::Byte:
+      return "unsigned char";
+    case ScalarType::Short:
+      return "short";
+    case ScalarType::Long:
+      return "long";
+    default:; /* nothing */
+  }
+  return dtype.ToCppString();
+}
+
+static void print_flat_alloc(std::ostream& os, const Allocate* alloc) {
+  std::vector<const Expr*> dims = alloc->dims();
+  // TODO: this should be merged with the storage flattener.
+  int64_t flat_size = 1;
+  for (auto dim : dims) {
+    const IntImm* dim_i = dynamic_cast<const IntImm*>(dim);
+    if (dim_i) {
+      flat_size *= dim_i->value();
+    } else {
+      throw std::runtime_error("Only IntImm dimensions are supported for now");
+    }
+  }
+  os << cudaDtypeCppString(alloc->dtype()) << " " << (*alloc->buffer_var())
+     << "[" << flat_size << "];" << std::endl;
+}
+
+void CudaPrinter::visit(const Allocate* v) {
+  Stmt* p = v->get_parent();
+  while (p) {
+    const For* for_v = dynamic_cast<const For*>(p);
+    if (for_v) {
+      if (for_v->loop_options().is_gpu_block_index()) {
+        os() << "__shared__ ";
+        print_flat_alloc(os(), v);
+        return;
+      } else if (for_v->loop_options().is_gpu_thread_index()) {
+        print_flat_alloc(os(), v);
+        return;
+      }
+    }
+    p = p->get_parent();
+  }
+  throw std::runtime_error("Global alloc not supported yet");
+}
+
 void CudaPrinter::visit(const For* v) {
+  maybe_insert_sync();
   const LoopOptions& loop_options = v->loop_options();
   if (loop_options.is_gpu_block_index()) {
     ScopedVarName var_name(
@@ -126,6 +186,13 @@ void CudaPrinter::visit(const For* v) {
           "start must be zero for gpu_block_index: " +
           std::to_string(v->start()));
     }
+    // A conservative measure to insert thread-syncs between each thread-idx
+    // change.
+    // TODO: only apply this when a cross-thread dependency happens across this
+    // point.
+    // TODO: maybe move this to a dedicated IRNode, if the logic gets
+    // sufficiently complicated.
+    need_sync_ = true;
     if (gpu_thread_extents_[gpu_thread_index]) {
       if (immediateEquals(v->stop(), 1)) {
         // This is a trivial thread-idx
@@ -291,23 +358,6 @@ void CudaPrinter::visit(const Min* v) {
   os() << ",";
   v->rhs()->accept(this);
   os() << ")";
-}
-
-std::string cudaDtypeCppString(const Dtype& dtype) {
-  switch (dtype.scalar_type()) {
-    case ScalarType::Half:
-      return "half";
-    case ScalarType::Char:
-      return "char";
-    case ScalarType::Byte:
-      return "unsigned char";
-    case ScalarType::Short:
-      return "short";
-    case ScalarType::Long:
-      return "long";
-    default:; /* nothing */
-  }
-  return dtype.ToCppString();
 }
 
 void CudaPrinter::visit(const LetStmt* v) {
@@ -525,7 +575,6 @@ class NoThreadIdxRewriter : public IRMutator {
     std::list<Stmt*> old_stmts = v->stmts();
     std::vector<bool> need_rewrites(old_stmts.size());
     std::vector<Stmt*> new_stmts(old_stmts.size());
-    ;
     int index = 0;
     for (auto old_stmt : old_stmts) {
       need_rewrite_ = false;
@@ -536,7 +585,7 @@ class NoThreadIdxRewriter : public IRMutator {
     }
 
     bool any_need_fix = false;
-    bool all_need_fix = true;
+    bool all_need_fix = need_rewrites.empty();
     for (auto need_fix : need_rewrites) {
       if (need_fix) {
         any_need_fix = true;
@@ -573,6 +622,9 @@ class NoThreadIdxRewriter : public IRMutator {
       while (start < count && !need_rewrites[start]) {
         rewrite_stmts.push_back(Stmt::clone(new_stmts[start]));
         start++;
+      }
+      if (start >= count) {
+        break;
       }
       int stop = start + 1;
       while (stop < count && need_rewrites[stop]) {

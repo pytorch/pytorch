@@ -69,6 +69,7 @@ class CudaPrinter : public IRPrinter {
   void visit(const Min* v) override;
   void visit(const LetStmt* v) override;
   void visit(const IfThenElse* v) override;
+  void visit(const Allocate* v) override;
 
   const std::vector<const Expr*>& gpu_block_extents() const {
     return gpu_block_extents_;
@@ -86,10 +87,12 @@ class CudaPrinter : public IRPrinter {
   using IRPrinter::visit;
 
  private:
+  void maybe_insert_sync();
   std::vector<const Expr*> gpu_block_extents_;
   std::vector<const Expr*> gpu_thread_extents_;
   const Var* rand_func_;
   const CudaAnalysis* cuda_analysis_;
+  bool need_sync_ = false;
 };
 
 // Construct Cuda C from the buffer and tensor input, and invoke the kernel
