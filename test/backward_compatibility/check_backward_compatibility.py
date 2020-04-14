@@ -31,6 +31,7 @@ white_list = [
     ('aten::index_put_', datetime.date(2020, 4, 10)),
     ('aten::quantize_per_tensor', datetime.date(2020, 4, 15)),
     ('aten::requires_grad_', datetime.date(2020, 4, 30)),
+    ('quantized::batch_norm', datetime.date(2020, 4, 20)),
 ]
 
 
