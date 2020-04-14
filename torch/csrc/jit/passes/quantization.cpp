@@ -676,24 +676,28 @@ graph(%self, %a, %b, %inplace):
 };
 
 // Check if `use` is an aten function of name `func_name` and if value
-// `v` is the nth argument of the function
-bool isAtenFuncNthArg(
-    Value* v,
+// `v` is the nth argument (if provided) of the function.
+bool matchAtenFuncToUse(
     Node* use,
     const std::string& func_name,
-    int n) {
-  return use->kind() == Symbol::aten(func_name) && v == use->inputs().at(n);
+    c10::optional<Value*> v,
+    c10::optional<int> n) {
+  return use->kind() == Symbol::aten(func_name) &&
+      (n.has_value() && v.has_value() ? v.value() == use->inputs().at(n.value())
+                                      : true);
 }
 
 // Check if `use` is a CallFunction of name `func_name` and if value
-// `v` is the nth argument of the function
-bool isCallFunctionNthArg(
-    Value* v,
+// `v` is the nth argument (if provided) of the function
+bool matchCallFuncToUse(
     Node* use,
     const std::string& func_name,
-    int n) {
+    c10::optional<Value*> v,
+    c10::optional<int> n) {
   return use->kind() == prim::CallFunction &&
-      getFuncName(use->inputs()[0]) == func_name && v == use->inputs().at(n);
+      getFuncName(use->inputs()[0]) == func_name &&
+      (n.has_value() && v.has_value() ? v.value() == use->inputs().at(n.value())
+                                      : false);
 }
 
 struct FuncArg {
@@ -711,14 +715,15 @@ bool matchArgPattern(
     const CallFuncArgs& call_func_args) {
   for (const Use& u : v->uses()) {
     for (const auto& func_arg : aten_func_args) {
-      if (isAtenFuncNthArg(v, u.user, func_arg.func_name, func_arg.arg_index)) {
+      if (matchAtenFuncToUse(
+              u.user, func_arg.func_name, v, func_arg.arg_index)) {
         return true;
       }
     }
 
     for (const auto& func_arg : call_func_args) {
-      if (isCallFunctionNthArg(
-              v, u.user, func_arg.func_name, func_arg.arg_index)) {
+      if (matchCallFuncToUse(
+              u.user, func_arg.func_name, v, func_arg.arg_index)) {
         return true;
       }
     }
@@ -987,25 +992,30 @@ void InsertObserversHelper::preprocess(
   }
 }
 
-bool useQuantizable(Value* v, Use use, bool is_dynamic) {
+bool useQuantizable(Use use, bool is_dynamic) {
   Node* n = use.user;
-
+  bool result = nodeQuantizable(n);
+  if (!result) {
+    return false;
+  }
+  // Special checks for ops that do not require observers for all input tensors.
+  // For each operator in this list observers are inserted for the input based
+  // on the index specified.
   const AtenFuncArgs& aten_func_args = AtenFuncArgs({{"lstm", 2}});
   const CallFuncArgs& call_func_args = CallFuncArgs({{"batch_norm", 1}});
   for (const auto& func_arg : aten_func_args) {
-    if (n->kind() == Symbol::aten(func_arg.func_name)) {
-      return v == n->inputs().at(func_arg.arg_index);
+    if (matchAtenFuncToUse(n, func_arg.func_name, c10::nullopt, c10::nullopt)) {
+      return use.offset == func_arg.arg_index;
     }
   }
 
   for (const auto& func_arg : call_func_args) {
-    if (n->kind() == prim::CallFunction &&
-        getFuncName(n->inputs()[0]) == func_arg.func_name) {
-      return v == n->inputs().at(func_arg.arg_index);
+    if (matchCallFuncToUse(n, func_arg.func_name, c10::nullopt, c10::nullopt)) {
+      return use.offset == func_arg.arg_index;
     }
   }
 
-  return true;
+  return result;
 }
 
 // TODO: remove this as a class method
@@ -1025,7 +1035,7 @@ bool InsertObserversHelper::valueNeedsToBeQuantized(Value* v) {
   }
   // Check whether node input value is quantizable
   for (const auto& use : v->uses()) {
-    if (nodeQuantizable(use.user) && useQuantizable(v, use, is_dynamic)) {
+    if (useQuantizable(use, is_dynamic)) {
       return true;
     }
   }
