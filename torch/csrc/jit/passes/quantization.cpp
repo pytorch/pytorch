@@ -50,6 +50,7 @@ struct PatternsAndModules {
 std::vector<std::string> _quantizable_call_funcs = {
     "conv2d",
     "linear",
+    "batch_norm",
 };
 
 std::vector<std::string> _quantizable_aten_funcs = {
