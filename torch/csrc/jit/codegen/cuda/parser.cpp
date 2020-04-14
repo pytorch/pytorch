@@ -28,6 +28,10 @@ typedef void (
 
 // TODO: add a mutex to make it thread safe.
 class IrParser {
+ private:
+  static const int nthreads = 128;
+  static const int unroll_factor = 4;
+
  public:
   IrParser(std::shared_ptr<Graph> graph, Fusion& fusion)
       : graph_(std::move(graph)), fusion_(&fusion) {
@@ -72,9 +76,9 @@ class IrParser {
       while (out->nDims() > 1)
         out->merge(0);
       // Split into 128 which will be bockDim.x
-      out->split(0, 128);
+      out->split(0, nthreads);
       // Split by another 4 which will be our unroll factor
-      out->split(0, 4);
+      out->split(0, unroll_factor);
 
       // Map blocks/threads
       out->axis(0)->parallelize(ParallelType::BIDx);
@@ -133,7 +137,7 @@ class IrParser {
         .push_back(std::make_pair(op, fn));
   }
 
- protected:
+ private:
   static void parseBinaryOpWithAlpha(
       const Node* const node,
       std::unordered_map<size_t, CgValue>& value_maps) {

@@ -36,7 +36,9 @@ struct UnrollPass : public OptOutDispatch {
   void computeMap();
 
  public:
-  static std::vector<Expr*> runPass(Fusion* fusion, std::vector<Expr*> exprs);
+  static std::vector<Expr*> runPass(
+      Fusion* fusion,
+      const std::vector<Expr*>& exprs);
 };
 
 struct TORCH_CUDA_API LoopNestGenerator : public OptOutDispatch {

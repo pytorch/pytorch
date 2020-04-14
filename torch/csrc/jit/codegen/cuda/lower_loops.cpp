@@ -36,8 +36,8 @@ void UnrollPass::handle(Expr* expr) {
 
 namespace {
 Int* getPredicate(const TensorView* const pred_tv, std::vector<Val*> indices) {
-  TensorIndex* ti =
-      new TensorIndex(pred_tv, IndexCompute::computeIndices(pred_tv, indices));
+  TensorIndex* ti = new TensorIndex(
+      pred_tv, IndexCompute::computeIndices(pred_tv, std::move(indices)));
   std::vector<Int*> all_preds = PredicateCompute::computePredicates(ti);
 
   std::vector<Int*> preds;
@@ -185,7 +185,7 @@ void UnrollPass::computeMap() {
 
 std::vector<Expr*> UnrollPass::runPass(
     Fusion* fusion,
-    std::vector<Expr*> exprs) {
+    const std::vector<Expr*>& exprs) {
   FusionGuard fg(fusion);
   UnrollPass up(fusion, exprs);
   up.computeMap();

@@ -366,14 +366,17 @@ TensorDomain* TensorDomain::reorder(
   // in empty spots in the set of new positions.
   // pos2axis[new_position] = old_position
   auto it = positions_left.begin(); // old positions left
-  for (decltype(pos2axis.size()) i = 0; i < pos2axis.size(); i++) {
-    if (pos2axis[i] == -1)
-      pos2axis[i] = *it++;
-  }
+  std::transform(
+      pos2axis.begin(), pos2axis.end(), pos2axis.begin(), [&it](int i) -> int {
+        return i == -1 ? *it++ : i;
+      });
 
   std::vector<IterDomain*> reordered_domain;
-  for (int entry : pos2axis)
-    reordered_domain.push_back(axis(entry));
+  std::transform(
+      pos2axis.begin(),
+      pos2axis.end(),
+      std::back_inserter(reordered_domain),
+      [this](int i) -> IterDomain* { return this->axis(i); });
 
   TensorDomain* reordered_td = new TensorDomain(reordered_domain);
   Reorder* merge_node = new Reorder(reordered_td, this, pos2axis);

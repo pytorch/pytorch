@@ -200,7 +200,7 @@ struct CloneLoopNest : public OptOutMutator {
   Expr* parent_scope_ = nullptr;
   Expr* to_clone_ = nullptr;
 
-  Statement* mutate(ForLoop* fl) {
+  Statement* mutate(ForLoop* fl) final {
     std::vector<Expr*> mutated_exprs;
     for (Expr* expr : fl->body().exprs()) {
       mutated_exprs.push_back(ir_utils::asExpr(OptOutMutator::mutate(expr)));
@@ -229,11 +229,11 @@ struct ReplaceExprsInScope : public OptOutDispatch {
  private:
   std::unordered_map<Expr*, Expr*> replacement_map_;
 
-  void handle(Expr* expr) {
+  void handle(Expr* expr) final {
     OptOutDispatch::handle(expr);
   }
 
-  void handle(ForLoop* fl) {
+  void handle(ForLoop* fl) final {
     for (Expr* expr : fl->body().exprs()) {
       auto it = replacement_map_.find(expr);
       if (it == replacement_map_.end()) {
@@ -245,7 +245,7 @@ struct ReplaceExprsInScope : public OptOutDispatch {
     }
   }
 
-  void handle(IfThenElse* ite) {
+  void handle(IfThenElse* ite) final {
     for (Expr* expr : ite->body().exprs()) {
       auto it = replacement_map_.find(expr);
       if (it == replacement_map_.end()) {
@@ -267,13 +267,13 @@ struct ReplaceExprsInScope : public OptOutDispatch {
   }
 
   ReplaceExprsInScope(std::unordered_map<Expr*, Expr*> _replacement_map)
-      : replacement_map_(_replacement_map) {}
+      : replacement_map_(std::move(_replacement_map)) {}
 
  public:
   static void replace(
       Expr* scope,
       std::unordered_map<Expr*, Expr*> replacement_map) {
-    ReplaceExprsInScope reis(replacement_map);
+    ReplaceExprsInScope reis(std::move(replacement_map));
     reis.handle(scope);
   }
 };
@@ -419,7 +419,7 @@ void replaceExprsInScope(
   TORCH_INTERNAL_ASSERT(
       replacement_map.find(scope) == replacement_map.end(),
       "Error trying to replace expressions in a scope, scope wants to be replaced entirely.");
-  ReplaceExprsInScope::replace(std::move(scope), std::move(replacement_map));
+  ReplaceExprsInScope::replace(scope, std::move(replacement_map));
 }
 
 Expr* firstInnerMostScope(Expr* scope) {

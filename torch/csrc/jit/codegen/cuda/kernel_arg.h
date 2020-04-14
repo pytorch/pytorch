@@ -24,16 +24,12 @@ struct TensorArgCodegen {
 
 struct ArgAbstract {
   virtual ~ArgAbstract() {}
-  virtual size_t getSizeof() = 0;
   virtual void* arg() = 0;
 };
 
 struct IntArg : public ArgAbstract {
   int val_;
   IntArg(int _val) : val_(_val){};
-  size_t getSizeof() {
-    return sizeof(int);
-  }
   void* arg() {
     return &val_;
   }
@@ -42,9 +38,6 @@ struct IntArg : public ArgAbstract {
 struct FloatArg : public ArgAbstract {
   float val_;
   FloatArg(float _val) : val_(_val){};
-  size_t getSizeof() {
-    return sizeof(float);
-  }
   void* arg() {
     return &val_;
   }
@@ -70,9 +63,6 @@ struct TensorArg : public TensorArgAbstract {
   }
   void setPointer(void* ptr) override {
     instance_.data = static_cast<decltype(TENSOR_TYPE::data)>(ptr);
-  }
-  size_t getSizeof() override {
-    return sizeof(TENSOR_TYPE);
   }
 
   void* arg() override {
