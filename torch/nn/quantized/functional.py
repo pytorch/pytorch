@@ -368,8 +368,8 @@ def hardtanh(input, min_val=-1., max_val=1., inplace=False):
         return torch._C._nn.hardtanh_(input, min_val, max_val)
     return torch._C._nn.hardtanh(input, min_val, max_val)
 
-def hardswish(input, inplace=False):
-    # type: (Tensor, bool) -> Tensor
+def hardswish(input, scale=None, zero_point=None, inplace=False):
+    # type: (Tensor, Optional[float], Optional[int], bool) -> Tensor
     r"""Applies the quantized version of the hardswish function, element-wise,
     as described in the paper:
 
@@ -393,6 +393,12 @@ def hardswish(input, inplace=False):
     """
     if not input.is_quantized:
         raise ValueError("Input to 'quantized.hardswish' must be quantized!")
+    if scale is not None and zero_point is not None:
+        assert not inplace, "Cannot rescale with `inplace`"
+        output = torch.quantize_per_tensor(torch.zeros(input.shape),
+                                           scale, int(zero_point), input.dtype)
+        torch._C._nn.hardswish(input, out=output)
+        return output
     if inplace:
         return torch._C._nn.hardswish_(input)
     return torch._C._nn.hardswish(input)

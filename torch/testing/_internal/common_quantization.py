@@ -275,6 +275,18 @@ class AnnotatedTwoLayerLinearModel(torch.nn.Module):
         x = self.fc2(x)
         return x
 
+class ActivationsTestModel(torch.nn.Module):
+    def __init__(self):
+        super(ActivationsTestModel, self).__init__()
+        self.qconfig = torch.quantization.get_default_qconfig("fbgemm")
+        self.quant = torch.quantization.QuantStub()
+        self.hardswish = torch.nn.Hardswish().to(dtype=torch.float)
+
+    def forward(self, x):
+        x = self.quant(x)
+        x = self.hardswish(x)
+        return x
+
 class LinearReluModel(torch.nn.Module):
     def __init__(self):
         super(LinearReluModel, self).__init__()

@@ -5747,6 +5747,11 @@
 
 - func: hardswish.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
+  dispatch:
+    CPU: hardswish_out
+    CUDA: hardswish_out
+    QuantizedCPU: quantized_hardswish_out
+
 
 - func: hardswish(Tensor self) -> Tensor
   use_c10_dispatcher: full
