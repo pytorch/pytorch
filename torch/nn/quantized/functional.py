@@ -4,8 +4,10 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
-import torch
 from typing import List, Optional
+
+import torch
+from torch import Tensor
 from torch.nn.modules.utils import _pair, _triple
 
 # Although some of the functions and docstrings are mirrored from the torch.nn,
