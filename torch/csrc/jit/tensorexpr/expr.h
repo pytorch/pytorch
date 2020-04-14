@@ -178,6 +178,11 @@ class TORCH_API Buf : public ExprNode<Buf> {
     return base_handle_->name_hint();
   }
 
+  Buf(const std::string& name_hint,
+      const std::vector<const Expr*>& dims,
+      Dtype dtype)
+      : Buf(new Var(name_hint, kHandle), dims, dtype) {}
+
   Buf(const Var* var, const std::vector<const Expr*>& dims, Dtype dtype)
       : ExprNodeBase(dtype, kPrimitive), base_handle_(var), dims_(dims) {
     TORCH_CHECK(var);
