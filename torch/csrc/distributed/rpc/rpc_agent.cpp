@@ -161,6 +161,7 @@ void RpcAgent::retryExpiredRpcs() {
       auto errorMsg = it.second;
       errorFuture->setError(errorMsg);
     }
+    errorFutures.clear();
 
     // If there are no more RPC's set to be retried at the current timepoint,
     // we can remove the corresponsing unordered_set from the retry map. We
@@ -168,7 +169,6 @@ void RpcAgent::retryExpiredRpcs() {
     {
       std::lock_guard<std::mutex> retryMapLock(rpcRetryMutex_);
       futures.clear();
-      errorFutures.clear();
       if (earliestRpcList.empty()) {
         rpcRetryMap_.erase(earliestTimeout);
       }
