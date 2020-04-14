@@ -25,6 +25,8 @@ namespace autograd {
 // first 16 bits being the worker id and next 48 bits are auto-incrementing.
 class TORCH_API DistAutogradContainer {
  public:
+  explicit DistAutogradContainer(uint32_t num_shards);
+
   // One time initialization of the container.
   static DistAutogradContainer& init(int64_t worker_id);
 
@@ -91,17 +93,24 @@ class TORCH_API DistAutogradContainer {
   static int64_t currentContextId();
 
  private:
-  // Structure holding one shard of the sharded autograd context map.
-  struct ContextsShard {
-    // Map storing autograd contexts for this shard.
-    std::unordered_map<int64_t, ContextPtr> contexts;
+  // Number of shards for the map storing autograd contexts. We'd like this
+  // to be a power of 2 and we don't expect a value much higher than the
+  // number of cores would provide much benefit.
+  static constexpr uint32_t kNumDefaultShards = 128;
 
+  // Use cache line size for alignment.
+  static constexpr int kCacheLineSize = 64;
+
+  // Structure holding one shard of the sharded autograd context map with its
+  // associated lock. Align to cache line size to avoid contention between
+  // adjacent entries.
+  struct alignas(kCacheLineSize) ContextsShard {
     // Lock for this shard.
     mutable std::mutex lock;
-  };
 
-  // Number of shards for the map storing autograd contexts.
-  static constexpr int16_t kNumShards = 256;
+    // Map storing autograd contexts for this shard.
+    std::unordered_map<int64_t, ContextPtr> contexts;
+  };
 
   DistAutogradContainer();
   ~DistAutogradContainer() = default;
@@ -127,6 +136,9 @@ class TORCH_API DistAutogradContainer {
   // function should be called with the lock.
   void eraseContextIdAndReset(ContextsShard& shard, int64_t context_id);
 
+  // Compute the number of shards for the autograd_contexts_ map.
+  static uint32_t computeNumShards();
+
   // Auto incrementing context id used to identify unique autograd passes.
   // Initialized with the first 16 bits being the worker_id.
   std::atomic<int64_t> next_context_id_;
@@ -139,6 +151,9 @@ class TORCH_API DistAutogradContainer {
 
   // Sharded autograd context map.
   std::vector<ContextsShard> autograd_contexts_;
+
+  // Number of shards for the sharded autograd_contexts_ map.
+  uint32_t num_shards_;
 
   // Autograd message id to identify unique send/recv autograd function pairs.
   std::atomic<int64_t> next_autograd_message_id_;

@@ -19,13 +19,18 @@ static thread_local int64_t current_context_id_ = kInvalidContextId;
 // Lock to ensure DistAutogradContainer is initialized only once.
 static std::mutex dist_container_init_lock_;
 
-DistAutogradContainer::DistAutogradContainer()
+DistAutogradContainer::DistAutogradContainer(uint32_t num_shards)
     : next_context_id_(0),
       worker_id_(0),
       initialized_(false),
-      autograd_contexts_(kNumShards),
+      autograd_contexts_(num_shards),
+      num_shards_(num_shards),
       next_autograd_message_id_(0),
-      max_id_(0) {}
+      max_id_(0) {
+  // num_shards has to be a power of 2 for the modulo trick in 'getShard'
+  // to work.
+  TORCH_INTERNAL_ASSERT((num_shards & (num_shards - 1)) == 0);
+}
 
 DistAutogradContainer& DistAutogradContainer::init(int64_t worker_id) {
   std::lock_guard<std::mutex> guard(dist_container_init_lock_);
@@ -51,11 +56,27 @@ DistAutogradContainer& DistAutogradContainer::init(int64_t worker_id) {
   return container;
 }
 
+uint32_t DistAutogradContainer::computeNumShards() {
+  uint32_t num_shards = 1;
+  auto num_hw_threads = std::thread::hardware_concurrency();
+  if (num_hw_threads == 0) {
+    num_shards = kNumDefaultShards;
+  } else {
+    // Compute the next power of 2 which is higher than twice the hardware
+    // concurrency.
+    while (num_shards < num_hw_threads * 2) {
+      num_shards <<= 1;
+    }
+  }
+  LOG(INFO) << "Number of shards for DistAutogradContainer: " << num_shards;
+  return num_shards;
+}
+
 inline DistAutogradContainer::ContextsShard& DistAutogradContainer::getShard(
     int64_t context_id) {
-  // kNumShards has to be a power of 2 for this to work.
-  DCHECK((kNumShards & (kNumShards - 1)) == 0);
-  return autograd_contexts_[context_id & (kNumShards - 1)];
+  // num_shards_ has to be a power of 2 for this modulo trick to work (validated
+  // during init).
+  return autograd_contexts_[context_id & (num_shards_ - 1)];
 }
 
 DistAutogradContainer& DistAutogradContainer::getInstance() {
@@ -69,7 +90,8 @@ DistAutogradContainer& DistAutogradContainer::getInstance() {
 
 DistAutogradContainer& DistAutogradContainer::getInstanceInternal() {
   // Leaky singleton to avoid module destructor race.
-  static DistAutogradContainer* container = new DistAutogradContainer();
+  static DistAutogradContainer* container =
+      new DistAutogradContainer(computeNumShards());
   return *container;
 }
 
