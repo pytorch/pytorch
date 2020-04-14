@@ -65,45 +65,6 @@ Tensor qnnpack_hardswish(const Tensor& qx, Tensor& qy) {
 
 } // namespace
 
-Tensor quantized_hardswish(const Tensor& qx) {
-#ifdef USE_PYTORCH_QNNPACK
-  if (at::globalContext().qEngine() == at::QEngine::QNNPACK &&
-      qx.scalar_type() == kQUInt8) {
-    Tensor qx_contig = qx.contiguous(qx.suggest_memory_format());
-    Tensor qy = at::_empty_affine_quantized(
-      qx_contig.sizes(),
-      qx_contig.options(),
-      qx_contig.q_scale(),
-      qx_contig.q_zero_point());
-    qnnpack_hardswish(qx_contig, qy);
-    return qy;
-  }
-#endif  // USE_PYTORCH_QNNPACK
-  Tensor qy = at::_empty_affine_quantized(qx.sizes(), qx.options(),
-      qx.q_scale(), qx.q_zero_point());
-  qhardswish_stub(qx.device().type(), qx, qy);
-  return qy;
-}
-
-Tensor& quantized_hardswish_(Tensor& qx) {
-#ifdef USE_PYTORCH_QNNPACK
-  if (at::globalContext().qEngine() == at::QEngine::QNNPACK &&
-      qx.scalar_type() == kQUInt8) {
-    Tensor qx_contig = qx.contiguous(qx.suggest_memory_format());
-    Tensor qy = at::_empty_affine_quantized(
-      qx_contig.sizes(),
-      qx_contig.options(),
-      qx_contig.q_scale(),
-      qx_contig.q_zero_point());
-    qnnpack_hardswish(qx_contig, qy);
-    qx.copy_(qy);
-    return qx;
-  }
-#endif  // USE_PYTORCH_QNNPACK
-  qhardswish_stub(qx.device().type(), qx, qx);
-  return qx;
-}
-
 Tensor& quantized_hardswish_out(Tensor& qy, const Tensor& qx) {
 #ifdef USE_PYTORCH_QNNPACK
   if (at::globalContext().qEngine() == at::QEngine::QNNPACK &&

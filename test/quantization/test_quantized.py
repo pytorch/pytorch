@@ -100,33 +100,15 @@ def _test_hardswish(self, X, Y_scale, Y_zero_point, engine):
         dqX = qX.dequantize()
 
         dqY_hat = F.hardswish(dqX)
-        qY_hat = torch.quantize_per_tensor(dqY_hat, scale=X_scale,
-                                           zero_point=X_zero_point,
+        qY_hat = torch.quantize_per_tensor(dqY_hat, scale=Y_scale,
+                                           zero_point=Y_zero_point,
                                            dtype=torch_type)
 
-        # regular
-        # uses input scale+zp
-        qY = torch.nn.quantized.functional.hardswish(qX)
-        self.assertEqual(qY, qY_hat,
-                         message="Hardswish failed: {} vs {}".format(qY, qY_hat))
-
-        # inplace
-        # uses input scale+zp
-        qX_copy = qX.clone().detach()
-        torch.nn.quantized.functional.hardswish(qX_copy, inplace=True)
-        self.assertEqual(qX_copy, qY_hat,
-                         message="inplace Hardswish failed: {} vs {}".format(qY, qY_hat))
-
-        # out
-        # uses out scale+zp
-        qY2 = torch.nn.quantized.functional.hardswish(
+        qY = torch.nn.quantized.functional.hardswish(
             qX, scale=Y_scale, zero_point=Y_zero_point)
-        qY_hat2 = torch.quantize_per_tensor(dqY_hat, scale=Y_scale,
-                                            zero_point=Y_zero_point,
-                                            dtype=torch_type)
         self.assertEqual(
-            qY2, qY_hat2,
-            message="Hardswish.out failed: {} vs {}".format(qY, qY_hat))
+            qY, qY_hat,
+            message="Hardswish failed: {} vs {}".format(qY, qY_hat))
 
 class TestQuantizedOps(TestCase):
 
