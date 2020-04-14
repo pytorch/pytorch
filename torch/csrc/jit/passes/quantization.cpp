@@ -986,10 +986,20 @@ void InsertObserversHelper::preprocess(
   }
 }
 
-// Returns true if the value is the weight to LSTM operator.
-bool isDynamicLSTMWeight(Value* v, Use use, bool is_dynamic) {
-  return is_dynamic && use.user->kind() == Symbol::aten("lstm") &&
-      (use.offset == 2);
+bool valueQuantizable(Use use, bool is_dynamic) {
+  Node* n = use.user;
+  // static quantization
+  if (n->kind() == prim::CallFunction &&
+      getFuncName(n->inputs()[0]) == "batch_norm") {
+    return use.offset == 1;
+  }
+  // Dynamic quantization checks
+  if (is_dynamic) {
+    if (use.user->kind() == Symbol::aten("lstm")) {
+      return use.offset == 2;
+    }
+  }
+  return nodeQuantizable(n);
 }
 
 // TODO: remove this as a class method
@@ -1007,9 +1017,9 @@ bool InsertObserversHelper::valueNeedsToBeQuantized(Value* v) {
       return true;
     }
   }
-  // Check whether user is quantizable
+  // Check whether node input value is quantizable
   for (const auto& use : v->uses()) {
-    if (nodeQuantizable(use.user) || isDynamicLSTMWeight(v, use, is_dynamic)) {
+    if (valueQuantizable(use, is_dynamic)) {
       return true;
     }
   }
