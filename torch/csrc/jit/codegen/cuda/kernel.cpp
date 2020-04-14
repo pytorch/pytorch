@@ -39,8 +39,8 @@ struct ExtractSizeStride {
       const at::Tensor& val,
       c10::optional<at::IntArrayRef> broadcasted_size = c10::nullopt) {
     if (broadcasted_size) {
-      int b_dim = (int) broadcasted_size->size();
-      int o_dim = (int) val.dim();
+      int b_dim = (int)broadcasted_size->size();
+      int o_dim = (int)val.dim();
       TORCH_CHECK(b_dim >= o_dim);
       for (int i = 0; i < b_dim; i++) {
         sizes.push_back(broadcasted_size->at(i));
