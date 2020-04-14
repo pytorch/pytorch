@@ -61,6 +61,7 @@ std::vector<std::string> _quantizable_aten_funcs = {
     "add_",
     "add",
     "cat",
+    "lstm",
 };
 
 // These are the prim::CallFunctions that doesn't require observation and
@@ -986,20 +987,25 @@ void InsertObserversHelper::preprocess(
   }
 }
 
-bool valueQuantizable(Use use, bool is_dynamic) {
+bool useQuantizable(Value* v, Use use, bool is_dynamic) {
   Node* n = use.user;
-  // static quantization
-  if (n->kind() == prim::CallFunction &&
-      getFuncName(n->inputs()[0]) == "batch_norm") {
-    return use.offset == 1;
-  }
-  // Dynamic quantization checks
-  if (is_dynamic) {
-    if (use.user->kind() == Symbol::aten("lstm")) {
-      return use.offset == 2;
+
+  const AtenFuncArgs& aten_func_args = AtenFuncArgs({{"lstm", 2}});
+  const CallFuncArgs& call_func_args = CallFuncArgs({{"batch_norm", 1}});
+  for (const auto& func_arg : aten_func_args) {
+    if (n->kind() == Symbol::aten(func_arg.func_name)) {
+      return v == n->inputs().at(func_arg.arg_index);
     }
   }
-  return nodeQuantizable(n);
+
+  for (const auto& func_arg : call_func_args) {
+    if (n->kind() == prim::CallFunction &&
+        getFuncName(n->inputs()[0]) == func_arg.func_name) {
+      return v == n->inputs().at(func_arg.arg_index);
+    }
+  }
+
+  return true;
 }
 
 // TODO: remove this as a class method
@@ -1019,7 +1025,7 @@ bool InsertObserversHelper::valueNeedsToBeQuantized(Value* v) {
   }
   // Check whether node input value is quantizable
   for (const auto& use : v->uses()) {
-    if (valueQuantizable(use, is_dynamic)) {
+    if (nodeQuantizable(use.user) && useQuantizable(v, use, is_dynamic)) {
       return true;
     }
   }
