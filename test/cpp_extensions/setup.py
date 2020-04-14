@@ -17,27 +17,27 @@ else:
 USE_NINJA = os.getenv('USE_NINJA') == '1'
 
 ext_modules = [
-    CppExtension(
-        'torch_test_cpp_extension.cpp', ['extension.cpp'],
-        extra_compile_args=CXX_FLAGS),
-    CppExtension(
-        'torch_test_cpp_extension.msnpu', ['msnpu_extension.cpp'],
-        extra_compile_args=CXX_FLAGS),
-    CppExtension(
-        'torch_test_cpp_extension.rng', ['rng_extension.cpp'],
-        extra_compile_args=CXX_FLAGS),
+    # CppExtension(
+    #     'torch_test_cpp_extension.cpp', ['extension.cpp'],
+    #     extra_compile_args=CXX_FLAGS),
+    # CppExtension(
+    #     'torch_test_cpp_extension.msnpu', ['msnpu_extension.cpp'],
+    #     extra_compile_args=CXX_FLAGS),
+    # CppExtension(
+    #     'torch_test_cpp_extension.rng', ['rng_extension.cpp'],
+    #     extra_compile_args=CXX_FLAGS),
 ]
 
 if torch.cuda.is_available() and CUDA_HOME is not None:
-    extension = CUDAExtension(
-        'torch_test_cpp_extension.cuda', [
-            'cuda_extension.cpp',
-            'cuda_extension_kernel.cu',
-            'cuda_extension_kernel2.cu',
-        ],
-        extra_compile_args={'cxx': CXX_FLAGS,
-                            'nvcc': ['-O2']})
-    ext_modules.append(extension)
+    # extension = CUDAExtension(
+    #     'torch_test_cpp_extension.cuda', [
+    #         'cuda_extension.cpp',
+    #         'cuda_extension_kernel.cu',
+    #         'cuda_extension_kernel2.cu',
+    #     ],
+    #     extra_compile_args={'cxx': CXX_FLAGS,
+    #                         'nvcc': ['-O2']})
+    # ext_modules.append(extension)
 elif torch.cuda.is_available() and ROCM_HOME is not None:
     from torch.utils.hipify import hipify_python
     this_dir = os.path.dirname(os.path.abspath(__file__))
@@ -47,13 +47,13 @@ elif torch.cuda.is_available() and ROCM_HOME is not None:
         includes="./*",
         show_detailed=True,
         is_pytorch_extension=True,)
-    extension = CUDAExtension(
-        'torch_test_cpp_extension.cuda', [
-            'cuda_extension.cpp',
-            'hip/hip_extension_kernel.hip',
-            'hip/hip_extension_kernel2.hip',
-        ])
-    ext_modules.append(extension)
+    # extension = CUDAExtension(
+    #     'torch_test_cpp_extension.cuda', [
+    #         'cuda_extension.cpp',
+    #         'hip/hip_extension_kernel.hip',
+    #         'hip/hip_extension_kernel2.hip',
+    #     ])
+    # ext_modules.append(extension)
 
 setup(
     name='torch_test_cpp_extension',
