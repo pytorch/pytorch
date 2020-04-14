@@ -1465,7 +1465,6 @@ class TestQuantizeScriptPTSQOps(JitTestCase):
                    .check("aten::dequantize") \
                    .run(m.graph)
 
-
 class TestQuantizeDynamicScript(JitTestCase):
     def test_prepare_dynamic(self):
         class M(torch.nn.Module):
