@@ -420,7 +420,7 @@ static auto registry = torch::RegisterOperators().op(
     "int[] dilation,"
     "bool ceil_mode) -> Tensor",
     torch::RegisterOperators::options().kernel<QMaxPool2D_arr_args>(
-        DispatchKey::QuantizedCPUTensorId));
+        DispatchKey::QuantizedCPU));
 
 } // namespace
 } // namespace native
