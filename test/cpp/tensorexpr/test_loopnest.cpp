@@ -872,10 +872,8 @@ void testLoopNestComputeAt_1() {
   const std::string& verification_pattern =
       R"IR(
 # CHECK: for (int i_b = 0; i_b < N; i_b++)
-# CHECK:  Allocate
 # CHECK-NOT: A[
-# CHECK:  B[i_b] =
-# CHECK:  Free)IR";
+# CHECK:  B[i_b] =)IR";
 
   torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
 
@@ -944,13 +942,11 @@ void testLoopNestComputeAt_2() {
     const std::string& verification_pattern =
         R"IR(
 # CHECK: for (int cy = 0; cy < H; cy++)
-# CHECK:   Allocate
 # CHECK:   for
 # CHECK:     for
 # CHECK:   for (int cx = 0; cx < W; cx++)
 # CHECK-NOT: prod[
-# CHECK:     cons[
-# CHECK:  Free)IR";
+# CHECK:     cons[)IR";
     torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
 
     // Now check that the loop still produces the correct result.
@@ -976,12 +972,10 @@ void testLoopNestComputeAt_2() {
         R"IR(
 # CHECK: for (int cy = 0; cy < H; cy++)
 # CHECK:   for (int cx = 0; cx < W; cx++)
-# CHECK: {2, 2}
 # CHECK:     for
 # CHECK:       for
 # CHECK-NOT: prod[
-# CHECK:     cons[
-# CHECK:     Free)IR";
+# CHECK:     cons[)IR";
     torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
 
     // Now check that the loop still produces the correct result.
@@ -1061,10 +1055,8 @@ void testLoopNestComputeAt_3() {
 # CHECK:   for (int cx = 0; cx < W; cx++)
 # CHECK:     C[
 # CHECK: for (int dy = 0; dy < H; dy++)
-# CHECK:  {1, W}
 # CHECK:   for (int dx = 0; dx < W; dx++)
-# CHECK-NOT: A[
-# CHECK:  Free)IR";
+# CHECK-NOT: A[)IR";
     torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
 
     // Now check that the loop still produces the correct result.
@@ -1099,9 +1091,7 @@ void testLoopNestComputeAt_3() {
 # CHECK:     C[
 # CHECK: for (int dy = 0; dy < H; dy++)
 # CHECK:   for (int dx = 0; dx < W; dx++)
-# CHECK:  {1, 1}
-# CHECK-NOT: A[
-# CHECK:  Free)IR";
+# CHECK-NOT: A[)IR";
     torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
 
     // Now check that the loop still produces the correct result.

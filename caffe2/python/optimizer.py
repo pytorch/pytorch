@@ -625,7 +625,11 @@ class AdagradOptimizer(Optimizer):
         )
 
         if self.rowWise:
-            logger.info("Using engine {} for rowWise Adagrad".format(self.engine))
+            logger.info(
+                "Using engine {} for rowWise Adagrad to train param {}".format(
+                    self.engine, param
+                )
+            )
 
             shapes, types = workspace.InferShapesAndTypes([param_init_net])
             if str(param) not in shapes:
@@ -651,7 +655,11 @@ class AdagradOptimizer(Optimizer):
                     value=0.0
                 )
         else:
-            logger.info("Using engine {} for regular Adagrad".format(self.engine))
+            logger.info(
+                "Using engine {} for regular Adagrad to train param {}".format(
+                    self.engine, param
+                )
+            )
 
             if self.engine in FP16_ENGINES:
                 shapes, types = workspace.InferShapesAndTypes([param_init_net])
