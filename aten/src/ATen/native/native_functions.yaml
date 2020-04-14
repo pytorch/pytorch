@@ -5428,6 +5428,12 @@
     CPU: unfold
     CUDA: unfold
 
+- func: unfold_backward(Tensor grad_in, int[] input_sizes, int dim, int size, int step) -> Tensor
+  variants: function
+  dispatch:
+    CPU: unfold_backward
+    CUDA: unfold_backward
+
 - func: equal(Tensor self, Tensor other) -> bool
   use_c10_dispatcher: full
   variants: method, function
