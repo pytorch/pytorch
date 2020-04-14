@@ -3633,7 +3633,7 @@ def normalize(input, p=2, dim=1, eps=1e-12, out=None):
 
 
 def assert_int_or_pair(arg, arg_name, message):
-    # type: (List[int], str, str)
+    # type: (List[int], str, str) -> None
     assert isinstance(arg, int) or len(arg) == 2, message.format(arg_name)
 
 
