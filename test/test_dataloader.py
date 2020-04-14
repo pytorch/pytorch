@@ -1269,6 +1269,10 @@ except RuntimeError as e:
 
         self.assertRaises(ValueError, lambda: RandomSampler(self.dataset, num_samples=0))
 
+        # raise error when replacement is non-boolean
+        with self.assertRaisesRegex(TypeError, "replacement should be a boolean value, but got replacement=0"):
+            RandomSampler(self.dataset, replacement=0)
+
     def test_random_sampler_len_with_replacement(self):
         from torch.utils.data import RandomSampler
         # add 5 extra samples

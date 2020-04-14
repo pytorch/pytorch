@@ -82,8 +82,8 @@ class RandomSampler(Sampler):
         self._num_samples = num_samples
 
         if not isinstance(self.replacement, bool):
-            raise ValueError("replacement should be a boolean value, but got "
-                             "replacement={}".format(self.replacement))
+            raise TypeError("replacement should be a boolean value, but got "
+                            "replacement={}".format(self.replacement))
 
         if self._num_samples is not None and not replacement:
             raise ValueError("With replacement=False, num_samples should not be specified, "
