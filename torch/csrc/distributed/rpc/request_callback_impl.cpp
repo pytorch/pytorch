@@ -319,25 +319,20 @@ void RequestCallbackImpl::processRpc(
       } else {
         auto whenValueSet = rref->getFuture();
         // Our response is satisfied when the rpcs come back.
-        whenValueSet->addCallback(
-            [responseFuture,
-             messageId,
-             rref,
-             weak = std::weak_ptr<FutureMessage>(whenValueSet)]() {
-              auto whenValueSet = weak.lock();
-              TORCH_INTERNAL_ASSERT(whenValueSet);
-              if (whenValueSet->hasError()) {
-                responseFuture->setError(*whenValueSet->error());
-                return;
-              }
-              try {
-                Message m = ScriptRRefFetchRet({rref->getValue()}).toMessage();
-                m.setId(messageId);
-                responseFuture->markCompleted(std::move(m));
-              } catch (const std::exception& e) {
-                responseFuture->setError(e.what());
-              }
-            });
+        whenValueSet->addCallback([responseFuture, messageId, rref](
+                                      const FutureMessage& whenValueSet) {
+          if (whenValueSet.hasError()) {
+            responseFuture->setError(*whenValueSet.error());
+            return;
+          }
+          try {
+            Message m = ScriptRRefFetchRet({rref->getValue()}).toMessage();
+            m.setId(messageId);
+            responseFuture->markCompleted(std::move(m));
+          } catch (const std::exception& e) {
+            responseFuture->setError(e.what());
+          }
+        });
       }
       return;
     }
@@ -363,14 +358,9 @@ void RequestCallbackImpl::processRpc(
 
       // Our response is satisfied when the rpcs come back.
       whenValueSet->addCallback(
-          [responseFuture,
-           messageId,
-           rref,
-           weak = std::weak_ptr<FutureMessage>(whenValueSet)]() {
-            auto whenValueSet = weak.lock();
-            TORCH_INTERNAL_ASSERT(whenValueSet);
-            if (whenValueSet->hasError()) {
-              responseFuture->setError(*whenValueSet->error());
+          [responseFuture, messageId, rref](const FutureMessage& whenValueSet) {
+            if (whenValueSet.hasError()) {
+              responseFuture->setError(*whenValueSet.error());
               return;
             }
             try {
@@ -451,6 +441,7 @@ void RequestCallbackImpl::processRpc(
       auto fromWorkerId = rpcWithAutograd.fromWorkerId();
       // The original future needs to be marked as completed when the wrapped
       // one completes, with the autograd context information wrapped.
+      // Uses weak_ptr so we can std::move the value.
       wrappedRpcResponseFuture->addCallback(
           [responseFuture,
            messageId,
@@ -496,17 +487,13 @@ void RequestCallbackImpl::processRpc(
 
       // Our response is satisfied when the rpcs come back.
       execFuture->addCallback(
-          [responseFuture,
-           messageId,
-           weak = std::weak_ptr<FutureMessage>(execFuture)]() {
-            auto execFuture = weak.lock();
-            TORCH_INTERNAL_ASSERT(execFuture);
-            if (!execFuture->hasError()) {
+          [responseFuture, messageId](const FutureMessage& execFuture) {
+            if (!execFuture.hasError()) {
               Message m = std::move(PropagateGradientsResp()).toMessage();
               m.setId(messageId);
               responseFuture->markCompleted(std::move(m));
             } else {
-              responseFuture->setError(*(execFuture->error()));
+              responseFuture->setError(*(execFuture.error()));
             }
           });
       return;

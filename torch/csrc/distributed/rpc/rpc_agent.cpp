@@ -69,6 +69,7 @@ std::shared_ptr<FutureMessage> RpcAgent::sendWithRetries(
       originalFuture,
       /* retryCount */ 0,
       retryOptions);
+  // Use weak_ptr so that the value can be std::moved in rpcRetryCallback.
   fm->addCallback([this,
                    newTime,
                    firstRetryRpc,
@@ -137,6 +138,7 @@ void RpcAgent::retryExpiredRpcs() {
           earliestRpc->options_, earliestRpc->retryCount_);
       earliestRpc->retryCount_++;
 
+      // Use weak_ptr so that the value can be std::moved in rpcRetryCallback.
       fm->addCallback([this,
                        newTime,
                        earliestRpc,

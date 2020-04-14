@@ -123,14 +123,10 @@ void DistAutogradContext::resetGraphTask() {
 
 void DistAutogradContext::addOutstandingRpc(
     const std::shared_ptr<rpc::FutureMessage>& futureMessage) {
-  futureMessage->addCallback([this,
-                              weak = std::weak_ptr<rpc::FutureMessage>(
-                                  futureMessage)]() {
-    auto futureMessage = weak.lock();
-    TORCH_INTERNAL_ASSERT(futureMessage);
-    if (futureMessage->hasError()) {
+  futureMessage->addCallback([this](const rpc::FutureMessage& futureMessage) {
+    if (futureMessage.hasError()) {
       // If we have an error, let the local autograd engine know about it.
-      std::runtime_error err((*futureMessage->error()).what());
+      std::runtime_error err((*futureMessage.error()).what());
       std::unique_lock<std::mutex> lock(lock_);
       if (graphTask_) {
         graphTask_->set_exception_without_signal(nullptr);
@@ -169,31 +165,28 @@ std::shared_ptr<rpc::FutureMessage> DistAutogradContext::
     state->future->markCompleted(rpc::Message());
   } else {
     for (auto& rpc : outStandingRpcs) {
-      rpc->addCallback(
-          [state, weak = std::weak_ptr<rpc::FutureMessage>(rpc)]() {
-            auto rpc = weak.lock();
-            TORCH_INTERNAL_ASSERT(rpc);
-            if (rpc->hasError()) {
-              // If there's an error, we want to setError() on the future,
-              // unless another error has already been sent - use a CAS to
-              // guard.
-              //
-              // Don't decrement num remaining here! (We don't need to, since
-              // memory handling is separate). If we simply don't decrement on
-              // errors, reaching 0 means that there were no errors - and hence,
-              // we can just markCompleted() without any other checking there.
-              bool expectedAlreadySent = false;
-              if (state->alreadySentError.compare_exchange_strong(
-                      expectedAlreadySent, true)) {
-                state->future->setError(rpc->error()->what());
-              }
-              return;
-            }
+      rpc->addCallback([state](const rpc::FutureMessage& rpc) {
+        if (rpc.hasError()) {
+          // If there's an error, we want to setError() on the future,
+          // unless another error has already been sent - use a CAS to
+          // guard.
+          //
+          // Don't decrement num remaining here! (We don't need to, since
+          // memory handling is separate). If we simply don't decrement on
+          // errors, reaching 0 means that there were no errors - and hence,
+          // we can just markCompleted() without any other checking there.
+          bool expectedAlreadySent = false;
+          if (state->alreadySentError.compare_exchange_strong(
+                  expectedAlreadySent, true)) {
+            state->future->setError(rpc.error()->what());
+          }
+          return;
+        }
 
-            if (--state->remaining == 0) {
-              state->future->markCompleted(rpc::Message());
-            }
-          });
+        if (--state->remaining == 0) {
+          state->future->markCompleted(rpc::Message());
+        }
+      });
     }
   }
   return state->future;

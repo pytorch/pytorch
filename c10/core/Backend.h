@@ -72,25 +72,25 @@ static inline Backend toDense(Backend b) {
 }
 
 static inline Backend dispatchKeyToBackend(DispatchKey t) {
-  if (t == DispatchKey::CPUTensorId) {
+  if (t == DispatchKey::CPU) {
     return Backend::CPU;
-  } else if (t == DispatchKey::CUDATensorId) {
+  } else if (t == DispatchKey::CUDA) {
     return Backend::CUDA;
-  } else if (t == DispatchKey::HIPTensorId) {
+  } else if (t == DispatchKey::HIP) {
     return Backend::HIP;
-  } else if (t == DispatchKey::MSNPUTensorId) {
+  } else if (t == DispatchKey::MSNPU) {
     return Backend::MSNPU;
-  } else if (t == DispatchKey::XLATensorId || t == DispatchKey::XLAPreAutograd) {
+  } else if (t == DispatchKey::XLA || t == DispatchKey::XLAPreAutograd) {
     return Backend::XLA;
-  } else if (t == DispatchKey::SparseCPUTensorId) {
+  } else if (t == DispatchKey::SparseCPU) {
     return Backend::SparseCPU;
-  } else if (t == DispatchKey::SparseCUDATensorId) {
+  } else if (t == DispatchKey::SparseCUDA) {
     return Backend::SparseCUDA;
-  } else if (t == DispatchKey::SparseHIPTensorId) {
+  } else if (t == DispatchKey::SparseHIP) {
     return Backend::SparseHIP;
-  } else if (t == DispatchKey::MkldnnCPUTensorId) {
+  } else if (t == DispatchKey::MkldnnCPU) {
     return Backend::MkldnnCPU;
-  } else if (t == DispatchKey::QuantizedCPUTensorId) {
+  } else if (t == DispatchKey::QuantizedCPU) {
     return Backend::QuantizedCPU;
   } else if (t == DispatchKey::Undefined) {
     return Backend::Undefined;
@@ -102,25 +102,25 @@ static inline Backend dispatchKeyToBackend(DispatchKey t) {
 static inline DispatchKey backendToDispatchKey(Backend b) {
   switch (b) {
     case Backend::CPU:
-      return DispatchKey::CPUTensorId;
+      return DispatchKey::CPU;
     case Backend::CUDA:
-      return DispatchKey::CUDATensorId;
+      return DispatchKey::CUDA;
     case Backend::HIP:
-      return DispatchKey::HIPTensorId;
+      return DispatchKey::HIP;
     case Backend::MSNPU:
-      return DispatchKey::MSNPUTensorId;
+      return DispatchKey::MSNPU;
     case Backend::XLA:
-      return DispatchKey::XLATensorId;
+      return DispatchKey::XLA;
     case Backend::SparseCPU:
-      return DispatchKey::SparseCPUTensorId;
+      return DispatchKey::SparseCPU;
     case Backend::SparseCUDA:
-      return DispatchKey::SparseCUDATensorId;
+      return DispatchKey::SparseCUDA;
     case Backend::SparseHIP:
-      return DispatchKey::SparseHIPTensorId;
+      return DispatchKey::SparseHIP;
     case Backend::MkldnnCPU:
-      return DispatchKey::MkldnnCPUTensorId;
+      return DispatchKey::MkldnnCPU;
     case Backend::QuantizedCPU:
-      return DispatchKey::QuantizedCPUTensorId;
+      return DispatchKey::QuantizedCPU;
     case Backend::Undefined:
       return DispatchKey::Undefined;
     default:

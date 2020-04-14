@@ -128,7 +128,11 @@ class TORCH_API Future final {
     callbacks_.emplace_back(std::move(cb));
   }
 
-  private:
+  void addCallback(std::function<void(const Future<T>& future)> cb) {
+    addCallback([this, cb]() { cb(*this); });
+  }
+
+ private:
   void setErrorInternal(
       FutureError error,
       std::unique_lock<std::mutex>& lock) {
