@@ -131,4 +131,5 @@ def im2col(g, input, kernel_size, dilation, padding, stride):
     # Padding tensor has the following format: (padding_h, padding_w)
     # Reshape the padding to follow ONNX format: (dim1_begin, dim2_begin,...,dim1_end, dim2_end,...)
     padding_ = [padding[0], padding[1], padding[0], padding[1]]
-    return g.op("UnfoldToDepth", input, block_size_i=kernel_size, dilations_i=dilation, pads_i=padding_, strides_i=stride)
+    return g.op("UnfoldToDepth", input, block_size_i=kernel_size, dilations_i=dilation, pads_i=padding_, 
+                strides_i=stride)
