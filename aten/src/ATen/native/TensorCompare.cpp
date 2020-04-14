@@ -166,17 +166,20 @@ std::tuple<Tensor &,Tensor &> mode_out(Tensor& values, Tensor& indices,
 
 std::tuple<Tensor &,Tensor &> _max_out_cpu(Tensor& max, Tensor& max_indices,
                                         const Tensor& self, int64_t dim, bool keepdim) {
+  TORCH_CHECK(!self.is_complex(), "max is not yet implemented for complex tensors.");
   max_stub(kCPU, max, max_indices, self, dim, keepdim);
   return std::tuple<Tensor &,Tensor &>{max, max_indices};
 }
 
 std::tuple<Tensor, Tensor> _max_cpu(const Tensor& self, int64_t dim, bool keepdim) {
+  TORCH_CHECK(!self.is_complex(), "max is not yet implemented for complex tensors.");
   Tensor max_indices = at::empty({0}, self.options().dtype(kLong));
   Tensor max = at::empty({0}, self.options());
   return at::native::_max_out_cpu(max, max_indices, self, dim, keepdim);
 }
 
 std::tuple<Tensor, Tensor> max(const Tensor& self, int64_t dim, bool keepdim) {
+  TORCH_CHECK(!self.is_complex(), "max is not yet implemented for complex tensors.");
   Tensor max_indices = at::empty({0}, self.options().dtype(kLong));
   if (self.is_quantized()) {
     Tensor max = at::empty({0}, self.options().dtype(toUnderlying(self.scalar_type())));
@@ -191,6 +194,7 @@ std::tuple<Tensor, Tensor> max(const Tensor& self, int64_t dim, bool keepdim) {
 
 static std::tuple<Tensor &,Tensor &> max_out_impl(Tensor& max, Tensor& max_indices,
                                                   const Tensor& self, int64_t dim, bool keepdim) {
+  TORCH_CHECK(!self.is_complex(), "max is not yet implemented for complex tensors.");
   TORCH_CHECK(self.device().type() == DeviceType::CPU || self.device().type() == DeviceType::CUDA,
               "max only supports CPU AND CUDA device type, got: ", self.device().type());
   TORCH_CHECK(self.layout() == Layout::Strided,
@@ -213,6 +217,7 @@ static std::tuple<Tensor &,Tensor &> max_out_impl(Tensor& max, Tensor& max_indic
 
 std::tuple<Tensor&,Tensor&> max_out(Tensor& max, Tensor& max_indices,
                                       const Tensor& self, int64_t dim, bool keepdim) {
+  TORCH_CHECK(!self.is_complex(), "max is not yet implemented for complex tensors.");
   auto result = [&]() {
     NoNamesGuard guard;
     return max_out_impl(max, max_indices, self, dim, keepdim);
@@ -224,17 +229,20 @@ std::tuple<Tensor&,Tensor&> max_out(Tensor& max, Tensor& max_indices,
 
 std::tuple<Tensor &,Tensor &> _min_out_cpu(Tensor& min, Tensor& min_indices,
                                         const Tensor& self, int64_t dim, bool keepdim) {
+  TORCH_CHECK(!self.is_complex(), "min is not yet implemented for complex tensors.");
   min_stub(kCPU, min, min_indices, self, dim, keepdim);
   return std::tuple<Tensor &,Tensor &>{min, min_indices};
 }
 
 std::tuple<Tensor, Tensor> _min_cpu(const Tensor& self, int64_t dim, bool keepdim) {
+  TORCH_CHECK(!self.is_complex(), "min is not yet implemented for complex tensors.");
   Tensor min_indices = at::empty({0}, self.options().dtype(kLong));
   Tensor min = at::empty({0}, self.options());
   return at::native::_min_out_cpu(min, min_indices, self, dim, keepdim);
 }
 
 std::tuple<Tensor, Tensor> min(const Tensor& self, int64_t dim, bool keepdim) {
+  TORCH_CHECK(!self.is_complex(), "min is not yet implemented for complex tensors.");
   Tensor min_indices = at::empty({0}, self.options().dtype(kLong));
   if (self.is_quantized()) {
     Tensor min = at::empty({0}, self.options().dtype(toUnderlying(self.scalar_type())));
@@ -248,6 +256,7 @@ std::tuple<Tensor, Tensor> min(const Tensor& self, int64_t dim, bool keepdim) {
 
 static std::tuple<Tensor &,Tensor &> min_out_impl(Tensor& min, Tensor& min_indices,
                                                   const Tensor& self, int64_t dim, bool keepdim) {
+  TORCH_CHECK(!self.is_complex(), "min is not yet implemented for complex tensors.");
   TORCH_CHECK(self.device().type() == DeviceType::CPU || self.device().type() == DeviceType::CUDA,
               "min only supports CPU AND CUDA device type, got: ", self.device().type());
   TORCH_CHECK(self.layout() == Layout::Strided,
@@ -270,6 +279,7 @@ static std::tuple<Tensor &,Tensor &> min_out_impl(Tensor& min, Tensor& min_indic
 
 std::tuple<Tensor&,Tensor&> min_out(Tensor& min, Tensor& min_indices,
                                     const Tensor& self, int64_t dim, bool keepdim) {
+  TORCH_CHECK(!self.is_complex(), "min is not yet implemented for complex tensors.");
   auto result = [&]() {
     NoNamesGuard guard;
     return min_out_impl(min, min_indices, self, dim, keepdim);
@@ -283,17 +293,21 @@ std::tuple<Tensor&,Tensor&> min_out(Tensor& min, Tensor& min_indices,
 // Named tensor overloads
 
 std::tuple<Tensor, Tensor> min(const Tensor& self, Dimname dim, bool keepdim) {
+  TORCH_CHECK(!self.is_complex(), "min is not yet implemented for complex tensors.");
   return at::min(self, dimname_to_position(self, dim), keepdim);
 }
 std::tuple<Tensor &,Tensor &> min_out(Tensor& min, Tensor& min_indices,
                                       const Tensor& self, Dimname dim, bool keepdim) {
+  TORCH_CHECK(!self.is_complex(), "min is not yet implemented for complex tensors.");
   return at::min_out(min, min_indices, self, dimname_to_position(self, dim), keepdim);
 }
 std::tuple<Tensor, Tensor> max(const Tensor& self, Dimname dim, bool keepdim) {
+  TORCH_CHECK(!self.is_complex(), "max is not yet implemented for complex tensors.");
   return at::max(self, dimname_to_position(self, dim), keepdim);
 }
 std::tuple<Tensor &,Tensor &> max_out(Tensor& max, Tensor& max_indices,
                                       const Tensor& self, Dimname dim, bool keepdim) {
+  TORCH_CHECK(!self.is_complex(), "max is not yet implemented for complex tensors.");
   return at::max_out(max, max_indices, self, dimname_to_position(self, dim), keepdim);
 }
 Tensor argmax(const Tensor& self, Dimname dim, bool keepdim) {

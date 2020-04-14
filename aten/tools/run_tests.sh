@@ -51,6 +51,9 @@ fi
 if [[ -x ./cuda_tensor_interop_test ]]; then
   ./cuda_tensor_interop_test
 fi
+if [[ -x ./cuda_complex_test ]]; then
+  ./cuda_complex_test
+fi
 if [ "$VALGRIND" == "ON" ]
 then
   valgrind --suppressions="$VALGRIND_SUP" --error-exitcode=1 ./basic --gtest_filter='-*CUDA'

@@ -157,6 +157,9 @@ struct ControlFlowLoadStores {
         case prim::Store: {
           environment_stack->setVar(n->s(attr::name), n->input()->type());
         } break;
+        case prim::LocalVariableScope: {
+          addControlFlowLoadStores(n->blocks().at(0));
+        } break;
       }
     }
     return popFrame();
@@ -199,6 +202,20 @@ struct EraseLoadStores {
           TORCH_INTERNAL_ASSERT(
               var, "Typechecking should ensure the variable name is set");
           n->output()->replaceAllUsesWith(var);
+          n->destroy();
+        } break;
+        case prim::LocalVariableScope: {
+          // writes within a local variable scope do not leak into
+          // the rest of the graph
+          auto body = n->blocks().at(0);
+          eraseBlockLoadStores(body);
+          // inline the local variable scope into the graph
+          for (auto it_cmpr = body->nodes().begin();
+               it_cmpr != body->nodes().end();) {
+            Node* body_node = *it_cmpr;
+            it_cmpr++;
+            body_node->moveBefore(n);
+          }
           n->destroy();
         } break;
         default: {

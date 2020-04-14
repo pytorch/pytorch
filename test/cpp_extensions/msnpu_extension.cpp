@@ -10,7 +10,7 @@ Tensor get_tensor(caffe2::TypeMeta dtype, IntArrayRef size) {
   auto tensor_impl = c10::make_intrusive<TensorImpl, UndefinedTensorImpl>(
       Storage(
           dtype, 0, at::DataPtr(nullptr, Device(DeviceType::MSNPU, 0)), nullptr, false),
-      DispatchKey::MSNPUTensorId);
+      DispatchKey::MSNPU);
   // This is a hack to workaround the shape checks in _convolution.
   tensor_impl->set_sizes_contiguous(size);
   return Tensor(std::move(tensor_impl));
@@ -49,10 +49,10 @@ std::tuple<Tensor,Tensor,Tensor> fake_convolution_backward(
 
 void init_msnpu_extension() {
   static auto registry = torch::import()
-    .impl("aten::empty.memory_format",                torch::dispatch(DispatchKey::MSNPUTensorId, CppFunction::makeUnboxedOnly(empty_override)))
-    .impl("aten::add.Tensor",                         torch::dispatch(DispatchKey::MSNPUTensorId, CppFunction::makeUnboxedOnly(add_override)))
-    .impl("aten::convolution_overrideable",           torch::dispatch(DispatchKey::MSNPUTensorId, CppFunction::makeUnboxedOnly(fake_convolution)))
-    .impl("aten::convolution_backward_overrideable",  torch::dispatch(DispatchKey::MSNPUTensorId, CppFunction::makeUnboxedOnly(fake_convolution_backward)))
+    .impl_UNBOXED("aten::empty.memory_format",                kMSNPU, empty_override)
+    .impl_UNBOXED("aten::add.Tensor",                         kMSNPU, add_override)
+    .impl_UNBOXED("aten::convolution_overrideable",           kMSNPU, fake_convolution)
+    .impl_UNBOXED("aten::convolution_backward_overrideable",  kMSNPU, fake_convolution_backward)
     ;
 }
 
