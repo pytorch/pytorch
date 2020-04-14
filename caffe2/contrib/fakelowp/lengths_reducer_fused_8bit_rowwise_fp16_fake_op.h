@@ -124,9 +124,9 @@ class SparseLengthsFused8BitRowwiseFakeFP16Op final : public Operator<Context> {
         float scale = scale_bias[0];
         float bias = scale_bias[1];
 
-        // Intel might store scale as s' = 1 / s which implies b' = b / s
+        // Vendor might store scale as s' = 1 / s which implies b' = b / s
         // We do      x = x_q * s + b
-        // Intel does x = (x_q + b') / s'
+        // Vendor does x = (x_q + b') / s'
         // Solving these equations yields to the results above
         if (use_inv_scale) {
           constexpr float kEpsilon = 1e-8;

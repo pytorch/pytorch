@@ -220,6 +220,51 @@ bool MulFunctor<CPUContext>::Backward(
   return true;
 }
 
+// Used in fallback ops
+template bool MulFunctor<CPUContext>::Backward<float, float, float>(
+    const std::vector<int>& A_dims,
+    const std::vector<int>& B_dims,
+    const float* dC,
+    const float* A,
+    const float* B,
+    const float* /* C */,
+    float* dA,
+    float* dB,
+    CPUContext* context) const;
+
+template bool MulFunctor<CPUContext>::Backward<int32_t, int32_t, int32_t>(
+    const std::vector<int>& A_dims,
+    const std::vector<int>& B_dims,
+    const int* dC,
+    const int* A,
+    const int* B,
+    const int* /* C */,
+    int* dA,
+    int* dB,
+    CPUContext* context) const;
+
+template bool MulFunctor<CPUContext>::Backward<double, double, double>(
+    const std::vector<int>& A_dims,
+    const std::vector<int>& B_dims,
+    const double* dC,
+    const double* A,
+    const double* B,
+    const double* /* C */,
+    double* dA,
+    double* dB,
+    CPUContext* context) const;
+
+template bool MulFunctor<CPUContext>::Backward<int64_t, int64_t, int64_t>(
+    const std::vector<int>& A_dims,
+    const std::vector<int>& B_dims,
+    const int64_t* dC,
+    const int64_t* A,
+    const int64_t* B,
+    const int64_t* /* C */,
+    int64_t* dA,
+    int64_t* dB,
+    CPUContext* context) const;
+
 REGISTER_CPU_OPERATOR(
     MulGradient,
     BinaryElementwiseGradientOp<
