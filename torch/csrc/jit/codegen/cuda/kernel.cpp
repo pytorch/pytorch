@@ -123,9 +123,9 @@ struct KernelArgumentHolder {
   // Create buffer, flatten arguments into it, align by 8 Bytes, return pointers
   // in the buffer
   void** getBuffer() {
-    if (changed){
+    if (changed) {
       void_ptrs = std::vector<void*>(arguments.size(), nullptr);
-      for(decltype(arguments.size()) i{0}; i<arguments.size(); i++)
+      for (decltype(arguments.size()) i{0}; i < arguments.size(); i++)
         void_ptrs[i] = static_cast<void*>(arguments[i]->arg());
       changed = false;
     }
