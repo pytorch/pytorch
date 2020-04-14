@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/tensorexpr/ir_printer.h>
 
 #include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
+#include <torch/csrc/jit/tensorexpr/reduction.h>
 
 namespace torch {
 namespace jit {
@@ -90,7 +91,7 @@ void IRPrinter::visit(const Mod* v) {
   if (v->dtype().is_integral()) {
     visitBinaryOp(v, "%", this);
   } else if (v->dtype().is_floating_point()) {
-    os() << "mod(" << v->lhs() << ", " << v->rhs() << ")";
+    os() << "mod(" << *v->lhs() << ", " << *v->rhs() << ")";
   } else {
     throw std::runtime_error("invalid dtype: " + std::to_string(v->dtype()));
   }
@@ -263,7 +264,18 @@ void IRPrinter::visit(const Ramp* v) {
 
 void IRPrinter::visit(const Load* v) {
   // TODO: support the mask case
-  os() << *v->base_handle() << "[" << *v->index() << "]";
+  os() << *v->base_handle() << "[";
+  size_t i = 0;
+  for (const Expr* ind : v->indices()) {
+    if (i++) {
+      os() << ", ";
+    }
+    ind->accept(this);
+  }
+  if (v->indices().empty()) {
+    os() << "0";
+  }
+  os() << "]";
 }
 
 void IRPrinter::visit(const For* v) {
@@ -296,8 +308,18 @@ void IRPrinter::visit(const Block* v) {
 void IRPrinter::visit(const Store* v) {
   // TODO: handle the mask
   emitIndent();
-  os() << *v->base_handle() << "[" << *v->index() << "] = " << *v->value()
-       << ";";
+  os() << *v->base_handle() << "[";
+  size_t i = 0;
+  for (const Expr* ind : v->indices()) {
+    if (i++) {
+      os() << ", ";
+    }
+    ind->accept(this);
+  }
+  if (v->indices().empty()) {
+    os() << "0";
+  }
+  os() << "] = " << *v->value() << ";";
 }
 
 void IRPrinter::visit(const Broadcast* v) {
@@ -397,6 +419,29 @@ void IRPrinter::visit(const Polynomial* v) {
   }
   v->scalar()->accept(this);
   os() << ")";
+}
+
+void IRPrinter::visit(const RoundOff* v) {
+  os() << "RoundOff(";
+  v->lhs()->accept(this);
+  os() << ", ";
+  v->rhs()->accept(this);
+  os() << ")";
+}
+
+void IRPrinter::visit(const ReduceOp* v) {
+  os() << "ReduceOp(";
+  os() << *v->initializer() << ", ";
+  os() << v->complete() << ", {";
+  bool first = true;
+  for (auto* d : v->reduce_args()) {
+    if (!first) {
+      os() << ", ";
+    }
+    os() << d->name_hint();
+    first = false;
+  }
+  os() << "})";
 }
 
 void IRPrinter::emitIndent() {

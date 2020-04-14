@@ -1160,7 +1160,12 @@ bool OnnxifiTransformer::supportOpC2(
     // Build a c2 net with one op
     NetDef net;
     net.add_op()->CopyFrom(op);
+    std::unordered_set<std::string> seenExternalInputs;
     for (const auto& i : op.input()) {
+      if (seenExternalInputs.count(i)) {
+        continue;
+      }
+      seenExternalInputs.insert(i);
       net.add_external_input(i);
     }
     for (const auto& o : op.output()) {
@@ -1182,7 +1187,12 @@ bool OnnxifiTransformer::supportOpC2(
     auto* qshape_arg = net.add_arg();
     shape_arg->set_name("input_shape_info");
     qshape_arg->set_name("input_qshape_info");
+    std::unordered_set<std::string> seenInputsForShapeArgs;
     for (const auto& i : op.input()) {
+      if (seenInputsForShapeArgs.count(i)) {
+        continue;
+      }
+      seenInputsForShapeArgs.insert(i);
       const auto it = shape_hints.find(i);
       if (it == shape_hints.end()) {
         VLOG(1) << "Skipping " << op.type() << " (" << pos

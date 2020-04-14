@@ -85,12 +85,63 @@ Dtype promoteTypesVar(const ExprType* e, Args... es) {
   return promoteTypes(lhs, rhs);
 }
 
-// Helper for determining if an Expr is a multi-lane primitive (e.g. Broadcast
-// or Ramp).
-bool isMultilanePrimitive(const Expr* e) {
-  return e->expr_type() == IRNodeType::kBroadcast ||
-      e->expr_type() == IRNodeType::kRamp;
+// Creates a new Expr of the given type with the provided lhs and rhs.
+static const Expr* newBinaryOpOfType(
+    IRNodeType expr_type,
+    const Expr* lhs,
+    const Expr* rhs,
+    bool option) {
+  switch (expr_type) {
+    case IRNodeType::kAdd:
+      return new Add(lhs, rhs);
+    case IRNodeType::kSub:
+      return new Sub(lhs, rhs);
+    case IRNodeType::kMul:
+      return new Mul(lhs, rhs);
+    case IRNodeType::kDiv:
+      return new Div(lhs, rhs);
+    case IRNodeType::kMod:
+      return new Mod(lhs, rhs);
+    case IRNodeType::kMax:
+      return new Max(lhs, rhs, option);
+    case IRNodeType::kMin:
+      return new Min(lhs, rhs, option);
+    case IRNodeType::kAnd:
+      return new And(lhs, rhs);
+    case IRNodeType::kXor:
+      return new Xor(lhs, rhs);
+    case IRNodeType::kLshift:
+      return new Lshift(lhs, rhs);
+    case IRNodeType::kRshift:
+      return new Rshift(lhs, rhs);
+    default:
+      LOG(FATAL) << "unsupported expr_type: " << static_cast<int>(expr_type);
+      return nullptr;
+  }
 }
+
+// Uses the evaluator to fold an Expression with constant terms.
+// E.g. evaluateOp(Add(3, 4)) => 7.
+// Expr v must not have any unbound Vars.
+static Expr* evaluateOp(const Expr* v) {
+  ExprHandle handle(v);
+  ExprEval<SimpleIREvaluator> eval(handle);
+
+  switch (v->dtype().scalar_type()) {
+#define TYPE_CASE(Type, Name)                                 \
+  case ScalarType::Name: {                                    \
+    Type val = eval.value<Type>();                            \
+    return getImmediateByType(v->dtype().scalar_type(), val); \
+  }
+    AT_FORALL_SCALAR_TYPES_AND(Half, TYPE_CASE);
+#undef TYPE_CASE
+    default:
+      LOG(FATAL) << "Unsupported datatype: " << v->dtype();
+      return nullptr;
+  }
+  return nullptr;
+}
+
 } // namespace
 
 // A Term represents a grouping of Exprs through multiplication.
@@ -231,6 +282,12 @@ class Polynomial : public ExprNode<Polynomial> {
   void sort();
 };
 
+class RoundOff : public BinaryOpNode<RoundOff> {
+ public:
+  RoundOff(const Expr* lhs, const Expr* rhs)
+      : BinaryOpNode(lhs, rhs, IRNodeType::kRoundOff) {}
+};
+
 // Simplify the IR by combining arithmetic expressions over common terms.
 class TORCH_API PolynomialTransformer : public IRMutator {
  public:
@@ -268,13 +325,16 @@ class TORCH_API PolynomialTransformer : public IRMutator {
   // Multiply a Polynomial by a Term.
   const Expr* polyByTerm(const Polynomial* poly, const Term* term);
 
+  // Match a rounding pattern and create a RoundOff if found.
+  const Expr* isRoundOff(const Expr* lhs, const Expr* rhs);
+
+  // Inserts a new component into a term, simplifying if possible.
+  const Expr* insertIntoTerm(const Term* term, const Expr* expr);
+
   // Merge and simplify multiplication.
   const Expr* mutate(const Mul* v) override;
 
-  const Expr* mutate(const Div* v) override {
-    // TODO div simplification will require a rational node.
-    return mutateBinaryOp(v, this);
-  }
+  const Expr* mutate(const Div* v) override;
 
   const Expr* mutate(const Mod* v) override {
     return mutateBinaryOp(v, this);
@@ -308,6 +368,10 @@ class TORCH_API PolynomialTransformer : public IRMutator {
 
   const Expr* mutate(const Cast* v) override;
 
+  const Expr* mutate(const IfThenElse* v) override;
+
+  Stmt* mutate(const Cond* v) override;
+
   template <typename Op>
   static const Expr* mutateBinaryOp(
       const BinaryOpNode<Op>* v,
@@ -330,6 +394,10 @@ class TORCH_API PolynomialTransformer : public IRMutator {
     }
 
     return evaluateOp(node);
+  }
+
+  HashProvider& hasher() {
+    return hasher_;
   }
 
   static const Expr* simplify(const Expr* e);
@@ -355,7 +423,10 @@ class TORCH_API TermExpander : public IRMutator {
   const Expr* factorizePolynomial(const Polynomial* poly);
 
   // Expand Polynomials out to a series of Adds.
-  const Expr* mutate(const Polynomial* v);
+  const Expr* mutate(const Polynomial* v) override;
+
+  // Expand RoundOff to it's component: Mul(Div(lhs, rhs), rhs).
+  const Expr* mutate(const RoundOff* v) override;
 };
 
 class TORCH_API IRSimplifier {

@@ -1571,6 +1571,7 @@ def sigmoid(input):
 
 
 def hardsigmoid(input, inplace=False):
+    # type: (Tensor, bool) -> Tensor
     r"""hardsigmoid(input) -> Tensor
 
     Applies the element-wise function
@@ -1645,6 +1646,7 @@ def bilinear(input1, input2, weight, bias=None):
 
 
 def hardswish(input, inplace=False):
+    # type: (Tensor, bool) -> Tensor
     r"""Applies the hardswish function, element-wise, as described in the paper:
 
     `Searching for MobileNetV3`_.
@@ -2228,8 +2230,8 @@ def poisson_nll_loss(input, target, log_input=True, full=False, size_average=Non
     return ret
 
 
-def kl_div(input, target, size_average=None, reduce=None, reduction='mean'):
-    # type: (Tensor, Tensor, Optional[bool], Optional[bool], str) -> Tensor
+def kl_div(input, target, size_average=None, reduce=None, reduction='mean', log_target=False):
+    # type: (Tensor, Tensor, Optional[bool], Optional[bool], str, bool) -> Tensor
     r"""The `Kullback-Leibler divergence`_ Loss.
 
     See :class:`~torch.nn.KLDivLoss` for details.
@@ -2253,6 +2255,10 @@ def kl_div(input, target, size_average=None, reduce=None, reduction='mean'):
             ``'sum'``: the output will be summed
             ``'mean'``: the output will be divided by the number of elements in the output
             Default: ``'mean'``
+        log_target (bool): A flag indicating whether ``target`` is passed in the log space.
+            It is recommended to pass certain distributions (like ``softmax``)
+            in the log space to avoid numerical issues caused by explicit ``log``.
+            Default: ``False``
 
     .. note::
         :attr:`size_average` and :attr:`reduce` are in the process of being deprecated,
@@ -2271,7 +2277,7 @@ def kl_div(input, target, size_average=None, reduce=None, reduction='mean'):
         if any([type(t) is not Tensor for t in tens_ops]) and has_torch_function(tens_ops):
             return handle_torch_function(
                 kl_div, tens_ops, input, target, size_average=size_average,
-                reduce=reduce, reduction=reduction)
+                reduce=reduce, reduction=reduction, log_target=log_target)
     if size_average is not None or reduce is not None:
         reduction_enum = _Reduction.legacy_get_enum(size_average, reduce)
     else:
@@ -2286,7 +2292,7 @@ def kl_div(input, target, size_average=None, reduce=None, reduction='mean'):
         else:
             reduction_enum = _Reduction.get_enum(reduction)
 
-    reduced = torch.kl_div(input, target, reduction_enum)
+    reduced = torch.kl_div(input, target, reduction_enum, log_target=log_target)
 
     if reduction == 'batchmean' and input.dim() != 0:
         reduced = reduced / input.size()[0]
@@ -2878,7 +2884,7 @@ def _interp_output_size(dim, closed_over_args):  # noqa: F811
 
         is_float_scale_factor = False
         for scale in scale_factors:
-            is_float_scale_factor = math.floor(scale) == scale
+            is_float_scale_factor = math.floor(scale) != scale
             if is_float_scale_factor:
                 break
 

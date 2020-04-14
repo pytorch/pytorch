@@ -2,7 +2,6 @@
 
 #include <c10/core/thread_pool.h>
 #include <c10d/ProcessGroup.hpp>
-#include <torch/csrc/distributed/rpc/python_rpc_handler.h>
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
 
 #include <atomic>
@@ -75,9 +74,9 @@ class ProcessGroupAgent : public RpcAgent {
 
   void sync() override;
 
-  void start() override;
+  void startImpl() override;
 
-  void shutdown() override;
+  void shutdownImpl() override;
 
   ~ProcessGroupAgent() override;
 
@@ -220,13 +219,6 @@ class ProcessGroupAgent : public RpcAgent {
   MessageCounter recvCounts_;
 
   std::atomic<int64_t> nextId_;
-  // atomic bool indicating if this agent is running. It is set in
-  // ProcessGroupAgent::start and unset in ProcessGroupAgent::shutdown and
-  // ProcessGroupAgent::join. It controls whether several background threads
-  // should be running.
-  // We lock access to this in shutdown() and pollTimedOutRPCs() to prevent race
-  // conditions when notifying condition variables.
-  std::atomic<bool> rpcRunning_{false};
   // one mutex per ProcessGroup rank, as ProcessGroup::send is not thread-safe
   // when using the same tag.
   std::vector<std::mutex> sendMutexes_;
@@ -257,6 +249,8 @@ class ProcessGroupAgent : public RpcAgent {
   //     NB: Ideally, this should be addressed by supporting asynchronous UDF.
   //         This is just a temporary solution for (2).
   ThreadPool threadPool_;
+  // Atomic to indicate whether the timeout thread is enabled.
+  std::atomic<bool> timeoutThreadEnabled_;
   // Mapping of request id to FutureInfo struct.
   std::unordered_map<int64_t, FutureInfo> futures_;
   // A map to keep track of when futures time out. The map is keyed by the time

@@ -172,21 +172,26 @@ void HashProvider::visit(const Ramp* v) {
 void HashProvider::visit(const Load* v) {
   CACHE_GUARD();
   v->base_handle()->accept(this);
-  v->index()->accept(this);
+  SimplifierHashType indices_hash;
+  for (const Expr* ind : v->indices()) {
+    ind->accept(this);
+    indices_hash = hash_combine(indices_hash, hashOf(ind));
+  }
   v->mask()->accept(this);
   putHash(
       v,
       hash_combine(
-          "load",
-          hashOf(v->base_handle()),
-          hashOf(v->index()),
-          hashOf(v->mask())));
+          "load", hashOf(v->base_handle()), indices_hash, hashOf(v->mask())));
 }
 
 void HashProvider::visit(const Store* v) {
   CACHE_GUARD();
   v->base_handle()->accept(this);
-  v->index()->accept(this);
+  SimplifierHashType indices_hash;
+  for (const Expr* ind : v->indices()) {
+    ind->accept(this);
+    indices_hash = hash_combine(indices_hash, hashOf(ind));
+  }
   v->value()->accept(this);
   v->mask()->accept(this);
   putHash(
@@ -194,7 +199,7 @@ void HashProvider::visit(const Store* v) {
       hash_combine(
           "store",
           hashOf(v->base_handle()),
-          hashOf(v->index()),
+          indices_hash,
           hashOf(v->value()),
           hashOf(v->mask())));
 }

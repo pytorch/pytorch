@@ -149,19 +149,17 @@ endif(BLAS_FOUND)
 
 if(LAPACK_FOUND)
   list(APPEND ATen_CPU_DEPENDENCY_LIBS ${LAPACK_LIBRARIES})
-  if(USE_CUDA)
+  if(USE_CUDA AND MSVC)
     # Although Lapack provides CPU (and thus, one might expect that ATen_cuda
     # would not need this at all), some of our libraries (magma in particular)
     # backend to CPU BLAS/LAPACK implementations, and so it is very important
     # we get the *right* implementation, because even if the symbols are the
     # same, LAPACK implementions may have different calling conventions.
     # This caused https://github.com/pytorch/pytorch/issues/7353
+    #
+    # We do NOT do this on Linux, since we just rely on torch_cpu to
+    # provide all of the symbols we need
     list(APPEND ATen_CUDA_DEPENDENCY_LIBS ${LAPACK_LIBRARIES})
-  endif()
-  if(USE_ROCM)
-    # It's not altogether clear that HIP behaves the same way, but it
-    # seems safer to assume that it needs it too
-    list(APPEND ATen_HIP_DEPENDENCY_LIBS ${LAPACK_LIBRARIES})
   endif()
 endif(LAPACK_FOUND)
 
@@ -265,46 +263,12 @@ endif()
 
 if(USE_CUDA AND NOT USE_ROCM)
   if($ENV{ATEN_STATIC_CUDA})
-    # CuFFT has a complicated static story (especially around CUDA < 9) because it has device callback support
-    # we first have to build a fake lib that links with no device callbacks,
-    # and then we link against this object file.
-    # This was recommended by the CuFFT team at NVIDIA
-
-    # build fake CuFFT lib in build dir
-    execute_process(COMMAND touch ${CMAKE_CURRENT_BINARY_DIR}/empty_file.cc)
-    if(${CUDA_VERSION_MAJOR} EQUAL "9")
-      set(CUFFT_FAKELINK_OPTIONS
-        --generate-code arch=compute_35,code=sm_35
-        --generate-code arch=compute_50,code=sm_50
-        --generate-code arch=compute_60,code=sm_60
-        --generate-code arch=compute_70,code=sm_70)
-    elseif(${CUDA_VERSION_MAJOR} EQUAL "10")
-      set(CUFFT_FAKELINK_OPTIONS
-        --generate-code arch=compute_35,code=sm_35
-        --generate-code arch=compute_50,code=sm_50
-        --generate-code arch=compute_60,code=sm_60
-        --generate-code arch=compute_70,code=sm_70)
-    else()
-      message(FATAL_ERROR "Unhandled major cuda version ${CUDA_VERSION_MAJOR}")
-    endif()
-    add_custom_command(
-      OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/cufft_static_library.a
-      COMMAND "${CUDA_TOOLKIT_ROOT_DIR}/bin/nvcc" -o ${CMAKE_CURRENT_BINARY_DIR}/cufft_static_library.a -Xcompiler -fPIC
-      ${CUFFT_FAKELINK_OPTIONS}
-      --device-link ${CMAKE_CURRENT_BINARY_DIR}/empty_file.cc -lcufft_static -lculibos
-      )
-    add_custom_target(FAKELINKED_CUFFT_TARGET DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/cufft_static_library.a)
-    add_library(FAKELINKED_CUFFT STATIC IMPORTED GLOBAL)
-    add_dependencies(FAKELINKED_CUFFT FAKELINKED_CUFFT_TARGET)
-    set_target_properties(FAKELINKED_CUFFT PROPERTIES IMPORTED_LOCATION ${CMAKE_CURRENT_BINARY_DIR}/cufft_static_library.a)
-
     list(APPEND ATen_CUDA_DEPENDENCY_LIBS
       ${CUDA_LIBRARIES}
       ${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcusparse_static.a
       ${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcurand_static.a
       ${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcublas_static.a
-      FAKELINKED_CUFFT
-      ${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcufft_static.a
+      ${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcufft_static_nocallback.a
       )
   else()
     list(APPEND ATen_CUDA_DEPENDENCY_LIBS
@@ -319,10 +283,14 @@ if(USE_CUDA AND NOT USE_ROCM)
 
   if(USE_MAGMA)
     list(APPEND ATen_CUDA_DEPENDENCY_LIBS ${MAGMA_LIBRARIES})
-    if($ENV{TH_BINARY_BUILD})
-      list(APPEND ATen_CUDA_DEPENDENCY_LIBS
-        "${BLAS_LIBRARIES};${BLAS_LIBRARIES};${BLAS_LIBRARIES}")
-    endif($ENV{TH_BINARY_BUILD})
+    if(MSVC)
+      if($ENV{TH_BINARY_BUILD})
+        # Do not do this on Linux: see Note [Extra MKL symbols for MAGMA in torch_cpu]
+        # in caffe2/CMakeLists.txt
+        list(APPEND ATen_CUDA_DEPENDENCY_LIBS
+          "${BLAS_LIBRARIES};${BLAS_LIBRARIES};${BLAS_LIBRARIES}")
+      endif($ENV{TH_BINARY_BUILD})
+    endif(MSVC)
   endif(USE_MAGMA)
   if($ENV{ATEN_STATIC_CUDA})
     list(APPEND ATen_CUDA_DEPENDENCY_LIBS "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libculibos.a")

@@ -396,7 +396,8 @@ void initJITBindings(PyObject* module) {
             auto stack = toTraceableStack(args);
             checkAliasAnnotation(g, std::move(stack), unqualified_op_name);
           })
-      .def("_jit_register_cuda_fuser", &registerCudaFuseGraph)
+      .def("_jit_register_cuda_fuser", &RegisterCudaFuseGraph::registerPass)
+      .def("_jit_clear_cuda_fuser", &RegisterCudaFuseGraph::clearPass)
       .def(
           "_jit_set_profiling_mode",
           [](bool profiling_flag) {
@@ -498,6 +499,11 @@ void initJITBindings(PyObject* module) {
       .def(
           "_jit_pass_insert_prepacked_ops",
           [](script::Module& module) { return insertPrePackedOps(module); })
+      .def(
+          "_jit_pass_fuse_clamp_w_prepacked_linear_conv",
+          [](script::Module& module) {
+            return fusePrePackedLinearConvWithClamp(module);
+          })
       .def(
           "_jit_pass_fold_prepacking_ops",
           [](script::Module& module) { return FoldPrePackingOps(module); })

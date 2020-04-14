@@ -4112,6 +4112,19 @@ class TestNN(NNTestCase):
 
         self.assertEqual(l, expected)
 
+    def test_KLDivLoss_batch_mean_log_target(self):
+        input_shape = (2, 5)
+        log_prob1 = F.log_softmax(torch.randn(input_shape), 1)
+        log_prob2 = F.log_softmax(torch.randn(input_shape), 1)
+
+        loss = nn.KLDivLoss(reduction='batchmean', log_target=True)
+        l = loss(log_prob1, log_prob2)
+
+        loss_none_reduce = nn.KLDivLoss(reduction='sum', log_target=True)(log_prob1, log_prob2)
+        expected = loss_none_reduce / input_shape[0]
+
+        self.assertEqual(l, expected)
+
     def test_CTCLoss_typechecks(self):
         target_lengths = torch.tensor([30, 25, 20])
         input_lengths = torch.tensor([50, 50, 50])
@@ -6145,6 +6158,29 @@ class TestNN(NNTestCase):
                     result = torch.nn.functional.kl_div(input, target)
                     self.assertEqual(result.item(), expected.item(), 0.001)
 
+    def test_kl_div_with_diff_type_log_target(self):
+        for device in device_():
+            input = torch.tensor([[2, 3, 5], [3, 2, 1]], dtype=torch.double, device=device)
+            target = torch.tensor([[1, 2, 3], [4, 5, 6]], dtype=torch.double, device=device).log()
+            expected = torch.nn.functional.kl_div(input, target, log_target=True)
+            for input_dtype in torch.testing.get_all_math_dtypes(device):
+                for target_dtype in [torch.float32, torch.float64, torch.float16]:
+                    if (torch.device(device).type == 'cpu' and target_dtype == torch.float16):
+                        continue
+                    input = input.to(input_dtype)
+                    target = target.to(target_dtype)
+                    result = torch.nn.functional.kl_div(input, target, log_target=True)
+                    self.assertEqual(result.item(), expected.item(), 0.001)
+
+    def test_kl_div_log_softmax_target(self):
+        for device in device_():
+            a = torch.tensor([[1.0, 2, 3], [5.0, 5, 5]], device=device)
+            b = torch.tensor([[1.0, 2, 3], [5.0, 5, 5]], device=device)
+            self.assertEqual(
+                F.kl_div(F.log_softmax(a, 1), F.log_softmax(b, 1), reduction='none', log_target=True),
+                torch.zeros_like(a)
+            )
+
     def test_cosine_embedding_loss_no_reduce(self):
         input1 = torch.randn(15, 10, requires_grad=True)
         input2 = torch.randn(15, 10, requires_grad=True)
@@ -7887,6 +7923,42 @@ class TestNN(NNTestCase):
         self.assertEqual(children[0].__class__, torch.nn.SyncBatchNorm)
         self.assertEqual(children[1].__class__, torch.nn.InstanceNorm1d)
 
+    def test_functional_grad_conv(self):
+        # Conv 1D
+        input = torch.randn(1, 1, 5, requires_grad=True)
+        weight = torch.randn(1, 1, 3, requires_grad=True)
+        output = F.conv1d(input, weight, dilation=2)
+        grad_output = torch.randn(output.shape)
+
+        grad_input_autograd = torch.autograd.grad(output, input, grad_output)[0]
+        grad_input_functional = torch.nn.grad.conv1d_input(input.shape, weight, grad_output, dilation=2)
+        self.assertEqual(grad_input_functional, grad_input_autograd)
+
+        # Conv 2D
+        input = torch.randn(1, 1, 5, 5, requires_grad=True)
+        weight = torch.randn(1, 1, 3, 3, requires_grad=True)
+        output = F.conv2d(input, weight, dilation=2)
+        grad_output = torch.randn(output.shape)
+
+        grad_input_autograd = torch.autograd.grad(output, input, grad_output)[0]
+        grad_input_functional = torch.nn.grad.conv2d_input(input.shape, weight, grad_output, dilation=2)
+        self.assertEqual(grad_input_functional, grad_input_autograd)
+
+        # Conv 3D
+        input = torch.randn(1, 1, 5, 5, 5, requires_grad=True)
+        weight = torch.randn(1, 1, 3, 3, 3, requires_grad=True)
+        output = F.conv3d(input, weight, dilation=2)
+        grad_output = torch.randn(output.shape)
+
+        grad_input_autograd = torch.autograd.grad(output, input, grad_output)[0]
+        grad_input_functional = torch.nn.grad.conv3d_input(input.shape, weight, grad_output, dilation=2)
+        self.assertEqual(grad_input_functional, grad_input_autograd)
+
+        # Warning for _grad_input_padding
+        with warnings.catch_warnings(record=True) as w:
+            torch.nn.grad._grad_input_padding(torch.rand(1, 2, 3), [1, 2, 5], (1,), (0,), (3,))
+        self.assertEqual(len(w), 1)
+
 
 class TestNNInit(TestCase):
     def setUp(self):
@@ -8296,7 +8368,9 @@ class TestNNInit(TestCase):
 
         def fn():
             init.normal(x)
-        self.assertWarnsRegex(fn, 'deprecated', 'methods not suffixed with underscore should be deprecated')
+
+        with self.assertWarnsRegex(UserWarning, 'deprecated', msg='methods not suffixed with underscore should be deprecated'):
+            fn()
 
 class TestFusionEval(TestCase):
     @given(X=hu.tensor(shapes=((5, 3, 5, 5),)),
@@ -9347,6 +9421,48 @@ class TestNNDeviceType(NNTestCase):
                 conv1.bias = nn.Parameter(bias_c)
             out2 = conv1(input_c)
             self.assertEqual(out1, out2)
+
+    @onlyCUDA
+    def test_grid_sample_large(self, device):
+        def issue_35202():
+            input_tensor = torch.rand(1, 1, 480, 640, dtype=torch.float, device=device, requires_grad=True)
+            coords = torch.tensor([[-10059144, 67680944], [67680944, 67680944]], dtype=torch.float, device=device)
+            coords = coords.unsqueeze(0).unsqueeze(0).repeat(1, 1, 1, 1)
+            result = torch.nn.functional.grid_sample(input_tensor, coords)
+            self.assertEqual(result, torch.tensor([[[[0., 0.]]]], dtype=torch.float, device=device))
+            result.backward(torch.ones_like(result))
+            torch.cuda.synchronize()
+        issue_35202()
+
+        def issue_24823_1(dtype):
+            image = torch.arange(27, 0, -1, dtype=dtype, device=device).view(1, 1, 3, 3, 3)
+            image.requires_grad_()
+            grid = torch.nn.functional.affine_grid(
+                torch.tensor([[[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0]]], dtype=dtype, device=device),
+                (1, 1, 3, 3, 3))
+            grid[:, 1, 1, 1, 0] = float('inf')
+            result = torch.nn.functional.grid_sample(image, grid, padding_mode='zeros')
+            self.assertEqual(result, torch.tensor([[[[[27., 26., 25.], [24., 23., 22.], [21., 20., 19.]],
+                                                     [[18., 17., 16.], [15., 0., 13.], [12., 11., 10.]],
+                                                     [[9., 8., 7.], [6., 5., 4.], [3., 2., 1.]]]]], 
+                                                  device=device, dtype=dtype))
+            result.backward(torch.ones_like(result))
+            expected_grad = torch.ones_like(image)
+            expected_grad[0, 0, 1, 1, 1] = 0
+            self.assertTrue(torch.allclose(image.grad, expected_grad, atol=1e-3))
+        issue_24823_1(torch.half)
+        issue_24823_1(torch.float)
+        issue_24823_1(torch.double)
+
+        def issue_24823_2():
+            param = torch.tensor([[[-1.0e+20, 0.0, 0.0], [0.0, -1.0e+20, 0.0]]], dtype=torch.float, device=device)
+            img = torch.zeros((1, 1, 4, 4), dtype=torch.float, device=device, requires_grad=True)
+            grid = torch.nn.functional.affine_grid(param, img.size())
+            result = torch.nn.functional.grid_sample(img, grid)
+            self.assertEqual(result, torch.zeros(1, 1, 4, 4, device=device, dtype=torch.float))
+            result.backward(torch.ones_like(result))
+            torch.cuda.synchronize()
+        issue_24823_2()
 
     @largeCUDATensorTest('12GB')
     def test_conv_transposed_large(self, device):

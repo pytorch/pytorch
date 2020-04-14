@@ -62,10 +62,14 @@ class TestConcatSplitOps(serial.SerializedTestCase):
             gc, op, splits, lambda *splits: (
                 np.concatenate(splits, axis=axis),
                 np.array([a.shape[axis] for a in splits])
-            )
+            ),
+            ensure_outputs_are_inferred=True,
         )
         self.assertDeviceChecks(dc, op, splits, [0, 1])
-        self.assertGradientChecks(gc, op, splits, 0, [0])
+        self.assertGradientChecks(
+            gc, op, splits, 0, [0],
+            ensure_outputs_are_inferred=True,
+        )
 
     @given(tensor_splits=_tensor_splits(add_axis=True),
            **hu.gcs)
@@ -87,11 +91,15 @@ class TestConcatSplitOps(serial.SerializedTestCase):
                     axis=axis
                 ),
                 np.array([1] * len(splits))
-            )
+            ),
+            ensure_outputs_are_inferred=True,
         )
         self.assertDeviceChecks(dc, op, splits, [0, 1])
         for i in range(len(splits)):
-            self.assertGradientChecks(gc, op, splits, i, [0])
+            self.assertGradientChecks(
+                gc, op, splits, i, [0],
+                ensure_outputs_are_inferred=True,
+            )
 
     @serial.given(tensor_splits=_tensor_splits(),
            split_as_arg=st.booleans(),
@@ -124,9 +132,15 @@ class TestConcatSplitOps(serial.SerializedTestCase):
                 for i in range(len(split))
             ]
         outputs_with_grad = range(len(split_info))
-        self.assertReferenceChecks(gc, op, input_tensors, split_ref, ensure_outputs_are_inferred=True)
+        self.assertReferenceChecks(
+            gc, op, input_tensors, split_ref,
+            ensure_outputs_are_inferred=True,
+        )
         self.assertDeviceChecks(dc, op, input_tensors, outputs_with_grad)
-        self.assertGradientChecks(gc, op, input_tensors, 0, outputs_with_grad)
+        self.assertGradientChecks(
+            gc, op, input_tensors, 0, outputs_with_grad,
+            ensure_outputs_are_inferred=True,
+        )
 
     @serial.given(
         inputs=hu.lengths_tensor(

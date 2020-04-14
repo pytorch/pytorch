@@ -69,7 +69,7 @@ struct TORCH_API Operator {
 
   Operator(
       const std::string& schema,
-      int (*op)(Stack&),
+      Operation op,
       c10::AliasAnalysisKind alias_analysis)
       : schema_string_(schema),
         alias_analysis_(alias_analysis),
@@ -125,6 +125,16 @@ struct TORCH_API Operator {
 
   c10::AliasAnalysisKind aliasAnalysisKind() const {
     if (isC10Op()) {
+      // Update schema_ because its alias analysis info might have changed if
+      // new c10 registrations came in
+      // TODO We're doing an isValid check because the c10 operator might
+      // already be deregistered.
+      //      Instead, we should automatically deregister the JIT wrapper when
+      //      the c10 op gets deregistered and remove this isValid() check.
+      if (c10Handle_->isValid()) {
+        schema_->setAliasAnalysis(c10Handle_->schema().aliasAnalysis());
+      }
+
       const FunctionSchema& schemaRef = schema();
       TORCH_CHECK(
           schemaRef.aliasAnalysis() == AliasAnalysisKind::FROM_SCHEMA ||
@@ -180,7 +190,8 @@ TORCH_API void registerOperator(Operator&& op);
 TORCH_API void deregisterOperator(const FunctionSchema& schema);
 
 // XXX: this function is meant to be used with string literals only!
-std::shared_ptr<Operator> getOperatorForLiteral(const char* signature);
+TORCH_API std::shared_ptr<Operator> getOperatorForLiteral(
+    const char* signature);
 
 // Ensure the thing that registers c10 ops is defined.
 // Otherwise, our registry will not have c10 ops. You can run into this

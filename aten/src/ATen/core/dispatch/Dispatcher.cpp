@@ -218,8 +218,9 @@ void Dispatcher::cleanup(const OperatorHandle& op, const OperatorName& op_name) 
 }
 
 RegistrationHandleRAII Dispatcher::registerFallback(DispatchKey dispatchKey, KernelFunction kernel) {
-  auto inserted = backendFallbackKernels_.setKernel(dispatchKey, std::move(kernel));
-  TORCH_CHECK(inserted == impl::KernelFunctionTable::SetKernelResult::ADDED_NEW_KERNEL, "Tried to register a backend fallback kernel for ", dispatchKey, " but there was already one registered.");
+  // TODO: fallbacks clobber each other completely unsafely, unlike regular
+  // kernels
+  backendFallbackKernels_.setKernel(dispatchKey, std::move(kernel));
   if (kernel.isFallthrough()) {
     backendsWithoutFallthrough_ = backendsWithoutFallthrough_.remove(dispatchKey);
   }
@@ -230,9 +231,8 @@ RegistrationHandleRAII Dispatcher::registerFallback(DispatchKey dispatchKey, Ker
 }
 
 void Dispatcher::deregisterFallback_(DispatchKey dispatchKey) {
-  auto result = backendFallbackKernels_.removeKernelIfExists(dispatchKey);
+  backendFallbackKernels_.removeKernelIfExists(dispatchKey);
   backendsWithoutFallthrough_ = backendsWithoutFallthrough_.add(dispatchKey);
-  TORCH_INTERNAL_ASSERT(result == impl::KernelFunctionTable::RemoveKernelIfExistsResult::REMOVED_KERNEL, "Tried to deregister a backend fallback kernel for ", dispatchKey, " but there was none registered.");
 }
 
 
@@ -280,6 +280,19 @@ void Dispatcher::checkInvariants() const {
       TORCH_INTERNAL_ASSERT(kernel.isFallthrough());
     }
   }
+}
+
+void Dispatcher::setManuallyBoxedKernelFor_(const OperatorHandle& op, KernelFunction::InternalBoxedKernelFunction* func) {
+  op.operatorIterator_->op.setManuallyBoxedKernel_(func);
+}
+
+bool Dispatcher::isValid(const OperatorHandle& op) const {
+  for (auto iter = operators_.begin(); iter != operators_.end(); ++iter) {
+    if (iter == op.operatorIterator_) {
+      return true;
+    }
+  }
+  return false;
 }
 
 }

@@ -1,4 +1,5 @@
 #include <ATen/core/dispatch/OperatorEntry.h>
+#include <ATen/core/op_registration/infer_schema.h>
 
 namespace c10 {
 namespace impl {
@@ -94,6 +95,11 @@ std::list<OperatorEntry::KernelEntry>::iterator OperatorEntry::registerKernel(
   // Add the kernel to the kernels list,
   // possibly creating the list if this is the first kernel.
   auto& k = kernels_[dispatch_key];
+
+  if (k.size() > 0) {
+    TORCH_WARN("Registering a kernel (", debug, ") for operator ", name_, " for dispatch key ", toString(dispatch_key), " that overwrote a previously registered kernel with the same dispatch key for the same operator.");
+  }
+
   k.emplace_front(std::move(kernel), std::move(inferred_function_schema), std::move(debug));
   std::list<OperatorEntry::KernelEntry>::iterator inserted = k.begin();
   // update the dispatch table, i.e. re-establish the invariant
@@ -150,7 +156,13 @@ void OperatorEntry::checkInvariants() const {
     auto mb_dispatch_key = kv.first;
     TORCH_INTERNAL_ASSERT(kv.second.size() > 0);
     auto* kernel = mb_dispatch_key ? dispatchTable_.lookup(*mb_dispatch_key) : dispatchTable_.lookupCatchallKernel();
-    TORCH_INTERNAL_ASSERT(kv.second.front().kernel._equalsBoxedAndUnboxed(*kernel));
+    auto manual_boxed_kernel = dispatchTable_.manuallyBoxedKernel();
+    // NB: this is a copy
+    auto local_kernel = kv.second.front().kernel;
+    if (manual_boxed_kernel.has_value()) {
+      local_kernel.setManuallyBoxedKernel_(*manual_boxed_kernel);
+    }
+    TORCH_INTERNAL_ASSERT(local_kernel._equalsBoxedAndUnboxed(*kernel));
   }
 }
 

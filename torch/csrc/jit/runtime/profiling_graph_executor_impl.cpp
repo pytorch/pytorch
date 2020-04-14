@@ -2,6 +2,7 @@
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/bailout_graph.h>
 #include <torch/csrc/jit/passes/canonicalize_ops.h>
+#include <torch/csrc/jit/passes/clear_profiling.h>
 #include <torch/csrc/jit/passes/clear_undefinedness.h>
 #include <torch/csrc/jit/passes/common_subexpression_elimination.h>
 #include <torch/csrc/jit/passes/constant_pooling.h>
@@ -21,11 +22,18 @@
 #include <torch/csrc/jit/passes/shape_analysis.h>
 #include <torch/csrc/jit/passes/specialize_autogradzero.h>
 
+C10_DECLARE_bool();
+
+C10_DEFINE_bool(
+    torch_jit_enable_new_executor,
+    true,
+    "If this flag is set to false TorchScript will be using the legacy/original executor");
+
 namespace torch {
 namespace jit {
 
 #if defined(FBCODE_CAFFE2) || defined(C10_MOBILE)
-static std::atomic<bool> executor_mode{false};
+static std::atomic<bool> executor_mode{true};
 static std::atomic<bool> profiling_mode{false};
 #else
 static std::atomic<bool> executor_mode{true};
@@ -113,6 +121,7 @@ void ProfilingGraphExecutorImpl::runProfilingOptimizations(
 
 void ProfilingGraphExecutorImpl::runProfilingInsensitiveOptimizations(
     std::shared_ptr<Graph>& copy) {
+  ClearProfilingInformation(copy);
   LowerGradOf(*copy);
   GRAPH_DUMP("runProfilingInsensitiveOptimizations", copy);
   // clear any residual undefinedness
