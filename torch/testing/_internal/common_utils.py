@@ -718,13 +718,6 @@ class TestCase(expecttest.TestCase):
 
         set_rng_seed(SEED)
 
-    def assertTensorsSlowEqual(self, x, y, prec=None, message=''):
-        max_err = 0
-        self.assertEqual(x.size(), y.size())
-        for index in iter_indices(x):
-            max_err = max(max_err, abs(x[index] - y[index]))
-        self.assertLessEqual(max_err, prec, message)
-
     def genSparseTensor(self, size, sparse_dim, nnz, is_uncoalesced, device='cpu'):
         # Assert not given impossible combination, where the sparse dims have
         # empty numel, but nnz > 0 makes the indices containing values.
@@ -1006,27 +999,6 @@ class TestCase(expecttest.TestCase):
             warnings.simplefilter("always")  # allow any warning to be raised
             callable()
             self.assertTrue(len(ws) == 0, msg)
-
-    def assertWarns(self, callable, msg=''):
-        r"""
-        Test if :attr:`callable` raises a warning.
-        """
-        with self._reset_warning_registry(), warnings.catch_warnings(record=True) as ws:
-            warnings.simplefilter("always")  # allow any warning to be raised
-            callable()
-            self.assertTrue(len(ws) > 0, msg)
-
-    def assertWarnsRegex(self, callable, regex, msg=''):
-        r"""
-        Test if :attr:`callable` raises any warning with message that contains
-        the regex pattern :attr:`regex`.
-        """
-        with self._reset_warning_registry(), warnings.catch_warnings(record=True) as ws:
-            warnings.simplefilter("always")  # allow any warning to be raised
-            callable()
-            self.assertTrue(len(ws) > 0, msg)
-            found = any(re.search(regex, str(w.message)) is not None for w in ws)
-            self.assertTrue(found, msg)
 
     @contextmanager
     def maybeWarnsRegex(self, category, regex=''):

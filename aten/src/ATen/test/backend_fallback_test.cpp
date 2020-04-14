@@ -52,7 +52,7 @@ void callBoxedWorkaround(const c10::OperatorHandle& op, torch::jit::Stack* stack
 
 void generic_mode_fallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
   override_call_count++;
-  c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::TESTING_ONLY_GenericModeTensorId);
+  c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::TESTING_ONLY_GenericMode);
   callBoxedWorkaround(op, stack);
 }
 
@@ -61,7 +61,7 @@ void generic_mode_fallback(const c10::OperatorHandle& op, torch::jit::Stack* sta
 struct GenericWrapperTensorImpl : public c10::TensorImpl {
   explicit GenericWrapperTensorImpl(at::Tensor rep)
     : TensorImpl(
-        c10::DispatchKeySet(c10::DispatchKey::TESTING_ONLY_GenericWrapperTensorId),
+        c10::DispatchKeySet(c10::DispatchKey::TESTING_ONLY_GenericWrapper),
         rep.dtype(),
         rep.device()
         // TODO: propagate size!
@@ -83,7 +83,7 @@ void generic_wrapper_fallback(const c10::OperatorHandle& op, torch::jit::Stack* 
     // TODO: Handle tensor list
     if (args[i].isTensor()) {
       auto* impl = args[i].unsafeToTensorImpl();
-      if (impl->key_set().has(DispatchKey::TESTING_ONLY_GenericWrapperTensorId)) {
+      if (impl->key_set().has(DispatchKey::TESTING_ONLY_GenericWrapper)) {
         auto* wrapper = static_cast<GenericWrapperTensorImpl*>(impl);
         torch::jit::push(*stack, wrapper->rep_);  // no move!
       } else {
@@ -111,11 +111,11 @@ void generic_wrapper_fallback(const c10::OperatorHandle& op, torch::jit::Stack* 
 TEST(BackendFallbackTest, TestBackendFallbackWithMode) {
   auto registry = c10::Dispatcher::singleton()
     .registerFallback(
-      DispatchKey::TESTING_ONLY_GenericModeTensorId,
+      DispatchKey::TESTING_ONLY_GenericMode,
       KernelFunction::makeFromBoxedFunction<&generic_mode_fallback>()
     );
 
-  c10::impl::IncludeDispatchKeyGuard guard(DispatchKey::TESTING_ONLY_GenericModeTensorId);
+  c10::impl::IncludeDispatchKeyGuard guard(DispatchKey::TESTING_ONLY_GenericMode);
 
   override_call_count = 0;
   Tensor a = ones({5, 5}, kDouble);
@@ -125,7 +125,7 @@ TEST(BackendFallbackTest, TestBackendFallbackWithMode) {
 
 TEST(BackendFallbackTest, TestBackendFallbackWithWrapper) {
   auto registry = c10::Dispatcher::singleton().registerFallback(
-      DispatchKey::TESTING_ONLY_GenericWrapperTensorId,
+      DispatchKey::TESTING_ONLY_GenericWrapper,
       KernelFunction::makeFromBoxedFunction<&generic_wrapper_fallback>()
   );
 
@@ -138,13 +138,13 @@ TEST(BackendFallbackTest, TestBackendFallbackWithWrapper) {
 TEST(BackendFallbackTest, TestFallthroughBackendFallback) {
   // By default fallthrough
   auto registry = c10::import()
-    .fallback(DispatchKey::TESTING_ONLY_GenericModeTensorId,
+    .fallback(DispatchKey::TESTING_ONLY_GenericMode,
               c10::CppFunction::makeFallthrough())
     .impl("aten::mul.Tensor",
-          DispatchKey::TESTING_ONLY_GenericModeTensorId,
+          DispatchKey::TESTING_ONLY_GenericMode,
           c10::CppFunction::makeFromBoxedFunction<&generic_mode_fallback>());
 
-  c10::impl::IncludeDispatchKeyGuard guard(DispatchKey::TESTING_ONLY_GenericModeTensorId);
+  c10::impl::IncludeDispatchKeyGuard guard(DispatchKey::TESTING_ONLY_GenericMode);
 
   override_call_count = 0;
   // Doesn't trigger, as we fallthrough
