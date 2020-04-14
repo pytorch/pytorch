@@ -11,7 +11,8 @@ def optimize_for_mobile(scripted_model):
         scripted_model: An instance of torch script module with type of ScriptModule
 
     Returns:
-        scripted_model: And optimized torch script module.
+        scripted_model: A new optimized torch script module, the method does not do
+        in-place transformation.
     """
     if not isinstance(scripted_model, torch.jit.ScriptModule):
         raise TypeError(

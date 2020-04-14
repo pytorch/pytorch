@@ -1,4 +1,3 @@
-import io
 import unittest
 import torch
 import torch.utils.optimizer
@@ -64,7 +63,8 @@ class TestOptimizer(unittest.TestCase):
         scripted_model.eval()
         initial_result = scripted_model(input_data)
 
-        optimized_script_model = torch.utils.optimizer.optimize_for_mobile(scripted_model)
+        optimized_scripted_model = torch.utils.optimizer.optimize_for_mobile(scripted_model)
+        optimized_result = optimized_scripted_model(input_data)
 
         pattern_count_map = {"Tensor = aten::conv2d": -1,
                              "Tensor = prim::CallFunction": -1,
@@ -74,13 +74,13 @@ class TestOptimizer(unittest.TestCase):
                              "prepacked::linear_clamp_run": 1}
         for pattern, v in pattern_count_map.items():
             if (v == 0):
-                FileCheck().check(pattern).run(optimized_script_model.graph)
+                FileCheck().check(pattern).run(optimized_scripted_model.graph)
             elif (v == -1):
-                FileCheck().check_not(pattern).run(optimized_script_model.graph)
+                FileCheck().check_not(pattern).run(optimized_scripted_model.graph)
             else:
-                FileCheck().check_count(pattern, v, exactly=True).run(optimized_script_model.graph)
+                FileCheck().check_count(pattern, v, exactly=True).run(optimized_scripted_model.graph)
 
-        optimized_result = optimized_script_model(input_data)
+
         torch.testing.assert_allclose(initial_result, optimized_result, rtol=1e-2, atol=1e-3)
 
 if __name__ == '__main__':
