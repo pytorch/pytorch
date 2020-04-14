@@ -1,14 +1,16 @@
-#include <torch/csrc/jit/codegen/cuda/kernel.h>
-#include <torch/csrc/jit/codegen/cuda/kernel_resource_strings.h>
-#include <torch/csrc/jit/codegen/cuda/lower2device.h>
-#include <iostream>
-
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/nvrtc_stub/ATenNVRTC.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/util/ArrayRef.h>
+#include <c10/core/ScalarType.h>
+
+#include <torch/csrc/jit/codegen/cuda/kernel.h>
+#include <torch/csrc/jit/codegen/cuda/kernel_arg.h>
+#include <torch/csrc/jit/codegen/cuda/kernel_resource_strings.h>
+#include <torch/csrc/jit/codegen/cuda/lower2device.h>
+
 #include <torch/csrc/jit/resource_guard.h>
-#include <torch/csrc/jit/codegen/fuser/cuda/resource_strings.h>
+#include <iostream>
 
 namespace torch {
 namespace jit {
@@ -28,81 +30,125 @@ static int ceilDiv(const int a, const int b) {
   return (a + b - 1) / b;
 }
 
-// include IO data structure for host code
-struct KernelArgumentHolder {
-  std::vector<void*> arguments;
-  std::vector<char> buffer;
-  void* buffer_ptr;
+// Go through a tensor, and grab it's sizes/strides potentially broadcasted
+struct ExtractSizeStride {
+  std::vector<int64_t> sizes;
+  std::vector<int64_t> strides;
 
-  KernelArgumentHolder(size_t n_inputs, size_t n_dimension_per_tensor) {
-    arguments.reserve(n_inputs);
-    // We are being generous here on the allocated buffer;
-    buffer.resize(
-        n_inputs * (sizeof(void*) + 2 * sizeof(int64_t) * n_dimension_per_tensor));
-    buffer_ptr = buffer.data();
-  }
-
-  void** args() {
-    return arguments.data();
-  }
-
-  // this should comply to the storage of Tensor object defined in code_template_tensor_struct;
-  void push_tensor(
+  ExtractSizeStride(
       const at::Tensor& val,
       c10::optional<at::IntArrayRef> broadcasted_size = c10::nullopt) {
-    arguments.push_back(buffer_ptr);
-
-    // passing address, type doesn't really matter here;
-    auto data_ptr = static_cast<void**>(buffer_ptr);
-    *data_ptr = val.data_ptr();
-    buffer_ptr += sizeof(char*);
-
     if (broadcasted_size) {
       auto b_dim = broadcasted_size->size();
       auto o_dim = val.dim();
       TORCH_CHECK(b_dim >= o_dim);
-      int64_t* sizes = reinterpret_cast<int64_t*>(buffer_ptr);
-      int64_t* strides = &sizes[b_dim];
       for (int i = 0; i < b_dim; i++) {
-        sizes[i] = broadcasted_size->at(i);
+        sizes.push_back(broadcasted_size->at(i));
         int index = i + o_dim - b_dim;
         if (index < 0) {
-          strides[i] = 0;
+          strides.push_back(0);
         } else if (val.sizes()[index] == sizes[i]) {
-          strides[i] = val.strides()[index];
+          strides.push_back(val.strides()[index]);
         } else {
           TORCH_CHECK(
               val.sizes()[index] == 1,
               "Not compatible dimension size for broadcast");
-          strides[i] = 0;
+          strides.push_back(0);
         }
       }
-      buffer_ptr = &strides[b_dim];
     } else {
       auto o_dim = val.dim();
-      int64_t* sizes = reinterpret_cast<int64_t*>(buffer_ptr);
-      int64_t* strides = &sizes[o_dim];
       for (decltype(val.dim()) i{0}; i < o_dim; i++) {
-        sizes[i] = val.sizes()[i];
-        strides[i] = val.strides()[i];
+        sizes.push_back(val.sizes()[i]);
+        strides.push_back(val.strides()[i]);
       }
-      buffer_ptr = &strides[o_dim];
     }
   }
+};
 
-  template <typename T>
-  void push_scalar(T scalar) {
-    // TODO: we should probably worry about alignment here;
-    T* ptr = reinterpret_cast<T*>(buffer_ptr);
-    *ptr = scalar;
-    arguments.push_back(buffer_ptr);
-    buffer_ptr += sizeof(T);
+struct KernelArgumentHolder {
+private:
+  std::vector<ArgAbstract*> arguments;
+  std::vector<char> buffer;
+  std::vector<void*> arg_ptrs;
+  bool changed = true;
+public:
+  virtual ~KernelArgumentHolder(){
+    for(auto  arg: arguments)
+      delete arg;
   }
+
+  // Push a tensor to the arguments
+  void push(
+      const at::Tensor& val,
+      c10::optional<at::IntArrayRef> broadcasted_size = c10::nullopt) {
+    changed = true;
+    ExtractSizeStride ess (val, broadcasted_size);
+    int nDims = ess.sizes.size();
+    
+    c10::ScalarType dtype = val.scalar_type();
+    TensorArgAbstract *tensor_arg = getTensorArg(dtype, nDims);
+    tensor_arg->setPointer(val.data_ptr());
+    for(int i=0; i<nDims; i++){
+      tensor_arg->setSize(i, ess.sizes[i]);
+      tensor_arg->setStride(i, ess.strides[i]);
+    }
+    arguments.push_back(tensor_arg);
+  }
+
+  // Push a scalar or integer to the arguments
+  void push(const IValue& val) {
+    changed = true;
+    TORCH_INTERNAL_ASSERT(val.isScalar(),
+      "Tried to push an arg to run in a fused kernel, expected a scalar but got, ", val);
+    switch(val.toScalar().type()){
+      case(c10::ScalarType::Double):
+        arguments.push_back(new FloatArg((float) val.toDouble()));
+        return;
+      case(c10::ScalarType::Long):
+        arguments.push_back(new IntArg((int) val.toInt()));
+        return;
+      default:
+        TORCH_INTERNAL_ASSERT(false,
+        " Tried to create argument to send to a fused kernel, but got an expected type: ");
+    }
+          TORCH_INTERNAL_ASSERT(false,
+      " Tried to create argument to send to a fused kernel, but got a non-tensor, non-scalar type.");
+  }
+
+  // Create buffer, flatten arguments into it, align by 8 Bytes, return pointers in the buffer
+  void** getBuffer(){
+    if(!changed) return arg_ptrs.data();
+
+    std::vector<size_t> offsets;
+
+    size_t buffer_size = 0;
+    //align args to 64bit
+    for(auto arg : arguments){
+      offsets.push_back(buffer_size);
+      buffer_size += arg->getSizeof();
+      buffer_size += buffer_size % 8;
+    }
+    
+    arg_ptrs = std::vector<void*>(arguments.size(), nullptr);
+
+    buffer.resize(buffer_size);
+    for(decltype(arguments.size()) i{0}; i<arguments.size(); i++){
+      arg_ptrs[i] = buffer.data() + offsets[i];
+      memcpy(arg_ptrs[i], arguments[i]->arg(), arguments[i]->getSizeof());
+    }
+
+    TensorArgCodegen<float, 4>* last_arg = static_cast<TensorArgCodegen<float, 4>* >(arg_ptrs[arg_ptrs.size()-1]);
+
+    return arg_ptrs.data();
+  }
+
 };
 
 std::pair<std::string, std::string> codeGeneration(Fusion& fusion) {
   std::stringstream str_stream;
-  str_stream << "namespace " << CG_NAMESPACE << " {\n" << code_template_tensor_struct << "\n";
+  str_stream << "namespace " << CG_NAMESPACE << " {\n"
+             << code_template_tensor_struct << "\n";
   std::stringstream cdg;
   GPULower gpulw(&fusion);
   gpulw.printKernel(str_stream, KERNEL_NAME);
@@ -111,21 +157,6 @@ std::pair<std::string, std::string> codeGeneration(Fusion& fusion) {
   std::string func_name = std::string(CG_NAMESPACE) + "::" + KERNEL_NAME;
   return std::make_pair(func_name, str_stream.str());
 };
-
-void prepare_argument(
-    KernelArgumentHolder& argument_holder,
-    const IValue& val,
-    c10::optional<at::IntArrayRef> broadcasted_size = c10::nullopt) {
-  if (val.isTensor()) {
-    argument_holder.push_tensor(val.toTensor(), broadcasted_size);
-  } else if (val.isDouble()) {
-    argument_holder.push_scalar(val.to<float>());
-  } else if (val.isInt()) {
-    argument_holder.push_scalar(val.to<int>());
-  } else {
-    TORCH_CHECK(false, "Not supported input IValue encounted.");
-  }
-}
 
 } // namespace
 
@@ -167,7 +198,7 @@ void compileKernel(Fusion& fusion, CudaKernel* entry) {
   AT_CUDA_NVRTC_CHECK(nvrtc().nvrtcVersion(&nvrtc_major, &nvrtc_minor));
 
   // Short-circuits if NVRTC version too low
-  AT_ASSERT(nvrtc_major >= 6);
+  TORCH_INTERNAL_ASSERT(nvrtc_major >= 6);
   // Major and minor is determined by device properties and
   // possibly "downcompiled" to a lower (compatible) compute architecture
   // based on the NVRTC version
@@ -231,18 +262,21 @@ void runKernel(
   // const auto nBlocks = std::min(entry->max_blocks_, ceilDiv(numel, 128));
   const auto nBlocks = ceilDiv(numel, 128);
 
-  // TODO: Proper API to tranform JIT I/O Tensor to CodeGen I/O Tensor
-  auto max_capacity = inputs.size() + outputs.size();
-  KernelArgumentHolder kernel_arg_holder(max_capacity, outputs[0].dim());
+  KernelArgumentHolder kernel_args;
 
   // Naive I/O setup, I'm ignoring all the potential transformation (i.e. I/O
   // allocated here from the subgraph could be, and very likely are, different
   // from I/O expected by the generated CUDA kernel.
-  for (auto& input : inputs) {
-    prepare_argument(kernel_arg_holder, input, outputs[0].sizes());
+  for (auto& input : inputs) { 
+    if(input.isTensor()){
+      kernel_args.push(input.toTensor(), outputs[0].sizes());
+    } else {
+      kernel_args.push(input);
+    }
   }
+
   for (auto& output : outputs) {
-    prepare_argument(kernel_arg_holder, output);
+      kernel_args.push(output);
   }
 
   // launch kernel;
@@ -256,7 +290,7 @@ void runKernel(
       1,
       0,
       stream,
-      kernel_arg_holder.args(),
+      kernel_args.getBuffer(),
       nullptr));
 
   // Resets device (see at::DeviceGuard notes above)
@@ -269,28 +303,23 @@ void runTestKernel(
     CudaKernel& entry,
     const std::vector<at::Tensor>& inputs,
     std::vector<at::Tensor>& outputs) {
+
+    
   const auto prior_device = at::cuda::current_device();
   at::cuda::set_device(entry.device_);
   auto stream = at::cuda::getCurrentCUDAStream();
 
-  // TODO: Proper API to tranform JIT I/O Tensor to CodeGen I/O Tensor
-  std::vector<void*> arguments;
-
-  // TODO: There are better ways to do this;
-  // argument holder;
-  // host code, `T` in `Tensor<T>` doesn't really matter, as we only interact
-  // with the address; Just put a float here to simply the argument holder.
-  auto max_capacity = inputs.size() + outputs.size();
-  KernelArgumentHolder kernel_arg_holder(max_capacity, outputs[0].dim());
+  KernelArgumentHolder kernel_args;
 
   // Naive I/O setup, I'm ignoring all the potential transformation (i.e. I/O
   // allocated here from the subgraph could be, and very likely are, different
   // from I/O expected by the generated CUDA kernel.
-  for (auto& input : inputs) {
-    prepare_argument(kernel_arg_holder, input);
+  for (auto& input : inputs) { 
+    kernel_args.push(input, outputs[0].sizes());
   }
+
   for (auto& output : outputs) {
-    prepare_argument(kernel_arg_holder, output);
+      kernel_args.push(output);
   }
 
   // launch kernel;
@@ -304,7 +333,7 @@ void runTestKernel(
       entry.block_.z,
       0,
       stream,
-      kernel_arg_holder.args(),
+      kernel_args.getBuffer(),
       nullptr));
 
   // Resets device (see at::DeviceGuard notes above)
