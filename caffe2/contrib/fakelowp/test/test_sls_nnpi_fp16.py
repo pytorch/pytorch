@@ -1,6 +1,7 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 
 import time
+import unittest
 
 # Must happen before importing caffe2.python.*
 import caffe2.python.fakelowp.init_shared_libs  # noqa
@@ -8,7 +9,6 @@ import numpy as np
 from caffe2.proto import caffe2_pb2
 from caffe2.python import core, workspace
 from caffe2.python.onnx.onnxifi import onnxifi_caffe2_net
-from caffe2.python.onnx.tests.test_utils import TestCase
 from caffe2.python.fakelowp.test_utils import print_test_debug_info
 
 
@@ -24,8 +24,8 @@ GLOW_MATMUL_ATOL = 1e-5
 GLOW_MATMUL_RTOL = 1e-3
 
 
-class SparseLengthsSumTest(TestCase):
-    def Test_SLS_NonQuantized_fp16(self):
+class SparseLengthsSumTest(unittest.TestCase):
+    def Skip_test_SLS_NonQuantized_fp16(self):
         N = 20000
         DIM = 64
         D = (4 * np.random.random_sample((N, DIM)) + 1).astype(np.float32)
@@ -614,3 +614,6 @@ class SparseLengthsSumTest(TestCase):
                 },
             )
             assert 0
+
+if __name__ == '__main__':
+    unittest.main()
