@@ -43,14 +43,15 @@ using OperationCreator = Operation (*)(const Node*);
  * with a wrapper for each c10 operator. The c10 operator library registers
  * those wrappers using listeners in register_c10_ops.cpp.
  * TODO Instead of doing it this way, we should only have pure-jit ops in
- * the jit library but have the JIT operator lookup look into the c10 library too.
+ * the jit library but have the JIT operator lookup look into the c10 library
+ * too.
  */
 
-// An Operator is a thin wrapper around either a pure JIT operator (e.g. prim ops)
-// or a c10 operator, allowing some common operations and abstracting away the
-// concrete operator nature.
+// An Operator is a thin wrapper around either a pure JIT operator (e.g. prim
+// ops) or a c10 operator, allowing some common operations and abstracting away
+// the concrete operator nature.
 struct TORCH_API Operator {
-private:
+ private:
   struct C10Operator final {
     c10::OperatorHandle handle_;
     Operation op_;
@@ -63,37 +64,33 @@ private:
     // The only valid transition for schema_ is from right->left, i.e.
     // when the schema gets parsed.
     mutable c10::either<FunctionSchema, UnparsedFunctionSchema> schema_;
-    
+
     c10::either<Operation, OperationCreator> op_;
   };
-public:
 
+ public:
   Operator(c10::OperatorHandle opHandle, Operation operation)
-      : op_(c10::make_left<C10Operator, JitOnlyOperator>(C10Operator {
-        std::move(opHandle), std::move(operation)
-      })) {}
+      : op_(c10::make_left<C10Operator, JitOnlyOperator>(
+            C10Operator{std::move(opHandle), std::move(operation)})) {}
 
   Operator(
       std::string schema,
       Operation op,
       c10::AliasAnalysisKind alias_analysis)
-      : op_(c10::make_right<C10Operator, JitOnlyOperator>(JitOnlyOperator {
-          c10::make_right<FunctionSchema, UnparsedFunctionSchema>(UnparsedFunctionSchema{
-            std::move(schema),
-            alias_analysis}),
-          c10::make_left<Operation, OperationCreator>(std::move(op))
-      })) {}
+      : op_(c10::make_right<C10Operator, JitOnlyOperator>(JitOnlyOperator{
+            c10::make_right<FunctionSchema, UnparsedFunctionSchema>(
+                UnparsedFunctionSchema{std::move(schema), alias_analysis}),
+            c10::make_left<Operation, OperationCreator>(std::move(op))})) {}
 
   Operator(
       std::string schema,
       OperationCreator op_creator,
       c10::AliasAnalysisKind alias_analysis)
-      : op_(c10::make_right<C10Operator, JitOnlyOperator>(JitOnlyOperator {
-          c10::make_right<FunctionSchema, UnparsedFunctionSchema>(UnparsedFunctionSchema {
-            std::move(schema),
-            alias_analysis}),
-          c10::make_right<Operation, OperationCreator>(std::move(op_creator))
-      })) {}
+      : op_(c10::make_right<C10Operator, JitOnlyOperator>(JitOnlyOperator{
+            c10::make_right<FunctionSchema, UnparsedFunctionSchema>(
+                UnparsedFunctionSchema{std::move(schema), alias_analysis}),
+            c10::make_right<Operation, OperationCreator>(
+                std::move(op_creator))})) {}
 
   // Helper constructor to register `op` to run
   // run for _every_ IR Node where n.kind() == name, regardless of arguments.
@@ -104,39 +101,44 @@ public:
       OperationCreator op_creator,
       c10::AliasAnalysisKind alias_analysis)
       : op_(c10::make_right<C10Operator, JitOnlyOperator>(JitOnlyOperator{
-          c10::make_left<FunctionSchema, UnparsedFunctionSchema>(varArgSchemaWithName(name, alias_analysis)),
-          c10::make_right<Operation, OperationCreator>(std::move(op_creator))
-      })) {}
+            c10::make_left<FunctionSchema, UnparsedFunctionSchema>(
+                varArgSchemaWithName(name, alias_analysis)),
+            c10::make_right<Operation, OperationCreator>(
+                std::move(op_creator))})) {}
 
   Operation getOperation(const Node* node = nullptr) const {
-    return op_.fold<Operation>([] (const C10Operator& op) {
-      return op.op_;
-    }, [node] (const JitOnlyOperator& op) {
-      return op.op_.fold<Operation>([] (const Operation& op) {
-        return op;
-      }, [node] (const OperationCreator& op_creator) {
-        return op_creator(node);
-      });
-    });
+    return op_.fold<Operation>(
+        [](const C10Operator& op) { return op.op_; },
+        [node](const JitOnlyOperator& op) {
+          return op.op_.fold<Operation>(
+              [](const Operation& op) { return op; },
+              [node](const OperationCreator& op_creator) {
+                return op_creator(node);
+              });
+        });
   }
 
   const FunctionSchema& schema() const {
-    return op_.fold<const FunctionSchema&>([] (const C10Operator& op) -> const FunctionSchema& {
-      return op.handle_.schema();
-    }, [] (const JitOnlyOperator& op) -> const FunctionSchema& {
-      // we lazily parse schema initialized from strings so that
-      // we do less work during static operator registration
-      if (op.schema_.is_right()) {
-        auto& unmaterializedSchema = op.schema_.right();
-        FunctionSchema schema = parseSchema(unmaterializedSchema.schema_string_);
-        if (unmaterializedSchema.alias_analysis_.has_value()) {
-          // TODO What if it gets set later?
-          schema.setAliasAnalysis(*unmaterializedSchema.alias_analysis_);
-        }
-        op.schema_ = c10::make_left<FunctionSchema, UnparsedFunctionSchema>(std::move(schema));
-      }
-      return op.schema_.left();
-    });
+    return op_.fold<const FunctionSchema&>(
+        [](const C10Operator& op) -> const FunctionSchema& {
+          return op.handle_.schema();
+        },
+        [](const JitOnlyOperator& op) -> const FunctionSchema& {
+          // we lazily parse schema initialized from strings so that
+          // we do less work during static operator registration
+          if (op.schema_.is_right()) {
+            auto& unmaterializedSchema = op.schema_.right();
+            FunctionSchema schema =
+                parseSchema(unmaterializedSchema.schema_string_);
+            if (unmaterializedSchema.alias_analysis_.has_value()) {
+              // TODO What if it gets set later?
+              schema.setAliasAnalysis(*unmaterializedSchema.alias_analysis_);
+            }
+            op.schema_ = c10::make_left<FunctionSchema, UnparsedFunctionSchema>(
+                std::move(schema));
+          }
+          return op.schema_.left();
+        });
   }
 
   bool isC10Op() const {
@@ -157,15 +159,15 @@ public:
   }
 
   bool hasOperation() const {
-    return op_.fold<bool>([] (const C10Operator&) {
-      return true;
-    }, [] (const JitOnlyOperator& op) {
-      return op.op_.is_left();
-    });
+    return op_.fold<bool>(
+        [](const C10Operator&) { return true; },
+        [](const JitOnlyOperator& op) { return op.op_.is_left(); });
   }
 
  private:
-  static FunctionSchema varArgSchemaWithName(Symbol name, AliasAnalysisKind alias_analysis) {
+  static FunctionSchema varArgSchemaWithName(
+      Symbol name,
+      AliasAnalysisKind alias_analysis) {
     auto result = FunctionSchema(
         name,
         "",
