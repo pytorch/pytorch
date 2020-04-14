@@ -35,7 +35,7 @@ from torch.testing._internal.common_quantization import QuantizationTestCase, \
     prepare_dynamic, convert_dynamic, SingleLayerLinearDynamicModel, \
     TwoLayerLinearModel, NestedModel, ResNetBase, LSTMDynamicModel, \
     ModelWithNoQconfigPropagation, ModelForFusionWithBias, \
-    ActivationsTestModel
+    ActivationsTestModel, ActivationsQATTestModel
 
 from torch.testing._internal.common_quantization import AnnotatedTwoLayerLinearModel, AnnotatedNestedModel, \
     AnnotatedSubNestedModel, AnnotatedCustomConfigNestedModel
@@ -825,6 +825,29 @@ class EagerModeQuantizationAwareTrainingTest(QuantizationTestCase):
         checkQuantized(model)
 
         model = quantize_qat(ManualLinearQATModel(), test_only_train_fn,
+                             self.train_data)
+        checkQuantized(model)
+
+    def test_activations(self):
+        model = ActivationsQATTestModel()
+        model = prepare_qat(model)
+
+        self.assertEqual(type(model.fc1), torch.nn.qat.modules.Linear)
+        self.assertEqual(type(model.hardswish), torch.nn.qat.modules.Hardswish)
+
+        self.checkObservers(model)
+        test_only_train_fn(model, self.train_data)
+        model = convert(model)
+
+        def checkQuantized(model):
+            self.assertEqual(type(model.fc1), nnq.Linear)
+            self.assertEqual(type(model.hardswish), nnq.Hardswish)
+            test_only_eval_fn(model, self.calib_data)
+            self.checkScriptable(model, self.calib_data)
+
+        checkQuantized(model)
+
+        model = quantize_qat(ActivationsQATTestModel(), test_only_train_fn,
                              self.train_data)
         checkQuantized(model)
 
