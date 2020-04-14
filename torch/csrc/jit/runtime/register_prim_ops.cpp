@@ -190,6 +190,30 @@ RegisterOperators reg({
           return 0;
         },
         aliasAnalysisFromSchema()),
+    Operator(
+        "aten::element_size(Tensor self) -> int",
+        [](Stack& stack) {
+          at::Tensor arg = pop(stack).toTensor();
+          push(stack, arg.element_size());
+          return 0;
+        },
+        aliasAnalysisFromSchema()),
+    Operator(
+        "aten::numel(Tensor self) -> int",
+        [](Stack& stack) {
+          at::Tensor arg = pop(stack).toTensor();
+          push(stack, arg.numel());
+          return 0;
+        },
+        aliasAnalysisFromSchema()),
+    Operator(
+        "aten::dim(Tensor self) -> int",
+        [](Stack& stack) {
+          at::Tensor arg = pop(stack).toTensor();
+          push(stack, arg.dim());
+          return 0;
+        },
+        aliasAnalysisFromSchema()),
     // these ops are generic over the list element type.
     // CREATING GENERIC_LIST_OPS
     Operator(

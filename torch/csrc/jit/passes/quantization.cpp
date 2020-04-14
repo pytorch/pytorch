@@ -1002,7 +1002,7 @@ bool useQuantizable(Use use, bool is_dynamic) {
   // For each operator in this list observers are inserted for the input based
   // on the index specified.
   const AtenFuncArgs& aten_func_args = AtenFuncArgs({{"lstm", 2}});
-  const CallFuncArgs& call_func_args = CallFuncArgs({{"batch_norm", 1}});
+  const CallFuncArgs& call_func_args = CallFuncArgs({});
   for (const auto& func_arg : aten_func_args) {
     if (matchAtenFuncToUse(n, func_arg.func_name, c10::nullopt, c10::nullopt)) {
       return use.offset == func_arg.arg_index;
