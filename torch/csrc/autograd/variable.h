@@ -507,18 +507,6 @@ inline Variable make_variable(
   return Variable();
 }
 
-// Tensor Conversion
-//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-// In the old days, these casts were checked, but now that every Tensor
-// is a Variable this cast is always valid
-inline Variable& as_variable_ref(at::Tensor& tensor) {
-  return static_cast<Variable&>(tensor);
-}
-
-inline const Variable& as_variable_ref(const at::Tensor& tensor) {
-  return static_cast<const Variable&>(tensor);
-}
 
 }} // namespace torch::autograd
 

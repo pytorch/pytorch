@@ -51,6 +51,8 @@ class MutableTypePtrHelper {
         return unshapedType(type);
       case TypeKind::OptionalType:
         return getMutableType(type->cast<OptionalType>()->getElementType());
+      case TypeKind::AnyType:
+        return type;
       case TypeKind::FutureType: {
         if (auto elem =
                 getMutableType(type->cast<FutureType>()->getElementType())) {
@@ -858,13 +860,20 @@ void AliasDb::makePointerTo(const Value* from, const Value* to) {
     return;
   }
 
-  // covariant type containers can be point to types which are not
-  // also mutable/immutable because we unify the contained types
+  // the contained types of immutable type containers (optional, tuple, future)
+  // are unified, so these types can be mutable or immutable
+  // and point to a type which is mutable or immutable.
+  // Any is mutable but can point to a immutable type through refinement
   if (isMutableTypeInternal(from) != isMutableTypeInternal(to)) {
-    auto from_kind = from->type()->kind();
+    bool expected_kind = false;
+    for (auto kind : {from->type()->kind(), to->type()->kind()}) {
+      expected_kind = expected_kind ||
+          (kind == TypeKind::OptionalType || kind == TypeKind::FutureType ||
+           kind == TypeKind::TupleType) // immutable type containers
+          || kind == TypeKind::AnyType;
+    }
     TORCH_INTERNAL_ASSERT(
-        from_kind == TypeKind::OptionalType ||
-        from_kind == TypeKind::FutureType || from_kind == TypeKind::TupleType);
+        expected_kind, from->type()->str(), to->type()->str());
     return;
   }
 
@@ -990,6 +999,16 @@ Element* AliasDb::getOrCreateElement(const Value* value) {
     giveFreshAlias(value);
   }
   return elementMap_.at(value);
+}
+
+void AliasDb::replaceMemoryLocation(Value* existing, Value* new_value) {
+  if (!isMutableTypeInternal(existing)) {
+    return;
+  }
+  auto existing_elem = elementMap_.at(existing);
+  elementMap_[new_value] = existing_elem;
+  elementMap_.erase(existing);
+  existing_elem->value = new_value;
 }
 
 bool AliasDb::moveAfterTopologicallyValid(Node* n, Node* movePoint) {
@@ -1416,6 +1435,7 @@ c10::optional<Element*> AliasDb::setWildcard(const Value* v) {
 }
 
 void AliasDb::rebuildWriteCache() const {
+  writeCache_ = {};
   for (const auto& pr : writeIndex_) {
     const auto& writtenLocs = pr.second;
     writeCache_ |= writtenLocs;
