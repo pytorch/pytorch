@@ -448,6 +448,10 @@ struct ivalue::PyObjectHolder : c10::intrusive_ptr_target {
   virtual ~PyObjectHolder() {};
 };
 
+// iterationOrder will return a vector of pairs of ivalues for the dict that ordered by
+// CompareKeys, which provides a fixed order iterator everytime we iterate the dictionary
+// (e.g. Tensor keys are ordered by in memory TensorImpl pointer address).
+// NOTE: this iteration order might not fully align with the python dictionary ordering
 std::vector<std::pair<IValue, IValue>> iterationOrder(const c10::Dict<IValue, IValue>& dict);
 
 #undef TORCH_FORALL_TAGS
