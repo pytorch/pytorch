@@ -928,7 +928,7 @@ public:
 
 namespace detail {
 
-class TorchLibraryInit {
+class TorchLibraryInit final {
 private:
   using InitFn = void(Library&);
   Library lib_;
