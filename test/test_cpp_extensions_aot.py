@@ -145,6 +145,10 @@ class TestMSNPUTensor(common.TestCase):
 
 class TestRNGExtension(common.TestCase):
 
+    def setUp(self):
+        super(TestRNGExtension, self).setUp()
+        rng_extension.registerOps()
+
     def test_rng(self):
         fourty_two = torch.full((10,), 42, dtype=torch.int64)
 
