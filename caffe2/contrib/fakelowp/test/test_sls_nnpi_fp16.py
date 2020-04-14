@@ -25,7 +25,7 @@ GLOW_MATMUL_RTOL = 1e-3
 
 
 class SparseLengthsSumTest(unittest.TestCase):
-    def test_SLS_NonQuantized_fp16(self):
+    def Skip_test_SLS_NonQuantized_fp16(self):
         N = 20000
         DIM = 64
         D = (4 * np.random.random_sample((N, DIM)) + 1).astype(np.float32)
