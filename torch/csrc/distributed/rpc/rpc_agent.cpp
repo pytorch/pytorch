@@ -78,6 +78,10 @@ std::shared_ptr<FutureMessage> RpcAgent::sendWithRetries(
 }
 
 void RpcAgent::retryExpiredRpcs() {
+  // storing futures and exception messages for non-retriable error-ed futures.
+  std::vector<std::pair<std::shared_ptr<FutureMessage>, std::string>>
+      errorFutures;
+
   while (rpcAgentRunning_.load()) {
     std::unique_lock<std::mutex> lock(rpcRetryMutex_);
 
