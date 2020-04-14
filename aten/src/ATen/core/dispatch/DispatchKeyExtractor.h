@@ -72,6 +72,11 @@ namespace detail {
         ts = ts | gen.key_set();
       }
     }
+    void operator()(c10::optional<at::Generator> gen) {
+      if (gen.has_value() && gen->defined()) {
+        ts = ts | gen->key_set();
+      }
+    }
     template <typename T>
     void operator()(const T& x) {
       // do nothing
