@@ -185,10 +185,13 @@ MyPy-style type annotations using the types listed above.
 
     ...
 
+  In our examples, we use comment-based type hints to ensure Python 2
+  compatibility as well.
+
 
 An empty list is assumed to be ``List[Tensor]`` and empty dicts
 ``Dict[str, Tensor]``. To instantiate an empty list or dict of other types,
-use `Python 3 type hints`_.
+use `Python 3 type hints`_. If you are on Python 2, you can use ``torch.jit.annotate``.
 
 Example (type annotations for Python 3):
 
@@ -213,6 +216,31 @@ Example (type annotations for Python 3):
 
     x = torch.jit.script(EmptyDataStructures())
 
+
+Example (``torch.jit.annotate`` for Python 2):
+
+.. testcode::
+
+    import torch
+    import torch.nn as nn
+    from typing import Dict, List, Tuple
+
+    class EmptyDataStructures(torch.nn.Module):
+        def __init__(self):
+            super(EmptyDataStructures, self).__init__()
+
+        def forward(self, x):
+            # type: (Tensor) -> Tuple[List[Tuple[int, float]], Dict[str, int]]
+
+            # This annotates the list to be a `List[Tuple[int, float]]`
+            my_list = torch.jit.annotate(List[Tuple[int, float]], [])
+            for i in range(10):
+                my_list.append((i, float(x.item())))
+
+            my_dict = torch.jit.annotate(Dict[str, int], {})
+            return my_list, my_dict
+
+    x = torch.jit.script(EmptyDataStructures())
 
 
 
@@ -828,8 +856,28 @@ Supported constant Python types are
 * tuples containing supported types
 * ``torch.nn.ModuleList`` which can be used in a TorchScript for loop
 
+.. note::
+    If you are on Python 2, you can mark an attribute as a constant by adding
+    its name to the ``__constants__`` property of the class:
 
+    .. testcode::
 
+        import torch
+        import torch.nn as nn
+
+        class Foo(nn.Module):
+            __constants__ = ['a']
+
+            def __init__(self):
+                super(Foo, self).__init__()
+                self.a = 1 + 4
+
+            def forward(self, input):
+                return self.a + input
+
+        f = torch.jit.script(Foo())
+
+    |
 
 .. _module attributes:
 
@@ -877,6 +925,10 @@ Example:
     f = torch.jit.script(Foo({'hi': 2}))
 
 
+.. note::
+    If you are on Python 2, you can mark an attribute's type by adding it to
+    the ``__annotations__`` class property as a dictionary of attribute name to
+    type
 
     .. testcode::
 

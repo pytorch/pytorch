@@ -210,7 +210,12 @@ class TORCH_API RpcAgent {
 
   // Stop accepting requests and shutdown the RPC framework as soon as possible
   // by terminating all RPC threads.
-  virtual void shutdown() = 0;
+  void shutdown();
+
+  // Derived classes must override this function to start accepting requests.
+  // THis is used to clean up any backend-specific state. Users must call
+  // shutdown, not shutdownImpl, to shutdown the RPC Agent.
+  virtual void shutdownImpl() = 0;
 
   // Check if current RPC agent is set.
   static bool isCurrentRpcAgentSet();
@@ -258,12 +263,6 @@ class TORCH_API RpcAgent {
   virtual void addGilWaitTime(const std::chrono::microseconds gilWaitTime) = 0;
   friend class PythonRpcHandler;
 
-  // Function that cleans up the local state for RpcAgent. This is called from
-  // the destructor, and ensures that we can gracefully destruct even if the
-  // child class was not successfully constructed without calling a virtual
-  // function.
-  void cleanup();
-
   // Map that stores metadata for RPC's that may need to be re-tried as well as
   // the timepoint at which we should re-try them.
   std::map<
@@ -287,8 +286,7 @@ class TORCH_API RpcAgent {
   // error and do not retry again. In case 3, we move the RpcRetryInfo struct
   // to another time point in the map to schedule the RPC for a future send.
   void rpcRetryCallback(
-      const rpc::Message& message,
-      const c10::optional<utils::FutureError>& futErr,
+      const std::shared_ptr<FutureMessage>& message,
       steady_clock_time_point newTime,
       std::shared_ptr<RpcRetryInfo> earliestRpc);
 

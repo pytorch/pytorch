@@ -320,6 +320,8 @@ def set_faulthander_if_available(_=None):
 set_faulthander_if_available()
 
 # Process `pid` must have called `set_faulthander_if_available`
+
+
 def print_traces_of_all_threads(pid):
     if HAS_FAULTHANDLER:
         if not IS_WINDOWS:
@@ -902,7 +904,6 @@ class TestDataLoader(TestCase):
         with self.assertRaisesRegex(ValueError, "timeout option should be non-negative"):
             DataLoader(self.dataset, timeout=-1)
 
-
         # disable auto-batching
         with self.assertRaisesRegex(ValueError,
                                     "batch_size=None option disables auto-batching and is mutually exclusive"):
@@ -917,7 +918,7 @@ class TestDataLoader(TestCase):
                 DataLoader(self.dataset, num_workers=0, multiprocessing_context=valid_ctx)
             with self.assertRaisesRegex(ValueError, "should specify a valid start method in"):
                 DataLoader(self.dataset, num_workers=1, multiprocessing_context='bad')
-            with self.assertRaisesRegex(ValueError, "multiprocessing_context option should be a valid context "):
+            with self.assertRaisesRegex(TypeError, "multiprocessing_context option should be a valid context "):
                 DataLoader(self.dataset, num_workers=1, multiprocessing_context=object())
         else:
             with self.assertRaisesRegex(ValueError, "multiprocessing_context relies on Python >= 3.4"):
@@ -1024,10 +1025,11 @@ class TestDataLoader(TestCase):
         for _ in range(20):
             self.assertNotWarn(lambda: next(it), "Should not warn before exceeding length")
         for _ in range(3):
-            self.assertWarnsRegex(
-                lambda: next(it),
+            with self.assertWarnsRegex(
+                UserWarning,
                 r"but [0-9]+ samples have been fetched\. For multiprocessing data-loading, this",
-                "Should always warn after exceeding length")
+                    msg="Should always warn after exceeding length"):
+                next(it)
 
         # [no auto-batching] test that workers exit gracefully
         workers = dataloader_iter._workers
