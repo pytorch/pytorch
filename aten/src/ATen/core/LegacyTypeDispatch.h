@@ -20,8 +20,12 @@ namespace at {
 
 class CAFFE2_API LegacyTypeDispatch {
  public:
-  void initForDispatchKey(DispatchKey k) {
-    auto b = dispatchKeyToBackend(k);
+  void initForDispatchKeySet(DispatchKeySet ts) {
+    // TODO: Avoid use of legacyExtractDispatchKey here.  The key
+    // problem is that you may get a DispatchKeySet with
+    // Autograd set; should you initialize the "underlying"
+    // type in that case?  Hard to say.
+    auto b = dispatchKeyToBackend(legacyExtractDispatchKey(ts));
     auto p = backendToDeviceType(b);
     static std::once_flag cpu_once;
     static std::once_flag cuda_once;
@@ -39,7 +43,6 @@ class CAFFE2_API LegacyTypeDispatch {
       });
     }
   }
-
 };
 
 CAFFE2_API LegacyTypeDispatch& globalLegacyTypeDispatch();
@@ -79,7 +82,7 @@ struct CAFFE2_API AutoNonVariableTypeMode {
   // NB: The enabled parameter must ALWAYS be black, as Henry Ford used to say.
   // TODO: Eliminate this parameter entirely
   AutoNonVariableTypeMode(bool enabled = true) :
-    guard_(DispatchKey::VariableTensorId) {
+    guard_(DispatchKey::Autograd) {
 
     TORCH_INTERNAL_ASSERT(enabled);
   }
