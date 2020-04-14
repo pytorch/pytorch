@@ -296,7 +296,7 @@ void FoldPrePackingOps(script::Module& m) {
   PrePackingOpsFolder(m, filter_fn, "prepack_folding");
 }
 
-void optimizeForMobile(script::Module& m) {
+script::Module optimizeForMobile(script::Module& m) {
   auto cloned_module = module.clone();
   cloned_module.eval();
   cloned_module = FoldConvBatchNorm2d(cloned_module);
