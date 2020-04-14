@@ -302,8 +302,14 @@ elif [[ "${BUILD_ENVIRONMENT}" == *-test2 || "${JOB_BASE_NAME}" == *-test2 ]]; t
 elif [[ "${BUILD_ENVIRONMENT}" == *-bazel-* ]]; then
   test_bazel
 else
-  echo "O_o o_O pwd = $PWD"
-  cd test && echo "O_o o_O pwd2 = $PWD" && python test_torch.py TestTorchDeviceTypeCUDA.test_svd_cuda_float64
+
+  export PYTORCH_JIT_LOG_LEVEL='>>liveness'
+  for i in {1..100}
+  do
+    echo "O_o o_O $i times; PYTORCH_JIT_LOG_LEVEL = $PYTORCH_JIT_LOG_LEVEL"
+    python test/test_torch.py TestTorchDeviceTypeCUDA.test_svd_cuda_float64
+  done
+
   # test_torchvision
   # test_python_nn
   # test_python_all_except_nn
