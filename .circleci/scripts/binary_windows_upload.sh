@@ -26,23 +26,20 @@ PIP_UPLOAD_FOLDER=${PIP_UPLOAD_FOLDER:-nightly/}
 # Strip trailing slashes if there
 CONDA_UPLOAD_CHANNEL=$(echo "${PIP_UPLOAD_FOLDER}" | sed 's:/*$::')
 
-pushd "~/workspace"
+pushd /root/workspace
 # Upload the package to the final location
 if [[ "$PACKAGE_TYPE" == conda ]]; then
   retry conda install -yq anaconda-client
-  echo "Uploading $(ls)"
-  # anaconda -t "${CONDA_PYTORCHBOT_TOKEN}" upload  "$(ls)" -u "pytorch-${CONDA_UPLOAD_CHANNEL}" --label main --no-progress --force
+  anaconda -t "${CONDA_PYTORCHBOT_TOKEN}" upload  "$(ls)" -u "pytorch-${CONDA_UPLOAD_CHANNEL}" --label main --no-progress --force
 elif [[ "$PACKAGE_TYPE" == libtorch ]]; then
   retry conda install -c conda-forge -yq awscli
   s3_dir="s3://pytorch/libtorch/${PIP_UPLOAD_FOLDER}${DESIRED_CUDA}/"
   for pkg in $(ls); do
-    echo "Uploading $pkg"
-    # retry aws s3 cp "$pkg" "$s3_dir" --acl public-read
+    retry aws s3 cp "$pkg" "$s3_dir" --acl public-read
   done
 else
   retry conda install -c conda-forge -yq awscli
   s3_dir="s3://pytorch/whl/${PIP_UPLOAD_FOLDER}${DESIRED_CUDA}/"
-  echo "Uploading $(ls)"
-  # retry aws s3 cp "$(ls)" "$s3_dir" --acl public-read
+  retry aws s3 cp "$(ls)" "$s3_dir" --acl public-read
 fi
 
