@@ -2,7 +2,6 @@
 This module contains utility method for mobile model optimization and lint.
 """
 
-import io
 import torch
 
 
@@ -18,9 +17,4 @@ def optimize_for_mobile(scripted_model):
         raise TypeError(
             'Got {}, but ScriptModule is expected.'.format(type(scripted_model)))
 
-    torch._C._jit_pass_optimize_for_mobile(scripted_model._c)
-    buffer = io.BytesIO()
-    torch.jit.save(scripted_model, buffer)
-    buffer.seek(0)
-    optimized_script_model = torch.jit.load(buffer)
-    return optimized_script_model
+    return torch._C._jit_pass_optimize_for_mobile(scripted_model._c)
