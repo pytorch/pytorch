@@ -1439,7 +1439,7 @@ class TestQuantizedOps(TestCase):
                        qparams=hu.qparams()),
            Y_scale=st.floats(0.2, 2.6),
            Y_zero_point=st.integers(0, 5))
-    def test_batch_norm(self, X, Y_scale, Y_zero_point):
+    def test_batch_norm2d(self, X, Y_scale, Y_zero_point):
         if "fbgemm" not in torch.backends.quantized.supported_engines:
             return
 
@@ -1455,7 +1455,7 @@ class TestQuantizedOps(TestCase):
             bias = torch.rand(c).float()
             eps = 0.001
             qx = torch.quantize_per_tensor(X, scale_x, zero_point_x, dtype_x)
-            qy = torch.ops.quantized.batch_norm(qx, weight, bias, mean, var, eps, Y_scale, Y_zero_point)
+            qy = torch.ops.quantized.batch_norm2d(qx, weight, bias, mean, var, eps, Y_scale, Y_zero_point)
 
             float_ref = F.batch_norm(qx.dequantize(), weight=weight, bias=bias,
                                      running_mean=mean, running_var=var, training=False, momentum=0, eps=eps)
@@ -1468,7 +1468,7 @@ class TestQuantizedOps(TestCase):
                        qparams=hu.qparams()),
            Y_scale=st.floats(0.2, 2.6),
            Y_zero_point=st.integers(0, 5))
-    def test_batch_norm_relu(self, X, Y_scale, Y_zero_point):
+    def test_batch_norm2d_relu(self, X, Y_scale, Y_zero_point):
         if "fbgemm" not in torch.backends.quantized.supported_engines:
             return
 

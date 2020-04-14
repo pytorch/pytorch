@@ -814,7 +814,7 @@ class ModuleAPITest(QuantizationTestCase):
         # JIT Testing
         self.checkScriptable(pool_under_test, list(zip([X], [qX_expect])))
 
-    def test_batch_norm(self):
+    def test_batch_norm2d(self):
         """Tests the correctness of the batchnorm2d module.
         The correctness is defined against the functional implementation.
         """
