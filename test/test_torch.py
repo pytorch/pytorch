@@ -15540,8 +15540,8 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         expected_result = torch.tensor([[[0, 0], [0, 1]], [[2, 0], [0, 1]], [[2, 0], [0, 0]]], device=device)
         if self.device_type != 'xla':
             self.assertWarnsRegex(
-                lambda: self.assertEqual(torch.searchsorted(boundaries_permute, values_3d_permute), expected_result),
-                "tensor is non-contiguous")
+                UserWarning, "tensor is non-contiguous",
+                lambda: self.assertEqual(torch.searchsorted(boundaries_permute, values_3d_permute), expected_result))
         else:
             # All tensors in XLA is contiguous even doing permute, no warning msg will be generate in XLA
             self.assertEqual(torch.searchsorted(boundaries_permute, values_3d_permute), expected_result)
