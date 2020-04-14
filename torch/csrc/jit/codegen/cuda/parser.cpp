@@ -26,6 +26,8 @@ typedef Expr* CgOp;
 typedef void (
     *ParseFuncPtr)(const Node* const, std::unordered_map<size_t, CgValue>&);
 
+typedef std::function<void(const Node* const, std::unordered_map<size_t, CgValue>&)> ParseFunc;
+
 // TODO: add a mutex to make it thread safe.
 class IrParser {
  private:
@@ -134,37 +136,10 @@ class IrParser {
       std::shared_ptr<Operator>& op,
       ParseFuncPtr fn) {
     jit_operator_registry_[Symbol::fromQualString(op->schema().name())]
-        .push_back(std::make_pair(op, fn));
+        .emplace_back(std::make_pair(op, fn));
   }
 
  private:
-  static void parseBinaryOpWithAlpha(
-      const Node* const node,
-      std::unordered_map<size_t, CgValue>& value_maps) {
-    static std::unordered_map<Symbol, BinaryOpType> op_mapping({
-        {aten::add, BinaryOpType::Add},
-        {aten::sub, BinaryOpType::Sub},
-    });
-    auto lhs = value_maps[node->inputs()[0]->unique()];
-    auto rhs = value_maps[node->inputs()[1]->unique()];
-
-    auto out = binaryOp(op_mapping[node->kind()], lhs, rhs);
-    value_maps.emplace(node->output()->unique(), out);
-  }
-
-  static void parseBinaryOp(
-      const Node* const node,
-      std::unordered_map<size_t, CgValue>& value_maps) {
-    static std::unordered_map<Symbol, BinaryOpType> op_mapping({
-        {aten::mul, BinaryOpType::Mul},
-        {aten::div, BinaryOpType::Div},
-    });
-    auto lhs = value_maps[node->inputs()[0]->unique()];
-    auto rhs = value_maps[node->inputs()[1]->unique()];
-
-    auto out = binaryOp(op_mapping[node->kind()], lhs, rhs);
-    value_maps.emplace(node->output()->unique(), out);
-  }
 
   static void registerJitOperator() {
     // Register parse-function for each JIT operator;
@@ -178,7 +153,20 @@ class IrParser {
         "aten::sub(Tensor self, Scalar other, Scalar alpha) -> Tensor"};
     for (auto signature : BinaryOpWithAlpha) {
       auto ptr_op = getOperatorForLiteral(signature);
-      registerParseRule(ptr_op, &parseBinaryOpWithAlpha);
+      registerParseRule(ptr_op,
+          [](const Node* const node,
+             std::unordered_map<size_t, CgValue>& value_maps) -> void {
+            static std::unordered_map<Symbol, BinaryOpType> op_mapping({
+                {aten::add, BinaryOpType::Add},
+                {aten::sub, BinaryOpType::Sub},
+            });
+            printf("\n\n\n parsing ternary \n\n\n");
+            auto lhs = value_maps[node->inputs()[0]->unique()];
+            auto rhs = value_maps[node->inputs()[1]->unique()];
+
+            auto out = binaryOp(op_mapping[node->kind()], lhs, rhs);
+            value_maps.emplace(node->output()->unique(), out);
+          });
     }
 
     std::array<const char*, 4> BinaryOp = {
@@ -188,7 +176,20 @@ class IrParser {
         "aten::mul(Tensor self, Scalar other) -> Tensor"};
     for (auto signature : BinaryOp) {
       auto ptr_op = getOperatorForLiteral(signature);
-      registerParseRule(ptr_op, &parseBinaryOp);
+      registerParseRule(ptr_op,
+          [](const Node* const node,
+             std::unordered_map<size_t, CgValue>& value_maps) -> void {
+            static std::unordered_map<Symbol, BinaryOpType> op_mapping({
+                {aten::mul, BinaryOpType::Mul},
+                {aten::div, BinaryOpType::Div},
+            });
+            printf("\n\n\n parsing binary \n\n\n");
+            auto lhs = value_maps[node->inputs()[0]->unique()];
+            auto rhs = value_maps[node->inputs()[1]->unique()];
+
+            auto out = binaryOp(op_mapping[node->kind()], lhs, rhs);
+            value_maps.emplace(node->output()->unique(), out);
+          });
     }
   }
 
