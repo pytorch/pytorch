@@ -346,8 +346,6 @@ class SummaryWriter(object):
     def add_scalars(self, main_tag, tag_scalar_dict, global_step=None, walltime=None):
         """Adds many scalar data to summary.
 
-        Note that this function also keeps logged scalars in memory. In extreme case it explodes your RAM.
-
         Args:
             main_tag (string): The parent name for the tags
             tag_scalar_dict (dict): Key-value pair storing the tag and corresponding values
