@@ -789,9 +789,9 @@ Stmt* LoopNest::insertAllocFree(Stmt* stmt) {
     b->append_stmt(free);
   }
   for (size_t i = 0; i < temp_bufs_.size(); i++) {
-    const Buf* buf = temp_bufs_[i];
+    const Buf* buf = temp_bufs_[i].first;
     Stmt* alloc =
-        new Allocate(buf->base_handle(), temp_bufs_dtypes_[i], buf->dims());
+        new Allocate(buf->base_handle(), temp_bufs_[i].second, buf->dims());
     Stmt* free = new Free(buf->base_handle());
     b->prepend_stmt(alloc);
     b->append_stmt(free);
@@ -1243,8 +1243,7 @@ void LoopNest::computeAt(Stmt* s, For* f) {
 
   // Mark the new temp buffer as requiring an alloc (it will be inserted as a
   // part of prepareForCodegen.
-  temp_bufs_.push_back(temp_buf);
-  temp_bufs_dtypes_.push_back(st->value()->dtype());
+  temp_bufs_.push_back(std::make_pair(temp_buf, st->value()->dtype()));
 }
 
 } // namespace tensorexpr
