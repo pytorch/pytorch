@@ -206,6 +206,7 @@ class SparseLengthsSumTest(TestCase):
             print_test_debug_info(
                 "slws_fused_4bit",
                 {
+                    "seed": seed,
                     "indices": indices,
                     "data": data.shape,
                     "lengths": lengths,
