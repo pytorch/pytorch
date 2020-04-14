@@ -1405,6 +1405,42 @@ class TestQuantizeScriptPTSQOps(JitTestCase):
         FileCheck().check_not("aten::batch_norm") \
                    .run(model.graph)
 
+    def test_qbatch_norm_relu(self):
+        class M(torch.nn.Module):
+            def __init__(self, inplace):
+                super(M, self).__init__()
+                self.bn = torch.nn.BatchNorm2d(3).to('cpu', torch.float)
+                self.relu = torch.nn.ReLU(inplace=inplace)
+
+            def forward(self, x):
+                return self.relu(self.bn(x))
+
+        class Func(torch.nn.Module):
+            def __init__(self):
+                super(Func, self).__init__()
+                self.bn = torch.nn.BatchNorm2d(3).to('cpu', torch.float)
+
+            def forward(self, x):
+                return F.relu(self.bn(x))
+
+        data = [(torch.rand((1, 3, 10, 10), dtype=torch.float), torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
+        model = self._test_op_impl(Func, data, "quantized::batch_norm2d_relu")
+
+        FileCheck().check_not("aten::batch_norm") \
+                   .check_not("aten::relu") \
+                   .run(model.graph)
+        for inplace in [True, False]:
+            m = torch.jit.script(M(True).eval())
+            m = prepare_script(m, {'': default_qconfig}, True)
+            data = torch.rand((1, 3, 10, 10), dtype=torch.float)
+            m(data)
+            m = convert_script(m, False)
+            FileCheck().check("quantized::batch_norm2d_relu") \
+                       .check_not("aten::batch_norm") \
+                       .check_not("aten::relu") \
+                       .check_not("aten::relu_") \
+                       .run(m.graph)
+
 
     def test_swap_dequantize_all_ops(self):
         """ A test that checks dequantize will be swapped for

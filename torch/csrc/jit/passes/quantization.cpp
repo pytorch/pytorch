@@ -665,6 +665,22 @@ graph(%self, %a, %b, %inplace):
      %second_output = prim::CallFunction(%relu, %first_output, %inplace)
      return (%second_output) )");
 
+  const PatternInfo bn_relu = PatternInfo::parse_from_str(R"(
+graph(%self, %input):
+    %first_module = match::module[name="BatchNorm2d"](%self)
+    %first_output = prim::CallMethod[name="forward"](%first_module, %input)
+    %second_module = match::module[name="ReLU"](%self)
+    %second_output = prim::CallMethod[name="forward"](%second_module, %first_output)
+    return (%second_output) )");
+
+  const PatternInfo bn_functional_relu = PatternInfo::parse_from_str(R"(
+graph(%self, %input, %inplace):
+    %relu = prim::Constant[name="relu"]()
+    %first_module = match::module[name="BatchNorm2d"](%self)
+    %first_output = prim::CallMethod[name="forward"](%first_module, %input)
+    %second_output = prim::CallFunction(%relu, %first_output, %inplace)
+    return (%second_output) )");
+
   const std::vector<std::reference_wrapper<const PatternInfo>> delay_patterns =
       {
           conv_functional_relu,
@@ -672,6 +688,8 @@ graph(%self, %a, %b, %inplace):
           matmul_add,
           add_module_relu,
           add_functional_relu,
+          bn_relu,
+          bn_functional_relu,
   };
 };
 
