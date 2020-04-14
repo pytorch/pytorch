@@ -4,6 +4,7 @@ import errno
 import fcntl
 import multiprocessing
 import os
+import six
 import sys
 import time
 import tempfile
