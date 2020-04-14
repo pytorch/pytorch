@@ -39,57 +39,57 @@ struct TestCPUGenerator : public c10::GeneratorImpl {
 
 // ==================================================== Random ========================================================
 
-Tensor& random_(Tensor& self, Generator generator) {
+Tensor& random_(Tensor& self, c10::optional<Generator> generator) {
   return at::native::templates::random_impl<native::templates::cpu::RandomKernel, TestCPUGenerator>(self, generator);
 }
 
-Tensor& random_from_to(Tensor& self, int64_t from, optional<int64_t> to, Generator generator) {
+Tensor& random_from_to(Tensor& self, int64_t from, optional<int64_t> to, c10::optional<Generator> generator) {
   return at::native::templates::random_from_to_impl<native::templates::cpu::RandomFromToKernel, TestCPUGenerator>(self, from, to, generator);
 }
 
-Tensor& random_to(Tensor& self, int64_t to, Generator generator) {
+Tensor& random_to(Tensor& self, int64_t to, c10::optional<Generator> generator) {
   return random_from_to(self, 0, to, generator);
 }
 
 // ==================================================== Normal ========================================================
 
-Tensor& normal_(Tensor& self, double mean, double std, Generator gen) {
+Tensor& normal_(Tensor& self, double mean, double std, c10::optional<Generator> gen) {
   return at::native::templates::normal_impl_<native::templates::cpu::NormalKernel, TestCPUGenerator>(self, mean, std, gen);
 }
 
-Tensor& normal_Tensor_float_out(Tensor& output, const Tensor& mean, double std, Generator gen) {
+Tensor& normal_Tensor_float_out(Tensor& output, const Tensor& mean, double std, c10::optional<Generator> gen) {
   return at::native::templates::normal_out_impl<native::templates::cpu::NormalKernel, TestCPUGenerator>(output, mean, std, gen);
 }
 
-Tensor& normal_float_Tensor_out(Tensor& output, double mean, const Tensor& std, Generator gen) {
+Tensor& normal_float_Tensor_out(Tensor& output, double mean, const Tensor& std, c10::optional<Generator> gen) {
   return at::native::templates::normal_out_impl<native::templates::cpu::NormalKernel, TestCPUGenerator>(output, mean, std, gen);
 }
 
-Tensor& normal_Tensor_Tensor_out(Tensor& output, const Tensor& mean, const Tensor& std, Generator gen) {
+Tensor& normal_Tensor_Tensor_out(Tensor& output, const Tensor& mean, const Tensor& std, c10::optional<Generator> gen) {
   return at::native::templates::normal_out_impl<native::templates::cpu::NormalKernel, TestCPUGenerator>(output, mean, std, gen);
 }
 
-Tensor normal_Tensor_float(const Tensor& mean, double std, Generator gen) {
+Tensor normal_Tensor_float(const Tensor& mean, double std, c10::optional<Generator> gen) {
   return at::native::templates::normal_impl<native::templates::cpu::NormalKernel, TestCPUGenerator>(mean, std, gen);
 }
 
-Tensor normal_float_Tensor(double mean, const Tensor& std, Generator gen) {
+Tensor normal_float_Tensor(double mean, const Tensor& std, c10::optional<Generator> gen) {
   return at::native::templates::normal_impl<native::templates::cpu::NormalKernel, TestCPUGenerator>(mean, std, gen);
 }
 
-Tensor normal_Tensor_Tensor(const Tensor& mean, const Tensor& std, Generator gen) {
+Tensor normal_Tensor_Tensor(const Tensor& mean, const Tensor& std, c10::optional<Generator> gen) {
   return at::native::templates::normal_impl<native::templates::cpu::NormalKernel, TestCPUGenerator>(mean, std, gen);
 }
 
 // ==================================================== Uniform =======================================================
 
-Tensor& uniform_(Tensor& self, double from, double to, Generator generator) {
+Tensor& uniform_(Tensor& self, double from, double to, c10::optional<Generator> generator) {
   return at::native::templates::uniform_impl_<native::templates::cpu::UniformKernel, TestCPUGenerator>(self, from, to, generator);
 }
 
 // ==================================================== Cauchy ========================================================
 
-Tensor& custom_rng_cauchy_(Tensor& self, double median, double sigma, Generator generator) {
+Tensor& custom_rng_cauchy_(Tensor& self, double median, double sigma, c10::optional<Generator> generator) {
   auto iter = TensorIterator::nullary_op(self);
   native::templates::cpu::cauchy_kernel(iter, median, sigma, check_generator<TestCPUGenerator>(generator));
   return self;

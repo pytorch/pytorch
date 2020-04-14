@@ -1724,6 +1724,7 @@ cc_library(
         "//third_party/miniz-2.0.8:miniz",
         "@com_google_protobuf//:protobuf",
         "@eigen",
+        "@fbgemm//:fbgemm_src_headers",
         "@foxi",
         "@gloo",
         "@onnx",
