@@ -1243,7 +1243,7 @@ void LoopNest::computeAt(Stmt* s, For* f) {
 
   // Mark the new temp buffer as requiring an alloc (it will be inserted as a
   // part of prepareForCodegen).
-  temp_bufs_.push_back(std::make_pair(temp_buf, st->value()->dtype()));
+  temp_bufs_.emplace_back(std::make_pair(temp_buf, st->value()->dtype()));
 }
 
 } // namespace tensorexpr
