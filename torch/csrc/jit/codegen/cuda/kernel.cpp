@@ -69,8 +69,7 @@ struct ExtractSizeStride {
 struct KernelArgumentHolder {
  private:
   std::vector<ArgAbstract*> arguments;
-  std::vector<char> buffer;
-  std::vector<void*> arg_ptrs;
+  std::vector<void*> void_ptrs;
   bool changed = true;
 
  public:
@@ -114,41 +113,23 @@ struct KernelArgumentHolder {
       default:
         TORCH_INTERNAL_ASSERT(
             false,
-            " Tried to create argument to send to a fused kernel, but got an expected type: ");
+            " Tried to create argument to send to a fused kernel, but got an unexpected type.");
     }
     TORCH_INTERNAL_ASSERT(
         false,
-        " Tried to create argument to send to a fused kernel, but got a non-tensor, non-scalar type.");
+        " Tried to create argument to send to a fused kernel, but got a non-scalar type.");
   }
 
   // Create buffer, flatten arguments into it, align by 8 Bytes, return pointers
   // in the buffer
   void** getBuffer() {
-    if (!changed)
-      return arg_ptrs.data();
-
-    std::vector<size_t> offsets;
-
-    size_t buffer_size = 0;
-    // align args to 64bit
-    for (auto arg : arguments) {
-      offsets.push_back(buffer_size);
-      buffer_size += arg->getSizeof();
-      buffer_size += buffer_size % 8;
+    if (changed){
+      void_ptrs = std::vector<void*>(arguments.size(), nullptr);
+      for(decltype(arguments.size()) i{0}; i<arguments.size(); i++)
+        void_ptrs[i] = static_cast<void*>(arguments[i]->arg());
+      changed = false;
     }
-
-    arg_ptrs = std::vector<void*>(arguments.size(), nullptr);
-
-    buffer.resize(buffer_size);
-    for (decltype(arguments.size()) i{0}; i < arguments.size(); i++) {
-      arg_ptrs[i] = buffer.data() + offsets[i];
-      memcpy(arg_ptrs[i], arguments[i]->arg(), arguments[i]->getSizeof());
-    }
-
-    TensorArgCodegen<float, 4>* last_arg =
-        static_cast<TensorArgCodegen<float, 4>*>(arg_ptrs[arg_ptrs.size() - 1]);
-
-    return arg_ptrs.data();
+    return void_ptrs.data();
   }
 };
 
