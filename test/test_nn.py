@@ -9641,6 +9641,14 @@ class TestNNDeviceType(NNTestCase):
         out = m(inp)
 
     @onlyCUDA
+    @skipCUDAIfNotRocm
+    def test_upsamplingNearest2d_launch_rocm(self, device):
+        # test_upsamplingNearest2d_launch_fail should run OK on ROCm
+        m = nn.Upsample(scale_factor=2)
+        inp = torch.rand(1, 1, 2**15, 2**8, device=device)
+        out = m(inp)
+
+    @onlyCUDA
     @skipCUDAIfCudnnVersionLessThan(7600)
     def test_CTCLoss_cudnn(self, device):
         target_lengths = [30, 25, 20]
