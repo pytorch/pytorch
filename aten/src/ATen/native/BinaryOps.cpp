@@ -752,7 +752,7 @@ Tensor& true_divide_(Tensor& self, Scalar divisor) {
 
 // Note: this function is only for testing.
 // It is undocumented and should not be used outside of tests.
-Tensor subcmul(const Tensor& self, const Tensor& other, Scalar alpha) {
+Tensor _test_serialization_subcmul(const Tensor& self, const Tensor& other, Scalar alpha) {
   return self - (other * alpha);
 }
 

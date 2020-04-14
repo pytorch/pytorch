@@ -63,8 +63,8 @@ def _assert_int_or_pair(vals: List[int], name: str, message: str):
 
 // Implementations of historic symbol behaviors are defined here
 // See note [Versioned Symbols]
-auto subcmul_0_2 = R"SCRIPT(
-def _subcmul_0_2(self: Tensor, other:Tensor, alpha: number=2) -> Tensor:
+auto _test_serialization_subcmul = R"SCRIPT(
+def _test_serialization_subcmul_0_2(self: Tensor, other:Tensor, alpha: number=2) -> Tensor:
   return other - (self * alpha)
 )SCRIPT";
 
@@ -129,7 +129,7 @@ struct BuiltinFunctionRegistry {
     }
     for (auto rhs : {"number", "Tensor"}) {
       TemplateEnv env;
-      env.s("Rhs_Type", rhs);
+      env.s("Rhs_Type", rhs);s
       loadSource(floordiv.format(env), "aten");
     }
 
@@ -137,7 +137,8 @@ struct BuiltinFunctionRegistry {
 
     // Loads functions implementing historic behavior, see note [Versioned
     // Symbols]
-    loadSource(subcmul_0_2, "aten");
+    // Note: these functions go into the "upgraders" namespace
+    loadSource(_test_serialization_subcmul, "upgraders");
 
     // These are under `prim` instead of `aten` since they exist to bind certain
     // tensor property getters to correpsonding methods

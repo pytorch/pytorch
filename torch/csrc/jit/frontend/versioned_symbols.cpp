@@ -13,23 +13,26 @@ namespace jit {
 // and when an older Torchscript program is loaded the program's uses of the
 // symbol can be replaced with the builtin.
 //
-// For example, a function _subcmul(a, b, alpha) might have been improperly
-// implemented as (b - alpha * a). Some users may have written and serialized
-// programs using that function, however, and fixing it to perform
-// (a - alpha * b) would break their programs. Using the "Versioned Symbol"
-// pattern lets you replace _subcmul in older programs with a builtin
-// _subcmul_<version_range> that implements the historic behavior. That way
-// old programs preserve their semantics while new programs can take
-// advantage of the fix.
+// For example, a function _test_serialization_subcmul(a, b, alpha) might have
+// been improperly implemented as (b - alpha * a).
+// Some users may have written and serialized programs using that function,
+// however, and fixing it to perform (a - alpha * b) would break their programs.
+// Using the "Versioned Symbol" pattern lets you replace
+// _test_serialization_subcmul in older programs with a builtin
+// _test_serialization_subcmul<version_range> that implements the historic
+// behavior. That way old programs preserve their semantics while new programs
+// can take advantage of the fix.
 //
 // To do this:
 //
 // 1) Identify the file version range where the symbol should be replaced,
 //    e.g. versions 0 to 2, inclusive.
 // 2) Create one or more builtins implementing the symbol's historic behavior.
-//    These should be named <function>_<start_version>_<end_version>.
-//    For example, the test-only _subcmul has a builtin for its
-//    "historic" behavior called _subcmul_0_2.
+//    These should be named <function>_<start_version>_<end_version> and
+//    go into the "upgraders" namespace.
+//    For example, the test-only aten::_test_serialization_subcmul has a builtin
+//    for its "historic" behavior called
+//    upgraders::_test_serialization_subcmul_0_2.
 // 3) Add a mapping from the symbol to the corresponding SymbolRange
 //    in the symbol_range_map (below).
 //
@@ -62,8 +65,10 @@ struct SymbolRange {
 };
 
 static std::unordered_map<Symbol, SymbolRange> symbol_range_map({
-    {Symbol::fromQualString("aten::_subcmul"),
-     {0, 2, Symbol::fromQualString("aten::_subcmul_0_2")}},
+    {Symbol::fromQualString("aten::_test_serialization_subcmul"),
+     {0,
+      2,
+      Symbol::fromQualString("upgraders::_test_serialization_subcmul_0_2")}},
 });
 
 Symbol get_symbol_for_version(const Symbol name, const uint64_t version) {
