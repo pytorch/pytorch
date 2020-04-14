@@ -10,7 +10,7 @@ try:
 except ImportError:
     import functools
 
-    class ContextDecorator(object):
+    class ContextDecorator(object):  # type: ignore[no-redef]
         def __call__(self, func):
             @functools.wraps(func)
             def wrapped(*args, **kwargs):
