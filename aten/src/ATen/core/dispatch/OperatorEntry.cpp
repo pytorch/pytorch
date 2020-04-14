@@ -156,7 +156,13 @@ void OperatorEntry::checkInvariants() const {
     auto mb_dispatch_key = kv.first;
     TORCH_INTERNAL_ASSERT(kv.second.size() > 0);
     auto* kernel = mb_dispatch_key ? dispatchTable_.lookup(*mb_dispatch_key) : dispatchTable_.lookupCatchallKernel();
-    TORCH_INTERNAL_ASSERT(kv.second.front().kernel._equalsBoxedAndUnboxed(*kernel));
+    auto manual_boxed_kernel = dispatchTable_.manuallyBoxedKernel();
+    // NB: this is a copy
+    auto local_kernel = kv.second.front().kernel;
+    if (manual_boxed_kernel.has_value()) {
+      local_kernel.setManuallyBoxedKernel_(*manual_boxed_kernel);
+    }
+    TORCH_INTERNAL_ASSERT(local_kernel._equalsBoxedAndUnboxed(*kernel));
   }
 }
 
