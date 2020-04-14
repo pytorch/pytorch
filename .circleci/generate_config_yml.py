@@ -103,20 +103,20 @@ YAML_SOURCES = [
     # File("workflows-pytorch-ge-config-tests.yml"),
     # File("workflows-pytorch-bazel-builds.yml"),
     # Listgen(caffe2_build_definitions.get_workflow_jobs, 3),
-    # File("workflows-binary-builds-smoke-subset.yml"),
-    # Listgen(binary_build_definitions.get_binary_smoke_test_jobs, 3),
+    File("workflows-binary-builds-smoke-subset.yml"),
+    Listgen(binary_build_definitions.get_binary_smoke_test_jobs, 3),
     Listgen(binary_build_definitions.get_binary_build_jobs, 3),
-    # File("workflows-nightly-ios-binary-builds.yml"),
-    # File("workflows-nightly-android-binary-builds.yml"),
+    File("workflows-nightly-ios-binary-builds.yml"),
+    File("workflows-nightly-android-binary-builds.yml"),
 
-    # Header("Nightly tests"),
-    # Listgen(binary_build_definitions.get_nightly_tests, 3),
-    # File("workflows-nightly-uploads-header.yml"),
-    # Listgen(binary_build_definitions.get_nightly_uploads, 3),
-    # File("workflows-s3-html.yml"),
-    # File("workflows-docker-builder.yml"),
-    # File("workflows-ecr-gc.yml"),
-    # File("workflows-promote.yml")
+    Header("Nightly tests"),
+    Listgen(binary_build_definitions.get_nightly_tests, 3),
+    File("workflows-nightly-uploads-header.yml"),
+    Listgen(binary_build_definitions.get_nightly_uploads, 3),
+    File("workflows-s3-html.yml"),
+    File("workflows-docker-builder.yml"),
+    File("workflows-ecr-gc.yml"),
+    File("workflows-promote.yml")
 ]
 
 
