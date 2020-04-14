@@ -1415,22 +1415,30 @@ class TestQuantizeScriptPTSQOps(JitTestCase):
             def forward(self, x):
                 return self.relu(self.bn(x))
 
-        class Func(torch.nn.Module):
+        class FuncRelu(torch.nn.Module):
             def __init__(self):
-                super(Func, self).__init__()
+                super(FuncRelu, self).__init__()
                 self.bn = torch.nn.BatchNorm2d(3).to('cpu', torch.float)
 
             def forward(self, x):
-                return F.relu(self.bn(x))
+                return F.relu(self.bn(x), True)
+
+        class FuncInplaceRelu(torch.nn.Module):
+            def __init__(self):
+                super(FuncInplaceRelu, self).__init__()
+                self.bn = torch.nn.BatchNorm2d(3).to('cpu', torch.float)
+
+            def forward(self, x):
+                return F.relu(self.bn(x), False)
 
         data = [(torch.rand((1, 3, 10, 10), dtype=torch.float), torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
-        model = self._test_op_impl(Func, data, "quantized::batch_norm2d_relu")
-
+        model = self._test_op_impl(FuncRelu, data, "quantized::batch_norm2d_relu")
         FileCheck().check_not("aten::batch_norm") \
                    .check_not("aten::relu") \
                    .run(model.graph)
+        model = self._test_op_impl(FuncInplaceRelu, data, "quantized::batch_norm2d_relu")
         for inplace in [True, False]:
-            m = torch.jit.script(M(True).eval())
+            m = torch.jit.script(M(inplace).eval())
             m = prepare_script(m, {'': default_qconfig}, True)
             data = torch.rand((1, 3, 10, 10), dtype=torch.float)
             m(data)
