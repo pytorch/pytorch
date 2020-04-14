@@ -61,9 +61,6 @@ pytorch_qnnp_compute_scalar_fp32_requantization_params(
     uint8_t zero_point,
     uint8_t min,
     uint8_t max) {
-  /* Compute requantization parameters */
-  assert(scale < 1.0f);
-  assert(scale >= 0x1.0p-32f);
 
   union pytorch_qnnp_fp32_requantization_params params;
   params.scalar.scale = scale;
@@ -157,8 +154,6 @@ pytorch_qnnp_compute_conv_quantization_params(
     uint8_t output_zero_point,
     uint8_t output_min,
     uint8_t output_max) {
-  assert(scale > 0);
-  assert(scale <= 1);
 
   union pytorch_qnnp_conv_quantization_params params;
 #if CPUINFO_ARCH_X86 || CPUINFO_ARCH_X86_64
