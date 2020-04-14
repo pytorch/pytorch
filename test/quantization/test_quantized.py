@@ -346,7 +346,6 @@ class TestQuantizedOps(TestCase):
                 X_zero_point = 127
                 num_bins = 2 ** 8
                 X_scale = float(max_val - min_val) / num_bins
-            print(torch_type, X_rand_scale, min_val, max_val, X_zero_point, X_scale)
 
 
             X = torch.from_numpy(X)
@@ -390,13 +389,20 @@ class TestQuantizedOps(TestCase):
             dqY = qY.dequantize()
             dqY_hat = qY_hat.dequantize()
             diff = dqY - dqY_hat
-            num_diff = torch.sum(diff > Y_scale)  # off-by-one errors are magnitude of Y_scale
+
+            # off-by-one errors are magnitude of Y_scale
+            num_diff = torch.sum(diff > Y_scale * 1.0001)
             pct_diff = float(num_diff) / (diff.numel() + 1e-5)
+            num_diff_off_by_one = torch.sum((diff > 0) * (diff <= Y_scale))
+            pct_diff_off_by_one = float(num_diff_off_by_one) / (diff.numel() + 1e-5)
+
             note("LayerNorm failed:\n {} input vs\n {} actual vs \n{} expected"
                  .format(X, qY, qY_hat))
             note("Pct diff: {}".format(pct_diff))
+            note("Pct diff off by one: {}".format(pct_diff_off_by_one))
 
-            self.assertTrue(pct_diff < 0.01)
+            self.assertTrue(pct_diff < 1e-6)
+            self.assertTrue(pct_diff_off_by_one < 0.01)
 
 
     """Tests the correctness of the quantized::qnnpack_tanh op."""
