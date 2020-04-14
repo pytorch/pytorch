@@ -3916,6 +3916,7 @@ def multi_head_attention_forward(query,                           # type: Tensor
             attn_mask.dtype == torch.uint8 or attn_mask.dtype == torch.bool, \
             'Only float, byte, and bool types are supported for attn_mask, not {}'.format(attn_mask.dtype)
         if attn_mask.dtype == torch.uint8:
+            warnings.warn("Byte tensor for attn_mask in nn.MultiheadAttention is deprecated. Use bool tensor instead.")
             attn_mask = attn_mask.to(torch.bool)
 
         if attn_mask.dim() == 2:
@@ -3931,6 +3932,7 @@ def multi_head_attention_forward(query,                           # type: Tensor
 
     # convert ByteTensor key_padding_mask to bool
     if key_padding_mask is not None and key_padding_mask.dtype == torch.uint8:
+        warnings.warn("Byte tensor for key_padding_mask in nn.MultiheadAttention is deprecated. Use bool tensor instead.")
         key_padding_mask = key_padding_mask.to(torch.bool)
 
     if bias_k is not None and bias_v is not None:
