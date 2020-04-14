@@ -379,7 +379,7 @@ class TestClassType(JitTestCase):
                 return self.x
 
         def test(li, reverse=False):
-            # type: (List[Foo], bool)
+            # type: (List[Foo], bool) -> (List[int], List[int])
             li_sorted = sorted(li)
             ret_sorted = torch.jit.annotate(List[int], [])
             for foo in li_sorted:
