@@ -37,16 +37,15 @@ static auto registry_prim =
                 .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
         .op("aten::Int.str(str a) -> int",
             torch::RegisterOperators::options()
-                .catchAllKernel(
-                    [](std::string str) -> int64_t {
-                        std::string::size_type sz;
-                        int64_t val = static_cast<int64_t>(c10::stoll(str, &sz));
-                        if (sz != str.size()) {
-                            std::stringstream error_str;
-                            error_str << "invalid literal for int() "
-                                      << "with base 10: '" << str << "'";
-                            throw std::runtime_error(error_str.str());
-                        }
-                        return val;
-                    })
+                .catchAllKernel([](const std::string& str) -> int64_t {
+                  std::string::size_type sz;
+                  int64_t val = static_cast<int64_t>(c10::stoll(str, &sz));
+                  if (sz != str.size()) {
+                    std::stringstream error_str;
+                    error_str << "invalid literal for int() "
+                              << "with base 10: '" << str << "'";
+                    throw std::runtime_error(error_str.str());
+                  }
+                  return val;
+                })
                 .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA));

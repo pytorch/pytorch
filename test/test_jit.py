@@ -5289,7 +5289,7 @@ a")
         def foo(a):
             return 0.5 == float('0.5 hello')
         s = torch.rand(1)
-        with self.assertRaisesRegex(RuntimeError, "only accepts a string of single float number"):
+        with self.assertRaisesRegex(RuntimeError, "could not convert string to float"):
             self.assertTrue(foo(s))
 
         @torch.jit.script
