@@ -130,6 +130,8 @@ void BoundShapeInferencer::InferOps(
       op.type() == "SparseLengthsSumFused4BitRowwise" ||
       op.type() == "SparseLengthsWeightedSumFused4BitRowwise") {
     InferSparseLengthsSum(op);
+  } else if (op.type() == "Add" || op.type() == "Mul") {
+    InferElementwiseOp(op);
   } else if (
       op.type() == "FC" || op.type() == "FCTransposed" ||
       op.type() == "FbFCPacked" || op.type() == "Int8FC") {
@@ -439,7 +441,8 @@ void BoundShapeInferencer::InferInt8QuantizeInput(const OperatorDef& op) {
 }
 
 void BoundShapeInferencer::InferElementwiseOpInput(const OperatorDef& op) {
-  if (shape_info_.find(op.input(0)) != shape_info_.end()) {
+  if (shape_info_.find(op.input(0)) != shape_info_.end() &&
+      shape_info_.find(op.input(1)) != shape_info_.end()) {
     return;
   }
   const auto it = shape_info_.find(op.output(0));
@@ -513,6 +516,25 @@ void BoundShapeInferencer::InferConcatInputs(const OperatorDef& op) {
       shape_info_[op.output(1)].setDimType(
           0, TensorBoundShape_DimType_CONSTANT);
     }
+  }
+}
+
+void BoundShapeInferencer::InferElementwiseOp(const OperatorDef& op) {
+  InferCommonOp(op);
+  if (shape_info_.find(op.output(0)) != shape_info_.end() &&
+      shape_info_.find(op.input(1)) != shape_info_.end()) {
+    return;
+  }
+  const auto it = shape_info_.find(op.input(0));
+  if (it == shape_info_.end()) {
+    return;
+  }
+  ArgumentHelper helper(op);
+  const bool broadcast = helper.GetSingleArgument<bool>("broadcast", false);
+  if (broadcast) {
+    auto input_shape_info = it->second;
+    shape_info_.emplace(op.input(1), input_shape_info);
+    shape_info_.emplace(op.output(0), std::move(input_shape_info));
   }
 }
 
