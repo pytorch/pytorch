@@ -974,6 +974,74 @@ const Expr* PolynomialTransformer::mutate(const Cast* v) {
   return new Cast(v->dtype(), node);
 }
 
+const Expr* PolynomialTransformer::mutate(const IfThenElse* v) {
+  const Expr* condition = v->condition();
+  const Expr* true_value = v->true_value();
+  const Expr* false_value = v->false_value();
+  const Expr* condition_new = condition->accept_mutator(this);
+  const Expr* true_value_new = true_value->accept_mutator(this);
+  const Expr* false_value_new = false_value->accept_mutator(this);
+
+  // If the condition is constant then we can choose the right branch now.
+  if (condition_new->isConstant()) {
+    if (!immediateEquals(condition_new, 0)) {
+      return true_value_new;
+    } else {
+      return false_value_new;
+    }
+  }
+
+  // If both branches are the same then don't do the condition.
+  if (hasher_.hash(true_value_new) == hasher_.hash(false_value_new)) {
+    return true_value_new;
+  }
+
+  if (condition == condition_new && true_value == true_value_new &&
+      false_value == false_value_new) {
+    return v;
+  }
+
+  return new IfThenElse(condition_new, true_value_new, false_value_new);
+}
+
+Stmt* PolynomialTransformer::mutate(const Cond* v) {
+  const Expr* cond_old = v->condition();
+  Stmt* true_old = v->true_stmt();
+  Stmt* false_old = v->false_stmt();
+
+  const Expr* cond_new = cond_old->accept_mutator(this);
+  Stmt* true_new = true_old ? true_old->accept_mutator(this) : true_old;
+  Stmt* false_new = false_old ? false_old->accept_mutator(this) : false_old;
+
+  // If the condition is constant then we can choose the right branch now.
+  if (cond_new->isConstant()) {
+    if (!immediateEquals(cond_new, 0)) {
+      return Stmt::clone(true_new);
+    } else {
+      return Stmt::clone(false_new);
+    }
+  }
+
+  // If both branches are the same then don't do the condition.
+  if (true_new && false_new &&
+      hasher_.hash(true_new) == hasher_.hash(false_new)) {
+    return Stmt::clone(true_new);
+  }
+
+  if (cond_old == cond_new && true_old == true_new && false_old == false_new) {
+    return (Stmt*)v;
+  }
+
+  if (true_old && true_new == true_old) {
+    true_new = Stmt::clone(true_old);
+  }
+  if (false_old && false_new == false_old) {
+    false_new = Stmt::clone(false_old);
+  }
+
+  return new Cond(cond_new, true_new, false_new);
+}
+
 // TermExpander
 
 const Expr* TermExpander::mutate(const Term* v) {
