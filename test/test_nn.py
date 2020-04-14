@@ -1437,17 +1437,25 @@ class TestNN(NNTestCase):
             pgm.backward(torch.randn(10, 20))
 
     def test_overwrite_module_params_on_conversion(self):
+
+        class TestModule(nn.Module):
+            def __init__(self):
+                super(TestModule, self).__init__()
+                self.weight = nn.Parameter(torch.randn(10, 20))
+                self.register_buffer('buffer', torch.randn(10, 20))
         # Test that if the conversion function passed to `module._apply()`
         # changes the TensorImpl type of `module`'s parameters, the `module`'s
         # parameters are always overwritten, regardless of the value of
         # `torch.__future__.get_overwrite_module_params_on_conversion()`.
-        m = nn.Linear(20, 10)
+        m = TestModule()
         m.weight.grad = torch.randn(10, 20)
         weight_ref = m.weight
         weight_grad_ref = m.weight.grad
+        buffer_ref = m.buffer
         m = m._apply(lambda t: torch.sparse_coo_tensor(torch.zeros([2, 1]), torch.ones([1]), torch.Size([10, 20])))
         self.assertNotEqual(weight_ref.layout, m.weight.layout)
         self.assertNotEqual(weight_grad_ref.layout, m.weight.grad.layout)
+        self.assertNotEqual(buffer_ref.layout, m.buffer.layout)
 
         # Test that under the current default settings
         # (`torch.__future__.get_overwrite_module_params_on_conversion() == False`),
@@ -1459,6 +1467,18 @@ class TestNN(NNTestCase):
         mw[0][0] = 5
         self.assertTrue(mw[0][0].dtype == torch.float)
         self.assertTrue(mw._base[0][0].dtype == torch.double)
+
+        # Test that under the current default settings
+        # (`torch.__future__.get_overwrite_module_params_on_conversion() == False`),
+        # the references to buffers and parameters are preserved as long as undelying TensorImpl
+        # is the same
+        m = TestModule().float()
+        weight_ref = m.weight
+        buffer_ref = m.buffer
+        m.double()
+        self.assertEqual(weight_ref.dtype, m.weight.dtype)
+        self.assertEqual(buffer_ref.dtype, m.buffer.dtype)
+
 
         try:
             torch.__future__.set_overwrite_module_params_on_conversion(True)
@@ -1474,14 +1494,16 @@ class TestNN(NNTestCase):
 
             # Test that if `torch.__future__.get_overwrite_module_params_on_conversion() == True`,
             # `float_module.double()` doesn't preserve previous references to
-            # `float_module`'s parameters or gradients.
-            m = nn.Linear(20, 10).float()
+            # `float_module`'s parameters, gradients or buffers.
+            m = TestModule().float()
             m.weight.grad = torch.randn(10, 20).float()
             weight_ref = m.weight
             weight_grad_ref = m.weight.grad
+            buffer_ref = m.buffer
             m.double()
             self.assertNotEqual(weight_ref.dtype, m.weight.dtype)
             self.assertNotEqual(weight_grad_ref.dtype, m.weight.grad.dtype)
+            self.assertNotEqual(buffer_ref.dtype, m.buffer.dtype)
 
             def add_one_inplace(t):
                 return t.add_(1.0)

@@ -8,6 +8,7 @@ import torch
 from ..parameter import Parameter
 import torch.utils.hooks as hooks
 
+
 class _IncompatibleKeys(namedtuple('IncompatibleKeys', ['missing_keys', 'unexpected_keys'])):
     def __repr__(self):
         if not self.missing_keys and not self.unexpected_keys:
@@ -251,7 +252,12 @@ class Module(object):
 
         for key, buf in self._buffers.items():
             if buf is not None:
-                self._buffers[key] = fn(buf)
+                buf_applied = fn(buf)
+                should_use_set_data = compute_should_use_set_data(buf, buf_applied)
+                if should_use_set_data:
+                    self._buffers[key].data = buf_applied
+                else:
+                    self._buffers[key] = buf_applied
 
         return self
 
@@ -524,7 +530,6 @@ class Module(object):
         handle = hooks.RemovableHandle(self._forward_hooks)
         self._forward_hooks[handle.id] = hook
         return handle
-
 
     def _slow_forward(self, *input, **kwargs):
         tracing_state = torch._C._get_tracing_state()
