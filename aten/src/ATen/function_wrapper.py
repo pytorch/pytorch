@@ -118,7 +118,7 @@ DEFAULT_UNBOXEDONLY_FUNCTION_REGISTRATION = CodeTemplate("""\
 """)
 BACKEND_UNBOXEDONLY_FUNCTION_REGISTRATION = CodeTemplate("""\
 .impl_UNBOXED("${operator_name_with_overload}",
-              DispatchKey::${Backend}TensorId,
+              DispatchKey::${Backend},
               ${Type}::${type_wrapper_name})
 """)
 DEFAULT_FUNCTION_REGISTRATION = CodeTemplate("""\
@@ -126,7 +126,7 @@ DEFAULT_FUNCTION_REGISTRATION = CodeTemplate("""\
 """)
 BACKEND_FUNCTION_REGISTRATION = CodeTemplate("""\
 .impl("${operator_name_with_overload}",
-      DispatchKey::${Backend}TensorId, &${Type}::${type_wrapper_name})
+      DispatchKey::${Backend}, &${Type}::${type_wrapper_name})
 """)
 
 # add non-virtual declaration to TensorBody.h
@@ -335,16 +335,16 @@ CHECKED_USE_NULLABLE = CodeTemplate('${arg_name}_ ? ${usage} : NULL')
 ALLOC_NOARGS_WRAP = {
     'THTensor*': 'c10::make_intrusive<TensorImpl, UndefinedTensorImpl>'
                  '(c10::Storage(scalarTypeToTypeMeta(${ScalarName}), 0, allocator(), true),'
-                 'DispatchKey::${Backend}TensorId).release()',
+                 'DispatchKey::${Backend}).release()',
     'THByteTensor*': 'c10::make_intrusive<TensorImpl, UndefinedTensorImpl>'
                      '(c10::Storage(scalarTypeToTypeMeta(ScalarType::Byte), 0, allocator(), true),'
-                     'DispatchKey::${Backend}TensorId).release()',
+                     'DispatchKey::${Backend}).release()',
     'THBoolTensor*': 'c10::make_intrusive<TensorImpl, UndefinedTensorImpl>'
                      '(c10::Storage(scalarTypeToTypeMeta(ScalarType::Bool), 0, allocator(), true),'
-                     'DispatchKey::${Backend}TensorId).release()',
+                     'DispatchKey::${Backend}).release()',
     'THIndexTensor*': 'c10::make_intrusive<TensorImpl, UndefinedTensorImpl>'
                      '(c10::Storage(scalarTypeToTypeMeta(ScalarType::Long), 0, allocator(), true),'
-                     'DispatchKey::${Backend}TensorId).release()',
+                     'DispatchKey::${Backend}).release()',
 }
 
 # Replacements for constants when calling into TH

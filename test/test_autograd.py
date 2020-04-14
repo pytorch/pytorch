@@ -2813,46 +2813,24 @@ class TestAutograd(TestCase):
         with profile() as p:
             forward(x)
 
+        p.export_chrome_trace('/home/jamesreed/foo.json')
+
         events = p.function_events
-        start_order = [
-            'profiler::_record_function_enter',
+        important_events = [
             'outer',
-            'is_complex',
             'mul',
-            'mul',
-            'to',
-            'empty_strided',
-            'copy_',
-            'empty',
-            'is_complex',
             'add',
-            'add',
-            'to',
-            'empty_strided',
-            'copy_',
-            'empty',
-            'profiler::_record_function_enter',
             'inner',
-            'is_complex',
             'sub',
-            'sub',
-            'to',
-            'empty_strided',
-            'copy_',
-            'empty',
-            'profiler::_record_function_exit',
-            'profiler::_record_function_exit',
-            'is_complex',
-            'div',
-            'div',
-            'to',
-            'empty_strided',
-            'copy_',
-            'empty'
+            'div'
         ]
-        self.assertEqual(len(events), len(start_order))
-        for info, expected_name in zip(events, start_order):
-            self.assertEqual(info.name, expected_name)
+        idx = 0
+        for info in events:
+            if info.name == important_events[idx]:
+                idx = idx + 1
+            if idx == len(important_events):
+                break
+        self.assertEqual(idx, len(important_events))
 
         def count_events_before(before, target):
             matches = [e for e in events if e.name == before]
