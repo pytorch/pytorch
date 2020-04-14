@@ -108,16 +108,42 @@ this iteration, so ``scaler.step(optimizer)`` knows not to redundantly unscale g
 .. currentmodule:: torch.cuda.amp.GradScaler
 
 .. warning::
-    :meth:`unscale_` should only be called once per optimizer per :meth:`step` call,
+    :meth:`unscale_<unscale_>` should only be called once per optimizer per :meth:`step<step>` call,
     and only after all gradients for that optimizer's assigned parameters have been accumulated.
-    Calling :meth:`unscale_` twice for a given optimizer between each :meth:`step` triggers a RuntimeError.
+    Calling :meth:`unscale_<unscale_>` twice for a given optimizer between each :meth:`step<step>` triggers a RuntimeError.
 
 
 Working with Scaled Gradients
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-For some operations, you may need to work with scaled gradients in a setting where
-:meth:`unscale_` is unsuitable.
+Gradient accumulation
+---------------------
+
+If you accumulate gradients over multiple iterations between each :meth:`step<step>`,
+they should remain scaled during iterations where you don't call :meth:`step<step>`.
+If you want to :meth:`unscale_<unscale_>` gradients (e.g., to allow clipping unscaled gradients),
+you should do so just before :meth:`step<step>`, after all (scaled) gradients for the upcoming
+:meth:`step<step>` have been accumulated.  Also, only call :meth:`update<update>` at the end of iterations where
+you called :meth:`step<step>`::
+
+    scaler = GradScaler()
+
+    for epoch in epochs:
+        for i, (input, target) in enumerate(data):
+            with autocast():
+                output = model(input)
+                loss = loss_fn(output, target)
+                loss = loss / iters_to_accumulate
+
+            # Accumulates scaled gradients.
+            scaler.scale(loss).backward()
+
+            if (i + 1) % iters_to_accumulate == 0:
+                # may unscale_ here if desired (e.g., to allow clipping unscaled gradients)
+
+                scaler.step(optimizer)
+                scaler.update()
+                optimizer.zero_grad()
 
 .. currentmodule:: torch.cuda.amp
 
@@ -147,6 +173,9 @@ Here's an ordinary example of an L2 penalty without gradient scaling or autocast
             loss = loss + grad_norm
 
             loss.backward()
+
+            # clip gradients here, if desired
+
             optimizer.step()
 
 To implement a gradient penalty *with* gradient scaling, the loss passed to
@@ -187,6 +216,8 @@ Here's how that looks for the same L2 penalty::
             # Applies scaling to the backward call as usual.
             # Accumulates leaf gradients that are correctly scaled.
             scaler.scale(loss).backward()
+
+            # may unscale_ here if desired (e.g., to allow clipping unscaled gradients)
 
             # step() and update() proceed as usual.
             scaler.step(optimizer)
