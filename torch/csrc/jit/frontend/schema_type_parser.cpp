@@ -175,7 +175,7 @@ TypePtr SchemaTypeParser::parseRefinedTensor() {
     ptr = at::TensorType::create(
         dtype,
         at::DeviceType::CPU,
-        c10::VaryingShape<c10::ShapeSymbol>(dims_ref),
+        c10::VaryingShape<c10::ShapeSymbol>::fromStaticShape(dims_ref),
         c10::VaryingShape<int64_t>(dims_ref.size()),
         c10::VaryingShape<size_t>(dims_ref.size()),
         c10::VaryingShape<bool>(dims_ref.size()),

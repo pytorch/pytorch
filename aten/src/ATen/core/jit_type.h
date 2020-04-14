@@ -325,20 +325,27 @@ inline c10::optional<T> merge_primitive(
 }
 
 struct CAFFE2_API ShapeSymbol {
-    ShapeSymbol(int64_t val, bool statik = true): value_(val), statik_(statik) {}
+    
+    
+    // needed for use in `std::map`
+    ShapeSymbol(): value_(-1) {}
+    bool is_static() const { return value_ >= 0; };  
+    bool operator ==(const ShapeSymbol &b) const { return value_ == b.value_; }
+    bool operator <(const ShapeSymbol &b) const { return value_ < b.value_; }
 
-    explicit operator int() const { return value_; }
-    ShapeSymbol(const ShapeSymbol& ss) {
-      statik_ = ss.statik_;
-      value_ = ss.value_;
-    }
-    ShapeSymbol(): value_(-1), statik_(false) {}
-    static ShapeSymbol getInvalidSymbol() {return ShapeSymbol(); }
-    int64_t value_;
-    bool statik_;  
-    bool operator ==(const ShapeSymbol &b) const { return value_ == b.value_ && statik_ == b.statik_; }
-    // dynamic shapes are typically negative
-    bool operator <(const ShapeSymbol &b) const { return static_cast<int>(statik_) < static_cast<int>(b.statik_) || value_ < b.value_; }
+    static ShapeSymbol fromStaticSize(int64_t val) {return ShapeSymbol(val); }
+    int64_t static_size() const {
+      TORCH_CHECK(is_static());
+      return value_;
+    };
+
+    static ShapeSymbol newSymbol () {return ++num_symbols; };
+    friend std::ostream& operator<<(std::ostream& os, const ShapeSymbol& s);
+    private:
+      ShapeSymbol(int64_t val): value_(val) {}
+      int64_t value_;
+      static std::atomic<size_t> num_symbols;
+ 
 };
 
 template <typename T>
@@ -356,15 +363,15 @@ struct CAFFE2_API VaryingShape {
     }
   }
 
-  // adds a c-tor VaryingShape<ShapeSymbol>(c10::IntArrayRef)
   template<typename U = T,
   typename = typename std::enable_if< std::is_same<U,ShapeSymbol>::value>::type>
-    inline VaryingShape(c10::IntArrayRef v) {
-        ListOfOptionalElements sv;
-        for (auto e : v) {
-            sv.push_back(c10::optional<ShapeSymbol>(ShapeSymbol(e, true)));
-        }
-        dims_ = c10::optional<ListOfOptionalElements>(sv);
+  inline static VaryingShape<ShapeSymbol> 
+  fromStaticShape(c10::IntArrayRef v) {
+    std::vector<ShapeSymbol> symbolic_sizes;
+    for (auto s : v) {
+      symbolic_sizes.push_back(ShapeSymbol::fromStaticSize(s));
+    }
+    return VaryingShape<ShapeSymbol>(symbolic_sizes);
   }
 
   VaryingShape(ListOfOptionalElements dims)
@@ -447,7 +454,22 @@ struct CAFFE2_API TensorType : public Type {
       c10::optional<Device> device,
       const VaryingShape<ShapeSymbol>& sizes,
       const VaryingShape<int64_t>& strides,
+
+      // If we see `a + b + c`  and know that a, b, and c are the same size and have two dimensions (WxH), 
+      // then we can generate a fused kernel for them. 
+      // That fused kernel would likely have indexing math to handling both the W and H dimensions. 
+      // However, if we knew the WxH dimensions were contiguous, 
+      // we can pretend like we only have a single dimension, simplifying the indexing logic. 
+      // This can be performed even if the dimensions are transposed, 
+      // as long as a, b, and c are transposed in the same way. 
+      // We’d like to have the compiler be able to do this dimensionality reduction, 
+      // but simply knowing sizes is not enough. 
+      // We can extend profiling to also record stride information. 
+      // Rather than recording specific strides, 
+      // we can simply order the strides from smallest to largest with `stride_indices`
       const VaryingShape<size_t>& stride_indices,
+      // A contiguity marker on the smallest stride (c0) indicates the stride is precisely 1, 
+      // otherwise a contiguity marker means that $stride_n = size_{n-1}*stride_{n-1}$
       const VaryingShape<bool>& contiguity,
       c10::optional<bool> requires_grad,
       c10::optional<bool> undefined = false);
@@ -499,8 +521,6 @@ struct CAFFE2_API TensorType : public Type {
     return requires_grad_ ? *requires_grad_ : true;
   }
 
-  bool isCompatibleWithInCurrentExecutionContext(at::Tensor& t) const;
-
   bool operator==(const Type& rhs) const override;
   bool isSubtypeOfExt(const TypePtr rhs, std::ostream* why_not) const override;
 
@@ -546,7 +566,7 @@ struct CAFFE2_API TensorType : public Type {
       at::IntArrayRef strides) const {
     auto cloned = clone();
     auto contNstrides = contiguityStrideIndices(sizes, strides);
-    auto ssizes = std::vector<ShapeSymbol>(fmap(sizes, [](int64_t s){return ShapeSymbol(s, true); }));
+    auto ssizes = VaryingShape<ShapeSymbol>::fromStaticShape(sizes);
     cloned->sizes_ = ssizes;
     cloned->contiguity_ = VaryingShape<bool>(std::get<0>(contNstrides));
     cloned->stride_indices_ = VaryingShape<size_t>(std::get<1>(contNstrides));

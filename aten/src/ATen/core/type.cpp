@@ -76,54 +76,6 @@ AnyTypePtr AnyType::get() {
   return value;
 }
 
-template <typename T, typename Y = T>
-static bool compatible_optional(c10::optional<T> e, T a) {
-  return !e.has_value() || e.value() == a;
-}
-
-template <typename T, int64_t>
-static bool compatible_optional(c10::optional<T> e, int64_t a) {
-  return !e.has_value() || static_cast<int>(e.value()) == a;
-}
-
-template <typename T>
-static bool compatible_varying_shape(const VaryingShape<T>& e, at::IntArrayRef a) {
-  if (!e.size().has_value()) {
-    return true;
-  }
-
-  if (e.size().value() != a.size()) {
-    return false;
-  }
-
-  auto ndim = a.size();
-  for (size_t i = 0; i < ndim; i++) {
-    if (!compatible_optional<T, int64_t>(e[i], a[i])) {
-      return false;
-    }
-  }
-  return true;
-}
-
-bool TensorType::isCompatibleWithInCurrentExecutionContext(
-    at::Tensor& t) const {
-  // any updates to `isSubtypeOf`, TensorType c-tor or
-  // `isCompatibleWithInCurrentExecutionContext` need to maintain the following
-  // `TensorType::create(actual_tensor)->isSubtypeOf(expected_type)
-  //  == expected_type->isCompatibleWithInCurrentExecutionContext(t)`
-  if (!t.defined()) {
-    return compatible_optional(undefined(), !t.defined());
-  }
-
-  return compatible_varying_shape(symbolic_sizes(), t.sizes()) &&
-       (t.is_sparse() || t.is_mkldnn() ||
-      compatible_varying_shape(strides(), t.strides())) &&
-      compatible_optional(
-             requiresGrad(), t.requires_grad() && at::GradMode::is_enabled()) &&
-      compatible_optional(scalarType(), t.scalar_type()) &&
-      compatible_optional(device(), t.device());
-}
-
 TensorTypePtr TensorType::get() {
   static auto value = TensorType::create(
       {},
@@ -549,7 +501,7 @@ VaryingShape<int64_t> TensorType::sizes() const {
   }
   return VaryingShape<int64_t> (fmap(*sizes_.sizes(), [](c10::optional<ShapeSymbol> ss) {
     // we turn symbolic shapes into unknowns
-    return ss.has_value() && ss->value_ >= 0 ? c10::optional<int64_t>(ss->value_) : c10::nullopt; 
+    return ss.has_value() && ss->is_static() ? c10::optional<int64_t>(ss->static_size()) : c10::nullopt; 
   }));
 }
 
@@ -608,7 +560,7 @@ template std::ostream& operator<<(std::ostream & out, const VaryingShape<ShapeSy
 
 std::ostream& operator<<(std::ostream& os, const ShapeSymbol& s)
 {
-    os << "ShapeSymbol(" << s.value_ << ',' << s.statik_ << ')';
+    os << "SS(" << s.value_ << ')';
     return os;
 }
 
@@ -781,6 +733,8 @@ std::tuple<std::vector<bool>, std::vector<size_t>> TensorType::
   return std::make_tuple(contiguity, stride_indices);
 }
 
+  std::atomic<size_t> ShapeSymbol::num_symbols {1};
+
   template struct VaryingShape<c10::ShapeSymbol>;
   template struct VaryingShape<bool>;
   template struct VaryingShape<size_t>;
@@ -835,7 +789,7 @@ std::tuple<std::vector<bool>, std::vector<size_t>> TensorType::
           contiguityStrideIndices(*sizes.concrete_sizes(), *strides.concrete_sizes());
       
 
-      auto symbol_sizes = fmap(*sizes.concrete_sizes(), [](int64_t s) {return ShapeSymbol(s, true); });
+      auto symbol_sizes = VaryingShape<ShapeSymbol>::fromStaticShape(*sizes.concrete_sizes());
       auto contiguity = VaryingShape<bool>(std::get<0>(contNstrides));
       auto stride_indices = VaryingShape<size_t>(std::get<1>(contNstrides));
 

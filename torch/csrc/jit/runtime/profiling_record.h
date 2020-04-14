@@ -24,10 +24,6 @@ struct ShapeSymbolSets {
   };
   std::map<c10::ShapeSymbol, std::map<Dimension, c10::ShapeSymbol>> sets_;
 
-  std::map<Dimension, c10::ShapeSymbol>& getGlobalSet() {
-    return getSetForSymbol(c10::ShapeSymbol(-1));
-  }
-
   std::map<Dimension, c10::ShapeSymbol>& getSetForSymbol(c10::ShapeSymbol s) {
     return sets_[s];
   }
@@ -35,7 +31,7 @@ struct ShapeSymbolSets {
 
 struct ShapeSymbolTable {
   bool isBound(c10::ShapeSymbol s) {
-    if (s.statik_) {
+    if (s.is_static()) {
       return true;
     }
     return data_.count(s) != 0;
@@ -46,13 +42,13 @@ struct ShapeSymbolTable {
   };
 
   Dimension getValue(c10::ShapeSymbol s) {
-    if (s.statik_) {
-      return s.value_;
+    if (s.is_static()) {
+      return s.static_size();
     }
     return data_[s];
   }
   void assign(c10::ShapeSymbol s, Dimension v) {
-    TORCH_INTERNAL_ASSERT(!s.statik_);
+    TORCH_INTERNAL_ASSERT(!s.is_static());
     data_[s] = v;
   }
   std::map<c10::ShapeSymbol, Dimension> data_;
@@ -84,11 +80,6 @@ struct ProfilingRecord {
   std::map<int64_t, std::map<Value*, TensorTypePtr>> profiled_types_per_frame_;
   size_t num_symbols =
       1; // -1 is special to denote the global set of all symbols for a run
-
-  c10::ShapeSymbol getNewSymbol() {
-    num_symbols++;
-    return c10::ShapeSymbol(-num_symbols, false);
-  }
 
   // A very brief high-level description of an algorithm for
   // constructing sets of dynamic/symbolic shapes.

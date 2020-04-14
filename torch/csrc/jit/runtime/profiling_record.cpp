@@ -12,7 +12,7 @@ c10::ShapeSymbol ShapeSymbolTable::toSymbol(
     std::map<Dimension, c10::ShapeSymbol>& dims2symbols,
     ProfilingRecord* pr) {
   if (dims2symbols.count(val) == 0) {
-    auto new_sym = pr->getNewSymbol();
+    auto new_sym = c10::ShapeSymbol::newSymbol();
     dims2symbols[val] = new_sym;
     return new_sym;
   }
@@ -85,15 +85,15 @@ std::vector<c10::optional<c10::ShapeSymbol>> ProfilingRecord::
       continue;
     }
     auto symbol = *sym_shapes[i];
-    TORCH_INTERNAL_ASSERT(new_sizes[i]->statik_);
-    Dimension new_size = new_sizes[i]->value_;
+    TORCH_INTERNAL_ASSERT(new_sizes[i]->is_static());
+    Dimension new_size = new_sizes[i]->static_size();
     GRAPH_DEBUG("Merging symbol ", symbol);
     if (!symbol_table.isBound(symbol)) {
       symbol_table.assign(symbol, new_size);
       GRAPH_DEBUG(symbol, " is now bound to ", new_size);
       new_symbols.push_back(symbol);
     } else {
-      if (symbol_table.getValue(symbol) == new_sizes[i]->value_) {
+      if (symbol_table.getValue(symbol) == new_sizes[i]->static_size()) {
         GRAPH_DEBUG("Reusing symbol ", symbol);
         new_symbols.push_back(symbol);
       } else {
