@@ -196,7 +196,7 @@ static auto registry = torch::RegisterOperators().op(
     "float output_scale, "
     "int output_zero_point) -> Tensor",
     torch::RegisterOperators::options().kernel<QLayerNorm2d>(
-        DispatchKey::QuantizedCPUTensorId));
+        DispatchKey::QuantizedCPU));
 
 } // namespace
 
