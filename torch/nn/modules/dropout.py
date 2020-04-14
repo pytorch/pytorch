@@ -185,7 +185,8 @@ class FeatureAlphaDropout(_DropoutNd):
     e.g. the :math:`j`-th channel of the :math:`i`-th sample in the batch input 
     is a tensor :math:`\text{input}[i, j]`) of the input tensor). Instead of 
     setting activations to zero, as in regular Dropout, the activations are set 
-    to the negative saturation value of the SELU activation function.
+    to the negative saturation value of the SELU activation function. More details
+    can be found in the paper `Self-Normalizing Neural Networks`_ .
 
     Each element will be masked independently for each sample on every forward 
     call with probability :attr:`p` using samples from a Bernoulli distribution.
@@ -194,7 +195,8 @@ class FeatureAlphaDropout(_DropoutNd):
 
     Usually the input comes from :class:`nn.Conv3d` modules.
 
-    As described in the paper `Self-Normalizing Neural Networks`_ ,
+    As described in the paper
+    `Efficient Object Localization Using Convolutional Networks`_ ,
     if adjacent pixels within feature maps are strongly correlated
     (as is normally the case in early convolution layers) then i.i.d. dropout
     will not regularize the activations and will otherwise just result
@@ -219,6 +221,8 @@ class FeatureAlphaDropout(_DropoutNd):
         >>> output = m(input)
 
     .. _Self-Normalizing Neural Networks: https://arxiv.org/abs/1706.02515
+    .. _Efficient Object Localization Using Convolutional Networks:
+       http://arxiv.org/abs/1411.4280
     """
 
     def forward(self, input):
