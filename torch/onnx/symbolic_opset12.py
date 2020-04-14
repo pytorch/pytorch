@@ -123,3 +123,12 @@ def nll_loss(g, self, target, weight, reduction, ignore_index):
 
 def nll_loss2d(g, self, target, weight, reduction, ignore_index):
     return nll_loss(g, self, target, weight, reduction, ignore_index)
+
+
+@parse_args('v', 'is', 'is', 'is', 'is')
+def im2col(g, input, kernel_size, dilation, padding, stride):
+    # Input is always 4-D tensor (N, C, H, W)
+    # Padding tensor has the following format: (padding_h, padding_w)
+    # Reshape the padding to follow ONNX format: (dim1_begin, dim2_begin,...,dim1_end, dim2_end,...)
+    padding_ = [padding[0], padding[1], padding[0], padding[1]]
+    return g.op("UnfoldToDepth", input, block_size_i=kernel_size, dilations_i=dilation, pads_i=padding_, strides_i=stride)
