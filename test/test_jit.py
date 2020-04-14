@@ -2878,6 +2878,26 @@ graph(%Ra, %Rb):
         model = Bar()
         self.checkTrace(model, x)
 
+    def test_trace_with_tensor_list_output(self):
+        def f():
+            return [torch.zeros(1), torch.zeros(5)]
+        with self.assertWarnsRegex(torch.jit.TracerWarning, "cause the trace to be incorrect"):
+            torch.jit.trace(f, [])
+        traced_non_strict_f = torch.jit.trace(f, [], strict=False)
+        self.assertEqual(traced_non_strict_f(), f())
+
+    def test_trace_with_number_list_output(self):
+        def f():
+            return [1, 5]
+        with self.assertRaisesRegex(RuntimeError, r"Only tensors.+can be output from traced functions"):
+            traced_f = torch.jit.trace(f, [])
+
+    def test_trace_with_nested_tensor_list_output(self):
+        def f():
+            return [[torch.zeros(1)], [torch.zeros(5)]]
+        with self.assertRaisesRegex(RuntimeError, r"Only tensors.+can be output from traced functions"):
+            traced_f = torch.jit.trace(f, [])
+
     def test_trace_variable_instantiation(self):
         def random_foo(x):
             return Variable(Variable(x) + 1.0)
@@ -10534,24 +10554,6 @@ a")
             return b
         v = torch.rand(10, 3)
         self.assertEqual(torch.chunk(v, dim=0, chunks=2)[0], foo(v))
-
-    def test_trace_with_tensor_list_output(self):
-        def f():
-            return [torch.zeros(1), torch.zeros(5)]
-        traced_f = torch.jit.trace(f, [])
-        self.assertEqual(traced_f(), f())
-
-    def test_trace_with_number_list_output(self):
-        def f():
-            return [1, 5]
-        with self.assertRaisesRegex(RuntimeError, r"Only tensors.+can be output from traced functions"):
-            traced_f = torch.jit.trace(f, [])
-
-    def test_trace_with_nested_tensor_list_output(self):
-        def f():
-            return [[torch.zeros(1)], [torch.zeros(5)]]
-        with self.assertRaisesRegex(RuntimeError, r"Only tensors.+can be output from traced functions"):
-            traced_f = torch.jit.trace(f, [])
 
     def test_script_copy(self):
         class M(torch.nn.Module):

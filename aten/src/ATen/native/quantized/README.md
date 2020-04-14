@@ -79,7 +79,7 @@ class QuantizedXAnd final : public torch::OperatorKernel {
 ```c++ static auto registry = torch::RegisterOperators().op(
     "quantized::xand(Tensor qa, Tensor qb) -> Tensor",
     torch::RegisterOperators::options().kernel<QuantizedXAnd>(
-        QuantizedCPUTensorId()));
+        QuantizedCPU()));
 ```
 
 The registry takes two arguments:
@@ -90,7 +90,7 @@ This translates to `torch._ops.ops.quantized.xand` function in Python of the app
 **Note:** The arguments signature in the schema is optional, and can also be written as `"quantized::xand"` (without args).
 2. **Registration options** should be of type `torch::RegisterOperators::options()`.
 To attach a kernel to it, use `.kernel<KERNEL_CLASS>(DISPATCH_KEY)`.
-In quantized ops you almost always want to use the `QuantizedCPUTensorId()` dispatcher.
+In quantized ops you almost always want to use the `QuantizedCPU()` dispatcher.
 
 ### Step 2b. [Optional] Registering the operation with the `native_functions.yaml`
 
@@ -149,7 +149,7 @@ namespace at {
   static auto registry = torch::RegisterOperators().op(
       "quantized::xand(Tensor qa, Tensor qb) -> Tensor",
       torch::RegisterOperators::options().kernel<QuantizedXAnd>(
-          QuantizedCPUTensorId()));
+          QuantizedCPU()));
 
   } // namespace
   }}  // namespace at::native
