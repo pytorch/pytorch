@@ -61,6 +61,10 @@ fi
 # TODO: Don't run this...
 pip_install -r requirements.txt || true
 
+# Enable LLVM dependency for TensorExpr testing
+export USE_LLVM=/opt/llvm
+export LLVM_DIR=/opt/llvm/lib/cmake/llvm
+
 # TODO: Don't install this here
 if ! which conda; then
   # In ROCm CIs, we are doing cross compilation on build machines with

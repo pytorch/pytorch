@@ -157,7 +157,7 @@ computeLinearIndex(const Tensor & src, TensorList indices, bool check_range) {
 
 static std::tuple<Tensor, Tensor, int64_t, int64_t, int64_t, std::vector<int64_t>> makeLinearIndex(Tensor self, TensorList orig, bool check_range) {
   checkIndexTensorTypes(orig);
-  // first expand BoolTensor (masks) into 1 or more LongTensors
+  // first expand BoolTensor (masks) or ByteTensor (masks) into 1 or more LongTensors
   auto indices = expandTensors(self, orig);
   // next broadcast all index tensors together
   indices = expand_outplace(indices);

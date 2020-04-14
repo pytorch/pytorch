@@ -172,7 +172,7 @@ private:
 
   DictEntryRef<Key, Value, Iterator> entryRef_;
 
-  friend class DictIterator<Key, Value, typename detail::DictImpl::dict_map_type::iterator>;
+  friend class DictIterator<Key, Value, typename c10::detail::DictImpl::dict_map_type::iterator>;
   friend class Dict<Key, Value>;
 };
 
