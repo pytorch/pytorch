@@ -463,26 +463,7 @@ def gen_jit_dispatch(
                          groupby(sorted_decls, key=lambda decl: decl['name'])]
         return [sorted(g, key=declkey) for g in grouped_decls]
 
-    # We need to add methods implemented manually in TensorImpl
-    # TODO: This seems to claim sizes() returns an int64_t.  Really?
-    tensor_impl_methods = [{
-        'name': name,
-        'api_name': name,
-        'schema_string': schema_string,
-        'overload_name': '',
-        'method_of': ['Tensor'],
-        'arguments': [{'name': 'self', 'simple_type': 'Tensor'}],
-        'returns': [{'name': 'result', 'type': 'int64_t', 'dynamic_type': 'int64_t', 'simple_type': 'int64_t'}],
-        'use_c10_dispatcher': 'unboxed_only',
-    } for name, schema_string in [
-        ('sizes', 'aten::sizes(Tensor self) -> int'),
-        ('strides', 'aten::strides(Tensor self) -> int'),
-        ('dim', 'aten::dim(Tensor self) -> int'),
-        ('numel', 'aten::numel(Tensor self) -> int'),
-        ('element_size', 'aten::element_size(Tensor self) -> int'),
-    ]]
-
-    aten_decls = load_aten_declarations(declarations) + tensor_impl_methods
+    aten_decls = load_aten_declarations(declarations)
     jit_decls = [d for d in aten_decls if is_jit_op(d)]
 
     # add arguments dtype and device for functions like zeros
