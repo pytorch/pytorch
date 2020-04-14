@@ -21,7 +21,7 @@ struct CUDA_CSPRNG_GeneratorImpl : public at::CPUGeneratorImpl {
 typedef ulonglong2 block_t;
 constexpr size_t block_t_size = sizeof(block_t);
 
-Tensor key_tensor(Generator generator) {
+Tensor key_tensor(c10::optional<Generator> generator) {
   return torch::empty({16}, torch::kUInt8).random_(0, 256, generator).to(kCUDA);
 }
 
@@ -184,12 +184,12 @@ void random_kernel(TensorIterator& iter, Tensor key_tensor) {
 
 template<typename RNG>
 struct RandomKernel {
-  void operator()(TensorIterator& iter, Generator generator) {
+  void operator()(TensorIterator& iter, c10::optional<Generator> generator) {
     random_kernel(iter, key_tensor(generator));
   }
 };
 
-Tensor& random_(Tensor& self, Generator generator) {
+Tensor& random_(Tensor& self, c10::optional<Generator> generator) {
   return native::templates::random_impl<RandomKernel, CUDA_CSPRNG_GeneratorImpl>(self, generator);
 }
 
@@ -271,12 +271,12 @@ void uniform_kernel(TensorIterator& iter, Tensor key_tensor, double from, double
 
 template<typename RNG>
 struct UniformKernel {
-  void operator()(TensorIterator& iter, double from, double to, Generator generator) {
+  void operator()(TensorIterator& iter, double from, double to, c10::optional<Generator> generator) {
     uniform_kernel(iter, key_tensor(generator), from, to);
   }
 };
 
-Tensor& uniform_(Tensor& self, double from, double to, Generator generator) {
+Tensor& uniform_(Tensor& self, double from, double to, c10::optional<Generator> generator) {
   return at::native::templates::uniform_impl_<UniformKernel, CUDA_CSPRNG_GeneratorImpl>(self, from, to, generator);
 }
 
@@ -350,8 +350,8 @@ void normal_kernel_helper_fp(TensorIterator& iter, scalar_t mean, scalar_t std, 
 
 template<typename RNG>
 struct NormalKernel {
-  void operator()(Tensor& self, double mean, double std, Generator generator) {
-    const auto key_t = key_tensor(generator));
+  void operator()(Tensor& self, double mean, double std, c10::optional<Generator> generator) {
+    const auto key_t = key_tensor(generator);
     const auto key = key_t.data_ptr<uint8_t>();
     auto iter = at::TensorIterator::nullary_op(self);
     AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "normal_kernel_cuda", [&] {
