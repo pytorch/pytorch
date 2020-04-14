@@ -455,7 +455,7 @@ def _dim_arange(g, like, dim):
     return arange(g, stop, 4, None, None, None)
 
 
-def size(g, self, dim=None):
+def size(g, self, dim):
     return sym_help._size_helper(g, self, dim)
 
 
