@@ -7,6 +7,9 @@
 namespace torch {
 namespace distributed {
 namespace rpc {
+ 
+enum RRefProxyType { RPC_SYNC, RPC_ASYNC, REMOTE };
+
 
 // Python wrapper of an RRef shared_ptr that supports Python
 // pickle and unpickle.
@@ -25,6 +28,10 @@ class PyRRef {
   py::tuple pickle() const;
   static PyRRef unpickle(const py::tuple& t);
   c10::IValue toIValue();
+
+  // create a proxy on this RRef, which can be used to launch RPC on the owner
+  // of this RRef to run functions on the object referenced by this RRef.
+  py::object createRRefProxy(PyRRef& self, const RRefProxyType& mode) const;
 
  private:
   c10::intrusive_ptr<RRef> rref_;
