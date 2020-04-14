@@ -114,8 +114,8 @@ struct scopePushBack : private OptInDispatch {
 
 struct scopeInsertBefore : private OptInDispatch {
  private:
-  Expr* expr_;
   Expr* ref_;
+  Expr* expr_;
   void handle(ForLoop* fl) final {
     fl->body().insert_before(ref_, expr_);
   }

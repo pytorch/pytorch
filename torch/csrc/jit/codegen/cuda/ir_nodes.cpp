@@ -18,15 +18,15 @@ struct ScalarCheck : OptInDispatch {
   Val* v2_;
   bool same = false;
 
-  void handle(Float* f) {
+  void handle(Float* f) override {
     same = static_cast<Float*>(v1_)->sameAs(static_cast<Float*>(v2_));
   }
 
-  void handle(Int* i) {
+  void handle(Int* i) override {
     same = static_cast<Int*>(v1_)->sameAs(static_cast<Int*>(v2_));
   }
 
-  void handle(NamedScalar* ns) {
+  void handle(NamedScalar* ns) override {
     same =
         static_cast<NamedScalar*>(v1_)->sameAs(static_cast<NamedScalar*>(v2_));
   }
