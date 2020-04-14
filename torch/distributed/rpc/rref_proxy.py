@@ -9,7 +9,7 @@ def _invoke_rpc(rref, rpc_api, func_name, *args, **kwargs):
     return rpc_api(
         rref.owner(),
         _local_invoke,
-        args = (rref, func_name, args, kwargs)
+        args=(rref, func_name, args, kwargs)
     )
 
 
