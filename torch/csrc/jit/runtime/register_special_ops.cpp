@@ -155,7 +155,7 @@ void recursiveStore(
       storeLastDimension<int64_t>(
           data, sizes, strides, dim, tenElementSize, seq);
     } else if (obj.isBoolList()) {
-      storeLastDimension<bool>(data, sizes, strides, dim, elementSize, seq);
+      storeLastDimension<bool>(data, sizes, strides, dim, tenElementSize, seq);
     } else if (obj.isDoubleList()) {
       if (tenElementSize ==
           static_cast<int>(elementSize(at::ScalarType::Double))) {
