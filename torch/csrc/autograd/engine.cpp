@@ -486,7 +486,9 @@ void GraphTask::set_exception(
     std::exception& e,
     const std::shared_ptr<Node>& fn) {
   set_exception_without_signal(fn);
-  future_result_->setErrorIfNeeded(e.what());
+  if (!future_completed_.exchange(true)) {
+    future_result_->setError(e.what());
+  }
 }
 
 static variable_list call_pre_hooks(Node& fn, variable_list inputs) {
@@ -820,12 +822,12 @@ std::shared_ptr<FutureVariableList> Engine::execute_graph_task_until_ready_queue
   set_device(CPU_DEVICE);
   graph_task->owner_ = worker_device;
   while(!graph_task_rq->empty()) {
-    NodeTask task = graph_task_rq->pop();
     std::shared_ptr<GraphTask> local_graph_task;
-    if (!(local_graph_task = task.base_.lock())) {
-      continue;
-    }
     {
+      NodeTask task = graph_task_rq->pop();
+      if (!(local_graph_task = task.base_.lock())) {
+        continue;
+      }
       if (task.fn_ && !local_graph_task->has_error_.load()) {
         AutoGradMode grad_mode(local_graph_task->grad_mode_);
         try {
@@ -918,19 +920,24 @@ std::shared_ptr<FutureVariableList> Engine::execute_with_graph_task(
 }
 
 void Engine::mark_graph_task_completed(const std::shared_ptr<GraphTask>& graph_task) {
-  std::unique_lock<std::mutex> lock(graph_task->mutex_);
-  if (graph_task->future_result_->completed()) {
+  if (graph_task->future_completed_.load()) {
     // Future is already marked as completed.
     return;
   }
-
   try {
     // Run post processing, before marking the future as complete.
+    // Drop lock prior to completing, to avoid holding across callbacks.
+    std::unique_lock<std::mutex> lock(graph_task->mutex_);
     graph_task_exec_post_processing(graph_task);
-    graph_task->future_result_->markCompleted(
-        std::move(graph_task->captured_vars_));
+    std::vector<Variable> vars = std::move(graph_task->captured_vars_);
+    lock.unlock();
+    if (!graph_task->future_completed_.exchange(true)) {
+      graph_task->future_result_->markCompleted(std::move(vars));
+    }
   } catch (std::exception& e) {
-    graph_task->future_result_->setErrorIfNeeded(e.what());
+    if (!graph_task->future_completed_.exchange(true)) {
+      graph_task->future_result_->setError(e.what());
+    }
   }
 }
 

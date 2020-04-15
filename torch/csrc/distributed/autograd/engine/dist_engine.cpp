@@ -211,48 +211,47 @@ std::shared_ptr<rpc::FutureMessage> DistEngine::runEngineAndAccumulateGradients(
   // future that waits for all gradient accumulation to finish.
   auto accumulateGradFuture = std::make_shared<rpc::FutureMessage>();
 
-  futureGrads->addCallback(
-      [autogradContext, outputEdges, accumulateGradFuture](
-          const variable_list& grads,
-          const c10::optional<torch::utils::FutureError>& error) {
-        if (error) {
-          // Don't accumulate gradients if we receive an error.
-          // We must add the node information here since DistEngine::execute
-          // waits on accumulateGradFuture and will throw an exception once we
-          // set the error below.
-          std::string errorMsg = c10::str(
-              "Error on Node ",
-              DistAutogradContainer::getInstance().getWorkerId(),
-              ": ",
-              error->what());
-          accumulateGradFuture->setError(errorMsg);
-          return;
+  futureGrads->addCallback([autogradContext, outputEdges, accumulateGradFuture](
+                               const FutureVariableList& futureGrads) {
+    if (futureGrads.hasError()) {
+      // Don't accumulate gradients if we receive an error.
+      // We must add the node information here since DistEngine::execute
+      // waits on accumulateGradFuture and will throw an exception once we
+      // set the error below.
+      std::string errorMsg = c10::str(
+          "Error on Node ",
+          DistAutogradContainer::getInstance().getWorkerId(),
+          ": ",
+          futureGrads.error()->what());
+      accumulateGradFuture->setError(errorMsg);
+      return;
+    }
+
+    try {
+      const variable_list& grads = futureGrads.constValue();
+      TORCH_INTERNAL_ASSERT(grads.size() == outputEdges.size());
+
+      // Accumulate all the gradients in the context.
+      for (size_t i = 0; i < grads.size(); i++) {
+        // It is possible that the grad is not defined since a separate
+        // invocation of the autograd engine on the same node might actually
+        // compute this gradient. Also accumulate grads only for
+        // AccumulateGrad function.
+        if (grads[i].defined() &&
+            dynamic_cast<AccumulateGrad*>(outputEdges[i].function.get())) {
+          auto& variable =
+              std::static_pointer_cast<AccumulateGrad>(outputEdges[i].function)
+                  ->variable;
+          autogradContext->accumulateGrad(
+              variable, grads[i], 1 /* num_expected_refs */);
         }
+      }
 
-        try {
-          TORCH_INTERNAL_ASSERT(grads.size() == outputEdges.size());
-
-          // Accumulate all the gradients in the context.
-          for (size_t i = 0; i < grads.size(); i++) {
-            // It is possible that the grad is not defined since a separate
-            // invocation of the autograd engine on the same node might actually
-            // compute this gradient. Also accumulate grads only for
-            // AccumulateGrad function.
-            if (grads[i].defined() &&
-                dynamic_cast<AccumulateGrad*>(outputEdges[i].function.get())) {
-              auto& variable = std::static_pointer_cast<AccumulateGrad>(
-                                   outputEdges[i].function)
-                                   ->variable;
-              autogradContext->accumulateGrad(
-                  variable, grads[i], 1 /* num_expected_refs */);
-            }
-          }
-
-          accumulateGradFuture->markCompleted(rpc::Message());
-        } catch (std::exception& e) {
-          accumulateGradFuture->setErrorIfNeeded(e.what());
-        }
-      });
+      accumulateGradFuture->markCompleted(rpc::Message());
+    } catch (std::exception& e) {
+      accumulateGradFuture->setErrorIfNeeded(e.what());
+    }
+  });
 
   return accumulateGradFuture;
 }
@@ -287,44 +286,40 @@ std::shared_ptr<rpc::FutureMessage> DistEngine::executeSendFunctionAsync(
     auto callbackFuture = std::make_shared<rpc::FutureMessage>();
 
     accumulateGradFuture->addCallback(
-        [autogradContext, callbackFuture](
-            const rpc::Message& message /* unused */,
-            const c10::optional<torch::utils::FutureError>& error) {
+        [autogradContext,
+         callbackFuture](const rpc::FutureMessage& accumulateGradFuture) {
           try {
-            if (error) {
+            if (accumulateGradFuture.hasError()) {
               // Perform cleanup at the end of the backward pass (before we mark
               // the future as completed).
               DistEngine::getInstance().cleanupBackwardPass(autogradContext);
 
               // Skip any further processing on errors.
-              callbackFuture->setError(error->what());
+              callbackFuture->setError(accumulateGradFuture.error()->what());
               return;
             }
 
             // Wait for all RPCs after the autograd engine is done.
             auto rpcFuture =
                 autogradContext->clearAndWaitForOutstandingRpcsAsync();
-            rpcFuture->addCallback(
-                [callbackFuture, autogradContext](
-                    const rpc::Message& /* unused */,
-                    const c10::optional<torch::utils::FutureError>& error) {
-                  try {
-                    // Perform cleanup at the end of the backward pass (before
-                    // we mark the future as completed).
-                    DistEngine::getInstance().cleanupBackwardPass(
-                        autogradContext);
-                  } catch (std::exception& e) {
-                    callbackFuture->setErrorIfNeeded(e.what());
-                    return;
-                  }
+            rpcFuture->addCallback([callbackFuture, autogradContext](
+                                       const rpc::FutureMessage& rpcFuture) {
+              try {
+                // Perform cleanup at the end of the backward pass (before
+                // we mark the future as completed).
+                DistEngine::getInstance().cleanupBackwardPass(autogradContext);
+              } catch (std::exception& e) {
+                callbackFuture->setErrorIfNeeded(e.what());
+                return;
+              }
 
-                  // Finally mark the 'uber' future as completed.
-                  if (!error) {
-                    callbackFuture->markCompleted(rpc::Message());
-                  } else {
-                    callbackFuture->setError(error->what());
-                  }
-                });
+              // Finally mark the 'uber' future as completed.
+              if (!rpcFuture.hasError()) {
+                callbackFuture->markCompleted(rpc::Message());
+              } else {
+                callbackFuture->setError(rpcFuture.error()->what());
+              }
+            });
           } catch (std::exception& e) {
             callbackFuture->setErrorIfNeeded(e.what());
           }
