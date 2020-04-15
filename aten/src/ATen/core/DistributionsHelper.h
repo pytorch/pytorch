@@ -81,15 +81,15 @@ constexpr float FLOAT_DIVISOR = 1.0f / (1 << std::numeric_limits<float>::digits)
 template <typename T>
 struct uniform_real_distribution {
 
-  inline uniform_real_distribution(T a_in, T b_in) {
-    TORCH_CHECK(a_in <= b_in);
-    TORCH_CHECK(b_in-a_in <= std::numeric_limits<T>::max());
+  C10_HOST_DEVICE inline uniform_real_distribution(T a_in, T b_in) {
+    TORCH_CHECK_IF_NOT_ON_CUDA(a_in <= b_in);
+    TORCH_CHECK_IF_NOT_ON_CUDA(b_in-a_in <= std::numeric_limits<T>::max());
     a = a_in;
     b = b_in;
   }
 
   template <typename RNG>
-  inline dist_acctype<T> operator()(RNG* generator){
+  C10_HOST_DEVICE inline dist_acctype<T> operator()(RNG* generator){
     dist_acctype<T> x;
     if(std::is_same<T, double>::value) {
       x = (generator->random64() & DOUBLE_MASK) * DOUBLE_DIVISOR;
