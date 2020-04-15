@@ -369,6 +369,7 @@ def hardtanh(input, min_val=-1., max_val=1., inplace=False):
     return torch._C._nn.hardtanh(input, min_val, max_val)
 
 def hardswish(input, inplace=False):
+    # type: (Tensor, bool) -> Tensor
     r"""Applies the quantized version of the hardswish function, element-wise,
     as described in the paper:
 
@@ -397,6 +398,7 @@ def hardswish(input, inplace=False):
     return torch._C._nn.hardswish(input)
 
 def elu(input, alpha=1., inplace=False, scale=None, zero_point=None):
+    # type: (Tensor, Optional[float], bool, Optional[float], Optional[int]) -> Tensor
     r"""
     Applies the quantized ELU function element-wise:
 

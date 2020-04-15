@@ -19,6 +19,9 @@ def einsum(g, equation, tensor_list):
     tensors = sym_help._unpack_list(tensor_list)
     return g.op("Einsum", *tensors, equation_s=equation)
 
+def inverse(g, self):
+    return g.op("Inverse", self)
+
 @parse_args('v', 'f', 'i')
 def dropout(g, input, p, train):
     sym_help.assert_training_mode(train, "dropout")

@@ -1,27 +1,14 @@
 #include <torch/csrc/jit/tensorexpr/function.h>
 
 #include <c10/util/Logging.h>
+#include <torch/csrc/jit/tensorexpr/buffer.h>
+#include <torch/csrc/jit/tensorexpr/dim_arg.h>
+#include <torch/csrc/jit/tensorexpr/reduction.h>
 #include <torch/csrc/jit/tensorexpr/tensor.h>
 
 namespace torch {
 namespace jit {
 namespace tensorexpr {
-
-namespace {
-
-static void unpack_dim_args(
-    const std::vector<DimArg>& dim_args,
-    std::vector<const Expr*>* dims,
-    std::vector<const Var*>* vars) {
-  dims->clear();
-  vars->clear();
-  for (const DimArg& dim_arg : dim_args) {
-    dims->push_back(dim_arg.dim().node());
-    vars->push_back(new Var(dim_arg.name_hint(), kInt));
-  }
-}
-
-} // namespace
 
 Tensor* Compute(
     const std::string& func_name,
@@ -41,7 +28,7 @@ Tensor* Compute(
     const std::vector<DimArg>& dim_args,
     const std::function<ExprHandle(const VarHandle&)>& body_func) {
   if (dim_args.size() != 1) {
-    throw malformed_input();
+    throw malformed_input("mismatch between body and arg size (1)");
   }
 
   std::vector<const Expr*> dims;
@@ -59,7 +46,7 @@ Tensor* Compute(
     const std::function<ExprHandle(const VarHandle&, const VarHandle&)>&
         body_func) {
   if (dim_args.size() != 2) {
-    throw malformed_input();
+    throw malformed_input("mismatch between body and arg size (2)");
   }
   std::vector<const Expr*> dims;
   std::vector<const Var*> args;
@@ -77,7 +64,7 @@ Tensor* Compute(
         ExprHandle(const VarHandle&, const VarHandle&, const VarHandle&)>&
         body_func) {
   if (dim_args.size() != 3) {
-    throw malformed_input();
+    throw malformed_input("mismatch between body and arg size (3)");
   }
   std::vector<const Expr*> dims;
   std::vector<const Var*> args;
@@ -99,7 +86,7 @@ Tensor* Compute(
         const VarHandle&,
         const VarHandle&)>& body_func) {
   if (dim_args.size() != 4) {
-    throw malformed_input();
+    throw malformed_input("mismatch between body and arg size (4)");
   }
   std::vector<const Expr*> dims;
   std::vector<const Var*> args_nodes;
@@ -114,7 +101,7 @@ Tensor* Compute(
 Stmt* Function::ElementStmt(size_t index) {
   const Buf* buf = func_var(index);
   std::vector<const Expr*> indices;
-  for (size_t i = 0; i < buf->ndim(); i++) {
+  for (int i = 0; i < buf->ndim(); i++) {
     indices.push_back(this->args_[i]);
   }
 
@@ -122,6 +109,20 @@ Stmt* Function::ElementStmt(size_t index) {
 
   Stmt* update_stmt = new Store(buf, indices, body(index), mask);
   return update_stmt;
+}
+
+Tensor* Reduce(
+    const std::string& func_name,
+    const std::vector<DimArg>& dim_args,
+    const Reducer& reducer,
+    const Buffer& buffer,
+    const std::vector<DimArg>& reduce_args) {
+  return Reduce(
+      func_name,
+      dim_args,
+      reducer,
+      [&](ParameterList& p) { return buffer.call(p); },
+      reduce_args);
 }
 
 } // namespace tensorexpr
