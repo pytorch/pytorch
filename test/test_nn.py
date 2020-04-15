@@ -10899,7 +10899,7 @@ class TestNNDeviceType(NNTestCase):
         seeds = (13, 256, 811, 43, 7)
         for sd in seeds:
             torch.manual_seed(sd)
-            x = torch.randn(2, 3, 5, 5, device=device, requires_grad=True)
+            x = torch.randn(1, 1, 5, 5, device=device, requires_grad=True)
             gradcheck(func, [x])
             gradgradcheck(func, [x])
 
@@ -10909,7 +10909,7 @@ class TestNNDeviceType(NNTestCase):
         seeds = (44, 83, 71, 25, 999)
         for sd in seeds:
             torch.manual_seed(sd)
-            x = torch.randn(3, 12, 12, device=device, requires_grad=True)
+            x = torch.randn(1, 12, 12, device=device, requires_grad=True)
             gradcheck(func, [x])
             gradgradcheck(func, [x])
 
