@@ -145,16 +145,16 @@ static auto registry =
         .op("quantized::conv_unpack(Tensor packed_weights)"
             " -> (Tensor unpacked_weights, Tensor? B_origin)",
             c10::RegisterOperators::options().kernel<QConvUnpackWeightsInt8<2>>(
-                DispatchKey::CPUTensorId)) // conv_unpack is deprecated, please
+                DispatchKey::CPU)) // conv_unpack is deprecated, please
                                             // use conv2d_unpack for 2D conv.
         .op("quantized::conv2d_unpack(Tensor packed_weights)"
             " -> (Tensor unpacked_weights, Tensor? B_origin)",
             c10::RegisterOperators::options().kernel<QConvUnpackWeightsInt8<2>>(
-                DispatchKey::CPUTensorId)) // We use  conv2d_unpack to be
+                DispatchKey::CPU)) // We use  conv2d_unpack to be
                                             // consistent with conv3d_unpack
         .op("quantized::conv3d_unpack",
             c10::RegisterOperators::options().kernel<QConvUnpackWeightsInt8<3>>(
-                DispatchKey::CPUTensorId));
+                DispatchKey::CPU));
 
 } // namespace
 } // namespace native
