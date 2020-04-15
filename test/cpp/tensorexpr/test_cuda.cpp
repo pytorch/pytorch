@@ -331,6 +331,73 @@ void testCudaDynamicShapeSplit() {
   cudaFree(bDev);
 }
 
+void testCudaTrivialReduce01() {
+  const static int N = 1024;
+  KernelScope kernel_scope;
+  Buffer data_buf("data", kFloat, {N});
+  Buffer output_buf("output", kFloat, {1});
+
+  // The test adds the following code for trivial reduction:
+  // for (int bidx = 0; bidx < 1; bidx++) { // blockIdx.x
+  //   for (int tidx = 0; tidx < 1; tidx++) { // threadIdx.x
+  //     output[0] = 0.f;
+  //     for (int i1 = 0; i1 < 1024; i1++) {
+  //       output[0] = output[0] + data[i1];
+  //     }
+  //   }
+  // }
+
+  Store* init_store = Store::make(output_buf, {0}, 0.f, 1);
+  VarHandle i1("i1", kInt);
+  ExprHandle load_data = Load::make(data_buf, {i1}, 1);
+  ExprHandle load_output = Load::make(output_buf, {0}, 1);
+  ExprHandle add_value = load_output + load_data;
+  Store* store_output = Store::make(output_buf, {0}, add_value, 1);
+  For* for_output = For::make(i1, 0, N, store_output);
+  Stmt* reduce_block = Block::make({init_store, for_output});
+  VarHandle thread_idx("tidx", kInt);
+  LoopOptions thread_idx_options;
+  thread_idx_options.set_gpu_thread_index(0);
+  For* thread_idx_loop =
+      For::make(thread_idx, 0, 1, reduce_block, thread_idx_options);
+  VarHandle block_idx("bidx", kInt);
+  LoopOptions block_idx_options;
+  block_idx_options.set_gpu_block_index(0);
+  For* block_idx_loop =
+      For::make(block_idx, 0, 1, thread_idx_loop, block_idx_options);
+
+  CudaCodeGen cuda_cg(block_idx_loop, data_buf, output_buf);
+  PaddedBuffer<float> data_v(N);
+  PaddedBuffer<float> output_v(1, "output_v");
+  PaddedBuffer<float> output_ref(1, "output_ref");
+
+  output_ref(0) = 0;
+  for (int i = 0; i < N; i++) {
+    data_v(i) = i;
+    output_ref(0) += data_v(i);
+  }
+
+  float* data_dev = nullptr;
+  cudaMalloc(&data_dev, N * sizeof(float));
+  cudaMemcpy(
+      data_dev, data_v.data(), N * sizeof(float), cudaMemcpyHostToDevice);
+  float* output_dev = nullptr;
+  cudaMalloc(&output_dev, 1 * sizeof(float));
+  cudaDeviceSynchronize();
+
+  cuda_cg(data_dev, output_dev);
+
+  cudaDeviceSynchronize();
+  cudaMemcpy(
+      output_v.data(), output_dev, 1 * sizeof(float), cudaMemcpyDeviceToHost);
+  cudaDeviceSynchronize();
+
+  ExpectAllNear(output_v, output_ref, 1e-5);
+
+  cudaFree(data_dev);
+  cudaFree(output_dev);
+}
+
 } // namespace jit
 } // namespace torch
 
