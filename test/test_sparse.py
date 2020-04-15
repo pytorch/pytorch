@@ -917,6 +917,10 @@ class TestSparse(TestCase):
         IS_WINDOWS and TEST_CUDA,
         "bmm sparse-dense CUDA is not yet supported in Windows, at least up to CUDA 10.1"
     )
+    @unittest.skipIf(
+        TEST_CUDA and (torch._C._cuda_getCompiledVersion() < 10010),
+        "bmm sparse-dense requires CUDA 10.1 or greater"
+    )
     def test_bmm(self):
         def test_shape(num_mats, dim_i, dim_j, dim_k, nnz):
             a_list = []
@@ -974,8 +978,12 @@ class TestSparse(TestCase):
 
     @cuda_only
     @unittest.skipIf(
-        IS_WINDOWS and TEST_CUDA,
+        IS_WINDOWS,
         "bmm sparse-dense CUDA is not yet supported in Windows, at least up to CUDA 10.1"
+    )
+    @unittest.skipIf(
+        torch._C._cuda_getCompiledVersion() < 10010,
+        "bmm sparse-dense requires CUDA 10.1 or greater"
     )
     def test_bmm_deterministic(self):
         def test_shape(num_mats, dim_i, dim_j, dim_k, nnz):
@@ -1007,8 +1015,9 @@ class TestSparse(TestCase):
         test_shape(10, 10, 100, 0, 20)
         test_shape(10, 10, 100, 0, 20)
 
+    @cuda_only
     @unittest.skipIf(
-        not (IS_WINDOWS and TEST_CUDA),
+        not IS_WINDOWS,
         "this test ensures bmm sparse-dense CUDA gives an error when run on Windows"
     )
     def test_bmm_windows_error(self):
@@ -1017,6 +1026,19 @@ class TestSparse(TestCase):
         with self.assertRaisesRegex(
                 RuntimeError,
                 "bmm sparse-dense CUDA is not supported on Windows"):
+            ab = a.bmm(b)
+
+    @cuda_only
+    @unittest.skipIf(
+        torch._C._cuda_getCompiledVersion() >= 10010,
+        "this test ensures bmm gives error if CUDA version is less than 10.1"
+    )
+    def test_bmm_cuda_version_error(self):
+        a = torch.rand(2, 2, 2).to_sparse().cuda()
+        b = torch.rand(2, 2, 2).cuda()
+        with self.assertRaisesRegex(
+                RuntimeError,
+                "bmm sparse-dense requires CUDA 10.1 or greater"):
             ab = a.bmm(b)
 
     @cpu_only

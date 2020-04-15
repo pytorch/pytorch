@@ -22,6 +22,7 @@
 
 #include <bitset>
 #include <cusparse.h>
+#include <cuda_runtime_api.h>
 
 #define I_INFO(tensor) cuda::detail::getTensorInfo<int64_t, uint64_t>(tensor)
 #define V_INFO(tensor) cuda::detail::getTensorInfo<scalar_t, uint64_t>(tensor)
@@ -819,7 +820,7 @@ Tensor& _bmm_out_sparse_cuda(Tensor& result, const SparseTensor& self, const Ten
   TORCH_CHECK(false, "bmm sparse-dense is not supported on HIP");
 #elif defined(_WIN32) || defined(_WIN64)
   TORCH_CHECK(false, "bmm sparse-dense CUDA is not supported on Windows");
-#else
+#elif defined(CUDART_VERSION) && (CUDART_VERSION >= 10010)
 
   TORCH_CHECK(!mat2.is_sparse(), "bmm_sparse: Tensor 'mat2' must be dense");
   TORCH_CHECK(self.dense_dim() == 0, "bmm_sparse: Tensor 'self' must have 0 dense dims, but has ", self.dense_dim());
@@ -1015,6 +1016,8 @@ Tensor& _bmm_out_sparse_cuda(Tensor& result, const SparseTensor& self, const Ten
   if (workspace_buffer != nullptr) {
     cudaFree(workspace_buffer);
   }
+#else
+  TORCH_CHECK(false, "bmm sparse-dense requires CUDA 10.1 or greater");
 #endif
 
   return result;
