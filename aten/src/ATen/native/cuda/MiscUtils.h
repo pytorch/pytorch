@@ -59,14 +59,15 @@ static inline magma_int_t magma_int_cast(int64_t value, const char* varname) {
 struct MagmaStreamSyncGuard {
   MagmaStreamSyncGuard() {
     auto stream = at::cuda::getCurrentCUDAStream();
-    if (stream != 0) {
+    if (stream != at::cuda::getDefaultCUDAStream()) {
       AT_CUDA_CHECK(cudaStreamSynchronize(stream));
     }
   }
 
   ~MagmaStreamSyncGuard() noexcept(false) {
-    if (at::cuda::getCurrentCUDAStream() != 0) {
-      AT_CUDA_CHECK(cudaStreamSynchronize(0));
+    auto default_stream = at::cuda::getDefaultCUDAStream();
+    if (at::cuda::getCurrentCUDAStream() != default_stream) {
+      AT_CUDA_CHECK(cudaStreamSynchronize(default_stream));
     }
   }
 };
