@@ -16,14 +16,14 @@ namespace rpc {
 namespace callback {
 // It's the callback for RemoteCall.
 void TORCH_API confirmPendingUser(
-    const std::shared_ptr<FutureMessage>& futureMessage,
+    const FutureMessage& futureMessage,
     const ForkId& expectedForkId);
 
 // It's the callback for finishing creating owner rref, it returned deletedRRef,
 // so that the deletedRRef can be handled under GIL in python_functions.cpp if
 // deletedRRef contains python object.
 c10::intrusive_ptr<RRef> TORCH_API
-finishCreatingOwnerRRef(const std::shared_ptr<FutureMessage>& futureMessage);
+finishCreatingOwnerRRef(const FutureMessage& futureMessage);
 } // namespace callback
 
 // Manages RRef lifetime and keeps track of RRef forks.
@@ -38,7 +38,7 @@ class TORCH_API RRefContext {
   static std::vector<c10::intrusive_ptr<RRef>> destroyInstance(
       bool ignoreRRefLeak = true);
 
-  static void handleException(const std::shared_ptr<FutureMessage>& fm);
+  static void handleException(const FutureMessage& fm);
 
   RRefContext(const RRefContext&) = delete;
   RRefContext(RRefContext&& other) = delete;

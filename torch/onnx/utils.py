@@ -333,7 +333,9 @@ def _model_to_graph(model, args, verbose=False,
     if isinstance(model, torch.jit.ScriptModule):
         assert example_outputs is not None, "example_outputs must be provided when exporting a ScriptModule"
         try:
-            method_graph, params = torch._C._jit_pass_lower_graph(model.forward.graph, model._c)
+            graph = model.forward.graph
+            torch._C._jit_pass_onnx_function_substitution(graph)
+            method_graph, params = torch._C._jit_pass_lower_graph(graph, model._c)
             in_vars, in_desc = torch.jit._flatten(tuple(args) + tuple(params))
             graph = _propagate_and_assign_input_shapes(
                 method_graph, tuple(in_vars), False, propagate)
@@ -344,8 +346,10 @@ def _model_to_graph(model, args, verbose=False,
         method = model
         params = ()
         in_vars, in_desc = torch.jit._flatten(tuple(args))
+        graph = model.graph
+        torch._C._jit_pass_onnx_function_substitution(graph)
         graph = _propagate_and_assign_input_shapes(
-            model.graph, tuple(in_vars), False, propagate)
+            graph, tuple(in_vars), False, propagate)
     else:
         graph, torch_out = _trace_and_get_graph_from_model(model, args)
         state_dict = _unique_state_dict(model)
@@ -357,6 +361,7 @@ def _model_to_graph(model, args, verbose=False,
             for i, inp in enumerate(graph_inputs):
                 if i >= user_input_num:
                     inp.setDebugName(param_names[i - user_input_num])
+        torch._C._jit_pass_onnx_function_substitution(graph)
 
     input_and_param_names = [val.debugName() for val in graph.inputs()]
     param_names = input_and_param_names[len(input_and_param_names) - len(params):]
