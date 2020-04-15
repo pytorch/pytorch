@@ -11210,6 +11210,44 @@ class TestTorchDeviceType(TestCase):
         a_masked = a.masked_select(mask_copy_3_times)
         self.assertEqual(a_masked, a.unsqueeze(0).expand(3, 100).flatten())
 
+
+    @dtypesIfCUDA(torch.bfloat16)
+    @dtypes(torch.bfloat16)
+    def test_index_mask(self, device, dtype):
+        warn = 'indexing with dtype torch.uint8 is now deprecated, pl'
+        for maskType in [torch.uint8, torch.bool]:
+            num_src = 10
+            src = torch.tensor([0, 0, 0, 0, 0, 0, 0, 0, 0, 0], dtype=dtype, device=device)
+            mask = torch.rand(num_src, device=device).clamp(0, 1).mul(2).floor().to(maskType)
+
+            if dtype == torch.half and torch.device(device).type == 'cpu':
+                self.assertRaises(RuntimeError, lambda: src[mask])
+                continue
+
+            with warnings.catch_warnings(record=True) as w:
+                dst = src[mask]
+                if maskType is torch.uint8:
+                    self.assertEqual(len(w), 1)
+                    self.assertEqual(str(w[0].message)[0:53], str(warn))
+            dst2 = []
+            for i in range(num_src):
+                if mask[i]:
+                    dst2 += [src[i]]
+            self.assertEqual(dst, torch.tensor(dst2), 0)
+
+        # Since half is not supported on CPU, need to skip the remaining test cases
+        if dtype == torch.half and torch.device(device).type == 'cpu':
+            return
+
+        # Ensure that masks are expanded to match tensor properly
+        a = torch.rand(100, 100, device=device).mul(100).to(dtype)
+        mask_first_el_each_row = torch.zeros(100, device=device).bool()
+        mask_first_el_each_row[0] = True
+        mask = mask_first_el_each_row.unsqueeze(0).expand(100,100)
+        a_masked = a[mask]
+        self.assertEqual(a_masked, a[:, 0])
+
+
     def test_masked_fill_bool_tensor(self, device):
         dst = torch.tensor([True, False, True], device=device)
         mask = torch.tensor([False, True, False], device=device)
