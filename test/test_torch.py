@@ -6087,8 +6087,6 @@ class TestTorchDeviceType(TestCase):
             expected_res = torch.tensor(expected_res_, dtype=dtype, device=device)
             a = torch.tensor(a_, dtype=dtype, device=device)
             for other_dtype in torch.testing.get_all_dtypes():
-                if other_dtype.is_complex:
-                    continue
                 b = torch.tensor(b_, dtype=other_dtype, device=device)
 
                 # Skip bfloat16 on CUDA. Remove this after bfloat16 is supported on CUDA.
@@ -6122,7 +6120,7 @@ class TestTorchDeviceType(TestCase):
                 with self.assertRaises(RuntimeError):
                     getattr(a, op + '_')(b)
                 continue
-            if dtype.is_complex or other_dtype.is_complex:
+            if dtype.is_complex:
                 with self.assertRaises(RuntimeError):
                     getattr(a, op + '_')(b)
                 continue
@@ -10685,7 +10683,7 @@ class TestTorchDeviceType(TestCase):
     def test_copy_all_dtypes_and_devices(self, device):
         from copy import copy
         for dt in torch.testing.get_all_dtypes():
-            #TODO: add test for complex when complex storage type is supported
+            # TODO: add test for complex when complex storage type is supported
             if dt.is_complex:
                 self.assertRaises(RuntimeError, lambda: copy(torch.tensor([1], dtype=dt, device=device).clone()))
                 continue
@@ -10803,9 +10801,6 @@ class TestTorchDeviceType(TestCase):
     def test_eye(self, device):
         for dtype in torch.testing.get_all_dtypes():
             if dtype == torch.bfloat16:
-                continue
-            if dt.is_complex:
-                self.assertRaises(RuntimeError, lambda: torch.eye(2, device=device, dtype=dtype))
                 continue
             for n, m in product([3, 5, 7], repeat=2):
                 # Construct identity using diagonal and fill
@@ -11083,7 +11078,7 @@ class TestTorchDeviceType(TestCase):
 
     def test_index_fill(self, device):
         for dt in torch.testing.get_all_dtypes():
-            if dt == torch.half or dt == torch.bfloat16:
+            if dt == torch.half or dt == torch.bfloat16 or dt.is_complex:
                 continue
 
             x = torch.tensor([[1, 2], [4, 5]], dtype=dt, device=device)
@@ -11118,6 +11113,13 @@ class TestTorchDeviceType(TestCase):
         # Complex Tensor
         src = torch.randn(3, 4, 5, dtype=torch.complex64, device=device)
         idx = torch.tensor([2, 1, 0, 1, 2], dtype=torch.long, device=device)
+
+        # index_select not supported for complex on cuda
+        if device.startswith('cuda'):
+            with self.assertRaises(RuntimeError):
+                torch.index_select(src, 0, idx)
+            return
+
         dest = torch.index_select(src, 0, idx)
         self.assertEqual(dest.shape, (5, 4, 5))
         for i in range(idx.size(0)):
@@ -11199,7 +11201,7 @@ class TestTorchDeviceType(TestCase):
             src = torch.tensor([0, 0, 0, 0, 0, 0, 0, 0, 0, 0], dtype=dtype, device=device)
             mask = torch.rand(num_src, device=device).clamp(0, 1).mul(2).floor().to(maskType)
 
-            if dtype.is_complex or (dtype == torch.half and torch.device(device).type == 'cpu'):
+            if (dtype.is_complex or dtype == torch.half) and torch.device(device).type == 'cpu':
                 self.assertRaises(RuntimeError, lambda: src.masked_select(mask))
                 continue
 
@@ -11219,7 +11221,7 @@ class TestTorchDeviceType(TestCase):
             self.assertEqual(dst3, torch.tensor(dst2, dtype=dst3.dtype), 0)
 
         # Since complex and half on CPU is not supported, need to skip the remaining test cases
-        if dtype.is_complex or (dtype == torch.half and torch.device(device).type == 'cpu'):
+        if (dtype.is_complex or dtype == torch.half) and torch.device(device).type == 'cpu':
             return
 
         # Ensure that masks are expanded to match tensor properly
