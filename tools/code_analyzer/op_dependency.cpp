@@ -126,6 +126,29 @@ cl::opt<RegexOpt, true, cl::parser<std::string>> OpInvocationPattern(
     cl::Required,
     cl::ValueRequired);
 
+// The `root_symbol_pattern` is used to specify the seeds of C++ symbols
+// from which it searches for transitively reachable ops which need to be
+// kept for these C++ APIs to be able to run.
+//
+// Why not dump ops that are reachable from any visible C++ symbols? Why
+// limit it to a subset of root symbols?
+// Because op registration callsites in static initializer are visible root
+// symbols, too. It will dump ALL the registered ops without any filtering.
+//
+// Can we use some fixed entry point like `main()`?
+// The target to be analyzed can be DSO that doesn't have a `main()`. And
+// sometimes we want to get ops that could (but not yet) be called.
+//
+// This temporary flag will be deprecated by better alternatives in the future.
+RegexOpt RootSymbolPatternLoc;
+cl::opt<RegexOpt, true, cl::parser<std::string>> RootSymbolPattern(
+    "root_symbol_pattern",
+    cl::desc("Regular expression used to identify root symbols. It will insert "
+             "an entry to the output graph with key = `__ROOT__` and value = "
+             "set of ops reachable from root symbols, if the pattern is set. "
+             "Example: -root_symbol_pattern 'torch::jit'"),
+    cl::location(RootSymbolPatternLoc));
+
 enum class OutputFormatType { Dot, PY, YAML };
 cl::opt<OutputFormatType> OutputFormat(
     "format",
@@ -198,35 +221,46 @@ public:
 
   bool runOnModule(Module& M) override {
     // Scan all functions and instructions to construct function -> function
-    // dependency graph and to find out instructions that might register or
-    // invoke operators, respectively.
+    // dependency graph and to find out:
+    // - visible functions matching `root_symbol_pattern` option;
+    // - instructions that might register or invoke operators, respectively.
     GRAPH deps;
-    VALUE_SET opRegistrationInsts, opInvocationInsts;
-    scanAllFunctions(M, &deps, &opRegistrationInsts, &opInvocationInsts);
+    VALUE_SET visibleFuncs, opRegistrationInsts, opInvocationInsts;
+    scanAllFunctions(
+        M, &deps, &visibleFuncs, &opRegistrationInsts, &opInvocationInsts);
+
+    // "Key nodes" are nodes we want to keep in output graph. They are usually
+    // op-schema strings.
+    SET keyNodes;
+
+    // Insert a dummy root node with links to function nodes matching the
+    // "root symbol" regex pattern and with default visibility. The goal is to
+    // find aten ops that are possibly called via torch C++ APIs.
+    insertRoot(visibleFuncs, &deps, &keyNodes);
 
     // Scan op registration/invocation API calls to construct the link between
     // op name (a.k.a op schema string) and related functions.
-    // Dump the op-schema <-> function mappings into the same `deps` graph as
-    // they will be processed together next.
-    SET opSchemaStrs;
-    scanOpRegistration(opRegistrationInsts, &opSchemaStrs, &deps);
-    scanOpInvocation(opInvocationInsts, &opSchemaStrs, &deps);
+    // Dump the op-schema -> function and function -> op-schema mappings into
+    // the same `deps` graph with function -> function mappings as they will
+    // be processed together next.
+    scanOpRegistration(opRegistrationInsts, &keyNodes, &deps);
+    scanOpInvocation(opInvocationInsts, &keyNodes, &deps);
 
     // Shrink the graph by removing intermediate nodes (functions) while
     // maintaining transitive dependency between operators (schema strings).
     GRAPH result;
     std::shared_ptr<PATH> path = DebugPath ? std::make_shared<PATH>() : nullptr;
-    simplifyGraph(deps, opSchemaStrs, &result, path.get());
+    simplifyGraph(deps, keyNodes, &result, path.get());
 
     switch (OutputFormat) {
       case OutputFormatType::Dot:
-        printAsDot(std::cout, opSchemaStrs, result);
+        printAsDot(std::cout, keyNodes, result);
         break;
       case OutputFormatType::PY:
-        printAsPython(std::cout, opSchemaStrs, result);
+        printAsPython(std::cout, keyNodes, result);
         break;
       case OutputFormatType::YAML:
-        printAsYAML(std::cout, opSchemaStrs, result, path.get());
+        printAsYAML(std::cout, keyNodes, result, path.get());
         break;
       default:
         break;
@@ -236,12 +270,37 @@ public:
   }
 
 private:
+  static void insertRoot(
+      const VALUE_SET& visibleFuncs, GRAPH* deps, SET* keyNodes) {
+    if (!RootSymbolPatternLoc.pattern) {
+      return;
+    }
+    SET roots;
+    for (const auto& F : visibleFuncs) {
+      std::string name = F->getName();
+      auto demangled = demangle(name);
+      if (RootSymbolPatternLoc.pattern->match(demangled)) {
+        roots.insert(name);
+        if (Verbose) {
+          std::cerr << "[DEBUG][ROOT_FUNC] " << demangled << std::endl;
+        }
+      }
+    }
+
+    static const std::string ROOT_NODE{"__ROOT__"};
+    deps->emplace(ROOT_NODE, std::move(roots));
+    keyNodes->insert(ROOT_NODE);
+  }
+
   // Scan the entire IR graph to construct function -> function dependency graph
   // as well as instructions that might register or invoke operators.
   static void scanAllFunctions(
-      Module& M, GRAPH* deps,
+      Module& M, GRAPH* deps, VALUE_SET* visibleFuncs,
       VALUE_SET* opRegistrationInsts, VALUE_SET* opInvocationInsts) {
     for (Function& F : M) {
+      if (F.hasDefaultVisibility()) {
+        visibleFuncs->insert(&F);
+      }
       std::string caller = F.getName();
       std::string callerDemangled = demangle(caller);
       for (BasicBlock& BB : F) {
