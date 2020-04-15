@@ -331,7 +331,7 @@ void testCudaDynamicShapeSplit() {
   cudaFree(bDev);
 }
 
-void testCudaTrivialReduce01() {
+void testCudaOneBlockOneThreadGlobalReduce1() {
   const static int N = 1024;
   KernelScope kernel_scope;
   Buffer data_buf("data", kFloat, {N});
@@ -396,6 +396,85 @@ void testCudaTrivialReduce01() {
 
   cudaFree(data_dev);
   cudaFree(output_dev);
+}
+
+void testCudaOneBlockMultiThreadGlobalReduce1() {
+  const static int N = 1024;
+  KernelScope kernel_scope;
+
+  // This test does the following reduction:
+  // clang-format off
+  //   for b in 0..1 // block-idx
+  //    for t in 0..1024: // thread-idx
+  //      if t < 1:
+  //        b[0] = 0
+  //    // implied sync_threads
+  //    for t in 0..1024: // thread-idx
+  //      b[0] = b[0] + a[t] // implied atomic
+  // clang-format on
+
+  Buffer a_buf("a", kFloat, {N});
+  Buffer b_buf("b", kFloat, {1});
+
+  Store* init_store = Store::make(b_buf, {0}, 0.f, 1);
+  VarHandle t("t", kInt);
+  VarHandle b("b", kInt);
+
+  //  for t in 0..1024: // thread-idx
+  //    if t < 1:
+  //      b[0] = 0
+  ExprHandle cond_t_lt_1 = CompareSelect::make(t, 1, CompareSelectOperation::kLT);
+  Cond* masked_init_b = Cond::make(cond_t_lt_1, init_store, nullptr);
+  LoopOptions thread_idx_options;
+  thread_idx_options.set_gpu_thread_index(0);
+  For* for_init = For::make(t, 0, N, masked_init_b, thread_idx_options);
+
+  //  for t in 0..1024: // thread-idx
+  //    b[0] = b[0] + a[t] // implied atomic
+  ExprHandle load_a = Load::make(a_buf, {t}, 1);
+  ExprHandle load_b = Load::make(b_buf, {0}, 1);
+  ExprHandle add_value = load_b + load_a;
+  Store* store_b = Store::make(b_buf, {0}, add_value, 1);
+  For* for_b = For::make(t, 0, N, store_b, thread_idx_options);
+
+  Stmt* reduce_block = Block::make({for_init, for_b});
+
+  VarHandle block_idx("bidx", kInt);
+  LoopOptions block_idx_options;
+  block_idx_options.set_gpu_block_index(0);
+  For* block_idx_loop =
+      For::make(block_idx, 0, 1, reduce_block, block_idx_options);
+
+  CudaCodeGen cuda_cg(block_idx_loop, a_buf, b_buf);
+  PaddedBuffer<float> a_v(N);
+  PaddedBuffer<float> b_v(1, "b_v");
+  PaddedBuffer<float> b_ref(1, "b_ref");
+
+  b_ref(0) = 0;
+  for (int i = 0; i < N; i++) {
+    a_v(i) = i;
+    b_ref(0) += a_v(i);
+  }
+
+  float* a_dev = nullptr;
+  cudaMalloc(&a_dev, N * sizeof(float));
+  cudaMemcpy(
+      a_dev, a_v.data(), N * sizeof(float), cudaMemcpyHostToDevice);
+  float* b_dev = nullptr;
+  cudaMalloc(&b_dev, 1 * sizeof(float));
+  cudaDeviceSynchronize();
+
+  cuda_cg(a_dev, b_dev);
+
+  cudaDeviceSynchronize();
+  cudaMemcpy(
+      b_v.data(), b_dev, 1 * sizeof(float), cudaMemcpyDeviceToHost);
+  cudaDeviceSynchronize();
+
+  ExpectAllNear(b_v, b_ref, 1e-5);
+
+  cudaFree(a_dev);
+  cudaFree(b_dev);
 }
 
 } // namespace jit

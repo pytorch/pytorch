@@ -8,6 +8,7 @@
 #include <torch/csrc/jit/tensorexpr/eval.h>
 #include <torch/csrc/jit/tensorexpr/exceptions.h>
 #include <torch/csrc/jit/tensorexpr/execution_counter.h>
+#include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
 
 #define DEBUG_PRINT 0
 
@@ -178,6 +179,56 @@ void CudaPrinter::visit(const Load* v) {
   }
 }
 
+// TODO: maybe this should be a more shared location?
+// TODO: investigate how "Expr*" can be implicitly converted to "ExprHandle" as
+// a bool.
+static bool CheckEqual(const Expr* lhs, const Expr* rhs) {
+  // The fast path. Checks if the pointers are the same.
+  if (lhs == rhs) {
+    return true;
+  }
+  ExprHandle diff = Sub::make(ExprHandle(lhs), ExprHandle(rhs));
+  ExprHandle diff_s = IRSimplifier::simplify(diff);
+  return immediateEquals(diff_s.node(), 0);
+}
+
+// Identify the pattern: a[e1] = a[e1] + e2.
+static bool isAtomicAdd(const Store* v, const Expr** atomic_add_value) {
+  ScalarType dtype = v->value()->dtype().scalar_type();
+  if (dtype != ScalarType::Float && dtype != ScalarType::Double) {
+    return false;
+  }
+  const Add* add_v = dynamic_cast<const Add*>(v->value());
+  if (!add_v) {
+    return false;
+  }
+  const Load* load_v = dynamic_cast<const Load*>(add_v->lhs());
+  if (!load_v) {
+    return false;
+  }
+  if (v->base_handle() != load_v->base_handle()) {
+    return false;
+  }
+  bool index_equal = CheckEqual(v->flat_index(), load_v->flat_index());
+  if (index_equal) {
+    *atomic_add_value = add_v->rhs();
+  }
+  return index_equal;
+}
+
+class AtomicAddFuser : public IRMutator {
+  Stmt* mutate(const Store* v) override {
+    const Buf* buf = v->buf();
+    const std::vector<const Expr*>& indices = v->indices();
+    const Expr* value = v->value();
+    const Expr* atomic_add_value = nullptr;
+    if (isAtomicAdd(v, &atomic_add_value)) {
+      return new AtomicAdd(buf, indices, atomic_add_value);
+    }
+    return const_cast<Store*>(v); // NOLINT
+  }
+};
+
 void CudaPrinter::visit(const Store* v) {
   os() << *v->base_handle() << "[" << *v->flat_index() << "] = ";
   if (v->value()->dtype().scalar_type() == ScalarType::Half) {
@@ -185,6 +236,11 @@ void CudaPrinter::visit(const Store* v) {
   } else {
     os() << *v->value() << ";";
   }
+}
+
+void CudaPrinter::visit(const AtomicAdd* v) {
+  os() << "atomicAdd(&" << *v->base_handle() << "[" << *v->flat_index() << "]"
+       << ", " << *v->value() << ");";
 }
 
 void CudaPrinter::visit(const Max* v) {
@@ -477,6 +533,8 @@ void CudaCodeGen::Initialize() {
   }
 
   Stmt* stmt_v = stmt();
+  AtomicAddFuser atomic_add_fuser;
+  stmt_v = stmt_v->accept_mutator(&atomic_add_fuser);
   PrioritizeLoad prioritize_load;
   stmt_v = prioritize_load.Process(stmt_v);
   stmt_v->accept(cuda_analysis_.get());
