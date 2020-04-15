@@ -52,13 +52,15 @@ class TestSerialization(TestCase):
         expected_file = base_name + ".expected.pt"
 
         # saving code : uncomment when adding a new test
-        data = torch.randn(1, 3, 6, 6, 6).float()
-        data = torch.quantize_per_tensor(data, 0.5, 2, torch.quint8)
-        torch.save(data, input_file)
-        torch.save(qmodule.state_dict(), state_dict_file)
-        torch.jit.save(torch.jit.script(qmodule), scripted_module_file)
-        torch.jit.save(torch.jit.trace(qmodule, data), traced_module_file)
-        torch.save(qmodule(data), expected_file)
+        # and run the new test, e.g.
+        # python test/quantization/test_backward_compatibility.py TestSerialization.test_conv3d
+        # data = ...
+        # data = torch.quantize_per_tensor(data, 0.5, 2, torch.quint8)
+        # torch.save(data, input_file)
+        # torch.save(qmodule.state_dict(), state_dict_file)
+        # torch.jit.save(torch.jit.script(qmodule), scripted_module_file)
+        # torch.jit.save(torch.jit.trace(qmodule, data), traced_module_file)
+        # torch.save(qmodule(data), expected_file)
 
         data = torch.load(input_file)
         qmodule.load_state_dict(torch.load(state_dict_file))
