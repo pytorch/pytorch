@@ -30,6 +30,8 @@ if [[ "${BUILD_ENVIRONMENT}" == *rocm* ]] && [[ "${BUILD_ENVIRONMENT}" =~ py((2|
   shopt -s expand_aliases
   export PYTORCH_TEST_WITH_ROCM=1
   alias python="$PYTHON"
+  # temporary to locate some kernel issues on the CI nodes
+  export HSAKMT_DEBUG_LEVEL=4
 fi
 
 # This token is used by a parser on Jenkins logs for determining
@@ -186,4 +188,13 @@ function file_diff_from_base() {
   git fetch origin master --quiet
   set -e
   git diff --name-only "$(git merge-base origin master HEAD)" > "$1"
+}
+
+function get_bazel() {
+  # download bazel version
+  wget https://github.com/bazelbuild/bazel/releases/download/2.2.0/bazel-2.2.0-linux-x86_64 -O tools/bazel
+  # verify content
+  echo 'b2f002ea0e6194a181af6ac84cd94bd8dc797722eb2354690bebac92dda233ff tools/bazel' | sha256sum --quiet -c
+
+  chmod +x tools/bazel
 }

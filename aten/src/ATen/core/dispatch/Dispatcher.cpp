@@ -282,4 +282,8 @@ void Dispatcher::checkInvariants() const {
   }
 }
 
+void Dispatcher::setManuallyBoxedKernelFor_(const OperatorHandle& op, KernelFunction::InternalBoxedKernelFunction* func) {
+  op.operatorIterator_->op.setManuallyBoxedKernel_(func);
+}
+
 }

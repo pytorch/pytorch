@@ -13,6 +13,9 @@ https://github.com/pytorch/pytorch/issues/24015 and
 https://www.numpy.org/neps/nep-0018-array-function-protocol.html
 )
 
+If changing this file in a way that can affect ``__torch_function__`` overhead,
+please report the benchmarks in ``benchmarks/overrides_benchmark``. See the
+instructions in the ``README.md`` in that directory.
 """
 
 import __future__
@@ -197,6 +200,7 @@ def get_testing_overrides():
         torch.bitwise_not: lambda input, out=None: -1,
         torch.bitwise_or: lambda input, other, out=None: -1,
         torch.bitwise_xor: lambda input, other, out=None: -1,
+        torch.block_diag: lambda *tensors: -1,
         torch.bmm: lambda input, mat2, out=None: -1,
         torch.broadcast_tensors: lambda *tensors: -1,
         torch.cartesian_prod: lambda *tensors: -1,
@@ -302,6 +306,7 @@ def get_testing_overrides():
         torch.histc: lambda input, bins=100, min=0, max=0, out=None: -1,
         torch.hspmm: lambda mat1, mat2, out=None: -1,
         torch.ifft: lambda input, signal_ndim, normalized=False: -1,
+        torch.copy_imag: lambda input, out=None: -1,
         torch.imag: lambda input, out=None: -1,
         torch.index_add: lambda input, dim, index, source: -1,
         torch.index_copy: lambda input, dim, index, source: -1,
@@ -557,6 +562,7 @@ def get_testing_overrides():
         torch.randint_like: lambda input, low, high, dtype=None, layout=torch.strided, device=None, requires_grad=False: -1,
         torch.randn_like: lambda input, dtype=None, layout=None, device=None, requires_grad=False: -1,
         torch.real: lambda input, out=None: -1,
+        torch.copy_real: lambda input, out=None: -1,
         torch.reciprocal: lambda input, out=None: -1,
         torch.relu: lambda input, inplace=False: -1,
         torch.remainder: lambda input, other, out=None: -1,
