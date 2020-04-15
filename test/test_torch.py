@@ -5694,11 +5694,13 @@ class TestTorchDeviceType(TestCase):
         vals = (-float('inf'), float('inf'), float('nan'), -1, 0, 1)
         self._isfinite_helper(vals, device, dtype)
 
+    @unittest.skipIf(not TEST_NUMPY, 'NumPy not found')
     @dtypes(torch.long)
     def test_isfinite_int(self, device, dtype):
         vals = (-1, 0, 1)
         self._isfinite_helper(vals, device, dtype)
 
+    @unittest.skipIf(not TEST_NUMPY, 'NumPy not found')
     @dtypes(torch.complex64)
     def test_isfinite_complex(self, device, dtype):
         vals = (

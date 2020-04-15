@@ -2597,7 +2597,7 @@ add_docstr(torch.isfinite,
            r"""
 Returns a new tensor with boolean elements representing if each element is `finite` or not.
 
-Real values are finite when they're not NaN, negative infinity, or infinity.
+Real values are finite when they are not NaN, negative infinity, or infinity.
 Complex values are finite when both their real and imaginary parts are finite.
 
     Arguments:
