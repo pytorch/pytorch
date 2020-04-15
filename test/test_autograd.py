@@ -5279,7 +5279,14 @@ class TestAutogradDeviceType(TestCase):
 
 
     @deviceCountAtLeast(2)
-    def test_scalar_different_devices(self, devices):
+    def test_AAAA_scalar_different_devices(self, devices):
+        # This test is expected to fail in CI and trigger
+        # 'RuntimeError: CUDA error: an illegal memory access was encountered'
+        # in the CI. Some users have been reporting this error but so far
+        # PyTorch devs were unable to reproduce it
+        #
+        # The "AAAA" in the name is so that the test runs early in the test
+        # suite
         a = torch.rand([], requires_grad=True, device=devices[0])
         b = torch.rand(10, requires_grad=True, device=devices[1])
 
