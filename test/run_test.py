@@ -54,6 +54,7 @@ TESTS = [
     'quantization/test_numerics',
     'quantization/test_qat',
     'quantization/test_quantization',
+    'quantization/test_numeric_suite',
     'quantization/test_quantized',
     'quantization/test_quantized_tensor',
     'quantization/test_quantized_nn_mods',
@@ -121,7 +122,6 @@ ROCM_BLACKLIST = [
     'distributed/rpc/test_dist_optimizer_spawn',
     'distributed/rpc/test_rpc_spawn',
     'test_cpp_extensions_aot_ninja',
-    'test_cpp_extensions_jit',
     'test_determination',
     'test_multiprocessing',
     'test_jit_simple',
@@ -159,6 +159,7 @@ SLOW_TESTS = [
     'distributed/test_c10d_spawn',
     'quantization/test_quantized',
     'quantization/test_quantization',
+    'quantization/test_numeric_suite',
     'test_determination',
 ]
 _DEP_MODULES_CACHE = {}
