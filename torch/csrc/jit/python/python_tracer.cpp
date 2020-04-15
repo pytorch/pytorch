@@ -53,6 +53,7 @@ std::pair<std::shared_ptr<Graph>, Stack> createGraphByTracing(
     const py::function& func,
     Stack trace_inputs,
     const py::function& var_name_lookup_fn,
+    bool strict,
     bool force_outplace,
     Module* self) {
   C10_LOG_API_USAGE_ONCE("torch.tracer");
@@ -80,6 +81,7 @@ std::pair<std::shared_ptr<Graph>, Stack> createGraphByTracing(
         return {toTypeInferredIValue(out)};
       },
       lookup_fn_adapter,
+      strict,
       force_outplace,
       self);
   return std::make_pair(std::get<0>(outs)->graph, std::get<1>(outs));
@@ -164,6 +166,7 @@ void initPythonTracerBindings(PyObject* module) {
       py::arg("func"),
       py::arg("inputs"),
       py::arg("var_name_lookup_fn"),
+      py::arg("strict"),
       py::arg("force_outplace"),
       py::arg("self") = nullptr);
   m.def("_get_tracing_state", []() { return getTracingState(); });

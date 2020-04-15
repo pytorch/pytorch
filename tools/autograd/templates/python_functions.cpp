@@ -5,7 +5,7 @@
 #include <Python.h>
 #include <ATen/ATen.h>
 
-#include "Functions.h"
+#include "torch/csrc/autograd/generated/Functions.h"
 #include "torch/csrc/autograd/python_cpp_function.h"
 
 namespace torch { namespace autograd { namespace generated {

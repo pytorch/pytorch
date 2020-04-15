@@ -16,6 +16,7 @@ namespace {
 template <> class Vec256<float> {
 private:
   __m256 values;
+  static const Vec256<float> ones;
 public:
   using value_type = float;
   static constexpr int size() {
@@ -240,6 +241,13 @@ public:
   Vec256<float> operator>=(const Vec256<float>& other) const {
     return _mm256_cmp_ps(values, other.values, _CMP_GE_OQ);
   }
+
+  Vec256<float> eq(const Vec256<float>& other) const;
+  Vec256<float> ne(const Vec256<float>& other) const;
+  Vec256<float> gt(const Vec256<float>& other) const;
+  Vec256<float> ge(const Vec256<float>& other) const;
+  Vec256<float> lt(const Vec256<float>& other) const;
+  Vec256<float> le(const Vec256<float>& other) const;
 };
 
 template <>
@@ -315,6 +323,32 @@ Vec256<float> inline operator|(const Vec256<float>& a, const Vec256<float>& b) {
 template <>
 Vec256<float> inline operator^(const Vec256<float>& a, const Vec256<float>& b) {
   return _mm256_xor_ps(a, b);
+}
+
+const Vec256<float> Vec256<float>::ones(1.0f);
+
+Vec256<float> Vec256<float>::eq(const Vec256<float>& other) const {
+  return (*this == other) & Vec256<float>::ones;
+}
+
+Vec256<float> Vec256<float>::ne(const Vec256<float>& other) const {
+  return (*this != other) & Vec256<float>::ones;
+}
+
+Vec256<float> Vec256<float>::gt(const Vec256<float>& other) const {
+  return (*this > other) & Vec256<float>::ones;
+}
+
+Vec256<float> Vec256<float>::ge(const Vec256<float>& other) const {
+  return (*this >= other) & Vec256<float>::ones;
+}
+
+Vec256<float> Vec256<float>::lt(const Vec256<float>& other) const {
+  return (*this < other) & Vec256<float>::ones;
+}
+
+Vec256<float> Vec256<float>::le(const Vec256<float>& other) const {
+  return (*this <= other) & Vec256<float>::ones;
 }
 
 template <>
