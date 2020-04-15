@@ -18,7 +18,8 @@ CAFFE2_API size_t editDistance(
   const std::string& s1, const std::string& s2, size_t max_distance = 0);
 
 CAFFE2_API inline bool StartsWith(const std::string& str, const std::string& prefix) {
-  return std::mismatch(prefix.begin(), prefix.end(), str.begin()).first ==
+  return str.length() >= prefix.length() &&
+    std::mismatch(prefix.begin(), prefix.end(), str.begin()).first ==
       prefix.end();
 }
 
