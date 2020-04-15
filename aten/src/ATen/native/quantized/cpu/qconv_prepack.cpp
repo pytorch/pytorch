@@ -320,24 +320,24 @@ static auto registry =
             c10::RegisterOperators::options()
                 .aliasAnalysis(at::AliasAnalysisKind::PURE_FUNCTION)
                 .kernel<QConvPackWeightInt8<2>>(
-                    DispatchKey::QuantizedCPUTensorId))
+                    DispatchKey::QuantizedCPU))
         .op("quantized::conv2d_prepack", // We use conv2d_prepack to be
                                          // consistent with conv3d_prepack
             c10::RegisterOperators::options()
                 .aliasAnalysis(at::AliasAnalysisKind::PURE_FUNCTION)
                 .kernel<QConvPackWeightInt8<2>>(
-                    DispatchKey::QuantizedCPUTensorId))
+                    DispatchKey::QuantizedCPU))
         .op("_quantized::conv2d_prepack", // We use conv2d_prepack to be
                                           // consistent with conv3d_prepack
             c10::RegisterOperators::options()
                 .aliasAnalysis(at::AliasAnalysisKind::PURE_FUNCTION)
                 .kernel<QConvPackWeightInt8<2>>(
-                    DispatchKey::QuantizedCPUTensorId))
+                    DispatchKey::QuantizedCPU))
         .op("quantized::conv3d_prepack",
             c10::RegisterOperators::options()
                 .aliasAnalysis(at::AliasAnalysisKind::PURE_FUNCTION)
                 .kernel<QConvPackWeightInt8<3>>(
-                    DispatchKey::QuantizedCPUTensorId));
+                    DispatchKey::QuantizedCPU));
 
 } // namespace
 } // namespace native
