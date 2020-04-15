@@ -306,7 +306,7 @@ else
   export PYTORCH_JIT_LOG_LEVEL='>>liveness'
   for i in {1..10}
   do
-    time python test/run_test.py --include test_nn --verbose --determine-from="$DETERMINE_FROM"
+    time python test/run_test.py --include test_torch --verbose --determine-from="$DETERMINE_FROM"
     #python test/test_torch.py TestTorchDeviceTypeCUDA.test_svd_cuda_float64
   done
 
