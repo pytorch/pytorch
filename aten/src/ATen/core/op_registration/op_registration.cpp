@@ -15,6 +15,18 @@ namespace {
       return std::move(debug);
     }
   }
+
+  std::ostream& operator<<(std::ostream& os, Library::Kind kind) {
+    switch (kind) {
+      case Library::DEF:
+        os << "TORCH_LIBRARY";
+      case Library::IMPL:
+        os << "TORCH_LIBRARY_IMPL";
+      case Library::FRAGMENT:
+        os << "TORCH_LIBRARY_FRAGMENT";
+    }
+    return os;
+  }
 }
 
 static_assert(std::is_nothrow_move_constructible<c10::optional<RegistrationHandleRAII>>::value, "");
@@ -126,40 +138,91 @@ CppFunction::CppFunction(KernelFunction func, std::unique_ptr<c10::FunctionSchem
   , debug_(std::move(debug))
   {}
 
-Library::Library(std::string ns, const char* file, uint32_t line)
-  : ns_(ns == "_" ? c10::nullopt : c10::make_optional(std::move(ns)))
-  , dispatch_key_(c10::nullopt)
+#define ERROR_CONTEXT "(Error occurred while processing ", kind_, " block at ", file_, ":", line_, ")"
+
+Library::Library(Kind kind, std::string ns, c10::optional<DispatchKey> k, const char* file, uint32_t line)
+  : kind_(kind)
+  , ns_(ns == "_" ? c10::nullopt : c10::make_optional(std::move(ns)))
+  , dispatch_key_((!k.has_value() || *k == DispatchKey::CatchAll) ? c10::nullopt : k)
   , file_(file)
   , line_(line)
-  {}
-
-Library::Library(std::string ns, DispatchKey k, const char* file, uint32_t line)
-  : ns_(ns == "_" ? c10::nullopt : c10::make_optional(std::move(ns)))
-  , dispatch_key_(k == DispatchKey::CatchAll ? c10::nullopt : c10::make_optional(k))
-  , file_(file)
-  , line_(line)
-  {}
-
-Library& Library::_ensure_torch_library_once() & {
-  TORCH_CHECK(
-    ns_.has_value(),
-    "TORCH_LIBRARY macro cannot be used with wildcard library name _.  "
-    "Registration site was ", file_, ":", line_
-  );
-  registrars_.emplace_back(Dispatcher::singleton().registerLibrary(*ns_, debugString("", file_, line_)));
-  return *this;
-}
+  {
+    switch (kind_) {
+      case DEF:
+        // Only DEFs require library uniqueness; fragments
+        // don't register a library
+        registrars_.emplace_back(
+          Dispatcher::singleton().registerLibrary(
+            *ns_, debugString("", file_, line_)
+          )
+        );
+        // fallthrough
+      case FRAGMENT:
+        TORCH_CHECK(
+          ns_.has_value(),
+          kind_, ": cannot define ", kind_, " with the wildcard namespace _ "
+          "(every ", kind_, " defines operators for a distinct namespace!)"
+          "Did you mean to use TORCH_LIBRARY_IMPL instead?  "
+          ERROR_CONTEXT
+        );
+        TORCH_INTERNAL_ASSERT(!dispatch_key_.has_value(), ERROR_CONTEXT);
+        break;
+      case IMPL:
+        // Nothing to do, everything is OK
+        break;
+    }
+  }
 
 // TODO: Error if an operator is def'ed multiple times.  Right now we just
 // merge everything
 
-Library& Library::_def(FunctionSchema&& schema) & {
-  if (ns_.has_value()) {
-    TORCH_CHECK(schema.setNamespaceIfNotSet(ns_->c_str()), "Attempted to def ", toString(schema.operator_name()), " which is explicitly qualified with a namespace inside a TORCH_LIBRARY, which is not allowed.  If TORCH_LIBRARY's namespace matches the explicitly given namespace, remove the qualifier; otherwise, move your def into a TORCH_LIBRARY block with the correct namespace, or give it a different namespace.  Registration site was ", file_, ":", line_);
+#define DEF_PRELUDE "def(\"", schema.operator_name(), "\"): "
+Library& Library::_def(FunctionSchema&& schema, OperatorName* out_name) & {
+  TORCH_CHECK(kind_ == DEF || kind_ == FRAGMENT,
+    DEF_PRELUDE,
+    "Cannot define an operator inside of a ", kind_, " block.  "
+    "All def()s should be placed in the (unique) TORCH_LIBRARY block for their namespace.  ",
+    ERROR_CONTEXT
+  );
+  TORCH_INTERNAL_ASSERT(ns_.has_value(), ERROR_CONTEXT);
+  TORCH_INTERNAL_ASSERT(!dispatch_key_.has_value(), ERROR_CONTEXT);
+  auto ns_opt = schema.getNamespace();
+  if (ns_opt.has_value()) {
+    // error case, but let's do a little more checking to see if
+    // we can give a better message
+    if (*ns_opt == *ns_) {
+      TORCH_CHECK(false,
+        DEF_PRELUDE,
+        "Redundant definition of namespace (", *ns_, ") in both schema "
+        "and the enclosing ", kind_, " block.  "
+        "Delete the namespace from your schema string.  ",
+        ERROR_CONTEXT
+      );
+    } else {
+      TORCH_CHECK(false,
+        DEF_PRELUDE,
+        "Invalid explicit namespace (", *ns_opt, ") in schema string.  "
+        "Move this definition to the (unique) TORCH_LIBRARY block for this namespace "
+        "and delete the namespace from your schema string.  ",
+        ERROR_CONTEXT
+      );
+    }
+  } else {
+    bool b = schema.setNamespaceIfNotSet(ns_->c_str());
+    TORCH_INTERNAL_ASSERT(b, ERROR_CONTEXT);
   }
-  registrars_.emplace_back(Dispatcher::singleton().registerDef(std::move(schema), debugString("", file_, line_)));
+  if (out_name) {
+    *out_name = schema.operator_name(); // copy!
+  }
+  registrars_.emplace_back(
+    Dispatcher::singleton().registerDef(
+      std::move(schema),
+      debugString("", file_, line_)
+    )
+  );
   return *this;
 }
+#undef DEF_PRELUDE
 
 Library& Library::_def(c10::either<OperatorName, FunctionSchema>&& name_or_schema, CppFunction&& f) & {
   FunctionSchema schema = [&] {
@@ -167,32 +230,22 @@ Library& Library::_def(c10::either<OperatorName, FunctionSchema>&& name_or_schem
       return std::move(name_or_schema).right();
     } else {
       // it's a name; use the inferred schema
-      TORCH_CHECK(f.schema_, "Library::def(): schema was not specified, and we "
-          "couldn't infer schema either.  Please explicitly provide schema.  Registration site was ", file_, ":", line_);
       OperatorName name = std::move(name_or_schema).left();
+      TORCH_CHECK(f.schema_,
+        "def(\"", name, "\"): "
+        "Full schema string was not specified, and we couldn't infer schema either.  ",
+        "Please explicitly provide a schema string.  ",
+        ERROR_CONTEXT
+      );
       FunctionSchema s = f.schema_->cloneWithName(std::move(name.name), std::move(name.overload_name));
       s.setAliasAnalysis(c10::AliasAnalysisKind::CONSERVATIVE);
       return s;
     }
   }();
-  if (ns_.has_value()) {
-    TORCH_CHECK(schema.setNamespaceIfNotSet(ns_->c_str()), "Attempted to def ", toString(schema.operator_name()), " which is explicitly qualified with a namespace inside a TORCH_LIBRARY, which is not allowed.  If TORCH_LIBRARY's namespace matches the explicitly given namespace, remove the qualifier; otherwise, please move your def into a TORCH_LIBRARY block with the correct namespace, or give it a different namespace.  Registration site was ", file_, ":", line_);
-  }
-  TORCH_CHECK(!(f.dispatch_key_.has_value() && dispatch_key_.has_value()), "Cannot specify a different dispatch key inside a TORCH_LIBRARY_IMPL; please declare a separate TORCH_LIBRARY_IMPL for your dispatch key.  Registration site was ", file_, ":", line_);
-  auto dispatch_key = f.dispatch_key_.has_value() ? f.dispatch_key_ : dispatch_key_;
-  // Retain the OperatorName for Impl call
-  OperatorName name = schema.operator_name();
-  registrars_.emplace_back(Dispatcher::singleton().registerDef(std::move(schema), debugString("", file_, line_)));
-  registrars_.emplace_back(Dispatcher::singleton().registerImpl(name, dispatch_key, std::move(f.func_), std::move(f.schema_), debugString(std::move(f.debug_), file_, line_)));
-  return *this;
-}
-
-Library& Library::_impl(const char* name_str, CppFunction&& f) & {
-  auto name = torch::jit::parseName(name_str);
-  if (ns_.has_value()) {
-    TORCH_CHECK(name.setNamespaceIfNotSet(ns_->c_str()), "Attempted to impl ", toString(name), " which is explicitly qualified with a namespace inside a TORCH_LIBRARY, which is not allowed.  If TORCH_LIBRARY's namespace matches the explicitly given namespace, remove the qualifier; otherwise, please place it in an separate TORCH_LIBRARY_IMPL block to make it clear that you are overriding behavior for an operator in a different library.  Registration site was ", file_, ":", line_);
-  }
-  TORCH_CHECK(!(f.dispatch_key_.has_value() && dispatch_key_.has_value()), "Cannot specify a different dispatch key inside a TORCH_LIBRARY_IMPL; please declare a separate TORCH_LIBRARY_IMPL for your dispatch key.  Registration site was ", file_, ":", line_);
+  OperatorName name("", "");  // Get the namespaced name for the impl call
+  // First define the schema...
+  _def(std::move(schema), &name);
+  // Then register the implementation...
   auto dispatch_key = f.dispatch_key_.has_value() ? f.dispatch_key_ : dispatch_key_;
   registrars_.emplace_back(
     Dispatcher::singleton().registerImpl(
@@ -206,10 +259,69 @@ Library& Library::_impl(const char* name_str, CppFunction&& f) & {
   return *this;
 }
 
-Library& Library::_fallback(CppFunction&& f) & {
-  TORCH_CHECK(!ns_.has_value(), "Cannot define a fallback in a namespaced TORCH_LIBRARY (fallbacks always affect operators outside of your library).  Instead, use TORCH_LIBRARY_IMPL(_, Backend, m) { m.fallback(...); }.  Registration site was ", file_, ":", line_);
+#define IMPL_PRELUDE "impl(\"", name_str, "\", ...): "
+Library& Library::_impl(const char* name_str, CppFunction&& f) & {
+  auto name = torch::jit::parseName(name_str);
+  auto ns_opt = name.getNamespace();
+  // This is kind of similar to the checking in def(), but the error
+  // messages are a little different for this call site
+  if (ns_opt.has_value()) {
+    if (*ns_opt == *ns_) {
+      TORCH_CHECK(false,
+        IMPL_PRELUDE,
+        "Redundant definition of namespace (", *ns_, ") in both operator name "
+        "and the enclosing ", kind_, " block.  "
+        "Delete the namespace from your operator name.  ",
+        ERROR_CONTEXT
+      );
+    } else {
+      TORCH_CHECK(false,
+        IMPL_PRELUDE,
+        "Invalid explicit namespace (", *ns_opt, ") in operator name.  "
+        "Move this definition to ", kind_, " block for this namespace "
+        "and delete the explicit namespace from your operator name.  ",
+        ERROR_CONTEXT
+      );
+    }
+  } else {
+    bool b = name.setNamespaceIfNotSet(ns_->c_str());
+    TORCH_INTERNAL_ASSERT(b, ERROR_CONTEXT);
+  }
+  TORCH_CHECK(!(f.dispatch_key_.has_value() && dispatch_key_.has_value()),
+    IMPL_PRELUDE,
+    "Explicitly provided dispatch key (", *f.dispatch_key_, ") is inconsistent "
+    "with the dispatch key of the enclosing ", kind_, " block (", *dispatch_key_, ").  "
+    "Please declare a separate ", kind_, " block for this dispatch key and "
+    "move your impl() there.  "
+    ERROR_CONTEXT
+  );
   auto dispatch_key = f.dispatch_key_.has_value() ? f.dispatch_key_ : dispatch_key_;
-  TORCH_CHECK(dispatch_key.has_value(), "Fallback must be defined for a specific backend, e.g., inside a TORCH_LIBRARY_IMPL.  Registration site was", file_, ":", line_);
+  registrars_.emplace_back(
+    Dispatcher::singleton().registerImpl(
+      std::move(name),
+      dispatch_key,
+      std::move(f.func_),
+      std::move(f.schema_),
+      debugString(std::move(f.debug_), file_, line_)
+    )
+  );
+  return *this;
+}
+#undef IMPL_PRELUDE
+
+Library& Library::_fallback(CppFunction&& f) & {
+  TORCH_CHECK(kind_ == IMPL,
+    "fallback(...): Cannot define an operator inside of a ", kind_, " block.  "
+    "Did you mean to call this function inside a TORCH_LIBRARY_IMPL block?  ",
+    ERROR_CONTEXT);
+  auto dispatch_key = f.dispatch_key_.has_value() ? f.dispatch_key_ : dispatch_key_;
+  TORCH_INTERNAL_ASSERT(dispatch_key.has_value(), ERROR_CONTEXT);
+  TORCH_CHECK(!ns_.has_value(),
+    "fallback(...): Fallback functions which apply to only a single namespace ",
+    "(you specified ", *ns_, ") are not supported.  If you intended to apply ",
+    "this fallback function globally, please define a separate block:\n\n",
+    "    TORCH_LIBRARY_IMPL(_, ", *dispatch_key, ", m) { m.fallback(...); }\n\n",
+    ERROR_CONTEXT);
   registrars_.emplace_back(
     Dispatcher::singleton().registerFallback(
       *dispatch_key,

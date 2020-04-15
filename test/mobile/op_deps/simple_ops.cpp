@@ -73,21 +73,22 @@ namespace {
 // example we are missing schemas for all of the impl registrations
 // here.  The analyzer doesn't really care, as it only really
 // cares about the name
-auto registerer = torch::import()
-  .def("aten::AA(Tensor self) -> Tensor", torch::dispatch(kCPU, &AA_op))
-  .def("aten::BB(Tensor self) -> Tensor", &BB_op)
-  .impl("aten::CC", kCPU, &CC_op)
-  .impl("aten::DD", &DD_op)
-  .impl_UNBOXED("aten::EE", kCPU, EE_op)
-  .def("aten::FF(Tensor self) -> Tensor", CppFunction::makeUnboxedOnly(FF_op))
-  .impl("aten::GG",
+TORCH_LIBRARY(_test, m) {
+  m.def("AA(Tensor self) -> Tensor", torch::dispatch(kCPU, &AA_op));
+  m.def("BB(Tensor self) -> Tensor", &BB_op);
+  m.impl("CC", kCPU, &CC_op);
+  m.impl("DD", &DD_op);
+  m.impl_UNBOXED("EE", kCPU, EE_op);
+  m.def("FF(Tensor self) -> Tensor", CppFunction::makeUnboxedOnly(FF_op));
+  m.impl("GG",
     kCPU, [] (Tensor a) -> Tensor {
       return call_FF_op(a);
-    })
-  .impl("aten::HH",
+    });
+  m.impl("HH",
     [] (Tensor a) -> Tensor {
       return a;
     });
+}
 
 } // namespace
 
