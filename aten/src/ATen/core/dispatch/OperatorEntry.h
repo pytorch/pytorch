@@ -39,7 +39,7 @@ public:
   OperatorEntry& operator=(OperatorEntry&&) noexcept = delete;
 
   const FunctionSchema& schema() const {
-    TORCH_INTERNAL_ASSERT(schema_.has_value());
+    TORCH_INTERNAL_ASSERT(schema_.has_value(), "Tried to access the schema for ", name_, " which doesn't have a schema registered yet");
     return *schema_;
   }
   bool hasSchema() const {
