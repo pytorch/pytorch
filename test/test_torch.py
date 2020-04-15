@@ -14328,7 +14328,6 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         self.assertEqual(torch.tensor(inputValues, dtype=dtype, device=device).sigmoid(),
                          torch.tensor(expectedOutput, dtype=dtype, device=device), precision_4dps)
 
-    @onlyCPU
     @dtypes(torch.float, torch.double)
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_hardsigmoid(self, device, dtype):
