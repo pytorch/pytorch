@@ -236,13 +236,6 @@ struct TORCH_API Engine {
 
   // Given a pre-populated GraphTask and GraphRoot, computes the backward pass
   // for the graph.
-  // The async_mode is a mode where we run the graph_task in an async way.
-  // when async_mode=True, we will launch execute_graph_task_with_continuation in
-  // a separate thread and return the graph_task->future_results_ immediately.
-  // execute_graph_task_with_continuation will execute the graph task from its
-  // associated ready_queue until the queue is empty, and re-launch it to the end
-  // of thread pool tasks' queue, this is so that we don't block the computation
-  // and IO, which is used by the Distributed Autograd Engine.
   //
   // NB: This API should only be used by internal autograd specific
   // machinery and shouldn't be exposed to users in anyway.
@@ -250,18 +243,19 @@ struct TORCH_API Engine {
       const std::shared_ptr<GraphTask>& graph_task,
       std::shared_ptr<Node> graph_root);
 
-  // Enqueues a blocked task for execution on the CPU thread. A blocked task is
-  // basically a task that isn't triggered automatically to be
-  // 'ready to execute' by the autograd engine. This task needs to be unblocked
-  // for execution via an external mechanism. This method assumes that
+  // Given a pre-populated GraphTask and a root node, compute the backward pass
+  // for the autograd graph until the graph task ready queue is empty.
+  //
+  // This method is being used in the Distributed Autograd Engine, it assumes that
   // the appropriate GraphTask has already been initialized appropriately.
-  // Another important part is that this does not increment 'outstanding_tasks_'
-  // in the appropriate GraphTask. It is assumed we've already done this before
-  // hand for this task (to ensure we block for its execution). This is useful
-  // in the distributed autograd case where we need to increment
-  // 'outstanding_tasks_' first to indicate the local autograd engine needs to
-  // wait for this task, but the task might actually be received later over the
-  // network for execution.
+  //
+  // When `incrementOutstandingTasks=false`, the function does not increment 
+  // 'outstanding_tasks_' in the appropriate GraphTask. It is assumed we've already
+  // done this before hand for this task (to ensure we don't pre-mark this graph_task
+  // as completed). This is useful in the distributed autograd case where we need to
+  // increment 'outstanding_tasks_' first to indicate the local autograd engine the
+  // graph task is not completed until it receives the signals from other workers
+  // over the network.
  std::shared_ptr<FutureVariableList> execute_graph_task_until_ready_queue_empty(
      const std::shared_ptr<GraphTask>& graph_task,
      std::shared_ptr<Node> root_to_execute,

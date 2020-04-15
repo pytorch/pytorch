@@ -816,6 +816,9 @@ std::shared_ptr<FutureVariableList> Engine::execute_graph_task_until_ready_queue
   graph_task_rq->push(
       NodeTask(graph_task, std::move(root_to_execute), InputBuffer(0)),
       incrementOutstandingTasks);
+
+  set_device(CPU_DEVICE);
+  graph_task->owner_ = worker_device;
   while(!graph_task_rq->empty()) {
     NodeTask task = graph_task_rq->pop();
     std::shared_ptr<GraphTask> local_graph_task;
@@ -829,8 +832,9 @@ std::shared_ptr<FutureVariableList> Engine::execute_graph_task_until_ready_queue
           evaluate_function(local_graph_task, task.fn_.get(), task.inputs_);
         } catch (std::exception& e) {
           thread_on_exception(local_graph_task, task.fn_, e);
-          // early return in error so that we immediately stop the execution
-          // of this GraphTask and return the future with proper ErrorMessage
+          // break the loop in error so that we immediately stop the execution
+          // of this GraphTask, mark it completed if necessary and return the
+          // future with proper ErrorMessage
           break;
         }
       }

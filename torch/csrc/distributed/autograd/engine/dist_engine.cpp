@@ -15,8 +15,8 @@ using torch::autograd::Engine;
 using torch::autograd::FutureVariableList;
 using torch::autograd::GraphRoot;
 using torch::autograd::GraphTask;
-using torch::autograd::ReadyQueue;
 using torch::autograd::Node;
+using torch::autograd::ReadyQueue;
 using torch::autograd::validate_outputs;
 using torch::autograd::variable_list;
 
@@ -90,7 +90,6 @@ void DistEngine::computeDependencies(
       /* depth */ 0,
       /* cpu_ready_queue */ cpu_ready_queue,
       /* exit_on_error */ true);
-
 
   // Run BFS to traverse the graph locally. The roots of the graph are
   // GraphRoot and all send functions for this autograd context.
@@ -202,9 +201,10 @@ std::shared_ptr<rpc::FutureMessage> DistEngine::runEngineAndAccumulateGradients(
   autogradContext->clearOutstandingRpcs();
 
   auto graphTask = autogradContext->retrieveGraphTask();
-  auto futureGrads = engine_.execute_graph_task_until_ready_queue_empty(/*graph_task*/graphTask,
-                                                                        /*root_to_execute*/graphRoot,
-                                                                        /*incrementOutstandingTasks*/incrementOutstandingTasks);
+  auto futureGrads = engine_.execute_graph_task_until_ready_queue_empty(
+      /*graph_task*/ graphTask,
+      /*root_to_execute*/ graphRoot,
+      /*incrementOutstandingTasks*/ incrementOutstandingTasks);
 
   // Build a future that waits for the callbacks to execute (since callbacks
   // execute after the original future is completed). This ensures we return a
@@ -274,12 +274,14 @@ std::shared_ptr<rpc::FutureMessage> DistEngine::executeSendFunctionAsync(
     initializedContextIds_.insert(autogradContext->contextId());
     lock.unlock();
 
-
     // Enqueue the current send function.
     auto graphTask = autogradContext->retrieveGraphTask();
     // Run the autograd engine.
     auto accumulateGradFuture = runEngineAndAccumulateGradients(
-        autogradContext, sendFunction, outputEdges, /*incrementOutstandingTasks=*/false);
+        autogradContext,
+        sendFunction,
+        outputEdges,
+        /*incrementOutstandingTasks=*/false);
 
     // Build the 'uber' future that waits for everything.
     auto callbackFuture = std::make_shared<rpc::FutureMessage>();
@@ -333,9 +335,10 @@ std::shared_ptr<rpc::FutureMessage> DistEngine::executeSendFunctionAsync(
   } else {
     lock.unlock();
     auto graphTask = autogradContext->retrieveGraphTask();
-    engine_.execute_graph_task_until_ready_queue_empty(/*graph_task*/graphTask,
-                                                       /*root_to_execute*/sendFunction,
-                                                       /*incrementOutstandingTasks*/false);
+    engine_.execute_graph_task_until_ready_queue_empty(
+        /*graph_task*/ graphTask,
+        /*root_to_execute*/ sendFunction,
+        /*incrementOutstandingTasks*/ false);
     return std::make_shared<rpc::FutureMessage>(rpc::Message());
   }
 }
@@ -418,12 +421,15 @@ std::unordered_map<std::string, std::string> DistEngine::getDebugInfo() const {
   std::unordered_map<std::string, std::string> debugInfo;
   auto& DistAutogradContainer = DistAutogradContainer::getInstance();
   debugInfo[kNumBackwardPasses] = std::to_string(numBackwardPasses());
-  // fill in all cpu queue size information for each graph task of the context_id
-  // in initializedContextIds_
+  // fill in all cpu queue size information for each graph task of the
+  // context_id in initializedContextIds_
   std::lock_guard<std::mutex> guard(initializedContextIdsLock_);
-  for(auto context_id : initializedContextIds_) {
-    std::shared_ptr<torch::autograd::GraphTask> graph_task = DistAutogradContainer.retrieveContext(context_id)->retrieveGraphTask();
-    std::string kGraphTaskCPUQueueSize = "context_id: "  + std::to_string(context_id) + " graph_task_cpu_queue_size";
+  for (auto context_id : initializedContextIds_) {
+    std::shared_ptr<torch::autograd::GraphTask> graph_task =
+        DistAutogradContainer.retrieveContext(context_id)->retrieveGraphTask();
+    std::string kGraphTaskCPUQueueSize =
+        "context_id: " + std::to_string(context_id) +
+        " graph_task_cpu_queue_size";
     debugInfo[kGraphTaskCPUQueueSize] =
         std::to_string(engine_.ready_queue_size(graph_task, at::kCPU));
   }
