@@ -356,15 +356,11 @@ class TestQuantizedOps(TestCase):
             dqX = qX.dequantize()
 
             # Enforce non-homogeneous inputs
-            nonzero_var_in_each_layer = sum(
-                1 if ((dqX[i] - dqX[i].min()) / (dqX[i].max() - dqX[i].min() + 1e-5)).std() > 1e-2 else 0
-                for i in range(dqX.shape[0])
-            ) == dqX.shape[0]
-            assume(nonzero_var_in_each_layer)
             enough_unique_vals_in_each_layer = sum(
                 1 if (
                     dqX[i].shape[0] < 5 or
-                    float(torch.unique(dqX[i]).shape[0]) / dqX[i].shape[0] > 0.01) else 0
+                    float(torch.unique(dqX[i]).shape[0]) / dqX[i].shape[0] > 0.01
+                ) else 0
                 for i in range(dqX.shape[0])
             ) == dqX.shape[0]
             assume(enough_unique_vals_in_each_layer)
