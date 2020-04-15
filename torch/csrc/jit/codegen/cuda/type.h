@@ -73,6 +73,8 @@ enum class UnaryOpType {
   Trunc
 };
 
+// TODO: Order of this list is important as it affects type promotion. it's not
+// in the right order now.
 enum class BinaryOpType {
   // Math Ops
   Add,
@@ -83,11 +85,11 @@ enum class BinaryOpType {
   Max,
   Min,
   // Int operations, leave position oif Mod we depend on its location of first
-  Mod,
   Mul,
   Pow,
   Remainder,
   Sub,
+  Mod,
   //TypeAs,
 
   // Logical Ops
