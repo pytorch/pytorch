@@ -1179,7 +1179,10 @@ class Module(object):
     def _replicate_for_data_parallel(self):
         replica = self.__new__(type(self))
         replica.__dict__ = self.__dict__.copy()
-        replica._parameters = replica._parameters.copy()
+
+        # replicas do not have parameters themselves, the replicas reference the original
+        # module.
+        replica._parameters = OrderedDict()
         replica._buffers = replica._buffers.copy()
         replica._modules = replica._modules.copy()
 
