@@ -8,7 +8,7 @@ $extra_headers
 namespace at {
 
 namespace {
-auto registerer = torch::import()
+TORCH_LIBRARY_FRAGMENT_THIS_API_IS_FOR_PER_OP_REGISTRATION_ONLY(aten, m) {
   ${function_registrations};
 }
 

@@ -2,6 +2,8 @@
 
 #include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
+#include <c10/util/Optional.h>
+#include <c10/util/string_view.h>
 #include <string>
 #include <utility>
 #include <ostream>
@@ -15,18 +17,30 @@ struct OperatorName final {
   OperatorName(std::string name, std::string overload_name)
       : name(std::move(name)), overload_name(std::move(overload_name)) {}
 
-  void setNamespaceIfNotSet(const char* ns) {
-    // TODO: slow!  Fix internal data structures so I don't have to paste the
-    // names together
+  // TODO: These two functions below are slow!  Fix internal data structures so
+  // I don't have to manually reconstruct the namespaces!
+
+  // Return the namespace of this OperatorName, if it exists.  The
+  // returned string_view is only live as long as the OperatorName
+  // exists and name is not mutated
+  c10::optional<c10::string_view> getNamespace() const {
+    auto pos = name.find("::");
+    if (pos == std::string::npos) {
+      return c10::nullopt;
+    } else {
+      return c10::make_optional(c10::string_view(name.data(), pos));
+    }
+  }
+
+  // Returns true if we successfully set the namespace
+  bool setNamespaceIfNotSet(const char* ns) {
     std::ostringstream oss;
-    if (name.find("::") == std::string::npos) {
+    if (!getNamespace().has_value()) {
       oss << ns << "::" << name;
       name = oss.str();
+      return true;
     } else {
-      // TODO: This error message assumes that this is called only from
-      // the op registration API (which is currently true
-      TORCH_CHECK(false,
-        "Attempted to def/impl operator ", name, " which is explicitly qualified with a namespace, but you were defining a TORCH_LIBRARY for ", ns, ".  This is not allowed; all TORCH_LIBRARY definitions must be unqualified.  Did you mean to use TORCH_LIBRARY_IMPL?");
+      return false;
     }
   }
 };

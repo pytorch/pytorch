@@ -4,6 +4,7 @@ import errno
 import fcntl
 import multiprocessing
 import os
+import six
 import sys
 import time
 import tempfile
@@ -2260,7 +2261,18 @@ if BACKEND == "gloo" or BACKEND == "nccl":
         def _spawn_process(self, rank):
             os.environ["RANK"] = str(rank)
             name = "process " + str(rank)
-            process = multiprocessing.Process(target=self._run, name=name, args=(rank,))
+            # TODO: test_distributed.py test suite does not work with spawn
+            # mode, so we enforce fork mode for now. In the long term, we should
+            # enable spawn mode and refactor this suite to inherit from
+            # common_distributed.MultiProcessTestCase.
+            if six.PY3:
+                # Note: explicitly specifying fork, as spawn is the default in
+                # py3.8+ on macos.
+                proc_handler = multiprocessing.get_context("fork").Process
+            else:
+                # fork is the default on Python 2
+                proc_handler = multiprocessing.Process
+            process = proc_handler(target=self._run, name=name, args=(rank,))
             process.start()
             return process
 

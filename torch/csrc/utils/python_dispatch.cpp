@@ -133,9 +133,9 @@ void initDispatchBindings(PyObject* module) {
     // This is a wee bit dodgy right now, but the "underlying" API is much
     // easier to test than the high level (using TORCH_LIBRARY, e.g.)
     if (name.empty()) {
-      return std::make_unique<c10::Library>("_", c10::DispatchKey::CatchAll, __FILE__, __LINE__);
+      return std::make_unique<c10::Library>(c10::Library::FRAGMENT, "_", c10::DispatchKey::CatchAll, "/dev/null", 0);
     } else {
-      return std::make_unique<c10::Library>(name, __FILE__, __LINE__);
+      return std::make_unique<c10::Library>(c10::Library::FRAGMENT, name, c10::nullopt, "/dev/null", 0);
     }
   });
 
