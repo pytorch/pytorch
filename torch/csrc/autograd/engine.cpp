@@ -933,10 +933,10 @@ std::shared_ptr<FutureVariableList> Engine::execute_with_graph_task(
   return graph_task->future_result_;
 }
 
-void Engine::mark_graph_task_completed(const std::shared_ptr<GraphTask>& graph_task) {
+void Engine::mark_graph_task_completed(
+    const std::shared_ptr<GraphTask>& graph_task) {
   // Allow only one thread one attempt to process this logic.
-  if (graph_task->future_completed_.exchange(true) ||
-      graph_task->future_result_->completed()) {
+  if (graph_task->future_completed_.exchange(true)) {
     // Future is already marked as completed.
     return;
   }
