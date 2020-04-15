@@ -5,7 +5,11 @@ export TZ=UTC
 tagged_version() {
   # Grabs version from either the env variable CIRCLE_TAG
   # or the pytorch git described version
-  GIT_DESCRIBE="git --git-dir ${workdir}/pytorch/.git describe"
+  if [[ "$OSTYPE" == "msys" ]]; then
+    GIT_DESCRIBE="git --git-dir ${workdir}/p/.git describe"
+  else
+    GIT_DESCRIBE="git --git-dir ${workdir}/pytorch/.git describe"
+  fi
   if [[ -n "${CIRCLE_TAG:-}" ]]; then
     echo "${CIRCLE_TAG}"
   elif ${GIT_DESCRIBE} --exact --tags >/dev/null; then
@@ -20,6 +24,9 @@ tagged_version() {
 if [[ "$(uname)" == Darwin ]]; then
   # macos executor (builds and tests)
   workdir="/Users/distiller/project"
+elif [[ "$OSTYPE" == "msys" ]]; then
+  # windows executor (builds and tests)
+  workdir="/c/w"
 elif [[ -d "/home/circleci/project" ]]; then
   # machine executor (binary tests)
   workdir="/home/circleci/project"
@@ -36,7 +43,15 @@ configs=($BUILD_ENVIRONMENT)
 export PACKAGE_TYPE="${configs[0]}"
 export DESIRED_PYTHON="${configs[1]}"
 export DESIRED_CUDA="${configs[2]}"
-export DESIRED_DEVTOOLSET="${configs[3]:-}"
+if [[ "${BUILD_FOR_SYSTEM:-}" == "windows" ]]; then
+  export DESIRED_DEVTOOLSET=""
+  export LIBTORCH_CONFIG="${configs[3]:-}"
+  if [[ "$LIBTORCH_CONFIG" == 'debug' ]]; then
+    export DEBUG=1
+  fi
+else
+  export DESIRED_DEVTOOLSET="${configs[3]:-}"
+fi
 if [[ "$PACKAGE_TYPE" == 'libtorch' ]]; then
   export BUILD_PYTHONLESS=1
 fi
@@ -109,6 +124,10 @@ export DESIRED_CUDA="$DESIRED_CUDA"
 export LIBTORCH_VARIANT="${LIBTORCH_VARIANT:-}"
 export BUILD_PYTHONLESS="${BUILD_PYTHONLESS:-}"
 export DESIRED_DEVTOOLSET="$DESIRED_DEVTOOLSET"
+if [[ "${BUILD_FOR_SYSTEM:-}" == "windows" ]]; then
+  export LIBTORCH_CONFIG="${LIBTORCH_CONFIG:-}"
+  export DEBUG="${DEBUG:-}"
+fi
 
 export DATE="$DATE"
 export NIGHTLIES_DATE_PREAMBLE=1.6.0.dev
@@ -128,8 +147,13 @@ export DOCKER_IMAGE="$DOCKER_IMAGE"
 
 export workdir="$workdir"
 export MAC_PACKAGE_WORK_DIR="$workdir"
-export PYTORCH_ROOT="$workdir/pytorch"
-export BUILDER_ROOT="$workdir/builder"
+if [[ "$OSTYPE" == "msys" ]]; then
+  export PYTORCH_ROOT="$workdir/p"
+  export BUILDER_ROOT="$workdir/b"
+else
+  export PYTORCH_ROOT="$workdir/pytorch"
+  export BUILDER_ROOT="$workdir/builder"
+fi
 export MINICONDA_ROOT="$workdir/miniconda"
 export PYTORCH_FINAL_PACKAGE_DIR="$workdir/final_pkgs"
 
