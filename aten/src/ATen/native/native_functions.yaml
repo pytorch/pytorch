@@ -5456,6 +5456,36 @@
     CPU: _min_out_cpu
     CUDA: legacy::cuda::_th_min_out
 
+- func: bucketize.Tensor(Tensor self, Tensor boundaries, *, bool out_int32=False, bool right=False) -> Tensor
+  dispatch:
+    CPU: bucketize_cpu
+    CUDA: bucketize_cuda
+
+- func: bucketize.Tensor_out(Tensor self, Tensor boundaries, *, bool out_int32=False, bool right=False, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: bucketize_out_cpu
+    CUDA: bucketize_out_cuda
+
+- func: bucketize.Scalar(Scalar self, Tensor boundaries, *, bool out_int32=False, bool right=False) -> Tensor
+  dispatch:
+    CPU: bucketize_cpu
+    CUDA: bucketize_cuda
+
+- func: searchsorted.Tensor(Tensor sorted_sequence, Tensor self, *, bool out_int32=False, bool right=False) -> Tensor
+  dispatch:
+    CPU: searchsorted_cpu
+    CUDA: searchsorted_cuda
+
+- func: searchsorted.Tensor_out(Tensor sorted_sequence, Tensor self, *, bool out_int32=False, bool right=False, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: searchsorted_out_cpu
+    CUDA: searchsorted_out_cuda
+
+- func: searchsorted.Scalar(Tensor sorted_sequence, Scalar self, *, bool out_int32=False, bool right=False) -> Tensor
+  dispatch:
+    CPU: searchsorted_cpu
+    CUDA: searchsorted_cuda
+
 ## NN wrappers
 
 - func: mse_loss.out(Tensor self, Tensor target, int reduction=Mean, *, Tensor(a!) out) -> Tensor(a!)
