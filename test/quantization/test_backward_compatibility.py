@@ -90,7 +90,7 @@ class TestSerialization(TestCase):
     def test_conv2d_relu(self):
         # quantized conv module
         qconv = nniq.ConvReLU2d(3, 3, kernel_size=3, stride=1, padding=0, dilation=1,
-                               groups=1, bias=True, padding_mode="zeros")
+                                groups=1, bias=True, padding_mode="zeros")
         self._test_op(qconv)
         # TODO: graph mode quantized conv2d module
 
@@ -114,7 +114,7 @@ class TestSerialization(TestCase):
     def test_conv3d_relu(self):
         # quantized conv module
         qconv = nniq.ConvReLU3d(3, 3, kernel_size=3, stride=1, padding=0, dilation=1,
-                               groups=1, bias=True, padding_mode="zeros")
+                                groups=1, bias=True, padding_mode="zeros")
         self._test_op(qconv)
         # TODO: graph mode quantized conv3d module
 
