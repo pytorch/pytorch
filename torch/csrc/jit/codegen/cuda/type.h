@@ -89,10 +89,12 @@ enum class BinaryOpType {
   Pow,
   Remainder,
   Sub,
-  Mod,
   //TypeAs,
 
   // Logical Ops
+  // Int operations, leave position oif Mod we depend on its location of first
+  Mod,
+  CeilDiv,
   And,
   Eq,
   GE,

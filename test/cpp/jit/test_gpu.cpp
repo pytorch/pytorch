@@ -606,7 +606,7 @@ void testGPU_FusionParser() {
   GPULower gpulw(&fusion);
   std::stringstream cdg;
   gpulw.printKernel(cdg);
-  /*if (ref.str().size() != cdg.str().size() ||
+  if (ref.str().size() != cdg.str().size() ||
       ref.str().compare(cdg.str()) != 0) {
     std::cerr
         << " Codegen mismatch, codegen possibly changed, or is incorrect.\n"
@@ -616,7 +616,7 @@ void testGPU_FusionParser() {
         << ref.str() << "\n========= RESULT ========== \n"
         << cdg.str() << "\n=================" << std::endl;
     TORCH_CHECK(false);
-  }*/
+  }
 }
 
 void testGPU_FusionDependency() {
