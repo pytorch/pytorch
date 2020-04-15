@@ -14,7 +14,6 @@ from torch.testing._internal.common_utils import TestCase, run_tests, skipIfRocm
 from torch.testing._internal.common_cuda import TEST_CUDA
 from numbers import Number
 from torch.autograd.gradcheck import gradcheck
-from packaging import version
 
 # load_tests from torch.testing._internal.common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -919,7 +918,7 @@ class TestSparse(TestCase):
         "bmm sparse-dense CUDA is not yet supported in Windows, at least up to CUDA 10.1"
     )
     @unittest.skipIf(
-        TEST_CUDA and (version.parse(torch.version.cuda) < version.parse("10.1")),
+        TEST_CUDA and ([int(x) for x in torch.version.cuda.split(".")] < [10, 1]),
         "bmm sparse-dense requires CUDA 10.1 or greater"
     )
     def test_bmm(self):
@@ -983,7 +982,7 @@ class TestSparse(TestCase):
         "bmm sparse-dense CUDA is not yet supported in Windows, at least up to CUDA 10.1"
     )
     @unittest.skipIf(
-        version.parse(torch.version.cuda) < version.parse("10.1"),
+        [int(x) for x in torch.version.cuda.split(".")] < [10, 1],
         "bmm sparse-dense requires CUDA 10.1 or greater"
     )
     def test_bmm_deterministic(self):
@@ -1031,7 +1030,7 @@ class TestSparse(TestCase):
 
     @cuda_only
     @unittest.skipIf(
-        version.parse(torch.version.cuda) >= version.parse("10.1"),
+        [int(x) for x in torch.version.cuda.split(".")] >= [10, 1],
         "this test ensures bmm gives error if CUDA version is less than 10.1"
     )
     def test_bmm_cuda_version_error(self):
