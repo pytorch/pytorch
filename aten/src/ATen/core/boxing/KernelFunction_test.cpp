@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
 #include <ATen/core/boxing/KernelFunction.h>
-#include <ATen/core/boxing/test_helpers.h>
+#include <ATen/core/boxing/impl/test_helpers.h>
 #include <ATen/core/op_registration/op_registration.h>
 
 using std::vector;
@@ -186,26 +186,6 @@ TEST(KernelFunctionTest, givenUnboxedFunctor_withReturn_whenCallingUnboxed_thenW
 
 TEST(KernelFunctionTest, givenUnboxedFunctor_withoutReturn_whenCallingUnboxed_thenWorks) {
   KernelFunction func = KernelFunction::makeFromUnboxedFunctor<false, kernels::unboxed_functor_without_return>(std::unique_ptr<OperatorKernel>(std::make_unique<kernels::unboxed_functor_without_return>()));
-  kernels::expectUnboxedCallingWithoutReturnWorks(func);
-}
-
-TEST(KernelFunctionTest, givenUnboxedFunctorFactory_withReturn_whenCallingBoxed_thenWorks) {
-  KernelFunction func = KernelFunction::makeFromUnboxedFunctorFactory<kernels::unboxed_functor_with_return>(kernels::unboxed_functor_with_return_factory());
-  kernels::expectBoxedCallingWithReturnWorks(func);
-}
-
-TEST(KernelFunctionTest, givenUnboxedFunctorFactory_withoutReturn_whenCallingBoxed_thenWorks) {
-  KernelFunction func = KernelFunction::makeFromUnboxedFunctorFactory<kernels::unboxed_functor_without_return>(kernels::unboxed_functor_without_return_factory());
-  kernels::expectBoxedCallingWithoutReturnWorks(func);
-}
-
-TEST(KernelFunctionTest, givenUnboxedFunctorFactory_withReturn_whenCallingUnboxed_thenWorks) {
-  KernelFunction func = KernelFunction::makeFromUnboxedFunctorFactory<kernels::unboxed_functor_with_return>(kernels::unboxed_functor_with_return_factory());
-  kernels::expectUnboxedCallingWithReturnWorks(func);
-}
-
-TEST(KernelFunctionTest, givenUnboxedFunctorFactory_withoutReturn_whenCallingUnboxed_thenWorks) {
-  KernelFunction func = KernelFunction::makeFromUnboxedFunctorFactory<kernels::unboxed_functor_without_return>(kernels::unboxed_functor_without_return_factory());
   kernels::expectUnboxedCallingWithoutReturnWorks(func);
 }
 

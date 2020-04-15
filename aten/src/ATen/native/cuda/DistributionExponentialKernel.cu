@@ -3,7 +3,7 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/AccumulateType.h>
-#include <ATen/CUDAGenerator.h>
+#include <ATen/CUDAGeneratorImpl.h>
 #include <ATen/native/UnaryOps.h>
 #include <ATen/native/cuda/DistributionTemplates.h>
 
@@ -29,8 +29,8 @@
 
 namespace at { namespace native {
 
-void exponential_kernel(TensorIterator& iter, double lambda_, Generator gen_) {
-  auto gen = get_generator_or_default<CUDAGenerator>(gen_, cuda::detail::getDefaultCUDAGenerator());
+void exponential_kernel(TensorIterator& iter, double lambda_, c10::optional<Generator> gen_) {
+  auto gen = get_generator_or_default<CUDAGeneratorImpl>(gen_, cuda::detail::getDefaultCUDAGenerator());
   // Note that HIP doesn't support std::nextafter in device code.
   auto nextafter_1_0_float = std::nextafter(1.0f, 0.0f);
   auto nextafter_1_0_double = std::nextafter(1.0, 0.0);

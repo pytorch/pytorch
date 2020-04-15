@@ -1569,6 +1569,7 @@ def sigmoid(input):
 
 
 def hardsigmoid(input, inplace=False):
+    # type: (Tensor, bool) -> Tensor
     r"""hardsigmoid(input) -> Tensor
 
     Applies the element-wise function
@@ -1643,6 +1644,7 @@ def bilinear(input1, input2, weight, bias=None):
 
 
 def hardswish(input, inplace=False):
+    # type: (Tensor, bool) -> Tensor
     r"""Applies the hardswish function, element-wise, as described in the paper:
 
     `Searching for MobileNetV3`_.
@@ -2880,7 +2882,7 @@ def _interp_output_size(dim, closed_over_args):  # noqa: F811
 
         is_float_scale_factor = False
         for scale in scale_factors:
-            is_float_scale_factor = math.floor(scale) == scale
+            is_float_scale_factor = math.floor(scale) != scale
             if is_float_scale_factor:
                 break
 
