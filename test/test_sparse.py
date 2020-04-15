@@ -918,7 +918,8 @@ class TestSparse(TestCase):
         "bmm sparse-dense CUDA is not yet supported in Windows, at least up to CUDA 10.1"
     )
     @unittest.skipIf(
-        TEST_CUDA and ([int(x) for x in torch.version.cuda.split(".")] < [10, 1]),
+        TEST_CUDA and (not torch.version.cuda
+            or [int(x) for x in torch.version.cuda.split(".")] < [10, 1]),
         "bmm sparse-dense requires CUDA 10.1 or greater"
     )
     def test_bmm(self):
@@ -982,7 +983,8 @@ class TestSparse(TestCase):
         "bmm sparse-dense CUDA is not yet supported in Windows, at least up to CUDA 10.1"
     )
     @unittest.skipIf(
-        [int(x) for x in torch.version.cuda.split(".")] < [10, 1],
+        (not torch.version.cuda
+            or [int(x) for x in torch.version.cuda.split(".")] < [10, 1]),
         "bmm sparse-dense requires CUDA 10.1 or greater"
     )
     def test_bmm_deterministic(self):
@@ -1030,7 +1032,8 @@ class TestSparse(TestCase):
 
     @cuda_only
     @unittest.skipIf(
-        [int(x) for x in torch.version.cuda.split(".")] >= [10, 1],
+        (torch.version.cuda
+            and [int(x) for x in torch.version.cuda.split(".")] >= [10, 1]),
         "this test ensures bmm gives error if CUDA version is less than 10.1"
     )
     def test_bmm_cuda_version_error(self):
