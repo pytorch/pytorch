@@ -10555,6 +10555,20 @@ a")
         v = torch.rand(10, 3)
         self.assertEqual(torch.chunk(v, dim=0, chunks=2)[0], foo(v))
 
+    def test_trace_mixed_by_script_with_dict_output(self):
+        @torch.jit.script
+        def return_dict(input: torch.Tensor) -> Dict[torch.Tensor, torch.Tensor]:
+            return {input : input + 1}
+
+        class TraceModule(torch.nn.Module):
+            def forward(self, input):
+                dict = return_dict(input)
+                return dict[input] + list(dict.keys())[0]
+
+        x = torch.rand(10, 3)
+        tm = torch.jit.trace(TraceModule(), x)
+        self.assertEqual(tm(x), x + 1 + x)
+
     def test_script_copy(self):
         class M(torch.nn.Module):
             __annotations__ = {
