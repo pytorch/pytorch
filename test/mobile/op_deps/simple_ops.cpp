@@ -74,14 +74,28 @@ namespace {
 // here.  The analyzer doesn't really care, as it only really
 // cares about the name
 TORCH_LIBRARY(_test, m) {
-  m.def("AA(Tensor self) -> Tensor", torch::dispatch(kCPU, &AA_op));
-  m.def("BB(Tensor self) -> Tensor", &BB_op);
-  m.impl("CC", kCPU, &CC_op);
-  m.impl("DD", &DD_op);
-  m.impl_UNBOXED("EE", kCPU, EE_op);
-  m.def("FF(Tensor self) -> Tensor", CppFunction::makeUnboxedOnly(FF_op));
+  m.def("AA(Tensor self) -> Tensor");
+  m.impl("AA", CppFunction::makeUnboxedOnly(AA_op));
+
+  m.def("BB(Tensor self) -> Tensor");
+  m.impl("BB", &BB_op);
+
+  m.def("CC(Tensor self) -> Tensor", &CC_op);
+  m.def("DD", &DD_op);
+}
+
+TORCH_LIBRARY_FRAGMENT_THIS_API_IS_FOR_PER_OP_REGISTRATION_ONLY(_test, m) {
+  m.def("EE(Tensor self) -> Tensor");
+  m.def("FF(Tensor self) -> Tensor");
+  m.def("GG(Tensor self) -> Tensor");
+  m.def("HH(Tensor self) -> Tensor");
+}
+
+TORCH_LIBRARY_IMPL(_test, CPU, m) {
+  m.impl_UNBOXED("EE", EE_op);
+  m.impl("FF", CppFunction::makeUnboxedOnly(FF_op));
   m.impl("GG",
-    kCPU, [] (Tensor a) -> Tensor {
+    [] (Tensor a) -> Tensor {
       return call_FF_op(a);
     });
   m.impl("HH",
