@@ -255,3 +255,6 @@ TAGS
 
 # clangd background index
 .clangd/
+
+# bazel symlinks
+bazel-*

@@ -50,6 +50,7 @@ static inline __m256i cvtfp32_bf16(const __m256& a, const __m256& b) {
 template <> class Vec256<BFloat16> {
 private:
   __m256i values;
+  static const Vec256<BFloat16> ones;
 public:
   using value_type = uint16_t;
   static constexpr int size() {
@@ -186,34 +187,277 @@ public:
     auto o2 = vop(hi);
     return cvtfp32_bf16(o1, o2);
   }
+  Vec256<BFloat16> abs() const {
+    __m256 lo, hi;
+    cvtbf16_fp32(values, lo, hi);
+    auto mask = _mm256_set1_ps(-0.f);
+    auto o1 = _mm256_andnot_ps(mask, lo);
+    auto o2 = _mm256_andnot_ps(mask, hi);
+    return cvtfp32_bf16(o1, o2);
+  }
+  Vec256<BFloat16> angle() const {
+    return _mm256_set1_epi16(0);
+  }
+  Vec256<BFloat16> real() const {
+    return *this;
+  }
+  Vec256<BFloat16> imag() const {
+    return _mm256_set1_epi16(0);
+  }
+  Vec256<BFloat16> conj() const {
+    return *this;
+  }
+  Vec256<BFloat16> acos() const {
+    return map(Sleef_acosf8_u10);
+  }
+  Vec256<BFloat16> asin() const {
+    return map(Sleef_asinf8_u10);
+  }
+  Vec256<BFloat16> atan() const {
+    return map(Sleef_atanf8_u10);
+  }
+  Vec256<BFloat16> atan2(const Vec256<BFloat16> &b) const {
+    __m256 lo, hi;
+    __m256 b1, b2;
+    cvtbf16_fp32(values, lo, hi);
+    cvtbf16_fp32(b.values, b1, b2);
+    auto o1 = Sleef_atan2f8_u10(lo, b1);
+    auto o2 = Sleef_atan2f8_u10(hi, b2);
+    return cvtfp32_bf16(o1, o2);
+  }
+  Vec256<BFloat16> erf() const {
+    return map(Sleef_erff8_u10);
+  }
+  Vec256<BFloat16> erfc() const {
+    return map(Sleef_erfcf8_u15);
+  }
+  Vec256<BFloat16> erfinv() const {
+    __at_align32__ int16_t tmp[size()];
+    store(tmp);
+    for (int64_t i = 0; i < size(); i++) {
+      tmp[i] = calc_erfinv((float)tmp[i]);
+    }
+    return loadu(tmp);
+  }
   Vec256<BFloat16> exp() const {
     return map(Sleef_expf8_u10);
+  }
+  Vec256<BFloat16> expm1() const {
+    return map(Sleef_expm1f8_u10);
   }
   Vec256<BFloat16> log() const {
     return map(Sleef_logf8_u10);
   }
+  Vec256<BFloat16> log2() const {
+    return map(Sleef_log2f8_u10);
+  }
+  Vec256<BFloat16> log10() const {
+    return map(Sleef_log10f8_u10);
+  }
+  Vec256<BFloat16> log1p() const {
+    return map(Sleef_log1pf8_u10);
+  }
+  Vec256<BFloat16> frac() const;
+  Vec256<BFloat16> sin() const {
+    return map(Sleef_sinf8_u10);
+  }
+  Vec256<BFloat16> sinh() const {
+    return map(Sleef_sinhf8_u10);
+  }
+  Vec256<BFloat16> cos() const {
+    return map(Sleef_cosf8_u10);
+  }
+  Vec256<BFloat16> cosh() const {
+    return map(Sleef_coshf8_u10);
+  }
+  Vec256<BFloat16> ceil() const {
+    __m256 lo, hi;
+    cvtbf16_fp32(values, lo, hi);
+    auto o1 = _mm256_ceil_ps(lo);
+    auto o2 = _mm256_ceil_ps(hi);
+    return cvtfp32_bf16(o1, o2);
+  }
+  Vec256<BFloat16> floor() const {
+    __m256 lo, hi;
+    cvtbf16_fp32(values, lo, hi);
+    auto o1 = _mm256_floor_ps(lo);
+    auto o2 = _mm256_floor_ps(hi);
+    return cvtfp32_bf16(o1, o2);
+  }
+  Vec256<BFloat16> neg() const {
+    __m256 lo, hi;
+    cvtbf16_fp32(values, lo, hi);
+    auto mask = _mm256_set1_ps(-0.f);
+    auto o1 = _mm256_xor_ps(mask, lo);
+    auto o2 = _mm256_xor_ps(mask, hi);
+    return cvtfp32_bf16(o1, o2);
+  }
+  Vec256<BFloat16> round() const {
+    __m256 lo, hi;
+    cvtbf16_fp32(values, lo, hi);
+    auto o1 = _mm256_round_ps(lo, (_MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC));
+    auto o2 = _mm256_round_ps(hi, (_MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC));
+    return cvtfp32_bf16(o1, o2);
+  }
+  Vec256<BFloat16> tan() const {
+    return map(Sleef_tanf8_u10);
+  }
+  Vec256<BFloat16> tanh() const {
+    return map(Sleef_tanhf8_u10);
+  }
+  Vec256<BFloat16> trunc() const {
+    __m256 lo, hi;
+    cvtbf16_fp32(values, lo, hi);
+    auto o1 = _mm256_round_ps(lo, (_MM_FROUND_TO_ZERO | _MM_FROUND_NO_EXC));
+    auto o2 = _mm256_round_ps(hi, (_MM_FROUND_TO_ZERO | _MM_FROUND_NO_EXC));
+    return cvtfp32_bf16(o1, o2);
+  }
+  Vec256<BFloat16> lgamma() const {
+    return map(Sleef_lgammaf8_u10);
+  }
+  Vec256<BFloat16> sqrt() const {
+    __m256 lo, hi;
+    cvtbf16_fp32(values, lo, hi);
+    auto o1 = _mm256_sqrt_ps(lo);
+    auto o2 = _mm256_sqrt_ps(hi);
+    return cvtfp32_bf16(o1, o2);
+  }
+  Vec256<BFloat16> reciprocal() const {
+    __m256 lo, hi;
+    cvtbf16_fp32(values, lo, hi);
+    auto ones = _mm256_set1_ps(1);
+    auto o1 = _mm256_div_ps(ones, lo);
+    auto o2 = _mm256_div_ps(ones, hi);
+    return cvtfp32_bf16(o1, o2);
+  }
+  Vec256<BFloat16> rsqrt() const {
+    __m256 lo, hi;
+    cvtbf16_fp32(values, lo, hi);
+    auto ones = _mm256_set1_ps(1);
+    auto o1 = _mm256_div_ps(ones, _mm256_sqrt_ps(lo));
+    auto o2 = _mm256_div_ps(ones, _mm256_sqrt_ps(hi));
+    return cvtfp32_bf16(o1, o2);
+  }
+  Vec256<BFloat16> pow(const Vec256<BFloat16> &b) const {
+    __m256 lo, hi;
+    __m256 b1, b2;
+    cvtbf16_fp32(values, lo, hi);
+    cvtbf16_fp32(b.values, b1, b2);
+    auto o1 = Sleef_powf8_u10(lo, b1);
+    auto o2 = Sleef_powf8_u10(hi, b2);
+    return cvtfp32_bf16(o1, o2);
+  }
 
+  Vec256<BFloat16> inline operator>(const Vec256<BFloat16>& other) const;
+  Vec256<BFloat16> inline operator<(const Vec256<BFloat16>& other) const;
+  Vec256<BFloat16> inline operator>=(const Vec256<BFloat16>& other) const;
+  Vec256<BFloat16> inline operator<=(const Vec256<BFloat16>& other) const;
+  Vec256<BFloat16> inline operator==(const Vec256<BFloat16>& other) const;
+  Vec256<BFloat16> inline operator!=(const Vec256<BFloat16>& other) const;
+
+  Vec256<BFloat16> eq(const Vec256<BFloat16>& other) const;
+  Vec256<BFloat16> ne(const Vec256<BFloat16>& other) const;
+  Vec256<BFloat16> gt(const Vec256<BFloat16>& other) const;
+  Vec256<BFloat16> ge(const Vec256<BFloat16>& other) const;
+  Vec256<BFloat16> lt(const Vec256<BFloat16>& other) const;
+  Vec256<BFloat16> le(const Vec256<BFloat16>& other) const;
 };
 
-#define DEFINE_BF16_OP(op, func)                                                            \
-template<>                                                                                  \
-Vec256<BFloat16> inline operator op(const Vec256<BFloat16>& a, const Vec256<BFloat16>& b) { \
-  __m256 a_lo, a_hi;                                                                        \
-  __m256 b_lo, b_hi;                                                                        \
-  cvtbf16_fp32(__m256i(a), a_lo, a_hi);                                                     \
-  cvtbf16_fp32(__m256i(b), b_lo, b_hi);                                                     \
-  auto o1 = func(a_lo, b_lo);                                                               \
-  auto o2 = func(a_hi, b_hi);                                                               \
-  return cvtfp32_bf16(o1, o2);                                                              \
+template<typename Op>
+Vec256<BFloat16> static inline bfloat16_binary_op_as_fp32(const Vec256<BFloat16>& a, const Vec256<BFloat16>& b, Op op) {
+  __m256 a_lo, a_hi;
+  __m256 b_lo, b_hi;
+  cvtbf16_fp32(__m256i(a), a_lo, a_hi);
+  cvtbf16_fp32(__m256i(b), b_lo, b_hi);
+  auto o1 = op(a_lo, b_lo);
+  auto o2 = op(a_hi, b_hi);
+  return cvtfp32_bf16(o1, o2);
 }
 
-DEFINE_BF16_OP(+, _mm256_add_ps)
-DEFINE_BF16_OP(-, _mm256_sub_ps)
-DEFINE_BF16_OP(*, _mm256_mul_ps)
-DEFINE_BF16_OP(/, _mm256_div_ps)
-DEFINE_BF16_OP(&, _mm256_and_ps)
-DEFINE_BF16_OP(|, _mm256_or_ps)
-DEFINE_BF16_OP(^, _mm256_xor_ps)
+Vec256<BFloat16> inline Vec256<BFloat16>::operator>(const Vec256<BFloat16>& other) const {
+  return bfloat16_binary_op_as_fp32(*this, other, [](__m256 x, __m256 y) {
+    return _mm256_cmp_ps(x, y, _CMP_GT_OQ);
+  });
+}
+Vec256<BFloat16> inline Vec256<BFloat16>::operator<(const Vec256<BFloat16>& other) const {
+  return bfloat16_binary_op_as_fp32(*this, other, [](__m256 x, __m256 y) {
+    return _mm256_cmp_ps(x, y, _CMP_LT_OQ);
+  });
+}
+Vec256<BFloat16> inline Vec256<BFloat16>::operator>=(const Vec256<BFloat16>& other) const {
+  return bfloat16_binary_op_as_fp32(*this, other, [](__m256 x, __m256 y) {
+    return _mm256_cmp_ps(x, y, _CMP_GE_OQ);
+  });
+}
+Vec256<BFloat16> inline Vec256<BFloat16>::operator<=(const Vec256<BFloat16>& other) const {
+  return bfloat16_binary_op_as_fp32(*this, other, [](__m256 x, __m256 y) {
+    return _mm256_cmp_ps(x, y, _CMP_LE_OQ);
+  });
+}
+Vec256<BFloat16> inline Vec256<BFloat16>::operator==(const Vec256<BFloat16>& other) const {
+  return bfloat16_binary_op_as_fp32(*this, other, [](__m256 x, __m256 y) {
+    return _mm256_cmp_ps(x, y, _CMP_EQ_OQ);
+  });
+}
+Vec256<BFloat16> inline Vec256<BFloat16>::operator!=(const Vec256<BFloat16>& other) const {
+  return bfloat16_binary_op_as_fp32(*this, other, [](__m256 x, __m256 y) {
+    return _mm256_cmp_ps(x, y, _CMP_NEQ_OQ);
+  });
+}
+
+Vec256<BFloat16> inline operator+(const Vec256<BFloat16>& a, const Vec256<BFloat16>& b) {
+  return bfloat16_binary_op_as_fp32(a, b, [](const __m256& x, const __m256& y) { return _mm256_add_ps(x, y); });
+}
+Vec256<BFloat16> inline operator-(const Vec256<BFloat16>& a, const Vec256<BFloat16>& b) {
+  return bfloat16_binary_op_as_fp32(a, b, [](const __m256& x, const __m256& y) { return _mm256_sub_ps(x, y); });
+}
+Vec256<BFloat16> inline operator*(const Vec256<BFloat16>& a, const Vec256<BFloat16>& b) {
+  return bfloat16_binary_op_as_fp32(a, b, [](const __m256& x, const __m256& y) { return _mm256_mul_ps(x, y); });
+}
+Vec256<BFloat16> inline operator/(const Vec256<BFloat16>& a, const Vec256<BFloat16>& b) {
+  return bfloat16_binary_op_as_fp32(a, b, [](const __m256& x, const __m256& y) { return _mm256_div_ps(x, y); });
+}
+
+Vec256<BFloat16> inline operator&(const Vec256<BFloat16>& a, const Vec256<BFloat16>& b) {
+  return _mm256_and_si256(a, b);
+}
+Vec256<BFloat16> inline operator|(const Vec256<BFloat16>& a, const Vec256<BFloat16>& b) {
+  return _mm256_or_si256(a, b);
+}
+Vec256<BFloat16> inline operator^(const Vec256<BFloat16>& a, const Vec256<BFloat16>& b) {
+  return _mm256_xor_si256(a, b);
+}
+
+const Vec256<BFloat16> Vec256<BFloat16>::ones(1.0f);
+
+Vec256<BFloat16> Vec256<BFloat16>::eq(const Vec256<BFloat16>& other) const {
+  return (*this == other) & Vec256<BFloat16>::ones;
+}
+
+Vec256<BFloat16> Vec256<BFloat16>::ne(const Vec256<BFloat16>& other) const {
+  return (*this != other) & Vec256<BFloat16>::ones;
+}
+
+Vec256<BFloat16> Vec256<BFloat16>::gt(const Vec256<BFloat16>& other) const {
+  return (*this > other) & Vec256<BFloat16>::ones;
+}
+
+Vec256<BFloat16> Vec256<BFloat16>::ge(const Vec256<BFloat16>& other) const {
+  return (*this >= other) & Vec256<BFloat16>::ones;
+}
+
+Vec256<BFloat16> Vec256<BFloat16>::lt(const Vec256<BFloat16>& other) const {
+  return (*this < other) & Vec256<BFloat16>::ones;
+}
+
+Vec256<BFloat16> Vec256<BFloat16>::le(const Vec256<BFloat16>& other) const {
+  return (*this <= other) & Vec256<BFloat16>::ones;
+}
+
+// frac. Implement this here so we can use subtraction
+Vec256<BFloat16> Vec256<BFloat16>::frac() const {
+  return *this - this->trunc();
+}
 
 // Implements the IEEE 754 201X `maximum` operation, which propagates NaN if
 // either input is a NaN.
@@ -285,6 +529,20 @@ Vec256<BFloat16> inline clamp_min(const Vec256<BFloat16>& a, const Vec256<BFloat
   auto o1 = _mm256_max_ps(min_lo, a_lo);
   auto o2 = _mm256_max_ps(min_hi, a_hi);
   return cvtfp32_bf16(o1, o2);
+}
+
+template <>
+inline void convert(const BFloat16* src, BFloat16* dst, int64_t n) {
+  int64_t i;
+#pragma unroll
+  for (i = 0; i <= (n - Vec256<BFloat16>::size()); i += Vec256<BFloat16>::size()) {
+    auto vsrc = _mm256_loadu_si256(reinterpret_cast<__m256i*>((void*)(src + i)));
+    _mm256_storeu_si256(reinterpret_cast<__m256i*>((void*)(dst + i)), vsrc);
+  }
+#pragma unroll
+  for (; i < n; i++) {
+    dst[i] = src[i];
+  }
 }
 
 template <>
