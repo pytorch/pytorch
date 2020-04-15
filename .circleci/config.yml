@@ -4223,8 +4223,8 @@ workflows:
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
       - binary_windows_build:
-          name: binary_windows_wheel_3_6_cpu_release_nightly_build
-          build_environment: "wheel 3.6 cpu release"
+          name: binary_windows_wheel_3_6_cpu_nightly_build
+          build_environment: "wheel 3.6 cpu"
           requires:
             - setup
           filters:
@@ -4233,8 +4233,8 @@ workflows:
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
       - binary_windows_build:
-          name: binary_windows_wheel_3_7_cpu_release_nightly_build
-          build_environment: "wheel 3.7 cpu release"
+          name: binary_windows_wheel_3_7_cpu_nightly_build
+          build_environment: "wheel 3.7 cpu"
           requires:
             - setup
           filters:
@@ -4243,8 +4243,8 @@ workflows:
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
       - binary_windows_build:
-          name: binary_windows_wheel_3_8_cpu_release_nightly_build
-          build_environment: "wheel 3.8 cpu release"
+          name: binary_windows_wheel_3_8_cpu_nightly_build
+          build_environment: "wheel 3.8 cpu"
           requires:
             - setup
           filters:
@@ -4253,8 +4253,8 @@ workflows:
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
       - binary_windows_build:
-          name: binary_windows_wheel_3_6_cu92_release_nightly_build
-          build_environment: "wheel 3.6 cu92 release"
+          name: binary_windows_wheel_3_6_cu92_nightly_build
+          build_environment: "wheel 3.6 cu92"
           requires:
             - setup
           filters:
@@ -4263,8 +4263,8 @@ workflows:
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
       - binary_windows_build:
-          name: binary_windows_wheel_3_7_cu92_release_nightly_build
-          build_environment: "wheel 3.7 cu92 release"
+          name: binary_windows_wheel_3_7_cu92_nightly_build
+          build_environment: "wheel 3.7 cu92"
           requires:
             - setup
           filters:
@@ -4273,8 +4273,8 @@ workflows:
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
       - binary_windows_build:
-          name: binary_windows_wheel_3_8_cu92_release_nightly_build
-          build_environment: "wheel 3.8 cu92 release"
+          name: binary_windows_wheel_3_8_cu92_nightly_build
+          build_environment: "wheel 3.8 cu92"
           requires:
             - setup
           filters:
@@ -4283,8 +4283,8 @@ workflows:
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
       - binary_windows_build:
-          name: binary_windows_wheel_3_6_cu101_release_nightly_build
-          build_environment: "wheel 3.6 cu101 release"
+          name: binary_windows_wheel_3_6_cu101_nightly_build
+          build_environment: "wheel 3.6 cu101"
           requires:
             - setup
           filters:
@@ -4293,8 +4293,8 @@ workflows:
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
       - binary_windows_build:
-          name: binary_windows_wheel_3_7_cu101_release_nightly_build
-          build_environment: "wheel 3.7 cu101 release"
+          name: binary_windows_wheel_3_7_cu101_nightly_build
+          build_environment: "wheel 3.7 cu101"
           requires:
             - setup
           filters:
@@ -4303,8 +4303,8 @@ workflows:
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
       - binary_windows_build:
-          name: binary_windows_wheel_3_8_cu101_release_nightly_build
-          build_environment: "wheel 3.8 cu101 release"
+          name: binary_windows_wheel_3_8_cu101_nightly_build
+          build_environment: "wheel 3.8 cu101"
           requires:
             - setup
           filters:
@@ -4313,8 +4313,8 @@ workflows:
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
       - binary_windows_build:
-          name: binary_windows_wheel_3_6_cu102_release_nightly_build
-          build_environment: "wheel 3.6 cu102 release"
+          name: binary_windows_wheel_3_6_cu102_nightly_build
+          build_environment: "wheel 3.6 cu102"
           requires:
             - setup
           filters:
@@ -4323,8 +4323,8 @@ workflows:
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
       - binary_windows_build:
-          name: binary_windows_wheel_3_7_cu102_release_nightly_build
-          build_environment: "wheel 3.7 cu102 release"
+          name: binary_windows_wheel_3_7_cu102_nightly_build
+          build_environment: "wheel 3.7 cu102"
           requires:
             - setup
           filters:
@@ -4333,8 +4333,8 @@ workflows:
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
       - binary_windows_build:
-          name: binary_windows_wheel_3_8_cu102_release_nightly_build
-          build_environment: "wheel 3.8 cu102 release"
+          name: binary_windows_wheel_3_8_cu102_nightly_build
+          build_environment: "wheel 3.8 cu102"
           requires:
             - setup
           filters:
@@ -4343,8 +4343,8 @@ workflows:
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
       - binary_windows_build:
-          name: binary_windows_conda_3_6_cpu_release_nightly_build
-          build_environment: "conda 3.6 cpu release"
+          name: binary_windows_conda_3_6_cpu_nightly_build
+          build_environment: "conda 3.6 cpu"
           requires:
             - setup
           filters:
@@ -4353,8 +4353,8 @@ workflows:
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
       - binary_windows_build:
-          name: binary_windows_conda_3_7_cpu_release_nightly_build
-          build_environment: "conda 3.7 cpu release"
+          name: binary_windows_conda_3_7_cpu_nightly_build
+          build_environment: "conda 3.7 cpu"
           requires:
             - setup
           filters:
@@ -4363,8 +4363,8 @@ workflows:
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
       - binary_windows_build:
-          name: binary_windows_conda_3_8_cpu_release_nightly_build
-          build_environment: "conda 3.8 cpu release"
+          name: binary_windows_conda_3_8_cpu_nightly_build
+          build_environment: "conda 3.8 cpu"
           requires:
             - setup
           filters:
@@ -4373,8 +4373,8 @@ workflows:
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
       - binary_windows_build:
-          name: binary_windows_conda_3_6_cu92_release_nightly_build
-          build_environment: "conda 3.6 cu92 release"
+          name: binary_windows_conda_3_6_cu92_nightly_build
+          build_environment: "conda 3.6 cu92"
           requires:
             - setup
           filters:
@@ -4383,8 +4383,8 @@ workflows:
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
       - binary_windows_build:
-          name: binary_windows_conda_3_7_cu92_release_nightly_build
-          build_environment: "conda 3.7 cu92 release"
+          name: binary_windows_conda_3_7_cu92_nightly_build
+          build_environment: "conda 3.7 cu92"
           requires:
             - setup
           filters:
@@ -4393,8 +4393,8 @@ workflows:
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
       - binary_windows_build:
-          name: binary_windows_conda_3_8_cu92_release_nightly_build
-          build_environment: "conda 3.8 cu92 release"
+          name: binary_windows_conda_3_8_cu92_nightly_build
+          build_environment: "conda 3.8 cu92"
           requires:
             - setup
           filters:
@@ -4403,8 +4403,8 @@ workflows:
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
       - binary_windows_build:
-          name: binary_windows_conda_3_6_cu101_release_nightly_build
-          build_environment: "conda 3.6 cu101 release"
+          name: binary_windows_conda_3_6_cu101_nightly_build
+          build_environment: "conda 3.6 cu101"
           requires:
             - setup
           filters:
@@ -4413,8 +4413,8 @@ workflows:
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
       - binary_windows_build:
-          name: binary_windows_conda_3_7_cu101_release_nightly_build
-          build_environment: "conda 3.7 cu101 release"
+          name: binary_windows_conda_3_7_cu101_nightly_build
+          build_environment: "conda 3.7 cu101"
           requires:
             - setup
           filters:
@@ -4423,8 +4423,8 @@ workflows:
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
       - binary_windows_build:
-          name: binary_windows_conda_3_8_cu101_release_nightly_build
-          build_environment: "conda 3.8 cu101 release"
+          name: binary_windows_conda_3_8_cu101_nightly_build
+          build_environment: "conda 3.8 cu101"
           requires:
             - setup
           filters:
@@ -4433,8 +4433,8 @@ workflows:
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
       - binary_windows_build:
-          name: binary_windows_conda_3_6_cu102_release_nightly_build
-          build_environment: "conda 3.6 cu102 release"
+          name: binary_windows_conda_3_6_cu102_nightly_build
+          build_environment: "conda 3.6 cu102"
           requires:
             - setup
           filters:
@@ -4443,8 +4443,8 @@ workflows:
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
       - binary_windows_build:
-          name: binary_windows_conda_3_7_cu102_release_nightly_build
-          build_environment: "conda 3.7 cu102 release"
+          name: binary_windows_conda_3_7_cu102_nightly_build
+          build_environment: "conda 3.7 cu102"
           requires:
             - setup
           filters:
@@ -4453,8 +4453,8 @@ workflows:
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
       - binary_windows_build:
-          name: binary_windows_conda_3_8_cu102_release_nightly_build
-          build_environment: "conda 3.8 cu102 release"
+          name: binary_windows_conda_3_8_cu102_nightly_build
+          build_environment: "conda 3.8 cu102"
           requires:
             - setup
           filters:
@@ -6219,11 +6219,11 @@ workflows:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           context: org-member
       - binary_windows_upload:
-          name: binary_windows_wheel_3_6_cpu_release_nightly_upload
-          build_environment: "wheel 3.6 cpu release"
+          name: binary_windows_wheel_3_6_cpu_nightly_upload
+          build_environment: "wheel 3.6 cpu"
           requires:
             - setup
-            - binary_windows_wheel_3_6_cpu_release_nightly_build
+            - binary_windows_wheel_3_6_cpu_nightly_build
           filters:
             branches:
               only: nightly
@@ -6231,11 +6231,11 @@ workflows:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           context: org-member
       - binary_windows_upload:
-          name: binary_windows_wheel_3_7_cpu_release_nightly_upload
-          build_environment: "wheel 3.7 cpu release"
+          name: binary_windows_wheel_3_7_cpu_nightly_upload
+          build_environment: "wheel 3.7 cpu"
           requires:
             - setup
-            - binary_windows_wheel_3_7_cpu_release_nightly_build
+            - binary_windows_wheel_3_7_cpu_nightly_build
           filters:
             branches:
               only: nightly
@@ -6243,11 +6243,11 @@ workflows:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           context: org-member
       - binary_windows_upload:
-          name: binary_windows_wheel_3_8_cpu_release_nightly_upload
-          build_environment: "wheel 3.8 cpu release"
+          name: binary_windows_wheel_3_8_cpu_nightly_upload
+          build_environment: "wheel 3.8 cpu"
           requires:
             - setup
-            - binary_windows_wheel_3_8_cpu_release_nightly_build
+            - binary_windows_wheel_3_8_cpu_nightly_build
           filters:
             branches:
               only: nightly
@@ -6255,11 +6255,11 @@ workflows:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           context: org-member
       - binary_windows_upload:
-          name: binary_windows_wheel_3_6_cu92_release_nightly_upload
-          build_environment: "wheel 3.6 cu92 release"
+          name: binary_windows_wheel_3_6_cu92_nightly_upload
+          build_environment: "wheel 3.6 cu92"
           requires:
             - setup
-            - binary_windows_wheel_3_6_cu92_release_nightly_build
+            - binary_windows_wheel_3_6_cu92_nightly_build
           filters:
             branches:
               only: nightly
@@ -6267,11 +6267,11 @@ workflows:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           context: org-member
       - binary_windows_upload:
-          name: binary_windows_wheel_3_7_cu92_release_nightly_upload
-          build_environment: "wheel 3.7 cu92 release"
+          name: binary_windows_wheel_3_7_cu92_nightly_upload
+          build_environment: "wheel 3.7 cu92"
           requires:
             - setup
-            - binary_windows_wheel_3_7_cu92_release_nightly_build
+            - binary_windows_wheel_3_7_cu92_nightly_build
           filters:
             branches:
               only: nightly
@@ -6279,11 +6279,11 @@ workflows:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           context: org-member
       - binary_windows_upload:
-          name: binary_windows_wheel_3_8_cu92_release_nightly_upload
-          build_environment: "wheel 3.8 cu92 release"
+          name: binary_windows_wheel_3_8_cu92_nightly_upload
+          build_environment: "wheel 3.8 cu92"
           requires:
             - setup
-            - binary_windows_wheel_3_8_cu92_release_nightly_build
+            - binary_windows_wheel_3_8_cu92_nightly_build
           filters:
             branches:
               only: nightly
@@ -6291,11 +6291,11 @@ workflows:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           context: org-member
       - binary_windows_upload:
-          name: binary_windows_wheel_3_6_cu101_release_nightly_upload
-          build_environment: "wheel 3.6 cu101 release"
+          name: binary_windows_wheel_3_6_cu101_nightly_upload
+          build_environment: "wheel 3.6 cu101"
           requires:
             - setup
-            - binary_windows_wheel_3_6_cu101_release_nightly_build
+            - binary_windows_wheel_3_6_cu101_nightly_build
           filters:
             branches:
               only: nightly
@@ -6303,11 +6303,11 @@ workflows:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           context: org-member
       - binary_windows_upload:
-          name: binary_windows_wheel_3_7_cu101_release_nightly_upload
-          build_environment: "wheel 3.7 cu101 release"
+          name: binary_windows_wheel_3_7_cu101_nightly_upload
+          build_environment: "wheel 3.7 cu101"
           requires:
             - setup
-            - binary_windows_wheel_3_7_cu101_release_nightly_build
+            - binary_windows_wheel_3_7_cu101_nightly_build
           filters:
             branches:
               only: nightly
@@ -6315,11 +6315,11 @@ workflows:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           context: org-member
       - binary_windows_upload:
-          name: binary_windows_wheel_3_8_cu101_release_nightly_upload
-          build_environment: "wheel 3.8 cu101 release"
+          name: binary_windows_wheel_3_8_cu101_nightly_upload
+          build_environment: "wheel 3.8 cu101"
           requires:
             - setup
-            - binary_windows_wheel_3_8_cu101_release_nightly_build
+            - binary_windows_wheel_3_8_cu101_nightly_build
           filters:
             branches:
               only: nightly
@@ -6327,11 +6327,11 @@ workflows:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           context: org-member
       - binary_windows_upload:
-          name: binary_windows_wheel_3_6_cu102_release_nightly_upload
-          build_environment: "wheel 3.6 cu102 release"
+          name: binary_windows_wheel_3_6_cu102_nightly_upload
+          build_environment: "wheel 3.6 cu102"
           requires:
             - setup
-            - binary_windows_wheel_3_6_cu102_release_nightly_build
+            - binary_windows_wheel_3_6_cu102_nightly_build
           filters:
             branches:
               only: nightly
@@ -6339,11 +6339,11 @@ workflows:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           context: org-member
       - binary_windows_upload:
-          name: binary_windows_wheel_3_7_cu102_release_nightly_upload
-          build_environment: "wheel 3.7 cu102 release"
+          name: binary_windows_wheel_3_7_cu102_nightly_upload
+          build_environment: "wheel 3.7 cu102"
           requires:
             - setup
-            - binary_windows_wheel_3_7_cu102_release_nightly_build
+            - binary_windows_wheel_3_7_cu102_nightly_build
           filters:
             branches:
               only: nightly
@@ -6351,11 +6351,11 @@ workflows:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           context: org-member
       - binary_windows_upload:
-          name: binary_windows_wheel_3_8_cu102_release_nightly_upload
-          build_environment: "wheel 3.8 cu102 release"
+          name: binary_windows_wheel_3_8_cu102_nightly_upload
+          build_environment: "wheel 3.8 cu102"
           requires:
             - setup
-            - binary_windows_wheel_3_8_cu102_release_nightly_build
+            - binary_windows_wheel_3_8_cu102_nightly_build
           filters:
             branches:
               only: nightly
@@ -6363,11 +6363,11 @@ workflows:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           context: org-member
       - binary_windows_upload:
-          name: binary_windows_conda_3_6_cpu_release_nightly_upload
-          build_environment: "conda 3.6 cpu release"
+          name: binary_windows_conda_3_6_cpu_nightly_upload
+          build_environment: "conda 3.6 cpu"
           requires:
             - setup
-            - binary_windows_conda_3_6_cpu_release_nightly_build
+            - binary_windows_conda_3_6_cpu_nightly_build
           filters:
             branches:
               only: nightly
@@ -6375,11 +6375,11 @@ workflows:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           context: org-member
       - binary_windows_upload:
-          name: binary_windows_conda_3_7_cpu_release_nightly_upload
-          build_environment: "conda 3.7 cpu release"
+          name: binary_windows_conda_3_7_cpu_nightly_upload
+          build_environment: "conda 3.7 cpu"
           requires:
             - setup
-            - binary_windows_conda_3_7_cpu_release_nightly_build
+            - binary_windows_conda_3_7_cpu_nightly_build
           filters:
             branches:
               only: nightly
@@ -6387,11 +6387,11 @@ workflows:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           context: org-member
       - binary_windows_upload:
-          name: binary_windows_conda_3_8_cpu_release_nightly_upload
-          build_environment: "conda 3.8 cpu release"
+          name: binary_windows_conda_3_8_cpu_nightly_upload
+          build_environment: "conda 3.8 cpu"
           requires:
             - setup
-            - binary_windows_conda_3_8_cpu_release_nightly_build
+            - binary_windows_conda_3_8_cpu_nightly_build
           filters:
             branches:
               only: nightly
@@ -6399,11 +6399,11 @@ workflows:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           context: org-member
       - binary_windows_upload:
-          name: binary_windows_conda_3_6_cu92_release_nightly_upload
-          build_environment: "conda 3.6 cu92 release"
+          name: binary_windows_conda_3_6_cu92_nightly_upload
+          build_environment: "conda 3.6 cu92"
           requires:
             - setup
-            - binary_windows_conda_3_6_cu92_release_nightly_build
+            - binary_windows_conda_3_6_cu92_nightly_build
           filters:
             branches:
               only: nightly
@@ -6411,11 +6411,11 @@ workflows:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           context: org-member
       - binary_windows_upload:
-          name: binary_windows_conda_3_7_cu92_release_nightly_upload
-          build_environment: "conda 3.7 cu92 release"
+          name: binary_windows_conda_3_7_cu92_nightly_upload
+          build_environment: "conda 3.7 cu92"
           requires:
             - setup
-            - binary_windows_conda_3_7_cu92_release_nightly_build
+            - binary_windows_conda_3_7_cu92_nightly_build
           filters:
             branches:
               only: nightly
@@ -6423,11 +6423,11 @@ workflows:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           context: org-member
       - binary_windows_upload:
-          name: binary_windows_conda_3_8_cu92_release_nightly_upload
-          build_environment: "conda 3.8 cu92 release"
+          name: binary_windows_conda_3_8_cu92_nightly_upload
+          build_environment: "conda 3.8 cu92"
           requires:
             - setup
-            - binary_windows_conda_3_8_cu92_release_nightly_build
+            - binary_windows_conda_3_8_cu92_nightly_build
           filters:
             branches:
               only: nightly
@@ -6435,11 +6435,11 @@ workflows:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           context: org-member
       - binary_windows_upload:
-          name: binary_windows_conda_3_6_cu101_release_nightly_upload
-          build_environment: "conda 3.6 cu101 release"
+          name: binary_windows_conda_3_6_cu101_nightly_upload
+          build_environment: "conda 3.6 cu101"
           requires:
             - setup
-            - binary_windows_conda_3_6_cu101_release_nightly_build
+            - binary_windows_conda_3_6_cu101_nightly_build
           filters:
             branches:
               only: nightly
@@ -6447,11 +6447,11 @@ workflows:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           context: org-member
       - binary_windows_upload:
-          name: binary_windows_conda_3_7_cu101_release_nightly_upload
-          build_environment: "conda 3.7 cu101 release"
+          name: binary_windows_conda_3_7_cu101_nightly_upload
+          build_environment: "conda 3.7 cu101"
           requires:
             - setup
-            - binary_windows_conda_3_7_cu101_release_nightly_build
+            - binary_windows_conda_3_7_cu101_nightly_build
           filters:
             branches:
               only: nightly
@@ -6459,11 +6459,11 @@ workflows:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           context: org-member
       - binary_windows_upload:
-          name: binary_windows_conda_3_8_cu101_release_nightly_upload
-          build_environment: "conda 3.8 cu101 release"
+          name: binary_windows_conda_3_8_cu101_nightly_upload
+          build_environment: "conda 3.8 cu101"
           requires:
             - setup
-            - binary_windows_conda_3_8_cu101_release_nightly_build
+            - binary_windows_conda_3_8_cu101_nightly_build
           filters:
             branches:
               only: nightly
@@ -6471,11 +6471,11 @@ workflows:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           context: org-member
       - binary_windows_upload:
-          name: binary_windows_conda_3_6_cu102_release_nightly_upload
-          build_environment: "conda 3.6 cu102 release"
+          name: binary_windows_conda_3_6_cu102_nightly_upload
+          build_environment: "conda 3.6 cu102"
           requires:
             - setup
-            - binary_windows_conda_3_6_cu102_release_nightly_build
+            - binary_windows_conda_3_6_cu102_nightly_build
           filters:
             branches:
               only: nightly
@@ -6483,11 +6483,11 @@ workflows:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           context: org-member
       - binary_windows_upload:
-          name: binary_windows_conda_3_7_cu102_release_nightly_upload
-          build_environment: "conda 3.7 cu102 release"
+          name: binary_windows_conda_3_7_cu102_nightly_upload
+          build_environment: "conda 3.7 cu102"
           requires:
             - setup
-            - binary_windows_conda_3_7_cu102_release_nightly_build
+            - binary_windows_conda_3_7_cu102_nightly_build
           filters:
             branches:
               only: nightly
@@ -6495,11 +6495,11 @@ workflows:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           context: org-member
       - binary_windows_upload:
-          name: binary_windows_conda_3_8_cu102_release_nightly_upload
-          build_environment: "conda 3.8 cu102 release"
+          name: binary_windows_conda_3_8_cu102_nightly_upload
+          build_environment: "conda 3.8 cu102"
           requires:
             - setup
-            - binary_windows_conda_3_8_cu102_release_nightly_build
+            - binary_windows_conda_3_8_cu102_nightly_build
           filters:
             branches:
               only: nightly
