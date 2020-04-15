@@ -4573,10 +4573,10 @@ def foo(x):
             def __init__(self):
                 super(ConvModel, self).__init__()
                 self.qconfig = torch.quantization.default_qconfig
-                self.fc1 = torch.quantization.QuantWrapper(torch.nn.Conv2d(3, 5, 2, bias=True).to(dtype=torch.float))
+                self.conv = torch.quantization.QuantWrapper(torch.nn.Conv2d(3, 5, 2, bias=True).to(dtype=torch.float))
 
             def forward(self, x):
-                x = self.fc1(x)
+                x = self.conv(x)
                 return x
         qconfig = torch.quantization.default_qconfig
         model = ConvModel()

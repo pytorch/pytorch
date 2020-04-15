@@ -4,6 +4,7 @@
 #include <torch/csrc/jit/ir/subgraph_matcher.h>
 #include <torch/csrc/jit/passes/onnx/helper.h>
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
+#include <ATen/native/quantized/cpu/packed_params.h>
 #include <stack>
 
 using ::c10::Dispatcher;
@@ -156,12 +157,11 @@ void unpackQuantizedWeightsHelper(
     at::Tensor unpacked_weight;
     c10::optional<at::Tensor> bias;
 
-    if (itr->second.isTuple()) {
+    if (itr->second.isObject()) {
       // Pre-unpacked weights. Comes from Linear weights which are
       // stored as bound C++ classes.
-      auto ser_tup = itr->second.toTuple();
-      unpacked_weight = ser_tup->elements()[0].toTensor();
-      bias = ser_tup->elements()[1].toOptional<at::Tensor>();
+      auto casted_obj = itr->second.toCustomClass<LinearPackedParamsBase>();
+      std::tie(unpacked_weight, bias) = casted_obj->unpack();
     } else {
       TORCH_INTERNAL_ASSERT(itr->second.isTensor());
       at::Tensor packed_weight = itr->second.toTensor();

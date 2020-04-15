@@ -274,7 +274,6 @@ struct SourceImporterImpl : public Resolver,
             "__torch__.torch.nn.quantized.modules.linear.Linear") {
       auto lhs = Var(assign.lhs());
       if (!assign.type().present() || assign.type().get().kind() != TK_VAR) {
-        ;
         return c10::nullopt;
       }
       auto type = Var(assign.type().get());
