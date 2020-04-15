@@ -4,3 +4,7 @@ pyyaml
 requests
 setuptools
 six
+sphinx==1.8
+javasphinx
+sphinxcontrib-katex
+git+https://github.com/pytorch/pytorch_sphinx_theme.git#egg=pytorch_sphinx_theme
