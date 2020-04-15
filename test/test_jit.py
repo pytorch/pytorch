@@ -47,7 +47,7 @@ from torch.testing._internal import jit_utils
 from torch.testing._internal.common_utils import run_tests, IS_WINDOWS, TEST_WITH_UBSAN, \
     skipIfRocm, suppress_warnings, IS_SANDCASTLE, GRAPH_EXECUTOR, ProfilingMode, \
     freeze_rng_state, set_rng_seed, slowTest, TemporaryFileName, skipIfCompiledWithoutNumpy, \
-    enable_profiling_mode, TEST_MKL
+    enable_profiling_mode, TEST_MKL, set_default_dtype
 from torch.testing._internal.jit_utils import JitTestCase, enable_cpu_fuser, disable_autodiff_subgraph_inlining, \
     _trace, enable_cpu_fuser_if, do_input_map, get_execution_plan, \
     execWrapper, _inline_everything, _tmp_donotuse_dont_inline_everything, \
@@ -7766,7 +7766,6 @@ a")
                 self.assertEqual(t1.device, t2.device)
 
 
-    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.LEGACY, "Simple Executor doesn't have any shapes to propagate")
     def test_tensor_as_tensor_shape_prop(self):
         tensor_template = dedent('''
         def func():
@@ -7894,14 +7893,15 @@ a")
 
     def test_torch_tensor_dtype(self):
         def foo(s: float):
-            return torch.tensor(s)
+            return torch.tensor(s), torch.tensor([s, s])
 
         scripted_foo = torch.jit.script(foo)
-        self.assertEqual(scripted_foo(1.).dtype, foo(1.).dtype)
-        saved_dtype = torch.get_default_dtype()
-        torch.set_default_dtype(torch.float32)
-        self.assertEqual(scripted_foo(1.).dtype, foo(1.).dtype)
-        torch.set_default_dtype(saved_dtype)
+        with set_default_dtype(torch.float):
+            self.assertEqual(scripted_foo(1.), foo(1.), exact_dtype=True)
+        with set_default_dtype(torch.double):
+            self.assertEqual(scripted_foo(1.), foo(1.), exact_dtype=True)
+        with set_default_dtype(torch.half):
+            self.assertEqual(scripted_foo(1.), foo(1.), exact_dtype=True)
 
     def test_empty_like_memory_format_bc(self):
         def f(x):
