@@ -5322,7 +5322,7 @@ class TestAutogradDeviceType(TestCase):
         a = torch.rand([], requires_grad=True, device=devices[0])
         b = torch.rand(10, requires_grad=True, device=devices[1])
 
-        c = a * b
+        c = b * a
         c.sum().backward()
 
 
