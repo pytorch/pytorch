@@ -9444,7 +9444,7 @@ class TestNNDeviceType(NNTestCase):
             result = torch.nn.functional.grid_sample(image, grid, padding_mode='zeros')
             self.assertEqual(result, torch.tensor([[[[[27., 26., 25.], [24., 23., 22.], [21., 20., 19.]],
                                                      [[18., 17., 16.], [15., 0., 13.], [12., 11., 10.]],
-                                                     [[9., 8., 7.], [6., 5., 4.], [3., 2., 1.]]]]], 
+                                                     [[9., 8., 7.], [6., 5., 4.], [3., 2., 1.]]]]],
                                                   device=device, dtype=dtype))
             result.backward(torch.ones_like(result))
             expected_grad = torch.ones_like(image)
@@ -10254,6 +10254,13 @@ class TestNNDeviceType(NNTestCase):
         if self.device_type == 'cuda' and self.has_cudnn():
             with torch.backends.cudnn.flags(enabled=False):
                 self._test_batchnorm_grad(device)
+
+
+    def test_hardsigmoid_grad(self, device):
+        inputs = (torch.randn(4, 16, 16, device=device) - 0.5) * 10
+        inputs.requires_grad = True
+        self.assertTrue(gradcheck(F.hardsigmoid, (inputs,)))
+
 
     def _test_batchnorm_eval(self, device, dtype=torch.float):
         module = nn.BatchNorm1d(3).to(device, dtype)
