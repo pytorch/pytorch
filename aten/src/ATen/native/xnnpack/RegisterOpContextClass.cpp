@@ -71,8 +71,6 @@ TORCH_LIBRARY(prepacked, m) {
 
 // Op registeration
 static auto registry =
-  // Registering under _xnnpack namespace for now. As we add more backend requiring similar functionality
-  // We can refactor the code and use a better namespace.
     torch::RegisterOperators()
         .op("prepacked::linear_clamp_prepack(Tensor W, Tensor? B=None, "
             "Scalar? output_min=None, Scalar? output_max=None) "

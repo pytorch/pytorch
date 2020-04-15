@@ -40,7 +40,7 @@ void compute_fused_params(
 }
 
 template <bool ReluFused>
-Tensor q_batch_norm_impl(
+Tensor q_batch_norm2d_impl(
     Tensor qx,
     Tensor weight,
     Tensor bias,
@@ -231,14 +231,14 @@ Tensor quantized_batch_norm(
     double output_scale,
     int64_t output_zero_point) {
   Tensor qy;
-  qy = q_batch_norm_impl<false>(
+  qy = q_batch_norm2d_impl<false>(
       qx, weight, bias, mean, var, eps, output_scale, output_zero_point);
   return qy;
 }
 
 TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
-  m.impl("batch_norm",        q_batch_norm_impl<false>);
-  m.impl("batch_norm2d_relu", q_batch_norm_impl<true>);
+  m.impl("batch_norm2d",      q_batch_norm2d_impl<false>);
+  m.impl("batch_norm2d_relu", q_batch_norm2d_impl<true>);
   m.impl("batch_norm3d",      q_batch_norm3d_impl<false>);
   m.impl("batch_norm3d_relu", q_batch_norm3d_impl<true>);
 }
