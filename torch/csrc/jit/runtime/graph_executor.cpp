@@ -667,6 +667,7 @@ GraphExecutor::GraphExecutor(
                     new GraphExecutorImpl(graph, std::move(function_name)))) {}
 
 void GraphExecutor::run(Stack& inputs) {
+  GRAPH_DEBUG("Running GraphExecutor", this, " pImpl ", pImpl);
   return pImpl->run(inputs);
 }
 

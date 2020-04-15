@@ -5,6 +5,7 @@
 #include <torch/csrc/jit/passes/constant_pooling.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
 #include <torch/csrc/jit/passes/peephole.h>
+#include <torch/csrc/jit/jit_log.h>
 
 namespace torch {
 namespace jit {
@@ -32,6 +33,7 @@ void placeholderCreator(GraphFunction&) {
 }
 
 void GraphFunction::run(Stack& stack) {
+  GRAPH_DEBUG("Running function ", qualname(), " on GraphExecutor: ", &get_executor());
   get_executor().run(stack);
 }
 
