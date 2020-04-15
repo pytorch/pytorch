@@ -81,5 +81,9 @@ ENV BUILD_ENVIRONMENT ${BUILD_ENVIRONMENT}
 ENV TORCH_CUDA_ARCH_LIST Maxwell
 ENV TORCH_NVCC_FLAGS "-Xfatbin -compress-all"
 
+# Install LLVM dev version
+ADD ./common/install_llvm.sh install_llvm.sh
+RUN bash ./install_llvm.sh
+
 USER jenkins
 CMD ["bash"]
