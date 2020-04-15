@@ -114,7 +114,7 @@ template <typename T>
 struct normal_distribution {
 
   inline normal_distribution(T mean_in, T stdv_in) {
-    TORCH_CHECK(stdv_in > 0);
+    TORCH_CHECK_IF_NOT_ON_CUDA(stdv_in > 0);
     mean = mean_in;
     stdv = stdv_in;
   }
@@ -122,6 +122,7 @@ struct normal_distribution {
   template <typename RNG>
   inline dist_acctype<T> operator()(RNG* generator){
     dist_acctype<T> ret;
+#if !defined(__CUDACC__) && !defined(__HIPCC__)
     // return cached values if available
     if (std::is_same<T, double>::value) {
       if (generator->next_double_normal_sample()) {
@@ -138,12 +139,14 @@ struct normal_distribution {
         return ret;
       }
     }
+#endif
     // otherwise generate new normal values
     uniform_real_distribution<T> uniform(0.0, 1.0);
     const dist_acctype<T> u1 = uniform(generator);
     const dist_acctype<T> u2 = uniform(generator);
     const dist_acctype<T> r = ::sqrt(static_cast<T>(-2.0) * ::log(static_cast<T>(1.0)-u2));
     const dist_acctype<T> theta = static_cast<T>(2.0) * static_cast<T>(M_PI) * u1;
+#if !defined(__CUDACC__) && !defined(__HIPCC__)
     if (std::is_same<T, double>::value) {
       dist_acctype<double> cache = r * ::sin(theta);
       generator->set_next_double_normal_sample(c10::optional<double>(cache));
@@ -151,6 +154,7 @@ struct normal_distribution {
       dist_acctype<float> cache = r * ::sin(theta);
       generator->set_next_float_normal_sample(c10::optional<float>(cache));
     }
+#endif
     ret = r * ::cos(theta) * stdv + mean;
     return ret;
   }
