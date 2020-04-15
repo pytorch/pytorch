@@ -45,7 +45,7 @@ export DESIRED_PYTHON="${configs[1]}"
 export DESIRED_CUDA="${configs[2]}"
 if [[ "${BUILD_FOR_SYSTEM:-}" == "windows" ]]; then
   export DESIRED_DEVTOOLSET=""
-  export LIBTORCH_CONFIG="${configs[3]}"
+  export LIBTORCH_CONFIG="${configs[3]:-}"
   if [[ "$LIBTORCH_CONFIG" == 'debug' ]]; then
     export DEBUG=1
   fi
