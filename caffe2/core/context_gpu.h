@@ -105,7 +105,7 @@ class CAFFE2_CUDA_API ThreadLocalCUDAObjects {
   cublasHandle_t GetHandle(c10::cuda::CUDAStream cuda_stream) {
     CUDAGuard guard(cuda_stream.device_index());
     // Default construct in the map if it doesn't exist, and return a mutable
-    // refernce to it.
+    // reference to it.
     auto& r = cublas_handles_[cuda_stream];
     if (r == nullptr) {
       CUBLAS_ENFORCE(cublasCreate(&r));
@@ -169,18 +169,7 @@ class CAFFE2_CUDA_API CUDAContext final : public BaseContext {
   explicit CUDAContext(Device device)
       : CUDAContext(DeviceToOption(device)) {}
 
-  ~CUDAContext() override {
-    if (curand_generator_) {
-      CURAND_CHECK(curandDestroyGenerator(curand_generator_));
-    }
-    // CUDAContext is used in 2 cases now:
-    // - long-lived instance inside OperatorBase in which case what happens in
-    //   destructor doesn't really matter
-    // - short-lived on-the-fly instances that are utilized as CUDAGuard - in
-    //   this case there's only one stream id (passed to SwitchToDevice) and
-    //   it's preferrable to synchronize in the destructor
-    FinishDeviceComputation();
-  }
+  ~CUDAContext() override;
 
   inline void SwitchToDevice(StreamId stream_id) override {
     getCudaObjects().SetCurrentStreamId(gpu_id_, stream_id);

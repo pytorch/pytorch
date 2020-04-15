@@ -10,9 +10,9 @@
 #include <torch/csrc/autograd/generated/Functions.h>
 #include <torch/csrc/autograd/functions/tensor.h>
 #include <torch/csrc/autograd/functions/basic_ops.h>
-#include <torch/csrc/jit/tracer.h>
-#include <torch/csrc/jit/constants.h>
-#include <torch/csrc/jit/ir.h>
+#include <torch/csrc/jit/frontend/tracer.h>
+#include <torch/csrc/jit/ir/constants.h>
+#include <torch/csrc/jit/ir/ir.h>
 
 #include <torch/csrc/utils/variadic.h>
 #include <torch/csrc/autograd/functions/utils.h>
@@ -41,9 +41,17 @@ namespace torch { namespace autograd {
 
 inline void check_inplace(const Tensor& tensor) {
   auto& var = static_cast<const Variable&>(tensor);
-  if (var.requires_grad() && var.is_leaf() && GradMode::is_enabled()) {
-    AT_ERROR(
-      "a leaf Variable that requires grad has been used in an in-place operation.");
+  if (var.requires_grad() && GradMode::is_enabled()) {
+    if (var.is_view()) {
+      // NB: is_view() ==> get_autograd_meta()
+      auto diff_view_meta = static_cast<DifferentiableViewMeta*>(impl::get_autograd_meta(var));
+      // This can throw or warn
+      handle_view_on_rebase(diff_view_meta);
+    }
+    if (var.is_leaf()) {
+      AT_ERROR(
+        "a leaf Variable that requires grad is being used in an in-place operation.");
+    }
   }
 }
 
@@ -77,7 +85,7 @@ inline void rebase_history(std::vector<Variable>&& vars, std::shared_ptr<Node> g
 }
 
 inline void increment_version(Tensor & t) {
-  impl::bump_version(as_variable_ref(t));
+  impl::bump_version(t);
 }
 
 struct Flatten : IterArgs<Flatten> {
@@ -97,23 +105,36 @@ template<typename... Args> inline variable_list flatten_tensor_args(Args&&... ar
 }
 
 // See NOTE [ Autograd View Variables ] for details.
-inline Tensor as_view(const Tensor & base, Tensor tensor, bool is_differentiable = true) {
+inline Tensor as_view(const Tensor & base, Tensor tensor, bool is_differentiable,
+                      CreationMeta creation_meta=CreationMeta::DEFAULT) {
   auto base_var = Variable(base);
   if (base_var.is_view()) {
-    base_var = base_var.base();
+    base_var = base_var._base();
   }
-  return make_variable_view(std::move(base_var), std::move(tensor), is_differentiable);
+  if (is_differentiable) {
+    return make_variable_differentiable_view(std::move(base_var), std::move(tensor), creation_meta);
+  } else {
+    TORCH_CHECK(creation_meta == CreationMeta::DEFAULT,
+                "Non-differentiable views must have creation_meta=CreationMeta::DEFAULT");
+    return make_variable_non_differentiable_view(std::move(base_var), std::move(tensor));
+  }
 }
 
 // See NOTE [ Autograd View Variables ] for details.
-inline std::vector<Tensor> as_view(const Tensor & base, std::vector<Tensor> tensors,
-                                   bool is_differentiable = true) {
+inline std::vector<Tensor> as_view(const Tensor & base, std::vector<Tensor> tensors, bool is_differentiable,
+                                   CreationMeta creation_meta=CreationMeta::DEFAULT) {
   auto base_var = Variable(base);
   if (base_var.is_view()) {
-    base_var = base_var.base();
+    base_var = base_var._base();
   }
   for(Tensor &tensor : tensors) {
-    tensor = make_variable_view(base_var, std::move(tensor), is_differentiable);
+    if (is_differentiable) {
+      tensor = make_variable_differentiable_view(base_var, std::move(tensor), creation_meta);
+    } else {
+      TORCH_CHECK(creation_meta == CreationMeta::DEFAULT,
+                  "Non-differentiable views must have creation_meta=CreationMeta::DEFAULT");
+      tensor = make_variable_non_differentiable_view(base_var, std::move(tensor));
+    }
   }
   return tensors;
 }

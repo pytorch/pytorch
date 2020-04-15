@@ -1,4 +1,4 @@
-# Find the vecLib libraries as part of Accelerate.framework or as standalon framework
+# Find the vecLib libraries as part of Accelerate.framework or as standalone framework
 #
 # The following are set after configuration is done:
 #  VECLIB_FOUND

@@ -14,8 +14,7 @@ import inspect
 import glob
 import os
 import shutil
-import common_utils as common
-
+import torch.testing._internal.common_utils as common
 
 '''Usage: python test/onnx/test_operators.py [--no-onnx] [--produce-onnx-test-data]
           --no-onnx: no onnx python dependence
@@ -255,7 +254,12 @@ class TestOperators(TestCase):
 
     def test_batchnorm_training(self):
         x = torch.ones(2, 2, 2, 2, requires_grad=True)
-        self.assertONNX(nn.BatchNorm2d(2), x, training=True, keep_initializers_as_inputs=True)
+        self.assertONNX(nn.BatchNorm2d(2), x, training=torch.onnx.TrainingMode.TRAINING, keep_initializers_as_inputs=True)
+
+    def test_batchnorm_training_opset12(self):
+        x = torch.ones(2, 2, 2, 2, requires_grad=True)
+        self.assertONNX(nn.BatchNorm2d(2), x, training=torch.onnx.TrainingMode.TRAINING,
+                        keep_initializers_as_inputs=True, opset_version=12)
 
     def test_conv(self):
         x = torch.ones(20, 16, 50, 40, requires_grad=True)
@@ -569,9 +573,19 @@ class TestOperators(TestCase):
         x = torch.randn(1, 2, 3, 4, requires_grad=True)
         self.assertONNX(lambda x: x.norm(p=2, dim=2), (x))
 
-    def test_upsample_nearest(self):
+    def test_upsample_nearest_scale(self):
         x = torch.randn(1, 2, 3, 4, requires_grad=True)
-        self.assertONNX(lambda x: nn.functional.interpolate(x, scale_factor=2., mode='nearest'), x)
+        self.assertONNX(lambda x: nn.functional.interpolate(x, scale_factor=2.,
+                        mode='nearest', recompute_scale_factor=False), x)
+
+    def test_upsample_nearest_scale_default_scale_factor(self):
+        x = torch.randn(1, 2, 3, 4, requires_grad=True)
+        self.assertONNX(lambda x: nn.functional.interpolate(x, scale_factor=2.,
+                        mode='nearest'), x)
+
+    def test_upsample_nearest_size(self):
+        x = torch.randn(1, 2, 3, 4, requires_grad=True)
+        self.assertONNX(lambda x: nn.functional.interpolate(x, size=16, mode='nearest'), x)
 
     def test_unsqueeze(self):
         x = torch.randn(3, 4, requires_grad=True)
@@ -662,6 +676,18 @@ class TestOperators(TestCase):
         x = torch.randn(3, 4, requires_grad=True)
         self.assertONNX(lambda x: torch.max(functional.dropout(x, training=False)), x)
 
+    def test_dropout_default(self):
+        x = torch.randn(3, 4, requires_grad=True)
+        self.assertONNX(lambda x: torch.max(functional.dropout(x,)), x)
+
+    def test_dropout_training(self):
+        x = torch.randn(3, 4, requires_grad=True)
+        self.assertONNX(lambda x: torch.max(functional.dropout(x)), x, training=torch.onnx.TrainingMode.TRAINING)
+
+    def test_dropout_training_opset12(self):
+        x = torch.randn(3, 4, requires_grad=True)
+        self.assertONNX(lambda x: torch.max(functional.dropout(x)), x, opset_version=12, training=torch.onnx.TrainingMode.TRAINING)
+
     def test_nonzero(self):
         x = torch.tensor([[[2., 2.], [1., 0.]], [[0., 0.], [1., 1.]]], requires_grad=True)
         self.assertONNX(lambda x: torch.nonzero(x), x)
@@ -741,7 +767,7 @@ class TestOperators(TestCase):
         im_info = torch.ones(img_count, 3, dtype=torch.float32)
         anchors = torch.ones(A, 4, dtype=torch.float32)
         inputs = (scores, bbox_deltas, im_info, anchors)
-        self.assertONNX(model, inputs)
+        self.assertONNX(model, inputs, custom_opsets={'org.pytorch._caffe2': 0})
 
     def test_dict(self):
         class MyModel(torch.nn.Module):
@@ -841,6 +867,10 @@ class TestOperators(TestCase):
     def test_round(self):
         x = torch.tensor([0.9920, -1.0362, -1.5000, 2.5000], requires_grad=True)
         self.assertONNX(lambda x: torch.round(x), x, opset_version=11)
+
+    def test_dim(self):
+        x = torch.ones((2, 2), requires_grad=True)
+        self.assertONNX(lambda x: torch.scalar_tensor(x.dim()), x)
 
     @skipIfNoLapack
     def test_det(self):

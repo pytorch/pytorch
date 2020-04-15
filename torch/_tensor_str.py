@@ -71,16 +71,30 @@ def set_printoptions(
 class _Formatter(object):
     def __init__(self, tensor):
         self.floating_dtype = tensor.dtype.is_floating_point
+        self.complex_dtype = tensor.dtype.is_complex
         self.int_mode = True
         self.sci_mode = False
         self.max_width = 1
+
+        # only used for complex tensors
+        self.has_non_zero_decimal_val = False
 
         with torch.no_grad():
             tensor_view = tensor.reshape(-1)
 
         if not self.floating_dtype:
+            if self.complex_dtype:
+                # max width for complex tensors depends on whether or not tensor contains ints only
+                self.has_non_zero_decimal_val = sum([not (value.item().real.is_integer() and value.item().imag.is_integer())
+                                                     for value in tensor_view])
             for value in tensor_view:
-                value_str = '{}'.format(value)
+                if self.complex_dtype:
+                    if self.has_non_zero_decimal_val:
+                        value_str = ('{{:.{}f}}').format(PRINT_OPTS.precision).format(value)
+                    else:
+                        value_str = "{:.0f}".format(value.item())
+                else:
+                    value_str = '{}'.format(value)
                 self.max_width = max(self.max_width, len(value_str))
 
         else:
@@ -142,6 +156,12 @@ class _Formatter(object):
                     ret += '.'
             else:
                 ret = ('{{:.{}f}}').format(PRINT_OPTS.precision).format(value)
+        elif self.complex_dtype:
+            p = PRINT_OPTS.precision
+            ret = '({{:.{}f}}{{}}{{:.{}f}}j)'.format(p, p).format(value.real, '+-'[value.imag < 0], abs(value.imag))
+            if not self.has_non_zero_decimal_val:
+                # complex tensor contains integer elements only
+                ret = "({{:.0f}}.{{}}{{:.0f}}.j)".format(p, p).format(value.real, '+-'[value.imag < 0], abs(value.imag))
         else:
             ret = '{}'.format(value)
         return (self.max_width - len(ret)) * ' ' + ret
@@ -195,7 +215,7 @@ def _tensor_str(self, indent):
     if self.numel() == 0:
         return '[]'
 
-    if torch._C._BUILD_NAMEDTENSOR and self.has_names():
+    if self.has_names():
         # There are two main codepaths (possibly more) that tensor printing goes through:
         # - tensor data can fit comfortably on screen
         # - tensor data needs to be summarized
@@ -321,7 +341,7 @@ def _str(self):
     elif self.requires_grad:
         suffixes.append('requires_grad=True')
 
-    if torch._C._BUILD_NAMEDTENSOR and self.has_names():
+    if self.has_names():
         suffixes.append('names={}'.format(self.names))
 
     return _add_suffixes(prefix + tensor_str, suffixes, indent, force_newline=self.is_sparse)

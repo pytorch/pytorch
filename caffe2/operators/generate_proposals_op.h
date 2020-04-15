@@ -69,7 +69,7 @@ CAFFE2_API ERArrXXf ComputeSortedAnchors(
 } // namespace utils
 
 // C++ implementation of GenerateProposalsOp
-// Generate bounding box proposals for Faster RCNN. The propoasls are generated
+// Generate bounding box proposals for Faster RCNN. The proposals are generated
 //     for a list of images based on image score 'score', bounding box
 //     regression result 'deltas' as well as predefined bounding box shapes
 //     'anchors'. Greedy non-maximum suppression is applied to generate the

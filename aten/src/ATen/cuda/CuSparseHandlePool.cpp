@@ -21,14 +21,14 @@ void destroyCusparseHandle(cusparseHandle_t handle) {
 #endif
 }
 
-DeviceThreadHandlePool<cusparseHandle_t, createCusparseHandle, destroyCusparseHandle> pool;
+auto pool = std::make_shared<DeviceThreadHandlePool<cusparseHandle_t, createCusparseHandle, destroyCusparseHandle>>();
 
 // Thread local PoolWindows are wrapped by unique_ptrs and lazily-initialized
 // to avoid initialization issues that caused hangs on Windows.
 // See: https://github.com/pytorch/pytorch/pull/22405
 // This thread local unique_ptrs will be destroyed when the thread terminates,
 // releasing its reserved handles back to the pool.
-thread_local std::unique_ptr<decltype(pool)::PoolWindow> myPoolWindow;
+thread_local std::unique_ptr<decltype(pool)::element_type::PoolWindow> myPoolWindow;
 
 } // namespace
 
@@ -37,9 +37,11 @@ cusparseHandle_t getCurrentCUDASparseHandle() {
   AT_CUDA_CHECK(cudaGetDevice(&device));
 
   if (!myPoolWindow)
-    myPoolWindow.reset(pool.newPoolWindow());
+    myPoolWindow.reset(pool->newPoolWindow());
 
-  return myPoolWindow->reserve(device);
+  auto handle = myPoolWindow->reserve(device);
+  cusparseSetStream(handle, c10::cuda::getCurrentCUDAStream());
+  return handle;
 }
 
 }} // namespace at::cuda

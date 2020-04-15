@@ -4,7 +4,6 @@
 #include <torch/csrc/autograd/engine.h>
 #include <torch/csrc/distributed/autograd/functions/recvrpc_backward.h>
 #include <torch/csrc/distributed/autograd/functions/sendrpc_backward.h>
-#include <torch/csrc/distributed/rpc/future_message.h>
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
 #include <cstdint>
 
@@ -69,13 +68,16 @@ class TORCH_API DistAutogradContext {
   std::unordered_set<rpc::worker_id_t> getKnownWorkerIds() const;
 
  private:
+  friend class BackwardPassCleanupGuard;
   friend class DistEngine;
+  friend class RecvRpcBackward;
 
   // Record that we would like to accumulate the provided gradient on the given
   // variable.
   void accumulateGrad(
       const torch::autograd::Variable& variable,
-      const torch::Tensor& grad);
+      const torch::Tensor& grad,
+      size_t num_expected_refs);
 
   // Retrieve the GraphTask.
   std::shared_ptr<torch::autograd::GraphTask> retrieveGraphTask();
@@ -84,9 +86,15 @@ class TORCH_API DistAutogradContext {
   // once.
   void setGraphTask(std::shared_ptr<torch::autograd::GraphTask> graphTask);
 
+  // Resets the graph task to ensure we can run another distributed backward
+  // pass for the same autograd context.
+  void resetGraphTask();
+
   // Waits for all outstanding RPCs for this context to finish and clears all
   // outstanding rpcs held in this context. This should be called only once.
-  void clearAndWaitForOutstandingRpcs();
+  std::shared_ptr<rpc::FutureMessage> clearAndWaitForOutstandingRpcsAsync();
+
+  void clearOutstandingRpcs();
 
   const int64_t contextId_;
 
@@ -113,7 +121,7 @@ class TORCH_API DistAutogradContext {
 
   // List of futures for RPCs initiated by this node to propagate gradients to
   // other nodes. The distributed autograd engine on this node can return
-  // successfully only if all these futures are done and are successfull.
+  // successfully only if all these futures are done and are successful.
   std::vector<std::shared_ptr<rpc::FutureMessage>> outStandingRpcs_;
 
   // Lock to protect concurrent modification of the context.

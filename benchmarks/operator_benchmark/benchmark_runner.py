@@ -132,13 +132,6 @@ def main():
         help='Run tests on the provided architecture (cpu, cuda)',
         default='None')
 
-    parser.add_argument(
-        '--wipe_cache',
-        help='Wipe cache before benchmarking each operator',
-        action='store_true',
-        default=False
-    )
-
     args, _ = parser.parse_known_args()
 
     if args.omp_num_threads:

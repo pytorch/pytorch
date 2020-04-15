@@ -51,7 +51,7 @@
 // technically [[deprecated]] syntax is from c++14 standard, but it works in
 // many compilers.
 #if defined(__has_cpp_attribute)
-#if __has_cpp_attribute(deprecated)
+#if __has_cpp_attribute(deprecated) && !defined(__CUDACC__)
 # define C10_DEFINE_DEPRECATED_USING(TypeName, TypeThingy) using TypeName [[deprecated]] = TypeThingy;
 #endif
 #endif
@@ -86,7 +86,7 @@
 // nvcc has a bug where it doesn't understand __attribute__((deprecated))
 // declarations even when the host compiler supports it. We'll only use this gcc
 // attribute when not cuda, and when using a GCC compiler that doesn't support
-// the c++14 syntax we checked for above (availble in __GNUC__ >= 5)
+// the c++14 syntax we checked for above (available in __GNUC__ >= 5)
 #if !defined(__CUDACC__)
 # define C10_DEFINE_DEPRECATED_USING(TypeName, TypeThingy) using TypeName __attribute__((deprecated)) = TypeThingy;
 #else

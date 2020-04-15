@@ -2,6 +2,8 @@
 
 #include <ATen/NativeFunctions.h>
 #include <ATen/TensorUtils.h>
+#include <ATen/NamedTensorUtils.h>
+#include <ATen/native/xnnpack/Engine.h>
 #include <c10/util/Exception.h>
 
 #include <tuple>
@@ -57,6 +59,8 @@ std::tuple<Tensor, Tensor> max_pool1d_with_indices(
   check1d("max_pool1d", "padding", padding);
   check1d("max_pool1d", "dilation", dilation);
 
+  NoNamesGuard guard;
+
   Tensor output, indices;
   std::tie(output, indices) = at::max_pool2d_with_indices(
       self.unsqueeze(2),
@@ -66,7 +70,14 @@ std::tuple<Tensor, Tensor> max_pool1d_with_indices(
       {1, dilation[0]},
       ceil_mode);
 
-  return std::make_tuple(output.squeeze(2), indices.squeeze(2));
+  output  = output.squeeze(2);
+  indices = indices.squeeze(2);
+
+  guard.reset();
+  namedinference::propagate_names(output, self);
+  namedinference::propagate_names(indices, self);
+
+  return std::make_tuple(output, indices);
 }
 
 Tensor avg_pool1d(
@@ -122,6 +133,13 @@ Tensor max_pool2d(
     return at::mkldnn_max_pool2d(
         self, kernel_size, stride, padding, dilation, ceil_mode);
   }
+#if defined(C10_MOBILE)
+  if(xnnpack::use_max_pool2d(self, kernel_size, padding, stride,
+                             dilation, ceil_mode)) {
+    return xnnpack::max_pool2d(
+        self, kernel_size, padding, stride, dilation, ceil_mode);
+  }
+#endif
   auto output_and_indices = at::max_pool2d_with_indices(
       self, kernel_size, stride, padding, dilation, ceil_mode);
   return std::get<0>(output_and_indices);

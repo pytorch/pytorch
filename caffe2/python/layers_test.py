@@ -344,6 +344,49 @@ class TestLayers(LayersTestCase):
 
         train_init_net, train_net = self.get_training_nets()
 
+    def testFCTransposed(self):
+        input_dim = 10
+        output_dim = 30
+        max_length = 20
+        input_record = self.new_record(
+            schema.Struct(
+                ('history_sequence', schema.Scalar((np.float32, (max_length,
+                    input_dim)))),
+            )
+        )
+        fc_transposed_out = self.model.FC(
+            input_record.history_sequence, output_dim,
+            axis=2, transposed=True)
+        self.model.output_schema = fc_transposed_out
+        self.assertEqual(
+            schema.Scalar((np.float32, (max_length, output_dim))),
+            fc_transposed_out
+        )
+
+        train_init_net, train_net = self.get_training_nets()
+
+    def testFCTransposedWithMaxFCSize(self):
+        input_dim = 10
+        output_dim = 30
+        max_length = 20
+        input_record = self.new_record(
+            schema.Struct(
+                ('history_sequence', schema.Scalar((np.float32, (max_length,
+                    input_dim)))),
+            )
+        )
+        fc_transposed_out = self.model.FC(
+            input_record.history_sequence, output_dim,
+            max_fc_size=input_dim * output_dim // 2,
+            axis=2, transposed=True)
+        self.model.output_schema = fc_transposed_out
+        self.assertEqual(
+            schema.Scalar((np.float32, (max_length, output_dim))),
+            fc_transposed_out
+        )
+
+        train_init_net, train_net = self.get_training_nets()
+
     def testSparseLookupSumPoolingWithEviction(self):
         # Create test embedding table of 1 row
         record = schema.NewRecord(self.model.net, schema.Struct(

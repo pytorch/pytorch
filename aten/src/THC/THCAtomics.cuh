@@ -87,19 +87,23 @@ struct AtomicAddIntegerImpl<T, 8> {
   }
 };
 
-static inline __device__ void atomicAdd(uint8_t *address, uint8_t val) {
+static inline __device__ void gpuAtomicAdd(uint8_t *address, uint8_t val) {
   AtomicAddIntegerImpl<uint8_t, sizeof(uint8_t)>()(address, val);
 }
 
-static inline  __device__ void atomicAdd(int8_t *address, int8_t val) {
+static inline  __device__ void gpuAtomicAdd(int8_t *address, int8_t val) {
   AtomicAddIntegerImpl<int8_t, sizeof(int8_t)>()(address, val);
 }
 
-static inline  __device__ void atomicAdd(int16_t *address, int16_t val) {
+static inline  __device__ void gpuAtomicAdd(int16_t *address, int16_t val) {
   AtomicAddIntegerImpl<int16_t, sizeof(int16_t)>()(address, val);
 }
 
-static inline __device__ void atomicAdd(int64_t *address, int64_t val) {
+static inline __device__ void gpuAtomicAdd(int32_t *address, int32_t val) {
+  atomicAdd(address, val);
+}
+
+static inline __device__ void gpuAtomicAdd(int64_t *address, int64_t val) {
 #ifdef __HIP_PLATFORM_HCC__
   __atomic_fetch_add(address, val, __ATOMIC_RELAXED);
 #else
@@ -107,11 +111,11 @@ static inline __device__ void atomicAdd(int64_t *address, int64_t val) {
 #endif
 }
 
-static inline __device__ void atomicAdd(bool *address, bool val) {
+static inline __device__ void gpuAtomicAdd(bool *address, bool val) {
   *address = address && val;
 }
 
-static inline  __device__ void atomicAdd(at::Half *address, at::Half val) {
+static inline  __device__ void gpuAtomicAdd(at::Half *address, at::Half val) {
   #if ((CUDA_VERSION < 10000) || (defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 700)))
     unsigned int * address_as_ui =
       (unsigned int *) ((char *)address - ((size_t)address & 2));
@@ -132,9 +136,32 @@ static inline  __device__ void atomicAdd(at::Half *address, at::Half val) {
 
 }
 
+static inline __device__ void gpuAtomicAdd(at::BFloat16 *address, at::BFloat16 val) {
+    unsigned int * address_as_ui =
+      (unsigned int *) ((char *)address - ((size_t)address & 2));
+    unsigned int old = *address_as_ui;
+    unsigned int assumed;
+
+    do {
+      assumed = old;
+      at::BFloat16 bsum;
+      bsum.x = (size_t)address & 2 ? (old >> 16) : (old & 0xffff);
+      bsum = THCNumerics<at::BFloat16>::add(bsum, val);
+      old = (size_t)address & 2 ? (old & 0xffff) | (bsum.x << 16) : (old & 0xffff0000) | bsum.x;
+      old = atomicCAS(address_as_ui, assumed, old);
+    } while (assumed != old);
+}
+
 #if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 600 || CUDA_VERSION < 8000)
 // from CUDA C Programmic Guide
-static inline  __device__  void atomicAdd(double *address, double val) {
+static inline __device__ void atomicAdd(double* address, double val)
+#if defined(__clang__) && defined(__CUDA__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wgcc-compat"
+    __attribute__((enable_if(true, "")))
+#pragma GCC diagnostic pop
+#endif
+{
   unsigned long long int* address_as_ull = (unsigned long long int*)address;
   unsigned long long int old = *address_as_ull;
   unsigned long long int assumed;
@@ -165,5 +192,49 @@ static inline  __device__  void atomicAdd(double *address, double val) {
   static inline  __device__  void atomicAdd(double *address, double val) { }
 #endif
 #endif
+
+static inline __device__ void gpuAtomicAdd(double *address, double val) {
+  atomicAdd(address, val);
+}
+
+static inline __device__ void gpuAtomicAdd(float *address, float val) {
+  atomicAdd(address, val);
+}
+
+/* Note [gpuAtomicAdd vs atomicAdd]
+ * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ * We are trying to standardize inside the PyTorch backend on using gpuAtomicAdd()
+ * without a return. These may either be resolved through library functions or
+ * implemented internally. Some extensions such as torchvision call atomicAdd()
+ * directly and require non-library provided data type support. Only for these, we
+ * continue to provide atomicAdd overloads. 
+ */
+static inline __device__ void atomicAdd(at::Half *address, at::Half val) {
+  gpuAtomicAdd(address, val);
+}
+
+static inline __device__ void atomicAdd(at::BFloat16 *address, at::BFloat16 val) {
+  gpuAtomicAdd(address, val);
+}
+
+static inline __device__ void atomicAdd(uint8_t *address, uint8_t val) {
+  gpuAtomicAdd(address, val);
+}
+
+static inline  __device__ void atomicAdd(int8_t *address, int8_t val) {
+  gpuAtomicAdd(address, val);
+}
+
+static inline  __device__ void atomicAdd(int16_t *address, int16_t val) {
+  gpuAtomicAdd(address, val);
+}
+
+static inline __device__ void atomicAdd(int64_t *address, int64_t val) {
+  gpuAtomicAdd(address, val);
+}
+
+static inline __device__ void atomicAdd(bool *address, bool val) {
+  gpuAtomicAdd(address, val);
+}
 
 #endif // THC_ATOMICS_INC

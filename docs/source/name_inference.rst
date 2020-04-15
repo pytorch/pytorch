@@ -389,7 +389,7 @@ For ``torch.mm(tensor, other)``:
     ('N', 'out')
 
 Inherently, a matrix multiplication performs a dot product over two dimensions,
-collapsing them. When two tensors are matrix-multipled, the contracted dimensions
+collapsing them. When two tensors are matrix-multiplied, the contracted dimensions
 disappear and do not show up in the output tensor.
 
 :func:`torch.mv`, :func:`torch.dot` work in a similar way: name inference does not

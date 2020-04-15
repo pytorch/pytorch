@@ -182,9 +182,9 @@ class MultivariateNormal(Distribution):
 
     @lazy_property
     def precision_matrix(self):
-        # TODO: use `torch.potri` on `scale_tril` once a backwards pass is implemented.
-        scale_tril_inv = torch.inverse(self._unbroadcasted_scale_tril)
-        return torch.matmul(scale_tril_inv.transpose(-1, -2), scale_tril_inv).expand(
+        identity = torch.eye(self.loc.size(-1), device=self.loc.device, dtype=self.loc.dtype)
+        # TODO: use cholesky_inverse when its batching is supported
+        return torch.cholesky_solve(identity, self._unbroadcasted_scale_tril).expand(
             self._batch_shape + self._event_shape + self._event_shape)
 
     @property

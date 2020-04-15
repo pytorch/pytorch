@@ -21,7 +21,7 @@
 #include "caffe2/core/timer.h"
 #include "caffe2/utils/string_utils.h"
 #include "torch/csrc/autograd/grad_mode.h"
-#include "torch/csrc/jit/import.h"
+#include "torch/csrc/jit/serialization/import.h"
 #include "torch/script.h"
 
 #include <chrono>
@@ -37,6 +37,10 @@ C10_DEFINE_string(
     "semicolon to separate the dimension of different "
     "tensors.");
 C10_DEFINE_string(input_type, "", "Input type (uint8_t/float)");
+C10_DEFINE_bool(
+  no_inputs,
+  false,
+  "Whether the model has any input. Will ignore other input arugments if true");
 C10_DEFINE_bool(
   print_output,
   false,
@@ -63,19 +67,9 @@ split(char separator, const std::string& string, bool ignore_empty = true) {
   return pieces;
 }
 
-int main(int argc, char** argv) {
-  c10::SetUsageMessage(
-    "Run speed benchmark for pytorch model.\n"
-    "Example usage:\n"
-    "./speed_benchmark_torch"
-    " --model=<model_file>"
-    " --input_dims=\"1,3,224,224\""
-    " --input_type=float"
-    " --warmup=5"
-    " --iter=20");
-  if (!c10::ParseCommandLineFlags(&argc, &argv)) {
-    std::cerr << "Failed to parse command line flags!" << std::endl;
-    return 1;
+std::vector<c10::IValue> create_inputs() {
+  if (FLAGS_no_inputs) {
+    return {};
   }
 
   CAFFE_ENFORCE_GE(FLAGS_input_dims.size(), 0, "Input dims must be specified.");
@@ -111,10 +105,26 @@ int main(int argc, char** argv) {
     inputs.push_back(stensor);
   }
 
-  auto qengines = at::globalContext().supportedQEngines();
-  if (std::find(qengines.begin(), qengines.end(), at::QEngine::QNNPACK) != qengines.end()) {
-    at::globalContext().setQEngine(at::QEngine::QNNPACK);
+  return inputs;
+}
+
+int main(int argc, char** argv) {
+  c10::SetUsageMessage(
+    "Run speed benchmark for pytorch model.\n"
+    "Example usage:\n"
+    "./speed_benchmark_torch"
+    " --model=<model_file>"
+    " --input_dims=\"1,3,224,224\""
+    " --input_type=float"
+    " --warmup=5"
+    " --iter=20");
+  if (!c10::ParseCommandLineFlags(&argc, &argv)) {
+    std::cerr << "Failed to parse command line flags!" << std::endl;
+    return 1;
   }
+
+  std::vector<c10::IValue> inputs = create_inputs();
+
   torch::autograd::AutoGradMode guard(false);
   torch::jit::GraphOptimizerEnabledGuard no_optimizer_guard(false);
   auto module = torch::jit::load(FLAGS_model);

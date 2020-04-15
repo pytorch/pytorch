@@ -1,5 +1,6 @@
 #include <ATen/ATen.h>
 #include <ATen/Parallel.h>
+#include <ATen/NamedTensorUtils.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/native/Pool.h>
 #include <tuple>
@@ -499,6 +500,8 @@ std::tuple<Tensor, Tensor> max_pool3d_with_indices_cpu(
   IntArrayRef dilation,
   bool ceil_mode)
 {
+  NoNamesGuard guard;
+
   Tensor output = at::empty({0}, input.options());
   Tensor indices = at::empty({0}, input.options().dtype(kLong));
   max_pool3d_with_indices_out_cpu_template(
@@ -510,6 +513,11 @@ std::tuple<Tensor, Tensor> max_pool3d_with_indices_cpu(
     padding,
     dilation,
     ceil_mode);
+
+  guard.reset();
+  namedinference::propagate_names(output, input);
+  namedinference::propagate_names(indices, input);
+
   return std::tuple<Tensor, Tensor>(output, indices);
 }
 

@@ -1,11 +1,9 @@
 #pragma once
 
-#include <ATen/core/EnableNamedTensor.h>
 #include <ATen/WrapDimUtils.h>
 
 namespace at { namespace namedinference {
 
-#ifdef BUILD_NAMEDTENSOR
 
 // TensorName and TensorNames are wrappers around Dimname and DimnameList
 // that contain helper functions to make writing name inference rules easier.
@@ -72,6 +70,5 @@ struct CAFFE2_API TensorNames {
   TensorNameVec names_;
 };
 
-#endif
 
 }} // namespace at::namedinference

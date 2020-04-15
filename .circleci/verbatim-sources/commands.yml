@@ -3,16 +3,12 @@ commands:
   # attaches the workspace at ~/workspace; this workspace is generated
   # by the setup job. Note that ~/workspace is not the default working
   # directory (that's ~/project).
-  should_run_job:
-    description: "Test if the job should run or not"
+  attach_scripts:
+    description: "Attach the scripts that power everything else"
     steps:
       - attach_workspace:
           name: Attaching workspace
           at: ~/workspace
-      - run:
-          name: Should run job
-          no_output_timeout: "2m"
-          command: ~/workspace/.circleci/scripts/should_run_job.sh
 
   # This system setup script is meant to run before the CI-related scripts, e.g.,
   # installing Git client, checking out code, setting up CI env, and

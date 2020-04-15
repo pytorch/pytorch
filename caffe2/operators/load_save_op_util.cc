@@ -27,7 +27,7 @@ void ProcessBlob(
   auto& blob_states = *blob_states_ptr;
   if (blob_states.count(key) == 0) {
     // We reset the blob so that any existing content is destroyed. This
-    // is to guaranee correct device placement: if we are deserializing
+    // is to guarantee correct device placement: if we are deserializing
     // into a TensorCUDA, without explicit Reset we might be loading data
     // into an existing TensorCUDA that has pre-allocated memory on a
     // different GPU.
@@ -42,7 +42,7 @@ void ProcessBlob(
         blob_states[key]
             .seen_chunks_ids.insert(proto.content_chunk_id())
             .second,
-        "Chunk with the same id has occured twice for: ",
+        "Chunk with the same id has occurred twice for: ",
         key);
     CAFFE_ENFORCE(
         proto.content_chunk_id() >= 0 &&

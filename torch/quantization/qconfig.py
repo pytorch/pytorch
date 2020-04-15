@@ -38,7 +38,7 @@ default_debug_qconfig = QConfig(weight=default_weight_observer,
 default_per_channel_qconfig = QConfig(activation=default_observer,
                                       weight=default_per_channel_weight_observer)
 
-class QConfigDynamic(namedtuple('QConfigDynamic', ['weight'])):
+class QConfigDynamic(namedtuple('QConfigDynamic', ['activation', 'weight'])):
     """
     Describes how to dynamically quantize a layer or a part of the network by providing
     settings (observer classe) for weights.
@@ -54,15 +54,17 @@ class QConfigDynamic(namedtuple('QConfigDynamic', ['weight'])):
 
       my_qconfig = QConfigDynamic(weight=default_observer.with_args(dtype=torch.qint8))
     """
-    def __new__(cls, weight):
+    def __new__(cls, activation=torch.nn.Identity, weight=torch.nn.Identity):
         # catch common mistakes
         if isinstance(weight, nn.Module):
             raise ValueError("QConfigDynamic received observer instance, please pass observer class instead. " +
                              "Use MyObserver.with_args(x=1) to override arguments to constructor if needed")
-        return super(QConfigDynamic, cls).__new__(cls, weight)
+        return super(QConfigDynamic, cls).__new__(cls, activation, weight)
 
-default_dynamic_qconfig = QConfigDynamic(weight=default_weight_observer)
-float16_dynamic_qconfig = QConfigDynamic(weight=NoopObserver.with_args(dtype=torch.float16))
+default_dynamic_qconfig = QConfigDynamic(activation=default_dynamic_quant_observer,
+                                         weight=default_weight_observer)
+float16_dynamic_qconfig = QConfigDynamic(activation=default_dynamic_quant_observer,
+                                         weight=NoopObserver.with_args(dtype=torch.float16))
 per_channel_dynamic_qconfig = QConfigDynamic(weight=default_per_channel_weight_observer)
 
 default_qat_qconfig = QConfig(activation=default_fake_quant,

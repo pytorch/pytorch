@@ -1,5 +1,8 @@
 #pragma once
 
+// Common
+#include <torch/nn/modules/common.h>
+
 // Containers
 #include <torch/nn/modules/container/any.h>
 #include <torch/nn/modules/container/functional.h>
@@ -8,6 +11,7 @@
 #include <torch/nn/modules/container/sequential.h>
 
 // Layers
+#include <torch/nn/modules/adaptive.h>
 #include <torch/nn/modules/batchnorm.h>
 #include <torch/nn/modules/instancenorm.h>
 #include <torch/nn/modules/conv.h>

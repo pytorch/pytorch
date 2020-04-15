@@ -12,8 +12,6 @@
 # define ffloat float
 #endif
 
-TH_EXTERNC void dswap_(int *n, double *x, int *incx, double *y, int *incy);
-TH_EXTERNC void sswap_(int *n, float *x, int *incx, float *y, int *incy);
 TH_EXTERNC void dscal_(int *n, double *a, double *x, int *incx);
 TH_EXTERNC void sscal_(int *n, float *a, float *x, int *incx);
 TH_EXTERNC void dcopy_(int *n, double *x, int *incx, double *y, int *incy);
@@ -40,49 +38,23 @@ TH_EXTERNC void sger_(int *m, int *n, float *alpha, float *x, int *incx, float *
 TH_EXTERNC void dgemm_(char *transa, char *transb, int *m, int *n, int *k, double *alpha, double *a, int *lda, double *b, int *ldb, double *beta, double *c, int *ldc);
 TH_EXTERNC void sgemm_(char *transa, char *transb, int *m, int *n, int *k, float *alpha, float *a, int *lda, float *b, int *ldb, float *beta, float *c, int *ldc);
 
-
-
-void THBlas_(swap)(int64_t n, scalar_t *x, int64_t incx, scalar_t *y, int64_t incy)
-{
-  if(n == 1)
-  {
-    incx = 1;
-    incy = 1;
-  }
-
-#if defined(USE_BLAS) && (defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_FLOAT))
-  if( (n <= INT_MAX) && (incx <= INT_MAX) && (incy <= INT_MAX) )
-  {
-    int i_n = (int)n;
-    int i_incx = (int)incx;
-    int i_incy = (int)incy;
-
-#if defined(TH_REAL_IS_DOUBLE)
-    dswap_(&i_n, x, &i_incx, y, &i_incy);
-#else
-    sswap_(&i_n, x, &i_incx, y, &i_incy);
-#endif
-    return;
-  }
-#endif
-  {
-    int64_t i;
-    for(i = 0; i < n; i++)
-    {
-      scalar_t z = x[i*incx];
-      x[i*incx] = y[i*incy];
-      y[i*incy] = z;
-    }
-  }
-}
-
 void THBlas_(scal)(int64_t n, scalar_t a, scalar_t *x, int64_t incx)
 {
   if(n == 1)
     incx = 1;
 
+  // [NOTE: cpu_zero]
+  // at least on the following version of BLAS this does not folllow the same semantics
+  // when a == 0 and there exists a NaN in the input.  Namely, the non-BLAS code below results
+  // in a value of 0, whereas this results in a value of NaN.  This is problematic because a
+  // NaN in an output tensor needs to be zero'ed explicitly through a separate mechanism.
+  // At the ATen/TH binding layer, this was via "cpu_zero", which would zero out the output
+  // tensor.
+  // BLAS version:
+  // [conda] blas                      1.0                         mkl
+  // [conda] mkl                       2019.4                      243
 #if defined(USE_BLAS) && (defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_FLOAT))
-  if( (n <= INT_MAX) && (incx <= INT_MAX) )
+  if( (n <= INT_MAX) && (incx <= INT_MAX) && (a != 0))
   {
     int i_n = (int)n;
     int i_incx = (int)incx;
@@ -360,14 +332,10 @@ void THBlas_(gemm)(
 
 #if defined(USE_BLAS) && (defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_FLOAT))
   if( (m <= INT_MAX) && (n <= INT_MAX) && (k <= INT_MAX) &&
-      (lda <= INT_MAX) && (ldb <= INT_MAX) && (ldc <= INT_MAX) )
+      (lda <= INT_MAX) && (ldb <= INT_MAX) && (ldc <= INT_MAX) &&
+      (lda >= THMax(1, (transa_ ? k : m))) && (ldb >= THMax(1, (transb_ ? n : k))) &&
+      (ldc >= THMax(1, m)))
   {
-    THArgCheck(lda >= THMax(1, (transa_ ? k : m)), 8,
-      "lda should be at least max(1, %d), but have %d", (transa_ ? k : m), lda);
-    THArgCheck(ldb >= THMax(1, (transb_ ? n : k)), 10,
-      "ldb should be at least max(1, %d), but have %d", (transb_ ? n : k), ldb);
-    THArgCheck(ldc >= THMax(1, m), 13,
-      "ldc should be at least max(1, m=%d), but have %d", m, ldc);
     int i_m = (int)m;
     int i_n = (int)n;
     int i_k = (int)k;

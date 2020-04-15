@@ -274,6 +274,8 @@ class SummaryWriter(object):
         Args:
             hparam_dict (dict): Each key-value pair in the dictionary is the
               name of the hyper parameter and it's corresponding value.
+              The type of the value can be one of `bool`, `string`, `float`,
+              `int`, or `None`.
             metric_dict (dict): Each key-value pair in the dictionary is the
               name of the metric and it's corresponding value. Note that the key used
               here should be unique in the tensorboard record. Otherwise the value
@@ -343,8 +345,6 @@ class SummaryWriter(object):
 
     def add_scalars(self, main_tag, tag_scalar_dict, global_step=None, walltime=None):
         """Adds many scalar data to summary.
-
-        Note that this function also keeps logged scalars in memory. In extreme case it explodes your RAM.
 
         Args:
             main_tag (string): The parent name for the tags
@@ -505,8 +505,8 @@ class SummaryWriter(object):
         Shape:
             img_tensor: Default is :math:`(3, H, W)`. You can use ``torchvision.utils.make_grid()`` to
             convert a batch of tensor into 3xHxW format or call ``add_images`` and let us do the job.
-            Tensor with :math:`(1, H, W)`, :math:`(H, W)`, :math:`(H, W, 3)` is also suitible as long as
-            corresponding ``dataformats`` argument is passed. e.g. CHW, HWC, HW.
+            Tensor with :math:`(1, H, W)`, :math:`(H, W)`, :math:`(H, W, 3)` is also suitable as long as
+            corresponding ``dataformats`` argument is passed, e.g. ``CHW``, ``HWC``, ``HW``.
 
         Examples::
 

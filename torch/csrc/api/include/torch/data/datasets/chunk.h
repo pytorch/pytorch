@@ -22,6 +22,8 @@ namespace datasets {
 template <typename ExampleType_, typename ChunkType_ = std::vector<ExampleType_>>
 class ChunkDataReader {
  public:
+  virtual ~ChunkDataReader() = default;
+
   using ChunkType = ChunkType_;
   using ExampleType = ExampleType_;
 

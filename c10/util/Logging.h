@@ -7,10 +7,10 @@
 #include <limits>
 #include <sstream>
 
-#include "c10/macros/Macros.h"
-#include "c10/util/Exception.h"
-#include "c10/util/Flags.h"
-#include "c10/util/StringUtil.h"
+#include <c10/macros/Macros.h>
+#include <c10/util/Exception.h>
+#include <c10/util/Flags.h>
+#include <c10/util/StringUtil.h>
 
 // CAFFE2_LOG_THRESHOLD is a compile time flag that would allow us to turn off
 // logging at compile time so no logging message below that level is produced
@@ -23,9 +23,9 @@
 
 // Below are different implementations for glog and non-glog cases.
 #ifdef C10_USE_GLOG
-#include "c10/util/logging_is_google_glog.h"
+#include <c10/util/logging_is_google_glog.h>
 #else // !C10_USE_GLOG
-#include "c10/util/logging_is_not_google_glog.h"
+#include <c10/util/logging_is_not_google_glog.h>
 #endif // C10_USE_GLOG
 
 C10_DECLARE_int(caffe2_log_level);
@@ -62,7 +62,14 @@ using std::string;
 C10_API bool InitCaffeLogging(int* argc, char** argv);
 C10_API void UpdateLoggingLevelsFromFlags();
 
-C10_API C10_NORETURN void ThrowEnforceNotMet(
+[[noreturn]] C10_API void ThrowEnforceNotMet(
+    const char* file,
+    const int line,
+    const char* condition,
+    const std::string& msg,
+    const void* caller = nullptr);
+
+[[noreturn]] C10_API void ThrowEnforceFiniteNotMet(
     const char* file,
     const int line,
     const char* condition,
@@ -98,6 +105,14 @@ using EnforceNotMet = ::c10::Error;
           __FILE__, __LINE__, #condition, ::c10::str(__VA_ARGS__)); \
     }                                                               \
   } while (false)
+
+#define CAFFE_ENFORCE_FINITE(condition, ...)                        \
+    do {                                                            \
+      if (C10_UNLIKELY(!(condition))) {                             \
+        ::c10::ThrowEnforceFiniteNotMet(                            \
+          __FILE__, __LINE__, #condition, ::c10::str(__VA_ARGS__)); \
+      }                                                             \
+    } while (false)
 
 #define CAFFE_ENFORCE_WITH_CALLER(condition, ...)                         \
   do {                                                                    \

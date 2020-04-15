@@ -54,7 +54,7 @@ void THCTensor_(sortKeyValueInplace)(THCState* state,
                                                                         \
     if (dir) {                                                          \
       bitonicSortKVInPlace<scalar_t, int64_t, A, -1, GTComp<scalar_t, true>, TYPE, SIZE> \
-        <<<grid, block, 0, THCState_getCurrentStream(state)>>>(         \
+        <<<grid, block, 0, c10::cuda::getCurrentCUDAStream()>>>(         \
           keyInfo,                                                      \
           keySlices,                                                    \
           (TYPE) keySliceSize,                                          \
@@ -64,7 +64,7 @@ void THCTensor_(sortKeyValueInplace)(THCState* state,
           GTComp<scalar_t, true>());                                    \
     } else {                                                            \
       bitonicSortKVInPlace<scalar_t, int64_t, A, -1, LTComp<scalar_t, true>, TYPE, SIZE> \
-        <<<grid, block, 0, THCState_getCurrentStream(state)>>>(         \
+        <<<grid, block, 0, c10::cuda::getCurrentCUDAStream()>>>(         \
           keyInfo,                                                      \
           keySlices,                                                    \
           (TYPE) keySliceSize,                                          \
@@ -222,7 +222,7 @@ void THCTensor_(sortViaThrust)(THCState* state,
   thrust::counting_iterator<int64_t> countIter(0);
   thrust::copy(
 #if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
-    thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)),
+    thrust::cuda::par(thrustAlloc).on(c10::cuda::getCurrentCUDAStream()),
 #endif
     countIter, countIter + totalElements, indexIter);
     auto begin = thrust::make_zip_iterator(thrust::make_tuple(indexIter, keyIter));
@@ -230,26 +230,26 @@ void THCTensor_(sortViaThrust)(THCState* state,
     if (totalElements < INT_MAX)
        thrust::sort(
 #if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
-       thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)),
+       thrust::cuda::par(thrustAlloc).on(c10::cuda::getCurrentCUDAStream()),
 #endif
        begin, begin + totalElements, ThrustSliceGTOp<scalar_t, int, true>(sliceSize));
     else
        thrust::sort(
 #if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
-       thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)),
+       thrust::cuda::par(thrustAlloc).on(c10::cuda::getCurrentCUDAStream()),
 #endif
        begin, begin + totalElements, ThrustSliceGTOp<scalar_t, int64_t, true>(sliceSize));
   } else {
     if (totalElements < INT_MAX)
        thrust::sort(
 #if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
-       thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)),
+       thrust::cuda::par(thrustAlloc).on(c10::cuda::getCurrentCUDAStream()),
 #endif
        begin, begin + totalElements, ThrustSliceLTOp<scalar_t, int, true>(sliceSize));
     else
        thrust::sort(
 #if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
-       thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)),
+       thrust::cuda::par(thrustAlloc).on(c10::cuda::getCurrentCUDAStream()),
 #endif
        begin, begin + totalElements, ThrustSliceLTOp<scalar_t, int64_t, true>(sliceSize));
   }
@@ -257,7 +257,7 @@ void THCTensor_(sortViaThrust)(THCState* state,
   // Lua index
   thrust::for_each(
 #if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
-    thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)),
+    thrust::cuda::par(thrustAlloc).on(c10::cuda::getCurrentCUDAStream()),
 #endif
     indexIter, indexIter + totalElements,
     GlobalIndexToPerSliceIndex(sliceSize));
@@ -279,6 +279,7 @@ void THCTensor_(sort)(THCState* state,
                       int dim, int order) {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, sorted, input));
   THCAssertSameGPU(THCudaLongTensor_checkGPU(state, 1, indices));
+  dim = at::maybe_wrap_dim(dim, input);
   int64_t dims = THCTensor_(nDimensionLegacyNoScalars)(state, sorted);
   THArgCheck(dims <= MAX_CUTORCH_DIMS, 2, CUTORCH_DIM_WARNING);
   dims = THCTensor_(nDimensionLegacyNoScalars)(state, input);

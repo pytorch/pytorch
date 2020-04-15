@@ -171,88 +171,93 @@ void avg_pool2d_out_cuda_template(
 
   output.resize_({nbatch, nInputPlane, outputHeight, outputWidth});
 
-  const int count = safe_downcast<int, int64_t>(output.numel());
-  const int num_threads = std::min(at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, 1024);
+  const int32_t count = safe_downcast<int32_t, int64_t>(output.numel());
+  const uint32_t  num_threads = std::min(at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, 1024);
+  const uint32_t num_blocks = cuda::ATenCeilDiv<uint32_t>(count, num_threads);
 
   if (divisor_override.has_value()) {
-    AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(),
+    AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, input.scalar_type(),
       "avg_pool2d_out_cuda_frame",
       [&] {
-        using accscalar_t = acc_type<scalar_t, true>;
+        AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "avg_pool2d_out_cuda_frame", [&] {
+          using accscalar_t = acc_type<scalar_t, true>;
 
-        scalar_t *output_data = output.data_ptr<scalar_t>();
-        scalar_t *input_data = input.data_ptr<scalar_t>();
+          scalar_t *output_data = output.data_ptr<scalar_t>();
+          scalar_t *input_data = input.data_ptr<scalar_t>();
 
-        avg_pool2d_out_cuda_frame<scalar_t, accscalar_t, false, true>
-            <<<cuda::ATenCeilDiv(count, num_threads), num_threads, 0, at::cuda::getCurrentCUDAStream()>>>(
-            count,
-                input_data,
-                nbatch,
-                nInputPlane,
-                inputHeight, inputWidth,
-                outputHeight, outputWidth,
-                kH, kW,
-                dH, dW,
-                padH, padW,
-                output_data,
-                divisor_override.value());
+          avg_pool2d_out_cuda_frame<scalar_t, accscalar_t, false, true>
+              <<<num_blocks, num_threads, 0, at::cuda::getCurrentCUDAStream()>>>(
+              count,
+                  input_data,
+                  nbatch,
+                  nInputPlane,
+                  inputHeight, inputWidth,
+                  outputHeight, outputWidth,
+                  kH, kW,
+                  dH, dW,
+                  padH, padW,
+                  output_data,
+                  divisor_override.value());
+        });
       }
     );
   } else {
     if (count_include_pad) {
-      AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(),
+      AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, input.scalar_type(),
         "avg_pool2d_out_cuda_frame",
         [&] {
-          using accscalar_t = acc_type<scalar_t, true>;
+          AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "avg_pool2d_out_cuda_frame", [&] {
+            using accscalar_t = acc_type<scalar_t, true>;
 
-          scalar_t *output_data = output.data_ptr<scalar_t>();
-          scalar_t *input_data = input.data_ptr<scalar_t>();
+            scalar_t *output_data = output.data_ptr<scalar_t>();
+            scalar_t *input_data = input.data_ptr<scalar_t>();
 
-          avg_pool2d_out_cuda_frame<scalar_t, accscalar_t, true, false>
-              <<<cuda::ATenCeilDiv(count, num_threads), num_threads, 0, at::cuda::getCurrentCUDAStream()>>>(
-              count,
-                  input_data,
-                  nbatch,
-                  nInputPlane,
-                  inputHeight, inputWidth,
-                  outputHeight, outputWidth,
-                  kH, kW,
-                  dH, dW,
-                  padH, padW,
-                  output_data, 0);
+            avg_pool2d_out_cuda_frame<scalar_t, accscalar_t, true, false>
+                <<<num_blocks, num_threads, 0, at::cuda::getCurrentCUDAStream()>>>(
+                count,
+                    input_data,
+                    nbatch,
+                    nInputPlane,
+                    inputHeight, inputWidth,
+                    outputHeight, outputWidth,
+                    kH, kW,
+                    dH, dW,
+                    padH, padW,
+                    output_data, 0);
+          });
         }
       );
     }
     else {
-      AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(),
+      AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, input.scalar_type(),
         "avg_pool2d_out_cuda_frame",
         [&] {
-          using accscalar_t = acc_type<scalar_t, true>;
+          AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "avg_pool2d_out_cuda_frame", [&] {
+            using accscalar_t = acc_type<scalar_t, true>;
 
-          scalar_t *output_data = output.data_ptr<scalar_t>();
-          scalar_t *input_data = input.data_ptr<scalar_t>();
+            scalar_t *output_data = output.data_ptr<scalar_t>();
+            scalar_t *input_data = input.data_ptr<scalar_t>();
 
-          avg_pool2d_out_cuda_frame<scalar_t, accscalar_t, false, false>
-              <<<cuda::ATenCeilDiv(count, num_threads), num_threads, 0, at::cuda::getCurrentCUDAStream()>>>(
-              count,
-                  input_data,
-                  nbatch,
-                  nInputPlane,
-                  inputHeight, inputWidth,
-                  outputHeight, outputWidth,
-                  kH, kW,
-                  dH, dW,
-                  padH, padW,
-                  output_data, 0);
+            avg_pool2d_out_cuda_frame<scalar_t, accscalar_t, false, false>
+                <<<num_blocks, num_threads, 0, at::cuda::getCurrentCUDAStream()>>>(
+                count,
+                    input_data,
+                    nbatch,
+                    nInputPlane,
+                    inputHeight, inputWidth,
+                    outputHeight, outputWidth,
+                    kH, kW,
+                    dH, dW,
+                    padH, padW,
+                    output_data, 0);
+          });
         }
       );
     }
   }
 
-  
-  TORCH_CHECK(cudaGetLastError() == cudaSuccess,
-     "avg_pool2d_out_cuda_frame failed with error code ",
-     cudaGetLastError());
+
+  AT_CUDA_CHECK(cudaGetLastError());
 
   if (input.ndimension() == 3) {
     output.resize_({nInputPlane, outputHeight, outputWidth});
@@ -322,20 +327,22 @@ Tensor& avg_pool2d_backward_out_cuda_template(
 
   gradInput.resize_as_(input);
 
-  const int count =  safe_downcast<int, int64_t>(input.numel());
-  const int num_threads = std::min(at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, 1024);
+  const int32_t count =  safe_downcast<int32_t, int64_t>(input.numel());
+  const uint32_t num_threads = std::min(at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, 1024);
+  const uint32_t num_blocks = cuda::ATenCeilDiv<uint32_t>(count, num_threads);
 
   if (divisor_override.has_value()) {
-    AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(),
+    AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, input.scalar_type(),
       "avg_pool2d_backward_out_cuda_frame",
       [&] {
+      AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "avg_pool2d_backward_out_cuda_frame", [&] {
         using accscalar_t = acc_type<scalar_t, true>;
 
         scalar_t *gradOutput_data = gradOutput.data_ptr<scalar_t>();
         scalar_t *gradInput_data = gradInput.data_ptr<scalar_t>();
 
         avg_pool2d_backward_out_cuda_frame<scalar_t, accscalar_t, false, true>
-            <<<cuda::ATenCeilDiv(count, num_threads), num_threads, 0, at::cuda::getCurrentCUDAStream()>>>(
+            <<<num_blocks, num_threads, 0, at::cuda::getCurrentCUDAStream()>>>(
             count,
                 gradOutput_data,
                 nbatch,
@@ -347,62 +354,65 @@ Tensor& avg_pool2d_backward_out_cuda_template(
                 padH, padW,
                 gradInput_data,
                 divisor_override.value());
+        });
       }
     );
   } else {
     if (count_include_pad) {
-      AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(),
+      AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, input.scalar_type(),
         "avg_pool2d_backward_out_cuda_frame",
         [&] {
-          using accscalar_t = acc_type<scalar_t, true>;
+          AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "avg_pool2d_backward_out_cuda_frame", [&] {
+            using accscalar_t = acc_type<scalar_t, true>;
 
-          scalar_t *gradOutput_data = gradOutput.data_ptr<scalar_t>();
-          scalar_t *gradInput_data = gradInput.data_ptr<scalar_t>();
+            scalar_t *gradOutput_data = gradOutput.data_ptr<scalar_t>();
+            scalar_t *gradInput_data = gradInput.data_ptr<scalar_t>();
 
-          avg_pool2d_backward_out_cuda_frame<scalar_t, accscalar_t, true, false>
-            <<<cuda::ATenCeilDiv(count, num_threads), num_threads, 0, at::cuda::getCurrentCUDAStream()>>>(
-               count,
-               gradOutput_data,
-               nbatch,
-               nInputPlane,
-               inputHeight, inputWidth,
-               outputHeight, outputWidth,
-               kH, kW,
-               dH, dW,
-               padH, padW,
-               gradInput_data, 0);
+            avg_pool2d_backward_out_cuda_frame<scalar_t, accscalar_t, true, false>
+              <<<num_blocks, num_threads, 0, at::cuda::getCurrentCUDAStream()>>>(
+                 count,
+                 gradOutput_data,
+                 nbatch,
+                 nInputPlane,
+                 inputHeight, inputWidth,
+                 outputHeight, outputWidth,
+                 kH, kW,
+                 dH, dW,
+                 padH, padW,
+                 gradInput_data, 0);
+          });
         }
       );
     }
     else {
-      AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(),
+      AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, input.scalar_type(),
         "avg_pool2d_backward_out_cuda_frame",
         [&] {
-          using accscalar_t = acc_type<scalar_t, true>;
+          AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "avg_pool2d_backward_out_cuda_frame", [&] {
+            using accscalar_t = acc_type<scalar_t, true>;
 
-          scalar_t *gradOutput_data = gradOutput.data_ptr<scalar_t>();
-          scalar_t *gradInput_data = gradInput.data_ptr<scalar_t>();
+            scalar_t *gradOutput_data = gradOutput.data_ptr<scalar_t>();
+            scalar_t *gradInput_data = gradInput.data_ptr<scalar_t>();
 
-          avg_pool2d_backward_out_cuda_frame<scalar_t, accscalar_t, false, false>
-            <<<cuda::ATenCeilDiv(count, num_threads), num_threads, 0, at::cuda::getCurrentCUDAStream()>>>(
-               count,
-               gradOutput_data,
-               nbatch,
-               nInputPlane,
-               inputHeight, inputWidth,
-               outputHeight, outputWidth,
-               kH, kW,
-               dH, dW,
-               padH, padW,
-               gradInput_data, 0);
+            avg_pool2d_backward_out_cuda_frame<scalar_t, accscalar_t, false, false>
+              <<<num_blocks, num_threads, 0, at::cuda::getCurrentCUDAStream()>>>(
+                 count,
+                 gradOutput_data,
+                 nbatch,
+                 nInputPlane,
+                 inputHeight, inputWidth,
+                 outputHeight, outputWidth,
+                 kH, kW,
+                 dH, dW,
+                 padH, padW,
+                 gradInput_data, 0);
+          });
         }
       );
     }
   }
 
-  TORCH_CHECK(cudaGetLastError() == cudaSuccess,
-    "avg_pool2d_backward_out_cuda failed with error code ",
-    cudaGetLastError());
+  AT_CUDA_CHECK(cudaGetLastError());
 
   return gradInput;
 }

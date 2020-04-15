@@ -10,7 +10,7 @@ apt-get autoclean && apt-get clean
 rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
 pushd /tmp
-curl -Os https://dl.google.com/android/repository/android-ndk-${ANDROID_NDK}-linux-x86_64.zip
+curl -Os --retry 3 https://dl.google.com/android/repository/android-ndk-${ANDROID_NDK}-linux-x86_64.zip
 popd
 _ndk_dir=/opt/ndk
 mkdir -p "$_ndk_dir"

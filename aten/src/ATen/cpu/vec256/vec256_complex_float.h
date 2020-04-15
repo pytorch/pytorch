@@ -16,6 +16,7 @@ namespace {
 template <> class Vec256<std::complex<float>> {
 private:
   __m256 values;
+  static const Vec256<std::complex<float>> ones;
 public:
   using value_type = std::complex<float>;
   static constexpr int size() {
@@ -86,7 +87,8 @@ public:
     return _mm256_blendv_ps(a.values, b.values, mask_);
 
   }
-  static Vec256<std::complex<float>> arange(std::complex<float> base = 0., std::complex<float> step = 1.) {
+  template<typename step_t>
+  static Vec256<std::complex<float>> arange(std::complex<float> base = 0., step_t step = static_cast<step_t>(1)) {
     return Vec256<std::complex<float>>(base,
                                         base + step,
                                         base + std::complex<float>(2)*step,
@@ -111,6 +113,12 @@ public:
       return _mm256_loadu_ps(reinterpret_cast<const float*>(ptr));
 
     __at_align32__ float tmp_values[2*size()];
+    // Ensure uninitialized memory does not change the output value See https://github.com/pytorch/pytorch/issues/32502
+    // for more details. We do not initialize arrays to zero using "={0}" because gcc would compile it to two
+    // instructions while a loop would be compiled to one instruction.
+    for (auto i = 0; i < 2*size(); ++i) {
+      tmp_values[i] = 0.0;
+    }
     std::memcpy(
         tmp_values,
         reinterpret_cast<const float*>(ptr),
@@ -235,7 +243,15 @@ public:
     AT_ERROR("not supported for complex numbers");
   }
   Vec256<std::complex<float>> exp() const {
-    return map(std::exp);
+    //exp(a + bi)
+    // = exp(a)*(cos(b) + sin(b)i)
+    auto exp = Sleef_expf8_u10(values);                               //exp(a)           exp(b)
+    exp = _mm256_blend_ps(exp, _mm256_permute_ps(exp, 0xB1), 0xAA);   //exp(a)           exp(a)
+
+    auto sin_cos = Sleef_sincosf8_u10(values);                        //[sin(a), cos(a)] [sin(b), cos(b)]
+    auto cos_sin = _mm256_blend_ps(_mm256_permute_ps(sin_cos.y, 0xB1),
+                                   sin_cos.x, 0xAA);                  //cos(b)           sin(b)
+    return _mm256_mul_ps(exp, cos_sin);
   }
   Vec256<std::complex<float>> expm1() const {
     AT_ERROR("not supported for complex numbers");
@@ -323,6 +339,13 @@ public:
   Vec256<std::complex<float>> operator>=(const Vec256<std::complex<float>>& other) const {
     AT_ERROR("not supported for complex numbers");
   }
+
+  Vec256<std::complex<float>> eq(const Vec256<std::complex<float>>& other) const;
+  Vec256<std::complex<float>> ne(const Vec256<std::complex<float>>& other) const;
+  Vec256<std::complex<float>> lt(const Vec256<std::complex<float>>& other) const;
+  Vec256<std::complex<float>> le(const Vec256<std::complex<float>>& other) const;
+  Vec256<std::complex<float>> gt(const Vec256<std::complex<float>>& other) const;
+  Vec256<std::complex<float>> ge(const Vec256<std::complex<float>>& other) const;
 };
 
 template <> Vec256<std::complex<float>> inline operator+(const Vec256<std::complex<float>> &a, const Vec256<std::complex<float>> &b) {
@@ -445,6 +468,18 @@ Vec256<std::complex<float>> inline operator|(const Vec256<std::complex<float>>& 
 template <>
 Vec256<std::complex<float>> inline operator^(const Vec256<std::complex<float>>& a, const Vec256<std::complex<float>>& b) {
   return _mm256_xor_ps(a, b);
+}
+
+const Vec256<std::complex<float>> Vec256<std::complex<float>>::ones(_mm256_set1_ps(1.0f));
+
+Vec256<std::complex<float>> Vec256<std::complex<float>>::eq(
+    const Vec256<std::complex<float>>& other) const {
+  return (*this == other) & Vec256<std::complex<float>>::ones;
+}
+
+Vec256<std::complex<float>> Vec256<std::complex<float>>::ne(
+    const Vec256<std::complex<float>>& other) const {
+  return (*this != other) & Vec256<std::complex<float>>::ones;
 }
 
 #ifdef __AVX2__

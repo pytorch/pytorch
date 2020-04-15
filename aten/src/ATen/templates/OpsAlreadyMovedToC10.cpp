@@ -1,5 +1,4 @@
 #include <ATen/core/OpsAlreadyMovedToC10.h>
-#include <ATen/core/EnableNamedTensor.h>
 
 #include <string>
 #include <cstring>
@@ -28,12 +27,22 @@ struct OpNameHash final {
 };
 }
 
-bool is_aten_op(const c10::OperatorName& opName) {
+bool is_aten_op_and_unboxing_is_already_handled_by_c10(const c10::OperatorName& opName) {
   static std::unordered_set<std::pair<const char*, const char*>, OpNameHash, OpNameEquals> ops {
-    ${list_of_aten_ops}
+    ${aten_ops_with_unboxing_already_handled_by_c10}
     {"", ""}
   };
   return ops.count(std::make_pair(opName.name.c_str(), opName.overload_name.c_str())) != 0;
 }
+
+bool is_aten_op_and_unboxing_is_not_handled_by_c10_yet(const c10::OperatorName& opName) {
+  static std::unordered_set<std::pair<const char*, const char*>, OpNameHash, OpNameEquals> ops {
+    ${aten_ops_with_unboxing_not_handled_by_c10_yet}
+    {"", ""}
+  };
+  return ops.count(std::make_pair(opName.name.c_str(), opName.overload_name.c_str())) != 0;
+}
+
+
 
 }

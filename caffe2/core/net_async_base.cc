@@ -68,7 +68,7 @@ AsyncNetBase::AsyncNetBase(
     Workspace* ws)
     : NetBase(net_def, ws), options_(net_def), counters_(net_def) {
   operator_nodes_ = dag_utils::prepareOperatorNodes(net_def, ws);
-  helper_ = caffe2::make_unique<AsyncNetExecutorHelper>(this);
+  helper_ = std::make_unique<AsyncNetExecutorHelper>(this);
   operators_.reserve(operator_nodes_.size());
   for (const auto& node : operator_nodes_) {
     auto op_ptr = node.operator_.get();
@@ -119,14 +119,14 @@ bool AsyncNetBase::handleRunError() {
   for (int task_id = 0; task_id < tasksNum(); ++task_id) {
     if (event(task_id).HasException()) {
       if (first_exc_task_id >= 0) {
-        auto exc_ts = event(task_id).ExceptionTimestamp();
+        auto exc_ts = event(task_id).ErrorTimestamp();
         if (exc_ts < first_exc_ts) {
           first_exc_task_id = task_id;
           first_exc_ts = exc_ts;
         }
       } else {
         first_exc_task_id = task_id;
-        first_exc_ts = event(task_id).ExceptionTimestamp();
+        first_exc_ts = event(task_id).ErrorTimestamp();
       }
     }
   }
@@ -497,7 +497,13 @@ void AsyncNetBase::finalizeEvents() {
                 if (op != pending_op) {
                   try {
                     op->CancelAsyncCallback();
-                    op->event().SetFinished("Cancelled");
+
+                    // throw and catch exception to preserve stack trace
+                    try {
+                      throw AsyncNetCancelled();
+                    } catch (const AsyncNetCancelled& e) {
+                      op->event().SetFinishedWithException(e.what());
+                    }
                   } catch (const EnforceNotMet&) {
                     // ignore
                   }

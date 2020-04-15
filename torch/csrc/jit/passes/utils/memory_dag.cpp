@@ -74,8 +74,8 @@ bool MemoryDAG::mayContainAliasImpl(const Element* a, const Element* b) const {
 }
 
 bool MemoryDAG::mayContainAlias(
-    const at::ArrayRef<Element*>& a,
-    const at::ArrayRef<Element*>& b) const {
+    const at::ArrayRef<Element*> a,
+    const at::ArrayRef<Element*> b) const {
   if (a.size() == 0 || b.size() == 0) {
     return false;
   }
@@ -109,7 +109,7 @@ void MemoryDAG::addToContainedElements(Element* elem, Element* container) {
 // Give `v` a fresh alias (i.e. it does not point to any value)
 Element* MemoryDAG::makeFreshValue(const Value* v) {
   indexToElementMap_.emplace_back(
-    torch::make_unique<Element>(*this, v, indexToElementMap_.size()));
+      torch::make_unique<Element>(*this, v, indexToElementMap_.size()));
   return indexToElementMap_.back().get();
 }
 

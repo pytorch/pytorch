@@ -33,8 +33,8 @@ class Conf(object):
 
         docker_distro_prefix = miniutils.override(self.pydistro, docker_word_substitution)
 
-        # The cpu nightlies are built on the pytorch/manylinux-cuda100 docker image
-        alt_docker_suffix = self.cuda_version or "100"
+        # The cpu nightlies are built on the pytorch/manylinux-cuda102 docker image
+        alt_docker_suffix = self.cuda_version or "102"
         docker_distro_suffix = "" if self.pydistro == "conda" else alt_docker_suffix
         return miniutils.quote("pytorch/" + docker_distro_prefix + "-cuda" + docker_distro_suffix)
 
@@ -67,7 +67,17 @@ class Conf(object):
             job_def["requires"].append("update_s3_htmls_for_nightlies_devtoolset7")
             job_def["filters"] = {"branches": {"only": "postnightly"}}
         else:
-            job_def["filters"] = {"branches": {"only": "nightly"}}
+            job_def["filters"] = {
+                "branches": {
+                    "only": "nightly"
+                },
+                # Will run on tags like v1.5.0-rc1, etc.
+                "tags": {
+                    # Using a raw string here to avoid having to escape
+                    # anything
+                    "only": r"/v[0-9]+(\.[0-9]+)*-rc[0-9]+/"
+                }
+            }
         if self.libtorch_variant:
             job_def["libtorch_variant"] = miniutils.quote(self.libtorch_variant)
         if phase == "test":
