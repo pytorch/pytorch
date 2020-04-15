@@ -20,10 +20,13 @@ namespace {
     switch (kind) {
       case Library::DEF:
         os << "TORCH_LIBRARY";
+        break;
       case Library::IMPL:
         os << "TORCH_LIBRARY_IMPL";
+        break;
       case Library::FRAGMENT:
         os << "TORCH_LIBRARY_FRAGMENT";
+        break;
     }
     return os;
   }
