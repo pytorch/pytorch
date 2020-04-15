@@ -918,7 +918,8 @@ class TestSparse(TestCase):
         "bmm sparse-dense CUDA is not yet supported in Windows, at least up to CUDA 10.1"
     )
     @unittest.skipIf(
-        TEST_CUDA and (not torch.version.cuda
+        TEST_CUDA and (
+            not torch.version.cuda
             or [int(x) for x in torch.version.cuda.split(".")] < [10, 1]),
         "bmm sparse-dense requires CUDA 10.1 or greater"
     )
