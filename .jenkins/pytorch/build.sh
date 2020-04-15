@@ -36,6 +36,10 @@ if [[ "$BUILD_ENVIRONMENT" == *-linux-xenial-py3-clang5-asan* ]]; then
   exec "$(dirname "${BASH_SOURCE[0]}")/build-asan.sh" "$@"
 fi
 
+if [[ "$BUILD_ENVIRONMENT" == *-linux-xenial-py3-clang5-tsan* ]]; then
+  exec "$(dirname "${BASH_SOURCE[0]}")/build-tsan.sh" "$@"
+fi
+
 if [[ "$BUILD_ENVIRONMENT" == *-mobile-*build* ]]; then
   exec "$(dirname "${BASH_SOURCE[0]}")/build-mobile.sh" "$@"
 fi

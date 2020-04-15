@@ -27,6 +27,7 @@ class Conf:
     #  tesnrorrt, leveldb, lmdb, redis, opencv, mkldnn, ideep, etc.
     # (from https://github.com/pytorch/pytorch/pull/17323#discussion_r259453608)
     is_xla: bool = False
+    is_tsan: bool = False
     restrict_phases: Optional[List[str]] = None
     gpu_resource: Optional[str] = None
     dependent_tests: List = field(default_factory=list)
@@ -57,6 +58,9 @@ class Conf:
         result = leading + ["linux", self.distro] + cuda_parms + self.parms
         if (not for_docker and self.parms_list_ignored_for_docker_image is not None):
             result = result + self.parms_list_ignored_for_docker_image
+            # Dirty hack
+            if self.is_tsan:
+                result.remove("asan")
         return result
 
     def gen_docker_image_path(self):
@@ -194,6 +198,8 @@ def instantiate_configs():
         compiler_name = fc.find_prop("compiler_name")
         compiler_version = fc.find_prop("compiler_version")
         is_xla = fc.find_prop("is_xla") or False
+        is_asan = fc.find_prop("is_asan") or False
+        is_tsan = fc.find_prop("is_tsan") or False
         parms_list_ignored_for_docker_image = []
 
         python_version = None
@@ -221,8 +227,10 @@ def instantiate_configs():
             parms_list.append(gcc_version)
 
             # TODO: This is a nasty special case
-            if compiler_name == "clang" and not is_xla:
+            if compiler_name == "clang" and (is_asan or is_tsan):
                 parms_list.append("asan")
+                if is_tsan:
+                    parms_list_ignored_for_docker_image.append("tsan")
                 python_version = fc.find_prop("pyver")
                 parms_list[0] = fc.find_prop("abbreviated_pyver")
 
@@ -245,6 +253,7 @@ def instantiate_configs():
             python_version,
             cuda_version,
             is_xla,
+            is_tsan,
             restrict_phases,
             gpu_resource,
             is_libtorch=is_libtorch,

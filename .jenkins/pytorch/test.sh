@@ -42,7 +42,7 @@ if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
 fi
 
 # --user breaks ppc64le builds and these packages are already in ppc64le docker
-if [[ "$BUILD_ENVIRONMENT" != *ppc64le* ]] && [[ "$BUILD_ENVIRONMENT" != *-bazel-* ]] ; then
+if [[ "$BUILD_ENVIRONMENT" != *ppc64le* ]] && [[ "$BUILD_ENVIRONMENT" != *-bazel-* ]]  && [[ "$BUILD_ENVIRONMENT" != *-tsan-* ]] ; then
   # JIT C++ extensions require ninja.
   pip_install --user ninja
   # ninja is installed in /var/lib/jenkins/.local/bin
@@ -193,13 +193,17 @@ test_libtorch() {
 
     # Run JIT cpp tests
     mkdir -p test/test-reports/cpp-unittest
-    python test/cpp/jit/tests_setup.py setup
+    if [[ "$BUILD_ENVIRONMENT" != *-tsan-* ]]; then
+      python test/cpp/jit/tests_setup.py setup
+    fi
     if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
       build/bin/test_jit  --gtest_output=xml:test/test-reports/cpp-unittest/test_jit.xml
     else
       build/bin/test_jit  --gtest_filter='-*CUDA' --gtest_output=xml:test/test-reports/cpp-unittest/test_jit.xml
     fi
-    python test/cpp/jit/tests_setup.py shutdown
+    if [[ "$BUILD_ENVIRONMENT" != *-tsan-* ]]; then
+      python test/cpp/jit/tests_setup.py shutdown
+    fi
     # Wait for background download to finish
     wait
     OMP_NUM_THREADS=2 TORCH_CPP_TEST_MNIST_PATH="test/cpp/api/mnist" build/bin/test_api --gtest_output=xml:test/test-reports/cpp-unittest/test_api.xml
@@ -278,7 +282,7 @@ test_bazel() {
   tools/bazel test --test_tag_filters=-gpu-required --test_filter=-*_CUDA :all_tests
 }
 
-if ! [[ "${BUILD_ENVIRONMENT}" == *libtorch* || "${BUILD_ENVIRONMENT}" == *-bazel-* ]]; then
+if ! [[ "${BUILD_ENVIRONMENT}" == *libtorch* || "${BUILD_ENVIRONMENT}" == *-bazel-* || "${BUILD_ENVIRONMENT}" == *-tsan-* ]]; then
   (cd test && python -c "import torch; print(torch.__config__.show())")
   (cd test && python -c "import torch; print(torch.__config__.parallel_info())")
 fi
@@ -307,6 +311,8 @@ elif [[ "${BUILD_ENVIRONMENT}" == *-test2 || "${JOB_BASE_NAME}" == *-test2 ]]; t
   test_torch_function_benchmark
 elif [[ "${BUILD_ENVIRONMENT}" == *-bazel-* ]]; then
   test_bazel
+elif [[ "${BUILD_ENVIRONMENT}" == *-tsan-* ]]; then
+  test_libtorch
 else
   test_torchvision
   test_python_nn

@@ -19,7 +19,10 @@ CONFIG_TREE_DATA = [
         ]),
         ("clang", [
             ("5", [
-                XImportant("3.6"),  # This is actually the ASAN build
+                ("3.6", [
+                    ("asan", [XImportant(True)]),
+                    ("tsan", [XImportant(True)]),
+                ]),
             ]),
         ]),
         ("cuda", [
@@ -117,6 +120,8 @@ class ExperimentalFeatureConfigNode(TreeConfigNode):
         experimental_feature = self.find_prop("experimental_feature")
 
         next_nodes = {
+            "asan": AsanConfigNode,
+            "tsan": TsanConfigNode,
             "xla": XlaConfigNode,
             "parallel_tbb": ParallelTBBConfigNode,
             "parallel_native": ParallelNativeConfigNode,
@@ -126,6 +131,26 @@ class ExperimentalFeatureConfigNode(TreeConfigNode):
         }
         return next_nodes[experimental_feature]
 
+
+class AsanConfigNode(TreeConfigNode):
+    def modify_label(self, label):
+        return "ASAN=" + str(label)
+
+    def init2(self, node_name):
+        self.props["is_asan"] = node_name
+
+    def child_constructor(self):
+        return ImportantConfigNode
+
+class TsanConfigNode(TreeConfigNode):
+    def modify_label(self, label):
+        return "TSAN=" + str(label)
+
+    def init2(self, node_name):
+        self.props["is_tsan"] = node_name
+
+    def child_constructor(self):
+        return ImportantConfigNode
 
 class XlaConfigNode(TreeConfigNode):
     def modify_label(self, label):
