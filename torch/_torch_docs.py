@@ -3293,6 +3293,9 @@ add_docstr(torch.max,
 
 Returns the maximum value of all elements in the ``input`` tensor.
 
+.. warning::
+    This function produces deterministic (sub)gradients unlike ``max(dim=0)``
+
 Args:
     {input}
 
@@ -3316,6 +3319,7 @@ value of each row of the :attr:`input` tensor in the given dimension
     maximal value found, unless it is unique.
     The exact implementation details are device-specific.
     Do not expect the same result when run on CPU and GPU in general.
+    For the same reason do not expect the gradients to be deterministic.
 
 If ``keepdim`` is ``True``, the output tensors are of the same size
 as ``input`` except in the dimension ``dim`` where they are of size 1.
@@ -3471,6 +3475,9 @@ add_docstr(torch.median,
 
 Returns the median value of all elements in the :attr:`input` tensor.
 
+.. warning::
+    This function produces deterministic (sub)gradients unlike ``median(dim=0)``
+
 Args:
     {input}
 
@@ -3494,6 +3501,14 @@ If :attr:`keepdim` is ``True``, the output tensors are of the same size
 as :attr:`input` except in the dimension :attr:`dim` where they are of size 1.
 Otherwise, :attr:`dim` is squeezed (see :func:`torch.squeeze`), resulting in
 the outputs tensor having 1 fewer dimension than :attr:`input`.
+
+.. warning::
+    ``indices`` does not necessarily contain the first occurrence of each
+    median value found, unless it is unique.
+    The exact implementation details are device-specific.
+    Do not expect the same result when run on CPU and GPU in general.
+    For the same reason do not expect the gradients to be deterministic.
+
 
 Args:
     {input}
@@ -3519,6 +3534,9 @@ add_docstr(torch.min,
 
 Returns the minimum value of all elements in the :attr:`input` tensor.
 
+.. warning::
+    This function produces deterministic (sub)gradients unlike ``min(dim=0)``
+
 Args:
     {input}
 
@@ -3542,6 +3560,7 @@ value of each row of the :attr:`input` tensor in the given dimension
     minimal value found, unless it is unique.
     The exact implementation details are device-specific.
     Do not expect the same result when run on CPU and GPU in general.
+    For the same reason do not expect the gradients to be deterministic.
 
 If :attr:`keepdim` is ``True``, the output tensors are of the same size as
 :attr:`input` except in the dimension :attr:`dim` where they are of size 1.

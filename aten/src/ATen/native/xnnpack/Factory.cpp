@@ -31,7 +31,7 @@ Tensor empty_with_tail_padding(
               allocator_ptr,
               /*resizable=*/true,
           },
-          DispatchKeySet{DispatchKey::CPUTensorId}));
+          DispatchKeySet{DispatchKey::CPU}));
 
   return namedinference::propagate_names_if_nonempty(
       tensor.resize_(size, memory_format),
