@@ -119,7 +119,7 @@ class CMake:
             cmake_command = 'cmake3'
         bare_version = CMake._get_version(cmake_command)
         if bare_version < LooseVersion("3.5.0"):
-                raise RuntimeError('cmake to old, minimum 3.5.0 needed.')
+            raise RuntimeError('cmake to old, minimum 3.5.0 needed.')
         return cmake_command
 
     @staticmethod
