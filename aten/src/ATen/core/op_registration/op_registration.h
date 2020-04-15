@@ -950,6 +950,10 @@ public:
 
 } // namespace c10
 
+// NB: The EXACT NAMING of the initializer functions (e.g.,
+// TORCH_LIBRARY_init_aten) matters for the code analyzer;
+// see the regexes at tools/code_analyzer/run_analyzer.sh
+
 #define TORCH_LIBRARY(ns, m) \
   static void TORCH_LIBRARY_init_ ## ns (c10::Library&); \
   static c10::detail::TorchLibraryInit TORCH_LIBRARY_static_init_ ## ns ( \
@@ -983,6 +987,9 @@ public:
 // These are variants of the macros above which are to be used for testing (they
 // don't setup the static initializer, so you can control the visibility of
 // the allocated library yourself).
+//
+// DO NOT use these in production code, they are NOT understood by the
+// code analyzer and will be incorrectly analyzed in those situations.
 #define MAKE_TORCH_LIBRARY(ns) Library(Library::DEF, #ns, c10::nullopt, __FILE__, __LINE__)
 #define MAKE_TORCH_LIBRARY_IMPL(ns, k) Library(Library::IMPL, #ns, c10::make_optional(c10::DispatchKey::k), __FILE__, __LINE__)
 
