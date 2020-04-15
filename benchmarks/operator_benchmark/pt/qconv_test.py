@@ -11,16 +11,19 @@ Microbenchmarks for qConv2d operators.
 
 # Configs for qconv2d
 qconv_2d_configs = op_bench.config_list(
-    # Resnext101 - 32x8d shapes
     attrs=[
+        # Shape matching the floating point short benchmark
+        [1, 256, 256, 16, 16, 1, 3, 1, 0],
+        # Resnext101 - 32x8d shapes
         [1, 64, 128, 56, 56, 1, 1, 1, 0],
         [1, 256, 256, 56, 56, 32, 3, 1, 1],
         [1, 256, 256, 56, 56, 1, 1, 1, 0],
         [1, 512, 512, 56, 56, 32, 3, 2, 1],
     ],
-    attr_names=["N", "IC", "OC", "H", "W", "G", "kernel", "stride", "pad"],
+    attr_names=["N", "in_c", "out_c", "H", "W", "G", "kernel", "stride", "pad"],
     tags=["short"],
 )
+
 
 # Configs for convolution shapes from Resnext-101 32x4d
 resnext_32_4d_shape_configs = op_bench.config_list(
@@ -51,26 +54,27 @@ resnext_32_4d_shape_configs = op_bench.config_list(
         [1, 64, 128, 56, 56, 1, 1, 1, 0],  # op#6
         [1, 64, 256, 56, 56, 1, 1, 1, 0],  # op#14
     ],
-    attr_names=["N", "IC", "OC", "H", "W", "G", "kernel", "stride", "pad"],
+    attr_names=["N", "in_c", "out_c", "H", "W", "G", "kernel", "stride", "pad"],
     tags=["resnext101_32x4d"],
 )
 
 
 class QConv2dBenchmark(op_bench.TorchBenchmarkBase):
-    def init(self, N, IC, OC, H, W, G, kernel, stride, pad):
+    def init(self, N, in_c, out_c, H, W, G, kernel, stride, pad):
+
         scale = 1.0 / 255
         zero_point = 0
-        X = torch.randn(N, IC, H, W, dtype=torch.float32)
+        X = torch.randn(N, in_c, H, W, dtype=torch.float32)
         qX = torch.quantize_per_tensor(
             X, scale=scale, zero_point=zero_point, dtype=torch.quint8
         )
         # Convert the tensor to NHWC format
         qX = qX.contiguous(memory_format=torch.channels_last)
-        W = torch.randn(OC, IC // G, kernel, kernel, dtype=torch.float32)
+        W = torch.randn(out_c, in_c // G, kernel, kernel, dtype=torch.float32)
         qW = torch.quantize_per_tensor(W, scale=scale, zero_point=0, dtype=torch.qint8)
 
         self.input = qX
-        self.qconv2d = nnq.Conv2d(IC, OC, kernel, stride=stride, padding=pad, groups=G)
+        self.qconv2d = nnq.Conv2d(in_c, out_c, kernel, stride=stride, padding=pad, groups=G)
         self.qconv2d.set_weight_bias(qW, None)
         self.qconv2d.scale = torch.tensor([scale], dtype=torch.double)
         self.qconv2d.zero_point = torch.tensor([zero_point], dtype=torch.int)
@@ -81,25 +85,25 @@ class QConv2dBenchmark(op_bench.TorchBenchmarkBase):
 
 
 class QConv2dChainedBenchmark(op_bench.TorchBenchmarkBase):
-    def init(self, N, IC, OC, H, W, G, kernel, stride, pad):
+    def init(self, N, in_c, out_c, H, W, G, kernel, stride, pad):
         scale = 1.0 / 255
         zero_point = 0
-        X = torch.randn(N, IC, H, W, dtype=torch.float32)
+        X = torch.randn(N, in_c, H, W, dtype=torch.float32)
         qX = torch.quantize_per_tensor(
             X, scale=scale, zero_point=zero_point, dtype=torch.quint8
         )
-        W = torch.randn(OC, IC // G, kernel, kernel, dtype=torch.float32)
+        W = torch.randn(out_c, in_c // G, kernel, kernel, dtype=torch.float32)
         qW = torch.quantize_per_tensor(W, scale=scale, zero_point=0, dtype=torch.qint8)
 
         self.input = qX
-        self.qconv2d = nnq.Conv2d(IC, OC, kernel, stride=stride, padding=pad, groups=G)
+        self.qconv2d = nnq.Conv2d(in_c, out_c, kernel, stride=stride, padding=pad, groups=G)
         self.qconv2d.weight = qW
         self.qconv2d.scale = torch.tensor([scale], dtype=torch.double)
         self.qconv2d.zero_point = torch.tensor([zero_point], dtype=torch.int)
 
-        W2 = torch.randn(OC, OC // G, kernel, kernel, dtype=torch.float32)
+        W2 = torch.randn(out_c, out_c // G, kernel, kernel, dtype=torch.float32)
         qW2 = torch.quantize_per_tensor(W2, scale=scale, zero_point=0, dtype=torch.qint8)
-        self.qconv2d2 = nnq.Conv2d(OC, OC, kernel, stride=stride, padding=pad, groups=G)
+        self.qconv2d2 = nnq.Conv2d(out_c, out_c, kernel, stride=stride, padding=pad, groups=G)
         self.qconv2d2.weight = qW2
         self.qconv2d2.scale = torch.tensor([scale], dtype=torch.double)
         self.qconv2d2.zero_point = torch.tensor([zero_point], dtype=torch.int)

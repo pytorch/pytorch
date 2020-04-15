@@ -75,10 +75,10 @@ Microbenchmarks for Conv2d and ConvTranspose2d operators.
 # Configs for Conv2d and ConvTranspose1d
 conv_2d_configs_short = op_bench.config_list(
     attr_names=[
-        'in_c', 'out_c', 'kernel', 'stride', 'N', 'H', 'W'
+        'in_c', 'out_c', 'kernel', 'stride', 'N', 'H', 'W', 'G', 'pad',
     ],
     attrs=[
-        [256, 256, 3, 1, 1, 16, 16],
+        [256, 256, 3, 1, 1, 16, 16, 1, 0],
     ],
     cross_product_configs={
         'device': ['cpu', 'cuda'],
@@ -94,15 +94,18 @@ conv_2d_configs_long = op_bench.cross_product_configs(
     N=[4],
     H=[32],
     W=[32],
+    G=[1],
+    pad=[0],
     device=['cpu', 'cuda'],
     tags=["long"]
 )
 
 
 class Conv2dBenchmark(op_bench.TorchBenchmarkBase):
-    def init(self, in_c, out_c, kernel, stride, N, H, W, device):
+    def init(self, in_c, out_c, kernel, stride, N, H, W, G, pad, device):
         self.input = torch.rand(N, in_c, H, W, device=device)
-        self.conv2d = nn.Conv2d(in_c, out_c, kernel, stride=stride).to(device=device)
+        self.conv2d = nn.Conv2d(
+            in_c, out_c, kernel, stride=stride, groups=G, padding=pad).to(device=device)
         self.set_module_name('Conv2d')
 
     def forward(self):
@@ -110,9 +113,10 @@ class Conv2dBenchmark(op_bench.TorchBenchmarkBase):
 
 
 class ConvTranspose2dBenchmark(op_bench.TorchBenchmarkBase):
-    def init(self, in_c, out_c, kernel, stride, N, H, W, device):
+    def init(self, in_c, out_c, kernel, stride, N, H, W, G, pad, device):
         self.input = torch.rand(N, in_c, H, W, device=device)
-        self.convtranspose2d = nn.ConvTranspose2d(in_c, out_c, kernel, stride=stride).to(device=device)
+        self.convtranspose2d = nn.ConvTranspose2d(
+            in_c, out_c, kernel, stride=stride, groups=G, padding=pad).to(device=device)
         self.set_module_name('ConvTranspose2d')
 
     def forward(self):
