@@ -123,6 +123,43 @@ TORCH_CUDA_API Val* andOp(Val* v1, Val* v2) {
   return binaryOp(BinaryOpType::And, v1, v2);
 }
 
+TORCH_CUDA_API Val* add_alpha(Val* v1, Val* v2, Val* s) {
+  TORCH_CHECK(
+      s->getValType().value() == ValType::Scalar,
+      "Alpha value should be a Scalar Valtype and not ",
+      s->getValType().value());
+
+  Val* intrm = binaryOp(BinaryOpType::Mul, v2, s);
+  return binaryOp(BinaryOpType::Add, v1, intrm);
+}
+
+TORCH_CUDA_API Val* sub_alpha(Val* v1, Val* v2, Val* s) {
+  TORCH_CHECK(
+      s->getValType().value() == ValType::Scalar,
+      "Alpha value should be a Scalar Valtype and not ",
+      s->getValType().value());
+
+  Val* intrm = binaryOp(BinaryOpType::Mul, v2, s);
+  return binaryOp(BinaryOpType::Sub, v1, intrm);
+}
+
+TORCH_CUDA_API Val* lerp(Val* start, Val* end, Val* weight) {
+  Val* intrm1 = binaryOp(BinaryOpType::Sub, end, start);
+  Val* intrm2 = binaryOp(BinaryOpType::Mul, weight, intrm1);
+  return binaryOp(BinaryOpType::Add, start, intrm2);
+}
+
+TORCH_CUDA_API Val* addcmul(Val* v1, Val* v2, Val* v3, Val* s) {
+  TORCH_CHECK(
+      s->getValType().value() == ValType::Scalar,
+      "Alpha value should be a Scalar Valtype and not ",
+      s->getValType().value());
+
+  Val* intrm1 = binaryOp(BinaryOpType::Mul, v3, s);
+  Val* intrm2 = binaryOp(BinaryOpType::Mul, v2, intrm1);
+  return binaryOp(BinaryOpType::Add, v1, intrm2);
+}
+
 } // namespace fuser
 } // namespace jit
 } // namespace torch

@@ -36,18 +36,68 @@ enum class ExprType {
   Reorder
 };
 
-enum class UnaryOpType { Neg, Cast };
+enum class UnaryOpType {
+  Abs,
+  Acos,
+  Asin,
+  Atan,
+  Atanh,
+  Cast,
+  Ceil,
+  Cos,
+  Cosh,
+  Exp,
+  Expm1,
+  Erf,
+  Erfc,
+  Floor,
+  Frac,
+  Gelu,
+  Lgamma,
+  Log,
+  Log10,
+  Log1p,
+  Log2,
+  Neg,
+  //RandLike,
+  Reciprocal,
+  Relu,
+  Rsqrt,
+  Round,
+  Sigmoid,
+  Sin,
+  Sinh,
+  Sqrt,
+  Tan,
+  Tanh,
+  Trunc
+};
 
 enum class BinaryOpType {
+  // Math Ops
   Add,
-  Sub,
-  Mul,
+  Atan2,
+  CeilDiv,
   Div,
+  Fmod,
+  Max,
+  Min,
   // Int operations, leave position oif Mod we depend on its location of first
   Mod,
+  Mul,
+  Pow,
+  Remainder,
+  Sub,
+  //TypeAs,
+
+  // Logical Ops
+  And,
+  Eq,
+  GE,
+  GT,
+  LE,
   LT,
-  CeilDiv,
-  And
+  NE
 };
 
 enum class ParallelType {

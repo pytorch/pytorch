@@ -25,9 +25,24 @@ void check_inlineable(const IRInputOutput* const irio) {
 } // namespace
 
 void IRPrinter::printHeader(Fusion* fusion, const std::string& kernel_name_) {
-  // ceilDiv Helper funtion
+  // Helper funtions
   os << "__device__ int ceilDiv(const int a, const int b) {\n"
      << "  return (a + b - 1) / b;\n"
+     << "}\n\n";
+  os << "__device__ float frac(const float x) {\n"
+     << "  return x - truncf(x);\n"
+     << "}\n\n";
+  os << "__device__ float gelu(const float x) {\n"
+     << "  return 0.5f * x * (1.f + tanhf(sqrtf(3.14159274101 / 2.f) * (x + 0.044715 * powf(x,3.f))));\n"
+     << "}\n\n";
+  os << "__device__ float reciprocal(const float x) {\n"
+     << "  return 1.f / x;\n"
+     << "}\n\n";
+  os << "__device__ float relu(const float x) {\n"
+     << "  return x < 0.f ? 0.f : x;\n"
+     << "}\n\n";
+  os << "__device__ float sigmoid(const float x) {\n"
+     << "  return 1.f / (1.f + expf(-x));\n"
      << "}\n\n";
 
   os << "__global__ void " << kernel_name_ << "(";

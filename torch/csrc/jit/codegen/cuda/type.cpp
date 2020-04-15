@@ -68,27 +68,84 @@ static _enum_unordered_map<ExprType, std::string> expr_type_string_map{
     {ExprType::Merge, "Merge"},
     {ExprType::Reorder, "Reorder"}};
 static _enum_unordered_map<UnaryOpType, std::string> unary_op_type_string_map{
-    {UnaryOpType::Neg, "Neg"},
-    {UnaryOpType::Cast, "Cast"}};
+    {UnaryOpType::Abs,        "fabs"},
+    {UnaryOpType::Acos,       "acosf"},
+    {UnaryOpType::Asin,       "asinf"},
+    {UnaryOpType::Atan,       "atanf"},
+    {UnaryOpType::Atanh,      "atanhf"},
+    {UnaryOpType::Cast,       "cast"},
+    {UnaryOpType::Ceil,       "ceilf"},
+    {UnaryOpType::Cos,        "cosf"},
+    {UnaryOpType::Cosh,       "coshf"},
+    {UnaryOpType::Exp,        "expf"},
+    {UnaryOpType::Expm1,      "expm1f"},
+    {UnaryOpType::Erf,        "erff"},
+    {UnaryOpType::Erfc,       "erfcf"},
+    {UnaryOpType::Floor,      "floorf"},
+    {UnaryOpType::Frac,       "frac"},
+    {UnaryOpType::Gelu,       "gelu"},
+    {UnaryOpType::Lgamma,     "lgammaf"},
+    {UnaryOpType::Log,        "logf"},
+    {UnaryOpType::Log10,      "log10f"},
+    {UnaryOpType::Log1p,      "log1pf"},
+    {UnaryOpType::Log2,       "log2f"},
+    {UnaryOpType::Neg,        "neg"},
+    //{UnaryOpType::RandLike,
+    {UnaryOpType::Reciprocal, "reciprocal"},
+    {UnaryOpType::Relu,       "relu"},
+    {UnaryOpType::Rsqrt,      "rsqrtf"},
+    {UnaryOpType::Round,      "roundf"},
+    {UnaryOpType::Sigmoid,    "sigmoid"},
+    {UnaryOpType::Sin,        "sinf"},
+    {UnaryOpType::Sinh,       "sinhf"},
+    {UnaryOpType::Sqrt,       "sqrtf"},
+    {UnaryOpType::Tan,        "tanf"},
+    {UnaryOpType::Tanh,       "tanhf"},
+    {UnaryOpType::Trunc,      "truncf"}
+   };
 static _enum_unordered_map<UnaryOpType, std::string>
-    unary_op_type_inline_op_string_map{{UnaryOpType::Neg, "~"}};
+    unary_op_type_inline_op_string_map{{UnaryOpType::Neg, "-"}};
 static _enum_unordered_map<BinaryOpType, std::string> binary_op_type_string_map{
-    {BinaryOpType::Add, "Add"},
-    {BinaryOpType::Sub, "Sub"},
-    {BinaryOpType::Mul, "Mul"},
-    {BinaryOpType::Div, "Div"},
-    {BinaryOpType::Mod, "Mod"},
-    {BinaryOpType::LT, "LessThan"},
-    {BinaryOpType::CeilDiv, "ceilDiv"},
-    {BinaryOpType::And, "And"}};
+    {BinaryOpType::Add,       "add"},
+    {BinaryOpType::Atan2,     "atan2f"},
+    {BinaryOpType::CeilDiv,   "ceilDiv"},
+    {BinaryOpType::Div,       "div"},
+    {BinaryOpType::Fmod,      "fmodf"},
+    {BinaryOpType::Max,       "fmaxf"},
+    {BinaryOpType::Min,       "fminf"},
+    {BinaryOpType::Mod,       "mod"},
+    {BinaryOpType::Mul,       "mul"},
+    {BinaryOpType::Pow,       "powf"},
+    {BinaryOpType::Remainder, "remainderf"},
+    {BinaryOpType::Sub,       "sub"},
+    //{BinaryOpType::TypeAs,
+
+    // Logical Ops
+    {BinaryOpType::And,       "and"},
+    {BinaryOpType::Eq,        "equal"},
+    {BinaryOpType::GE,        "greaterThanOrEqual"},
+    {BinaryOpType::GT,        "greaterThan"},
+    {BinaryOpType::LE,        "lessThanOrEqual"},
+    {BinaryOpType::LT,        "lessThan"},
+    {BinaryOpType::NE,        "notEqual"}
+   };
+
 static _enum_unordered_map<BinaryOpType, std::string>
     binary_op_type_inline_op_string_map{{BinaryOpType::Add, "+"},
-                                        {BinaryOpType::Sub, "-"},
-                                        {BinaryOpType::Mul, "*"},
                                         {BinaryOpType::Div, "/"},
                                         {BinaryOpType::Mod, "%"},
+                                        {BinaryOpType::Mul, "*"},
+                                        {BinaryOpType::Sub, "-"},
+
+                                        // Logical Ops
+                                        {BinaryOpType::And, "&&"},
+                                        {BinaryOpType::Eq, "=="},
+                                        {BinaryOpType::GE, ">="},
+                                        {BinaryOpType::GT, ">"},
+                                        {BinaryOpType::LE, "<="},
                                         {BinaryOpType::LT, "<"},
-                                        {BinaryOpType::And, "&&"}};
+                                        {BinaryOpType::NE, "!="}
+                                       };
 
 static _enum_unordered_map<ParallelType, std::string> parallel_type_string_map{
     {ParallelType::BIDz, "blockIdx.z"},
