@@ -5,108 +5,18 @@
 #include <ATen/native/DistributionTemplates.h>
 #include <ATen/core/op_registration/op_registration.h>
 #include <ATen/cuda/Exceptions.h>
-#include <ATen/cuda/detail/OffsetCalculator.cuh>
-#include <ATen/core/MT19937RNGEngine.h>
 #include <ATen/core/DistributionsHelper.h>
 #include <memory>
 #include "aes.cuh"
+#include "block_cipher.cuh"
 
 using namespace at;
 
-struct CUDA_CSPRNG_GeneratorImpl : public at::CPUGeneratorImpl {
+struct CUDA_CSPRNG_GeneratorImpl : public CPUGeneratorImpl {
   CUDA_CSPRNG_GeneratorImpl(uint64_t seed_in = default_rng_seed_val) : CPUGeneratorImpl(seed_in) {
     this->key_set_ = DispatchKeySet(DispatchKey::CustomRNGKeyId);
   }
 };
-
-typedef ulonglong2 block_t;
-constexpr size_t block_t_size = sizeof(block_t);
-
-Tensor key_tensor(c10::optional<Generator> generator) {
-  return torch::empty({16}, torch::kUInt8).random_(0, 256, generator).to(kCUDA);
-}
-
-template<size_t size>
-struct DummyRNG {
-  __device__ DummyRNG(uint64_t* vals) {
-    for (auto i = 0; i < size; i++) {
-      vals_[i] = vals[i];
-    }
-  }
-  uint32_t __device__ random() { return static_cast<uint32_t>(vals_[index++]); }
-  uint64_t __device__ random64() { return vals_[index++]; }
-  c10::optional<float> __device__ next_float_normal_sample() { return c10::nullopt; }
-  c10::optional<double> __device__ next_double_normal_sample() { return c10::nullopt; }
-  void __device__ set_next_float_normal_sample(c10::optional<float> randn) {}
-  void __device__ set_next_double_normal_sample(c10::optional<double> randn) {}
-private:
-  uint64_t vals_[size];
-  int index = 0;
-};
-
-template<typename scalar_t, typename uint_t, size_t N = 1, typename cipher_t, typename transform_t>
-__global__ void block_cipher_contiguous_kernel(scalar_t* data, int numel, cipher_t cipher, transform_t transform_func) {
-  const auto idx = blockIdx.x * blockDim.x + threadIdx.x;
-  constexpr auto unroll_factor = block_t_size / sizeof(uint_t) / N;
-  if (unroll_factor * idx < numel) {
-    auto block = cipher(idx);
-    #pragma unroll
-    for (auto i = 0; i < unroll_factor; ++i) {
-      const auto li = unroll_factor * idx + i;
-      if (li < numel) {
-        uint64_t vals[N];
-        #pragma unroll
-        for (auto j = 0; j < N; j++) {
-          vals[j] = (reinterpret_cast<uint_t*>(&block))[N * i + j];
-        }
-        DummyRNG<N> rng(vals);
-        data[li] = transform_func(&rng);
-      }
-    }
-  }
-}
-
-template<typename scalar_t, typename uint_t, size_t N = 1, typename cipher_t, typename transform_t>
-__global__ void block_cipher_kernel(scalar_t* data, int numel, cipher_t cipher, transform_t transform_func, OffsetCalculator<1> offset_calc) {
-  const auto idx = blockIdx.x * blockDim.x + threadIdx.x;
-  constexpr auto unroll_factor = block_t_size / sizeof(uint_t) / N;
-  if (unroll_factor * idx < numel) {
-    auto block = cipher(idx);
-    #pragma unroll
-    for (auto i = 0; i < unroll_factor; ++i) {
-      const auto li = unroll_factor * idx + i;
-      if (li < numel) {
-        uint64_t vals[N];
-        #pragma unroll
-        for (auto j = 0; j < N; j++) {
-          vals[j] = (reinterpret_cast<uint_t*>(&block))[N * i + j];
-        }
-        DummyRNG<N> rng(vals);
-        data[offset_calc.get(li)[0] / sizeof(scalar_t)] = transform_func(&rng);
-      }
-    }
-  }
-}
-
-template<typename scalar_t, typename uint_t, size_t N = 1, typename cipher_t, typename transform_t>
-void block_cipher_ctr_mode(at::TensorIterator& iter, cipher_t cipher, transform_t transform_func) {
-  const auto numel = iter.numel();
-  if (numel == 0) {
-    return;
-  }
-  constexpr auto unroll_factor = block_t_size / sizeof(uint_t) / N;
-  const auto block = 256;
-  const auto grid = (numel + (block * unroll_factor) - 1) / (block * unroll_factor);
-  scalar_t* data = (scalar_t*)iter.data_ptr(0);
-  auto stream = at::cuda::getCurrentCUDAStream();
-  if (iter.output(0).is_contiguous()) {
-    block_cipher_contiguous_kernel<scalar_t, uint_t, N, cipher_t, transform_t><<<grid, block, 0, stream>>>(data, numel, cipher, transform_func);
-  } else {
-    auto offset_calc = make_offset_calculator<1>(iter);
-    block_cipher_kernel<scalar_t, uint_t, N, cipher_t, transform_t><<<grid, block, 0, stream>>>(data, numel, cipher, transform_func, offset_calc);
-  }
-  AT_CUDA_CHECK(cudaGetLastError());
-}
 
 // ===========================================================================================================================
 
@@ -174,7 +84,7 @@ struct RandomKernel {
         }
       });
     } else if (isIntegralType(iter.dtype(), /*includeBool=*/true)) {
-      AT_DISPATCH_INTEGRAL_TYPES_AND(at::ScalarType::Bool, iter.dtype(), "random_kernel_int_cuda", [&] {
+      AT_DISPATCH_INTEGRAL_TYPES_AND(ScalarType::Bool, iter.dtype(), "random_kernel_int_cuda", [&] {
         if (std::is_same<scalar_t, int64_t>::value) {
           random_kernel_helper_int<scalar_t, uint64_t>(iter, key);
         } else if (std::is_same<scalar_t, bool>::value) {
@@ -219,72 +129,16 @@ struct UniformKernel {
 };
 
 Tensor& uniform_(Tensor& self, double from, double to, c10::optional<Generator> generator) {
-  return at::native::templates::uniform_impl_<UniformKernel, CUDA_CSPRNG_GeneratorImpl>(self, from, to, generator);
+  return native::templates::uniform_impl_<UniformKernel, CUDA_CSPRNG_GeneratorImpl>(self, from, to, generator);
 }
 
 // ===========================================================================================================================
-
-/**
- * Samples a normal distribution using the Box-Muller method
- * Takes mean and standard deviation as inputs
- * Note that Box-muller method returns two samples at a time.
- * Hence, we cache the "next" sample in the CPUGeneratorImpl class.
- */
- template <typename T>
- struct normal_distribution {
-
-  inline __device__ normal_distribution(T mean_in, T stdv_in) {
-  //  TORCH_CHECK(stdv_in > 0);
-    mean = mean_in;
-    stdv = stdv_in;
-  }
-
-  template <typename RNG>
-  inline dist_acctype<T> __device__ operator()(RNG* generator) {
-    dist_acctype<T> ret;
-    // return cached values if available
-    // if (std::is_same<T, double>::value) {
-    //   if (generator->next_double_normal_sample()) {
-    //     ret = *(generator->next_double_normal_sample()) * stdv + mean;
-    //     // reset c10::optional to null
-    //     generator->set_next_double_normal_sample(c10::optional<double>());
-    //     return ret;
-    //   }
-    // } else {
-    //   if (generator->next_float_normal_sample()) {
-    //     ret = *(generator->next_float_normal_sample()) * stdv + mean;
-    //     // reset c10::optional to null
-    //     generator->set_next_float_normal_sample(c10::optional<float>());
-    //     return ret;
-    //   }
-    // }
-    // otherwise generate new normal values
-    uniform_real_distribution<T> uniform(0.0, 1.0);
-    const dist_acctype<T> u1 = uniform(generator);
-    const dist_acctype<T> u2 = uniform(generator);
-    const dist_acctype<T> r = ::sqrt(static_cast<T>(-2.0) * ::log(static_cast<T>(1.0)-u2));
-    const dist_acctype<T> theta = static_cast<T>(2.0) * static_cast<T>(M_PI) * u1;
-    // if (std::is_same<T, double>::value) {
-    //   dist_acctype<double> cache = r * ::sin(theta);
-    //   generator->set_next_double_normal_sample(c10::optional<double>(cache));
-    // } else {
-    //   dist_acctype<float> cache = r * ::sin(theta);
-    //   generator->set_next_float_normal_sample(c10::optional<float>(cache));
-    // }
-    ret = r * ::cos(theta) * stdv + mean;
-    return ret;
-  }
-
-  private:
-    T mean;
-    T stdv;
-};
 
 template<typename scalar_t, typename uint_t>
 void normal_kernel_helper_fp(TensorIterator& iter, scalar_t mean, scalar_t std, uint8_t* key) {
   block_cipher_helper<scalar_t, uint_t, 2>(iter, key,
     [mean, std] __device__ (DummyRNG<2>* generator) -> scalar_t {
-      ::normal_distribution<scalar_t> normal(mean, std);
+      normal_distribution<scalar_t> normal(mean, std);
       return normal(generator);
     }
   );
@@ -295,7 +149,7 @@ struct NormalKernel {
   void operator()(Tensor& self, double mean, double std, c10::optional<Generator> generator) {
     const auto key_t = key_tensor(generator);
     const auto key = key_t.data_ptr<uint8_t>();
-    auto iter = at::TensorIterator::nullary_op(self);
+    auto iter = TensorIterator::nullary_op(self);
     AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "normal_kernel_cuda", [&] {
       if (std::is_same<scalar_t, double>::value) {
         normal_kernel_helper_fp<scalar_t, uint64_t>(iter, mean, std, key);
@@ -307,7 +161,31 @@ struct NormalKernel {
 };
 
 Tensor& normal_(Tensor& self, double mean, double std, c10::optional<Generator> generator) {
-  return at::native::templates::normal_impl_<NormalKernel, CUDA_CSPRNG_GeneratorImpl>(self, mean, std, generator);
+  return native::templates::normal_impl_<NormalKernel, CUDA_CSPRNG_GeneratorImpl>(self, mean, std, generator);
+}
+
+Tensor& normal_Tensor_float_out(Tensor& output, const Tensor& mean, double std, c10::optional<Generator> gen) {
+  return native::templates::normal_out_impl<NormalKernel, CUDA_CSPRNG_GeneratorImpl>(output, mean, std, gen);
+}
+
+Tensor& normal_float_Tensor_out(Tensor& output, double mean, const Tensor& std, c10::optional<Generator> gen) {
+  return native::templates::normal_out_impl<NormalKernel, CUDA_CSPRNG_GeneratorImpl>(output, mean, std, gen);
+}
+
+Tensor& normal_Tensor_Tensor_out(Tensor& output, const Tensor& mean, const Tensor& std, c10::optional<Generator> gen) {
+  return native::templates::normal_out_impl<NormalKernel, CUDA_CSPRNG_GeneratorImpl>(output, mean, std, gen);
+}
+
+Tensor normal_Tensor_float(const Tensor& mean, double std, c10::optional<Generator> gen) {
+  return native::templates::normal_impl<NormalKernel, CUDA_CSPRNG_GeneratorImpl>(mean, std, gen);
+}
+
+Tensor normal_float_Tensor(double mean, const Tensor& std, c10::optional<Generator> gen) {
+  return native::templates::normal_impl<NormalKernel, CUDA_CSPRNG_GeneratorImpl>(mean, std, gen);
+}
+
+Tensor normal_Tensor_Tensor(const Tensor& mean, const Tensor& std, c10::optional<Generator> gen) {
+  return native::templates::normal_impl<NormalKernel, CUDA_CSPRNG_GeneratorImpl>(mean, std, gen);
 }
 
 // ===========================================================================================================================
@@ -318,9 +196,19 @@ Generator create_CUDA_CSPRNG_Generator() {
   
 void registerOps() {
   static auto registry = torch::import()
+    // Random
     .impl_UNBOXED("aten::random_", DispatchKey::CustomRNGKeyId, random_)
+    // Uniform
     .impl_UNBOXED("aten::uniform_", DispatchKey::CustomRNGKeyId, uniform_)
-    .impl_UNBOXED("aten::normal_", DispatchKey::CustomRNGKeyId, normal_);
+    // Normal
+    .impl_UNBOXED("aten::normal_",                  DispatchKey::CustomRNGKeyId, normal_)
+    .impl_UNBOXED("aten::normal.Tensor_float_out",  DispatchKey::CustomRNGKeyId, normal_Tensor_float_out)
+    .impl_UNBOXED("aten::normal.float_Tensor_out",  DispatchKey::CustomRNGKeyId, normal_float_Tensor_out)
+    .impl_UNBOXED("aten::normal.Tensor_Tensor_out", DispatchKey::CustomRNGKeyId, normal_Tensor_Tensor_out)
+    .impl_UNBOXED("aten::normal.Tensor_float",      DispatchKey::CustomRNGKeyId, normal_Tensor_float)
+    .impl_UNBOXED("aten::normal.float_Tensor",      DispatchKey::CustomRNGKeyId, normal_float_Tensor)
+    .impl_UNBOXED("aten::normal.Tensor_Tensor",     DispatchKey::CustomRNGKeyId, normal_Tensor_Tensor)
+  ;
 }
 
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
