@@ -1,8 +1,10 @@
 #pragma once
 
+#include <ATen/AccumulateType.h>
 #include <ATen/Dispatch.h>
 #include <ATen/native/TensorIterator.h>
 #include <c10/util/Half.h>
+#include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
 
 #include <curand.h>
@@ -248,11 +250,11 @@ void random_full_64_bits_range_kernel(TensorIterator& iter, RNG gen) {
 
 template<typename RNG>
 struct RandomFromToKernel {
-  void operator()(TensorIterator& iter, uint64_t range, int64_t base, RNG gen) {
-    random_from_to_kernel(iter, range, base, gen);
+  void operator()(TensorIterator& iter, uint64_t range, int64_t base, c10::optional<Generator> gen) {
+    random_from_to_kernel(iter, range, base, check_generator<RNG>(gen));
   }
-  void operator()(TensorIterator& iter, RNG gen) {
-    random_full_64_bits_range_kernel(iter, gen);
+  void operator()(TensorIterator& iter, c10::optional<Generator> gen) {
+    random_full_64_bits_range_kernel(iter, check_generator<RNG>(gen));
   }
 };
 
@@ -371,8 +373,54 @@ void normal_kernel(Tensor& self, double mean_, double std_, RNG gen) {
 
 template<typename RNG>
 struct NormalKernel {
-  void operator()(Tensor& self, double mean, double std, Generator gen) {
+  void operator()(Tensor& self, double mean, double std, c10::optional<Generator> gen) {
     normal_kernel(self, mean, std, check_generator<RNG>(gen));
+  }
+};
+
+// ==================================================== Uniform ========================================================
+
+template<typename RNG>
+void uniform_kernel(TensorIterator& iter, double from_, double to_, RNG gen) {
+#ifdef _WIN32
+  // TODO: https://github.com/pytorch/pytorch/issues/33793
+  if (iter.dtype() == ScalarType::BFloat16) {
+    TORCH_CHECK(false, "uniform_() is not supported for bfloat16 CUDA tensors on Windows. Please see https://github.com/pytorch/pytorch/issues/33793");
+  }
+#endif
+  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "uniform_kernel_cuda", [&] {
+    auto from = static_cast<scalar_t>(from_);
+    auto to = static_cast<scalar_t>(to_);
+    using accscalar_t = at::acc_type<scalar_t, true>;
+    auto range = static_cast<accscalar_t>(to-from);
+    from = static_cast<accscalar_t>(from);
+    // define lambda to reverse bounds, multiply 'range' and add 'from_'
+    auto uniform_func = [range, from] __device__ (accscalar_t rand) {
+      // reverse the bounds of curand4 from (0, 1] to [0, 1)
+      // Note that this method is from legacy THCTensorRandom and is likely to give
+      // you more 0-s, since, the probability of gettings 1-s is higher than 0-s and
+      // by reversing the bounds, we are flipping the probabilities of 1-s and 0-s.
+      auto reverse_bound_rand = rand == static_cast<accscalar_t>(1.0) ? static_cast<accscalar_t>(0.0) : rand;
+      return static_cast<scalar_t>(reverse_bound_rand * range + from);
+    };
+    if (std::is_same<scalar_t, double>::value) {
+      distribution_nullary_kernel<scalar_t, accscalar_t, curand4_engine_calls/2>(iter,
+        gen,
+        [] __device__ (curandStatePhilox4_32_10_t* state) { return curand_uniform2_double(state); },
+        uniform_func);
+    } else {
+      distribution_nullary_kernel<scalar_t, accscalar_t, curand4_engine_calls>(iter,
+        gen,
+        [] __device__ (curandStatePhilox4_32_10_t* state) { return curand_uniform4(state); },
+        uniform_func);
+    }
+   });
+}
+
+template<typename RNG>
+struct UniformKernel {
+  void operator()(TensorIterator& iter, double from, double to, c10::optional<Generator> gen) {
+    uniform_kernel(iter, from, to, check_generator<RNG>(gen));
   }
 };
 

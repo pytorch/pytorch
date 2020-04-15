@@ -32,6 +32,9 @@ jobs:
       - name: Ensure no tabs
         run: |
           (! git grep -I -l $'\t' -- . ':(exclude)*.svg' ':(exclude)**Makefile' ':(exclude)**/contrib/**' ':(exclude)third_party' ':(exclude).gitattributes' ':(exclude).gitmodules' || (echo "The above files have tabs; please convert them to spaces"; false))
+      - name: Ensure canonical include
+        run: |
+          (! git grep -I -l $'#include "' -- ./c10 || (echo "The above files have include with quotes; please convert them to #include <xxxx>"; false))
       - name: Ensure C++ source files are not executable
         run: |
           (! find . \( -path ./third_party -o -path ./.git -o -path ./torch/bin -o -path ./build \) -prune -o -type f -executable -regextype posix-egrep -not -regex '.+(\.(bash|sh|py|so)|git-pre-commit)$' -print | grep . || (echo 'The above files have executable permission; please remove their executable permission by using `chmod -x`'; false))
@@ -111,7 +114,7 @@ jobs:
           sudo apt-key adv --fetch-keys https://developer.download.nvidia.com/compute/cuda/repos/ubuntu1804/x86_64/7fa2af80.pub
           sudo add-apt-repository "deb http://developer.download.nvidia.com/compute/cuda/repos/ubuntu1804/x86_64/ /"
           sudo apt-get update
-          sudo apt-get --no-install-recommends -y install cuda
+          sudo apt-get --no-install-recommends -y install cuda-toolkit-10-2
           # Install dependencies
           pip install pyyaml
           wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key | sudo apt-key add -
@@ -161,6 +164,8 @@ jobs:
             -g"-torch/csrc/jit/import.cpp"            \
             -g"-torch/csrc/jit/netdef_converter.cpp"  \
             -g"-torch/csrc/onnx/init.cpp"             \
+            -g"-torch/csrc/cuda/nccl.*"               \
+            -g"-torch/csrc/cuda/python_nccl.cpp"      \
             "$@" > ${GITHUB_WORKSPACE}/clang-tidy-output.txt
 
           cat ${GITHUB_WORKSPACE}/clang-tidy-output.txt

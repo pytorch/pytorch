@@ -42,7 +42,7 @@ if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
 fi
 
 # --user breaks ppc64le builds and these packages are already in ppc64le docker
-if [[ "$BUILD_ENVIRONMENT" != *ppc64le* ]]; then
+if [[ "$BUILD_ENVIRONMENT" != *ppc64le* ]] && [[ "$BUILD_ENVIRONMENT" != *-bazel-* ]] ; then
   # JIT C++ extensions require ninja.
   pip_install --user ninja
   # ninja is installed in /var/lib/jenkins/.local/bin
@@ -193,6 +193,7 @@ test_libtorch() {
     python test/cpp/jit/tests_setup.py shutdown
     python tools/download_mnist.py --quiet -d test/cpp/api/mnist
     OMP_NUM_THREADS=2 TORCH_CPP_TEST_MNIST_PATH="test/cpp/api/mnist" build/bin/test_api --gtest_output=xml:test/test-reports/cpp-unittest/test_api.xml
+    build/bin/test_tensorexpr
     assert_git_not_dirty
   fi
 }
@@ -211,6 +212,18 @@ test_custom_script_ops() {
     popd
     assert_git_not_dirty
   fi
+}
+
+test_torch_function_benchmark() {
+  echo "Testing __torch_function__ benchmarks"
+  pushd benchmarks/overrides_benchmark
+  python bench.py -n 1 -m 2
+  python pyspybench.py Tensor -n 1
+  python pyspybench.py SubTensor -n 1
+  python pyspybench.py WithTorchFunction -n 1
+  python pyspybench.py SubWithTorchFunction -n 1
+  popd
+  assert_git_not_dirty
 }
 
 test_xla() {
@@ -247,7 +260,15 @@ test_backward_compatibility() {
   assert_git_not_dirty
 }
 
-if ! [[ "${BUILD_ENVIRONMENT}" == *libtorch* ]]; then
+test_bazel() {
+  set -e
+
+  get_bazel
+
+  tools/bazel test --test_tag_filters=-gpu-required --test_filter=-*_CUDA :all_tests
+}
+
+if ! [[ "${BUILD_ENVIRONMENT}" == *libtorch* || "${BUILD_ENVIRONMENT}" == *-bazel-* ]]; then
   (cd test && python -c "import torch; print(torch.__config__.show())")
   (cd test && python -c "import torch; print(torch.__config__.parallel_info())")
 fi
@@ -273,6 +294,9 @@ elif [[ "${BUILD_ENVIRONMENT}" == *-test2 || "${JOB_BASE_NAME}" == *-test2 ]]; t
   test_aten
   test_libtorch
   test_custom_script_ops
+  test_torch_function_benchmark
+elif [[ "${BUILD_ENVIRONMENT}" == *-bazel-* ]]; then
+  test_bazel
 else
   test_torchvision
   test_python_nn
@@ -280,4 +304,5 @@ else
   test_aten
   test_libtorch
   test_custom_script_ops
+  test_torch_function_benchmark
 fi
