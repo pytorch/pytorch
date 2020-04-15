@@ -55,6 +55,7 @@ Creation Ops
 .. autofunction:: full_like
 .. autofunction:: quantize_per_tensor
 .. autofunction:: quantize_per_channel
+.. autofunction:: dequantize
 
 Indexing, Slicing, Joining, Mutating Ops
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -311,6 +312,7 @@ Spectral Ops
 Other Operations
 ~~~~~~~~~~~~~~~~~~~~~~
 .. autofunction:: bincount
+.. autofunction:: block_diag
 .. autofunction:: broadcast_tensors
 .. autofunction:: cartesian_prod
 .. autofunction:: cdist

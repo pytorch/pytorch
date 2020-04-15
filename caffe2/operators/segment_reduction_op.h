@@ -1553,7 +1553,7 @@ class AbstractLengthsGradientOp : public Operator<Context> {
     }
 
     typename ReducerGradient::Meta ctx(segmentGradsInput, 1);
-    for (int i = 0; i < ReducerGradient::originalInputs().size(); ++i) {
+    for (auto i = 0U; i < ReducerGradient::originalInputs().size(); ++i) {
       auto& aux_in = Input(i);
       CAFFE_ENFORCE_EQ(
           reducedDataSize,

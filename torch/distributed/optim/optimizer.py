@@ -82,28 +82,27 @@ class DistributedOptimizer:
         kwargs: arguments to pass to the optimizer constructor on each worker.
 
     Example::
-
-        >> import torch.distributed.autograd as dist_autograd
-        >> import torch.distributed.rpc as rpc
-        >> from torch import optim
-        >> from torch.distributed.optim import DistributedOptimizer
-        >>
-        >> with dist_autograd.context() as context_id:
-        >>   # Forward pass.
-        >>   rref1 = rpc.remote("worker1", torch.add, args=(torch.ones(2), 3))
-        >>   rref2 = rpc.remote("worker1", torch.add, args=(torch.ones(2), 1))
-        >>   loss = rref1.to_here() + rref2.to_here()
-        >>
-        >>   # Backward pass.
-        >>   dist_autograd.backward(context_id, [loss.sum()])
-        >>
-        >>   # Optimizer.
-        >>   dist_optim = DistributedOptimizer(
-        >>      optim.SGD,
-        >>      [rref1, rref2],
-        >>      lr=0.05,
-        >>   )
-        >>   dist_optim.step(context_id)
+        >>> import torch.distributed.autograd as dist_autograd
+        >>> import torch.distributed.rpc as rpc
+        >>> from torch import optim
+        >>> from torch.distributed.optim import DistributedOptimizer
+        >>>
+        >>> with dist_autograd.context() as context_id:
+        >>>   # Forward pass.
+        >>>   rref1 = rpc.remote("worker1", torch.add, args=(torch.ones(2), 3))
+        >>>   rref2 = rpc.remote("worker1", torch.add, args=(torch.ones(2), 1))
+        >>>   loss = rref1.to_here() + rref2.to_here()
+        >>>
+        >>>   # Backward pass.
+        >>>   dist_autograd.backward(context_id, [loss.sum()])
+        >>>
+        >>>   # Optimizer.
+        >>>   dist_optim = DistributedOptimizer(
+        >>>      optim.SGD,
+        >>>      [rref1, rref2],
+        >>>      lr=0.05,
+        >>>   )
+        >>>   dist_optim.step(context_id)
     """
     def __init__(self, optimizer_class, params_rref, *args, **kwargs):
         per_worker_params_rref = defaultdict(list)

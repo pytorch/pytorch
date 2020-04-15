@@ -8,8 +8,8 @@
 #include <ATen/native/ReduceOpsUtils.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/SharedReduceOps.h>
-#include <ATen/native/cpu/Reduce.h>
 #include <ATen/native/ReduceOpsUtils.h>
+#include <ATen/native/cpu/Reduce.h>
 
 #include <c10/util/Optional.h>
 #include <ATen/AccumulateType.h>

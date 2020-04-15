@@ -1,8 +1,8 @@
+#include <torch/csrc/jit/frontend/schema_matching.h>
 #include <ATen/core/jit_type.h>
-#include <torch/csrc/jit/runtime/operator.h>
 #include <torch/csrc/jit/frontend/builtin_functions.h>
 #include <torch/csrc/jit/frontend/error_report.h>
-#include <torch/csrc/jit/frontend/schema_matching.h>
+#include <torch/csrc/jit/runtime/operator.h>
 
 namespace torch {
 namespace jit {
@@ -144,8 +144,8 @@ static Value* tryMatchArgument(
   }
 
   // Resolve VarType variables
-  const MatchTypeReturn matched = matchTypeVariables(
-      arg.type(), value->type(), type_env);
+  const MatchTypeReturn matched =
+      matchTypeVariables(arg.type(), value->type(), type_env);
   if (!matched.success()) {
     if (failure_messages) {
       err() << "Could not match type " << value->type()->python_str() << " to "

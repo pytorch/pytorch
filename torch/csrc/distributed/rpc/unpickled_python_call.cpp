@@ -14,7 +14,7 @@ UnpickledPythonCall::UnpickledPythonCall(
   pythonUdf_ = pythonRpcHandler.deserialize(serializedPyObj);
 }
 
-Message UnpickledPythonCall::toMessage() && {
+Message UnpickledPythonCall::toMessageImpl() && {
   TORCH_INTERNAL_ASSERT(
       false, "UnpickledPythonCall does not support toMessage().");
 }

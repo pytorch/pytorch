@@ -82,8 +82,7 @@ c10::IValue SourceRangeSerializer::serialize_source(
   return serialized;
 }
 
-SourceRangePickler::SourceRangePickler()
-    : srs(new SourceRangeSerializer()) {}
+SourceRangePickler::SourceRangePickler() : srs(new SourceRangeSerializer()) {}
 
 std::vector<char> SourceRangePickler::pickle(const SourceRangeRecords& ranges) {
   std::vector<c10::IValue> ivalues;
@@ -98,7 +97,6 @@ std::vector<char> SourceRangePickler::pickle(const SourceRangeRecords& ranges) {
   TORCH_CHECK(table.size() == 0, "Expected 0 tensors to be written");
   return result;
 }
-
 
 ConcreteSourceRangeUnpickler::ConcreteSourceRangeUnpickler(
     at::DataPtr&& data,

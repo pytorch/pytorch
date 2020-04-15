@@ -1,4 +1,3 @@
-
 #include "torch/csrc/jit/runtime/operator.h"
 #include "torch/csrc/jit/runtime/custom_operator.h"
 #include "torch/csrc/jit/frontend/function_schema_parser.h"
@@ -57,7 +56,7 @@ namespace {
 template<class Return, class... Args>
 Return callUnboxedKernel(OperatorKernel* unboxedKernel, Args... args) {
   using FuncType = Return (Args...);
-  auto* typedUnboxedKernel = static_cast<c10::detail::WrapRuntimeKernelFunctor<FuncType*>*>(unboxedKernel);
+  auto* typedUnboxedKernel = static_cast<c10::impl::WrapFunctionIntoRuntimeFunctor<FuncType*>*>(unboxedKernel);
   return (*typedUnboxedKernel)(std::forward<Args>(args)...);
 }
 
@@ -111,9 +110,11 @@ public:
     static auto& dispatcher = c10::Dispatcher::singleton();
     auto schema = parseSchema(schemaStr);
     schema.setAliasAnalysis(AliasAnalysisKind::FROM_SCHEMA);
-    std::pair<RegistrationHandleRAII, OperatorHandle> registration = dispatcher.registerSchema(std::move(schema));
-    registrationHandles_.push_back(std::move(registration.first));
-    dispatcher.setManuallyBoxedKernelFor_(registration.second, boxed_kernel_wrapper);
+    c10::OperatorName name = schema.operator_name();
+    RegistrationHandleRAII registration = dispatcher.registerDef(std::move(schema));
+    auto op = dispatcher.findSchema(name).value();
+    registrationHandles_.push_back(std::move(registration));
+    dispatcher.setManuallyBoxedKernelFor_(op, boxed_kernel_wrapper);
     return std::move(*this);
   }
 

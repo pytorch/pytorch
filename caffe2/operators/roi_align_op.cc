@@ -1,17 +1,20 @@
-#include "roi_align_op.h"
+#include "caffe2/operators/roi_align_op.h"
+
+#include <vector>
 
 #include "caffe2/utils/eigen_utils.h"
 #include "caffe2/utils/math.h"
 
 namespace caffe2 {
+
 namespace {
 
 template <typename T>
-struct PreCalc {
-  int pos1;
-  int pos2;
-  int pos3;
-  int pos4;
+struct BilinearInterpolationParam {
+  int64_t p1;
+  int64_t p2;
+  int64_t p3;
+  int64_t p4;
   T w1;
   T w2;
   T w3;
@@ -19,324 +22,235 @@ struct PreCalc {
 };
 
 template <typename T>
-void pre_calc_for_bilinear_interpolate(
-    const int height,
-    const int width,
-    const int pooled_height,
-    const int pooled_width,
-    const int iy_upper,
-    const int ix_upper,
-    T roi_start_h,
-    T roi_start_w,
+std::vector<BilinearInterpolationParam<T>> MakeBilinearInterpolationParams(
+    int64_t H,
+    int64_t W,
+    int64_t pooled_h,
+    int64_t pooled_w,
     T bin_size_h,
     T bin_size_w,
-    int roi_bin_grid_h,
-    int roi_bin_grid_w,
-    std::vector<PreCalc<T>>& pre_calc) {
-  int pre_calc_index = 0;
-  for (int ph = 0; ph < pooled_height; ph++) {
-    for (int pw = 0; pw < pooled_width; pw++) {
-      for (int iy = 0; iy < iy_upper; iy++) {
-        const T yy = roi_start_h + ph * bin_size_h +
-            static_cast<T>(iy + .5f) * bin_size_h /
-                static_cast<T>(roi_bin_grid_h); // e.g., 0.5, 1.5
-        for (int ix = 0; ix < ix_upper; ix++) {
+    int64_t bin_grid_h,
+    int64_t bin_grid_w,
+    T roi_start_h,
+    T roi_start_w) {
+  std::vector<BilinearInterpolationParam<T>> params(
+      pooled_h * pooled_w * bin_grid_h * bin_grid_w);
+  const T ch = bin_size_h / static_cast<T>(bin_grid_h);
+  const T cw = bin_size_w / static_cast<T>(bin_grid_w);
+  int64_t cnt = 0;
+  for (int64_t ph = 0; ph < pooled_h; ++ph) {
+    for (int64_t pw = 0; pw < pooled_w; ++pw) {
+      for (int64_t iy = 0; iy < bin_grid_h; ++iy) {
+        const T yy = roi_start_h + static_cast<T>(ph) * bin_size_h +
+            (static_cast<T>(iy) + T(0.5)) * ch;
+        if (yy < T(-1) || yy > static_cast<T>(H)) {
+          std::memset(params.data() + cnt, 0, bin_grid_w * sizeof(params[0]));
+          cnt += bin_grid_w;
+          continue;
+        }
+        for (int64_t ix = 0; ix < bin_grid_w; ++ix) {
           const T xx = roi_start_w + pw * bin_size_w +
-              static_cast<T>(ix + .5f) * bin_size_w /
-                  static_cast<T>(roi_bin_grid_w);
-
-          T x = xx;
-          T y = yy;
-          // deal with: inverse elements are out of feature map boundary
-          if (y < -1.0 || y > height || x < -1.0 || x > width) {
-            // empty
-            PreCalc<T> pc;
-            pc.pos1 = 0;
-            pc.pos2 = 0;
-            pc.pos3 = 0;
-            pc.pos4 = 0;
-            pc.w1 = 0;
-            pc.w2 = 0;
-            pc.w3 = 0;
-            pc.w4 = 0;
-            pre_calc[pre_calc_index] = pc;
-            pre_calc_index += 1;
+              (static_cast<T>(ix) + T(0.5f)) * cw;
+          BilinearInterpolationParam<T>& param = params[cnt++];
+          if (xx < T(-1) || xx > static_cast<T>(W)) {
+            std::memset(&param, 0, sizeof(param));
             continue;
           }
-
-          if (y <= 0) {
-            y = 0;
-          }
-          if (x <= 0) {
-            x = 0;
-          }
-
-          int y_low = (int)y;
-          int x_low = (int)x;
-          int y_high;
-          int x_high;
-
-          if (y_low >= height - 1) {
-            y_high = y_low = height - 1;
-            y = (T)y_low;
-          } else {
-            y_high = y_low + 1;
-          }
-
-          if (x_low >= width - 1) {
-            x_high = x_low = width - 1;
-            x = (T)x_low;
-          } else {
-            x_high = x_low + 1;
-          }
-
-          T ly = y - y_low;
-          T lx = x - x_low;
-          T hy = 1. - ly, hx = 1. - lx;
-          T w1 = hy * hx, w2 = hy * lx, w3 = ly * hx, w4 = ly * lx;
-
-          // save weights and indeces
-          PreCalc<T> pc;
-          pc.pos1 = y_low * width + x_low;
-          pc.pos2 = y_low * width + x_high;
-          pc.pos3 = y_high * width + x_low;
-          pc.pos4 = y_high * width + x_high;
-          pc.w1 = w1;
-          pc.w2 = w2;
-          pc.w3 = w3;
-          pc.w4 = w4;
-          pre_calc[pre_calc_index] = pc;
-
-          pre_calc_index += 1;
+          const T y = std::min(std::max(yy, T(0)), static_cast<T>(H - 1));
+          const T x = std::min(std::max(xx, T(0)), static_cast<T>(W - 1));
+          const int64_t yl = static_cast<int64_t>(std::floor(y));
+          const int64_t xl = static_cast<int64_t>(std::floor(x));
+          const int64_t yh = std::min(yl + 1, H - 1);
+          const int64_t xh = std::min(xl + 1, W - 1);
+          const T py = y - static_cast<T>(yl);
+          const T px = x - static_cast<T>(xl);
+          const T qy = T(1) - py;
+          const T qx = T(1) - px;
+          param.p1 = yl * W + xl;
+          param.p2 = yl * W + xh;
+          param.p3 = yh * W + xl;
+          param.p4 = yh * W + xh;
+          param.w1 = qy * qx;
+          param.w2 = qy * px;
+          param.w3 = py * qx;
+          param.w4 = py * px;
         }
       }
     }
   }
-}
-
-template <typename T>
-void ROIAlignForward(
-    const int nthreads,
-    const T* bottom_data,
-    const T& spatial_scale,
-    const int channels,
-    const int height,
-    const int width,
-    const int pooled_height,
-    const int pooled_width,
-    const int sampling_ratio,
-    const T* bottom_rois,
-    int roi_cols,
-    T* top_data,
-    StorageOrder order,
-    bool continuous_coordinate) {
-  DCHECK(roi_cols == 4 || roi_cols == 5);
-
-  int n_rois = nthreads / channels / pooled_width / pooled_height;
-
-#ifdef _OPENMP
-#pragma omp parallel for
-#endif
-  for (int n = 0; n < n_rois; n++) {
-    int index_n = n * channels * pooled_width * pooled_height;
-
-    // roi could have 4 or 5 columns
-    const T* offset_bottom_rois = bottom_rois + n * roi_cols;
-    int roi_batch_ind = 0;
-    if (roi_cols == 5) {
-      roi_batch_ind = offset_bottom_rois[0];
-      offset_bottom_rois++;
-    }
-
-    // Do not using rounding; this implementation detail is critical
-    T roi_offset = continuous_coordinate ? T(0.5) : 0;
-    T roi_start_w = offset_bottom_rois[0] * spatial_scale - roi_offset;
-    T roi_start_h = offset_bottom_rois[1] * spatial_scale - roi_offset;
-    T roi_end_w = offset_bottom_rois[2] * spatial_scale - roi_offset;
-    T roi_end_h = offset_bottom_rois[3] * spatial_scale - roi_offset;
-
-    T roi_width = roi_end_w - roi_start_w;
-    T roi_height = roi_end_h - roi_start_h;
-    if (continuous_coordinate) {
-      CAFFE_ENFORCE(
-          roi_width >= 0 && roi_height >= 0,
-          "ROIs in ROIAlign do not have non-negative size!");
-    } else { // backward compatibility
-      // Force malformed ROIs to be 1x1
-      roi_width = std::max(roi_width, (T)1.);
-      roi_height = std::max(roi_height, (T)1.);
-    }
-    T bin_size_h = static_cast<T>(roi_height) / static_cast<T>(pooled_height);
-    T bin_size_w = static_cast<T>(roi_width) / static_cast<T>(pooled_width);
-
-    // We use roi_bin_grid to sample the grid and mimic integral
-    int roi_bin_grid_h = (sampling_ratio > 0)
-        ? sampling_ratio
-        : ceil(roi_height / pooled_height); // e.g., = 2
-    int roi_bin_grid_w =
-        (sampling_ratio > 0) ? sampling_ratio : ceil(roi_width / pooled_width);
-
-    // We do average (integral) pooling inside a bin
-    const T count = roi_bin_grid_h * roi_bin_grid_w; // e.g. = 4
-
-    // we want to precalculate indeces and weights shared by all chanels,
-    // this is the key point of optimiation
-    std::vector<PreCalc<T>> pre_calc(
-        roi_bin_grid_h * roi_bin_grid_w * pooled_width * pooled_height);
-    pre_calc_for_bilinear_interpolate(
-        height,
-        width,
-        pooled_height,
-        pooled_width,
-        roi_bin_grid_h,
-        roi_bin_grid_w,
-        roi_start_h,
-        roi_start_w,
-        bin_size_h,
-        bin_size_w,
-        roi_bin_grid_h,
-        roi_bin_grid_w,
-        pre_calc);
-
-    if (order == StorageOrder::NCHW) {
-      for (int c = 0; c < channels; c++) {
-        int index_n_c = index_n + c * pooled_width * pooled_height;
-        const T* offset_bottom_data =
-            bottom_data + (roi_batch_ind * channels + c) * height * width;
-        int pre_calc_index = 0;
-
-        for (int ph = 0; ph < pooled_height; ph++) {
-          for (int pw = 0; pw < pooled_width; pw++) {
-            int index = index_n_c + ph * pooled_width + pw;
-
-            T output_val = 0.;
-            for (int iy = 0; iy < roi_bin_grid_h; iy++) {
-              for (int ix = 0; ix < roi_bin_grid_w; ix++) {
-                PreCalc<T> pc = pre_calc[pre_calc_index];
-                output_val += pc.w1 * offset_bottom_data[pc.pos1] +
-                    pc.w2 * offset_bottom_data[pc.pos2] +
-                    pc.w3 * offset_bottom_data[pc.pos3] +
-                    pc.w4 * offset_bottom_data[pc.pos4];
-
-                pre_calc_index += 1;
-              }
-            }
-            output_val /= count;
-
-            top_data[index] = output_val;
-          } // for pw
-        } // for ph
-      } // for c
-    } // if nchw
-
-    if (order == StorageOrder::NHWC) {
-      const T* offset_bottom_data =
-          bottom_data + roi_batch_ind * channels * height * width;
-      int pre_calc_index = 0;
-
-      for (int ph = 0; ph < pooled_height; ph++) {
-        for (int pw = 0; pw < pooled_width; pw++) {
-          EVecXf output_vals = EVecXf::Zero(channels);
-
-          for (int iy = 0; iy < roi_bin_grid_h; iy++) {
-            for (int ix = 0; ix < roi_bin_grid_w; ix++) {
-              PreCalc<T> pc = pre_calc[pre_calc_index];
-
-              ConstEigenVectorMap<T> data_1(
-                  offset_bottom_data + channels * pc.pos1, channels);
-              ConstEigenVectorMap<T> data_2(
-                  offset_bottom_data + channels * pc.pos2, channels);
-              ConstEigenVectorMap<T> data_3(
-                  offset_bottom_data + channels * pc.pos3, channels);
-              ConstEigenVectorMap<T> data_4(
-                  offset_bottom_data + channels * pc.pos4, channels);
-
-              output_vals += pc.w1 * data_1 + pc.w2 * data_2 + pc.w3 * data_3 +
-                  pc.w4 * data_4;
-
-              pre_calc_index += 1;
-            }
-          }
-          output_vals /= count;
-
-          int index_nhw = index_n + (ph * pooled_width + pw) * channels;
-          std::memcpy(
-              top_data + index_nhw, output_vals.data(), channels * sizeof(T));
-        } // for pw
-      } // for ph
-    } // if nhwc
-
-  } // for n
+  return params;
 }
 
 } // namespace
 
 template <>
-bool RoIAlignOp<float, CPUContext>::RunOnDevice() {
-  auto& X = Input(0); // Input data to pool, NCHW
-  auto& R = Input(1); // RoIs
+bool RoIAlignOp<float, CPUContext>::RunOnDeviceWithOrderNCHW(
+    int64_t N,
+    int64_t C,
+    int64_t H,
+    int64_t W,
+    int64_t roi_cols,
+    const float* X,
+    const float* R,
+    float* Y) {
+  DCHECK(roi_cols == 4 || roi_cols == 5);
+  const float roi_offset = aligned_ ? 0.5f : 0.0f;
 
-  if (R.numel() == 0) {
-    std::vector<int64_t> sizes;
-    // Handle empty rois
-    if (order_ == StorageOrder::NCHW) {
-      sizes = {0, X.dim32(1), pooled_height_, pooled_width_};
-    } else if (order_ == StorageOrder::NHWC) {
-      sizes = {0, pooled_height_, pooled_width_, X.dim32(3)};
+#ifdef _OPENMP
+#pragma omp parallel for
+#endif
+  for (int64_t n = 0; n < N; ++n) {
+    const int64_t roi_batch_idx = roi_cols == 4 ? 0 : R[n * roi_cols];
+    const float* X_ptr = X + roi_batch_idx * C * H * W;
+    const float* R_ptr = R + n * roi_cols + (roi_cols == 5);
+    float* Y_ptr = Y + n * C * pooled_h_ * pooled_w_;
+
+    // Do not using rounding; this implementation detail is critical
+    const float roi_w1 = R_ptr[0] * spatial_scale_ - roi_offset;
+    const float roi_h1 = R_ptr[1] * spatial_scale_ - roi_offset;
+    const float roi_w2 = R_ptr[2] * spatial_scale_ - roi_offset;
+    const float roi_h2 = R_ptr[3] * spatial_scale_ - roi_offset;
+    float roi_w = roi_w2 - roi_w1;
+    float roi_h = roi_h2 - roi_h1;
+    if (aligned_) {
+      CAFFE_ENFORCE(
+          roi_w >= 0.0f && roi_h >= 0.0f,
+          "ROIs in ROIAlign do not have non-negative size!");
+    } else { // backward compatibility
+      // Force malformed ROIs to be 1x1
+      roi_w = std::max(roi_w, 1.0f);
+      roi_h = std::max(roi_h, 1.0f);
     }
-    // Output Tensor is inititalized with proper sizes and data type
-    Output(0, sizes, at::dtype<float>());
-    return true;
+    const float bin_size_h = roi_h / static_cast<float>(pooled_h_);
+    const float bin_size_w = roi_w / static_cast<float>(pooled_w_);
+
+    // We use roi_bin_grid to sample the grid and mimic integral
+    const int64_t bin_grid_h = (sampling_ratio_ > 0)
+        ? sampling_ratio_
+        : static_cast<int64_t>(ceil(roi_h / static_cast<float>(pooled_h_)));
+    const int64_t bin_grid_w = (sampling_ratio_ > 0)
+        ? sampling_ratio_
+        : static_cast<int64_t>(ceil(roi_w / static_cast<float>(pooled_w_)));
+
+    const std::vector<BilinearInterpolationParam<float>> params =
+        MakeBilinearInterpolationParams(
+            H,
+            W,
+            pooled_h_,
+            pooled_w_,
+            bin_size_h,
+            bin_size_w,
+            bin_grid_h,
+            bin_grid_w,
+            roi_h1,
+            roi_w1);
+
+    const float scale = 1.0f / static_cast<float>(bin_grid_h * bin_grid_w);
+    for (int64_t c = 0; c < C; ++c) {
+      int64_t cnt = 0;
+      for (int64_t ph = 0; ph < pooled_h_; ++ph) {
+        for (int64_t pw = 0; pw < pooled_w_; ++pw) {
+          float sum = 0.0f;
+          for (int64_t iy = 0; iy < bin_grid_h; ++iy) {
+            for (int64_t ix = 0; ix < bin_grid_w; ++ix) {
+              const BilinearInterpolationParam<float>& param = params[cnt++];
+              sum += param.w1 * X_ptr[param.p1] + param.w2 * X_ptr[param.p2] +
+                  param.w3 * X_ptr[param.p3] + param.w4 * X_ptr[param.p4];
+            }
+          }
+          Y_ptr[ph * pooled_w_ + pw] = sum * scale;
+        }
+      }
+      X_ptr += H * W;
+      Y_ptr += pooled_h_ * pooled_w_;
+    }
   }
 
-  CAFFE_ENFORCE_EQ(R.dim(), 2);
-  // if R has 5 columns, the first column is the index, otherwise 0
-  CAFFE_ENFORCE(R.dim32(1) == 4 || R.dim32(1) == 5);
+  return true;
+}
 
-  assert(sampling_ratio_ >= 0);
+template <>
+bool RoIAlignOp<float, CPUContext>::RunOnDeviceWithOrderNHWC(
+    int64_t N,
+    int64_t C,
+    int64_t H,
+    int64_t W,
+    int64_t roi_cols,
+    const float* X,
+    const float* R,
+    float* Y) {
+  DCHECK(roi_cols == 4 || roi_cols == 5);
+  const float roi_offset = aligned_ ? 0.5f : 0.0f;
 
-  if (order_ == StorageOrder::NCHW) {
-    auto* Y = Output(
-        0,
-        {R.dim32(0), X.dim32(1), pooled_height_, pooled_width_},
-        at::dtype<float>()); // RoI pooled data
-    int output_size = Y->numel();
-    ROIAlignForward<float>(
-        output_size,
-        X.data<float>(),
-        spatial_scale_,
-        X.dim32(1),
-        X.dim32(2),
-        X.dim32(3),
-        pooled_height_,
-        pooled_width_,
-        sampling_ratio_,
-        R.data<float>(),
-        R.dim32(1),
-        Y->template mutable_data<float>(),
-        order_,
-        aligned_);
-  } else if (order_ == StorageOrder::NHWC) {
-    auto* Y = Output(
-        0,
-        {R.dim32(0), pooled_height_, pooled_width_, X.dim32(3)},
-        at::dtype<float>()); // RoI pooled data
-    int output_size = Y->numel();
-    ROIAlignForward<float>(
-        output_size,
-        X.data<float>(),
-        spatial_scale_,
-        X.dim32(3),
-        X.dim32(1),
-        X.dim32(2),
-        pooled_height_,
-        pooled_width_,
-        sampling_ratio_,
-        R.data<float>(),
-        R.dim32(1),
-        Y->template mutable_data<float>(),
-        order_,
-        aligned_);
+#ifdef _OPENMP
+#pragma omp parallel for
+#endif
+  for (int64_t n = 0; n < N; ++n) {
+    const int64_t roi_batch_idx = roi_cols == 4 ? 0 : R[n * roi_cols];
+    const float* X_ptr = X + roi_batch_idx * C * H * W;
+    const float* R_ptr = R + n * roi_cols + (roi_cols == 5);
+    float* Y_ptr = Y + n * C * pooled_h_ * pooled_w_;
+
+    // Do not using rounding; this implementation detail is critical
+    const float roi_w1 = R_ptr[0] * spatial_scale_ - roi_offset;
+    const float roi_h1 = R_ptr[1] * spatial_scale_ - roi_offset;
+    const float roi_w2 = R_ptr[2] * spatial_scale_ - roi_offset;
+    const float roi_h2 = R_ptr[3] * spatial_scale_ - roi_offset;
+    float roi_w = roi_w2 - roi_w1;
+    float roi_h = roi_h2 - roi_h1;
+    if (aligned_) {
+      CAFFE_ENFORCE(
+          roi_w >= 0.0f && roi_h >= 0.0f,
+          "ROIs in ROIAlign do not have non-negative size!");
+    } else { // backward compatibility
+      // Force malformed ROIs to be 1x1
+      roi_w = std::max(roi_w, 1.0f);
+      roi_h = std::max(roi_h, 1.0f);
+    }
+    const float bin_size_h = roi_h / static_cast<float>(pooled_h_);
+    const float bin_size_w = roi_w / static_cast<float>(pooled_w_);
+
+    // We use roi_bin_grid to sample the grid and mimic integral
+    const int64_t bin_grid_h = (sampling_ratio_ > 0)
+        ? sampling_ratio_
+        : static_cast<int64_t>(ceil(roi_h / static_cast<float>(pooled_h_)));
+    const int64_t bin_grid_w = (sampling_ratio_ > 0)
+        ? sampling_ratio_
+        : static_cast<int64_t>(ceil(roi_w / static_cast<float>(pooled_w_)));
+
+    const std::vector<BilinearInterpolationParam<float>> params =
+        MakeBilinearInterpolationParams(
+            H,
+            W,
+            pooled_h_,
+            pooled_w_,
+            bin_size_h,
+            bin_size_w,
+            bin_grid_h,
+            bin_grid_w,
+            roi_h1,
+            roi_w1);
+
+    const float scale = 1.0f / static_cast<float>(bin_grid_h * bin_grid_w);
+    int64_t cnt = 0;
+    for (int64_t ph = 0; ph < pooled_h_; ++ph) {
+      for (int64_t pw = 0; pw < pooled_w_; ++pw) {
+        EigenVectorArrayMap<float> Y_arr(Y_ptr + (ph * pooled_w_ + pw) * C, C);
+        Y_arr.setZero();
+        for (int64_t iy = 0; iy < bin_grid_h; ++iy) {
+          for (int64_t ix = 0; ix < bin_grid_w; ++ix) {
+            const BilinearInterpolationParam<float>& param = params[cnt++];
+            ConstEigenVectorArrayMap<float> x1_arr(X_ptr + param.p1 * C, C);
+            ConstEigenVectorArrayMap<float> x2_arr(X_ptr + param.p2 * C, C);
+            ConstEigenVectorArrayMap<float> x3_arr(X_ptr + param.p3 * C, C);
+            ConstEigenVectorArrayMap<float> x4_arr(X_ptr + param.p4 * C, C);
+            Y_arr += param.w1 * x1_arr + param.w2 * x2_arr + param.w3 * x3_arr +
+                param.w4 * x4_arr;
+          }
+        }
+        Y_arr *= scale;
+      }
+    }
   }
 
   return true;
@@ -380,22 +294,35 @@ Region of Interest (RoI) align operation as used in Mask R-CNN.
         "4D output of shape (R, C, pooled_h, pooled_w). The r-th batch element "
         "is a pooled feature map cooresponding to the r-th RoI.");
 
+template <typename T>
+using RoIAlignCPUOp = caffe2::RoIAlignOp<T, CPUContext>;
+
 } // namespace caffe2
 
-using RoIAlignOpFloatCPU = caffe2::RoIAlignOp<float, caffe2::CPUContext>;
-
-// clang-format off
 C10_EXPORT_CAFFE2_OP_TO_C10_CPU(
     RoIAlign,
     "_caffe2::RoIAlign("
-      "Tensor features, "
-      "Tensor rois, "
-      "str order, "
-      "float spatial_scale, "
-      "int pooled_h, "
-      "int pooled_w, "
-      "int sampling_ratio, "
-      "bool aligned"
+    "    Tensor features,"
+    "    Tensor rois,"
+    "    str order,"
+    "    float spatial_scale,"
+    "    int pooled_h,"
+    "    int pooled_w,"
+    "    int sampling_ratio,"
+    "    bool aligned"
     ") -> Tensor",
-    RoIAlignOpFloatCPU);
-// clang-format on
+    caffe2::RoIAlignCPUOp<float>);
+
+C10_EXPORT_CAFFE2_OP_TO_C10_CPU(
+    RoIAlign2,
+    "__caffe2::RoIAlign("
+    "    Tensor features,"
+    "    Tensor rois,"
+    "    str order,"
+    "    float spatial_scale,"
+    "    int pooled_h,"
+    "    int pooled_w,"
+    "    int sampling_ratio,"
+    "    bool aligned"
+    ") -> Tensor",
+    caffe2::RoIAlignCPUOp<float>);

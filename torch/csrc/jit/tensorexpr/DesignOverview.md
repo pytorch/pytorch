@@ -20,32 +20,36 @@ User construct a kernel from tensor expressions, like:
     std::vector<Tensor*> tensors_to_compute = {x, z}; // Tensor y might be used in x or z - in this case it will also be computed. 
 ```
 
-## Step 2: Create schedule for the tensor expressions:
+## Step 2: Lower to a LoopNest:
 ```
-   Schedule s(tensors_to_compute);
+   LoopNest l(tensors_to_compute);
 ```
-This constructs a tree-like data structure (`TensorExprNode`) representing loop nests for the given tensor computation.
-A node in this IR is either a loop-axis(LoopAxis) or a tensor expression (`TensorExprOp`).
-If it is a loop-axis, it also contains children that again might be either a loop-axes or a tensor expression, and so on.
-If it is a tensor-expression, it is lowered to a statement (`Stmt`). Currently, it just means that we're creating a `Store` for every tensor-expression. We also keep a pointer to the original tensor expression.
-It could look like this:
+LoopNest consists of a root statement (`Stmt`) and some metadata. The root statement of a loop nest is a block statement containing other statements.
+
+A statement can be one of the following:
+ - `Store` statement: such statements represent access to tensor elements. They specify the base variable (`Var`), an expression for the index, an expression for the stored value, and the mask.
+ - `LetStmt` statement: 'let' statements are used for binding variables to given expressions. Such statements consist of the variable to bind (`Var`), the expression to bind to, and the body statement in which the binding should be performed.
+ - `For` statement: these statements represent a loop. They specify the index variable (`Var`), expressions for the beginning and the end of the iteration space, a `Block` statement for the body, and some metadata.
+ - `Cond` statement: these statements represent if-s: they consist of a condition expression and two `Block` statements for true and false branches (both are allowed to be null).
+ - `Block` statement: these statements represent a linear sequence of other statements.
+
+An example of a root statement:
 ```
-loop-axis i
-  loop-axis j
-    Store(to: a[i, j], what: x[i] + y[j])
-loop-axis k
-  loop-axis l
-    Store(to: b[k, l], what: a[i, j] + 1)
-    loop-axis m
-      Store(to: c[k,l,m], what: b[k,l] + z[m])
+for (int m = 0; m < 100; m++) {
+  for (int n = 0; n < 200; n++) {
+    c[m * 200 + n] = a[m * 200 + n + 1] + a[m * 200 + n];
+  }
+}
+for (int i = 0; i < W; i++) {
+  q[i] = i + 1
+}
 ```
 
-## Step 3: Apply scheduling primitives
-Scheduling primitives mutate the tree structure: they can create or remove loop-axis, replace statements with other statements (updates `element_stmt` for each affected tensor expression) or remove them. The transformations also record the history.
-The output of this step is a modified tree-like structure (same format as in step 2).
+## Step 3: Apply loop transformations
+One can apply various loop transformations on a loop nest. The transformations mutate statements in the loop nest and loop nest can record the history of the transformations.
 
-## Step 4: Lower the tree structure to statements.
-This step creates a `For` statement for each loop-axis and emits `element_stmt` for bodies of the loops.
+## Step 4: Prepare loop nest for codegen
+After all desired loop transformations are applied, a final transformation is carried out on the loop nest's root statement. A result of this transformation is also a statement, but it now can include a lower-level statements like `Allocate` and `Free`, which are not allowed to exist during the loop transformation phase.
 
 ## Step 5: Pass the final statement for codegen (LLVM/CUDA/IREval)
 Codegen is implemented as an IR visitor over the statements produced in the previous step.
@@ -104,10 +108,8 @@ The code for constructing such an expression could look like this:
 ## Function
 `Function` represents several tensor computations bundled together. In fact, `Tensor`s are implemented via `Function`s. A function allows us to specify that several different tensor expressions operate over the same set of indices and dimensions.
 
-## Stmt
-`Stmt`s are what tensor expressions are lowered to before the codegen. They represent the computation in a less abstract way, compared to pure tensor expressions. Statements are built upon expressions, i.e. they can contain expressions as operands. Statement is a unit that a codegen works with, it is incorrect to try to pass an expression to a codegen.
-An example of statements are `Store` and `For`.
-TODO: provide more detailed example/description for the stmt.
-
 # Memory model
+TBD
+
+# Integartion with PyTorch JIT
 TBD

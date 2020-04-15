@@ -123,6 +123,12 @@ void writeOutput(
     const bool text_output,
     const int index,
     const int num_blobs);
+void logBenchmarkResult(
+    const std::string& type,
+    const std::string& metric,
+    const std::string& unit,
+    const int value);
+long getVirtualMemoryIfOptionEnabled(bool FLAGS_measure_memory);
 void runNetwork(
     shared_ptr<caffe2::Workspace> workspace,
     caffe2::NetBase* net,

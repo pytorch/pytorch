@@ -3,17 +3,17 @@
 #include <unordered_map>
 #include <unordered_set>
 
-#include "ATen/ATen.h"
-#include "ATen/cuda/CUDAContext.h"
-#include "ATen/cuda/nvrtc_stub/ATenNVRTC.h"
-#include "c10/cuda/CUDACachingAllocator.h"
-#include "c10/cuda/CUDAGuard.h"
-#include "torch/csrc/jit/resource_guard.h"
-#include "torch/csrc/jit/tensorexpr/codegen.h"
-#include "torch/csrc/jit/tensorexpr/ir.h"
-#include "torch/csrc/jit/tensorexpr/ir_printer.h"
-#include "torch/csrc/jit/tensorexpr/ir_visitor.h"
-#include "torch/csrc/jit/tensorexpr/unique_name_manager.h"
+#include <ATen/ATen.h>
+#include <ATen/cuda/CUDAContext.h>
+#include <ATen/cuda/nvrtc_stub/ATenNVRTC.h>
+#include <c10/cuda/CUDACachingAllocator.h>
+#include <c10/cuda/CUDAGuard.h>
+#include <torch/csrc/jit/resource_guard.h>
+#include <torch/csrc/jit/tensorexpr/codegen.h>
+#include <torch/csrc/jit/tensorexpr/ir.h>
+#include <torch/csrc/jit/tensorexpr/ir_printer.h>
+#include <torch/csrc/jit/tensorexpr/ir_visitor.h>
+#include <torch/csrc/jit/tensorexpr/unique_name_manager.h>
 
 namespace torch {
 namespace jit {
@@ -76,12 +76,19 @@ class CudaPrinter : public IRPrinter {
 class TORCH_CUDA_API CudaCodeGen : public CodeGen {
  public:
   template <typename... Ts>
-  CudaCodeGen(Stmt* stmt, Ts... ts) : CodeGen(stmt, std::forward<Ts>(ts)...) {
+  CudaCodeGen(Stmt* stmt, Ts... ts)
+      : CodeGen(
+            stmt,
+            std::vector<BufferArg>({BufferArg(ts)...}),
+            at::Device(at::kCUDA, at::cuda::current_device())) {
     Initialize();
   }
 
-  CudaCodeGen(Stmt* stmt, const std::vector<BufferArg>& buffer_args)
-      : CodeGen(stmt, buffer_args) {
+  CudaCodeGen(
+      Stmt* stmt,
+      const std::vector<BufferArg>& buffer_args,
+      at::Device device = at::Device(at::kCUDA, at::cuda::current_device()))
+      : CodeGen(stmt, buffer_args, device) {
     Initialize();
   }
 
