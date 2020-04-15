@@ -1030,7 +1030,7 @@ class TestSparse(TestCase):
 
     @cuda_only
     @unittest.skipIf(
-        torch._C._cuda_getCompiledVersion() >= 10010,
+        IS_WINDOWS or (torch._C._cuda_getCompiledVersion() >= 10010),
         "this test ensures bmm gives error if CUDA version is less than 10.1"
     )
     def test_bmm_cuda_version_error(self):
