@@ -20,6 +20,7 @@ DEFAULT_MODULE_MAPPING = {
     nn.Conv3d: nnq.Conv3d,
     nn.BatchNorm2d: nnq.BatchNorm2d,
     nn.BatchNorm3d: nnq.BatchNorm3d,
+    nn.LayerNorm: nnq.LayerNorm,
     QuantStub: nnq.Quantize,
     DeQuantStub: nnq.DeQuantize,
     # Wrapper Modules:

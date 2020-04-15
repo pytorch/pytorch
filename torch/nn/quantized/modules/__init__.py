@@ -4,6 +4,7 @@ from torch.nn.modules.pooling import MaxPool2d
 
 from .activation import ReLU, ReLU6
 from .batchnorm import BatchNorm2d, BatchNorm3d
+from .normalization import LayerNorm
 from .conv import Conv1d, Conv2d, Conv3d
 from .linear import Linear
 
@@ -88,6 +89,7 @@ __all__ = [
     'Quantize',
     'ReLU',
     'ReLU6',
+    'LayerNorm',
     # Wrapper modules
     'FloatFunctional',
     'QFunctional',

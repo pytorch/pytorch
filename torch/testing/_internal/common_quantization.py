@@ -285,6 +285,19 @@ class LinearReluModel(torch.nn.Module):
         x = self.relu(self.fc(x))
         return x
 
+class NormalizationTestModel(torch.nn.Module):
+    def __init__(self):
+        super(NormalizationTestModel, self).__init__()
+        self.quant = torch.quantization.QuantStub()
+        self.fc1 = torch.nn.Linear(5, 8).to(dtype=torch.float)
+        self.layer_norm = torch.nn.LayerNorm((8))
+
+    def forward(self, x):
+        x = self.quant(x)
+        x = self.fc1(x)
+        x = self.layer_norm(x)
+        return x
+
 class NestedModel(torch.nn.Module):
     def __init__(self):
         super(NestedModel, self).__init__()
