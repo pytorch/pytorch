@@ -320,6 +320,10 @@ public:
     alias_kind_ = v;
   }
 
+  c10::optional<c10::string_view> getNamespace() const {
+    return name_.getNamespace();
+  }
+
   // Returns true if we successfully set the namespace (as there
   // was none set, and false otherwise)
   bool setNamespaceIfNotSet(const char* ns) {

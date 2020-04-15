@@ -260,8 +260,4 @@ public:
   }
 };
 
-/// Used by vec256<c10::BFloat16>::map
-inline c10::BFloat16 exp(c10::BFloat16 a) { return std::exp(float(a)); }
-inline c10::BFloat16 log(c10::BFloat16 a) { return std::log(float(a)); }
-
 } // namespace std
