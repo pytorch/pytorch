@@ -6,7 +6,7 @@
 #include <torch/csrc/jit/codegen/cuda/ir_base_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/tensor.h>
 
-#include <iostream>
+#include <unordered_map>
 
 namespace torch {
 namespace jit {
@@ -28,27 +28,25 @@ struct Fusion;
 // value "with".
 struct TORCH_CUDA_API ReplaceAll : public OptOutMutator {
  private:
-  Statement* mutate(Val*);
-  Statement* mutate(Expr* expr) {
-    return OptOutMutator::mutate(expr);
+  // Will look in fusion and if we're replacing an input or output we register
+  // those changes
+  void replaceInpOut();
+
+  ReplaceAll(Val* _instance, Val* _with) {
+    registerMutation(_instance, _with);
   }
-
-  ReplaceAll(Val* _instance, Val* _with) : instance_(_instance), with_(_with) {}
-
-  Val* instance_;
-  Val* with_;
+  ReplaceAll(std::unordered_map<Val*, Val*> _replacement_map) {
+    for (auto it : _replacement_map)
+      registerMutation(it.first, it.second);
+  }
 
  public:
-  // Traverses Statement, and replaces all instances of _instance with _with.
-  static void instancesWithin(Val* _instance, Val* _with, Expr* _within) {
-    if (_within == nullptr)
-      return;
-    FusionGuard fg(_within->fusion());
-    ReplaceAll ra(_instance, _with);
-    ra.mutate(_within);
-  }
-
   static void instancesOf(Val* instance, Val* with);
+  static void instancesOf(std::unordered_map<Val*, Val*> replacement_map);
+  static void instancesWithin(Val* instance, Val* with, Expr* within);
+  static void instancesWithin(
+      std::unordered_map<Val*, Val*> replacement_map,
+      Expr* within);
 };
 
 } // namespace fuser

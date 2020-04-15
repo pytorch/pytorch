@@ -433,8 +433,7 @@ Launch utility
 
 The `torch.distributed` package also provides a launch utility in
 `torch.distributed.launch`. This helper utility can be used to launch
-multiple processes per node for distributed training. This utility also supports
-both python2 and python3.
+multiple processes per node for distributed training.
 
 
 .. automodule:: torch.distributed.launch

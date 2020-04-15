@@ -858,12 +858,21 @@ void initJitScriptBindings(PyObject* module) {
             didFinishEmitModule(m);
           })
       .def(
+          "_register_attribute",
+          [](Module& m,
+             const std::string& name,
+             TypePtr type,
+             py::handle value) {
+            m.register_attribute(name, type, toIValue(value, type));
+          })
+      .def(
           "_create_method_from_trace",
           [](Module& self,
              const std::string& name,
              py::function func,
              py::tuple input_tuple,
              py::function var_lookup_fn,
+             bool strict,
              bool force_outplace) {
             // prereq: Module's buffers and parameters are unique
             // this was ensured in python before calling this function
@@ -871,7 +880,12 @@ void initJitScriptBindings(PyObject* module) {
 
             std::shared_ptr<Graph> graph =
                 std::get<0>(tracer::createGraphByTracing(
-                    func, typed_inputs, var_lookup_fn, force_outplace, &self));
+                    func,
+                    typed_inputs,
+                    var_lookup_fn,
+                    strict,
+                    force_outplace,
+                    &self));
             const auto method_name = QualifiedName(*self.type()->name(), name);
             auto fn = self._ivalue()->compilation_unit()->create_function(
                 method_name, graph);
@@ -1075,10 +1089,11 @@ void initJitScriptBindings(PyObject* module) {
          py::function func,
          py::tuple input_tuple,
          py::function var_lookup_fn,
+         bool strict,
          bool force_outplace) {
         auto typed_inputs = toTraceableStack(input_tuple);
         std::shared_ptr<Graph> graph = std::get<0>(tracer::createGraphByTracing(
-            func, typed_inputs, var_lookup_fn, force_outplace));
+            func, typed_inputs, var_lookup_fn, strict, force_outplace));
         auto cu = get_python_cu();
         auto name = c10::QualifiedName(qualname);
         auto result = cu->create_function(
