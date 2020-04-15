@@ -118,6 +118,14 @@ void IRVisitor::visit(const Store* v) {
   v->mask()->accept(this);
 }
 
+void IRVisitor::visit(const AtomicAdd* v) {
+  v->buf()->accept(this);
+  for (const Expr* ind : v->indices()) {
+    ind->accept(this);
+  }
+  v->value()->accept(this);
+}
+
 void IRVisitor::visit(const Block* v) {
   for (Stmt* s : v->stmts()) {
     s->accept(this);
