@@ -49,7 +49,7 @@ from torch.testing._internal.common_nn import NNTestCase, NewModuleTest, NewCrit
     ctcloss_reference, new_module_tests
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, dtypes, \
     dtypesIfCUDA, skipCUDAIfNoCudnn, skipCUDAIfCudnnVersionLessThan, onlyCUDA, \
-    skipCUDAIfRocm, skipCUDAIf, skipCUDAIfNotRocm, largeCUDATensorTest
+    skipCUDAIfRocm, skipCUDAIf, skipCUDAIfNotRocm, largeCUDATensorTest, onlyOnCPUAndCUDA
 
 from torch.nn import MultiheadAttention
 
@@ -10256,10 +10256,20 @@ class TestNNDeviceType(NNTestCase):
                 self._test_batchnorm_grad(device)
 
 
+    # currently fails on XLA
+    @onlyOnCPUAndCUDA
     def test_hardsigmoid_grad(self, device):
         inputs = (torch.randn(4, 16, 16, device=device) - 0.5) * 10
         inputs.requires_grad = True
         self.assertTrue(gradcheck(F.hardsigmoid, (inputs,)))
+
+
+    # currently fails on XLA
+    @onlyOnCPUAndCUDA
+    def test_hardswish_grad(self, device):
+        inputs = (torch.randn(4, 16, 16, device=device) - 0.5) * 10
+        inputs.requires_grad = True
+        self.assertTrue(gradcheck(F.hardswish, (inputs,)))
 
 
     def _test_batchnorm_eval(self, device, dtype=torch.float):
