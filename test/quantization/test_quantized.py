@@ -346,7 +346,8 @@ class TestQuantizedOps(TestCase):
                 X_zero_point = 127
                 num_bins = 2 ** 8
                 X_scale = float(max_val - min_val) / num_bins
-
+            if X_scale == 0:
+                X_scale = 1e-10
 
             X = torch.from_numpy(X)
             qX = torch.quantize_per_tensor(X, scale=X_scale,
