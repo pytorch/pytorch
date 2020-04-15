@@ -75,6 +75,7 @@ std::vector<std::string> _single_input_general_call_funcs = {
     "avg_pool1d",
     "avg_pool2d",
     "avg_pool3d",
+    "_max_pool1d",
     "_max_pool2d",
     "_max_pool3d",
     "dropout",

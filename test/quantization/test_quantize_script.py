@@ -1397,9 +1397,9 @@ class TestQuantizeScriptPTSQOps(JitTestCase):
         class M(torch.nn.Module):
             def __init__(self):
                 super(M, self).__init__()
-                self.maxpool1d = torch.nn.MaxPool2d(kernel_size=3)
+                self.maxpool1d = torch.nn.MaxPool1d(kernel_size=3)
                 self.maxpool2d = torch.nn.MaxPool2d(kernel_size=3)
-                self.maxpool3d = torch.nn.MaxPool2d(kernel_size=3)
+                self.maxpool3d = torch.nn.MaxPool3d(kernel_size=3)
                 self.adaptive_avgpool1d = torch.nn.AdaptiveAvgPool1d((1))
                 self.adaptive_avgpool2d = torch.nn.AdaptiveAvgPool2d((1, 1))
                 self.adaptive_avgpool3d = torch.nn.AdaptiveAvgPool3d((1, 1, 1))
