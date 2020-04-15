@@ -1208,9 +1208,9 @@ def create_generic(top_env, declarations):
             # Having manual_kernel_registration for an abstract method doesn't make sense.
             assert not option['manual_kernel_registration']
         else:
-            top_env['type_method_declarations'].append(NATIVE_DISPATCH_DECLARATION.substitute(option))
-            top_env['type_method_definitions'].append(NATIVE_DISPATCH_DEFINITION_DEFAULT.substitute(option))
             if not option['manual_kernel_registration']:
+                top_env['type_method_declarations'].append(NATIVE_DISPATCH_DECLARATION.substitute(option))
+                top_env['type_method_definitions'].append(NATIVE_DISPATCH_DEFINITION_DEFAULT.substitute(option))
                 if option['use_c10_dispatcher'] == 'full':
                     op_registrations.append(OpRegistration(
                         operator_name=OPERATOR_NAME.substitute(option),
