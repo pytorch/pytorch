@@ -8566,12 +8566,10 @@ class TestTorchDeviceType(TestCase):
         shapes = [(3, 3), (5, 3, 3), (7, 5, 3, 3),  # square matrices
                   (7, 3), (5, 7, 3), (7, 5, 7, 3),  # fat matrices
                   (3, 7), (5, 3, 7), (7, 5, 3, 7)]  # thin matrices
-
-        import os
-        os.environ["PYTORCH_JIT_LOG_LEVEL"] = ">>profiling_graph_executor_impl:>>liveness.cpp:>>graph_executor:>>function_impl"
+        
         for dims, some, compute_uv in product(shapes, [True, False], [True, False]):
             run_test(dims, some, compute_uv)
-        del os.environ
+
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
@@ -8585,7 +8583,9 @@ class TestTorchDeviceType(TestCase):
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     def test_svd_lowrank(self, device):
+        import os
         import torch
+        os.environ["PYTORCH_JIT_LOG_LEVEL"] = ">>profiling_graph_executor_impl:>>liveness.cpp:>>graph_executor:>>function_impl"
         from torch.testing._internal.common_utils import random_lowrank_matrix, random_sparse_matrix
 
         dtype = torch.double
@@ -8652,6 +8652,7 @@ class TestTorchDeviceType(TestCase):
         jitted = torch.jit.script(torch.svd_lowrank)
         actual_rank, size, batches = 2, (17, 4), ()
         run_subtest(actual_rank, size, batches, device, jitted)
+        del os.environ
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
