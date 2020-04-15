@@ -190,8 +190,7 @@ class TestDispatch(TestCase):
             lambda m: m.def_("foo(Tensor x) -> Tensor"),
             # m.impl("test_def", [](const Tensor& x) { return x })
             lambda m: m.impl_t_t("foo"),
-            # m.impl("test_def",
-            #        torch::dispatch_autograd([](const Tensor& x) { return x }))
+            # m.impl("test_def", kAutograd, [](const Tensor& x) { return x })
             lambda m: m.impl_t_t("foo", dispatch="autograd")
         ])
         self.assertExpectedInline(r, '''\
@@ -217,7 +216,7 @@ catchall: impl_t_t :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
         r = self.commute("foo", [
             # m.def("foo", [](const Tensor & x) { return x })
             lambda m: m.def_name_t_t("foo"),
-            # m.impl("foo", torch::dispatch_autograd([](const Tensor & x) { return x }))
+            # m.impl("foo", torch::kAutograd, [](const Tensor & x) { return x })
             lambda m: m.impl_t_t("foo", "autograd")
         ])
         self.assertExpectedInline(r, '''\
@@ -243,8 +242,7 @@ alias analysis kind: FROM_SCHEMA
         r = self.commute("foo", [
             # m.impl("foo", [](const Tensor& x) { return x })
             lambda m: m.impl_t_t("foo"),
-            # m.impl("foo",
-            #        torch::dispatch_autograd([](const Tensor& x) { return x }))
+            # m.impl("foo", torch::kAutograd, [](const Tensor& x) { return x })
             lambda m: m.impl_t_t("foo", "autograd")
         ])
         self.assertExpectedInline(r, '''\
