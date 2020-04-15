@@ -221,12 +221,13 @@ graph(%x, %packed_params, %stride, %padding, %dilation, %groups, %r_scale, %r_ze
          return (%r) )";
 
   SubgraphRewriter rewriter;
-  static const std::vector<std::pair<std::string, std::string>> patterns_and_replacements = {
-      {old_quantized_conv2d, new_quantized_conv2d},
-      {old_quantized_conv2d_relu, new_quantized_conv2d_relu},
-      {old_quantized_conv3d, new_quantized_conv3d},
-      {old_quantized_conv3d_relu, new_quantized_conv3d_relu},
-  };
+  static const std::vector<std::pair<std::string, std::string>>
+      patterns_and_replacements = {
+          {old_quantized_conv2d, new_quantized_conv2d},
+          {old_quantized_conv2d_relu, new_quantized_conv2d_relu},
+          {old_quantized_conv3d, new_quantized_conv3d},
+          {old_quantized_conv3d_relu, new_quantized_conv3d_relu},
+      };
   for (const auto& item : patterns_and_replacements) {
     rewriter.RegisterRewritePattern(item.first, item.second);
   }
