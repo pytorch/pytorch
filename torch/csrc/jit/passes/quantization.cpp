@@ -71,8 +71,15 @@ std::vector<std::string> _quantizable_aten_funcs = {
 // so we propagate observed property from %input_tensor to the
 // output of the `prim::CallFunction`
 std::vector<std::string> _single_input_general_call_funcs = {
+    "adaptive_avg_pool1d",
     "adaptive_avg_pool2d",
+    "adaptive_avg_pool3d",
+    "avg_pool1d",
+    "avg_pool2d",
+    "avg_pool3d",
+    "_max_pool1d",
     "_max_pool2d",
+    "_max_pool3d",
     "dropout",
     "interpolate",
     "upsample",
@@ -85,8 +92,12 @@ std::vector<std::string> _single_input_general_call_funcs = {
 // require observation and have a single input Tensor
 // e.g. `aten::max_pool2d(%input_tensor, ...)`
 std::vector<std::string> _single_input_general_aten_funcs = {
+    "max_pool1d",
     "max_pool2d",
+    "max_pool3d",
+    "avg_pool1d",
     "avg_pool2d",
+    "avg_pool3d",
     "flatten",
     "max",
     "min",
@@ -123,8 +134,8 @@ using CallFuncArgs = std::vector<FuncArg>;
 // Special checks for ops that do not require observers for all input tensors.
 // For each operator in this list observers are inserted for the input based
 // on the index specified.
-AtenFuncArgs _aten_func_args = {};
-CallFuncArgs _call_func_args = {{"batch_norm", 1}};
+AtenFuncArgs _observe_inputs_aten_func = {};
+CallFuncArgs _observe_inputs_call_func = {{"batch_norm", 1}};
 
 void fillQConfigMap(
     const Module& module,
@@ -717,7 +728,7 @@ bool matchAtenFuncToUse(
     c10::optional<int> n) {
   Node* node = use.user;
   return node->kind() == Symbol::aten(func_name) &&
-      (n.has_value() ? (n.value() == use.offset) : true);
+      (!n.has_value() || n.value() == use.offset);
 }
 
 // Check if `use` is a CallFunction of name `func_name` and if value
@@ -729,7 +740,7 @@ bool matchCallFuncToUse(
   Node* node = use.user;
   return node->kind() == prim::CallFunction &&
       getFuncName(node->inputs()[0]) == func_name &&
-      (n.has_value() ? (n.value() == use.offset) : true);
+      (!n.has_value() || n.value() == use.offset);
 }
 
 // Check any use of `v` matches the aten function call
@@ -1016,15 +1027,15 @@ void InsertObserversHelper::preprocess(
 }
 
 bool useQuantizable(const Use& use, bool is_dynamic) {
-  for (const auto& func_arg : _aten_func_args) {
-    if (matchAtenFuncToUse(use, func_arg.func_name, c10::nullopt)) {
-      return use.offset == func_arg.arg_index;
+  for (const auto& func_input : _observe_inputs_aten_func) {
+    if (matchAtenFuncToUse(use, func_input.func_name, c10::nullopt)) {
+      return use.offset == func_input.arg_index;
     }
   }
 
-  for (const auto& func_arg : _call_func_args) {
-    if (matchCallFuncToUse(use, func_arg.func_name, c10::nullopt)) {
-      return use.offset == func_arg.arg_index;
+  for (const auto& func_input : _observe_inputs_call_func) {
+    if (matchCallFuncToUse(use, func_input.func_name, c10::nullopt)) {
+      return use.offset == func_input.arg_index;
     }
   }
   // Dynamic quantized ops that require special handling for inputs.
