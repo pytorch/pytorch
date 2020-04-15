@@ -1,3 +1,5 @@
+#include <c10/macros/Macros.h>
+
 #include <ATen/core/op_registration/op_registration.h>
 #if !defined(CAFFE2_IS_XPLAT_BUILD)
 #include <torch/csrc/jit/frontend/function_schema_parser.h>
@@ -9,11 +11,15 @@ namespace {
   // TODO: Consider representing debug info as a struct instead so you
   // don't have to allocate strings all the time
   std::string debugString(std::string debug, const char* file, uint32_t line) {
+#ifdef STRIP_ERROR_MESSAGES
+    return "";
+#else
     if (debug.empty()) {
       return c10::str("registered at ", file, ":", line);
     } else {
       return debug;
     }
+#endif
   }
 
   std::ostream& operator<<(std::ostream& os, Library::Kind kind) {
