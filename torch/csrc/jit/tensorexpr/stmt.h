@@ -58,7 +58,7 @@ Stmt* StmtNode<Op>::accept_mutator(IRMutator* mutator) {
 }
 
 // Concrete Stmt classes
-class LetStmt : public StmtNode<LetStmt> {
+class TORCH_API LetStmt : public StmtNode<LetStmt> {
  public:
   const Var* var() const {
     return var_;
@@ -92,7 +92,7 @@ class LetStmt : public StmtNode<LetStmt> {
   Stmt* body_;
 };
 
-class Block : public StmtNode<Block> {
+class TORCH_API Block : public StmtNode<Block> {
  public:
   static Block* make(const std::vector<Stmt*>& stmts) {
     std::vector<Stmt*> valid_stmts;
@@ -241,7 +241,7 @@ class TORCH_API Store : public StmtNode<Store> {
 // Allocate a buffer of given shapes and dtypes and bind it with the given
 // buffer var. The life span is at most through the current program, until it is
 // explicitly freed. An unfreed memory is likely considered an error.
-class Allocate : public StmtNode<Allocate> {
+class TORCH_API Allocate : public StmtNode<Allocate> {
  public:
   static Allocate* make(
       const VarHandle& buffer_var,
@@ -280,7 +280,7 @@ class Allocate : public StmtNode<Allocate> {
 };
 
 // Free the specific buffer. It is an error.
-class Free : public StmtNode<Free> {
+class TORCH_API Free : public StmtNode<Free> {
  public:
   static Free* make(const VarHandle& buffer_var) {
     return new Free(buffer_var.node());
@@ -296,7 +296,7 @@ class Free : public StmtNode<Free> {
   const Var* buffer_var_;
 };
 
-class Cond : public StmtNode<Cond> {
+class TORCH_API Cond : public StmtNode<Cond> {
  public:
   static Cond* make(
       const ExprHandle& condition,
@@ -343,7 +343,7 @@ class Cond : public StmtNode<Cond> {
   Block* false_stmt_ = nullptr;
 };
 
-class LoopOptions {
+class TORCH_API LoopOptions {
  public:
   // GPU Block Index
   bool is_gpu_block_index() const {
@@ -436,7 +436,7 @@ class LoopOptions {
   int gpu_thread_index_ = -1;
 };
 
-class For : public StmtNode<For> {
+class TORCH_API For : public StmtNode<For> {
  public:
   const Var* var() const {
     return var_;
