@@ -696,7 +696,7 @@ bool matchCallFuncToUse(
   Node* node = use.user;
   return node->kind() == prim::CallFunction &&
       getFuncName(node->inputs()[0]) == func_name &&
-      (n.has_value() ? (n.value() == use.offset) : false);
+      (n.has_value() ? (n.value() == use.offset) : true);
 }
 
 struct FuncArg {
@@ -990,14 +990,10 @@ void InsertObserversHelper::preprocess(
 }
 
 bool useQuantizable(const Use& use, bool is_dynamic) {
-  bool result = nodeQuantizable(use.user);
-  if (!result) {
-    return false;
-  }
   // Special checks for ops that do not require observers for all input tensors.
   // For each operator in this list observers are inserted for the input based
   // on the index specified.
-  const AtenFuncArgs& aten_func_args = AtenFuncArgs({{"lstm", 2}});
+  const AtenFuncArgs& aten_func_args = AtenFuncArgs({});
   const CallFuncArgs& call_func_args = CallFuncArgs({{"batch_norm", 1}});
   for (const auto& func_arg : aten_func_args) {
     if (matchAtenFuncToUse(use, func_arg.func_name, c10::nullopt)) {
@@ -1010,8 +1006,14 @@ bool useQuantizable(const Use& use, bool is_dynamic) {
       return use.offset == func_arg.arg_index;
     }
   }
+  // Dynamic quantized ops that require special handling for inputs.
+  if (is_dynamic) {
+    if (matchAtenFuncToUse(use, "lstm", c10::nullopt)) {
+      return use.offset == 2;
+    }
+  }
 
-  return result;
+  return nodeQuantizable(use.user);
 }
 
 // TODO: remove this as a class method
