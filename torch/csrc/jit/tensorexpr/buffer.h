@@ -11,11 +11,11 @@ class Buffer {
   Buffer(const BufHandle& data, const Dtype& dtype)
       : data_(data.node()), dtype_(dtype) {
     if (data.dtype() != kHandle) {
-      throw malformed_input();
+      throw malformed_input("Buffer dtype must be Handle");
     }
 
     std::vector<ExprHandle> stride_handles(ndim());
-    for (int i = ndim() - 1; i >= 0; i--) {
+    for (int i = (int)ndim() - 1; i >= 0; i--) {
       if (i == ndim() - 1) {
         stride_handles[i] = 1;
       } else {
@@ -51,6 +51,7 @@ class Buffer {
   ExprHandle operator()(Args... args) const {
     return LoadValue(std::forward<Args>(args)...);
   }
+
   ExprHandle LoadValue(
       const ExprHandle& x,
       const ExprHandle& y,

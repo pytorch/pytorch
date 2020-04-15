@@ -204,6 +204,7 @@ bool TracingState::hasValue(const IValue& var) const {
 }
 
 Value* TracingState::getOutput(const IValue& iv, size_t i) {
+  bool tracing_mode_strict = getTracingState()->strict;
   if (iv.isTensor()) {
     at::Tensor var = iv.toTensor();
     if (!var.defined()) {
@@ -224,6 +225,10 @@ Value* TracingState::getOutput(const IValue& iv, size_t i) {
     }
     return it->second;
   } else if (iv.isTensorList()) {
+    if (tracing_mode_strict) {
+      tracer::warn(
+          "Encountering a list at the output of the tracer", STRICT_TRACER_MSG);
+    }
     return graph
         ->insertNode(graph->createList(
             TensorType::get(),
@@ -272,7 +277,7 @@ static IValue addInput(
     for (size_t i = 0; i < num_elems; ++i) {
       elems[i] = addInput(state, elems.at(i), elem_types[i], elem_values[i]);
     }
-    return std::move(tuple);
+    return tuple;
   } else if (auto dict_type = type->cast<DictType>()) {
     auto dict = input.toGenericDict();
 
@@ -294,7 +299,7 @@ static IValue addInput(
               state, pair.second, dict_type->getValueType(), elem_values[i++]));
     }
 
-    return std::move(dict);
+    return dict;
   } else if (auto list_type = type->cast<ListType>()) {
     size_t num_elems = input.isList() ? input.toListRef().size()
                                       : input.toTensorVector().size();
@@ -365,6 +370,7 @@ std::pair<std::shared_ptr<TracingState>, Stack> trace(
     Stack inputs,
     const std::function<Stack(Stack)>& traced_fn,
     std::function<std::string(const Variable&)> var_name_lookup_fn,
+    bool strict,
     bool force_outplace,
     Module* self) {
   try {
@@ -391,6 +397,7 @@ std::pair<std::shared_ptr<TracingState>, Stack> trace(
     auto graph = state->graph;
 
     getTracingState()->lookup_var_name_fn = std::move(var_name_lookup_fn);
+    getTracingState()->strict = strict;
     getTracingState()->force_outplace = force_outplace;
 
     // Invoke the traced function
@@ -459,6 +466,34 @@ void TracingState::setValue(const IValue& v, Value* value) {
     env_stack.back()[capsule] = value;
   } else if (v.isFuture() || v.isObject()) {
     env_stack.back()[v] = value;
+  } else if (v.isGenericDict()) {
+    auto dict = v.toGenericDict();
+    TypePtr key_type = dict.keyType();
+    TypePtr value_type = dict.valueType();
+    auto dict_size = dict.size();
+    const auto order = iterationOrder(dict);
+    auto handle_unpack = [&](Symbol opname) {
+      auto unpack_to_list = graph->insert(opname, {value});
+      auto list_unpack = graph->createListUnpack(unpack_to_list, dict_size);
+      auto unpack_node = graph->insertNode(list_unpack);
+      auto elem_values = unpack_node->outputs();
+      AT_ASSERT(order.size() == elem_values.size());
+      size_t i = 0;
+      for (const auto& pair : order) {
+        if (opname == aten::keys) {
+          setValue(pair.first, elem_values[i]);
+        } else {
+          setValue(pair.second, elem_values[i]);
+        }
+        ++i;
+      }
+    };
+    if (key_type->cast<TensorType>()) {
+      handle_unpack(aten::keys);
+    }
+    if (value_type->cast<TensorType>()) {
+      handle_unpack(aten::values);
+    }
   } else {
     std::ostringstream os;
     os << "Tracer cannot set value trace for type " << v.tagKind() << ". "
@@ -543,9 +578,12 @@ void addInputs(Node* n, const char* name, const std::string& value) {
 void addInputs(Node* n, const char* name, const at::Tensor& value) {
   n->addInput(getValueTrace(value));
 }
-void addInputs(Node* n, const char* name, const at::Generator& value) {
-  if (value.defined()) {
-    detail::badArgType(value);
+void addInputs(
+    Node* n,
+    const char* name,
+    const c10::optional<at::Generator>& value) {
+  if (value.has_value() && value->defined()) {
+    detail::badArgType(*value);
   }
   Graph* g = n->owningGraph();
   Value* undef_gen = g->insertNode(g->createNone())->output();
@@ -701,7 +739,7 @@ void addOutput(Node* node, const at::Tensor& output) {
 void setOutput(Value* value, const at::Tensor& output) {
   if (output.defined()) {
     value->inferTypeFrom(output);
-    setValueTrace(autograd::as_variable_ref(output), value);
+    setValueTrace(output, value);
   }
 }
 
@@ -857,7 +895,12 @@ const char* WARN_RESIZE =
     " can't be represented in the JIT at the moment, so we won't connect any uses of "
     "this value with its current trace. If you happen to use it again, it will show "
     "up as a constant in the graph.";
-
+const char* STRICT_TRACER_MSG =
+    " might cause the trace to be incorrect, this is only valid if the container "
+    "structure does not change based on the module's inputs. Consider using a constant "
+    "container instead (e.g. for `list`, use a `tuple` instead. for `dict`, use a "
+    "`NamedTuple` instead). If you absolutely need this and know the side effects, pass "
+    "strict=False to trace() to allow this behavior.";
 // XXX: _kind can be a nullptr
 void _do_warn(const char* _reason, const char* _kind) {
   std::string reason{_reason};
