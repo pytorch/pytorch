@@ -129,8 +129,8 @@ recover the accumulated unscaled gradients :meth:`step<step>` must apply.
 
 Therefore, if you want to :meth:`unscale_<unscale_>` gradients (e.g., to allow clipping unscaled gradients),
 call :meth:`unscale_<unscale_>` just before :meth:`step<step>`, after all (scaled) gradients for the upcoming
-:meth:`step<step>` have been accumulated.  Also, only call :meth:`update<update>` at the end of iterations where
-you called :meth:`step<step>`::
+:meth:`step<step>` have been accumulated.  Also, only call :meth:`update<update>` at the end of iterations
+over which the gradients applied in step were accumulated::
 
     scaler = GradScaler()
 
