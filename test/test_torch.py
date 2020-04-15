@@ -8652,7 +8652,7 @@ class TestTorchDeviceType(TestCase):
         jitted = torch.jit.script(torch.svd_lowrank)
         actual_rank, size, batches = 2, (17, 4), ()
         run_subtest(actual_rank, size, batches, device, jitted)
-        del os.environ
+        del os.environ["PYTORCH_JIT_LOG_LEVEL"]
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
