@@ -423,7 +423,8 @@ void testCudaOneBlockMultiThreadGlobalReduce1() {
   //  for t in 0..1024: // thread-idx
   //    if t < 1:
   //      b[0] = 0
-  ExprHandle cond_t_lt_1 = CompareSelect::make(t, 1, CompareSelectOperation::kLT);
+  ExprHandle cond_t_lt_1 =
+      CompareSelect::make(t, 1, CompareSelectOperation::kLT);
   Cond* masked_init_b = Cond::make(cond_t_lt_1, init_store, nullptr);
   LoopOptions thread_idx_options;
   thread_idx_options.set_gpu_thread_index(0);
@@ -458,8 +459,7 @@ void testCudaOneBlockMultiThreadGlobalReduce1() {
 
   float* a_dev = nullptr;
   cudaMalloc(&a_dev, N * sizeof(float));
-  cudaMemcpy(
-      a_dev, a_v.data(), N * sizeof(float), cudaMemcpyHostToDevice);
+  cudaMemcpy(a_dev, a_v.data(), N * sizeof(float), cudaMemcpyHostToDevice);
   float* b_dev = nullptr;
   cudaMalloc(&b_dev, 1 * sizeof(float));
   cudaDeviceSynchronize();
@@ -467,8 +467,7 @@ void testCudaOneBlockMultiThreadGlobalReduce1() {
   cuda_cg(a_dev, b_dev);
 
   cudaDeviceSynchronize();
-  cudaMemcpy(
-      b_v.data(), b_dev, 1 * sizeof(float), cudaMemcpyDeviceToHost);
+  cudaMemcpy(b_v.data(), b_dev, 1 * sizeof(float), cudaMemcpyDeviceToHost);
   cudaDeviceSynchronize();
 
   ExpectAllNear(b_v, b_ref, 1e-5);
