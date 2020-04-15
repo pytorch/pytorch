@@ -1,8 +1,3 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
-
 import io
 import numpy as np
 import os
@@ -284,10 +279,7 @@ class TestTensorBoardSummaryWriter(BaseTestCase):
 
     def test_pathlib(self):
         import sys
-        if sys.version_info.major == 2:
-            import pathlib2 as pathlib
-        else:
-            import pathlib
+        import pathlib
         p = pathlib.Path('./pathlibtest' + str(uuid.uuid4()))
         with SummaryWriter(p) as writer:
             writer.add_scalar('test', 1)

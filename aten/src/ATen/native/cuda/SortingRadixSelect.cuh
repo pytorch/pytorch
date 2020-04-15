@@ -125,7 +125,7 @@ struct TopKTypeConfig<at::Half> {
   static inline __device__ RadixType convert(at::Half v) {
 #if defined(__CUDA_ARCH__) || defined(__HIP_PLATFORM_HCC__)
     RadixType x = __half_as_ushort(v);
-    RadixType mask = -((x >> 15)) | 0x8000;
+    RadixType mask = (x & 0x00008000) ? 0x0000ffff : 0x00008000;
     return (v == v) ? (x ^ mask) : 0xffff;
 #else
     assert(false);
@@ -135,7 +135,7 @@ struct TopKTypeConfig<at::Half> {
 
   static inline __device__ at::Half deconvert(RadixType v) {
 #if defined(__CUDA_ARCH__) || defined(__HIP_PLATFORM_HCC__)
-    RadixType mask = ((v >> 15) - 1) | 0x8000;
+    RadixType mask = (v & 0x00008000) ? 0x00008000 : 0x0000ffff;
     return __ushort_as_half(v ^ mask);
 #else
     assert(false);
@@ -150,12 +150,12 @@ struct TopKTypeConfig<at::BFloat16> {
 
   static inline __device__ RadixType convert(at::BFloat16 v) {
     RadixType x = v.x;
-    RadixType mask = -((x >> 15)) | 0x8000;
+    RadixType mask = (x & 0x00008000) ? 0x0000ffff : 0x00008000;
     return (v == v) ? (x ^ mask) : 0xffff;
   }
 
   static inline __device__ at::BFloat16 deconvert(RadixType v) {
-    RadixType mask = ((v >> 15) - 1) | 0x8000;
+    RadixType mask = (v & 0x00008000) ? 0x00008000 : 0x0000ffff;
     at::BFloat16 r;
     r.x = (v ^ mask);
     return r;

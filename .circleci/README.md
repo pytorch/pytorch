@@ -466,7 +466,7 @@ But if you want to try, then I’d recommend
 # Always install miniconda 3, even if building for Python <3
 new_conda="~/my_new_conda"
 conda_sh="$new_conda/install_miniconda.sh"
-curl -o "$conda_sh" https://repo.continuum.io/miniconda/Miniconda3-latest-MacOSX-x86_64.sh
+curl -o "$conda_sh" https://repo.anaconda.com/miniconda/Miniconda3-latest-MacOSX-x86_64.sh
 chmod +x "$conda_sh"
 "$conda_sh" -b -p "$MINICONDA_ROOT"
 rm -f "$conda_sh"

@@ -1,4 +1,3 @@
-from __future__ import absolute_import, division, print_function, unicode_literals
 import torch.nn as nn
 from torch.nn.intrinsic import ConvReLU2d
 

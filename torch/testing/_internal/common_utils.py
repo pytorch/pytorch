@@ -30,10 +30,7 @@ from copy import deepcopy
 from numbers import Number
 import tempfile
 import json
-if sys.version_info[0] == 2:
-    from urllib2 import urlopen  # noqa f811
-else:
-    from urllib.request import urlopen
+from urllib.request import urlopen
 
 import __main__
 import errno
@@ -168,7 +165,6 @@ IS_PYTORCH_CI = bool(os.environ.get('IS_PYTORCH_CI'))
 IN_CIRCLECI = bool(os.environ.get('IN_CIRCLECI'))
 TEST_REPORT_SOURCE_OVERRIDE = os.environ.get('TEST_REPORT_SOURCE_OVERRIDE')
 
-PY3 = sys.version_info > (3, 0)
 PY34 = sys.version_info >= (3, 4)
 
 def run_tests(argv=UNITTEST_ARGS):
@@ -206,11 +202,7 @@ def run_tests(argv=UNITTEST_ARGS):
                 test_source = 'python-unittest'
 
             test_report_path = os.path.join('test-reports', test_source)
-            if PY3:
-                os.makedirs(test_report_path, exist_ok=True)
-            else:
-                if not os.path.exists(test_report_path):
-                    os.makedirs(test_report_path)
+            os.makedirs(test_report_path, exist_ok=True)
             verbose = '--verbose' in argv or '-v' in argv
             if verbose:
                 print('Test results will be stored in {}'.format(test_report_path))
@@ -248,14 +240,7 @@ def _check_module_exists(name):
     our tests, e.g., setting multiprocessing start method when imported
     (see librosa/#747, torchvision/#544).
     """
-    if not PY3:  # Python 2
-        import imp
-        try:
-            imp.find_module(name)
-            return True
-        except ImportError:
-            return False
-    elif not PY34:  # Python [3, 3.4)
+    if not PY34:  # Python [3, 3.4)
         import importlib
         loader = importlib.find_loader(name)
         return loader is not None
@@ -270,16 +255,12 @@ TEST_SCIPY = _check_module_exists('scipy')
 TEST_MKL = torch.backends.mkl.is_available()
 TEST_NUMBA = _check_module_exists('numba')
 
-# Skip the test until issue #28313 gets fixed on Py2.
-TEST_DILL = _check_module_exists('dill') and PY3
+TEST_DILL = _check_module_exists('dill')
 
-# On Py2, importing librosa 0.6.1 triggers a TypeError (if using newest joblib)
-# see librosa/librosa#729.
-# TODO: allow Py2 when librosa 0.6.2 releases
-TEST_LIBROSA = _check_module_exists('librosa') and PY3
+TEST_LIBROSA = _check_module_exists('librosa')
 
 # Python 2.7 doesn't have spawn
-NO_MULTIPROCESSING_SPAWN = os.environ.get('NO_MULTIPROCESSING_SPAWN', '0') == '1' or sys.version_info[0] == 2
+NO_MULTIPROCESSING_SPAWN = os.environ.get('NO_MULTIPROCESSING_SPAWN', '0') == '1'
 TEST_WITH_ASAN = os.getenv('PYTORCH_TEST_WITH_ASAN', '0') == '1'
 TEST_WITH_TSAN = os.getenv('PYTORCH_TEST_WITH_TSAN', '0') == '1'
 TEST_WITH_UBSAN = os.getenv('PYTORCH_TEST_WITH_UBSAN', '0') == '1'
@@ -296,16 +277,23 @@ TEST_SKIP_FAST = os.getenv('PYTORCH_TEST_SKIP_FAST', '0') == '1'
 if TEST_NUMPY:
     import numpy
 
-def numpy_dtype(dtype):
-    assert TEST_NUMPY
-
-    torch_to_numpy_dtype = {
-        torch.half   : numpy.float16,
-        torch.float  : numpy.float32,
-        torch.double : numpy.float64
+    # Dict of NumPy dtype -> torch dtype (when the correspondence exists)
+    numpy_to_torch_dtype_dict = {
+        numpy.bool       : torch.bool,
+        numpy.uint8      : torch.uint8,
+        numpy.int8       : torch.int8,
+        numpy.int16      : torch.int16,
+        numpy.int32      : torch.int32,
+        numpy.int64      : torch.int64,
+        numpy.float16    : torch.float16,
+        numpy.float32    : torch.float32,
+        numpy.float64    : torch.float64,
+        numpy.complex64  : torch.complex64,
+        numpy.complex128 : torch.complex128
     }
 
-    return torch_to_numpy_dtype[dtype]
+    # Dict of torch dtype -> NumPy dtype
+    torch_to_numpy_dtype_dict = {value : key for (key, value) in numpy_to_torch_dtype_dict.items()}
 
 ALL_TENSORTYPES = [torch.float,
                    torch.double,
@@ -457,10 +445,7 @@ def to_gpu(obj, type_map=None):
 
 
 def get_function_arglist(func):
-    if sys.version_info > (3,):
-        return inspect.getfullargspec(func).args
-    else:
-        return inspect.getargspec(func).args
+    return inspect.getfullargspec(func).args
 
 
 def set_rng_seed(seed):
@@ -710,13 +695,6 @@ class TestCase(expecttest.TestCase):
         check_disabled(str(self))
 
         set_rng_seed(SEED)
-
-    def assertTensorsSlowEqual(self, x, y, prec=None, message=''):
-        max_err = 0
-        self.assertEqual(x.size(), y.size())
-        for index in iter_indices(x):
-            max_err = max(max_err, abs(x[index] - y[index]))
-        self.assertLessEqual(max_err, prec, message)
 
     def genSparseTensor(self, size, sparse_dim, nnz, is_uncoalesced, device='cpu'):
         # Assert not given impossible combination, where the sparse dims have
@@ -995,31 +973,10 @@ class TestCase(expecttest.TestCase):
         r"""
         Test if :attr:`callable` does not raise a warning.
         """
-        with self._reset_warning_registry(), warnings.catch_warnings(record=True) as ws:
+        with warnings.catch_warnings(record=True) as ws:
             warnings.simplefilter("always")  # allow any warning to be raised
             callable()
             self.assertTrue(len(ws) == 0, msg)
-
-    def assertWarns(self, callable, msg=''):
-        r"""
-        Test if :attr:`callable` raises a warning.
-        """
-        with self._reset_warning_registry(), warnings.catch_warnings(record=True) as ws:
-            warnings.simplefilter("always")  # allow any warning to be raised
-            callable()
-            self.assertTrue(len(ws) > 0, msg)
-
-    def assertWarnsRegex(self, callable, regex, msg=''):
-        r"""
-        Test if :attr:`callable` raises any warning with message that contains
-        the regex pattern :attr:`regex`.
-        """
-        with self._reset_warning_registry(), warnings.catch_warnings(record=True) as ws:
-            warnings.simplefilter("always")  # allow any warning to be raised
-            callable()
-            self.assertTrue(len(ws) > 0, msg)
-            found = any(re.search(regex, str(w.message)) is not None for w in ws)
-            self.assertTrue(found, msg)
 
     @contextmanager
     def maybeWarnsRegex(self, category, regex=''):
@@ -1028,7 +985,7 @@ class TestCase(expecttest.TestCase):
         This filters expected warnings from the test log and fails the test if
         any unexpected warnings are caught.
         """
-        with self._reset_warning_registry(), warnings.catch_warnings(record=True) as ws:
+        with warnings.catch_warnings(record=True) as ws:
             warnings.simplefilter("always")  # allow any warning to be raised
             # Ignore expected warnings
             warnings.filterwarnings("ignore", message=regex, category=category)
@@ -1043,46 +1000,6 @@ class TestCase(expecttest.TestCase):
                         msg += '\n'
                     self.fail(msg)
 
-    @contextmanager
-    def _reset_warning_registry(self):
-        r"""
-        warnings.catch_warnings() in Python 2 misses already registered
-        warnings. We need to manually clear the existing warning registries to
-        ensure catching warnings in a scope.
-        """
-        # Python 3 has no problem.
-        if sys.version_info >= (3,):
-            yield
-            return
-
-        # Backup and clear all existing warning registries.
-        backup = {}
-        for name, mod in list(sys.modules.items()):
-            try:
-                reg = mod.__warningregistry__
-            except AttributeError:
-                continue
-            else:
-                backup[name] = reg.copy()
-                reg.clear()
-
-        yield
-
-        # Restore backed up warning registries.
-        for name, reg_orig in backup.items():
-            try:
-                mod = sys.modules[name]
-            except KeyError:
-                continue
-
-            try:
-                reg = mod.__warningregistry__
-            except AttributeError:
-                mod.__warningregistry__ = reg_orig
-            else:
-                reg.clear()
-                reg.update(reg_orig)
-
     def assertExpected(self, s, subname=None):
         r"""
         Test that a string matches the recorded contents of a file
@@ -1094,7 +1011,7 @@ class TestCase(expecttest.TestCase):
         If you call this multiple times in a single function, you must
         give a unique subname each time.
         """
-        if not (isinstance(s, str) or (sys.version_info[0] == 2 and isinstance(s, unicode))):
+        if not isinstance(s, str):
             raise TypeError("assertExpected is strings only")
 
         def remove_prefix(text, prefix):
@@ -1185,14 +1102,8 @@ class TestCase(expecttest.TestCase):
 
 
 def download_file(url, binary=True):
-    if sys.version_info < (3,):
-        from urlparse import urlsplit
-        import urllib2
-        request = urllib2
-        error = urllib2
-    else:
-        from urllib.parse import urlsplit
-        from urllib import request, error
+    from urllib.parse import urlsplit
+    from urllib import request, error
 
     filename = os.path.basename(urlsplit(url)[2])
     data_dir = get_writable_path(os.path.join(os.path.dirname(__file__), 'data'))

@@ -1,5 +1,3 @@
-from __future__ import absolute_import, division, print_function, unicode_literals
-
 import threading
 import unittest
 
@@ -94,9 +92,6 @@ def rpc_async_method(method, obj_rref, *args, **kwargs):
     )
 
 
-@unittest.skipIf(
-    not torch._six.PY3, "Pytorch distributed optim does not support python2"
-)
 class DistOptimizerTest(RpcAgentTestFixture):
     @dist_init()
     def test_dist_optim_exception(self):

@@ -161,7 +161,10 @@
 #      enable TBB support
 #
 
-from __future__ import print_function
+import sys
+if sys.version_info < (3,):
+    raise Exception("Python 2 has reached end-of-life and is no longer supported by PyTorch.")
+
 from setuptools import setup, Extension, distutils, find_packages
 from collections import defaultdict
 from distutils import core
@@ -174,7 +177,6 @@ import distutils.sysconfig
 import filecmp
 import subprocess
 import shutil
-import sys
 import os
 import json
 import glob
@@ -184,11 +186,6 @@ from tools.build_pytorch_libs import build_caffe2
 from tools.setup_helpers.env import (IS_WINDOWS, IS_DARWIN, IS_LINUX,
                                      check_env_flag, build_type)
 from tools.setup_helpers.cmake import CMake
-
-try:
-    FileNotFoundError
-except NameError:
-    FileNotFoundError = IOError  # Python 2.7 does not have FileNotFoundError
 
 ################################################################################
 # Parameters parsed from environment
@@ -219,7 +216,7 @@ for i, arg in enumerate(sys.argv):
         break
     if arg == '-q' or arg == '--quiet':
         VERBOSE_SCRIPT = False
-    if arg == 'clean':
+    if arg == 'clean' or arg == 'egg_info':
         RUN_BUILD_DEPS = False
     filtered_args.append(arg)
 sys.argv = filtered_args
@@ -793,6 +790,7 @@ if __name__ == '__main__':
                 'include/c10/macros/*.h',
                 'include/c10/core/*.h',
                 'include/ATen/core/boxing/*.h',
+                'include/ATen/core/boxing/impl/*.h',
                 'include/ATen/core/dispatch/*.h',
                 'include/ATen/core/op_registration/*.h',
                 'include/c10/core/impl/*.h',

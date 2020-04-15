@@ -5,11 +5,7 @@ import random
 import string
 import unittest
 import io
-try:
-    import unittest.mock as mock
-except ImportError:
-    # isn't available in py2
-    pass
+import unittest.mock as mock
 import itertools
 import warnings
 import pickle
@@ -40,7 +36,7 @@ from torch.autograd.gradcheck import gradgradcheck
 from torch.nn import Parameter
 from torch.nn.parallel._functions import Broadcast
 from torch.testing._internal.common_utils import freeze_rng_state, run_tests, TestCase, skipIfNoLapack, skipIfRocm, \
-    TEST_NUMPY, TEST_SCIPY, TEST_WITH_ROCM, download_file, PY3, \
+    TEST_NUMPY, TEST_SCIPY, TEST_WITH_ROCM, download_file, \
     get_function_arglist, load_tests, repeat_test_for_types, ALL_TENSORTYPES, \
     ALL_TENSORTYPES2, TemporaryFileName, TEST_WITH_UBSAN, IS_PPC
 from torch.testing._internal.common_cuda import TEST_CUDA, TEST_MULTIGPU, TEST_CUDNN, TEST_CUDNN_VERSION
@@ -350,15 +346,6 @@ class TestNN(NNTestCase):
 
         return l, n, s
 
-    @contextlib.contextmanager
-    def _compatible_subtest(self, **kwargs):
-        # Added for subtest compatibility with Python 2
-        if PY3:
-            with self.subTest(**kwargs):
-                yield
-        else:
-            yield
-
     def test_requires_grad_(self):
         m = self._create_basic_net()[-1]
         assert len(list(m.buffers())) > 0, 'invalid test'
@@ -394,10 +381,7 @@ class TestNN(NNTestCase):
         path = download_file('https://download.pytorch.org/test_data/legacy_conv2d.pt')
         with warnings.catch_warnings():
             warnings.simplefilter('ignore', SourceChangeWarning)
-            if sys.version_info[0] == 2:
-                m = torch.load(path)
-            else:
-                m = torch.load(path, encoding='utf-8')
+            m = torch.load(path, encoding='utf-8')
         input = torch.randn((1, 1, 1, 1), dtype=torch.float)
         self.assertEqual(m(input).size(), (1, 1, 1, 1))
 
@@ -1791,7 +1775,7 @@ class TestNN(NNTestCase):
 
         for m in modules:
             for name in names:
-                with self._compatible_subtest(m=m, name=name):
+                with self.subTest(m=m, name=name):
                     original_tensor = getattr(m, name)
 
                     prune.random_unstructured(m, name=name, amount=0.1)
@@ -1823,7 +1807,7 @@ class TestNN(NNTestCase):
 
         for m in modules:
             for name in names:
-                with self._compatible_subtest(m=m, name=name):
+                with self.subTest(m=m, name=name):
 
                     # tensor prior to pruning
                     original_tensor = getattr(m, name)
@@ -1844,7 +1828,7 @@ class TestNN(NNTestCase):
 
         for m in modules:
             for name in names:
-                with self._compatible_subtest(m=m, name=name):
+                with self.subTest(m=m, name=name):
                     # tensor prior to pruning
                     original_tensor = getattr(m, name)
                     prune.random_unstructured(m, name=name, amount=0.1)
@@ -1891,7 +1875,6 @@ class TestNN(NNTestCase):
         y2 = m(input_)
         self.assertEqual(y1, y2)
 
-    @unittest.skipIf(not PY3, "mock is not available in Python 2")
     def test_random_pruning_0perc(self):
         r"""Test that a mask of 1s does not change forward or backward.
         """
@@ -1930,7 +1913,6 @@ class TestNN(NNTestCase):
         y2 = m(input_)
         self.assertEqual(y1, y2)
 
-    @unittest.skipIf(not PY3, "mock is not available in Python 2")
     def test_random_pruning(self):
         input_ = torch.ones(1, 5)
         m = nn.Linear(5, 2)
@@ -1963,7 +1945,6 @@ class TestNN(NNTestCase):
         self.assertEqual(old_weight_orig[1, 0], m.weight_orig[1, 0])
         self.assertEqual(old_weight_orig[0, 3], m.weight_orig[0, 3])
 
-    @unittest.skipIf(not PY3, "mock is not available in Python 2")
     def test_random_pruning_forward(self):
         r"""check forward with mask (by hand).
         """
@@ -1985,7 +1966,6 @@ class TestNN(NNTestCase):
         self.assertEqual(yhat[0, 0], m.weight_orig[0, 3] + m.bias[0])
         self.assertEqual(yhat[0, 1], m.weight_orig[1, 0] + m.bias[1])
 
-    @unittest.skipIf(not PY3, "mock is not available in Python 2")
     def test_remove_pruning_forward(self):
         r"""Remove pruning and check forward is unchanged from previous
         pruned state.
@@ -2033,7 +2013,7 @@ class TestNN(NNTestCase):
 
         for m in modules:
             for name in names:
-                with self._compatible_subtest(m=m, name=name):
+                with self.subTest(m=m, name=name):
                     prune.random_unstructured(m, name=name, amount=0.1)
                     m_new = pickle.loads(pickle.dumps(m))
                     self.assertIsInstance(m_new, type(m))
@@ -2237,7 +2217,7 @@ class TestNN(NNTestCase):
 
         for m in modules:
             for name in names:
-                with self._compatible_subtest(m=m, name=name):
+                with self.subTest(m=m, name=name):
                     # first prune
                     prune.random_unstructured(m, name, amount=0.5)
                     self.assertIn(name + "_orig", dict(m.named_parameters()))
@@ -2263,7 +2243,7 @@ class TestNN(NNTestCase):
 
         for m in modules:
             for name in names:
-                with self._compatible_subtest(m=m, name=name):
+                with self.subTest(m=m, name=name):
                     # check that the module isn't pruned
                     self.assertFalse(prune.is_pruned(m))
                     # since it isn't pruned, pruning can't be removed from it
@@ -2328,7 +2308,6 @@ class TestNN(NNTestCase):
 
         self.assertEqual(computed_mask, expected_mask)
 
-    @unittest.skipIf(not PY3, "mock is not available in Python 2")
     def test_pruning_rollback(self):
         r"""Test that if something fails when the we try to compute the mask,
         then the model isn't left in some intermediate half-pruned state.
@@ -2340,7 +2319,7 @@ class TestNN(NNTestCase):
 
         for m in modules:
             for name in names:
-                with self._compatible_subtest(m=m, name=name):
+                with self.subTest(m=m, name=name):
 
                     with mock.patch(
                         "torch.nn.utils.prune.L1Unstructured.compute_mask"
@@ -3572,7 +3551,6 @@ class TestNN(NNTestCase):
         self.assertEqual(bn.num_batches_tracked.dtype, torch.long)
         self.assertEqual(bn.num_batches_tracked.item(), 0)
 
-    @unittest.skipIf(not PY3, 'Python 2.7 generates cyclic trash')
     def test_load_state_dict_ref_cycle(self):
         # load_state_dict shouldn't cause a reference cycle involving Tensors
         import gc
@@ -7923,6 +7901,42 @@ class TestNN(NNTestCase):
         self.assertEqual(children[0].__class__, torch.nn.SyncBatchNorm)
         self.assertEqual(children[1].__class__, torch.nn.InstanceNorm1d)
 
+    def test_functional_grad_conv(self):
+        # Conv 1D
+        input = torch.randn(1, 1, 5, requires_grad=True)
+        weight = torch.randn(1, 1, 3, requires_grad=True)
+        output = F.conv1d(input, weight, dilation=2)
+        grad_output = torch.randn(output.shape)
+
+        grad_input_autograd = torch.autograd.grad(output, input, grad_output)[0]
+        grad_input_functional = torch.nn.grad.conv1d_input(input.shape, weight, grad_output, dilation=2)
+        self.assertEqual(grad_input_functional, grad_input_autograd)
+
+        # Conv 2D
+        input = torch.randn(1, 1, 5, 5, requires_grad=True)
+        weight = torch.randn(1, 1, 3, 3, requires_grad=True)
+        output = F.conv2d(input, weight, dilation=2)
+        grad_output = torch.randn(output.shape)
+
+        grad_input_autograd = torch.autograd.grad(output, input, grad_output)[0]
+        grad_input_functional = torch.nn.grad.conv2d_input(input.shape, weight, grad_output, dilation=2)
+        self.assertEqual(grad_input_functional, grad_input_autograd)
+
+        # Conv 3D
+        input = torch.randn(1, 1, 5, 5, 5, requires_grad=True)
+        weight = torch.randn(1, 1, 3, 3, 3, requires_grad=True)
+        output = F.conv3d(input, weight, dilation=2)
+        grad_output = torch.randn(output.shape)
+
+        grad_input_autograd = torch.autograd.grad(output, input, grad_output)[0]
+        grad_input_functional = torch.nn.grad.conv3d_input(input.shape, weight, grad_output, dilation=2)
+        self.assertEqual(grad_input_functional, grad_input_autograd)
+
+        # Warning for _grad_input_padding
+        with warnings.catch_warnings(record=True) as w:
+            torch.nn.grad._grad_input_padding(torch.rand(1, 2, 3), [1, 2, 5], (1,), (0,), (3,))
+        self.assertEqual(len(w), 1)
+
 
 class TestNNInit(TestCase):
     def setUp(self):
@@ -8332,7 +8346,9 @@ class TestNNInit(TestCase):
 
         def fn():
             init.normal(x)
-        self.assertWarnsRegex(fn, 'deprecated', 'methods not suffixed with underscore should be deprecated')
+
+        with self.assertWarnsRegex(UserWarning, 'deprecated', msg='methods not suffixed with underscore should be deprecated'):
+            fn()
 
 class TestFusionEval(TestCase):
     @given(X=hu.tensor(shapes=((5, 3, 5, 5),)),

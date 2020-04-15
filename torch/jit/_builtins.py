@@ -4,7 +4,7 @@ import warnings
 import torch
 import torch.backends.cudnn as cudnn
 
-from torch._six import PY2, PY37
+from torch._six import PY37
 from ..nn.modules.utils import _single, _pair, _triple, _quadruple
 
 from collections import OrderedDict
@@ -116,9 +116,8 @@ def _get_builtin_table():
     for mod in _modules_containing_builtins:
         register_all(mod)
 
-    if not PY2:
-        _builtin_ops.append((math.gcd, "aten::gcd"))
-        _builtin_ops.append((math.isfinite, "aten::isfinite"))
+    _builtin_ops.append((math.gcd, "aten::gcd"))
+    _builtin_ops.append((math.isfinite, "aten::isfinite"))
     if PY37:
         _builtin_ops.append((math.remainder, "aten::mathremainder"))
 
