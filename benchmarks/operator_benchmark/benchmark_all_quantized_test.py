@@ -7,6 +7,7 @@ import operator_benchmark as op_bench
 from pt import ( # noqa
     qactivation_test,
     qarithmetic_test,
+    qbatchnorm_test,
     qcat_test,
     qcomparators_test,
     qconv_test,

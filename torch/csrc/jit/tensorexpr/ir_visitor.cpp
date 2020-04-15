@@ -2,6 +2,7 @@
 
 #include <torch/csrc/jit/tensorexpr/ir.h>
 #include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
+#include <torch/csrc/jit/tensorexpr/reduction.h>
 #include <torch/csrc/jit/tensorexpr/tensor.h>
 
 namespace torch {
@@ -200,6 +201,12 @@ void IRVisitor::visit(const Polynomial* v) {
 void IRVisitor::visit(const RoundOff* v) {
   v->lhs()->accept(this);
   v->rhs()->accept(this);
+}
+
+void IRVisitor::visit(const ReduceOp* v) {
+  v->accumulator().node()->accept(this);
+  v->initializer()->accept(this);
+  v->body().node()->accept(this);
 }
 
 } // namespace tensorexpr

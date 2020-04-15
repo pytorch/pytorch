@@ -245,7 +245,7 @@ std::tuple<double, Tensor, double, int64_t> _strong_wolfe(const Function& obj_fu
         bracket_gtd = {gtd_prev, gtd_new};
         break;
       }
-      if (abs(val(gtd_new)) <= (-c2 * val(gtd))) {
+      if (std::abs(val(gtd_new)) <= (-c2 * val(gtd))) {
         bracket = {t, t};
         bracket_f = {f_new, f_new};
         bracket_g = {g_new, g_new};
@@ -310,7 +310,7 @@ std::tuple<double, Tensor, double, int64_t> _strong_wolfe(const Function& obj_fu
         // interpolation close to boundary
         if (insuf_progress || (t >= bracket_max) || (t <= bracket_min)) {
           // evaluate at 0.1 away from boundary
-          t = (abs(t - bracket_max) < abs(t - bracket_min)) ? bracket_max - eps : bracket_min + eps;
+          t = (std::abs(t - bracket_max) < std::abs(t - bracket_min)) ? bracket_max - eps : bracket_min + eps;
           insuf_progress = false;
         } else {
           insuf_progress = true;
@@ -336,7 +336,7 @@ std::tuple<double, Tensor, double, int64_t> _strong_wolfe(const Function& obj_fu
         bracket_gtd[high_pos] = gtd_new;
         std::tie(low_pos, high_pos) = bracket_f[0] <= bracket_f[1] ? std::make_tuple(0, 1) : std::make_tuple(1, 0);
       } else {
-        if (val(abs(gtd_new)) <= (-c2 * val(gtd))) {
+        if (val(at::abs(gtd_new)) <= (-c2 * val(gtd))) {
           // Wolfe conditions satisfied
           done = true;
         } else if ((val(gtd_new) * (bracket[high_pos] - bracket[low_pos])) >= 0) {
@@ -355,7 +355,7 @@ std::tuple<double, Tensor, double, int64_t> _strong_wolfe(const Function& obj_fu
       }
 
       // line-search bracket is so small
-      if ((abs(bracket[1] - bracket[0]) * d_norm) < tolerance_change) break;
+      if ((std::abs(bracket[1] - bracket[0]) * d_norm) < tolerance_change) break;
     }
 
     // return stuff
@@ -509,7 +509,6 @@ Tensor LBFGS::step(LossClosure closure) {
       TORCH_CHECK(*line_search_fn == "strong_wolfe", "only 'strong_wolfe' is supported");
       auto x_init = _clone_param();
       auto obj_func = [&](const std::vector<Tensor>& x, double t, const Tensor& d) { return _directional_evaluate(closure, x, t, d); };
-      auto strong_wolfe_res = _strong_wolfe(obj_func, x_init, t, d, loss, flat_grad, gtd);
       std::tie(loss, flat_grad, t, ls_func_evals) = _strong_wolfe(obj_func, x_init, t, d, loss, flat_grad, gtd);
       _add_grad(t, d);
       opt_cond = (val(flat_grad.abs().max()) <= tolerance_grad);
@@ -546,7 +545,7 @@ Tensor LBFGS::step(LossClosure closure) {
     // lack of progress
     if (val(d.mul(t).abs().max()) <= tolerance_change) break;
 
-    if (abs(loss - prev_loss) < tolerance_change) break;
+    if (std::abs(loss - prev_loss) < tolerance_change) break;
   }
 
   return orig_loss;
