@@ -276,15 +276,90 @@ Tensor& uniform_(Tensor& self, double from, double to, c10::optional<Generator> 
 
 // ===========================================================================================================================
 
+/**
+ * Samples a normal distribution using the Box-Muller method
+ * Takes mean and standard deviation as inputs
+ * Note that Box-muller method returns two samples at a time.
+ * Hence, we cache the "next" sample in the CPUGeneratorImpl class.
+ */
+ template <typename T>
+ struct normal_distribution {
+
+  inline __device__ normal_distribution(T mean_in, T stdv_in) {
+  //  TORCH_CHECK(stdv_in > 0);
+    mean = mean_in;
+    stdv = stdv_in;
+  }
+
+  template <typename RNG>
+  inline dist_acctype<T> __device__ operator()(RNG* generator) {
+    dist_acctype<T> ret;
+    // return cached values if available
+    // if (std::is_same<T, double>::value) {
+    //   if (generator->next_double_normal_sample()) {
+    //     ret = *(generator->next_double_normal_sample()) * stdv + mean;
+    //     // reset c10::optional to null
+    //     generator->set_next_double_normal_sample(c10::optional<double>());
+    //     return ret;
+    //   }
+    // } else {
+    //   if (generator->next_float_normal_sample()) {
+    //     ret = *(generator->next_float_normal_sample()) * stdv + mean;
+    //     // reset c10::optional to null
+    //     generator->set_next_float_normal_sample(c10::optional<float>());
+    //     return ret;
+    //   }
+    // }
+    // otherwise generate new normal values
+    uniform_real_distribution<T> uniform(0.0, 1.0);
+    const dist_acctype<T> u1 = uniform(generator);
+    const dist_acctype<T> u2 = uniform(generator);
+    const dist_acctype<T> r = ::sqrt(static_cast<T>(-2.0) * ::log(static_cast<T>(1.0)-u2));
+    const dist_acctype<T> theta = static_cast<T>(2.0) * static_cast<T>(M_PI) * u1;
+    // if (std::is_same<T, double>::value) {
+    //   dist_acctype<double> cache = r * ::sin(theta);
+    //   generator->set_next_double_normal_sample(c10::optional<double>(cache));
+    // } else {
+    //   dist_acctype<float> cache = r * ::sin(theta);
+    //   generator->set_next_float_normal_sample(c10::optional<float>(cache));
+    // }
+    ret = r * ::cos(theta) * stdv + mean;
+    return ret;
+  }
+
+  private:
+    T mean;
+    T stdv;
+};
+
+template<typename scalar_t, typename uint_t>
+void normal_kernel_helper_fp(TensorIterator& iter, scalar_t mean, scalar_t std, uint8_t* key) {
+  block_cipher_helper<scalar_t, uint_t, 2>(iter, key,
+    [mean, std] __device__ (DummyRNG<2>* generator) -> scalar_t {
+      normal_distribution<scalar_t> normal(mean, std);
+      return normal(generator);
+    }
+  );
+}
+
 template<typename RNG>
 struct NormalKernel {
   void operator()(Tensor& self, double mean, double std, c10::optional<Generator> generator) {
-    // TODO
+    const auto key_t = key_tensor(generator);
+    const auto key = key_t.data_ptr<uint8_t>();
+    auto iter = at::TensorIterator::nullary_op(self);
+    AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "normal_kernel_cuda", [&] {
+      if (std::is_same<scalar_t, double>::value) {
+        normal_kernel_helper_fp<scalar_t, uint64_t>(iter, mean, std, key);
+      } else {
+        normal_kernel_helper_fp<scalar_t, uint32_t>(iter, mean, std, key);
+      }
+    });
   }
 };
 
-Tensor& normal_(Tensor& self, double mean, double std, Generator gen) {
-  return at::native::templates::normal_impl_<NormalKernel, CUDA_CSPRNG_GeneratorImpl>(self, mean, std, gen);
+Tensor& normal_(Tensor& self, double mean, double std, c10::optional<Generator> generator) {
+  return at::native::templates::normal_impl_<NormalKernel, CUDA_CSPRNG_GeneratorImpl>(self, mean, std, generator);
 }
 
 // ===========================================================================================================================
