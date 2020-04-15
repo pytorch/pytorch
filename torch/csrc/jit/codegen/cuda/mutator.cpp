@@ -211,7 +211,7 @@ Statement* OptOutMutator::mutate(IfThenElse* ite) {
   TORCH_INTERNAL_ASSERT(
       val_cond->getValType().value() == ValType::Scalar &&
       val_cond->getDataType().value() == DataType::Int);
-  Int* cond = static_cast<Int*>(cond);
+  Int* cond = static_cast<Int*>(val_cond);
 
   bool is_mutated = !cond->sameAs(ite->cond());
 
