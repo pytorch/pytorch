@@ -21,11 +21,14 @@ struct LivenessAnalyzer {
     // the analysis is run until there are no more changes
     // to liveness sets for each node
     size_t i = 0;
+    std::vector<Node*> counters;
+    insertExplicitUsesOfLoopCounters(graph_->block(), counters);
     do {
       GRAPH_DEBUG("Running iteration ", i++);
       changed_ = false;
       processBlock(graph_->block(), SparseBitVector{});
     } while (changed_);
+    removeCounterNodes(counters);
 
     std::unordered_map<Node*, std::vector<Value*>> result;
 
@@ -84,6 +87,38 @@ struct LivenessAnalyzer {
     return vec;
   }
 
+
+  // temporary make loop counts live for the duration of the loop
+  // as they are needed by BailOuts in the loop
+  void insertExplicitUsesOfLoopCounters(Block* b, std::vector<Node*>& counters) {
+
+    for (auto it : b->nodes()) {
+      if (it->kind() == prim::Loop) {
+        LoopView lv(it);
+        WithInsertPoint guard(*lv.bodyBlock()->nodes().end());
+        // temporary make loop counts live for the duration of the loop
+        // as they are needed by BailOuts in the loop
+        auto ctc = graph_->create(prim::Store, {lv.currentTripCount()}, 0);
+        graph_->insertNode(ctc);
+        counters.push_back(ctc);
+        GRAPH_DEBUG("@#$Creating a store for ctc : ", ctc);
+        auto mtc = graph_->create(prim::Store, {lv.maxTripCount()}, 0);
+        graph_->insertNode(mtc);
+        counters.push_back(mtc);
+      }
+
+      for (auto ib: it->blocks()) {
+        insertExplicitUsesOfLoopCounters(ib, counters);
+      }
+    }
+  }
+
+  void removeCounterNodes(std::vector<Node*>& counters) {
+    for (auto n: counters) {
+      n->destroy();
+    }
+  }
+
   SparseBitVector processBlock(Block* b, SparseBitVector liveness) {
     // block outputs are the uses
     auto block_outputs = toSparseBitVector(b->outputs());
@@ -109,20 +144,8 @@ struct LivenessAnalyzer {
         // loop's outputs aren't live inside the loop
         // loop's block outputs, OTOH, will be considered
         // as uses
-        WithInsertPoint guard(*lv.bodyBlock()->nodes().end());
-        // temporary make loop counts live for the duration of the loop
-        // as they are needed by BailOuts in the loop
-        
-        auto ctc = graph_->create(prim::Store, {lv.currentTripCount()}, 0);
-        graph_->insertNode(ctc);
-        GRAPH_DEBUG("@#$Creating a store for ctc : ", ctc);
-        auto mtc = graph_->create(prim::Store, {lv.maxTripCount()}, 0);
-        graph_->insertNode(mtc);
-        GRAPH_DEBUG("@#$Creating a store for mtc : ", mtc);
         loop_block = processBlock(lv.bodyBlock(), loop_block);
         GRAPH_DEBUG("@#$loop_block liveness after loop: ", loop_block);
-        ctc->destroy();
-        mtc->destroy();
         // loop block's inputs die outside loop's block
         loop_block -= toSparseBitVector(lv.bodyBlock()->inputs());
         GRAPH_DEBUG("@#$loop_block liveness after removing block inputs: ", loop_block);
