@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 A script that runs clang-format on all C/C++ files in CLANG_FORMAT_WHITELIST. There is
-also a diff mode which simply checks if clang-format would make any changes, which is useful for 
+also a diff mode which simply checks if clang-format would make any changes, which is useful for
 CI purposes.
 
 If clang-format is not available, the script also downloads a platform-appropriate binary from
@@ -43,7 +43,7 @@ CLANG_FORMAT_PATH = os.path.join(CLANG_FORMAT_DIR, "clang-format")
 
 # Whitelist of directories to check. All files that in that directory
 # (recursively) will be checked.
-CLANG_FORMAT_WHITELIST = ["torch/csrc/jit/", "test/cpp/jit/"]
+CLANG_FORMAT_WHITELIST = ["torch/csrc/jit/", "test/cpp/jit/", "test/cpp/tensorexpr/"]
 
 # Only files with names matching this regex will be formatted.
 CPP_FILE_REGEX = re.compile(".*\\.(h|cpp|cc|c|hpp)$")

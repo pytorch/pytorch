@@ -506,7 +506,8 @@ void testATenmaxInt() {
   VarHandle index = VarHandle("index", kInt);
   ExprHandle load_a = Load::make(a_buf, {index}, 1);
   ExprHandle load_b = Load::make(b_buf, {index}, 1);
-  Stmt* store_c = Store::make(c_buf, {index}, Max::make(load_a, load_b, true), 1);
+  Stmt* store_c =
+      Store::make(c_buf, {index}, Max::make(load_a, load_b, true), 1);
   Stmt* stmt = For::make(index, 0, kTotalSize, store_c);
 
   PaddedBuffer<int> a_v(kTotalSize);
@@ -538,7 +539,8 @@ void testATenmaxFloat() {
   VarHandle index = VarHandle("index", kInt);
   ExprHandle load_a = Load::make(a_buf, {index}, 1);
   ExprHandle load_b = Load::make(b_buf, {index}, 1);
-  Stmt* store_c = Store::make(c_buf, {index}, Max::make(load_a, load_b, true), 1);
+  Stmt* store_c =
+      Store::make(c_buf, {index}, Max::make(load_a, load_b, true), 1);
   Stmt* stmt = For::make(index, 0, kTotalSize, store_c);
 
   PaddedBuffer<float> a_v(kTotalSize);
@@ -570,7 +572,8 @@ void testATenminInt() {
   VarHandle index = VarHandle("index", kInt);
   ExprHandle load_a = Load::make(a_buf, {index}, 1);
   ExprHandle load_b = Load::make(b_buf, {index}, 1);
-  Stmt* store_c = Store::make(c_buf, {index}, Min::make(load_a, load_b, true), 1);
+  Stmt* store_c =
+      Store::make(c_buf, {index}, Min::make(load_a, load_b, true), 1);
   Stmt* stmt = For::make(index, 0, kTotalSize, store_c);
 
   PaddedBuffer<int> a_v(kTotalSize);
@@ -602,7 +605,8 @@ void testATenminFloat() {
   VarHandle index = VarHandle("index", kInt);
   ExprHandle load_a = Load::make(a_buf, {index}, 1);
   ExprHandle load_b = Load::make(b_buf, {index}, 1);
-  Stmt* store_c = Store::make(c_buf, {index}, Min::make(load_a, load_b, true), 1);
+  Stmt* store_c =
+      Store::make(c_buf, {index}, Min::make(load_a, load_b, true), 1);
   Stmt* stmt = For::make(index, 0, kTotalSize, store_c);
 
   PaddedBuffer<float> a_v(kTotalSize);

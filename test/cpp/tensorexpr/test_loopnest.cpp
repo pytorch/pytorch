@@ -1,8 +1,8 @@
+#include <test/cpp/tensorexpr/test_base.h>
 #include <memory>
 #include <sstream>
 #include <stdexcept>
 #include <unordered_map>
-#include <test/cpp/tensorexpr/test_base.h>
 
 #include <test/cpp/tensorexpr/padded_buffer.h>
 #include <torch/csrc/jit/tensorexpr/bounds_inference.h>
@@ -90,8 +90,7 @@ void testExprSimple02() {
             x_inner,
             0,
             4,
-            For::make(
-                y, 0, 5, Store::make(f, {x_1, y}, func(x_1, y), 1))));
+            For::make(y, 0, 5, Store::make(f, {x_1, y}, func(x_1, y), 1))));
     ExprHandle x_2 = x_tail + x_outer_end * 4;
     For* stmt2 = For::make(
         x_tail,
@@ -159,8 +158,7 @@ void testExprSplitWithTailNone() {
             x_inner,
             0,
             4,
-            For::make(
-                y, 0, 5, Store::make(f, {x_1, y}, func(x_1, y), 1))));
+            For::make(y, 0, 5, Store::make(f, {x_1, y}, func(x_1, y), 1))));
 
     std::ostringstream oss_ref;
     oss_ref << *stmt;
@@ -705,8 +703,7 @@ void testBoundsInference_4() {
   }
   {
     // Infer bounds on the inner loop body's scope
-    const std::vector<TensorAccessBoundsInfo>& bounds_info =
-        inferBounds(body);
+    const std::vector<TensorAccessBoundsInfo>& bounds_info = inferBounds(body);
     auto bounds_info_map = convertBoundsInfoToMap(bounds_info);
 
     ASSERT_EQ(bounds_info_map.at(a.data()).kind, kLoad);
@@ -824,8 +821,7 @@ void testBoundsInference_6() {
   }
   {
     // Infer bounds on the inner loop body's scope
-    const std::vector<TensorAccessBoundsInfo>& bounds_info =
-        inferBounds(body);
+    const std::vector<TensorAccessBoundsInfo>& bounds_info = inferBounds(body);
     auto bounds_info_map = convertBoundsInfoToMap(bounds_info);
 
     ASSERT_EQ(bounds_info_map.at(a.data()).kind, kLoad);
