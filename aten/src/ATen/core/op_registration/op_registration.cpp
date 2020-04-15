@@ -12,7 +12,7 @@ namespace {
     if (debug.empty()) {
       return c10::str("registered at ", file, ":", line);
     } else {
-      return std::move(debug);
+      return debug;
     }
   }
 
