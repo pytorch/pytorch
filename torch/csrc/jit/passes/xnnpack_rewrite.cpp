@@ -329,8 +329,8 @@ void FoldPrePackingOps(script::Module& m) {
 }
 
 script::Module optimizeForMobile(const script::Module& m) {
-  AT_ERROR("Mobile optimizaiton only available with XNNPACK at the moment. "
-      "XNNPACK is not enabled. Please build with USE_XNNPACK=1");
+  AT_ERROR("Mobile optimizaiton only available with XNNPACK at the moment.
+    XNNPACK is not enabled. Please build with USE_XNNPACK=1");
 }
 
 #endif
