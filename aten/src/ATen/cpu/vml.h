@@ -44,8 +44,10 @@
   volatile value_t x = (value_t)(1);                          \
   x = std::op(x);                                             \
   _mm256_zeroall();
+#define DL_RUNTIME_BUG_BFLOAT16() _mm256_zeroall();
 #else
 #define DL_RUNTIME_BUG(op, type)
+#define DL_RUNTIME_BUG_BFLOAT16()
 #endif
 
 namespace at {
@@ -75,16 +77,30 @@ inline void vrsqrt(scalar_t* out, scalar_t* in, int64_t size) {
 // this. This duplication is also necessary since not all functions (e.g. rsqrt)
 // might be part of cmath.
 
-#define IMPLEMENT_VML_BUG(op)                                          \
-  template <typename scalar_t>                                          \
-  inline void v##op(scalar_t* out, const scalar_t* in, int64_t size) {  \
-    DL_RUNTIME_BUG(op, scalar_t)                                        \
-    parallel_for(0, size, 2048, [out, in](int64_t begin, int64_t end) { \
-      map([](const Vec256<scalar_t>& x) { return x.op(); },             \
-          out + begin,                                                  \
-          in + begin,                                                   \
-          end - begin);                                                 \
-    });                                                                 \
+// for BFloat16, we need specialize it, the reason is that avx/avx2 and glic=2.23,
+// we can't give DL_RUNTIME_BUG volatile type in x = std::op(x);
+
+#define IMPLEMENT_VML_BUG(op)                                                     \
+  template <typename scalar_t>                                                    \
+  inline void v##op(scalar_t* out, const scalar_t* in, int64_t size) {            \
+    DL_RUNTIME_BUG(op, scalar_t)                                                  \
+    parallel_for(0, size, 2048, [out, in](int64_t begin, int64_t end) {           \
+      map([](const Vec256<scalar_t>& x) { return x.op(); },                       \
+          out + begin,                                                            \
+          in + begin,                                                             \
+          end - begin);                                                           \
+    });                                                                           \
+  }                                                                               \
+  template <>                                                                     \
+  inline void v##op<c10::BFloat16>(                                               \
+      c10::BFloat16* out, const c10::BFloat16* in, int64_t size) {                \
+    parallel_for(0, size, 2048, [out, in](int64_t begin, int64_t end) {           \
+      DL_RUNTIME_BUG_BFLOAT16()                                                   \
+      map([](const Vec256<c10::BFloat16>& x) { return x.op(); },                  \
+          out + begin,                                                            \
+          in + begin,                                                             \
+          end - begin);                                                           \
+    });                                                                           \
   }
 
 #define IMPLEMENT_VML(op)                                              \

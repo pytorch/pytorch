@@ -11,8 +11,7 @@ void IndexCompute::replayBackward(Split* expr) {
   TORCH_INTERNAL_ASSERT(
       ax >= 0 && ax + 1 < indices.size(),
       "Hit an invalid Split transformation during IndexCompute, axis is not within bounds.");
-  indices[ax] =
-      static_cast<Int*>(add(mul(indices[ax], expr->factor()), indices[ax + 1]));
+  indices[ax] = add(mul(indices[ax], expr->factor()), indices[ax + 1]);
   indices.erase(indices.begin() + ax + 1);
 }
 
@@ -22,17 +21,17 @@ void IndexCompute::replayBackward(Merge* expr) {
       ax >= 0 && ax < indices.size(),
       "Hit an invalid MERGE transformation during IndexCompute, axis is not within bounds.");
 
-  Int* I = expr->in()->axis(ax + 1)->size();
-  Int* ind = indices[ax];
-  indices[ax] = static_cast<Int*>(div(ind, I));
-  indices.insert(indices.begin() + ax + 1, static_cast<Int*>(mod(ind, I)));
+  Val* I = expr->in()->axis(ax + 1)->size();
+  Val* ind = indices[ax];
+  indices[ax] = div(ind, I);
+  indices.insert(indices.begin() + ax + 1, mod(ind, I));
 }
 
 void IndexCompute::replayBackward(Reorder* expr) {
   // pos2axis[new_pos] = old_pos Generate new axis2pos map
   const std::vector<int>& pos2axis = expr->pos2axis();
 
-  std::vector<Int*> reordered_indices;
+  std::vector<Val*> reordered_indices;
 
   // Reverse the map so we can simply push back into reordered_indices
   // axis2pos[old_pos] = new_pos
@@ -58,14 +57,15 @@ void IndexCompute::replayBackward(Reorder* expr) {
   indices = reordered_indices;
 }
 
-IndexCompute::IndexCompute(const TensorView* tv, std::vector<Int*> _indices) {
+IndexCompute::IndexCompute(const TensorView* tv, std::vector<Val*> _indices) {
   indices = std::move(_indices);
 
   TensorDomain* td = tv->domain();
 
   bool exclude_reduction = td->size() > indices.size();
+
   TORCH_CHECK(
-      td->size() >= indices.size(),
+      exclude_reduction || td->size() == indices.size(),
       "For IndexCompute the number of axis should match the number of dimensions"
       " in the TensorView.");
 
@@ -97,9 +97,9 @@ IndexCompute::IndexCompute(const TensorView* tv, std::vector<Int*> _indices) {
   }
 }
 
-std::vector<Int*> IndexCompute::computeIndices(
+std::vector<Val*> IndexCompute::computeIndices(
     const TensorView* tv,
-    std::vector<Int*> _indices) {
+    std::vector<Val*> _indices) {
   IndexCompute ic(tv, std::move(_indices));
   return ic.indices;
 }

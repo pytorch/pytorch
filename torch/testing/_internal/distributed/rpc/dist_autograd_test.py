@@ -1483,7 +1483,7 @@ class DistAutogradTest(RpcAgentTestFixture):
                         # shutdown RPC before responding and satisfying this RPC. Therefore, we swallow possible errors here.
                         try:
                             rpc.rpc_sync(
-                                "worker{}".format(i),
+                                worker_name(i),
                                 DistAutogradTest._set_backward_done,
                                 args=(),
                             )
@@ -2110,9 +2110,9 @@ class FaultyAgentDistAutogradTest(FaultyRpcAgentTestFixture):
 
         with dist_autograd.context() as context_id:
             for dst_rank in dst_ranks:
-                rpc.rpc_sync("worker{}".format(dst_rank), func, args=rpc_args)
+                rpc.rpc_sync(worker_name(dst_rank), func, args=rpc_args)
                 rpc.rpc_sync(
-                    "worker{}".format(dst_rank), _set_rpc_done, args=(context_id, 1)
+                    worker_name(dst_rank), _set_rpc_done, args=(context_id, 1)
                 )
         # the thread's context id should be cleaned up
         with self.assertRaises(RuntimeError):
