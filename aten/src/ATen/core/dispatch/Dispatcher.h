@@ -143,14 +143,6 @@ public:
   RegistrationHandleRAII registerDef(FunctionSchema schema);
 
   /**
-   * Returns true, iff the given operator handle is still valid,
-   * i.e. the operator was not deregistered.
-   * Note that this function is somewhat expensive to call,
-   * so don't do it in a hotpath.
-   */
-  bool isValid(const OperatorHandle& op) const;
-
-  /**
    * Register a kernel to the dispatch table for an operator.
    * If dispatch_key is nullopt, then this registers a fallback kernel.
    *
@@ -240,16 +232,6 @@ public:
 
   bool hasSchema() const {
     return operatorIterator_->op.hasSchema();
-  }
-
-  /**
-   * Returns true iff the operator handle is still valid,
-   * i.e. the operator was not deregistered.
-   * Note that this function is somewhat expensive to call,
-   * so don't do it in a hotpath.
-   */
-  bool isValid() const {
-    return c10::Dispatcher::singleton().isValid(*this);
   }
 
   const FunctionSchema& schema() const {
