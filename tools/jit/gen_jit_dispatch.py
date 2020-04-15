@@ -578,8 +578,6 @@ NEEDS_HACKED_TWIN_NAMES = [
 def needs_hacked_twin(decl):
     schema_string = decl['schema_string']
     result = any([schema_string.startswith(name) for name in NEEDS_HACKED_TWIN_NAMES])
-    if result:
-        assert decl['use_c10_dispatcher'] == 'unboxed_only'
     return result
 
 
