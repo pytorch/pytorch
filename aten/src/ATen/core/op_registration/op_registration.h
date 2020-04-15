@@ -915,11 +915,11 @@ public:
   }
 
 private:
+  Kind kind_;
   c10::optional<std::string> ns_;
   c10::optional<DispatchKey> dispatch_key_;
   const char* file_;
   uint32_t line_;
-  Kind kind_;
 
   std::vector<RegistrationHandleRAII> registrars_;
 
