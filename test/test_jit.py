@@ -4526,27 +4526,12 @@ def foo(x):
         mod = TorchBindOptionalExplicitAttr()
         scripted = torch.jit.script(mod)
 
-    @unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
-                         'Quantized RNN requires FBGEMM. FBGEMM is only optimized for CPUs'
-                         ' with instruction set support avx2 or newer.')
-    def test_torchbind_lower_graph_conv(self):
-        class ConvModel(torch.nn.Module):
-            def __init__(self):
-                super(ConvModel, self).__init__()
-                self.conv = torch.quantization.QuantWrapper(torch.nn.Conv2d(3, 5, 2, bias=True).to(dtype=torch.float))
-
-            def forward(self, x):
-                x = self.conv(x)
-                return x
-
-        model = ConvModel()
+    def _test_torchbind_lower_graph_conv_impl(self, model, data):
         model.qconfig = torch.quantization.default_qconfig
         model = torch.quantization.prepare(model)
         model = torch.quantization.convert(model)
 
-        x_numpy = np.random.rand(1, 3, 6, 6).astype(np.float32)
-        x = torch.from_numpy(x_numpy).to(dtype=torch.float)
-        outputs = model(x)
+        outputs = model(data)
         input_names = ["x"]
 
         def export_to_onnx(model, input, input_names):
@@ -4561,7 +4546,27 @@ def foo(x):
             f = io.BytesIO()
             torch.onnx.export(model, input, f, input_names=input_names, example_outputs=outputs,
                               operator_export_type=torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK)
-        onnx_model = export_to_onnx(model, x, input_names)
+        onnx_model = export_to_onnx(model, data, input_names)
+
+    @unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
+                         'Quantized RNN requires FBGEMM. FBGEMM is only optimized for CPUs'
+                         ' with instruction set support avx2 or newer.')
+    def test_torchbind_lower_graph_conv2d(self):
+        model = torch.quantization.QuantWrapper(torch.nn.Conv2d(3, 5, 2, bias=True)).to(dtype=torch.float)
+        data_numpy = np.random.rand(1, 3, 6, 6).astype(np.float32)
+        data = torch.from_numpy(data_numpy).to(dtype=torch.float)
+        self._test_torchbind_lower_graph_conv_impl(model, data)
+
+    @unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
+                         'Quantized RNN requires FBGEMM. FBGEMM is only optimized for CPUs'
+                         ' with instruction set support avx2 or newer.')
+    @unittest.skip("onnx opset9 does not support quantize_per_tensor and caffe2 \
+    does not support conv3d")
+    def test_torchbind_lower_graph_conv3d(self):
+        model = torch.quantization.QuantWrapper(torch.nn.Conv3d(3, 5, 2, bias=True)).to(dtype=torch.float)
+        data_numpy = np.random.rand(1, 3, 6, 6, 6).astype(np.float32)
+        data = torch.from_numpy(data_numpy).to(dtype=torch.float)
+        self._test_torchbind_lower_graph_conv_impl(model, data)
 
     def test_jitter_bug(self):
         @torch.jit.script

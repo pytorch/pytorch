@@ -120,7 +120,6 @@ class _ConvNd(nn.Module):
     # QTensor weight into its packed format for use by the FBGEMM ops.
     def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
                               missing_keys, unexpected_keys, error_msgs):
-        version = local_metadata.get('version', None)
         self.set_weight_bias(
             state_dict[prefix + 'weight'], state_dict[prefix + 'bias'])
         state_dict.pop(prefix + 'weight')
@@ -454,13 +453,13 @@ class Conv3d(_ConvNd):
             w, b, self.stride, self.padding, self.dilation, self.groups)
 
     def _weight_bias(self):
-        return torch.ops.quantized.conv3d_unpack(self._packed_params)
+        return self._packed_params.unpack()
 
     def weight(self):
-        return self._packed_params.weight()
+        return self._weight_bias()[0]
 
     def bias(self):
-        return self._packed_params.bias()
+        return self._weight_bias()[1]
 
     def forward(self, input):
         # Temporarily using len(shape) instead of ndim due to JIT issue

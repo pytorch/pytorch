@@ -7,6 +7,7 @@ import unittest
 # torch
 import torch
 import torch.nn.quantized as nnq
+import torch.nn.intrinsic.quantized as nniq
 
 # Testing utils
 from torch.testing._internal.common_utils import TestCase
@@ -15,8 +16,6 @@ from torch.testing._internal.common_utils import run_tests
 # TODO: remove this global setting
 # JIT tests use double as the default dtype
 torch.set_default_dtype(torch.double)
-
-ACCEPT = os.getenv('EXPECTTEST_ACCEPT')
 
 class TestSerialization(TestCase):
     # Copy and modified from TestCase.assertExpected
@@ -46,11 +45,20 @@ class TestSerialization(TestCase):
             base_name += "_" + subname
             subname_output = " ({})".format(subname)
 
+        input_file = base_name + ".input.pt"
         state_dict_file = base_name + ".state_dict.pt"
         scripted_module_file = base_name + ".scripted.pt"
         traced_module_file = base_name + ".traced.pt"
-        input_file = base_name + ".input.pt"
         expected_file = base_name + ".expected.pt"
+
+        # saving code : uncomment when adding a new test
+        data = torch.randn(1, 3, 6, 6, 6).float()
+        data = torch.quantize_per_tensor(data, 0.5, 2, torch.quint8)
+        torch.save(data, input_file)
+        torch.save(qmodule.state_dict(), state_dict_file)
+        torch.jit.save(torch.jit.script(qmodule), scripted_module_file)
+        torch.jit.save(torch.jit.trace(qmodule, data), traced_module_file)
+        torch.save(qmodule(data), expected_file)
 
         data = torch.load(input_file)
         qmodule.load_state_dict(torch.load(state_dict_file))
@@ -67,12 +75,50 @@ class TestSerialization(TestCase):
         " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
         " with instruction set support avx2 or newer.",
     )
-    def test_conv(self):
+    def test_conv2d(self):
         # quantized conv module
         qconv = nnq.Conv2d(3, 3, kernel_size=3, stride=1, padding=0, dilation=1,
                            groups=1, bias=True, padding_mode="zeros")
         self._test_op(qconv)
-        # TODO: graph mode quantized conv module
+        # TODO: graph mode quantized conv2d module
+
+    @unittest.skipUnless(
+        'fbgemm' in torch.backends.quantized.supported_engines,
+        " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
+        " with instruction set support avx2 or newer.",
+    )
+    def test_conv2d_relu(self):
+        # quantized conv module
+        qconv = nniq.ConvReLU2d(3, 3, kernel_size=3, stride=1, padding=0, dilation=1,
+                               groups=1, bias=True, padding_mode="zeros")
+        self._test_op(qconv)
+        # TODO: graph mode quantized conv2d module
+
+    @unittest.skipUnless(
+        'fbgemm' in torch.backends.quantized.supported_engines,
+        " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
+        " with instruction set support avx2 or newer.",
+    )
+    def test_conv3d(self):
+        # quantized conv module
+        qconv = nnq.Conv3d(3, 3, kernel_size=3, stride=1, padding=0, dilation=1,
+                           groups=1, bias=True, padding_mode="zeros")
+        self._test_op(qconv)
+        # TODO: graph mode quantized conv3d module
+
+    @unittest.skipUnless(
+        'fbgemm' in torch.backends.quantized.supported_engines,
+        " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
+        " with instruction set support avx2 or newer.",
+    )
+    def test_conv3d_relu(self):
+        # quantized conv module
+        qconv = nniq.ConvReLU3d(3, 3, kernel_size=3, stride=1, padding=0, dilation=1,
+                               groups=1, bias=True, padding_mode="zeros")
+        self._test_op(qconv)
+        # TODO: graph mode quantized conv3d module
+
+
 
 if __name__ == "__main__":
     run_tests()

@@ -74,8 +74,7 @@ class ConvReLU3d(nnq.Conv3d):
         if len(input.shape) != 5:
             raise ValueError("Input shape must be `(N, C, D, H, W)`!")
         return torch.ops.quantized.conv3d_relu(
-            input, self._packed_params, self.stride, self.padding,
-            self.dilation, self.groups, self.scale, self.zero_point)
+            input, self._packed_params, self.scale, self.zero_point)
 
     def _get_name(self):
         return 'QuantizedConvReLU3d'
