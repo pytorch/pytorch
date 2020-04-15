@@ -44,7 +44,11 @@ class CudaFusionManager {
   //       want to AVOID kernel reuse between different fusion_node, unless they
   //       have identical contiguity information! (So identical stride + shape
   //       is even more restricting in a good way)
-  int32_t registerOrGetCacheId(std::shared_ptr<Graph>& graph) {
+  int32_t registerOrGetCacheId(std::shared_ptr<Graph>& orig_graph) {
+    // TODO: delete the copy here after shape inference is done.
+    //       this allows us to avoid shape inference when run-time shape doesn't
+    //       differ from static shape.
+    auto graph = orig_graph->copy();
     std::lock_guard<std::mutex> guard(mutex_);
 
     // prepare graph for lowering;
@@ -185,7 +189,6 @@ void runCudaFusionGroup(const Node* const fusion_node, Stack& stack) {
 
   // TODO: expose the API to populate shape inference. This allows separate CI
   // tests
-  // matched_static_inputs = false;
   if (!matched_static_inputs) {
     // update shape information per the new inputs;
     // shape inference done through PyTorch JIT shape propagation;

@@ -26,8 +26,6 @@ typedef Expr* CgOp;
 typedef void (
     *ParseFuncPtr)(const Node* const, std::unordered_map<size_t, CgValue>&);
 
-typedef std::function<void(const Node* const, std::unordered_map<size_t, CgValue>&)> ParseFunc;
-
 // TODO: add a mutex to make it thread safe.
 class IrParser {
  private:
@@ -160,7 +158,6 @@ class IrParser {
                 {aten::add, BinaryOpType::Add},
                 {aten::sub, BinaryOpType::Sub},
             });
-            printf("\n\n\n parsing ternary \n\n\n");
             auto lhs = value_maps[node->inputs()[0]->unique()];
             auto rhs = value_maps[node->inputs()[1]->unique()];
 
@@ -169,21 +166,56 @@ class IrParser {
           });
     }
 
-    std::array<const char*, 4> BinaryOp = {
+    std::array<const char*, 24> BinaryOp = {
         "aten::div(Tensor self, Tensor other) -> Tensor",
         "aten::div(Tensor self, Scalar other) -> Tensor",
         "aten::mul(Tensor self, Tensor other) -> Tensor",
-        "aten::mul(Tensor self, Scalar other) -> Tensor"};
+        "aten::mul(Tensor self, Scalar other) -> Tensor",
+        "aten::atan2(Tensor self, Tensor other) -> Tensor",
+        "aten::max(Tensor self, Tensor other) -> Tensor",
+        "aten::min(Tensor self, Tensor other) -> Tensor",
+        "aten::pow(Tensor self, Tensor exponent) -> Tensor",
+        "aten::pow(Tensor self, Scalar exponent) -> Tensor",
+        "aten::pow(Scalar self, Tensor exponent) -> Tensor",
+        "aten::remainder(Tensor self, Tensor other) -> Tensor",
+        "aten::fmod(Tensor self, Tensor other) -> Tensor",
+        "aten::eq(Tensor self, Tensor other) -> Tensor",
+        "aten::eq(Tensor self, Scalar other) -> Tensor",
+        "aten::ne(Tensor self, Tensor other) -> Tensor",
+        "aten::ne(Tensor self, Scalar other) -> Tensor",
+        "aten::ge(Tensor self, Tensor other) -> Tensor",
+        "aten::ge(Tensor self, Scalar other) -> Tensor",
+        "aten::gt(Tensor self, Tensor other) -> Tensor",
+        "aten::gt(Tensor self, Scalar other) -> Tensor",
+        "aten::le(Tensor self, Tensor other) -> Tensor",
+        "aten::le(Tensor self, Scalar other) -> Tensor",
+        "aten::lt(Tensor self, Tensor other) -> Tensor",
+        "aten::lt(Tensor self, Scalar other) -> Tensor"};
     for (auto signature : BinaryOp) {
       auto ptr_op = getOperatorForLiteral(signature);
       registerParseRule(ptr_op,
           [](const Node* const node,
              std::unordered_map<size_t, CgValue>& value_maps) -> void {
             static std::unordered_map<Symbol, BinaryOpType> op_mapping({
-                {aten::mul, BinaryOpType::Mul},
-                {aten::div, BinaryOpType::Div},
+                {aten::mul,       BinaryOpType::Mul},
+                {aten::div,       BinaryOpType::Div},
+                {aten::add,       BinaryOpType::Add},
+                {aten::sub,       BinaryOpType::Sub},
+                {aten::mul,       BinaryOpType::Mul},
+                {aten::div,       BinaryOpType::Div},
+                {aten::atan2,     BinaryOpType::Atan2},
+                {aten::min,       BinaryOpType::Min},
+                {aten::max,       BinaryOpType::Max},
+                {aten::pow,       BinaryOpType::Pow},
+                {aten::remainder, BinaryOpType::Remainder},
+                {aten::fmod,      BinaryOpType::Fmod},
+                {aten::lt,        BinaryOpType::LT},
+                {aten::le,        BinaryOpType::LE},
+                {aten::gt,        BinaryOpType::GT},
+                {aten::ge,        BinaryOpType::GE},
+                {aten::ne,        BinaryOpType::NE},
+                {aten::eq,        BinaryOpType::Eq}
             });
-            printf("\n\n\n parsing binary \n\n\n");
             auto lhs = value_maps[node->inputs()[0]->unique()];
             auto rhs = value_maps[node->inputs()[1]->unique()];
 
@@ -191,6 +223,81 @@ class IrParser {
             value_maps.emplace(node->output()->unique(), out);
           });
     }
+
+    std::array<const char*, 29> UnaryOp= {
+        "aten::neg(Tensor self) -> Tensor",
+        "aten::abs(Tensor self) -> Tensor",
+        "aten::log(Tensor self) -> Tensor",
+        "aten::log10(Tensor self) -> Tensor",
+        "aten::log1p(Tensor self) -> Tensor",
+        "aten::log2(Tensor self) -> Tensor",
+        "aten::lgamma(Tensor self) -> Tensor",
+        "aten::exp(Tensor self) -> Tensor",
+        "aten::expm1(Tensor self) -> Tensor",
+        "aten::erf(Tensor self) -> Tensor",
+        "aten::erfc(Tensor self) -> Tensor",
+        "aten::cos(Tensor self) -> Tensor",
+        "aten::acos(Tensor self) -> Tensor",
+        "aten::cosh(Tensor self) -> Tensor",
+        "aten::sin(Tensor self) -> Tensor",
+        "aten::asin(Tensor self) -> Tensor",
+        "aten::sinh(Tensor self) -> Tensor",
+        "aten::tan(Tensor self) -> Tensor",
+        "aten::atan(Tensor self) -> Tensor",
+        "aten::sqrt(Tensor self) -> Tensor",
+        "aten::rsqrt(Tensor self) -> Tensor",
+        "aten::ceil(Tensor self) -> Tensor",
+        "aten::floor(Tensor self) -> Tensor",
+        "aten::round(Tensor self) -> Tensor",
+        "aten::trunc(Tensor self) -> Tensor",
+        "aten::frac(Tensor self) -> Tensor",
+        "aten::reciprocal(Tensor self) -> Tensor",
+        "aten::relu(Tensor self) -> Tensor",
+        "aten::sigmoid(Tensor self) -> Tensor"
+        };
+    for (auto signature : UnaryOp) {
+      auto ptr_op = getOperatorForLiteral(signature);
+      registerParseRule(ptr_op,
+          [](const Node* const node,
+             std::unordered_map<size_t, CgValue>& value_maps) -> void {
+            static std::unordered_map<Symbol, UnaryOpType> op_mapping({
+                {aten::neg,        UnaryOpType::Neg},
+                {aten::abs,        UnaryOpType::Abs},
+                {aten::log,        UnaryOpType::Log},
+                {aten::log10,      UnaryOpType::Log10},
+                {aten::log1p,      UnaryOpType::Log1p},
+                {aten::log2,       UnaryOpType::Log2},
+                {aten::lgamma,     UnaryOpType::Lgamma},
+                {aten::exp,        UnaryOpType::Exp},
+                {aten::expm1,      UnaryOpType::Expm1},
+                {aten::erf,        UnaryOpType::Erf},
+                {aten::erfc,       UnaryOpType::Erfc},
+                {aten::cos,        UnaryOpType::Cos},
+                {aten::acos,       UnaryOpType::Acos},
+                {aten::cosh,       UnaryOpType::Cosh},
+                {aten::sin,        UnaryOpType::Sin},
+                {aten::asin,       UnaryOpType::Asin},
+                {aten::sinh,       UnaryOpType::Sinh},
+                {aten::tan,        UnaryOpType::Tan},
+                {aten::atan,       UnaryOpType::Atan},
+                {aten::sqrt,       UnaryOpType::Sqrt},
+                {aten::rsqrt,      UnaryOpType::Rsqrt},
+                {aten::ceil,       UnaryOpType::Ceil},
+                {aten::floor,      UnaryOpType::Floor},
+                {aten::round,      UnaryOpType::Round},
+                {aten::trunc,      UnaryOpType::Trunc},
+                {aten::frac,       UnaryOpType::Frac},
+                {aten::reciprocal, UnaryOpType::Reciprocal},
+                {aten::relu,       UnaryOpType::Relu},
+                {aten::sigmoid,    UnaryOpType::Sigmoid},
+            });
+            auto operand = value_maps[node->input()->unique()];
+
+            auto out = unaryOp(op_mapping[node->kind()], operand);
+            value_maps.emplace(node->output()->unique(), out);
+          });
+    }
+
   }
 
   void processJitNode(const JitOp* node) {
@@ -250,8 +357,9 @@ class IrParser {
 
   bool registerTensor(const JitValue* val, int broadcast_dim = -1) {
     CgValue cg_val;
-    if (val->isCompleteTensor()) {
-      auto tensor_type = val->type()->cast<TensorType>();
+   if (auto tensor_type = val->type()->cast<TensorType>()) {
+      // TODO: make this a static function in Tensor class;
+      // create tensor;
       if (broadcast_dim >= 0) {
         tensor_type = tensor_type->withDim(broadcast_dim);
       }
