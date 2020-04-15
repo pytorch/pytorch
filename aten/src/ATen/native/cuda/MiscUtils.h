@@ -65,9 +65,7 @@ struct MagmaStreamSyncGuard {
   }
 
   ~MagmaStreamSyncGuard() noexcept(false) {
-    if (at::cuda::getCurrentCUDAStream() == 0) {
-      AT_CUDA_CHECK(cudaGetLastError());
-    } else {
+    if (at::cuda::getCurrentCUDAStream() != 0) {
       AT_CUDA_CHECK(cudaStreamSynchronize(0));
     }
   }
