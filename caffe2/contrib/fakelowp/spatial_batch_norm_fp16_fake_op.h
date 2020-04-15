@@ -6,9 +6,9 @@
 #include <string>
 #include <vector>
 
+#include <fbgemm/FbgemmConvert.h>
 #include "caffe2/core/context.h"
 #include "caffe2/core/operator.h"
-#include "caffe2/fb/fbgemm/fbgemm_fp16/include/fbgemm/FbgemmFloat16.h"
 #include "caffe2/utils/eigen_utils.h"
 #include "caffe2/utils/math.h"
 #include "fp16_fma.h"
@@ -330,9 +330,8 @@ class SpatialBNFakeFp16Op : public Operator<CPUContext> {
       T* beta) {
     EigenVectorArrayMap<T> alpha_arr(alpha, C);
     EigenVectorArrayMap<T> beta_arr(beta, C);
-    alpha_arr = ConstEigenVectorArrayMap<T>(scale, C) *
-        (ConstEigenVectorArrayMap<T>(var, C) + static_cast<T>(epsilon_))
-            .rsqrt();
+    alpha_arr = ConstEigenVectorArrayMap<T>(scale, C) /
+        (ConstEigenVectorArrayMap<T>(var, C) + static_cast<T>(epsilon_)).sqrt();
     beta_arr = ConstEigenVectorArrayMap<T>(bias, C) -
         alpha_arr * ConstEigenVectorArrayMap<T>(mean, C);
   }

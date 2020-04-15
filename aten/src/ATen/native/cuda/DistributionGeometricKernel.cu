@@ -3,7 +3,7 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/AccumulateType.h>
-#include <ATen/CUDAGenerator.h>
+#include <ATen/CUDAGeneratorImpl.h>
 #include <ATen/native/UnaryOps.h>
 #include <ATen/native/cuda/DistributionTemplates.h>
 
@@ -29,8 +29,8 @@
 
 namespace at { namespace native {
 
-void geometric_kernel_cuda(TensorIterator& iter, double p_, Generator gen_) {
-  auto gen = get_generator_or_default<CUDAGenerator>(gen_, cuda::detail::getDefaultCUDAGenerator());
+void geometric_kernel_cuda(TensorIterator& iter, double p_, c10::optional<Generator> gen_) {
+  auto gen = get_generator_or_default<CUDAGeneratorImpl>(gen_, cuda::detail::getDefaultCUDAGenerator());
   AT_DISPATCH_ALL_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "geometric_cuda", [&] {
     if (std::is_same<scalar_t, double>::value) {
       // define lambda for geometric transformation

@@ -62,23 +62,29 @@ Tensor FF_op(const Tensor& self) {
 
 namespace {
 
+// NB: Some of these registrations (AA, EE) are not what you
+// actually expect to see in practice, but we cover them here
+// as they are technically "valid" API calls and we want to
+// make sure the analyzer catches them.  (The analyzer is very
+// generic, so actually there isn't any reason it shouldn't work,
+// but it's good to test them!)
+//
+// Additionally, the code in this file is not really runnable; for
+// example we are missing schemas for all of the impl registrations
+// here.  The analyzer doesn't really care, as it only really
+// cares about the name
 auto registerer = torch::import()
-  .def("aten::AA(Tensor self) -> Tensor",
-    torch::dispatch(DispatchKey::CPUTensorId, &AA_op))
+  .def("aten::AA(Tensor self) -> Tensor", torch::dispatch(kCPU, &AA_op))
   .def("aten::BB(Tensor self) -> Tensor", &BB_op)
-  .impl("aten::CC(Tensor self) -> Tensor",
-    torch::dispatch(DispatchKey::CPUTensorId, &CC_op))
-  .impl("aten::DD(Tensor self) -> Tensor", &DD_op)
-  .def("aten::EE(Tensor self) -> Tensor", torch::dispatch(
-    DispatchKey::CPUTensorId,
-    CppFunction::makeUnboxedOnly(EE_op)))
-  .def("aten::FF(Tensor self) -> Tensor",
-    CppFunction::makeUnboxedOnly(FF_op))
-  .impl("aten::GG(Tensor self) -> Tensor", torch::dispatch(
-    DispatchKey::CPUTensorId, [] (Tensor a) -> Tensor {
+  .impl("aten::CC", kCPU, &CC_op)
+  .impl("aten::DD", &DD_op)
+  .impl_UNBOXED("aten::EE", kCPU, EE_op)
+  .def("aten::FF(Tensor self) -> Tensor", CppFunction::makeUnboxedOnly(FF_op))
+  .impl("aten::GG",
+    kCPU, [] (Tensor a) -> Tensor {
       return call_FF_op(a);
-    }))
-  .impl("aten::HH(Tensor self) -> Tensor",
+    })
+  .impl("aten::HH",
     [] (Tensor a) -> Tensor {
       return a;
     });
