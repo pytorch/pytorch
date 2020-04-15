@@ -8566,8 +8566,12 @@ class TestTorchDeviceType(TestCase):
         shapes = [(3, 3), (5, 3, 3), (7, 5, 3, 3),  # square matrices
                   (7, 3), (5, 7, 3), (7, 5, 7, 3),  # fat matrices
                   (3, 7), (5, 3, 7), (7, 5, 3, 7)]  # thin matrices
+
+        import os
+        os.environ["PYTORCH_JIT_LOG_LEVEL"] = ">>profiling_graph_executor_impl:>>liveness.cpp:>>graph_executor:>>function_impl"
         for dims, some, compute_uv in product(shapes, [True, False], [True, False]):
             run_test(dims, some, compute_uv)
+        del os.environ
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
