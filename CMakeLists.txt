@@ -147,6 +147,7 @@ cmake_dependent_option(
     USE_STATIC_CUDNN "Use cuDNN static libraries" OFF
     "USE_CUDNN" OFF)
 option(USE_FBGEMM "Use FBGEMM (quantized 8-bit server operators)" ON)
+option(USE_FAKELOWP "Use FakeLowp operators" OFF)
 option(USE_FFMPEG "Use ffmpeg" OFF)
 option(USE_GFLAGS "Use GFLAGS" OFF)
 option(USE_GLOG "Use GLOG" OFF)
@@ -363,7 +364,15 @@ include(cmake/Utils.cmake)
 include(cmake/public/utils.cmake)
 
 # ---[ Version numbers for generated libraries
-set(TORCH_DEFAULT_VERSION "1.1.0")
+file(READ version.txt TORCH_DEFAULT_VERSION)
+# Strip trailing newline
+string(REGEX REPLACE "\n$" "" TORCH_DEFAULT_VERSION "${TORCH_DEFAULT_VERSION}")
+if("${TORCH_DEFAULT_VERSION} " STREQUAL " ")
+  message(WARNING "Could not get version from base 'version.txt'")
+  # If we can't get the version from the version file we should probably
+  # set it to something non-sensical like 0.0.0
+  set(TORCH_DEFAULT_VERSION, "0.0.0")
+endif()
 set(TORCH_BUILD_VERSION "${TORCH_DEFAULT_VERSION}" CACHE STRING "Torch build version")
 if(DEFINED ENV{PYTORCH_BUILD_VERSION})
   set(TORCH_BUILD_VERSION "$ENV{PYTORCH_BUILD_VERSION}"

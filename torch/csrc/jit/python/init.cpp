@@ -30,6 +30,7 @@
 #include <torch/csrc/jit/passes/onnx/constant_fold.h>
 #include <torch/csrc/jit/passes/onnx/fixup_onnx_conditionals.h>
 #include <torch/csrc/jit/passes/onnx/fixup_onnx_loop.h>
+#include <torch/csrc/jit/passes/onnx/function_substitution.h>
 #include <torch/csrc/jit/passes/onnx/peephole.h>
 #include <torch/csrc/jit/passes/onnx/prepare_division_for_onnx.h>
 #include <torch/csrc/jit/passes/onnx/prepare_inplace_ops_for_onnx.h>
@@ -122,6 +123,7 @@ void initJITBindings(PyObject* module) {
       .def("_jit_pass_onnx_preprocess_caffe2", PreprocessCaffe2Ops)
       .def("_jit_pass_onnx", ToONNX)
       .def("_jit_pass_lower_all_tuples", LowerAllTuples)
+      .def("_jit_pass_onnx_function_substitution", ONNXFunctionCallSubstitution)
       .def(
           "_jit_pass_onnx_peephole",
           [](std::shared_ptr<Graph>& graph,
@@ -396,7 +398,8 @@ void initJITBindings(PyObject* module) {
             auto stack = toTraceableStack(args);
             checkAliasAnnotation(g, std::move(stack), unqualified_op_name);
           })
-      .def("_jit_register_cuda_fuser", &registerCudaFuseGraph)
+      .def("_jit_register_cuda_fuser", &RegisterCudaFuseGraph::registerPass)
+      .def("_jit_clear_cuda_fuser", &RegisterCudaFuseGraph::clearPass)
       .def(
           "_jit_set_profiling_mode",
           [](bool profiling_flag) {
@@ -498,6 +501,11 @@ void initJITBindings(PyObject* module) {
       .def(
           "_jit_pass_insert_prepacked_ops",
           [](script::Module& module) { return insertPrePackedOps(module); })
+      .def(
+          "_jit_pass_fuse_clamp_w_prepacked_linear_conv",
+          [](script::Module& module) {
+            return fusePrePackedLinearConvWithClamp(module);
+          })
       .def(
           "_jit_pass_fold_prepacking_ops",
           [](script::Module& module) { return FoldPrePackingOps(module); })

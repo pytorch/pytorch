@@ -1,6 +1,6 @@
 #pragma once
 
-#include <ATen/core/boxing/kernel_functor.h>
+#include <ATen/core/boxing/impl/make_boxed_from_unboxed_functor.h>
 #include <ATen/core/function.h>
 #include <c10/util/Metaprogramming.h>
 #include <c10/util/TypeTraits.h>
@@ -77,7 +77,8 @@ call_torchbind_method_from_stack(
 
   using IValueArgTypes =
       typename c10::guts::infer_function_traits_t<Functor>::parameter_types;
-  return (functor)(c10::detail::ivalue_to_arg<
+  // TODO We shouldn't use c10::impl stuff directly here. We should use the KernelFunction API instead.
+  return (functor)(c10::impl::ivalue_to_arg<
                    std::remove_cv_t<std::remove_reference_t<
                        c10::guts::typelist::
                            element_t<ivalue_arg_indices, IValueArgTypes>>>,

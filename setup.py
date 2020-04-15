@@ -219,7 +219,7 @@ for i, arg in enumerate(sys.argv):
         break
     if arg == '-q' or arg == '--quiet':
         VERBOSE_SCRIPT = False
-    if arg == 'clean':
+    if arg == 'clean' or arg == 'egg_info':
         RUN_BUILD_DEPS = False
     filtered_args.append(arg)
 sys.argv = filtered_args
@@ -793,6 +793,7 @@ if __name__ == '__main__':
                 'include/c10/macros/*.h',
                 'include/c10/core/*.h',
                 'include/ATen/core/boxing/*.h',
+                'include/ATen/core/boxing/impl/*.h',
                 'include/ATen/core/dispatch/*.h',
                 'include/ATen/core/op_registration/*.h',
                 'include/c10/core/impl/*.h',
@@ -801,6 +802,7 @@ if __name__ == '__main__':
                 'include/c10/cuda/impl/*.h',
                 'include/c10/hip/*.h',
                 'include/c10/hip/impl/*.h',
+                'include/c10d/*.hpp',
                 'include/caffe2/**/*.h',
                 'include/torch/*.h',
                 'include/torch/csrc/*.h',

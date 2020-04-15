@@ -12,9 +12,8 @@ namespace tensorexpr {
 template <typename T>
 inline std::vector<int64_t> bufferSizes(const T& t) {
   std::vector<int64_t> sizes;
-  for (int i = 0; i < t->function()->ndim(); i++) {
-    sizes.push_back(
-        dynamic_cast<const IntImm*>(t->function()->dim(i))->value());
+  for (size_t i = 0; i < t->buf()->ndim(); i++) {
+    sizes.push_back(dynamic_cast<const IntImm*>(t->buf()->dim(i))->value());
   }
   return sizes;
 }
@@ -70,7 +69,7 @@ class TensorExprKernel {
   template <typename T, typename T1>
   ExprHandle broadcast(const T& t, const std::vector<T1>& axes) {
     return t->call(computeIndicesToBroadcast(
-        axes, ExprVectorToExprHandleVector(t->function()->dims())));
+        axes, ExprVectorToExprHandleVector(t->buf()->dims())));
   }
 
   template <typename T, typename T1>
