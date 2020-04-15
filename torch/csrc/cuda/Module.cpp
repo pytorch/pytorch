@@ -6,11 +6,11 @@
 #include <TH/TH.h>
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAContext.h>
-#include <ATen/CUDAGenerator.h>
+#include <ATen/CUDAGeneratorImpl.h>
 #include <c10/cuda/CUDAFunctions.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 #ifdef USE_NCCL
-#include <nccl.h>
+#include <torch/csrc/cuda/python_nccl.h>
 #endif
 
 #include <torch/csrc/cuda/THCP.h>
@@ -473,17 +473,6 @@ static PyObject * THCPModule_initExtension(PyObject *self, PyObject *noargs)
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
-
-#ifdef USE_NCCL
-#include <torch/csrc/cuda/python_nccl.h>
-
-void THCPModule_useNccl()
-{
-  // Use NCCL to ensure that the symbols are loaded
-  ncclUniqueId uniqueId;
-  ncclGetUniqueId(&uniqueId);
-}
-#endif
 
 PyObject * THCPModule_getCurrentBlasHandle_wrap(PyObject *self, PyObject *noargs)
 {

@@ -11,6 +11,7 @@ namespace at {
 namespace native {
 
 DEFINE_DISPATCH(qbatch_norm_stub);
+DEFINE_DISPATCH(qbatch_norm_relu_stub);
 
 namespace {
 void compute_fused_params(
@@ -39,7 +40,7 @@ void compute_fused_params(
 }
 
 template <bool ReluFused>
-Tensor q_batch_norm_impl(
+Tensor q_batch_norm2d_impl(
     Tensor qx,
     Tensor weight,
     Tensor bias,
@@ -81,10 +82,12 @@ Tensor q_batch_norm_impl(
   auto qx_nhwc = qx.contiguous(MemoryFormat::ChannelsLast);
   Tensor qy = at::_empty_affine_quantized(
       oSizes,
-      at::device(kCPU).dtype(qx_nhwc.scalar_type()),
+      at::device(kCPU)
+        .dtype(qx_nhwc.scalar_type())
+        .memory_format(MemoryFormat::ChannelsLast),
       output_scale,
       output_zero_point,
-      MemoryFormat::ChannelsLast);
+      c10::nullopt);
 
   compute_fused_params(
       C,
@@ -97,18 +100,31 @@ Tensor q_batch_norm_impl(
       output_scale,
       alpha_data,
       beta_data);
-
-  qbatch_norm_stub(
-      qx.device().type(),
-      N,
-      C,
-      H * W,
-      qx.q_zero_point(),
-      output_zero_point,
-      qx_nhwc,
-      alpha,
-      beta,
-      qy);
+  if (ReluFused) {
+    qbatch_norm_relu_stub(
+        qx.device().type(),
+        N,
+        C,
+        H * W,
+        qx.q_zero_point(),
+        output_zero_point,
+        qx_nhwc,
+        alpha,
+        beta,
+        qy);
+  } else {
+    qbatch_norm_stub(
+        qx.device().type(),
+        N,
+        C,
+        H * W,
+        qx.q_zero_point(),
+        output_zero_point,
+        qx_nhwc,
+        alpha,
+        beta,
+        qy);
+  }
   return qy;
 }
 
@@ -156,10 +172,12 @@ Tensor q_batch_norm3d_impl(
   auto qx_nhwc = qx.contiguous(MemoryFormat::ChannelsLast3d);
   Tensor qy = at::_empty_affine_quantized(
       oSizes,
-      at::device(kCPU).dtype(qx_nhwc.scalar_type()),
+      at::device(kCPU)
+        .dtype(qx_nhwc.scalar_type())
+        .memory_format(MemoryFormat::ChannelsLast3d),
       output_scale,
       output_zero_point,
-      MemoryFormat::ChannelsLast3d);
+      c10::nullopt);
 
   compute_fused_params(
       C,
@@ -173,18 +191,31 @@ Tensor q_batch_norm3d_impl(
       alpha_data,
       beta_data);
 
-  qbatch_norm_stub(
-      qx.device().type(),
-      N,
-      C,
-      D * H * W,
-      qx.q_zero_point(),
-      output_zero_point,
-      qx_nhwc,
-      alpha,
-      beta,
-      qy);
-
+  if (ReluFused) {
+    qbatch_norm_relu_stub(
+        qx.device().type(),
+        N,
+        C,
+        D * H * W,
+        qx.q_zero_point(),
+        output_zero_point,
+        qx_nhwc,
+        alpha,
+        beta,
+        qy);
+  } else {
+    qbatch_norm_stub(
+        qx.device().type(),
+        N,
+        C,
+        D * H * W,
+        qx.q_zero_point(),
+        output_zero_point,
+        qx_nhwc,
+        alpha,
+        beta,
+        qy);
+  }
   return qy;
 }
 
@@ -200,7 +231,7 @@ Tensor quantized_batch_norm(
     double output_scale,
     int64_t output_zero_point) {
   Tensor qy;
-  qy = q_batch_norm_impl<false>(
+  qy = q_batch_norm2d_impl<false>(
       qx, weight, bias, mean, var, eps, output_scale, output_zero_point);
   return qy;
 }
@@ -220,7 +251,7 @@ class QBatchNorm2d final : public torch::OperatorKernel {
       double eps,
       double output_scale,
       int64_t output_zero_point) {
-    return q_batch_norm_impl<ReLUFused>(
+    return q_batch_norm2d_impl<ReLUFused>(
         qx, weight, bias, mean, var, eps, output_scale, output_zero_point);
   }
 };
@@ -243,7 +274,7 @@ class QBatchNorm3d final : public torch::OperatorKernel {
 };
 
 static auto registry = torch::RegisterOperators().op(
-    "quantized::batch_norm(Tensor qx, "
+    "quantized::batch_norm2d(Tensor qx, "
     "Tensor weight, "
     "Tensor bias, "
     "Tensor mean, "
@@ -252,7 +283,7 @@ static auto registry = torch::RegisterOperators().op(
     "float output_scale, "
     "int output_zero_point) -> Tensor",
     torch::RegisterOperators::options().kernel<QBatchNorm2d<false>>(
-        DispatchKey::QuantizedCPUTensorId))
+        DispatchKey::QuantizedCPU))
 .op(
     "quantized::batch_norm2d_relu(Tensor qx, "
     "Tensor weight, "
@@ -263,7 +294,7 @@ static auto registry = torch::RegisterOperators().op(
     "float output_scale, "
     "int output_zero_point) -> Tensor",
     torch::RegisterOperators::options().kernel<QBatchNorm2d<true>>(
-        DispatchKey::QuantizedCPUTensorId))
+        DispatchKey::QuantizedCPU))
 .op(
     "quantized::batch_norm3d(Tensor qx, "
     "Tensor weight, "
@@ -274,7 +305,7 @@ static auto registry = torch::RegisterOperators().op(
     "float output_scale, "
     "int output_zero_point) -> Tensor",
     torch::RegisterOperators::options().kernel<QBatchNorm3d<false>>(
-        DispatchKey::QuantizedCPUTensorId))
+        DispatchKey::QuantizedCPU))
 .op(
     "quantized::batch_norm3d_relu(Tensor qx, "
     "Tensor weight, "
@@ -285,7 +316,7 @@ static auto registry = torch::RegisterOperators().op(
     "float output_scale, "
     "int output_zero_point) -> Tensor",
     torch::RegisterOperators::options().kernel<QBatchNorm3d<true>>(
-        DispatchKey::QuantizedCPUTensorId));
+        DispatchKey::QuantizedCPU));
 
 } // namespace
 } // namespace native

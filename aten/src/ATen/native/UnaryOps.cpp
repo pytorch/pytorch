@@ -73,11 +73,25 @@ Tensor& abs_(Tensor& self) { return unary_op_impl_(self, at::abs_out); }
 Tensor& angle_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, angle_stub); }
 Tensor angle(const Tensor& self) { return unary_op_impl(self, at::angle_out); }
 
-Tensor& real_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, real_stub); }
-Tensor real(const Tensor& self) { return unary_op_impl(self, at::real_out); }
+Tensor real(const Tensor& self) {
+  TORCH_CHECK(!self.is_complex(), "real is not yet implemented for complex tensors.");
+  return self;
+}
 
-Tensor& imag_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, imag_stub); }
-Tensor imag(const Tensor& self) { return unary_op_impl(self, at::imag_out); }
+Tensor imag(const Tensor& self) {
+  TORCH_CHECK(false, "imag is not yet implemented.");
+
+  // Note: unreachable
+  return at::zeros_like(self);
+}
+
+Tensor& copy_real_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, real_stub); }
+
+Tensor copy_real(const Tensor& self) { return unary_op_impl(self, at::copy_real_out); }
+
+Tensor& copy_imag_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, imag_stub); }
+
+Tensor copy_imag(const Tensor& self) { return unary_op_impl(self, at::copy_imag_out); }
 
 Tensor& conj_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, conj_stub); }
 Tensor conj(const Tensor& self) { return unary_op_impl(self, at::conj_out); }
@@ -86,7 +100,13 @@ Tensor& bitwise_not_out(Tensor& result, const Tensor& self) { return unary_op_im
 Tensor bitwise_not(const Tensor& self) { return unary_op_impl(self, at::bitwise_not_out); }
 Tensor& bitwise_not_(Tensor& self) { return unary_op_impl_(self, at::bitwise_not_out); }
 
-Tensor& ceil_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, ceil_stub); }
+Tensor& ceil_out(Tensor& result, const Tensor& self) {
+  // Note: this is consistent with NumPy
+  TORCH_CHECK(!self.is_complex(),
+    "ceil is not supported for complex inputs");
+
+  return unary_op_impl_out(result, self, ceil_stub);
+}
 Tensor ceil(const Tensor& self) { return unary_op_impl(self, at::ceil_out); }
 Tensor& ceil_(Tensor& self) { return unary_op_impl_(self, at::ceil_out); }
 
@@ -98,7 +118,13 @@ Tensor& frac_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(
 Tensor frac(const Tensor& self) { return unary_op_impl(self, at::frac_out); }
 Tensor& frac_(Tensor& self) { return unary_op_impl_(self, at::frac_out); }
 
-Tensor& floor_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, floor_stub); }
+Tensor& floor_out(Tensor& result, const Tensor& self) {
+  // Note: this is consistent with NumPy
+  TORCH_CHECK(!self.is_complex(),
+    "floor is not supported for complex inputs");
+
+  return unary_op_impl_out(result, self, floor_stub);
+}
 Tensor floor(const Tensor& self) { return unary_op_impl(self, at::floor_out); }
 Tensor& floor_(Tensor& self) { return unary_op_impl_(self, at::floor_out); }
 
@@ -157,7 +183,13 @@ Tensor& sigmoid_out(Tensor& result, const Tensor& self) { return unary_op_impl_o
 Tensor sigmoid(const Tensor& self) { return unary_op_impl(self, at::sigmoid_out);  }
 Tensor& sigmoid_(Tensor& self) { return unary_op_impl_(self, at::sigmoid_out);  }
 
-Tensor& trunc_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, trunc_stub); }
+Tensor& trunc_out(Tensor& result, const Tensor& self) {
+  // Note: this is consistent with NumPy
+  TORCH_CHECK(!self.is_complex(),
+    "trunc is not supported for complex inputs");
+
+  return unary_op_impl_out(result, self, trunc_stub);
+}
 Tensor trunc(const Tensor& self) { return unary_op_impl(self, at::trunc_out); }
 Tensor& trunc_(Tensor& self) { return unary_op_impl_(self, at::trunc_out); }
 
@@ -191,21 +223,25 @@ Tensor& logical_not_out(Tensor& result, const Tensor& self) {
 }
 
 Tensor clamp(const Tensor& self, optional<Scalar> min, optional<Scalar> max) {
+  TORCH_CHECK(!self.is_complex(), "clamp is not yet implemented for complex tensors.");
   Tensor result = at::empty({0}, self.options());
   return clamp_out(result, self, min, max);
 }
 
 Tensor clamp_max(const Tensor& self, Scalar max) {
+  TORCH_CHECK(!self.is_complex(), "clamp is not yet implemented for complex tensors.");
   Tensor result = at::empty({0}, self.options());
   return clamp_max_out(result, self, max);
 }
 
 Tensor clamp_min(const Tensor& self, Scalar min) {
+  TORCH_CHECK(!self.is_complex(), "clamp is not yet implemented for complex tensors.");
   Tensor result = at::empty({0}, self.options());
   return clamp_min_out(result, self, min);
 }
 
 Tensor& _clamp__cpu(Tensor& self, optional<Scalar> min, optional<Scalar> max) {
+  TORCH_CHECK(!self.is_complex(), "clamp is not yet implemented for complex tensors.");
   return clamp_out(self, self, min, max);
 }
 
@@ -230,6 +266,7 @@ Tensor& _clamp_out_cpu(
     const Tensor& self,
     optional<Scalar> min,
     optional<Scalar> max) {
+  TORCH_CHECK(!self.is_complex(), "clamp is not yet implemented for complex tensors.");
   if (min && max) {
     TORCH_CHECK(self.device().type() == DeviceType::CPU,
                 "clamp only supports CPU device type, got: ", self.device().type());
@@ -249,10 +286,12 @@ Tensor& _clamp_out_cpu(
 }
 
 Tensor& _clamp_max__cpu(Tensor& self, Scalar max) {
+  TORCH_CHECK(!self.is_complex(), "clamp is not yet implemented for complex tensors.");
   return clamp_max_out(self, self, max);
 }
 
 Tensor& _clamp_max_out_cpu(Tensor& result, const Tensor& self, Scalar max) {
+  TORCH_CHECK(!self.is_complex(), "clamp is not yet implemented for complex tensors.");
   TORCH_CHECK(self.device().type() == DeviceType::CPU,
               "clamp_max only supports CPU device type, got: ", self.device().type());
   TORCH_CHECK(self.layout() == Layout::Strided,
@@ -264,10 +303,12 @@ Tensor& _clamp_max_out_cpu(Tensor& result, const Tensor& self, Scalar max) {
 }
 
 Tensor& _clamp_min__cpu(Tensor& self, Scalar min) {
+  TORCH_CHECK(!self.is_complex(), "clamp is not yet implemented for complex tensors.");
   return clamp_min_out(self, self, min);
 }
 
 Tensor& _clamp_min_out_cpu(Tensor& result, const Tensor& self, Scalar min) {
+  TORCH_CHECK(!self.is_complex(), "clamp is not yet implemented for complex tensors.");
   TORCH_CHECK(self.device().type() == DeviceType::CPU,
               "clamp_min only supports CPU device type, got: ", self.device().type());
   TORCH_CHECK(self.layout() == Layout::Strided,

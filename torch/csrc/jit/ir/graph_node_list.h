@@ -23,11 +23,12 @@ namespace jit {
 //
 // Regardless of the iteration direction, iterators always physically point
 // to the element they logically point to, rather than
-// the off-by-one behavior for all standard library reverse iterators like std::list.
+// the off-by-one behavior for all standard library reverse iterators like
+// std::list.
 
-// The list is includes two sentinel nodes, one at the beginning and one at the end
-// with a circular link between them. It is an error to insert nodes after the
-// end sentinel node but before the beginning node:
+// The list is includes two sentinel nodes, one at the beginning and one at the
+// end with a circular link between them. It is an error to insert nodes after
+// the end sentinel node but before the beginning node:
 
 // Visualization showing only the next() links:
 //  HEAD -> first -> second  -> ... -> last -> TAIL
@@ -36,7 +37,6 @@ namespace jit {
 // Visualization showing only the prev() links:
 //  HEAD <- first <- second  <- ... <- last <- TAIL
 //   ------------------------------------------^
-
 
 static constexpr int kNextDirection = 0;
 static constexpr int kPrevDirection = 1;
@@ -128,7 +128,8 @@ struct generic_graph_node_list {
     return generic_graph_node_list_iterator<T>(head->next_in_graph[!d], d);
   }
   generic_graph_node_list_iterator<const T> end() const {
-    return generic_graph_node_list_iterator<const T>(head->next_in_graph[!d], d);
+    return generic_graph_node_list_iterator<const T>(
+        head->next_in_graph[!d], d);
   }
   generic_graph_node_list_iterator<T> rbegin() {
     return reverse().begin();
@@ -143,12 +144,10 @@ struct generic_graph_node_list {
     return reverse().end();
   }
   generic_graph_node_list reverse() {
-    return generic_graph_node_list(
-        head->next_in_graph[!d], !d);
+    return generic_graph_node_list(head->next_in_graph[!d], !d);
   }
   const generic_graph_node_list reverse() const {
-    return generic_graph_node_list(
-        head->next_in_graph[!d], !d);
+    return generic_graph_node_list(head->next_in_graph[!d], !d);
   }
   T* front() {
     return head->next_in_graph[d];

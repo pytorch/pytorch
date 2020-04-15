@@ -1,8 +1,8 @@
 #include <torch/csrc/jit/ir/constants.h>
 #include <ATen/core/functional.h>
 #include <torch/csrc/autograd/variable.h>
-#include <torch/csrc/jit/runtime/custom_operator.h>
 #include <torch/csrc/jit/ir/ir.h>
+#include <torch/csrc/jit/runtime/custom_operator.h>
 #include <torch/csrc/jit/runtime/operator.h>
 
 namespace torch {
@@ -96,12 +96,10 @@ c10::optional<Value*> tryInsertConstant(
     n->is_(attr::value, val.toIntVector());
     n->output()->setType(ListType::ofInts());
   } else if (val.isTensorList()) {
-    n->ts_(
-        attr::value,
-        fmap(val.toTensorVector(), [](const at::Tensor& t) {
-          AT_ASSERT(!t.requires_grad());
-          return t;
-        }));
+    n->ts_(attr::value, fmap(val.toTensorVector(), [](const at::Tensor& t) {
+             AT_ASSERT(!t.requires_grad());
+             return t;
+           }));
     n->output()->setType(ListType::ofTensors());
   } else if (val.isDoubleList()) {
     auto double_list = val.toDoubleList();
@@ -158,7 +156,7 @@ c10::optional<IValue> toIValue(const Value* v) {
   if (type->isSubtypeOf(TensorType::get())) {
     return node->t(attr::value);
   } else if (type->isSubtypeOf(BoolType::get())) {
-    return (bool) node->i(attr::value);
+    return (bool)node->i(attr::value);
   } else if (
       type->isSubtypeOf(NumberType::get()) &&
       node->kindOf(attr::value) == AttributeKind::i) {

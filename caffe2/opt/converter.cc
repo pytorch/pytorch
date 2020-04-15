@@ -96,6 +96,19 @@ OperatorDef Converter::convertToOperatorDef(
   return op;
 }
 
+DeviceOption Converter::getDeviceOption(
+    const nom::repr::NeuralNetOperator* nnOp) const {
+  auto* annotation = nnOp->getAnnotation();
+  // Default to using the stored operator.
+  if (annotation && isa<Caffe2Annotation>(annotation)) {
+    return dyn_cast<Caffe2Annotation>(annotation)
+        ->getOperatorDef()
+        .device_option();
+  }
+  caffe2::DeviceOption opt;
+  return opt;
+}
+
 std::vector<int> getKernelShape(
     std::map<std::string, caffe2::Argument> argMap) {
   // There are literally three ways to define shapes in Conv in Caffe2

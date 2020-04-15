@@ -87,6 +87,7 @@ def main(args):
             build.cc("deconvolution.c"),
             build.cc("fully-connected.c"),
             build.cc("global-average-pooling.c"),
+            build.cc("hardswish.c"),
             build.cc("leaky-relu.c"),
             build.cc("max-pooling.c"),
             build.cc("sigmoid.c"),
@@ -220,6 +221,7 @@ def main(args):
         build.unittest("sigmoid-test", build.cxx("sigmoid.cc"))
         build.unittest("softargmax-test", build.cxx("softargmax.cc"))
         build.unittest("tanh-test", build.cxx("tanh.cc"))
+        build.unittest("hardswish-test", build.cxx("hardswish.cc"))
         build.unittest(
             "requantization-test",
             [build.cxx("requantization.cc")] + requantization_objects,
@@ -258,6 +260,7 @@ def main(args):
         build.benchmark("sigmoid-bench", build.cxx("sigmoid.cc"))
         build.benchmark("softargmax-bench", build.cxx("softargmax.cc"))
         build.benchmark("tanh-bench", build.cxx("tanh.cc"))
+        build.benchmark("hardswish-bench", build.cxx("hardswish.cc"))
 
         build.benchmark("q8gemm-bench", build.cxx("q8gemm.cc"))
         build.benchmark("hgemm-bench", build.cxx("hgemm.cc"))

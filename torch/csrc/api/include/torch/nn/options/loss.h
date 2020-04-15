@@ -43,7 +43,7 @@ using L1LossFuncOptions = L1LossOptions;
 ///
 /// Example:
 /// ```
-/// KLDivLoss model(KLDivLossOptions(torch::kNone));
+/// KLDivLoss model(KLDivLossOptions().reduction(torch::kNone).log_target(false));
 /// ```
 struct TORCH_API KLDivLossOptions {
   typedef c10::variant<enumtype::kNone, enumtype::kBatchMean, enumtype::kSum, enumtype::kMean> reduction_t;
@@ -53,6 +53,9 @@ struct TORCH_API KLDivLossOptions {
   /// Specifies the reduction to apply to the output.
   /// ``'none'`` | ``'batchmean'`` | ``'sum'`` | ``'mean'``. Default: ``'mean'``
   TORCH_ARG(reduction_t, reduction) = torch::kMean;
+
+  /// Specifies whether `target` is accepted in the log space. Default: False
+  TORCH_ARG(bool, log_target) = false;
 };
 
 namespace functional {
@@ -64,7 +67,7 @@ namespace functional {
 /// Example:
 /// ```
 /// namespace F = torch::nn::functional;
-/// F::kl_div(input, target, F::KLDivFuncOptions(torch::kNone));
+/// F::kl_div(input, target, F::KLDivFuncOptions().reduction(torch::kNone).log_target(false));
 /// ```
 using KLDivFuncOptions = KLDivLossOptions;
 } // namespace functional
@@ -268,9 +271,9 @@ namespace functional {
 /// Example:
 /// ```
 /// namespace F = torch::nn::functional;
-/// F::multilabel_margin_loss(input, target, F::MultiLabelMarginLossFuncOptions(torch::kNone));
+/// F::multilabel_margin_loss(input, target, F::MultilabelMarginLossFuncOptions(torch::kNone));
 /// ```
-using MultiLabelMarginLossFuncOptions = MultiLabelMarginLossOptions;
+using MultilabelMarginLossFuncOptions = MultiLabelMarginLossOptions;
 } // namespace functional
 
 // ============================================================================
@@ -339,9 +342,9 @@ namespace functional {
 /// Example:
 /// ```
 /// namespace F = torch::nn::functional;
-/// F::multilabel_soft_margin_loss(input, target, F::MultiLabelSoftMarginLossFuncOptions().reduction(torch::kNone).weight(weight));
+/// F::multilabel_soft_margin_loss(input, target, F::MultilabelSoftMarginLossFuncOptions().reduction(torch::kNone).weight(weight));
 /// ```
-using MultiLabelSoftMarginLossFuncOptions = MultiLabelSoftMarginLossOptions;
+using MultilabelSoftMarginLossFuncOptions = MultiLabelSoftMarginLossOptions;
 } // namespace functional
 
 // ============================================================================

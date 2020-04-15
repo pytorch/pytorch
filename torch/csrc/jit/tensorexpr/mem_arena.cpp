@@ -1,4 +1,4 @@
-#include "torch/csrc/jit/tensorexpr/mem_arena.h"
+#include <torch/csrc/jit/tensorexpr/mem_arena.h>
 
 namespace torch {
 namespace jit {
@@ -19,11 +19,6 @@ KernelArena::~KernelArena() {
 KernelScopedObject::KernelScopedObject() {
   KernelArena* kernel = KernelArena::GetCurrentKernelArena();
   kernel->kernel_objects_.push_back(this);
-}
-
-static std::vector<KernelArena*>& GetKernelArenaStack() {
-  thread_local std::vector<KernelArena*> kernel_arena_stack;
-  return kernel_arena_stack;
 }
 
 void KernelArena::SetCurrentKernelArena(KernelArena* new_kernel_arena) {

@@ -115,6 +115,19 @@ IValue UserRRef::toHere() {
       " and ForkId=",
       forkId(),
       " has been deleted. Cannot call to_here() on it after deletion.");
+  TORCH_CHECK(
+      !type_->is_module(),
+      "User RRef with RRefId=",
+      rrefId(),
+      " and ForkId=",
+      forkId(),
+      " is an RRef to a ScriptModule. "
+      "It can't be sent through RPC "
+      "from owner, ",
+      ownerName(),
+      ", to user, ",
+      RpcAgent::getCurrentRpcAgent()->getWorkerInfo().name_,
+      ".");
 
   auto agent = RpcAgent::getCurrentRpcAgent();
 
@@ -190,13 +203,18 @@ RRefForkData UserRRef::fork() const {
 
 const IValue& OwnerRRef::getValue() const {
   std::unique_lock<std::mutex> lock(mutex_);
-  valueCV_.wait(lock, [this] { return value_.has_value(); });
+  valueCV_.wait(
+      lock, [this] { return value_.has_value() || error_.has_value(); });
+  if (error_) {
+    std::runtime_error err(*error_);
+    throw err;
+  }
   return value_.value();
 }
 
 bool OwnerRRef::hasValue() const {
   std::lock_guard<std::mutex> lock(mutex_);
-  return value_.has_value();
+  return value_.has_value() || error_.has_value();
 }
 
 std::shared_ptr<FutureMessage> OwnerRRef::getFuture() {
@@ -209,6 +227,10 @@ std::shared_ptr<FutureMessage> OwnerRRef::getFuture() {
   if (value_.has_value()) {
     lock.unlock();
     ret->markCompleted(Message());
+  } else if (error_.has_value()) {
+    auto err = *error_;
+    lock.unlock();
+    ret->setError(std::move(err));
   }
   return ret;
 }
@@ -222,6 +244,18 @@ void OwnerRRef::setValue(IValue&& value) {
   valueCV_.notify_all();
   if (future.get() && !future->completed()) {
     future->markCompleted(Message());
+  }
+}
+
+void OwnerRRef::setError(const std::string& error) {
+  std::unique_lock<std::mutex> lock(mutex_);
+  error_ = error;
+  std::shared_ptr<FutureMessage> future;
+  future.swap(future_);
+  lock.unlock();
+  valueCV_.notify_all();
+  if (future.get()) {
+    future->setErrorIfNeeded(error);
   }
 }
 

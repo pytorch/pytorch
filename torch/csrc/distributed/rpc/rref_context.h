@@ -16,15 +16,14 @@ namespace rpc {
 namespace callback {
 // It's the callback for RemoteCall.
 void TORCH_API confirmPendingUser(
-    const rpc::Message& message,
-    const c10::optional<utils::FutureError>& futErr);
+    const FutureMessage& futureMessage,
+    const ForkId& expectedForkId);
 
 // It's the callback for finishing creating owner rref, it returned deletedRRef,
 // so that the deletedRRef can be handled under GIL in python_functions.cpp if
 // deletedRRef contains python object.
-c10::intrusive_ptr<RRef> TORCH_API finishCreatingOwnerRRef(
-    const Message& message,
-    const c10::optional<utils::FutureError>& futErr);
+c10::intrusive_ptr<RRef> TORCH_API
+finishCreatingOwnerRRef(const FutureMessage& futureMessage);
 } // namespace callback
 
 // Manages RRef lifetime and keeps track of RRef forks.
@@ -39,7 +38,7 @@ class TORCH_API RRefContext {
   static std::vector<c10::intrusive_ptr<RRef>> destroyInstance(
       bool ignoreRRefLeak = true);
 
-  static void handleException(const c10::optional<utils::FutureError>& futErr);
+  static void handleException(const FutureMessage& fm);
 
   RRefContext(const RRefContext&) = delete;
   RRefContext(RRefContext&& other) = delete;
@@ -105,6 +104,10 @@ class TORCH_API RRefContext {
   // Register a fork of the ``OwnerRRef``, and inserts a intrusive_ptr of the
   // ``OwnerRRef`` in a map to keep it alive.
   void addForkOfOwner(const RRefId& rrefId, const ForkId& forkId);
+  // Performs the same function as addForkOfOwner but ignores duplicate
+  // requests. This idempotent function is used with RREF_FORK_REQUEST calls,
+  // whereas all other message types use the non-idempotent variant.
+  void addForkOfOwnerIfNotPresent(const RRefId& rrefId, const ForkId& forkId);
   // Delete a fork of the ``OwnerRRef``. NB: this could trigger deletion on the
   // IValue or py::object. For the later, this method will acquire GIL.
   // NB: If this fork deletion triggered deleting OwnerRRef, this method will
@@ -147,6 +150,9 @@ class TORCH_API RRefContext {
       const ForkId& forkId,
       const c10::intrusive_ptr<RRef>& rref);
   void delPendingUser(const ForkId& forkId);
+  void addConfirmedUser(
+      const ForkId& forkId,
+      const c10::intrusive_ptr<RRef>& rref);
 
   // Start recroding new pending UserRRefs. All pending UserRRefs introduced
   // after this point will be put into the thread_local userTable_, which will
@@ -292,7 +298,7 @@ class TORCH_API RRefContext {
   // without confirmation is OK, because the creator would either call to_here
   // or forward the UserRRef, and both would then require confirmations from the
   // owner.
-  static thread_local bool recording;
+  static thread_local bool recording_;
 };
 
 } // namespace rpc
