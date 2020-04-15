@@ -83,6 +83,10 @@ std::shared_ptr<FutureMessage> RpcAgent::sendWithRetries(
 }
 
 void RpcAgent::retryExpiredRpcs() {
+  // storing futures and exception messages for non-retriable error-ed futures.
+  std::vector<std::pair<std::shared_ptr<FutureMessage>, std::string>>
+      errorFutures;
+
   while (rpcAgentRunning_.load()) {
     std::unique_lock<std::mutex> lock(rpcRetryMutex_);
 
@@ -118,8 +122,20 @@ void RpcAgent::retryExpiredRpcs() {
       auto& earliestRpc = *it;
       // Making a copy of the message so it can be retried in the future.
       Message msgCopy = earliestRpc->message_;
-      auto fm = send(earliestRpc->to_, std::move(msgCopy));
-      futures.emplace_back(fm, earliestRpc);
+      std::shared_ptr<FutureMessage> fm;
+
+      // send() will throw an exception if an RPC is retried while the agent is
+      // shutdown. We must catch this exception and mark the original future
+      // with an error, since this RPC never succeeded and can no longer be
+      // retried.
+      try {
+        fm = send(earliestRpc->to_, std::move(msgCopy));
+        futures.emplace_back(fm, earliestRpc);
+      } catch (std::exception& e) {
+        // We must store the futures and exception messages here and only mark
+        // the futures with an error after releasing the lock.
+        errorFutures.emplace_back(earliestRpc->originalFuture_, e.what());
+      }
 
       // A callback will be attached to all futures for the retries in this
       // list. Thus they will either be rescheduled for future retries or they
@@ -148,6 +164,15 @@ void RpcAgent::retryExpiredRpcs() {
         rpcRetryCallback(fm, newTime, earliestRpc);
       });
     }
+
+    // For exceptions caught while retrying RPC's above, we set those futures
+    // with errors now that we have released the lock.
+    for (const auto& it : errorFutures) {
+      auto errorFuture = it.first;
+      auto errorMsg = it.second;
+      errorFuture->setError(errorMsg);
+    }
+    errorFutures.clear();
 
     // If there are no more RPC's set to be retried at the current timepoint,
     // we can remove the corresponsing unordered_set from the retry map. We
