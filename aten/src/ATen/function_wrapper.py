@@ -179,7 +179,9 @@ ${return_call} TypeDefault::${type_wrapper_name}(${native_arguments});
 STATIC_DISPATCH_FUNCTION_SWITCH_BODY = CodeTemplate("""\
 at::AutoNonVariableTypeMode _var_guard(true);
 switch(dispatchKeyToBackend(c10::impl::dispatchTypeId(${key_set},
-                            c10::DispatchKeySet(c10::DispatchKeySet::FULL).remove(DispatchKey::BackendSelect).remove(DispatchKey::Profiler)))) {
+                            c10::DispatchKeySet(c10::DispatchKeySet::FULL)
+                                .remove(DispatchKey::BackendSelect)
+                                .remove(DispatchKey::Profiler)))) {
     ${static_dispatch_function_switches}
     default:
         AT_ERROR("${api_name} not implemented for ", at::toString(${key_set}));
@@ -1199,22 +1201,18 @@ def create_generic(top_env, declarations):
         # we just implement it in the base Type.  This is exposed
         # in Declarations.yaml via a field named 'abstract'.
         abstract = False
+        op_registrations.append(OpRegistration(
+            operator_name=OPERATOR_NAME.substitute(option),
+            registration_code=SCHEMA_REGISTRATION.substitute(option),
+            schema_registration_code=SCHEMA_REGISTRATION.substitute(option)))
         if isinstance(type_method_dispatch, dict):
             abstract = True
             # Having manual_kernel_registration for an abstract method doesn't make sense.
             assert not option['manual_kernel_registration']
-            op_registrations.append(OpRegistration(
-                operator_name=OPERATOR_NAME.substitute(option),
-                registration_code=SCHEMA_REGISTRATION.substitute(option),
-                schema_registration_code=SCHEMA_REGISTRATION.substitute(option)))
         else:
             top_env['type_method_declarations'].append(NATIVE_DISPATCH_DECLARATION.substitute(option))
             top_env['type_method_definitions'].append(NATIVE_DISPATCH_DEFINITION_DEFAULT.substitute(option))
             if not option['manual_kernel_registration']:
-                op_registrations.append(OpRegistration(
-                    operator_name=OPERATOR_NAME.substitute(option),
-                    registration_code=SCHEMA_REGISTRATION.substitute(option),
-                    schema_registration_code=SCHEMA_REGISTRATION.substitute(option)))
                 if option['use_c10_dispatcher'] == 'full':
                     op_registrations.append(OpRegistration(
                         operator_name=OPERATOR_NAME.substitute(option),
