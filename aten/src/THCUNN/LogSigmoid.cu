@@ -19,7 +19,7 @@ struct logSigmoid_updateGradInput_functor
 {
   __device__ void operator()(T *gradInput, const T *input, const T *gradOutput) const {
     const T max = fmaxType(T{0}, -*input);
-    const T z = ::exp(-max) + :exp(-*input -max);
+    const T z = ::exp(-max) + ::exp(-*input -max);
     T max_deriv = 0.f;
     T sign = -1.f;
     if (*input < 0.f){
