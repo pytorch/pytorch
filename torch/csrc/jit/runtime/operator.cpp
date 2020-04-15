@@ -47,6 +47,17 @@ struct OperatorRegistry {
  public:
   void registerOperator(Operator&& op) {
     std::lock_guard<std::mutex> guard(lock);
+
+    // Assert that the op isn't already there
+    // for (const auto& pending_op : to_register) {
+    //   TORCH_INTERNAL_ASSERT(pending_op->schema() != op.schema(), "Tried to add ", op.schema(), " to JIT but it was already registered and is in the list of pending ops");
+    // }
+    // for (const auto& ops_by_symbol : operators) {
+    //   for (const auto& found_op : ops_by_symbol.second) {
+    //     TORCH_INTERNAL_ASSERT(found_op->schema() != op.schema(), "Tried to add ", op.schema(), "  to JIT that was already registered before");
+    //   }
+    // }
+
     to_register.push_back(std::make_shared<Operator>(std::move(op)));
   }
 
