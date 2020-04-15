@@ -89,7 +89,9 @@ std::vector<std::string> _single_input_general_call_funcs = {
 // require observation and have a single input Tensor
 // e.g. `aten::max_pool2d(%input_tensor, ...)`
 std::vector<std::string> _single_input_general_aten_funcs = {
+    "max_pool1d",
     "max_pool2d",
+    "max_pool3d",
     "avg_pool1d",
     "avg_pool2d",
     "avg_pool3d",
