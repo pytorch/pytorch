@@ -237,18 +237,16 @@ void DistAutogradContainer::sendReleaseContextRpc(
           CleanupAutogradContextReq(context_id).toMessage(),
           options);
 
-      cleanupFuture->addCallback(
-          [](const rpc::Message& message /* unused */,
-             const c10::optional<torch::utils::FutureError>& error) {
-            if (error) {
-              std::string errorMsg = c10::str(
-                  "Could not release Dist Autograd Context after ",
-                  kNumCleanupContextRetries,
-                  " attempts.");
-              LOG(ERROR) << errorMsg;
-              return;
-            }
-          });
+      cleanupFuture->addCallback([](const rpc::FutureMessage& cleanupFuture) {
+        if (cleanupFuture.hasError()) {
+          std::string errorMsg = c10::str(
+              "Could not release Dist Autograd Context after ",
+              kNumCleanupContextRetries,
+              " attempts.");
+          LOG(ERROR) << errorMsg;
+          return;
+        }
+      });
     } catch (const std::exception& e) {
       LOG(INFO)
           << "Failed to send RPC to clear Dist Autograd context to worker id: "
