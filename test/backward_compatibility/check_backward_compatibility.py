@@ -33,6 +33,8 @@ white_list = [
     ('aten::requires_grad_', datetime.date(2020, 4, 30)),
     ('aten::sizes', datetime.date(2020, 4, 30)),
     ('aten::strides', datetime.date(2020, 4, 30)),
+    ('aten::quantized_lstm', datetime.date(2020, 4, 30)),
+    ('aten::quantized_gru', datetime.date(2020, 4, 30)),
     ('quantized::batch_norm', datetime.date(2020, 4, 30)),
     ('quantized::batch_norm', datetime.date(2020, 4, 30)),
     ('quantized::linear_unpack_fp16', datetime.date(2020, 4, 30)),
@@ -44,8 +46,6 @@ white_list = [
     ('quantized::linear_dynamic', datetime.date(2020, 4, 30)),
     ('quantized::linear_relu', datetime.date(2020, 4, 30)),
     ('quantized::linear', datetime.date(2020, 4, 30)),
-    ('quantized::quantized_lstm', datetime.date(2020, 4, 30)),
-    ('quantized::quantized_gru', datetime.date(2020, 4, 30)),
 ]
 
 

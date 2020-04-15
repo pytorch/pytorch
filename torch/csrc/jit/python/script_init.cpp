@@ -28,6 +28,7 @@
 
 #include <ATen/ATen.h>
 #include <ATen/core/function_schema.h>
+#include <ATen/core/jit_type.h>
 #include <ATen/core/qualified_name.h>
 
 #include <pybind11/functional.h>
@@ -443,7 +444,7 @@ static void setInputTensorTypes(Graph& g, const Stack& stack, bool complete) {
     // Leave packed param types alone. This is needed for downstream passes
     // (like alias analysis) to work properly. This will be unpacked later
     // in unpackQuantizedWeights.
-    if (auto named_type = v->type()->cast<NamedType>()) {
+    if (auto named_type = v->type()->cast<c10::NamedType>()) {
       if (auto qualname = named_type->name()) {
         if (getCustomClass(qualname->qualifiedName())) {
           s_iter++;

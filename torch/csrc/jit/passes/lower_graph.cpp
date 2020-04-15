@@ -123,7 +123,16 @@ static std::vector<IValue> loadTensors(const std::vector<Slot>& slots) {
     if (obj.isTensor()) {
       result.emplace_back(obj.toTensor());
     } else {
-      result.emplace_back(obj);
+      // Unpack quantization packed tensor
+      auto type = obj.type();
+      TORCH_CHECK(
+          type ==
+              getCustomClass("__torch__.torch.classes.quantized.LinearPackedParamsBase"),
+          "Unknown type ",
+          type->python_str(),
+          " encountered in graph lowering. This type is not supported in ONNX export.");
+      result.emplace_back(
+          script::Object(obj.toObject()).run_method("__getstate__"));
     }
   }
   return result;

@@ -157,11 +157,12 @@ void unpackQuantizedWeightsHelper(
     at::Tensor unpacked_weight;
     c10::optional<at::Tensor> bias;
 
-    if (itr->second.isObject()) {
+    if (itr->second.isTuple()) {
       // Pre-unpacked weights. Comes from Linear weights which are
       // stored as bound C++ classes.
-      auto casted_obj = itr->second.toCustomClass<LinearPackedParamsBase>();
-      std::tie(unpacked_weight, bias) = casted_obj->unpack();
+      auto ser_tup = itr->second.toTuple();
+      unpacked_weight = ser_tup->elements()[0].toTensor();
+      bias = ser_tup->elements()[1].toOptional<at::Tensor>();
     } else {
       TORCH_INTERNAL_ASSERT(itr->second.isTensor());
       at::Tensor packed_weight = itr->second.toTensor();

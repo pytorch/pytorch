@@ -234,13 +234,15 @@ torch::jit::class_<LinearPackedParamsBase> register_linear_params() {
                   if (weight.dtype() == at::kQInt8) {
                     return PackedLinearWeight::prepack(
                         std::move(weight), std::move(bias));
-                  } else if (weight.dtype() == at::kHalf) {
+                  } else if (weight.dtype() == at::kFloat) {
+                    // NB! FP16 quantized weights are stored as float, not
+                    // half!
                     return PackedLinearWeightFp16::prepack(
                         std::move(weight), std::move(bias));
                   } else {
                     TORCH_CHECK(
                         false,
-                        "Unsupported quantized dtype",
+                        "Unsupported quantized dtype ",
                         c10::toString(weight.dtype()),
                         " in serialized LinearPackedParams object!");
                   }
