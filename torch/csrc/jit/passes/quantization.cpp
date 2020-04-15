@@ -111,6 +111,20 @@ std::vector<std::string> _single_input_general_aten_funcs = {
     "relu",
 };
 
+struct FuncArg {
+  std::string func_name;
+  int arg_index;
+};
+
+using AtenFuncArgs = std::vector<FuncArg>;
+using CallFuncArgs = std::vector<FuncArg>;
+
+// Special checks for ops that do not require observers for all input tensors.
+// For each operator in this list observers are inserted for the input based
+// on the index specified.
+AtenFuncArgs _aten_func_args = {};
+CallFuncArgs _call_func_args = {};
+
 void fillQConfigMap(
     const Module& module,
     const QConfigDict& qconfig_dict,
@@ -698,13 +712,6 @@ bool matchCallFuncToUse(
       (n.has_value() ? (n.value() == use.offset) : true);
 }
 
-struct FuncArg {
-  std::string func_name;
-  int arg_index;
-};
-using AtenFuncArgs = std::vector<FuncArg>;
-using CallFuncArgs = std::vector<FuncArg>;
-
 // Check any use of `v` matches the aten function call
 // or CallFunction patterns
 bool matchArgPattern(
@@ -989,27 +996,20 @@ void InsertObserversHelper::preprocess(
 }
 
 bool useQuantizable(const Use& use, bool is_dynamic) {
-  // Special checks for ops that do not require observers for all input tensors.
-  // For each operator in this list observers are inserted for the input based
-  // on the index specified.
-  const AtenFuncArgs& aten_func_args = AtenFuncArgs({});
-  const CallFuncArgs& call_func_args = CallFuncArgs({});
-  for (const auto& func_arg : aten_func_args) {
+  for (const auto& func_arg : _aten_func_args) {
     if (matchAtenFuncToUse(use, func_arg.func_name, c10::nullopt)) {
       return use.offset == func_arg.arg_index;
     }
   }
 
-  for (const auto& func_arg : call_func_args) {
+  for (const auto& func_arg : _call_func_args) {
     if (matchCallFuncToUse(use, func_arg.func_name, c10::nullopt)) {
       return use.offset == func_arg.arg_index;
     }
   }
   // Dynamic quantized ops that require special handling for inputs.
-  if (is_dynamic) {
-    if (matchAtenFuncToUse(use, "lstm", c10::nullopt)) {
-      return use.offset == 2;
-    }
+  if (is_dynamic && matchAtenFuncToUse(use, "lstm", c10::nullopt)) {
+    return use.offset == 2;
   }
 
   return nodeQuantizable(use.user);
