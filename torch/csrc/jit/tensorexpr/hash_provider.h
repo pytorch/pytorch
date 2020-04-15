@@ -74,7 +74,7 @@ class TORCH_API HashProvider : public IRVisitor {
   void visit(const Xor* v) override;
   void visit(const Lshift* v) override;
   void visit(const Rshift* v) override;
-  void visit(const CompareSelect* v);
+  void visit(const CompareSelect* v) override;
 
 // NOLINTNEXTLINE
 #define IMM_VISIT(Type, Name)                    \
