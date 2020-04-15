@@ -33,7 +33,7 @@ void placeholderCreator(GraphFunction&) {
 }
 
 void GraphFunction::run(Stack& stack) {
-  GRAPH_DEBUG("Running function ", qualname(), " on GraphExecutor: ", &get_executor());
+  GRAPH_DEBUG("Running function ", qualname().qualifiedName(), " on GraphExecutor: ", &get_executor());
   get_executor().run(stack);
 }
 
