@@ -3,6 +3,7 @@
 #include <torch/csrc/jit/tensorexpr/eval.h>
 #include <torch/csrc/jit/tensorexpr/ir.h>
 #include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
+#include <torch/csrc/jit/tensorexpr/reduction.h>
 
 namespace torch {
 namespace jit {
@@ -269,6 +270,19 @@ const Expr* IRMutator::mutate(const RoundOff* v) {
       v->lhs()->accept_mutator(this), v->rhs()->accept_mutator(this));
 }
 
+const Expr* IRMutator::mutate(const ReduceOp* v) {
+  auto accum = v->accumulator().node()->accept_mutator(this);
+  Stmt* init = v->initializer()->accept_mutator(this);
+  auto body = v->body().node()->accept_mutator(this);
+
+  return new ReduceOp(
+      ExprHandle(accum),
+      init,
+      ExprHandle(body),
+      v->interaction(),
+      v->reduce_args());
+}
+
 const Expr* IRMutator::mutate(const BaseCallNode* v) {
   std::vector<const Expr*> params(v->nparams());
   bool any_change = false;
@@ -465,7 +479,6 @@ Stmt* StmtClone::mutate(const Free* v) {
 }
 
 Stmt* StmtClone::mutate(const Cond* v) {
-  const Expr* cond_old = v->condition();
   Stmt* true_old = v->true_stmt();
   Stmt* false_old = v->false_stmt();
 

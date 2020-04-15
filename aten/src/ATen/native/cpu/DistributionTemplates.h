@@ -62,10 +62,10 @@ void random_full_64_bits_range_kernel(TensorIterator& iter, RNG generator) {
 
 template<typename RNG>
 struct RandomFromToKernel {
-  void operator()(TensorIterator& iter, uint64_t range, int64_t base, at::Generator gen) {
+  void operator()(TensorIterator& iter, uint64_t range, int64_t base, c10::optional<Generator> gen) {
     random_from_to_kernel(iter, range, base, check_generator<RNG>(gen));
   }
-  void operator()(TensorIterator& iter, at::Generator gen) {
+  void operator()(TensorIterator& iter, c10::optional<Generator> gen) {
     random_full_64_bits_range_kernel(iter, check_generator<RNG>(gen));
   }
 };
@@ -108,7 +108,7 @@ void random_kernel(TensorIterator& iter, RNG generator) {
 
 template<typename RNG>
 struct RandomKernel {
-  void operator()(TensorIterator& iter, at::Generator gen) {
+  void operator()(TensorIterator& iter, c10::optional<Generator> gen) {
     random_kernel(iter, check_generator<RNG>(gen));
   }
 };
@@ -231,8 +231,28 @@ void normal_kernel(Tensor& self, double mean, double std, RNG generator) {
 
 template<typename RNG>
 struct NormalKernel {
-  void operator()(Tensor& self, double mean, double std, Generator gen) {
+  void operator()(Tensor& self, double mean, double std, c10::optional<Generator> gen) {
     normal_kernel(self, mean, std, check_generator<RNG>(gen));
+  }
+};
+
+// ==================================================== Uniform =======================================================
+
+template<typename RNG>
+void uniform_kernel(TensorIterator& iter, double from, double to, RNG generator) {
+  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "uniform_kernel_cpu", [&]() {
+    std::lock_guard<std::mutex> lock(generator->mutex_);
+    at::uniform_real_distribution<scalar_t> uniform(static_cast<scalar_t>(from), static_cast<scalar_t>(to));
+    cpu_serial_kernel(iter, [&uniform, generator]() -> scalar_t {
+      return static_cast<scalar_t>(uniform(generator));
+    });
+  });
+}
+
+template<typename RNG>
+struct UniformKernel {
+  void operator()(TensorIterator& iter, double from, double to, c10::optional<Generator> gen) {
+    uniform_kernel(iter, from, to, check_generator<RNG>(gen));
   }
 };
 

@@ -6,6 +6,8 @@
 namespace torch {
 namespace jit {
 
+struct MutationRemover;
+
 TORCH_API void CreateFunctionalGraphs(const std::shared_ptr<Graph>& graph);
 
 TORCH_API void InlineFunctionalGraphs(const std::shared_ptr<Graph>& graph);

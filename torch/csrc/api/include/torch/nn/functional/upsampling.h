@@ -47,7 +47,7 @@ inline std::vector<int64_t> _interp_output_size(
     // the result for ints is the same with/without recompute_scale_factor
     bool is_float_scale_factor = false;
     for (double scale : scale_factors) {
-      is_float_scale_factor = floor(scale) == scale;
+      is_float_scale_factor = floor(scale) != scale;
       if (is_float_scale_factor) {
         break;
       }

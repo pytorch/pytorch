@@ -60,11 +60,11 @@
   name: _th_masked_select
   cname: maskedSelect
   cpu_bool: True
-  cuda_bool: True
   cpu_bfloat16: True
-  cuda_bfloat16: True
   variants:
     - function
+  backends:
+    - CPU
   return: argument 0
   arguments:
     - arg: THTensor* result
@@ -77,11 +77,11 @@
   name: _th_masked_select_bool
   cname: maskedSelectBool
   cpu_bool: True
-  cuda_bool: True
   cpu_bfloat16: True
-  cuda_bfloat16: True
   variants:
     - function
+  backends:
+    - CPU
   return: argument 0
   arguments:
     - arg: THTensor* result
@@ -1044,24 +1044,8 @@
     - THTensor* q
     - THIndexTensor* J
     - long num_samples
-    - Generator generator
+    - c10::optional<Generator> generator
 ]]
-[[
-  name: _th_uniform_
-  types:
-    - floating_point
-  backends:
-    - CPU
-  cname: uniform
-  variants: function
-  return: self
-  arguments:
-    - THTensor* self
-    - double from
-    - double to
-    - Generator generator
-]]
-
 [[
   name: _th_copy_ignoring_overlaps_
   cname: copyIgnoringOverlaps

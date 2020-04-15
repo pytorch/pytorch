@@ -2,9 +2,9 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cpu/Loops.h>
+#include <ATen/native/quantized/cpu/quant_utils.h>
 #include <ATen/quantized/QTensorImpl.h>
 #include <ATen/quantized/Quantizer.h>
-#include <ATen/native/quantized/cpu/quant_utils.h>
 
 namespace at {
 namespace native {
@@ -16,6 +16,22 @@ Tensor quantize_per_tensor_cpu(
     ScalarType dtype) {
   auto quantizer = make_per_tensor_affine_quantizer(scale, zero_point, dtype);
   return quantizer->quantize(self);
+}
+
+std::vector<Tensor> quantize_per_tensor_list_cpu(
+    TensorList tensors,
+    const Tensor& scales,
+    const Tensor& zero_points,
+    ScalarType dtype) {
+  std::vector<Tensor> quantized_tensors;
+  for (auto i = 0; i < tensors.size(); ++i) {
+    quantized_tensors.push_back(at::quantize_per_tensor(
+        tensors[i],
+        scales[i].item<double>(),
+        zero_points[i].item<int64_t>(),
+        dtype));
+  }
+  return quantized_tensors;
 }
 
 Tensor quantize_per_channel_cpu(
@@ -56,13 +72,17 @@ int64_t q_zero_point_quant(const Tensor& self) {
 Tensor q_per_channel_scales_quant(const Tensor& self) {
   auto quantizer = get_qtensorimpl(self)->quantizer();
   TORCH_CHECK(quantizer->qscheme() == kPerChannelAffine);
-  return static_cast<PerChannelAffineQuantizer*>(quantizer.get())->scales().to(kDouble);
+  return static_cast<PerChannelAffineQuantizer*>(quantizer.get())
+      ->scales()
+      .to(kDouble);
 }
 
 Tensor q_per_channel_zero_points_quant(const Tensor& self) {
   auto quantizer = get_qtensorimpl(self)->quantizer();
   TORCH_CHECK(quantizer->qscheme() == kPerChannelAffine);
-  return static_cast<PerChannelAffineQuantizer*>(quantizer.get())->zero_points().to(kLong);
+  return static_cast<PerChannelAffineQuantizer*>(quantizer.get())
+      ->zero_points()
+      .to(kLong);
 }
 
 int64_t q_per_channel_axis_quant(const Tensor& self) {
@@ -102,14 +122,15 @@ Tensor make_per_tensor_quantized_tensor_cpu(
       scale,
       zero_point);
   Tensor self_contig = self.contiguous();
-  AT_DISPATCH_QINT_TYPES(dst.scalar_type(), "make_per_tensor_quantized_tensor", [&]() {
-    underlying_t* self_data = self_contig.data_ptr<underlying_t>();
-    underlying_t* dst_data =
-        reinterpret_cast<underlying_t*>(dst.data_ptr<scalar_t>());
-    if (self.numel() > 0) {
-      memcpy(dst_data, self_data, self.nbytes());
-    }
-  });
+  AT_DISPATCH_QINT_TYPES(
+      dst.scalar_type(), "make_per_tensor_quantized_tensor", [&]() {
+        underlying_t* self_data = self_contig.data_ptr<underlying_t>();
+        underlying_t* dst_data =
+            reinterpret_cast<underlying_t*>(dst.data_ptr<scalar_t>());
+        if (self.numel() > 0) {
+          memcpy(dst_data, self_data, self.nbytes());
+        }
+      });
   return dst;
 }
 
@@ -160,7 +181,9 @@ Tensor& set_quantizer_(Tensor& self, ConstQuantizerPtr quantizer) {
   return self;
 }
 
-Tensor quantized_clone(const Tensor& self, c10::optional<c10::MemoryFormat> optional_memory_format) {
+Tensor quantized_clone(
+    const Tensor& self,
+    c10::optional<c10::MemoryFormat> optional_memory_format) {
   // TODO: add per channel support
   TORCH_INTERNAL_ASSERT(
       self.qscheme() == at::kPerTensorAffine,
@@ -171,8 +194,9 @@ Tensor quantized_clone(const Tensor& self, c10::optional<c10::MemoryFormat> opti
 
   // TODO: To support all features of MemoryFormat::Preserve we need to add
   // _empty_affine_quantized_strided function and use it similarly to
-  // Tensor clone(const Tensor& src, c10::optional<c10::MemoryFormat> optional_memory_format)
-  // if (self.is_non_overlapping_and_dense()) -> _empty_affine_quantized_strided
+  // Tensor clone(const Tensor& src, c10::optional<c10::MemoryFormat>
+  // optional_memory_format) if (self.is_non_overlapping_and_dense()) ->
+  // _empty_affine_quantized_strided
   if (memory_format == MemoryFormat::Preserve) {
     memory_format = self.suggest_memory_format();
   }
@@ -220,20 +244,22 @@ bool quantized_equal(const Tensor& self, const Tensor& other) {
 }
 
 /* Calculate the quantization params for the activation tensor */
-std::tuple<double, int64_t> _choose_qparams_per_tensor(const Tensor& self, bool reduce_range) {
+std::tuple<double, int64_t> _choose_qparams_per_tensor(
+    const Tensor& self,
+    bool reduce_range) {
   at::Tensor a;
   auto input_contig = self.contiguous();
   float x_min = input_contig.min().item<float>();
   float x_max = input_contig.max().item<float>();
 
   auto q_params = quant_utils::ChooseQuantizationParams(
-        /*min=*/x_min,
-        /*max=*/x_max,
-        /*qmin=*/0,
-        /*qmax=*/255,
-        /*preserve_sparsity=*/false,
-        /*force_scale_power_of_two=*/false,
-        /*reduce_range=*/reduce_range);
+      /*min=*/x_min,
+      /*max=*/x_max,
+      /*qmin=*/0,
+      /*qmax=*/255,
+      /*preserve_sparsity=*/false,
+      /*force_scale_power_of_two=*/false,
+      /*reduce_range=*/reduce_range);
 
   return std::make_tuple(q_params.scale, q_params.zero_point);
 }
