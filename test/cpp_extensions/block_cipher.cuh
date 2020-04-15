@@ -5,11 +5,13 @@
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
 #include <ATen/cuda/Exceptions.h>
 #include <cstdint>
+#include <mutex>
 
 typedef ulonglong2 block_t;
 constexpr size_t block_t_size = sizeof(block_t);
 
 at::Tensor key_tensor(c10::optional<at::Generator> generator) {
+  std::lock_guard<std::mutex> lock(generator->mutex());
   auto gen = at::check_generator<at::CPUGeneratorImpl>(generator);
   auto t = torch::empty({block_t_size}, torch::kUInt8);
   for (int i = 0; i < block_t_size; i++) {
