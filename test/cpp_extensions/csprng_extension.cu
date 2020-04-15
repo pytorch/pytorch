@@ -21,7 +21,7 @@ struct CUDA_CSPRNG_GeneratorImpl : public CPUGeneratorImpl {
 // ===========================================================================================================================
 
 template<typename scalar_t, typename uint_t, size_t N = 1, typename transform_t>
-void block_cipher_helper(TensorIterator& iter, uint8_t* key, transform_t transform_func) {
+void aes_helper(TensorIterator& iter, const uint8_t* key, transform_t transform_func) {
   block_cipher_ctr_mode<scalar_t, uint_t, N>(iter,
     [key] __device__ (unsigned int idx) -> block_t {
       block_t block;
@@ -37,8 +37,8 @@ void block_cipher_helper(TensorIterator& iter, uint8_t* key, transform_t transfo
 // ===========================================================================================================================
 
 template<typename scalar_t, typename uint_t>
-void random_kernel_helper_fp(TensorIterator& iter, uint8_t* key) {
-  block_cipher_helper<scalar_t, uint_t>(iter, key,
+void random_kernel_helper_fp(TensorIterator& iter, const uint8_t* key) {
+  aes_helper<scalar_t, uint_t>(iter, key,
     [] __device__ (DummyRNG<1>* generator) -> scalar_t {
       if (std::is_same<scalar_t, double>::value) {
         return static_cast<scalar_t>(generator->random64() % static_cast<uint64_t>((1ULL << std::numeric_limits<scalar_t>::digits) + 1));
@@ -50,8 +50,8 @@ void random_kernel_helper_fp(TensorIterator& iter, uint8_t* key) {
 }
 
 template<typename scalar_t, typename uint_t>
-void random_kernel_helper_int(TensorIterator& iter, uint8_t* key) {
-  block_cipher_helper<scalar_t, uint_t>(iter, key,
+void random_kernel_helper_int(TensorIterator& iter, const uint8_t* key) {
+  aes_helper<scalar_t, uint_t>(iter, key,
     [] __device__ (DummyRNG<1>* generator) -> scalar_t {
       if (std::is_same<scalar_t, long>::value) {
         return static_cast<scalar_t>(generator->random64() % (static_cast<uint64_t>(std::numeric_limits<scalar_t>::max()) + 1));
@@ -62,8 +62,8 @@ void random_kernel_helper_int(TensorIterator& iter, uint8_t* key) {
   );
 }
 
-void random_kernel_helper_bool(TensorIterator& iter, uint8_t* key) {
-  block_cipher_helper<bool, uint32_t>(iter, key,
+void random_kernel_helper_bool(TensorIterator& iter, const uint8_t* key) {
+  aes_helper<bool, uint32_t>(iter, key,
     [] __device__ (DummyRNG<1>* generator) -> bool {
       return static_cast<bool>(generator->random() & 1);
     }
@@ -97,15 +97,58 @@ struct RandomKernel {
   }
 };
 
+template<typename RNG>
+struct RandomFromToKernel {
+  void operator()(TensorIterator& iter, uint64_t range, int64_t base, c10::optional<Generator> generator) {
+    const auto key_t = key_tensor(generator);
+    const auto key = key_t.data_ptr<uint8_t>();
+    AT_DISPATCH_ALL_TYPES_AND3(at::ScalarType::Bool, at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "random_from_to_kernel_cuda", [&] {
+      if ((
+        std::is_same<scalar_t, int64_t>::value ||
+        std::is_same<scalar_t, double>::value ||
+        std::is_same<scalar_t, float>::value ||
+        std::is_same<scalar_t, at::BFloat16>::value) && range >= 1ULL << 32)
+      {
+
+      } else {
+        
+      }
+    });
+  }
+  void operator()(TensorIterator& iter, c10::optional<Generator> generator) {
+    const auto key_t = key_tensor(generator);
+    const auto key = key_t.data_ptr<uint8_t>();
+    AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::BFloat16, iter.dtype(), "random_full_64_bits_range_kernel_cuda", [&] {
+      if (std::is_same<scalar_t, int64_t>::value ||
+          std::is_same<scalar_t, double>::value ||
+          std::is_same<scalar_t, float>::value ||
+          std::is_same<scalar_t, at::BFloat16>::value)
+      {
+
+      } else {
+        TORCH_CHECK(false, "random_full_64_bits_range_kernel_cuda handles only int64, double, float and bfloat16");
+      }
+    });
+  }
+};
+
 Tensor& random_(Tensor& self, c10::optional<Generator> generator) {
   return native::templates::random_impl<RandomKernel, CUDA_CSPRNG_GeneratorImpl>(self, generator);
+}
+
+Tensor& random_from_to(Tensor& self, int64_t from, optional<int64_t> to, c10::optional<Generator> generator) {
+  return native::templates::random_from_to_impl<RandomFromToKernel, CUDA_CSPRNG_GeneratorImpl>(self, from, to, generator);
+}
+
+Tensor& random_to(Tensor& self, int64_t to, c10::optional<Generator> generator) {
+  return random_from_to(self, 0, to, generator);
 }
 
 // ===========================================================================================================================
 
 template<typename scalar_t, typename uint_t>
-void uniform_kernel_helper_fp(TensorIterator& iter, uint8_t* key, scalar_t from, scalar_t to) {
-  block_cipher_helper<scalar_t, uint_t>(iter, key,
+void uniform_kernel_helper_fp(TensorIterator& iter, const uint8_t* key, scalar_t from, scalar_t to) {
+  aes_helper<scalar_t, uint_t>(iter, key,
     [from, to] __device__ (DummyRNG<1>* generator) -> scalar_t {
       uniform_real_distribution<scalar_t> uniform(from, to);
       return uniform(generator);
@@ -135,8 +178,8 @@ Tensor& uniform_(Tensor& self, double from, double to, c10::optional<Generator> 
 // ===========================================================================================================================
 
 template<typename scalar_t, typename uint_t>
-void normal_kernel_helper_fp(TensorIterator& iter, scalar_t mean, scalar_t std, uint8_t* key) {
-  block_cipher_helper<scalar_t, uint_t, 2>(iter, key,
+void normal_kernel_helper_fp(TensorIterator& iter, scalar_t mean, scalar_t std, const uint8_t* key) {
+  aes_helper<scalar_t, uint_t, 2>(iter, key,
     [mean, std] __device__ (DummyRNG<2>* generator) -> scalar_t {
       normal_distribution<scalar_t> normal(mean, std);
       return normal(generator);
@@ -197,9 +240,11 @@ Generator create_CUDA_CSPRNG_Generator() {
 void registerOps() {
   static auto registry = torch::import()
     // Random
-    .impl_UNBOXED("aten::random_", DispatchKey::CustomRNGKeyId, random_)
+    .impl_UNBOXED("aten::random_",                  DispatchKey::CustomRNGKeyId, random_)
+    .impl_UNBOXED("aten::random_.from",             DispatchKey::CustomRNGKeyId, random_from_to)
+    .impl_UNBOXED("aten::random_.to",               DispatchKey::CustomRNGKeyId, random_to)
     // Uniform
-    .impl_UNBOXED("aten::uniform_", DispatchKey::CustomRNGKeyId, uniform_)
+    .impl_UNBOXED("aten::uniform_",                 DispatchKey::CustomRNGKeyId, uniform_)
     // Normal
     .impl_UNBOXED("aten::normal_",                  DispatchKey::CustomRNGKeyId, normal_)
     .impl_UNBOXED("aten::normal.Tensor_float_out",  DispatchKey::CustomRNGKeyId, normal_Tensor_float_out)

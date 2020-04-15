@@ -93,7 +93,7 @@ __device__ void shiftRows(uint8_t* block) {
   block[7] = temp;
 }
 
-__device__ void expandKey(uint8_t* key, uint8_t* rkey){
+__device__ void expandKey(const uint8_t* key, uint8_t* rkey){
   uint8_t temp[4];
   uint32_t n = 10;
   for (auto i = 0; i < 4; ++i) {
@@ -127,7 +127,7 @@ __device__ void expandKey(uint8_t* key, uint8_t* rkey){
   } 
 }
 
-__device__ void encrypt(uint8_t* block, uint8_t* key) {
+__device__ void encrypt(uint8_t* block, const uint8_t* key) {
   uint8_t rkey[176];
   uint8_t r; 
   expandKey(key, rkey); 

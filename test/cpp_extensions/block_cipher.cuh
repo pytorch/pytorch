@@ -10,7 +10,12 @@ typedef ulonglong2 block_t;
 constexpr size_t block_t_size = sizeof(block_t);
 
 at::Tensor key_tensor(c10::optional<at::Generator> generator) {
-  return torch::empty({block_t_size}, torch::kUInt8).random_(0, 256, generator).to(at::kCUDA);
+  auto gen = at::check_generator<at::CPUGeneratorImpl>(generator);
+  auto t = torch::empty({block_t_size}, torch::kUInt8);
+  for (int i = 0; i < block_t_size; i++) {
+    t[i] = static_cast<uint8_t>(gen->random());
+  }
+  return t.to(at::kCUDA);
 }
 
 template<size_t size>
