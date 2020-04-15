@@ -118,7 +118,7 @@ DEFAULT_UNBOXEDONLY_FUNCTION_REGISTRATION = CodeTemplate("""\
 """)
 BACKEND_UNBOXEDONLY_FUNCTION_REGISTRATION = CodeTemplate("""\
 .impl_UNBOXED("${operator_name_with_overload}",
-              DispatchKey::${Backend}TensorId,
+              DispatchKey::${Backend},
               ${Type}::${type_wrapper_name})
 """)
 DEFAULT_FUNCTION_REGISTRATION = CodeTemplate("""\
@@ -126,7 +126,7 @@ DEFAULT_FUNCTION_REGISTRATION = CodeTemplate("""\
 """)
 BACKEND_FUNCTION_REGISTRATION = CodeTemplate("""\
 .impl("${operator_name_with_overload}",
-      DispatchKey::${Backend}TensorId, &${Type}::${type_wrapper_name})
+      DispatchKey::${Backend}, &${Type}::${type_wrapper_name})
 """)
 
 # add non-virtual declaration to TensorBody.h
@@ -335,16 +335,16 @@ CHECKED_USE_NULLABLE = CodeTemplate('${arg_name}_ ? ${usage} : NULL')
 ALLOC_NOARGS_WRAP = {
     'THTensor*': 'c10::make_intrusive<TensorImpl, UndefinedTensorImpl>'
                  '(c10::Storage(scalarTypeToTypeMeta(${ScalarName}), 0, allocator(), true),'
-                 'DispatchKey::${Backend}TensorId).release()',
+                 'DispatchKey::${Backend}).release()',
     'THByteTensor*': 'c10::make_intrusive<TensorImpl, UndefinedTensorImpl>'
                      '(c10::Storage(scalarTypeToTypeMeta(ScalarType::Byte), 0, allocator(), true),'
-                     'DispatchKey::${Backend}TensorId).release()',
+                     'DispatchKey::${Backend}).release()',
     'THBoolTensor*': 'c10::make_intrusive<TensorImpl, UndefinedTensorImpl>'
                      '(c10::Storage(scalarTypeToTypeMeta(ScalarType::Bool), 0, allocator(), true),'
-                     'DispatchKey::${Backend}TensorId).release()',
+                     'DispatchKey::${Backend}).release()',
     'THIndexTensor*': 'c10::make_intrusive<TensorImpl, UndefinedTensorImpl>'
                      '(c10::Storage(scalarTypeToTypeMeta(ScalarType::Long), 0, allocator(), true),'
-                     'DispatchKey::${Backend}TensorId).release()',
+                     'DispatchKey::${Backend}).release()',
 }
 
 # Replacements for constants when calling into TH
@@ -1199,22 +1199,18 @@ def create_generic(top_env, declarations):
         # we just implement it in the base Type.  This is exposed
         # in Declarations.yaml via a field named 'abstract'.
         abstract = False
+        op_registrations.append(OpRegistration(
+            operator_name=OPERATOR_NAME.substitute(option),
+            registration_code=SCHEMA_REGISTRATION.substitute(option),
+            schema_registration_code=SCHEMA_REGISTRATION.substitute(option)))
         if isinstance(type_method_dispatch, dict):
             abstract = True
             # Having manual_kernel_registration for an abstract method doesn't make sense.
             assert not option['manual_kernel_registration']
-            op_registrations.append(OpRegistration(
-                operator_name=OPERATOR_NAME.substitute(option),
-                registration_code=SCHEMA_REGISTRATION.substitute(option),
-                schema_registration_code=SCHEMA_REGISTRATION.substitute(option)))
         else:
             top_env['type_method_declarations'].append(NATIVE_DISPATCH_DECLARATION.substitute(option))
             top_env['type_method_definitions'].append(NATIVE_DISPATCH_DEFINITION_DEFAULT.substitute(option))
             if not option['manual_kernel_registration']:
-                op_registrations.append(OpRegistration(
-                    operator_name=OPERATOR_NAME.substitute(option),
-                    registration_code=SCHEMA_REGISTRATION.substitute(option),
-                    schema_registration_code=SCHEMA_REGISTRATION.substitute(option)))
                 if option['use_c10_dispatcher'] == 'full':
                     op_registrations.append(OpRegistration(
                         operator_name=OPERATOR_NAME.substitute(option),
