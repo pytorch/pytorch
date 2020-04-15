@@ -17,7 +17,7 @@ from torch.utils.data.dataset import random_split
 from torch._utils import ExceptionWrapper
 from torch.testing._internal.common_utils import (TestCase, run_tests, TEST_NUMPY, IS_WINDOWS, PY3,
                                                   IS_PYTORCH_CI, NO_MULTIPROCESSING_SPAWN, skipIfRocm,
-                                                  load_tests, TEST_WITH_TSAN)
+                                                  load_tests, TEST_WITH_TSAN, IS_SANDCASTLE)
 
 try:
     import psutil
@@ -805,6 +805,43 @@ class TestDataLoader(TestCase):
         loader = DataLoader(self.dataset, num_workers=2, worker_init_fn=error_worker_init_fn)
         with self.assertRaisesRegex(RuntimeError, 'Error in worker_init_fn'):
             list(iter(loader))
+
+    @unittest.skipIf(IS_SANDCASTLE, "subprocess doesn't work in FB internal CI")
+    @unittest.skipIf(IS_WINDOWS, "No 'resource' module on Windows")
+    def test_fd_limit_exceeded(self):
+        # See NOTE [ DataLoader on Linux and open files limit ]
+        import subprocess
+        subprocess.check_output([sys.executable, '-c', """\
+import torch
+import resource
+from torch.utils.data import DataLoader, IterableDataset
+
+class RandomDataset(IterableDataset):
+    def __init__(self, len, size):
+        super(RandomDataset).__init__()
+        self.len = len
+        self.size = size
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        if self.len <= 0:
+            raise StopIteration
+        self.len -= 1
+        return torch.randn(self.size)
+
+try:
+    keep_fds_alive = []
+    resource.setrlimit(resource.RLIMIT_NOFILE, (100, 100))
+    for random_t in DataLoader(RandomDataset(200, (2,2)),
+                               num_workers=1):
+      random_t.max(dim=0)
+      keep_fds_alive.append(random_t)
+except RuntimeError as e:
+    assert "ulimit -n" in str(e)
+    assert "set_sharing_strategy" in str(e)
+"""])
 
     def test_invalid_assign_after_init(self):
         dl = DataLoader(self.dataset)

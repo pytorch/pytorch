@@ -222,6 +222,7 @@ class MultiProcessTestCase(TestCase):
         if six.PY3:
             proc = torch.multiprocessing.get_context("fork").Process
         else:
+            # fork is the default on Python 2
             proc = torch.multiprocessing.Process
         self._start_processes(proc)
 
