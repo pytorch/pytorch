@@ -148,6 +148,7 @@ void CudaPrinter::visit(const Allocate* v) {
         return;
       } else if (for_v->loop_options().is_gpu_thread_index()) {
         print_flat_alloc(os(), v);
+        thread_local_bufs_.insert(v->buffer_var());
         return;
       }
     }
@@ -312,8 +313,14 @@ void CudaPrinter::visit(const Store* v) {
 }
 
 void CudaPrinter::visit(const AtomicAdd* v) {
-  os() << "atomicAdd(&" << *v->base_handle() << "[" << *v->flat_index() << "]"
-       << ", " << *v->value() << ");";
+  if (thread_local_bufs_.count(v->base_handle()) > 0) {
+    // atomicAdd only works on global and shared memory
+    os() << *v->base_handle() << "[" << *v->flat_index()
+         << "] += " << *v->value() << ";";
+  } else {
+    os() << "atomicAdd(&" << *v->base_handle() << "[" << *v->flat_index() << "]"
+         << ", " << *v->value() << ");";
+  }
 }
 
 void CudaPrinter::visit(const Max* v) {
@@ -389,11 +396,30 @@ class PrioritizeLoad : public IRMutator {
     if (nested_if_then_else_ > 0) {
       return IRMutator::mutate(v);
     }
+    if (thread_local_bufs_.count(v->base_handle()) > 0) {
+      return IRMutator::mutate(v);
+    }
     MemLoadList& load_list = load_stack_.back();
     const Var* load_new_var = new Var("v", v->dtype());
     const Expr* new_value = IRMutator::mutate(v);
     load_list.push_back(std::make_pair(load_new_var, new_value));
     return load_new_var;
+  }
+
+  // TODO: merge this with CudaPrinter into CudaAnalysis
+  Stmt* mutate(const Allocate* v) override {
+    Stmt* p = v->get_parent();
+    while (p) {
+      const For* for_v = dynamic_cast<const For*>(p);
+      if (for_v) {
+        if (for_v->loop_options().is_gpu_thread_index()) {
+          thread_local_bufs_.insert(v->buffer_var());
+          break;
+        }
+      }
+      p = p->get_parent();
+    }
+    return (Stmt*)v;
   }
 
   // TODO: merge this with the IRMutator::mutate version.
@@ -514,6 +540,7 @@ class PrioritizeLoad : public IRMutator {
   // }
   // int v2 = v + 2;
   int nested_if_then_else_ = 0;
+  std::unordered_set<const Var*> thread_local_bufs_;
 };
 
 std::string CudaCodeGen::GetUniqueFuncName(const std::string& func_prefix) {

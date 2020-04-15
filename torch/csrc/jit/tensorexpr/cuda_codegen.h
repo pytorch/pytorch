@@ -93,6 +93,7 @@ class CudaPrinter : public IRPrinter {
   const Var* rand_func_;
   const CudaAnalysis* cuda_analysis_;
   bool need_sync_ = false;
+  std::unordered_set<const Var*> thread_local_bufs_;
 };
 
 // Construct Cuda C from the buffer and tensor input, and invoke the kernel
