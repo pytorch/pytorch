@@ -39,8 +39,8 @@
 
 # Computes the gradient of current tensor w.r.t. graph leaves.
 - func: backward(Tensor self, Tensor? gradient=None, bool keep_graph=False, bool create_graph=False) -> ()
-  manual_kernel_registration: True
   use_c10_dispatcher: unboxed_only
+  manual_kernel_registration: True
   variants: method
 
 # DEPRECATED. Sets the tensor data held by this `Variable` to be the same as
@@ -51,19 +51,19 @@
 # where Variables *are* Tensors (as opposed to them containing tensors, which
 # is what the previous interpretation was.)
 - func: set_data(Tensor(a!) self, Tensor new_data) -> ()
+  use_c10_dispatcher: full
   manual_kernel_registration: True
-  use_c10_dispatcher: unboxed_only
   variants: method
 
 - func: data(Tensor self) -> Tensor
+  use_c10_dispatcher: full
   manual_kernel_registration: True
-  use_c10_dispatcher: unboxed_only
   variants: method
 
 # True if this `Variable` is a leaf and thus does not have a `grad_fn`.
 - func: is_leaf(Tensor self) -> bool
+  use_c10_dispatcher: full
   manual_kernel_registration: True
-  use_c10_dispatcher: unboxed_only
   variants: method
 
 # Returns the output index of this variable from the forward operation that
@@ -87,9 +87,8 @@
   manual_kernel_registration: True
   variants: method
 
-- func: requires_grad_(Tensor(a!) self, bool _requires_grad=True) -> Tensor(a!)
+- func: requires_grad_(Tensor(a!) self, bool requires_grad=True) -> Tensor(a!)
   manual_kernel_registration: True
-  use_c10_dispatcher: unboxed_only
   variants: method
 
 # Enables .grad attribute for non-leaf Tensors.
@@ -696,6 +695,9 @@
 - func: cat.names_out(Tensor[] tensors, Dimname dim, *, Tensor(a!) out) -> Tensor(a!)
   supports_named_tensor: True
 
+- func: block_diag(Tensor[] tensors) -> Tensor
+  variants: function
+
 - func: ceil(Tensor self) -> Tensor
   use_c10_dispatcher: full
   supports_named_tensor: True
@@ -820,7 +822,6 @@
 
 - func: copy_(Tensor(a!) self, Tensor src, bool non_blocking=False) -> Tensor(a!)
   manual_kernel_registration: True
-  use_c10_dispatcher: unboxed_only
   variants: method
   device_guard: False
   supports_named_tensor: True
@@ -1191,7 +1192,6 @@
 
 - func: resize_(Tensor(a!) self, int[] size, *, MemoryFormat? memory_format=None) -> Tensor(a!)
   manual_kernel_registration: True
-  use_c10_dispatcher: unboxed_only
   supports_named_tensor: True
   variants: method
   device_guard: False
@@ -1508,6 +1508,7 @@
 - func: _cufft_clear_plan_cache(int device_index) -> ()
 
 - func: index.Tensor(Tensor self, Tensor?[] indices) -> Tensor
+  use_c10_dispatcher: unboxed_only
   variants: function, method
   # NB: This function is special-cased in tools/autograd/gen_variable_type.py
   # NB: The following functions are declared in aten/src/ATen/templates/TensorBody.h and defined in aten/src/ATen/TensorIndexing.cpp:
@@ -1528,6 +1529,7 @@
   variants: function, method
 
 - func: index_put_(Tensor(a!) self, Tensor?[] indices, Tensor values, bool accumulate=False) -> Tensor(a!)
+  use_c10_dispatcher: unboxed_only
   variants: function, method
   # NB: The following functions are declared in aten/src/ATen/templates/TensorBody.h and defined in aten/src/ATen/TensorIndexing.cpp:
   # - Tensor & Tensor::index_put_(ArrayRef<TensorIndex> indices, Tensor const & rhs)
@@ -1536,9 +1538,11 @@
   # - Tensor & Tensor::index_put_(std::initializer_list<TensorIndex> indices, Scalar v)
 
 - func: index_put(Tensor self, Tensor?[] indices, Tensor values, bool accumulate=False) -> Tensor
+  use_c10_dispatcher: unboxed_only
   variants: function, method
 
 - func: _index_put_impl_(Tensor(a!) self, Tensor?[] indices, Tensor values, bool accumulate=False, bool unsafe=False) -> Tensor(a!)
+  use_c10_dispatcher: unboxed_only
   variants: function
 
 - func: instance_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool use_input_stats, float momentum, float eps, bool cudnn_enabled) -> Tensor
@@ -2592,7 +2596,6 @@
 # this. If this `Variable` is a view, throws an `std::runtime_error()`.
 - func: detach_(Tensor(a!) self) -> Tensor(a!)
   manual_kernel_registration: True
-  use_c10_dispatcher: unboxed_only
   supports_named_tensor: True
   variants: function, method
 
@@ -3250,7 +3253,6 @@
 
 - func: resize_as_(Tensor(a!) self, Tensor the_template, *, MemoryFormat? memory_format=None) -> Tensor(a!)
   manual_kernel_registration: True
-  use_c10_dispatcher: unboxed_only
   supports_named_tensor: True
   variants: function, method
 
@@ -5758,12 +5760,14 @@
   python_module: nn
   dispatch:
     CPU: hardswish
+    CUDA: hardswish
     QuantizedCPU: quantized_hardswish
 
 - func: hardswish_(Tensor(a!) self) -> Tensor(a!)
   python_module: nn
   dispatch:
     CPU: hardswish_
+    CUDA: hardswish_
     QuantizedCPU: quantized_hardswish_
 
 - func: hardswish_backward(Tensor grad_output, Tensor self) -> Tensor

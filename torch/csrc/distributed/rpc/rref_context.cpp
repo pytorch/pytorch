@@ -9,14 +9,14 @@ namespace rpc {
 
 thread_local std::vector<std::shared_ptr<RRefContext::PendingUserState>>
     RRefContext::userTable_;
-thread_local bool RRefContext::recording = false;
+thread_local bool RRefContext::recording_ = false;
 
 namespace callback {
 void confirmPendingUser(
-    const std::shared_ptr<FutureMessage>& futureMessage,
+    const FutureMessage& futureMessage,
     const ForkId& expectedForkId) {
-  if (!futureMessage->hasError()) {
-    auto rr = RemoteRet::fromMessage(futureMessage->constValue());
+  if (!futureMessage.hasError()) {
+    auto rr = RemoteRet::fromMessage(futureMessage.constValue());
     TORCH_INTERNAL_ASSERT(rr->forkId() == expectedForkId);
   }
   RRefContext::getInstance().delPendingUser(expectedForkId);
@@ -25,9 +25,9 @@ void confirmPendingUser(
 }
 
 c10::intrusive_ptr<RRef> finishCreatingOwnerRRef(
-    const std::shared_ptr<FutureMessage>& futureMessage) {
+    const FutureMessage& futureMessage) {
   RRefContext::handleException(futureMessage);
-  auto rr = RemoteRet::fromMessage(futureMessage->constValue());
+  auto rr = RemoteRet::fromMessage(futureMessage.constValue());
   TORCH_INTERNAL_ASSERT(
       rr->rrefId() == rr->forkId(),
       "Expecting an OwnerRRef as RemoteRet but got a fork.");
@@ -68,11 +68,11 @@ std::vector<c10::intrusive_ptr<RRef>> RRefContext::destroyInstance(
   return deletedRRefs;
 }
 
-void RRefContext::handleException(const std::shared_ptr<FutureMessage>& fm) {
-  if (fm->hasError()) {
+void RRefContext::handleException(const FutureMessage& fm) {
+  if (fm.hasError()) {
     // TODO: allow users to register an error handler and call it here.
-    VLOG(1) << "Got exception: " << fm->error()->what();
-    throw std::runtime_error(fm->error()->what());
+    VLOG(1) << "Got exception: " << fm.error()->what();
+    throw std::runtime_error(fm.error()->what());
   }
 }
 
@@ -178,7 +178,7 @@ void RRefContext::delUser(
           agent_->getWorkerInfo(owner),
           RRefUserDelete(rrefId, forkId).toMessage());
 
-      fm->addCallback([fm]() { handleException(fm); });
+      fm->addCallback([](const FutureMessage& fm) { handleException(fm); });
     }
   }
 
@@ -387,14 +387,14 @@ void RRefContext::notifyOwnerAndParentOfFork(
     // with this fork ID.
     auto fm = agent_->sendWithRetries(
         agent_->getWorkerInfo(parent), RRefChildAccept(forkId).toMessage());
-    fm->addCallback([fm]() { handleException(fm); });
+    fm->addCallback([](const FutureMessage& fm) { handleException(fm); });
   } else {
     auto fm = agent_->sendWithRetries(
         agent_->getWorkerInfo(rref->owner()),
         RRefForkRequest(rref->rrefId(), forkId).toMessage());
 
     addPendingUser(forkId, rref);
-    fm->addCallback([this, forkId, parent, fm]() {
+    fm->addCallback([this, forkId, parent](const FutureMessage& fm) {
       handleException(fm);
       this->finishForkRequest(forkId, parent);
     });
@@ -455,7 +455,7 @@ void RRefContext::addPendingUser(
       !rref->isOwner(), "Attempt to add an OwnerRRef as a pending User.");
 
   auto state = std::make_shared<PendingUserState>(rref);
-  if (recording) {
+  if (recording_) {
     // adding and waiting for pending users are guaranteed to be called from the
     // same thread, but deleting pending users will be called from another
     // thread. As the delPendingUser will not be able to access the same
@@ -528,15 +528,16 @@ void RRefContext::recordThreadLocalPendingRRefs() {
   TORCH_INTERNAL_ASSERT(
       userTable_.empty(),
       "User RRef Table should be empty when start recording");
-  recording = true;
+  recording_ = true;
 }
 
 std::shared_ptr<torch::utils::Future<bool>> RRefContext::
     waitForThreadLocalPendingRRefs() {
-  auto future = std::make_shared<torch::utils::Future<bool>>();
+  std::shared_ptr<torch::utils::Future<bool>> future;
   if (userTable_.empty()) {
-    future->markCompleted(true);
+    future = std::make_shared<torch::utils::Future<bool>>(true);
   } else {
+    future = std::make_shared<torch::utils::Future<bool>>();
     auto remainingRRefs =
         std::make_shared<std::atomic<uint64_t>>(userTable_.size());
     for (auto& state : userTable_) {
@@ -549,13 +550,13 @@ std::shared_ptr<torch::utils::Future<bool>> RRefContext::
     }
     userTable_.clear();
   }
-  recording = false;
+  recording_ = false;
   return future;
 }
 
 void RRefContext::clearRecordedPendingRRefsOnError() {
   userTable_.clear();
-  recording = false;
+  recording_ = false;
 }
 
 void RRefContext::finishForkRequest(const ForkId& forkId, worker_id_t parent) {
@@ -563,7 +564,7 @@ void RRefContext::finishForkRequest(const ForkId& forkId, worker_id_t parent) {
   auto fm = agent_->sendWithRetries(
       agent_->getWorkerInfo(parent), RRefChildAccept(forkId).toMessage());
 
-  fm->addCallback([fm]() { handleException(fm); });
+  fm->addCallback([](const FutureMessage& fm) { handleException(fm); });
 }
 
 void RRefContext::addSelfAsFork(c10::intrusive_ptr<OwnerRRef>& rref) {
