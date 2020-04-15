@@ -97,6 +97,33 @@ struct RandomKernel {
   }
 };
 
+template<typename scalar_t, typename uint_t>
+void random_from_to_kernel_helper(TensorIterator& iter, uint64_t range, int64_t base, const uint8_t* key) {
+  aes_helper<scalar_t, uint_t>(iter, key,
+    [range, base] __device__ (DummyRNG<1>* generator) -> scalar_t {
+      return static_cast<scalar_t>(static_cast<int64_t>((generator->random() % range) + base));
+    }
+  );
+}
+
+template<typename scalar_t, typename uint_t>
+void random_from_to_64_kernel_helper(TensorIterator& iter, uint64_t range, int64_t base, const uint8_t* key) {
+  aes_helper<scalar_t, uint_t>(iter, key,
+    [range, base] __device__ (DummyRNG<1>* generator) -> scalar_t {
+      return static_cast<scalar_t>(static_cast<int64_t>((generator->random64() % range) + base));
+    }
+  );
+}
+
+template<typename scalar_t, typename uint_t>
+void random_full_range_kernel_helper(TensorIterator& iter, const uint8_t* key) {
+  aes_helper<scalar_t, uint_t>(iter, key,
+    [] __device__ (DummyRNG<1>* generator) -> scalar_t {
+      return static_cast<scalar_t>(static_cast<int64_t>(generator->random64()));
+    }
+  );
+}
+
 template<typename RNG>
 struct RandomFromToKernel {
   void operator()(TensorIterator& iter, uint64_t range, int64_t base, c10::optional<Generator> generator) {
@@ -109,9 +136,9 @@ struct RandomFromToKernel {
         std::is_same<scalar_t, float>::value ||
         std::is_same<scalar_t, at::BFloat16>::value) && range >= 1ULL << 32)
       {
-
+        random_from_to_64_kernel_helper<scalar_t, uint64_t>(iter, range, base, key);
       } else {
-        
+        random_from_to_kernel_helper<scalar_t, uint32_t>(iter, range, base, key);
       }
     });
   }
@@ -124,7 +151,7 @@ struct RandomFromToKernel {
           std::is_same<scalar_t, float>::value ||
           std::is_same<scalar_t, at::BFloat16>::value)
       {
-
+        random_full_range_kernel_helper<scalar_t, uint64_t>(iter, key);
       } else {
         TORCH_CHECK(false, "random_full_64_bits_range_kernel_cuda handles only int64, double, float and bfloat16");
       }
@@ -147,7 +174,7 @@ Tensor& random_to(Tensor& self, int64_t to, c10::optional<Generator> generator) 
 // ===========================================================================================================================
 
 template<typename scalar_t, typename uint_t>
-void uniform_kernel_helper_fp(TensorIterator& iter, const uint8_t* key, scalar_t from, scalar_t to) {
+void uniform_kernel_helper_fp(TensorIterator& iter, scalar_t from, scalar_t to, const uint8_t* key) {
   aes_helper<scalar_t, uint_t>(iter, key,
     [from, to] __device__ (DummyRNG<1>* generator) -> scalar_t {
       uniform_real_distribution<scalar_t> uniform(from, to);
@@ -163,9 +190,9 @@ struct UniformKernel {
     const auto key = key_t.data_ptr<uint8_t>();
     AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "uniform_kernel_cuda", [&] {
       if (std::is_same<scalar_t, double>::value) {
-        uniform_kernel_helper_fp<scalar_t, uint64_t>(iter, key, from, to);
+        uniform_kernel_helper_fp<scalar_t, uint64_t>(iter, from, to, key);
       } else {
-        uniform_kernel_helper_fp<scalar_t, uint32_t>(iter, key, from, to);
+        uniform_kernel_helper_fp<scalar_t, uint32_t>(iter, from, to, key);
       }
     });
   }
