@@ -591,6 +591,9 @@ if(USE_FBGEMM)
   caffe2_update_option(USE_FBGEMM ON)
 else()
   caffe2_update_option(USE_FBGEMM OFF)
+  message(WARNING 
+    "Turning USE_FAKELOWP off as it depends on USE_FBGEMM.")
+  caffe2_update_option(USE_FAKELOWP OFF)
 endif()
 
 
@@ -1226,6 +1229,7 @@ if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO AND NOT INTERN_DISABLE_ONNX)
   if(ONNX_ML)
     add_definitions(-DONNX_ML=1)
   endif()
+  add_definitions(-DONNXIFI_ENABLE_EXT=1)
   # Add op schemas in "ai.onnx.pytorch" domain
   add_subdirectory("${CMAKE_CURRENT_LIST_DIR}/../caffe2/onnx/torch_ops")
   add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/onnx EXCLUDE_FROM_ALL)
