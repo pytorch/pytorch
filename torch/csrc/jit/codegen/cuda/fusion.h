@@ -83,7 +83,8 @@ struct ExprSort : public IterVisitor {
 // Expr sort will take a fusion and return a topologically sorted list of
 // expressions.
 struct InputsOf : public IterVisitor {
- using IterVisitor::handle;
+  using IterVisitor::handle;
+
  private:
   std::vector<TensorView*> inputs;
 
