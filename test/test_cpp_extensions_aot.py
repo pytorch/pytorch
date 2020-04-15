@@ -185,14 +185,14 @@ class TestCUDA_CSPRNG_Generator(common.TestCase):
         super(TestCUDA_CSPRNG_Generator, self).setUp()
         csprng_extension.registerOps()
 
-    def test_csprng(self):
+    def test_random(self):
         gen = csprng_extension.create_CUDA_CSPRNG_Generator()
         for dtype in [torch.bool, torch.uint8, torch.int8, torch.int16, 
                       torch.int32, torch.int64, torch.float, torch.double]:
             t = torch.empty(100, dtype=dtype, device='cuda').random_(generator=gen)
-            print(t)
+            # print(t)
 
-    def test_csprng2(self):
+    def test_rando2(self):
         gen = csprng_extension.create_CUDA_CSPRNG_Generator()
         s = torch.zeros(20, 20, dtype=torch.uint8, device='cuda')
         t = s[:, 7]
@@ -201,7 +201,16 @@ class TestCUDA_CSPRNG_Generator(common.TestCase):
         t = s[7, :]
         self.assertTrue(t.is_contiguous())
         t.random_(generator=gen)
-        print(s)
+        # print(s)
+
+    def test_uniform(self):
+        gen = csprng_extension.create_CUDA_CSPRNG_Generator()
+        size = 1000
+        for dtype in [torch.float, torch.double]:
+            t = torch.empty(size, dtype=dtype, device='cuda').uniform_(generator=gen)
+            # print('================================================== ' + str(dtype) + ' uniform =================================================')
+            # for elem in t:
+            #     print(elem.item())
 
 if __name__ == "__main__":
     common.run_tests()
