@@ -2,6 +2,16 @@
 
 #include <ATen/native/xnnpack/Common.h>
 
+//
+// This file is here so as to provide an implementation even in cases where
+// PyTorch is compiled without XNNPACK support.  Under those scenarios, either
+// all XNNPACK usage must be gated with #ifdefs at call-sites which would make
+// for cluttered logic, or alternatively, all use can be routed to a central
+// place, namely here, where available() calls return false preventing the
+// XNNPACK related codepaths to be taken, and use of the actual operators
+// trigger an error.
+//
+
 namespace at {
 namespace native {
 namespace xnnpack {
@@ -53,6 +63,30 @@ Tensor linear(
     const Tensor&,
     const Tensor&,
     const Tensor&) {
+  TORCH_CHECK(false, internal::kError);
+}
+
+bool use_max_pool2d(
+    const Tensor&,
+    const IntArrayRef,
+    const IntArrayRef,
+    const IntArrayRef,
+    const IntArrayRef,
+    const bool,
+    const float,
+    const float) {
+  return false;
+}
+
+Tensor max_pool2d(
+    const Tensor&,
+    const IntArrayRef,
+    const IntArrayRef,
+    const IntArrayRef,
+    const IntArrayRef,
+    const bool,
+    const float,
+    const float) {
   TORCH_CHECK(false, internal::kError);
 }
 

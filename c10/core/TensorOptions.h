@@ -376,44 +376,44 @@ struct C10_API TensorOptions {
           case DeviceType::CPU: {
             auto dtype_tmp = typeMetaToScalarType(dtype());
             if (isQIntType(dtype_tmp)) {
-              return DispatchKey::QuantizedCPUTensorId;
+              return DispatchKey::QuantizedCPU;
             }
-            return DispatchKey::CPUTensorId;
+            return DispatchKey::CPU;
             }
           case DeviceType::CUDA:
-            return DispatchKey::CUDATensorId;
+            return DispatchKey::CUDA;
           case DeviceType::MKLDNN:
-            return DispatchKey::MKLDNNTensorId;
+            return DispatchKey::MKLDNN;
           case DeviceType::OPENGL:
-            return DispatchKey::OpenGLTensorId;
+            return DispatchKey::OpenGL;
           case DeviceType::OPENCL:
-            return DispatchKey::OpenCLTensorId;
+            return DispatchKey::OpenCL;
           case DeviceType::IDEEP:
-            return DispatchKey::IDEEPTensorId;
+            return DispatchKey::IDEEP;
           case DeviceType::HIP:
-            return DispatchKey::HIPTensorId;
+            return DispatchKey::HIP;
           case DeviceType::MSNPU:
-            return DispatchKey::MSNPUTensorId;
+            return DispatchKey::MSNPU;
           case DeviceType::XLA:
-            return DispatchKey::XLATensorId;
+            return DispatchKey::XLA;
           default:
             AT_ERROR("Unsupported device type for dense layout: ", device().type());
         }
       case Layout::Sparse:
         switch (device().type()) {
           case DeviceType::CPU:
-            return DispatchKey::SparseCPUTensorId;
+            return DispatchKey::SparseCPU;
           case DeviceType::CUDA:
-            return DispatchKey::SparseCUDATensorId;
+            return DispatchKey::SparseCUDA;
           case DeviceType::HIP:
-            return DispatchKey::SparseHIPTensorId;
+            return DispatchKey::SparseHIP;
           default:
             AT_ERROR("Unsupported device type for sparse layout: ", device().type());
         }
       case Layout::Mkldnn:
         switch (device().type()) {
           case DeviceType::CPU:
-            return DispatchKey::MkldnnCPUTensorId;
+            return DispatchKey::MkldnnCPU;
           default:
             AT_ERROR("Unsupported device type for mkldnn layout: ", device().type());
         }
@@ -612,33 +612,33 @@ inline DispatchKey computeDispatchKey(TensorOptions options) {
 }
 
 inline DeviceType computeDeviceType(DispatchKey tid) {
-  if (tid == DispatchKey::CPUTensorId) {
+  if (tid == DispatchKey::CPU) {
     return DeviceType::CPU;
-  } else if (tid == DispatchKey::CUDATensorId) {
+  } else if (tid == DispatchKey::CUDA) {
     return DeviceType::CUDA;
-  } else if (tid == DispatchKey::HIPTensorId) {
+  } else if (tid == DispatchKey::HIP) {
     return DeviceType::HIP;
-  } else if (tid == DispatchKey::MKLDNNTensorId) {
+  } else if (tid == DispatchKey::MKLDNN) {
     return DeviceType::MKLDNN;
-  } else if (tid == DispatchKey::OpenGLTensorId) {
+  } else if (tid == DispatchKey::OpenGL) {
     return DeviceType::IDEEP;
-  } else if (tid == DispatchKey::OpenCLTensorId) {
+  } else if (tid == DispatchKey::OpenCL) {
     return DeviceType::OPENCL;
-  } else if (tid == DispatchKey::IDEEPTensorId) {
+  } else if (tid == DispatchKey::IDEEP) {
     return DeviceType::IDEEP;
-  } else if (tid == DispatchKey::HIPTensorId) {
+  } else if (tid == DispatchKey::HIP) {
     return DeviceType::HIP;
-  } else if (tid == DispatchKey::MSNPUTensorId) {
+  } else if (tid == DispatchKey::MSNPU) {
     return DeviceType::MSNPU;
-  } else if (tid == DispatchKey::XLATensorId) {
+  } else if (tid == DispatchKey::XLA) {
     return DeviceType::XLA;
-  } else if (tid == DispatchKey::SparseCPUTensorId) {
+  } else if (tid == DispatchKey::SparseCPU) {
     return DeviceType::CPU;
-  } else if (tid == DispatchKey::SparseCUDATensorId) {
+  } else if (tid == DispatchKey::SparseCUDA) {
     return DeviceType::CUDA;
-  } else if (tid == DispatchKey::SparseHIPTensorId) {
+  } else if (tid == DispatchKey::SparseHIP) {
     return DeviceType::HIP;
-  } else if (tid == DispatchKey::MkldnnCPUTensorId) {
+  } else if (tid == DispatchKey::MkldnnCPU) {
     return DeviceType::CPU;
   } else {
     AT_ASSERTM(false, "Unknown DispatchKey: ", tid);

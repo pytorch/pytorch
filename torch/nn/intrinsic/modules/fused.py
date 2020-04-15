@@ -1,4 +1,3 @@
-from __future__ import absolute_import, division, print_function, unicode_literals
 import torch
 from torch.nn import Conv2d, Conv3d, ReLU, Linear, BatchNorm2d, BatchNorm3d
 

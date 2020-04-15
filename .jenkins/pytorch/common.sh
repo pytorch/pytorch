@@ -30,6 +30,8 @@ if [[ "${BUILD_ENVIRONMENT}" == *rocm* ]] && [[ "${BUILD_ENVIRONMENT}" =~ py((2|
   shopt -s expand_aliases
   export PYTORCH_TEST_WITH_ROCM=1
   alias python="$PYTHON"
+  # temporary to locate some kernel issues on the CI nodes
+  export HSAKMT_DEBUG_LEVEL=4
 fi
 
 # This token is used by a parser on Jenkins logs for determining
@@ -139,8 +141,7 @@ fi
 # Use conda cmake in some CI build. Conda cmake will be newer than our supported
 # min version 3.5, so we only do it in two builds that we know should use conda.
 if [[ "$BUILD_ENVIRONMENT" == *pytorch-linux-xenial-cuda* ]]; then
-  if [[ "$BUILD_ENVIRONMENT" == *cuda9-cudnn7-py2* ]] || \
-     [[ "$BUILD_ENVIRONMENT" == *cuda10.1-cudnn7-py3* ]]; then
+  if [[ "$BUILD_ENVIRONMENT" == *cuda10.1-cudnn7-py3* ]]; then
     if ! which conda; then
       echo "Expected ${BUILD_ENVIRONMENT} to use conda, but 'which conda' returns empty"
       exit 1
@@ -186,4 +187,13 @@ function file_diff_from_base() {
   git fetch origin master --quiet
   set -e
   git diff --name-only "$(git merge-base origin master HEAD)" > "$1"
+}
+
+function get_bazel() {
+  # download bazel version
+  wget https://github.com/bazelbuild/bazel/releases/download/2.2.0/bazel-2.2.0-linux-x86_64 -O tools/bazel
+  # verify content
+  echo 'b2f002ea0e6194a181af6ac84cd94bd8dc797722eb2354690bebac92dda233ff tools/bazel' | sha256sum --quiet -c
+
+  chmod +x tools/bazel
 }

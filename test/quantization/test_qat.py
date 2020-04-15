@@ -1,8 +1,3 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
-
 import torch
 from torch.nn import Conv2d, BatchNorm2d, ReLU
 from torch.nn.intrinsic.qat import ConvBn2d, ConvBnReLU2d
@@ -89,6 +84,7 @@ class IntrinsicQATModuleTest(TestCase):
                 (pad_h, pad_w),
                 (dilation_h, dilation_w),
                 groups,
+                None,  # bias
                 padding_mode,
                 eps,
                 momentum,

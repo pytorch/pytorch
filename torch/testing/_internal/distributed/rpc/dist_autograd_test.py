@@ -189,9 +189,6 @@ class ExecMode(Enum):
     RPC_ASYNC = 4  # Run the operation using rpc_async
 
 
-@unittest.skipIf(
-    not torch._six.PY3, "Pytorch distributed autograd package does not support python2"
-)
 class DistAutogradTest(RpcAgentTestFixture):
     def _exec_func_with_dst(self, dst, exec_mode, method, *args):
         if ExecMode.LOCAL == exec_mode:
@@ -1483,7 +1480,7 @@ class DistAutogradTest(RpcAgentTestFixture):
                         # shutdown RPC before responding and satisfying this RPC. Therefore, we swallow possible errors here.
                         try:
                             rpc.rpc_sync(
-                                "worker{}".format(i),
+                                worker_name(i),
                                 DistAutogradTest._set_backward_done,
                                 args=(),
                             )
@@ -2091,10 +2088,6 @@ class DistAutogradTest(RpcAgentTestFixture):
             # refcount.
             self.assertTrue(p_g == p_a)
 
-@unittest.skipIf(
-    not torch._six.PY3,
-    "Pytorch distributed autograd package does not support python2",
-)
 class FaultyAgentDistAutogradTest(FaultyRpcAgentTestFixture):
     # Reusing a simplified helper function from DistAutogradTest to ensure
     # autograd context is successfully cleaned up even when RPCs are failing.
@@ -2110,9 +2103,9 @@ class FaultyAgentDistAutogradTest(FaultyRpcAgentTestFixture):
 
         with dist_autograd.context() as context_id:
             for dst_rank in dst_ranks:
-                rpc.rpc_sync("worker{}".format(dst_rank), func, args=rpc_args)
+                rpc.rpc_sync(worker_name(dst_rank), func, args=rpc_args)
                 rpc.rpc_sync(
-                    "worker{}".format(dst_rank), _set_rpc_done, args=(context_id, 1)
+                    worker_name(dst_rank), _set_rpc_done, args=(context_id, 1)
                 )
         # the thread's context id should be cleaned up
         with self.assertRaises(RuntimeError):

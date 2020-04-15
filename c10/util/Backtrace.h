@@ -5,7 +5,7 @@
 #include <string>
 #include <typeinfo>
 
-#include "c10/macros/Macros.h"
+#include <c10/macros/Macros.h>
 
 namespace c10 {
 C10_API std::string get_backtrace(
