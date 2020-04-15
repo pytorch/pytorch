@@ -597,7 +597,7 @@ class SummaryWriter(object):
             rescale (float): Optional scale override
             dataformats (string): Image data format specification of the form
               NCHW, NHWC, CHW, HWC, HW, WH, etc.
-            labels (list of string): The strings to be show on each bounding box.
+            labels (list of string): The label to be shown for each bounding box.
         Shape:
             img_tensor: Default is :math:`(3, H, W)`. It can be specified with ``dataformats`` argument.
             e.g. CHW or HWC
