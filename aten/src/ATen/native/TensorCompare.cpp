@@ -72,10 +72,18 @@ Tensor isinf(const Tensor &self) {
 }
 
 Tensor isfinite(const Tensor& self) {
-  // Integral tensor types are finite
-  if (!self.is_floating_point()) {
+  // Integral tensor values are always finite
+  if (c10::isIntegralType(self.scalar_type(), /*include_bool=*/true)) {
     return at::ones_like(self, at::kBool, at::MemoryFormat::Preserve);
   }
+
+  // Note: a complex value is finite iff both parts are finite
+  if (self.is_complex()) {
+    const auto float_type = c10::toValueType(self.scalar_type());
+    return at::isfinite(self.copy_real().to(float_type)).__iand__
+          (at::isfinite(self.copy_imag().to(float_type)));
+  }
+
   return AT_DISPATCH_FLOATING_TYPES_AND_HALF(self.scalar_type(), "isfinite", [&]() {
     return (self == self) * (self.abs() != std::numeric_limits<scalar_t>::infinity());
   });

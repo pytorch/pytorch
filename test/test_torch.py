@@ -2173,18 +2173,6 @@ class _TestTorchMixin(object):
                     o32[i + j - 1].add(torch.conv2(x[i], k[j], 'F'))
         self._test_conv_corr_eq(lambda x, k: torch.conv3(x, k, 'F'), reference)
 
-    def test_isfinite(self):
-        x = torch.Tensor([1, inf, 2, -inf, nan, -10])
-        self.assertEqual(torch.isfinite(x), torch.BoolTensor([True, False, True, False, False, True]))
-
-    def test_isfinite_int(self):
-        x = torch.tensor([1, 2, 3])
-        self.assertEqual(torch.isfinite(x), torch.BoolTensor([True, True, True]))
-
-    def test_isfinite_type(self):
-        with self.assertRaises(TypeError):
-            torch.isfinite(1)  # Parameter must be a tensor
-
     def test_isinf_type(self):
         with self.assertRaises(TypeError):
             torch.isinf(1)  # Parameter must be a tensor
@@ -5690,6 +5678,45 @@ class TestTorchDeviceType(TestCase):
                 self.assertEqual(target.shape, torch.nn.functional.multi_margin_loss(input, target, reduction='none').shape)
                 self.assertEqual((), torch.nn.functional.multi_margin_loss(input, target, reduction='mean').shape)
                 self.assertEqual((), torch.nn.functional.multi_margin_loss(input, target, reduction='sum').shape)
+
+    def _isfinite_helper(self, vals, device, dtype):
+        a = np.array(vals, dtype=torch_to_numpy_dtype_dict[dtype])
+        np_result = torch.from_numpy(np.isfinite(a))
+
+        t = torch.tensor(vals, device=device, dtype=dtype)
+        torch_result = torch.isfinite(t).cpu()
+
+        self.assertEqual(np_result, torch_result)
+
+    @unittest.skipIf(not TEST_NUMPY, 'NumPy not found')
+    @dtypes(torch.float)
+    def test_isfinite(self, device, dtype):
+        vals = (-float('inf'), float('inf'), float('nan'), -1, 0, 1)
+        self._isfinite_helper(vals, device, dtype)
+
+    @dtypes(torch.long)
+    def test_isfinite_int(self, device, dtype):
+        vals = (-1, 0, 1)
+        self._isfinite_helper(vals, device, dtype)
+
+    @dtypes(torch.complex64)
+    def test_isfinite_complex(self, device, dtype):
+        vals = (
+            complex(-float('inf'), float('inf')),
+            complex(-float('inf'), 0),
+            complex(0, float('inf')),
+            complex(float('inf'), float('nan')),
+            complex(float('nan'), 0),
+            complex(-1, 0),
+            complex(0, 1)
+        )
+
+        self._isfinite_helper(vals, device, dtype)
+
+    @onlyCPU
+    def test_isfinite_type(self, device):
+        with self.assertRaises(TypeError):
+            torch.isfinite(1)  # Parameter must be a tensor
 
     @onlyCPU
     @dtypes(torch.float)
