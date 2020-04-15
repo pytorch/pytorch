@@ -7,6 +7,7 @@
 #include <ATen/cuda/Exceptions.h>
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
 #include <ATen/core/MT19937RNGEngine.h>
+#include <ATen/core/DistributionsHelper.h>
 #include <memory>
 #include "aes.cuh"
 
@@ -192,59 +193,6 @@ Tensor& random_(Tensor& self, c10::optional<Generator> generator) {
 
 // ===========================================================================================================================
 
-// Using DistAccumType in accumulate types for distributions.
-// Note: Ideally we'd be using ATen/AccumulateType.h but looks
-// like the there is some inconsistency in how accumulate types
-// are mapped currently, e.g. for the cpu side, float is mapped
-// to double.
-template <typename T>
-struct DistAccumType {  };
-
-#if defined(__CUDACC__) || defined(__HIPCC__)
-template <> struct DistAccumType<half> { using type = float; };
-#endif
-template <> struct DistAccumType<Half> { using type = float; };
-template <> struct DistAccumType<float> { using type = float; };
-template <> struct DistAccumType<double> { using type = double; };
-
-template <typename T>
-using dist_acctype = typename DistAccumType<T>::type;
-
-// Constants for uniform distribution
-// doubles have 52 bits of mantissa (fractional part)
-constexpr uint64_t DOUBLE_MASK = (1ULL << std::numeric_limits<double>::digits) - 1;
-constexpr double DOUBLE_DIVISOR = 1.0 / (1ULL << std::numeric_limits<double>::digits);
-
-// floats have 23 bits of mantissa (fractional part)
-constexpr uint32_t FLOAT_MASK = (1 << std::numeric_limits<float>::digits) - 1;
-constexpr float FLOAT_DIVISOR = 1.0f / (1 << std::numeric_limits<float>::digits);
-
-template <typename T>
-struct uniform_real_distribution {
-
-  inline __device__ uniform_real_distribution(T a_in, T b_in) {
-    // TORCH_CHECK(a_in <= b_in);
-    // TORCH_CHECK(b_in-a_in <= std::numeric_limits<T>::max());
-    a = a_in;
-    b = b_in;
-  }
-
-  template <typename RNG>
-  inline __device__ dist_acctype<T> operator()(RNG* generator){
-    dist_acctype<T> x;
-    if(std::is_same<T, double>::value) {
-      x = (generator->random64() & DOUBLE_MASK) * DOUBLE_DIVISOR;
-    } else {
-      x = (generator->random() & FLOAT_MASK) * FLOAT_DIVISOR;
-    }
-    return (x * (b - a) + a);
-  }
-
-  private:
-    T a;
-    T b;
-};
-
 template<typename scalar_t, typename uint_t>
 void uniform_kernel_helper_fp(TensorIterator& iter, uint8_t* key, scalar_t from, scalar_t to) {
   block_cipher_helper<scalar_t, uint_t>(iter, key,
@@ -336,7 +284,7 @@ template<typename scalar_t, typename uint_t>
 void normal_kernel_helper_fp(TensorIterator& iter, scalar_t mean, scalar_t std, uint8_t* key) {
   block_cipher_helper<scalar_t, uint_t, 2>(iter, key,
     [mean, std] __device__ (DummyRNG<2>* generator) -> scalar_t {
-      normal_distribution<scalar_t> normal(mean, std);
+      ::normal_distribution<scalar_t> normal(mean, std);
       return normal(generator);
     }
   );
