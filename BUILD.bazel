@@ -1,6 +1,7 @@
 load("@rules_proto//proto:defs.bzl", "proto_library")
 load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library", "cc_proto_library", "cc_test")
 load("//third_party:substitution.bzl", "template_rule")
+load("//:tools/build_variables.bzl", "torch_cpp_srcs", "libtorch_core_sources", "libtorch_distributed_sources", "libtorch_extra_sources")
 load("//tools/rules:cu.bzl", "cu_library")
 load("//tools/config:defs.bzl", "if_cuda")
 load("//:aten.bzl", "intern_build_aten_ops")
@@ -179,11 +180,11 @@ genrule(
         "aten/src/ATen/Declarations.yaml",
     ],
     outs = [
-        "torch/csrc/autograd/generated/python_functions.h",
-        "torch/csrc/autograd/generated/python_functions.cpp",
-        "torch/csrc/autograd/generated/python_variable_methods.cpp",
-        "torch/csrc/autograd/generated/python_torch_functions.cpp",
-        "torch/csrc/autograd/generated/python_nn_functions.cpp",
+        #"torch/csrc/autograd/generated/python_functions.h",
+        #"torch/csrc/autograd/generated/python_functions.cpp",
+        #"torch/csrc/autograd/generated/python_variable_methods.cpp",
+        #"torch/csrc/autograd/generated/python_torch_functions.cpp",
+        #"torch/csrc/autograd/generated/python_nn_functions.cpp",
         "torch/csrc/autograd/generated/VariableType.h",
         "torch/csrc/autograd/generated/VariableType_0.cpp",
         "torch/csrc/autograd/generated/VariableType_1.cpp",
@@ -1939,6 +1940,7 @@ cc_library(
         ":aten_headers",
         ":c10_headers",
         ":caffe2_headers",
+        "@local_config_python//:python_headers",
         "@onnx",
     ],
     alwayslink = True,
@@ -1954,116 +1956,34 @@ TORCH_COPTS = COMMON_COPTS + [
     "-fno-trapping-math",
 ]
 
-filegroup(
-    name = "torch_srcs",
-    srcs = [
-        "torch/csrc/jit/tensorexpr/bounds_inference.cpp",
-        "torch/csrc/jit/tensorexpr/codegen.cpp",
-        "torch/csrc/jit/tensorexpr/eval.cpp",
-        "torch/csrc/jit/tensorexpr/expr.cpp",
-        "torch/csrc/jit/tensorexpr/function.cpp",
-        "torch/csrc/jit/tensorexpr/hash_provider.cpp",
-        "torch/csrc/jit/tensorexpr/ir.cpp",
-        "torch/csrc/jit/tensorexpr/ir_mutator.cpp",
-        "torch/csrc/jit/tensorexpr/ir_printer.cpp",
-        "torch/csrc/jit/tensorexpr/ir_simplifier.cpp",
-        "torch/csrc/jit/tensorexpr/ir_visitor.cpp",
-        "torch/csrc/jit/tensorexpr/kernel.cpp",
-        "torch/csrc/jit/tensorexpr/llvm_codegen.cpp",
-        "torch/csrc/jit/tensorexpr/llvm_jit.cpp",
-        "torch/csrc/jit/tensorexpr/loopnest.cpp",
-        "torch/csrc/jit/tensorexpr/mem_arena.cpp",
-        "torch/csrc/jit/tensorexpr/tensor.cpp",
-        "torch/csrc/jit/tensorexpr/types.cpp",
-        "torch/csrc/jit/tensorexpr/unique_name_manager.cpp",
-    ],
-)
-
 cc_library(
     name = "torch",
     srcs = if_cuda(glob(
         [
             "torch/csrc/cuda/*.cpp",
             "torch/csrc/autograd/functions/comm.cpp",
-            "torch/csrc/jit/tensorexpr/*.cpp",
         ],
         exclude = [
             "torch/csrc/cuda/python_nccl.cpp",
             "torch/csrc/cuda/nccl.cpp",
         ],
-    )) + glob(
-        [
-            "torch/csrc/*.cpp",
-            "torch/csrc/api/src/*.cpp",
-            "torch/csrc/api/src/data/datasets/*.cpp",
-            "torch/csrc/api/src/data/samplers/*.cpp",
-            "torch/csrc/api/src/nn/*.cpp",
-            "torch/csrc/api/src/nn/modules/*.cpp",
-            "torch/csrc/api/src/nn/modules/container/*.cpp",
-            "torch/csrc/api/src/nn/options/*.cpp",
-            "torch/csrc/api/src/optim/*.cpp",
-            "torch/csrc/api/src/python/*.cpp",
-            "torch/csrc/api/src/serialize/*.cpp",
-            "torch/csrc/autograd/*.cpp",
-            "torch/csrc/autograd/functions/*.cpp",
-            "torch/csrc/distributed/autograd/*.cpp",
-            "torch/csrc/distributed/autograd/context/*.cpp",
-            "torch/csrc/distributed/autograd/functions/*.cpp",
-            "torch/csrc/distributed/autograd/engine/*.cpp",
-            "torch/csrc/distributed/autograd/rpc_messages/*.cpp",
-            "torch/csrc/distributed/rpc/*.cpp",
-            "torch/csrc/jit/*.cpp",
-            "torch/csrc/jit/api/*.cpp",
-            "torch/csrc/jit/codegen/fuser/*.cpp",
-            "torch/csrc/jit/frontend/*.cpp",
-            "torch/csrc/jit/fuser/*.cpp",
-            "torch/csrc/jit/fuser/cpu/*.cpp",
-            "torch/csrc/jit/ir/*.cpp",
-            "torch/csrc/jit/passes/*.cpp",
-            "torch/csrc/jit/passes/onnx/*.cpp",
-            "torch/csrc/jit/passes/utils/*.cpp",
-            "torch/csrc/jit/mobile/*.cpp",
-            "torch/csrc/jit/python/*.cpp",
-            "torch/csrc/jit/runtime/*.cpp",
-            "torch/csrc/jit/serialization/*.cpp",
-            "torch/csrc/jit/testing/*.cpp",
-            "torch/csrc/multiprocessing/*.cpp",
-            "torch/csrc/onnx/*.cpp",
-            "torch/csrc/tensor/*.cpp",
-            "torch/csrc/utils/*.cpp",
-            "torch/lib/libshm/*.cpp",
-            "torch/lib/c10d/*.cpp",
-        ],
-        exclude = glob([
-            "torch/csrc/autograd/*_cuda.cpp",
-        ]) + [
-            "torch/csrc/autograd/functions/comm.cpp",
-            "torch/lib/libshm/manager.cpp",
-            "torch/lib/c10d/NCCLUtils.cpp",
-            "torch/lib/c10d/ProcessGroupMPI.cpp",
-            "torch/lib/c10d/ProcessGroupNCCL.cpp",
-        ],
-    ) + [
-        "torch/csrc/jit/codegen/cuda/interface.cpp",
-        ":torch_srcs",
+    )) + libtorch_core_sources + libtorch_distributed_sources + torch_cpp_srcs + libtorch_extra_sources + [
+        "torch/csrc/jit/frontend/error_report.cpp",
+        "torch/csrc/jit/frontend/lexer.cpp",
+        "torch/csrc/jit/frontend/function_schema_parser.cpp",
+        "torch/csrc/jit/frontend/strtod.cpp",
+        "torch/csrc/jit/frontend/source_range.cpp",
+        "torch/csrc/jit/frontend/schema_type_parser.cpp",
         ":generated_code",
     ],
     copts = TORCH_COPTS + if_cuda(["-DUSE_CUDA=1"]),
     defines = [
         "CAFFE2_NIGHTLY_VERSION=20200115",
     ],
-    linkopts = [
-        "-Wl,--rpath",
-        "-Wl,/opt/conda/lib",
-        "-L/opt/conda/lib",
-        "-lpython3.6m",
-    ],
     visibility = ["//visibility:public"],
     deps = [
         ":caffe2",
         ":torch_headers",
-        "@local_config_python//:python_headers",
-        "@pybind11",
     ],
     alwayslink = True,
 )
