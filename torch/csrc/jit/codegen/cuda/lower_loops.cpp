@@ -48,12 +48,16 @@ Int* getPredicate(const TensorView* const pred_tv, std::vector<Val*> indices) {
     if (!pred->sameAs(one))
       preds.push_back(pred);
 
-  Int* cond = preds[0];
+  if (preds.size() == 0) {
+    return one;
+  } else {
+    Int* cond = preds[0];
 
-  for (decltype(preds.size()) i{1}; i < preds.size(); i++)
-    cond = static_cast<Int*>(andOp(cond, preds[i]));
+    for (decltype(preds.size()) i{1}; i < preds.size(); i++)
+      cond = static_cast<Int*>(andOp(cond, preds[i]));
 
-  return cond;
+    return cond;
+  }
 }
 } // namespace
 
