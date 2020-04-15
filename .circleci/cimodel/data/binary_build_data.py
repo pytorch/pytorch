@@ -54,7 +54,17 @@ CONFIG_TREE_DATA = OrderedDict(
             "3.7",
         ],
     )),
+    windows=(dimensions.CUDA_VERSIONS, OrderedDict(
+        wheel=dimensions.STANDARD_PYTHON_VERSIONS,
+        conda=dimensions.STANDARD_PYTHON_VERSIONS,
+        libtorch=[
+            "3.7",
+        ],
+    )),
 )
+
+CONFIG_TREE_DATA_NO_WINDOWS = CONFIG_TREE_DATA.copy()
+CONFIG_TREE_DATA_NO_WINDOWS.pop("windows")
 
 # GCC config variants:
 #
@@ -69,6 +79,15 @@ LINUX_GCC_CONFIG_VARIANTS = OrderedDict(
     libtorch=[
         "devtoolset7",
         "gcc5.4_cxx11-abi",
+    ],
+)
+
+WINDOWS_LIBTORCH_CONFIG_VARIANTS = OrderedDict(
+    wheel=['release'],
+    conda=['release'],
+    libtorch=[
+        "debug",
+        "release",
     ],
 )
 
@@ -106,6 +125,8 @@ class PackageFormatConfigNode(ConfigNode):
     def get_children(self):
         if self.find_prop("os_name") == "linux":
             return [LinuxGccConfigNode(self, v) for v in LINUX_GCC_CONFIG_VARIANTS[self.find_prop("package_format")]]
+        elif self.find_prop("os_name") == "windows":
+            return [WindowsLibtorchConfigNode(self, v) for v in WINDOWS_LIBTORCH_CONFIG_VARIANTS[self.find_prop("package_format")]]
         else:
             return [ArchConfigNode(self, v) for v in self.find_prop("cuda_versions")]
 
@@ -125,6 +146,16 @@ class LinuxGccConfigNode(ConfigNode):
             cuda_versions = filter(lambda x: x != "90", cuda_versions)
 
         return [ArchConfigNode(self, v) for v in cuda_versions]
+
+
+class WindowsLibtorchConfigNode(ConfigNode):
+    def __init__(self, parent, libtorch_config_variant):
+        super(WindowsLibtorchConfigNode, self).__init__(parent, "LIBTORCH_CONFIG_VARIANT=" + str(libtorch_config_variant))
+
+        self.props["libtorch_config_variant"] = libtorch_config_variant
+
+    def get_children(self):
+        return [ArchConfigNode(self, v) for v in self.find_prop("cuda_versions")]
 
 
 class ArchConfigNode(ConfigNode):
