@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cstdint>
+
 __device__ static uint8_t sbox[256] = {
     0x63, 0x7C, 0x77, 0x7B, 0xF2, 0x6B, 0x6F, 0xC5, 0x30, 0x01, 0x67, 0x2B, 0xFE, 0xD7, 0xAB, 0x76,
     0xCA, 0x82, 0xC9, 0x7D, 0xFA, 0x59, 0x47, 0xF0, 0xAD, 0xD4, 0xA2, 0xAF, 0x9C, 0xA4, 0x72, 0xC0,
@@ -19,7 +21,6 @@ __device__ static uint8_t sbox[256] = {
     0x8C, 0xA1, 0x89, 0x0D, 0xBF, 0xE6, 0x42, 0x68, 0x41, 0x99, 0x2D, 0x0F, 0xB0, 0x54, 0xBB, 0x16
  };
 
-//reduce the size of this since we don't need this many
 __device__ static uint8_t rcon[255] = {
   0x8d, 0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40, 0x80, 0x1b, 0x36, 0x6c, 0xd8, 0xab, 0x4d, 0x9a, 
   0x2f, 0x5e, 0xbc, 0x63, 0xc6, 0x97, 0x35, 0x6a, 0xd4, 0xb3, 0x7d, 0xfa, 0xef, 0xc5, 0x91, 0x39, 
@@ -36,119 +37,108 @@ __device__ static uint8_t rcon[255] = {
   0x25, 0x4a, 0x94, 0x33, 0x66, 0xcc, 0x83, 0x1d, 0x3a, 0x74, 0xe8, 0xcb, 0x8d, 0x01, 0x02, 0x04, 
   0x08, 0x10, 0x20, 0x40, 0x80, 0x1b, 0x36, 0x6c, 0xd8, 0xab, 0x4d, 0x9a, 0x2f, 0x5e, 0xbc, 0x63, 
   0xc6, 0x97, 0x35, 0x6a, 0xd4, 0xb3, 0x7d, 0xfa, 0xef, 0xc5, 0x91, 0x39, 0x72, 0xe4, 0xd3, 0xbd, 
-  0x61, 0xc2, 0x9f, 0x25, 0x4a, 0x94, 0x33, 0x66, 0xcc, 0x83, 0x1d, 0x3a, 0x74, 0xe8, 0xcb  };
+  0x61, 0xc2, 0x9f, 0x25, 0x4a, 0x94, 0x33, 0x66, 0xcc, 0x83, 0x1d, 0x3a, 0x74, 0xe8, 0xcb
+};
 
-__device__ void add_round_key(uint8_t *block, uint8_t *key){
-  for (int i = 0; i < 16; ++i) {
+__device__ void addRoundKey(uint8_t* block, uint8_t* key){
+  for (auto i = 0; i < 16; i++) {
     block[i] = block[i] ^ key[i];
   }
 }
 
-__device__ void mix_columns(uint8_t *block){
-  for (int i = 0; i < 4; ++i) { //iterate over columns
-    uint8_t a[4];
-    uint8_t b[4]; 
-    uint8_t h;
-    for (int j = 0; j < 4; ++j) {
-      a[j] = block[4*i + j];
-      h = (uint8_t)((int8_t)a[j] >> 7);
-      b[j] = a[j] << 1;
-      b[j] ^= 0x1b & h;
-    } 
-    block[4*i + 0] = b[0] ^ a[3] ^ a[2] ^ b[1] ^ a[1];
-    block[4*i + 1] = b[1] ^ a[0] ^ a[3] ^ b[2] ^ a[2];
-    block[4*i + 2] = b[2] ^ a[1] ^ a[0] ^ b[3] ^ a[3];
-    block[4*i + 3] = b[3] ^ a[2] ^ a[1] ^ b[0] ^ a[0]; 
+__device__ void mixColumns(uint8_t* block){
+  for (auto i = 0; i < 4; i++) {
+    uint8_t x[4];
+    uint8_t y[4];
+    for (auto j = 0; j < 4; j++) {
+      x[j] = block[4 * i + j];
+      uint8_t z = ((int8_t)x[j] >> 7);
+      y[j] = x[j] << 1;
+      y[j] ^= 0x1b & z;
+    }
+    block[4 * i + 0] = y[0] ^ x[3] ^ x[2] ^ y[1] ^ x[1];
+    block[4 * i + 1] = y[1] ^ x[0] ^ x[3] ^ y[2] ^ x[2];
+    block[4 * i + 2] = y[2] ^ x[1] ^ x[0] ^ y[3] ^ x[3];
+    block[4 * i + 3] = y[3] ^ x[2] ^ x[1] ^ y[0] ^ x[0]; 
   }
 }
 
-__device__ void sub_bytes(uint8_t *block){
-  for (int i = 0; i < 16; ++i) {
+__device__ void subBytes(uint8_t* block){
+  for (auto i = 0; i < 16; i++) {
     block[i] = sbox[block[i]];
   }
 }
 
-//shift left by 0,1,2,3 respectively 
-__device__ void shift_rows(uint8_t *block) {
-  uint8_t tmp;
-  //row 0 remains unshifted
+__device__ void shiftRows(uint8_t* block) {
+  uint8_t temp;
 
-  //shift row 1 left by 1
-  tmp = block[1];
+  temp = block[1];
   block[1] = block[5];
   block[5] = block[9];
   block[9] = block[13];
-  block[13] = tmp;
+  block[13] = temp;
 
-  //shift row 2 letf by 2
-  tmp = block[2];
+  temp = block[2];
   block[2] = block[10];
-  block[10] = tmp;
+  block[10] = temp;
 
-  tmp = block[6];
+  temp = block[6];
   block[6] = block[14];
-  block[14] = tmp;
+  block[14] = temp;
 
-  //shift row 3 left by 3
-  tmp = block[3];
+  temp = block[3];
   block[3] = block[15];
   block[15] = block[11];
   block[11] = block[7];
-  block[7] = tmp;
+  block[7] = temp;
 }
 
-//generate round keys from initial key
-__device__ void expand_key(uint8_t *key, uint8_t *rkey){
-  uint32_t i,j,k;
-  uint8_t tempa[4];
-  uint32_t nround = 10;
-  //first round key is just the key
-  for (i = 0; i < 4; ++i) {
-    rkey[4*i + 0] = key[4*i + 0];
-    rkey[4*i + 1] = key[4*i + 1];
-    rkey[4*i + 2] = key[4*i + 2];
-    rkey[4*i + 3] = key[4*i + 3];
+__device__ void expandKey(uint8_t* key, uint8_t* rkey){
+  uint8_t temp[4];
+  uint32_t n = 10;
+  for (auto i = 0; i < 4; ++i) {
+    rkey[4 * i] = key[4 * i];
+    rkey[4 * i + 1] = key[4 * i + 1];
+    rkey[4 * i + 2] = key[4 * i + 2];
+    rkey[4 * i + 3] = key[4 * i + 3];
   }
-  for (i = 4; i < 4*(nround + 1); ++i) {
-    for (j = 0; j < 4; ++j) {
-      tempa[j] = rkey[(i-1)*4 + j];
+  for (auto i = 4; i < 4 * (n + 1); i++) {
+    for (auto j = 0; j < 4; j++) {
+      temp[j] = rkey[j + 4 * (i - 1)];
     }
     if (i % 4 == 0) {
-      //rotate 4 bytes in word
-      k = tempa[0];
-      tempa[0] = tempa[1];
-      tempa[1] = tempa[2];
-      tempa[2] = tempa[3];
-      tempa[3] = k;
+      auto t = temp[0];
+      temp[0] = temp[1];
+      temp[1] = temp[2];
+      temp[2] = temp[3];
+      temp[3] = t;
 
-      tempa[0] = sbox[tempa[0]];
-      tempa[1] = sbox[tempa[1]];
-      tempa[2] = sbox[tempa[2]];
-      tempa[3] = sbox[tempa[3]];
+      temp[0] = sbox[temp[0]];
+      temp[1] = sbox[temp[1]];
+      temp[2] = sbox[temp[2]];
+      temp[3] = sbox[temp[3]];
   
-      tempa[0] = tempa[0] ^ rcon[i/4];
+      temp[0] = temp[0] ^ rcon[i / 4];
     }
-    rkey[4*i + 0] = rkey[4*(i-4) + 0] ^ tempa[0];
-    rkey[4*i + 1] = rkey[4*(i-4) + 1] ^ tempa[1];
-    rkey[4*i + 2] = rkey[4*(i-4) + 2] ^ tempa[2];
-    rkey[4*i + 3] = rkey[4*(i-4) + 3] ^ tempa[3];
+    rkey[4 * i] = temp[0] ^ rkey[4 * (i - 4)];
+    rkey[4 * i + 1] = temp[1] ^ rkey[4 * (i - 4) + 1];
+    rkey[4 * i + 2] = temp[2] ^ rkey[4 * (i - 4) + 2];
+    rkey[4 * i + 3] = temp[3] ^ rkey[4 * (i - 4) + 3];
   } 
 }
 
-__device__ void encrypt(uint8_t *block, uint8_t *key) {
+__device__ void encrypt(uint8_t* block, uint8_t* key) {
   uint8_t rkey[176];
-  uint8_t round; 
-  //setup round keys
-  expand_key(key, rkey); 
-  //perform encryption
-  add_round_key(block, rkey);
-  for(round = 1; round < 10; ++round){
-    sub_bytes(block);
-    shift_rows(block);
-    mix_columns(block);
-    add_round_key(block, rkey + 16*round);
+  uint8_t r; 
+  expandKey(key, rkey); 
+  addRoundKey(block, rkey);
+  for (r = 1; r < 10; r++) {
+    subBytes(block);
+    shiftRows(block);
+    mixColumns(block);
+    addRoundKey(block, rkey + 16 * r);
   }
-  sub_bytes(block);
-  shift_rows(block);
-  add_round_key(block, rkey + 16*round);
+  subBytes(block);
+  shiftRows(block);
+  addRoundKey(block, rkey + 16 * r);
 }
