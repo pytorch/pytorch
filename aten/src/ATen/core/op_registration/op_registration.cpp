@@ -135,10 +135,10 @@ RegisterOperators::RegisterOperators(RegisterOperators&&) noexcept = default;
 RegisterOperators& RegisterOperators::operator=(RegisterOperators&&) noexcept = default;
 
 
-CppFunction::CppFunction(KernelFunction func, std::unique_ptr<c10::FunctionSchema> schema, std::string debug)
+CppFunction::CppFunction(KernelFunction func, std::unique_ptr<c10::FunctionSchema> schema)
   : func_(std::move(func))
   , schema_(std::move(schema))
-  , debug_(std::move(debug))
+  , debug_()
   {}
 
 #define ERROR_CONTEXT "(Error occurred while processing ", kind_, " block at ", file_, ":", line_, ")"
