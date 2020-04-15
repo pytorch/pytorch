@@ -88,8 +88,7 @@ Tensor isfinite(const Tensor& self) {
   // Note: a complex value is finite iff both parts are finite
   if (self.is_complex()) {
     const auto float_type = c10::toValueType(self.scalar_type());
-    return at::isfinite(self.copy_real().to(float_type)).__iand__
-          (at::isfinite(self.copy_imag().to(float_type)));
+    return self.abs().to(float_type).isfinite();
   }
 
   return AT_DISPATCH_FLOATING_TYPES_AND_HALF(self.scalar_type(), "isfinite", [&]() {
