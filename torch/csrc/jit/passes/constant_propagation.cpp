@@ -285,7 +285,7 @@ struct ConstantPropagator {
 
   bool noMutableValues(at::ArrayRef<Value*> values) {
     return std::none_of(values.begin(), values.end(), [](Value* v) {
-      return AliasDb::mutableType(v);
+      return AliasDb::isMutableType(v);
     });
   }
 
