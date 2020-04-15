@@ -7765,7 +7765,7 @@ a")
                 self.assertEqual(t1, t2)
                 self.assertEqual(t1.device, t2.device)
 
-
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.LEGACY, "Simple Executor doesn't have any shapes to propagate")
     def test_tensor_as_tensor_shape_prop(self):
         tensor_template = dedent('''
         def func():
