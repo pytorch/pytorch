@@ -36,6 +36,8 @@ enum class ValType;
 struct TORCH_CUDA_API IterVisitor : public OptOutDispatch {
   virtual ~IterVisitor() = default;
 
+  using OptOutDispatch::handle;
+
   IterVisitor() = default;
 
   IterVisitor(const IterVisitor& other) = default;
