@@ -2,7 +2,7 @@
 #include <type_traits>
 #include <ATen/Config.h>
 #include <ATen/Dispatch.h>
-#include <ATen/CPUGenerator.h>
+#include <ATen/CPUGeneratorImpl.h>
 #include <ATen/Utils.h>
 #include <ATen/Generator.h>
 #include <ATen/Parallel.h>
@@ -253,20 +253,20 @@ static void clamp_min_kernel(TensorIterator& iter, Scalar min_scalar) {
   });
 }
 
-static void cauchy_kernel(TensorIterator& iter, double median, double sigma, Generator gen) {
-  CPUGenerator* generator = get_generator_or_default<CPUGenerator>(gen, detail::getDefaultCPUGenerator());
+static void cauchy_kernel(TensorIterator& iter, double median, double sigma, c10::optional<Generator> gen) {
+  CPUGeneratorImpl* generator = get_generator_or_default<CPUGeneratorImpl>(gen, detail::getDefaultCPUGenerator());
   templates::cpu::cauchy_kernel(iter, median, sigma, generator);
 }
 
 #if !AT_MKL_ENABLED()
-void bernoulli_mkl_kernel(Tensor &output, const double p, Generator gen) {
+void bernoulli_mkl_kernel(Tensor &output, const double p, c10::optional<Generator> gen) {
   // Use AT_ASSERTM because this should never be reached, and AT_ASSERTM tells
   // users to report this as a bug.
   AT_ASSERTM(false, "ATen not compiled with MKL");
 }
 #else
-void bernoulli_mkl_kernel(Tensor &self, const double p, Generator gen) {
-  CPUGenerator* generator = get_generator_or_default<CPUGenerator>(gen, detail::getDefaultCPUGenerator());
+void bernoulli_mkl_kernel(Tensor &self, const double p, c10::optional<Generator> gen) {
+  CPUGeneratorImpl* generator = get_generator_or_default<CPUGeneratorImpl>(gen, detail::getDefaultCPUGenerator());
   int64_t seed;
   {
     // See Note [Acquire lock when using random generators]
@@ -317,9 +317,9 @@ void bernoulli_mkl_kernel(Tensor &self, const double p, Generator gen) {
 }
 #endif
 
-static void exponential_kernel(TensorIterator& iter, double lambda, Generator gen) {
+static void exponential_kernel(TensorIterator& iter, double lambda, c10::optional<Generator> gen) {
   AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "exponential_cpu", [&]() {
-    CPUGenerator* generator = get_generator_or_default<CPUGenerator>(gen, detail::getDefaultCPUGenerator());
+    CPUGeneratorImpl* generator = get_generator_or_default<CPUGeneratorImpl>(gen, detail::getDefaultCPUGenerator());
     std::lock_guard<std::mutex> lock(generator->mutex_);
     at::exponential_distribution<double> exponential(lambda);
     cpu_serial_kernel(iter, [&exponential, generator]() -> scalar_t {
@@ -328,9 +328,9 @@ static void exponential_kernel(TensorIterator& iter, double lambda, Generator ge
   });
 }
 
-static void geometric_kernel(TensorIterator& iter, double p, Generator gen) {
+static void geometric_kernel(TensorIterator& iter, double p, c10::optional<Generator> gen) {
   AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "geometric_cpu", [&]() {
-    CPUGenerator* generator = get_generator_or_default<CPUGenerator>(gen, detail::getDefaultCPUGenerator());
+    CPUGeneratorImpl* generator = get_generator_or_default<CPUGeneratorImpl>(gen, detail::getDefaultCPUGenerator());
     std::lock_guard<std::mutex> lock(generator->mutex_);
     cpu_serial_kernel(iter, [p, generator]() -> scalar_t {
       at::geometric_distribution<double> geometric(p);
@@ -339,9 +339,9 @@ static void geometric_kernel(TensorIterator& iter, double p, Generator gen) {
   });
 }
 
-static void log_normal_kernel(TensorIterator& iter, double mean, double std, Generator gen) {
+static void log_normal_kernel(TensorIterator& iter, double mean, double std, c10::optional<Generator> gen) {
   AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "log_normal_cpu", [&]() {
-    CPUGenerator* generator = get_generator_or_default<CPUGenerator>(gen, detail::getDefaultCPUGenerator());
+    CPUGeneratorImpl* generator = get_generator_or_default<CPUGeneratorImpl>(gen, detail::getDefaultCPUGenerator());
     std::lock_guard<std::mutex> lock(generator->mutex_);
     cpu_serial_kernel(iter, [mean, std, generator]() -> scalar_t {
       at::lognormal_distribution<double> logNormal(mean, std);
@@ -350,31 +350,31 @@ static void log_normal_kernel(TensorIterator& iter, double mean, double std, Gen
   });
 }
 
-void uniform_kernel(TensorIterator& iter, double from, double to, Generator gen) {
-  CPUGenerator* generator = get_generator_or_default<CPUGenerator>(gen, detail::getDefaultCPUGenerator());
+void uniform_kernel(TensorIterator& iter, double from, double to, c10::optional<Generator> gen) {
+  CPUGeneratorImpl* generator = get_generator_or_default<CPUGeneratorImpl>(gen, detail::getDefaultCPUGenerator());
   templates::cpu::uniform_kernel(iter, from, to, generator);
 }
 
-void normal_kernel(Tensor& self, double mean, double std, Generator gen) {
-  CPUGenerator* generator = get_generator_or_default<CPUGenerator>(gen, detail::getDefaultCPUGenerator());
+void normal_kernel(Tensor& self, double mean, double std, c10::optional<Generator> gen) {
+  CPUGeneratorImpl* generator = get_generator_or_default<CPUGeneratorImpl>(gen, detail::getDefaultCPUGenerator());
   templates::cpu::normal_kernel(self, mean, std, generator);
 }
 
-static void random_from_to_kernel(TensorIterator& iter, uint64_t range, int64_t base, Generator gen) {
-  CPUGenerator* generator = get_generator_or_default<CPUGenerator>(gen, detail::getDefaultCPUGenerator());
+static void random_from_to_kernel(TensorIterator& iter, uint64_t range, int64_t base, c10::optional<Generator> gen) {
+  CPUGeneratorImpl* generator = get_generator_or_default<CPUGeneratorImpl>(gen, detail::getDefaultCPUGenerator());
   templates::cpu::random_from_to_kernel(iter, range, base, generator);
 }
 
-static void random_kernel(TensorIterator& iter, Generator gen) {
-  CPUGenerator* generator = get_generator_or_default<CPUGenerator>(gen, detail::getDefaultCPUGenerator());
+static void random_kernel(TensorIterator& iter, c10::optional<Generator> gen) {
+  CPUGeneratorImpl* generator = get_generator_or_default<CPUGeneratorImpl>(gen, detail::getDefaultCPUGenerator());
   templates::cpu::random_kernel(iter, generator);
 }
 
 // This is the special kernel to handle single specific case:
 // from(inclusive) = std::numeric_limits<int64_t>::lowest()
 // to(exclusive) = None (= std::numeric_limits<int64_t>::max() + 1)
-static void random_full_64_bits_range_kernel(TensorIterator& iter, Generator gen) {
-  CPUGenerator* generator = get_generator_or_default<CPUGenerator>(gen, detail::getDefaultCPUGenerator());
+static void random_full_64_bits_range_kernel(TensorIterator& iter, c10::optional<Generator> gen) {
+  CPUGeneratorImpl* generator = get_generator_or_default<CPUGeneratorImpl>(gen, detail::getDefaultCPUGenerator());
   templates::cpu::random_full_64_bits_range_kernel(iter, generator);
 }
 
@@ -394,7 +394,7 @@ static void rsqrt_kernel(TensorIterator& iter) {
 #define IMPLEMENT_FLOAT_KERNEL(dispatchtypes, op)                             \
   static void op##_kernel(TensorIterator& iter) {                             \
     TORCH_INTERNAL_ASSERT(iter.ntensors() == 2);                              \
-    AT_DISPATCH_FLOATING_TYPES(iter.dtype(), op##_vml_cpu, [&]() {            \
+    AT_DISPATCH_FLOATING_TYPES_AND(kBFloat16, iter.dtype(), op##_vml_cpu, [&]() {            \
       iter.serial_for_each(                                                   \
           [&](char** data_, const int64_t* strides, int64_t n) { \
             scalar_t* out_data = reinterpret_cast<scalar_t*>(data_[0]);       \
@@ -425,7 +425,7 @@ static void rsqrt_kernel(TensorIterator& iter) {
 #define IMPLEMENT_COMPLEX_KERNEL(dispatchtypes, op)                             \
   static void op##_kernel(TensorIterator& iter) {                             \
     TORCH_INTERNAL_ASSERT(iter.ntensors() == 2);                              \
-    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(iter.dtype(), op##_vml_cpu, [&]() {\
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(kBFloat16, iter.dtype(), op##_vml_cpu, [&]() {\
       iter.serial_for_each(                                                   \
           [&](char** data_, const int64_t* strides, int64_t n) {              \
             scalar_t* out_data = reinterpret_cast<scalar_t*>(data_[0]);       \

@@ -93,6 +93,14 @@ void Fusion::removeVal(Val* val) {
     removeExpr(use);
 
   val_set_.erase(val);
+
+  for (auto it = val_deque_.begin(); it != val_deque_.end(); it++)
+    if (*it == val) {
+      val_deque_.erase(it);
+      break;
+    }
+
+  delete val;
 }
 
 void Fusion::addInput(Val* const input) {
@@ -152,6 +160,7 @@ StmtNameType Fusion::registerVal(Val* val) {
     }
   }
   val_set_.emplace(val);
+  val_deque_.push_back(val);
   return getValName(*(val->getValType()));
 }
 
@@ -212,6 +221,10 @@ bool Fusion::used(Val* val) const {
 
 const std::set<Val*>& Fusion::vals() const noexcept {
   return val_set_;
+}
+
+const std::deque<Val*>& Fusion::deterministic_vals() const noexcept {
+  return val_deque_;
 }
 
 const std::set<Expr*>& Fusion::unordered_exprs() const noexcept {

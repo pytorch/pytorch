@@ -47,6 +47,18 @@ namespace jit {
   _(ScheduleFuserStyle)                   \
   _(ScheduleFuserThreeArg)                \
   _(ScheduleDynamicShape2D)               \
+  _(ReduceSum1D)                          \
+  _(ReduceSum2D)                          \
+  _(ReduceSum3D)                          \
+  _(ReduceSum10D)                         \
+  _(ReduceProduct)                        \
+  _(ReduceMax)                            \
+  _(ReduceMinCustomInitializer)           \
+  _(ReduceAnyAll)                         \
+  _(ReduceMatmul2D)                       \
+  _(ReduceRfactorLike)                    \
+  _(SplitReduceAxis)                      \
+  _(SplitNonReduceAxis)                   \
   _(TypeTest01)                           \
   _(TypePropagation)                      \
   _(Cond01)                               \
@@ -124,7 +136,20 @@ namespace jit {
   _(SimplifyRoundModPattern)              \
   _(SimplifyRoundModPatternFactorization) \
   _(SimplifyRoundModPatternMultivar)      \
-  _(StmtClone)
+  _(SimplifyDivisionScalarFactorization)  \
+  _(SimplifyConstantBranches)             \
+  _(SimplifyConstantCond)                 \
+  _(StmtClone)                            \
+  _(BoundsInference_1)                    \
+  _(BoundsInference_2)                    \
+  _(BoundsInference_3)                    \
+  _(BoundsInference_4)                    \
+  _(BoundsInference_5)                    \
+  _(BoundsInference_6)                    \
+  _(LoopNestComputeAt_1)                  \
+  _(LoopNestComputeAt_2)                  \
+  _(LoopNestComputeAt_3)                  \
+  _(LoopNestComputeAt_4)
 
 #define TH_FORALL_TENSOREXPR_TESTS_LLVM(_) \
   _(LLVMByteImmTest)                       \

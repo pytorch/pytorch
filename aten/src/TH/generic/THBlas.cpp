@@ -36,6 +36,7 @@ TH_EXTERNC void sger_(int *m, int *n, float *alpha, float *x, int *incx, float *
 TH_EXTERNC void dgemm_(char *transa, char *transb, int *m, int *n, int *k, double *alpha, double *a, int *lda, double *b, int *ldb, double *beta, double *c, int *ldc);
 TH_EXTERNC void sgemm_(char *transa, char *transb, int *m, int *n, int *k, float *alpha, float *a, int *lda, float *b, int *ldb, float *beta, float *c, int *ldc);
 
+<<<<<<< HEAD
 
 
 void THBlas_(swap)(int64_t n, scalar_t *x, int64_t incx, scalar_t *y, int64_t incy)
@@ -57,17 +58,53 @@ void THBlas_(swap)(int64_t n, scalar_t *x, int64_t incx, scalar_t *y, int64_t in
     dswap_(&i_n, x, &i_incx, y, &i_incy);
 #else
     sswap_(&i_n, x, &i_incx, y, &i_incy);
+=======
+void THBlas_(scal)(int64_t n, scalar_t a, scalar_t *x, int64_t incx)
+{
+  if(n == 1)
+    incx = 1;
+
+  // [NOTE: cpu_zero]
+  // at least on the following version of BLAS this does not folllow the same semantics
+  // when a == 0 and there exists a NaN in the input.  Namely, the non-BLAS code below results
+  // in a value of 0, whereas this results in a value of NaN.  This is problematic because a
+  // NaN in an output tensor needs to be zero'ed explicitly through a separate mechanism.
+  // At the ATen/TH binding layer, this was via "cpu_zero", which would zero out the output
+  // tensor.
+  // BLAS version:
+  // [conda] blas                      1.0                         mkl
+  // [conda] mkl                       2019.4                      243
+#if defined(USE_BLAS) && (defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_FLOAT))
+  if( (n <= INT_MAX) && (incx <= INT_MAX) && (a != 0))
+  {
+    int i_n = (int)n;
+    int i_incx = (int)incx;
+
+#if defined(TH_REAL_IS_DOUBLE)
+    dscal_(&i_n, &a, x, &i_incx);
+#else
+    sscal_(&i_n, &a, x, &i_incx);
+>>>>>>> 9cac2b83d9e6838de796e0cecfbacaa6a64dc6a8
 #endif
     return;
   }
 #endif
   {
     int64_t i;
+<<<<<<< HEAD
     for(i = 0; i < n; i++)
     {
       scalar_t z = x[i*incx];
       x[i*incx] = y[i*incy];
       y[i*incy] = z;
+=======
+    for(i = 0; i < n; i++) {
+      if (a == 0) {
+        x[i*incx] = 0;
+      } else {
+        x[i*incx] *= a;
+      }
+>>>>>>> 9cac2b83d9e6838de796e0cecfbacaa6a64dc6a8
     }
   }
 }
