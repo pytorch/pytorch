@@ -119,10 +119,16 @@ Working with Scaled Gradients
 Gradient accumulation
 ---------------------
 
-If you accumulate gradients over multiple iterations between each :meth:`step<step>`,
-they should remain scaled during iterations where you don't call :meth:`step<step>`.
-If you want to :meth:`unscale_<unscale_>` gradients (e.g., to allow clipping unscaled gradients),
-you should do so just before :meth:`step<step>`, after all (scaled) gradients for the upcoming
+Gradient accumulation adds gradients over an effective batch of size ``batch_per_iter * iters_to_accumulate``
+(``* num_procs`` if distributed).  The scale should be calibrated for the effective batch, which means inf/NaN checking,
+step skipping, and scale updates should occur once for each effective batch.  Also, gradients should remain scaled,
+and the scale factor should remain constant, while gradients for a given effective batch are accumulated.
+If gradients are unscaled (or the scale factor changes) before accumulation is complete, the next backward pass will
+add scaled gradients to unscaled gradients (or gradients scaled by a different factor) after which it's impossible to
+recover the accumulated unscaled gradients :meth:`step<step>` must apply.
+
+Therefore, if you want to :meth:`unscale_<unscale_>` gradients (e.g., to allow clipping unscaled gradients),
+call :meth:`unscale_<unscale_>` just before :meth:`step<step>`, after all (scaled) gradients for the upcoming
 :meth:`step<step>` have been accumulated.  Also, only call :meth:`update<update>` at the end of iterations where
 you called :meth:`step<step>`::
 
