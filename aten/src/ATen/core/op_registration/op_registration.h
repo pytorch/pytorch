@@ -817,27 +817,16 @@ namespace detail {
 // }
 //
 class CAFFE2_API Library final {
-  c10::optional<std::string> ns_;
-  c10::optional<DispatchKey> dispatch_key_;
-  const char* file_;
-  uint32_t line_;
-
-  std::vector<RegistrationHandleRAII> registrars_;
-
-  friend detail::TorchLibraryInit;
-
-private:
-  // Non-user visible actual implementations of functions.  These aren't
-  // public because we only implement & qualifier and not && qualifier
-  Library& _def(FunctionSchema&& schema) &;
-  Library& _def(c10::either<OperatorName, FunctionSchema>&&, CppFunction&& f) &;
-  Library& _impl(const char* name, CppFunction&& f) &;
-  Library& _fallback(CppFunction&& f) &;
-
 public:
+  // Which type of macro produced this Library
+  enum Kind {
+    DEF, // from TORCH_LIBRARY (no qualifier)
+    IMPL,
+    FRAGMENT,
+  };
+
   // Use TORCH_LIBRARY/TORCH_LIBRARY_IMPL instead of these constructors directly
-  Library(std::string ns, const char* file, uint32_t line);
-  Library(std::string ns, DispatchKey k, const char* file, uint32_t line);
+  Library(Kind kind, std::string ns, c10::optional<DispatchKey> k, const char* file, uint32_t line);
 
   Library(const Library&) = delete;
   Library& operator=(const Library&) = delete;
@@ -924,6 +913,24 @@ public:
     CppFunction f((std::forward<Func>(raw_f)));
     return _fallback(std::move(f));
   }
+
+private:
+  c10::optional<std::string> ns_;
+  c10::optional<DispatchKey> dispatch_key_;
+  const char* file_;
+  uint32_t line_;
+  Kind kind_;
+
+  std::vector<RegistrationHandleRAII> registrars_;
+
+  friend detail::TorchLibraryInit;
+
+  // Non-user visible actual implementations of functions.  These aren't
+  // public because we only implement & qualifier and not && qualifier
+  Library& _def(FunctionSchema&& schema, OperatorName* out_name = nullptr) &;
+  Library& _def(c10::either<OperatorName, FunctionSchema>&&, CppFunction&& f) &;
+  Library& _impl(const char* name, CppFunction&& f) &;
+  Library& _fallback(CppFunction&& f) &;
 };
 
 namespace detail {
@@ -933,12 +940,8 @@ private:
   using InitFn = void(Library&);
   Library lib_;
 public:
-  TorchLibraryInit(InitFn* fn, const char* ns, const char* file, uint32_t line)
-    : lib_(ns, file, line) {
-    fn(lib_);
-  }
-  TorchLibraryInit(InitFn* fn, const char* ns, DispatchKey k, const char* file, uint32_t line)
-    : lib_(ns, k, file, line) {
+  TorchLibraryInit(Library::Kind kind, InitFn* fn, const char* ns, c10::optional<DispatchKey> k, const char* file, uint32_t line)
+    : lib_(kind, ns, k, file, line) {
     fn(lib_);
   }
 };
@@ -950,16 +953,38 @@ public:
 #define TORCH_LIBRARY(ns, m) \
   static void TORCH_LIBRARY_init_ ## ns (c10::Library&); \
   static c10::detail::TorchLibraryInit TORCH_LIBRARY_static_init_ ## ns ( \
-    &TORCH_LIBRARY_init_ ## ns, #ns, __FILE__, __LINE__ \
+    c10::Library::DEF, \
+    &TORCH_LIBRARY_init_ ## ns, \
+    #ns, c10::nullopt, __FILE__, __LINE__ \
   ); \
   void TORCH_LIBRARY_init_ ## ns (c10::Library& m)
+
+// This macro is a version of TORCH_LIBRARY that doesn't enforce that there
+// is only one library (it is a "fragment").  This should ONLY be used
+// with PerOpRegistration (as its name suggests).
+#define TORCH_LIBRARY_FRAGMENT_THIS_API_IS_FOR_PER_OP_REGISTRATION_ONLY(ns, m) \
+  static void TORCH_LIBRARY_FRAGMENT_init_ ## ns ## _ ## k (c10::Library&); \
+  static c10::detail::TorchLibraryInit TORCH_LIBRARY_FRAGMENT_static_init_ ## ns ## _ ## k ( \
+    c10::Library::FRAGMENT, \
+    &TORCH_LIBRARY_FRAGMENT_init_ ## ns ## _ ## k, \
+    #ns, c10::nullopt, __FILE__, __LINE__ \
+  ); \
+  void TORCH_LIBRARY_FRAGMENT_init_ ## ns ## _ ## k (c10::Library& m)
 
 #define TORCH_LIBRARY_IMPL(ns, k, m) \
   static void TORCH_LIBRARY_IMPL_init_ ## ns ## _ ## k (c10::Library&); \
   static c10::detail::TorchLibraryInit TORCH_LIBRARY_IMPL_static_init_ ## ns ## _ ## k ( \
-    & TORCH_LIBRARY_IMPL_init_ ## ns ## _ ## k, #ns, c10::DispatchKey::k, __FILE__, __LINE__ \
+    c10::Library::IMPL, \
+    & TORCH_LIBRARY_IMPL_init_ ## ns ## _ ## k, \
+    #ns, c10::make_optional(c10::DispatchKey::k), __FILE__, __LINE__ \
   ); \
   void TORCH_LIBRARY_IMPL_init_ ## ns ## _ ## k (c10::Library& m)
+
+// These are variants of the macros above which are to be used for testing (they
+// don't setup the static initializer, so you can control the visibility of
+// the allocated library yourself).
+#define MAKE_TORCH_LIBRARY(ns) Library(Library::DEF, #ns, c10::nullopt, __FILE__, __LINE__)
+#define MAKE_TORCH_LIBRARY_IMPL(ns, k) Library(Library::IMPL, #ns, c10::make_optional(c10::DispatchKey::k), __FILE__, __LINE__)
 
 namespace torch {
   // Old-style API
