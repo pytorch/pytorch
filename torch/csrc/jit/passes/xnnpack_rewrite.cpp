@@ -296,7 +296,7 @@ void FoldPrePackingOps(script::Module& m) {
   PrePackingOpsFolder(m, filter_fn, "prepack_folding");
 }
 
-script::Module optimizeForMobile(script::Module& m) {
+script::Module optimizeForMobile(const script::Module& m) {
   auto cloned_module = m.clone();
   cloned_module.eval();
   cloned_module = FoldConvBatchNorm2d(cloned_module);
@@ -328,7 +328,7 @@ void FoldPrePackingOps(script::Module& m) {
       "XNNPACK is not enabled. Please build with USE_XNNPACK=1");
 }
 
-script::Module optimizeForMobile(script::Module& m) {
+script::Module optimizeForMobile(const script::Module& m) {
   TORCH_INTERNAL_ASSERT(
       "Mobile optimizaiton only available with XNNPACK at the moment. "
       "XNNPACK is not enabled. Please build with USE_XNNPACK=1");
