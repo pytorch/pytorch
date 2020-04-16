@@ -1,6 +1,6 @@
 import unittest
 import torch
-import torch.utils.optimizer
+import torch.utils.mobile_optimizer
 from torch.nn import functional as F
 
 FileCheck = torch._C.FileCheck
@@ -63,7 +63,7 @@ class TestOptimizer(unittest.TestCase):
         scripted_model.eval()
         initial_result = scripted_model(input_data)
 
-        optimized_scripted_model = torch.utils.optimizer.optimize_for_mobile(scripted_model)
+        optimized_scripted_model = torch.utils.mobile_optimizer.optimize_for_mobile(scripted_model)
         optimized_result = optimized_scripted_model(input_data)
 
         pattern_count_map = {"Tensor = aten::conv2d": -1,
