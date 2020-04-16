@@ -3,7 +3,7 @@
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/TensorAdvancedIndexing.h>
 #include <ATen/Parallel.h>
-#include <unordered_map>
+#include <map>
 
 namespace at { namespace native {
 
@@ -249,7 +249,7 @@ struct cpu_scatter_gather_base_kernel {
         constexpr auto INDEX_ITER_STRIDE_IDX = 1;
 
         using binary_func_t = std::function<void(scalar_t*, Scalar)>;
-        std::unordered_map<const SCATTER_GATHER_OP, binary_func_t> binary_funcs;
+        std::map<const SCATTER_GATHER_OP, binary_func_t> binary_funcs;
         binary_funcs[SCATTER_GATHER_OP::SCALAR_ASSIGN] =  scalar_assign;
         binary_funcs[SCATTER_GATHER_OP::SCALAR_REDUCE_ADD] = scalar_reduce_add;
         binary_funcs[SCATTER_GATHER_OP::SCALAR_REDUCE_SUBTRACT] = scalar_reduce_subtract;
@@ -380,7 +380,7 @@ struct cpu_scatter_gather_base_kernel {
         constexpr auto SRC_ITER_STRIDE_IDX = 1;
 
         using binary_func_t = std::function<void(scalar_t*, scalar_t*)>;
-        std::unordered_map<const SCATTER_GATHER_OP, binary_func_t> binary_funcs;
+        std::map<const SCATTER_GATHER_OP, binary_func_t> binary_funcs;
         binary_funcs[SCATTER_GATHER_OP::REDUCE_ADD] = reduce_sum;
         binary_funcs[SCATTER_GATHER_OP::REDUCE_SUBTRACT] = reduce_subtract;
         binary_funcs[SCATTER_GATHER_OP::REDUCE_MULTIPLY] = reduce_multiply;
