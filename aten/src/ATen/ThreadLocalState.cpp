@@ -17,7 +17,9 @@ bool _unused = []() {
     ThreadLocalSetting::GRAD_MODE,
 #if !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
     []() {
-      return SettingValue{.value = GradMode::is_enabled()};
+      auto v = SettingValue();
+      v.value = GradMode::is_enabled();
+      return v;
     },
     [](SettingValue v) {
       GradMode::set_enabled(v.value);

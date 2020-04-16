@@ -221,7 +221,7 @@ struct TORCH_API RecordFunction {
 
 class TORCH_API RecordFunctionGuard {
  public:
-  RecordFunctionGuard(bool is_enabled)
+  explicit RecordFunctionGuard(bool is_enabled)
       : prev_value_(at::_tls_is_record_function_enabled()) {
     at::_tls_set_record_function_enabled(is_enabled);
   }
