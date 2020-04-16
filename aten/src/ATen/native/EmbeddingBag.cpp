@@ -5,7 +5,7 @@
 
 #include <TH/THBlasUtils.h>
 
-#if defined(USE_FBGEMM)
+#ifdef USE_FBGEMM
 #include <fbgemm/Fbgemm.h>
 #else
 #include <caffe2/perfkernels/embedding_lookup_idx.h>
@@ -104,7 +104,7 @@ void index_select_add<float>(const Tensor &select_indices,
       offsets_data = offsets_include_last.data();
     }
 
-#if defined(USE_FBGEMM)
+#ifdef USE_FBGEMM
     auto kernel_fp32_i64 =
       fbgemm::GenerateEmbeddingSpMDM<float, int64_t, int64_t>(
         /* block_size */ddim,
@@ -117,7 +117,7 @@ void index_select_add<float>(const Tensor &select_indices,
 #endif
     at::parallel_for(
         0, output_size, 1, [&](int64_t start_idx, int64_t end_idx) {
-#if defined(USE_FBGEMM)
+#ifdef USE_FBGEMM
           kernel_fp32_i64(
             /* output_size */end_idx - start_idx,
             /* index_size */offsets_data[end_idx] - offsets_data[start_idx],
@@ -230,7 +230,8 @@ void index_select_scale_add<float>(const Tensor &select_indices,
       offsets_include_last[offsets.numel()] = select_indices.numel();
       offsets_data = offsets_include_last.data();
     }
-#if defined(USE_FBGEMM)
+
+#ifdef USE_FBGEMM
     auto kernel_fp32_i64 =
       fbgemm::GenerateEmbeddingSpMDM<float, int64_t, int64_t>(
         /* block_size */ddim,
@@ -243,7 +244,7 @@ void index_select_scale_add<float>(const Tensor &select_indices,
 #endif
     at::parallel_for(
         0, output_size, 1, [&](int64_t start_idx, int64_t end_idx) {
-#if defined(USE_FBGEMM)
+#ifdef USE_FBGEMM
           kernel_fp32_i64(
             /* output_size */end_idx - start_idx,
             /* index_size */offsets_data[end_idx] - offsets_data[start_idx],
