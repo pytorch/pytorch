@@ -20,7 +20,7 @@ torch.set_default_dtype(torch.double)
 
 class TestSerialization(TestCase):
     # Copy and modified from TestCase.assertExpected
-    def _test_op(self, qmodule, subname=None, prec=None):
+    def _test_op(self, qmodule, subname=None, input_size=None, input_quantized=True, generate=False, prec=None):
         r""" Test quantized modules serialized previously can be loaded
         with current code, make sure we don't break backward compatibility for the
         serialization of quantized modules
@@ -52,26 +52,25 @@ class TestSerialization(TestCase):
         traced_module_file = base_name + ".traced.pt"
         expected_file = base_name + ".expected.pt"
 
-        # saving code : uncomment when adding a new test
-        # and run the new test, e.g.
-        # python test/quantization/test_backward_compatibility.py TestSerialization.test_conv3d
-        # data = torch.randn(2, 3).float()
-        # data = torch.quantize_per_tensor(data, 0.5, 2, torch.quint8)
-        # torch.save(data, input_file)
-        # torch.save(qmodule.state_dict(), state_dict_file)
-        # torch.jit.save(torch.jit.script(qmodule), scripted_module_file)
-        # torch.jit.save(torch.jit.trace(qmodule, data), traced_module_file)
-        # torch.save(qmodule(data), expected_file)
+        if generate:
+            input_tensor = torch.rand(*input_size).float()
+            if input_quantized:
+                input_tensor = torch.quantize_per_tensor(input_tensor, 0.5, 2, torch.quint8)
+            torch.save(input_tensor, input_file)
+            torch.save(qmodule.state_dict(), state_dict_file)
+            torch.jit.save(torch.jit.script(qmodule), scripted_module_file)
+            torch.jit.save(torch.jit.trace(qmodule, input_tensor), traced_module_file)
+            torch.save(qmodule(input_tensor), expected_file)
 
-        data = torch.load(input_file)
+        input_tensor = torch.load(input_file)
         qmodule.load_state_dict(torch.load(state_dict_file))
         qmodule_scripted = torch.jit.load(scripted_module_file)
         qmodule_traced = torch.jit.load(traced_module_file)
 
         expected = torch.load(expected_file)
-        self.assertEqual(qmodule(data), expected, prec=prec)
-        self.assertEqual(qmodule_scripted(data), expected, prec=prec)
-        self.assertEqual(qmodule_traced(data), expected, prec=prec)
+        self.assertEqual(qmodule(input_tensor), expected, prec=prec)
+        self.assertEqual(qmodule_scripted(input_tensor), expected, prec=prec)
+        self.assertEqual(qmodule_traced(input_tensor), expected, prec=prec)
 
     @unittest.skipUnless(
         'fbgemm' in torch.backends.quantized.supported_engines or
@@ -80,8 +79,8 @@ class TestSerialization(TestCase):
         " with instruction set support avx2 or newer.",
     )
     def test_linear(self):
-        module_qint8 = nnq.Linear(3, 1, bias_=True, dtype=torch.qint8)
-        self._test_op(module_qint8, "qint8")
+        module = nnq.Linear(3, 1, bias_=True, dtype=torch.qint8)
+        self._test_op(module, input_size=[1, 3], generate=False)
 
     @unittest.skipUnless(
         'fbgemm' in torch.backends.quantized.supported_engines or
@@ -90,8 +89,8 @@ class TestSerialization(TestCase):
         " with instruction set support avx2 or newer.",
     )
     def test_linear_relu(self):
-        module_qint8 = nniq.LinearReLU(3, 1, bias=True, dtype=torch.qint8)
-        self._test_op(module_qint8, "qint8")
+        module = nniq.LinearReLU(3, 1, bias=True, dtype=torch.qint8)
+        self._test_op(module, input_size=[1, 3], generate=False)
 
     @unittest.skipUnless(
         'fbgemm' in torch.backends.quantized.supported_engines or
@@ -102,8 +101,8 @@ class TestSerialization(TestCase):
     def test_linear_dynamic(self):
         module_qint8 = nnqd.Linear(3, 1, bias_=True, dtype=torch.qint8)
         module_float16 = nnqd.Linear(3, 1, bias_=True, dtype=torch.float16)
-        self._test_op(module_qint8, "qint8")
-        self._test_op(module_float16, "float16")
+        self._test_op(module_qint8, "qint8", input_size=[1, 3], input_quantized=False, generate=False)
+        self._test_op(module_float16, "float16", input_size=[1, 3], input_quantized=False, generate=False)
 
     @unittest.skipUnless(
         'fbgemm' in torch.backends.quantized.supported_engines or
@@ -114,7 +113,7 @@ class TestSerialization(TestCase):
     def test_conv2d(self):
         module = nnq.Conv2d(3, 3, kernel_size=3, stride=1, padding=0, dilation=1,
                             groups=1, bias=True, padding_mode="zeros")
-        self._test_op(module)
+        self._test_op(module, input_size=[1, 3, 6, 6], generate=False)
         # TODO: graph mode quantized conv2d module
 
     @unittest.skipUnless(
@@ -126,7 +125,7 @@ class TestSerialization(TestCase):
     def test_conv2d_relu(self):
         module = nniq.ConvReLU2d(3, 3, kernel_size=3, stride=1, padding=0, dilation=1,
                                  groups=1, bias=True, padding_mode="zeros")
-        self._test_op(module)
+        self._test_op(module, input_size=[1, 3, 6, 6], generate=False)
         # TODO: graph mode quantized conv2d module
 
     @unittest.skipUnless(
@@ -138,7 +137,7 @@ class TestSerialization(TestCase):
     def test_conv3d(self):
         module = nnq.Conv3d(3, 3, kernel_size=3, stride=1, padding=0, dilation=1,
                             groups=1, bias=True, padding_mode="zeros")
-        self._test_op(module)
+        self._test_op(module, input_size=[1, 3, 6, 6, 6], generate=False)
         # TODO: graph mode quantized conv3d module
 
     @unittest.skipUnless(
@@ -150,7 +149,7 @@ class TestSerialization(TestCase):
     def test_conv3d_relu(self):
         module = nniq.ConvReLU3d(3, 3, kernel_size=3, stride=1, padding=0, dilation=1,
                                  groups=1, bias=True, padding_mode="zeros")
-        self._test_op(module)
+        self._test_op(module, input_size=[1, 3, 6, 6, 6], generate=False)
         # TODO: graph mode quantized conv3d module
 
 
