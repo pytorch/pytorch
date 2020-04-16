@@ -48,15 +48,15 @@ class AveragedModel(Module):
         >>> # Update bn statistics for the swa_model at the end
         >>> torch.optim.swa_utils.update_bn(loader, swa_model) 
 
-    You can use custom averaging functions with `avg_fn` parameter.
+    You can also use custom averaging functions with `avg_fn` parameter.
     If no averaging function is provided, the default is to compute
     equally-weighted average of the weights.
 
     Example:
-        >>> # ema_model computes exponential moving averages of the weights
+        >>> # Compute exponential moving averages of the weights
         >>> ema_avg = lambda averaged_model_parameter, model_parameter, num_averaged:\
                             0.1 * averaged_model_parameter + 0.9 * model_parameter
-        >>> ema_model = torch.optim.swa_utils.AveragedModel(model, avg_fn=ema_avg)
+        >>> swa_model = torch.optim.swa_utils.AveragedModel(model, avg_fn=ema_avg)
 
     .. note::
         When using SWA with models containing Batch Normalization you may 
