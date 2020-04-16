@@ -10938,6 +10938,17 @@ class TestNNDeviceType(NNTestCase):
             gradcheck(func, [x])
             gradgradcheck(func, [x])
 
+    def test_logsigmoid_out(self, device):
+        # this isn't actually documented, but was broken previously:
+        # https://github.com/pytorch/pytorch/issues/36499
+        x = torch.randn(2, 3, device=device).t()
+        empty_out = torch.randn(0, device=device)
+        self.assertEqual(F.logsigmoid(x), F.logsigmoid(x, out=empty_out))
+
+        noncontig_out = torch.randn(2, 3, device=device).t()
+        self.assertEqual(F.logsigmoid(x), F.logsigmoid(x, out=noncontig_out))
+
+
 instantiate_device_type_tests(TestNNDeviceType, globals())
 
 if __name__ == '__main__':
