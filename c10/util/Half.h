@@ -435,7 +435,7 @@ typename std::enable_if<std::is_integral<From>::value && !std::is_same<From, boo
     // For example, with uint8, this allows for `a - b` to be treated as
     // `a + 255 * b`.
     return f > limit::max() ||
-        (f < 0 && -static_cast<uint64_t>(f) > limit::max());
+        (f < 0 && static_cast<int64_t>(-static_cast<uint64_t>(f)) > limit::max());
   } else {
     return f < limit::lowest() || f > limit::max();
   }
