@@ -1,3 +1,5 @@
+#include <c10/macros/Macros.h>
+
 #include <ATen/core/op_registration/op_registration.h>
 #if !defined(CAFFE2_IS_XPLAT_BUILD)
 #include <torch/csrc/jit/frontend/function_schema_parser.h>
@@ -9,11 +11,15 @@ namespace {
   // TODO: Consider representing debug info as a struct instead so you
   // don't have to allocate strings all the time
   std::string debugString(std::string debug, const char* file, uint32_t line) {
+#ifdef STRIP_ERROR_MESSAGES
+    return "";
+#else
     if (debug.empty()) {
       return c10::str("registered at ", file, ":", line);
     } else {
       return debug;
     }
+#endif
   }
 
   std::ostream& operator<<(std::ostream& os, Library::Kind kind) {
@@ -135,10 +141,10 @@ RegisterOperators::RegisterOperators(RegisterOperators&&) noexcept = default;
 RegisterOperators& RegisterOperators::operator=(RegisterOperators&&) noexcept = default;
 
 
-CppFunction::CppFunction(KernelFunction func, std::unique_ptr<c10::FunctionSchema> schema, std::string debug)
+CppFunction::CppFunction(KernelFunction func, std::unique_ptr<c10::FunctionSchema> schema)
   : func_(std::move(func))
   , schema_(std::move(schema))
-  , debug_(std::move(debug))
+  , debug_()
   {}
 
 #define ERROR_CONTEXT "(Error occurred while processing ", kind_, " block at ", file_, ":", line_, ")"
@@ -191,25 +197,25 @@ Library& Library::_def(FunctionSchema&& schema, OperatorName* out_name) & {
   TORCH_INTERNAL_ASSERT(!dispatch_key_.has_value(), ERROR_CONTEXT);
   auto ns_opt = schema.getNamespace();
   if (ns_opt.has_value()) {
-    // error case, but let's do a little more checking to see if
-    // we can give a better message
-    if (*ns_opt == *ns_) {
-      TORCH_CHECK(false,
-        DEF_PRELUDE,
-        "Redundant definition of namespace (", *ns_, ") in both schema "
-        "and the enclosing ", kind_, " block.  "
-        "Delete the namespace from your schema string.  ",
-        ERROR_CONTEXT
-      );
-    } else {
-      TORCH_CHECK(false,
-        DEF_PRELUDE,
-        "Invalid explicit namespace (", *ns_opt, ") in schema string.  "
-        "Move this definition to the (unique) TORCH_LIBRARY block for this namespace "
-        "and delete the namespace from your schema string.  ",
-        ERROR_CONTEXT
-      );
-    }
+    // Note [Redundancy in registration code is OK]
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    // In an earlier version of this code, I made it an error to explicitly
+    // specify the namespace, even when the namespaces match.  I've decided
+    // to relax this constraint because sometimes we code generate registrations
+    // and you cannot conveniently tell what the enclosing context will be;
+    // in these cases, it is simpler (and less error prone) to place all
+    // of the information in the registration site, which will be cross-checked
+    // in the end in any case (and if it turns out you DON'T have the right
+    // information at the site, as is the case with backend specific
+    // per-op registrations, you will get the right behavior!)
+    TORCH_CHECK(false,
+      *ns_opt == *ns_,
+      "Explicitly provided namespace (", *ns_opt, ") in schema string "
+      "does not match namespace of enclsing ", kind_, " block (", *ns_, ").  "
+      "Move this definition to the (unique) TORCH_LIBRARY block corresponding to this namespace "
+      "(and consider deleting the namespace from your schema string.)  ",
+      ERROR_CONTEXT
+    );
   } else {
     bool b = schema.setNamespaceIfNotSet(ns_->c_str());
     TORCH_INTERNAL_ASSERT(b, ERROR_CONTEXT);
@@ -269,28 +275,23 @@ Library& Library::_impl(const char* name_str, CppFunction&& f) & {
   // This is kind of similar to the checking in def(), but the error
   // messages are a little different for this call site
   if (ns_opt.has_value()) {
-    if (*ns_opt == *ns_) {
-      TORCH_CHECK(false,
-        IMPL_PRELUDE,
-        "Redundant definition of namespace (", *ns_, ") in both operator name "
-        "and the enclosing ", kind_, " block.  "
-        "Delete the namespace from your operator name.  ",
-        ERROR_CONTEXT
-      );
-    } else {
-      TORCH_CHECK(false,
-        IMPL_PRELUDE,
-        "Invalid explicit namespace (", *ns_opt, ") in operator name.  "
-        "Move this definition to ", kind_, " block for this namespace "
-        "and delete the explicit namespace from your operator name.  ",
-        ERROR_CONTEXT
-      );
-    }
+    // See Note [Redundancy in registration code is OK]
+    TORCH_CHECK(*ns_opt == *ns_,
+      IMPL_PRELUDE,
+      "Explicitly provided namespace (", *ns_opt, ") in operator name "
+      "does not match namespace of enclosing ", kind_, " block (", *ns_, ").  "
+      "Move this definition to the ", kind_, " block corresponding to this namespace "
+      "(and consider deleting the namespace from your schema string.)  ",
+      ERROR_CONTEXT
+    );
   } else {
     bool b = name.setNamespaceIfNotSet(ns_->c_str());
     TORCH_INTERNAL_ASSERT(b, ERROR_CONTEXT);
   }
-  TORCH_CHECK(!(f.dispatch_key_.has_value() && dispatch_key_.has_value()),
+  // See Note [Redundancy in registration code is OK]
+  TORCH_CHECK(!(f.dispatch_key_.has_value() &&
+                dispatch_key_.has_value() &&
+                *f.dispatch_key_ != *dispatch_key_),
     IMPL_PRELUDE,
     "Explicitly provided dispatch key (", *f.dispatch_key_, ") is inconsistent "
     "with the dispatch key of the enclosing ", kind_, " block (", *dispatch_key_, ").  "

@@ -5880,6 +5880,13 @@ class TestAutogradDeviceType(TestCase):
         go = torch.randn(a.size(), device=device, requires_grad=True)
         gradgradcheck(func, (a, b), (go,))
 
+    def test_inplace_view_multiple_outputs(self, device):
+        root = torch.arange(9.).reshape(3, 3).requires_grad_()
+        x = root.clone()
+        v1 = x.unbind()
+        with self.assertRaises(RuntimeError):
+            v1[0].mul_(2)
+
     def test_inplace_view_makes_base_require_grad(self, device):
         # in-place modification to view makes base require grad
         a = torch.randn(4, 4, device=device, requires_grad=False)
