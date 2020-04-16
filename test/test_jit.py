@@ -406,7 +406,7 @@ class TestJit(JitTestCase):
             def __init__(self, cpu_device_str):
                 super(M, self).__init__()
                 self.p0 = nn.Parameter(torch.tensor([0.3], dtype=torch.float,
-                                       device=cpu_device_str))
+                                                    device=cpu_device_str))
                 self.b0 = torch.tensor([0.9], dtype=torch.float,
                                        device=cpu_device_str)
 
@@ -2878,6 +2878,26 @@ graph(%Ra, %Rb):
         model = Bar()
         self.checkTrace(model, x)
 
+    def test_trace_with_tensor_list_output(self):
+        def f():
+            return [torch.zeros(1), torch.zeros(5)]
+        with self.assertWarnsRegex(torch.jit.TracerWarning, "cause the trace to be incorrect"):
+            torch.jit.trace(f, [])
+        traced_non_strict_f = torch.jit.trace(f, [], strict=False)
+        self.assertEqual(traced_non_strict_f(), f())
+
+    def test_trace_with_number_list_output(self):
+        def f():
+            return [1, 5]
+        with self.assertRaisesRegex(RuntimeError, r"Only tensors.+can be output from traced functions"):
+            traced_f = torch.jit.trace(f, [])
+
+    def test_trace_with_nested_tensor_list_output(self):
+        def f():
+            return [[torch.zeros(1)], [torch.zeros(5)]]
+        with self.assertRaisesRegex(RuntimeError, r"Only tensors.+can be output from traced functions"):
+            traced_f = torch.jit.trace(f, [])
+
     def test_trace_variable_instantiation(self):
         def random_foo(x):
             return Variable(Variable(x) + 1.0)
@@ -2899,6 +2919,26 @@ graph(%Ra, %Rb):
 
         x = torch.rand(3, 4)
         self.assertEqual(random_bar(x), (x + 1)[0:1])
+
+    def test_trace_inline_shape(self):
+        # testing peephole optimization of size is turned into a constant
+        # in script fn
+
+        @torch.jit.script
+        def tensor_size(x: torch.Tensor) -> torch.Tensor:
+            return torch.tensor([x.size()[0]])
+
+        self.assertEqual(
+            tensor_size(torch.rand(15,)),
+            torch.tensor([15])
+        )
+
+        traced_tensor_size = torch.jit.trace(tensor_size, torch.rand(7,))
+
+        self.assertEqual(
+            traced_tensor_size(torch.rand(15,)),
+            torch.tensor([15])
+        )
 
     def test_export_tensoroption_to(self):
         def foo(x):
@@ -3471,6 +3511,34 @@ class TestScript(JitTestCase):
                 results = fct_loop(inp, NUM_ITERATIONS)
                 self.assertEqual(results[1], expected)
 
+    def test_ignored_method_binding(self):
+        class Bar(torch.nn.Module):
+            def __init__(self):
+                super(Bar, self).__init__()
+                self.x : int = 0
+
+            @torch.jit.export
+            def setx(self, x : int):
+                self.x = x
+
+            @torch.jit.export
+            def getx(self):
+                return self.x
+
+            @torch.jit.ignore
+            def ignored_getx(self):
+                return self.x
+
+        b = Bar()
+        b.setx(123)
+        sb = torch.jit.script(b)
+        self.assertEqual(sb.getx(), 123)
+        self.assertEqual(sb.ignored_getx(), 123)
+
+        sb.setx(456)
+        self.assertEqual(sb.getx(), 456)
+        self.assertEqual(sb.ignored_getx(), 456)
+
     def test_set_attribute_through_optional(self):
         class A(torch.nn.Module):
             __annotations__ = {"x": Optional[torch.Tensor]}
@@ -3943,18 +4011,8 @@ def foo(x):
     @unittest.skipIf(IS_WINDOWS and sys.version_info >= (3, 8), 'TODO: need to fix the test case')
     def test_unmatched_type_annotation(self):
         message1 = re.escape("Number of type annotations (2) did not match the number of function parameters (1):")
-        message2 = re.escape("""
-            def invalid2(a):
-            ~~~~~~~~~~~~~~ <--- HERE
-                # type: (Int, Int) -> Int
-                return a + 2
-        """.strip())
-        message3 = re.escape("""
-            def invalid4(a):
-            ~~~~~~~~~~~~~~ <--- HERE
-                # type: (Int, Int) -> Int
-                return a + 2
-        """.strip())
+        message2 = 'def invalid2\\(a\\):\n\\s*~+\\.*\\s+<--- HERE\n\\s+# type: \\(Int, Int\\) -> Int\n\\s+return a \\+ 2'
+        message3 = 'def invalid4\\(a\\):\n\\s*~+\\.*\\s+<--- HERE\n\\s+# type: \\(Int, Int\\) -> Int\n\\s+return a \\+ 2'
         with self.assertRaisesRegex(RuntimeError, message1):
             @torch.jit.script
             def invalid1(a):
@@ -10545,23 +10603,19 @@ a")
         v = torch.rand(10, 3)
         self.assertEqual(torch.chunk(v, dim=0, chunks=2)[0], foo(v))
 
-    def test_trace_with_tensor_list_output(self):
-        def f():
-            return [torch.zeros(1), torch.zeros(5)]
-        traced_f = torch.jit.trace(f, [])
-        self.assertEqual(traced_f(), f())
+    def test_trace_mixed_by_script_with_dict_output(self):
+        @torch.jit.script
+        def return_dict(input: torch.Tensor) -> Dict[torch.Tensor, torch.Tensor]:
+            return {input : input + 1}
 
-    def test_trace_with_number_list_output(self):
-        def f():
-            return [1, 5]
-        with self.assertRaisesRegex(RuntimeError, r"Only tensors.+can be output from traced functions"):
-            traced_f = torch.jit.trace(f, [])
+        class TraceModule(torch.nn.Module):
+            def forward(self, input):
+                dict = return_dict(input)
+                return dict[input] + list(dict.keys())[0]
 
-    def test_trace_with_nested_tensor_list_output(self):
-        def f():
-            return [[torch.zeros(1)], [torch.zeros(5)]]
-        with self.assertRaisesRegex(RuntimeError, r"Only tensors.+can be output from traced functions"):
-            traced_f = torch.jit.trace(f, [])
+        x = torch.rand(10, 3)
+        tm = torch.jit.trace(TraceModule(), x)
+        self.assertEqual(tm(x), x + 1 + x)
 
     def test_script_copy(self):
         class M(torch.nn.Module):
@@ -14263,12 +14317,6 @@ a")
             torch.testing.assert_allclose(y_int8, y_ref, rtol=0.0001, atol=1e-3)
             torch.testing.assert_allclose(y_fp16, y_ref, rtol=0.0001, atol=1e-3)
 
-    def checkTracerWarning(self, *args, **kwargs):
-        with warnings.catch_warnings(record=True) as warns:
-            torch.jit.trace(*args, **kwargs)
-        self.assertGreater(len(warns), 0)
-        self.assertTrue(any(["cause the trace to be incorrect" in str(warn.message) for warn in warns]))
-
     def test_trace_checker_slice_lhs(self):
         def foo(x):
             for i in range(3):
@@ -14282,18 +14330,21 @@ a")
             x.view(-1).add_(-x.view(-1))
             return x
 
-        self.assertWarnsRegex(lambda: torch.jit.trace(foo,
-                                                      torch.rand(3, 4),
-                                                      check_inputs=[torch.rand(5, 6)],
-                                                      _force_outplace=True),
-                              'Output nr 1. of the traced function does not match the '
-                              'corresponding output of the Python function')
+        with self.assertWarnsRegex(torch.jit.TracerWarning,
+                                   'Output nr 1. of the traced function does not match the '
+                                   'corresponding output of the Python function'):
+            torch.jit.trace(foo,
+                            torch.rand(3, 4),
+                            check_inputs=[torch.rand(5, 6)],
+                            _force_outplace=True)
 
     def test_lhs_index_fails(self):
         def foo(x):
             x[0, 1] = 4
             return x
-        self.checkTracerWarning(foo, torch.rand(3, 4), _force_outplace=True)
+
+        with self.assertWarnsRegex(torch.jit.TracerWarning, "cause the trace to be incorrect"):
+            torch.jit.trace(foo, torch.rand(3, 4), _force_outplace=True)
 
     def test_lhs_index_trivial(self):
         def foo(y, x):
@@ -14305,18 +14356,23 @@ a")
         def foo(x):
             x.view(-1).add_(-x.view(-1))
             return x
-        self.checkTracerWarning(foo, torch.rand(3, 4), _force_outplace=True)
+
+        with self.assertWarnsRegex(torch.jit.TracerWarning, "cause the trace to be incorrect"):
+            torch.jit.trace(foo, torch.rand(3, 4), _force_outplace=True)
 
     @suppress_warnings
     def test_trace_checker_dropout_train(self):
         def foo(x):
             return torch.dropout(x, p=0.5, train=True)
 
-        self.assertWarnsRegex(lambda: torch.jit.trace(foo, torch.rand(3, 4), check_inputs=[torch.rand(5, 6)]),
-                              'Output nr 1. of the traced function does not match the '
-                              'corresponding output of the Python function')
-        self.assertWarnsRegex(lambda: torch.jit.trace(foo, torch.rand(3, 4), check_inputs=[torch.rand(5, 6)]),
-                              'Trace had nondeterministic nodes')
+        with self.assertWarnsRegex(torch.jit.TracerWarning,
+                                   'Output nr 1. of the traced function does not match the '
+                                   'corresponding output of the Python function'):
+            torch.jit.trace(foo, torch.rand(3, 4), check_inputs=[torch.rand(5, 6)])
+
+        with self.assertWarnsRegex(torch.jit.TracerWarning,
+                                   'Trace had nondeterministic nodes'):
+            torch.jit.trace(foo, torch.rand(3, 4), check_inputs=[torch.rand(5, 6)])
 
     def test_trace_checker_dropout_notrain(self):
         input = torch.rand(3, 4)

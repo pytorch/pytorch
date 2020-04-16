@@ -222,17 +222,41 @@ CALL_DISPATCH_VIA_NAMESPACE = CodeTemplate("""\
 at::${api_name}(${unpacked_args})""")
 
 CALL_DISPATCH_VIA_METHOD = CodeTemplate("""\
-self_.${api_name}(${unpacked_method_args})""")
+${var}.${api_name}(${unpacked_method_args})""")
 
 # If the non-variable operation has return values, we use the `tmp` variable to hold the
 # values temporarily and pass the values to the return variables outside of the
 # `at::AutoNonVariableTypeMode` guard block.
-DISPATCH_TO_NON_VAR_TYPE_WITH_RETURN_VALUES = CodeTemplate("""\
+DISPATCH_TO_NON_VAR_TYPE_WITH_TMP_RETURN_VALUES = CodeTemplate("""\
 auto tmp = ([&]() {
   at::AutoNonVariableTypeMode non_var_type_mode(true);
   return ${base_type_call};
 })();
+""")
+
+ASSIGN_RETURN_VALUE = CodeTemplate("""\
 ${return_values} = ${rhs_value};
+""")
+
+ARRAYREF_TO_VEC = CodeTemplate("""\
+auto ${vec} = ${arg}.vec();
+""")
+
+OPTIONAL_TO_VAL = CodeTemplate("""\
+auto ${val} = ${arg}.value_or(${default});
+""")
+
+SETUP_REPLAY_VIEW_IF_NOT_SUPPORT_AS_STRIDED = CodeTemplate("""\
+c10::optional<std::function<at::Tensor(const at::Tensor&)>> func=c10::nullopt;
+if (!self.unsafeGetTensorImpl()->support_as_strided()) {
+  ${replay_view_func}
+}
+""")
+
+REPLAY_VIEW_LAMBDA_FUNC = CodeTemplate("""\
+func = [=](const at::Tensor& ${input_base}) {
+  return ${replay_view_call};
+};
 """)
 
 DISPATCH_TO_NON_VAR_TYPE_WITHOUT_RETURN_VALUES = CodeTemplate("""\
@@ -767,10 +791,64 @@ def emit_body(declaration):
         names = [ret['type'] + ' ' + ret['name'] + ';' for ret in declaration['returns']]
         return '\n'.join(names)
 
-    def wrap_output(call):
-        # Returns `wrapped_call` which is a drop-in replacement for `call`
+    def emit_dispatch_call(api_name, input_base, unpacked_args):
+        """ Dispatch call via function in a namespace or method on Tensor."""
+        if 'namespace' in declaration['method_of']:
+            call = CALL_DISPATCH_VIA_NAMESPACE.substitute(
+                api_name=api_name,
+                unpacked_args=unpacked_args)
+        else:
+            call = CALL_DISPATCH_VIA_METHOD.substitute(
+                api_name=api_name,
+                var=input_base,
+                unpacked_method_args=unpacked_args[1:])
+        return call
+
+    def emit_view_lambda():
+        """ Generate an additional lambda function to recover views in backward when as_strided is not supported.
+        See Note [View + Inplace update for base tensor] and [View + Inplace update for view tensor] for more details."""
+        input_base = 'input_base'
+        replay_view_func = ''
+        updated_unpacked_args = []
+        combined = nested_dict(env, declaration)
+        known_view_arg_simple_types = ['int64_t', 'int64_t?', 'bool', 'IntArrayRef']
+        for arg in combined['unpacked_args']:
+            if arg == 'self_':
+                updated_unpacked_args.append(input_base)
+                continue
+            arg_type = combined['unpacked_args_simple_type'][arg]
+            if arg_type not in known_view_arg_simple_types:
+                raise TypeError('You are adding an {} {} argument to op {} in addition to known types: {}. '
+                                'Please update the list or materialize it so that it can be closed over by value, '
+                                'also add a test in pytorch/xla/test/test_operations.py where this code is exercised.'
+                                .format(arg_type, arg, declaration['name'], ', '.join(known_view_arg_simple_types)))
+
+            if arg_type == 'IntArrayRef':
+                # It's not safe to close over IntArrayRef by value, since this is a
+                # reference type, so materialize a vector to close over by value
+                arg_vec = arg + '_vec'
+                replay_view_func += ARRAYREF_TO_VEC.substitute(arg=arg, vec=arg_vec)
+                updated_unpacked_args.append(arg_vec)
+            elif arg_type == 'int64_t?':
+                # Materialize int64_t? to int64_t
+                arg_value = arg + '_val'
+                replay_view_func += OPTIONAL_TO_VAL.substitute(arg=arg, val=arg_value, default='0')
+                updated_unpacked_args.append(arg_value)
+            else:
+                updated_unpacked_args.append(arg)
+
+        replay_view_call = emit_dispatch_call(combined['api_name'], input_base, updated_unpacked_args)
+        replay_view_func += REPLAY_VIEW_LAMBDA_FUNC.substitute(
+            input_base=input_base,
+            replay_view_call=replay_view_call)
+        return SETUP_REPLAY_VIEW_IF_NOT_SUPPORT_AS_STRIDED.substitute(
+            replay_view_func=replay_view_func)
+
+    def wrap_output(return_values, var):
+        call = ''
+        rhs_value = None
         if 'Tensor' not in declaration['return_type']:
-            return call
+            rhs_value = var
         elif view_info is not None:
             # See NOTE [ Autograd View Variables ] in variable.h for details.
             differentiable_output_vars = {r['name'] for r in differentiable_outputs}
@@ -780,7 +858,7 @@ def emit_body(declaration):
 
             if len(differentiable_output_vars) == 0:
                 # no output is differentiable (.indices() for SparseTensors for example)
-                return 'as_view({}, {}, /* is_differentiable */ false)'.format(view_info, call)
+                rhs_value = 'as_view({}, {}, /* is_differentiable */ false)'.format(view_info, var)
             elif len(differentiable_output_vars) == 1:
                 # Single differentiable output (Tensor or Tensor[])
                 return_info = differentiable_outputs[0]
@@ -790,18 +868,25 @@ def emit_body(declaration):
                 # Only allow rebasing of the history if we return a single Tensor
                 # If we are in a no grad block, raise a warning
                 # See NOTE [ View + Inplace detection ] for more details about this logic
-                creation_meta = "GradMode::is_enabled() ? CreationMeta::DEFAULT: CreationMeta::NO_GRAD_MODE"
                 if return_info['dynamic_type'] == 'TensorList':
                     creation_meta = "CreationMeta::MULTI_OUTPUT_NODE"
-                wrapped_call = ("as_view(/* base */ {}, /* output */ {}, /* is_differentiable */ true, "
-                                "/* creation_meta */ {})").format(view_info, call, creation_meta)
-                return wrapped_call
+                    rhs_value = ("as_view(/* base */ {}, /* output */ {}, /* is_differentiable */ true, "
+                                 "/* creation_meta */ {})").format(view_info, var, creation_meta)
+                else:
+                    call += emit_view_lambda()
+                    creation_meta = "GradMode::is_enabled() ? CreationMeta::DEFAULT: CreationMeta::NO_GRAD_MODE"
+                    rhs_value = ("as_view(/* base */ {}, /* output */ {}, /* is_differentiable */ true, "
+                                 "/* view_func */ func, /* creation_meta */ {})").format(view_info, var, creation_meta)
             else:
                 # This could be supported but we don't need it at the moment, so keeping things simple.
                 raise RuntimeError("Function that return multiple differentiable output "
                                    "when at least one of them is view is not supported.")
         else:
-            return 'std::move({})'.format(call)
+            rhs_value = 'std::move({})'.format(var)
+        assert rhs_value is not None
+        call += ASSIGN_RETURN_VALUE.substitute(return_values=return_values,
+                                               rhs_value=rhs_value)
+        return call
 
     def enforce_same_tensorimpl_and_storage(env, call):
         save_ptrs_stmts = []
@@ -834,18 +919,12 @@ def emit_body(declaration):
             # the baseType operations still dispatch to non-Variable type, even if the arguments passed
             # in are now Variables.
             # See NOTE [ Treating Variables as non-Variables in type dispatch ] for details.
-            if 'namespace' in declaration['method_of']:
-                base_type_call = CALL_DISPATCH_VIA_NAMESPACE.substitute(combined)
-            else:
-                unpacked_method_args = combined['unpacked_args'][1:]
-                base_type_call = CALL_DISPATCH_VIA_METHOD.substitute(
-                    combined, unpacked_method_args=unpacked_method_args)
+            base_type_call = emit_dispatch_call(combined['api_name'], 'self_', combined['unpacked_args'])
             if not modifies_arguments and not returns_void:
-                rhs_value = wrap_output('tmp')
-                call = DISPATCH_TO_NON_VAR_TYPE_WITH_RETURN_VALUES.substitute(
-                    base_type_call=base_type_call,
-                    return_values=tie_return_values(),
-                    rhs_value=rhs_value)
+                call = DISPATCH_TO_NON_VAR_TYPE_WITH_TMP_RETURN_VALUES.substitute(
+                    base_type_call=base_type_call)
+
+                call += wrap_output(tie_return_values(), 'tmp')
             else:
                 call = DISPATCH_TO_NON_VAR_TYPE_WITHOUT_RETURN_VALUES.substitute(
                     base_type_call=base_type_call)
