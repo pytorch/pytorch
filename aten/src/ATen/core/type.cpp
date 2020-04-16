@@ -812,6 +812,22 @@ bool ClassType::isSubtypeOfExt(const TypePtr rhs, std::ostream* why_not) const {
   return Type::isSubtypeOfExt(rhs, why_not);
 }
 
+bool ClassType::is_hook(const std::string& fn_name) {
+  QualifiedName qname(fn_name);
+  const auto& name = qname.name();
+  for (const auto& hook : forward_pre_hooks) {
+    if (hook.name() == name) {
+      return true;
+    }
+  }
+  for (const auto& hook : forward_hooks) {
+    if (hook.name() == name) {
+      return true;
+    }
+  }
+  return false;
+}
+
 FunctionType::FunctionType(torch::jit::Function* function)
   : NamedType(TypeKind::FunctionType, function->qualname()),
     function_(function) {}

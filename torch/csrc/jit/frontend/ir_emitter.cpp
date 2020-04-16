@@ -3497,7 +3497,7 @@ std::unique_ptr<Function> CompilationUnit::define(
     _resolver =
         std::make_shared<FunctionResolver>(resolver.get(), function_table);
   }
-  auto creator = [def, _resolver, self](Function& method) {
+  auto creator = [def, _resolver, self, this](Function& method) {
     // Store the function name so that it can be referenced if there is an error
     // while compiling this function
     std::string call_name = method.qualname().name();
@@ -3507,7 +3507,10 @@ std::unique_ptr<Function> CompilationUnit::define(
       TORCH_INTERNAL_ASSERT(atoms.size() >= 2);
       call_name = atoms.at(atoms.size() - 2) + "." + atoms.at(atoms.size() - 1);
     }
-    ErrorReport::CallStack call(call_name);
+    auto prefix = method.qualname().prefix();
+    at::ClassTypePtr class_type =
+        (prefix.length() > 0 ? get_class(prefix) : nullptr);
+    ErrorReport::CallStack call(call_name, class_type);
     to_ir(def, _resolver, self, method);
   };
   auto name = prefix ? QualifiedName(*prefix, def.name().name())

@@ -25,8 +25,10 @@ void ErrorReport::CallStack::update_pending_range(const SourceRange& range) {
   calls.back().caller_range = range;
 }
 
-ErrorReport::CallStack::CallStack(const std::string& name) {
-  calls.push_back({name, c10::nullopt});
+ErrorReport::CallStack::CallStack(
+    const std::string& name,
+    at::ClassTypePtr class_type) {
+  calls.push_back({name, c10::nullopt, class_type});
 }
 
 ErrorReport::CallStack::~CallStack() {
@@ -55,6 +57,20 @@ std::string get_stacked_errors(const std::vector<Call>& error_stack) {
         callee->caller_range->highlight(msg);
       } else {
         msg << "<no range>\n";
+      }
+    }
+
+    for (auto it = error_stack.rbegin(); it != error_stack.rend(); ++it) {
+      if (it->class_type && it->class_type->is_hook(it->fn_name)) {
+        msg << "'" << it->fn_name
+            << "' is compiled since it was attached as a hook to '"
+            << it->class_type->str()
+            << "'.\nIf you do not want your hooks to be compiled, "
+               "clear them on the module before compiling with "
+               "'torch.jit.script'.\n"
+               "Scripting hooks is a new feature and it might have "
+               "introduced new compilation issues for your module.";
+        break;
       }
     }
   }

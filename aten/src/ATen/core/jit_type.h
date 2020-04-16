@@ -1793,6 +1793,8 @@ struct CAFFE2_API ClassType : public NamedType {
     return forward_pre_hooks;
   }
 
+  bool is_hook(const std::string& fn_name);
+
   void addMethod(torch::jit::Function* method);
   torch::jit::Function* getMethod(const std::string& name) const;
 

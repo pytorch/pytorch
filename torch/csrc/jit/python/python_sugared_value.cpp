@@ -734,7 +734,7 @@ std::shared_ptr<SugaredValue> toSugaredValue(
         {
           // We're starting a new compilation, so update the error call stack in
           // case it fails
-          ErrorReport::CallStack stack(qualname.name());
+          ErrorReport::CallStack stack(qualname.name(), nullptr);
           ErrorReport::CallStack::update_pending_range(loc);
 
           py::module::import("torch.jit")
