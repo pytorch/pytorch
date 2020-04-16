@@ -872,6 +872,8 @@ class ShapePropagator {
         },
         [](Node* node) -> type_vec_t {
           auto input_type = node->input(0)->type()->cast<TensorType>();
+          // Naked type acquisition should cause prod error!
+          const auto type = *(input_type->scalarType());
           return input_type ? type_vec_t{input_type->dimensionedOnly()}
                             : type_vec_t{};
         }};
