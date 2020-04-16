@@ -275,6 +275,32 @@ class AnnotatedTwoLayerLinearModel(torch.nn.Module):
         x = self.fc2(x)
         return x
 
+class ActivationsTestModel(torch.nn.Module):
+    def __init__(self):
+        super(ActivationsTestModel, self).__init__()
+        self.qconfig = torch.quantization.get_default_qconfig("fbgemm")
+        self.quant = torch.quantization.QuantStub()
+        self.hardswish = torch.nn.Hardswish().to(dtype=torch.float)
+
+    def forward(self, x):
+        x = self.quant(x)
+        x = self.hardswish(x)
+        return x
+
+class ActivationsQATTestModel(torch.nn.Module):
+    def __init__(self):
+        super(ActivationsQATTestModel, self).__init__()
+        self.qconfig = torch.quantization.get_default_qconfig("fbgemm")
+        self.quant = torch.quantization.QuantStub()
+        self.fc1 = torch.nn.Linear(5, 8).to(dtype=torch.float)
+        self.hardswish = torch.nn.Hardswish().to(dtype=torch.float)
+
+    def forward(self, x):
+        x = self.quant(x)
+        x = self.fc1(x)
+        x = self.hardswish(x)
+        return x
+
 class LinearReluModel(torch.nn.Module):
     def __init__(self):
         super(LinearReluModel, self).__init__()
@@ -556,6 +582,26 @@ class ModelWithSequentialFusion(nn.Module):
         x = self.dequant(x)
         return x
 
+class ModelForFusionWithBias(nn.Module):
+    def __init__(self):
+        super(ModelForFusionWithBias, self).__init__()
+        self.conv1 = nn.Conv2d(3, 2, 5, bias=True).to(dtype=torch.float)
+        self.bn1 = nn.BatchNorm2d(2).to(dtype=torch.float)
+        self.relu1 = nn.ReLU(inplace=True).to(dtype=torch.float)
+        self.conv2 = nn.Conv2d(2, 2, 1, bias=True).to(dtype=torch.float)
+        self.bn2 = nn.BatchNorm2d(2).to(dtype=torch.float)
+        self.quant = QuantStub()
+        self.dequant = DeQuantStub()
+
+    def forward(self, x):
+        x = self.quant(x)
+        x = self.conv1(x)
+        x = self.bn1(x)
+        x = self.relu1(x)
+        x = self.conv2(x)
+        x = self.bn2(x)
+        x = self.dequant(x)
+        return x
 
 class DummyObserver(torch.nn.Module):
     def calculate_qparams(self):

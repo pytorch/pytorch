@@ -12,7 +12,7 @@
 #include <string>
 #include <vector>
 
-#include "c10/util/Flags.h"
+#include <c10/util/Flags.h>
 
 // Log severity level constants.
 const int FATAL = 3;
