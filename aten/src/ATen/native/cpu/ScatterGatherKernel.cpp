@@ -249,13 +249,12 @@ struct cpu_scatter_gather_base_kernel {
         constexpr auto INDEX_ITER_STRIDE_IDX = 1;
 
         using binary_func_t = std::function<void(scalar_t*, Scalar)>;
-        std::unordered_map<const SCATTER_GATHER_OP, binary_func_t> binary_funcs({
-          {SCATTER_GATHER_OP::SCALAR_ASSIGN, scalar_assign},
-          {SCATTER_GATHER_OP::SCALAR_REDUCE_ADD, scalar_reduce_add},
-          {SCATTER_GATHER_OP::SCALAR_REDUCE_SUBTRACT, scalar_reduce_subtract},
-          {SCATTER_GATHER_OP::SCALAR_REDUCE_MULTIPLY, scalar_reduce_multiply},
-          {SCATTER_GATHER_OP::SCALAR_REDUCE_DIVIDE, scalar_reduce_divide},
-        });
+        std::unordered_map<const SCATTER_GATHER_OP, binary_func_t> binary_funcs;
+        binary_funcs[SCATTER_GATHER_OP::SCALAR_ASSIGN] =  scalar_assign;
+        binary_funcs[SCATTER_GATHER_OP::SCALAR_REDUCE_ADD] = scalar_reduce_add;
+        binary_funcs[SCATTER_GATHER_OP::SCALAR_REDUCE_SUBTRACT] = scalar_reduce_subtract;
+        binary_funcs[SCATTER_GATHER_OP::SCALAR_REDUCE_MULTIPLY] = scalar_reduce_multiply;
+        binary_funcs[SCATTER_GATHER_OP::SCALAR_REDUCE_DIVIDE] = scalar_reduce_divide;
 
         auto run_loop = [&](const auto& kernel_func) {
           auto loop = [&](char** data, const int64_t* strides, int64_t n) {
@@ -381,13 +380,12 @@ struct cpu_scatter_gather_base_kernel {
         constexpr auto SRC_ITER_STRIDE_IDX = 1;
 
         using binary_func_t = std::function<void(scalar_t*, scalar_t*)>;
-        std::unordered_map<const SCATTER_GATHER_OP, binary_func_t> binary_funcs({
-          {SCATTER_GATHER_OP::REDUCE_ADD, reduce_sum},
-          {SCATTER_GATHER_OP::REDUCE_SUBTRACT, reduce_subtract},
-          {SCATTER_GATHER_OP::REDUCE_MULTIPLY, reduce_multiply},
-          {SCATTER_GATHER_OP::REDUCE_DIVIDE, reduce_divide},
-          {SCATTER_GATHER_OP::TENSOR_ASSIGN, tensor_assign}
-        });
+        std::unordered_map<const SCATTER_GATHER_OP, binary_func_t> binary_funcs;
+        binary_funcs[SCATTER_GATHER_OP::REDUCE_ADD] = reduce_sum;
+        binary_funcs[SCATTER_GATHER_OP::REDUCE_SUBTRACT] = reduce_subtract;
+        binary_funcs[SCATTER_GATHER_OP::REDUCE_MULTIPLY] = reduce_multiply;
+        binary_funcs[SCATTER_GATHER_OP::REDUCE_DIVIDE] = reduce_divide;
+        binary_funcs[SCATTER_GATHER_OP::TENSOR_ASSIGN] = tensor_assign;
 
         auto run_loop = [&](const auto& kernel_func) {
           auto loop = [&](char** data, const int64_t* strides, int64_t n) {
