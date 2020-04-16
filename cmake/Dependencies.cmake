@@ -1216,6 +1216,49 @@ if(USE_GLOO)
   endif()
 endif()
 
+if(USE_TENSORPIPE)
+  if(MSVC)
+    message(WARNING "Tensorpipe cannot be used on Windows.")
+  else()
+    if(CAFFE2_LINK_LOCAL_PROTOBUF)
+      set(TP_EXTRA_CMAKE_ARGS -DProtobuf_DIR=${PROJECT_BINARY_DIR}/third_party/protobuf/cmake/${CMAKE_INSTALL_LIBDIR}/cmake/protobuf)
+    endif()
+
+    include(ExternalProject)
+
+    ExternalProject_Add(cmake-3.17.1
+      PREFIX cmake-3.17.1
+      URL https://github.com/Kitware/CMake/releases/download/v3.17.1/cmake-3.17.1-${CMAKE_SYSTEM_NAME}-x86_64.tar.gz
+      CONFIGURE_COMMAND ""
+      BUILD_COMMAND ""
+      INSTALL_COMMAND cp -R <SOURCE_DIR> <INSTALL_DIR>
+      DOWNLOAD_NO_PROGRESS ON)
+
+    ExternalProject_Add(tensorpipe-build
+      PREFIX tensorpipe
+      SOURCE_DIR ${PROJECT_SOURCE_DIR}/third_party/tensorpipe
+      BUILD_BYPRODUCTS tensorpipe/${CMAKE_INSTALL_LIBDIR}/libuv_a.a tensorpipe/${CMAKE_INSTALL_LIBDIR}/libtensorpipe.a
+      DEPENDS cmake-3.17.1 protobuf::libprotobuf protobuf::protoc
+      CMAKE_COMMAND ${PROJECT_BINARY_DIR}/cmake-3.17.1/cmake-3.17.1$<$<PLATFORM_ID:Darwin>:/CMake.app/Contents>/bin/cmake
+      CMAKE_ARGS -DCMAKE_INSTALL_PREFIX=<INSTALL_DIR> -DBUILD_TESTING=OFF -DTP_BUILD_PYTHON=OFF -DTP_BUILD_LIBUV=ON -DCMAKE_CXX_FLAGS=${CMAKE_CXX_FLAGS} ${TP_EXTRA_CMAKE_ARGS}
+      EXCLUDE_FROM_ALL 1)
+
+    include_directories(${PROJECT_BINARY_DIR}/tensorpipe/include)
+
+    add_library(tensorpipe STATIC IMPORTED)
+    add_dependencies(tensorpipe tensorpipe-build)
+    set_property(TARGET tensorpipe
+      PROPERTY IMPORTED_LOCATION ${PROJECT_BINARY_DIR}/tensorpipe/${CMAKE_INSTALL_LIBDIR}/libtensorpipe.a)
+
+    add_library(libuv STATIC IMPORTED)
+    set_property(TARGET libuv
+      PROPERTY IMPORTED_LOCATION ${PROJECT_BINARY_DIR}/tensorpipe/${CMAKE_INSTALL_LIBDIR}/libuv_a.a)
+    file(MAKE_DIRECTORY tensorpipe/include)
+
+    list(APPEND Caffe2_DEPENDENCY_LIBS protobuf::libprotobuf libuv tensorpipe)
+  endif()
+endif()
+
 # ---[ profiling
 if(USE_PROF)
   find_package(htrace)
