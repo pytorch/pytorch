@@ -2884,7 +2884,7 @@ def _interp_output_size(dim, closed_over_args):  # noqa: F811
 
         is_float_scale_factor = False
         for scale in scale_factors:
-            is_float_scale_factor = math.floor(scale) == scale
+            is_float_scale_factor = math.floor(scale) != scale
             if is_float_scale_factor:
                 break
 

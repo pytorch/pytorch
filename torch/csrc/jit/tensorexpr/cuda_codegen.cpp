@@ -8,6 +8,7 @@
 #include <torch/csrc/jit/tensorexpr/eval.h>
 #include <torch/csrc/jit/tensorexpr/exceptions.h>
 #include <torch/csrc/jit/tensorexpr/execution_counter.h>
+#include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
 
 #define DEBUG_PRINT 0
 
@@ -165,9 +166,68 @@ void CudaPrinter::visit(const Load* v) {
     os() << "__half2float(" << *v->base_handle() << "[" << *v->flat_index()
          << "])";
   } else {
-    os() << "__ldg(" << *v->base_handle() << " + " << *v->flat_index() << ")";
+    // Detects whether the load target is also a store target.
+    // TODO: this is currently too wide. It detects whether a store-target
+    // exists within the program. In fact, this check is only necessary within a
+    // kernel.
+    if (!cuda_analysis_->is_buf_store_target(v->buf())) {
+      // Cuda __ldg can only be applied on read-only buffers.
+      os() << "__ldg(" << *v->base_handle() << " + " << *v->flat_index() << ")";
+    } else {
+      os() << *v->base_handle() << "[" << *v->flat_index() << "]";
+    }
   }
 }
+
+// TODO: maybe this should be a more shared location?
+// TODO: investigate how "Expr*" can be implicitly converted to "ExprHandle" as
+// a bool.
+static bool CheckEqual(const Expr* lhs, const Expr* rhs) {
+  // The fast path. Checks if the pointers are the same.
+  if (lhs == rhs) {
+    return true;
+  }
+  ExprHandle diff = Sub::make(ExprHandle(lhs), ExprHandle(rhs));
+  ExprHandle diff_s = IRSimplifier::simplify(diff);
+  return immediateEquals(diff_s.node(), 0);
+}
+
+// Identify the pattern: a[e1] = a[e1] + e2.
+static bool isAtomicAdd(const Store* v, const Expr** atomic_add_value) {
+  ScalarType dtype = v->value()->dtype().scalar_type();
+  if (dtype != ScalarType::Float && dtype != ScalarType::Double) {
+    return false;
+  }
+  const Add* add_v = dynamic_cast<const Add*>(v->value());
+  if (!add_v) {
+    return false;
+  }
+  const Load* load_v = dynamic_cast<const Load*>(add_v->lhs());
+  if (!load_v) {
+    return false;
+  }
+  if (v->base_handle() != load_v->base_handle()) {
+    return false;
+  }
+  bool index_equal = CheckEqual(v->flat_index(), load_v->flat_index());
+  if (index_equal) {
+    *atomic_add_value = add_v->rhs();
+  }
+  return index_equal;
+}
+
+class AtomicAddFuser : public IRMutator {
+  Stmt* mutate(const Store* v) override {
+    const Buf* buf = v->buf();
+    const std::vector<const Expr*>& indices = v->indices();
+    const Expr* value = v->value();
+    const Expr* atomic_add_value = nullptr;
+    if (isAtomicAdd(v, &atomic_add_value)) {
+      return new AtomicAdd(buf, indices, atomic_add_value);
+    }
+    return const_cast<Store*>(v); // NOLINT
+  }
+};
 
 void CudaPrinter::visit(const Store* v) {
   os() << *v->base_handle() << "[" << *v->flat_index() << "] = ";
@@ -176,6 +236,11 @@ void CudaPrinter::visit(const Store* v) {
   } else {
     os() << *v->value() << ";";
   }
+}
+
+void CudaPrinter::visit(const AtomicAdd* v) {
+  os() << "atomicAdd(&" << *v->base_handle() << "[" << *v->flat_index() << "]"
+       << ", " << *v->value() << ");";
 }
 
 void CudaPrinter::visit(const Max* v) {
@@ -408,9 +473,12 @@ void CudaCodeGen::Initialize() {
   // TODO: handle multiple kernels.
   // TODO: handle dynamic dimension.
   // TODO: call nvrtc.
+  // TODO: merge HasRand with CudaAnalysis.
   HasRand has_rand_func(stmt());
   has_random_ = has_rand_func.has_rand();
-  printer_ = std::make_unique<CudaPrinter>(&oss_, has_random_);
+  cuda_analysis_ = std::make_unique<CudaAnalysis>();
+  printer_ =
+      std::make_unique<CudaPrinter>(&oss_, cuda_analysis_.get(), has_random_);
 
   os() << "#define NAN __int_as_float(0x7fffffff)\n"
           "#define POS_INFINITY __int_as_float(0x7f800000)\n"
@@ -465,8 +533,11 @@ void CudaCodeGen::Initialize() {
   }
 
   Stmt* stmt_v = stmt();
+  AtomicAddFuser atomic_add_fuser;
+  stmt_v = stmt_v->accept_mutator(&atomic_add_fuser);
   PrioritizeLoad prioritize_load;
   stmt_v = prioritize_load.Process(stmt_v);
+  stmt_v->accept(cuda_analysis_.get());
   stmt_v->accept(printer_.get());
   os() << std::endl;
   os() << "}";
@@ -682,6 +753,8 @@ void CudaCodeGen::CompileToNVRTC(
       nvrtc().cuModuleGetFunction(&function_, module, func_name.c_str()));
   at::cuda::set_device(prior_device);
 }
+
+CudaCodeGen::~CudaCodeGen() = default;
 
 RegisterCodeGen<CudaCodeGen> cuda_codegen_reg("cuda_codegen");
 
