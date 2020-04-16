@@ -89,34 +89,26 @@ def pool_output_shape(input_size, kernel_size, padding, stride,
     return output_size
 
 """Common logic for hardswish testing, called from fbgemm and qnnpack testers"""
-def _test_hardswish(self, X, engine):
+def _test_hardswish(self, X, Y_scale, Y_zero_point, engine):
     if engine not in torch.backends.quantized.supported_engines:
         return
     with override_quantized_engine(engine):
-        X, (scale, zero_point, torch_type) = X
+        X, (X_scale, X_zero_point, torch_type) = X
         X = torch.from_numpy(X)
-        qX = torch.quantize_per_tensor(X, scale=scale, zero_point=zero_point,
+        qX = torch.quantize_per_tensor(X, scale=X_scale, zero_point=X_zero_point,
                                        dtype=torch_type)
         dqX = qX.dequantize()
 
-        output_scale = scale
-        output_zero_point = zero_point
-
         dqY_hat = F.hardswish(dqX)
-        qY_hat = torch.quantize_per_tensor(dqY_hat, scale=output_scale,
-                                           zero_point=output_zero_point,
+        qY_hat = torch.quantize_per_tensor(dqY_hat, scale=Y_scale,
+                                           zero_point=Y_zero_point,
                                            dtype=torch_type)
 
-        # regular
-        qY = torch.nn.quantized.functional.hardswish(qX)
-        self.assertEqual(qY, qY_hat,
-                         message="Hardswish failed: {} vs {}".format(qY, qY_hat))
-
-        # inplace
-        qX_copy = qX.clone().detach()
-        torch.nn.quantized.functional.hardswish(qX_copy, inplace=True)
-        self.assertEqual(qX_copy, qY_hat,
-                         message="inplace Hardswish failed: {} vs {}".format(qY, qY_hat))
+        qY = torch.nn.quantized.functional.hardswish(
+            qX, scale=Y_scale, zero_point=Y_zero_point)
+        self.assertEqual(
+            qY, qY_hat,
+            message="Hardswish failed: {} vs {}".format(qY, qY_hat))
 
 class TestQuantizedOps(TestCase):
 
@@ -396,9 +388,11 @@ class TestQuantizedOps(TestCase):
     """Tests the correctness of the quantized::hardswish op."""
     @given(X=hu.tensor(shapes=hu.array_shapes(1, 8, 1, 8),
                        elements=hu.floats(-1e6, 1e6, allow_nan=False, allow_infinity=False),
-                       qparams=hu.qparams()))
-    def test_hardswish(self, X):
-        _test_hardswish(self, X, 'fbgemm')
+                       qparams=hu.qparams()),
+           Y_scale=st.floats(1e-6, 1e6),
+           Y_zero_point=st.integers(0, 10))
+    def test_hardswish(self, X, Y_scale, Y_zero_point):
+        _test_hardswish(self, X, Y_scale, Y_zero_point, 'fbgemm')
 
     """Tests the correctness of the scalar addition."""
     @unittest.skip("Failing on MacOS")
@@ -2715,9 +2709,11 @@ class TestQNNPackOps(TestCase):
     """Tests the correctness of the quantized::hardswish op."""
     @given(X=hu.tensor(shapes=hu.array_shapes(1, 8, 1, 8),
                        elements=hu.floats(-1e6, 1e6, allow_nan=False, allow_infinity=False),
-                       qparams=hu.qparams(dtypes=(torch.quint8))))
-    def test_hardswish(self, X):
-        _test_hardswish(self, X, 'qnnpack')
+                       qparams=hu.qparams(dtypes=(torch.quint8))),
+           Y_scale=st.floats(1e-6, 1e6),
+           Y_zero_point=st.integers(0, 10))
+    def test_hardswish(self, X, Y_scale, Y_zero_point):
+        _test_hardswish(self, X, Y_scale, Y_zero_point, 'qnnpack')
 
 """Tests the correctness of the tensor comparators."""
 class TestComparatorOps(TestCase):
