@@ -83,6 +83,11 @@ void THCudaInit(THCState* state)
       MIN_GLOBAL_SCRATCH_SPACE_PER_DEVICE :
       numSM * MIN_GLOBAL_SCRATCH_SPACE_PER_SM_STREAM;
     res->scratchSpacePerStream = sizePerStream;
+
+    /* Force device initialization, in some scenarios such as using external
+       allocated memory, not having a completely initialized cuda context
+       may produce unexpected errors*/
+    THCudaCheck(cudaFree(0));
   }
 
   /* Restore to previous device */
