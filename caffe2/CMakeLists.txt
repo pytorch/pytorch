@@ -461,6 +461,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/jit/frontend/sugared_value.cpp
     ${TORCH_SRC_DIR}/csrc/jit/frontend/parser.cpp
     ${TORCH_SRC_DIR}/csrc/jit/frontend/builtin_functions.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/frontend/versioned_symbols.cpp
     ${TORCH_SRC_DIR}/csrc/jit/frontend/canonicalize_modified_loop.cpp
     ${TORCH_SRC_DIR}/csrc/jit/frontend/edit_distance.cpp
     ${TORCH_SRC_DIR}/csrc/jit/runtime/logging.cpp

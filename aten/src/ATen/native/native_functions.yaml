@@ -6776,3 +6776,8 @@
   variants: function
   device_guard: False
   supports_named_tensor: True
+
+# Note: this function is only for testing.
+# It is undocumented and should not be used outside of tests.
+- func: _test_serialization_subcmul(Tensor self, Tensor other, Scalar alpha=1) -> Tensor
+  use_c10_dispatcher: full
