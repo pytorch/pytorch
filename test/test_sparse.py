@@ -2367,6 +2367,21 @@ class TestSparse(TestCase):
     def test_softmax(self):
         import torch.nn.functional as F
 
+        def to_dense(sparse, fill_value=None):
+            """
+            Return dense tensor from a sparse tensor using given fill value.
+            """
+            if isinstance(fill_value, str):
+                fill_value = float(fill_value)
+            if fill_value is None or fill_value == 0:
+                return sparse.to_dense()
+            sparse = sparse.coalesce()
+            dense = torch.empty(sparse.shape, dtype=sparse.dtype, device=sparse.device)
+            dense[:] = fill_value
+            for idx, value in zip(sparse._indices().t(), sparse._values()):
+                dense[tuple(idx)] = value
+            return dense
+
         def softmax_to_dense(sparse, dim):
             """Dense softmax of a sparse tensor. Useful only for testing softmax
             correctness.
@@ -2387,11 +2402,7 @@ class TestSparse(TestCase):
             dtype = sparse.dtype
             device = sparse.device
             sparse = sparse.coalesce()
-            dense = torch.empty(sparse.shape, dtype=dtype, device=device)
-            inf = float('inf')
-            dense[:] = -inf
-            for idx, value in zip(sparse._indices().t(), sparse._values()):
-                dense[tuple(idx)] = value
+            dense = to_dense(sparse, fill_value=-float('inf'))
             r = F.softmax(dense, dim)
             # softmax on empty lines results nan, replace with zeros to match the definition
             r[r != r] = 0
@@ -2466,6 +2477,92 @@ class TestSparse(TestCase):
                     '`dim(=%s)` must be smaller than `sparse_dim(=%s) + dense_dim(=%s)`'
                     % (dim, sparse.sparse_dim(), sparse.dense_dim()))
 
+        def softmax_jacobian_analytic(x, dim):
+            """Return Jacobian of softmax using analytic formula
+
+               D_jS_i = S_i * (1[i==j] - S_j).
+
+            where S = softmax(x, dim), x is dense tensor, i,j in
+            range(x.shape[dim]).
+            """
+            y = F.softmax(x, dim)
+            y[y != y] = 0  # replace nan-s with zeros
+            J = torch.zeros((x.shape[dim],) + tuple(x.shape), dtype=x.dtype, device=x.device)
+            si = [slice(None)] * len(y.shape)
+            sj = [slice(None)] * len(y.shape)
+            s = [slice(None)] * len(J.shape)
+            for i in range(y.shape[dim]):
+                si[dim] = i
+                s[dim + 1] = i
+                yi = y[tuple(si)]
+                for j in range(y.shape[dim]):
+                    sj[dim] = j
+                    s[0] = j
+                    if i == j:
+                        J[tuple(s)] = yi * (1 - yi)
+                    else:
+                        yj = y[tuple(sj)]
+                        J[tuple(s)] = - yi * yj
+                    sj[dim] = slice(None)
+                si[dim] = slice(None)
+                s[dim + 1] = slice(None)
+            return J
+
+        def softmax_jacobian_autograd(x, dim):
+            """Return Jacobian of softmax using PyTorch autograd feature.
+
+            x can be dense or sparse tensor.
+            """
+            import itertools
+
+            if x.is_sparse:
+                x = x.coalesce()
+
+            dtype = x.dtype
+            device = x.device
+            shape = tuple(x.shape)
+            J = torch.zeros((shape[dim],) + shape, dtype=dtype, device=device)
+            for i in range(shape[dim]):
+                if x.is_sparse:
+                    sparse_dim = x.sparse_dim()
+                    dense_dim = x.dense_dim()
+                    if dim < sparse_dim:
+                        ranges = []
+                        for j, sz in enumerate(shape[:sparse_dim]):
+                            if dim == j:
+                                ranges.append([i])
+                            else:
+                                ranges.append(list(range(sz)))
+                        indices = torch.tensor(list(itertools.product(*ranges)), dtype=torch.long, device=device).t()
+                        values = torch.ones((indices.shape[1],) + shape[sparse_dim:], dtype=dtype, device=device)
+                    else:
+                        ranges = []
+                        for j, sz in enumerate(shape[:sparse_dim]):
+                            ranges.append(list(range(sz)))
+                        indices = torch.tensor(list(itertools.product(*ranges)), dtype=torch.long, device=device).t()
+                        values = torch.zeros((indices.shape[1],) + shape[sparse_dim:], dtype=dtype, device=device)
+                        sv = [slice(None)] * (dense_dim + 1)
+                        sv[dim - sparse_dim + 1] = i
+                        values[tuple(sv)] = 1
+                    v = torch.sparse_coo_tensor(indices, values, shape, dtype=dtype, device=device)
+                else:
+                    v = torch.zeros_like(x)
+                    sv = [slice(None)] * len(v.shape)
+                    sv[dim] = i
+                    v[tuple(sv)] = 1
+                x_ = x.clone()
+                x_.requires_grad_(True)
+                y = F.softmax(x_, dim)
+                if not y.is_sparse:
+                    # replace nan-s with zeros
+                    y.data[y != y] = 0
+                y.backward(v)
+                g = x_.grad
+                if g.is_sparse:
+                    g = g.to_dense()
+                J[i] = g
+            return J
+
         def test_op(sparse_dims, nnz, with_size):
             if isinstance(with_size, Number):
                 with_size = [with_size] * sparse_dims
@@ -2476,23 +2573,43 @@ class TestSparse(TestCase):
                 return torch.sparse_coo_tensor(x._indices(), x._values().log(),
                                                x.size(), dtype=x.dtype, device=x.device)
 
-            for dim in range(len(x.shape)):
-                # check sparse softmax definition using dense softmax:
-                y = sparse_softmax(x, dim)  # Python sparse softmax
+            for dim in range(x.sparse_dim() + x.dense_dim()):
+                # Check sparse softmax definition
+
+                # check Python sparse softmax
+                y = sparse_softmax(x, dim)
                 r1 = softmax_to_dense(x, dim)
                 r2 = y.to_dense()
                 self.assertEqual(r1, r2)
+
                 # check C++ sparse softmax
-                y1 = F.softmax(x, dim)      # C++ sparse softmax
+                y1 = F.softmax(x, dim)
                 self.assertEqual(y, y1)
+
                 # check C++ sparse log_softmax
                 ly1 = F.log_softmax(x, dim)
                 self.assertEqual(ly1, sparse_log(y1))
 
+                # Check autograd support on sparse softmax
+
+                # check softmax Jacobian definition for dense input
+                x1 = to_dense(x, fill_value='-inf')
+                J = softmax_jacobian_analytic(x1, dim)
+
+                # check softmax Jacobian from autograd, dense input
+                J2 = softmax_jacobian_autograd(x1, dim)
+                self.assertEqual(J, J2)
+
+                # check softmax Jacobian from autograd, sparse input
+                J3 = softmax_jacobian_autograd(x, dim)
+                self.assertEqual(J, J3)
+
         test_op(1, 10, [3])
+        test_op(1, 10, [2, 3])
         test_op(1, 10, [3, 2])
         test_op(2, 10, [2, 3, 4])
         test_op(2, 10, [3, 4])
+        test_op(2, 5, [5, 4])
         test_op(2, 10, [3, 4, 2])
         test_op(3, 10, [3, 4, 2])
         test_op(3, 100, [3, 4, 2])

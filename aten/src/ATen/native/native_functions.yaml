@@ -2694,6 +2694,7 @@
   dispatch:
     CPU: softmax_backward_cpu
     CUDA: softmax_backward_cuda
+    SparseCPU: softmax_backward_sparse_cpu
 
 - func: split.Tensor(Tensor(a) self, int split_size, int dim=0) -> Tensor(a)[]
   use_c10_dispatcher: full
