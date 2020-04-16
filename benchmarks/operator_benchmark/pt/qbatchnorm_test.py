@@ -41,7 +41,7 @@ class QBatchNormBenchmark(op_bench.TorchBenchmarkBase):
         self.Y_zero_point = 0
 
     def forward(self):
-        return torch.ops.quantized.batch_norm(
+        return torch.ops.quantized.batch_norm2d(
             self.q_input_one, self.weight, self.bias, self.mean, self.var, self.eps,
             self.Y_scale, self.Y_zero_point)
 
