@@ -57,11 +57,22 @@ void floor_kernel_cuda(TensorIterator& iter) {
   });
 }
 
+template <typename scalar_t>
+__host__ __device__ static inline scalar_t reciprocal_wrapper(scalar_t a) {
+  return static_cast<scalar_t>(1)/a;
+}
+
+template<typename T>
+__host__ __device__ static inline thrust::complex<T> reciprocal_wrapper(thrust::complex<T> v) {
+  const thrust::complex<T> one = thrust::complex<T>(1.0, 0);
+  return one/v;
+}
+
 void reciprocal_kernel_cuda(TensorIterator& iter) {
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "reciprocal_cuda", [&]() {
-    using acc_t = acc_type<scalar_t, /*is_cuda=*/true>;
-    gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
-      return static_cast<acc_t>(1) / a;
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(ScalarType::Half, iter.dtype(), "reciprocal_cuda", [&]() {
+    using thrust_t = typename ztype_cuda<scalar_t>::thrust_t;
+    gpu_kernel(iter, []GPU_LAMBDA(thrust_t a) -> thrust_t {
+      return reciprocal_wrapper(a);
     });
   });
 }
