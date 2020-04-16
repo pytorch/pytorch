@@ -1833,7 +1833,6 @@ class TestSWAUtils(TestCase):
             self._test_update_bn(dnn.cuda(), dl_x, dl_xy, True)
         self.assertTrue(dnn.training)
 
-
     def test_update_bn_cnn(self):
         # Test update_bn for convolutional network and BatchNorm2d
         objects = 100
