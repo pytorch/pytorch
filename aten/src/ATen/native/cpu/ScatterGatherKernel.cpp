@@ -145,7 +145,9 @@ struct _cpu_scatter_gather_dim_loop {
 class ReduceMultiply {
 public:
   ReduceMultiply() {};
-  void operator()(auto * self_data, auto * src_data) {
+  // don't use auto due to complaints from clang.
+  template <typename scalar_t>
+  void operator()(scalar_t * self_data, scalar_t * src_data) {
     *self_data *= *src_data;
   };
 
