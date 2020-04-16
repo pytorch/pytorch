@@ -1479,6 +1479,7 @@
 - func: _cufft_clear_plan_cache(int device_index) -> ()
 
 - func: index.Tensor(Tensor self, Tensor?[] indices) -> Tensor
+  use_c10_dispatcher: unboxed_only
   variants: function, method
   # NB: This function is special-cased in tools/autograd/gen_variable_type.py
   # NB: The following functions are declared in aten/src/ATen/templates/TensorBody.h and defined in aten/src/ATen/TensorIndexing.cpp:
@@ -1499,6 +1500,7 @@
   variants: function, method
 
 - func: index_put_(Tensor(a!) self, Tensor?[] indices, Tensor values, bool accumulate=False) -> Tensor(a!)
+  use_c10_dispatcher: unboxed_only
   variants: function, method
   # NB: The following functions are declared in aten/src/ATen/templates/TensorBody.h and defined in aten/src/ATen/TensorIndexing.cpp:
   # - Tensor & Tensor::index_put_(ArrayRef<TensorIndex> indices, Tensor const & rhs)
@@ -1507,9 +1509,11 @@
   # - Tensor & Tensor::index_put_(std::initializer_list<TensorIndex> indices, Scalar v)
 
 - func: index_put(Tensor self, Tensor?[] indices, Tensor values, bool accumulate=False) -> Tensor
+  use_c10_dispatcher: unboxed_only
   variants: function, method
 
 - func: _index_put_impl_(Tensor(a!) self, Tensor?[] indices, Tensor values, bool accumulate=False, bool unsafe=False) -> Tensor(a!)
+  use_c10_dispatcher: unboxed_only
   variants: function
 
 - func: instance_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool use_input_stats, float momentum, float eps, bool cudnn_enabled) -> Tensor
@@ -1615,6 +1619,11 @@
   dispatch:
     CPU: layer_norm_backward_cpu
     CUDA: layer_norm_backward_cuda
+
+- func: quantized_layer_norm(Tensor input, int[] normalized_shape, Tensor? weight, Tensor? bias, float eps, float output_scale, int output_zero_point) -> Tensor
+  requires_tensor: True
+  dispatch:
+    QuantizedCPU: quantized_layer_norm_impl
 
 - func: linear(Tensor input, Tensor weight, Tensor? bias=None) -> Tensor
   python_module: nn
@@ -5385,6 +5394,36 @@
     CPU: _min_out_cpu
     CUDA: legacy::cuda::_th_min_out
 
+- func: bucketize.Tensor(Tensor self, Tensor boundaries, *, bool out_int32=False, bool right=False) -> Tensor
+  dispatch:
+    CPU: bucketize_cpu
+    CUDA: bucketize_cuda
+
+- func: bucketize.Tensor_out(Tensor self, Tensor boundaries, *, bool out_int32=False, bool right=False, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: bucketize_out_cpu
+    CUDA: bucketize_out_cuda
+
+- func: bucketize.Scalar(Scalar self, Tensor boundaries, *, bool out_int32=False, bool right=False) -> Tensor
+  dispatch:
+    CPU: bucketize_cpu
+    CUDA: bucketize_cuda
+
+- func: searchsorted.Tensor(Tensor sorted_sequence, Tensor self, *, bool out_int32=False, bool right=False) -> Tensor
+  dispatch:
+    CPU: searchsorted_cpu
+    CUDA: searchsorted_cuda
+
+- func: searchsorted.Tensor_out(Tensor sorted_sequence, Tensor self, *, bool out_int32=False, bool right=False, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: searchsorted_out_cpu
+    CUDA: searchsorted_out_cuda
+
+- func: searchsorted.Scalar(Tensor sorted_sequence, Scalar self, *, bool out_int32=False, bool right=False) -> Tensor
+  dispatch:
+    CPU: searchsorted_cpu
+    CUDA: searchsorted_cuda
+
 ## NN wrappers
 
 - func: mse_loss.out(Tensor self, Tensor target, int reduction=Mean, *, Tensor(a!) out) -> Tensor(a!)
@@ -5640,6 +5679,7 @@
   python_module: nn
   dispatch:
     CPU: hardsigmoid
+    CUDA: hardsigmoid
     QuantizedCPU: quantized_hardsigmoid
 
 - func: hardsigmoid_(Tensor(a!) self) -> Tensor(a!)
@@ -5683,21 +5723,18 @@
 
 - func: hardswish.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
+  dispatch:
+    CPU: hardswish_out
+    CUDA: hardswish_out
+    QuantizedCPU: quantized_hardswish_out
+
 
 - func: hardswish(Tensor self) -> Tensor
   use_c10_dispatcher: full
   python_module: nn
-  dispatch:
-    CPU: hardswish
-    CUDA: hardswish
-    QuantizedCPU: quantized_hardswish
 
 - func: hardswish_(Tensor(a!) self) -> Tensor(a!)
   python_module: nn
-  dispatch:
-    CPU: hardswish_
-    CUDA: hardswish_
-    QuantizedCPU: quantized_hardswish_
 
 - func: hardswish_backward(Tensor grad_output, Tensor self) -> Tensor
   use_c10_dispatcher: full
@@ -6672,3 +6709,8 @@
   variants: function
   device_guard: False
   supports_named_tensor: True
+
+# Note: this function is only for testing.
+# It is undocumented and should not be used outside of tests.
+- func: _test_serialization_subcmul(Tensor self, Tensor other, Scalar alpha=1) -> Tensor
+  use_c10_dispatcher: full

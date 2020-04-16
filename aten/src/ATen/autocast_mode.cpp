@@ -13,11 +13,11 @@ namespace at {
 namespace autocast {
 
 bool is_enabled() {
-  return c10::impl::tls_is_dispatch_key_included(DispatchKey::AutocastTensorId);
+  return c10::impl::tls_is_dispatch_key_included(DispatchKey::Autocast);
 }
 
 void set_enabled(bool new_enabled) {
-  c10::impl::tls_set_dispatch_key_included(DispatchKey::AutocastTensorId, new_enabled);
+  c10::impl::tls_set_dispatch_key_included(DispatchKey::Autocast, new_enabled);
 }
 
 namespace {
@@ -230,7 +230,7 @@ template<CastPolicy policy, class Redispatch, Redispatch* F, class Ret, class Ar
 template<class Redispatch, Redispatch* F, class Ret, class... Args>
 struct WrapFunction_<CastPolicy::fp16, Redispatch, F, Ret, guts::typelist::typelist<Args...>> {
   static Ret call(Args... args) {
-    c10::impl::ExcludeDispatchKeyGuard no_autocasting(DispatchKey::AutocastTensorId);
+    c10::impl::ExcludeDispatchKeyGuard no_autocasting(DispatchKey::Autocast);
     return (*F)(cached_cast(at::kHalf, args)...);
   }
 };
@@ -239,7 +239,7 @@ struct WrapFunction_<CastPolicy::fp16, Redispatch, F, Ret, guts::typelist::typel
 template<class Redispatch, Redispatch* F, class Ret, class... Args>
 struct WrapFunction_<CastPolicy::fp32, Redispatch, F, Ret, guts::typelist::typelist<Args...>> {
   static Ret call(Args... args) {
-    c10::impl::ExcludeDispatchKeyGuard no_autocasting(DispatchKey::AutocastTensorId);
+    c10::impl::ExcludeDispatchKeyGuard no_autocasting(DispatchKey::Autocast);
     return (*F)(cached_cast(at::kFloat, args)...);
   }
 };
@@ -248,7 +248,7 @@ struct WrapFunction_<CastPolicy::fp32, Redispatch, F, Ret, guts::typelist::typel
 template<class Redispatch, Redispatch* F, class Ret, class... Args>
 struct WrapFunction_<CastPolicy::fp32_set_opt_dtype, Redispatch, F, Ret, guts::typelist::typelist<Args...>> {
   static Ret call(Args... args) {
-    c10::impl::ExcludeDispatchKeyGuard no_autocasting(DispatchKey::AutocastTensorId);
+    c10::impl::ExcludeDispatchKeyGuard no_autocasting(DispatchKey::Autocast);
     if (firstarg_is_eligible(args...)) {
       return (*F)(set_opt_dtype(at::kFloat, args)...);
     } else {
@@ -263,7 +263,7 @@ struct WrapFunction_<CastPolicy::fp32_set_opt_dtype, Redispatch, F, Ret, guts::t
 template<class Redispatch, Redispatch* F, class Ret, class... Args>
 struct WrapFunction_<CastPolicy::fp32_append_dtype, Redispatch, F, Ret, guts::typelist::typelist<Args...>> {
   static Ret call(Args... args) {
-    c10::impl::ExcludeDispatchKeyGuard no_autocasting(DispatchKey::AutocastTensorId);
+    c10::impl::ExcludeDispatchKeyGuard no_autocasting(DispatchKey::Autocast);
     at::ScalarType out_type = type_from_firstarg(at::kFloat, args...);
     return (*F)(args..., out_type);
   }
@@ -273,7 +273,7 @@ struct WrapFunction_<CastPolicy::fp32_append_dtype, Redispatch, F, Ret, guts::ty
 template<class Redispatch, Redispatch* F, class Ret, class... Args>
 struct WrapFunction_<CastPolicy::promote, Redispatch, F, Ret, guts::typelist::typelist<Args...>> {
   static Ret call(Args... args) {
-    c10::impl::ExcludeDispatchKeyGuard no_autocasting(DispatchKey::AutocastTensorId);
+    c10::impl::ExcludeDispatchKeyGuard no_autocasting(DispatchKey::Autocast);
     auto to_type = promote_type(at::kHalf, args...);
     return (*F)(cached_cast(to_type, args)...);
   }
@@ -332,7 +332,7 @@ I think Option 2 is the right answer for all ops, not just convolutions.  Option
 *****************************************************************************************************************/
 
 auto register_fallthrough = c10::import()
-  .fallback(c10::DispatchKey::AutocastTensorId, c10::CppFunction::makeFallthrough());
+  .fallback(c10::DispatchKey::Autocast, c10::CppFunction::makeFallthrough());
 
 /********************************************************************************************************************
 Explicit registration for out-of-place ops
@@ -360,16 +360,16 @@ Therefore, for the moment, this is all copy pasted in from VariableTypeEverythin
 // Common cases where registration signature matches redispatch signature
 // (that's why SIGNATURE is repeated in the WrapFunction instantiation)
 #define KERNEL(FUNC, REGISTER_NAME, SIGNATURE, POLICY) \
-  .impl(REGISTER_NAME, DispatchKey::AutocastTensorId, \
+  .impl(REGISTER_NAME, DispatchKey::Autocast, \
     &WrapFunction<CastPolicy::POLICY, SIGNATURE, SIGNATURE, &FUNC>::type::call)
 
 #define KERNEL_UNBOXED_ONLY(FUNC, REGISTER_NAME, SIGNATURE, POLICY) \
-  .impl_UNBOXED(REGISTER_NAME, DispatchKey::AutocastTensorId, \
+  .impl_UNBOXED(REGISTER_NAME, DispatchKey::Autocast, \
     &WrapFunction<CastPolicy::POLICY, SIGNATURE, SIGNATURE, &FUNC>::type::call)
 
 // Less-common but still useful case: redispatching to a function with a new signature (e.g. appending a dtype)
 #define KERNEL_UNBOXED_ONLY_DIFFERENT_REDISPATCH_SIGNATURE(REDISPATCH_FUNC, REGISTER_NAME, REGISTER_SIGNATURE, REDISPATCH_SIGNATURE, POLICY) \
-  .impl_UNBOXED(REGISTER_NAME, DispatchKey::AutocastTensorId, \
+  .impl_UNBOXED(REGISTER_NAME, DispatchKey::Autocast, \
     &WrapFunction<CastPolicy::POLICY, REGISTER_SIGNATURE, REDISPATCH_SIGNATURE, &REDISPATCH_FUNC>::type::call)
 
 /*****************************************
@@ -425,7 +425,7 @@ auto register_out_of_place = c10::import()
   KERNEL(ADD_NS(gelu), "aten::gelu", Tensor (const Tensor &), fp32)
   KERNEL_UNBOXED_ONLY(ADD_NS(layer_norm), "aten::layer_norm", Tensor (const Tensor &, IntArrayRef, const Tensor &, const Tensor &, double, bool), fp32)
   // The macro doesn't like this one so I had to write it out manually.
-  .impl_UNBOXED("aten::native_layer_norm", DispatchKey::AutocastTensorId,
+  .impl_UNBOXED("aten::native_layer_norm", DispatchKey::Autocast,
                 &WrapFunction<CastPolicy::fp32, std::tuple<Tensor,Tensor,Tensor> (const Tensor &, const Tensor &, const Tensor &, int64_t, int64_t, double), std::tuple<Tensor,Tensor,Tensor> (const Tensor &, const Tensor &, const Tensor &, int64_t, int64_t, double), &ADD_NS(native_layer_norm)>::type::call)
   KERNEL_UNBOXED_ONLY(ADD_NS(group_norm), "aten::group_norm", Tensor (const Tensor &, int64_t, const Tensor &, const Tensor &, double, bool), fp32)
   KERNEL_UNBOXED_ONLY(ADD_NS(frobenius_norm), "aten::frobenius_norm", Tensor (const Tensor &), fp32)
@@ -494,7 +494,7 @@ auto register_out_of_place = c10::import()
   ;
 
 auto register_banned = torch::import()
-  .impl_UNBOXED("aten::binary_cross_entropy", DispatchKey::AutocastTensorId,
+  .impl_UNBOXED("aten::binary_cross_entropy", DispatchKey::Autocast,
                 &at::autocast::binary_cross_entropy_banned);
 }
 #endif
