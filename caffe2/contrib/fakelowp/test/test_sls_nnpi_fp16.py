@@ -6,6 +6,8 @@ import unittest
 # Must happen before importing caffe2.python.*
 import caffe2.python.fakelowp.init_shared_libs  # noqa
 import numpy as np
+from hypothesis import given, settings
+from hypothesis import strategies as st
 from caffe2.proto import caffe2_pb2
 from caffe2.python import core, workspace
 from caffe2.python.onnx.onnxifi import onnxifi_caffe2_net
@@ -97,9 +99,10 @@ class SparseLengthsSumTest(unittest.TestCase):
             )
             assert 0
 
-    def test_slws_fused_8bit_rowwise_all_same(self):
+    @given(seed=st.integers(0, 65535))
+    def test_slws_fused_8bit_rowwise_all_same(self, seed):
         # Comment out for predictable debugging
-        np.random.seed(int(time.time()))
+        np.random.seed(seed)
         workspace.ResetWorkspace()
         n = 1
         m = 2
@@ -196,10 +199,8 @@ class SparseLengthsSumTest(unittest.TestCase):
             )
             assert 0
 
-    def test_slws_fused_8bit_rowwise_turkey(self):
-        # Comment out for predictable debugging
-        seed = int(time.time() * 1000) % 2 ** 16
-        print(seed)
+    @given(seed=st.integers(0, 65535))
+    def test_slws_fused_8bit_rowwise_turkey(self, seed):
         np.random.seed(seed)
         workspace.ResetWorkspace()
 
@@ -297,9 +298,8 @@ class SparseLengthsSumTest(unittest.TestCase):
 
     # Simple test to aid debugging order of operations
     # Minimize the case to an SLS that adds two rows
-    def test_small_sls(self):
-        seed = int(time.time() * 1000) % 2 ** 16
-        print(seed)
+    @given(seed=st.integers(0, 65535))
+    def test_small_sls(self, seed):
         np.random.seed(seed)
         workspace.ResetWorkspace()
 
@@ -398,8 +398,8 @@ class SparseLengthsSumTest(unittest.TestCase):
             )
             assert 0
 
-    def test_small_sls_acc32(self):
-
+    @given(seed=st.integers(0, 65535))
+    def test_small_sls_acc32(self, seed):
         workspace.GlobalInit(
             [
                 "caffe2",
@@ -408,8 +408,6 @@ class SparseLengthsSumTest(unittest.TestCase):
                 "--glow_global_force_sls_fp16_accum=0",
             ]
         )
-        seed = int(time.time() * 1000) % 2 ** 16
-        print(seed)
         np.random.seed(seed)
         workspace.ResetWorkspace()
 
@@ -508,7 +506,8 @@ class SparseLengthsSumTest(unittest.TestCase):
             )
             assert 0
 
-    def test_slws_fused_8bit_rowwise_acc32_nnpi(self):
+    @given(seed=st.integers(0, 65535))
+    def test_slws_fused_8bit_rowwise_acc32_nnpi(self, seed):
         workspace.GlobalInit(
             [
                 "caffe2",
@@ -517,9 +516,6 @@ class SparseLengthsSumTest(unittest.TestCase):
                 "--glow_global_force_sls_fp16_accum=0",
             ]
         )
-        # Comment out for predictable debugging
-        seed = int(time.time() * 1000) % 2 ** 16
-        print(seed)
         np.random.seed(seed)
         workspace.ResetWorkspace()
 
