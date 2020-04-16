@@ -3,7 +3,18 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 import torch
 import torch.nn as nn
 import torch.nn.quantized as nnq
-from torch.quantization import RecordingObserver, prepare
+from torch.quantization import (
+    DEFAULT_DYNAMIC_MODULE_MAPPING,
+    DEFAULT_MODULE_MAPPING,
+    DEFAULT_QAT_MODULE_MAPPING,
+    DeQuantStub,
+    RecordingObserver,
+    prepare,
+)
+
+
+_EXCLUDE_QCONFIG_PROPAGATE_LIST = {DeQuantStub}
+_INCLUDE_QCONFIG_PROPAGATE_LIST = {nn.Sequential}
 
 
 def compute_error(x, y, error_type="l2"):
@@ -227,7 +238,7 @@ def _get_matching_activations(float_dict, quantized_dict):
     return act_dict
 
 
-def compare_model_outputs(float_model, q_model, data, white_list):
+def compare_model_outputs(float_model, q_model, data, white_list=None):
     r"""Returns a dict with key corresponding to quantized module names and each
     entry being a dictionary with two keys 'float' and 'quantized', containing
     the activations of quantized model and float model at matching locations. This
@@ -244,6 +255,17 @@ def compare_model_outputs(float_model, q_model, data, white_list):
         and each entry being a dictionary with two keys 'float' and 'quantized',
         containing the matching float and quantized activations
     """
+    if white_list is None:
+        white_list = (
+            set(DEFAULT_MODULE_MAPPING.values())
+            | set(DEFAULT_QAT_MODULE_MAPPING.values())
+            | set(DEFAULT_DYNAMIC_MODULE_MAPPING.values())
+            | set(DEFAULT_MODULE_MAPPING.keys())
+            | set(DEFAULT_QAT_MODULE_MAPPING.keys())
+            | set(DEFAULT_DYNAMIC_MODULE_MAPPING.keys())
+            | _INCLUDE_QCONFIG_PROPAGATE_LIST
+        ) - _EXCLUDE_QCONFIG_PROPAGATE_LIST
+
     qconfig_debug = torch.quantization.QConfig(
         activation=RecordingObserver, weight=None
     )

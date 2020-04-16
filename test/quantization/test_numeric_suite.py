@@ -1,12 +1,5 @@
 import torch.nn as nn
-from torch.quantization import (
-    DEFAULT_DYNAMIC_MODULE_MAPPING,
-    DEFAULT_MODULE_MAPPING,
-    DEFAULT_QAT_MODULE_MAPPING,
-    default_eval_fn,
-    quantize,
-    DeQuantStub,
-)
+from torch.quantization import default_eval_fn, quantize
 from torch.quantization._numeric_suite import (
     compare_model_outputs,
     compare_model_stub,
@@ -16,10 +9,6 @@ from torch.testing._internal.common_quantization import (
     AnnotatedConvModel,
     QuantizationTestCase,
 )
-
-
-_EXCLUDE_QCONFIG_PROPAGATE_LIST = {DeQuantStub}
-_INCLUDE_QCONFIG_PROPAGATE_LIST = {nn.Sequential}
 
 
 class EagerModeNumericSuiteTest(QuantizationTestCase):
@@ -66,17 +55,8 @@ class EagerModeNumericSuiteTest(QuantizationTestCase):
             annotated_conv_model, default_eval_fn, self.img_data
         )
         data = self.img_data[0][0]
-        white_list = (
-            set(DEFAULT_MODULE_MAPPING.values())
-            | set(DEFAULT_QAT_MODULE_MAPPING.values())
-            | set(DEFAULT_DYNAMIC_MODULE_MAPPING.values())
-            | set(DEFAULT_MODULE_MAPPING.keys())
-            | set(DEFAULT_QAT_MODULE_MAPPING.keys())
-            | set(DEFAULT_DYNAMIC_MODULE_MAPPING.keys())
-            | _INCLUDE_QCONFIG_PROPAGATE_LIST
-        ) - _EXCLUDE_QCONFIG_PROPAGATE_LIST
         act_compare_dict = compare_model_outputs(
-            annotated_conv_model, quantized_annotated_conv_model, data, white_list
+            annotated_conv_model, quantized_annotated_conv_model, data
         )
         self.assertEqual(len(act_compare_dict), 2)
         for k, v in act_compare_dict.items():
