@@ -271,16 +271,27 @@ const Expr* IRMutator::mutate(const RoundOff* v) {
 }
 
 const Expr* IRMutator::mutate(const ReduceOp* v) {
-  auto accum = v->accumulator().node()->accept_mutator(this);
-  Stmt* init = v->initializer()->accept_mutator(this);
+  const Expr* buf_new_expr = v->accumulator()->accept_mutator(this);
+  const Buf* buf_new = dynamic_cast<const Buf*>(buf_new_expr);
+  const Expr* init = v->initializer()->accept_mutator(this);
   auto body = v->body().node()->accept_mutator(this);
 
+  std::vector<const Expr*> new_output_args;
+  std::vector<const Var*> new_reduce_args;
+  for (auto* e : v->output_args()) {
+    new_output_args.push_back(e->accept_mutator(this));
+  }
+  for (auto* r : v->reduce_args()) {
+    new_reduce_args.push_back(static_cast<const Var*>(r->accept_mutator(this)));
+  }
+
   return new ReduceOp(
-      ExprHandle(accum),
+      buf_new,
       init,
       ExprHandle(body),
       v->interaction(),
-      v->reduce_args());
+      new_output_args,
+      new_reduce_args);
 }
 
 const Expr* IRMutator::mutate(const BaseCallNode* v) {
