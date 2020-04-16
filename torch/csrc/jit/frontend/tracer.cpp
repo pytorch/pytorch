@@ -242,51 +242,9 @@ Value* TracingState::getOutput(const IValue& iv, size_t i) {
         fmap(tuple, [&](const IValue& ival) { return getOutput(ival, i); }));
     graph->insertNode(tuple_node);
     return tuple_node->output();
-  } else if (iv.isGenericDict()) {
-    if (tracing_mode_strict) {
-      throw std::runtime_error(
-          "Encountering a dict at the output of the tracer" +
-          std::string(STRICT_TRACER_MSG));
-    }
-    auto dict = iv.toGenericDict();
-    TypePtr key_type = dict.keyType();
-    TypePtr value_type = dict.valueType();
-
-    bool key_type_valid = key_type->isSubtypeOf(StringType::get()) ||
-        key_type->isSubtypeOf(TensorType::get());
-    bool value_type_valid = value_type->isSubtypeOf(TensorType::get());
-
-    if (!key_type_valid || !value_type_valid) {
-      std::ostringstream os;
-      os << "output " << i << " (" << dict << ") of traced region "
-         << "cannot be understood by the tracer, only dict[str, Tensor] "
-         << "or dict[Tensor, Tensor] can be a dictionary output of a traced function";
-      throw std::runtime_error(os.str());
-    }
-    const auto order = iterationOrder(dict);
-    std::vector<Value*> keys;
-    std::vector<Value*> values;
-    for (const auto& pair : order) {
-      keys.emplace_back(getValue(pair.first));
-      values.emplace_back(getOutput(pair.second, i));
-    }
-    if (dict.keyType()->cast<TensorType>()) {
-      // First get a permuation that are sorted by the keys Value's unique id
-      std::vector<int64_t> perm(keys.size());
-      std::iota(perm.begin(), perm.end(), 0);
-      std::sort(perm.begin(), perm.end(), [&](int64_t i, int64_t j) {
-        return keys[i]->unique() < keys[j]->unique();
-      });
-      // Apply the permutation to sort keys and values
-      keys = fmap(perm, [&](int64_t i) { return keys[i]; });
-      values = fmap(perm, [&](int64_t i) { return values[i]; });
-    }
-    auto dict_node = graph->createDict(key_type, value_type, keys, values);
-    graph->insertNode(dict_node);
-    return dict_node->output();
   } else {
     AT_ERROR(
-        "Only tensors, lists, tuples of tensors, or dictionary of tensors can be output from traced functions");
+        "Only tensors, lists and tuples of tensors can be output from traced functions");
   }
 }
 
@@ -330,15 +288,17 @@ static IValue addInput(
     auto unpack_node = state->graph->insertNode(list_unpack);
     auto elem_values = unpack_node->outputs();
 
-    const auto order = iterationOrder(dict);
-    AT_ASSERT(order.size() == elem_values.size());
+    AT_ASSERT(dict.size() == elem_values.size());
 
     size_t i = 0;
-    for (const auto& pair : order) {
+    for (const auto& entry : dict) {
       dict.insert_or_assign(
-          pair.first,
+          entry.key(),
           addInput(
-              state, pair.second, dict_type->getValueType(), elem_values[i++]));
+              state,
+              entry.value(),
+              dict_type->getValueType(),
+              elem_values[i++]));
     }
 
     return dict;
