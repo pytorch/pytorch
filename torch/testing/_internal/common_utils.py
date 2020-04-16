@@ -487,6 +487,12 @@ def freeze_rng_state():
         torch.cuda.set_rng_state(cuda_rng_state)
     torch.set_rng_state(rng_state)
 
+@contextlib.contextmanager
+def set_default_dtype(dtype):
+    saved_dtype = torch.get_default_dtype()
+    torch.set_default_dtype(dtype)
+    yield
+    torch.set_default_dtype(saved_dtype)
 
 def iter_indices(tensor):
     if tensor.dim() == 0:
