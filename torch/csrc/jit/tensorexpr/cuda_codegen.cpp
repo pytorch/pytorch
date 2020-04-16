@@ -137,6 +137,20 @@ static void print_flat_alloc(std::ostream& os, const Allocate* alloc) {
      << "[" << flat_size << "];" << std::endl;
 }
 
+void CudaPrinter::visit(const Free* v) {
+  Stmt* p = v->get_parent();
+  while (p) {
+    const For* for_v = dynamic_cast<const For*>(p);
+    if (for_v &&
+        (for_v->loop_options().is_gpu_block_index() ||
+         for_v->loop_options().is_gpu_thread_index())) {
+      return;
+    }
+    p = p->get_parent();
+  }
+  throw std::runtime_error("Global free not supported yet");
+}
+
 void CudaPrinter::visit(const Allocate* v) {
   Stmt* p = v->get_parent();
   while (p) {
@@ -553,12 +567,12 @@ std::string CudaCodeGen::GetUniqueFuncName(const std::string& func_prefix) {
 }
 
 // Find all the statements that are not covered by any thread-idx axes,
-// and wrapp them under a trivial thread idx.
+// and wrap them under a trivial thread idx.
 class NoThreadIdxRewriter : public IRMutator {
  private:
   Stmt* rewrite(const std::vector<Stmt*>& stmts) {
     std::vector<Stmt*> cloned_stmts(stmts.size());
-    for (int index = 0; index < stmts.size(); index++) {
+    for (size_t index = 0; index < stmts.size(); index++) {
       cloned_stmts[index] = Stmt::clone(stmts[index]);
     }
     Stmt* new_block = Block::make(cloned_stmts);
@@ -566,6 +580,9 @@ class NoThreadIdxRewriter : public IRMutator {
     //   for t in 0..1: // threadIdx
     //     if (t < 1):
     //       new_block
+    // Note: the insertion of this for loop serves two purpose. First it is
+    // turned into a mask; Second, it will make sure a sync point is inserted
+    // when we switch to another thread-idx axis.
     VarHandle t("t", kInt);
     ExprHandle t_lt_1 = CompareSelect::make(t, 1, CompareSelectOperation::kLT);
     // TODO: move "if (t < 1)" to threadIdx generation
@@ -627,15 +644,15 @@ class NoThreadIdxRewriter : public IRMutator {
       return (Stmt*)v;
     }
 
-    // If all needs fix, check if parent is a GPU block
+    // If all needs fix, then we could have its parent statement to merge
+    // further. Unless the parent is a block-indx axis, then we should handle
+    // the rewrite now.
     if (all_need_fix) {
       Stmt* parent = v->get_parent();
       For* loop_parent = dynamic_cast<For*>(parent);
-      if (loop_parent) {
-        if (loop_parent->loop_options().is_gpu_block_index()) {
-          Stmt* new_block = rewrite(new_stmts);
-          return new_block;
-        }
+      if (loop_parent && loop_parent->loop_options().is_gpu_block_index()) {
+        Stmt* new_block = rewrite(new_stmts);
+        return new_block;
       }
       need_rewrite_ = true;
       return (Stmt*)v;
@@ -659,9 +676,9 @@ class NoThreadIdxRewriter : public IRMutator {
       }
 
       // Rewrite the stmts from [start, stop)
-      std::vector<Stmt*> stmts_block(
+      std::vector<Stmt*> stmts_to_rewrite(
           new_stmts.begin() + start, new_stmts.begin() + stop);
-      Stmt* rewritten_stmt = rewrite(stmts_block);
+      Stmt* rewritten_stmt = rewrite(stmts_to_rewrite);
       rewrite_stmts.push_back(rewritten_stmt);
 
       start = stop;
