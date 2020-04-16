@@ -259,7 +259,7 @@ static at::Tensor make_bag_size(
     }
     bag_size[-1] = indices.size(0) - offsets[-1];
   } else if (requires_grad) {
-    // in MODE_SUM, only initialize bag_size if we need gradients
+    // in MODE_SUM, only allocate bag_size if we need gradients
     bag_size = at::empty(offsets.sizes(), indices.options());
   }
   return bag_size;
