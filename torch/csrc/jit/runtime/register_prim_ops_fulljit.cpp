@@ -117,7 +117,7 @@ RegisterOperators reg(
      // the whole gradients in every tensor of the Autograd graph with
      // create_graph=True so we use aliasAnalysisConservative for these two OPs
      Operator(
-         "aten::backward(Tensor[](a!) tensors, Tensor?[]? grad_tensors=None, bool? retain_graph=None, bool create_graph=False) -> ()",
+         "aten::backward.TensorList(Tensor[] tensors, Tensor?[]? grad_tensors=None, bool? retain_graph=None, bool create_graph=False) -> ()",
          [](Stack& stack) {
            bool create_graph = pop(stack).toBool();
            auto retain_graph = pop(stack).toOptional<bool>();
@@ -139,7 +139,7 @@ RegisterOperators reg(
          },
          aliasAnalysisConservative()),
      Operator(
-         "aten::backward(Tensor(a!) self, Tensor? gradient=None, bool? retain_graph=None, bool create_graph=False) -> ()",
+         "aten::backward(Tensor self, Tensor? gradient=None, bool? retain_graph=None, bool create_graph=False) -> ()",
          [](Stack& stack) {
            bool create_graph = pop(stack).toBool();
            auto retain_graph = pop(stack).toOptional<bool>();
