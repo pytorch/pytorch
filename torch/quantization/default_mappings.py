@@ -15,6 +15,7 @@ DEFAULT_MODULE_MAPPING = {
     nn.Linear: nnq.Linear,
     nn.ReLU: nnq.ReLU,
     nn.ReLU6: nnq.ReLU6,
+    nn.Hardswish: nnq.Hardswish,
     nn.Conv1d: nnq.Conv1d,
     nn.Conv2d: nnq.Conv2d,
     nn.Conv3d: nnq.Conv3d,
