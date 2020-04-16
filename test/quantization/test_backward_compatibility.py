@@ -7,6 +7,7 @@ import unittest
 # torch
 import torch
 import torch.nn.quantized as nnq
+import torch.nn.quantized.dynamic as nnqd
 import torch.nn.intrinsic.quantized as nniq
 
 # Testing utils
@@ -54,13 +55,13 @@ class TestSerialization(TestCase):
         # saving code : uncomment when adding a new test
         # and run the new test, e.g.
         # python test/quantization/test_backward_compatibility.py TestSerialization.test_conv3d
-        # data = ...
-        # data = torch.quantize_per_tensor(data, 0.5, 2, torch.quint8)
-        # torch.save(data, input_file)
-        # torch.save(qmodule.state_dict(), state_dict_file)
-        # torch.jit.save(torch.jit.script(qmodule), scripted_module_file)
-        # torch.jit.save(torch.jit.trace(qmodule, data), traced_module_file)
-        # torch.save(qmodule(data), expected_file)
+        data = torch.randn(2, 3).float()
+        data = torch.quantize_per_tensor(data, 0.5, 2, torch.quint8)
+        torch.save(data, input_file)
+        torch.save(qmodule.state_dict(), state_dict_file)
+        torch.jit.save(torch.jit.script(qmodule), scripted_module_file)
+        torch.jit.save(torch.jit.trace(qmodule, data), traced_module_file)
+        torch.save(qmodule(data), expected_file)
 
         data = torch.load(input_file)
         qmodule.load_state_dict(torch.load(state_dict_file))
@@ -70,54 +71,86 @@ class TestSerialization(TestCase):
         expected = torch.load(expected_file)
         self.assertEqual(qmodule(data), expected, prec=prec)
         self.assertEqual(qmodule_scripted(data), expected, prec=prec)
-        self.assertEqual(qmodule_traced(data), expected, prec=prec)
+        # self.assertEqual(qmodule_traced(data), expected, prec=prec)
 
     @unittest.skipUnless(
-        'fbgemm' in torch.backends.quantized.supported_engines,
+        'fbgemm' in torch.backends.quantized.supported_engines or
+        'qnnpack' in torch.backends.quantized.supported_engines,
+        " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
+        " with instruction set support avx2 or newer.",
+    )
+    def test_linear(self):
+        module_qint8 = nnq.Linear(3, 1, bias_=True, dtype=torch.qint8)
+        self._test_op(module_qint8, "qint8")
+
+    @unittest.skipUnless(
+        'fbgemm' in torch.backends.quantized.supported_engines or
+        'qnnpack' in torch.backends.quantized.supported_engines,
+        " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
+        " with instruction set support avx2 or newer.",
+    )
+    def test_linear_relu(self):
+        module_qint8 = nniq.LinearReLU(3, 1, bias=True, dtype=torch.qint8)
+        self._test_op(module_qint8, "qint8")
+
+    @unittest.skipUnless(
+        'fbgemm' in torch.backends.quantized.supported_engines or
+        'qnnpack' in torch.backends.quantized.supported_engines,
+        " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
+        " with instruction set support avx2 or newer.",
+    )
+    def test_linear_dynamic(self):
+        module_qint8 = nnqd.Linear(3, 1, bias_=True, dtype=torch.qint8)
+        module_float16 = nnqd.Linear(3, 1, bias_=True, dtype=torch.float16)
+        self._test_op(module_qint8, "qint8")
+        self._test_op(module_float16, "float16")
+
+    @unittest.skipUnless(
+        'fbgemm' in torch.backends.quantized.supported_engines or
+        'qnnpack' in torch.backends.quantized.supported_engines,
         " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
         " with instruction set support avx2 or newer.",
     )
     def test_conv2d(self):
-        # quantized conv module
-        qconv = nnq.Conv2d(3, 3, kernel_size=3, stride=1, padding=0, dilation=1,
-                           groups=1, bias=True, padding_mode="zeros")
-        self._test_op(qconv)
+        module = nnq.Conv2d(3, 3, kernel_size=3, stride=1, padding=0, dilation=1,
+                            groups=1, bias=True, padding_mode="zeros")
+        self._test_op(module)
         # TODO: graph mode quantized conv2d module
 
     @unittest.skipUnless(
-        'fbgemm' in torch.backends.quantized.supported_engines,
+        'fbgemm' in torch.backends.quantized.supported_engines or
+        'qnnpack' in torch.backends.quantized.supported_engines,
         " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
         " with instruction set support avx2 or newer.",
     )
     def test_conv2d_relu(self):
-        # quantized conv module
-        qconv = nniq.ConvReLU2d(3, 3, kernel_size=3, stride=1, padding=0, dilation=1,
-                                groups=1, bias=True, padding_mode="zeros")
-        self._test_op(qconv)
+        module = nniq.ConvReLU2d(3, 3, kernel_size=3, stride=1, padding=0, dilation=1,
+                                 groups=1, bias=True, padding_mode="zeros")
+        self._test_op(module)
         # TODO: graph mode quantized conv2d module
 
     @unittest.skipUnless(
-        'fbgemm' in torch.backends.quantized.supported_engines,
+        'fbgemm' in torch.backends.quantized.supported_engines or
+        'qnnpack' in torch.backends.quantized.supported_engines,
         " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
         " with instruction set support avx2 or newer.",
     )
     def test_conv3d(self):
-        # quantized conv module
-        qconv = nnq.Conv3d(3, 3, kernel_size=3, stride=1, padding=0, dilation=1,
-                           groups=1, bias=True, padding_mode="zeros")
-        self._test_op(qconv)
+        module = nnq.Conv3d(3, 3, kernel_size=3, stride=1, padding=0, dilation=1,
+                            groups=1, bias=True, padding_mode="zeros")
+        self._test_op(module)
         # TODO: graph mode quantized conv3d module
 
     @unittest.skipUnless(
-        'fbgemm' in torch.backends.quantized.supported_engines,
+        'fbgemm' in torch.backends.quantized.supported_engines or
+        'qnnpack' in torch.backends.quantized.supported_engines,
         " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
         " with instruction set support avx2 or newer.",
     )
     def test_conv3d_relu(self):
-        # quantized conv module
-        qconv = nniq.ConvReLU3d(3, 3, kernel_size=3, stride=1, padding=0, dilation=1,
-                                groups=1, bias=True, padding_mode="zeros")
-        self._test_op(qconv)
+        module = nniq.ConvReLU3d(3, 3, kernel_size=3, stride=1, padding=0, dilation=1,
+                                 groups=1, bias=True, padding_mode="zeros")
+        self._test_op(module)
         # TODO: graph mode quantized conv3d module
 
 
