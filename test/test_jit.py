@@ -25,6 +25,7 @@ from jit.test_unsupported_ops import TestUnsupportedOps  # noqa: F401
 from jit.test_freezing import TestFreezing  # noqa: F401
 from jit.test_functional_blocks import TestFunctionalBlocks  # noqa: F401
 from jit.test_save_load import TestSaveLoad  # noqa: F401
+from jit.test_python_ir import TestPythonIr  # noqa: F401
 
 # Torch
 from torch import Tensor
