@@ -243,7 +243,7 @@ void enableProfiler(const ProfilerConfig& new_config, bool emit_start) {
       // event recording appears to have some startup overhead, so we need to
       // to generate some dummy events first before recording synchronization events
       for (int i = 0; i < kWarmupStart; i++) {
-        cuda_stubs->onEachDevice([](int d) {
+        cuda_stubs->onEachDevice([](int /* unused */) {
             mark("__cuda_startup");
             cuda_stubs->synchronize();
         });

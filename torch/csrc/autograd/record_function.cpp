@@ -20,7 +20,7 @@ float sample_zero_one() {
 
 class RecordFunctionCallback {
  public:
-  RecordFunctionCallback(
+  explicit RecordFunctionCallback(
       std::function<void(const RecordFunction&)> start,
       std::function<void(const RecordFunction&)> end =
         [](const RecordFunction&) {}):
@@ -190,10 +190,16 @@ class CallbackManager {
   void recomputeFlags() {
     has_callbacks_with_inputs_ = false;
     for (const auto& cb : callbacks_) {
-      has_callbacks_with_inputs_ |= cb.needsInputs();
+      if (cb.needsInputs()) {
+        has_callbacks_with_inputs_ = true;
+        return;
+      }
     }
     for (const auto& cb : tls_callbacks_) {
-      has_callbacks_with_inputs_ |= cb.needsInputs();
+      if (cb.needsInputs()) {
+        has_callbacks_with_inputs_ = true;
+        return;
+      }
     }
   }
 
