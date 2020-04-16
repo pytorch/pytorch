@@ -25,7 +25,9 @@ class RecordFunctionCallback {
       std::function<void(const RecordFunction&)> end =
         [](const RecordFunction&) {}):
       start_(std::move(start)),
-      end_(std::move(end)) {}
+      end_(std::move(end)) {
+    scopes_.fill(true);
+  }
 
   RecordFunctionCallback& needsInputs(bool needs_inputs) {
     needs_inputs_ = needs_inputs;
@@ -39,7 +41,7 @@ class RecordFunctionCallback {
   }
 
   RecordFunctionCallback& scopes(
-      std::unordered_set<RecordScope, std::hash<RecordScope>> scopes) {
+      const std::unordered_set<RecordScope, std::hash<RecordScope>>& scopes) {
     if (!scopes.empty()) {
       scopes_.fill(false);
       for (auto sc : scopes) {
@@ -124,9 +126,9 @@ class CallbackManager {
   void runStartCallbacks(RecordFunction& rf) {
     rf._setGlobalCallbacksVersion(global_callbacks_version_);
     rf._activeGlobalCallbacks().clear();
-    for (size_t cb_idx = 0; cb_idx < callbacks_.size(); ++cb_idx) {
-      if (shouldRunCallback(callbacks_[cb_idx], rf.scope())) {
-        auto ret = tryRunCallback(callbacks_[cb_idx].start(), rf);
+    for (auto& cb : callbacks_) {
+      if (shouldRunCallback(cb, rf.scope())) {
+        auto ret = tryRunCallback(cb.start(), rf);
         rf._activeGlobalCallbacks().push_back(ret);
       } else {
         rf._activeGlobalCallbacks().push_back(false);

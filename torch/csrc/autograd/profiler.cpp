@@ -59,6 +59,8 @@ bool unused_ = []() {
 // within a single thread
 thread_local int recursion_depth_ = 0;
 
+const int kWarmupStart = 5;
+
 } // namespace
 
 void registerCUDAMethods(CUDAStubs* stubs) {
@@ -163,9 +165,9 @@ void popRange() {
   }
 }
 
-void enableProfiler(ProfilerConfig new_config, bool emit_start) {
+void enableProfiler(const ProfilerConfig& new_config, bool emit_start) {
   TORCH_CHECK(new_config.state != ProfilerState::Disabled);
-  if (config.state != ProfilerState::Disabled) {
+  if (recursion_depth_ > 0 || config.state != ProfilerState::Disabled) {
     TORCH_WARN("Trying to enable profiler when profiler is already active,"
         " new profiler is inactive");
     ++recursion_depth_;
@@ -175,10 +177,12 @@ void enableProfiler(ProfilerConfig new_config, bool emit_start) {
   TORCH_CHECK(new_config.state != ProfilerState::NVTX || cuda_stubs->enabled(),
       "Can't use NVTX profiler - PyTorch was compiled without CUDA");
 
+  config = new_config;
+
   pushCallback(
-      [new_config](const RecordFunction& fn) {
+      [](const RecordFunction& fn) {
         auto* msg = (fn.seqNr() >= 0) ? ", seq = " : "";
-        if (new_config.report_input_shapes) {
+        if (config.report_input_shapes) {
           std::vector<std::vector<int64_t>> inputSizes;
           inputSizes.reserve(fn.inputs().size());
           for (const c10::IValue& input : fn.inputs()) {
@@ -229,16 +233,15 @@ void enableProfiler(ProfilerConfig new_config, bool emit_start) {
           popRange();
         }
       },
-      /* needs_inputs */ new_config.report_input_shapes,
+      /* needs_inputs */ config.report_input_shapes,
       /* sampling_prob */ 1.0,
       /* scopes */ {RecordScope::FUNCTION, RecordScope::USER_SCOPE});
-  config = new_config;
 
   if (emit_start) {
     if (config.state == ProfilerState::CUDA) {
       // event recording appears to have some startup overhead, so we need to
       // to generate some dummy events first before recording synchronization events
-      for (int i = 0; i < 5; i++) {
+      for (int i = 0; i < kWarmupStart; i++) {
         cuda_stubs->onEachDevice([](int d) {
             mark("__cuda_startup");
             cuda_stubs->synchronize();

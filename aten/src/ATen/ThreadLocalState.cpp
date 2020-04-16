@@ -48,8 +48,7 @@ ThreadLocalState::ThreadLocalState(bool keep_grad_mode)
     : dispatch_key_(c10::impl::tls_local_dispatch_key_set()),
       debug_info_(ThreadLocalDebugInfo::_current()),
       keep_grad_mode_(keep_grad_mode) {
-  for (auto st = (size_t)ThreadLocalSetting::GRAD_MODE;
-        st < (size_t)ThreadLocalSetting::NUM_SETTINGS; ++st) {
+  for (auto st = (size_t)0; st < (size_t)ThreadLocalSetting::NUM_SETTINGS; ++st) {
     if (!getters_[st] ||
         (st == (size_t)ThreadLocalSetting::GRAD_MODE && !keep_grad_mode_)) {
       continue;
@@ -61,8 +60,7 @@ ThreadLocalState::ThreadLocalState(bool keep_grad_mode)
 /* static */
 void ThreadLocalState::setThreadLocalState(
     const ThreadLocalState& state) {
-for (auto st = (size_t)ThreadLocalSetting::GRAD_MODE;
-        st < (size_t)ThreadLocalSetting::NUM_SETTINGS; ++st) {
+for (auto st = (size_t)0; st < (size_t)ThreadLocalSetting::NUM_SETTINGS; ++st) {
     if (!setters_[st] ||
         (st == (size_t)ThreadLocalSetting::GRAD_MODE && !state.keep_grad_mode_)) {
       continue;
