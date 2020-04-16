@@ -40,7 +40,7 @@ class LLVMCodeGenImpl : public IRVisitor {
   std::unique_ptr<llvm::Module> module_;
   llvm::Function* fn_;
   llvm::BasicBlock* bb_;
-  llvm::Value* value_;
+  llvm::Value* value_{nullptr};
   llvm::JITTargetAddress kernelAddress_;
 
 #define LLVM_TYPE_DECLARE(_1, Name) llvm::Type* Name##Ty_;
@@ -324,6 +324,12 @@ void LLVMCodeGenImpl::emitKernel(
 
   // Compile the kernel.
   stmt->accept(this);
+
+  // If the kernel is empty, set a default return value.
+  if (value_ == nullptr) {
+    value_ = llvm::ConstantInt::get(IntTy_, 0);
+  }
+
   irb_.CreateRet(value_);
 
 #if DEBUG_PRINT

@@ -267,6 +267,8 @@ namespace jit {
   _(LLVMBindDynamicShapeAdd)               \
   _(LLVMTensorDynamicShapeAdd)             \
   _(LLVMDynamicShape2D)                    \
+  _(LLVMEmptyStmt)                         \
+  _(LLVMEliminatedStmt)                    \
   _(LLVMIfThenElseTest)                    \
   _(LLVMVectorizerLoadStoreTest)
 

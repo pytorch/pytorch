@@ -296,12 +296,14 @@ void FoldPrePackingOps(script::Module& m) {
   PrePackingOpsFolder(m, filter_fn, "prepack_folding");
 }
 
-void optimizeForMobile(script::Module& m) {
-  m.eval();
-  m = FoldConvBatchNorm2d(m);
-  insertPrePackedOps(m);
-  m = freeze_module(m);
-  FoldPrePackingOps(m);
+c10::optional<script::Module> optimizeForMobile(const script::Module& m) {
+  auto cloned_module = m.clone();
+  cloned_module.eval();
+  cloned_module = FoldConvBatchNorm2d(cloned_module);
+  insertPrePackedOps(cloned_module);
+  cloned_module = freeze_module(cloned_module);
+  FoldPrePackingOps(cloned_module);
+  return cloned_module;
 }
 
 #else
@@ -326,10 +328,10 @@ void FoldPrePackingOps(script::Module& m) {
       "XNNPACK is not enabled. Please build with USE_XNNPACK=1");
 }
 
-void optimizeForMobile(script::Module& m) {
-  TORCH_INTERNAL_ASSERT(
-      "Mobile optimizaiton only available with XNNPACK at the moment. "
+c10::optional<script::Module> optimizeForMobile(const script::Module& m) {
+  TORCH_INTERNAL_ASSERT("Mobile optimizaiton only available with XNNPACK at the moment. "
       "XNNPACK is not enabled. Please build with USE_XNNPACK=1");
+  return c10::nullopt;
 }
 
 #endif
