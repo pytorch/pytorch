@@ -960,9 +960,7 @@ void testRecordFunction() {
           RECORD_USER_SCOPE("C");
         }
       }
-      {
-        RECORD_USER_SCOPE("D");
-      }
+      { RECORD_USER_SCOPE("D"); }
     }
   }
   TORCH_CHECK(fn_names.size() == 1);
