@@ -1576,5 +1576,32 @@ void testLoopNestReorderLongStringFull() {
   }
 }
 
+void testOuterLoopVectorization() {
+  KernelScope kernel_scope;
+  Tensor* tensor = Compute(
+      "f", {{8, "X"}, {8, "y"}}, [](const VarHandle& x, const VarHandle& y) {
+        return ExprHandle(1.0f) + cast<float>(x) * x + cast<float>(y) * y;
+      });
+  LoopNest l({tensor});
+
+  l.vectorize(l.getLoopStmtsFor(tensor)[0]);
+
+  Stmt* root_stmt = l.root_stmt();
+  Block* outer_block = dynamic_cast<Block*>(root_stmt);
+  ASSERT_NE(outer_block, nullptr);
+  while (Block* inner_block = dynamic_cast<Block*>(*outer_block->stmts().begin())) {
+    outer_block = inner_block;
+  }
+
+  // Verify that we have only a single loop level remaining after
+  // vectorization.
+  ASSERT_EQ(outer_block->nstmts(), 1);
+  For* for_loop = dynamic_cast<For*>(*outer_block->stmts().begin());
+  ASSERT_NE(for_loop, nullptr);
+  Block* for_body = for_loop->body();
+  ASSERT_EQ(for_body->nstmts(), 1);
+  ASSERT_EQ(dynamic_cast<For*>(*for_body->stmts().begin()), nullptr);
+}
+
 } // namespace jit
 } // namespace torch

@@ -321,7 +321,26 @@ class Vectorizer : public IRMutator {
   }
 
   Stmt* mutate(const For* v) override {
-    throw std::runtime_error("Can't vectorize nested For!");
+    const Var* var = v->var();
+    const Expr* start = v->start();
+    const Expr* stop = v->stop();
+    LoopOptions loop_options = v->loop_options();
+
+    const Expr* new_start = start->accept_mutator(this);
+    const Expr* new_stop = stop->accept_mutator(this);
+
+    if (new_start != start || new_stop != stop) {
+      throw std::runtime_error("Can't vectorize nested For with dependent loop bounds!");
+    }
+
+    Stmt* body = v->body();
+    Stmt* new_body = body->accept_mutator(this);
+
+    if (new_body == body) {
+      return (For*)v;
+    }
+
+    return new For(var, new_start, new_stop, new_body, loop_options);
   }
 
   template <typename T>
