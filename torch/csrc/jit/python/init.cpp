@@ -692,23 +692,26 @@ void initJITBindings(PyObject* module) {
             return py::bytes(reinterpret_cast<const char*>(data.get()), size);
           })
       .def(
-          "get_storage_record",
-          [](PyTorchStreamReader& self, const std::string& key, size_t numel) {
+          "get_storage_from_record",
+          [](PyTorchStreamReader& self,
+             const std::string& key,
+             size_t numel,
+             py::object dd) {
             at::DataPtr data;
             size_t size;
             std::tie(data, size) = self.getRecord(key);
-            at::Allocator* allocator = nullptr;
+            auto scalar_type =
+                reinterpret_cast<THPDtype*>(dd.ptr())->scalar_type;
+
             auto storage = c10::Storage(
-              caffe2::TypeMeta::Make<float>(),
-              numel,
-              std::move(data),
-              allocator,
-              allocator != nullptr
-            );
-            // TODO: Fix DispatchKeySet
-            auto ptr = c10::make_intrusive<at::TensorImpl, at::UndefinedTensorImpl>(
-              std::move(storage), at::DispatchKeySet()
-            );
+                at::CPU(scalar_type).typeMeta(),
+                numel,
+                std::move(data),
+                /*allocator=*/nullptr,
+                /*resizable=*/false);
+            auto ptr =
+                c10::make_intrusive<at::TensorImpl, at::UndefinedTensorImpl>(
+                    std::move(storage), at::DispatchKeySet());
             return at::Tensor(std::move(ptr));
           })
       .def("get_all_records", [](PyTorchStreamReader& self) {

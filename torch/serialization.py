@@ -822,10 +822,12 @@ def _load(zip_file, map_location, pickle_module, **pickle_load_args):
 
     loaded_storages = {}
 
-    def load_tensor(obj, size, key, location):
-        loaded_storages[key] = restore_location(obj, location)
+    def load_tensor(data_type, size, key, location):
         name = 'data/{}'.format(key)
-        loaded_storages[key] = zip_file.get_storage_record(name, size).storage()
+        dtype = data_type(0).dtype
+
+        storage = zip_file.get_storage_from_record(name, size, dtype).storage()
+        loaded_storages[key] = restore_location(storage, location)
 
     def persistent_load(saved_id):
         assert isinstance(saved_id, tuple)
@@ -836,7 +838,7 @@ def _load(zip_file, map_location, pickle_module, **pickle_load_args):
             "Unknown typename for persistent_load, expected 'storage' but got '{}'".format(typename)
         data_type, key, location, size = data
         if key not in loaded_storages:
-            load_tensor(data_type(size), size, key, _maybe_decode_ascii(location))
+            load_tensor(data_type, size, key, _maybe_decode_ascii(location))
         storage = loaded_storages[key]
         return storage
 
