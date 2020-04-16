@@ -7,11 +7,6 @@ GENERATED_CPP = [
     "autograd/generated/VariableType_2.cpp",
     "autograd/generated/VariableType_3.cpp",
     "autograd/generated/VariableType_4.cpp",
-    "autograd/generated/ProfiledType_0.cpp",
-    "autograd/generated/ProfiledType_1.cpp",
-    "autograd/generated/ProfiledType_2.cpp",
-    "autograd/generated/ProfiledType_3.cpp",
-    "autograd/generated/ProfiledType_4.cpp",
     "jit/generated/register_aten_ops_0.cpp",
     "jit/generated/register_aten_ops_1.cpp",
     "jit/generated/register_aten_ops_2.cpp",
@@ -31,12 +26,6 @@ libtorch_generated_sources = [
     ":generate-code=autograd/generated/VariableType_2.cpp",
     ":generate-code=autograd/generated/VariableType_3.cpp",
     ":generate-code=autograd/generated/VariableType_4.cpp",
-    ":generate-code=autograd/generated/ProfiledType_0.cpp",
-    ":generate-code=autograd/generated/ProfiledType_1.cpp",
-    ":generate-code=autograd/generated/ProfiledType_2.cpp",
-    ":generate-code=autograd/generated/ProfiledType_3.cpp",
-    ":generate-code=autograd/generated/ProfiledType_4.cpp",
-    "torch/csrc/autograd/VariableTypeManual.cpp",
 ]
 
 # copied from https://github.com/pytorch/pytorch/blob/master/tools/cpp_build/torch/CMakeLists.txt
