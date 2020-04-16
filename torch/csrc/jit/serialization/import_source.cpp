@@ -268,11 +268,18 @@ struct SourceImporterImpl : public Resolver,
     std::regex mangle_re("\\.___torch_mangle_\\d+");
     auto replaced_string =
         std::regex_replace(qualified_classname.qualifiedName(), mangle_re, "");
-    const std::string& conv2d_type =
-        "__torch__.torch.nn.quantized.modules.conv.Conv2d";
-    const std::string& conv3d_type =
-        "__torch__.torch.nn.quantized.modules.conv.Conv3d";
-    if (replaced_string == conv2d_type || replaced_string == conv3d_type) {
+    auto is_conv2d = [](const std::string& type) {
+      return type == "__torch__.torch.nn.quantized.modules.conv.Conv2d" ||
+          type ==
+          "__torch__.torch.nn.intrinsic.quantized.modules.conv_relu.ConvReLU2d";
+    };
+
+    auto is_conv3d = [](const std::string& type) {
+      return type == "__torch__.torch.nn.quantized.modules.conv.Conv3d" ||
+          type ==
+          "__torch__.torch.nn.intrinsic.quantized.modules.conv_relu.ConvReLU3d";
+    };
+    if (is_conv2d(replaced_string) || is_conv3d(replaced_string)) {
       auto lhs = Var(assign.lhs());
       if (!assign.type().present() || assign.type().get().kind() != TK_VAR) {
         return c10::nullopt;
@@ -280,7 +287,7 @@ struct SourceImporterImpl : public Resolver,
       auto type = Var(assign.type().get());
       if (lhs.name().name() == "_packed_params" &&
           type.name().name() == "Tensor") {
-        std::string packed_params_typename = replaced_string == conv2d_type
+        std::string packed_params_typename = is_conv2d(replaced_string)
             ? "__torch__.torch.classes.quantized.Conv2dPackedParamsBase"
             : "__torch__.torch.classes.quantized.Conv3dPackedParamsBase";
         Parser p(std::make_shared<Source>(std::move(packed_params_typename)));

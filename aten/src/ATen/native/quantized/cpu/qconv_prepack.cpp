@@ -315,25 +315,23 @@ static auto conv3d_params = register_conv_params<3>();
 
 static auto registry =
     c10::RegisterOperators()
-        .op("quantized::conv_prepack", // conv_prepack is deprecated, please use
-                                       // conv2d_prepack for 2D conv.
+        .op("quantized::conv_prepack(Tensor weight, Tensor? bias, int[] stride, int[] padding, int[] dilation, int groups) -> __torch__.torch.classes.quantized.Conv2dPackedParamsBase", // conv_prepack is deprecated, please use
+                        // conv2d_prepack for 2D conv.
             c10::RegisterOperators::options()
                 .aliasAnalysis(at::AliasAnalysisKind::PURE_FUNCTION)
                 .kernel<QConvPackWeightInt8<2>>(
                     DispatchKey::QuantizedCPU))
-        .op("quantized::conv2d_prepack", // We use conv2d_prepack to be
-                                         // consistent with conv3d_prepack
+        .op("quantized::conv2d_prepack(Tensor weight, Tensor? bias, int[] stride, int[] padding, int[] dilation, int groups) -> __torch__.torch.classes.quantized.Conv2dPackedParamsBase",
             c10::RegisterOperators::options()
                 .aliasAnalysis(at::AliasAnalysisKind::PURE_FUNCTION)
                 .kernel<QConvPackWeightInt8<2>>(
                     DispatchKey::QuantizedCPU))
-        .op("_quantized::conv2d_prepack", // We use conv2d_prepack to be
-                                          // consistent with conv3d_prepack
+        .op("_quantized::conv2d_prepack(Tensor weight, Tensor? bias, int[] stride, int[] padding, int[] dilation, int groups) -> __torch__.torch.classes.quantized.Conv2dPackedParamsBase",
             c10::RegisterOperators::options()
                 .aliasAnalysis(at::AliasAnalysisKind::PURE_FUNCTION)
                 .kernel<QConvPackWeightInt8<2>>(
                     DispatchKey::QuantizedCPU))
-        .op("quantized::conv3d_prepack",
+        .op("quantized::conv3d_prepack(Tensor weight, Tensor? bias, int[] stride, int[] padding, int[] dilation, int groups) -> __torch__.torch.classes.quantized.Conv3dPackedParamsBase",
             c10::RegisterOperators::options()
                 .aliasAnalysis(at::AliasAnalysisKind::PURE_FUNCTION)
                 .kernel<QConvPackWeightInt8<3>>(

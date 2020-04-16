@@ -740,34 +740,34 @@ static auto conv3d_params = register_conv_params<3>();
 
 static auto registry =
     c10::RegisterOperators()
-        .op("quantized::conv2d",
+        .op("quantized::conv2d(Tensor qx, __torch__.torch.classes.quantized.Conv2dPackedParamsBase packed_weight, float output_scale, int output_zero_point) -> Tensor",
             c10::RegisterOperators::options().kernel<QConvInt8<2, false>>(
                 DispatchKey::QuantizedCPU))
-        .op("_quantized::conv2d",
+        .op("_quantized::conv2d(Tensor qx, __torch__.torch.classes.quantized.Conv2dPackedParamsBase packed_weight, float output_scale, int output_zero_point) -> Tensor",
             c10::RegisterOperators::options().kernel<QConvInt8<2, false>>(
                 DispatchKey::QuantizedCPU))
-        .op("quantized::conv2d_relu",
+        .op("quantized::conv2d_relu(Tensor qx, __torch__.torch.classes.quantized.Conv2dPackedParamsBase packed_weight, float output_scale, int output_zero_point) -> Tensor",
             c10::RegisterOperators::options().kernel<QConvInt8<2, true>>(
                 DispatchKey::QuantizedCPU))
-        .op("_quantized::conv2d_relu",
+        .op("_quantized::conv2d_relu(Tensor qx, __torch__.torch.classes.quantized.Conv2dPackedParamsBase packed_weight, float output_scale, int output_zero_point) -> Tensor",
             c10::RegisterOperators::options().kernel<QConvInt8<2, true>>(
                 DispatchKey::QuantizedCPU))
-        .op("quantized::conv3d",
+        .op("quantized::conv3d(Tensor qx, __torch__.torch.classes.quantized.Conv3dPackedParamsBase packed_weight, float output_scale, int output_zero_point) -> Tensor",
             c10::RegisterOperators::options().kernel<QConvInt8<3, false>>(
                 DispatchKey::QuantizedCPU))
-        .op("quantized::conv3d_relu",
+        .op("quantized::conv3d_relu(Tensor qx, __torch__.torch.classes.quantized.Conv3dPackedParamsBase packed_weight, float output_scale, int output_zero_point) -> Tensor",
             c10::RegisterOperators::options().kernel<QConvInt8<3, true>>(
                 DispatchKey::QuantizedCPU))
-        .op("quantized::conv2d.deprecated",
+        .op("quantized::conv2d.deprecated(Tensor qx, __torch__.torch.classes.quantized.Conv2dPackedParamsBase packed_weight, int[] stride, int[] padding, int[] dilation, int groups, float output_scale, int output_zero_point) -> Tensor",
             c10::RegisterOperators::options().kernel<QConvInt8ForBC<2>>(
                 DispatchKey::QuantizedCPU))
-        .op("quantized::conv2d_relu.deprecated",
+        .op("quantized::conv2d_relu.deprecated(Tensor qx, __torch__.torch.classes.quantized.Conv2dPackedParamsBase packed_weight, int[] stride, int[] padding, int[] dilation, int groups, float output_scale, int output_zero_point) -> Tensor",
             c10::RegisterOperators::options().kernel<QConvInt8ForBC<2>>(
                 DispatchKey::QuantizedCPU))
-        .op("quantized::conv3d.deprecated",
+        .op("quantized::conv3d.deprecated(Tensor qx, __torch__.torch.classes.quantized.Conv3dPackedParamsBase packed_weight, int[] stride, int[] padding, int[] dilation, int groups, float output_scale, int output_zero_point) -> Tensor",
             c10::RegisterOperators::options().kernel<QConvInt8ForBC<3>>(
                 DispatchKey::QuantizedCPU))
-        .op("quantized::conv3d_relu.deprecated",
+        .op("quantized::conv3d_relu.deprecated(Tensor qx, __torch__.torch.classes.quantized.Conv3dPackedParamsBase packed_weight, int[] stride, int[] padding, int[] dilation, int groups, float output_scale, int output_zero_point) -> Tensor",
             c10::RegisterOperators::options().kernel<QConvInt8ForBC<3>>(
                 DispatchKey::QuantizedCPU));
 
