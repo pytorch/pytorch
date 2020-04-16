@@ -329,7 +329,8 @@ void FoldPrePackingOps(script::Module& m) {
 }
 
 c10::optional<script::Module> optimizeForMobile(const script::Module& m) {
-  TORCH_INTERNAL_ASSERT("Mobile optimizaiton only available with XNNPACK at the moment. "
+  TORCH_INTERNAL_ASSERT(
+      "Mobile optimizaiton only available with XNNPACK at the moment. "
       "XNNPACK is not enabled. Please build with USE_XNNPACK=1");
   return c10::nullopt;
 }
