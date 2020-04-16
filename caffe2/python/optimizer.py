@@ -922,6 +922,97 @@ class WngradOptimizer(Optimizer):
         return
 
 
+class StormOptimizer(Optimizer):
+    def __init__(self, lr=0.1, momentum=10.0, beta=0.1, grad_sq_init=0.01,
+                 policy='fixed', sparse_dedup_aggregator=None, lars=None,
+                 **kwargs):
+        """Constructor function to add STORM Optimizer
+
+        Args:
+            lr: learning rate scaling (called k in the original paper)
+            momentum: momentum scaling (called c in the original paper)
+            beta: initial value of denominator in adaptive learning rate (
+              called c in the original paper)
+            grad_sq_init: initial value of gradient squared accumulator.
+            policy: specifies how learning rate should be applied, options are
+              'fixed', 'step', 'exp', etc.
+            sparse_dedup_aggregator: specifies deduplication strategy for
+              gradient slices. Works while using sparse gradients. Options
+              include 'mean' and 'sum'.
+            lars: lars offset.
+        """
+        super(StormOptimizer, self).__init__()
+        self.lr = lr
+        self.momentum = momentum
+        self.beta = beta
+        self.grad_sq_init = grad_sq_init
+        self.policy = policy
+        self.sparse_dedup_aggregator = sparse_dedup_aggregator
+        self.lars = lars
+        self.init_kwargs = kwargs
+
+    def _run(self, net, param_init_net, param_info):
+        param = param_info.blob
+        grad = param_info.grad
+
+        if self.lr <= 0:
+            return
+
+        self._clear_local_lr_multiplier()
+
+        if self.lars is not None and not isinstance(grad, core.GradientSlice):
+            assert self.lars >= 0, (
+                'Lars offset must be nonnegative, got {}'.format(self.lars))
+            wd, trust, lr_max = self.create_lars_inputs(
+                param_init_net, 0.0, 1.0, np.finfo(np.float32).max)
+            lr_lars_multiplier = net.Lars(
+                [param, grad, wd, trust, lr_max],
+                self.make_unique_blob_name(str(param) + '_lars'),
+                offset=self.lars,
+                lr_min=0.0)
+            current_scope = scope.CurrentDeviceScope()
+            self._add_local_lr_multiplier(
+                lr_lars_multiplier,
+                is_gpu_blob=(current_scope is not None and
+                             core.IsGPUDeviceType(current_scope.device_type))
+            )
+
+        lr, _ = self.build_lr(
+            net, param_init_net,
+            base_learning_rate=self.lr,
+            policy=self.policy,
+            **(self.init_kwargs)
+        )
+
+        moment = param_init_net.ConstantFill(
+            param, str(param) + '_moment', value=0.)
+        self._aux_params.local.append(moment)
+
+        grad_sq_sum = param_init_net.ConstantFill(
+            [], str(param) + '_grad_sq_sum', shape=[1], value=self.grad_sq_init)
+        self._aux_params.local.append(grad_sq_sum)
+
+
+        if isinstance(grad, core.GradientSlice):
+            grad = self.dedup(net, self.sparse_dedup_aggregator, grad)
+            net.SparseStorm(
+                [param, moment, grad_sq_sum, grad.values, grad.indices, lr],
+                [param, moment, grad_sq_sum],
+                momentum=self.momentum,
+                beta=self.beta
+            )
+        else:
+            net.Storm(
+                [param, moment, grad_sq_sum, grad, lr],
+                [param, moment, grad_sq_sum],
+                momentum=self.momentum,
+                beta=self.beta
+            )
+
+    def scale_learning_rate(self, scale):
+        self.lr *= scale
+
+
 class AdadeltaOptimizer(Optimizer):
     def __init__(self, alpha=0.01, epsilon=1e-4, decay=0.95, policy="fixed",
                  sparse_dedup_aggregator=None, engine='', **kwargs):
@@ -1694,6 +1785,23 @@ def build_wngrad(
         wngrad_optimizer,
         max_gradient_norm=max_gradient_norm,
         allow_lr_injection=allow_lr_injection,
+    )
+
+
+def build_storm(
+    model,
+    base_learning_rate,
+    parameters=None,
+    max_gradient_norm=None,
+    allow_lr_injection=False,
+    **kwargs
+):
+    storm_optimizer = StormOptimizer(lr=base_learning_rate, **kwargs)
+    return _build(
+        model,
+        storm_optimizer,
+        max_gradient_norm=max_gradient_norm,
+        allow_lr_injection=allow_lr_injection
     )
 
 
