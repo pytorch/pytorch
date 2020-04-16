@@ -38,12 +38,14 @@ DEFAULT_MODULE_MAPPING = {
     # QAT modules:
     nnqat.Linear: nnq.Linear,
     nnqat.Conv2d: nnq.Conv2d,
+    nnqat.Hardswish: nnq.Hardswish,
 }
 
 # Map for swapping float module to qat modules
 DEFAULT_QAT_MODULE_MAPPING = {
     nn.Linear: nnqat.Linear,
     nn.Conv2d: nnqat.Conv2d,
+    nn.Hardswish: nnqat.Hardswish,
     # Intrinsic modules:
     nni.ConvBn2d: nniqat.ConvBn2d,
     nni.ConvBnReLU2d: nniqat.ConvBnReLU2d,

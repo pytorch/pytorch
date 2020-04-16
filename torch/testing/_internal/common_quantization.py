@@ -287,6 +287,20 @@ class ActivationsTestModel(torch.nn.Module):
         x = self.hardswish(x)
         return x
 
+class ActivationsQATTestModel(torch.nn.Module):
+    def __init__(self):
+        super(ActivationsQATTestModel, self).__init__()
+        self.qconfig = torch.quantization.get_default_qconfig("fbgemm")
+        self.quant = torch.quantization.QuantStub()
+        self.fc1 = torch.nn.Linear(5, 8).to(dtype=torch.float)
+        self.hardswish = torch.nn.Hardswish().to(dtype=torch.float)
+
+    def forward(self, x):
+        x = self.quant(x)
+        x = self.fc1(x)
+        x = self.hardswish(x)
+        return x
+
 class LinearReluModel(torch.nn.Module):
     def __init__(self):
         super(LinearReluModel, self).__init__()
