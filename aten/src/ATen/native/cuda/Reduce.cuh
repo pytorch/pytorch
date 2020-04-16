@@ -81,6 +81,8 @@ struct ReduceConfig {
   int block_height;
   int num_threads;
 
+  bool vectorize4 = false;
+
   void set_block_dimension(int64_t dim0, int64_t dim1) {
     int dim0_pow2 = dim0 < MAX_NUM_THREADS ? static_cast<int>(last_pow2(dim0)) : MAX_NUM_THREADS;
     int dim1_pow2 = dim1 < MAX_NUM_THREADS ? static_cast<int>(last_pow2(dim1)) : MAX_NUM_THREADS;
@@ -126,6 +128,11 @@ struct ReduceConfig {
     return output_idx < num_outputs &&
       (!should_block_x_reduce() || threadIdx.x == 0) &&
       (!should_block_y_reduce() || threadIdx.y == 0);
+  }
+
+  C10_DEVICE bool should_reduce_tail() const {
+    return (!should_block_y_reduce() || threadIdx.y == 0) &&
+      (!should_global_reduce() || blockIdx.y == 0);
   }
 
   C10_HOST_DEVICE int input_idx() const {
@@ -323,9 +330,18 @@ struct ReduceOp {
     auto base_offsets = output_calc.get(output_idx);
 
     arg_t value = ident;
+
     if (output_idx < config.num_outputs && input_idx < config.num_inputs) {
-      auto input_slice = (const char*)src + base_offsets[1];
-      value = thread_reduce((const scalar_t*)input_slice);
+      const scalar_t* input_slice = (const scalar_t*)((const char*)src + base_offsets[1]);
+      index_t end = config.num_inputs;
+      if (config.vectorize4) {
+        // reduce at the header of input_slice where memory is not aligned,
+        // so that thread_reduce will have an aligned memory to work on.
+        value = header_reduce(value, input_slice, end);
+        value = vectorized_thread_reduce(value, input_slice, end);
+      } else {
+        value = thread_reduce(value, input_slice, end);
+      }
     }
 
     if (config.should_block_y_reduce()) {
@@ -373,28 +389,86 @@ struct ReduceOp {
     }
   }
 
-  C10_DEVICE arg_t thread_reduce(const scalar_t* data) const {
+  C10_DEVICE arg_t header_reduce(arg_t value, const scalar_t* &data, index_t &end) const {
+    const int align_bytes = alignof(at::native::memory::aligned_vector<scalar_t, 4>);
+    const int shift = ((uint64_t)data) % align_bytes / sizeof(scalar_t);
+    if (shift > 0) {
+      data -= shift;
+      end += shift;
+      if(threadIdx.x >= shift && config.should_reduce_tail()){
+        value = ops.reduce(value, data[threadIdx.x], threadIdx.x - shift);
+      }
+      end -= blockDim.x;
+      data += blockDim.x;
+    }
+    return value;
+  }
+
+  C10_DEVICE arg_t vectorized_thread_reduce(arg_t value, const scalar_t* data, index_t end) const {
+    using load_t = at::native::memory::aligned_vector<scalar_t, 4>;
+
+    index_t idx = config.input_idx();
+    const index_t stride = config.step_input;
+
+    // Multiple accumulators to remove dependency between unrolled loops.
+    arg_t value_list[4];
+    value_list[0] = value;
+    #pragma unroll
+    for (int i = 1; i < 4; i++) {
+      value_list[i] = ident;
+    }
+
+    scalar_t values[4];
+    load_t *values_vector = reinterpret_cast<load_t*>(values);
+
+    while (idx * 4 + 3 < end) {
+      *values_vector = reinterpret_cast<const load_t*>(data)[idx];
+      #pragma unroll
+      for (index_t i = 0; i < 4; i++) {
+        value_list[i] = ops.reduce(value_list[i], values[i], idx * 4 + i);
+      }
+      idx += stride;
+    }
+
+    // tail
+    index_t tail_start = end - end % 4;
+    if (config.should_reduce_tail()) {
+      int idx = tail_start + threadIdx.x;
+      if (idx < end) {
+        value_list[0] = ops.reduce(value_list[0], data[idx], idx);
+      }
+    }
+
+    // combine accumulators
+    #pragma unroll
+    for (int i = 1; i < 4; i++) {
+      value_list[0] = ops.combine(value_list[0], value_list[i]);
+    }
+    return value_list[0];
+  }
+
+  C10_DEVICE arg_t thread_reduce(arg_t value, const scalar_t* data, index_t end) const {
     index_t element_stride = input_calc.strides_[0][0] / sizeof(scalar_t);
     bool is_contiguous = (input_calc.dims == 1 && element_stride == 1);
     if (is_contiguous) {
-      return thread_reduce_impl(data, [](index_t idx) { return idx; });
+      return thread_reduce_impl(value, data, end, [](index_t idx) { return idx; });
     } else if (input_calc.dims == 1) {
-      return thread_reduce_impl(data, [&](index_t idx) { return idx * element_stride; });
+      return thread_reduce_impl(value, data, end, [&](index_t idx) { return idx * element_stride; });
     } else {
-      return thread_reduce_impl(data, [&](index_t idx) { return input_calc.get(idx)[0] / sizeof(scalar_t); });
+      return thread_reduce_impl(value, data, end, [&](index_t idx) { return input_calc.get(idx)[0] / sizeof(scalar_t); });
     }
   }
 
   template<typename offset_calc_t>
-  C10_DEVICE arg_t thread_reduce_impl(const scalar_t* data, offset_calc_t calc) const {
+  C10_DEVICE arg_t thread_reduce_impl(arg_t value, const scalar_t* data, index_t end, offset_calc_t calc) const {
     index_t idx = config.input_idx();
-    const index_t end = config.num_inputs;
     const index_t stride = config.step_input;
 
     // Multiple accumulators to remove dependency between unrolled loops.
     arg_t value_list[vt0];
+    value_list[0] = value;
     #pragma unroll
-    for (int i = 0; i < vt0; i++) {
+    for (int i = 1; i < vt0; i++) {
       value_list[i] = ident;
     }
 
@@ -748,6 +822,7 @@ inline void gpu_reduce_kernel(TensorIterator& iter, const ops_t& ops, ident_t id
   // tensor. This grants the best possible memory accessing pattern, given that
   // for non-contiguous tensor with space in between, we cannot have perfect
   // memory coalescing.
+  int64_t fastest_moving_stride;
   bool reduction_on_fastest_striding_dimension =
       (iter.num_reduce_dims() == iter.ndim()) ||
       (iter.strides(/*arg=*/input_index)[0] <
@@ -764,12 +839,25 @@ inline void gpu_reduce_kernel(TensorIterator& iter, const ops_t& ops, ident_t id
     //   2. block.y now max out to num_outputs.
     dim0 = iter.shape()[0];
     dim1 = num_outputs;
+    fastest_moving_stride = iter.strides(/*arg=*/input_index)[0];
   } else {
     // Map block.x to the fastest non reducing dimension. It implies:
     //   1. block_x_reduce is turned off.
     //   2. block.y now max out to inputs_per_output.
     dim0 = iter.shape()[iter.num_reduce_dims()];
     dim1 = inputs_per_output;
+    fastest_moving_stride = iter.strides(/*arg=*/input_index)[iter.num_reduce_dims()];
+  }
+
+  // if the fastest moving dimension is contiguous and large enough, we do vectorized
+  // load for better performance. Note that if vt0 < 4, then this means the register
+  // pressure could be high, in such case, we should avoid vectorization.
+  // We only vectorize 1D reduction
+  if (fastest_moving_stride == sizeof(scalar_t) && dim0 > 128 && vt0 >= 4) {
+    // TODO: vectorization on output is not supported yet
+    if (reduction_on_fastest_striding_dimension && iter.num_reduce_dims() == 1) {
+      config.vectorize4 = true;
+    }
   }
 
   // Adjust block_width and block_height
