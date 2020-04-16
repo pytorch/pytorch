@@ -114,7 +114,7 @@ RegistrationHandleRAII Dispatcher::registerLibrary(std::string ns, std::string d
     "; please put all of your definitions in a single TORCH_LIBRARY block.  "
     "If you were trying to specify implementations, consider using TORCH_LIBRARY_IMPL "
     "(which can be duplicated).  Previous registration of TORCH_LIBRARY was ",
-    *found, "; latest registration was ", debug
+    found->second, "; latest registration was ", debug
   );
   libraries_.emplace(ns, std::move(debug));
   return RegistrationHandleRAII([this, ns] {
