@@ -405,6 +405,8 @@ class Tensor(torch._C._TensorBase):
     def __rdiv__(self, other):
         if self.dtype.is_floating_point:
             return self.reciprocal() * other
+        elif self.is_complex():
+            return (self.reciprocal() * other).type_as(self)
         else:
             return (self.double().reciprocal() * other).type_as(self)
 
