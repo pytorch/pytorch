@@ -79,12 +79,10 @@ enum class BinaryOpType {
   // Math Ops
   Add,
   Atan2,
-  CeilDiv,
   Div,
   Fmod,
   Max,
   Min,
-  // Int operations, leave position oif Mod we depend on its location of first
   Mul,
   Pow,
   Remainder,
