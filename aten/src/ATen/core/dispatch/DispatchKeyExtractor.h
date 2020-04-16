@@ -59,9 +59,6 @@ namespace detail {
     void operator()(const at::Tensor& x) {
       ts = ts | x.key_set();
     }
-    void operator()(const TensorOptions& x) {
-      ts = ts | x.key_set();
-    }
     void operator()(at::ArrayRef<at::Tensor> xs) {
       for (const auto& x : xs) {
         ts = ts | x.key_set();
@@ -123,9 +120,6 @@ public:
   }
 
   DispatchKey getDispatchKeyBoxed(DispatchKeySet backendsWithoutFallthrough, const torch::jit::Stack* stack) const {
-    // TODO Unboxed dispatch supports TensorOptions (i.e. ScalarType/Device/Layout) arguments
-    //      but boxed doesn't yet. See https://github.com/pytorch/pytorch/issues/26428
-
     DispatchKeySet ks;
     dispatch_arg_indices_reverse_.for_each_set_bit([&] (size_t reverse_arg_index) {
       const auto& ivalue = torch::jit::peek(*stack, 0, reverse_arg_index + 1);
