@@ -50,7 +50,7 @@ def _propagate_qconfig_helper(module, qconfig_dict, white_list=None,
                                   module_qconfig, module_prefix)
 
 # TODO(jerryzh): expose white_list
-def propagate_qconfig_(module, qconfig_dict=None):
+def propagate_qconfig_(module, qconfig_dict=None, white_list=None):
     r"""Propagate qconfig through the module hierarchy and assign `qconfig`
     attribute on each leaf module
 
@@ -66,7 +66,7 @@ def propagate_qconfig_(module, qconfig_dict=None):
     """
     if qconfig_dict is None:
         qconfig_dict = {}
-    _propagate_qconfig_helper(module, qconfig_dict)
+    _propagate_qconfig_helper(module, qconfig_dict, white_list)
 
 def _observer_forward_hook(self, input, output):
     r"""Forward hook that calls observer on the output
@@ -122,7 +122,7 @@ def add_quant_dequant(module):
         module._modules[name] = add_quant_dequant(child)
     return module
 
-def prepare(model, inplace=False):
+def prepare(model, inplace=False, white_list=None):
     r"""Prepares a copy of the model for quantization calibration or quantization-aware training.
 
     Quantization configuration should be assigned preemptively
@@ -137,7 +137,7 @@ def prepare(model, inplace=False):
     """
     if not inplace:
         model = copy.deepcopy(model)
-    propagate_qconfig_(model)
+    propagate_qconfig_(model, qconfig_dict=None, white_list=white_list)
     # sanity check common API misusage
     if not any(hasattr(m, 'qconfig') and m.qconfig for m in model.modules()):
         warnings.warn("None of the submodule got qconfig applied. Make sure you "

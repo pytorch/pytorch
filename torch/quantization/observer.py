@@ -1009,10 +1009,15 @@ class RecordingObserver(_ObserverBase):
 
     def __init__(self, **kwargs):
         super(RecordingObserver, self).__init__(**kwargs)
-        self.tensor_val = []
+        self.tensor_val = None
+        self.iters = 0
 
     def forward(self, x):
-        self.tensor_val.append(x.clone())
+        self.iters = self.iters + 1
+        if self.tensor_val is None:
+            self.tensor_val = x
+        else:
+            self.tensor_val = torch.cat((self.tensor_val, x))
         return x
 
     @torch.jit.export
