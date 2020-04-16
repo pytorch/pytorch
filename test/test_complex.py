@@ -1,3 +1,4 @@
+import itertools
 import math
 import torch
 from torch.testing._internal.common_utils import TestCase, run_tests, TEST_NUMPY
@@ -25,6 +26,22 @@ class TestComplexTensor(TestCase):
 
         exp_fn(torch.complex64)
         exp_fn(torch.complex128)
+
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    def test_reciprocal(self):
+        def reciprocal_fn(device, dtype):
+            x = torch.randn(10, 10, dtype=dtype, device=device)
+            if device != 'cpu':
+                expected = np.reciprocal(x.cpu().numpy())
+            else:
+                expected = np.reciprocal(x.numpy())
+            actual = torch.reciprocal(x)
+            self.assertEqual(actual, torch.from_numpy(expected))
+
+        dtypes_to_test = [torch.complex64, torch.complex128]
+        for (device, dtype) in itertools.product(devices, dtypes_to_test):
+            reciprocal_fn(device, dtype)
+            reciprocal_fn(device, dtype)
 
     def test_copy_real_imag_methods(self):
         real = torch.randn(4)
