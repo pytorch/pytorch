@@ -18,10 +18,10 @@
 // file.
 
 #ifndef C10_USING_CUSTOM_GENERATED_MACROS
-#include "c10/macros/cmake_macros.h"
+#include <c10/macros/cmake_macros.h>
 #endif // C10_USING_CUSTOM_GENERATED_MACROS
 
-#include "c10/macros/Export.h"
+#include <c10/macros/Export.h>
 
 #if defined(__clang__)
   #define __ubsan_ignore_float_divide_by_zero__ __attribute__((no_sanitize("float-divide-by-zero")))

@@ -319,22 +319,20 @@ void RequestCallbackImpl::processRpc(
       } else {
         auto whenValueSet = rref->getFuture();
         // Our response is satisfied when the rpcs come back.
-        whenValueSet->addCallback(
-            [responseFuture, messageId, rref](
-                const rpc::Message& /* unused */,
-                const c10::optional<utils::FutureError>& error) {
-              if (error) {
-                responseFuture->setError(error->what());
-                return;
-              }
-              try {
-                Message m = ScriptRRefFetchRet({rref->getValue()}).toMessage();
-                m.setId(messageId);
-                responseFuture->markCompleted(std::move(m));
-              } catch (const std::exception& e) {
-                responseFuture->setError(e.what());
-              }
-            });
+        whenValueSet->addCallback([responseFuture, messageId, rref](
+                                      const FutureMessage& whenValueSet) {
+          if (whenValueSet.hasError()) {
+            responseFuture->setError(*whenValueSet.error());
+            return;
+          }
+          try {
+            Message m = ScriptRRefFetchRet({rref->getValue()}).toMessage();
+            m.setId(messageId);
+            responseFuture->markCompleted(std::move(m));
+          } catch (const std::exception& e) {
+            responseFuture->setError(e.what());
+          }
+        });
       }
       return;
     }
@@ -360,11 +358,9 @@ void RequestCallbackImpl::processRpc(
 
       // Our response is satisfied when the rpcs come back.
       whenValueSet->addCallback(
-          [responseFuture, messageId, rref](
-              const rpc::Message& /* unused */,
-              const c10::optional<utils::FutureError>& error) {
-            if (error) {
-              responseFuture->setError(error->what());
+          [responseFuture, messageId, rref](const FutureMessage& whenValueSet) {
+            if (whenValueSet.hasError()) {
+              responseFuture->setError(*whenValueSet.error());
               return;
             }
             try {
@@ -445,13 +441,18 @@ void RequestCallbackImpl::processRpc(
       auto fromWorkerId = rpcWithAutograd.fromWorkerId();
       // The original future needs to be marked as completed when the wrapped
       // one completes, with the autograd context information wrapped.
+      // Uses weak_ptr so we can std::move the value.
       wrappedRpcResponseFuture->addCallback(
-          [responseFuture, messageId, fromWorkerId, wrappedRpcResponseFuture](
-              const Message& /* unused */,
-              const c10::optional<utils::FutureError>& error) {
-            if (error) {
+          [responseFuture,
+           messageId,
+           fromWorkerId,
+           weak = std::weak_ptr<FutureMessage>(wrappedRpcResponseFuture)]() {
+            auto wrappedRpcResponseFuture = weak.lock();
+            TORCH_INTERNAL_ASSERT(wrappedRpcResponseFuture);
+            if (wrappedRpcResponseFuture->hasError()) {
               // Propagate error to responseFuture if we had one.
-              responseFuture->setError(error->what());
+              responseFuture->setError(
+                  wrappedRpcResponseFuture->error()->what());
             } else {
               auto msg = getMessageWithAutograd(
                   fromWorkerId,
@@ -486,15 +487,13 @@ void RequestCallbackImpl::processRpc(
 
       // Our response is satisfied when the rpcs come back.
       execFuture->addCallback(
-          [responseFuture, messageId](
-              const Message& /* unused */,
-              const c10::optional<utils::FutureError>& error) {
-            if (!error) {
+          [responseFuture, messageId](const FutureMessage& execFuture) {
+            if (!execFuture.hasError()) {
               Message m = std::move(PropagateGradientsResp()).toMessage();
               m.setId(messageId);
               responseFuture->markCompleted(std::move(m));
             } else {
-              responseFuture->setError(error->what());
+              responseFuture->setError(*(execFuture.error()));
             }
           });
       return;
@@ -539,9 +538,7 @@ std::shared_ptr<FutureMessage> RequestCallbackImpl::processMessage(
          // a shared_ptr here.
          rpc = (std::shared_ptr<RpcCommandBase>)std::move(rpc),
          messageType = request.type(),
-         id = request.id()](
-            const bool& /*unused*/,
-            const c10::optional<utils::FutureError>& /*unused*/) {
+         id = request.id()]() {
           try {
             // For a recv thread, current context id should be invalid outside
             // processMessage().

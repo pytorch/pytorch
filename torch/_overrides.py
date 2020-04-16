@@ -13,6 +13,9 @@ https://github.com/pytorch/pytorch/issues/24015 and
 https://www.numpy.org/neps/nep-0018-array-function-protocol.html
 )
 
+If changing this file in a way that can affect ``__torch_function__`` overhead,
+please report the benchmarks in ``benchmarks/overrides_benchmark``. See the
+instructions in the ``README.md`` in that directory.
 """
 
 import __future__
@@ -197,8 +200,10 @@ def get_testing_overrides():
         torch.bitwise_not: lambda input, out=None: -1,
         torch.bitwise_or: lambda input, other, out=None: -1,
         torch.bitwise_xor: lambda input, other, out=None: -1,
+        torch.block_diag: lambda *tensors: -1,
         torch.bmm: lambda input, mat2, out=None: -1,
         torch.broadcast_tensors: lambda *tensors: -1,
+        torch.bucketize: lambda input, boundaries, out_int32=False, right=False, out=None: -1,
         torch.cartesian_prod: lambda *tensors: -1,
         torch.cat: lambda tensors, dim=0, out=None: -1,
         torch.cdist: lambda x1, c2, p=2, compute_mode=None: -1,
@@ -581,6 +586,7 @@ def get_testing_overrides():
         torch.scalar_tensor: lambda s, dtype=None, layour=None, device=None, pin_memory=None: -1,
         torch.scatter: lambda input, dim, index, src: -1,
         torch.scatter_add: lambda input, dim, index, src: -1,
+        torch.searchsorted: lambda sorted_sequence, input, out_int32=False, right=False, out=None: -1,
         torch.select: lambda input, dim, index: -1,
         torch.selu: lambda input, inplace=False: -1,
         torch.sigmoid: lambda input, out=None: -1,

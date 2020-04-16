@@ -20,9 +20,13 @@ struct Expr;
 struct UnaryOp;
 struct BinaryOp;
 
+struct ForLoop;
+struct IfThenElse;
+
 struct TensorDomain;
 struct TensorView;
 struct IterDomain;
+struct TensorIndex;
 
 struct TensorContiguity;
 
@@ -45,6 +49,21 @@ struct Add;
 struct TORCH_CUDA_API IRPrinter : public OptInConstDispatch {
   std::ostream& os;
   bool print_inline_ = false;
+
+  // Track the indentation size for pretty printing
+  int indent_size = 0;
+
+  // Indent the generated code
+  void indent() {
+    for (int i = 0; i < indent_size; i++)
+      os << "  ";
+  }
+
+  void resetIndent() {
+    indent_size = 0;
+  }
+
+  void printHeader(Fusion* fusion, const std::string& kernel_name_);
 
  public:
   IRPrinter(std::ostream& _os) : os(_os) {}
@@ -75,13 +94,19 @@ struct TORCH_CUDA_API IRPrinter : public OptInConstDispatch {
   virtual void handle(const TensorDomain* const);
   virtual void handle(const TensorView* const);
   virtual void handle(const IterDomain* const);
+  virtual void handle(const TensorIndex* const);
   virtual void handle(const TensorContiguity* const);
 
   virtual void handle(const Float* const);
   virtual void handle(const Int* const);
+  virtual void handle(const NamedScalar* const);
 
   virtual void handle(const UnaryOp* const);
   virtual void handle(const BinaryOp* const);
+
+  virtual void handle(const ForLoop* const);
+  virtual void handle(const IfThenElse* const);
+  virtual void handle(const Allocate* const);
 
   virtual void handle(const Split* const);
   virtual void handle(const Merge* const);
@@ -93,6 +118,10 @@ struct TORCH_CUDA_API IRPrinter : public OptInConstDispatch {
     handle(stmt);
     print_inline_ = prev;
   }
+
+  void printKernel(
+      const std::vector<Expr*>& exprs,
+      const std::string& kernel_name);
 };
 
 TORCH_CUDA_API std::ostream& operator<<(
