@@ -121,13 +121,24 @@ m.impl("${unqual_operator_name_with_overload}",
 DEFAULT_FUNCTION_REGISTRATION = CodeTemplate("""\
 m.impl("${unqual_operator_name_with_overload}", &TypeDefault::${type_wrapper_name});
 """)
-# NB: Specification of the backend is handled by the enclosing
-# TORCH_LIBRARY_IMPL macro invocation
+# NB: In the ordinary, TypeDerived code generation work flow, specification
+# of the backend is handled by the enclosing block, so the torch::dispatch
+# invocation here is strictly unnecessary.  However, in the fbcode mobile
+# only workflow using per-op registration, these registrations will get dumped
+# in a TORCH_LIBRARY_FRAGMENT that does not have an ambient backend.  So
+# the torch::dispatch specification here is important!  See
+# Note [Redundancy in registration code is OK] for how we handle redundant info.
 BACKEND_UNBOXEDONLY_FUNCTION_REGISTRATION = CodeTemplate("""\
-m.impl_UNBOXED("${unqual_operator_name_with_overload}", ${Type}::${type_wrapper_name});
+m.impl("${unqual_operator_name_with_overload}",
+       torch::dispatch(DispatchKey::${Backend},
+                       CppFunction::makeUnboxedOnly(${Type}::${type_wrapper_name}))
+);
 """)
 BACKEND_FUNCTION_REGISTRATION = CodeTemplate("""\
-m.impl("${unqual_operator_name_with_overload}",  &${Type}::${type_wrapper_name});
+m.impl("${unqual_operator_name_with_overload}",
+       torch::dispatch(DispatchKey::${Backend},
+                       &${Type}::${type_wrapper_name})
+);
 """)
 
 # add non-virtual declaration to TensorBody.h
