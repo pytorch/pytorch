@@ -2920,6 +2920,26 @@ graph(%Ra, %Rb):
         x = torch.rand(3, 4)
         self.assertEqual(random_bar(x), (x + 1)[0:1])
 
+    def test_trace_inline_shape(self):
+        # testing peephole optimization of size is turned into a constant
+        # in script fn
+
+        @torch.jit.script
+        def tensor_size(x: torch.Tensor) -> torch.Tensor:
+            return torch.tensor([x.size()[0]])
+
+        self.assertEqual(
+            tensor_size(torch.rand(15,)),
+            torch.tensor([15])
+        )
+
+        traced_tensor_size = torch.jit.trace(tensor_size, torch.rand(7,))
+
+        self.assertEqual(
+            traced_tensor_size(torch.rand(15,)),
+            torch.tensor([15])
+        )
+
     def test_export_tensoroption_to(self):
         def foo(x):
             return x[0].clone().detach().cpu() + x
