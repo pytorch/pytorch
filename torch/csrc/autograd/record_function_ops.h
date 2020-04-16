@@ -24,9 +24,7 @@ void _call_end_callbacks_on_fut(
   fut->addCallback(
       // Copy handle by value to persist after the python context manager is
       // exited.
-      [handle](
-          const T& /* unused */,
-          const c10::optional<torch::utils::FutureError>& /* unused */) {
+      [handle]() {
         TORCH_INTERNAL_ASSERT(
             handle.defined(),
             "Undefined RecordFunction handle. This can happen if the handle is "

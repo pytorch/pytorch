@@ -154,7 +154,7 @@ PyRRef pyRemoteBuiltin(
 
     userRRef->registerCreatingFuture(fm);
     ctx.addPendingUser(userRRef->forkId(), userRRef);
-    fm->addCallback([forkId{userRRef->forkId()}, fm]() {
+    fm->addCallback([forkId{userRRef->forkId()}](const FutureMessage& fm) {
       callback::confirmPendingUser(fm, forkId);
     });
     return PyRRef(userRRef);
@@ -172,7 +172,8 @@ PyRRef pyRemoteBuiltin(
 
     // Builtin operators does not return py::object, and hence does not require
     // GIL for destructing the potentially deleted OwerRRef.
-    fm->addCallback([fm]() { callback::finishCreatingOwnerRRef(fm); });
+    fm->addCallback(
+        [](const FutureMessage& fm) { callback::finishCreatingOwnerRRef(fm); });
     return PyRRef(ownerRRef);
   }
 }
@@ -211,7 +212,7 @@ PyRRef pyRemotePythonUdf(
     userRRef->registerCreatingFuture(fm);
 
     ctx.addPendingUser(userRRef->forkId(), userRRef);
-    fm->addCallback([forkId{userRRef->forkId()}, fm]() {
+    fm->addCallback([forkId{userRRef->forkId()}](const FutureMessage& fm) {
       callback::confirmPendingUser(fm, forkId);
     });
     return PyRRef(userRRef);
@@ -227,7 +228,7 @@ PyRRef pyRemotePythonUdf(
 
     ownerRRef->registerCreatingFuture(fm);
 
-    fm->addCallback([fm]() {
+    fm->addCallback([](const FutureMessage& fm) {
       auto deletedRRef = callback::finishCreatingOwnerRRef(fm);
       if (deletedRRef && deletedRRef->isPyObj()) {
         pybind11::gil_scoped_acquire ag;
