@@ -162,10 +162,10 @@ class RegistrationListener final : public c10::OpRegistrationListener {
   void onOperatorRegistered(const c10::OperatorHandle& op) override {
     if (op.schema().name() == "aten::backward") {
       // aten::backward has a manual wrapper in register_prim_ops_fulljit.cpp.
-      // We should not additionally export the c10 aten::backward op from native_functions.yaml
-      // to JIT. This special handling is needed because aten::backward requires
-      // AliasAnalysisKind::CONSERVATIVE but all ops from native_functions.yaml get
-      // AliasAnalysisKind::FROM_SCHEMA.
+      // We should not additionally export the c10 aten::backward op from
+      // native_functions.yaml to JIT. This special handling is needed because
+      // aten::backward requires AliasAnalysisKind::CONSERVATIVE but all ops
+      // from native_functions.yaml get AliasAnalysisKind::FROM_SCHEMA.
       // TODO Find a better way to handle this.
       return;
     }
