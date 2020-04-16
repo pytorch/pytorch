@@ -5,5 +5,6 @@
 
 using namespace at;
 
-static auto registerer = torch::import()
-  ${schema_registrations};
+TORCH_LIBRARY_FRAGMENT_THIS_API_IS_FOR_PER_OP_REGISTRATION_ONLY(aten, m) {
+  ${schema_registrations}
+}
