@@ -33,7 +33,9 @@ bool _unused = []() {
   ThreadLocalState::registerThreadLocalSetting(
     ThreadLocalSetting::RECORD_FUNCTION,
     []() {
-      return SettingValue{.value = _tls_is_record_function_enabled()};
+      auto v = SettingValue();
+      v.value = _tls_is_record_function_enabled();
+      return v;
     },
     [](SettingValue v) {
       _tls_set_record_function_enabled(v.value);
