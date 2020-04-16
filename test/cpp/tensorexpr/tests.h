@@ -139,6 +139,10 @@ namespace jit {
   _(SimplifyDivisionScalarFactorization)  \
   _(SimplifyConstantBranches)             \
   _(SimplifyConstantCond)                 \
+  _(SimplifyEliminateZeroLengthFor)       \
+  _(SimplifyOneLoopFor)                   \
+  _(SimplifyForWontLoseLoopOptions)       \
+  _(SimplifyMultilevelFor)                \
   _(StmtClone)                            \
   _(BoundsInference_1)                    \
   _(BoundsInference_2)                    \
@@ -267,6 +271,8 @@ namespace jit {
   _(LLVMBindDynamicShapeAdd)               \
   _(LLVMTensorDynamicShapeAdd)             \
   _(LLVMDynamicShape2D)                    \
+  _(LLVMEmptyStmt)                         \
+  _(LLVMEliminatedStmt)                    \
   _(LLVMIfThenElseTest)                    \
   _(LLVMVectorizerLoadStoreTest)
 
