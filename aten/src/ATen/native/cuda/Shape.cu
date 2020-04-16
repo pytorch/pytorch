@@ -380,11 +380,9 @@ Tensor& cat_out_cuda(Tensor& out, TensorList inputs, int64_t dimension) {
   if (!allSameType) {
     // Since we are not using the iterator here, we need to enforce type promotion 
     // compatibility ourselves
-    for(auto input : inputs) {
-      TORCH_CHECK(canCast(input.scalar_type(), out.scalar_type()), "input type ", input.scalar_type(),
+    TORCH_CHECK(canCast(result_type(inputs), out.scalar_type()), "input types ",
           " can't be cast to the desired output type ",
           out.scalar_type());
-    }
   }
   if (inputs.size() > 1 &&
       !hasSkippedInput &&

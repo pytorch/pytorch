@@ -2747,8 +2747,7 @@ t2.start()
                     self.assertTrue(torch.norm(a_ignore).dtype is type_no_autocast)
 
                 # Tests if CastPolicy::promote ops ignore double and int
-                with self.assertRaises(RuntimeError):
-                    torch.cat((a_ignore, c_16))
+                torch.cat((a_ignore, c_16))
                 with torch.cuda.amp.autocast(enabled=False):
                     type_no_autocast = torch.cat((a_ignore, b_ignore)).dtype
                 self.assertTrue(torch.cat((a_ignore, b_ignore)).dtype is type_no_autocast)
