@@ -180,7 +180,6 @@ void enableProfiler(const ProfilerConfig& new_config, bool emit_start) {
       "Can't use NVTX profiler - PyTorch was compiled without CUDA");
 
   config = new_config;
-
   pushCallback(
       [](const RecordFunction& fn) {
         auto* msg = (fn.seqNr() >= 0) ? ", seq = " : "";
