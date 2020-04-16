@@ -83,7 +83,7 @@ __host__ __device__ static inline thrust::complex<T> cos_wrapper(thrust::complex
 }
 
 void cos_kernel_cuda(TensorIterator& iter) {
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(ScalarType::Half, iter.dtype(), "cos_cuda", [&]() {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(ScalarType::Half, ScalarType::BFloat16, iter.dtype(), "cos_cuda", [&]() {
     using thrust_t = typename ztype_cuda<scalar_t>::thrust_t;
     gpu_kernel(iter, []GPU_LAMBDA(thrust_t a) -> thrust_t {
       return cos_wrapper(a);
