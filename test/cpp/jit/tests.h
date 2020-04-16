@@ -117,7 +117,8 @@ namespace jit {
   _(GPU_FusionCodeGen2)          \
   _(GPU_FusionSimplePWise)       \
   _(GPU_FusionExecKernel)        \
-  _(GPU_FusionForLoop)
+  _(GPU_FusionForLoop)           \
+  _(GPU_FusionLoopUnroll)
 #else
 #define TH_FORALL_TESTS_CUDA(_) \
   _(ArgumentSpec)               \

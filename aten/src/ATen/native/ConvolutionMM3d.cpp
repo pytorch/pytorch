@@ -349,17 +349,10 @@ void slow_conv3d_backward_out_cpu_template(
   // group instead of the entire weight2d
   Tensor tweight2d;
   if (groups > 1) {
-    // TODO: find a more elegant way of group transpose
-    tweight2d = at::empty({0}, weight2d.options());
-    tweight2d.resize_as_(weight2d);
-    for (int g = 0; g < groups; ++g) {
-      tweight2d.reshape(
-          {groups, weight2d.size(1), weight2d.size(0) / groups})[g] =
-          weight2d
-              .reshape({groups, weight2d.size(0) / groups, weight2d.size(1)})[g]
-              .transpose(0, 1);
-    }
-    tweight2d = tweight2d.reshape({weight2d.size(1), weight2d.size(0)});
+    tweight2d =
+        weight2d.reshape({groups, weight2d.size(0) / groups, weight2d.size(1)})
+            .permute({0, 2, 1})
+            .reshape({weight2d.size(1), weight2d.size(0)});
   } else {
     tweight2d = weight2d.transpose(0, 1);
   }
@@ -409,14 +402,11 @@ void slow_conv3d_backward_parameters_frame(
     if (groups > 1) {
       auto grad_weight_g = grad_weight.reshape(
           {groups, grad_weight.size(0) / groups, grad_weight.size(1)});
-      auto finput_g =
-          finput.reshape({groups, finput.size(0) / groups, finput.size(1)});
-      // TODO: if we can transpose grouped finput, we can use baddbmm_ instead
-      // of this loop to further improve performance
-      for (int g = 0; g < groups; ++g) {
-        Tensor tfinput = finput_g[g].transpose(0, 1);
-        grad_weight_g[g].addmm_(grad_output_2d[g], tfinput);
-      }
+      Tensor tfinput =
+          finput.reshape({groups, finput.size(0) / groups, finput.size(1)})
+              .permute({0, 2, 1})
+              .contiguous();
+      grad_weight_g.baddbmm_(grad_output_2d, tfinput);
     } else {
       const Tensor tfinput = finput.transpose(0, 1);
       grad_weight.addmm_(grad_output_2d, tfinput);
