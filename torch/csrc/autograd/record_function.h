@@ -312,38 +312,52 @@ TORCH_API void TEST_unsetGlobalSamplingProbability();
 //       only when no other code is running, e.g. during the initialization
 
 /**
- * pushCallback adds a pair of callbacks to run with RecordFunction:
+ * pushCallback adds a pair of thread local callbacks to run with RecordFunction:
  *   start, end - the callbacks to run when entering and exiting the scope;
  *   needs_inputs - whether the callbacks need the inputs passed from the observed
  *     function/range; NOTE: passing the inputs incurs an additional overhead;
- *   sampling_prob - whether the callbacks are sampled and the sampling
- *     probability
  *   scopes - types of scopes to execute the callbacks on (see RecordScope);
  *     passing empty set means the callbacks will be executed for all possible
  *     scope types
  *  is_thread_local - whether this pair of callbacks should be set
  *    only for the current thread or globally (per process)
- *  NOTE: only global callbacks support sampling
- *  WARNING: not thread safe if is_thread_local = false
  */
 TORCH_API void pushCallback(
     std::function<bool(const RecordFunction&)> start,
     std::function<void(const RecordFunction&)> end =
         [](const RecordFunction&) {},
     bool needs_inputs = false,
-    double sampling_prob = 1.0,
     std::unordered_set<RecordScope, std::hash<RecordScope>> scopes =
-        std::unordered_set<RecordScope, std::hash<RecordScope>>(),
-    bool is_thread_local = true);
+        std::unordered_set<RecordScope, std::hash<RecordScope>>());
 
 /**
- * popCallback removes the last pair of callbacks added earlier
- * with pushCallback:
- *  is_thread_local - whether to remove the last thread_local or
- *    global pair of callbacks added earlier with pushCallback
- *  WARNING: not thread safe if is_thread_local = false
+ * pushGlobalCallback adds a pair of global callbacks to run with RecordFunction:
+ *   sampling_prob - whether the callbacks are sampled and the sampling
+ *     probability
+ *   other params - see pushCallback
+ *
+ *  WARNING: not thread safe
  */
-TORCH_API void popCallback(bool is_thread_local = true);
+TORCH_API void pushGlobalCallback(
+    std::function<bool(const RecordFunction&)> start,
+    std::function<void(const RecordFunction&)> end =
+        [](const RecordFunction&) {},
+    bool needs_inputs = false,
+    double sampling_prob = 1.0,
+    std::unordered_set<RecordScope, std::hash<RecordScope>> scopes =
+        std::unordered_set<RecordScope, std::hash<RecordScope>>());
+
+/**
+ * popCallback removes the last pair of thread local callbacks
+ * added earlier with pushCallback
+ */
+TORCH_API void popCallback();
+
+/**
+ * popGlobalCallback removes the last pair of global callbacks
+ * added earlier with pushCallback
+ */
+TORCH_API void popGlobalCallback();
 
 // Returns whether there're callbacks registered with pushCallback
 TORCH_API bool hasCallbacks();

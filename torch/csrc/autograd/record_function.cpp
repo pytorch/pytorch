@@ -260,18 +260,32 @@ void pushCallback(
     std::function<bool(const RecordFunction&)> start,
     std::function<void(const RecordFunction&)> end,
     bool needs_inputs,
+    std::unordered_set<RecordScope, std::hash<RecordScope>> scopes) {
+  manager().pushCallback(
+      RecordFunctionCallback(std::move(start), std::move(end))
+      .needsInputs(needs_inputs)
+      .scopes(std::move(scopes)), /* is_thread_local */ true);
+}
+
+void popCallback() {
+  manager().popCallback(/* is_thread_local */ true);
+}
+
+void pushGlobalCallback(
+    std::function<bool(const RecordFunction&)> start,
+    std::function<void(const RecordFunction&)> end,
+    bool needs_inputs,
     double sampling_prob,
-    std::unordered_set<RecordScope, std::hash<RecordScope>> scopes,
-    bool is_thread_local) {
+    std::unordered_set<RecordScope, std::hash<RecordScope>> scopes) {
   manager().pushCallback(
       RecordFunctionCallback(std::move(start), std::move(end))
       .needsInputs(needs_inputs)
       .samplingProb(sampling_prob)
-      .scopes(std::move(scopes)), is_thread_local);
+      .scopes(std::move(scopes)), /* is_thread_local */ false);
 }
 
-void popCallback(bool is_thread_local) {
-  manager().popCallback(is_thread_local);
+void popGlobalCallback() {
+  manager().popCallback(/* is_thread_local */ false);
 }
 
 void _runBeforeCallbacks(RecordFunction* rf, const std::string& funcName) {

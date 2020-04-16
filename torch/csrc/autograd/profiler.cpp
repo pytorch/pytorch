@@ -235,7 +235,6 @@ void enableProfiler(const ProfilerConfig& new_config, bool emit_start) {
         }
       },
       /* needs_inputs */ config.report_input_shapes,
-      /* sampling_prob */ 1.0,
       /* scopes */ {RecordScope::FUNCTION, RecordScope::USER_SCOPE});
 
   if (emit_start) {

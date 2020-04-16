@@ -116,7 +116,6 @@ class PytorchJni : public facebook::jni::HybridClass<PytorchJni> {
         &onFunctionEnter,
         &onFunctionExit,
         /* need_inputs */ false,
-        /* sampling_prob */ 1.0,
         /* scopes */ {RecordScope::FUNCTION, RecordScope::USER_SCOPE});
 #endif
   }

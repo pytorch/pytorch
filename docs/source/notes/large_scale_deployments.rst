@@ -26,7 +26,7 @@ gathering information about PyTorch workloads running in a given process or
 across the entire set of machines.
 
 New callbacks for any operator invocation can be added with
-``torch::autograd::profiler::pushCallback``. Hooks will be called with
+``torch::autograd::profiler::pushGlobalCallback``. Hooks will be called with
 ``torch::autograd::profiler::RecordFunction`` struct that describes invocation
 context (e.g. `name`). If enabled, ``RecordFunction::inputs()`` contains arguments
 of the function represented as ``torch::IValue`` variant type. Note, that inputs
@@ -42,9 +42,9 @@ application down to the operator callbacks.
 
 Invoking callbacks adds some overhead, so usually it's useful to just randomly
 sample operator invocations. This can be enabled on per-callback basis with an
-optional sampling rate passed into ``torch::autograd::profiler::pushCallback``.
+optional sampling rate passed into ``torch::autograd::profiler::pushGlobalCallback``.
 
-Note, that ``pushCallback`` is not thread-safe and can be called only when no
+Note, that ``pushGlobalCallback`` is not thread-safe and can be called only when no
 PyTorch operator is running. Usually, it's a good idea to call them once during
 initialization.
 
@@ -55,7 +55,7 @@ Here's an example:
     // Called somewhere in the program beginning
     void init() {
         // Sample one in a hundred operator runs randomly
-        pushCallback(
+        pushGlobalCallback(
             &onFunctionEnter,
             &onFunctionExit,
             /* needs_inputs */ true,
