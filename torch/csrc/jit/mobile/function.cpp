@@ -1,9 +1,9 @@
 #include "function.h"
+#include <ATen/core/op_registration/custom_class_detail.h>
 #include <ATen/core/op_registration/op_registration.h>
 #include <torch/csrc/jit/runtime/instruction.h>
 #include <torch/csrc/jit/runtime/operator.h>
 #include <torch/csrc/jit/runtime/vararg_functions.h>
-#include <torch/custom_class_detail.h>
 #include "interpreter.h"
 
 namespace torch {

@@ -13,6 +13,11 @@
 #endif
 #include <ATen/core/OpsAlreadyMovedToC10.h>
 
+namespace torch {
+  template <class CurClass>
+  class class_;
+}
+
 namespace c10 {
 
 namespace detail {
@@ -911,6 +916,9 @@ public:
     return _fallback(std::move(f));
   }
 
+  template <class CurClass>
+  inline torch::class_<CurClass> class_(const std::string& className);
+
 private:
   Kind kind_;
   c10::optional<std::string> ns_;
@@ -998,3 +1006,5 @@ namespace torch {
   using c10::dispatch;
   using c10::schema;
 }
+
+#include <aten/src/ATen/core/op_registration/custom_class.h>
