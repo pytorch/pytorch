@@ -264,7 +264,7 @@ void pushCallback(
   manager().pushCallback(
       RecordFunctionCallback(std::move(start), std::move(end))
       .needsInputs(needs_inputs)
-      .scopes(std::move(scopes)), /* is_thread_local */ true);
+      .scopes(scopes), /* is_thread_local */ true);
 }
 
 void popCallback() {
@@ -281,7 +281,7 @@ void pushGlobalCallback(
       RecordFunctionCallback(std::move(start), std::move(end))
       .needsInputs(needs_inputs)
       .samplingProb(sampling_prob)
-      .scopes(std::move(scopes)), /* is_thread_local */ false);
+      .scopes(scopes), /* is_thread_local */ false);
 }
 
 void popGlobalCallback() {
