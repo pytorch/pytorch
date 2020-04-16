@@ -47,13 +47,11 @@ std::tuple<Tensor,Tensor,Tensor> fake_convolution_backward(
             get_tensor(input.dtype(), {}));
 }
 
-void init_msnpu_extension() {
-  static auto registry = torch::import()
-    .impl_UNBOXED("aten::empty.memory_format",                kMSNPU, empty_override)
-    .impl_UNBOXED("aten::add.Tensor",                         kMSNPU, add_override)
-    .impl_UNBOXED("aten::convolution_overrideable",           kMSNPU, fake_convolution)
-    .impl_UNBOXED("aten::convolution_backward_overrideable",  kMSNPU, fake_convolution_backward)
-    ;
+TORCH_LIBRARY_IMPL(aten, MSNPU, m) {
+  m.impl_UNBOXED("empty.memory_format",                empty_override);
+  m.impl_UNBOXED("add.Tensor",                         add_override);
+  m.impl_UNBOXED("convolution_overrideable",           fake_convolution);
+  m.impl_UNBOXED("convolution_backward_overrideable",  fake_convolution_backward);
 }
 
 // TODO: Extend this to exercise multi-device setting.  In that case,
@@ -119,6 +117,5 @@ int get_test_int() {
 }
 
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
-  m.def("init_msnpu_extension", &init_msnpu_extension);
   m.def("get_test_int", &get_test_int);
 }
