@@ -39,18 +39,20 @@ struct DistAccumulateGradCapturePreHook
     // It is possible that the grad is not defined since a separate
     // invocation of the autograd engine on the same node might actually
     // compute this gradient.
-    if (!grad.defined()) {
-      return grad;
+    if (grad.defined()) {
+      autogradContext_->accumulateGrad(
+          accumulateGrad_->variable, grad, 1 /* num_expected_refs */);
     }
-    autogradContext_->accumulateGrad(
-        accumulateGrad_->variable, grad, 1 /* num_expected_refs */);
-
+    // It's intended that post hooks are still called even if the grad is
+    // undenfined here.
     if (!accumulateGrad_->post_hooks().empty()) {
       const variable_list kEmptyOuput;
       const variable_list inputGrads = {grad};
       for (const auto& hook : accumulateGrad_->post_hooks()) {
-        // Discard the return value.
-        (*hook)(kEmptyOuput, inputGrads);
+        const auto postHookOutput = (*hook)(kEmptyOuput, inputGrads);
+        // A post hook should return a varaible list of the same size as the
+        // function's output.
+        TORCH_INTERNAL_ASSERT(postHookOutput.empty());
       }
     }
     return grad;
