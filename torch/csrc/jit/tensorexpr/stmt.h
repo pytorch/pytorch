@@ -412,6 +412,10 @@ class LoopOptions {
     return oss.str();
   }
 
+  bool isDefault() const {
+    return gpu_block_index_ == -1 && gpu_thread_index_ == -1;
+  }
+
  private:
   int gpu_block_index_ = -1;
   int gpu_thread_index_ = -1;
@@ -515,6 +519,46 @@ class For : public StmtNode<For> {
   Block* body_;
   LoopOptions loop_options_;
 };
+
+// A backend specific IR Node that implements atomic-add.
+// This node could only shows up as an internal with GPU backends.
+// TODO: move to this an internal IR.
+// TODO: make IR nodes extensible.
+class AtomicAdd : public StmtNode<AtomicAdd> {
+ public:
+  AtomicAdd(
+      const Buf* buf,
+      const std::vector<const Expr*>& indices,
+      const Expr* value)
+      : buf_(buf), indices_(indices), value_(value) {}
+
+  const Var* base_handle() const {
+    return buf_->base_handle();
+  }
+
+  const Buf* buf() const {
+    return buf_;
+  }
+
+  const Expr* flat_index() const {
+    TORCH_CHECK(indices_.size() == 1, "Indices haven't been flattened.");
+    return indices_[0];
+  }
+
+  const Expr* value() const {
+    return value_;
+  }
+
+  const std::vector<const Expr*>& indices() const {
+    return indices_;
+  }
+
+ private:
+  const Buf* buf_;
+  std::vector<const Expr*> indices_;
+  const Expr* value_;
+};
+
 } // namespace tensorexpr
 } // namespace jit
 } // namespace torch

@@ -10,7 +10,7 @@ import torch.nn.functional as F
 from torch.nn.modules.utils import _single, _pair
 
 from hypothesis import settings, HealthCheck
-from hypothesis import assume, given
+from hypothesis import assume, given, note
 from hypothesis import strategies as st
 import torch.testing._internal.hypothesis_utils as hu
 hu.assert_deadline_disabled()
@@ -89,34 +89,26 @@ def pool_output_shape(input_size, kernel_size, padding, stride,
     return output_size
 
 """Common logic for hardswish testing, called from fbgemm and qnnpack testers"""
-def _test_hardswish(self, X, engine):
+def _test_hardswish(self, X, Y_scale, Y_zero_point, engine):
     if engine not in torch.backends.quantized.supported_engines:
         return
     with override_quantized_engine(engine):
-        X, (scale, zero_point, torch_type) = X
+        X, (X_scale, X_zero_point, torch_type) = X
         X = torch.from_numpy(X)
-        qX = torch.quantize_per_tensor(X, scale=scale, zero_point=zero_point,
+        qX = torch.quantize_per_tensor(X, scale=X_scale, zero_point=X_zero_point,
                                        dtype=torch_type)
         dqX = qX.dequantize()
 
-        output_scale = scale
-        output_zero_point = zero_point
-
         dqY_hat = F.hardswish(dqX)
-        qY_hat = torch.quantize_per_tensor(dqY_hat, scale=output_scale,
-                                           zero_point=output_zero_point,
+        qY_hat = torch.quantize_per_tensor(dqY_hat, scale=Y_scale,
+                                           zero_point=Y_zero_point,
                                            dtype=torch_type)
 
-        # regular
-        qY = torch.nn.quantized.functional.hardswish(qX)
-        self.assertEqual(qY, qY_hat,
-                         message="Hardswish failed: {} vs {}".format(qY, qY_hat))
-
-        # inplace
-        qX_copy = qX.clone().detach()
-        torch.nn.quantized.functional.hardswish(qX_copy, inplace=True)
-        self.assertEqual(qX_copy, qY_hat,
-                         message="inplace Hardswish failed: {} vs {}".format(qY, qY_hat))
+        qY = torch.nn.quantized.functional.hardswish(
+            qX, scale=Y_scale, zero_point=Y_zero_point)
+        self.assertEqual(
+            qY, qY_hat,
+            message="Hardswish failed: {} vs {}".format(qY, qY_hat))
 
 class TestQuantizedOps(TestCase):
 
@@ -300,6 +292,108 @@ class TestQuantizedOps(TestCase):
                          message="Hardsigmoid failed: {} vs. {}".format(qY, qY_hat))
 
 
+    """Tests the correctness of the quantized::qlayer_norm op."""
+    @given(shapes=hu.array_shapes(3, 5, 1, 32),
+           torch_type=st.sampled_from((torch.qint8, torch.quint8, torch.qint32)),
+           X_rand_scale=st.floats(0.01, 1e3),
+           Y_scale=st.floats(0.2, 2.6),
+           Y_zero_point=st.integers(0, 5))
+    def test_qlayer_norm(self, shapes, torch_type, X_rand_scale, Y_scale, Y_zero_point):
+        if "fbgemm" not in torch.backends.quantized.supported_engines:
+            return
+
+        with override_quantized_engine("fbgemm"):
+
+            # In the FP kernel, mean and variance are calculated in floating point.
+            # In the quantized kernel, they are calculated in integer arithmetic.
+            # Because of this, the numerics do not always match exactly which is
+            # expected and acceptable. We do two things to whitelist this failure
+            # in this test:
+            # 1. do not use Hypothesis to generate the input tensor.  Hypothesis
+            #    favors homogeneous inputs in its search strategies which isn't
+            #    representative of the inputs we care about, and tends to maximize
+            #    this particular numerics difference.
+            # 2. whitelist a small % of off by Y_scale errors.  Even when the
+            #    variance of the input is high, there can be off by one errors
+            #    in the result if the input value happens to fall exactly on
+            #    the bin boundary of the output scale.
+            #
+            # If we want the numerics to match we could switch to calculating
+            # mean+var in floating point in the future, at the cost of speed.
+
+            X = (np.random.rand(*shapes).astype(np.float32) - 0.5) * X_rand_scale
+
+            # Calculate reasonable quantization params
+            min_val = np.min(X)
+            max_val = np.max(X)
+            if torch_type == torch.qint32:
+                X_zero_point = 0
+                num_bins = 2 ** 32
+                X_scale = float(max_val - min_val) / num_bins
+            elif torch_type == torch.qint8:
+                X_zero_point = 0
+                num_bins = 2 ** 8
+                X_scale = float(max_val - min_val) / num_bins
+            else:  # torch.quint8
+                X_zero_point = 127
+                num_bins = 2 ** 8
+                X_scale = float(max_val - min_val) / num_bins
+            if X_scale == 0:
+                X_scale = 1e-10
+
+            X = torch.from_numpy(X)
+            qX = torch.quantize_per_tensor(X, scale=X_scale,
+                                           zero_point=X_zero_point,
+                                           dtype=torch_type)
+            dqX = qX.dequantize()
+
+            # Enforce non-homogeneous inputs
+            enough_unique_vals_in_each_layer = sum(
+                1 if (
+                    dqX[i].shape[0] < 5 or
+                    float(torch.unique(dqX[i]).shape[0]) / dqX[i].shape[0] > 0.01
+                ) else 0
+                for i in range(dqX.shape[0])
+            ) == dqX.shape[0]
+            assume(enough_unique_vals_in_each_layer)
+
+            # Initialize the weights non-randomly for reproducibility, to avoid
+            # flaky tests
+            weight = torch.ones(*qX.size()[1:], dtype=torch.float) * 0.5
+            bias = torch.ones(*qX.size()[1:], dtype=torch.float) * 1
+            epsilon = 1e-5
+
+            qY = torch.ops.quantized.layer_norm(
+                qX, qX.size()[1:], weight=weight, bias=bias, eps=epsilon,
+                output_scale=Y_scale, output_zero_point=Y_zero_point)
+
+            Y_hat = F.layer_norm(
+                dqX, dqX.size()[1:], weight=weight, bias=bias, eps=epsilon)
+            qY_hat = torch.quantize_per_tensor(
+                Y_hat, scale=Y_scale, zero_point=Y_zero_point, dtype=torch_type)
+
+            # Due to the numerics difference mentioned above between calculating
+            # the variance in float vs int, the results can still be slightly
+            # different.
+            dqY = qY.dequantize()
+            dqY_hat = qY_hat.dequantize()
+            diff = dqY - dqY_hat
+
+            # off-by-one errors are magnitude of Y_scale
+            num_diff = torch.sum(diff > Y_scale * 1.0001)
+            pct_diff = float(num_diff) / (diff.numel() + 1e-5)
+            num_diff_off_by_one = torch.sum((diff > 0) * (diff <= Y_scale))
+            pct_diff_off_by_one = float(num_diff_off_by_one) / (diff.numel() + 1e-5)
+
+            note("LayerNorm failed:\n {} input vs\n {} actual vs \n{} expected"
+                 .format(X, qY, qY_hat))
+            note("Pct diff: {}".format(pct_diff))
+            note("Pct diff off by one: {}".format(pct_diff_off_by_one))
+
+            self.assertTrue(pct_diff < 1e-6)
+            self.assertTrue(pct_diff_off_by_one < 0.01)
+
+
     """Tests the correctness of the quantized::qnnpack_tanh op."""
     @given(X=hu.tensor(shapes=hu.array_shapes(1, 5, 1, 5),
                        qparams=hu.qparams()))
@@ -396,9 +490,11 @@ class TestQuantizedOps(TestCase):
     """Tests the correctness of the quantized::hardswish op."""
     @given(X=hu.tensor(shapes=hu.array_shapes(1, 8, 1, 8),
                        elements=hu.floats(-1e6, 1e6, allow_nan=False, allow_infinity=False),
-                       qparams=hu.qparams()))
-    def test_hardswish(self, X):
-        _test_hardswish(self, X, 'fbgemm')
+                       qparams=hu.qparams()),
+           Y_scale=st.floats(1e-6, 1e6),
+           Y_zero_point=st.integers(0, 10))
+    def test_hardswish(self, X, Y_scale, Y_zero_point):
+        _test_hardswish(self, X, Y_scale, Y_zero_point, 'fbgemm')
 
     """Tests the correctness of the scalar addition."""
     @unittest.skip("Failing on MacOS")
@@ -1439,7 +1535,7 @@ class TestQuantizedOps(TestCase):
                        qparams=hu.qparams()),
            Y_scale=st.floats(0.2, 2.6),
            Y_zero_point=st.integers(0, 5))
-    def test_batch_norm(self, X, Y_scale, Y_zero_point):
+    def test_batch_norm2d(self, X, Y_scale, Y_zero_point):
         if "fbgemm" not in torch.backends.quantized.supported_engines:
             return
 
@@ -1455,7 +1551,7 @@ class TestQuantizedOps(TestCase):
             bias = torch.rand(c).float()
             eps = 0.001
             qx = torch.quantize_per_tensor(X, scale_x, zero_point_x, dtype_x)
-            qy = torch.ops.quantized.batch_norm(qx, weight, bias, mean, var, eps, Y_scale, Y_zero_point)
+            qy = torch.ops.quantized.batch_norm2d(qx, weight, bias, mean, var, eps, Y_scale, Y_zero_point)
 
             float_ref = F.batch_norm(qx.dequantize(), weight=weight, bias=bias,
                                      running_mean=mean, running_var=var, training=False, momentum=0, eps=eps)
@@ -1468,7 +1564,7 @@ class TestQuantizedOps(TestCase):
                        qparams=hu.qparams()),
            Y_scale=st.floats(0.2, 2.6),
            Y_zero_point=st.integers(0, 5))
-    def test_batch_norm_relu(self, X, Y_scale, Y_zero_point):
+    def test_batch_norm2d_relu(self, X, Y_scale, Y_zero_point):
         if "fbgemm" not in torch.backends.quantized.supported_engines:
             return
 
@@ -2715,9 +2811,11 @@ class TestQNNPackOps(TestCase):
     """Tests the correctness of the quantized::hardswish op."""
     @given(X=hu.tensor(shapes=hu.array_shapes(1, 8, 1, 8),
                        elements=hu.floats(-1e6, 1e6, allow_nan=False, allow_infinity=False),
-                       qparams=hu.qparams(dtypes=(torch.quint8))))
-    def test_hardswish(self, X):
-        _test_hardswish(self, X, 'qnnpack')
+                       qparams=hu.qparams(dtypes=(torch.quint8))),
+           Y_scale=st.floats(1e-6, 1e6),
+           Y_zero_point=st.integers(0, 10))
+    def test_hardswish(self, X, Y_scale, Y_zero_point):
+        _test_hardswish(self, X, Y_scale, Y_zero_point, 'qnnpack')
 
 """Tests the correctness of the tensor comparators."""
 class TestComparatorOps(TestCase):
