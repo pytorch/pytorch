@@ -70,7 +70,8 @@ class RNNBase(torch.nn.Module):
 
     def __init__(self, mode, input_size, hidden_size,
                  num_layers=1, bias=True, batch_first=False,
-                 dropout=0., bidirectional=False, dtype=torch.qint8):
+                 dropout=0., bidirectional=False,
+                 cat_layer_fwd_bwd_states=True, dtype=torch.qint8):
         super(RNNBase, self).__init__()
 
         self.mode = mode
@@ -81,8 +82,13 @@ class RNNBase(torch.nn.Module):
         self.batch_first = batch_first
         self.dropout = float(dropout)
         self.bidirectional = bidirectional
+        self.cat_layer_fwd_bwd_states = cat_layer_fwd_bwd_states
         self.dtype = dtype
         num_directions = 2 if bidirectional else 1
+
+        hidden_switch = bidirectional and cat_layer_fwd_bwd_states
+        bidirectional_size = hidden_size * num_directions
+        actual_size = bidirectional_size if hidden_switch else hidden_size
 
         if not isinstance(dropout, numbers.Number) or not 0 <= dropout <= 1 or \
                 isinstance(dropout, bool):
@@ -104,7 +110,7 @@ class RNNBase(torch.nn.Module):
         _all_weight_values = []
         for layer in range(num_layers):
             for direction in range(num_directions):
-                layer_input_size = input_size if layer == 0 else hidden_size * num_directions
+                layer_input_size = input_size if layer == 0 else actual_size
 
                 def process_weights(ihhh, layer, suffix, qweight, bias, dtype):
                     if dtype == torch.qint8:
@@ -282,11 +288,16 @@ class RNNBase(torch.nn.Module):
 
         if mod.mode == 'LSTM':
             qRNNBase = LSTM(mod.input_size, mod.hidden_size, mod.num_layers,
-                            mod.bias, mod.batch_first, mod.dropout, mod.bidirectional, dtype)
+                            mod.bias, mod.batch_first, mod.dropout, mod.bidirectional,
+                            mod.cat_layer_fwd_bwd_states, dtype)
         else:
             raise NotImplementedError('Only LSTM is supported for QuantizedRNN for now')
 
         num_directions = 2 if mod.bidirectional else 1
+
+        hidden_switch = bidirectional and qRNNBase.cat_layer_fwd_bwd_states
+        bidirectional_size = qRNNBase.hidden_size * num_directions
+        actual_size = bidirectional_size if hidden_switch else qRNNBase.hidden_size
 
         assert mod.bias
 
@@ -294,7 +305,7 @@ class RNNBase(torch.nn.Module):
         _all_weight_values = []
         for layer in range(qRNNBase.num_layers):
             for direction in range(num_directions):
-                layer_input_size = qRNNBase.input_size if layer == 0 else qRNNBase.hidden_size * num_directions
+                layer_input_size = qRNNBase.input_size if layer == 0 else actual_size
 
                 def process_weights(ihhh, layer, suffix, dtype):
                     weight_name = 'weight_{}_l{}{}'.format(ihhh, layer, suffix)
@@ -379,11 +390,13 @@ class LSTM(RNNBase):
         if batch_sizes is None:
             result = _VF.quantized_lstm(input, hx, weight_values, self.bias, self.num_layers,
                                         float(self.dropout), self.training, self.bidirectional,
+                                        self.cat_layer_fwd_bwd_states,
                                         self.batch_first, dtype=self.dtype, use_dynamic=True)
         else:
             result = _VF.quantized_lstm(input, batch_sizes, hx, weight_values, self.bias,
                                         self.num_layers, float(self.dropout), self.training,
-                                        self.bidirectional, dtype=self.dtype, use_dynamic=True)
+                                        self.bidirectional, self.cat_layer_fwd_bwd_states,
+                                        dtype=self.dtype, use_dynamic=True)
         output = result[0]
         hidden = result[1:]
 

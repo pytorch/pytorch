@@ -243,7 +243,8 @@ def apply_permutation(tensor, permutation, dim=1):
 
 class QuantizedRNNBase(torch.jit.ScriptModule):
     __constants__ = ['mode', 'input_size', 'hidden_size', 'num_layers', 'bias',
-                     'batch_first', 'dropout', 'bidirectional', 'dtype']
+                     'batch_first', 'dropout', 'bidirectional',
+                     'cat_layer_fwd_bwd_states', 'dtype']
 
     def __init__(self, other, dtype=torch.int8):
         super(QuantizedRNNBase, self).__init__()
@@ -257,9 +258,13 @@ class QuantizedRNNBase(torch.jit.ScriptModule):
             assert not self.batch_first
         self.dropout = other.dropout
         self.bidirectional = other.bidirectional
+        self.cat_layer_fwd_bwd_states = other.cat_layer_fwd_bwd_states
         num_directions = 2 if self.bidirectional else 1
         self.dtype = dtype
 
+        hidden_switch = self.bidirectional and self.cat_layer_fwd_bwd_states
+        bidirectional_size = self.hidden_size * num_directions
+        actual_size = bidirectional_size if hidden_switch else self.hidden_size
         assert self.bias
 
         # TODO: support more than just LSTM
@@ -275,7 +280,8 @@ class QuantizedRNNBase(torch.jit.ScriptModule):
         self._orig_weights_names = []
         for layer in range(self.num_layers):
             for direction in range(num_directions):
-                layer_input_size = self.input_size if layer == 0 else self.hidden_size * num_directions
+                layer_input_size = (self.input_size
+                                    if layer == 0 else actual_size)
 
                 def process_weights(ihhh, layer, suffix, dtype):
                     weight_name = 'weight_{}_l{}{}'.format(ihhh, layer, suffix)
@@ -465,9 +471,12 @@ class QuantizedLSTM(QuantizedRNNBase):
 
         self.check_forward_args(input, hx, batch_sizes)
         assert batch_sizes is None
-        result = _VF.quantized_lstm(input, hx, self.all_weights, self.bias, self.num_layers,
-                                    float(self.dropout), self.training, self.bidirectional,
-                                    self.batch_first, dtype=self.dtype, use_dynamic=False)
+        result = _VF.quantized_lstm(input, hx, self.all_weights, self.bias,
+                                    self.num_layers, float(self.dropout),
+                                    self.training, self.bidirectional,
+                                    self.cat_layer_fwd_bwd_states,
+                                    self.batch_first, dtype=self.dtype,
+                                    use_dynamic=False)
         output = result[0]
         hidden = result[1:]
 
@@ -543,10 +552,12 @@ class QuantizedGRU(QuantizedRNNBase):
         if batch_sizes is None:
             result = _VF.quantized_gru(input, hx, self.all_weights, self.bias, self.num_layers,
                                        float(self.dropout), self.training, self.bidirectional,
+                                       self.cat_layer_fwd_bwd_states,
                                        self.batch_first)
         else:
             result = _VF.quantized_gru(input, batch_sizes, hx, self.all_weights, self.bias, self.num_layers,
-                                       float(self.dropout), self.training, self.bidirectional)
+                                       float(self.dropout), self.training, self.bidirectional,
+                                       self.cat_layer_fwd_bwd_states)
 
         output = result[0]
         hidden = result[1]
