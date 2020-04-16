@@ -226,6 +226,18 @@ graph(%a_quant, %b_scalar, %alpha):
          %r = quantized::add_scalar_relu_out(%a_quant, %b_scalar, %a_quant)
          return (%r) )";
 
+  // quantized::batch_norm
+  std::string batch_norm2d = R"(
+graph(%a_quant, %weight, %bias, %mean, %var, %training, %eaf, %eps, %7, %scale, %zero_point, %scalar_type):
+         %a_dequant = aten::dequantize(%a_quant)
+         %r_bn = aten::batch_norm(%a_dequant, %weight, %bias, %mean, %var, %training, %eaf, %eps, %7)
+         %r = aten::quantize_per_tensor(%r_bn, %scale, %zero_point, %scalar_type)
+         return (%r) )";
+  std::string quantized_batch_norm2d = R"(
+graph(%a_quant, %weight, %bias, %mean, %var, %training, %eaf, %eps, %7, %scale, %zero_point, %scalar_type):
+         %r = quantized::batch_norm2d(%a_quant, %weight, %bias, %mean, %var, %eps, %scale, %zero_point)
+         return (%r) )";
+
   return {
       {"quantized::conv2d", conv2d, quantized_conv2d},
       {"quantized::conv3d", conv3d, quantized_conv3d},
@@ -254,6 +266,7 @@ graph(%a_quant, %b_scalar, %alpha):
        quantized_add_scalar_out,
        add_scalar_filter},
       {"quantized::cat", cat, quantized_cat},
+      {"quantized::batch_norm2d", batch_norm2d, quantized_batch_norm2d},
   };
 }
 
