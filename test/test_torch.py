@@ -16336,6 +16336,15 @@ class TestViewOps(TestCase):
             v[0, 0] = idx + 1
             self.assertEqual(t[idx, 0], v[0, 0])
 
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    @dtypes(torch.complex64, torch.complex128)
+    @onlyCPU  # "reciprocal_cuda" not implemented for 'Complex{Float/Double}'
+    def test_rdiv_complex(self, device, dtype):
+        # Reference: https://github.com/pytorch/pytorch/pull/36726
+        x = torch.randn(1, device=device, dtype=dtype)
+        x_np = x.numpy()
+        rand_num = random.random() * 10
+        self.assertEqual(rand_num / x, torch.from_numpy(rand_num / x_np))
 
 # Below are fixtures and functions that generate tensor op comparison tests
 # These tests run a single op on both a CPU and device tensor and compare the
