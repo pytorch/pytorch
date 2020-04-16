@@ -914,6 +914,32 @@ Tensor hann_window(
       window_length, periodic, /*alpha=*/0.5, /*beta=*/0.5, options);
 }
 
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~ vandermonde_matrix ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Tensor vander(const Tensor& x, bool increasing) {
+  return native::vander(x, /*n=*/x.size(0), increasing);
+}
+
+Tensor vander(const Tensor& x, int64_t n, bool increasing) {
+  TORCH_CHECK(x.dim() == 1, "x must be a one-dimensional tensor.");
+  TORCH_CHECK(n >= 0, "n must be non-negative.");
+
+  auto result = at::empty({x.size(0), n}, x.options().dtype(at::promote_types(x.scalar_type(), c10::ScalarType::Long)));
+
+  if (n > 0) {
+    result.select(1, 0).fill_(1);
+  }
+  if (n > 1) {
+    result.slice(1, 1).copy_(x.unsqueeze(1));
+    result.slice(1, 1).copy_(at::cumprod(result.slice(1, 1), 1));
+  }
+
+  if (!increasing) {
+    return at::flip(result, {1});
+  }
+  return result;
+}
+
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ tensor ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 template <typename T>

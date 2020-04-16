@@ -342,6 +342,7 @@ Other Operations
 .. autofunction:: tril_indices
 .. autofunction:: triu
 .. autofunction:: triu_indices
+.. autofunction:: vander
 
 
 BLAS and LAPACK Operations
