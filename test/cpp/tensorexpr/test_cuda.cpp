@@ -423,7 +423,8 @@ void testCudaOneBlockMultiThreadGlobalReduce1() {
   //  for t in 0..1024: // thread-idx
   //    if t < 1:
   //      b[0] = 0
-  ExprHandle cond_t_lt_1 = CompareSelect::make(t, 1, CompareSelectOperation::kLT);
+  ExprHandle cond_t_lt_1 =
+      CompareSelect::make(t, 1, CompareSelectOperation::kLT);
   Cond* masked_init_b = Cond::make(cond_t_lt_1, init_store, nullptr);
   LoopOptions thread_idx_options;
   thread_idx_options.set_gpu_thread_index(0);
@@ -458,8 +459,7 @@ void testCudaOneBlockMultiThreadGlobalReduce1() {
 
   float* a_dev = nullptr;
   cudaMalloc(&a_dev, N * sizeof(float));
-  cudaMemcpy(
-      a_dev, a_v.data(), N * sizeof(float), cudaMemcpyHostToDevice);
+  cudaMemcpy(a_dev, a_v.data(), N * sizeof(float), cudaMemcpyHostToDevice);
   float* b_dev = nullptr;
   cudaMalloc(&b_dev, 1 * sizeof(float));
   cudaDeviceSynchronize();
@@ -467,8 +467,7 @@ void testCudaOneBlockMultiThreadGlobalReduce1() {
   cuda_cg(a_dev, b_dev);
 
   cudaDeviceSynchronize();
-  cudaMemcpy(
-      b_v.data(), b_dev, 1 * sizeof(float), cudaMemcpyDeviceToHost);
+  cudaMemcpy(b_v.data(), b_dev, 1 * sizeof(float), cudaMemcpyDeviceToHost);
   cudaDeviceSynchronize();
 
   ExpectAllNear(b_v, b_ref, 1e-5);
@@ -492,8 +491,8 @@ void testCudaNoThreadIdxWrite_1() {
   //   for l in 0..2:
   //     a[1] = a[1] + n
   //
-  //  note that the statements not covered by thread-idx are supposed to be covered by its own
-  //  thread-idx
+  //  note that the statements not covered by thread-idx are supposed to be
+  //  covered by its own thread-idx
 
   const static int N = 1024;
   Buffer a_buf("a", kFloat, {2});
@@ -529,7 +528,8 @@ void testCudaNoThreadIdxWrite_1() {
   Store* store_a1_v2 = Store::make(a_buf, {1}, v2, 1);
   For* loop_a_1 = For::make(l, 0, 2, store_a1_v2);
 
-  Stmt* reduce_block = Block::make({store_a0_0, loop_a_0, loop_b_1, store_a1_1, loop_a_1});
+  Stmt* reduce_block =
+      Block::make({store_a0_0, loop_a_0, loop_b_1, store_a1_1, loop_a_1});
 
   VarHandle block_idx("bidx", kInt);
   LoopOptions block_idx_options;
@@ -552,6 +552,7 @@ void testCudaNoThreadIdxWrite_1() {
     b_ref(i) = i;
   }
 
+  // TODO: add check of the generated code.
   float* a_dev = nullptr;
   cudaMalloc(&a_dev, 2 * sizeof(float));
   float* b_dev = nullptr;
@@ -561,10 +562,8 @@ void testCudaNoThreadIdxWrite_1() {
   cuda_cg(a_dev, b_dev);
 
   cudaDeviceSynchronize();
-  cudaMemcpy(
-      a_v.data(), a_dev, 2 * sizeof(float), cudaMemcpyDeviceToHost);
-  cudaMemcpy(
-      b_v.data(), b_dev, N * sizeof(float), cudaMemcpyDeviceToHost);
+  cudaMemcpy(a_v.data(), a_dev, 2 * sizeof(float), cudaMemcpyDeviceToHost);
+  cudaMemcpy(b_v.data(), b_dev, N * sizeof(float), cudaMemcpyDeviceToHost);
   cudaDeviceSynchronize();
 
   ExpectAllNear(a_v, a_ref, 1e-5);
