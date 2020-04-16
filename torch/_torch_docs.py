@@ -123,6 +123,13 @@ Example::
     tensor([ 1,  2,  3])
 """.format(**common_args))
 
+add_docstr(torch.absolute,
+           r"""
+absolute(input, out=None) -> Tensor
+
+Alias for :func:`torch.abs`
+""".format(**common_args))
+
 add_docstr(torch.acos,
            r"""
 acos(input, out=None) -> Tensor
