@@ -47,7 +47,7 @@ from torch.testing._internal import jit_utils
 from torch.testing._internal.common_utils import run_tests, IS_WINDOWS, TEST_WITH_UBSAN, \
     skipIfRocm, suppress_warnings, IS_SANDCASTLE, GRAPH_EXECUTOR, ProfilingMode, \
     freeze_rng_state, set_rng_seed, slowTest, TemporaryFileName, skipIfCompiledWithoutNumpy, \
-    enable_profiling_mode, TEST_MKL
+    enable_profiling_mode, TEST_MKL, set_default_dtype
 from torch.testing._internal.jit_utils import JitTestCase, enable_cpu_fuser, disable_autodiff_subgraph_inlining, \
     _trace, enable_cpu_fuser_if, do_input_map, get_execution_plan, \
     execWrapper, _inline_everything, _tmp_donotuse_dont_inline_everything, \
@@ -2920,6 +2920,26 @@ graph(%Ra, %Rb):
         x = torch.rand(3, 4)
         self.assertEqual(random_bar(x), (x + 1)[0:1])
 
+    def test_trace_inline_shape(self):
+        # testing peephole optimization of size is turned into a constant
+        # in script fn
+
+        @torch.jit.script
+        def tensor_size(x: torch.Tensor) -> torch.Tensor:
+            return torch.tensor([x.size()[0]])
+
+        self.assertEqual(
+            tensor_size(torch.rand(15,)),
+            torch.tensor([15])
+        )
+
+        traced_tensor_size = torch.jit.trace(tensor_size, torch.rand(7,))
+
+        self.assertEqual(
+            traced_tensor_size(torch.rand(15,)),
+            torch.tensor([15])
+        )
+
     def test_export_tensoroption_to(self):
         def foo(x):
             return x[0].clone().detach().cpu() + x
@@ -3490,6 +3510,34 @@ class TestScript(JitTestCase):
             for inp in inputs:
                 results = fct_loop(inp, NUM_ITERATIONS)
                 self.assertEqual(results[1], expected)
+
+    def test_ignored_method_binding(self):
+        class Bar(torch.nn.Module):
+            def __init__(self):
+                super(Bar, self).__init__()
+                self.x : int = 0
+
+            @torch.jit.export
+            def setx(self, x : int):
+                self.x = x
+
+            @torch.jit.export
+            def getx(self):
+                return self.x
+
+            @torch.jit.ignore
+            def ignored_getx(self):
+                return self.x
+
+        b = Bar()
+        b.setx(123)
+        sb = torch.jit.script(b)
+        self.assertEqual(sb.getx(), 123)
+        self.assertEqual(sb.ignored_getx(), 123)
+
+        sb.setx(456)
+        self.assertEqual(sb.getx(), 456)
+        self.assertEqual(sb.ignored_getx(), 456)
 
     def test_set_attribute_through_optional(self):
         class A(torch.nn.Module):
@@ -7817,7 +7865,6 @@ a")
                 self.assertEqual(t1, t2)
                 self.assertEqual(t1.device, t2.device)
 
-
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.LEGACY, "Simple Executor doesn't have any shapes to propagate")
     def test_tensor_as_tensor_shape_prop(self):
         tensor_template = dedent('''
@@ -7943,6 +7990,18 @@ a")
 
         inp = torch.randn(3, 4)
         self.checkScript(test_as_tensor_tensor_input, (inp,))
+
+    def test_torch_tensor_dtype(self):
+        def foo(s: float):
+            return torch.tensor(s), torch.tensor([s, s])
+
+        scripted_foo = torch.jit.script(foo)
+        with set_default_dtype(torch.float):
+            self.assertEqual(scripted_foo(1.), foo(1.), exact_dtype=True)
+        with set_default_dtype(torch.double):
+            self.assertEqual(scripted_foo(1.), foo(1.), exact_dtype=True)
+        with set_default_dtype(torch.half):
+            self.assertEqual(scripted_foo(1.), foo(1.), exact_dtype=True)
 
     def test_empty_like_memory_format_bc(self):
         def f(x):

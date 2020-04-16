@@ -55,13 +55,13 @@ class TestSerialization(TestCase):
         # saving code : uncomment when adding a new test
         # and run the new test, e.g.
         # python test/quantization/test_backward_compatibility.py TestSerialization.test_conv3d
-        data = torch.randn(2, 3).float()
-        data = torch.quantize_per_tensor(data, 0.5, 2, torch.quint8)
-        torch.save(data, input_file)
-        torch.save(qmodule.state_dict(), state_dict_file)
-        torch.jit.save(torch.jit.script(qmodule), scripted_module_file)
-        torch.jit.save(torch.jit.trace(qmodule, data), traced_module_file)
-        torch.save(qmodule(data), expected_file)
+        # data = torch.randn(2, 3).float()
+        # data = torch.quantize_per_tensor(data, 0.5, 2, torch.quint8)
+        # torch.save(data, input_file)
+        # torch.save(qmodule.state_dict(), state_dict_file)
+        # torch.jit.save(torch.jit.script(qmodule), scripted_module_file)
+        # torch.jit.save(torch.jit.trace(qmodule, data), traced_module_file)
+        # torch.save(qmodule(data), expected_file)
 
         data = torch.load(input_file)
         qmodule.load_state_dict(torch.load(state_dict_file))
@@ -71,7 +71,7 @@ class TestSerialization(TestCase):
         expected = torch.load(expected_file)
         self.assertEqual(qmodule(data), expected, prec=prec)
         self.assertEqual(qmodule_scripted(data), expected, prec=prec)
-        # self.assertEqual(qmodule_traced(data), expected, prec=prec)
+        self.assertEqual(qmodule_traced(data), expected, prec=prec)
 
     @unittest.skipUnless(
         'fbgemm' in torch.backends.quantized.supported_engines or
