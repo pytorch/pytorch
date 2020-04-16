@@ -187,6 +187,11 @@ test_torchvision() {
 test_libtorch() {
   if [[ "$BUILD_ENVIRONMENT" != *rocm* ]]; then
     echo "Testing libtorch"
+
+    # Start background download
+    python tools/download_mnist.py --quiet -d test/cpp/api/mnist &
+
+    # Run JIT cpp tests
     mkdir -p test/test-reports/cpp-unittest
     python test/cpp/jit/tests_setup.py setup
     if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
@@ -195,9 +200,10 @@ test_libtorch() {
       build/bin/test_jit  --gtest_filter='-*CUDA' --gtest_output=xml:test/test-reports/cpp-unittest/test_jit.xml
     fi
     python test/cpp/jit/tests_setup.py shutdown
-    python tools/download_mnist.py --quiet -d test/cpp/api/mnist
+    # Wait for background download to finish
+    wait
     OMP_NUM_THREADS=2 TORCH_CPP_TEST_MNIST_PATH="test/cpp/api/mnist" build/bin/test_api --gtest_output=xml:test/test-reports/cpp-unittest/test_api.xml
-    build/bin/test_tensorexpr
+    build/bin/test_tensorexpr --gtest_output=xml:test/test-reports/cpp-unittests/test_tensorexpr.xml
     assert_git_not_dirty
   fi
 }
