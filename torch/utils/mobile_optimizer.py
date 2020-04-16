@@ -18,4 +18,5 @@ def optimize_for_mobile(scripted_model):
         raise TypeError(
             'Got {}, but ScriptModule is expected.'.format(type(scripted_model)))
 
-    return torch._C._jit_pass_optimize_for_mobile(scripted_model._c)
+    optimized_cpp_module = torch._C._jit_pass_optimize_for_mobile(scripted_model._c)
+    return torch.jit._recursive.wrap_cpp_module(optimized_cpp_module)

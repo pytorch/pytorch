@@ -1,12 +1,16 @@
 import unittest
 import torch
-import torch.utils.mobile_optimizer
+import torch.backends.xnnpack
+from torch.utils import mobile_optimizer
 from torch.nn import functional as F
 
 FileCheck = torch._C.FileCheck
 
 class TestOptimizer(unittest.TestCase):
 
+    @unittest.skipUnless(torch.backends.xnnpack.enabled,
+                     " XNNPACK must be enabled for these tests."
+                     " Please build with USE_XNNPACK=1.")
     def test_optimize_for_mobile(self):
         batch_size = 2
         input_channels_per_group = 6
@@ -63,7 +67,7 @@ class TestOptimizer(unittest.TestCase):
         scripted_model.eval()
         initial_result = scripted_model(input_data)
 
-        optimized_scripted_model = torch.utils.mobile_optimizer.optimize_for_mobile(scripted_model)
+        optimized_scripted_model = mobile_optimizer.optimize_for_mobile(scripted_model)
         optimized_result = optimized_scripted_model(input_data)
 
         pattern_count_map = {"Tensor = aten::conv2d": -1,
