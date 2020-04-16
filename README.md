@@ -34,6 +34,7 @@ See also the [ci.pytorch.org HUD](https://ezyang.github.io/pytorch-ci-hud/build/
 ## More About PyTorch
 foo
 bar
+foo
 
 At a granular level, PyTorch is a library that consists of the following components:
 
