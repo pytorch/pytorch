@@ -580,7 +580,7 @@ void testCudaSharedMemReduce_1() {
   //    alloc(c, 64)
   //    for n in 0..64:  // thread-idx
   //      c(n) = 0
-  //	for m in 0..128:
+  //    for m in 0..128:
   //      for n in 0..64:  // thread_idx
   //        c(n) = c(n) + a(k, m, n)
   //    b(k) = 0
@@ -622,7 +622,7 @@ void testCudaSharedMemReduce_1() {
   }
 
   {
-    //	for m in 0..128:
+    //  for m in 0..128:
     //    for n in 0..64:  // thread_idx
     //      c(n) = c(n) + a(k, m, n)
     ExprHandle load_cn = Load::make(kFloat, c, {n}, 1);
