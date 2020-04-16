@@ -99,6 +99,45 @@ struct TORCH_CUDA_API BinaryOp : public Expr {
 };
 
 /*
+ * A specialization for Conditional operations.
+ * There are 3 inputs and 1 output
+ * Examples include:
+ *  1) Threshold
+ *  2) Where
+ */
+struct TORCH_CUDA_API ConditionalOp : public Expr {
+  ~ConditionalOp() = default;
+  ConditionalOp(Val* _out, Val* _cond, Val* _then, Val* _else);
+
+  ConditionalOp(const ConditionalOp& other) = delete;
+  ConditionalOp& operator=(const ConditionalOp& other) = delete;
+
+  ConditionalOp(ConditionalOp&& other) = delete;
+  ConditionalOp& operator=(ConditionalOp&& other) = delete;
+
+  Val* out() const noexcept {
+    return out_;
+  }
+  Val* cond() const noexcept {
+    return cond_;
+  }
+  Val* then_val() const noexcept {
+    return then_;
+  }
+  Val* else_val() const noexcept {
+    return else_;
+  }
+
+  bool sameAs(const ConditionalOp* other) const;
+
+ private:
+  Val* const out_;
+  Val* const cond_;
+  Val* const then_;
+  Val* const else_;
+};
+
+/*
  * Simply a representation of an annotated 1D iterable from start to extent.
  * TensorDomains which represent how to iterate over a tensor is made up of
  * IterDomains to form an ND iterable. We directly set parallization strategies

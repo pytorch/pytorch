@@ -92,6 +92,9 @@ void Expr::dispatch(T handler, Expr* expr) {
     case ExprType::BinaryOp:
       ptr(handler)->handle(static_cast<BinaryOp*>(expr));
       return;
+    case ExprType::ConditionalOp:
+      ptr(handler)->handle(static_cast<ConditionalOp*>(expr));
+      return;
     case ExprType::ForLoop:
       ptr(handler)->handle(static_cast<ForLoop*>(expr));
       return;
@@ -169,6 +172,9 @@ void Expr::constDispatch(T handler, const Expr* const expr) {
     case ExprType::BinaryOp:
       ptr(handler)->handle(static_cast<const BinaryOp* const>(expr));
       return;
+    case ExprType::ConditionalOp:
+      ptr(handler)->handle(static_cast<const ConditionalOp* const>(expr));
+      return;
     case ExprType::ForLoop:
       ptr(handler)->handle(static_cast<const ForLoop* const>(expr));
       return;
@@ -245,6 +251,8 @@ Statement* Expr::mutatorDispatch(T mutator, Expr* expr) {
       return ptr(mutator)->mutate(static_cast<UnaryOp*>(expr));
     case ExprType::BinaryOp:
       return ptr(mutator)->mutate(static_cast<BinaryOp*>(expr));
+    case ExprType::ConditionalOp:
+      return ptr(mutator)->mutate(static_cast<ConditionalOp*>(expr));
     case ExprType::ForLoop:
       return ptr(mutator)->mutate(static_cast<ForLoop*>(expr));
     case ExprType::IfThenElse:

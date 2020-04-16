@@ -97,6 +97,27 @@ bool BinaryOp::sameAs(const BinaryOp* other) const {
   return true;
 }
 
+ConditionalOp::ConditionalOp(Val* _out, Val* _cond, Val* _then, Val* _else)
+    : Expr(ExprType::ConditionalOp),
+      out_{_out},
+      cond_{_cond},
+      then_{_then},
+      else_{_else} {
+  addOutput(_out);
+  addInput(_cond);
+  addInput(_then);
+  addInput(_else);
+  this->name_ = FusionGuard::getCurFusion()->registerExpr(this);
+}
+
+bool ConditionalOp::sameAs(const ConditionalOp* other) const {
+  if ( ! (    cond()->sameAs(other->cond())
+           && then_val()->sameAs(other->then_val())
+           && else_val()->sameAs(other->else_val())))
+    return false;
+  return true;
+}
+
 IterDomain::IterDomain(
     Val* _start,
     Val* _extent,

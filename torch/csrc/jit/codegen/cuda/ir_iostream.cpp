@@ -276,6 +276,46 @@ void IRPrinter::handle(const BinaryOp* const bop) {
     os << ";\n";
 }
 
+void IRPrinter::handle(const ConditionalOp* const cop) {
+  bool istvop = isTVOp(cop);
+  if (!print_inline_) {
+    indent();
+    os << cop->out();
+
+    // tensor operations tend to be long, break them up into multiple lines
+    if (istvop) {
+      os << "\n";
+      indent_size++;
+      indent();
+    }
+
+    os << " = ";
+  } else {
+    check_inlineable(cop);
+  }
+
+  handle(cop->cond());
+  os << " ? ";
+  if (istvop) {
+    os << "\n";
+    indent();
+  }
+  handle(cop->then_val());
+  if (istvop) {
+    os << "\n";
+    indent();
+  }
+  os << ": ";
+  handle(cop->else_val());
+  os << ")";
+
+  if (istvop)
+    indent_size--;
+
+  if (!print_inline_)
+    os << ";\n";
+}
+
 void IRPrinter::handle(const ForLoop* const fl) {
   if (fl->iter_domain()->isThread()) {
     for (auto& expr : fl->constBody().exprs())

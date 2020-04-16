@@ -296,6 +296,26 @@ Statement* GPULower::mutate(BinaryOp* bop) {
   return new_op;
 }
 
+Statement* GPULower::mutate(ConditionalOp* cop) {
+  if (!ir_utils::isTVOp(cop))
+    return OptOutMutator::mutate(cop);
+
+  TensorIndex* out = getConsumerIndex(ir_utils::asTV(cop->out()));
+  Val* cond     = cop->cond();
+  Val* then_val = cop->then_val();
+  Val* else_val = cop->else_val();
+
+  if (ir_utils::isTV(then_val))
+    then_val = getProducerIndex(ir_utils::asTV(then_val), ir_utils::asTV(cop->out()));
+
+  if (ir_utils::isTV(else_val))
+    else_val = getProducerIndex(ir_utils::asTV(else_val), ir_utils::asTV(cop->out()));
+
+  Expr* new_op = new ConditionalOp(out, cond, then_val, else_val);
+
+  return new_op;
+}
+
 // TensorViews are all based on symbolic sizes. When we first initialize them we
 // don't know if they're inputs or outputs which would mean that they have
 // runtime shapes. Intermediate tensors (those not going to global memory) do

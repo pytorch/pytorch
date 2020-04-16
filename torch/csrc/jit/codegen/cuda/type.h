@@ -28,6 +28,7 @@ enum class DataType { Float, Int, Null };
 enum class ExprType {
   UnaryOp,
   BinaryOp,
+  ConditionalOp,
   ForLoop,
   IfThenElse,
   Allocate,

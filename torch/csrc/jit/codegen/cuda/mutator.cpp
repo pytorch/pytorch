@@ -176,6 +176,20 @@ Statement* OptOutMutator::mutate(BinaryOp* bop) {
   return new BinaryOp(bop->getBinaryOpType(), out, lhs, rhs);
 }
 
+Statement* OptOutMutator::mutate(ConditionalOp* cop) {
+  Val* out      = mutateAsVal(cop->out())->asVal();
+  Val* cond     = mutateAsVal(cop->cond())->asVal();
+  Val* then_val = mutateAsVal(cop->then_val())->asVal();
+  Val* else_val = mutateAsVal(cop->else_val())->asVal();
+  if (    out == cop->out()
+       && cond == cop->cond()
+       && then_val == cop->then_val()
+       && else_val == cop->else_val())
+    return cop;
+  FusionGuard::getCurFusion()->removeExpr(cop);
+  return new ConditionalOp(out, cond, then_val, else_val);
+}
+
 Statement* OptOutMutator::mutate(ForLoop* fl) {
   Val* index = mutateAsVal(fl->index())->asVal();
   Val* val_id = mutateAsVal(fl->iter_domain())->asVal();
