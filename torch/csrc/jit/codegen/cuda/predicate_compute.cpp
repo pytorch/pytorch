@@ -23,11 +23,11 @@ std::vector<Int*> PredicateCompute::computePredicates(const TensorIndex* ti) {
   const TensorView* tv = ti->view();
 
   TensorDomain* root = tv->getRootDomain();
-  TORCH_CHECK(root->size() == ti->size());
-  for (decltype(ti->size()) i{0}; i < ti->size(); i++)
+  TORCH_CHECK(root->nDims() == ti->nDims());
+  for (decltype(ti->nDims()) i{0}; i < ti->nDims(); i++)
 
     if (FusionGuard::getCurFusion()->origin(ti->index(i)) != nullptr) {
-      Val* pred = lt(ti->index(i), root->axis(i)->size());
+      Val* pred = lt(ti->index(i), root->axis(i)->extent());
       TORCH_CHECK(
           pred->getValType().value() == ValType::Scalar &&
           pred->getDataType().value() == DataType::Int);
