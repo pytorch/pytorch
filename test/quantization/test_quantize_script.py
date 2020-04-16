@@ -1417,7 +1417,7 @@ class TestQuantizeScriptPTSQOps(JitTestCase):
 
         # Note Fusion for functional Relu with inplace argument isn't currently supported in fusion patterns.
         class BNFuncRelu(torch.nn.Module):
-            def __init__(self, inplace):
+            def __init__(self):
                 super(BNFuncRelu, self).__init__()
                 self.bn = torch.nn.BatchNorm2d(3).to(torch.float)
 
@@ -1425,7 +1425,7 @@ class TestQuantizeScriptPTSQOps(JitTestCase):
                 return F.relu(self.bn(x), False)
 
         class BNFuncInplaceRelu(torch.nn.Module):
-            def __init__(self, inplace):
+            def __init__(self):
                 super(BNFuncInplaceRelu, self).__init__()
                 self.bn = torch.nn.BatchNorm2d(3).to(torch.float)
 
@@ -1433,13 +1433,12 @@ class TestQuantizeScriptPTSQOps(JitTestCase):
                 return F.relu(self.bn(x), True)
 
         data = [(torch.rand((1, 3, 10, 10), dtype=torch.float), torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
-        for Model in [BNRelu, BNFuncRelu, BNFuncInplaceRelu]:
-            for inplace in [True, False]:
-                model = self._test_op_impl(Model(inplace), data, "quantized::batch_norm2d_relu")
-                FileCheck().check_not("aten::batch_norm") \
-                           .check_not("aten::relu") \
-                           .check_not("aten::relu_") \
-                           .run(model.graph)
+        for instance in [BNRelu(True), BNRelu(False), BNFuncRelu(), BNFuncInplaceRelu()]:
+            model = self._test_op_impl(instance, data, "quantized::batch_norm2d_relu")
+            FileCheck().check_not("aten::batch_norm") \
+                       .check_not("aten::relu") \
+                       .check_not("aten::relu_") \
+                       .run(model.graph)
 
 
     def test_swap_dequantize_all_ops(self):
