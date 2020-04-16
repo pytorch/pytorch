@@ -390,7 +390,7 @@ auto ConvParams::use_cudnn_depthwise(
 
 static void check_shape_forward(const at::Tensor& input,
                                 const c10::IntArrayRef& weight_sizes, const at::Tensor& bias,
-                                const ConvParams& params, bool input_is_mkldnn) {
+                                const ConvParams& params) {
   int64_t k = input.ndimension();
   int64_t weight_dim = weight_sizes.size();
   int64_t groups = params.groups;
@@ -564,18 +564,7 @@ at::Tensor _convolution(
   auto weight = weight_r;
   auto bias = bias_r;
   auto k = weight.ndimension();
-  // mkldnn conv2d weights could have been re-ordered to 5d by
-  // mkldnn_reorder_conv2d_weight
-  std::vector<int64_t> weight_sizes_mkl;
   c10::IntArrayRef weight_sizes = weight.sizes();
-  if (input_is_mkldnn && (k == input.ndimension() + 1)) {
-    k = input.ndimension();
-    weight_sizes_mkl.resize(k);
-    weight_sizes_mkl[0] = weight.size(0) * weight.size(1);
-    std::copy_n(
-        weight.sizes().cbegin() + 2, k - 1, weight_sizes_mkl.begin() + 1);
-    weight_sizes = c10::IntArrayRef(weight_sizes_mkl);
-  }
   int64_t dim = k - 2;
   
 
@@ -592,7 +581,7 @@ at::Tensor _convolution(
   params.deterministic = deterministic;
   params.cudnn_enabled = cudnn_enabled;
 
-  check_shape_forward(input, weight_sizes, bias, params, input_is_mkldnn);
+  check_shape_forward(input, weight_sizes, bias, params);
 
   if (input.size(0) == 0) {    
     // don't send empty inputs through backends

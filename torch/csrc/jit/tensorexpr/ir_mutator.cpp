@@ -1,7 +1,9 @@
-#include "torch/csrc/jit/tensorexpr/ir_mutator.h"
+#include <torch/csrc/jit/tensorexpr/ir_mutator.h>
 
-#include "torch/csrc/jit/tensorexpr/eval.h"
-#include "torch/csrc/jit/tensorexpr/ir.h"
+#include <torch/csrc/jit/tensorexpr/eval.h>
+#include <torch/csrc/jit/tensorexpr/ir.h>
+#include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
+#include <torch/csrc/jit/tensorexpr/reduction.h>
 
 namespace torch {
 namespace jit {
@@ -46,8 +48,7 @@ static const Expr* mutate_binary_op(
     case IRNodeType::kRshift:
       return new Rshift(lhs_new, rhs_new);
     default:
-      LOG(FATAL) << "unsupported expr_type: " << static_cast<int>(expr_type);
-      return nullptr;
+      throw unsupported_dtype();
   }
 }
 
@@ -184,18 +185,28 @@ const Expr* IRMutator::mutate(const Ramp* v) {
 
 const Expr* IRMutator::mutate(const Load* v) {
   Dtype dtype = v->dtype();
-  const Var* base_handle = v->base_handle();
-  const Expr* index = v->index();
+  const Buf* buf = v->buf();
+
+  bool any_index_changed = false;
+  std::vector<const Expr*> indices_new;
+  for (const Expr* ind : v->indices()) {
+    const Expr* new_ind = ind->accept_mutator(this);
+    if (new_ind != ind) {
+      any_index_changed = true;
+    }
+    indices_new.push_back(new_ind);
+  }
   const Expr* mask = v->mask();
-  const Expr* base_handle_expr = base_handle->accept_mutator(this);
-  const Var* base_handle_new = dynamic_cast<const Var*>(base_handle_expr);
-  const Expr* index_new = index->accept_mutator(this);
+  const Buf* buf_new = dynamic_cast<const Buf*>(buf->accept_mutator(this));
   const Expr* mask_new = mask->accept_mutator(this);
-  if (base_handle == base_handle_new && index == index_new &&
-      mask == mask_new) {
+  if (buf == buf_new && !any_index_changed && mask == mask_new) {
     return v;
   }
-  return new Load(dtype, base_handle_new, index_new, mask_new);
+  return new Load(dtype, buf_new, indices_new, mask_new);
+}
+
+const Expr* IRMutator::mutate(const Buf* v) {
+  return v;
 }
 
 const Expr* IRMutator::mutate(const Broadcast* v) {
@@ -215,6 +226,7 @@ const Expr* IRMutator::mutate(const IfThenElse* v) {
   const Expr* condition_new = condition->accept_mutator(this);
   const Expr* true_value_new = true_value->accept_mutator(this);
   const Expr* false_value_new = false_value->accept_mutator(this);
+
   if (condition == condition_new && true_value == true_value_new &&
       false_value == false_value_new) {
     return v;
@@ -231,6 +243,55 @@ const Expr* IRMutator::mutate(const Intrinsics* v) {
 const Expr* IRMutator::mutate(const FunctionCall* v) {
   const BaseCallNode* base = v;
   return this->mutate(base);
+}
+
+const Expr* IRMutator::mutate(const Term* v) {
+  const Expr* newScalar = v->scalar()->accept_mutator(this);
+
+  std::vector<const Expr*> variables;
+  for (const auto* t : v->variables()) {
+    variables.push_back(t->accept_mutator(this));
+  }
+  return new Term(v->hasher(), newScalar, variables);
+}
+
+const Expr* IRMutator::mutate(const Polynomial* v) {
+  const Expr* newScalar = v->scalar()->accept_mutator(this);
+
+  std::vector<const Term*> variables;
+  for (const auto* t : v->variables()) {
+    variables.push_back(static_cast<const Term*>(t->accept_mutator(this)));
+  }
+  return new Polynomial(v->hasher(), newScalar, variables);
+}
+
+const Expr* IRMutator::mutate(const RoundOff* v) {
+  return new RoundOff(
+      v->lhs()->accept_mutator(this), v->rhs()->accept_mutator(this));
+}
+
+const Expr* IRMutator::mutate(const ReduceOp* v) {
+  const Expr* buf_new_expr = v->accumulator()->accept_mutator(this);
+  const Buf* buf_new = dynamic_cast<const Buf*>(buf_new_expr);
+  const Expr* init = v->initializer()->accept_mutator(this);
+  auto body = v->body().node()->accept_mutator(this);
+
+  std::vector<const Expr*> new_output_args;
+  std::vector<const Var*> new_reduce_args;
+  for (auto* e : v->output_args()) {
+    new_output_args.push_back(e->accept_mutator(this));
+  }
+  for (auto* r : v->reduce_args()) {
+    new_reduce_args.push_back(static_cast<const Var*>(r->accept_mutator(this)));
+  }
+
+  return new ReduceOp(
+      buf_new,
+      init,
+      ExprHandle(body),
+      v->interaction(),
+      new_output_args,
+      new_reduce_args);
 }
 
 const Expr* IRMutator::mutate(const BaseCallNode* v) {
@@ -268,6 +329,9 @@ Stmt* IRMutator::mutate(const For* v) {
       body == body_new) {
     return (Stmt*)v;
   }
+  if (body_new == body) {
+    body_new = Stmt::clone(body);
+  }
   return new For(var_new, start_new, stop_new, body_new, loop_options);
 }
 
@@ -278,6 +342,8 @@ Stmt* IRMutator::mutate(const Block* v) {
     Stmt* stmt_new = stmt->accept_mutator(this);
     if (stmt != stmt_new) {
       any_change = true;
+    } else {
+      stmt_new = Stmt::clone(stmt);
     }
     if (stmt_new) {
       stmts.push_back(stmt_new);
@@ -290,20 +356,48 @@ Stmt* IRMutator::mutate(const Block* v) {
 }
 
 Stmt* IRMutator::mutate(const Store* v) {
-  const Var* base_handle = v->base_handle();
-  const Expr* index = v->index();
+  const Buf* buf = v->buf();
+
+  bool any_index_changed = false;
+  std::vector<const Expr*> indices_new;
+  for (const Expr* ind : v->indices()) {
+    const Expr* new_ind = ind->accept_mutator(this);
+    if (new_ind != ind) {
+      any_index_changed = true;
+    }
+    indices_new.push_back(new_ind);
+  }
   const Expr* value = v->value();
   const Expr* mask = v->mask();
-  const Expr* base_handle_expr = base_handle->accept_mutator(this);
-  const Var* base_handle_new = dynamic_cast<const Var*>(base_handle_expr);
-  const Expr* index_new = index->accept_mutator(this);
+  const Buf* buf_new = dynamic_cast<const Buf*>(buf->accept_mutator(this));
   const Expr* value_new = value->accept_mutator(this);
   const Expr* mask_new = mask->accept_mutator(this);
-  if (base_handle == base_handle_new && index == index_new &&
-      value == value_new && mask == mask_new) {
+  if (buf == buf_new && !any_index_changed && value == value_new &&
+      mask == mask_new) {
     return (Stmt*)v;
   }
-  return new Store(base_handle_new, index_new, value_new, mask_new);
+  return new Store(buf_new, indices_new, value_new, mask_new);
+}
+
+Stmt* IRMutator::mutate(const AtomicAdd* v) {
+  const Buf* buf = v->buf();
+
+  bool any_index_changed = false;
+  std::vector<const Expr*> indices_new;
+  for (const Expr* ind : v->indices()) {
+    const Expr* new_ind = ind->accept_mutator(this);
+    if (new_ind != ind) {
+      any_index_changed = true;
+    }
+    indices_new.push_back(new_ind);
+  }
+  const Expr* value = v->value();
+  const Buf* buf_new = dynamic_cast<const Buf*>(buf->accept_mutator(this));
+  const Expr* value_new = value->accept_mutator(this);
+  if (buf == buf_new && !any_index_changed && value == value_new) {
+    return (Stmt*)v;
+  }
+  return new AtomicAdd(buf_new, indices_new, value_new);
 }
 
 Stmt* IRMutator::mutate(const Allocate* v) {
@@ -349,6 +443,14 @@ Stmt* IRMutator::mutate(const Cond* v) {
   if (cond_old == cond_new && true_old == true_new && false_old == false_new) {
     return (Stmt*)v;
   }
+
+  if (true_old && true_new == true_old) {
+    true_new = Stmt::clone(true_old);
+  }
+  if (false_old && false_new == false_old) {
+    false_new = Stmt::clone(false_old);
+  }
+
   return new Cond(cond_new, true_new, false_new);
 }
 
@@ -356,6 +458,73 @@ const Expr* IRMutator::DefaultMutator(
     const BaseCallNode* v,
     std::vector<const Expr*>& params) {
   return v->DefaultMutator(params);
+}
+
+class StmtClone : public IRMutator {
+ public:
+  Stmt* mutate(const LetStmt* v) override;
+  Stmt* mutate(const For* v) override;
+  Stmt* mutate(const Block* v) override;
+  Stmt* mutate(const Store* v) override;
+  Stmt* mutate(const Allocate* v) override;
+  Stmt* mutate(const Free* v) override;
+  Stmt* mutate(const Cond* v) override;
+};
+
+Stmt* StmtClone::mutate(const LetStmt* v) {
+  // Expressions are immutable => we don't need to clone them
+  const Var* var = v->var();
+  const Expr* value = v->value();
+
+  // Statements are mutable => we need to clone them
+  Stmt* body_new = v->body()->accept_mutator(this);
+
+  // Create a new LetStmt with the cloned statement for body
+  return new LetStmt(var, value, body_new);
+}
+
+Stmt* StmtClone::mutate(const For* v) {
+  // Only body needs to be cloned as only statements are mutable
+  Stmt* body_new = v->body()->accept_mutator(this);
+
+  return new For(v->var(), v->start(), v->stop(), body_new, v->loop_options());
+}
+
+Stmt* StmtClone::mutate(const Block* v) {
+  std::vector<Stmt*> stmts;
+  for (Stmt* stmt : v->stmts()) {
+    stmts.push_back(stmt->accept_mutator(this));
+  }
+  return new Block(stmts);
+}
+
+Stmt* StmtClone::mutate(const Store* v) {
+  return new Store(v->buf(), v->indices(), v->value(), v->mask());
+}
+
+Stmt* StmtClone::mutate(const Allocate* v) {
+  return new Allocate(v->buffer_var(), v->dtype(), v->dims());
+}
+
+Stmt* StmtClone::mutate(const Free* v) {
+  return new Free(v->buffer_var());
+}
+
+Stmt* StmtClone::mutate(const Cond* v) {
+  Stmt* true_old = v->true_stmt();
+  Stmt* false_old = v->false_stmt();
+
+  Stmt* true_new = true_old ? true_old->accept_mutator(this) : true_old;
+  Stmt* false_new = false_old ? false_old->accept_mutator(this) : false_old;
+
+  return new Cond(v->condition(), true_new, false_new);
+}
+
+Stmt* Stmt::clone(Stmt* s) {
+  StmtClone clone_mutator;
+  Stmt* cloned = s->accept_mutator(&clone_mutator);
+  set_parent(cloned, nullptr);
+  return cloned;
 }
 
 } // namespace tensorexpr

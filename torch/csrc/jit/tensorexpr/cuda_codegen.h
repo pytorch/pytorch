@@ -3,26 +3,45 @@
 #include <unordered_map>
 #include <unordered_set>
 
-#include "ATen/ATen.h"
-#include "ATen/cuda/CUDAContext.h"
-#include "ATen/cuda/nvrtc_stub/ATenNVRTC.h"
-#include "c10/cuda/CUDACachingAllocator.h"
-#include "c10/cuda/CUDAGuard.h"
-#include "torch/csrc/jit/resource_guard.h"
-#include "torch/csrc/jit/tensorexpr/codegen.h"
-#include "torch/csrc/jit/tensorexpr/ir.h"
-#include "torch/csrc/jit/tensorexpr/ir_printer.h"
-#include "torch/csrc/jit/tensorexpr/ir_visitor.h"
-#include "torch/csrc/jit/tensorexpr/unique_name_manager.h"
+#include <ATen/ATen.h>
+#include <ATen/cuda/CUDAContext.h>
+#include <ATen/cuda/nvrtc_stub/ATenNVRTC.h>
+#include <c10/cuda/CUDACachingAllocator.h>
+#include <c10/cuda/CUDAGuard.h>
+#include <torch/csrc/jit/resource_guard.h>
+#include <torch/csrc/jit/tensorexpr/codegen.h>
+#include <torch/csrc/jit/tensorexpr/ir.h>
+#include <torch/csrc/jit/tensorexpr/ir_printer.h>
+#include <torch/csrc/jit/tensorexpr/ir_visitor.h>
+#include <torch/csrc/jit/tensorexpr/unique_name_manager.h>
 
 namespace torch {
 namespace jit {
 namespace tensorexpr {
 
+// A class that analyzes the given program relevant for Cuda backends.
+class CudaAnalysis : public IRVisitor {
+ public:
+  bool is_buf_store_target(const Buf* buf) const {
+    return store_targets_.count(buf) > 0;
+  }
+
+ private:
+  void visit(const Store* v) override {
+    store_targets_.insert(v->buf());
+  }
+
+  std::unordered_set<const Buf*> store_targets_;
+};
+
 // A class that overrides the underlying IRPrinter to produce Cuda C.
 class CudaPrinter : public IRPrinter {
  public:
-  explicit CudaPrinter(std::ostream* os, bool has_random) : IRPrinter(*os) {
+  explicit CudaPrinter(
+      std::ostream* os,
+      const CudaAnalysis* cuda_analysis,
+      bool has_random)
+      : IRPrinter(*os), cuda_analysis_(cuda_analysis) {
     if (has_random) {
       rand_func_ = new Var("rand", kHandle);
     }
@@ -45,6 +64,7 @@ class CudaPrinter : public IRPrinter {
 
   void visit(const Load* v) override;
   void visit(const Store* v) override;
+  void visit(const AtomicAdd* v) override;
   void visit(const Max* v) override;
   void visit(const Min* v) override;
   void visit(const LetStmt* v) override;
@@ -69,6 +89,7 @@ class CudaPrinter : public IRPrinter {
   std::vector<const Expr*> gpu_block_extents_;
   std::vector<const Expr*> gpu_thread_extents_;
   const Var* rand_func_;
+  const CudaAnalysis* cuda_analysis_;
 };
 
 // Construct Cuda C from the buffer and tensor input, and invoke the kernel
@@ -76,16 +97,23 @@ class CudaPrinter : public IRPrinter {
 class TORCH_CUDA_API CudaCodeGen : public CodeGen {
  public:
   template <typename... Ts>
-  CudaCodeGen(Stmt* stmt, Ts... ts) : CodeGen(stmt, std::forward<Ts>(ts)...) {
+  CudaCodeGen(Stmt* stmt, Ts... ts)
+      : CodeGen(
+            stmt,
+            std::vector<BufferArg>({BufferArg(ts)...}),
+            at::Device(at::kCUDA, at::cuda::current_device())) {
     Initialize();
   }
 
-  CudaCodeGen(Stmt* stmt, const std::vector<BufferArg>& buffer_args)
-      : CodeGen(stmt, buffer_args) {
+  CudaCodeGen(
+      Stmt* stmt,
+      const std::vector<BufferArg>& buffer_args,
+      at::Device device = at::Device(at::kCUDA, at::cuda::current_device()))
+      : CodeGen(stmt, buffer_args, device) {
     Initialize();
   }
 
-  ~CudaCodeGen() override {}
+  ~CudaCodeGen() override;
 
   void call(const std::vector<CallArg>& args) override;
 
@@ -112,6 +140,7 @@ class TORCH_CUDA_API CudaCodeGen : public CodeGen {
 
   std::ostringstream oss_;
   std::unique_ptr<CudaPrinter> printer_;
+  std::unique_ptr<CudaAnalysis> cuda_analysis_;
   CUfunction function_;
   bool has_random_ = false;
 

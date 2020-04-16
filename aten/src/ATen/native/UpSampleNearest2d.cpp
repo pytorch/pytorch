@@ -35,7 +35,7 @@ static void upsample_nearest2d_out_cpu_template(
       output_height,
       output_width);
 
-  output.resize_({nbatch, channels, output_height, output_width});
+  output.resize_({nbatch, channels, output_height, output_width}, input.suggest_memory_format());
 
   AT_ASSERT(input_width > 0 && output_width > 0);
   upsample_nearest2d_kernel(kCPU, output, input, scales_h, scales_w);

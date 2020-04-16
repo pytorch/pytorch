@@ -68,7 +68,7 @@ class FloatToFusedNBitRowwiseQuantizedOp final : public Operator<CPUContext> {
 #endif
 
 #pragma omp parallel for if (GREEDY)
-    for (size_t row = 0; row < input_rows; ++row) {
+    for (int row = 0; row < input_rows; ++row) {
       float* tmp = tmp_vec.data();
 #ifdef _OPENMP
       if (GREEDY) {

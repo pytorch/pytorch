@@ -30,8 +30,10 @@ Value* ConvertSliceToIndex(Node* slice, Value* size, Node* insertBefore) {
   auto start = slice->get(attr::start) ? slice->get(attr::start) : 0;
   auto end = slice->get(attr::end) ? slice->get(attr::end) : int_max;
   auto step = slice->get(attr::step);
-  auto index = graph->insert(aten::arange, {size}, {NamedValue("dtype", c10::kLong)});
-  auto sliced_index = graph->insert(aten::slice, {index, {0}, start, end, step});
+  auto index =
+      graph->insert(aten::arange, {size}, {NamedValue("dtype", c10::kLong)});
+  auto sliced_index =
+      graph->insert(aten::slice, {index, {0}, start, end, step});
   return sliced_index;
 }
 
@@ -40,14 +42,16 @@ Value* CreateCompleteIndexTensor(Value* size, Node* insertBefore) {
   // The result is torch.tensor([0, 1, 2, ..., size - 1])
   auto graph = size->owningGraph();
   WithInsertPoint guard(insertBefore);
-  auto index = graph->insert(aten::arange, {size}, {NamedValue("dtype", c10::kLong)});
+  auto index =
+      graph->insert(aten::arange, {size}, {NamedValue("dtype", c10::kLong)});
   return index;
 }
 
 bool IsSameSource(const Node* n, const Node* m) {
   const auto& source_n = n->sourceRange().source();
-  const auto& source_m = m->sourceRange().source(); 
-  return ((source_n->text() == source_m->text()) &&
+  const auto& source_m = m->sourceRange().source();
+  return (
+      (source_n->text() == source_m->text()) &&
       (source_n->starting_line_no() == source_m->starting_line_no()));
 }
 
@@ -102,29 +106,39 @@ std::unordered_map<int64_t, ConvertedIndex> MergeSliceAndSelectToIndices(
   // this creates offset for latter slice and select nodes.
   int64_t dim_offset = 0;
   const auto orig_tensor_indices = index_put_node->input(1)->node()->inputs();
-  for (auto it = slice_and_select_nodes.rbegin(); it != slice_and_select_nodes.rend(); ++it) {
+  for (auto it = slice_and_select_nodes.rbegin();
+       it != slice_and_select_nodes.rend();
+       ++it) {
     auto node = *it;
     auto dim = node->get(attr::dim)->toInt() + dim_offset;
 
     while (cur_dim < dim) {
       // Handle skipped dims, these are created from ..., or tensor indices
       // E.g.: x[torch.tensor([1, 0]), ..., 0] = update, where x has rank 3.
-      // Both torch.tensor([1, 0]) and ... are skipped, we only observe aten::select node
-      // with dim == 2.
-      // Tensor indices will be handled later. Ellipsis(...) are treated as a complete slice over
-      // the axes, thus we create index tensors here accordingly.
+      // Both torch.tensor([1, 0]) and ... are skipped, we only observe
+      // aten::select node with dim == 2. Tensor indices will be handled later.
+      // Ellipsis(...) are treated as a complete slice over the axes, thus we
+      // create index tensors here accordingly.
       if (cur_dim - dim_offset >= orig_tensor_indices.size() ||
-          index_put_node->input(1)->node()->input(cur_dim - dim_offset)->node()->mustBeNone()) {
+          index_put_node->input(1)
+              ->node()
+              ->input(cur_dim - dim_offset)
+              ->node()
+              ->mustBeNone()) {
         auto size = CreateSizeOfDim(orig_data, cur_dim, index_put_node);
         WithInsertPoint guard(index_put_node);
-        auto index_tensor = graph->insert(aten::arange, {size}, {NamedValue("dtype", c10::kLong)});
-        dim_index_map.emplace(std::piecewise_construct,
-                              std::forward_as_tuple(cur_dim),
-                              std::forward_as_tuple(index_tensor, aten::slice));
+        auto index_tensor = graph->insert(
+            aten::arange, {size}, {NamedValue("dtype", c10::kLong)});
+        dim_index_map.emplace(
+            std::piecewise_construct,
+            std::forward_as_tuple(cur_dim),
+            std::forward_as_tuple(index_tensor, aten::slice));
       } else if (cur_dim - dim_offset < orig_tensor_indices.size()) {
-        dim_index_map.emplace(std::piecewise_construct,
-                              std::forward_as_tuple(cur_dim),
-                              std::forward_as_tuple(orig_tensor_indices[cur_dim - dim_offset], aten::index));
+        dim_index_map.emplace(
+            std::piecewise_construct,
+            std::forward_as_tuple(cur_dim),
+            std::forward_as_tuple(
+                orig_tensor_indices[cur_dim - dim_offset], aten::index));
       }
       cur_dim++;
     }
@@ -133,17 +147,21 @@ std::unordered_map<int64_t, ConvertedIndex> MergeSliceAndSelectToIndices(
     if (node->kind() == aten::slice) {
       auto size = CreateSizeOfDim(orig_data, dim, index_put_node);
       auto index_tensor = ConvertSliceToIndex(node, size, index_put_node);
-      dim_index_map.emplace(std::piecewise_construct,
-                            std::forward_as_tuple(dim),
-                            std::forward_as_tuple(index_tensor, aten::slice));
+      dim_index_map.emplace(
+          std::piecewise_construct,
+          std::forward_as_tuple(dim),
+          std::forward_as_tuple(index_tensor, aten::slice));
     } else if (node->kind() == aten::select) {
       auto index_tensor = ConvertSelectToIndex(node->input(2), index_put_node);
-      dim_index_map.emplace(std::piecewise_construct,
-                            std::forward_as_tuple(dim),
-                            std::forward_as_tuple(index_tensor, aten::select));
+      dim_index_map.emplace(
+          std::piecewise_construct,
+          std::forward_as_tuple(dim),
+          std::forward_as_tuple(index_tensor, aten::select));
       dim_offset++;
     } else {
-      AT_ERROR("Unexpected node kind ", node->kind().toDisplayString(),
+      AT_ERROR(
+          "Unexpected node kind ",
+          node->kind().toDisplayString(),
           " Expected aten::slice or aten::select.");
     }
 
@@ -151,9 +169,11 @@ std::unordered_map<int64_t, ConvertedIndex> MergeSliceAndSelectToIndices(
   }
 
   while (cur_dim - dim_offset < orig_tensor_indices.size()) {
-    dim_index_map.emplace(std::piecewise_construct,
-                          std::forward_as_tuple(cur_dim),
-                          std::forward_as_tuple(orig_tensor_indices[cur_dim - dim_offset], aten::index));
+    dim_index_map.emplace(
+        std::piecewise_construct,
+        std::forward_as_tuple(cur_dim),
+        std::forward_as_tuple(
+            orig_tensor_indices[cur_dim - dim_offset], aten::index));
     cur_dim++;
   }
 
@@ -170,11 +190,12 @@ std::unordered_map<int64_t, ConvertedIndex> MergeSliceAndSelectToIndices(
 //  ind1 shape:          [        _ ]
 //  ind2 shape:          [        _ ]
 // where _ is the original size of ind1 and ind2.
-// ind1 and ind2 are both 1-d tensors since currently we only supports 1-d tensor indices.
+// ind1 and ind2 are both 1-d tensors since currently we only supports 1-d
+// tensor indices.
 std::vector<Value*> ReshapeToAdvancedIndexingFormat(
     Graph* graph,
     Node* index_put_node,
-    std::unordered_map<int64_t, ConvertedIndex> &dim_index_map) {
+    std::unordered_map<int64_t, ConvertedIndex>& dim_index_map) {
   std::vector<Value*> indices;
 
   size_t min_index_dim = dim_index_map.size();
@@ -184,14 +205,18 @@ std::vector<Value*> ReshapeToAdvancedIndexingFormat(
     auto index_i = dim_index_map.find(i);
     AT_ASSERT(index_i != dim_index_map.end());
     if (index_i->second.orig_node_kind == aten::index) {
-      if (i < min_index_dim) min_index_dim = i;
-      if (i > max_index_dim) max_index_dim = i;
+      if (i < min_index_dim)
+        min_index_dim = i;
+      if (i > max_index_dim)
+        max_index_dim = i;
       tensor_ind_count++;
     }
   }
 
-  if (((max_index_dim - min_index_dim + 1) != tensor_ind_count) && tensor_ind_count != 0) {
-    AT_ERROR("Only consecutive 1-d tensor indices are supported in exporting aten::index_put to ONNX.");
+  if (((max_index_dim - min_index_dim + 1) != tensor_ind_count) &&
+      tensor_ind_count != 0) {
+    AT_ERROR(
+        "Only consecutive 1-d tensor indices are supported in exporting aten::index_put to ONNX.");
   }
 
   size_t tensor_ind_offset = tensor_ind_count == 0 ? 0 : tensor_ind_count - 1;
@@ -200,7 +225,7 @@ std::vector<Value*> ReshapeToAdvancedIndexingFormat(
     size_t ind_size = 0;
     auto index_i = dim_index_map.find(i);
     AT_ASSERT(index_i != dim_index_map.end());
-    Value *index = index_i->second.index;
+    Value* index = index_i->second.index;
     switch (index_i->second.orig_node_kind) {
       case aten::select:
       case aten::slice: {
@@ -240,7 +265,8 @@ std::vector<Value*> ReshapeToAdvancedIndexingFormat(
 //    %13 : Tensor?[] = prim::ListConstruct()
 //    ...
 //    %16 : Float(2) = aten::index_put(%11, %13, %14, %15)
-// The aten::index_put node alone does not contain any indices (%13 : Tensor?[] = prim::ListConstruct()).
+// The aten::index_put node alone does not contain any indices (%13 : Tensor?[]
+// = prim::ListConstruct()).
 //    ...
 //    # Below constructs index from slice node.
 //    %23 : Long() = aten::size(%0, %4)
@@ -261,25 +287,35 @@ std::vector<Value*> ReshapeToAdvancedIndexingFormat(
 void SquashSliceAndSelect(Node* index_put_node) {
   auto graph = index_put_node->owningGraph();
 
-  // Find slice and select operators that are associated with this index operator.
-  // E.g. x[1:3, 0] = y will generate one slice operator(1:3) and one select operator(0).
-  std::vector<Node*> slice_and_select_nodes = FetchSliceAndSelect(index_put_node);
+  // Find slice and select operators that are associated with this index
+  // operator. E.g. x[1:3, 0] = y will generate one slice operator(1:3) and one
+  // select operator(0).
+  std::vector<Node*> slice_and_select_nodes =
+      FetchSliceAndSelect(index_put_node);
 
-  Node* last_node = slice_and_select_nodes.size() > 0 ? slice_and_select_nodes.back() : index_put_node;
+  Node* last_node = slice_and_select_nodes.size() > 0
+      ? slice_and_select_nodes.back()
+      : index_put_node;
   Value* orig_data = last_node->input(0);
 
   // Convert fetched slice/select operators into tensor indices.
   std::unordered_map<int64_t, ConvertedIndex> dim_index_map =
-      MergeSliceAndSelectToIndices(graph, index_put_node, slice_and_select_nodes, orig_data);
+      MergeSliceAndSelectToIndices(
+          graph, index_put_node, slice_and_select_nodes, orig_data);
   std::vector<Value*> indices =
       ReshapeToAdvancedIndexingFormat(graph, index_put_node, dim_index_map);
 
   // Create new aten::index_put operator.
   WithInsertPoint guard(index_put_node);
-  const auto list_indices = graph->insertNode(graph->createList(OptionalType::ofTensor(), indices))
-                                 ->output();
-  auto new_index_put =
-      graph->insert(aten::index_put, {orig_data, list_indices, index_put_node->input(2), index_put_node->input(3)});
+  const auto list_indices =
+      graph->insertNode(graph->createList(OptionalType::ofTensor(), indices))
+          ->output();
+  auto new_index_put = graph->insert(
+      aten::index_put,
+      {orig_data,
+       list_indices,
+       index_put_node->input(2),
+       index_put_node->input(3)});
   new_index_put->copyMetadata(index_put_node->output());
   index_put_node->output()->replaceAllUsesWith(new_index_put);
 
@@ -303,10 +339,12 @@ void PrepareCopyForONNX(Block* block) {
       // 2. create index_put node.
       WithInsertPoint guard(node);
       auto graph = node->owningGraph();
-      auto dummy_list = graph->insertNode(graph->createList(
-                                       OptionalType::ofTensor(), {}))
-                                   ->output();
-      auto index_put = graph->insert(aten::index_put, {node->input(0), dummy_list, node->input(1), node->input(2)});
+      auto dummy_list =
+          graph->insertNode(graph->createList(OptionalType::ofTensor(), {}))
+              ->output();
+      auto index_put = graph->insert(
+          aten::index_put,
+          {node->input(0), dummy_list, node->input(1), node->input(2)});
       index_put->node()->setSourceRange(node->sourceRange());
       index_put->copyMetadata(node->output());
       node->output()->replaceAllUsesWith(index_put);
@@ -330,9 +368,10 @@ void PrepareIndexPutForONNX(Block* block) {
 }
 
 // aten::pop is inplace. The tensor list input is updated.
-// This pass creates an aten::__getitem__ op to return the original output from aten::pop.
-// Then it makes the original aten::pop operator return the updated tensor list,
-// and replaces all later uses of that tensor list with this new output.
+// This pass creates an aten::__getitem__ op to return the original output from
+// aten::pop. Then it makes the original aten::pop operator return the updated
+// tensor list, and replaces all later uses of that tensor list with this new
+// output.
 static void PrepareListPopForONNX(Block* b) {
   for (auto it = b->nodes().begin(), end = b->nodes().end(); it != end; ++it) {
     for (auto* child_block : it->blocks()) {
@@ -357,7 +396,7 @@ static void PrepareListPopForONNX(Block* b) {
   }
 }
 
-static void PrepareListAppendAndInsertForONNX(Block *b) {
+static void PrepareListAppendAndInsertForONNX(Block* b) {
   for (auto it = b->nodes().begin(), end = b->nodes().end(); it != end; ++it) {
     for (auto* child_block : it->blocks()) {
       PrepareListPopForONNX(child_block);

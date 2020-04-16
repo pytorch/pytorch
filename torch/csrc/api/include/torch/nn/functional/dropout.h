@@ -9,7 +9,7 @@ namespace functional {
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
 
-inline Tensor dropout(Tensor& input, double p, bool training, bool inplace) {
+inline Tensor dropout(Tensor input, double p, bool training, bool inplace) {
   TORCH_CHECK(
     p >= 0. && p <= 1.,
     "dropout probability has to be between 0 and 1, but got ",
@@ -46,7 +46,7 @@ inline Tensor dropout(Tensor input,
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
 
-inline Tensor dropout2d(Tensor& input, double p, bool training, bool inplace) {
+inline Tensor dropout2d(Tensor input, double p, bool training, bool inplace) {
   TORCH_CHECK(
     p >= 0. && p <= 1.,
     "dropout probability has to be between 0 and 1, but got ",
@@ -83,7 +83,7 @@ inline Tensor dropout2d(Tensor input,
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
 
-inline Tensor dropout3d(Tensor& input, double p, bool training, bool inplace) {
+inline Tensor dropout3d(Tensor input, double p, bool training, bool inplace) {
   TORCH_CHECK(
     p >= 0. && p <= 1.,
     "dropout probability has to be between 0 and 1, but got ",

@@ -66,7 +66,7 @@ struct PickleTester : torch::CustomClassHolder {
   std::vector<int64_t> vals;
 };
 
-static auto test = torch::class_<Foo>("_TorchScriptTesting_Foo")
+static auto test = torch::class_<Foo>("_TorchScriptTesting", "_Foo")
                        .def(torch::init<int64_t, int64_t>())
                        // .def(torch::init<>())
                        .def("info", &Foo::info)
@@ -75,7 +75,9 @@ static auto test = torch::class_<Foo>("_TorchScriptTesting_Foo")
                        .def("combine", &Foo::combine);
 
 static auto testStack =
-    torch::class_<MyStackClass<std::string>>("_TorchScriptTesting_StackString")
+    torch::class_<MyStackClass<std::string>>(
+        "_TorchScriptTesting",
+        "_StackString")
         .def(torch::init<std::vector<std::string>>())
         .def("push", &MyStackClass<std::string>::push)
         .def("pop", &MyStackClass<std::string>::pop)
@@ -101,7 +103,7 @@ static auto testStack =
 // clang-format on
 
 static auto testPickle =
-    torch::class_<PickleTester>("_TorchScriptTesting_PickleTester")
+    torch::class_<PickleTester>("_TorchScriptTesting", "_PickleTester")
         .def(torch::init<std::vector<int64_t>>())
         .def_pickle(
             [](c10::intrusive_ptr<PickleTester> self) { // __getstate__
@@ -127,15 +129,14 @@ at::Tensor take_an_instance(const c10::intrusive_ptr<PickleTester>& instance) {
 
 torch::RegisterOperators& register_take_instance() {
   static auto instance_registry = torch::RegisterOperators().op(
-  torch::RegisterOperators::options()
-      .schema(
-          "_TorchScriptTesting::take_an_instance(__torch__.torch.classes._TorchScriptTesting_PickleTester x) -> Tensor Y")
-      .catchAllKernel<decltype(take_an_instance), &take_an_instance>());
+      torch::RegisterOperators::options()
+          .schema(
+              "_TorchScriptTesting::take_an_instance(__torch__.torch.classes._TorchScriptTesting._PickleTester x) -> Tensor Y")
+          .catchAllKernel<decltype(take_an_instance), &take_an_instance>());
   return instance_registry;
 }
 
 static auto& ensure_take_instance_registered = register_take_instance();
-
 
 } // namespace
 
@@ -146,7 +147,7 @@ void testTorchbindIValueAPI() {
   auto custom_class_obj = make_custom_class<MyStackClass<std::string>>(
       std::vector<std::string>{"foo", "bar"});
   m.define(R"(
-    def forward(self, s : __torch__.torch.classes._TorchScriptTesting_StackString):
+    def forward(self, s : __torch__.torch.classes._TorchScriptTesting._StackString):
       return s.pop(), s
   )");
 
@@ -156,13 +157,20 @@ void testTorchbindIValueAPI() {
     AT_ASSERT(tup->elements().size() == 2);
     auto str = tup->elements()[0].toStringRef();
     auto other_obj =
-        tup->elements()[1].to<c10::intrusive_ptr<MyStackClass<std::string>>>();
+        tup->elements()[1].toCustomClass<MyStackClass<std::string>>();
     AT_ASSERT(str == expected);
-    auto ref_obj = obj.to<c10::intrusive_ptr<MyStackClass<std::string>>>();
+    auto ref_obj = obj.toCustomClass<MyStackClass<std::string>>();
     AT_ASSERT(other_obj.get() == ref_obj.get());
   };
 
   test_with_obj(custom_class_obj, "bar");
+
+  // test IValue() API
+  auto my_new_stack = c10::make_intrusive<MyStackClass<std::string>>(
+      std::vector<std::string>{"baz", "boo"});
+  auto new_stack_ivalue = c10::IValue(my_new_stack);
+
+  test_with_obj(new_stack_ivalue, "boo");
 }
 
 } // namespace jit

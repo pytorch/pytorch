@@ -1,6 +1,6 @@
-#include "torch/csrc/jit/tensorexpr/expr.h"
+#include <torch/csrc/jit/tensorexpr/expr.h>
 
-#include "torch/csrc/jit/tensorexpr/ir.h"
+#include <torch/csrc/jit/tensorexpr/ir.h>
 
 namespace torch {
 namespace jit {
@@ -201,6 +201,17 @@ ExprHandle ifThenElse(
     const ExprHandle& t,
     const ExprHandle& f) {
   return IfThenElse::make(c, t, f);
+}
+
+ExprHandle Buf::make(
+    const std::string& name_hint,
+    const std::vector<ExprHandle>& dims) {
+  return ExprHandle(
+      new Buf(new Var(name_hint, kHandle), ExprHandleVectorToExprVector(dims)));
+}
+
+ExprHandle Buf::make(const std::vector<ExprHandle>& dims) {
+  return Buf::make("", dims);
 }
 
 } // namespace tensorexpr

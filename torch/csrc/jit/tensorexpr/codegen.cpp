@@ -1,4 +1,4 @@
-#include "torch/csrc/jit/tensorexpr/codegen.h"
+#include <torch/csrc/jit/tensorexpr/codegen.h>
 
 #include <sstream>
 
@@ -40,10 +40,11 @@ void RegisterCodeGenList::AddStmtFactoryMethod(
 std::unique_ptr<CodeGen> CreateCodeGen(
     const std::string& name,
     Stmt* stmt,
-    const std::vector<CodeGen::BufferArg>& params) {
+    const std::vector<CodeGen::BufferArg>& params,
+    at::Device device) {
   RegisterCodeGenList::StmtFactoryMethod method =
       RegisterCodeGenList::GetInstance().FindStmtFactoryMethod(name);
-  return method(stmt, params);
+  return method(stmt, params, device);
 }
 
 } // namespace tensorexpr

@@ -294,7 +294,8 @@ class KLDivLoss(_Loss):
 
     As with :class:`~torch.nn.NLLLoss`, the `input` given is expected to contain
     *log-probabilities* and is not restricted to a 2D Tensor.
-    The targets are given as *probabilities* (i.e. without taking the logarithm).
+    The targets are interpreted as *probabilities* by default, but could be considered
+    as *log-probabilities* with :attr:`log_target` set to ``True``.
 
     This criterion expects a `target` `Tensor` of the same size as the
     `input` `Tensor`.
@@ -339,6 +340,8 @@ class KLDivLoss(_Loss):
             ``'sum'``: the output will be summed.
             ``'mean'``: the output will be divided by the number of elements in the output.
             Default: ``'mean'``
+        log_target (bool, optional): Specifies whether `target` is passed in the log space.
+            Default: ``False``
 
     .. note::
         :attr:`size_average` and :attr:`reduce` are in the process of being deprecated,
@@ -359,11 +362,12 @@ class KLDivLoss(_Loss):
     """
     __constants__ = ['reduction']
 
-    def __init__(self, size_average=None, reduce=None, reduction='mean'):
+    def __init__(self, size_average=None, reduce=None, reduction='mean', log_target=False):
         super(KLDivLoss, self).__init__(size_average, reduce, reduction)
+        self.log_target = log_target
 
     def forward(self, input, target):
-        return F.kl_div(input, target, reduction=self.reduction)
+        return F.kl_div(input, target, reduction=self.reduction, log_target=self.log_target)
 
 
 class MSELoss(_Loss):

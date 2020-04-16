@@ -43,7 +43,7 @@ const RRefId& RRefMessageBase::rrefId() {
   return rrefId_;
 }
 
-Message RRefMessageBase::toMessage() && {
+Message RRefMessageBase::toMessageImpl() && {
   return fromIValues({rrefId_.toIValue()}, type_);
 }
 
@@ -63,7 +63,7 @@ const ForkId& ForkMessageBase::forkId() {
   return forkId_;
 }
 
-Message ForkMessageBase::toMessage() && {
+Message ForkMessageBase::toMessageImpl() && {
   return fromIValues({rrefId_.toIValue(), forkId_.toIValue()}, type_);
 }
 
@@ -81,7 +81,7 @@ std::pair<RRefId, ForkId> ForkMessageBase::fromMessage(
 
 /////////////////////////// RRef Protocol //////////////////////////////////
 
-Message ScriptRRefFetchCall::toMessage() && {
+Message ScriptRRefFetchCall::toMessageImpl() && {
   std::vector<at::IValue> ivalues;
   ivalues.reserve(2);
   ivalues.emplace_back(rrefId_.toIValue());
@@ -103,7 +103,7 @@ std::unique_ptr<ScriptRRefFetchCall> ScriptRRefFetchCall::fromMessage(
       worker_id_t(id), RRefId::fromIValue(values[0]));
 }
 
-Message PythonRRefFetchCall::toMessage() && {
+Message PythonRRefFetchCall::toMessageImpl() && {
   std::vector<at::IValue> ivalues;
   ivalues.reserve(2);
   ivalues.emplace_back(rrefId_.toIValue());
@@ -129,12 +129,11 @@ const std::vector<at::IValue>& RRefFetchRet::values() {
   return values_;
 }
 
-Message RRefFetchRet::toMessage() && {
+Message RRefFetchRet::toMessageImpl() && {
   std::vector<at::IValue> ivalues = values_;
   std::vector<torch::Tensor> tensor_table;
   auto payload =
       jit::pickle(c10::ivalue::Tuple::create(ivalues), &tensor_table);
-
   return Message(std::move(payload), std::move(tensor_table), type_);
 }
 
@@ -171,7 +170,7 @@ const ForkId& RRefChildAccept::forkId() const {
   return forkId_;
 }
 
-Message RRefChildAccept::toMessage() && {
+Message RRefChildAccept::toMessageImpl() && {
   return fromIValues({forkId_.toIValue()}, MessageType::RREF_CHILD_ACCEPT);
 }
 
@@ -190,7 +189,7 @@ std::unique_ptr<RRefForkRequest> RRefForkRequest::fromMessage(
   return std::make_unique<RRefForkRequest>(pair.first, pair.second);
 }
 
-Message RRefAck::toMessage() && {
+Message RRefAck::toMessageImpl() && {
   return Message({}, {}, MessageType::RREF_ACK);
 }
 

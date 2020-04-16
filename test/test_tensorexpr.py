@@ -4,6 +4,10 @@ import torch
 import torch.nn.functional as F
 import unittest
 
+from torch.testing._internal.common_utils import suppress_warnings
+
+from te_utils import CudaCodeGenCreated, CudaCodeGenExecuted, \
+    LLVMCodeGenExecuted, SimpleIREvalExecuted
 
 @contextlib.contextmanager
 def num_profiled_runs(num_runs):
@@ -19,44 +23,11 @@ class BaseTestClass(unittest.TestCase):
         # TODO: read the old value and restore it rather than always set to True
         # on exit
         torch._C._jit_override_can_fuse_on_gpu(False)
-        torch._C._jit_register_tensorexpr_fuser()
+        torch._C._jit_set_texpr_fuser_enabled(True)
 
     def tearDown(self):
+        torch._C._jit_set_texpr_fuser_enabled(False)
         torch._C._jit_override_can_fuse_on_gpu(True)
-
-class ExecutionCounter(object):
-    def __init__(self, name):
-        self.name = name
-        self.start_value = torch._C._jit_get_trigger_value(self.name)
-
-    def elapsed_value(self):
-        value = torch._C._jit_get_trigger_value(self.name)
-        return value - self.start_value
-
-
-class CudaCodeGenCreated(ExecutionCounter):
-    def __init__(self):
-        super(CudaCodeGenCreated, self).__init__("cuda_codegen_created")
-
-
-class CudaCodeGenExecuted(ExecutionCounter):
-    def __init__(self):
-        super(CudaCodeGenExecuted, self).__init__("cuda_codegen_executed")
-
-
-class LLVMCodeGenCreated(ExecutionCounter):
-    def __init__(self):
-        super(LLVMCodeGenCreated, self).__init__("llvm_codegen_created")
-
-
-class LLVMCodeGenExecuted(ExecutionCounter):
-    def __init__(self):
-        super(LLVMCodeGenExecuted, self).__init__("llvm_codegen_executed")
-
-
-class SimpleIREvalExecuted(ExecutionCounter):
-    def __init__(self):
-        super(SimpleIREvalExecuted, self).__init__("simple_ir_eval_executed")
 
 class TestTensorExprFuser(BaseTestClass):
     def test_easy(self):
@@ -332,6 +303,7 @@ class TestTensorExprFuser(BaseTestClass):
         np.testing.assert_allclose(a.numpy() + 2.0 * a.numpy(), x.numpy())
 
 
+    @suppress_warnings
     def test_constant(self):
         def constant(x):
             bbb = torch.tensor([1.0])
@@ -530,6 +502,7 @@ class TestTensorExprFuser(BaseTestClass):
             np.testing.assert_allclose(np.zeros(1024), x.cpu().numpy())
 
 
+    @suppress_warnings
     def test_min_max(self):
         def test(x, y):
             return torch.max(torch.min(x, y), torch.tensor([4.0]))
@@ -1037,7 +1010,8 @@ class TestTensorExprFuser(BaseTestClass):
             r = test(x, y, z, a, b)
             xn, yn, zn = [t.numpy() for t in (x, y, z)]
             np.testing.assert_allclose(r.numpy(), xn + yn * a + zn * b)
-            assert llvm.elapsed_value() == 1 or interp.elapsed_value() == 1
+            # FIXME: interp.elapsed_value() also increments due to simplifier
+            assert llvm.elapsed_value() == 1 or interp.elapsed_value() > 1
 
 # FIXME: Blocked on profiling executor changes
 # def test_loop():
@@ -1055,7 +1029,7 @@ class TestTensorExprFuser(BaseTestClass):
 #    x, y, z = (torch.zeros(32, 32), torch.ones(32, 32), 4)
 #    test(x, y, z)
 #    r = test(x, y, z)
-#    assert llvm.elapsed_value == 1 or interp.elapsed_value() == 1
+#    assert llvm.elapsed_value == 1 or interp.elapsed_value() > 1
 
     def test_slice(self):
         def easy(x, y):
@@ -1073,10 +1047,10 @@ class TestTensorExprFuser(BaseTestClass):
         npr = a[0:512:2]
         npr = npr + npr
         np.testing.assert_allclose(npr.numpy(), x.numpy())
-        assert llvm.elapsed_value() == 1 or interp.elapsed_value() == 1
+        # FIXME: interp.elapsed_value() also increments due to simplifier
+        assert llvm.elapsed_value() == 1 or interp.elapsed_value() > 1
 
 
-    @unittest.skip("fails on trunk")
     def test_unsqueeze(self):
         def easy(x, y):
             a = torch.unsqueeze(x, 0)
@@ -1093,7 +1067,8 @@ class TestTensorExprFuser(BaseTestClass):
         npr = np.expand_dims(a, 0)
         npr = npr + npr
         np.testing.assert_allclose(npr, x.numpy())
-        assert llvm.elapsed_value() == 1 or interp.elapsed_value() == 1
+        # FIXME: interp.elapsed_value() also increments due to simplifier
+        assert llvm.elapsed_value() == 1 or interp.elapsed_value() > 1
 
 
     def test_transpose(self):
@@ -1108,7 +1083,8 @@ class TestTensorExprFuser(BaseTestClass):
         ref = test(x, y, z)
         res = test(x, y, z)
         np.testing.assert_allclose(ref.numpy(), res.numpy())
-        assert llvm.elapsed_value() == 1 or interp.elapsed_value() == 1
+        # FIXME: interp.elapsed_value() also increments due to simplifier
+        assert llvm.elapsed_value() == 1 or interp.elapsed_value() > 1
 
 
     def test_sliced_stride(self):
@@ -1123,7 +1099,8 @@ class TestTensorExprFuser(BaseTestClass):
         ref = test(x, y, z)
         res = test(x, y, z)
         np.testing.assert_allclose(ref.numpy(), res.numpy())
-        assert llvm.elapsed_value() == 1 or interp.elapsed_value() == 1
+        # FIXME: interp.elapsed_value() also increments due to simplifier
+        assert llvm.elapsed_value() == 1 or interp.elapsed_value() > 1
 
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
@@ -1168,7 +1145,7 @@ class TestTensorExprFuser(BaseTestClass):
             # np.testing.assert_allclose(res.cpu().numpy(), xn * yn * zn)
             # assert cuda.elapsed_value() == 1
 
-    @unittest.skip("guarding on static shapes is not working")
+    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
     def test_guard_fails(self):
         @torch.jit.script
         def test(x, y, z):
@@ -1181,7 +1158,6 @@ class TestTensorExprFuser(BaseTestClass):
         r3 = test(*[torch.rand(4).cuda() for _ in range(3)])
         assert cuda.elapsed_value() == 2
         r4 = test(*[torch.rand(7).cuda() for _ in range(3)])
-        print(test.graph_for(*[torch.rand(7).cuda() for _ in range(3)]))
         assert cuda.elapsed_value() == 2
 
     def test_bitwise_ops(self):
@@ -1225,6 +1201,29 @@ class TestTensorExprFuser(BaseTestClass):
         y = run_where(a, b)
         np.testing.assert_allclose(x.numpy(), y.numpy())
 
+    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+    def test_unused(self):
+        def test(x, y):
+            return x * x + torch.rand_like(y)
+        a = torch.rand(1, device="cuda")
+        b = torch.rand(1, device="cuda")
+        scripted = torch.jit.script(test)
+        scripted(a, b)
+        cx = CudaCodeGenExecuted()
+        scripted(a, b)
+        assert cx.elapsed_value() == 1
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+    def test_multi_rand(self):
+        def test(x):
+            y = torch.rand_like(x)
+            return (x + y) - (y - x)
+        a = torch.rand(4, device="cuda")
+        scripted = torch.jit.script(test)
+        scripted(a)
+        cx = CudaCodeGenExecuted()
+        assert torch.allclose(scripted(a), 2 * a)
+        assert cx.elapsed_value() == 1
 
 if __name__ == '__main__':
     unittest.main()

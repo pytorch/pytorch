@@ -1,4 +1,6 @@
+import copy
 import inspect
+import runpy
 import threading
 from functools import wraps
 import unittest
@@ -275,6 +277,30 @@ device_type_test_bases.append(CPUTestBase)
 if torch.cuda.is_available():
     device_type_test_bases.append(CUDATestBase)
 
+
+# Note [How to extend DeviceTypeTestBase to add new test device]
+# The following logic optionally allows downstream projects like pytorch/xla to
+# add more test devices.
+# Instructions:
+#  - Add a python file (e.g. pytorch/xla/test/pytorch_test_base.py) in downstream project.
+#    - Inside the file, one should inherit from `DeviceTypeTestBase` class and define
+#      a new DeviceTypeTest class (e.g. `XLATestBase`) with proper implementation of
+#      `instantiate_test` method.
+#    - DO NOT import common_device_type inside the file.
+#      `runpy.run_path` with `globals()` already properly setup the context so that
+#      `DeviceTypeTestBase` is already available.
+#    - Set a top-level variable `TEST_CLASS` equal to your new class.
+#      E.g. TEST_CLASS = XLATensorBase
+#  - To run tests with new device type, set `TORCH_TEST_DEVICE` env variable to path
+#    to this file. Multiple paths can be separated by `:`.
+# See pytorch/xla/test/pytorch_test_base.py for a more detailed example.
+_TORCH_TEST_DEVICES = os.environ.get('TORCH_TEST_DEVICES', None)
+if _TORCH_TEST_DEVICES:
+    for path in _TORCH_TEST_DEVICES.split(':'):
+        mod = runpy.run_path(path, init_globals=globals())
+        device_type_test_bases.append(mod['TEST_CLASS'])
+
+
 PYTORCH_CUDA_MEMCHECK = os.getenv('PYTORCH_CUDA_MEMCHECK', '0') == '1'
 
 
@@ -282,7 +308,7 @@ PYTORCH_CUDA_MEMCHECK = os.getenv('PYTORCH_CUDA_MEMCHECK', '0') == '1'
 # The tests in these test cases are derived from the generic tests in
 # generic_test_class.
 # See note "Generic Device Type Testing."
-def instantiate_device_type_tests(generic_test_class, scope, except_for=None):
+def instantiate_device_type_tests(generic_test_class, scope, except_for=None, only_for=None):
     # Removes the generic test class from its enclosing scope so its tests
     # are not discoverable.
     del scope[generic_test_class.__name__]
@@ -304,7 +330,12 @@ def instantiate_device_type_tests(generic_test_class, scope, except_for=None):
     # Creates device-specific test cases
     for base in device_type_test_bases:
         # Skips bases listed in except_for
+        if except_for is not None and only_for is not None:
+            assert base.device_type not in except_for or base.device_type not in only_for,\
+                "same device cannot appear in except_for and only_for"
         if except_for is not None and base.device_type in except_for:
+            continue
+        if only_for is not None and base.device_type not in only_for:
             continue
 
         class_name = generic_test_class.__name__ + base.device_type.upper()
@@ -320,7 +351,7 @@ def instantiate_device_type_tests(generic_test_class, scope, except_for=None):
                 assert inspect.isfunction(test), "Couldn't extract function from '{0}'".format(name)
 
                 # Instantiates the device-specific tests
-                device_type_test_class.instantiate_test(name, test)
+                device_type_test_class.instantiate_test(name, copy.deepcopy(test))
             else:  # Ports non-test member
                 assert name not in device_type_test_class.__dict__, "Redefinition of directly defined member {0}".format(name)
 
@@ -505,7 +536,6 @@ class dtypes(object):
     # Note: *args, **kwargs for Python2 compat.
     # Python 3 allows (self, *args, device_type='all').
     def __init__(self, *args, **kwargs):
-        assert args is not None and len(args) != 0, "No dtypes given"
         assert all(isinstance(arg, torch.dtype) for arg in args), "Unknown dtype in {0}".format(str(args))
         self.args = args
         self.device_type = kwargs.get('device_type', 'all')

@@ -264,12 +264,10 @@ std::string wireSerialize(
   }
 
   if (!tensors.empty()) {
-    torch::jit::Pickler pickler(
-        [&](const void* buf, size_t sz) -> size_t {
-          metaEntry.append(static_cast<const char*>(buf), sz);
-          return sz;
-        },
-        nullptr);
+    torch::jit::Pickler pickler([&](const void* buf, size_t sz) -> size_t {
+      metaEntry.append(static_cast<const char*>(buf), sz);
+      return sz;
+    });
     pickler.protocol();
     pickler.pushIValue(cloneSparseTensors(tensors));
     pickler.stop();
