@@ -144,7 +144,7 @@ class DispatchTable final {
 
   std::string listAllDispatchKeys() const {
     std::ostringstream str;
-    str << "ExpectoPatronum [";
+    str << "[";
 
     bool has_kernels = false;
     for (uint8_t iter = 0; iter != static_cast<uint8_t>(DispatchKey::NumDispatchKeys); ++iter) {
