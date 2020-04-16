@@ -368,6 +368,27 @@ Stmt* IRMutator::mutate(const Store* v) {
   return new Store(buf_new, indices_new, value_new, mask_new);
 }
 
+Stmt* IRMutator::mutate(const AtomicAdd* v) {
+  const Buf* buf = v->buf();
+
+  bool any_index_changed = false;
+  std::vector<const Expr*> indices_new;
+  for (const Expr* ind : v->indices()) {
+    const Expr* new_ind = ind->accept_mutator(this);
+    if (new_ind != ind) {
+      any_index_changed = true;
+    }
+    indices_new.push_back(new_ind);
+  }
+  const Expr* value = v->value();
+  const Buf* buf_new = dynamic_cast<const Buf*>(buf->accept_mutator(this));
+  const Expr* value_new = value->accept_mutator(this);
+  if (buf == buf_new && !any_index_changed && value == value_new) {
+    return (Stmt*)v;
+  }
+  return new AtomicAdd(buf_new, indices_new, value_new);
+}
+
 Stmt* IRMutator::mutate(const Allocate* v) {
   const Var* buffer_var_old = v->buffer_var();
   const Var* buffer_var_new =

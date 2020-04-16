@@ -788,6 +788,14 @@ Stmt* LoopNest::insertAllocFree(Stmt* stmt) {
     b->prepend_stmt(alloc);
     b->append_stmt(free);
   }
+  for (const auto& temp_buf : temp_bufs_) {
+    const Buf* buf = temp_buf.first;
+    Stmt* alloc =
+        new Allocate(buf->base_handle(), temp_buf.second, buf->dims());
+    Stmt* free = new Free(buf->base_handle());
+    b->prepend_stmt(alloc);
+    b->append_stmt(free);
+  }
   return b;
 }
 
@@ -1221,16 +1229,8 @@ void LoopNest::computeAt(Stmt* s, For* f) {
         bd);
   }
 
-  // Generate alloc/free stmts for 'temp'
-  Stmt* al = new Allocate(temp_buf->base_handle(), st->value()->dtype(), dims);
-  Stmt* fr = new Free(temp_buf->base_handle());
-
   // Add constructed stmts to the consumer loop
-  // TODO: Revisit this place later: we might want to move allocation out of the
-  // loop.
   f->body()->prepend_stmt(bd);
-  f->body()->prepend_stmt(al);
-  f->body()->append_stmt(fr);
 
   // Rewrite accesses to producer in consumer with accesses to temp
   LoopComputeAtRewriter lr(
@@ -1240,6 +1240,10 @@ void LoopNest::computeAt(Stmt* s, For* f) {
     Block* bb = dynamic_cast<Block*>(f->get_parent());
     bb->replace_stmt(f, new_f);
   }
+
+  // Mark the new temp buffer as requiring an alloc (it will be inserted as a
+  // part of prepareForCodegen).
+  temp_bufs_.emplace_back(std::make_pair(temp_buf, st->value()->dtype()));
 }
 
 } // namespace tensorexpr

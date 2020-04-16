@@ -1,8 +1,8 @@
+#include <test/cpp/tensorexpr/test_base.h>
 #include <memory>
 #include <sstream>
 #include <stdexcept>
 #include <unordered_map>
-#include <test/cpp/tensorexpr/test_base.h>
 
 #include <test/cpp/tensorexpr/padded_buffer.h>
 #include <torch/csrc/jit/tensorexpr/bounds_inference.h>
@@ -90,8 +90,7 @@ void testExprSimple02() {
             x_inner,
             0,
             4,
-            For::make(
-                y, 0, 5, Store::make(f, {x_1, y}, func(x_1, y), 1))));
+            For::make(y, 0, 5, Store::make(f, {x_1, y}, func(x_1, y), 1))));
     ExprHandle x_2 = x_tail + x_outer_end * 4;
     For* stmt2 = For::make(
         x_tail,
@@ -159,8 +158,7 @@ void testExprSplitWithTailNone() {
             x_inner,
             0,
             4,
-            For::make(
-                y, 0, 5, Store::make(f, {x_1, y}, func(x_1, y), 1))));
+            For::make(y, 0, 5, Store::make(f, {x_1, y}, func(x_1, y), 1))));
 
     std::ostringstream oss_ref;
     oss_ref << *stmt;
@@ -705,8 +703,7 @@ void testBoundsInference_4() {
   }
   {
     // Infer bounds on the inner loop body's scope
-    const std::vector<TensorAccessBoundsInfo>& bounds_info =
-        inferBounds(body);
+    const std::vector<TensorAccessBoundsInfo>& bounds_info = inferBounds(body);
     auto bounds_info_map = convertBoundsInfoToMap(bounds_info);
 
     ASSERT_EQ(bounds_info_map.at(a.data()).kind, kLoad);
@@ -824,8 +821,7 @@ void testBoundsInference_6() {
   }
   {
     // Infer bounds on the inner loop body's scope
-    const std::vector<TensorAccessBoundsInfo>& bounds_info =
-        inferBounds(body);
+    const std::vector<TensorAccessBoundsInfo>& bounds_info = inferBounds(body);
     auto bounds_info_map = convertBoundsInfoToMap(bounds_info);
 
     ASSERT_EQ(bounds_info_map.at(a.data()).kind, kLoad);
@@ -872,10 +868,8 @@ void testLoopNestComputeAt_1() {
   const std::string& verification_pattern =
       R"IR(
 # CHECK: for (int i_b = 0; i_b < N; i_b++)
-# CHECK:  Allocate
 # CHECK-NOT: A[
-# CHECK:  B[i_b] =
-# CHECK:  Free)IR";
+# CHECK:  B[i_b] =)IR";
 
   torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
 
@@ -944,13 +938,11 @@ void testLoopNestComputeAt_2() {
     const std::string& verification_pattern =
         R"IR(
 # CHECK: for (int cy = 0; cy < H; cy++)
-# CHECK:   Allocate
 # CHECK:   for
 # CHECK:     for
 # CHECK:   for (int cx = 0; cx < W; cx++)
 # CHECK-NOT: prod[
-# CHECK:     cons[
-# CHECK:  Free)IR";
+# CHECK:     cons[)IR";
     torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
 
     // Now check that the loop still produces the correct result.
@@ -976,12 +968,10 @@ void testLoopNestComputeAt_2() {
         R"IR(
 # CHECK: for (int cy = 0; cy < H; cy++)
 # CHECK:   for (int cx = 0; cx < W; cx++)
-# CHECK: {2, 2}
 # CHECK:     for
 # CHECK:       for
 # CHECK-NOT: prod[
-# CHECK:     cons[
-# CHECK:     Free)IR";
+# CHECK:     cons[)IR";
     torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
 
     // Now check that the loop still produces the correct result.
@@ -1061,10 +1051,8 @@ void testLoopNestComputeAt_3() {
 # CHECK:   for (int cx = 0; cx < W; cx++)
 # CHECK:     C[
 # CHECK: for (int dy = 0; dy < H; dy++)
-# CHECK:  {1, W}
 # CHECK:   for (int dx = 0; dx < W; dx++)
-# CHECK-NOT: A[
-# CHECK:  Free)IR";
+# CHECK-NOT: A[)IR";
     torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
 
     // Now check that the loop still produces the correct result.
@@ -1099,9 +1087,7 @@ void testLoopNestComputeAt_3() {
 # CHECK:     C[
 # CHECK: for (int dy = 0; dy < H; dy++)
 # CHECK:   for (int dx = 0; dx < W; dx++)
-# CHECK:  {1, 1}
-# CHECK-NOT: A[
-# CHECK:  Free)IR";
+# CHECK-NOT: A[)IR";
     torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
 
     // Now check that the loop still produces the correct result.
