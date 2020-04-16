@@ -2173,26 +2173,6 @@ class _TestTorchMixin(object):
                     o32[i + j - 1].add(torch.conv2(x[i], k[j], 'F'))
         self._test_conv_corr_eq(lambda x, k: torch.conv3(x, k, 'F'), reference)
 
-    def test_isfinite(self):
-        x = torch.Tensor([1, inf, 2, -inf, nan, -10])
-        self.assertEqual(torch.isfinite(x), torch.BoolTensor([True, False, True, False, False, True]))
-
-    def test_isfinite_int(self):
-        x = torch.tensor([1, 2, 3])
-        self.assertEqual(torch.isfinite(x), torch.BoolTensor([True, True, True]))
-
-    def test_isfinite_type(self):
-        with self.assertRaises(TypeError):
-            torch.isfinite(1)  # Parameter must be a tensor
-
-    def test_isinf_type(self):
-        with self.assertRaises(TypeError):
-            torch.isinf(1)  # Parameter must be a tensor
-
-    def test_isnan(self):
-        x = torch.Tensor([1, nan, 2])
-        self.assertEqual(torch.isnan(x), torch.tensor([False, True, False]))
-
     def test_dtype_is_signed(self):
         for dtype in torch.testing.get_all_dtypes():
             self.assertEqual(dtype.is_signed, torch.is_signed(torch.tensor(0, dtype=dtype)))
@@ -5693,6 +5673,65 @@ class TestTorchDeviceType(TestCase):
                 self.assertEqual((), torch.nn.functional.multi_margin_loss(input, target, reduction='mean').shape)
                 self.assertEqual((), torch.nn.functional.multi_margin_loss(input, target, reduction='sum').shape)
 
+    def _np_compare(self, fn_name, vals, device, dtype):
+        assert TEST_NUMPY
+
+        torch_fn = getattr(torch, fn_name)
+        np_fn = getattr(np, fn_name)
+
+        a = np.array(vals, dtype=torch_to_numpy_dtype_dict[dtype])
+        np_result = torch.from_numpy(np_fn(a))
+
+        t = torch.tensor(vals, device=device, dtype=dtype)
+        torch_result = torch_fn(t).cpu()
+
+        self.assertEqual(np_result, torch_result)
+
+    @unittest.skipIf(not TEST_NUMPY, 'NumPy not found')
+    @dtypes(torch.float)
+    def test_isfinite_isinf_isnan(self, device, dtype):
+        vals = (-float('inf'), float('inf'), float('nan'), -1, 0, 1)
+
+        self._np_compare('isfinite', vals, device, dtype)
+        self._np_compare('isinf', vals, device, dtype)
+        self._np_compare('isnan', vals, device, dtype)
+
+    @unittest.skipIf(not TEST_NUMPY, 'NumPy not found')
+    @dtypes(torch.long)
+    def test_isfinite_isinf_isnan_int(self, device, dtype):
+        vals = (-1, 0, 1)
+
+        self._np_compare('isfinite', vals, device, dtype)
+        self._np_compare('isinf', vals, device, dtype)
+        self._np_compare('isnan', vals, device, dtype)
+
+    @unittest.skipIf(not TEST_NUMPY, 'NumPy not found')
+    @dtypes(torch.complex64)
+    def test_isfinite_isinf_isnan_complex(self, device, dtype):
+        vals = (
+            complex(-float('inf'), float('inf')),
+            complex(-float('inf'), 0),
+            complex(0, float('inf')),
+            complex(float('inf'), float('nan')),
+            complex(float('nan'), 0),
+            complex(-1, 0),
+            complex(0, 1)
+        )
+
+        self._np_compare('isfinite', vals, device, dtype)
+        self._np_compare('isinf', vals, device, dtype)
+        self._np_compare('isnan', vals, device, dtype)
+
+    @onlyCPU
+    def test_isfinite_type(self, device):
+        with self.assertRaises(TypeError):
+            torch.isfinite(1)  # Parameter must be a tensor
+
+    @onlyCPU
+    def test_isinf_type(self, device):
+        with self.assertRaises(TypeError):
+            torch.isinf(1)  # Parameter must be a tensor
+
     @onlyCPU
     @dtypes(torch.float)
     def test_diag(self, device, dtype):
@@ -6136,20 +6175,6 @@ class TestTorchDeviceType(TestCase):
 
     def test_logical_or(self, device):
         self._test_logical(device, 'logical_or', [10, 0, 1, 0], [1, 0, 0, 10], [1, 0, 1, 1])
-
-    def test_isinf(self, device):
-        t1 = torch.Tensor([1, inf, 2, -inf, nan]).to(device)
-        t2 = torch.ByteTensor([1, 2, 3]).to(device)
-        t3 = torch.CharTensor([1, 2, 3]).to(device)
-        t4 = torch.ShortTensor([1, 2, 3]).to(device)
-        t5 = torch.IntTensor([1, 2, 3]).to(device)
-        t6 = torch.LongTensor([1, 2, 3]).to(device)
-        self.assertEqual(torch.isinf(t1), torch.tensor([0, 1, 0, 1, 0], dtype=torch.bool, device=device))
-        self.assertEqual(torch.isinf(t2), torch.tensor([0, 0, 0], dtype=torch.bool, device=device))
-        self.assertEqual(torch.isinf(t3), torch.tensor([0, 0, 0], dtype=torch.bool, device=device))
-        self.assertEqual(torch.isinf(t4), torch.tensor([0, 0, 0], dtype=torch.bool, device=device))
-        self.assertEqual(torch.isinf(t5), torch.tensor([0, 0, 0], dtype=torch.bool, device=device))
-        self.assertEqual(torch.isinf(t6), torch.tensor([0, 0, 0], dtype=torch.bool, device=device))
 
     def test_clamp(self, device):
         m1 = torch.rand(100, device=device).mul(5).add(-2.5)  # uniform in [-2.5, 2.5]
