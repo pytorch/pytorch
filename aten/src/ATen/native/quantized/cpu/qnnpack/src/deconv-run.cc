@@ -7,7 +7,7 @@ namespace qnnpack {
 
 // TODO: WIP
 enum pytorch_qnnp_status qnnpackDeConv(
-    const conv_param_t& deconv_p,
+    const deconv_param_t& deconv_p,
     void* packed_weights,
     const size_t batch_size,
     const size_t input_height,
