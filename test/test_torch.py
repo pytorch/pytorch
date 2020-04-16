@@ -453,8 +453,7 @@ class _TestTorchMixin(object):
                             if x1.is_floating_point():
                                 condition = (x1 < 0.5)
                             elif x1.is_complex():
-                                #TODO: modify this after abs is updated for complex
-                                condition = (x1.abs().to(float) < 0.5)
+                                condition = (x1.abs() < 0.5)
                             else:
                                 condition = (x1 == 1)
                             expected = condition.to(x1.dtype) * x1 + (~condition).to(x2.dtype) * x2
@@ -595,7 +594,7 @@ class _TestTorchMixin(object):
             lambda n, d: logsumexp(n, d),
             use_integral=False)
 
-    def _test_reduce_integer_upcast(self, fn, has_out=True, test_complex = True):
+    def _test_reduce_integer_upcast(self, fn, has_out=True, test_complex=True):
         shape = (3, 4, 5)
         reduced_shape = fn(torch.ones(shape)).shape
 
@@ -10114,6 +10113,8 @@ class TestTorchDeviceType(TestCase):
     def test_sign(self, device):
         for dtype in torch.testing.get_all_math_dtypes(device):
             if dtype.is_complex:
+                self.assertRaises(RuntimeError, lambda: torch.finfo(dtype))
+                self.assertRaises(RuntimeError, lambda: torch.sign(torch.tensor([3+4j], dype=dtype)))
                 continue
 
             # Include NaN for floating point numbers
@@ -11109,9 +11110,6 @@ class TestTorchDeviceType(TestCase):
                 return torch.randint(-5, 5, size=size, dtype=dtype, device=device)
 
         for dtype in torch.testing.get_all_math_dtypes(device):
-            # TODO: update this after torch.isclose is landed for complex
-            if dtype.is_complex:
-                continue
             a = rand_tensor((2, 2), dtype=dtype, device=device)
             b = rand_tensor((2, 2), dtype=dtype, device=device)
             c = rand_tensor((2, 2), dtype=dtype, device=device)
@@ -11122,6 +11120,11 @@ class TestTorchDeviceType(TestCase):
             actual = torch.addcmul(a, b, c, value=alpha)
             expected = a + alpha * b * c
             self.assertTrue(torch.allclose(expected, actual))
+
+            # TODO: update this after torch.isclose is landed for complex
+            if dtype.is_complex:
+                self.assertRaises(RuntimeError, lambda: torch.allclose(expected, actual))
+                continue
 
             with self.maybeWarnsRegex(
                     UserWarning, "This overload of addcmul is deprecated"):
