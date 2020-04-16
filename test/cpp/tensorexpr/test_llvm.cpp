@@ -8,6 +8,7 @@
 #include "torch/csrc/jit/tensorexpr/function.h"
 #include "torch/csrc/jit/tensorexpr/ir.h"
 #include "torch/csrc/jit/tensorexpr/ir_printer.h"
+#include "torch/csrc/jit/tensorexpr/ir_simplifier.h"
 #include "torch/csrc/jit/tensorexpr/llvm_codegen.h"
 #include "torch/csrc/jit/tensorexpr/loopnest.h"
 #include "torch/csrc/jit/tensorexpr/tensor.h"
@@ -1173,6 +1174,31 @@ void testLLVMDynamicShape2D() {
   testWithSize(1, 8);
   testWithSize(16, 32);
   testWithSize(37, 11);
+}
+
+void testLLVMEmptyStmt() {
+  KernelScope kernel_scope;
+  Stmt* s = new Block({});
+
+  LLVMCodeGen cg(s, {});
+  cg.call({});
+  // Just don't crash.
+}
+
+void testLLVMEliminatedStmt() {
+  KernelScope kernel_scope;
+  Buffer a(BufHandle("a", {1}), kFloat);
+
+  Tensor* c = Compute("c", {{0, "m"}}, [&](const VarHandle& m) { return m; });
+
+  LoopNest l({c});
+  l.prepareForCodegen();
+  Stmt* s = l.root_stmt();
+  s = IRSimplifier::simplify(s);
+  LLVMCodeGen cg(s, {a, c});
+  std::vector<float> aData(1, 1.0f);
+  std::vector<float> cData(0, 0.0f);
+  cg.call({aData, cData});
 }
 
 } // namespace jit

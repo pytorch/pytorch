@@ -2920,6 +2920,26 @@ graph(%Ra, %Rb):
         x = torch.rand(3, 4)
         self.assertEqual(random_bar(x), (x + 1)[0:1])
 
+    def test_trace_inline_shape(self):
+        # testing peephole optimization of size is turned into a constant
+        # in script fn
+
+        @torch.jit.script
+        def tensor_size(x: torch.Tensor) -> torch.Tensor:
+            return torch.tensor([x.size()[0]])
+
+        self.assertEqual(
+            tensor_size(torch.rand(15,)),
+            torch.tensor([15])
+        )
+
+        traced_tensor_size = torch.jit.trace(tensor_size, torch.rand(7,))
+
+        self.assertEqual(
+            traced_tensor_size(torch.rand(15,)),
+            torch.tensor([15])
+        )
+
     def test_export_tensoroption_to(self):
         def foo(x):
             return x[0].clone().detach().cpu() + x
@@ -3490,6 +3510,34 @@ class TestScript(JitTestCase):
             for inp in inputs:
                 results = fct_loop(inp, NUM_ITERATIONS)
                 self.assertEqual(results[1], expected)
+
+    def test_ignored_method_binding(self):
+        class Bar(torch.nn.Module):
+            def __init__(self):
+                super(Bar, self).__init__()
+                self.x : int = 0
+
+            @torch.jit.export
+            def setx(self, x : int):
+                self.x = x
+
+            @torch.jit.export
+            def getx(self):
+                return self.x
+
+            @torch.jit.ignore
+            def ignored_getx(self):
+                return self.x
+
+        b = Bar()
+        b.setx(123)
+        sb = torch.jit.script(b)
+        self.assertEqual(sb.getx(), 123)
+        self.assertEqual(sb.ignored_getx(), 123)
+
+        sb.setx(456)
+        self.assertEqual(sb.getx(), 456)
+        self.assertEqual(sb.ignored_getx(), 456)
 
     def test_set_attribute_through_optional(self):
         class A(torch.nn.Module):
@@ -10554,6 +10602,20 @@ a")
             return b
         v = torch.rand(10, 3)
         self.assertEqual(torch.chunk(v, dim=0, chunks=2)[0], foo(v))
+
+    def test_trace_mixed_by_script_with_dict_output(self):
+        @torch.jit.script
+        def return_dict(input: torch.Tensor) -> Dict[torch.Tensor, torch.Tensor]:
+            return {input : input + 1}
+
+        class TraceModule(torch.nn.Module):
+            def forward(self, input):
+                dict = return_dict(input)
+                return dict[input] + list(dict.keys())[0]
+
+        x = torch.rand(10, 3)
+        tm = torch.jit.trace(TraceModule(), x)
+        self.assertEqual(tm(x), x + 1 + x)
 
     def test_script_copy(self):
         class M(torch.nn.Module):

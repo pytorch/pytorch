@@ -267,6 +267,8 @@ namespace jit {
   _(LLVMBindDynamicShapeAdd)               \
   _(LLVMTensorDynamicShapeAdd)             \
   _(LLVMDynamicShape2D)                    \
+  _(LLVMEmptyStmt)                         \
+  _(LLVMEliminatedStmt)                    \
   _(LLVMIfThenElseTest)                    \
   _(LLVMVectorizerLoadStoreTest)
 
@@ -274,8 +276,10 @@ namespace jit {
   _(CudaTestVectorAdd01)                   \
   _(CudaTestVectorAdd02)                   \
   _(CudaDynamicShape2D)                    \
-  _(CudaTestRand01)                        \
-  _(CudaDynamicShapeSplit)
+  _(CudaDynamicShapeSplit)                 \
+  _(CudaOneBlockOneThreadGlobalReduce1)    \
+  _(CudaOneBlockMultiThreadGlobalReduce1)  \
+  _(CudaTestRand01)
 
 #define DECLARE_TENSOREXPR_TEST(name) void test##name();
 TH_FORALL_TENSOREXPR_TESTS(DECLARE_TENSOREXPR_TEST)

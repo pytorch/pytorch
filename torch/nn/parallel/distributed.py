@@ -48,25 +48,7 @@ class DistributedDataParallel(Module):
     Creation of this class requires that ``torch.distributed`` to be already
     initialized, by calling :func:`torch.distributed.init_process_group`.
 
-    ``DistributedDataParallel`` can be used in the following two ways:
-
-    (1) Single-Process Multi-GPU
-
-    In this case, a single process will be
-    spawned on each host/node and each process will operate on all the GPUs
-    of the node where it's running. To use ``DistributedDataParallel`` in
-    this way, you can simply construct the model as the following:
-
-        >>> torch.distributed.init_process_group(backend="nccl")
-        >>> model = DistributedDataParallel(model) # device_ids will include all GPU devices by default
-
-    (2) Multi-Process Single-GPU
-
-    This is the highly recommended way to use ``DistributedDataParallel``, with
-    multiple processes, each of which operates on a single GPU. This is
-    currently the fastest approach to do data parallel training using PyTorch
-    and applies to both single-node(multi-GPU) and multi-node data
-    parallel training. It is proven to be significantly faster than
+    ``DistributedDataParallel`` is proven to be significantly faster than
     :class:`torch.nn.DataParallel` for single-node multi-GPU data
     parallel training.
 
@@ -315,6 +297,22 @@ class DistributedDataParallel(Module):
         (5) passing a handle of DDP to SyncBatchNorm Layer
         """
         if self.device_ids and len(self.device_ids) > 1:
+
+            import warnings
+            warnings.warn(
+                "Single-Process Multi-GPU is not the recommended mode for "
+                "DDP. In this mode, each DDP instance operates on multiple "
+                "devices and creates multiple module replicas within one "
+                "process. The overhead of scatter/gather and GIL contention "
+                "in every forward pass can slow down training. "
+                "Please consider using one DDP instance per device or per "
+                "module replica by explicitly setting device_ids or "
+                "CUDA_VISIBLE_DEVICES. "
+                "NB: There is a known issue in nn.parallel.replicate that "
+                "prevents a single DDP instance to operate on multiple model "
+                "replicas."
+            )
+
             # only create replicas for single-device CUDA modules
             #
             # TODO: we don't need to replicate params in here. they're always going to
