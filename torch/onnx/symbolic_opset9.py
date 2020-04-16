@@ -972,7 +972,7 @@ def index_select(g, self, dim, index):
         index = g.op("Constant", value_t=torch.LongTensor([index_const]))
     elif index_dim is not None:
         if index_dim == 0:
-            # Index is a scalar. Reshape it to a size 1 tensor. 
+            # Index is a scalar. Reshape it to a size 1 tensor.
             index = g.op("Reshape", index, g.op("Constant", value_t=torch.LongTensor([1])))
     return g.op("Gather", self, index, axis_i=dim)
 
@@ -1950,10 +1950,10 @@ def multinomial(g, input, num_samples, replacement=False, generator=None):
                 dtype_i=sym_help.cast_pytorch_to_onnx['Long'],
                 sample_size_i=num_samples)
 
-def baddbmm(g, self, batch1, batch2, beta, alpha):  
-    dtype = self.type().scalarType()    
-    batch_mul = matmul(g, batch1, batch2)       
-    mul_a = mul(g, batch_mul, g.op("Cast", alpha, to_i=sym_help.cast_pytorch_to_onnx[dtype]))       
+def baddbmm(g, self, batch1, batch2, beta, alpha):
+    dtype = self.type().scalarType()
+    batch_mul = matmul(g, batch1, batch2)
+    mul_a = mul(g, batch_mul, g.op("Cast", alpha, to_i=sym_help.cast_pytorch_to_onnx[dtype]))
     mul_b = mul(g, self, g.op("Cast", beta, to_i=sym_help.cast_pytorch_to_onnx[dtype]))
     return add(g, mul_a, mul_b)
 
@@ -1962,3 +1962,6 @@ def gelu(g, self):
     erf = g.op('Erf', div(g, self, torch.tensor(_sqrt2)))
     erf_plusone = add(g, erf, g.op('Constant', value_t=torch.tensor(1, dtype=torch.float)))
     return mul(g, mul(g, self, erf_plusone), g.op('Constant', value_t=torch.tensor(0.5, dtype=torch.float)))
+
+def dummy_op(g, input):
+    return g.op("dummy_op", input)

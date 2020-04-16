@@ -616,6 +616,10 @@ def _run_symbolic_function(g, n, inputs, env, operator_export_type=OperatorExpor
                                   "torch.onnx.symbolic_opset{}.{} does not exist"
                                   .format(op_name, opset_version, op_name))
                 op_fn = sym_registry.get_registered_op(op_name, '', opset_version)
+                
+                if "dummy_op" in op_fn.__name__:
+                    return op_fn(g, inputs[0], **attrs)
+
                 return op_fn(g, *inputs, **attrs)
 
         elif ns == "prim":
