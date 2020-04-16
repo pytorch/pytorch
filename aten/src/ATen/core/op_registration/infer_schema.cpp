@@ -18,7 +18,7 @@ std::vector<Argument> createArgumentVector(c10::ArrayRef<ArgumentDef> args) {
 }
 // This is intentionally a separate function and in a .cpp file
 // because then the template is smaller and that benefits binary size
-FunctionSchema make_function_schema(std::string&& name, std::string&& overload_name, c10::ArrayRef<ArgumentDef> arguments, c10::ArrayRef<ArgumentDef> returns) {
+C10_EXPORT FunctionSchema make_function_schema(std::string&& name, std::string&& overload_name, c10::ArrayRef<ArgumentDef> arguments, c10::ArrayRef<ArgumentDef> returns) {
   return FunctionSchema(std::move(name), std::move(overload_name), createArgumentVector(arguments), createArgumentVector(returns));
 }
 }
