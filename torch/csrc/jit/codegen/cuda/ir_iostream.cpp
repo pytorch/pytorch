@@ -276,11 +276,11 @@ void IRPrinter::handle(const BinaryOp* const bop) {
     os << ";\n";
 }
 
-void IRPrinter::handle(const ConditionalOp* const cop) {
-  bool istvop = isTVOp(cop);
+void IRPrinter::handle(const TernaryOp* const top) {
+  bool istvop = isTVOp(top);
   if (!print_inline_) {
     indent();
-    os << cop->out();
+    os << top->out();
 
     // tensor operations tend to be long, break them up into multiple lines
     if (istvop) {
@@ -291,22 +291,23 @@ void IRPrinter::handle(const ConditionalOp* const cop) {
 
     os << " = ";
   } else {
-    check_inlineable(cop);
+    check_inlineable(top);
   }
 
-  handle(cop->cond());
-  os << " ? ";
+  os << top->getTernaryOpType() << "(";
+  handle(top->in1());
   if (istvop) {
     os << "\n";
     indent();
   }
-  handle(cop->then_val());
+  os << ", ";
+  handle(top->in2());
   if (istvop) {
     os << "\n";
     indent();
   }
-  os << ": ";
-  handle(cop->else_val());
+  os << ", ";
+  handle(top->in3());
   os << ")";
 
   if (istvop)

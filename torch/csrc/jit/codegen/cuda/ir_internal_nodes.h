@@ -99,42 +99,47 @@ struct TORCH_CUDA_API BinaryOp : public Expr {
 };
 
 /*
- * A specialization for Conditional operations.
+ * A specialization for Ternary operations.
  * There are 3 inputs and 1 output
  * Examples include:
  *  1) Threshold
  *  2) Where
  */
-struct TORCH_CUDA_API ConditionalOp : public Expr {
-  ~ConditionalOp() = default;
-  ConditionalOp(Val* _out, Val* _cond, Val* _then, Val* _else);
+struct TORCH_CUDA_API TernaryOp : public Expr {
+  ~TernaryOp() = default;
+  TernaryOp(TernaryOpType _type, Val* _out, Val* _in1, Val* _in2, Val* _in3);
 
-  ConditionalOp(const ConditionalOp& other) = delete;
-  ConditionalOp& operator=(const ConditionalOp& other) = delete;
+  TernaryOp(const TernaryOp& other) = delete;
+  TernaryOp& operator=(const TernaryOp& other) = delete;
 
-  ConditionalOp(ConditionalOp&& other) = delete;
-  ConditionalOp& operator=(ConditionalOp&& other) = delete;
+  TernaryOp(TernaryOp&& other) = delete;
+  TernaryOp& operator=(TernaryOp&& other) = delete;
 
   Val* out() const noexcept {
     return out_;
   }
-  Val* cond() const noexcept {
-    return cond_;
+  Val* in1() const noexcept {
+    return in1_;
   }
-  Val* then_val() const noexcept {
-    return then_;
+  Val* in2() const noexcept {
+    return in2_;
   }
-  Val* else_val() const noexcept {
-    return else_;
+  Val* in3() const noexcept {
+    return in3_;
   }
 
-  bool sameAs(const ConditionalOp* other) const;
+  TernaryOpType getTernaryOpType() const noexcept {
+    return ternary_op_type_;
+  }
+
+  bool sameAs(const TernaryOp* other) const;
 
  private:
+  const TernaryOpType ternary_op_type_;
   Val* const out_;
-  Val* const cond_;
-  Val* const then_;
-  Val* const else_;
+  Val* const in1_;
+  Val* const in2_;
+  Val* const in3_;
 };
 
 /*

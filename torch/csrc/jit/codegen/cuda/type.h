@@ -28,7 +28,7 @@ enum class DataType { Float, Int, Null };
 enum class ExprType {
   UnaryOp,
   BinaryOp,
-  ConditionalOp,
+  TernaryOp,
   ForLoop,
   IfThenElse,
   Allocate,
@@ -103,6 +103,12 @@ enum class BinaryOpType {
   NE
 };
 
+enum class TernaryOpType {
+  Clamp,
+  Threshold,
+  Where
+};
+
 enum class ParallelType {
   BIDz,
   BIDy,
@@ -126,6 +132,7 @@ TORCH_CUDA_API std::ostream& operator<<(std::ostream&, const DataType);
 TORCH_CUDA_API std::ostream& operator<<(std::ostream&, const ExprType);
 TORCH_CUDA_API std::ostream& operator<<(std::ostream&, const UnaryOpType);
 TORCH_CUDA_API std::ostream& operator<<(std::ostream&, const BinaryOpType);
+TORCH_CUDA_API std::ostream& operator<<(std::ostream&, const TernaryOpType);
 TORCH_CUDA_API std::ostream& operator<<(std::ostream&, const ParallelType);
 
 std::string stringify(const ParallelType);

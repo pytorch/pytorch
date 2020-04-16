@@ -438,7 +438,7 @@ bool isTV(const Val* const val) {
 bool isTVOp(const Expr* expr) {
   if (expr->nOutputs() == 1 && isTV(expr->output(0)) &&
       (expr->getExprType().value() == ExprType::BinaryOp ||
-       expr->getExprType().value() == ExprType::ConditionalOp ||
+       expr->getExprType().value() == ExprType::TernaryOp ||
        expr->getExprType().value() == ExprType::UnaryOp))
     return true;
   return false;

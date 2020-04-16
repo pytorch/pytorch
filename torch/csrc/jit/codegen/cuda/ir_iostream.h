@@ -19,7 +19,7 @@ struct Expr;
 
 struct UnaryOp;
 struct BinaryOp;
-struct ConditionalOp;
+struct TernaryOp;
 
 struct ForLoop;
 struct IfThenElse;
@@ -104,7 +104,7 @@ struct TORCH_CUDA_API IRPrinter : public OptInConstDispatch {
 
   virtual void handle(const UnaryOp* const);
   virtual void handle(const BinaryOp* const);
-  virtual void handle(const ConditionalOp* const);
+  virtual void handle(const TernaryOp* const);
 
   virtual void handle(const ForLoop* const);
   virtual void handle(const IfThenElse* const);

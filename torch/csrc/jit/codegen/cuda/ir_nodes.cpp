@@ -97,23 +97,26 @@ bool BinaryOp::sameAs(const BinaryOp* other) const {
   return true;
 }
 
-ConditionalOp::ConditionalOp(Val* _out, Val* _cond, Val* _then, Val* _else)
-    : Expr(ExprType::ConditionalOp),
+TernaryOp::TernaryOp(TernaryOpType _type, Val* _out, Val* _in1, Val* _in2, Val* _in3)
+    : Expr(ExprType::TernaryOp),
+      ternary_op_type_{_type},
       out_{_out},
-      cond_{_cond},
-      then_{_then},
-      else_{_else} {
+      in1_{_in1},
+      in2_{_in2},
+      in3_{_in3} {
   addOutput(_out);
-  addInput(_cond);
-  addInput(_then);
-  addInput(_else);
+  addInput(_in1);
+  addInput(_in2);
+  addInput(_in3);
   this->name_ = FusionGuard::getCurFusion()->registerExpr(this);
 }
 
-bool ConditionalOp::sameAs(const ConditionalOp* other) const {
-  if ( ! (    cond()->sameAs(other->cond())
-           && then_val()->sameAs(other->then_val())
-           && else_val()->sameAs(other->else_val())))
+bool TernaryOp::sameAs(const TernaryOp* other) const {
+  if (getTernaryOpType() != other->getTernaryOpType())
+    return false;
+  if ( ! (    in1()->sameAs(other->in1())
+           && in2()->sameAs(other->in2())
+           && in3()->sameAs(other->in3())))
     return false;
   return true;
 }

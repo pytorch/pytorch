@@ -296,22 +296,25 @@ Statement* GPULower::mutate(BinaryOp* bop) {
   return new_op;
 }
 
-Statement* GPULower::mutate(ConditionalOp* cop) {
-  if (!ir_utils::isTVOp(cop))
-    return OptOutMutator::mutate(cop);
+Statement* GPULower::mutate(TernaryOp* top) {
+  if (!ir_utils::isTVOp(top))
+    return OptOutMutator::mutate(top);
 
-  TensorIndex* out = getConsumerIndex(ir_utils::asTV(cop->out()));
-  Val* cond     = cop->cond();
-  Val* then_val = cop->then_val();
-  Val* else_val = cop->else_val();
+  TensorIndex* out = getConsumerIndex(ir_utils::asTV(top->out()));
+  Val* in1 = top->in1();
+  Val* in2 = top->in2();
+  Val* in3 = top->in3();
 
-  if (ir_utils::isTV(then_val))
-    then_val = getProducerIndex(ir_utils::asTV(then_val), ir_utils::asTV(cop->out()));
+  if (ir_utils::isTV(in1))
+    in1 = getProducerIndex(ir_utils::asTV(in1), ir_utils::asTV(top->out()));
 
-  if (ir_utils::isTV(else_val))
-    else_val = getProducerIndex(ir_utils::asTV(else_val), ir_utils::asTV(cop->out()));
+  if (ir_utils::isTV(in2))
+    in2 = getProducerIndex(ir_utils::asTV(in2), ir_utils::asTV(top->out()));
 
-  Expr* new_op = new ConditionalOp(out, cond, then_val, else_val);
+  if (ir_utils::isTV(in3))
+    in3 = getProducerIndex(ir_utils::asTV(in3), ir_utils::asTV(top->out()));
+
+  Expr* new_op = new TernaryOp(top->getTernaryOpType(), out, in1, in2, in3);
 
   return new_op;
 }
