@@ -957,12 +957,13 @@ int dictPopItem(Stack& stack) {
   if (dict.size() == 0) {
     AT_ERROR("popitem(): dictionary is empty");
   }
-  auto item = dict.begin();
-  auto erase_count = dict.erase(item->key());
+  auto head_item = dict.begin();
+
+  IValue tuple =
+      c10::ivalue::Tuple::create({head_item->key(), head_item->value()});
+  auto erase_count = dict.erase(head_item->key());
   TORCH_CHECK(
       erase_count == 1, "Expected to erase 1 item, found ", erase_count);
-
-  IValue tuple = c10::ivalue::Tuple::create({item->key(), item->value()});
   push(stack, tuple);
   return 0;
 }
