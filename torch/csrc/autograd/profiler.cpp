@@ -32,8 +32,10 @@ bool unused_ = []() {
   at::ThreadLocalState::registerThreadLocalSetting(
     at::ThreadLocalSetting::PROFILER,
     []() {
-      return at::SettingValue{.pair =
-          {(int32_t)config.state, (int32_t)config.report_input_shapes}};
+      auto v = at::SettingValue();
+      v.pair.first = (int32_t)config.state;
+      v.pair.second = (int32_t)config.report_input_shapes;
+      return v;
     },
     [](at::SettingValue v) {
       // ThreadLocalState propagates profiler state across threads and
