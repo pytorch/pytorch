@@ -139,14 +139,27 @@ struct _cpu_scatter_gather_dim_loop {
   }
 };
 
+// implement reduce_multiply as a class since the multiplication requires a type
+// specialization for the boolean operation (which refuses to proceed the compilation
+// on clang).
+class ReduceMultiply {
+public:
+  ReduceMultiply() {};
+  void operator()(auto * self_data, auto * src_data) {
+    *self_data *= *src_data;
+  };
+
+  void operator()(bool * self_data, bool * src_data) {
+    *self_data = *self_data && *src_data;
+  };
+};
+ReduceMultiply reduce_multiply;
+
 auto reduce_sum = [](auto * self_data, auto * src_data) {
                     *self_data += *src_data;
                   };
 auto reduce_subtract = [](auto * self_data, auto * src_data) {
                          *self_data -= *src_data;
-                       };
-auto reduce_multiply = [](auto * self_data, auto * src_data) {
-                         *self_data *= *src_data;
                        };
 auto reduce_divide = [](auto * self_data, auto * src_data) {
                        *self_data /= *src_data;
