@@ -40,7 +40,7 @@ std::unique_ptr<FunctionSchema> inferFunctionSchemaFromFunctor() {
  * > static auto registry = c10::RegisterOperators()
  * >     .op(c10::RegisterOperators::options()
  * >         .schema("my_op")
- * >         .kernel<my_kernel_cpu>(DispatchKey::CPUTensorId));
+ * >         .kernel<my_kernel_cpu>(DispatchKey::CPU));
  */
 class CAFFE2_API RegisterOperators final {
 public:
@@ -89,14 +89,14 @@ public:
      * > static auto registry = c10::RegisterOperators()
      * >     .op(c10::RegisterOperators::options()
      * >         .schema("my_op")
-     * >         .kernel<my_kernel_cpu>(DispatchKey::CPUTensorId));
+     * >         .kernel<my_kernel_cpu>(DispatchKey::CPU));
      * >
      * >
      * > // Explicitly specify full schema
      * > static auto registry = c10::RegisterOperators()
      * >     .op(c10::RegisterOperators::options()
      * >         .schema("my_op(Tensor a) -> Tensor")
-     * >         .kernel<my_kernel_cpu>(DispatchKey::CPUTensorId));
+     * >         .kernel<my_kernel_cpu>(DispatchKey::CPU));
      */
     Options&& schema(const std::string& schemaOrName) {
       TORCH_CHECK(!schemaOrName_.has_value(), "Tried to register operator ", schemaOrName," but specified schema multiple times. You can only specify the schema once per operator registration.");
@@ -127,7 +127,7 @@ public:
      * > static auto registry = c10::RegisterOperators()
      * >     .op(c10::RegisterOperators::options()
      * >         .schema("my_op")
-     * >         .kernel<my_kernel_cpu>(DispatchKey::CPUTensorId));
+     * >         .kernel<my_kernel_cpu>(DispatchKey::CPU));
      *
      * The functor constructor can take arguments to configure the kernel.
      * The arguments are defined in the kernel registration.
@@ -146,7 +146,7 @@ public:
      * > static auto registry = c10::RegisterOperators()
      * >     .op(c10::RegisterOperators::options()
      * >         .schema("my_op")
-     * >         .kernel<my_kernel_cpu>(DispatchKey::CPUTensorId, "some_configuration", 3, true));
+     * >         .kernel<my_kernel_cpu>(DispatchKey::CPU, "some_configuration", 3, true));
      */
     template<class KernelFunctor, class... ConstructorParameters>
     // enable_if: only enable it if KernelFunctor is actually a functor
@@ -156,7 +156,7 @@ public:
 
       return std::move(*this).kernel(
         std::move(dispatch_key),
-        KernelFunction::makeFromUnboxedFunctorFactory<KernelFunctor>(impl::KernelFactory<KernelFunctor, std::decay_t<ConstructorParameters>...>(std::forward<ConstructorParameters>(constructorParameters)...)),
+        KernelFunction::makeFromUnboxedFunctor<false, KernelFunctor>(std::make_unique<KernelFunctor>(std::forward<ConstructorParameters>(constructorParameters)...)),
         detail::inferFunctionSchemaFromFunctor<KernelFunctor>()
       );
     }
@@ -207,7 +207,7 @@ public:
 
       return std::move(*this).kernel(
         c10::nullopt,
-        KernelFunction::makeFromUnboxedFunctorFactory<KernelFunctor>(impl::KernelFactory<KernelFunctor, std::decay_t<ConstructorParameters>...>(std::forward<ConstructorParameters>(constructorParameters)...)),
+        KernelFunction::makeFromUnboxedFunctor<false, KernelFunctor>(std::make_unique<KernelFunctor>(std::forward<ConstructorParameters>(constructorParameters)...)),
         detail::inferFunctionSchemaFromFunctor<KernelFunctor>()
       );
     }
@@ -224,7 +224,7 @@ public:
      * > static auto registry = c10::RegisterOperators()
      * >     .op(c10::RegisterOperators::options()
      * >         .schema("my_op")
-     * >         .kernel<decltype(my_kernel_cpu), &my_kernel_cpu>(DispatchKey::CPUTensorId));
+     * >         .kernel<decltype(my_kernel_cpu), &my_kernel_cpu>(DispatchKey::CPU));
      */
     template<class FuncType, FuncType* kernel_func>
     // enable_if: only enable it if FuncType is actually a function
@@ -338,7 +338,7 @@ public:
      * > static auto registry = c10::RegisterOperators()
      * >     .op(c10::RegisterOperators::options()
      * >         .schema("my_op")
-     * >         .kernel(DispatchKey::CPUTensorId, [] (Tensor a) -> Tensor {...}));
+     * >         .kernel(DispatchKey::CPU, [] (Tensor a) -> Tensor {...}));
      */
     template<class Lambda>
     // enable_if: only enable it if Lambda is a functor (note: lambdas are functors)
@@ -617,8 +617,8 @@ private:
 //    // provide multiple; one per backend).  We'll take care of calling
 //    // the correct implementation depending on if we get a CPU
 //    // tensor or a CUDA tensor
-//    .impl("aten::mul", torch::dispatch(torch::kCPU, &mul_cpu_impl))
-//    .impl("aten::mul", torch::dispatch(torch::kCUDA, &mul_cuda_impl))
+//    .impl("aten::mul", torch::kCPU, &mul_cpu_impl)
+//    .impl("aten::mul", torch::kCUDA, &mul_cuda_impl)
 //
 // Also, you can omit the top level namespace and specify it explicitly in
 // the sub-definitions, e.g.,  torch::import().impl("aten::mul", ...)
@@ -726,12 +726,17 @@ template <typename Func>
 inline CppFunction dispatch(DeviceType type, Func&& raw_f) {
   auto deviceTypeToDispatchKey = [](DeviceType t){
     switch (t) {
+      // This list is synchronized with the k-constants in c10/core/DeviceType.h
       case DeviceType::CPU:
-        return c10::DispatchKey::CPUTensorId;
+        return c10::DispatchKey::CPU;
       case DeviceType::CUDA:
-        return c10::DispatchKey::CUDATensorId;
+        return c10::DispatchKey::CUDA;
       case DeviceType::XLA:
-        return c10::DispatchKey::XLATensorId;
+        return c10::DispatchKey::XLA;
+      case DeviceType::HIP:
+        return c10::DispatchKey::HIP;
+      case DeviceType::MSNPU:
+        return c10::DispatchKey::MSNPU;
       default:
         TORCH_CHECK(false,
           "Device type ", t, " cannot be overloaded at dispatch time, "
@@ -739,12 +744,6 @@ inline CppFunction dispatch(DeviceType type, Func&& raw_f) {
     }
   };
   return dispatch(deviceTypeToDispatchKey(type), std::forward<Func>(raw_f));
-}
-
-// Convenience for overriding autograd functionality
-template <typename Func>
-inline CppFunction dispatch_autograd(Func&& raw_f) {
-  return dispatch(c10::DispatchKey::VariableTensorId, std::forward<Func>(raw_f));
 }
 
 inline FunctionSchema schema(const char* str, AliasAnalysisKind k) {
@@ -794,6 +793,14 @@ class CAFFE2_API Module final {
   friend Module _import_DOES_NOT_WORK_WITH_MOBILE_CUSTOM_BUILD(std::string ns);
   friend Module import();
 
+private:
+  // Non-user visible actual implementations of functions.  These aren't
+  // public because we only implement & qualifier and not && qualifier
+  Module& _def(FunctionSchema&& schema) &;
+  Module& _def(c10::either<OperatorName, FunctionSchema>&&, CppFunction&& f) &;
+  Module& _impl(const char* name, CppFunction&& f) &;
+  Module& _fallback(CppFunction&& f) &;
+
 public:
   Module(const Module&) = delete;
   Module& operator=(const Module&) = delete;
@@ -832,11 +839,10 @@ public:
   // Declare an operator with a schema, but don't provide any implementations
   // for it.  You're expected to then provide implementations using the
   // impl() method.
-  Module& def(FunctionSchema&& schema) &;
   template <typename Schema>
   Module& def(Schema&& raw_schema) & {
     FunctionSchema s = schema(std::forward<Schema>(raw_schema));
-    return def(std::move(s));
+    return _def(std::move(s));
   }
   template <typename Schema>
   Module&& def(Schema&& raw_schema) && {
@@ -848,12 +854,11 @@ public:
   // an implementation for it.  def(n, f) is almost equivalent to def(n).impl(f),
   // except that if n is not a schema, then the schema is inferred from the
   // static type of f.
-  Module& def(c10::either<OperatorName, FunctionSchema>&&, CppFunction&& f) &;
   template <typename NameOrSchema, typename Func>
   Module& def(NameOrSchema&& raw_name_or_schema, Func&& raw_f) & {
     CppFunction f(std::forward<Func>(raw_f));
     auto name_or_schema = detail::constructSchemaOrName(std::forward<NameOrSchema>(raw_name_or_schema));
-    return def(std::move(name_or_schema), std::move(f));
+    return _def(std::move(name_or_schema), std::move(f));
   }
   template <typename NameOrSchema, typename Func>
   Module&& def(NameOrSchema&& raw_name_or_schema, Func&& raw_f) && {
@@ -865,27 +870,70 @@ public:
   // implementations for a single operator at different dispatch keys
   // (see torch::dispatch).  Implementations must have a corresponding
   // declaration (from def), otherwise they are invalid.
-  Module& impl(const char* name, CppFunction&& f) &;
   template <typename Func>
   Module& impl(const char* name, Func&& raw_f) & {
     CppFunction f(std::forward<Func>(raw_f));
-    return impl(name, std::move(f));
+    return _impl(name, std::move(f));
   }
   template <typename Func>
   Module&& impl(const char* name, Func&& raw_f) && {
     impl(name, std::forward<Func>(raw_f));
     return std::move(*this);
   }
+  // Convenience overload for directly specifying the dispatch key.  Dispatch
+  // can validly be either DeviceType or DispatchKey; check torch::dispatch for
+  // the canonical list of accepted overloads.
+  template <typename Dispatch, typename Func>
+  Module& impl(const char* name, Dispatch&& key, Func&& raw_f) & {
+    return impl(name, dispatch(std::forward<Dispatch>(key), std::forward<Func>(raw_f)));
+  }
+  template <typename Dispatch, typename Func>
+  Module&& impl(const char* name, Dispatch&& key, Func&& raw_f) && {
+    impl(name, std::forward<Dispatch>(key), std::forward<Func>(raw_f));
+    return std::move(*this);
+  }
+  // Convenience overload for unboxed only kernels.  These are quite common
+  // but will be eventually eliminated; this function makes it easy to grep for
+  // them.
+  //
+  // If you're looking how to def or impl with no DispatchKey, use the
+  // CppFunction::makeUnboxedOnly factory directly (the API is compositional;
+  // it's just that we have a LOT of impl calls that are unboxed, so there is
+  // just a little syntax sugar for this case.)
+  //
+  // TODO: Remove these overloads once the makeUnboxedOnly incidence rate
+  // goes way down
+  template <typename Dispatch, typename Func>
+  Module& impl_UNBOXED(const char* name, Dispatch&& key, Func* raw_f) & {
+    return impl(name, dispatch(std::forward<Dispatch>(key), CppFunction::makeUnboxedOnly(raw_f)));
+  }
+  template <typename Dispatch, typename Func>
+  Module&& impl_UNBOXED(const char* name, Dispatch&& key, Func* raw_f) && {
+    impl_UNBOXED(name, std::forward<Dispatch>(key), raw_f);
+    return std::move(*this);
+  }
 
   // Register a fallback implementation for all operators which will be used
   // if there is not a specific implementation for an operator available.
-  // At the moment, you must specify a dispatch key (see torch::dispatch) for
-  // your fallback.
-  Module& fallback(CppFunction&& f) &;
+  // Providing a DispatchKey is MANDATORY for fallback at the moment.
+  //
+  // Dispatch can validly be either DeviceType or DispatchKey; check
+  // torch::dispatch for the canonical list of accepted overloads.
+  template <typename Dispatch, typename Func>
+  Module& fallback(Dispatch&& key, Func&& raw_f) & {
+    return fallback(c10::dispatch(std::forward<Dispatch>(key), std::forward<Func>(raw_f)));
+  }
+  template <typename Dispatch, typename Func>
+  Module&& fallback(Dispatch&& key, Func&& raw_f) && {
+    fallback(std::forward<Dispatch>(key), std::forward<Func>(raw_f));
+    return std::move(*this);
+  }
+  // NB: these overloads are here for completeness, but you'll probably want to
+  // use the direct Dispatch overload
   template <typename Func>
   Module& fallback(Func&& raw_f) & {
-    CppFunction f(std::forward<Func>(raw_f));
-    return fallback(std::move(f));
+    CppFunction f((std::forward<Func>(raw_f)));
+    return _fallback(std::move(f));
   }
   template <typename Func>
   Module&& fallback(Func&& raw_f) && {
@@ -921,7 +969,6 @@ namespace torch {
 
   // New-style API
   using c10::dispatch;
-  using c10::dispatch_autograd;
   using c10::schema;
   using c10::import;
 }
