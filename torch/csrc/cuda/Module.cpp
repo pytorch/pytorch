@@ -35,7 +35,7 @@ static bool in_bad_fork = false;  // True for children forked after cuda init
 // Called in the forked child if cuda has already been initialized
 static void forked_child() {
   in_bad_fork = true;
-  utils::set_run_yet_variable_to_false();
+  torch::utils::set_run_yet_variable_to_false();
   state = nullptr;
 }
 #endif
