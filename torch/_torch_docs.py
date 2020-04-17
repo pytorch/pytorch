@@ -2580,6 +2580,7 @@ Example::
 add_docstr(torch.isinf,
            r"""
 Returns a new tensor with boolean elements representing if each element is `+/-INF` or not.
+Complex values are infinite when their real and/or imaginary part is infinite.
 
     Arguments:
         tensor (Tensor): A tensor to check
@@ -2595,7 +2596,10 @@ Returns a new tensor with boolean elements representing if each element is `+/-I
 
 add_docstr(torch.isfinite,
            r"""
-Returns a new tensor with boolean elements representing if each element is `Finite` or not.
+Returns a new tensor with boolean elements representing if each element is `finite` or not.
+
+Real values are finite when they are not NaN, negative infinity, or infinity.
+Complex values are finite when both their real and imaginary parts are finite.
 
     Arguments:
         tensor (Tensor): A tensor to check
@@ -2612,6 +2616,7 @@ Returns a new tensor with boolean elements representing if each element is `Fini
 add_docstr(torch.isnan,
            r"""
 Returns a new tensor with boolean elements representing if each element is `NaN` or not.
+Complex values are considered `NaN` when either their real and/or imaginary part is NaN.
 
 Arguments:
     input (Tensor): A tensor to check
