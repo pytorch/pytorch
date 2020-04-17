@@ -37,6 +37,14 @@ void validate_outputs(
 static constexpr int NO_DEVICE = -2;
 static constexpr int CPU_DEVICE = -1;
 
+// Maximum reentrant backward depth before switching to a new thread
+// This limit is based on the TSAN's deadlock detector, where it will
+// fail if a program hold more than 65 locks in one thread at once.
+// As we hold mutex in every of our custom C++ autograd Node, we would
+// like to avoid TSAN complains on this when doing reentrant backwards
+// For reference, see https://github.com/google/sanitizers/issues/950
+static constexpr int MAX_DEPTH = 60;
+
 // GraphTask holds metadata needed for a single execution of backward()
 struct GraphTask {
   std::atomic<uint64_t> outstanding_tasks_{0};
