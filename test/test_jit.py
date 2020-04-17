@@ -12955,7 +12955,7 @@ a")
             return a, b, c, d
         ''')
 
-            self.checkScript(star_code, (), name='star_tuple_assign')
+        self.checkScript(star_code, (), name='star_tuple_assign')
 
         def subscript_tuple_augmented_assign(a):
             # type: (Tuple[int, int]) -> Tuple[int, int]

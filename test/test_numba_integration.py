@@ -1,5 +1,4 @@
 import unittest
-import sys
 
 import torch.testing._internal.common_utils as common
 from torch.testing._internal.common_utils import TEST_NUMBA, TEST_NUMPY

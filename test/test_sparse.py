@@ -7,7 +7,6 @@ torch.set_default_dtype(torch.double)
 import itertools
 import functools
 import random
-import sys
 import unittest
 from torch.testing._internal.common_utils import TestCase, run_tests, skipIfRocm, do_test_dtypes, \
     do_test_empty_full, load_tests, TEST_NUMPY, TEST_WITH_ROCM
