@@ -26,6 +26,22 @@ namespace {
 
 RegisterOperators reg({
     Operator(
+        // note the compiler knows to type TupleIndex more accurately than it
+        // is listed here.
+        "prim::TupleIndex(Any tup, int i) -> Any",
+        [](Stack& stack) {
+          int64_t index = pop(stack).toInt();
+          auto tuple = pop(stack).toTuple();
+          auto norm_index = normalizeIndex(index, tuple->elements().size());
+          if (norm_index < 0 ||
+              norm_index > static_cast<int64_t>(tuple->elements().size())) {
+            throw std::out_of_range("Tuple list index out of range");
+          }
+          stack.emplace_back(tuple->elements()[norm_index]);
+          return 0;
+        },
+        aliasAnalysisSpecialCase()),
+    Operator(
         "prim::TupleUnpack(Any tup) -> ...",
         [](Stack& stack) {
           tupleUnpack(stack);
