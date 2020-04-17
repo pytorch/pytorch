@@ -390,7 +390,8 @@ Tensor fbgemm_linear_fp16_weight_fp32_activation(
 
   // Pull out the PackedGemmMatrixFP16 instance from the owning tensor
   const fbgemm::PackedGemmMatrixFP16& packed_weight_fp16 =
-      *cpp_custom_type_hack::cast<c10::intrusive_ptr<PackedLinearWeightFp16>>(packed_weight)->w;
+      *c10::dynamic_intrusive_pointer_cast<PackedLinearWeightFp16>(
+        cpp_custom_type_hack::cast<c10::intrusive_ptr<LinearPackedParamsBase>>(packed_weight))->w;
 
   TORCH_CHECK(input.size(input.dim() - 1) == packed_weight_fp16.numRows())
   TORCH_CHECK(input.dim() >= 2);
