@@ -29,8 +29,7 @@ ${type_method_definitions}
 
 }  // namespace TypeDefault
 
-namespace {
-auto registerer = torch::import()
+TORCH_LIBRARY(aten, m) {
   ${function_registrations};
 }
 
