@@ -1007,4 +1007,4 @@ namespace torch {
   using c10::schema;
 }
 
-#include <aten/src/ATen/core/op_registration/custom_class.h>
+#include <ATen/core/op_registration/custom_class.h>
