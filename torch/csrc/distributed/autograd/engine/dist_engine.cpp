@@ -72,23 +72,15 @@ void DistEngine::computeDependencies(
     bool retainGraph) {
   TORCH_INTERNAL_ASSERT(graphRoot, "graphRoot is null!");
 
-  // Build a CPU ready queue that is used by the graphTask in local
-  // autograd engine, since Distributed Autograd Engine calls
-  // Engine::execute_with_graph_task in async mode instead of
-  // Engine::execute, we allocate our own CPU ReadyQueue for
-  // each GraphTask.
-  // NB: We must allocate a separate ready queue for each GraphTask,
-  // because the async mode of autograd engine loop through the
-  // GraphTask's ready queue, so a single ready_queue cannot be
-  // shared by different GraphTasks.
-  auto cpu_ready_queue = std::make_shared<ReadyQueue>();
-
   // Build the graph task and graph root.
+  // NOTE: we don't need to build and pass a cpu_ready_queue to GraphTask
+  // as we use execute_graph_task_until_ready_queue_empty, which will build
+  // a separate ReadyQueue for each call.
   auto graphTask = std::make_shared<GraphTask>(
       /* keep_graph */ retainGraph,
       /* create_graph */ false,
       /* depth */ 0,
-      /* cpu_ready_queue */ cpu_ready_queue,
+      /* cpu_ready_queue */ nullptr,
       /* exit_on_error */ true);
 
   // Run BFS to traverse the graph locally. The roots of the graph are
@@ -416,18 +408,6 @@ std::unordered_map<std::string, std::string> DistEngine::getDebugInfo() const {
   std::unordered_map<std::string, std::string> debugInfo;
   auto& DistAutogradContainer = DistAutogradContainer::getInstance();
   debugInfo[kNumBackwardPasses] = std::to_string(numBackwardPasses());
-  // fill in all cpu queue size information for each graph task of the
-  // context_id in initializedContextIds_
-  std::lock_guard<std::mutex> guard(initializedContextIdsLock_);
-  for (auto context_id : initializedContextIds_) {
-    std::shared_ptr<torch::autograd::GraphTask> graph_task =
-        DistAutogradContainer.retrieveContext(context_id)->retrieveGraphTask();
-    std::string kGraphTaskCPUQueueSize =
-        "context_id: " + std::to_string(context_id) +
-        " graph_task_cpu_queue_size";
-    debugInfo[kGraphTaskCPUQueueSize] =
-        std::to_string(engine_.ready_queue_size(graph_task, at::kCPU));
-  }
   debugInfo[kNumAutogradContexts] = std::to_string(
       DistAutogradContainer::getInstance().numAutogradContexts());
   return debugInfo;

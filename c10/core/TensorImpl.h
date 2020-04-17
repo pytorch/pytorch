@@ -510,6 +510,20 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     is_wrapped_number_ = value;
   }
 
+  /**
+   * Returns true if Tensor supports as_strided and as_strided_backward.
+   * This is used in autograd to perform inplace update on view Tensors.
+   * See Note [View + Inplace update for base tensor] and
+   * [View + Inplace update for view tensor] for details.
+   * Note this method only returns true for XLA backend, where it
+   * simulates strided Tensor to support most view ops, but it cannot
+   * fully support general `as_strided` case.
+   * It can be expanded as needed in the future, e.g sparse Tensor.
+   */
+  inline bool support_as_strided() const {
+    return device().type() != at::kXLA;
+  }
+
   // ~~~~~ Autograd API ~~~~~
   // Some methods below are defined in TensorImpl.cpp because Tensor is an
   // incomplete type.

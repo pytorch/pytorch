@@ -37,6 +37,14 @@ void validate_outputs(
 static constexpr int NO_DEVICE = -2;
 static constexpr int CPU_DEVICE = -1;
 
+// Maximum reentrant backward depth before switching to a new thread
+// This limit is based on the TSAN's deadlock detector, where it will
+// fail if a program hold more than 65 locks in one thread at once.
+// As we hold mutex in every of our custom C++ autograd Node, we would
+// like to avoid TSAN complains on this when doing reentrant backwards
+// For reference, see https://github.com/google/sanitizers/issues/950
+static constexpr int MAX_DEPTH = 60;
+
 // GraphTask holds metadata needed for a single execution of backward()
 struct GraphTask {
   std::atomic<uint64_t> outstanding_tasks_{0};
@@ -143,9 +151,7 @@ struct GraphTask {
         reentrant_depth_(reentrant_depth),
         exit_on_error_(exit_on_error),
         cpu_ready_queue_(std::move(cpu_ready_queue)),
-        future_result_(std::make_shared<FutureVariableList>()) {
-          TORCH_INTERNAL_ASSERT(cpu_ready_queue_ != nullptr);
-        }
+        future_result_(std::make_shared<FutureVariableList>()) {}
 };
 
 struct NodeTask {
@@ -246,7 +252,11 @@ struct TORCH_API Engine {
   // for the autograd graph until the graph task ready queue is empty.
   //
   // This method is being used in the Distributed Autograd Engine, it assumes that
-  // the appropriate GraphTask has already been initialized appropriately.
+  // the appropriate GraphTask has already been initialized appropriately. It will
+  // construct a local ready queue to traverse the GraphTask instead of using the
+  // GraphTask embedded cpu_ready_queue, this is because dist engine might run the
+  // same GraphTask from different SendFunctions concurrently. The method might also 
+  // not mark the GraphTask as completed to keep the GraphTask alive.
   //
   // When `incrementOutstandingTasks=false`, the function does not increment 
   // 'outstanding_tasks_' in the appropriate GraphTask. It is assumed we've already
@@ -279,7 +289,8 @@ struct TORCH_API Engine {
   void evaluate_function(
       std::shared_ptr<GraphTask>& graph_task,
       Node* func,
-      InputBuffer& inputs);
+      InputBuffer& inputs,
+      std::shared_ptr<ReadyQueue> cpu_ready_queue);
 
   // initialize the thread local ready queue with the ready queue that is created
   // elsewhere (i.e. thread_init, Engine::execute, etc), or create a new
@@ -287,10 +298,10 @@ struct TORCH_API Engine {
   void init_local_ready_queue(std::shared_ptr<ReadyQueue> ready_queue = nullptr);
 
   std::shared_ptr<ReadyQueue> ready_queue(
-      const std::shared_ptr<GraphTask>& graph_task,
+      std::shared_ptr<ReadyQueue> cpu_ready_queue,
       at::Device device);
   std::shared_ptr<ReadyQueue> ready_queue_by_index(
-      const std::shared_ptr<GraphTask>& graph_task,
+      std::shared_ptr<ReadyQueue> cpu_ready_queue,
       int device_index);
   // start device threads (CUDA, XLA, etc.) in Engine,
   // note that it does NOT start CPU thread.

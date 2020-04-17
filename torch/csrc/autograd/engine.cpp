@@ -215,8 +215,7 @@ bool ReadyQueue::empty() const {
   return heap_.empty();
 }
 
-// This limit is based on the default python recursion limit which is 1000
-Engine::Engine() : max_recursion_depth_(100), non_reentrant_device_thread_count_(0) {}
+Engine::Engine() : max_recursion_depth_(MAX_DEPTH), non_reentrant_device_thread_count_(0) {}
 
 // Send shutdown tasks to all device_ready_queues_ if no backward tasks are running
 // Even though readyQueue should be empty, shutdown tasks have the highest priority
@@ -394,7 +393,7 @@ auto Engine::thread_main(
           // queue_callback() to find the target GraphTask to append final
           // callbacks.
           GraphTaskGuard guard(local_graph_task);
-          evaluate_function(local_graph_task, task.fn_.get(), task.inputs_);
+          evaluate_function(local_graph_task, task.fn_.get(), task.inputs_, local_graph_task->cpu_ready_queue_);
         } catch (std::exception& e) {
           thread_on_exception(local_graph_task, task.fn_, e);
         }
@@ -428,7 +427,7 @@ auto Engine::thread_main(
       if (worker_device != base_owner) {
         // Synchronize outstanding_tasks_ with queue mutex
         std::atomic_thread_fence(std::memory_order_release);
-        ready_queue_by_index(local_graph_task, base_owner)
+        ready_queue_by_index(local_graph_task->cpu_ready_queue_, base_owner)
             ->push(NodeTask(local_graph_task, nullptr, InputBuffer(0)));
       }
     }
@@ -459,7 +458,7 @@ void Engine::reentrant_thread_init() {
     }
     set_device(graph_task->owner_);
     // set the local_ready_queue to the ready queue on the graph_task->owner_ device
-    local_ready_queue = ready_queue_by_index(graph_task, graph_task->owner_);
+    local_ready_queue = ready_queue_by_index(graph_task->cpu_ready_queue_, graph_task->owner_);
     total_depth = graph_task->reentrant_depth_;
     thread_main(graph_task, /* reentrant thread*/ true);
   }
@@ -624,7 +623,8 @@ static variable_list call_function(
 void Engine::evaluate_function(
     std::shared_ptr<GraphTask>& graph_task,
     Node* func,
-    InputBuffer& inputs) {
+    InputBuffer& inputs,
+    std::shared_ptr<ReadyQueue> cpu_ready_queue) {
   // If exec_info_ is not empty, we have to instrument the execution
   auto& exec_info_ = graph_task->exec_info_;
   if (!exec_info_.empty()) {
@@ -720,7 +720,7 @@ void Engine::evaluate_function(
                        opt_next_stream);
 
       if (is_ready) {
-        auto queue = ready_queue(graph_task, input_buffer.device());
+        auto queue = ready_queue(cpu_ready_queue, input_buffer.device());
         queue->push(
             NodeTask(graph_task, next.function, std::move(input_buffer)));
       } else {
@@ -737,7 +737,7 @@ void Engine::evaluate_function(
                        opt_parent_stream,
                        opt_next_stream);
       if (is_ready) {
-        auto queue = ready_queue(graph_task, input_buffer.device());
+        auto queue = ready_queue(cpu_ready_queue, input_buffer.device());
         queue->push(
             NodeTask(graph_task, next.function, std::move(input_buffer)));
         not_ready.erase(not_ready_it);
@@ -814,24 +814,25 @@ std::shared_ptr<FutureVariableList> Engine::execute_graph_task_until_ready_queue
     std::shared_ptr<Node> root_to_execute,
     bool incrementOutstandingTasks) {
   initialize_device_threads_pool();
-  std::shared_ptr<ReadyQueue> graph_task_rq = graph_task->cpu_ready_queue_;
-  graph_task_rq->push(
+  // create a ready queue per call
+  std::shared_ptr<ReadyQueue> cpu_ready_queue = std::make_shared<ReadyQueue>();
+  cpu_ready_queue->push(
       NodeTask(graph_task, std::move(root_to_execute), InputBuffer(0)),
       incrementOutstandingTasks);
 
   set_device(CPU_DEVICE);
   graph_task->owner_ = worker_device;
-  while(!graph_task_rq->empty()) {
+  while(!cpu_ready_queue->empty()) {
     std::shared_ptr<GraphTask> local_graph_task;
     {
-      NodeTask task = graph_task_rq->pop();
+      NodeTask task = cpu_ready_queue->pop();
       if (!(local_graph_task = task.base_.lock())) {
         continue;
       }
       if (task.fn_ && !local_graph_task->has_error_.load()) {
         AutoGradMode grad_mode(local_graph_task->grad_mode_);
         try {
-          evaluate_function(local_graph_task, task.fn_.get(), task.inputs_);
+          evaluate_function(local_graph_task, task.fn_.get(), task.inputs_, cpu_ready_queue);
         } catch (std::exception& e) {
           thread_on_exception(local_graph_task, task.fn_, e);
           // break the loop in error so that we immediately stop the execution
@@ -861,7 +862,7 @@ std::shared_ptr<FutureVariableList> Engine::execute_with_graph_task(
   // Lock mutex for GraphTask.
   std::unique_lock<std::mutex> lock(graph_task->mutex_);
 
-  ready_queue(graph_task, at::kCPU)->push(
+  ready_queue(graph_task->cpu_ready_queue_, at::kCPU)->push(
       NodeTask(graph_task, std::move(graph_root), InputBuffer(0)));
 
   // worker_device == NO_DEVICE it's a CPU thread and it's trying to drive the
@@ -919,25 +920,28 @@ std::shared_ptr<FutureVariableList> Engine::execute_with_graph_task(
   return graph_task->future_result_;
 }
 
-void Engine::mark_graph_task_completed(const std::shared_ptr<GraphTask>& graph_task) {
-  if (graph_task->future_completed_.load()) {
+void Engine::mark_graph_task_completed(
+    const std::shared_ptr<GraphTask>& graph_task) {
+  // Allow only one thread one attempt to process this logic.
+  if (graph_task->future_completed_.exchange(true)) {
     // Future is already marked as completed.
     return;
   }
+
   try {
     // Run post processing, before marking the future as complete.
     // Drop lock prior to completing, to avoid holding across callbacks.
     std::unique_lock<std::mutex> lock(graph_task->mutex_);
+
     graph_task_exec_post_processing(graph_task);
     std::vector<Variable> vars = std::move(graph_task->captured_vars_);
+
+    // Need to unlock before we call markCompleted to avoid holding locks
+    // when the callbacks are called.
     lock.unlock();
-    if (!graph_task->future_completed_.exchange(true)) {
-      graph_task->future_result_->markCompleted(std::move(vars));
-    }
+    graph_task->future_result_->markCompleted(std::move(vars));
   } catch (std::exception& e) {
-    if (!graph_task->future_completed_.exchange(true)) {
-      graph_task->future_result_->setError(e.what());
-    }
+    graph_task->future_result_->setErrorIfNeeded(e.what());
   }
 }
 
@@ -1028,26 +1032,26 @@ size_t Engine::ready_queue_size(const std::shared_ptr<GraphTask>& graph_task, at
     // out of bound error.
     return 0;
   }
-  return ready_queue(graph_task, device)->size();
+  return ready_queue(graph_task->cpu_ready_queue_, device)->size();
 }
 
 // CPU ready queue is per GraphTask, but CUDA device ready queues are shared across all graph tasks
-auto Engine::ready_queue(const std::shared_ptr<GraphTask>& graph_task, at::Device device) -> std::shared_ptr<ReadyQueue>{
+auto Engine::ready_queue(std::shared_ptr<ReadyQueue> cpu_ready_queue, at::Device device) -> std::shared_ptr<ReadyQueue>{
   if (device.type() == at::kCPU) {
-    // return the cpu ready queue memorized in GraphTask
-    TORCH_INTERNAL_ASSERT(graph_task);
-    return graph_task->cpu_ready_queue_;
+    // return the cpu ready queue passed in
+    TORCH_INTERNAL_ASSERT(cpu_ready_queue);
+    return cpu_ready_queue;
   } else {
     // See Note [Allocating GPUs to autograd threads]
     return device_ready_queues_.at(device.index());
   }
 }
 
-auto Engine::ready_queue_by_index(const std::shared_ptr<GraphTask>& graph_task, int device_index) -> std::shared_ptr<ReadyQueue> {
+auto Engine::ready_queue_by_index(std::shared_ptr<ReadyQueue> cpu_ready_queue, int device_index) -> std::shared_ptr<ReadyQueue> {
   if (device_index == CPU_DEVICE) {
-    // return the cpu ready queue memorized in GraphTask
-    TORCH_INTERNAL_ASSERT(graph_task);
-    return graph_task->cpu_ready_queue_;
+    // return the cpu ready queue passed in 
+    TORCH_INTERNAL_ASSERT(cpu_ready_queue);
+    return cpu_ready_queue;
   } else {
     // See Note [Allocating GPUs to autograd threads]
     // NB: This function would become obsolete if we truly allocated a CPU thread
