@@ -35,6 +35,8 @@ white_list = [
     ('aten::sizes', datetime.date(2020, 4, 30)),
     ('aten::strides', datetime.date(2020, 4, 30)),
     ('aten::backward', datetime.date(2020, 4, 30)),
+    ('aten::quantized_lstm', datetime.date(2020, 4, 30)),
+    ('aten::quantized_gru', datetime.date(2020, 4, 30)),
 ]
 
 
