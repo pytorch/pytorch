@@ -3,6 +3,7 @@
 // Engine implements backpropagation from output variables and their gradients
 // to "root" variables (variables created by the user with requires_grad=True).
 
+#include <ATen/Tensor.h>
 #include <ATen/ThreadLocalState.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/csrc/autograd/anomaly_mode.h>
@@ -10,7 +11,6 @@
 #include <torch/csrc/autograd/functions/basic_ops.h>
 #include <torch/csrc/autograd/input_buffer.h>
 #include <torch/csrc/utils/future.h>
-#include <torch/types.h>
 
 #include <deque>
 #include <exception>
@@ -77,7 +77,7 @@ struct GraphTask {
       // grad will be replaced by the return value of the hook.
       struct GradCaptureHook {
         virtual ~GradCaptureHook() = default;
-        virtual torch::Tensor operator()(const torch::Tensor& grad) = 0;
+        virtual at::Tensor operator()(const at::Tensor& grad) = 0;
       };
       // The hooks will be called one by one in the order. The input grad of a
       // hook will be the output of its preceding hook. The first hook will take

@@ -35,15 +35,12 @@ struct DistAccumulateGradCaptureHook
       : accumulateGrad_(std::move(accumulateGrad)),
         autogradContext_(std::move(autogradContext)) {}
 
-  torch::Tensor operator()(const torch::Tensor& grad) override {
+  at::Tensor operator()(const at::Tensor& grad) override {
     variable_list inputGrads = {grad};
     // It's intended that pre/post hooks are still called even if the grad is
     // undenfined here.
     for (const auto& hook : accumulateGrad_->pre_hooks()) {
       inputGrads = (*hook)(inputGrads);
-      // A pre-hook should return a varaible list of the same size as the
-      // function's inputs.
-      TORCH_INTERNAL_ASSERT(inputGrads.size() == 1);
     }
 
     // It is possible that the grad is not defined since a separate
@@ -56,10 +53,7 @@ struct DistAccumulateGradCaptureHook
 
     const variable_list kEmptyOuput;
     for (const auto& hook : accumulateGrad_->post_hooks()) {
-      const auto postHookOutput = (*hook)(kEmptyOuput, inputGrads);
-      // A post hook should return a varaible list of the same size as the
-      // function's outputs.
-      TORCH_INTERNAL_ASSERT(postHookOutput.empty());
+      (*hook)(kEmptyOuput, inputGrads);
     }
     return inputGrads[0];
   }
