@@ -126,7 +126,7 @@ enum pytorch_qnnp_status qnnpackDeConv(
     return pytorch_qnnp_status_invalid_parameter;
   }
 
-  if (input_scale <= 0.0f || !isnormal(input_scale)) {
+  if (input_scale <= 0.0f || !std::isnormal(input_scale)) {
     pytorch_qnnp_log_error(
         "failed to create deconvolution with %.7g input scale: "
         "scale must be finite and positive",
@@ -135,7 +135,7 @@ enum pytorch_qnnp_status qnnpackDeConv(
   }
 
   const float kernel_scale = deconv_p.kernel_scale;
-  if (kernel_scale <= 0.0f || !isnormal(kernel_scale)) {
+  if (kernel_scale <= 0.0f || !std::isnormal(kernel_scale)) {
     pytorch_qnnp_log_error(
         "failed to create deconvolution with %.7g kernel scale: "
         "scale must be finite and positive",
@@ -143,7 +143,7 @@ enum pytorch_qnnp_status qnnpackDeConv(
     return pytorch_qnnp_status_invalid_parameter;
   }
 
-  if (output_scale <= 0.0f || !isnormal(output_scale)) {
+  if (output_scale <= 0.0f || !std::isnormal(output_scale)) {
     pytorch_qnnp_log_error(
         "failed to create deconvolution with %.7g output scale: "
         "scale must be finite and positive",
