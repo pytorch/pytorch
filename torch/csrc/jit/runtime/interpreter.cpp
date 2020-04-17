@@ -371,8 +371,8 @@ struct CodeImpl {
   std::vector<IValue> constant_table_;
   std::vector<Operation> operator_table_;
   std::vector<Function*> function_table_;
+  std::vector<std::unique_ptr<GraphFunction>> forked_functions_;
   std::vector<TypePtr> type_table_;
-  std::vector<Code> code_table_;
   std::vector<std::function<void(std::vector<IValue>&)>>
       profile_function_table_;
 
@@ -772,9 +772,11 @@ struct CodeImpl {
 
   void emitFork(Node* node) {
     emitLoadInputs(node->inputs());
-    code_table_.emplace_back(
-        Code(node->g(attr::Subgraph), "<forked function>"));
-    insertInstruction(FORK, code_table_.size() - 1, node->inputs().size());
+    std::unique_ptr<GraphFunction> forked_fn(new GraphFunction(
+        "<forked function>", node->g(attr::Subgraph), nullptr));
+    forked_functions_.emplace_back(std::move(forked_fn));
+    function_table_.emplace_back(forked_functions_.back().get());
+    insertInstruction(FORK, function_table_.size() - 1, node->inputs().size());
   }
 
   void emitWarn(Node* node) {
@@ -1314,8 +1316,11 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
           } break;
           case FORK: {
             // Move inputs to a separate stack
+            Function* forked_fn = af.functions[inst.X];
             InterpreterState forked_interpreter(
-                frames.back().function->code_table_.at(inst.X));
+                forked_fn->get_executor()
+                    .getPlanFor(stack, GraphExecutor::getDefaultNumBailOuts())
+                    .code);
             InterpreterContinuation continuation(
                 forked_interpreter,
                 Stack(stack.end() - inst.N, stack.end()),
