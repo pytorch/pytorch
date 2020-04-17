@@ -124,7 +124,7 @@ IValue Module::operator()(std::vector<IValue> inputs) {
 
   // Let's go over each pre-forward hook and call them
   for (const auto& hook : pre_forward_hooks) {
-    auto fn = get_method(hook.qualifiedName());
+    auto fn = get_method(hook);
     auto tuple_input = c10::ivalue::Tuple::create(inputs);
     std::vector<IValue> hook_inputs;
     hook_inputs.emplace_back(tuple_input);
@@ -143,7 +143,7 @@ IValue Module::operator()(std::vector<IValue> inputs) {
 
   // It is now time for the forward hooks
   for (const auto& hook : forward_hooks) {
-    auto fn = get_method(hook.qualifiedName());
+    auto fn = get_method(hook);
     Kwargs output_param;
     output_param["outputs"] = outputs;
     auto hook_result = fn(inputs, output_param);

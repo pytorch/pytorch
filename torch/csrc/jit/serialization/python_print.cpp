@@ -1232,7 +1232,7 @@ struct PythonPrintImpl {
         indent();
         body_ << "__forward_pre_hooks__ = [";
         for (const auto& hook_name : forwardPreHooks) {
-          body_ << hook_name.qualifiedName() << ",";
+          body_ << hook_name << ", ";
         }
         body_ << "]\n";
       }
@@ -1242,7 +1242,7 @@ struct PythonPrintImpl {
         indent();
         body_ << "__forward_hooks__ = [";
         for (const auto& hook_name : forwardHooks) {
-          body_ << hook_name.qualifiedName() << ",";
+          body_ << hook_name << ", ";
         }
         body_ << "]\n";
       }

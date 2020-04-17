@@ -1332,8 +1332,21 @@ void initJitScriptBindings(PyObject* module) {
       .def("get_constants", &ConcreteModuleType::getConstantsPy)
       .def("get_attributes", &ConcreteModuleType::getAttributesPy)
       .def("get_modules", &ConcreteModuleType::getModulesPy)
-      .def("get_forward_hooks", &ConcreteModuleType::getForwardHooksPy)
-      .def("get_forward_pre_hooks", &ConcreteModuleType::getForwardPreHooksPy)
+      .def(
+          "get_forward_hooks",
+          [](const ConcreteModuleType& self) {
+            if (auto cls = self.getJitType()->cast<ClassType>()) {
+              return cls->getForwardHooks();
+            }
+            return std::vector<std::string>();
+          })
+      .def("get_forward_pre_hooks",
+          [](const ConcreteModuleType& self) {
+            if (auto cls = self.getJitType()->cast<ClassType>()) {
+              return cls->getForwardPreHooks();
+            }
+            return std::vector<std::string>();
+          })
       .def("dump", &ConcreteModuleType::dump)
       .def(
           "equals",

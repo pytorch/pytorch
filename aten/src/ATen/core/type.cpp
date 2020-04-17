@@ -816,12 +816,12 @@ bool ClassType::is_hook(const std::string& fn_name) {
   QualifiedName qname(fn_name);
   const auto& name = qname.name();
   for (const auto& hook : forward_pre_hooks) {
-    if (hook.name() == name) {
+    if (hook == name) {
       return true;
     }
   }
   for (const auto& hook : forward_hooks) {
-    if (hook.name() == name) {
+    if (hook == name) {
       return true;
     }
   }

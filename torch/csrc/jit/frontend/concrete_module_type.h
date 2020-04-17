@@ -210,8 +210,6 @@ class VISIBILITY_HIDDEN ConcreteModuleType {
       const;
   std::vector<std::pair<std::string, std::shared_ptr<ConcreteModuleType>>>
   getModulesPy() const;
-  std::vector<std::string> getForwardPreHooksPy() const;
-  std::vector<std::string> getForwardHooksPy() const;
 
   bool equals(const ConcreteModuleType& other) const {
     if (jitType_ == other.jitType_) {
