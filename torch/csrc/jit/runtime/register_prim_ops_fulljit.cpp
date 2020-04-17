@@ -37,17 +37,6 @@ RegisterOperators reg(
          },
          aliasAnalysisSpecialCase()),
      Operator(
-         prim::CudaFusionGroup,
-         [](const Node* node) -> Operation {
-           const auto key = registerFusion(node);
-           return [key](Stack& stack) {
-             RECORD_FUNCTION("CudaFusionGroup", std::vector<c10::IValue>());
-             runFusion(key, stack);
-             return 0;
-           };
-         },
-         aliasAnalysisSpecialCase()),
-     Operator(
          prim::FusionGroup,
          [](const Node* node) -> Operation {
            const auto key = registerFusion(node);
@@ -232,36 +221,6 @@ RegisterOperators reg(
            return 0;
          },
          aliasAnalysisFromSchema()),
-     Operator(
-         "aten::IntImplicit(Tensor a) -> int",
-         [](Stack& stack) {
-           at::Tensor a;
-           pop(stack, a);
-           checkImplicitTensorToNum(a, /*to int*/ true);
-           push(stack, a.item<int64_t>());
-           return 0;
-         },
-         aliasAnalysisFromSchema()),
-     Operator(
-         "aten::FloatImplicit(Tensor a) -> float",
-         [](Stack& stack) {
-           at::Tensor a;
-           pop(stack, a);
-           checkImplicitTensorToNum(a, /*to int*/ false);
-           push(stack, a.item<double>());
-           return 0;
-         },
-         aliasAnalysisFromSchema()),
-     Operator(
-         "aten::ScalarImplicit(Tensor a) -> Scalar",
-         [](Stack& stack) {
-           at::Tensor a;
-           pop(stack, a);
-           checkImplicitTensorToNum(a, /*to int*/ false);
-           push(stack, a.item());
-           return 0;
-         },
-         aliasAnalysisFromSchema()),
      // note: this op needs to share a name with the Scalar -> Tensor conversion
      // because all _to_tensor conversion have to have the same operator namet
      Operator(
@@ -270,88 +229,6 @@ RegisterOperators reg(
            bool b;
            pop(stack, b);
            push(stack, at::scalar_to_tensor(b));
-           return 0;
-         },
-         aliasAnalysisFromSchema()),
-     Operator(
-         "aten::Bool.Tensor(Tensor a) -> bool",
-         [](Stack& stack) {
-           at::Tensor a;
-           pop(stack, a);
-           push(stack, a.is_nonzero());
-           return 0;
-         },
-         aliasAnalysisFromSchema()),
-     Operator(
-         "aten::Bool.int(int a) -> bool",
-         [](Stack& stack) {
-           int64_t i;
-           pop(stack, i);
-           push(stack, (bool)i);
-           return 0;
-         },
-         aliasAnalysisFromSchema()),
-     Operator(
-         "aten::Bool.float(float a) -> bool",
-         [](Stack& stack) {
-           double d;
-           pop(stack, d);
-           push(stack, (bool)d);
-           return 0;
-         },
-         aliasAnalysisFromSchema()),
-     Operator(
-         "aten::Float.Tensor(Tensor a) -> float",
-         [](Stack& stack) {
-           at::Tensor a;
-           pop(stack, a);
-           push(stack, a.item<double>());
-           return 0;
-         },
-         aliasAnalysisFromSchema()),
-     Operator(
-         "aten::Float.Scalar(Scalar a) -> float",
-         [](Stack& stack) {
-           IValue scalar;
-           pop(stack, scalar);
-           if (scalar.isDouble()) {
-             push(stack, std::move(scalar));
-           } else {
-             push(stack, static_cast<double>(scalar.toInt()));
-           }
-           return 0;
-         },
-         aliasAnalysisFromSchema()),
-     Operator(
-         "aten::Float.int(int a) -> float",
-         [](Stack& stack) {
-           int64_t i;
-           pop(stack, i);
-           push(stack, (float)i);
-           return 0;
-         },
-         aliasAnalysisFromSchema()),
-     Operator(
-         "aten::Float.bool(bool a) -> float",
-         [](Stack& stack) {
-           bool b;
-           pop(stack, b);
-           push(stack, (float)b);
-           return 0;
-         },
-         aliasAnalysisFromSchema()),
-     Operator(
-         "aten::Float.str(str a) -> float",
-         [](Stack& stack) {
-           auto s = pop(stack).toString();
-           std::string::size_type sz;
-           double b = c10::stod(s->string(), &sz);
-           if (sz == s->string().size()) {
-             push(stack, b);
-           } else {
-             throw std::runtime_error(
-                 "float() only accepts a string of single float number");
-           }
            return 0;
          },
          aliasAnalysisFromSchema()),
@@ -580,7 +457,7 @@ RegisterOperators reg(
          },
          aliasAnalysisFromSchema()),
      Operator(
-         "aten::requires_grad_(Tensor(a!) self, bool _requires_grad=True) -> Tensor(a!)",
+         "aten::requires_grad_(Tensor(a!) self, bool requires_grad=True) -> Tensor(a!)",
          [](Stack& stack) {
            bool _requires_grad = pop(stack).toBool();
            at::Tensor self = pop(stack).toTensor();
@@ -982,10 +859,8 @@ int dictLen(Stack& stack) {
 int dictValues(Stack& stack) {
   auto dict = pop(stack).toGenericDict();
   auto values = c10::impl::GenericList(dict.valueType());
-  const auto& order = iterationOrder(dict);
-  values.reserve(order.size());
-  for (const auto& p : order) {
-    values.emplace_back(p.second);
+  for (const auto& entry : dict) {
+    values.emplace_back(entry.value());
   }
   push(stack, values);
   return 0;
@@ -994,10 +869,8 @@ int dictValues(Stack& stack) {
 int dictKeys(Stack& stack) {
   auto dict = pop(stack).toGenericDict();
   auto keys = c10::impl::GenericList(dict.keyType());
-  const auto& order = iterationOrder(dict);
-  keys.reserve(order.size());
-  for (const auto& p : order) {
-    keys.emplace_back(p.first);
+  for (const auto& entry : dict) {
+    keys.emplace_back(entry.key());
   }
   push(stack, keys);
   return 0;
@@ -1084,12 +957,13 @@ int dictPopItem(Stack& stack) {
   if (dict.size() == 0) {
     AT_ERROR("popitem(): dictionary is empty");
   }
-  auto item = iterationOrder(dict).at(0);
-  auto erase_count = dict.erase(item.first);
+  auto head_item = dict.begin();
+
+  IValue tuple =
+      c10::ivalue::Tuple::create({head_item->key(), head_item->value()});
+  auto erase_count = dict.erase(head_item->key());
   TORCH_CHECK(
       erase_count == 1, "Expected to erase 1 item, found ", erase_count);
-
-  IValue tuple = c10::ivalue::Tuple::create({item.first, item.second});
   push(stack, tuple);
   return 0;
 }
@@ -1124,8 +998,8 @@ int dictItems(Stack& stack) {
   auto items =
       c10::impl::GenericList(TupleType::create({key_type, value_type}));
   items.reserve(dict.size());
-  for (const auto& item : iterationOrder(dict)) {
-    items.emplace_back(c10::ivalue::Tuple::create({item.first, item.second}));
+  for (const auto& item : dict) {
+    items.emplace_back(c10::ivalue::Tuple::create({item.key(), item.value()}));
   }
   push(stack, std::move(items));
   return 0;

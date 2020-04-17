@@ -790,21 +790,6 @@ New API:
 
     m = torch.jit.script(MyModule())
 
-Python 2
-""""""""
-If you are stuck on Python 2 and cannot use the class annotation syntax, you can use the ``__annotations__`` class member to directly apply type annotations.
-
-.. testcode::
-
-    from typing import Dict
-
-    class MyModule(torch.jit.ScriptModule):
-        __annotations__ = {'my_dict': Dict[str, int]}
-
-        def __init__(self):
-            super(MyModule, self).__init__()
-            self.my_dict = {}
-            self.my_int = 20
 
 Constants
 ^^^^^^^^^
