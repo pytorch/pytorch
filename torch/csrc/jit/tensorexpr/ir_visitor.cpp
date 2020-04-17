@@ -212,9 +212,16 @@ void IRVisitor::visit(const RoundOff* v) {
 }
 
 void IRVisitor::visit(const ReduceOp* v) {
-  v->accumulator().node()->accept(this);
+  v->accumulator()->accept(this);
   v->initializer()->accept(this);
   v->body().node()->accept(this);
+
+  for (auto* e : v->output_args()) {
+    e->accept(this);
+  }
+  for (auto* r : v->reduce_args()) {
+    r->accept(this);
+  }
 }
 
 } // namespace tensorexpr

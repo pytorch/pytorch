@@ -90,10 +90,6 @@ class TestCppExtensionAOT(common.TestCase):
 
 
 class TestMSNPUTensor(common.TestCase):
-    @classmethod
-    def setUpClass(cls):
-        msnpu_extension.init_msnpu_extension()
-
     def test_unregistered(self):
         a = torch.arange(0, 10, device='cpu')
         with self.assertRaisesRegex(RuntimeError, "Could not run"):
