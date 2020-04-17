@@ -13,6 +13,7 @@
 #include "ATen/WrapDimUtilsMulti.h"
 #include "ATen/cpp_custom_type_hack.h"
 #include "ATen/native/quantized/cpu/fbgemm_utils.h"
+#include "ATen/native/quantized/cpu/packed_params.h"
 
 #ifdef USE_FBGEMM
 #include "fbgemm/Fbgemm.h"
