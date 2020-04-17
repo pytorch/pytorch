@@ -787,7 +787,7 @@ class TestTypePromotion(TestCase):
         y = torch.tensor([4, 5, 6], device=device, dtype=torch.int32)
         expected_out = torch.tensor([1, 2, 3, 4, 5, 6], device=device, dtype=torch.int32)
         out = torch.cat([x, y])
-        self.assertEqual(out, expected_out) 
+        self.assertEqual(out, expected_out, exact_dtype=True) 
         z = torch.tensor([7, 8, 9], device=device, dtype=torch.int16)
         expected_out = torch.tensor([1, 2, 3, 4, 5, 6, 7, 8, 9],
                                     device=device, dtype=torch.int32)

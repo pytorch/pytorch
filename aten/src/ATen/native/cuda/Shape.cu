@@ -299,6 +299,11 @@ Tensor& cat_out_cuda(Tensor& out, TensorList inputs, int64_t dimension) {
   const Tensor *notSkippedTensor = NULL;  // non-owning reference
   int nDims = 0;
 
+  // Check for type promotion
+  TORCH_CHECK(canCast(result_type(inputs), out.scalar_type()), "input types ",
+                      " can't be cast to the desired output type ",
+                      out.scalar_type());
+
   // Inputs cannot alias the output tensor
   for (int i = 0; i < inputs.size(); i++) {
     auto lap = at::get_overlap_status(out, inputs[i]);
@@ -377,13 +382,7 @@ Tensor& cat_out_cuda(Tensor& out, TensorList inputs, int64_t dimension) {
     [firstType](const Tensor& t) {
       return t.scalar_type() == firstType;
     });
-  if (!allSameType) {
-    // Since we are not using the iterator here, we need to enforce type promotion 
-    // compatibility ourselves
-    TORCH_CHECK(canCast(result_type(inputs), out.scalar_type()), "input types ",
-          " can't be cast to the desired output type ",
-          out.scalar_type());
-  }
+
   if (inputs.size() > 1 &&
       !hasSkippedInput &&
       out.dim() <= CAT_ARRAY_MAX_INPUT_DIMS &&
