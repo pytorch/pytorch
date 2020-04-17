@@ -27,8 +27,9 @@ static constexpr char* kNumAutogradContexts = "num_autograd_contexts";
 //   1. Accumuate the gard to RPC context.
 //   2. Call pre hooks of the original AccumulateGrad to modify the input grad.
 //   3. Call post hooks of the original AccumulateGrad.
-struct DistAccumulateGradCaptureHook
-    : GraphTask::ExecInfo::Capture::GradCaptureHook {
+class DistAccumulateGradCaptureHook
+    : public GraphTask::ExecInfo::Capture::GradCaptureHook {
+ public:
   DistAccumulateGradCaptureHook(
       std::shared_ptr<AccumulateGrad> accumulateGrad,
       ContextPtr autogradContext)
