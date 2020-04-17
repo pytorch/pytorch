@@ -191,23 +191,11 @@ void launch_prelu_cuda_backward_share_weights_kernel(TensorIterator &iter, const
   int64_t grid = (numel + block_work_size - 1) / block_work_size;
   auto stream = at::cuda::getCurrentCUDAStream();
 
-  if (iter.is_contiguous()) {
-    prelu_cuda_backward_share_weights_kernel<scalar_t><<<grid, num_threads, 0, stream>>>(
-      numel, input_data, grad_out_data, input_grad_data, weight_grad_collector_data, weight_data,
-      TrivialOffsetCalculator<2>(), TrivialOffsetCalculator<2>()
-    );
-  } else {
-    std::array<const int64_t*, 2> out_strides = {iter.strides(0).data(), iter.strides(1).data()};
-    std::array<const int64_t*, 2> out_elemsizes = {iter.element_size(0), iter.element_size(1)};
-    std::array<const int64_t, 2> inp_strides = {iter.strides(2).data(), iter.strides(3).data()};
-    std::array<const int64_t*, 2> inp_elemsizes = {iter.element_size(2), iter.element_size(3)};
-
-    prelu_cuda_backward_share_weights_kernel<scalar_t><<<grid, num_threads, 0, stream>>>(
-      numel, input_data, grad_out_data, input_grad_data, weight_grad_collector_data, weight_data,
-      OffsetCalculator<2>(iter.ndim(), iter.shape().data(), inp_strides.data(), inp_elemsizes),
-      OffsetCalculator<2>(iter.ndim(), iter.shape().data(), out_strides.data(), out_elemsizes)
-    );
-  }
+  TORCH_INTERNAL_ASSERT(iter.is_contiguous());
+  prelu_cuda_backward_share_weights_kernel<scalar_t><<<grid, num_threads, 0, stream>>>(
+    numel, input_data, grad_out_data, input_grad_data, weight_grad_collector_data, weight_data,
+    TrivialOffsetCalculator<2>(), TrivialOffsetCalculator<2>()
+  );
 }
 
 template <typename scalar_t>
