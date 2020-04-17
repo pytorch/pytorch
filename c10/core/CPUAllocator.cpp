@@ -1,6 +1,8 @@
 #include <c10/core/CPUAllocator.h>
 #include <c10/core/DeviceType.h>
 
+#include <iostream>
+
 // TODO: rename flags to C10
 C10_DEFINE_bool(
     caffe2_report_cpu_memory_usage,
@@ -83,10 +85,12 @@ void* alloc_cpu(size_t nbytes) {
     memset_junk(data, nbytes);
   }
 
+  std::cout << "[" << data << "]: allocated tensor with " << nbytes << " bytes" << std::endl;
   return data;
 }
 
 void free_cpu(void* data) {
+  std::cout << "[" << data << "]: freed tensor" << std::endl;
 #ifdef _MSC_VER
   _aligned_free(data);
 #else
