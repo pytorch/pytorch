@@ -124,6 +124,9 @@ struct TORCH_API Object {
     return _ivalue()->slots().size();
   }
 
+  // shallow copy the object
+  Object copy() const;
+
   // Copies all the attributes of the object recursively without creating new
   // `ClassType`, including deepcopy of Tensors
   Object deepcopy() const;

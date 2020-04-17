@@ -35,6 +35,24 @@ void Object::define(const std::string& src, const ResolverPtr& resolver) {
       *type()->name(), src, resolver ? resolver : nativeResolver(), &self);
 }
 
+Object Object::copy() const {
+  Object obj(_ivalue()->compilation_unit(), type());
+
+  size_t N = type()->numAttributes();
+  for (size_t i = 0; i < N; ++i) {
+    IValue s = _ivalue()->getSlot(i);
+    if (type()->getAttribute(i)->is_module()) {
+      const Object& orig = s.toObject();
+      Object copied = orig.copy();
+      obj._ivalue()->setAttr(type()->getAttributeName(i), copied._ivalue());
+    } else {
+      obj._ivalue()->setAttr(type()->getAttributeName(i), s);
+    }
+  }
+
+  return obj;
+}
+
 Object Object::deepcopy() const {
   c10::IValue::HashAliasedIValueMap memo;
   return deepcopy(memo);
