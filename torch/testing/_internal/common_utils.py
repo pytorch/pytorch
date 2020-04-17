@@ -639,6 +639,16 @@ def check_disabled(test_name):
             "Test is disabled because an issue exists disabling it: {}".format(disabled_test_from_issues[test_name]) +
             " To enable set the environment variable PYTORCH_RUN_DISABLED_TESTS=1")
 
+class CWatchdog():
+    def __init__(self, name):
+        self.name = name
+
+    def __enter__(self):
+        torch._C._set_watchdog(self.name, 600)
+
+    def __exit__(self, exec_type, exec_value, traceback):
+        torch._C._set_watchdog(self.name, 0)
+
 class TestCase(expecttest.TestCase):
     precision = 1e-5
     maxDiff = None
@@ -650,6 +660,11 @@ class TestCase(expecttest.TestCase):
         super().__init__(method_name)
 
         test_method = getattr(self, method_name)
+
+        # Wrap method with CWatchdog
+        test_method = self.wrap_method_with_c_watchdog(test_method)
+        setattr(self, method_name, test_method)
+
         # Wraps the tested method if we should do CUDA memory check.
         self._do_cuda_memory_leak_check &= getattr(test_method, '_do_cuda_memory_leak_check', True)
         # FIXME: figure out the flaky -1024 anti-leaks on windows. See #8044
@@ -694,6 +709,12 @@ class TestCase(expecttest.TestCase):
     def wrap_with_cuda_memory_check(self, method):
         return self.wrap_method_with_cuda_policy(method, self.assertLeaksNoCudaTensors)
 
+    def wrap_method_with_c_watchdog(self, method):
+        @wraps(method)
+        def wrapper(self, *args, **kwargs):
+            with CWatchdog(method.__name__):
+                method(*args, *kwargs)
+        return types.MethodType(wrapper, self)
 
     def setUp(self):
 
