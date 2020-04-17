@@ -5,7 +5,6 @@ import tempfile
 import time
 import unittest
 import logging
-import six
 import traceback
 
 from collections import namedtuple
