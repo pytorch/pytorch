@@ -108,7 +108,6 @@ struct TORCH_API Module : public Object {
     return true;
   }
 
-
   IValue operator()(std::vector<IValue> inputs);
 
   IValue forward(std::vector<IValue> inputs) {

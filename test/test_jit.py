@@ -4383,6 +4383,7 @@ def foo(x):
 If you do not want your hooks to be compiled, clear them on the module before compiling with 'torch.jit.script'.
 Scripting hooks is a new feature and it might have introduced new compilation issues for your module.
         """.strip())
+
         class M(nn.Module):
             def forward(self, x):
                 return x + 2
