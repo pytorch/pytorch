@@ -7,8 +7,6 @@
 
 // for TH compat test only...
 struct THFloatTensor;
-extern "C" THFloatTensor * THFloatTensor_newWithSize1d(size_t a, size_t b);
-extern "C" void THFloatTensor_fill(THFloatTensor *, float v);
 
 #include <iostream>
 #include <chrono>
@@ -205,13 +203,6 @@ void TestZeroDim(DeprecatedTypeProperties& type) {
   ASSERT_EQ_RESOLVED(f[2][0].item<double>(), 0);
 }
 
-void TestTensorFromTH() {
-  int a = 4;
-  THFloatTensor* t = THFloatTensor_newWithSize1d(a, a);
-  THFloatTensor_fill(t, a);
-  ASSERT_NO_THROW(at::unsafeTensorFromTH(t, false));
-}
-
 void TestToCFloat() {
   Tensor a = zeros({3, 4});
   Tensor b = ones({3, 7});
@@ -322,7 +313,6 @@ void test(DeprecatedTypeProperties& type) {
   TestAddingAValueWithScalar(type);
   TestSelect(type);
   TestZeroDim(type);
-  TestTensorFromTH();
   TestToCFloat();
   TestToString();
   TestIndexingByScalar();

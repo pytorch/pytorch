@@ -2202,6 +2202,15 @@ class TestAutograd(TestCase):
                               lambda a, b, c, d: torch.broadcast_tensors(a, b, c, d),
                               True, f_args_variable, f_args_tensor)
 
+    def test_block_diag(self):
+        f_args_variable = (torch.randn(1, S, requires_grad=True),
+                           torch.randn(2, S, requires_grad=True),
+                           torch.randn(3, S, requires_grad=True))
+        f_args_tensor = deepcopy(unpack_variables(f_args_variable))
+        run_functional_checks(self, "test_block_diag", "block_diag",
+                              lambda a, b, c: torch.block_diag(a, b, c),
+                              True, f_args_variable, f_args_tensor)
+
     def test_cat(self):
         f_args_variable = (torch.randn(1, S, S, requires_grad=True),
                            torch.randn(2, S, S, requires_grad=True),
@@ -5870,6 +5879,13 @@ class TestAutogradDeviceType(TestCase):
         gradcheck(func, [a, b], raise_exception=True)
         go = torch.randn(a.size(), device=device, requires_grad=True)
         gradgradcheck(func, (a, b), (go,))
+
+    def test_inplace_view_multiple_outputs(self, device):
+        root = torch.arange(9.).reshape(3, 3).requires_grad_()
+        x = root.clone()
+        v1 = x.unbind()
+        with self.assertRaises(RuntimeError):
+            v1[0].mul_(2)
 
     def test_inplace_view_makes_base_require_grad(self, device):
         # in-place modification to view makes base require grad

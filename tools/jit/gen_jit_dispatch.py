@@ -67,6 +67,7 @@ TYPE_MAP = {
     'bool': 'bool',
     'bool?': 'bool?',
     'Generator': 'Generator?',
+    'Generator?': 'Generator?',
 }
 
 
@@ -126,7 +127,7 @@ FROM_IVALUE = {
     'int64_t': '{}.toInt()',
     'int64_t?': '{}.toOptional<int64_t>()',
     'std::string': '{}.toStringRef()',
-    'Generator': 'nullptr',
+    'Generator?': '{}.toOptional<at::Generator>()',
     'std::array<bool,2>': 'as_bool_array<2>({}.toBoolList())',
     'std::array<bool,3>': 'as_bool_array<3>({}.toBoolList())',
     'std::array<bool,4>': 'as_bool_array<4>({}.toBoolList())',
@@ -338,7 +339,7 @@ def gen_jit_dispatch(
         # default anymore. For the (very few) ops that don't support boxed dispatch yet (i.e. ops taking TensorOptions
         # arguments), we set them to 'unboxed_only' and they follow the old behavior of having register_aten_ops.cpp
         # register the jit op.
-        elif decl['use_c10_dispatcher'] == 'with_codegenerated_unboxing_wrapper':
+        elif decl['use_c10_dispatcher'] == 'with_codegenerated_unboxing_wrapper' and not needs_hacked_twin(decl):
             if len(decl['returns']) == 0:
                 return_type = "void"
             elif len(decl['returns']) == 1:
@@ -360,7 +361,7 @@ def gen_jit_dispatch(
                                                   return_type=return_type,
                                                   formals_types_with_leading_comma=argument_types_with_leading_comma)
         else:
-            assert decl['use_c10_dispatcher'] in ['unboxed_only', 'full']
+            assert decl['use_c10_dispatcher'] in ['unboxed_only', 'full'] or needs_hacked_twin(decl)
             if is_namespace_function:
                 return CALL_NAMESPACE.substitute(name=decl['name'],
                                                  args=pack_arguments(args),
@@ -376,7 +377,7 @@ def gen_jit_dispatch(
 
     def emit_decl_variant(decl):
         if ('emit_dummy_placeholder' in decl):
-            if decl['use_c10_dispatcher'] == 'unboxed_only':
+            if decl['use_c10_dispatcher'] == 'unboxed_only' or needs_hacked_twin(decl):
                 return "DUMMY_OPERATION_JITONLY"
             else:
                 return "DUMMY_OPERATION"
@@ -402,7 +403,7 @@ def gen_jit_dispatch(
 
         returns = decl['returns']
 
-        if decl['use_c10_dispatcher'] == 'unboxed_only':
+        if decl['use_c10_dispatcher'] == 'unboxed_only' or needs_hacked_twin(decl):
             # Ops taking TensorOptions aren't supported in this mechanism yet because boxed dispatch doesn't
             # work for them. They use the old mechanism of registering a jitonly op for now.
             # TODO We should get rid of this once TensorOptions are supported.
@@ -462,26 +463,7 @@ def gen_jit_dispatch(
                          groupby(sorted_decls, key=lambda decl: decl['name'])]
         return [sorted(g, key=declkey) for g in grouped_decls]
 
-    # We need to add methods implemented manually in TensorImpl
-    # TODO: This seems to claim sizes() returns an int64_t.  Really?
-    tensor_impl_methods = [{
-        'name': name,
-        'api_name': name,
-        'schema_string': schema_string,
-        'overload_name': '',
-        'method_of': ['Tensor'],
-        'arguments': [{'name': 'self', 'simple_type': 'Tensor'}],
-        'returns': [{'name': 'result', 'type': 'int64_t', 'dynamic_type': 'int64_t', 'simple_type': 'int64_t'}],
-        'use_c10_dispatcher': 'unboxed_only',
-    } for name, schema_string in [
-        ('sizes', 'aten::sizes(Tensor self) -> int'),
-        ('strides', 'aten::strides(Tensor self) -> int'),
-        ('dim', 'aten::dim(Tensor self) -> int'),
-        ('numel', 'aten::numel(Tensor self) -> int'),
-        ('element_size', 'aten::element_size(Tensor self) -> int'),
-    ]]
-
-    aten_decls = load_aten_declarations(declarations) + tensor_impl_methods
+    aten_decls = load_aten_declarations(declarations)
     jit_decls = [d for d in aten_decls if is_jit_op(d)]
 
     # add arguments dtype and device for functions like zeros
@@ -547,7 +529,7 @@ def gen_jit_dispatch(
     for group in jit_decl_groups:
         x = sum(ord(c) for c in group[0]['name']) % num_shards
         for decl in group:
-            if decl['use_c10_dispatcher'] == 'unboxed_only':
+            if decl['use_c10_dispatcher'] == 'unboxed_only' or needs_hacked_twin(decl):
                 shards[x].append(OPERATOR_JITONLY.substitute(signature=decl['schema_string'],
                                                              op=emit_decl_variant(decl)))
             elif decl['use_c10_dispatcher'] == 'with_codegenerated_unboxing_wrapper':
@@ -595,7 +577,10 @@ NEEDS_HACKED_TWIN_NAMES = [
 
 def needs_hacked_twin(decl):
     schema_string = decl['schema_string']
-    return any([schema_string.startswith(name) for name in NEEDS_HACKED_TWIN_NAMES])
+    result = any([schema_string.startswith(name) for name in NEEDS_HACKED_TWIN_NAMES])
+    if result:
+        assert decl['use_c10_dispatcher'] == 'unboxed_only'
+    return result
 
 
 def hacked_twin(decl):
