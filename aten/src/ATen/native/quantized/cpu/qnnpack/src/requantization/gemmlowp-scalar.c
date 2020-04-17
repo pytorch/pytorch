@@ -13,7 +13,7 @@
 #include <qnnpack/requantization-stubs.h>
 #include <qnnpack/scalar-utils.h>
 
-#include <ATen/native/quantized/cpu/qnnpack/src/requantization/gemmlowp-scalar.h>
+#include "gemmlowp-scalar.h"
 
 void pytorch_qnnp_requantize_gemmlowp__scalar(
     size_t n,
