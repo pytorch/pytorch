@@ -1,4 +1,3 @@
-import sys
 import torch
 import torch._C as _C
 from torch._namedtensor_internals import update_names, check_serializing_named_tensor, resolve_ellipsis
@@ -14,9 +13,6 @@ import functools
 
 
 def _wrap_type_error_to_not_implemented(f):
-    from torch import _six
-    import inspect
-
     # functools.wraps doesn't work well with methods in python 2
     method_assignments = ('__name__', '__doc__')
     assigned = functools.WRAPPER_ASSIGNMENTS
