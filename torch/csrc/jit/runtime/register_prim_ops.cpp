@@ -190,6 +190,63 @@ RegisterOperators reg({
           return 0;
         },
         aliasAnalysisFromSchema()),
+    Operator(
+        "aten::element_size(Tensor self) -> int",
+        [](Stack& stack) {
+          at::Tensor arg = pop(stack).toTensor();
+          push(stack, arg.element_size());
+          return 0;
+        },
+        aliasAnalysisFromSchema()),
+    Operator(
+        "aten::numel(Tensor self) -> int",
+        [](Stack& stack) {
+          at::Tensor arg = pop(stack).toTensor();
+          push(stack, arg.numel());
+          return 0;
+        },
+        aliasAnalysisFromSchema()),
+    Operator(
+        "aten::dim(Tensor self) -> int",
+        [](Stack& stack) {
+          at::Tensor arg = pop(stack).toTensor();
+          push(stack, arg.dim());
+          return 0;
+        },
+        aliasAnalysisFromSchema()),
+    Operator(
+        "aten::get_device(Tensor self) -> int",
+        [](Stack& stack) {
+          RECORD_FUNCTION("get_device", std::vector<c10::IValue>());
+          auto result =
+              at::get_device((std::move(peek(stack, 0, 1))).toTensor());
+          drop(stack, 1);
+          pack(stack, result);
+          return 0;
+        },
+        aliasAnalysisFromSchema()),
+    Operator(
+        "aten::storage_offset(Tensor self) -> int",
+        [](Stack& stack) {
+          RECORD_FUNCTION("storage_offset", std::vector<c10::IValue>());
+          auto result =
+              ((std::move(peek(stack, 0, 1))).toTensor()).storage_offset();
+          drop(stack, 1);
+          pack(stack, result);
+          return 0;
+        },
+        aliasAnalysisFromSchema()),
+    Operator(
+        "aten::is_contiguous(Tensor self) -> bool",
+        [](Stack& stack) {
+          RECORD_FUNCTION("is_contiguous", std::vector<c10::IValue>());
+          auto result =
+              ((std::move(peek(stack, 0, 1))).toTensor()).is_contiguous();
+          drop(stack, 1);
+          pack(stack, result);
+          return 0;
+        },
+        aliasAnalysisFromSchema()),
     // these ops are generic over the list element type.
     // CREATING GENERIC_LIST_OPS
     Operator(
