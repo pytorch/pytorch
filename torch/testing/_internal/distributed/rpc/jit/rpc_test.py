@@ -933,11 +933,13 @@ class JitRpcTest(RRefAPITest, LocalRRefTest, JitRpcAsyncOpTest, RpcAgentTestFixt
             with torch.autograd.profiler.record_function("foo") as rf:
                 fut = torch.jit._fork(sleep, sleep_interval)
                 rf._call_end_callbacks_on_future(fut)
-                fut.wait()
+            fut.wait()
 
         function_events = prof.function_events
         sleep_event = get_function_event(function_events, "foo")
         self.assertEqual(sleep_event.name, "foo")
+        # Validate that callbacks were fired at the right time by checking the
+        # profiling event cpu time
         self.assertGreaterEqual(sleep_event.cpu_time * 1e-6, sleep_interval)
 
     def test_call_fork_jit_with_profiling(self):
