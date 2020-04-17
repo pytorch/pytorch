@@ -564,11 +564,11 @@ static c10::List<c10::intrusive_ptr<CellParamsBase>> gather_quantized_params_fp1
   TORCH_CHECK(params.size() % 4 == 0,
               "incorrect number of quantized RNN parameters FP16");
   for (size_t i = 0; i < params.size(); i += 4) {
-    c10::intrusive_ptr<PackedLinearWeightFp16> packed_struct_ih =
-        cpp_custom_type_hack::cast<c10::intrusive_ptr<PackedLinearWeightFp16>>(
+    c10::intrusive_ptr<LinearPackedParamsBase> packed_struct_ih =
+        cpp_custom_type_hack::cast<c10::intrusive_ptr<LinearPackedParamsBase>>(
           static_cast<at::Tensor>(params[i]));
-    c10::intrusive_ptr<PackedLinearWeightFp16> packed_struct_hh =
-        cpp_custom_type_hack::cast<c10::intrusive_ptr<PackedLinearWeightFp16>>(
+    c10::intrusive_ptr<LinearPackedParamsBase> packed_struct_hh =
+        cpp_custom_type_hack::cast<c10::intrusive_ptr<LinearPackedParamsBase>>(
           static_cast<at::Tensor>(params[i + 1]));
 
     result.emplace_back(c10::make_intrusive<QuantizedCellParamsFP16>(
