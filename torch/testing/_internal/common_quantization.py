@@ -126,12 +126,7 @@ class QuantizationTestCase(TestCase):
         self._checkScriptable(orig_mod, scripted, calib_data, check_save_load)
 
         # Use first calib_data entry as trace input
-        #
-        # TODO: Trace checking is blocked on this issue:
-        # https://github.com/pytorch/pytorch/issues/23986
-        #
-        # Once that's resolved we can remove `check_trace=False`
-        traced = torch.jit.trace(orig_mod, calib_data[0][0], check_trace=False)
+        traced = torch.jit.trace(orig_mod, calib_data[0][0])
         self._checkScriptable(orig_mod, traced, calib_data, check_save_load)
 
     # Call this twice: once for a scripted module and once for a traced module
@@ -270,6 +265,32 @@ class AnnotatedTwoLayerLinearModel(torch.nn.Module):
         x = self.fc2(x)
         return x
 
+class ActivationsTestModel(torch.nn.Module):
+    def __init__(self):
+        super(ActivationsTestModel, self).__init__()
+        self.qconfig = torch.quantization.get_default_qconfig("fbgemm")
+        self.quant = torch.quantization.QuantStub()
+        self.hardswish = torch.nn.Hardswish().to(dtype=torch.float)
+
+    def forward(self, x):
+        x = self.quant(x)
+        x = self.hardswish(x)
+        return x
+
+class ActivationsQATTestModel(torch.nn.Module):
+    def __init__(self):
+        super(ActivationsQATTestModel, self).__init__()
+        self.qconfig = torch.quantization.get_default_qconfig("fbgemm")
+        self.quant = torch.quantization.QuantStub()
+        self.fc1 = torch.nn.Linear(5, 8).to(dtype=torch.float)
+        self.hardswish = torch.nn.Hardswish().to(dtype=torch.float)
+
+    def forward(self, x):
+        x = self.quant(x)
+        x = self.fc1(x)
+        x = self.hardswish(x)
+        return x
+
 class LinearReluModel(torch.nn.Module):
     def __init__(self):
         super(LinearReluModel, self).__init__()
@@ -278,6 +299,19 @@ class LinearReluModel(torch.nn.Module):
 
     def forward(self, x):
         x = self.relu(self.fc(x))
+        return x
+
+class NormalizationTestModel(torch.nn.Module):
+    def __init__(self):
+        super(NormalizationTestModel, self).__init__()
+        self.quant = torch.quantization.QuantStub()
+        self.fc1 = torch.nn.Linear(5, 8).to(dtype=torch.float)
+        self.layer_norm = torch.nn.LayerNorm((8))
+
+    def forward(self, x):
+        x = self.quant(x)
+        x = self.fc1(x)
+        x = self.layer_norm(x)
         return x
 
 class NestedModel(torch.nn.Module):

@@ -790,6 +790,7 @@ New API:
 
     m = torch.jit.script(MyModule())
 
+
 Constants
 ^^^^^^^^^
 The ``Final`` type constructor can be used to mark members as `constant`_. If members are not marked constant, they will be copied to the resulting :class:`ScriptModule` as an attribute. Using ``Final`` opens opportunities for optimization if the value is known to be fixed and gives additional type safety.
