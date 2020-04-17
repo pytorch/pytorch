@@ -236,7 +236,7 @@ c10::intrusive_ptr<RRef> RRefContext::getOrCreateRRef(
   auto& forkId = rrefForkData.forkId_;
   if (ownerId == getWorkerId()) {
     // We have found the rref through the rrefId
-    auto ownerRRef = getOwnerRRef(rrefId);
+    auto ownerRRef = getOrCreateOwnerRRef(rrefId, type);
     // Now double check if the two types are matched
     //
     // Why we are special casing the check for tensor type here?
