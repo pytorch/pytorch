@@ -15,7 +15,6 @@ from torch.distributed.rpc.api import _delete_all_user_rrefs, _use_rpc_pickler
 from torch.distributed.rpc.internal import (
     PythonUDF,
     RPCExecMode,
-    _disable_profiling_for_testing,
     _internal_rpc_pickler,
     _build_rpc_profiling_key,
 )
@@ -159,6 +158,14 @@ def build_complex_tensors():
     e = {a: d}
     return [a, b, c, d, e]
 
+def non_cont_test(t_view, t_cont):
+    if t_view.is_contiguous():
+        raise Exception('t_view is contiguous!')
+    if not t_cont.is_contiguous():
+        raise Exception('t_cont is not contiguous!')
+    if not torch.equal(t_view, t_cont):
+        raise Exception('t_view is not equal to t_cont!')
+    return t_view
 
 def my_function(a, b, c):
     return a + b + c
@@ -797,9 +804,6 @@ class RpcTest(RpcAgentTestFixture):
 
     @dist_init
     def test_async_record_function_double_end_callbacks(self):
-        # We need to disable the internal profiling implementation so we can check
-        # it here without any duplicated calls.
-        _disable_profiling_for_testing()
         num_sleep_seconds = 2
         if self.rank == 1:
             # Validate that calling the function twice results in an error.
@@ -816,66 +820,7 @@ class RpcTest(RpcAgentTestFixture):
                 fut.wait()
 
     @dist_init
-    def test_async_record_function_no_end_callbacks(self):
-        # We need to disable the internal profiling implementation so we can check
-        # it here without any duplicated calls.
-        _disable_profiling_for_testing()
-        num_sleep_seconds = 1
-        if self.rank == 1:
-            # Check that if we don't call rf._call_end_callbacks_on_future, then
-            # there are no errors raised, but the reported time will not be accurate
-            # and will only include the async dispatch.
-            with torch.autograd.profiler.profile() as pf:
-                with torch.autograd.profiler.record_function("foo") as rf:
-                    fut = rpc.rpc_async(
-                        worker_name(0), my_sleep_func, args=(num_sleep_seconds,)
-                    )
-                # Note that we do not call rf._call_end_callbacks, so the time will be recorded
-                # when exiting the ctx manager.
-                fut.wait()
-            events = pf.function_events
-            rpc_event = get_function_event(events, "foo")
-            # This should be a small amount of time and much less than
-            # num_sleep_seconds
-            self.assertLess(
-                rpc_event.cpu_time_total * 1e-6,
-                num_sleep_seconds,
-                "RPC event should be less than {} but got {}".format(
-                    num_sleep_seconds, rpc_event.cpu_time_total * 1e-6
-                ),
-            )
-
-    @dist_init
-    def test_async_record_function_end_callbacks(self):
-        # We need to disable the internal profiling implementation so we can check
-        # it here without any duplicated calls.
-        _disable_profiling_for_testing()
-        num_sleep_seconds = 1
-        if self.rank == 1:
-            with torch.autograd.profiler.profile() as pf:
-                with torch.autograd.profiler.record_function("foo") as rf:
-                    fut = rpc.rpc_async(
-                        worker_name(0), my_sleep_func, args=(num_sleep_seconds,)
-                    )
-                    rf._call_end_callbacks_on_future(fut)
-                # Note: calling fut.wait() outside of record_function to simulate
-                # real usage and to ensure that underlying handles in record_function
-                # are correctly persisted even after python ctx manager has exited
-                fut.wait()
-            # Find recorded event and roughly validate the time.
-            events = pf.function_events
-            rpc_event = get_function_event(events, "foo")
-            self.assertGreaterEqual(
-                rpc_event.cpu_time_total * 1e-6,
-                num_sleep_seconds,
-                "RPC event time should be more than {} but got {}".format(
-                    num_sleep_seconds, rpc_event.cpu_time_total * 1e-6
-                ),
-            )
-
-    @dist_init
     def test_async_record_function_cbs_jit_call(self):
-        _disable_profiling_for_testing()
         if self.rank == 1:
             with torch.autograd.profiler.profile() as pf:
                 key = _build_rpc_profiling_key(
@@ -2039,6 +1984,26 @@ class RpcTest(RpcAgentTestFixture):
                           args=(torch.ones(2),))
         with self.assertRaisesRegex(Exception, ".*Expected error.*"):
             rref.to_here()
+
+    @dist_init
+    def test_non_cont_tensors(self):
+        if self.rank == 0:
+            # Create a non-contiguous tensor.
+            t = torch.rand(5, 5)
+            t_view = t.narrow(1, 2, 2)
+            self.assertFalse(t_view.is_contiguous())
+            t_cont = t_view.contiguous()
+            self.assertTrue(t_cont.is_contiguous())
+            self.assertEqual(t_view, t_cont)
+
+            # Send non-cont tensor over RPC.
+            next_rank = (self.rank + 1) % self.world_size
+            t_ret = rpc.rpc_sync(worker_name(next_rank), non_cont_test, args=(t_view, t_cont))
+
+            # Verify the returned tensor.
+            self.assertEqual(t_view, t_ret)
+            self.assertFalse(t_ret.is_contiguous())
+
 
 @unittest.skipIf(
     not torch._six.PY3,

@@ -14,8 +14,8 @@ namespace autograd {
 namespace profiler {
 
 // Needed to register JIT operator in operator registry below
-c10::AliasAnalysisKind aliasAnalysisSpecialCase() {
-  return c10::AliasAnalysisKind::INTERNAL_SPECIAL_CASE;
+c10::AliasAnalysisKind aliasAnalysisFromSchema() {
+  return c10::AliasAnalysisKind::FROM_SCHEMA;
 }
 
 at::Tensor record_function_enter(const std::string& name) {
@@ -87,7 +87,7 @@ jit::RegisterOperators reg_fut_ops({
           _call_end_callbacks_on_jit_fut(tensor, fut);
           return 0;
         },
-        aliasAnalysisSpecialCase()),
+        aliasAnalysisFromSchema()),
 });
 
 } // namespace profiler

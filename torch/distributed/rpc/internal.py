@@ -14,11 +14,6 @@ import torch.distributed as dist
 # objects
 _thread_local_tensor_tables = threading.local()
 
-# Flag to enable and disable RPC profiling with the autograd profiler. Only disabled
-# in some unit tests to test the profiler functionality at a granular level.
-_profiling_flag = True
-
-
 class RPCExecMode(Enum):
     SYNC = "sync"
     ASYNC = "async"
@@ -165,14 +160,6 @@ def _run_function(python_udf):
 def _handle_exception(result):
     if isinstance(result, RemoteException):
         raise result.exception_type(result.msg)
-
-def _disable_profiling_for_testing():
-    global _profiling_flag
-    _profiling_flag = False
-
-def _profiling_enabled():
-    global _profiling_flag
-    return _profiling_flag
 
 def _build_rpc_profiling_key(exec_type, func_name, current_worker_name, dst_worker_name):
     """

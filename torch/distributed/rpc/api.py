@@ -33,7 +33,6 @@ from .internal import (
     PythonUDF,
     RPCExecMode,
     _internal_rpc_pickler,
-    _profiling_enabled,
     _build_rpc_profiling_key,
 )
 
@@ -424,9 +423,7 @@ def remote(to, func, args=None, kwargs=None):
     """
     qualified_name = torch.jit._find_builtin(func)
     dst_worker_info = _to_worker_info(to)
-    # _profiling_enabled is only false in certain unittests where we check the
-    # profiling implementation on a more granular basis.
-    should_profile = torch.autograd._profiler_enabled() and _profiling_enabled()
+    should_profile = torch.autograd._profiler_enabled()
 
     ctx_manager = contextlib.suppress()
     if should_profile:
@@ -483,7 +480,7 @@ def _invoke_rpc(to, func, rpc_type, args=None, kwargs=None):
 
     # TODO: profiling logic does not really belong in invoke_rpc, it should be
     # added as part of a context manager or helper (https://github.com/pytorch/pytorch/issues/36360)
-    should_profile = torch.autograd._profiler_enabled() and _profiling_enabled()
+    should_profile = torch.autograd._profiler_enabled()
 
     ctx_manager = contextlib.suppress()
     if should_profile:
