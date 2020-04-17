@@ -37,6 +37,7 @@ white_list = [
     ('aten::backward', datetime.date(2020, 4, 30)),
     ('quantized::conv_prepack', datetime.date(2020, 6, 1)),
     ('quantized::conv3d_prepack', datetime.date(2020, 6, 1)),
+    ('quantized::conv3d_unpack', datetime.date(2020, 6, 1)),
     ('quantized::conv3d', datetime.date(2020, 6, 1)),
     ('quantized::conv2d_relu', datetime.date(2020, 6, 1)),
     ('quantized::conv2d', datetime.date(2020, 6, 1)),
