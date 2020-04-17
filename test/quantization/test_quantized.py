@@ -1624,6 +1624,59 @@ class TestQuantizedOps(TestCase):
                 qY_hat, qY,
                 message="qgroup_norm failed: \n{} expected vs \n{} actual".format(qY_hat, qY))
 
+    @given(shapes=hu.array_shapes(3, 5, 2, 32),
+           torch_type=st.sampled_from((torch.qint8, torch.quint8, torch.qint32)),
+           X_rand_scale=st.floats(0.01, 1e3),
+           Y_scale=st.floats(0.2, 2.6),
+           Y_zero_point=st.integers(0, 5))
+    def test_instance_norm(self, shapes, torch_type, X_rand_scale,
+                           Y_scale, Y_zero_point):
+        if "fbgemm" not in torch.backends.quantized.supported_engines:
+            return
+
+        with override_quantized_engine("fbgemm"):
+            # In the FP kernel, mean and variance are calculated in floating point.
+            # In the quantized kernel, they are calculated in integer arithmetic.
+            # Because of this, the numerics do not always match exactly which is
+            # expected and acceptable. We do the following to whitelist this failure
+            # in this test:
+            # 1. do not use Hypothesis to generate the input tensor.  Hypothesis
+            #    favors homogeneous inputs in its search strategies which isn't
+            #    representative of the inputs we care about, and tends to maximize
+            #    this particular numerics difference.
+            #
+            # If we want the numerics to match we could switch to calculating
+            # mean+var in floating point in the future, at the cost of speed.
+            X, X_scale, X_zero_point = \
+                _get_random_tensor_and_q_params(shapes, X_rand_scale, torch_type)
+
+            num_channels = shapes[1]
+            weight = torch.rand(num_channels).float()
+            bias = torch.rand(num_channels).float()
+            eps = 0.001
+
+            qX = torch.quantize_per_tensor(X, X_scale, X_zero_point, torch_type)
+            dqX = qX.dequantize()
+
+            # Enforce non-homogeneous inputs
+            batches = shapes[0]
+            for batch_idx in range(batches):
+                for ch_idx in range(num_channels):
+                    ch_vals = dqX[batch_idx][ch_idx]
+                    assume(
+                        float(torch.unique(ch_vals).shape[0]) / ch_vals.numel() > 0.01
+                        or group_vals.numel() < 5)
+
+            qY = torch.ops.quantized.instance_norm(qX, weight, bias, eps, Y_scale, Y_zero_point)
+
+            dqY_hat = F.instance_norm(dqX, weight=weight, bias=bias, eps=eps)
+            qY_hat = torch.quantize_per_tensor(dqY_hat, Y_scale, Y_zero_point, torch_type)
+            note("X\n{}\nqX\n{}\ndqX\n{}\n".format(X, qX, dqX))
+
+            self.assertEqual(
+                qY_hat, qY,
+                message="qinstance_norm failed: \n{} expected vs \n{} actual".format(qY_hat, qY))
+
     @unittest.skip("Takes 20+ min to finish in many configurations")
     @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=4, max_dims=5,
                                               min_side=1, max_side=32),
