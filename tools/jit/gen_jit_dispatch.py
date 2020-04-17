@@ -13,7 +13,6 @@ torch/csrc/jit/generated/
 """
 
 import argparse
-import copy
 import re
 import yaml
 from itertools import groupby
