@@ -850,5 +850,36 @@ class ModuleAPITest(QuantizationTestCase):
         self.assertEqual(quant_ref.int_repr().numpy(), qy.int_repr().numpy(),
                          message="BatchNorm3d module API failed")
 
+    def test_layer_norm(self):
+        """Tests the correctness of the layernorm module.
+        The correctness is defined against the functional implementation.
+        """
+        x_scale = 10.0 / 256
+        x_zero_point = 0
+        y_scale = 5.0 / 256
+        y_zero_point = 127
+
+        dims = (1, 4, 8)
+
+        X = (torch.randn(dims, dtype=torch.float) - 0.5) * 10
+        qX = torch.quantize_per_tensor(X, x_scale, x_zero_point, dtype=torch.quint8)
+        dqX = qX.dequantize()
+
+        float_mod = torch.nn.LayerNorm(dqX.size()[1:])
+        float_mod.weight = torch.nn.Parameter(torch.rand(*dims[1:]))
+        float_mod.bias = torch.nn.Parameter(torch.rand(*dims[1:]))
+
+        dqY_ref = float_mod(dqX)
+        qY_ref = torch.quantize_per_tensor(
+            dqY_ref, y_scale, y_zero_point, dtype=torch.quint8)
+
+        quant_mod = nnq.LayerNorm(
+            qX.size()[1:], float_mod.weight, float_mod.bias, y_scale, y_zero_point)
+        qY = quant_mod(qX)
+
+        self.assertEqual(qY_ref.int_repr().numpy(), qY.int_repr().numpy(),
+                         message="LayerNorm module API failed, qY_ref\n{} vs qY\n{}"
+                         .format(qY_ref, qY))
+
 if __name__ == '__main__':
     run_tests()

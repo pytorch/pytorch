@@ -90,12 +90,24 @@ class HardswishOperatorTester {
     return this->inputZeroPoint_;
   }
 
+  inline HardswishOperatorTester& outputScale(float outputScale) {
+    assert(outputScale > 0.0f);
+    assert(std::isnormal(outputScale));
+    this->outputScale_ = outputScale;
+    return *this;
+  }
+
   inline float outputScale() const {
-    return this->inputScale_;
+    return this->outputScale_;
+  }
+
+  inline HardswishOperatorTester& outputZeroPoint(uint8_t outputZeroPoint) {
+    this->outputZeroPoint_ = outputZeroPoint;
+    return *this;
   }
 
   inline uint8_t outputZeroPoint() const {
-    return this->inputZeroPoint_;
+    return this->outputZeroPoint_;
   }
 
   inline HardswishOperatorTester& qmin(uint8_t qmin) {
@@ -209,6 +221,8 @@ class HardswishOperatorTester {
   size_t outputStride_{0};
   float inputScale_{0.75f};
   uint8_t inputZeroPoint_{121};
+  float outputScale_{0.75f};
+  uint8_t outputZeroPoint_{121};
   uint8_t qmin_{0};
   uint8_t qmax_{255};
   size_t iterations_{15};
