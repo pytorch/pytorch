@@ -224,8 +224,8 @@ static OffsetCalculator<1, index_t> make_input_calculator(const TensorIterator& 
 
 template <typename out_scalar_t, typename func_t>
 struct func_wrapper_t {
-  using arg_t = typename c10::guts::binary_function_traits<func_t>::arg1_t;
-  using scalar_t = typename c10::guts::binary_function_traits<func_t>::arg2_t;
+  using arg_t = typename c10::guts::function_traits<func_t>::arg<0>::type;
+  using scalar_t = typename c10::guts::function_traits<func_t>::arg<1>::type;
 
   func_t combine;
   static inline __device__ out_scalar_t project(arg_t arg) {

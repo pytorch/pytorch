@@ -62,7 +62,7 @@ struct function_traits<ReturnType(Args...)> {
   using parameter_types = typelist::typelist<Args...>;
 
   // arity is the number of arguments.
-  enum { arity = sizeof...(Args) };
+  constexpr static size_t arity() { return sizeof...(Args); }
 
   typedef std::tuple<Args...> ArgsTuple;
 
@@ -73,12 +73,6 @@ struct function_traits<ReturnType(Args...)> {
       // the i-th argument is equivalent to the i-th tuple element of a tuple
       // composed of those arguments.
   };
-};
-
-template <typename T>
-struct nullary_function_traits {
-  using traits = function_traits<T>;
-  using return_type = typename traits::return_type;
 };
 
 template <typename T>
