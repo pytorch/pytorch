@@ -160,6 +160,49 @@ TORCH_CUDA_API Val* addcmul(Val* v1, Val* v2, Val* v3, Val* s) {
   return binaryOp(BinaryOpType::Add, v1, intrm2);
 }
 
+TORCH_CUDA_API Val* where(Val* c, Val* v1, Val* v2) {
+  TORCH_CHECK(
+      c->getDataType().value() == DataType::Int,
+      "Condition should be of DataType Int, not ",
+      c->getDataType().value());
+
+  Val* out = promoteNew(v1, v2);
+  Statement* expr = new TernaryOp(TernaryOpType::Where, out, c, v1, v2);
+  return out;
+}
+
+TORCH_CUDA_API Val* threshold(Val* in, Val* thresh, Val* value) {
+  TORCH_CHECK(
+         in->getDataType().value() == thresh->getDataType().value()
+      && in->getDataType().value() == value->getDataType().value(),
+      "All input DataType values should match the input ",
+      in->getDataType().value());
+  TORCH_CHECK(
+         thresh->getValType().value() == ValType::Scalar
+      && value->getValType().value() == ValType::Scalar,
+      "Thresh and Value values should be Scalars");
+
+  Val* out = newValLike(in);
+  Statement* expr = new TernaryOp(TernaryOpType::Threshold, out, in, thresh, value);
+  return out;
+}
+
+TORCH_CUDA_API Val* clamp(Val* in, Val* min_val, Val* max_val) {
+  TORCH_CHECK(
+         in->getDataType().value() == min_val->getDataType().value()
+      && in->getDataType().value() == max_val->getDataType().value(),
+      "All input DataType values should match the input ",
+      in->getDataType().value());
+  TORCH_CHECK(
+         min_val->getValType().value() == ValType::Scalar
+      && max_val->getValType().value() == ValType::Scalar,
+      "Min and Max values should be Scalars");
+
+  Val* out = newValLike(in);
+  Statement* expr = new TernaryOp(TernaryOpType::Clamp, out, in, min_val, max_val);
+  return out;
+}
+
 } // namespace fuser
 } // namespace jit
 } // namespace torch

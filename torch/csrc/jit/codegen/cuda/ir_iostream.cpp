@@ -29,6 +29,9 @@ void IRPrinter::printHeader(Fusion* fusion, const std::string& kernel_name_) {
   os << "__device__ int ceilDiv(const int a, const int b) {\n"
      << "  return (a + b - 1) / b;\n"
      << "}\n\n";
+  os << "__device__ float clamp(const float x, const float minv, const float maxv) {\n"
+     << "  return x < minv ? minv : (x > maxv ? maxv : x);\n"
+     << "}\n\n";
   os << "__device__ float frac(const float x) {\n"
      << "  return x - truncf(x);\n"
      << "}\n\n";
@@ -39,10 +42,19 @@ void IRPrinter::printHeader(Fusion* fusion, const std::string& kernel_name_) {
      << "  return 1.f / x;\n"
      << "}\n\n";
   os << "__device__ float relu(const float x) {\n"
-     << "  return x < 0.f ? 0.f : x;\n"
+     << "  return x <= 0.f ? 0.f : x;\n"
+     << "}\n\n";
+  os << "__device__ float remainder(const float a, const float b) {\n"
+     << "  return a - b * floorf(a / b);\n"
      << "}\n\n";
   os << "__device__ float sigmoid(const float x) {\n"
      << "  return 1.f / (1.f + expf(-x));\n"
+     << "}\n\n";
+  os << "__device__ float threshold(const float x, const float t, const float v) {\n"
+     << "  return x <= t ? v : x;\n"
+     << "}\n\n";
+  os << "__device__ float where(const int c, const float a, const float b) {\n"
+     << "  return c ? a : b;\n"
      << "}\n\n";
 
   os << "__global__ void " << kernel_name_ << "(";
