@@ -19,10 +19,6 @@ def einsum(g, equation, tensor_list):
     tensors = sym_help._unpack_list(tensor_list)
     return g.op("Einsum", *tensors, equation_s=equation)
 
-def inverse(g, self):
-    if not sym_help._is_fp(self):
-        self = g.op("Cast", self, to_i=sym_help.cast_pytorch_to_onnx['Float'])
-    return g.op("Inverse", self)
 
 @parse_args('v', 'f', 'i')
 def dropout(g, input, p, train):
