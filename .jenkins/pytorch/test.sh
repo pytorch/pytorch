@@ -36,6 +36,8 @@ if [ -n "${IN_CIRCLECI}" ]; then
 fi
 
 if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
+  # Print GPU info
+  rocminfo | egrep 'Name:.*\sgfx|Marketing'
   # TODO: Move this to Docker
   sudo apt-get -qq update
   sudo apt-get -qq install --no-install-recommends libsndfile1
