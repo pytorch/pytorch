@@ -1390,6 +1390,22 @@ class TestQuantizeScriptPTSQOps(JitTestCase):
                    .check("quantized::cat") \
                    .run(m.graph_for(data, data))
 
+    def test_qbatch_norm(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+                self.bn = torch.nn.BatchNorm2d(3).to(torch.float)
+
+            def forward(self, x):
+                return self.bn(x)
+
+        data = [(torch.rand((1, 3, 10, 10), dtype=torch.float), torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
+        model = self._test_op_impl(M, data, "quantized::batch_norm2d")
+
+        FileCheck().check_not("aten::batch_norm") \
+                   .run(model.graph)
+
+
     def test_swap_dequantize_all_ops(self):
         """ A test that checks dequantize will be swapped for
         all supported general ops without actually checking for execution of these ops
@@ -1397,18 +1413,36 @@ class TestQuantizeScriptPTSQOps(JitTestCase):
         class M(torch.nn.Module):
             def __init__(self):
                 super(M, self).__init__()
-                self.maxpool = torch.nn.MaxPool2d(kernel_size=3)
-                self.adaptive_avgpool = torch.nn.AdaptiveAvgPool2d((1, 1))
+                self.maxpool1d = torch.nn.MaxPool1d(kernel_size=3)
+                self.maxpool2d = torch.nn.MaxPool2d(kernel_size=3)
+                self.maxpool3d = torch.nn.MaxPool3d(kernel_size=3)
+                self.adaptive_avgpool1d = torch.nn.AdaptiveAvgPool1d((1))
+                self.adaptive_avgpool2d = torch.nn.AdaptiveAvgPool2d((1, 1))
+                self.adaptive_avgpool3d = torch.nn.AdaptiveAvgPool3d((1, 1, 1))
                 self.dropout = torch.nn.Dropout()
-                self.avgpool = torch.nn.AvgPool2d(3)
+                self.avgpool1d = torch.nn.AvgPool1d(3)
+                self.avgpool2d = torch.nn.AvgPool2d(3)
+                self.avgpool3d = torch.nn.AvgPool3d(3)
                 self.conv = torch.nn.Conv2d(3, 3, 3)
 
             def forward(self, x):
                 x = self.conv(x)
-                x = self.maxpool(x)
-                x = self.adaptive_avgpool(x)
-                x = self.avgpool(x)
+                x = self.maxpool1d(x)
+                x = self.maxpool2d(x)
+                x = self.maxpool3d(x)
+                x = self.adaptive_avgpool1d(x)
+                x = self.adaptive_avgpool2d(x)
+                x = self.adaptive_avgpool3d(x)
+                x = self.avgpool1d(x)
+                x = self.avgpool2d(x)
+                x = self.avgpool3d(x)
                 x = torch.flatten(x)
+                x = F.adaptive_avg_pool1d(x, (1))
+                x = F.adaptive_avg_pool2d(x, (1, 1))
+                x = F.adaptive_avg_pool3d(x, (1, 1, 1))
+                x = F.avg_pool1d(x, 3)
+                x = F.avg_pool2d(x, 3)
+                x = F.avg_pool3d(x, 3)
                 x = torch.max(x)
                 x = torch.min(x)
                 x = torch.mean(x)

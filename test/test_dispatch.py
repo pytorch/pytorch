@@ -196,6 +196,7 @@ class TestDispatch(TestCase):
         self.assertExpectedInline(r, '''\
 name: test::foo
 schema: test::foo(Tensor x) -> (Tensor)
+debug: registered at /dev/null:0
 alias analysis kind: FROM_SCHEMA
 Autograd: impl_t_t :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
 catchall: impl_t_t :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
@@ -210,7 +211,7 @@ catchall: impl_t_t :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
             # m.impl("foo", [](const Tensor & x) { return x })
             lambda m: m.impl_t_t("foo"),
         ], expect_raises=True)
-        self.assertExpectedInline(r, '''In registration for test::foo: expected schema of operator to be "test::foo(Tensor x, Tensor y) -> (Tensor)", but got inferred schema "(Tensor _0) -> (Tensor _0)". The number of arguments is different. 2 vs 1.''')  # noqa
+        self.assertExpectedInline(r, '''In registration for test::foo: expected schema of operator to be "test::foo(Tensor x, Tensor y) -> (Tensor)" (registered at /dev/null:0), but got inferred schema "(Tensor _0) -> (Tensor _0)" (impl_t_t). The number of arguments is different. 2 vs 1.''')  # noqa
 
     def test_def_with_inference(self):
         r = self.commute("foo", [
@@ -222,6 +223,7 @@ catchall: impl_t_t :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
         self.assertExpectedInline(r, '''\
 name: test::foo
 schema: test::foo(Tensor _0) -> (Tensor _0)
+debug: registered at /dev/null:0
 alias analysis kind: CONSERVATIVE
 Autograd: impl_t_t :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
 catchall: default_def_name_t_t :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
@@ -235,6 +237,7 @@ catchall: default_def_name_t_t :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
         self.assertExpectedInline(r, '''\
 name: test::foo
 schema: test::foo(Tensor x, Tensor y) -> (Tensor)
+debug: registered at /dev/null:0
 alias analysis kind: FROM_SCHEMA
 ''')
 
@@ -275,6 +278,7 @@ catchall: impl_t_t :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
         self.assertExpectedInline(r, '''\
 name: test::foo
 schema: test::foo(Tensor x, Tensor y) -> (Tensor)
+debug: registered at /dev/null:0
 alias analysis kind: PURE_FUNCTION
 ''')
 
@@ -289,11 +293,11 @@ alias analysis kind: PURE_FUNCTION
         ]
         self.assertExpectedInline(
             self.commute("foo", ops, ctor_order=(0, 1), expect_raises=True),
-            '''Tried to register multiple operators with the same name and the same overload name but different schemas: test::foo(Tensor x) -> (Tensor) vs test::foo(Tensor x, Tensor y) -> (Tensor)'''  # noqa
+            '''Tried to register multiple operators with the same name and the same overload name but different schemas: test::foo(Tensor x) -> (Tensor) (registered at /dev/null:0) vs test::foo(Tensor x, Tensor y) -> (Tensor) (registered at /dev/null:0)'''  # noqa
         )
         self.assertExpectedInline(
             self.commute("foo", ops, ctor_order=(1, 0), expect_raises=True),
-            '''Tried to register multiple operators with the same name and the same overload name but different schemas: test::foo(Tensor x, Tensor y) -> (Tensor) vs test::foo(Tensor x) -> (Tensor)'''  # noqa
+            '''Tried to register multiple operators with the same name and the same overload name but different schemas: test::foo(Tensor x, Tensor y) -> (Tensor) (registered at /dev/null:0) vs test::foo(Tensor x) -> (Tensor) (registered at /dev/null:0)'''  # noqa
         )
 
     def test_multiple_def_alias_defaulting(self):
@@ -310,6 +314,7 @@ alias analysis kind: PURE_FUNCTION
             '''\
 name: test::foo
 schema: test::foo(Tensor x) -> (Tensor)
+debug: registered at /dev/null:0
 alias analysis kind: PURE_FUNCTION
 '''
         )
@@ -332,11 +337,11 @@ alias analysis kind: PURE_FUNCTION
         ]
         self.assertExpectedInline(
             self.commute("foo", ops, ctor_order=(0, 1), expect_raises=True),
-            '''Tried to define the schema for test::foo with different alias analysis kinds: PURE_FUNCTION vs CONSERVATIVE'''  # noqa
+            '''Tried to define the schema for test::foo with different alias analysis kinds: PURE_FUNCTION (registered at /dev/null:0) vs CONSERVATIVE (registered at /dev/null:0)'''  # noqa
         )
         self.assertExpectedInline(
             self.commute("foo", ops, ctor_order=(1, 0), expect_raises=True),
-            '''Tried to define the schema for test::foo with different alias analysis kinds: CONSERVATIVE vs PURE_FUNCTION'''  # noqa
+            '''Tried to define the schema for test::foo with different alias analysis kinds: CONSERVATIVE (registered at /dev/null:0) vs PURE_FUNCTION (registered at /dev/null:0)'''  # noqa
         )
 
     def test_overwrite_catchall(self):
