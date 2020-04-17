@@ -1335,8 +1335,8 @@ class RpcTest(RpcAgentTestFixture):
 
     @requires_process_group_agent("PROCESS_GROUP rpc backend specific test, skip")
     def test_single_threaded_rref_owner(self):
-        # This test aims to verify if the server can handle all internal RPC 
-        # messages using just one thread. 
+        # This test aims to verify if the server can handle all internal RPC
+        # messages using just one thread.
         caller_rank = 0
         callee_rank = 1
         rpc_backend_options = rpc.ProcessGroupRpcBackendOptions(
@@ -1396,7 +1396,6 @@ class RpcTest(RpcAgentTestFixture):
         # only thread on callee (rank == 1) too early.
         dist.barrier()
         rpc.shutdown()
-
 
     @requires_process_group_agent("PROCESS_GROUP rpc backend specific test, skip")
     def test_single_threaded_rref_to_here(self):
