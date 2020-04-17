@@ -353,6 +353,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: lt_
    .. automethod:: lu
    .. automethod:: lu_solve
+   .. automethod:: as_subclass
    .. automethod:: map_
    .. automethod:: masked_scatter_
    .. automethod:: masked_scatter

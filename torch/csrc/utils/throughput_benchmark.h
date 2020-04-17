@@ -8,6 +8,7 @@
 
 #include <iostream>
 #include <memory>
+#include <string>
 #include <vector>
 
 namespace py = pybind11;
@@ -52,6 +53,10 @@ struct BenchmarkConfig {
   // Number of iterations the benchmark should run with. This number is separate
   // from the warmup iterations
   int64_t num_iters{100};
+  // If set autograd profiler will be enabled. I.e. this variable would be created
+  // before the main benchmark loop (but after the warmup):
+  // RecordProfile guard(profiler_output_path);
+  std::string profiler_output_path{""};
 };
 
 namespace detail {

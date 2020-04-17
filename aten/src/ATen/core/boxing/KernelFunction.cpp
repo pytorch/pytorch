@@ -30,9 +30,6 @@ std::string KernelFunction::dumpState() const {
   if (unboxed_kernel_func_) {
     oss << "unboxed ";
   }
-  if (functorFactory_) {
-    oss << "functor ";
-  }
   return oss.str();
 }
 
