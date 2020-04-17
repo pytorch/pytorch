@@ -23,9 +23,18 @@ __global__ void stochastic_rounding_kernel(
 
 Tensor stochastic_rounding_cuda(const Tensor& input, Generator gen_) {
 
-  Tensor output = at::empty_like(input, input.options().dtype(kHalf), input.suggest_memory_format());
+  TORCH_CHECK(input.is_contiguous());
 
+  if (input.scalar_type() == kHalf) {
+    return input;
+  }
+
+  Tensor output = at::empty_like(input, input.options().dtype(kHalf), input.suggest_memory_format());
   const int64_t numel = input.numel();
+  if (numel == 0) {
+    return output;
+  }
+
   const int block = 256;
   const int blocks_per_sm = at::cuda::getCurrentDeviceProperties()->maxThreadsPerMultiProcessor / block;
   unsigned int grid = (numel + block - 1) / block;
@@ -38,7 +47,7 @@ Tensor stochastic_rounding_cuda(const Tensor& input, Generator gen_) {
     rng_engine_inputs = gen->philox_engine_inputs((numel + block * grid - 1) / (block * grid));
   }
 
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(
+  AT_DISPATCH_FLOATING_TYPES(
     input.scalar_type(),  "stochastic_rounding_cuda", [&] {
       stochastic_rounding_kernel<scalar_t, at::Half><<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(
         input.data_ptr<scalar_t>(),
