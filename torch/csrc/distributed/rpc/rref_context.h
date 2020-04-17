@@ -26,6 +26,8 @@ c10::intrusive_ptr<RRef> TORCH_API
 finishCreatingOwnerRRef(const FutureMessage& futureMessage);
 } // namespace callback
 
+using torch::utils::Future;
+
 // Manages RRef lifetime and keeps track of RRef forks.
 class TORCH_API RRefContext {
  public:
@@ -89,7 +91,7 @@ class TORCH_API RRefContext {
 
   // Returns a Future of the OwnerRRef, which will be marked completed when
   // OwnerRRef is created.
-  std::shared_ptr<torch::utils::Future<c10::intrusive_ptr<OwnerRRef>>>
+  std::shared_ptr<Future<c10::intrusive_ptr<OwnerRRef>>>
       getOwnerRRef(const RRefId& rrefId);
 
   // Adding the RRefId of an OwnerRRef into the forks_ map. This is useful when
@@ -171,7 +173,7 @@ class TORCH_API RRefContext {
   // because this Future is already captured in callbacks of the
   // PendingUserState. If there is no pending UserRRefs, this method returns a
   // completed future.
-  std::shared_ptr<torch::utils::Future<bool>> waitForThreadLocalPendingRRefs();
+  std::shared_ptr<Future<bool>> waitForThreadLocalPendingRRefs();
   // Only call this function when there are errors during a recording session,
   // and it is likely that waitForThreadLocalPendingRRefs() cannot be invoked
   // properly.
@@ -198,7 +200,7 @@ class TORCH_API RRefContext {
     c10::intrusive_ptr<RRef> rref_;
     // Use Future.wait() and Future.markCompleted() to block and unblock user
     // functions. The bool value wrapped by the future_ is not used.
-    torch::utils::Future<bool> future_;
+    Future<bool> future_;
   };
 
   RRefContext(std::shared_ptr<RpcAgent>);
@@ -230,7 +232,7 @@ class TORCH_API RRefContext {
   // OwnerRRef is created.
   std::unordered_map<
       RRefId,
-      std::shared_ptr<torch::utils::Future<c10::intrusive_ptr<OwnerRRef>>>,
+      std::shared_ptr<Future<c10::intrusive_ptr<OwnerRRef>>>,
       RRefId::Hash>
       pendingOwners_;
   // Tracks known living UserRRefs of an OwnerRRef
