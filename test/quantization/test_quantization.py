@@ -1176,7 +1176,7 @@ class GraphModePostTrainingQuantTest(QuantizationTestCase):
                 model_under_test,
                 qconfig_dict,
                 test_only_eval_fn,
-                [self.calib_data])
+                [self.calib_data[0][0]])
             self.assertEqual(model_quantized(self.calib_data[0][0]), result_eager)
 
             # Check to make sure choose_qparams->quant->dequant->linear is numerically
@@ -1185,7 +1185,7 @@ class GraphModePostTrainingQuantTest(QuantizationTestCase):
                 model_under_test,
                 qconfig_dict,
                 test_only_eval_fn,
-                [self.calib_data],
+                [self.calib_data[0][0]],
                 debug=True)
             self.assertEqual(model_fake_quantized(self.calib_data[0][0]), result_eager)
 
