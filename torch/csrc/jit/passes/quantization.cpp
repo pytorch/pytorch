@@ -63,6 +63,8 @@ std::vector<std::string> _quantizable_aten_funcs = {
     "add",
     "cat",
     "lstm",
+    "mul",
+    "mul_",
 };
 
 // These are the prim::CallFunctions that doesn't require observation and
@@ -207,10 +209,15 @@ bool alwaysRaisesException(Block* block) {
   return false;
 }
 
-bool isAddScalar(Node* n) {
-  return (n->kind() == Symbol::aten("add") ||
-          n->kind() == Symbol::aten("add_")) &&
-      n->input(0)->type()->isSubtypeOf(TensorType::get()) &&
+bool hasScalarInput(Node* n) {
+  bool result = false;
+  std::unordered_set<std::string> scalar_op{"add", "add_", "mul", "mul_"};
+  for (auto op : scalar_op) {
+    if (n->kind() == Symbol::aten(op)) {
+      result |= true;
+    }
+  }
+  return result && n->input(0)->type()->isSubtypeOf(TensorType::get()) &&
       n->input(1)->type()->isSubtypeOf(NumberType::get());
 }
 
@@ -259,7 +266,7 @@ std::vector<Value*> getPassThroughInputs(Value* v) {
 }
 
 bool mayRequireObservation(Value* v) {
-  return !isAddScalar(v->node());
+  return !hasScalarInput(v->node());
 }
 
 bool nodeQuantizable(Node* n) {
