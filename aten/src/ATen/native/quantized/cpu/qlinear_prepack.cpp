@@ -300,7 +300,7 @@ TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
 }
 
 TORCH_LIBRARY_IMPL(quantized, CPU, m) {
-  m.impl("linear_prepack", QLinearPackWeightFp16::run);
+  m.impl("linear_prepack_fp16", QLinearPackWeightFp16::run);
 }
 
 TORCH_LIBRARY_IMPL(_quantized, QuantizedCPU, m) {
@@ -308,7 +308,7 @@ TORCH_LIBRARY_IMPL(_quantized, QuantizedCPU, m) {
 }
 
 TORCH_LIBRARY_IMPL(_quantized, CPU, m) {
-  m.impl("linear_prepack", QLinearPackWeightFp16::run);
+  m.impl("linear_prepack_fp16", QLinearPackWeightFp16::run);
 }
 
 } // namespace
