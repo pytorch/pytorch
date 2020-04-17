@@ -859,10 +859,8 @@ int dictLen(Stack& stack) {
 int dictValues(Stack& stack) {
   auto dict = pop(stack).toGenericDict();
   auto values = c10::impl::GenericList(dict.valueType());
-  const auto& order = iterationOrder(dict);
-  values.reserve(order.size());
-  for (const auto& p : order) {
-    values.emplace_back(p.second);
+  for (const auto& entry : dict) {
+    values.emplace_back(entry.value());
   }
   push(stack, values);
   return 0;
@@ -871,10 +869,8 @@ int dictValues(Stack& stack) {
 int dictKeys(Stack& stack) {
   auto dict = pop(stack).toGenericDict();
   auto keys = c10::impl::GenericList(dict.keyType());
-  const auto& order = iterationOrder(dict);
-  keys.reserve(order.size());
-  for (const auto& p : order) {
-    keys.emplace_back(p.first);
+  for (const auto& entry : dict) {
+    keys.emplace_back(entry.key());
   }
   push(stack, keys);
   return 0;
@@ -961,12 +957,13 @@ int dictPopItem(Stack& stack) {
   if (dict.size() == 0) {
     AT_ERROR("popitem(): dictionary is empty");
   }
-  auto item = iterationOrder(dict).at(0);
-  auto erase_count = dict.erase(item.first);
+  auto head_item = dict.begin();
+
+  IValue tuple =
+      c10::ivalue::Tuple::create({head_item->key(), head_item->value()});
+  auto erase_count = dict.erase(head_item->key());
   TORCH_CHECK(
       erase_count == 1, "Expected to erase 1 item, found ", erase_count);
-
-  IValue tuple = c10::ivalue::Tuple::create({item.first, item.second});
   push(stack, tuple);
   return 0;
 }
@@ -1001,8 +998,8 @@ int dictItems(Stack& stack) {
   auto items =
       c10::impl::GenericList(TupleType::create({key_type, value_type}));
   items.reserve(dict.size());
-  for (const auto& item : iterationOrder(dict)) {
-    items.emplace_back(c10::ivalue::Tuple::create({item.first, item.second}));
+  for (const auto& item : dict) {
+    items.emplace_back(c10::ivalue::Tuple::create({item.key(), item.value()}));
   }
   push(stack, std::move(items));
   return 0;

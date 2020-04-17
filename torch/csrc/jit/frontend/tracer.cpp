@@ -288,15 +288,17 @@ static IValue addInput(
     auto unpack_node = state->graph->insertNode(list_unpack);
     auto elem_values = unpack_node->outputs();
 
-    const auto order = iterationOrder(dict);
-    AT_ASSERT(order.size() == elem_values.size());
+    AT_ASSERT(dict.size() == elem_values.size());
 
     size_t i = 0;
-    for (const auto& pair : order) {
+    for (const auto& entry : dict) {
       dict.insert_or_assign(
-          pair.first,
+          entry.key(),
           addInput(
-              state, pair.second, dict_type->getValueType(), elem_values[i++]));
+              state,
+              entry.value(),
+              dict_type->getValueType(),
+              elem_values[i++]));
     }
 
     return dict;
@@ -471,19 +473,18 @@ void TracingState::setValue(const IValue& v, Value* value) {
     TypePtr key_type = dict.keyType();
     TypePtr value_type = dict.valueType();
     auto dict_size = dict.size();
-    const auto order = iterationOrder(dict);
     auto handle_unpack = [&](Symbol opname) {
       auto unpack_to_list = graph->insert(opname, {value});
       auto list_unpack = graph->createListUnpack(unpack_to_list, dict_size);
       auto unpack_node = graph->insertNode(list_unpack);
       auto elem_values = unpack_node->outputs();
-      AT_ASSERT(order.size() == elem_values.size());
+      AT_ASSERT(dict.size() == elem_values.size());
       size_t i = 0;
-      for (const auto& pair : order) {
+      for (const auto& entry : dict) {
         if (opname == aten::keys) {
-          setValue(pair.first, elem_values[i]);
+          setValue(entry.key(), elem_values[i]);
         } else {
-          setValue(pair.second, elem_values[i]);
+          setValue(entry.value(), elem_values[i]);
         }
         ++i;
       }
