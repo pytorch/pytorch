@@ -268,7 +268,7 @@ class SummaryWriter(object):
         """Returns the directory where event files will be written."""
         return self.log_dir
 
-    def add_hparams(self, hparam_dict=None, metric_dict=None):
+    def add_hparams(self, hparam_dict, metric_dict):
         """Add a set of hyperparameters to be compared in TensorBoard.
 
         Args:
