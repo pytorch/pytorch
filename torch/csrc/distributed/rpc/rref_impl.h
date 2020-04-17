@@ -223,13 +223,13 @@ class TORCH_API RRef : public RRefInterface {
   // node. Note that this is only set when processing requests invoked with
   // rpc.remote. This is only used to get the future corresponding to the rref
   // for profiling use cases.
-  inline void registerCreatingFuture(std::shared_ptr<FutureMessage> fut) {
-    creatingFuture_ = std::move(fut);
+  inline void registerOwnerCreationFuture(std::shared_ptr<FutureMessage> fut) {
+    ownerCreationFuture_ = std::move(fut);
   }
 
   // Get the future corresponding to the creation of this rref.
-  inline std::shared_ptr<FutureMessage> getCreatingFuture() const {
-    return creatingFuture_;
+  inline std::shared_ptr<FutureMessage> getOwnerCreationFuture() const {
+    return ownerCreationFuture_;
   };
 
   // Send delete UserRRef request to Owner,
@@ -254,7 +254,7 @@ class TORCH_API RRef : public RRefInterface {
   // it could be any TypePtr that JIT support, including PyObjectType
   const TypePtr type_;
   // Future corresponding to request to create RRef on remote node.
-  std::shared_ptr<FutureMessage> creatingFuture_;
+  std::shared_ptr<FutureMessage> ownerCreationFuture_;
 };
 
 // ``UserRRef`` represents a user of an RRef. Besides the ``RRefId``, each user

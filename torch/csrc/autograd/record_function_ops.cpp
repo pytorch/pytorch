@@ -50,6 +50,7 @@ void record_function_exit(const at::Tensor& handle) {
   rec._end();
 }
 
+// Same as _call_end_callbacks_on_fut but takes an ivalue future.
 // TODO: once python and JIT futures are merged, consolidate this with
 // call_end_callbacks_on_fut (https://github.com/pytorch/pytorch/issues/34999).
 void _call_end_callbacks_on_jit_fut(

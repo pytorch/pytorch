@@ -113,7 +113,7 @@ PyRRef::PyRRef(const py::object& value, const py::object& type_hint)
       }()) {}
 
 const std::shared_ptr<FutureMessage> PyRRef::getFuture() const {
-  return rref_->getCreatingFuture();
+  return rref_->getOwnerCreationFuture();
 }
 
 bool PyRRef::isOwner() const {

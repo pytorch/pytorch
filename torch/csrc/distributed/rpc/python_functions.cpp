@@ -152,7 +152,7 @@ PyRRef pyRemoteBuiltin(
     auto fm = sendMessageWithAutograd(
         *agent, dst, std::move(*scriptRemoteCall).toMessage(), false);
 
-    userRRef->registerCreatingFuture(fm);
+    userRRef->registerOwnerCreationFuture(fm);
     ctx.addPendingUser(userRRef->forkId(), userRRef);
     fm->addCallback([forkId{userRRef->forkId()}](const FutureMessage& fm) {
       callback::confirmPendingUser(fm, forkId);
@@ -168,7 +168,7 @@ PyRRef pyRemoteBuiltin(
     auto fm = sendMessageWithAutograd(
         *agent, dst, std::move(*scriptRemoteCall).toMessage(), false);
 
-    ownerRRef->registerCreatingFuture(fm);
+    ownerRRef->registerOwnerCreationFuture(fm);
 
     // Builtin operators does not return py::object, and hence does not require
     // GIL for destructing the potentially deleted OwerRRef.
@@ -209,7 +209,7 @@ PyRRef pyRemotePythonUdf(
         userRRef->rrefId().toIValue(),
         userRRef->forkId().toIValue());
 
-    userRRef->registerCreatingFuture(fm);
+    userRRef->registerOwnerCreationFuture(fm);
 
     ctx.addPendingUser(userRRef->forkId(), userRRef);
     fm->addCallback([forkId{userRRef->forkId()}](const FutureMessage& fm) {
@@ -226,7 +226,7 @@ PyRRef pyRemotePythonUdf(
         ownerRRef->rrefId().toIValue(),
         ownerRRef->rrefId().toIValue());
 
-    ownerRRef->registerCreatingFuture(fm);
+    ownerRRef->registerOwnerCreationFuture(fm);
 
     fm->addCallback([](const FutureMessage& fm) {
       auto deletedRRef = callback::finishCreatingOwnerRRef(fm);

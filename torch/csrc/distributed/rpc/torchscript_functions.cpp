@@ -83,7 +83,7 @@ c10::intrusive_ptr<RRef> remoteTorchscript(
         std::move(*scriptRemoteCall).toMessage(),
         true /*forceGradRecording*/);
 
-    userRRefPtr->registerCreatingFuture(fm);
+    userRRefPtr->registerOwnerCreationFuture(fm);
 
     ctx.addPendingUser(userRRefPtr->forkId(), userRRefPtr);
     fm->addCallback([forkId{userRRefPtr->forkId()}](const FutureMessage& fm) {
@@ -108,7 +108,7 @@ c10::intrusive_ptr<RRef> remoteTorchscript(
         std::move(*scriptRemoteCall).toMessage(),
         true /*forceGradRecording*/);
 
-    ownerRRefPtr->registerCreatingFuture(fm);
+    ownerRRefPtr->registerOwnerCreationFuture(fm);
 
     fm->addCallback(
         [](const FutureMessage& fm) { callback::finishCreatingOwnerRRef(fm); });
