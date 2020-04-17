@@ -317,4 +317,3 @@ operators, see :ref:`name_inference_reference-doc`.
 
       .. warning::
           The named tensor API is experimental and subject to change.
-

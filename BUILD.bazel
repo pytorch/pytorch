@@ -121,6 +121,7 @@ genrule(
     ] + glob(["aten/src/ATen/templates/**"]),
     outs = [
         "aten/src/ATen/Declarations.yaml",
+        "aten/src/ATen/BackendSelectRegister.cpp",
         "aten/src/ATen/CPUType.h",
         "aten/src/ATen/CPUType.cpp",
         "aten/src/ATen/Functions.h",

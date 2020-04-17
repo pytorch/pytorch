@@ -185,9 +185,6 @@ MyPy-style type annotations using the types listed above.
 
     ...
 
-  In our examples, we use comment-based type hints to ensure Python 2
-  compatibility as well.
-
 
 An empty list is assumed to be ``List[Tensor]`` and empty dicts
 ``Dict[str, Tensor]``. To instantiate an empty list or dict of other types,
@@ -215,6 +212,8 @@ Example (type annotations for Python 3):
             return my_list, my_dict
 
     x = torch.jit.script(EmptyDataStructures())
+
+
 
 
 Optional Type Refinement
@@ -828,6 +827,9 @@ Supported constant Python types are
 * ``torch.dtype``
 * tuples containing supported types
 * ``torch.nn.ModuleList`` which can be used in a TorchScript for loop
+
+
+
 
 .. _module attributes:
 
