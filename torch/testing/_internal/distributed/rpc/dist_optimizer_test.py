@@ -1,5 +1,4 @@
 import threading
-import unittest
 
 import torch
 import torch.distributed.autograd as dist_autograd
