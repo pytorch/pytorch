@@ -216,9 +216,12 @@ struct MutationRemover {
     aliasDb_ = torch::make_unique<AliasDb>(graph_);
   }
 
-  void run() {
-    RemoveAtenMutation(graph_->block());
+  void removeListMutation() {
     RemoveListMutation(graph_->block());
+  }
+
+  void removeTensorMutation() {
+    RemoveTensorMutation(graph_->block());
   }
 
  private:
@@ -327,13 +330,13 @@ struct MutationRemover {
     }
   }
 
-  void RemoveAtenMutation(Block* block) {
+  void RemoveTensorMutation(Block* block) {
     for (auto it = block->nodes().begin(); it != block->nodes().end();) {
       auto* node = *it;
       it++;
 
       for (Block* sub_block : node->blocks()) {
-        RemoveAtenMutation(sub_block);
+        RemoveTensorMutation(sub_block);
       }
 
       // TODO: out op variants
@@ -409,9 +412,17 @@ void InlineFunctionalGraphs(const std::shared_ptr<Graph>& graph) {
   InlineFunctionalGraphs(graph->block());
 }
 
-void RemoveMutation(const std::shared_ptr<Graph>& graph) {
+void RemoveMutation(
+    const std::shared_ptr<Graph>& graph,
+    bool remove_list_mutation,
+    bool remove_tensor_mutation) {
   MutationRemover mr(graph);
-  mr.run();
+  if (remove_list_mutation) {
+    mr.removeListMutation();
+  }
+  if (remove_tensor_mutation) {
+    mr.removeTensorMutation();
+  }
 }
 
 } // namespace jit
