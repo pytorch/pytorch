@@ -110,6 +110,32 @@ def _test_hardswish(self, X, Y_scale, Y_zero_point, engine):
             qY, qY_hat,
             message="Hardswish failed: {} vs {}".format(qY, qY_hat))
 
+"""
+Util for creating a random tensor and quantization params when Hypothesis
+is undesirable.
+"""
+def _get_random_tensor_and_q_params(shapes, rand_scale, torch_type):
+    X = (np.random.rand(*shapes).astype(np.float32) - 0.5) * rand_scale
+    # Calculate reasonable quantization params
+    min_val = np.min(X)
+    max_val = np.max(X)
+    if torch_type == torch.qint32:
+        X_zero_point = 0
+        num_bins = 2 ** 32
+        X_scale = float(max_val - min_val) / num_bins
+    elif torch_type == torch.qint8:
+        X_zero_point = 0
+        num_bins = 2 ** 8
+        X_scale = float(max_val - min_val) / num_bins
+    else:  # torch.quint8
+        X_zero_point = 127
+        num_bins = 2 ** 8
+        X_scale = float(max_val - min_val) / num_bins
+    if X_scale == 0:
+        X_scale = 1e-10
+    return torch.from_numpy(X), X_scale, X_zero_point
+
+
 class TestQuantizedOps(TestCase):
 
     """Tests the correctness of the quantized::relu op."""
@@ -320,28 +346,8 @@ class TestQuantizedOps(TestCase):
             #
             # If we want the numerics to match we could switch to calculating
             # mean+var in floating point in the future, at the cost of speed.
-
-            X = (np.random.rand(*shapes).astype(np.float32) - 0.5) * X_rand_scale
-
-            # Calculate reasonable quantization params
-            min_val = np.min(X)
-            max_val = np.max(X)
-            if torch_type == torch.qint32:
-                X_zero_point = 0
-                num_bins = 2 ** 32
-                X_scale = float(max_val - min_val) / num_bins
-            elif torch_type == torch.qint8:
-                X_zero_point = 0
-                num_bins = 2 ** 8
-                X_scale = float(max_val - min_val) / num_bins
-            else:  # torch.quint8
-                X_zero_point = 127
-                num_bins = 2 ** 8
-                X_scale = float(max_val - min_val) / num_bins
-            if X_scale == 0:
-                X_scale = 1e-10
-
-            X = torch.from_numpy(X)
+            X, X_scale, X_zero_point = \
+                _get_random_tensor_and_q_params(shapes, X_rand_scale, torch_type)
             qX = torch.quantize_per_tensor(X, scale=X_scale,
                                            zero_point=X_zero_point,
                                            dtype=torch_type)
@@ -1557,6 +1563,66 @@ class TestQuantizedOps(TestCase):
                                      running_mean=mean, running_var=var, training=False, momentum=0, eps=eps)
             quantize_ref = torch.quantize_per_tensor(float_ref, Y_scale, Y_zero_point, dtype_x)
             self.assertEqual(qy.int_repr().numpy(), quantize_ref.int_repr().numpy())
+
+    @given(batches=st.integers(1, 16),
+           num_groups=st.sampled_from((1, 2, 3, 4, 6, 8, 12)),
+           channels_per_group=st.sampled_from((1, 2, 3, 4, 7, 9, 16, 32)),
+           elements_per_channel=st.integers(2, 1024),
+           torch_type=st.sampled_from((torch.qint8, torch.quint8, torch.qint32)),
+           X_rand_scale=st.floats(0.01, 1e3),
+           Y_scale=st.floats(0.2, 2.6),
+           Y_zero_point=st.integers(0, 5))
+    def test_group_norm(self, batches, num_groups, channels_per_group,
+                        elements_per_channel, torch_type, X_rand_scale,
+                        Y_scale, Y_zero_point):
+        if "fbgemm" not in torch.backends.quantized.supported_engines:
+            return
+
+        with override_quantized_engine("fbgemm"):
+            num_channels = num_groups * channels_per_group
+            shapes = (batches, num_channels, elements_per_channel)
+
+            # In the FP kernel, mean and variance are calculated in floating point.
+            # In the quantized kernel, they are calculated in integer arithmetic.
+            # Because of this, the numerics do not always match exactly which is
+            # expected and acceptable. We do the following to whitelist this failure
+            # in this test:
+            # 1. do not use Hypothesis to generate the input tensor.  Hypothesis
+            #    favors homogeneous inputs in its search strategies which isn't
+            #    representative of the inputs we care about, and tends to maximize
+            #    this particular numerics difference.
+            #
+            # If we want the numerics to match we could switch to calculating
+            # mean+var in floating point in the future, at the cost of speed.
+            X, X_scale, X_zero_point = \
+                _get_random_tensor_and_q_params(shapes, X_rand_scale, torch_type)
+
+            weight = torch.rand(num_channels).float()
+            bias = torch.rand(num_channels).float()
+            eps = 0.001
+
+            qX = torch.quantize_per_tensor(X, X_scale, X_zero_point, torch_type)
+            dqX = qX.dequantize()
+
+            # Enforce non-homogeneous inputs
+            for batch_idx in range(batches):
+                for group_idx in range(num_groups):
+                    ch_start = group_idx * channels_per_group
+                    ch_end = ch_start + channels_per_group
+                    group_vals = dqX[batch_idx][ch_start:ch_end]
+                    assume(
+                        float(torch.unique(group_vals).shape[0]) / group_vals.numel() > 0.01
+                        or group_vals.numel() < 5)
+
+            qY = torch.ops.quantized.group_norm(qX, num_groups, weight, bias, eps, Y_scale, Y_zero_point)
+
+            dqY_hat = F.group_norm(dqX, num_groups=num_groups, weight=weight, bias=bias, eps=eps)
+            qY_hat = torch.quantize_per_tensor(dqY_hat, Y_scale, Y_zero_point, torch_type)
+            note("X\n{}\nqX\n{}\ndqX\n{}\n".format(X, qX, dqX))
+
+            self.assertEqual(
+                qY_hat, qY,
+                message="qgroup_norm failed: \n{} expected vs \n{} actual".format(qY_hat, qY))
 
     @unittest.skip("Takes 20+ min to finish in many configurations")
     @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=4, max_dims=5,

@@ -33,6 +33,9 @@ using forward_quantized_fn = void (*)(
     const Tensor& /* X */,
     const Tensor& /* gamma */,
     const Tensor& /* beta */,
+    bool /* affine_per_channel */,
+    int /* num_channels */,
+    int /* num_groups */,
     int64_t /* M */,
     int64_t /* N */,
     double /* eps */,
@@ -40,7 +43,7 @@ using forward_quantized_fn = void (*)(
 
 DECLARE_DISPATCH(forward_fn, LayerNormKernel);
 DECLARE_DISPATCH(backward_fn, LayerNormBackwardKernel);
-DECLARE_DISPATCH(forward_quantized_fn, quantized_layer_norm_stub);
+DECLARE_DISPATCH(forward_quantized_fn, quantized_normalize_stub);
 
 } // namespace native
 } // namespace at
