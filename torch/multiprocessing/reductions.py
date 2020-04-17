@@ -3,11 +3,9 @@ import torch.utils.hooks
 from torch._namedtensor_internals import check_serializing_named_tensor
 import os
 import threading
-import errno
 import multiprocessing
 from multiprocessing.util import register_after_fork
 from multiprocessing.reduction import ForkingPickler
-import sys
 try:
     # Early load resource_sharer to prevent a partially initialized instance
     # from being inherited in a forked child process. The reduce_storage method
