@@ -303,15 +303,15 @@ c10::intrusive_ptr<OwnerRRef> RRefContext::createOwnerRRef(
 }
 
 std::shared_ptr<torch::utils::Future<c10::intrusive_ptr<OwnerRRef>>>
-    RRefContext::getOwnerRRef(const RRefId& rrefId) {
+RRefContext::getOwnerRRef(const RRefId& rrefId) {
   std::unique_lock<std::mutex> lock(mutex_);
   const auto iter = owners_.find(rrefId);
   if (iter == owners_.end()) {
     // Scenario (1) RRef is used before it is created
     const auto pendingOwnerIter = pendingOwners_.find(rrefId);
     if (pendingOwnerIter == pendingOwners_.end()) {
-      auto futureOwner =
-          std::make_shared<torch::utils::Future<c10::intrusive_ptr<OwnerRRef>>>();
+      auto futureOwner = std::make_shared<
+          torch::utils::Future<c10::intrusive_ptr<OwnerRRef>>>();
       pendingOwners_[rrefId] = futureOwner;
       return futureOwner;
     } else {
@@ -319,7 +319,8 @@ std::shared_ptr<torch::utils::Future<c10::intrusive_ptr<OwnerRRef>>>
     }
   } else {
     // Scenario (2) retrieving an existing RRef
-    return std::make_shared<torch::utils::Future<c10::intrusive_ptr<OwnerRRef>>>(
+    return std::make_shared<
+        torch::utils::Future<c10::intrusive_ptr<OwnerRRef>>>(
         c10::static_intrusive_pointer_cast<OwnerRRef>(iter->second));
   }
 }
