@@ -3,6 +3,7 @@
 #include <torch/csrc/jit/tensorexpr/eval.h>
 #include <torch/csrc/jit/tensorexpr/ir.h>
 #include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
+#include <torch/csrc/jit/tensorexpr/reduction.h>
 
 namespace torch {
 namespace jit {
@@ -269,6 +270,30 @@ const Expr* IRMutator::mutate(const RoundOff* v) {
       v->lhs()->accept_mutator(this), v->rhs()->accept_mutator(this));
 }
 
+const Expr* IRMutator::mutate(const ReduceOp* v) {
+  const Expr* buf_new_expr = v->accumulator()->accept_mutator(this);
+  const Buf* buf_new = dynamic_cast<const Buf*>(buf_new_expr);
+  const Expr* init = v->initializer()->accept_mutator(this);
+  auto body = v->body().node()->accept_mutator(this);
+
+  std::vector<const Expr*> new_output_args;
+  std::vector<const Var*> new_reduce_args;
+  for (auto* e : v->output_args()) {
+    new_output_args.push_back(e->accept_mutator(this));
+  }
+  for (auto* r : v->reduce_args()) {
+    new_reduce_args.push_back(static_cast<const Var*>(r->accept_mutator(this)));
+  }
+
+  return new ReduceOp(
+      buf_new,
+      init,
+      ExprHandle(body),
+      v->interaction(),
+      new_output_args,
+      new_reduce_args);
+}
+
 const Expr* IRMutator::mutate(const BaseCallNode* v) {
   std::vector<const Expr*> params(v->nparams());
   bool any_change = false;
@@ -352,6 +377,27 @@ Stmt* IRMutator::mutate(const Store* v) {
     return (Stmt*)v;
   }
   return new Store(buf_new, indices_new, value_new, mask_new);
+}
+
+Stmt* IRMutator::mutate(const AtomicAdd* v) {
+  const Buf* buf = v->buf();
+
+  bool any_index_changed = false;
+  std::vector<const Expr*> indices_new;
+  for (const Expr* ind : v->indices()) {
+    const Expr* new_ind = ind->accept_mutator(this);
+    if (new_ind != ind) {
+      any_index_changed = true;
+    }
+    indices_new.push_back(new_ind);
+  }
+  const Expr* value = v->value();
+  const Buf* buf_new = dynamic_cast<const Buf*>(buf->accept_mutator(this));
+  const Expr* value_new = value->accept_mutator(this);
+  if (buf == buf_new && !any_index_changed && value == value_new) {
+    return (Stmt*)v;
+  }
+  return new AtomicAdd(buf_new, indices_new, value_new);
 }
 
 Stmt* IRMutator::mutate(const Allocate* v) {
@@ -465,7 +511,6 @@ Stmt* StmtClone::mutate(const Free* v) {
 }
 
 Stmt* StmtClone::mutate(const Cond* v) {
-  const Expr* cond_old = v->condition();
   Stmt* true_old = v->true_stmt();
   Stmt* false_old = v->false_stmt();
 

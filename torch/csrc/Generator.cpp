@@ -2,7 +2,7 @@
 
 #include <structmember.h>
 #include <ATen/ATen.h>
-#include <ATen/CPUGenerator.h>
+#include <ATen/CPUGeneratorImpl.h>
 
 #include <TH/TH.h>
 #include <torch/csrc/THP.h>
@@ -16,7 +16,7 @@
 
 #ifdef USE_CUDA
 #include <THC/THCTensorRandom.h>
-#include <ATen/CUDAGenerator.h>
+#include <ATen/CUDAGeneratorImpl.h>
 #endif
 
 using namespace at;
@@ -36,7 +36,7 @@ PyObject * THPGenerator_initDefaultGenerator(at::Generator cdata)
 
 static void THPGenerator_dealloc(THPGenerator* self)
 {
-  self->cdata->set_pyobj(nullptr);
+  self->cdata.set_pyobj(nullptr);
   self->cdata.~Generator();
   Py_TYPE(self)->tp_free((PyObject*)self);
 }
@@ -54,9 +54,9 @@ static PyObject * THPGenerator_pynew(PyTypeObject *type, PyObject *args, PyObjec
   THPGeneratorPtr self((THPGenerator *)type->tp_alloc(type, 0));
 #ifdef USE_CUDA
   if (device.type() == at::kCPU) {
-    self->cdata = make_generator<CPUGenerator>();
+    self->cdata = make_generator<CPUGeneratorImpl>();
   } else if (device.type() == at::kCUDA){
-    self->cdata = make_generator<CUDAGenerator>(device.index());
+    self->cdata = make_generator<CUDAGeneratorImpl>(device.index());
   } else {
     AT_ERROR("Device type ", c10::DeviceTypeName(device.type()),
              " is not supported for torch.Generator() api.");
@@ -65,7 +65,7 @@ static PyObject * THPGenerator_pynew(PyTypeObject *type, PyObject *args, PyObjec
   TORCH_CHECK(device.type() == at::kCPU,
               "Device type ", c10::DeviceTypeName(device.type()),
               " is not supported for torch.Generator() api.");
-  self->cdata = make_generator<CPUGenerator>();
+  self->cdata = make_generator<CPUGeneratorImpl>();
 #endif
   return (PyObject*)self.release();
   END_HANDLE_TH_ERRORS
@@ -76,11 +76,11 @@ static PyObject * THPGenerator_getState(THPGenerator *self, PyObject *noargs)
   using namespace torch::autograd;
   HANDLE_TH_ERRORS
   Variable var = torch::empty({0}, at::device(at::kCPU).dtype(at::kByte));
-  if (self->cdata->device().type() == at::kCPU) {
+  if (self->cdata.device().type() == at::kCPU) {
     THByteTensor_getRNGState(self->cdata, (THByteTensor*)(var.unsafeGetTensorImpl()));
   } else {
 #ifdef USE_CUDA
-    TORCH_INTERNAL_ASSERT(self->cdata->device().type() == at::kCUDA);
+    TORCH_INTERNAL_ASSERT(self->cdata.device().type() == at::kCUDA);
     THCRandom_getRNGState(self->cdata, (THByteTensor*)(var.unsafeGetTensorImpl()));
 #else 
     TORCH_INTERNAL_ASSERT(false, "PyTorch not compiled with CUDA");
@@ -102,11 +102,11 @@ static PyObject * THPGenerator_setState(THPGenerator *self, PyObject *_new_state
     auto type_name = torch::utils::options_to_string(tensor.options());
     throw TypeError("expected a torch.ByteTensor, but got %s", type_name.c_str());
   }
-  if (self->cdata->device().type() == at::kCPU) {
+  if (self->cdata.device().type() == at::kCPU) {
     THByteTensor_setRNGState(self->cdata, (THByteTensor*)tensor.unsafeGetTensorImpl());
   } else {
 #ifdef USE_CUDA
-    TORCH_INTERNAL_ASSERT(self->cdata->device().type() == at::kCUDA);
+    TORCH_INTERNAL_ASSERT(self->cdata.device().type() == at::kCUDA);
     THCRandom_setRNGState(self->cdata, (THByteTensor*)tensor.unsafeGetTensorImpl());
 #else 
     TORCH_INTERNAL_ASSERT(false, "PyTorch not compiled with CUDA");
@@ -124,8 +124,8 @@ static PyObject * THPGenerator_manualSeed(THPGenerator *self, PyObject *seed)
   THPUtils_assert(THPUtils_checkLong(seed), "manual_seed expected a long, "
           "but got %s", THPUtils_typename(seed));
   // See Note [Acquire lock when using random generators]
-  std::lock_guard<std::mutex> lock(generator->mutex_);
-  generator->set_current_seed(THPUtils_unpackLong(seed));
+  std::lock_guard<std::mutex> lock(generator.mutex());
+  generator.set_current_seed(THPUtils_unpackLong(seed));
   Py_INCREF(self);
   return (PyObject*)self;
   END_HANDLE_TH_ERRORS
@@ -135,8 +135,8 @@ static PyObject * THPGenerator_seed(THPGenerator *self, PyObject *noargs)
 {
   HANDLE_TH_ERRORS
   // See Note [Acquire lock when using random generators]
-  std::lock_guard<std::mutex> lock(self->cdata->mutex_);
-  uint64_t seed_val = self->cdata->seed();
+  std::lock_guard<std::mutex> lock(self->cdata.mutex());
+  uint64_t seed_val = self->cdata.seed();
   return THPUtils_packUInt64(seed_val);
   END_HANDLE_TH_ERRORS
 }
@@ -144,13 +144,13 @@ static PyObject * THPGenerator_seed(THPGenerator *self, PyObject *noargs)
 static PyObject * THPGenerator_initialSeed(THPGenerator *self, PyObject *noargs)
 {
   HANDLE_TH_ERRORS
-  return THPUtils_packUInt64(self->cdata->current_seed());
+  return THPUtils_packUInt64(self->cdata.current_seed());
   END_HANDLE_TH_ERRORS
 }
 
 static PyObject * THPGenerator_get_device(THPGenerator *self, void *unused) {
   HANDLE_TH_ERRORS
-  return THPDevice_New(self->cdata->device());
+  return THPDevice_New(self->cdata.device());
   END_HANDLE_TH_ERRORS
 }
 
@@ -226,12 +226,12 @@ bool THPGenerator_init(PyObject *module)
 
 void set_pyobj(const Generator& self, PyObject* pyobj) {
   TORCH_CHECK(self.defined(), "cannot call set_pyobj() on undefined generator");
-  self->set_pyobj(pyobj);
+  self.set_pyobj(pyobj);
 }
 
 PyObject* pyobj(const Generator& self) {
   TORCH_CHECK(self.defined(), "cannot call pyobj() on undefined generator");
-  return self->pyobj();
+  return self.pyobj();
 }
 
 PyObject * THPGenerator_Wrap(Generator gen)

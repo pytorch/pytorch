@@ -136,6 +136,7 @@ jobs:
           echo ${COMMAND} > ./command.sh && unbuffer bash ./command.sh | ts
 
           retrieve_test_reports
+          docker stats --all --no-stream
     - store_test_results:
         path: test-reports
 

@@ -645,24 +645,24 @@ class QConvInt8 final : public c10::OperatorKernel {
 
 static auto registry =
     c10::RegisterOperators()
-        .op("quantized::conv2d",
+        .op("quantized::conv2d(Tensor qx, Tensor weight, int[] stride, int[] padding, int[] dilation, int groups, float output_scale, int output_zero_point) -> Tensor",
             c10::RegisterOperators::options().kernel<QConvInt8<2, false>>(
-                DispatchKey::QuantizedCPUTensorId))
-        .op("_quantized::conv2d",
+                DispatchKey::QuantizedCPU))
+        .op("_quantized::conv2d(Tensor qx, Tensor weight, int[] stride, int[] padding, int[] dilation, int groups, float output_scale, int output_zero_point) -> Tensor",
             c10::RegisterOperators::options().kernel<QConvInt8<2, false>>(
-                DispatchKey::QuantizedCPUTensorId))
-        .op("quantized::conv2d_relu",
+                DispatchKey::QuantizedCPU))
+        .op("quantized::conv2d_relu(Tensor qx, Tensor weight, int[] stride, int[] padding, int[] dilation, int groups, float output_scale, int output_zero_point) -> Tensor",
             c10::RegisterOperators::options().kernel<QConvInt8<2, true>>(
-                DispatchKey::QuantizedCPUTensorId))
-        .op("_quantized::conv2d_relu",
+                DispatchKey::QuantizedCPU))
+        .op("_quantized::conv2d_relu(Tensor qx, Tensor weight, int[] stride, int[] padding, int[] dilation, int groups, float output_scale, int output_zero_point) -> Tensor",
             c10::RegisterOperators::options().kernel<QConvInt8<2, true>>(
-                DispatchKey::QuantizedCPUTensorId))
-        .op("quantized::conv3d",
+                DispatchKey::QuantizedCPU))
+        .op("quantized::conv3d(Tensor qx, Tensor weight, int[] stride, int[] padding, int[] dilation, int groups, float output_scale, int output_zero_point) -> Tensor",
             c10::RegisterOperators::options().kernel<QConvInt8<3, false>>(
-                DispatchKey::QuantizedCPUTensorId))
-        .op("quantized::conv3d_relu",
+                DispatchKey::QuantizedCPU))
+        .op("quantized::conv3d_relu(Tensor qx, Tensor weight, int[] stride, int[] padding, int[] dilation, int groups, float output_scale, int output_zero_point) -> Tensor",
             c10::RegisterOperators::options().kernel<QConvInt8<3, true>>(
-                DispatchKey::QuantizedCPUTensorId));
+                DispatchKey::QuantizedCPU));
 
 } // namespace
 } // namespace native
