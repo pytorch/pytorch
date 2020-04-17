@@ -63,6 +63,7 @@ struct ReduceConfig {
   static constexpr int CTA = 2;
 
   static constexpr int MAX_NUM_THREADS = 512;
+  static constexpr int vec_size = 4;
 
   ReduceConfig(int element_size_bytes, int num_outputs, int num_inputs)
     : element_size_bytes(element_size_bytes)
@@ -82,7 +83,7 @@ struct ReduceConfig {
   int block_height;
   int num_threads;
 
-  bool vectorize4 = false;
+  bool vectorize = false;
 
   void set_block_dimension(int64_t dim0, int64_t dim1) {
     int dim0_pow2 = dim0 < MAX_NUM_THREADS ? static_cast<int>(last_pow2(dim0)) : MAX_NUM_THREADS;
@@ -275,6 +276,8 @@ struct ReduceOp {
 
   static constexpr float acc_buffer_multiplier = (float)sizeof(arg_t) / sizeof(out_scalar_t);
 
+  static constexpr int vec_size = ReduceConfig::vec_size;
+
   ops_t ops;
   arg_t ident;
   ReduceConfig config;
@@ -335,7 +338,7 @@ struct ReduceOp {
     if (output_idx < config.num_outputs && input_idx < config.num_inputs) {
       const scalar_t* input_slice = (const scalar_t*)((const char*)src + base_offsets[1]);
       index_t end = config.num_inputs;
-      if (config.vectorize4) {
+      if (config.vectorize) {
         // reduce at the header of input_slice where memory is not aligned,
         // so that thread_reduce will have an aligned memory to work on.
         value = header_reduce(input_slice, end);
@@ -392,7 +395,7 @@ struct ReduceOp {
 
   C10_DEVICE arg_t header_reduce(const scalar_t* &data, index_t &end) const {
     arg_t value = ident;
-    const int align_bytes = alignof(at::native::memory::aligned_vector<scalar_t, 4>);
+    const int align_bytes = alignof(at::native::memory::aligned_vector<scalar_t, vec_size>);
     const int shift = ((uint64_t)data) % align_bytes / sizeof(scalar_t);
     if (shift > 0) {
       data -= shift;
@@ -407,33 +410,33 @@ struct ReduceOp {
   }
 
   C10_DEVICE arg_t vectorized_thread_reduce(arg_t value, const scalar_t* data, index_t end) const {
-    using load_t = at::native::memory::aligned_vector<scalar_t, 4>;
+    using load_t = at::native::memory::aligned_vector<scalar_t, vec_size>;
 
     index_t idx = config.input_idx();
     const index_t stride = config.step_input;
 
     // Multiple accumulators to remove dependency between unrolled loops.
-    arg_t value_list[4];
+    arg_t value_list[vec_size];
     value_list[0] = value;
     #pragma unroll
-    for (int i = 1; i < 4; i++) {
+    for (int i = 1; i < vec_size; i++) {
       value_list[i] = ident;
     }
 
-    scalar_t values[4];
+    scalar_t values[vec_size];
     load_t *values_vector = reinterpret_cast<load_t*>(values);
 
-    while (idx * 4 + 3 < end) {
+    while (idx * vec_size + vec_size - 1 < end) {
       *values_vector = reinterpret_cast<const load_t*>(data)[idx];
       #pragma unroll
-      for (index_t i = 0; i < 4; i++) {
-        value_list[i] = ops.reduce(value_list[i], values[i], idx * 4 + i);
+      for (index_t i = 0; i < vec_size; i++) {
+        value_list[i] = ops.reduce(value_list[i], values[i], idx * vec_size + i);
       }
       idx += stride;
     }
 
     // tail
-    index_t tail_start = end - end % 4;
+    index_t tail_start = end - end % vec_size;
     if (config.should_reduce_tail()) {
       int idx = tail_start + threadIdx.x;
       if (idx < end) {
@@ -443,7 +446,7 @@ struct ReduceOp {
 
     // combine accumulators
     #pragma unroll
-    for (int i = 1; i < 4; i++) {
+    for (int i = 1; i < vec_size; i++) {
       value_list[0] = ops.combine(value_list[0], value_list[i]);
     }
     return value_list[0];
@@ -858,7 +861,7 @@ inline void gpu_reduce_kernel(TensorIterator& iter, const ops_t& ops, ident_t id
   if (fastest_moving_stride == sizeof(scalar_t) && dim0 > 128 && vt0 >= 4) {
     // TODO: vectorization on output is not supported yet
     if (reduction_on_fastest_striding_dimension && iter.num_reduce_dims() == 1) {
-      config.vectorize4 = true;
+      config.vectorize = true;
     }
   }
 
