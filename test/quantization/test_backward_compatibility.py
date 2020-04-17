@@ -127,8 +127,7 @@ class TestSerialization(TestCase):
         # TODO: graph mode quantized conv2d module
 
     @unittest.skipUnless(
-        'fbgemm' in torch.backends.quantized.supported_engines or
-        'qnnpack' in torch.backends.quantized.supported_engines,
+        'fbgemm' in torch.backends.quantized.supported_engines,
         " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
         " with instruction set support avx2 or newer.",
     )
