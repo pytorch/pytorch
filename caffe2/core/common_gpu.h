@@ -37,9 +37,7 @@
 // CAFFE_HAS_CUDA_FP16 manually.
 
 #ifndef CAFFE_HAS_CUDA_FP16
-#if defined(__HIP_PLATFORM_HCC__)
 #define CAFFE_HAS_CUDA_FP16
-#endif // defined(__HIP_PLATFORM_HCC__)
 #endif // CAFFE_HAS_CUDA_FP16
 
 #ifdef CAFFE_HAS_CUDA_FP16
