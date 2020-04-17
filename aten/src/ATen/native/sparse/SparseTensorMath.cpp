@@ -352,6 +352,25 @@ Tensor norm_sparse(const SparseTensor& self, Scalar value) {
 }
 
 // --------------------------------------------------------------------
+// mv(SparseTensor, Tensor)
+// --------------------------------------------------------------------
+
+Tensor mv_sparse(const SparseTensor& self, const Tensor& vec)
+{
+  TORCH_CHECK(self.ndimension() == 2 && 
+              vec.ndimension() == 1,
+              "mv: two tensor dim should be 2 and 1, but got ",
+              "SparseTensor Dim: ", self.ndimension(), "Tensor Dim: ", vec.ndimension());
+
+  TORCH_CHECK(vec.size(-1) == self.size(-1),
+              "mv: expected self.size(-1) == vec.size(-1)");
+
+  auto result = self.matmul(vec.unsqueeze(-1));
+
+  return result.squeeze(-1);
+}
+
+// --------------------------------------------------------------------
 // add(SparseTensor, SparseTensor, Scalar)  [broadcasts]
 // --------------------------------------------------------------------
 

@@ -21,7 +21,7 @@ if [ -n "${IN_CIRCLECI}" ]; then
     sudo apt-get -qq install --allow-downgrades --allow-change-held-packages libnccl-dev=2.5.6-1+cuda10.1 libnccl2=2.5.6-1+cuda10.1
   fi
 
-  if [[ "$BUILD_ENVIRONMENT" == *-xenial-cuda9-cudnn7-py2* ]]; then
+  if [[ "$BUILD_ENVIRONMENT" == *-xenial-cuda10.1-cudnn7-py3* ]]; then
     # TODO: move this to Docker
     sudo apt-get -qq update
     sudo apt-get -qq install --allow-downgrades --allow-change-held-packages openmpi-bin libopenmpi-dev
@@ -37,13 +37,12 @@ fi
 
 if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   # TODO: Move this to Docker
-  sudo apt-get -qq install --no-install-recommends apt-transport-https ca-certificates
   sudo apt-get -qq update
   sudo apt-get -qq install --no-install-recommends libsndfile1
 fi
 
 # --user breaks ppc64le builds and these packages are already in ppc64le docker
-if [[ "$BUILD_ENVIRONMENT" != *ppc64le* ]]; then
+if [[ "$BUILD_ENVIRONMENT" != *ppc64le* ]] && [[ "$BUILD_ENVIRONMENT" != *-bazel-* ]] ; then
   # JIT C++ extensions require ninja.
   pip_install --user ninja
   # ninja is installed in /var/lib/jenkins/.local/bin
@@ -152,7 +151,7 @@ test_python_ge_config_legacy() {
 }
 
 test_python_all_except_nn() {
-  time python test/run_test.py --exclude test_nn test_jit_simple test_jit_legacy test_jit_fuser_legacy --verbose --bring-to-front test_quantization test_quantized test_quantized_tensor test_quantized_nn_mods --determine-from="$DETERMINE_FROM"
+  time python test/run_test.py --exclude test_nn test_jit_simple test_jit_legacy test_jit_fuser_legacy --verbose --determine-from="$DETERMINE_FROM"
   assert_git_not_dirty
 }
 
@@ -188,15 +187,23 @@ test_torchvision() {
 test_libtorch() {
   if [[ "$BUILD_ENVIRONMENT" != *rocm* ]]; then
     echo "Testing libtorch"
+
+    # Start background download
+    python tools/download_mnist.py --quiet -d test/cpp/api/mnist &
+
+    # Run JIT cpp tests
+    mkdir -p test/test-reports/cpp-unittest
     python test/cpp/jit/tests_setup.py setup
     if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
-      build/bin/test_jit
+      build/bin/test_jit  --gtest_output=xml:test/test-reports/cpp-unittest/test_jit.xml
     else
-      build/bin/test_jit "[cpu]"
+      build/bin/test_jit  --gtest_filter='-*CUDA' --gtest_output=xml:test/test-reports/cpp-unittest/test_jit.xml
     fi
     python test/cpp/jit/tests_setup.py shutdown
-    python tools/download_mnist.py --quiet -d test/cpp/api/mnist
-    OMP_NUM_THREADS=2 TORCH_CPP_TEST_MNIST_PATH="test/cpp/api/mnist" build/bin/test_api
+    # Wait for background download to finish
+    wait
+    OMP_NUM_THREADS=2 TORCH_CPP_TEST_MNIST_PATH="test/cpp/api/mnist" build/bin/test_api --gtest_output=xml:test/test-reports/cpp-unittest/test_api.xml
+    build/bin/test_tensorexpr --gtest_output=xml:test/test-reports/cpp-unittests/test_tensorexpr.xml
     assert_git_not_dirty
   fi
 }
@@ -217,6 +224,18 @@ test_custom_script_ops() {
   fi
 }
 
+test_torch_function_benchmark() {
+  echo "Testing __torch_function__ benchmarks"
+  pushd benchmarks/overrides_benchmark
+  python bench.py -n 1 -m 2
+  python pyspybench.py Tensor -n 1
+  python pyspybench.py SubTensor -n 1
+  python pyspybench.py WithTorchFunction -n 1
+  python pyspybench.py SubWithTorchFunction -n 1
+  popd
+  assert_git_not_dirty
+}
+
 test_xla() {
   export XLA_USE_XRT=1 XRT_DEVICE_MAP="CPU:0;/job:localservice/replica:0/task:0/device:XLA_CPU:0"
   # Issue #30717: randomize the port of XLA/gRPC workers is listening on to reduce flaky tests.
@@ -231,7 +250,7 @@ test_xla() {
 
   echo "Running C++ Tests"
   pushd test/cpp
-  CC=clang-7 CXX=clang++-7 ./run_tests.sh
+  CC=clang-9 CXX=clang++-9 ./run_tests.sh
   popd
   assert_git_not_dirty
 }
@@ -251,7 +270,15 @@ test_backward_compatibility() {
   assert_git_not_dirty
 }
 
-if ! [[ "${BUILD_ENVIRONMENT}" == *libtorch* ]]; then
+test_bazel() {
+  set -e
+
+  get_bazel
+
+  tools/bazel test --test_tag_filters=-gpu-required --test_filter=-*_CUDA :all_tests
+}
+
+if ! [[ "${BUILD_ENVIRONMENT}" == *libtorch* || "${BUILD_ENVIRONMENT}" == *-bazel-* ]]; then
   (cd test && python -c "import torch; print(torch.__config__.show())")
   (cd test && python -c "import torch; print(torch.__config__.parallel_info())")
 fi
@@ -277,6 +304,9 @@ elif [[ "${BUILD_ENVIRONMENT}" == *-test2 || "${JOB_BASE_NAME}" == *-test2 ]]; t
   test_aten
   test_libtorch
   test_custom_script_ops
+  test_torch_function_benchmark
+elif [[ "${BUILD_ENVIRONMENT}" == *-bazel-* ]]; then
+  test_bazel
 else
   test_torchvision
   test_python_nn
@@ -284,4 +314,5 @@ else
   test_aten
   test_libtorch
   test_custom_script_ops
+  test_torch_function_benchmark
 fi

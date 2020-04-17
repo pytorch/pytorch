@@ -3,15 +3,15 @@
 #include <ATen/ATen.h>
 #include <ATen/core/jit_type.h>
 #include <c10/util/Exception.h>
-#include <torch/csrc/jit/frontend/code_template.h>
 #include <torch/csrc/jit/codegen/fuser/codegen.h>
 #include <torch/csrc/jit/codegen/fuser/interface.h>
 #include <torch/csrc/jit/codegen/fuser/kernel_cache.h>
 #include <torch/csrc/jit/codegen/fuser/tensor_desc.h>
+#include <torch/csrc/jit/frontend/code_template.h>
 #include <torch/csrc/jit/ir/ir.h>
-#include <torch/csrc/jit/runtime/operator.h>
 #include <torch/csrc/jit/passes/canonicalize.h>
 #include <torch/csrc/jit/passes/shape_analysis.h>
+#include <torch/csrc/jit/runtime/operator.h>
 
 #include <atomic>
 #include <iostream>
@@ -28,7 +28,7 @@ std::mutex& fusionBackendLock() {
   static std::mutex fusion_backends_lock_{};
   return fusion_backends_lock_;
 }
-}
+} // namespace
 
 namespace torch {
 namespace jit {
@@ -225,7 +225,8 @@ std::shared_ptr<FusedKernel> compileKernel(
 
   // Creates chunk and flattened input descriptions
   std::vector<PartitionDesc> chunk_desc;
-  std::vector<std::pair<const Value*, const c10::optional<TensorDesc>>> flat_inputs;
+  std::vector<std::pair<const Value*, const c10::optional<TensorDesc>>>
+      flat_inputs;
   {
     size_t input_index = 0;
     for (const auto& p : graph->inputs()) {

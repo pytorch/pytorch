@@ -2,10 +2,10 @@
 
 #include <ATen/ATen.h>
 #include <c10/util/Exception.h>
-#include <torch/csrc/jit/frontend/code_template.h>
 #include <torch/csrc/jit/codegen/fuser/compiler.h>
 #include <torch/csrc/jit/codegen/fuser/interface.h>
 #include <torch/csrc/jit/codegen/fuser/tensor_info.h>
+#include <torch/csrc/jit/frontend/code_template.h>
 #include <torch/csrc/jit/ir/ir.h>
 
 #include <torch/csrc/jit/codegen/fuser/cpu/resource_strings.h>
@@ -317,7 +317,8 @@ static void emitIndexingFor(
 std::string generateKernel(
     const std::string& name,
     const Graph& graph,
-    const std::vector<std::pair<const Value*, const c10::optional<TensorDesc>>>& inputs,
+    const std::vector<std::pair<const Value*, const c10::optional<TensorDesc>>>&
+        inputs,
     const std::vector<std::pair<const Value*, const TensorDesc>>& outputs,
     const bool use_cuda) {
   TemplateEnv env;
@@ -337,23 +338,23 @@ std::string generateKernel(
         "formal_index",
         formals.size() +
             1); // + 1 because the first argument is the linearIndex
-      std::string tensor =
-          "t" +
-          c10::to_string(
-              formals.size()); // can't be unique() because Param may be an output
-      const auto nDim = desc.nDim();
-      emitIndexingFor(tensorOffsets, tensor, nDim, desc.lastIsContiguous());
-      env.s("tensor", tensor);
-      env.d("nDim", nDim);
-      env.s("scalar_type", scalarTypeName(desc.scalar_type));
-      formals.push_back(
-          format("const TensorInfo<${scalar_type},${nDim}> ${tensor}", env));
-      argument_loads.push_back(format(
-          "*static_cast<TensorInfo<${scalar_type},${nDim}>*>(args[${formal_index}])",
-          env));
+    std::string tensor =
+        "t" +
+        c10::to_string(
+            formals.size()); // can't be unique() because Param may be an output
+    const auto nDim = desc.nDim();
+    emitIndexingFor(tensorOffsets, tensor, nDim, desc.lastIsContiguous());
+    env.s("tensor", tensor);
+    env.d("nDim", nDim);
+    env.s("scalar_type", scalarTypeName(desc.scalar_type));
+    formals.push_back(
+        format("const TensorInfo<${scalar_type},${nDim}> ${tensor}", env));
+    argument_loads.push_back(format(
+        "*static_cast<TensorInfo<${scalar_type},${nDim}>*>(args[${formal_index}])",
+        env));
   };
 
-  auto emitScalarFormal = [&](const Value* n){
+  auto emitScalarFormal = [&](const Value* n) {
     env.d(
         "formal_index",
         formals.size() +
@@ -369,14 +370,13 @@ std::string generateKernel(
     env.s("scalar", scalar);
     env.s("scalar_type", variableType(n->type()));
     formals.push_back(format("${scalar_type} ${scalar}", env));
-    argument_loads.push_back(format(
-    "*static_cast<${scalar_type}*>(args[${formal_index}])", env));
+    argument_loads.push_back(
+        format("*static_cast<${scalar_type}*>(args[${formal_index}])", env));
   };
-
 
   // Writes input parameters
   for (const auto& input : inputs) {
-    if (input.second.has_value()){
+    if (input.second.has_value()) {
       emitFormal(input.first, *input.second);
     } else {
       emitScalarFormal(input.first);
@@ -401,8 +401,10 @@ std::string generateKernel(
     //  The conversion immediately converts fp16 inputs to float.
     //  Access for other types is common to CUDA and CPU kernels.
     if (input.second.has_value()) {
-      const auto is_half = input.second.has_value() && ((*input.second).scalar_type == at::ScalarType::Half);
-      const auto is_bool = input.second.has_value() && ((*input.second).scalar_type == at::ScalarType::Bool);
+      const auto is_half = input.second.has_value() &&
+          ((*input.second).scalar_type == at::ScalarType::Half);
+      const auto is_bool = input.second.has_value() &&
+          ((*input.second).scalar_type == at::ScalarType::Bool);
       if (is_half) {
         AT_ASSERT(use_cuda);
         env.s(
@@ -414,7 +416,9 @@ std::string generateKernel(
         if (is_bool) {
           env.s("access", format("t${formal}.data[t${formal}_offset]", env));
         } else {
-          env.s("access", format("__ldg(&t${formal}.data[t${formal}_offset])", env));
+          env.s(
+              "access",
+              format("__ldg(&t${formal}.data[t${formal}_offset])", env));
         }
       } else {
         env.s("access", format("t${formal}.data[t${formal}_offset]", env));

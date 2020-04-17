@@ -1,8 +1,8 @@
-IF (MSVC)
-  IF (MSVC_VERSION LESS 1911)
+if(MSVC)
+  if(MSVC_VERSION LESS 1911)
     return()
-  ENDIF()
-ENDIF(MSVC)
+  endif()
+endif(MSVC)
 
 list(APPEND ATen_CPU_TEST_SRCS
   ${CMAKE_CURRENT_SOURCE_DIR}/scalar_test.cpp
@@ -36,7 +36,8 @@ list(APPEND ATen_CPU_TEST_SRCS
   ${CMAKE_CURRENT_SOURCE_DIR}/reduce_ops_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/memory_format_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/cpu_rng_test.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/ivalue_test.cpp)
+  ${CMAKE_CURRENT_SOURCE_DIR}/ivalue_test.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/type_test.cpp)
 
 list(APPEND ATen_CUDA_TEST_SRCS
   ${CMAKE_CURRENT_SOURCE_DIR}/cuda_integer_divider_test.cu
@@ -49,7 +50,7 @@ list(APPEND ATen_CUDA_TEST_SRCS
   ${CMAKE_CURRENT_SOURCE_DIR}/cuda_tensor_interop_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/cuda_vectorized_test.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/cuda_generator_test.cu)
-if (CAFFE2_USE_CUDNN)
+if(CAFFE2_USE_CUDNN)
   list(APPEND ATen_CUDA_TEST_SRCS
     ${CMAKE_CURRENT_SOURCE_DIR}/cuda_cudnn_test.cpp)
 endif()

@@ -1,7 +1,8 @@
 #pragma once
-#include <c10/util/Exception.h>
 #include <ATen/core/function.h>
+#include <c10/util/Exception.h>
 #include <torch/csrc/jit/api/function_impl.h>
+#include <torch/csrc/jit/frontend/name_mangler.h>
 #include <torch/csrc/jit/frontend/source_range.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
@@ -75,7 +76,7 @@ struct TORCH_API CompilationUnit {
         "Please use setGraphExecutorOptimize()");
   }
 
-   bool is_optimized() const {
+  bool is_optimized() const {
     TORCH_WARN(
         "CompilationUnit::is_optimized() is deprecated and always returns true. "
         "Please use getGraphExecutorOptimize()");
@@ -244,7 +245,13 @@ struct TORCH_API CompilationUnit {
   // We also use mangling to distinguish different Module instances. Since each
   // Module is a singleton class instance, different instances of the same
   // Python Module will have different types but the same qualified name.
-  c10::QualifiedName mangle(const c10::QualifiedName& name) const;
+  c10::QualifiedName mangle(const c10::QualifiedName& name) const {
+    auto mangled = name;
+    while (get_type(mangled) || find_function(mangled)) {
+      mangled = mangler_.mangle(mangled);
+    }
+    return mangled;
+  }
 
  private:
   std::unique_ptr<Function> define(
@@ -277,16 +284,14 @@ struct TORCH_API CompilationUnit {
   // module's compilation unit.
   std::vector<c10::NamedTypePtr> classes_;
 
-  mutable size_t mangleIndex_ = 0;
+  mutable NameMangler mangler_;
 };
 
 // An owning pointer to a Function. Just a pair of a raw Function ptr and it's
 // owning CU. We need this because pybind requires a ref-counted way to refer to
 // Functions.
 struct StrongFunctionPtr {
-  StrongFunctionPtr(
-      std::shared_ptr<CompilationUnit> cu,
-      Function* function)
+  StrongFunctionPtr(std::shared_ptr<CompilationUnit> cu, Function* function)
       : cu_(std::move(cu)), function_(function) {
     TORCH_INTERNAL_ASSERT(cu_);
     TORCH_INTERNAL_ASSERT(function_);
@@ -299,6 +304,6 @@ namespace script {
 // We once had a `script::` namespace that was deleted. This is for backcompat
 // of the public API; new code should not use this type alias.
 using CompilationUnit = ::torch::jit::CompilationUnit;
-}
+} // namespace script
 } // namespace jit
 } // namespace torch

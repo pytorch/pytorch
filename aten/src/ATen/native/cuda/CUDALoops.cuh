@@ -110,16 +110,6 @@ __global__ void elementwise_kernel(int N, func_t f) {
   }
 }
 
-template<int N>
-static OffsetCalculator<N> make_offset_calculator(const TensorIterator& iter) {
-  AT_ASSERT(N == iter.ntensors());
-  std::array<const int64_t*, N> strides;
-  for (int i = 0; i < N; i++) {
-    strides[i] = iter.strides(i).data();
-  }
-  return OffsetCalculator<N>(iter.ndim(), iter.shape().data(), strides.data());
-}
-
 template<int nt, int vt, typename func_t>
 static void launch_kernel(int64_t N, const func_t& f) {
   TORCH_INTERNAL_ASSERT(N >= 0 && N <= std::numeric_limits<int32_t>::max());
@@ -312,7 +302,7 @@ void gpu_kernel_impl(TensorIterator& iter, const func_t& f) {
       });
     }
   } else {
-    auto offset_calc = legacy::make_offset_calculator<traits::arity + 1>(iter);
+    auto offset_calc = ::make_offset_calculator<traits::arity + 1>(iter);
     if (needs_dynamic_casting<func_t>::check(iter)) {
       legacy::launch_kernel<launch_size_nd, launch_bound2>(numel, [=]GPU_LAMBDA(int idx) {
         auto offsets = offset_calc.get(idx);

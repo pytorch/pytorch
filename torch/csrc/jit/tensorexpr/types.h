@@ -50,7 +50,7 @@ class TORCH_API Dtype {
   Dtype(Dtype type, int lanes)
       : scalar_type_(type.scalar_type_), lanes_(lanes) {
     if (type.lanes() != 1) {
-      throw malformed_input();
+      throw malformed_input("dtype lanes dont match");
     }
   }
   int lanes() const {
@@ -108,10 +108,15 @@ inline ScalarType promoteTypes(ScalarType a, ScalarType b) {
   return static_cast<ScalarType>(c10::promoteTypes(
       static_cast<c10::ScalarType>(a), static_cast<c10::ScalarType>(b)));
 }
-inline ScalarType promoteTypes(Dtype a, Dtype b) {
-  return static_cast<ScalarType>(c10::promoteTypes(
-      static_cast<c10::ScalarType>(a.scalar_type()),
-      static_cast<c10::ScalarType>(b.scalar_type())));
+inline Dtype promoteTypes(Dtype a, Dtype b) {
+  if (a.lanes() != b.lanes()) {
+    throw malformed_input("promoting types with different lanes");
+  }
+  return Dtype(
+      static_cast<ScalarType>(c10::promoteTypes(
+          static_cast<c10::ScalarType>(a.scalar_type()),
+          static_cast<c10::ScalarType>(b.scalar_type()))),
+      a.lanes());
 }
 
 inline Dtype BinaryOpDtype(
@@ -127,22 +132,21 @@ inline Dtype BinaryOpDtype(
   }
 
   if (op1_dtype.lanes() != op2_dtype.lanes()) {
-    throw malformed_input();
+    throw malformed_input("lanes dont match");
   }
   int lanes = op1_dtype.lanes();
 
-  ScalarType resultType = promoteTypes(op1_dtype, op2_dtype);
-  if (resultType == ScalarType::Undefined) {
-    throw malformed_input();
+  Dtype resultType = promoteTypes(op1_dtype, op2_dtype);
+  if (resultType.scalar_type() == ScalarType::Undefined) {
+    throw malformed_input("scalar type doesn't match");
   }
-
 
   if (lanes == 1) {
     // Use the fixed scalar Dtypes.
-    return ToDtype(resultType);
+    return ToDtype(resultType.scalar_type());
   }
 
-  return Dtype(resultType, lanes);
+  return resultType;
 }
 
 } // namespace tensorexpr

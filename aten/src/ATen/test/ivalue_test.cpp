@@ -1,7 +1,6 @@
 #include <ATen/ATen.h>
 #include <gtest/gtest.h>
 #include <torch/torch.h>
-#include "ATen/core/ivalue.h"
 
 namespace c10 {
 
@@ -122,6 +121,7 @@ TEST(IValueTest, FutureCallbacks) {
   });
   ASSERT_EQ(calledTimesA, 1);
   ASSERT_EQ(calledTimesB, 1);
+  ASSERT_FALSE(f2->hasError());
 }
 
 TEST(IValueTest, FutureExceptions) {
@@ -138,7 +138,123 @@ TEST(IValueTest, FutureExceptions) {
     }
   });
   ivalue::Future::FutureError err("My Error");
-  f3->markCompleted(std::move(err));
+  f3->setError(std::move(err));
   ASSERT_EQ(calledTimes, 1);
+  ASSERT_TRUE(f3->hasError());
+  ASSERT_EQ(std::string(f3->error()->what()), std::string("My Error"));
+}
+
+TEST(IValueTest, ValueEquality) {
+  EXPECT_EQ(IValue("asdf"), IValue("asdf"));
+  EXPECT_NE(IValue("asdf"), IValue("ASDF"));
+  EXPECT_NE(IValue("2"), IValue(2));
+  EXPECT_EQ(IValue(1), IValue(1));
+
+  // Check the equals() variant that returns an IValue
+  auto res = IValue("asdf").equals("asdf");
+  EXPECT_TRUE(res.isBool());
+  EXPECT_TRUE(res.toBool());
+
+  res = IValue("asdf").equals(1);
+  EXPECT_TRUE(res.isBool());
+  EXPECT_FALSE(res.toBool());
+}
+
+TEST(IValueTest, TensorEquality) {
+  auto rawTensor = torch::zeros({2, 3});
+  auto rawTensorCopy = rawTensor.clone();
+  auto t = IValue(rawTensor);
+  auto tCopy = IValue(rawTensorCopy);
+
+  // This should throw, because elementwise equality is ambiguous for
+  // multi-element Tensors.
+  auto testEquality = []() {
+    return IValue(torch::ones({2, 3})) == IValue(torch::rand({2, 3}));
+  };
+  EXPECT_ANY_THROW(testEquality());
+
+  // equals() should return a tensor of all `true`.
+  IValue eqTensor = t.equals(tCopy);
+  EXPECT_TRUE(eqTensor.isTensor());
+  auto booleanTrue = torch::ones({2, 3}).to(torch::kBool);
+  EXPECT_TRUE(eqTensor.toTensor().equal(booleanTrue));
+
+  // Test identity checking
+  EXPECT_TRUE(t.is(t));
+  EXPECT_FALSE(t.is(tCopy));
+  IValue tReference = t;
+  EXPECT_TRUE(t.is(tReference));
+}
+
+TEST(IValueTest, ListEquality) {
+  IValue c1 = std::vector<int64_t>{0, 1, 2, 3};
+  IValue c2 = std::vector<int64_t>{0, 1, 2, 3};
+  IValue c3 = std::vector<int64_t>{0, 1, 2, 3, 4};
+  EXPECT_EQ(c1, c1);
+  EXPECT_EQ(c1, c2);
+  EXPECT_FALSE(c1.is(c2));
+  EXPECT_NE(c1, c3);
+  EXPECT_NE(c2, c3);
+}
+
+TEST(IValueTest, DictEquality) {
+  auto innerDict = c10::Dict<std::string, std::string>();
+  innerDict.insert("foo", "bar");
+
+  auto d1 = c10::Dict<std::string, c10::Dict<std::string, std::string>>();
+  d1.insert("one", innerDict);
+  d1.insert("two", innerDict);
+  d1.insert("three", innerDict);
+  auto c1 = IValue(d1);
+
+  auto d2 = c10::Dict<std::string, c10::Dict<std::string, std::string>>();
+  d2.insert("one", innerDict.copy());
+  d2.insert("two", innerDict.copy());
+  d2.insert("three", innerDict.copy());
+  auto c2 = IValue(d2);
+
+  auto d3 = c10::Dict<std::string, c10::Dict<std::string, std::string>>();
+  d3.insert("one", innerDict.copy());
+  d3.insert("two", innerDict.copy());
+  d3.insert("three", innerDict.copy());
+  d3.insert("four", innerDict.copy());
+  auto c3 = IValue(d3);
+
+  auto d4 = c10::Dict<std::string, c10::Dict<std::string, std::string>>();
+  d4.insert("one", innerDict.copy());
+  d4.insert("two", innerDict.copy());
+  auto innerDictNotEqual = c10::Dict<std::string, std::string>();
+  innerDictNotEqual.insert("bar", "foo");
+  d4.insert("three", innerDictNotEqual);
+  auto c4 = IValue(d4);
+
+  EXPECT_EQ(c1, c1);
+  EXPECT_EQ(c1, c2);
+  EXPECT_FALSE(c1.is(c2));
+  EXPECT_NE(c1, c3);
+  EXPECT_NE(c2, c3);
+  EXPECT_NE(c1, c4);
+  EXPECT_NE(c2, c4);
+}
+
+TEST(IValueTest, DictEqualityDifferentOrder) {
+  auto d1 = c10::Dict<std::string, int64_t>();
+  d1.insert("one", 1);
+  d1.insert("two", 2);
+  auto d2 = c10::Dict<std::string, int64_t>();
+  d2.insert("two", 2);
+  d2.insert("one", 1);
+
+  EXPECT_EQ(d1, d2);
+}
+
+TEST(IValueTest, ListNestedEquality) {
+  IValue c1 = std::vector<std::vector<int64_t>>({{0}, {0, 1}, {0, 1, 2}});
+  IValue c2 = std::vector<std::vector<int64_t>>({{0}, {0, 1}, {0, 1, 2}});
+  IValue c3 = std::vector<std::vector<int64_t>>({{1}, {0, 1}, {0, 1, 2}});
+  EXPECT_EQ(c1, c1);
+  EXPECT_EQ(c1, c2);
+  EXPECT_NE(c1, c3);
+  EXPECT_NE(c2, c3);
 }
 } // namespace c10
