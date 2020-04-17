@@ -203,17 +203,8 @@ libtorch_distributed_sources = [
     "torch/csrc/distributed/rpc/utils.cpp",
 ]
 
-libtorch_extra_sources = [
-    "torch/csrc/autograd/VariableTypeManual.cpp",
-    "torch/csrc/jit/api/module_save.cpp",
+libtorch_core_jit_sources = [
     "torch/csrc/jit/codegen/cuda/interface.cpp",
-    "torch/csrc/jit/codegen/fuser/cpu/fused_kernel.cpp",
-    "torch/csrc/jit/mobile/function.cpp",
-    "torch/csrc/jit/mobile/import.cpp",
-    "torch/csrc/jit/mobile/interpreter.cpp",
-    "torch/csrc/jit/mobile/module.cpp",
-    "torch/csrc/jit/mobile/register_mobile_autograd.cpp",
-    "torch/csrc/jit/mobile/register_mobile_ops.cpp",
     "torch/csrc/jit/passes/create_functional_graphs.cpp",
     "torch/csrc/jit/passes/lower_graph.cpp",
     "torch/csrc/jit/runtime/register_c10_ops.cpp",
@@ -222,6 +213,24 @@ libtorch_extra_sources = [
     "torch/csrc/jit/runtime/register_prim_ops_fulljit.cpp",
     "torch/csrc/jit/runtime/register_special_ops.cpp",
     "torch/csrc/jit/runtime/register_string_ops.cpp",
+]
+
+libtorch_cmake_sources = libtorch_core_sources + libtorch_core_jit_sources + [
+    "torch/csrc/jit/passes/inline_fork_wait.cpp",
+    "torch/csrc/jit/passes/remove_inplace_ops.cpp",
+    "torch/csrc/jit/passes/utils/check_alias_annotation.cpp",
+]
+
+libtorch_extra_sources = libtorch_core_jit_sources + [
+    "torch/csrc/autograd/VariableTypeManual.cpp",
+    "torch/csrc/jit/api/module_save.cpp",
+    "torch/csrc/jit/codegen/fuser/cpu/fused_kernel.cpp",
+    "torch/csrc/jit/mobile/function.cpp",
+    "torch/csrc/jit/mobile/import.cpp",
+    "torch/csrc/jit/mobile/interpreter.cpp",
+    "torch/csrc/jit/mobile/module.cpp",
+    "torch/csrc/jit/mobile/register_mobile_autograd.cpp",
+    "torch/csrc/jit/mobile/register_mobile_ops.cpp",
     "torch/csrc/jit/serialization/export.cpp",
     "torch/csrc/jit/serialization/export_module.cpp",
     "torch/csrc/jit/serialization/import_legacy.cpp",
