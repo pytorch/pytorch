@@ -242,9 +242,39 @@ Value* TracingState::getOutput(const IValue& iv, size_t i) {
         fmap(tuple, [&](const IValue& ival) { return getOutput(ival, i); }));
     graph->insertNode(tuple_node);
     return tuple_node->output();
+  } else if (iv.isGenericDict()) {
+    if (tracing_mode_strict) {
+      throw std::runtime_error(
+          "Encountering a dict at the output of the tracer" +
+          std::string(STRICT_TRACER_MSG));
+    }
+    auto dict = iv.toGenericDict();
+    TypePtr key_type = dict.keyType();
+    TypePtr value_type = dict.valueType();
+
+    bool key_type_valid = key_type->isSubtypeOf(StringType::get()) ||
+        key_type->isSubtypeOf(TensorType::get());
+    bool value_type_valid = value_type->isSubtypeOf(TensorType::get());
+
+    if (!key_type_valid || !value_type_valid) {
+      std::ostringstream os;
+      os << "output " << i << " (" << dict << ") of traced region "
+         << "cannot be understood by the tracer, only dict[str, Tensor] "
+         << "or dict[Tensor, Tensor] can be a dictionary output of a traced function";
+      throw std::runtime_error(os.str());
+    }
+    std::vector<Value*> keys;
+    std::vector<Value*> values;
+    for (const auto& entry : dict) {
+      keys.emplace_back(getValue(entry.key()));
+      values.emplace_back(getOutput(entry.value(), i));
+    }
+    auto dict_node = graph->createDict(key_type, value_type, keys, values);
+    graph->insertNode(dict_node);
+    return dict_node->output();
   } else {
     AT_ERROR(
-        "Only tensors, lists and tuples of tensors can be output from traced functions");
+        "Only tensors, lists, tuples of tensors, or dictionary of tensors can be output from traced functions");
   }
 }
 
