@@ -215,8 +215,7 @@ bool ReadyQueue::empty() const {
   return heap_.empty();
 }
 
-// This limit is based on the default python recursion limit which is 1000
-Engine::Engine() : max_recursion_depth_(100), non_reentrant_device_thread_count_(0) {}
+Engine::Engine() : max_recursion_depth_(MAX_DEPTH), non_reentrant_device_thread_count_(0) {}
 
 // Send shutdown tasks to all device_ready_queues_ if no backward tasks are running
 // Even though readyQueue should be empty, shutdown tasks have the highest priority

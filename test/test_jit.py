@@ -25,6 +25,7 @@ from jit.test_unsupported_ops import TestUnsupportedOps  # noqa: F401
 from jit.test_freezing import TestFreezing  # noqa: F401
 from jit.test_functional_blocks import TestFunctionalBlocks  # noqa: F401
 from jit.test_save_load import TestSaveLoad  # noqa: F401
+from jit.test_python_ir import TestPythonIr  # noqa: F401
 
 # Torch
 from torch import Tensor
@@ -47,7 +48,7 @@ from torch.testing._internal import jit_utils
 from torch.testing._internal.common_utils import run_tests, IS_WINDOWS, TEST_WITH_UBSAN, \
     skipIfRocm, suppress_warnings, IS_SANDCASTLE, GRAPH_EXECUTOR, ProfilingMode, \
     freeze_rng_state, set_rng_seed, slowTest, TemporaryFileName, skipIfCompiledWithoutNumpy, \
-    enable_profiling_mode, TEST_MKL
+    enable_profiling_mode, TEST_MKL, set_default_dtype
 from torch.testing._internal.jit_utils import JitTestCase, enable_cpu_fuser, disable_autodiff_subgraph_inlining, \
     _trace, enable_cpu_fuser_if, do_input_map, get_execution_plan, \
     execWrapper, _inline_everything, _tmp_donotuse_dont_inline_everything, \
@@ -2877,6 +2878,26 @@ graph(%Ra, %Rb):
         x = (torch.rand(3), torch.rand(3))
         model = Bar()
         self.checkTrace(model, x)
+
+    def test_trace_dict_output(self):
+
+        class TraceDictStrTensor(torch.nn.Module):
+            def forward(self, a, b):
+                return {'a': a, 'b': b}
+
+        class TraceDictTensorTensor(torch.nn.Module):
+            def forward(self, a, b):
+                return {a: b, b: a}
+
+        x = (torch.rand(3), torch.rand(3))
+        with self.assertRaisesRegex(RuntimeError, r"Encountering a dict at the output"):
+            torch.jit.trace(TraceDictStrTensor(), x)
+
+        traced_dict_str_mod = torch.jit.trace(TraceDictStrTensor(), x, strict=False)
+        self.assertEqual(traced_dict_str_mod(*x), {'a': x[0], 'b': x[1]})
+
+        traced_dict_tensor_mod = torch.jit.trace(TraceDictTensorTensor(), x, strict=False)
+        self.assertEqual(traced_dict_tensor_mod(*x), {x[0]: x[1], x[1]: x[0]})
 
     def test_trace_with_tensor_list_output(self):
         def f():
@@ -7823,7 +7844,6 @@ a")
                 self.assertEqual(t1, t2)
                 self.assertEqual(t1.device, t2.device)
 
-
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.LEGACY, "Simple Executor doesn't have any shapes to propagate")
     def test_tensor_as_tensor_shape_prop(self):
         tensor_template = dedent('''
@@ -7949,6 +7969,18 @@ a")
 
         inp = torch.randn(3, 4)
         self.checkScript(test_as_tensor_tensor_input, (inp,))
+
+    def test_torch_tensor_dtype(self):
+        def foo(s: float):
+            return torch.tensor(s), torch.tensor([s, s])
+
+        scripted_foo = torch.jit.script(foo)
+        with set_default_dtype(torch.float):
+            self.assertEqual(scripted_foo(1.), foo(1.), exact_dtype=True)
+        with set_default_dtype(torch.double):
+            self.assertEqual(scripted_foo(1.), foo(1.), exact_dtype=True)
+        with set_default_dtype(torch.half):
+            self.assertEqual(scripted_foo(1.), foo(1.), exact_dtype=True)
 
     def test_empty_like_memory_format_bc(self):
         def f(x):
