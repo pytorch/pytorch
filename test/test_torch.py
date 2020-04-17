@@ -170,7 +170,6 @@ class _TestTorchMixin(object):
                        'is_distributed',
                        'is_nonzero',
                        'is_same_size',
-                       'isclose',
                        'log_softmax',
                        'map2_',
                        'new',
