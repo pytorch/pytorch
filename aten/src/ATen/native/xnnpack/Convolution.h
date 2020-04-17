@@ -23,12 +23,9 @@ c10::intrusive_ptr<xnnpack::Conv2dOpContext>
         c10::optional<Scalar> output_min,
         c10::optional<Scalar> output_max);
 
-class Conv2dClampRun final : public torch::OperatorKernel {
- public:
-  Tensor operator()(
-      const Tensor& input,
-      const c10::intrusive_ptr<xnnpack::Conv2dOpContext>& op_context);
-};
+Tensor conv2d_clamp_run(
+    const Tensor& input,
+    const c10::intrusive_ptr<xnnpack::Conv2dOpContext>& op_context);
 
 ContextConv2D create(
     const Tensor& weight,
