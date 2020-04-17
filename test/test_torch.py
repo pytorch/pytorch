@@ -9927,8 +9927,9 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(a.dtype, torch.float)
         self.assertEqual(a.size(), torch.Size([1]))
         expected = torch.tensor([10], dtype=torch.float, device=device).exponential_(0)
-        actual = torch.tensor([0.0], dtype=torch.float, device=device)
+        actual = torch.tensor((float('inf'),), dtype=torch.float, device=device)
         self.assertTrue(torch.allclose(expected, actual, rtol=0, atol=0))
+
         # fail with negative lambda
         self.assertRaises(RuntimeError, lambda: torch.tensor(
             [10], dtype=torch.float, device=device).exponential_(-0.5))

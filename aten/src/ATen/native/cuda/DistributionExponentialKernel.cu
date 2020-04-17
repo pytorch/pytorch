@@ -41,7 +41,7 @@ void exponential_kernel(TensorIterator& iter, double lambda_, Generator* gen_) {
       // define lambda for exponential transformation
       auto exponential_func = [lambda, nextafter_1_0_double] __device__ (accscalar_t rand) {
         if (lambda == static_cast<accscalar_t>(0.0)) {
-          return static_cast<scalar_t>(0.0);
+          return std::numeric_limits<scalar_t>::infinity();
         }
         accscalar_t sample;
         // curand_uniform has (0,1] bounds. log(1) is 0 and exponential excludes 0.
@@ -61,7 +61,7 @@ void exponential_kernel(TensorIterator& iter, double lambda_, Generator* gen_) {
       // use __logf fast approximation for peak bandwidth
       auto exponential_func = [lambda, nextafter_1_0_float] __device__ (accscalar_t rand) {
         if (lambda == static_cast<accscalar_t>(0.0)) {
-          return static_cast<scalar_t>(0.0);
+          return std::numeric_limits<scalar_t>::infinity();
         }
         accscalar_t sample;
         if(rand == static_cast<accscalar_t>(1.0)) {
