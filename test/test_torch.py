@@ -2376,9 +2376,6 @@ class _TestTorchMixin(object):
     def test_index_add_all_dtypes(self):
         for device in torch.testing.get_all_device_types():
             for dtype in torch.testing.get_all_math_dtypes(device):
-                # index_add is not supported for complex dtypes on cuda yet
-                if device.startswith('cuda') and dtype.is_complex:
-                    continue
                 size = [5, 5]
                 if dtype.is_floating_point or dtype.is_complex:
                     tensor = torch.rand(size, dtype=dtype, device=device)
@@ -2386,8 +2383,15 @@ class _TestTorchMixin(object):
                     tensor = torch.randint(-5, 15, size, dtype=dtype, device=device)
                 else:
                     tensor = torch.randint(0, 10, size, dtype=dtype, device=device)
+
                 # index_add calls atomicAdd on cuda.
                 zeros = torch.zeros(size, dtype=dtype, device=device)
+
+                # index_add is not supported for complex dtypes on cuda yet
+                if device.startswith('cuda') and dtype.is_complex:
+                    self.assertRaises(RuntimeError, lambda: zeros.index_add(0, torch.arange(0, size[0], dtype=torch.long, device=device), tensor))
+                    continue
+
                 added = zeros.index_add(0, torch.arange(0, size[0], dtype=torch.long, device=device), tensor)
                 self.assertEqual(added, tensor)
 
@@ -5989,21 +5993,20 @@ class TestTorchDeviceType(TestCase):
             if dtype == torch.half:
                 continue
 
+            # deferring to https://github.com/pytorch/pytorch/pull/36793
+            if dtype.is_complex():
+                continue
+
             m1 = torch.empty(0, dtype=dtype, device=device)
-            if m1.is_floating_point() or m1.is_complex():
+            if m1.is_floating_point():
                 m1 = torch.rand(100, 100, dtype=dtype, device=device) + 0.5
             else:
                 # math.pow will overflow and throw exceptions for large integers
                 range_high = 4 if dtype in (torch.int8, torch.uint8) else 10
                 m1 = torch.randint(1, range_high, (100, 100), dtype=dtype, device=device)
 
-            # torch.pow not supported on cuda for complex dtypes
-            if device.startswith('cuda') and dtype.is_complex:
-                self.assertRaises(RuntimeError, lambda: torch.pow(m1[4], num))
-                continue
-
             for num in [-2.8, -2, -1, -0.5, 0, 0.5, 1, 2, 3, 4, 3.3]:
-                if isinstance(num, int) and num < 0 and not m1.is_floating_point() and not m1.is_complex():
+                if isinstance(num, int) and num < 0 and not m1.is_floating_point():
                     with self.assertRaisesRegex(RuntimeError,
                                                 r'Integers to negative integer powers are not allowed\.'):
                         torch.pow(m1[4], num)
@@ -6013,35 +6016,35 @@ class TestTorchDeviceType(TestCase):
                     res1 = torch.pow(m1[4], num)
                     res2 = res1.clone().zero_()
                     for i in range(res2.size(0)):
-                        res2[i] = pow(m1[4][i], num)
-                    self.assertAlmostEqual(res1, res2, places=4)
+                        res2[i] = math.pow(m1[4][i], num)
+                    self.assertEqual(res1, res2)
 
                     # non-contiguous
                     res1 = torch.pow(m1[:, 4], num)
                     res2 = res1.clone().zero_()
                     for i in range(res2.size(0)):
-                        res2[i] = pow(m1[i, 4], num)
-                    self.assertAlmostEqual(res1, res2, places=4)
+                        res2[i] = math.pow(m1[i, 4], num)
+                    self.assertEqual(res1, res2)
 
             # base - number, exponent - tensor
             # contiguous
             res1 = torch.pow(3, m1[4])
             res2 = res1.clone().zero_()
             for i in range(res2.size(0)):
-                res2[i] = pow(3, m1[4, i])
-            self.assertAlmostEqual(res1, res2)
+                res2[i] = math.pow(3, m1[4, i])
+            self.assertEqual(res1, res2)
 
             # non-contiguous
             res1 = torch.pow(3, m1[:, 4])
             res2 = res1.clone().zero_()
             for i in range(res2.size(0)):
-                res2[i] = pow(3, m1[i][4])
-            self.assertAlmostEqual(res1, res2)
+                res2[i] = math.pow(3, m1[i][4])
+            self.assertEqual(res1, res2)
 
             # resize behavior for exp == 1
             out = torch.zeros(1, dtype=dtype, device=device)
             torch.pow(m1, 1, out=out)
-            self.assertAlmostEqual(out, m1)
+            self.assertEqual(out, m1)
 
     def test_neg(self, device):
         int_types = [torch.int, torch.short, torch.int8, torch.uint8]
@@ -10119,8 +10122,7 @@ class TestTorchDeviceType(TestCase):
     def test_sign(self, device):
         for dtype in torch.testing.get_all_math_dtypes(device):
             if dtype.is_complex:
-                self.assertRaises(RuntimeError, lambda: torch.finfo(dtype))
-                self.assertRaises(RuntimeError, lambda: torch.sign(torch.tensor([3+4j], dype=dtype)))
+                self.assertRaises(RuntimeError, lambda: torch.sign(torch.tensor([4j], device=device, dtype=dtype)))
                 continue
 
             # Include NaN for floating point numbers
@@ -10453,66 +10455,70 @@ class TestTorchDeviceType(TestCase):
             lambda: torch.multinomial(x, 3))
 
     def test_add(self, device):
-        # [res] torch.add([res,] tensor1, tensor2)
-        m1 = torch.randn(100, 100, device=device)
-        v1 = torch.randn(100, device=device)
+        dtypes = [torch.float, torch.double] + torch.testing.get_all_complex_dtypes()
+        for dtype in dtypes:
+            # [res] torch.add([res,] tensor1, tensor2)
+            m1 = torch.randn(100, 100, dtype=dtype, device=device)
+            v1 = torch.randn(100, dtype=dtype, device=device)
 
-        # contiguous
-        res1 = torch.add(m1[4], v1)
-        res2 = res1.clone().zero_()
-        for i in range(m1.size(1)):
-            res2[i] = m1[4, i] + v1[i]
-        self.assertEqual(res1, res2)
+            # contiguous
+            res1 = torch.add(m1[4], v1)
+            res2 = res1.clone().zero_()
+            for i in range(m1.size(1)):
+                res2[i] = m1[4, i] + v1[i]
+            self.assertEqual(res1, res2)
 
-        m1 = torch.randn(100, 100, device=device)
-        v1 = torch.randn(100, device=device)
+            m1 = torch.randn(100, 100, device=device)
+            v1 = torch.randn(100, device=device)
 
-        # non-contiguous
-        res1 = torch.add(m1[:, 4], v1)
-        res2 = res1.clone().zero_()
-        for i in range(m1.size(0)):
-            res2[i] = m1[i, 4] + v1[i]
-        self.assertEqual(res1, res2)
+            # non-contiguous
+            res1 = torch.add(m1[:, 4], v1)
+            res2 = res1.clone().zero_()
+            for i in range(m1.size(0)):
+                res2[i] = m1[i, 4] + v1[i]
+            self.assertEqual(res1, res2)
 
-        # [res] torch.add([res,] tensor, value)
-        m1 = torch.randn(10, 10, device=device)
+            # [res] torch.add([res,] tensor, value)
+            m1 = torch.randn(10, 10, device=device)
 
-        # contiguous
-        res1 = m1.clone()
-        res1[3].add_(2)
-        res2 = m1.clone()
-        for i in range(m1.size(1)):
-            res2[3, i] = res2[3, i] + 2
-        self.assertEqual(res1, res2)
+            # contiguous
+            res1 = m1.clone()
+            res1[3].add_(2)
+            res2 = m1.clone()
+            for i in range(m1.size(1)):
+                res2[3, i] = res2[3, i] + 2
+            self.assertEqual(res1, res2)
 
-        # non-contiguous
-        m1 = torch.randn(10, 10, device=device)
-        res1 = m1.clone()
-        res1[:, 3].add_(2)
-        res2 = m1.clone()
-        for i in range(m1.size(0)):
-            res2[i, 3] = res2[i, 3] + 2
-        self.assertEqual(res1, res2)
+            # non-contiguous
+            m1 = torch.randn(10, 10, device=device)
+            res1 = m1.clone()
+            res1[:, 3].add_(2)
+            res2 = m1.clone()
+            for i in range(m1.size(0)):
+                res2[i, 3] = res2[i, 3] + 2
+            self.assertEqual(res1, res2)
 
-        # inter-type
-        m1 = torch.randn(10, 10, device=device)
-        self.assertEqual(m1 + 3, m1 + torch.tensor(3))
-        self.assertEqual(3 + m1, torch.tensor(3) + m1)
+            # inter-type
+            m1 = torch.randn(10, 10, dtype=dtype, device=device)
+            self.assertEqual(m1 + 3, m1 + torch.tensor(3))
+            self.assertEqual(3 + m1, torch.tensor(3) + m1)
+
+            # contiguous + non-contiguous
+            m1 = torch.randn(10, 10, dtype=dtype, device=device)
+            m2 = torch.randn(10, 10, dtype=dtype, device=device).t()
+            res = m1 + m2
+            self.assertTrue(res.is_contiguous())
+            self.assertEqual(res, m1 + m2.contiguous())
+
+            # 1d + empty
+            m1 = torch.tensor([1.0], dtype=dtype, device=device)
+            m2 = torch.tensor([], dtype=dtype, device=device)
+            self.assertEqual(m1 + m2, [])
+
+        # inter-type unint8
         one = torch.tensor(1, dtype=torch.uint8, device=device)
         self.assertEqual(torch.add(one, 1), 2)
         self.assertEqual(torch.add(one, 1).dtype, torch.uint8)
-
-        # contiguous + non-contiguous
-        m1 = torch.randn(10, 10, device=device)
-        m2 = torch.randn(10, 10, device=device).t()
-        res = m1 + m2
-        self.assertTrue(res.is_contiguous())
-        self.assertEqual(res, m1 + m2.contiguous())
-
-        # 1d + empty
-        m1 = torch.tensor([1.0], dtype=torch.float, device=device)
-        m2 = torch.tensor([], dtype=torch.float, device=device)
-        self.assertEqual(m1 + m2, [])
 
         # bool
         m1 = torch.tensor([True, False, False, True, False, False], dtype=torch.bool, device=device)
@@ -11119,18 +11125,24 @@ class TestTorchDeviceType(TestCase):
             a = rand_tensor((2, 2), dtype=dtype, device=device)
             b = rand_tensor((2, 2), dtype=dtype, device=device)
             c = rand_tensor((2, 2), dtype=dtype, device=device)
-            if dtype.is_floating_point or dtype.is_complex:
+            if dtype.is_floating_point:
                 alpha = 0.1
             else:
                 alpha = 3
+
+            # TODO: add cpu test after isclose is fixed in https://github.com/pytorch/pytorch/pull/36456
+            if device.startswith('cpu') and dtype.is_complex:
+                continue
+
+            # addcmul is not supported for complex dtypes on cuda yet
+            if device.startswith('cuda') and dtype.is_complex:
+                self.assertRaises(RuntimeError, lambda: torch.addcmul(a, b, c, value=alpha))
+                continue
+
             actual = torch.addcmul(a, b, c, value=alpha)
             expected = a + alpha * b * c
-            self.assertTrue(torch.allclose(expected, actual))
 
-            # TODO: update this after torch.isclose is landed for complex
-            if dtype.is_complex:
-                self.assertRaises(RuntimeError, lambda: torch.allclose(expected, actual))
-                continue
+            self.assertTrue(torch.allclose(expected, actual))
 
             with self.maybeWarnsRegex(
                     UserWarning, "This overload of addcmul is deprecated"):
