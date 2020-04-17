@@ -625,8 +625,14 @@ class _TestTorchMixin(object):
             self.assertEqual(fn(x.type(other_dtype)), fn(x, dtype=other_dtype), exact_dtype=False)
 
             # test mixed int/float/complex
-            for mixed_dtype_ in [torch.int32, torch.complex64]:
-                mixed_dtype = mixed_dtype_ if dtype.is_floating_point else torch.float32
+            if dtype.is_floating_point:
+                mixed_dtypes = [torch.int32, torch.complex64]
+            elif dtype.is_complex:
+                mixed_dtypes = [torch.int32, torch.float32]
+            else:
+                mixed_dtypes = [torch.float32, torch.complex64]
+
+            for mixed_dtype in mixed_dtypes:
                 self.assertIs(mixed_dtype, fn(x, dtype=mixed_dtype).dtype)
                 self.assertEqual(fn(x.type(mixed_dtype)), fn(x, dtype=mixed_dtype), exact_dtype=False)
 
