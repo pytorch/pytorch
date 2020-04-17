@@ -43,8 +43,6 @@ template <> struct AccumulateType<char, false> { using type = int64_t; };
 template <> struct AccumulateType<int16_t, false> { using type = int64_t; };
 template <> struct AccumulateType<int32_t, false> { using type = int64_t; };
 template <> struct AccumulateType<int64_t, false> { using type = int64_t; };
-template <> struct AccumulateType<std::complex<float>, false> { using type = std::complex<double>; };
-template <> struct AccumulateType<std::complex<double>, false> { using type = std::complex<double>; };
 
 template<typename T, bool is_cuda>
 using acc_type = typename AccumulateType<T, is_cuda>::type;

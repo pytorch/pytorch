@@ -7,7 +7,6 @@
 #include <c10/util/Exception.h>
 #include <ATen/native/TensorCompare.h>
 #include <ATen/NamedTensorUtils.h>
-#include <ATen/native/cpu/zmath.h>
 
 namespace at { namespace native {
 
