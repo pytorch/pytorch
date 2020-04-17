@@ -30,7 +30,6 @@ public:
     std::string debug;
   };
 
-  explicit OperatorEntry(FunctionSchema&& schema);
   explicit OperatorEntry(OperatorName&& operator_name);
 
   OperatorEntry(const OperatorEntry&) = delete;
@@ -41,6 +40,10 @@ public:
   const FunctionSchema& schema() const {
     TORCH_INTERNAL_ASSERT(schema_.has_value(), "Tried to access the schema for ", name_, " which doesn't have a schema registered yet");
     return *schema_;
+  }
+  const std::string& debug() const {
+    TORCH_INTERNAL_ASSERT(debug_.has_value());
+    return *debug_;
   }
   bool hasSchema() const {
     return schema_.has_value();
@@ -65,7 +68,7 @@ public:
   // attempt to register a schema when one is already present or vice
   // versa that is an error.  (Refcounting for the registrations is
   // handled in the OperatorHandle in Dispatcher)
-  void registerSchema(FunctionSchema&&);
+  void registerSchema(FunctionSchema&&, std::string&& debug);
   void deregisterSchema();
 
   const OperatorName& operator_name() const {
@@ -102,6 +105,8 @@ private:
 
   OperatorName name_;
   c10::optional<FunctionSchema> schema_;
+  c10::optional<std::string> debug_;
+  // INVARIANT: schema_.has_value() == debug_.has_value()
 
   // The dispatchTable stores the current kernel for each dispatch key
   DispatchTable dispatchTable_;

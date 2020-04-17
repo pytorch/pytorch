@@ -29,8 +29,9 @@ Strategy management
 Sharing CUDA tensors
 --------------------
 
-Sharing CUDA tensors between processes is supported only using
-a ``spawn`` or ``forkserver`` start methods.
+Sharing CUDA tensors between processes is supported only in Python 3, using
+a ``spawn`` or ``forkserver`` start methods. 
+
 
 Unlike CPU tensors, the sending process is required to keep the original tensor
 as long as the receiving process retains a copy of the tensor. The refcounting is
