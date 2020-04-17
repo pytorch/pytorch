@@ -215,15 +215,10 @@ bool GetCudaPeerAccessPattern(vector<vector<bool> >* pattern) {
 }
 
 bool TensorCoreAvailable() {
-  // requires CUDA 9.0 and above
-#if CUDA_VERSION < 9000
-  return false;
-#else
   int device = CaffeCudaGetDevice();
   auto& prop = GetDeviceProperty(device);
 
   return prop.major >= 7;
-#endif
 }
 
 const char* cublasGetErrorString(cublasStatus_t error) {
@@ -246,14 +241,10 @@ const char* cublasGetErrorString(cublasStatus_t error) {
 #endif
   case CUBLAS_STATUS_INTERNAL_ERROR:
     return "CUBLAS_STATUS_INTERNAL_ERROR";
-#if CUDA_VERSION >= 6000
   case CUBLAS_STATUS_NOT_SUPPORTED:
     return "CUBLAS_STATUS_NOT_SUPPORTED";
-#if CUDA_VERSION >= 6050
   case CUBLAS_STATUS_LICENSE_ERROR:
     return "CUBLAS_STATUS_LICENSE_ERROR";
-#endif  // CUDA_VERSION >= 6050
-#endif  // CUDA_VERSION >= 6000
 #ifdef __HIP_PLATFORM_HCC__
   case rocblas_status_invalid_size:
     return "rocblas_status_invalid_size";

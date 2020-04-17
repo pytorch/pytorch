@@ -171,11 +171,7 @@ __device__ void countRadixUsingMask(CountType counts[RadixSize],
 #if defined(__HIP_PLATFORM_HCC__)
       counts[j] += __popcll(__ballot(vote));
 #else
-#if CUDA_VERSION >= 9000
       counts[j] += __popc(__ballot_sync(__activemask(), vote));
-#else
-      counts[j] += __popc(__ballot(vote));
-#endif
 #endif  // __HIP_PLATFORM_HCC__
     }
   }
