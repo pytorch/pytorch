@@ -68,6 +68,19 @@ class TORCH_API LoopNest {
 
 TORCH_API Stmt* FlattenIndexes(Stmt* s);
 
+struct BufUse {
+  Stmt* s;
+  bool isStore;
+};
+
+/*
+ * Returns a map ( Buf -> uses of this Buf), uses are represented as vectors of
+ * BufUse elements, which are Stmt* and a bool isStore flag. The order of uses
+ * in the vectors reflects the order in which the uses appear in the given
+ * statement.
+ */
+std::unordered_map<const Buf*, std::vector<BufUse>> findUses(Stmt* s);
+
 } // namespace tensorexpr
 } // namespace jit
 } // namespace torch
