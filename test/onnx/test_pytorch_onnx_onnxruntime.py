@@ -315,7 +315,6 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(model, (x,), rtol=1e-3, atol=1e-5)
 
     def get_image_from_url(self, url):
-        import sys
         import os
         from urllib.parse import urlsplit
         from urllib import request
