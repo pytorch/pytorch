@@ -20,7 +20,7 @@ using namespace vec256;
 template <typename traits>
 static inline bool is_contiguous_reduction(const int64_t* strides) {
   return strides[0] == 0 &&
-         strides[1] == sizeof(typename traits::arg<1>::type);
+         strides[1] == sizeof(typename traits::template arg<1>::type);
 }
 
 // reduction that is contiguous over the input in dim 1
@@ -28,7 +28,7 @@ template <typename traits>
 static inline bool is_outer_reduction(const int64_t* strides) {
   return strides[0] == 0 &&
          strides[2] == sizeof(typename traits::return_type) &&
-         strides[3] == sizeof(typename traits::arg<1>::type);
+         strides[3] == sizeof(typename traits::template arg<1>::type);
 }
 
 template <typename func_t, typename vec_func_t>
@@ -185,16 +185,16 @@ void binary_kernel_reduce(TensorIterator& iter, ops_t ops, init_t init) {
   using r_traits = c10::guts::function_traits<rf_t>;
   using c_traits = c10::guts::function_traits<cf_t>;
   using p_traits = c10::guts::function_traits<pf_t>;
-  using acc_t = typename p_traits::arg<0>::type;
-  using data_t = typename r_traits::arg<1>::type;
+  using acc_t = typename p_traits::template arg<0>::type;
+  using data_t = typename r_traits::template arg<1>::type;
   static_assert(
     all_same<
       acc_t,
       init_t,
-      typename r_traits::arg<0>::type,
+      typename r_traits::template arg<0>::type,
       typename r_traits::return_type,
-      typename c_traits::arg<0>::type,
-      typename c_traits::arg<1>::type,
+      typename c_traits::template arg<0>::type,
+      typename c_traits::template arg<1>::type,
       typename c_traits::return_type>::value,
     "all accumulate types must match");
   static_assert(
@@ -249,8 +249,8 @@ void binary_kernel_reduce_vec(TensorIterator& iter, func_t op, vec_func_t vop, d
   static_assert(
     all_same<
       typename traits::return_type,
-      typename traits::arg<0>::type,
-      typename traits::arg<1>::type>::value,
+      typename traits::template arg<0>::type,
+      typename traits::template arg<1>::type>::value,
     "all types must match");
 
   iter.output().fill_(ident);
