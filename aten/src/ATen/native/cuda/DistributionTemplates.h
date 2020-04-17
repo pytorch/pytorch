@@ -250,11 +250,11 @@ void random_full_64_bits_range_kernel(TensorIterator& iter, RNG gen) {
 
 template<typename RNG>
 struct RandomFromToKernel {
-  void operator()(TensorIterator& iter, uint64_t range, int64_t base, RNG gen) {
-    random_from_to_kernel(iter, range, base, gen);
+  void operator()(TensorIterator& iter, uint64_t range, int64_t base, c10::optional<Generator> gen) {
+    random_from_to_kernel(iter, range, base, check_generator<RNG>(gen));
   }
-  void operator()(TensorIterator& iter, RNG gen) {
-    random_full_64_bits_range_kernel(iter, gen);
+  void operator()(TensorIterator& iter, c10::optional<Generator> gen) {
+    random_full_64_bits_range_kernel(iter, check_generator<RNG>(gen));
   }
 };
 
@@ -373,7 +373,7 @@ void normal_kernel(Tensor& self, double mean_, double std_, RNG gen) {
 
 template<typename RNG>
 struct NormalKernel {
-  void operator()(Tensor& self, double mean, double std, Generator gen) {
+  void operator()(Tensor& self, double mean, double std, c10::optional<Generator> gen) {
     normal_kernel(self, mean, std, check_generator<RNG>(gen));
   }
 };
@@ -419,7 +419,7 @@ void uniform_kernel(TensorIterator& iter, double from_, double to_, RNG gen) {
 
 template<typename RNG>
 struct UniformKernel {
-  void operator()(TensorIterator& iter, double from, double to, Generator gen) {
+  void operator()(TensorIterator& iter, double from, double to, c10::optional<Generator> gen) {
     uniform_kernel(iter, from, to, check_generator<RNG>(gen));
   }
 };

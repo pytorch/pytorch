@@ -77,10 +77,10 @@ Tensor& abs_out(Tensor& result, const Tensor& self) {
   // operation's result to the expected result type.
   if (self.is_complex() && !result.is_complex()) {
     // Checks if the corresponding float type can be cast to the desired dtype
-    const auto float_type = c10::toValueType(c10::typeMetaToScalarType(self.dtype()));
-    TORCH_CHECK(canCast(float_type, c10::typeMetaToScalarType(result.dtype())),
+    const auto float_type = c10::toValueType(self.scalar_type());
+    TORCH_CHECK(canCast(float_type, result.scalar_type()),
           "result type ", float_type, " can't be cast to the desired output type ",
-          result.dtype());
+          result.scalar_type());
 
     // Runs the function complex->complex, as TensorIterator expects
     Tensor complex_result = at::empty({0}, self.options());
@@ -100,7 +100,7 @@ Tensor abs(const Tensor& self) {
   // Overrides default return type to be floating point when given a
   // complex input. See note [Complex abs].
   if (self.is_complex()) {
-    const auto float_type = c10::toValueType(c10::typeMetaToScalarType(self.dtype()));
+    const auto float_type = c10::toValueType(self.scalar_type());
     Tensor result = at::empty({0}, self.options().dtype(float_type));
     return at::abs_out(result, self);
   }
@@ -262,21 +262,25 @@ Tensor& logical_not_out(Tensor& result, const Tensor& self) {
 }
 
 Tensor clamp(const Tensor& self, optional<Scalar> min, optional<Scalar> max) {
+  TORCH_CHECK(!self.is_complex(), "clamp is not yet implemented for complex tensors.");
   Tensor result = at::empty({0}, self.options());
   return clamp_out(result, self, min, max);
 }
 
 Tensor clamp_max(const Tensor& self, Scalar max) {
+  TORCH_CHECK(!self.is_complex(), "clamp is not yet implemented for complex tensors.");
   Tensor result = at::empty({0}, self.options());
   return clamp_max_out(result, self, max);
 }
 
 Tensor clamp_min(const Tensor& self, Scalar min) {
+  TORCH_CHECK(!self.is_complex(), "clamp is not yet implemented for complex tensors.");
   Tensor result = at::empty({0}, self.options());
   return clamp_min_out(result, self, min);
 }
 
 Tensor& _clamp__cpu(Tensor& self, optional<Scalar> min, optional<Scalar> max) {
+  TORCH_CHECK(!self.is_complex(), "clamp is not yet implemented for complex tensors.");
   return clamp_out(self, self, min, max);
 }
 
@@ -301,6 +305,7 @@ Tensor& _clamp_out_cpu(
     const Tensor& self,
     optional<Scalar> min,
     optional<Scalar> max) {
+  TORCH_CHECK(!self.is_complex(), "clamp is not yet implemented for complex tensors.");
   if (min && max) {
     TORCH_CHECK(self.device().type() == DeviceType::CPU,
                 "clamp only supports CPU device type, got: ", self.device().type());
@@ -320,10 +325,12 @@ Tensor& _clamp_out_cpu(
 }
 
 Tensor& _clamp_max__cpu(Tensor& self, Scalar max) {
+  TORCH_CHECK(!self.is_complex(), "clamp is not yet implemented for complex tensors.");
   return clamp_max_out(self, self, max);
 }
 
 Tensor& _clamp_max_out_cpu(Tensor& result, const Tensor& self, Scalar max) {
+  TORCH_CHECK(!self.is_complex(), "clamp is not yet implemented for complex tensors.");
   TORCH_CHECK(self.device().type() == DeviceType::CPU,
               "clamp_max only supports CPU device type, got: ", self.device().type());
   TORCH_CHECK(self.layout() == Layout::Strided,
@@ -335,10 +342,12 @@ Tensor& _clamp_max_out_cpu(Tensor& result, const Tensor& self, Scalar max) {
 }
 
 Tensor& _clamp_min__cpu(Tensor& self, Scalar min) {
+  TORCH_CHECK(!self.is_complex(), "clamp is not yet implemented for complex tensors.");
   return clamp_min_out(self, self, min);
 }
 
 Tensor& _clamp_min_out_cpu(Tensor& result, const Tensor& self, Scalar min) {
+  TORCH_CHECK(!self.is_complex(), "clamp is not yet implemented for complex tensors.");
   TORCH_CHECK(self.device().type() == DeviceType::CPU,
               "clamp_min only supports CPU device type, got: ", self.device().type());
   TORCH_CHECK(self.layout() == Layout::Strided,
