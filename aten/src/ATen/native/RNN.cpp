@@ -594,9 +594,9 @@ static std::vector<c10::intrusive_ptr<CellParamsBase>> _quantized_params_dynamic
       if (qengine == "fbgemm") {
 #ifdef USE_FBGEMM
         auto& packed_struct_ih =
-            cpp_custom_type_hack::cast<PackedLinearWeight>(params[i]);
+            cpp_custom_type_hack::cast<PackedLinearWeight>(static_cast<at::Tensor>(params[i]));
         auto& packed_struct_hh =
-            cpp_custom_type_hack::cast<PackedLinearWeight>(params[i + 1]);
+            cpp_custom_type_hack::cast<PackedLinearWeight>(static_cast<at::Tensor>(params[i + 1]));
 
         bias_ih = packed_struct_ih.bias.value_or(undefined);
         bias_hh = packed_struct_hh.bias.value_or(undefined);
@@ -604,15 +604,19 @@ static std::vector<c10::intrusive_ptr<CellParamsBase>> _quantized_params_dynamic
       } else if (qengine == "qnnpack") {
 #ifdef USE_PYTORCH_QNNPACK
         auto& packed_struct_ih =
-            cpp_custom_type_hack::cast<PackedLinearWeightsQnnp>(params[i]);
+            cpp_custom_type_hack::cast<PackedLinearWeightsQnnp>(static_cast<at::Tensor>(params[i]));
         auto& packed_struct_hh =
-            cpp_custom_type_hack::cast<PackedLinearWeightsQnnp>(params[i + 1]);
+            cpp_custom_type_hack::cast<PackedLinearWeightsQnnp>(static_cast<at::Tensor>(params[i + 1]));
 
         bias_ih = packed_struct_ih.bias;
         bias_hh = packed_struct_hh.bias;
 #endif
       }
-      result.emplace_back(c10::make_intrusive<QuantizedCellParamsDynamic>(params[i], params[i + 1], bias_ih, bias_hh));
+      result.emplace_back(c10::make_intrusive<QuantizedCellParamsDynamic>(
+        static_cast<at::Tensor>(params[i]),
+        static_cast<at::Tensor>(params[i + 1]),
+        bias_ih,
+        bias_hh));
     }
     return result;
 }
@@ -626,12 +630,12 @@ static c10::List<c10::intrusive_ptr<CellParamsBase>> gather_quantized_params_dyn
   auto& ctx = at::globalContext();
 #ifdef USE_FBGEMM
   if (ctx.qEngine() == at::QEngine::FBGEMM){
-    return c10::List<c10::intrusive_ptr<CellParamsBase>>(_quantized_params_dynamic(params, "fbgemm"));
+    return c10::List<c10::intrusive_ptr<CellParamsBase>>(_quantized_params_dynamic(std::move(params), "fbgemm"));
 }
 #endif
 #ifdef USE_PYTORCH_QNNPACK
   if (ctx.qEngine() == at::QEngine::QNNPACK) {
-      return c10::List<c10::intrusive_ptr<CellParamsBase>>(_quantized_params_dynamic(params, "qnnpack"));
+      return c10::List<c10::intrusive_ptr<CellParamsBase>>(_quantized_params_dynamic(std::move(params), "qnnpack"));
   }
 #endif
   TORCH_INTERNAL_ASSERT(false, "Tried to use quantized RNN without FBGEMM or QNNPACK!")
@@ -645,7 +649,11 @@ static c10::List<c10::intrusive_ptr<CellParamsBase>> gather_quantized_params_fp1
   TORCH_CHECK(params.size() % 4 == 0,
               "incorrect number of quantized RNN parameters FP16");
   for (size_t i = 0; i < params.size(); i += 4) {
-    result.emplace_back(c10::make_intrusive<QuantizedCellParamsFP16>(params[i], params[i + 1], params[i + 2], params[i + 3]));
+    result.emplace_back(c10::make_intrusive<QuantizedCellParamsFP16>(
+      static_cast<at::Tensor>(params[i]),
+      static_cast<at::Tensor>(params[i + 1]),
+      static_cast<at::Tensor>(params[i + 2]),
+      static_cast<at::Tensor>(params[i + 3])));
   }
   return c10::List<c10::intrusive_ptr<CellParamsBase>>(result);
 }
