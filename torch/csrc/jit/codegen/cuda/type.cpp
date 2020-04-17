@@ -115,7 +115,7 @@ static _enum_unordered_map<BinaryOpType, std::string> binary_op_type_string_map{
     {BinaryOpType::Min,       "fminf"},
     {BinaryOpType::Mul,       "mul"},
     {BinaryOpType::Pow,       "powf"},
-    {BinaryOpType::Remainder, "remainderf"},
+    {BinaryOpType::Remainder, "remainder"},
     {BinaryOpType::Sub,       "sub"},
     //{BinaryOpType::TypeAs,
 

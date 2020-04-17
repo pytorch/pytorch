@@ -178,7 +178,7 @@ class TestCudaFuser(JitTestCase):
     @skipIfRocm
     def test_binary_ops(self):
         #operations = [torch.div, torch.mul, torch.atan2, torch.max, torch.min, torch.pow, torch.remainder, torch.fmod, torch.eq, torch.ne, torch.ge, torch.gt, torch.le, torch.lt]
-        operations = [torch.div, torch.mul, torch.atan2, torch.max, torch.min, torch.pow, torch.fmod]
+        operations = [torch.div, torch.mul, torch.atan2, torch.max, torch.min, torch.pow, torch.remainder, torch.fmod]
         for op in operations:
             self._binary_test_helper(op)
 
