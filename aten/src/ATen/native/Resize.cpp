@@ -79,13 +79,16 @@ Tensor& resize_(
   return self;
 }
 
-TORCH_LIBRARY_IMPL(aten, CPU, m) {
-  m.impl_UNBOXED("resize_", resize_);
-}
-
-TORCH_LIBRARY_IMPL(aten, CatchAll, m) {
-  m.impl_UNBOXED("resize_as_", resize_as_);
-}
+static auto registry = torch::RegisterOperators()
+  .op(torch::RegisterOperators::options()
+    .schema("aten::resize_(Tensor(a!) self, int[] size, *, MemoryFormat? memory_format=None) -> Tensor(a!)")
+    .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
+    .impl_unboxedOnlyKernel<decltype(resize_), &resize_>(DispatchKey::CPU))
+  .op(torch::RegisterOperators::options()
+    .schema("aten::resize_as_(Tensor(a!) self, Tensor the_template, *, MemoryFormat? memory_format=None) -> Tensor(a!)")
+    .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
+    .impl_unboxedOnlyCatchAllKernel<decltype(resize_as_), &resize_as_>())
+  ;
 
 } // namespace native
 } // namespace at

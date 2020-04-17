@@ -70,10 +70,16 @@ Tensor & detach_(Tensor & self) {
   return self;
 }
 
-TORCH_LIBRARY_IMPL(aten, CatchAll, m) {
-  m.impl("detach", detach);
-  m.impl_UNBOXED("detach_", detach_);
-}
+static auto registry = torch::RegisterOperators()
+  .op(torch::RegisterOperators::options()
+    .schema("aten::detach(Tensor self) -> Tensor")
+    .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
+    .catchAllKernel<decltype(detach), &detach>())
+  .op(torch::RegisterOperators::options()
+    .schema("aten::detach_(Tensor(a!) self) -> Tensor(a!)")
+    .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
+    .impl_unboxedOnlyCatchAllKernel<decltype(detach_), &detach_>())
+  ;
 
 Tensor contiguous(const Tensor & self) {
   return contiguous(self, MemoryFormat::Contiguous);
