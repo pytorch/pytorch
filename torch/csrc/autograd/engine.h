@@ -73,13 +73,17 @@ struct GraphTask {
       int input_idx_; // within Node inputs
       int output_idx_; // within the output vector of a GraphTask
 
-      // This hook will be executed before a grad is captured. The engine will
-      // capture the returned value.
-      struct GradCapturePreHook {
-        virtual ~GradCapturePreHook() = default;
+      // This hook will be executed after a grad is captured. The captured
+      // grad will be replaced by the return value of the hook.
+      struct GradCaptureHook {
+        virtual ~GradCaptureHook() = default;
         virtual torch::Tensor operator()(const torch::Tensor& grad) = 0;
       };
-      std::vector<std::unique_ptr<GradCapturePreHook>> hooks_;
+      // The hooks will be called one by one in the order. The input grad of a
+      // hook will be the output of its preceding hook. The first hook will take
+      // the captured grad as the input. The output of the last hook will
+      // replace the captured grad.
+      std::vector<std::unique_ptr<GradCaptureHook>> hooks_;
     };
 
     bool should_execute() const {

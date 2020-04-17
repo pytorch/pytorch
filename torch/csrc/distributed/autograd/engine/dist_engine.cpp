@@ -26,9 +26,9 @@ static constexpr char* kNumAutogradContexts = "num_autograd_contexts";
 // This hook does 2 things:
 //   1. Accumuate the gard to RPC context.
 //   2. Call post hooks of the original AccumulateGrad.
-struct DistAccumulateGradCapturePreHook
-    : GraphTask::ExecInfo::Capture::GradCapturePreHook {
-  DistAccumulateGradCapturePreHook(
+struct DistAccumulateGradCaptureHook
+    : GraphTask::ExecInfo::Capture::GradCaptureHook {
+  DistAccumulateGradCaptureHook(
       std::shared_ptr<AccumulateGrad> accumulateGrad,
       ContextPtr autogradContext)
       : accumulateGrad_(std::move(accumulateGrad)),
@@ -42,15 +42,26 @@ struct DistAccumulateGradCapturePreHook
       autogradContext_->accumulateGrad(
           accumulateGrad_->variable, grad, 1 /* num_expected_refs */);
     }
-    // It's intended that post hooks are still called even if the grad is
+    // It's intended that pre/post hooks are still called even if the grad is
     // undenfined here.
+    if (!accumulateGrad_->pre_hooks().empty()) {
+      variable_list inputGrads = {grad};
+      for (const auto& hook : accumulateGrad_->pre_hooks()) {
+        inputGrads = (*hook)(inputGrads);
+        // A pre-hook should return a varaible list of the same size as the
+        // function's inputs.
+        TORCH_INTERNAL_ASSERT(inputGrads.size() == 1);
+      }
+      grad = inputGrads[0];
+    }
+
     if (!accumulateGrad_->post_hooks().empty()) {
       const variable_list kEmptyOuput;
       const variable_list inputGrads = {grad};
       for (const auto& hook : accumulateGrad_->post_hooks()) {
         const auto postHookOutput = (*hook)(kEmptyOuput, inputGrads);
         // A post hook should return a varaible list of the same size as the
-        // function's output.
+        // function's outputs.
         TORCH_INTERNAL_ASSERT(postHookOutput.empty());
       }
     }
@@ -228,7 +239,7 @@ void DistEngine::computeDependencies(
       TORCH_INTERNAL_ASSERT(accumulateGradFn);
       for (auto& capture : *execInfo.captures_) {
         capture.hooks_.push_back(
-            std::make_unique<DistAccumulateGradCapturePreHook>(
+            std::make_unique<DistAccumulateGradCaptureHook>(
                 std::dynamic_pointer_cast<AccumulateGrad>(
                     accumulateGradFn->shared_from_this()),
                 autogradContext));
