@@ -2,6 +2,8 @@
 set -eux -o pipefail
 export TZ=UTC
 
+DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
+
 # We need to write an envfile to persist these variables to following
 # steps, but the location of the envfile depends on the circleci executor
 if [[ "$(uname)" == Darwin ]]; then
@@ -47,7 +49,9 @@ export DATE="$(date -u +%Y%m%d)"
 #TODO: We should be pulling semver version from the base version.txt
 BASE_BUILD_VERSION="1.5.0.dev$DATE"
 # Change BASE_BUILD_VERSION to git tag when on a git tag
-if git describe --tags --exact >/dev/null 2>/dev/null; then
+# Use 'git -C' to make doubly sure we're in the correct directory for checking
+# the git tag
+if git -C "${DIR}" describe --tags --exact >/dev/null; then
   # Switch upload folder to 'test/' if we are on a tag
   PIP_UPLOAD_FOLDER='test/'
   # Grab git tag, remove prefixed v and remove everything after -
