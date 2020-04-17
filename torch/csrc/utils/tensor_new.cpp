@@ -148,61 +148,84 @@ std::vector<int64_t> compute_sizes(PyObject* seq) {
   return sizes;
 }
 
-ScalarType infer_scalar_type(PyObject *obj) {
+// returns:
+// - the inferred ScalarType
+// - a bool representing if the inferred ScalarType is Double AND the result is changed as a result of:
+//   https://github.com/pytorch/pytorch/pull/30486
+std::tuple<ScalarType, bool> infer_scalar_type(PyObject *obj) {
 #ifdef USE_NUMPY
   if (PyArray_Check(obj)) {
-    return numpy_dtype_to_aten(PyArray_TYPE((PyArrayObject*)obj));
+    return std::make_tuple(numpy_dtype_to_aten(PyArray_TYPE((PyArrayObject*)obj)), false);
   }
   if (PyArray_CheckScalar(obj)) {
     THPObjectPtr arr(PyArray_FromScalar(obj, nullptr));
-    return numpy_dtype_to_aten(PyArray_TYPE((PyArrayObject*) arr.get()));
+    ScalarType ret = numpy_dtype_to_aten(PyArray_TYPE((PyArrayObject*) arr.get()));
+    // TODO: do we need to PyFloat_Check here can we just check if ret == ScalarType::Double?
+    return std::make_tuple(ret, PyFloat_Check(obj));
   }
 #endif
   if (PyFloat_Check(obj)) {
     // this is always guaranteed to be a floating-point type, and makes it more
     // convenient to write e.g. torch.tensor(0.) than torch.tensor(0., dtype=torch.Tensor.dtype).
-    return torch::tensors::get_default_scalar_type();
+    return std::make_tuple(torch::tensors::get_default_scalar_type(), false);
   }
   if (THPUtils_checkLong(obj)) {
-    return ScalarType::Long;
+    return std::make_tuple(ScalarType::Long, false);
   }
   if (PyBool_Check(obj)) {
-    return ScalarType::Bool;
+    return std::make_tuple(ScalarType::Bool, false);
   }
   if (PyComplex_Check(obj)) {
     switch (torch::tensors::get_default_scalar_type()) {
-      case ScalarType::Float: return ScalarType::ComplexFloat;
-      case ScalarType::Double: return ScalarType::ComplexDouble;
+      case ScalarType::Float: return std::make_tuple(ScalarType::ComplexFloat, false);
+      case ScalarType::Double: return std::make_tuple(ScalarType::ComplexDouble, false);
       default: TORCH_CHECK(false, "invalid default scalar type for complex");
     }
   }
   if (THPVariable_Check(obj)) {
     auto var = reinterpret_cast<THPVariable*>(obj)->cdata;
-    return var.scalar_type();
+    return std::make_tuple(var.scalar_type(), false);
   }
   if (THPUtils_checkString(obj)) {
     throw TypeError("new(): invalid data type '%s'", Py_TYPE(obj)->tp_name);
   }
   if (PySequence_Check(obj)) {
-    c10::optional<ScalarType> scalarType;
+    c10::optional<ScalarType> inferred_scalarType;
+    bool inferred_because_np64 = true;
     auto length = PySequence_Length(obj);
     if (length < 0) throw python_error();
     // match NumPy semantics, except use default tensor type instead of double.
-    if (length == 0) return torch::tensors::get_default_scalar_type();
+    if (length == 0) return std::make_tuple(torch::tensors::get_default_scalar_type(), false);
     for (int i = 0; i < length; ++i) {
       THPObjectPtr handle(PySequence_GetItem(obj, i));
       if (!handle) throw python_error();
       auto cur_item = handle.get();
       if (cur_item == obj) throw TypeError("new(): self-referential lists are incompatible");
-      ScalarType item_scalarType = infer_scalar_type(cur_item);
-      scalarType = (scalarType) ?
-          at::promoteTypes(*scalarType, item_scalarType) : item_scalarType;
-      if (scalarType == ScalarType::Double) {
+      std::tuple<ScalarType, bool> item_inference = infer_scalar_type(cur_item);
+      if (inferred_scalarType.has_value()) {
+        ScalarType promoteType = at::promoteTypes(*inferred_scalarType, std::get<0>(item_inference));
+        if (promoteType != ScalarType::Double) {
+          inferred_because_np64 = false;
+        } else if (inferred_scalarType != ScalarType::Double) {
+          // this item solely defined the inference
+          inferred_because_np64 = std::get<1>(item_inference);
+        } else if (std::get<0>(item_inference) == ScalarType::Double) {
+          // this didn't change the ScalarType, but could undo inference.
+          inferred_because_np64 = inferred_because_np64 && std::get<1>(item_inference);
+        }
+        inferred_scalarType = promoteType;
+      } else {
+        inferred_scalarType = std::get<0>(item_inference);
+        inferred_because_np64 = std::get<1>(item_inference);
+      }
+      if (inferred_scalarType == ScalarType::Double && !inferred_because_np64) {
         // this won't change (unless we hit undefined, but that will fail later).
-        return *scalarType;
+        // FIXME: there is a bug here where we early exit if we've inferred double,
+        // but we may still hit complex.
+        return std::make_tuple(*inferred_scalarType, inferred_because_np64);
       }
     }
-    return *scalarType;
+    return std::make_tuple(*inferred_scalarType, inferred_because_np64);
   }
   AT_ERROR("Could not infer dtype of ", Py_TYPE(obj)->tp_name);
 }
@@ -283,10 +306,13 @@ Tensor internal_new_from_data(
 #endif
 
   auto sizes = compute_sizes(data);
-  ScalarType inferred_scalar_type = type_inference ? infer_scalar_type(data) : scalar_type;
-  // This exists to prevent us from tracing the call to empty().  The actual
-  // autograd code doesn't really matter, because requires_grad is always false
-  // here.
+  ScalarType inferred_scalar_type = scalar_type;
+  if (type_inference) {
+    std::tuple<ScalarType, bool> inferred = infer_scalar_type(data);
+    inferred_scalar_type = std::get<0>(inferred);
+    TORCH_CHECK(!std::get<1>(inferred), "this code relies on deprecated type inference");
+  }
+
   Tensor tensor;
   {
     at::AutoNonVariableTypeMode guard;
@@ -567,7 +593,8 @@ Tensor indexing_tensor_from_data(
     PyObject* data) {
   // Specific to tensor indexing, converts an indexing list to an
   // indexing tensor (type Byte or Long)
-  ScalarType inferred_scalar_type = infer_scalar_type(data);
+  // Since this is only affecting indexing, we don't care about the second infer_scalar_type return.
+  ScalarType inferred_scalar_type = std::get<0>(infer_scalar_type(data));
   if (inferred_scalar_type == ScalarType::Byte || inferred_scalar_type == ScalarType::Bool) {
     return internal_new_from_data(dispatch_key, inferred_scalar_type, std::move(device), data, false, false, false);
   } else {
