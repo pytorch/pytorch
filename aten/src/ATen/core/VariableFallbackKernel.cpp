@@ -1,5 +1,6 @@
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <ATen/core/LegacyTypeDispatch.h>
+#include <ATen/core/op_registration/op_registration.h>
 
 /*
  * This file implements a variable fallback kernel for custom operators.
@@ -32,43 +33,42 @@ void variable_fallback_kernel(const OperatorHandle& op, Stack* stack) {
     Dispatcher::singleton().callBoxed(op, stack);
 }
 
-static auto registry = Dispatcher::singleton().registerFallback(
-    DispatchKey::Autograd,
+TORCH_LIBRARY_IMPL(_, Autograd, m) {
 #ifdef C10_MOBILE
-    // As custom mobile build might not include variable kernels, we need
-    // leverage variable fallback mechanism as well. The goals are:
-    // 1) don't break forward pass for inference-only mobile build;
-    // 2) don't break forward/backward pass for mobile build with necessary
-    // variable kernels registered;
-    //
-    // This `fallthrough` kernel is for #1 - because not all kernels support
-    // boxed call yet, registering `variable_fallback_kernel` might fail.
-    // When an op has variable kernel registered explicitly dispatcher will
-    // call it instead of `fallthrough`, so `fallthrough` won't break
-    // dispatching to real variable kernels for case #2.
-    //
-    // The substantial difference between fallback and fallthrough is whether
-    // AutoNonVariableTypeMode guard is applied. There are two downstream
-    // effects of the guard:
-    // a) stop calling variable kernels of other ops called by the current op;
-    //    For case #1, there is no difference because no variable kernels are
-    //    registered. For case #2, there is no difference as long as ALL used
-    //    ops have real variable kernels registered, where the guard will be
-    //    set properly in real variable kernels. There is potential issue only
-    //    when variable kernels are partially registered for used ops.
-    // b) `variable_excluded_from_dispatch()` method returns the state of the
-    //    NonVariableTypeMode. As of when this diff is written, the callers of
-    //    the method are ALL asserting it returns true; the only exception is
-    //    the deprecated `is_variable()` method. So we make the method to always
-    //    return true for mobile builds. It shouldn't break case #1/#2 as long
-    //    as `is_variable()` is not used.
-    //
-    // We can remove this `fallthrough` kernel when all kernels support boxed
-    // call.
-    KernelFunction::makeFallthrough()
+  // As custom mobile build might not include variable kernels, we need
+  // leverage variable fallback mechanism as well. The goals are:
+  // 1) don't break forward pass for inference-only mobile build;
+  // 2) don't break forward/backward pass for mobile build with necessary
+  // variable kernels registered;
+  //
+  // This `fallthrough` kernel is for #1 - because not all kernels support
+  // boxed call yet, registering `variable_fallback_kernel` might fail.
+  // When an op has variable kernel registered explicitly dispatcher will
+  // call it instead of `fallthrough`, so `fallthrough` won't break
+  // dispatching to real variable kernels for case #2.
+  //
+  // The substantial difference between fallback and fallthrough is whether
+  // AutoNonVariableTypeMode guard is applied. There are two downstream
+  // effects of the guard:
+  // a) stop calling variable kernels of other ops called by the current op;
+  //    For case #1, there is no difference because no variable kernels are
+  //    registered. For case #2, there is no difference as long as ALL used
+  //    ops have real variable kernels registered, where the guard will be
+  //    set properly in real variable kernels. There is potential issue only
+  //    when variable kernels are partially registered for used ops.
+  // b) `variable_excluded_from_dispatch()` method returns the state of the
+  //    NonVariableTypeMode. As of when this diff is written, the callers of
+  //    the method are ALL asserting it returns true; the only exception is
+  //    the deprecated `is_variable()` method. So we make the method to always
+  //    return true for mobile builds. It shouldn't break case #1/#2 as long
+  //    as `is_variable()` is not used.
+  //
+  // We can remove this `fallthrough` kernel when all kernels support boxed
+  // call.
+  m.fallback(c10::CppFunction::makeFallthrough());
 #else
-    KernelFunction::makeFromBoxedFunction<&variable_fallback_kernel>()
+  m.fallback(c10::CppFunction::makeFromBoxedFunction<&variable_fallback_kernel>());
 #endif
-);
+}
 
 }
