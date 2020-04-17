@@ -7,6 +7,7 @@
 #include <ATen/native/quantized/cpu/quantized_ops.h>
 #include <ATen/native/quantized/cpu/init_qnnpack.h>
 #include <ATen/native/quantized/cpu/qnnpack_utils.h>
+#include <c10/core/TensorOptions.h>
 #include <caffe2/utils/threadpool/ThreadPoolMobile.h>
 
 #include <algorithm>
@@ -138,12 +139,14 @@ Tensor qnnpack_add(Tensor qa, Tensor qb, double scale, int64_t zero_point) {
   const auto a_scale = qa_contig.q_scale();
   const auto b_scale = qb_contig.q_scale();
 
-  Tensor qy = at::_empty_affine_quantized(
+  Tensor qy = at::new_qtensor_cpu(
       qa_contig.sizes(),
-      at::device(kCPU).dtype(kQUInt8).memory_format(qa.suggest_memory_format()),
-      scale,
-      zero_point,
-      c10::nullopt);
+      TensorOptions(kQUInt8)
+          .device(kCPU)
+          .memory_format(qa.suggest_memory_format()),
+      make_per_tensor_affine_quantizer(
+        scale, zero_point, kQUInt8)
+      );
 
   if (qa_contig.size(0) == 0) {
     return qy;

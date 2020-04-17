@@ -7,8 +7,10 @@
 #include <ATen/SmallVector.h>
 #include <ATen/core/op_registration/op_registration.h>
 #include <ATen/cpp_custom_type_hack.h>
+#include <ATen/quantized/Quantizer.h>
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
 #include <ATen/native/quantized/cpu/qnnpack_utils.h>
+#include <c10/core/TensorOptions.h>
 #include <caffe2/utils/threadpool/ThreadPoolMobile.h>
 
 namespace at {
@@ -611,14 +613,14 @@ class QConvInt8 final : public c10::OperatorKernel {
         "be greater than 0.")
 
     // Allocate output Tensor and a buffer for QNNPACK to use
-    Tensor output = at::_empty_affine_quantized(
+    Tensor output = at::new_qtensor_cpu(
         output_shape,
-        at::device(kCPU)
-           .dtype(kQUInt8)
-           .memory_format(MemoryFormat::ChannelsLast),
-        output_scale,
-        output_zero_point,
-        c10::nullopt);
+        TensorOptions(kQUInt8)
+            .device(kCPU)
+            .memory_format(MemoryFormat::ChannelsLast),
+        make_per_tensor_affine_quantizer(
+          output_scale, output_zero_point, kQUInt8)
+        );
 
     const pytorch_qnnp_status run_status = qnnpack::qnnpackConv(
         conv_p,
