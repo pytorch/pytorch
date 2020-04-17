@@ -16,6 +16,10 @@ namespace onnx {
 class OnnxExporter;
 }
 
+// Split SparseLengthsSumSparse into SparseLengthsSumSparseLookup +
+// SparseLengthsSum
+CAFFE2_API void splitSparseLengthsSumSparse(NetDef* net, const Workspace& ws);
+
 struct OnnxifiTransformerOptions final : public BackendTransformOptions {
   explicit OnnxifiTransformerOptions() : BackendTransformOptions() {}
 
@@ -34,6 +38,9 @@ struct OnnxifiTransformerOptions final : public BackendTransformOptions {
 
   // Enter loop test mode
   bool loop_test{false};
+
+  // Whether the net has been ssaRewritten
+  bool predictor_net_ssa_rewritten{false};
 };
 
 class CAFFE2_API OnnxifiTransformer final : public BackendTransformerBase {
@@ -95,6 +102,7 @@ class CAFFE2_API OnnxifiTransformer final : public BackendTransformerBase {
   bool supportOpC2(
       const caffe2::OperatorDef& op,
       const ShapeInfoMap& shape_hints,
+      const std::unordered_set<std::string>& weights,
       const std::unordered_set<int>& blacklisted_ops,
       onnxBackendID backend_id) const;
 
@@ -106,11 +114,13 @@ class CAFFE2_API OnnxifiTransformer final : public BackendTransformerBase {
       onnxBackendID backend_id) const;
 
   // Tie the output of Gather to the scalar weight input of the
-  // SparseLengthsWeighted* op. If the latter is disabled, disable the former
-  // too.
+  // SparseLengthsWeighted* and SparseLengthsSumSparseLookup (which is split
+  // from the SparseLengthsWeighted*Sparse) ops. If the latter is disabled,
+  // disable the former too.
   void tieGatherAndSparseLengthsWeightedSumOps(
       const NetDef& net,
       const ShapeInfoMap& shape_hints,
+      const std::unordered_set<std::string>& weights,
       std::unordered_set<int>* blacklisted_ops) const;
 
   // For net with partitioning info, blacklist ops that are supposed to run on
@@ -123,6 +133,7 @@ class CAFFE2_API OnnxifiTransformer final : public BackendTransformerBase {
   void applyFilteringRules(
       const NetDef& net,
       const ShapeInfoMap& shape_hints,
+      const std::unordered_set<std::string>& weights,
       std::unordered_set<int>* blacklisted_ops) const;
 
   // Determine backend id

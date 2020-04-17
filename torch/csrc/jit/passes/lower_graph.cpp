@@ -1,6 +1,6 @@
 #include <torch/csrc/jit/passes/lower_graph.h>
-#include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/frontend/error_report.h>
+#include <torch/csrc/jit/passes/inliner.h>
 #include <unordered_map>
 
 namespace torch {
@@ -78,8 +78,7 @@ std::pair<std::shared_ptr<Graph>, std::vector<Slot>> lower_graph(
       continue;
     }
     if (e.n->kind() == prim::PythonOp) {
-      throw ErrorReport(e.n->sourceRange())
-          << "Couldn't export Python method.";
+      throw ErrorReport(e.n->sourceRange()) << "Couldn't export Python method.";
     }
     if (e.n->kind() != prim::GetAttr) {
       throw ErrorReport(e.n->sourceRange())

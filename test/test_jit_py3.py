@@ -9,6 +9,7 @@ import sys
 import torch
 import torch.testing._internal.jit_utils
 import torch.nn as nn
+import types
 
 class TestScriptPy3(JitTestCase):
     def test_joined_str(self):
@@ -191,6 +192,24 @@ class TestScriptPy3(JitTestCase):
         foo = torch.jit.script(Foo())
         y = foo(torch.randn(2, 2), torch.randn(2, 2))
 
+
+    def test_named_tuple_resolution(self):
+        class TheType(NamedTuple):
+            t: int
+
+        class MyModule(types.ModuleType):
+            def __init__(self):
+                super(MyModule, self).__init__('MyModule')
+
+            def __getattr__(self, attr):
+                return TheType
+
+        some_module = MyModule()
+
+        def fn() -> some_module.Type:
+            return some_module.Type(1)
+
+        self.checkScript(fn, [])
 
     def test_ignore_with_types(self):
         @torch.jit.ignore
@@ -454,12 +473,16 @@ class TestScriptPy3(JitTestCase):
             return mod_list[0].forward(x) + mod_list[1].forward(x)
 
         scripted_M_mod = torch.jit.script(M())
-        self.assertEqual(torch.jit.export_opnames(scripted_M_mod),
-                         ['aten::mul.Scalar', 'aten::mul.Tensor', 'aten::reciprocal'])
+        # Temporarily test empty output because lite interpreter does not support interface call
+        # Replace it with the issubset call when interface call is supported.
+        self.assertTrue(len(torch.jit.export_opnames(scripted_M_mod)) == 0)
+        # self.assertTrue(set(['aten::mul.Scalar', 'aten::mul.Tensor', 'aten::reciprocal']).issubset(
+        #     set(torch.jit.export_opnames(scripted_M_mod))))
 
         scripted_M_mod.sub = torch.jit.script(FooMod())
-        self.assertEqual(torch.jit.export_opnames(scripted_M_mod),
-                         ['aten::add.Tensor', 'aten::mul.Scalar'])
+        self.assertTrue(len(torch.jit.export_opnames(scripted_M_mod)) == 0)
+        # self.assertTrue(set(['aten::add.Tensor', 'aten::mul.Scalar']).issubset(
+        #     set(torch.jit.export_opnames(scripted_M_mod))))
 
 
 if __name__ == '__main__':

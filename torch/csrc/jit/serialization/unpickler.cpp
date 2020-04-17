@@ -4,8 +4,8 @@
 #include <torch/csrc/distributed/rpc/rref_context.h>
 #endif
 #include <torch/csrc/jit/api/function_impl.h>
-#include <torch/csrc/jit/serialization/pickler.h>
 #include <torch/csrc/jit/mobile/type_parser.h>
+#include <torch/csrc/jit/serialization/pickler.h>
 #include <string>
 #include "unpickler.h"
 
@@ -160,7 +160,6 @@ void restoreContainerTypeTags(IValue& ivalue, TypePtr type) {
     AT_ERROR("Unknown type for tag restoration: " + type->python_str());
   }
 }
-
 
 IValue Unpickler::parse_ivalue() {
   run();
@@ -626,11 +625,7 @@ void Unpickler::rebuildTensor(bool quantized) {
           const auto& zero_points = qparams.at(2).toTensor();
           int64_t axis = qparams.at(3).toInt();
           result = at::_empty_per_channel_affine_quantized(
-              {0},
-              scales,
-              zero_points,
-              axis,
-              storage_tensor.options());
+              {0}, scales, zero_points, axis, storage_tensor.options());
         } break;
         default:
           TORCH_CHECK(
@@ -718,24 +713,27 @@ void Unpickler::readSlowWithBuffer(char* dest, size_t sz) {
 
 // Read a number of bytes from the input stream
 std::string Unpickler::readBytes(size_t length) {
-  std::string data(length, 0);
+  std::string data;
   static const size_t kSmallString = 64;
   if (length <= buffer_remaining_) {
     // Fast-path: entirely in buffer.
-    memcpy(&data[0], buffer_.data() + buffer_pos_, length);
+    data.assign(buffer_.data() + buffer_pos_, length);
     buffer_pos_ += length;
     buffer_remaining_ -= length;
   } else if (length <= kSmallString) {
     // If the string is smallish, do a full buffer read,
     // and read out of that buffer.
+    data.resize(length);
     readSlowWithBuffer(&data[0], length);
   } else {
     // Otherwise, for larger strings, read what we can from
     // the buffer, and then read directly to the destination.
     const size_t from_old_buf = buffer_remaining_;
     if (from_old_buf != 0) {
-      memcpy(&data[0], buffer_.data() + buffer_pos_, from_old_buf);
+      data.reserve(length);
+      data.append(buffer_.data() + buffer_pos_, from_old_buf);
     }
+    data.resize(length);
     const size_t needed = length - from_old_buf;
     size_t nread = reader_(&data[from_old_buf], needed);
     if (nread != needed) {

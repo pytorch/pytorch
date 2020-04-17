@@ -56,7 +56,7 @@ def assert_allclose(actual, expected, rtol=None, atol=None, equal_nan=True):
 
     raise AssertionError(msg.format(
         rtol, atol, list(index), actual[index].item(), expected[index].item(),
-        count - 1, 100 * count / actual.numel()))
+        count - 1, 100. * count / actual.numel()))
 
 def make_non_contiguous(tensor):
     if tensor.numel() <= 1:  # can't make non-contiguous
@@ -89,8 +89,7 @@ def make_non_contiguous(tensor):
 
 def get_all_dtypes():
     return [torch.uint8, torch.bool, torch.int8, torch.int16, torch.int32, torch.int64,
-            torch.float16, torch.float32, torch.float64, torch.bfloat16]
-
+            torch.float16, torch.float32, torch.float64, torch.bfloat16, torch.complex64, torch.complex128]
 
 def get_all_math_dtypes(device):
     dtypes = [torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64,
@@ -102,6 +101,9 @@ def get_all_math_dtypes(device):
 
     return dtypes
 
+def get_all_complex_dtypes():
+    dtypes = [torch.complex64, torch.complex128]
+    return dtypes
 
 def get_all_device_types():
     return ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']

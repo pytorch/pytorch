@@ -138,7 +138,6 @@ torch::RegisterOperators& register_take_instance() {
 
 static auto& ensure_take_instance_registered = register_take_instance();
 
-
 } // namespace
 
 void testTorchbindIValueAPI() {

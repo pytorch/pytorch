@@ -14,16 +14,10 @@ void testModuleClone() {
   child->addAttribute(attr_name, IntType::get());
   Module c1(cu, child);
   auto v1 = IValue(2);
-  c1.register_attribute(attr_name,
-                        IntType::get(),
-                        v1,
-                        false);
+  c1.register_attribute(attr_name, IntType::get(), v1, false);
   Module c2(cu, child);
   auto v2 = IValue(3);
-  c2.register_attribute(attr_name,
-                        IntType::get(),
-                        v2,
-                        false);
+  c2.register_attribute(attr_name, IntType::get(), v2, false);
 
   // attach two child module instance to parent that shares
   // ClassType
@@ -47,10 +41,7 @@ void testModuleCloneInstance() {
   cls->addAttribute(attr_name, IntType::get());
   Module m(cu, cls);
   auto v = IValue(2);
-  m.register_attribute(attr_name,
-                       IntType::get(),
-                       v,
-                       false);
+  m.register_attribute(attr_name, IntType::get(), v, false);
 
   Module m2 = m.clone();
   Module m3 = m.clone_instance();
@@ -65,10 +56,7 @@ void testModuleCloneInstance() {
   ASSERT_EQ(m.type(), m3.type());
 
   // change value of copied instance
-  m3.register_attribute(attr_name,
-                        IntType::get(),
-                        IValue(3),
-                        false);
+  m3.register_attribute(attr_name, IntType::get(), IValue(3), false);
   // Verify value of original instance doesn't change
   ASSERT_EQ(m2.attr(attr_name).toInt(), 2);
   ASSERT_EQ(m3.attr(attr_name).toInt(), 3);
@@ -83,10 +71,7 @@ void testModuleConstant() {
   cls->addConstant(const_name, IValue(3));
   Module m(cu, cls);
   auto v = IValue(2);
-  m.register_attribute(attr_name,
-                       IntType::get(),
-                       v,
-                       false);
+  m.register_attribute(attr_name, IntType::get(), v, false);
   ASSERT_TRUE(m.hasattr(attr_name));
   ASSERT_TRUE(m.hasattr(const_name));
   ASSERT_EQ(m.attr(attr_name).toInt(), 2);
@@ -98,10 +83,13 @@ void testModuleParameter() {
   auto cls = ClassType::create("foo.bar", cu, true);
   Module m(cu, cls);
   // Tensor parameter
-  m.register_parameter("tensor_param", at::empty({3}, at::kFloat), /* is_buffer */ false);
+  m.register_parameter(
+      "tensor_param", at::empty({3}, at::kFloat), /* is_buffer */ false);
   // None parameter
-  m.register_attribute("none_param", NoneType::get(), IValue(), /* is_param */ true);
-  m.register_attribute("none_param2", NoneType::get(), IValue(), /* is_param */ true);
+  m.register_attribute(
+      "none_param", NoneType::get(), IValue(), /* is_param */ true);
+  m.register_attribute(
+      "none_param2", NoneType::get(), IValue(), /* is_param */ true);
   auto param_list = m.parameters();
   ASSERT_EQ(param_list.size(), 1);
   ASSERT_TRUE(m.hasattr("tensor_param"));

@@ -70,8 +70,8 @@ struct CAFFE2_API DispatchStub<rT (*)(Args...), T> {
       // they will still compute the same value for cpu_dispatch_ptr.
       if (!cpu_dispatch_ptr.load(std::memory_order_relaxed)) {
         FnPtr tmp_cpu_dispatch_ptr = nullptr;
-        cpu_dispatch_ptr.compare_exchange_weak(
-            tmp_cpu_dispatch_ptr, choose_cpu_impl(), std::memory_order_relaxed);
+        while(!cpu_dispatch_ptr.compare_exchange_weak(
+            tmp_cpu_dispatch_ptr, choose_cpu_impl(), std::memory_order_relaxed));
       }
       return (*cpu_dispatch_ptr)(std::forward<ArgTypes>(args)...);
     } else if (device_type == DeviceType::CUDA) {

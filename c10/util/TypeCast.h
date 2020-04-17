@@ -7,44 +7,6 @@
 
 namespace c10 {
 
-// Note [Implicit conversion between signed and unsigned]
-// C and C++ have a lovely set of implicit conversion rules, where casting
-// signed integral values to unsigned integral values is always valid
-// (it basically treats the value as if using modulo arithmetic), however
-// converting negative floating point values to unsigned integral types
-// is UB! This means that: (double)-1 -> (int64_t)-1 -> (uint8_t)255 is
-// guaranteed to look like this, but we have (double)-1 -> (uint8_t)<ANYTHING>
-// because it's UB. This also makes UBSan really angry.
-//
-// I think those rules are stupid and we really shouldn't conform to them.
-// The structs below ensure that for all unsigned types we use (currently
-// only uint8_t), we will do an intermediate convertion via int64_t,
-// to ensure that any negative values are wrapped around correctly.
-//
-// Note that conversions from doubles to signed integral types that can't
-// represent a particular value after truncating the fracitonal part are UB as well,
-// but fixing them is not as simple as adding an int64_t intermediate, beacuse the
-// int64_t -> <smaller signed type> conversion is UB for those large values anyway.
-// I guess in that case we just have to live with that, but it's definitely less
-// surprising than the thing above.
-//
-// For the curious:
-//   https://en.cppreference.com/w/cpp/language/implicit_conversion
-//   The relevant paragraph is "Floating-integral conversions".
-
-template <typename T>
-struct inter_copy_type {
-  using type = T;
-};
-
-template <>
-struct inter_copy_type<uint8_t> {
-  using type = int64_t;
-};
-
-template <typename T>
-using inter_copy_type_t = typename inter_copy_type<T>::type;
-
 template<typename dest_t, typename src_t>
 struct needs_real {
   constexpr static bool value = (is_complex_t<src_t>::value && !is_complex_t<dest_t>::value);
@@ -64,15 +26,25 @@ struct maybe_real<true, src_t> {
   }
 };
 
-
+// Note: deliberately ignores undefined behavior, consistent with NumPy.
+// PyTorch's type conversions can cause a variety of undefined behavior,
+// including float to integral overflow and signed to unsigned integer overflow.
 template <typename dest_t, typename src_t>
 struct static_cast_with_inter_type {
-  C10_HOST_DEVICE __ubsan_ignore_float_cast_overflow__ static inline dest_t apply(src_t src) {
+  C10_HOST_DEVICE __ubsan_ignore_undefined__ static inline dest_t apply(src_t src) {
     constexpr bool real = needs_real<dest_t, src_t>::value;
-    return static_cast<dest_t>(
-      static_cast<inter_copy_type_t<dest_t>>(maybe_real<real, src_t>::apply(src)));
+    return static_cast<dest_t>(maybe_real<real, src_t>::apply(src));
   }
 };
+
+#if defined(__CUDACC__) || defined(__HIPCC__)
+template <typename dest_value_t, typename src_value_t>
+  struct static_cast_with_inter_type<std::complex<dest_value_t>, std::complex<src_value_t>> {
+    C10_HOST_DEVICE static inline std::complex<dest_value_t> apply(std::complex<src_value_t> src) {
+      return std::complex<dest_value_t>(src.real(), src.imag());
+    }
+};
+#endif
 
 // Dynamic type casting utils:
 // - fetch_and_cast

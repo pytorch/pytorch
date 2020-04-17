@@ -61,7 +61,7 @@ TORCH_MODULE(L1Loss);
 ///
 /// Example:
 /// ```
-/// KLDivLoss model(KLDivLossOptions(torch::kNone));
+/// KLDivLoss model(KLDivLossOptions().reduction(torch::kNone));
 /// ```
 struct TORCH_API KLDivLossImpl : Cloneable<KLDivLossImpl> {
   explicit KLDivLossImpl(const KLDivLossOptions& options_ = {});

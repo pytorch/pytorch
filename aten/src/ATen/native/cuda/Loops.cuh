@@ -6,9 +6,13 @@
 
 namespace at { namespace native {
 
-constexpr int num_threads = C10_WARP_SIZE * 2;
-constexpr int thread_work_size = 4;
-constexpr int block_work_size = thread_work_size * num_threads;
+#define NUM_THREADS (C10_WARP_SIZE * 2)
+#define THREAD_WORK_SIZE 4
+#define BLOCK_WORK_SIZE (THREAD_WORK_SIZE * num_threads)
+
+constexpr int num_threads = NUM_THREADS;
+constexpr int thread_work_size = THREAD_WORK_SIZE;
+constexpr int block_work_size = BLOCK_WORK_SIZE;
 
 // `needs_dynamic_casting` compares the types expected by iterator
 // (i.e. dtypes of the operands) with the actual type of the arguments
