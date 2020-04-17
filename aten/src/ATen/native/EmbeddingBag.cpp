@@ -432,6 +432,7 @@ _embedding_bag_cpu(const Tensor &weight, const Tensor &indices,
 
     offset2bag.resize_({indices.sizes()[0]});
 
+    // only initialize output in slow path
     output.zero_();
   }
 
