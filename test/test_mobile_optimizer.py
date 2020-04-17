@@ -9,8 +9,8 @@ FileCheck = torch._C.FileCheck
 class TestOptimizer(unittest.TestCase):
 
     @unittest.skipUnless(torch.backends.xnnpack.enabled,
-                     " XNNPACK must be enabled for these tests."
-                     " Please build with USE_XNNPACK=1.")
+                         " XNNPACK must be enabled for these tests."
+                         " Please build with USE_XNNPACK=1.")
     def test_optimize_for_mobile(self):
         batch_size = 2
         input_channels_per_group = 6
@@ -40,7 +40,7 @@ class TestOptimizer(unittest.TestCase):
         linear_weight_shape = (weight_output_dim, linear_input_shape)
 
         class MyTestModule(torch.nn.Module):
-            def __init__(self, activation_fn=F.relu):
+            def __init__(self):
                 super(MyTestModule, self).__init__()
                 self.conv_weight = torch.nn.Parameter(torch.Tensor(torch.rand(conv_weight_shape)))
                 self.conv_bias = torch.nn.Parameter(torch.Tensor(torch.rand((conv_bias_shape))))
@@ -50,15 +50,14 @@ class TestOptimizer(unittest.TestCase):
                 self.paddings = paddings
                 self.dilations = dilations
                 self.groups = groups
-                self.activation_fn = activation_fn
 
             def forward(self, x):
                 o = F.conv2d(x, self.conv_weight, self.conv_bias,
                              self.strides, self.paddings, self.dilations, self.groups)
-                o = self.activation_fn(o)
+                o = F.relu(o)
                 o = o.permute([0, 2, 3, 1])
                 o = F.linear(o, self.linear_weight, self.linear_bias)
-                return self.activation_fn(o)
+                return F.relu(o)
 
         data_shape = (batch_size, input_channels, height, width)
         input_data = torch.normal(1, 20, size=data_shape)
@@ -70,20 +69,13 @@ class TestOptimizer(unittest.TestCase):
         optimized_scripted_model = mobile_optimizer.optimize_for_mobile(scripted_model)
         optimized_result = optimized_scripted_model(input_data)
 
-        pattern_count_map = {"Tensor = aten::conv2d": -1,
-                             "Tensor = prim::CallFunction": -1,
-                             "prepacked::conv2d_clamp_prepack": -1,
-                             "prepacked::conv2d_clamp_run": 1,
-                             "prepacked::linear_clamp_prepack": -1,
-                             "prepacked::linear_clamp_run": 1}
-        for pattern, v in pattern_count_map.items():
-            if (v == 0):
-                FileCheck().check(pattern).run(optimized_scripted_model.graph)
-            elif (v == -1):
-                FileCheck().check_not(pattern).run(optimized_scripted_model.graph)
-            else:
-                FileCheck().check_count(pattern, v, exactly=True).run(optimized_scripted_model.graph)
-
+        FileCheck().check_not("Tensor = aten::conv2d") \
+                   .check_not("Tensor = prim::CallFunction") \
+                   .check_not("prepacked::conv2d_clamp_prepack") \
+                   .check_count("prepacked::conv2d_clamp_run", 1, exactly=True) \
+                   .check_not("prepacked::linear_clamp_prepack") \
+                   .check_count("prepacked::linear_clamp_run", 1, exactly=True) \
+                   .run(optimized_scripted_model.graph)
 
         torch.testing.assert_allclose(initial_result, optimized_result, rtol=1e-2, atol=1e-3)
 
