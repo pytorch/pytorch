@@ -474,7 +474,10 @@ def _new_process_group_helper(world_size,
     backend = Backend(backend)
     if backend == Backend.MPI:
         if not is_mpi_available():
-            raise RuntimeError("Distributed package doesn't have MPI built in")
+            raise RuntimeError(
+                "Distributed package doesn't have MPI built in."
+                " MPI is only included if you build PyTorch from"
+                " source on a host that has MPI installed.")
         pg = ProcessGroupMPI.create(group_ranks)
         if not pg:
             return GroupMember.NON_GROUP_MEMBER
