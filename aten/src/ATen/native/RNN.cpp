@@ -1627,7 +1627,7 @@ static auto registry =
         .op("aten::quantized_lstm.data_legacy(Tensor data, Tensor batch_sizes, Tensor[] hx, Tensor[] params, bool has_biases, int num_layers, float dropout, bool train, bool bidirectional, *, ScalarType? dtype=None, bool use_dynamic=False) -> (Tensor, Tensor, Tensor)",
             torch::RegisterOperators::options().kernel<decltype(quantized_lstm_data_legacy), quantized_lstm_data_legacy>(
                 DispatchKey::CPUTensorId))
-        .op("quantized::make_quantized_cell_params_dynamic(Tensor w_ih, Tensor w_hh, Tensor bias_ih, Tensor bias_hh) -> __torch__.torch.classes.rnn.CellParamsBase",
+        .op("quantized::make_quantized_cell_params_dynamic(__torch__.torch.classes.quantized.LinearPackedParamsBase w_ih, __torch__.torch.classes.quantized.LinearPackedParamsBase w_hh, Tensor bias_ih, Tensor bias_hh) -> __torch__.torch.classes.rnn.CellParamsBase",
             torch::RegisterOperators::options().kernel<decltype(make_quantized_cell_params_dynamic), make_quantized_cell_params_dynamic>(
                 DispatchKey::CPUTensorId))
         .op("quantized::make_quantized_cell_params_fp16(__torch__.torch.classes.quantized.LinearPackedParamsBase w_ih, __torch__.torch.classes.quantized.LinearPackedParamsBase w_hh, Tensor b_ih, Tensor b_hh) -> __torch__.torch.classes.rnn.CellParamsBase",
