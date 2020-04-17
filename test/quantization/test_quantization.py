@@ -1175,7 +1175,6 @@ class GraphModePostTrainingQuantTest(QuantizationTestCase):
             model_quantized = quantize_dynamic_script(
                 model_under_test,
                 qconfig_dict,
-                test_only_eval_fn,
                 [self.calib_data[0][0]])
             self.assertEqual(model_quantized(self.calib_data[0][0]), result_eager)
 
@@ -1184,7 +1183,6 @@ class GraphModePostTrainingQuantTest(QuantizationTestCase):
             model_fake_quantized = quantize_dynamic_script(
                 model_under_test,
                 qconfig_dict,
-                test_only_eval_fn,
                 [self.calib_data[0][0]],
                 debug=True)
             self.assertEqual(model_fake_quantized(self.calib_data[0][0]), result_eager)
