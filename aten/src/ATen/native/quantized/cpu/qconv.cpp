@@ -498,8 +498,8 @@ at::Tensor PackedConvWeightsQnnp<kSpatialDim>::apply_impl(
 
   auto* pack_w = w.get();
   // Adjust weight zero point, similar to weight data.
-  const auto kernel_zp = w_zp + 128;
-  const auto& kernel_scale = w_scale;
+  int8_t kernel_zp = w_zp + 128;
+  const float& kernel_scale = w_scale;
 
   const uint32_t kernel_h = kernel[0];
   const uint32_t kernel_w = kernel[1];
@@ -543,7 +543,7 @@ at::Tensor PackedConvWeightsQnnp<kSpatialDim>::apply_impl(
       output_min,
       output_max);
 
-  auto act_input_scale = act_nhwc.q_scale();
+  float act_input_scale = act_nhwc.q_scale();
 
   // Re-quantizing the bias based on input scale and weight scale.
   if (!input_scale.has_value() || input_scale.value() != act_input_scale) {
