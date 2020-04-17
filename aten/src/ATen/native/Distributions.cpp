@@ -331,10 +331,10 @@ Tensor _dirichlet_grad_cpu(const Tensor& x, const Tensor& alpha, const Tensor& t
  * This section is a counterpart to Distributions.cu
  */
 
-Tensor _s_binomial_cpu(const Tensor& count, const Tensor& prob, Generator *gen) {
+Tensor _s_binomial_cpu(const Tensor& count, const Tensor& prob, c10::optional<Generator> gen) {
   Tensor ret = at::zeros(count.sizes(), count.options());
   AT_DISPATCH_FLOATING_TYPES(ret.scalar_type(), "binomial_cpu", [&] {
-    CPUGenerator* generator = get_generator_or_default<CPUGenerator>(gen, detail::getDefaultCPUGenerator());
+    CPUGeneratorImpl* generator = get_generator_or_default<CPUGeneratorImpl>(gen, detail::getDefaultCPUGenerator());
     // See Note [Acquire lock when using random generators]
     std::lock_guard<std::mutex> lock(generator->mutex_);
     CPU_tensor_apply3<scalar_t, scalar_t, scalar_t>(ret, count, prob,

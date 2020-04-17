@@ -95,10 +95,19 @@ void binomial_cuda_kernel(
   iter.add_output(ret);
   iter.add_input(count);
   iter.add_input(prob);
-  at::native::gpu_kernel(iter,
-    [seeds] GPU_LAMBDA (scalar_t count, scalar_t prob) {
-      return binomial_cuda_kernel_worker<scalar_t, accscalar_t>(seeds, count, prob);
-    }
+  iter.build();
+
+  at::native::distribution_binary_kernel(iter, seeds,
+      [seeds] GPU_LAMBDA (curandStatePhilox4_32_10_t state, scalar_t count, scalar_t prob) {
+        #if defined(__CUDA_ARCH__) || defined(__HIP_PLATFORM_HCC__)
+        auto uniform_lambda = [state] __device__ () { return curand_uniform(&state); };
+        BaseSampler<accscalar_t, decltype(uniform_lambda)> standard_uniform(uniform_lambda);
+        auto sample = sample_binomial<scalar_t, accscalar_t, decltype(uniform_lambda)>(count, prob, standard_uniform);
+        return static_cast<scalar_t>(sample);
+        #else
+        return count; // useless.
+        #endif
+      }
   );
 }
 
@@ -175,8 +184,8 @@ Tensor _s_poisson_cuda(const Tensor& lambda, c10::optional<Generator> gen_) {
   return ret;
 }
 
-Tensor _s_binomial_cuda(const Tensor& count, const Tensor& prob, Generator* gen_) {
-  auto gen = get_generator_or_default<CUDAGenerator>(gen_, cuda::detail::getDefaultCUDAGenerator());
+Tensor _s_binomial_cuda(const Tensor& count, const Tensor& prob, Generator gen_) {
+  auto gen = get_generator_or_default<CUDAGeneratorImpl>(gen_, cuda::detail::getDefaultCUDAGenerator());
   std::pair<uint64_t, uint64_t> rng_engine_inputs;
   {
     // See Note [Acquire lock when using random generators]

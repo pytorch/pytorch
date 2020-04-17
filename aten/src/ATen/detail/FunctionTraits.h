@@ -76,3 +76,12 @@ struct binary_function_traits {
   using arg1_t = typename traits::template arg<0>::type;
   using arg2_t = typename traits::template arg<1>::type;
 };
+
+template <typename T>
+struct ternary_function_traits {
+  using traits = function_traits<T>;
+  using result_type = typename traits::result_type;
+  using arg1_t = typename traits::template arg<0>::type;
+  using arg2_t = typename traits::template arg<1>::type;
+  using arg3_t = typename traits::template arg<2>::type;
+};
