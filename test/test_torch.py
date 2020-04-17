@@ -11211,9 +11211,9 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(a_masked, a.unsqueeze(0).expand(3, 100).flatten())
 
 
-    @dtypesIfCUDA(torch.bfloat16)
-    @dtypes(torch.bfloat16)
-    def test_index_mask(self, device, dtype):
+    @dtypesIfCUDA(torch.float)
+    @dtypes(torch.float)
+    def test_index_0mask(self, device, dtype):
         warn = 'indexing with dtype torch.uint8 is now deprecated, pl'
         for maskType in [torch.uint8, torch.bool]:
             num_src = 10
@@ -11244,6 +11244,49 @@ class TestTorchDeviceType(TestCase):
         mask_first_el_each_row = torch.zeros(100, device=device).bool()
         mask_first_el_each_row[0] = True
         mask = mask_first_el_each_row.unsqueeze(0).expand(100,100)
+        a_masked = a[mask]
+        self.assertEqual(a_masked, a[:, 0])
+
+
+
+    @dtypesIfCUDA(torch.bfloat16)
+    @dtypes(torch.bfloat16)
+    def test_index_mask(self, device, dtype):
+        warn = 'indexing with dtype torch.uint8 is now deprecated, pl'
+        for maskType in [torch.uint8, torch.bool]:
+            num_src = 10
+            src = torch.tensor([0, 0, 0, 0, 0, 0, 0, 0, 0, 0], dtype=dtype, device=device)
+            mask = torch.rand(num_src, device=device).clamp(0, 1).mul(2).floor().to(maskType)
+
+            if dtype == torch.half and torch.device(device).type == 'cpu':
+                self.assertRaises(RuntimeError, lambda: src[mask])
+                continue
+            torch.cuda.synchronize()
+            with warnings.catch_warnings(record=True) as w:
+                dst = src[mask]
+                if maskType is torch.uint8:
+                    self.assertEqual(len(w), 1)
+                    self.assertEqual(str(w[0].message)[0:53], str(warn))
+            torch.cuda.synchronize()
+            dst2 = []
+            for i in range(num_src):
+                if mask[i]:
+                    dst2 += [src[i]]
+            self.assertEqual(dst, torch.tensor(dst2), 0)
+            torch.cuda.synchronize()
+
+        # Since half is not supported on CPU, need to skip the remaining test cases
+        if dtype == torch.half and torch.device(device).type == 'cpu':
+            return
+
+        print("mask with broadcasting")
+        # Ensure that masks are expanded to match tensor properly
+        a = torch.rand(100, 100, device=device).mul(100).to(dtype)
+        torch.cuda.synchronize()
+        mask_first_el_each_row = torch.zeros(100, device=device).bool()
+        mask_first_el_each_row[0] = True
+        mask = mask_first_el_each_row.unsqueeze(0).expand(100, 100)
+        torch.cuda.synchronize()
         a_masked = a[mask]
         self.assertEqual(a_masked, a[:, 0])
 
