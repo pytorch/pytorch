@@ -30,6 +30,10 @@ enum class DispatchKey : uint8_t {
 
   Undefined = 0,
 
+  // Define an alias for Undefined to represent CatchAll (long term
+  // this will get eliminated, but for now it's convenient)
+  CatchAll = Undefined,
+
 
 
   // ~~~~~~~~~~~~~~~~~~~~~~~~~~ BACKENDS ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
@@ -157,8 +161,6 @@ enum class DispatchKey : uint8_t {
   // to operate on this type id.  See aten/src/ATen/test/backend_fallback_test.cpp
   // for a usage example
   TESTING_ONLY_GenericMode,
-
-
 
   // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ FIN ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
   NumDispatchKeys, // Sentinel

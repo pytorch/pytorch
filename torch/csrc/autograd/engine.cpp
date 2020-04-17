@@ -933,25 +933,28 @@ std::shared_ptr<FutureVariableList> Engine::execute_with_graph_task(
   return graph_task->future_result_;
 }
 
-void Engine::mark_graph_task_completed(const std::shared_ptr<GraphTask>& graph_task) {
-  if (graph_task->future_completed_.load()) {
+void Engine::mark_graph_task_completed(
+    const std::shared_ptr<GraphTask>& graph_task) {
+  // Allow only one thread one attempt to process this logic.
+  if (graph_task->future_completed_.exchange(true)) {
     // Future is already marked as completed.
     return;
   }
+
   try {
     // Run post processing, before marking the future as complete.
     // Drop lock prior to completing, to avoid holding across callbacks.
     std::unique_lock<std::mutex> lock(graph_task->mutex_);
+
     graph_task_exec_post_processing(graph_task);
     std::vector<Variable> vars = std::move(graph_task->captured_vars_);
+
+    // Need to unlock before we call markCompleted to avoid holding locks
+    // when the callbacks are called.
     lock.unlock();
-    if (!graph_task->future_completed_.exchange(true)) {
-      graph_task->future_result_->markCompleted(std::move(vars));
-    }
+    graph_task->future_result_->markCompleted(std::move(vars));
   } catch (std::exception& e) {
-    if (!graph_task->future_completed_.exchange(true)) {
-      graph_task->future_result_->setError(e.what());
-    }
+    graph_task->future_result_->setErrorIfNeeded(e.what());
   }
 }
 
