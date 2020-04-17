@@ -59,7 +59,6 @@ TESTS = [
     'quantization/test_quantized_tensor',
     'quantization/test_quantized_nn_mods',
     'quantization/test_quantize_script',
-    'quantization/test_backward_compatibility.py',
     'test_sparse',
     'test_serialization',
     'test_show_pickle',
