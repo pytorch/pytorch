@@ -23,9 +23,10 @@ using torch::autograd::variable_list;
 static constexpr char* kNumBackwardPasses = "num_current_backward_passes";
 static constexpr char* kNumAutogradContexts = "num_autograd_contexts";
 
-// This hook does 2 things:
+// This hook does 3 things:
 //   1. Accumuate the gard to RPC context.
-//   2. Call post hooks of the original AccumulateGrad.
+//   2. Call pre hooks of the original AccumulateGrad to modify the input grad.
+//   3. Call post hooks of the original AccumulateGrad.
 struct DistAccumulateGradCaptureHook
     : GraphTask::ExecInfo::Capture::GradCaptureHook {
   DistAccumulateGradCaptureHook(
