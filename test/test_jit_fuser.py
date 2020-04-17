@@ -280,7 +280,6 @@ class TestFuser(JitTestCase):
         self.assertAllFused(ge.graph_for(*inputs))
 
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
-    @unittest.skipIf(GRAPH_EXECUTOR == ProfilingMode.LEGACY, "borked on the legacy executor")
     def test_clamp(self):
         def func2(a, b):
             return torch.clamp(a + b, min=0, max=2)
@@ -300,6 +299,7 @@ class TestFuser(JitTestCase):
 
         funcs = (func2, funcInf, funcOptMin, funcOptMax)
         for f, inputs in product(funcs, [[a, b], [a, nan]]):
+            f.__disable_jit_function_caching__ = True
             inp1, inp2 = inputs
             s = self.checkScript(f, (inp1, inp2), profiling=ProfilingMode.PROFILING)
             self.assertAllFused(s.graph_for(inp1, inp2), except_for={'aten::size', 'aten::_size_if_not_equal'})

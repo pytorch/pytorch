@@ -152,6 +152,14 @@ def build_complex_tensors():
     e = {a: d}
     return [a, b, c, d, e]
 
+def non_cont_test(t_view, t_cont):
+    if t_view.is_contiguous():
+        raise Exception('t_view is contiguous!')
+    if not t_cont.is_contiguous():
+        raise Exception('t_cont is not contiguous!')
+    if not torch.equal(t_view, t_cont):
+        raise Exception('t_view is not equal to t_cont!')
+    return t_view
 
 def my_function(a, b, c):
     return a + b + c
@@ -249,6 +257,10 @@ def heavy_rpc_torchscript(tensor):
         tensor *= i
         tensor /= i + 1
     return 0
+
+@torch.jit.script
+def my_script_func(tensor):
+    return torch.add(tensor, tensor)
 
 def raise_func():
     raise ValueError("Expected error")
@@ -679,7 +691,10 @@ class RpcTest(RpcAgentTestFixture):
             dst_worker_name = worker_name(dst)
             self.assertTrue(self_worker_name in rpc_event.name)
             self.assertTrue(dst_worker_name in rpc_event.name)
-            self.assertTrue(func.__name__ in rpc_event.name)
+            if isinstance(func, torch.jit.ScriptFunction):
+                self.assertTrue(torch.jit._qualified_name(func) in rpc_event.name)
+            else:
+                self.assertTrue(func.__name__ in rpc_event.name)
             self.assertTrue(rpc_exec_mode.value in rpc_event.name)
             self.assertEqual(rpc_event.count, 1)
             if use_record_function:
@@ -736,6 +751,44 @@ class RpcTest(RpcAgentTestFixture):
             RPCExecMode.REMOTE, torch.add, args=(torch.ones(1), torch.ones(1)),
             use_record_function=True
         )
+
+    @dist_init
+    def test_profiler_with_script_async_rpc(self):
+        self._profiler_test_with_rpc(
+            RPCExecMode.ASYNC, my_script_func, args=(torch.tensor(1),)
+        )
+        self._profiler_test_with_rpc(
+            RPCExecMode.ASYNC,
+            my_script_func,
+            args=(torch.tensor(1),),
+            use_record_function=True,
+        )
+
+    @dist_init
+    def test_profiler_with_script_sync_rpc(self):
+        self._profiler_test_with_rpc(
+            RPCExecMode.SYNC, my_script_func, args=(torch.tensor(1),)
+        )
+        self._profiler_test_with_rpc(
+            RPCExecMode.SYNC,
+            my_script_func,
+            args=(torch.tensor(1),),
+            use_record_function=True,
+        )
+
+    @dist_init
+    def test_profiler_with_script_remote_rpc(self):
+        self._profiler_test_with_rpc(
+            RPCExecMode.REMOTE, my_script_func, args=(torch.tensor(1),)
+        )
+        self._profiler_test_with_rpc(
+            RPCExecMode.REMOTE,
+            my_script_func,
+            args=(torch.tensor(1),),
+            use_record_function=True,
+        )
+
+
 
     @dist_init
     def test_py_class_constructor(self):
@@ -1855,6 +1908,26 @@ class RpcTest(RpcAgentTestFixture):
                           args=(torch.ones(2),))
         with self.assertRaisesRegex(Exception, ".*Expected error.*"):
             rref.to_here()
+
+    @dist_init
+    def test_non_cont_tensors(self):
+        if self.rank == 0:
+            # Create a non-contiguous tensor.
+            t = torch.rand(5, 5)
+            t_view = t.narrow(1, 2, 2)
+            self.assertFalse(t_view.is_contiguous())
+            t_cont = t_view.contiguous()
+            self.assertTrue(t_cont.is_contiguous())
+            self.assertEqual(t_view, t_cont)
+
+            # Send non-cont tensor over RPC.
+            next_rank = (self.rank + 1) % self.world_size
+            t_ret = rpc.rpc_sync(worker_name(next_rank), non_cont_test, args=(t_view, t_cont))
+
+            # Verify the returned tensor.
+            self.assertEqual(t_view, t_ret)
+            self.assertFalse(t_ret.is_contiguous())
+
 
 @unittest.skipIf(
     not torch._six.PY3,

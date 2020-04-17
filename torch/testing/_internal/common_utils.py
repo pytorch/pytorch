@@ -297,16 +297,23 @@ TEST_SKIP_FAST = os.getenv('PYTORCH_TEST_SKIP_FAST', '0') == '1'
 if TEST_NUMPY:
     import numpy
 
-def numpy_dtype(dtype):
-    assert TEST_NUMPY
-
-    torch_to_numpy_dtype = {
-        torch.half   : numpy.float16,
-        torch.float  : numpy.float32,
-        torch.double : numpy.float64
+    # Dict of NumPy dtype -> torch dtype (when the correspondence exists)
+    numpy_to_torch_dtype_dict = {
+        numpy.bool       : torch.bool,
+        numpy.uint8      : torch.uint8,
+        numpy.int8       : torch.int8,
+        numpy.int16      : torch.int16,
+        numpy.int32      : torch.int32,
+        numpy.int64      : torch.int64,
+        numpy.float16    : torch.float16,
+        numpy.float32    : torch.float32,
+        numpy.float64    : torch.float64,
+        numpy.complex64  : torch.complex64,
+        numpy.complex128 : torch.complex128
     }
 
-    return torch_to_numpy_dtype[dtype]
+    # Dict of torch dtype -> NumPy dtype
+    torch_to_numpy_dtype_dict = {value : key for (key, value) in numpy_to_torch_dtype_dict.items()}
 
 ALL_TENSORTYPES = [torch.float,
                    torch.double,
@@ -481,6 +488,12 @@ def freeze_rng_state():
         torch.cuda.set_rng_state(cuda_rng_state)
     torch.set_rng_state(rng_state)
 
+@contextlib.contextmanager
+def set_default_dtype(dtype):
+    saved_dtype = torch.get_default_dtype()
+    torch.set_default_dtype(dtype)
+    yield
+    torch.set_default_dtype(saved_dtype)
 
 def iter_indices(tensor):
     if tensor.dim() == 0:
@@ -712,13 +725,6 @@ class TestCase(expecttest.TestCase):
 
         set_rng_seed(SEED)
 
-    def assertTensorsSlowEqual(self, x, y, atol=None, message=''):
-        max_err = 0
-        self.assertEqual(x.size(), y.size())
-        for index in iter_indices(x):
-            max_err = max(max_err, abs(x[index] - y[index]))
-        self.assertLessEqual(max_err, atol, message)
-
     def genSparseTensor(self, size, sparse_dim, nnz, is_uncoalesced, device='cpu'):
         # Assert not given impossible combination, where the sparse dims have
         # empty numel, but nnz > 0 makes the indices containing values.
@@ -798,15 +804,18 @@ class TestCase(expecttest.TestCase):
         'bfloat16': (0.016, 1e-5),
         'float32': (1.3e-6, 1e-5),
         'float64': (1e-7, 1e-7),
-        'complex32': (1.3e-6, 1e-5),
-        'complex64': (1e-7, 1e-7),
+        'complex32': (0.001, 1e-5),
+        'complex64': (1.3e-6, 1e-5),
+        'complex128': (1e-7, 1e-7),
     }
 
     # todo: implement numpy-like issubdtype
     def is_integral(self, dtype):
         dtypes = get_all_dtypes()
+        # complex/quantized types aren't in get_all_dtypes.
         return dtype in dtypes and not dtype.is_floating_point
 
+    # accepts tensors, dtypes, or np.ndarrays
     def get_default_tolerance(self, a, b=None):
         if b is None:
             dtype = torch.float
@@ -815,6 +824,7 @@ class TestCase(expecttest.TestCase):
             elif isinstance(a, torch.dtype):
                 dtype = a
             elif TEST_NUMPY and isinstance(a, numpy.ndarray):
+                # Some tests call assertEqual with numpy Unicode.
                 if numpy.issubdtype(a.dtype, numpy.dtype('U')):
                     dtype = torch.float
                 else:
@@ -1039,27 +1049,6 @@ class TestCase(expecttest.TestCase):
             warnings.simplefilter("always")  # allow any warning to be raised
             callable()
             self.assertTrue(len(ws) == 0, msg)
-
-    def assertWarns(self, callable, msg=''):
-        r"""
-        Test if :attr:`callable` raises a warning.
-        """
-        with self._reset_warning_registry(), warnings.catch_warnings(record=True) as ws:
-            warnings.simplefilter("always")  # allow any warning to be raised
-            callable()
-            self.assertTrue(len(ws) > 0, msg)
-
-    def assertWarnsRegex(self, callable, regex, msg=''):
-        r"""
-        Test if :attr:`callable` raises any warning with message that contains
-        the regex pattern :attr:`regex`.
-        """
-        with self._reset_warning_registry(), warnings.catch_warnings(record=True) as ws:
-            warnings.simplefilter("always")  # allow any warning to be raised
-            callable()
-            self.assertTrue(len(ws) > 0, msg)
-            found = any(re.search(regex, str(w.message)) is not None for w in ws)
-            self.assertTrue(found, msg)
 
     @contextmanager
     def maybeWarnsRegex(self, category, regex=''):

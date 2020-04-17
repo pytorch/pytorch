@@ -268,12 +268,14 @@ class SummaryWriter(object):
         """Returns the directory where event files will be written."""
         return self.log_dir
 
-    def add_hparams(self, hparam_dict=None, metric_dict=None):
+    def add_hparams(self, hparam_dict, metric_dict):
         """Add a set of hyperparameters to be compared in TensorBoard.
 
         Args:
             hparam_dict (dict): Each key-value pair in the dictionary is the
               name of the hyper parameter and it's corresponding value.
+              The type of the value can be one of `bool`, `string`, `float`,
+              `int`, or `None`.
             metric_dict (dict): Each key-value pair in the dictionary is the
               name of the metric and it's corresponding value. Note that the key used
               here should be unique in the tensorboard record. Otherwise the value
@@ -343,8 +345,6 @@ class SummaryWriter(object):
 
     def add_scalars(self, main_tag, tag_scalar_dict, global_step=None, walltime=None):
         """Adds many scalar data to summary.
-
-        Note that this function also keeps logged scalars in memory. In extreme case it explodes your RAM.
 
         Args:
             main_tag (string): The parent name for the tags
