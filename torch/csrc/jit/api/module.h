@@ -221,6 +221,8 @@ struct TORCH_API Module : public Object {
       const std::string& filename,
       const ExtraFilesMap& extra_files = ExtraFilesMap()) const;
 
+  Module copy() const;
+
   Module deepcopy() const;
 
   // Clones both the underlying `ClassType` and the module instance(data), this

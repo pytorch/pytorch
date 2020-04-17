@@ -109,12 +109,12 @@ void testModuleDeepcopy() {
   m.setattr(tensor_attr, at::randn(5));
 
   Module m2 = m.deepcopy();
-  Module m3 = m.clone_instance();
+  Module m3 = m.copy();
   // Make sure copy works
   ASSERT_EQ(m2.attr(int_attr).toInt(), 2);
   ASSERT_EQ(m3.attr(int_attr).toInt(), 2);
 
-  // Both deepcopy and clone_instance will preserve the type
+  // Both deepcopy and copy will preserve the type
   ASSERT_EQ(m.type(), m2.type());
   ASSERT_EQ(m.type(), m3.type());
 
@@ -129,7 +129,7 @@ void testModuleDeepcopy() {
   // change Tensor value of copied instances
   at::Tensor t1 = m.attr(tensor_attr).toTensor();
   at::Tensor t2 = m2.attr(tensor_attr).toTensor(); // deepcopy will copy the Tensor
-  at::Tensor t3 = m3.attr(tensor_attr).toTensor(); // clone_instance will not copy the Tensor
+  at::Tensor t3 = m3.attr(tensor_attr).toTensor(); // copy will not copy the Tensor
   // check copy works
   ASSERT_TRUE(t1.equal(t2));
   ASSERT_TRUE(t1.equal(t3));

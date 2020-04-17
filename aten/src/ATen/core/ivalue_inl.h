@@ -433,6 +433,8 @@ struct C10_EXPORT ivalue::Object final : c10::intrusive_ptr_target {
     return type_.cu_;
   }
 
+  c10::intrusive_ptr<Object> copy() const;
+
   c10::intrusive_ptr<Object> deepcopy() const;
   c10::intrusive_ptr<Object> deepcopy(IValue::HashAliasedIValueMap& memo) const;
 
