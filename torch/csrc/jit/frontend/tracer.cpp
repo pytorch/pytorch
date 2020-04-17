@@ -466,6 +466,34 @@ void TracingState::setValue(const IValue& v, Value* value) {
     env_stack.back()[capsule] = value;
   } else if (v.isFuture() || v.isObject()) {
     env_stack.back()[v] = value;
+  } else if (v.isGenericDict()) {
+    auto dict = v.toGenericDict();
+    TypePtr key_type = dict.keyType();
+    TypePtr value_type = dict.valueType();
+    auto dict_size = dict.size();
+    const auto order = iterationOrder(dict);
+    auto handle_unpack = [&](Symbol opname) {
+      auto unpack_to_list = graph->insert(opname, {value});
+      auto list_unpack = graph->createListUnpack(unpack_to_list, dict_size);
+      auto unpack_node = graph->insertNode(list_unpack);
+      auto elem_values = unpack_node->outputs();
+      AT_ASSERT(order.size() == elem_values.size());
+      size_t i = 0;
+      for (const auto& pair : order) {
+        if (opname == aten::keys) {
+          setValue(pair.first, elem_values[i]);
+        } else {
+          setValue(pair.second, elem_values[i]);
+        }
+        ++i;
+      }
+    };
+    if (key_type->cast<TensorType>()) {
+      handle_unpack(aten::keys);
+    }
+    if (value_type->cast<TensorType>()) {
+      handle_unpack(aten::values);
+    }
   } else {
     std::ostringstream os;
     os << "Tracer cannot set value trace for type " << v.tagKind() << ". "

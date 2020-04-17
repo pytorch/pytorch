@@ -55,8 +55,7 @@ class LinearPackedParams(torch.nn.Module):
     #
     # Version 3
     #   self
-    #   |--- _packed_params : (Tensor, Tensor) representing (weight, bias)
-    #                         of LinearPackedParams
+    #   |--- _packed_params : LinearPackedParamsBase
     #   |--- dtype : torch.dtype
     def _save_to_state_dict(self, destination, prefix, keep_vars):
         super(LinearPackedParams, self)._save_to_state_dict(destination, prefix, keep_vars)
@@ -226,8 +225,7 @@ class Linear(torch.nn.Module):
     #   |--- scale : float
     #   |--- zero_point : int
     #   |--- _packed_params : Module
-    #        |--- _packed_params : (Tensor, Tensor) representing weight, bias
-    #                              of LinearPackedParams C++ struct
+    #        |--- _packed_params : LinearPackedParamsBase
     #
     def _save_to_state_dict(self, destination, prefix, keep_vars):
         super(Linear, self)._save_to_state_dict(destination, prefix, keep_vars)

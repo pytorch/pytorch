@@ -4,7 +4,6 @@
 #include <torch/csrc/jit/ir/subgraph_matcher.h>
 #include <torch/csrc/jit/passes/onnx/helper.h>
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
-#include <ATen/native/quantized/cpu/packed_params.h>
 #include <stack>
 
 using ::c10::Dispatcher;
