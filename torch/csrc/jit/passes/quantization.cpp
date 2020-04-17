@@ -212,7 +212,7 @@ bool alwaysRaisesException(Block* block) {
 bool hasScalarInput(Node* n) {
   bool result = false;
   std::unordered_set<std::string> scalar_op{"add", "add_", "mul", "mul_"};
-  for (auto op : scalar_op) {
+  for (const auto& op : scalar_op) {
     if (n->kind() == Symbol::aten(op)) {
       result |= true;
     }

@@ -289,7 +289,7 @@ graph(%a_quant, %b_scalar):
          %r = aten::mul(%a_dequant, %b_scalar)
          return (%r) )";
 
-  std::string inplace_mul_scalar = R"(
+  std::string mul_scalar_out = R"(
 graph(%a_quant, %b_scalar):
          %a_dequant = aten::dequantize(%a_quant)
          %r = aten::mul_(%a_dequant, %b_scalar)
@@ -298,6 +298,11 @@ graph(%a_quant, %b_scalar):
   std::string quantized_mul_scalar = R"(
 graph(%a_quant, %b_scalar):
          %r = quantized::mul_scalar(%a_quant, %b_scalar)
+         return (%r) )";
+
+  std::string quantized_mul_scalar_out = R"(
+graph(%a_quant, %b_scalar):
+         %r = quantized::mul_scalar_out(%a_quant, %b_scalar, %a_quant)
          return (%r) )";
 
   // filter that checks %b_scalar is a scalar
@@ -351,8 +356,8 @@ graph(%a_quant, %b_scalar):
        quantized_mul_scalar,
        mul_scalar_filter},
       {"quantized::mul_scalar",
-       inplace_mul_scalar,
-       quantized_mul_scalar,
+       mul_scalar_out,
+       quantized_mul_scalar_out,
        mul_scalar_filter},
   };
 }
