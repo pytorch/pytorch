@@ -1229,17 +1229,17 @@ void testGPU_FusionBinaryOps() {
   std::vector<BinaryOpType> bop_types = {
     BinaryOpType::Add,
     BinaryOpType::Atan2,
-    //BinaryOpType::CeilDiv,
     BinaryOpType::Div,
     BinaryOpType::Fmod,
     BinaryOpType::Max,
     BinaryOpType::Min,
-    //BinaryOpType::Mod,
     BinaryOpType::Mul,
     BinaryOpType::Pow,
     BinaryOpType::Remainder,
     BinaryOpType::Sub,
 
+    //BinaryOpType::Mod,
+    //BinaryOpType::CeilDiv,
     //BinaryOpType::And,
     BinaryOpType::Eq,
     BinaryOpType::GE,
@@ -1321,6 +1321,48 @@ void testGPU_FusionMultiInputOps() {
 
   out->axis(0)->parallelize(ParallelType::BIDx);
   out->axis(-1)->parallelize(ParallelType::TIDx);
+
+  torch::jit::fuser::cuda::CudaKernel prog;
+  prog.device_ = 0;
+  prog.grid(64);
+  prog.block(32);
+
+  torch::jit::fuser::cuda::compileKernel(fusion, &prog);
+}
+
+void testGPU_FusionTernaryOps() {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  std::vector<IterDomain*> dom;
+  for (int i = 0; i < 2; i++)
+    dom.push_back(new IterDomain(new Int(0), new Int()));
+
+  TensorView* tv0 = new TensorView(new TensorDomain(dom), DataType::Float);
+  TensorView* tv1 = new TensorView(new TensorDomain(dom), DataType::Float);
+  Float*       f0 = new Float(0.f);
+  Float*       f1 = new Float(1.f);
+  Float*       f6 = new Float(6.f);
+  Int*		   i1 = new Int(1);
+
+  Val*     intrm1 = clamp    (tv0,    f0,     f6);
+  Val*     intrm2 = threshold(intrm1, f1,     f0);
+  TensorView* out = static_cast<TensorView*>(where(i1, intrm2, tv1));
+
+  fusion.addInput(tv0);
+  fusion.addInput(tv1);
+  fusion.addOutput(out);
+  tv0->computeAt(out, -1);
+  tv1->computeAt(out, -1);
+
+  out->axis(0)->parallelize(ParallelType::BIDx);
+  out->axis(-1)->parallelize(ParallelType::TIDx);
+
+  GPULower gpulw(&fusion);
+  std::stringstream cdg;
+  gpulw.printKernel(cdg);
+
+  std::cout << cdg.str() << std::endl;
 
   torch::jit::fuser::cuda::CudaKernel prog;
   prog.device_ = 0;
