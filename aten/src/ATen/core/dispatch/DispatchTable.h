@@ -21,7 +21,7 @@
 namespace c10 {
 
 [[noreturn]] inline void ExpectoPatronum() {
-  TORCH_CHECK(false, "ExpectoPatronum");
+  TORCH_CHECK(false, "Modified ExpectoPatronum");
 }
 
 namespace impl {
