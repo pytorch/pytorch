@@ -68,29 +68,44 @@ class ReductionExpander : public IRMutator {
   }
 
   Stmt* mutate(const For* v) override {
-    LoopOptions loop_options = v->loop_options();
     Stmt* body_new = v->body()->accept_mutator(this);
     if (body_new == v->body()) {
       body_new = Stmt::clone(v->body());
     }
-    Stmt* ret =
-        new For(v->var(), v->start(), v->stop(), body_new, loop_options);
+
+    Stmt* ret = v->cloneWithNewBody(body_new);
 
     for (size_t i = 0; i < initializers_.size();) {
-      std::vector<const Var*>& vars = initializers_[i].second;
+      InitializerInfo& info = initializers_[i];
 
-      auto end = std::remove(vars.begin(), vars.end(), v->var());
-      if (end == vars.end()) {
+      auto end = std::remove(info.vars.begin(), info.vars.end(), v->var());
+      if (end == info.vars.end()) {
+        info.skipped_loops.push_back(v);
         i++;
         continue;
       }
 
-      vars.erase(end);
-      if (vars.empty()) {
+      info.vars.erase(end);
+      if (info.vars.empty()) {
+        const ReduceOp* op = info.op;
+        std::vector<const Expr*> indices(
+            op->output_args().begin(), op->output_args().end());
+
+        Stmt* init = new Store(
+            op->accumulator(), indices, op->initializer(), new IntImm(1));
+
+        for (auto it = info.skipped_loops.rbegin();
+             it != info.skipped_loops.rend();
+             it++) {
+          const For* old_for = *it;
+          init = old_for->cloneWithNewBody(init);
+        }
+        info.skipped_loops.clear();
+
         if (Block* b = dynamic_cast<Block*>(ret)) {
-          b->prepend_stmt(initializers_[i].first);
+          b->prepend_stmt(init);
         } else {
-          ret = new Block({initializers_[i].first, ret});
+          ret = new Block({init, ret});
         }
         initializers_.erase(initializers_.begin() + i);
         continue;
@@ -102,13 +117,21 @@ class ReductionExpander : public IRMutator {
   }
 
   const Expr* mutate(const ReduceOp* v) override {
-    std::vector<const Var*> reduce_vars(v->reduce_args());
-    initializers_.push_back(std::make_pair(v->initializer(), reduce_vars));
+    const std::vector<const Var*>& reduce_vars(v->reduce_args());
+    initializers_.emplace_back(InitializerInfo(v, reduce_vars));
     return v->complete().node();
   }
 
  private:
-  std::vector<std::pair<Stmt*, std::vector<const Var*>>> initializers_;
+  struct InitializerInfo {
+    InitializerInfo(const ReduceOp* o, std::vector<const Var*> v)
+        : op(o), vars(std::move(v)) {}
+    const ReduceOp* op;
+    std::vector<const Var*> vars;
+    std::vector<const For*> skipped_loops;
+  };
+
+  std::vector<InitializerInfo> initializers_;
 };
 
 class Vectorizer : public IRMutator {
@@ -946,6 +969,121 @@ void LoopNest::splitWithMask(For* f, int factor, For** outer, For** inner) {
   // TODO: record history of transformations
 }
 
+void LoopNest::reorderAxis(Tensor* t, For* a, For* b) {
+  if (a == b) {
+    // nothing to do.
+    return;
+  }
+  // find inner and outer.
+  For* outer{nullptr};
+  For* inner{nullptr};
+  std::deque<For*> internal_axes;
+
+  // Find relevant axes, store reversed.
+  for (For* loop : getLoopStmtsFor(t)) {
+    if (loop == a || loop == b) {
+      if (outer == nullptr) {
+        outer = loop;
+        internal_axes.push_front(loop);
+      } else {
+        inner = loop;
+        internal_axes.push_front(loop);
+      }
+    } else if (outer && !inner) {
+      internal_axes.push_front(loop);
+    }
+  }
+
+  if (!inner || !outer) {
+    throw std::runtime_error("Reordered a loop not in LoopNest");
+  }
+
+  Block* root = dynamic_cast<Block*>(outer->get_parent());
+  CHECK(root);
+
+  // Do a shallow copy of the inner blocks.
+  Block* body = new Block({});
+  for (auto* s : inner->body()->stmts()) {
+    inner->body()->remove_stmt(s);
+    body->append_stmt(s);
+  }
+
+  For* before{outer};
+  For* after{nullptr};
+  For* last = internal_axes.front();
+  Stmt* newInner = body;
+
+  // This is the major complexity in loop reordering: handling statements not in
+  // the straight line of the reorder. To handle this we partition the tree into
+  // the section before the critical path and after the critical path.
+  //
+  // An example of this pattern is:
+  // for i in ..
+  //   Statement A
+  //   for j in ..
+  //     Statement B
+  //   Statement C
+  //
+  // When reordering loop i and j we need to ensure that Statement A and C are
+  // still both executed with the loop extents of i, and that the three
+  // statements are not reordered (as much as possible).
+  for (auto* loop : internal_axes) {
+    // If the inner loop had a component after the loop we must wrap it in a For
+    // loop matching this level of the tree.
+    if (after != nullptr) {
+      after = loop->cloneWithNewBody(after);
+    }
+
+    bool pastMidpoint = false;
+    bool hadBeforeStmts = false;
+    for (Stmt* s : loop->body()->stmts()) {
+      if (s == last) {
+        // This is the midpoint.
+        loop->body()->remove_stmt(s);
+        if (!hadBeforeStmts) {
+          // If there were no existing statements this loop does not need  to be
+          // preserved and we can roll it into the above loop.
+          last = loop;
+        }
+        pastMidpoint = true;
+      } else if (pastMidpoint) {
+        // Statements after the reordered path must be moved to a new tree after
+        // the reordered statement has occurred to preserve ordering.
+        loop->body()->remove_stmt(s);
+        if (after == nullptr) {
+          after = loop->cloneWithNewBody(s);
+        } else {
+          after->body()->append_stmt(s);
+        }
+      } else {
+        // We can leave any statements before the reordered loop alone, so long
+        // as we preserve the loop structure.
+        hadBeforeStmts = true;
+      }
+    }
+  }
+
+  // If the top level is now empty, eliminate it.
+  if (before->body()->nstmts() == 0) {
+    root->remove_stmt(before);
+    before = nullptr;
+  }
+
+  // now we can actually reorder the chosen axes.
+  std::swap(internal_axes.front(), internal_axes.back());
+
+  // Create the reordered internals:
+  for (auto* loop : internal_axes) {
+    newInner = loop->cloneWithNewBody(newInner);
+  }
+
+  // Append the new statements to the root of the tree.
+  root->append_stmt(newInner);
+  if (after) {
+    root->append_stmt(after);
+  }
+} // namespace tensorexpr
+
 std::vector<For*> LoopNest::getLoopStmtsFor(Tensor* t) const {
   std::vector<For*> result;
   Stmt* cur_stmt = tensor_to_stmt_.at(t);
@@ -998,10 +1136,10 @@ class LoopComputeAtRewriter : public IRMutator {
     if (v->buf() != buf_) {
       return v;
     }
-    std::vector<const Expr*> new_indices;
+    std::vector<const Expr*> new_indices(v->indices().size());
     for (size_t i = 0; i < v->indices().size(); i++) {
-      new_indices.push_back(
-          IRSimplifier::simplify(new Sub(v->indices()[i], offsets_[i])));
+      new_indices[i] =
+          IRSimplifier::simplify(new Sub(v->indices()[i], offsets_[i]));
     }
     return new Load(v->dtype(), new_buf_, new_indices, v->mask());
   }

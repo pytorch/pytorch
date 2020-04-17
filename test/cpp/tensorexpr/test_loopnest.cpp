@@ -1103,5 +1103,478 @@ void testLoopNestComputeAt_4() {
   // TODO: Verify that computeAt works with reduction axis
 }
 
+class LoopOrderHelper : public IRVisitor {
+  std::stringstream ordering;
+
+ public:
+  std::string getOrder(Stmt* s) {
+    ordering.str("");
+    s->accept(this);
+    return ordering.str();
+  }
+
+  void visit(const For* v) {
+    ordering << v->var()->name_hint() << ",";
+    IRVisitor::visit(v);
+  }
+};
+
+void testLoopNestReorderAxis1() {
+  KernelScope kernel_scope;
+  Tensor* tensor = Compute(
+      "f", {{2, "x"}, {3, "y"}}, [](const VarHandle& x, const VarHandle& y) {
+        return ExprHandle(1.0f) + cast<float>(x) * x + cast<float>(y) * y;
+      });
+  LoopNest l({tensor});
+  Stmt* stmt1 = Stmt::clone(l.root_stmt());
+
+  std::vector<int> stmt1_output(6, 0);
+  SimpleIREvaluator cg(stmt1, {tensor});
+  cg.call({stmt1_output});
+
+  auto loops = l.getLoopStmtsFor(tensor);
+  l.reorderAxis(tensor, loops[0], loops[1]);
+  Stmt* stmt2 = Stmt::clone(l.root_stmt());
+
+  ASSERT_NE(stmt1, stmt2);
+  LoopOrderHelper loopOrderHelper;
+  std::string order1 = loopOrderHelper.getOrder(stmt1);
+  std::string order2 = loopOrderHelper.getOrder(stmt2);
+
+  ASSERT_EQ(order1, "x,y,");
+  ASSERT_EQ(order2, "y,x,");
+
+  std::vector<int> stmt2_output(6, 0);
+  SimpleIREvaluator cg2(stmt2, {tensor});
+  cg.call({stmt2_output});
+
+  for (int i = 0; i < 6; ++i) {
+    ASSERT_EQ(stmt1_output[i], stmt2_output[i]);
+  }
+
+  // Reorder them back.
+  loops = l.getLoopStmtsFor(tensor);
+  l.reorderAxis(tensor, loops[0], loops[1]);
+  Stmt* stmt3 = l.root_stmt();
+
+  std::string order3 = loopOrderHelper.getOrder(stmt3);
+  ASSERT_EQ(order3, order1);
+
+  std::ostringstream oss1, oss2;
+  oss1 << *stmt1;
+  oss2 << *stmt3;
+
+  // Should be identical to the unreordered statement.
+  ASSERT_EQ(oss1.str(), oss2.str());
+}
+
+void testLoopNestReorderPartialAxes() {
+  KernelScope kernel_scope;
+  Tensor* tensor = Compute(
+      "f",
+      {{2, "x"}, {3, "y"}, {4, "z"}},
+      [](const VarHandle& x, const VarHandle& y, const VarHandle& z) {
+        return ExprHandle(1.0f) + cast<float>(x) * x + cast<float>(y) * y +
+            cast<float>(z) * z;
+      });
+  LoopNest l({tensor});
+
+  LoopOrderHelper loopOrderHelper;
+  Stmt* stmt1 = Stmt::clone(l.root_stmt());
+  ASSERT_EQ(loopOrderHelper.getOrder(stmt1), "x,y,z,");
+
+  std::vector<int> stmt1_output(24, 0);
+  SimpleIREvaluator cg(stmt1, {tensor});
+  cg.call({stmt1_output});
+
+  auto loops = l.getLoopStmtsFor(tensor);
+  l.reorderAxis(tensor, loops[0], loops[1]);
+  ASSERT_EQ(loopOrderHelper.getOrder(l.root_stmt()), "y,x,z,");
+
+  Stmt* stmt2 = Stmt::clone(l.root_stmt());
+
+  std::vector<int> stmt2_output(24, 0);
+  SimpleIREvaluator cg2(stmt2, {tensor});
+  cg2.call({stmt2_output});
+
+  for (int i = 0; i < 24; ++i) {
+    ASSERT_EQ(stmt1_output[i], stmt2_output[i]);
+  }
+
+  loops = l.getLoopStmtsFor(tensor);
+  l.reorderAxis(tensor, loops[1], loops[2]);
+  ASSERT_EQ(loopOrderHelper.getOrder(l.root_stmt()), "y,z,x,");
+
+  Stmt* stmt3 = Stmt::clone(l.root_stmt());
+
+  std::vector<int> stmt3_output(24, 0);
+  SimpleIREvaluator cg3(stmt3, {tensor});
+  cg3.call({stmt3_output});
+
+  for (int i = 0; i < 24; ++i) {
+    ASSERT_EQ(stmt1_output[i], stmt3_output[i]);
+  }
+}
+
+void testLoopNestReorderInternalAxis() {
+  KernelScope kernel_scope;
+  Tensor* tensor = Compute(
+      "f",
+      {{1, "w"}, {2, "x"}, {3, "y"}, {4, "z"}},
+      [](const VarHandle& w,
+         const VarHandle& x,
+         const VarHandle& y,
+         const VarHandle& z) {
+        return ExprHandle(1.0f) + w + cast<float>(x) * x + cast<float>(y) * y +
+            cast<float>(z) * z;
+      });
+  LoopNest l({tensor});
+
+  LoopOrderHelper loopOrderHelper;
+  Stmt* stmt1 = Stmt::clone(l.root_stmt());
+  ASSERT_EQ(loopOrderHelper.getOrder(stmt1), "w,x,y,z,");
+
+  std::vector<int> stmt1_output(24, 0);
+  SimpleIREvaluator cg(stmt1, {tensor});
+  cg.call({stmt1_output});
+
+  auto loops = l.getLoopStmtsFor(tensor);
+  l.reorderAxis(tensor, loops[2], loops[1]);
+  ASSERT_EQ(loopOrderHelper.getOrder(l.root_stmt()), "w,y,x,z,");
+
+  Stmt* stmt2 = l.root_stmt();
+
+  std::vector<int> stmt2_output(24, 0);
+  SimpleIREvaluator cg2(stmt2, {tensor});
+  cg2.call({stmt2_output});
+
+  for (int i = 0; i < 24; ++i) {
+    ASSERT_EQ(stmt1_output[i], stmt2_output[i]);
+  }
+}
+
+void testLoopNestReorderEnclosingAxis() {
+  KernelScope kernel_scope;
+  Tensor* tensor = Compute(
+      "f",
+      {{1, "w"}, {2, "x"}, {3, "y"}, {4, "z"}},
+      [](const VarHandle& w,
+         const VarHandle& x,
+         const VarHandle& y,
+         const VarHandle& z) {
+        return ExprHandle(1.0f) + w + cast<float>(x) * x + cast<float>(y) * y +
+            cast<float>(z) * z;
+      });
+  LoopNest l({tensor});
+
+  LoopOrderHelper loopOrderHelper;
+  Stmt* stmt1 = Stmt::clone(l.root_stmt());
+
+  std::vector<int> stmt1_output(24, 0);
+  SimpleIREvaluator cg(stmt1, {tensor});
+  cg.call({stmt1_output});
+
+  auto loops = l.getLoopStmtsFor(tensor);
+  l.reorderAxis(tensor, loops[0], loops[3]);
+  ASSERT_EQ(loopOrderHelper.getOrder(l.root_stmt()), "z,x,y,w,");
+
+  Stmt* stmt2 = l.root_stmt();
+
+  std::vector<int> stmt2_output(24, 0);
+  SimpleIREvaluator cg2(stmt2, {tensor});
+  cg2.call({stmt2_output});
+
+  for (int i = 0; i < 24; ++i) {
+    ASSERT_EQ(stmt1_output[i], stmt2_output[i]);
+  }
+}
+
+void testLoopNestReorderSameAxis() {
+  KernelScope kernel_scope;
+  Tensor* tensor = Compute(
+      "f", {{2, "x"}, {3, "y"}}, [](const VarHandle& x, const VarHandle& y) {
+        return ExprHandle(1.0f) + cast<float>(x) * x + cast<float>(y) * y;
+      });
+  LoopNest l({tensor});
+  Stmt* stmt1 = Stmt::clone(l.root_stmt());
+
+  auto loops = l.getLoopStmtsFor(tensor);
+  l.reorderAxis(tensor, loops[1], loops[1]);
+  Stmt* stmt2 = Stmt::clone(l.root_stmt());
+
+  std::ostringstream oss, oss2;
+  oss << *stmt1;
+  oss2 << *stmt2;
+  ASSERT_EQ(oss.str(), oss2.str());
+}
+
+void testLoopNestReorderExtraStatements() {
+  /* We're going for a structure like this:
+   * for x in ...
+   *   Stmt 1
+   *   for y in ...
+   *     Stmt 2
+   *     for z in ...
+   *       Stmt 3
+   *     Stmt 4
+   */
+
+  KernelScope kernel_scope;
+
+  Tensor* tensor = Compute(
+      "f",
+      {{2, "x"}, {3, "y"}, {4, "z"}},
+      [](const VarHandle& x, const VarHandle& y, const VarHandle& z) {
+        return ExprHandle(1.0f) + cast<float>(x) * x + cast<float>(y) * y +
+            cast<float>(z) * z;
+      });
+  LoopNest l({tensor});
+
+  Buffer extra(BufHandle("res", {6, 3}), kFloat);
+
+  auto loops = l.getLoopStmtsFor(tensor);
+
+  VarHandle i = VarHandle(loops[0]->var());
+
+  Stmt* store_1 = Store::make(extra, {i, 0}, ExprHandle(1.f), 1);
+  Stmt* store_2 = Store::make(extra, {i, 1}, ExprHandle(2.f), 1);
+  // stmt 3 is the Function body.
+  Stmt* store_3 = Store::make(extra, {i, 2}, ExprHandle(4.f), 1);
+
+  loops[0]->body()->prepend_stmt(store_1);
+  loops[1]->body()->prepend_stmt(store_2);
+  loops[1]->body()->append_stmt(store_3);
+  Stmt* stmt1 = Stmt::clone(l.root_stmt());
+
+  std::vector<int> extra1(6, 0);
+  std::vector<int> res1(24, 0);
+  SimpleIREvaluator cg(stmt1, {tensor, extra});
+  cg.call({res1, extra1});
+
+  /* Then we reorder loop y and z, we want it to look like:
+   *
+   * for x in ...
+   *   Stmt 1
+   *   for y in ...
+   *     Stmt 2
+   *   for z in ...
+   *    for y in ...
+   *       Stmt 3
+   *   for y in ...
+   *     Stmt 4
+   *
+   * We need extra loops because we don't have dependency info about stmt 3
+   * and 4.
+   *
+   */
+
+  l.reorderAxis(tensor, loops[1], loops[2]);
+  Stmt* stmt2 = Stmt::clone(l.root_stmt());
+
+  std::ostringstream oss;
+  oss << *l.root_stmt();
+
+  // Check the IR we produced
+  const std::string& verification_pattern1 =
+      R"IR(
+# CHECK: for (int x
+# CHECK:   res[x, 0] = 1
+# CHECK:   for (int y
+# CHECK:     res[x, 1] = 2
+# CHECK:   for (int z
+# CHECK:     for (int y
+# CHECK:       f[
+# CHECK:   for (int y
+# CHECK:     res[x, 2] = 4
+)IR";
+  torch::jit::testing::FileCheck().run(verification_pattern1, oss.str());
+
+  std::vector<int> extra2(6, 0);
+  std::vector<int> res2(24, 0);
+  SimpleIREvaluator cg2(stmt2, {tensor, extra});
+  cg2.call({res2, extra2});
+
+  for (int i = 0; i < 24; ++i) {
+    ASSERT_EQ(res1[i], res2[i]);
+  }
+  for (int i = 0; i < 6; ++i) {
+    ASSERT_EQ(extra1[i], extra2[i]);
+  }
+
+  /* Now reorder x and the y above stmt 3:
+   *
+   *
+   * for x in ...
+   *   Stmt 1
+   *   for y in ...
+   *     Stmt 2
+   *
+   * for y in ...
+   *   for z in ...
+   *    for x in ...
+   *       Stmt 3
+   *
+   * for x in ...
+   *   for y in ...
+   *     Stmt 4
+   *
+   *
+   */
+  loops = l.getLoopStmtsFor(tensor);
+  l.reorderAxis(tensor, loops[0], loops[2]);
+  Stmt* stmt3 = Stmt::clone(l.root_stmt());
+
+  std::ostringstream oss2;
+  oss2 << *stmt3;
+
+  // Check the IR we produced
+  const std::string& verification_pattern2 =
+      R"IR(
+# CHECK: for (int x
+# CHECK:   res[x, 0] = 1
+# CHECK:   for (int y
+# CHECK:     res[x, 1] = 2
+# CHECK: for (int y
+# CHECK:   for (int z
+# CHECK:     for (int x
+# CHECK:       f[
+# CHECK: for (int x
+# CHECK:   for (int y
+# CHECK:     res[x, 2] = 4
+)IR";
+  torch::jit::testing::FileCheck().run(verification_pattern2, oss2.str());
+
+  std::vector<int> extra3(6, 0);
+  std::vector<int> res3(24, 0);
+  SimpleIREvaluator cg3(stmt3, {tensor, extra});
+  cg3.call({res3, extra3});
+
+  for (int i = 0; i < 24; ++i) {
+    ASSERT_EQ(res1[i], res3[i]);
+  }
+  for (int i = 0; i < 6; ++i) {
+    ASSERT_EQ(extra1[i], extra3[i]);
+  }
+}
+
+void LoopNestReorderTestHelper(
+    bool prepend,
+    bool append,
+    int index1,
+    int index2) {
+  KernelScope kernel_scope;
+
+  Tensor* c = Compute(
+      "5d",
+      {{2, "a"}, {3, "b"}, {2, "c"}, {3, "d"}, {2, "e"}},
+      [](const std::vector<VarHandle>&) { return -1; });
+  LoopNest l({c});
+
+  Buffer extra(BufHandle("extra", {5}), kInt);
+
+  auto loops = l.getLoopStmtsFor(c);
+  int j = 0;
+  for (auto* l : loops) {
+    // Add an increment at each layer of the loop which counts the number of
+    // times the loop executes.
+    Load* load = new Load(extra, {new IntImm(j)}, new IntImm(1));
+    Add* add = new Add(load, new IntImm(1));
+    Stmt* store = Store::make(extra, {j}, ExprHandle(add), 1);
+    if (prepend) {
+      l->body()->prepend_stmt(store);
+    }
+    if (append) {
+      l->body()->append_stmt(Stmt::clone(store));
+    }
+
+    j++;
+  }
+
+  Stmt* stmt1 = Stmt::clone(l.root_stmt());
+
+  std::vector<int> extra1(5, 0);
+  std::vector<int> res1(2 * 3 * 2 * 3 * 2, 0);
+  SimpleIREvaluator cg(stmt1, {c, extra});
+  cg.call({res1, extra1});
+
+  std::vector<int> loopExtents = {2, 3, 2, 3, 2};
+
+  int expected_loops = 0;
+  if (prepend) {
+    expected_loops++;
+  }
+  if (append) {
+    expected_loops++;
+  }
+  for (int i = 0; i < 5; ++i) {
+    expected_loops *= loopExtents[i];
+    ASSERT_EQ(extra1[i], expected_loops);
+  }
+
+  loops = l.getLoopStmtsFor(c);
+  l.reorderAxis(c, loops[index1], loops[index2]);
+  Stmt* stmt2 = Stmt::clone(l.root_stmt());
+
+  std::ostringstream oss, oss2;
+  oss << *stmt1;
+  oss2 << *stmt2;
+  ASSERT_NE(oss.str(), oss2.str());
+
+  std::vector<int> extra2(5, 0);
+  std::vector<int> res2(2 * 3 * 2 * 3 * 2, 0);
+  SimpleIREvaluator cg2(stmt2, {c, extra});
+  cg2.call({res2, extra2});
+
+  expected_loops = 0;
+  if (prepend) {
+    expected_loops++;
+  }
+  if (append) {
+    expected_loops++;
+  }
+
+  for (int i = 0; i < 5; ++i) {
+    expected_loops *= loopExtents[i];
+    ASSERT_EQ(extra2[i], expected_loops);
+  }
+
+  for (int i = 0; i < 2 * 3 * 2 * 3 * 2; ++i) {
+    ASSERT_EQ(res2[i], res1[i]);
+  }
+}
+
+void testLoopNestReorderLongStringOfPreOrphans() {
+  for (int i = 0; i < 5; ++i) {
+    for (int j = 0; j < 5; ++j) {
+      // skip noops, since we check the loop isn't the same after reordering.
+      if (i != j) {
+        LoopNestReorderTestHelper(true, false, i, j);
+      }
+    }
+  }
+}
+
+void testLoopNestReorderLongStringOfPostOrphans() {
+  for (int i = 0; i < 5; ++i) {
+    for (int j = 0; j < 5; ++j) {
+      // skip noops, since we check the loop isn't the same after reordering.
+      if (i != j) {
+        LoopNestReorderTestHelper(false, true, i, j);
+      }
+    }
+  }
+}
+
+void testLoopNestReorderLongStringFull() {
+  for (int i = 0; i < 5; ++i) {
+    for (int j = 0; j < 5; ++j) {
+      // skip noops, since we check the loop isn't the same after reordering.
+      if (i != j) {
+        LoopNestReorderTestHelper(true, true, i, j);
+      }
+    }
+  }
+}
+
 } // namespace jit
 } // namespace torch
