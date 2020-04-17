@@ -20,7 +20,7 @@ retry () {
 }
 
 # This gets set in binary_populate_env.sh, but lets have a sane default just in case
-PIP_UPLOAD_FOLDER=${PIP_UPLOAD_FOLDER:-nightly/}
+PIP_UPLOAD_FOLDER=${PIP_UPLOAD_FOLDER:-test/}
 # TODO: Combine CONDA_UPLOAD_CHANNEL and PIP_UPLOAD_FOLDER into one variable
 #       The only difference is the trailing slash
 # Strip trailing slashes if there

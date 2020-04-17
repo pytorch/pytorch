@@ -15,7 +15,10 @@ export CUDA_VERSION="${configs[2]/cu/}"
 export LIBTORCH_CONFIG="${configs[3]}"
 export VC_YEAR=2017
 export USE_SCCACHE=1
-export SCCACHE_BUCKET=ossci-compiler-cache-circleci-v2
+export SCCACHE_BUCKET=ossci-compiler-cache-windows
+export PYTORCH_FINAL_PACKAGE_DIR="/c/b/windows/output"
+
+mkdir -p $PYTORCH_FINAL_PACKAGE_DIR
 
 set +x
 export AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_SCCACHE_S3_BUCKET_V4:-}
