@@ -1587,7 +1587,7 @@ except RuntimeError as e:
                 return 4
 
         dtypes = {
-            #np.float64: torch.DoubleTensor,
+            # np.float64: torch.DoubleTensor,
             np.float32: torch.FloatTensor,
             np.float16: torch.HalfTensor,
             np.int64: torch.LongTensor,
