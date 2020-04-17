@@ -515,7 +515,7 @@ FunctionSignature::FunctionSignature(const std::string& fmt, int index)
 }
 
 std::string FunctionSignature::toString() const {
-  // FixMe: consider printing more proper schema strings with defaults, optionals, etc.
+  // TODO: consider printing more proper schema strings with defaults, optionals, etc.
   std::ostringstream ss;
   bool keyword_already = false;
   ss << "(";
