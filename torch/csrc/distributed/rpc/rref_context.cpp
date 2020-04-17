@@ -285,7 +285,7 @@ c10::intrusive_ptr<OwnerRRef> RRefContext::getOrCreateOwnerRRef(
           "OwnerRRef type is ",
           ownerRRef->type()->python_str(),
           ", expected type is ",
-          type););
+          type);
     }
     return ownerRRef;
   }
