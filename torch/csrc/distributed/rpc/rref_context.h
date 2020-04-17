@@ -89,8 +89,8 @@ class TORCH_API RRefContext {
 
   // Returns a Future of the OwnerRRef, which will be marked completed when
   // OwnerRRef is created.
-  std::shared_ptr<Future<c10::intrusive_ptr<OwnerRRef>>>
-        getOwnerRRef(const RRefId& rrefId);
+  std::shared_ptr<Future<c10::intrusive_ptr<OwnerRRef>>> getOwnerRRef(
+      const RRefId& rrefId);
 
   // Adding the RRefId of an OwnerRRef into the forks_ map. This is useful when
   // making a remote call to self, which as for now, still goes through serde
@@ -231,7 +231,8 @@ class TORCH_API RRefContext {
   std::unordered_map<
       RRefId,
       std::shared_ptr<Future<c10::intrusive_ptr<OwnerRRef>>>,
-      RRefId::Hash> pendingOwners_;
+      RRefId::Hash>
+      pendingOwners_;
   // Tracks known living UserRRefs of an OwnerRRef
   std::unordered_map<
       RRefId,

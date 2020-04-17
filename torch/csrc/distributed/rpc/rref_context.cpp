@@ -276,7 +276,7 @@ c10::intrusive_ptr<OwnerRRef> RRefContext::getOrCreateOwnerRRef(
     // private.
     auto rref = c10::make_intrusive<OwnerRRef>(getWorkerId(), rrefId, type);
     owners_[rref->rrefId()] = rref;
-    //ownerCV_.notify_all();
+    // ownerCV_.notify_all();
     const auto pendingOwnerIter = pendingOwners_.find(rrefId);
     if (pendingOwnerIter != pendingOwners_.end()) {
       pendingOwnerIter->second->markCompleted(rref);
@@ -302,8 +302,8 @@ c10::intrusive_ptr<OwnerRRef> RRefContext::createOwnerRRef(
       getWorkerId(), genGloballyUniqueId(), type);
 }
 
-std::shared_ptr<Future<c10::intrusive_ptr<OwnerRRef>>>
-    RRefContext::getOwnerRRef(const RRefId& rrefId) {
+std::shared_ptr<Future<c10::intrusive_ptr<OwnerRRef>>> RRefContext::
+    getOwnerRRef(const RRefId& rrefId) {
   std::unique_lock<std::mutex> lock(mutex_);
   const auto iter = owners_.find(rrefId);
   if (iter == owners_.end()) {

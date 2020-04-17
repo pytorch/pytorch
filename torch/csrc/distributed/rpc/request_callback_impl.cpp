@@ -324,29 +324,27 @@ void RequestCallbackImpl::processRpc(
         }
       }
 
-      futureOwner->addCallback(
-          [responseFuture, messageId, futureOwner]() {
-            auto& rref = futureOwner->wait();
-            auto whenValueSet = rref->getFuture();
+      futureOwner->addCallback([responseFuture, messageId, futureOwner]() {
+        auto& rref = futureOwner->wait();
+        auto whenValueSet = rref->getFuture();
 
-            // Our response is satisfied when the rpc.remote() request
-            // finishes executing on the owner.
-            whenValueSet->addCallback(
-                [responseFuture, messageId, rref](
-                    const FutureMessage& whenValueSet) {
-                  if (whenValueSet.hasError()) {
-                    responseFuture->setError(*whenValueSet.error());
-                    return;
-                  }
-                  try {
-                    Message m = ScriptRRefFetchRet({rref->getValue()}).toMessage();
-                    m.setId(messageId);
-                    responseFuture->markCompleted(std::move(m));
-                  } catch (const std::exception& e) {
-                    responseFuture->setError(e.what());
-                  }
-                });
-          });
+        // Our response is satisfied when the rpc.remote() request
+        // finishes executing on the owner.
+        whenValueSet->addCallback([responseFuture, messageId, rref](
+                                      const FutureMessage& whenValueSet) {
+          if (whenValueSet.hasError()) {
+            responseFuture->setError(*whenValueSet.error());
+            return;
+          }
+          try {
+            Message m = ScriptRRefFetchRet({rref->getValue()}).toMessage();
+            m.setId(messageId);
+            responseFuture->markCompleted(std::move(m));
+          } catch (const std::exception& e) {
+            responseFuture->setError(e.what());
+          }
+        });
+      });
 
       return;
     }
@@ -374,38 +372,36 @@ void RequestCallbackImpl::processRpc(
         }
       }
 
-      futureOwner->addCallback(
-        [responseFuture, messageId, futureOwner]() {
-          auto& rref = futureOwner->wait();
-          auto whenValueSet = rref->getFuture();
+      futureOwner->addCallback([responseFuture, messageId, futureOwner]() {
+        auto& rref = futureOwner->wait();
+        auto whenValueSet = rref->getFuture();
 
-          // Our response is satisfied when the the rpc.remote() request
-          // finishes executing on the owner.
-          whenValueSet->addCallback(
-              [responseFuture, messageId, rref](
-                  const FutureMessage& whenValueSet) {
-                if (whenValueSet.hasError()) {
-                  responseFuture->setError(*whenValueSet.error());
-                  return;
-                }
-                try {
-                  IValue value = rref->getValue();
-                  py::object pyValue;
-                  {
-                    pybind11::gil_scoped_acquire ag;
-                    pyValue = torch::jit::toPyObject(std::move(value));
-                  }
-                  SerializedPyObj result =
-                      PythonRpcHandler::getInstance().serialize(pyValue);
-                  Message m =
-                      PythonRRefFetchRet(std::move(result).toIValues()).toMessage();
-                  m.setId(messageId);
-                  responseFuture->markCompleted(std::move(m));
-                } catch (const std::exception& e) {
-                  responseFuture->setError(e.what());
-                }
-              });
+        // Our response is satisfied when the the rpc.remote() request
+        // finishes executing on the owner.
+        whenValueSet->addCallback([responseFuture, messageId, rref](
+                                      const FutureMessage& whenValueSet) {
+          if (whenValueSet.hasError()) {
+            responseFuture->setError(*whenValueSet.error());
+            return;
+          }
+          try {
+            IValue value = rref->getValue();
+            py::object pyValue;
+            {
+              pybind11::gil_scoped_acquire ag;
+              pyValue = torch::jit::toPyObject(std::move(value));
+            }
+            SerializedPyObj result =
+                PythonRpcHandler::getInstance().serialize(pyValue);
+            Message m =
+                PythonRRefFetchRet(std::move(result).toIValues()).toMessage();
+            m.setId(messageId);
+            responseFuture->markCompleted(std::move(m));
+          } catch (const std::exception& e) {
+            responseFuture->setError(e.what());
+          }
         });
+      });
 
       return;
     }
