@@ -4377,6 +4377,27 @@ def foo(x):
         t = torch.tensor([3, 4, 5])
         self.assertEqual(n(t), n_loaded2(t))
 
+    def test_hook_compilation_error(self):
+        message = re.escape("""
+            'M.hook' is compiled since it was attached as a hook to '__torch__.M'.
+If you do not want your hooks to be compiled, clear them on the module before compiling with 'torch.jit.script'.
+Scripting hooks is a new feature and it might have introduced new compilation issues for your module.
+        """.strip())
+        class M(nn.Module):
+            def forward(self, x):
+                return x + 2
+
+        def fn_with_param(input):
+            return input + 1
+
+        def hook(self, inputs):
+            return (inputs[0] + fn_with_param(),)
+
+        m = M()
+        m.register_forward_pre_hook(hook)
+        with self.assertRaisesRegex(RuntimeError, message):
+            torch.jit.script(m)
+
     def test_python_op_builtins(self):
         @torch.jit.unused
         def fn(x):

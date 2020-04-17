@@ -108,7 +108,12 @@ struct TORCH_API Module : public Object {
     return true;
   }
 
-  IValue forward(std::vector<IValue> inputs);
+
+  IValue operator()(std::vector<IValue> inputs);
+
+  IValue forward(std::vector<IValue> inputs) {
+    return get_method("forward")(std::move(inputs));
+  }
 
   // In script modules, buffers are Tensors attribute that are _not_ registered
   // as parameters. This is different than in nn.Module where there is a special

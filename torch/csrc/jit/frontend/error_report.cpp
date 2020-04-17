@@ -28,7 +28,7 @@ void ErrorReport::CallStack::update_pending_range(const SourceRange& range) {
 ErrorReport::CallStack::CallStack(
     const std::string& name,
     at::ClassTypePtr class_type) {
-  calls.push_back({name, c10::nullopt, class_type});
+  calls.push_back({name, c10::nullopt, std::move(class_type)});
 }
 
 ErrorReport::CallStack::~CallStack() {

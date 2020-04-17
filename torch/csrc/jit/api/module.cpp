@@ -118,7 +118,7 @@ IValue Method::operator()(std::vector<IValue> stack, const Kwargs& kwargs) {
   return (*function_)(std::move(stack), kwargs);
 }
 
-IValue Module::forward(std::vector<IValue> inputs) {
+IValue Module::operator()(std::vector<IValue> inputs) {
   const auto& pre_forward_hooks = type()->getForwardPreHooks();
   const auto& forward_hooks = type()->getForwardHooks();
 
@@ -139,7 +139,7 @@ IValue Module::forward(std::vector<IValue> inputs) {
   }
 
   // Now let's call forward
-  auto outputs = get_method("forward")(inputs);
+  auto outputs = forward(inputs);
 
   // It is now time for the forward hooks
   for (const auto& hook : forward_hooks) {
