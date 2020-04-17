@@ -1327,10 +1327,14 @@ class RpcTest(RpcAgentTestFixture):
 
     @requires_process_group_agent("PROCESS_GROUP rpc backend specific test, skip")
     def test_single_threaded_rref_owner(self):
+        # This test aims to verify if the server can handle all internal RPC 
+        # messages using just one thread. 
+        caller_rank = 0
+        callee_rank = 1
         rpc_backend_options = rpc.ProcessGroupRpcBackendOptions(
             init_method=self.rpc_backend_options.init_method,
             num_send_recv_threads=1
-        ) if self.rank == 1 else self.rpc_backend_options
+        ) if self.rank == callee_rank else self.rpc_backend_options
 
         rpc.init_rpc(
             name=worker_name(self.rank),
@@ -1340,8 +1344,8 @@ class RpcTest(RpcAgentTestFixture):
             rpc_backend_options=rpc_backend_options,
         )
 
-        if self.rank == 0:
-            dst = worker_name((self.rank + 1) % self.world_size)
+        if self.rank == caller_rank:
+            dst = worker_name(callee_rank)
             rrefs = []
 
             # makes sure there is no existing OwnerRRefs on dst
@@ -1380,6 +1384,8 @@ class RpcTest(RpcAgentTestFixture):
                 num_owner_rrefs = int(info["num_owner_rrefs"])
                 time.sleep(0.01)
 
+        # use a barrier to prevent messages sent during shutdown occupies the
+        # only thread on callee (rank == 1) too early.
         dist.barrier()
         rpc.shutdown()
 
