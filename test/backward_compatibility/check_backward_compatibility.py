@@ -33,6 +33,7 @@ white_list = [
     ('aten::requires_grad_', datetime.date(2020, 4, 30)),
     ('aten::sizes', datetime.date(2020, 4, 30)),
     ('aten::strides', datetime.date(2020, 4, 30)),
+    ('aten::backward', datetime.date(2020, 4, 30)),
     ('quantized::batch_norm', datetime.date(2020, 4, 30)),
     ('quantized::batch_norm', datetime.date(2020, 4, 30)),
     ('quantized::linear_unpack_fp16', datetime.date(2020, 4, 30)),
