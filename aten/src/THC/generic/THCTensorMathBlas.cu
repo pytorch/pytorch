@@ -643,57 +643,6 @@ void THCTensor_(baddbmm)(THCState *state, THCTensor *result, THCTensor *t,
 
 #if defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE)
   // Compute pointers to matrices in each batch.
-#if CUDA_VERSION < 8000 && !defined __HIP_PLATFORM_HCC__
-  size_t matrices_size = num_batches * sizeof(scalar_t*);
-
-//   Copy pointers to device.
-  auto d_matrices1 = static_cast<const scalar_t**>(THCudaMalloc(state, matrices_size));
-  auto d_matrices2 = static_cast<const scalar_t**>(THCudaMalloc(state, matrices_size));
-  auto d_result_matrices = static_cast<scalar_t**>(THCudaMalloc(state, matrices_size));
-
-  const int64_t block = 512;
-  const int64_t grid = (num_batches + block - 1) / block;
-
-  createBatchGemmBuffer3<<<grid, block, 0, c10::cuda::getCurrentCUDAStream()>>>(
-    d_matrices1, d_matrices2, (const scalar_t**)d_result_matrices, THCTensor_(data)(state, batch1_),
-    THCTensor_(data)(state, batch2_), THCTensor_(data)(state, result_),
-    batch1_->stride(0), batch2_->stride(0), result_->stride(0), num_batches);
-
-#ifdef THC_REAL_IS_FLOAT
-  THCudaBlas_SgemmBatched(
-      state,
-      transpose_batch1,
-      transpose_batch2,
-      result_->size(transpose_result ? 2 : 1),
-      result_->size(transpose_result ? 1 : 2),
-      batch1_->size(transpose_result ? 1 : 2),
-      alpha,
-      d_matrices1, lda,
-      d_matrices2, ldb,
-      beta,
-      d_result_matrices, ldc,
-      num_batches);
-#elif defined(THC_REAL_IS_DOUBLE)
-  THCudaBlas_DgemmBatched(
-      state,
-      transpose_batch1,
-      transpose_batch2,
-      result_->size(transpose_result ? 2 : 1),
-      result_->size(transpose_result ? 1 : 2),
-      batch1_->size(transpose_result ? 1 : 2),
-      alpha,
-      d_matrices1, lda,
-      d_matrices2, ldb,
-      beta,
-      d_result_matrices, ldc,
-      num_batches);
-#endif //THC_REAL
-
-  THCudaFree(state, d_matrices1);
-  THCudaFree(state, d_matrices2);
-  THCudaFree(state, d_result_matrices);
-
-#else
 #ifdef THC_REAL_IS_FLOAT
   THCudaBlas_SgemmStridedBatched(
       state,
@@ -723,27 +672,9 @@ void THCTensor_(baddbmm)(THCState *state, THCTensor *result, THCTensor *t,
       THCTensor_(data)(state, result_), ldc, result_->stride(0),
       num_batches);
 #endif //THC_REAL
-#endif //CUDA_VERSION
 
 #elif defined(THC_REAL_IS_HALF)
 
-#if CUDA_VERSION < 9010
-  // Currently no HgemmBatched in Cublas
-  for (int64_t i = 0; i < num_batches; ++i) {
-    THCudaBlas_Hgemm(
-        state,
-        transpose_batch1,
-        transpose_batch2,
-        result_->size(transpose_result ? 2 : 1),
-        result_->size(transpose_result ? 1 : 2),
-        batch1_->size(transpose_result ? 1 : 2),
-        alpha,
-        THCTensor_(data)(state, batch1_) + i * batch1_->stride(0), lda,
-        THCTensor_(data)(state, batch2_) + i * batch2_->stride(0), ldb,
-        beta,
-        THCTensor_(data)(state, result_) + i * result_->stride(0), ldc);
-  }
-#else
 #ifndef __HIP_PLATFORM_HCC__
   cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
   if (prop->major >= 5){
@@ -780,7 +711,6 @@ void THCTensor_(baddbmm)(THCState *state, THCTensor *result, THCTensor *t,
       }
    }
 #endif
-#endif //CUDA_VERSION
 
 #elif defined(THC_REAL_IS_BFLOAT16)
 #if defined(__HIP_PLATFORM_HCC__)

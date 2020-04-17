@@ -274,11 +274,6 @@ bool THC_pointwiseApply1(THCState* state,
       getTensorInfo<ScalarTypeA, TensorTypeA, unsigned int>(state, a);
     rearrangeDims(&aInfo);
     aInfo.collapseDims();
-#if CUDA_VERSION < 9000
-    if (!aInfo.isContiguous()) {
-        grid.x = min(at::cuda::getCurrentDeviceProperties()->multiProcessorCount * THC_APPLY_BLOCKS_PER_SM , grid.x);
-    }
-#endif
     HANDLE_A_CASE(unsigned int, aInfo.dims);
   } else {
     TensorInfo<ScalarTypeA, uint64_t> aInfo =
@@ -299,10 +294,6 @@ bool THC_pointwiseApply1(THCState* state,
         <<<grid, block, 0, c10::cuda::getCurrentCUDAStream()>>>(
           aOffset, (uint64_t) totalElements, op);
     } else {
-
-#if CUDA_VERSION < 9000
-        grid.x = min(at::cuda::getCurrentDeviceProperties()->multiProcessorCount * THC_APPLY_BLOCKS_PER_SM , grid.x);
-#endif
       OffsetInfo<ScalarTypeA, uint64_t, -1>
         aOffset(aInfo);
       kernelPointwiseApply1<Op,
@@ -442,11 +433,6 @@ bool THC_pointwiseApply2(THCState* state,
     rearrangeDims(&aInfo, &bInfo);
     aInfo.collapseDims();
     bInfo.collapseDims();
-#if CUDA_VERSION < 9000
-    if (!(aInfo.isContiguous() && bInfo.isContiguous()))
-        grid.x = min(at::cuda::getCurrentDeviceProperties()->multiProcessorCount * THC_APPLY_BLOCKS_PER_SM , grid.x);
-#endif
-
     HANDLE_A_CASE(unsigned int, aInfo.dims, bInfo.dims);
   } else {
     TensorInfo<ScalarTypeA, uint64_t> aInfo =
@@ -475,9 +461,6 @@ bool THC_pointwiseApply2(THCState* state,
         <<<grid, block, 0, c10::cuda::getCurrentCUDAStream()>>>(
           aOffset, bOffset, (uint64_t) totalElements, op);
     } else {
-#if CUDA_VERSION < 9000
-      grid.x = min(at::cuda::getCurrentDeviceProperties()->multiProcessorCount * THC_APPLY_BLOCKS_PER_SM , grid.x);
-#endif
       OffsetInfo<ScalarTypeA, uint64_t, -1>
         aOffset(aInfo);
       OffsetInfo<ScalarTypeB, uint64_t, -1>
@@ -658,11 +641,6 @@ bool THC_pointwiseApply3(THCState* state,
     aInfo.collapseDims();
     bInfo.collapseDims();
     cInfo.collapseDims();
-
-#if CUDA_VERSION < 9000
-      if (!(aInfo.isContiguous() && bInfo.isContiguous() && cInfo.isContiguous()))
-          grid.x = min(at::cuda::getCurrentDeviceProperties()->multiProcessorCount * THC_APPLY_BLOCKS_PER_SM , grid.x);
-#endif
     HANDLE_A_CASE(unsigned int, aInfo.dims, bInfo.dims, cInfo.dims);
   } else {
     TensorInfo<ScalarTypeA, uint64_t> aInfo =
@@ -698,10 +676,6 @@ bool THC_pointwiseApply3(THCState* state,
         <<<grid, block, 0, c10::cuda::getCurrentCUDAStream()>>>(
           aOffset, bOffset, cOffset, (uint64_t) totalElements, op);
     } else {
-#if CUDA_VERSION < 9000
-      grid.x = min(at::cuda::getCurrentDeviceProperties()->multiProcessorCount * THC_APPLY_BLOCKS_PER_SM , grid.x);
-#endif
-
       OffsetInfo<ScalarTypeA, uint64_t, -1>
         aOffset(aInfo);
       OffsetInfo<ScalarTypeB, uint64_t, -1>

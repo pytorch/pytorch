@@ -17,9 +17,7 @@ __host__ void THCTensor_(scanThrust)(
   thrust::device_ptr<scalar_t> dst_data(THCTensor_(data)(state, dst));
   ptrdiff_t size = THCTensor_(nElement)(state, src);
   thrust::inclusive_scan(
-#if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
       thrust::cuda::par(thrustAlloc).on(c10::cuda::getCurrentCUDAStream()),
-#endif
       src_data, src_data + size, dst_data,
       binary_op);
 }

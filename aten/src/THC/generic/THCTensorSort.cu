@@ -221,44 +221,32 @@ void THCTensor_(sortViaThrust)(THCState* state,
   // Fill the indices with a global index across all slices
   thrust::counting_iterator<int64_t> countIter(0);
   thrust::copy(
-#if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
     thrust::cuda::par(thrustAlloc).on(c10::cuda::getCurrentCUDAStream()),
-#endif
     countIter, countIter + totalElements, indexIter);
     auto begin = thrust::make_zip_iterator(thrust::make_tuple(indexIter, keyIter));
   if (dir){
     if (totalElements < INT_MAX)
        thrust::sort(
-#if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
        thrust::cuda::par(thrustAlloc).on(c10::cuda::getCurrentCUDAStream()),
-#endif
        begin, begin + totalElements, ThrustSliceGTOp<scalar_t, int, true>(sliceSize));
     else
        thrust::sort(
-#if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
        thrust::cuda::par(thrustAlloc).on(c10::cuda::getCurrentCUDAStream()),
-#endif
        begin, begin + totalElements, ThrustSliceGTOp<scalar_t, int64_t, true>(sliceSize));
   } else {
     if (totalElements < INT_MAX)
        thrust::sort(
-#if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
        thrust::cuda::par(thrustAlloc).on(c10::cuda::getCurrentCUDAStream()),
-#endif
        begin, begin + totalElements, ThrustSliceLTOp<scalar_t, int, true>(sliceSize));
     else
        thrust::sort(
-#if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
        thrust::cuda::par(thrustAlloc).on(c10::cuda::getCurrentCUDAStream()),
-#endif
        begin, begin + totalElements, ThrustSliceLTOp<scalar_t, int64_t, true>(sliceSize));
   }
   // Translate the global integer 0-based index to a per-slice real
   // Lua index
   thrust::for_each(
-#if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
     thrust::cuda::par(thrustAlloc).on(c10::cuda::getCurrentCUDAStream()),
-#endif
     indexIter, indexIter + totalElements,
     GlobalIndexToPerSliceIndex(sliceSize));
 
@@ -298,12 +286,8 @@ void THCTensor_(sort)(THCState* state,
   // CUDA 8 uses more shared memory than 7.5 for bitonicSortKVInPlace,
   // and so for the double word types,
   // we get "too many resources requested for launch" in the 2048 case
-#if CUDA_VERSION >= 8000
 #if defined(THC_REAL_IS_DOUBLE) || defined(THC_REAL_IS_LONG)
   int maxSliceSize = 1024;
-#else
-  int maxSliceSize = 2048;
-#endif
 #else
   int maxSliceSize = 2048;
 #endif

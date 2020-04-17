@@ -152,7 +152,7 @@ static inline __device__ void gpuAtomicAdd(at::BFloat16 *address, at::BFloat16 v
     } while (assumed != old);
 }
 
-#if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 600 || CUDA_VERSION < 8000)
+#if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 600)
 // from CUDA C Programmic Guide
 static inline __device__ void atomicAdd(double* address, double val)
 #if defined(__clang__) && defined(__CUDA__)
@@ -175,7 +175,7 @@ static inline __device__ void atomicAdd(double* address, double val)
     // Note: uses integer comparison to avoid hang in case of NaN (since NaN != NaN)
 } while (assumed != old);
 }
-#elif !defined(__CUDA_ARCH__) && (CUDA_VERSION < 8000) || defined(__HIP_PLATFORM_HCC__)
+#elif defined(__HIP_PLATFORM_HCC__)
 
 /* Note [hip-clang differences to hcc]
  * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

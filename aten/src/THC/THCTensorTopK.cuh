@@ -11,10 +11,7 @@
 #include <THC/THCTensorMathReduce.cuh>
 #include <ATen/WrapDimUtils.h>
 #include <algorithm> // for std::min
-
-#if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
 #include <thrust/system/cuda/execution_policy.h>
-#endif
 
 #include <c10/macros/Macros.h>
 #include <ATen/native/cuda/SortingRadixSelect.cuh>
