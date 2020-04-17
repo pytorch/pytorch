@@ -91,10 +91,6 @@ except ImportError:
 
 
 # class TestMSNPUTensor(common.TestCase):
-#     @classmethod
-#     def setUpClass(cls):
-#         msnpu_extension.init_msnpu_extension()
-
 #     def test_unregistered(self):
 #         a = torch.arange(0, 10, device='cpu')
 #         with self.assertRaisesRegex(RuntimeError, "Could not run"):
@@ -214,13 +210,13 @@ class TestCUDA_CSPRNG_Generator(common.TestCase):
 
     def test_ints(self):
         gen = csprng_extension.create_CUDA_CSPRNG_Generator()
-        for (dtype, size, prec) in [(torch.uint8, 10000, 1), (torch.int8, 10000, 1), (torch.int16, 100000, 10)]:
+        for (dtype, size, prec) in [(torch.uint8, 10000, 1), (torch.int8, 10000, 1), (torch.int16, 1000000, 10)]:
             t = torch.empty(size, dtype=dtype, device='cuda').random_(generator=gen)
             avg = t.sum().item() / size
             # print(avg)
             # print(torch.iinfo(dtype).max / 2)
             self.assertEqual(avg, torch.iinfo(dtype).max / 2, prec=prec)
-        for (dtype, size, prec) in [(torch.int32, 1000000, 1e6), (torch.int64, 1000000, 1e16)]:
+        for (dtype, size, prec) in [(torch.int32, 1000000, 1e7), (torch.int64, 1000000, 1e16)]:
             t = torch.empty(size, dtype=dtype, device='cuda').random_(generator=gen)
             avg = (t / size).sum().item()
             # print(avg)

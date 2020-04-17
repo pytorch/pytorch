@@ -42,8 +42,9 @@ ${type_derived_method_definitions}
 
 namespace {
 
-auto registerer = torch::import()
-  ${wrapper_registrations};
+TORCH_LIBRARY_IMPL(aten, Autograd, m) {
+  ${wrapper_registrations}
+}
 
 }
 

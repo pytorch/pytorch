@@ -10,6 +10,7 @@
 
 #include <ATen/core/Array.h>
 #include <c10/util/Half.h>
+#include <c10/util/BFloat16.h>
 #include <c10/util/Optional.h>
 #include <type_traits>
 #include <limits>
@@ -75,8 +76,68 @@ constexpr double DOUBLE_DIVISOR = 1.0 / (1ULL << std::numeric_limits<double>::di
 constexpr uint32_t FLOAT_MASK = (1 << std::numeric_limits<float>::digits) - 1;
 constexpr float FLOAT_DIVISOR = 1.0f / (1 << std::numeric_limits<float>::digits);
 
+template <typename T>
+struct uniform_int_from_to_distribution {
+
+  C10_HOST_DEVICE inline uniform_int_from_to_distribution(uint64_t range_, int64_t base_) {
+    range = range_;
+    base = base_;
+  }
+
+  template <typename RNG>
+  C10_HOST_DEVICE inline T operator()(RNG* generator) {
+    if ((
+      std::is_same<T, int64_t>::value ||
+      std::is_same<T, double>::value ||
+      std::is_same<T, float>::value ||
+      std::is_same<T, at::BFloat16>::value) && range >= 1ULL << 32)
+    {
+      return static_cast<T>(static_cast<int64_t>((generator->random64() % range) + base));
+    } else {
+      return static_cast<T>(static_cast<int64_t>((generator->random() % range) + base));
+    }
+  }
+
+  private:
+    uint64_t range;
+    int64_t base;
+};
+
+template <typename T>
+struct uniform_int_full_range_distribution {
+
+  template <typename RNG>
+  C10_HOST_DEVICE inline T operator()(RNG* generator) {
+    return static_cast<T>(static_cast<int64_t>(generator->random64()));
+  }
+
+};
+
+template <typename T>
+struct uniform_int_distribution {
+
+  template <typename RNG>
+  C10_HOST_DEVICE inline T operator()(RNG* generator) {
+    if (std::is_same<T, bool>::value) {
+      return static_cast<bool>(generator->random() & 1);
+    } else if (std::is_same<T, double>::value) {
+      return static_cast<T>(generator->random64() % static_cast<uint64_t>((1ULL << std::numeric_limits<T>::digits) + 1));
+    } else if (std::is_same<T, int64_t>::value) {
+      return static_cast<T>(generator->random64() % (static_cast<uint64_t>(std::numeric_limits<T>::max()) + 1));
+    } else if (std::is_floating_point<T>::value || std::is_same<T, at::Half>::value || std::is_same<T, at::BFloat16>::value) {
+      return static_cast<T>(generator->random() % static_cast<uint64_t>((1ULL << std::numeric_limits<T>::digits) + 1));
+    } else if (std::is_integral<T>::value) {
+      return static_cast<T>(generator->random() % (static_cast<uint64_t>(std::numeric_limits<T>::max()) + 1));
+    } else {
+      assert(false);
+      return 0;
+    }
+  }
+
+};
+
 /**
- * Samples a uniform distribution in the range [0,1) of type T
+ * Samples a uniform distribution in the range [a, b) of type T
  */
 template <typename T>
 struct uniform_real_distribution {

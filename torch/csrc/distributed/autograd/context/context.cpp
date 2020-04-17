@@ -131,7 +131,9 @@ void DistAutogradContext::addOutstandingRpc(
       if (graphTask_) {
         graphTask_->set_exception_without_signal(nullptr);
         lock.unlock();
-        graphTask_->future_result_->setErrorIfNeeded(err.what());
+        if (!graphTask_->future_completed_.exchange(true)) {
+          graphTask_->future_result_->setErrorIfNeeded(err.what());
+        }
       } else {
         LOG(WARNING) << "Ignoring error since GraphTask is no longer valid: "
                      << err.what();
