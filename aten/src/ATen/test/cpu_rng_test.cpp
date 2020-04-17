@@ -95,27 +95,25 @@ Tensor& custom_rng_cauchy_(Tensor& self, double median, double sigma, c10::optio
   return self;
 }
 
+TORCH_LIBRARY_IMPL(aten, CustomRNGKeyId, m) {
+  // Random
+  m.impl_UNBOXED("random_.from",             random_from_to);
+  m.impl_UNBOXED("random_.to",               random_to);
+  m.impl_UNBOXED("random_",                  random_);
+  // Normal
+  m.impl_UNBOXED("normal_",                  normal_);
+  m.impl_UNBOXED("normal.Tensor_float_out",  normal_Tensor_float_out);
+  m.impl_UNBOXED("normal.float_Tensor_out",  normal_float_Tensor_out);
+  m.impl_UNBOXED("normal.Tensor_Tensor_out", normal_Tensor_Tensor_out);
+  m.impl_UNBOXED("normal.Tensor_float",      normal_Tensor_float);
+  m.impl_UNBOXED("normal.float_Tensor",      normal_float_Tensor);
+  m.impl_UNBOXED("normal.Tensor_Tensor",     normal_Tensor_Tensor);
+  m.impl_UNBOXED("uniform_",                 uniform_);
+  // Cauchy
+  m.impl_UNBOXED("cauchy_",                  custom_rng_cauchy_);
+}
+
 class RNGTest : public ::testing::Test {
- protected:
-  void SetUp() override {
-    static auto registry = torch::import()
-      // Random
-      .impl_UNBOXED("aten::random_.from",             kCustomRNG, random_from_to)
-      .impl_UNBOXED("aten::random_.to",               kCustomRNG, random_to)
-      .impl_UNBOXED("aten::random_",                  kCustomRNG, random_)
-      // Normal
-      .impl_UNBOXED("aten::normal_",                  kCustomRNG, normal_)
-      .impl_UNBOXED("aten::normal.Tensor_float_out",  kCustomRNG, normal_Tensor_float_out)
-      .impl_UNBOXED("aten::normal.float_Tensor_out",  kCustomRNG, normal_float_Tensor_out)
-      .impl_UNBOXED("aten::normal.Tensor_Tensor_out", kCustomRNG, normal_Tensor_Tensor_out)
-      .impl_UNBOXED("aten::normal.Tensor_float",      kCustomRNG, normal_Tensor_float)
-      .impl_UNBOXED("aten::normal.float_Tensor",      kCustomRNG, normal_float_Tensor)
-      .impl_UNBOXED("aten::normal.Tensor_Tensor",     kCustomRNG, normal_Tensor_Tensor)
-      .impl_UNBOXED("aten::uniform_",                 kCustomRNG, uniform_)
-      // Cauchy
-      .impl_UNBOXED("aten::cauchy_",                  kCustomRNG, custom_rng_cauchy_)
-    ;
-  }
 };
 
 // ==================================================== Random ========================================================
