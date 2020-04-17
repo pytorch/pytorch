@@ -170,35 +170,19 @@ Tensor quantized_layer_norm_impl(
   return Y;
 }
 
-// Keep the registry in the anonymous namespace.
-namespace {
-class QLayerNorm2d final : public torch::OperatorKernel {
- public:
-  Tensor operator()(
-      Tensor input,
-      std::vector<int64_t> normalized_shape,
-      Tensor weight /* optional */,
-      Tensor bias /* optional */,
-      double eps,
-      double output_scale,
-      int64_t output_zero_point) {
-    return quantized_layer_norm_impl(
-        input, normalized_shape, weight, bias, eps, output_scale, output_zero_point);
-  }
-};
-
-static auto registry = torch::RegisterOperators().op(
-    "quantized::layer_norm(Tensor input, "
-    "int[] normalized_shape, "
-    "Tensor weight, "
-    "Tensor bias, "
-    "float eps, "
-    "float output_scale, "
-    "int output_zero_point) -> Tensor",
-    torch::RegisterOperators::options().kernel<QLayerNorm2d>(
-        DispatchKey::QuantizedCPU));
-
-} // namespace
+TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
+  // TODO: this is kind of... blegh
+  m.impl("layer_norm", [](
+    Tensor input,
+    std::vector<int64_t> normalized_shape,  // because IntArrayRef doesn't work
+    Tensor weight /* optional */,
+    Tensor bias /* optional */,
+    double eps,
+    double output_scale,
+    int64_t output_zero_point) {
+      return quantized_layer_norm_impl(input, normalized_shape, weight, bias, eps, output_scale, output_zero_point);
+  });
+}
 
 DEFINE_DISPATCH(LayerNormKernel);
 DEFINE_DISPATCH(LayerNormBackwardKernel);
