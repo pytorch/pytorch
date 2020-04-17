@@ -1108,6 +1108,18 @@ void addGlobalMethods(py::module& m) {
       "switch_workspace",
       [](Workspace* ws, py::object /*create_if_missing*/) { gWorkspace = ws; });
   m.def(
+      "create_child_workspace",
+      [](const std::string& parent_ws_name, const std::string& child_ws_name) {
+        CAFFE_ENFORCE(
+            gWorkspaces.count(parent_ws_name), "Parent ws does not exist.");
+        auto parent_gws = gWorkspaces[parent_ws_name].get();
+        std::unique_ptr<Workspace> child_ws(new Workspace(parent_gws));
+        gWorkspaces.insert(std::make_pair(child_ws_name, std::move(child_ws)));
+      },
+      "Create and register child ws, sharing existing blobs in parent ws.",
+      py::arg("parent_ws_name"),
+      py::arg("child_ws_name"));
+  m.def(
       "switch_workspace",
       [](const std::string& name, const py::object create_if_missing) {
         if (create_if_missing.is(py::none())) {
