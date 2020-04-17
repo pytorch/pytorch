@@ -804,7 +804,7 @@ class RpcTest(RpcAgentTestFixture):
 
     @dist_init
     def test_async_record_function_double_end_callbacks(self):
-        num_sleep_seconds = 2
+        num_sleep_seconds = 1
         if self.rank == 1:
             # Validate that calling the function twice results in an error.
             with torch.autograd.profiler.profile() as pf:

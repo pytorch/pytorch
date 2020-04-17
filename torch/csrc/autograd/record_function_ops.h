@@ -11,7 +11,8 @@ at::Tensor record_function_enter(const std::string& name);
 
 // Cast Tensor that was created with at::cpp_custom_type_hack back to
 // RecordFunction. This is a temporary workaround until RecordFunction is
-// registered as a custom C++ class.
+// registered as a custom C++ class
+// (https://github.com/pytorch/pytorch/issues/35026).
 TORCH_API RecordFunction& getRecordFunctionFromTensor(const at::Tensor& handle);
 
 // Schedules RecordFunction's end callbacks to be run on completion of a future.

@@ -13,11 +13,6 @@ namespace torch {
 namespace autograd {
 namespace profiler {
 
-// Needed to register JIT operator in operator registry below
-c10::AliasAnalysisKind aliasAnalysisFromSchema() {
-  return c10::AliasAnalysisKind::FROM_SCHEMA;
-}
-
 at::Tensor record_function_enter(const std::string& name) {
   auto rec = std::make_unique<RecordFunction>(RecordScope::USER_SCOPE);
   // Only add new scope if profiling is enabled.
@@ -43,7 +38,7 @@ void record_function_exit(const at::Tensor& handle) {
   // We don't actually need to do anything with handle just need to persist the
   // lifetime until now.
   auto& rec = getRecordFunctionFromTensor(handle);
-  if (auto* current = RecordFunction::current()) {
+  if (auto* current = rec.current()) {
     TORCH_INTERNAL_ASSERT(current->name() == StringView("profiler::_record_function_exit"));
     current->_end();
   }
@@ -77,6 +72,11 @@ static auto registry =
     RegisterOperators()
         .op("profiler::_record_function_enter", &record_function_enter)
         .op("profiler::_record_function_exit", &record_function_exit);
+
+// Needed to register JIT operator in operator registry below
+c10::AliasAnalysisKind aliasAnalysisFromSchema() {
+  return c10::AliasAnalysisKind::FROM_SCHEMA;
+}
 
 jit::RegisterOperators reg_fut_ops({
     jit::Operator(
