@@ -2173,26 +2173,6 @@ class _TestTorchMixin(object):
                     o32[i + j - 1].add(torch.conv2(x[i], k[j], 'F'))
         self._test_conv_corr_eq(lambda x, k: torch.conv3(x, k, 'F'), reference)
 
-    def test_isfinite(self):
-        x = torch.Tensor([1, inf, 2, -inf, nan, -10])
-        self.assertEqual(torch.isfinite(x), torch.BoolTensor([True, False, True, False, False, True]))
-
-    def test_isfinite_int(self):
-        x = torch.tensor([1, 2, 3])
-        self.assertEqual(torch.isfinite(x), torch.BoolTensor([True, True, True]))
-
-    def test_isfinite_type(self):
-        with self.assertRaises(TypeError):
-            torch.isfinite(1)  # Parameter must be a tensor
-
-    def test_isinf_type(self):
-        with self.assertRaises(TypeError):
-            torch.isinf(1)  # Parameter must be a tensor
-
-    def test_isnan(self):
-        x = torch.Tensor([1, nan, 2])
-        self.assertEqual(torch.isnan(x), torch.tensor([False, True, False]))
-
     def test_dtype_is_signed(self):
         for dtype in torch.testing.get_all_dtypes():
             self.assertEqual(dtype.is_signed, torch.is_signed(torch.tensor(0, dtype=dtype)))
@@ -2662,7 +2642,8 @@ class _TestTorchMixin(object):
                         # in a separate test
                         continue
 
-                    if dt == torch.half:
+                    # TODO: update test when masked scatter is supported for complex
+                    if dt == torch.half or dt.is_complex:
                         self.assertRaises(RuntimeError, lambda: dest.masked_scatter_(mask, src))
                         continue
 
@@ -2715,8 +2696,8 @@ class _TestTorchMixin(object):
                     dst.masked_fill_((dst > 0).to(dtype), val)
                     dst2.masked_fill_((dst2 > 0).to(dtype), val)
                     self.assertEqual(dst, dst2, 0)
-            # Only 27 (not 28) here as the warning in the assertRaises are not caught on the python side
-            self.assertEqual(len(w), 27)
+            # Only 33 (not 32) here as the warning in the assertRaises are not caught on the python side
+            self.assertEqual(len(w), 33)
 
             warn = 'masked_fill_ received a mask with dtype torch.uint8,'
             for wi in w:
@@ -5692,6 +5673,65 @@ class TestTorchDeviceType(TestCase):
                 self.assertEqual((), torch.nn.functional.multi_margin_loss(input, target, reduction='mean').shape)
                 self.assertEqual((), torch.nn.functional.multi_margin_loss(input, target, reduction='sum').shape)
 
+    def _np_compare(self, fn_name, vals, device, dtype):
+        assert TEST_NUMPY
+
+        torch_fn = getattr(torch, fn_name)
+        np_fn = getattr(np, fn_name)
+
+        a = np.array(vals, dtype=torch_to_numpy_dtype_dict[dtype])
+        np_result = torch.from_numpy(np_fn(a))
+
+        t = torch.tensor(vals, device=device, dtype=dtype)
+        torch_result = torch_fn(t).cpu()
+
+        self.assertEqual(np_result, torch_result)
+
+    @unittest.skipIf(not TEST_NUMPY, 'NumPy not found')
+    @dtypes(torch.float)
+    def test_isfinite_isinf_isnan(self, device, dtype):
+        vals = (-float('inf'), float('inf'), float('nan'), -1, 0, 1)
+
+        self._np_compare('isfinite', vals, device, dtype)
+        self._np_compare('isinf', vals, device, dtype)
+        self._np_compare('isnan', vals, device, dtype)
+
+    @unittest.skipIf(not TEST_NUMPY, 'NumPy not found')
+    @dtypes(torch.long)
+    def test_isfinite_isinf_isnan_int(self, device, dtype):
+        vals = (-1, 0, 1)
+
+        self._np_compare('isfinite', vals, device, dtype)
+        self._np_compare('isinf', vals, device, dtype)
+        self._np_compare('isnan', vals, device, dtype)
+
+    @unittest.skipIf(not TEST_NUMPY, 'NumPy not found')
+    @dtypes(torch.complex64)
+    def test_isfinite_isinf_isnan_complex(self, device, dtype):
+        vals = (
+            complex(-float('inf'), float('inf')),
+            complex(-float('inf'), 0),
+            complex(0, float('inf')),
+            complex(float('inf'), float('nan')),
+            complex(float('nan'), 0),
+            complex(-1, 0),
+            complex(0, 1)
+        )
+
+        self._np_compare('isfinite', vals, device, dtype)
+        self._np_compare('isinf', vals, device, dtype)
+        self._np_compare('isnan', vals, device, dtype)
+
+    @onlyCPU
+    def test_isfinite_type(self, device):
+        with self.assertRaises(TypeError):
+            torch.isfinite(1)  # Parameter must be a tensor
+
+    @onlyCPU
+    def test_isinf_type(self, device):
+        with self.assertRaises(TypeError):
+            torch.isinf(1)  # Parameter must be a tensor
+
     @onlyCPU
     @dtypes(torch.float)
     def test_diag(self, device, dtype):
@@ -6064,7 +6104,7 @@ class TestTorchDeviceType(TestCase):
     def test_logical_not(self, device):
         for dtype in torch.testing.get_all_dtypes():
             a = torch.tensor([10, 1, 0], dtype=dtype, device=device)
-            if dtype == torch.bfloat16:
+            if dtype == torch.bfloat16 or dtype.is_complex:
                 self.assertRaises(RuntimeError, lambda: a.logical_not())
                 continue
             expected_res = torch.tensor([0, 0, 1], dtype=dtype, device=device)
@@ -6073,7 +6113,7 @@ class TestTorchDeviceType(TestCase):
             # out
             for out_dtype in torch.testing.get_all_dtypes():
                 b = torch.empty(0, dtype=out_dtype, device=device)
-                if out_dtype == torch.bfloat16:
+                if out_dtype == torch.bfloat16 or out_dtype.is_complex:
                     self.assertRaises(RuntimeError, lambda: torch.logical_not(a, out=b))
                     continue
                 torch.logical_not(a, out=b)
@@ -6101,6 +6141,11 @@ class TestTorchDeviceType(TestCase):
                         getattr(a, op)(b)
                     continue
 
+                if dtype.is_complex or other_dtype.is_complex:
+                    with self.assertRaises(RuntimeError):
+                        getattr(a, op)(b)
+                    continue
+
                 # new tensor
                 self.assertEqual(expected_res.bool(), getattr(a, op)(b))
                 # out
@@ -6115,6 +6160,10 @@ class TestTorchDeviceType(TestCase):
                 with self.assertRaises(RuntimeError):
                     getattr(a, op + '_')(b)
                 continue
+            if dtype.is_complex:
+                with self.assertRaises(RuntimeError):
+                    getattr(a, op + '_')(b)
+                continue
             getattr(a, op + '_')(b)
             self.assertEqual(expected_res, a)
 
@@ -6126,20 +6175,6 @@ class TestTorchDeviceType(TestCase):
 
     def test_logical_or(self, device):
         self._test_logical(device, 'logical_or', [10, 0, 1, 0], [1, 0, 0, 10], [1, 0, 1, 1])
-
-    def test_isinf(self, device):
-        t1 = torch.Tensor([1, inf, 2, -inf, nan]).to(device)
-        t2 = torch.ByteTensor([1, 2, 3]).to(device)
-        t3 = torch.CharTensor([1, 2, 3]).to(device)
-        t4 = torch.ShortTensor([1, 2, 3]).to(device)
-        t5 = torch.IntTensor([1, 2, 3]).to(device)
-        t6 = torch.LongTensor([1, 2, 3]).to(device)
-        self.assertEqual(torch.isinf(t1), torch.tensor([0, 1, 0, 1, 0], dtype=torch.bool, device=device))
-        self.assertEqual(torch.isinf(t2), torch.tensor([0, 0, 0], dtype=torch.bool, device=device))
-        self.assertEqual(torch.isinf(t3), torch.tensor([0, 0, 0], dtype=torch.bool, device=device))
-        self.assertEqual(torch.isinf(t4), torch.tensor([0, 0, 0], dtype=torch.bool, device=device))
-        self.assertEqual(torch.isinf(t5), torch.tensor([0, 0, 0], dtype=torch.bool, device=device))
-        self.assertEqual(torch.isinf(t6), torch.tensor([0, 0, 0], dtype=torch.bool, device=device))
 
     def test_clamp(self, device):
         m1 = torch.rand(100, device=device).mul(5).add(-2.5)  # uniform in [-2.5, 2.5]
@@ -10656,10 +10691,10 @@ class TestTorchDeviceType(TestCase):
                 # TODO: https://github.com/pytorch/pytorch/issues/33793
                 self.assertRaises(RuntimeError, lambda: torch.randint(5, (0, 1, 3, 0), dtype=dt, device=device))
             elif dt == torch.bool:
-                x = torch.randint(2, (0, 1, 3, 0), dtype=dt, device=device)
+                x = torch.empty((0, 1, 3, 0), dtype=dt, device=device)
                 self.assertEqual((0, 1, 1, 0, 3), x.unfold(2, 3, 2).shape)
             else:
-                x = torch.randint(5, (0, 1, 3, 0), dtype=dt, device=device)
+                x = torch.empty((0, 1, 3, 0), dtype=dt, device=device)
                 self.assertEqual((0, 1, 1, 0, 3), x.unfold(2, 3, 2).shape)
 
     def test_unfold_scalars(self, device):
@@ -10674,6 +10709,10 @@ class TestTorchDeviceType(TestCase):
     def test_copy_all_dtypes_and_devices(self, device):
         from copy import copy
         for dt in torch.testing.get_all_dtypes():
+            # TODO: add test for complex when complex storage type is supported
+            if dt.is_complex:
+                self.assertRaises(RuntimeError, lambda: copy(torch.tensor([1], dtype=dt, device=device).clone()))
+                continue
             x = torch.tensor([1, 2, 3, 4], dtype=dt, device=device)
             x_clone = x.clone()
             y = copy(x)
@@ -10757,14 +10796,16 @@ class TestTorchDeviceType(TestCase):
                 elif dt == torch.bool:
                     self.assertEqual(shape, torch.randint(2, shape, device=device, dtype=dt).shape)
                     self.assertEqual(shape, torch.randint_like(torch.zeros(shape, device=device, dtype=dt), 2).shape)
+                elif dt.is_complex:
+                    self.assertRaises(RuntimeError, lambda: torch.randint(6, shape, device=device, dtype=dt).shape)
                 else:
                     self.assertEqual(shape, torch.randint(6, shape, device=device, dtype=dt).shape)
                     self.assertEqual(shape, torch.randint_like(torch.zeros(shape, device=device, dtype=dt), 6).shape)
 
-                if dt not in {torch.double, torch.float, torch.half, torch.bfloat16}:
+                if dt not in {torch.double, torch.float, torch.half, torch.bfloat16, torch.complex64, torch.complex128}:
                     self.assertRaises(RuntimeError, lambda: torch.rand(shape, device=device, dtype=dt).shape)
 
-                if dt == torch.double or dt == torch.float:
+                if dt == torch.double or dt == torch.float or dt.is_complex:
                     self.assertEqual(shape, torch.randn(shape, device=device, dtype=dt).shape)
                     self.assertEqual(shape, torch.randn_like(torch.zeros(shape, device=device, dtype=dt)).shape)
 
@@ -10787,7 +10828,6 @@ class TestTorchDeviceType(TestCase):
         for dtype in torch.testing.get_all_dtypes():
             if dtype == torch.bfloat16:
                 continue
-
             for n, m in product([3, 5, 7], repeat=2):
                 # Construct identity using diagonal and fill
                 res1 = torch.eye(n, m, device=device, dtype=dtype)
@@ -10984,6 +11024,8 @@ class TestTorchDeviceType(TestCase):
 
     def test_logical(self, device):
         for dt in torch.testing.get_all_dtypes():
+            if dt.is_complex:
+                continue
             x = torch.tensor([1, 2, 3, 4], device=device, dtype=dt)
             b = torch.tensor([2], device=device, dtype=dt)
 
@@ -11062,7 +11104,7 @@ class TestTorchDeviceType(TestCase):
 
     def test_index_fill(self, device):
         for dt in torch.testing.get_all_dtypes():
-            if dt == torch.half or dt == torch.bfloat16:
+            if dt == torch.half or dt == torch.bfloat16 or dt.is_complex:
                 continue
 
             x = torch.tensor([[1, 2], [4, 5]], dtype=dt, device=device)
@@ -11093,6 +11135,21 @@ class TestTorchDeviceType(TestCase):
         idx = torch.tensor([1], dtype=torch.long, device=device)
         dest = torch.index_select(src, 0, idx)
         self.assertEqual(torch.tensor([True]), dest)
+
+        # Complex Tensor
+        src = torch.randn(3, 4, 5, dtype=torch.complex64, device=device)
+        idx = torch.tensor([2, 1, 0, 1, 2], dtype=torch.long, device=device)
+
+        # index_select not supported for complex on cuda
+        if device.startswith('cuda'):
+            with self.assertRaises(RuntimeError):
+                torch.index_select(src, 0, idx)
+            return
+
+        dest = torch.index_select(src, 0, idx)
+        self.assertEqual(dest.shape, (5, 4, 5))
+        for i in range(idx.size(0)):
+            self.assertEqual(dest[i], src[idx[i]])
 
     def test_take_empty(self, device):
         for input_shape in [(0,), (0, 1, 2, 0), (1, 2, 3)]:
@@ -11170,7 +11227,7 @@ class TestTorchDeviceType(TestCase):
             src = torch.tensor([0, 0, 0, 0, 0, 0, 0, 0, 0, 0], dtype=dtype, device=device)
             mask = torch.rand(num_src, device=device).clamp(0, 1).mul(2).floor().to(maskType)
 
-            if dtype == torch.half and torch.device(device).type == 'cpu':
+            if (dtype.is_complex or dtype == torch.half) and torch.device(device).type == 'cpu':
                 self.assertRaises(RuntimeError, lambda: src.masked_select(mask))
                 continue
 
@@ -11189,8 +11246,8 @@ class TestTorchDeviceType(TestCase):
             torch.masked_select(src, mask, out=dst3)
             self.assertEqual(dst3, torch.tensor(dst2, dtype=dst3.dtype), 0)
 
-        # Since half is not supported on CPU, need to skip the remaining test cases
-        if dtype == torch.half and torch.device(device).type == 'cpu':
+        # Since complex and half on CPU is not supported, need to skip the remaining test cases
+        if (dtype.is_complex or dtype == torch.half) and torch.device(device).type == 'cpu':
             return
 
         # Ensure that masks are expanded to match tensor properly
@@ -12968,7 +13025,7 @@ class TestTorchDeviceType(TestCase):
                 self.assertEqual(expected_inverse.view(additional_shape), y_inverse)
                 self.assertEqual(expected_counts, y_counts)
 
-    @dtypes(*set(torch.testing.get_all_dtypes()) - {torch.bfloat16})
+    @dtypes(*set(torch.testing.get_all_dtypes()) - {torch.bfloat16, torch.complex64, torch.complex128})
     def test_unique(self, device, dtype):
         if dtype is torch.half and self.device_type == 'cpu':
             return  # CPU does not have half support
@@ -13026,7 +13083,7 @@ class TestTorchDeviceType(TestCase):
                                     count += 1
                             self.assertEqual(j, count)
 
-    @dtypes(*set(torch.testing.get_all_dtypes()) - {torch.bfloat16})
+    @dtypes(*set(torch.testing.get_all_dtypes()) - {torch.bfloat16, torch.complex64, torch.complex128})
     def test_unique_consecutive(self, device, dtype):
         if dtype is torch.half and self.device_type == 'cpu':
             return  # CPU does not have half support

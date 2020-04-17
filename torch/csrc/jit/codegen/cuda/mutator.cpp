@@ -29,20 +29,21 @@ void OptOutMutator::mutate(Fusion* fusion) {
 // MUTATE FUNCTIONS FOR VALS
 
 Statement* OptOutMutator::mutate(IterDomain* id) {
-  Val* s = mutateAsVal(id->size())->asVal();
-  if (!s->sameAs(id->size())) {
-    Val* mutated_val =
-        new IterDomain(s, id->parallel_method(), id->isReduction());
-    registerMutation(id, mutated_val);
-    return mutated_val;
-  }
-  return id;
+  Val* s = mutateAsVal(id->start())->asVal();
+  Val* e = mutateAsVal(id->extent())->asVal();
+  if (s->sameAs(id->start()) && e->sameAs(id->extent()))
+    return id;
+
+  Val* mutated_val =
+      new IterDomain(s, e, id->parallel_method(), id->isReduction());
+  registerMutation(id, mutated_val);
+  return mutated_val;
 }
 
 Statement* OptOutMutator::mutate(TensorDomain* td) {
   std::vector<IterDomain*> dom;
   bool mutated = false;
-  for (decltype(td->size()) i = 0; i < td->size(); i++) {
+  for (decltype(td->nDims()) i = 0; i < td->nDims(); i++) {
     IterDomain* id = static_cast<IterDomain*>(mutateAsVal(td->axis(i)));
     dom.push_back(id);
     if (!id->sameAs(td->axis(i)))
@@ -175,12 +176,76 @@ Statement* OptOutMutator::mutate(BinaryOp* bop) {
   return new BinaryOp(bop->getBinaryOpType(), out, lhs, rhs);
 }
 
-Statement* OptOutMutator::mutate(ForLoop* n) {
-  return n;
+Statement* OptOutMutator::mutate(ForLoop* fl) {
+  Val* index = mutateAsVal(fl->index())->asVal();
+  Val* val_id = mutateAsVal(fl->iter_domain())->asVal();
+
+  TORCH_INTERNAL_ASSERT(val_id->getValType() == ValType::IterDomain);
+  IterDomain* id = static_cast<IterDomain*>(val_id);
+
+  bool is_mutated = !index->sameAs(fl->index());
+  is_mutated = is_mutated | !id->sameAs(fl->iter_domain());
+
+  std::vector<Expr*> mutated_exprs;
+  for (auto expr : fl->body().exprs()) {
+    Statement* mutated_stmt = mutate(expr);
+    TORCH_INTERNAL_ASSERT(
+        mutated_stmt->isExpr(),
+        "While mutating a for loop, received a non-expression for a body entry.");
+    Expr* mutated_expr = static_cast<Expr*>(mutated_stmt);
+    mutated_exprs.push_back(mutated_expr);
+    // could use sameAs here, but we'd have to check the output value separately
+    is_mutated = is_mutated | (mutated_expr != expr);
+  }
+
+  if (is_mutated) {
+    auto newFL = new ForLoop(index, id, mutated_exprs, fl->parentScope());
+    return newFL;
+  }
+
+  return fl;
 }
 
-Statement* OptOutMutator::mutate(IfThenElse* n) {
-  return n;
+Statement* OptOutMutator::mutate(IfThenElse* ite) {
+  Val* val_cond = mutateAsVal(ite->cond())->asVal();
+  TORCH_INTERNAL_ASSERT(
+      val_cond->getValType().value() == ValType::Scalar &&
+      val_cond->getDataType().value() == DataType::Int);
+  Int* cond = static_cast<Int*>(val_cond);
+
+  bool is_mutated = !cond->sameAs(ite->cond());
+
+  std::vector<Expr*> mutated_exprs;
+  for (auto expr : ite->body().exprs()) {
+    Statement* mutated_stmt = mutate(expr);
+    TORCH_INTERNAL_ASSERT(
+        mutated_stmt->isExpr(),
+        "While mutating a for loop, received a non-expression for a body entry.");
+    Expr* mutated_expr = static_cast<Expr*>(mutated_stmt);
+    mutated_exprs.push_back(mutated_expr);
+    // could use sameAs here, but we'd have to check the output value separately
+    is_mutated = is_mutated | (mutated_expr != expr);
+  }
+
+  std::vector<Expr*> mutated_else_exprs;
+  for (auto expr : ite->elseBody().exprs()) {
+    Statement* mutated_stmt = mutate(expr);
+    TORCH_INTERNAL_ASSERT(
+        mutated_stmt->isExpr(),
+        "While mutating a for loop, received a non-expression for a body entry.");
+    Expr* mutated_expr = static_cast<Expr*>(mutated_stmt);
+    mutated_else_exprs.push_back(mutated_expr);
+    // could use sameAs here, but we'd have to check the output value separately
+    is_mutated = is_mutated | (mutated_expr != expr);
+  }
+
+  if (is_mutated) {
+    auto newITE = new IfThenElse(
+        cond, ite->body().exprs(), ite->elseBody().exprs(), ite->parentScope());
+    return newITE;
+  }
+
+  return ite;
 }
 
 // START REPLACE ALL
