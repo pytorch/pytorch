@@ -337,53 +337,60 @@ RegisterOperators reg(
      Operator(
          "aten::index.Tensor_hacked_twin(Tensor self, Tensor[] indices) -> Tensor",
          [](Stack& stack) {
-           auto result_ = at::index(
-               (std::move(peek(stack, 0, 2))).toTensor(),
-               (std::move(peek(stack, 1, 2))).toTensorVector());
-           drop(stack, 2);
-           pack(stack, std::move(result_));
+           auto indices = pop(stack).toTensorVector();
+           auto self = pop(stack).toTensor();
+           auto result = at::index(std::move(self), std::move(indices));
+           push(stack, std::move(result));
            return 0;
          },
          aliasAnalysisFromSchema()),
      Operator(
          "aten::_index_put_impl_.hacked_twin(Tensor(a!) self, Tensor[] indices, Tensor values, bool accumulate=False, bool unsafe=False) -> Tensor(a!)",
          [](Stack& stack) {
-           auto self = (std::move(peek(stack, 0, 5))).toTensor();
-           auto result_ = at::_index_put_impl_(
-               self,
-               (std::move(peek(stack, 1, 5))).toTensorVector(),
-               (std::move(peek(stack, 2, 5))).toTensor(),
-               (std::move(peek(stack, 3, 5))).toBool(),
-               (std::move(peek(stack, 4, 5))).toBool());
-           drop(stack, 5);
-           pack(stack, std::move(result_));
+           auto unsafe = pop(stack).toBool();
+           auto accumulate = pop(stack).toBool();
+           auto values = pop(stack).toTensor();
+           auto indices = pop(stack).toTensorVector();
+           auto self = pop(stack).toTensor();
+           auto result = at::_index_put_impl_(
+               std::move(self),
+               std::move(indices),
+               std::move(values),
+               std::move(accumulate),
+               std::move(unsafe));
+           push(stack, std::move(result));
            return 0;
          },
          aliasAnalysisFromSchema()),
      Operator(
          "aten::index_put_.hacked_twin(Tensor(a!) self, Tensor[] indices, Tensor values, bool accumulate=False) -> Tensor(a!)",
          [](Stack& stack) {
-           auto self = (std::move(peek(stack, 0, 4))).toTensor();
-           auto result_ = at::index_put_(
-               self,
-               (std::move(peek(stack, 1, 4))).toTensorVector(),
-               (std::move(peek(stack, 2, 4))).toTensor(),
-               (std::move(peek(stack, 3, 4))).toBool());
-           drop(stack, 4);
-           pack(stack, std::move(result_));
+           auto accumulate = pop(stack).toBool();
+           auto values = pop(stack).toTensor();
+           auto indices = pop(stack).toTensorVector();
+           auto self = pop(stack).toTensor();
+           auto result = at::index_put_(
+               std::move(self),
+               std::move(indices),
+               std::move(values),
+               std::move(accumulate));
+           push(stack, std::move(result));
            return 0;
          },
          aliasAnalysisFromSchema()),
      Operator(
          "aten::index_put.hacked_twin(Tensor self, Tensor[] indices, Tensor values, bool accumulate=False) -> Tensor",
          [](Stack& stack) {
-           auto result_ = at::index_put(
-               (std::move(peek(stack, 0, 4))).toTensor(),
-               (std::move(peek(stack, 1, 4))).toTensorVector(),
-               (std::move(peek(stack, 2, 4))).toTensor(),
-               (std::move(peek(stack, 3, 4))).toBool());
-           drop(stack, 4);
-           pack(stack, std::move(result_));
+           auto accumulate = pop(stack).toBool();
+           auto values = pop(stack).toTensor();
+           auto indices = pop(stack).toTensorVector();
+           auto self = pop(stack).toTensor();
+           auto result = at::index_put_(
+               std::move(self),
+               std::move(indices),
+               std::move(values),
+               std::move(accumulate));
+           push(stack, std::move(result));
            return 0;
          },
          aliasAnalysisFromSchema())});
