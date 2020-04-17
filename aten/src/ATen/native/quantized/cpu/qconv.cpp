@@ -645,22 +645,22 @@ class QConvInt8 final : public c10::OperatorKernel {
 
 static auto registry =
     c10::RegisterOperators()
-        .op("quantized::conv2d(Tensor qx, Tensor weight, int[] stride, int[] padding, int[] dilation, int groups, float output_scale, int output_zero_point) -> Tensor",
+        .op("quantized::conv2d",
             c10::RegisterOperators::options().kernel<QConvInt8<2, false>>(
                 DispatchKey::QuantizedCPU))
-        .op("_quantized::conv2d(Tensor qx, Tensor weight, int[] stride, int[] padding, int[] dilation, int groups, float output_scale, int output_zero_point) -> Tensor",
+        .op("_quantized::conv2d",
             c10::RegisterOperators::options().kernel<QConvInt8<2, false>>(
                 DispatchKey::QuantizedCPU))
-        .op("quantized::conv2d_relu(Tensor qx, Tensor weight, int[] stride, int[] padding, int[] dilation, int groups, float output_scale, int output_zero_point) -> Tensor",
+        .op("quantized::conv2d_relu",
             c10::RegisterOperators::options().kernel<QConvInt8<2, true>>(
                 DispatchKey::QuantizedCPU))
-        .op("_quantized::conv2d_relu(Tensor qx, Tensor weight, int[] stride, int[] padding, int[] dilation, int groups, float output_scale, int output_zero_point) -> Tensor",
+        .op("_quantized::conv2d_relu",
             c10::RegisterOperators::options().kernel<QConvInt8<2, true>>(
                 DispatchKey::QuantizedCPU))
-        .op("quantized::conv3d(Tensor qx, Tensor weight, int[] stride, int[] padding, int[] dilation, int groups, float output_scale, int output_zero_point) -> Tensor",
+        .op("quantized::conv3d",
             c10::RegisterOperators::options().kernel<QConvInt8<3, false>>(
                 DispatchKey::QuantizedCPU))
-        .op("quantized::conv3d_relu(Tensor qx, Tensor weight, int[] stride, int[] padding, int[] dilation, int groups, float output_scale, int output_zero_point) -> Tensor",
+        .op("quantized::conv3d_relu",
             c10::RegisterOperators::options().kernel<QConvInt8<3, true>>(
                 DispatchKey::QuantizedCPU));
 

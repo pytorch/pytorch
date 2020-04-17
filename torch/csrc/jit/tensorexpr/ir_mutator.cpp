@@ -469,6 +469,7 @@ class StmtClone : public IRMutator {
   Stmt* mutate(const Allocate* v) override;
   Stmt* mutate(const Free* v) override;
   Stmt* mutate(const Cond* v) override;
+  Stmt* mutate(const AtomicAdd* v) override;
 };
 
 Stmt* StmtClone::mutate(const LetStmt* v) {
@@ -500,6 +501,10 @@ Stmt* StmtClone::mutate(const Block* v) {
 
 Stmt* StmtClone::mutate(const Store* v) {
   return new Store(v->buf(), v->indices(), v->value(), v->mask());
+}
+
+Stmt* StmtClone::mutate(const AtomicAdd* v) {
+  return new AtomicAdd(v->buf(), v->indices(), v->value());
 }
 
 Stmt* StmtClone::mutate(const Allocate* v) {
