@@ -330,7 +330,8 @@ class Vectorizer : public IRMutator {
     const Expr* new_stop = stop->accept_mutator(this);
 
     if (new_start != start || new_stop != stop) {
-      throw std::runtime_error("Can't vectorize nested For with dependent loop bounds!");
+      throw std::runtime_error(
+          "Can't vectorize nested For with dependent loop bounds!");
     }
 
     Stmt* body = v->body();
