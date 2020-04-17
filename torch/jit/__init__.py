@@ -2020,7 +2020,7 @@ def _set_jit_overload_cache(key, compiled_fns):
     _jit_function_overload_caching[key] = [fn.qualified_name for fn in compiled_fns]
 
 def _try_get_jit_cached_function(key):
-    if getattr(key, "__disable_jit_function_caching__", False) == True:
+    if getattr(key, "__disable_jit_function_caching__", False) is True:
         return None
     qual_name = _jit_caching_layer.get(key, None)
     if qual_name:
