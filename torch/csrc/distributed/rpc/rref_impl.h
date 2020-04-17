@@ -73,7 +73,7 @@ struct TORCH_API RRefForkData {
 //
 // TODO: current RRef implementation does not tolerate failures
 //
-// The RRef design aims to handle transient network failures by retrying
+// The RRef design handles transient network failures by retrying
 // messages. Node crashes or permanent network partition is beyond the scope.
 // When those incidents occur, the application may take down all workers, revert
 // to the previous checkpoint, and resume training.
@@ -81,7 +81,8 @@ struct TORCH_API RRefForkData {
 // 2. Non-idempotent UDFs
 //
 // We assume UDFs are not idempotent and therefore cannot be retried. However,
-// internal RRef control messages will be made idempotent and retryable.
+// internal RRef control messages are idempotent and retried upon message
+// failure.
 //
 // TODO: RRef internal messages are not yet idempotent
 //
