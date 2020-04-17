@@ -353,7 +353,7 @@ RegisterOperators reg(
            auto indices = pop(stack).toTensorVector();
            auto self = pop(stack).toTensor();
            auto result = at::_index_put_impl_(
-               std::move(self),
+               self,
                std::move(indices),
                std::move(values),
                std::move(accumulate),
@@ -370,7 +370,7 @@ RegisterOperators reg(
            auto indices = pop(stack).toTensorVector();
            auto self = pop(stack).toTensor();
            auto result = at::index_put_(
-               std::move(self),
+               self,
                std::move(indices),
                std::move(values),
                std::move(accumulate));
@@ -386,7 +386,7 @@ RegisterOperators reg(
            auto indices = pop(stack).toTensorVector();
            auto self = pop(stack).toTensor();
            auto result = at::index_put_(
-               std::move(self),
+               self,
                std::move(indices),
                std::move(values),
                std::move(accumulate));
