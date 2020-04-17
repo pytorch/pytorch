@@ -3,7 +3,6 @@ import contextlib
 import functools
 import logging
 import numbers
-import sys
 import threading
 from datetime import timedelta
 
