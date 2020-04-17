@@ -6,6 +6,7 @@
 #include <ATen/native/quantized/cpu/qnnpack_utils.h>
 #include <ATen/native/c10_utils.h>
 #include <ATen/core/op_registration/op_registration.h>
+#include <ATen/cpp_custom_type_hack.h>
 #include <torch/custom_class.h>
 
 torch::jit::class_<LinearPackedParamsBase> register_linear_params();
@@ -556,65 +557,6 @@ static c10::List<c10::intrusive_ptr<CellParamsBase>> gather_quantized_params(c10
   return c10::List<c10::intrusive_ptr<CellParamsBase>>(result);
 }
 
-static std::vector<c10::intrusive_ptr<CellParamsBase>> _quantized_params_dynamic(
-  c10::List<at::Tensor> params, std::string qengine) {
-
-    static at::Tensor undefined;
-    std::vector<c10::intrusive_ptr<CellParamsBase>> result;
-    for (size_t i = 0; i < params.size(); i += 2) {
-      at::Tensor bias_ih, bias_hh;
-
-      if (qengine == "fbgemm") {
-#ifdef USE_FBGEMM
-        auto& packed_struct_ih =
-            cpp_custom_type_hack::cast<PackedLinearWeight>(static_cast<at::Tensor>(params[i]));
-        auto& packed_struct_hh =
-            cpp_custom_type_hack::cast<PackedLinearWeight>(static_cast<at::Tensor>(params[i + 1]));
-
-        bias_ih = packed_struct_ih.bias.value_or(undefined);
-        bias_hh = packed_struct_hh.bias.value_or(undefined);
-#endif
-      } else if (qengine == "qnnpack") {
-#ifdef USE_PYTORCH_QNNPACK
-        auto& packed_struct_ih =
-            cpp_custom_type_hack::cast<PackedLinearWeightsQnnp>(static_cast<at::Tensor>(params[i]));
-        auto& packed_struct_hh =
-            cpp_custom_type_hack::cast<PackedLinearWeightsQnnp>(static_cast<at::Tensor>(params[i + 1]));
-
-        bias_ih = packed_struct_ih.bias;
-        bias_hh = packed_struct_hh.bias;
-#endif
-      }
-      result.emplace_back(c10::make_intrusive<QuantizedCellParamsDynamic>(
-        static_cast<at::Tensor>(params[i]),
-        static_cast<at::Tensor>(params[i + 1]),
-        bias_ih,
-        bias_hh));
-    }
-    return result;
-}
-
-static c10::List<c10::intrusive_ptr<CellParamsBase>> gather_quantized_params_dynamic(
-    c10::List<at::Tensor> params) {
-
-  TORCH_CHECK(
-      params.size() % 2 == 0,
-      "got an incorrect number of quantized RNN parameters");
-  auto& ctx = at::globalContext();
-#ifdef USE_FBGEMM
-  if (ctx.qEngine() == at::QEngine::FBGEMM){
-    return c10::List<c10::intrusive_ptr<CellParamsBase>>(_quantized_params_dynamic(std::move(params), "fbgemm"));
-}
-#endif
-#ifdef USE_PYTORCH_QNNPACK
-  if (ctx.qEngine() == at::QEngine::QNNPACK) {
-      return c10::List<c10::intrusive_ptr<CellParamsBase>>(_quantized_params_dynamic(std::move(params), "qnnpack"));
-  }
-#endif
-  TORCH_INTERNAL_ASSERT(false, "Tried to use quantized RNN without FBGEMM or QNNPACK!")
-
-}
-
 static c10::List<c10::intrusive_ptr<CellParamsBase>> gather_quantized_params_fp16(
     c10::List<at::Tensor> params) {
   static at::Tensor undefined;
@@ -622,9 +564,16 @@ static c10::List<c10::intrusive_ptr<CellParamsBase>> gather_quantized_params_fp1
   TORCH_CHECK(params.size() % 4 == 0,
               "incorrect number of quantized RNN parameters FP16");
   for (size_t i = 0; i < params.size(); i += 4) {
+    c10::intrusive_ptr<PackedLinearWeightFp16> packed_struct_ih =
+        cpp_custom_type_hack::cast<c10::intrusive_ptr<PackedLinearWeightFp16>>(
+          static_cast<at::Tensor>(params[i]));
+    c10::intrusive_ptr<PackedLinearWeightFp16> packed_struct_hh =
+        cpp_custom_type_hack::cast<c10::intrusive_ptr<PackedLinearWeightFp16>>(
+          static_cast<at::Tensor>(params[i + 1]));
+
     result.emplace_back(c10::make_intrusive<QuantizedCellParamsFP16>(
-      static_cast<at::Tensor>(params[i]),
-      static_cast<at::Tensor>(params[i + 1]),
+      std::move(packed_struct_ih),
+      std::move(packed_struct_hh),
       static_cast<at::Tensor>(params[i + 2]),
       static_cast<at::Tensor>(params[i + 3])));
   }
@@ -1570,7 +1519,7 @@ std::tuple<Tensor, Tensor, Tensor> quantized_lstm_input_legacy(
   auto result_dtype = dtype.has_value() ? dtype.value() : at::kChar;
   if (result_dtype == at::kChar || result_dtype == at::kQInt8) {
     if (use_dynamic) {
-      params = gather_quantized_params_dynamic(std::move(_params_));
+      TORCH_CHECK(false, "Not supported! Use the newer op torch.quantized_lstm");
     } else {
       params = gather_quantized_params(std::move(_params_));
     }
@@ -1632,7 +1581,7 @@ std::tuple<Tensor, Tensor, Tensor> quantized_lstm_data_legacy(
   auto result_dtype = dtype.has_value() ? dtype.value() : at::kChar;
   if (result_dtype == at::kChar || result_dtype == at::kQInt8) {
     if (use_dynamic) {
-      params = gather_quantized_params_dynamic(std::move(_params_));
+      TORCH_CHECK(false, "Not supported! Use the newer op torch.quantized_lstm");
     } else {
       params = gather_quantized_params(std::move(_params_));
     }
