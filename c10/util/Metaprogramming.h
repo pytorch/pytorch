@@ -75,22 +75,6 @@ struct function_traits<ReturnType(Args...)> {
   };
 };
 
-template <typename T>
-struct unary_function_traits {
-  using traits = function_traits<T>;
-  using return_type = typename traits::return_type;
-  using arg1_t = typename traits::template arg<0>::type;
-};
-
-template <typename T>
-struct binary_function_traits {
-  using traits = function_traits<T>;
-  using return_type = typename traits::return_type;
-  using arg1_t = typename traits::template arg<0>::type;
-  using arg2_t = typename traits::template arg<1>::type;
-};
-
-
 /**
  * Use extract_arg_by_filtered_index to return the i-th argument whose
  * type fulfills a given type trait. The argument itself is perfectly forwarded.
