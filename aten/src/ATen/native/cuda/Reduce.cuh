@@ -395,16 +395,17 @@ struct ReduceOp {
 
   C10_DEVICE arg_t header_reduce(const scalar_t* &data, index_t &end) const {
     arg_t value = ident;
-    const int align_bytes = alignof(at::native::memory::aligned_vector<scalar_t, vec_size>);
+    constexpr int align_bytes = alignof(at::native::memory::aligned_vector<scalar_t, vec_size>);
+    constexpr int align_elements = align_bytes / sizeof(scalar_t);
     const int shift = ((uint64_t)data) % align_bytes / sizeof(scalar_t);
     if (shift > 0) {
       data -= shift;
       end += shift;
-      if(threadIdx.x >= shift && config.should_reduce_tail()){
+      if(threadIdx.x >= shift && threadIdx.x < align_elements && config.should_reduce_tail()){
         value = ops.reduce(value, data[threadIdx.x], threadIdx.x - shift);
       }
-      end -= blockDim.x;
-      data += blockDim.x;
+      end -= align_elements;
+      data += align_elements;
     }
     return value;
   }
@@ -855,10 +856,10 @@ inline void gpu_reduce_kernel(TensorIterator& iter, const ops_t& ops, ident_t id
   }
 
   // if the fastest moving dimension is contiguous and large enough, we do vectorized
-  // load for better performance. Note that if vt0 < 4, then this means the register
-  // pressure could be high, in such case, we should avoid vectorization.
+  // load for better performance. Note that if vt0 < ReduceConfig::vec_size, then this
+  // means the register pressure could be high, in such case, we should avoid vectorization.
   // We only vectorize 1D reduction
-  if (fastest_moving_stride == sizeof(scalar_t) && dim0 > 128 && vt0 >= 4) {
+  if (fastest_moving_stride == sizeof(scalar_t) && dim0 > 128 && vt0 >= ReduceConfig::vec_size) {
     // TODO: vectorization on output is not supported yet
     if (reduction_on_fastest_striding_dimension && iter.num_reduce_dims() == 1) {
       config.vectorize = true;
