@@ -338,10 +338,10 @@ struct ReduceOp {
       if (config.vectorize4) {
         // reduce at the header of input_slice where memory is not aligned,
         // so that thread_reduce will have an aligned memory to work on.
-        value = header_reduce(value, input_slice, end);
+        value = header_reduce(input_slice, end);
         value = vectorized_thread_reduce(value, input_slice, end);
       } else {
-        value = thread_reduce(value, input_slice, end);
+        value = thread_reduce(input_slice);
       }
     }
 
@@ -390,7 +390,8 @@ struct ReduceOp {
     }
   }
 
-  C10_DEVICE arg_t header_reduce(arg_t value, const scalar_t* &data, index_t &end) const {
+  C10_DEVICE arg_t header_reduce(const scalar_t* &data, index_t &end) const {
+    arg_t value = ident;
     const int align_bytes = alignof(at::native::memory::aligned_vector<scalar_t, 4>);
     const int shift = ((uint64_t)data) % align_bytes / sizeof(scalar_t);
     if (shift > 0) {
@@ -448,28 +449,28 @@ struct ReduceOp {
     return value_list[0];
   }
 
-  C10_DEVICE arg_t thread_reduce(arg_t value, const scalar_t* data, index_t end) const {
+  C10_DEVICE arg_t thread_reduce(const scalar_t* data) const {
     index_t element_stride = input_calc.strides_[0][0] / sizeof(scalar_t);
     bool is_contiguous = (input_calc.dims == 1 && element_stride == 1);
     if (is_contiguous) {
-      return thread_reduce_impl(value, data, end, [](index_t idx) { return idx; });
+      return thread_reduce_impl(data, [](index_t idx) { return idx; });
     } else if (input_calc.dims == 1) {
-      return thread_reduce_impl(value, data, end, [&](index_t idx) { return idx * element_stride; });
+      return thread_reduce_impl(data, [&](index_t idx) { return idx * element_stride; });
     } else {
-      return thread_reduce_impl(value, data, end, [&](index_t idx) { return input_calc.get(idx)[0] / sizeof(scalar_t); });
+      return thread_reduce_impl(data, [&](index_t idx) { return input_calc.get(idx)[0] / sizeof(scalar_t); });
     }
   }
 
   template<typename offset_calc_t>
-  C10_DEVICE arg_t thread_reduce_impl(arg_t value, const scalar_t* data, index_t end, offset_calc_t calc) const {
+  C10_DEVICE arg_t thread_reduce_impl(const scalar_t* data, offset_calc_t calc) const {
     index_t idx = config.input_idx();
+    const index_t end = config.num_inputs;
     const index_t stride = config.step_input;
 
     // Multiple accumulators to remove dependency between unrolled loops.
     arg_t value_list[vt0];
-    value_list[0] = value;
     #pragma unroll
-    for (int i = 1; i < vt0; i++) {
+    for (int i = 0; i < vt0; i++) {
       value_list[i] = ident;
     }
 
