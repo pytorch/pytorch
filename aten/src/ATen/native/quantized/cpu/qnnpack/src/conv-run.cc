@@ -326,7 +326,7 @@ enum pytorch_qnnp_status qnnpackConv(
   uint32_t stride_height = conv_p.subsampling_dims[1];
 
   const std::array<size_t, 2> output_dims =
-      conv_p.compute_output_dims({input_width, input_height});  // H, W for some reason
+      conv_p.compute_output_dims({input_width, input_height});
   const size_t output_width = output_dims[0];
   const size_t output_height = output_dims[1];
   const size_t output_size = output_height * output_width;

@@ -48,26 +48,6 @@ struct conv_param_t {
   size_t group_input_channels;
   size_t group_output_channels;
 
-  std::array<size_t, 2> compute_output_dims(
-      std::array<size_t, 2> input_dims) const {
-    std::array<size_t, 2> output_dims;
-    output_dims[0] = compute_output_dimension(input_dims[0],  // width
-                                              pad[1] + pad[3],
-                                              /*adjustment=*/0,
-                                              kernel_dims[0],
-                                              dilation[0],
-                                              subsampling_dims[0],
-                                              /*transpose=*/false);
-    output_dims[1] = compute_output_dimension(input_dims[1],  // height
-                                              pad[0] + pad[2],
-                                              /*adjustment=*/0,
-                                              kernel_dims[1],
-                                              dilation[1],
-                                              subsampling_dims[1],
-                                              /*transpose=*/false);
-    return output_dims;
-  }
-
   /**
    * @brief Constructor for initializing the convolution parameters.
    */
@@ -231,9 +211,31 @@ struct conv_param_t {
       ukernel_type = pytorch_qnnp_ukernel_type_conv;
     }
   }
+
+  /**
+   * @brief Computes the output dimensions given a 2D input.
+   */
+  std::array<size_t, 2> compute_output_dims(
+      std::array<size_t, 2> input_dims) const {
+    std::array<size_t, 2> output_dims;
+    output_dims[0] = compute_output_dimension(input_dims[0],  // width
+                                              pad[1] + pad[3],
+                                              /*adjustment=*/0,
+                                              kernel_dims[0],
+                                              dilation[0],
+                                              subsampling_dims[0],
+                                              /*transpose=*/false);
+    output_dims[1] = compute_output_dimension(input_dims[1],  // height
+                                              pad[0] + pad[2],
+                                              /*adjustment=*/0,
+                                              kernel_dims[1],
+                                              dilation[1],
+                                              subsampling_dims[1],
+                                              /*transpose=*/false);
+    return output_dims;
+  }
 };
 
-/******************************************************************************/
 struct deconv_param_t {
   const std::array<uint32_t, 2> kernel_dims; // kernel width, kernel height
   const std::array<uint32_t, 2> stride_dims; // stride width, height
@@ -340,6 +342,29 @@ struct deconv_param_t {
 
     const size_t kernel_size = kernel_height * kernel_width;
     ukernel_type = pytorch_qnnp_ukernel_type_conv;
+  }
+
+  /**
+   * @brief Computes the output dimensions given a 2D input.
+   */
+  std::array<size_t, 2> compute_output_dims(
+      std::array<size_t, 2> input_dims) const {
+    std::array<size_t, 2> output_dims;
+    output_dims[0] = compute_output_dimension(input_dims[0],  // width
+                                              padding_dims[1] + padding_dims[3],
+                                              /*adjustment=*/0,
+                                              kernel_dims[0],
+                                              dilation_dims[0],
+                                              stride_dims[0],
+                                              /*transpose=*/true);
+    output_dims[1] = compute_output_dimension(input_dims[1],  // height
+                                              padding_dims[0] + padding_dims[2],
+                                              /*adjustment=*/0,
+                                              kernel_dims[1],
+                                              dilation_dims[1],
+                                              stride_dims[1],
+                                              /*transpose=*/true);
+    return output_dims;
   }
 };
 } // namespace qnnpack

@@ -57,6 +57,7 @@ libtorch_core_sources = [
     "torch/csrc/jit/codegen/fuser/interface.cpp",
     "torch/csrc/jit/codegen/fuser/kernel_cache.cpp",
     "torch/csrc/jit/frontend/builtin_functions.cpp",
+    "torch/csrc/jit/frontend/versioned_symbols.cpp",
     "torch/csrc/jit/frontend/canonicalize_modified_loop.cpp",
     "torch/csrc/jit/frontend/convert_to_ssa.cpp",
     "torch/csrc/jit/frontend/edit_distance.cpp",

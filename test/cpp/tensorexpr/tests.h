@@ -139,6 +139,10 @@ namespace jit {
   _(SimplifyDivisionScalarFactorization)  \
   _(SimplifyConstantBranches)             \
   _(SimplifyConstantCond)                 \
+  _(SimplifyEliminateZeroLengthFor)       \
+  _(SimplifyOneLoopFor)                   \
+  _(SimplifyForWontLoseLoopOptions)       \
+  _(SimplifyMultilevelFor)                \
   _(StmtClone)                            \
   _(BoundsInference_1)                    \
   _(BoundsInference_2)                    \
