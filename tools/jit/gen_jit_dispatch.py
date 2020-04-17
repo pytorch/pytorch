@@ -504,8 +504,6 @@ def gen_jit_dispatch(
         decl['arguments'] = [a for i, arg in enumerate(decl['arguments']) for a in expand_options(decl, i, arg)]
         if is_out_variant(decl):
             reorder_out_args(decl)
-        if needs_hacked_twin(decl):
-            additional_jit_decls.append(hacked_twin(decl))
 
     jit_decls.extend(additional_jit_decls)
     if not selected_op_list:
@@ -560,47 +558,6 @@ def reorder_out_args(decl):
 
 def is_kwarg_only(a):
     return a.get('kwarg_only') or a.get('output')
-
-
-#
-# create a clone of these declarations
-# with nullability scrubbed from TensorList arg types
-# TOOD find out why this exists and how to do it without the hack
-#
-
-NEEDS_HACKED_TWIN_NAMES = [
-    "aten::_index_put_impl_",
-    "aten::index.Tensor",
-    "aten::index_put",
-    "aten::index_put_",
-]
-
-def needs_hacked_twin(decl):
-    schema_string = decl['schema_string']
-    result = any([schema_string.startswith(name) for name in NEEDS_HACKED_TWIN_NAMES])
-    return result
-
-
-def hacked_twin(decl):
-    decl_copy = copy.deepcopy(decl)
-    old_overload_name = decl['overload_name']
-    schema_string = decl['schema_string']
-    name = decl['name']
-    schema_string = schema_string.replace('Tensor?[]', 'Tensor[]')
-    if old_overload_name:
-        new_overload_name = old_overload_name + "_hacked_twin"
-        decl_copy['overload_name'] = new_overload_name
-        decl_copy['schema_string'] = schema_string.replace(name + "." + old_overload_name,
-                                                           name + "." + new_overload_name)
-    else:
-        new_overload_name = "hacked_twin"
-        decl_copy['overload_name'] = new_overload_name
-        decl_copy['schema_string'] = schema_string.replace(name, name + "." + new_overload_name)
-    for arg in decl_copy['arguments']:
-        if arg['simple_type'] == 'TensorList' and arg.get('is_nullable'):
-            arg['is_nullable'] = False
-    return decl_copy
-
 
 def signature_without_args(decl):
     name = decl['name'] if not is_out_variant(decl) else decl['name'][:-4]

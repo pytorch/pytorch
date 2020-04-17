@@ -325,6 +325,65 @@ RegisterOperators reg({
     DEFINE_COMPARISON_OP(aten::gt, a > b),
     DEFINE_COMPARISON_OP(aten::le, a <= b),
     DEFINE_COMPARISON_OP(aten::ge, a >= b),
+
+     //
+     // create a clone of these declarations with a _hacked_twin overload name
+     // and nullability scrubbed from TensorList arg types
+     // TOOD find out why this exists and how to do it without the hack
+     //
+    Operator(
+      "aten::index.Tensor_hacked_twin(Tensor self, Tensor[] indices) -> Tensor",
+      [](Stack& stack) {
+          auto result_ = at::index(
+              (std::move(peek(stack, 0, 2))).toTensor(),
+              (std::move(peek(stack, 1, 2))).toTensorVector()
+          );
+          drop(stack, 2);
+          pack(stack, std::move(result_));
+          return 0;
+      }, aliasAnalysisFromSchema()),
+    Operator(
+      "aten::_index_put_impl_.hacked_twin(Tensor(a!) self, Tensor[] indices, Tensor values, bool accumulate=False, bool unsafe=False) -> Tensor(a!)",
+      [](Stack& stack) {
+          auto self = (std::move(peek(stack, 0, 5))).toTensor();
+          auto result_ = at::_index_put_impl_(
+              self,
+              (std::move(peek(stack, 1, 5))).toTensorVector(),
+              (std::move(peek(stack, 2, 5))).toTensor(),
+              (std::move(peek(stack, 3, 5))).toBool(),
+              (std::move(peek(stack, 4, 5))).toBool()
+          );
+          drop(stack, 5);
+          pack(stack, std::move(result_));
+          return 0;
+      }, aliasAnalysisFromSchema()),
+    Operator(
+      "aten::index_put_.hacked_twin(Tensor(a!) self, Tensor[] indices, Tensor values, bool accumulate=False) -> Tensor(a!)",
+      [](Stack& stack) {
+          auto self = (std::move(peek(stack, 0, 4))).toTensor();
+          auto result_ = at::index_put_(
+              self,
+              (std::move(peek(stack, 1, 4))).toTensorVector(),
+              (std::move(peek(stack, 2, 4))).toTensor(),
+              (std::move(peek(stack, 3, 4))).toBool()
+          );
+          drop(stack, 4);
+          pack(stack, std::move(result_));
+          return 0;
+      }, aliasAnalysisFromSchema()),
+    Operator(
+      "aten::index_put.hacked_twin(Tensor self, Tensor[] indices, Tensor values, bool accumulate=False) -> Tensor",
+      [](Stack& stack) {
+          auto result_ = at::index_put(
+              (std::move(peek(stack, 0, 4))).toTensor(),
+              (std::move(peek(stack, 1, 4))).toTensorVector(),
+              (std::move(peek(stack, 2, 4))).toTensor(),
+              (std::move(peek(stack, 3, 4))).toBool()
+          );
+          drop(stack, 4);
+          pack(stack, std::move(result_));
+          return 0;
+      }, aliasAnalysisFromSchema())
 });
 
 } // namespace
