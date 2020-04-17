@@ -2,6 +2,7 @@
 
 #include <ATen/core/jit_type.h>
 #include <aten/src/ATen/ExpandUtils.h>
+#include <c10/core/DefaultDtype.h>
 #include <torch/csrc/api/include/torch/utils.h>
 #include <torch/csrc/autograd/profiler.h>
 #include <torch/csrc/jit/ir/ir.h>
@@ -100,13 +101,45 @@ void storeLastDimension(
   }
 }
 
+void storeLastDimensionFloat(
+    char* data,
+    const std::vector<int64_t>& sizes,
+    const c10::ArrayRef<int64_t>& strides,
+    int64_t dim,
+    int elementSize,
+    at::ArrayRef<IValue> obj) {
+  auto n = sizes[dim];
+  auto seq_size = obj.size();
+  checkSequenceSize(n, dim, seq_size);
+  for (int64_t i = 0; i < n; i++) {
+    *(float*)data = static_cast<float>(obj[i].to<double>());
+    data += strides[dim] * elementSize;
+  }
+}
+
+void storeLastDimensionHalf(
+    char* data,
+    const std::vector<int64_t>& sizes,
+    const c10::ArrayRef<int64_t>& strides,
+    int64_t dim,
+    int elementSize,
+    at::ArrayRef<IValue> obj) {
+  auto n = sizes[dim];
+  auto seq_size = obj.size();
+  checkSequenceSize(n, dim, seq_size);
+  for (int64_t i = 0; i < n; i++) {
+    *(at::Half*)data = at::convert<at::Half, double>(obj[i].to<double>());
+    data += strides[dim] * elementSize;
+  }
+}
+
 // reference python implementation recursive_store in tensor_new.cpp
 void recursiveStore(
     char* data,
     const std::vector<int64_t>& sizes,
     const c10::ArrayRef<int64_t>& strides,
     int64_t dim,
-    int elementSize,
+    int tenElementSize,
     const IValue& obj) {
   auto ndim = sizes.size();
   auto n = sizes[dim];
@@ -114,17 +147,33 @@ void recursiveStore(
   checkSequenceSize(n, dim, seq.size());
   if (dim + 1 < static_cast<long>(ndim)) {
     for (int64_t i = 0; i < n; i++) {
-      recursiveStore(data, sizes, strides, dim + 1, elementSize, seq[i]);
-      data += strides[dim] * elementSize;
+      recursiveStore(data, sizes, strides, dim + 1, tenElementSize, seq[i]);
+      data += strides[dim] * tenElementSize;
     }
   } else {
-    AT_ASSERT(obj.isIntList() || obj.isDoubleList() || obj.isBoolList());
     if (obj.isIntList()) {
-      storeLastDimension<int64_t>(data, sizes, strides, dim, elementSize, seq);
+      storeLastDimension<int64_t>(
+          data, sizes, strides, dim, tenElementSize, seq);
+    } else if (obj.isBoolList()) {
+      storeLastDimension<bool>(data, sizes, strides, dim, tenElementSize, seq);
     } else if (obj.isDoubleList()) {
-      storeLastDimension<double>(data, sizes, strides, dim, elementSize, seq);
+      if (tenElementSize ==
+          static_cast<int>(elementSize(at::ScalarType::Double))) {
+        storeLastDimension<double>(
+            data, sizes, strides, dim, tenElementSize, seq);
+      } else if (
+          tenElementSize ==
+          static_cast<int>(elementSize(at::ScalarType::Float))) {
+        storeLastDimensionFloat(data, sizes, strides, dim, tenElementSize, seq);
+      } else if (
+          tenElementSize ==
+          static_cast<int>(elementSize(at::ScalarType::Half))) {
+        storeLastDimensionHalf(data, sizes, strides, dim, tenElementSize, seq);
+      } else {
+        TORCH_INTERNAL_ASSERT(false);
+      }
     } else {
-      storeLastDimension<bool>(data, sizes, strides, dim, elementSize, seq);
+      TORCH_INTERNAL_ASSERT(false);
     }
   }
 }
@@ -149,6 +198,9 @@ int createTensorFromList(Stack& stack) {
   auto sizes = compute_sizes(data);
   checkListInputType(elem_type, sizes.size() == 1 && sizes[0] == 0);
   at::ScalarType initial_scalar_type = scalarTypeFromJitType(elem_type);
+  if (initial_scalar_type == at::ScalarType::Double) {
+    initial_scalar_type = typeMetaToScalarType(c10::get_default_dtype());
+  }
 
   auto tensor =
       at::empty(sizes, at::initialTensorOptions().dtype(initial_scalar_type));
@@ -293,7 +345,12 @@ RegisterOperators reg({
           },                                                               \
           aliasAnalysisFromSchema()),
 
-    DEFINE_TORCH_TENSOR_OP(float, double, at::scalar_to_tensor(scalar_val))
+    DEFINE_TORCH_TENSOR_OP(
+        float,
+        double,
+        at::native::scalar_tensor(
+            scalar_val,
+            at::device(at::kCPU).dtype(c10::get_default_dtype())))
         DEFINE_TORCH_TENSOR_OP(int, int64_t, at::scalar_to_tensor(scalar_val))
             DEFINE_TORCH_TENSOR_OP(
                 bool,

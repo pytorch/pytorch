@@ -3,6 +3,7 @@
 # - Configures caffe2/core/macros.h
 # - Creates an ATen target for its generated C++ files and adds it
 #   as a dependency
+# - Reads build lists defined in build_variables.bzl
 
 ################################################################################
 # Helper functions
@@ -204,3 +205,14 @@ if(INTERN_BUILD_ATEN_OPS)
   add_dependencies(ATEN_CPU_FILES_GEN_LIB ATEN_CPU_FILES_GEN_TARGET)
   add_dependencies(ATEN_CUDA_FILES_GEN_LIB ATEN_CUDA_FILES_GEN_TARGET)
 endif()
+
+function(get_filelist name outputvar)
+  set(_rootdir "${CMAKE_CURRENT_LIST_DIR}/../")
+  execute_process(
+    COMMAND "${PYTHON_EXECUTABLE}" -c
+            "exec(open('../tools/build_variables.bzl').read());print(';'.join(['${_rootdir}' + x for x in ${name}]))"
+    WORKING_DIRECTORY "${CMAKE_CURRENT_LIST_DIR}"
+    OUTPUT_VARIABLE _tempvar)
+  string(REPLACE "\n" "" _tempvar "${_tempvar}")
+  set(${outputvar} ${_tempvar} PARENT_SCOPE)
+endfunction()

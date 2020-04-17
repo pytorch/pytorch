@@ -35,7 +35,7 @@ from torch.testing._internal.common_quantization import QuantizationTestCase, \
     prepare_dynamic, convert_dynamic, SingleLayerLinearDynamicModel, \
     TwoLayerLinearModel, NestedModel, ResNetBase, LSTMDynamicModel, \
     ModelWithNoQconfigPropagation, ModelForFusionWithBias, \
-    ActivationsTestModel, ActivationsQATTestModel
+    ActivationsTestModel, ActivationsQATTestModel, NormalizationTestModel
 
 from torch.testing._internal.common_quantization import AnnotatedTwoLayerLinearModel, AnnotatedNestedModel, \
     AnnotatedSubNestedModel, AnnotatedCustomConfigNestedModel
@@ -313,6 +313,29 @@ class EagerModePostTrainingQuantTest(QuantizationTestCase):
             self.assertEqual(type(model.module.avgpool), nn.AdaptiveAvgPool2d)
             test_only_eval_fn(model, self.img_data)
 
+        checkQuantized(model)
+
+    def test_normalization(self):
+        r"""
+        Test quantization of normalization layers
+        """
+        model = NormalizationTestModel()
+        model.qconfig = torch.quantization.get_default_qconfig('fbgemm')
+        prepare(model, inplace=True)
+        self.checkObservers(model)
+        test_only_eval_fn(model, self.calib_data)
+        model = convert(model)
+
+        def checkQuantized(model):
+            self.checkNoPrepModules(model.layer_norm)
+            self.assertEqual(type(model.layer_norm), nnq.LayerNorm)
+            test_only_eval_fn(model, self.calib_data)
+            self.checkScriptable(model, self.calib_data)
+
+        checkQuantized(model)
+
+        model_oneline = quantize(
+            NormalizationTestModel(), test_only_eval_fn, self.calib_data)
         checkQuantized(model)
 
     @given(qengine=st.sampled_from(("qnnpack", "fbgemm")))
