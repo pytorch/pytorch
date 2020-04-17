@@ -531,16 +531,94 @@ static std::vector<CellParams> gather_params(TensorList params, bool has_biases)
   return result;
 }
 
-static c10::List<c10::intrusive_ptr<CellParamsBase>> gather_quantized_params(TensorList params) {
+// These gather_* functions are kept solely for the purposes of backward compatbility in the
+// legacy quantized_{lstm,gru} APIs
+
+static c10::List<c10::intrusive_ptr<CellParamsBase>> gather_quantized_params(c10::List<at::Tensor> params) {
   static at::Tensor undefined;
   std::vector<c10::intrusive_ptr<CellParamsBase>> result;
   TORCH_CHECK(params.size() % 12 == 0, "got an incorrect number of quantized RNN parameters");
   for (size_t i = 0; i < params.size(); i += 12) {
     result.emplace_back(c10::make_intrusive<QuantizedCellParams>(
-                        params[i], params[i + 1], params[i + 2], params[i + 3],
-                        params[i + 4], params[i + 5], params[i + 6], params[i + 7],
-                        params[i + 8].item(), params[i + 9].item(),
-                        params[i + 10].item(), params[i + 11].item()));
+                        static_cast<at::Tensor>(params[i]),
+                        static_cast<at::Tensor>(params[i + 1]),
+                        static_cast<at::Tensor>(params[i + 2]),
+                        static_cast<at::Tensor>(params[i + 3]),
+                        static_cast<at::Tensor>(params[i + 4]),
+                        static_cast<at::Tensor>(params[i + 5]),
+                        static_cast<at::Tensor>(params[i + 6]),
+                        static_cast<at::Tensor>(params[i + 7]),
+                        static_cast<at::Tensor>(params[i + 8]).item(),
+                        static_cast<at::Tensor>(params[i + 9]).item(),
+                        static_cast<at::Tensor>(params[i + 10]).item(),
+                        static_cast<at::Tensor>(params[i + 11]).item()));
+  }
+  return c10::List<c10::intrusive_ptr<CellParamsBase>>(result);
+}
+
+static std::vector<c10::intrusive_ptr<CellParamsBase>> _quantized_params_dynamic(
+  c10::List<at::Tensor> params, std::string qengine) {
+
+    static at::Tensor undefined;
+    std::vector<c10::intrusive_ptr<CellParamsBase>> result;
+    for (size_t i = 0; i < params.size(); i += 2) {
+      at::Tensor bias_ih, bias_hh;
+
+      if (qengine == "fbgemm") {
+#ifdef USE_FBGEMM
+        auto& packed_struct_ih =
+            cpp_custom_type_hack::cast<PackedLinearWeight>(params[i]);
+        auto& packed_struct_hh =
+            cpp_custom_type_hack::cast<PackedLinearWeight>(params[i + 1]);
+
+        bias_ih = packed_struct_ih.bias.value_or(undefined);
+        bias_hh = packed_struct_hh.bias.value_or(undefined);
+#endif
+      } else if (qengine == "qnnpack") {
+#ifdef USE_PYTORCH_QNNPACK
+        auto& packed_struct_ih =
+            cpp_custom_type_hack::cast<PackedLinearWeightsQnnp>(params[i]);
+        auto& packed_struct_hh =
+            cpp_custom_type_hack::cast<PackedLinearWeightsQnnp>(params[i + 1]);
+
+        bias_ih = packed_struct_ih.bias;
+        bias_hh = packed_struct_hh.bias;
+#endif
+      }
+      result.emplace_back(c10::make_intrusive<QuantizedCellParamsDynamic>(params[i], params[i + 1], bias_ih, bias_hh));
+    }
+    return result;
+}
+
+static c10::List<c10::intrusive_ptr<CellParamsBase>> gather_quantized_params_dynamic(
+    c10::List<at::Tensor> params) {
+
+  TORCH_CHECK(
+      params.size() % 2 == 0,
+      "got an incorrect number of quantized RNN parameters");
+  auto& ctx = at::globalContext();
+#ifdef USE_FBGEMM
+  if (ctx.qEngine() == at::QEngine::FBGEMM){
+    return c10::List<c10::intrusive_ptr<CellParamsBase>>(_quantized_params_dynamic(params, "fbgemm"));
+}
+#endif
+#ifdef USE_PYTORCH_QNNPACK
+  if (ctx.qEngine() == at::QEngine::QNNPACK) {
+      return c10::List<c10::intrusive_ptr<CellParamsBase>>(_quantized_params_dynamic(params, "qnnpack"));
+  }
+#endif
+  TORCH_INTERNAL_ASSERT(false, "Tried to use quantized RNN without FBGEMM or QNNPACK!")
+
+}
+
+static c10::List<c10::intrusive_ptr<CellParamsBase>> gather_quantized_params_fp16(
+    c10::List<at::Tensor> params) {
+  static at::Tensor undefined;
+  std::vector<c10::intrusive_ptr<CellParamsBase>> result;
+  TORCH_CHECK(params.size() % 4 == 0,
+              "incorrect number of quantized RNN parameters FP16");
+  for (size_t i = 0; i < params.size(); i += 4) {
+    result.emplace_back(c10::make_intrusive<QuantizedCellParamsFP16>(params[i], params[i + 1], params[i + 2], params[i + 3]));
   }
   return c10::List<c10::intrusive_ptr<CellParamsBase>>(result);
 }
@@ -1202,7 +1280,7 @@ std::tuple<Tensor, Tensor> quantized_gru_input_legacy(
   TORCH_WARN_ONCE("torch.quantized_gru with List[Tensor] for parameters is "
                   "deprecated and may be removed! Please re-export your model "
                   "using the newer definitions in torch.jit.quantized");
-  auto params = gather_quantized_params(_params.vec());
+  auto params = gather_quantized_params(std::move(_params));
   return quantized_gru_input(_input, hx, std::move(params), has_biases,
                              num_layers, dropout_p, train, bidirectional,
                              batch_first);
@@ -1221,7 +1299,7 @@ std::tuple<Tensor, Tensor> quantized_gru_data_legacy (
   TORCH_WARN_ONCE("torch.quantized_gru with List[Tensor] for parameters is "
                   "deprecated and may be removed! Please re-export your model "
                   "using the newer definitions in torch.jit.quantized");
-  auto params = gather_quantized_params(_params.vec());
+  auto params = gather_quantized_params(std::move(_params));
   return quantized_gru_data(data, batch_sizes, hx, std::move(params),
                             has_biases, num_layers, dropout_p, train,
                             bidirectional);
@@ -1480,7 +1558,17 @@ std::tuple<Tensor, Tensor, Tensor> quantized_lstm_input_legacy(
   TORCH_WARN_ONCE("torch.quantized_lstm with List[Tensor] for parameters is "
                   "deprecated and may be removed! Please re-export your model "
                   "using the newer definitions in torch.jit.quantized");
-  auto params = gather_quantized_params(_params_.vec());
+  c10::List<c10::intrusive_ptr<CellParamsBase>> params;
+  auto result_dtype = dtype.has_value() ? dtype.value() : at::kChar;
+  if (result_dtype == at::kChar || result_dtype == at::kQInt8) {
+    if (use_dynamic) {
+      params = gather_quantized_params_dynamic(std::move(_params_));
+    } else {
+      params = gather_quantized_params(std::move(_params_));
+    }
+  } else {
+    params = gather_quantized_params_fp16(std::move(_params_));
+  }
   return quantized_lstm_input(_input, std::move(hx_), std::move(params), has_biases,
                               num_layers, dropout_p, train, bidirectional,
                               batch_first, std::move(dtype), use_dynamic);
@@ -1532,7 +1620,17 @@ std::tuple<Tensor, Tensor, Tensor> quantized_lstm_data_legacy(
   TORCH_WARN_ONCE("torch.quantized_lstm with List[Tensor] for parameters is "
                   "deprecated and may be removed! Please re-export your model "
                   "using the newer definitions in torch.jit.quantized");
-  auto params = gather_quantized_params(_params_.vec());
+  c10::List<c10::intrusive_ptr<CellParamsBase>> params;
+  auto result_dtype = dtype.has_value() ? dtype.value() : at::kChar;
+  if (result_dtype == at::kChar || result_dtype == at::kQInt8) {
+    if (use_dynamic) {
+      params = gather_quantized_params_dynamic(std::move(_params_));
+    } else {
+      params = gather_quantized_params(std::move(_params_));
+    }
+  } else {
+    params = gather_quantized_params_fp16(std::move(_params_));
+  }
   return quantized_lstm_data(data, batch_sizes, std::move(hx_), std::move(params),
                              has_biases, num_layers, dropout_p, train, bidirectional,
                              std::move(dtype), use_dynamic);
