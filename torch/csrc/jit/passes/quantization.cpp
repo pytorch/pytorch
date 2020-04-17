@@ -737,7 +737,8 @@ graph(%self, %a, %b, %inplace):
      %second_output = prim::CallFunction(%relu, %first_output, %inplace)
      return (%second_output) )");
 
-  const PatternInfo inplace_mul_functional_relu = PatternInfo::parse_from_str(R"(
+  const PatternInfo inplace_mul_functional_relu =
+      PatternInfo::parse_from_str(R"(
 graph(%self, %a, %b, %inplace):
      %first_output = aten::mul_(%a, %b)
      %relu = prim::Constant[name="relu"]()
