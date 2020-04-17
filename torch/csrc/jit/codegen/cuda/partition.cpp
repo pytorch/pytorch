@@ -88,9 +88,6 @@ bool isFusableCudaFusionGroup(
     const Node* const node) {
   if (isFusableNode(node)) {
 
-    std::cout << "node: " << *node << std::endl;
-    std::cout << "fusion node: " << *fusion << std::endl;
-
     auto device = getDevice(fusion);
 
     auto tensor_type = fusion->outputs()[0]->type()->cast<TensorType>();
@@ -106,7 +103,6 @@ bool isFusableCudaFusionGroup(
               break;
             }
           }
-          std::cout << "output used outside fusion: " << output_tensor << std::endl;
           // if the output is not used by outside, there's no need to check its
           // shape
           if (output_tensor &&
