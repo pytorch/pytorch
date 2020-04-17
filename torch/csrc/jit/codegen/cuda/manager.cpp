@@ -160,12 +160,20 @@ void runCudaFusionGroup(const Node* const fusion_node, Stack& stack) {
   // Currently we just construct I/O tensors for static graph;
   std::shared_ptr<Graph> graph = fusion_node->g(attr::Subgraph);
 
+  std::cout << "graph for execution: " << *graph << std::endl;
+
   const auto nInputs = graph->inputs().size();
   at::ArrayRef<IValue> inputs = last(stack, nInputs);
 
   // shape inference in graph
   bool matched_static_inputs = true;
-  for (int i = 0; i < nInputs; i++) {
+  for (auto output : graph->outputs()) {
+    if (!output->isCompleteTensor()) {
+      matched_static_inputs = false;
+    }
+  }
+
+  for (int i = 0; matched_static_inputs && i < nInputs; i++) {
     auto& static_input = graph->inputs()[i];
     auto& dynamic_input = inputs[i]; // this is FILO stack
     if ((*dynamic_input.type()) != (*static_input->type())) {

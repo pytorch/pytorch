@@ -1929,6 +1929,33 @@ class ShapePropagator {
       return PropagateShapeOnNodeByRunningIt(node);
     } else if (
         node->matches("aten::neg(Tensor self) -> Tensor") ||
+        node->matches("aten::abs(Tensor self) -> Tensor") ||
+        node->matches("aten::log(Tensor self) -> Tensor") ||
+        node->matches("aten::log10(Tensor self) -> Tensor") ||
+        node->matches("aten::log1p(Tensor self) -> Tensor") ||
+        node->matches("aten::log2(Tensor self) -> Tensor") ||
+        node->matches("aten::lgamma(Tensor self) -> Tensor") ||
+        node->matches("aten::exp(Tensor self) -> Tensor") ||
+        node->matches("aten::expm1(Tensor self) -> Tensor") ||
+        node->matches("aten::erf(Tensor self) -> Tensor") ||
+        node->matches("aten::erfc(Tensor self) -> Tensor") ||
+        node->matches("aten::cos(Tensor self) -> Tensor") ||
+        node->matches("aten::acos(Tensor self) -> Tensor") ||
+        node->matches("aten::cosh(Tensor self) -> Tensor") ||
+        node->matches("aten::sin(Tensor self) -> Tensor") ||
+        node->matches("aten::asin(Tensor self) -> Tensor") ||
+        node->matches("aten::sinh(Tensor self) -> Tensor") ||
+        node->matches("aten::tan(Tensor self) -> Tensor") ||
+        node->matches("aten::atan(Tensor self) -> Tensor") ||
+        node->matches("aten::sqrt(Tensor self) -> Tensor") ||
+        node->matches("aten::rsqrt(Tensor self) -> Tensor") ||
+        node->matches("aten::ceil(Tensor self) -> Tensor") ||
+        node->matches("aten::floor(Tensor self) -> Tensor") ||
+        node->matches("aten::round(Tensor self) -> Tensor") ||
+        node->matches("aten::trunc(Tensor self) -> Tensor") ||
+        node->matches("aten::frac(Tensor self) -> Tensor") ||
+        node->matches("aten::reciprocal(Tensor self) -> Tensor") ||
+        node->matches("aten::relu(Tensor self) -> Tensor") ||
         node->matches("aten::sigmoid(Tensor self) -> Tensor") ||
         node->matches("aten::tanh(Tensor self) -> Tensor")) {
       node->output()->setType(tensor_types.at(0)->contiguous());

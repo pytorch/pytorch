@@ -138,5 +138,49 @@ class TestCudaFuser(JitTestCase):
         # Currently cannot fuse this
         self.assertFalse(self._has_cuda_fusion_group(t_jit.graph_for(x, y, z)))
 
+    def _binary_test_helper(self, operation):
+        def t(x : torch.Tensor, y: torch.Tensor, z : float):
+            o = x + z
+            o = operation(o, y)
+            return o
+        t_jit = torch.jit.script(t)
+        x = torch.randn(4, 8, 32, 32, dtype=torch.float, device="cuda")
+        y = torch.randn(4, 8, 32, 32, dtype=torch.float, device="cuda")
+        jit_o = t_jit(x, y, 2.0)
+        jit_o = t_jit(x, y, 2.0)
+        o = t(x, y, 2.0)
+        self.assertEqual(o, jit_o)
+        self.assertTrue(self._has_cuda_fusion_group(t_jit.graph_for(x, y, 2.0)))
+      
+    def _unary_test_helper(self, operation):
+        def t(x : torch.Tensor, z : float):
+            o = x + z
+            o = operation(o)
+            return o
+        t_jit = torch.jit.script(t)
+        x = torch.randn(4, 8, 32, 32, dtype=torch.float, device="cuda")
+        jit_o = t_jit(x, 2.0)
+        jit_o = t_jit(x, 2.0)
+        o = t(x, 2.0)
+        self.assertEqual(o, jit_o)
+        self.assertTrue(self._has_cuda_fusion_group(t_jit.graph_for(x, 2.0)))
+      
+    @unittest.skipIf(not RUN_CUDA, "requires CUDA")
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING, "Requires profiling node to run cuda fuser")
+    @skipIfRocm
+    def test_unary_ops(self):
+        operations = [torch.neg, torch.abs, torch.log, torch.log10, torch.log1p, torch.log2, torch.lgamma, torch.exp, torch.expm1, torch.erf, torch.erfc, torch.cos, torch.acos, torch.cosh, torch.sin, torch.asin, torch.tan, torch.atan, torch.sqrt, torch.rsqrt, torch.ceil, torch.floor, torch.round, torch.trunc, torch.frac, torch.reciprocal, torch.relu, torch.sigmoid]
+        for op in operations:
+            self._unary_test_helper(op)
+        
+    @unittest.skipIf(not RUN_CUDA, "requires CUDA")
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING, "Requires profiling node to run cuda fuser")
+    @skipIfRocm
+    def test_binary_ops(self):
+        #operations = [torch.div, torch.mul, torch.atan2, torch.max, torch.min, torch.pow, torch.remainder, torch.fmod, torch.eq, torch.ne, torch.ge, torch.gt, torch.le, torch.lt]
+        operations = [torch.div, torch.mul, torch.atan2, torch.max, torch.min, torch.pow, torch.fmod]
+        for op in operations:
+            self._binary_test_helper(op)
+
 if __name__ == '__main__':
     run_tests()

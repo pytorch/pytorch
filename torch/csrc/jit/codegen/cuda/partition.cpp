@@ -32,7 +32,8 @@ static c10::optional<c10::Device> getDevice(const Node* const node) {
 static bool isFusableDevice(const Node* node, const c10::Device device) {
   for (auto value : node->outputs()) {
     auto output_device = getDevice(value);
-    if (!output_device.has_value() || output_device.value() != device) {
+    //if (!output_device.has_value() || output_device.value() != device) {
+    if (output_device.has_value() && output_device.value() != device) {
       return false;
     }
   }
@@ -43,7 +44,8 @@ static bool isFusableDevice(const Node* node, const c10::Device device) {
 static bool isFusableDevice(const Node* node) {
   auto device = getDevice(node);
   if (!device.has_value()) {
-    return false;
+    //return false;
+    return true;
   }
   // Technically we don't need to check device for node->outputs()[0] again, meh
   return isFusableDevice(node, device.value());
@@ -85,6 +87,10 @@ bool isFusableCudaFusionGroup(
     const Node* const fusion,
     const Node* const node) {
   if (isFusableNode(node)) {
+
+    std::cout << "node: " << *node << std::endl;
+    std::cout << "fusion node: " << *fusion << std::endl;
+
     auto device = getDevice(fusion);
 
     auto tensor_type = fusion->outputs()[0]->type()->cast<TensorType>();
@@ -100,6 +106,7 @@ bool isFusableCudaFusionGroup(
               break;
             }
           }
+          std::cout << "output used outside fusion: " << output_tensor << std::endl;
           // if the output is not used by outside, there's no need to check its
           // shape
           if (output_tensor &&
@@ -109,7 +116,8 @@ bool isFusableCudaFusionGroup(
           }
         }
       }
-      return (device.has_value() && isFusableDevice(node, device.value()));
+      //return (device.has_value() && isFusableDevice(node, device.value()));
+      return (!device.has_value() || isFusableDevice(node, device.value()));
     }
   }
   return false;
