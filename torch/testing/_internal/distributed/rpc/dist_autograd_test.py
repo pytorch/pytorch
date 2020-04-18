@@ -2111,7 +2111,7 @@ class DistAutogradTest(RpcAgentTestFixture):
             loss = a.sum()
             dist_autograd.backward(context_id, [loss])
             self.assertEqual(3, self.hook_called_times)
-            self.assertEqual(7, len(dist_autograd.get_gradients(context_id)))
+            self.assertEqual(1, len(dist_autograd.get_gradients(context_id)))
 
 @unittest.skipIf(
     not torch._six.PY3,
