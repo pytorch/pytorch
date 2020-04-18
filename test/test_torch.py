@@ -8606,7 +8606,7 @@ class TestTorchDeviceType(TestCase):
             x[-i] = 1
             self.assertEqual(x.argmax().item(), size - i)
             self.assertEqual(y.argmax().item(), ysize - i)
-        # 2D case
+        # 2D case: sum
         size = (7, 1024 * 1024 + 3)
         x = torch.zeros(size, dtype=dtype, device=device)
         for i in range(100):
@@ -8623,6 +8623,23 @@ class TestTorchDeviceType(TestCase):
             xs = x.sum(dim=-1)
             for j in range(7):
                 self.assertEqual(xs[j].item(), float(j))
+        # 2D case: argmax
+        size = (7, 1024 * 1024 + 3)
+        x = torch.zeros(size, dtype=dtype, device=device)
+        for i in range(100):
+            x.zero_()
+            for j in range(7):
+                x[j][i] = j + 1
+            xs = x.argmax(dim=-1)
+            for j in range(7):
+                self.assertEqual(xs[j].item(), i)
+        for i in range(1, 100):
+            x.zero_()
+            for j in range(7):
+                x[j][-i] = j + 1
+            xs = x.argmax(dim=-1)
+            for j in range(7):
+                self.assertEqual(xs[j].item(), size[1] - i)
 
 
     @slowTest

@@ -406,7 +406,7 @@ struct ReduceOp {
   C10_DEVICE arg_t vectorized_thread_reduce_impl(const scalar_t* data) const {
     index_t end = config.num_inputs;
 
-    // Shift the 
+    // Handle the head of input slice where data is not aligned
     arg_t value = ident;
     constexpr int align_bytes = alignof(at::native::memory::aligned_vector<scalar_t, vec_size>);
     constexpr int align_elements = align_bytes / sizeof(scalar_t);
