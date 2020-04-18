@@ -889,7 +889,7 @@ std::shared_ptr<FutureVariableList> Engine::execute_with_graph_task(
       });
     } else {
       thread_main(nullptr, false);
-      TORCH_INTERNAL_ASSERT(graph_task->future_result_->completed());
+      TORCH_INTERNAL_ASSERT(graph_task->future_completed_.load());
     }
     // reset the worker_device after the completion of the graph_task, this is so
     // that the initial state of the engine remains the same across every backward()
@@ -924,7 +924,7 @@ std::shared_ptr<FutureVariableList> Engine::execute_with_graph_task(
       // The graph task should have completed and the associated future should
       // be marked completed as well since 'thread_main' above is a call
       // blocking an autograd engine thread.
-      TORCH_INTERNAL_ASSERT(graph_task->future_result_->completed());
+      TORCH_INTERNAL_ASSERT(graph_task->future_completed_.load());
     }
   }
   // graph_task_exec_post_processing is done when the Future is marked as
