@@ -5,6 +5,10 @@
 namespace torch {
 namespace jit {
 
+std::map<std::vector<std::string>, std::string> function_to_op_mappings = {
+    {{"torch.nn.functional", ".interpolate"}, "aten::__interpolate"},
+    {{"torchvision", ".nms"}, "torchvision::nms"}};
+
 void functionCallSubstitution(Block* block) {
   for (auto it = block->nodes().begin(), end = block->nodes().end();
        it != end;) {
@@ -12,36 +16,45 @@ void functionCallSubstitution(Block* block) {
     switch (cur->kind()) {
       case prim::CallFunction: {
         AT_ASSERT(cur->input(0)->node()->kind() == prim::Constant);
+        bool function_substituted = false;
         auto function_constant = cur->input(0)->node();
         auto fun_type =
             function_constant->output()->type()->expect<FunctionType>();
 
-        if ((fun_type->function()->qualname().qualifiedName().find(
-                 "torch.nn.functional") != std::string::npos) &&
-            (fun_type->function()->qualname().qualifiedName().find(
-                 "interpolate") != std::string::npos)) {
-          cur->removeInput(0);
-          Node* interpolate_node = block->owningGraph()->create(
-              Symbol::fromQualString("aten::__interpolate"),
-              {cur->inputs()},
-              cur->outputs().size());
-          interpolate_node->output()->copyMetadata(cur->output());
-          interpolate_node->insertAfter(cur);
-          cur->replaceAllUsesWith(interpolate_node);
-          cur->removeAllInputs();
-          cur->destroy();
-          GRAPH_UPDATE(
-              "ONNX function call substitution function: '",
-              fun_type->function()->name(),
-              "' to aten::__interpolate");
-          GRAPH_UPDATE(
-              "Function in ONNX function call substitution body: ",
-              *fun_type->function()->optimized_graph());
-        } else {
+        for (std::pair<std::vector<std::string>, std::string> function_to_op :
+             function_to_op_mappings) {
+          if ((fun_type->function()->qualname().qualifiedName().find(
+                   function_to_op.first[0]) != std::string::npos) &&
+              (fun_type->function()->qualname().qualifiedName().find(
+                   function_to_op.first[1]) != std::string::npos)) {
+            cur->removeInput(0);
+            Node* new_node = block->owningGraph()->create(
+                Symbol::fromQualString(function_to_op.second),
+                {cur->inputs()},
+                cur->outputs().size());
+            new_node->output()->copyMetadata(cur->output());
+            new_node->insertAfter(cur);
+            cur->replaceAllUsesWith(new_node);
+            cur->removeAllInputs();
+            cur->destroy();
+            GRAPH_UPDATE(
+                "ONNX function call substitution function: '",
+                fun_type->function()->name(),
+                "' to ",
+                function_to_op.second);
+            GRAPH_UPDATE(
+                "Function in ONNX function call substitution body: ",
+                *fun_type->function()->optimized_graph());
+            function_substituted = true;
+            break;
+          }
+        }
+        if (!function_substituted) {
           cur->removeInput(0);
           functionCallSubstitution(fun_type->function()->graph()->block());
           inlineCallTo(cur, fun_type->function(), false);
         }
+
       } break;
       case prim::CallMethod: {
         const std::string& name = cur->s(attr::name);

@@ -456,6 +456,17 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.arange(-5, 5).to(dtype=torch.float32)
         self.run_test(MyModel(), x)
 
+    def test_nms(self):
+        class Module(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, boxes, scores):
+                return torchvision.ops.nms(boxes, scores, 0.5)
+
+        boxes = torch.rand(5, 4)
+        boxes[:, 2:] += torch.rand(5, 2)
+        scores = torch.randn(5)
+        self.run_test(Module(), (boxes, scores))
+
     @skipIfUnsupportedMinOpsetVersion(12)
     @unittest.skip("Enable once inverse is supported in ORT")
     def test_inverse(self):
