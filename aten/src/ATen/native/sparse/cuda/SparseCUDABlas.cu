@@ -7,7 +7,10 @@
 #include <TH/THGeneral.h>
 
 #include <cusparse.h>
+
+#if !defined(MSC_VER) && defined(__CUDACC__) && CUSPARSE_VERSION >= 10301 // CUDA release >= 10.2 and not windows
 #include <library_types.h>
+#endif
 
 // LIMITATION (cusparseSpMM): 
 // The generic APIs are currently (CUDA 10.1) available for all platforms except Windows. 
@@ -77,7 +80,7 @@ cusparseOperation_t convertTransToCusparseOperation(char trans) {
   }
 }
 
-#if !defined(MSC_VER) && CUSPARSE_VERSION >= 10301 // CUDA release >= 10.2 and not windows
+#if !defined(MSC_VER) && defined(__CUDACC__) && CUSPARSE_VERSION >= 10301 // CUDA release >= 10.2 and not windows
 
 template<typename T> 
 void csrmm2(
