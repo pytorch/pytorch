@@ -84,3 +84,24 @@ commands:
       - brew_update
       - brew_install:
           formulae: libtool
+
+  maybe_rebase:
+    steps:
+      - run:
+          name: Rebase on top of REBASE_TARGET if exists
+          no_output_timeout: "10m"
+          command: |
+            set -ex
+            if [ -n "$REBASE_TARGET" ] && [ -n "$CIRCLE_PULL_REQUEST" ]; then
+              git config --global user.email "circleci.ossci@gmail.com"
+              git config --global user.name "CircleCI"
+              PR_NUM=$(basename $CIRCLE_PULL_REQUEST)
+              CIRCLE_PR_BASE_BRANCH=$(curl -s https://api.github.com/repos/$CIRCLE_PROJECT_USERNAME/$CIRCLE_PROJECT_REPONAME/pulls/$PR_NUM | jq -r '.base.ref')
+              echo "Rebase on top of $CIRCLE_PR_BASE_BRANCH branch before building in environment $BUILD_ENVIRONMENT"
+              if [[ "${CIRCLE_PR_BASE_BRANCH}" == "master" ]]; then
+                git rebase "${REBASE_TARGET}"
+              else
+                git rebase "origin/${CIRCLE_PR_BASE_BRANCH}"
+              fi
+            fi
+
