@@ -126,9 +126,9 @@ namespace {
  */
 
 template <int kSpatialDim = 2>
-class QConvUnpackWeightsInt8 final : public c10::OperatorKernel {
+class QConvUnpackWeightsInt8 final {
  public:
-  std::tuple<at::Tensor, c10::optional<at::Tensor>> operator()(
+  static std::tuple<at::Tensor, c10::optional<at::Tensor>> run(
       const c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>>& packed_weight) {
     auto& ctx = at::globalContext();
 
@@ -162,19 +162,13 @@ static auto conv3d_params = register_conv_params<3>();
 
 } // namespace
 
-static auto registry =
-    c10::RegisterOperators()
-        .op(c10::RegisterOperators::options()
-            .schema("quantized::conv_unpack(__torch__.torch.classes.quantized.Conv2dPackedParamsBase packed_weight) -> (Tensor W_origin, Tensor? B_origin)")
-            .catchAllKernel<QConvUnpackWeightsInt8<2>>()) // conv_unpack is deprecated, please
-        // use conv2d_unpack for 2D conv.
-        .op(c10::RegisterOperators::options()
-            .schema("quantized::conv2d_unpack(__torch__.torch.classes.quantized.Conv2dPackedParamsBase packed_weight) -> (Tensor W_origin, Tensor? B_origin)")
-            .catchAllKernel<QConvUnpackWeightsInt8<2>>()) // We use  conv2d_unpack to be
-                                           // consistent with conv3d_unpack
-        .op(c10::RegisterOperators::options()
-            .schema("quantized::conv3d_unpack(__torch__.torch.classes.quantized.Conv3dPackedParamsBase packed_weight) -> (Tensor W_origin, Tensor? B_origin)")
-            .catchAllKernel<QConvUnpackWeightsInt8<3>>());
+TORCH_LIBRARY_IMPL(quantized, CPU, m) {
+  // conv_unpack is deprecated, please use conv2d_unpack for 2D conv.
+  m.impl("conv_unpack", QConvUnpackWeightsInt8<2>::run);
+  // We use  conv2d_unpack to be consistent with conv3d_unpack
+  m.impl("conv2d_unpack", QConvUnpackWeightsInt8<2>::run);
+  m.impl("conv3d_unpack", QConvUnpackWeightsInt8<3>::run);
+}
 
 } // namespace
 } // namespace native

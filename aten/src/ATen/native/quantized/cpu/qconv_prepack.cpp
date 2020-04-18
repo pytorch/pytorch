@@ -266,9 +266,9 @@ namespace native {
 namespace {
 
 template <int kSpatialDim = 2>
-class QConvPackWeightInt8 final : public c10::OperatorKernel {
+class QConvPackWeightInt8 final {
  public:
-  c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> operator()(
+  static c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> run(
       Tensor weight,
       c10::optional<Tensor> bias,
       torch::List<int64_t> stride,
@@ -313,29 +313,16 @@ static auto conv3d_params = register_conv_params<3>();
 
 } // namespace
 
-static auto registry =
-    c10::RegisterOperators()
-        .op("quantized::conv_prepack(Tensor weight, Tensor? bias, int[] stride, int[] padding, int[] dilation, int groups) -> __torch__.torch.classes.quantized.Conv2dPackedParamsBase", // conv_prepack is deprecated, please use
-                        // conv2d_prepack for 2D conv.
-            c10::RegisterOperators::options()
-                .aliasAnalysis(at::AliasAnalysisKind::PURE_FUNCTION)
-                .kernel<QConvPackWeightInt8<2>>(
-                    DispatchKey::QuantizedCPU))
-        .op("quantized::conv2d_prepack(Tensor weight, Tensor? bias, int[] stride, int[] padding, int[] dilation, int groups) -> __torch__.torch.classes.quantized.Conv2dPackedParamsBase",
-            c10::RegisterOperators::options()
-                .aliasAnalysis(at::AliasAnalysisKind::PURE_FUNCTION)
-                .kernel<QConvPackWeightInt8<2>>(
-                    DispatchKey::QuantizedCPU))
-        .op("_quantized::conv2d_prepack(Tensor weight, Tensor? bias, int[] stride, int[] padding, int[] dilation, int groups) -> __torch__.torch.classes.quantized.Conv2dPackedParamsBase",
-            c10::RegisterOperators::options()
-                .aliasAnalysis(at::AliasAnalysisKind::PURE_FUNCTION)
-                .kernel<QConvPackWeightInt8<2>>(
-                    DispatchKey::QuantizedCPU))
-        .op("quantized::conv3d_prepack(Tensor weight, Tensor? bias, int[] stride, int[] padding, int[] dilation, int groups) -> __torch__.torch.classes.quantized.Conv3dPackedParamsBase",
-            c10::RegisterOperators::options()
-                .aliasAnalysis(at::AliasAnalysisKind::PURE_FUNCTION)
-                .kernel<QConvPackWeightInt8<3>>(
-                    DispatchKey::QuantizedCPU));
+TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
+  // conv_prepack is deprecated, please use conv2d_prepack for 2D conv.
+  m.impl("conv_prepack", QConvPackWeightInt8<2>::run);
+  m.impl("conv2d_prepack", QConvPackWeightInt8<2>::run);
+  m.impl("conv3d_prepack", QConvPackWeightInt8<3>::run);
+}
+
+TORCH_LIBRARY_IMPL(_quantized, QuantizedCPU, m) {
+  m.impl("conv2d_prepack", QConvPackWeightInt8<2>::run);
+}
 
 } // namespace
 } // namespace native
