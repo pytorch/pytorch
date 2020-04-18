@@ -72,9 +72,9 @@ class TestSerialization(TestCase):
         self.assertEqual(qmodule_scripted(input_tensor), expected, prec=prec)
         self.assertEqual(qmodule_traced(input_tensor), expected, prec=prec)
 
+    # TODO: add qnnpack test(https://github.com/pytorch/pytorch/pull/36771)
     @unittest.skipUnless(
-        'fbgemm' in torch.backends.quantized.supported_engines or
-        'qnnpack' in torch.backends.quantized.supported_engines,
+        'fbgemm' in torch.backends.quantized.supported_engines,
         " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
         " with instruction set support avx2 or newer.",
     )
@@ -83,8 +83,7 @@ class TestSerialization(TestCase):
         self._test_op(module, input_size=[1, 3], generate=False)
 
     @unittest.skipUnless(
-        'fbgemm' in torch.backends.quantized.supported_engines or
-        'qnnpack' in torch.backends.quantized.supported_engines,
+        'fbgemm' in torch.backends.quantized.supported_engines,
         " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
         " with instruction set support avx2 or newer.",
     )
@@ -103,7 +102,6 @@ class TestSerialization(TestCase):
         self._test_op(module_qint8, "qint8", input_size=[1, 3], input_quantized=False, generate=False)
         self._test_op(module_float16, "float16", input_size=[1, 3], input_quantized=False, generate=False)
 
-    # TODO: add qnnpack test(https://github.com/pytorch/pytorch/pull/36771)
     @unittest.skipUnless(
         'fbgemm' in torch.backends.quantized.supported_engines,
         " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
