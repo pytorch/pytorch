@@ -245,5 +245,121 @@ class TestCUDA_CSPRNG_Generator(common.TestCase):
                     self.assertEqual(t.mean().item(), mean, 1)
                     self.assertEqual(t.std().item(), std, 1)
 
+    def test_normal2(self):
+
+        def helper(self, device, dtype, ptype, t_transform, std_transform):
+            q = torch.empty(100, 100, dtype=dtype, device=device)
+
+            q.normal_()
+            self.assertEqual(t_transform(q).mean(), 0, 0.2)
+            self.assertEqual(t_transform(q).std(), std_transform(1), 0.2)
+
+            q.normal_(2, 3)
+            self.assertEqual(t_transform(q).mean(), 2, 0.3)
+            self.assertEqual(t_transform(q).std(), std_transform(3), 0.3)
+
+            q = torch.empty(100, 100, dtype=dtype, device=device)
+            q_row1 = q[0:1].clone()
+            q[99:100].normal_()
+            self.assertEqual(t_transform(q[99:100]).mean(), 0, 0.2)
+            self.assertEqual(t_transform(q[99:100]).std(), std_transform(1), 0.2)
+            self.assertEqual(t_transform(q[0:1]).clone(), t_transform(q_row1))
+
+            mean = torch.empty(100, 100, dtype=dtype, device=device)
+            mean[:50].fill_(ptype(0))
+            mean[50:].fill_(ptype(1))
+
+            std = torch.empty(100, 100, dtype=torch.float, device=device)
+            std[:, :50] = 4
+            std[:, 50:] = 1
+
+            r = torch.normal(mean)
+            self.assertEqual(r.dtype, dtype)
+            self.assertEqual(str(r.device), device)
+            self.assertEqual(t_transform(r[:50]).mean(), 0, 0.2)
+            self.assertEqual(t_transform(r[50:]).mean(), 1, 0.2)
+            self.assertEqual(t_transform(r).std(), std_transform(1), 0.2)
+
+            r.fill_(42)
+            r = torch.normal(mean, 3)
+            self.assertEqual(r.dtype, dtype)
+            self.assertEqual(str(r.device), device)
+            self.assertEqual(t_transform(r[:50]).mean(), 0, 0.2)
+            self.assertEqual(t_transform(r[50:]).mean(), 1, 0.2)
+            self.assertEqual(t_transform(r).std(), std_transform(3), 0.2)
+
+            r.fill_(42)
+            torch.normal(mean, 3, out=r)
+            self.assertEqual(r.dtype, dtype)
+            self.assertEqual(str(r.device), device)
+            self.assertEqual(t_transform(r[:50]).mean(), 0, 0.2)
+            self.assertEqual(t_transform(r[50:]).mean(), 1, 0.2)
+            self.assertEqual(t_transform(r).std(), std_transform(3), 0.2)
+
+            r.fill_(42)
+            r = torch.normal(2, std)
+            self.assertFalse(r.dtype.is_complex)
+            self.assertEqual(str(r.device), device)
+            self.assertEqual(r.mean(), 2, 0.2)
+            self.assertEqual(r[:, :50].std(), 4, 0.3)
+            self.assertEqual(r[:, 50:].std(), 1, 0.2)
+
+            r.fill_(42)
+            torch.normal(2, std, out=r)
+            self.assertFalse(r.dtype.is_complex)
+            self.assertEqual(str(r.device), device)
+            self.assertEqual(r.mean(), 2, 0.2)
+            self.assertEqual(r[:, :50].std(), 4, 0.3)
+            self.assertEqual(r[:, 50:].std(), 1, 0.2)
+
+            r.fill_(42)
+            r = torch.normal(mean, std)
+            self.assertEqual(r.dtype, dtype)
+            self.assertEqual(str(r.device), device)
+            self.assertEqual(t_transform(r[:50]).mean(), 0, 0.2)
+            self.assertEqual(t_transform(r[50:]).mean(), 1, 0.2)
+            self.assertEqual(t_transform(r[:, :50]).std(), std_transform(4), 0.3)
+            self.assertEqual(t_transform(r[:, 50:]).std(), std_transform(1), 0.2)
+
+            r.fill_(42)
+            torch.normal(mean, std, out=r)
+            self.assertEqual(r.dtype, dtype)
+            self.assertEqual(str(r.device), device)
+            self.assertEqual(t_transform(r[:50]).mean(), 0, 0.2)
+            self.assertEqual(t_transform(r[50:]).mean(), 1, 0.2)
+            self.assertEqual(t_transform(r[:, :50]).std(), std_transform(4), 0.3)
+            self.assertEqual(t_transform(r[:, 50:]).std(), std_transform(1), 0.2)
+
+            r.fill_(42)
+            r = torch.normal(2, 3, (100, 100), dtype=dtype, device=device)
+            self.assertEqual(r.dtype, dtype)
+            self.assertEqual(str(r.device), device)
+            self.assertEqual(t_transform(r).mean(), 2, 0.3)
+            self.assertEqual(t_transform(r).std(), std_transform(3), 0.3)
+
+            r.fill_(42)
+            torch.normal(2, 3, (100, 100), dtype=dtype, device=device, out=r)
+            self.assertEqual(r.dtype, dtype)
+            self.assertEqual(str(r.device), device)
+            self.assertEqual(t_transform(r).mean(), 2, 0.3)
+            self.assertEqual(t_transform(r).std(), std_transform(3), 0.3)
+
+        device = 'cuda:0'
+        for dtype in [torch.float, torch.double] :
+            if dtype.is_complex:
+                helper(self, device, dtype, lambda x: complex(x, x),
+                    lambda t: torch.real(t).to(torch.float), lambda mean: mean / math.sqrt(2))
+                helper(self, device, dtype, lambda x: complex(x, x),
+                    lambda t: torch.imag(t).to(torch.float), lambda mean: mean / math.sqrt(2))
+                self.assertRaisesRegex(
+                    RuntimeError, "normal expects standard deviation to be non-complex",
+                    lambda: torch.normal(0, torch.empty(100, 100, dtype=dtype, device=device)))
+                out = torch.empty(100, 100, dtype=dtype, device=device)
+                self.assertRaisesRegex(
+                    RuntimeError, "normal expects standard deviation to be non-complex",
+                    lambda: torch.normal(0, torch.empty(100, 100, dtype=dtype, device=device), out=out))
+            else:
+                helper(self, device, dtype, lambda x: x, lambda t: t, lambda mean: mean)
+
 if __name__ == "__main__":
     common.run_tests()
