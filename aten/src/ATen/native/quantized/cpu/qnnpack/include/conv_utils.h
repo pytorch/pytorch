@@ -352,14 +352,14 @@ struct deconv_param_t {
     std::array<size_t, 2> output_dims;
     output_dims[0] = compute_output_dimension(input_dims[0],  // width
                                               padding_dims[1] + padding_dims[3],
-                                              /*adjustment=*/0,
+                                              adjustment_dims[0],
                                               kernel_dims[0],
                                               dilation_dims[0],
                                               stride_dims[0],
                                               /*transpose=*/true);
     output_dims[1] = compute_output_dimension(input_dims[1],  // height
                                               padding_dims[0] + padding_dims[2],
-                                              /*adjustment=*/0,
+                                              adjustment_dims[1],
                                               kernel_dims[1],
                                               dilation_dims[1],
                                               stride_dims[1],

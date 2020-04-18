@@ -178,7 +178,7 @@ enum pytorch_qnnp_status qnnpackDeConv(
   pytorch_qnnp_operator_t deconvolution =
       static_cast<pytorch_qnnp_operator_t>(
           calloc(1, sizeof(struct pytorch_qnnp_operator)));
-  if (deconvolution == NULL) {
+  if (deconvolution == nullptr) {
     pytorch_qnnp_log_error(
         "failed to allocate %zu bytes for qnnp_operator structure",
         sizeof(struct pytorch_qnnp_operator));
@@ -316,7 +316,7 @@ enum pytorch_qnnp_status qnnpackDeConv(
     }
     default:
       pytorch_qnnp_log_error(
-          "Invalid kernel type. QNNPACK convolution run failed.");
+          "Invalid kernel type. QNNPACK deconvolution run failed.");
       PYTORCH_QNNP_UNREACHABLE;
   }
   return pytorch_qnnp_status_success;
