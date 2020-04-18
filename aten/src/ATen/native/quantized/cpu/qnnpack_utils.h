@@ -40,10 +40,10 @@ struct PackedConvWeightsQnnp : public ConvPackedParamsBase<kSpatialDim> {
       torch::List<int64_t> padding,
       torch::List<int64_t> dilation,
       int64_t groups,
-      c10::optional<double> input_scale,
+      c10::optional<float> input_scale,
       std::vector<int64_t> kernel,
-      double w_scale,
-      int64_t w_zp)
+      float w_scale,
+      int32_t w_zp)
       : w(std::move(w)),
         orig_weight(std::move(orig_weight)),
         bias(std::move(bias)),
@@ -53,8 +53,8 @@ struct PackedConvWeightsQnnp : public ConvPackedParamsBase<kSpatialDim> {
         groups_(groups),
         input_scale(input_scale),
         kernel(std::move(kernel)),
-        w_scale(std::move(w_scale)),
-        w_zp(std::move(w_zp)) {}
+        w_scale(w_scale),
+        w_zp(w_zp) {}
 
   std::unique_ptr<qnnpack::PrePackConvWeights> w;
   at::Tensor orig_weight;
@@ -63,10 +63,10 @@ struct PackedConvWeightsQnnp : public ConvPackedParamsBase<kSpatialDim> {
   torch::List<int64_t> padding_;
   torch::List<int64_t> dilation_;
   int64_t groups_;
-  c10::optional<double> input_scale;
+  c10::optional<float> input_scale;
   std::vector<int64_t> kernel;
-  double w_scale;
-  int64_t w_zp;
+  float w_scale;
+  int32_t w_zp;
 
   at::Tensor apply(
       at::Tensor input,
