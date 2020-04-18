@@ -8571,7 +8571,7 @@ class TestTorchDeviceType(TestCase):
     @onlyCUDA
     @dtypes(torch.half, torch.float, torch.double)
     def test_reduction_vectorized_corner(self, device, dtype):
-        # 1D case
+        # 1D case: sum
         size = 1024 * 1024 * 64 + 3
         shift = 1
         x = torch.zeros(size, dtype=dtype, device=device)
@@ -8589,9 +8589,25 @@ class TestTorchDeviceType(TestCase):
             x[-i] = 1
             self.assertEqual(x.sum(), 1.0)
             self.assertEqual(y.sum(), 1.0)
+        # 1D case: argmax
+        size = 1024 * 1024 * 64 + 3
+        shift = 1
+        ysize = size - shift
+        x = torch.zeros(size, dtype=dtype, device=device)
+        y = x[shift:]
+        for i in range(100):
+            x.zero_()
+            x[i] = 1
+            self.assertEqual(x.argmax().item(), i)
+            if i >= shift:
+                self.assertEqual(y.argmax().item(), i - shift)
+        for i in range(1, 100):
+            x.zero_()
+            x[-i] = 1
+            self.assertEqual(x.argmax().item(), size - i)
+            self.assertEqual(y.argmax().item(), ysize - i)
         # 2D case
         size = (7, 1024 * 1024 + 3)
-        shift = 1
         x = torch.zeros(size, dtype=dtype, device=device)
         for i in range(100):
             x.zero_()
