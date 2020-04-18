@@ -1713,7 +1713,7 @@ class RpcTest(RpcAgentTestFixture):
             fut2.wait()
         fut1.wait()
 
-        # Zero timeout means infinity, so future should ru to completion.
+        # Zero timeout means infinity, so future should run to completion.
         rpc._set_rpc_timeout(timedelta(seconds=0))
         rpc.rpc_async(worker_name(dst_rank), my_sleep_func, args=()).wait()
 
@@ -1756,7 +1756,7 @@ class RpcTest(RpcAgentTestFixture):
         # The RPCs should run to completion since we override the timeout.
         rpc.rpc_async(dst_worker, my_sleep_func, args=(1,), timeout=5).wait()
         rpc.rpc_sync(dst_worker, my_sleep_func, args=(1,), timeout=5)
-        # Passing in a zero timeout should ensure that the RPC wont time out.
+        # Passing in a zero timeout should ensure that the RPC won't time out.
         rpc.rpc_async(dst_worker, my_sleep_func, args=(1,), timeout=0).wait()
         rpc.rpc_sync(dst_worker, my_sleep_func, args=(1,), timeout=0)
         # Reset for clean shutdown
