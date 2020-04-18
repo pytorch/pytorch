@@ -226,14 +226,16 @@ void DistEngine::computeDependencies(
         continue;
       }
       auto fn = mapEntry.first;
-      auto accumulateGradFn = dynamic_cast<AccumulateGrad*>(fn);
-      TORCH_INTERNAL_ASSERT(accumulateGradFn);
-      for (auto& capture : *execInfo.captures_) {
-        capture.hooks_.push_back(
-            std::make_unique<DistAccumulateGradCaptureHook>(
-                std::dynamic_pointer_cast<AccumulateGrad>(
-                    accumulateGradFn->shared_from_this()),
-                autogradContext));
+      // There may be nodes other than 'AccumulateGrad', e.g. RecvRPCBackward,
+      // to be captured.
+      if (auto accumulateGradFn = dynamic_cast<AccumulateGrad*>(fn)) {
+        for (auto& capture : *execInfo.captures_) {
+          capture.hooks_.push_back(
+              std::make_unique<DistAccumulateGradCaptureHook>(
+                  std::dynamic_pointer_cast<AccumulateGrad>(
+                      accumulateGradFn->shared_from_this()),
+                  autogradContext));
+        }
       }
     }
 
