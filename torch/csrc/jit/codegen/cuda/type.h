@@ -60,7 +60,7 @@ enum class UnaryOpType {
   Log1p,
   Log2,
   Neg,
-  //RandLike,
+  RandLike,
   Reciprocal,
   Relu,
   Rsqrt,

@@ -91,7 +91,7 @@ static _enum_unordered_map<UnaryOpType, std::string> unary_op_type_string_map{
     {UnaryOpType::Log1p,      "log1pf"},
     {UnaryOpType::Log2,       "log2f"},
     {UnaryOpType::Neg,        "neg"},
-    //{UnaryOpType::RandLike,
+    {UnaryOpType::RandLike,   "randLike"},
     {UnaryOpType::Reciprocal, "reciprocal"},
     {UnaryOpType::Relu,       "relu"},
     {UnaryOpType::Rsqrt,      "rsqrtf"},

@@ -26,35 +26,122 @@ void check_inlineable(const IRInputOutput* const irio) {
 
 void IRPrinter::printHeader(Fusion* fusion, const std::string& kernel_name_) {
   // Helper funtions
-  os << "__device__ int ceilDiv(const int a, const int b) {\n"
+  os << "class Philox {\n"
+     << "public:\n"
+     << "  __device__ inline Philox(unsigned long long seed,\n"
+     << "                           unsigned long long subsequence,\n"
+     << "                           unsigned long long offset) {\n"
+     << "    key.x = (unsigned int)seed;\n"
+     << "    key.y = (unsigned int)(seed >> 32);\n"
+     << "    counter = make_uint4(0, 0, 0, 0);\n"
+     << "    counter.z = (unsigned int)(subsequence);\n"
+     << "    counter.w = (unsigned int)(subsequence >> 32);\n"
+     << "    STATE = 0;\n"
+     << "    incr_n(offset / 4);\n"
+     << "  }\n"
+     << "  __device__ inline unsigned long operator()() {\n"
+     << "    if(STATE == 0) {\n"
+     << "      uint4 counter_ = counter;\n"
+     << "      uint2 key_ = key;\n"
+     << "      for(int i = 0; i < 9; i++) {\n"
+     << "        counter_ = single_round(counter_, key_);\n"
+     << "        key_.x += (kPhilox10A); key_.y += (kPhilox10B);\n"
+     << "      }\n"
+     << "      output = single_round(counter_, key_);\n"
+     << "      incr();\n"
+     << "    }\n"
+     << "    unsigned long ret;\n"
+     << "    switch(STATE) {\n"
+     << "      case 0: ret = output.x; break;\n"
+     << "      case 1: ret = output.y; break;\n"
+     << "      case 2: ret = output.z; break;\n"
+     << "      case 3: ret = output.w; break;\n"
+     << "    }\n"
+     << "    STATE = (STATE + 1) % 4;\n"
+     << "    return ret;\n"
+     << "  }\n"
+     << "private:\n"
+     << "  uint4 counter;\n"
+     << "  uint4 output;\n"
+     << "  uint2 key;\n"
+     << "  unsigned int STATE;\n"
+     << "  __device__ inline void incr_n(unsigned long long n) {\n"
+     << "    unsigned int nlo = (unsigned int)(n);\n"
+     << "    unsigned int nhi = (unsigned int)(n >> 32);\n"
+     << "    counter.x += nlo;\n"
+     << "    if (counter.x < nlo)\n"
+     << "      nhi++;\n"
+     << "    counter.y += nhi;\n"
+     << "    if (nhi <= counter.y)\n"
+     << "      return;\n"
+     << "    if (++counter.z)\n"
+     << "      return;\n"
+     << "    ++counter.w;\n"
+     << "  }\n"
+     << "  __device__ inline void incr() {\n"
+     << "    if (++counter.x)\n"
+     << "      return;\n"
+     << "    if (++counter.y)\n"
+     << "      return;\n"
+     << "    if (++counter.z)\n"
+     << "      return;\n"
+     << "    ++counter.w;\n"
+     << "  }\n"
+     << "  __device__ unsigned int mulhilo32(unsigned int a, unsigned int b,\n"
+     << "                                    unsigned int *result_high) {\n"
+     << "    *result_high = __umulhi(a, b);\n"
+     << "    return a*b;\n"
+     << "  }\n"
+     << "  __device__ inline uint4 single_round(uint4 ctr, uint2 key) {\n"
+     << "    unsigned int hi0;\n"
+     << "    unsigned int hi1;\n"
+     << "    unsigned int lo0 = mulhilo32(kPhiloxSA, ctr.x, &hi0);\n"
+     << "    unsigned int lo1 = mulhilo32(kPhiloxSB, ctr.z, &hi1);\n"
+     << "    uint4 ret = {hi1 ^ ctr.y ^ key.x, lo1, hi0 ^ ctr.w ^ key.y, lo0};\n"
+     << "    return ret;\n"
+     << "  }\n"
+     << "  static const unsigned long kPhilox10A = 0x9E3779B9;\n"
+     << "  static const unsigned long kPhilox10B = 0xBB67AE85;\n"
+     << "  static const unsigned long kPhiloxSA = 0xD2511F53;\n"
+     << "  static const unsigned long kPhiloxSB = 0xCD9E8D57;\n"
+     << "};\n"
+     << "// Inverse of 2^32.\n"
+     << "#define M_RAN_INVM32 2.3283064e-10f\n"
+     << "__device__  __inline__ float uniform(unsigned int x) {\n"
+     << "  return x * M_RAN_INVM32;\n"
+     << "}\n"
+     << "__device__ int ceilDiv(const int a, const int b) {\n"
      << "  return (a + b - 1) / b;\n"
-     << "}\n\n";
-  os << "__device__ float clamp(const float x, const float minv, const float maxv) {\n"
+     << "}\n\n"
+     << "__device__ float clamp(const float x, const float minv, const float maxv) {\n"
      << "  return x < minv ? minv : (x > maxv ? maxv : x);\n"
-     << "}\n\n";
-  os << "__device__ float frac(const float x) {\n"
+     << "}\n\n"
+     << "__device__ float frac(const float x) {\n"
      << "  return x - truncf(x);\n"
-     << "}\n\n";
-  os << "__device__ float gelu(const float x) {\n"
+     << "}\n\n"
+     << "__device__ float gelu(const float x) {\n"
      << "  return 0.5f * x * (1.f + tanhf(sqrtf(3.14159274101 / 2.f) * (x + 0.044715 * powf(x,3.f))));\n"
-     << "}\n\n";
-  os << "__device__ float reciprocal(const float x) {\n"
+     << "}\n\n"
+     << "__device__ float reciprocal(const float x) {\n"
      << "  return 1.f / x;\n"
-     << "}\n\n";
-  os << "__device__ float relu(const float x) {\n"
+     << "}\n\n"
+     << "__device__ float relu(const float x) {\n"
      << "  return x <= 0.f ? 0.f : x;\n"
-     << "}\n\n";
-  os << "__device__ float remainder(const float a, const float b) {\n"
+     << "}\n\n"
+     << "__device__ float remainder(const float a, const float b) {\n"
      << "  return a - b * floorf(a / b);\n"
-     << "}\n\n";
-  os << "__device__ float sigmoid(const float x) {\n"
+     << "}\n\n"
+     << "__device__ float sigmoid(const float x) {\n"
      << "  return 1.f / (1.f + expf(-x));\n"
-     << "}\n\n";
-  os << "__device__ float threshold(const float x, const float t, const float v) {\n"
+     << "}\n\n"
+     << "__device__ float threshold(const float x, const float t, const float v) {\n"
      << "  return x <= t ? v : x;\n"
-     << "}\n\n";
-  os << "__device__ float where(const int c, const float a, const float b) {\n"
+     << "}\n\n"
+     << "__device__ float where(const int c, const float a, const float b) {\n"
      << "  return c ? a : b;\n"
+     << "}\n\n"
+     << "__device__ float randLike(Philox rnd) {\n"
+     << "  return uniform(rnd());\n"
      << "}\n\n";
 
   os << "__global__ void " << kernel_name_ << "(";
@@ -85,8 +172,14 @@ void IRPrinter::printHeader(Fusion* fusion, const std::string& kernel_name_) {
       os << ", ";
   }
 
+  if (fusion->random())
+    os << ", unsigned long long seed, unsigned long long offset";
   os << "){\n";
   indent_size++;
+  if (fusion->random()) {
+    indent(); os << "int idx = blockIdx.x*blockDim.x + threadIdx.x;\n";
+    indent(); os << "Philox rnd(seed, idx, offset);\n";
+  }
 }
 
 void IRPrinter::handle(Fusion* fusion) {
@@ -232,7 +325,10 @@ void IRPrinter::handle(const UnaryOp* const uop) {
     handle(uop->in());
   } else {
     os << uop->getUnaryOpType() << "(";
-    handle(uop->in());
+    if(uop->getUnaryOpType() == UnaryOpType::RandLike)
+      os << "rnd";
+    else
+      handle(uop->in());
     os << ")";
   }
 

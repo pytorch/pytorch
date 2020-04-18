@@ -69,6 +69,8 @@ UnaryOp::UnaryOp(UnaryOpType _type, Val* _out, Val* _in)
   addOutput(_out);
   addInput(_in);
   this->name_ = FusionGuard::getCurFusion()->registerExpr(this);
+  if (this->getUnaryOpType() == UnaryOpType::RandLike)
+    FusionGuard::getCurFusion()->setRandom(true);
 }
 
 bool UnaryOp::sameAs(const UnaryOp* const other) const {

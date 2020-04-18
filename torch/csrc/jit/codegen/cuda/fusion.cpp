@@ -288,6 +288,13 @@ StmtNameType Fusion::getExprName() {
   return expr_name_counter_++;
 }
 
+void Fusion::setRandom(bool r) {
+  this->random_ = r;
+}
+bool Fusion::random() const noexcept {
+  return random_;
+}
+
 } // namespace fuser
 } // namespace jit
 } // namespace torch
