@@ -48,8 +48,14 @@ class DistAccumulateGradCaptureHook
     // invocation of the autograd engine on the same node might actually
     // compute this gradient.
     if (inputGrads[0].defined()) {
+      // Three internal references to 'inputGrads[0]' at this moment:
+      //   1. 'inputGrads[0]'
+      //   2. 'grad'
+      //   3. The captured grad in the callsite.
       autogradContext_->accumulateGrad(
-          accumulateGrad_->variable, inputGrads[0], 1 /* num_expected_refs */);
+          accumulateGrad_->variable,
+          inputGrads[0],
+          3 /* num_expected_refs */);
     }
 
     const variable_list kEmptyOuput;
