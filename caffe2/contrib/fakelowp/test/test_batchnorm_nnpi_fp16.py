@@ -4,9 +4,12 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 import numpy as np
+import time
+import unittest
 
 import caffe2.python.fakelowp.init_shared_libs  # noqa
-import time
+from hypothesis import given, settings
+from hypothesis import strategies as st
 from caffe2.proto import caffe2_pb2
 from caffe2.python import core
 from caffe2.python import workspace
@@ -38,13 +41,14 @@ def reference_spatialbn_test16(X, scale, bias, mean, var, epsilon, order):
 
 
 # Test the lowered BN op
-class BatchnormTest(TestCase):
-    # TODO: replace with hypothesis
+class BatchnormTest(unittest.TestCase):
+    # TODO: using hypothesis seed, sweep dimensions
     def test_bn(self):
+        seed = int(time.time())
+        workspace.ResetWorkspace()
         size = 30
         input_channels = 20
         batch_size = 40
-        seed = int(time.time())
         np.random.seed(seed)
 
         order = "NCHW"
