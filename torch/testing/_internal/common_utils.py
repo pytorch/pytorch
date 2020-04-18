@@ -40,6 +40,7 @@ import errno
 
 from torch.testing._internal import expecttest
 from torch.testing import get_all_dtypes
+from torch.testing import get_all_complex_dtypes
 
 import torch
 import torch.cuda
@@ -811,8 +812,8 @@ class TestCase(expecttest.TestCase):
 
     # todo: implement numpy-like issubdtype
     def is_integral(self, dtype):
-        dtypes = get_all_dtypes()
-        # complex/quantized types aren't in get_all_dtypes.
+        # Skip complex/quantized types
+        dtypes = [x for x in get_all_dtypes() if x not in get_all_complex_dtypes()]
         return dtype in dtypes and not dtype.is_floating_point
 
     # accepts tensors, dtypes, or np.ndarrays
