@@ -16,11 +16,6 @@ using namespace at::native::templates;
 struct CUDA_CSPRNG_GeneratorImpl : public CPUGeneratorImpl {
   CUDA_CSPRNG_GeneratorImpl(uint64_t seed_in = default_rng_seed_val) : CPUGeneratorImpl(seed_in) {
     this->key_set_ = DispatchKeySet(DispatchKey::CustomRNGKeyId);
-    this->device_ = Device(DeviceType::CUDA);
-  }
-
-  static DeviceType device_type() {
-    return DeviceType::CUDA;
   }
 };
 
@@ -269,21 +264,44 @@ Generator create_CUDA_CSPRNG_Generator() {
 }
   
 void registerOps() {
-  auto m = MAKE_TORCH_LIBRARY_IMPL(_, CustomRNGKeyId);
-  // Random
-  m.impl_UNBOXED("random_.from",             random_from_to);
-  m.impl_UNBOXED("random_.to",               random_to);
-  m.impl_UNBOXED("random_",                  random_);
-  // Uniform
-  m.impl_UNBOXED("uniform_",                 uniform_);
-  // Normal
-  m.impl_UNBOXED("normal_",                  normal_);
-  m.impl_UNBOXED("normal.Tensor_float_out",  normal_Tensor_float_out);
-  m.impl_UNBOXED("normal.float_Tensor_out",  normal_float_Tensor_out);
-  m.impl_UNBOXED("normal.Tensor_Tensor_out", normal_Tensor_Tensor_out);
-  m.impl_UNBOXED("normal.Tensor_float",      normal_Tensor_float);
-  m.impl_UNBOXED("normal.float_Tensor",      normal_float_Tensor);
-  m.impl_UNBOXED("normal.Tensor_Tensor",     normal_Tensor_Tensor);
+  static auto registry = torch::RegisterOperators()
+    // Random
+    .op(torch::RegisterOperators::options()
+      .schema("aten::random_.from(Tensor(a!) self, int from, int? to, *, Generator? generator=None) -> Tensor(a!)")
+      .impl_unboxedOnlyKernel<decltype(random_from_to), &random_from_to>(DispatchKey::CustomRNGKeyId))
+    .op(torch::RegisterOperators::options()
+      .schema("aten::random_.to(Tensor(a!) self, int to, *, Generator? generator=None) -> Tensor(a!)")
+      .impl_unboxedOnlyKernel<decltype(random_to), &random_to>(DispatchKey::CustomRNGKeyId))
+    .op(torch::RegisterOperators::options()
+      .schema("aten::random_(Tensor(a!) self, *, Generator? generator=None) -> Tensor(a!)")
+      .impl_unboxedOnlyKernel<decltype(random_), &random_>(DispatchKey::CustomRNGKeyId))
+    // Uniform
+    .op(torch::RegisterOperators::options()
+      .schema("aten::uniform_(Tensor(a!) self, float from=0, float to=1, *, Generator? generator=None) -> Tensor(a!)")
+      .impl_unboxedOnlyKernel<decltype(uniform_), &uniform_>(DispatchKey::CustomRNGKeyId))
+    // Normal
+    .op(torch::RegisterOperators::options()
+      .schema("aten::normal_(Tensor(a!) self, float mean=0, float std=1, *, Generator? generator=None) -> Tensor(a!)")
+      .impl_unboxedOnlyKernel<decltype(normal_), &normal_>(DispatchKey::CustomRNGKeyId))
+    .op(torch::RegisterOperators::options()
+      .schema("aten::normal.Tensor_float_out(Tensor mean, float std=1, *, Generator? generator=None, Tensor(a!) out) -> Tensor(a!)")
+      .impl_unboxedOnlyKernel<decltype(normal_Tensor_float_out), &normal_Tensor_float_out>(DispatchKey::CustomRNGKeyId))
+    .op(torch::RegisterOperators::options()
+      .schema("aten::normal.float_Tensor_out(float mean, Tensor std, *, Generator? generator=None, Tensor(a!) out) -> Tensor(a!)")
+      .impl_unboxedOnlyKernel<decltype(normal_float_Tensor_out), &normal_float_Tensor_out>(DispatchKey::CustomRNGKeyId))
+    .op(torch::RegisterOperators::options()
+      .schema("aten::normal.Tensor_Tensor_out(Tensor mean, Tensor std, *, Generator? generator=None, Tensor(a!) out) -> Tensor(a!)")
+      .impl_unboxedOnlyKernel<decltype(normal_Tensor_Tensor_out), &normal_Tensor_Tensor_out>(DispatchKey::CustomRNGKeyId))
+    .op(torch::RegisterOperators::options()
+      .schema("aten::normal.Tensor_float(Tensor mean, float std=1, *, Generator? generator=None) -> Tensor")
+      .impl_unboxedOnlyKernel<decltype(normal_Tensor_float), &normal_Tensor_float>(DispatchKey::CustomRNGKeyId))
+    .op(torch::RegisterOperators::options()
+      .schema("aten::normal.float_Tensor(float mean, Tensor std, *, Generator? generator=None) -> Tensor")
+      .impl_unboxedOnlyKernel<decltype(normal_float_Tensor), &normal_float_Tensor>(DispatchKey::CustomRNGKeyId))
+    .op(torch::RegisterOperators::options()
+      .schema("aten::normal.Tensor_Tensor(Tensor mean, Tensor std, *, Generator? generator=None) -> Tensor")
+      .impl_unboxedOnlyKernel<decltype(normal_Tensor_Tensor), &normal_Tensor_Tensor>(DispatchKey::CustomRNGKeyId))
+  ;
 }
 
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
