@@ -43,8 +43,8 @@ def reference_spatialbn_test16(X, scale, bias, mean, var, epsilon, order):
 # Test the lowered BN op
 class BatchnormTest(unittest.TestCase):
     # TODO: using hypothesis seed, sweep dimensions
-    def test_bn(self):
-        seed = int(time.time())
+    @given(seed=st.integers(0, 65535))
+    def test_bn(self, seed):
         workspace.ResetWorkspace()
         size = 30
         input_channels = 20
