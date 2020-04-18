@@ -6287,25 +6287,25 @@
     CPU: replication_pad3d_backward_cpu
     CUDA: replication_pad3d_backward_cuda
 
-- func: upsample_linear1d.out(Tensor self, int[1] output_size, bool align_corners, float? scales=None, *, Tensor(a!) out) -> Tensor(a!)
+- func: upsample_linear1d.out(Tensor self, int[1]? output_size_opt, bool align_corners, float? scales=None, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
   dispatch:
     CPU: upsample_linear1d_out_cpu
     CUDA: upsample_linear1d_out_cuda
 
-- func: upsample_linear1d(Tensor self, int[1] output_size, bool align_corners, float? scales=None) -> Tensor
+- func: upsample_linear1d(Tensor self, int[1]? output_size_opt, bool align_corners, float? scales=None) -> Tensor
   python_module: nn
   dispatch:
     CPU: upsample_linear1d_cpu
     CUDA: upsample_linear1d_cuda
 
-- func: upsample_linear1d_backward.grad_input(Tensor grad_output, int[1] output_size, int[3] input_size, bool align_corners, float? scales=None, *, Tensor(a!) grad_input) -> Tensor(a!)
+- func: upsample_linear1d_backward.grad_input(Tensor grad_output, int[1]? output_size_opt, int[3] input_size, bool align_corners, float? scales=None, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
   dispatch:
     CPU: upsample_linear1d_backward_out_cpu
     CUDA: upsample_linear1d_backward_out_cuda
 
-- func: upsample_linear1d_backward(Tensor grad_output, int[1] output_size, int[3] input_size, bool align_corners, float? scales=None) -> Tensor
+- func: upsample_linear1d_backward(Tensor grad_output, int[1]? output_size_opt, int[3] input_size, bool align_corners, float? scales=None) -> Tensor
   python_module: nn
   dispatch:
     CPU: upsample_linear1d_backward_cpu

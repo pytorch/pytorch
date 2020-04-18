@@ -1155,8 +1155,8 @@
 - name: replication_pad3d(Tensor self, int[6] padding) -> Tensor
   self: replication_pad3d_backward(grad, self, padding)
 
-- name: upsample_linear1d(Tensor self, int[1] output_size, bool align_corners, float? scales=None) -> Tensor
-  self: upsample_linear1d_backward(grad, output_size, self.sizes(), align_corners, scales)
+- name: upsample_linear1d(Tensor self, int[1]? output_size_opt, bool align_corners, float? scales=None) -> Tensor
+  self: upsample_linear1d_backward(grad, output_size_opt, self.sizes(), align_corners, scales)
 
 - name: upsample_bilinear2d(Tensor self, int[2] output_size, bool align_corners, float? scales_h=None, float? scales_w=None) -> Tensor
   self: upsample_bilinear2d_backward(grad, output_size, self.sizes(), align_corners, scales_h, scales_w)
@@ -1422,8 +1422,8 @@
   grad_output: threshold_backward(grad, self, threshold)
   self: zeros_like(grad, at::MemoryFormat::Preserve)
 
-- name: upsample_linear1d_backward(Tensor grad_output, int[1] output_size, int[3] input_size, bool align_corners, float? scales=None) -> Tensor
-  grad_output: upsample_linear1d(grad, output_size, align_corners, scales)
+- name: upsample_linear1d_backward(Tensor grad_output, int[1]? output_size_opt, int[3] input_size, bool align_corners, float? scales=None) -> Tensor
+  grad_output: upsample_linear1d(grad, output_size_opt, align_corners, scales)
 
 - name: upsample_bilinear2d_backward(Tensor grad_output, int[2] output_size, int[4] input_size, bool align_corners, float? scales_h=None, float? scales_w=None) -> Tensor
   grad_output: upsample_bilinear2d(grad, output_size, align_corners, scales_h, scales_w)
