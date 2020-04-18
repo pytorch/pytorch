@@ -78,8 +78,8 @@ at::Tensor PackedLinearWeight::apply_dynamic_impl(at::Tensor input) {
 
   const float* bias_ptr = nullptr;
   at::Tensor bias_vec;
-  if (bias.has_value()) {
-    bias_vec = bias.value();
+  if (bias_.has_value()) {
+    bias_vec = bias_.value();
     TORCH_CHECK(bias_vec.dim() == 1, "bias should be a vector (1D Tensor)");
     TORCH_CHECK(
         bias_vec.size(0) == N,
@@ -229,10 +229,10 @@ at::Tensor PackedLinearWeightsQnnp::apply_dynamic_impl(at::Tensor input) {
   // Adjust weight zero point, similar to weight data.
   auto kernel_zp = w_zp + 128;
   auto kernel_scale = w_scale;
-  size_t rows_w = bias.size(0);
+  size_t rows_w = bias_.size(0);
   size_t cols_w = input_contig.size(input_contig.dim() - 1);
 
-  at::Tensor bias_vec = bias;
+  at::Tensor bias_vec = bias_;
 
   TORCH_CHECK(bias_vec.dim() == 1, "bias should be a vector (1D Tensor)");
 
@@ -356,9 +356,9 @@ at::Tensor PackedLinearWeightFp16::apply_dynamic_impl(at::Tensor input) {
       output.data_ptr<float>());
 
   // Add bias term
-  if (bias.has_value()) {
-    TORCH_CHECK(bias->dim() == 1);
-    output.add_(*bias);
+  if (bias_.has_value()) {
+    TORCH_CHECK(bias_->dim() == 1);
+    output.add_(*bias_);
   }
 
   return output;

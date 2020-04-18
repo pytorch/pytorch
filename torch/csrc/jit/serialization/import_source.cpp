@@ -265,24 +265,33 @@ struct SourceImporterImpl : public Resolver,
   c10::optional<Assign> attributeAssignmentSpecialHandlingHack(
       const QualifiedName& qualified_classname,
       const Assign& assign) {
-    std::regex mangle_re("\\.___torch_mangle_\\d+");
-    auto replaced_string =
+    struct AttrTypeReplacementDescr {
+      std::string attr_name;
+      std::string expected_type;
+      std::string replacement_type;
+    };
+
+    // module demangled qualname -> ReplacementDescr
+    static std::unordered_map<std::string, AttrTypeReplacementDescr> replacements {
+      {"__torch__.torch.nn.quantized.modules.linear.LinearPackedParams", {"_packed_params", "Tensor", "__torch__.torch.classes.quantized.LinearPackedParamsBase"}},
+      {"__torch__.torch.nn.quantized.modules.linear.Linear", {"_packed_params", "Tensor", "__torch__.torch.classes.quantized.LinearPackedParamsBase"}},
+    };
+    static std::regex mangle_re("\\.___torch_mangle_\\d+");
+    auto demangled_classname =
         std::regex_replace(qualified_classname.qualifiedName(), mangle_re, "");
-    if (replaced_string ==
-            "__torch__.torch.nn.quantized.modules.linear.LinearPackedParams" ||
-        replaced_string ==
-            "__torch__.torch.nn.quantized.modules.linear.Linear") {
+    if (replacements.count(demangled_classname)) {
       auto lhs = Var(assign.lhs());
       if (!assign.type().present() || assign.type().get().kind() != TK_VAR) {
-        ;
         return c10::nullopt;
       }
       auto type = Var(assign.type().get());
-      if (lhs.name().name() == "_packed_params" &&
-          type.name().name() == "Tensor") {
-        std::string packed_params_typename =
-            "__torch__.torch.classes.quantized.LinearPackedParamsBase";
-        Parser p(std::make_shared<Source>(std::move(packed_params_typename)));
+
+      auto &attr_name = replacements.at(demangled_classname).attr_name;
+      auto &expected_type = replacements.at(demangled_classname).expected_type;
+      auto &replacement_type = replacements.at(demangled_classname).replacement_type;
+      if (lhs.name().name() == attr_name &&
+          type.name().name() == expected_type) {
+        Parser p(std::make_shared<Source>(replacement_type));
         auto typename_expr = p.parseExp();
         auto maybe_typename =
             Maybe<Expr>::create(typename_expr.range(), typename_expr);

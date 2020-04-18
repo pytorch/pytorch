@@ -557,6 +557,30 @@ static c10::List<c10::intrusive_ptr<CellParamsBase>> gather_quantized_params(c10
   return c10::List<c10::intrusive_ptr<CellParamsBase>>(result);
 }
 
+static c10::List<c10::intrusive_ptr<CellParamsBase>> gather_quantized_params_dynamic(
+    c10::List<at::Tensor> params) {
+  static at::Tensor undefined;
+  std::vector<c10::intrusive_ptr<CellParamsBase>> result;
+  for (size_t i = 0; i < params.size(); i += 2) {
+
+    auto packed_struct_ih =
+        cpp_custom_type_hack::cast<c10::intrusive_ptr<LinearPackedParamsBase>>(
+          static_cast<at::Tensor>(params[i]));
+    auto packed_struct_hh =
+        cpp_custom_type_hack::cast<c10::intrusive_ptr<LinearPackedParamsBase>>(
+          static_cast<at::Tensor>(params[i + 1]));
+
+    auto bias_ih = packed_struct_ih->bias().value_or(undefined);
+    auto bias_hh = packed_struct_hh->bias().value_or(undefined);
+    result.emplace_back(c10::make_intrusive<QuantizedCellParamsDynamic>(
+                          std::move(packed_struct_ih),
+                          std::move(packed_struct_hh),
+                          std::move(bias_ih),
+                          std::move(bias_hh)));
+  }
+  return c10::List<c10::intrusive_ptr<CellParamsBase>>(result);
+}
+
 static c10::List<c10::intrusive_ptr<CellParamsBase>> gather_quantized_params_fp16(
     c10::List<at::Tensor> params) {
   static at::Tensor undefined;
@@ -571,11 +595,14 @@ static c10::List<c10::intrusive_ptr<CellParamsBase>> gather_quantized_params_fp1
         cpp_custom_type_hack::cast<c10::intrusive_ptr<LinearPackedParamsBase>>(
           static_cast<at::Tensor>(params[i + 1]));
 
+    auto bias_ih = packed_struct_ih->bias().value_or(undefined);
+    auto bias_hh = packed_struct_hh->bias().value_or(undefined);
+
     result.emplace_back(c10::make_intrusive<QuantizedCellParamsFP16>(
       std::move(packed_struct_ih),
       std::move(packed_struct_hh),
-      static_cast<at::Tensor>(params[i + 2]),
-      static_cast<at::Tensor>(params[i + 3])));
+      std::move(bias_ih),
+      std::move(bias_hh)));
   }
   return c10::List<c10::intrusive_ptr<CellParamsBase>>(result);
 }
@@ -1519,7 +1546,7 @@ std::tuple<Tensor, Tensor, Tensor> quantized_lstm_input_legacy(
   auto result_dtype = dtype.has_value() ? dtype.value() : at::kChar;
   if (result_dtype == at::kChar || result_dtype == at::kQInt8) {
     if (use_dynamic) {
-      TORCH_CHECK(false, "Not supported! Use the newer op torch.quantized_lstm");
+      params = gather_quantized_params_dynamic(std::move(_params_));
     } else {
       params = gather_quantized_params(std::move(_params_));
     }
@@ -1581,7 +1608,7 @@ std::tuple<Tensor, Tensor, Tensor> quantized_lstm_data_legacy(
   auto result_dtype = dtype.has_value() ? dtype.value() : at::kChar;
   if (result_dtype == at::kChar || result_dtype == at::kQInt8) {
     if (use_dynamic) {
-      TORCH_CHECK(false, "Not supported! Use the newer op torch.quantized_lstm");
+      params = gather_quantized_params_dynamic(std::move(_params_));
     } else {
       params = gather_quantized_params(std::move(_params_));
     }

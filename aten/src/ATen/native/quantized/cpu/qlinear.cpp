@@ -74,8 +74,8 @@ at::Tensor PackedLinearWeight::apply_impl(
 
   const float* bias_ptr = nullptr;
   at::Tensor bias;
-  if (this->bias.has_value()) {
-    bias = this->bias.value();
+  if (this->bias_.has_value()) {
+    bias = this->bias_.value();
     bias = bias.contiguous();
     TORCH_CHECK(bias.dim() == 1, "bias should be a vector (1D Tensor)");
     TORCH_CHECK(
@@ -238,7 +238,7 @@ at::Tensor PackedLinearWeightsQnnp::apply_impl(
   // Adjust weight zero point, similar to weight data.
   auto kernel_zp = w_zp + 128;
   auto kernel_scale = w_scale;
-  size_t rows_w = bias.size(0);
+  size_t rows_w = bias_.size(0);
   size_t cols_w = input_contig.size(input_contig.dim() - 1);
   auto input_scale = input_contig.q_scale();
 
@@ -246,7 +246,7 @@ at::Tensor PackedLinearWeightsQnnp::apply_impl(
       this->input_scale.value() != input_scale) {
     // Get the original weight and adjust it to uint8 from int8
     auto weight_contig = orig_weight;
-    auto bias_fp32 = bias;
+    auto bias_fp32 = bias_;
     int8_t* w_data = (int8_t*)weight_contig.data_ptr<c10::qint8>();
     at::Tensor qnnp_weight = at::_empty_affine_quantized(
         weight_contig.sizes(),
@@ -270,7 +270,7 @@ at::Tensor PackedLinearWeightsQnnp::apply_impl(
         kernel_zp,
         kernel_scale,
         (uint8_t*)qnnp_w_data,
-        (int32_t*)bias.data_ptr<c10::qint32>());
+        (int32_t*)bias_.data_ptr<c10::qint32>());
     packB = w.get();
   }
 

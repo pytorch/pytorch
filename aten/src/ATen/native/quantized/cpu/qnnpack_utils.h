@@ -31,14 +31,14 @@ struct PackedLinearWeightsQnnp : public LinearPackedParamsBase {
       int64_t w_zp)
       : w(std::move(w)),
         orig_weight(std::move(orig_weight)),
-        bias(std::move(bias)),
+        bias_(std::move(bias)),
         input_scale(std::move(input_scale)),
         w_scale(w_scale),
         w_zp(w_zp) {}
 
   std::unique_ptr<qnnpack::PackBMatrix> w;
   at::Tensor orig_weight;
-  at::Tensor bias;
+  at::Tensor bias_;
   c10::optional<double> input_scale;
   double w_scale;
   int64_t w_zp;
@@ -57,12 +57,8 @@ struct PackedLinearWeightsQnnp : public LinearPackedParamsBase {
 
   std::tuple<at::Tensor, c10::optional<at::Tensor>> unpack() override;
 
-  std::string backend() override {
-    return "QNNPACK";
-  }
-
-  std::string bit_width() override {
-    return "INT8";
+  c10::optional<at::Tensor> bias() override {
+    return bias_;
   }
 
   static c10::intrusive_ptr<LinearPackedParamsBase> prepack(

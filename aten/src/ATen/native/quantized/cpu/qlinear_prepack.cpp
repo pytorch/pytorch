@@ -1,5 +1,6 @@
 #include <ATen/ATen.h>
 #include <ATen/core/op_registration/op_registration.h>
+#include <ATen/cpp_custom_type_hack.h>
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
 #include <ATen/native/quantized/cpu/init_qnnpack.h>
 #include <ATen/native/quantized/cpu/packed_params.h>
@@ -289,6 +290,74 @@ class QLinearPackWeightFp16 final : public c10::OperatorKernel {
  private:
 };
 
+class QLinearPackWeightInt8Legacy final : public c10::OperatorKernel {
+ public:
+  Tensor operator()(
+      at::Tensor weight,
+      c10::optional<Tensor> bias) {
+    auto& ctx = at::globalContext();
+    auto options = weight.options();
+
+#ifdef USE_FBGEMM
+    if (ctx.qEngine() == at::QEngine::FBGEMM) {
+      auto prepacked = PackedLinearWeight::prepack(std::move(weight), std::move(bias));
+      auto wrapped = std::make_unique<c10::intrusive_ptr<LinearPackedParamsBase>>(
+        std::move(prepacked)
+      );
+      return cpp_custom_type_hack::create(std::move(wrapped), options);
+    }
+#endif
+#ifdef USE_PYTORCH_QNNPACK
+    if (ctx.qEngine() == at::QEngine::QNNPACK) {
+      auto prepacked = PackedLinearWeightsQnnp::prepack(
+          std::move(weight), std::move(bias));
+      auto wrapped = std::make_unique<c10::intrusive_ptr<LinearPackedParamsBase>>(
+        std::move(prepacked)
+      );
+      return cpp_custom_type_hack::create(std::move(wrapped), options);
+    }
+#endif
+    TORCH_CHECK(
+        false,
+        "Didn't find engine for operation quantized::linear_prepack ",
+        toString(ctx.qEngine()));
+  }
+};
+
+class QLinearPackWeightFp16Legacy final : public c10::OperatorKernel {
+ public:
+  Tensor operator()(
+      at::Tensor weight,
+      c10::optional<Tensor> bias) {
+    auto& ctx = at::globalContext();
+    auto options = weight.options();
+#ifdef USE_FBGEMM
+    if (ctx.qEngine() == at::QEngine::FBGEMM) {
+      auto prepacked = PackedLinearWeightFp16::prepack(
+          std::move(weight), std::move(bias));
+      auto wrapped = std::make_unique<c10::intrusive_ptr<LinearPackedParamsBase>>(
+        std::move(prepacked)
+      );
+      return cpp_custom_type_hack::create(std::move(wrapped), options);
+    }
+#endif // USE_FBGEMM
+#ifdef USE_PYTORCH_QNNPACK
+    if (ctx.qEngine() == at::QEngine::QNNPACK) {
+      TORCH_CHECK(
+          false,
+          "quantized::linear_prepack_fp16 is currently "
+          "not supported by QNNPACK");
+    }
+#endif // USE_PYTORCH_QNNPACK
+    TORCH_CHECK(
+        false,
+        "Didn't find engine for operation quantized::linear_prepack_fp16 ",
+        toString(ctx.qEngine()));
+  }
+
+ private:
+};
+
 namespace {
 static auto siof = register_linear_params();
 }  // namespace
@@ -303,6 +372,14 @@ static auto registry =
             c10::RegisterOperators::options()
             .aliasAnalysis(at::AliasAnalysisKind::PURE_FUNCTION)
             .kernel<QLinearPackWeightFp16>(DispatchKey::CPU))
+        .op("quantized::linear_prepack_legacy(Tensor W, Tensor? B=None) -> Tensor W_prepack",
+            c10::RegisterOperators::options()
+            .aliasAnalysis(at::AliasAnalysisKind::PURE_FUNCTION)
+            .kernel<QLinearPackWeightInt8Legacy>(DispatchKey::QuantizedCPU))
+        .op("quantized::linear_prepack_fp16_legacy(Tensor W, Tensor? B=None) -> Tensor W_prepack",
+            c10::RegisterOperators::options()
+            .aliasAnalysis(at::AliasAnalysisKind::PURE_FUNCTION)
+            .kernel<QLinearPackWeightFp16Legacy>(DispatchKey::CPU))
         .op("_quantized::linear_prepack(Tensor W, Tensor? B=None) -> __torch__.torch.classes.quantized.LinearPackedParamsBase W_prepack",
             c10::RegisterOperators::options()
             .aliasAnalysis(at::AliasAnalysisKind::PURE_FUNCTION)

@@ -17,6 +17,5 @@ struct LinearPackedParamsBase : public torch::jit::CustomClassHolder {
 
   virtual std::tuple<at::Tensor, c10::optional<at::Tensor>> unpack() = 0;
 
-  virtual std::string backend() = 0;
-  virtual std::string bit_width() = 0;
+  virtual c10::optional<at::Tensor> bias() = 0;
 };

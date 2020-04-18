@@ -1,5 +1,6 @@
 #include <ATen/ATen.h>
 #include <ATen/core/op_registration/op_registration.h>
+#include <ATen/cpp_custom_type_hack.h>
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
 #include <ATen/native/quantized/cpu/packed_params.h>
 #include <ATen/native/quantized/cpu/qnnpack_utils.h>
@@ -39,14 +40,14 @@ std::tuple<at::Tensor, c10::optional<at::Tensor>> PackedLinearWeight::unpack() {
   // (QLinearUnpackWeightInt8): ");
   packB->unpack(weight_ptr_int8);
 
-  return std::tuple<at::Tensor, c10::optional<at::Tensor>>(weight_origin, bias);
+  return std::tuple<at::Tensor, c10::optional<at::Tensor>>(weight_origin, bias_);
 }
 #endif // USE_FBGEMM
 
 #ifdef USE_PYTORCH_QNNPACK
 std::tuple<at::Tensor, c10::optional<at::Tensor>> PackedLinearWeightsQnnp::
     unpack() {
-  return std::tuple<at::Tensor, c10::optional<at::Tensor>>(orig_weight, bias);
+  return std::tuple<at::Tensor, c10::optional<at::Tensor>>(orig_weight, bias_);
 }
 #endif // USE_PYTORCH_QNNPACK
 
@@ -64,7 +65,7 @@ std::tuple<at::Tensor, c10::optional<at::Tensor>> PackedLinearWeightFp16::
       static_cast<fbgemm::float16*>(unpacked_weight.data_ptr()),
       fbgemm::matrix_op_t::Transpose);
 
-  return std::make_tuple(unpacked_weight.to(at::kFloat), bias);
+  return std::make_tuple(unpacked_weight.to(at::kFloat), bias_);
 }
 #endif // USE_FBGEMM
 
@@ -95,6 +96,35 @@ class QLinearUnpackWeightFp16 final : public c10::OperatorKernel {
   }
 };
 
+class QLinearUnpackWeightInt8Legacy final : public c10::OperatorKernel {
+ public:
+  std::tuple<at::Tensor, c10::optional<Tensor>> operator()(
+      const at::Tensor& packed_weight) {
+    TORCH_WARN_ONCE("quantized.linear_unpack(Tensor) is deprecated! Please "
+                    "upgrade your model to use the newer quantized.linear_"
+                    "unpack(LinearPackedParamsBase) overload");
+    return cpp_custom_type_hack::cast<c10::intrusive_ptr<LinearPackedParamsBase>>(packed_weight)->unpack();
+  }
+};
+
+class QLinearUnpackWeightFp16Legacy final : public c10::OperatorKernel {
+ public:
+  std::tuple<at::Tensor, c10::optional<Tensor>> operator()(
+      const at::Tensor& packed_weight) {
+    TORCH_WARN_ONCE("quantized.linear_unpack(Tensor) is deprecated! Please "
+                    "upgrade your model to use the newer quantized.linear_"
+                    "unpack(LinearPackedParamsBase) overload");
+    auto& ctx = at::globalContext();
+
+    TORCH_CHECK(
+        ctx.qEngine() != at::QEngine::QNNPACK,
+        "quantized::linear_unpack_fp16 is currently "
+        "not supported by QNNPACK");
+
+    return cpp_custom_type_hack::cast<c10::intrusive_ptr<LinearPackedParamsBase>>(packed_weight)->unpack();
+  }
+};
+
 namespace {
 static auto siof = register_linear_params();
 }  // namespace
@@ -104,7 +134,11 @@ static auto registry =
         .op("quantized::linear_unpack(__torch__.torch.classes.quantized.LinearPackedParamsBase W_prepack) -> (Tensor W_origin, Tensor? B_origin)",
             c10::RegisterOperators::options().catchAllKernel<QLinearUnpackWeightInt8>())
         .op("quantized::linear_unpack_fp16(__torch__.torch.classes.quantized.LinearPackedParamsBase W_prepack) -> (Tensor W_origin, Tensor? B_origin)",
-            c10::RegisterOperators::options().catchAllKernel<QLinearUnpackWeightFp16>());
+            c10::RegisterOperators::options().catchAllKernel<QLinearUnpackWeightFp16>())
+        .op("quantized::linear_unpack.legacy(Tensor W_prepack) -> (Tensor W_origin, Tensor? B_origin)",
+            c10::RegisterOperators::options().catchAllKernel<QLinearUnpackWeightInt8Legacy>())
+        .op("quantized::linear_unpack_fp16.legacy(Tensor W_prepack) -> (Tensor W_origin, Tensor? B_origin)",
+            c10::RegisterOperators::options().catchAllKernel<QLinearUnpackWeightFp16Legacy>());
 
 } // namespace
 } // namespace native

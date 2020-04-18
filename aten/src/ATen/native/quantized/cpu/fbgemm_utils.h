@@ -27,13 +27,13 @@ struct CAFFE2_API PackedLinearWeight : public LinearPackedParamsBase {
       std::vector<int32_t> w_zp,
       c10::QScheme q_scheme)
       : w(std::move(w)),
-        bias(std::move(bias)),
+        bias_(std::move(bias)),
         col_offsets(std::move(col_offsets)),
         w_scale(std::move(w_scale)),
         w_zp(std::move(w_zp)),
         q_scheme(std::move(q_scheme)) {}
   std::unique_ptr<fbgemm::PackBMatrix<int8_t>> w;
-  c10::optional<at::Tensor> bias;
+  c10::optional<at::Tensor> bias_;
   std::vector<int32_t> col_offsets;
   std::vector<float> w_scale;
   std::vector<int32_t> w_zp;
@@ -53,12 +53,8 @@ struct CAFFE2_API PackedLinearWeight : public LinearPackedParamsBase {
 
   std::tuple<at::Tensor, c10::optional<at::Tensor>> unpack() override;
 
-  std::string backend() override {
-    return "FBGEMM";
-  }
-
-  std::string bit_width() override {
-    return "INT8";
+  c10::optional<at::Tensor> bias() override {
+    return bias_;
   }
 
   static c10::intrusive_ptr<LinearPackedParamsBase> prepack(
@@ -80,10 +76,10 @@ struct CAFFE2_API PackedLinearWeightFp16 : public LinearPackedParamsBase {
   PackedLinearWeightFp16(
       std::unique_ptr<fbgemm::PackedGemmMatrixFP16> w,
       c10::optional<at::Tensor> bias)
-      : w(std::move(w)), bias(std::move(bias)) {}
+      : w(std::move(w)), bias_(std::move(bias)) {}
 
   std::unique_ptr<fbgemm::PackedGemmMatrixFP16> w;
-  c10::optional<at::Tensor> bias;
+  c10::optional<at::Tensor> bias_;
 
   at::Tensor apply(
       at::Tensor input,
@@ -103,12 +99,8 @@ struct CAFFE2_API PackedLinearWeightFp16 : public LinearPackedParamsBase {
 
   std::tuple<at::Tensor, c10::optional<at::Tensor>> unpack() override;
 
-  std::string backend() override {
-    return "FBGEMM";
-  }
-
-  std::string bit_width() override {
-    return "FP16";
+  c10::optional<at::Tensor> bias() override {
+    return bias_;
   }
 
   static c10::intrusive_ptr<LinearPackedParamsBase> prepack(
