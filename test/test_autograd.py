@@ -5286,7 +5286,11 @@ class TestAutogradDeviceType(TestCase):
         # The "AAAA" in the name is so that the test runs early in the test
         # suite
         a = torch.rand([], requires_grad=True, device=devices[0])
+        b = torch.rand(10, requires_grad=True, device=devices[1])
+
+        c = a * b
         a.to(devices[1])
+        b.to(devices[0])
 
 
     # NOTE: flaky on ROCm CI
