@@ -80,41 +80,41 @@ TensorDomain* TransformIter::runBackward(
   return root;
 }
 
-TensorView* TransformIter::replay(Split* expr, TensorView* tv) {
-  return tv->split(
+TensorDomain* TransformIter::replay(Split* expr, TensorDomain* td) {
+  return td->split(
       expr->axis(), static_cast<Int*>(expr->factor())->value().value());
 }
 
-TensorView* TransformIter::replay(Merge* expr, TensorView* tv) {
-  return tv->merge(expr->axis());
+TensorDomain* TransformIter::replay(Merge* expr, TensorDomain* td) {
+  return td->merge(expr->axis());
 }
 
-TensorView* TransformIter::replay(Reorder* expr, TensorView* tv) {
+TensorDomain* TransformIter::replay(Reorder* expr, TensorDomain* td) {
   std::unordered_map<int, int> axis2pos;
   for (decltype(expr->pos2axis().size()) i{0}; i < expr->pos2axis().size(); i++)
     axis2pos[expr->pos2axis()[i]] = i;
-  return tv->reorder(axis2pos);
+  return td->reorder(axis2pos);
 }
 
-TensorView* TransformIter::replay(Expr* expr, TensorView* tv) {
+TensorDomain* TransformIter::replay(Expr* expr, TensorDomain* td) {
   TORCH_INTERNAL_ASSERT(expr->isExpr());
   switch (*(expr->getExprType())) {
     case (ExprType::Split):
-      return replay(static_cast<Split*>(expr), tv);
+      return replay(static_cast<Split*>(expr), td);
     case (ExprType::Merge):
-      return replay(static_cast<Merge*>(expr), tv);
+      return replay(static_cast<Merge*>(expr), td);
     case (ExprType::Reorder):
-      return replay(static_cast<Reorder*>(expr), tv);
+      return replay(static_cast<Reorder*>(expr), td);
     default:
       TORCH_INTERNAL_ASSERT(false, "Could not detect expr type in replay.");
   }
 }
 
-TensorView* TransformIter::runReplay(TensorView* tv) {
+TensorDomain* TransformIter::runReplay(TensorDomain* td) {
   for (auto it = record.begin(); it < record.end(); ++it) {
-    tv = TransformIter::replay(*it, tv);
+    td = TransformIter::replay(*it, td);
   }
-  return tv;
+  return td;
 }
 
 } // namespace fuser
