@@ -38,8 +38,7 @@
   variants: function
 
 # Computes the gradient of current tensor w.r.t. graph leaves.
-- func: backward(Tensor self, Tensor? gradient=None, bool keep_graph=False, bool create_graph=False) -> ()
-  use_c10_dispatcher: unboxed_only
+- func: backward(Tensor self, Tensor? gradient=None, bool? retain_graph=None, bool create_graph=False) -> ()
   manual_kernel_registration: True
   variants: method
 
@@ -5688,6 +5687,9 @@
 - func: hardsigmoid_backward(Tensor grad_output, Tensor self) -> Tensor
   use_c10_dispatcher: full
   python_module: nn
+  dispatch:
+    CPU: hardsigmoid_backward
+    CUDA: hardsigmoid_backward
 
 - func: hardtanh.out(Tensor self, Scalar min_val=-1, Scalar max_val=1, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
@@ -5739,6 +5741,9 @@
 - func: hardswish_backward(Tensor grad_output, Tensor self) -> Tensor
   use_c10_dispatcher: full
   python_module: nn
+  dispatch:
+    CPU: hardswish_backward
+    CUDA: hardswish_backward
 
 - func: leaky_relu.out(Tensor self, Scalar negative_slope=0.01, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
