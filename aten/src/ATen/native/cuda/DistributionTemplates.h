@@ -19,6 +19,8 @@
 #include <tuple>
 #include <type_traits>
 
+namespace at {
+namespace native {
 namespace {
 
 // launch bounds used for kernels utilizing TensorIterator
@@ -164,11 +166,7 @@ void distribution_nullary_kernel(at::TensorIterator& iter,
   }
   AT_CUDA_CHECK(cudaGetLastError());
 }
-} // namespace
 
-namespace at {
-namespace native {
-namespace {
 // Binary kernel
 template <typename func_t, typename inp_offset_calc_t, typename out_offset_calc_t>
 __global__ void distribution_binary_elementwise_kernel(
@@ -227,7 +225,7 @@ void distribution_binary_kernel(TensorIterator &iter, std::pair<uint64_t, uint64
   static_assert(std::is_same<typename traits::arg1_t, curandStatePhilox4_32_10_t &>::value, "the first argument of functor must be curandStatePhilox4_32_10_t");
   using input_t_1 = typename traits::arg2_t;
   using input_t_2 = typename traits::arg3_t;
-  using output_t = typename traits:result_type;
+  using output_t = typename traits::result_type;
 
   if (!iter.can_use_32bit_indexing()) {
     for (auto& sub_iter : iter.with_32bit_indexing()) {
@@ -238,7 +236,7 @@ void distribution_binary_kernel(TensorIterator &iter, std::pair<uint64_t, uint64
 
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(iter.can_use_32bit_indexing());
 
-  uint64_t numel = iter.numel();
+  int64_t numel = iter.numel();
   if (numel == 0) {
     return;
   }
@@ -247,7 +245,7 @@ void distribution_binary_kernel(TensorIterator &iter, std::pair<uint64_t, uint64
   const input_t_1 *input_data_1 = static_cast<const input_t_1 *>(iter.data_ptr(1));
   const input_t_2 *input_data_2 = static_cast<const input_t_2 *>(iter.data_ptr(2));
 
-  uint64_t grid = (numel + block_work_size - 1) / block_work_size;
+  int64_t grid = (numel + block_work_size - 1) / block_work_size;
   auto stream = at::cuda::getCurrentCUDAStream();
 
   if (iter.is_contiguous()) {
@@ -255,10 +253,6 @@ void distribution_binary_kernel(TensorIterator &iter, std::pair<uint64_t, uint64
         numel, f, seeds, output_data, input_data_1, input_data_2,
         TrivialOffsetCalculator<2>(), TrivialOffsetCalculator<1>());
   } else {
-    std::array<const uint64_t*, 1> out_strides = {iter.strides(0).data()};
-    std::array<const uint64_t*, 1> inp_strides_1 = {iter.strides(1).data()};
-    std::array<const uint64_t*, 1> inp_strides_2 = {iter.strides(2).data()};
-
     distribution_binary_elementwise_kernel<<<grid, num_threads, 0, stream>>>(
         numel, f, seeds, output_data, input_data_1, input_data_2,
         make_input_offset_calculator<2>(iter), make_output_offset_calculator(iter));

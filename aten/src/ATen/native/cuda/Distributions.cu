@@ -84,6 +84,14 @@ C10_DEVICE scalar_t binomial_cuda_kernel_worker(std::pair<uint64_t, uint64_t> se
   return static_cast<scalar_t>(sample);
 }
 
+struct curand_uniform_wrapper {
+  curandStatePhilox4_32_10_t &state;
+  __device__ curand_uniform_wrapper(curandStatePhilox4_32_10_t &state): state(state) {}
+  __device__ float operator()() {
+    return curand_uniform(&state);
+  }
+};
+
 template <typename scalar_t>
 void binomial_cuda_kernel(
     at::Tensor& ret,
@@ -98,9 +106,9 @@ void binomial_cuda_kernel(
   iter.build();
 
   at::native::distribution_binary_kernel(iter, seeds,
-      [seeds] GPU_LAMBDA (curandStatePhilox4_32_10_t state, scalar_t count, scalar_t prob) {
+      [seeds] GPU_LAMBDA (curandStatePhilox4_32_10_t &state, scalar_t count, scalar_t prob) {
         #if defined(__CUDA_ARCH__) || defined(__HIP_PLATFORM_HCC__)
-        auto uniform_lambda = [state] __device__ () { return curand_uniform(&state); };
+        auto uniform_lambda = curand_uniform_wrapper(state);
         BaseSampler<accscalar_t, decltype(uniform_lambda)> standard_uniform(uniform_lambda);
         auto sample = sample_binomial<scalar_t, accscalar_t, decltype(uniform_lambda)>(count, prob, standard_uniform);
         return static_cast<scalar_t>(sample);
