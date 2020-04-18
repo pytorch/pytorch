@@ -51,6 +51,7 @@ namespace fuser {
  */
 
 // debug print. remove this guy!
+#ifdef TC_DEBUG
 template <typename T>
 std::ostream& operator<<(std::ostream& os, const std::vector<T>& data) {
   os << "(";
@@ -60,6 +61,7 @@ std::ostream& operator<<(std::ostream& os, const std::vector<T>& data) {
   }
   return os << ")";
 }
+#endif
 
 TensorContiguity::TensorContiguity(
     const std::vector<int64_t>& sizes,
