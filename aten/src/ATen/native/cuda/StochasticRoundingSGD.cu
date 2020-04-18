@@ -52,7 +52,7 @@ Tensor stochastic_rounding_sgd_step_cuda(
     Tensor& param, const Tensor& grad, Tensor& momentum_buffer,
     const Tensor& inv_scale, const Tensor& found_inf,
     double lr, double momentum, double weight_decay, double dampening,
-    bool nesterov, bool first_run, Generator gen_) {
+    bool nesterov, bool first_run, c10::optional<Generator> gen_) {
 
   if (param.numel() == 0) return param;
 

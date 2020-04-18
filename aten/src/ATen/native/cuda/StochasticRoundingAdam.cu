@@ -74,7 +74,7 @@ Tensor stochastic_rounding_adam_step_cuda(
     const Tensor& found_inf,
     double lr, double beta1, double beta2,
     double weight_decay, double eps, int64_t step,
-    bool is_decoupled, bool is_amsgrad, Generator gen_) {
+    bool is_decoupled, bool is_amsgrad, c10::optional<Generator> gen_) {
 
   if (param.numel() == 0) return param;
 

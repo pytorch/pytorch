@@ -21,7 +21,7 @@ __global__ void stochastic_rounding_kernel(
   }
 }
 
-Tensor stochastic_rounding_cuda(const Tensor& input, Generator gen_) {
+Tensor stochastic_rounding_cuda(const Tensor& input, c10::optional<Generator> gen_) {
 
   TORCH_CHECK(input.is_contiguous());
 

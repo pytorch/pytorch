@@ -6989,4 +6989,3 @@
 - func: stochastic_rounding_sgd_step(Tensor(a!) param, Tensor grad, Tensor(b!) momentum_buffer, Tensor inv_scale, Tensor found_inf, float lr, float momentum, float weight_decay, float dampening, bool nesterov, bool first_run, Generator? gen_=None) -> Tensor(a!)
   dispatch:
     CUDA: stochastic_rounding_sgd_step_cuda
->>>>>>> 02db424932... Implement stochastic rounding features
