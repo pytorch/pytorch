@@ -54,6 +54,7 @@ TYPE_MAP = {
     # in returns
     'std::vector<Tensor>': 'Tensor[]',
     'IntArrayRef': 'int[]',
+    'IntArrayRef?': 'int[]?',
     'Layout': 'Layout',
     'Layout?': 'Layout?',
     'Device': 'Device',
@@ -107,6 +108,7 @@ FROM_IVALUE = {
     'Device': '{}.toDevice()',
     'Device?': '{}.toOptional<c10::Device>()',
     'IntArrayRef': '{}.toIntVector()',
+    'IntArrayRef?': '{}.toIntVectorOptional()',
     'Layout': '{}.toLayout()',
     'Layout?': '{}.toOptional<c10::Layout>()',
     'MemoryFormat': '{}.toMemoryFormat()',

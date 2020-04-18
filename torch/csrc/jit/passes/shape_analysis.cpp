@@ -1162,7 +1162,7 @@ class ShapePropagator {
             "aten::replication_pad2d(Tensor self, int[] padding) -> Tensor",
             "aten::replication_pad3d(Tensor self, int[] padding) -> Tensor",
             "aten::upsample_bilinear2d(Tensor self, int[] output_size, bool align_corners, float? scales_h, float? scales_w) -> Tensor",
-            "aten::upsample_linear1d(Tensor self, int[] output_size, bool align_corners, float? scales) -> Tensor",
+            "aten::upsample_linear1d(Tensor self, int[]? output_size_opt, bool align_corners, float? scales) -> Tensor",
             "aten::upsample_nearest1d(Tensor self, int[] output_size, float? scales) -> Tensor",
             "aten::upsample_nearest2d(Tensor self, int[] output_size, float? scales_h, float? scales_w) -> Tensor",
             "aten::upsample_nearest3d(Tensor self, int[] output_size, float? scales_d, float? scales_h, float? scales_w) -> Tensor",

@@ -727,6 +727,20 @@ void addInputs(Node* n, const char* name, const at::TensorOptions& options) {
   addInputs(n, name, options.pinned_memory());
 }
 
+void addInputs(
+  Node* n,
+  const char* name,
+  const c10::optional<at::IntArrayRef>& value
+) {
+  if (value.has_value()) {
+    detail::genericAddInput(n, static_cast<at::IntArrayRef>(*value));
+  } else {
+    Graph* g = n->owningGraph();
+    Value* none = g->insertNode(g->createNone())->output();
+    n->addInput(none);
+  }
+}
+
 void addInputs(Node* n, const char* name, at::IntArrayRef value) {
   using ArgumentStash = jit::tracer::ArgumentStash;
   std::vector<Value*> info = ArgumentStash::hasIntArrayRef(name)

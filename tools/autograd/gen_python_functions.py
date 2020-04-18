@@ -245,6 +245,7 @@ UNPACK_WITH_SIZE_METHODS = {
     'TensorList': 'tensorlist_n<{}>',
     'DimnameList': 'dimnamelist',
     'IntArrayRef': 'intlist',
+    'c10::optional<IntArrayRef>': 'intlistOptional',
 }
 
 UNPACK_WITH_DEFAULT_METHODS = {

@@ -15,6 +15,7 @@ using c10::either;
 using c10::FunctionSchema;
 using c10::IValue;
 using c10::ListType;
+using c10::OptionalType;
 using c10::make_left;
 using c10::make_right;
 using c10::OperatorName;
@@ -127,6 +128,9 @@ struct SchemaParser {
         container->addContainedType(std::move(*alias_info));
       }
       alias_info = std::move(container);
+      if (L.nextIf('?')) {
+        type = OptionalType::create(type);
+      }
     }
     if (is_return) {
       // optionally field names in return values
