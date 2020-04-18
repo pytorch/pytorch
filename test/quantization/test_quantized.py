@@ -1591,14 +1591,23 @@ class TestQuantizedOps(TestCase):
             #    favors homogeneous inputs in its search strategies which isn't
             #    representative of the inputs we care about, and tends to maximize
             #    this particular numerics difference.
+            # 2. whitelist a small % of off by Y_scale errors.  Even when the
+            #    variance of the input is high, there can be off by one errors
+            #    in the result if the input value happens to fall exactly on
+            #    the bin boundary of the output scale.
             #
             # If we want the numerics to match we could switch to calculating
             # mean+var in floating point in the future, at the cost of speed.
             X, X_scale, X_zero_point = \
                 _get_random_tensor_and_q_params(shapes, X_rand_scale, torch_type)
 
-            weight = torch.rand(num_channels).float()
-            bias = torch.rand(num_channels).float()
+            # Initialize the weights non-randomly for reproducibility
+            weight = torch.ones(num_channels).float() * 0.5
+            bias = torch.ones(num_channels).float()
+            for i in range(num_channels):
+                weight[i] *= i
+                bias[i] *= i
+
             eps = 0.001
 
             qX = torch.quantize_per_tensor(X, X_scale, X_zero_point, torch_type)
@@ -1620,9 +1629,26 @@ class TestQuantizedOps(TestCase):
             qY_hat = torch.quantize_per_tensor(dqY_hat, Y_scale, Y_zero_point, torch_type)
             note("X\n{}\nqX\n{}\ndqX\n{}\n".format(X, qX, dqX))
 
-            self.assertEqual(
-                qY_hat, qY,
-                message="qgroup_norm failed: \n{} expected vs \n{} actual".format(qY_hat, qY))
+            # Due to the numerics difference mentioned above between calculating
+            # the variance in float vs int, the results can still be slightly
+            # different.
+            dqY = qY.dequantize()
+            dqY_hat = qY_hat.dequantize()
+            diff = dqY - dqY_hat
+
+            # off-by-one errors are magnitude of Y_scale
+            num_diff = torch.sum(diff > Y_scale * 1.0001)
+            pct_diff = float(num_diff) / (diff.numel() + 1e-5)
+            num_diff_off_by_one = torch.sum((diff > 0) * (diff <= Y_scale))
+            pct_diff_off_by_one = float(num_diff_off_by_one) / (diff.numel() + 1e-5)
+
+            note("LayerNorm failed:\n {} input vs\n {} actual vs \n{} expected"
+                 .format(X, qY, qY_hat))
+            note("Pct diff: {}".format(pct_diff))
+            note("Pct diff off by one: {}".format(pct_diff_off_by_one))
+
+            self.assertTrue(pct_diff < 1e-6)
+            self.assertTrue(pct_diff_off_by_one < 0.01)
 
     @unittest.skip("Takes 20+ min to finish in many configurations")
     @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=4, max_dims=5,
