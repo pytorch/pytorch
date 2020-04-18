@@ -41,6 +41,7 @@ static inline void compare_base_kernel(Tensor& result, Tensor& indice,
     indice.set_(indices_view);
   }
 
+  Tensor self_restrided = restride_dim(self, dim, self_sizes);
   auto self_dim_stride = ensure_nonempty_stride(self, dim);
 
   auto iter = TensorIterator();
@@ -48,7 +49,7 @@ static inline void compare_base_kernel(Tensor& result, Tensor& indice,
   iter.dont_resize_outputs();
   iter.add_output(result);
   iter.add_output(indice);
-  iter.add_input(self, /*lazy_restride_dim=*/dim);
+  iter.add_input(self_restrided);
   iter.build();
 
   auto loop = [&](char** data, const int64_t* strides, int64_t n) {

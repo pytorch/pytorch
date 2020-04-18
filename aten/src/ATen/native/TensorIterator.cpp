@@ -298,7 +298,7 @@ void TensorIterator::allocate_outputs() {
         // As we are allocating output after permutations is done, we need to
         // make sure that operand's strides are matching element size and
         // dimensions permutations which are stored in _perm
-        op.stride_bytes = apply_perm_and_mul(op.tensor_strides(), element_size);
+        op.stride_bytes = apply_perm_and_mul(op.tensor.strides(), element_size);
       } else {
         op.stride_bytes = compatible_stride(element_size);
         // check if permutation is just an inverted order
@@ -692,9 +692,9 @@ TensorIterator TensorIterator::unary_op(Tensor& out, const Tensor& a,
 
 TensorIterator TensorIterator::nullary_op(Tensor& out) {
   auto iter = TensorIterator();
-  // FIXME: workaround for bug: https://github.com/pytorch/pytorch/issues/20342
-  iter.dont_resize_outputs();
   iter.add_output(out);
+  // FIXME: workaround for bug: https://github.com/pytorch/pytorch/issues/20342
+  iter.resize_outputs_ = false;
   iter.build();
   return iter;
 }
@@ -702,10 +702,10 @@ TensorIterator TensorIterator::nullary_op(Tensor& out) {
 TensorIterator TensorIterator::reduce_op(Tensor& out, const Tensor& a) {
   TORCH_INTERNAL_ASSERT(out.defined());
   auto iter = TensorIterator();
-  iter.dont_resize_outputs();
   iter.add_output(out);
   iter.add_input(a);
   iter.promote_gpu_output_dtypes_ = true;
+  iter.resize_outputs_ = false;
   iter.is_reduction_ = true;
   // TODO: This is only really necessary for arg{min,max}
   iter.compute_common_dtype_only_for_inputs();
@@ -726,11 +726,11 @@ TensorIterator TensorIterator::reduce_op(Tensor& out1, Tensor& out2, const Tenso
   TORCH_CHECK(out1.strides() == out2.strides(), "reduce_op(): expected both outputs to have same strides, but output1 has ", out1.strides(),
            " and output2 has ", out2.strides());
   auto iter = TensorIterator();
-  iter.dont_resize_outputs();
   iter.add_output(out1);
   iter.add_output(out2);
   iter.add_input(a);
   iter.promote_gpu_output_dtypes_ = true;
+  iter.resize_outputs_ = false;
   iter.is_reduction_ = true;
   iter.build();
   return iter;
@@ -778,7 +778,7 @@ void TensorIterator::compute_shape() {
     // This preserves the legacy behavior where torch.add(..., out=dst) resizes
     // the destination tensor.
     if (resize_outputs_ && op.is_output && !op.is_read_write) continue;
-    auto shape = op.tensor_sizes();
+    auto shape = op.tensor.sizes();
     if (shape.size() == 0) {
       has_scalars = true;
     } else {
@@ -799,9 +799,8 @@ void TensorIterator::compute_shape() {
   // our legacy behavior that functions with `out=` arguments resize their
   // outputs.
   for (int i = 0; i < num_outputs_; i++) {
-    auto& op = operands_[i];
-    auto& tensor = op.tensor;
-    if (tensor.defined() && !op.tensor_sizes().equals(shape_)) {
+    auto& tensor = operands_[i].tensor;
+    if (tensor.defined() && !tensor.sizes().equals(shape_)) {
       if (resize_outputs_ && !operands_[i].is_read_write) {
         // Preserve legacy resizing behavior of out=... arguments
         // TODO: issue warning
@@ -816,7 +815,7 @@ void TensorIterator::compute_shape() {
         }
         continue;
       }
-      TORCH_CHECK(is_reduction_, "output with shape ", op.tensor_sizes(), " doesn't match the broadcast shape ",
+      TORCH_CHECK(is_reduction_, "output with shape ", tensor.sizes(), " doesn't match the broadcast shape ",
                  shape_);
     }
   }
@@ -825,8 +824,8 @@ void TensorIterator::compute_shape() {
 void TensorIterator::compute_strides() {
   for (auto& op : operands_) {
     if (op.tensor.defined()) {
-      auto original_shape = op.tensor_sizes();
-      auto original_stride = op.tensor_strides();
+      auto original_shape = op.tensor.sizes();
+      auto original_stride = op.tensor.strides();
       auto element_size_in_bytes = op.tensor.element_size();
       auto offset = ndim() - original_shape.size();
       if (offset > 0)
@@ -956,7 +955,7 @@ bool TensorIterator::fast_set_up() {
           auto& op = operands_[i];
           if (!op.tensor.defined()) {
             TORCH_INTERNAL_ASSERT(op.is_type_defined(), "no type for operand", i);
-            op.tensor = at::empty_strided(shape_, operands_[i_defined].tensor_strides(), op.options());
+            op.tensor = at::empty_strided(shape_, operands_[i_defined].tensor.strides(), op.options());
             op.current_dtype = op.target_dtype;
           }
           else if (resize_outputs_ && !op.is_read_write) {
@@ -967,8 +966,8 @@ bool TensorIterator::fast_set_up() {
             //       it would probably be better to move this logic out of TensorIterator.
 
             // Check whether output tensor needs restride, output's stride can be different than input tensors
-            if (i != i_defined && !op.tensor_strides().equals(operands_[i_defined].tensor_strides())) {
-              op.tensor.as_strided_(op.tensor_sizes(), operands_[i_defined].tensor_strides());
+            if (i != i_defined && !op.tensor.strides().equals(operands_[i_defined].tensor.strides())) {
+              op.tensor.as_strided_(op.tensor.sizes(), operands_[i_defined].tensor.strides());
             }
           }
         }
@@ -1023,13 +1022,13 @@ FastSetupType TensorIterator::compute_fast_setup_type() {
     // if only the output's strides is inconstent but all inputs' strides are equal,
     // it is still a NON_OVERLAPPING_DENSE case and output will be restrided in fast_set_up()
     for (int64_t i = ntensors() - 1; i >= 0; --i) {
-      auto& op = operands_[i];
+      const auto& op = operands_[i];
       if (op.tensor.defined()) {
         if (prev < 0) {
           prev = i;
           continue;
         }
-        if (!operands_[prev].tensor_strides().equals(op.tensor_strides())) {
+        if (!operands_[prev].tensor.strides().equals(op.tensor.strides())) {
           if (!resize_outputs_ || !op.is_output || op.is_read_write) {
             return FastSetupType::NONE;
           }
