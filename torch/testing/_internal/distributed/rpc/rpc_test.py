@@ -1724,7 +1724,7 @@ class RpcTest(RpcAgentTestFixture):
     def test_rpc_timeouts(self):
         # TODO: enable timeouts for rpc.remote/RRef (https://github.com/pytorch/pytorch/issues/33803)
         dst_rank = (self.rank + 1) % self.world_size
-        dst_workr = worker_name(dst_rank)
+        dst_worker = worker_name(dst_rank)
         timeout = 0.1  # 100 ms
         expected_error = get_timeout_error_regex(dist_utils.TEST_CONFIG.rpc_backend_name)
         # Test async UDF
