@@ -205,12 +205,11 @@ class TestCUDA_CSPRNG_Generator(common.TestCase):
         for i in range(100):
             t = torch.empty(size, dtype=torch.bool, device='cuda').random_(generator=gen)
             percentage = (t.eq(True)).to(torch.int).sum().item() / size
-            # print(percentage)
             self.assertTrue(0.48 < percentage < 0.52)
 
     def test_ints(self):
         gen = csprng_extension.create_CUDA_CSPRNG_Generator()
-        for (dtype, size, prec) in [(torch.uint8, 10000, 1), (torch.int8, 10000, 1), (torch.int16, 1000000, 10)]:
+        for (dtype, size, prec) in [(torch.uint8, 10000, 1), (torch.int8, 10000, 1), (torch.int16, 1000000, 100)]:
             t = torch.empty(size, dtype=dtype, device='cuda').random_(generator=gen)
             avg = t.sum().item() / size
             # print(avg)
@@ -226,20 +225,25 @@ class TestCUDA_CSPRNG_Generator(common.TestCase):
     def test_uniform(self):
         gen = csprng_extension.create_CUDA_CSPRNG_Generator()
         size = 1000
+        alpha = 0.1
         for dtype in [torch.float, torch.double]:
-            t = torch.empty(size, dtype=dtype, device='cuda').uniform_(generator=gen)
-            # print('================================================== ' + str(dtype) + ' uniform =================================================')
-            # for elem in t:
-            #     print(elem.item())
+            for from_ in [-100, 0, 1000]:
+                for to_ in [-42, 0, 4242]:
+                    if to_ > from_:
+                        range_ = to_ - from_
+                        t = torch.empty(size, dtype=dtype, device='cuda').uniform_(from_, to_, generator=gen)
+                        self.assertTrue(from_  <= t.min() < from_ + alpha * range_)
+                        self.assertTrue(to_ - alpha * range_  <= t.max() < to_)
 
     def test_normal(self):
         gen = csprng_extension.create_CUDA_CSPRNG_Generator()
         size = 1000
         for dtype in [torch.float, torch.double]:
-            t = torch.empty(size, dtype=dtype, device='cuda').normal_(generator=gen)
-            # print('================================================== ' + str(dtype) + ' normal =================================================')
-            # for elem in t:
-            #     print(elem.item())
+            for mean in [-42.42, 0.0, 4242]:
+                for std in [1.0, 2.0, 3.0]:
+                    t = torch.empty(size, dtype=dtype, device='cuda').normal_(mean, std, generator=gen)
+                    self.assertEqual(t.mean().item(), mean, 1)
+                    self.assertEqual(t.std().item(), std, 1)
 
 if __name__ == "__main__":
     common.run_tests()
