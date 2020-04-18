@@ -74,29 +74,17 @@ struct CAFFE2_API OperandInfo {
   using StrideVector = SmallVector<int64_t, 6>;
   OperandInfo() {}
   explicit OperandInfo(const Tensor& t) : tensor(t) {
-    collect_attrs();
+    if (t.defined()) {
+      device = t.device();
+      target_dtype = t.scalar_type();
+      current_dtype = target_dtype;
+    }
     validate();
   }
-
-  OperandInfo(const Tensor& t, const int64_t lazy_restride_dim) : tensor(t) {
-    lazy_restride(lazy_restride_dim);
-    collect_attrs();
-    validate();
-  }
-
   OperandInfo(const Tensor& t, Device device, ScalarType dtype)
     : tensor(t), device(device), target_dtype(dtype), current_dtype(t.scalar_type()) {
     validate();
   }
-
-  OperandInfo(const Tensor& t, Device device, ScalarType dtype, const int64_t lazy_restride_dim)
-    : tensor(t), device(device), target_dtype(dtype), current_dtype(t.scalar_type()) {
-    lazy_restride(lazy_restride_dim);
-    validate();
-  }
-
-  const IntArrayRef tensor_sizes() { return is_lazily_restrided ? IntArrayRef(sizes_) : tensor.sizes(); }
-  const IntArrayRef tensor_strides() { return is_lazily_restrided ? IntArrayRef(strides_) : tensor.strides(); }
 
   /// Stride after broadcasting. The stride is in bytes, not number of elements.
   StrideVector stride_bytes;
@@ -136,49 +124,10 @@ struct CAFFE2_API OperandInfo {
 
   bool is_read_write = false;
 
-  bool is_lazily_restrided = false;
-
- private:
-  int64_t lazy_restride_dim_ = -1;
-  SmallVector<int64_t,5> sizes_;
-  SmallVector<int64_t,5> strides_;
-
-  void collect_attrs(){
-    if (tensor.defined()) {
-      device = tensor.device();
-      target_dtype = tensor.scalar_type();
-      current_dtype = target_dtype;
-    }
-  }
-
   void validate() {
     TORCH_CHECK(
         !tensor.defined() || tensor.layout() == kStrided,
         "unsupported tensor layout: ", tensor.layout());
-  }
-
-  void lazy_restride(const int64_t dim){
-    /* `dim` is traversed in the kernel. This will effectively hide that
-     * dimension from the TensorIterator. The stride prevents TensorIterator
-     * from advancing along dim, and the size makes sure that
-     * TensorIterator.DimCounter has the following form :
-     *   (i_1,..., i_{dim-1}, 0, i_{dim+1},...,i_n).
-     * Note that it is important that `tensor.sizes()` and `tensor.strides()`
-     * are not called directly outside of this function. Instead
-     * `tensor_sizes()` and `tensor_strides()` should be used.
-     */
-    TORCH_CHECK(tensor.defined(), "Cannot lazily restride an uninitialized Tensor.")
-    is_lazily_restrided = true;
-    lazy_restride_dim_ = dim;
-    sizes_ = tensor.sizes().vec();
-    strides_ = tensor.strides().vec();
-    if (tensor.dim()){
-      TORCH_CHECK(dim >= 0 && dim < tensor.dim(),
-                  "Cannot lazily restride dim ", dim,
-                  ". Not in range [0, ", tensor.dim(), ").")
-      sizes_[dim] = 1;
-      strides_[dim] = 0;
-    }
   }
 };
 
@@ -374,9 +323,13 @@ struct CAFFE2_API TensorIterator {
   }
 
   /// Construction
-  template<typename... Args>
-  void add_output(Args... args) {
-    add_input(args...);
+  void add_output(const Tensor& output) {
+    operands_.emplace_back(output);
+    num_outputs_++;
+  }
+
+  void add_output(const Tensor& input, Device device, ScalarType dtype) {
+    operands_.emplace_back(input, device, dtype);
     num_outputs_++;
   }
 
@@ -384,18 +337,8 @@ struct CAFFE2_API TensorIterator {
     operands_.emplace_back(input);
   }
 
-  void add_input(const Tensor& input, const int64_t lazy_restride_dim) {
-    TORCH_CHECK(!resize_outputs_, "lazy_restride_dim is incompatable with resize_inputs_");
-    operands_.emplace_back(input, lazy_restride_dim);
-  }
-
   void add_input(const Tensor& input, Device device, ScalarType dtype) {
     operands_.emplace_back(input, device, dtype);
-  }
-
-  void add_input(const Tensor& input, Device device, ScalarType dtype, const int64_t lazy_restride_dim) {
-    TORCH_CHECK(!resize_outputs_, "lazy_restride_dim is incompatable with resize_inputs_");
-    operands_.emplace_back(input, device, dtype, lazy_restride_dim);
   }
 
   void promote_common_dtype() {
