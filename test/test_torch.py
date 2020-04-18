@@ -15412,6 +15412,13 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         # verifies out dtype overrides inference
         self.assertEqual(torch.full(o.shape, 1., out=o).dtype, o.dtype)
 
+    def _float_to_int_conversion_helper(self, vals, device, dtype):
+        assert TEST_NUMPY
+
+        a = np.array(vals, dtype=np.float32).astype(torch_to_numpy_dtype_dict[dtype])
+        t = torch.tensor(vals, device=device, dtype=torch.float).to(dtype)
+        self.assertEqual(torch.from_numpy(a), t.cpu())
+
     # Checks that float->integer casts don't produce undefined behavior errors.
     # Note: In C++, casting from a floating value to an integral dtype
     # is undefined if the floating point value is not within the integral
@@ -15429,21 +15436,16 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         if self.device_type == 'cuda':
             vals = (min, -2, -1.5, -.5, 0, .5, 1.5, 2)
 
-        a = np.array(vals, dtype=np.float32).astype(torch_to_numpy_dtype_dict[dtype])
-        t = torch.tensor(vals, device=device, dtype=torch.float).to(dtype)
-        self.assertEqual(torch.from_numpy(a), t.cpu())
+        self._float_to_int_conversion_helper(vals, device, dtype)
 
     # Note: CUDA will fail this test on most dtypes, often dramatically.
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     @onlyCPU
     @dtypes(torch.bool, torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64)
     def test_float_to_int_conversion_nonfinite(self, device, dtype):
-        t = torch.tensor((float('-inf'), float('inf'), float('nan')), device=device, dtype=torch.float)
-        a = np.array((float('-inf'), float('inf'), float('nan')), dtype=np.float32)
+        vals = (float('-inf'), float('inf'), float('nan'))
 
-        torch_result = t.to(dtype)
-        numpy_result = torch.from_numpy(a.astype(torch_to_numpy_dtype_dict[dtype]))
-        self.assertEqual(torch_result, numpy_result)
+        self._float_to_int_conversion_helper(vals, device, dtype)
 
     # TODO: re-enable this test
     @unittest.skipIf(True, "real and imag not implemented for complex")
