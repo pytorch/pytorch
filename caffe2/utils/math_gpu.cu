@@ -837,6 +837,24 @@ CAFFE2_CUDA_EXPORT void GemmBatched<at::Half, CUDAContext>(
     at::Half** C,
     CUDAContext* context,
     TensorProto::DataType math_type) {
+#if __CUDACC_VER_MAJOR__ < 9
+  // loop over matrices in the batch
+  for (int i = 0; i < batch_size; ++i) {
+    Gemm<at::Half, CUDAContext>(
+        trans_A,
+        trans_B,
+        M,
+        N,
+        K,
+        alpha,
+        A[i],
+        B[i],
+        beta,
+        C[i],
+        context,
+        math_type);
+  }
+#else
   // Note that cublas follows fortran order, so the order is different from
   // the cblas convention.
   const int lda = (trans_A == CblasNoTrans) ? K : M;
@@ -847,6 +865,24 @@ CAFFE2_CUDA_EXPORT void GemmBatched<at::Half, CUDAContext>(
   const cublasOperation_t cu_trans_B =
       (trans_B == CblasNoTrans) ? CUBLAS_OP_N : CUBLAS_OP_T;
   if (math_type == TensorProto_DataType_FLOAT) {
+#if CUDA_VERSION < 9010
+    // loop over matrices in the batch
+    for (int i = 0; i < batch_size; ++i) {
+      Gemm<at::Half, CUDAContext>(
+          trans_A,
+          trans_B,
+          M,
+          N,
+          K,
+          alpha,
+          A[i],
+          B[i],
+          beta,
+          C[i],
+          context,
+          math_type);
+    }
+#else
     thrust::device_vector<const void*> A_device(A, A + batch_size);
     thrust::device_vector<const void*> B_device(B, B + batch_size);
     thrust::device_vector<void*> C_device(C, C + batch_size);
@@ -873,6 +909,7 @@ CAFFE2_CUDA_EXPORT void GemmBatched<at::Half, CUDAContext>(
         batch_size,
         CUDA_R_32F,
         CUBLAS_GEMM_DEFAULT_TENSOR_OP));
+#endif
   } else if (math_type == TensorProto_DataType_FLOAT16) {
     // Convert alpha, beta from float -> __half
     const __half alpha_fp16 = at::Half(alpha);
@@ -911,6 +948,7 @@ CAFFE2_CUDA_EXPORT void GemmBatched<at::Half, CUDAContext>(
   } else {
     CAFFE_THROW("Unsupported math type");
   }
+#endif
 }
 
 template <>
@@ -951,6 +989,16 @@ CAFFE2_CUDA_EXPORT void GemmStridedBatched<at::Half, CUDAContext>(
   const cublasOperation_t cu_trans_B =
       (trans_B == CblasNoTrans) ? CUBLAS_OP_N : CUBLAS_OP_T;
   if (math_type == TensorProto_DataType_FLOAT) {
+#if CUDA_VERSION < 9010 && !defined(__HIP_PLATFORM_HCC__)
+    // loop over matrices in the batch
+    for (int i = 0; i < batch_size; ++i) {
+      Gemm<at::Half, CUDAContext>(
+          trans_A, trans_B, M, N, K, alpha, A, B, beta, C, context, math_type);
+      A += A_stride;
+      B += B_stride;
+      C += C_stride;
+    }
+#else
     CUBLAS_ENFORCE(cublasSetPointerMode(
         context->cublas_handle(), CUBLAS_POINTER_MODE_HOST));
 #ifdef __HIP_PLATFORM_HCC__
@@ -1012,6 +1060,7 @@ CAFFE2_CUDA_EXPORT void GemmStridedBatched<at::Half, CUDAContext>(
         CUDA_R_32F,
         CUBLAS_GEMM_DEFAULT_TENSOR_OP));
 #endif // __HIP_PLATFORM_HCC__
+#endif
   } else if (math_type == TensorProto_DataType_FLOAT16) {
     // Convert alpha, beta from float -> __half
     const __half alpha_fp16 = at::Half(alpha);
@@ -1174,6 +1223,7 @@ CAFFE2_CUDA_EXPORT void Gemv<at::Half, CUDAContext>(
   }
 }
 
+#if CUDA_VERSION >= 9000
 
 // No change, but required. Defer to default CUDA engine
 template <>
@@ -1422,6 +1472,8 @@ CAFFE2_CUDA_EXPORT void Gemv<at::Half, CUDAContext, TensorCoreEngine>(
   Gemv<at::Half, CUDAContext, DefaultEngine>(
       trans_A, M, N, alpha, A, x, beta, y, context, math_type);
 }
+
+#endif // CUDA_VERSION >= 9000
 
 template <>
 CAFFE2_CUDA_EXPORT void GemmEx<float, CUDAContext>(
