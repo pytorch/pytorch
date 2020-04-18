@@ -1,25 +1,35 @@
 # How to run FakeLowP vs Glow tests
 This was tested on Ubuntu 16.04 LTS but should work in general Linux system.
 
-## Install and Build Glow
+## Build Glow Onnxifi Library
 Follow https://github.com/pytorch/glow/blob/master/README.md to install the dependency of Glow. Then at glow root run
 ```
 mkdir build && cd build
 cmake -G Ninja -DGLOW_BUILD_ONNXIFI_DYNLIB=ON ..
 ninja all
 ```
-Note that here you probably want to add other flags like `-DGLOW_WITH_NNPI=1` to enable specific backend if you have the flow setup.
+Note that here you probably want to add other flags like `-DGLOW_WITH_NNPI=1` to enable specific backend if you have the flow set up.
 Once built successfully, you will get an dynamic library at `build/lib/Onnxifi/libonnxifi.so`. We will use it later.
 
-## Install and Build PyTorch
+## Build and Install PyTorch
 Follow https://github.com/pytorch/pytorch/blob/master/README.md to install the dependency of PyTorch. It might be easy to 
 setup a python virtualenv or conda. And please use Python > 3.5.2 because hypothesis library will expose a bug in Python which 
-is fixed after 3.5.2. Something like 3.7 mighr be good enough. Here I give a virtualenv flow:
+is fixed after 3.5.2. Something like 3.7 might be good enough. You can install python3.7 with
 ```
+sudo apt-get install -y build-essential checkinstall libreadline-gplv2-dev libncursesw5-dev libssl-dev libsqlite3-dev tk-dev libgdbm-dev libc6-dev libbz2-dev zlib1g-dev openssl libffi-dev python3-dev python3-setuptools wget
+wget https://www.python.org/ftp/python/3.7.4/Python-3.7.4.tgz && tar -xf Python-3.7.4.tgz
+cd Python-3.7.4
+./configure && make -j 8 && sudo make altinstall
+```
+
+Once you installed Python 3.7, here I give a virtualenv flow:
+```
+sudo pip3.7 install virtualenv
 python3.7 -m venv venv3
 source venv3/bin/active
 cd pytorch
 pip install -r requirements.txt
+pip install pytest hypothesis
 ```
 You probably need to install gflags-dev too with
 ```
@@ -36,6 +46,6 @@ use gflags in Glow to pass options. Other flags are mostl for fast build time an
 ## Run the test
 You can now run the tests with command like the following  when you are inside the virtual python env:
 ```
-OSS_ONNXIFI_LIB=${PATH_TO_GLOW}/build/lib/Onnxifi/libonnxifi.so python pytorch/caffe2/contrib/fakelowp/test/test_sls_nnpi_fp16.py
+OSS_ONNXIFI_LIB=${PATH_TO_GLOW}/build/lib/Onnxifi/libonnxifi.so pytest pytorch/caffe2/contrib/fakelowp/test/test_sls_nnpi_fp16.py --hypothesis-show-statistics
 ```
 
