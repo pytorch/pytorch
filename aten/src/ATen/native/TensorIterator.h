@@ -1,7 +1,5 @@
 #pragma once
 
-#include <vector>
-
 #include <ATen/ATen.h>
 #include <c10/util/FunctionRef.h>
 #include <c10/util/SmallVector.h>
@@ -80,9 +78,9 @@ struct CAFFE2_API OperandInfo {
     validate();
   }
 
-  explicit OperandInfo(const Tensor& t, const int64_t lazy_restride_dim) : tensor(t) {
+  OperandInfo(const Tensor& t, const int64_t lazy_restride_dim) : tensor(t) {
+    lazy_restride(lazy_restride_dim);
     collect_attrs();
-    collect_sizes_and_strides(lazy_restride_dim);
     validate();
   }
 
@@ -93,12 +91,12 @@ struct CAFFE2_API OperandInfo {
 
   OperandInfo(const Tensor& t, Device device, ScalarType dtype, const int64_t lazy_restride_dim)
     : tensor(t), device(device), target_dtype(dtype), current_dtype(t.scalar_type()) {
-    collect_sizes_and_strides(lazy_restride_dim);
+    lazy_restride(lazy_restride_dim);
     validate();
   }
 
-  const IntArrayRef tensor_sizes() { return !is_lazily_restrided_ ? tensor.sizes() : sizes_storage_; }
-  const IntArrayRef tensor_strides() { return !is_lazily_restrided_ ? tensor.strides() : strides_storage_; }
+  const IntArrayRef tensor_sizes() { return is_lazily_restrided ? IntArrayRef(sizes_) : tensor.sizes(); }
+  const IntArrayRef tensor_strides() { return is_lazily_restrided ? IntArrayRef(strides_) : tensor.strides(); }
 
   /// Stride after broadcasting. The stride is in bytes, not number of elements.
   StrideVector stride_bytes;
@@ -138,7 +136,13 @@ struct CAFFE2_API OperandInfo {
 
   bool is_read_write = false;
 
+  bool is_lazily_restrided = false;
+
  private:
+  int64_t lazy_restride_dim_ = -1;
+  SmallVector<int64_t,5> sizes_;
+  SmallVector<int64_t,5> strides_;
+
   void collect_attrs(){
     if (tensor.defined()) {
       device = tensor.device();
@@ -147,11 +151,13 @@ struct CAFFE2_API OperandInfo {
     }
   }
 
-  std::vector<int64_t> sizes_storage_;
-  std::vector<int64_t> strides_storage_;
-  bool is_lazily_restrided_ = false;
+  void validate() {
+    TORCH_CHECK(
+        !tensor.defined() || tensor.layout() == kStrided,
+        "unsupported tensor layout: ", tensor.layout());
+  }
 
-  void collect_sizes_and_strides(const int64_t lazy_restride_dim) {
+  void lazy_restride(const int64_t dim){
     /* `dim` is traversed in the kernel. This will effectively hide that
      * dimension from the TensorIterator. The stride prevents TensorIterator
      * from advancing along dim, and the size makes sure that
@@ -162,22 +168,17 @@ struct CAFFE2_API OperandInfo {
      * `tensor_sizes()` and `tensor_strides()` should be used.
      */
     TORCH_CHECK(tensor.defined(), "Cannot lazily restride an uninitialized Tensor.")
-    is_lazily_restrided_ = true;
-    sizes_storage_ = tensor.sizes().vec();
-    strides_storage_ = tensor.strides().vec();
+    is_lazily_restrided = true;
+    lazy_restride_dim_ = dim;
+    sizes_ = tensor.sizes().vec();
+    strides_ = tensor.strides().vec();
     if (tensor.dim()){
-      TORCH_CHECK(lazy_restride_dim >= 0 && lazy_restride_dim < tensor.dim(),
-                  "Cannot lazily restride dim ", lazy_restride_dim,
+      TORCH_CHECK(dim >= 0 && dim < tensor.dim(),
+                  "Cannot lazily restride dim ", dim,
                   ". Not in range [0, ", tensor.dim(), ").")
-      sizes_storage_[lazy_restride_dim] = 1;
-      strides_storage_[lazy_restride_dim] = 0;
+      sizes_[dim] = 1;
+      strides_[dim] = 0;
     }
-  }
-
-  void validate() {
-    TORCH_CHECK(
-        !tensor.defined() || tensor.layout() == kStrided,
-        "unsupported tensor layout: ", tensor.layout());
   }
 };
 
