@@ -208,11 +208,19 @@ endif()
 
 function(get_filelist name outputvar)
   set(_rootdir "${CMAKE_CURRENT_LIST_DIR}/../")
+  # configure_file adds its input to the list of CMAKE_RERUN dependencies
+  configure_file(
+      ${CMAKE_CURRENT_LIST_DIR}/../tools/build_variables.bzl
+      ${CMAKE_BINARY_DIR}/caffe2/build_variables.bzl)
   execute_process(
     COMMAND "${PYTHON_EXECUTABLE}" -c
             "exec(open('../tools/build_variables.bzl').read());print(';'.join(['${_rootdir}' + x for x in ${name}]))"
     WORKING_DIRECTORY "${CMAKE_CURRENT_LIST_DIR}"
+    RESULT_VARIABLE _retval
     OUTPUT_VARIABLE _tempvar)
+  if(NOT _retval EQUAL 0)
+    message(FATAL_ERROR "Failed to fetch filelist ${name} from build_variables.bzl")
+  endif()
   string(REPLACE "\n" "" _tempvar "${_tempvar}")
   set(${outputvar} ${_tempvar} PARENT_SCOPE)
 endfunction()
