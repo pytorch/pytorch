@@ -8568,47 +8568,6 @@ class TestTorchDeviceType(TestCase):
             expected = fn(y, 1, keepdim=False)
             self.assertEqual(x[:, 1], expected, '{} with out= kwarg'.format(fn_name))
 
-    @onlyCUDA
-    @dtypes(torch.half, torch.float, torch.double)
-    def test_reduction_vectorized_corner(self, device, dtype):
-        # 1D case
-        size = 1024 * 1024 * 64 + 3
-        shift = 1
-        x = torch.zeros(size, dtype=dtype, device=device)
-        y = x[shift:]
-        for i in range(100):
-            x.zero_()
-            x[i] = 1
-            self.assertEqual(x.sum(), 1.0)
-            if i < shift:
-                self.assertEqual(y.sum(), 0.0)
-            else:
-                self.assertEqual(y.sum(), 1.0)
-        for i in range(1, 100):
-            x.zero_()
-            x[-i] = 1
-            self.assertEqual(x.sum(), 1.0)
-            self.assertEqual(y.sum(), 1.0)
-        # 2D case
-        size = (7, 1024 * 1024 + 3)
-        shift = 1
-        x = torch.zeros(size, dtype=dtype, device=device)
-        for i in range(100):
-            x.zero_()
-            for j in range(7):
-                x[j][i] = j
-            xs = x.sum(dim=-1)
-            for j in range(7):
-                self.assertEqual(xs[j].item(), float(j))
-        for i in range(100):
-            x.zero_()
-            for j in range(7):
-                x[j][-i] = j
-            xs = x.sum(dim=-1)
-            for j in range(7):
-                self.assertEqual(xs[j].item(), float(j))
-
-
     @slowTest
     def test_argminmax_large_axis(self, device):
         # Regression test for gh-32863
