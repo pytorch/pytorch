@@ -5282,8 +5282,6 @@ class TestAutogradDeviceType(TestCase):
     def test_AAAA_scalar_different_devices(self, devices):
         # This test is expected to fail in CI and trigger
         # 'RuntimeError: CUDA error: an illegal memory access was encountered'
-        # in the CI. Some users have been reporting this error but so far
-        # PyTorch devs were unable to reproduce it
         #
         # The "AAAA" in the name is so that the test runs early in the test
         # suite
@@ -5291,16 +5289,8 @@ class TestAutogradDeviceType(TestCase):
         b = torch.rand(10, requires_grad=True, device=devices[1])
 
         c = a * b
-        c.sum().backward()
-
-
-    @onlyCUDA
-    def test_scalar_different_device_types(self, device):
-        c = torch.tensor(3.0, device='cpu', requires_grad=True) * torch.rand(2, 2, device=device)
-        c.sum().backward()
-
-        d = torch.tensor(3.0, device=device, requires_grad=True) * torch.rand(2, 2, device='cpu')
-        d.sum().backward()
+        a.to(devices[1])
+        b.to(devices[0])
 
 
     # NOTE: flaky on ROCm CI

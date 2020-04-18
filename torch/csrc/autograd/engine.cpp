@@ -547,10 +547,6 @@ void validate_outputs(
     if (c10::typeMetaToScalarType(metadata.options().dtype()) != grads[i].scalar_type()) {
       grads[i] = grads[i].to(c10::typeMetaToScalarType(metadata.options().dtype()));
     }
-    if (grads[i].device() != metadata.device() &&
-        grads[i].dim() == 0) {
-      grads[i] = grads[i].to(metadata.device());
-    }
     if (!is_compatible_type(metadata.options(), grads[i].options())) {
        std::stringstream ss;
        ss << "invalid gradient at index " << i << " - expected type ";
