@@ -126,7 +126,7 @@ def wait_until_node_failure(rank, expected_error_regex=".*"):
             rpc.rpc_sync("worker{}".format(rank), noop, args=())
             time.sleep(0.1)
         except Exception as e:
-            if re.match(pattern=expected_error_regex, string=str(e)):
+            if re.search(pattern=expected_error_regex, string=str(e)):
                 return str(e)
 
 # Shutdown sequence is not well defined, so we may see any of the following errors
@@ -137,7 +137,13 @@ def get_shutdown_error_regex(rpc_backend):
     is used to match against possible errors to ensure failures were raised properly.
     """
     if rpc_backend == "PROCESS_GROUP":
-        error_regexes = ["Encountered exception in ProcessGroupAgent::enqueueSend"]
+        error_regexes = [
+            "Encountered exception in ProcessGroupAgent::enqueueSend",
+            "Encountered exception in ProcessGroupAgent::listenLoop()",
+            "Exception in thread pool task",
+            "Connection reset by peer",
+            "Connection closed by peer"
+        ]
     else:
         error_regexes = [
             "Request aborted during client shutdown",

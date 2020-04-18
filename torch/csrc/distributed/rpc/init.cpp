@@ -413,11 +413,11 @@ If the future completes with an error, an exception is thrown.
       [](const WorkerInfo& dst,
          const std::string& opName,
          const std::shared_ptr<torch::autograd::profiler::RecordFunction>& rf,
-         const float rpcTimeout,
+         const float rpcTimeoutSeconds,
          const py::args& args,
          const py::kwargs& kwargs) {
         DCHECK(PyGILState_Check());
-        return pyRpcBuiltin(dst, opName, rf, args, kwargs, rpcTimeout);
+        return pyRpcBuiltin(dst, opName, rf, args, kwargs, rpcTimeoutSeconds);
       },
       py::call_guard<py::gil_scoped_acquire>());
 
@@ -427,9 +427,10 @@ If the future completes with an error, an exception is thrown.
          std::string& pickledPythonUDF,
          std::vector<torch::Tensor>& tensors,
          const std::shared_ptr<torch::autograd::profiler::RecordFunction>& rf,
-         const float rpcTimeout) {
+         const float rpcTimeoutSeconds) {
         DCHECK(!PyGILState_Check());
-        return pyRpcPythonUdf(dst, pickledPythonUDF, tensors, rf, rpcTimeout);
+        return pyRpcPythonUdf(
+            dst, pickledPythonUDF, tensors, rf, rpcTimeoutSeconds);
       },
       py::call_guard<py::gil_scoped_release>(),
       py::arg("dst"),
@@ -445,7 +446,7 @@ If the future completes with an error, an exception is thrown.
          const std::shared_ptr<torch::autograd::profiler::RecordFunction>& rf,
          const py::tuple& argsTuple,
          const py::dict& kwargsDict,
-         const float rpcTimeout) {
+         const float rpcTimeoutSeconds) {
         // No need to catch exception here, if function can not be found,
         // exception will be thrown in get_function() call; if args do not match
         // with function schema, exception will be thrown in
@@ -472,7 +473,7 @@ If the future completes with an error, an exception is thrown.
             qualifiedName,
             functionSchema,
             stack,
-            rpcTimeout,
+            rpcTimeoutSeconds,
             rf);
         return torch::jit::PythonFutureWrapper(fut);
       },
@@ -561,8 +562,11 @@ If the future completes with an error, an exception is thrown.
         RpcAgent::getCurrentRpcAgent()->setRpcTimeout(rpcTimeout);
       },
       R"(
-          Set the timeout for all RPCs. If an RPC is not completed within this
-          time, an exception indicating it has timed out will be raised.
+          Set the default timeout for all RPCs. If an RPC is not completed
+          within this time, an exception indicating it has timed out will be
+          raised. To control timeout for specific RPCs, a timeout parameter can
+          be passed into :meth:`~torch.distributed.rpc.rpc_sync` and
+          :meth:`~torch.distributed.rpc.rpc_async`.
       )");
 
   Py_RETURN_TRUE;

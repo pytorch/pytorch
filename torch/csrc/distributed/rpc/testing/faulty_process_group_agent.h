@@ -42,7 +42,7 @@ class FaultyProcessGroupAgent : public ProcessGroupAgent {
   std::shared_ptr<FutureMessage> send(
       const WorkerInfo& to,
       Message&& message,
-      const float rpcTimeout =
+      const float rpcTimeoutSeconds =
           torch::distributed::rpc::kUnsetRpcTimeout) override;
 
  protected:

@@ -28,171 +28,6 @@ c10::optional<TensorContiguity> infer_contiguity_from_tensor_type(
 
 } // namespace
 
-TensorView* split_(TensorView* tv, int axis, int factor) {
-  TensorDomain* td = tv->domain();
-
-  if (axis < 0)
-    axis += td->size();
-
-  assert(axis >= 0 && axis < td->size());
-
-  IterDomain* id = td->axis(axis);
-
-  if (id->parallel_method() != ParallelType::Serial)
-    TORCH_CHECK(
-        false,
-        "Splitting an axis of non-Serial iteration is not supported at this time."
-        " Parallelization strategy must be set after calling split.");
-
-  if (tv->getComputeAtView() != nullptr)
-    if (axis < tv->getComputeAtAxis())
-      TORCH_CHECK(false, "Cannot split axis within the compute at range.");
-
-  std::vector<IterDomain*> new_domain;
-
-  Int* fact = new Int(factor);
-  Int* one = new Int(1);
-
-  for (decltype(td->size()) i = 0; i < td->size(); i++) {
-    if (i != axis)
-      new_domain.push_back(td->axis(i));
-    else {
-      // outer loop size
-      Val* vo = ceilDiv(id->size(), fact);
-      Int* so = static_cast<Int*>(vo);
-
-      // outer loop IterDomain
-      IterDomain* ido =
-          new IterDomain(so, id->parallel_method(), id->isReduction());
-      new_domain.push_back(ido);
-
-      // inner loop IterDomain
-      IterDomain* idi =
-          new IterDomain(fact, id->parallel_method(), id->isReduction());
-      new_domain.push_back(idi);
-    }
-  }
-  TensorDomain* split_td = new TensorDomain(new_domain);
-  Split* split_node = new Split(split_td, td, axis, fact); // For record keeping
-  tv->setDomain(split_td);
-  return tv;
-}
-
-TensorView* merge_(TensorView* tv, int axis) {
-  TensorDomain* td = tv->domain();
-
-  if (axis < 0)
-    axis += td->size();
-
-  assert(axis >= 0 && axis + 1 < td->size());
-
-  if (tv->getComputeAtView() != nullptr)
-    if (axis < tv->getComputeAtAxis())
-      TORCH_CHECK(false, "Cannot split axis within compute at range.");
-
-  IterDomain* first = td->axis(axis);
-  IterDomain* second = td->axis(axis + 1);
-
-  assert(first->isReduction() == second->isReduction());
-  assert(first->parallel_method() == second->parallel_method());
-
-  Val* merged_id_size = mul(first->size(), second->size());
-  IterDomain* merged_id = new IterDomain(
-      static_cast<Int*>(merged_id_size),
-      first->parallel_method(),
-      first->isReduction());
-
-  std::vector<IterDomain*> new_domain;
-  for (decltype(td->size()) i = 0; i < td->size(); i++) {
-    if (i < axis || i > axis + 1)
-      new_domain.push_back(td->axis(i));
-    else if (i == axis) {
-      new_domain.push_back(merged_id);
-    }
-  }
-  TensorDomain* merged_td = new TensorDomain(new_domain);
-  Merge* merge_node = new Merge(merged_td, td, axis); // For record keeping
-  tv->setDomain(merged_td);
-  return tv;
-}
-
-/*
- * Takes axis2pos map, axis2pos[old_pos] = new_pos, to modify the ordering of
- * the iter axes.
- */
-TensorView* reorder_(
-    TensorView* tv,
-    const std::unordered_map<int, int>& axis2pos) {
-  TensorDomain* td = tv->domain();
-  auto ndims = td->size();
-  // Map to save from previous order, to new order.
-  std::vector<int> pos2axis(ndims, -1);
-
-  // Go through each old and new position, make sure they're within 0-ndims
-  for (std::pair<int, int> elem : axis2pos) {
-    int old_pos = elem.first;
-    int new_pos = elem.second;
-
-    if (old_pos < 0)
-      old_pos += ndims;
-    if (new_pos < 0)
-      new_pos += ndims;
-
-    assert(old_pos >= 0 && old_pos < ndims && new_pos >= 0 && new_pos < ndims);
-
-    if (pos2axis[new_pos] != -1)
-      TORCH_CHECK(false, "Reorder found duplicate destination positions.");
-
-    pos2axis[new_pos] = old_pos;
-  }
-
-  std::set<int> old_positions(pos2axis.begin(), pos2axis.end());
-  old_positions.erase(-1);
-
-  if (old_positions.size() != axis2pos.size())
-    TORCH_INTERNAL_ASSERT(
-        false, "Reorder found duplicate destination positions.");
-
-  std::set<int> all_positions;
-  for (decltype(ndims) i{0}; i < ndims; i++)
-    all_positions.insert(i);
-
-  // Check what positions haven't been specified.
-  std::set<int> positions_left;
-  std::set_difference(
-      all_positions.begin(),
-      all_positions.end(),
-      old_positions.begin(),
-      old_positions.end(),
-      std::inserter(positions_left, positions_left.end()));
-
-  // Fill in positions that weren't specified, in relative order,
-  // in empty spots in the set of new positions.
-  // pos2axis[new_position] = old_position
-  auto it = positions_left.begin(); // old positions left
-  for (decltype(pos2axis.size()) i = 0; i < pos2axis.size(); i++) {
-    if (pos2axis[i] == -1)
-      pos2axis[i] = *it++;
-  }
-
-  // pos2axis is now filled
-  if (tv->getComputeAtView() != nullptr) {
-    for (int i = 0; i < tv->getComputeAtAxis(); i++) {
-      if (pos2axis[i] != i)
-        TORCH_CHECK(false, "Cannot reorder axis within compute at range.");
-    }
-  }
-
-  std::vector<IterDomain*> reordered_domain;
-  for (int entry : pos2axis)
-    reordered_domain.push_back(td->axis(entry));
-
-  TensorDomain* reordered_td = new TensorDomain(reordered_domain);
-  Reorder* merge_node = new Reorder(reordered_td, td, pos2axis);
-  tv->setDomain(reordered_td);
-  return tv;
-}
-
 TensorView::TensorView(TensorDomain* _domain, DataType dtype)
     : Val(ValType::TensorView, dtype), domain_(_domain) {}
 
@@ -202,7 +37,7 @@ TensorView::TensorView(const std::shared_ptr<c10::TensorType>& tensor_type)
   TORCH_CHECK(
       tensor_type->dim().has_value(), "Requires static rank for Tensor");
   for (int i = 0; i < tensor_type->dim().value(); i++) {
-    sizes.push_back(new IterDomain(new Int()));
+    sizes.push_back(new IterDomain(new Int(0), new Int()));
   }
   domain_ = new TensorDomain(sizes);
 }
@@ -221,7 +56,8 @@ TensorView* TensorView::newForOutput(DataType dtype) const {
     // consumers and we're copying over a producer.
     if (this->axis(i)->isReduction())
       continue;
-    domain_copy.push_back(new IterDomain(this->axis(i)->size()));
+    domain_copy.push_back(
+        new IterDomain(this->axis(i)->start(), this->axis(i)->extent()));
   }
   TensorDomain* td = new TensorDomain(domain_copy);
   return new TensorView(td, dtype);
@@ -238,14 +74,14 @@ void TensorView::resetView() {
 }
 
 std::vector<IterDomain*>::size_type TensorView::nDims() const {
-  return domain()->size();
+  return domain()->nDims();
 }
 
 IterDomain* TensorView::axis(int pos) const {
   if (pos < 0)
-    pos += domain()->size();
+    pos += domain()->nDims();
   TORCH_CHECK(
-      pos >= 0 && pos < domain()->size(),
+      pos >= 0 && pos < domain()->nDims(),
       "Tried to access position ",
       pos,
       " in domain: ",
@@ -255,7 +91,7 @@ IterDomain* TensorView::axis(int pos) const {
 
 void TensorView::copyDomain(const TensorDomain* td) {
   std::vector<IterDomain*> idv;
-  for (decltype(td->size()) i = 0; i < td->size(); i++)
+  for (decltype(td->nDims()) i = 0; i < td->nDims(); i++)
     idv.push_back(td->axis(i));
   setDomain(new TensorDomain(idv));
 }
@@ -341,6 +177,117 @@ TensorView* TensorView::computeAt(TensorView* consumer, int axis) {
   TransformReplay::replay(running_consumer, this, axis);
   this->compute_at_view_ = running_consumer;
   this->compute_at_axis_ = (unsigned int)axis;
+  return this;
+}
+
+TensorView* TensorView::split(int axis, int factor) {
+  if (axis < 0)
+    axis += domain()->nDims();
+
+  TORCH_CHECK(
+      axis >= 0 && axis < domain()->nDims(),
+      "Trying to split axis outside of TensorView's range.");
+
+  if (getComputeAtView() != nullptr)
+    if (axis < getComputeAtAxis())
+      TORCH_CHECK(false, "Cannot split axis within compute at range.");
+
+  setDomain(domain()->split(axis, factor));
+  return this;
+}
+
+// Merge "axis" and "axis+1" into 1 dimension
+TensorView* TensorView::merge(int axis) {
+  if (axis < 0)
+    axis += domain()->nDims();
+
+  TORCH_CHECK(
+      axis >= 0 && axis + 1 < domain()->nDims(),
+      "Trying to merge axis outside of TensorView's range.");
+
+  if (getComputeAtView() != nullptr)
+    if (axis + 1 < getComputeAtAxis())
+      TORCH_CHECK(false, "Cannot merge axis within compute at range.");
+
+  setDomain(domain()->merge(axis));
+  return this;
+}
+
+// Reorder axes according to map[old_pos] = new_pos
+TensorView* TensorView::reorder(const std::unordered_map<int, int>& axis2pos_) {
+  // START VALIDATION CHECKS
+  // adjust based on negative values (any negative values gets nDims added to
+  // it)
+  std::unordered_map<int, int> axis2pos;
+  auto ndims = nDims();
+  std::transform(
+      axis2pos_.begin(),
+      axis2pos_.end(),
+      std::inserter(axis2pos, axis2pos.begin()),
+      [ndims](std::unordered_map<int, int>::value_type entry) {
+        return std::unordered_map<int, int>::value_type({
+            entry.first < 0 ? entry.first + ndims : entry.first,
+            entry.second < 0 ? entry.second + ndims : entry.second,
+        });
+      });
+
+  // Check if any adjusted values are < 0, or >= nDims, which are invalid
+  bool out_of_range = std::any_of(
+      axis2pos.begin(),
+      axis2pos.end(),
+      [ndims](std::unordered_map<int, int>::value_type entry) {
+        return entry.first < 0 || entry.first >= ndims || entry.second < 0 ||
+            entry.second >= ndims;
+      });
+
+  TORCH_CHECK(
+      !out_of_range,
+      "TensorView reorder axes are outside the number of dimensions in the TensorView.")
+
+  // Going to use sets, to see if any duplicate values are in the map.
+
+  std::set<int> old_pos_set;
+  std::transform(
+      axis2pos.begin(),
+      axis2pos.end(),
+      std::inserter(old_pos_set, old_pos_set.begin()),
+      [](std::unordered_map<int, int>::value_type entry) {
+        return entry.first;
+      });
+
+  std::set<int> new_pos_set;
+  std::transform(
+      axis2pos.begin(),
+      axis2pos.end(),
+      std::inserter(new_pos_set, new_pos_set.begin()),
+      [](std::unordered_map<int, int>::value_type entry) {
+        return entry.first;
+      });
+
+  // Error out if duplicate values are found.
+  TORCH_CHECK(
+      old_pos_set.size() == axis2pos.size() &&
+          new_pos_set.size() == axis2pos.size(),
+      "Duplicate entries in transformation map sent to TensorView reorder.");
+
+  // Check if we're trying to reorder any values outside of the computeAt axis
+
+  if (hasComputeAt()) {
+    auto compute_at_axis = getComputeAtAxis();
+    bool outside_computeat = std::any_of(
+        axis2pos.begin(),
+        axis2pos.end(),
+        [compute_at_axis](std::unordered_map<int, int>::value_type entry) {
+          return entry.first < compute_at_axis ||
+              entry.second < compute_at_axis;
+        });
+    TORCH_CHECK(
+        !outside_computeat,
+        "Cannot reorder dimensions that are outside computeAt axis.");
+  }
+  // END VALIDATION CHECKS
+  setDomain(domain()->reorder(axis2pos_));
+
   return this;
 }
 

@@ -174,7 +174,7 @@ def _wait_all_workers():
     # after receiving all followers' intents.
     if is_leader_worker:
         # The leader sends out proceeed signals to all followers.
-        timeout = 5000
+        timeout = 5  # seconds
         worker_name_to_response_future_dict = dict()
         for follower_worker_name in _ALL_WORKER_NAMES - {leader_worker_name}:
             fut = rpc_async(follower_worker_name, _set_proceed_shutdown_signal,
@@ -520,13 +520,14 @@ def rpc_sync(to, func, args=None, kwargs=None, timeout=UNSET_RPC_TIMEOUT):
         args (tuple): the argument tuple for the ``func`` invocation.
         kwargs (dict): is a dictionary of keyword arguments for the ``func``
                        invocation.
-        timeout (float, optional): timeout to use for this RPC. If the RPC
-                                   does not complete in this amount of
+        timeout (float, optional): timeout in seconds to use for this RPC. If
+                                   the RPC does not complete in this amount of
                                    time, an exception indicating it has
-                                   timed out will be raised. If not
-                                   provided, the default value set during
-                                   initialization or with `_set_rpc_timeout`
-                                   is used.
+                                   timed out will be raised. A value of 0
+                                   indicates an infinite timeout, i.e. a timeout
+                                   error will never be raised. If not provided,
+                                   the default value set during initialization
+                                   or with `_set_rpc_timeout` is used.
 
     Returns:
         Returns the result of running ``func`` with ``args`` and ``kwargs``.
@@ -598,13 +599,14 @@ def rpc_async(to, func, args=None, kwargs=None, timeout=UNSET_RPC_TIMEOUT):
         args (tuple): the argument tuple for the ``func`` invocation.
         kwargs (dict): is a dictionary of keyword arguments for the ``func``
                        invocation.
-        timeout (float, optional): timeout to use for this RPC. If the RPC
-                                   does not complete in this amount of
+        timeout (float, optional): timeout in seconds to use for this RPC. If
+                                   the RPC does not complete in this amount of
                                    time, an exception indicating it has
-                                   timed out will be raised. If not
-                                   provided, the default value set during
-                                   initialization or with `_set_rpc_timeout`
-                                   is used.
+                                   timed out will be raised. A value of 0
+                                   indicates an infinite timeout, i.e. a timeout
+                                   error will never be raised. If not provided,
+                                   the default value set during initialization
+                                   or with `_set_rpc_timeout` is used.
 
 
     Returns:

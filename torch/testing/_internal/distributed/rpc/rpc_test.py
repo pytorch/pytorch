@@ -153,6 +153,14 @@ def build_complex_tensors():
     e = {a: d}
     return [a, b, c, d, e]
 
+def non_cont_test(t_view, t_cont):
+    if t_view.is_contiguous():
+        raise Exception('t_view is contiguous!')
+    if not t_cont.is_contiguous():
+        raise Exception('t_cont is not contiguous!')
+    if not torch.equal(t_view, t_cont):
+        raise Exception('t_view is not equal to t_cont!')
+    return t_view
 
 def my_function(a, b, c):
     return a + b + c
@@ -1716,23 +1724,24 @@ class RpcTest(RpcAgentTestFixture):
     def test_rpc_timeouts(self):
         # TODO: enable timeouts for rpc.remote/RRef (https://github.com/pytorch/pytorch/issues/33803)
         dst_rank = (self.rank + 1) % self.world_size
-        dst_worker = "worker{}".format(dst_rank)
-        timeout = 100  # 100 ms
+        dst_workr = worker_name(dst_rank)
+        timeout = 0.1  # 100 ms
         expected_error = get_timeout_error_regex(dist_utils.TEST_CONFIG.rpc_backend_name)
-        print("Got expected error {}".format(expected_error))
         # Test async UDF
         fut = rpc.rpc_async(dst_worker, my_sleep_func, args=(1,), timeout=timeout)
         with self.assertRaisesRegex(RuntimeError, expected_error):
             fut.wait()
 
-        # Ensure run to completion if there is no timeout.
+        # Ensure run to completion if there is no timeout and we use the default
+        # RPC timeout.
         rpc.rpc_async(dst_worker, my_sleep_func, args=(1,)).wait()
 
         # Test sync UDF
         with self.assertRaisesRegex(RuntimeError, expected_error):
             rpc.rpc_sync(dst_worker, my_sleep_func, args=(1,), timeout=timeout)
 
-        # Ensure run to completion if there is no timeout.
+        # Ensure run to completion if there is no timeout and we use the default
+        # RPC timeout.
         rpc.rpc_sync(dst_worker, my_sleep_func, args=(1,))
 
         # If we set a default timeout for RPCs, it should be respected, though
@@ -1745,9 +1754,8 @@ class RpcTest(RpcAgentTestFixture):
             rpc.rpc_sync(dst_worker, my_sleep_func, args=(1,))
 
         # The RPCs should run to completion since we override the timeout.
-        sec_to_ms = 1000
-        rpc.rpc_async(dst_worker, my_sleep_func, args=(1,), timeout=5 * sec_to_ms).wait()
-        rpc.rpc_sync(dst_worker, my_sleep_func, args=(1,), timeout=5 * sec_to_ms)
+        rpc.rpc_async(dst_worker, my_sleep_func, args=(1,), timeout=5).wait()
+        rpc.rpc_sync(dst_worker, my_sleep_func, args=(1,), timeout=5)
         # Passing in a zero timeout should ensure that the RPC wont time out.
         rpc.rpc_async(dst_worker, my_sleep_func, args=(1,), timeout=0).wait()
         rpc.rpc_sync(dst_worker, my_sleep_func, args=(1,), timeout=0)
@@ -1948,6 +1956,26 @@ class RpcTest(RpcAgentTestFixture):
                           args=(torch.ones(2),))
         with self.assertRaisesRegex(Exception, ".*Expected error.*"):
             rref.to_here()
+
+    @dist_init
+    def test_non_cont_tensors(self):
+        if self.rank == 0:
+            # Create a non-contiguous tensor.
+            t = torch.rand(5, 5)
+            t_view = t.narrow(1, 2, 2)
+            self.assertFalse(t_view.is_contiguous())
+            t_cont = t_view.contiguous()
+            self.assertTrue(t_cont.is_contiguous())
+            self.assertEqual(t_view, t_cont)
+
+            # Send non-cont tensor over RPC.
+            next_rank = (self.rank + 1) % self.world_size
+            t_ret = rpc.rpc_sync(worker_name(next_rank), non_cont_test, args=(t_view, t_cont))
+
+            # Verify the returned tensor.
+            self.assertEqual(t_view, t_ret)
+            self.assertFalse(t_ret.is_contiguous())
+
 
 @unittest.skipIf(
     not torch._six.PY3,

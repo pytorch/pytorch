@@ -89,7 +89,7 @@ class ProcessGroupAgent : public RpcAgent {
   std::shared_ptr<FutureMessage> send(
       const WorkerInfo& to,
       Message&& message,
-      const float rpcTimeout = kUnsetRpcTimeout) override;
+      const float rpcTimeoutSeconds = kUnsetRpcTimeout) override;
 
  private:
   using steady_clock_time_point =

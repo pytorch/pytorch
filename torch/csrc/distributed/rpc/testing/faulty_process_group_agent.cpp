@@ -48,11 +48,11 @@ std::vector<MessageType> FaultyProcessGroupAgent::parseMessagesToFailInput(
 std::shared_ptr<FutureMessage> FaultyProcessGroupAgent::send(
     const WorkerInfo& to,
     Message&& message,
-    const float rpcTimeout) {
+    const float rpcTimeoutSeconds) {
   // We only fail control messages that have been specified by the test case.
   // For all other messages, we just send them without any failures.
   if (!shouldFailMessage(message.type())) {
-    return ProcessGroupAgent::send(to, std::move(message));
+    return ProcessGroupAgent::send(to, std::move(message), rpcTimeoutSeconds);
   }
   // This send function checks the failMessageCountMap_ to check whether
   // we must fail the next send. If the send must be failed, we set an error
@@ -72,7 +72,7 @@ std::shared_ptr<FutureMessage> FaultyProcessGroupAgent::send(
     return fm;
   } else {
     lock.unlock();
-    return ProcessGroupAgent::send(to, std::move(message));
+    return ProcessGroupAgent::send(to, std::move(message), rpcTimeoutSeconds);
   }
 }
 

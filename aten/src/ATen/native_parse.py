@@ -42,16 +42,13 @@ def type_argument_translations(arg):
     # need to special case Generator? logic to make ? only available in jit
     # TODO: deprecate is_nullable global flag, and parse the type
     # to support annotating complicated types with optional annotation
-    nullable = (t != 'Generator?' and '?' in t)
+    nullable = '?' in t
 
     # This enables "Generator? x = None and translates to legacy
     # "Generator x = nullptr". See [temp translations].
     if t == 'Generator?' and default == 'None':
         t = 'Generator'
-        default = 'nullptr'  # TODO(pbelevich): replace with {}
-    # Enables Generator? by translating to legacy Generator*.
-    elif t == "Generator?":
-        t = 'Generator'
+        default = 'c10::nullopt'
     # Enables Tensor[] by translating to legacy TensorList.
     elif t == 'Tensor[]' or t == 'Tensor?[]':
         t = 'TensorList'

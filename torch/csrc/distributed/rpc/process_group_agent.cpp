@@ -293,7 +293,7 @@ void ProcessGroupAgent::shutdownImpl() {
 std::shared_ptr<FutureMessage> ProcessGroupAgent::send(
     const WorkerInfo& to,
     Message&& message,
-    const float rpcTimeout) {
+    const float rpcTimeoutSeconds) {
   // Throw if we previously encountered an exception in ::listenLoop.
   {
     std::unique_lock<std::mutex> guard(listenLoopExceptionMutex_);
@@ -328,9 +328,9 @@ std::shared_ptr<FutureMessage> ProcessGroupAgent::send(
     auto futureStartTime = std::chrono::steady_clock::now();
     // if passed in timeout is unset, then use the currently set default timeout
     // for all RPCs.
-    auto timeout = rpcTimeout == kUnsetRpcTimeout
+    auto timeout = rpcTimeoutSeconds == kUnsetRpcTimeout
         ? getRpcTimeout()
-        : std::chrono::milliseconds((int)rpcTimeout);
+        : std::chrono::milliseconds(static_cast<int>(rpcTimeoutSeconds * 1000));
 
     // Prepare endTime from timeout. Set infinite timeout if
     // specified.
@@ -531,9 +531,16 @@ bool ProcessGroupAgent::handleRecv(RecvWork& work) {
       ++serverActiveAsyncCalls_;
       // Callback processing returned an incomplete future. Add sending the
       // response as a callback which fires when the future completes.
+      // Use a weak_ptr, so we can std::move the future's value.
       auto fromId = work.from_.id_;
       auto requestId = work.id_;
-      futureResponse->addCallback([this, fromId, requestId, futureResponse]() {
+      futureResponse->addCallback([this,
+                                   fromId,
+                                   requestId,
+                                   weak = std::weak_ptr<FutureMessage>(
+                                       futureResponse)]() {
+        auto futureResponse = weak.lock();
+        TORCH_INTERNAL_ASSERT(futureResponse);
         --serverActiveCalls_;
         --serverActiveAsyncCalls_;
         if (!futureResponse->hasError()) {

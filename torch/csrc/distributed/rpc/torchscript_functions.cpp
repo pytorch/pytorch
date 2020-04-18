@@ -16,7 +16,7 @@ c10::intrusive_ptr<c10::ivalue::Future> rpcTorchscript(
     const c10::QualifiedName& qualifiedName,
     const c10::FunctionSchema& functionSchema,
     std::vector<c10::IValue>& stack,
-    const float rpcTimeout,
+    const float rpcTimeoutSeconds,
     const std::shared_ptr<torch::autograd::profiler::RecordFunction>& rf) {
   auto scriptCall =
       std::make_unique<ScriptCall>(qualifiedName, std::move(stack));
@@ -27,7 +27,7 @@ c10::intrusive_ptr<c10::ivalue::Future> rpcTorchscript(
       std::move(*scriptCall).toMessage(),
       true /*forceGradRecording*/,
       rf,
-      rpcTimeout);
+      rpcTimeoutSeconds);
 
   // Get function return type to construct c10::ivalue::Future.
   auto returns = functionSchema.returns();
@@ -42,12 +42,12 @@ c10::intrusive_ptr<c10::ivalue::Future> rpcTorchscript(
   // Create a JIT future and pass it to futMessage's callback to set state
   // of the JIT future.
   auto futPtr = c10::make_intrusive<c10::ivalue::Future>(returnType);
-  futMessage->addCallback([futPtr, futMessage]() {
-    if (futMessage->hasError()) {
-      c10::ivalue::Future::FutureError jitFutErr(futMessage->error()->what());
+  futMessage->addCallback([futPtr](const FutureMessage& futMessage) {
+    if (futMessage.hasError()) {
+      c10::ivalue::Future::FutureError jitFutErr(futMessage.error()->what());
       futPtr->setError(std::move(jitFutErr));
     } else {
-      futPtr->markCompleted(deserializeRespToIValue(futMessage->constValue()));
+      futPtr->markCompleted(deserializeRespToIValue(futMessage.constValue()));
     }
   });
   return futPtr;
@@ -90,7 +90,7 @@ c10::intrusive_ptr<RRef> remoteTorchscript(
         rf);
 
     ctx.addPendingUser(userRRefPtr->forkId(), userRRefPtr);
-    fm->addCallback([forkId{userRRefPtr->forkId()}, fm]() {
+    fm->addCallback([forkId{userRRefPtr->forkId()}](const FutureMessage& fm) {
       callback::confirmPendingUser(fm, forkId);
     });
 
@@ -113,7 +113,8 @@ c10::intrusive_ptr<RRef> remoteTorchscript(
         true /*forceGradRecording*/,
         rf);
 
-    fm->addCallback([fm]() { callback::finishCreatingOwnerRRef(fm); });
+    fm->addCallback(
+        [](const FutureMessage& fm) { callback::finishCreatingOwnerRRef(fm); });
     return ownerRRefPtr;
   }
 }
