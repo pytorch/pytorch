@@ -165,9 +165,9 @@ SmallVector<int64_t, 5> MakeConvOutputShape<3>(
  *
  */
 template <int kSpatialDim, bool kReluFused>
-class QConvInt8 final : public c10::OperatorKernel {
+class QConvInt8 final {
  public:
-  Tensor operator()(
+  static Tensor run(
       Tensor act,
       Tensor packed_weight,
       torch::List<int64_t> stride,
@@ -256,7 +256,7 @@ class QConvInt8 final : public c10::OperatorKernel {
     }
   }
 
-  at::Tensor FbgemmConv(
+  static at::Tensor FbgemmConv(
       Tensor act,
       Tensor packed_weight,
       torch::List<int64_t> stride,
@@ -501,7 +501,7 @@ class QConvInt8 final : public c10::OperatorKernel {
 #endif
 
 #ifdef USE_PYTORCH_QNNPACK
-  at::Tensor QnnpackConv(
+  static at::Tensor QnnpackConv(
       Tensor act,
       Tensor packed_weight,
       torch::List<int64_t> stride,
@@ -643,26 +643,17 @@ class QConvInt8 final : public c10::OperatorKernel {
 #endif
 };
 
-static auto registry =
-    c10::RegisterOperators()
-        .op("quantized::conv2d",
-            c10::RegisterOperators::options().kernel<QConvInt8<2, false>>(
-                DispatchKey::QuantizedCPU))
-        .op("_quantized::conv2d",
-            c10::RegisterOperators::options().kernel<QConvInt8<2, false>>(
-                DispatchKey::QuantizedCPU))
-        .op("quantized::conv2d_relu",
-            c10::RegisterOperators::options().kernel<QConvInt8<2, true>>(
-                DispatchKey::QuantizedCPU))
-        .op("_quantized::conv2d_relu",
-            c10::RegisterOperators::options().kernel<QConvInt8<2, true>>(
-                DispatchKey::QuantizedCPU))
-        .op("quantized::conv3d",
-            c10::RegisterOperators::options().kernel<QConvInt8<3, false>>(
-                DispatchKey::QuantizedCPU))
-        .op("quantized::conv3d_relu",
-            c10::RegisterOperators::options().kernel<QConvInt8<3, true>>(
-                DispatchKey::QuantizedCPU));
+TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
+  m.impl("conv2d",      QConvInt8<2, false>::run);
+  m.impl("conv2d_relu", QConvInt8<2, true>::run);
+  m.impl("conv3d",      QConvInt8<3, false>::run);
+  m.impl("conv3d_relu", QConvInt8<3, true>::run);
+}
+
+TORCH_LIBRARY_IMPL(_quantized, QuantizedCPU, m) {
+  m.impl("conv2d",      QConvInt8<2, false>::run);
+  m.impl("conv2d_relu", QConvInt8<2, true>::run);
+}
 
 } // namespace
 } // namespace native
