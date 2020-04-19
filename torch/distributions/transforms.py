@@ -116,7 +116,7 @@ class Transform(object):
         if self._cache_size == cache_size:
             return self
         if type(self).__init__ is Transform.__init__:
-            return type(self).__init__(cache_size=cache_size)
+            return type(self)(cache_size=cache_size)
         raise NotImplementedError("{}.with_cache is not implemented".format(type(self)))
 
     def __eq__(self, other):
@@ -180,7 +180,7 @@ class _InverseTransform(Transform):
     This class is private; please instead use the ``Transform.inv`` property.
     """
     def __init__(self, transform):
-        super(_InverseTransform, self).__init__()
+        super(_InverseTransform, self).__init__(cache_size=transform._cache_size)
         self._inv = transform
 
     @constraints.dependent_property
@@ -282,9 +282,10 @@ class ComposeTransform(Transform):
         return inv
 
     def with_cache(self, cache_size=1):
-        if all(part._cache_size == cache_size for part in self.parts):
+        if self._cache_size == cache_size:
             return self
-        return ComposeTransform([part.with_cache(cache_size) for part in self.parts])
+        parts = [part.with_cache(cache_size) for part in self.parts]
+        return ComposeTransform(parts, cache_size=cache_size)
 
     def __call__(self, x):
         for part in self.parts:
