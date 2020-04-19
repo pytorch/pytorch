@@ -5,10 +5,13 @@ from __future__ import unicode_literals
 
 import numpy as np
 import time
+import unittest
 
 # Must happen before importing caffe2.python.*
 import caffe2.python.fakelowp.init_shared_libs  # noqa
 
+from hypothesis import given, settings
+from hypothesis import strategies as st
 from caffe2.proto import caffe2_pb2
 from caffe2.python import core, workspace, dyndep
 from caffe2.python.onnx.onnxifi import onnxifi_caffe2_net
@@ -20,10 +23,9 @@ workspace.GlobalInit(["caffe2", "--glow_global_fp16=1",
                       "--glow_global_force_sls_fp16_accum=1"])
 
 
-class SparseLengthsSumTest(TestCase):
-    def test_slws_fused_4bit_rowwise_all_same(self):
-        # Comment out for predictable debugging
-        seed = int(time.time())
+class SparseLengthsSumTest(unittest.TestCase):
+    @given(seed=st.integers(0, 65535))
+    def test_slws_fused_4bit_rowwise_all_same(self, seed):
         np.random.seed(seed)
         workspace.ResetWorkspace()
         n = 1
@@ -119,10 +121,8 @@ class SparseLengthsSumTest(TestCase):
                  "rowwise_diff": (Y_glow - Y_c2)[:, 0]})
             assert(0)
 
-    def test_slws_fused_4bit_rowwise(self):
-        # Comment out for predictable debugging
-        seed = int(time.time() * 1000) % 2 ** 16
-        print(seed)
+    @given(seed=st.integers(0, 65535))
+    def test_slws_fused_4bit_rowwise(self, seed):
         np.random.seed(seed)
         workspace.ResetWorkspace()
 
@@ -217,3 +217,6 @@ class SparseLengthsSumTest(TestCase):
                 },
             )
             assert 0
+
+if __name__ == '__main__':
+    unittest.main()
