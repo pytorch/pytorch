@@ -1339,7 +1339,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
               drop(stack, 1);
               c10::SourceLocation location{
                   "", range->filename()->c_str(), uint32_t(line)};
-              c10::Warning::warn(location, pop(stack).toStringRef());
+              c10::Warning::warn(location, pop(stack).toStringRef(), /*verbatim=*/ true);
             } else {
               TORCH_WARN(pop(stack).toStringRef());
             }
