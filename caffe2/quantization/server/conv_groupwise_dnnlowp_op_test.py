@@ -5,7 +5,7 @@ import collections
 import caffe2.python.hypothesis_test_util as hu
 import hypothesis.strategies as st
 from caffe2.python import core, dyndep, workspace
-from caffe2.python.fb import hardcode_scale_zp
+from caffe2.python.fb import hardcode_scale_zp  # type: ignore[import]
 from caffe2.quantization.server import utils as dnnlowp_utils
 from .dnnlowp_test_utils import (
     check_quantized_results_close,
