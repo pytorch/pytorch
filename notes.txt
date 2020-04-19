@@ -11,3 +11,12 @@ build/build.ninja:30491:
 build ..._IndexUtils.cu.o: ...IndexUtils.cu.o.depend ...
 (Depends on the dependency file but not on its contents;
     should utilise the depfile = variable in the build rule)
+
+build/build.ninja:10492:
+build caffe2/CMakeFiles/torch_cpu.dir/__/aten/src/ATen/Utils.cpp.o: CXX_COMPILER__torch_cpu
+    DEP_FILE = caffe2/CMakeFiles/torch_cpu.dir/__/aten/src/ATen/Utils.cpp.o.d
+
+build/rules.ninja:2320
+rule CXX_COMPILER__torch_cpu
+    command = ... -MD -MT -MF
+    
