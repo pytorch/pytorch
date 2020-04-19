@@ -84,7 +84,14 @@ struct uniform_int_from_to_distribution {
     base = base_;
   }
 
-  template <typename RNG>
+  template <typename V,
+            typename std::enable_if<std::is_integral<V>::value, int>::type = 0>
+  C10_HOST_DEVICE inline T operator()(V val) {
+    return static_cast<T>(static_cast<int64_t>((val % range) + base));
+  }
+
+  template <typename RNG,
+            typename std::enable_if<(!std::is_fundamental<RNG>::value), int>::type = 0>
   C10_HOST_DEVICE inline T operator()(RNG generator) {
     if ((
       std::is_same<T, int64_t>::value ||
@@ -92,9 +99,9 @@ struct uniform_int_from_to_distribution {
       std::is_same<T, float>::value ||
       std::is_same<T, at::BFloat16>::value) && range >= 1ULL << 32)
     {
-      return static_cast<T>(static_cast<int64_t>((generator->random64() % range) + base));
+      return operator()(generator->random64());
     } else {
-      return static_cast<T>(static_cast<int64_t>((generator->random() % range) + base));
+      return operator()(generator->random());
     }
   }
 
@@ -106,9 +113,16 @@ struct uniform_int_from_to_distribution {
 template <typename T>
 struct uniform_int_full_range_distribution {
 
-  template <typename RNG>
+  template <typename V,
+            typename std::enable_if<std::is_integral<V>::value, int>::type = 0>
+  C10_HOST_DEVICE inline T operator()(V val) {
+    return static_cast<T>(static_cast<int64_t>(val));
+  }
+
+  template <typename RNG,
+            typename std::enable_if<(!std::is_fundamental<RNG>::value), int>::type = 0>
   C10_HOST_DEVICE inline T operator()(RNG generator) {
-    return static_cast<T>(static_cast<int64_t>(generator->random64()));
+    return operator()(generator->random64());
   }
 
 };
@@ -116,21 +130,32 @@ struct uniform_int_full_range_distribution {
 template <typename T>
 struct uniform_int_distribution {
 
-  template <typename RNG>
-  C10_HOST_DEVICE inline T operator()(RNG generator) {
+  template <typename V,
+            typename std::enable_if<std::is_integral<V>::value, int>::type = 0>
+  C10_HOST_DEVICE inline T operator()(V val) {
     if (std::is_same<T, bool>::value) {
-      return static_cast<bool>(generator->random() & 1);
+      return static_cast<bool>(val & 1);
     } else if (std::is_same<T, double>::value) {
-      return static_cast<T>(generator->random64() % static_cast<uint64_t>((1ULL << std::numeric_limits<T>::digits) + 1));
+      return static_cast<T>(val % static_cast<uint64_t>((1ULL << std::numeric_limits<T>::digits) + 1));
     } else if (std::is_same<T, int64_t>::value) {
-      return static_cast<T>(generator->random64() % (static_cast<uint64_t>(std::numeric_limits<T>::max()) + 1));
+      return static_cast<T>(val % (static_cast<uint64_t>(std::numeric_limits<T>::max()) + 1));
     } else if (std::is_floating_point<T>::value || std::is_same<T, at::Half>::value || std::is_same<T, at::BFloat16>::value) {
-      return static_cast<T>(generator->random() % static_cast<uint64_t>((1ULL << std::numeric_limits<T>::digits) + 1));
+      return static_cast<T>(val % static_cast<uint64_t>((1ULL << std::numeric_limits<T>::digits) + 1));
     } else if (std::is_integral<T>::value) {
-      return static_cast<T>(generator->random() % (static_cast<uint64_t>(std::numeric_limits<T>::max()) + 1));
+      return static_cast<T>(val % (static_cast<uint64_t>(std::numeric_limits<T>::max()) + 1));
     } else {
       assert(false);
       return 0;
+    }
+  }
+
+  template <typename RNG,
+            typename std::enable_if<(!std::is_fundamental<RNG>::value), int>::type = 0>
+  C10_HOST_DEVICE inline T operator()(RNG generator) {
+    if (std::is_same<T, double>::value || std::is_same<T, int64_t>::value) {
+      return operator()(generator->random64());
+    } else {
+      return operator()(generator->random());
     }
   }
 
