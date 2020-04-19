@@ -1705,8 +1705,13 @@ def _generic_rnn(g, variant, input, initial_states, all_weights, has_biases,
         if variant == 'RNN':
             weight_ih, weight_hh = weights
         elif variant == 'GRU' or variant == 'LSTM':
+<<<<<<< HEAD
             weight_ih, weight_hh = \
                 [reform_weights(g, w, hidden_size, reform_permutation) for w in weights]
+=======
+                weight_ih, weight_hh = \
+                    [reform_weights(g, w, hidden_size, reform_permutation) for w in weights]
+>>>>>>> Fix ONNX export of RNNs with no bias
         return tuple(g.op('Unsqueeze', x, axes_i=[0]) for x in (weight_ih, weight_hh))
 
     def transform_weights(layer_index):
@@ -1714,8 +1719,13 @@ def _generic_rnn(g, variant, input, initial_states, all_weights, has_biases,
         if variant == 'RNN':
             weight_ih, weight_hh, bias_ih, bias_hh = weights
         elif variant == 'GRU' or variant == 'LSTM':
+<<<<<<< HEAD
             weight_ih, weight_hh, bias_ih, bias_hh = \
                 [reform_weights(g, w, hidden_size, reform_permutation) for w in weights]
+=======
+                weight_ih, weight_hh, bias_ih, bias_hh = \
+                    [reform_weights(g, w, hidden_size, reform_permutation) for w in weights]
+>>>>>>> Fix ONNX export of RNNs with no bias
         bias_concat = g.op('Concat', bias_ih, bias_hh, axis_i=0)
         return tuple(g.op('Unsqueeze', x, axes_i=[0]) for x in (weight_ih, weight_hh, bias_concat))
 
@@ -1740,7 +1750,11 @@ def _generic_rnn(g, variant, input, initial_states, all_weights, has_biases,
                 weight_ih_f, weight_hh_f = transform_weights_no_bias(2 * i)
                 weight_ih_b, weight_hh_b = transform_weights_no_bias(2 * i + 1)
                 bias_concat = unused(g)
+<<<<<<< HEAD
 
+=======
+                    
+>>>>>>> Fix ONNX export of RNNs with no bias
             weight_ih = g.op('Concat', weight_ih_f, weight_ih_b, axis_i=0)
             weight_hh = g.op('Concat', weight_hh_f, weight_hh_b, axis_i=0)
 
