@@ -20,3 +20,8 @@ build/rules.ninja:2320
 rule CXX_COMPILER__torch_cpu
     command = ... -MD -MT -MF
     
+
+cmake/Modules_CUDA_fix/upstream/FindCUDA/run_nvcc.cmake - template for .cu.o.RelWithDebInfo.cmake files
+
+cmake/Modules_CUDA_fix/upstream/FindCUDA.cmake:497
+    set(CUDA_NVCC_DEPEND ${dependency_file})
