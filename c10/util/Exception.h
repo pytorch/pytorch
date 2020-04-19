@@ -104,8 +104,8 @@ namespace Warning {
 // "verbatim" flag. When this is false a warning handler might append
 // the C++ warning to a Python warning message that relates the warning
 // back to the user's program. Callers who have already accounted for
-// context in their warnins should set verbatim to true so their warnings
-// appears without modification.
+// context in their warnings should set verbatim to true so their warnings
+// appear without modification.
 
 /// Issue a warning with a given message. Dispatched to the current
 /// warning handler.
