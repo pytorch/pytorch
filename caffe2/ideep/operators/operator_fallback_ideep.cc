@@ -1,6 +1,11 @@
 #include <caffe2/ideep/operators/operator_fallback_ideep.h>
 #include <caffe2/ideep/utils/ideep_operator.h>
 
+#if defined(_MSC_VER) && defined(__clang__)
+// Use extra macro to prevent re-definition of some operators in Clang for Windows
+#define CAFFE2_IDEEP_FALLBACK_IDEEP_DEFINITION
+#endif
+
 #include <caffe2/operators/abs_op.h>
 #include <caffe2/operators/accuracy_op.h>
 #include <caffe2/operators/affine_channel_op.h>
