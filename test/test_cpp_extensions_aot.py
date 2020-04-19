@@ -214,13 +214,13 @@ class TestCUDA_CSPRNG_Generator(common.TestCase):
             avg = t.sum().item() / size
             # print(avg)
             # print(torch.iinfo(dtype).max / 2)
-            self.assertEqual(avg, torch.iinfo(dtype).max / 2, prec=prec)
+            self.assertEqual(avg, torch.iinfo(dtype).max / 2, prec)
         for (dtype, size, prec) in [(torch.int32, 1000000, 1e7), (torch.int64, 1000000, 1e16)]:
             t = torch.empty(size, dtype=dtype, device='cuda').random_(generator=gen)
             avg = (t / size).sum().item()
             # print(avg)
             # print(torch.iinfo(dtype).max / 2)
-            self.assertEqual(avg, torch.iinfo(dtype).max / 2, prec=prec)
+            self.assertEqual(avg, torch.iinfo(dtype).max / 2, prec)
 
     def test_uniform(self):
         gen = csprng_extension.create_CUDA_CSPRNG_Generator()
