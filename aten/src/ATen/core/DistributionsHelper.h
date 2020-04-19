@@ -215,10 +215,6 @@ struct exponential_distribution {
 
   template <typename RNG>
   inline T operator()(RNG* generator) {
-    // Follows numpy exponential for the case when lambda is zero.
-    if (lambda == static_cast<T>(0.0)) {
-      return std::numeric_limits<T>::infinity();
-    }
     uniform_real_distribution<T> uniform(0.0, 1.0);
     dist_acctype<T> sample = uniform(generator);
     return static_cast<T>(-1.0) / lambda * ::log(static_cast<T>(1.0)-sample);
