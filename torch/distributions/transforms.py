@@ -599,6 +599,10 @@ class CatTransform(Transform):
     component-wise to each submatrix at `dim`, of length `lengths[dim]`,
     in a way compatible with :func:`torch.cat`.
 
+    Note that the ``.event_shape`` of a :class:`CatDistribution` is the
+    maximum shape of its transforms, since transforms can introduce 
+    correlations among events.
+
     Example::
        x0 = torch.cat([torch.range(1, 10), torch.range(1, 10)], dim=0)
        x = torch.cat([x0, x0], dim=0)
@@ -615,6 +619,7 @@ class CatTransform(Transform):
         self.lengths = list(lengths)
         assert len(self.lengths) == len(self.transforms)
         self.dim = dim
+        self.event_dim = max([t.event_dim for t in self.transforms])
 
     @lazy_property
     def length(self):
@@ -652,9 +657,9 @@ class CatTransform(Transform):
         for trans, length in zip(self.transforms, self.lengths):
             xslice = x.narrow(self.dim, start, length)
             yslice = y.narrow(self.dim, start, length)
-            logdetjacs.append(trans.log_abs_det_jacobian(xslice, yslice))
+            logdetjacs.append(trans.log_abs_det_jacobian(xslice, yslice).view(x.shape + (1,) * self.event_dim))
             start = start + length  # avoid += for jit compat
-        return torch.cat(logdetjacs, dim=self.dim)
+        return torch.cat(logdetjacs, dim=self.dim)._sum_rightmost(self.event_dim)
 
     @property
     def bijective(self):
