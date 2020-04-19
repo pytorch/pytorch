@@ -16,7 +16,6 @@ using namespace vec256;
 
 // Note: Undefined behavior when performing addition is intentionally
 // ignored.
-__ubsan_ignore_undefined__
 void add_kernel(TensorIterator& iter, Scalar alpha_scalar) {
   if (iter.dtype() == ScalarType::Bool) {
       using scalar_t = bool;
@@ -49,7 +48,7 @@ void atan2_kernel(TensorIterator& iter) {
 
 // Note: Undefined behavior when performing subtraction is intentionally
 // ignored.
-__ubsan_ignore_undefined__ void sub_kernel(TensorIterator& iter, Scalar alpha_scalar) {
+void sub_kernel(TensorIterator& iter, Scalar alpha_scalar) __ubsan_ignore_undefined__ {
   add_kernel(iter, -alpha_scalar);
 }
 
