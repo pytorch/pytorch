@@ -1,0 +1,121 @@
+#include <gtest/gtest.h>
+
+#include <c10d/TCPStore.hpp>
+#include <torch/csrc/distributed/autograd/context/container.h>
+#include <torch/csrc/distributed/autograd/context/context.h>
+#include <torch/csrc/distributed/autograd/engine/dist_engine.h>
+#include <torch/csrc/distributed/autograd/utils.h>
+#include <torch/csrc/distributed/rpc/python_rpc_handler.h>
+#include <torch/csrc/distributed/rpc/script_call.h>
+#include <torch/csrc/distributed/rpc/script_resp.h>
+#include <torch/csrc/distributed/rpc/utils.h>
+#include <torch/csrc/jit/runtime/operator.h>
+
+namespace torch {
+namespace distributed {
+namespace rpc {
+
+using torch::distributed::autograd::DistAutogradContainer;
+using torch::distributed::autograd::DistAutogradContext;
+
+class TestE2EBase : public ::testing::Test {
+ protected:
+  void SetUp() override {
+    // Setup distributed autograd.
+    autogradContainer = &DistAutogradContainer::init(0);
+
+    // Setup server store.
+    store = std::make_shared<c10d::TCPStore>(
+        serverAddress, 0, numWorkers, true, std::chrono::seconds(10));
+
+    buildRpcAgent();
+
+    rpcAgentPostProcessing();
+  }
+
+  void rpcAgentPostProcessing() {
+    RpcAgent::setCurrentRpcAgent(rpcAgent);
+    std::shared_ptr<TypeResolver> typeResolver =
+        std::make_shared<TypeResolver>([&](const c10::QualifiedName& qn) {
+          auto typePtr = PythonRpcHandler::getInstance().parseTypeFromStr(
+              qn.qualifiedName());
+          return c10::StrongTypePtr(
+              PythonRpcHandler::getInstance().jitCompilationUnit(),
+              std::move(typePtr));
+        });
+    rpcAgent->setTypeResolver(typeResolver);
+    rpcAgent->start();
+  }
+
+  at::Tensor remoteAdd(
+      at::Tensor t1,
+      at::Tensor t2,
+      std::shared_ptr<torch::jit::Operator> op) {
+    ScriptCall scriptCall(op, {t1, t2, /* alpha */ 1});
+
+    // Send the RPC and return result.
+    auto response = autograd::sendMessageWithAutograd(
+                        *rpcAgent,
+                        rpcAgent->getWorkerInfo("worker"),
+                        std::move(scriptCall).toMessage())
+                        ->wait();
+    MessageType messageType = MessageType::FORWARD_AUTOGRAD_RESP;
+    auto wrappedResponse = deserializeResponse(response, messageType);
+    return static_cast<ScriptResp&>(*wrappedResponse).value().toTensor();
+  }
+
+  virtual void buildRpcAgent() = 0;
+
+  class AutogradContextGuard {
+   public:
+    explicit AutogradContextGuard()
+        : context(DistAutogradContainer::getInstance().newContext()) {}
+
+    ~AutogradContextGuard() {
+      DistAutogradContainer::getInstance().releaseContext(context->contextId());
+    }
+
+   private:
+    std::shared_ptr<DistAutogradContext> context;
+  };
+
+  void runTrainingLoop() {
+    auto options = at::TensorOptions().requires_grad(true);
+    auto t1 = torch::ones({3, 3}, options);
+    auto t2 = torch::ones({3, 3}, options);
+
+    c10::OperatorName full_name("aten::add", "Tensor");
+    auto matchedOp = torch::jit::findOperatorFor(full_name);
+    ASSERT_TRUE(matchedOp);
+
+    for (size_t i = 0; i < numIters; i++) {
+      // Create the autograd context guard.
+      AutogradContextGuard guard;
+
+      // Multiple RPCs within one autograd context for the forward pass.
+      auto result = remoteAdd(t1, t2, matchedOp);
+      for (size_t j = 0; j < 5; j++) {
+        result = remoteAdd(t1, result, matchedOp);
+      }
+
+      // Run backward pass now.
+      autograd::DistEngine::getInstance().execute(
+          DistAutogradContainer::currentContextId(),
+          {torch::sum(result)},
+          /* retainGraph */ false);
+    }
+  }
+
+  DistAutogradContainer* autogradContainer;
+  std::shared_ptr<RpcAgent> rpcAgent;
+  static constexpr size_t numIters = 100;
+  static constexpr size_t numWorkers = 1;
+  std::shared_ptr<c10d::Store> store;
+  static const char* serverAddress;
+};
+
+const char* TestE2EBase::serverAddress = "127.0.0.1";
+
+} // namespace rpc
+} // namespace distributed
+} // namespace torch
