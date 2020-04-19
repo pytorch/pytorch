@@ -593,6 +593,8 @@ Vec256<int64_t> inline emulate(const Vec256<int64_t>& a, const Vec256<int64_t>& 
 // This could be implemented more efficiently using epi32 instructions
 // This is also technically avx compatible, but then we'll need AVX
 // code for add as well.
+// Note: intentionally ignores undefined behavior like (-lowest * -1).
+__ubsan_ignore_undefined__
 template <>
 Vec256<int64_t> inline operator*(const Vec256<int64_t>& a, const Vec256<int64_t>& b) {
   return emulate(a, b, [](int64_t a_point, int64_t b_point){return a_point * b_point;});
