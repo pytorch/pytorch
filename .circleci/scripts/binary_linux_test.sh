@@ -58,7 +58,7 @@ fi
 # Run MyPy (TODO: move this to builder/binary_run_in_docker.sh)
 # TODO: installing mypy isn't needed after the Docker images are updated with it
 if [[ "$PACKAGE_TYPE" != libtorch ]]; then
-  retry pip install -q mypy
+  retry pip install -q mypy==0.770
   mypy
 fi
 # =================== The above code will be executed inside Docker container ===================
