@@ -68,7 +68,10 @@ blacklist = [
     # Somehow, these are defined in both _C and in functional. Ick!
     'broadcast_tensors',
     # type hints for named tensors are broken: https://github.com/pytorch/pytorch/issues/27846
+    'rename',
+    'refine_names',
     'align_tensors',
+    'unflatten',
     'meshgrid',
     'cartesian_prod',
     'block_diag',
@@ -136,8 +139,8 @@ def type_to_python(typename, size=None):
         'void*': '_int',    # data_ptr
         'void': 'None',
         'std::string': 'str',
-        'Dimname': 'Union[str, None]',
-        'DimnameList': 'List[Union[str, None]]',
+        'Dimname': 'Union[str, ellipsis]',
+        'DimnameList': 'Sequence[Union[str, ellipsis, None]]',
         'QScheme': '_qscheme',
     }[typename]
 
@@ -301,7 +304,7 @@ def generate_type_hints(fname, decls, is_tensor=False):
         numargs = len(decl['arguments'])
         vararg_pos = int(is_tensor)
         have_vararg_version = (numargs > vararg_pos and
-                               decl['arguments'][vararg_pos]['dynamic_type'] in {'IntArrayRef', 'TensorList'} and
+                               decl['arguments'][vararg_pos]['dynamic_type'] in {'IntArrayRef', 'TensorList', 'DimnameList'} and
                                (numargs == vararg_pos + 1 or python_args[vararg_pos + 1] == '*') and
                                (not is_tensor or decl['arguments'][0]['name'] == 'self'))
 
@@ -309,14 +312,19 @@ def generate_type_hints(fname, decls, is_tensor=False):
 
         if have_vararg_version:
             # Two things come into play here: PyTorch has the "magic" that if the first and only positional argument
-            # is an IntArrayRef or TensorList, it will be used as a vararg variant.
+            # is an IntArrayRef, TensorList, or DimnameList, it will be used as a vararg variant.
             # The following outputs the vararg variant, the "pass a list variant" is output above.
             # The other thing is that in Python, the varargs are annotated with the element type, not the list type.
             typelist = decl['arguments'][vararg_pos]['dynamic_type']
             if typelist == 'IntArrayRef':
                 vararg_type = '_int'
-            else:
+            elif typelist == 'TensorList':
                 vararg_type = 'Tensor'
+            elif typelist == 'DimnameList':
+                vararg_type = 'Union[str, ellipsis]'
+            else:
+                raise Exception("Unexpected variable argument type {}".format(typelist))
+
             # replace first argument and eliminate '*' if present
             python_args = ((['self'] if is_tensor else []) + ['*' + decl['arguments'][vararg_pos]['name'] +
                                                               ': ' + vararg_type] + python_args[vararg_pos + 2:])
