@@ -88,8 +88,8 @@ sccache --start-server
 sccache --zero-stats
 set CC=sccache-cl
 set CXX=sccache-cl
-set LD=lld-link
 
+set CMAKE_LINKER=lld-link
 set CMAKE_GENERATOR=Ninja
 
 :: The following code will try to build PyTorch twice if USE_CUDA is neither 0
