@@ -352,7 +352,7 @@ TensorOptions infer_full_options(
 
   if (!options.has_dtype()) {
     if (fill_value.isIntegral(true)) {
-      TORCH_WARN_ONCE(
+      TORCH_CHECK(false,
         "Deprecation warning: In a future PyTorch release torch.full ",
         "will no longer return tensors of floating dtype by default. ",
         "Instead, a bool fill_value will return a tensor of torch.bool dtype, ",
