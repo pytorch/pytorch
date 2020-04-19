@@ -12,7 +12,6 @@ try:
     import torch_test_cpp_extension.cpp as cpp_extension
     import torch_test_cpp_extension.msnpu as msnpu_extension
     import torch_test_cpp_extension.rng as rng_extension
-    import torch_test_cpp_extension.csprng as csprng_extension
 except ImportError:
     raise RuntimeError(
         "test_cpp_extensions_aot.py cannot be invoked directly. Run "
@@ -178,17 +177,24 @@ class TestRNGExtension(common.TestCase):
 class TestCUDA_CSPRNG_Generator(common.TestCase):
 
     def setUp(self):
+        import torch_test_cpp_extension.csprng as csprng_extension
         super(TestCUDA_CSPRNG_Generator, self).setUp()
         csprng_extension.registerOps()
 
+    @skipIfRocm
+    @unittest.skipIf(not TEST_CUDA, "CUDA not found")
     def test_random(self):
+        import torch_test_cpp_extension.csprng as csprng_extension
         gen = csprng_extension.create_CUDA_CSPRNG_Generator()
         for dtype in [torch.bool, torch.uint8, torch.int8, torch.int16, 
                       torch.int32, torch.int64, torch.float, torch.double]:
             t = torch.empty(100, dtype=dtype, device='cuda').random_(generator=gen)
             # print(t)
 
+    @skipIfRocm
+    @unittest.skipIf(not TEST_CUDA, "CUDA not found")
     def test_random2(self):
+        import torch_test_cpp_extension.csprng as csprng_extension
         gen = csprng_extension.create_CUDA_CSPRNG_Generator()
         s = torch.zeros(20, 20, dtype=torch.uint8, device='cuda')
         t = s[:, 7]
@@ -199,7 +205,10 @@ class TestCUDA_CSPRNG_Generator(common.TestCase):
         t.random_(generator=gen)
         # print(s)
 
+    @skipIfRocm
+    @unittest.skipIf(not TEST_CUDA, "CUDA not found")
     def test_bool(self):
+        import torch_test_cpp_extension.csprng as csprng_extension
         gen = csprng_extension.create_CUDA_CSPRNG_Generator()
         size = 10000
         for i in range(100):
@@ -207,7 +216,10 @@ class TestCUDA_CSPRNG_Generator(common.TestCase):
             percentage = (t.eq(True)).to(torch.int).sum().item() / size
             self.assertTrue(0.48 < percentage < 0.52)
 
+    @skipIfRocm
+    @unittest.skipIf(not TEST_CUDA, "CUDA not found")
     def test_ints(self):
+        import torch_test_cpp_extension.csprng as csprng_extension
         gen = csprng_extension.create_CUDA_CSPRNG_Generator()
         for (dtype, size, prec) in [(torch.uint8, 10000, 1), (torch.int8, 10000, 1), (torch.int16, 1000000, 100)]:
             t = torch.empty(size, dtype=dtype, device='cuda').random_(generator=gen)
@@ -222,7 +234,10 @@ class TestCUDA_CSPRNG_Generator(common.TestCase):
             # print(torch.iinfo(dtype).max / 2)
             self.assertEqual(avg, torch.iinfo(dtype).max / 2, prec)
 
+    @skipIfRocm
+    @unittest.skipIf(not TEST_CUDA, "CUDA not found")
     def test_uniform(self):
+        import torch_test_cpp_extension.csprng as csprng_extension
         gen = csprng_extension.create_CUDA_CSPRNG_Generator()
         size = 1000
         alpha = 0.1
@@ -235,7 +250,10 @@ class TestCUDA_CSPRNG_Generator(common.TestCase):
                         self.assertTrue(from_  <= t.min() < from_ + alpha * range_)
                         self.assertTrue(to_ - alpha * range_  <= t.max() < to_)
 
+    @skipIfRocm
+    @unittest.skipIf(not TEST_CUDA, "CUDA not found")
     def test_normal(self):
+        import torch_test_cpp_extension.csprng as csprng_extension
         gen = csprng_extension.create_CUDA_CSPRNG_Generator()
         size = 1000
         for dtype in [torch.float, torch.double]:
@@ -245,7 +263,10 @@ class TestCUDA_CSPRNG_Generator(common.TestCase):
                     self.assertEqual(t.mean().item(), mean, 1)
                     self.assertEqual(t.std().item(), std, 1)
 
+    @skipIfRocm
+    @unittest.skipIf(not TEST_CUDA, "CUDA not found")
     def test_normal2(self):
+        import torch_test_cpp_extension.csprng as csprng_extension
 
         def helper(self, device, dtype, ptype, t_transform, std_transform):
             q = torch.empty(100, 100, dtype=dtype, device=device)
