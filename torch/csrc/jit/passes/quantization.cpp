@@ -743,6 +743,7 @@ graph(%self, %input, %inplace):
 
   const std::vector<std::reference_wrapper<const PatternInfo>> delay_patterns =
       {
+          linear_functional_relu,
           linear_relu,
           conv2d_functional_relu,
           conv2d_relu,
