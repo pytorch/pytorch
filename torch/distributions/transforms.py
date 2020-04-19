@@ -657,9 +657,9 @@ class CatTransform(Transform):
         for trans, length in zip(self.transforms, self.lengths):
             xslice = x.narrow(self.dim, start, length)
             yslice = y.narrow(self.dim, start, length)
-            logdetjacs.append(trans.log_abs_det_jacobian(xslice, yslice).view(x.shape + (1,) * self.event_dim))
+            logdetjacs.append(trans.log_abs_det_jacobian(xslice, yslice).reshape(x.shape + (1,) * self.event_dim))
             start = start + length  # avoid += for jit compat
-        return torch.cat(logdetjacs, dim=self.dim)._sum_rightmost(self.event_dim)
+        return _sum_rightmost(torch.cat(logdetjacs, dim=self.dim), self.event_dim)
 
     @property
     def bijective(self):
