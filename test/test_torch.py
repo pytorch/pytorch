@@ -11299,7 +11299,6 @@ class TestTorchDeviceType(TestCase):
         dst = dst.masked_scatter(mask, src)
         self.assertEqual(dst, torch.tensor([True, True, True], device=device))
 
-    @dtypesIfCUDA(*[dtype for dtype in torch.testing.get_all_dtypes() if dtype not in [torch.bfloat16]])
     @dtypes(*torch.testing.get_all_dtypes())
     def test_masked_select(self, device, dtype):
         if device == 'cpu':
@@ -11335,7 +11334,11 @@ class TestTorchDeviceType(TestCase):
             return
 
         # Ensure that masks are expanded to match tensor properly
-        a = torch.rand(100, 100, device=device).mul(100).to(dtype)
+        if IS_WINDOWS and dtype == torch.bfloat16 and torch.device(device).type == 'cuda':
+            # TODO .to() for bfloat16 does not work on windows
+            a = torch.ones(100, 100, device=device, dtype=dtype)
+        else:
+            a = torch.rand(100, 100, device=device).mul(100).to(dtype)
         mask_first_el_each_row = torch.zeros(100, device=device).bool()
         mask_first_el_each_row[0] = True
         a_masked = a.masked_select(mask_first_el_each_row)
@@ -11347,7 +11350,10 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(a_masked, a[0, :])
 
         # Ensure that tensor is expanded to match mask properly
-        a = torch.rand(100, device=device).mul(100).to(maskType)
+        if IS_WINDOWS and dtype == torch.bfloat16 and torch.device(device).type == 'cuda':
+            a = torch.ones(100, device=device, dtype=dtype)
+        else:
+            a = torch.rand(100, device=device).mul(100).to(maskType)
         mask_copy_3_times = torch.tensor([[True], [True], [False], [True]], device=device)
         a_masked = a.masked_select(mask_copy_3_times)
         self.assertEqual(a_masked, a.unsqueeze(0).expand(3, 100).flatten())
