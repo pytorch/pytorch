@@ -596,8 +596,8 @@ Vec256<int64_t> inline emulate(const Vec256<int64_t>& a, const Vec256<int64_t>& 
 // code for add as well.
 // Note: intentionally ignores undefined behavior like (-lowest * -1).
 template <>
-__ubsan_ignore_undefined__ Vec256<int64_t> inline operator*(const Vec256<int64_t>& a, const Vec256<int64_t>& b) {
-  return emulate(a, b, [](int64_t a_point, int64_t b_point){return a_point * b_point;});
+Vec256<int64_t> inline operator*(const Vec256<int64_t>& a, const Vec256<int64_t>& b) {
+  return emulate(a, b, [](int64_t a_point, int64_t b_point) __ubsan_ignore_undefined__ {return a_point * b_point;});
 }
 
 template <>
