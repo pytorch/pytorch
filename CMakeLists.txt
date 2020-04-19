@@ -302,7 +302,7 @@ if(MSVC)
       CMAKE_EXE_LINKER_FLAGS CMAKE_MODULE_LINKER_FLAGS)
     string(APPEND ${flag_var} " /ignore:4049 /ignore:4217")
     if(CMAKE_LINKER MATCHES "lld-link")
-      string(APPEND ${flag_var} " -threads:no")
+      string(APPEND ${flag_var} " /threads:no")
     endif()
   endforeach(flag_var)
 
