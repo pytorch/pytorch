@@ -5678,6 +5678,9 @@ class TestTorchDeviceType(TestCase):
     # Uses deprecated indexing by uint8 to trigger a warning
     def test_cpp_warnings_have_python_context(self, device):
         import inspect
+        # Creates long string in advance to avoid a too-long Python line
+        s = ".+Triggered internally at  ../aten/src/ATen/native/IndexingUtils.h.+"
+
         with warnings.catch_warnings(record=True) as w:
             t = torch.tensor((1, 2))
             indices = torch.tensor((0, 1), dtype=torch.uint8)
@@ -5686,7 +5689,9 @@ class TestTorchDeviceType(TestCase):
             warning = w[0]
 
             # Checks for cpp context in the warning message
-            self.assertTrue(re.search(".+Triggered internally at  ../aten/src/ATen/native/IndexingUtils.h.+", str(warning.message)) is not None)
+            self.assertTrue(re.search(s, str(warning.message)) is not None)
+
+            # Checks the Python features of the warning
             self.assertEqual(frameinfo.lineno - 1, warning.lineno)
             self.assertEqual(len(w), 1)
 
