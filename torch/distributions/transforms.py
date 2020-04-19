@@ -233,7 +233,7 @@ class ComposeTransform(Transform):
             the latest single value is cached. Only 0 and 1 are supported.
     """
     def __init__(self, parts, cache_size=0):
-        if parts and cache_size:
+        if cache_size:
             parts = [part.with_cache(cache_size) for part in parts]
         super(ComposeTransform, self).__init__(cache_size=cache_size)
         self.parts = parts
@@ -637,7 +637,7 @@ class CatTransform(Transform):
     """
     def __init__(self, tseq, dim=0, lengths=None, cache_size=0):
         assert all(isinstance(t, Transform) for t in tseq)
-        if tseq and cache_size:
+        if cache_size:
             tseq = [t.with_cache(cache_size) for t in tseq]
         super(CatTransform, self).__init__(cache_size=cache_size)
         self.transforms = list(tseq)
@@ -720,7 +720,7 @@ class StackTransform(Transform):
     """
     def __init__(self, tseq, dim=0, cache_size=0):
         assert all(isinstance(t, Transform) for t in tseq)
-        if tseq and cache_size:
+        if cache_size:
             tseq = [t.with_cache(cache_size) for t in tseq]
         super(StackTransform, self).__init__(cache_size=cache_size)
         self.transforms = list(tseq)
