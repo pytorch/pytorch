@@ -463,28 +463,28 @@ macro(CUDA_INCLUDE_NVCC_DEPENDENCIES dependency_file)
   endif()
   # Always include this file to force CMake to run again next
   # invocation and rebuild the dependencies.
-  #message("including dependency_file = ${dependency_file}")
+  message("including dependency_file = ${dependency_file}")
   include(${dependency_file})
 
   # Now we need to verify the existence of all the included files
   # here.  If they aren't there we need to just blank this variable and
   # make the file regenerate again.
-#   if(DEFINED CUDA_NVCC_DEPEND)
-#     message("CUDA_NVCC_DEPEND set")
-#   else()
-#     message("CUDA_NVCC_DEPEND NOT set")
-#   endif()
+   if(DEFINED CUDA_NVCC_DEPEND)
+     message("CUDA_NVCC_DEPEND set")
+   else()
+     message("CUDA_NVCC_DEPEND NOT set")
+   endif()
   if(CUDA_NVCC_DEPEND)
-    #message("CUDA_NVCC_DEPEND found")
+    message("CUDA_NVCC_DEPEND found")
     foreach(f ${CUDA_NVCC_DEPEND})
-      # message("searching for ${f}")
+       message("searching for ${f}")
       if(NOT EXISTS ${f})
-        #message("file ${f} not found")
+        message("file ${f} not found")
         set(CUDA_NVCC_DEPEND_REGENERATE TRUE)
       endif()
     endforeach()
   else()
-    #message("CUDA_NVCC_DEPEND false")
+    message("CUDA_NVCC_DEPEND false")
     # No dependencies, so regenerate the file.
     set(CUDA_NVCC_DEPEND_REGENERATE TRUE)
   endif()
@@ -495,7 +495,7 @@ macro(CUDA_INCLUDE_NVCC_DEPENDENCIES dependency_file)
   # rule to re-run.
   if(CUDA_NVCC_DEPEND_REGENERATE)
     set(CUDA_NVCC_DEPEND ${dependency_file})
-    #message("Generating an empty dependency_file: ${dependency_file}")
+    message("Generating an empty dependency_file: ${dependency_file}")
     file(WRITE ${dependency_file} "#FindCUDA.cmake generated file.  Do not edit.\n")
   endif()
 
