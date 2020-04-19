@@ -252,6 +252,10 @@ Tensor& tanh_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(
 Tensor tanh(const Tensor& self) { return unary_op_impl(self, at::tanh_out); }
 Tensor& tanh_(Tensor& self) { return unary_op_impl_(self, at::tanh_out); }
 
+Tensor& tan_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, tan_stub);  }
+Tensor tan(const Tensor& self) { return unary_op_impl(self, at::tan_out);  }
+Tensor& tan_(Tensor& self) { return unary_op_impl_(self, at::tan_out);  }
+
 Tensor& trunc_out(Tensor& result, const Tensor& self) {
   // Note: this is consistent with NumPy
   TORCH_CHECK(!self.is_complex(),
@@ -447,7 +451,6 @@ IMPLEMENT_UNARY_OP_VEC(erf)
 IMPLEMENT_UNARY_OP_VEC(erfc)
 IMPLEMENT_UNARY_OP_VEC_CUDA(erfinv)
 IMPLEMENT_UNARY_OP_VEC(exp)
-IMPLEMENT_UNARY_OP_VEC(tan)
 IMPLEMENT_UNARY_OP_VEC_CUDA(lgamma)
 
 DEFINE_DISPATCH(abs_stub);
