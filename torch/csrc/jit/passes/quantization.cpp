@@ -2766,7 +2766,10 @@ struct FoldPrepackedWeightIntoModuleHelper {
         {false, false, linear_prepack_per_tensor, linear_params_module},
         {false, true, linear_prepack_per_channel, linear_params_module},
         {true, false, conv2d_prepack, conv_params_module},
-        {true, true, conv2d_prepack_per_channel, conv_params_module}};
+        {true, true, conv2d_prepack_per_channel, conv_params_module},
+        {true, false, conv3d_prepack, conv_params_module},
+        {true, true, conv3d_prepack_per_channel, conv_params_module}
+    };
     for (const auto& pm : pattern_and_modules) {
       const Graph& pattern_graph = *pm.pattern.pattern_graph;
       const auto& vmap = pm.pattern.vmap;
@@ -2926,6 +2929,18 @@ graph(%a_dequant, %w, %b, %w_scale, %w_zero_point, %w_dtype, %stride, %padding, 
 graph(%a_dequant, %w, %b, %w_scale, %w_zero_point, %w_axis, %w_dtype, %stride, %padding, %dilation, %groups):
         %w_quant = aten::quantize_per_channel(%w, %w_scale, %w_zero_point, %w_axis, %w_dtype)
         %packed_params = quantized::conv2d_prepack(%w_quant, %b, %stride, %padding, %dilation, %groups)
+        return (%packed_params) )");
+
+  const PatternInfo conv3d_prepack = PatternInfo::parse_from_str(R"(
+graph(%a_dequant, %w, %b, %w_scale, %w_zero_point, %w_dtype, %stride, %padding, %dilation, %groups):
+        %w_quant = aten::quantize_per_tensor(%w, %w_scale, %w_zero_point, %w_dtype)
+        %packed_params = quantized::conv3d_prepack(%w_quant, %b, %stride, %padding, %dilation, %groups)
+        return (%packed_params) )");
+
+  const PatternInfo conv3d_prepack_per_channel = PatternInfo::parse_from_str(R"(
+graph(%a_dequant, %w, %b, %w_scale, %w_zero_point, %w_axis, %w_dtype, %stride, %padding, %dilation, %groups):
+        %w_quant = aten::quantize_per_channel(%w, %w_scale, %w_zero_point, %w_axis, %w_dtype)
+        %packed_params = quantized::conv3d_prepack(%w_quant, %b, %stride, %padding, %dilation, %groups)
         return (%packed_params) )");
 };
 
