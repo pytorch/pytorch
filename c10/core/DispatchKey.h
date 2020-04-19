@@ -67,10 +67,9 @@ enum class DispatchKey : uint8_t {
 
   // Here are backends which specify more specialized operators
   // based on the dtype of the tensor.
-  QuantizedCPU,  // registered at build/aten/src/ATen/QuantizedCPUType.cpp
-  QuantizedCUDA, // registered at build/aten/src/ATen/QuantizedCUDAType.cpp
-  ComplexCPU,    // lives out of tree at https://gitlab.com/pytorch-complex/pytorch-cpu-strided-complex
-  ComplexCUDA,   // and https://gitlab.com/pytorch-complex/pytorch-cuda-strided-complex
+  QuantizedCPU, // registered at build/aten/src/ATen/QuantizedCPUType.cpp
+  ComplexCPU,   // lives out of tree at https://gitlab.com/pytorch-complex/pytorch-cpu-strided-complex
+  ComplexCUDA,  // and https://gitlab.com/pytorch-complex/pytorch-cuda-strided-complex
                         // tested at test/cpp_extensions/complex_registration_extension.cpp
                         // TODO: Remove Complex dispatch keys when Complex is moved in tree
 

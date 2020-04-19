@@ -3,7 +3,7 @@
 #include <ATen/core/op_registration/op_registration.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cpu/Loops.h>
-#include <ATen/native/quantized/affine_quantizer.h>
+#include <ATen/quantized/Quantizer.h>
 #include <ATen/native/quantized/cpu/quantized_ops.h>
 #include <ATen/native/quantized/cpu/init_qnnpack.h>
 #include <ATen/native/quantized/cpu/qnnpack_utils.h>
@@ -142,8 +142,8 @@ Tensor quantized_relu6_(Tensor& qx) {
     using Vec = Vec256<scalar_t>;
     auto iter = TensorIterator::unary_op(qx, qx);
     auto zero_point_vec = Vec(scalar_t(zero_point));
-    scalar_t six = at::native::quantize_val<scalar_t>(qx.q_scale(), qx.q_zero_point(),
-                                                      /*value=*/6.0);
+    scalar_t six = at::quantize_val<scalar_t>(qx.q_scale(), qx.q_zero_point(),
+                                              /*value=*/6.0);
     auto six_vec = Vec(six);
     cpu_kernel_vec(
         iter,

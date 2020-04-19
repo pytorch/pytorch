@@ -171,14 +171,12 @@ cuda_file_manager = FileManager()
 def backend_to_devicetype(backend):
     if backend == 'QuantizedCPU':
         return 'CPU'
-    elif backend == 'QuantizedCUDA':
-        return 'CUDA'
     return backend
 
 backends = ['CPU', 'CUDA']
 densities = ['Dense', 'Sparse', 'Mkldnn']  # TODO: layout instead of densities?
 
-quantized_backends = ['QuantizedCPU', 'QuantizedCUDA']
+quantized_backends = ['QuantizedCPU']
 
 # scalar_name, c_type, accreal, is_floating_type
 quantized_scalar_types = [
@@ -214,8 +212,6 @@ top_env = {
 def is_whitelisted_backend(backend):
     return options.backend_whitelist is None or backend in options.backend_whitelist
 
-def is_cuda_backend(backend):
-    return backend in ("QuantizedCUDA", "CUDA")
 
 def dict_representer(dumper, data):
     return dumper.represent_dict(data.items())
@@ -299,7 +295,7 @@ def generate_storage_type_and_tensor(backend, density, declarations, per_op_regi
     top_env['type_ids'].append(tag + ',')
 
     env['legacy_th_headers'] = []
-    if is_cuda_backend(backend):
+    if backend == 'CUDA':
         env['extra_cuda_headers'] = []
         env['extra_cuda_headers'].append('#include <ATen/DeviceGuard.h>')
         if options.rocm:
@@ -408,7 +404,7 @@ def declare_outputs():
         if not is_whitelisted_backend(full_backend):
             continue
         fm = file_manager
-        if is_cuda_backend(backend):
+        if backend == 'CUDA':
             fm = cuda_file_manager
         for kind in ["Type"]:
             if kind != 'Type' and density == "Sparse":
