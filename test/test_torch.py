@@ -5675,6 +5675,21 @@ class TestTorchDeviceType(TestCase):
                 self.assertEqual((), torch.nn.functional.multi_margin_loss(input, target, reduction='mean').shape)
                 self.assertEqual((), torch.nn.functional.multi_margin_loss(input, target, reduction='sum').shape)
 
+    # Uses deprecated indexing by uint8 to trigger a warning
+    def test_cpp_warnings_have_python_context(self, device):
+        import inspect
+        with warnings.catch_warnings(record=True) as w:
+            t = torch.tensor((1, 2))
+            indices = torch.tensor((0, 1), dtype=torch.uint8)
+            t[indices]  # triggers warning
+            frameinfo = inspect.getframeinfo(inspect.currentframe())
+            warning = w[0]
+
+            # Checks for cpp context in the warning message
+            self.assertTrue(re.search(".+Triggered internally at  ../aten/src/ATen/native/IndexingUtils.h.+", str(warning.message)) is not None)
+            self.assertEqual(frameinfo.lineno - 1, warning.lineno)
+            self.assertEqual(len(w), 1)
+
     def _np_compare(self, fn_name, vals, device, dtype):
         assert TEST_NUMPY
 
