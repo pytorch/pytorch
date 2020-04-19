@@ -5679,7 +5679,7 @@ class TestTorchDeviceType(TestCase):
     def test_cpp_warnings_have_python_context(self, device):
         import inspect
         # Creates long string in advance to avoid a too-long Python line
-        s = ".+Triggered internally at  ../aten/src/ATen/native/IndexingUtils.h.+"
+        s = ".+Triggered internally at.+IndexingUtils.+"
 
         with warnings.catch_warnings(record=True) as w:
             t = torch.tensor((1, 2))
