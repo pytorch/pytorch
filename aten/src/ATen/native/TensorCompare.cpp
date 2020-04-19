@@ -62,20 +62,35 @@ Tensor isnan(const Tensor& self) {
 }
 
 Tensor isinf(const Tensor &self) {
-  // Integral tensor types are always not inf
-  if (isIntegralType(self.scalar_type())) {
+  // Note: Integral tensor values are never infinite
+  if (c10::isIntegralType(self.scalar_type(), /*include_bool=*/true)) {
     return at::zeros_like(self, at::kBool, at::MemoryFormat::Preserve);
   }
+
+  // Note: a complex value is infinite when either part is infinite
+  if (self.is_complex()) {
+    const auto float_type = c10::toValueType(self.scalar_type());
+    return at::isinf(self.copy_real().to(float_type)).__ior__
+          (at::isinf(self.copy_imag().to(float_type)));
+  }
+
   return AT_DISPATCH_FLOATING_TYPES_AND_HALF(self.scalar_type(), "isinf", [&]() {
     return self.abs() == std::numeric_limits<scalar_t>::infinity();
   });
 }
 
 Tensor isfinite(const Tensor& self) {
-  // Integral tensor types are finite
-  if (!self.is_floating_point()) {
+  // Note: Integral tensor values are always finite
+  if (c10::isIntegralType(self.scalar_type(), /*include_bool=*/true)) {
     return at::ones_like(self, at::kBool, at::MemoryFormat::Preserve);
   }
+
+  // Note: a complex value is finite iff both parts are finite
+  if (self.is_complex()) {
+    const auto float_type = c10::toValueType(self.scalar_type());
+    return at::isfinite(self.abs().to(float_type));
+  }
+
   return AT_DISPATCH_FLOATING_TYPES_AND_HALF(self.scalar_type(), "isfinite", [&]() {
     return (self == self) * (self.abs() != std::numeric_limits<scalar_t>::infinity());
   });
