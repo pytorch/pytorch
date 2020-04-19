@@ -131,7 +131,7 @@ graph(%a_quant, %b_quant, %scale, %zero_point, %dtype):
 
   // aten::linear
   std::string linear = R"(
-graph(%packed_params, %a_quant, %r_scale, %r_zero_point, %r_dtype):
+graph(%a_quant, %packed_params, %r_scale, %r_zero_point, %r_dtype):
         %a_dequant = aten::dequantize(%a_quant)
         %w_quant : Tensor, %b : Tensor? = quantized::linear_unpack(%packed_params)
         %w_dequant = aten::dequantize(%w_quant)
@@ -139,10 +139,35 @@ graph(%packed_params, %a_quant, %r_scale, %r_zero_point, %r_dtype):
         %r_quant = aten::quantize_per_tensor(%r, %r_scale, %r_zero_point, %r_dtype)
         return (%r_quant) )";
 
+  std::string linear_relu = R"(
+graph(%a_quant, %packed_params, %r_scale, %r_zero_point, %r_dtype):
+        %a_dequant = aten::dequantize(%a_quant)
+        %w_quant : Tensor, %b : Tensor? = quantized::linear_unpack(%packed_params)
+        %w_dequant = aten::dequantize(%w_quant)
+        %linear_out = aten::linear(%a_dequant, %w_dequant, %b)
+        %r = aten::relu(%linear_out)
+        %r_quant = aten::quantize_per_tensor(%r, %r_scale, %r_zero_point, %r_dtype)
+        return (%r_quant) )";
+
+  std::string linear_inplace_relu = R"(
+graph(%a_quant, %packed_params, %r_scale, %r_zero_point, %r_dtype):
+        %a_dequant = aten::dequantize(%a_quant)
+        %w_quant : Tensor, %b : Tensor? = quantized::linear_unpack(%packed_params)
+        %w_dequant = aten::dequantize(%w_quant)
+        %linear_out = aten::linear(%a_dequant, %w_dequant, %b)
+        %r = aten::relu_(%linear_out)
+        %r_quant = aten::quantize_per_tensor(%r, %r_scale, %r_zero_point, %r_dtype)
+        return (%r_quant) )";
+
   // quantized::linear
   std::string quantized_linear = R"(
-graph(%packed_params, %a_quant, %r_scale, %r_zero_point, %r_dtype):
+graph(%a_quant, %packed_params, %r_scale, %r_zero_point, %r_dtype):
         %r = quantized::linear(%a_quant, %packed_params, %r_scale, %r_zero_point)
+        return (%r) )";
+
+  std::string quantized_linear_relu = R"(
+graph(%a_quant, %packed_params, %r_scale, %r_zero_point, %r_dtype):
+        %r = quantized::linear_relu(%a_quant, %packed_params, %r_scale, %r_zero_point)
         return (%r) )";
 
   std::string cat = R"(
@@ -291,6 +316,8 @@ graph(%a_quant, %weight, %bias, %mean, %var, %training, %eaf, %eps, %7, %scale, 
       {"quantized::conv3d_relu", conv3d_relu, quantized_conv3d_relu},
       {"quantized::conv3d_relu", conv3d_inplace_relu, quantized_conv3d_relu},
       {"quantized::linear", linear, quantized_linear},
+      {"quantized::linear_relu", linear_relu, quantized_linear_relu},
+      {"quantized::linear_relu", linear_inplace_relu, quantized_linear_relu},
       {"quantized::add_relu", add_relu, quantized_add_relu, add_filter},
       {"quantized::add_relu", add_inplace_relu, quantized_add_relu, add_filter},
       {"quantized::add", add, quantized_add, add_filter},

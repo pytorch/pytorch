@@ -1169,11 +1169,57 @@ class TestQuantizeScriptPTSQOps(JitTestCase):
         model = quantize_script(model, qconfig_dict, _test_only_eval_fn, [data], inplace=False)
         FileCheck().check(quantized_op) \
                    .run(model.graph)
-
         # make sure it runs
         model(data[0][0])
 
         return model
+
+    @unittest.skipUnless(
+        'fbgemm' in torch.backends.quantized.supported_engines,
+        " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
+        " with instruction set support avx2 or newer.",
+    )
+    def test_quantized_linear(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+                self.linear = torch.nn.Linear(30, 4).float()
+
+            def forward(self, x):
+                return self.linear(x)
+
+        data = [(torch.rand((1, 30), dtype=torch.float),
+                 torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
+        model = self._test_op_impl(M(), data, "quantized::linear")
+        # make sure there is only one quantize_per_tensor for input
+        # and linear_prepack is folded
+        FileCheck().check_count("aten::quantize_per_tensor", 1, exactly=True) \
+                   .run(model.graph)
+        FileCheck().check_not("quantized::linear_prepack") \
+                   .run(model.graph)
+
+    @unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
+                         " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
+                         " with instruction set support avx2 or newer.")
+    def test_quantized_linear_relu(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+                self.linear = torch.nn.Linear(30, 4).float()
+                self.relu = torch.nn.ReLU()
+
+            def forward(self, x):
+                return self.relu(self.linear(x))
+
+        data = [(torch.randn((1, 30), dtype=torch.float),
+                 torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
+        model = self._test_op_impl(M(), data, "quantized::linear_relu")
+
+        FileCheck().check_not("aten::linear") \
+                   .check_not("aten::relu") \
+                   .check_not("quantized::linear(") \
+                   .check_not("quantized::relu(") \
+                   .run(model.graph)
 
     @unittest.skipUnless(
         'fbgemm' in torch.backends.quantized.supported_engines,
@@ -1198,7 +1244,6 @@ class TestQuantizeScriptPTSQOps(JitTestCase):
 
         FileCheck().check_not("quantized::conv2d_prepack") \
                    .run(model.graph)
-
 
     @unittest.skipUnless(
         'fbgemm' in torch.backends.quantized.supported_engines,
