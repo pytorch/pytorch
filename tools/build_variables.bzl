@@ -199,6 +199,7 @@ libtorch_core_sources = [
     "torch/csrc/jit/tensorexpr/codegen.cpp",
     "torch/csrc/jit/tensorexpr/eval.cpp",
     "torch/csrc/jit/tensorexpr/expr.cpp",
+    "torch/csrc/jit/tensorexpr/cost_estimator.cpp",
     "torch/csrc/jit/tensorexpr/function.cpp",
     "torch/csrc/jit/tensorexpr/hash_provider.cpp",
     "torch/csrc/jit/tensorexpr/ir.cpp",

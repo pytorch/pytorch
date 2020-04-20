@@ -111,6 +111,18 @@ namespace jit {
   _(ATengtInt)                              \
   _(ATenleInt)                              \
   _(ATenltInt)                              \
+  _(CostEstimatorSimple)                    \
+  _(CostEstimatorCompound)                  \
+  _(CostEstimatorStaticFor)                 \
+  _(CostEstimatorVariableFor)               \
+  _(CostEstimatorBlock)                     \
+  _(CostEstimatorLoadStoreIndices)          \
+  _(CostEstimatorCond)                      \
+  _(CostEstimatorAllocFree)                 \
+  _(CostEstimatorDictionary)                \
+  _(CostEstimatorSanityCheck)               \
+  _(CostEstimatorFindCommonExpr)            \
+  _(CostEstimatorFindCommonParent)          \
   _(ConstantFoldSimple)                     \
   _(ConstantFoldTwoLayer)                   \
   _(ConstantFoldShifts)                     \
