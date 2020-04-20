@@ -809,7 +809,7 @@ Example:
 
 add_docstr(torch.bmm,
            r"""
-bmm(input, mat2, out=None) -> Tensor
+bmm(input, mat2, deterministic=False, out=None) -> Tensor
 
 Performs a batch matrix-matrix product of matrices stored in :attr:`input`
 and :attr:`mat2`.
@@ -830,6 +830,10 @@ If :attr:`input` is a :math:`(b \times n \times m)` tensor, :attr:`mat2` is a
 Args:
     input (Tensor): the first batch of matrices to be multiplied
     mat2 (Tensor): the second batch of matrices to be multiplied
+    deterministic (bool, optional): flag to choose between a faster non-deterministic
+                                    calculation, or a slower deterministic calculation.
+                                    This argument is only available for sparse-dense CUDA bmm.
+                                    Default: ``False``
     {out}
 
 Example::
@@ -2580,6 +2584,7 @@ Example::
 add_docstr(torch.isinf,
            r"""
 Returns a new tensor with boolean elements representing if each element is `+/-INF` or not.
+Complex values are infinite when their real and/or imaginary part is infinite.
 
     Arguments:
         tensor (Tensor): A tensor to check
@@ -2595,7 +2600,10 @@ Returns a new tensor with boolean elements representing if each element is `+/-I
 
 add_docstr(torch.isfinite,
            r"""
-Returns a new tensor with boolean elements representing if each element is `Finite` or not.
+Returns a new tensor with boolean elements representing if each element is `finite` or not.
+
+Real values are finite when they are not NaN, negative infinity, or infinity.
+Complex values are finite when both their real and imaginary parts are finite.
 
     Arguments:
         tensor (Tensor): A tensor to check
@@ -2612,6 +2620,7 @@ Returns a new tensor with boolean elements representing if each element is `Fini
 add_docstr(torch.isnan,
            r"""
 Returns a new tensor with boolean elements representing if each element is `NaN` or not.
+Complex values are considered `NaN` when either their real and/or imaginary part is NaN.
 
 Arguments:
     input (Tensor): A tensor to check

@@ -465,7 +465,7 @@ class CAFFE2_API Tensor {
   /// // f requires grad, has no operation creating it
   /// @endcode
 
-  /// \fn void backward(const Tensor & gradient={}, bool keep_graph=false, bool create_graph=false) const;
+  /// \fn void backward(const Tensor & gradient={}, c10::optional<bool> retain_graph=c10::nullopt, bool create_graph=false) const;
   ///
   /// Computes the gradient of current tensor with respect to graph leaves.
   ///
@@ -484,7 +484,7 @@ class CAFFE2_API Tensor {
   ///     None values can be specified for scalar Tensors or ones that
   ///     don't require grad. If a None value would be acceptable then
   ///     this argument is optional.
-  /// \param keep_graph If ``false``, the graph used to compute
+  /// \param retain_graph If ``false``, the graph used to compute
   ///     the grads will be freed. Note that in nearly all cases setting
   ///     this option to True is not needed and often can be worked around
   ///     in a much more efficient way. Defaults to the value of
