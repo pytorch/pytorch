@@ -11,6 +11,9 @@ bool BatchMatMulOp<CUDAContext, DefaultEngine>::RunOnDevice() {
 
 REGISTER_CUDA_OPERATOR(BatchMatMul, BatchMatMulOp<CUDAContext>);
 
+
+#ifndef __HIP_PLATFORM_HCC__
+
 template <>
 bool BatchMatMulOp<CUDAContext, TensorCoreEngine>::RunOnDevice() {
     return DispatchHelper<TensorTypes<float, at::Half>>::call(this, Input(0));
@@ -20,5 +23,7 @@ REGISTER_CUDA_OPERATOR_WITH_ENGINE(
     BatchMatMul,
     TENSORCORE,
     BatchMatMulOp<CUDAContext, TensorCoreEngine>);
+
+#endif
 
 } // namespace caffe2

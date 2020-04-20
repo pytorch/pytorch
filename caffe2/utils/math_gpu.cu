@@ -1223,7 +1223,11 @@ CAFFE2_CUDA_EXPORT void Gemv<at::Half, CUDAContext>(
   }
 }
 
+<<<<<<< HEAD
+#ifndef __HIP_PLATFORM_HCC__
+=======
 #if CUDA_VERSION >= 9000
+>>>>>>> a1e7654106... debug ROCm
 
 // No change, but required. Defer to default CUDA engine
 template <>
@@ -1473,7 +1477,11 @@ CAFFE2_CUDA_EXPORT void Gemv<at::Half, CUDAContext, TensorCoreEngine>(
       trans_A, M, N, alpha, A, x, beta, y, context, math_type);
 }
 
+<<<<<<< HEAD
+#endif
+=======
 #endif // CUDA_VERSION >= 9000
+>>>>>>> a1e7654106... debug ROCm
 
 template <>
 CAFFE2_CUDA_EXPORT void GemmEx<float, CUDAContext>(
