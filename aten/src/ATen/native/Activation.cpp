@@ -726,15 +726,32 @@ Tensor leaky_relu_backward(
 }
 
 std::tuple<Tensor, Tensor> log_sigmoid_forward_cpu(const Tensor& input) {
-  auto result = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  auto buffer = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  // FIXME: do these actually need to be zeros_like or can they be empty_like?
+  auto result = at::zeros_like(input, at::MemoryFormat::Contiguous);
+  auto buffer = at::zeros_like(input, at::MemoryFormat::Contiguous);
   log_sigmoid_cpu_stub(kCPU, result, buffer, input.contiguous());
   return std::make_tuple(result, buffer);
 }
 
 std::tuple<Tensor&, Tensor&> log_sigmoid_forward_out_cpu(Tensor& result, Tensor& buffer, const Tensor& input) {
-  log_sigmoid_cpu_stub(kCPU, result, buffer, input);
+  result.resize_as_(input);
+  buffer.resize_as_(input, at::MemoryFormat::Contiguous);
+  TORCH_CHECK(buffer.is_contiguous(), "Contiguous buffer required for log_sigmoid with out parameter");
+  Tensor result_tmp = result.is_contiguous() ? result : at::empty_like(result, at::MemoryFormat::Contiguous);
+  log_sigmoid_cpu_stub(kCPU, result_tmp, buffer, input.contiguous());
+  if (!result.is_contiguous()) {
+    result.copy_(result_tmp);
+  }
   return std::forward_as_tuple(result, buffer);
+}
+
+Tensor & log_sigmoid_out(Tensor & output, const Tensor & self) {
+  Tensor buffer = at::empty({0}, self.options());
+  return std::get<0>(at::log_sigmoid_forward_out(output, buffer, self));
+}
+
+Tensor log_sigmoid(const Tensor & self) {
+  return std::get<0>(at::log_sigmoid_forward(self));
 }
 
 Tensor log_sigmoid_backward_cpu(const Tensor& grad_output, const Tensor& input, const Tensor& buffer) {

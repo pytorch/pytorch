@@ -488,7 +488,7 @@ class TestFuser(JitTestCase):
                 with torch.jit.optimized_execution(False):
                     out_noopt = model_noopt(x, y)
                     rep_noopt = str(model_noopt.graph_for(x, y))
-                self.assertEqual(out, out_noopt, prec=3e-5)
+                self.assertEqual(out, out_noopt, atol=3e-5)
 
             # Check that normalization op has really been decomposed
             for node_in_graph in in_opt_graph:
