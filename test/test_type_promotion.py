@@ -232,7 +232,7 @@ class TestTypePromotion(TestCase):
         complex_dtypes = torch.testing.get_all_complex_dtypes()
         dtypes1 = torch.testing.get_all_math_dtypes('cuda') + complex_dtypes
         dtypes2 = torch.testing.get_all_math_dtypes(device) + complex_dtypes
-        ops = [torch.add, torch.sub, torch.mul, torch.div, torch.rsub]
+        ops = [torch.add, torch.sub, torch.mul, torch.true_divide, torch.rsub]
         for dt1, dt2 in itertools.product(dtypes1, dtypes2):
             for op, non_contiguous in itertools.product(ops, [True, False]):
                 common_dtype = torch.promote_types(dt1, dt2)
@@ -644,10 +644,6 @@ class TestTypePromotion(TestCase):
         self._run_all_tests_for_sparse_op('mul', device)
 
     @onlyOnCPUAndCUDA
-    def test_sparse_div(self, device):
-        self._run_all_tests_for_sparse_op('div', device)
-
-    @onlyOnCPUAndCUDA
     def test_sparse_sub(self, device):
         self._run_all_tests_for_sparse_op('sub', device)
 
@@ -669,17 +665,17 @@ class TestTypePromotion(TestCase):
         o = torch.empty(1, device=device, dtype=dtype)
 
         # Tests div (including /) deprecation
-        with self.maybeWarnsRegex(UserWarning, '^Integer division.+is deprecated.+'):
+        with self.assertRaises(RuntimeError):
             c = a / b
-        with self.maybeWarnsRegex(UserWarning, '^Integer division.+is deprecated.+'):
+        with self.assertRaises(RuntimeError):
             c = torch.div(a, b)
-        with self.maybeWarnsRegex(UserWarning, '^Integer division.+is deprecated.+'):
+        with self.assertRaises(RuntimeError):
             torch.div(a, b, out=o)
 
         # Tests addcdiv deprecation
-        with self.maybeWarnsRegex(UserWarning, '^Integer division.+is deprecated.+'):
+        with self.assertRaises(RuntimeError):
             torch.addcdiv(a, b, b)
-        with self.maybeWarnsRegex(UserWarning, '^Integer division.+is deprecated.+'):
+        with self.assertRaises(RuntimeError):
             torch.addcdiv(a, b, b, out=o)
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")

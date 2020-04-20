@@ -11858,12 +11858,10 @@ class TestTorchDeviceType(TestCase):
             # implementation of addcdiv downcasts alpha. arithmetic ops don't.
             if not actual.dtype.is_floating_point:
                 alpha = int(alpha)
-            expected = a + (alpha * b) / c
+                expected = a + (alpha * b) // c
+            else:
+                expected = a + (alpha * b) / c
             self.assertTrue(torch.allclose(expected, actual, equal_nan=True))
-
-            with self.maybeWarnsRegex(
-                    UserWarning, "This overload of addcdiv is deprecated"):
-                self.assertEqual(actual, torch.addcdiv(a, alpha, b, c))
 
         def non_zero_rand(size, dtype, device):
             if dtype.is_floating_point:
@@ -11874,7 +11872,7 @@ class TestTorchDeviceType(TestCase):
                 a = torch.randint(-5, 5, size=size, dtype=dtype, device=device)
             return a + (a == 0).type(dtype)
 
-        for dtype in torch.testing.get_all_math_dtypes(device):
+        for dtype in (torch.float32, torch.float64):
             _test_addcdiv(
                 non_zero_rand((2, 2), dtype=dtype, device=device),
                 0.5,
@@ -12598,8 +12596,8 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(2 + torch.tensor(3), 2 + torch.tensor(3).to(devices[1]))    # __radd__
         self.assertEqual(2 - torch.tensor(3), 2 - torch.tensor(3).to(devices[1]))    # __rsub__
         self.assertEqual(2 * torch.tensor(3), 2 * torch.tensor(3).to(devices[1]))    # __rmul__
-        self.assertEqual(2 / torch.tensor(3), 2 / torch.tensor(3).to(devices[1]))    # __rtruediv__
-        self.assertEqual(2 // torch.tensor(3), 2 // torch.tensor(3).to(devices[1]))  # __rfloordiv__
+        self.assertEqual(2 // torch.tensor(3), 2 // torch.tensor(3).to(devices[1]))    # __rtruediv__
+        self.assertEqual(2 / torch.tensor(3.), 2 / torch.tensor(3.).to(devices[1]))  # __rfloordiv__
 
         self.assertEqual(
             torch.tensor(2).to(devices[1]) + torch.tensor(3).to(devices[0]),
@@ -12611,8 +12609,8 @@ class TestTorchDeviceType(TestCase):
             torch.tensor(2).to(devices[1]) * torch.tensor(3).to(devices[0]),
             torch.tensor(2) * torch.tensor(3))
         self.assertEqual(
-            torch.tensor(2).to(devices[1]) / torch.tensor(3).to(devices[0]),
-            torch.tensor(2) / torch.tensor(3))
+            torch.tensor(2.).to(devices[1]) / torch.tensor(3.).to(devices[0]),
+            torch.tensor(2.) / torch.tensor(3.))
         self.assertEqual(
             torch.tensor(2).to(devices[1]) // torch.tensor(3).to(devices[0]),
             torch.tensor(2) // torch.tensor(3))
@@ -15353,7 +15351,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
     def test_div_zero(self, device, dtype):
         a = torch.tensor([0, 1], dtype=dtype, device=device)
         b = torch.tensor([0, 1], dtype=dtype, device=device)
-        with self.assertRaisesRegex(RuntimeError, 'ZeroDivisionError'):
+        with self.assertRaises(RuntimeError):
             a.div(b)
 
     @onlyCPU
@@ -16596,9 +16594,11 @@ tensor_op_tests = [
     ('mul', '', _small_3d, lambda t, d: [_number(3.14, 3, t)], 1e-2),
     ('mul', 'tensor', _small_3d, lambda t, d: [_small_3d(t, d)], 1e-2),
     ('mul', 'scalar', _small_0d, lambda t, d: [_small_0d(torch.int32, d)], 1e-2),
-    ('div', '', _small_3d, lambda t, d: [_number(3.14, 3, t)], 1e-1),
+    ('div', '', _small_3d, lambda t, d: [_number(3.14, 3, t)], 1e-1, 1e-5, 1e-5,
+        _float_types, _cpu_types, False),
     ('div', 'tensor', _small_3d,
-        lambda t, d: [_small_3d(t, d, has_zeros=False)], 1e-1),
+        lambda t, d: [_small_3d(t, d, has_zeros=False)], 1e-1, 1e-5, 1e-5,
+        _float_types, _cpu_types, False),
     ('true_divide', '', _small_3d, lambda t, d: [_number(3.14, 3, t)], 1e-1,
         1e-5, 1e-5, _types, _cpu_types, False),
     ('true_divide', 'with_inplace', _small_3d, lambda t, d: [_number(3.14, 3, t)], 1e-1,
@@ -16642,13 +16642,12 @@ tensor_op_tests = [
     ('addcdiv', '', _small_2d,
         lambda t, d: [_small_2d(t, d),
                       _small_2d(t, d, has_zeros=False)], 1, 1e-5, 1e-3,
-        _types, _cpu_types, True,
+        _float_types, _cpu_types, True,
         [_wrap_maybe_warns("Integer division .+")]),
     ('addcdiv', 'scalar', _small_2d,
         lambda t, d: [_number(2.8, 1, t), _small_2d(t, d),
                       _small_2d(t, d, has_zeros=False)], 1, 1e-5, 1e-3,
-        _types, _cpu_types, True,
-        [_wrap_maybe_warns("This overload of addcdiv_? is deprecated|Integer division .+")]),
+        _float_types, _cpu_types, True),
     ('addcmul', '', _small_3d, lambda t, d: [_small_3d(t, d), _small_3d(t, d)], 1e-2, 2e-5, 1e-3),
     ('addcmul', 'scalar', _small_3d,
         lambda t, d: [_number(0.4, 2, t), _small_3d(t, d), _small_3d(t, d)], 1e-2,

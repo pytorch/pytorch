@@ -6373,7 +6373,7 @@ a")
     def test_integral_shape_inference(self):
         cu = torch.jit.CompilationUnit('''
         def test_integral_shape_inference(a):
-            return a / a
+            return a // a
         ''')
         inputs = [torch.ones(10, 10).type(torch.LongTensor)]
         outputs = torch.ones(10, 10)
@@ -9259,7 +9259,10 @@ a")
                     if (op == 'sub' or op == 'div') and (isBool(first_arg) or isBool(second_arg)):
                         continue
                     # div not implemneted correctly for mixed-type or in params
-                    if (op == 'div' and (type(first_arg) != type(second_arg) or type(first_arg) == int)):
+                    if (op == 'div' and ((type(first_arg) != type(second_arg)) or
+                                         type(first_arg) == int or
+                                         (isinstance(first_arg, str) and not
+                                         'float' in first_arg))):
                         continue
                     return_line = "torch.{}({}, {})".format(op, first_arg, second_arg)
                     # uncomment for debugging a failed test:

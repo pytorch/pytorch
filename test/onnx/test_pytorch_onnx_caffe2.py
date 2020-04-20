@@ -1159,7 +1159,7 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
                 super(MyModel, self).__init__()
 
             def forward(self, x, y):
-                return x.repeat(y.size()[0] / 2, y.size()[1] * 2)
+                return x.repeat(y.size()[0] // 2, y.size()[1] * 2)
 
         x = torch.randn(1, 2, requires_grad=True)
         y = torch.randn(2, 4, requires_grad=True)
