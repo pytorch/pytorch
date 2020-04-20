@@ -936,7 +936,10 @@ void Engine::mark_graph_task_completed(
     const std::shared_ptr<GraphTask>& graph_task) {
   // Allow only one thread one attempt to process this logic.
   if (graph_task->future_completed_.exchange(true)) {
-    // Future is already marked as completed.
+    // Future is already marked complete, or being marked as such.
+    // In case the marking complete is only in progress, we add a
+    // waitNoThrow() to guarantee the future is marked complete on exit.
+    graph_task->future_result_->waitNoThrow();
     return;
   }
 
