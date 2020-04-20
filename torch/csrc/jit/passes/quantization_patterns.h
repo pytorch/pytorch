@@ -200,7 +200,7 @@ graph(%a_quant, %b_scalar, %alpha):
          %r = quantized::add_scalar_out(%a_quant, %b_scalar, %a_quant)
          return (%r) )";
 
-  // quanntized::add_scalar_relu
+  // quantized::add_scalar_relu
   std::string add_scalar_relu = R"(
 graph(%a_quant, %b_scalar, %alpha):
          %a_dequant = aten::dequantize(%a_quant)
@@ -213,7 +213,7 @@ graph(%a_quant, %b_scalar, %alpha):
          %r = quantized::add_scalar_relu(%a_quant, %b_scalar)
          return (%r) )";
 
-  // quanntized::add_scalar_relu_out
+  // quantized::add_scalar_relu_out
   std::string add_scalar_relu_out = R"(
 graph(%a_quant, %b_scalar, %alpha):
          %a_dequant = aten::dequantize(%a_quant)
@@ -314,6 +314,73 @@ graph(%a_quant, %b_scalar):
         return b_scalar->type()->isSubtypeOf(NumberType::get());
       };
 
+  // quantized::mul_relu
+  std::string mul_relu = R"(
+graph(%a_quant, %b_quant, %scale, %zero_point, %dtype):
+         %a_dequant = aten::dequantize(%a_quant)
+         %b_dequant = aten::dequantize(%b_quant)
+         %r_mul = aten::mul(%a_dequant, %b_dequant)
+         %r_relu = aten::relu(%r_mul)
+         %r = aten::quantize_per_tensor(%r_relu, %scale, %zero_point, %dtype)
+         return (%r) )";
+
+  std::string inplace_mul_relu = R"(
+graph(%a_quant, %b_quant, %scale, %zero_point, %dtype):
+         %a_dequant = aten::dequantize(%a_quant)
+         %b_dequant = aten::dequantize(%b_quant)
+         %r_mul = aten::mul_(%a_dequant, %b_dequant)
+         %r_relu = aten::relu(%r_mul)
+         %r = aten::quantize_per_tensor(%r_relu, %scale, %zero_point, %dtype)
+         return (%r) )";
+
+  std::string mul_inplace_relu = R"(
+graph(%a_quant, %b_quant, %scale, %zero_point, %dtype):
+         %a_dequant = aten::dequantize(%a_quant)
+         %b_dequant = aten::dequantize(%b_quant)
+         %r_mul = aten::mul(%a_dequant, %b_dequant)
+         %r_relu = aten::relu_(%r_mul)
+         %r = aten::quantize_per_tensor(%r_relu, %scale, %zero_point, %dtype)
+         return (%r) )";
+
+  std::string inplace_mul_inplace_relu = R"(
+graph(%a_quant, %b_quant, %scale, %zero_point, %dtype):
+         %a_dequant = aten::dequantize(%a_quant)
+         %b_dequant = aten::dequantize(%b_quant)
+         %r_mul = aten::mul_(%a_dequant, %b_dequant)
+         %r_relu = aten::relu_(%r_mul)
+         %r = aten::quantize_per_tensor(%r_relu, %scale, %zero_point, %dtype)
+         return (%r) )";
+
+  std::string quantized_mul_relu = R"(
+graph(%a_quant, %b_quant, %scale, %zero_point, %dtype):
+         %r = quantized::mul_relu(%a_quant, %b_quant, %scale, %zero_point)
+         return (%r) )";
+
+  // quantized::mul_scalar_relu
+  std::string mul_scalar_relu = R"(
+graph(%a_quant, %b_scalar):
+         %a_dequant = aten::dequantize(%a_quant)
+         %r_mul = aten::mul(%a_dequant, %b_scalar)
+         %r = aten::relu(%r_mul)
+         return (%r) )";
+
+  std::string quantized_mul_scalar_relu = R"(
+graph(%a_quant, %b_scalar):
+         %r = quantized::mul_scalar_relu(%a_quant, %b_scalar)
+         return (%r) )";
+
+  // quantized::mul_scalar_relu_out
+  std::string mul_scalar_relu_out = R"(
+graph(%a_quant, %b_scalar):
+         %a_dequant = aten::dequantize(%a_quant)
+         %r_mul = aten::mul_(%a_dequant, %b_scalar)
+         %r = aten::relu(%r_mul)
+         return (%r) )";
+
+  std::string quantized_mul_scalar_relu_out = R"(
+graph(%a_quant, %b_scalar):
+         %r = quantized::mul_scalar_relu_out(%a_quant, %b_scalar, %a_quant)
+         return (%r) )";
   return {
       {"quantized::conv2d", conv2d, quantized_conv2d},
       {"quantized::conv2d_relu", conv2d_relu, quantized_conv2d_relu},
@@ -351,6 +418,14 @@ graph(%a_quant, %b_scalar):
        quantized_batch_norm2d_relu},
       {"quantized::mul", mul, quantized_mul},
       {"quantized::mul", inplace_mul, quantized_mul},
+      {"quantized::mul_scalar_relu",
+       mul_scalar_relu,
+       quantized_mul_scalar_relu,
+       mul_scalar_filter},
+      {"quantized::mul_scalar_relu_out",
+       mul_scalar_relu_out,
+       quantized_mul_scalar_relu_out,
+       mul_scalar_filter},
       {"quantized::mul_scalar",
        mul_scalar,
        quantized_mul_scalar,
@@ -359,6 +434,10 @@ graph(%a_quant, %b_scalar):
        mul_scalar_out,
        quantized_mul_scalar_out,
        mul_scalar_filter},
+      {"quantized::mul_relu", mul_relu, quantized_mul_relu},
+      {"quantized::mul_relu", mul_inplace_relu, quantized_mul_relu},
+      {"quantized::mul_relu", inplace_mul_relu, quantized_mul_relu},
+      {"quantized::mul_relu", inplace_mul_inplace_relu, quantized_mul_relu},
   };
 }
 
