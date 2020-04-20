@@ -138,6 +138,9 @@ bool FullyConnectedGradientOp<
   return RunFullyConnectedGradientOpOnCUDADevice(float16_compute_, this);
 }
 
+
+#ifndef __HIP_PLATFORM_HCC__
+
 // Require these to be defined otherwise TensorCore FC ops will end
 // up calling the default FC implementation which doesn't have
 // fp16 support...
@@ -170,6 +173,7 @@ bool FullyConnectedGradientOp<
       false /* float16_compute */, this);
 }
 
+#endif
 
 REGISTER_CUDA_OPERATOR(FC, FullyConnectedOp<CUDAContext>);
 REGISTER_CUDA_OPERATOR(FCGradient, FullyConnectedGradientOp<CUDAContext>);
@@ -186,6 +190,8 @@ REGISTER_CUDA_OPERATOR(
         CUDAContext,
         DefaultEngine,
         false /* don't transpose weight */>);
+
+#ifndef __HIP_PLATFORM_HCC__
 
 REGISTER_CUDA_OPERATOR_WITH_ENGINE(
     FC,
@@ -210,5 +216,7 @@ REGISTER_CUDA_OPERATOR_WITH_ENGINE(
         CUDAContext,
         TensorCoreEngine,
         false /* don't transpose weight */>);
+
+#endif
 
 } // namespace caffe2

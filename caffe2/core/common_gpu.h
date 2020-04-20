@@ -5,13 +5,14 @@
 #include <cuda.h>
 #include <cuda_runtime.h>
 
-
+#ifndef __HIP_PLATFORM_HCC__
 #ifdef __GNUC__
 #if __GNUC__ > 4 || (__GNUC__ == 4 && __GNUC_MINOR__ >= 6)
 #pragma GCC diagnostic push
 #endif
 #pragma GCC diagnostic ignored "-Wstrict-aliasing"
 #endif // __GNUC__
+#endif // __HIP_PLATFORM_HCC__
 
 #include <cublas_v2.h>
 #include <curand.h>
@@ -52,11 +53,13 @@ constexpr int kFp16CUDADevicePropMajor = 3;
 #endif
 
 // Re-enable strict aliasing diagnostic if it was disabled.
+#ifndef __HIP_PLATFORM_HCC__
 #ifdef __GNUC__
 #if __GNUC__ > 4 || (__GNUC__ == 4 && __GNUC_MINOR__ >= 6)
 #pragma GCC diagnostic pop
 #endif
 #endif // __GNUC__
+#endif // __HIP_PLATFORM_HCC__
 
 /**
  * The maximum number of peers that each gpu can have when doing p2p setup.
@@ -69,10 +72,12 @@ constexpr int kFp16CUDADevicePropMajor = 3;
 
 namespace caffe2 {
 
+#ifndef __HIP_PLATFORM_HCC__
 /**
  * Empty class to identify TensorCore-based math
  */
 class TensorCoreEngine {};
+#endif // __HIP_PLATFORM_HCC__
 
 #if CUDA_VERSION >= 10000
 #define CAFFE2_CUDA_PTRATTR_MEMTYPE type
