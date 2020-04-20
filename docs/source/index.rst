@@ -64,12 +64,13 @@ PyTorch is an optimized tensor library for deep learning using GPUs and CPUs.
 .. toctree::
    :maxdepth: 1
    :caption: Libraries
-   
-   PyTorch on XLA Devices <http://pytorch.org/xla/>
-   PyTorch Elastic (torchelastic) <https://pytorch.org/elastic/>
+
    torchaudio <https://pytorch.org/audio>
    torchtext <https://pytorch.org/text>
    torchvision/index
+   TorchElastic <https://pytorch.org/elastic/>
+   TorchServe <https://pytorch.org/serve>
+   PyTorch on XLA Devices <http://pytorch.org/xla/>
 
 .. toctree::
    :glob:
