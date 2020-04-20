@@ -337,15 +337,7 @@ struct ReduceOp {
 
     if (output_idx < config.num_outputs && input_idx < config.num_inputs) {
       const scalar_t* input_slice = (const scalar_t*)((const char*)src + base_offsets[1]);
-      index_t end = config.num_inputs;
-      if (config.vectorize) {
-        // reduce at the header of input_slice where memory is not aligned,
-        // so that thread_reduce will have an aligned memory to work on.
-        value = header_reduce(input_slice, end);
-        value = vectorized_thread_reduce(value, input_slice, end);
-      } else {
-        value = thread_reduce(input_slice);
-      }
+      value = thread_reduce(input_slice);
     }
 
     if (config.should_block_y_reduce()) {
@@ -393,11 +385,32 @@ struct ReduceOp {
     }
   }
 
-  C10_DEVICE arg_t header_reduce(const scalar_t* &data, index_t &end) const {
+  C10_DEVICE arg_t thread_reduce(const scalar_t* data) const {
+    if (config.vectorize) {
+      // reduce at the header of input_slice where memory is not aligned,
+      // so that thread_reduce will have an aligned memory to work on.
+      return vectorized_thread_reduce_impl(data);
+    } else {
+      index_t element_stride = input_calc.strides_[0][0] / sizeof(scalar_t);
+      bool is_contiguous = (input_calc.dims == 1 && element_stride == 1);
+      if (is_contiguous) {
+        return thread_reduce_impl(data, [](index_t idx) { return idx; });
+      } else if (input_calc.dims == 1) {
+        return thread_reduce_impl(data, [&](index_t idx) { return idx * element_stride; });
+      } else {
+        return thread_reduce_impl(data, [&](index_t idx) { return input_calc.get(idx)[0] / sizeof(scalar_t); });
+      }
+    }
+  }
+
+  C10_DEVICE arg_t vectorized_thread_reduce_impl(const scalar_t* data) const {
+    index_t end = config.num_inputs;
+
+    // Handle the head of input slice where data is not aligned
     arg_t value = ident;
     constexpr int align_bytes = alignof(at::native::memory::aligned_vector<scalar_t, vec_size>);
     constexpr int align_elements = align_bytes / sizeof(scalar_t);
-    const int shift = ((uint64_t)data) % align_bytes / sizeof(scalar_t);
+    int shift = ((uint64_t)data) % align_bytes / sizeof(scalar_t);
     if (shift > 0) {
       data -= shift;
       end += shift;
@@ -406,11 +419,10 @@ struct ReduceOp {
       }
       end -= align_elements;
       data += align_elements;
+      shift = align_elements - shift;
     }
-    return value;
-  }
 
-  C10_DEVICE arg_t vectorized_thread_reduce(arg_t value, const scalar_t* data, index_t end) const {
+    // Do the vectorized reduction
     using load_t = at::native::memory::aligned_vector<scalar_t, vec_size>;
 
     index_t idx = config.input_idx();
@@ -431,7 +443,7 @@ struct ReduceOp {
       *values_vector = reinterpret_cast<const load_t*>(data)[idx];
       #pragma unroll
       for (index_t i = 0; i < vec_size; i++) {
-        value_list[i] = ops.reduce(value_list[i], values[i], idx * vec_size + i);
+        value_list[i] = ops.reduce(value_list[i], values[i], shift + idx * vec_size + i);
       }
       idx += stride;
     }
@@ -441,7 +453,7 @@ struct ReduceOp {
     if (config.should_reduce_tail()) {
       int idx = tail_start + threadIdx.x;
       if (idx < end) {
-        value_list[0] = ops.reduce(value_list[0], data[idx], idx);
+        value_list[0] = ops.reduce(value_list[0], data[idx], idx + shift);
       }
     }
 
@@ -451,18 +463,6 @@ struct ReduceOp {
       value_list[0] = ops.combine(value_list[0], value_list[i]);
     }
     return value_list[0];
-  }
-
-  C10_DEVICE arg_t thread_reduce(const scalar_t* data) const {
-    index_t element_stride = input_calc.strides_[0][0] / sizeof(scalar_t);
-    bool is_contiguous = (input_calc.dims == 1 && element_stride == 1);
-    if (is_contiguous) {
-      return thread_reduce_impl(data, [](index_t idx) { return idx; });
-    } else if (input_calc.dims == 1) {
-      return thread_reduce_impl(data, [&](index_t idx) { return idx * element_stride; });
-    } else {
-      return thread_reduce_impl(data, [&](index_t idx) { return input_calc.get(idx)[0] / sizeof(scalar_t); });
-    }
   }
 
   template<typename offset_calc_t>
