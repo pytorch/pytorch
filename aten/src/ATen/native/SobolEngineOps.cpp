@@ -134,7 +134,15 @@ Tensor& _sobol_engine_initialize_state_(Tensor& sobolstate, int64_t dimension) {
     int64_t m = bit_length(p) - 1;
 
     for (int64_t i = 0; i < m; ++i) {
-      ss_a[d][i] = initsobolstate[d][i];
+      // Note: [Workaround Clang9.0.0 bug]
+      // Q: Why not use `ss_a[d][i] = initsobolstate[d][i];`?
+      // A: It'll trigger a bug with Clang9.0.0 and segfaults pytorch build.
+      //    The bug is fixed in 9.0.1 but we still want to work around it
+      //    here so that we can keep using 9.0.0 in CircleCi jobs,
+      //    since it is available through apt.
+      //    See https://github.com/pytorch/pytorch/issues/36676 for details.
+      const auto p = &(initsobolstate[d]);
+      ss_a[d][i] = (*p)[i];
     }
 
     for (int64_t j = m; j < MAXBIT; ++j) {
