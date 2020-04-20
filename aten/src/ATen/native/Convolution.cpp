@@ -36,7 +36,7 @@ struct ConvParams {
   bool is_padding_neg() const;
   bool is_stride_nonpos() const;
   void view1d_as_2d();
-  bool use_cpu_depthwise3x3_winograd(const at::Tensor& input, const at::Tensor& weight) const;
+  bool use_cpu_depthwise3x3_winograd(const at::Tensor& input, const at::Tensor& weight, const at::Tensor& bias) const;
   bool needs_64bit_indexing_no_split(const at::Tensor& input, const at::Tensor& weight) const;
   bool use_cudnn(const at::Tensor& input, const at::Tensor& weight) const;
   bool use_cudnn_depthwise(const at::Tensor& input, const at::Tensor& weight) const;
@@ -128,7 +128,9 @@ auto ConvParams::view1d_as_2d() -> void {
 }
 
 auto ConvParams::use_cpu_depthwise3x3_winograd(
-    const at::Tensor& input, const at::Tensor& weight) const -> bool {
+    const at::Tensor& input,
+    const at::Tensor& weight,
+    const at::Tensor& bias) const -> bool {
 #ifdef __ARM_NEON__
   // Currently only 3x3 depthwise convolutions on tensors of float are supported.
   return (input.ndimension() == 4) &&
@@ -143,6 +145,9 @@ auto ConvParams::use_cpu_depthwise3x3_winograd(
          (weight.device().type() == c10::DeviceType::CPU) &&
          (weight.scalar_type() == at::kFloat) &&
          weight.is_contiguous() &&
+         (!bias.defined() ||
+            ((bias.device().type() == c10::DeviceType::CPU) &&
+             (bias.scalar_type() == at::kFloat))) &&
          !is_strided() &&
          !is_dilated() &&
          !transposed;
@@ -728,7 +733,7 @@ at::Tensor _convolution(
         params.stride,
         params.dilation,
         params.groups);
-  } else if (params.use_cpu_depthwise3x3_winograd(input, weight)) {
+  } else if (params.use_cpu_depthwise3x3_winograd(input, weight, bias)) {
     output = convolution_depthwise3x3_winograd_stub(
         input.device().type(),
         input,
