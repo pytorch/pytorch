@@ -31,6 +31,20 @@ white_list = [
     ('aten::index_put_', datetime.date(2020, 4, 10)),
     ('aten::quantize_per_tensor', datetime.date(2020, 4, 15)),
     ('aten::requires_grad_', datetime.date(2020, 4, 30)),
+    ('quantized::batch_norm', datetime.date(2020, 4, 20)),
+    ('aten::sizes', datetime.date(2020, 4, 30)),
+    ('aten::strides', datetime.date(2020, 4, 30)),
+    ('aten::backward', datetime.date(2020, 4, 30)),
+    ('quantized::conv_prepack', datetime.date(2020, 6, 1)),
+    ('quantized::conv3d_prepack', datetime.date(2020, 6, 1)),
+    ('quantized::conv3d_unpack', datetime.date(2020, 6, 1)),
+    ('quantized::conv3d', datetime.date(2020, 6, 1)),
+    ('quantized::conv2d_relu', datetime.date(2020, 6, 1)),
+    ('quantized::conv2d', datetime.date(2020, 6, 1)),
+    ('_quantized::conv2d_relu', datetime.date(2020, 6, 1)),
+    ('_quantized::conv2d', datetime.date(2020, 6, 1)),
+    ('quantized::conv2d_prepack', datetime.date(2020, 6, 1)),
+    ('quantized::conv3d_relu', datetime.date(2020, 6, 1)),
 ]
 
 
