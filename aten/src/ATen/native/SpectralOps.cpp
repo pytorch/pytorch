@@ -282,7 +282,6 @@ Tensor istft(const Tensor& self, const int64_t n_fft, const optional<int64_t> ho
   const auto hop_length = hop_lengthOpt.value_or(n_fft >> 2);
   const auto win_length = win_lengthOpt.value_or(n_fft);
 
-  const auto input_shape = self.sizes();
   const auto input_dim = self.dim();
   const auto n_frames = self.size(-2);
   const auto fft_size = self.size(-3);
@@ -295,9 +294,9 @@ Tensor istft(const Tensor& self, const int64_t n_fft, const optional<int64_t> ho
     REPR(ss) << ": input tensor cannot be empty.";
     AT_ERROR(ss.str());
   }
-  if (input_dim != 4) {
+  if (input_dim != 3 && input_dim != 4) {
     std::ostringstream ss;
-    REPR(ss) << ": expected a tensor with 4 dimensions, but got " << input_dim;
+    REPR(ss) << ": expected a tensor with 3 or 4 dimensions, but got " << input_dim;
     AT_ERROR(ss.str());
   }
  if (self.size(-1) != 2) {
@@ -348,6 +347,9 @@ Tensor istft(const Tensor& self, const int64_t n_fft, const optional<int64_t> ho
   }
 
   Tensor input = self;
+  if (input_dim == 3) {
+    input = input.unsqueeze();
+  }
 
   input = input.transpose(1, 2);  // size: (channel, n_frames, fft_size, 2)
   input = at::native::irfft(input, 1, normalized, onesided, {n_fft, });  // size: (channel, n_frames, n_fft)
@@ -383,6 +385,9 @@ Tensor istft(const Tensor& self, const int64_t n_fft, const optional<int64_t> ho
   }
 
   y = (y / window_envelop).squeeze(1);  // size: (channel, expected_output_signal_len)
+  if (input_dim == 3) {
+    y = y.squeeze(0);
+  }
   return y;
 
   #undef REPR

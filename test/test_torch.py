@@ -12247,16 +12247,18 @@ class TestTorchDeviceType(TestCase):
     @dtypes(torch.double)
     def test_istft_round_trip_various_params(self, device, dtype):
         """stft -> istft should recover the original signale"""
-        def _test_istft_is_inverse_of_stft(kwargs):
+        def _test_istft_is_inverse_of_stft(stft_kwargs):
             # generates a random sound signal for each tril and then does the stft/istft
             # operation to check whether we can reconstruct signal
             data_sizes = [(2, 20), (3, 15), (4, 10)]
             num_trials = 100
+            istft_kwargs = stft_kwargs.copy()
+            del istft_kwargs['pad_mode']
             for sizes in data_sizes:
                 for i in range(num_trials):
                     original = torch.randn(*sizes, dtype=dtype, device=device)
-                    stft = torch.stft(original, **kwargs)
-                    inversed = torch.istft(stft, length=original.size(1), **kwargs)
+                    stft = torch.stft(original, **stft_kwargs)
+                    inversed = torch.istft(stft, length=original.size(1), **istft_kwargs)
 
                     # trim the original for case when constructed signal is shorter than original
                     original = original[..., :inversed.size(-1)]
@@ -12271,6 +12273,7 @@ class TestTorchDeviceType(TestCase):
                 'win_length': 12,
                 'window': torch.hann_window(12, dtype=dtype, device=device),
                 'center': True,
+                'pad_mode': 'reflect',
                 'normalized': True,
                 'onesided': True,
             },
@@ -12281,6 +12284,7 @@ class TestTorchDeviceType(TestCase):
                 'win_length': 8,
                 'window': torch.hann_window(8, dtype=dtype, device=device),
                 'center': True,
+                'pad_mode': 'reflect',
                 'normalized': False,
                 'onesided': False,
             },
@@ -12291,6 +12295,7 @@ class TestTorchDeviceType(TestCase):
                 'win_length': 11,
                 'window': torch.hamming_window(11, dtype=dtype, device=device),
                 'center': True,
+                'pad_mode': 'constant',
                 'normalized': True,
                 'onesided': False,
             },
@@ -12302,6 +12307,7 @@ class TestTorchDeviceType(TestCase):
                 'win_length': 5,
                 'window': torch.hamming_window(5, dtype=dtype, device=device),
                 'center': False,
+                'pad_mode': 'constant',
                 'normalized': False,
                 'onesided': True,
             },
@@ -12313,6 +12319,7 @@ class TestTorchDeviceType(TestCase):
                 'win_length': 3,
                 'window': torch.hamming_window(3, dtype=dtype, device=device),
                 'center': False,
+                'pad_mode': 'reflect',
                 'normalized': False,
                 'onesided': False,
             },

@@ -464,12 +464,10 @@ def istft(input, n_fft, hop_length=None, win_length=None, window=None,
     IEEE Trans. ASSP, vol.32, no.2, pp.236-243, Apr. 1984.
 
     Arguments:
-        input (Tensor): The input tensor. Expected to be output of :func:`~torch.stft` where
-            each row of a channel is a frequency and each column is a window.
-            It has a size of either (..., ``fft_size``, ``n_frame``, 2)
+        input (Tensor): The input tensor. Expected to be output of :func:`~torch.stft`, either 3D (``fft_size``, ``n_frame``, 2) or 4D (``channel``, ``fft_size``, ``n_frame``, 2).
         n_fft (int): Size of Fourier transform
         hop_length (Optional[int]): The distance between neighboring sliding window frames.
-            (Default: ``win_length // 4``)
+            (Default: ``n_fft // 4``)
         win_length (Optional[int]): The size of window frame and STFT filter. (Default: ``n_fft``)
         window (Optional[torch.Tensor]): The optional window function.
             (Default: ``torch.ones(win_length)``)
@@ -491,17 +489,8 @@ def istft(input, n_fft, hop_length=None, win_length=None, window=None,
                 window=window, center=center, normalized=normalized, onesided=onesided,
                 length=length)
 
-    original_dim = input.dim()
-    original_shape = input.size()
-
-    assert original_dim >= 3, "Expected input tensor to have at least 3 dimensions."
-    input = input.view(-1, original_shape[-3], original_shape[-2], original_shape[-1])
-    output = _VF.istft(
+    return _VF.istft(
         input, n_fft, hop_length, win_length, window, center, normalized, onesided, length)
-    output.view(original_shape[:-3] + output.shape[-1:])
-    if original_dim == 3:
-        output = output.squeeze(0)
-    return output
 
 
 del torch.unique_dim
