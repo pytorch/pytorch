@@ -38,7 +38,6 @@
 #include <ATen/detail/FunctionTraits.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cuda/MemoryAccess.cuh>
-#include <ATen/native/cuda/CUDA9Workarounds.cuh>
 #include <c10/macros/Macros.h>
 #include <c10/core/ScalarType.h>
 #include <c10/util/TypeCast.h>
@@ -165,8 +164,7 @@ __device__ inline void elementwise_kernel_helper(func_t f, policy_t policy) {
   int idx = blockIdx.x;
 
   return_t results[thread_work_size];
-  cuda9::workaround::enable_default_constructor<args_t> args_[thread_work_size];
-  args_t *args = reinterpret_cast<args_t *>(&args_);
+  args_t args[thread_work_size];
 
   // load
   policy.load(args, idx);

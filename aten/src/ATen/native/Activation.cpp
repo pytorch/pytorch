@@ -209,7 +209,7 @@ inline void _rrelu_with_noise_train(
     const Tensor& noise,
     Scalar lower_,
     Scalar upper_,
-    Generator generator) {
+    c10::optional<Generator> generator) {
   scalar_t lower = lower_.to<scalar_t>();
   scalar_t upper = upper_.to<scalar_t>();
   Tensor tmp_tensor = output.contiguous();
@@ -241,7 +241,7 @@ Tensor& rrelu_with_noise_out_cpu(
     Scalar lower,
     Scalar upper,
     bool training,
-    Generator generator) {
+    c10::optional<Generator> generator) {
   if (training) {
     AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "rrelu_with_noise_out_cpu", [&] {
       _rrelu_with_noise_train<scalar_t>(output, self.contiguous(), noise, lower, upper, generator);
@@ -262,7 +262,7 @@ Tensor rrelu_with_noise_cpu(
     Scalar lower,
     Scalar upper,
     bool training,
-    Generator generator) {
+    c10::optional<Generator> generator) {
   auto output = at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   return at::native::rrelu_with_noise_out_cpu(output, self, noise, lower, upper, training, generator);
 }
@@ -273,7 +273,7 @@ Tensor& rrelu_with_noise_cpu_(
     Scalar lower,
     Scalar upper,
     bool training,
-    Generator generator) {
+    c10::optional<Generator> generator) {
   return at::native::rrelu_with_noise_out_cpu(self, self, noise, lower, upper, training, generator);
 }
 
@@ -296,11 +296,11 @@ Tensor rrelu_with_noise_backward(
   }
 }
 
-Tensor rrelu(const Tensor & self, Scalar lower, Scalar upper, bool training, Generator generator) {
+Tensor rrelu(const Tensor & self, Scalar lower, Scalar upper, bool training, c10::optional<Generator> generator) {
   return at::rrelu_with_noise(self, at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT), lower, upper, training, generator);
 }
 
-Tensor & rrelu_(Tensor & self, Scalar lower, Scalar upper, bool training, Generator generator) {
+Tensor & rrelu_(Tensor & self, Scalar lower, Scalar upper, bool training, c10::optional<Generator> generator) {
   return at::rrelu_with_noise_(self, at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT), lower, upper, training, generator);
 }
 
@@ -737,15 +737,32 @@ Tensor leaky_relu_backward(
 }
 
 std::tuple<Tensor, Tensor> log_sigmoid_forward_cpu(const Tensor& input) {
-  auto result = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  auto buffer = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  // FIXME: do these actually need to be zeros_like or can they be empty_like?
+  auto result = at::zeros_like(input, at::MemoryFormat::Contiguous);
+  auto buffer = at::zeros_like(input, at::MemoryFormat::Contiguous);
   log_sigmoid_cpu_stub(kCPU, result, buffer, input.contiguous());
   return std::make_tuple(result, buffer);
 }
 
 std::tuple<Tensor&, Tensor&> log_sigmoid_forward_out_cpu(Tensor& result, Tensor& buffer, const Tensor& input) {
-  log_sigmoid_cpu_stub(kCPU, result, buffer, input);
+  result.resize_as_(input);
+  buffer.resize_as_(input, at::MemoryFormat::Contiguous);
+  TORCH_CHECK(buffer.is_contiguous(), "Contiguous buffer required for log_sigmoid with out parameter");
+  Tensor result_tmp = result.is_contiguous() ? result : at::empty_like(result, at::MemoryFormat::Contiguous);
+  log_sigmoid_cpu_stub(kCPU, result_tmp, buffer, input.contiguous());
+  if (!result.is_contiguous()) {
+    result.copy_(result_tmp);
+  }
   return std::forward_as_tuple(result, buffer);
+}
+
+Tensor & log_sigmoid_out(Tensor & output, const Tensor & self) {
+  Tensor buffer = at::empty({0}, self.options());
+  return std::get<0>(at::log_sigmoid_forward_out(output, buffer, self));
+}
+
+Tensor log_sigmoid(const Tensor & self) {
+  return std::get<0>(at::log_sigmoid_forward(self));
 }
 
 Tensor log_sigmoid_backward_cpu(const Tensor& grad_output, const Tensor& input, const Tensor& buffer) {

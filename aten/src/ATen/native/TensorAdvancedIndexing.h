@@ -31,4 +31,6 @@ DECLARE_DISPATCH(scatter_fn, scatter_stub);
 DECLARE_DISPATCH(scatter_fill_fn, scatter_fill_stub);
 DECLARE_DISPATCH(scatter_add_fn, scatter_add_stub);
 
+TORCH_API Tensor& index_out(Tensor& result, const Tensor & self, TensorList indices);
+
 }} // namespace at::native
