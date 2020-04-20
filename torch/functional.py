@@ -464,7 +464,8 @@ def istft(input, n_fft, hop_length=None, win_length=None, window=None,
     IEEE Trans. ASSP, vol.32, no.2, pp.236-243, Apr. 1984.
 
     Arguments:
-        input (Tensor): The input tensor. Expected to be output of :func:`~torch.stft`, either 3D (``fft_size``, ``n_frame``, 2) or 4D (``channel``, ``fft_size``, ``n_frame``, 2).
+        input (Tensor): The input tensor. Expected to be output of :func:`~torch.stft`,
+            either 3D (``fft_size``, ``n_frame``, 2) or 4D (``channel``, ``fft_size``, ``n_frame``, 2).
         n_fft (int): Size of Fourier transform
         hop_length (Optional[int]): The distance between neighboring sliding window frames.
             (Default: ``n_fft // 4``)
