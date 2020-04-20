@@ -105,7 +105,7 @@ static inline __host__ __device__ T invsqrt_(T x) {
 }
 // Rely only on thrust for complex ops
 template<typename B, typename E>
-static inline __host__ __device__ B compex_pow_(B base, E exp) {
+static inline __host__ __device__ B complex_pow_(B base, E exp) {
   return thrust::pow(base, exp);
 }
 #endif
