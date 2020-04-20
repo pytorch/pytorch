@@ -93,6 +93,8 @@ TypePtr IValue::type() const {
       return CapsuleType::get();
     case Tag::Tuple:
       return toTuple()->type();
+    case Tag::Generator:
+      return GeneratorType::get();
   }
   // switch above is complete but this silences compiler warnings
   TORCH_INTERNAL_ASSERT(false, "unhandled case in IValue::type()");
@@ -219,6 +221,7 @@ IValue IValue::equals(const IValue& rhs) const {
     case Tag::Object:
     case Tag::PyObject:
     case Tag::Capsule:
+    case Tag::Generator:
       return ptrEqual(lhs, rhs);
     case Tag::Uninitialized:
       // Unitialized ivalues show up in no-ops when the compiler can prove a
@@ -445,6 +448,8 @@ std::ostream& operator<<(std::ostream & out, const IValue & v) {
       auto py_obj = v.toPyObject();
       return out << "<PyObject at" << py_obj << ">";
     }
+    case IValue::Tag::Generator:
+      return out << "Generator";
     case IValue::Tag::Object: {
       // TODO we should attempt to call __str__ if the object defines it.
       auto obj = v.toObject();
@@ -487,32 +492,6 @@ void ivalue::Object::unsafeRemoveAttr(const std::string& name) {
 void ivalue::Object::resizeObject(size_t slot) {
   AT_ASSERT(slot < type()->numAttributes());
   slots_.resize(type()->numAttributes());
-}
-
-
-static bool CompareKeys(const std::pair<IValue, IValue>& aWrap,
-                        const std::pair<IValue, IValue>& bWrap) {
-  const auto a = aWrap.first;
-  const auto b = bWrap.first;
-  if (a.isString() && b.isString()) {
-    return a.toStringRef().compare(b.toStringRef()) < 0;
-  } else if (a.isInt() && b.isInt()) {
-    return a.toInt() < b.toInt();
-  } else if (a.isDouble() && b.isDouble()) {
-    return a.toDouble() < b.toDouble();
-  } else if (a.isTensor() && b.isTensor()) {
-    return a.toTensor().unsafeGetTensorImpl() < b.toTensor().unsafeGetTensorImpl();
-  }
-  AT_ERROR("Illegal dict key");
-}
-
-std::vector<std::pair<IValue, IValue>> iterationOrder(const c10::Dict<IValue, IValue>& dict) {
-  std::vector<std::pair<IValue, IValue>> ordered;
-  for (auto& element : dict) {
-    ordered.emplace_back(element.key(), element.value());
-  }
-  std::sort(ordered.begin(), ordered.end(), CompareKeys);
-  return ordered;
 }
 
 StrongTypePtr::StrongTypePtr(

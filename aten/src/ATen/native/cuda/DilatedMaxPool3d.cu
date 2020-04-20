@@ -479,7 +479,7 @@ void max_pool3d_with_indices_backward_out_cuda_template(
           grad_input_data, work_grad_output, work_indices,
           totalZ,
           itime, iheight, iwidth,
-          owidth, oheight,
+          oheight, owidth,
           dT, dH, dW,
           pT, pH, pW,
           dilationT, dilationH, dilationW);
