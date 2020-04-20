@@ -2083,7 +2083,6 @@ class DistAutogradTest(RpcAgentTestFixture):
             dist_autograd.backward(context_id, [loss], retain_graph=True)
             grads = dist_autograd.get_gradients(context_id)
             p_g = MyFunc.static_grad_ptr
-            self.assertTrue(a in grads)
             p_a = grads[a]._values().data_ptr()
             self.assertIsNotNone(MyFunc.static_grad_indices_ref)
             self.assertIsNotNone(MyFunc.static_grad_values_ref)
