@@ -5419,8 +5419,8 @@ class TestAutogradDeviceType(TestCase):
     def test_advanced_indexing_backwards_memory_format(self, device):
         # See https://github.com/pytorch/pytorch/issues/36956
         shape = (2, 8, 1, 2)
-        i = torch.randint(1, shape, device='cuda').contiguous(memory_format=torch.channels_last)
-        x = torch.randn(shape, requires_grad=True, device='cuda')
+        i = torch.randint(1, shape, device=device).contiguous(memory_format=torch.channels_last)
+        x = torch.randn(shape, requires_grad=True, device=device)
         x[i].sum().backward()
 
     def _test_reentrant_parent_error_on_cpu(self, device):
