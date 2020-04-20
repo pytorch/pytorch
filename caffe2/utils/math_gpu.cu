@@ -1174,6 +1174,7 @@ CAFFE2_CUDA_EXPORT void Gemv<at::Half, CUDAContext>(
   }
 }
 
+#ifndef __HIP_PLATFORM_HCC__
 
 // No change, but required. Defer to default CUDA engine
 template <>
@@ -1422,6 +1423,8 @@ CAFFE2_CUDA_EXPORT void Gemv<at::Half, CUDAContext, TensorCoreEngine>(
   Gemv<at::Half, CUDAContext, DefaultEngine>(
       trans_A, M, N, alpha, A, x, beta, y, context, math_type);
 }
+
+#endif
 
 template <>
 CAFFE2_CUDA_EXPORT void GemmEx<float, CUDAContext>(
