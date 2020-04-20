@@ -215,7 +215,7 @@ struct TORCH_API AutogradMeta : public c10::AutogradMetaInterface {
     TORCH_CHECK(
       !requires_grad || at::isFloatingType(at::typeMetaToScalarType(self_impl->dtype())) ||
       at::isComplexType(at::typeMetaToScalarType(self_impl->dtype())),
-      "Only Tensors of floating point dtype can require gradients");
+      "Only Tensors of floating point and complex dtype can require gradients");
     requires_grad_ = requires_grad;
   }
 

@@ -3621,150 +3621,150 @@ for shape in [(1,), ()]:
         run_test(grad_mode=False, requires_grad=False, is_view=True,
                  should_raise_tuple=(None, None, None))
 
-    def test_autograd_simple_views_python(self):
-        def test_dtype(dtype):
-            # This is not necessarily the absolute correct behavior, but this is the current
-            # one. This test is here to make sure that any change to this behavior is detected
-            # and not silent. The TODOs below mark the places with unexpected behavior.
-            # Note that any change in these test will be BC-breaking and should be done carefully.
+    def _do_test_autograd_simple_views_python(self, dtype):
+        # This is not necessarily the absolute correct behavior, but this is the current
+        # one. This test is here to make sure that any change to this behavior is detected
+        # and not silent. The TODOs below mark the places with unexpected behavior.
+        # Note that any change in these test will be BC-breaking and should be done carefully.
 
-            # This checks the autograd.Function behavior when we return one or multiple outputs
-            # while one of these is an input, a view of an input or of a temporary tensor.
+        # This checks the autograd.Function behavior when we return one or multiple outputs
+        # while one of these is an input, a view of an input or of a temporary tensor.
 
-            # This indicator is used to track how many times the backward function was called
-            bw_called = [0]
-            # This indicator is used to check if the argument `ga` contains non-zero values
-            ga_nz = [False]
+        # This indicator is used to track how many times the backward function was called
+        bw_called = [0]
+        # This indicator is used to check if the argument `ga` contains non-zero values
+        ga_nz = [False]
 
-            class IdOneOutput(Function):
-                @staticmethod
-                def forward(ctx, a, b, make_view):
-                    if make_view:
-                        a = a.narrow(0, 0, 2)
-                    else:
+        class IdOneOutput(Function):
+            @staticmethod
+            def forward(ctx, a, b, make_view):
+                if make_view:
+                    a = a.narrow(0, 0, 2)
+                else:
+                    a = a.clone()
+                return a
+
+            @staticmethod
+            def backward(ctx, ga):
+                bw_called[0] += 1
+                return ga, None, None
+
+        class IdTwoOutput(Function):
+            @staticmethod
+            def forward(ctx, a, b, make_view):
+                if make_view:
+                    a = a.narrow(0, 0, 2)
+                else:
+                    a = a.clone()
+                return a, a + b
+
+            @staticmethod
+            def backward(ctx, ga, gab):
+                bw_called[0] += 1
+                if ga.eq(0).all():
+                    ga_nz[0] = False
+                else:
+                    ga_nz[0] = True
+                return ga + gab, gab, None
+
+        err_msg_two_outputs = "Output 0 of IdTwoOutputBackward is a view and is being modified inplace."
+        err_msg_two_outputs += " This view is the output of a function that returns multiple views."
+
+        class ViewOfTemp(Function):
+            @staticmethod
+            def forward(ctx, a, make_view):
+                ctx.save_for_backward(a)
+                if make_view:
+                    a = a.narrow(0, 0, 2)
+                else:
+                    a = a.clone()
+                b = a.clone()
+                return b.select(0, 0)
+
+            @staticmethod
+            def backward(ctx, grad):
+                bw_called[0] += 1
+                a, = ctx.saved_tensors
+                res = torch.zeros_like(a)
+                res.select(0, 0).copy_(grad)
+                return res, None
+
+        for fn_id in ["one_output", "two_output", "view_of_temp"]:
+            for inplace in [True, False]:
+                for make_view in [True, False]:
+                    # Used for special casing the tests below
+                    output_is_a_view = (make_view or fn_id == "view_of_temp")
+
+                    def fn(a, b):
+                        # never modify a, b inplace for gracheck
                         a = a.clone()
-                    return a
-
-                @staticmethod
-                def backward(ctx, ga):
-                    bw_called[0] += 1
-                    return ga, None, None
-
-            class IdTwoOutput(Function):
-                @staticmethod
-                def forward(ctx, a, b, make_view):
-                    if make_view:
-                        a = a.narrow(0, 0, 2)
-                    else:
-                        a = a.clone()
-                    return a, a + b
-
-                @staticmethod
-                def backward(ctx, ga, gab):
-                    bw_called[0] += 1
-                    if ga.eq(0).all():
-                        ga_nz[0] = False
-                    else:
-                        ga_nz[0] = True
-                    return ga + gab, gab, None
-
-            err_msg_two_outputs = "Output 0 of IdTwoOutputBackward is a view and is being modified inplace."
-            err_msg_two_outputs += " This view is the output of a function that returns multiple views."
-
-            class ViewOfTemp(Function):
-                @staticmethod
-                def forward(ctx, a, make_view):
-                    ctx.save_for_backward(a)
-                    if make_view:
-                        a = a.narrow(0, 0, 2)
-                    else:
-                        a = a.clone()
-                    b = a.clone()
-                    return b.select(0, 0)
-
-                @staticmethod
-                def backward(ctx, grad):
-                    bw_called[0] += 1
-                    a, = ctx.saved_tensors
-                    res = torch.zeros_like(a)
-                    res.select(0, 0).copy_(grad)
-                    return res, None
-
-            for fn_id in ["one_output", "two_output", "view_of_temp"]:
-                for inplace in [True, False]:
-                    for make_view in [True, False]:
-                        # Used for special casing the tests below
-                        output_is_a_view = (make_view or fn_id == "view_of_temp")
-
-                        def fn(a, b):
-                            # never modify a, b inplace for gracheck
-                            a = a.clone()
-                            b = b.clone()
-                            if fn_id == "two_output":
-                                tmp1, tmp2 = IdTwoOutput.apply(a, b, make_view)
-                                if inplace:
-                                    tmp1 += 3
-                                    tmp2 += 3
-                                else:
-                                    tmp1 = tmp1 + 3
-                                    tmp2 = tmp2 + 3
-                                tmp = tmp1 * tmp2
+                        b = b.clone()
+                        if fn_id == "two_output":
+                            tmp1, tmp2 = IdTwoOutput.apply(a, b, make_view)
+                            if inplace:
+                                tmp1 += 3
+                                tmp2 += 3
                             else:
-                                if fn_id == "one_output":
-                                    tmp = IdOneOutput.apply(a, b, make_view)
-                                else:
-                                    tmp = ViewOfTemp.apply(a + b, make_view)
-                                if inplace:
-                                    tmp += 3
-                                else:
-                                    tmp = tmp + 3
-
-                            return tmp.sum()
-
-                        a = torch.ones(2, dtype=dtype, requires_grad=True)
-                        b = torch.ones(2, dtype=dtype, requires_grad=True)
-
-
-                        if fn_id == "two_output" and inplace and output_is_a_view:
-                            with self.assertRaisesRegex(RuntimeError, err_msg_two_outputs):
-                                fn(a, b)
+                                tmp1 = tmp1 + 3
+                                tmp2 = tmp2 + 3
+                            tmp = tmp1 * tmp2
                         else:
-                            # Are the computed gradients correct ?
-                            if inplace and output_is_a_view:
-                                with warnings.catch_warnings(record=True) as w:
-                                    if fn_id == "view_of_temp":
-                                        # This will be fixed after the deprecation cycle and the warning becomes
-                                        # an error.
-                                        with self.assertRaisesRegex(RuntimeError, "Jacobian mismatch for output 0"):
-                                            gradcheck(fn, (a, b))
-                                    else:
-                                        # This works but the custom backward is not called (or called with partial)
-                                        # gradients as tested below
-                                        gradcheck(fn, (a, b))
-                                self.assertTrue(len(w) > 0)
+                            if fn_id == "one_output":
+                                tmp = IdOneOutput.apply(a, b, make_view)
                             else:
-                                gradcheck(fn, (a, b))
+                                tmp = ViewOfTemp.apply(a + b, make_view)
+                            if inplace:
+                                tmp += 3
+                            else:
+                                tmp = tmp + 3
 
-                            # Was the custom backward called properly
-                            bw_called[0] = 0
-                            ga_nz[0] = True  # For the case where the backward is called
+                        return tmp.sum()
+
+                    a = torch.ones(2, dtype=dtype, requires_grad=True)
+                    b = torch.ones(2, dtype=dtype, requires_grad=True)
+
+
+                    if fn_id == "two_output" and inplace and output_is_a_view:
+                        with self.assertRaisesRegex(RuntimeError, err_msg_two_outputs):
+                            fn(a, b)
+                    else:
+                        # Are the computed gradients correct ?
+                        if inplace and output_is_a_view:
                             with warnings.catch_warnings(record=True) as w:
-                                fn(a, b).backward()
+                                if fn_id == "view_of_temp":
+                                    # This will be fixed after the deprecation cycle and the warning becomes
+                                    # an error.
+                                    with self.assertRaisesRegex(RuntimeError, "Jacobian mismatch for output 0"):
+                                        gradcheck(fn, (a, b))
+                                else:
+                                    # This works but the custom backward is not called (or called with partial)
+                                    # gradients as tested below
+                                    gradcheck(fn, (a, b))
+                            self.assertTrue(len(w) > 0)
+                        else:
+                            gradcheck(fn, (a, b))
 
-                            expected_called = 1
-                            expected_ga_nz = True
-                            expected_warning = False
+                        # Was the custom backward called properly
+                        bw_called[0] = 0
+                        ga_nz[0] = True  # For the case where the backward is called
+                        with warnings.catch_warnings(record=True) as w:
+                            fn(a, b).backward()
 
-                            if output_is_a_view and inplace:
-                                expected_called = 0
-                                expected_warning = True
+                        expected_called = 1
+                        expected_ga_nz = True
+                        expected_warning = False
 
-                            self.assertTrue(bw_called[0] == expected_called)
-                            self.assertTrue(ga_nz[0] == expected_ga_nz)
-                            self.assertTrue((len(w) == 1) == expected_warning)
+                        if output_is_a_view and inplace:
+                            expected_called = 0
+                            expected_warning = True
 
-        test_dtype(torch.double)
-        test_dtype(torch.cdouble)
+                        self.assertTrue(bw_called[0] == expected_called)
+                        self.assertTrue(ga_nz[0] == expected_ga_nz)
+                        self.assertTrue((len(w) == 1) == expected_warning)
+
+    def test_autograd_simple_views_python(self):
+        _do_test_autograd_simple_views_python(torch.double)
+        _do_test_autograd_simple_views_python(torch.cdouble)
 
     def test_autograd_complex_views_python(self):
         # This is not necessarily the absolute correct behavior, but this is the current

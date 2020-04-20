@@ -547,8 +547,7 @@ void validate_outputs(
     bool input_is_complex = isComplexType(c10::typeMetaToScalarType(metadata.options().dtype()));
     bool grad_is_complex = isComplexType(grads[i].scalar_type());
 
-    TORCH_CHECK(isFloatingType(grads[i].scalar_type()) || ((input_is_complex && grad_is_complex)
-                || (!input_is_complex && !grad_is_complex)));
+    TORCH_CHECK(isFloatingType(grads[i].scalar_type()) || (input_is_complex == grad_is_complex));
     if (c10::typeMetaToScalarType(metadata.options().dtype()) != grads[i].scalar_type()) {
       grads[i] = grads[i].to(c10::typeMetaToScalarType(metadata.options().dtype()));
     }
