@@ -507,19 +507,19 @@ void Pickler::endTypeTag(const IValue& ivalue) {
 }
 
 void Pickler::pushDict(const IValue& ivalue) {
-  auto dict_items = iterationOrder(ivalue.toGenericDict());
+  auto dict = ivalue.toGenericDict();
 
   startTypeTag();
 
   push<PickleOpCode>(PickleOpCode::EMPTY_DICT);
 
-  if (dict_items.size() >= 0) {
+  if (dict.size() >= 0) {
     push<PickleOpCode>(PickleOpCode::MARK);
 
     // Sort the dict for deterministic keys
-    for (const auto& pair : dict_items) {
-      pushIValue(pair.first);
-      pushIValue(pair.second);
+    for (const auto& entry : dict) {
+      pushIValue(entry.key());
+      pushIValue(entry.value());
     }
 
     push<PickleOpCode>(PickleOpCode::SETITEMS);

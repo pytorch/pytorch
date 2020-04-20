@@ -1,8 +1,9 @@
 #include <torch/csrc/jit/codegen/cuda/parser.h>
 
 #include <torch/csrc/jit/codegen/cuda/arith.h>
+#include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
-#include <torch/csrc/jit/codegen/cuda/tensor.h>
+
 #include <torch/csrc/jit/frontend/function_schema_parser.h>
 #include <torch/csrc/jit/ir/constants.h>
 
@@ -19,14 +20,18 @@ namespace cuda {
 
 namespace {
 
-typedef Val CgValue;
-typedef Expr CgOp;
+typedef Val* CgValue;
+typedef Expr* CgOp;
 
 typedef void (
-    *ParseFuncPtr)(const Node* const, std::unordered_map<size_t, CgValue*>&);
+    *ParseFuncPtr)(const Node* const, std::unordered_map<size_t, CgValue>&);
 
 // TODO: add a mutex to make it thread safe.
 class IrParser {
+ private:
+  static const int nthreads = 128;
+  static const int unroll_factor = 4;
+
  public:
   IrParser(std::shared_ptr<Graph> graph, Fusion& fusion)
       : graph_(std::move(graph)), fusion_(&fusion) {
@@ -36,15 +41,23 @@ class IrParser {
     }
   }
 
+  // Fuses pointwise ops with loop unrolling (factor = 4).
   void parse() {
     FusionGuard fg(fusion_);
     auto block = graph_->block();
+
+    // in case of broadcast, we don't support explicit broadcast, so we need to
+    // convert/expand all inputs tensors to comply to the broadcasted size.
+    // This supports very limited case, which we try to accomodate in graph
+    // partition, that we only merge nodes with identical output shapes.
+    int broadcast_dim =
+        block->outputs()[0]->type()->cast<TensorType>()->dim().value();
 
     // register all inputs;
     // shape propagation during parsing is effctively done in parsing rules, as
     // we only explicitly register inputs in the graph.
     for (auto val : block->inputs()) {
-      TORCH_CHECK(registerValue(val));
+      TORCH_CHECK(registerValue(val, broadcast_dim));
       fusion_->addInput(value_maps_[val->unique()]);
     }
 
@@ -62,25 +75,38 @@ class IrParser {
       // Merge all dimensions because we're only supporting pointwise
       while (out->nDims() > 1)
         out->merge(0);
-      // Split into 128 so we can map blocks/threads
-      out->split(0, 128);
+      // Split into 128 which will be bockDim.x
+      out->split(0, nthreads);
+      // Split by another 4 which will be our unroll factor
+      out->split(0, unroll_factor);
 
       // Map blocks/threads
       out->axis(0)->parallelize(ParallelType::BIDx);
+      out->axis(1)->parallelize(ParallelType::Unroll);
       out->axis(-1)->parallelize(ParallelType::TIDx);
     }
 
-    for (auto jit_input : block->inputs()) {
-      TensorView* inp =
-          static_cast<TensorView*>(value_maps_[jit_input->unique()]);
-      for (auto jit_output : block->outputs()) {
-        TensorView* out =
-            static_cast<TensorView*>(value_maps_[jit_output->unique()]);
-        if (DependencyCheck::isDependencyOf(inp, out)) {
-          inp->computeAt(out, -1);
-          break;
-        }
+    // Run through outputs, grab all inputs of outputs
+    // squeeze with computeAt to set overall structure.
+    for (auto jit_output : block->outputs()) {
+      TensorView* out =
+          static_cast<TensorView*>(value_maps_[jit_output->unique()]);
+
+      for (TensorView* inp : fusion_->inputsOf(out)) {
+        inp->computeAt(out, 1);
       }
+    }
+
+    // Run through intermediates, unroll, and bind their axes
+    for (auto entry : value_maps_) {
+      CgValue val = entry.second;
+      if (fusion_->hasInput(val) || fusion_->hasOutput(val))
+        continue;
+      if (val->getValType().value() != ValType::TensorView)
+        continue;
+      TensorView* tv = static_cast<TensorView*>(val);
+      tv->axis(-2)->parallelize(ParallelType::Unroll);
+      tv->axis(-1)->parallelize(ParallelType::TIDx);
     }
   }
 
@@ -111,10 +137,10 @@ class IrParser {
         .push_back(std::make_pair(op, fn));
   }
 
- protected:
+ private:
   static void parseBinaryOpWithAlpha(
       const Node* const node,
-      std::unordered_map<size_t, CgValue*>& value_maps) {
+      std::unordered_map<size_t, CgValue>& value_maps) {
     static std::unordered_map<Symbol, BinaryOpType> op_mapping({
         {aten::add, BinaryOpType::Add},
         {aten::sub, BinaryOpType::Sub},
@@ -128,7 +154,7 @@ class IrParser {
 
   static void parseBinaryOp(
       const Node* const node,
-      std::unordered_map<size_t, CgValue*>& value_maps) {
+      std::unordered_map<size_t, CgValue>& value_maps) {
     static std::unordered_map<Symbol, BinaryOpType> op_mapping({
         {aten::mul, BinaryOpType::Mul},
         {aten::div, BinaryOpType::Div},
@@ -193,13 +219,13 @@ class IrParser {
     }
   }
 
-  bool registerValue(const JitValue* val) {
-    return registerTensor(val) || registerScalar(val);
+  bool registerValue(const JitValue* val, int broadcast_dim = -1) {
+    return registerTensor(val, broadcast_dim) || registerScalar(val);
   }
 
   bool registerScalar(const JitValue* val) {
     if (val->type()->isSubtypeOf(static_cast<c10::TypePtr>(FloatType::get()))) {
-      CgValue* cg_val;
+      CgValue cg_val;
       if (auto ival = constant_as<float>(val)) {
         cg_val = new Float(ival.value());
       } else {
@@ -209,7 +235,7 @@ class IrParser {
       return true;
     } else if (val->type()->isSubtypeOf(
                    static_cast<c10::TypePtr>(IntType::get()))) {
-      CgValue* cg_val;
+      CgValue cg_val;
       if (auto ival = constant_as<int>(val)) {
         cg_val = new Float(ival.value());
       } else {
@@ -221,12 +247,16 @@ class IrParser {
     return false;
   }
 
-  bool registerTensor(const JitValue* val) {
-    CgValue* cg_val;
+  bool registerTensor(const JitValue* val, int broadcast_dim = -1) {
+    CgValue cg_val;
     if (val->isCompleteTensor()) {
+      auto tensor_type = val->type()->cast<TensorType>();
+      if (broadcast_dim >= 0) {
+        tensor_type = tensor_type->withDim(broadcast_dim);
+      }
       // TODO: make this a static function in Tensor class;
       // create tensor;
-      cg_val = new TensorView(val->type()->cast<TensorType>());
+      cg_val = new TensorView(tensor_type);
       value_maps_.emplace(val->unique(), cg_val);
       return true;
     }
@@ -237,7 +267,7 @@ class IrParser {
   Fusion* fusion_;
 
   // maps from JitValue::unique() to fusion Val;
-  std::unordered_map<size_t, CgValue*> value_maps_;
+  std::unordered_map<size_t, CgValue> value_maps_;
   // parsing rule registry.
   static std::unordered_map<
       Symbol,
