@@ -4,14 +4,16 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 import numpy as np
+import time
+import unittest
 
 import caffe2.python.fakelowp.init_shared_libs  # noqa
-import time
+from hypothesis import given, settings
+from hypothesis import strategies as st
 from caffe2.proto import caffe2_pb2
 from caffe2.python import core
 from caffe2.python import workspace
 from caffe2.python.onnx.onnxifi import onnxifi_caffe2_net
-from caffe2.python.onnx.tests.test_utils import TestCase
 from caffe2.python.fakelowp.test_utils import print_test_debug_info
 
 core.GlobalInit(["caffe2", "--caffe2_log_level=-3", "--glow_global_fp16=1"])
@@ -19,7 +21,7 @@ core.GlobalInit(["caffe2", "--caffe2_log_level=-3", "--glow_global_fp16=1"])
 GLOW_MATMUL_RTOL = 0
 
 
-class FCTest(TestCase):
+class FCTest(unittest.TestCase):
     def test_clip(self):
         m, n, k = 8, 8, 8
         dtype = np.float32
@@ -236,11 +238,12 @@ class FCTest(TestCase):
                      "rowdiff": rowdiff})
                 assert(0)
 
-    def test_fc_num0(self):
+    @given(seed=st.integers(0, 65535))
+    def test_fc_num0(self, seed):
         """ Test numerics, fix a dimension and determine the ranges of error.
             Use Fp16FCAcc16 as a reference.
         """
-        np.random.seed(int(time.time()))
+        np.random.seed(seed)
         m = np.random.randint(low=4, high=50)
         k = np.random.randint(low=4, high=1000)
         n = np.random.randint(low=4, high=50)
@@ -322,3 +325,6 @@ class FCTest(TestCase):
                      "b0": b0, "Y_glow": Y_glow, "Y_c2": Y_c2, "diff": diff,
                      "rowdiff": rowdiff})
                 assert(0)
+
+if __name__ == '__main__':
+    unittest.main()
