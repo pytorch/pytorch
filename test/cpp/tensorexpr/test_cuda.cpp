@@ -476,6 +476,103 @@ void testCudaOneBlockMultiThreadGlobalReduce1() {
   cudaFree(b_dev);
 }
 
+void testCudaNoThreadIdxWrite_1() {
+  KernelScope kernel_scope;
+
+  // This test does the following reduction:
+  //
+  // for k in 0..1: // block-idx
+  //   a[0] = 0
+  //   for n in 0..2:
+  //     a[0] = a[0] + n
+  //   for m in 0..1024: // thread-idx
+  //     b[m] = m
+  //   a[1] = 1
+  //   for l in 0..2:
+  //     a[1] = a[1] + n
+  //
+  //  note that the statements not covered by thread-idx are supposed to be
+  //  covered by its own thread-idx
+
+  const static int N = 1024;
+  Buffer a_buf("a", kFloat, {2});
+  Buffer b_buf("b", kFloat, {N});
+
+  VarHandle k("k", kInt);
+  VarHandle l("l", kInt);
+  VarHandle m("m", kInt);
+  VarHandle n("n", kInt);
+
+  //   a[0] = 0
+  //   for n in 0..2:
+  //     a[0] = a[0] + n
+  Store* store_a0_0 = Store::make(a_buf, {0}, 0.f, 1);
+  ExprHandle load_a0 = Load::make(a_buf, {0}, 1);
+  ExprHandle v1 = load_a0 + n;
+  Store* store_a0_v1 = Store::make(a_buf, {0}, v1, 1);
+  For* loop_a_0 = For::make(n, 0, 2, store_a0_v1);
+
+  //   for m in 0..1024: // thread-idx
+  //     b[m] = m
+  Store* store_bm_m = Store::make(b_buf, {m}, m + 0.f, 1);
+  LoopOptions thread_idx_options;
+  thread_idx_options.set_gpu_thread_index(0);
+  For* loop_b_1 = For::make(m, 0, N, store_bm_m, thread_idx_options);
+
+  //   a[1] = 1
+  //   for l in 0..2:
+  //     a[1] = a[1] + l
+  Store* store_a1_1 = Store::make(a_buf, {1}, 1.f, 1);
+  ExprHandle load_a1 = Load::make(a_buf, {1}, 1);
+  ExprHandle v2 = load_a1 + l;
+  Store* store_a1_v2 = Store::make(a_buf, {1}, v2, 1);
+  For* loop_a_1 = For::make(l, 0, 2, store_a1_v2);
+
+  Stmt* reduce_block =
+      Block::make({store_a0_0, loop_a_0, loop_b_1, store_a1_1, loop_a_1});
+
+  VarHandle block_idx("bidx", kInt);
+  LoopOptions block_idx_options;
+  block_idx_options.set_gpu_block_index(0);
+  For* block_idx_loop =
+      For::make(block_idx, 0, 1, reduce_block, block_idx_options);
+
+  CudaCodeGen cuda_cg(block_idx_loop, a_buf, b_buf);
+  PaddedBuffer<float> a_v(2);
+  PaddedBuffer<float> b_v(N, "b_v");
+  PaddedBuffer<float> a_ref(2, "a_ref");
+  PaddedBuffer<float> b_ref(N, "b_ref");
+
+  a_ref(0) = 0;
+  for (int i = 0; i < 2; i++) {
+    a_ref(0) += i;
+  }
+  a_ref(1) = a_ref(0) + 1;
+  for (int i = 0; i < N; i++) {
+    b_ref(i) = i;
+  }
+
+  // TODO: add check of the generated code.
+  float* a_dev = nullptr;
+  cudaMalloc(&a_dev, 2 * sizeof(float));
+  float* b_dev = nullptr;
+  cudaMalloc(&b_dev, N * sizeof(float));
+  cudaDeviceSynchronize();
+
+  cuda_cg(a_dev, b_dev);
+
+  cudaDeviceSynchronize();
+  cudaMemcpy(a_v.data(), a_dev, 2 * sizeof(float), cudaMemcpyDeviceToHost);
+  cudaMemcpy(b_v.data(), b_dev, N * sizeof(float), cudaMemcpyDeviceToHost);
+  cudaDeviceSynchronize();
+
+  ExpectAllNear(a_v, a_ref, 1e-5);
+  ExpectAllNear(b_v, b_ref, 1e-5);
+
+  cudaFree(a_dev);
+  cudaFree(b_dev);
+}
+
 } // namespace jit
 } // namespace torch
 
