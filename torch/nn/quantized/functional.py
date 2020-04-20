@@ -368,18 +368,23 @@ def hardtanh(input, min_val=-1., max_val=1., inplace=False):
         return torch._C._nn.hardtanh_(input, min_val, max_val)
     return torch._C._nn.hardtanh(input, min_val, max_val)
 
-def hardswish(input, inplace=False):
+def hardswish(input, scale, zero_point):
+    # type: (Tensor, float, int) -> Tensor
     r"""Applies the quantized version of the hardswish function, element-wise,
     as described in the paper:
 
     `Searching for MobileNetV3`_.
 
     .. math::
-        \text{Hardswish}(x) = x * \frac{ReLU6(x + 3)}{6}
+        \text{Hardswish}(x) = \begin{cases}
+            0 & \text{if~} x \le -3, \\
+            x & \text{if~} x \ge +3, \\
+            x^2/6 & \text{otherwise}
+        \end{cases}
 
     Args:
         input: quantized input
-        inplace: Inplace modification of the input tensor
+        scale, zero_point: Scale and zero point of the output tensor.
 
     See :class:`~torch.nn.Hardswish` for more details.
 
@@ -388,11 +393,13 @@ def hardswish(input, inplace=False):
     """
     if not input.is_quantized:
         raise ValueError("Input to 'quantized.hardswish' must be quantized!")
-    if inplace:
-        return torch._C._nn.hardswish_(input)
-    return torch._C._nn.hardswish(input)
+    output = torch.quantize_per_tensor(torch.zeros(input.shape),
+                                       scale, int(zero_point), input.dtype)
+    torch._C._nn.hardswish(input, out=output)
+    return output
 
 def elu(input, alpha=1., inplace=False, scale=None, zero_point=None):
+    # type: (Tensor, Optional[float], bool, Optional[float], Optional[int]) -> Tensor
     r"""
     Applies the quantized ELU function element-wise:
 
@@ -424,7 +431,14 @@ def elu(input, alpha=1., inplace=False, scale=None, zero_point=None):
 def hardsigmoid(input):
     # type: (Tensor) -> Tensor
     r"""
-    Applies the quantized element-wise function :math:`\text{Hardsigmoid}(x) = \frac{ReLU6(x + 3)}{6}`
+    Applies the quantized element-wise function
+
+    .. math::
+        \text{Hardsigmoid}(x) = \begin{cases}
+            0 & \text{if~} x \le -3, \\
+            1 & \text{if~} x \ge +3, \\
+            x / 6 & \text{otherwise}
+        \end{cases}
 
     See :class:`~torch.nn.Hardsigmoid` for more details.
     """

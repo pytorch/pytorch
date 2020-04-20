@@ -89,13 +89,13 @@ void cat_kernel(const c10::OperatorHandle& op, Stack* stack) {
 void __is__kernel(const c10::OperatorHandle& op, Stack* stack) {
   c10::IValue self, obj;
   pop(*stack, self, obj);
-  push(*stack, self.isSameIdentity(obj));
+  push(*stack, self.is(obj));
 }
 
 void __isnot__kernel(const c10::OperatorHandle& op, Stack* stack) {
   c10::IValue self, obj;
   pop(*stack, self, obj);
-  push(*stack, !self.isSameIdentity(obj));
+  push(*stack, !self.is(obj));
 }
 
 void log_softmax_kernel(const c10::OperatorHandle& op, Stack* stack) {
@@ -109,15 +109,13 @@ void log_softmax_kernel(const c10::OperatorHandle& op, Stack* stack) {
 
 void quantize_per_tensor_kernel(const c10::OperatorHandle& op, Stack* stack) {
   auto result_ = at::quantize_per_tensor(
-    (std::move(peek(*stack, 0, 4))).toTensor(),
-    (std::move(peek(*stack, 1, 4))).toDouble(),
-    (std::move(peek(*stack, 2, 4))).toInt(),
-    (std::move(peek(*stack, 3, 4))).to<c10::ScalarType>()
-  );
+      (std::move(peek(*stack, 0, 4))).toTensor(),
+      (std::move(peek(*stack, 1, 4))).toDouble(),
+      (std::move(peek(*stack, 2, 4))).toInt(),
+      (std::move(peek(*stack, 3, 4))).to<c10::ScalarType>());
   drop(*stack, 4);
   pack(*stack, std::move(result_));
 }
-
 
 void softmax_kernel(const c10::OperatorHandle& op, Stack* stack) {
   auto result_ = at::softmax(
@@ -184,25 +182,28 @@ void to_dtype_kernel(const c10::OperatorHandle& op, Stack* stack) {
 }
 
 void to_device_kernel(const c10::OperatorHandle& op, Stack* stack) {
-  auto result_ = ((std::move(peek(*stack, 0, 6))).toTensor()).to(
-     (std::move(peek(*stack, 1, 6))).toDevice(),
-     (std::move(peek(*stack, 2, 6))).toScalarType(),
-     (std::move(peek(*stack, 3, 6))).toBool(),
-     (std::move(peek(*stack, 4, 6))).toBool(),
-     (std::move(peek(*stack, 5, 6))).toOptional<c10::MemoryFormat>()
-  );
+  auto result_ =
+      ((std::move(peek(*stack, 0, 6))).toTensor())
+          .to((std::move(peek(*stack, 1, 6))).toDevice(),
+              (std::move(peek(*stack, 2, 6))).toScalarType(),
+              (std::move(peek(*stack, 3, 6))).toBool(),
+              (std::move(peek(*stack, 4, 6))).toBool(),
+              (std::move(peek(*stack, 5, 6))).toOptional<c10::MemoryFormat>());
   drop(*stack, 6);
   pack(*stack, std::move(result_));
 }
 
 void full_op_kernel(const c10::OperatorHandle& op, Stack* stack) {
-  const auto options = c10::TensorOptions()
-      .dtype((std::move(peek(*stack, 2, 6))).toOptional<c10::ScalarType>())
-      .layout((std::move(peek(*stack, 3, 6))).toOptional<c10::Layout>())
-      .device((std::move(peek(*stack, 4, 6))).toOptional<c10::Device>())
-      .pinned_memory((std::move(peek(*stack, 5, 6))).toOptional<bool>());
-  auto result_ = at::full((std::move(peek(*stack, 0, 6))).toIntVector(),
-    (std::move(peek(*stack, 1, 6))).toScalar(), options);
+  const auto options =
+      c10::TensorOptions()
+          .dtype((std::move(peek(*stack, 2, 6))).toOptional<c10::ScalarType>())
+          .layout((std::move(peek(*stack, 3, 6))).toOptional<c10::Layout>())
+          .device((std::move(peek(*stack, 4, 6))).toOptional<c10::Device>())
+          .pinned_memory((std::move(peek(*stack, 5, 6))).toOptional<bool>());
+  auto result_ = at::full(
+      (std::move(peek(*stack, 0, 6))).toIntVector(),
+      (std::move(peek(*stack, 1, 6))).toScalar(),
+      options);
   drop(*stack, 6);
   pack(*stack, std::move(result_));
 }
@@ -243,25 +244,25 @@ static auto registry =
     torch::RegisterOperators()
         .op("_aten::add.Tensor",
             torch::RegisterOperators::options().kernel(
-                c10::DispatchKey::CPUTensorId,
+                c10::DispatchKey::CPU,
                 [](at::Tensor a, at::Tensor b, at::Scalar c) -> at::Tensor {
                   return at::add(a, b, c);
                 }))
         .op("_aten::sub.Tensor",
             torch::RegisterOperators::options().kernel(
-                c10::DispatchKey::CPUTensorId,
+                c10::DispatchKey::CPU,
                 [](at::Tensor a, at::Tensor b, at::Scalar c) -> at::Tensor {
                   return at::sub(a, b, c);
                 }))
         .op("_aten::add.Scalar",
             torch::RegisterOperators::options().kernel(
-                c10::DispatchKey::CPUTensorId,
+                c10::DispatchKey::CPU,
                 [](at::Tensor a, at::Scalar b, at::Scalar c) -> at::Tensor {
                   return at::add(a, b, c);
                 }))
         .op("_aten::add_.Tensor",
             torch::RegisterOperators::options().kernel(
-                c10::DispatchKey::CPUTensorId,
+                c10::DispatchKey::CPU,
                 [](at::Tensor a, at::Tensor b, at::Scalar c) -> at::Tensor {
                   return at::add(a, b, c);
                 }))
@@ -275,19 +276,19 @@ static auto registry =
                 }))
         .op("_aten::mm",
             torch::RegisterOperators::options().kernel(
-                c10::DispatchKey::CPUTensorId,
+                c10::DispatchKey::CPU,
                 [](at::Tensor a, at::Tensor b) -> at::Tensor {
                   return at::mm(a, b);
                 }))
         .op("_aten::_convolution(Tensor input, Tensor weight, Tensor? bias, int[] stride, int[] padding, int[] dilation, bool transposed, int[] output_padding, int groups, bool benchmark, bool deterministic, bool cudnn_enabled) -> Tensor",
             torch::RegisterOperators::options().kernel<&_convolution_kernel>(
-                c10::DispatchKey::CPUTensorId))
+                c10::DispatchKey::CPU))
         .op("_aten::conv2d(Tensor input, Tensor weight, Tensor? bias=None, int[2] stride=1, int[2] padding=0, int[2] dilation=1, int groups=1) -> Tensor",
             torch::RegisterOperators::options().kernel<&conv2d_kernel>(
-                c10::DispatchKey::CPUTensorId))
+                c10::DispatchKey::CPU))
         .op("_aten::batch_norm",
             torch::RegisterOperators::options().kernel(
-                c10::DispatchKey::CPUTensorId,
+                c10::DispatchKey::CPU,
                 [](at::Tensor input,
                    c10::optional<at::Tensor> weight,
                    c10::optional<at::Tensor> bias,
@@ -310,7 +311,7 @@ static auto registry =
                 }))
         .op("_aten::max_pool2d_with_indices(Tensor self, int[2] kernel_size, int[2] stride=[], int[2] padding=0, int[2] dilation=1, bool ceil_mode=False) -> (Tensor, Tensor)",
             torch::RegisterOperators::options().kernel(
-                c10::DispatchKey::CPUTensorId,
+                c10::DispatchKey::CPU,
                 [](const Tensor& self,
                    c10::List<int64_t> kernel_size,
                    c10::List<int64_t> stride,
@@ -330,7 +331,7 @@ static auto registry =
                 }))
         .op("_aten::max_pool2d(Tensor self, int[2] kernel_size, int[2] stride=[], int[2] padding=0, int[2] dilation=1, bool ceil_mode=False) -> Tensor",
             torch::RegisterOperators::options().kernel(
-                c10::DispatchKey::CPUTensorId,
+                c10::DispatchKey::CPU,
                 [](const Tensor& self,
                    c10::List<int64_t> kernel_size,
                    c10::List<int64_t> stride,
@@ -350,13 +351,13 @@ static auto registry =
                 }))
         .op("_aten::threshold",
             torch::RegisterOperators::options().kernel(
-                c10::DispatchKey::CPUTensorId,
+                c10::DispatchKey::CPU,
                 [](at::Tensor self, at::Scalar threshold, at::Scalar value) {
                   return at::threshold_(self, threshold, value);
                 }))
         .op("_aten::relu(Tensor self) -> Tensor",
             torch::RegisterOperators::options().kernel(
-                c10::DispatchKey::CPUTensorId,
+                c10::DispatchKey::CPU,
                 [](const Tensor& self) {
 
 #ifdef USE_STATIC_DISPATCH
@@ -366,12 +367,12 @@ static auto registry =
                 }))
         .op("_aten::relu_",
             torch::RegisterOperators::options().kernel(
-                c10::DispatchKey::CPUTensorId,
+                c10::DispatchKey::CPU,
                 [](at::Tensor a) -> at::Tensor { return at::relu_(a); }))
         .op("_aten::t(Tensor(a) self) -> Tensor(a)",
             torch::RegisterOperators::options()
                 .kernel(
-                    c10::DispatchKey::CPUTensorId,
+                    c10::DispatchKey::CPU,
                     [](const Tensor& self) {
 
 #ifdef USE_STATIC_DISPATCH
@@ -387,7 +388,7 @@ static auto registry =
                 }))
         .op("_aten::addmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor",
             torch::RegisterOperators::options().kernel(
-                c10::DispatchKey::CPUTensorId,
+                c10::DispatchKey::CPU,
                 [](const Tensor& self,
                    const Tensor& mat1,
                    const Tensor& mat2,
@@ -401,18 +402,18 @@ static auto registry =
                 }))
         .op("_aten::view(Tensor(a) self, int[] size) -> Tensor(a)",
             torch::RegisterOperators::options()
-                .kernel<&view_kernel>(c10::DispatchKey::CPUTensorId)
+                .kernel<&view_kernel>(c10::DispatchKey::CPU)
                 .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
         .op("_aten::dim",
             torch::RegisterOperators::options().kernel(
-                c10::DispatchKey::CPUTensorId,
+                c10::DispatchKey::CPU,
                 [](at::Tensor a) -> int64_t { return a.dim(); }))
         .op("_aten::eq",
             torch::RegisterOperators::options().catchAllKernel(
                 [](int64_t a, int64_t b) -> bool { return a == b; }))
         .op("_aten::log_softmax",
             torch::RegisterOperators::options().kernel(
-                c10::DispatchKey::CPUTensorId,
+                c10::DispatchKey::CPU,
                 [](at::Tensor a, int64_t b, c10::optional<int64_t> c)
                     -> at::Tensor {
                   if (c.has_value()) {
@@ -458,7 +459,7 @@ static auto registry =
             )
         .op("_aten::embedding(Tensor weight, Tensor indices, int padding_idx=-1, bool scale_grad_by_freq=False, bool sparse=False) -> Tensor",
             torch::RegisterOperators::options().kernel(
-                c10::DispatchKey::CPUTensorId,
+                c10::DispatchKey::CPU,
                 [](const Tensor& weight,
                    const Tensor& indices,
                    int64_t padding_idx,
@@ -469,29 +470,29 @@ static auto registry =
                 }))
         .op("_aten::dropout(Tensor input, float p, bool train) -> Tensor",
             torch::RegisterOperators::options().kernel(
-                c10::DispatchKey::CPUTensorId,
+                c10::DispatchKey::CPU,
                 [](const Tensor& input, double p, bool train) {
                   return at::dropout(input, p, train);
                 }))
         .op("_aten::feature_dropout(Tensor input, float p, bool train) -> Tensor",
             torch::RegisterOperators::options().kernel(
-                c10::DispatchKey::CPUTensorId,
+                c10::DispatchKey::CPU,
                 [](const Tensor& input, double p, bool train) {
                   return at::feature_dropout(input, p, train);
                 }))
         .op("_aten::permute(Tensor(a) self, int[] dims) -> Tensor(a)",
             torch::RegisterOperators::options()
-                .kernel<&permute_kernel>(c10::DispatchKey::CPUTensorId)
+                .kernel<&permute_kernel>(c10::DispatchKey::CPU)
                 .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
         .op("_aten::matmul(Tensor self, Tensor other) -> Tensor",
             torch::RegisterOperators::options().kernel(
-                c10::DispatchKey::CPUTensorId,
+                c10::DispatchKey::CPU,
                 [](const Tensor& self, const Tensor& other) {
                   return at::matmul(self, other);
                 }))
         .op("_aten::mul.Tensor(Tensor self, Tensor other) -> Tensor",
             torch::RegisterOperators::options().kernel(
-                c10::DispatchKey::CPUTensorId,
+                c10::DispatchKey::CPU,
                 [](const Tensor& self, const Tensor& other) {
                   return at::mul(self, other);
                 }))
@@ -500,17 +501,17 @@ static auto registry =
                 .catchAllKernel<&upsample_nearest2d_kernel>())
         .op("_aten::tanh(Tensor self) -> Tensor",
             torch::RegisterOperators::options().kernel(
-                c10::DispatchKey::CPUTensorId,
+                c10::DispatchKey::CPU,
                 [](const Tensor& self) { return at::tanh(self); }))
         .op("_aten::max.dim(Tensor self, int dim, bool keepdim=False) -> (Tensor values, Tensor indices)",
             torch::RegisterOperators::options().kernel(
-                c10::DispatchKey::CPUTensorId,
+                c10::DispatchKey::CPU,
                 [](const Tensor& self, int64_t dim, bool keepdim) {
                   return at::max(self, dim, keepdim);
                 }))
         .op("_aten::cat(Tensor[] tensors, int dim=0) -> Tensor",
             torch::RegisterOperators::options().kernel<&cat_kernel>(
-                c10::DispatchKey::CPUTensorId))
+                c10::DispatchKey::CPU))
         .op("_aten::__is__(t1 self, t2 obj) -> bool",
             torch::RegisterOperators::options().catchAllKernel<&__is__kernel>())
         .op("_aten::__isnot__(t1 self, t2 obj) -> bool",
@@ -518,13 +519,13 @@ static auto registry =
                 .catchAllKernel<&__isnot__kernel>())
         .op("_aten::log_softmax.int(Tensor self, int dim, ScalarType? dtype=None) -> Tensor",
             torch::RegisterOperators::options().kernel<&log_softmax_kernel>(
-                c10::DispatchKey::CPUTensorId))
+                c10::DispatchKey::CPU))
         .op("_aten::softmax.int(Tensor self, int dim, ScalarType? dtype=None) -> Tensor",
             torch::RegisterOperators::options().kernel<&softmax_kernel>(
-                c10::DispatchKey::CPUTensorId))
+                c10::DispatchKey::CPU))
         .op("_aten::softplus(Tensor self, Scalar beta=1, Scalar threshold=20) -> Tensor",
             torch::RegisterOperators::options().kernel(
-                c10::DispatchKey::CPUTensorId,
+                c10::DispatchKey::CPU,
                 [](const Tensor& self, Scalar beta, Scalar threshold) {
                   return at::softplus(self, beta, threshold);
                 }))
@@ -543,7 +544,7 @@ static auto registry =
                 .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
         .op("_aten::append.Tensor(Tensor self) -> void",
             torch::RegisterOperators::options().kernel<&listAppend<at::Tensor>>(
-                c10::DispatchKey::CPUTensorId))
+                c10::DispatchKey::CPU))
         .op("_aten::append.int(int self) -> void",
             torch::RegisterOperators::options()
                 .catchAllKernel<&listAppend<int64_t>>()
@@ -551,61 +552,70 @@ static auto registry =
             )
         .op("_aten::sigmoid(Tensor self) -> Tensor",
             torch::RegisterOperators::options().kernel(
-                c10::DispatchKey::CPUTensorId,
+                c10::DispatchKey::CPU,
                 [](const Tensor& self) { return at::sigmoid(self); }))
         .op("_aten::eq.int",
             torch::RegisterOperators::options().catchAllKernel(
                 [](int64_t a, int64_t b) -> bool { return a == b; }))
         .op("_aten::div.Tensor(Tensor self, Tensor other) -> Tensor",
-            torch::RegisterOperators::options().kernel(c10::DispatchKey::CPUTensorId,
-            [](const Tensor & self, const Tensor & other) {
-               return at::div(self, other);
-            }))
+            torch::RegisterOperators::options().kernel(
+                c10::DispatchKey::CPU,
+                [](const Tensor& self, const Tensor& other) {
+                  return at::div(self, other);
+                }))
         .op("_aten::quantize_per_tensor(Tensor self, float scale, int zero_point, ScalarType dtype) -> Tensor",
-            torch::RegisterOperators::options().kernel<&quantize_per_tensor_kernel>(c10::DispatchKey::CPUTensorId))
+            torch::RegisterOperators::options()
+                .kernel<&quantize_per_tensor_kernel>(c10::DispatchKey::CPU))
         .op("_aten::floor(Tensor self) -> Tensor",
-            torch::RegisterOperators::options().kernel(c10::DispatchKey::CPUTensorId,
-            [](const Tensor & self) {
-               return at::floor(self);
-            }))
+            torch::RegisterOperators::options().kernel(
+                c10::DispatchKey::CPU,
+                [](const Tensor& self) { return at::floor(self); }))
         .op("_aten::slice.Tensor(Tensor self, int dim, int start, int end, int step) -> Tensor",
-            torch::RegisterOperators::options().kernel(c10::DispatchKey::CPUTensorId,
-            [](const Tensor & self, int64_t dim, int64_t start, int64_t end, int64_t step) {
-               return at::slice(self, dim, start, end, step);
-            }))
+            torch::RegisterOperators::options().kernel(
+                c10::DispatchKey::CPU,
+                [](const Tensor& self,
+                   int64_t dim,
+                   int64_t start,
+                   int64_t end,
+                   int64_t step) {
+                  return at::slice(self, dim, start, end, step);
+                }))
         .op("_aten::detach(Tensor self) -> Tensor",
-            torch::RegisterOperators::options().kernel(c10::DispatchKey::CPUTensorId,
-            [](const Tensor & self) {
-               return at::detach(self);
-            }))
+            torch::RegisterOperators::options().kernel(
+                c10::DispatchKey::CPU,
+                [](const Tensor& self) { return at::detach(self); }))
         .op("_aten::dequantize(Tensor self) -> Tensor",
             torch::RegisterOperators::options().catchAllKernel(
-            [](const Tensor & self) {
-               return at::dequantize(self);
-            }))
+                [](const Tensor& self) { return at::dequantize(self); }))
+        .op("_aten::dequantize.self(Tensor self) -> Tensor",
+            torch::RegisterOperators::options().catchAllKernel(
+                [](const Tensor& self) { return at::dequantize(self); }))
         .op("_aten::select.int(Tensor self, int dim, int index) -> Tensor",
-            torch::RegisterOperators::options().kernel(c10::DispatchKey::CPUTensorId,
-            [](const Tensor & self, int64_t dim, int64_t index) {
-               return at::select(self, dim, index);
-            }))
+            torch::RegisterOperators::options().kernel(
+                c10::DispatchKey::CPU,
+                [](const Tensor& self, int64_t dim, int64_t index) {
+                  return at::select(self, dim, index);
+                }))
         .op(torch::RegisterOperators::options()
                 .schema(
                     "_aten::to.dtype(Tensor self, ScalarType dtype, bool non_blocking=False, bool copy=False, MemoryFormat? memory_format=None) -> Tensor")
-                .kernel<&to_dtype_kernel>(c10::DispatchKey::CPUTensorId)
+                .kernel<&to_dtype_kernel>(c10::DispatchKey::CPU)
                 .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
         .op(torch::RegisterOperators::options()
                 .schema("_prim::TupleIndex(any self, int index) -> any")
                 .catchAllKernel<&TupleIndex_kernel>())
         .op(torch::RegisterOperators::options()
                 .schema("_prim::RaiseException(str msg) -> ()")
-                .kernel<&pop_kernel>(c10::DispatchKey::CPUTensorId)
+                .kernel<&pop_kernel>(c10::DispatchKey::CPU)
                 .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
         .op(torch::RegisterOperators::options()
-                .schema("_aten::to.device(Tensor self, Device device, ScalarType dtype, bool non_blocking=False, bool copy=False, MemoryFormat? memory_format=None) -> Tensor")
+                .schema(
+                    "_aten::to.device(Tensor self, Device device, ScalarType dtype, bool non_blocking=False, bool copy=False, MemoryFormat? memory_format=None) -> Tensor")
                 .catchAllKernel<&to_device_kernel>()
                 .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
         .op(torch::RegisterOperators::options()
-                .schema("_aten::full(int[] size, Scalar fill_value, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor")
+                .schema(
+                    "_aten::full(int[] size, Scalar fill_value, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor")
                 .catchAllKernel<&full_op_kernel>()
                 .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA));
 } // namespace

@@ -158,6 +158,8 @@ view of a storage and defines numeric operations on it.
 
    .. automethod:: abs
    .. automethod:: abs_
+   .. automethod:: absolute
+   .. automethod:: absolute_
    .. automethod:: acos
    .. automethod:: acos_
    .. automethod:: add
@@ -353,6 +355,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: lt_
    .. automethod:: lu
    .. automethod:: lu_solve
+   .. automethod:: as_subclass
    .. automethod:: map_
    .. automethod:: masked_scatter_
    .. automethod:: masked_scatter

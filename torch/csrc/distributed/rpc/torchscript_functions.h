@@ -1,6 +1,7 @@
 #pragma once
 
 #include <ATen/core/ivalue.h>
+#include <torch/csrc/autograd/profiler.h>
 #include <torch/csrc/distributed/autograd/utils.h>
 #include <torch/csrc/distributed/rpc/rref_context.h>
 #include <torch/csrc/distributed/rpc/script_remote_call.h>

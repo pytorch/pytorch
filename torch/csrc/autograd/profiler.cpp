@@ -38,7 +38,7 @@ RangeEventList& getEventList() {
   if (!event_list) {
     std::lock_guard<std::mutex> guard(all_event_lists_map_mutex);
     event_list = std::make_shared<RangeEventList>();
-    thread_id = RecordFunction::getCurrentThreadId();
+    thread_id = RecordFunction::currentThreadId();
     all_event_lists_map.emplace(thread_id, event_list);
   }
   return *event_list;
@@ -155,10 +155,11 @@ void enableProfiler(ProfilerConfig config) {
         } else {
           pushRange(fn.name(), msg, fn.seqNr(), {});
         }
+        return true;
       },
       [](const RecordFunction& fn) {
         if (fn.getStartCallbacksThreadId() !=
-                RecordFunction::getCurrentThreadId()) {
+                RecordFunction::currentThreadId()) {
           // If we're not in a thread that ran start callbacks, then find
           // the eventList that was created for the original thread_id. Then,
           // record the end event on this list so that the block is added to
@@ -186,7 +187,9 @@ void enableProfiler(ProfilerConfig config) {
           popRange();
         }
       },
-      config.report_input_shapes);
+      /* needs_inputs */ config.report_input_shapes,
+      /* sampling_prob */ 1.0,
+      /* scopes */ {RecordScope::FUNCTION, RecordScope::USER_SCOPE});
   state = new_state;
 
   if(state == ProfilerState::CUDA) {

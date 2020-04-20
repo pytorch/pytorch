@@ -102,6 +102,7 @@ class CAFFE2_API OnnxifiTransformer final : public BackendTransformerBase {
   bool supportOpC2(
       const caffe2::OperatorDef& op,
       const ShapeInfoMap& shape_hints,
+      const std::unordered_set<std::string>& weights,
       const std::unordered_set<int>& blacklisted_ops,
       onnxBackendID backend_id) const;
 
@@ -119,6 +120,7 @@ class CAFFE2_API OnnxifiTransformer final : public BackendTransformerBase {
   void tieGatherAndSparseLengthsWeightedSumOps(
       const NetDef& net,
       const ShapeInfoMap& shape_hints,
+      const std::unordered_set<std::string>& weights,
       std::unordered_set<int>* blacklisted_ops) const;
 
   // For net with partitioning info, blacklist ops that are supposed to run on
@@ -131,6 +133,7 @@ class CAFFE2_API OnnxifiTransformer final : public BackendTransformerBase {
   void applyFilteringRules(
       const NetDef& net,
       const ShapeInfoMap& shape_hints,
+      const std::unordered_set<std::string>& weights,
       std::unordered_set<int>* blacklisted_ops) const;
 
   // Determine backend id

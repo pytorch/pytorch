@@ -19,6 +19,8 @@
 #include <android/log.h>
 #endif
 
+using namespace torch::autograd::profiler;
+
 namespace pytorch_jni {
 
 namespace {
@@ -85,12 +87,13 @@ class PytorchJni : public facebook::jni::HybridClass<PytorchJni> {
 #endif
 
 #ifdef TRACE_ENABLED
-  static void onFunctionEnter(
-      const torch::autograd::profiler::RecordFunction& fn) {
+  static bool onFunctionEnter(
+      const RecordFunction& fn) {
     Trace::beginSection(fn.name().str());
+    return true;
   }
 
-  static void onFunctionExit(const torch::autograd::profiler::RecordFunction&) {
+  static void onFunctionExit(const RecordFunction&) {
     Trace::endSection();
   }
 #endif
@@ -109,11 +112,12 @@ class PytorchJni : public facebook::jni::HybridClass<PytorchJni> {
 #endif
 
 #ifdef TRACE_ENABLED
-    torch::autograd::profiler::pushCallback(
+    pushCallback(
         &onFunctionEnter,
         &onFunctionExit,
         /* need_inputs */ false,
-        /* sampled */ false);
+        /* sampling_prob */ 1.0,
+        /* scopes */ {RecordScope::FUNCTION, RecordScope::USER_SCOPE});
 #endif
   }
 

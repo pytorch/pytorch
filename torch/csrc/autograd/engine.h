@@ -3,7 +3,7 @@
 // Engine implements backpropagation from output variables and their gradients
 // to "root" variables (variables created by the user with requires_grad=True).
 
-#include <ATen/ThreadLocalDebugInfo.h>
+#include <ATen/ThreadLocalState.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/csrc/autograd/anomaly_mode.h>
 #include <torch/csrc/autograd/function.h>
@@ -37,12 +37,21 @@ void validate_outputs(
 static constexpr int NO_DEVICE = -2;
 static constexpr int CPU_DEVICE = -1;
 
+// Maximum reentrant backward depth before switching to a new thread
+// This limit is based on the TSAN's deadlock detector, where it will
+// fail if a program hold more than 65 locks in one thread at once.
+// As we hold mutex in every of our custom C++ autograd Node, we would
+// like to avoid TSAN complains on this when doing reentrant backwards
+// For reference, see https://github.com/google/sanitizers/issues/950
+static constexpr int MAX_DEPTH = 60;
+
 // GraphTask holds metadata needed for a single execution of backward()
 struct GraphTask {
+  std::atomic<uint64_t> outstanding_tasks_{0};
   // Indicates if an error occurred while executing any task.  When this is
   // true, it signals all threads to stop executing.
-  std::atomic_bool has_error_;
-  std::atomic<uint64_t> outstanding_tasks_;
+  std::atomic_bool has_error_{false};
+  std::atomic_bool future_completed_{false};
   // It is safe to read grad_mode_ and keep_graph_ without synchronization
   bool keep_graph_;
   bool grad_mode_;
@@ -79,8 +88,10 @@ struct GraphTask {
   // execution of the GraphTask is completed, the captured_vars_ are moved
   // out of the GraphTask and are no longer valid.
   std::vector<Variable> captured_vars_;
-  std::shared_ptr<at::ThreadLocalDebugInfoBase> debug_info_ =
-      at::getThreadLocalDebugInfo();
+
+  at::ThreadLocalState thread_locals_ =
+      at::ThreadLocalState(/* keep_grad_mode */ false);
+
   std::unordered_set<c10::Stream> leaf_streams;
 
   void init_to_execute(Node& graph_root, const edge_list& outputs);
@@ -134,9 +145,7 @@ struct GraphTask {
       int reentrant_depth,
       std::shared_ptr<ReadyQueue> cpu_ready_queue,
       bool exit_on_error = false)
-      : has_error_(false),
-        outstanding_tasks_(0),
-        keep_graph_(keep_graph),
+      : keep_graph_(keep_graph),
         grad_mode_(grad_mode),
         owner_(NO_DEVICE),
         reentrant_depth_(reentrant_depth),

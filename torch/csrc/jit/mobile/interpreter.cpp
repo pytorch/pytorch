@@ -25,23 +25,19 @@ bool InterpreterState::run(Stack& stack) {
   while (true) {
     Instruction inst = code_->instructions_[pc];
 
-    //  std::cout << "RUNNING " << pc << " " << code_->instructions_[pc];
-    //  if (inst.op == OP) {
-    //    std::cout << ", " << code_->op_names_[inst.X].name << "." <<
-    //      code_->op_names_[inst.X].overload_name;
-    //  }
-    //  std::cout << std::endl;
-    //  for (auto val : stack) {
-    //    if (val.isTensor()) {
-    //      std::cout << val.toTensor().sizes() << std::endl;
-    //    } else {
-    //      std::cout << val << std::endl;
+    //    std::cout << "RUNNING " << pc << " " << code_->instructions_[pc];
+    //    if (inst.op == OP) {
+    //      std::cout << ", " << code_->op_names_[inst.X].name;
+    //      if (!code_->op_names_[inst.X].overload_name.empty()) {
+    //        std::cout << "." << code_->op_names_[inst.X].overload_name;
+    //      }
     //    }
-    //  }
+    //    std::cout << std::endl;
     switch (inst.op) {
       case OP: {
 #if defined(PYTORCH_MOBILE_OPERATOR_OBSERVER)
-        if (auto debug_info = at::getThreadLocalDebugInfo()) {
+        if (auto debug_info = at::ThreadLocalDebugInfo::get(
+                at::DebugInfoKind::MOBILE_RUNTIME_INFO)) {
           if (auto* mobile_debug_info =
                   dynamic_cast<MobileDebugInfo*>(debug_info.get())) {
             mobile_debug_info->setOpIdx(pc);
@@ -159,6 +155,16 @@ bool InterpreterState::run(Stack& stack) {
         tupleSlice(stack, inst.X, inst.X + inst.N);
         ++pc;
       } break;
+      case DICT_CONSTRUCT: {
+        auto type = code_->types_[inst.X]->expect<at::DictType>();
+        dictConstruct(stack, type, inst.N);
+        ++pc;
+      } break;
+      case NAMED_TUPLE_CONSTRUCT: {
+        auto type = code_->types_[inst.X]->expect<at::TupleType>();
+        namedTupleConstruct(stack, type, inst.N);
+        ++pc;
+      } break;
       case WARN: {
         drop(stack, 1);
         TORCH_WARN(pop(stack).toStringRef());
@@ -167,6 +173,13 @@ bool InterpreterState::run(Stack& stack) {
       default:
         AT_ERROR(toString(inst.op), " is invalid.");
     }
+    //  for (auto val : stack) {
+    //    if (val.isTensor()) {
+    //      std::cout << val.toTensor().sizes() << std::endl;
+    //    } else {
+    //      std::cout << val << std::endl;
+    //    }
+    //  }
   }
   return false;
 }

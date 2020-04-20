@@ -50,6 +50,8 @@ class TORCH_API IRPrinter : public IRVisitor {
   void visit(const Cond* v) override;
   void visit(const Term* v) override;
   void visit(const Polynomial* v) override;
+  void visit(const RoundOff* v) override;
+  void visit(const ReduceOp* v) override;
 
   std::ostream& os() {
     return printer_os_;

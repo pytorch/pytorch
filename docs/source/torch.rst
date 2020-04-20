@@ -194,6 +194,7 @@ Pointwise Ops
 ~~~~~~~~~~~~~~~~~~~~~~
 
 .. autofunction:: abs
+.. autofunction:: absolute
 .. autofunction:: acos
 .. autofunction:: add
 .. autofunction:: addcdiv
@@ -312,6 +313,7 @@ Spectral Ops
 Other Operations
 ~~~~~~~~~~~~~~~~~~~~~~
 .. autofunction:: bincount
+.. autofunction:: block_diag
 .. autofunction:: broadcast_tensors
 .. autofunction:: cartesian_prod
 .. autofunction:: cdist

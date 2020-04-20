@@ -17,7 +17,8 @@
 namespace caffe2 {
 
 namespace {
-const std::string kRealBatchSizeBlob("real_batch_size");
+const std::string kRealBatchSizeBlob = "real_batch_size";
+const std::string kInitializers = "initializers";
 constexpr size_t kBufferSize = 64;
 
 // Convert ShapeInfo map to TensorShape map
@@ -684,7 +685,7 @@ OperatorDef OnnxifiTransformer::buildOnnxifiOp(
   // Add the names of the initializer blobs that we want to fetch from the
   // workspace later
   auto* initializers_arg = op.add_arg();
-  initializers_arg->set_name("initializers");
+  initializers_arg->set_name(kInitializers);
   for (const auto& s : initialization_list) {
     initializers_arg->add_strings(s);
   }
@@ -882,14 +883,21 @@ NetDef OnnxifiTransformer::SubnetToOnnxifiOpViaC2(
     onnxifi_net.add_partition_info()->CopyFrom(p);
   }
 
+  // Add initializers (weights) list to the net as an arg
+  auto* w_arg = onnxifi_net.add_arg();
+  w_arg->set_name(kInitializers);
+  for (const auto& i : initialization_list) {
+    w_arg->add_strings(i);
+  }
+
   // Build ONNXIFI Op
+  std::string model_str;
+  onnxifi_net.SerializeToString(&model_str);
   std::vector<std::string> onnxifi_net_inputs(
       onnxifi_net.external_input().begin(), onnxifi_net.external_input().end());
   std::vector<std::string> onnxifi_net_outputs(
       onnxifi_net.external_output().begin(),
       onnxifi_net.external_output().end());
-  std::string model_str;
-  onnxifi_net.SerializeToString(&model_str);
   auto onnxifi_op = buildOnnxifiOp(
       model_str,
       output_shape_hints,
@@ -1138,6 +1146,7 @@ bool OnnxifiTransformer::supportOpOnnx(
 bool OnnxifiTransformer::supportOpC2(
     const caffe2::OperatorDef& op,
     const ShapeInfoMap& shape_hints,
+    const std::unordered_set<std::string>& weights,
     const std::unordered_set<int>& blacklisted_ops,
     onnxBackendID backend_id) const {
   try {
@@ -1151,7 +1160,12 @@ bool OnnxifiTransformer::supportOpC2(
     // Build a c2 net with one op
     NetDef net;
     net.add_op()->CopyFrom(op);
+    std::unordered_set<std::string> seenExternalInputs;
     for (const auto& i : op.input()) {
+      if (seenExternalInputs.count(i)) {
+        continue;
+      }
+      seenExternalInputs.insert(i);
       net.add_external_input(i);
     }
     for (const auto& o : op.output()) {
@@ -1173,7 +1187,12 @@ bool OnnxifiTransformer::supportOpC2(
     auto* qshape_arg = net.add_arg();
     shape_arg->set_name("input_shape_info");
     qshape_arg->set_name("input_qshape_info");
+    std::unordered_set<std::string> seenInputsForShapeArgs;
     for (const auto& i : op.input()) {
+      if (seenInputsForShapeArgs.count(i)) {
+        continue;
+      }
+      seenInputsForShapeArgs.insert(i);
       const auto it = shape_hints.find(i);
       if (it == shape_hints.end()) {
         VLOG(1) << "Skipping " << op.type() << " (" << pos
@@ -1209,6 +1228,15 @@ bool OnnxifiTransformer::supportOpC2(
       }
     }
 
+    // Annnote the inputs that are weights
+    auto w_arg = net.add_arg();
+    w_arg->set_name(kInitializers);
+    for (const auto& i : op.input()) {
+      if (weights.count(i)) {
+        w_arg->add_strings(i);
+      }
+    }
+
     std::string c2_model_str;
     net.SerializeToString(&c2_model_str);
     auto ret = lib_->onnxGetBackendCompatibility(
@@ -1229,6 +1257,7 @@ bool OnnxifiTransformer::supportOpC2(
 void OnnxifiTransformer::tieGatherAndSparseLengthsWeightedSumOps(
     const NetDef& net,
     const ShapeInfoMap& shape_hints,
+    const std::unordered_set<std::string>& weights,
     std::unordered_set<int>* blacklisted_ops) const {
   std::unordered_map<std::string, int> output_pos;
   onnx::OnnxExporter exporter(nullptr);
@@ -1245,7 +1274,7 @@ void OnnxifiTransformer::tieGatherAndSparseLengthsWeightedSumOps(
     } else if (StartsWith(op.type(), "SparseLengthsWeighted")) {
       auto supported = opts_.use_onnx
           ? supportOpOnnx(op, &exporter, *blacklisted_ops, backend_id)
-          : supportOpC2(op, shape_hints, *blacklisted_ops, backend_id);
+          : supportOpC2(op, shape_hints, weights, *blacklisted_ops, backend_id);
       if (!supported && op.input_size() > 1) {
         check = op.input(1);
       }
@@ -1288,8 +1317,10 @@ void OnnxifiTransformer::blacklistCpuPartition(
 void OnnxifiTransformer::applyFilteringRules(
     const NetDef& net,
     const ShapeInfoMap& shape_hints,
+    const std::unordered_set<std::string>& weights,
     std::unordered_set<int>* blacklisted_ops) const {
-  tieGatherAndSparseLengthsWeightedSumOps(net, shape_hints, blacklisted_ops);
+  tieGatherAndSparseLengthsWeightedSumOps(
+      net, shape_hints, weights, blacklisted_ops);
   blacklistCpuPartition(net, blacklisted_ops);
 }
 
@@ -1321,9 +1352,12 @@ NetDef OnnxifiTransformer::TransformViaC2(
     const ShapeInfoMap& shape_hints) {
   onnxBackendID backend_id = backend_ids_[idx_];
 
-  auto c2_supports = [this, &shape_hints, &blacklisted_ops, backend_id](
-                         const caffe2::OperatorDef& op) {
-    return supportOpC2(op, shape_hints, blacklisted_ops, backend_id);
+  auto c2_supports = [this,
+                      &shape_hints,
+                      &blacklisted_ops,
+                      backend_id,
+                      &weights](const caffe2::OperatorDef& op) {
+    return supportOpC2(op, shape_hints, weights, blacklisted_ops, backend_id);
   };
 
   auto c2_converter =
@@ -1430,7 +1464,7 @@ void OnnxifiTransformer::transform(
   // Apply some filtering rules
   std::unordered_set<int> new_blacklisted_ops(
       blacklisted_ops.begin(), blacklisted_ops.end());
-  applyFilteringRules(*pred_net, shape_hints, &new_blacklisted_ops);
+  applyFilteringRules(*pred_net, shape_hints, weights, &new_blacklisted_ops);
 
   // Transform the net
   NetDef net_opt = opts_.use_onnx
