@@ -18,7 +18,6 @@
 #include <ATen/Parallel.h>
 #include <ATen/native/UnaryOps.h>
 #include <ATen/native/TensorIterator.h>
-#include <ATen/native/xnnpack/Engine.h>
 #include <ATen/NamedTensorUtils.h>
 
 #include <algorithm>
@@ -263,45 +262,25 @@ Tensor& logical_not_out(Tensor& result, const Tensor& self) {
 }
 
 Tensor clamp(const Tensor& self, optional<Scalar> min, optional<Scalar> max) {
-  TORCH_CHECK(!self.is_complex(), "clamp is not yet implemented for complex tensors.");\
-// #ifdef C10_MOBILE
-  if (xnnpack::use_clamp_optional(xnnpack::use_clamp, min, max, self)) {
-    return xnnpack::clamp_optional(xnnpack::clamp, min, max, self);
-  }
-// #endif
+  TORCH_CHECK(!self.is_complex(), "clamp is not yet implemented for complex tensors.");
   Tensor result = at::empty({0}, self.options());
   return clamp_out(result, self, min, max);
 }
 
 Tensor clamp_max(const Tensor& self, Scalar max) {
-  TORCH_CHECK(!self.is_complex(), "clamp is not yet implemented for complex tensors.");\
-// #ifdef C10_MOBILE
-  if (xnnpack::use_clamp_optional(xnnpack::use_clamp, optional<Scalar>{}, max, self)) {
-    return xnnpack::clamp_optional(xnnpack::clamp, optional<Scalar>{}, max, self);
-  }
-// #endif
+  TORCH_CHECK(!self.is_complex(), "clamp is not yet implemented for complex tensors.");
   Tensor result = at::empty({0}, self.options());
   return clamp_max_out(result, self, max);
 }
 
 Tensor clamp_min(const Tensor& self, Scalar min) {
-  TORCH_CHECK(!self.is_complex(), "clamp is not yet implemented for complex tensors.");\
-// #ifdef C10_MOBILE
-  if (xnnpack::use_clamp_optional(xnnpack::use_clamp, min, optional<Scalar>{}, self)) {
-    return xnnpack::clamp_optional(xnnpack::clamp, min, optional<Scalar>{}, self);
-  }
-// #endif
+  TORCH_CHECK(!self.is_complex(), "clamp is not yet implemented for complex tensors.");
   Tensor result = at::empty({0}, self.options());
   return clamp_min_out(result, self, min);
 }
 
 Tensor& _clamp__cpu(Tensor& self, optional<Scalar> min, optional<Scalar> max) {
-  TORCH_CHECK(!self.is_complex(), "clamp is not yet implemented for complex tensors.");\
-// #ifdef C10_MOBILE
-  if (xnnpack::use_clamp_optional(xnnpack::use_clamp_, min, max, self)) {
-    return xnnpack::clamp_optional(xnnpack::clamp_, min, max, self);
-  }
-// #endif
+  TORCH_CHECK(!self.is_complex(), "clamp is not yet implemented for complex tensors.");
   return clamp_out(self, self, min, max);
 }
 
@@ -326,12 +305,7 @@ Tensor& _clamp_out_cpu(
     const Tensor& self,
     optional<Scalar> min,
     optional<Scalar> max) {
-  TORCH_CHECK(!self.is_complex(), "clamp is not yet implemented for complex tensors.");\
-// #ifdef C10_MOBILE
-  if (xnnpack::use_clamp_optional(xnnpack::use_clamp_out, min, max, result, self)) {
-    return xnnpack::clamp_optional(xnnpack::clamp_out, min, max, result, self);
-  }
-// #endif
+  TORCH_CHECK(!self.is_complex(), "clamp is not yet implemented for complex tensors.");
   if (min && max) {
     TORCH_CHECK(self.device().type() == DeviceType::CPU,
                 "clamp only supports CPU device type, got: ", self.device().type());
@@ -351,26 +325,16 @@ Tensor& _clamp_out_cpu(
 }
 
 Tensor& _clamp_max__cpu(Tensor& self, Scalar max) {
-  TORCH_CHECK(!self.is_complex(), "clamp is not yet implemented for complex tensors.");\
-// #ifdef C10_MOBILE
-  if (xnnpack::use_clamp_optional(xnnpack::use_clamp_, optional<Scalar>{}, max, self)) {
-    return xnnpack::clamp_optional(xnnpack::clamp_, optional<Scalar>{}, max, self);
-  }
-// #endif
+  TORCH_CHECK(!self.is_complex(), "clamp is not yet implemented for complex tensors.");
   return clamp_max_out(self, self, max);
 }
 
 Tensor& _clamp_max_out_cpu(Tensor& result, const Tensor& self, Scalar max) {
-  TORCH_CHECK(!self.is_complex(), "clamp is not yet implemented for complex tensors.");\
+  TORCH_CHECK(!self.is_complex(), "clamp is not yet implemented for complex tensors.");
   TORCH_CHECK(self.device().type() == DeviceType::CPU,
               "clamp_max only supports CPU device type, got: ", self.device().type());
   TORCH_CHECK(self.layout() == Layout::Strided,
               "clamp_max only supports strided layout, got: ", self.layout());
-// #ifdef C10_MOBILE
-  if (xnnpack::use_clamp_optional(xnnpack::use_clamp_out, optional<Scalar>{}, max, result, self)) {
-    return xnnpack::clamp_optional(xnnpack::clamp_out, optional<Scalar>{}, max, result, self);
-  }
-// #endif
   auto iter = TensorIterator::unary_op(result, self,
       /*check_mem_overlap=*/true);
   clamp_max_stub(iter.device_type(), iter, max);
@@ -378,26 +342,16 @@ Tensor& _clamp_max_out_cpu(Tensor& result, const Tensor& self, Scalar max) {
 }
 
 Tensor& _clamp_min__cpu(Tensor& self, Scalar min) {
-  TORCH_CHECK(!self.is_complex(), "clamp is not yet implemented for complex tensors.");\
-// #ifdef C10_MOBILE
-  if (xnnpack::use_clamp_optional(xnnpack::use_clamp_, min, optional<Scalar>{}, self)) {
-    return xnnpack::clamp_optional(xnnpack::clamp_, min, optional<Scalar>{}, self);
-  }
-// #endif
+  TORCH_CHECK(!self.is_complex(), "clamp is not yet implemented for complex tensors.");
   return clamp_min_out(self, self, min);
 }
 
 Tensor& _clamp_min_out_cpu(Tensor& result, const Tensor& self, Scalar min) {
-  TORCH_CHECK(!self.is_complex(), "clamp is not yet implemented for complex tensors.");\
+  TORCH_CHECK(!self.is_complex(), "clamp is not yet implemented for complex tensors.");
   TORCH_CHECK(self.device().type() == DeviceType::CPU,
               "clamp_min only supports CPU device type, got: ", self.device().type());
   TORCH_CHECK(self.layout() == Layout::Strided,
               "clamp_min only supports strided layout, got: ", self.layout());
-// #ifdef C10_MOBILE
-  if (xnnpack::use_clamp_optional(xnnpack::use_clamp_out, min, optional<Scalar>{}, result, self)) {
-    return xnnpack::clamp_optional(xnnpack::clamp_out, min, optional<Scalar>{}, result, self);
-  }
-// #endif
   auto iter = TensorIterator::unary_op(result, self,
       /*check_mem_overlap=*/true);
   clamp_min_stub(iter.device_type(), iter, min);

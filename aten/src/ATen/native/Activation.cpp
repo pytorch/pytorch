@@ -7,7 +7,6 @@
 #include <ATen/native/TensorIterator.h>
 #include <ATen/Parallel.h>
 #include <ATen/core/DistributionsHelper.h>
-#include <ATen/native/xnnpack/Engine.h>
 
 namespace at { namespace native {
 
@@ -166,20 +165,10 @@ Tensor hardswish_backward(const Tensor& grad_output, const Tensor& self) {
 }
 
 Tensor relu(const Tensor & self) {
-// #ifdef C10_MOBILE
-  if (xnnpack::use_relu(self)) {
-    return xnnpack::relu(self);
-  }
-// #endif
   return at::threshold(self, 0, 0);
 }
 
 Tensor & relu_(Tensor & self) {
-// #ifdef C10_MOBILE
-  if (xnnpack::use_relu_(self)) {
-    return xnnpack::relu_(self);
-  }
-// #endif
   return at::threshold_(self, 0, 0);
 }
 
