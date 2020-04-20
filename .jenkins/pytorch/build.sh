@@ -259,7 +259,7 @@ if [[ "${BUILD_ENVIRONMENT}" == *xla* ]]; then
   # XLA build requires Bazel
   # We use bazelisk to avoid updating Bazel version manually.
   sudo npm install -g @bazel/bazelisk
-  sudo ln -s "$(command -v bazelisk)" /usr/bin/bazel
+  sudo ln -sf "$(command -v bazelisk)" /usr/bin/bazel
 
   # Install bazels3cache for cloud cache
   sudo npm install -g bazels3cache
