@@ -48,7 +48,7 @@ template <typename Func>
 inline torch::CppFunction dispatch_str(const char* key, Func&& raw_f) {
   auto mb_key = parseDispatchKey(key);
   if (mb_key) {
-    return torch::dispatch(*mb_key, std::move(raw_f));
+    return torch::dispatch(*mb_key, std::forward<Func>(raw_f));
   } else {
     torch::CppFunction f(std::forward<Func>(raw_f));
     return f;
