@@ -1696,10 +1696,10 @@ class ProcessGroupNCCLTest(TestCase):
         def flatten(tl, outer_dim, inner_dim):
             nels = tl[0][0].numel()
             dtype = tl[0][0].dtype
-            new_tl = [torch.empty(dtype=dtype, size=[nels*inner_dim]).cuda(i) for i in range(outer_dim)]
+            new_tl = [torch.empty(dtype=dtype, size=[nels * inner_dim]).cuda(i) for i in range(outer_dim)]
             new_tl = [
                 [
-                    new_tl[i][j*nels:(j+1)*nels].reshape(tl[i][j].size()).copy_(tl[i][j])
+                    new_tl[i][j * nels:(j + 1) * nels].reshape(tl[i][j].size()).copy_(tl[i][j])
                     for j in range(inner_dim)
                 ]
                 for i in range(outer_dim)
@@ -1752,10 +1752,10 @@ class ProcessGroupNCCLTest(TestCase):
             if flatten:
                 nels = tl[0][0].numel()
                 dtype = tl[0][0].dtype
-                new_tl = [torch.empty(dtype=dtype, size=[nels*inner_dim]).cuda(i) for i in range(outer_dim)]
+                new_tl = [torch.empty(dtype=dtype, size=[nels * inner_dim]).cuda(i) for i in range(outer_dim)]
                 new_tl = [
                     [
-                        new_tl[i][j*nels:(j+1)*nels].reshape(tl[i][j].size()).copy_(tl[i][j])
+                        new_tl[i][j * nels:(j + 1) * nels].reshape(tl[i][j].size()).copy_(tl[i][j])
                         for j in range(inner_dim)
                     ]
                     for i in range(outer_dim)
