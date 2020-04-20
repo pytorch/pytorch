@@ -258,6 +258,62 @@ graph(%a_quant, %weight, %bias, %mean, %var, %training, %eaf, %eps, %7, %scale, 
          %r = quantized::batch_norm2d_relu(%a_quant, %weight, %bias, %mean, %var, %eps, %scale, %zero_point)
          return (%r) )";
 
+  // aten::mul
+  std::string mul = R"(
+graph(%a_quant, %b_quant, %scale, %zero_point, %dtype):
+         %a_dequant = aten::dequantize(%a_quant)
+         %b_dequant = aten::dequantize(%b_quant)
+         %r_mul = aten::mul(%a_dequant, %b_dequant)
+         %r = aten::quantize_per_tensor(%r_mul, %scale, %zero_point, %dtype)
+         return (%r) )";
+
+  // aten::mul_
+  std::string inplace_mul = R"(
+graph(%a_quant, %b_quant, %scale, %zero_point, %dtype):
+         %a_dequant = aten::dequantize(%a_quant)
+         %b_dequant = aten::dequantize(%b_quant)
+         %r_mul = aten::mul_(%a_dequant, %b_dequant)
+         %r = aten::quantize_per_tensor(%r_mul, %scale, %zero_point, %dtype)
+         return (%r) )";
+
+  // quantized::mul
+  std::string quantized_mul = R"(
+graph(%a_quant, %b_quant, %scale, %zero_point, %dtype):
+         %r = quantized::mul(%a_quant, %b_quant, %scale, %zero_point)
+         return (%r) )";
+
+  // quantized::mul_scalar
+  std::string mul_scalar = R"(
+graph(%a_quant, %b_scalar):
+         %a_dequant = aten::dequantize(%a_quant)
+         %r = aten::mul(%a_dequant, %b_scalar)
+         return (%r) )";
+
+  std::string mul_scalar_out = R"(
+graph(%a_quant, %b_scalar):
+         %a_dequant = aten::dequantize(%a_quant)
+         %r = aten::mul_(%a_dequant, %b_scalar)
+         return (%r) )";
+
+  std::string quantized_mul_scalar = R"(
+graph(%a_quant, %b_scalar):
+         %r = quantized::mul_scalar(%a_quant, %b_scalar)
+         return (%r) )";
+
+  std::string quantized_mul_scalar_out = R"(
+graph(%a_quant, %b_scalar):
+         %r = quantized::mul_scalar_out(%a_quant, %b_scalar, %a_quant)
+         return (%r) )";
+
+  // filter that checks %b_scalar is a scalar
+  auto mul_scalar_filter =
+      [](const Match& match,
+         const std::unordered_map<std::string, Value*>& vmap) {
+        const auto& match_vmap = match.values_map;
+        auto b_scalar = match_vmap.at(vmap.at("b_scalar"));
+        return b_scalar->type()->isSubtypeOf(NumberType::get());
+      };
+
   return {
       {"quantized::conv2d", conv2d, quantized_conv2d},
       {"quantized::conv2d_relu", conv2d_relu, quantized_conv2d_relu},
@@ -293,6 +349,16 @@ graph(%a_quant, %weight, %bias, %mean, %var, %training, %eaf, %eps, %7, %scale, 
       {"quantized::batch_norm2d_relu",
        batch_norm2d_inplace_relu,
        quantized_batch_norm2d_relu},
+      {"quantized::mul", mul, quantized_mul},
+      {"quantized::mul", inplace_mul, quantized_mul},
+      {"quantized::mul_scalar",
+       mul_scalar,
+       quantized_mul_scalar,
+       mul_scalar_filter},
+      {"quantized::mul_scalar",
+       mul_scalar_out,
+       quantized_mul_scalar_out,
+       mul_scalar_filter},
   };
 }
 
