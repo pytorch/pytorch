@@ -118,7 +118,7 @@ Operator createOperatorFromC10_withTracingHandledHere(
       op.callBoxed(&stack);
     }
 #else
-      op.callBoxed(&stack);
+    op.callBoxed(&stack);
 #endif // USE_STATIC_DISPATCH
 
     if (tracer_state) {
