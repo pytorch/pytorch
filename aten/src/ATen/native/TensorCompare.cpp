@@ -44,7 +44,7 @@ Tensor isclose(const Tensor& self, const Tensor& other, double rtol, double atol
 
   // Computes equality closeness
   Tensor close = self == other;
-  if (equal_nan && (self.is_complex() || self.is_floating_point())) {
+  if (equal_nan && self.is_floating_point()) {
       close.__ior__((self != self).__iand__(other != other));
   }
 
@@ -61,7 +61,7 @@ Tensor isclose(const Tensor& self, const Tensor& other, double rtol, double atol
 
   // Computes allowed and actual error
   Tensor cast_other;
-  if (!(self.is_complex() || self.is_floating_point())) {
+  if (c10::isIntegralType(self.scalar_type(), /*include_bool=*/true)) {
     cast_other = other.to(at::get_default_dtype());
   } else {
     cast_other = other;
