@@ -106,7 +106,10 @@ static Tensor wrapIndexOnce(const Tensor & index, int64_t dim, int64_t dim_size,
       TORCH_CHECK_INDEX(false, "index ", min_idx, " is out of bounds for dimension ", dim, " with size ", dim_size);
     }
   }
-  return index.remainder(dim_size);
+
+  // require that the output is contiguous
+  auto out = at::empty_like(index, MemoryFormat::Contiguous);
+  return at::remainder_out(out, index, dim_size);
 }
 
 static std::vector<int64_t> computeLinearStride(const Tensor & tensor) {
