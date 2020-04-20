@@ -919,7 +919,11 @@ void LLVMCodeGenImpl::visit(const For* v) {
   // Set up phi node for index variable.
   auto idx = irb_.CreatePHI(IntTy_, 2);
   idx->addIncoming(start, preheader);
-  varToVal_.emplace(v->var(), idx);
+  if (!varToVal_.count(v->var())) {
+    varToVal_.emplace(v->var(), idx);
+  } else {
+    throw std::runtime_error("var should not exist before");
+  }
 
   // Create the body and exit blocks.
   auto body = llvm::BasicBlock::Create(getContext(), "body", fn_);
@@ -944,6 +948,8 @@ void LLVMCodeGenImpl::visit(const For* v) {
 
   // Exit the loop.
   irb_.SetInsertPoint(exit);
+
+  varToVal_.erase(v->var());
   value_ = llvm::ConstantInt::get(IntTy_, 0);
 }
 
