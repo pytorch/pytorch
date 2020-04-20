@@ -1488,6 +1488,61 @@ class TestQuantizeScriptPTSQOps(JitTestCase):
                        .check_not("aten::mul_") \
                        .run(m.graph)
 
+    def test_quantized_mul_relu(self):
+        class MulRelu(torch.nn.Module):
+            def __init__(self, inplace):
+                super(MulRelu, self).__init__()
+                self.relu = torch.nn.ReLU(inplace)
+
+            def forward(self, x, y):
+                x = x * y
+                return self.relu(x)
+
+        class InplaceMulRelu(torch.nn.Module):
+            def __init__(self, inplace):
+                super(InplaceMulRelu, self).__init__()
+                self.relu = torch.nn.ReLU(inplace)
+
+            def forward(self, x, y):
+                x *= y
+                return self.relu(x)
+
+        data = [(torch.rand((1, 3, 10, 10), dtype=torch.float), torch.rand((1, 3, 10, 10), dtype=torch.float),
+                 torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
+        for M in [MulRelu(True), MulRelu(False), InplaceMulRelu(True), InplaceMulRelu(False)]:
+            m = self._test_op_impl(M, data, "quantized::mul_relu")
+            FileCheck().check_not("aten::mul") \
+                       .check_not("aten::mul_") \
+                       .check_not("aten::relu") \
+                       .check_not("aten::relu_") \
+                       .check_not("quantized::relu") \
+                       .run(m.graph)
+
+    def test_quantized_mul_scalar_relu(self):
+        class MulScalar(torch.nn.Module):
+            def __init__(self):
+                super(MulScalar, self).__init__()
+
+            def forward(self, x):
+                return F.relu(x * 3)
+
+        class InplaceMulScalar(torch.nn.Module):
+            def __init__(self):
+                super(InplaceMulScalar, self).__init__()
+
+            def forward(self, x):
+                x *= 3
+                return F.relu(x)
+
+        data = [(torch.rand((1, 3, 10, 10), dtype=torch.float), torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
+        for M in [MulScalar(), InplaceMulScalar()]:
+            m = self._test_op_impl(M, data, "quantized::mul_scalar_relu")
+            FileCheck().check_not("aten::mul") \
+                       .check_not("aten::mul_") \
+                       .check_not("aten::relu") \
+                       .check_not("quantized::relu") \
+                       .run(m.graph)
+
     def test_swap_dequantize_all_ops(self):
         """ A test that checks dequantize will be swapped for
         all supported general ops without actually checking for execution of these ops
