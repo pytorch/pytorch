@@ -284,8 +284,7 @@ class ComposeTransform(Transform):
     def with_cache(self, cache_size=1):
         if self._cache_size == cache_size:
             return self
-        parts = [part.with_cache(cache_size) for part in self.parts]
-        return ComposeTransform(parts, cache_size=cache_size)
+        return ComposeTransform(self.parts, cache_size=cache_size)
 
     def __call__(self, x):
         for part in self.parts:
