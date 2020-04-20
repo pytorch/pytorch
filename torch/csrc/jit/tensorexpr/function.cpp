@@ -101,7 +101,7 @@ Tensor* Compute(
 Stmt* Function::ElementStmt(size_t index) {
   const Buf* buf = func_var(index);
   std::vector<const Expr*> indices;
-  for (int i = 0; i < buf->ndim(); i++) {
+  for (size_t i = 0; i < buf->ndim(); i++) {
     indices.push_back(this->args_[i]);
   }
 
