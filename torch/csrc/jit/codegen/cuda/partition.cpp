@@ -57,6 +57,8 @@ inline bool isFusableNode(const Node* const node) {
   return (isNodeParsible(node) || node->kind() == prim::CudaFusionGroup);
 }
 
+// TODO: remove the check of broadcasting shapes for functional parity with
+//       legacy fuser;
 // TODO: how would symbolic shape from profiling executor play with this?
 static bool compatible_broadcast_shape(
     const c10::VaryingShape& e,
@@ -71,7 +73,7 @@ static bool compatible_broadcast_shape(
     }
     return true;
   }
-  return false;
+  return true;
 }
 
 } // namespace
@@ -112,7 +114,6 @@ bool isFusableCudaFusionGroup(
           }
         }
       }
-      //return (device.has_value() && isFusableDevice(node, device.value()));
       return (!device.has_value() || isFusableDevice(node, device.value()));
     }
   }

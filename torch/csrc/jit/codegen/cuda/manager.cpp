@@ -5,6 +5,7 @@
 #include <torch/csrc/jit/codegen/cuda/utils.h>
 #include <torch/csrc/jit/passes/canonicalize.h>
 #include <torch/csrc/jit/passes/shape_analysis.h>
+#include <torch/csrc/jit/runtime/interpreter.h>
 
 #include <unordered_map>
 
@@ -158,88 +159,92 @@ void runCudaFusionGroup(const Node* const fusion_node, Stack& stack) {
   int32_t kernel_id = fusion_node->i(attr::cache_id);
 
   // Currently we just construct I/O tensors for static graph;
-  std::shared_ptr<Graph> graph = fusion_node->g(attr::Subgraph);
+  std::shared_ptr<Graph> graph = fusion_node->g(attr::Subgraph)->copy();
 
-  const auto nInputs = graph->inputs().size();
-  at::ArrayRef<IValue> inputs = last(stack, nInputs);
+  try {
+    const auto nInputs = graph->inputs().size();
+    at::ArrayRef<IValue> inputs = last(stack, nInputs);
 
-  // shape inference in graph
-  bool matched_static_inputs = true;
-  for (auto output : graph->outputs()) {
-    if (!output->isCompleteTensor()) {
-      matched_static_inputs = false;
+    // shape inference in graph
+    bool matched_static_inputs = true;
+    for (auto output : graph->outputs()) {
+      if (!output->isCompleteTensor()) {
+        matched_static_inputs = false;
+      }
     }
-  }
 
-  for (int i = 0; matched_static_inputs && i < nInputs; i++) {
-    auto& static_input = graph->inputs()[i];
-    auto& dynamic_input = inputs[i]; // this is FILO stack
-    if ((*dynamic_input.type()) != (*static_input->type())) {
-      matched_static_inputs = false;
-      break;
-    }
-    if (dynamic_input.isTensor()) {
-      at::Tensor inp_tensor = dynamic_input.toTensor();
-      // we need to return use shape inference when static shape is not complete
-      // even though it is compatible with profiling graph.
-      // TODO: we could relax on a bunch of checks here, like strides & gradient
-      if (!static_input->type()->cast<TensorType>()->sizes().isComplete() ||
-          !static_input->type()
-               ->cast<TensorType>()
-               ->isCompatibleWithInCurrentExecutionContext(inp_tensor)) {
+    for (int i = 0; matched_static_inputs && i < nInputs; i++) {
+      auto& static_input = graph->inputs()[i];
+      auto& dynamic_input = inputs[i]; // this is FILO stack
+      if ((*dynamic_input.type()) != (*static_input->type())) {
         matched_static_inputs = false;
         break;
       }
+      if (dynamic_input.isTensor()) {
+        at::Tensor inp_tensor = dynamic_input.toTensor();
+        // we need to return use shape inference when static shape is not complete
+        // even though it is compatible with profiling graph.
+        // TODO: we could relax on a bunch of checks here, like strides & gradient
+        if (!static_input->type()->cast<TensorType>()->sizes().isComplete() ||
+            !static_input->type()
+                 ->cast<TensorType>()
+                 ->isCompatibleWithInCurrentExecutionContext(inp_tensor)) {
+          matched_static_inputs = false;
+          break;
+        }
+      }
     }
-  }
 
-  // TODO: expose the API to populate shape inference. This allows separate CI
-  // tests
-  if (!matched_static_inputs) {
-    // update shape information per the new inputs;
-    // shape inference done through PyTorch JIT shape propagation;
+    // TODO: expose the API to populate shape inference. This allows separate CI
+    // tests
+    if (!matched_static_inputs) {
+      // update shape information per the new inputs;
+      // shape inference done through PyTorch JIT shape propagation;
+      EraseShapeInformation(graph);
+      for (int i = 0; i < nInputs; i++) {
+        graph->inputs()[i]->setType(inputs[i].type());
+      }
+      // shape inference
+      PropagateInputShapes(graph);
+    }
+
+    // we need to construct outputs;
+    std::vector<at::Tensor> outputs;
+    for (const auto* const output : graph->outputs()) {
+      auto type = output->type()->expect<TensorType>();
+      // Expect output to be tensor;
+      TORCH_CHECK(
+          type && type->isComplete(),
+          "Complete TensorType for output is expected.");
+
+      const auto device = *(type->device());
+      const auto scalar_type = *(type->scalarType());
+
+      auto options = at::TensorOptions()
+                         .dtype(scalar_type)
+                         .layout(at::kStrided)
+                         .device(device)
+                         .requires_grad(type->requires_grad());
+
+      // TODO: We should infer output shape from `inputs`
+      const auto sizes = extractSizes(type);
+      const auto strides = extractStrides(type);
+
+      auto tensor = at::empty_strided(sizes, strides, options);
+      outputs.push_back(tensor);
+    }
+    CudaFusionManager::getManager().runFusionNode(
+        kernel_id, graph, inputs, outputs);
+    drop(stack, inputs.size());
+    stack.insert(
+        stack.end(),
+        std::make_move_iterator(outputs.begin()),
+        std::make_move_iterator(outputs.end()));
+  } catch (...) {
     EraseShapeInformation(graph);
-    for (int i = 0; i < nInputs; i++) {
-      graph->inputs()[i]->setType(inputs[i].type());
-    }
-    // shape inference
-    PropagateInputShapes(graph);
+    InterpreterState{Code(graph,"fallback_cuda_fuser")}.run(stack);
   }
 
-  // we need to construct outputs;
-  std::vector<at::Tensor> outputs;
-  for (const auto* const output : graph->outputs()) {
-    auto type = output->type()->expect<TensorType>();
-    // Expect output to be tensor;
-    TORCH_CHECK(
-        type && type->isComplete(),
-        "Complete TensorType for output is expected.");
-
-    const auto device = *(type->device());
-    const auto scalar_type = *(type->scalarType());
-
-    auto options = at::TensorOptions()
-                       .dtype(scalar_type)
-                       .layout(at::kStrided)
-                       .device(device)
-                       .requires_grad(type->requires_grad());
-
-    // TODO: We should infer output shape from `inputs`
-    const auto sizes = extractSizes(type);
-    const auto strides = extractStrides(type);
-
-    auto tensor = at::empty_strided(sizes, strides, options);
-    outputs.push_back(tensor);
-  }
-
-  CudaFusionManager::getManager().runFusionNode(
-      kernel_id, graph, inputs, outputs);
-
-  drop(stack, inputs.size());
-  stack.insert(
-      stack.end(),
-      std::make_move_iterator(outputs.begin()),
-      std::make_move_iterator(outputs.end()));
 }
 
 } // namespace cuda
