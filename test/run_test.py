@@ -121,7 +121,6 @@ SLOW_TESTS = [
     'test_quantized',
     'test_dataloader',
     'test_overrides',
-    'test_jit_simple',
     'test_jit',
     'test_torch',
     'distributed/test_distributed',
