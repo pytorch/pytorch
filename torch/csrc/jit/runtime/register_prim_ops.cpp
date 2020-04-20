@@ -431,8 +431,8 @@ RegisterOperators reg(
            auto values = pop(stack).toTensor();
            auto indices = pop(stack).toTensorVector();
            auto self = pop(stack).toTensor();
-           auto result = at::_index_put_impl_(
-               self, indices, values, accumulate, unsafe);
+           auto result =
+               at::_index_put_impl_(self, indices, values, accumulate, unsafe);
            push(stack, std::move(result));
            return 0;
          },
@@ -444,8 +444,7 @@ RegisterOperators reg(
            auto values = pop(stack).toTensor();
            auto indices = pop(stack).toTensorVector();
            auto self = pop(stack).toTensor();
-           auto result =
-               at::index_put_(self, indices, values, accumulate);
+           auto result = at::index_put_(self, indices, values, accumulate);
            push(stack, std::move(result));
            return 0;
          },
@@ -457,8 +456,7 @@ RegisterOperators reg(
            auto values = pop(stack).toTensor();
            auto indices = pop(stack).toTensorVector();
            auto self = pop(stack).toTensor();
-           auto result =
-               at::index_put_(self, indices, values, accumulate);
+           auto result = at::index_put_(self, indices, values, accumulate);
            push(stack, std::move(result));
            return 0;
          },
