@@ -122,6 +122,8 @@ SLOW_TESTS = [
     'test_dataloader',
     'test_overrides',
     'test_jit',
+    'test_jit_profiling',
+    'test_jit_fuser_profiling',
     'test_torch',
     'distributed/test_distributed',
     'distributed/rpc/test_rpc_spawn',
