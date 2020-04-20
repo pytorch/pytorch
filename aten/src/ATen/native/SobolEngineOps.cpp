@@ -141,8 +141,8 @@ Tensor& _sobol_engine_initialize_state_(Tensor& sobolstate, int64_t dimension) {
       //    here so that we can keep using 9.0.0 in CircleCi jobs,
       //    since it is available through apt.
       //    See https://github.com/pytorch/pytorch/issues/36676 for details.
-      const auto p = &(initsobolstate[d]);
-      ss_a[d][i] = (*p)[i];
+      const auto p = initsobolstate[d];
+      ss_a[d][i] = p[i];
     }
 
     for (int64_t j = m; j < MAXBIT; ++j) {
