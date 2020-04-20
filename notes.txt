@@ -25,3 +25,9 @@ cmake/Modules_CUDA_fix/upstream/FindCUDA/run_nvcc.cmake - template for .cu.o.Rel
 
 cmake/Modules_CUDA_fix/upstream/FindCUDA.cmake:497
     set(CUDA_NVCC_DEPEND ${dependency_file})
+
+cmake/Modules_CUDA_fix/upstream/FindCUDA.cmake:1661
+    add_custom_command
+
+CONTRIBUTING.md:484:
+Ninja is optional, Makefile will be used without it
