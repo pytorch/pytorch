@@ -803,9 +803,14 @@ if(BUILD_PYTHON)
 
   # These should fill in the rest of the variables, like versions, but resepct
   # the variables we set above
-  set(Python_ADDITIONAL_VERSIONS 3.7 3.6 3.5 2.8 2.7 2.6)
-  find_package(PythonInterp 2.7)
-  find_package(PythonLibs 2.7)
+  set(Python_ADDITIONAL_VERSIONS 3.7 3.6 3.5)
+  find_package(PythonInterp 3.0)
+  find_package(PythonLibs 3.0)
+
+  if(${PYTHONLIBS_VERSION_STRING} VERSION_LESS 3)
+    message(FATAL_ERROR
+      "Found Python libraries version ${PYTHONLIBS_VERSION_STRING}. Python 2 has reached end-of-life and is no longer supported by PyTorch.")
+  endif()
 
   # When building pytorch, we pass this in directly from setup.py, and
   # don't want to overwrite it because we trust python more than cmake
