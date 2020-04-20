@@ -162,7 +162,7 @@ struct PeepholeOptimizeImpl {
             }
             int64_t index = maybe_index->toInt();
             int64_t norm_index = index < 0 ? ndim + index : index;
-            if (norm_index >= 0 & norm_index < static_cast<int64_t>(ndim) &&
+            if (norm_index >= 0 && norm_index < static_cast<int64_t>(ndim) &&
                 ptt->sizes()[norm_index]) {
               WithInsertPoint guard(node);
               IValue ival(*ptt->sizes()[norm_index]);
