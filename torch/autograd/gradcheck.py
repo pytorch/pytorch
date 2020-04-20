@@ -3,6 +3,7 @@ from torch._six import container_abcs, istuple
 import torch.testing
 from itertools import product
 import warnings
+import math
 
 def zero_gradients(x):
     if isinstance(x, torch.Tensor):
@@ -176,7 +177,7 @@ def get_analytical_jacobian(input, output, nondet_tol=0.0):
                         jacobian_x[:, i] = d_x_dense.contiguous().view(-1)
 
     for jacobian_x, jacobian_reentrant_x in zip(jacobian, jacobian_reentrant):
-        if jacobian_x.numel() != 0 and (jacobian_x - jacobian_reentrant_x).abs().to(torch.double).max() > nondet_tol:
+        if jacobian_x.numel() != 0 and (jacobian_x - jacobian_reentrant_x).abs().max() > nondet_tol:
             reentrant = False
 
     return jacobian, reentrant, correct_grad_sizes
