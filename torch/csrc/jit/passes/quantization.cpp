@@ -63,6 +63,8 @@ std::vector<std::string> _quantizable_aten_funcs = {
     "add",
     "cat",
     "lstm",
+    "mul",
+    "mul_",
 };
 
 // These are the prim::CallFunctions that doesn't require observation and
@@ -166,10 +168,7 @@ void fillQConfigMap(
   }
 }
 
-bool isFunctionNode(
-    Node* n,
-    const std::vector<std::string>& call_funcs,
-    const std::vector<std::string>& aten_funcs) {
+bool isAtenFunc(Node* n, const std::vector<std::string>& aten_funcs) {
   std::vector<Symbol> aten_func_symbols;
   std::transform(
       aten_funcs.begin(),
@@ -177,17 +176,23 @@ bool isFunctionNode(
       std::back_inserter(aten_func_symbols),
       [](const std::string& s) { return Symbol::aten(s); });
 
-  bool is_quantizable =
-      std::find(
-          aten_func_symbols.begin(), aten_func_symbols.end(), n->kind()) !=
+  return std::find(
+             aten_func_symbols.begin(), aten_func_symbols.end(), n->kind()) !=
       aten_func_symbols.end();
+}
+
+bool isFunctionNode(
+    Node* n,
+    const std::vector<std::string>& call_funcs,
+    const std::vector<std::string>& aten_funcs) {
+  bool is_func_node = isAtenFunc(n, aten_funcs);
   if (n->kind() == prim::CallFunction) {
     auto func_name = getFuncName(n->inputs()[0]);
-    is_quantizable |=
+    is_func_node |=
         std::find(call_funcs.begin(), call_funcs.end(), func_name) !=
         call_funcs.end();
   }
-  return is_quantizable;
+  return is_func_node;
 }
 
 // checks if a block will always raise an Exception
@@ -209,9 +214,10 @@ bool alwaysRaisesException(Block* block) {
   return false;
 }
 
-bool isAddScalar(Node* n) {
-  return (n->kind() == Symbol::aten("add") ||
-          n->kind() == Symbol::aten("add_")) &&
+bool hasScalarInput(Node* n) {
+  std::vector<std::string> scalar_ops = {"add", "add_", "mul", "mul_"};
+
+  return isAtenFunc(n, scalar_ops) &&
       n->input(0)->type()->isSubtypeOf(TensorType::get()) &&
       n->input(1)->type()->isSubtypeOf(NumberType::get());
 }
@@ -261,7 +267,7 @@ std::vector<Value*> getPassThroughInputs(Value* v) {
 }
 
 bool mayRequireObservation(Value* v) {
-  return !isAddScalar(v->node());
+  return !hasScalarInput(v->node());
 }
 
 bool nodeQuantizable(Node* n) {
