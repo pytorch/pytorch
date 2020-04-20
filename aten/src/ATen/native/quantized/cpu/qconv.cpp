@@ -717,7 +717,7 @@ class QConvInt8ForBC final {
  public:
   static Tensor run(
       Tensor act,
-      const c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>>& packed_weight,
+      Tensor packed_weight,
       torch::List<int64_t> stride,
       torch::List<int64_t> padding,
       torch::List<int64_t> dilation,
