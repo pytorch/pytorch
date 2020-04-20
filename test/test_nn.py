@@ -10268,8 +10268,6 @@ class TestNNDeviceType(NNTestCase):
                 self._test_batchnorm_grad(device)
 
 
-    # currently fails on XLA
-    @onlyOnCPUAndCUDA
     def test_hardsigmoid_grad(self, device):
         inputs = (torch.randn(4, 16, 16, device=device) - 0.5) * 10
         inputs.requires_grad = True
