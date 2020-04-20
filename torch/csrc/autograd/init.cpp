@@ -65,12 +65,6 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
          const std::shared_ptr<torch::distributed::rpc::FutureMessage>& fut) {
         torch::autograd::profiler::_call_end_callbacks_on_fut(handle, fut);
       });
-#else
-  m.def("_call_end_callbacks_on_fut", []() {
-    TORCH_INTERNAL_ASSERT(
-        false,
-        "_call_end_callbacks_on_fut is only supported with the distributed package");
-  });
 #endif
 
   Py_RETURN_TRUE;

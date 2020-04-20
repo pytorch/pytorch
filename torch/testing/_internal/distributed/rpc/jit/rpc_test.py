@@ -109,10 +109,11 @@ def call_rpc_with_profiling(handle: Tensor, dst_worker_name: str) -> Tensor:
     # Call rpc_async from within ScriptFunction and ensure that we can attach
     # profiling callbacks. Note that handle here is a Tensor representation of
     # RecordFunction.
-    fut = rpc.rpc_async(dst_worker_name, one_arg, (torch.tensor(1), ))
+    fut = rpc.rpc_async(dst_worker_name, one_arg, (torch.tensor(1),))
     torch.ops.profiler._call_end_callbacks_on_jit_fut(handle, fut)
     ret = fut.wait()
     return ret
+
 
 @torch.jit.script
 def call_fork_with_profiling(handle: Tensor) -> Tensor:
@@ -123,6 +124,7 @@ def call_fork_with_profiling(handle: Tensor) -> Tensor:
     torch.ops.profiler._call_end_callbacks_on_jit_fut(handle, fut)
     ret = fut.wait()
     return ret
+
 
 class MyScriptModuleWithRRefs(torch.jit.ScriptModule):
     def __init__(self, dst_worker):
@@ -919,7 +921,12 @@ class JitRpcTest(RRefAPITest, LocalRRefTest, JitRpcAsyncOpTest, RpcAgentTestFixt
         # future from within a script function that calls rpc_async
         if self.rank == 0:
             with torch.autograd.profiler.profile() as prof:
-                prof_key = _build_rpc_profiling_key(RPCExecMode.ASYNC, torch.jit._qualified_name(one_arg), "worker0", "worker1")
+                prof_key = _build_rpc_profiling_key(
+                    RPCExecMode.ASYNC,
+                    torch.jit._qualified_name(one_arg),
+                    "worker0",
+                    "worker1",
+                )
                 with torch.autograd.profiler.record_function(prof_key) as rf:
                     ret = call_rpc_with_profiling(rf.handle, "worker1")
             # TODO: Can't get a reliable time for this profiling event since
@@ -929,7 +936,6 @@ class JitRpcTest(RRefAPITest, LocalRRefTest, JitRpcAsyncOpTest, RpcAgentTestFixt
             events = prof.function_events
             function_event = get_function_event(events, prof_key)
             self.assertTrue(torch.jit._qualified_name(one_arg) in function_event.name)
-
 
     def test_record_function_jit_end_callbacks_with_fork(self):
         # Ensures that we can call rf._call_end_callbacks_on_future on a jit
@@ -957,4 +963,4 @@ class JitRpcTest(RRefAPITest, LocalRRefTest, JitRpcAsyncOpTest, RpcAgentTestFixt
 
         events = prof.function_events
         function_event = get_function_event(events, "foo")
-        self.assertTrue("foo" in function_event.name)
+        self.assertEqual(sleep_event.name, "foo")

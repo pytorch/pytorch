@@ -657,7 +657,9 @@ class RpcTest(RpcAgentTestFixture):
         # Tests that the name that shows up as an Event in profiling RPCs has all
         # the necessary information.
         for exec_mode in [RPCExecMode.SYNC, RPCExecMode.ASYNC, RPCExecMode.REMOTE]:
-            rpc_profiling_key = _build_rpc_profiling_key(exec_mode, "foo", "worker0", "worker1")
+            rpc_profiling_key = _build_rpc_profiling_key(
+                exec_mode, "foo", "worker0", "worker1"
+            )
             self.assertIn(exec_mode.value, rpc_profiling_key)
             self.assertIn("foo", rpc_profiling_key)
             self.assertIn("worker0", rpc_profiling_key)
