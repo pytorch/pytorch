@@ -215,8 +215,7 @@ bool ReadyQueue::empty() const {
   return heap_.empty();
 }
 
-// This limit is based on the default python recursion limit which is 1000
-Engine::Engine() : max_recursion_depth_(100), non_reentrant_device_thread_count_(0) {}
+Engine::Engine() : max_recursion_depth_(MAX_DEPTH), non_reentrant_device_thread_count_(0) {}
 
 // Send shutdown tasks to all device_ready_queues_ if no backward tasks are running
 // Even though readyQueue should be empty, shutdown tasks have the highest priority
@@ -933,25 +932,31 @@ std::shared_ptr<FutureVariableList> Engine::execute_with_graph_task(
   return graph_task->future_result_;
 }
 
-void Engine::mark_graph_task_completed(const std::shared_ptr<GraphTask>& graph_task) {
-  if (graph_task->future_completed_.load()) {
-    // Future is already marked as completed.
+void Engine::mark_graph_task_completed(
+    const std::shared_ptr<GraphTask>& graph_task) {
+  // Allow only one thread one attempt to process this logic.
+  if (graph_task->future_completed_.exchange(true)) {
+    // Future is already marked complete, or being marked as such.
+    // In case the marking complete is only in progress, we add a
+    // waitNoThrow() to guarantee the future is marked complete on exit.
+    graph_task->future_result_->waitNoThrow();
     return;
   }
+
   try {
     // Run post processing, before marking the future as complete.
     // Drop lock prior to completing, to avoid holding across callbacks.
     std::unique_lock<std::mutex> lock(graph_task->mutex_);
+
     graph_task_exec_post_processing(graph_task);
     std::vector<Variable> vars = std::move(graph_task->captured_vars_);
+
+    // Need to unlock before we call markCompleted to avoid holding locks
+    // when the callbacks are called.
     lock.unlock();
-    if (!graph_task->future_completed_.exchange(true)) {
-      graph_task->future_result_->markCompleted(std::move(vars));
-    }
+    graph_task->future_result_->markCompleted(std::move(vars));
   } catch (std::exception& e) {
-    if (!graph_task->future_completed_.exchange(true)) {
-      graph_task->future_result_->setError(e.what());
-    }
+    graph_task->future_result_->setErrorIfNeeded(e.what());
   }
 }
 
