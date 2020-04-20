@@ -11,6 +11,7 @@ import unittest
 from torch.testing._internal.common_utils import TestCase, run_tests, skipIfRocm, do_test_dtypes, \
     do_test_empty_full, load_tests, TEST_NUMPY, TEST_WITH_ROCM, IS_WINDOWS
 from torch.testing._internal.common_cuda import TEST_CUDA
+from torch.testing._internal.common_device_type import onlyCPU
 from numbers import Number
 from torch.autograd.gradcheck import gradcheck
 
@@ -2363,7 +2364,7 @@ class TestSparse(TestCase):
         t = torch.sparse_coo_tensor(torch.tensor(([0, 0], [2, 0])), torch.tensor([1, 4]))
         self.assertRaises(TypeError, lambda: t.numpy())
 
-
+    #@onlyCPU
     def test_softmax(self):
         import torch.nn.functional as F
 
@@ -2508,7 +2509,7 @@ class TestSparse(TestCase):
                 s[dim + 1] = slice(None)
             return J
 
-        def softmax_jacobian_autograd(x, dim):
+        def softmax_jacobian_autograd(x, dim, log=False):
             """Return Jacobian of softmax using PyTorch autograd feature.
 
             x can be dense or sparse tensor.
@@ -2552,15 +2553,20 @@ class TestSparse(TestCase):
                     v[tuple(sv)] = 1
                 x_ = x.clone()
                 x_.requires_grad_(True)
-                y = F.softmax(x_, dim)
-                if not y.is_sparse:
-                    # replace nan-s with zeros
-                    y.data[y != y] = 0
+
+                if log:
+                    y = F.log_softmax(x_, dim)
+                else:
+                    y = F.softmax(x_, dim)
+                    if not y.is_sparse:
+                        # replace nan-s with zeros
+                        y.data[y != y] = 0
                 y.backward(v)
                 g = x_.grad
-                if g.is_sparse:
-                    g = g.to_dense()
-                J[i] = g
+                if not g.is_sparse:
+                    # replace nan-s with zeros
+                    g.data[g != g] = 0
+                J[i] = g.to_dense() if g.is_sparse else g
             return J
 
         def test_op(sparse_dims, nnz, with_size):
@@ -2595,6 +2601,8 @@ class TestSparse(TestCase):
                 # check softmax Jacobian definition for dense input
                 x1 = to_dense(x, fill_value='-inf')
                 J = softmax_jacobian_analytic(x1, dim)
+                assert J.shape[0] == x.shape[dim]
+                assert J.shape[dim + 1] == x.shape[dim]
 
                 # check softmax Jacobian from autograd, dense input
                 J2 = softmax_jacobian_autograd(x1, dim)
@@ -2603,6 +2611,25 @@ class TestSparse(TestCase):
                 # check softmax Jacobian from autograd, sparse input
                 J3 = softmax_jacobian_autograd(x, dim)
                 self.assertEqual(J, J3)
+
+                '''
+                y = softmax(x, dim)
+                z = log(y) = log_softmax(x, dim)
+                Dy/Dx = J
+                Dz/Dx = Dz/Dy Dy/Dx = 1/y * J
+                => J = J_log * y
+                '''
+                # log_softmax Jacobian from autograd, dense input
+                J2_log = softmax_jacobian_autograd(x1, dim, log=True)
+
+                # log_softmax Jacobian from autograd, sparse input
+                J3_log = softmax_jacobian_autograd(x, dim, log=True)
+
+                J = J.transpose(0, dim+1)
+                J2_log = J2_log.transpose(0, dim+1)
+                J3_log = J3_log.transpose(0, dim+1)
+                self.assertEqual(J, J2_log * r1)
+                self.assertEqual(J, J3_log * r1)
 
         test_op(1, 10, [3])
         test_op(1, 10, [2, 3])

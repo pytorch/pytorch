@@ -1812,6 +1812,7 @@
   dispatch:
     CPU: log_softmax_backward_cpu
     CUDA: log_softmax_backward_cuda
+    SparseCPU: log_softmax_backward_sparse_cpu
 
 - func: logsumexp(Tensor self, int[1] dim, bool keepdim=False) -> Tensor
   use_c10_dispatcher: full

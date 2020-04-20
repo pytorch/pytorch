@@ -235,8 +235,13 @@ void cpu_sparse_coo_softmax_backward(Tensor& grad_input, const Tensor& grad, con
       auto low = std::lower_bound(grad_offsets.begin(), grad_offsets.end(), out_offsets[i]);
       auto j = low - grad_offsets.begin();
       if (j < grad_nnz && out_offsets[i] == grad_offsets[j]) {
-        auto r = softmax_backward_cpu(grad_values[j], out_values[i], dim - sparse_dim, unused);
-        values[i].copy_(r);
+        if (LogSoftMax) {
+          auto r = log_softmax_backward_cpu(grad_values[j], out_values[i], dim - sparse_dim, unused);
+          values[i].copy_(r);
+        } else {
+          auto r = softmax_backward_cpu(grad_values[j], out_values[i], dim - sparse_dim, unused);
+          values[i].copy_(r);
+        }
       }
     }
     return;
@@ -269,7 +274,11 @@ void cpu_sparse_coo_softmax_backward(Tensor& grad_input, const Tensor& grad, con
     if (j < grad_nnz && (out_offsets[i] == grad_offsets[j])) {
       scalar_t* grad_values_data = grad_values_data_base + j * nvalues;
       for (int64_t k=0; k<nvalues; k++) {
-        tmp_data[k] -= out_values_data[k] * grad_values_data[k];
+        if (LogSoftMax) {
+          tmp_data[k] -= grad_values_data[k];
+        } else {
+          tmp_data[k] -= out_values_data[k] * grad_values_data[k];
+        }
       }
     }
   }
@@ -285,11 +294,19 @@ void cpu_sparse_coo_softmax_backward(Tensor& grad_input, const Tensor& grad, con
     if (j < grad_nnz && (out_offsets[i] == grad_offsets[j])) {
       scalar_t* grad_values_data = grad_values_data_base + j * nvalues;
       for (int64_t k=0; k<nvalues; k++) {
-        values_data[k] = out_values_data[k] * (grad_values_data[k] + tmp_data[k]);
+        if (LogSoftMax) {
+          values_data[k] = grad_values_data[k] + std::exp(out_values_data[k]) * tmp_data[k];
+        } else {
+          values_data[k] = out_values_data[k] * (grad_values_data[k] + tmp_data[k]);
+        }
       }
     } else {
       for (int64_t k=0; k<nvalues; k++) {
-        values_data[k] = out_values_data[k] * (tmp_data[k]);
+        if (LogSoftMax) {
+          values_data[k] = std::exp(out_values_data[k]) * tmp_data[k];
+        } else {
+          values_data[k] = out_values_data[k] * (tmp_data[k]);
+        }
       }
     }
   }
@@ -337,11 +354,6 @@ Tensor softmax_backward_sparse_cpu(
     const Tensor& output_,
     int64_t dim_,
     const Tensor& input_) {
-  /*
-    Return D(output)/D(input) @ grad.
-
-    input is not used.
-   */
   TensorArg grad_arg{grad_, "grad", 1}, output_arg{output_, "output", 2};
   checkSameSize("softmax_backward", grad_arg, output_arg);
 
@@ -363,6 +375,36 @@ Tensor softmax_backward_sparse_cpu(
   AT_DISPATCH_FLOATING_TYPES(grad.scalar_type(), "softmax_backward", [&] {
       // assuming that the type of input._indices() entries is int64_t
       cpu_sparse_coo_softmax_backward<scalar_t, int64_t, false>(grad_input, grad, output, dim);
+  });
+  return grad_input;
+}
+
+Tensor log_softmax_backward_sparse_cpu(
+    const Tensor& grad_,
+    const Tensor& output_,
+    int64_t dim_,
+    const Tensor& input_) {
+  TensorArg grad_arg{grad_, "grad", 1}, output_arg{output_, "output", 2};
+  checkSameSize("log_softmax_backward", grad_arg, output_arg);
+
+  int64_t dim = maybe_wrap_dim(dim_, grad_.dim());
+
+  auto grad = grad_.coalesce();
+  auto output = output_.coalesce();
+
+  Tensor grad_input = at::native::empty_like(output);
+  if (output.numel() == 0) {
+    return grad_input;
+  }
+  TORCH_CHECK(
+      dim >= 0 && dim < grad.dim(),
+      "dim must be non-negative and less than input dimensions");
+  TORCH_CHECK(
+              grad.sparse_dim() == output.sparse_dim(),
+      "grad and output sparse dimensions must be equal");
+  AT_DISPATCH_FLOATING_TYPES(grad.scalar_type(), "softmax_backward", [&] {
+      // assuming that the type of input._indices() entries is int64_t
+      cpu_sparse_coo_softmax_backward<scalar_t, int64_t, true>(grad_input, grad, output, dim);
   });
   return grad_input;
 }
