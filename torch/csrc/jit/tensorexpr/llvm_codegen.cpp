@@ -1454,11 +1454,33 @@ void LLVMCodeGenImpl::visit(const FunctionCall* v) {
 }
 
 void LLVMCodeGenImpl::visit(const Allocate* v) {
-  throw unimplemented_lowering(v);
+  llvm::Value* size =
+    llvm::ConstantInt::getSigned(LongTy_, v->dtype().byte_size());
+  for (const Expr* e : v->dims()) {
+    e->accept(this);
+    size = irb_.CreateMul(size, irb_.CreateZExt(value_, LongTy_));
+  }
+
+  llvm::Instruction* I = llvm::CallInst::CreateMalloc(
+    irb_.GetInsertBlock(),
+    LongTy_,
+    dtypeToLLVM(v->dtype()),
+    size,
+    nullptr,
+    nullptr
+  );
+
+  // Insert the bitcast into the block.
+  irb_.SetInsertPoint(irb_.GetInsertBlock());
+  value_ = irb_.Insert(I);
+  varToVal_[v->buffer_var()] = value_;
+  value_ = llvm::ConstantInt::get(IntTy_, 0);
 }
 
 void LLVMCodeGenImpl::visit(const Free* v) {
-  throw unimplemented_lowering(v);
+  llvm::Value* ptr = varToVal_.at(v->buffer_var());
+  irb_.Insert(llvm::CallInst::CreateFree(ptr, irb_.GetInsertBlock()));
+  value_ = llvm::ConstantInt::get(IntTy_, 0);
 }
 
 void LLVMCodeGenImpl::visit(const Cond* v) {

@@ -1201,6 +1201,46 @@ void testLLVMEliminatedStmt() {
   cg.call({aData, cData});
 }
 
+
+void testLLVMSimpleReduction() {
+  KernelScope kernel_scope;
+
+  int M = 128;
+  int N = 64;
+  const int kTotalSize = M * N;
+
+  Buffer a("a", kFloat, {1, M, N});
+
+  // TODO: why doesn't implicit vector<DimArg> work?
+  std::vector<DimArg> axis = {DimArg(1)};
+  std::vector<DimArg> reduce_axis = {DimArg(M), DimArg(N)};
+  Tensor* b = Reduce("sum", axis, Sum(), a, reduce_axis);
+  LoopNest loop({b});
+
+  loop.prepareForCodegen();
+  Stmt* s = loop.root_stmt();
+  s = IRSimplifier::simplify(s);
+
+  LLVMCodeGen cg(s, {a, b});
+
+  PaddedBuffer<float> a_v(1, M, N, "a_v");
+  PaddedBuffer<float> b_v(1, "b_v");
+  PaddedBuffer<float> b_ref(1, "b_ref");
+
+  b_ref(0) = 0;
+  for (int i = 0; i < M; i++) {
+    for (int j = 0; j < N; j++) {
+      int v = i + j;
+      a_v(0, i, j) = v;
+      b_ref(0) += v;
+    }
+  }
+
+  cg.call({a_v, b_v});
+
+  ExpectAllNear(b_v, b_ref, 1e-5);
+}
+
 } // namespace jit
 } // namespace torch
 
