@@ -277,6 +277,23 @@ graph(%a : Float(4, 5),
     AT_ASSERT(c_type->sizes().concrete_sizes() == c10::nullopt);
     AT_ASSERT(c_type->strides().concrete_sizes() == c10::nullopt);
   }
+  {
+    auto graph = std::make_shared<Graph>();
+    std::unordered_map<std::string, Value*> vmap;
+    bool error_thrown = false;
+    try {
+      parseIR(
+          R"IR(
+graph(%a : Float(4:5, 5)):
+  return (%a)
+)IR",
+          &*graph,
+          vmap);
+    } catch (const std::exception& error) {
+      error_thrown = true;
+    }
+    AT_ASSERT(error_thrown);
+  }
 }
 } // namespace jit
 } // namespace torch
