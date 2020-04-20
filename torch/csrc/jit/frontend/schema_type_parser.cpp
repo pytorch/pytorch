@@ -165,18 +165,35 @@ TypePtr SchemaTypeParser::parseRefinedTensor() {
         c10::nullopt);
   } else {
     std::vector<int64_t> dims;
+    bool seen_strides = false;
+    std::vector<int64_t> strides;
     parseList(TK_NOTHING, ',', ')', [&] {
       const std::string& num = L.expect(TK_NUMBER).text();
       std::string::size_type num_len;
       size_t dim = c10::stoi(num, &num_len);
-      AT_ASSERTM(
-          num_len == num.size(),
-          "Bad tensor dimension size. Strides not yet supported in parsing",
-          num);
       dims.push_back(dim);
+      if (L.cur().kind == ':') {
+        L.expect(':');
+        seen_strides = true;
+        const std::string& num = L.expect(TK_NUMBER).text();
+        std::string::size_type num_len;
+        size_t stride = c10::stoi(num, &num_len);
+        strides.push_back(stride);
+      }
     });
     at::IntArrayRef dims_ref(dims);
-    ptr = at::TensorType::create(dtype, at::DeviceType::CPU, dims_ref, false);
+    if (seen_strides) {
+      at::IntArrayRef strides_ref(strides);
+      ptr = at::TensorType::create(
+          dtype, at::DeviceType::CPU, dims_ref, strides_ref);
+    } else {
+      ptr = at::TensorType::create(
+          dtype,
+          at::DeviceType::CPU,
+          c10::VaryingShape(dims_ref),
+          c10::VaryingShape(),
+          c10::nullopt);
+    }
   }
   return ptr;
 }
