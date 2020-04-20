@@ -5418,7 +5418,7 @@ class TestAutogradDeviceType(TestCase):
 
     def test_advanced_indexing_backwards_memory_format(self, device):
         # See https://github.com/pytorch/pytorch/issues/36956
-        shape = (2,8,1,2)
+        shape = (2, 8, 1, 2)
         i = torch.randint(1, shape, device='cuda').contiguous(memory_format=torch.channels_last)
         x = torch.randn(shape, requires_grad=True, device='cuda')
         x[i].sum().backward()
