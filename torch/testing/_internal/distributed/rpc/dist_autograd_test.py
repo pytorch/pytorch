@@ -1411,10 +1411,7 @@ class DistAutogradTest(RpcAgentTestFixture):
             time.sleep(0.1)
 
     @dist_init(clean_shutdown=False)
-    @unittest.skipIf(
-        IS_MACOS,
-        "Test is flaky on MacOS since libuv error handling is not as robust as TCP",
-    )
+    @unittest.skip("Test is flaky, see https://github.com/pytorch/pytorch/issues/35099")
     def test_backward_node_failure_python_udf(self):
         # Set a short timeout to quickly time out failed RPCs.
         rpc._set_rpc_timeout(timedelta(milliseconds=5000))
