@@ -149,7 +149,8 @@ namespace jit {
   _(LoopNestComputeAt_1)                  \
   _(LoopNestComputeAt_2)                  \
   _(LoopNestComputeAt_3)                  \
-  _(LoopNestComputeAt_4)
+  _(LoopNestComputeAt_4)                  \
+  _(Kernel_1)
 
 #define TH_FORALL_TENSOREXPR_TESTS_LLVM(_) \
   _(LLVMByteImmTest)                       \
