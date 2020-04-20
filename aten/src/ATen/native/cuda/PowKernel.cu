@@ -65,7 +65,7 @@ static inline __host__ __device__ typename std::enable_if<!std::is_same<Base_typ
 }
 // pow (Complex)
 template<typename B, typename E>
-static inline __host__ __device__ B c_pow_(B base, E exp) {
+static inline __host__ __device__ B complex_pow_(B base, E exp) {
   return thrust::pow(base, exp);
 }
 // Functions for sqrt
@@ -78,14 +78,6 @@ static inline __host__ __device__ typename std::enable_if<std::is_floating_point
 template <typename T>
 static inline __host__ __device__ typename std::enable_if<!std::is_floating_point<T>::value, T>::type sqrt_(T x) {
   return static_cast<T>(std::sqrt(static_cast<double>(x)));
-}
-// sqrt (complex)
-static inline __host__ __device__ thrust::complex<double> sqrt_(thrust::complex<double> x) {
-  return static_cast<T>(thrust::sqrt(x));
-}
-// sqrt (complex)
-static inline __host__ __device__ thrust::complex<float> sqrt_(thrust::complex<float> x) {
-  return static_cast<T>(thrust::sqrt(x));
 }
 // Function for inverse sqrt
 // invsqrt (floating)
@@ -113,7 +105,7 @@ static inline __host__ __device__ T invsqrt_(T x) {
 }
 // Rely only on thrust for complex ops
 template<typename B, typename E>
-static inline __host__ __device__ B c_pow_(B base, E exp) {
+static inline __host__ __device__ B compex_pow_(B base, E exp) {
   return thrust::pow(base, exp);
 }
 #endif
@@ -123,7 +115,7 @@ void pow_tensor_tensor_kernel(TensorIterator& iter) {
     AT_DISPATCH_COMPLEX_TYPES(iter.dtype(), "pow_cuda", [&]() {
       using thrust_t = typename ztype_cuda<scalar_t>::thrust_t;
       gpu_kernel(iter, [=]GPU_LAMBDA(thrust_t base, thrust_t exp) -> thrust_t {
-        return c_pow_(base, exp);
+        return complex_pow_(base, exp);
       });
     });
   } else if (isFloatingType(iter.dtype())) {
@@ -182,7 +174,7 @@ void pow_tensor_scalar_kernel(TensorIterator& iter, Scalar exp_scalar) {
       using thrust_t = typename ztype_cuda<scalar_t>::thrust_t;
       const auto exp = thrust_t(exp_scalar.to<scalar_t>());
       gpu_kernel(iter, [=]GPU_LAMBDA(thrust_t base) -> thrust_t {
-        return c_pow_(base, exp);
+        return complex_pow_(base, exp);
       });
     });
   } else if (isFloatingType(iter.dtype()) || exp_scalar.isIntegral(false)) {
