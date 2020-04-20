@@ -172,7 +172,7 @@ TypePtr SchemaTypeParser::parseRefinedTensor() {
       std::string::size_type num_len;
       size_t dim = c10::stoi(num, &num_len);
       dims.push_back(dim);
-      if (L.cur().kind == ':') {
+      if (seen_strides || L.cur().kind == ':') {
         L.expect(':');
         seen_strides = true;
         const std::string& num = L.expect(TK_NUMBER).text();
@@ -184,6 +184,10 @@ TypePtr SchemaTypeParser::parseRefinedTensor() {
     at::IntArrayRef dims_ref(dims);
     if (seen_strides) {
       at::IntArrayRef strides_ref(strides);
+      if (strides.size() != dims.size()) {
+        throw ErrorReport(L.cur())
+            << "Strides info is specified for some but not for all dimensions";
+      }
       ptr = at::TensorType::create(
           dtype, at::DeviceType::CPU, dims_ref, strides_ref);
     } else {
