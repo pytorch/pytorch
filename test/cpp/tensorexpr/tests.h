@@ -143,6 +143,7 @@ namespace jit {
   _(SimplifyOneLoopFor)                     \
   _(SimplifyForWontLoseLoopOptions)         \
   _(SimplifyMultilevelFor)                  \
+  _(SimplifyForCleansUp)                    \
   _(StmtClone)                              \
   _(BoundsInference_1)                      \
   _(BoundsInference_2)                      \
