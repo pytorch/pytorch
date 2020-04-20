@@ -348,7 +348,7 @@ Tensor istft(const Tensor& self, const int64_t n_fft, const optional<int64_t> ho
 
   Tensor input = self;
   if (input_dim == 3) {
-    input = input.unsqueeze();
+    input = input.unsqueeze(0);
   }
 
   input = input.transpose(1, 2);  // size: (channel, n_frames, fft_size, 2)

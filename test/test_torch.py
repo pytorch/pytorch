@@ -12263,7 +12263,7 @@ class TestTorchDeviceType(TestCase):
                     # trim the original for case when constructed signal is shorter than original
                     original = original[..., :inversed.size(-1)]
                     self.assertEqual(
-                        inversed, original, 7e-6, 'istft comparison against original', exact_dtype=True)
+                        inversed, original, 'istft comparison against original', atol=7e-6, exact_dtype=True)
 
         patterns = [
             # hann_window, centered, normalized, onesided
