@@ -15502,42 +15502,40 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         # verifies out dtype overrides inference
         self.assertEqual(torch.full(o.shape, 1., out=o).dtype, o.dtype)
 
+    def _float_to_int_conversion_helper(self, vals, device, dtype):
+        assert TEST_NUMPY
+
+        a = np.array(vals, dtype=np.float32).astype(torch_to_numpy_dtype_dict[dtype])
+        t = torch.tensor(vals, device=device, dtype=torch.float).to(dtype)
+        self.assertEqual(torch.from_numpy(a), t.cpu())
+
     # Checks that float->integer casts don't produce undefined behavior errors.
     # Note: In C++, casting from a floating value to an integral dtype
     # is undefined if the floating point value is not within the integral
     # dtype's dynamic range. This can (and should) cause undefined behavior
     # errors with UBSAN. These casts are deliberate in PyTorch, however, and
     # NumPy has the same behavior.
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     @dtypes(torch.bool, torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64)
-    def test_float_to_int_undefined_conversion(self, device, dtype):
+    def test_float_to_int_conversion_finite(self, device, dtype):
         min = torch.finfo(torch.float).min
         max = torch.finfo(torch.float).max
-        t = torch.tensor((min, max), device=device, dtype=torch.float)
-        self.assertEqual(t.to(dtype).dtype, dtype)
+
+        # Note: CUDA max float -> integer conversion is divergent on some dtypes
+        vals = (min, -2, -1.5, -.5, 0, .5, 1.5, 2, max)
+        if self.device_type == 'cuda':
+            vals = (min, -2, -1.5, -.5, 0, .5, 1.5, 2)
+
+        self._float_to_int_conversion_helper(vals, device, dtype)
 
     # Note: CUDA will fail this test on most dtypes, often dramatically.
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     @onlyCPU
     @dtypes(torch.bool, torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64)
-    def test_float_to_int_conversion_precision(self, device, dtype):
-        min = np.finfo(np.float32).min
-        max = np.finfo(np.float32).max
-        t = torch.tensor((float('-inf'), min, max, float('inf'), float('nan')), device=device, dtype=torch.float)
-        a = np.array((float('-inf'), min, max, float('inf'), float('nan')), dtype=np.float32)
+    def test_float_to_int_conversion_nonfinite(self, device, dtype):
+        vals = (float('-inf'), float('inf'), float('nan'))
 
-        torch_to_np = {
-            torch.bool  : np.bool,
-            torch.uint8 : np.uint8,
-            torch.int8  : np.int8,
-            torch.int16 : np.int16,
-            torch.int32 : np.int32,
-            torch.int64 : np.int64
-        }
-
-        torch_result = t.to(dtype)
-        numpy_result = torch.from_numpy(a.astype(torch_to_np[dtype]))
-        self.assertEqual(torch_result, numpy_result)
-
+        self._float_to_int_conversion_helper(vals, device, dtype)
 
     # TODO: re-enable this test
     @unittest.skipIf(True, "real and imag not implemented for complex")
