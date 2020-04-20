@@ -3,7 +3,6 @@ from torch.testing._internal.common_device_type import instantiate_device_type_t
 import torch
 from torch import tensor
 import unittest
-import warnings
 
 class TestIndexing(TestCase):
     def test_single_int(self, device):
@@ -44,12 +43,7 @@ class TestIndexing(TestCase):
 
         v = torch.tensor([True, False, True], dtype=torch.bool, device=device)
         boolIndices = torch.tensor([True, False, False], dtype=torch.bool, device=device)
-        uint8Indices = torch.tensor([1, 0, 0], dtype=torch.uint8, device=device)
-        with warnings.catch_warnings(record=True) as w:
-            self.assertEqual(v[boolIndices].shape, v[uint8Indices].shape)
-            self.assertEqual(v[boolIndices], v[uint8Indices])
-            self.assertEqual(v[boolIndices], tensor([True], dtype=torch.bool, device=device))
-            self.assertEquals(len(w), 2)
+        self.assertEqual(v[boolIndices], tensor([True], dtype=torch.bool, device=device))
 
     def test_bool_indices_accumulate(self, device):
         mask = torch.zeros(size=(10, ), dtype=torch.bool, device=device)
@@ -67,21 +61,24 @@ class TestIndexing(TestCase):
     def test_byte_mask(self, device):
         v = torch.randn(5, 7, 3, device=device)
         mask = torch.ByteTensor([1, 0, 1, 1, 0]).to(device)
-        with warnings.catch_warnings(record=True) as w:
-            self.assertEqual(v[mask].shape, (3, 7, 3))
-            self.assertEqual(v[mask], torch.stack([v[0], v[2], v[3]]))
-            self.assertEquals(len(w), 2)
+        with self.assertRaisesRegex(
+                RuntimeError,
+                'indexing with dtype torch.uint8 is no longer supported'):
+            v[mask].shape
 
-        v = torch.tensor([1.], device=device)
-        self.assertEqual(v[v == 0], torch.tensor([], device=device))
+        mask = torch.tensor([1, 0, 1, 1, 0], device="cpu", dtype=torch.uint8)
+        with self.assertRaisesRegex(
+                RuntimeError,
+                'indexing with dtype torch.uint8 is no longer supported'):
+            v[mask].shape
 
-    def test_byte_mask_accumulate(self, device):
+    def test_index_put_byte_indices(self, device):
         mask = torch.zeros(size=(10, ), dtype=torch.uint8, device=device)
         y = torch.ones(size=(10, 10), device=device)
-        with warnings.catch_warnings(record=True) as w:
-            y.index_put_((mask, ), y[mask], accumulate=True)
-            self.assertEqual(y, torch.ones(size=(10, 10), device=device))
-            self.assertEquals(len(w), 2)
+        with self.assertRaisesRegex(
+                RuntimeError,
+                'indexing with dtype torch.uint8 is no longer supported'):
+            y.index_put_((mask, ), y, accumulate=True)
 
     def test_index_put_accumulate_large_tensor(self, device): 
         # This test is for tensors with number of elements >= INT_MAX (2^31 - 1). 
@@ -100,16 +97,7 @@ class TestIndexing(TestCase):
         self.assertEqual(a[-2], 13)
         self.assertEqual(a[-1], 14)
 
-    def test_multiple_byte_mask(self, device):
-        v = torch.randn(5, 7, 3, device=device)
-        # note: these broadcast together and are transposed to the first dim
-        mask1 = torch.ByteTensor([1, 0, 1, 1, 0]).to(device)
-        mask2 = torch.ByteTensor([1, 1, 1]).to(device)
-        with warnings.catch_warnings(record=True) as w:
-            self.assertEqual(v[mask1, :, mask2].shape, (3, 7))
-            self.assertEquals(len(w), 2)
-
-    def test_byte_mask2d(self, device):
+    def test_bool_mask2d(self, device):
         v = torch.randn(5, 7, 3, device=device)
         c = torch.randn(5, 7, device=device)
         num_ones = (c > 0).sum()
@@ -336,14 +324,12 @@ class TestIndexing(TestCase):
         x[1] = torch.arange(5, 7, device=device)
         self.assertEqual(x.tolist(), [[0, 1], [5, 6]])
 
-    def test_byte_tensor_assignment(self, device):
+    def test_bool_tensor_assignment(self, device):
         x = torch.arange(0., 16, device=device).view(4, 4)
-        b = torch.ByteTensor([True, False, True, False]).to(device)
+        b = torch.BoolTensor([True, False, True, False]).to(device)
         value = torch.tensor([3., 4., 5., 6.], device=device)
 
-        with warnings.catch_warnings(record=True) as w:
-            x[b] = value
-            self.assertEquals(len(w), 1)
+        x[b] = value
 
         self.assertEqual(x[0], value)
         self.assertEqual(x[1], torch.arange(4, 8, device=device))
@@ -537,7 +523,7 @@ class NumpyTests(TestCase):
         index = tensor([False] * 6, device=device)
         self.assertRaisesRegex(IndexError, 'mask', lambda: arr[index])
 
-        index = torch.ByteTensor(4, 4).to(device).zero_()
+        index = torch.BoolTensor(4, 4).to(device).zero_()
         self.assertRaisesRegex(IndexError, 'mask', lambda: arr[index])
         self.assertRaisesRegex(IndexError, 'mask', lambda: arr[(slice(None), index)])
 

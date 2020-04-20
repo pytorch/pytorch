@@ -14,9 +14,24 @@ namespace impl {
 
 // This is a private class used inside the Dispatcher to represent an operator
 // and its dispatch table. This is not part of the public API.
-class OperatorEntry final {
+class CAFFE2_API OperatorEntry final {
 public:
+  struct KernelEntry final {
+    KernelEntry(KernelFunction k, std::unique_ptr<FunctionSchema> s, std::string d)
+      : kernel(std::move(k))
+      , inferred_function_schema(std::move(s))
+      , debug(std::move(d))
+      {}
+    KernelFunction kernel;
+    std::unique_ptr<FunctionSchema> inferred_function_schema;
+    // A little debug string to help us identify the kernel in question.
+    // Mostly used in testing but it might be possible to augment
+    // regular registrations with some more info here too
+    std::string debug;
+  };
+
   explicit OperatorEntry(FunctionSchema&& schema);
+  explicit OperatorEntry(OperatorName&& operator_name);
 
   OperatorEntry(const OperatorEntry&) = delete;
   OperatorEntry(OperatorEntry&&) noexcept = delete;
@@ -24,7 +39,37 @@ public:
   OperatorEntry& operator=(OperatorEntry&&) noexcept = delete;
 
   const FunctionSchema& schema() const {
-    return schema_;
+    TORCH_INTERNAL_ASSERT(schema_.has_value());
+    return *schema_;
+  }
+  bool hasSchema() const {
+    return schema_.has_value();
+  }
+
+  // An OperatorEntry may be initialized with only an OperatorName.
+  // If this is the case, we may post facto register a schema to it.
+  //
+  // Some rules:
+  //  - The following programs are equivalent:
+  //      OperatorEntry op(std::move(schema))
+  //    and
+  //      OperatorEntry op(schema.operator_name())
+  //      op.registerSchema(std::move(schema))
+  //  - The following programs are equivalent:
+  //      OperatorEntry op(schema.operator_name())
+  //    and
+  //      OperatorEntry op(std::move(schema))
+  //      op.deregisterSchema()
+  //
+  // NB: registerSchema/deregisterSchema are not idempotent; if you
+  // attempt to register a schema when one is already present or vice
+  // versa that is an error.  (Refcounting for the registrations is
+  // handled in the OperatorHandle in Dispatcher)
+  void registerSchema(FunctionSchema&&);
+  void deregisterSchema();
+
+  const OperatorName& operator_name() const {
+    return name_;
   }
 
   const DispatchTable& dispatch_table() const {
@@ -33,16 +78,22 @@ public:
 
   void prepareForDeregistration();
 
-  RegistrationHandleRAII registerKernel(c10::optional<DispatchKey> dispatch_key, KernelFunction kernel);
+  // Postcondition: caller is responsible for disposing of the kernel
+  std::list<KernelEntry>::iterator registerKernel(c10::optional<DispatchKey> dispatch_key, KernelFunction kernel, std::unique_ptr<FunctionSchema> inferred_function_schema, std::string debug);
+  void deregisterKernel_(c10::optional<DispatchKey> dispatch_key, std::list<KernelEntry>::iterator kernel);
 
   void updateSchemaAliasAnalysis(AliasAnalysisKind a) {
-    schema_.setAliasAnalysis(a);
+    TORCH_INTERNAL_ASSERT(schema_.has_value());
+    schema_->setAliasAnalysis(a);
   }
 
-private:
-  void deregisterKernel_(c10::optional<DispatchKey> dispatch_key, std::list<KernelFunction>::iterator kernel);
+  std::string dumpState() const;
+  void checkInvariants() const;
 
-  FunctionSchema schema_;
+private:
+
+  OperatorName name_;
+  c10::optional<FunctionSchema> schema_;
 
   // The dispatchTable stores the current kernel for each dispatch key
   DispatchTable dispatchTable_;
@@ -78,7 +129,7 @@ private:
   // re-executed and then only allow one kernel here, i.e. error if a kernel
   // is already registered, but that's a lot of effort to implement and
   // currently not high-pri.
-  ska::flat_hash_map<c10::optional<DispatchKey>, std::list<KernelFunction>> kernels_;
+  ska::flat_hash_map<c10::optional<DispatchKey>, std::list<KernelEntry>> kernels_;
 
   std::mutex kernelsMutex_; // protects kernels_
 

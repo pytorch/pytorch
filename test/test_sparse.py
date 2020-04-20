@@ -191,7 +191,7 @@ class TestSparse(TestCase):
         self.assertEqual(x._indices().numel(), 0)
         self.assertEqual(x._values().numel(), 0)
 
-    def test_coalecce(self):
+    def test_coalesce(self):
         for empty_i, empty_v, empty_nnz in itertools.product([True, False], repeat=3):
             sparse_size = [] if empty_i else [2, 1]
             dense_size = [1, 0, 2] if empty_v else [1, 2]
@@ -228,7 +228,7 @@ class TestSparse(TestCase):
             x.to_dense()  # Tests triple to_dense for memory corruption
             x.to_dense()
             x.to_dense()
-            # We dont have to_dense for half types, so we don't request 
+            # We dont have to_dense for half types, so we don't request
             # exact_dtype if res.type is torch.float16.
             dense_x = x.to_dense()
             safe_dense_x = self.safeToDense(x)
@@ -1200,6 +1200,21 @@ class TestSparse(TestCase):
         self.assertEqual(self.safeToDense(y1), expected)
         self.assertEqual(self.safeToDense(y2), expected)
 
+        y1 = torch.true_divide(x1, 37.5)
+        y2 = x1.clone()
+        if y2.dtype.is_floating_point or y2.dtype.is_complex:
+            y2.true_divide_(37.5)
+        expected = torch.true_divide(self.safeToDense(x1), 37.5)
+        self.assertEqual(self.safeToDense(y1), expected)
+        self.assertEqual(self.safeToDense(y2), expected)
+
+        y1 = x1 // 37.5
+        y2 = x1.clone()
+        y2.floor_divide_(37.5)
+        expected = self.safeToDense(x1) // 37.5
+        self.assertEqual(self.safeToDense(y1), expected)
+        self.assertEqual(self.safeToDense(y2), expected)
+
         # TODO: add back inplace support
         y1 = x1 ** 2
         y2 = x1.clone()
@@ -1502,6 +1517,31 @@ class TestSparse(TestCase):
             torch.Size([5, 6, 0]),
             device=self.device)
         self._test_log1p_tensor(input, torch.zeros([5, 6, 0]))
+
+    def test_mv(self):
+        def test_shape(di, dj, dk, nnz):
+            x, _, _ = self._gen_sparse(2, nnz, [di, dj])
+            t = torch.randn(dk, device=self.device)
+
+            res = x.matmul(t)
+            expected = self.safeToDense(x).matmul(t)
+            self.assertEqual(res, expected)
+
+        test_shape(10, 100, 100, 20)
+        test_shape(100, 1000, 1000, 20)
+        test_shape(64, 10000, 10000, 20)
+        test_shape(0, 100, 100, 0)
+        test_shape(10, 0, 0, 0)
+        test_shape(10, 100, 100, 0)
+        test_shape(10, 100, 100, 20)
+
+        with self.assertRaisesRegex(RuntimeError, r"mv: expected self\.size\(-1\) == vec\.size\(-1\)"):
+            test_shape(10, 100, 10, 20)
+
+        with self.assertRaisesRegex(RuntimeError, "mv: two tensor dim should be 2 and 1"):
+            x, _, _ = self._gen_sparse(2, 20, [10, 100])
+            y, _, _ = self._gen_sparse(2, 20, [10, 100])
+            res = x.mv(y)
 
     def test_sparse_add_coalesce(self):
         i = self.index_tensor([[1, 2, 1]])
@@ -2143,9 +2183,23 @@ class TestSparse(TestCase):
         self.assertEqual(torch.isnan(t).int(), t_nan.int())
 
     def test_div_by_sparse_error(self):
-        self.assertRaisesRegex(RuntimeError, 'A Sparse Tensor can only be divided',
+        self.assertRaisesRegex(RuntimeError, 'Sparse division requires',
                                lambda: torch.tensor(1., device=self.device).to_sparse()
                                / torch.tensor(1., device=self.device).to_sparse())
+
+    def test_true_divide_by_sparse_error(self):
+        def fn():
+            x = torch.tensor(1., device=self.device).to_sparse()
+            y = torch.tensor(1., device=self.device).to_sparse()
+            torch.true_divide(x, y)
+
+        self.assertRaisesRegex(RuntimeError, 'Sparse true division requires',
+                               fn)
+
+    def test_floor_divide_by_sparse_error(self):
+        self.assertRaisesRegex(RuntimeError, 'Sparse floor division requires',
+                               lambda: torch.tensor(1., device=self.device).to_sparse()
+                               // torch.tensor(1., device=self.device).to_sparse())
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_sparse_to_numpy(self):

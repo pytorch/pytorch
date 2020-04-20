@@ -1,5 +1,7 @@
 #include <ATen/core/boxing/KernelFunction.h>
 
+#include <sstream>
+
 namespace c10 {
 
 // This a "fake" kernel which doesn't actually do anything.  Instead, it is a
@@ -14,6 +16,29 @@ void fallthrough_kernel(OperatorKernel*, const OperatorHandle&, Stack*) {
     "(as opposed to a backend fallback); this is NOT currently supported, and we do not intend to "
     "add support for it in the near future.  If you do find yourself in need of this, "
     "let us know in the bug tracker.");
+}
+
+// single line summary of state
+std::string KernelFunction::dumpState() const {
+  std::ostringstream oss;
+  if (boxed_kernel_func_ == fallthrough_kernel) {
+    oss << "fallthrough ";
+  }
+  if (boxed_kernel_func_) {
+    oss << "boxed ";
+  }
+  if (unboxed_kernel_func_) {
+    oss << "unboxed ";
+  }
+  if (functorFactory_) {
+    oss << "functor ";
+  }
+  return oss.str();
+}
+
+bool KernelFunction::_equalsBoxedAndUnboxed(const KernelFunction& other) const {
+  return boxed_kernel_func_ == other.boxed_kernel_func_ &&
+         unboxed_kernel_func_ == other.unboxed_kernel_func_;
 }
 
 } // namespace c10

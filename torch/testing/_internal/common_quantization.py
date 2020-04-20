@@ -374,11 +374,12 @@ class InnerModule(torch.nn.Module):
     def __init__(self):
         super(InnerModule, self).__init__()
         self.fc1 = torch.nn.Linear(5, 8).to(dtype=torch.float)
-        self.relu = torch.nn.ReLU()
+        self.relu1 = torch.nn.ReLU()
         self.fc2 = torch.nn.Linear(8, 5).to(dtype=torch.float)
+        self.relu2 = torch.nn.ReLU()
 
     def forward(self, x):
-        return self.relu(self.fc2(self.relu(self.fc1(x))))
+        return self.relu2(self.fc2(self.relu1(self.fc1(x))))
 
 class SkipQuantModel(torch.nn.Module):
     r"""We can skip quantization by explicitly
@@ -386,6 +387,18 @@ class SkipQuantModel(torch.nn.Module):
     """
     def __init__(self):
         super(SkipQuantModel, self).__init__()
+        self.sub = InnerModule()
+        self.fc = torch.nn.Linear(5, 5).to(dtype=torch.float)
+
+    def forward(self, x):
+        return self.fc(self.sub(x))
+
+class AnnotatedSkipQuantModel(torch.nn.Module):
+    r"""We can skip quantization by explicitly
+    setting qconfig of a submodule to None
+    """
+    def __init__(self):
+        super(AnnotatedSkipQuantModel, self).__init__()
         self.qconfig = default_qconfig
         self.sub = QuantWrapper(InnerModule())
         self.fc = torch.nn.Linear(5, 5).to(dtype=torch.float)
@@ -482,11 +495,16 @@ class ModelForFusion(nn.Module):
         self.quant = QuantStub()
         self.dequant = DeQuantStub()
         self.qconfig = qconfig
+        self.conv2 = nn.Conv3d(3, 2, (1, 1, 1), bias=None).to(dtype=torch.float)
+        self.relu2 = nn.ReLU(inplace=False).to(dtype=torch.float)
+        self.bn2 = nn.BatchNorm3d(2).to(dtype=torch.float)
+        self.relu3 = nn.ReLU(inplace=True).to(dtype=torch.float)
         # don't quantize sub2
         self.sub2.qconfig = None
         self.fc.qconfig = None
 
     def forward(self, x):
+        y = x.unsqueeze(2)
         x = self.quant(x)
         x = self.conv1(x)
         x = self.bn1(x)
@@ -496,6 +514,12 @@ class ModelForFusion(nn.Module):
         x = self.sub2(x)
         x = x.view(-1, 72).contiguous()
         x = self.fc(x)
+        y = self.quant(y)
+        y = self.conv2(y)
+        y = self.relu2(y)
+        y = self.bn2(y)
+        y = self.relu3(y)
+        y = self.dequant(y)
         return x
 
 class ConvBNReLU(nn.Sequential):

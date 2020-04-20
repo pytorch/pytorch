@@ -56,6 +56,9 @@ struct C10_API LocalDispatchKeySet {
 
 C10_API LocalDispatchKeySet tls_local_dispatch_key_set();
 
+// Internal, use ThreadLocalStateGuard
+C10_API void _force_tls_local_dispatch_key_set(LocalDispatchKeySet key_set);
+
 // RAII API for manipulating the thread-local dispatch state.
 
 class C10_API IncludeDispatchKeyGuard {

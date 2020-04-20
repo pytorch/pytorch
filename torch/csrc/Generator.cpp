@@ -24,22 +24,20 @@ using namespace torch;
 
 PyObject *THPGeneratorClass = nullptr;
 
-PyObject * THPGenerator_initDefaultGenerator(at::Generator* cdata)
+PyObject * THPGenerator_initDefaultGenerator(at::Generator cdata)
 {
   auto type = (PyTypeObject*)THPGeneratorClass;
   auto self = THPObjectPtr{type->tp_alloc(type, 0)};
   if (!self) throw python_error();
   auto self_ = reinterpret_cast<THPGenerator*>(self.get());
   self_->cdata = cdata;
-  self_->owner = false;
   return self.release();
 }
 
 static void THPGenerator_dealloc(THPGenerator* self)
 {
-  if (self->owner) {
-    delete self->cdata;
-  }
+  self->cdata->set_pyobj(nullptr);
+  self->cdata.~Generator();
   Py_TYPE(self)->tp_free((PyObject*)self);
 }
 
@@ -56,9 +54,9 @@ static PyObject * THPGenerator_pynew(PyTypeObject *type, PyObject *args, PyObjec
   THPGeneratorPtr self((THPGenerator *)type->tp_alloc(type, 0));
 #ifdef USE_CUDA
   if (device.type() == at::kCPU) {
-    self->cdata = new CPUGenerator();
+    self->cdata = make_generator<CPUGenerator>();
   } else if (device.type() == at::kCUDA){
-    self->cdata = new CUDAGenerator(device.index());
+    self->cdata = make_generator<CUDAGenerator>(device.index());
   } else {
     AT_ERROR("Device type ", c10::DeviceTypeName(device.type()),
              " is not supported for torch.Generator() api.");
@@ -67,9 +65,8 @@ static PyObject * THPGenerator_pynew(PyTypeObject *type, PyObject *args, PyObjec
   TORCH_CHECK(device.type() == at::kCPU,
               "Device type ", c10::DeviceTypeName(device.type()),
               " is not supported for torch.Generator() api.");
-  self->cdata = new CPUGenerator();
+  self->cdata = make_generator<CPUGenerator>();
 #endif
-  self->owner = true;
   return (PyObject*)self.release();
   END_HANDLE_TH_ERRORS
 }
@@ -225,4 +222,41 @@ bool THPGenerator_init(PyObject *module)
   Py_INCREF(&THPGeneratorType);
   PyModule_AddObject(module, "Generator", (PyObject *)&THPGeneratorType);
   return true;
+}
+
+void set_pyobj(const Generator& self, PyObject* pyobj) {
+  TORCH_CHECK(self.defined(), "cannot call set_pyobj() on undefined generator");
+  self->set_pyobj(pyobj);
+}
+
+PyObject* pyobj(const Generator& self) {
+  TORCH_CHECK(self.defined(), "cannot call pyobj() on undefined generator");
+  return self->pyobj();
+}
+
+PyObject * THPGenerator_Wrap(Generator gen)
+{
+  if (!gen.defined()) {
+    Py_RETURN_NONE;
+  }
+
+  if (auto obj = pyobj(gen)) {
+    Py_INCREF(obj);
+    return obj;
+  }
+
+  return THPGenerator_NewWithVar((PyTypeObject *)THPGeneratorClass, std::move(gen));
+}
+
+// Creates a new Python object for a Generator. The Generator must not already
+// have a PyObject* associated with it.
+PyObject* THPGenerator_NewWithVar(PyTypeObject* type, Generator gen)
+{
+  PyObject* obj = type->tp_alloc(type, 0);
+  if (obj) {
+    auto g = (THPGenerator*) obj;
+    new (&g->cdata) Generator(std::move(gen));
+    set_pyobj(g->cdata, obj);
+  }
+  return obj;
 }

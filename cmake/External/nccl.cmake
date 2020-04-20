@@ -1,10 +1,10 @@
-if (NOT __NCCL_INCLUDED)
+if(NOT __NCCL_INCLUDED)
   set(__NCCL_INCLUDED TRUE)
 
-  if (USE_SYSTEM_NCCL)
+  if(USE_SYSTEM_NCCL)
     # NCCL_ROOT, NCCL_LIB_DIR, NCCL_INCLUDE_DIR will be accounted in the following line.
     find_package(NCCL REQUIRED)
-    if (NCCL_FOUND)
+    if(NCCL_FOUND)
       add_library(__caffe2_nccl INTERFACE)
       target_link_libraries(__caffe2_nccl INTERFACE ${NCCL_LIBRARIES})
       target_include_directories(__caffe2_nccl INTERFACE ${NCCL_INCLUDE_DIRS})

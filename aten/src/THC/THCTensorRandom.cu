@@ -15,7 +15,7 @@
 // NB: ROCm compiler seems to have a bug where __host__ functions must be
 // explicitly specified extern "C" otherwise ROCm compiler doesn't respect it.
 // See https://github.com/RadeonOpenCompute/hcc/issues/839
-extern "C" __host__ void THCRandom_getRNGState(at::Generator *gen_, THByteTensor *rng_state)
+extern "C" __host__ void THCRandom_getRNGState(at::Generator gen_, THByteTensor *rng_state)
 {
   auto gen = at::check_generator<at::CUDAGenerator>(gen_);
   std::lock_guard<std::mutex> lock(gen->mutex_);
@@ -40,7 +40,7 @@ extern "C" __host__ void THCRandom_getRNGState(at::Generator *gen_, THByteTensor
   memcpy(THByteTensor_data(rng_state) + states_size + seed_size, &offset, offset_size);
 }
 
-extern "C" __host__ void THCRandom_setRNGState(at::Generator *gen_, THByteTensor *rng_state)
+extern "C" __host__ void THCRandom_setRNGState(at::Generator gen_, THByteTensor *rng_state)
 {
   auto gen = at::check_generator<at::CUDAGenerator>(gen_);
   std::lock_guard<std::mutex> lock(gen->mutex_);

@@ -22,4 +22,4 @@ echo "LLVM_DIR: ${LLVM_DIR}"
 time ANALYZE_TEST=1 CHECK_RESULT=1 tools/code_analyzer/build.sh
 
 # 2. Run code analysis on mobile LibTorch
-time ANALYZE_TORCH=1 tools/code_analyzer/build.sh -closure=false
+time ANALYZE_TORCH=1 tools/code_analyzer/build.sh

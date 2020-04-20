@@ -259,16 +259,24 @@ void List<T>::resize(size_type count, const T& value) const {
 }
 
 template<class T>
-bool list_is_equal(const List<T>& lhs, const List<T>& rhs) {
-  if (lhs.size() != rhs.size()) {
-    return false;
+bool operator==(const List<T>& lhs, const List<T>& rhs) {
+  // Lists with the same identity trivially compare equal.
+  if (lhs.impl_ == rhs.impl_) {
+    return true;
   }
-  for (size_t i = 0; i < lhs.size(); ++i) {
-    if (lhs.get(i) != rhs.get(i)) {
-      return false;
-    }
-  }
-  return true;
+
+  // Otherwise, just compare values directly.
+  return *lhs.impl_ == *rhs.impl_;
+}
+
+template<class T>
+bool operator!=(const List<T>& lhs, const List<T>& rhs) {
+  return !(lhs == rhs);
+}
+
+template<class T>
+bool List<T>::is(const List<T>& rhs) const {
+  return this->impl_ == rhs.impl_;
 }
 
 template<class T>

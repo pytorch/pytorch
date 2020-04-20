@@ -529,14 +529,14 @@ TEST(ListTest_IValueBasedList, givenEqualLists_thenIsEqual) {
   List<string> list1({"first", "second"});
   List<string> list2({"first", "second"});
 
-  EXPECT_TRUE(list_is_equal(list1, list2));
+  EXPECT_EQ(list1, list2);
 }
 
 TEST(ListTest_IValueBasedList, givenDifferentLists_thenIsNotEqual) {
   List<string> list1({"first", "second"});
   List<string> list2({"first", "not_second"});
 
-  EXPECT_FALSE(list_is_equal(list1, list2));
+  EXPECT_NE(list1, list2);
 }
 
 TEST(ListTest_NonIValueBasedList, givenEmptyList_whenCallingEmpty_thenReturnsTrue) {
@@ -1059,12 +1059,26 @@ TEST(ListTest_NonIValueBasedList, givenEqualLists_thenIsEqual) {
   List<int64_t> list1({1, 3});
   List<int64_t> list2({1, 3});
 
-  EXPECT_TRUE(list_is_equal(list1, list2));
+  EXPECT_EQ(list1, list2);
 }
 
 TEST(ListTest_NonIValueBasedList, givenDifferentLists_thenIsNotEqual) {
   List<int64_t> list1({1, 3});
   List<int64_t> list2({1, 2});
 
-  EXPECT_FALSE(list_is_equal(list1, list2));
+  EXPECT_NE(list1, list2);
+}
+
+TEST(ListTest_NonIValueBasedList, isChecksIdentity) {
+  List<int64_t> list1({1, 3});
+  const auto list2 = list1;
+
+  EXPECT_TRUE(list1.is(list2));
+}
+
+TEST(ListTest_NonIValueBasedList, sameValueDifferentStorage_thenIsReturnsFalse) {
+  List<int64_t> list1({1, 3});
+  const auto list2 = list1.copy();
+
+  EXPECT_FALSE(list1.is(list2));
 }

@@ -102,11 +102,14 @@ Tensor _mul_scalar_out(Tensor& out, const Tensor& self, Scalar other) {
 template <bool ReLUFused = false>
 class QMul final : public c10::OperatorKernel {
  public:
-  Tensor operator()(Tensor qa, Tensor qb,
-                    double scale, int64_t zero_point) {
+  Tensor operator()(Tensor qa, Tensor qb, double scale, int64_t zero_point) {
     check_inputs(qa, qb);
-    auto qc = at::_empty_affine_quantized(qa.sizes(),
-      at::device(kCPU).dtype(qa.scalar_type()), scale, zero_point);
+    auto qc = at::_empty_affine_quantized(
+        qa.sizes(),
+        at::device(kCPU).dtype(qa.scalar_type()),
+        scale,
+        zero_point,
+        qa.suggest_memory_format());
     return _mul_out<ReLUFused>(qc, qa, qb);
   }
 };
@@ -128,7 +131,7 @@ class QMulScalar final : public c10::OperatorKernel {
     TORCH_CHECK(qa.qscheme() == kPerTensorAffine ||
               qa.qscheme() == kPerTensorSymmetric,
               "Only per tensor quantization is suuported in Mul.");
-    auto qc = at::empty_like(qa, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+    auto qc = at::empty_like(qa, qa.suggest_memory_format());
     return _mul_scalar_out<ReLUFused>(qc, qa, b);
   }
 };

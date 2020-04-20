@@ -288,7 +288,7 @@ def get_workflow_jobs():
 
     config_list = instantiate_configs()
 
-    x = ["setup"]
+    x = []
     for conf_options in config_list:
 
         phases = conf_options.restrict_phases or dimensions.PHASES

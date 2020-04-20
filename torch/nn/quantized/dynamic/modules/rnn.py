@@ -1,12 +1,14 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 
+from collections import OrderedDict
+import numbers
+
 import torch
 import torch.nn as nn
 from torch import Tensor  # noqa: F401
 from torch import _VF
 from torch._jit_internal import Tuple, Optional, List  # noqa: F401
 from torch.nn.utils.rnn import PackedSequence
-import numbers
 
 
 def apply_permutation(tensor, permutation, dim=1):
@@ -26,6 +28,34 @@ class PackedParameter(torch.nn.Module):
     def __setstate__(self, state):
         self.param = torch.ops.quantized.linear_prepack(*state[0])
         self.training = state[1]
+
+    def _save_to_state_dict(self, destination, prefix, keep_vars):
+        super(PackedParameter, self)._save_to_state_dict(destination, prefix,
+                                                         keep_vars)
+        (w, b) = self.unpack()
+
+        destination[prefix + 'weight'] = w
+        destination[prefix + 'bias'] = b
+
+    def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
+                              missing_keys, unexpected_keys, error_msgs):
+        weight = state_dict[prefix + 'weight']
+        bias = state_dict[prefix + 'bias']
+        self.param = torch.ops.quantized.linear_prepack(weight, bias)
+        state_dict.pop(prefix + 'weight')
+        state_dict.pop(prefix + 'bias')
+
+        super(PackedParameter, self)._load_from_state_dict(state_dict, prefix,
+                                                           local_metadata,
+                                                           False, missing_keys,
+                                                           unexpected_keys,
+                                                           error_msgs)
+
+    def __repr__(self):
+        return repr(self.unpack())
+
+    def unpack(self):
+        return torch.ops.quantized.linear_unpack(self.param)
 
     # This only exists because there's a bug in recursive scripting
     # that arises only in Python 2 where a recursively scripted
@@ -150,6 +180,36 @@ class RNNBase(torch.nn.Module):
             s += ', bidirectional={bidirectional}'
         return s.format(**self.__dict__)
 
+    def __repr__(self):
+        # We don't want to show `ModuleList` children, hence custom
+        # `__repr__`. This is the same as nn.Module.__repr__, except the check
+        # for the `PackedParameter` and `nn.ModuleList`.
+        # You should still override `extra_repr` to add more info.
+        extra_lines = []
+        extra_repr = self.extra_repr()
+        # empty string will be split into list ['']
+        if extra_repr:
+            extra_lines = extra_repr.split('\n')
+        child_lines = []
+        for key, module in self._modules.items():
+            if isinstance(module, (PackedParameter, nn.ModuleList)):
+                continue
+            mod_str = repr(module)
+            mod_str = nn.modules.module._addindent(mod_str, 2)
+            child_lines.append('(' + key + '): ' + mod_str)
+        lines = extra_lines + child_lines
+
+        main_str = self._get_name() + '('
+        if lines:
+            # simple one-liner info, which most builtin Modules will use
+            if len(extra_lines) == 1 and not child_lines:
+                main_str += extra_lines[0]
+            else:
+                main_str += '\n  ' + '\n  '.join(lines) + '\n'
+
+        main_str += ')'
+        return main_str
+
     def check_input(self, input, batch_sizes):
         # type: (Tensor, Optional[Tensor]) -> None
         expected_input_dim = 2 if batch_sizes is not None else 3
@@ -192,6 +252,13 @@ class RNNBase(torch.nn.Module):
         if permutation is None:
             return hx
         return apply_permutation(hx, permutation)
+
+    @property
+    def all_weights(self):
+        result = OrderedDict()
+        for idx, name in enumerate(self._all_weight_names):
+            result[name] = self._all_weight_values[idx].unpack()
+        return result
 
     @classmethod
     def from_float(cls, mod):

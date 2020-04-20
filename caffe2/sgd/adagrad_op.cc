@@ -2,7 +2,9 @@
 
 namespace caffe2 {
 
-REGISTER_CPU_OPERATOR(Adagrad, AdagradOp<float, CPUContext>);
+REGISTER_CPU_OPERATOR(Adagrad, AdagradOp<CPUContext>);
+// For backward compatibility
+REGISTER_CPU_OPERATOR_WITH_ENGINE(Adagrad, SIMD, AdagradOp<CPUContext>);
 OPERATOR_SCHEMA(Adagrad)
     .NumInputs(4)
     .NumOutputs(2, 4)
@@ -64,7 +66,9 @@ static OpSchema::Cost CostInferenceForSparseAdagrad(
   return c;
 }
 
-REGISTER_CPU_OPERATOR(SparseAdagrad, SparseAdagradOp<float, CPUContext>);
+REGISTER_CPU_OPERATOR(SparseAdagrad, SparseAdagradOp<>);
+// For backward compatibility
+REGISTER_CPU_OPERATOR_WITH_ENGINE(SparseAdagrad, SIMD, SparseAdagradOp<>);
 OPERATOR_SCHEMA(SparseAdagrad)
     .NumInputs(5)
     .NumOutputs(2)
@@ -87,9 +91,12 @@ new_moment) as in the dense case.
     .CostInferenceFunction(
         OpSchema::CostInferenceFunctionType(CostInferenceForSparseAdagrad));
 
-REGISTER_CPU_OPERATOR(
+REGISTER_CPU_OPERATOR(RowWiseSparseAdagrad, RowWiseSparseAdagradOp<CPUContext>);
+// For backward compatibility
+REGISTER_CPU_OPERATOR_WITH_ENGINE(
     RowWiseSparseAdagrad,
-    RowWiseSparseAdagradOp<float, CPUContext>);
+    SIMD,
+    RowWiseSparseAdagradOp<CPUContext>);
 OPERATOR_SCHEMA(RowWiseSparseAdagrad)
     .NumInputs(5)
     .NumOutputs(2)
@@ -117,4 +124,4 @@ also be a 1D tensor indexing into the rows of param.
 SHOULD_NOT_DO_GRADIENT(Adagrad);
 SHOULD_NOT_DO_GRADIENT(SparseAdagrad);
 SHOULD_NOT_DO_GRADIENT(RowWiseSparseAdagrad);
-}
+} // namespace caffe2

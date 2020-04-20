@@ -130,7 +130,7 @@ static Tensor _mkldnn_pool2d(
   }
 
   ideep::tensor y;
-  ideep::pooling_forward::compute<AllocForMKLDNN>(
+  ideep::pooling_forward::compute(
       x,
       {output_sizes.cbegin(), output_sizes.cend()},
       y,

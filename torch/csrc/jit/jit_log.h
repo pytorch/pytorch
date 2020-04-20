@@ -1,7 +1,7 @@
 #pragma once
+#include <torch/csrc/WindowsTorchApiMacro.h>
 #include <memory>
 #include <string>
-#include <torch/csrc/WindowsTorchApiMacro.h>
 
 // `TorchScript` offers a simple logging facility that can enabled by setting an
 // environment variable `PYTORCH_JIT_LOG_LEVEL`.
@@ -47,9 +47,9 @@ enum class JitLoggingLevels {
   GRAPH_DEBUG,
 };
 
-std::string TORCH_API getHeader(const Node *node);
+std::string TORCH_API getHeader(const Node* node);
 
-std::string TORCH_API log_function(const std::shared_ptr<Graph> &graph);
+std::string TORCH_API log_function(const std::shared_ptr<Graph>& graph);
 
 TORCH_API JitLoggingLevels jit_log_level();
 
@@ -64,18 +64,18 @@ TORCH_API std::string jit_log_prefix(
     int l,
     const std::string& in_str);
 
-TORCH_API bool is_enabled(const char *cfname, JitLoggingLevels level);
+TORCH_API bool is_enabled(const char* cfname, JitLoggingLevels level);
 
 TORCH_API std::ostream& operator<<(std::ostream& out, JitLoggingLevels level);
 
-#define JIT_LOG(level, ...)                                                    \
-  if (is_enabled(__FILE__, level)) {                                           \
-    std::cerr << jit_log_prefix(level, __FILE__, __LINE__,                     \
-                                ::c10::str(__VA_ARGS__));                      \
+#define JIT_LOG(level, ...)                                  \
+  if (is_enabled(__FILE__, level)) {                         \
+    std::cerr << jit_log_prefix(                             \
+        level, __FILE__, __LINE__, ::c10::str(__VA_ARGS__)); \
   }
 
 // tries to reconstruct original python source
-#define SOURCE_DUMP(MSG, G)                                                    \
+#define SOURCE_DUMP(MSG, G) \
   JIT_LOG(JitLoggingLevels::GRAPH_DUMP, MSG, "\n", log_function(G));
 // use GRAPH_DUMP for dumping graphs after optimization passes
 #define GRAPH_DUMP(MSG, G) \

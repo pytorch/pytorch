@@ -14,7 +14,7 @@
       - ecr_gc_job:
             name: ecr_gc_job_for_caffe2
             project: caffe2
-            tags_to_keep: "348,345,336,325,324,315,306,301,287,283,276,273,266,253,248,238,230,213"
+            tags_to_keep: "373,369,348,345,336,325,324,315,306,301,287,283,276,273,266,253,248,238,230,213"
       - ecr_gc_job:
             name: ecr_gc_job_for_translate
             project: translate

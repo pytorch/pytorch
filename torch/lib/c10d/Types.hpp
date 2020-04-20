@@ -59,6 +59,10 @@ struct ReduceScatterOptions {
   bool noCopy = false;
 };
 
+struct AllToAllOptions {
+  std::chrono::milliseconds timeout = kUnsetTimeout;
+};
+
 struct BarrierOptions {
   std::chrono::milliseconds timeout = kUnsetTimeout;
 };

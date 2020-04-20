@@ -71,9 +71,9 @@ A **binary configuration** is a collection of
 * release or nightly
     * releases are stable, nightlies are beta and built every night
 * python version
-    * linux: 2.7m, 2.7mu, 3.5m, 3.6m 3.7m (mu is wide unicode or something like that. It usually doesn't matter but you should know that it exists)
-    * macos: 2.7, 3.5, 3.6, 3.7
-    * windows: 3.5, 3.6, 3.7
+    * linux: 3.5m, 3.6m 3.7m (mu is wide unicode or something like that. It usually doesn't matter but you should know that it exists)
+    * macos: 3.6, 3.7, 3.8
+    * windows: 3.6, 3.7, 3.8
 * cpu version
     * cpu, cuda 9.0, cuda 10.0
     * The supported cuda versions occasionally change

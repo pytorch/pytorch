@@ -14,10 +14,10 @@ void UpsampleImpl::reset() {}
 
 void UpsampleImpl::pretty_print(std::ostream& stream) const {
   stream << "torch::nn::Upsample(";
-  if (!options.scale_factor().empty()) {
-    stream << "scale_factor=" << at::ArrayRef<double>(options.scale_factor());
+  if (options.scale_factor() != c10::nullopt) {
+    stream << "scale_factor=" << at::ArrayRef<double>(*options.scale_factor());
   } else {
-    stream << "size=" << at::ArrayRef<int64_t>(options.size());
+    stream << "size=" << at::ArrayRef<int64_t>(*options.size());
   }
   stream << ", mode=" << enumtype::get_enum_name(options.mode()) << ")";
 }
@@ -41,7 +41,8 @@ Tensor UpsampleImpl::forward(const Tensor& input) {
       options.size(),
       options.scale_factor(),
       mode,
-      options.align_corners());
+      options.align_corners(),
+      c10::nullopt);
 }
 
 } // namespace nn

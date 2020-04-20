@@ -23,7 +23,7 @@ __host__ __device__ static inline std::complex<T> ceil_wrapper(std::complex<T> v
 }
 
 void ceil_kernel_cuda(TensorIterator& iter) {
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(ScalarType::Half, iter.dtype(), "ceil_cuda", [&]() {
+  AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::Half, iter.dtype(), "ceil_cuda", [&]() {
     gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
       return ceil_wrapper(a);
     });
@@ -50,7 +50,7 @@ __host__ __device__ static inline std::complex<T> floor_wrapper(std::complex<T> 
 }
 
 void floor_kernel_cuda(TensorIterator& iter) {
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(ScalarType::Half, iter.dtype(), "floor_cuda", [&]() {
+  AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::Half, iter.dtype(), "floor_cuda", [&]() {
     gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
       return floor_wrapper(a);
     });
@@ -112,7 +112,7 @@ __host__ __device__ static inline std::complex<double> trunc_wrapper(std::comple
 }
 
 void trunc_kernel_cuda(TensorIterator& iter) {
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(ScalarType::Half, iter.dtype(), "trunc_cuda", [&]() {
+  AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::Half, iter.dtype(), "trunc_cuda", [&]() {
     gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
       return trunc_wrapper(a);
     });

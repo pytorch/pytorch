@@ -18,18 +18,6 @@ namespace c10 {
 struct Argument;
 struct FunctionSchema;
 
-namespace detail {
-inline bool defaultValueEquals_(
-    const c10::optional<IValue>& lhs,
-    const c10::optional<IValue>& rhs) {
-  if (lhs.has_value()) {
-    return rhs.has_value() && impl::shallowEquals(*lhs, *rhs);
-  } else {
-    return !rhs.has_value();
-  }
-}
-} // namespace detail
-
 bool operator==(const Argument& lhs, const Argument& rhs);
 
 struct Argument {
@@ -124,7 +112,7 @@ inline bool operator==(const Argument& lhs, const Argument& rhs) {
   return lhs.name() == rhs.name()
           && *lhs.type() == *rhs.type()
           && lhs.N() == rhs.N()
-          && detail::defaultValueEquals_(lhs.default_value(), rhs.default_value())
+          && lhs.default_value() == rhs.default_value()
           && lhs.kwarg_only() == rhs.kwarg_only()
           && lhs.alias_info() == rhs.alias_info();
 }
@@ -260,6 +248,16 @@ public:
     }
     return c10::nullopt;
   }
+  FunctionSchema cloneWithName(std::string name, std::string overload_name) const {
+    return FunctionSchema(
+      std::move(name),
+      std::move(overload_name),
+      arguments(),
+      returns(),
+      is_vararg(),
+      is_varret()
+      );
+  }
   FunctionSchema cloneWithArguments(std::vector<Argument> new_arguments) const {
     return FunctionSchema(
         name(),
@@ -320,6 +318,10 @@ public:
   }
   void setAliasAnalysis(AliasAnalysisKind v) {
     alias_kind_ = v;
+  }
+
+  void setNamespaceIfNotSet(const char* ns) {
+    name_.setNamespaceIfNotSet(ns);
   }
 
   // can a function with this schema be substituted for a function of rhs's

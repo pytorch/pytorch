@@ -31,6 +31,8 @@ struct TORCH_API Function {
 
   virtual void run(Stack&& stack) = 0;
 
+  virtual c10::intrusive_ptr<c10::ivalue::Future> runAsync(Stack& stack) = 0;
+
   virtual at::IValue operator()(
       std::vector<at::IValue> stack,
       const Kwargs& kwargs = Kwargs()) = 0;

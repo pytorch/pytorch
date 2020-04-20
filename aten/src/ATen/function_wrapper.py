@@ -113,18 +113,20 @@ SCHEMA_REGISTRATION = CodeTemplate("""\
 """)
 
 DEFAULT_UNBOXEDONLY_FUNCTION_REGISTRATION = CodeTemplate("""\
-.def("${schema_string}", CppFunction::makeUnboxedOnly(TypeDefault::${type_wrapper_name}))
+.impl("${operator_name_with_overload}",
+      CppFunction::makeUnboxedOnly(TypeDefault::${type_wrapper_name}))
 """)
 BACKEND_UNBOXEDONLY_FUNCTION_REGISTRATION = CodeTemplate("""\
-.def("${schema_string}", torch::dispatch(
+.impl("${operator_name_with_overload}", torch::dispatch(
     DispatchKey::${Backend}TensorId,
     CppFunction::makeUnboxedOnly(${Type}::${type_wrapper_name})))
 """)
 DEFAULT_FUNCTION_REGISTRATION = CodeTemplate("""\
-.def("${schema_string}", &TypeDefault::${type_wrapper_name})
+.impl("${operator_name_with_overload}", &TypeDefault::${type_wrapper_name})
 """)
 BACKEND_FUNCTION_REGISTRATION = CodeTemplate("""\
-.def("${schema_string}", torch::dispatch(DispatchKey::${Backend}TensorId, &${Type}::${type_wrapper_name}))
+.impl("${operator_name_with_overload}",
+      torch::dispatch(DispatchKey::${Backend}TensorId, &${Type}::${type_wrapper_name}))
 """)
 
 # add non-virtual declaration to TensorBody.h
@@ -257,8 +259,6 @@ TYPE_FORMAL_GENERIC = {
     'THByteTensor*': 'Tensor &',
     'THIndexTensor*': 'Tensor &',
     'THBoolTensor*': 'Tensor &',
-    'THStorage*': 'Storage',
-    'THGenerator*': 'Generator *',
     'IntArrayRefSize': 'IntArrayRef',
     'accreal': 'Scalar',
     'real': 'Scalar',
@@ -270,8 +270,6 @@ DYNAMIC_TYPE = {
     'THByteTensor*': 'ByteTensor',
     'THBoolTensor*': 'BoolTensor',
     'THIndexTensor*': 'IndexTensor',
-    'THStorage*': 'Storage',
-    'THGenerator*': 'Generator*',
     'IntArrayRefSize': 'IntArrayRef',
     'accreal': 'accreal',
     'real': 'real',
@@ -314,13 +312,6 @@ CHECKED_CAST = {
             'checked_dense_tensor_unwrap('
             '${arg_name}, "${arg_name}", ${arg_pos}, "${api_name}", ${null_okay}, '
             'DeviceType::${DeviceType}, ScalarType::Long)'),
-    'THStorage*':
-        CodeTemplate(
-            'checked_storage('
-            '${arg_name}, "${arg_name}", ${arg_pos}, '
-            # We're punning here (Backend and DeviceType constructors coincide)
-            # but DeviceType is the correct way to classify storages
-            'DeviceType::${Backend}, at::scalarTypeToTypeMeta(${scalar_type}))'),
     # This is a cast done via direct-construction
     'IntArrayRefStride': CodeTemplate('at::IntArrayRef ${result_name} = get_intlist_stride_th(${arg_name});'),
     'real': CodeTemplate('${arg_name}.to${ScalarName}()'),
@@ -336,7 +327,6 @@ CHECKED_USE = {
     'THIndexTensor*': '{}_',
     'THByteTensor*': '{}_',
     'THBoolTensor*': '{}_',
-    'THStorage*': '{}_.unsafeGetStorageImpl()',
     'TensorList': "{0}_.data(), {0}_.size()",
 }
 
@@ -587,6 +577,7 @@ FunctionCode = NamedTuple('FunctionCode', [
 OpRegistration = NamedTuple('OpRegistration', [
     ('operator_name', str),
     ('registration_code', str),
+    ('schema_registration_code', str),
 ])
 
 
@@ -1207,22 +1198,29 @@ def create_generic(top_env, declarations):
             abstract = True
             # Having manual_kernel_registration for an abstract method doesn't make sense.
             assert not option['manual_kernel_registration']
+            op_registrations.append(OpRegistration(
+                operator_name=OPERATOR_NAME.substitute(option),
+                registration_code=SCHEMA_REGISTRATION.substitute(option),
+                schema_registration_code=SCHEMA_REGISTRATION.substitute(option)))
         else:
             top_env['type_method_declarations'].append(NATIVE_DISPATCH_DECLARATION.substitute(option))
             top_env['type_method_definitions'].append(NATIVE_DISPATCH_DEFINITION_DEFAULT.substitute(option))
-            op_registrations.append(OpRegistration(
-                operator_name=OPERATOR_NAME.substitute(option),
-                registration_code=SCHEMA_REGISTRATION.substitute(option)))
             if not option['manual_kernel_registration']:
+                op_registrations.append(OpRegistration(
+                    operator_name=OPERATOR_NAME.substitute(option),
+                    registration_code=SCHEMA_REGISTRATION.substitute(option),
+                    schema_registration_code=SCHEMA_REGISTRATION.substitute(option)))
                 if option['use_c10_dispatcher'] == 'full':
                     op_registrations.append(OpRegistration(
                         operator_name=OPERATOR_NAME.substitute(option),
-                        registration_code=DEFAULT_FUNCTION_REGISTRATION.substitute(option)))
+                        registration_code=DEFAULT_FUNCTION_REGISTRATION.substitute(option),
+                        schema_registration_code=SCHEMA_REGISTRATION.substitute(option)))
                 else:
                     assert option['use_c10_dispatcher'] == 'unboxed_only'
                     op_registrations.append(OpRegistration(
                         operator_name=OPERATOR_NAME.substitute(option),
-                        registration_code=DEFAULT_UNBOXEDONLY_FUNCTION_REGISTRATION.substitute(option)))
+                        registration_code=DEFAULT_UNBOXEDONLY_FUNCTION_REGISTRATION.substitute(option),
+                        schema_registration_code=SCHEMA_REGISTRATION.substitute(option)))
 
         # generate the at::native function declarations (i.e. what the user will implement)
         if isinstance(type_method_dispatch, dict):
@@ -1462,7 +1460,7 @@ def create_derived(backend_type_env, declarations):
                             # defined
                             null_okay = 'true' if nullable_argument(arg) else 'false'
 
-                            # extract the TensorImpl from an existing tensor (or Storage, etc.)
+                            # extract the TensorImpl from an existing tensor
                             check_cast = CHECKED_CAST[arg['type']].substitute(
                                 case_env, arg_name=arg['name'], arg_pos=count,
                                 api_name=option['api_name'], null_okay=null_okay,
@@ -1570,12 +1568,14 @@ def create_derived(backend_type_env, declarations):
                     if option['use_c10_dispatcher'] == 'full':
                         op_registrations.append(OpRegistration(
                             operator_name=OPERATOR_NAME.substitute(option),
-                            registration_code=BACKEND_FUNCTION_REGISTRATION.substitute(env)))
+                            registration_code=BACKEND_FUNCTION_REGISTRATION.substitute(env),
+                            schema_registration_code=SCHEMA_REGISTRATION.substitute(option)))
                     else:
                         assert option['use_c10_dispatcher'] == 'unboxed_only'
                         op_registrations.append(OpRegistration(
                             operator_name=OPERATOR_NAME.substitute(option),
-                            registration_code=BACKEND_UNBOXEDONLY_FUNCTION_REGISTRATION.substitute(env)))
+                            registration_code=BACKEND_UNBOXEDONLY_FUNCTION_REGISTRATION.substitute(env),
+                            schema_registration_code=SCHEMA_REGISTRATION.substitute(option)))
 
     for declaration in declarations:
         for option in declaration['options']:

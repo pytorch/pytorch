@@ -40,7 +40,8 @@ public:
                                const Vec256<double>& mask) {
     return _mm256_blendv_pd(a.values, b.values, mask.values);
   }
-  static Vec256<double> arange(double base = 0., double step = 1.) {
+  template<typename step_t>
+  static Vec256<double> arange(double base = 0., step_t step = static_cast<step_t>(1)) {
     return Vec256<double>(base, base + step, base + 2 * step, base + 3 * step);
   }
   static Vec256<double> set(const Vec256<double>& a, const Vec256<double>& b,
@@ -92,9 +93,9 @@ public:
     return _mm256_movemask_pd(cmp);
   }
   Vec256<double> map(double (*f)(double)) const {
-    __at_align32__ double tmp[4];
+    __at_align32__ double tmp[size()];
     store(tmp);
-    for (int64_t i = 0; i < 4; i++) {
+    for (int64_t i = 0; i < size(); i++) {
       tmp[i] = f(tmp[i]);
     }
     return loadu(tmp);

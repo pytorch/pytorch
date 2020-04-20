@@ -1,11 +1,11 @@
 #include <google/protobuf/util/json_util.h>
 #include <google/protobuf/util/type_resolver_util.h>
 
+#include <torch/csrc/jit/frontend/script_type_parser.h>
 #include <torch/csrc/jit/serialization/import_export_helpers.h>
 #include <torch/csrc/jit/serialization/import_legacy.h>
 #include <torch/csrc/jit/serialization/import_source.h>
 #include <torch/csrc/jit/serialization/pickle.h>
-#include <torch/csrc/jit/frontend/script_type_parser.h>
 #include <torch/csrc/jit/serialization/source_range_serialization.h>
 #include <torch/csrc/jit/serialization/source_range_serialization_impl.h>
 
@@ -116,8 +116,7 @@ Module ScriptModuleDeserializer::LEGACY_deserialize() {
   LEGACY_loadTensorTable(&model_def);
   AT_ASSERT(proto_version < 6);
   if (proto_version == 2) {
-    const auto& list =
-        LEGACY_loadPickleArchive("attributes.pkl").toList();
+    const auto& list = LEGACY_loadPickleArchive("attributes.pkl").toList();
     LEGACY_pickled_ivalues_.insert(
         LEGACY_pickled_ivalues_.end(), list.begin(), list.end());
   } else if (proto_version >= 3) {
@@ -214,14 +213,11 @@ at::Tensor ScriptModuleDeserializer::LEGACY_loadTensor(
 
   if (device.type() == at::DeviceType::CPU) {
     if (tensor_proto.is_quantized()) {
-      result = at::_empty_affine_quantized(
-          {0},
-          type,
-          tensor_proto.scale(),
-          tensor_proto.zero_point())
-          .set_(storage_it->second, tensor_proto.offset(), dims, strides);
-    }
-    else {
+      result =
+          at::_empty_affine_quantized(
+              {0}, type, tensor_proto.scale(), tensor_proto.zero_point())
+              .set_(storage_it->second, tensor_proto.offset(), dims, strides);
+    } else {
       result =
           at::empty({0}, at::CPU(type).options())
               .set_(storage_it->second, tensor_proto.offset(), dims, strides);
@@ -278,8 +274,8 @@ Module ScriptModuleDeserializer::LEGACY_convertModule(
     auto sanitized = is_digits(atom) ? std::string("_") + atom : atom;
     LEGACY_moduleStack_.emplace_back(sanitized);
   }
-  auto module = Module(
-      c10::QualifiedName(LEGACY_moduleStack_), compilation_unit_);
+  auto module =
+      Module(c10::QualifiedName(LEGACY_moduleStack_), compilation_unit_);
   for (int i = 0; i < module_def.submodules_size(); ++i) {
     const torch::ModuleDef& sub_def = module_def.submodules(i);
     auto submodule = LEGACY_convertModule(sub_def);

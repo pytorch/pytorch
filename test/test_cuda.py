@@ -17,7 +17,7 @@ import torch
 import torch.cuda
 import torch.cuda.comm as comm
 from torch import multiprocessing as mp
-from torch._six import inf, nan
+from torch._six import inf, nan, container_abcs
 
 from test_torch import _TestTorchMixin
 
@@ -26,6 +26,7 @@ from torch.testing._internal.common_methods_invocations import tri_tests_args, t
 from torch.testing._internal.common_utils import TestCase, get_gpu_type, freeze_rng_state, run_tests, \
     PY3, IS_WINDOWS, NO_MULTIPROCESSING_SPAWN, skipIfRocm, \
     load_tests, slowTest, skipCUDANonDefaultStreamIf, TEST_WITH_ROCM, TEST_NUMPY
+from torch.testing._internal.autocast_test_lists import AutocastTestLists
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -96,6 +97,13 @@ class TestCuda(TestCase):
     _do_cuda_non_default_stream = True
     FIFTY_MIL_CYCLES = 50000000
 
+    def setUp(self):
+        super(TestCuda, self).setUp()
+        self.autocast_lists = AutocastTestLists(torch.device('cuda:0'))
+
+    def tearDown(self):
+        del self.autocast_lists
+        super(TestCuda, self).tearDown()
 
     def _check_memory_stat_consistency(self):
         snapshot = torch.cuda.memory_snapshot()
@@ -477,6 +485,23 @@ class TestCuda(TestCase):
         x = torch.zeros(10000000, dtype=torch.uint8).pin_memory()
         y = torch.ones(10000000, dtype=torch.uint8).cuda()
         _test_copy_non_blocking(x, y)
+
+    @unittest.skip("skipped because test could be flaky, see #35144")
+    def test_to_non_blocking(self):
+        def _test_to_non_blocking(a, non_blocking):
+            stream = torch.cuda.current_stream()
+            with torch.cuda.stream(stream):
+                b = a.to('cuda', non_blocking=non_blocking)
+                self.assertEqual(stream.query(), not non_blocking)
+                stream.synchronize()
+                self.assertEqual(a, b)
+
+        # 10MB copies
+        x = torch.ones(10000000, dtype=torch.uint8)
+        _test_to_non_blocking(x, True)
+
+        y = torch.ones(10000000, dtype=torch.uint8)
+        _test_to_non_blocking(y, False)
 
     def test_serialization_array_with_storage(self):
         x = torch.randn(5, 5).cuda()
@@ -2115,7 +2140,7 @@ t2.start()
         return self._create_scaling_models_optimizers(device=device) + (data, loss_fn, skip_iter)
 
     # _run_scaling_case generalizes some single-optimizer test logic to avoid too much copy-pasting below.
-    def _run_scaling_case(self, run, unskipped, skipped):
+    def _run_scaling_case(self, run, unskipped, skipped, atol=1e-7):
         # Ensure scaling can be disabled without changing user control flow.
         for enabled in True, False:
             mod_control, mod_scaling, opt_control, opt_scaling, data, loss_fn, skip_iter = self._create_scaling_case()
@@ -2137,7 +2162,29 @@ t2.start()
                 self.assertTrue(scaler.get_scale() == 1.0)
 
             for c, s in zip(mod_control.parameters(), mod_scaling.parameters()):
-                self.assertTrue(torch.allclose(c, s, atol=1e-7))
+                self.assertTrue(torch.allclose(c, s, atol=atol))
+
+    # Compares no scaling + no autocasting against scaling + autocasting.
+    def test_grad_scaling_autocast(self):
+        def run(data, model, optimizer, scaler, loss_fn, skip_iter, try_scaling_api):
+            for i, (input, target) in enumerate(data):
+                optimizer.zero_grad()
+                with torch.cuda.amp.autocast(enabled=try_scaling_api):
+                    output = model(input)
+                    loss = loss_fn(output, target)
+                if try_scaling_api:
+                    scaler.scale(loss).backward()
+                    if i == skip_iter and scaler.is_enabled():
+                        model[1].weight.grad.data.fill_(float('inf'))
+                    scaler.step(optimizer)
+                    scaler.update()
+                else:
+                    loss.backward()
+                    if (not scaler.is_enabled()) or (i != skip_iter):
+                        optimizer.step()
+
+        # sets atol=1e-3 because we're comparing pure fp32 arithmetic vs a mixture of fp16 and fp32
+        self._run_scaling_case(run, unskipped=3, skipped=1, atol=1e-3)
 
     def test_grad_scaling_clipping(self):
         def run(data, model, optimizer, scaler, loss_fn, skip_iter, try_scaling_api):
@@ -2520,6 +2567,246 @@ t2.start()
 
             for t in range(num_threads):
                 self.assertEqual(results[t].sum().item(), size * size)
+
+    def _run_autocast_outofplace(self, op, args, run_as_type, out_type=None, module=torch, add_kwargs=None):
+        # helper to cast args
+        def cast(val, to_type):
+            if isinstance(val, torch.Tensor):
+                return val.to(to_type) if val.is_floating_point() else val
+            elif isinstance(val, container_abcs.Iterable):
+                return type(val)(cast(v, to_type) for v in val)
+            else:
+                return val
+
+        if add_kwargs is None:
+            add_kwargs = {}
+
+        self.assertFalse(torch.is_autocast_enabled())
+        with torch.cuda.amp.autocast():
+            self.assertTrue(torch.is_autocast_enabled())
+
+            out_type = out_type if out_type is not None else run_as_type
+            output = output_method = None
+
+            # Try module.* variant, if requested:
+            if module is not None and hasattr(module, op):
+                output = getattr(module, op)(*args, **add_kwargs)
+                if isinstance(output, torch.Tensor):
+                    self.assertTrue(out_type == output.dtype,
+                                    "autocast for torch.{} produced {}, should produce {}"
+                                    .format(op, output.dtype, out_type))
+
+            # Try Tensor.* variant:
+            if hasattr(torch.Tensor, op):
+                output_method = getattr(args[0], op)(*args[1:], **add_kwargs)
+                if isinstance(output_method, torch.Tensor):
+                    self.assertTrue(out_type == output_method.dtype,
+                                    "autocast for torch.{} produced {}, should produce torch.{}"
+                                    .format(op, output_method.dtype, out_type))
+
+            self.assertTrue((output is not None) or (output_method is not None),
+                            "{} not found as an attribute on either Tensor or the requested module {}".format(
+                            op, module))
+
+            # If both torch.* and Tensor.* variants were found, check outputs are identical
+            if (output is not None) and (output_method is not None):
+                self.assertTrue(type(output) == type(output_method))
+                comparison = torch.equal(output, output_method) if isinstance(output, torch.Tensor) \
+                    else (output == output_method)
+                self.assertTrue(comparison, "torch.{0} result did not match Tensor.{0} result".format(op))
+
+            # Compare numerics to Python-side "autocasting" that (we expect) does the same thing
+            # as the C++-side autocasting, and should be bitwise accurate.
+            output_to_compare = output if output is not None else output_method
+            with torch.cuda.amp.autocast(enabled=False):
+                self.assertFalse(torch.is_autocast_enabled())
+
+                if module is not None and hasattr(module, op):
+                    control = getattr(module, op)(*cast(args, run_as_type), **add_kwargs)
+                else:
+                    control = getattr(args[0].to(run_as_type), op)(*cast(args[1:], run_as_type), **add_kwargs)
+                self.assertTrue(type(output_to_compare) == type(control))
+                comparison = torch.equal(output_to_compare, control) if isinstance(control, torch.Tensor) \
+                    else (output_to_compare == control)
+                self.assertTrue(comparison, "torch.{} result did not match control".format(op))
+            self.assertTrue(torch.is_autocast_enabled())
+        self.assertFalse(torch.is_autocast_enabled())
+
+    def args_maybe_kwargs(self, op_with_args):
+        if len(op_with_args) == 2:
+            return op_with_args[0], op_with_args[1], {}
+        else:
+            return op_with_args[0], op_with_args[1], op_with_args[2]
+
+    @skipIfRocm
+    @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
+    def test_autocast_torch_fp16(self):
+        with torch.backends.cudnn.flags(deterministic=True):
+            for op, args in self.autocast_lists.torch_fp16:
+                self._run_autocast_outofplace(op, args, torch.float16)
+
+    @skipIfRocm
+    @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
+    def test_autocast_torch_fp32(self):
+        for op_with_args in self.autocast_lists.torch_fp32:
+            op, args, maybe_kwargs = self.args_maybe_kwargs(op_with_args)
+            self._run_autocast_outofplace(op, args, torch.float32, add_kwargs=maybe_kwargs)
+
+    @skipIfRocm
+    @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
+    def test_autocast_torch_need_autocast_promote(self):
+        for op, args in self.autocast_lists.torch_need_autocast_promote:
+            self._run_autocast_outofplace(op, args, torch.float32)
+
+    @skipIfRocm
+    @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
+    def test_autocast_torch_expect_builtin_promote(self):
+        for op, args, out_type in self.autocast_lists.torch_expect_builtin_promote:
+            self._run_autocast_outofplace(op, args, torch.float32, out_type=out_type)
+
+    @skipIfRocm
+    @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
+    def test_autocast_nn_fp16(self):
+        with torch.backends.cudnn.flags(deterministic=True):
+            for op, args in self.autocast_lists.nn_fp16:
+                self._run_autocast_outofplace(op, args, torch.float16, module=torch._C._nn)
+
+    @skipIfRocm
+    @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
+    def test_autocast_nn_fp32(self):
+        for op, args in self.autocast_lists.nn_fp32:
+            self._run_autocast_outofplace(op, args, torch.float32, module=torch._C._nn)
+
+    @skipIfRocm
+    @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
+    def test_autocast_methods_fp16(self):
+        with torch.backends.cudnn.flags(deterministic=True):
+            for op, args in self.autocast_lists.methods_fp16:
+                self._run_autocast_outofplace(op, args, torch.float16, module=None)
+
+    @skipIfRocm
+    @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
+    def test_autocast_methods_fp32(self):
+        for op, args in self.autocast_lists.methods_fp32:
+            self._run_autocast_outofplace(op, args, torch.float32, module=None)
+
+    @skipIfRocm
+    @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
+    def test_autocast_methods_expect_builtin_promote(self):
+        for op, args, out_type in self.autocast_lists.methods_expect_builtin_promote:
+            self._run_autocast_outofplace(op, args, torch.float32, module=None, out_type=out_type)
+
+    @skipIfRocm
+    def test_autocast_banned(self):
+        with torch.cuda.amp.autocast():
+            for op, args, module in self.autocast_lists.banned:
+                with self.assertRaises(RuntimeError):
+                    getattr(module, op)(*args)
+
+    @skipIfRocm
+    def test_autocast_ignored_types(self):
+        with torch.cuda.amp.autocast():
+            for ignore_type in (torch.double, torch.int32):
+                a_ignore = torch.ones((8, 8), dtype=ignore_type, device="cuda:0")
+                b_ignore = torch.ones((8, 8), dtype=ignore_type, device="cuda:0")
+                c_16 = torch.ones((8, 8), dtype=torch.float16, device="cuda:0")
+
+                # Tests if CastPolicy::fp16 ops ignore double and int
+                # Currently, no ops belonging to this policy support integer inputs.
+                if ignore_type is torch.double:
+                    with self.assertRaises(RuntimeError):
+                        torch.mm(a_ignore, c_16)
+                    with torch.cuda.amp.autocast(enabled=False):
+                        type_no_autocast = torch.mm(a_ignore, b_ignore).dtype
+                    self.assertTrue(torch.mm(a_ignore, b_ignore).dtype is type_no_autocast)
+
+                # Tests if CastPolicy::fp32 ops ignore double and int
+                with torch.cuda.amp.autocast(enabled=False):
+                    type_no_autocast = torch.pow(a_ignore, 2.0).dtype
+                self.assertTrue(torch.pow(a_ignore, 2.0).dtype is type_no_autocast)
+
+                # Tests if CastPolicy::fp32_set_opt_dtype ops ignore double and int
+                with torch.cuda.amp.autocast(enabled=False):
+                    type_no_autocast = torch.sum(a_ignore).dtype
+                self.assertTrue(torch.sum(a_ignore).dtype is type_no_autocast)
+
+                # Tests if CastPolicy::fp32_append_dtype ops ignore double and int
+                # Currently, no ops belonging to this policy support integer inputs.
+                if ignore_type is torch.double:
+                    with torch.cuda.amp.autocast(enabled=False):
+                        type_no_autocast = torch.norm(a_ignore).dtype
+                    self.assertTrue(torch.norm(a_ignore).dtype is type_no_autocast)
+
+                # Tests if CastPolicy::promote ops ignore double and int
+                with self.assertRaises(RuntimeError):
+                    torch.cat((a_ignore, c_16))
+                with torch.cuda.amp.autocast(enabled=False):
+                    type_no_autocast = torch.cat((a_ignore, b_ignore)).dtype
+                self.assertTrue(torch.cat((a_ignore, b_ignore)).dtype is type_no_autocast)
+
+    @skipIfRocm
+    def test_autocast_custom_enabled(self):
+        class MyMM(torch.autograd.Function):
+            @staticmethod
+            @torch.cuda.amp.custom_fwd
+            def forward(ctx, a, b):
+                self.assertTrue(a.dtype is torch.float32)
+                self.assertTrue(b.dtype is torch.float32)
+                self.assertTrue(torch.is_autocast_enabled())
+                ctx.save_for_backward(a, b)
+                return a.mm(b)
+
+            @staticmethod
+            @torch.cuda.amp.custom_bwd
+            def backward(ctx, grad):
+                self.assertTrue(torch.is_autocast_enabled())
+                a, b = ctx.saved_tensors
+                return grad.mm(b.t()), a.t().mm(grad)
+
+        mymm = MyMM.apply
+
+        x = torch.randn((8, 8), device="cuda", dtype=torch.float32, requires_grad=True)
+        y = torch.randn((8, 8), device="cuda", dtype=torch.float32, requires_grad=True)
+
+        with torch.cuda.amp.autocast():
+            output = mymm(x, y)
+            self.assertTrue(output.dtype is torch.float16)
+            loss = output.sum()
+        loss.backward()
+
+    @skipIfRocm
+    def test_autocast_custom_disabled(self):
+        class MyMM(torch.autograd.Function):
+            @staticmethod
+            @torch.cuda.amp.custom_fwd(cast_inputs=torch.float32)
+            def forward(ctx, a, container):
+                b = container[1][0]
+                self.assertTrue(a.dtype is torch.float32)
+                self.assertTrue(b.dtype is torch.float32)
+                self.assertFalse(torch.is_autocast_enabled())
+                ctx.save_for_backward(a, b)
+                return a.mm(b)
+
+            @staticmethod
+            @torch.cuda.amp.custom_bwd
+            def backward(ctx, grad):
+                self.assertFalse(torch.is_autocast_enabled())
+                a, b = ctx.saved_tensors
+                return grad.mm(b.t()), None
+
+        mymm = MyMM.apply
+
+        x = torch.randn((8, 8), device="cuda", dtype=torch.float16, requires_grad=True)
+        # Puts one input tensor in a nested container.  y's contained Tensor won't receive a gradient,
+        # because torch.autograd.Function can't hand gradients back to non-Tensor forward arguments.
+        # Sets requires_grad=False explicitly so we don't lie about expecting a gradient.
+        y = (0, {0: torch.randn((8, 8), device="cuda", dtype=torch.float16, requires_grad=False)})
+
+        with torch.cuda.amp.autocast():
+            output = mymm(x, y)
+            self.assertTrue(output.dtype is torch.float32)
+            loss = output.sum()
+        loss.backward()
 
     @slowTest
     @unittest.skipIf(not TEST_LARGE_TENSOR, "not enough memory")

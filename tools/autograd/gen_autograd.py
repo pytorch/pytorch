@@ -119,6 +119,7 @@ def load_aten_declarations(path):
                 declaration['name'], declaration['overload_name'])
         else:
             declaration['type_wrapper_name'] = declaration['name']
+        declaration['operator_name_with_overload'] = declaration['schema_string'].split('(')[0]
         declaration['return_type'] = format_return_type(declaration['returns'])
 
         declaration['base_name'] = declaration['name']

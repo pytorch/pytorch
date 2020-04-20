@@ -18,7 +18,7 @@ if [ ! -d "${WORKSPACE_DIR}/miniconda3" ]; then
 fi
 export PATH="${WORKSPACE_DIR}/miniconda3/bin:$PATH"
 source ${WORKSPACE_DIR}/miniconda3/bin/activate
-retry conda install -y mkl mkl-include numpy pyyaml setuptools cmake cffi ninja
+retry conda install -y mkl mkl-include numpy pyyaml=5.3 setuptools=46.0.0 cmake cffi ninja
 
 # The torch.hub tests make requests to GitHub.
 #

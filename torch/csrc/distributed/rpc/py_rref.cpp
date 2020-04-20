@@ -113,8 +113,16 @@ bool PyRRef::isOwner() const {
   return rref_->isOwner();
 }
 
+bool PyRRef::confirmedByOwner() const {
+  return rref_->confirmedByOwner();
+}
+
 WorkerInfo PyRRef::owner() const {
   return RRefContext::getInstance().agent()->getWorkerInfo(rref_->owner());
+}
+
+std::string PyRRef::ownerName() const {
+  return rref_->ownerName();
 }
 
 py::object PyRRef::toHere() {
@@ -176,10 +184,6 @@ std::string PyRRef::str() const {
 
 py::tuple PyRRef::pickle() const {
   auto& ctx = RRefContext::getInstance();
-  // TODO: use a dispatch table to pickle/unpickle an RRef, and only only
-  // install the dispatch table only when there are indeed RPC activities. As
-  // a counter example, checkpointing a model with RRefs should not trigger
-  // forks to be added as a fork or a child.
   auto rrefForkData = ctx.prepareChildFork(rref_);
   return toPyTuple(rrefForkData);
 }

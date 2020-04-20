@@ -29,7 +29,7 @@
 
 namespace at { namespace native {
 
-void uniform_kernel_cuda(TensorIterator& iter, double from_, double to_, Generator* gen_) {
+void uniform_kernel_cuda(TensorIterator& iter, double from_, double to_, Generator gen_) {
   auto gen = get_generator_or_default<CUDAGenerator>(gen_, cuda::detail::getDefaultCUDAGenerator());
   AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "uniform_cuda", [&] {
     auto from = static_cast<scalar_t>(from_);
@@ -68,7 +68,7 @@ void uniform_kernel_cuda(TensorIterator& iter, double from_, double to_, Generat
    });
 }
 
-Tensor& uniform_cuda_(Tensor& self, double from, double to, Generator* gen) {
+Tensor& uniform_cuda_(Tensor& self, double from, double to, Generator gen) {
   auto iter = TensorIterator::nullary_op(self);
   uniform_kernel_cuda(iter, from, to, gen);
   return self;

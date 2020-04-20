@@ -156,7 +156,18 @@ void RpcAgent::rpcRetryCallback(
     // just the retry count.
     LOG(INFO) << "Send try " << std::to_string(earliestRpc->retryCount_ + 1)
               << " failed";
-    if (earliestRpc->retryCount_ < earliestRpc->options_.maxRetries) {
+    if (!rpcAgentRunning_.load()) {
+      // If the RPC Agent has shutdown, we cannot retry messages. Thus we mark
+      // the future with an error since the RPC was never completed
+      // successfully.
+      std::string errorMessage = c10::str(
+          "RPC Agent is no longer running on Node ",
+          RpcAgent::getWorkerInfo().id_,
+          ". Cannot retry message of type ",
+          message.type(),
+          ".");
+      earliestRpc->originalFuture_->setError(errorMessage);
+    } else if (earliestRpc->retryCount_ < earliestRpc->options_.maxRetries) {
       // If the previous future completed with an error and we haven't
       // completed maxRetries send attempts, we move the earliestRpc
       // struct to a new time point in the retry map (effectively

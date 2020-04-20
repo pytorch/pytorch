@@ -7,14 +7,22 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
+thread_local std::vector<std::shared_ptr<RRefContext::PendingUserState>>
+    RRefContext::userTable_;
+thread_local bool RRefContext::recording = false;
+
 namespace callback {
 void confirmPendingUser(
     const rpc::Message& message,
-    const c10::optional<utils::FutureError>& futErr) {
+    const c10::optional<utils::FutureError>& futErr,
+    const ForkId& expectedForkId) {
+  if (!futErr) {
+    auto rr = RemoteRet::fromMessage(message);
+    TORCH_INTERNAL_ASSERT(rr->forkId() == expectedForkId);
+  }
+  RRefContext::getInstance().delPendingUser(expectedForkId);
+  // Potentially propagate to the userRRef?
   RRefContext::handleException(futErr);
-  auto rr = RemoteRet::fromMessage(message);
-  auto& ctx = RRefContext::getInstance();
-  ctx.delPendingUser(rr->forkId());
 }
 
 c10::intrusive_ptr<RRef> finishCreatingOwnerRRef(
@@ -35,6 +43,7 @@ c10::intrusive_ptr<RRef> finishCreatingOwnerRRef(
 // Keys for RRef-related debug information.
 const std::string kNumOwnerRRefs = "num_owner_rrefs";
 const std::string kNumPendingUsers = "num_pending_users";
+const std::string kNumForks = "num_forks";
 
 RRefContext& RRefContext::getInstance() {
   // Leaky singleton to avoid module destructor races.
@@ -86,9 +95,14 @@ std::unordered_map<std::string, std::string> RRefContext::getDebugInfo() {
   std::unique_lock<std::mutex> lock(mutex_);
   auto ownerSize = owners_.size();
   auto numPendingUsers = pendingUsers_.size();
+  int numForks = 0;
+  for (const auto& owner : forks_) {
+    numForks += owner.second.size();
+  }
   lock.unlock();
   info[kNumOwnerRRefs] = c10::to_string(ownerSize);
   info[kNumPendingUsers] = c10::to_string(numPendingUsers);
+  info[kNumForks] = c10::to_string(numForks);
   return info;
 }
 
@@ -160,7 +174,10 @@ void RRefContext::delUser(
   {
     std::lock_guard<std::mutex> lock(destroyedMutex_);
     if (!destroyed_) {
-      auto fm = agent_->send(
+      // Sending an RRefUserDelete causes the receiver to run delForkOfOwner,
+      // which is now idempotent. See the comment at RRefContext::delForkOfOwner
+      // for more details.
+      auto fm = agent_->sendWithRetries(
           agent_->getWorkerInfo(owner),
           RRefUserDelete(rrefId, forkId).toMessage());
 
@@ -340,6 +357,7 @@ void RRefContext::notifyOwnerAndParentOfFork(
     const ForkId& forkId,
     worker_id_t parent,
     const c10::intrusive_ptr<RRef>& rref) {
+  // Fork is shared from owner.
   if (parent == rref->owner()) {
     if (parent == agent_->getWorkerInfo().id_) {
       // Owner sending RRef to self, remove the forkId as it was added during
@@ -361,23 +379,26 @@ void RRefContext::notifyOwnerAndParentOfFork(
       // Hence, it is not necessary to send another RREF_CHILD_ACCEPT or
       // RREF_FORK_REQUEST back to the owner. See Note [Early Fork
       // Registration].
+      std::lock_guard<std::mutex> lock(mutex_);
+      addConfirmedUser(forkId, rref);
     }
     return;
   }
 
+  // Fork is shared from user.
   if (rref->isOwner()) {
     // See Note [Useful Phantom Fork ID for User to Owner Call]
     // In this case, the owner is the caller, and it does not add the fork id
     // into forks_. Because, there will be no real `UserRRef` associated
     // with this fork ID.
-    auto fm = agent_->send(
+    auto fm = agent_->sendWithRetries(
         agent_->getWorkerInfo(parent), RRefChildAccept(forkId).toMessage());
     fm->addCallback([](const Message& /* unused */,
                        const c10::optional<utils::FutureError>& futErr) {
       handleException(futErr);
     });
   } else {
-    auto fm = agent_->send(
+    auto fm = agent_->sendWithRetries(
         agent_->getWorkerInfo(rref->owner()),
         RRefForkRequest(rref->rrefId(), forkId).toMessage());
 
@@ -411,19 +432,24 @@ void RRefContext::delPendingChild(const ForkId& forkId) {
   {
     std::lock_guard<std::mutex> lock(mutex_);
     auto iter = pendingChildren_.find(forkId);
-    TORCH_INTERNAL_ASSERT(
-        iter != pendingChildren_.end(),
-        "Inconsistent states: attempt to delete a non-exist child fork.");
-
-    // Since this UserRRef is removed from the map,
-    // the refcount of this UserRRef could reach to 0,
-    // so the "destructor", `release_resources()`, might be called,
-    // in which the lock is acquired again.
-    // So it must be destructed with the lock released.
-    // Meet this constraint by creating a temporary pointer to increase the
-    // refcount, extending its lifetime untill lock released.
-    deletedUser = iter->second; // Increase refcount.
-    pendingChildren_.erase(iter); // Decrease refcount.
+    // We first check whether the child exists in pendingChildren_. It's
+    // possible the child may have been removed by a previous send attempt, and
+    // this check (as opposed to an assertion here) ensures that messages that
+    // trigger this function are idempotent.
+    if (iter != pendingChildren_.end()) {
+      // Since this UserRRef is removed from the map,
+      // the refcount of this UserRRef could reach to 0,
+      // so the "destructor", `release_resources()`, might be called,
+      // in which the lock is acquired again.
+      // So it must be destructed with the lock released.
+      // Meet this constraint by creating a temporary pointer to increase the
+      // refcount, extending its lifetime untill lock released.
+      deletedUser = iter->second; // Increase refcount.
+      pendingChildren_.erase(iter); // Decrease refcount.
+    } else {
+      LOG(INFO) << "Ignoring duplicate request to delete child UserRRef with "
+                << "ForkId = " << forkId;
+    }
   }
   deleteAllUsersCV_.notify_all();
   // The refcount of this UserRRef could reach to 0,
@@ -438,43 +464,117 @@ void RRefContext::addPendingUser(
     const c10::intrusive_ptr<RRef>& rref) {
   TORCH_INTERNAL_ASSERT(
       !rref->isOwner(), "Attempt to add an OwnerRRef as a pending User.");
+
+  auto state = std::make_shared<PendingUserState>(rref);
+  if (recording) {
+    // adding and waiting for pending users are guaranteed to be called from the
+    // same thread, but deleting pending users will be called from another
+    // thread. As the delPendingUser will not be able to access the same
+    // thread_local variable, we cannot address this problem by making
+    // pendingUsers_ thread_local. Instead, pendingUsers_ and userTable_ share
+    // the same PendingUserState shared_ptr.
+    userTable_.push_back(state);
+  }
+
   std::lock_guard<std::mutex> lock(mutex_);
   TORCH_INTERNAL_ASSERT(
       pendingUsers_.find(forkId) == pendingUsers_.end(),
       "Inconsistent states: attempt to add the same UserRRef twice.");
-  pendingUsers_[forkId] = rref;
+
+  pendingUsers_.emplace(
+      std::piecewise_construct,
+      std::forward_as_tuple(forkId),
+      std::forward_as_tuple(state));
 }
 
 void RRefContext::delPendingUser(const ForkId& forkId) {
-  c10::intrusive_ptr<RRef> deletedUser;
+  std::shared_ptr<PendingUserState> deletedState = nullptr;
   {
     std::lock_guard<std::mutex> lock(mutex_);
     auto iter = pendingUsers_.find(forkId);
     TORCH_INTERNAL_ASSERT(
         iter != pendingUsers_.end(),
         "Inconsistent states: attempt to delete a non-exist UserRRef.");
-    confirmedUsers_.emplace(
-        std::piecewise_construct,
-        std::forward_as_tuple(forkId),
-        std::forward_as_tuple(iter->second));
 
-    // Since this UserRRef is removed from the map,
-    // the refcount of this UserRRef could reach to 0,
-    // so the "destructor", `release_resources()`, might be called,
-    // in which the lock is acquired again.
-    // So it must be destructed with the lock released.
-    // Meet this constraint by creating a temporary pointer to increase the
-    // refcount, extending its lifetime untill lock released.
-    deletedUser = iter->second; // Increase refcount.
+    // There are two reasons for keeping the deleted PendingUserState alive
+    // until exiting the critical section.
+    // (1) Since this UserRRef is removed from the map, the refcount of this
+    //     UserRRef could reach to 0. So the resource destructor
+    //     (`release_resources()`) might be called, in which the lock is
+    //     acquired again. Hence, it must be destructed with the lock released.
+    //     To meet this constraint, we intentionally create a temporary pointer
+    //     to increase the refcount of the deleted PendingUserState, extending
+    //     its lifetime untill lock released.
+    // (2) Since #34497, a user function only runs after all RRefs in the
+    //     arguments are confirmed by their owners, which is done by adding the
+    //     RPC processing logic as a callback to the UserRRef ready future. So,
+    //     calling `confirm` on the PendingUserState could trigger pending user
+    //     functions, which might in turn acquire the lock in RRefContext.
+    //     Hence, we must release the lock to prevent deadlock.
+    // NB: Another option is to use reentrant lock. However, it is better for
+    // the developers to fully understand the locking behavior instead of
+    // hiding the subtle logic using a reentrant lock.
+    deletedState = iter->second; // Increase refcount
+
+    addConfirmedUser(forkId, iter->second->rref_);
     pendingUsers_.erase(iter); // Decrease refcount.
   }
+  deletedState->confirm();
   deleteAllUsersCV_.notify_all();
-  deletedUser.reset(); // Decrease refcount.
+  deletedState.reset(); // Decrease refcount.
+}
+
+void RRefContext::addConfirmedUser(
+    const ForkId& forkId,
+    const c10::intrusive_ptr<RRef>& rref) {
+  // Notice, caller need to hold the mutex for confirmedUsers_.
+  // std::lock_guard<std::mutex> lock(mutex_);
+  confirmedUsers_.emplace(
+      std::piecewise_construct,
+      std::forward_as_tuple(forkId),
+      std::forward_as_tuple(rref));
+}
+
+void RRefContext::recordThreadLocalPendingRRefs() {
+  TORCH_INTERNAL_ASSERT(
+      userTable_.empty(),
+      "User RRef Table should be empty when start recording");
+  recording = true;
+}
+
+std::shared_ptr<torch::utils::Future<bool>> RRefContext::
+    waitForThreadLocalPendingRRefs() {
+  auto future = std::make_shared<torch::utils::Future<bool>>();
+  if (userTable_.empty()) {
+    future->markCompleted(true);
+  } else {
+    auto remainingRRefs =
+        std::make_shared<std::atomic<uint64_t>>(userTable_.size());
+    for (auto& state : userTable_) {
+      state->future_.addCallback(
+          [future, remainingRRefs](
+              const bool& /* unused */,
+              const c10::optional<utils::FutureError>& /* unused */) {
+            auto localCount = remainingRRefs->fetch_sub(1);
+            if (localCount == 1) {
+              future->markCompleted(true);
+            }
+          });
+    }
+    userTable_.clear();
+  }
+  recording = false;
+  return future;
+}
+
+void RRefContext::clearRecordedPendingRRefsOnError() {
+  userTable_.clear();
+  recording = false;
 }
 
 void RRefContext::finishForkRequest(const ForkId& forkId, worker_id_t parent) {
   delPendingUser(forkId);
-  auto fm = agent_->send(
+  auto fm = agent_->sendWithRetries(
       agent_->getWorkerInfo(parent), RRefChildAccept(forkId).toMessage());
 
   fm->addCallback([](const Message& /* unused */,
@@ -505,34 +605,60 @@ void RRefContext::addForkOfOwner(const RRefId& rrefId, const ForkId& forkId) {
   rrefForks.insert(forkId);
 }
 
+void RRefContext::addForkOfOwnerIfNotPresent(
+    const RRefId& rrefId,
+    const ForkId& forkId) {
+  std::lock_guard<std::mutex> lock(mutex_);
+  auto& rrefForks = forks_[rrefId];
+  // We first check whether the child exists in rrefForks. It's possible
+  // the child may have been added by a previous send attempt, and this check
+  // (as opposed to an assertion here) ensures that messages that trigger this
+  // function are idempotent.
+  if (rrefForks.find(forkId) == rrefForks.end()) {
+    rrefForks.insert(forkId);
+  } else {
+    LOG(INFO) << "Ignoring duplicate request to add Fork of OwnerRRef with "
+              << "RRefId = " << rrefId << ", ForkId = " << forkId;
+  }
+}
+
 c10::intrusive_ptr<RRef> RRefContext::delForkOfOwner(
     const RRefId& rrefId,
     const ForkId& forkId) {
   c10::intrusive_ptr<RRef> deletedRRef;
   bool ownerReduced = false;
+  // There were previously multiple TORCH_CHECKs in this function that checked
+  // whether the passed in fork was known by the user and whether the fork had
+  // already been deleted. These assertions are now replaced with nested if
+  // statements to ensure this function is idempotent. This makes it safe to
+  // retry RRefUserDelete messages.
   {
     std::lock_guard<std::mutex> lock(mutex_);
     auto rrefIter = forks_.find(rrefId);
-    TORCH_INTERNAL_ASSERT(
-        rrefIter != forks_.end(),
-        "Inconsistent states, deleting a fork before the owner knows it.");
-    auto& rrefForks = rrefIter->second;
-    auto forkIter = rrefForks.find(forkId);
-    TORCH_INTERNAL_ASSERT(
-        forkIter != rrefForks.end(),
-        "Attempt to delete a non-exist fork ",
-        forkId);
-
-    rrefForks.erase(forkId);
-
-    if (rrefForks.empty()) {
-      auto ownerIter = owners_.find(rrefId);
-      if (ownerIter != owners_.end()) {
-        deletedRRef = ownerIter->second;
-        owners_.erase(ownerIter);
-        ownerReduced = true;
+    if (rrefIter != forks_.end()) {
+      auto& rrefForks = rrefIter->second;
+      auto forkIter = rrefForks.find(forkId);
+      if (forkIter != rrefForks.end()) {
+        rrefForks.erase(forkId);
+      } else {
+        LOG(INFO)
+            << "Could not find UserRRef instance, "
+            << "RRefId = " << rrefId << ", ForkId = " << forkId
+            << ", likely because it was deleted by a previously retried message";
       }
-      forks_.erase(rrefIter);
+      if (rrefForks.empty()) {
+        auto ownerIter = owners_.find(rrefId);
+        if (ownerIter != owners_.end()) {
+          deletedRRef = ownerIter->second;
+          owners_.erase(ownerIter);
+          ownerReduced = true;
+        }
+        forks_.erase(rrefIter);
+      }
+    } else {
+      LOG(INFO)
+          << "Could not find OwnerRRef with RRefId = " << rrefId
+          << ", likely because it was deleted by a previously retried message";
     }
   }
   if (ownerReduced) {

@@ -127,6 +127,10 @@ enum class DispatchKey : uint8_t {
   // operators which support autograd.
   XLAPreAutograd,
 
+  // Autocasting precedes VariableTypeId, to ensure casts are autograd-exposed
+  // and inputs are saved for backward in the post-autocast type.
+  AutocastTensorId,
+
   // Here are some reserved pre-autograd keys for user-defined backends, see Note [Private use TensorId]
   PrivateUse1_PreAutogradTensorId,
   PrivateUse2_PreAutogradTensorId,
