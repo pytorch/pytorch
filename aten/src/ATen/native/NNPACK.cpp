@@ -54,9 +54,9 @@ bool _nnpack_available() {
 
 #else
 
-#include "nnpack.h"
+#include <nnpack.h>
 
-#include "caffe2/utils/threadpool/ThreadPoolMobile.h"
+#include <caffe2/utils/threadpool/ThreadPoolMobile.h>
 #include <ATen/native/ConvUtils.h>
 
 namespace at {

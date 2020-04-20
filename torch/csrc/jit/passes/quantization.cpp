@@ -87,6 +87,7 @@ std::vector<std::string> _single_input_general_call_funcs = {
     "upsample_nearest",
     "relu",
     "sigmoid",
+    "tanh",
 };
 
 // Similar to prim::CallFunctions, there are aten ops that doesn't
@@ -123,6 +124,7 @@ std::vector<std::string> _single_input_general_aten_funcs = {
     "repeat_interleave",
     "relu",
     "sigmoid",
+    "tanh",
 };
 
 struct FuncArg {

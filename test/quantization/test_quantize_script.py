@@ -1460,6 +1460,7 @@ class TestQuantizeScriptPTSQOps(JitTestCase):
                 self.avgpool3d = torch.nn.AvgPool3d(3)
                 self.conv = torch.nn.Conv2d(3, 3, 3)
                 self.sigmoid = torch.nn.Sigmoid()
+                self.tanh = torch.nn.Tanh()
 
             def forward(self, x):
                 x = self.conv(x)
@@ -1500,6 +1501,9 @@ class TestQuantizeScriptPTSQOps(JitTestCase):
                 x = x.permute(0, 2, 3, 1)
                 x = torch.repeat_interleave(x, 3, 1)
                 x = self.conv(x)
+                x = self.tanh(x)
+                x = F.tanh(x)
+                x = torch.tanh(x)
                 return x
 
         m = torch.jit.script(M())
@@ -1681,10 +1685,10 @@ class TestQuantizeDynamicScript(JitTestCase):
             def forward(self, x):
                 return self.fc(x)
 
-        data = [(torch.rand((1, 5), dtype=torch.float), torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
+        data = torch.rand((1, 5), dtype=torch.float)
         qconfig_dict = {'': default_dynamic_qconfig}
         model = torch.jit.script(M()).eval()
-        model = quantize_dynamic_script(model, qconfig_dict, _test_only_eval_fn, [data])
+        model = quantize_dynamic_script(model, qconfig_dict, data)
         FileCheck().check("quantized::linear_dynamic") \
                    .run(model.graph)
 
