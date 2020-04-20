@@ -1,5 +1,17 @@
 #include <ATen/core/op_registration/op_registration.h>
 
+#include <torch/custom_class.h>
+#include <ATen/native/quantized/cpu/conv_packed_params.h>
+template <int kSpatialDim>
+torch::jit::class_<ConvPackedParamsBase<kSpatialDim>> register_conv_params();
+
+namespace {
+
+static auto conv2d_params = register_conv_params<2>();
+static auto conv3d_params = register_conv_params<3>();
+
+} // namespace
+
 TORCH_LIBRARY(quantized, m) {
   m.def("add(Tensor qa, Tensor qb, float scale, int zero_point) -> Tensor qc");
   m.def("add_relu(Tensor qa, Tensor qb, float scale, int zero_point) -> Tensor qc");
