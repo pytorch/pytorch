@@ -617,11 +617,10 @@ def quantize_linear_modules(module, dtype=torch.int8):
     if isinstance(module, torch.nn.Linear):
         if dtype == torch.int8:
             return QuantizedLinear(module)
-        elif dtype == torch.float16:
+        if dtype == torch.float16:
             return QuantizedLinearFP16(module)
-        else:
-            raise RuntimeError(
-                "Unsupported dtype: {}".format(dtype))
+        raise RuntimeError(
+            "Unsupported dtype: {}".format(dtype))
     return module
 
 
