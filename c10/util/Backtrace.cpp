@@ -1,6 +1,6 @@
-#include "c10/util/Backtrace.h"
-#include "c10/util/Optional.h"
-#include "c10/util/Type.h"
+#include <c10/util/Backtrace.h>
+#include <c10/util/Optional.h>
+#include <c10/util/Type.h>
 
 #include <functional>
 #include <memory>
@@ -124,8 +124,9 @@ c10::optional<FrameInformation> parse_frame_information(
 #elif defined(_MSC_VER)
 namespace {
 const int max_name_len = 256;
-void get_module_name(char* module, void* addr) {
+std::string get_module_base_name(void* addr) {
   HMODULE h_module;
+  char module[max_name_len];
   strcpy(module, "");
   GetModuleHandleEx(
       GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
@@ -135,7 +136,41 @@ void get_module_name(char* module, void* addr) {
   if (h_module != NULL) {
     GetModuleFileNameA(h_module, module, max_name_len);
   }
+  char* last_slash_pos = strrchr(module, '\\');
+  if (last_slash_pos) {
+    std::string module_base_name(last_slash_pos + 1);
+    return module_base_name;
+  } else {
+    std::string module_base_name(module);
+    return module_base_name;
+  }
 }
+class SymbolHelper {
+ public:
+  static SymbolHelper& getInstance() {
+    static SymbolHelper instance;
+    return instance;
+  }
+  bool inited = false;
+  HANDLE process;
+
+ private:
+  SymbolHelper() {
+    process = GetCurrentProcess();
+    DWORD flags = SymGetOptions();
+    SymSetOptions(flags | SYMOPT_DEFERRED_LOADS);
+    inited = SymInitialize(process, NULL, TRUE);
+  }
+  ~SymbolHelper() {
+    if (inited) {
+      SymCleanup(process);
+    }
+  }
+
+ public:
+  SymbolHelper(SymbolHelper const&) = delete;
+  void operator=(SymbolHelper const&) = delete;
+};
 } // anonymous namespace
 #endif // SUPPORTS_BACKTRACE
 
@@ -227,19 +262,16 @@ std::string get_backtrace(
   // We always skip this frame (backtrace).
   frames_to_skip += 1;
 
-  HANDLE process;
   DWORD64 displacement;
   DWORD disp;
   std::unique_ptr<IMAGEHLP_LINE64> line;
 
   char buffer[sizeof(SYMBOL_INFO) + MAX_SYM_NAME * sizeof(TCHAR)];
-  char module[max_name_len];
   PSYMBOL_INFO p_symbol = (PSYMBOL_INFO)buffer;
 
   std::unique_ptr<void*[]> back_trace(new void*[maximum_number_of_frames]);
   bool with_symbol = false;
   bool with_line = false;
-  bool init_symbol;
 
   // The backtrace string goes into here.
   std::ostringstream stream;
@@ -251,37 +283,28 @@ std::string get_backtrace(
       back_trace.get(),
       NULL);
 
-  // Initialize symbols
-  process = GetCurrentProcess();
-  init_symbol = SymInitialize(process, NULL, TRUE);
+  // Initialize symbols if necessary
+  SymbolHelper& sh = SymbolHelper::getInstance();
 
   for (USHORT i_frame = 0; i_frame < n_frame; ++i_frame) {
     // Get the address and the name of the symbol
-    if (init_symbol) {
+    if (sh.inited) {
       p_symbol->SizeOfStruct = sizeof(SYMBOL_INFO);
       p_symbol->MaxNameLen = MAX_SYM_NAME;
       with_symbol = SymFromAddr(
-          process, (ULONG64)back_trace[i_frame], &displacement, p_symbol);
+          sh.process, (ULONG64)back_trace[i_frame], &displacement, p_symbol);
     }
 
     // Get the line number and the module
-    if (init_symbol) {
+    if (sh.inited) {
       line.reset(new IMAGEHLP_LINE64());
       line->SizeOfStruct = sizeof(IMAGEHLP_LINE64);
       with_line = SymGetLineFromAddr64(
-          process, (ULONG64)back_trace[i_frame], &disp, line.get());
+          sh.process, (ULONG64)back_trace[i_frame], &disp, line.get());
     }
 
     // Get the module basename
-    get_module_name(module, back_trace[i_frame]);
-    char* basename = nullptr;
-    char* last_slash_pos = nullptr;
-    if (module) {
-      last_slash_pos = strrchr(module, '\\');
-      if (last_slash_pos) {
-        basename = last_slash_pos + 1;
-      }
-    }
+    std::string module = get_module_base_name(back_trace[i_frame]);
 
     // The pattern on Windows is
     // `<return-address> <symbol-address>
@@ -290,9 +313,9 @@ std::string get_backtrace(
            << back_trace[i_frame] << std::dec;
     if (with_symbol) {
       stream << std::setfill('0') << std::setw(16) << std::uppercase << std::hex
-             << p_symbol->Address << std::dec << " " << basename << "!" << p_symbol->Name;
+             << p_symbol->Address << std::dec << " " << module << "!" << p_symbol->Name;
     } else {
-      stream << " <unknown symbol address> " << basename << "!<unknown symbol>";
+      stream << " <unknown symbol address> " << module << "!<unknown symbol>";
     }
     stream << " [";
     if (with_line) {
@@ -301,10 +324,6 @@ std::string get_backtrace(
       stream << "<unknown file> @ <unknown line number>";
     }
     stream << "]" << std::endl;
-  }
-
-  if (init_symbol) {
-    SymCleanup(process);
   }
 
   return stream.str();
