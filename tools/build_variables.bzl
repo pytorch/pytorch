@@ -402,6 +402,7 @@ def glob_libtorch_python_sources():
         "torch/csrc/distributed/rpc/testing/init.cpp",
         "torch/csrc/distributed/rpc/unpickled_python_call.cpp",
         "torch/csrc/distributed/rpc/unpickled_python_remote_call.cpp",
+        "torch/csrc/distributed/rpc/tensorpipe_agent.cpp",
         "torch/csrc/jit/python/init.cpp",
         "torch/csrc/jit/passes/inline_fork_wait.cpp",
         "torch/csrc/jit/passes/onnx.cpp",
@@ -492,4 +493,4 @@ def glob_libtorch_python_sources():
     ])
 
     _libtorch_python_sources.extend(native.glob(["test/cpp/tensorexpr/test_*.cpp"]))
-
+    return _libtorch_python_sources

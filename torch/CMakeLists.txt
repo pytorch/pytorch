@@ -140,6 +140,7 @@ set(TORCH_PYTHON_INCLUDE_DIRECTORIES
 
     ${TORCH_ROOT}/third_party/gloo
     ${TORCH_ROOT}/third_party/onnx
+    ${TORCH_ROOT}/third_party/tensorpipe
     ${pybind11_INCLUDE_DIRS}
 
     ${TORCH_SRC_DIR}/csrc
@@ -261,6 +262,7 @@ if(USE_DISTRIBUTED)
         ${TORCH_SRC_DIR}/csrc/distributed/rpc/python_functions.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/rpc/python_rpc_handler.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/rpc/request_callback_impl.cpp
+        ${TORCH_SRC_DIR}/csrc/distributed/rpc/tensorpipe_agent.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/rpc/testing/faulty_process_group_agent.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/rpc/testing/init.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/rpc/unpickled_python_call.cpp
