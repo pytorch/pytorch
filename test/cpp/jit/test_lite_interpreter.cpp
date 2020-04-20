@@ -139,6 +139,24 @@ void testLiteInterpreterTuple() {
   AT_ASSERT(output.toTuple()->elements()[1].toInt() == 2);
 }
 
+void testLiteInterpreterDict() {
+  Module m("m");
+  m.define(R"JIT(
+  def foo(self, x):
+      return {"result": x + 1}
+
+  def forward(self, x):
+      d = self.foo(x)
+      return d
+  )JIT");
+  std::stringstream ss;
+  m._save_for_mobile(ss);
+  mobile::Module bc = _load_for_mobile(ss);
+  std::vector<torch::jit::IValue> inputs({torch::ones({})});
+  auto output = bc.run_method("forward", inputs);
+  AT_ASSERT(output.toGenericDict().at("result").toTensor().item().toInt() == 2);
+}
+
 void testLiteInterpreterPrimOverload() {
   /*
   // temporarily disabled

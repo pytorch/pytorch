@@ -435,12 +435,14 @@ SparseTensor& add_out_sparse_cuda(SparseTensor& r_, const SparseTensor& t, const
   Tensor t_values_ = t._values().to(commonDtype);
   Tensor s_values_ = src._values().to(commonDtype);
 
-  AT_DISPATCH_ALL_TYPES_AND(
-    at::ScalarType::Half, commonDtype, "add_out_sparse_cuda", [&] {
+  AT_DISPATCH_ALL_TYPES_AND2(
+    at::ScalarType::Half, at::ScalarType::BFloat16, commonDtype, "add_out_sparse_cuda", [&] {
+      AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "add_out_sparse_cuda", [&] {
         if (value.to<scalar_t>() != static_cast<scalar_t>(1)) {
           s_values_ = s_values_.mul(value);
         }
       });
+    });
   LongTensor r_indices_ = at::cat({t_indices_, s_indices_}, 1);
   Tensor r_values_ = at::cat({t_values_, s_values_}, 0);
 

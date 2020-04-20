@@ -11,9 +11,12 @@ namespace jit {
 
 namespace {
 
+// custom ops don't do tracing/autograd in VariableType yet, we need to handle
+// tracing here.
 // TODO This currently only handles tensors with requires_grad==False correctly.
 //      It should also handle autograd.
-Operator createOperatorFromC10(const c10::OperatorHandle& op) {
+Operator createOperatorFromC10_withTracingHandledHere(
+    const c10::OperatorHandle& op) {
   return Operator(op, [op](Stack& stack) {
     RECORD_FUNCTION(op.schema().name(), stack);
     const auto input_size = op.schema().arguments().size();
@@ -146,20 +149,51 @@ Operator createOperatorFromC10(const c10::OperatorHandle& op) {
   });
 }
 
+Operator createOperatorFromC10_withTracingNotHandledHere(
+    const c10::OperatorHandle& op) {
+  return Operator(op, [op](Stack& stack) {
+    c10::Dispatcher::singleton().callBoxed(op, &stack);
+    return 0;
+  });
+}
+
 class RegistrationListener final : public c10::OpRegistrationListener {
  public:
   void onOperatorRegistered(const c10::OperatorHandle& op) override {
-    if (at::is_aten_op(op.schema().operator_name())) {
-      // Ignore ATen ops for now because they have their own code
-      // to expose them to JIT in register_aten_ops.cpp
-      // TODO Remove register_aten_ops.cpp and also use this registration here
+    if (op.schema().name() == "aten::backward") {
+      // aten::backward has a manual wrapper in register_prim_ops_fulljit.cpp.
+      // We should not additionally export the c10 aten::backward op from
+      // native_functions.yaml to JIT. This special handling is needed because
+      // aten::backward requires AliasAnalysisKind::CONSERVATIVE but all ops
+      // from native_functions.yaml get AliasAnalysisKind::FROM_SCHEMA.
+      // TODO Find a better way to handle this.
       return;
     }
-    torch::jit::registerOperator(createOperatorFromC10(op));
+    if (at::is_aten_op_and_unboxing_is_already_handled_by_c10(
+            op.schema().operator_name())) {
+      // Those ops do tracing/autograd in VariableType, no need to handle it
+      // here
+      torch::jit::registerOperator(
+          createOperatorFromC10_withTracingNotHandledHere(op));
+    } else if (at::is_aten_op_and_unboxing_is_not_handled_by_c10_yet(
+                   op.schema().operator_name())) {
+      // register_aten_ops.cpp registers the jit unboxing wrapper for this op,
+      // no need to do anything here.
+    } else {
+      // custom ops don't do tracing/autograd in VariableType yet, we need to
+      // handle tracing here.
+      torch::jit::registerOperator(
+          createOperatorFromC10_withTracingHandledHere(op));
+    }
   }
 
   void onOperatorDeregistered(const c10::OperatorHandle& op) override {
-    if (at::is_aten_op(op.schema().operator_name())) {
+    if (op.schema().name() == "aten::backward") {
+      // see comment in onOperatorRegistered for why aten::backward is excluded
+      return;
+    }
+    if (at::is_aten_op_and_unboxing_is_not_handled_by_c10_yet(
+            op.schema().operator_name())) {
       return;
     }
     torch::jit::deregisterOperator(op.schema());

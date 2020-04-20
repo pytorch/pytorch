@@ -11,13 +11,19 @@ import numpy as np
 import six
 
 
-def SubFunctionThatThrowsRuntimeError():
-    raise RuntimeError("This is an intentional exception.")
+class CustomError(Exception):
+    pass
 
 
-def MainOpFunctionThatThrowsRuntimeError(inputs, _):
-    return SubFunctionThatThrowsRuntimeError()
+def SubFunctionThatThrowsCustomError():
+    raise CustomError("This is an intentional exception.")
 
+
+def MainOpFunctionThatThrowsCustomError(inputs, _):
+    return SubFunctionThatThrowsCustomError()
+
+def MainOpFunctionThatThrowsCustomErrorInBuilder(inputs, _):
+    raise CustomError("This is an intentional exception in builder.")
 
 def op_builder(name, index, extra):
     iterations = [0]
@@ -48,8 +54,13 @@ class PythonOpTest(hu.HypothesisTestCase):
         workspace.RunOperatorOnce(op)
 
     def test_exception(self):
-        op = CreatePythonOperator(MainOpFunctionThatThrowsRuntimeError, [], [])
-        with six.assertRaisesRegex(self, RuntimeError, "This is an intentional exception."):
+        op = CreatePythonOperator(MainOpFunctionThatThrowsCustomError, [], [])
+        with six.assertRaisesRegex(self, CustomError, "This is an intentional exception."):
+            workspace.RunOperatorOnce(op)
+
+    def test_exception_builder(self):
+        op = CreatePythonOperator(MainOpFunctionThatThrowsCustomErrorInBuilder, [], [])
+        with six.assertRaisesRegex(self, CustomError, "This is an intentional exception in builder."):
             workspace.RunOperatorOnce(op)
 
     @given(x=hu.tensor())

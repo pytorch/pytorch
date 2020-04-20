@@ -1094,7 +1094,7 @@ def glu(input, dim=-1):
         if type(input) is not Tensor and has_torch_function((input,)):
             return handle_torch_function(glu, (input,), input, dim=dim)
     if input.dim() == 0:
-        raise RuntimeError("glu does not suppport scalars because halving size must be even")
+        raise RuntimeError("glu does not support scalars because halving size must be even")
     return torch._C._nn.glu(input, dim)
 
 
@@ -1412,7 +1412,7 @@ def softmax(input, dim=None, _stacklevel=3, dtype=None):
 
     Softmax is defined as:
 
-    :math:`\text{Softmax}(x_{i}) = \frac{exp(x_i)}{\sum_j exp(x_j)}`
+    :math:`\text{Softmax}(x_{i}) = \frac{\exp(x_i)}{\sum_j \exp(x_j)}`
 
     It is applied to all slices along dim, and will re-scale them so that the elements
     lie in the range `[0, 1]` and sum to 1.
@@ -1571,6 +1571,7 @@ def sigmoid(input):
 
 
 def hardsigmoid(input, inplace=False):
+    # type: (Tensor, bool) -> Tensor
     r"""hardsigmoid(input) -> Tensor
 
     Applies the element-wise function
@@ -1645,6 +1646,7 @@ def bilinear(input1, input2, weight, bias=None):
 
 
 def hardswish(input, inplace=False):
+    # type: (Tensor, bool) -> Tensor
     r"""Applies the hardswish function, element-wise, as described in the paper:
 
     `Searching for MobileNetV3`_.
@@ -2882,7 +2884,7 @@ def _interp_output_size(dim, closed_over_args):  # noqa: F811
 
         is_float_scale_factor = False
         for scale in scale_factors:
-            is_float_scale_factor = math.floor(scale) == scale
+            is_float_scale_factor = math.floor(scale) != scale
             if is_float_scale_factor:
                 break
 

@@ -1,5 +1,6 @@
 #include <torch/csrc/jit/tensorexpr/kernel.h>
 
+#include <c10/util/string_utils.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/tensorexpr/analysis.h>
 #include <torch/csrc/jit/tensorexpr/ir_printer.h>
@@ -47,14 +48,14 @@ static std::vector<ExprHandle> texprSizes(const c10::VaryingShape& shape) {
 
 static std::vector<DimArg> texprDims(const torch::jit::Value* v) {
   if (v->type()->kind() != TypeKind::TensorType) {
-    throw malformed_input();
+    throw malformed_input("type is not Tensor");
   }
 
   auto tt = v->type()->cast<TensorType>();
   std::vector<DimArg> dimArgs;
   int i = 0;
   for (auto const& s : texprSizes(tt->sizes())) {
-    dimArgs.emplace_back(DimArg(s, "i" + std::to_string(i++)));
+    dimArgs.emplace_back(DimArg(s, "i" + c10::to_string(i++)));
   }
   return dimArgs;
 }
@@ -86,7 +87,7 @@ ExprHandle TensorExprKernel::constant(const torch::jit::Value* v) {
   }
 
   if (!scalars_.count(v->unique())) {
-    throw malformed_input();
+    throw malformed_input("no scalar in Constant");
   }
 
   return scalars_.at(v->unique());
@@ -134,7 +135,7 @@ ExprHandle TensorExprKernel::demoteOutput(
     const ExprHandle& e,
     const torch::jit::Value* v) {
   if (v->type()->kind() != TypeKind::TensorType) {
-    throw malformed_input();
+    throw malformed_input("type is not tensor in demoteOutput");
   }
 
   auto tt = *v->type()->cast<TensorType>()->scalarType();
@@ -912,7 +913,7 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
             int64_t dim = constant(n->inputs()[1]).AsNode<IntImm>()->value();
             if (dim < 0) {
               if (axes.size() == 0) {
-                throw malformed_input();
+                throw malformed_input("axes are zero handling unsqueeze");
               }
 
               dim += axes.size() - 1;
@@ -1009,7 +1010,6 @@ void TensorExprKernel::lowerToBackend(BackendType backendType) {
       l.computeInline(l.getLoopBodyFor(tensorOutputs_[i]));
 
       Tensor* tensor = tensorOutputs[i];
-      const Var* index = tensor->arg(0);
       int loopLevels = getTECudaPointwiseLoopLevels();
       const int kDefaultLoopLevels = 2;
       loopLevels = (loopLevels > 0) ? loopLevels : kDefaultLoopLevels;
@@ -1044,7 +1044,7 @@ void TensorExprKernel::lowerToBackend(BackendType backendType) {
         l.setGPUThreadIndex(inner2, 0);
       } else {
         throw std::runtime_error(
-            "Invalid loop-level: " + std::to_string(loopLevels));
+            "Invalid loop-level: " + c10::to_string(loopLevels));
       }
     }
   } else if (backendType == kLLVMCodeGen) {
@@ -1147,7 +1147,7 @@ void TensorExprKernel::lowerToBackend(BackendType backendType) {
     default:
       throw std::runtime_error(
           "invalid backend type: " +
-          std::to_string(static_cast<int>(backendType_)));
+          c10::to_string(static_cast<int>(backendType_)));
   }
 
   codegenCache_.emplace(
@@ -1275,8 +1275,8 @@ void TensorExprKernel::pickAndCheckBackendType(
     // TODO: if we have to support muliptole backends with the same subgraph,
     // we need to add kernel caching.
     throw std::runtime_error(
-        "Inconsistent backendType: " + std::to_string(backendType_) + " vs " +
-        std::to_string(backendType));
+        "Inconsistent backendType: " + c10::to_string(backendType_) + " vs " +
+        c10::to_string(backendType));
   }
 }
 
@@ -1290,7 +1290,7 @@ void TensorExprKernel::codeGenRun(
       break;
     default:
       throw std::runtime_error(
-          "Invalid backend type: " + std::to_string(backendType_));
+          "Invalid backend type: " + c10::to_string(backendType_));
   }
 }
 
@@ -1302,7 +1302,7 @@ ExprHandle TensorExprKernel::createInputIndexExpr(
     const c10::VaryingStrides& contiguity,
     const std::unordered_map<int64_t, VarHandle>& sizeVars) {
   if (axes.size() != strides.size()) {
-    throw malformed_input();
+    throw malformed_input("axes and strides size mismatch");
   }
 
   std::vector<ShapeArg> strideArgs;
@@ -1311,7 +1311,7 @@ ExprHandle TensorExprKernel::createInputIndexExpr(
   ExprHandle index = 0;
 
   if (axes.size() == 0) {
-    throw malformed_input();
+    throw malformed_input("axes are zero creating input index");
   }
   size_t n = axes.size() - 1;
 
@@ -1319,7 +1319,7 @@ ExprHandle TensorExprKernel::createInputIndexExpr(
     // For discontiguous tensors, create a parameter to represent stride.
     if (!*contiguity[i]) {
       VarHandle v = VarHandle{
-          "stride_" + buffer.data()->name_hint() + "_" + std::to_string(i),
+          "stride_" + buffer.data()->name_hint() + "_" + c10::to_string(i),
           kInt};
       strideArgs.emplace_back(n - i, v);
       stride = v;
@@ -1331,7 +1331,7 @@ ExprHandle TensorExprKernel::createInputIndexExpr(
     if (sizeVal < 0) {
       auto it = sizeVars.find(sizeVal);
       if (it == sizeVars.end()) {
-        throw malformed_input();
+        throw malformed_input("cannot dind size when creating input index");
       }
 
       auto const& v = it->second;
@@ -1364,14 +1364,14 @@ void TensorExprKernel::bindInput(const torch::jit::Value* input) {
         auto const& size = *tt->sizes()[i];
         if (size < 0) {
           VarHandle v(
-              "size_" + std::to_string(input->unique()) + "_" +
-                  std::to_string(i),
+              "size_" + c10::to_string(input->unique()) + "_" +
+                  c10::to_string(i),
               kInt);
           sizeVars.emplace(size, v);
           inputTensorDims.emplace_back(v);
         } else {
           inputTensorDims.emplace_back(
-              DimArg(IntImm::make(size), "i" + std::to_string(i)));
+              DimArg(IntImm::make(size), "i" + c10::to_string(i)));
         }
       }
 #ifdef DYNAMIC_SHAPES
@@ -1457,7 +1457,7 @@ void TensorExprKernel::compile() {
   // Move output operands from `tensors_` to `tensorOutputs_`
   for (const auto& output : graph_->outputs()) {
     if (!tensors_.count(output->unique())) {
-      throw malformed_input();
+      throw malformed_input("cannot find output Tensor");
     }
     tensorOutputs_.emplace_back(tensors_.at(output->unique()));
     tensors_.erase(output->unique());
@@ -1526,7 +1526,7 @@ void TensorExprKernel::runKernel(Stack& stack) {
       } else {
         const IntImm* s = dynamic_cast<const IntImm*>(dim);
         if (!s) {
-          throw malformed_input(dim);
+          throw malformed_input("output expected Int", dim);
         }
         tensorSize.push_back(s->value());
       }

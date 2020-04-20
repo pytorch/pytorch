@@ -59,17 +59,17 @@ but operating on 4-bit rowwise quantized matrices with fused storage
         "operator FloatToFused4BitRowwiseQuantized")
     .Input(
         1,
+        "WEIGHTS",
+        "Vector of weights to scale rows of DATA with before reduction")
+    .Input(
+        2,
         "INDICES",
         "Integer vector containing indices of the first "
         "dimension of DATA for the slices that are being aggregated")
     .Input(
-        2,
+        3,
         "LENGTHS",
         "Vector with the same sum of elements as the first dimension of DATA")
-    .Input(
-        3,
-        "WEIGHTS",
-        "Vector of weights to scale rows of DATA with before reduction")
     .Output(0, "output", "output");
 NO_GRADIENT(SparseLengthsWeightedSumFused4BitRowwise);
 
@@ -165,17 +165,17 @@ but operating on 2-bit rowwise quantized matrices with fused storage
         "operator FloatToFused2BitRowwiseQuantized")
     .Input(
         1,
+        "WEIGHTS",
+        "Vector of weights to scale rows of DATA with before reduction")
+    .Input(
+        2,
         "INDICES",
         "Integer vector containing indices of the first "
         "dimension of DATA for the slices that are being aggregated")
     .Input(
-        2,
+        3,
         "LENGTHS",
         "Vector with the same sum of elements as the first dimension of DATA")
-    .Input(
-        3,
-        "WEIGHTS",
-        "Vector of weights to scale rows of DATA with before reduction")
     .Output(0, "output", "output");
 NO_GRADIENT(SparseLengthsWeightedSumFused2BitRowwise);
 
@@ -312,17 +312,17 @@ matrices with fused storage (where each row stores quantized values, and then
         "operator FloatToFused4BitRowwiseQuantized")
     .Input(
         1,
+        "WEIGHTS",
+        "Vector of weights to scale rows of DATA with before reduction")
+    .Input(
+        2,
         "INDICES",
         "Integer vector containing indices of the first "
         "dimension of DATA for the slices that are being aggregated")
     .Input(
-        2,
+        3,
         "LENGTHS",
         "Vector with the same sum of elements as the first dimension of DATA")
-    .Input(
-        3,
-        "WEIGHTS",
-        "Vector of weights to scale rows of DATA with before reduction")
     .Input(
         4,
         "COMPRESSED_INDICES_MAPPING",
@@ -432,17 +432,17 @@ matrices with fused storage (where each row stores quantized values, and then
         "operator FloatToFused4BitRowwiseQuantized")
     .Input(
         1,
+        "WEIGHTS",
+        "Vector of weights to scale rows of DATA with before reduction")
+    .Input(
+        2,
         "INDICES",
         "Integer vector containing indices of the first "
         "dimension of DATA for the slices that are being aggregated")
     .Input(
-        2,
+        3,
         "LENGTHS",
         "Vector with the same sum of elements as the first dimension of DATA")
-    .Input(
-        3,
-        "WEIGHTS",
-        "Vector of weights to scale rows of DATA with before reduction")
     .Input(
         4,
         "COMPRESSED_INDICES_MAPPING",
@@ -552,17 +552,17 @@ matrices with fused storage (where each row stores quantized values, and then
         "operator FloatToFused2BitRowwiseQuantized")
     .Input(
         1,
+        "WEIGHTS",
+        "Vector of weights to scale rows of DATA with before reduction")
+    .Input(
+        2,
         "INDICES",
         "Integer vector containing indices of the first "
         "dimension of DATA for the slices that are being aggregated")
     .Input(
-        2,
+        3,
         "LENGTHS",
         "Vector with the same sum of elements as the first dimension of DATA")
-    .Input(
-        3,
-        "WEIGHTS",
-        "Vector of weights to scale rows of DATA with before reduction")
     .Input(
         4,
         "COMPRESSED_INDICES_MAPPING",
