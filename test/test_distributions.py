@@ -434,7 +434,7 @@ EXAMPLES = [
     Example(MixtureSameFamily, [
         {
             'mixture_distribution': Categorical(torch.rand(5, requires_grad=True)),
-            'component_distribution': Normal(torch.randn(5, requires_grad=True), 
+            'component_distribution': Normal(torch.randn(5, requires_grad=True),
                                              torch.rand(5, requires_grad=True)),
         },
         {
@@ -442,7 +442,7 @@ EXAMPLES = [
             'component_distribution': MultivariateNormal(
                 loc=torch.randn(5, 2, requires_grad=True),
                 covariance_matrix=torch.tensor([[2.0, 0.3], [0.3, 0.25]], requires_grad=True)),
-        },     
+        },
     ]),
     Example(VonMises, [
         {
@@ -913,9 +913,9 @@ class TestDistributions(TestCase):
         self.assertRaises(NotImplementedError, Bernoulli(r).rsample)
 
         # check entropy computation
-        self.assertEqual(Bernoulli(p).entropy(), torch.tensor([0.6108, 0.5004, 0.6730]), prec=1e-4)
+        self.assertEqual(Bernoulli(p).entropy(), torch.tensor([0.6108, 0.5004, 0.6730]), atol=1e-4)
         self.assertEqual(Bernoulli(torch.tensor([0.0])).entropy(), torch.tensor([0.0]))
-        self.assertEqual(Bernoulli(s).entropy(), torch.tensor(0.6108), prec=1e-4)
+        self.assertEqual(Bernoulli(s).entropy(), torch.tensor(0.6108), atol=1e-4)
 
     def test_bernoulli_enumerate_support(self):
         examples = [
@@ -962,8 +962,8 @@ class TestDistributions(TestCase):
         self._check_log_prob(Geometric(logits=p.log() - (-p).log1p()), ref_log_prob)
 
         # check entropy computation
-        self.assertEqual(Geometric(p).entropy(), scipy.stats.geom(p.detach().numpy(), loc=-1).entropy(), prec=1e-3)
-        self.assertEqual(float(Geometric(s).entropy()), scipy.stats.geom(s, loc=-1).entropy().item(), prec=1e-3)
+        self.assertEqual(Geometric(p).entropy(), scipy.stats.geom(p.detach().numpy(), loc=-1).entropy(), atol=1e-3)
+        self.assertEqual(float(Geometric(s).entropy()), scipy.stats.geom(s, loc=-1).entropy().item(), atol=1e-3)
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_geometric_sample(self):
@@ -1047,8 +1047,8 @@ class TestDistributions(TestCase):
         bin1 = Binomial(total_count, torch.tensor(0.5))
         samples = bin1.sample(torch.Size((100000,)))
         self.assertTrue((samples <= total_count.type_as(samples)).all())
-        self.assertEqual(samples.mean(dim=0), bin1.mean, prec=0.02)
-        self.assertEqual(samples.var(dim=0), bin1.variance, prec=0.02)
+        self.assertEqual(samples.mean(dim=0), bin1.mean, atol=0.02)
+        self.assertEqual(samples.var(dim=0), bin1.variance, atol=0.02)
 
     def test_negative_binomial(self):
         p = torch.arange(0.05, 1, 0.1).requires_grad_()
@@ -1165,7 +1165,7 @@ class TestDistributions(TestCase):
         self._check_log_prob(Categorical(logits=p.log()), ref_log_prob)
 
         # check entropy computation
-        self.assertEqual(Categorical(p).entropy(), torch.tensor([1.0114, 1.0297]), prec=1e-4)
+        self.assertEqual(Categorical(p).entropy(), torch.tensor([1.0114, 1.0297]), atol=1e-4)
         self.assertEqual(Categorical(s).entropy(), torch.tensor([0.0, 0.0]))
 
     def test_categorical_enumerate_support(self):
@@ -1467,7 +1467,7 @@ class TestDistributions(TestCase):
         set_rng_seed(1)
         self.assertEqual(HalfNormal(std_delta).sample(sample_shape=(1, 2)),
                          torch.tensor([[[0.0, 0.0], [0.0, 0.0]]]),
-                         prec=1e-4)
+                         atol=1e-4)
 
         self._gradcheck_log_prob(HalfNormal, (std,))
         self._gradcheck_log_prob(HalfNormal, (1.0,))
@@ -1514,7 +1514,7 @@ class TestDistributions(TestCase):
         set_rng_seed(1)
         self.assertEqual(LogNormal(mean_delta, std_delta).sample(sample_shape=(1, 2)),
                          torch.tensor([[[math.exp(1), 1.0], [math.exp(1), 1.0]]]),
-                         prec=1e-4)
+                         atol=1e-4)
 
         self._gradcheck_log_prob(LogNormal, (mean, std))
         self._gradcheck_log_prob(LogNormal, (mean, 1.0))
@@ -1566,7 +1566,7 @@ class TestDistributions(TestCase):
                          torch.tensor([math.exp(1) / (1. + 1. + math.exp(1)),
                                        1. / (1. + 1. + math.exp(1)),
                                        1. / (1. + 1. + math.exp(1))]),
-                         prec=1e-4)
+                         atol=1e-4)
 
         self._gradcheck_log_prob(LogisticNormal, (mean, std))
         self._gradcheck_log_prob(LogisticNormal, (mean, 1.0))
@@ -1617,24 +1617,24 @@ class TestDistributions(TestCase):
             Categorical(torch.rand(5)),
             Normal(torch.randn(5), torch.rand(5)))
         normal_case_1d_batch = MixtureSameFamily(
-            Categorical(torch.rand(3, 5)), 
+            Categorical(torch.rand(3, 5)),
             Normal(torch.randn(3, 5), torch.rand(3, 5)))
         normal_case_1d_multi_batch = MixtureSameFamily(
-            Categorical(torch.rand(4, 3, 5)), 
+            Categorical(torch.rand(4, 3, 5)),
             Normal(torch.randn(4, 3, 5), torch.rand(4, 3, 5)))
         normal_case_2d = MixtureSameFamily(
             Categorical(torch.rand(5)),
             Independent(Normal(torch.randn(5, 2), torch.rand(5, 2)), 1))
         normal_case_2d_batch = MixtureSameFamily(
-            Categorical(torch.rand(3, 5)), 
+            Categorical(torch.rand(3, 5)),
             Independent(Normal(torch.randn(3, 5, 2), torch.rand(3, 5, 2)), 1))
         normal_case_2d_multi_batch = MixtureSameFamily(
-            Categorical(torch.rand(4, 3, 5)), 
+            Categorical(torch.rand(4, 3, 5)),
             Independent(Normal(torch.randn(4, 3, 5, 2), torch.rand(4, 3, 5, 2)), 1))
 
         self.assertEqual(normal_case_1d.sample().size(), ())
         self.assertEqual(normal_case_1d.sample((2,)).size(), (2,))
-        self.assertEqual(normal_case_1d.sample((2, 7)).size(), (2, 7))            
+        self.assertEqual(normal_case_1d.sample((2, 7)).size(), (2, 7))
         self.assertEqual(normal_case_1d_batch.sample().size(), (3,))
         self.assertEqual(normal_case_1d_batch.sample((2,)).size(), (2, 3))
         self.assertEqual(normal_case_1d_batch.sample((2, 7)).size(), (2, 7, 3))
@@ -1644,7 +1644,7 @@ class TestDistributions(TestCase):
 
         self.assertEqual(normal_case_2d.sample().size(), (2,))
         self.assertEqual(normal_case_2d.sample((2,)).size(), (2, 2))
-        self.assertEqual(normal_case_2d.sample((2, 7)).size(), (2, 7, 2))            
+        self.assertEqual(normal_case_2d.sample((2, 7)).size(), (2, 7, 2))
         self.assertEqual(normal_case_2d_batch.sample().size(), (3, 2))
         self.assertEqual(normal_case_2d_batch.sample((2,)).size(), (2, 3, 2))
         self.assertEqual(normal_case_2d_batch.sample((2, 7)).size(), (2, 7, 3, 2))
@@ -1668,7 +1668,7 @@ class TestDistributions(TestCase):
             self.assertAlmostEqual(log_prob, expected, places=3)
 
         self._check_log_prob(
-            MixtureSameFamily(Categorical(probs=probs), 
+            MixtureSameFamily(Categorical(probs=probs),
                               Normal(loc, scale)), ref_log_prob)
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
@@ -1695,7 +1695,7 @@ class TestDistributions(TestCase):
         self._check_sampler_sampler(
             MixtureSameFamily(Categorical(probs=probs), Normal(loc, scale)),
             ScipyMixtureNormal(probs.numpy(), loc.numpy(), scale.numpy()),
-            '''MixtureSameFamily(Categorical(probs={}), 
+            '''MixtureSameFamily(Categorical(probs={}),
             Normal(loc={}, scale={}))'''.format(probs, loc, scale))
 
     def test_normal(self):
@@ -1716,7 +1716,7 @@ class TestDistributions(TestCase):
         set_rng_seed(1)
         self.assertEqual(Normal(loc_delta, scale_delta).sample(sample_shape=(1, 2)),
                          torch.tensor([[[1.0, 0.0], [1.0, 0.0]]]),
-                         prec=1e-4)
+                         atol=1e-4)
 
         self._gradcheck_log_prob(Normal, (loc, scale))
         self._gradcheck_log_prob(Normal, (loc, 1.0))
@@ -1865,9 +1865,9 @@ class TestDistributions(TestCase):
         d = LowRankMultivariateNormal(mean, cov_factor, cov_diag)
         samples = d.rsample((100000,))
         empirical_mean = samples.mean(0)
-        self.assertEqual(d.mean, empirical_mean, prec=0.01)
+        self.assertEqual(d.mean, empirical_mean, atol=0.01)
         empirical_var = samples.var(0)
-        self.assertEqual(d.variance, empirical_var, prec=0.02)
+        self.assertEqual(d.variance, empirical_var, atol=0.02)
 
     def test_multivariate_normal_shape(self):
         mean = torch.randn(5, 3, requires_grad=True)
@@ -1983,7 +1983,7 @@ class TestDistributions(TestCase):
                                     multivariate=True)
         self._check_sampler_sampler(MultivariateNormal(mean, precision_matrix=prec),
                                     scipy.stats.multivariate_normal(mean.detach().numpy(), cov.detach().numpy()),
-                                    'MultivariateNormal(loc={}, prec={})'.format(mean, prec),
+                                    'MultivariateNormal(loc={}, atol={})'.format(mean, prec),
                                     multivariate=True)
         self._check_sampler_sampler(MultivariateNormal(mean, scale_tril=scale_tril),
                                     scipy.stats.multivariate_normal(mean.detach().numpy(), cov.detach().numpy()),
@@ -2005,9 +2005,9 @@ class TestDistributions(TestCase):
         d = MultivariateNormal(mean, scale_tril=scale_tril)
         samples = d.rsample((100000,))
         empirical_mean = samples.mean(0)
-        self.assertEqual(d.mean, empirical_mean, prec=0.01)
+        self.assertEqual(d.mean, empirical_mean, atol=0.01)
         empirical_var = samples.var(0)
-        self.assertEqual(d.variance, empirical_var, prec=0.05)
+        self.assertEqual(d.variance, empirical_var, atol=0.05)
 
     def test_exponential(self):
         rate = torch.randn(5, 5).abs().requires_grad_()
@@ -2062,7 +2062,7 @@ class TestDistributions(TestCase):
         set_rng_seed(0)
         self.assertEqual(Laplace(loc_delta, scale_delta).sample(sample_shape=(1, 2)),
                          torch.tensor([[[1.0, 0.0], [1.0, 0.0]]]),
-                         prec=1e-4)
+                         atol=1e-4)
 
         self._gradcheck_log_prob(Laplace, (loc, scale))
         self._gradcheck_log_prob(Laplace, (loc, 1.0))
@@ -2438,11 +2438,11 @@ class TestDistributions(TestCase):
         self._check_log_prob(ContinuousBernoulli(logits=p.log() - (-p).log1p()), ref_log_prob)
 
         # check entropy computation
-        self.assertEqual(ContinuousBernoulli(p).entropy(), torch.tensor([-0.02938, -0.07641, -0.00682]), prec=1e-4)
+        self.assertEqual(ContinuousBernoulli(p).entropy(), torch.tensor([-0.02938, -0.07641, -0.00682]), atol=1e-4)
         # entropy below corresponds to the clamped value of prob when using float 64
         # the value for float32 should be -1.76898
-        self.assertEqual(ContinuousBernoulli(torch.tensor([0.0])).entropy(), torch.tensor([-2.58473]))
-        self.assertEqual(ContinuousBernoulli(s).entropy(), torch.tensor(-0.02938), prec=1e-4)
+        self.assertEqual(ContinuousBernoulli(torch.tensor([0.0])).entropy(), torch.tensor([-2.58473]), atol=1e-5)
+        self.assertEqual(ContinuousBernoulli(s).entropy(), torch.tensor(-0.02938), atol=1e-4)
 
     def test_continuous_bernoulli_3d(self):
         p = torch.full((2, 3, 5), 0.5).requires_grad_()
@@ -2857,7 +2857,7 @@ class TestRsample(TestCase):
             num = 1.0 - 2.0 * alpha - 4.0 * alpha**2
             den = (1.0 + alpha)**2 * (1.0 + 2.0 * alpha)**3
             expected_grad = num / den
-            self.assertEqual(actual_grad, expected_grad, 0.002, '\n'.join([
+            self.assertEqual(actual_grad, expected_grad, atol=0.002, message='\n'.join([
                 "alpha = alpha_c + %.2g" % shift,
                 "expected_grad: %.5g" % expected_grad,
                 "actual_grad: %.5g" % actual_grad,
@@ -3690,7 +3690,7 @@ class TestKL(TestCase):
                 expected = -dist.log_prob(x).mean(0)
                 ignore = (expected == inf) | (expected == -inf)
                 expected[ignore] = actual[ignore]
-                self.assertEqual(actual, expected, prec=0.2, message='\n'.join([
+                self.assertEqual(actual, expected, atol=0.2, message='\n'.join([
                     '{} example {}/{}, incorrect .entropy().'.format(Dist.__name__, i + 1, len(params)),
                     'Expected (monte carlo) {}'.format(expected),
                     'Actual (analytic) {}'.format(actual),
@@ -3763,7 +3763,7 @@ class TestNumericalStability(TestCase):
                         probs=None,
                         logits=None,
                         expected_gradient=None,
-                        prec=1e-5):
+                        atol=1e-5):
         if probs is not None:
             p = probs.detach().requires_grad_()
             dist = dist_class(p)
@@ -3774,13 +3774,13 @@ class TestNumericalStability(TestCase):
         log_pdf.sum().backward()
         self.assertEqual(log_pdf,
                          expected_value,
-                         prec=prec,
+                         atol=atol,
                          message='Incorrect value for tensor type: {}. Expected = {}, Actual = {}'
                          .format(type(x), expected_value, log_pdf))
         if expected_gradient is not None:
             self.assertEqual(p.grad,
                              expected_gradient,
-                             prec=prec,
+                             atol=atol,
                              message='Incorrect gradient for tensor type: {}. Expected = {}, Actual = {}'
                              .format(type(x), expected_gradient, p.grad))
 
@@ -3813,14 +3813,14 @@ class TestNumericalStability(TestCase):
                                  x=tensor_type([0]),
                                  expected_value=tensor_type([math.log(1e-4)]),
                                  expected_gradient=tensor_type([-10000]),
-                                 prec=2)
+                                 atol=2)
 
             self._test_pdf_score(dist_class=Bernoulli,
                                  logits=tensor_type([math.log(9999)]),
                                  x=tensor_type([0]),
                                  expected_value=tensor_type([math.log(1e-4)]),
                                  expected_gradient=tensor_type([-1]),
-                                 prec=1e-3)
+                                 atol=1e-3)
 
     def test_bernoulli_with_logits_underflow(self):
         for tensor_type, lim in ([(torch.FloatTensor, -1e38),
@@ -3928,21 +3928,21 @@ class TestNumericalStability(TestCase):
                                  x=tensor_type([1]),
                                  expected_value=tensor_type([expec_val(1, probs=1e-4)]),
                                  expected_gradient=tensor_type(tensor_type([expec_grad(1, probs=1e-4)])),
-                                 prec=1e-3)
+                                 atol=1e-3)
 
             self._test_pdf_score(dist_class=ContinuousBernoulli,
                                  probs=tensor_type([1 - 1e-4]),
                                  x=tensor_type([0.1]),
                                  expected_value=tensor_type([expec_val(0.1, probs=1 - 1e-4)]),
                                  expected_gradient=tensor_type([expec_grad(0.1, probs=1 - 1e-4)]),
-                                 prec=2)
+                                 atol=2)
 
             self._test_pdf_score(dist_class=ContinuousBernoulli,
                                  logits=tensor_type([math.log(9999)]),
                                  x=tensor_type([0]),
                                  expected_value=tensor_type([expec_val(0, logits=math.log(9999))]),
                                  expected_gradient=tensor_type([expec_grad(0, logits=math.log(9999))]),
-                                 prec=1e-3)
+                                 atol=1e-3)
 
             self._test_pdf_score(dist_class=ContinuousBernoulli,
                                  logits=tensor_type([0.001]),
