@@ -115,6 +115,8 @@ def hparams(hparam_dict=None, metric_dict=None):
 
     ssi = SessionStartInfo()
     for k, v in hparam_dict.items():
+        if v is None:
+            continue
         if isinstance(v, int) or isinstance(v, float):
             ssi.hparams[k].number_value = v
             continue
@@ -308,7 +310,7 @@ def image(tag, tensor, rescale=1, dataformats='NCHW'):
     return Summary(value=[Summary.Value(tag=tag, image=image)])
 
 
-def image_boxes(tag, tensor_image, tensor_boxes, rescale=1, dataformats='CHW'):
+def image_boxes(tag, tensor_image, tensor_boxes, rescale=1, dataformats='CHW', labels=None):
     '''Outputs a `Summary` protocol buffer with images.'''
     tensor_image = make_np(tensor_image)
     tensor_image = convert_to_HWC(tensor_image, dataformats)
@@ -317,11 +319,12 @@ def image_boxes(tag, tensor_image, tensor_boxes, rescale=1, dataformats='CHW'):
         np.float32) * _calc_scale_factor(tensor_image)
     image = make_image(tensor_image.astype(np.uint8),
                        rescale=rescale,
-                       rois=tensor_boxes)
+                       rois=tensor_boxes,
+                       labels=labels)
     return Summary(value=[Summary.Value(tag=tag, image=image)])
 
 
-def draw_boxes(disp_image, boxes):
+def draw_boxes(disp_image, boxes, labels=None):
     # xyxy format
     num_boxes = boxes.shape[0]
     list_gt = range(num_boxes)
@@ -331,12 +334,12 @@ def draw_boxes(disp_image, boxes):
                                       boxes[i, 1],
                                       boxes[i, 2],
                                       boxes[i, 3],
-                                      display_str=None,
+                                      display_str=None if labels is None else labels[i],
                                       color='Red')
     return disp_image
 
 
-def make_image(tensor, rescale=1, rois=None):
+def make_image(tensor, rescale=1, rois=None, labels=None):
     """Convert a numpy representation of an image to Image protobuf"""
     from PIL import Image
     height, width, channel = tensor.shape
@@ -344,7 +347,7 @@ def make_image(tensor, rescale=1, rois=None):
     scaled_width = int(width * rescale)
     image = Image.fromarray(tensor)
     if rois is not None:
-        image = draw_boxes(image, rois)
+        image = draw_boxes(image, rois, labels=labels)
     image = image.resize((scaled_width, scaled_height), Image.ANTIALIAS)
     import io
     output = io.BytesIO()
