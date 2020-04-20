@@ -182,6 +182,65 @@ RegisterOperators reg({
         },
         aliasAnalysisFromSchema()),
     Operator(
+        "prim::RaiseException(str msg) -> ()",
+        [](Stack& stack) {
+          throw JITException(pop(stack).toStringRef());
+          return 0;
+        },
+        aliasAnalysisFromSchema()),
+    Operator(
+        "aten::Size(int[] sizes) -> int[]",
+        [](Stack& stack) { return 0; },
+        aliasAnalysisFromSchema()),
+    Operator(
+        "aten::size(Tensor self) -> int[]",
+        [](Stack& stack) {
+          auto t = std::move(pop(stack)).toTensor();
+          pack(stack, t.sizes().vec());
+          return 0;
+        },
+        aliasAnalysisFromSchema()),
+    Operator(
+        // note the compiler knows to type TupleIndex more accurately than it
+        // is listed here.
+        "prim::TupleIndex(Any tup, int i) -> Any",
+        [](Stack& stack) {
+          int64_t index = pop(stack).toInt();
+          auto tuple = pop(stack).toTuple();
+          auto norm_index = normalizeIndex(index, tuple->elements().size());
+          if (norm_index < 0 ||
+              norm_index > static_cast<int64_t>(tuple->elements().size())) {
+            throw std::out_of_range("Tuple list index out of range");
+          }
+          stack.emplace_back(tuple->elements()[norm_index]);
+          return 0;
+        },
+        aliasAnalysisSpecialCase()),
+    Operator(
+        "aten::ne.int_list(int[] a, int[] b) -> bool",
+        listNe<int64_t>,
+        aliasAnalysisFromSchema()),
+    Operator(
+        "prim::unchecked_unwrap_optional(t(a)? optional) -> t(a)",
+        noop,
+        aliasAnalysisFromSchema()),
+    Operator(
+        "prim::device(Tensor a) -> Device",
+        [](Stack& stack) {
+          push(stack, pop(stack).toTensor().device());
+          return 0;
+        },
+        aliasAnalysisFromSchema()),
+    Operator(
+        "prim::dtype(Tensor a) -> int",
+        [](Stack& stack) {
+          at::Tensor a;
+          pop(stack, a);
+          push(stack, static_cast<int64_t>(a.scalar_type()));
+          return 0;
+        },
+        aliasAnalysisFromSchema()),
+    Operator(
         "aten::__not__(bool self) -> bool",
         [](Stack& stack) {
           push(stack, !pop(stack).toBool());
@@ -341,6 +400,10 @@ RegisterOperators reg({
     DEFINE_COMPARISON_OP(aten::gt, a > b),
     DEFINE_COMPARISON_OP(aten::le, a <= b),
     DEFINE_COMPARISON_OP(aten::ge, a >= b),
+
+    DEFINE_BINARY_OP(aten::add, a + b),
+    DEFINE_BINARY_OP(aten::sub, a - b),
+    DEFINE_BINARY_OP(aten::mul, a* b),
 });
 
 int dictSetItem(Stack& stack) {
