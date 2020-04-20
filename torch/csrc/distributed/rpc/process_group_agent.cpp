@@ -11,6 +11,10 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
+namespace {
+constexpr auto kSecToMsConversion = 1000;
+}
+
 //////////////////////////  MessageCounter  /////////////////////////////////
 
 ProcessGroupAgent::MessageCounter::MessageCounter(int worldSize)
@@ -330,7 +334,8 @@ std::shared_ptr<FutureMessage> ProcessGroupAgent::send(
     // for all RPCs.
     auto timeout = rpcTimeoutSeconds == kUnsetRpcTimeout
         ? getRpcTimeout()
-        : std::chrono::milliseconds(static_cast<int>(rpcTimeoutSeconds * 1000));
+        : std::chrono::milliseconds(
+              static_cast<int>(rpcTimeoutSeconds * kSecToMsConversion));
 
     // Prepare endTime from timeout. Set infinite timeout if
     // specified.
