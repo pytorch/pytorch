@@ -12,12 +12,13 @@ import torch.testing._internal.common_utils as common
 import torch
 import torch.backends.cudnn
 import torch.utils.cpp_extension
-from torch.utils.cpp_extension import CUDA_HOME
+from torch.utils.cpp_extension import CUDA_HOME, ROCM_HOME
 
 
 TEST_CUDA = torch.cuda.is_available() and CUDA_HOME is not None
 TEST_CUDNN = False
-if TEST_CUDA:
+TEST_ROCM = torch.cuda.is_available() and torch.version.hip is not None and ROCM_HOME is not None
+if TEST_CUDA and torch.version.cuda is not None:  # the skip CUDNN test for ROCm
     CUDNN_HEADER_EXISTS = os.path.isfile(os.path.join(CUDA_HOME, "include/cudnn.h"))
     TEST_CUDNN = (
         TEST_CUDA and CUDNN_HEADER_EXISTS and torch.backends.cudnn.is_available()
@@ -109,6 +110,7 @@ class TestCppExtensionJIT(common.TestCase):
             ],
             extra_cuda_cflags=["-O2"],
             verbose=True,
+            keep_intermediates=False,
         )
 
         x = torch.zeros(100, device="cuda", dtype=torch.float32)
@@ -184,6 +186,7 @@ class TestCppExtensionJIT(common.TestCase):
                 os.environ['TORCH_CUDA_ARCH_LIST'] = old_envvar
 
     @unittest.skipIf(not TEST_CUDA, "CUDA not found")
+    @unittest.skipIf(TEST_ROCM, "disabled on rocm")
     def test_jit_cuda_archflags(self):
         # Test a number of combinations:
         #   - the default for the machine we're testing on
