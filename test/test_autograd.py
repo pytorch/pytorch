@@ -3765,6 +3765,7 @@ for shape in [(1,), ()]:
 
         test_dtype(torch.double)
         test_dtype(torch.cdouble)
+
     def test_autograd_complex_views_python(self):
         # This is not necessarily the absolute correct behavior, but this is the current
         # one. This test is here to make sure that any change to this behavior is detected

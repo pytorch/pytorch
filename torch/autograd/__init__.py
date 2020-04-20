@@ -29,7 +29,7 @@ def _make_grads(outputs, grads):
                                    + str(outputs.index(out)) + "] has a shape of "
                                    + str(out.shape) + ".")
             if (out.dtype != grad.dtype):
-               raise RuntimeError("Mismatch in dtype: grad_output["
+                raise RuntimeError("Mismatch in dtype: grad_output["
                                   + str(grads.index(grad)) + "] has a dtype of "
                                   + str(grad.dtype) + " and output["
                                   + str(outputs.index(out)) + "] has a dtype of "

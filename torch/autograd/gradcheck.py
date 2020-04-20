@@ -3,7 +3,6 @@ from torch._six import container_abcs, istuple
 import torch.testing
 from itertools import product
 import warnings
-import math
 
 def zero_gradients(x):
     if isinstance(x, torch.Tensor):
