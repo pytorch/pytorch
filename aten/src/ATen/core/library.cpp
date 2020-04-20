@@ -33,7 +33,7 @@ namespace {
   }
 }
 
-CppFunction::CppFunction(KernelFunction func, std::unique_ptr<c10::FunctionSchema> schema)
+CppFunction::CppFunction(c10::KernelFunction func, std::unique_ptr<c10::FunctionSchema> schema)
   : func_(std::move(func))
   , schema_(std::move(schema))
   , debug_()
@@ -125,13 +125,13 @@ Library& Library::_def(c10::FunctionSchema&& schema, c10::OperatorName* out_name
 }
 #undef DEF_PRELUDE
 
-Library& Library::_def(c10::either<c10:OperatorName, c10::FunctionSchema>&& name_or_schema, CppFunction&& f) & {
+Library& Library::_def(c10::either<c10::OperatorName, c10::FunctionSchema>&& name_or_schema, CppFunction&& f) & {
   c10::FunctionSchema schema = [&] {
     if (name_or_schema.is_right()) {
       return std::move(name_or_schema).right();
     } else {
       // it's a name; use the inferred schema
-      OperatorName name = std::move(name_or_schema).left();
+      c10::OperatorName name = std::move(name_or_schema).left();
       TORCH_CHECK(f.schema_,
         "def(\"", name, "\"): "
         "Full schema string was not specified, and we couldn't infer schema either.  ",
@@ -143,7 +143,7 @@ Library& Library::_def(c10::either<c10:OperatorName, c10::FunctionSchema>&& name
       return s;
     }
   }();
-  OperatorName name("", "");  // Get the namespaced name for the impl call
+  c10::OperatorName name("", "");  // Get the namespaced name for the impl call
   // First define the schema...
   _def(std::move(schema), &name);
   // Then register the implementation...
