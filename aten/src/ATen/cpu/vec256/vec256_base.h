@@ -667,11 +667,12 @@ inline Vec256<T> operator^(const Vec256<T>& a, const Vec256<T>& b) {
 
 template<class T, typename Op>
 static inline Vec256<T> bitwise_binary_op(const Vec256<T> &a, const Vec256<T> &b, Op op) {
-  __at_align32__ intmax_t buffer[256 / sizeof(intmax_t)];
-  for (ptrdiff_t i = 0; i < sizeof(buffer) / sizeof(buffer[0]); ++ i) {
-    const intmax_t *i_a_ptr = reinterpret_cast<const intmax_t*>((const T*) a) + i;
-    const intmax_t *i_b_ptr = reinterpret_cast<const intmax_t*>((const T*) b) + i;
-    buffer[i] = op(*i_a_ptr, *i_b_ptr);
+  static constexpr uint32_t element_no = 32 / sizeof(intmax_t);
+  __at_align32__ intmax_t buffer[element_no];
+  const intmax_t *a_ptr = reinterpret_cast<const intmax_t*>((const T*) a);
+  const intmax_t *b_ptr = reinterpret_cast<const intmax_t*>((const T*) b);
+  for (uint32_t i = 0U; i < element_no; ++ i) {
+    buffer[i] = op(a_ptr[i], b_ptr[i]);
   }
   return Vec256<T>::loadu(buffer);
 }
