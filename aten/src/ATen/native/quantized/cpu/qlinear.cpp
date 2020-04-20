@@ -14,10 +14,10 @@ namespace native {
 namespace {
 
 template <bool ReluFused>
-class QLinearInt8 final : public torch::OperatorKernel {
+class QLinearInt8 final {
  public:
 #ifdef USE_FBGEMM
-  at::Tensor fbgemm_linear(
+  static at::Tensor fbgemm_linear(
       at::Tensor input,
       at::Tensor packed_weight,
       double output_scale,
@@ -218,7 +218,7 @@ class QLinearInt8 final : public torch::OperatorKernel {
   }
 #endif
 #ifdef USE_PYTORCH_QNNPACK
-  at::Tensor qnnpack_linear(
+  static at::Tensor qnnpack_linear(
       at::Tensor input,
       at::Tensor packed_weight,
       double output_scale,
@@ -326,7 +326,7 @@ class QLinearInt8 final : public torch::OperatorKernel {
     return output;
   }
 #endif
-  at::Tensor operator()(
+  static at::Tensor run(
       at::Tensor input,
       at::Tensor packed_weight,
       double output_scale,
@@ -352,17 +352,15 @@ class QLinearInt8 final : public torch::OperatorKernel {
   }
 };
 
-static auto registry =
-    torch::RegisterOperators()
-        .op("quantized::linear(Tensor X, Tensor W_prepack, float Y_scale_i, int Y_zero_point_i) -> Tensor Y",
-            torch::RegisterOperators::options().kernel<QLinearInt8<false>>(
-                DispatchKey::QuantizedCPU))
-        .op("_quantized::linear(Tensor X, Tensor W_prepack, float Y_scale_i, int Y_zero_point_i) -> Tensor Y",
-            torch::RegisterOperators::options().kernel<QLinearInt8<false>>(
-                DispatchKey::QuantizedCPU))
-        .op("quantized::linear_relu(Tensor X, Tensor W_prepack, float Y_scale_i, int Y_zero_point_i) -> Tensor Y",
-            torch::RegisterOperators::options().kernel<QLinearInt8<true>>(
-                DispatchKey::QuantizedCPU));
+TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
+  m.impl("linear", QLinearInt8<false>::run);
+  m.impl("linear_relu", QLinearInt8<true>::run);
+}
+
+TORCH_LIBRARY_IMPL(_quantized, QuantizedCPU, m) {
+  m.impl("linear", QLinearInt8<false>::run);
+}
+
 } // namespace
 } // namespace native
 } // namespace at
