@@ -162,7 +162,8 @@ namespace jit {
   _(LoopNestReorderExtraStatements)         \
   _(LoopNestReorderLongStringOfPreOrphans)  \
   _(LoopNestReorderLongStringOfPostOrphans) \
-  _(LoopNestReorderLongStringFull)
+  _(LoopNestReorderLongStringFull)          \
+  _(OuterLoopVectorization)
 
 #define TH_FORALL_TENSOREXPR_TESTS_LLVM(_) \
   _(LLVMByteImmTest)                       \
@@ -292,6 +293,7 @@ namespace jit {
   _(CudaDynamicShapeSplit)                 \
   _(CudaOneBlockOneThreadGlobalReduce1)    \
   _(CudaOneBlockMultiThreadGlobalReduce1)  \
+  _(CudaNoThreadIdxWrite_1)                \
   _(CudaTestRand01)
 
 #define DECLARE_TENSOREXPR_TEST(name) void test##name();
