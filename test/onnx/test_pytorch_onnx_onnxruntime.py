@@ -1842,12 +1842,9 @@ class TestONNXRuntime(unittest.TestCase):
     def test_rnn_no_bias(self):
         def make_model(layers, packed_sequence):
             batch_first = True if packed_sequence == 2 else False
-            model = torch.nn.RNN(RNN_INPUT_SIZE, RNN_HIDDEN_SIZE, layers, bidirectional=False,
-<<<<<<< HEAD
-                                 batch_first=batch_first, bias=False)
-=======
-                             batch_first=batch_first, bias=False)
->>>>>>> Fix ONNX export of RNNs with no bias
+
+            model = torch.nn.RNN(RNN_INPUT_SIZE, RNN_HIDDEN_SIZE, layers, bidirectional=False, \
+                batch_first=batch_first, bias=False)
 
             if packed_sequence == 1:
                 model = RnnModelWithPackedSequence(model, False)
