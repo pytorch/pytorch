@@ -152,6 +152,14 @@ def build_complex_tensors():
     e = {a: d}
     return [a, b, c, d, e]
 
+def non_cont_test(t_view, t_cont):
+    if t_view.is_contiguous():
+        raise Exception('t_view is contiguous!')
+    if not t_cont.is_contiguous():
+        raise Exception('t_cont is not contiguous!')
+    if not torch.equal(t_view, t_cont):
+        raise Exception('t_view is not equal to t_cont!')
+    return t_view
 
 def my_function(a, b, c):
     return a + b + c
@@ -1900,6 +1908,26 @@ class RpcTest(RpcAgentTestFixture):
                           args=(torch.ones(2),))
         with self.assertRaisesRegex(Exception, ".*Expected error.*"):
             rref.to_here()
+
+    @dist_init
+    def test_non_cont_tensors(self):
+        if self.rank == 0:
+            # Create a non-contiguous tensor.
+            t = torch.rand(5, 5)
+            t_view = t.narrow(1, 2, 2)
+            self.assertFalse(t_view.is_contiguous())
+            t_cont = t_view.contiguous()
+            self.assertTrue(t_cont.is_contiguous())
+            self.assertEqual(t_view, t_cont)
+
+            # Send non-cont tensor over RPC.
+            next_rank = (self.rank + 1) % self.world_size
+            t_ret = rpc.rpc_sync(worker_name(next_rank), non_cont_test, args=(t_view, t_cont))
+
+            # Verify the returned tensor.
+            self.assertEqual(t_view, t_ret)
+            self.assertFalse(t_ret.is_contiguous())
+
 
 @unittest.skipIf(
     not torch._six.PY3,
