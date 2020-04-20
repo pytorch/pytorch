@@ -135,11 +135,10 @@ def _uses_true_division(fn):
         return True
     if inspect.ismethod(fn):
         return _uses_true_division(fn.__func__)
-    elif inspect.isfunction(fn):
+    if inspect.isfunction(fn):
         return fn.__globals__.get('division') is __future__.division
-    else:
-        raise RuntimeError(
-            '_uses_true_division: expected function or method, got {}'.format(type(fn)))
+    raise RuntimeError(
+        '_uses_true_division: expected function or method, got {}'.format(type(fn)))
 
 
 def get_jit_class_def(cls, self_name):
