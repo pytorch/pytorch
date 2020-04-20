@@ -591,6 +591,9 @@ if(USE_FBGEMM)
   caffe2_update_option(USE_FBGEMM ON)
 else()
   caffe2_update_option(USE_FBGEMM OFF)
+  message(WARNING 
+    "Turning USE_FAKELOWP off as it depends on USE_FBGEMM.")
+  caffe2_update_option(USE_FAKELOWP OFF)
 endif()
 
 
@@ -800,9 +803,14 @@ if(BUILD_PYTHON)
 
   # These should fill in the rest of the variables, like versions, but resepct
   # the variables we set above
-  set(Python_ADDITIONAL_VERSIONS 3.7 3.6 3.5 2.8 2.7 2.6)
-  find_package(PythonInterp 2.7)
-  find_package(PythonLibs 2.7)
+  set(Python_ADDITIONAL_VERSIONS 3.7 3.6 3.5)
+  find_package(PythonInterp 3.0)
+  find_package(PythonLibs 3.0)
+
+  if(${PYTHONLIBS_VERSION_STRING} VERSION_LESS 3)
+    message(FATAL_ERROR
+      "Found Python libraries version ${PYTHONLIBS_VERSION_STRING}. Python 2 has reached end-of-life and is no longer supported by PyTorch.")
+  endif()
 
   # When building pytorch, we pass this in directly from setup.py, and
   # don't want to overwrite it because we trust python more than cmake
@@ -1226,6 +1234,7 @@ if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO AND NOT INTERN_DISABLE_ONNX)
   if(ONNX_ML)
     add_definitions(-DONNX_ML=1)
   endif()
+  add_definitions(-DONNXIFI_ENABLE_EXT=1)
   # Add op schemas in "ai.onnx.pytorch" domain
   add_subdirectory("${CMAKE_CURRENT_LIST_DIR}/../caffe2/onnx/torch_ops")
   add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/onnx EXCLUDE_FROM_ALL)

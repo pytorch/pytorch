@@ -154,7 +154,7 @@ struct PythonArgs {
   inline std::array<at::Tensor, N> tensorlist_n(int i);
   inline std::vector<int64_t> intlist(int i);
   inline std::vector<int64_t> intlistWithDefault(int i, std::vector<int64_t> default_intlist);
-  inline at::Generator generator(int i);
+  inline c10::optional<at::Generator> generator(int i);
   inline at::Storage storage(int i);
   inline at::ScalarType scalartype(int i);
   inline at::ScalarType scalartypeWithDefault(int i, at::ScalarType default_scalartype);
@@ -543,8 +543,8 @@ inline bool PythonArgs::isNone(int i) {
   return args[i] == nullptr;
 }
 
-inline at::Generator PythonArgs::generator(int i) {
-  if (!args[i]) return nullptr;
+inline c10::optional<at::Generator> PythonArgs::generator(int i) {
+  if (!args[i]) return c10::nullopt;
   return reinterpret_cast<THPGenerator*>(args[i])->cdata;
 }
 
