@@ -107,7 +107,7 @@ if args.ge_config == 'legacy':
     GRAPH_EXECUTOR = ProfilingMode.LEGACY
 elif args.ge_config == 'profiling':
     GRAPH_EXECUTOR = ProfilingMode.PROFILING
-else
+else:
     GRAPH_EXECUTOR = ProfilingMode.SIMPLE
 
 TEST_BAILOUTS = args.test_bailouts
