@@ -230,7 +230,7 @@ class TORCH_API RRef : public RRefInterface {
   // Get the future corresponding to the creation of this rref.
   inline std::shared_ptr<FutureMessage> getOwnerCreationFuture() const {
     return ownerCreationFuture_;
-  };
+  }
 
   // Send delete UserRRef request to Owner,
   // if the request hasn't been sent yet.
