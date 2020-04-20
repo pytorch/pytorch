@@ -287,12 +287,15 @@ std::ostream& printMaybeAnnotatedList(
     std::ostream& out,
     const IValue& the_list,
     IValueFormatter formatter) {
-  if (the_list.toListRef().size() == 0) {
-    out << "annotate(" << the_list.type()->python_str() << ", [])";
+
+  if (the_list.toListRef().size() == 0 || elementTypeCanBeInferredFromMembers(the_list.type())) {
+    out << "annotate(" << the_list.type()->python_str() << ", ";
+    printList(out, the_list.toListRef(), "[", "]", formatter);
+    out << ")";
+    return out;
   } else {
     return printList(out, the_list.toListRef(), "[", "]", formatter);
   }
-  return out;
 }
 
 template <typename Dict>
