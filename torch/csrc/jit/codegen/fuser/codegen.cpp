@@ -326,13 +326,13 @@ static void emitCheckFor(
   out << format("${scalar_type} ${tensor}_buf[4];\n", env);
 
   // check if last dim is contiguous
-  if(!desc.lastIsContiguous()) {
+  if (!desc.lastIsContiguous()) {
     out << "flag_vec4 = false;\n";
     return;
   }
 
   // disable on dtype > 4 bytes for performance
-  if( at::elementSize(desc.scalar_type) > 4 ) {
+  if (at::elementSize(desc.scalar_type) > 4) {
     out << "flag_vec4 = false;\n";
     return;
   }
@@ -340,18 +340,21 @@ static void emitCheckFor(
   // last dim size multiple of 4, other dim stride multiple of 4
   for (int d = ndim - 1; d >= 0; --d) {
     env.d("d", d);
-    if(d == ndim-1){
+    if (d == ndim - 1) {
       // last dim stride already checked above at compile time
-      out << format("if(${tensor}.sizes[${d}] % 4 != 0) flag_vec4 = false;\n", env);
+      out << format(
+          "if(${tensor}.sizes[${d}] % 4 != 0) flag_vec4 = false;\n", env);
     } else {
-      out << format("if(${tensor}.strides[${d}] % 4 != 0) flag_vec4 = false;\n", env);
+      out << format(
+          "if(${tensor}.strides[${d}] % 4 != 0) flag_vec4 = false;\n", env);
     }
   }
 
   // pointer aligned
-  out << format("if(((uint64_t) ${tensor}.data) % (4 * sizeof(${scalar_type})) != 0) flag_vec4 = false;\n", env);
+  out << format(
+      "if(((uint64_t) ${tensor}.data) % (4 * sizeof(${scalar_type})) != 0) flag_vec4 = false;\n",
+      env);
 }
-
 
 // TODO: handle cases where we need to generate > 2^32 element tensors
 std::string generateKernel(
@@ -455,9 +458,7 @@ std::string generateKernel(
         env.s(
             "access",
             format("__half2float(t${formal}.data[t${formal}_offset])", env));
-        env.s(
-            "access_vec4",
-            format("__half2float(t${formal}_buf[i])", env));
+        env.s("access_vec4", format("__half2float(t${formal}_buf[i])", env));
         has_half_tensor = true;
       } else if (use_cuda) {
         // No __ldg overload for bool
@@ -477,22 +478,30 @@ std::string generateKernel(
 
       // load input in vectorized code path
       auto ele_size = at::elementSize((*input.second).scalar_type);
-      if(ele_size == 1) {
-        env.s("load4",
-              format("*(reinterpret_cast<float*>(t${formal}_buf)) = *(reinterpret_cast<float*>(t${formal}.data + t${formal}_offset))",
-                     env));
-      } else if(ele_size == 2) {
-        env.s("load4",
-              format("*(reinterpret_cast<float2*>(t${formal}_buf)) = *(reinterpret_cast<float2*>(t${formal}.data + t${formal}_offset))",
-                     env));
-      } else if(ele_size == 4) {
-        env.s("load4",
-              format("*(reinterpret_cast<float4*>(t${formal}_buf)) = *(reinterpret_cast<float4*>(t${formal}.data + t${formal}_offset))",
-                     env));
+      if (ele_size == 1) {
+        env.s(
+            "load4",
+            format(
+                "*(reinterpret_cast<float*>(t${formal}_buf)) = *(reinterpret_cast<float*>(t${formal}.data + t${formal}_offset))",
+                env));
+      } else if (ele_size == 2) {
+        env.s(
+            "load4",
+            format(
+                "*(reinterpret_cast<float2*>(t${formal}_buf)) = *(reinterpret_cast<float2*>(t${formal}.data + t${formal}_offset))",
+                env));
+      } else if (ele_size == 4) {
+        env.s(
+            "load4",
+            format(
+                "*(reinterpret_cast<float4*>(t${formal}_buf)) = *(reinterpret_cast<float4*>(t${formal}.data + t${formal}_offset))",
+                env));
       } else {
-        env.s("load4",
-              format("for(int i = 0; i<4; i++) t${formal}_buf[i] = t${formal}.data[t${formal}_offset + i]",
-                     env));
+        env.s(
+            "load4",
+            format(
+                "for(int i = 0; i<4; i++) t${formal}_buf[i] = t${formal}.data[t${formal}_offset + i]",
+                env));
       }
       load << format("${load4};\n", env);
 
@@ -574,25 +583,32 @@ std::string generateKernel(
 
     // store output in vectorized code path
     auto ele_size = at::elementSize(output.second.scalar_type);
-    if(ele_size == 1) {
-      env.s("store4",
-            format("*(reinterpret_cast<float*>(t${formal}.data + t${formal}_offset)) = *(reinterpret_cast<float*>(t${formal}_buf))",
-                   env));
-    } else if(ele_size == 2) {
-      env.s("store4",
-            format("*(reinterpret_cast<float2*>(t${formal}.data + t${formal}_offset)) = *(reinterpret_cast<float2*>(t${formal}_buf))",
-                   env));
-    } else if(ele_size == 4) {
-      env.s("store4",
-            format("*(reinterpret_cast<float4*>(t${formal}.data + t${formal}_offset)) = *(reinterpret_cast<float4*>(t${formal}_buf))",
-                   env));
+    if (ele_size == 1) {
+      env.s(
+          "store4",
+          format(
+              "*(reinterpret_cast<float*>(t${formal}.data + t${formal}_offset)) = *(reinterpret_cast<float*>(t${formal}_buf))",
+              env));
+    } else if (ele_size == 2) {
+      env.s(
+          "store4",
+          format(
+              "*(reinterpret_cast<float2*>(t${formal}.data + t${formal}_offset)) = *(reinterpret_cast<float2*>(t${formal}_buf))",
+              env));
+    } else if (ele_size == 4) {
+      env.s(
+          "store4",
+          format(
+              "*(reinterpret_cast<float4*>(t${formal}.data + t${formal}_offset)) = *(reinterpret_cast<float4*>(t${formal}_buf))",
+              env));
     } else {
-      env.s("store4",
-            format("for(int i = 0; i<4; i++) t${formal}.data[t${formal}_offset + i] = t${formal}_buf[i]",
-                   env));
+      env.s(
+          "store4",
+          format(
+              "for(int i = 0; i<4; i++) t${formal}.data[t${formal}_offset + i] = t${formal}_buf[i]",
+              env));
     }
     store << format("${store4};\n", env);
-
   }
 
   // Includes headers
