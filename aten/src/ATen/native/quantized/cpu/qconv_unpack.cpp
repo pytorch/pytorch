@@ -162,7 +162,7 @@ static auto conv3d_params = register_conv_params<3>();
 
 } // namespace
 
-TORCH_LIBRARY_IMPL(quantized, CPU, m) {
+TORCH_LIBRARY_IMPL(quantized, CatchAll, m) {
   // conv_unpack is deprecated, please use conv2d_unpack for 2D conv.
   m.impl("conv_unpack", QConvUnpackWeightsInt8<2>::run);
   // We use  conv2d_unpack to be consistent with conv3d_unpack
