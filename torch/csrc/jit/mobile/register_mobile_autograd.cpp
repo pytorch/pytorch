@@ -1,8 +1,8 @@
 #include <ATen/ATen.h>
 #include <ATen/TypeDefault.h>
-#include <torch/library.h>
 #include <ATen/core/stack.h>
 #include <torch/csrc/autograd/function.h>
+#include <torch/library.h>
 
 using Stack = std::vector<c10::IValue>;
 using at::Scalar;
