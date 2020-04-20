@@ -23,9 +23,10 @@
 
 // ${generated_comment}
 
-// This file contains manual unboxing wrappers for ops that aren't use_c10_dispatcher: full
-// because the templated unboxing logic in c10 doesn't support them yet.
-// The ultimate goal is to make all ops use the templated unboxing and delete this codegen file.
+// This file contains manual unboxing wrappers for ops that aren't
+// use_c10_dispatcher: full because the templated unboxing logic in c10 doesn't
+// support them yet. The ultimate goal is to make all ops use the templated
+// unboxing and delete this codegen file.
 
 // NOTE [Sharded File]: This file is generated in a sharded fashion to speed up
 // incremental rebuilds. See the comment at the top of

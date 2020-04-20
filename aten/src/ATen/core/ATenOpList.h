@@ -8,7 +8,6 @@ struct OperatorName;
 
 namespace at {
 
-// list of ATen ops that come from native_functions.yaml
-CAFFE2_API bool is_aten_op(const c10::OperatorName& opName);
-
+// check if an op is a custom op (i.e. did not come from native_functions.yaml)
+CAFFE2_API bool is_custom_op(const c10::OperatorName& opName);
 }

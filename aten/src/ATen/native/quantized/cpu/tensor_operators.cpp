@@ -78,11 +78,10 @@ Tensor& quantized_resize_cpu_(
   resize_impl_cpu_(self_, size, /*strides=*/c10::nullopt);
   return self;
 }
-static auto registry = torch::RegisterOperators()
-  .op(torch::RegisterOperators::options()
-    .schema("aten::resize_(Tensor(a!) self, int[] size, *, MemoryFormat? memory_format=None) -> Tensor(a!)")
-    .impl_unboxedOnlyKernel<decltype(quantized_resize_cpu_), &quantized_resize_cpu_>(DispatchKey::QuantizedCPU))
-  ;
+
+TORCH_LIBRARY_IMPL(aten, QuantizedCPU, m) {
+  m.impl_UNBOXED("resize_", quantized_resize_cpu_);
+}
 
 }  // namespcae
 }}  // at::native

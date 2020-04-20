@@ -25,12 +25,13 @@ struct OpNameHash final {
 };
 }
 
-bool is_aten_op(const c10::OperatorName& opName) {
-  static std::unordered_set<std::pair<const char*, const char*>, OpNameHash, OpNameEquals> ops {
-    ${aten_ops}
-    {"", ""}
-  };
-  return ops.count(std::make_pair(opName.name.c_str(), opName.overload_name.c_str())) != 0;
+bool is_custom_op(const c10::OperatorName& opName) {
+  static std::unordered_set<
+      std::pair<const char*, const char*>,
+      OpNameHash,
+      OpNameEquals>
+      ops{${aten_ops} {"", ""}};
+  return ops.count(std::make_pair(
+             opName.name.c_str(), opName.overload_name.c_str())) == 0;
 }
-
 }
