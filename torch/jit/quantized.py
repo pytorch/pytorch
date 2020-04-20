@@ -578,8 +578,7 @@ class QuantizedGRU(QuantizedRNNBase):
     def forward(self, input, hx=None):
         if isinstance(input, PackedSequence):
             return self.forward_packed(input, hx)
-        else:
-            return self.forward_tensor(input, hx)
+        return self.forward_tensor(input, hx)
 
 
 def quantize_rnn_cell_modules(module):
