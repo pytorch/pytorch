@@ -337,7 +337,9 @@ class TestTypePromotion(TestCase):
             torch.int64: (1 << 35),
             torch.float16: (1 << 10),
             torch.float32: (1 << 20),
-            torch.float64: (1 << 35)
+            torch.float64: (1 << 35),
+            torch.complex64: (1 << 20),
+            torch.complex128: (1 << 35)
         }
         comparison_ops = [
             dict(
@@ -380,7 +382,10 @@ class TestTypePromotion(TestCase):
         for op in comparison_ops:
             for dt1 in torch.testing.get_all_math_dtypes(device):
                 for dt2 in torch.testing.get_all_math_dtypes(device):
-                    if dt1.is_complex or dt2.is_complex:
+                    if (dt1.is_complex or dt2.is_complex) and not (op["name"] == "eq" or op["name"] == "ne"):
+                        u = torch.tensor([1], dtype=dt1, device=device)
+                        v = torch.tensor([2], dtype=dt2, device=device)
+                        self.assertRaises(RuntimeError, lambda: torch.tensor([op["compare_op"](u, v)], dtype=torch.bool))
                         continue
                     val1 = value_for_type[dt1]
                     val2 = value_for_type[dt2]
@@ -420,10 +425,12 @@ class TestTypePromotion(TestCase):
     @float_double_default_dtype
     def test_lt_with_type_promotion(self, device):
         for dt in torch.testing.get_all_math_dtypes(device):
-            if dt.is_complex:
-                continue
             x = torch.tensor([0], dtype=dt, device=device)
             expected = torch.tensor([True], dtype=torch.bool, device=device)
+
+            if dt.is_complex:
+                self.assertRaises(RuntimeError, lambda: x < 0.5)
+                continue
 
             actual = x < 0.5
             self.assertTrue(actual, expected)
@@ -540,6 +547,11 @@ class TestTypePromotion(TestCase):
             # ensure sparsity. Bool should already have sufficient sparsity.
             mask = self._get_test_tensor(device, torch.bool)
             t = t * mask
+
+        if dtype.is_complex:
+            self.assertRaises(RuntimeError, lambda: t.to_sparse())
+            return (0,0)
+
         if coalesced:
             s = t.to_sparse()
         else:
@@ -575,6 +587,10 @@ class TestTypePromotion(TestCase):
 
         (dense1, sparse1) = self._test_sparse_op_input_tensors(device, dtype1, coalesced)
         (dense2, sparse2) = self._test_sparse_op_input_tensors(device, dtype2, coalesced, op_name != 'div')
+
+        if dtype1.is_complex or dtype2.is_complex:
+            return
+
         common_dtype = torch.result_type(dense1, dense2)
         if self.device_type == 'cpu' and common_dtype == torch.half:
             self.assertRaises(RuntimeError, lambda: op(s1, d2))
@@ -636,8 +652,6 @@ class TestTypePromotion(TestCase):
     def _run_all_tests_for_sparse_op(self, op_name, device):
         dtypes = torch.testing.get_all_math_dtypes(device)
         for dtype1, dtype2 in itertools.product(dtypes, dtypes):
-            if dtype1.is_complex or dtype2.is_complex:
-                continue
             for inplace, coalesced in itertools.product([True, False], [True, False]):
                 self._test_sparse_op(op_name, inplace, dtype1, dtype2, device, coalesced)
 

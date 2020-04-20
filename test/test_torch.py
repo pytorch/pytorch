@@ -11131,10 +11131,6 @@ class TestTorchDeviceType(TestCase):
             else:
                 alpha = 3
 
-            # TODO: add cpu test after isclose is fixed in https://github.com/pytorch/pytorch/pull/36456
-            if device.startswith('cpu') and dtype.is_complex:
-                continue
-
             # addcmul is not supported for complex dtypes on cuda yet
             if device.startswith('cuda') and dtype.is_complex:
                 self.assertRaises(RuntimeError, lambda: torch.addcmul(a, b, c, value=alpha))
@@ -11143,7 +11139,7 @@ class TestTorchDeviceType(TestCase):
             actual = torch.addcmul(a, b, c, value=alpha)
             expected = a + alpha * b * c
 
-            self.assertTrue(torch.allclose(expected, actual))
+            self.assertEqual(expected, actual)
 
             with self.maybeWarnsRegex(
                     UserWarning, "This overload of addcmul is deprecated"):
