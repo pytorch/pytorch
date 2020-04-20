@@ -139,6 +139,14 @@ class Softsign(Module):
     def forward(self, input: Tensor) -> Tensor: ...
 
 
+class Hardsigmoid(Module):
+    def forward(self, input: Tensor) -> Tensor: ... 
+
+
+class Hardswish(Module):
+    def forward(self, input: Tensor) -> Tensor: ... 
+
+
 class Tanhshrink(Module):
     def forward(self, input: Tensor) -> Tensor: ...
 
