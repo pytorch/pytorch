@@ -1,4 +1,7 @@
 # -*- coding: utf-8 -*-
+
+from torch.testing._internal.common_utils import run_tests
+
 # Quantized Tensor
 from quantization.test_quantized_tensor import TestQuantizedTensor  # noqa: F401
 # Quantized Op
@@ -12,7 +15,7 @@ from quantization.test_quantized_op import TestComparatorOps  # noqa: F401
 # TODO: split functional
 from quantization.test_quantized_module import TestFunctional  # noqa: F401
 from quantization.test_quantized_module import TestStaticQuantizedModule  # noqa: F401
-from quantization.test_quantized_module import TestDyanmicQuantizedModule  # noqa: F401
+from quantization.test_quantized_module import TestDynamicQuantizedModule  # noqa: F401
 
 # Quantization aware training
 from quantization.test_fake_quant import TestFakeQuantizePerTensor  # noqa: F401
@@ -32,7 +35,7 @@ from quantization.test_quantize import TestObserver  # noqa: F401
 # TODO: merge with TestObserver
 from quantization.test_quantize import TestRecordHistogramObserver  # noqa: F401
 from quantization.test_quantize_script import TestQuantizeScriptJitPasses  # noqa: F401
-from quantization.test_quantize_script import TestQuantizeScriptPTSQOPs  # noqa: F401
+from quantization.test_quantize_script import TestQuantizeScriptPTSQOps  # noqa: F401
 from quantization.test_quantize_script import TestQuantizeDynamicScript  # noqa: F401
 
 # Model numerics
@@ -44,3 +47,6 @@ from quantization.test_numeric_suite import TestEagerModeNumericSuite  # noqa: F
 
 # Backward Compatibility
 from quantization.test_backward_compatibility import TestBC  # noqa: F401
+
+if __name__ == '__main__':
+    run_tests()
