@@ -11,7 +11,6 @@ import unittest
 from torch.testing._internal.common_utils import TestCase, run_tests, skipIfRocm, do_test_dtypes, \
     do_test_empty_full, load_tests, TEST_NUMPY, TEST_WITH_ROCM, IS_WINDOWS
 from torch.testing._internal.common_cuda import TEST_CUDA
-from torch.testing._internal.common_device_type import onlyCPU
 from numbers import Number
 from torch.autograd.gradcheck import gradcheck
 
@@ -2364,8 +2363,10 @@ class TestSparse(TestCase):
         t = torch.sparse_coo_tensor(torch.tensor(([0, 0], [2, 0])), torch.tensor([1, 4]))
         self.assertRaises(TypeError, lambda: t.numpy())
 
-    #@onlyCPU
     def test_softmax(self):
+        if self.device != 'cpu':
+            self.skipTest('sparse softmax not available on %s' % (self.device))
+
         import torch.nn.functional as F
 
         def to_dense(sparse, fill_value=None):
@@ -2625,9 +2626,9 @@ class TestSparse(TestCase):
                 # log_softmax Jacobian from autograd, sparse input
                 J3_log = softmax_jacobian_autograd(x, dim, log=True)
 
-                J = J.transpose(0, dim+1)
-                J2_log = J2_log.transpose(0, dim+1)
-                J3_log = J3_log.transpose(0, dim+1)
+                J = J.transpose(0, dim + 1)
+                J2_log = J2_log.transpose(0, dim + 1)
+                J3_log = J3_log.transpose(0, dim + 1)
                 self.assertEqual(J, J2_log * r1)
                 self.assertEqual(J, J3_log * r1)
 
