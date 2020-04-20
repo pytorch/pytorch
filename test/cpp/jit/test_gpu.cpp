@@ -1441,6 +1441,7 @@ void testGPU_FusionUnaryOps() {
     UnaryOpType::Log1p,
     UnaryOpType::Log2,
     UnaryOpType::Neg,
+    UnaryOpType::RandLike,
     UnaryOpType::Reciprocal,
     UnaryOpType::Relu,
     UnaryOpType::Round,
