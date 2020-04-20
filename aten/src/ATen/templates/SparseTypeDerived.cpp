@@ -42,9 +42,8 @@ ${type_derived_method_definitions}
 
 }  // namespace ${Type}
 
-namespace {
-static auto registerer = torch::import()
+TORCH_LIBRARY_IMPL(aten, ${Backend}, m) {
   ${function_registrations};
 }
 
-}
+} // namespace at

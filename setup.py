@@ -162,6 +162,11 @@
 #
 
 from __future__ import print_function
+
+import sys
+if sys.version_info < (3,):
+    raise Exception("Python 2 has reached end-of-life and is no longer supported by PyTorch.")
+
 from setuptools import setup, Extension, distutils, find_packages
 from collections import defaultdict
 from distutils import core
@@ -174,7 +179,6 @@ import distutils.sysconfig
 import filecmp
 import subprocess
 import shutil
-import sys
 import os
 import json
 import glob
@@ -219,7 +223,7 @@ for i, arg in enumerate(sys.argv):
         break
     if arg == '-q' or arg == '--quiet':
         VERBOSE_SCRIPT = False
-    if arg == 'clean':
+    if arg == 'clean' or arg == 'egg_info':
         RUN_BUILD_DEPS = False
     filtered_args.append(arg)
 sys.argv = filtered_args
