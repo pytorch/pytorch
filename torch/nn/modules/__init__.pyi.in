@@ -15,6 +15,7 @@ from .distance import CosineSimilarity as CosineSimilarity, PairwiseDistance as 
 from .dropout import AlphaDropout as AlphaDropout, Dropout as Dropout, Dropout2d as Dropout2d, Dropout3d as Dropout3d, \
     FeatureAlphaDropout as FeatureAlphaDropout
 from .fold import Fold as Fold, Unfold as Unfold
+from .flatten import Flatten as Flatten
 from .instancenorm import InstanceNorm1d as InstanceNorm1d, InstanceNorm2d as InstanceNorm2d, \
     InstanceNorm3d as InstanceNorm3d
 from .linear import Bilinear as Bilinear, Identity as Identity, Linear as Linear
