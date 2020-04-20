@@ -24,8 +24,8 @@ static constexpr char* kNumBackwardPasses = "num_current_backward_passes";
 static constexpr char* kNumAutogradContexts = "num_autograd_contexts";
 
 // This hook does 3 things:
-//   1. Accumuate the gard to RPC context.
-//   2. Call pre hooks of the original AccumulateGrad to modify the input grad.
+//   1. Call pre hooks of the original AccumulateGrad to modify the input grad.
+//   2. Accumuate the gard to RPC context.
 //   3. Call post hooks of the original AccumulateGrad.
 class DistAccumulateGradCaptureHook
     : public GraphTask::ExecInfo::Capture::GradCaptureHook {
@@ -48,14 +48,13 @@ class DistAccumulateGradCaptureHook
     // invocation of the autograd engine on the same node might actually
     // compute this gradient.
     if (inputGrads[0].defined()) {
-      // Three internal references to 'inputGrads[0]' at this moment:
-      //   1. 'inputGrads[0]'
-      //   2. 'grad'
-      //   3. The captured grad in the callsite.
+      // There are 3 internal references to 'inputGrads[0]' at this moment:
+      //   1. 'inputGrads[0]' in this function.
+      //   2. 'graph_task->captured_vars_' on the callsite in the local engine.
+      //   3. 'InputBuffer& inputs' on the callsite as the inputs of the
+      //   function node.
       autogradContext_->accumulateGrad(
-          accumulateGrad_->variable,
-          inputGrads[0],
-          3 /* num_expected_refs */);
+          accumulateGrad_->variable, inputGrads[0], 3 /* num_expected_refs */);
     }
 
     const variable_list kEmptyOuput;

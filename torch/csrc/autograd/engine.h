@@ -79,10 +79,10 @@ struct GraphTask {
         virtual ~GradCaptureHook() = default;
         virtual at::Tensor operator()(const at::Tensor& grad) = 0;
       };
-      // The hooks will be called one by one in the order. The input grad of a
-      // hook will be the output of its preceding hook. The first hook will take
-      // the captured grad as the input. The output of the last hook will
-      // replace the captured grad.
+      // The hooks will be called one by one in the order as they were added.
+      // The input grad of a hook will be the output of its preceding hook. The
+      // first hook will take the captured grad as the input. The output of the
+      // last hook will replace the captured grad.
       std::vector<std::unique_ptr<GradCaptureHook>> hooks_;
     };
 
