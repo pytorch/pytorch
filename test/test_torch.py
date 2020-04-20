@@ -2412,7 +2412,8 @@ class _TestTorchMixin(object):
 
                 # index_add is not supported for complex dtypes on cuda yet
                 if device.startswith('cuda') and dtype.is_complex:
-                    self.assertRaises(RuntimeError, lambda: zeros.index_add(0, torch.arange(0, size[0], dtype=torch.long, device=device), tensor))
+                    self.assertRaises(RuntimeError,
+                                      lambda: zeros.index_add(0, torch.arange(0, size[0], dtype=torch.long, device=device), tensor))
                     continue
 
                 added = zeros.index_add(0, torch.arange(0, size[0], dtype=torch.long, device=device), tensor)
@@ -5839,7 +5840,7 @@ class TestTorchDeviceType(TestCase):
                 continue
 
             # deferring to https://github.com/pytorch/pytorch/pull/36793
-            if dtype.is_complex():
+            if dtype.is_complex:
                 continue
 
             m1 = torch.empty(0, dtype=dtype, device=device)
