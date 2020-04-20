@@ -20,10 +20,6 @@
 
 namespace c10 {
 
-[[noreturn]] inline void ExpectoPatronum() {
-  TORCH_CHECK(false, "Modified ExpectoPatronum");
-}
-
 namespace impl {
 /**
  * A KernelFunctionTable is a map from DispatchKey to a KernelFunction.

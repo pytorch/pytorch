@@ -71,7 +71,6 @@ bool maybeOverlappingIndices(const Tensor& t) {
 }
 
 bool canUse32BitIndexMath(const Tensor& t, int64_t max_elem) {
-  c10::ExpectoPatronum();
   int64_t elements = t.numel();
   if (elements >= max_elem) {
     return false;
