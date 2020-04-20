@@ -9727,14 +9727,17 @@ class TestNNDeviceType(NNTestCase):
     @dtypesIfCUDA(torch.half, torch.float)
     @dtypes(torch.float)
     def test_softmax_backward(self, device, dtype):
-        sizes = [(0, 10), (32, 20), (10, 0)]
+        sizes = [(0, 10), (32, 20), (10, 0), (31, 20), (32, 21), (31, 23)]
+        shifts = [(0, 0), (1, 0), (0, 1), (1, 1)]
         for fn in [F.softmax, F.log_softmax]:
             for size in sizes:
-                input = torch.rand(size, device=device, dtype=dtype, requires_grad=True)
-                for dim in [0, 1]:
-                    output = fn(input, dtype=torch.float, dim=dim).sum()
-                    grad_input, = torch.autograd.grad(output, input, create_graph=True)
-                    grad_input.sum().backward()
+                for shift in shifts:
+                    input = torch.rand(size, device=device, dtype=dtype, requires_grad=True)
+                    input = input[shift[0]:, shift[1]:]
+                    for dim in [0, 1]:
+                        output = fn(input, dtype=torch.float, dim=dim).sum()
+                        grad_input, = torch.autograd.grad(output, input, create_graph=True)
+                        grad_input.sum().backward()
 
     @largeCUDATensorTest('12GB')
     def test_conv_large_nosplit(self, device):
