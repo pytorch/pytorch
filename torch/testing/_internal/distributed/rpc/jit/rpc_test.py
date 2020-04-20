@@ -954,7 +954,7 @@ class JitRpcTest(RRefAPITest, LocalRRefTest, JitRpcAsyncOpTest, RpcAgentTestFixt
         # profiling event cpu time
         self.assertGreaterEqual(sleep_event.cpu_time * 1e-6, sleep_interval)
 
-    def test_call_fork_jit_with_profiling(self):
+    def test_call_fork_in_jit_with_profiling(self):
         # Ensures that we can call torch.ops.profiler._call_end_callbacks_on_jit_fut on a jit
         # future from within a script function with torch.jit.fork
         with torch.autograd.profiler.profile() as prof:
@@ -963,4 +963,4 @@ class JitRpcTest(RRefAPITest, LocalRRefTest, JitRpcAsyncOpTest, RpcAgentTestFixt
 
         events = prof.function_events
         function_event = get_function_event(events, "foo")
-        self.assertEqual(sleep_event.name, "foo")
+        self.assertEqual(function_event.name, "foo")
