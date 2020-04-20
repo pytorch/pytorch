@@ -809,7 +809,7 @@ Example:
 
 add_docstr(torch.bmm,
            r"""
-bmm(input, mat2, out=None) -> Tensor
+bmm(input, mat2, deterministic=False, out=None) -> Tensor
 
 Performs a batch matrix-matrix product of matrices stored in :attr:`input`
 and :attr:`mat2`.
@@ -830,6 +830,10 @@ If :attr:`input` is a :math:`(b \times n \times m)` tensor, :attr:`mat2` is a
 Args:
     input (Tensor): the first batch of matrices to be multiplied
     mat2 (Tensor): the second batch of matrices to be multiplied
+    deterministic (bool, optional): flag to choose between a faster non-deterministic
+                                    calculation, or a slower deterministic calculation.
+                                    This argument is only available for sparse-dense CUDA bmm.
+                                    Default: ``False``
     {out}
 
 Example::
