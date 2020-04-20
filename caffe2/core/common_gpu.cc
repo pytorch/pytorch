@@ -233,11 +233,18 @@ const char* cublasGetErrorString(cublasStatus_t error) {
     return "CUBLAS_STATUS_INVALID_VALUE";
   case CUBLAS_STATUS_ARCH_MISMATCH:
     return "CUBLAS_STATUS_ARCH_MISMATCH";
+  case CUBLAS_STATUS_INTERNAL_ERROR:
+    return "CUBLAS_STATUS_INTERNAL_ERROR";
 #ifndef __HIP_PLATFORM_HCC__
   case CUBLAS_STATUS_MAPPING_ERROR:
     return "CUBLAS_STATUS_MAPPING_ERROR";
   case CUBLAS_STATUS_EXECUTION_FAILED:
     return "CUBLAS_STATUS_EXECUTION_FAILED";
+  case CUBLAS_STATUS_NOT_SUPPORTED:
+    return "CUBLAS_STATUS_NOT_SUPPORTED";
+  case CUBLAS_STATUS_LICENSE_ERROR:
+    return "CUBLAS_STATUS_LICENSE_ERROR";
+#else
   case rocblas_status_invalid_size:
     return "rocblas_status_invalid_size";
   case rocblas_status_perf_degraded:
@@ -248,13 +255,6 @@ const char* cublasGetErrorString(cublasStatus_t error) {
     return "rocblas_status_size_increased";
   case rocblas_status_size_unchanged:
     return "rocblas_status_size_unchanged";
-#else
-  case CUBLAS_STATUS_INTERNAL_ERROR:
-    return "CUBLAS_STATUS_INTERNAL_ERROR";
-  case CUBLAS_STATUS_NOT_SUPPORTED:
-    return "CUBLAS_STATUS_NOT_SUPPORTED";
-  case CUBLAS_STATUS_LICENSE_ERROR:
-    return "CUBLAS_STATUS_LICENSE_ERROR";
 #endif
   }
   // To suppress compiler warning.
