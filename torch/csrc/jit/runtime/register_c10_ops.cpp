@@ -169,16 +169,16 @@ class RegistrationListener final : public c10::OpRegistrationListener {
       // TODO Find a better way to handle this.
       return;
     }
-    if (at::is_aten_op(op.schema().operator_name())) {
-      // Those ops do tracing/autograd in VariableType, no need to handle it
-      // here
-      torch::jit::registerOperator(
-          createOperatorFromC10_withTracingNotHandledHere(op));
-    } else {
+    if (at::is_custom_op(op.schema().operator_name())) {
       // custom ops don't do tracing/autograd in VariableType yet, we need to
       // handle tracing here.
       torch::jit::registerOperator(
           createOperatorFromC10_withTracingHandledHere(op));
+    } else {
+      // Ops from native_functions.yaml do tracing/autograd in VariableType,
+      // no need to handle it here
+      torch::jit::registerOperator(
+          createOperatorFromC10_withTracingNotHandledHere(op));
     }
   }
 
