@@ -2127,15 +2127,21 @@ void quantize_tensor_arm<c10::quint8>(
 #endif // __ARM_NEON__
 
 void quantize_tensor_per_tensor_affine_cpu(Tensor rtensor, Tensor qtensor, double scale, int64_t zero_point) {
+#if defined(__ARM_NEON__)
   AT_DISPATCH_QINT_TYPES(qtensor.scalar_type(), "quantize_tensor_per_tensor_affine_cpu", [&]() {
     TORCH_CHECK(rtensor.is_contiguous(), "Float tensor should be contiguous");
     const float* const rdata = rtensor.data_ptr<float>();
     // If QEngine is set to QNNPACK, use caffe2 specialized Int8Quantize implementation on ARM
-    #if defined(__ARM_NEON__)
-      if (at::globalContext().qEngine() == at::QEngine::QNNPACK) {
-        quantize_tensor_arm<scalar_t>(rdata, qtensor, rtensor.numel(), scale, zero_point);
-      }
-    #endif
+    if (at::globalContext().qEngine() == at::QEngine::QNNPACK) {
+      quantize_tensor_arm<scalar_t>(rdata, qtensor, rtensor.numel(), scale, zero_point);
+      return;
+    }
+  });
+#endif // __ARM_NEON__
+  // Fallback path
+  AT_DISPATCH_QINT_TYPES(qtensor.scalar_type(), "quantize_tensor_per_tensor_affine_cpu", [&]() {
+    TORCH_CHECK(rtensor.is_contiguous(), "Float tensor should be contiguous");
+    const float* const rdata = rtensor.data_ptr<float>();
     auto qdata = qtensor.data_ptr<scalar_t>();
     auto numel = rtensor.numel();
     for (int i = 0; i < numel; ++i) {
