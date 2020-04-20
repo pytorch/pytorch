@@ -6,7 +6,7 @@ from torch.testing._internal.common_quantization import (
 )
 
 
-class EagerModeNumericSuiteTest(QuantizationTestCase):
+class TestEagerModeNumericSuite(QuantizationTestCase):
     def test_compare_weights(self):
         r"""Compare the weights of float and quantized conv layer
         """

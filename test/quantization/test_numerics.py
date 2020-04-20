@@ -5,7 +5,7 @@ from torch.testing._internal.common_quantization import QuantizationTestCase, \
     ModelMultipleOps, ModelMultipleOpsNoAvgPool
 from torch.testing._internal.common_quantized import override_quantized_engine
 
-class ModelNumerics(QuantizationTestCase):
+class TestModelNumerics(QuantizationTestCase):
     def test_float_quant_compare_per_tensor(self):
         for qengine in ["fbgemm", "qnnpack"]:
             if qengine not in torch.backends.quantized.supported_engines:

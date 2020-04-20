@@ -16,7 +16,7 @@ hu.assert_deadline_disabled()
 from functools import reduce
 
 
-class IntrinsicQATModuleTest(TestCase):
+class TestQATModule(TestCase):
 
     @given(batch_size=st.integers(2, 4),
            input_channels_per_group=st.sampled_from([2, 3, 4]),
