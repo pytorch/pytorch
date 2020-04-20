@@ -659,14 +659,14 @@ class InsertObserversHelper {
   // These are the IR patterns we match to skip inserting observers.
   // They are compiled once on construction and used repeatedly within
   // the pass.
-  const PatternInfo conv_functional_relu = PatternInfo::parse_from_str(R"(
+  const PatternInfo conv2d_functional_relu = PatternInfo::parse_from_str(R"(
 graph(%self, %input, %inplace):
     %relu = prim::Constant[name="relu"]()
     %first_module = match::module[name="Conv2d"](%self)
     %first_output = prim::CallMethod[name="forward"](%first_module, %input)
     %second_output = prim::CallFunction(%relu, %first_output, %inplace)
     return (%second_output) )");
-  const PatternInfo conv_relu = PatternInfo::parse_from_str(R"(
+  const PatternInfo conv2d_relu = PatternInfo::parse_from_str(R"(
 graph(%self, %input):
     %first_module = match::module[name="Conv2d"](%self)
     %first_output = prim::CallMethod[name="forward"](%first_module, %input)
@@ -714,8 +714,8 @@ graph(%self, %input, %inplace):
 
   const std::vector<std::reference_wrapper<const PatternInfo>> delay_patterns =
       {
-          conv_functional_relu,
-          conv_relu,
+          conv2d_functional_relu,
+          conv2d_relu,
           matmul_add,
           add_module_relu,
           add_functional_relu,
