@@ -164,6 +164,7 @@ class TestTypeHints(TestCase):
                     '-mmypy',
                     '--follow-imports', 'silent',
                     '--check-untyped-defs',
+                    '--no-strict-optional',  # needed because of torch.lu_unpack, see gh-36584
                     os.path.abspath(fn)],
                     cwd=tmp_dir,
                     check=True)
@@ -181,16 +182,16 @@ class TestTypeHints(TestCase):
         examples_folder = os.path.join(test_path, "type_hint_tests")
         examples = os.listdir(examples_folder)
         for example in examples:
-            try: 
+            try:
                 example_path = os.path.join(examples_folder, example)
-                subprocess.run([ 
-                    sys.executable, 
-                    '-mmypy', 
-                    '--follow-imports', 'silent', 
-                    '--check-untyped-defs', 
-                    example_path],  
-                    check=True) 
-            except subprocess.CalledProcessError as e: 
+                subprocess.run([
+                    sys.executable,
+                    '-mmypy',
+                    '--follow-imports', 'silent',
+                    '--check-untyped-defs',
+                    example_path],
+                    check=True)
+            except subprocess.CalledProcessError as e:
                 raise AssertionError("mypy failed for example {}.  Look above this error for mypy's output.".format(example))
 
 if __name__ == '__main__':
