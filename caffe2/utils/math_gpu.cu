@@ -837,23 +837,23 @@ CAFFE2_CUDA_EXPORT void GemmBatched<at::Half, CUDAContext>(
     at::Half** C,
     CUDAContext* context,
     TensorProto::DataType math_type) {
-#if __CUDACC_VER_MAJOR__ < 9	
-  // loop over matrices in the batch	
-  for (int i = 0; i < batch_size; ++i) {	
-    Gemm<at::Half, CUDAContext>(	
-        trans_A,	
-        trans_B,	
-        M,	
-        N,	
-        K,	
-        alpha,	
-        A[i],	
-        B[i],	
-        beta,	
-        C[i],	
-        context,	
-        math_type);	
-  }	
+#if __CUDACC_VER_MAJOR__ < 9
+  // loop over matrices in the batch
+  for (int i = 0; i < batch_size; ++i) {
+    Gemm<at::Half, CUDAContext>(
+        trans_A,
+        trans_B,
+        M,
+        N,
+        K,
+        alpha,
+        A[i],
+        B[i],
+        beta,
+        C[i],
+        context,
+        math_type);
+  }
 #else
   // Note that cublas follows fortran order, so the order is different from
   // the cblas convention.
@@ -1662,7 +1662,7 @@ CAFFE2_CUDA_EXPORT void Dot<at::Half, CUDAContext>(
     CUDAContext* context) {
 #if defined __HIP_PLATFORM_HCC__ && HIP_VERSION < 210
   CAFFE_THROW("HIP currently does not support FP16 completely yet.");
-#elif defined __HIP_PLATFORM_HCC__ && HIP_VERSION >= 210  
+#elif defined __HIP_PLATFORM_HCC__ && HIP_VERSION >= 210
   CUBLAS_ENFORCE(cublasSetPointerMode(
       context->cublas_handle(), CUBLAS_POINTER_MODE_DEVICE));
   CUBLAS_ENFORCE(rocblas_hdot(
