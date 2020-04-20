@@ -71,6 +71,7 @@ DEFINE_DISPATCH(index_put_stub);
 DEFINE_DISPATCH(index_put_accum_stub);
 DEFINE_DISPATCH(masked_fill_stub);
 REGISTER_NO_CPU_DISPATCH(index_put_accum_stub, index_put_accum_fn);
+DEFINE_DISPATCH(masked_select_serial_stub);
 DEFINE_DISPATCH(masked_select_stub);
 
 DEFINE_DISPATCH(gather_stub);
@@ -651,8 +652,7 @@ static Tensor & masked_select_out_impl_cpu(Tensor & result, const Tensor & self,
   std::tie(_mask, _self) = expand_outplace(mask, self);
 
   auto shape = _self.sizes().vec();
-  auto mask_long = at::empty(shape, self.options().dtype(at::kLong)).copy_(_mask);
-  int64_t numel = mask_long.sum().item().toLong();
+  int64_t numel = _mask.sum().item().toLong();
   result.resize_({numel});
   if (numel == 0) {
     return result;
@@ -662,8 +662,24 @@ static Tensor & masked_select_out_impl_cpu(Tensor & result, const Tensor & self,
   auto strides = DimVector(shape.size(), 0);
   auto result_strided = result.as_strided(shape, strides);
 
+  // serial kernel
+  bool use_serial_kernel = self.numel() < at::internal::GRAIN_SIZE || at::get_num_threads() == 1;
+  if (use_serial_kernel) {
+    auto iter = TensorIterator();
+    iter.dont_compute_common_dtype();
+    iter.dont_resize_outputs();
+    iter.add_output(result_strided);
+    iter.add_input(_self);
+    iter.add_input(_mask);
+    iter.build();
+
+    masked_select_serial_stub(iter.device_type(), iter);
+    return result;
+  }
+
   // Use a prefix sum to record the output locations of the masked elements,
   // so as to parallel with TensorIterator.
+  auto mask_long = at::empty(shape, self.options().dtype(at::kLong)).copy_(_mask);
   auto mask_prefix_sum = at::empty(shape, self.options().dtype(at::kLong));
   auto mask_long_data = mask_long.data_ptr<int64_t>();
   auto mask_prefix_sum_data = mask_prefix_sum.data_ptr<int64_t>();

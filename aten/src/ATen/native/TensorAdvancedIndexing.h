@@ -26,6 +26,7 @@ DECLARE_DISPATCH(index_fn, index_stub);
 DECLARE_DISPATCH(index_put_fn, index_put_stub);
 DECLARE_DISPATCH(index_put_accum_fn, index_put_accum_stub);
 DECLARE_DISPATCH(masked_fill_fn, masked_fill_stub);
+DECLARE_DISPATCH(masked_select_fn, masked_select_serial_stub);
 DECLARE_DISPATCH(masked_select_fn, masked_select_stub);
 
 DECLARE_DISPATCH(gather_fn, gather_stub);
