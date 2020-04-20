@@ -116,7 +116,7 @@ Library& Library::_def(c10::FunctionSchema&& schema, c10::OperatorName* out_name
     *out_name = schema.operator_name(); // copy!
   }
   registrars_.emplace_back(
-    Dispatcher::singleton().registerDef(
+    c10::Dispatcher::singleton().registerDef(
       std::move(schema),
       debugString("", file_, line_)
     )
@@ -149,7 +149,7 @@ Library& Library::_def(c10::either<c10:OperatorName, c10::FunctionSchema>&& name
   // Then register the implementation...
   auto dispatch_key = f.dispatch_key_.has_value() ? f.dispatch_key_ : dispatch_key_;
   registrars_.emplace_back(
-    Dispatcher::singleton().registerImpl(
+    c10::Dispatcher::singleton().registerImpl(
       std::move(name),
       dispatch_key,
       std::move(f.func_),
@@ -193,7 +193,7 @@ Library& Library::_impl(const char* name_str, CppFunction&& f) & {
   );
   auto dispatch_key = f.dispatch_key_.has_value() ? f.dispatch_key_ : dispatch_key_;
   registrars_.emplace_back(
-    Dispatcher::singleton().registerImpl(
+    c10::Dispatcher::singleton().registerImpl(
       std::move(name),
       dispatch_key,
       std::move(f.func_),
@@ -219,7 +219,7 @@ Library& Library::_fallback(CppFunction&& f) & {
     "    TORCH_LIBRARY_IMPL(_, ", *dispatch_key, ", m) { m.fallback(...); }\n\n",
     ERROR_CONTEXT);
   registrars_.emplace_back(
-    Dispatcher::singleton().registerFallback(
+    c10::Dispatcher::singleton().registerFallback(
       *dispatch_key,
       std::move(f.func_),
       debugString(std::move(f.debug_), file_, line_)
