@@ -36,6 +36,7 @@ from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.common_quantization import SingleLayerLinearModel, AnnotatedSingleLayerLinearModel
 from torch.testing._internal.common_quantization import ConvModel, AnnotatedConvModel
 from torch.testing._internal.common_quantization import test_only_eval_fn as _test_only_eval_fn
+from torch.testing._internal.common_quantized import override_quantized_engine
 
 from torch.testing import FileCheck
 from torch.testing._internal.jit_utils import attrs_with_prefix
@@ -1199,9 +1200,11 @@ class TestQuantizeScriptPTSQOps(JitTestCase):
         FileCheck().check_not("quantized::linear_prepack") \
                    .run(model.graph)
 
-    @unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
-                         " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
-                         " with instruction set support avx2 or newer.")
+    @unittest.skipUnless(
+        'fbgemm' in torch.backends.quantized.supported_engines,
+        " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
+        " with instruction set support avx2 or newer.",
+    )
     def test_quantized_linear_relu(self):
         class M(torch.nn.Module):
             def __init__(self, functional):
@@ -1217,13 +1220,16 @@ class TestQuantizeScriptPTSQOps(JitTestCase):
 
         data = [(torch.randn((1, 30), dtype=torch.float),
                  torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
-        model = self._test_op_impl(M(), data, "quantized::linear_relu")
-
-        FileCheck().check_not("aten::linear") \
-                   .check_not("aten::relu") \
-                   .check_not("quantized::linear(") \
-                   .check_not("quantized::relu(") \
-                   .run(model.graph)
+        model = self._test_op_impl(M(functional=False), data,
+                                   "quantized::linear_relu")
+        model_functional = self._test_op_impl(M(functional=True), data,
+                                              "quantized::linear_relu")
+        checker = FileCheck().check_not("aten::linear") \
+                             .check_not("aten::relu") \
+                             .check_not("quantized::linear(") \
+                             .check_not("quantized::relu(")
+        checker.run(model.graph)
+        checker.run(model_functional.graph)
 
     @unittest.skipUnless(
         'fbgemm' in torch.backends.quantized.supported_engines,
