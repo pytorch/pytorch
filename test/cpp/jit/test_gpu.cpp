@@ -1362,8 +1362,6 @@ void testGPU_FusionTernaryOps() {
   std::stringstream cdg;
   gpulw.printKernel(cdg);
 
-  std::cout << cdg.str() << std::endl;
-
   torch::jit::fuser::cuda::CudaKernel prog;
   prog.device_ = 0;
   prog.grid(64);

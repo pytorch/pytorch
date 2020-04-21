@@ -158,6 +158,7 @@ class IrParser {
                 {aten::add, BinaryOpType::Add},
                 {aten::sub, BinaryOpType::Sub},
             });
+            // TODO: handle scaling factor when it's not constant 1;
             auto lhs = value_maps[node->inputs()[0]->unique()];
             auto rhs = value_maps[node->inputs()[1]->unique()];
 
@@ -166,7 +167,7 @@ class IrParser {
           });
     }
 
-    std::array<const char*, 24> BinaryOp = {
+    std::array<const char*, 12> BinaryOp = {
         "aten::div(Tensor self, Tensor other) -> Tensor",
         "aten::div(Tensor self, Scalar other) -> Tensor",
         "aten::mul(Tensor self, Tensor other) -> Tensor",
@@ -178,19 +179,19 @@ class IrParser {
         "aten::pow(Tensor self, Scalar exponent) -> Tensor",
         "aten::pow(Scalar self, Tensor exponent) -> Tensor",
         "aten::remainder(Tensor self, Tensor other) -> Tensor",
-        "aten::fmod(Tensor self, Tensor other) -> Tensor",
-        "aten::eq(Tensor self, Tensor other) -> Tensor",
-        "aten::eq(Tensor self, Scalar other) -> Tensor",
-        "aten::ne(Tensor self, Tensor other) -> Tensor",
-        "aten::ne(Tensor self, Scalar other) -> Tensor",
-        "aten::ge(Tensor self, Tensor other) -> Tensor",
-        "aten::ge(Tensor self, Scalar other) -> Tensor",
-        "aten::gt(Tensor self, Tensor other) -> Tensor",
-        "aten::gt(Tensor self, Scalar other) -> Tensor",
-        "aten::le(Tensor self, Tensor other) -> Tensor",
-        "aten::le(Tensor self, Scalar other) -> Tensor",
-        "aten::lt(Tensor self, Tensor other) -> Tensor",
-        "aten::lt(Tensor self, Scalar other) -> Tensor"};
+        "aten::fmod(Tensor self, Tensor other) -> Tensor"};
+        //"aten::eq(Tensor self, Tensor other) -> Tensor",
+        //"aten::eq(Tensor self, Scalar other) -> Tensor",
+        //"aten::ne(Tensor self, Tensor other) -> Tensor",
+        //"aten::ne(Tensor self, Scalar other) -> Tensor",
+        //"aten::ge(Tensor self, Tensor other) -> Tensor",
+        //"aten::ge(Tensor self, Scalar other) -> Tensor",
+        //"aten::gt(Tensor self, Tensor other) -> Tensor",
+        //"aten::gt(Tensor self, Scalar other) -> Tensor",
+        //"aten::le(Tensor self, Tensor other) -> Tensor",
+        //"aten::le(Tensor self, Scalar other) -> Tensor",
+        //"aten::lt(Tensor self, Tensor other) -> Tensor",
+        //"aten::lt(Tensor self, Scalar other) -> Tensor"};
     for (auto signature : BinaryOp) {
       auto ptr_op = getOperatorForLiteral(signature);
       registerParseRule(ptr_op,
