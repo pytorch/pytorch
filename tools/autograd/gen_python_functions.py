@@ -33,7 +33,7 @@
 from collections import defaultdict
 import re
 from .gen_variable_type import should_trace
-from .utils import write
+from .utils import write, is_tensor_method
 
 try:
     from src.ATen.code_template import CodeTemplate
@@ -1444,10 +1444,6 @@ def get_tensor_options(declaration):
 
 def has_tensor_options(declaration):
     return get_tensor_options(declaration) is not None
-
-
-def is_tensor_method(declaration):
-    return 'Tensor' in declaration['method_of']
 
 
 def is_torch_function(declaration):

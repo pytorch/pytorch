@@ -188,11 +188,11 @@ ${return_type} ${type_wrapper_name}(${type_method_formals}) {
 """)
 
 UNBOXEDONLY_WRAPPER_REGISTRATION = CodeTemplate("""\
-m.impl_UNBOXED("${unqual_operator_name_with_overload}", VariableType::${type_wrapper_name});
+m.impl_UNBOXED("${unqual_operator_name_with_overload}", ${class_type}::${type_wrapper_name});
 """)
 
 WRAPPER_REGISTRATION = CodeTemplate("""\
-m.impl("${unqual_operator_name_with_overload}", VariableType::${type_wrapper_name});
+m.impl("${unqual_operator_name_with_overload}", ${class_type}::${type_wrapper_name});
 """)
 
 UNPACK_TENSOR = CodeTemplate("""\
@@ -340,6 +340,13 @@ REGISTRATION_DECLARATION = CodeTemplate("""\
 ${return_type} ${api_name}(${type_method_formals}); // {"schema": "${schema_string}", "compound": "${compound}"}
 """)
 
+# ProfiledType templates
+PROFILE_DISPATCH_UNBOXED = CodeTemplate("""\
+static auto op = c10::Dispatcher::singleton().findSchema({"aten::${operator_name}", "${overload_name}"});
+TORCH_INTERNAL_ASSERT(op);
+RECORD_FUNCTION("${name}", std::vector<c10::IValue>({${input_names}}), Node::peek_at_next_sequence_nr());
+return c10::Dispatcher::singleton().callUnboxedRedispatch<${ret_and_arg_types}>(${profiled_dispatch_args});
+""")
 
 FACTORY_FUNCTION_NAMES = None
 
@@ -548,10 +555,13 @@ def gen_variable_type(out, aten_declarations, template_path):
 def gen_variable_type_shard(out, aten_declarations, template_path, suffix, header):
     VARIABLE_TYPE_H = CodeTemplate.from_file(template_path + '/VariableType.h')
     VARIABLE_TYPE_CPP = CodeTemplate.from_file(template_path + '/VariableType.cpp')
+    PROFILED_TYPE_CPP = CodeTemplate.from_file(template_path + '/ProfiledType.cpp')
 
     type_declarations = []
     type_definitions = []
     wrapper_registrations = []
+    profiled_method_definitions = []
+    profiled_wrapper_registrations = []
 
     for declaration in aten_declarations:
         formal_types = [arg['type'] for arg in declaration['arguments']]
@@ -562,22 +572,73 @@ def gen_variable_type_shard(out, aten_declarations, template_path, suffix, heade
                 declaration, type_definition_body=body))
             if declaration['use_c10_dispatcher'] == 'full':
                 wrapper_registrations.append(WRAPPER_REGISTRATION.substitute(
-                    declaration, formal_types=formal_types))
+                    declaration, class_type='VariableType'))
             else:
                 assert declaration['use_c10_dispatcher'] == 'with_codegenerated_unboxing_wrapper'
                 wrapper_registrations.append(UNBOXEDONLY_WRAPPER_REGISTRATION.substitute(
-                    declaration, formal_types=formal_types))
+                    declaration, class_type='VariableType'))
+
+        # Emit ProfiledType code
+        profiled_body = emit_profiled_body(declaration)
+        profiled_method_definitions.append(METHOD_DEFINITION.substitute(
+            declaration, type_definition_body=profiled_body))
+
+        if declaration['use_c10_dispatcher'] == 'full':
+            profiled_wrapper_registrations.append(WRAPPER_REGISTRATION.substitute(
+                declaration, class_type='ProfiledType'))
+        else:
+            profiled_wrapper_registrations.append(UNBOXEDONLY_WRAPPER_REGISTRATION.substitute(
+                declaration, class_type='ProfiledType'))
 
     env = {
         'type_derived_method_declarations': type_declarations,
         'type_derived_method_definitions': type_definitions,
         'wrapper_registrations': wrapper_registrations,
+        'profiled_method_definitions': profiled_method_definitions,
+        'profiled_wrapper_registrations': profiled_wrapper_registrations
     }
     if header:
         write(out, 'VariableType.h', VARIABLE_TYPE_H, env)
     else:
         write(out, 'VariableType%s.cpp' % suffix, VARIABLE_TYPE_CPP, env)
 
+    write(out, 'ProfiledType%s.cpp' % suffix, PROFILED_TYPE_CPP, env)
+
+def emit_profiled_body(declaration):
+    arguments = declaration['arguments']
+    returns = declaration['returns']
+    func = declaration['derivative']
+    name = declaration['name']
+    inplace = declaration['inplace']
+    is_out_fn = name.endswith('_out')
+    modifies_arguments = inplace or is_out_fn
+    returns_void = len(returns) == 0
+
+    processed_args = []
+    for a in arguments:
+        processed_args.append('{}'.format(a['name']))
+
+    ret_and_arg_types = ', '.join([declaration['return_type']] + [a['type'] for a in declaration['arguments']])
+
+    def check_record_function_input_type(simple_type):
+        return simple_type in ['Tensor', 'Scalar']
+
+    def record_function_input_names():
+        return ', '.join([
+            arg['name'] for arg in declaration['arguments']
+            if check_record_function_input_type(arg['simple_type'])])
+
+    profiled_dispatch_args = ['*op', 'c10::DispatchKey::Profiler'] + declaration['args']
+
+    call = PROFILE_DISPATCH_UNBOXED.substitute(
+        declaration,
+        name=name,
+        input_names=record_function_input_names(),
+        ret_and_arg_types=ret_and_arg_types,
+        profiled_dispatch_args=profiled_dispatch_args,
+    )
+
+    return [call]
 
 def emit_body(declaration):
     strategy = dispatch_strategy(declaration)
@@ -988,22 +1049,10 @@ def emit_body(declaration):
             return []
         return ['increment_version({});'.format(arg['name']) for arg in differentiable_outputs]
 
-    def check_record_function_input_type(simple_type):
-        return simple_type in ['Tensor', 'Scalar']
-
-    def record_function_input_names():
-        return ', '.join([
-            arg['name'] for arg in declaration['arguments']
-            if check_record_function_input_type(arg['simple_type'])])
-
     env = {}
     combined = nested_dict(env, declaration)
 
     body = []
-    if base_name not in DONT_PROFILE:
-        input_names = record_function_input_names()
-        body.append(
-            RECORD_FUNCTION.substitute(combined, input_names=input_names))
     if strategy != 'use_type':
         body.extend(unpack_args(env, declaration))
     if requires_derivative:
