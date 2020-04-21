@@ -116,7 +116,6 @@ std::shared_ptr<FutureMessage> sendMessageWithAutograd(
     const WorkerInfo& dst,
     torch::distributed::rpc::Message&& wrappedRpcMsg,
     bool forceGradRecording,
-    const std::shared_ptr<torch::autograd::profiler::RecordFunction>& rf,
     const float rpcTimeoutSeconds) {
   auto msg = getMessageWithAutograd(
       dst.id_,
@@ -124,16 +123,7 @@ std::shared_ptr<FutureMessage> sendMessageWithAutograd(
       MessageType::FORWARD_AUTOGRAD_REQ,
       forceGradRecording);
 
-  auto fut = agent.send(dst, std::move(msg), rpcTimeoutSeconds);
-  if (rf != nullptr) {
-    // Add a callback to
-    // the future that captures the RecordFunction to persist it for the
-    // lifetime of the future. When the future is completed, this will run the
-    // end() callbacks associated with the RecordFunction, so that async RPCs
-    // can be profiled correctly.
-    fut->addCallback([rf]() { rf->_end(); });
-  }
-  return fut;
+  return agent.send(dst, std::move(msg), rpcTimeoutSeconds);
 }
 
 } // namespace autograd
