@@ -183,7 +183,7 @@ class MultiProcessTestCase(TestCase):
         return types.MethodType(wrapper, self)
 
     # The main process spawns N subprocesses that run the test.
-    # This function patches overwrites every test function to either
+    # Constructor patches current instance test method to
     # assume the role of the main process and join its subprocesses,
     # or run the underlying test function.
     def __init__(self, method_name='runTest'):
