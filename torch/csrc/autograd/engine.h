@@ -294,6 +294,9 @@ struct TORCH_API Engine {
  protected:
   Engine();
   void compute_dependencies(Node* root, GraphTask& task);
+
+  // We pass cpu_ready_queue to evaluate_function, so that it knows
+  // the correct ready queue to push to after a NodeTask is ready
   void evaluate_function(
       std::shared_ptr<GraphTask>& graph_task,
       Node* func,
