@@ -11121,7 +11121,7 @@ class TestTorchDeviceType(TestCase):
                            [1, 0, 0, 0],
                            [1, 0, 0, 0],
                            [0, 0, 0, 0]],
-                          device=device, dtype=torch.float32), "sum"),
+                          device=device, dtype=torch.float32), "add"),
             (torch.zeros(4, 4, device=device, dtype=torch.float32),
              torch.ones(2, 2, device=device, dtype=torch.float32),
              torch.tensor([[0, 0, 0, 0],
@@ -11199,7 +11199,7 @@ class TestTorchDeviceType(TestCase):
         test_data = [
             (torch.ones(height, width, device=device, dtype=torch.float32),
              torch.ones(height, width, device=device, dtype=torch.float32),
-             torch.tensor([[3], [1]], device=device, dtype=torch.float32).repeat(1, width), "sum"),
+             torch.tensor([[3], [1]], device=device, dtype=torch.float32).repeat(1, width), "add"),
 
             (torch.ones(height, width, device=device, dtype=torch.float32),
              torch.ones(height, width, device=device, dtype=torch.float32),

@@ -541,7 +541,7 @@ Tensor & scatter_fill_cpu_(Tensor & self, int64_t dim, const Tensor & index, Sca
 }
 
 SCATTER_GATHER_OP get_operator_enum(const std::string& reduce) {
-  if (reduce == "sum") {
+  if (reduce == "add") {
     return SCATTER_GATHER_OP::REDUCE_ADD;
   }
   else if (reduce == "subtract") {
@@ -560,7 +560,7 @@ SCATTER_GATHER_OP get_operator_enum(const std::string& reduce) {
 }
 
 SCATTER_GATHER_OP get_scalar_operator_enum(const std::string& reduce) {
-  if (reduce == "sum") {
+  if (reduce == "add") {
     return SCATTER_GATHER_OP::SCALAR_REDUCE_ADD;
   }
   else if (reduce == "subtract") {

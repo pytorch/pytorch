@@ -157,7 +157,7 @@ public:
 };
 ReduceMultiply reduce_multiply;
 
-auto reduce_sum = [](auto * self_data, auto * src_data) {
+auto reduce_add = [](auto * self_data, auto * src_data) {
                     *self_data += *src_data;
                   };
 auto reduce_subtract = [](auto * self_data, auto * src_data) {
@@ -381,7 +381,7 @@ struct cpu_scatter_gather_base_kernel {
 
         using binary_func_t = std::function<void(scalar_t*, scalar_t*)>;
         std::map<const SCATTER_GATHER_OP, binary_func_t> binary_funcs;
-        binary_funcs[SCATTER_GATHER_OP::REDUCE_ADD] = reduce_sum;
+        binary_funcs[SCATTER_GATHER_OP::REDUCE_ADD] = reduce_add;
         binary_funcs[SCATTER_GATHER_OP::REDUCE_SUBTRACT] = reduce_subtract;
         binary_funcs[SCATTER_GATHER_OP::REDUCE_MULTIPLY] = reduce_multiply;
         binary_funcs[SCATTER_GATHER_OP::REDUCE_DIVIDE] = reduce_divide;
