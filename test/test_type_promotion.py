@@ -550,7 +550,7 @@ class TestTypePromotion(TestCase):
 
         if dtype.is_complex:
             self.assertRaises(RuntimeError, lambda: t.to_sparse())
-            return (0,0)
+            return (0, 0)
 
         if coalesced:
             s = t.to_sparse()
