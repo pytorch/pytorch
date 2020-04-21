@@ -114,7 +114,7 @@ DONT_REQUIRE_DERIVATIVE = {
 
 # Some operators invalidate the grad_accumulator. Let's reset it.
 RESET_GRAD_ACCUMULATOR = {
-    'set_'
+    'set'
 }
 
 # NOTE [ Invariant: TensorImpl and Storage Pointer Equality ]
