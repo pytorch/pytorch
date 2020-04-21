@@ -9105,6 +9105,11 @@ class TestNNDeviceType(NNTestCase):
             with torch.backends.cudnn.flags(enabled=False):
                 self._test_module_empty_input(mod, inp, check_size=False)
 
+    def test_linear_empty(self, device):
+        mod = torch.nn.Linear(7, 7).to(device)
+        inp = torch.randn(0, 7, device=device)
+        self._test_module_empty_input(mod, inp)
+
     def test_one_hot(self, device):
         with self.assertRaises(RuntimeError):
             torch.nn.functional.one_hot(torch.tensor([3, 4, -1, 0], device=device), -1)
