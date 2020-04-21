@@ -343,8 +343,10 @@ class MinMaxObserver(_ObserverBase):
         else:
             min_val = torch.min(torch.min(x), min_val)
             max_val = torch.max(torch.max(x), max_val)
-        self.min_val = min_val
-        self.max_val = max_val
+        self.min_val.resize_(min_val.shape)
+        self.max_val.resize_(max_val.shape)
+        self.min_val.copy_(min_val)
+        self.max_val.copy_(max_val)
         return x_orig
 
     @torch.jit.export
@@ -434,8 +436,10 @@ class MovingAverageMinMaxObserver(MinMaxObserver):
         else:
             min_val = min_val + self.averaging_constant * (torch.min(x) - min_val)
             max_val = max_val + self.averaging_constant * (torch.max(x) - max_val)
-        self.min_val = min_val
-        self.max_val = max_val
+        self.min_val.resize_(min_val.shape)
+        self.max_val.resize_(max_val.shape)
+        self.min_val.copy_(min_val)
+        self.max_val.copy_(max_val)
         return x_orig
 
 
@@ -624,8 +628,10 @@ class PerChannelMinMaxObserver(_ObserverBase):
         else:
             min_vals = torch.min(torch.min(y, 1)[0], min_vals)
             max_vals = torch.max(torch.max(y, 1)[0], max_vals)
-        self.min_vals = min_vals
-        self.max_vals = max_vals
+        self.min_vals.resize_(min_vals.shape)
+        self.max_vals.resize_(max_vals.shape)
+        self.min_vals.copy_(min_vals)
+        self.max_vals.copy_(max_vals)
         return x_orig
 
     @torch.jit.export
@@ -688,6 +694,7 @@ class MovingAveragePerChannelMinMaxObserver(PerChannelMinMaxObserver):
         super(MovingAveragePerChannelMinMaxObserver, self).__init__(
             ch_axis=ch_axis, dtype=dtype, qscheme=qscheme,
             reduce_range=reduce_range)
+        # TODO: this
         self.averaging_constant = averaging_constant
 
     def forward(self, x_orig):
@@ -707,8 +714,10 @@ class MovingAveragePerChannelMinMaxObserver(PerChannelMinMaxObserver):
         else:
             min_vals = min_vals + self.averaging_constant * (torch.min(y, 1)[0] - min_vals)
             max_vals = max_vals + self.averaging_constant * (torch.max(y, 1)[0] - max_vals)
-        self.min_vals = min_vals
-        self.max_vals = max_vals
+        self.min_vals.resize_(*min_vals.shape)
+        self.max_vals.resize_(*max_vals.shape)
+        self.min_vals.copy_(min_vals)
+        self.max_vals.copy_(max_vals)
         return x_orig
 
 class HistogramObserver(_ObserverBase):
