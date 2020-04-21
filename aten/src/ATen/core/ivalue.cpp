@@ -288,7 +288,8 @@ std::ostream& printMaybeAnnotatedList(
     const IValue& the_list,
     IValueFormatter formatter) {
 
-  if (the_list.toListRef().size() == 0 || !elementTypeCanBeInferredFromMembers(the_list.type()->expect<ListType>()->getElementType())) {
+  auto list_elem_type = the_list.type()->expect<ListType>()->getElementType();
+  if (the_list.toListRef().size() == 0 || !elementTypeCanBeInferredFromMembers(list_elem_type)) {
     out << "annotate(" << the_list.type()->python_str() << ", ";
     printList(out, the_list.toListRef(), "[", "]", formatter);
     out << ")";

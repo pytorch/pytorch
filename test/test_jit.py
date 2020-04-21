@@ -39,7 +39,7 @@ import torch.cuda
 import torch.jit
 import torch.jit._logging
 import torch.jit.frontend
-# import torch.jit.quantized
+import torch.jit.quantized
 import torch.nn as nn
 import torch.nn.functional as F
 
