@@ -49,6 +49,7 @@ using _enum_unordered_map =
     std::unordered_map<KeyType, ValType, _enum_class_hash<KeyType>>;
 static _enum_unordered_map<DataType, std::string> data_type_string_map{
     {DataType::Float, "float"},
+    {DataType::Half, "__half"},
     {DataType::Int, "size_t"}};
 static _enum_unordered_map<ValType, std::string> val_type_string_map{
     {ValType::TensorIndex, "TensorIndex"},
@@ -166,6 +167,7 @@ static _enum_unordered_map<ParallelType, std::string> parallel_type_string_map{
 
 static _enum_unordered_map<at::ScalarType, DataType> at_type_map{
     {at::ScalarType::Float, DataType::Float},
+    {at::ScalarType::Half, DataType::Half},
     {at::ScalarType::Int, DataType::Int}};
 
 static _enum_unordered_map<ParallelType, std::string> thread_size_string_map{

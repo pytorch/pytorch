@@ -1628,6 +1628,34 @@ void testGPU_FusionTernaryOps() {
   torch::jit::fuser::cuda::compileKernel(fusion, &prog);
 }
 
+void testGPU_FusionCastOps() {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  std::vector<IterDomain*> dom;
+  for (int i = 0; i < 2; i++)
+    dom.push_back(new IterDomain(new Int(0), new Int()));
+
+  TensorView* tv0 = new TensorView(new TensorDomain(dom), DataType::Half);
+
+  Val*     intrm1 = castOp(DataType::Float, tv0);
+  TensorView* out = static_cast<TensorView*>(castOp(DataType::Half, intrm1));
+
+  fusion.addInput(tv0);
+  fusion.addOutput(out);
+  tv0->computeAt(out, -1);
+
+  out->axis(0)->parallelize(ParallelType::BIDx);
+  out->axis(-1)->parallelize(ParallelType::TIDx);
+
+  torch::jit::fuser::cuda::CudaKernel prog;
+  prog.device_ = 0;
+  prog.grid(64);
+  prog.block(32);
+
+  torch::jit::fuser::cuda::compileKernel(fusion, &prog);
+}
+
 void testGPU_Fusion() {}
 
 } // namespace jit

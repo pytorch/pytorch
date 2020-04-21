@@ -53,6 +53,10 @@ struct ConstCheck : OptOutConstDispatch {
     is_const_ = f->isConst();
   }
 
+  void handle(const Half* const h) override {
+    is_const_ = h->isConst();
+  }
+
   void handle(const Int* const i) override {
     is_const_ = i->isConst();
   }

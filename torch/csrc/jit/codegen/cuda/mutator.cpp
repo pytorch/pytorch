@@ -105,6 +105,9 @@ Statement* OptOutMutator::mutate(TensorIndex* ti) {
 Statement* OptOutMutator::mutate(Float* n) {
   return n;
 }
+Statement* OptOutMutator::mutate(Half* n) {
+  return n;
+}
 Statement* OptOutMutator::mutate(Int* n) {
   return n;
 }

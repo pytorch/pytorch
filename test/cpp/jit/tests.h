@@ -122,7 +122,8 @@ namespace jit {
   _(GPU_FusionUnaryOps)          \
   _(GPU_FusionBinaryOps)         \
   _(GPU_FusionMultiInputOps)     \
-  _(GPU_FusionTernaryOps)
+  _(GPU_FusionTernaryOps)        \
+  _(GPU_FusionCastOps)
 #else
 #define TH_FORALL_TESTS_CUDA(_) \
   _(ArgumentSpec)               \

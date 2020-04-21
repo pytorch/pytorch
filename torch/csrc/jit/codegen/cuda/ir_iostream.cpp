@@ -270,6 +270,21 @@ void IRPrinter::handle(const Float* const f) {
   }
 }
 
+void IRPrinter::handle(const Half* const h) {
+  if (print_inline_ && FusionGuard::getCurFusion()->origin(h) != nullptr) {
+    os << "( ";
+    handle(FusionGuard::getCurFusion()->origin(h));
+    os << " )";
+    return;
+  }
+
+  if (h->isSymbolic()) {
+    os << "h" << h->name();
+  } else {
+    os << "__float2half(" << *(h->value()) << ")";
+  }
+}
+
 void IRPrinter::handle(const Int* const i) {
   if (print_inline_ && FusionGuard::getCurFusion()->origin(i) != nullptr) {
     os << "( ";
@@ -323,6 +338,21 @@ void IRPrinter::handle(const UnaryOp* const uop) {
   if (auto inline_uop = inline_op_str(uop->getUnaryOpType())) {
     os << inline_uop.value();
     handle(uop->in());
+  } else if(uop->getUnaryOpType() == UnaryOpType::Cast) {
+	if(    uop->in()->getDataType() == DataType::Half
+        && uop->out()->getDataType() == DataType::Float)
+      os << "__half2float(";
+    else if (    uop->in()->getDataType() == DataType::Float
+              && uop->out()->getDataType() == DataType::Half)
+      os << "__float2half(";
+    else
+      TORCH_CHECK(
+          false,
+          "Cast of DataType: ", uop->in()->getDataType().value(),
+          " to: ", uop->out()->getDataType().value(),
+          " not supported!");
+    handle(uop->in());
+    os << ")";
   } else {
     os << uop->getUnaryOpType() << "(";
     if(uop->getUnaryOpType() == UnaryOpType::RandLike)

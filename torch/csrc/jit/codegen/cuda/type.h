@@ -23,7 +23,12 @@ enum class ValType {
   NamedScalar
 };
 
-enum class DataType { Float, Int, Null };
+enum class DataType {
+  Float,
+  Half,
+  Int,
+  Null
+};
 
 enum class ExprType {
   UnaryOp,

@@ -17,6 +17,8 @@ TORCH_CUDA_API Val* newValLike(const Val* const val, DataType dtype) {
       switch (dtype) {
         case (DataType::Float):
           return new Float();
+        case (DataType::Half):
+          return new Half();
         case (DataType::Int):
           return new Int();
         default:

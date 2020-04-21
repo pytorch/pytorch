@@ -61,6 +61,7 @@ struct TensorDomain;
 struct TensorView;
 struct TensorIndex;
 struct Float;
+struct Half;
 struct Int;
 struct NamedScalar;
 
@@ -100,6 +101,7 @@ struct TORCH_CUDA_API OptOutConstDispatch {
   virtual void handle(const TensorView* const) {}
   virtual void handle(const TensorIndex* const) {}
   virtual void handle(const Float* const) {}
+  virtual void handle(const Half* const) {}
   virtual void handle(const Int* const) {}
   virtual void handle(const NamedScalar* const) {}
 
@@ -136,6 +138,7 @@ struct TORCH_CUDA_API OptOutDispatch {
   virtual void handle(TensorView*) {}
   virtual void handle(TensorIndex*) {}
   virtual void handle(Float*) {}
+  virtual void handle(Half*) {}
   virtual void handle(Int*) {}
   virtual void handle(NamedScalar*) {}
 
@@ -181,6 +184,9 @@ struct TORCH_CUDA_API OptInConstDispatch {
   }
   virtual void handle(const Float* const) {
     TORCH_INTERNAL_ASSERT(false, "Handle not overriden for Float.");
+  }
+  virtual void handle(const Half* const) {
+    TORCH_INTERNAL_ASSERT(false, "Handle not overriden for Half.");
   }
   virtual void handle(const Int* const) {
     TORCH_INTERNAL_ASSERT(false, "Handle not overriden for Int.");
@@ -249,6 +255,9 @@ struct TORCH_CUDA_API OptInDispatch {
   }
   virtual void handle(Float*) {
     TORCH_INTERNAL_ASSERT(false, "Handle not overriden for Float.");
+  }
+  virtual void handle(Half*) {
+    TORCH_INTERNAL_ASSERT(false, "Handle not overriden for Half.");
   }
   virtual void handle(Int*) {
     TORCH_INTERNAL_ASSERT(false, "Handle not overriden for Int.");
@@ -332,6 +341,7 @@ struct TORCH_CUDA_API OptOutMutator {
   virtual Statement* mutate(TensorView*);
   virtual Statement* mutate(TensorIndex*);
   virtual Statement* mutate(Float*);
+  virtual Statement* mutate(Half*);
   virtual Statement* mutate(Int*);
   virtual Statement* mutate(NamedScalar*);
 
