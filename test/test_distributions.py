@@ -4268,6 +4268,20 @@ class TestTransforms(TestCase):
         self.assertTrue(identity_transform == identity_transform.inv)
         self.assertFalse(identity_transform != identity_transform.inv)
 
+    def test_with_cache(self):
+        for transform in self.transforms:
+            if transform._cache_size == 0:
+                transform = transform.with_cache(1)
+            self.assertTrue(transform._cache_size == 1)
+
+            x = self._generate_data(transform).requires_grad_()
+            try:
+                y = transform(x)
+            except NotImplementedError:
+                continue
+            y2 = transform(x)
+            self.assertTrue(y2 is y)
+
     def test_forward_inverse_cache(self):
         for transform in self.transforms:
             x = self._generate_data(transform).requires_grad_()
