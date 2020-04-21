@@ -1235,7 +1235,8 @@ class TestQuantizeScriptPTSQOps(JitTestCase):
             def forward(self, x):
                 return self.relu(self.conv(x))
 
-        data = [(torch.randn(1, 1, 10, 10, dtype=torch.float), torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
+        data = [(torch.randn(1, 1, 10, 10, dtype=torch.float),
+                 torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
         model = self._test_op_impl(M(), data, "quantized::conv2d_relu")
 
         FileCheck().check_not("aten::conv2d") \
@@ -1243,6 +1244,36 @@ class TestQuantizeScriptPTSQOps(JitTestCase):
                    .check_not("quantized::conv2d(") \
                    .check_not("quantized::relu(") \
                    .run(model.graph)
+
+    @unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
+                         " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
+                         " with instruction set support avx2 or newer.")
+    def test_quantized_conv3d_relu(self):
+        class M(torch.nn.Module):
+            def __init__(self, functional):
+                super(M, self).__init__()
+                self.conv = torch.nn.Conv3d(1, 4, 2, 3).float()
+                if functional:
+                    self.relu = F.relu
+                else:
+                    self.relu = torch.nn.ReLU()
+
+            def forward(self, x):
+                return self.relu(self.conv(x))
+
+        data = [(torch.randn(1, 1, 5, 5, 5, dtype=torch.float),
+                 torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
+        model = self._test_op_impl(M(functional=False), data,
+                                   "quantized::conv3d_relu")
+        model_functional = self._test_op_impl(M(functional=True), data,
+                                              "quantized::conv3d_relu")
+
+        checker = FileCheck().check_not("aten::conv3d") \
+                             .check_not("aten::relu") \
+                             .check_not("quantized::conv3d(") \
+                             .check_not("quantized::relu(")
+        checker.run(model.graph)
+        checker.run(model_functional.graph)
 
     def test_quantized_add(self):
         class Add(torch.nn.Module):
