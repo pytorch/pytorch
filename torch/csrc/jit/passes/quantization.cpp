@@ -63,6 +63,8 @@ std::vector<std::string> _quantizable_aten_funcs = {
     "add",
     "cat",
     "lstm",
+    "mul",
+    "mul_",
 };
 
 // These are the prim::CallFunctions that doesn't require observation and
@@ -166,10 +168,7 @@ void fillQConfigMap(
   }
 }
 
-bool isFunctionNode(
-    Node* n,
-    const std::vector<std::string>& call_funcs,
-    const std::vector<std::string>& aten_funcs) {
+bool isAtenFunc(Node* n, const std::vector<std::string>& aten_funcs) {
   std::vector<Symbol> aten_func_symbols;
   std::transform(
       aten_funcs.begin(),
@@ -177,17 +176,23 @@ bool isFunctionNode(
       std::back_inserter(aten_func_symbols),
       [](const std::string& s) { return Symbol::aten(s); });
 
-  bool is_quantizable =
-      std::find(
-          aten_func_symbols.begin(), aten_func_symbols.end(), n->kind()) !=
+  return std::find(
+             aten_func_symbols.begin(), aten_func_symbols.end(), n->kind()) !=
       aten_func_symbols.end();
+}
+
+bool isFunctionNode(
+    Node* n,
+    const std::vector<std::string>& call_funcs,
+    const std::vector<std::string>& aten_funcs) {
+  bool is_func_node = isAtenFunc(n, aten_funcs);
   if (n->kind() == prim::CallFunction) {
     auto func_name = getFuncName(n->inputs()[0]);
-    is_quantizable |=
+    is_func_node |=
         std::find(call_funcs.begin(), call_funcs.end(), func_name) !=
         call_funcs.end();
   }
-  return is_quantizable;
+  return is_func_node;
 }
 
 // checks if a block will always raise an Exception
@@ -209,9 +214,10 @@ bool alwaysRaisesException(Block* block) {
   return false;
 }
 
-bool isAddScalar(Node* n) {
-  return (n->kind() == Symbol::aten("add") ||
-          n->kind() == Symbol::aten("add_")) &&
+bool hasScalarInput(Node* n) {
+  std::vector<std::string> scalar_ops = {"add", "add_", "mul", "mul_"};
+
+  return isAtenFunc(n, scalar_ops) &&
       n->input(0)->type()->isSubtypeOf(TensorType::get()) &&
       n->input(1)->type()->isSubtypeOf(NumberType::get());
 }
@@ -261,7 +267,7 @@ std::vector<Value*> getPassThroughInputs(Value* v) {
 }
 
 bool mayRequireObservation(Value* v) {
-  return !isAddScalar(v->node());
+  return !hasScalarInput(v->node());
 }
 
 bool nodeQuantizable(Node* n) {
@@ -712,6 +718,35 @@ graph(%self, %input, %inplace):
     %second_output = prim::CallFunction(%relu, %first_output, %inplace)
     return (%second_output) )");
 
+  const PatternInfo mul_module_relu = PatternInfo::parse_from_str(R"(
+graph(%self, %a, %b):
+     %first_output = aten::mul(%a, %b)
+     %second_module = match::module[name="ReLU"](%self)
+     %second_output = prim::CallMethod[name="forward"](%second_module, %first_output)
+     return (%second_output) )");
+
+  const PatternInfo inplace_mul_module_relu = PatternInfo::parse_from_str(R"(
+graph(%self, %a, %b):
+     %first_output = aten::mul_(%a, %b)
+     %second_module = match::module[name="ReLU"](%self)
+     %second_output = prim::CallMethod[name="forward"](%second_module, %first_output)
+     return (%second_output) )");
+
+  const PatternInfo mul_functional_relu = PatternInfo::parse_from_str(R"(
+graph(%self, %a, %b, %inplace):
+     %first_output = aten::mul(%a, %b)
+     %relu = prim::Constant[name="relu"]()
+     %second_output = prim::CallFunction(%relu, %first_output, %inplace)
+     return (%second_output) )");
+
+  const PatternInfo inplace_mul_functional_relu =
+      PatternInfo::parse_from_str(R"(
+graph(%self, %a, %b, %inplace):
+     %first_output = aten::mul_(%a, %b)
+     %relu = prim::Constant[name="relu"]()
+     %second_output = prim::CallFunction(%relu, %first_output, %inplace)
+     return (%second_output) )");
+
   const std::vector<std::reference_wrapper<const PatternInfo>> delay_patterns =
       {
           conv2d_functional_relu,
@@ -721,6 +756,10 @@ graph(%self, %input, %inplace):
           add_functional_relu,
           bn_relu,
           bn_functional_relu,
+          mul_module_relu,
+          inplace_mul_module_relu,
+          mul_functional_relu,
+          inplace_mul_functional_relu,
   };
 };
 
@@ -2766,10 +2805,7 @@ struct FoldPrepackedWeightIntoModuleHelper {
         {false, false, linear_prepack_per_tensor, linear_params_module},
         {false, true, linear_prepack_per_channel, linear_params_module},
         {true, false, conv2d_prepack, conv_params_module},
-        {true, true, conv2d_prepack_per_channel, conv_params_module},
-        {true, false, conv3d_prepack, conv_params_module},
-        {true, true, conv3d_prepack_per_channel, conv_params_module}
-    };
+        {true, true, conv2d_prepack_per_channel, conv_params_module}};
     for (const auto& pm : pattern_and_modules) {
       const Graph& pattern_graph = *pm.pattern.pattern_graph;
       const auto& vmap = pm.pattern.vmap;
@@ -2929,18 +2965,6 @@ graph(%a_dequant, %w, %b, %w_scale, %w_zero_point, %w_dtype, %stride, %padding, 
 graph(%a_dequant, %w, %b, %w_scale, %w_zero_point, %w_axis, %w_dtype, %stride, %padding, %dilation, %groups):
         %w_quant = aten::quantize_per_channel(%w, %w_scale, %w_zero_point, %w_axis, %w_dtype)
         %packed_params = quantized::conv2d_prepack(%w_quant, %b, %stride, %padding, %dilation, %groups)
-        return (%packed_params) )");
-
-  const PatternInfo conv3d_prepack = PatternInfo::parse_from_str(R"(
-graph(%a_dequant, %w, %b, %w_scale, %w_zero_point, %w_dtype, %stride, %padding, %dilation, %groups):
-        %w_quant = aten::quantize_per_tensor(%w, %w_scale, %w_zero_point, %w_dtype)
-        %packed_params = quantized::conv3d_prepack(%w_quant, %b, %stride, %padding, %dilation, %groups)
-        return (%packed_params) )");
-
-  const PatternInfo conv3d_prepack_per_channel = PatternInfo::parse_from_str(R"(
-graph(%a_dequant, %w, %b, %w_scale, %w_zero_point, %w_axis, %w_dtype, %stride, %padding, %dilation, %groups):
-        %w_quant = aten::quantize_per_channel(%w, %w_scale, %w_zero_point, %w_axis, %w_dtype)
-        %packed_params = quantized::conv3d_prepack(%w_quant, %b, %stride, %padding, %dilation, %groups)
         return (%packed_params) )");
 };
 
