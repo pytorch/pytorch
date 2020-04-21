@@ -1,6 +1,6 @@
 #ifdef USE_XNNPACK
 
-#include <torch/library.h>
+#include <ATen/core/op_registration/op_registration.h>
 #include <ATen/native/xnnpack/Convolution.h>
 #include <ATen/native/xnnpack/Linear.h>
 #include <ATen/native/xnnpack/OpContext.h>
