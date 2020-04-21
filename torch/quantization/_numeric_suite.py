@@ -120,8 +120,12 @@ class Shadow(nn.Module):
     r"""Shadow module attaches the float module to its matching quantized module
     as the shadow. Then it uses Logger module to process the outputs of both
     modules to do the comparison.
-    """
 
+    Args:
+        q_module: quantized module that we want to shadow
+        float_module: float module used to shadow q_module
+        Logger: class used to process the outputs of q_module and float_module
+    """
     def __init__(self, q_module, float_module, Logger):
         super(Shadow, self).__init__()
         self.orig_module = q_module
