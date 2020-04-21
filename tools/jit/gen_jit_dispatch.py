@@ -13,7 +13,6 @@ torch/csrc/jit/generated/
 """
 
 import argparse
-import copy
 import re
 import yaml
 from itertools import groupby
@@ -67,6 +66,7 @@ TYPE_MAP = {
     'bool': 'bool',
     'bool?': 'bool?',
     'Generator': 'Generator?',
+    'Generator?': 'Generator?',
 }
 
 
@@ -126,7 +126,7 @@ FROM_IVALUE = {
     'int64_t': '{}.toInt()',
     'int64_t?': '{}.toOptional<int64_t>()',
     'std::string': '{}.toStringRef()',
-    'Generator': 'nullptr',
+    'Generator?': '{}.toOptional<at::Generator>()',
     'std::array<bool,2>': 'as_bool_array<2>({}.toBoolList())',
     'std::array<bool,3>': 'as_bool_array<3>({}.toBoolList())',
     'std::array<bool,4>': 'as_bool_array<4>({}.toBoolList())',
@@ -462,26 +462,7 @@ def gen_jit_dispatch(
                          groupby(sorted_decls, key=lambda decl: decl['name'])]
         return [sorted(g, key=declkey) for g in grouped_decls]
 
-    # We need to add methods implemented manually in TensorImpl
-    # TODO: This seems to claim sizes() returns an int64_t.  Really?
-    tensor_impl_methods = [{
-        'name': name,
-        'api_name': name,
-        'schema_string': schema_string,
-        'overload_name': '',
-        'method_of': ['Tensor'],
-        'arguments': [{'name': 'self', 'simple_type': 'Tensor'}],
-        'returns': [{'name': 'result', 'type': 'int64_t', 'dynamic_type': 'int64_t', 'simple_type': 'int64_t'}],
-        'use_c10_dispatcher': 'unboxed_only',
-    } for name, schema_string in [
-        ('sizes', 'aten::sizes(Tensor self) -> int'),
-        ('strides', 'aten::strides(Tensor self) -> int'),
-        ('dim', 'aten::dim(Tensor self) -> int'),
-        ('numel', 'aten::numel(Tensor self) -> int'),
-        ('element_size', 'aten::element_size(Tensor self) -> int'),
-    ]]
-
-    aten_decls = load_aten_declarations(declarations) + tensor_impl_methods
+    aten_decls = load_aten_declarations(declarations)
     jit_decls = [d for d in aten_decls if is_jit_op(d)]
 
     # add arguments dtype and device for functions like zeros
@@ -522,8 +503,6 @@ def gen_jit_dispatch(
         decl['arguments'] = [a for i, arg in enumerate(decl['arguments']) for a in expand_options(decl, i, arg)]
         if is_out_variant(decl):
             reorder_out_args(decl)
-        if needs_hacked_twin(decl):
-            additional_jit_decls.append(hacked_twin(decl))
 
     jit_decls.extend(additional_jit_decls)
     if not selected_op_list:
@@ -578,46 +557,6 @@ def reorder_out_args(decl):
 
 def is_kwarg_only(a):
     return a.get('kwarg_only') or a.get('output')
-
-
-#
-# create a clone of these declarations
-# with nullability scrubbed from TensorList arg types
-# TOOD find out why this exists and how to do it without the hack
-#
-
-NEEDS_HACKED_TWIN_NAMES = [
-    "aten::_index_put_impl_",
-    "aten::index.Tensor",
-    "aten::index_put",
-    "aten::index_put_",
-]
-
-def needs_hacked_twin(decl):
-    schema_string = decl['schema_string']
-    return any([schema_string.startswith(name) for name in NEEDS_HACKED_TWIN_NAMES])
-
-
-def hacked_twin(decl):
-    decl_copy = copy.deepcopy(decl)
-    old_overload_name = decl['overload_name']
-    schema_string = decl['schema_string']
-    name = decl['name']
-    schema_string = schema_string.replace('Tensor?[]', 'Tensor[]')
-    if old_overload_name:
-        new_overload_name = old_overload_name + "_hacked_twin"
-        decl_copy['overload_name'] = new_overload_name
-        decl_copy['schema_string'] = schema_string.replace(name + "." + old_overload_name,
-                                                           name + "." + new_overload_name)
-    else:
-        new_overload_name = "hacked_twin"
-        decl_copy['overload_name'] = new_overload_name
-        decl_copy['schema_string'] = schema_string.replace(name, name + "." + new_overload_name)
-    for arg in decl_copy['arguments']:
-        if arg['simple_type'] == 'TensorList' and arg.get('is_nullable'):
-            arg['is_nullable'] = False
-    return decl_copy
-
 
 def signature_without_args(decl):
     name = decl['name'] if not is_out_variant(decl) else decl['name'][:-4]

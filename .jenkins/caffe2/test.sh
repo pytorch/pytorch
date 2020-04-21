@@ -7,6 +7,10 @@ if [[ "${BUILD_ENVIRONMENT}" == *-android* ]]; then
   echo 'Skipping tests'
   exit 0
 fi
+if [[ "${BUILD_ENVIRONMENT}" == *-rocm* ]]; then
+  # temporary to locate some kernel issues on the CI nodes
+  export HSAKMT_DEBUG_LEVEL=4
+fi
 
 # Find where cpp tests and Caffe2 itself are installed
 if [[ "$BUILD_ENVIRONMENT" == *cmake* ]]; then

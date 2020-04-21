@@ -285,6 +285,9 @@ void initJITBindings(PyObject* module) {
           py::arg("graph"),
           py::arg("addmm_fusion_enabled") = false)
       .def(
+          "_jit_pass_fuse_addmm",
+          [](std::shared_ptr<Graph>& g) { return FuseAddMM(g); })
+      .def(
           "_jit_pass_canonicalize",
           [](const std::shared_ptr<Graph>& g) { return Canonicalize(g); })
       .def("_jit_pass_lint", LintGraph)
@@ -377,8 +380,6 @@ void initJITBindings(PyObject* module) {
       .def("_jit_pass_canonicalize_ops", CanonicalizeOps)
       .def("_jit_pass_decompose_ops", DecomposeOps)
       .def("_jit_pass_specialize_autogradzero", specializeAutogradZero)
-      .def("_jit_can_fuse_on_cpu", &canFuseOnCPU)
-      .def("_jit_can_fuse_on_gpu", &canFuseOnGPU)
       .def("_jit_override_can_fuse_on_cpu", &overrideCanFuseOnCPU)
       .def("_jit_override_can_fuse_on_gpu", &overrideCanFuseOnGPU)
       .def("_jit_can_fuse_on_cpu", &canFuseOnCPU)

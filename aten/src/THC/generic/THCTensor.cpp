@@ -66,7 +66,7 @@ THCTensor *THCTensor_(new)(THCState *state)
 {
   return c10::make_intrusive<at::TensorImpl, at::UndefinedTensorImpl>(
     c10::intrusive_ptr<at::StorageImpl>::reclaim(THCStorage_(new)(state)),
-    at::DispatchKey::CUDATensorId
+    at::DispatchKey::CUDA
   ).release();
 }
 
@@ -82,7 +82,7 @@ THCTensor *THCTensor_(newWithStorage1d)(THCState *state, THCStorage *storage, pt
   c10::raw::intrusive_ptr::incref(storage);
   THTensor *self = c10::make_intrusive<at::TensorImpl, at::UndefinedTensorImpl>(
     c10::intrusive_ptr<at::StorageImpl>::reclaim(storage),
-    at::DispatchKey::CUDATensorId
+    at::DispatchKey::CUDA
   ).release();
   THCTensor_(setStorage)(state, self, storage, storageOffset, {size0}, {stride0});
 
@@ -99,7 +99,7 @@ THCTensor *THCTensor_(newWithSize1d)(THCState *state, int64_t size0)
   THCStorage *new_storage = THCStorage_(new)(state);
   THCTensor *self = c10::make_intrusive<at::TensorImpl, at::UndefinedTensorImpl>(
     c10::intrusive_ptr<at::StorageImpl>::reclaim(new_storage),
-    at::DispatchKey::CUDATensorId
+    at::DispatchKey::CUDA
   ).release();
   THCTensor_(setStorage)(state, self, new_storage, 0, {size0}, {});
 
