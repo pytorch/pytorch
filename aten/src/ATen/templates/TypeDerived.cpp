@@ -27,7 +27,7 @@ $storage_tensor_headers
 #include <utility>
 
 #include <ATen/Config.h>
-#include <torch/library.h>
+#include <ATen/core/op_registration/op_registration.h>
 $extra_cuda_headers
 $legacy_th_headers
 

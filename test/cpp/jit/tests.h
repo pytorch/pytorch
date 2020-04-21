@@ -59,6 +59,7 @@ namespace jit {
   _(ModuleParameter)                   \
   _(ModuleCopy)                        \
   _(ModuleDeepcopy)                    \
+  _(ModuleCopyString)                  \
   _(ModuleCopyAliasing)                \
   _(ModuleDefine)                      \
   _(QualifiedName)                     \
