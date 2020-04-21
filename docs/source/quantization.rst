@@ -3,6 +3,9 @@
 Quantization
 ===========================
 
+.. warning ::
+     Quantization is experimental and subject to change.
+
 Introduction to Quantization
 ----------------------------
 
