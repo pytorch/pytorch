@@ -1204,10 +1204,13 @@ class TestQuantizeScriptPTSQOps(JitTestCase):
                          " with instruction set support avx2 or newer.")
     def test_quantized_linear_relu(self):
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self, functional):
                 super(M, self).__init__()
                 self.linear = torch.nn.Linear(30, 4).float()
-                self.relu = torch.nn.ReLU()
+                if functional:
+                    self.relu = F.relu
+                else:
+                    self.relu = torch.nn.ReLU()
 
             def forward(self, x):
                 return self.relu(self.linear(x))
@@ -1295,23 +1298,30 @@ class TestQuantizeScriptPTSQOps(JitTestCase):
                          " with instruction set support avx2 or newer.")
     def test_quantized_conv3d_relu(self):
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self, functional):
                 super(M, self).__init__()
                 self.conv = torch.nn.Conv3d(1, 4, 2, 3).float()
-                self.relu = torch.nn.ReLU()
+                if functional:
+                    self.relu = F.relu
+                else:
+                    self.relu = torch.nn.ReLU()
 
             def forward(self, x):
                 return self.relu(self.conv(x))
 
         data = [(torch.randn(1, 1, 5, 5, 5, dtype=torch.float),
                  torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
-        model = self._test_op_impl(M(), data, "quantized::conv3d_relu")
+        model = self._test_op_impl(M(functional=False), data,
+                                   "quantized::conv3d_relu")
+        model_functional = self._test_op_impl(M(functional=True), data,
+                                              "quantized::conv3d_relu")
 
-        FileCheck().check_not("aten::conv3d") \
-                   .check_not("aten::relu") \
-                   .check_not("quantized::conv3d(") \
-                   .check_not("quantized::relu(") \
-                   .run(model.graph)
+        checker = FileCheck().check_not("aten::conv3d") \
+                    .check_not("aten::relu") \
+                    .check_not("quantized::conv3d(") \
+                    .check_not("quantized::relu(")
+        checker.run(model.graph)
+        checker.run(model_functional.graph)
 
     def test_quantized_add(self):
         class Add(torch.nn.Module):
@@ -1668,7 +1678,9 @@ class TestQuantizeScriptPTSQOps(JitTestCase):
                 x = F.upsample(x, (32, 32))
                 x = F.upsample_bilinear(x, (32, 32))
                 x = F.upsample_nearest(x, (32, 32))
-                x = torch.clamp(x, -2, 2)
+                x = torch.clamp(x, -3, 3)
+                x = x.clamp(-2.5, 2.5)
+                # x = x.clamp_(-2, 2)  # Enable when quantized `clamp_` is ready
                 x = F.sigmoid(x)
                 x = x.permute(0, 2, 3, 1)
                 x = torch.repeat_interleave(x, 3, 1)
