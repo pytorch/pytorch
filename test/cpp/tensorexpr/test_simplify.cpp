@@ -1883,5 +1883,38 @@ void testSimplifyMultilevelFor() {
   }
 }
 
+void testSimplifyForCleansUp() {
+  KernelScope kernel_scope;
+
+  {
+    Buffer a("a", kFloat, {1, 12, 1});
+    VarHandle x("x", kInt);
+    Tensor* b = Compute(
+        "x",
+        {{1, "i"}, {12, "m"}, {1, "n"}},
+        [](const VarHandle& i, const VarHandle& m, const VarHandle& n) {
+          return i + m + n;
+        });
+    LoopNest l({b});
+    l.prepareForCodegen();
+
+    Stmt* body = l.root_stmt();
+    Stmt* simplified = IRSimplifier::simplify(body);
+
+    // TODO until block inlining.
+    Block* block = static_cast<Block*>(simplified);
+    block = static_cast<Block*>(block->stmts().front());
+    IS_NODE_WITH_NAME(For, block->stmts().front(), for_);
+    // for is over "m".
+    IS_VAR_WITH_NAME(for_->var(), "m");
+    // TODO until block inlining.
+    block = static_cast<Block*>(for_->body()->stmts().front());
+    // x[m] = m;
+    IS_NODE_WITH_NAME(Store, block->stmts().front(), store);
+    IS_VAR_WITH_NAME(store->flat_index(), "m");
+    IS_VAR_WITH_NAME(store->value(), "m");
+  }
+}
+
 } // namespace jit
 } // namespace torch

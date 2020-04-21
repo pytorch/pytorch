@@ -5278,6 +5278,18 @@ class TestAutogradDeviceType(TestCase):
         _test_euclidean_large_cdist((2000, 5))
 
 
+    def test_parameter_resize(self, device):
+        asd = torch.nn.Parameter(torch.ones(16, device=device))
+
+        for i in range(2):
+            with torch.no_grad():
+                asd.set_(asd[1:])
+                asd.grad = None
+
+            m = torch.cat((asd, asd))
+            m.sum().backward()
+
+
     # NOTE: flaky on ROCm CI
     @skipCUDAIfRocm
     def test_sparse_ctor_getter_backward(self, device):
@@ -5415,6 +5427,13 @@ class TestAutogradDeviceType(TestCase):
         a = x[:, [0]]
         a.sum().backward()
         self.assertEqual(x.grad, torch.ones(n, 1, device=device))
+
+    def test_advanced_indexing_backwards_memory_format(self, device):
+        # See https://github.com/pytorch/pytorch/issues/36956
+        shape = (2, 8, 1, 2)
+        i = torch.randint(1, shape, device=device).contiguous(memory_format=torch.channels_last)
+        x = torch.randn(shape, requires_grad=True, device=device)
+        x[i].sum().backward()
 
     def _test_reentrant_parent_error_on_cpu(self, device):
         t1 = torch.rand([3, 3], requires_grad=True)
