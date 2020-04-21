@@ -36,7 +36,6 @@ from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.common_quantization import SingleLayerLinearModel, AnnotatedSingleLayerLinearModel
 from torch.testing._internal.common_quantization import ConvModel, AnnotatedConvModel
 from torch.testing._internal.common_quantization import test_only_eval_fn as _test_only_eval_fn
-from torch.testing._internal.common_quantized import override_quantized_engine
 
 from torch.testing import FileCheck
 from torch.testing._internal.jit_utils import attrs_with_prefix
