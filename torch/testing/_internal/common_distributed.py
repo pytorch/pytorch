@@ -335,7 +335,7 @@ class MultiProcessTestCase(TestCase):
         self.assertEqual(
             first_process.exitcode,
             0,
-            "zero expected but got {}".format(first_process.exitcode)
+            "Expected zero exit code but got {}".format(first_process.exitcode)
         )
 
     @property
