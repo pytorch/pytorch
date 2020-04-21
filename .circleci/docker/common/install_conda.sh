@@ -4,7 +4,7 @@ set -ex
 
 # Optionally install conda
 if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
-  BASE_URL="https://repo.continuum.io/miniconda"
+  BASE_URL="https://repo.anaconda.com/miniconda"
 
   MAJOR_PYTHON_VERSION=$(echo "$ANACONDA_PYTHON_VERSION" | cut -d . -f 1)
 

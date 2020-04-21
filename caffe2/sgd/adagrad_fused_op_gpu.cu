@@ -350,6 +350,7 @@ __global__
   // TODO: Tuning NumThreads for w_grad
   typedef cub::BlockReduce<float, NumThreads> BlockReduce;
   __shared__ typename BlockReduce::TempStorage temp_storage;
+  int valid = min(post, blockDim.x);
 
   // for avg_square_weight. Can we reuse temp_storage
   __shared__ typename BlockReduce::TempStorage temp_storage2;
@@ -370,9 +371,7 @@ __global__
       const float x_ij = grad[group * post + i];
       sum_squares += x_ij * x_ij;
     }
-    // float reduce_result = BlockReduce(temp_storage).Sum(sum_squares, valid);
-    float reduce_result =
-        BlockReduce(temp_storage2).Sum(sum_squares, NumThreads);
+    float reduce_result = BlockReduce(temp_storage2).Sum(sum_squares, valid);
 
     if (threadIdx.x == 0) {
       row_sum_squares_avg = reduce_result / static_cast<float>(post);
@@ -398,9 +397,6 @@ __global__
       param[paramIdx] = out_grad_temp * step + param[paramIdx];
     }
     w_grad = BlockReduce(temp_storage).Reduce(w_grad, cub::Sum());
-
-    // int valid = min(post, blockDim.x);
-    // float w_reduce_result = BlockReduce(temp_storage).Sum(w_grad, valid);
 
     if (threadIdx.x == 0) {
       weights_grad_out[line] = w_grad;

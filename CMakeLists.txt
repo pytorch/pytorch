@@ -147,6 +147,7 @@ cmake_dependent_option(
     USE_STATIC_CUDNN "Use cuDNN static libraries" OFF
     "USE_CUDNN" OFF)
 option(USE_FBGEMM "Use FBGEMM (quantized 8-bit server operators)" ON)
+option(USE_FAKELOWP "Use FakeLowp operators" OFF)
 option(USE_FFMPEG "Use ffmpeg" OFF)
 option(USE_GFLAGS "Use GFLAGS" OFF)
 option(USE_GLOG "Use GLOG" OFF)
@@ -203,6 +204,8 @@ cmake_dependent_option(
 cmake_dependent_option(
     USE_GLOO "Use Gloo. Only available if USE_DISTRIBUTED is on." ON
     "USE_DISTRIBUTED" OFF)
+# NB: USE_NCCL is intentionally left independent from USE_DISTRIBUTED, because
+# DataParallel also uses NCCL.
 option(USE_TBB "Use TBB" OFF)
 option(ONNX_ML "Enable traditional ONNX ML API." ON)
 
@@ -364,6 +367,8 @@ include(cmake/public/utils.cmake)
 
 # ---[ Version numbers for generated libraries
 file(READ version.txt TORCH_DEFAULT_VERSION)
+# Strip trailing newline
+string(REGEX REPLACE "\n$" "" TORCH_DEFAULT_VERSION "${TORCH_DEFAULT_VERSION}")
 if("${TORCH_DEFAULT_VERSION} " STREQUAL " ")
   message(WARNING "Could not get version from base 'version.txt'")
   # If we can't get the version from the version file we should probably

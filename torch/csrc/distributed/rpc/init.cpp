@@ -239,6 +239,15 @@ PyObject* rpc_init(PyObject* /* unused */) {
               "_deserialize",
               &PyRRef::unpickle,
               py::call_guard<py::gil_scoped_release>())
+          .def(
+              "_get_future",
+              &PyRRef::getFuture,
+              py::call_guard<py::gil_scoped_release>(),
+              R"(
+                  Returns the future that corresponds to the creation of this RRef
+                  on the remote node. This is for internal use cases such as profiling
+                  only.
+              )")
           // not releasing GIL to avoid context switch
           .def("__str__", &PyRRef::str);
 
@@ -404,11 +413,10 @@ If the future completes with an error, an exception is thrown.
       "_invoke_rpc_builtin",
       [](const WorkerInfo& dst,
          const std::string& opName,
-         const std::shared_ptr<torch::autograd::profiler::RecordFunction>& rf,
          const py::args& args,
          const py::kwargs& kwargs) {
         DCHECK(PyGILState_Check());
-        return pyRpcBuiltin(dst, opName, rf, args, kwargs);
+        return pyRpcBuiltin(dst, opName, args, kwargs);
       },
       py::call_guard<py::gil_scoped_acquire>());
 
@@ -416,16 +424,14 @@ If the future completes with an error, an exception is thrown.
       "_invoke_rpc_python_udf",
       [](const WorkerInfo& dst,
          std::string& pickledPythonUDF,
-         std::vector<torch::Tensor>& tensors,
-         const std::shared_ptr<torch::autograd::profiler::RecordFunction>& rf) {
+         std::vector<torch::Tensor>& tensors) {
         DCHECK(!PyGILState_Check());
-        return pyRpcPythonUdf(dst, pickledPythonUDF, tensors, rf);
+        return pyRpcPythonUdf(dst, pickledPythonUDF, tensors);
       },
       py::call_guard<py::gil_scoped_release>(),
       py::arg("dst"),
       py::arg("pickledPythonUDF"),
-      py::arg("tensors"),
-      py::arg("rf") = nullptr);
+      py::arg("tensors"));
 
   module.def(
       "_invoke_rpc_torchscript",
@@ -464,11 +470,10 @@ If the future completes with an error, an exception is thrown.
       "_invoke_remote_builtin",
       [](const WorkerInfo& dst,
          const std::string& opName,
-         const std::shared_ptr<torch::autograd::profiler::RecordFunction>& rf,
          const py::args& args,
          const py::kwargs& kwargs) {
         DCHECK(PyGILState_Check());
-        return pyRemoteBuiltin(dst, opName, rf, args, kwargs);
+        return pyRemoteBuiltin(dst, opName, args, kwargs);
       },
       py::call_guard<py::gil_scoped_acquire>());
 
@@ -502,16 +507,14 @@ If the future completes with an error, an exception is thrown.
       "_invoke_remote_python_udf",
       [](const WorkerInfo& dst,
          std::string& pickledPythonUDF,
-         std::vector<torch::Tensor>& tensors,
-         const std::shared_ptr<torch::autograd::profiler::RecordFunction>& rf) {
+         std::vector<torch::Tensor>& tensors) {
         DCHECK(!PyGILState_Check());
-        return pyRemotePythonUdf(dst, pickledPythonUDF, tensors, rf);
+        return pyRemotePythonUdf(dst, pickledPythonUDF, tensors);
       },
       py::call_guard<py::gil_scoped_release>(),
       py::arg("dst"),
       py::arg("pickledPythonUDF"),
-      py::arg("tensors"),
-      py::arg("rf") = nullptr);
+      py::arg("tensors"));
 
   module.def(
       "get_rpc_timeout",
