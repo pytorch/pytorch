@@ -1269,9 +1269,9 @@ class TestQuantizeScriptPTSQOps(JitTestCase):
                                               "quantized::conv3d_relu")
 
         checker = FileCheck().check_not("aten::conv3d") \
-                    .check_not("aten::relu") \
-                    .check_not("quantized::conv3d(") \
-                    .check_not("quantized::relu(")
+                             .check_not("aten::relu") \
+                             .check_not("quantized::conv3d(") \
+                             .check_not("quantized::relu(")
         checker.run(model.graph)
         checker.run(model_functional.graph)
 
