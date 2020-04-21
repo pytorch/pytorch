@@ -52,6 +52,8 @@ def _floats_wrapper(*args, **kwargs):
 def floats(*args, **kwargs):
     if 'width' not in kwargs:
         kwargs['width'] = 32
+        kwargs['exclude_min'] = True
+        kwargs['exclude_max'] = True
     return _floats_wrapper(*args, **kwargs)
 
 """Hypothesis filter to avoid overflows with quantized tensors.
