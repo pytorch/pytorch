@@ -270,7 +270,7 @@ at::Tensor PackedLinearWeightsQnnp::apply_impl(
         kernel_zp,
         kernel_scale,
         (uint8_t*)qnnp_w_data,
-        (int32_t*)bias_.data_ptr<c10::qint32>());
+        (int32_t*)bias.data_ptr<c10::qint32>());
     packB = w.get();
   }
 
@@ -351,9 +351,9 @@ namespace native {
 namespace {
 
 template <bool ReluFused>
-class QLinearInt8 final : public torch::OperatorKernel {
+class QLinearInt8 final {
  public:
-  at::Tensor operator()(
+  static at::Tensor run(
       at::Tensor input,
       const c10::intrusive_ptr<LinearPackedParamsBase>& packed_weight,
       double output_scale,
@@ -368,21 +368,15 @@ class QLinearInt8 final : public torch::OperatorKernel {
   }
 };
 
-namespace {
-static auto siof = register_linear_params();
-}  // namespace
+TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
+  m.impl("linear", QLinearInt8<false>::run);
+  m.impl("linear_relu", QLinearInt8<true>::run);
+}
 
-static auto registry =
-    torch::RegisterOperators()
-        .op("quantized::linear(Tensor X, __torch__.torch.classes.quantized.LinearPackedParamsBase W_prepack, float Y_scale_i, int Y_zero_point_i) -> Tensor Y",
-            torch::RegisterOperators::options().kernel<QLinearInt8<false>>(
-                DispatchKey::QuantizedCPU))
-        .op("_quantized::linear(Tensor X, __torch__.torch.classes.quantized.LinearPackedParamsBase W_prepack, float Y_scale_i, int Y_zero_point_i) -> Tensor Y",
-            torch::RegisterOperators::options().kernel<QLinearInt8<false>>(
-                DispatchKey::QuantizedCPU))
-        .op("quantized::linear_relu(Tensor X, __torch__.torch.classes.quantized.LinearPackedParamsBase W_prepack, float Y_scale_i, int Y_zero_point_i) -> Tensor Y",
-            torch::RegisterOperators::options().kernel<QLinearInt8<true>>(
-                DispatchKey::QuantizedCPU));
+TORCH_LIBRARY_IMPL(_quantized, QuantizedCPU, m) {
+  m.impl("linear", QLinearInt8<false>::run);
+}
+
 } // namespace
 } // namespace native
 } // namespace at

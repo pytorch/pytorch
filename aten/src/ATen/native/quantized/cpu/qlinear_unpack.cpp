@@ -73,18 +73,18 @@ namespace at {
 namespace native {
 namespace {
 
-class QLinearUnpackWeightInt8 final : public c10::OperatorKernel {
+class QLinearUnpackWeightInt8 final {
  public:
-  std::tuple<at::Tensor, c10::optional<Tensor>> operator()(
+  static std::tuple<at::Tensor, c10::optional<Tensor>> run(
       const c10::intrusive_ptr<LinearPackedParamsBase>& packed_weight) {
     return packed_weight->unpack();
   }
 };
 
-class QLinearUnpackWeightFp16 final : public c10::OperatorKernel {
+class QLinearUnpackWeightFp16 final {
  public:
-  std::tuple<at::Tensor, c10::optional<Tensor>> operator()(
-      const c10::intrusive_ptr<LinearPackedParamsBase>& packed_weight) {
+  static std::tuple<at::Tensor, c10::optional<Tensor>> run(
+        const c10::intrusive_ptr<LinearPackedParamsBase>& packed_weight) {
     auto& ctx = at::globalContext();
 
     TORCH_CHECK(
@@ -96,9 +96,9 @@ class QLinearUnpackWeightFp16 final : public c10::OperatorKernel {
   }
 };
 
-class QLinearUnpackWeightInt8Legacy final : public c10::OperatorKernel {
+class QLinearUnpackWeightInt8Legacy final {
  public:
-  std::tuple<at::Tensor, c10::optional<Tensor>> operator()(
+  static std::tuple<at::Tensor, c10::optional<Tensor>> run(
       const at::Tensor& packed_weight) {
     TORCH_WARN_ONCE("quantized.linear_unpack(Tensor) is deprecated! Please "
                     "upgrade your model to use the newer quantized.linear_"
@@ -107,9 +107,9 @@ class QLinearUnpackWeightInt8Legacy final : public c10::OperatorKernel {
   }
 };
 
-class QLinearUnpackWeightFp16Legacy final : public c10::OperatorKernel {
+class QLinearUnpackWeightFp16Legacy final {
  public:
-  std::tuple<at::Tensor, c10::optional<Tensor>> operator()(
+  static std::tuple<at::Tensor, c10::optional<Tensor>> run(
       const at::Tensor& packed_weight) {
     TORCH_WARN_ONCE("quantized.linear_unpack(Tensor) is deprecated! Please "
                     "upgrade your model to use the newer quantized.linear_"
@@ -125,20 +125,15 @@ class QLinearUnpackWeightFp16Legacy final : public c10::OperatorKernel {
   }
 };
 
-namespace {
-static auto siof = register_linear_params();
-}  // namespace
+TORCH_LIBRARY_IMPL(quantized, CPU, m) {
+  m.impl("linear_unpack_legacy", QLinearUnpackWeightInt8Legacy::run);
+  m.impl("linear_unpack_fp16_legacy", QLinearUnpackWeightFp16Legacy::run);
+}
 
-static auto registry =
-    c10::RegisterOperators()
-        .op("quantized::linear_unpack(__torch__.torch.classes.quantized.LinearPackedParamsBase W_prepack) -> (Tensor W_origin, Tensor? B_origin)",
-            c10::RegisterOperators::options().catchAllKernel<QLinearUnpackWeightInt8>())
-        .op("quantized::linear_unpack_fp16(__torch__.torch.classes.quantized.LinearPackedParamsBase W_prepack) -> (Tensor W_origin, Tensor? B_origin)",
-            c10::RegisterOperators::options().catchAllKernel<QLinearUnpackWeightFp16>())
-        .op("quantized::linear_unpack.legacy(Tensor W_prepack) -> (Tensor W_origin, Tensor? B_origin)",
-            c10::RegisterOperators::options().catchAllKernel<QLinearUnpackWeightInt8Legacy>())
-        .op("quantized::linear_unpack_fp16.legacy(Tensor W_prepack) -> (Tensor W_origin, Tensor? B_origin)",
-            c10::RegisterOperators::options().catchAllKernel<QLinearUnpackWeightFp16Legacy>());
+TORCH_LIBRARY_IMPL(quantized, CatchAll, m) {
+  m.impl("linear_unpack", QLinearUnpackWeightInt8::run);
+  m.impl("linear_unpack_fp16", QLinearUnpackWeightFp16::run);
+}
 
 } // namespace
 } // namespace native

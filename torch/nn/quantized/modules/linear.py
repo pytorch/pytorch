@@ -252,9 +252,6 @@ class Linear(torch.nn.Module):
             bias = state_dict.pop(prefix + 'bias')
             state_dict.update({prefix + '_packed_params.weight': weight,
                                prefix + '_packed_params.bias': bias})
-        elif version == 2:
-            weight = state_dict.pop(prefix + '_packed_params.weight')
-            bias = state_dict.pop(prefix + '_packed_params.bias')
 
         super(Linear, self)._load_from_state_dict(state_dict, prefix, local_metadata, False,
                                                   missing_keys, unexpected_keys, error_msgs)

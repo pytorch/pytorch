@@ -157,9 +157,9 @@ Tensor quantized_relu6_(Tensor& qx) {
   return qx;
 }
 
-class QRelu6 final : public c10::OperatorKernel {
+class QRelu6 final {
  public:
-  Tensor operator()(Tensor qx, bool inplace) {
+  static Tensor run(Tensor qx, bool inplace) {
     if (inplace) {
       return quantized_relu6_(qx);
     } else {
@@ -168,9 +168,10 @@ class QRelu6 final : public c10::OperatorKernel {
   }
 };
 
-static auto registry = c10::RegisterOperators()
-.op("quantized::relu6(Tensor qx, bool inplace=False) -> Tensor",
-    c10::RegisterOperators::options().kernel<QRelu6>(DispatchKey::QuantizedCPU));
+TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
+  m.impl("relu6", QRelu6::run);
+}
+
 } // namespace
 
 }}  // namespace at::native

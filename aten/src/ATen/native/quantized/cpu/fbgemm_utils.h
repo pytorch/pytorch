@@ -1,9 +1,9 @@
 #pragma once
 
 #ifdef USE_FBGEMM
-#include "fbgemm/Fbgemm.h"
-#include "fbgemm/FbgemmFP16.h"
-#include "fbgemm/QuantUtils.h"
+#include <fbgemm/Fbgemm.h>
+#include <fbgemm/FbgemmFP16.h>
+#include <fbgemm/QuantUtils.h>
 
 #include <ATen/Tensor.h>
 #include <ATen/native/quantized/cpu/packed_params.h>

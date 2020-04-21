@@ -379,9 +379,9 @@ namespace native {
 namespace {
 
 template <bool ReluFused>
-class QLinearDynamicInt8 final : public torch::OperatorKernel {
+class QLinearDynamicInt8 final {
  public:
-  at::Tensor operator()(
+  static at::Tensor run(
       at::Tensor input,
       const c10::intrusive_ptr<LinearPackedParamsBase>& packed_weight) {
     auto& ctx = at::globalContext();
@@ -395,12 +395,10 @@ class QLinearDynamicInt8 final : public torch::OperatorKernel {
 };
 
 template <bool ReluFused>
-class QLinearDynamicFp16 final : public torch::OperatorKernel {
+class QLinearDynamicFp16 final {
  public:
 #ifdef USE_FBGEMM
-  at::Tensor operator()(
-      at::Tensor input,
-      const c10::intrusive_ptr<LinearPackedParamsBase>& packed_weight) {
+  static at::Tensor run(at::Tensor input, const c10::intrusive_ptr<LinearPackedParamsBase>& packed_weight) {
     // We make a strong guarantee that models using these operators will have
     // the same numerics across different machines. Therefore, we do not provide
     // a fallback path and rather fail loudly if we cannot run FBGEMM.
@@ -411,7 +409,7 @@ class QLinearDynamicFp16 final : public torch::OperatorKernel {
     return packed_weight->apply_dynamic(std::move(input));
   }
 #else // USE_FBGEMM
-  at::Tensor operator()(
+  static at::Tensor run(
       at::Tensor /* input */,
       const c10::intrusive_ptr<LinearPackedParamsBase>& /* packed_weight */) {
     // We make a strong guarantee that models using these operators will have
@@ -423,22 +421,15 @@ class QLinearDynamicFp16 final : public torch::OperatorKernel {
 #endif // USE_FBGEMM
 };
 
-static auto siof1 = register_linear_params();
+TORCH_LIBRARY_IMPL(quantized, CPU, m) {
+  m.impl("linear_dynamic", QLinearDynamicInt8<false>::run);
+  m.impl("linear_relu_dynamic", QLinearDynamicInt8<true>::run);
+  m.impl("linear_dynamic_fp16", QLinearDynamicFp16<false>::run);
+}
 
-static auto registry =
-    torch::RegisterOperators()
-        .op("quantized::linear_dynamic(Tensor X, __torch__.torch.classes.quantized.LinearPackedParamsBase W_prepack) -> Tensor Y",
-            torch::RegisterOperators::options()
-                .kernel<QLinearDynamicInt8<false>>(DispatchKey::CPU))
-        .op("_quantized::linear_dynamic(Tensor X, __torch__.torch.classes.quantized.LinearPackedParamsBase W_prepack) -> Tensor Y",
-            torch::RegisterOperators::options()
-                .kernel<QLinearDynamicInt8<false>>(DispatchKey::CPU))
-        .op("quantized::linear_relu_dynamic(Tensor X, __torch__.torch.classes.quantized.LinearPackedParamsBase W_prepack) -> Tensor Y",
-            torch::RegisterOperators::options()
-                .kernel<QLinearDynamicInt8<true>>(DispatchKey::CPU))
-        .op("quantized::linear_dynamic_fp16(Tensor X, __torch__.torch.classes.quantized.LinearPackedParamsBase W_prepack) -> Tensor Y",
-            torch::RegisterOperators::options()
-                .kernel<QLinearDynamicFp16<false>>(DispatchKey::CPU));
+TORCH_LIBRARY_IMPL(_quantized, CPU, m) {
+  m.impl("linear_dynamic", QLinearDynamicInt8<false>::run);
+}
 
 } // namespace
 } // namespace native
