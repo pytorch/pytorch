@@ -15,7 +15,8 @@ namespace {
 // tracing here.
 // TODO This currently only handles tensors with requires_grad==False correctly.
 //      It should also handle autograd.
-Operator createOperatorFromC10_withTracingHandledHere(const c10::OperatorHandle& op) {
+Operator createOperatorFromC10_withTracingHandledHere(
+    const c10::OperatorHandle& op) {
   return Operator(op, [op](Stack* stack) {
     RECORD_FUNCTION(op.schema().name(), *stack);
     const auto input_size = op.schema().arguments().size();
@@ -146,9 +147,10 @@ Operator createOperatorFromC10_withTracingHandledHere(const c10::OperatorHandle&
   });
 }
 
-Operator createOperatorFromC10_withTracingNotHandledHere(const c10::OperatorHandle& op) {
+Operator createOperatorFromC10_withTracingNotHandledHere(
+    const c10::OperatorHandle& op) {
   return Operator(op, [op](Stack* stack) {
-      c10::Dispatcher::singleton().callBoxed(op, stack);
+    c10::Dispatcher::singleton().callBoxed(op, stack);
   });
 }
 

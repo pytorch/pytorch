@@ -35,7 +35,6 @@ void listIndex<at::Tensor>(Stack* stack) {
   } else {
     AT_ERROR("'", elem, "' is not in list");
   }
-
 }
 
 template <>
@@ -49,7 +48,6 @@ void listCount<at::Tensor>(Stack* stack) {
         return cmp_result.is_nonzero();
       });
   push(stack, count);
-
 }
 
 template <>
@@ -110,7 +108,6 @@ void listRemove<at::Tensor>(Stack* stack) {
   } else {
     AT_ERROR("list.remove(x): x not in list");
   }
-
 }
 
 void checkImplicitTensorToNum(at::Tensor t, bool toInt) {

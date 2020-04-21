@@ -390,19 +390,15 @@ RegisterOperators reg({
     Operator(
         "aten::_pack_sequence(Tensor output, Tensor batch_sizes, Tensor? sorted_indices, "
         "Tensor? unsorted_indices) -> (Tensor, Tensor, Tensor?, Tensor?)",
-        [](Stack* stack) { },
+        [](Stack* stack) {},
         aliasAnalysisFromSchema()),
     Operator(
         "aten::_get_tracing_state() -> bool",
-        [](Stack* stack) {
-          push(stack, false);
-        },
+        [](Stack* stack) { push(stack, false); },
         aliasAnalysisFromSchema()),
     Operator(
         "aten::is_scripting() -> bool",
-        [](Stack* stack) {
-          push(stack, true);
-        },
+        [](Stack* stack) { push(stack, true); },
         aliasAnalysisFromSchema()),
     Operator(
         "aten::_no_grad_uniform_(Tensor(a!) tensor, float a, float b) -> Tensor(a!)",

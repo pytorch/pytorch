@@ -42,9 +42,7 @@ RegisterOperators reg(
          aliasAnalysisSpecialCase()),
      Operator(
          "prim::TupleUnpack(Any tup) -> ...",
-         [](Stack* stack) {
-           tupleUnpack(*stack);
-         },
+         [](Stack* stack) { tupleUnpack(*stack); },
          aliasAnalysisSpecialCase()),
      Operator(
          "prim::unchecked_cast(t x) -> t",
@@ -168,13 +166,11 @@ RegisterOperators reg(
          aliasAnalysisFromSchema()),
      Operator(
          "prim::RaiseException(str msg) -> ()",
-         [](Stack* stack) {
-           throw JITException(pop(stack).toStringRef());
-         },
+         [](Stack* stack) { throw JITException(pop(stack).toStringRef()); },
          aliasAnalysisFromSchema()),
      Operator(
          "aten::Size(int[] sizes) -> int[]",
-         [](Stack* stack) { },
+         [](Stack* stack) {},
          aliasAnalysisFromSchema()),
      Operator(
          "aten::size(Tensor self) -> int[]",
@@ -208,9 +204,7 @@ RegisterOperators reg(
          aliasAnalysisFromSchema()),
      Operator(
          "prim::device(Tensor a) -> Device",
-         [](Stack* stack) {
-           push(stack, pop(stack).toTensor().device());
-         },
+         [](Stack* stack) { push(stack, pop(stack).toTensor().device()); },
          aliasAnalysisFromSchema()),
      Operator(
          "prim::dtype(Tensor a) -> int",
@@ -222,9 +216,7 @@ RegisterOperators reg(
          aliasAnalysisFromSchema()),
      Operator(
          "aten::__not__(bool self) -> bool",
-         [](Stack* stack) {
-           push(stack, !pop(stack).toBool());
-         },
+         [](Stack* stack) { push(stack, !pop(stack).toBool()); },
          aliasAnalysisFromSchema()),
      Operator(
          "aten::__is__(t1 self, t2 obj) -> bool",
@@ -391,7 +383,6 @@ RegisterOperators reg(
            auto self = pop(stack).toTensor();
            auto result = at::index(self, indices);
            push(stack, std::move(result));
-
          },
          aliasAnalysisFromSchema()),
      Operator(
@@ -405,7 +396,6 @@ RegisterOperators reg(
            auto result =
                at::_index_put_impl_(self, indices, values, accumulate, unsafe);
            push(stack, std::move(result));
-
          },
          aliasAnalysisFromSchema()),
      Operator(
@@ -417,7 +407,6 @@ RegisterOperators reg(
            auto self = pop(stack).toTensor();
            auto result = at::index_put_(self, indices, values, accumulate);
            push(stack, std::move(result));
-
          },
          aliasAnalysisFromSchema()),
      Operator(
@@ -429,7 +418,6 @@ RegisterOperators reg(
            auto self = pop(stack).toTensor();
            auto result = at::index_put_(self, indices, values, accumulate);
            push(stack, std::move(result));
-
          },
          aliasAnalysisFromSchema())});
 

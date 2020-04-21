@@ -882,11 +882,11 @@ graph():
 void testWildcards() {
   RegisterOperators reg({Operator(
                              "prim::returns_wildcard(Tensor a) -> Tensor(*)",
-                             [](Stack* stack) { },
+                             [](Stack* stack) {},
                              aliasAnalysisFromSchema()),
                          Operator(
                              "prim::writes(Tensor(z!) a) -> Tensor(a)",
-                             [](Stack* stack) { },
+                             [](Stack* stack) {},
                              aliasAnalysisFromSchema())});
   const auto returns_wildcard =
       Symbol::fromQualString("prim::returns_wildcard");

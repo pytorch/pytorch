@@ -48,8 +48,7 @@ c10::List<T> make_result_list(const TypePtr& elemType) {
 template <>
 c10::impl::GenericList make_result_list<IValue>(const TypePtr& elemType);
 
-inline void noop(Stack* n) {
-}
+inline void noop(Stack* n) {}
 
 // using the rules from python_arg_parser FunctionParameter::check
 // tensor cannot have grad set, tensor must be 0 dim,

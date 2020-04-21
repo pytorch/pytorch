@@ -47,9 +47,7 @@ RegisterOperators reg(
          aliasAnalysisSpecialCase()),
      Operator(
          "prim::Guard(Tensor(a) t) -> Tensor(a)",
-         [](Stack* stack) {
-           AT_ERROR("Should be replaced by prim::BailOut");
-         },
+         [](Stack* stack) { AT_ERROR("Should be replaced by prim::BailOut"); },
          aliasAnalysisFromSchema()),
      Operator(
          "prim::BailOut(...) -> Tensor(a)",
@@ -388,9 +386,7 @@ RegisterOperators reg(
          // TODO return generator object when torchscript supports RNG
          // first-class
          "aten::manual_seed(int seed) -> ()",
-         [](Stack* stack) {
-           at::manual_seed(pop(stack).toInt());
-         },
+         [](Stack* stack) { at::manual_seed(pop(stack).toInt()); },
          aliasAnalysisFromSchema()),
      Operator(
          "aten::cuda(Tensor(a) self) -> Tensor(a|b)",
@@ -410,9 +406,7 @@ RegisterOperators reg(
          aliasAnalysisConservative()),
      Operator(
          "prim::AutogradZero() -> Tensor",
-         [](Stack* stack) {
-           stack->emplace_back(at::Tensor());
-         },
+         [](Stack* stack) { stack->emplace_back(at::Tensor()); },
          aliasAnalysisSpecialCase()),
      Operator(
          "prim::BroadcastSizes(...) -> int[]",
@@ -699,9 +693,7 @@ RegisterOperators reg(
          aliasAnalysisSpecialCase()),
      Operator(
          "prim::Uninitialized() -> Any",
-         [](Stack* stack) {
-           push(stack, IValue::uninitialized());
-         },
+         [](Stack* stack) { push(stack, IValue::uninitialized()); },
          aliasAnalysisSpecialCase())});
 
 RegisterOperators logging_operators(
