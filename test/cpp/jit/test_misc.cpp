@@ -936,6 +936,36 @@ void testRecordFunction() {
   // test the scope of the callbacks
   checkScopeCallbacks();
   cleanUpScopeCallbacks();
+
+  // check record function guard
+  std::vector<std::string> fn_names;
+  std::mutex mtx;
+  autograd::profiler::pushCallback(
+      [&fn_names, &mtx](const autograd::profiler::RecordFunction& fn) {
+        std::lock_guard<std::mutex> lock(mtx);
+        fn_names.push_back(fn.name().str());
+        return true;
+      },
+      [](const autograd::profiler::RecordFunction&) {},
+      /* needs_inputs */ false);
+  {
+    autograd::profiler::RecordFunctionGuard g1(false);
+    {
+      RECORD_USER_SCOPE("A");
+      {
+        autograd::profiler::RecordFunctionGuard g2(true);
+        RECORD_USER_SCOPE("B");
+        {
+          autograd::profiler::DisableRecordFunctionGuard g3;
+          RECORD_USER_SCOPE("C");
+        }
+      }
+      { RECORD_USER_SCOPE("D"); }
+    }
+  }
+  TORCH_CHECK(fn_names.size() == 1);
+  TORCH_CHECK(fn_names[0] == "B");
+  cleanUpScopeCallbacks();
 }
 
 class TestThreadLocalDebugInfo : public at::DebugInfoBase {
