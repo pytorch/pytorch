@@ -121,54 +121,19 @@ void THCTensor_resizeNd(THCState *state, THCTensor *self, int nDimension, const 
 void THCTensor_set(THCState *state, THCTensor *self, THCTensor *src)
 {
   if(self != src)
-    THCTensor_setStorageNd(state,
-                           self,
-                           THTensor_getStoragePtr(src),
-                           src->storage_offset(),
-                           src->dim(),
-                           THTensor_getSizePtr(src),
-                           THTensor_getStridePtr(src));
+    THCTensor_setStorage(state,
+                         self,
+                         THTensor_getStoragePtr(src),
+                         src->storage_offset(),
+                         src->sizes(),
+                         src->strides());
 }
 
 void THCTensor_setStorage(THCState *state, THCTensor *self, THCStorage *storage_, ptrdiff_t storageOffset_, at::IntArrayRef size_, at::IntArrayRef stride_)
 {
-  if (stride_.data()) {
-    THArgCheck(size_.size() == stride_.size(), 5, "inconsistent size/stride sizes");
-  }
-
-  THCTensor_setStorageNd(state,
-                         self,
-                         storage_,
-                         storageOffset_,
-                         size_.size(),
-                         size_.data(),
-                         stride_.data());
-}
-
-void THCTensor_setStorageNd(THCState *state, THCTensor *self, THCStorage *storage, ptrdiff_t storageOffset, int nDimension, const int64_t *size, const int64_t *stride)
-{
-  /* storage */
-  if(THTensor_getStoragePtr(self) != storage)
-  {
-    if (!THTensor_getStoragePtr(self)) {
-      THError("Tensor: invalid null storage");
-    }
-    if (storage) {
-      c10::raw::intrusive_ptr::incref(storage);
-      THTensor_stealAndSetStoragePtr(self, storage);
-    } else {
-      THError("Tensor: invalid new null storage");
-    }
-  }
-
-  /* storageOffset */
-  if (storageOffset < 0) {
-    THError("Tensor: invalid storage offset");
-  }
-  self->set_storage_offset(storageOffset);
-
-  /* size and stride */
-  THCTensor_resizeNd(state, self, nDimension, size, stride);
+  c10::raw::intrusive_ptr::incref(storage_);
+  THTensor_wrap(self).set_(at::Storage(c10::intrusive_ptr<at::StorageImpl>::reclaim(storage_)),
+                           storageOffset_, size_, stride_);
 }
 
 void THCTensor_squeeze1d(THCState *state, THCTensor *self, THCTensor *src, int dimension)

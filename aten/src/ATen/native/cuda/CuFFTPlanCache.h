@@ -137,6 +137,9 @@ public:
       // See NOTE [ cuFFT Embedded Strides ] in native/cuda/SpectralOps.cu.
       clone_input |= (batch > 0 && input.stride(0) % 2 != 0) ||
                       input.stride(signal_ndim) % 2 != 0;
+
+      // Complex to real FFTs may overwrite the input buffer (gh-34551)
+      clone_input |= !complex_output;
     }
 
     // Checks if input strides can be viewed as embedded.

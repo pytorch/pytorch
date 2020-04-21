@@ -12,12 +12,13 @@ import torch.testing._internal.common_utils as common
 import torch
 import torch.backends.cudnn
 import torch.utils.cpp_extension
-from torch.utils.cpp_extension import CUDA_HOME
+from torch.utils.cpp_extension import CUDA_HOME, ROCM_HOME
 
 
 TEST_CUDA = torch.cuda.is_available() and CUDA_HOME is not None
 TEST_CUDNN = False
-if TEST_CUDA:
+TEST_ROCM = torch.cuda.is_available() and torch.version.hip is not None and ROCM_HOME is not None
+if TEST_CUDA and torch.version.cuda is not None:  # the skip CUDNN test for ROCm
     CUDNN_HEADER_EXISTS = os.path.isfile(os.path.join(CUDA_HOME, "include/cudnn.h"))
     TEST_CUDNN = (
         TEST_CUDA and CUDNN_HEADER_EXISTS and torch.backends.cudnn.is_available()
@@ -109,6 +110,7 @@ class TestCppExtensionJIT(common.TestCase):
             ],
             extra_cuda_cflags=["-O2"],
             verbose=True,
+            keep_intermediates=False,
         )
 
         x = torch.zeros(100, device="cuda", dtype=torch.float32)
@@ -184,6 +186,7 @@ class TestCppExtensionJIT(common.TestCase):
                 os.environ['TORCH_CUDA_ARCH_LIST'] = old_envvar
 
     @unittest.skipIf(not TEST_CUDA, "CUDA not found")
+    @unittest.skipIf(TEST_ROCM, "disabled on rocm")
     def test_jit_cuda_archflags(self):
         # Test a number of combinations:
         #   - the default for the machine we're testing on
@@ -364,19 +367,6 @@ class TestCppExtensionJIT(common.TestCase):
         y = torch.zeros(100, dtype=torch.float32)
         z = module.tanh_add(x, y).cpu()
         self.assertEqual(z, x.tanh() + y.tanh())
-
-    def test_complex_registration(self):
-        module = torch.utils.cpp_extension.load(
-            name="complex_registration_extension",
-            sources="cpp_extensions/complex_registration_extension.cpp",
-            verbose=True,
-        )
-
-        # Make sure that the empty tensor is of the desired shape and type
-        # Refer to https://github.com/pytorch/pytorch/issues/14829
-        t = torch.empty(2, 2, dtype=torch.complex64)
-        self.assertEqual(t.size(), torch.Size([2, 2]))
-        self.assertEqual(t.type(), 'torch.ComplexFloatTensor')
 
     @unittest.skipIf(not TEST_CUDA, "CUDA not found")
     def test_half_support(self):

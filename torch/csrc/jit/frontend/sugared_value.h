@@ -3,10 +3,11 @@
 #include <memory>
 #include <string>
 
-#include <torch/csrc/jit/ir/ir.h>
-#include <torch/csrc/jit/frontend/error_report.h>
 #include <torch/csrc/jit/api/module.h>
+#include <torch/csrc/jit/frontend/error_report.h>
 #include <torch/csrc/jit/frontend/schema_matching.h>
+#include <torch/csrc/jit/frontend/versioned_symbols.h>
+#include <torch/csrc/jit/ir/ir.h>
 
 namespace torch {
 namespace jit {
@@ -240,7 +241,8 @@ struct TORCH_API SugaredTupleValue : public SugaredValue {
       throw ErrorReport(loc) << "Expected integer literal for index";
     }
     auto index = toIValue(idx)->toInt();
-    int64_t adj_index = (index < 0) ? index + static_cast<int64_t>(tup_.size()) : index;
+    int64_t adj_index =
+        (index < 0) ? index + static_cast<int64_t>(tup_.size()) : index;
     if (!(adj_index >= 0 && adj_index < static_cast<int64_t>(tup_.size()))) {
       throw ErrorReport(loc)
           << "Index " << index << " out of range of length " << tup_.size();
@@ -283,8 +285,15 @@ struct TORCH_API BuiltinModule : public SugaredValue {
       // methods under its module.
       return std::make_shared<BuiltinModule>("aten", version);
     }
-    return std::make_shared<BuiltinFunction>(
-        Symbol::fromQualString(name + "::" + field), c10::nullopt);
+
+    auto sym = Symbol::fromQualString(name + "::" + field);
+    if (version.has_value()) {
+      // Possibly replaces symbol with another that implements its
+      // historic behavior.
+      // See note [Versioned Symbols]
+      sym = get_symbol_for_version(sym, *version);
+    }
+    return std::make_shared<BuiltinFunction>(sym, c10::nullopt);
   }
 
  private:
@@ -377,9 +386,9 @@ struct FunctionValue : public SugaredValue {
     return std::make_shared<SimpleValue>(output);
   }
 
- const std::vector<Function*>& callees() {
-   return callees_;
- }
+  const std::vector<Function*>& callees() {
+    return callees_;
+  }
 
  private:
   std::vector<Function*> callees_;

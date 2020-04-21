@@ -33,12 +33,12 @@ from .internal import (
     PythonUDF,
     RPCExecMode,
     _internal_rpc_pickler,
-    _start_record_function,
+    _build_rpc_profiling_key,
 )
 
 
-logging.basicConfig()
 logger = logging.getLogger(__name__)
+
 
 # NB: Ignoring RRef leaks during shutdown. Without this, applications have to
 # make sure there is no references to any RRef in the application code and
@@ -105,29 +105,28 @@ _wait_all_workers_sequence_id_to_states = collections.defaultdict(WaitAllWorkers
 
 
 def _on_leader_follower_report_shutdown_intent(sequence_id, worker_name):
-    assert (
-        worker_name in _ALL_WORKER_NAMES
-    ), "{worker_name} is not expected by leader.".format(worker_name=worker_name)
-    intent_worker_names = _wait_all_workers_sequence_id_to_states[
-        sequence_id
-    ].intent_worker_names
-    assert (
-        worker_name not in intent_worker_names
-    ), "{worker_name} reported intent sequence id {sequence_id} twice. ".format(
-        worker_name=worker_name, sequence_id=sequence_id
-    )
-    intent_worker_names.add(worker_name)
-    if _ALL_WORKER_NAMES == intent_worker_names:
-        _set_proceed_shutdown_signal(sequence_id)
+    with _wait_all_workers_dict_lock:
+        assert (
+            worker_name in _ALL_WORKER_NAMES
+        ), "{worker_name} is not expected by leader.".format(worker_name=worker_name)
+        intent_worker_names = _wait_all_workers_sequence_id_to_states[
+            sequence_id
+        ].intent_worker_names
+        assert (
+            worker_name not in intent_worker_names
+        ), "{worker_name} reported intent sequence id {sequence_id} twice. ".format(
+            worker_name=worker_name, sequence_id=sequence_id
+        )
+        intent_worker_names.add(worker_name)
+        if _ALL_WORKER_NAMES == intent_worker_names:
+            _set_proceed_shutdown_signal(sequence_id)
 
 
 def _set_proceed_shutdown_signal(sequence_id):
     proceed_signal = _wait_all_workers_sequence_id_to_states[sequence_id].proceed_signal
     assert (
         not proceed_signal.is_set()
-    ), "Termination signal sequence id {} got set twice.".format(
-        sequence_id=sequence_id
-    )
+    ), "Termination signal sequence id {} got set twice.".format(sequence_id)
     proceed_signal.set()
 
 
@@ -196,17 +195,17 @@ def _wait_all_workers():
 def shutdown(graceful=True):
     r"""
     Perform a shutdown of the RPC agent, and then destroy the RPC agent. This
-    stops the local agent from  accepting outstanding requests, and shuts
-    down the RPC framework by terminating all RPC threads. If graceful=True,
-    then this will block until all local and remote RPC processes reach this
-    method and wait for all outstanding work to complete. Otherwise, if
-    graceful=False, then this is a local shutdown, and it does not wait for
-    other RPC processes to reach this method.
+    stops the local agent from accepting outstanding requests, and shuts
+    down the RPC framework by terminating all RPC threads. If ``graceful=True``,
+    this will block until all local and remote RPC processes reach this method
+    and wait for all outstanding work to complete. Otherwise, if
+    ``graceful=False``, this is a local shutdown, and it does not wait for other
+    RPC processes to reach this method.
 
     Arguments:
         graceful (bool): Whether to do a graceful shutdown or not. If True,
                          this will 1) wait until there is no pending system
-                         messages for ``UserRRef``s and delete them; 2) block
+                         messages for ``UserRRefs`` and delete them; 2) block
                          until all local and remote RPC processes have reached
                          this method and wait for all outstanding work to
                          complete.
@@ -353,8 +352,9 @@ def remote(to, func, args=None, kwargs=None):
 
     Arguments:
         to (str or WorkerInfo): id or name of the destination worker.
-        func (callable): any callable function. python callable, builtin or annotated TorchScript
-                         functions (like meth:`torch.add`) can be sent over RPC more efficiently.
+        func (callable): a callable function, such as Python callables, builtin
+                         operators (e.g. :meth:`~torch.add`) and annotated
+                         TorchScript functions.
         args (tuple): the argument tuple for the ``func`` invocation.
         kwargs (dict): is a dictionary of keyword arguments for the ``func``
                        invocation.
@@ -363,6 +363,20 @@ def remote(to, func, args=None, kwargs=None):
         A user :class:`~torch.distributed.rpc.RRef` instance to the result
         value. Use the blocking API :meth:`torch.distributed.rpc.RRef.to_here`
         to retrieve the result value locally.
+
+    .. warning ::
+        Using GPU tensors as arguments or return values of ``func`` is not
+        supported since we don't support sending GPU tensors over the wire. You
+        need to explicitly copy GPU tensors to CPU before using them as
+        arguments or return values of ``func``.
+
+    .. warning ::
+        The ``remote`` API does not copy storages of argument tensors until
+        sending them over the wire, which could be done by a different thread
+        depending on the RPC backend type. The caller should make sure that the
+        contents of those tensors stay intact until the returned RRef is
+        confirmed by the owner, which can be checked using the
+        :meth:`torch.distributed.rpc.RRef.confirmed_by_owner` API.
 
     Example::
         Make sure that ``MASTER_ADDRESS`` and ``MASTER_PORT`` are set properly
@@ -388,13 +402,14 @@ def remote(to, func, args=None, kwargs=None):
         >>> rpc.init_rpc("worker1", rank=1, world_size=2)
         >>> rpc.shutdown()
 
-        If invoking an annotated TorchScript function, then run the following
-        code in two different processes:
+        Below is an example of running a TorchScript function using RPC.
 
-        >>> # On worker 0:
+        >>> # On both workers:
         >>> @torch.jit.script
         >>> def my_script_add(t1, t2):
         >>>    return torch.add(t1, t2)
+
+        >>> # On worker 0:
         >>> import torch.distributed.rpc as rpc
         >>> rpc.init_rpc("worker0", rank=0, world_size=2)
         >>> rref = rpc.remote("worker1", my_script_add, args=(torch.ones(2), 3))
@@ -408,33 +423,53 @@ def remote(to, func, args=None, kwargs=None):
     """
     qualified_name = torch.jit._find_builtin(func)
     dst_worker_info = _to_worker_info(to)
+    should_profile = torch.autograd._profiler_enabled()
 
-    # If profiling is enabled, kick off the timer and retrieve back a
-    # RecordFunction instance.
-    rf = None
-    if torch.autograd._profiler_enabled():
-        rf = _start_record_function(
+    ctx_manager = contextlib.suppress()
+    if should_profile:
+        # Create appropriate string representation based on type of func
+        # (builtin, script, python)
+        if qualified_name is None:
+            func_name = (
+                torch.jit._qualified_name(func)
+                if isinstance(func, torch.jit.ScriptFunction)
+                else func.__qualname__
+            )
+        else:
+            func_name = qualified_name
+        # Build RPC profiling key.
+        rpc_profiling_key = _build_rpc_profiling_key(
             RPCExecMode.REMOTE,
-            str(qualified_name) if qualified_name is not None else func.__qualname__,
+            func_name,
             get_worker_info().name,
             dst_worker_info.name,
         )
+        ctx_manager = torch.autograd.profiler.record_function(rpc_profiling_key)
 
-    args = args if args else ()
-    kwargs = kwargs if kwargs else {}
+    with ctx_manager as rf:
+        args = args if args else ()
+        kwargs = kwargs if kwargs else {}
+        if qualified_name is not None:
+            rref = _invoke_remote_builtin(dst_worker_info, qualified_name, *args, **kwargs)
+        elif isinstance(func, torch.jit.ScriptFunction):
+            rref = _invoke_remote_torchscript(
+                dst_worker_info.name,
+                torch._jit_internal._qualified_name(func),
+                *args,
+                **kwargs
+            )
+        else:
+            (pickled_python_udf, tensors) = _default_pickler.serialize(
+                PythonUDF(func, args, kwargs)
+            )
+            rref = _invoke_remote_python_udf(dst_worker_info, pickled_python_udf, tensors)
+        # attach profiling information
+        if should_profile:
+            assert torch.autograd._profiler_enabled()
+            assert rf is not None
+            rf._call_end_callbacks_on_future(rref._get_future())
 
-    if qualified_name is not None:
-        return _invoke_remote_builtin(dst_worker_info, qualified_name, rf, *args, **kwargs)
-    elif isinstance(func, torch.jit.ScriptFunction):
-        return _invoke_remote_torchscript(
-            dst_worker_info.name, torch._jit_internal._qualified_name(func), *args, **kwargs
-        )
-    else:
-        (pickled_python_udf, tensors) = _default_pickler.serialize(
-            PythonUDF(func, args, kwargs)
-        )
-        return _invoke_remote_python_udf(dst_worker_info, pickled_python_udf, tensors, rf)
-
+    return rref
 
 def _invoke_rpc(to, func, rpc_type, args=None, kwargs=None):
     if not callable(func):
@@ -442,29 +477,52 @@ def _invoke_rpc(to, func, rpc_type, args=None, kwargs=None):
 
     qualified_name = torch.jit._find_builtin(func)
     dst_worker_info = _to_worker_info(to)
-    # If profiling is enabled, kick off the timer and retrieve back a
-    # RecordFunction instance.
-    rf = None
-    if torch.autograd._profiler_enabled():
-        rf = _start_record_function(
+
+    # TODO: profiling logic does not really belong in invoke_rpc, it should be
+    # added as part of a context manager or helper (https://github.com/pytorch/pytorch/issues/36360)
+    should_profile = torch.autograd._profiler_enabled()
+
+    ctx_manager = contextlib.suppress()
+    if should_profile:
+        # Create appropriate string representation based on type of func
+        # (builtin, script, python)
+        if qualified_name is None:
+            func_name = (
+                torch.jit._qualified_name(func)
+                if isinstance(func, torch.jit.ScriptFunction)
+                else func.__qualname__
+            )
+        else:
+            func_name = qualified_name
+        # Build RPC profiling key.
+        rpc_profiling_key = _build_rpc_profiling_key(
             rpc_type,
-            str(qualified_name) if qualified_name is not None else func.__qualname__,
+            func_name,
             get_worker_info().name,
             dst_worker_info.name,
         )
+        ctx_manager = torch.autograd.profiler.record_function(rpc_profiling_key)
 
-    args = args if args else ()
-    kwargs = kwargs if kwargs else {}
+    with ctx_manager as rf:
+        args = args if args else ()
+        kwargs = kwargs if kwargs else {}
 
-    if qualified_name is not None:
-        fut = _invoke_rpc_builtin(dst_worker_info, qualified_name, rf, *args, **kwargs)
-    elif isinstance(func, torch.jit.ScriptFunction):
-        fut = _invoke_rpc_torchscript(dst_worker_info.name, func, args, kwargs)
-    else:
-        (pickled_python_udf, tensors) = _default_pickler.serialize(
-            PythonUDF(func, args, kwargs)
-        )
-        fut = _invoke_rpc_python_udf(dst_worker_info, pickled_python_udf, tensors, rf)
+        if qualified_name is not None:
+            fut = _invoke_rpc_builtin(dst_worker_info, qualified_name, *args, **kwargs)
+        elif isinstance(func, torch.jit.ScriptFunction):
+            fut = _invoke_rpc_torchscript(
+                dst_worker_info.name, torch.jit._qualified_name(func), args, kwargs
+            )
+        else:
+            (pickled_python_udf, tensors) = _default_pickler.serialize(
+                PythonUDF(func, args, kwargs)
+            )
+            fut = _invoke_rpc_python_udf(dst_worker_info, pickled_python_udf, tensors)
+        if should_profile:
+            assert torch.autograd._profiler_enabled()
+            assert rf is not None
+            # Schedule profiling callbacks to run when the future completes.
+            rf._call_end_callbacks_on_future(fut)
     return fut
 
 
@@ -477,14 +535,21 @@ def rpc_sync(to, func, args=None, kwargs=None):
 
     Arguments:
         to (str or WorkerInfo): id or name of the destination worker.
-        func (callable): any callable function. python callable, builtin or annotated TorchScript
-                         functions (like meth:`torch.add`) can be sent over RPC more efficiently.
+        func (callable): a callable function, such as Python callables, builtin
+                         operators (e.g. :meth:`~torch.add`) and annotated
+                         TorchScript functions.
         args (tuple): the argument tuple for the ``func`` invocation.
         kwargs (dict): is a dictionary of keyword arguments for the ``func``
                        invocation.
 
     Returns:
-        Returns the result of running ``func`` on ``args`` and ``kwargs``.
+        Returns the result of running ``func`` with ``args`` and ``kwargs``.
+
+    .. warning ::
+        Using GPU tensors as arguments or return values of ``func`` is not
+        supported since we don't support sending GPU tensors over the wire. You
+        need to explicitly copy GPU tensors to CPU before using them as
+        arguments or return values of ``func``.
 
     Example::
         Make sure that ``MASTER_ADDRESS`` and ``MASTER_PORT`` are set properly
@@ -508,13 +573,14 @@ def rpc_sync(to, func, args=None, kwargs=None):
         >>> rpc.init_rpc("worker1", rank=1, world_size=2)
         >>> rpc.shutdown()
 
-        If invoking an annotated TorchScript function, then run the following
-        code in two different processes:
+        Below is an example of running a TorchScript function using RPC.
 
-        >>> # On worker 0:
+        >>> # On both workers:
         >>> @torch.jit.script
         >>> def my_script_add(t1, t2):
         >>>    return torch.add(t1, t2)
+
+        >>> # On worker 0:
         >>> import torch.distributed.rpc as rpc
         >>> rpc.init_rpc("worker0", rank=0, world_size=2)
         >>> ret = rpc.rpc_sync("worker1", my_script_add, args=(torch.ones(2), 3))
@@ -535,13 +601,14 @@ def rpc_async(to, func, args=None, kwargs=None):
     r"""
     Make a non-blocking RPC call to run function ``func`` on worker ``to``. RPC
     messages are sent and received in parallel to execution of Python code. This
-    method is thread-safe. This method will immediately return a
-    Future that can be awaited on.
+    method is thread-safe. This method will immediately return a Future that can
+    be awaited on.
 
     Arguments:
         to (str or WorkerInfo): id or name of the destination worker.
-        func (callable): any callable function. python callable, builtin or annotated TorchScript
-                         functions (like meth:`torch.add`) can be sent over RPC more efficiently.
+        func (callable): a callable function, such as Python callables, builtin
+                         operators (e.g. :meth:`~torch.add`) and annotated
+                         TorchScript functions.
         args (tuple): the argument tuple for the ``func`` invocation.
         kwargs (dict): is a dictionary of keyword arguments for the ``func``
                        invocation.
@@ -550,6 +617,19 @@ def rpc_async(to, func, args=None, kwargs=None):
         Returns a Future object that can be waited
         on. When completed, the return value of ``func`` on ``args`` and
         ``kwargs`` can be retrieved from the Future object.
+
+    .. warning ::
+        Using GPU tensors as arguments or return values of ``func`` is not
+        supported since we don't support sending GPU tensors over the wire. You
+        need to explicitly copy GPU tensors to CPU before using them as
+        arguments or return values of ``func``.
+
+    .. warning ::
+        The ``rpc_async`` API does not copy storages of argument tensors until
+        sending them over the wire, which could be done by a different thread
+        depending on the RPC backend type. The caller should make sure that the
+        contents of those tensors stay intact until the returned Future
+        completes.
 
     Example::
         Make sure that ``MASTER_ADDRESS`` and ``MASTER_PORT`` are set properly
@@ -575,13 +655,14 @@ def rpc_async(to, func, args=None, kwargs=None):
         >>> rpc.init_rpc("worker1", rank=1, world_size=2)
         >>> rpc.shutdown()
 
-        If invoking an annotated TorchScript function, then run the following
-        code in two different processes:
+        Below is an example of running a TorchScript function using RPC.
 
-        >>> # On worker 0:
+        >>> # On both workers:
         >>> @torch.jit.script
         >>> def my_script_add(t1, t2):
         >>>    return torch.add(t1, t2)
+
+        >>> # On worker 0:
         >>> import torch.distributed.rpc as rpc
         >>> rpc.init_rpc("worker0", rank=0, world_size=2)
         >>> fut = rpc.rpc_async("worker1", my_script_add, args=(torch.ones(2), 3))

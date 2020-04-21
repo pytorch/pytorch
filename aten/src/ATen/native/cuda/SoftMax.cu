@@ -567,7 +567,7 @@ Tensor host_softmax(const Tensor & input_, const int64_t dim_, const bool half_t
       });
       });
     }
-    THCudaCheck(cudaGetLastError());
+    AT_CUDA_CHECK(cudaGetLastError());
   }
   return output;
 }
@@ -656,7 +656,7 @@ Tensor host_softmax_backward(const Tensor &grad_, const Tensor &output_, int64_t
     });
     });
   }
-  THCudaCheck(cudaGetLastError());
+  AT_CUDA_CHECK(cudaGetLastError());
   return gI;
 }
 }

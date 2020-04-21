@@ -231,4 +231,12 @@ bool RoIAlignGradientOp<float, CUDAContext>::RunOnDevice() {
 REGISTER_CUDA_OPERATOR(
     RoIAlignGradient,
     RoIAlignGradientOp<float, CUDAContext>);
+
+template <typename T>
+using RoIAlignGradientCUDAOp = RoIAlignGradientOp<T, CUDAContext>;
+
 } // namespace caffe2
+
+C10_EXPORT_CAFFE2_OP_TO_C10_CUDA(
+    RoIAlignGradient,
+    caffe2::RoIAlignGradientCUDAOp<float>);
