@@ -15,9 +15,13 @@ DEFAULT_MODULE_MAPPING = {
     nn.Linear: nnq.Linear,
     nn.ReLU: nnq.ReLU,
     nn.ReLU6: nnq.ReLU6,
+    nn.Hardswish: nnq.Hardswish,
+    nn.Conv1d: nnq.Conv1d,
     nn.Conv2d: nnq.Conv2d,
     nn.Conv3d: nnq.Conv3d,
     nn.BatchNorm2d: nnq.BatchNorm2d,
+    nn.BatchNorm3d: nnq.BatchNorm3d,
+    nn.LayerNorm: nnq.LayerNorm,
     QuantStub: nnq.Quantize,
     DeQuantStub: nnq.DeQuantize,
     # Wrapper Modules:
@@ -26,6 +30,8 @@ DEFAULT_MODULE_MAPPING = {
     nni.ConvReLU2d: nniq.ConvReLU2d,
     nni.ConvReLU3d: nniq.ConvReLU3d,
     nni.LinearReLU: nniq.LinearReLU,
+    nni.BNReLU2d: nniq.BNReLU2d,
+    nni.BNReLU3d: nniq.BNReLU3d,
     nniqat.ConvReLU2d: nniq.ConvReLU2d,
     nniqat.LinearReLU: nniq.LinearReLU,
     nniqat.ConvBn2d: nnq.Conv2d,
@@ -33,12 +39,14 @@ DEFAULT_MODULE_MAPPING = {
     # QAT modules:
     nnqat.Linear: nnq.Linear,
     nnqat.Conv2d: nnq.Conv2d,
+    nnqat.Hardswish: nnq.Hardswish,
 }
 
 # Map for swapping float module to qat modules
 DEFAULT_QAT_MODULE_MAPPING = {
     nn.Linear: nnqat.Linear,
     nn.Conv2d: nnqat.Conv2d,
+    nn.Hardswish: nnqat.Hardswish,
     # Intrinsic modules:
     nni.ConvBn2d: nniqat.ConvBn2d,
     nni.ConvBnReLU2d: nniqat.ConvBnReLU2d,

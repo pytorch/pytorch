@@ -35,11 +35,10 @@ struct SourceRangeFactory {
 
   SourceRange create(int line, int start_col, int end_col) {
     size_t start_byte_offset, end_byte_offset;
-    std::tie(start_byte_offset, end_byte_offset) =
-        line_col_to_byte_offs(
-            line,
-            start_col + leading_whitespace_chars_,
-            end_col + leading_whitespace_chars_);
+    std::tie(start_byte_offset, end_byte_offset) = line_col_to_byte_offs(
+        line,
+        start_col + leading_whitespace_chars_,
+        end_col + leading_whitespace_chars_);
     return SourceRange(source_, start_byte_offset, end_byte_offset);
   }
 
@@ -169,10 +168,9 @@ void initTreeViewBindings(PyObject* module) {
             r, wrap_list(r, std::move(params)), wrap_maybe(r, return_type));
       }));
 
-  py::class_<Delete, Stmt>(m, "Delete")
-      .def(py::init([](Expr expr) {
-        return Delete::create(expr);
-      }));
+  py::class_<Delete, Stmt>(m, "Delete").def(py::init([](Expr expr) {
+    return Delete::create(expr);
+  }));
 
   py::class_<Assign, Stmt>(m, "Assign")
       .def(py::init([](std::vector<Expr> lhs, const Expr& rhs) {
@@ -330,10 +328,14 @@ void initTreeViewBindings(PyObject* module) {
             wrap_list(base.range(), std::move(subscript_exprs)));
       }));
   py::class_<SliceExpr, Expr>(m, "SliceExpr")
-      .def(py::init([](const SourceRange& range, Expr* lower, Expr* upper, Expr* step) {
-        return SliceExpr::create(
-            range, wrap_maybe(range, lower), wrap_maybe(range, upper), wrap_maybe(range, step));
-      }));
+      .def(py::init(
+          [](const SourceRange& range, Expr* lower, Expr* upper, Expr* step) {
+            return SliceExpr::create(
+                range,
+                wrap_maybe(range, lower),
+                wrap_maybe(range, upper),
+                wrap_maybe(range, step));
+          }));
   py::class_<Starred, Expr>(m, "Starred")
       .def(py::init([](const SourceRange& range, Expr expr) {
         return Starred::create(range, expr);

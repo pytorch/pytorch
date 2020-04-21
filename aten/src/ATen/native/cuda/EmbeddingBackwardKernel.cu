@@ -301,7 +301,7 @@ Tensor embedding_backward_cuda_kernel(
               grad_weight_per_segment.data_ptr<partial_weight_t>(),
               stride_warped);
       }
-      THCudaCheck(cudaGetLastError());
+      AT_CUDA_CHECK(cudaGetLastError());
 
       // Finally, we sum all the partial-sums and scatter them
       // into `grad_weight`.
@@ -316,7 +316,7 @@ Tensor embedding_backward_cuda_kernel(
             num_of_partial_segments, 
             padding_idx, 
             stride_warped);
-      THCudaCheck(cudaGetLastError());
+      AT_CUDA_CHECK(cudaGetLastError());
   });
   return grad_weight;
 }

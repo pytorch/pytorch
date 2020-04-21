@@ -1,9 +1,9 @@
 #pragma once
 
-#include <torch/csrc/jit/ir/ir.h>
-#include <torch/csrc/jit/serialization/unpickler.h>
 #include <caffe2/serialize/inline_container.h>
 #include <torch/csrc/jit/api/module.h>
+#include <torch/csrc/jit/ir/ir.h>
+#include <torch/csrc/jit/serialization/unpickler.h>
 
 #include <istream>
 

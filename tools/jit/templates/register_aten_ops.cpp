@@ -1,4 +1,3 @@
-
 #include "torch/csrc/jit/runtime/operator.h"
 #include "torch/csrc/jit/runtime/custom_operator.h"
 #include "torch/csrc/jit/frontend/function_schema_parser.h"
@@ -57,7 +56,7 @@ namespace {
 template<class Return, class... Args>
 Return callUnboxedKernel(OperatorKernel* unboxedKernel, Args... args) {
   using FuncType = Return (Args...);
-  auto* typedUnboxedKernel = static_cast<c10::detail::WrapRuntimeKernelFunctor<FuncType*>*>(unboxedKernel);
+  auto* typedUnboxedKernel = static_cast<c10::impl::WrapFunctionIntoRuntimeFunctor<FuncType*>*>(unboxedKernel);
   return (*typedUnboxedKernel)(std::forward<Args>(args)...);
 }
 
@@ -107,11 +106,15 @@ KernelFunction::InternalBoxedKernelFunction *DUMMY_OPERATION =
 
 class Registerer final {
 public:
-  Registerer&& op(const std::string& schema, KernelFunction::InternalBoxedKernelFunction* boxed_kernel_wrapper) && {
+  Registerer&& op(const std::string& schemaStr, KernelFunction::InternalBoxedKernelFunction* boxed_kernel_wrapper) && {
     static auto& dispatcher = c10::Dispatcher::singleton();
-    std::pair<RegistrationHandleRAII, OperatorHandle> registration = dispatcher.registerSchema(parseSchema(schema));
-    registrationHandles_.push_back(std::move(registration.first));
-    dispatcher.setManuallyBoxedKernelFor_(registration.second, boxed_kernel_wrapper);
+    auto schema = parseSchema(schemaStr);
+    schema.setAliasAnalysis(AliasAnalysisKind::FROM_SCHEMA);
+    c10::OperatorName name = schema.operator_name();
+    RegistrationHandleRAII registration = dispatcher.registerDef(std::move(schema), "registered by JIT");
+    auto op = dispatcher.findSchema(name).value();
+    registrationHandles_.push_back(std::move(registration));
+    dispatcher.setManuallyBoxedKernelFor_(op, boxed_kernel_wrapper);
     return std::move(*this);
   }
 
@@ -138,34 +141,6 @@ private:
 };
 
 static auto registry = Registerer()
-  .jitOnlyOp("aten::get_device(Tensor self) -> int",
-    [](Stack* stack) {
-      RECORD_FUNCTION("get_device", std::vector<c10::IValue>());
-      auto result =
-          at::get_device((std::move(peek(*stack, 0, 1))).toTensor());
-      drop(*stack, 1);
-      pack(*stack, std::move(result));
-      return 0;
-    })
-  .jitOnlyOp("aten::storage_offset(Tensor self) -> int",
-    [](Stack* stack) {
-      RECORD_FUNCTION("storage_offset", std::vector<c10::IValue>());
-      auto result =
-          ((std::move(peek(*stack, 0, 1))).toTensor()).storage_offset();
-      drop(*stack, 1);
-      pack(*stack, std::move(result));
-       return 0;
-    })
-  .jitOnlyOp("aten::is_contiguous(Tensor self) -> bool",
-    [](Stack* stack) {
-      RECORD_FUNCTION("is_contiguous", std::vector<c10::IValue>());
-      auto result =
-          ((std::move(peek(*stack, 0, 1))).toTensor()).is_contiguous();
-      drop(*stack, 1);
-      pack(*stack, std::move(result));
-      return 0;
-    })
-
   // Generated operators
   ${constructors}
   ;

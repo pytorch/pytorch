@@ -1,3 +1,5 @@
+#include <c10/macros/Macros.h>
+
 #include <ATen/core/op_registration/op_registration.h>
 #if !defined(CAFFE2_IS_XPLAT_BUILD)
 #include <torch/csrc/jit/frontend/function_schema_parser.h>
@@ -5,32 +7,39 @@
 
 namespace c10 {
 
-static_assert(std::is_nothrow_move_constructible<c10::optional<RegistrationHandleRAII>>::value, "");
-static_assert(std::is_nothrow_move_assignable<c10::optional<RegistrationHandleRAII>>::value, "");
-
-// OperatorRegistrar in its constructor registers an operator in the dispatch
-// table deregisters it in the destructor.
-class RegisterOperators::OperatorRegistrar final {
-public:
-  explicit OperatorRegistrar(FunctionSchema&& schema, c10::optional<DispatchKey> dispatch_key, c10::optional<KernelFunction> kernel)
-  : op_(Dispatcher::singleton().registerSchema(std::move(schema))), kernel_registration_handle_(c10::nullopt) {
-    if (kernel.has_value()) {
-      TORCH_INTERNAL_ASSERT(kernel->isValid());
-      kernel_registration_handle_ = Dispatcher::singleton().registerKernel(op_.second, dispatch_key, std::move(*kernel));
+namespace {
+  // TODO: Consider representing debug info as a struct instead so you
+  // don't have to allocate strings all the time
+  std::string debugString(std::string debug, const char* file, uint32_t line) {
+#ifdef STRIP_ERROR_MESSAGES
+    return "";
+#else
+    if (debug.empty()) {
+      return c10::str("registered at ", file, ":", line);
+    } else {
+      return debug;
     }
+#endif
   }
 
-  OperatorRegistrar(OperatorRegistrar&& rhs) noexcept = default;
-  OperatorRegistrar& operator=(OperatorRegistrar&& rhs) noexcept = default;
+  std::ostream& operator<<(std::ostream& os, Library::Kind kind) {
+    switch (kind) {
+      case Library::DEF:
+        os << "TORCH_LIBRARY";
+        break;
+      case Library::IMPL:
+        os << "TORCH_LIBRARY_IMPL";
+        break;
+      case Library::FRAGMENT:
+        os << "TORCH_LIBRARY_FRAGMENT";
+        break;
+    }
+    return os;
+  }
+}
 
-  // not needed and would break RAII if defaulted.
-  OperatorRegistrar(const OperatorRegistrar& rhs) = delete;
-  OperatorRegistrar& operator=(const OperatorRegistrar& rhs) = delete;
-
-private:
-  std::pair<RegistrationHandleRAII, OperatorHandle> op_;
-  c10::optional<RegistrationHandleRAII> kernel_registration_handle_;
-};
+static_assert(std::is_nothrow_move_constructible<c10::optional<RegistrationHandleRAII>>::value, "");
+static_assert(std::is_nothrow_move_assignable<c10::optional<RegistrationHandleRAII>>::value, "");
 
 void RegisterOperators::checkSchemaAndRegisterOp_(Options&& options) {
   TORCH_CHECK(options.schemaOrName_.has_value(), "In operator registration: Tried to register an operator without specifying a schema or operator name.");
@@ -38,17 +47,6 @@ void RegisterOperators::checkSchemaAndRegisterOp_(Options&& options) {
     // schema was explicitly specified. Check it matches the inferred one and register the op.
 
     const FunctionSchema& schema = options.schemaOrName_->right();
-
-    for (auto& kernel : options.kernels) {
-      if (nullptr != kernel.inferred_function_schema.get()) {
-        c10::optional<std::string> schema_difference = findSchemaDifferences(schema, *kernel.inferred_function_schema);
-        if (schema_difference.has_value()) {
-          TORCH_CHECK(false, "In operator registration: Specified function schema [", toString(schema), "] ",
-                   "doesn't match inferred function schema [", toString(*kernel.inferred_function_schema), "]. ",
-                   *schema_difference);
-        }
-      }
-    }
 
     checkNoDuplicateKernels_(options);
 
@@ -84,24 +82,18 @@ void RegisterOperators::checkSchemaAndRegisterOp_(Options&& options) {
 }
 
 c10::FunctionSchema RegisterOperators::inferSchemaFromKernels_(const OperatorName& opName, const RegisterOperators::Options& options) {
-  TORCH_CHECK(options.kernels.size() > 0, "Cannot infer operator schema in registration of operator ", toString(opName), " because there is no kernel specified.");
+  TORCH_CHECK(options.kernels.size() > 0, "Cannot infer operator schema in registration of operator ", opName, " because there is no kernel specified.");
 
   c10::optional<FunctionSchema> inferred_schema = c10::nullopt;
   for (const auto& kernel : options.kernels) {
     if (nullptr != kernel.inferred_function_schema.get()) {
-      if (inferred_schema.has_value()) {
-        c10::optional<std::string> schema_difference = findSchemaDifferences(*inferred_schema, *kernel.inferred_function_schema);
-        if (schema_difference.has_value()) {
-          TORCH_CHECK(false, "In operator registration: Tried to register kernels for same operator that infer a different function schema: [", toString(*inferred_schema), "] ",
-                   "doesn't match [", toString(*kernel.inferred_function_schema), "]. ",
-                   *schema_difference);
-        }
-      } else {
+      if (!inferred_schema.has_value()) {
         inferred_schema = *kernel.inferred_function_schema;
+        break;
       }
     }
   }
-  TORCH_CHECK(inferred_schema.has_value(), "Cannot infer operator schema for this kind of kernel in registration of operator ", toString(opName), ". Please explicitly specify the operator schema or specify at least one kernel for which we can infer the schema.");
+  TORCH_CHECK(inferred_schema.has_value(), "Cannot infer operator schema for this kind of kernel in registration of operator ", opName, ". Please explicitly specify the operator schema or specify at least one kernel for which we can infer the schema.");
 
   return *inferred_schema;
 }
@@ -112,10 +104,10 @@ void RegisterOperators::checkNoDuplicateKernels_(const Options& options) {
 
   for (const auto& kernel : options.kernels) {
     if (kernel.dispatch_key.has_value()) {
-      TORCH_CHECK(0 == dispatch_keys.count(*kernel.dispatch_key), "In operator registration: Tried to register multiple kernels with same dispatch key ", toString(*kernel.dispatch_key), " for operator schema ", toString(options.schemaOrName_->right()));
+      TORCH_CHECK(0 == dispatch_keys.count(*kernel.dispatch_key), "In operator registration: Tried to register multiple kernels with same dispatch key ", *kernel.dispatch_key, " for operator schema ", toString(options.schemaOrName_->right()));
       dispatch_keys.insert(*kernel.dispatch_key);
     } else {
-      TORCH_CHECK(!has_catchall_kernel, "In operator registration: Tried to register multiple catch-all kernels for operator schema " + toString(options.schemaOrName_->right()));
+      TORCH_CHECK(!has_catchall_kernel, "In operator registration: Tried to register multiple catch-all kernels for operator schema ", toString(options.schemaOrName_->right()));
       has_catchall_kernel = true;
     }
   }
@@ -132,25 +124,15 @@ void RegisterOperators::registerOp_(Options&& options) {
 
   OperatorName op_name = schema.operator_name();
 
-  if (0 == options.kernels.size()) {
-    registerSchemaOnly_(std::move(schema));
-  } else {
-    for (auto& kernel : options.kernels) {
-      registerSchemaAndKernel_(schema, std::move(kernel));
-    }
+  registrars_.emplace_back(
+    Dispatcher::singleton().registerDef(std::move(schema), "registered by RegisterOperators")
+  );
+
+  for (auto& kernel : options.kernels) {
+    registrars_.emplace_back(
+      Dispatcher::singleton().registerImpl(op_name, kernel.dispatch_key, std::move(kernel.func), std::move(kernel.inferred_function_schema), "registered by RegisterOperators")
+    );
   }
-
-  TORCH_INTERNAL_ASSERT(c10::Dispatcher::singleton().findSchema(op_name).has_value());
-}
-
-void RegisterOperators::registerSchemaAndKernel_(FunctionSchema schema, Options::KernelRegistrationConfig&& kernel) {
-  TORCH_INTERNAL_ASSERT(kernel.func.isValid(), "Kernel must be set");
-
-  registrars_.emplace_back(std::move(schema), kernel.dispatch_key, std::move(kernel.func));
-}
-
-void RegisterOperators::registerSchemaOnly_(FunctionSchema&& schema) {
-  registrars_.emplace_back(std::move(schema), c10::nullopt, c10::nullopt);
 }
 
 RegisterOperators::RegisterOperators() = default;
@@ -162,53 +144,196 @@ RegisterOperators& RegisterOperators::operator=(RegisterOperators&&) noexcept = 
 CppFunction::CppFunction(KernelFunction func, std::unique_ptr<c10::FunctionSchema> schema)
   : func_(std::move(func))
   , schema_(std::move(schema))
+  , debug_()
   {}
 
-Module::Module(const char* ns)
-  : ns_(ns)
-  {}
+#define ERROR_CONTEXT "(Error occurred while processing ", kind_, " block at ", file_, ":", line_, ")"
 
-Module::Module(Module&&) noexcept = default;
-Module& Module::operator=(Module&&) noexcept = default;
+Library::Library(Kind kind, std::string ns, c10::optional<DispatchKey> k, const char* file, uint32_t line)
+  : kind_(kind)
+  , ns_(ns == "_" ? c10::nullopt : c10::make_optional(std::move(ns)))
+  , dispatch_key_((!k.has_value() || *k == DispatchKey::CatchAll) ? c10::nullopt : k)
+  , file_(file)
+  , line_(line)
+  {
+    switch (kind_) {
+      case DEF:
+        // Only DEFs require library uniqueness; fragments
+        // don't register a library
+        registrars_.emplace_back(
+          Dispatcher::singleton().registerLibrary(
+            *ns_, debugString("", file_, line_)
+          )
+        );
+        // fallthrough
+      case FRAGMENT:
+        TORCH_CHECK(
+          ns_.has_value(),
+          kind_, ": cannot define ", kind_, " with the wildcard namespace _ "
+          "(every ", kind_, " defines operators for a distinct namespace!)"
+          "Did you mean to use TORCH_LIBRARY_IMPL instead?  "
+          ERROR_CONTEXT
+        );
+        TORCH_INTERNAL_ASSERT(!dispatch_key_.has_value(), ERROR_CONTEXT);
+        break;
+      case IMPL:
+        // Nothing to do, everything is OK
+        break;
+    }
+  }
 
 // TODO: Error if an operator is def'ed multiple times.  Right now we just
 // merge everything
 
-namespace {
-  std::string addNamespace(const char* ns, const char* name_or_schema) { if (ns) {
-      // TODO: slow!  Fix internal data structures so I don't have to paste the
-      // names together
-      std::ostringstream oss;
-      oss << ns << "::" << name_or_schema;
-      return oss.str();
-    } else {
-      return name_or_schema;
-    }
+#define DEF_PRELUDE "def(\"", schema.operator_name(), "\"): "
+Library& Library::_def(FunctionSchema&& schema, OperatorName* out_name) & {
+  TORCH_CHECK(kind_ == DEF || kind_ == FRAGMENT,
+    DEF_PRELUDE,
+    "Cannot define an operator inside of a ", kind_, " block.  "
+    "All def()s should be placed in the (unique) TORCH_LIBRARY block for their namespace.  ",
+    ERROR_CONTEXT
+  );
+  TORCH_INTERNAL_ASSERT(ns_.has_value(), ERROR_CONTEXT);
+  TORCH_INTERNAL_ASSERT(!dispatch_key_.has_value(), ERROR_CONTEXT);
+  auto ns_opt = schema.getNamespace();
+  if (ns_opt.has_value()) {
+    // Note [Redundancy in registration code is OK]
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    // In an earlier version of this code, I made it an error to explicitly
+    // specify the namespace, even when the namespaces match.  I've decided
+    // to relax this constraint because sometimes we code generate registrations
+    // and you cannot conveniently tell what the enclosing context will be;
+    // in these cases, it is simpler (and less error prone) to place all
+    // of the information in the registration site, which will be cross-checked
+    // in the end in any case (and if it turns out you DON'T have the right
+    // information at the site, as is the case with backend specific
+    // per-op registrations, you will get the right behavior!)
+    TORCH_CHECK(false,
+      *ns_opt == *ns_,
+      "Explicitly provided namespace (", *ns_opt, ") in schema string "
+      "does not match namespace of enclsing ", kind_, " block (", *ns_, ").  "
+      "Move this definition to the (unique) TORCH_LIBRARY block corresponding to this namespace "
+      "(and consider deleting the namespace from your schema string.)  ",
+      ERROR_CONTEXT
+    );
+  } else {
+    bool b = schema.setNamespaceIfNotSet(ns_->c_str());
+    TORCH_INTERNAL_ASSERT(b, ERROR_CONTEXT);
   }
+  if (out_name) {
+    *out_name = schema.operator_name(); // copy!
+  }
+  registrars_.emplace_back(
+    Dispatcher::singleton().registerDef(
+      std::move(schema),
+      debugString("", file_, line_)
+    )
+  );
+  return *this;
+}
+#undef DEF_PRELUDE
+
+Library& Library::_def(c10::either<OperatorName, FunctionSchema>&& name_or_schema, CppFunction&& f) & {
+  FunctionSchema schema = [&] {
+    if (name_or_schema.is_right()) {
+      return std::move(name_or_schema).right();
+    } else {
+      // it's a name; use the inferred schema
+      OperatorName name = std::move(name_or_schema).left();
+      TORCH_CHECK(f.schema_,
+        "def(\"", name, "\"): "
+        "Full schema string was not specified, and we couldn't infer schema either.  ",
+        "Please explicitly provide a schema string.  ",
+        ERROR_CONTEXT
+      );
+      FunctionSchema s = f.schema_->cloneWithName(std::move(name.name), std::move(name.overload_name));
+      s.setAliasAnalysis(c10::AliasAnalysisKind::CONSERVATIVE);
+      return s;
+    }
+  }();
+  OperatorName name("", "");  // Get the namespaced name for the impl call
+  // First define the schema...
+  _def(std::move(schema), &name);
+  // Then register the implementation...
+  auto dispatch_key = f.dispatch_key_.has_value() ? f.dispatch_key_ : dispatch_key_;
+  registrars_.emplace_back(
+    Dispatcher::singleton().registerImpl(
+      std::move(name),
+      dispatch_key,
+      std::move(f.func_),
+      std::move(f.schema_),
+      debugString(std::move(f.debug_), file_, line_)
+    )
+  );
+  return *this;
 }
 
-Module&& Module::def(const char* schema) && {
-  register_.op(c10::RegisterOperators::options()
-    .schema(addNamespace(ns_, schema))
-    .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA));
-  return std::move(*this);
+#define IMPL_PRELUDE "impl(\"", name_str, "\", ...): "
+Library& Library::_impl(const char* name_str, CppFunction&& f) & {
+  auto name = torch::jit::parseName(name_str);
+  auto ns_opt = name.getNamespace();
+  // This is kind of similar to the checking in def(), but the error
+  // messages are a little different for this call site
+  if (ns_opt.has_value()) {
+    // See Note [Redundancy in registration code is OK]
+    TORCH_CHECK(*ns_opt == *ns_,
+      IMPL_PRELUDE,
+      "Explicitly provided namespace (", *ns_opt, ") in operator name "
+      "does not match namespace of enclosing ", kind_, " block (", *ns_, ").  "
+      "Move this definition to the ", kind_, " block corresponding to this namespace "
+      "(and consider deleting the namespace from your schema string.)  ",
+      ERROR_CONTEXT
+    );
+  } else {
+    bool b = name.setNamespaceIfNotSet(ns_->c_str());
+    TORCH_INTERNAL_ASSERT(b, ERROR_CONTEXT);
+  }
+  // See Note [Redundancy in registration code is OK]
+  TORCH_CHECK(!(f.dispatch_key_.has_value() &&
+                dispatch_key_.has_value() &&
+                *f.dispatch_key_ != *dispatch_key_),
+    IMPL_PRELUDE,
+    "Explicitly provided dispatch key (", *f.dispatch_key_, ") is inconsistent "
+    "with the dispatch key of the enclosing ", kind_, " block (", *dispatch_key_, ").  "
+    "Please declare a separate ", kind_, " block for this dispatch key and "
+    "move your impl() there.  "
+    ERROR_CONTEXT
+  );
+  auto dispatch_key = f.dispatch_key_.has_value() ? f.dispatch_key_ : dispatch_key_;
+  registrars_.emplace_back(
+    Dispatcher::singleton().registerImpl(
+      std::move(name),
+      dispatch_key,
+      std::move(f.func_),
+      std::move(f.schema_),
+      debugString(std::move(f.debug_), file_, line_)
+    )
+  );
+  return *this;
 }
+#undef IMPL_PRELUDE
 
-Module&& Module::def(const char* name_or_schema, CppFunction&& f) && {
-  register_.op(c10::RegisterOperators::options()
-    .schema(addNamespace(ns_, name_or_schema))
-    .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA)
-    .kernel(f.dispatch_key_, std::move(f.func_), std::move(f.schema_)));
-  return std::move(*this);
-}
-
-Module&& Module::impl(const char* name_or_schema, CppFunction&& f) && {
-  register_.op(c10::RegisterOperators::options()
-    .schema(addNamespace(ns_, name_or_schema))
-    // NB: Don't specify AliasAnalysis; the def() is expected to provide
-    // this
-    .kernel(f.dispatch_key_, std::move(f.func_), std::move(f.schema_)));
-  return std::move(*this);
+Library& Library::_fallback(CppFunction&& f) & {
+  TORCH_CHECK(kind_ == IMPL,
+    "fallback(...): Cannot define an operator inside of a ", kind_, " block.  "
+    "Did you mean to call this function inside a TORCH_LIBRARY_IMPL block?  ",
+    ERROR_CONTEXT);
+  auto dispatch_key = f.dispatch_key_.has_value() ? f.dispatch_key_ : dispatch_key_;
+  TORCH_INTERNAL_ASSERT(dispatch_key.has_value(), ERROR_CONTEXT);
+  TORCH_CHECK(!ns_.has_value(),
+    "fallback(...): Fallback functions which apply to only a single namespace ",
+    "(you specified ", *ns_, ") are not supported.  If you intended to apply ",
+    "this fallback function globally, please define a separate block:\n\n",
+    "    TORCH_LIBRARY_IMPL(_, ", *dispatch_key, ", m) { m.fallback(...); }\n\n",
+    ERROR_CONTEXT);
+  registrars_.emplace_back(
+    Dispatcher::singleton().registerFallback(
+      *dispatch_key,
+      std::move(f.func_),
+      debugString(std::move(f.debug_), file_, line_)
+    )
+  );
+  return *this;
 }
 
 }

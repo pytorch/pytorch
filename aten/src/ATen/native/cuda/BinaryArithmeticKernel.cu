@@ -4,6 +4,7 @@
 #include <ATen/native/cuda/zmath.cuh>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/BinaryOps.h>
+#include <c10/macros/Macros.h>
 
 
 // NOTE: CUDA on Windows requires that the enclosing function
@@ -69,7 +70,6 @@ void remainder_kernel_cuda(TensorIterator& iter) {
     AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "remainder_cuda", [&]() {
       using thrust_t = typename ztype_cuda<scalar_t>::thrust_t;
       gpu_kernel_with_scalars(iter, []GPU_LAMBDA(thrust_t a, thrust_t b) -> thrust_t {
-        CUDA_KERNEL_ASSERT(b != 0);
         thrust_t r = a % b;
         if ((r != 0) && ((r < 0) != (b < 0))) {
           r += b;

@@ -316,18 +316,36 @@ message OperatorDef {
   optional int64 op_version = 12;
 }
 
+// MapFieldEntry follows the pattern for cross-proto-version maps.
+// See https://developers.google.com/protocol-buffers/docs/proto3#maps
+message MapFieldEntry {
+  required string key = 1;
+  required string val = 2;
+};
+
+// Used to hold backend-specific options.
+message BackendOptions {
+  // Name of the backend that the specified options apply to.
+  required string backend_name = 1;
+  // Flexible map for passing in the options.
+  repeated MapFieldEntry option = 2;
+};
+
 // Partition definition.
 message PartitionInfo {
   // Name of the partition.
   required string name = 1;
 
-  // A list of logic device ID, indicating which devices this partition 
-  // can be executed on. If empty, it means the partition won't run on 
+  // A list of logic device ID, indicating which devices this partition
+  // can be executed on. If empty, it means the partition won't run on
   // device but on host CPU instead.
   repeated int32 device_id = 2;
 
   // Extra debug info.
   optional string extra_info = 3;
+
+  // Flexible map for passing options specific to a backend.
+  repeated BackendOptions backend_options = 4;
 }
 
 // Network definition.

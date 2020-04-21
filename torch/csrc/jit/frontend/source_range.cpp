@@ -21,7 +21,9 @@ C10_EXPORT void SourceRange::highlight(std::ostream& out) const {
   print_with_context(out, CONTEXT, true, "");
 }
 
-C10_EXPORT void format_stack_trace(std::ostream& out, const std::vector<StackEntry>& entries) {
+C10_EXPORT void format_stack_trace(
+    std::ostream& out,
+    const std::vector<StackEntry>& entries) {
   bool has_orig_ranges = false;
   std::vector<SourceRange> orig_ranges;
   // gather original ranges. if we have a situation where we do not have orig

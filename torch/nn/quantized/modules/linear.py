@@ -80,6 +80,10 @@ class LinearPackedParams(torch.nn.Module):
         self.set_weight_bias(state[0], state[1])
         self.training = state[2]
 
+    def __repr__(self):
+        return self._weight_bias().__repr__()
+
+
 class Linear(torch.nn.Module):
     r"""
     A quantized linear module with quantized tensor as inputs and outputs.
@@ -141,6 +145,36 @@ class Linear(torch.nn.Module):
         return 'in_features={}, out_features={}, scale={}, zero_point={}, qscheme={}'.format(
             self.in_features, self.out_features, self.scale, self.zero_point, self.weight().qscheme()
         )
+
+    def __repr__(self):
+        # We don't want to show `LinearPackedParams` children, hence custom
+        # `__repr__`. This is the same as nn.Module.__repr__, except the check
+        # for the `LinearPackedParams`.
+        # You should still override `extra_repr` to add more info.
+        extra_lines = []
+        extra_repr = self.extra_repr()
+        # empty string will be split into list ['']
+        if extra_repr:
+            extra_lines = extra_repr.split('\n')
+        child_lines = []
+        for key, module in self._modules.items():
+            if isinstance(module, LinearPackedParams):
+                continue
+            mod_str = repr(module)
+            mod_str = _addindent(mod_str, 2)
+            child_lines.append('(' + key + '): ' + mod_str)
+        lines = extra_lines + child_lines
+
+        main_str = self._get_name() + '('
+        if lines:
+            # simple one-liner info, which most builtin Modules will use
+            if len(extra_lines) == 1 and not child_lines:
+                main_str += extra_lines[0]
+            else:
+                main_str += '\n  ' + '\n  '.join(lines) + '\n'
+
+        main_str += ')'
+        return main_str
 
     def forward(self, x):
         return torch.ops.quantized.linear(

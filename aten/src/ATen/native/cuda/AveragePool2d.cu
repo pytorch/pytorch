@@ -257,7 +257,7 @@ void avg_pool2d_out_cuda_template(
   }
 
 
-  THCudaCheck(cudaGetLastError());
+  AT_CUDA_CHECK(cudaGetLastError());
 
   if (input.ndimension() == 3) {
     output.resize_({nInputPlane, outputHeight, outputWidth});
@@ -412,7 +412,7 @@ Tensor& avg_pool2d_backward_out_cuda_template(
     }
   }
 
-  THCudaCheck(cudaGetLastError());
+  AT_CUDA_CHECK(cudaGetLastError());
 
   return gradInput;
 }

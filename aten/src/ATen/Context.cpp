@@ -16,7 +16,7 @@
 #include <TH/TH.h> // for USE_LAPACK
 
 #ifdef USE_FBGEMM
-#include "fbgemm/Fbgemm.h"
+#include <fbgemm/Fbgemm.h>
 #endif // USE_FBGEMM
 
 namespace at {
@@ -139,6 +139,14 @@ const std::vector<at::QEngine>& Context::supportedQEngines() const {
     return engines;
   }();
   return supported_qengines;
+}
+
+bool Context::isXNNPACKAvailable() const {
+#ifdef USE_XNNPACK
+  return true;
+#else
+  return false;
+#endif
 }
 
 bool Context::setFlushDenormal(bool on) {

@@ -11,7 +11,7 @@ COMPACT_JOB_NAME="${BUILD_ENVIRONMENT}"
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
 # Install torch & torchvision - used to download & trace test model.
-pip install torch torchvision --progress-bar off
+retry pip install torch torchvision --progress-bar off
 
 # Run end-to-end process of building mobile library, linking into the predictor
 # binary, and running forward pass with a real model.

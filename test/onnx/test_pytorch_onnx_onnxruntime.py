@@ -456,6 +456,16 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.arange(-5, 5).to(dtype=torch.float32)
         self.run_test(MyModel(), x)
 
+    @skipIfUnsupportedMinOpsetVersion(12)
+    @unittest.skip("Enable once inverse is supported in ORT")
+    def test_inverse(self):
+        class Inverse(torch.nn.Module):
+            def forward(self, x):
+                return torch.inverse(x)
+
+        x = torch.randn(2, 3, 4, 4)
+        self.run_test(Inverse(), x)
+
     def test_clamp(self):
         class ClampModel(torch.nn.Module):
             def forward(self, x):
@@ -828,6 +838,7 @@ class TestONNXRuntime(unittest.TestCase):
                       'output_1': [0, 1, 2]})
 
     @skipIfUnsupportedMinOpsetVersion(9)
+    @unittest.skip("relies on not constant folding size calls, but other tests rely on constant folding")
     def test_arange_dynamic(self):
         class ArangeModel(torch.nn.Module):
             def forward(self, input):
@@ -872,7 +883,7 @@ class TestONNXRuntime(unittest.TestCase):
     def test_size(self):
         class SizeModel(torch.nn.Module):
             def forward(self, input):
-                return torch.arange(input.size(0)), torch.arange(input.size(-1))
+                return torch.arange(input.size(0)), torch.arange(input.size(-1)), torch.ones(input.shape)
 
         x = torch.randn(5, 3, 2)
         self.run_test(SizeModel(), x)
@@ -1196,9 +1207,6 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(MyModel(), x)
 
     def _interpolate_script(self, x, mode, use_size, is_upsample, align_corners=False):
-        # test disabled
-        return 
-
         class MyModel(torch.jit.ScriptModule):
             __constants__ = ['mode', 'use_size', 'is_upsample', 'size', 'scale', 'size_array', 'scale_array', 'align_corners']
 
@@ -1286,12 +1294,41 @@ class TestONNXRuntime(unittest.TestCase):
     def test_interpolate_upsample(self):
         self._interpolate_tests(True)
 
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_interpolate_function_substitution(self):
+        class ScriptModel(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, x):
+                return torch.nn.functional.interpolate(x, mode="nearest", scale_factor=2.)
+
+        class ScriptModule(torch.jit.ScriptModule):
+            def __init__(self):
+                super(ScriptModule, self).__init__()
+                self.submodule = ScriptModel()
+
+            @torch.jit.script_method
+            def forward(self, input):
+                return self.submodule(input)
+
+        x = torch.randn(1, 2, 4, 4, 6)
+        self.run_test(ScriptModule(), (x,))
+
+        @torch.jit.script
+        def script_method(x):
+            return torch.nn.functional.interpolate(x, mode="nearest", scale_factor=2.)
+
+        class TracingModule(torch.nn.Module):
+            def forward(self, x):
+                return script_method(x)
+
+        self.run_test(TracingModule(), (x,))
+
     @skipIfUnsupportedMinOpsetVersion(10)
     def test_interpolate_downsample(self):
         self._interpolate_tests(False)
 
     @skipIfUnsupportedMinOpsetVersion(11)
-    @unittest.skipIf(True, "Interpolate script NYI")
+    @unittest.skip("Interpolate script NYI")
     def test_interpolate_no_shape(self):
         class MyModel(torch.jit.ScriptModule):
             @torch.jit.script_method
@@ -1579,6 +1616,30 @@ class TestONNXRuntime(unittest.TestCase):
         input = torch.tensor([[1., 2., 3.], [4., 5., 6.], [7., 8., 9.]])
         indices = torch.tensor([[1, 0], [0, 1], [0, 1]], dtype=torch.int64)
         self.run_test(GatherModel(), input=(input, indices))
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_expand(self):
+        class ExpandModel(torch.nn.Module):
+            def forward(self, input):
+                return input.expand(2, 3, -1)
+
+        input = torch.randn(2, 1, 4)
+        self.run_test(ExpandModel(), input=(input))
+
+        class ExpandInferDimModel(torch.nn.Module):
+            def forward(self, input):
+                return input.expand(-1, input.size(0))
+
+        input = torch.randn(3, 1)
+        self.run_test(ExpandInferDimModel(), input=(input))
+
+        class ExpandTensorSizeModel(torch.nn.Module):
+            def forward(self, input, size):
+                return input.expand(size)
+
+        input = torch.randn(3,)
+        size = torch.tensor([-1])
+        self.run_test(ExpandTensorSizeModel(), input=(input, size))
 
     def test_multinomial(self):
         class Multinomial(torch.nn.Module):
@@ -2366,6 +2427,22 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.tensor(12)
         self.run_test(FullModel(), x)
 
+    def test_l1_norm(self):
+        class NormModel(torch.nn.Module):
+            def forward(self, x):
+                return torch.norm(x, p=1, dim=-1, keepdim=False)
+
+        x = torch.randn(4, 2, 3, requires_grad=True)
+        self.run_test(NormModel(), x)
+
+    def test_l2_norm(self):
+        class NormModel(torch.nn.Module):
+            def forward(self, x):
+                return torch.norm(x, p=2, dim=-2, keepdim=False)
+
+        x = torch.randn(4, 2, 3, requires_grad=True)
+        self.run_test(NormModel(), x)
+
     def test_frobenius_norm(self):
         class NormModel(torch.nn.Module):
             def forward(self, x):
@@ -2839,6 +2916,29 @@ class TestONNXRuntime(unittest.TestCase):
         input = torch.randn(N, 16, 10, 10)
         target = torch.empty(N, 8, 8, dtype=torch.long).random_(0, C)
         self.run_test(NLLModel(), (input, target))
+
+    def test_torch_mm(self):
+        class M(torch.nn.Module):
+            def forward(self, mat1, mat2):
+                mm = torch.mm(mat1, mat2)
+                return mm
+
+        mat1 = torch.randn(2, 3)
+        mat2 = torch.randn(3, 3)
+        self.run_test(M(), input=(mat1, mat2))
+
+    def test_shape_constant_fold(self):
+        class ShapeModule(torch.nn.Module):
+            def __init__(self):
+                super(ShapeModule, self).__init__()
+                self.register_buffer("weight", torch.ones(5))
+
+            def forward(self, x):
+                shape = self.weight.shape[0]
+                return x + shape
+
+        x = torch.randn(2, 5)
+        self.run_test(ShapeModule(), (x,), rtol=1e-3, atol=1e-5) 
 
     def test_onnx_proto_checker(self):
         class Model(torch.nn.Module):

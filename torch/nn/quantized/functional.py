@@ -368,7 +368,38 @@ def hardtanh(input, min_val=-1., max_val=1., inplace=False):
         return torch._C._nn.hardtanh_(input, min_val, max_val)
     return torch._C._nn.hardtanh(input, min_val, max_val)
 
+def hardswish(input, scale, zero_point):
+    # type: (Tensor, float, int) -> Tensor
+    r"""Applies the quantized version of the hardswish function, element-wise,
+    as described in the paper:
+
+    `Searching for MobileNetV3`_.
+
+    .. math::
+        \text{Hardswish}(x) = \begin{cases}
+            0 & \text{if~} x \le -3, \\
+            x & \text{if~} x \ge +3, \\
+            x^2/6 & \text{otherwise}
+        \end{cases}
+
+    Args:
+        input: quantized input
+        scale, zero_point: Scale and zero point of the output tensor.
+
+    See :class:`~torch.nn.Hardswish` for more details.
+
+    .. _`Searching for MobileNetV3`:
+        https://arxiv.org/abs/1905.02244
+    """
+    if not input.is_quantized:
+        raise ValueError("Input to 'quantized.hardswish' must be quantized!")
+    output = torch.quantize_per_tensor(torch.zeros(input.shape),
+                                       scale, int(zero_point), input.dtype)
+    torch._C._nn.hardswish(input, out=output)
+    return output
+
 def elu(input, alpha=1., inplace=False, scale=None, zero_point=None):
+    # type: (Tensor, Optional[float], bool, Optional[float], Optional[int]) -> Tensor
     r"""
     Applies the quantized ELU function element-wise:
 
@@ -396,6 +427,24 @@ def elu(input, alpha=1., inplace=False, scale=None, zero_point=None):
         return torch._C._nn.elu_(input, alpha)
     else:
         return torch._C._nn.elu(input, alpha)
+
+def hardsigmoid(input):
+    # type: (Tensor) -> Tensor
+    r"""
+    Applies the quantized element-wise function
+
+    .. math::
+        \text{Hardsigmoid}(x) = \begin{cases}
+            0 & \text{if~} x \le -3, \\
+            1 & \text{if~} x \ge +3, \\
+            x / 6 & \text{otherwise}
+        \end{cases}
+
+    See :class:`~torch.nn.Hardsigmoid` for more details.
+    """
+    if not input.is_quantized:
+        raise ValueError("Input to 'quantized.hardsigmoid' must be quantized!")
+    return torch._C._nn.hardsigmoid(input)
 
 def clamp(input, min_, max_):
     # type: (Tensor, float, float) -> Tensor

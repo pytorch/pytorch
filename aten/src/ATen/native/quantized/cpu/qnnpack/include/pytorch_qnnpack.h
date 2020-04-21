@@ -343,6 +343,44 @@ enum pytorch_qnnp_status pytorch_qnnp_setup_tanh_nc_q8(
     uint8_t* output,
     size_t output_stride);
 
+enum pytorch_qnnp_status pytorch_qnnp_create_hardsigmoid_nc_q8(
+    size_t channels,
+    uint8_t input_zero_point,
+    float input_scale,
+    uint8_t output_zero_point,
+    float output_scale,
+    uint8_t output_min,
+    uint8_t output_max,
+    uint32_t flags,
+    pytorch_qnnp_operator_t* hardsigmoid);
+
+enum pytorch_qnnp_status pytorch_qnnp_setup_hardsigmoid_nc_q8(
+    pytorch_qnnp_operator_t hardsigmoid,
+    size_t batch_size,
+    const uint8_t* input,
+    size_t input_stride,
+    uint8_t* output,
+    size_t output_stride);
+
+enum pytorch_qnnp_status pytorch_qnnp_create_hardswish_nc_q8(
+    size_t channels,
+    uint8_t input_zero_point,
+    float input_scale,
+    uint8_t output_zero_point,
+    float output_scale,
+    uint8_t output_min,
+    uint8_t output_max,
+    uint32_t flags,
+    pytorch_qnnp_operator_t* hardswish);
+
+enum pytorch_qnnp_status pytorch_qnnp_setup_hardswish_nc_q8(
+    pytorch_qnnp_operator_t hardswish,
+    size_t batch_size,
+    const uint8_t* input,
+    size_t input_stride,
+    uint8_t* output,
+    size_t output_stride);
+
 enum pytorch_qnnp_status pytorch_qnnp_run_operator(
     pytorch_qnnp_operator_t op,
     pthreadpool_t threadpool);
