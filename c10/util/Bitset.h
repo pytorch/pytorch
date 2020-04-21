@@ -37,8 +37,10 @@ public:
   constexpr bitset() noexcept : bitset_(0) {}
   constexpr bitset(const bitset&) noexcept = default;
   constexpr bitset(bitset&&) noexcept = default;
-  constexpr bitset& operator=(const bitset&) noexcept = default;
-  constexpr bitset& operator=(bitset&&) noexcept = default;
+  // there is an issure for gcc 5.3.0 when define default function as constexpr
+  // see https://gcc.gnu.org/bugzilla/show_bug.cgi?id=68754.
+  bitset& operator=(const bitset&) noexcept = default;
+  bitset& operator=(bitset&&) noexcept = default;
 
   constexpr void set(size_t index) noexcept {
     bitset_ |= (static_cast<long long int>(1) << index);
