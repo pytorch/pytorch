@@ -64,6 +64,7 @@ INPUT                  = ../../../aten/src/ATen/ATen.h \
                          ../../../torch/csrc/jit/runtime/custom_operator.h \
                          ../../../torch/csrc/jit/serialization/import.h \
                          ../../../torch/csrc/jit/api/module.h \
+                         ../../../torch/library.h \
                          ../../../torch/custom_class.h
 # Don't include .cpp files!
 FILE_PATTERNS          = *.h
