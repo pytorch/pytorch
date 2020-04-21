@@ -68,6 +68,13 @@ TEST(WireSerialize, CloneSparseTensors) {
   EXPECT_TRUE(v3.get(0).is_same(sparse));
 }
 
+TEST(WireSerialize, Errors) {
+  EXPECT_THROW((void)torch::distributed::rpc::wireDeserialize("", 0), std::runtime_error);
+  EXPECT_THROW((void)torch::distributed::rpc::wireDeserialize(" ", 1), std::runtime_error);
+  auto serialized = torch::distributed::rpc::wireSerialize({}, {torch::randn({5, 5})});
+  EXPECT_THROW((void)torch::distributed::rpc::wireDeserialize(serialized.data(), serialized.size() / 2), std::runtime_error);
+}
+
 // Enable this once JIT Pickler supports sparse tensors.
 TEST(WireSerialize, DISABLED_Sparse) {
   at::Tensor main =
