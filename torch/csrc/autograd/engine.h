@@ -255,8 +255,10 @@ struct TORCH_API Engine {
   // the appropriate GraphTask has already been initialized appropriately. It will
   // construct a local ready queue to traverse the GraphTask instead of using the
   // GraphTask embedded cpu_ready_queue, this is because dist engine might run the
-  // same GraphTask from different SendFunctions concurrently. The method might also 
-  // not mark the GraphTask as completed to keep the GraphTask alive.
+  // same GraphTask from different SendFunctions concurrently in different threads.
+  // The method will only mark the GraphTask as completed when it needes to, which
+  // means it might not mark as completed for every call as dist engine would like
+  // to keep the GraphTask alive when it not receives all gradients.
   //
   // When `incrementOutstandingTasks=false`, the function does not increment 
   // 'outstanding_tasks_' in the appropriate GraphTask. It is assumed we've already
@@ -265,6 +267,12 @@ struct TORCH_API Engine {
   // increment 'outstanding_tasks_' first to indicate the local autograd engine the
   // graph task is not completed until it receives the signals from other workers
   // over the network.
+  //
+  // XXX: calling this function assumes that we will have NO GPU nodetasks be executed
+  // for the graph_task, the caller of this function need to ensure this otherwise
+  // there will be non deterministic behaviors. A correct way to fix this is to
+  // re-design the autograd engine so that GPU worker thread to behave the same as CPU
+  // caller thread, record the operation/thread for the device, and reuse it in backward.
  std::shared_ptr<FutureVariableList> execute_graph_task_until_ready_queue_empty(
      const std::shared_ptr<GraphTask>& graph_task,
      std::shared_ptr<Node> root_to_execute,
@@ -290,7 +298,7 @@ struct TORCH_API Engine {
       std::shared_ptr<GraphTask>& graph_task,
       Node* func,
       InputBuffer& inputs,
-      std::shared_ptr<ReadyQueue> cpu_ready_queue);
+      const std::shared_ptr<ReadyQueue>& cpu_ready_queue);
 
   // initialize the thread local ready queue with the ready queue that is created
   // elsewhere (i.e. thread_init, Engine::execute, etc), or create a new

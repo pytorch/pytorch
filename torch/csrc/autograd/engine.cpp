@@ -624,7 +624,7 @@ void Engine::evaluate_function(
     std::shared_ptr<GraphTask>& graph_task,
     Node* func,
     InputBuffer& inputs,
-    std::shared_ptr<ReadyQueue> cpu_ready_queue) {
+    const std::shared_ptr<ReadyQueue>& cpu_ready_queue) {
   // If exec_info_ is not empty, we have to instrument the execution
   auto& exec_info_ = graph_task->exec_info_;
   if (!exec_info_.empty()) {
@@ -814,7 +814,8 @@ std::shared_ptr<FutureVariableList> Engine::execute_graph_task_until_ready_queue
     std::shared_ptr<Node> root_to_execute,
     bool incrementOutstandingTasks) {
   initialize_device_threads_pool();
-  // create a ready queue per call
+  // Create a ready queue per call to traverse the graph_task from root_to_execute
+  // This allow concurrent execution of the same GraphTask from different threads
   std::shared_ptr<ReadyQueue> cpu_ready_queue = std::make_shared<ReadyQueue>();
   cpu_ready_queue->push(
       NodeTask(graph_task, std::move(root_to_execute), InputBuffer(0)),
@@ -825,6 +826,9 @@ std::shared_ptr<FutureVariableList> Engine::execute_graph_task_until_ready_queue
   while(!cpu_ready_queue->empty()) {
     std::shared_ptr<GraphTask> local_graph_task;
     {
+      // Scope this block of execution since NodeTask is not needed after this
+      // block and can be deallocated (release any references to grad tensors
+      // as part of inputs_)
       NodeTask task = cpu_ready_queue->pop();
       if (!(local_graph_task = task.base_.lock())) {
         continue;
@@ -924,7 +928,10 @@ void Engine::mark_graph_task_completed(
     const std::shared_ptr<GraphTask>& graph_task) {
   // Allow only one thread one attempt to process this logic.
   if (graph_task->future_completed_.exchange(true)) {
-    // Future is already marked as completed.
+    // Future is already marked complete, or being marked as such.
+    // In case the marking complete is only in progress, we add a
+    // waitNoThrow() to guarantee the future is marked complete on exit.
+    graph_task->future_result_->waitNoThrow();
     return;
   }
 
