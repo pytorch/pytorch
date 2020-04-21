@@ -128,8 +128,7 @@ struct TORCH_API Object {
   // `ClassType`, including deepcopy of Tensors
   Object deepcopy() const;
 
-  Object deepcopy(
-      c10::IValue::HashAliasedIValueMap& memo) const;
+  Object deepcopy(c10::IValue::HashAliasedIValueMap& memo) const;
 
  private:
   // mutable be we lazily initialize in module_object.

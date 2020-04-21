@@ -40,8 +40,7 @@ Object Object::deepcopy() const {
   return deepcopy(memo);
 }
 
-Object Object::deepcopy(
-    c10::IValue::HashAliasedIValueMap& memo) const {
+Object Object::deepcopy(c10::IValue::HashAliasedIValueMap& memo) const {
   Object obj(_ivalue()->compilation_unit(), type());
 
   // Deepcopy slots. If a slot is a module - recursively copy it.
