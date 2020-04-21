@@ -129,6 +129,7 @@ Numerical gradient checking
 
 .. autofunction:: gradgradcheck
 
+
 Profiler
 ^^^^^^^^
 

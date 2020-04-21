@@ -119,3 +119,89 @@ a version counter of their containing Tensor is saved as well. Once you access
 an error is raised. This ensures that if you're using in-place
 functions and not seeing any errors, you can be sure that the computed
 gradients are correct.
+
+
+Multithreaded Autograd
+^^^^^^^^^^^^^^^^^^^^^^^^^^^
+We are now using the caller thread to drive the autograd execution, user
+could write their own threading code and does not block on the Autograd
+engine, example code could be:
+
+.. code::
+
+    # Define a train function to be used in different threads
+    def train_fn():
+        x = torch.ones(5, 5, requires_grad=True)
+        # forward
+        y = (x + 3) * (x + 4) * 0.5
+        # backward
+        y.sum().backward()
+        # potential optimizer update
+
+    
+    # User write their own threading code to drive the train_fn
+    threads = []
+    for _ in range(10):
+        p = threading.Thread(target=train_fn, args=())
+        p.start()
+        threads.append(p)
+
+    for p in threads:
+        p.join()
+
+
+Note that some behaviors that user should be aware of:
+
+Concurrency on CPU
+------------------
+
+Now when you run ``backward()`` or ``grad()`` via python or C++ API in multiple
+threads on CPU, you are expecting to see extra concurrency instead of serializing
+all the backward calls in a specific order during execution.
+
+Non-determinism
+------------------
+
+if we are calling ``backward()`` on multiple thread concurrently but with
+shared inputs (i.e. Hogwild CPU training). Since parameters are automatically
+shared across threads, gradient accumulation might become non-deterministic on
+backward calls across threads, because two backward calls might access and try
+to accumulate the same ``.grad`` attribute. This is technically not safe, and
+it might result in racing condition and the result might be invalid to use.
+
+But this is expected pattern if user are using the multithreading
+approach to drive the whole training process but using shared
+parameters, user who use multithreading should have the threading model
+in mind and should expect this to happen. User could use the functional API
+:func:`torch.autograd.grad` to calculate the gradients instead of
+``backward()`` to avoid non-determinism.
+
+Graph retaining
+------------------
+
+If part of the autograd graph is shared between threads, i.e. run first
+part of forward single thread, then run second part in multiple threads,
+then the first part of graph is shared. In this case different threads
+execute ``grad()`` or ``backward()`` on the same graph might have issue of
+destroying the graph on the fly of one thread, and the other thread will
+crash in this case. We will error out to the user similar to what call
+``backward()`` twice with out ``retain_graph=True``, and let the user know
+they should use ``retain_graph=True``.
+
+Thread Safety on Autograd Node
+------------------------------
+
+Since we enable CPU parallelism in this PR, it's important that we ensure
+thread safety on CPU with parallel backwards that share part/whole of the
+GraphTask. custom Python autograd.function is automatically thread safe
+because of GIL, but built-in C++ Node and custom C++ Node are not.
+
+To protect thread safety, we use thread locking on autograd Nodes that might
+have state write/read, like AccumulateGrad, CopySlices, custom C++
+``autograd::Function``, etc.
+
+No thread safety on C++ hooks
+------------------------------
+
+We rely on the user to write thread safe C++ hooks if they want the hook to be
+correctly applied in multithreading environment.
