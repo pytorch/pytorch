@@ -265,7 +265,7 @@ class CUDATestBase(DeviceTypeTestBase):
         cls.no_magma = not torch.cuda.has_magma
 
         # Determines if cuDNN is available and its version
-        cls.no_cudnn = not (TEST_WITH_ROCM or torch.backends.cudnn.is_acceptable(t))
+        cls.no_cudnn = not torch.backends.cudnn.is_acceptable(t)
         cls.cudnn_version = None if cls.no_cudnn else torch.backends.cudnn.version()
 
         # Acquires the current device as the primary (test) device

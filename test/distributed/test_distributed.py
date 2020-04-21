@@ -442,7 +442,7 @@ class _DistTestBase(object):
         # Only execute barrier on rank == 0, causing it to timeout
         if local_rank == 0:
             expected_time = time.time() + timeout.total_seconds()
-            with self.assertRaisesRegex(RuntimeError, " (Timed out|closed) "):
+            with self.assertRaisesRegex(Exception, " (Timed out|closed|timeout) "):
                 dist.barrier(group_id)
             self.assertGreaterEqual(time.time(), expected_time)
         else:
@@ -463,7 +463,7 @@ class _DistTestBase(object):
         self._barrier(wait_for=int(WORLD_SIZE))
 
         # Reinitialize global process group
-        timeout = timedelta(seconds=0.2)
+        timeout = timedelta(seconds=1)
         dist.init_process_group(
             init_method=INIT_METHOD,
             backend=BACKEND,
@@ -476,14 +476,14 @@ class _DistTestBase(object):
     @skip_if_small_worldsize
     @unittest.skipIf(BACKEND != "gloo", "Only gloo backend supports timeouts")
     def test_barrier_timeout_group(self):
-        timeout = timedelta(seconds=0.2)
+        timeout = timedelta(seconds=1)
         _, group_id, _ = self._init_group_test(timeout=timeout)
         if group_id is not None:
             self._test_barrier_timeout(group_id, timeout)
 
     @unittest.skipIf(BACKEND != "gloo", "Only gloo backend supports timeouts")
     def test_barrier_timeout_full_group(self):
-        timeout = timedelta(seconds=0.2)
+        timeout = timedelta(seconds=1)
         _, group_id, _ = self._init_full_group_test(timeout=timeout)
         if group_id is not None:
             self._test_barrier_timeout(group_id, timeout)
