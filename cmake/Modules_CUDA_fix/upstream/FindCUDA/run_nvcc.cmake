@@ -241,8 +241,8 @@ endif()
 
 # Delete the temporary file
 cuda_execute_process(
-  "Removing ${cmake_dependency_file}.tmp and ${NVCC_generated_dependency_file}"
-  COMMAND "${CMAKE_COMMAND}" -E remove "${cmake_dependency_file}.tmp" "${NVCC_generated_dependency_file}"
+  "Removing ${cmake_dependency_file}.tmp"
+  COMMAND "${CMAKE_COMMAND}" -E remove "${cmake_dependency_file}.tmp"
   )
 
 if(CUDA_result)
