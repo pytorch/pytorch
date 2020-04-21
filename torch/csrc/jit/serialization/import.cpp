@@ -185,6 +185,7 @@ void rewriteQuantizedConvForBC(const Module& module) {
 graph(%x, %packed_params, %stride, %padding, %dilation, %groups, %r_scale, %r_zero_point):
          %r = quantized::conv2d(%x, %packed_params, %stride, %padding, %dilation, %groups, %r_scale, %r_zero_point)
          return (%r) )";
+
   const std::string& old_quantized_conv2d_relu = R"(
 graph(%x, %packed_params, %stride, %padding, %dilation, %groups, %r_scale, %r_zero_point):
          %r = quantized::conv2d_relu(%x, %packed_params, %stride, %padding, %dilation, %groups, %r_scale, %r_zero_point)

@@ -2198,7 +2198,7 @@ class TestQuantizedConv(unittest.TestCase):
            X_zero_point=st.integers(0, 4),
            W_scale=st.lists(hu.floats(0.2, 1.6), min_size=1, max_size=2),
            W_zero_point=st.lists(st.integers(-5, 5), min_size=1, max_size=2),
-           Y_scale=hu.floats(4.2, 5.6, width=32),
+           Y_scale=hu.floats(4.2, 5.6),
            Y_zero_point=st.integers(0, 4),
            use_bias=st.booleans(),
            use_relu=st.booleans(),
