@@ -251,8 +251,9 @@ def is_tensor_arg(arg):
 
 
 def is_sized_intlist_arg(arg):
-    """Returns True for arguments declared as IntArrayRef[k], but False for IntArrayRef."""
-    return (arg['simple_type'] == 'IntArrayRef') and ('size' in arg)
+    # Returns True for arguments declared as IntArrayRef[k], but False for IntArrayRef.
+    # Also allows optionality in list or element type.
+    return arg['simple_type'].startswith('IntArrayRef') and ('size' in arg)
 
 
 def base_name(decl):

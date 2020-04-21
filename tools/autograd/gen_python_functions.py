@@ -285,17 +285,26 @@ def parsed_arg_expr(arg, arg_index):
     return '_r.{}({})'.format(unpack, arg_index)
 
 
-# TODO make this part of something more general, or get rid of it
-def unpack_optional_dimname_list_hack(name, expr):
+OPTIONAL_LIST_TYPES = {
+    'c10::optional<DimnameList>': 'DimnameList',
+    'c10::optional<IntArrayRef>': 'IntArrayRef',
+}
+
+def unpack_optional_list(name, expr, typ):
     # optional<ArrayRef<T>> are special. The PythonArgParser returns an
     # optional<vector<T>>, which cannot be implicitly converted to
     # optional<ArrayRef<T>>. One needs to unwrap the optional and rewrap.
+    #
+    # Further, the conversion can't be factored into a PythonArgParser
+    # helper - ArrayRef does not own the vector it refers to, so the
+    # lifetime of that vector must by guaranteed by an in-scope reference.
+    #
+    # We generate a local for both purposes here.
     result = """\
         auto __{name} = {expr};
         c10::optional<{typ}> {name} = __{name} ? c10::make_optional({typ}(__{name}.value())) : c10::nullopt;
-    """.format(name=name, expr=expr, typ='DimnameList')
+    """.format(name=name, expr=expr, typ=typ)
     return [line.strip() for line in result.split('\n')]
-
 
 def parse_arg(arg, arg_index, unpack_to_local=False):
     # get parsed rhs
@@ -304,8 +313,8 @@ def parse_arg(arg, arg_index, unpack_to_local=False):
     # maybe unpack to local
     name = arg['name']
     typename = arg['type']
-    if typename == 'c10::optional<DimnameList>':
-        inits = unpack_optional_dimname_list_hack(name, expr)
+    if typename in OPTIONAL_LIST_TYPES:
+        inits = unpack_optional_list(name, expr, OPTIONAL_LIST_TYPES[typename])
         expr = name
     elif unpack_to_local:
         inits = ['auto {} = {};'.format(name, expr)]
@@ -1154,7 +1163,10 @@ def get_schema_formal(arg, is_python_method):
 
     size = arg.get('size')
     if size is not None:
-        typename = '{}[{}]'.format(typename, size)
+        if typename.endswith('?'):
+            typename = '{}[{}]?'.format(typename[:-1], size)
+        else:
+            typename = '{}[{}]'.format(typename, size)
 
     # default
     default = arg.get('default')
@@ -1249,7 +1261,7 @@ def make_python_arglists(declaration, is_python_method):
     # adjustments
 
     # positional inputs:
-    # - filter self when we're generating a method binding.else - there, it comes in as
+    # - filter self when we're generating a method binding. there, it comes in as
     #   a separate Python param, not in args array
     def include(arg):
         return not (is_tensor_self(arg) and is_python_method)
