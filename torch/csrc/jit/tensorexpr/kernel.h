@@ -63,6 +63,7 @@ class TORCH_API TensorExprKernel {
   };
 
   void compile();
+  void lowerToBackend(const at::ArrayRef<IValue>& inputs);
 
   void runKernel(Stack& stack);
 

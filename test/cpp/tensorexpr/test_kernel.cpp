@@ -1,5 +1,3 @@
-#ifdef USE_CUDA
-
 #include <sstream>
 #include <stdexcept>
 #include "test/cpp/tensorexpr/test_base.h"
@@ -37,15 +35,21 @@ void testKernel_1() {
   auto graph = std::make_shared<Graph>();
   parseIR(graph_string, &*graph);
 
-  //   auto a = at::rand({3, 3}, at::kCUDA);
-  //   auto b = at::rand({3, 3}, at::kCUDA);//.transpose(0, 1);
-  //   auto o = at::zeros({3, 3}, at::kCUDA);
+//   auto a = at::rand({3, 3}, at::kCUDA);
+//   auto b = at::rand({3, 3}, at::kCUDA);//.transpose(0, 1);
+//   auto o = at::zeros({3, 3}, at::kCUDA);
   auto a = at::rand({3, 3}, at::kCPU);
   auto b = at::rand({3, 3}, at::kCPU); //.transpose(0, 1);
   auto o = at::zeros({3, 3}, at::kCPU);
   TensorExprKernel k(graph);
-  Stmt* s = k.generateStmtForInputs({a, b, o});
+  std::vector<at::Tensor> inputs = {a, b};
+  Stmt* s = k.generateStmtForInputs(fmap<IValue>(inputs));
   std::cerr << "QQQQ:\n" << *s << "\n";
+  std::vector<at::Tensor> tensors = {a, b, o};
+  std::vector<IValue> stack = fmap<IValue>(tensors);
+  k.run(stack);
+//   Stmt* s2 = debugLaunchGraph(graph, {a, b, o});
+//   std::cerr << "ZZZZ:\n" << *s2 << "\n";
   //  auto outputs = debugLaunchGraph(graph, {a, b});
   //   ASSERT_EQ(outputs.size(), 1);
   //   auto o2 = a * b;
@@ -113,5 +117,3 @@ void testKernel_1() {
 
 } // namespace jit
 } // namespace torch
-
-#endif
