@@ -2,7 +2,7 @@
 #define THC_GENERIC_FILE "THC/generic/THCTensorRandom.h"
 #else
 
-#include "ATen/core/Generator.h"
+#include <ATen/core/Generator.h>
 
 #if defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE) || defined(THC_REAL_IS_HALF)
 
