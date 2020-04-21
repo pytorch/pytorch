@@ -35,9 +35,9 @@ void testKernel_1() {
   auto graph = std::make_shared<Graph>();
   parseIR(graph_string, &*graph);
 
-//   auto a = at::rand({3, 3}, at::kCUDA);
-//   auto b = at::rand({3, 3}, at::kCUDA);//.transpose(0, 1);
-//   auto o = at::zeros({3, 3}, at::kCUDA);
+  //   auto a = at::rand({3, 3}, at::kCUDA);
+  //   auto b = at::rand({3, 3}, at::kCUDA);//.transpose(0, 1);
+  //   auto o = at::zeros({3, 3}, at::kCUDA);
   auto a = at::rand({3, 3}, at::kCPU);
   auto b = at::rand({3, 3}, at::kCPU); //.transpose(0, 1);
   auto o = at::zeros({3, 3}, at::kCPU);
@@ -48,8 +48,8 @@ void testKernel_1() {
   std::vector<at::Tensor> tensors = {a, b, o};
   std::vector<IValue> stack = fmap<IValue>(tensors);
   k.run(stack);
-//   Stmt* s2 = debugLaunchGraph(graph, {a, b, o});
-//   std::cerr << "ZZZZ:\n" << *s2 << "\n";
+  //   Stmt* s2 = debugLaunchGraph(graph, {a, b, o});
+  //   std::cerr << "ZZZZ:\n" << *s2 << "\n";
   //  auto outputs = debugLaunchGraph(graph, {a, b});
   //   ASSERT_EQ(outputs.size(), 1);
   //   auto o2 = a * b;

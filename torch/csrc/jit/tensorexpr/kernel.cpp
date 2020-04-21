@@ -1504,8 +1504,7 @@ std::vector<CodeGen::CallArg> TensorExprKernel::prepareRunArgs(
   return runArgs;
 }
 
-void TensorExprKernel::lowerToBackend(
-    const at::ArrayRef<IValue>& inputs) {
+void TensorExprKernel::lowerToBackend(const at::ArrayRef<IValue>& inputs) {
   checkInputs(inputs, inputTypes_);
 
   at::Device device = pickDeviceType(inputs);
@@ -1528,7 +1527,7 @@ Stmt* TensorExprKernel::generateStmtForInputs(
   lowerToBackend(inputs);
   at::Device device = pickDeviceType(inputs);
   return codegenCache_.at(torch::get_hash(device))->stmt();
-//   return generateStmt(backendType);
+  //   return generateStmt(backendType);
 }
 
 void TensorExprKernel::runKernel(Stack& stack) {
