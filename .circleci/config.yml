@@ -114,25 +114,38 @@ commands:
       - brew_install:
           formulae: libtool
 
-  maybe_rebase:
+  optional_merge_target_branch:
     steps:
       - run:
-          name: Rebase on top of REBASE_TARGET if exists
+          name: (Optional) Merge target branch
           no_output_timeout: "10m"
           command: |
-            set -ex
-            if [ -n "$REBASE_TARGET" ] && [ -n "$CIRCLE_PULL_REQUEST" ]; then
-              git config --global user.email "circleci.ossci@gmail.com"
-              git config --global user.name "CircleCI"
+            if [ -n "$CIRCLE_PULL_REQUEST" ]; then
               PR_NUM=$(basename $CIRCLE_PULL_REQUEST)
               CIRCLE_PR_BASE_BRANCH=$(curl -s https://api.github.com/repos/$CIRCLE_PROJECT_USERNAME/$CIRCLE_PROJECT_REPONAME/pulls/$PR_NUM | jq -r '.base.ref')
-              echo "Rebase on top of $CIRCLE_PR_BASE_BRANCH branch before building in environment $BUILD_ENVIRONMENT"
-              if [[ "${CIRCLE_PR_BASE_BRANCH}" == "master" ]]; then
-                git rebase "${REBASE_TARGET}"
+              if [[ "${BUILD_ENVIRONMENT}" == *"xla"* || "${BUILD_ENVIRONMENT}" == *"gcc5"* ]] ; then
+                set -x
+                git config --global user.email "circleci.ossci@gmail.com"
+                git config --global user.name "CircleCI"
+                git config remote.origin.url https://github.com/pytorch/pytorch.git
+                git config --add remote.origin.fetch +refs/heads/master:refs/remotes/origin/master
+                git fetch --tags --progress https://github.com/pytorch/pytorch.git +refs/heads/master:refs/remotes/origin/master --depth=100 --quiet
+                export GIT_MERGE_TARGET=`git log -n 1 --pretty=format:"%H" origin/$CIRCLE_PR_BASE_BRANCH`
+                echo "GIT_MERGE_TARGET: " ${GIT_MERGE_TARGET}
+                export GIT_COMMIT=${CIRCLE_SHA1}
+                echo "GIT_COMMIT: " ${GIT_COMMIT}
+                git checkout -f ${GIT_COMMIT}
+                git reset --hard ${GIT_COMMIT}
+                git merge --allow-unrelated-histories --no-edit --no-ff ${GIT_MERGE_TARGET}
+                echo "Merged $CIRCLE_PR_BASE_BRANCH branch before building in environment $BUILD_ENVIRONMENT"
+                set +x
               else
-                git rebase "origin/${CIRCLE_PR_BASE_BRANCH}"
+                echo "No need to merge with $CIRCLE_PR_BASE_BRANCH, skipping..."
               fi
+            else
+              echo "This is not a pull request, skipping..."
             fi
+
 
 
 ##############################################################################
@@ -204,15 +217,11 @@ pytorch_params: &pytorch_params
     build_only:
       type: string
       default: ""
-    rebase_target:
-      type: string
-      default: ""
   environment:
     BUILD_ENVIRONMENT: << parameters.build_environment >>
     DOCKER_IMAGE: << parameters.docker_image >>
     USE_CUDA_DOCKER_RUNTIME: << parameters.use_cuda_docker_runtime >>
     BUILD_ONLY: << parameters.build_only >>
-    REBASE_TARGET: << parameters.rebase_target >>
   resource_class: << parameters.resource_class >>
 
 pytorch_ios_params: &pytorch_ios_params
@@ -387,7 +396,7 @@ jobs:
     - attach_scripts
     - setup_linux_system_environment
     - checkout
-    - maybe_rebase
+    - optional_merge_target_branch
     - setup_ci_environment
     - run:
         name: Build
@@ -2099,7 +2108,6 @@ workflows:
             - setup
           build_environment: "pytorch-linux-xenial-py3.6-gcc5.4-build"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-gcc5.4:8fcf46ef-4a34-480b-a8ee-b0a30a4d3e59"
-          rebase_target: origin/master
       - pytorch_linux_test:
           name: pytorch_linux_xenial_py3_6_gcc5_4_test
           requires:
@@ -2420,7 +2428,6 @@ workflows:
             - setup
           build_environment: "pytorch-xla-linux-bionic-py3.6-clang9-build"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-bionic-py3.6-clang9:8fcf46ef-4a34-480b-a8ee-b0a30a4d3e59"
-          rebase_target: origin/master
       - pytorch_linux_test:
           name: pytorch_xla_linux_bionic_py3_6_clang9_test
           requires:

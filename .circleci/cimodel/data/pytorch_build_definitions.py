@@ -89,8 +89,6 @@ class Conf:
             if self.gpu_resource:
                 resource_class = "gpu." + self.gpu_resource
             parameters["resource_class"] = resource_class
-        if phase == "build" and (self.is_xla or 'pytorch-linux-xenial-py3.6-gcc5' in parameters["build_environment"]):
-            parameters["rebase_target"] = "origin/master"
         return parameters
 
     def gen_workflow_job(self, phase):

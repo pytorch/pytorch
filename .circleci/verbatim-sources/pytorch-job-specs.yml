@@ -8,7 +8,7 @@ jobs:
     - attach_scripts
     - setup_linux_system_environment
     - checkout
-    - maybe_rebase
+    - optional_merge_target_branch
     - setup_ci_environment
     - run:
         name: Build
