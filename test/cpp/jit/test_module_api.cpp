@@ -142,5 +142,29 @@ void testModuleDeepcopy() {
   ASSERT_TRUE(t1.equal(t3));
 }
 
+void testModuleCopyAliasing() {
+  // check deepcopy preserves aliasing
+  auto cu = std::make_shared<CompilationUnit>();
+  auto cls = ClassType::create("foo.bar", cu, true);
+  auto attr1 = "attr1";
+  auto attr2 = "attr2";
+  cls->addAttribute(attr1, ListType::ofTensors());
+  cls->addAttribute(attr2, ListType::ofTensors());
+  Module m(cu, cls);
+  auto t1 = at::rand(5);
+  auto t2 = at::rand(5);
+  auto t3 = at::rand(5);
+  c10::List<at::Tensor> list1({t1, t2});
+  c10::List<at::Tensor> list2({t1, t3});
+  // first element of attr1 and attr2 are aliased
+  m.setattr(attr1, list1);
+  m.setattr(attr2, list2);
+
+  auto copied = m.deepcopy();
+  auto copied_attr1_t1 = m.attr(attr1).toList().get(0);
+  auto copied_attr2_t1 = m.attr(attr2).toList().get(0);
+  ASSERT_TRUE(copied_attr1_t1.isAliasOf(copied_attr2_t1));
+}
+
 } // namespace jit
 } // namespace torch

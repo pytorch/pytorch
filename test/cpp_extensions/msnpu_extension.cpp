@@ -1,6 +1,5 @@
 #include <torch/extension.h>
-
-#include <ATen/core/op_registration/op_registration.h>
+#include <torch/library.h>
 
 using namespace at;
 
