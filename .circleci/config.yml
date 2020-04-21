@@ -839,13 +839,6 @@ jobs:
           script="/Users/distiller/project/.circleci/scripts/binary_ios_build.sh"
           cat "$script"
           source "$script"
-    # - run:
-    #     name: Test
-    #     no_output_timeout: "30m"
-    #     command: |
-    #       script="/Users/distiller/project/.circleci/scripts/binary_ios_test.sh"
-    #       cat "$script"
-    #       source "$script"
     - persist_to_workspace:
         root: /Users/distiller/workspace/
         paths: ios
@@ -1163,6 +1156,7 @@ jobs:
 workflows:
   build:
     jobs:
+      - setup
       - setup:
           # Run this job on everything since it is
           # the dependency for everything.
@@ -1180,9 +1174,6 @@ workflows:
           ios_arch: "x86_64"
           requires: 
             - setup
-          # filters:
-          #   branches:
-          #     only: nightly
       - binary_ios_build:
           name: pytorch_ios_11_2_1_nightly_arm64_build
           build_environment: "libtorch-ios-11.2.1-nightly-arm64-build"
@@ -1191,9 +1182,6 @@ workflows:
           ios_platform: "OS"
           requires: 
             - setup
-          # filters:
-          #   branches:
-          #     only: nightly
       - binary_ios_upload:
           build_environment: "libtorch-ios-11.2.1-nightly-binary-build-upload"
           context: org-member
@@ -1201,6 +1189,3 @@ workflows:
             - setup
             - pytorch_ios_11_2_1_nightly_x86_64_build
             - pytorch_ios_11_2_1_nightly_arm64_build
-          # filters:
-          #   branches:
-          #     only: nightly
