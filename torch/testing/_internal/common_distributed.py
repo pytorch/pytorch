@@ -336,7 +336,7 @@ class MultiProcessTestCase(TestCase):
             first_process.exitcode,
             0,
             "zero expected but got {}".format(first_process.exitcode)
-            )
+        )
 
     @property
     def is_master(self):

@@ -2,9 +2,7 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 import copy
 import errno
 import fcntl
-import multiprocessing
 import os
-import six
 import sys
 import time
 import tempfile
