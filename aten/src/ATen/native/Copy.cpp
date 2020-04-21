@@ -8,7 +8,7 @@
 #include <ATen/quantized/Quantizer.h>
 #include <ATen/MemoryOverlap.h>
 #include <ATen/NamedTensorUtils.h>
-#include <torch/library.h>
+#include <ATen/core/op_registration/op_registration.h>
 
 namespace {
 

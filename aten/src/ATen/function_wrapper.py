@@ -120,7 +120,7 @@ m.def("${unqual_schema_string}");
 # TORCH_LIBRARY macro invocation
 DEFAULT_UNBOXEDONLY_FUNCTION_REGISTRATION = CodeTemplate("""\
 m.impl("${unqual_operator_name_with_overload}",
-       torch::CppFunction::makeUnboxedOnly(TypeDefault::${type_wrapper_name}));
+       CppFunction::makeUnboxedOnly(TypeDefault::${type_wrapper_name}));
 """)
 
 DEFAULT_FUNCTION_REGISTRATION = CodeTemplate("""\
@@ -137,7 +137,7 @@ m.impl("${unqual_operator_name_with_overload}", &TypeDefault::${type_wrapper_nam
 BACKEND_UNBOXEDONLY_FUNCTION_REGISTRATION = CodeTemplate("""\
 m.impl("${unqual_operator_name_with_overload}",
        torch::dispatch(DispatchKey::${Backend},
-                       torch::CppFunction::makeUnboxedOnly(${Type}::${type_wrapper_name}))
+                       CppFunction::makeUnboxedOnly(${Type}::${type_wrapper_name}))
 );
 """)
 

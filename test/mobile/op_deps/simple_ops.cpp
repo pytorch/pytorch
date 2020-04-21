@@ -75,7 +75,7 @@ namespace {
 // cares about the name
 TORCH_LIBRARY(_test, m) {
   m.def("AA(Tensor self) -> Tensor");
-  m.impl("AA", torch::CppFunction::makeUnboxedOnly(AA_op));
+  m.impl("AA", CppFunction::makeUnboxedOnly(AA_op));
 
   m.def("BB(Tensor self) -> Tensor");
   m.impl("BB", &BB_op);
@@ -93,7 +93,7 @@ TORCH_LIBRARY_FRAGMENT_THIS_API_IS_FOR_PER_OP_REGISTRATION_ONLY(_test, m) {
 
 TORCH_LIBRARY_IMPL(_test, CPU, m) {
   m.impl_UNBOXED("EE", EE_op);
-  m.impl("FF", torch::CppFunction::makeUnboxedOnly(FF_op));
+  m.impl("FF", CppFunction::makeUnboxedOnly(FF_op));
   m.impl("GG",
     [] (Tensor a) -> Tensor {
       return call_FF_op(a);
