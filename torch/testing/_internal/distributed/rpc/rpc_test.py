@@ -12,11 +12,17 @@ import torch.distributed.rpc as rpc
 import torch.testing._internal.dist_utils as dist_utils
 from torch.distributed.rpc import RRef, _get_debug_info, _rref_context_get_debug_info
 from torch.distributed.rpc.api import _delete_all_user_rrefs, _use_rpc_pickler
-from torch.distributed.rpc.internal import PythonUDF, RPCExecMode, _internal_rpc_pickler
+from torch.distributed.rpc.internal import (
+    PythonUDF,
+    RPCExecMode,
+    _internal_rpc_pickler,
+    _build_rpc_profiling_key,
+)
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import IS_MACOS, load_tests
 from torch.testing._internal.dist_utils import (
     dist_init,
+    get_function_event,
     get_shutdown_error_regex,
     initialize_pg,
     wait_until_node_failure,
@@ -647,6 +653,18 @@ class RpcTest(RpcAgentTestFixture):
         )
         self.assertEqual(ret, my_function(n, n + 1, n + 2))
 
+    def test_build_rpc_profiling_key(self):
+        # Tests that the name that shows up as an Event in profiling RPCs has all
+        # the necessary information.
+        for exec_mode in [RPCExecMode.SYNC, RPCExecMode.ASYNC, RPCExecMode.REMOTE]:
+            rpc_profiling_key = _build_rpc_profiling_key(
+                exec_mode, "foo", "worker0", "worker1"
+            )
+            self.assertIn(exec_mode.value, rpc_profiling_key)
+            self.assertIn("foo", rpc_profiling_key)
+            self.assertIn("worker0", rpc_profiling_key)
+            self.assertIn("worker1", rpc_profiling_key)
+
     def _profiler_test_with_rpc(self, rpc_exec_mode, func, args, use_record_function=False):
         dst = (self.rank + 1) % self.world_size
         # only run profiler on rank 1.
@@ -676,11 +694,9 @@ class RpcTest(RpcAgentTestFixture):
                     record_function.__exit__()
 
             events = prof.function_events
-            rpc_event = [
-                event for event in events if rpc_exec_mode.value in event.name
-            ][0]
+            rpc_event = get_function_event(events, rpc_exec_mode.value)
             if use_record_function:
-                scope_event = [event for event in events if "foo" in event.name][0]
+                scope_event = get_function_event(events, "foo")
                 # Since RPC call is within the scope, its CPU interval should be
                 # contained within foo's interval.
                 self.assertTrue(scope_event.cpu_interval.start < rpc_event.cpu_interval.start)
@@ -788,7 +804,45 @@ class RpcTest(RpcAgentTestFixture):
             use_record_function=True,
         )
 
+    @dist_init
+    def test_async_record_function_double_end_callbacks(self):
+        num_sleep_seconds = 1
+        if self.rank == 1:
+            # Validate that calling the function twice results in an error.
+            with torch.autograd.profiler.profile() as pf:
+                with torch.autograd.profiler.record_function("foo") as rf:
+                    fut = rpc.rpc_async(
+                        worker_name(0), my_sleep_func, args=(num_sleep_seconds,)
+                    )
+                    rf._call_end_callbacks_on_future(fut)
+                    with self.assertRaisesRegex(
+                        RuntimeError, "can only be called once."
+                    ):
+                        rf._call_end_callbacks_on_future(fut)
+                fut.wait()
 
+    @dist_init
+    def test_async_record_function_cbs_jit_call(self):
+        if self.rank == 1:
+            with torch.autograd.profiler.profile() as pf:
+                key = _build_rpc_profiling_key(
+                    RPCExecMode.ASYNC,
+                    torch.jit._qualified_name(my_script_func),
+                    "worker1",
+                    "worker0",
+                )
+                with torch.autograd.profiler.record_function(key) as rf:
+                    fut = rpc.rpc_async(
+                        worker_name(0), my_script_func, args=(torch.tensor(1),)
+                    )
+                    # Intentionally calling record_function internals
+                    torch.ops.profiler._call_end_callbacks_on_jit_fut(rf.handle, fut)
+                fut.wait()
+            events = pf.function_events
+            rpc_event = get_function_event(
+                events, torch.jit._qualified_name(my_script_func)
+            )
+            self.assertTrue(torch.jit._qualified_name(my_script_func) in rpc_event.name)
 
     @dist_init
     def test_py_class_constructor(self):
@@ -1383,6 +1437,30 @@ class RpcTest(RpcAgentTestFixture):
                 id_class, self.rank
             ),
         )
+
+    @dist_init
+    def test_rref_get_future(self):
+        # Tests that we can obtain the future corresponding to the creation of
+        # the RRef on remote end
+        if self.rank == 0:
+            # Builtin
+            rref = rpc.remote(worker_name(1), torch.add, args=(1, 1))
+            rref.to_here()
+            fut = rref._get_future()
+            self.assertIsInstance(fut, torch.distributed.rpc.Future)
+
+            # UDF
+            rref = rpc.remote(worker_name(1), foo_add, args=())
+            rref.to_here()
+            fut = rref._get_future()
+            self.assertIsInstance(fut, torch.distributed.rpc.Future)
+
+            # Script
+            rref = rpc.remote(worker_name(1), my_script_func, args=(torch.tensor(1), ))
+            rref.to_here()
+            fut = rref._get_future()
+            self.assertIsInstance(fut, torch.distributed.rpc.Future)
+
 
     @dist_init
     def test_rref_context_debug_info(self):

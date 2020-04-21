@@ -246,7 +246,7 @@ bool LabelCrossEntropyGradientOp<float, CPUContext>::RunOnDevice() {
   float* dXdata = dX->template mutable_data<float>();
   for (int i = 0; i < N; ++i) {
     dXdata[i * D + labelData[i]] =
-        - dYdata[i] / std::max(Xdata[i * D + labelData[i]], kLOG_THRESHOLD());
+        -dYdata[i] / std::max(Xdata[i * D + labelData[i]], kLOG_THRESHOLD());
   }
   return true;
 }
@@ -360,10 +360,12 @@ bool CrossEntropyGradientOp<float, CPUContext>::RunOnDevice() {
   return true;
 }
 
-REGISTER_CPU_OPERATOR(LabelCrossEntropy,
-                      LabelCrossEntropyOp<float, CPUContext>);
-REGISTER_CPU_OPERATOR(LabelCrossEntropyGradient,
-                      LabelCrossEntropyGradientOp<float, CPUContext>);
+REGISTER_CPU_OPERATOR(
+    LabelCrossEntropy,
+    LabelCrossEntropyOp<float, CPUContext>);
+REGISTER_CPU_OPERATOR(
+    LabelCrossEntropyGradient,
+    LabelCrossEntropyGradientOp<float, CPUContext>);
 
 OPERATOR_SCHEMA(LabelCrossEntropy)
     .NumInputs(2)
@@ -436,37 +438,36 @@ Y:
 
 
 )DOC")
-  .Input(
-      0,
-      "X",
-      "Input tensor which is almost always the result of a softmax operation. $X$ is a 2D array of size $NxD$, where $N$ is the batch size and $D$ is the number of classes.")
-  .Input(
-      1,
-      "label",
-      "Blob containing the labels used to compare the input. $label$ is a length $N$ list of integers, where each element is the integer label for the $n$th element of the batch.")
-  .Output(
-      0,
-      "Y",
-      "Output blob from the cross entropy computation. $Y$ is 1D length $N$ tensor.");
-OPERATOR_SCHEMA(LabelCrossEntropyGradient)
-  .NumInputs(3)
-  .NumOutputs(1);
+    .Input(
+        0,
+        "X",
+        "Input tensor which is almost always the result of a softmax operation. $X$ is a 2D array of size $NxD$, where $N$ is the batch size and $D$ is the number of classes.")
+    .Input(
+        1,
+        "label",
+        "Blob containing the labels used to compare the input. $label$ is a length $N$ list of integers, where each element is the integer label for the $n$th element of the batch.")
+    .Output(
+        0,
+        "Y",
+        "Output blob from the cross entropy computation. $Y$ is 1D length $N$ tensor.");
+OPERATOR_SCHEMA(LabelCrossEntropyGradient).NumInputs(3).NumOutputs(1);
 
 class GetLabelCrossEntropyGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;
   vector<OperatorDef> GetGradientDefs() override {
     return SingleGradientDef(
-        "LabelCrossEntropyGradient", "",
+        "LabelCrossEntropyGradient",
+        "",
         vector<string>{I(0), I(1), GO(0)},
         vector<string>{GI(0)});
   }
 };
 REGISTER_GRADIENT(LabelCrossEntropy, GetLabelCrossEntropyGradient);
 
-REGISTER_CPU_OPERATOR(MakeTwoClass,
-                      MakeTwoClassOp<float, CPUContext>);
-REGISTER_CPU_OPERATOR(MakeTwoClassGradient,
-                      MakeTwoClassGradientOp<float, CPUContext>);
+REGISTER_CPU_OPERATOR(MakeTwoClass, MakeTwoClassOp<float, CPUContext>);
+REGISTER_CPU_OPERATOR(
+    MakeTwoClassGradient,
+    MakeTwoClassGradientOp<float, CPUContext>);
 
 REGISTER_CPU_OPERATOR(
     SigmoidCrossEntropyWithLogits,
@@ -485,13 +486,13 @@ REGISTER_CPU_OPERATOR(
 OPERATOR_SCHEMA(MakeTwoClass)
     .NumInputs(1)
     .NumOutputs(1)
-    .TensorInferenceFunction(
-        [](const OperatorDef& /* unused */, const vector<TensorShape>& in) {
-          vector<TensorShape> out(1);
-          out[0].add_dims(in[0].dims(0));
-          out[0].add_dims(2);
-          return out;
-        })
+    .TensorInferenceFunction([](const OperatorDef& /* unused */,
+                                const vector<TensorShape>& in) {
+      vector<TensorShape> out(1);
+      out[0].add_dims(in[0].dims(0));
+      out[0].add_dims(2);
+      return out;
+    })
     .SetDoc(R"DOC(
 Given a vector of probabilities, this operator transforms this into a 2-column
  matrix with complimentary probabilities for binary classification. In explicit
@@ -504,9 +505,7 @@ Given a vector of probabilities, this operator transforms this into a 2-column
         "2-column matrix with complimentary probabilities of X for "
         "binary classification");
 
-OPERATOR_SCHEMA(MakeTwoClassGradient)
-  .NumInputs(1)
-  .NumOutputs(1);
+OPERATOR_SCHEMA(MakeTwoClassGradient).NumInputs(1).NumOutputs(1);
 
 OPERATOR_SCHEMA(SigmoidCrossEntropyWithLogits)
     .Arg("log_D_trick", R"DOC(
@@ -596,10 +595,10 @@ REGISTER_GRADIENT(
     WeightedSigmoidCrossEntropyWithLogits,
     GetWeightedSigmoidCrossEntropyWithLogitsGradient);
 
-REGISTER_CPU_OPERATOR(CrossEntropy,
-                      CrossEntropyOp<float, CPUContext>);
-REGISTER_CPU_OPERATOR(CrossEntropyGradient,
-                      CrossEntropyGradientOp<float, CPUContext>);
+REGISTER_CPU_OPERATOR(CrossEntropy, CrossEntropyOp<float, CPUContext>);
+REGISTER_CPU_OPERATOR(
+    CrossEntropyGradient,
+    CrossEntropyGradientOp<float, CPUContext>);
 
 OPERATOR_SCHEMA(CrossEntropy)
     .NumInputs(2)
@@ -683,19 +682,18 @@ Y:
         0,
         "Y",
         "Output blob from the cross entropy computation. $Y$ is 1D length $N$ tensor.");
-OPERATOR_SCHEMA(CrossEntropyGradient)
-  .NumInputs(3)
-  .NumOutputs(1);
+OPERATOR_SCHEMA(CrossEntropyGradient).NumInputs(3).NumOutputs(1);
 
 class GetCrossEntropyGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;
   vector<OperatorDef> GetGradientDefs() override {
     return SingleGradientDef(
-        "CrossEntropyGradient", "",
+        "CrossEntropyGradient",
+        "",
         vector<string>{I(0), I(1), GO(0)},
         vector<string>{GI(0)});
   }
 };
 REGISTER_GRADIENT(CrossEntropy, GetCrossEntropyGradient);
 
-}  // namespace caffe2
+} // namespace caffe2

@@ -1589,7 +1589,8 @@ void testOuterLoopVectorization() {
   Stmt* root_stmt = l.root_stmt();
   Block* outer_block = dynamic_cast<Block*>(root_stmt);
   ASSERT_NE(outer_block, nullptr);
-  while (Block* inner_block = dynamic_cast<Block*>(*outer_block->stmts().begin())) {
+  while (Block* inner_block =
+             dynamic_cast<Block*>(*outer_block->stmts().begin())) {
     outer_block = inner_block;
   }
 
