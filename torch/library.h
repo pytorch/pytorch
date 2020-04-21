@@ -333,7 +333,7 @@ private:
 
   std::vector<c10::RegistrationHandleRAII> registrars_;
 
-  friend detail::TorchLibraryInit;
+  friend class detail::TorchLibraryInit;
 
   // Non-user visible actual implementations of functions.  These aren't
   // public because we only implement & qualifier and not && qualifier
