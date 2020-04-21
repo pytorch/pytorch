@@ -692,7 +692,7 @@ inline Vec256<T> operator^(const Vec256<T>& a, const Vec256<T>& b) {
 #endif
 
 template <typename T>
-inline T fmadd(const T& a, const T& b, const T& c) {
+inline Vec256<T> fmadd(const Vec256<T>& a, const Vec256<T>& b, const Vec256<T>& c) {
   return a * b + c;
 }
 
