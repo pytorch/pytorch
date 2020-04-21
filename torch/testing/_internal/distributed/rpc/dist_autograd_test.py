@@ -1429,15 +1429,6 @@ class DistAutogradTest(RpcAgentTestFixture):
 
     _backward_done = False
 
-    @staticmethod
-    def _set_backward_done():
-        DistAutogradTest._backward_done = True
-
-    @staticmethod
-    def _wait_backward_done():
-        while not DistAutogradTest._backward_done:
-            time.sleep(0.1)
-
     @dist_init(clean_shutdown=False)
     @unittest.skipIf(
         IS_MACOS,
@@ -1465,6 +1456,7 @@ class DistAutogradTest(RpcAgentTestFixture):
             if self.rank == 2:
                 return
 
+            store = dist.distributed_c10d._get_default_store()
             if self.rank == 0:
                 # Wait for rank 2 to die.
                 shutdown_error_regex = get_shutdown_error_regex(dist_utils.TEST_CONFIG.rpc_backend_name)
@@ -1475,23 +1467,13 @@ class DistAutogradTest(RpcAgentTestFixture):
                     # Run backwards, and validate we receive an error since rank 2 is dead.
                     dist_autograd.backward(context_id, [res.sum()])
 
-                # Tell other nodes RPC is done.
-                for i in range(self.world_size):
-                    if i != self.rank and i != 2:
-                        # Due to non-graceful shutdown of workers, this RPC may not return successfully.
-                        # For example, the destination worker could process the RPC, exit and begin shutdown, and
-                        # shutdown RPC before responding and satisfying this RPC. Therefore, we swallow possible errors here.
-                        try:
-                            rpc.rpc_sync(
-                                worker_name(i),
-                                DistAutogradTest._set_backward_done,
-                                args=(),
-                            )
-                        except Exception as e:
-                            pass
+                # Mark rank 0 is done in the store, since the RPC framework on
+                # some nodes might be broken at this point (listenLoop() in
+                # ProcessGroupAgent might've exited).
+                store.set('test_backward_node_failure_python_udf_rank0_done', "True")
             else:
                 # Wait for backward to finish on rank 0.
-                DistAutogradTest._wait_backward_done()
+                store.wait(['test_backward_node_failure_python_udf_rank0_done'], timedelta(seconds=10))
 
     @staticmethod
     def _nested_python_udf(t1, t2, dst):
