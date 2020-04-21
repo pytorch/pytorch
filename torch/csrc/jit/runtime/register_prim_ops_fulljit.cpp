@@ -169,6 +169,26 @@ RegisterOperators reg(
          },
          aliasAnalysisFromSchema()),
      Operator(
+         "prim::Print(...) -> ()",
+         [](Stack& stack) {
+           auto num_inputs = pop(stack).toInt();
+           std::stringstream ss;
+           bool first = true;
+           for (const IValue& i : last(stack, num_inputs)) {
+             if (!first)
+               ss << " ";
+             first = false;
+             ss << i;
+           }
+           drop(stack, num_inputs);
+           ss << std::endl;
+           auto* handler = getPrintHandler();
+           TORCH_INTERNAL_ASSERT(handler);
+           handler(ss.str());
+           return 0;
+         },
+         aliasAnalysisSpecialCase()),
+     Operator(
          "prim::IgnoredPythonOp(...) -> None",
          [](Stack& stack) {
            throw JITException(
@@ -723,6 +743,13 @@ RegisterOperators reg(
          [](Stack& stack) {
            TORCH_CHECK(
                false, "wait is implemented directly in the interpreter");
+           return 0;
+         },
+         aliasAnalysisSpecialCase()),
+     Operator(
+         "prim::Uninitialized() -> Any",
+         [](Stack& stack) {
+           push(stack, IValue::uninitialized());
            return 0;
          },
          aliasAnalysisSpecialCase())});
