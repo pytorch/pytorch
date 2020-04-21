@@ -362,11 +362,11 @@ class TestBottleneck(TestCase):
     def _check_run_args(self):
         # Check that this fails due to missing args
         rc, out, err = self._run_bottleneck('bottleneck_test/test_args.py')
-        self.assertEqual(rc, 2, None, self._fail_msg('Missing args should error', out + err))
+        self.assertEqual(rc, 2, atol=0, message=self._fail_msg('Missing args should error', out + err))
 
         # This should succeed
         rc, out, err = self._run_bottleneck('bottleneck_test/test_args.py', '--foo foo --bar bar')
-        self.assertEqual(rc, 0, None, self._fail_msg('Should pass args to script', out + err))
+        self.assertEqual(rc, 0, atol=0, message=self._fail_msg('Should pass args to script', out + err))
 
     def _fail_msg(self, msg, output):
         return '{}, output was:\n{}'.format(msg, output)
