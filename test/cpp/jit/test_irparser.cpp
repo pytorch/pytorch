@@ -251,7 +251,7 @@ graph(%0 : Tensor,
         R"IR(
 graph(%a : Float(4, 5),
       %b : Float(4:5, 5:1),
-      %c : Double(*,*)):
+      %c : Double(*, *)):
   return (%a)
 )IR",
         &*graph,
@@ -293,6 +293,15 @@ graph(%a : Float(4:5, 5)):
       error_thrown = true;
     }
     AT_ASSERT(error_thrown);
+  }
+  {
+    checkRoundtrip(
+        R"IR(
+graph(%a : Float(4, 5),
+      %b : Float(4:5, 5:1),
+      %c : Double(*, *)):
+  return (%a)
+)IR");
   }
 }
 } // namespace jit
