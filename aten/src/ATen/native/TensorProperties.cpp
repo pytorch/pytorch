@@ -3,7 +3,7 @@
 #include <ATen/WrapDimUtils.h>
 #include <ATen/detail/CUDAHooksInterface.h>
 #include <ATen/NamedTensorUtils.h>
-#include <ATen/core/op_registration/op_registration.h>
+#include <torch/library.h>
 
 #include <ATen/Config.h>
 namespace at {
