@@ -1,7 +1,7 @@
 #include <ATen/ATen.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/ResizeCommon.h>
-#include <torch/library.h>
+#include <ATen/core/op_registration/op_registration.h>
 #include <c10/core/TensorOptions.h>
 
 namespace at { namespace native {

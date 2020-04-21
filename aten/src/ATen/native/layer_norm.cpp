@@ -12,7 +12,7 @@
 #include <ATen/Config.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/Parallel.h>
-#include <torch/library.h>
+#include <ATen/core/op_registration/op_registration.h>
 
 namespace at {
 namespace native {

@@ -142,28 +142,57 @@ void testModuleDeepcopy() {
   ASSERT_TRUE(t1.equal(t3));
 }
 
+void testModuleCopyString() {
+  auto cu = std::make_shared<CompilationUnit>();
+  auto cls = ClassType::create("foo.bar", cu, true);
+  auto attr1 = "attr1";
+  cls->addAttribute(attr1, StringType::get());
+  std::string str = "str";
+  Module m(cu, cls);
+  m.setattr(attr1, str);
+  auto copied = m.deepcopy();
+  auto original_str = str;
+  ASSERT_EQ(copied.attr(attr1).toString()->string(), original_str);
+  // check string mutation is not reflected in the copied module
+  str += "str";
+  ASSERT_EQ(copied.attr(attr1).toString()->string(), original_str);
+}
+
 void testModuleCopyAliasing() {
   // check deepcopy preserves aliasing
   auto cu = std::make_shared<CompilationUnit>();
   auto cls = ClassType::create("foo.bar", cu, true);
   auto attr1 = "attr1";
   auto attr2 = "attr2";
+  auto attr3 = "attr3";
+  auto attr4 = "attr4";
   cls->addAttribute(attr1, ListType::ofTensors());
   cls->addAttribute(attr2, ListType::ofTensors());
+  cls->addAttribute(attr3, TensorType::get());
+  cls->addAttribute(attr4, TensorType::get());
   Module m(cu, cls);
   auto t1 = at::rand(5);
   auto t2 = at::rand(5);
   auto t3 = at::rand(5);
+  auto t4 = at::rand({5, 2});
   c10::List<at::Tensor> list1({t1, t2});
   c10::List<at::Tensor> list2({t1, t3});
   // first element of attr1 and attr2 are aliased
   m.setattr(attr1, list1);
   m.setattr(attr2, list2);
+  m.setattr(attr3, t4);
+  m.setattr(attr4, t4.view(-1));
 
   auto copied = m.deepcopy();
-  auto copied_attr1_t1 = m.attr(attr1).toList().get(0);
-  auto copied_attr2_t1 = m.attr(attr2).toList().get(0);
+  // test tensor aliasing
+  auto copied_attr1_t1 = copied.attr(attr1).toList().get(0);
+  auto copied_attr2_t1 = copied.attr(attr2).toList().get(0);
   ASSERT_TRUE(copied_attr1_t1.isAliasOf(copied_attr2_t1));
+
+  // test aliasing from view
+  auto copied_attr3 = copied.attr(attr3);
+  auto copied_attr4 = copied.attr(attr3);
+  ASSERT_TRUE(copied_attr3.isAliasOf(copied_attr4));
 }
 
 } // namespace jit
