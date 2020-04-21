@@ -80,9 +80,6 @@ if [ -n "$TRAVIS_PYTHON_VERSION" ]; then
 
   as_jenkins pip install mkl mkl-devel
 
-  # Pin MyPy version because new errors are likely to appear with each release
-  as_jenkins pip install mypy==0.770
-
   # SciPy does not support Python 3.7 or Python 2.7.9
   if [[ "$TRAVIS_PYTHON_VERSION" != nightly ]] && [[ "$TRAVIS_PYTHON_VERSION" != "2.7.9" ]]; then
       as_jenkins pip install scipy==1.1.0 scikit-image librosa>=0.6.2
