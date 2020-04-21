@@ -160,6 +160,15 @@ Operator createOperatorFromC10_withTracingNotHandledHere(
 class RegistrationListener final : public c10::OpRegistrationListener {
  public:
   void onOperatorRegistered(const c10::OperatorHandle& op) override {
+    if (op.schema().name() == "aten::backward") {
+      // aten::backward has a manual wrapper in register_prim_ops_fulljit.cpp.
+      // We should not additionally export the c10 aten::backward op from
+      // native_functions.yaml to JIT. This special handling is needed because
+      // aten::backward requires AliasAnalysisKind::CONSERVATIVE but all ops
+      // from native_functions.yaml get AliasAnalysisKind::FROM_SCHEMA.
+      // TODO Find a better way to handle this.
+      return;
+    }
     if (at::is_aten_op_and_unboxing_is_already_handled_by_c10(
             op.schema().operator_name())) {
       // Those ops do tracing/autograd in VariableType, no need to handle it
@@ -179,6 +188,10 @@ class RegistrationListener final : public c10::OpRegistrationListener {
   }
 
   void onOperatorDeregistered(const c10::OperatorHandle& op) override {
+    if (op.schema().name() == "aten::backward") {
+      // see comment in onOperatorRegistered for why aten::backward is excluded
+      return;
+    }
     if (at::is_aten_op_and_unboxing_is_not_handled_by_c10_yet(
             op.schema().operator_name())) {
       return;

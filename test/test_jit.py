@@ -25,6 +25,7 @@ from jit.test_unsupported_ops import TestUnsupportedOps  # noqa: F401
 from jit.test_freezing import TestFreezing  # noqa: F401
 from jit.test_functional_blocks import TestFunctionalBlocks  # noqa: F401
 from jit.test_save_load import TestSaveLoad  # noqa: F401
+from jit.test_python_ir import TestPythonIr  # noqa: F401
 
 # Torch
 from torch import Tensor
@@ -2877,6 +2878,26 @@ graph(%Ra, %Rb):
         x = (torch.rand(3), torch.rand(3))
         model = Bar()
         self.checkTrace(model, x)
+
+    def test_trace_dict_output(self):
+
+        class TraceDictStrTensor(torch.nn.Module):
+            def forward(self, a, b):
+                return {'a': a, 'b': b}
+
+        class TraceDictTensorTensor(torch.nn.Module):
+            def forward(self, a, b):
+                return {a: b, b: a}
+
+        x = (torch.rand(3), torch.rand(3))
+        with self.assertRaisesRegex(RuntimeError, r"Encountering a dict at the output"):
+            torch.jit.trace(TraceDictStrTensor(), x)
+
+        traced_dict_str_mod = torch.jit.trace(TraceDictStrTensor(), x, strict=False)
+        self.assertEqual(traced_dict_str_mod(*x), {'a': x[0], 'b': x[1]})
+
+        traced_dict_tensor_mod = torch.jit.trace(TraceDictTensorTensor(), x, strict=False)
+        self.assertEqual(traced_dict_tensor_mod(*x), {x[0]: x[1], x[1]: x[0]})
 
     def test_trace_with_tensor_list_output(self):
         def f():
@@ -7187,7 +7208,7 @@ a")
                             continue
                     msg = ("Failed on {func_name} with inputs {a} {b}. Python: {res_python}, Script: {res_script}"
                            .format(func_name=func_name, a=a, b=b, res_python=res_python, res_script=res_script))
-                    self.assertEqual(res_python, res_script, message=msg, prec=(1e-4) * max(abs(res_python), res_script))
+                    self.assertEqual(res_python, res_script, message=msg, atol=(1e-4) * max(abs(res_python), res_script))
 
         unary_float_ops = ["log", "log1p", "log10", "exp", "sqrt", "gamma", "lgamma", "erf",
                            "erfc", "expm1", "fabs", "acos", "asin", "atan", "cos", "sin", "tan",
