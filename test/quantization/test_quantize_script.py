@@ -6,10 +6,6 @@ import torch.nn.functional as F
 import torch.jit
 from torch._C import parse_ir
 
-# TODO: remove this global setting
-# JIT tests use double as the default dtype
-torch.set_default_dtype(torch.double)
-
 # torch.quantization
 from torch.quantization import QConfig
 from torch.quantization import default_dynamic_qconfig
