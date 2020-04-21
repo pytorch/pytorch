@@ -1,7 +1,7 @@
 #include "torch/csrc/autograd/VariableTypeUtils.h"
 
 #include <ATen/TypeDefault.h>
-#include <torch/library.h>
+#include <ATen/core/op_registration/op_registration.h>
 
 // ${generated_comment}
 

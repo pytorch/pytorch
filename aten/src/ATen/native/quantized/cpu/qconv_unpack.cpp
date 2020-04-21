@@ -2,7 +2,7 @@
 #include <vector>
 
 #include <ATen/ATen.h>
-#include <torch/library.h>
+#include <ATen/core/op_registration/op_registration.h>
 #include <ATen/cpp_custom_type_hack.h>
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
 #include <ATen/native/quantized/cpu/qnnpack_utils.h>

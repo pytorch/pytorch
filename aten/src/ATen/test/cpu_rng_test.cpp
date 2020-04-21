@@ -5,7 +5,7 @@
 #include <ATen/Tensor.h>
 #include <ATen/native/DistributionTemplates.h>
 #include <ATen/native/cpu/DistributionTemplates.h>
-#include <torch/library.h>
+#include <ATen/core/op_registration/op_registration.h>
 #include <c10/util/Optional.h>
 #include <torch/all.h>
 #include <stdexcept>

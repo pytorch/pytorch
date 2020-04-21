@@ -1,5 +1,6 @@
 #include <ATen/ATen.h>
 #include <ATen/Parallel.h>
+#include <ATen/core/op_registration/op_registration.h>
 #include <torch/library.h>
 #include <ATen/core/op_registration/op_registration.h>
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
