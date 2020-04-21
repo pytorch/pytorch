@@ -9,7 +9,7 @@
 #define WIN32_LEAN_AND_MEAN
 #endif
 #endif
-#include "tbb/tbb.h"
+#include <tbb/tbb.h>
 
 #define INTRA_OP_PARALLEL
 

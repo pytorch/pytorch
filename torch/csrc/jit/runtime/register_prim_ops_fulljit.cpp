@@ -189,13 +189,6 @@ RegisterOperators reg(
          },
          aliasAnalysisSpecialCase()),
      Operator(
-         "prim::RaiseException(str msg) -> ()",
-         [](Stack& stack) {
-           throw JITException(pop(stack).toStringRef());
-           return 0;
-         },
-         aliasAnalysisFromSchema()),
-     Operator(
          "prim::IgnoredPythonOp(...) -> None",
          [](Stack& stack) {
            throw JITException(
@@ -303,22 +296,6 @@ RegisterOperators reg(
            auto a = pop(stack).toDevice();
            auto b = pop(stack).toDevice();
            push(stack, a == b);
-           return 0;
-         },
-         aliasAnalysisFromSchema()),
-     Operator(
-         "prim::device(Tensor a) -> Device",
-         [](Stack& stack) {
-           push(stack, pop(stack).toTensor().device());
-           return 0;
-         },
-         aliasAnalysisFromSchema()),
-     Operator(
-         "prim::dtype(Tensor a) -> int",
-         [](Stack& stack) {
-           at::Tensor a;
-           pop(stack, a);
-           push(stack, static_cast<int64_t>(a.scalar_type()));
            return 0;
          },
          aliasAnalysisFromSchema()),
@@ -758,10 +735,6 @@ RegisterOperators reg(
      // This op is no longer generated, but old models use it instead of
      // unchecked_cast, so we keep it here so it gets handled correctly.
      Operator(
-         "prim::unchecked_unwrap_optional(t(a)? optional) -> t(a)",
-         noop,
-         aliasAnalysisFromSchema()),
-     Operator(
          "prim::unchecked_cast(t x) -> t",
          noop,
          aliasAnalysisSpecialCase()),
@@ -1020,10 +993,6 @@ RegisterOperators reg2({
         listEq<bool>,
         aliasAnalysisFromSchema()),
     Operator(
-        "aten::ne.int_list(int[] a, int[] b) -> bool",
-        listNe<int64_t>,
-        aliasAnalysisFromSchema()),
-    Operator(
         "aten::ne.float_list(float[] a, float[] b) -> bool",
         listNe<double>,
         aliasAnalysisFromSchema()),
@@ -1132,10 +1101,6 @@ RegisterOperators reg2({
     CREATE_COPY_OP(int, int64_t),
     CREATE_COPY_OP(float, double),
 #undef CREATE_COPY_OP
-
-    DEFINE_BINARY_OP(aten::add, a + b),
-    DEFINE_BINARY_OP(aten::sub, a - b),
-    DEFINE_BINARY_OP(aten::mul, a* b),
 
     // int ** int produces a float, because negative exponents produce float
     // results

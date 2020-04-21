@@ -792,13 +792,9 @@ void ProcessGroupAgent::pollTimedOutRPCs() {
           "RPC ran for more than ",
           timedOutFuture.timeout_.count(),
           " milliseconds and timed out.");
-      // This is a dummy response that's not send over RPC, so the ID field is
-      // not used for any request/response matching.
-      const auto exceptionMsg = createExceptionResponse(err, -1);
       if (!timedOutFuture.future_->hasError()) {
         --clientActiveCalls_;
-        timedOutFuture.future_->setError(std::string(
-            exceptionMsg.payload().begin(), exceptionMsg.payload().end()));
+        timedOutFuture.future_->setError(err);
         // The future timed out and will not be processed by handleRecv(), even
         // if we eventually get a response. In order to keep track of all
         // send/recv pairs, we increment the count here.
