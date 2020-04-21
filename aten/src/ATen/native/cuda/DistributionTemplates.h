@@ -181,8 +181,8 @@ __global__ void distribution_binary_elementwise_kernel(
   using input_t_1 = typename function_traits<func_t>::template arg<1>::type;
   using input_t_2 = typename function_traits<func_t>::template arg<2>::type;
 
-  input_t_1 inputs_1[THREAD_WORK_SIZE];
-  input_t_2 inputs_2[THREAD_WORK_SIZE];
+  input_t_1 inputs_1[thread_work_size];
+  input_t_2 inputs_2[thread_work_size];
 
   int base_index = BLOCK_WORK_SIZE * blockIdx.x;
   int remaining = std::min<int>(numel - base_index, BLOCK_WORK_SIZE);
@@ -193,7 +193,7 @@ __global__ void distribution_binary_elementwise_kernel(
   // load data into registers
   int thread_idx = threadIdx.x;
   #pragma unroll
-  for (int i = 0; i < THREAD_WORK_SIZE; i++) {
+  for (int i = 0; i < thread_work_size; i++) {
     if (thread_idx >= remaining) {
       break;
     }
@@ -208,7 +208,7 @@ __global__ void distribution_binary_elementwise_kernel(
   // compute and store
   thread_idx = threadIdx.x;
   #pragma unroll
-  for (int i = 0; i < THREAD_WORK_SIZE; i++) {
+  for (int i = 0; i < thread_work_size; i++) {
     if (thread_idx >= remaining) {
       break;
     }
