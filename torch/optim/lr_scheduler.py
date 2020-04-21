@@ -1234,3 +1234,63 @@ class OneCycleLR(_LRScheduler):
                     group['momentum'] = computed_momentum
 
         return lrs
+
+class AdaptiveLR(_LRScheduler):
+    """Modify the learning rate of each parameter group,
+    depending on the current & previous loss values.
+
+    If current_loss < previous_loss:
+        lr += a*lr (Increment lr by a * lr)
+    If current loss > previous loss:
+        lr -= b*lr (Decrement lr by b * lr)
+
+    Args:
+        optimizer (Optimizer): Wrapped optimizer.
+        a: (float or list): A multiplicative factor to increment learning rate
+            when the current loss is lower than the previous loss.
+        b: (float or list): A multiplicative factor to decrement learning rate
+            when the current loss is higher than the previous loss.
+
+        The increment/decrement of learning rate is done on
+        each lr for each group in optimizer.param_groups
+    Example:
+        >>> # Assuming optimizer has two groups.
+        >>> a_list = [0.1, 0.2]
+        >>> b_list = [0.5, 0.9]
+        >>> scheduler = LambdaLR(optimizer, a=a_list, b=b_list)
+        >>> for epoch in range(100):
+        >>>     train(...)
+        >>>     validate(...)
+        >>>     scheduler.step(loss)
+    """
+    def __init__(self, optimizer, a, b, last_epoch = -1, last_loss = float('inf')):
+
+        self.last_loss = last_loss
+        if (not isinstance(a, list) and not isinstance(a, tuple)) and (not isinstance(b, list) and not isinstance(b, tuple)):
+            self.a_s = [a] * len(optimizer.param_groups)
+            self.b_s = [b] * len(optimizer.param_groups)
+        elif (isinstance(a, list) or isinstance(a, tuple)) and (isinstance(b, list) or isinstance(b, tuple)):
+            if len(a) != len(optimizer.param_groups) or len(b) != len(optimizer.param_groups):
+                raise ValueError("Expected {} 'a's and 'b's, but got {}, {}".format(
+                    len(optimizer.param_groups), len(a), len(b)))
+            self.a_s = list(a)
+            self.b_s = list(b)
+        else:
+            raise ValueError("a and b has to be the same type, of either iterable or numeric values."
+                            "Got: a: {}, b: {}".format(type(a), type(b)))
+        super(AdaptiveLR, self).__init__(optimizer, last_epoch)
+    def step(self, loss = 0, epoch=None):
+        self.loss = loss
+        super(AdaptiveLR, self).step(epoch=epoch)
+    def get_lr(self):
+        if not self._get_lr_called_within_step:
+            warnings.warn("To get the last learning rate computed by the scheduler, "
+                          "please use `get_last_lr()`.", DeprecationWarning)
+        if self.last_epoch > 0:
+            if self.loss <= self.last_loss:
+                return [lr + lr * a for lr, a in zip(self._last_lr, self.a_s)]
+            else:
+                return [lr - lr * b for lr, b in zip(self._last_lr, self.b_s)]
+        else:
+            return self.base_lrs
+    
