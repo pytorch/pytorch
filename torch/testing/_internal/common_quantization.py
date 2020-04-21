@@ -24,8 +24,8 @@ def test_only_eval_fn(model, calib_data):
     input Tensors and run the model on the dataset
     """
     total, correct = 0, 0
-    for data, target in calib_data:
-        output = model(data)
+    for *data, target in calib_data:
+        output = model(*data)
         _, predicted = torch.max(output, 1)
         total += target.size(0)
         correct += (predicted == target).sum().item()
