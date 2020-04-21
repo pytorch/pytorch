@@ -1466,7 +1466,7 @@ class DistAutogradTest(RpcAgentTestFixture):
                 with self.assertRaisesRegex(RuntimeError, shutdown_error_regex):
                     # Run backwards, and validate we receive an error since rank 2 is dead.
                     dist_autograd.backward(context_id, [res.sum()])
-                
+
                 # Mark rank 0 is done in the store, since the RPC framework on
                 # some nodes might be broken at this point (listenLoop() in
                 # ProcessGroupAgent might've exited).
