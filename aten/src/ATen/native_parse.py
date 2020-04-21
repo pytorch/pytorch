@@ -418,7 +418,6 @@ def run(paths):
                 declaration['use_c10_dispatcher'] = func.get('use_c10_dispatcher', 'with_codegenerated_unboxing_wrapper')
                 assert declaration['use_c10_dispatcher'] in ['unboxed_only', 'with_codegenerated_unboxing_wrapper', 'full']
                 declaration['manual_kernel_registration'] = func.get('manual_kernel_registration', False)
-                declaration['reset_grad_accumulator'] = func.get('reset_grad_accumulator', False)
                 declaration['category_override'] = func.get('category_override', '')
                 declaration['arguments'] = func.get('arguments', arguments)
                 declaration['type_method_definition_dispatch'] = func.get('dispatch', declaration['name'])

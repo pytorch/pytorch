@@ -112,6 +112,11 @@ DONT_REQUIRE_DERIVATIVE = {
     'quantize_per_tensor', 'quantize_per_channel'
 }
 
+# Some operators invalidate the grad_accumulator. Let's reset it.
+RESET_GRAD_ACCUMULATOR = {
+    'set_'
+}
+
 # NOTE [ Invariant: TensorImpl and Storage Pointer Equality ]
 #
 # When a function modifies its input tensors (via inplace or out-variants),
@@ -585,7 +590,6 @@ def emit_body(declaration):
     is_out_fn = name.endswith('_out')
     modifies_arguments = inplace or is_out_fn
     returns_void = len(returns) == 0
-    reset_grad_accumulator = declaration['reset_grad_accumulator']
 
     base_name = name[:-1] if inplace else name[:-4] if is_out_fn else name
     view_info = VIEW_FUNCTIONS.get(base_name, None)
@@ -1021,8 +1025,13 @@ def emit_body(declaration):
     body.append(post_record_trace)
     if requires_derivative:
         body.append(emit_save_outputs())
-    if reset_grad_accumulator:
-        body.append('reset_grad_accumulator(self_);')
+    if base_name in RESET_GRAD_ACCUMULATOR:
+        # `inplace` implies that there is exactly one output named `self`,
+        # so we can keep the generated code easy. If you need to
+        # `reset_grad_accumulator` in an operator that's not `inplace`, you can
+        # remove this assert but the code generation will get more elaborate
+        assert inplace
+        body.append('reset_grad_accumulator(self);')
     if not returns_void:
         body.append('return {};'.format(get_return_value()))
     return body
