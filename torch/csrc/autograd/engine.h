@@ -3,6 +3,7 @@
 // Engine implements backpropagation from output variables and their gradients
 // to "root" variables (variables created by the user with requires_grad=True).
 
+#include <ATen/Tensor.h>
 #include <ATen/ThreadLocalState.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/csrc/autograd/anomaly_mode.h>
@@ -64,10 +65,25 @@ struct GraphTask {
 
   struct ExecInfo {
     struct Capture {
+      Capture(const Capture&) = delete;
+      Capture(Capture&&) = default;
+
       Capture(int input_idx, int output_idx)
           : input_idx_(input_idx), output_idx_(output_idx) {}
       int input_idx_; // within Node inputs
       int output_idx_; // within the output vector of a GraphTask
+
+      // This hook will be executed after a grad is captured. The captured
+      // grad will be replaced by the return value of the hook.
+      struct GradCaptureHook {
+        virtual ~GradCaptureHook() = default;
+        virtual at::Tensor operator()(const at::Tensor& grad) = 0;
+      };
+      // The hooks will be called one by one in the order as they were added.
+      // The input grad of a hook will be the output of its preceding hook. The
+      // first hook will take the captured grad as the input. The output of the
+      // last hook will replace the captured grad.
+      std::vector<std::unique_ptr<GradCaptureHook>> hooks_;
     };
 
     bool should_execute() const {
