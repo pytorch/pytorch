@@ -1157,14 +1157,6 @@ workflows:
   build:
     jobs:
       - setup
-      - setup:
-          # Run this job on everything since it is
-          # the dependency for everything.
-          filters:
-            tags:
-              only: /.*/
-            branches:
-              only: /.*/
       # Pytorch iOS binary builds
       - binary_ios_build:
           name: pytorch_ios_11_2_1_nightly_x86_64_build
