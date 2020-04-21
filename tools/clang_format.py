@@ -178,7 +178,7 @@ def download_clang_format(path):
     print("Downloading clang-format to {}".format(path))
     try:
         urllib.request.urlretrieve(
-            cf_url, filename, reporthook=report_download_progress
+            cf_url, filename, reporthook=report_download_progress if sys.stdout.isatty() else None
         )
     except urllib.error.URLError as e:
         print("Error downloading {}: {}".format(filename, str(e)))
