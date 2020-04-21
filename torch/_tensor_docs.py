@@ -173,6 +173,21 @@ abs_() -> Tensor
 In-place version of :meth:`~Tensor.abs`
 """)
 
+add_docstr_all('absolute',
+               r"""
+absolute() -> Tensor
+
+Alias for :func:`abs`
+""")
+
+add_docstr_all('absolute_',
+               r"""
+absolute_() -> Tensor
+
+In-place version of :meth:`~Tensor.absolute`
+Alias for :func:`abs_`
+""")
+
 add_docstr_all('acos',
                r"""
 acos() -> Tensor
