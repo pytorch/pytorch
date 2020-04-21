@@ -2224,17 +2224,19 @@ if BACKEND == "gloo" or BACKEND == "nccl":
 
         def setUp(self):
             super().setUp()
-            # We rely on tearDown for deleting the temporary file
-            # TODO: this temporary file should be deduped with the file_name
-            # in MultiProcessTestCase as part of supporting spawn mode for these tests.
             global INIT_METHOD
             # initialize Barrier.
             Barrier.init()
+            # We rely on tearDown for deleting the temporary file
+            # TODO: this temporary file should be deduped with the file_name
+            # in MultiProcessTestCase as part of supporting spawn mode for these tests.
+            # https://github.com/pytorch/pytorch/issues/36663
             self.temporary_file = None
             if INIT_METHOD.startswith("file://"):
                 self.temporary_file = tempfile.NamedTemporaryFile(delete=False)
                 INIT_METHOD = "file://{}".format(self.temporary_file.name)
 
+            # TODO: enable spawn mode https://github.com/pytorch/pytorch/issues/36663
             self._fork_processes()
 
         def tearDown(self):
