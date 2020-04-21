@@ -149,7 +149,7 @@ SPARSE_TYPE_DERIVED_CPP = CodeTemplate.from_file(TEMPLATE_PATH + "/SparseTypeDer
 TYPE_DERIVED_H = CodeTemplate.from_file(TEMPLATE_PATH + "/TypeDerived.h")
 TYPE_DEFAULT_H = CodeTemplate.from_file(TEMPLATE_PATH + "/TypeDefault.h")
 TYPE_DEFAULT_CPP = CodeTemplate.from_file(TEMPLATE_PATH + "/TypeDefault.cpp")
-OPS_ALREADY_MOVED_TO_C10_CPP = CodeTemplate.from_file(TEMPLATE_PATH + "/OpsAlreadyMovedToC10.cpp")
+OPS_ALREADY_MOVED_TO_C10_CPP = CodeTemplate.from_file(TEMPLATE_PATH + "/ATenOpList.cpp")
 BACKEND_SELECT_REGISTER_CPP = CodeTemplate.from_file(TEMPLATE_PATH + "/BackendSelectRegister.cpp")
 SCHEMA_REGISTER_CPP = CodeTemplate.from_file(TEMPLATE_PATH + "/SchemaRegister.cpp")
 TENSOR_H = CodeTemplate.from_file(TEMPLATE_PATH + "/TensorBody.h")
@@ -171,12 +171,14 @@ cuda_file_manager = FileManager()
 def backend_to_devicetype(backend):
     if backend == 'QuantizedCPU':
         return 'CPU'
+    elif backend == 'QuantizedCUDA':
+        return 'CUDA'
     return backend
 
 backends = ['CPU', 'CUDA']
 densities = ['Dense', 'Sparse', 'Mkldnn']  # TODO: layout instead of densities?
 
-quantized_backends = ['QuantizedCPU']
+quantized_backends = ['QuantizedCPU', 'QuantizedCUDA']
 
 # scalar_name, c_type, accreal, is_floating_type
 quantized_scalar_types = [
@@ -196,8 +198,7 @@ top_env = {
     'cpu_type_headers': [],
     'cuda_type_headers': [],
     'function_registrations': [],
-    'aten_ops_with_unboxing_already_handled_by_c10': [],
-    'aten_ops_with_unboxing_not_handled_by_c10_yet': [],
+    'aten_ops': [],
     'type_method_declarations': [],
     'type_method_definitions': [],
     'tensor_method_declarations': [],
@@ -212,6 +213,8 @@ top_env = {
 def is_whitelisted_backend(backend):
     return options.backend_whitelist is None or backend in options.backend_whitelist
 
+def is_cuda_backend(backend):
+    return backend in ("QuantizedCUDA", "CUDA")
 
 def dict_representer(dumper, data):
     return dumper.represent_dict(data.items())
@@ -295,7 +298,7 @@ def generate_storage_type_and_tensor(backend, density, declarations, per_op_regi
     top_env['type_ids'].append(tag + ',')
 
     env['legacy_th_headers'] = []
-    if backend == 'CUDA':
+    if is_cuda_backend(backend):
         env['extra_cuda_headers'] = []
         env['extra_cuda_headers'].append('#include <ATen/DeviceGuard.h>')
         if options.rocm:
@@ -364,11 +367,11 @@ def generate_storage_type_and_tensor(backend, density, declarations, per_op_regi
 
     if env['DeviceType'] == 'CPU':
         top_env['cpu_type_headers'].append(
-            '#include "ATen/{}.h"'.format(env['Type']))
+            '#include <ATen/{}.h>'.format(env['Type']))
     else:
         assert env['DeviceType'] == 'CUDA'
         top_env['cuda_type_headers'].append(
-            '#include "ATen/{}.h"'.format(env['Type']))
+            '#include <ATen/{}.h>'.format(env['Type']))
 
 
 # yields (backend, density) tuples
@@ -392,7 +395,7 @@ def gen_per_op_registration_filename(opname):
 # so that the script runs quickly when we are just querying the
 # outputs
 def declare_outputs():
-    core_files = ['TensorBody.h', 'TensorMethods.h', 'OpsAlreadyMovedToC10.cpp']
+    core_files = ['TensorBody.h', 'TensorMethods.h', 'ATenOpList.cpp']
     for f in core_files:
         core_file_manager.will_write(f)
     files = ['Declarations.yaml', 'TypeDefault.cpp', 'TypeDefault.h',
@@ -404,7 +407,7 @@ def declare_outputs():
         if not is_whitelisted_backend(full_backend):
             continue
         fm = file_manager
-        if backend == 'CUDA':
+        if is_cuda_backend(backend):
             fm = cuda_file_manager
         for kind in ["Type"]:
             if kind != 'Type' and density == "Sparse":
@@ -504,7 +507,7 @@ def generate_outputs():
     core_files = {
         'TensorBody.h': TENSOR_H,
         'TensorMethods.h': TENSOR_METHODS_H,
-        'OpsAlreadyMovedToC10.cpp': OPS_ALREADY_MOVED_TO_C10_CPP,
+        'ATenOpList.cpp': OPS_ALREADY_MOVED_TO_C10_CPP,
     }
 
     for core_file, core_template_file in core_files.items():

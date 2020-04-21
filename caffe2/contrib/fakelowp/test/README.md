@@ -1,5 +1,5 @@
 # How to run FakeLowP vs Glow tests
-This was tested on Ubuntu 16.04 LTS but should work in general Linux system.
+This was tested on Ubuntu 16.04 LTS but should work in general Linux system. The tested compiler is Clang-8.
 
 ## Build Glow Onnxifi Library
 Follow https://github.com/pytorch/glow/blob/master/README.md to install the dependency of Glow. Then at glow root run
@@ -29,7 +29,7 @@ python3.7 -m venv venv3
 source venv3/bin/active
 cd pytorch
 pip install -r requirements.txt
-pip install pytest hypothesis
+pip install pytest hypothesis protobuf
 ```
 You probably need to install gflags-dev too with
 ```
@@ -38,7 +38,7 @@ sudo apt-get install libgflags-dev
 
 Once you have all the dependency libs installed, build PyTorch with FakeLowP op support
 ```
-USE_CUDA=0 USE_ROCM=0 USE_FAKELOWP=ON DEBUG=1 CMAKE_BUILD_TYPE=Debug USE_GFLAGS=1 USE_GLOG=1 USE_MKLDNN=0 python setup.py install
+USE_CUDA=0 USE_ROCM=0 USE_FAKELOWP=ON DEBUG=1 CMAKE_BUILD_TYPE=Debug USE_GFLAGS=1 USE_GLOG=1 USE_MKLDNN=0 BUILD_TEST=0 python setup.py install
 ```
 The key options here are `USE_FAKELOWP=ON` which enables building of FakeLowP operators and `USE_GFLAGS=1` which enables gflags as we 
 use gflags in Glow to pass options. Other flags are mostl for fast build time and debug purpose. 
@@ -46,6 +46,6 @@ use gflags in Glow to pass options. Other flags are mostl for fast build time an
 ## Run the test
 You can now run the tests with command like the following  when you are inside the virtual python env:
 ```
-OSS_ONNXIFI_LIB=${PATH_TO_GLOW}/build/lib/Onnxifi/libonnxifi.so pytest pytorch/caffe2/contrib/fakelowp/test/test_sls_nnpi_fp16.py --hypothesis-show-statistics
+OSS_ONNXIFI_LIB=${PATH_TO_GLOW}/build/lib/Onnxifi/libonnxifi.so pytest pytorch/caffe2/contrib/fakelowp/test --hypothesis-show-statistics
 ```
 
