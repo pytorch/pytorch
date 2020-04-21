@@ -13,7 +13,7 @@
 namespace torch {
 namespace jit {
 
-static bool texpr_fuser_enabled_ = false;
+static bool texpr_fuser_enabled_ = true;
 void setTensorExprFuserEnabled(bool val) {
   texpr_fuser_enabled_ = val;
 }
