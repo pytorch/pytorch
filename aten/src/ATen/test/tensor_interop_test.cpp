@@ -1,6 +1,6 @@
-#include "gtest/gtest.h"
+#include <gtest/gtest.h>
 
-#include "ATen/ATen.h"
+#include <ATen/ATen.h>
 #include <caffe2/core/init.h>
 #include <caffe2/core/operator.h>
 

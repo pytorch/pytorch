@@ -3362,6 +3362,7 @@ class TestKL(TestCase):
                                              [0.2, 0.7, 0.1],
                                              [0.33, 0.33, 0.34],
                                              [0.2, 0.2, 0.6]])
+        cauchy = pairwise(Cauchy, [-2.0, 2.0, -3.0, 3.0], [1.0, 2.0, 1.0, 2.0])
         chi2 = pairwise(Chi2, [1.0, 2.0, 2.5, 5.0])
         dirichlet = pairwise(Dirichlet, [[0.1, 0.2, 0.7],
                                          [0.5, 0.4, 0.1],
@@ -3407,6 +3408,7 @@ class TestKL(TestCase):
             (binomial30, binomial30),
             (binomial_vectorized_count, binomial_vectorized_count),
             (categorical, categorical),
+            (cauchy, cauchy),
             (chi2, chi2),
             (chi2, exponential),
             (chi2, gamma),
