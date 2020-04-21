@@ -63,7 +63,7 @@ PythonRpcHandler::PythonRpcHandler() {
   py::object rpcInternal = py::module::import("torch.distributed.rpc.internal");
   py::object rpcApi = py::module::import("torch.distributed.rpc.api");
   py::object rrefProxy = py::module::import("torch.distributed.rpc.rref_proxy");
-  
+
   pyRunFunction_ = getFunction(rpcInternal, "_run_function");
   pySerialize_ = getFunction(rpcInternal, "serialize");
   pyDeserialize_ = getFunction(rpcInternal, "deserialize");
@@ -85,7 +85,7 @@ void PythonRpcHandler::cleanup() {
   pySerialize_ = py::none();
   pyDeserialize_ = py::none();
   pyHandleException_ = py::none();
-  
+
   rrefProxyFunctions_.rpcSync_ = py::none();
   rrefProxyFunctions_.rpcAsync_ = py::none();
   rrefProxyFunctions_.remote_ = py::none();
@@ -154,8 +154,8 @@ TypePtr PythonRpcHandler::parseTypeFromStr(const std::string& type_str) {
   return typeParser_->parseType(type_str);
 }
 
-const PythonRpcHandler::RRefProxyFunctions& 
-    PythonRpcHandler::getRRefProxyFunctions() const {
+const PythonRpcHandler::RRefProxyFunctions& PythonRpcHandler::
+    getRRefProxyFunctions() const {
   return rrefProxyFunctions_;
 }
 

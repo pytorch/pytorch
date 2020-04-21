@@ -7,7 +7,7 @@
 namespace torch {
 namespace distributed {
 namespace rpc {
- 
+
 enum RRefProxyType { RPC_SYNC, RPC_ASYNC, REMOTE };
 
 // Python wrapper of an RRef shared_ptr that supports Python

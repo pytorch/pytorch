@@ -185,7 +185,8 @@ std::string PyRRef::str() const {
   }
 }
 
-py::object PyRRef::createRRefProxy(PyRRef& self, const RRefProxyType& type) const {
+py::object PyRRef::createRRefProxy(PyRRef& self, const RRefProxyType& type)
+    const {
   auto& pythonRpcHandler = PythonRpcHandler::getInstance();
   pybind11::gil_scoped_acquire ag;
   auto& functions = pythonRpcHandler.getRRefProxyFunctions();
@@ -201,8 +202,7 @@ py::object PyRRef::createRRefProxy(PyRRef& self, const RRefProxyType& type) cons
       return ctor(self, functions.remote_);
     }
     default: {
-      TORCH_INTERNAL_ASSERT(
-          false, "Unrecognized RRefProxy type ", type);
+      TORCH_INTERNAL_ASSERT(false, "Unrecognized RRefProxy type ", type);
     }
   }
 }
