@@ -58,16 +58,11 @@ _worker_info = None
 
 
 class WorkerInfo(object):
-    __initialized = False
-
     def __init__(self, **kwargs):
         for k, v in kwargs.items():
             setattr(self, k, v)
-        self.__initialized = True
 
     def __setattr__(self, key, val):
-        if self.__initialized:
-            raise RuntimeError("Cannot assign attributes to {} objects".format(self.__class__.__name__))
         return super(WorkerInfo, self).__setattr__(key, val)
 
 

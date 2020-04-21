@@ -657,15 +657,6 @@ def test_worker_info_init_fn(worker_id):
     dataset = worker_info.dataset
     assert isinstance(dataset, TestWorkerInfoDataset), "worker_info should have correct dataset copy"
     assert not hasattr(dataset, 'value'), "worker_info should have correct dataset copy"
-    # test that WorkerInfo attributes are read-only
-    try:
-        worker_info.id = 3999
-    except RuntimeError as e:
-        assert str(e) == "Cannot assign attributes to WorkerInfo objects"
-    try:
-        worker_info.a = 3
-    except RuntimeError as e:
-        assert str(e) == "Cannot assign attributes to WorkerInfo objects"
     dataset.value = [worker_id, os.getpid()]
 
 
