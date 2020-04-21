@@ -158,6 +158,8 @@ view of a storage and defines numeric operations on it.
 
    .. automethod:: abs
    .. automethod:: abs_
+   .. automethod:: absolute
+   .. automethod:: absolute_
    .. automethod:: acos
    .. automethod:: acos_
    .. automethod:: add
