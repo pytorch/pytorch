@@ -218,7 +218,7 @@ void _runBeforeCallbacks(RecordFunction* rf, const std::string& funcName) {
 }
 
 RecordFunction::RecordFunction(RecordScope scope) : scope_(scope) {
-  if (manager().hasCallbacks()) {
+  if (manager().hasCallbacks() && at::_tls_is_record_function_enabled()) {
     active_ = true;
   }
 }

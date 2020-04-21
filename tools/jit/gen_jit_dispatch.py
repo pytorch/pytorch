@@ -13,7 +13,6 @@ torch/csrc/jit/generated/
 """
 
 import argparse
-import copy
 import re
 import yaml
 from itertools import groupby
@@ -339,7 +338,7 @@ def gen_jit_dispatch(
         # default anymore. For the (very few) ops that don't support boxed dispatch yet (i.e. ops taking TensorOptions
         # arguments), we set them to 'unboxed_only' and they follow the old behavior of having register_aten_ops.cpp
         # register the jit op.
-        elif decl['use_c10_dispatcher'] == 'with_codegenerated_unboxing_wrapper' and not needs_hacked_twin(decl):
+        elif decl['use_c10_dispatcher'] == 'with_codegenerated_unboxing_wrapper':
             if len(decl['returns']) == 0:
                 return_type = "void"
             elif len(decl['returns']) == 1:
@@ -361,7 +360,7 @@ def gen_jit_dispatch(
                                                   return_type=return_type,
                                                   formals_types_with_leading_comma=argument_types_with_leading_comma)
         else:
-            assert decl['use_c10_dispatcher'] in ['unboxed_only', 'full'] or needs_hacked_twin(decl)
+            assert decl['use_c10_dispatcher'] in ['unboxed_only', 'full']
             if is_namespace_function:
                 return CALL_NAMESPACE.substitute(name=decl['name'],
                                                  args=pack_arguments(args),
@@ -377,7 +376,7 @@ def gen_jit_dispatch(
 
     def emit_decl_variant(decl):
         if ('emit_dummy_placeholder' in decl):
-            if decl['use_c10_dispatcher'] == 'unboxed_only' or needs_hacked_twin(decl):
+            if decl['use_c10_dispatcher'] == 'unboxed_only':
                 return "DUMMY_OPERATION_JITONLY"
             else:
                 return "DUMMY_OPERATION"
@@ -403,7 +402,7 @@ def gen_jit_dispatch(
 
         returns = decl['returns']
 
-        if decl['use_c10_dispatcher'] == 'unboxed_only' or needs_hacked_twin(decl):
+        if decl['use_c10_dispatcher'] == 'unboxed_only':
             # Ops taking TensorOptions aren't supported in this mechanism yet because boxed dispatch doesn't
             # work for them. They use the old mechanism of registering a jitonly op for now.
             # TODO We should get rid of this once TensorOptions are supported.
@@ -504,8 +503,6 @@ def gen_jit_dispatch(
         decl['arguments'] = [a for i, arg in enumerate(decl['arguments']) for a in expand_options(decl, i, arg)]
         if is_out_variant(decl):
             reorder_out_args(decl)
-        if needs_hacked_twin(decl):
-            additional_jit_decls.append(hacked_twin(decl))
 
     jit_decls.extend(additional_jit_decls)
     if not selected_op_list:
@@ -529,7 +526,7 @@ def gen_jit_dispatch(
     for group in jit_decl_groups:
         x = sum(ord(c) for c in group[0]['name']) % num_shards
         for decl in group:
-            if decl['use_c10_dispatcher'] == 'unboxed_only' or needs_hacked_twin(decl):
+            if decl['use_c10_dispatcher'] == 'unboxed_only':
                 shards[x].append(OPERATOR_JITONLY.substitute(signature=decl['schema_string'],
                                                              op=emit_decl_variant(decl)))
             elif decl['use_c10_dispatcher'] == 'with_codegenerated_unboxing_wrapper':
@@ -560,49 +557,6 @@ def reorder_out_args(decl):
 
 def is_kwarg_only(a):
     return a.get('kwarg_only') or a.get('output')
-
-
-#
-# create a clone of these declarations
-# with nullability scrubbed from TensorList arg types
-# TOOD find out why this exists and how to do it without the hack
-#
-
-NEEDS_HACKED_TWIN_NAMES = [
-    "aten::_index_put_impl_",
-    "aten::index.Tensor",
-    "aten::index_put",
-    "aten::index_put_",
-]
-
-def needs_hacked_twin(decl):
-    schema_string = decl['schema_string']
-    result = any([schema_string.startswith(name) for name in NEEDS_HACKED_TWIN_NAMES])
-    if result:
-        assert decl['use_c10_dispatcher'] == 'unboxed_only'
-    return result
-
-
-def hacked_twin(decl):
-    decl_copy = copy.deepcopy(decl)
-    old_overload_name = decl['overload_name']
-    schema_string = decl['schema_string']
-    name = decl['name']
-    schema_string = schema_string.replace('Tensor?[]', 'Tensor[]')
-    if old_overload_name:
-        new_overload_name = old_overload_name + "_hacked_twin"
-        decl_copy['overload_name'] = new_overload_name
-        decl_copy['schema_string'] = schema_string.replace(name + "." + old_overload_name,
-                                                           name + "." + new_overload_name)
-    else:
-        new_overload_name = "hacked_twin"
-        decl_copy['overload_name'] = new_overload_name
-        decl_copy['schema_string'] = schema_string.replace(name, name + "." + new_overload_name)
-    for arg in decl_copy['arguments']:
-        if arg['simple_type'] == 'TensorList' and arg.get('is_nullable'):
-            arg['is_nullable'] = False
-    return decl_copy
-
 
 def signature_without_args(decl):
     name = decl['name'] if not is_out_variant(decl) else decl['name'][:-4]
