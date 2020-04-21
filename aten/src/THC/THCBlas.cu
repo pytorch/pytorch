@@ -57,7 +57,7 @@ double THCudaBlas_Ddot(THCState *state, int64_t n, double *x, int64_t incx, doub
 
 at::Half THCudaBlas_Hdot(THCState *state, int64_t n, at::Half *x, int64_t incx, at::Half *y, int64_t incy)
 {
-#ifdef CUDA_VERSION
+#ifndef __HIP_PLATFORM_HCC__
   if (n == 1) {
     incx = 1;
     incy = 1;
