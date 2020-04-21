@@ -618,7 +618,7 @@ class BuildExtension(build_ext, object):
         if hasattr(self.compiler, 'compiler_cxx'):
             compiler = self.compiler.compiler_cxx[0]
         elif IS_WINDOWS:
-            compiler = os.environ.get('CXX', 'cl')
+            compiler = os.environ.get('CXX', 'clang-cl')
         else:
             compiler = os.environ.get('CXX', 'c++')
         check_compiler_abi_compatibility(compiler)
@@ -1145,7 +1145,7 @@ def _write_ninja_file_and_compile_objects(
         with_cuda):
     verify_ninja_availability()
     if IS_WINDOWS:
-        compiler = os.environ.get('CXX', 'cl')
+        compiler = os.environ.get('CXX', 'clang-cl')
     else:
         compiler = os.environ.get('CXX', 'c++')
     check_compiler_abi_compatibility(compiler)
@@ -1188,7 +1188,7 @@ def _write_ninja_file_and_build_library(
         with_cuda):
     verify_ninja_availability()
     if IS_WINDOWS:
-        compiler = os.environ.get('CXX', 'cl')
+        compiler = os.environ.get('CXX', 'clang-cl')
     else:
         compiler = os.environ.get('CXX', 'c++')
     check_compiler_abi_compatibility(compiler)
@@ -1604,7 +1604,7 @@ def _write_ninja_file(path,
     assert len(sources) > 0
 
     if IS_WINDOWS:
-        compiler = os.environ.get('CXX', 'cl')
+        compiler = os.environ.get('CXX', 'clang-cl')
     else:
         compiler = os.environ.get('CXX', 'c++')
 
@@ -1633,7 +1633,7 @@ def _write_ninja_file(path,
     compile_rule = ['rule compile']
     if IS_WINDOWS:
         compile_rule.append(
-            '  command = cl /showIncludes $cflags -c $in /Fo$out $post_cflags')
+            '  command = clang-cl /showIncludes $cflags -c $in /Fo$out $post_cflags')
         compile_rule.append('  deps = msvc')
     else:
         compile_rule.append(
@@ -1661,13 +1661,13 @@ def _write_ninja_file(path,
         link_rule = ['rule link']
         if IS_WINDOWS:
             cl_paths = subprocess.check_output(['where',
-                                                'cl']).decode().split('\r\n')
+                                                'clang-cl']).decode().split('\r\n')
             if len(cl_paths) >= 1:
                 cl_path = os.path.dirname(cl_paths[0]).replace(':', '$:')
             else:
                 raise RuntimeError("MSVC is required to load C++ extensions")
             link_rule.append(
-                '  command = "{}/link.exe" $in /nologo $ldflags /out:$out'.format(
+                '  command = "{}/lld-link.exe" $in /nologo $ldflags /out:$out'.format(
                     cl_path))
         else:
             link_rule.append('  command = $cxx $in $ldflags -o $out')
