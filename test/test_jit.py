@@ -39,7 +39,7 @@ import torch.cuda
 import torch.jit
 import torch.jit._logging
 import torch.jit.frontend
-import torch.jit.quantized
+# import torch.jit.quantized
 import torch.nn as nn
 import torch.nn.functional as F
 
@@ -2040,15 +2040,6 @@ graph(%Ra, %Rb):
                 return x + 2
             else:
                 return x
-
-        def invalid_constant_baking(x):
-            a = ["hello", "world"]
-            return func4(x, a)
-
-        with self.assertRaisesRegex(RuntimeError,
-                                    "Tracer cannot get value trace for type"):
-            self.checkTrace(invalid_constant_baking, (inp,))
-
 
     def test_einsum(self):
         def outer(x, y):
