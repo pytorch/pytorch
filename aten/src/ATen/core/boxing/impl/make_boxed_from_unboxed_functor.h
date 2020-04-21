@@ -1,6 +1,7 @@
 #pragma once
 
 #include <ATen/core/ivalue.h>
+#include <ATen/core/stack.h>
 #include <c10/util/Metaprogramming.h>
 
 namespace c10 {
