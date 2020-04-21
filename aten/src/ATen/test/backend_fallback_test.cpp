@@ -2,7 +2,7 @@
 
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
-#include <torch/library.h>
+#include <ATen/core/op_registration/op_registration.h>
 #include <torch/csrc/jit/runtime/operator.h>
 
 using namespace at;
@@ -110,7 +110,7 @@ void generic_wrapper_fallback(const c10::OperatorHandle& op, torch::jit::Stack* 
 
 TEST(BackendFallbackTest, TestBackendFallbackWithMode) {
   auto m = MAKE_TORCH_LIBRARY_IMPL(_, TESTING_ONLY_GenericMode);
-  m.fallback(torch::CppFunction::makeFromBoxedFunction<&generic_mode_fallback>());
+  m.fallback(CppFunction::makeFromBoxedFunction<&generic_mode_fallback>());
 
   c10::impl::IncludeDispatchKeyGuard guard(DispatchKey::TESTING_ONLY_GenericMode);
 
@@ -122,7 +122,7 @@ TEST(BackendFallbackTest, TestBackendFallbackWithMode) {
 
 TEST(BackendFallbackTest, TestBackendFallbackWithWrapper) {
   auto m = MAKE_TORCH_LIBRARY_IMPL(_, TESTING_ONLY_GenericWrapper);
-  m.fallback(torch::CppFunction::makeFromBoxedFunction<&generic_wrapper_fallback>());
+  m.fallback(CppFunction::makeFromBoxedFunction<&generic_wrapper_fallback>());
 
   override_call_count = 0;
   Tensor a = at::detail::make_tensor<GenericWrapperTensorImpl>(ones({5, 5}, kDouble));
@@ -132,10 +132,10 @@ TEST(BackendFallbackTest, TestBackendFallbackWithWrapper) {
 
 TEST(BackendFallbackTest, TestFallthroughBackendFallback) {
   auto m = MAKE_TORCH_LIBRARY_IMPL(aten, TESTING_ONLY_GenericMode);
-  m.impl("mul.Tensor", torch::CppFunction::makeFromBoxedFunction<&generic_mode_fallback>());
+  m.impl("mul.Tensor", c10::CppFunction::makeFromBoxedFunction<&generic_mode_fallback>());
 
   auto gm = MAKE_TORCH_LIBRARY_IMPL(_, TESTING_ONLY_GenericMode);
-  gm.fallback(torch::CppFunction::makeFallthrough());
+  gm.fallback(c10::CppFunction::makeFallthrough());
 
   c10::impl::IncludeDispatchKeyGuard guard(DispatchKey::TESTING_ONLY_GenericMode);
 

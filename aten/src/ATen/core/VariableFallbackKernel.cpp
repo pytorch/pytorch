@@ -1,6 +1,6 @@
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <ATen/core/LegacyTypeDispatch.h>
-#include <torch/library.h>
+#include <ATen/core/op_registration/op_registration.h>
 
 /*
  * This file implements a variable fallback kernel for custom operators.
@@ -65,9 +65,9 @@ TORCH_LIBRARY_IMPL(_, Autograd, m) {
   //
   // We can remove this `fallthrough` kernel when all kernels support boxed
   // call.
-  m.fallback(torch::CppFunction::makeFallthrough());
+  m.fallback(c10::CppFunction::makeFallthrough());
 #else
-  m.fallback(torch::CppFunction::makeFromBoxedFunction<&variable_fallback_kernel>());
+  m.fallback(c10::CppFunction::makeFromBoxedFunction<&variable_fallback_kernel>());
 #endif
 }
 
