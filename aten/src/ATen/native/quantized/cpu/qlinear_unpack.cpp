@@ -126,8 +126,8 @@ class QLinearUnpackWeightFp16Legacy final {
 };
 
 TORCH_LIBRARY_IMPL(quantized, CPU, m) {
-  m.impl("linear_unpack_legacy", QLinearUnpackWeightInt8Legacy::run);
-  m.impl("linear_unpack_fp16_legacy", QLinearUnpackWeightFp16Legacy::run);
+  m.impl("linear_unpack.legacy", QLinearUnpackWeightInt8Legacy::run);
+  m.impl("linear_unpack_fp16.legacy", QLinearUnpackWeightFp16Legacy::run);
 }
 
 TORCH_LIBRARY_IMPL(quantized, CatchAll, m) {

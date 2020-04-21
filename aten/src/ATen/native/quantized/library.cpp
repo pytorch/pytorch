@@ -42,8 +42,8 @@ TORCH_LIBRARY(quantized, m) {
   m.def("linear_prepack_fp16_legacy(Tensor W, Tensor? B=None) -> Tensor W_prepack");
   m.def("linear_unpack(__torch__.torch.classes.quantized.LinearPackedParamsBase W_prepack) -> (Tensor W_origin, Tensor? B_origin)");
   m.def("linear_unpack_fp16(__torch__.torch.classes.quantized.LinearPackedParamsBase W_prepack) -> (Tensor W_origin, Tensor? B_origin)");
-  m.def("linear_unpack_legacy(Tensor W_prepack) -> (Tensor W_origin, Tensor? B_origin)");
-  m.def("linear_unpack_fp16_legacy(Tensor W_prepack) -> (Tensor W_origin, Tensor? B_origin)");
+  m.def("linear_unpack.legacy(Tensor W_prepack) -> (Tensor W_origin, Tensor? B_origin)");
+  m.def("linear_unpack_fp16.legacy(Tensor W_prepack) -> (Tensor W_origin, Tensor? B_origin)");
   m.def("mul(Tensor qa, Tensor qb, float scale, int zero_point)-> Tensor qc");
   m.def("mul_relu(Tensor qa, Tensor qb, float scale, int zero_point)-> Tensor qc");
   m.def("mul_out(Tensor qa, Tensor qb, Tensor(a!) out)-> Tensor(a!) out");
