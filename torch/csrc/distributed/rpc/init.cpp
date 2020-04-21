@@ -48,8 +48,8 @@ PyObject* rpc_init(PyObject* /* unused */) {
             ``init_method`` to be used. )")
           .def_readwrite(
               "rpc_timeout",
-              &RpcBackendOptions::rpcTimeout,
-              R"(A ``datetime.timedelta`` indicating the timeout to use for all
+              &RpcBackendOptions::rpcTimeoutSeconds,
+              R"(A float indicating the timeout to use for all
                 RPCs. If an RPC does not complete in this timeframe, it will
                 complete with an exception indicating that it has timed out.)")
           .def_readwrite(
@@ -60,7 +60,7 @@ PyObject* rpc_init(PyObject* /* unused */) {
 
   // The following C++ constants need to be cast so they can be used from
   // python.
-  module.attr("_DEFAULT_RPC_TIMEOUT") = py::cast(kDefaultRpcTimeout);
+  module.attr("_DEFAULT_RPC_TIMEOUT_SEC") = py::cast(kDefaultRpcTimeoutSeconds);
   module.attr("_UNSET_RPC_TIMEOUT") = py::cast(kUnsetRpcTimeout);
   module.attr("_DEFAULT_INIT_METHOD") = py::cast(kDefaultInitMethod);
 
@@ -282,8 +282,8 @@ If the future completes with an error, an exception is thrown.
           Arguments:
               num_send_recv_threads (int, optional): The number of threads in
                   the thread-pool used by ``ProcessGroupAgent`` (default: 4).
-              rpc_timeout (datetime.timedelta, optional): The default timeout
-                  for RPC requests (default: ``timedelta(seconds=60)``). If the
+              rpc_timeout (float, optional): The default timeout, in seconds,
+                  for RPC requests (default: 60 seconds). If the
                   RPC has not completed in this timeframe, an exception
                   indicating so will be raised. Callers can override this
                   timeout for individual RPCs in
@@ -305,16 +305,16 @@ If the future completes with an error, an exception is thrown.
               >>>     world_size=2,
               >>>     rpc_backend_options=rpc.ProcessGroupRpcBackendOptions(
               >>>         num_send_recv_threads=16,
-              >>>         datetime.timedelta(seconds=20)
+              >>>         20 # 20 second timeout
               >>>     )
               >>> )
               >>>
               >>> # omitting init_rpc invocation on worker2
       )")
       .def(
-          py::init<int, std::chrono::milliseconds, std::string>(),
+          py::init<int, float, std::string>(),
           py::arg("num_send_recv_threads") = kDefaultNumSendRecvThreads,
-          py::arg("rpc_timeout") = kDefaultRpcTimeout,
+          py::arg("rpc_timeout") = kDefaultRpcTimeoutSeconds,
           py::arg("init_method") = kDefaultInitMethod)
       .def_readwrite(
           "num_send_recv_threads",
@@ -531,12 +531,14 @@ If the future completes with an error, an exception is thrown.
 
   module.def(
       "get_rpc_timeout",
-      []() { return RpcAgent::getCurrentRpcAgent()->getRpcTimeout(); },
+      []() {
+        return RpcAgent::getCurrentRpcAgent()->getRpcTimeout().count() / 1000.f;
+      },
       R"(
-          Retrieve the timeout for all RPCs that was set during RPC initialization.
+          Retrieve the default timeout for all RPCs that was set during RPC initialization.
 
           Returns:
-            ``datetime.timedelta`` instance indicating the RPC timeout.
+            ``float`` indicating the RPC timeout in seconds.
       )");
 
   module.def(
@@ -554,7 +556,9 @@ If the future completes with an error, an exception is thrown.
 
   module.def(
       "_set_rpc_timeout",
-      [](const std::chrono::milliseconds& rpcTimeout) {
+      [](const float rpcTimeoutSeconds) {
+        auto rpcTimeout = std::chrono::milliseconds(
+            static_cast<int>(rpcTimeoutSeconds * 1000));
         RpcAgent::getCurrentRpcAgent()->setRpcTimeout(rpcTimeout);
       },
       R"(

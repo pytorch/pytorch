@@ -1676,7 +1676,7 @@ class RpcTest(RpcAgentTestFixture):
             world_size=self.world_size,
             rpc_backend_options=self.rpc_backend_options,
         )
-        rpc._set_rpc_timeout(timedelta(seconds=10))
+        rpc._set_rpc_timeout(10)
         # This barrier is needed to ensure that some workers do not exit before
         # others have been brought up, for non ProcessGroupAgent backends.
         initialize_pg(self.init_method, self.rank, self.world_size)
@@ -1722,8 +1722,8 @@ class RpcTest(RpcAgentTestFixture):
         rpc.shutdown(graceful=False)
 
     @dist_init(setup_rpc=False)
-    def test_get_rpc_timeout(self):
-        timeout = timedelta(seconds=1)
+    def test_set_and_get_default_rpc_timeout(self):
+        timeout = 0.5
 
         # A new `RpcBackendOptions` is constructed
         # when accessing `self.rpc_backend_options`.
@@ -1761,6 +1761,27 @@ class RpcTest(RpcAgentTestFixture):
         self.assertEqual(int(info["agent.thread_pool_size"]), NUM_THREADS)
         rpc.shutdown()
 
+    @dist_init(setup_rpc=False)
+    @requires_process_group_agent("PROCESS_GROUP rpc backend specific test, skip")
+    def test_process_group_set_default_timeout(self):
+        timeout = 0.5
+        rpc_backend_options = rpc.ProcessGroupRpcBackendOptions(
+            init_method=self.rpc_backend_options.init_method,
+            num_send_recv_threads=self.rpc_backend_options.num_send_recv_threads,
+            rpc_timeout=timeout
+        )
+        rpc.init_rpc(
+            name=worker_name(self.rank),
+            backend=self.rpc_backend,
+            rank=self.rank,
+            world_size=self.world_size,
+            rpc_backend_options=rpc_backend_options,
+        )
+
+        default_timeout = rpc.get_rpc_timeout()
+        self.assertEqual(default_timeout, timeout)
+        rpc.shutdown()
+
     @dist_init
     def test_default_timeout_used(self):
         """
@@ -1768,7 +1789,7 @@ class RpcTest(RpcAgentTestFixture):
         default timeout is used.
         """
         dst_rank = (self.rank + 1) % self.world_size
-        rpc._set_rpc_timeout(timedelta(milliseconds=1))
+        rpc._set_rpc_timeout(0.001)  # 1 ms
         # futures should time out and be marked with an exception indicating it as such.
         futs = [
             rpc.rpc_async(worker_name(dst_rank), my_sleep_func, args=())
@@ -1780,11 +1801,11 @@ class RpcTest(RpcAgentTestFixture):
                 fut.wait()
 
         # ensure that if a new timeout is set old futures don't time out but new ones do.
-        rpc._set_rpc_timeout(timedelta(seconds=200))
+        rpc._set_rpc_timeout(200)  # 200 seconds
         # create a longstanding RPC.
         fut1 = rpc.rpc_async(worker_name(dst_rank), my_sleep_func, args=(1,))
         # now, set a short timeout.
-        rpc._set_rpc_timeout(timedelta(milliseconds=1))
+        rpc._set_rpc_timeout(0.001)
         # fut2 should time out, fut1 should not.
         fut2 = rpc.rpc_async(worker_name(dst_rank), my_sleep_func, args=(1,))
         with self.assertRaisesRegex(RuntimeError, expected_error):
@@ -1792,11 +1813,11 @@ class RpcTest(RpcAgentTestFixture):
         fut1.wait()
 
         # Zero timeout means infinity, so future should run to completion.
-        rpc._set_rpc_timeout(timedelta(seconds=0))
+        rpc._set_rpc_timeout(0)
         rpc.rpc_async(worker_name(dst_rank), my_sleep_func, args=()).wait()
 
         # reset to default timeout so shutdown messages can process cleanly.
-        rpc._set_rpc_timeout(rpc.constants.DEFAULT_RPC_TIMEOUT)
+        rpc._set_rpc_timeout(rpc.constants.DEFAULT_RPC_TIMEOUT_SEC)
 
     @dist_init
     def test_rpc_timeouts(self):
@@ -1824,7 +1845,7 @@ class RpcTest(RpcAgentTestFixture):
 
         # If we set a default timeout for RPCs, it should be respected, though
         # still overridden if we pass in a different timeout to the APIs.
-        rpc._set_rpc_timeout(timedelta(milliseconds=1))
+        rpc._set_rpc_timeout(0.001)
         fut = rpc.rpc_async(dst_worker, my_sleep_func, args=(1,))
         with self.assertRaisesRegex(RuntimeError, expected_error):
             fut.wait()
@@ -1838,7 +1859,7 @@ class RpcTest(RpcAgentTestFixture):
         rpc.rpc_async(dst_worker, my_sleep_func, args=(1,), timeout=0).wait()
         rpc.rpc_sync(dst_worker, my_sleep_func, args=(1,), timeout=0)
         # Reset for clean shutdown
-        rpc._set_rpc_timeout(timedelta(seconds=60))
+        rpc._set_rpc_timeout(rpc.constants.DEFAULT_RPC_TIMEOUT_SEC)
 
 
     def test_requires_process_group_agent_decorator(self):
