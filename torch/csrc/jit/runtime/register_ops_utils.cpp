@@ -20,7 +20,7 @@ c10::impl::GenericList make_result_list<IValue>(const TypePtr& elemType) {
 }
 
 template <>
-int listIndex<at::Tensor>(Stack& stack) {
+void listIndex<at::Tensor>(Stack* stack) {
   at::Tensor elem = pop(stack).to<at::Tensor>();
   c10::List<at::Tensor> list = pop(stack).to<c10::List<at::Tensor>>();
 
@@ -36,11 +36,10 @@ int listIndex<at::Tensor>(Stack& stack) {
     AT_ERROR("'", elem, "' is not in list");
   }
 
-  return 0;
 }
 
 template <>
-int listCount<at::Tensor>(Stack& stack) {
+void listCount<at::Tensor>(Stack* stack) {
   at::Tensor elem = pop(stack).to<at::Tensor>();
   c10::List<at::Tensor> list = pop(stack).to<c10::List<at::Tensor>>();
 
@@ -51,27 +50,24 @@ int listCount<at::Tensor>(Stack& stack) {
       });
   push(stack, count);
 
-  return 0;
 }
 
 template <>
-int listEq<at::Tensor>(Stack& stack) {
+void listEq<at::Tensor>(Stack* stack) {
   c10::List<at::Tensor> b = pop(stack).to<c10::List<at::Tensor>>();
   c10::List<at::Tensor> a = pop(stack).to<c10::List<at::Tensor>>();
   push(stack, tensor_list_equal(a, b));
-  return 0;
 }
 
 template <>
-int listNe<at::Tensor>(Stack& stack) {
+void listNe<at::Tensor>(Stack* stack) {
   c10::List<at::Tensor> b = pop(stack).to<c10::List<at::Tensor>>();
   c10::List<at::Tensor> a = pop(stack).to<c10::List<at::Tensor>>();
   push(stack, !tensor_list_equal(a, b));
-  return 0;
 }
 
 template <>
-int listSort<at::Tensor>(Stack& stack) {
+void listSort<at::Tensor>(Stack* stack) {
   bool reverse = pop(stack).toBool();
   c10::List<at::Tensor> list = pop(stack).toTensorList();
   std::sort(
@@ -84,11 +80,10 @@ int listSort<at::Tensor>(Stack& stack) {
         }
         return (a.lt(b).is_nonzero()) ^ reverse;
       });
-  return 0;
 }
 
 template <>
-int listCopyAndSort<at::Tensor>(Stack& stack) {
+void listCopyAndSort<at::Tensor>(Stack* stack) {
   c10::List<at::Tensor> list = pop(stack).toTensorList();
   auto list_copied = list.copy();
   std::sort(
@@ -98,11 +93,10 @@ int listCopyAndSort<at::Tensor>(Stack& stack) {
         return a.lt(b).is_nonzero();
       });
   push(stack, list_copied);
-  return 0;
 }
 
 template <>
-int listRemove<at::Tensor>(Stack& stack) {
+void listRemove<at::Tensor>(Stack* stack) {
   at::Tensor elem = pop(stack).to<at::Tensor>();
   c10::List<at::Tensor> list = pop(stack).to<c10::List<at::Tensor>>();
 
@@ -117,7 +111,6 @@ int listRemove<at::Tensor>(Stack& stack) {
     AT_ERROR("list.remove(x): x not in list");
   }
 
-  return 0;
 }
 
 void checkImplicitTensorToNum(at::Tensor t, bool toInt) {
@@ -261,25 +254,21 @@ int64_t normalizeIndex(int64_t idx, int64_t list_size) {
   return idx;
 }
 
-int listAppend(Stack& stack) {
+void listAppend(Stack* stack) {
   IValue el = pop(stack).to<IValue>();
   c10::List<IValue> list = pop(stack).to<c10::List<IValue>>();
 
   list.push_back(std::move(el));
   push(stack, std::move(list));
-
-  return 0;
 }
 
-int listReverse(Stack& stack) {
+void listReverse(Stack* stack) {
   c10::List<IValue> list = pop(stack).to<c10::List<IValue>>();
 
   std::reverse(list.begin(), list.end());
-
-  return 0;
 }
 
-int listPopImpl(Stack& stack, const char* empty_message) {
+void listPopImpl(Stack* stack, const char* empty_message) {
   int64_t idx = pop(stack).to<int64_t>();
   c10::List<IValue> list = pop(stack).to<c10::List<IValue>>();
 
@@ -292,28 +281,24 @@ int listPopImpl(Stack& stack, const char* empty_message) {
 
   push(stack, getItem(list, idx));
   list.erase(list.begin() + normalized_idx);
-
-  return 0;
 }
 
-int listPop(Stack& stack) {
+void listPop(Stack* stack) {
   return listPopImpl(stack, "pop from empty list");
 }
 
-int listClear(Stack& stack) {
+void listClear(Stack* stack) {
   c10::List<IValue> list = pop(stack).to<c10::List<IValue>>();
 
   list.clear();
-  return 0;
 }
 
-int listDelete(Stack& stack) {
+void listDelete(Stack* stack) {
   listPopImpl(stack, "pop index out of range");
   pop(stack);
-  return 0;
 }
 
-int listInsert(Stack& stack) {
+void listInsert(Stack* stack) {
   IValue elem = pop(stack).to<IValue>();
   int64_t idx = pop(stack).to<int64_t>();
   c10::List<IValue> list = pop(stack).to<c10::List<IValue>>();
@@ -330,11 +315,9 @@ int listInsert(Stack& stack) {
   } else {
     list.insert(list.begin() + normalized_idx, elem);
   }
-
-  return 0;
 }
 
-int listExtend(Stack& stack) {
+void listExtend(Stack* stack) {
   c10::List<IValue> b = pop(stack).to<c10::List<IValue>>();
   c10::List<IValue> a = pop(stack).to<c10::List<IValue>>();
 
@@ -342,39 +325,34 @@ int listExtend(Stack& stack) {
   for (size_t i = 0; i < b.size(); ++i) {
     a.push_back(b.get(i));
   }
-  return 0;
 }
 
-int listCopy(Stack& stack) {
+void listCopy(Stack* stack) {
   c10::List<IValue> list = pop(stack).to<c10::List<IValue>>();
   push(stack, list.copy());
-  return 0;
 }
 
-int listSelect(Stack& stack) {
+void listSelect(Stack* stack) {
   int64_t idx = pop(stack).to<int64_t>();
   c10::List<IValue> list = pop(stack).to<c10::List<IValue>>();
 
   auto element = getItem(list, idx);
   push(stack, std::move(element));
-  return 0;
 }
 
-int listLen(Stack& stack) {
+void listLen(Stack* stack) {
   c10::List<IValue> a = pop(stack).to<c10::List<IValue>>();
 
   const int64_t size = a.size();
   push(stack, size);
-  return 0;
 }
 
-int listList(Stack& stack) {
+void listList(Stack* stack) {
   c10::List<IValue> a = pop(stack).to<c10::List<IValue>>();
   push(stack, a.copy());
-  return 0;
 }
 
-int listAdd(Stack& stack) {
+void listAdd(Stack* stack) {
   c10::List<IValue> b = pop(stack).to<c10::List<IValue>>();
   c10::List<IValue> a = pop(stack).to<c10::List<IValue>>();
 
@@ -389,18 +367,16 @@ int listAdd(Stack& stack) {
   ret.append(std::move(b));
 
   push(stack, std::move(ret));
-  return 0;
 }
 
-int listInplaceAdd(Stack& stack) {
+void listInplaceAdd(Stack* stack) {
   c10::List<IValue> b = pop(stack).to<List<IValue>>();
   c10::List<IValue> a = pop(stack).to<List<IValue>>();
   a.append(std::move(b));
   push(stack, std::move(a));
-  return 0;
 }
 
-int listMulIntLeftInPlace(Stack& stack) {
+void listMulIntLeftInPlace(Stack* stack) {
   int64_t n = pop(stack).to<int64_t>();
   c10::List<IValue> list = pop(stack).to<c10::List<IValue>>();
   if (n <= 0) {
@@ -415,10 +391,9 @@ int listMulIntLeftInPlace(Stack& stack) {
   }
 
   push(stack, std::move(list));
-  return 0;
 }
 
-int listMulIntLeft(Stack& stack) {
+void listMulIntLeft(Stack* stack) {
   int64_t n = pop(stack).to<int64_t>();
   c10::List<IValue> list = pop(stack).to<c10::List<IValue>>();
 
@@ -433,10 +408,9 @@ int listMulIntLeft(Stack& stack) {
   }
 
   push(stack, std::move(ret));
-  return 0;
 }
 
-int listMulIntRight(Stack& stack) {
+void listMulIntRight(Stack* stack) {
   c10::List<IValue> list = pop(stack).to<c10::List<IValue>>();
   int64_t n = pop(stack).to<int64_t>();
 
@@ -451,10 +425,9 @@ int listMulIntRight(Stack& stack) {
   }
 
   push(stack, std::move(ret));
-  return 0;
 }
 
-int listSlice(Stack& stack) {
+void listSlice(Stack* stack) {
   int64_t step = pop(stack).to<int64_t>();
   int64_t end = pop(stack).to<int64_t>();
   int64_t start = pop(stack).to<int64_t>();
@@ -472,7 +445,7 @@ int listSlice(Stack& stack) {
   if (normalized_end <= normalized_start) {
     // early exit if the slice is trivially empty
     push(stack, std::move(sliced_list));
-    return 0;
+    return;
   }
 
   sliced_list.reserve(normalized_end - normalized_start);
@@ -483,10 +456,9 @@ int listSlice(Stack& stack) {
   }
 
   push(stack, std::move(sliced_list));
-  return 0;
 }
 
-int listSetItem(Stack& stack) {
+void listSetItem(Stack* stack) {
   IValue value = pop(stack).to<IValue>();
   int64_t idx = pop(stack).to<int64_t>();
   c10::List<IValue> list = pop(stack).to<c10::List<IValue>>();
@@ -494,7 +466,6 @@ int listSetItem(Stack& stack) {
   setItem(list, idx, std::move(value));
 
   push(stack, std::move(list));
-  return 0;
 }
 } // namespace jit
 } // namespace torch

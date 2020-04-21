@@ -93,10 +93,9 @@ std::array<bool, N> as_bool_array(const c10::List<bool>& list) {
   return res;
 }
 
-int (*DUMMY_OPERATION_JITONLY)(Stack*) =
-  [](Stack* stack) -> int {
+void (*DUMMY_OPERATION_JITONLY)(Stack*) =
+  [](Stack* stack) {
     TORCH_CHECK(false, "Operator has been stripped in the custom build.")
-    return 0;
   };
 
 KernelFunction::InternalBoxedKernelFunction *DUMMY_OPERATION =
@@ -118,13 +117,11 @@ public:
     return std::move(*this);
   }
 
-  Registerer&& jitOnlyOp(const std::string& schema, std::function<int (Stack*)> boxed_kernel_wrapper) && {
+  Registerer&& jitOnlyOp(const std::string& schema, Operation boxed_kernel_wrapper) && {
     torch::jit::registerOperator(
       torch::jit::Operator(
         schema,
-        Operation([boxed_kernel_wrapper = std::move(boxed_kernel_wrapper)] (Stack& stack) -> int {
-          return boxed_kernel_wrapper(&stack);
-        }),
+        boxed_kernel_wrapper,
         c10::AliasAnalysisKind::FROM_SCHEMA
       )
     );

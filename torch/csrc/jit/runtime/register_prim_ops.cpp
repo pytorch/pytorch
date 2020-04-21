@@ -29,7 +29,7 @@ RegisterOperators reg(
          // note the compiler knows to type TupleIndex more accurately than it
          // is listed here.
          "prim::TupleIndex(Any tup, int i) -> Any",
-         [](Stack& stack) {
+         [](Stack* stack) {
            int64_t index = pop(stack).toInt();
            auto tuple = pop(stack).toTuple();
            auto norm_index = normalizeIndex(index, tuple->elements().size());
@@ -37,15 +37,13 @@ RegisterOperators reg(
                norm_index > static_cast<int64_t>(tuple->elements().size())) {
              throw std::out_of_range("Tuple list index out of range");
            }
-           stack.emplace_back(tuple->elements()[norm_index]);
-           return 0;
+           stack->emplace_back(tuple->elements()[norm_index]);
          },
          aliasAnalysisSpecialCase()),
      Operator(
          "prim::TupleUnpack(Any tup) -> ...",
-         [](Stack& stack) {
-           tupleUnpack(stack);
-           return 0;
+         [](Stack* stack) {
+           tupleUnpack(*stack);
          },
          aliasAnalysisSpecialCase()),
      Operator(
@@ -54,73 +52,66 @@ RegisterOperators reg(
          aliasAnalysisSpecialCase()),
      Operator(
          "aten::IntImplicit(Tensor a) -> int",
-         [](Stack& stack) {
+         [](Stack* stack) {
            at::Tensor a;
            pop(stack, a);
            checkImplicitTensorToNum(a, /*to int*/ true);
            push(stack, a.item<int64_t>());
-           return 0;
          },
          aliasAnalysisFromSchema()),
      Operator(
          "aten::FloatImplicit(Tensor a) -> float",
-         [](Stack& stack) {
+         [](Stack* stack) {
            at::Tensor a;
            pop(stack, a);
            checkImplicitTensorToNum(a, /*to int*/ false);
            push(stack, a.item<double>());
-           return 0;
          },
          aliasAnalysisFromSchema()),
      Operator(
          "aten::ScalarImplicit(Tensor a) -> Scalar",
-         [](Stack& stack) {
+         [](Stack* stack) {
            at::Tensor a;
            pop(stack, a);
            checkImplicitTensorToNum(a, /*to int*/ false);
            push(stack, a.item());
-           return 0;
          },
          aliasAnalysisFromSchema()),
      Operator(
          "aten::Bool.Tensor(Tensor a) -> bool",
-         [](Stack& stack) {
+         [](Stack* stack) {
            at::Tensor a;
            pop(stack, a);
            push(stack, a.is_nonzero());
-           return 0;
          },
          aliasAnalysisFromSchema()),
      Operator(
          "aten::Bool.int(int a) -> bool",
-         [](Stack& stack) {
+         [](Stack* stack) {
            int64_t i;
            pop(stack, i);
            push(stack, (bool)i);
-           return 0;
          },
          aliasAnalysisFromSchema()),
      Operator(
          "aten::Bool.float(float a) -> bool",
-         [](Stack& stack) {
+         [](Stack* stack) {
            double d;
            pop(stack, d);
            push(stack, (bool)d);
-           return 0;
          },
          aliasAnalysisFromSchema()),
      Operator(
          "aten::Float.Tensor(Tensor a) -> float",
-         [](Stack& stack) {
+         [](Stack* stack) {
            at::Tensor a;
            pop(stack, a);
            push(stack, a.item<double>());
-           return 0;
          },
          aliasAnalysisFromSchema()),
      Operator(
          "aten::Float.Scalar(Scalar a) -> float",
-         [](Stack& stack) {
+         [](Stack* stack) {
            IValue scalar;
            pop(stack, scalar);
            if (scalar.isDouble()) {
@@ -128,30 +119,27 @@ RegisterOperators reg(
            } else {
              push(stack, static_cast<double>(scalar.toInt()));
            }
-           return 0;
          },
          aliasAnalysisFromSchema()),
      Operator(
          "aten::Float.int(int a) -> float",
-         [](Stack& stack) {
+         [](Stack* stack) {
            int64_t i;
            pop(stack, i);
            push(stack, (float)i);
-           return 0;
          },
          aliasAnalysisFromSchema()),
      Operator(
          "aten::Float.bool(bool a) -> float",
-         [](Stack& stack) {
+         [](Stack* stack) {
            bool b;
            pop(stack, b);
            push(stack, (float)b);
-           return 0;
          },
          aliasAnalysisFromSchema()),
      Operator(
          "aten::Float.str(str a) -> float",
-         [](Stack& stack) {
+         [](Stack* stack) {
            auto s = pop(stack).toString();
            std::string::size_type sz;
            double b = c10::stod(s->string(), &sz);
@@ -161,50 +149,45 @@ RegisterOperators reg(
              throw std::runtime_error(
                  "float() only accepts a string of single float number");
            }
-           return 0;
          },
          aliasAnalysisFromSchema()),
      Operator(
          "aten::format(str self, ...) -> str",
-         [](Stack& stack) {
+         [](Stack* stack) {
            size_t num_inputs = pop(stack).toInt();
-           format(stack, num_inputs);
-           return 0;
+           format(*stack, num_inputs);
          },
          aliasAnalysisFromSchema()),
      Operator(
          "prim::NumToTensor.Scalar(Scalar a) -> Tensor",
-         [](Stack& stack) {
+         [](Stack* stack) {
            at::Scalar s;
            pop(stack, s);
            push(stack, at::scalar_to_tensor(s));
-           return 0;
          },
          aliasAnalysisFromSchema()),
      Operator(
          "prim::RaiseException(str msg) -> ()",
-         [](Stack& stack) {
+         [](Stack* stack) {
            throw JITException(pop(stack).toStringRef());
-           return 0;
          },
          aliasAnalysisFromSchema()),
      Operator(
          "aten::Size(int[] sizes) -> int[]",
-         [](Stack& stack) { return 0; },
+         [](Stack* stack) { },
          aliasAnalysisFromSchema()),
      Operator(
          "aten::size(Tensor self) -> int[]",
-         [](Stack& stack) {
+         [](Stack* stack) {
            auto t = std::move(pop(stack)).toTensor();
            pack(stack, t.sizes().vec());
-           return 0;
          },
          aliasAnalysisFromSchema()),
      Operator(
          // note the compiler knows to type TupleIndex more accurately than it
          // is listed here.
          "prim::TupleIndex(Any tup, int i) -> Any",
-         [](Stack& stack) {
+         [](Stack* stack) {
            int64_t index = pop(stack).toInt();
            auto tuple = pop(stack).toTuple();
            auto norm_index = normalizeIndex(index, tuple->elements().size());
@@ -212,8 +195,7 @@ RegisterOperators reg(
                norm_index > static_cast<int64_t>(tuple->elements().size())) {
              throw std::out_of_range("Tuple list index out of range");
            }
-           stack.emplace_back(tuple->elements()[norm_index]);
-           return 0;
+           stack->emplace_back(tuple->elements()[norm_index]);
          },
          aliasAnalysisSpecialCase()),
      Operator(
@@ -226,100 +208,89 @@ RegisterOperators reg(
          aliasAnalysisFromSchema()),
      Operator(
          "prim::device(Tensor a) -> Device",
-         [](Stack& stack) {
+         [](Stack* stack) {
            push(stack, pop(stack).toTensor().device());
-           return 0;
          },
          aliasAnalysisFromSchema()),
      Operator(
          "prim::dtype(Tensor a) -> int",
-         [](Stack& stack) {
+         [](Stack* stack) {
            at::Tensor a;
            pop(stack, a);
            push(stack, static_cast<int64_t>(a.scalar_type()));
-           return 0;
          },
          aliasAnalysisFromSchema()),
      Operator(
          "aten::__not__(bool self) -> bool",
-         [](Stack& stack) {
+         [](Stack* stack) {
            push(stack, !pop(stack).toBool());
-           return 0;
          },
          aliasAnalysisFromSchema()),
      Operator(
          "aten::__is__(t1 self, t2 obj) -> bool",
-         [](Stack& stack) {
+         [](Stack* stack) {
            IValue self, obj;
            pop(stack, self, obj);
            push(stack, self.is(obj));
-           return 0;
          },
          aliasAnalysisFromSchema()),
      Operator(
          "aten::__isnot__(t1 self, t2 obj) -> bool",
-         [](Stack& stack) {
+         [](Stack* stack) {
            IValue self, obj;
            pop(stack, self, obj);
            push(stack, !self.is(obj));
-           return 0;
          },
          aliasAnalysisFromSchema()),
      Operator(
          "aten::element_size(Tensor self) -> int",
-         [](Stack& stack) {
+         [](Stack* stack) {
            at::Tensor arg = pop(stack).toTensor();
            push(stack, arg.element_size());
-           return 0;
          },
          aliasAnalysisFromSchema()),
      Operator(
          "aten::numel(Tensor self) -> int",
-         [](Stack& stack) {
+         [](Stack* stack) {
            at::Tensor arg = pop(stack).toTensor();
            push(stack, arg.numel());
-           return 0;
          },
          aliasAnalysisFromSchema()),
      Operator(
          "aten::dim(Tensor self) -> int",
-         [](Stack& stack) {
+         [](Stack* stack) {
            at::Tensor arg = pop(stack).toTensor();
            push(stack, arg.dim());
-           return 0;
          },
          aliasAnalysisFromSchema()),
      Operator(
          "aten::get_device(Tensor self) -> int",
-         [](Stack& stack) {
+         [](Stack* stack) {
            RECORD_FUNCTION("get_device", std::vector<c10::IValue>());
            auto result =
                at::get_device((std::move(peek(stack, 0, 1))).toTensor());
            drop(stack, 1);
            pack(stack, result);
-           return 0;
          },
          aliasAnalysisFromSchema()),
      Operator(
          "aten::storage_offset(Tensor self) -> int",
-         [](Stack& stack) {
+         [](Stack* stack) {
            RECORD_FUNCTION("storage_offset", std::vector<c10::IValue>());
            auto result =
                ((std::move(peek(stack, 0, 1))).toTensor()).storage_offset();
            drop(stack, 1);
            pack(stack, result);
-           return 0;
          },
          aliasAnalysisFromSchema()),
      Operator(
          "aten::is_contiguous(Tensor self) -> bool",
-         [](Stack& stack) {
+         [](Stack* stack) {
            RECORD_FUNCTION("is_contiguous", std::vector<c10::IValue>());
            auto result =
                ((std::move(peek(stack, 0, 1))).toTensor()).is_contiguous();
            drop(stack, 1);
            pack(stack, result);
-           return 0;
          },
          aliasAnalysisFromSchema()),
      // these ops are generic over the list element type.
@@ -415,17 +386,17 @@ RegisterOperators reg(
      //
      Operator(
          "aten::index.Tensor_hacked_twin(Tensor self, Tensor[] indices) -> Tensor",
-         [](Stack& stack) {
+         [](Stack* stack) {
            auto indices = pop(stack).toTensorVector();
            auto self = pop(stack).toTensor();
            auto result = at::index(self, indices);
            push(stack, std::move(result));
-           return 0;
+
          },
          aliasAnalysisFromSchema()),
      Operator(
          "aten::_index_put_impl_.hacked_twin(Tensor(a!) self, Tensor[] indices, Tensor values, bool accumulate=False, bool unsafe=False) -> Tensor(a!)",
-         [](Stack& stack) {
+         [](Stack* stack) {
            auto unsafe = pop(stack).toBool();
            auto accumulate = pop(stack).toBool();
            auto values = pop(stack).toTensor();
@@ -434,69 +405,65 @@ RegisterOperators reg(
            auto result =
                at::_index_put_impl_(self, indices, values, accumulate, unsafe);
            push(stack, std::move(result));
-           return 0;
+
          },
          aliasAnalysisFromSchema()),
      Operator(
          "aten::index_put_.hacked_twin(Tensor(a!) self, Tensor[] indices, Tensor values, bool accumulate=False) -> Tensor(a!)",
-         [](Stack& stack) {
+         [](Stack* stack) {
            auto accumulate = pop(stack).toBool();
            auto values = pop(stack).toTensor();
            auto indices = pop(stack).toTensorVector();
            auto self = pop(stack).toTensor();
            auto result = at::index_put_(self, indices, values, accumulate);
            push(stack, std::move(result));
-           return 0;
+
          },
          aliasAnalysisFromSchema()),
      Operator(
          "aten::index_put.hacked_twin(Tensor self, Tensor[] indices, Tensor values, bool accumulate=False) -> Tensor",
-         [](Stack& stack) {
+         [](Stack* stack) {
            auto accumulate = pop(stack).toBool();
            auto values = pop(stack).toTensor();
            auto indices = pop(stack).toTensorVector();
            auto self = pop(stack).toTensor();
            auto result = at::index_put_(self, indices, values, accumulate);
            push(stack, std::move(result));
-           return 0;
+
          },
          aliasAnalysisFromSchema())});
 
-int dictSetItem(Stack& stack) {
+void dictSetItem(Stack* stack) {
   auto value = pop(stack);
   auto idx = pop(stack);
   auto dict = pop(stack).toGenericDict();
   dict.insert_or_assign(std::move(idx), std::move(value));
-  return 0;
 }
 
-int dictLen(Stack& stack) {
+void dictLen(Stack* stack) {
   auto dict = pop(stack).toGenericDict();
   push(stack, int64_t(dict.size()));
-  return 0;
 }
 
-int dictValues(Stack& stack) {
+void dictValues(Stack* stack) {
   auto dict = pop(stack).toGenericDict();
   auto values = c10::impl::GenericList(dict.valueType());
   for (const auto& entry : dict) {
     values.emplace_back(entry.value());
   }
   push(stack, values);
-  return 0;
 }
 
-int dictKeys(Stack& stack) {
+void dictKeys(Stack* stack) {
   auto dict = pop(stack).toGenericDict();
   auto keys = c10::impl::GenericList(dict.keyType());
   for (const auto& entry : dict) {
     keys.emplace_back(entry.key());
   }
   push(stack, keys);
-  return 0;
 }
 
-int dictIndex(Stack& stack) {
+void dictIndex(Stack* stack) {
   auto key = pop(stack);
   auto dict = pop(stack).toGenericDict();
   auto value = dict.find(key);
@@ -504,11 +471,10 @@ int dictIndex(Stack& stack) {
     AT_ERROR("KeyError: ", key);
   }
   push(stack, value->value());
-  return 0;
 }
 
 template <bool has_default>
-int dictGet(Stack& stack) {
+void dictGet(Stack* stack) {
   IValue default_value;
   if (has_default) {
     default_value = pop(stack);
@@ -521,12 +487,11 @@ int dictGet(Stack& stack) {
   } else {
     push(stack, value->value());
   }
-  return 0;
 }
 
 // If the key is in the dict, return it. Else set it to the default value and
 // return that.
-int dictSetDefault(Stack& stack) {
+void dictSetDefault(Stack* stack) {
   auto default_value = pop(stack);
   auto key = pop(stack);
   auto dict = pop(stack).toGenericDict();
@@ -537,11 +502,10 @@ int dictSetDefault(Stack& stack) {
   } else {
     push(stack, value->value());
   }
-  return 0;
 }
 
 template <bool has_default>
-int dictPop(Stack& stack) {
+void dictPop(Stack* stack) {
   IValue default_value;
   if (has_default) {
     default_value = pop(stack);
@@ -562,17 +526,15 @@ int dictPop(Stack& stack) {
     TORCH_CHECK(
         erase_count == 1, "Expected to erase 1 item, found ", erase_count);
   }
-  return 0;
 }
 
-int dictDelete(Stack& stack) {
+void dictDelete(Stack* stack) {
   dictPop<false>(stack);
   // pop pushes an item on the stack but delete does not, so get rid of it
   pop(stack);
-  return 0;
 }
 
-int dictPopItem(Stack& stack) {
+void dictPopItem(Stack* stack) {
   auto dict = pop(stack).toGenericDict();
   if (dict.size() == 0) {
     AT_ERROR("popitem(): dictionary is empty");
@@ -585,33 +547,29 @@ int dictPopItem(Stack& stack) {
   TORCH_CHECK(
       erase_count == 1, "Expected to erase 1 item, found ", erase_count);
   push(stack, tuple);
-  return 0;
 }
 
-int dictContains(Stack& stack) {
+void dictContains(Stack* stack) {
   auto key = pop(stack);
   auto dict = pop(stack).toGenericDict();
   push(stack, dict.contains(key));
-  return 0;
 }
 
-int dictClear(Stack& stack) {
+void dictClear(Stack* stack) {
   auto dict = pop(stack).toGenericDict();
   dict.clear();
-  return 0;
 }
 
-int dictUpdate(Stack& stack) {
+void dictUpdate(Stack* stack) {
   auto to_add = pop(stack).toGenericDict();
   auto dict = pop(stack).toGenericDict();
 
   for (const auto& item : to_add) {
     dict.insert(item.key(), item.value());
   }
-  return 0;
 }
 
-int dictItems(Stack& stack) {
+void dictItems(Stack* stack) {
   auto dict = pop(stack).toGenericDict();
   auto key_type = dict.keyType();
   auto value_type = dict.valueType();
@@ -622,15 +580,13 @@ int dictItems(Stack& stack) {
     items.emplace_back(c10::ivalue::Tuple::create({item.key(), item.value()}));
   }
   push(stack, std::move(items));
-  return 0;
 }
 
-int dictCopy(Stack& stack) {
+void dictCopy(Stack* stack) {
   push(stack, pop(stack).toGenericDict().copy());
-  return 0;
 }
 
-int dictConstructFromList(Stack& stack) {
+void dictConstructFromList(Stack* stack) {
   auto input_list = pop(stack);
   auto list = input_list.toList();
   auto tup_type = list.elementType()->expect<TupleType>();
@@ -642,7 +598,6 @@ int dictConstructFromList(Stack& stack) {
     dict.insert_or_assign(tup[0], tup[1]);
   }
   push(stack, dict);
-  return 0;
 }
 
 #define CREATE_DICT_OPS(key_type)                                             \

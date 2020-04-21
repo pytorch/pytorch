@@ -1046,12 +1046,12 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
         Instruction inst = af.instructions[af.pc];
         switch (inst.op) {
           case OP:
-            af.operators[inst.X](stack);
+            af.operators[inst.X](&stack);
             ++af.pc;
             break;
           case OPN:
             stack.push_back(inst.N);
-            af.operators[inst.X](stack);
+            af.operators[inst.X](&stack);
             ++af.pc;
             break;
           case LOAD:

@@ -189,7 +189,6 @@ CONSTRUCTOR_JITONLY = CodeTemplate("""\
     ${call}
     drop(*stack, ${num_inputs});
     pack(*stack, std::move(result_));
-    return 0;
 }
 """)
 

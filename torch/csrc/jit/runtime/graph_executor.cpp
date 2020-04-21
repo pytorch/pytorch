@@ -334,7 +334,7 @@ struct DifferentiableGraphOp {
         num_outputs(this->grad.f->outputs().size()) {}
 
   // XXX: keep in mind that stack can be larger than the inputs we need!
-  int operator()(Stack& stack) const {
+  void operator()(Stack* stack) const {
     auto grad_fn = std::make_shared<DifferentiableGraphBackward>(
         grad_executor,
         grad.df_input_vjps.size(),
@@ -351,8 +351,8 @@ struct DifferentiableGraphOp {
       captureInputs(*grad_fn, inputs);
     }
 
-    detachVariables(stack);
-    InterpreterState(f).run(stack);
+    detachVariables(*stack);
+    InterpreterState(f).run(*stack);
 
     {
       auto outputs = last(stack, num_outputs);
@@ -370,9 +370,8 @@ struct DifferentiableGraphOp {
       // drop the temporary outputs so that we return the same number of
       // outputs as if we were not also calculating gradient
       const size_t num_temporary_outputs = num_outputs - grad.f_real_outputs;
-      stack.erase(stack.end() - num_temporary_outputs, stack.end());
+      stack->erase(stack->end() - num_temporary_outputs, stack->end());
     }
-    return 0;
   }
 
  private:

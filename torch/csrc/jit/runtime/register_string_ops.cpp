@@ -83,7 +83,7 @@ RegisterOperators reg_str_ops({
 #define DEFINE_STRING_IS_OP(op_name, char_op)                          \
   Operator(                                                            \
       #op_name "(str self) -> bool",                                   \
-      [](Stack& stack) {                                               \
+      [](Stack* stack) {                                               \
         auto string = pop(stack).toStringRef();                        \
         push(                                                          \
             stack,                                                     \
@@ -91,7 +91,6 @@ RegisterOperators reg_str_ops({
                 std::all_of(string.begin(), string.end(), [](char c) { \
                   return char_op(c);                                   \
                 }));                                                   \
-        return 0;                                                      \
       },                                                               \
       aliasAnalysisFromSchema())
 
@@ -105,14 +104,13 @@ RegisterOperators reg_str_ops({
 #define DEFINE_STRING_CHAR_MAP_OP(op_name, char_op) \
   Operator(                                         \
       #op_name "(str self) -> str",                 \
-      [](Stack& stack) {                            \
+      [](Stack* stack) {                            \
         auto string = pop(stack).toStringRef();     \
         std::stringstream ss;                       \
         for (char c : string) {                     \
           ss << static_cast<char>(char_op(c));      \
         }                                           \
         push(stack, ss.str());                      \
-        return 0;                                   \
       },                                            \
       aliasAnalysisFromSchema())
 
