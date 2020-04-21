@@ -1508,9 +1508,7 @@ def sort(g, self, dim, decending, out=None):
 
 def numel(g, self):
     shape = g.op("Shape", self)
-    shape = g.op("Cast", shape, to_i=sym_help.cast_pytorch_to_onnx['Int'])
-    prod = g.op("ReduceProd", shape, keepdims_i=0)
-    return g.op("Cast", prod, to_i=sym_help.cast_pytorch_to_onnx['Long'])
+    return g.op("ReduceProd", shape, keepdims_i=0)
 
 
 @parse_args('v', 'i', 'i', 'i', 'i', 'none')
