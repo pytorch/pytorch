@@ -257,9 +257,9 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
 
   set(GENERATED_CXX_TORCH
     "${TORCH_SRC_DIR}/csrc/autograd/generated/Functions.cpp"
-    "${TORCH_SRC_DIR}/csrc/jit/generated/register_aten_ops_0.cpp"
-    "${TORCH_SRC_DIR}/csrc/jit/generated/register_aten_ops_1.cpp"
-    "${TORCH_SRC_DIR}/csrc/jit/generated/register_aten_ops_2.cpp"
+    "${TORCH_SRC_DIR}/csrc/jit/generated/generated_unboxing_wrappers_0.cpp"
+    "${TORCH_SRC_DIR}/csrc/jit/generated/generated_unboxing_wrappers_1.cpp"
+    "${TORCH_SRC_DIR}/csrc/jit/generated/generated_unboxing_wrappers_2.cpp"
     )
 
   if(NOT INTERN_DISABLE_AUTOGRAD)
@@ -333,8 +333,8 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     "${TOOLS_PATH}/autograd/load_derivatives.py"
     "${TOOLS_PATH}/autograd/nested_dict.py"
     "${TOOLS_PATH}/autograd/utils.py"
-    "${TOOLS_PATH}/jit/gen_jit_dispatch.py"
-    "${TOOLS_PATH}/jit/templates/register_aten_ops.cpp"
+    "${TOOLS_PATH}/jit/gen_unboxing_wrappers.py"
+    "${TOOLS_PATH}/jit/templates/generated_unboxing_wrappers.cpp"
     WORKING_DIRECTORY "${TORCH_ROOT}")
 
 
