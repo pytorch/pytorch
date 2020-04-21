@@ -17,7 +17,7 @@ from torch.quantization import QConfigDynamic
 from torch.quantization import default_observer
 from torch.quantization import default_weight_observer
 from torch.quantization import default_per_channel_weight_observer
-from torch.quantization import default_qconfig
+from torch.quantization import default_qconfig, default_per_channel_qconfig
 from torch.quantization import get_default_qconfig
 from torch.quantization import quantize
 
@@ -30,11 +30,13 @@ from torch.quantization._quantize_script import convert_script
 from torch.quantization._quantize_script import quantize_script
 from torch.quantization._quantize_script import prepare_dynamic_script
 from torch.quantization._quantize_script import quantize_dynamic_script
+from torch.quantization._quantize_script import preprocess_qconfig_dict
 
 # Testing utils
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.common_quantization import SingleLayerLinearModel, AnnotatedSingleLayerLinearModel
 from torch.testing._internal.common_quantization import ConvModel, AnnotatedConvModel
+from torch.testing._internal.common_quantization import NestedModel
 from torch.testing._internal.common_quantization import test_only_eval_fn as _test_only_eval_fn
 
 from torch.testing import FileCheck
@@ -1159,6 +1161,20 @@ graph(%input, %weight):
                    .check("CallMethod") \
                    .run(model.graph)
 
+    def test_qconfig_w_types(self):
+        data = [(torch.rand((1, 5), dtype=torch.float), torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
+        qconfig_dict = {torch.nn.Linear : default_qconfig, 'sub2.fc1' : default_per_channel_qconfig}
+        qconfig_dict = preprocess_qconfig_dict(NestedModel().eval(), qconfig_dict)
+        # check to make sure it matches expected dict.
+        expected_qconfig_dict = {'sub1.fc' : default_qconfig, 'sub2.fc1': default_per_channel_qconfig,
+                                 'sub2.fc2': default_qconfig, 'fc3': default_qconfig}
+        self.assertEqual(qconfig_dict, expected_qconfig_dict)
+        # Convert and run model.
+        model = torch.jit.script(NestedModel()).eval()
+        model = quantize_script(model, qconfig_dict, _test_only_eval_fn, [data])
+        FileCheck().check("quantized::linear") \
+                   .run(model.graph)
+
 class TestQuantizeScriptPTSQOps(JitTestCase):
     """ Test graph mode post training static quantization works
     for individual ops end to end.
@@ -1789,6 +1805,39 @@ class TestQuantizeDynamicScript(JitTestCase):
 
         data = torch.rand((1, 5), dtype=torch.float)
         qconfig_dict = {'': default_dynamic_qconfig}
+        model = torch.jit.script(M()).eval()
+        model = quantize_dynamic_script(model, qconfig_dict, data)
+        FileCheck().check("quantized::linear_dynamic") \
+                   .run(model.graph)
+
+    def test_dynamic_qconfig_w_types(self):
+        class LinearReluModel(torch.nn.Module):
+            def __init__(self):
+                super(LinearReluModel, self).__init__()
+                self.fc = torch.nn.Linear(5, 5).to(dtype=torch.float)
+                self.relu = torch.nn.ReLU()
+
+            def forward(self, x):
+                x = self.relu(self.fc(x))
+                return x
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+                self.sub1 = LinearReluModel()
+                self.fc = torch.nn.Linear(5, 5).float()
+
+            def forward(self, x):
+                x = self.sub1(x)
+                return self.fc(x)
+
+        data = torch.rand((1, 5), dtype=torch.float)
+        qconfig_dict = {torch.nn.Linear : default_dynamic_qconfig, 'fc': default_dynamic_qconfig}
+        qconfig_dict = preprocess_qconfig_dict(M().eval(), qconfig_dict)
+        # check to make sure it matches expected dict.
+        expected_qconfig_dict = {'fc': default_dynamic_qconfig, 'sub1.fc': default_dynamic_qconfig}
+        self.assertEqual(expected_qconfig_dict, qconfig_dict)
+        # Convert and run model.
         model = torch.jit.script(M()).eval()
         model = quantize_dynamic_script(model, qconfig_dict, data)
         FileCheck().check("quantized::linear_dynamic") \
