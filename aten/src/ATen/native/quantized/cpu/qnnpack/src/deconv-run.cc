@@ -93,38 +93,12 @@ enum pytorch_qnnp_status qnnpackDeConv(
   // Check all invalid parameters
   const size_t kernel_width = deconv_p.kernel_dims[0];
   const size_t kernel_height = deconv_p.kernel_dims[1];
-  if (kernel_width == 0 || kernel_height == 0) {
-    pytorch_qnnp_log_error(
-        "failed to create deconvolution with %" PRIu32 "x%" PRIu32
-        " kernel: kernel dimensions must be non-zero",
-        (uint32_t)kernel_width,
-        (uint32_t)kernel_height);
-    return pytorch_qnnp_status_invalid_parameter;
-  }
 
   const size_t stride_width = deconv_p.stride_dims[0];
   const size_t stride_height = deconv_p.stride_dims[1];
-  if (stride_width == 0 || stride_height == 0) {
-    pytorch_qnnp_log_error(
-        "failed to create deconvolution with %" PRIu32 "x%" PRIu32
-        " stride: "
-        "stride dimensions must be non-zero",
-        (uint32_t)stride_width,
-        (uint32_t)stride_height);
-    return pytorch_qnnp_status_invalid_parameter;
-  }
 
   const size_t dilation_width = deconv_p.dilation_dims[0];
   const size_t dilation_height = deconv_p.dilation_dims[1];
-  if (dilation_width == 0 || dilation_height == 0) {
-    pytorch_qnnp_log_error(
-        "failed to create deconvolution with %" PRIu32 "x%" PRIu32
-        " dilation: "
-        "dilation dimensions must be non-zero",
-        (uint32_t)dilation_width,
-        (uint32_t)dilation_height);
-    return pytorch_qnnp_status_invalid_parameter;
-  }
 
   if (input_scale <= 0.0f || !std::isnormal(input_scale)) {
     pytorch_qnnp_log_error(
@@ -135,13 +109,6 @@ enum pytorch_qnnp_status qnnpackDeConv(
   }
 
   const float kernel_scale = deconv_p.kernel_scale;
-  if (kernel_scale <= 0.0f || !std::isnormal(kernel_scale)) {
-    pytorch_qnnp_log_error(
-        "failed to create deconvolution with %.7g kernel scale: "
-        "scale must be finite and positive",
-        kernel_scale);
-    return pytorch_qnnp_status_invalid_parameter;
-  }
 
   if (output_scale <= 0.0f || !std::isnormal(output_scale)) {
     pytorch_qnnp_log_error(
@@ -152,6 +119,7 @@ enum pytorch_qnnp_status qnnpackDeConv(
   }
 
   // Check all unsupported parameters
+  // TODO: Might need a change after #35856 is landed
   const float deconvolution_scale = input_scale * kernel_scale / output_scale;
   if (deconvolution_scale >= 1.0f) {
     pytorch_qnnp_log_error(

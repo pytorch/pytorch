@@ -9,7 +9,7 @@
 
 #include <cmath>
 #ifdef USE_FBGEMM
-#include "fbgemm/QuantUtils.h"
+#include <fbgemm/QuantUtils.h>
 #endif
 #ifdef _OPENMP
 #include <omp.h>
