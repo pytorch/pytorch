@@ -102,8 +102,7 @@ def _split_tensor_list_constants(g, block):
             output_type = node.output().type()
             if output_type.isSubtypeOf(ListType.ofTensors()):
                 inputs = [g.create("prim::Constant").t_('value', t)
-                           .insertBefore(node).output()
-                          for t in node['value']]
+                           .insertBefore(node).output() for t in node.output().toIValue()]
                 lc = (g.create("prim::ListConstruct", inputs)
                       .insertBefore(node)
                       .output()
@@ -773,11 +772,11 @@ def _run_symbolic_function(g, n, inputs, env, operator_export_type=OperatorExpor
                     return g.op("Constant", value_t=n["value"])
                 if n.kindOf("value") == "s":
                     return g.op("Constant", value_s=n["value"])
-                elif n.kindOf("value") == "is":
-                    value = torch.stack([torch.tensor(v) for v in n["value"]]) if n["value"] else []
+                elif n.output().type().isSubtypeOf(ListType.ofInts()):
+                    value = torch.stack([torch.tensor(v) for v in n.output().toIValue()])
                     return g.op("Constant", value_t=value)
-                elif n.kindOf("value") == "fs":
-                    value = torch.stack([torch.tensor(v) for v in n["value"]]) if n["value"] else []
+                elif n.output().type().isSubtypeOf(ListType.ofFloats()):
+                    value = torch.stack([torch.tensor(v) for v in n.output().toIValue()])
                     return g.op("Constant", value_t=value)
                 elif n.output().type().kind() == "DeviceObjType":
                     return None
