@@ -17,7 +17,7 @@
 #include <c10/util/Half.h>
 #include <c10/core/UndefinedTensorImpl.h>
 #include <c10/util/Optional.h>
-#include <torch/library.h>
+#include <ATen/core/op_registration/op_registration.h>
 
 #include <cstddef>
 #include <functional>
