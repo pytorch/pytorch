@@ -5688,6 +5688,10 @@ class TestTorchDeviceType(TestCase):
         # Creates long string in advance to avoid a too-long Python line
         s = ".+Triggered internally at.+IndexingUtils.+"
 
+        def warn_fn(t):
+            indices = torch.tensor((0, 1), dtype=torch.uint8)
+            return t[indices]
+
         with warnings.catch_warnings(record=True) as w:
             t = torch.tensor((1, 2))
             indices = torch.tensor((0, 1), dtype=torch.uint8)

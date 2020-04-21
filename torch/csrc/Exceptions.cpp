@@ -177,6 +177,9 @@ PyWarningHandler::~PyWarningHandler() noexcept(false) {
           result = PyErr_WarnEx(PyExc_RuntimeWarning, msg.c_str(), 1);
         } else if (warning.verbatim_) {
           // Sets the source location from the warning
+          // Note: PyErr_WarnExplicit will disregard Python's warning filter
+          // and always appear. This is in contrast to PyErr_WarnEx,
+          // which respects the warning filter.
           result = PyErr_WarnExplicit(
               /*category=*/PyExc_UserWarning,
               /*message=*/msg.c_str(),
