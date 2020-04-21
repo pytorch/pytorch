@@ -36,6 +36,7 @@ from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.common_quantization import SingleLayerLinearModel, AnnotatedSingleLayerLinearModel
 from torch.testing._internal.common_quantization import ConvModel, AnnotatedConvModel
 from torch.testing._internal.common_quantization import test_only_eval_fn as _test_only_eval_fn
+from torch.testing._internal.common_quantization import test_module_graph
 
 from torch.testing import FileCheck
 from torch.testing._internal.jit_utils import attrs_with_prefix
@@ -1191,13 +1192,12 @@ class TestQuantizeScriptPTSQOps(JitTestCase):
 
         data = [(torch.rand((1, 30), dtype=torch.float),
                  torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
-        model = self._test_op_impl(M(), data, "quantized::linear")
-        # make sure there is only one quantize_per_tensor for input
-        # and linear_prepack is folded
-        FileCheck().check_count("aten::quantize_per_tensor", 1, exactly=True) \
-                   .run(model.graph)
-        FileCheck().check_not("quantized::linear_prepack") \
-                   .run(model.graph)
+        model, checker = test_module_graph(
+            M(), data,
+            checks=[['check', ("quantized::linear",)],
+                    ['check_not', ("quantized::linear_prepack",)],
+                    ['check_count', ("aten::quantize_per_tensor", 1, True)]
+                    ])
 
     @unittest.skipUnless(
         'fbgemm' in torch.backends.quantized.supported_engines,
@@ -1219,16 +1219,16 @@ class TestQuantizeScriptPTSQOps(JitTestCase):
 
         data = [(torch.randn((1, 30), dtype=torch.float),
                  torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
-        model = self._test_op_impl(M(functional=False), data,
-                                   "quantized::linear_relu")
-        model_functional = self._test_op_impl(M(functional=True), data,
-                                              "quantized::linear_relu")
-        checker = FileCheck().check_not("aten::linear") \
-                             .check_not("aten::relu") \
-                             .check_not("quantized::linear(") \
-                             .check_not("quantized::relu(")
-        checker.run(model.graph)
-        checker.run(model_functional.graph)
+        ordered_checks = [
+            ['check_not', ("aten::linear",)],
+            ['check_not', ("aten::relu",)],
+            ['check_not', ("quantized::linear(",)],
+            ['check_not', ("quantized::relu(",)]
+        ]
+        model, _ = test_module_graph(
+            M(functional=False), data, ordered_checks=ordered_checks)
+        model_functional, _ = test_module_graph(
+            M(functional=True), data, ordered_checks=ordered_checks)
 
     @unittest.skipUnless(
         'fbgemm' in torch.backends.quantized.supported_engines,
@@ -1245,14 +1245,10 @@ class TestQuantizeScriptPTSQOps(JitTestCase):
                 return self.conv(x)
 
         data = [(torch.rand((1, 3, 10, 10), dtype=torch.float), torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
-        model = self._test_op_impl(M(), data, "quantized::conv2d")
-        # make sure there is only one quantize_per_tensor for input
-        # and conv2d_prepack is folded
-        FileCheck().check_count("aten::quantize_per_tensor", 1, exactly=True) \
-                   .run(model.graph)
-
-        FileCheck().check_not("quantized::conv2d_prepack") \
-                   .run(model.graph)
+        model, _ = test_module_graph(
+            M(), data, checks=[['', ("quantized::conv2d",)],
+                               ['count', ("aten::quantize_per_tensor", 1, True)],
+                               ['not', ("quantized::conv2d_prepack",)]])
 
     @unittest.skipUnless(
         'fbgemm' in torch.backends.quantized.supported_engines,
@@ -1269,11 +1265,9 @@ class TestQuantizeScriptPTSQOps(JitTestCase):
                 return self.conv(x)
 
         data = [(torch.rand((1, 3, 10, 10, 10), dtype=torch.float), torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
-        model = self._test_op_impl(M(), data, "quantized::conv3d")
-        # make sure there is only one quantize_per_tensor for input
-        # and conv3d_prepack is folded
-        FileCheck().check_count("aten::quantize_per_tensor", 1, exactly=True) \
-                   .run(model.graph)
+        model = test_module_graph(
+            M(), data, checks=[['', ("quantized::conv3d",)],
+                               ['count', ("aten::quantize_per_tensor", 1, True)]])
 
     @unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
                          " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"

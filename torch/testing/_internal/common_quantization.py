@@ -12,11 +12,76 @@ import torch
 import torch.nn as nn
 import torch.nn.quantized as nnq
 import torch.nn.quantized.dynamic as nnqd
+from torch.testing import FileCheck
 from torch.testing._internal.common_utils import TestCase
-from torch.quantization import QuantWrapper, QuantStub, DeQuantStub, \
-    default_qconfig, default_per_channel_qconfig, QConfig, default_observer, default_weight_observer, \
-    propagate_qconfig_, convert
+from torch.quantization import QuantWrapper, QuantStub, DeQuantStub, QConfig
+from torch.quantization import default_qconfig, default_per_channel_qconfig
+from torch.quantization import get_default_qconfig
+from torch.quantization import default_observer, default_weight_observer
+from torch.quantization import propagate_qconfig_, convert
+from torch.quantization._quantize_script import quantize_script
 from torch.quantization.default_mappings import DEFAULT_DYNAMIC_MODULE_MAPPING
+
+"""Test graph mode post training static quantization works
+   for individual ops end to end.
+
+Args:
+    module: Quantizable module to generate a graph from
+    data: Data to be tested against
+    checks: List of tuples (TYPE, ARGS).
+        TYPE: Can be one of ['', 'not', 'same', 'next', 'count', 'dag']
+              Empty string implies "check"
+        ARGS: Argument list to pass to the appropriate type
+              More info here: torch/csrc/jit/testing/file_check.h
+    ordered_checks: Same as the `checks` except the order is preserved.
+                    Please, note that the order of the checks matters.
+                    The order makes sure the checks are "chained", that
+                    is every consecutive match will be after the
+                    previous one: torch/csrc/jit/testing/file_check.h
+    qengine: Quantization engine
+
+Returns:
+    model: Quantized graph model
+    checker: `FileCheck` instance
+"""
+def test_module_graph(module, data=None, checks=None, ordered_checks=None,
+                      qengine=None):
+    def _make_check_type(check_type):
+        if check_type[:5] == 'check':
+            return check_type
+        if check_type != '':
+            check_type = '_' + check_type
+        check_type = 'check' + check_type
+        return check_type
+
+    if qengine is None:
+        qengine = 'fbgemm'
+    assert qengine in ['fbgemm', 'qnnpack'], \
+        'Qengine must be one of (fbgemm, qnnpack)'
+    qconfig_dict = {'': get_default_qconfig(qengine)}
+    model = torch.jit.script(module).eval()
+    model = quantize_script(model, qconfig_dict, test_only_eval_fn, [data],
+                            inplace=False)
+
+    if checks is not None:
+        for check_type, check_args in checks:
+            check_type = _make_check_type(check_type)
+            checker = FileCheck()
+            getattr(checker, check_type)(*check_args).run(model.graph)
+
+    if ordered_checks is not None:
+        checker = FileCheck()
+        for check_type, check_args in ordered_checks:
+            check_type = _make_check_type(check_type)
+            getattr(checker, check_type)(*check_args)
+        checker.run(model.graph)
+
+    # make sure it runs
+    if data is not None:
+        *inputs, target = data[0]
+        model(*inputs)
+
+    return model, checker
 
 def test_only_eval_fn(model, calib_data):
     r"""
