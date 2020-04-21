@@ -14,6 +14,7 @@ using namespace at;
 using namespace at::native::templates;
 using namespace torch::custom_prng;
 
+// CUDA CSPRNG is actually CPU generator which is used only to generate a random key on CPU for AES running in a block mode on CUDA 
 struct CUDA_CSPRNG_GeneratorImpl : public CPUGeneratorImpl {
   CUDA_CSPRNG_GeneratorImpl(uint64_t seed_in = default_rng_seed_val) : CPUGeneratorImpl(seed_in) {
     this->key_set_ = DispatchKeySet(DispatchKey::CustomRNGKeyId);
@@ -22,6 +23,15 @@ struct CUDA_CSPRNG_GeneratorImpl : public CPUGeneratorImpl {
 
 // ===========================================================================================================================
 
+// Applies AES in CTR mode with the `key` for passed TensorIterator iter.
+// `scalar_t`       is a scalar type equivalent of target tensor dtype
+// `uint_t`         is an unsigned integral type of sub-blocks that random state is divided to
+//                  (e.g, 16 bytes random state block can be divided into 16 uint8_t sub-blocks 
+//                  or 8 uint16_t sub-block or 4 uint32_t sub-block or 2 uint64_t sub-blocks)
+// `N`              is a number of sub-block which is used by `transform_func` 
+//                  to generate a random value of specific distribution (e.g. `normal` uses 2)
+// `key`            is a CUDA pointer to random key memory block
+// `transform_func` is a callable that converts N `uint_t` random state sub-blocks passed in RNGValues into target dtype `scalar_t`
 template<typename scalar_t, typename uint_t, size_t N = 1, typename transform_t>
 void aes_helper(TensorIterator& iter, const uint8_t* key, transform_t transform_func) {
   block_cipher_ctr_mode<scalar_t, uint_t, N>(iter, aes::block_t_size,
@@ -38,6 +48,8 @@ void aes_helper(TensorIterator& iter, const uint8_t* key, transform_t transform_
 
 // ===========================================================================================================================
 
+// A mapping between scalar type and corresponding unsigned integer type of random state sub-block.
+// uint64_t for double and long, uint32_t for the rest
 template <typename T>
 struct UIntType {};
 
@@ -50,6 +62,8 @@ template <> struct UIntType<int8_t> { using type = uint32_t; };
 template <> struct UIntType<uint8_t> { using type = uint32_t; };
 template <> struct UIntType<bool> { using type = uint32_t; };
 
+// ===========================================================================================================================
+
 template<typename RNG>
 struct RandomKernel {
   void operator()(TensorIterator& iter, c10::optional<Generator> generator) {
@@ -57,7 +71,7 @@ struct RandomKernel {
     const auto key = key_t.data_ptr<uint8_t>();
     AT_DISPATCH_ALL_TYPES_AND(ScalarType::Bool, iter.dtype(), "my_random_kernel_cuda", [&] {
       aes_helper<scalar_t, UIntType<scalar_t>::type>(iter, key,
-        [] __device__ (DummyRNG<1>* generator) -> scalar_t {
+        [] __device__ (RNGValues<1>* generator) -> scalar_t {
           uniform_int_distribution<scalar_t> random;
           return random(generator);
         }
@@ -69,7 +83,7 @@ struct RandomKernel {
 template<typename scalar_t, typename uint_t>
 void random_from_to_kernel_helper(TensorIterator& iter, uint64_t range, int64_t base, const uint8_t* key) {
   aes_helper<scalar_t, uint_t>(iter, key,
-    [range, base] __device__ (DummyRNG<1>* generator) -> scalar_t {
+    [range, base] __device__ (RNGValues<1>* generator) -> scalar_t {
       uniform_int_from_to_distribution<scalar_t> random(range, base);
       return random(generator);
     }
@@ -79,7 +93,7 @@ void random_from_to_kernel_helper(TensorIterator& iter, uint64_t range, int64_t 
 template<typename scalar_t, typename uint_t>
 void random_full_range_kernel_helper(TensorIterator& iter, const uint8_t* key) {
   aes_helper<scalar_t, uint_t>(iter, key,
-    [] __device__ (DummyRNG<1>* generator) -> scalar_t {
+    [] __device__ (RNGValues<1>* generator) -> scalar_t {
       uniform_int_full_range_distribution<scalar_t> random;
       return random(generator);
     }
@@ -142,7 +156,7 @@ struct UniformKernel {
     const auto key = key_t.data_ptr<uint8_t>();
     AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "uniform_kernel_cuda", [&] {
       aes_helper<scalar_t, UIntType<scalar_t>::type>(iter, key,
-        [from, to] __device__ (DummyRNG<1>* generator) -> scalar_t {
+        [from, to] __device__ (RNGValues<1>* generator) -> scalar_t {
           uniform_real_distribution<scalar_t> uniform(from, to);
           return uniform(generator);
         }
@@ -165,7 +179,7 @@ struct NormalKernel {
     const auto key = key_t.data_ptr<uint8_t>();
     AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "normal_kernel_cuda", [&] {
       aes_helper<scalar_t, UIntType<scalar_t>::type, 2>(iter, key,
-        [mean, std] __device__ (DummyRNG<2>* generator) -> scalar_t {
+        [mean, std] __device__ (RNGValues<2>* generator) -> scalar_t {
           normal_distribution<scalar_t> normal(mean, std);
           return normal(generator);
         }
@@ -209,6 +223,7 @@ Generator create_CUDA_CSPRNG_Generator() {
 }
   
 void registerOps() {
+  // TODO: replace with new ops registration API
   static auto registry = torch::RegisterOperators()
     // Random
     .op(torch::RegisterOperators::options()

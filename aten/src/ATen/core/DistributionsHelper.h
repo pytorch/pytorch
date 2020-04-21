@@ -34,21 +34,6 @@
 
 namespace at {
 
-// Using VectorType in Box-muller derived distributions to avoid
-// code duplication
-template <typename T>
-struct VectorType {  };
-
-#if defined(__CUDACC__) || defined(__HIPCC__)
-template <> struct VectorType<half> { using type = at::detail::Array<float, 2>; };
-#endif
-template <> struct VectorType<Half> { using type = at::detail::Array<float, 2>; };
-template <> struct VectorType<float> { using type = at::detail::Array<float, 2>; };
-template <> struct VectorType<double> { using type = at::detail::Array<double, 2>; };
-
-template <typename T>
-using vect_type = typename VectorType<T>::type;
-
 // Using DistAccumType in accumulate types for distributions.
 // Note: Ideally we'd be using ATen/AccumulateType.h but looks
 // like the there is some inconsistency in how accumulate types
@@ -67,15 +52,12 @@ template <> struct DistAccumType<double> { using type = double; };
 template <typename T>
 using dist_acctype = typename DistAccumType<T>::type;
 
-// Constants for uniform distribution
-// doubles have 52 bits of mantissa (fractional part)
-constexpr uint64_t DOUBLE_MASK = (1ULL << std::numeric_limits<double>::digits) - 1;
-constexpr double DOUBLE_DIVISOR = 1.0 / (1ULL << std::numeric_limits<double>::digits);
-
-// floats have 23 bits of mantissa (fractional part)
-constexpr uint32_t FLOAT_MASK = (1 << std::numeric_limits<float>::digits) - 1;
-constexpr float FLOAT_DIVISOR = 1.0f / (1 << std::numeric_limits<float>::digits);
-
+/**
+ * Samples a discrete uniform distribution in the range [base, base+range) of type T
+ * This is a transformation function for
+ * https://pytorch.org/docs/stable/tensors.html?highlight=random#torch.Tensor.random_
+ * when both `from` and `to` are specified.
+ */
 template <typename T>
 struct uniform_int_from_to_distribution {
 
@@ -110,6 +92,12 @@ struct uniform_int_from_to_distribution {
     int64_t base;
 };
 
+/**
+ * Samples a discrete uniform distribution in the range [min_value(int64_t), max_value(int64_t)]
+ * This is a transformation function for
+ * https://pytorch.org/docs/stable/tensors.html?highlight=random#torch.Tensor.random_
+ * when `from=min_value(int64_t)` and to=None
+ */
 template <typename T>
 struct uniform_int_full_range_distribution {
 
@@ -127,6 +115,12 @@ struct uniform_int_full_range_distribution {
 
 };
 
+/**
+ * Samples a discrete uniform distribution in the range [0, max_value(T)] for integral types
+ * and [0, 2^mantissa] for floating point types. This is a transformation function for
+ * https://pytorch.org/docs/stable/tensors.html?highlight=random#torch.Tensor.random_
+ * when used without specifing `from` and `to`.
+ */
 template <typename T>
 struct uniform_int_distribution {
 
@@ -174,15 +168,23 @@ struct uniform_real_distribution {
     b = b_in;
   }
 
-  template <typename RNG>
-  C10_HOST_DEVICE inline dist_acctype<T> operator()(RNG generator){
-    dist_acctype<T> x;
-    if(std::is_same<T, double>::value) {
-      x = (generator->random64() & DOUBLE_MASK) * DOUBLE_DIVISOR;
-    } else {
-      x = (generator->random() & FLOAT_MASK) * FLOAT_DIVISOR;
-    }
+  template <typename V,
+            typename std::enable_if<std::is_integral<V>::value, int>::type = 0>
+  C10_HOST_DEVICE inline T operator()(V val) {
+    constexpr auto MASK = static_cast<V>((static_cast<uint64_t>(1) << std::numeric_limits<T>::digits) - 1);
+    constexpr auto DIVISOR = static_cast<T>(1) / (static_cast<uint64_t>(1) << std::numeric_limits<T>::digits);
+    dist_acctype<T> x = (val & MASK) * DIVISOR;
     return (x * (b - a) + a);
+  }
+
+  template <typename RNG,
+            typename std::enable_if<(!std::is_fundamental<RNG>::value), int>::type = 0>
+  C10_HOST_DEVICE inline dist_acctype<T> operator()(RNG generator){
+    if(std::is_same<T, double>::value) {
+      return operator()(generator->random64());
+    } else {
+      return operator()(generator->random());
+    }
   }
 
   private:
