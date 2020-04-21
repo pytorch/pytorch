@@ -815,14 +815,6 @@ class TestTypePromotion(TestCase):
                     if torch_type in float16_failures and np_type is np.float16:
                         undesired_failure = True
 
-                    # bool x complex interactions are not working as intended.
-                    # See https://github.com/pytorch/pytorch/issues/36057.
-                    if torch_type in (torch.complex64, torch.complex128) and np_type is np.bool:
-                        undesired_failure = True
-
-                    if torch_type is torch.bool and np_type in (np.complex64, np.complex128):
-                        undesired_failure = True
-
                     # Expects the same result if undesired_failure is false
                     # and a different result otherwise.
                     # Note: These cases prettyprint the failing inputs to make
