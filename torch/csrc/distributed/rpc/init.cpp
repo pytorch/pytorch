@@ -217,7 +217,7 @@ PyObject* rpc_init(PyObject* /* unused */) {
           .def(
               "rpc_sync",
               [&](PyRRef& self) {
-                  return self.createRRefProxy(self, RRefProxyType::RPC_SYNC);
+                return self.createRRefProxy(self, RRefProxyType::RPC_SYNC);
               },
               py::call_guard<py::gil_scoped_release>(),
               R"(
@@ -241,7 +241,7 @@ PyObject* rpc_init(PyObject* /* unused */) {
           .def(
               "rpc_async",
               [&](PyRRef& self) {
-                  return self.createRRefProxy(self, RRefProxyType::RPC_ASYNC);
+                return self.createRRefProxy(self, RRefProxyType::RPC_ASYNC);
               },
               py::call_guard<py::gil_scoped_release>(),
               R"(
@@ -259,13 +259,13 @@ PyObject* rpc_init(PyObject* /* unused */) {
                   Example::
                       >>> from torch.distributed import rpc
                       >>> rref = rpc.remote("worker1", torch.add, args=(torch.zeros(2, 2), 1))
-                      >>> rref.rpc_async().wait().size()  # returns torch.Size([2, 2])
-                      >>> rref.rpc_async().wait().view(1, 4)  # returns tensor([[1., 1., 1., 1.]])
+                      >>> rref.rpc_async().size().wait()  # returns torch.Size([2, 2])
+                      >>> rref.rpc_async().view(1, 4).wait()  # returns tensor([[1., 1., 1., 1.]])
               )")
           .def(
               "remote",
               [&](PyRRef& self) {
-                  return self.createRRefProxy(self, RRefProxyType::REMOTE);
+                return self.createRRefProxy(self, RRefProxyType::REMOTE);
               },
               py::call_guard<py::gil_scoped_release>(),
               R"(
@@ -283,8 +283,8 @@ PyObject* rpc_init(PyObject* /* unused */) {
                   Example::
                       >>> from torch.distributed import rpc
                       >>> rref = rpc.remote("worker1", torch.add, args=(torch.zeros(2, 2), 1))
-                      >>> rref.remote().to_here().size()  # returns torch.Size([2, 2])
-                      >>> rref.remote().to_here().view(1, 4)  # returns tensor([[1., 1., 1., 1.]])
+                      >>> rref.remote().size().to_here()  # returns torch.Size([2, 2])
+                      >>> rref.remote().view(1, 4).to_here()  # returns tensor([[1., 1., 1., 1.]])
               )")
           .def(
               py::pickle(
@@ -312,8 +312,7 @@ PyObject* rpc_init(PyObject* /* unused */) {
               &PyRRef::unpickle,
               py::call_guard<py::gil_scoped_release>())
           // not releasing GIL to avoid context switch
-          .def("__str__", &PyRRef::str)
-          .def("rpc_sync", &PyRRef::createRRefProxy);
+          .def("__str__", &PyRRef::str);
 
   // future.wait() should not be called after shutdown(), e.g.,
   // pythonRpcHandler is cleaned up in shutdown(), after
