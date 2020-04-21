@@ -34,6 +34,7 @@ white_list = [
     ('quantized::batch_norm', datetime.date(2020, 4, 20)),
     ('aten::sizes', datetime.date(2020, 4, 30)),
     ('aten::strides', datetime.date(2020, 4, 30)),
+    ('aten::batch_norm_gather_stats_with_counts', datetime.date(2020, 6, 30)),
 ]
 
 
