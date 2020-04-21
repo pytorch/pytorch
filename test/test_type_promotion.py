@@ -734,12 +734,16 @@ class TestTypePromotion(TestCase):
                     torch_fn(t, out=long_out)
 
                 # Tests inplace
-                # Note: angle does not have an in-place variant
                 if fn_name == 'abs':
                     torch_inplace_method = getattr(torch.Tensor, fn_name + "_")
                     np_fn(a, out=a)
                     torch_inplace_method(t)
                     self.assertEqual(torch.from_numpy(a), t.cpu())
+
+                # Note: angle does not have an in-place variant
+                if fn_name == 'angle':
+                    with self.assertRaises(AttributeError):
+                        torch_inplace_method = getattr(torch.Tensor, fn_name + "_")
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     @float_double_default_dtype
