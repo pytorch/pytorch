@@ -198,12 +198,10 @@ class IrParser {
           [](const Node* const node,
              std::unordered_map<size_t, CgValue>& value_maps) -> void {
             static std::unordered_map<Symbol, BinaryOpType> op_mapping({
-                {aten::mul,       BinaryOpType::Mul},
                 {aten::div,       BinaryOpType::Div},
+                {aten::mul,       BinaryOpType::Mul},
                 {aten::add,       BinaryOpType::Add},
                 {aten::sub,       BinaryOpType::Sub},
-                {aten::mul,       BinaryOpType::Mul},
-                {aten::div,       BinaryOpType::Div},
                 {aten::atan2,     BinaryOpType::Atan2},
                 {aten::min,       BinaryOpType::Min},
                 {aten::max,       BinaryOpType::Max},

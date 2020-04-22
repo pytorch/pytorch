@@ -2,6 +2,7 @@
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_cache.h>
 #include <torch/csrc/jit/codegen/cuda/parser.h>
+#include <torch/csrc/jit/codegen/cuda/shape_inference.h>
 #include <torch/csrc/jit/codegen/cuda/utils.h>
 #include <torch/csrc/jit/passes/canonicalize.h>
 #include <torch/csrc/jit/passes/shape_analysis.h>
@@ -13,6 +14,8 @@ namespace torch {
 namespace jit {
 namespace fuser {
 namespace cuda {
+
+#define DISABLED_FALLBACK true
 
 namespace {
 
@@ -45,11 +48,7 @@ class CudaFusionManager {
   //       want to AVOID kernel reuse between different fusion_node, unless they
   //       have identical contiguity information! (So identical stride + shape
   //       is even more restricting in a good way)
-  int32_t registerOrGetCacheId(std::shared_ptr<Graph>& orig_graph) {
-    // TODO: delete the copy here after shape inference is done.
-    //       this allows us to avoid shape inference when run-time shape doesn't
-    //       differ from static shape.
-    auto graph = orig_graph->copy();
+  int32_t registerOrGetCacheId(std::shared_ptr<Graph>& graph) {
     std::lock_guard<std::mutex> guard(mutex_);
 
     // prepare graph for lowering;
@@ -166,47 +165,13 @@ void runCudaFusionGroup(const Node* const fusion_node, Stack& stack) {
     at::ArrayRef<IValue> inputs = last(stack, nInputs);
 
     // shape inference in graph
-    bool matched_static_inputs = true;
-    for (auto output : graph->outputs()) {
-      if (!output->isCompleteTensor()) {
-        matched_static_inputs = false;
-      }
+    // update shape information per the new inputs;
+    EraseShapeInformation(graph);
+    for (int i = 0; i < nInputs; i++) {
+      graph->inputs()[i]->setType(inputs[i].type());
     }
-
-    for (int i = 0; matched_static_inputs && i < nInputs; i++) {
-      auto& static_input = graph->inputs()[i];
-      auto& dynamic_input = inputs[i]; // this is FILO stack
-      if ((*dynamic_input.type()) != (*static_input->type())) {
-        matched_static_inputs = false;
-        break;
-      }
-      if (dynamic_input.isTensor()) {
-        at::Tensor inp_tensor = dynamic_input.toTensor();
-        // we need to return use shape inference when static shape is not complete
-        // even though it is compatible with profiling graph.
-        // TODO: we could relax on a bunch of checks here, like strides & gradient
-        if (!static_input->type()->cast<TensorType>()->sizes().isComplete() ||
-            !static_input->type()
-                 ->cast<TensorType>()
-                 ->isCompatibleWithInCurrentExecutionContext(inp_tensor)) {
-          matched_static_inputs = false;
-          break;
-        }
-      }
-    }
-
-    // TODO: expose the API to populate shape inference. This allows separate CI
-    // tests
-    if (!matched_static_inputs) {
-      // update shape information per the new inputs;
-      // shape inference done through PyTorch JIT shape propagation;
-      EraseShapeInformation(graph);
-      for (int i = 0; i < nInputs; i++) {
-        graph->inputs()[i]->setType(inputs[i].type());
-      }
-      // shape inference
-      PropagateInputShapes(graph);
-    }
+    // shape inference
+    ShapeTypePropagate(graph);
 
     // we need to construct outputs;
     std::vector<at::Tensor> outputs;
@@ -241,6 +206,7 @@ void runCudaFusionGroup(const Node* const fusion_node, Stack& stack) {
         std::make_move_iterator(outputs.begin()),
         std::make_move_iterator(outputs.end()));
   } catch (...) {
+    TORCH_CHECK(DISABLED_FALLBACK, "codegen errored out.");
     EraseShapeInformation(graph);
     InterpreterState{Code(graph,"fallback_cuda_fuser")}.run(stack);
   }
