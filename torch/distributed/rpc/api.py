@@ -3,7 +3,6 @@ import contextlib
 import functools
 import logging
 import numbers
-import sys
 import threading
 from datetime import timedelta
 
@@ -263,9 +262,6 @@ def _init_rpc_backend(
     world_size=-1,
     rpc_backend_options=None,
 ):
-
-    if sys.version_info < (3, 0):
-        raise RuntimeError("RPC package does not support Python2.")
 
     _validate_rpc_args(backend, store, name, rank, world_size, rpc_backend_options)
 

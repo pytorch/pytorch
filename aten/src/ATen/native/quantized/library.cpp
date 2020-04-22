@@ -1,4 +1,4 @@
-#include <ATen/core/op_registration/op_registration.h>
+#include <torch/library.h>
 
 TORCH_LIBRARY(quantized, m) {
   m.def("add(Tensor qa, Tensor qb, float scale, int zero_point) -> Tensor qc");
