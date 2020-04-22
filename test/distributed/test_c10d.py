@@ -1880,7 +1880,7 @@ class DistributedDataParallelSingleProcessTest(TestCase):
 
     def tearDown(self):
         try:
-            os.remove(self.file_name)
+            os.remove(self.file.name)
         except OSError:
             pass
 
