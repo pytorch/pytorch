@@ -13,6 +13,8 @@ namespace torch {
 namespace autograd {
 namespace profiler {
 
+// Creates a new profiling scope using RecordFunction and invokes its starting
+// callbacks.
 at::Tensor record_function_enter(const std::string& name) {
   auto rec = std::make_unique<RecordFunction>(RecordScope::USER_SCOPE);
   // Only add new scope if profiling is enabled.
@@ -34,6 +36,7 @@ RecordFunction& getRecordFunctionFromTensor(const at::Tensor& handle) {
   return rec;
 }
 
+// Ends the profiling scope created with record_function_enter.
 void record_function_exit(const at::Tensor& handle) {
   // We don't actually need to do anything with handle just need to persist the
   // lifetime until now.
