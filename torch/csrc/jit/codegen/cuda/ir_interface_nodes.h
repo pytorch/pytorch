@@ -198,6 +198,11 @@ struct TORCH_CUDA_API TensorView : public Val {
   // Compute this TensorView relative to another tensor at axis
   TensorView* computeAt(TensorView* consumer, int axis);
 
+  void clearComputeAt(){
+    compute_at_axis_ = -1;
+    compute_at_view_ = nullptr;
+  }
+
   // Split "axis" into 2 axes where the inner axes is size of "factor"
   // and outer axis is size axis.size() / factor
   TensorView* split(int axis, int factor);

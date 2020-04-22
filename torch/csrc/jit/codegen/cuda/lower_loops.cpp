@@ -38,30 +38,33 @@ namespace {
 Int* getPredicate(const TensorView* const pred_tv, std::vector<Val*> indices) {
   TensorIndex* ti = new TensorIndex(
       pred_tv, IndexCompute::computeIndices(pred_tv, std::move(indices)));
+
   std::vector<Int*> all_preds = PredicateCompute::computePredicates(ti);
 
   std::vector<Int*> preds;
 
-  Int* one = new Int(1);
-
   for (Int* pred : all_preds)
-    if (!pred->sameAs(one))
+    if (!pred->isOneInt())
       preds.push_back(pred);
 
-  if (preds.size() == 0) {
-    return one;
-  } else {
-    Int* cond = preds[0];
+  if(preds.size() == 0)
+    return new Int(1);
 
-    for (decltype(preds.size()) i{1}; i < preds.size(); i++)
-      cond = static_cast<Int*>(andOp(cond, preds[i]));
-
-    return cond;
+  Val* cond = preds[0];
+  
+  for (decltype(preds.size()) i{1}; i < preds.size(); i++){
+    cond = andOp(cond, preds[i]);
   }
+
+  TORCH_INTERNAL_ASSERT(cond->getValType().value() == ValType::Scalar && cond->getDataType().value() == DataType::Int,
+  "Error computing predicate, should be returning an Int, but returning ", cond);
+
+  return static_cast<Int*>(cond);
 }
 } // namespace
 
-// Open the for loop.
+// This function is one huge mess that should be refactored.
+// It handles the unrolling and predicate generation
 void UnrollPass::handle(ForLoop* fl) {
   // Setup for loop scoping
   for_loops.push_back(fl);
@@ -97,7 +100,9 @@ void UnrollPass::handle(ForLoop* fl) {
       unroll_pred_inds.push_back((*it)->index());
       it++;
     }
-
+    
+    TORCH_INTERNAL_ASSERT(it != for_loops.end(), "Error unrolling loops, expected an unrolled loop but wasn't found.");
+  
     // This is the outer most loop that needs to be unrolled
     ForLoop* first_unroll = *it;
 
@@ -150,10 +155,10 @@ void UnrollPass::handle(ForLoop* fl) {
           inner_most_inlined_loop, inline_replacement_map);
 
     } // for expr
-
   } else { //  if(!within_unroll)
-
-    for (auto expr : fl->body().exprs()) {
+    // modify in place, so grab a copy of exprs first.
+    std::vector<Expr*> exprs(fl->body().exprs().begin(), fl->body().exprs().end());
+    for (auto expr : exprs) {
       if (!ir_utils::isTVOp(expr))
         continue;
 
@@ -169,8 +174,9 @@ void UnrollPass::handle(ForLoop* fl) {
       }
     }
   } // else (if(!within_unroll))
+  
   for_loops.pop_back();
-  bool within_unroll = prev_unroll;
+  within_unroll = prev_unroll;
 }
 
 // Generate the loop nest structure and place it in lowered_exprs

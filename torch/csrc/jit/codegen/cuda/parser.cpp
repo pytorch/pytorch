@@ -92,8 +92,9 @@ class IrParser {
       TensorView* out =
           static_cast<TensorView*>(value_maps_[jit_output->unique()]);
 
-      for (TensorView* inp : fusion_->inputsOf(out)) {
-        inp->computeAt(out, 1);
+      for (Val* inp : fusion_->inputsOf(out)) {
+        if(inp->getValType().value() == ValType::TensorView)
+          static_cast<TensorView*>(inp)->computeAt(out, 1);
       }
     }
 

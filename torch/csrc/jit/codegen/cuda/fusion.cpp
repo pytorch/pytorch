@@ -34,12 +34,15 @@ std::vector<Expr*> ExprSort::getExprs(
   return es.exprs;
 }
 
-void InputsOf::handle(TensorView* tv) {
-  if (FusionGuard::getCurFusion()->hasInput(tv))
-    inputs.push_back(tv);
+
+std::vector<Statement*> InputsOf::next(Val* v) {
+  if (FusionGuard::getCurFusion()->origin(v) == nullptr)
+    inputs.emplace(v);
+  return IterVisitor::next(v);
+    
 }
 
-std::vector<TensorView*> InputsOf::output(Fusion* fusion, Val* output_) {
+std::set<Val*> InputsOf::output(Fusion* fusion, Val* output_) {
   TORCH_CHECK(
       fusion->hasOutput(output_),
       "Asked for the inputs of ",
@@ -157,8 +160,26 @@ std::vector<Expr*> Fusion::exprs(bool from_outputs_only, bool breadth_first) {
   return ExprSort::getExprs(this, from_outputs_only, breadth_first);
 }
 
-std::vector<TensorView*> Fusion::inputsOf(Val* val) {
+std::set<Val*> Fusion::inputsOf(Val* val) {
   return InputsOf::output(this, val);
+}
+
+void Fusion::validateInputs() {
+  std::set<Val*> all_inputs;
+  for(Val* out : outputs()){
+    auto outs_inputs = inputsOf(out);
+    std::set_union(
+        all_inputs.begin(),
+        all_inputs.end(),
+        outs_inputs.begin(),
+        outs_inputs.end(),
+        std::inserter(all_inputs, all_inputs.begin()));
+  }
+  for(Val* inp : all_inputs){
+    if(!inp->isConstScalar())
+      TORCH_CHECK(hasInput(inp),
+      "Could not figure out how ", inp, " is generated, however it was not specified as an input.");
+  }
 }
 
 void Fusion::print() {
@@ -169,6 +190,18 @@ void Fusion::print() {
   IRTransformPrinter t_exprs(std::cout);
   t_exprs.handle(this);
   std::cout << "}\n";
+}
+
+void Fusion::printMath() {
+  FusionGuard fg(this);
+  IRMathPrinter op_exprs(std::cout);
+  op_exprs.handle(this);
+}
+
+void Fusion::printTransforms() {
+  FusionGuard fg(this);
+  IRTransformPrinter t_exprs(std::cout);
+  t_exprs.handle(this);
 }
 
 StmtNameType Fusion::registerVal(Val* val) {
