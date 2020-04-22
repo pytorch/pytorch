@@ -41,8 +41,6 @@ void gather_shape_check(const Tensor& self, int64_t dim, const Tensor& index, co
       " vs ", ensure_nonempty_size(index, i)
     );
   }
-
-
 }
 
 // Used for `scatter`-like methods
