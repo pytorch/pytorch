@@ -374,6 +374,7 @@ def gen_jit_dispatch(
                     name=decl['name'], first=args[0],
                     args=pack_arguments(args[1:]), num_inputs=num_inputs)
 
+
     def is_mutable_tensor(arg):
         jit_type = jit_type_of(arg)
         return jit_type.startswith('Tensor') and '!' in jit_type
@@ -388,6 +389,7 @@ def gen_jit_dispatch(
         return is_mutable_tensor(arg) or is_optional_int_list(arg)
 
     def unpack_lvalue(arg, value):
+        # generate unpack snippets based on arg type
         name = arg['name']
         if is_optional_int_list(arg):
             return [
@@ -397,10 +399,6 @@ def gen_jit_dispatch(
             ]
         else:
             return ['auto {} = {};\n'.format(name, value)]
-
-
-        # auto __output_size_opt = (std::move(peek(*stack, 1, 4))).toIntVectorOptional();
-        # c10::optional<IntArrayRef> output_size_opt = __output_size_opt ? c10::make_optional(IntArrayRef(__output_size_opt.value())) : c10::nullopt;
 
 
     def emit_decl_variant(decl):
