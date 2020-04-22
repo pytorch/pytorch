@@ -733,7 +733,7 @@ void addInputs(
   const c10::optional<at::IntArrayRef>& value
 ) {
   if (value.has_value()) {
-    detail::genericAddInput(n, static_cast<at::IntArrayRef>(*value));
+    addInputs(n, name, *value);
   } else {
     Graph* g = n->owningGraph();
     Value* none = g->insertNode(g->createNone())->output();

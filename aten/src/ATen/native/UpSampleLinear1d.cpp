@@ -217,7 +217,6 @@ Tensor& upsample_linear1d_out_cpu(
     c10::optional<IntArrayRef> output_size_opt,
     bool align_corners,
     c10::optional<double> scales) {
-  TORCH_CHECK(output_size_opt.has_value(), "HEY upsample_linear1d_out_cpu got output_size nullopt");
   IntArrayRef output_size = *output_size_opt;
   upsample_linear1d_out_cpu_template(output, input, output_size, align_corners, scales);
   return output;
@@ -230,7 +229,6 @@ Tensor upsample_linear1d_cpu(
     c10::optional<double> scales) {
   TORCH_CHECK(output_size_opt.has_value(), "HEY upsample_linear1d_cpu got output_size nullopt");
   IntArrayRef output_size = *output_size_opt;
-  std::cout << "HEY output_size " << output_size << "\n";
   auto output = at::empty({0}, input.options());
   upsample_linear1d_out_cpu_template(output, input, output_size, align_corners, scales);
   return output;
@@ -243,7 +241,6 @@ Tensor& upsample_linear1d_backward_out_cpu(
     IntArrayRef input_size,
     bool align_corners,
     c10::optional<double> scales) {
-  TORCH_CHECK(output_size_opt.has_value(), "HEY upsample_linear1d_backward_out_cpu got output_size nullopt");
   IntArrayRef output_size = *output_size_opt;
   upsample_linear1d_backward_out_cpu_template(
       grad_input, grad_output, output_size, input_size, align_corners, scales);
@@ -256,7 +253,6 @@ Tensor upsample_linear1d_backward_cpu(
     IntArrayRef input_size,
     bool align_corners,
     c10::optional<double> scales) {
-  TORCH_CHECK(output_size_opt.has_value(), "HEY upsample_linear1d_backward_cpu got output_size nullopt");
   IntArrayRef output_size = *output_size_opt;
   auto grad_input = at::zeros(input_size, grad_output.options());
   upsample_linear1d_backward_out_cpu_template(

@@ -685,11 +685,11 @@ inline std::vector<int64_t> IValue::toIntVector() const {
   return createVectorFromList<int64_t>(static_cast<const c10::detail::ListImpl*>(payload.as_intrusive_ptr));
 }
 // handles conversion from std::vector<int64_t> to at::IntArrayRef within optional
-inline c10::optional<at::IntArrayRef> IValue::toIntVectorOptional() {
+inline c10::optional<std::vector<int64_t>> IValue::toIntVectorOptional() {
   if (isNone()) {
     return c10::nullopt;
   }
-  return at::IntArrayRef(toIntVector());
+  return toIntVector();
 }
 inline c10::List<double> IValue::toDoubleList() && {
   AT_ASSERT(isDoubleList(), "Expected DoubleList but got ", tagKind());
