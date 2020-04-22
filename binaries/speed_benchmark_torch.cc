@@ -41,6 +41,11 @@ C10_DEFINE_bool(
   no_inputs,
   false,
   "Whether the model has any input. Will ignore other input arugments if true");
+C10_DEFINE_int(
+    use_bundled_input,
+    -1,
+    "If set, benchmark will expect the model to have bundled inputs "
+    "and will run on the input with this index. ");
 C10_DEFINE_bool(
   print_output,
   false,
@@ -69,6 +74,11 @@ split(char separator, const std::string& string, bool ignore_empty = true) {
 
 std::vector<c10::IValue> create_inputs() {
   if (FLAGS_no_inputs) {
+    return {};
+  }
+
+  if (FLAGS_use_bundled_input >= 0) {
+    // Need to get these after the model is loaded.
     return {};
   }
 
@@ -114,8 +124,7 @@ int main(int argc, char** argv) {
     "Example usage:\n"
     "./speed_benchmark_torch"
     " --model=<model_file>"
-    " --input_dims=\"1,3,224,224\""
-    " --input_type=float"
+    " --use_bundled_input=0"
     " --warmup=5"
     " --iter=20");
   if (!c10::ParseCommandLineFlags(&argc, &argv)) {
@@ -128,6 +137,24 @@ int main(int argc, char** argv) {
   torch::autograd::AutoGradMode guard(false);
   torch::jit::GraphOptimizerEnabledGuard no_optimizer_guard(false);
   auto module = torch::jit::load(FLAGS_model);
+
+  if (FLAGS_use_bundled_input >= 0) {
+    auto get_method = module.find_method("get_all_bundled_inputs");
+    if (!get_method) {
+      std::cerr << "Model does not have bundled inputs.  Before saving," << std::endl
+        << "use torch.utils.bundled_inputs.augment_model_with_bundled_inputs." << std::endl;
+      return 1;
+    }
+
+    auto all_inputs = (*get_method)({}).toList();
+    if (FLAGS_use_bundled_input >= all_inputs.size()) {
+      // NOTE: This check is only to make the error message nicer.
+      // The get call below does internal bounds checking.
+      std::cerr << "Model has only " << all_inputs.size() << " bundled inputs." << std::endl;
+      return 1;
+    }
+    inputs = all_inputs.get(FLAGS_use_bundled_input).toTuple()->elements();
+  }
 
   module.eval();
   if (FLAGS_print_output) {
