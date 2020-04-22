@@ -1,3 +1,4 @@
+#include <torch/csrc/autograd/record_function_ops.h>
 #include <ATen/cpp_custom_type_hack.h>
 #include <torch/csrc/autograd/record_function.h>
 #include <torch/csrc/jit/runtime/custom_operator.h>
@@ -16,7 +17,7 @@ at::Tensor record_function_enter(const std::string& name) {
   auto rec = std::make_unique<RecordFunction>(RecordScope::USER_SCOPE);
   // Only add new scope if profiling is enabled.
   if (auto* current = rec->current()) {
-    AT_ASSERT(
+    TORCH_INTERNAL_ASSERT(
         current->name() == StringView("profiler::_record_function_enter"));
     // RecordFunction requires parent_ to be alive for it's entire lifetime.
     // Since the currently active RecordFunction will only live for the lifetime
@@ -28,15 +29,42 @@ at::Tensor record_function_enter(const std::string& name) {
   return at::cpp_custom_type_hack::create(std::move(rec), at::TensorOptions());
 }
 
+RecordFunction& getRecordFunctionFromTensor(const at::Tensor& handle) {
+  auto& rec = at::cpp_custom_type_hack::cast<RecordFunction>(handle);
+  return rec;
+}
+
 void record_function_exit(const at::Tensor& handle) {
   // We don't actually need to do anything with handle just need to persist the
   // lifetime until now.
-  auto& rec = at::cpp_custom_type_hack::cast<RecordFunction>(handle);
+  auto& rec = getRecordFunctionFromTensor(handle);
   if (auto* current = rec.current()) {
-    AT_ASSERT(
-        current->name() == StringView("profiler::_record_function_exit"));
+    TORCH_INTERNAL_ASSERT(current->name() == StringView("profiler::_record_function_exit"));
+    current->_end();
   }
   rec._end();
+}
+
+// Same as _call_end_callbacks_on_fut but takes an ivalue future.
+// TODO: once python and JIT futures are merged, consolidate this with
+// call_end_callbacks_on_fut (https://github.com/pytorch/pytorch/issues/34999).
+void _call_end_callbacks_on_jit_fut(
+    const at::Tensor& handle,
+    const c10::intrusive_ptr<c10::ivalue::Future>& fut) {
+  // Add a callback onto the future to mark run RecordFunction's end callbacks
+  // when the future is completed.
+  fut->addCallback(
+      // Copy handle by value to persist after the python context manager is
+      // exited.
+      [handle]() {
+        TORCH_INTERNAL_ASSERT(
+            handle.defined(),
+            "Undefined RecordFunction handle. This can happen if the handle is "
+            "not correctly persisted and is destroyed before the future is "
+            "realized.");
+        auto& rec = getRecordFunctionFromTensor(handle);
+        rec._end();
+      });
 }
 
 // Internal only, do not use directly, use Python's record_function()
@@ -44,6 +72,24 @@ static auto registry =
     RegisterOperators()
         .op("profiler::_record_function_enter", &record_function_enter)
         .op("profiler::_record_function_exit", &record_function_exit);
+
+// Needed to register JIT operator in operator registry below
+c10::AliasAnalysisKind aliasAnalysisFromSchema() {
+  return c10::AliasAnalysisKind::FROM_SCHEMA;
+}
+
+jit::RegisterOperators reg_fut_ops({
+    jit::Operator(
+        "profiler::_call_end_callbacks_on_jit_fut(Tensor x, Future(t) y) -> ()",
+        [](jit::Stack& stack) {
+          // Pop inputs, which should be a future and a tensor
+          auto fut = jit::pop(stack).toFuture();
+          auto tensor = jit::pop(stack).toTensor();
+          _call_end_callbacks_on_jit_fut(tensor, fut);
+          return 0;
+        },
+        aliasAnalysisFromSchema()),
+});
 
 } // namespace profiler
 } // namespace autograd
