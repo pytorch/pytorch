@@ -838,6 +838,43 @@ class TestTypePromotion(TestCase):
                         self.fail(msg)
 
 
+    @onlyOnCPUAndCUDA
+    def test_cat_different_dtypes(self, device):
+        x = torch.tensor([1, 2, 3], device=device, dtype=torch.int8)
+        y = torch.tensor([4, 5, 6], device=device, dtype=torch.int32)
+        expected_out = torch.tensor([1, 2, 3, 4, 5, 6], device=device, dtype=torch.int32)
+        out = torch.cat([x, y])
+        self.assertEqual(out, expected_out, exact_dtype=True) 
+        z = torch.tensor([7, 8, 9], device=device, dtype=torch.int16)
+        expected_out = torch.tensor([1, 2, 3, 4, 5, 6, 7, 8, 9],
+                                    device=device, dtype=torch.int32)
+        out = torch.cat([x, y, z])
+        self.assertEqual(out, expected_out, exact_dtype=True) 
+
+    @onlyOnCPUAndCUDA
+    def test_cat_out_different_dtypes(self, device):
+        out = torch.zeros(6, device=device, dtype=torch.int16)
+        x = torch.tensor([1, 2, 3], device=device, dtype=torch.int8)
+        y = torch.tensor([4, 5, 6], device=device, dtype=torch.int32)
+        expected_out = torch.tensor([1, 2, 3, 4, 5, 6], device=device, dtype=torch.int16)
+        torch.cat([x, y], out=out)
+        self.assertEqual(out, expected_out, exact_dtype=True) 
+        z = torch.tensor([7, 8, 9], device=device, dtype=torch.int16)
+        out = torch.zeros(9, device=device, dtype=torch.int64)
+        expected_out = torch.tensor([1, 2, 3, 4, 5, 6, 7, 8, 9],
+                                    device=device, dtype=torch.int64)
+        torch.cat([x, y, z], out=out)
+        self.assertEqual(out, expected_out, exact_dtype=True) 
+
+    @onlyOnCPUAndCUDA
+    def test_cat_invalid_dtype_promotion(self, device):
+        out = torch.zeros(6, device=device, dtype=torch.int16)
+        x = torch.tensor([1, 2, 3], device=device, dtype=torch.int16)
+        y = torch.tensor([4, 5, 6], device=device, dtype=torch.float)
+        with self.assertRaisesRegex(RuntimeError, 'can\'t be cast'):
+            torch.cat([x, y], out=out)
+
+
 instantiate_device_type_tests(TestTypePromotion, globals())
 
 if __name__ == '__main__':

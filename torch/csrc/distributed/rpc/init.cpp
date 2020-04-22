@@ -250,7 +250,7 @@ PyObject* rpc_init(PyObject* /* unused */) {
               R"(
                   Create a helper proxy to easily launch an ``rpc_async`` using
                   the owner of the RRef as the destination to run functions on
-                  the object referenced by this RRef. More specifically,
+                  the object referenced by this RRef. More specifically, 
                   ``rref.rpc_async().func_name(*args, **kwargs)`` is the same as
                   the following:
 
@@ -274,7 +274,7 @@ PyObject* rpc_init(PyObject* /* unused */) {
               R"(
                   Create a helper proxy to easily launch an ``remote`` using
                   the owner of the RRef as the destination to run functions on
-                  the object referenced by this RRef. More specifically,
+                  the object referenced by this RRef. More specifically, 
                   ``rref.remote().func_name(*args, **kwargs)`` is the same as
                   the following:
 
