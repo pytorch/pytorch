@@ -1,21 +1,14 @@
+#include <test/cpp/tensorexpr/test_base.h>
+#include <torch/csrc/jit/ir/ir.h>
+#include <torch/csrc/jit/ir/irparser.h>
+#include <torch/csrc/jit/tensorexpr/buffer.h>
+#include <torch/csrc/jit/tensorexpr/kernel.h>
+#include <torch/csrc/jit/tensorexpr/loopnest.h>
+#include <torch/csrc/jit/tensorexpr/tensor.h>
+#include <torch/torch.h>
+#include <cmath>
 #include <sstream>
 #include <stdexcept>
-#include "test/cpp/tensorexpr/test_base.h"
-
-#include <cmath>
-
-#include "test/cpp/tensorexpr/padded_buffer.h"
-#include "torch/csrc/jit/ir/ir.h"
-#include "torch/csrc/jit/ir/irparser.h"
-#include "torch/csrc/jit/tensorexpr/buffer.h"
-#include "torch/csrc/jit/tensorexpr/cuda_codegen.h"
-#include "torch/csrc/jit/tensorexpr/kernel.h"
-#include "torch/csrc/jit/tensorexpr/loopnest.h"
-#include "torch/csrc/jit/tensorexpr/tensor.h"
-
-#include <c10/cuda/CUDACachingAllocator.h>
-#include <c10/util/Half.h>
-#include <torch/torch.h>
 
 namespace torch {
 namespace jit {
