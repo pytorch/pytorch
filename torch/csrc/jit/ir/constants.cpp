@@ -18,7 +18,6 @@ bool insertableTensor(const at::Tensor& ten) {
   return !ten.requires_grad();
 }
 
-
 // Check that TorchScript can handle inlining string.
 // TODO: support inlining any string (e.g. \x, \u, \U escapes).
 static bool isSupportedStringLiteral(const std::string& str) {
@@ -31,7 +30,7 @@ static bool isSupportedStringLiteral(const std::string& str) {
 
 bool insertableIValue(const IValue& ivalue) {
   if (ivalue.isString()) {
-     return isSupportedStringLiteral(ivalue.toString()->string());
+    return isSupportedStringLiteral(ivalue.toString()->string());
   }
   if (ivalue.isInt() || ivalue.isNone() || ivalue.isBool() ||
       ivalue.isDouble() || ivalue.isDevice()) {
