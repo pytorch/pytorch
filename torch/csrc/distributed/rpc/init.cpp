@@ -604,7 +604,9 @@ If the future completes with an error, an exception is thrown.
   module.def(
       "get_rpc_timeout",
       []() {
-        return RpcAgent::getCurrentRpcAgent()->getRpcTimeout().count() / 1000.f;
+        const float msToSecDiv = 1000.f;
+        return RpcAgent::getCurrentRpcAgent()->getRpcTimeout().count() /
+            msToSecDiv;
       },
       R"(
           Retrieve the default timeout for all RPCs that was set during RPC initialization.
