@@ -31,11 +31,15 @@ ValType promote_type(const ValType& t1, const ValType& t2) {
   return t1 < t2 ? t1 : t2;
 }
 
-bool is_cast_legal(const DataType& t1, const DataType& t2) {
+c10::optional<UnaryOpType> cast_type(const DataType& t1, const DataType& t2) {
   if ((DataType::Null == t1) || (DataType::Null == t2))
-    return false;
+    return c10::nullopt;
+  if ((DataType::Half == t1) && (DataType::Float == t2))
+	return UnaryOpType::HalfToFloat;;
+  if ((DataType::Float == t1) && (DataType::Half == t2))
+	return UnaryOpType::FloatToHalf;
   // In theory there could be stronger real check here in the future
-  return true;
+  return c10::nullopt;
 }
 
 template <typename T>
@@ -83,9 +87,11 @@ static _enum_unordered_map<UnaryOpType, std::string> unary_op_type_string_map{
     {UnaryOpType::Expm1,      "expm1f"},
     {UnaryOpType::Erf,        "erff"},
     {UnaryOpType::Erfc,       "erfcf"},
+    {UnaryOpType::FloatToHalf,"__float2half"},
     {UnaryOpType::Floor,      "floorf"},
     {UnaryOpType::Frac,       "frac"},
     {UnaryOpType::Gelu,       "gelu"},
+    {UnaryOpType::HalfToFloat,"__half2float"},
     {UnaryOpType::Lgamma,     "lgammaf"},
     {UnaryOpType::Log,        "logf"},
     {UnaryOpType::Log10,      "log10f"},

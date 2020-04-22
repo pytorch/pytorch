@@ -100,7 +100,6 @@ namespace jit {
   _(GPU_FusionDispatch)          \
   _(GPU_FusionSimpleArith)       \
   _(GPU_FusionSimpleTypePromote) \
-  _(GPU_FusionCastOp)            \
   _(GPU_FusionMutator)           \
   _(GPU_FusionRegister)          \
   _(GPU_FusionTopoSort)          \

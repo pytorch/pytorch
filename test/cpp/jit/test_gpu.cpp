@@ -88,17 +88,6 @@ void testGPU_FusionSimpleTypePromote() {
   TORCH_CHECK(f5->getDataType() == DataType::Float);
 }
 
-void testGPU_FusionCastOp() {
-  Fusion fusion;
-  FusionGuard fg(&fusion);
-
-  Float* f3_test = new Float{3.f};
-  Int* i3 = new Int{3};
-  auto f3 = castOp(DataType::Float, i3);
-
-  TORCH_CHECK(f3->getDataType().value() == f3_test->getDataType().value());
-}
-
 class ZeroMutator : public OptOutMutator {
  public:
   Statement* mutate(Float* f) {

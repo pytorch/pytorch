@@ -338,21 +338,6 @@ void IRPrinter::handle(const UnaryOp* const uop) {
   if (auto inline_uop = inline_op_str(uop->getUnaryOpType())) {
     os << inline_uop.value();
     handle(uop->in());
-  } else if(uop->getUnaryOpType() == UnaryOpType::Cast) {
-	if(    uop->in()->getDataType() == DataType::Half
-        && uop->out()->getDataType() == DataType::Float)
-      os << "__half2float(";
-    else if (    uop->in()->getDataType() == DataType::Float
-              && uop->out()->getDataType() == DataType::Half)
-      os << "__float2half(";
-    else
-      TORCH_CHECK(
-          false,
-          "Cast of DataType: ", uop->in()->getDataType().value(),
-          " to: ", uop->out()->getDataType().value(),
-          " not supported!");
-    handle(uop->in());
-    os << ")";
   } else {
     os << uop->getUnaryOpType() << "(";
     if(uop->getUnaryOpType() == UnaryOpType::RandLike)
