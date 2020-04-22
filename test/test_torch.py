@@ -5859,14 +5859,14 @@ class TestTorchDeviceType(TestCase):
         # Creates long string in advance to avoid a too-long Python line
         s = ".+Triggered internally at.+RangeFactories.+"
 
-        def warn_fn():
+        def cpp_warn_fn():
             out = torch.empty((5,))
             torch.arange(0, 3, out=out)
             return out
 
-        # Checks eager-mode warning
+        # Checks eager-mode cpp warning
         with warnings.catch_warnings(record=True) as w:
-            warn_fn()
+            cpp_warn_fn()
             frameinfo = inspect.getframeinfo(inspect.currentframe())
             warning = w[0]
 
@@ -5879,10 +5879,11 @@ class TestTorchDeviceType(TestCase):
             self.assertEqual(frameinfo.lineno - 6, warning.lineno)
             self.assertEqual(len(w), 1)
 
-        # Checks jitted warning
+        # Checks jitted cpp warning
         with warnings.catch_warnings(record=True) as w:
-            scripted_warn_fn = torch.jit.script(warn_fn)
-            scripted_warn_fn()
+            scripted_cpp_warn_fn = torch.jit.script(cpp_warn_fn)
+            scripted_cpp_warn_fn()
+            warning = w[0]
 
             # Checks for cpp context in the warning message
             self.assertTrue(re.search(s, str(warning.message)) is not None)
@@ -5893,6 +5894,22 @@ class TestTorchDeviceType(TestCase):
             # that makes checking the Python lineno fragile
             self.assertEqual(len(w), 1)
 
+        # Checks jitted Python warning
+        def warn_fn():
+            warnings.warn("Warning!")
+
+        # The jit mimics an eager-mode Python warning in this case
+        with warnings.catch_warnings(record=True) as w:
+            scripted_warn_fn = torch.jit.script(warn_fn)
+            scripted_warn_fn()
+            frameinfo = inspect.getframeinfo(inspect.currentframe())
+            warning = w[0]
+
+            self.assertTrue(re.search('Warning!', str(warning.message)) is not None)
+
+            # Checks the Python features of the warning
+            self.assertEqual(frameinfo.lineno - 6, warning.lineno)
+            self.assertEqual(len(w), 1)
 
     def _np_compare(self, fn_name, vals, device, dtype):
         assert TEST_NUMPY
