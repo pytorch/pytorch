@@ -163,8 +163,8 @@ class EagerModeNumericSuiteTest(QuantizationTestCase):
         def compare_and_validate_results(float_model, q_model, data):
             act_compare_dict = compare_model_outputs(float_model, q_model, data)
             self.assertEqual(len(act_compare_dict), 2)
-            exptected_act_compare_dict_keys = {"conv.stats", "quant.stats"}
-            self.assertTrue(act_compare_dict.keys() == exptected_act_compare_dict_keys)
+            expected_act_compare_dict_keys = {"conv.stats", "quant.stats"}
+            self.assertTrue(act_compare_dict.keys() == expected_act_compare_dict_keys)
             for k, v in act_compare_dict.items():
                 self.assertTrue(v["float"].shape == v["quantized"].shape)
 
@@ -187,7 +187,7 @@ class EagerModeNumericSuiteTest(QuantizationTestCase):
         q_model = convert(q_model)
         act_compare_dict = compare_model_outputs(model, q_model, data)
         self.assertEqual(len(act_compare_dict), 7)
-        exptected_act_compare_dict_keys = {
+        expected_act_compare_dict_keys = {
             "mycat.stats",
             "myadd.stats",
             "mymul.stats",
@@ -196,6 +196,6 @@ class EagerModeNumericSuiteTest(QuantizationTestCase):
             "my_scalar_mul.stats",
             "quant.stats",
         }
-        self.assertTrue(act_compare_dict.keys() == exptected_act_compare_dict_keys)
+        self.assertTrue(act_compare_dict.keys() == expected_act_compare_dict_keys)
         for k, v in act_compare_dict.items():
             self.assertTrue(v["float"].shape == v["quantized"].shape)

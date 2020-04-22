@@ -293,21 +293,12 @@ def get_matching_activations(float_module, q_module, Logger):
     return act_dict
 
 
-def remove_qconfig(module):
-    r"""Clean up the qconfig left in the module so that new qconfig can be
-    propagated.
-
-    Args:
-        module: module to be cleaned up
-    """
-    for child in module.children():
-        remove_qconfig(child)
-
-    if hasattr(module, "qconfig"):
-        del module.qconfig
-
-
-def prepare_model_outputs(float_module, q_module, white_list, Logger):
+def prepare_model_outputs(
+    float_module,
+    q_module,
+    white_list=DEFAULT_NUMERIC_SUITE_COMPARE_MODEL_OUTPUT_WHITE_LIST,
+    Logger=TensorLogger,
+):
     r"""Prepare the model by attaching the tensor logger to both float module
     and quantized module if they are in the white_list.
 
@@ -316,10 +307,6 @@ def prepare_model_outputs(float_module, q_module, white_list, Logger):
         q_module: the quantized module
         white_list: list of module types to attach tensor logger
     """
-    if white_list is None:
-        white_list = DEFAULT_NUMERIC_SUITE_COMPARE_MODEL_OUTPUT_WHITE_LIST
-    remove_qconfig(float_module)
-    remove_qconfig(q_module)
     qconfig_debug = torch.quantization.QConfig(activation=Logger, weight=None)
     float_module.qconfig = qconfig_debug
     prepare(float_module, inplace=True, white_list=white_list)
@@ -328,7 +315,11 @@ def prepare_model_outputs(float_module, q_module, white_list, Logger):
 
 
 def compare_model_outputs(
-    float_model, q_model, data, white_list=None, Logger=TensorLogger
+    float_model,
+    q_model,
+    data,
+    white_list=DEFAULT_NUMERIC_SUITE_COMPARE_MODEL_OUTPUT_WHITE_LIST,
+    Logger=TensorLogger,
 ):
     r"""Returns a dict with key corresponding to quantized module names and each
     entry being a dictionary with two keys 'float' and 'quantized', containing

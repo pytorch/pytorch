@@ -122,7 +122,7 @@ def add_quant_dequant(module):
         module._modules[name] = add_quant_dequant(child)
     return module
 
-def prepare(model, inplace=False, white_list=None):
+def prepare(model, inplace=False, white_list=DEFAULT_QCONFIG_PROPAGATE_WHITE_LIST):
     r"""Prepares a copy of the model for quantization calibration or quantization-aware training.
 
     Quantization configuration should be assigned preemptively
@@ -316,7 +316,8 @@ def convert(module, mapping=None, inplace=False):
 
     for key, value in reassign.items():
         module._modules[key] = value
-
+        if hasattr(module._modules[key], 'qconfig'):
+            delattr(module._modules[key], 'qconfig')
     return module
 
 def swap_module(mod, mapping):
