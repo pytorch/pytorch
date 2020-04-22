@@ -228,6 +228,27 @@
 - func: abs.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   supports_named_tensor: True
 
+- func: absolute(Tensor self) -> Tensor
+  use_c10_dispatcher: full
+  variants: function, method
+  dispatch:
+    CPU: abs
+    CUDA: abs
+  supports_named_tensor: True
+
+- func: absolute_(Tensor(a!) self) -> Tensor(a!)
+  variants: function, method
+  dispatch:
+    CPU: abs_
+    CUDA: abs_
+  supports_named_tensor: True
+
+- func: absolute.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: abs_out
+    CUDA: abs_out
+  supports_named_tensor: True
+
 - func: angle(Tensor self) -> Tensor
   use_c10_dispatcher: full
   variants: function, method
