@@ -2591,7 +2591,6 @@ class DistributedDataParallelTest(MultiProcessTestCase):
             self.assertIsNone(t1_p.grad)
             self.assertIsNone(task_unused_p.grad)
 
-
             # Run backward
             output.mean().backward()
 
@@ -2600,6 +2599,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
             self.assertIsNotNone(t0_p.grad)
             self.assertIsNotNone(t1_p.grad)
             self.assertIsNone(task_unused_p.grad)
+
 
         store = c10d.FileStore(self.file_name, self.world_size)
         process_group = c10d.ProcessGroupGloo(store, self.rank, self.world_size)
