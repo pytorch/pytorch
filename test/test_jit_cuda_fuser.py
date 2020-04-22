@@ -117,7 +117,6 @@ class TestCudaFuser(JitTestCase):
         self.assertEqual(o, jit_o)
         self.assertTrue(self._has_cuda_fusion_group(t_jit.graph_for(x, y, 2.0)))
 
-    @unittest.skipIf(True, "temporarily disable it as the hanging bug in codegen")
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING, "Requires profiling node to run cuda fuser")
     @skipIfRocm
@@ -137,7 +136,7 @@ class TestCudaFuser(JitTestCase):
         o = t(x, y, z)
         self.assertEqual(o, jit_o)
         # Currently cannot fuse this
-        self.assertFalse(self._has_cuda_fusion_group(t_jit.graph_for(x, y, z)))
+        self.assertTrue(self._has_cuda_fusion_group(t_jit.graph_for(x, y, z)))
 
     def _binary_test_helper(self, operation):
         def t(x : torch.Tensor, y: torch.Tensor, z : float):
