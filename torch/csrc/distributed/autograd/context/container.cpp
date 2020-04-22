@@ -68,7 +68,7 @@ uint32_t DistAutogradContainer::computeNumShards() {
       num_shards <<= 1;
     }
   }
-  LOG(INFO) << "Number of shards for DistAutogradContainer: " << num_shards;
+  VLOG(1) << "Number of shards for DistAutogradContainer: " << num_shards;
   return num_shards;
 }
 
