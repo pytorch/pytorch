@@ -1473,9 +1473,6 @@ def softmax(input, dim=None, _stacklevel=3, dtype=None):
     It is applied to all slices along dim, and will re-scale them so that the elements
     lie in the range `[0, 1]` and sum to 1.
 
-    When the input is sparse tensor then the unspecifed values are
-    treated as ``-inf``.
-
     See :class:`~torch.nn.Softmax` for more details.
 
     Arguments:

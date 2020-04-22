@@ -2556,10 +2556,15 @@ class TestSparse(TestCase):
                 x_.requires_grad_(True)
 
                 if log:
-                    y = F.log_softmax(x_, dim)
+                    if x_.is_sparse:
+                        y = torch.sparse.log_softmax(x_, dim)
+                    else:
+                        y = F.log_softmax(x_, dim)
                 else:
-                    y = F.softmax(x_, dim)
-                    if not y.is_sparse:
+                    if x_.is_sparse:
+                        y = torch.sparse.softmax(x_, dim)
+                    else:
+                        y = F.softmax(x_, dim)
                         # replace nan-s with zeros
                         y.data[y != y] = 0
                 y.backward(v)
@@ -2590,11 +2595,11 @@ class TestSparse(TestCase):
                 self.assertEqual(r1, r2)
 
                 # check C++ sparse softmax
-                y1 = F.softmax(x, dim)
+                y1 = torch.sparse.softmax(x, dim)
                 self.assertEqual(y, y1)
 
                 # check C++ sparse log_softmax
-                ly1 = F.log_softmax(x, dim)
+                ly1 = torch.sparse.log_softmax(x, dim)
                 self.assertEqual(ly1, sparse_log(y1))
 
                 # Check autograd support on sparse softmax
@@ -2631,6 +2636,17 @@ class TestSparse(TestCase):
                 J3_log = J3_log.transpose(0, dim + 1)
                 self.assertEqual(J, J2_log * r1)
                 self.assertEqual(J, J3_log * r1)
+
+                if dim == 0:
+                    # check dtype argument
+                    other_dtype = torch.float32
+                    y2 = torch.sparse.softmax(x, dim, dtype=other_dtype)
+                    self.assertEqual(y2.dtype, other_dtype)
+                    self.assertEqual(y2, y1.type(other_dtype))
+
+                    ly2 = torch.sparse.log_softmax(x, dim, dtype=other_dtype)
+                    self.assertEqual(ly2.dtype, other_dtype)
+                    self.assertEqual(ly2, ly1.type(other_dtype))
 
         test_op(1, 10, [3])
         test_op(1, 10, [2, 3])

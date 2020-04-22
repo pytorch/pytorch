@@ -8,6 +8,8 @@ __all__ = [
     'addmm',
     'mm',
     'sum',
+    'softmax',
+    'log_softmax',
 ]
 
 
@@ -137,3 +139,55 @@ def sum(input, dim=None, dtype=None):
             return torch._sparse_sum(input, dim, dtype=dtype)
         else:
             return torch._sparse_sum(input, dtype=dtype)
+
+
+def softmax(input, dim, dtype=None):
+    # type: (Tensor, int) -> Tensor
+    r"""Applies a softmax function.
+
+    Softmax is defined as:
+
+    :math:`\text{Softmax}(x_{i}) = \frac{exp(x_i)}{\sum_j exp(x_j)}`
+
+    where :math:`i, j` run over sparse tensor indicies and unspecified
+    entries are ignores. This is equivalent to defining unspecifed
+    entries as negative infinity so that :max:`exp(x_k) = 0` when the
+    entry with index :math:`k` has not specified.
+
+    It is applied to all slices along `dim`, and will re-scale them so
+    that the elements lie in the range `[0, 1]` and sum to 1.
+
+    Arguments:
+        input (Tensor): input
+        dim (int): A dimension along which softmax will be computed.
+        dtype (:class:`torch.dtype`, optional): the desired data type
+          of returned tensor.  If specified, the input tensor is
+          casted to :attr:`dtype` before the operation is
+          performed. This is useful for preventing data type
+          overflows. Default: None
+    """
+    if dtype is None:
+        return torch._sparse_softmax(input, dim)
+    else:
+        return torch._sparse_softmax(input, dim, dtype=dtype)
+
+
+def log_softmax(input, dim, dtype=None):
+    # type: (Tensor, int) -> Tensor
+    r"""Applies a softmax function followed by logarithm.
+
+    See :class:`~torch.sparse.softmax` for more details.
+
+    Arguments:
+        input (Tensor): input
+        dim (int): A dimension along which softmax will be computed.
+        dtype (:class:`torch.dtype`, optional): the desired data type
+          of returned tensor.  If specified, the input tensor is
+          casted to :attr:`dtype` before the operation is
+          performed. This is useful for preventing data type
+          overflows. Default: None
+    """
+    if dtype is None:
+        return torch._sparse_log_softmax(input, dim)
+    else:
+        return torch._sparse_log_softmax(input, dim, dtype=dtype)
