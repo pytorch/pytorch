@@ -167,6 +167,7 @@ IS_PYTORCH_CI = bool(os.environ.get('IS_PYTORCH_CI'))
 IN_CIRCLECI = bool(os.environ.get('IN_CIRCLECI'))
 TEST_REPORT_SOURCE_OVERRIDE = os.environ.get('TEST_REPORT_SOURCE_OVERRIDE')
 
+PY3 = sys.version_info > (3, 0)
 PY34 = sys.version_info >= (3, 4)
 
 def run_tests(argv=UNITTEST_ARGS):
