@@ -3819,9 +3819,9 @@ criterion_tests = [
     ),
     dict(
         module_name='MultiMarginLoss',
-        constructor_args=(1, 1., torch.rand(10)),
+        constructor_args=(1, 1., torch.rand(10).double()),
         cpp_constructor_args='torch::nn::MultiMarginLossOptions().p(1).margin(1.).weight(torch::rand(10))',
-        legacy_constructor_args=(1, torch.rand(10)),
+        legacy_constructor_args=(1, torch.rand(10).double()),
         input_size=(5, 10),
         target_fn=lambda: torch.rand(5).mul(8).floor().long(),
         reference_fn=lambda i, t, m:
