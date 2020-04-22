@@ -8,7 +8,7 @@ from torch.nn import Conv2d, BatchNorm2d, ReLU
 from torch.nn.intrinsic.qat import ConvBn2d, ConvBnReLU2d
 from torch.quantization.qconfig import default_qat_qconfig
 import torch.backends.mkldnn
-from torch.testing._internal.common_utils import TestCase, run_tests
+from torch.testing._internal.common_utils import TestCase
 from hypothesis import given
 from hypothesis import strategies as st
 import torch.testing._internal.hypothesis_utils as hu

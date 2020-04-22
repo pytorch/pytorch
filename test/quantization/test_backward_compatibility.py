@@ -12,7 +12,6 @@ import torch.nn.intrinsic.quantized as nniq
 
 # Testing utils
 from torch.testing._internal.common_utils import TestCase
-from torch.testing._internal.common_utils import run_tests
 
 class TestSerialization(TestCase):
     """ Test backward compatiblity for serialization and numerics

@@ -6,7 +6,7 @@ from copy import deepcopy
 from hypothesis import given
 from hypothesis import strategies as st
 
-from torch.testing._internal.common_utils import TestCase, run_tests
+from torch.testing._internal.common_utils import TestCase
 import torch.testing._internal.hypothesis_utils as hu
 
 hu.assert_deadline_disabled()

@@ -1,3 +1,4 @@
+import torch
 from torch.quantization import default_eval_fn, quantize
 from torch.quantization._numeric_suite import compare_weights
 from torch.testing._internal.common_quantization import (
