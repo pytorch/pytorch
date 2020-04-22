@@ -55,6 +55,8 @@ white_list = [
     ('quantized::linear_dynamic', datetime.date(2020, 6, 1)),
     ('quantized::linear_relu', datetime.date(2020, 6, 1)),
     ('quantized::linear', datetime.date(2020, 6, 1)),
+    ('_aten::*', datetime.date(2020, 6, 1)),
+    ('_prim::*', datetime.date(2020, 6, 1)),
 ]
 
 

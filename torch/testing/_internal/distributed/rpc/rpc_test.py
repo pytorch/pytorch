@@ -24,6 +24,7 @@ from torch.testing._internal.dist_utils import (
     dist_init,
     get_function_event,
     get_shutdown_error_regex,
+    get_timeout_error_regex,
     initialize_pg,
     wait_until_node_failure,
     wait_until_pending_users_flushed,
@@ -1862,8 +1863,11 @@ class RpcTest(RpcAgentTestFixture):
         rpc.shutdown()
 
     @dist_init
-    @requires_process_group_agent("PROCESS_GROUP rpc backend specific test, skip")
-    def test_rpc_timeouts(self):
+    def test_default_timeout_used(self):
+        """
+        Tests that if no timeout is passed into rpc_async and rpc_sync, then the
+        default timeout is used.
+        """
         dst_rank = (self.rank + 1) % self.world_size
         rpc._set_rpc_timeout(timedelta(milliseconds=1))
         # futures should time out and be marked with an exception indicating it as such.
@@ -1871,8 +1875,9 @@ class RpcTest(RpcAgentTestFixture):
             rpc.rpc_async(worker_name(dst_rank), my_sleep_func, args=())
             for _ in range(10)
         ]
+        expected_error = get_timeout_error_regex(dist_utils.TEST_CONFIG.rpc_backend_name)
         for fut in futs:
-            with self.assertRaisesRegex(RuntimeError, "RPC ran for more than"):
+            with self.assertRaisesRegex(RuntimeError, expected_error):
                 fut.wait()
 
         # ensure that if a new timeout is set old futures don't time out but new ones do.
@@ -1881,18 +1886,61 @@ class RpcTest(RpcAgentTestFixture):
         fut1 = rpc.rpc_async(worker_name(dst_rank), my_sleep_func, args=(1,))
         # now, set a short timeout.
         rpc._set_rpc_timeout(timedelta(milliseconds=1))
-        # f2 should time out, f should not.
+        # fut2 should time out, fut1 should not.
         fut2 = rpc.rpc_async(worker_name(dst_rank), my_sleep_func, args=(1,))
-        with self.assertRaises(RuntimeError):
+        with self.assertRaisesRegex(RuntimeError, expected_error):
             fut2.wait()
         fut1.wait()
 
-        # future should run to completion if the timeout is zero.
+        # Zero timeout means infinity, so future should run to completion.
         rpc._set_rpc_timeout(timedelta(seconds=0))
         rpc.rpc_async(worker_name(dst_rank), my_sleep_func, args=()).wait()
 
         # reset to default timeout so shutdown messages can process cleanly.
         rpc._set_rpc_timeout(rpc.constants.DEFAULT_RPC_TIMEOUT)
+
+    @dist_init
+    def test_rpc_timeouts(self):
+        # TODO: enable timeouts for rpc.remote/RRef (https://github.com/pytorch/pytorch/issues/33803)
+        dst_rank = (self.rank + 1) % self.world_size
+        dst_worker = worker_name(dst_rank)
+        timeout = 0.1  # 100 ms
+        expected_error = get_timeout_error_regex(dist_utils.TEST_CONFIG.rpc_backend_name)
+        # Test async UDF
+        fut = rpc.rpc_async(dst_worker, my_sleep_func, args=(1,), timeout=timeout)
+        with self.assertRaisesRegex(RuntimeError, expected_error):
+            fut.wait()
+
+        # Ensure run to completion if there is no timeout and we use the default
+        # RPC timeout.
+        rpc.rpc_async(dst_worker, my_sleep_func, args=(1,)).wait()
+
+        # Test sync UDF
+        with self.assertRaisesRegex(RuntimeError, expected_error):
+            rpc.rpc_sync(dst_worker, my_sleep_func, args=(1,), timeout=timeout)
+
+        # Ensure run to completion if there is no timeout and we use the default
+        # RPC timeout.
+        rpc.rpc_sync(dst_worker, my_sleep_func, args=(1,))
+
+        # If we set a default timeout for RPCs, it should be respected, though
+        # still overridden if we pass in a different timeout to the APIs.
+        rpc._set_rpc_timeout(timedelta(milliseconds=1))
+        fut = rpc.rpc_async(dst_worker, my_sleep_func, args=(1,))
+        with self.assertRaisesRegex(RuntimeError, expected_error):
+            fut.wait()
+        with self.assertRaisesRegex(RuntimeError, expected_error):
+            rpc.rpc_sync(dst_worker, my_sleep_func, args=(1,))
+
+        # The RPCs should run to completion since we override the timeout.
+        rpc.rpc_async(dst_worker, my_sleep_func, args=(1,), timeout=5).wait()
+        rpc.rpc_sync(dst_worker, my_sleep_func, args=(1,), timeout=5)
+        # Passing in a zero timeout should ensure that the RPC won't time out.
+        rpc.rpc_async(dst_worker, my_sleep_func, args=(1,), timeout=0).wait()
+        rpc.rpc_sync(dst_worker, my_sleep_func, args=(1,), timeout=0)
+        # Reset for clean shutdown
+        rpc._set_rpc_timeout(timedelta(seconds=60))
+
 
     def test_requires_process_group_agent_decorator(self):
         @requires_process_group_agent("test_func did not run")
