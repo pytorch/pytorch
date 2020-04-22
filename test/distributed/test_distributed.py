@@ -16,13 +16,12 @@ import torch.cuda
 import torch.distributed as dist
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.testing._internal.common_utils import TestCase, TEST_WITH_TSAN, run_tests, find_free_port
+from torch.testing._internal.common_utils import TestCase, run_tests, find_free_port
 from torch.distributed.distributed_c10d import _get_default_group
 from torch._utils_internal import TEST_MASTER_ADDR as MASTER_ADDR
 from torch._utils_internal import TEST_MASTER_PORT as MASTER_PORT
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
-    requires_gloo,
     simple_sparse_reduce_tests,
     skip_if_rocm,
 )
@@ -42,8 +41,8 @@ but it could not be found. Install ninja with `pip install ninja`
 or `conda install ninja`.
 """
 
-BACKEND = os.getenv("BACKEND", None)
-TEMP_DIR = os.getenv("TEMP_DIR", None)
+BACKEND = os.environ["BACKEND"]
+TEMP_DIR = os.environ["TEMP_DIR"]
 INIT_METHOD = os.getenv("INIT_METHOD", "env://")
 
 DEFAULT_TIMEOUT = 300
@@ -140,7 +139,7 @@ def skip_if_no_gpu(func):
     def wrapper(*args, **kwargs):
         if not torch.cuda.is_available():
             sys.exit(SKIP_IF_NO_CUDA_EXIT_CODE)
-        if torch.cuda.device_count() < int(os.getenv("WORLD_SIZE", -1)):
+        if torch.cuda.device_count() < int(os.environ["WORLD_SIZE"]):
             sys.exit(SKIP_IF_NO_GPU_EXIT_CODE)
 
         return func(*args, **kwargs)
@@ -153,7 +152,7 @@ def skip_if_small_worldsize(func):
 
     @wraps(func)
     def wrapper(*args, **kwargs):
-        if (os.environ["BACKEND"] != "mpi") and int(os.getenv("WORLD_SIZE", -1)) <= 2:
+        if (os.environ["BACKEND"] != "mpi") and int(os.environ["WORLD_SIZE"]) <= 2:
             sys.exit(SKIP_IF_SMALL_WORLDSIZE_EXIT_CODE)
 
         return func(*args, **kwargs)
@@ -199,7 +198,7 @@ def require_backends_available(backends):
 
 
 def require_world_size(world_size):
-    if int(os.getenv("WORLD_SIZE", -1)) < world_size:
+    if int(os.environ["WORLD_SIZE"]) < world_size:
         return unittest.skip("Test requires world size of %d" % world_size)
     return lambda func: func
 
@@ -2328,99 +2327,6 @@ elif BACKEND == "test":
             self.assertTrue(work.is_success())
 
             dist.destroy_process_group()
-
-
-@unittest.skipIf(TEST_WITH_TSAN, "TSAN is not fork-safe since we're forking in a multi-threaded environment")
-class DistributedDataParallelSingleProcessTest(TestCase):
-    def setUp(self):
-        self.rank = 0
-        self.world_size = 1
-        self.file = tempfile.NamedTemporaryFile(delete=False)  # noqa: P201
-
-    def tearDown(self):
-        try:
-            os.remove(self.file.name)
-        except OSError:
-            pass
-
-    def _test_base(self, net, inp, check_allclose=True):
-        store = dist.FileStore(self.file.name, self.world_size)
-        process_group = dist.ProcessGroupGloo(store, self.rank, self.world_size)
-
-        ddp = nn.parallel.DistributedDataParallel(
-            copy.deepcopy(net),
-            process_group=process_group
-        )
-
-        net_opt = torch.optim.Adam(net.parameters(), lr=0.001)
-        ddp_opt = torch.optim.Adam(ddp.parameters(), lr=0.001)
-
-        for i, j in zip(ddp.parameters(), net.parameters()):
-            self.assertTrue(i.allclose(j))
-
-        for _ in range(1):
-            net_out = net(*inp)
-            ddp_out = ddp(*inp)
-
-            net_out.sum().backward()
-            ddp_out.sum().backward()
-
-            net_opt.step()
-            ddp_opt.step()
-
-        if check_allclose:
-            for i, j in zip(ddp.parameters(), net.parameters()):
-                self.assertTrue(i.allclose(j))
-
-    @requires_gloo()
-    def test_cpu(self):
-        self._test_base(nn.Linear(2, 2), [torch.randn(30, 2)])
-
-    @requires_gloo()
-    @skip_if_no_cuda_distributed
-    def test_cuda(self):
-        self._test_base(nn.Linear(2, 2).to(0), [torch.randn(30, 2).to(0)])
-
-    @requires_gloo()
-    @skip_if_no_cuda_distributed
-    def test_rnn(self):
-        # This test is inspired by the bug reported in
-        # https://github.com/pytorch/pytorch/issues/36268
-        BATCH_SIZE = 4
-        INPUT_DIM = 256
-        OUTPUT_DIM = 256
-        HIDDEN_DIM = 256
-        N_LAYERS = 3
-        SEQ_LEN = 100
-
-        class Net(nn.Module):
-            def __init__(self, input_dim, hidden_dim, output_dim, hidden_layers):
-                super(Net, self).__init__()
-                self.input_dim = input_dim
-                self.hidden_dim = hidden_dim
-                self.output_dim = output_dim
-                self.hidden_layers = hidden_layers
-
-                self.lstm = nn.LSTM(input_dim, hidden_dim, hidden_layers, batch_first=True)
-                self.h2o = nn.Linear(hidden_dim, output_dim)
-
-            def forward(self, x, y):
-                self.lstm.flatten_parameters()
-                h_t, _ = self.lstm(x)
-                output = self.h2o(h_t)
-                loss = F.mse_loss(output, y)
-                return loss
-
-        net = Net(INPUT_DIM, HIDDEN_DIM, OUTPUT_DIM, N_LAYERS).to(0)
-        inp = [
-            torch.randn((BATCH_SIZE, SEQ_LEN, INPUT_DIM)).to(0),
-            torch.rand((BATCH_SIZE, SEQ_LEN, OUTPUT_DIM)).to(0)
-        ]
-
-        # Not checking result allclose as the parameter inconsistency exist
-        # prior to this change. See #37079
-        self._test_base(net, inp, check_allclose=False)
-
 
 if __name__ == "__main__":
     assert (
