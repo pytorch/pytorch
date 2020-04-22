@@ -1081,6 +1081,27 @@ Stmt* PolynomialTransformer::mutate(const For* v) {
   return new For(var_new, start_new, stop_new, body_new, loop_options);
 }
 
+Stmt* PolynomialTransformer::mutate(const Block* v) {
+  std::vector<Stmt*> stmts;
+  for (Stmt* stmt : v->stmts()) {
+    Stmt* stmt_new = stmt->accept_mutator(this);
+    if (stmt_new == nullptr) {
+      continue;
+    }
+
+    if (auto* subBlock = dynamic_cast<Block*>(stmt_new)) {
+      for (auto* s : subBlock->stmts()) {
+        subBlock->remove_stmt(s);
+        stmts.push_back(s);
+      }
+    } else {
+      stmts.push_back(Stmt::clone(stmt_new));
+    }
+  }
+
+  return new Block(stmts);
+}
+
 // TermExpander
 
 const Expr* TermExpander::mutate(const Term* v) {
