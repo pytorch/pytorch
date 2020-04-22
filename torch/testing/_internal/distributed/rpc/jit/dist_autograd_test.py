@@ -1,4 +1,3 @@
-import unittest
 from typing import Tuple
 
 import torch
@@ -29,9 +28,6 @@ def fork_add(t1, t2, dst: str):
     return torch.jit._wait(fut)
 
 
-@unittest.skipIf(
-    not torch._six.PY3, "Pytorch distributed autograd package does not support python2"
-)
 class JitDistAutogradTest(RpcAgentTestFixture):
     @dist_init
     def test_get_gradients(self):

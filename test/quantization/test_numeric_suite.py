@@ -1,5 +1,4 @@
 import torch
-import copy
 import torch.nn as nn
 import torch.nn.quantized as nnq
 from torch.quantization import (
