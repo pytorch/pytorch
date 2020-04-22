@@ -2,7 +2,7 @@ import math
 
 import torch
 from torch import Tensor
-from torch.nn.parameter import Parameter
+from torch.nn.parameter import Parameter, _UninitializedParameter, ParameterMode
 from .. import functional as F
 from .. import init
 from .module import Module
@@ -69,11 +69,19 @@ class Linear(Module):
     out_features: int
     weight: Tensor
 
-    def __init__(self, in_features: int, out_features: int, bias: bool = True) -> None:
+    def __init__(self, in_features: int, out_features: int, bias: bool = True, param_mode: ParameterMode = ParameterMode.Explicit) -> None:
         super(Linear, self).__init__()
         self.in_features = in_features
         self.out_features = out_features
-        self.weight = Parameter(torch.Tensor(out_features, in_features))
+        self.must_initialize = param_mode == ParameterMode.Infer
+
+        if param_mode == ParameterMode.Infer:
+            self.weight = _UninitializedParameter()
+        elif param_mode == ParameterMode.Explicit:
+            self.weight = Parameter(torch.Tensor(out_features, in_features))
+        else:
+            raise ValueError('Unknown parameter initialization mode')
+
         if bias:
             self.bias = Parameter(torch.Tensor(out_features))
         else:
@@ -81,13 +89,21 @@ class Linear(Module):
         self.reset_parameters()
 
     def reset_parameters(self) -> None:
-        init.kaiming_uniform_(self.weight, a=math.sqrt(5))
-        if self.bias is not None:
-            fan_in, _ = init._calculate_fan_in_and_fan_out(self.weight)
-            bound = 1 / math.sqrt(fan_in)
-            init.uniform_(self.bias, -bound, bound)
+        # Defer until parameter initialization
+        if not self.must_initialize:
+            init.kaiming_uniform_(self.weight, a=math.sqrt(5))
+            if self.bias is not None:
+                fan_in, _ = init._calculate_fan_in_and_fan_out(self.weight)
+                bound = 1 / math.sqrt(fan_in)
+                init.uniform_(self.bias, -bound, bound)
 
     def forward(self, input: Tensor) -> Tensor:
+        # Inputs are reshaped on the first forward call
+        if self.must_initialize:
+            self.in_features = input.shape[-1]
+            self.weight = Parameter(torch.Tensor(self.out_features, self.in_features))
+            self.must_initialize = False
+            self.reset_parameters()
         return F.linear(input, self.weight, self.bias)
 
     def extra_repr(self) -> str:

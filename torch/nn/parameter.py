@@ -1,5 +1,10 @@
+import enum
 import torch
 from collections import OrderedDict
+
+class ParameterMode(enum.Enum):
+    Explicit = 1
+    Infer = 2
 
 
 class Parameter(torch.Tensor):
@@ -42,3 +47,12 @@ class Parameter(torch.Tensor):
             torch._utils._rebuild_parameter,
             (self.data, self.requires_grad, OrderedDict())
         )
+
+
+class _UninitializedParameter(Parameter):
+    r"""A parameter that is not yet initialized for lazy modules support.
+
+    UninitializedParameters are detected by the optimizer ...
+    """
+    def __repr__(self):
+        return 'Uninitialized lazy parameter'

@@ -4,7 +4,7 @@ import itertools
 import warnings
 
 import torch
-from ..parameter import Parameter
+from ..parameter import Parameter, _UninitializedParameter
 import torch.utils.hooks as hooks
 
 from torch import Tensor, device, dtype
@@ -1084,6 +1084,8 @@ class Module:
 
         """
         for name, param in self.named_parameters(recurse=recurse):
+            if isinstance(param, _UninitializedParameter):
+                raise ValueError('Can\'t retrieve an unitialized parameter {}'.format(name))
             yield param
 
     def named_parameters(self, prefix: str = '', recurse: bool = True) -> Iterator[Tuple[str, Tensor]]:
