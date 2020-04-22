@@ -316,7 +316,7 @@ MemoryLocations AliasDb::getReads(Node* n) const {
 }
 
 std::string AliasDb::getElementName(const Element* e) const {
-  if (e->value == nullptr) {
+  if (e->values.empty()) {
     // not the most efficient way, but given the fact there are
     // not too many types and even fewer of them will end up in
     // wildcardIndex_, we should be fine with a linear search
@@ -328,7 +328,17 @@ std::string AliasDb::getElementName(const Element* e) const {
     }
     return "WILDCARD";
   } else {
-    return e->value->debugName();
+    std::ostringstream ss;
+    if (e->values.size() == 1) {
+      ss << "%" << (*e->values.begin())->debugName();
+      return ss.str();
+    }
+    ss << "(";
+    for (const Value* v : e->values) {
+      ss << "%" << v->debugName() << ", ";
+    }
+    ss << ")";
+    return ss.str();
   }
 }
 
@@ -455,6 +465,8 @@ void AliasDb::analyzeImpl(Node* node) {
     case prim::Loop:
       return analyzeLoop(node);
     case prim::FusionGroup:
+      // FusionGroups are pure functions
+      return analyzeCreator(node);
     case prim::CudaFusionGroup:
     case prim::FunctionalGraph:
     case prim::DifferentiableGraph:
@@ -1059,14 +1071,29 @@ Element* AliasDb::getOrCreateElement(const Value* value) {
   return elementMap_.at(value);
 }
 
-void AliasDb::replaceMemoryLocation(Value* existing, Value* new_value) {
+void AliasDb::replaceWithNewValue(Value* existing, Value* new_value) {
+  TORCH_INTERNAL_ASSERT(
+      *existing->type() == *new_value->type(),
+      "Types must be strictly equal if you are copying aliasing information");
   if (!isMutableTypeInternal(existing)) {
     return;
   }
   auto existing_elem = elementMap_.at(existing);
   elementMap_[new_value] = existing_elem;
   elementMap_.erase(existing);
-  existing_elem->value = new_value;
+  existing_elem->values = {new_value};
+}
+
+void AliasDb::copyValue(Value* from, Value* to) {
+  TORCH_INTERNAL_ASSERT(
+      *from->type() == *to->type(),
+      "Types must be strictly equal if you are copying aliasing information");
+  if (!isMutableTypeInternal(to)) {
+    return;
+  }
+  auto origElem = elementMap_.at(from);
+  elementMap_[to] = origElem;
+  origElem->values.insert(to);
 }
 
 bool AliasDb::moveAfterTopologicallyValid(Node* n, Node* movePoint) {

@@ -132,7 +132,7 @@ struct GraphFuser {
   using FusionCallback = std::function<bool(Node*)>;
 
   Block* block_;
-  std::unique_ptr<AliasDb> aliasDb_;
+  AliasDb* aliasDb_;
   std::shared_ptr<Graph> graph_;
   FusionCallback callback_ = [&](Node* n) {
     return isFusableDefault(n, this->strict_fuser_check_);
@@ -148,24 +148,18 @@ struct GraphFuser {
   // Change with setInputArgLimit
   size_t subgraph_arg_limit_ = 128;
 
-  GraphFuser(
-      Block* block,
-      std::shared_ptr<Graph> graph,
-      bool strict_fuser_check)
+  GraphFuser(AliasDb* aliasDb, Block* block, bool strict_fuser_check)
       : block_(block),
-        graph_(std::move(graph)),
+        aliasDb_(aliasDb),
         strict_fuser_check_(strict_fuser_check) {}
 
   // Custom passes require kind to specified
   GraphFuser(
+      AliasDb* aliasDb,
       Block* block,
-      std::shared_ptr<Graph> graph,
       FusionCallback callback,
       Symbol kind)
-      : block_(block),
-        graph_(std::move(graph)),
-        callback_(callback),
-        kind_(kind) {}
+      : block_(block), aliasDb_(aliasDb), callback_(callback), kind_(kind) {}
 
   void setInputArgLimit(size_t limit) {
     subgraph_arg_limit_ = limit;
@@ -408,6 +402,7 @@ struct GraphFuser {
     getSubgraph(group).registerOutput(mergedNode->output());
     auto sel = group->addOutput();
     sel->copyMetadata(n->output());
+    aliasDb_->replaceWithNewValue(n->output(), sel);
     n->replaceAllUsesWith(group);
     n->destroy();
     return group;
@@ -457,6 +452,7 @@ struct GraphFuser {
       getSubgraph(group).registerOutput(merged->output());
       Value* new_producer = group->addOutput();
       new_producer->copyMetadata(producer);
+      aliasDb_->replaceWithNewValue(producer, new_producer);
       producer->replaceAllUsesWith(new_producer);
     }
     producer->node()->destroy();
@@ -619,6 +615,7 @@ struct GraphFuser {
       auto* old_output = chunk->outputs().at(i);
       auto* new_output = bchunk->outputs().at(i);
       new_output->copyMetadata(old_output);
+      aliasDb_->replaceWithNewValue(old_output, new_output);
       old_output->replaceAllUsesWith(new_output);
     }
     bchunk->copyAttributes(*chunk);
@@ -802,6 +799,7 @@ struct GraphFuser {
       }
       bchunk->owningGraph()->insertNode(chunked_op);
       chunk_sel->replaceAllUsesWith(chunked_op->output());
+      aliasDb_->replaceWithNewValue(chunk_sel, chunked_op->output());
     }
 
     bchunk->removeInput(producer_index);
@@ -889,6 +887,7 @@ struct GraphFuser {
           auto old_output =
               bchunk->outputs().at(input_offset * nchunks + output_offset);
           new_output->copyMetadata(old_output);
+          aliasDb_->replaceWithNewValue(old_output, new_output);
           old_output->replaceAllUsesWith(new_output);
         }
       }
@@ -1003,10 +1002,6 @@ struct GraphFuser {
     }
   }
 
-  void refreshAliasDb() {
-    aliasDb_ = torch::make_unique<AliasDb>(graph_);
-  }
-
   bool canFuseWithConcat(Value* producer, Node* before_check) {
     if (!isFusable(producer->node())) {
       return false;
@@ -1046,6 +1041,7 @@ struct GraphFuser {
                           ->i_(attr::dim, dim);
     fused_cat->insertBefore(list_construct);
     fused_cat->output()->copyMetadata(node->output());
+    aliasDb_->copyValue(node->output(), fused_cat->output());
 
     // NB: this deletes the fused_cat node from the original graph
     return createSingletonFusionGroup(fused_cat);
@@ -1123,14 +1119,12 @@ struct GraphFuser {
     bool any_changed = true;
     while (any_changed) {
       any_changed = false;
-      refreshAliasDb();
       for (auto it = block_->nodes().rbegin(); it != block_->nodes().rend();) {
         bool changed;
         std::tie(it, changed) = scanNode(*it);
         any_changed |= changed;
       }
     }
-    refreshAliasDb();
 
     fuseConcats();
 
@@ -1152,7 +1146,7 @@ struct GraphFuser {
 
     for (Node* node : block_->nodes()) {
       for (Block* sub_block : node->blocks()) {
-        GraphFuser(sub_block, graph_, callback_, kind_).run();
+        GraphFuser(aliasDb_, sub_block, callback_, kind_).run();
       }
     }
   }
@@ -1213,7 +1207,8 @@ void PeepholeOptimizeShapeExpressions(Block* block) {
 } // anonymous namespace
 
 void FuseGraph(std::shared_ptr<Graph>& graph, bool strict_fuser_check) {
-  GraphFuser(graph->block(), graph, strict_fuser_check).run();
+  AliasDb db(graph);
+  GraphFuser(&db, graph->block(), strict_fuser_check).run();
   // After FuseGraph some common subexpressions may come back
   EliminateCommonSubexpression(graph);
   // We might have emitted a fair amount of useless shape propagating code, so
@@ -1228,9 +1223,10 @@ void CustomFuseGraph(
     std::function<bool(Node*)> fn,
     Symbol kind,
     size_t arg_limit) {
+  AliasDb db(graph);
   auto g = GraphFuser(
+      &db,
       graph->block(),
-      graph,
       [=](Node* n) { return fn(n) || n->kind() == kind; },
       kind);
   g.setInputArgLimit(arg_limit);

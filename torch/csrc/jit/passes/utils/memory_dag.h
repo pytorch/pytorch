@@ -120,6 +120,8 @@ class TORCH_API MemoryDAGBuilder {
 // also the "inside of a list", or wildcards.
 struct Element {
   Element(const Value* value_, unsigned index_);
+  // wildcard constructor
+  explicit Element(unsigned index_);
 
   // Index into the owning DAG's bit vector that represents this element.
   unsigned index;
@@ -133,9 +135,10 @@ struct Element {
   // Elements can contain other elements (e.g. List[Tensor])
   MemoryLocations containedElements;
 
-  // The value that this element corresponds to. May be null if this element
+  // The values that this element corresponds to. May be empty if this element
   // doesn't represent a first-class value.
-  const Value* value = nullptr;
+  // This is for debug information only.
+  std::unordered_set<const Value*> values = {};
 
  private:
   // Make `from` point at `to`.

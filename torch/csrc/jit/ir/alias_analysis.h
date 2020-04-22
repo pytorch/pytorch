@@ -117,6 +117,14 @@ class AliasDb {
   static bool isMutableType(const Value* v);
   static bool isMutableType(const TypePtr& type);
 
+  // In the Value * -> Element * map replaces the mapping
+  // of Value * existing -> Element * existing_elem with
+  // Value * new_value -> Element * existing_elem
+  // Callers are expected to maintain graph invariants & specify
+  // own correctness conditions
+  void replaceWithNewValue(Value* existing, Value* new_value);
+  void copyValue(Value* from, Value* to);
+
   friend struct MutationRemover;
 
  private:
@@ -190,13 +198,6 @@ class AliasDb {
   void unsafeGiveFreshAlias(const Value* value);
   void giveFreshAlias(const Value* value);
   Element* getOrCreateElement(const Value* value);
-
-  // In the Value * -> Element * map replaces the mapping
-  // of Value * existing -> Element * existing_elem with
-  // Value * new_value -> Element * existing_elem
-  // Callers are expected to maintain graph invariants & specify
-  // own correctness conditions
-  void replaceMemoryLocation(Value* existing, Value* new_value);
 
   c10::optional<TypePtr> getMutableTypePtr(const TypePtr& type) const;
 

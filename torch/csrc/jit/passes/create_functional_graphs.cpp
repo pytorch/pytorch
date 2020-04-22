@@ -374,7 +374,7 @@ struct MutationRemover {
       // same aliasing relationships as the original x.
       // To avoid rebuilding the entire alias db, we can replace
       // the memory dag element of x with x0.
-      aliasDb_->replaceMemoryLocation(mutated_value, new_node->output());
+      aliasDb_->replaceWithNewValue(mutated_value, new_node->output());
 
       // it is an invariant that all mutable types have an element in the memory
       // dag so we must regive x an alias db element. We have already verified
