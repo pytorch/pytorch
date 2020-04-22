@@ -28,11 +28,10 @@ Tensor& resize_cuda_(
   }
   return self;
 }
-static auto registry = torch::RegisterOperators()
-  .op(torch::RegisterOperators::options()
-    .schema("aten::resize_(Tensor(a!) self, int[] size, *, MemoryFormat? memory_format=None) -> Tensor(a!)")
-    .impl_unboxedOnlyKernel<decltype(resize_cuda_), &resize_cuda_>(DispatchKey::CUDA))
-  ;
+
+TORCH_LIBRARY_IMPL(aten, CUDA, m) {
+  m.impl_UNBOXED("resize_", resize_cuda_);
+}
 
 } // namespace
 } // namespace native
