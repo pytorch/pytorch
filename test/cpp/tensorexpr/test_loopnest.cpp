@@ -150,7 +150,7 @@ void testExprSplitWithTailNone() {
     BufHandle f("f", {24, 5});
     ExprHandle x_1 = x_outer * 4 + x_inner;
     ExprHandle x_outer_end = (ExprHandle(24) - 0) / 4;
-    For* stmt = For::make(
+    Stmt* stmt = new Block({For::make(
         x_outer,
         0,
         x_outer_end,
@@ -158,11 +158,10 @@ void testExprSplitWithTailNone() {
             x_inner,
             0,
             4,
-            For::make(y, 0, 5, Store::make(f, {x_1, y}, func(x_1, y), 1))));
+            For::make(y, 0, 5, Store::make(f, {x_1, y}, func(x_1, y), 1))))});
 
     std::ostringstream oss_ref;
     oss_ref << *stmt;
-    oss_ref << "\n"; // TODO: fix printing instead of adding \n here
     ASSERT_EQ(oss.str(), oss_ref.str());
   }
 
