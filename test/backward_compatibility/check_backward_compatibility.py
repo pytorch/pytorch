@@ -55,15 +55,8 @@ white_list = [
 # The nightly will fail to parse newly added syntax to schema declarations
 # Add new schemas that will fail the nightly here
 dont_parse_list = [
-    ('quantized::linear_unpack_fp16', datetime.date(2020, 6, 1)),
-    ('quantized::linear_unpack', datetime.date(2020, 6, 1)),
-    ('quantized::linear_prepack_fp16', datetime.date(2020, 6, 1)),
-    ('quantized::linear_prepack', datetime.date(2020, 6, 1)),
-    ('quantized::linear_dynamic_fp16', datetime.date(2020, 6, 1)),
-    ('quantized::linear_relu_dynamic', datetime.date(2020, 6, 1)),
-    ('quantized::linear_dynamic', datetime.date(2020, 6, 1)),
-    ('quantized::linear_relu', datetime.date(2020, 6, 1)),
-    ('quantized::linear', datetime.date(2020, 6, 1)),
+    ('aten::quantized_lstm', datetime.date(2020, 6, 1)),
+    ('aten::quantized_gru', datetime.date(2020, 6, 1)),
 ]
 
 
