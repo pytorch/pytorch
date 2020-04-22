@@ -3141,6 +3141,11 @@
     CPU: _s_poisson_cpu
     CUDA: _s_poisson_cuda
 
+- func: binomial(Tensor count, Tensor prob, Generator? generator=None) -> Tensor
+  dispatch:
+    CPU: _s_binomial_cpu
+    CUDA: _s_binomial_cuda
+
 # When more variants get ported to native, this dispatch will get more
 # complicated
 
