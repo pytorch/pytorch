@@ -360,19 +360,14 @@ c10::intrusive_ptr<CellParamsBase> make_quantized_cell_params_dynamic(
 
 
 c10::intrusive_ptr<CellParamsBase> make_quantized_cell_params_fp16(
-    c10::intrusive_ptr<LinearPackedParamsBase> w_ih_packed, c10::intrusive_ptr<LinearPackedParamsBase> w_hh_packed,
-    at::Tensor b_ih, at::Tensor b_hh);
+    c10::intrusive_ptr<LinearPackedParamsBase> w_ih_packed, c10::intrusive_ptr<LinearPackedParamsBase> w_hh_packed);
 
-struct QuantizedCellParamsFP16 : public CellParamsBase{
+struct QuantizedCellParamsFP16 : public CellParamsBase {
   QuantizedCellParamsFP16(
     c10::intrusive_ptr<LinearPackedParamsBase> _packed_ih,
-    c10::intrusive_ptr<LinearPackedParamsBase> _packed_hh,
-    Tensor _b_ih,
-    Tensor _b_hh)
+    c10::intrusive_ptr<LinearPackedParamsBase> _packed_hh)
   : packed_ih(std::move(_packed_ih)),
-    packed_hh(std::move(_packed_hh)),
-    b_ih_(std::move(_b_ih)),
-    b_hh_(std::move(_b_hh)) {}
+    packed_hh(std::move(_packed_hh)) {}
 
   c10::intrusive_ptr<LinearPackedParamsBase> packed_ih;
   c10::intrusive_ptr<LinearPackedParamsBase> packed_hh;
@@ -386,26 +381,10 @@ struct QuantizedCellParamsFP16 : public CellParamsBase{
     TORCH_CHECK(false, "matmul is not supported with quantized cell params");
   }
   Tensor linear_ih(const Tensor& input) const override {
-    const auto kFuncName = "quantized::linear_dynamic_fp16";
-    const auto kOvrldName = "";
-    const std::vector<c10::IValue> output_ih_list =
-        callOp(kFuncName, kOvrldName, input, packed_ih);
-    TORCH_INTERNAL_ASSERT(
-        output_ih_list.size() == 1,
-        "The output vector should have exact one element");
-    const Tensor output_ih = output_ih_list[0].toTensor();
-    return output_ih;
+    return packed_ih->apply_dynamic(input);
   }
   Tensor linear_hh(const Tensor& h) const override {
-    const auto kFuncName = "quantized::linear_dynamic_fp16";
-    const auto kOvrldName = "";
-    const std::vector<c10::IValue> output_hh_list =
-        callOp(kFuncName, kOvrldName, h, packed_hh);
-    TORCH_INTERNAL_ASSERT(
-        output_hh_list.size() == 1,
-        "The output vector should have exact one element");
-    const Tensor output_hh = output_hh_list[0].toTensor();
-    return output_hh;
+    return packed_hh->apply_dynamic(h);
   }
 
   const Tensor &b_ih() const override {
@@ -415,11 +394,6 @@ struct QuantizedCellParamsFP16 : public CellParamsBase{
     return b_hh_;
   }
   CellParamsSerializationType __getstate__() const override {
-    std::vector<at::Tensor> tensors_to_serialize {
-      /*b_ih=*/b_ih_,
-      /*b_hh=*/b_hh_
-    };
-
     std::vector<c10::intrusive_ptr<LinearPackedParamsBase>> packed_params_to_serialize {
       packed_ih,
       packed_hh
@@ -427,32 +401,28 @@ struct QuantizedCellParamsFP16 : public CellParamsBase{
 
     return CellParamsSerializationType(
       "quantized_fp16",
-      std::move(tensors_to_serialize),
+      {},
       {},
       {},
       std::move(packed_params_to_serialize)
     );
   }
   static c10::intrusive_ptr<CellParamsBase> __setstate__(CellParamsSerializationType state) {
-    std::vector<at::Tensor> tensors;
     std::vector<c10::intrusive_ptr<LinearPackedParamsBase>> packed_params;
-    std::tie(std::ignore, tensors, std::ignore, std::ignore, packed_params) = std::move(state);
-    TORCH_INTERNAL_ASSERT(tensors.size() == 2);
+    std::tie(std::ignore, std::ignore, std::ignore, std::ignore, packed_params) = std::move(state);
     TORCH_INTERNAL_ASSERT(packed_params.size() == 2);
 
     return make_quantized_cell_params_fp16(
       /*w_ih_packed=*/std::move(packed_params[0]),
-      /*w_hh_packed=*/std::move(packed_params[1]),
-      /*b_ih=*/std::move(tensors[0]),
-      /*b_hh=*/std::move(tensors[1]));
+      /*w_hh_packed=*/std::move(packed_params[1]));
   }
 };
 
 c10::intrusive_ptr<CellParamsBase> make_quantized_cell_params_fp16(
-    c10::intrusive_ptr<LinearPackedParamsBase> w_ih_packed, c10::intrusive_ptr<LinearPackedParamsBase> w_hh_packed,
-    at::Tensor b_ih, at::Tensor b_hh) {
+    c10::intrusive_ptr<LinearPackedParamsBase> w_ih_packed,
+    c10::intrusive_ptr<LinearPackedParamsBase> w_hh_packed) {
   return c10::make_intrusive<QuantizedCellParamsFP16>(
-    std::move(w_ih_packed), std::move(w_hh_packed), std::move(b_ih), std::move(b_hh));
+    std::move(w_ih_packed), std::move(w_hh_packed));
 }
 
 static std::unordered_map<
@@ -595,14 +565,23 @@ static c10::List<c10::intrusive_ptr<CellParamsBase>> gather_quantized_params_fp1
         cpp_custom_type_hack::cast<c10::intrusive_ptr<LinearPackedParamsBase>>(
           static_cast<at::Tensor>(params[i + 1]));
 
-    auto bias_ih = packed_struct_ih->bias().value_or(undefined);
-    auto bias_hh = packed_struct_hh->bias().value_or(undefined);
+    // NB: we install the bias from the gathered parameters here because
+    // in the "new world", the fp16 linear apply() method always expects
+    // the bias to be present in the packed struct. In the "old world",
+    // we called `fbgemm_linear_fp16_weight_fp32_activation`, which took
+    // the bias explicitly and ignored the bias in the packed struct. To
+    // reconcile serialized models that behavied in the old style, we
+    // put the bias into the appropriate packed structures here.
+    //
+    // Hopefully we can remove this in the future when we eliminate
+    // the old style altogether
+    packed_struct_ih->set_bias(params[i + 2]);
+    packed_struct_hh->set_bias(params[i + 3]);
+
 
     result.emplace_back(c10::make_intrusive<QuantizedCellParamsFP16>(
       std::move(packed_struct_ih),
-      std::move(packed_struct_hh),
-      std::move(bias_ih),
-      std::move(bias_hh)));
+      std::move(packed_struct_hh)));
   }
   return c10::List<c10::intrusive_ptr<CellParamsBase>>(result);
 }
@@ -1712,9 +1691,8 @@ static auto registry =
         .op("quantized::make_quantized_cell_params_dynamic(__torch__.torch.classes.quantized.LinearPackedParamsBase w_ih, __torch__.torch.classes.quantized.LinearPackedParamsBase w_hh, Tensor bias_ih, Tensor bias_hh) -> __torch__.torch.classes.rnn.CellParamsBase",
             torch::RegisterOperators::options().kernel<decltype(make_quantized_cell_params_dynamic), make_quantized_cell_params_dynamic>(
                 DispatchKey::CPUTensorId))
-        .op("quantized::make_quantized_cell_params_fp16(__torch__.torch.classes.quantized.LinearPackedParamsBase w_ih, __torch__.torch.classes.quantized.LinearPackedParamsBase w_hh, Tensor b_ih, Tensor b_hh) -> __torch__.torch.classes.rnn.CellParamsBase",
-            torch::RegisterOperators::options().kernel<decltype(make_quantized_cell_params_fp16), make_quantized_cell_params_fp16>(
-                DispatchKey::CPUTensorId))
+        .op("quantized::make_quantized_cell_params_fp16(__torch__.torch.classes.quantized.LinearPackedParamsBase w_ih, __torch__.torch.classes.quantized.LinearPackedParamsBase w_hh) -> __torch__.torch.classes.rnn.CellParamsBase",
+            torch::RegisterOperators::options().catchAllKernel<decltype(make_quantized_cell_params_fp16), &make_quantized_cell_params_fp16>())
         .op("quantized::make_quantized_cell_params(Tensor w_ih, Tensor w_hh, Tensor b_ih, Tensor b_hh) -> __torch__.torch.classes.rnn.CellParamsBase",
             torch::RegisterOperators::options().kernel<decltype(make_quantized_cell_params), make_quantized_cell_params>(
                 DispatchKey::CPUTensorId))

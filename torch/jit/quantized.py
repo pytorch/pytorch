@@ -297,7 +297,7 @@ class QuantizedRNNBase(torch.jit.ScriptModule):
                         weight_hh.float(), bias_hh)
 
                     cell_params = torch.ops.quantized.make_quantized_cell_params_fp16(
-                        packed_ih, packed_hh, bias_ih, bias_hh)
+                        packed_ih, packed_hh)
 
                 setattr(self, 'cell_params_{}_{}'.format(layer, suffix), cell_params)
                 self.all_weights.append(cell_params)

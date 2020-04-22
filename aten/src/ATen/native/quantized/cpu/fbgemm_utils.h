@@ -107,6 +107,8 @@ struct CAFFE2_API PackedLinearWeightFp16 : public LinearPackedParamsBase {
       at::Tensor weight,
       c10::optional<at::Tensor> bias);
 
+  void set_bias(c10::optional<at::Tensor> bias) override;
+
  private:
   template <bool ReluFused>
   at::Tensor apply_dynamic_impl(at::Tensor input);

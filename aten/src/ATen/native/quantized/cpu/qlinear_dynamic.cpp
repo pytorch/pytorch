@@ -372,6 +372,10 @@ at::Tensor PackedLinearWeightFp16::apply_dynamic_relu(at::Tensor input) {
   return apply_dynamic_impl</*ReluFused=*/true>(std::move(input));
 }
 
+void PackedLinearWeightFp16::set_bias(c10::optional<at::Tensor> bias) {
+  bias_ = std::move(bias);
+}
+
 #endif // USE_FBGEMM
 
 namespace at {
