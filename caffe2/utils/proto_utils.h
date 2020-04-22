@@ -299,6 +299,10 @@ class C10_EXPORT ArgumentHelper {
 // name. Throws if argument does not exist.
 CAFFE2_API const Argument& GetArgument(const OperatorDef& def, const string& name);
 CAFFE2_API const Argument& GetArgument(const NetDef& def, const string& name);
+// Helper methods to get an argument from OperatorDef or NetDef given argument
+// name. Returns nullptr if argument does not exist.
+CAFFE2_API const Argument* GetArgumentPtr(const OperatorDef& def, const string& name);
+CAFFE2_API const Argument* GetArgumentPtr(const NetDef& def, const string& name);
 
 // Helper methods to query a boolean argument flag from OperatorDef or NetDef
 // given argument name. If argument does not exist, return default value.
