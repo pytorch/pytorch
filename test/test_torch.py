@@ -11155,7 +11155,7 @@ class TestTorchDeviceType(TestCase):
                            [1, 0, 0, 0],
                            [1, 0, 0, 0],
                            [0, 0, 0, 0]],
-                          device=device, dtype=torch.float32), "sum"),
+                          device=device, dtype=torch.float32), "add"),
             (torch.zeros(4, 4, device=device, dtype=torch.float32), 1,
              torch.tensor([[0, 0, 0, 0],
                            [-1, 0, 0, 0],
