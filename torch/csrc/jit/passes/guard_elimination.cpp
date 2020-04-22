@@ -196,8 +196,8 @@ struct GuardElimination {
     // to remove a guard on ops' outputs
     for (auto it = b->nodes().rbegin(); it != b->nodes().rend();) {
       auto n = *it;
-      if ((n->kind() == prim::Guard && guardsOutput(n) &&
-           removableGuard(n->inputs().at(0)->node()))) {
+      if (n->kind() == prim::Guard && guardsOutput(n) &&
+          removableGuard(n->inputs().at(0)->node())) {
         auto pttp = n->output()->type();
         n->output()->replaceAllUsesWith(n->inputs().at(0));
         n->inputs().at(0)->setType(pttp);
