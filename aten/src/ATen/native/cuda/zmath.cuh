@@ -27,6 +27,7 @@ namespace c10 {
       return std::complex<dest_value_t>(src.real(), src.imag());
     }
   };
+
 } //end c10
 
 namespace at { namespace native {

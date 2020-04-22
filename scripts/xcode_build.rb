@@ -43,7 +43,7 @@ target.build_configurations.each do |config|
     config.build_settings['OTHER_LDFLAGS']          = other_linker_flags
     config.build_settings['ENABLE_BITCODE']         = 'No'
     dev_team_id = options[:team_id]
-    if not dev_team_id
+    if not dev_team_id and options[:platform] == 'OS'
         raise "Please sepecify a valid development team id for code signing"
     end
     config.build_settings['DEVELOPMENT_TEAM']       = dev_team_id
@@ -71,7 +71,7 @@ else
 end
 
 profile = options[:profile]
-if not profile
+if not profile and options[:platform] == 'OS'
     raise "no provisioning profile found!"
 end
 

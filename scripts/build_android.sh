@@ -47,12 +47,6 @@ echo "Caffe2 path: $CAFFE2_ROOT"
 echo "Using Android NDK at $ANDROID_NDK"
 echo "Android NDK version: $ANDROID_NDK_VERSION"
 
-# Now, actually build the Android target.
-BUILD_ROOT=${BUILD_ROOT:-"$CAFFE2_ROOT/build_android"}
-INSTALL_PREFIX=${BUILD_ROOT}/install
-mkdir -p $BUILD_ROOT
-cd $BUILD_ROOT
-
 CMAKE_ARGS=()
 
 if [ -z "${BUILD_CAFFE2_MOBILE:-}" ]; then
@@ -63,6 +57,12 @@ if [ -z "${BUILD_CAFFE2_MOBILE:-}" ]; then
   CMAKE_ARGS+=("-DBUILD_CUSTOM_PROTOBUF=OFF")
   # custom build with selected ops
   if [ -n "${SELECTED_OP_LIST}" ]; then
+    SELECTED_OP_LIST="$(cd $(dirname $SELECTED_OP_LIST); pwd -P)/$(basename $SELECTED_OP_LIST)"
+    echo "Choose SELECTED_OP_LIST file: $SELECTED_OP_LIST"
+    if [ ! -r ${SELECTED_OP_LIST} ]; then
+      echo "Error: SELECTED_OP_LIST file ${SELECTED_OP_LIST} not found."
+      exit 1
+    fi
     CMAKE_ARGS+=("-DSELECTED_OP_LIST=${SELECTED_OP_LIST}")
   fi
 else
@@ -120,6 +120,11 @@ fi
 # Use-specified CMake arguments go last to allow overridding defaults
 CMAKE_ARGS+=($@)
 
+# Now, actually build the Android target.
+BUILD_ROOT=${BUILD_ROOT:-"$CAFFE2_ROOT/build_android"}
+INSTALL_PREFIX=${BUILD_ROOT}/install
+mkdir -p $BUILD_ROOT
+cd $BUILD_ROOT
 cmake "$CAFFE2_ROOT" \
     -DCMAKE_INSTALL_PREFIX=$INSTALL_PREFIX \
     -DCMAKE_BUILD_TYPE=Release \

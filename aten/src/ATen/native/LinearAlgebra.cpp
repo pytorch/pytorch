@@ -252,7 +252,11 @@ static inline Tensor& bmm_out_or_baddbmm_(Tensor& self_or_result, const Tensor& 
   if (self_or_result.numel() == 0) {
     return self_or_result;
   } else if (contraction_size == 0) {
-    return self_or_result.zero_();
+    if (is_bmm_out) {
+      return self_or_result.zero_();
+    } else {
+      return self_or_result.mul_(beta);
+    }
   }
 
   auto batch_items_contiguous_or_transposed = [&](const Tensor& t) {
@@ -529,7 +533,7 @@ Tensor frobenius_norm(const Tensor& self, IntArrayRef dim, bool keepdim) {
     return at::norm(self, 2, dim, keepdim, self.scalar_type());
   }
   if (self.is_complex()){
-    return at::sqrt(at::sum((self.conj() * self).real(), dim, keepdim));
+    return at::sqrt(at::sum((self.conj() * self).copy_real(), dim, keepdim));
   } else {
     return at::sqrt(at::sum((self * self), dim, keepdim));
   }
@@ -549,7 +553,7 @@ Tensor &frobenius_norm_out(
     return at::norm_out(result, self, 2, dim, keepdim, self.scalar_type());
   }
   if (self.is_complex()){
-    return at::sqrt_out(result, at::sum((self.conj() * self).real(), dim, keepdim));
+    return at::sqrt_out(result, at::sum((self.conj() * self).copy_real(), dim, keepdim));
   } else {
     return at::sqrt_out(result, at::sum((self * self), dim, keepdim));
   }

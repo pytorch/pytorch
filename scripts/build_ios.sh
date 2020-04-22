@@ -9,12 +9,6 @@
 
 CAFFE2_ROOT="$( cd "$(dirname "$0")"/.. ; pwd -P)"
 
-# Now, actually build the iOS target.
-BUILD_ROOT=${BUILD_ROOT:-"$CAFFE2_ROOT/build_ios"}
-INSTALL_PREFIX=${BUILD_ROOT}/install
-mkdir -p $BUILD_ROOT
-cd $BUILD_ROOT
-
 CMAKE_ARGS=()
 
 if [ -z "${BUILD_CAFFE2_MOBILE:-}" ]; then
@@ -25,6 +19,12 @@ if [ -z "${BUILD_CAFFE2_MOBILE:-}" ]; then
   CMAKE_ARGS+=("-DBUILD_CUSTOM_PROTOBUF=OFF")
   # custom build with selected ops
   if [ -n "${SELECTED_OP_LIST}" ]; then
+    SELECTED_OP_LIST="$(cd $(dirname $SELECTED_OP_LIST); pwd -P)/$(basename $SELECTED_OP_LIST)"
+    echo "Choose SELECTED_OP_LIST file: $SELECTED_OP_LIST"
+    if [ ! -r ${SELECTED_OP_LIST} ]; then
+      echo "Error: SELECTED_OP_LIST file ${SELECTED_OP_LIST} not found."
+      exit 1
+    fi
     CMAKE_ARGS+=("-DSELECTED_OP_LIST=${SELECTED_OP_LIST}")
   fi
   # bitcode
@@ -106,6 +106,11 @@ if [ "${VERBOSE:-}" == '1' ]; then
   CMAKE_ARGS+=("-DCMAKE_VERBOSE_MAKEFILE=1")
 fi
 
+# Now, actually build the iOS target.
+BUILD_ROOT=${BUILD_ROOT:-"$CAFFE2_ROOT/build_ios"}
+INSTALL_PREFIX=${BUILD_ROOT}/install
+mkdir -p $BUILD_ROOT
+cd $BUILD_ROOT
 cmake "$CAFFE2_ROOT" \
     -DCMAKE_INSTALL_PREFIX=$INSTALL_PREFIX \
     -DCMAKE_BUILD_TYPE=MinSizeRel \

@@ -526,18 +526,18 @@ int TensorIterator::num_reduce_dims() const {
     }                                                                     \
   }
 
-void TensorIterator::for_each(loop_t loop) {
-  for_each(LOOP_WRAPPER(ntensors(), loop));
+void TensorIterator::for_each(loop_t loop, int64_t grain_size) {
+  for_each(LOOP_WRAPPER(ntensors(), loop), grain_size);
 }
 
-void TensorIterator::for_each(loop2d_t loop) {
+void TensorIterator::for_each(loop2d_t loop, int64_t grain_size) {
   int64_t numel = this->numel();
   if (numel == 0) {
     return;
   } else if (numel < internal::GRAIN_SIZE || at::get_num_threads() == 1) {
     return serial_for_each(loop, {0, numel});
   } else {
-    at::parallel_for(0, numel, internal::GRAIN_SIZE, [&](int64_t begin, int64_t end) {
+    at::parallel_for(0, numel, grain_size, [&](int64_t begin, int64_t end) {
       serial_for_each(loop, {begin, end});
     });
   }
@@ -974,7 +974,7 @@ bool TensorIterator::fast_set_up() {
         break;
       }
     default:
-      TORCH_INTERNAL_ASSERT(false, "Unsupported fast setup type", std::to_string((int)setup_type));
+      TORCH_INTERNAL_ASSERT(false, "Unsupported fast setup type", c10::to_string((int)setup_type));
   }
   //coalescing dimensions consists of collapsing dimensions to 1 (we are limited to contiguous no-broadcast cases here)
   if (ndim() > 1){

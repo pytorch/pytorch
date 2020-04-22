@@ -3,7 +3,7 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/AccumulateType.h>
-#include <ATen/CUDAGenerator.h>
+#include <ATen/CUDAGeneratorImpl.h>
 #include <ATen/native/UnaryOps.h>
 #include <ATen/native/cuda/DistributionTemplates.h>
 
@@ -29,8 +29,8 @@
 
 namespace at { namespace native {
 
-void exponential_kernel(TensorIterator& iter, double lambda_, Generator* gen_) {
-  auto gen = get_generator_or_default<CUDAGenerator>(gen_, cuda::detail::getDefaultCUDAGenerator());
+void exponential_kernel(TensorIterator& iter, double lambda_, c10::optional<Generator> gen_) {
+  auto gen = get_generator_or_default<CUDAGeneratorImpl>(gen_, cuda::detail::getDefaultCUDAGenerator());
   // Note that HIP doesn't support std::nextafter in device code.
   auto nextafter_1_0_float = std::nextafter(1.0f, 0.0f);
   auto nextafter_1_0_double = std::nextafter(1.0, 0.0);
@@ -40,9 +40,6 @@ void exponential_kernel(TensorIterator& iter, double lambda_, Generator* gen_) {
     if (std::is_same<scalar_t, double>::value) {
       // define lambda for exponential transformation
       auto exponential_func = [lambda, nextafter_1_0_double] __device__ (accscalar_t rand) {
-        if (lambda == static_cast<accscalar_t>(0.0)) {
-          return static_cast<scalar_t>(0.0);
-        }
         accscalar_t sample;
         // curand_uniform has (0,1] bounds. log(1) is 0 and exponential excludes 0.
         // Hence, squash the 1 to just below 1.
@@ -60,9 +57,6 @@ void exponential_kernel(TensorIterator& iter, double lambda_, Generator* gen_) {
     } else {
       // use __logf fast approximation for peak bandwidth
       auto exponential_func = [lambda, nextafter_1_0_float] __device__ (accscalar_t rand) {
-        if (lambda == static_cast<accscalar_t>(0.0)) {
-          return static_cast<scalar_t>(0.0);
-        }
         accscalar_t sample;
         if(rand == static_cast<accscalar_t>(1.0)) {
           sample = __logf(nextafter_1_0_float);

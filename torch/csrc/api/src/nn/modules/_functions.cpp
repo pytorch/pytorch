@@ -1,5 +1,7 @@
 #include <torch/nn/modules/_functions.h>
 
+using namespace torch::autograd;
+
 namespace torch {
 namespace nn {
 namespace functions {

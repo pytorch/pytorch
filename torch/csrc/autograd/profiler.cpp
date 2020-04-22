@@ -1,5 +1,10 @@
 #include <torch/csrc/autograd/profiler.h>
+#include <torch/csrc/autograd/function.h>
 #include <torch/csrc/jit/frontend/code_template.h>
+
+#include <torch/csrc/jit/runtime/operator.h>
+
+#include <ATen/core/op_registration/op_registration.h>
 
 #include <fstream>
 #include <list>
@@ -38,7 +43,7 @@ RangeEventList& getEventList() {
   if (!event_list) {
     std::lock_guard<std::mutex> guard(all_event_lists_map_mutex);
     event_list = std::make_shared<RangeEventList>();
-    thread_id = RecordFunction::getCurrentThreadId();
+    thread_id = RecordFunction::currentThreadId();
     all_event_lists_map.emplace(thread_id, event_list);
   }
   return *event_list;
@@ -63,7 +68,7 @@ bool profilerEnabled() {
   return state != ProfilerState::Disabled;
 }
 
-void pushRangeImpl(
+void pushRange(
     const StringView& name,
     const char* msg = "",
     int64_t sequence_nr = -1,
@@ -109,10 +114,6 @@ void pushRangeImpl(
   }
 }
 
-void pushRange(std::string name) {
-  pushRangeImpl(StringView(std::move(name)));
-}
-
 void popRange() {
   if (state == ProfilerState::Disabled) {
     return;
@@ -155,14 +156,15 @@ void enableProfiler(ProfilerConfig config) {
               inputSizes.emplace_back();
             }
           }
-          pushRangeImpl(fn.name(), msg, fn.seqNr(), std::move(inputSizes));
+          pushRange(fn.name(), msg, fn.seqNr(), std::move(inputSizes));
         } else {
-          pushRangeImpl(fn.name(), msg, fn.seqNr(), {});
+          pushRange(fn.name(), msg, fn.seqNr(), {});
         }
+        return true;
       },
       [](const RecordFunction& fn) {
         if (fn.getStartCallbacksThreadId() !=
-                RecordFunction::getCurrentThreadId()) {
+                RecordFunction::currentThreadId()) {
           // If we're not in a thread that ran start callbacks, then find
           // the eventList that was created for the original thread_id. Then,
           // record the end event on this list so that the block is added to
@@ -190,8 +192,11 @@ void enableProfiler(ProfilerConfig config) {
           popRange();
         }
       },
-      config.report_input_shapes);
+      /* needs_inputs */ config.report_input_shapes,
+      /* sampling_prob */ 1.0,
+      /* scopes */ {RecordScope::FUNCTION, RecordScope::USER_SCOPE});
   state = new_state;
+  c10::impl::tls_set_dispatch_key_included(c10::DispatchKey::Profiler, true);
 
   if(state == ProfilerState::CUDA) {
     // event recording appears to have some startup overhead, so we need to
@@ -222,6 +227,7 @@ thread_event_lists disableProfiler() {
 
   popCallback();
   state = ProfilerState::Disabled;
+  c10::impl::tls_set_dispatch_key_included(c10::DispatchKey::Profiler, false);
 
   if (old_state == ProfilerState::NVTX) {
     return thread_event_lists();

@@ -5,7 +5,6 @@
 
 namespace torch {
 namespace jit {
-namespace script {
 
 inline bool isCharCount(char c, const std::string& str, size_t start, int len) {
   // count checks from [start, start + len)
@@ -87,6 +86,5 @@ inline std::string parseStringLiteral(
   return ret_str;
 }
 
-} // namespace script
 } // namespace jit
 } // namespace torch

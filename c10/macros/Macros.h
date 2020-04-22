@@ -18,10 +18,18 @@
 // file.
 
 #ifndef C10_USING_CUSTOM_GENERATED_MACROS
-#include "c10/macros/cmake_macros.h"
+#include <c10/macros/cmake_macros.h>
 #endif // C10_USING_CUSTOM_GENERATED_MACROS
 
-#include "c10/macros/Export.h"
+#include <c10/macros/Export.h>
+
+#if defined(__clang__)
+  #define __ubsan_ignore_float_divide_by_zero__ __attribute__((no_sanitize("float-divide-by-zero")))
+  #define __ubsan_ignore_undefined__ __attribute__((no_sanitize("undefined")))
+#else
+  #define __ubsan_ignore_float_divide_by_zero__
+  #define __ubsan_ignore_undefined__
+#endif
 
 // Disable the copy and assignment operator for a class. Note that this will
 // disable the usage of the class in std containers.
@@ -221,12 +229,16 @@ extern "C" {
 #if !defined(__CUDA_ARCH__)  || !defined(__clang__)
   [[noreturn]]
 #endif
-#if defined(__CUDA_ARCH__) || defined(__HIP_ARCH__) || defined(__HIP__)
-    __host__ __device__
+#if (defined(__CUDA_ARCH__) && !(defined(__clang__) && defined(__CUDA__))) || \
+    defined(__HIP_ARCH__) || defined(__HIP__)
+__host__ __device__
 #endif // __CUDA_ARCH__
-  void __assert_fail(const char *assertion, const char *file,
-                unsigned int line, const char *function)
-                throw();
+    void
+    __assert_fail(
+        const char* assertion,
+        const char* file,
+        unsigned int line,
+        const char* function) throw();
 }
 #endif // NDEBUG
 #define CUDA_ALWAYS_ASSERT(cond)                                         \

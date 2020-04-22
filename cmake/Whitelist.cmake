@@ -1,12 +1,12 @@
 
-if (__caffe2_whitelist_included)
+if(__caffe2_whitelist_included)
   return()
 endif()
 
-set (__caffe2_whitelist_included TRUE)
+set(__caffe2_whitelist_included TRUE)
 
 set(CAFFE2_WHITELISTED_FILES)
-if (NOT CAFFE2_WHITELIST)
+if(NOT CAFFE2_WHITELIST)
   return()
 endif()
 
@@ -24,7 +24,7 @@ macro(caffe2_do_whitelist output whitelist)
   set(_tmp)
   foreach(item ${${output}})
     list(FIND ${whitelist} ${item} _index)
-    if (${_index} GREATER -1)
+    if(${_index} GREATER -1)
       set(_tmp ${_tmp} ${item})
     endif()
   endforeach()

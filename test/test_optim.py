@@ -32,6 +32,8 @@ def drosenbrock(tensor):
 
 
 class TestOptim(TestCase):
+    exact_dtype = True
+
     def _test_rosenbrock_sparse(self, constructor, scheduler_constructors=None,
                                 sparse_only=False):
         if scheduler_constructors is None:
@@ -508,6 +510,8 @@ class LambdaLRTestObject:
 
 
 class TestLRScheduler(TestCase):
+    exact_dtype = True
+
     def setUp(self):
         super(TestLRScheduler, self).setUp()
         self.net = SchedulerTestNet()
@@ -571,7 +575,7 @@ class TestLRScheduler(TestCase):
                 scheduler.step()
                 self.opt.step()
 
-        self.assertWarnsRegex(old_pattern, r'how-to-adjust-learning-rate')
+        self.assertWarnsRegex(UserWarning, r'how-to-adjust-learning-rate', old_pattern)
 
     def test_old_pattern_warning_with_arg(self):
         epochs = 35
@@ -585,7 +589,7 @@ class TestLRScheduler(TestCase):
                 scheduler.step()
                 self.opt.step()
 
-        self.assertWarnsRegex(old_pattern2, r'how-to-adjust-learning-rate')
+        self.assertWarnsRegex(UserWarning, r'how-to-adjust-learning-rate', old_pattern2)
 
     def test_old_pattern_warning_resuming(self):
         epochs = 35
@@ -602,7 +606,7 @@ class TestLRScheduler(TestCase):
                 scheduler.step()
                 self.opt.step()
 
-        self.assertWarnsRegex(old_pattern, r'how-to-adjust-learning-rate')
+        self.assertWarnsRegex(UserWarning, r'how-to-adjust-learning-rate', old_pattern)
 
     def test_old_pattern_warning_resuming_with_arg(self):
         epochs = 35
@@ -619,7 +623,7 @@ class TestLRScheduler(TestCase):
                 scheduler.step()
                 self.opt.step()
 
-        self.assertWarnsRegex(old_pattern2, r'how-to-adjust-learning-rate')
+        self.assertWarnsRegex(UserWarning, r'how-to-adjust-learning-rate', old_pattern2)
 
     def test_old_pattern_warning_with_overridden_optim_step(self):
         epochs = 35
@@ -647,7 +651,7 @@ class TestLRScheduler(TestCase):
                 scheduler.step()
                 self.opt.step()
 
-        self.assertWarnsRegex(old_pattern2, r'how-to-adjust-learning-rate')
+        self.assertWarnsRegex(UserWarning, r'how-to-adjust-learning-rate', old_pattern2)
 
     def test_new_pattern_no_warning(self):
         epochs = 35
@@ -700,7 +704,7 @@ class TestLRScheduler(TestCase):
                 self.opt.step()
                 scheduler.step()
 
-        self.assertWarnsRegex(new_pattern, r'`optimizer.step\(\)` has been overridden')
+        self.assertWarnsRegex(UserWarning, r'`optimizer.step\(\)` has been overridden', new_pattern)
 
     def _test_lr_is_constant_for_constant_epoch(self, scheduler):
         l = []
@@ -757,6 +761,17 @@ class TestLRScheduler(TestCase):
         targets = [single_targets, list(map(lambda x: x * epochs, single_targets))]
         scheduler = MultiStepLR(self.opt, gamma=0.1, milestones=[2, 5, 9])
         self._test(scheduler, targets, epochs)
+
+    def test_multi_step_lr_with_epoch(self):
+        # lr = 0.05     if epoch < 2
+        # lr = 0.005    if 2 <= epoch < 5
+        # lr = 0.0005   if epoch < 9
+        # lr = 0.00005   if epoch >= 9
+        epochs = 10
+        single_targets = [0.05] * 2 + [0.005] * 3 + [0.0005] * 4 + [0.00005] * 3
+        targets = [single_targets, list(map(lambda x: x * epochs, single_targets))]
+        scheduler = MultiStepLR(self.opt, gamma=0.1, milestones=[2, 5, 9])
+        self._test_with_epoch(scheduler, targets, epochs)
 
     def test_exp_lr(self):
         epochs = 10
@@ -1407,11 +1422,20 @@ class TestLRScheduler(TestCase):
             result = [scheduler.get_last_lr() for scheduler in schedulers]
             [scheduler.step() for scheduler in schedulers]
             target = [[t[epoch] for t in targets]] * len(schedulers)
-            # print(target)
             for t, r in zip(target, result):
                 self.assertAlmostEqual(target, result,
                                        msg='LR is wrong in epoch {}: expected {}, got {}'.format(
                                            epoch, t, r), delta=1e-5)
+
+    def _test_with_epoch(self, schedulers, targets, epochs=10):
+        if isinstance(schedulers, _LRScheduler):
+            schedulers = [schedulers]
+        for epoch in range(epochs):
+            [scheduler.step(epoch) for scheduler in schedulers]  # step before assert: skip initial lr
+            for param_group, target in zip(self.opt.param_groups, targets):
+                self.assertAlmostEqual(target[epoch], param_group['lr'],
+                                       msg='LR is wrong in epoch {}: expected {}, got {}'.format(
+                                           epoch, target[epoch], param_group['lr']), delta=1e-5)
 
     def _test(self, schedulers, targets, epochs=10):
         if isinstance(schedulers, _LRScheduler):

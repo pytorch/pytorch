@@ -7,7 +7,6 @@ namespace py = pybind11;
 
 namespace torch {
 namespace jit {
-namespace script {
 
 inline c10::optional<Module> as_module(const py::object& obj) {
   if (py::isinstance(
@@ -17,6 +16,5 @@ inline c10::optional<Module> as_module(const py::object& obj) {
   return c10::nullopt;
 }
 
-} // namespace script
 } // namespace jit
 } // namespace torch

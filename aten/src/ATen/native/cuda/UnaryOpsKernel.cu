@@ -76,10 +76,12 @@ void sqrt_kernel_cuda(TensorIterator& iter) {
 }
 
 void sigmoid_kernel_cuda(TensorIterator& iter) {
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "sigmoid_cuda", [&]() {
-    gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
-      scalar_t one = scalar_t(1);
-      return  one / (one + std::exp(- a));
+  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "sigmoid_cuda", [&]() {
+    AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "sigmoid_cuda", [&] {
+      gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
+        scalar_t one = scalar_t(1);
+        return  one / (one + std::exp(- a));
+      });
     });
   });
 }

@@ -49,7 +49,7 @@ RpcWithAutograd::RpcWithAutograd(
       messageType_ == MessageType::FORWARD_AUTOGRAD_RESP);
 }
 
-Message RpcWithAutograd::toMessage() && {
+Message RpcWithAutograd::toMessageImpl() && {
   auto messageId = wrappedMessage_.id();
   auto messageType = wrappedMessage_.type();
 
@@ -164,6 +164,11 @@ const AutogradMetadata& RpcWithAutograd::autogradMetadata() const {
 RpcCommandBase& RpcWithAutograd::wrappedRpc() {
   TORCH_INTERNAL_ASSERT(wrappedRpc_ != nullptr, "wrappedRpc cannot be null!");
   return *wrappedRpc_;
+}
+
+void RpcWithAutograd::setWrappedRpc(
+    std::unique_ptr<RpcCommandBase> wrappedRpc) {
+  wrappedRpc_ = std::move(wrappedRpc);
 }
 
 std::unique_ptr<RpcCommandBase> RpcWithAutograd::moveWrappedRpc() && {

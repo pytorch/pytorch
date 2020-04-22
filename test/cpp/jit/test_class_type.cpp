@@ -5,8 +5,6 @@
 namespace torch {
 namespace jit {
 
-using namespace torch::jit::script;
-
 void testClassTypeAddRemoveAttr() {
   auto cu = std::make_shared<CompilationUnit>();
   auto cls = ClassType::create("foo.bar", cu, true);

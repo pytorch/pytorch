@@ -261,8 +261,7 @@ class LBFGS(Optimizer):
         for p in self._params:
             numel = p.numel()
             # view as to avoid deprecated pointwise semantics
-            # Need to avoid version tracking for parameter.
-            p.data.add_(update[offset:offset + numel].view_as(p), alpha=step_size)
+            p.add_(update[offset:offset + numel].view_as(p), alpha=step_size)
             offset += numel
         assert offset == self._numel()
 
@@ -271,10 +270,8 @@ class LBFGS(Optimizer):
 
     def _set_param(self, params_data):
         for p, pdata in zip(self._params, params_data):
-            # Need to avoid version tracking for parameter.
-            p.data.copy_(pdata)
+            p.copy_(pdata)
 
-    @torch.enable_grad()
     def _directional_evaluate(self, closure, x, t, d):
         self._add_grad(t, d)
         loss = float(closure())
@@ -292,6 +289,9 @@ class LBFGS(Optimizer):
         """
         assert len(self.param_groups) == 1
 
+        # Make sure the closure is always called with grad enabled
+        closure = torch.enable_grad()(closure)
+
         group = self.param_groups[0]
         lr = group['lr']
         max_iter = group['max_iter']
@@ -308,8 +308,7 @@ class LBFGS(Optimizer):
         state.setdefault('n_iter', 0)
 
         # evaluate initial f(x) and df/dx
-        with torch.enable_grad():
-            orig_loss = closure()
+        orig_loss = closure()
         loss = float(orig_loss)
         current_evals = 1
         state['func_evals'] += 1

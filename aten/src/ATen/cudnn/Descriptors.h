@@ -145,7 +145,7 @@ private:
 
 std::ostream& operator<<(std::ostream & out, const TensorDescriptor& d);
 
-class FilterDescriptor
+class TORCH_CUDA_API FilterDescriptor
   : public Descriptor<cudnnFilterStruct,
                       &cudnnCreateFilterDescriptor,
                       &cudnnDestroyFilterDescriptor>

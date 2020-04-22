@@ -12,7 +12,7 @@
 namespace helpers {
 template <typename Predicate>
 void check_all_parameters(
-    const torch::jit::script::Module& module,
+    const torch::jit::Module& module,
     Predicate predicate) {
   for (at::Tensor parameter : module.parameters()) {
     AT_ASSERT(predicate(parameter));
@@ -79,7 +79,7 @@ void get_autograd_operator_from_registry_and_execute_in_nograd_mode() {
 
 void load_serialized_module_with_custom_op_and_execute(
     const std::string& path_to_exported_script_module) {
-  torch::jit::script::Module module =
+  torch::jit::Module module =
       torch::jit::load(path_to_exported_script_module);
   std::vector<torch::jit::IValue> inputs;
   inputs.push_back(torch::ones(5));
@@ -90,7 +90,7 @@ void load_serialized_module_with_custom_op_and_execute(
 
 void test_argument_checking_for_serialized_modules(
     const std::string& path_to_exported_script_module) {
-  torch::jit::script::Module module =
+  torch::jit::Module module =
       torch::jit::load(path_to_exported_script_module);
 
   try {
@@ -124,7 +124,7 @@ void test_argument_checking_for_serialized_modules(
 }
 
 void test_move_to_device(const std::string& path_to_exported_script_module) {
-  torch::jit::script::Module module =
+  torch::jit::Module module =
       torch::jit::load(path_to_exported_script_module);
 
   helpers::check_all_parameters(module, [](const torch::Tensor& tensor) {
@@ -145,7 +145,7 @@ void test_move_to_device(const std::string& path_to_exported_script_module) {
 }
 
 void test_move_to_dtype(const std::string& path_to_exported_script_module) {
-  torch::jit::script::Module module =
+  torch::jit::Module module =
       torch::jit::load(path_to_exported_script_module);
 
   module.to(torch::kInt);

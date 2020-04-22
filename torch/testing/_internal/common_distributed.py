@@ -222,6 +222,7 @@ class MultiProcessTestCase(TestCase):
         if six.PY3:
             proc = torch.multiprocessing.get_context("fork").Process
         else:
+            # fork is the default on Python 2
             proc = torch.multiprocessing.Process
         self._start_processes(proc)
 
@@ -247,8 +248,37 @@ class MultiProcessTestCase(TestCase):
     def _join_processes(self, fn):
         timeout = get_timeout(self.id())
         start_time = time.time()
-        for p in self.processes:
-            p.join(timeout)
+        subprocess_error = False
+        while True:
+            # check to see if any subprocess exited with an error early.
+            for p in self.processes:
+                # This is the exited code processes exit with if they
+                # encountered an exception.
+                if p.exitcode == MultiProcessTestCase.TEST_ERROR_EXIT_CODE:
+                    print("Some process exited badly, terminating rest.")
+                    active_children = torch.multiprocessing.active_children()
+                    for ac in active_children:
+                        ac.terminate()
+                    subprocess_error = True
+                    break
+            if subprocess_error:
+                break
+            # All processes have joined cleanly if they all a valid exitcode
+            if all([p.exitcode is not None for p in self.processes]):
+                break
+            # Check if we should time out the test. If so, we terminate each process.
+            elapsed = time.time() - start_time
+            if elapsed > timeout:
+                print(
+                    "Timing out after {} seconds and killing subprocesses.".format(
+                        timeout
+                    )
+                )
+                for p in self.processes:
+                    p.terminate()
+                break
+            # Sleep to avoid excessive busy polling.
+            time.sleep(0.1)
         elapsed_time = time.time() - start_time
         if fn in self.skip_return_code_checks:
             self._check_no_test_errors(elapsed_time)
@@ -270,14 +300,43 @@ class MultiProcessTestCase(TestCase):
         tests if they returned a return code indicating a skipping condition.
         """
         first_process = self.processes[0]
+        # first, we check if there are errors in actual processes
+        # (via TEST_ERROR_EXIT CODE), and raise an exception for those.
+        # the reason we do this is to attempt to raise a more helpful error
+        # message than "Process x terminated/timed out"
+        # TODO: we should pipe the exception of the failed subprocess here.
+        # Currently, the actual exception is displayed as a logging output.
+        errored_processes = [
+            (i, p)
+            for i, p in enumerate(self.processes)
+            if p.exitcode == MultiProcessTestCase.TEST_ERROR_EXIT_CODE
+        ]
+        if errored_processes:
+            error = "Processes {} exited with error code {}".format(
+                " ".join([str(i) for (i, _) in errored_processes]),
+                MultiProcessTestCase.TEST_ERROR_EXIT_CODE,
+            )
+            raise RuntimeError(error)
+        # If no process exited uncleanly, we check for timeouts, and then ensure
+        # each process exited cleanly.
         for i, p in enumerate(self.processes):
             if p.exitcode is None:
                 raise RuntimeError('Process {} terminated or timed out after {} seconds'.format(i, elapsed_time))
-            self.assertEqual(p.exitcode, first_process.exitcode)
+            self.assertEqual(
+                p.exitcode,
+                first_process.exitcode,
+                "Expect process {} exit code to match Process 0 exit code of {}, but got {}".format(
+                    i, first_process.exitcode, p.exitcode
+                ),
+            )
         for skip in TEST_SKIPS.values():
             if first_process.exitcode == skip.exit_code:
                 raise unittest.SkipTest(skip.message)
-        self.assertEqual(first_process.exitcode, 0)
+        self.assertEqual(
+            first_process.exitcode,
+            0,
+            "Expected zero exit code but got {}".format(first_process.exitcode)
+        )
 
     @property
     def is_master(self):

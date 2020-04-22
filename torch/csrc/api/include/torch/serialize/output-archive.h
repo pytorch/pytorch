@@ -15,9 +15,7 @@ class Tensor;
 namespace torch {
 using at::Tensor;
 namespace jit {
-namespace script {
 struct Module;
-} // namespace script
 } // namespace jit
 } // namespace torch
 
@@ -25,8 +23,8 @@ namespace torch {
 namespace serialize {
 class TORCH_API OutputArchive final {
  public:
-  explicit OutputArchive(std::shared_ptr<jit::script::CompilationUnit> cu);
-  explicit OutputArchive() : cu_(std::make_shared<jit::script::CompilationUnit>()), module_("__torch__.Module", cu_) {}
+  explicit OutputArchive(std::shared_ptr<jit::CompilationUnit> cu);
+  explicit OutputArchive() : cu_(std::make_shared<jit::CompilationUnit>()), module_("__torch__.Module", cu_) {}
 
   // Move is allowed.
   OutputArchive(OutputArchive&&) = default;
@@ -36,7 +34,7 @@ class TORCH_API OutputArchive final {
   OutputArchive(OutputArchive&) = delete;
   OutputArchive& operator=(OutputArchive&) = delete;
 
-  std::shared_ptr<jit::script::CompilationUnit> compilation_unit() const {
+  std::shared_ptr<jit::CompilationUnit> compilation_unit() const {
     return cu_;
   }
 
@@ -75,8 +73,8 @@ class TORCH_API OutputArchive final {
   }
 
  private:
-  std::shared_ptr<jit::script::CompilationUnit> cu_;
-  jit::script::Module module_;
+  std::shared_ptr<jit::CompilationUnit> cu_;
+  jit::Module module_;
 };
 } // namespace serialize
 } // namespace torch

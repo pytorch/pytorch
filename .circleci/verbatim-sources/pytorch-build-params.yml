@@ -12,10 +12,14 @@ pytorch_params: &pytorch_params
     use_cuda_docker_runtime:
       type: string
       default: ""
+    build_only:
+      type: string
+      default: ""
   environment:
     BUILD_ENVIRONMENT: << parameters.build_environment >>
     DOCKER_IMAGE: << parameters.docker_image >>
     USE_CUDA_DOCKER_RUNTIME: << parameters.use_cuda_docker_runtime >>
+    BUILD_ONLY: << parameters.build_only >>
   resource_class: << parameters.resource_class >>
 
 pytorch_ios_params: &pytorch_ios_params

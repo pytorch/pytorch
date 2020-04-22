@@ -53,7 +53,7 @@ TypePtr tryInferTypeWithTypeHint(
     const py::object& type_hint) {
   // If the py::object to be contained by the RRef is a ScripModule, we enforce
   // users to specify its ModuleInterface type.
-  if (auto module = jit::script::as_module(value)) {
+  if (auto module = jit::as_module(value)) {
     TORCH_CHECK(
         !type_hint.is_none(),
         "The RRef being created contains a ScriptModule, "
@@ -63,13 +63,16 @@ TypePtr tryInferTypeWithTypeHint(
                                   .attr("_qualified_name")(type_hint)));
     TypePtr type_hint_ptr =
         jit::get_python_cu()->get_interface(type_qualified_name);
+    std::ostringstream subtype_check_msg;
     TORCH_CHECK(
         type_hint_ptr != nullptr &&
-            module.value().type()->isSubtypeOf(type_hint_ptr),
+            module.value().type()->isSubtypeOfExt(
+                type_hint_ptr, &subtype_check_msg),
         module.value().type()->python_str(),
         " is not a subtype of the type hint: ",
         type_qualified_name.qualifiedName(),
-        ", did you pass a valid interface type?");
+        ", did you pass a valid interface type?\n",
+        subtype_check_msg.str());
     return type_hint_ptr;
   } else {
     TORCH_CHECK(
@@ -109,12 +112,24 @@ PyRRef::PyRRef(const py::object& value, const py::object& type_hint)
         return rref;
       }()) {}
 
+const std::shared_ptr<FutureMessage> PyRRef::getFuture() const {
+  return rref_->getOwnerCreationFuture();
+}
+
 bool PyRRef::isOwner() const {
   return rref_->isOwner();
 }
 
+bool PyRRef::confirmedByOwner() const {
+  return rref_->confirmedByOwner();
+}
+
 WorkerInfo PyRRef::owner() const {
   return RRefContext::getInstance().agent()->getWorkerInfo(rref_->owner());
+}
+
+std::string PyRRef::ownerName() const {
+  return rref_->ownerName();
 }
 
 py::object PyRRef::toHere() {
@@ -128,8 +143,11 @@ py::object PyRRef::toHere() {
     if (rref_->isPyObj()) {
       // python_rpc_handler deserialization will acquires GIL.
       auto rfr_values = value.toTuple()->elements();
-      return PythonRpcHandler::getInstance().deserialize(
+      auto& pythonRpcHandler = PythonRpcHandler::getInstance();
+      auto ret = pythonRpcHandler.deserialize(
           SerializedPyObj::fromIValues(rfr_values));
+      pythonRpcHandler.handleException(ret);
+      return ret;
     } else {
       // acquiring GIL as torch::jit::toPyObject creates new py::object
       // without grabbing the GIL.
@@ -159,22 +177,42 @@ py::object PyRRef::localValue() {
 }
 
 std::string PyRRef::str() const {
-  std::ostringstream ss;
   if (rref_->isOwner()) {
-    ss << "OwnerRRef(" << rref_->rrefId() << ")";
+    return c10::str("OwnerRRef(", rref_->rrefId(), ")");
   } else {
-    ss << "UserRRef(RRefId = " << rref_->rrefId() << ", ForkId = "
-       << c10::static_intrusive_pointer_cast<UserRRef>(rref_)->forkId() << ")";
+    return c10::str(
+        "UserRRef(RRefId = ",
+        rref_->rrefId(),
+        ", ForkId = ",
+        c10::static_intrusive_pointer_cast<UserRRef>(rref_)->forkId(),
+        ")");
   }
-  return ss.str();
+}
+
+py::object PyRRef::createRRefProxy(PyRRef& self, const RRefProxyType& type)
+    const {
+  auto& pythonRpcHandler = PythonRpcHandler::getInstance();
+  pybind11::gil_scoped_acquire ag;
+  auto& functions = pythonRpcHandler.getRRefProxyFunctions();
+  auto& ctor = functions.rrefProxyCtor_;
+  switch (type) {
+    case RRefProxyType::RPC_SYNC: {
+      return ctor(self, functions.rpcSync_);
+    }
+    case RRefProxyType::RPC_ASYNC: {
+      return ctor(self, functions.rpcAsync_);
+    }
+    case RRefProxyType::REMOTE: {
+      return ctor(self, functions.remote_);
+    }
+    default: {
+      TORCH_INTERNAL_ASSERT(false, "Unrecognized RRefProxy type ", type);
+    }
+  }
 }
 
 py::tuple PyRRef::pickle() const {
   auto& ctx = RRefContext::getInstance();
-  // TODO: use a dispatch table to pickle/unpickle an RRef, and only only
-  // install the dispatch table only when there are indeed RPC activities. As
-  // a counter example, checkpointing a model with RRefs should not trigger
-  // forks to be added as a fork or a child.
   auto rrefForkData = ctx.prepareChildFork(rref_);
   return toPyTuple(rrefForkData);
 }

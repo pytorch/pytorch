@@ -1,131 +1,131 @@
 set(PYTORCH_FOUND_HIP FALSE)
 
-IF(NOT DEFINED ENV{ROCM_PATH})
-  SET(ROCM_PATH /opt/rocm)
-ELSE()
-  SET(ROCM_PATH $ENV{ROCM_PATH})
-ENDIF()
+if(NOT DEFINED ENV{ROCM_PATH})
+  set(ROCM_PATH /opt/rocm)
+else()
+  set(ROCM_PATH $ENV{ROCM_PATH})
+endif()
 
 # HIP_PATH
-IF(NOT DEFINED ENV{HIP_PATH})
-  SET(HIP_PATH ${ROCM_PATH}/hip)
-ELSE()
-  SET(HIP_PATH $ENV{HIP_PATH})
-ENDIF()
+if(NOT DEFINED ENV{HIP_PATH})
+  set(HIP_PATH ${ROCM_PATH}/hip)
+else()
+  set(HIP_PATH $ENV{HIP_PATH})
+endif()
 
-IF(NOT EXISTS ${HIP_PATH})
+if(NOT EXISTS ${HIP_PATH})
   return()
-ENDIF()
+endif()
 
 # HCC_PATH
-IF(NOT DEFINED ENV{HCC_PATH})
-  SET(HCC_PATH ${ROCM_PATH}/hcc)
-ELSE()
-  SET(HCC_PATH $ENV{HCC_PATH})
-ENDIF()
+if(NOT DEFINED ENV{HCC_PATH})
+  set(HCC_PATH ${ROCM_PATH}/hcc)
+else()
+  set(HCC_PATH $ENV{HCC_PATH})
+endif()
 
 # HSA_PATH
-IF(NOT DEFINED ENV{HSA_PATH})
-  SET(HSA_PATH ${ROCM_PATH}/hsa)
-ELSE()
-  SET(HSA_PATH $ENV{HSA_PATH})
-ENDIF()
+if(NOT DEFINED ENV{HSA_PATH})
+  set(HSA_PATH ${ROCM_PATH}/hsa)
+else()
+  set(HSA_PATH $ENV{HSA_PATH})
+endif()
 
 # ROCBLAS_PATH
-IF(NOT DEFINED ENV{ROCBLAS_PATH})
-  SET(ROCBLAS_PATH ${ROCM_PATH}/rocblas)
-ELSE()
-  SET(ROCBLAS_PATH $ENV{ROCBLAS_PATH})
-ENDIF()
+if(NOT DEFINED ENV{ROCBLAS_PATH})
+  set(ROCBLAS_PATH ${ROCM_PATH}/rocblas)
+else()
+  set(ROCBLAS_PATH $ENV{ROCBLAS_PATH})
+endif()
 
 # ROCFFT_PATH
-IF(NOT DEFINED ENV{ROCFFT_PATH})
-  SET(ROCFFT_PATH ${ROCM_PATH}/rocfft)
-ELSE()
-  SET(ROCFFT_PATH $ENV{ROCFFT_PATH})
-ENDIF()
+if(NOT DEFINED ENV{ROCFFT_PATH})
+  set(ROCFFT_PATH ${ROCM_PATH}/rocfft)
+else()
+  set(ROCFFT_PATH $ENV{ROCFFT_PATH})
+endif()
 
 # HIPSPARSE_PATH
-IF(NOT DEFINED ENV{HIPSPARSE_PATH})
-  SET(HIPSPARSE_PATH ${ROCM_PATH}/hipsparse)
-ELSE()
-  SET(HIPSPARSE_PATH $ENV{HIPSPARSE_PATH})
-ENDIF()
+if(NOT DEFINED ENV{HIPSPARSE_PATH})
+  set(HIPSPARSE_PATH ${ROCM_PATH}/hipsparse)
+else()
+  set(HIPSPARSE_PATH $ENV{HIPSPARSE_PATH})
+endif()
 
 # THRUST_PATH
-IF(DEFINED ENV{THRUST_PATH})
-  SET(THRUST_PATH $ENV{THRUST_PATH})
-ELSE()
-  SET(THRUST_PATH ${ROCM_PATH}/include)
-ENDIF()
+if(DEFINED ENV{THRUST_PATH})
+  set(THRUST_PATH $ENV{THRUST_PATH})
+else()
+  set(THRUST_PATH ${ROCM_PATH}/include)
+endif()
 
 # HIPRAND_PATH
-IF(NOT DEFINED ENV{HIPRAND_PATH})
-  SET(HIPRAND_PATH ${ROCM_PATH}/hiprand)
-ELSE()
-  SET(HIPRAND_PATH $ENV{HIPRAND_PATH})
-ENDIF()
+if(NOT DEFINED ENV{HIPRAND_PATH})
+  set(HIPRAND_PATH ${ROCM_PATH}/hiprand)
+else()
+  set(HIPRAND_PATH $ENV{HIPRAND_PATH})
+endif()
 
 # ROCRAND_PATH
-IF(NOT DEFINED ENV{ROCRAND_PATH})
-  SET(ROCRAND_PATH ${ROCM_PATH}/rocrand)
-ELSE()
-  SET(ROCRAND_PATH $ENV{ROCRAND_PATH})
-ENDIF()
+if(NOT DEFINED ENV{ROCRAND_PATH})
+  set(ROCRAND_PATH ${ROCM_PATH}/rocrand)
+else()
+  set(ROCRAND_PATH $ENV{ROCRAND_PATH})
+endif()
 
 # MIOPEN_PATH
-IF(NOT DEFINED ENV{MIOPEN_PATH})
-  SET(MIOPEN_PATH ${ROCM_PATH}/miopen)
-ELSE()
-  SET(MIOPEN_PATH $ENV{MIOPEN_PATH})
-ENDIF()
+if(NOT DEFINED ENV{MIOPEN_PATH})
+  set(MIOPEN_PATH ${ROCM_PATH}/miopen)
+else()
+  set(MIOPEN_PATH $ENV{MIOPEN_PATH})
+endif()
 
 # RCCL_PATH
-IF(NOT DEFINED ENV{RCCL_PATH})
-  SET(RCCL_PATH ${ROCM_PATH}/rccl)
-ELSE()
-  SET(RCCL_PATH $ENV{RCCL_PATH})
-ENDIF()
+if(NOT DEFINED ENV{RCCL_PATH})
+  set(RCCL_PATH ${ROCM_PATH}/rccl)
+else()
+  set(RCCL_PATH $ENV{RCCL_PATH})
+endif()
 
 # ROCPRIM_PATH
-IF(NOT DEFINED ENV{ROCPRIM_PATH})
-  SET(ROCPRIM_PATH ${ROCM_PATH}/rocprim)
-ELSE()
-  SET(ROCPRIM_PATH $ENV{ROCPRIM_PATH})
-ENDIF()
+if(NOT DEFINED ENV{ROCPRIM_PATH})
+  set(ROCPRIM_PATH ${ROCM_PATH}/rocprim)
+else()
+  set(ROCPRIM_PATH $ENV{ROCPRIM_PATH})
+endif()
 
 # HIPCUB_PATH
-IF(NOT DEFINED ENV{HIPCUB_PATH})
-  SET(HIPCUB_PATH ${ROCM_PATH}/hipcub)
-ELSE()
-  SET(HIPCUB_PATH $ENV{HIPCUB_PATH})
-ENDIF()
+if(NOT DEFINED ENV{HIPCUB_PATH})
+  set(HIPCUB_PATH ${ROCM_PATH}/hipcub)
+else()
+  set(HIPCUB_PATH $ENV{HIPCUB_PATH})
+endif()
 
 # ROCTHRUST_PATH
-IF(NOT DEFINED ENV{ROCTHRUST_PATH})
-  SET(ROCTHRUST_PATH ${ROCM_PATH}/rocthrust)
-ELSE()
-  SET(ROCTHRUST_PATH $ENV{ROCTHRUST_PATH})
-ENDIF()
+if(NOT DEFINED ENV{ROCTHRUST_PATH})
+  set(ROCTHRUST_PATH ${ROCM_PATH}/rocthrust)
+else()
+  set(ROCTHRUST_PATH $ENV{ROCTHRUST_PATH})
+endif()
 
 # ROCTRACER_PATH
-IF(NOT DEFINED ENV{ROCTRACER_PATH})
-  SET(ROCTRACER_PATH ${ROCM_PATH}/roctracer)
-ELSE()
-  SET(ROCTRACER_PATH $ENV{ROCTRACER_PATH})
-ENDIF()
+if(NOT DEFINED ENV{ROCTRACER_PATH})
+  set(ROCTRACER_PATH ${ROCM_PATH}/roctracer)
+else()
+  set(ROCTRACER_PATH $ENV{ROCTRACER_PATH})
+endif()
 
-IF(NOT DEFINED ENV{PYTORCH_ROCM_ARCH})
-  SET(PYTORCH_ROCM_ARCH gfx803;gfx900;gfx906;gfx908)
-ELSE()
-  SET(PYTORCH_ROCM_ARCH $ENV{PYTORCH_ROCM_ARCH})
-ENDIF()
+if(NOT DEFINED ENV{PYTORCH_ROCM_ARCH})
+  set(PYTORCH_ROCM_ARCH gfx803;gfx900;gfx906;gfx908)
+else()
+  set(PYTORCH_ROCM_ARCH $ENV{PYTORCH_ROCM_ARCH})
+endif()
 
 # Add HIP to the CMAKE Module Path
 set(CMAKE_MODULE_PATH ${HIP_PATH}/cmake ${CMAKE_MODULE_PATH})
 
 # Disable Asserts In Code (Can't use asserts on HIP stack.)
-ADD_DEFINITIONS(-DNDEBUG)
+add_definitions(-DNDEBUG)
 
 macro(find_package_and_print_version PACKAGE_NAME)
   find_package("${PACKAGE_NAME}" ${ARGN})
@@ -135,7 +135,7 @@ endmacro()
 # Find the HIP Package
 find_package_and_print_version(HIP 1.0)
 
-IF(HIP_FOUND)
+if(HIP_FOUND)
   set(PYTORCH_FOUND_HIP TRUE)
 
   message("\n***** Library versions from dpkg *****\n")
@@ -179,21 +179,21 @@ IF(HIP_FOUND)
   # recognizable by hcc, but not gcc and clang. Right now in our
   # setup, hcc is only used for linking, but it should be used to
   # compile the *_hip.cc files as well.
-  FIND_LIBRARY(PYTORCH_HIP_HCC_LIBRARIES hip_hcc HINTS ${HIP_PATH}/lib)
+  find_library(PYTORCH_HIP_HCC_LIBRARIES hip_hcc HINTS ${HIP_PATH}/lib)
   # TODO: miopen_LIBRARIES should return fullpath to the library file,
   # however currently it's just the lib name
-  FIND_LIBRARY(PYTORCH_MIOPEN_LIBRARIES ${miopen_LIBRARIES} HINTS ${MIOPEN_PATH}/lib)
+  find_library(PYTORCH_MIOPEN_LIBRARIES ${miopen_LIBRARIES} HINTS ${MIOPEN_PATH}/lib)
   # TODO: rccl_LIBRARIES should return fullpath to the library file,
   # however currently it's just the lib name
-  FIND_LIBRARY(PYTORCH_RCCL_LIBRARIES ${rccl_LIBRARIES} HINTS ${RCCL_PATH}/lib)
+  find_library(PYTORCH_RCCL_LIBRARIES ${rccl_LIBRARIES} HINTS ${RCCL_PATH}/lib)
   # hiprtc is part of HIP
-  FIND_LIBRARY(ROCM_HIPRTC_LIB hiprtc HINTS ${HIP_PATH}/lib)
+  find_library(ROCM_HIPRTC_LIB hiprtc HINTS ${HIP_PATH}/lib)
   # roctx is part of roctracer
-  FIND_LIBRARY(ROCM_ROCTX_LIB roctx64 HINTS ${ROCTRACER_PATH}/lib)
+  find_library(ROCM_ROCTX_LIB roctx64 HINTS ${ROCTRACER_PATH}/lib)
   set(roctracer_INCLUDE_DIRS ${ROCTRACER_PATH}/include)
 
   # Necessary includes for building PyTorch since we include HIP headers that depend on hcc/hsa headers.
   set(hcc_INCLUDE_DIRS ${HCC_PATH}/include)
   set(hsa_INCLUDE_DIRS ${HSA_PATH}/include)
 
-ENDIF()
+endif()

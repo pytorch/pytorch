@@ -1067,6 +1067,34 @@ class TestList(JitTestCase):
             )
 
 
+    def test_to_list_gpu(self):
+        """GPU tests for Tensor.tolist() function."""
+        if not torch.cuda.is_available() or torch.cuda.device_count() == 0:
+            self.skipTest("CUDA is not available")
+
+        def to_list_bool_1D(x):
+            # type: (torch.Tensor) -> List[bool]
+            li = torch.jit.annotate(List[bool], x.tolist())
+            return li
+
+        def to_list_int_1D(x):
+            # type: (torch.Tensor) -> List[int]
+            li = torch.jit.annotate(List[int], x.tolist())
+            return li
+
+        def to_list_float_1D(x):
+            # type: (torch.Tensor) -> List[float]
+            li = torch.jit.annotate(List[float], x.tolist())
+            return li
+
+        self.checkScript(to_list_bool_1D, (torch.tensor(
+            [True, False, True, False], dtype=torch.bool).cuda(),))
+        self.checkScript(to_list_int_1D, (torch.tensor(
+            [1, 2, 3, 4], dtype=torch.long).cuda(),))
+        self.checkScript(to_list_float_1D, (torch.randn(
+            5, dtype=torch.double).cuda(),))
+
+
 class TestDict(JitTestCase):
     def dict(self):
         return {u'a': torch.ones(1), u'b': torch.ones(1) + 1, u'c': torch.ones(1) + 2}

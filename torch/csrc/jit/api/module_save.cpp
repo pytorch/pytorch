@@ -3,7 +3,6 @@
 
 namespace torch {
 namespace jit {
-namespace script {
 
 void Module::save(std::ostream& out, const ExtraFilesMap& extra_files) const {
   ExportModule(*this, out, extra_files, false);
@@ -26,6 +25,5 @@ void Module::_save_for_mobile(
   ExportModule(*this, filename, extra_files, true);
 }
 
-} // namespace script
 } // namespace jit
 } // namespace torch

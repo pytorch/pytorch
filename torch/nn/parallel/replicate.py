@@ -1,7 +1,5 @@
-import torch
 import torch.cuda.comm as comm
 from torch.cuda._utils import _get_device_index
-from torch.nn import Parameter
 
 
 def _is_script_module(module):
@@ -110,17 +108,7 @@ def replicate(network, devices, detach=False):
     for i, module in enumerate(modules):
         module_indices[module] = i
         for j in range(num_replicas):
-            if _is_script_module(module):
-                # we have to initialize ScriptModule properly so that
-                # it works with pybind11
-                def init_fn(script_module):
-                    # Don't do anything here, we'll initialize the ScriptModule below
-                    return
-                replica = torch.jit.RecursiveScriptModule._construct(module._c._replicate_for_data_parallel(), init_fn)
-            else:
-                replica = module._replicate_for_data_parallel()
-
-            module_copies[j].append(replica)
+            module_copies[j].append(module._replicate_for_data_parallel())
 
     for i, module in enumerate(modules):
         for key, child in module._modules.items():
@@ -143,12 +131,9 @@ def replicate(network, devices, detach=False):
                 for j in range(num_replicas):
                     replica = module_copies[j][i]
                     param = param_copies[j][param_idx]
-                    setattr(replica, key, Parameter(param, requires_grad=param.requires_grad))
-                    # TODO: We need to manually set _parameters with a bare
-                    # non-parameter Tensor, otherwise gradients don't
-                    # accumulate in the original parameters when you call
-                    # backwards() on the DataParallel module.
-                    replica._parameters[key] = param
+                    # parameters in replicas are no longer leaves,
+                    # so setattr them as non-parameter attributes
+                    setattr(replica, key, param)
         for key, buf in module._buffers.items():
             if buf is None:
                 for j in range(num_replicas):

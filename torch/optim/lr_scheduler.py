@@ -401,7 +401,8 @@ class MultiStepLR(_LRScheduler):
                 for group in self.optimizer.param_groups]
 
     def _get_closed_form_lr(self):
-        return [base_lr * self.gamma ** bisect_right(self.milestones, self.last_epoch)
+        milestones = list(sorted(self.milestones.elements()))
+        return [base_lr * self.gamma ** bisect_right(milestones, self.last_epoch)
                 for base_lr in self.base_lrs]
 
 
@@ -1044,7 +1045,7 @@ class OneCycleLR(_LRScheduler):
         max_lr (float or list): Upper learning rate boundaries in the cycle
             for each parameter group.
         total_steps (int): The total number of steps in the cycle. Note that
-            if a value is provided here, then it must be inferred by providing
+            if a value is not provided here, then it must be inferred by providing
             a value for epochs and steps_per_epoch.
             Default: None
         epochs (int): The number of epochs to train for. This is used along

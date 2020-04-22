@@ -34,7 +34,7 @@ Tensor mkldnn_softmax(
   const int64_t wrapped_dim = maybe_wrap_dim(dim, self.dim());
   ideep::tensor& x = itensor_from_mkldnn(self);
   ideep::tensor y;
-  ideep::softmax_forward::compute<AllocForMKLDNN>(x, y, wrapped_dim);
+  ideep::softmax_forward::compute(x, y, wrapped_dim);
   return new_with_itensor_mkldnn(std::move(y), self.options());
 }
 

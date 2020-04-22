@@ -7,7 +7,7 @@
 
 #include <ATen/Config.h>
 #if AT_NNPACK_ENABLED()
-#include "nnpack.h"
+#include <nnpack.h>
 #endif
 
 constexpr int MIOPEN_DIM_MAX = 5;
@@ -390,7 +390,7 @@ auto ConvParams::use_cudnn_depthwise(
 
 static void check_shape_forward(const at::Tensor& input,
                                 const c10::IntArrayRef& weight_sizes, const at::Tensor& bias,
-                                const ConvParams& params, bool input_is_mkldnn) {
+                                const ConvParams& params) {
   int64_t k = input.ndimension();
   int64_t weight_dim = weight_sizes.size();
   int64_t groups = params.groups;
@@ -550,7 +550,7 @@ at::Tensor convolution_overrideable(
     const Tensor& input, const Tensor& weight, const Tensor& bias,
     IntArrayRef stride, IntArrayRef padding, IntArrayRef dilation,
     bool transposed, IntArrayRef output_padding, int64_t groups) {
-  AT_ERROR("You are likely triggering this with tensor backend other than CPU/CUDA/MKLDNN, if this is intended, please use torch::RegisterOperators() to override this function ");
+  AT_ERROR("You are likely triggering this with tensor backend other than CPU/CUDA/MKLDNN, if this is intended, please use TORCH_LIBRARY_IMPL to override this function ");
 }
 
 at::Tensor _convolution(
@@ -564,18 +564,7 @@ at::Tensor _convolution(
   auto weight = weight_r;
   auto bias = bias_r;
   auto k = weight.ndimension();
-  // mkldnn conv2d weights could have been re-ordered to 5d by
-  // mkldnn_reorder_conv2d_weight
-  std::vector<int64_t> weight_sizes_mkl;
   c10::IntArrayRef weight_sizes = weight.sizes();
-  if (input_is_mkldnn && (k == input.ndimension() + 1)) {
-    k = input.ndimension();
-    weight_sizes_mkl.resize(k);
-    weight_sizes_mkl[0] = weight.size(0) * weight.size(1);
-    std::copy_n(
-        weight.sizes().cbegin() + 2, k - 1, weight_sizes_mkl.begin() + 1);
-    weight_sizes = c10::IntArrayRef(weight_sizes_mkl);
-  }
   int64_t dim = k - 2;
   
 
@@ -592,7 +581,7 @@ at::Tensor _convolution(
   params.deterministic = deterministic;
   params.cudnn_enabled = cudnn_enabled;
 
-  check_shape_forward(input, weight_sizes, bias, params, input_is_mkldnn);
+  check_shape_forward(input, weight_sizes, bias, params);
 
   if (input.size(0) == 0) {    
     // don't send empty inputs through backends
@@ -710,6 +699,18 @@ at::Tensor _convolution(
     if (params.use_cpu_depthwise3x3_winograd(input, weight)) {
       output = convolution_depthwise3x3_winograd_stub(
         input.device().type(), input, weight, bias, params.stride, params.padding, params.groups);
+    } else if (
+        !params.transposed && (input.ndimension() == 5) &&
+        (input.device().type() == c10::DeviceType::CPU) &&
+        !params.is_dilated()) {
+      // fast path for grouped conv3d
+      output = at::slow_conv3d(
+          input,
+          weight,
+          weight.sizes().slice(2),
+          bias,
+          params.stride,
+          params.padding);
     } else if (params.groups == 1) {
       output = at::_convolution_nogroup(
           input.contiguous(), weight, bias, params.stride, params.padding, params.dilation, params.transposed, params.output_padding);
@@ -796,6 +797,9 @@ at::Tensor _convolution_nogroup(
     } else if (dim == 5) { /* dim == 5, CPU, non-dilated */
       /* CPU implementation has specialized MM kernels
          for non-dilated case here */
+
+      // This path is already overwritten with the fast impl in _convolution
+      // See: https://github.com/pytorch/pytorch/pull/3635
       return at::slow_conv3d(
           input, weight, kernel_size, bias,
           stride, padding);
@@ -809,7 +813,7 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward_overrideable(
         const Tensor& grad_output, const Tensor& input, const Tensor& weight,
         IntArrayRef stride, IntArrayRef padding, IntArrayRef dilation,
         bool transposed, IntArrayRef output_padding, int64_t groups, std::array<bool, 3> output_mask) {
-  AT_ERROR("You are likely triggering this with tensor backend other than CPU/CUDA/MKLDNN, if this is intended, please use torch::RegisterOperators() to override this function ");
+  AT_ERROR("You are likely triggering this with tensor backend other than CPU/CUDA/MKLDNN, if this is intended, please use TORCH_LIBRARY_IMPL to override this function ");
   return std::tuple<Tensor, Tensor, Tensor>(
           at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT),
           at::empty_like(weight, LEGACY_CONTIGUOUS_MEMORY_FORMAT),
@@ -840,7 +844,13 @@ std::tuple<Tensor,Tensor,Tensor> _convolution_double_backward(
   params.dilation = dilation_.vec();
   params.transposed = transposed_;
   params.output_padding = output_padding_.vec();
-  params.groups = groups_;
+  // TODO: hacky way of inferring the groups number for grouped Conv3D
+  // See: https://github.com/pytorch/pytorch/pull/36355
+  if (!params.transposed && input.dim() > 4) {
+    params.groups = input.size(1) / weight.size(1);
+  } else {
+    params.groups = groups_;
+  }
   params.benchmark = benchmark;
   params.deterministic = deterministic;
   params.cudnn_enabled = cudnn_enabled;
@@ -913,7 +923,6 @@ std::tuple<Tensor,Tensor,Tensor> _convolution_double_backward(
         if (gOt.is_cuda()) {
           gOt = gOt.contiguous();
         }
-
         // Compute conv
         if (params.transposed) {
           gw_conv_params.transposed = false;

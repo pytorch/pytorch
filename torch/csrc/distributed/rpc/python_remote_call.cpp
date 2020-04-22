@@ -14,8 +14,8 @@ PythonRemoteCall::PythonRemoteCall(
       retRRefId_(std::move(retRRefId)),
       retForkId_(std::move(retForkId)) {}
 
-Message PythonRemoteCall::toMessage() && {
-  std::vector<IValue> ivalues = serializedPyObj_.toIValues();
+Message PythonRemoteCall::toMessageImpl() && {
+  std::vector<IValue> ivalues = std::move(serializedPyObj_).toIValues();
   ivalues.emplace_back(retRRefId_);
   ivalues.emplace_back(retForkId_);
 

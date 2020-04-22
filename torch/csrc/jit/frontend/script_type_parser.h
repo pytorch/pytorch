@@ -6,7 +6,6 @@
 
 namespace torch {
 namespace jit {
-namespace script {
 
 /**
  * class ScriptTypeParser
@@ -45,6 +44,5 @@ class TORCH_API ScriptTypeParser {
 
   ResolverPtr resolver_ = nullptr;
 };
-} // namespace script
 } // namespace jit
 } // namespace torch

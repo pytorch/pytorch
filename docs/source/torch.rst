@@ -55,6 +55,7 @@ Creation Ops
 .. autofunction:: full_like
 .. autofunction:: quantize_per_tensor
 .. autofunction:: quantize_per_channel
+.. autofunction:: dequantize
 
 Indexing, Slicing, Joining, Mutating Ops
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -193,6 +194,7 @@ Pointwise Ops
 ~~~~~~~~~~~~~~~~~~~~~~
 
 .. autofunction:: abs
+.. autofunction:: absolute
 .. autofunction:: acos
 .. autofunction:: add
 .. autofunction:: addcdiv
@@ -250,6 +252,7 @@ Pointwise Ops
 .. autofunction:: square
 .. autofunction:: tan
 .. autofunction:: tanh
+.. autofunction:: true_divide
 .. autofunction:: trunc
 
 
@@ -281,6 +284,7 @@ Comparison Ops
 .. autofunction:: equal
 .. autofunction:: ge
 .. autofunction:: gt
+.. autofunction:: isclose
 .. autofunction:: isfinite
 .. autofunction:: isinf
 .. autofunction:: isnan
@@ -310,6 +314,7 @@ Spectral Ops
 Other Operations
 ~~~~~~~~~~~~~~~~~~~~~~
 .. autofunction:: bincount
+.. autofunction:: block_diag
 .. autofunction:: broadcast_tensors
 .. autofunction:: cartesian_prod
 .. autofunction:: cdist
@@ -376,9 +381,13 @@ BLAS and LAPACK Operations
 .. autofunction:: qr
 .. autofunction:: solve
 .. autofunction:: svd
+.. autofunction:: svd_lowrank
+.. autofunction:: pca_lowrank
 .. autofunction:: symeig
+.. autofunction:: lobpcg
 .. autofunction:: trapz
 .. autofunction:: triangular_solve
+
 
 Utilities
 ----------------------------------

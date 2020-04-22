@@ -12,8 +12,6 @@ namespace jit {
 struct Graph;
 struct Value;
 
-namespace script {
-
 // \brief Parse IR from \p STR constructing the corresponding IR in\ GRAPH.
 TORCH_API void parseIR(const std::string& str, torch::jit::Graph* graph);
 
@@ -27,6 +25,5 @@ TORCH_API void parseIR(
     torch::jit::Graph* graph,
     std::unordered_map<std::string, Value*>& vmap);
 
-} // namespace script
 } // namespace jit
 } // namespace torch

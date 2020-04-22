@@ -103,10 +103,8 @@ class RMSprop(Optimizer):
                 if group['momentum'] > 0:
                     buf = state['momentum_buffer']
                     buf.mul_(group['momentum']).addcdiv_(grad, avg)
-                    # Need to avoid version tracking for parameter.
-                    p.data.add_(buf, alpha=-group['lr'])
+                    p.add_(buf, alpha=-group['lr'])
                 else:
-                    # Need to avoid version tracking for parameter.
-                    p.data.addcdiv_(grad, avg, value=-group['lr'])
+                    p.addcdiv_(grad, avg, value=-group['lr'])
 
         return loss
