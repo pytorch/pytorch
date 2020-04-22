@@ -207,13 +207,76 @@ public:
   Vec256<BFloat16> conj() const {
     return *this;
   }
+  Vec256<BFloat16> acos() const {
+    return map(Sleef_acosf8_u10);
+  }
+  Vec256<BFloat16> asin() const {
+    return map(Sleef_asinf8_u10);
+  }
+  Vec256<BFloat16> atan() const {
+    return map(Sleef_atanf8_u10);
+  }
+  Vec256<BFloat16> atan2(const Vec256<BFloat16> &b) const {
+    __m256 lo, hi;
+    __m256 b1, b2;
+    cvtbf16_fp32(values, lo, hi);
+    cvtbf16_fp32(b.values, b1, b2);
+    auto o1 = Sleef_atan2f8_u10(lo, b1);
+    auto o2 = Sleef_atan2f8_u10(hi, b2);
+    return cvtfp32_bf16(o1, o2);
+  }
+  Vec256<BFloat16> erf() const {
+    return map(Sleef_erff8_u10);
+  }
+  Vec256<BFloat16> erfc() const {
+    return map(Sleef_erfcf8_u15);
+  }
+  Vec256<BFloat16> erfinv() const {
+    __at_align32__ int16_t tmp[size()];
+    store(tmp);
+    for (int64_t i = 0; i < size(); i++) {
+      tmp[i] = calc_erfinv((float)tmp[i]);
+    }
+    return loadu(tmp);
+  }
   Vec256<BFloat16> exp() const {
     return map(Sleef_expf8_u10);
+  }
+  Vec256<BFloat16> expm1() const {
+    return map(Sleef_expm1f8_u10);
   }
   Vec256<BFloat16> log() const {
     return map(Sleef_logf8_u10);
   }
+  Vec256<BFloat16> log2() const {
+    return map(Sleef_log2f8_u10);
+  }
+  Vec256<BFloat16> log10() const {
+    return map(Sleef_log10f8_u10);
+  }
+  Vec256<BFloat16> log1p() const {
+    return map(Sleef_log1pf8_u10);
+  }
   Vec256<BFloat16> frac() const;
+  Vec256<BFloat16> sin() const {
+    return map(Sleef_sinf8_u10);
+  }
+  Vec256<BFloat16> sinh() const {
+    return map(Sleef_sinhf8_u10);
+  }
+  Vec256<BFloat16> cos() const {
+    return map(Sleef_cosf8_u10);
+  }
+  Vec256<BFloat16> cosh() const {
+    return map(Sleef_coshf8_u10);
+  }
+  Vec256<BFloat16> ceil() const {
+    __m256 lo, hi;
+    cvtbf16_fp32(values, lo, hi);
+    auto o1 = _mm256_ceil_ps(lo);
+    auto o2 = _mm256_ceil_ps(hi);
+    return cvtfp32_bf16(o1, o2);
+  }
   Vec256<BFloat16> floor() const {
     __m256 lo, hi;
     cvtbf16_fp32(values, lo, hi);
@@ -229,12 +292,28 @@ public:
     auto o2 = _mm256_xor_ps(mask, hi);
     return cvtfp32_bf16(o1, o2);
   }
+  Vec256<BFloat16> round() const {
+    __m256 lo, hi;
+    cvtbf16_fp32(values, lo, hi);
+    auto o1 = _mm256_round_ps(lo, (_MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC));
+    auto o2 = _mm256_round_ps(hi, (_MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC));
+    return cvtfp32_bf16(o1, o2);
+  }
+  Vec256<BFloat16> tan() const {
+    return map(Sleef_tanf8_u10);
+  }
+  Vec256<BFloat16> tanh() const {
+    return map(Sleef_tanhf8_u10);
+  }
   Vec256<BFloat16> trunc() const {
     __m256 lo, hi;
     cvtbf16_fp32(values, lo, hi);
     auto o1 = _mm256_round_ps(lo, (_MM_FROUND_TO_ZERO | _MM_FROUND_NO_EXC));
     auto o2 = _mm256_round_ps(hi, (_MM_FROUND_TO_ZERO | _MM_FROUND_NO_EXC));
     return cvtfp32_bf16(o1, o2);
+  }
+  Vec256<BFloat16> lgamma() const {
+    return map(Sleef_lgammaf8_u10);
   }
   Vec256<BFloat16> sqrt() const {
     __m256 lo, hi;
@@ -257,6 +336,15 @@ public:
     auto ones = _mm256_set1_ps(1);
     auto o1 = _mm256_div_ps(ones, _mm256_sqrt_ps(lo));
     auto o2 = _mm256_div_ps(ones, _mm256_sqrt_ps(hi));
+    return cvtfp32_bf16(o1, o2);
+  }
+  Vec256<BFloat16> pow(const Vec256<BFloat16> &b) const {
+    __m256 lo, hi;
+    __m256 b1, b2;
+    cvtbf16_fp32(values, lo, hi);
+    cvtbf16_fp32(b.values, b1, b2);
+    auto o1 = Sleef_powf8_u10(lo, b1);
+    auto o2 = Sleef_powf8_u10(hi, b2);
     return cvtfp32_bf16(o1, o2);
   }
 
@@ -441,6 +529,20 @@ Vec256<BFloat16> inline clamp_min(const Vec256<BFloat16>& a, const Vec256<BFloat
   auto o1 = _mm256_max_ps(min_lo, a_lo);
   auto o2 = _mm256_max_ps(min_hi, a_hi);
   return cvtfp32_bf16(o1, o2);
+}
+
+template <>
+inline void convert(const BFloat16* src, BFloat16* dst, int64_t n) {
+  int64_t i;
+#pragma unroll
+  for (i = 0; i <= (n - Vec256<BFloat16>::size()); i += Vec256<BFloat16>::size()) {
+    auto vsrc = _mm256_loadu_si256(reinterpret_cast<__m256i*>((void*)(src + i)));
+    _mm256_storeu_si256(reinterpret_cast<__m256i*>((void*)(dst + i)), vsrc);
+  }
+#pragma unroll
+  for (; i < n; i++) {
+    dst[i] = src[i];
+  }
 }
 
 template <>

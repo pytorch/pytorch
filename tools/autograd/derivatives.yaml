@@ -110,6 +110,9 @@
 - name: abs(Tensor self) -> Tensor
   self: grad * self.sign()
 
+- name: absolute(Tensor self) -> Tensor
+  self: grad * self.sign()
+
 - name: acos(Tensor self) -> Tensor
   self: grad * -((-self * self + 1).rsqrt())
 
@@ -208,6 +211,10 @@
 - name: bmm(Tensor self, Tensor mat2) -> Tensor
   self: grad.bmm(mat2.transpose(1, 2))
   mat2: self.transpose(1, 2).bmm(grad)
+
+- name: _bmm(Tensor self, Tensor mat2, *, bool deterministic=False) -> Tensor
+  self: at::_bmm(grad, mat2.transpose(1, 2), deterministic)
+  mat2: at::_bmm(self.transpose(1, 2), grad, deterministic)
 
 - name: cat(Tensor[] tensors, int dim=0) -> Tensor
   tensors: cat_tensors_backward(grad, to_args_sizes(tensors), dim)
@@ -412,7 +419,7 @@
   other: zeros_like(other)
 
 - name: hardsigmoid(Tensor self) -> Tensor
-  self: hardsigmoid_backward(grad, result)
+  self: hardsigmoid_backward(grad, self)
 
 - name: histc(Tensor self, int bins=100, Scalar min=0, Scalar max=0) -> Tensor
   self: not_implemented("histc")
@@ -1272,6 +1279,11 @@
   self: im2col_backward(grad, {self.size(2), self.size(3)}, kernel_size, dilation, padding, stride)
 
 # NN double backwards support
+- name: im2col_backward(Tensor grad_output, int[2] input_size, int[2] kernel_size, int[2] dilation, int[2] padding, int[2] stride) -> Tensor
+  grad_output: im2col(grad, kernel_size, dilation, padding, stride)
+
+- name: col2im_backward(Tensor grad_output, int[2] kernel_size, int[2] dilation, int[2] padding, int[2] stride) -> Tensor
+  grad_output: col2im(grad, {grad_output.size(2), grad_output.size(3)}, kernel_size, dilation, padding, stride)
 
 - name: _adaptive_avg_pool2d_backward(Tensor grad_output, Tensor self) -> Tensor
   grad_output: _adaptive_avg_pool2d(grad, { grad_output.size(-2), grad_output.size(-1) })
