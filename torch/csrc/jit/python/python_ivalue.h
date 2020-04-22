@@ -28,4 +28,4 @@ struct C10_EXPORT ConcretePyObjectHolder final : PyObjectHolder {
 };
 
 } // namespace ivalue
-} // namespace c10} // namespace c10
+} // namespace c10

@@ -1,6 +1,6 @@
 ##############################################################################
 # Macro to update cached options.
-macro (caffe2_update_option variable value)
+macro(caffe2_update_option variable value)
   if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
     get_property(__help_string CACHE ${variable} PROPERTY HELPSTRING)
     set(${variable} ${value} CACHE BOOL ${__help_string} FORCE)
@@ -44,7 +44,7 @@ macro(caffe2_interface_library SRC DST)
   get_target_property(__src_target_type ${SRC} TYPE)
   # Depending on the type of the source library, we will set up the
   # link command for the specific SRC library.
-  if (${__src_target_type} STREQUAL "STATIC_LIBRARY")
+  if(${__src_target_type} STREQUAL "STATIC_LIBRARY")
     # In the case of static library, we will need to add whole-static flags.
     if(APPLE)
       target_link_libraries(
@@ -120,7 +120,7 @@ function(caffe2_binary_target target_name_or_src)
   # https://cmake.org/cmake/help/latest/command/function.html
   # Checking that ARGC is greater than # is the only way to ensure
   # that ARGV# was passed to the function as an extra argument.
-  if (ARGC GREATER 1)
+  if(ARGC GREATER 1)
     set(__target ${target_name_or_src})
     prepend(__srcs "${CMAKE_CURRENT_SOURCE_DIR}/" "${ARGN}")
   else()
@@ -130,17 +130,17 @@ function(caffe2_binary_target target_name_or_src)
   add_executable(${__target} ${__srcs})
   target_link_libraries(${__target} ${Caffe2_MAIN_LIBS})
   # If we have Caffe2_MODULES defined, we will also link with the modules.
-  if (DEFINED Caffe2_MODULES)
+  if(DEFINED Caffe2_MODULES)
     target_link_libraries(${__target} ${Caffe2_MODULES})
   endif()
-  if (USE_TBB)
+  if(USE_TBB)
     target_include_directories(${__target} PUBLIC ${TBB_ROOT_DIR}/include)
   endif()
   install(TARGETS ${__target} DESTINATION bin)
 endfunction()
 
 function(caffe2_hip_binary_target target_name_or_src)
-  if (ARGC GREATER 1)
+  if(ARGC GREATER 1)
     set(__target ${target_name_or_src})
     prepend(__srcs "${CMAKE_CURRENT_SOURCE_DIR}/" "${ARGN}")
   else()
@@ -160,13 +160,13 @@ endfunction()
 #   torch_cuda_based_add_executable(cuda_target)
 #
 macro(torch_cuda_based_add_executable cuda_target)
-  IF (USE_ROCM)
+  if(USE_ROCM)
     hip_add_executable(${cuda_target} ${ARGN})
-  ELSEIF(USE_CUDA)
+  elseif(USE_CUDA)
     cuda_add_executable(${cuda_target} ${ARGN})
-  ELSE()
+  else()
 
-  ENDIF()
+  endif()
 endmacro()
 
 
@@ -176,12 +176,12 @@ endmacro()
 #   torch_cuda_based_add_library(cuda_target)
 #
 macro(torch_cuda_based_add_library cuda_target)
-  IF (USE_ROCM)
+  if(USE_ROCM)
     hip_add_library(${cuda_target} ${ARGN})
-  ELSEIF(USE_CUDA)
+  elseif(USE_CUDA)
     cuda_add_library(${cuda_target} ${ARGN})
-  ELSE()
-  ENDIF()
+  else()
+  endif()
 endmacro()
 
 
@@ -192,7 +192,7 @@ endmacro()
 #
 macro(torch_cuda_get_nvcc_gencode_flag store_var)
   # setting nvcc arch flags
-  if ((NOT EXISTS ${TORCH_CUDA_ARCH_LIST}) AND (DEFINED ENV{TORCH_CUDA_ARCH_LIST}))
+  if((NOT EXISTS ${TORCH_CUDA_ARCH_LIST}) AND (DEFINED ENV{TORCH_CUDA_ARCH_LIST}))
     message(WARNING
         "In the future we will require one to explicitly pass "
         "TORCH_CUDA_ARCH_LIST to cmake instead of implicitly setting it as an "
@@ -200,7 +200,7 @@ macro(torch_cuda_get_nvcc_gencode_flag store_var)
         "pytorch.")
     set(TORCH_CUDA_ARCH_LIST $ENV{TORCH_CUDA_ARCH_LIST})
   endif()
-  if (EXISTS ${CUDA_ARCH_NAME})
+  if(EXISTS ${CUDA_ARCH_NAME})
     message(WARNING
         "CUDA_ARCH_NAME is no longer used. Use TORCH_CUDA_ARCH_LIST instead. "
         "Right now, CUDA_ARCH_NAME is ${CUDA_ARCH_NAME} and "
@@ -220,11 +220,11 @@ endmacro()
 function(torch_compile_options libname)
   set_property(TARGET ${libname} PROPERTY CXX_STANDARD 14)
 
-  if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
+  if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     # until they can be unified, keep these lists synced with setup.py
     if(MSVC)
 
-      if (MSVC_Z7_OVERRIDE)
+      if(MSVC_Z7_OVERRIDE)
         set(MSVC_DEBINFO_OPTION "/Z7")
       else()
         set(MSVC_DEBINFO_OPTION "/Zi")
@@ -271,13 +271,13 @@ function(torch_compile_options libname)
 
     endif()
 
-    if (MSVC)
-    elseif (WERROR)
+    if(MSVC)
+    elseif(WERROR)
       target_compile_options(${libname} PRIVATE -Werror -Wno-strict-overflow)
     endif()
   endif()
 
-  if (NOT WIN32 AND NOT USE_ASAN)
+  if(NOT WIN32 AND NOT USE_ASAN)
     # Enable hidden visibility by default to make it easier to debug issues with
     # TORCH_API annotations. Hidden visibility with selective default visibility
     # behaves close enough to Windows' dllimport/dllexport.
@@ -293,7 +293,7 @@ function(torch_compile_options libname)
 
   # ---[ Check if warnings should be errors.
   # TODO: Dedupe with WERROR check above
-  if (WERROR)
+  if(WERROR)
     target_compile_options(${libname} PRIVATE -Werror)
   endif()
 endfunction()

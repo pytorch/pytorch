@@ -431,13 +431,12 @@ __global__ void batch_norm_backward_reduce_kernel(
     const GenericPackedTensorAccessor<input_scalar_t, 3, DefaultPtrTraits, index_t> grad_output,
     GenericPackedTensorAccessor<stat_accscalar_t, 1, DefaultPtrTraits, index_t> mean,
     GenericPackedTensorAccessor<stat_accscalar_t, 1, DefaultPtrTraits, index_t> invstd,
-    GenericPackedTensorAccessor<stat_accscalar_t, 1, DefaultPtrTraits, index_t> mean_dy,
-    GenericPackedTensorAccessor<stat_accscalar_t, 1, DefaultPtrTraits, index_t> mean_dy_xmu,
+    GenericPackedTensorAccessor<stat_accscalar_t, 1, DefaultPtrTraits, index_t> sum_dy,
+    GenericPackedTensorAccessor<stat_accscalar_t, 1, DefaultPtrTraits, index_t> sum_dy_xmu,
     GenericPackedTensorAccessor<stat_scalar_t, 1, DefaultPtrTraits, index_t> grad_weight,
     GenericPackedTensorAccessor<stat_scalar_t, 1, DefaultPtrTraits, index_t> grad_bias) {
 
   index_t plane = blockIdx.x;
-  index_t N = input.size(0) * input.size(2);
 
   stat_accscalar_t r_mean = mean[plane];
   stat_accscalar_t factor = invstd[plane];
@@ -446,7 +445,6 @@ __global__ void batch_norm_backward_reduce_kernel(
   Float2<input_scalar_t, stat_accscalar_t> res = reduce<Float2<input_scalar_t, stat_accscalar_t>, GradOp<input_scalar_t, stat_accscalar_t,
                                                                                    GenericPackedTensorAccessor<input_scalar_t, 3, DefaultPtrTraits, index_t>>>(g, grad_output, plane);
 
-  stat_accscalar_t norm = stat_accscalar_t(1) / N;
   if (threadIdx.x == 0) {
     if (grad_weight.size(0) > 0) {
       grad_weight[plane] = static_cast<stat_scalar_t>(res.v2 * factor);
@@ -454,11 +452,11 @@ __global__ void batch_norm_backward_reduce_kernel(
     if (grad_bias.size(0) > 0) {
       grad_bias[plane] = static_cast<stat_scalar_t>(res.v1);
     }
-    if (mean_dy.size(0) > 0) {
-      mean_dy[plane] = static_cast<stat_accscalar_t>(res.v1 * norm);
+    if (sum_dy.size(0) > 0) {
+      sum_dy[plane] = static_cast<stat_accscalar_t>(res.v1);
     }
-    if (mean_dy_xmu.size(0) > 0) {
-      mean_dy_xmu[plane] = static_cast<stat_accscalar_t>(res.v2 * norm);
+    if (sum_dy_xmu.size(0) > 0) {
+      sum_dy_xmu[plane] = static_cast<stat_accscalar_t>(res.v2);
     }
   }
 }
@@ -571,7 +569,7 @@ void batch_norm_cuda_template(Tensor& output_, Tensor& save_mean_, Tensor& save_
     batch_norm_transform_input_kernel<input_scalar_t, stat_scalar_t, stat_accscalar_t, true, index_t> <<<blocks_trans, threads_trans, 0, stream>>>
       (input, output, save_mean, save_invstd, weight, bias, epsilon);
   }
-  THCudaCheck(cudaGetLastError());
+  AT_CUDA_CHECK(cudaGetLastError());
 }
 
 template<typename input_scalar_t, typename stat_scalar_t, typename index_t>
@@ -617,7 +615,7 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cuda_template(const Tenso
   batch_norm_backward_kernel<input_scalar_t, stat_scalar_t, accscalar_t, index_t> <<<blocks, threads, 0, stream>>>
     (input, grad_output, grad_input, grad_weight, grad_bias, weight, running_mean, running_var,
      save_mean, save_invstd, train, epsilon);
-  THCudaCheck(cudaGetLastError());
+  AT_CUDA_CHECK(cudaGetLastError());
 
   return std::make_tuple(grad_input_, grad_weight_, grad_bias_);
 }
@@ -656,7 +654,7 @@ std::tuple<Tensor, Tensor> batch_norm_stats_cuda_template(const Tensor& input_, 
   dim3 threads(tf, std::max<int>(1, MAX_BLOCK_SIZE/tf));
   batch_norm_collect_statistics_kernel<InvStd, scalar_t, scalar_t, accscalar_t, index_t> <<<blocks, threads, 0, stream>>>
     (input, epsilon, 0.0, dummy_mean, dummy_invstd, mean, invstd);
-  THCudaCheck(cudaGetLastError());
+  AT_CUDA_CHECK(cudaGetLastError());
   return std::make_tuple(mean_, invstd_);
 }
 
@@ -696,7 +694,7 @@ void batch_norm_elemt_cuda_template(Tensor& output_, const Tensor& input_, const
   dim3 threads_trans(tf, tb);
   batch_norm_transform_input_kernel<input_scalar_t, stat_scalar_t, stat_accscalar_t, true, index_t> <<<blocks_trans, threads_trans, 0, stream>>>
     (input, output, mean, invstd, weight, bias, epsilon);
-  THCudaCheck(cudaGetLastError());
+  AT_CUDA_CHECK(cudaGetLastError());
 }
 
 template<typename scalar_t, typename accscalar_t, typename index_t>
@@ -729,7 +727,7 @@ std::tuple<Tensor, Tensor> batch_norm_gather_stats_cuda_template(const Tensor& m
   int grid = std::max<int>(1, features/block);
   batch_norm_reduce_statistics_kernel<scalar_t, accscalar_t, index_t> <<<grid, block, 0, stream>>>
       (mean, invstd, save_mean, save_invstd, running_mean, running_var, epsilon, momentum, counts);
-  THCudaCheck(cudaGetLastError());
+  AT_CUDA_CHECK(cudaGetLastError());
   return std::make_tuple(save_mean_, save_invstd_);
 }
 
@@ -740,16 +738,16 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> batch_norm_backward_reduce_cuda_templ
 
   using stat_accscalar_t = at::acc_type<stat_scalar_t, true>;
   int64_t n_input = input_.size(1);
-  Tensor mean_dy_;
-  Tensor mean_dy_xmu_;
+  Tensor sum_dy_;
+  Tensor sum_dy_xmu_;
   Tensor grad_weight_;
   Tensor grad_bias_;
   auto input_reshaped = input_.reshape({input_.size(0), input_.size(1), -1}); // internally we merge the feature dimensions
   auto grad_output_reshaped = grad_out_.reshape(input_reshaped.sizes());
 
   if (input_g) {
-    mean_dy_ = at::empty_like(mean_, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-    mean_dy_xmu_ = at::empty_like(mean_, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+    sum_dy_ = at::empty_like(mean_, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+    sum_dy_xmu_ = at::empty_like(mean_, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   }
   if (weight_g) {
     grad_weight_ = at::empty({n_input}, weight_.options());
@@ -764,8 +762,8 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> batch_norm_backward_reduce_cuda_templ
   auto grad_bias = packed_accessor_or_dummy<stat_scalar_t, 1, DefaultPtrTraits, index_t>(grad_bias_);
   auto mean = packed_accessor_or_dummy<stat_accscalar_t, 1, DefaultPtrTraits, index_t>(mean_);
   auto invstd = packed_accessor_or_dummy<stat_accscalar_t, 1, DefaultPtrTraits, index_t>(invstd_);
-  auto mean_dy = packed_accessor_or_dummy<stat_accscalar_t, 1, DefaultPtrTraits, index_t>(mean_dy_);
-  auto mean_dy_xmu = packed_accessor_or_dummy<stat_accscalar_t, 1, DefaultPtrTraits, index_t>(mean_dy_xmu_);
+  auto sum_dy = packed_accessor_or_dummy<stat_accscalar_t, 1, DefaultPtrTraits, index_t>(sum_dy_);
+  auto sum_dy_xmu = packed_accessor_or_dummy<stat_accscalar_t, 1, DefaultPtrTraits, index_t>(sum_dy_xmu_);
 
   auto batch_size = input_reshaped.size(0);
   auto feature_size = input_reshaped.size(2);
@@ -778,10 +776,10 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> batch_norm_backward_reduce_cuda_templ
   const dim3 grid(n_input);
 
   batch_norm_backward_reduce_kernel<input_scalar_t, stat_scalar_t, stat_accscalar_t, index_t> <<<grid, block, 0, stream>>>
-    (input, grad_output, mean, invstd, mean_dy, mean_dy_xmu, grad_weight, grad_bias);
-  THCudaCheck(cudaGetLastError());
+    (input, grad_output, mean, invstd, sum_dy, sum_dy_xmu, grad_weight, grad_bias);
+  AT_CUDA_CHECK(cudaGetLastError());
 
-  return std::make_tuple(mean_dy_, mean_dy_xmu_, grad_weight_, grad_bias_);
+  return std::make_tuple(sum_dy_, sum_dy_xmu_, grad_weight_, grad_bias_);
 }
 
 template<typename input_scalar_t, typename stat_scalar_t, typename index_t>
@@ -821,7 +819,7 @@ Tensor batch_norm_backward_elemt_cuda_template(const Tensor& grad_out_, const Te
   dim3 threads_trans(tf, tb);
   batch_norm_backward_elemt_kernel<input_scalar_t, stat_scalar_t, stat_accscalar_t, index_t> <<<blocks_trans, threads_trans, 0, stream>>>
     (input, grad_output, mean, invstd, weight, mean_dy, mean_dy_xmu, grad_input);
-  THCudaCheck(cudaGetLastError());
+  AT_CUDA_CHECK(cudaGetLastError());
   return grad_input_reshaped.view(input_.sizes());
 }
 
@@ -855,7 +853,7 @@ std::tuple<Tensor, Tensor> batch_norm_update_stats_cuda_template(
   // NB: epsilon is unused by the Var transform, so we set it to 0
   batch_norm_collect_statistics_kernel<Var, input_scalar_t, stat_scalar_t, stat_accscalar_t, index_t> <<<blocks, threads, 0, stream>>>
     (input, 0., momentum, running_mean, running_var, save_mean, save_var);
-  THCudaCheck(cudaGetLastError());
+  AT_CUDA_CHECK(cudaGetLastError());
   return std::make_tuple(save_mean_, save_var_);
 }
 

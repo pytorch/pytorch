@@ -2,7 +2,6 @@
 #define TH_GENERIC_FILE "TH/generic/THVector.h"
 #else
 
-#include <ATen/core/Generator.h>
 #include <ATen/core/DistributionsHelper.h>
 
 TH_API void THVector_(fill)(scalar_t *x, const scalar_t c, const ptrdiff_t n);
@@ -11,11 +10,6 @@ TH_API void THVector_(fill)(scalar_t *x, const scalar_t c, const ptrdiff_t n);
 
 TH_API void THVector_(muls)(scalar_t *y, const scalar_t *x, const scalar_t c, const ptrdiff_t n);
 TH_API void THVector_(neg)(scalar_t *y, const scalar_t *x, const ptrdiff_t n);
-TH_API void THVector_(normal_fill)(scalar_t *data,
-                                                                   const int64_t size,
-                                                                   struct at::Generator *generator,
-                                                                   const scalar_t mean,
-                                                                   const scalar_t stddev);
 
 #endif /* non bool only part */
 

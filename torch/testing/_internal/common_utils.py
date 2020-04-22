@@ -39,6 +39,8 @@ import __main__
 import errno
 
 from torch.testing._internal import expecttest
+from torch.testing import get_all_dtypes
+from torch.testing import get_all_complex_dtypes
 
 import torch
 import torch.cuda
@@ -211,8 +213,10 @@ def run_tests(argv=UNITTEST_ARGS):
             else:
                 if not os.path.exists(test_report_path):
                     os.makedirs(test_report_path)
-
-            unittest.main(argv=argv, testRunner=xmlrunner.XMLTestRunner(output=test_report_path))
+            verbose = '--verbose' in argv or '-v' in argv
+            if verbose:
+                print('Test results will be stored in {}'.format(test_report_path))
+            unittest.main(argv=argv, testRunner=xmlrunner.XMLTestRunner(output=test_report_path, verbosity=2 if verbose else 1))
         else:
             unittest.main(argv=argv)
 
@@ -294,6 +298,24 @@ TEST_SKIP_FAST = os.getenv('PYTORCH_TEST_SKIP_FAST', '0') == '1'
 if TEST_NUMPY:
     import numpy
 
+    # Dict of NumPy dtype -> torch dtype (when the correspondence exists)
+    numpy_to_torch_dtype_dict = {
+        numpy.bool       : torch.bool,
+        numpy.uint8      : torch.uint8,
+        numpy.int8       : torch.int8,
+        numpy.int16      : torch.int16,
+        numpy.int32      : torch.int32,
+        numpy.int64      : torch.int64,
+        numpy.float16    : torch.float16,
+        numpy.float32    : torch.float32,
+        numpy.float64    : torch.float64,
+        numpy.complex64  : torch.complex64,
+        numpy.complex128 : torch.complex128
+    }
+
+    # Dict of torch dtype -> NumPy dtype
+    torch_to_numpy_dtype_dict = {value : key for (key, value) in numpy_to_torch_dtype_dict.items()}
+
 ALL_TENSORTYPES = [torch.float,
                    torch.double,
                    torch.half]
@@ -338,7 +360,6 @@ def skipIfCompiledWithoutNumpy(fn):
         else:
             fn(*args, **kwargs)
     return wrapper
-
 
 def _test_function(fn, device):
     def run_test_function(self):
@@ -468,6 +489,12 @@ def freeze_rng_state():
         torch.cuda.set_rng_state(cuda_rng_state)
     torch.set_rng_state(rng_state)
 
+@contextlib.contextmanager
+def set_default_dtype(dtype):
+    saved_dtype = torch.get_default_dtype()
+    torch.set_default_dtype(dtype)
+    yield
+    torch.set_default_dtype(saved_dtype)
 
 def iter_indices(tensor):
     if tensor.dim() == 0:
@@ -536,7 +563,7 @@ class CudaMemoryLeakCheck():
         for i, (before, after) in enumerate(zip(self.befores, afters)):
             if not TEST_WITH_ROCM:
                 self.testcase.assertEqual(
-                    before, after, '{} leaked {} bytes CUDA memory on device {}'.format(
+                    before, after, message='{} leaked {} bytes CUDA memory on device {}'.format(
                         self.name, after - before, i))
             else:
                 # TODO: Investigate ROCm memory leaking.
@@ -699,13 +726,6 @@ class TestCase(expecttest.TestCase):
 
         set_rng_seed(SEED)
 
-    def assertTensorsSlowEqual(self, x, y, prec=None, message=''):
-        max_err = 0
-        self.assertEqual(x.size(), y.size())
-        for index in iter_indices(x):
-            max_err = max(max_err, abs(x[index] - y[index]))
-        self.assertLessEqual(max_err, prec, message)
-
     def genSparseTensor(self, size, sparse_dim, nnz, is_uncoalesced, device='cpu'):
         # Assert not given impossible combination, where the sparse dims have
         # empty numel, but nnz > 0 makes the indices containing values.
@@ -777,27 +797,84 @@ class TestCase(expecttest.TestCase):
 
         return tg
 
-    def assertEqual(self, x, y, prec=None, message='', allow_inf=False, exact_dtype=None):
+    # Some analysis of tolerance by logging tests from test_torch.py can be found
+    # in https://github.com/pytorch/pytorch/pull/32538.
+    # dtype name : (rtol, atol)
+    dtype_precisions = {
+        'float16': (0.001, 1e-5),
+        'bfloat16': (0.016, 1e-5),
+        'float32': (1.3e-6, 1e-5),
+        'float64': (1e-7, 1e-7),
+        'complex32': (0.001, 1e-5),
+        'complex64': (1.3e-6, 1e-5),
+        'complex128': (1e-7, 1e-7),
+    }
+
+    # todo: implement numpy-like issubdtype
+    def is_integral(self, dtype):
+        # Skip complex/quantized types
+        dtypes = [x for x in get_all_dtypes() if x not in get_all_complex_dtypes()]
+        return dtype in dtypes and not dtype.is_floating_point
+
+    # accepts tensors, dtypes, or np.ndarrays
+    def get_default_tolerance(self, a, b=None):
+        if b is None:
+            dtype = torch.float
+            if isinstance(a, torch.Tensor):
+                dtype = a.dtype
+            elif isinstance(a, torch.dtype):
+                dtype = a
+            elif TEST_NUMPY and isinstance(a, numpy.ndarray):
+                # Some tests call assertEqual with numpy Unicode.
+                if numpy.issubdtype(a.dtype, numpy.dtype('U')):
+                    dtype = torch.float
+                else:
+                    dtype = torch.from_numpy(a).dtype
+            if self.is_integral(dtype):
+                return (0, 0)
+            dtype = str(dtype).split('.')[-1]
+            return self.dtype_precisions.get(dtype, (self.precision, self.precision))
+
+        a_tol = self.get_default_tolerance(a)
+        b_tol = self.get_default_tolerance(b)
+        return (max(a_tol[0], b_tol[0]), max(a_tol[1], b_tol[1]))
+
+    def assertEqual(self, x, y, message='', **kwargs):
+        self.assertIsNone(kwargs.get('prec', None), 'prec is no longer supported. Use atol or rtol.')
+        rtol = kwargs.get('rtol', None)
+        atol = kwargs.get('atol', None)
+        allow_inf = kwargs.get('allow_inf', False)
+        exact_dtype = kwargs.get('exact_dtype', None)
+        # we allow setting an absolute tolerance as a positional arg for BC with legacy testing behavior.
+        if isinstance(message, Number):
+            self.assertIsNone(atol, "don't combine positional prec and atol")
+            self.assertIsNone(rtol, "don't combine positionial prec and rtol")
+            atol = message
+            message = ''
+            rtol = 0
+        elif atol is None and rtol is None:
+            # if both are None, use defaults per-dtype
+            (rtol, atol) = self.get_default_tolerance(x, y)
+        else:
+            if rtol is None:
+                rtol = 0
+            if atol is None:
+                atol = 0
+
         if exact_dtype is None:
             exact_dtype = self.exact_dtype
 
-        if isinstance(prec, str) and message == '':
-            message = prec
-            prec = None
-        if prec is None:
-            prec = self.precision
-
         if isinstance(x, torch.Tensor) and isinstance(y, Number):
-            self.assertEqual(x.item(), y, prec=prec, message=message,
+            self.assertEqual(x.item(), y, atol=atol, rtol=rtol, message=message,
                              allow_inf=allow_inf, exact_dtype=exact_dtype)
         elif isinstance(y, torch.Tensor) and isinstance(x, Number):
-            self.assertEqual(x, y.item(), prec=prec, message=message,
+            self.assertEqual(x, y.item(), atol=atol, rtol=rtol, message=message,
                              allow_inf=allow_inf, exact_dtype=exact_dtype)
         elif isinstance(x, torch.Tensor) and isinstance(y, numpy.bool_):
-            self.assertEqual(x.item(), y, prec=prec, message=message,
+            self.assertEqual(x.item(), y, atol=atol, rtol=rtol, message=message,
                              allow_inf=allow_inf, exact_dtype=exact_dtype)
         elif isinstance(y, torch.Tensor) and isinstance(x, numpy.bool_):
-            self.assertEqual(x, y.item(), prec=prec, message=message,
+            self.assertEqual(x, y.item(), atol=atol, rtol=rtol, message=message,
                              allow_inf=allow_inf, exact_dtype=exact_dtype)
         elif isinstance(x, torch.Tensor) and isinstance(y, torch.Tensor):
             def assertTensorsEqual(a, b):
@@ -822,30 +899,23 @@ class TestCase(expecttest.TestCase):
                             a = a.to(torch.int)
                             b = b.to(torch.int)
 
-                        diff = a - b
-                        if a.dtype.is_complex or a.dtype.is_floating_point:
-                            # check that NaNs are in the same locations
-                            nan_mask = torch.isnan(a)
-                            self.assertTrue(torch.equal(nan_mask, torch.isnan(b)), message)
-                            diff[nan_mask] = 0
-                            # inf check if allow_inf=True
-                            if allow_inf:
-                                inf_mask = torch.isinf(a)
-                                inf_sign = inf_mask.sign()
-                                self.assertTrue(torch.equal(inf_sign, torch.isinf(b).sign()), message)
-                                diff[inf_mask] = 0
-                        # TODO: implement abs on CharTensor (int8)
-                        # TODO: modify abs to return float/double for ComplexFloat/ComplexDouble
-                        if diff.is_signed() and diff.dtype != torch.int8:
-                            diff = diff.abs()
-                            # if diff is complex, the imaginary component for diff will be 0
-                            # from the previous step, hence converting it to float and double is fine.
-                            if diff.dtype == torch.complex64:
-                                diff = diff.to(torch.float)
-                            elif diff.dtype == torch.complex128:
-                                diff = diff.to(torch.double)
-                        max_err = diff.max()
-                        self.assertLessEqual(max_err, prec, message)
+                        if a.is_complex():
+                            # todo: assert_allclose should handle complex types directly.
+                            float_dtype = torch.float if a.dtype == torch.complex64 else torch.double
+                            self.assertEqual(a.copy_real().to(float_dtype), b.copy_real().to(float_dtype),
+                                             atol=atol, rtol=rtol, message=message)
+                            self.assertEqual(a.copy_imag().to(float_dtype), b.copy_imag().to(float_dtype),
+                                             atol=atol, rtol=rtol, message=message)
+                        elif a.is_floating_point():
+                            torch.testing.assert_allclose(a, b, atol=atol, rtol=rtol, equal_nan=True, msg=message)
+                        else:
+                            diff = a - b
+                            # TODO: implement abs on CharTensor (int8)
+                            if diff.is_signed() and diff.dtype != torch.int8:
+                                diff = diff.abs()
+                            max_err = diff.max()
+                            self.assertLessEqual(max_err, atol, message)
+
             super(TestCase, self).assertEqual(x.is_sparse, y.is_sparse, message)
             super(TestCase, self).assertEqual(x.is_quantized, y.is_quantized, message)
             if x.is_sparse:
@@ -854,30 +924,26 @@ class TestCase(expecttest.TestCase):
                 assertTensorsEqual(x._indices(), y._indices())
                 assertTensorsEqual(x._values(), y._values())
             elif x.is_quantized and y.is_quantized:
-                self.assertEqual(x.qscheme(), y.qscheme(), prec=prec,
-                                 message=message, allow_inf=allow_inf,
-                                 exact_dtype=exact_dtype)
+                self.assertEqual(x.qscheme(), y.qscheme(), atol=atol, rtol=rtol,
+                                 message=message, allow_inf=allow_inf, exact_dtype=exact_dtype)
                 if x.qscheme() == torch.per_tensor_affine:
-                    self.assertEqual(x.q_scale(), y.q_scale(), prec=prec,
-                                     message=message, allow_inf=allow_inf,
-                                     exact_dtype=exact_dtype)
+                    self.assertEqual(x.q_scale(), y.q_scale(), atol=atol, rtol=rtol,
+                                     message=message, allow_inf=allow_inf, exact_dtype=exact_dtype)
                     self.assertEqual(x.q_zero_point(), y.q_zero_point(),
-                                     prec=prec, message=message,
+                                     atol=atol, rtol=rtol, message=message,
                                      allow_inf=allow_inf, exact_dtype=exact_dtype)
                 elif x.qscheme() == torch.per_channel_affine:
-                    self.assertEqual(x.q_per_channel_scales(), y.q_per_channel_scales(), prec=prec,
-                                     message=message, allow_inf=allow_inf,
-                                     exact_dtype=exact_dtype)
+                    self.assertEqual(x.q_per_channel_scales(), y.q_per_channel_scales(), atol=atol, rtol=rtol,
+                                     message=message, allow_inf=allow_inf, exact_dtype=exact_dtype)
                     self.assertEqual(x.q_per_channel_zero_points(), y.q_per_channel_zero_points(),
-                                     prec=prec, message=message,
+                                     atol=atol, rtol=rtol, message=message,
                                      allow_inf=allow_inf, exact_dtype=exact_dtype)
                     self.assertEqual(x.q_per_channel_axis(), y.q_per_channel_axis(),
-                                     prec=prec, message=message)
+                                     atol=atol, rtol=rtol, message=message)
                 self.assertEqual(x.dtype, y.dtype)
                 self.assertEqual(x.int_repr().to(torch.int32),
-                                 y.int_repr().to(torch.int32), prec=prec,
-                                 message=message, allow_inf=allow_inf,
-                                 exact_dtype=exact_dtype)
+                                 y.int_repr().to(torch.int32), atol=atol, rtol=rtol,
+                                 message=message, allow_inf=allow_inf, exact_dtype=exact_dtype)
             else:
                 assertTensorsEqual(x, y)
         elif isinstance(x, string_classes) and isinstance(y, string_classes):
@@ -886,22 +952,20 @@ class TestCase(expecttest.TestCase):
             super(TestCase, self).assertEqual(x, y, message)
         elif isinstance(x, dict) and isinstance(y, dict):
             if isinstance(x, OrderedDict) and isinstance(y, OrderedDict):
-                self.assertEqual(x.items(), y.items(), prec=prec,
-                                 message=message, allow_inf=allow_inf,
-                                 exact_dtype=exact_dtype)
+                self.assertEqual(x.items(), y.items(), atol=atol, rtol=rtol,
+                                 message=message, allow_inf=allow_inf, exact_dtype=exact_dtype)
             else:
-                self.assertEqual(set(x.keys()), set(y.keys()), prec=prec,
-                                 message=message, allow_inf=allow_inf,
-                                 exact_dtype=exact_dtype)
+                self.assertEqual(set(x.keys()), set(y.keys()), atol=atol, rtol=rtol,
+                                 message=message, allow_inf=allow_inf, exact_dtype=exact_dtype)
                 key_list = list(x.keys())
                 self.assertEqual([x[k] for k in key_list],
                                  [y[k] for k in key_list],
-                                 prec=prec, message=message,
+                                 atol=atol, rtol=rtol, message=message,
                                  allow_inf=allow_inf, exact_dtype=exact_dtype)
         elif is_iterable(x) and is_iterable(y):
             super(TestCase, self).assertEqual(len(x), len(y), message)
             for x_, y_ in zip(x, y):
-                self.assertEqual(x_, y_, prec=prec, message=message,
+                self.assertEqual(x_, y_, atol=atol, rtol=rtol, message=message,
                                  allow_inf=allow_inf, exact_dtype=exact_dtype)
         elif isinstance(x, bool) and isinstance(y, bool):
             super(TestCase, self).assertEqual(x, y, message)
@@ -912,22 +976,21 @@ class TestCase(expecttest.TestCase):
                 else:
                     self.fail("Expected finite numeric values - x={}, y={}".format(x, y))
                 return
-            super(TestCase, self).assertLessEqual(abs(x - y), prec, message)
+            super(TestCase, self).assertLessEqual(abs(x - y), atol, message)
         else:
             super(TestCase, self).assertEqual(x, y, message)
 
-    def assertAlmostEqual(self, x, y, places=None, msg=None, delta=None, allow_inf=None):
+    def assertAlmostEqual(self, x, y, places=None, msg='', delta=None, allow_inf=None):
         prec = delta
         if places:
             prec = 10**(-places)
-        self.assertEqual(x, y, prec, msg, allow_inf)
+        self.assertEqual(x, y, msg, atol=prec, allow_inf=allow_inf)
 
-    def assertNotEqual(self, x, y, prec=None, message=''):
-        if isinstance(prec, str) and message == '':
-            message = prec
-            prec = None
-        if prec is None:
-            prec = self.precision
+    def assertNotEqual(self, x, y, message='', atol=None):
+        if not isinstance(message, str):
+            raise Error("fix this test, message should be a string")
+        if atol is None:
+            (_, atol) = self.get_default_tolerance(x, y)
 
         if isinstance(x, torch.Tensor) and isinstance(y, torch.Tensor):
             if x.size() != y.size():
@@ -944,14 +1007,14 @@ class TestCase(expecttest.TestCase):
                 # Use `item()` to work around:
                 # https://github.com/pytorch/pytorch/issues/22301
                 max_err = diff.max().item()
-                self.assertGreaterEqual(max_err, prec, message)
+                self.assertGreater(max_err, atol, message)
         elif type(x) == str and type(y) == str:
             super(TestCase, self).assertNotEqual(x, y)
         elif is_iterable(x) and is_iterable(y):
             super(TestCase, self).assertNotEqual(x, y)
         else:
             try:
-                self.assertGreaterEqual(abs(x - y), prec, message)
+                self.assertGreater(abs(x - y), atol, message)
                 return
             except (TypeError, AssertionError):
                 pass
@@ -987,27 +1050,6 @@ class TestCase(expecttest.TestCase):
             warnings.simplefilter("always")  # allow any warning to be raised
             callable()
             self.assertTrue(len(ws) == 0, msg)
-
-    def assertWarns(self, callable, msg=''):
-        r"""
-        Test if :attr:`callable` raises a warning.
-        """
-        with self._reset_warning_registry(), warnings.catch_warnings(record=True) as ws:
-            warnings.simplefilter("always")  # allow any warning to be raised
-            callable()
-            self.assertTrue(len(ws) > 0, msg)
-
-    def assertWarnsRegex(self, callable, regex, msg=''):
-        r"""
-        Test if :attr:`callable` raises any warning with message that contains
-        the regex pattern :attr:`regex`.
-        """
-        with self._reset_warning_registry(), warnings.catch_warnings(record=True) as ws:
-            warnings.simplefilter("always")  # allow any warning to be raised
-            callable()
-            self.assertTrue(len(ws) > 0, msg)
-            found = any(re.search(regex, str(w.message)) is not None for w in ws)
-            self.assertTrue(found, msg)
 
     @contextmanager
     def maybeWarnsRegex(self, category, regex=''):
@@ -1235,6 +1277,25 @@ def retry_on_connect_failures(func=None, connect_errors=(ADDRESS_IN_USE)):
     return wrapper
 
 
+# Decorator to retry upon certain Exceptions.
+def retry(ExceptionToCheck, tries=3, delay=3):
+    def deco_retry(f):
+        @wraps(f)
+        def f_retry(*args, **kwargs):
+            mtries, mdelay = tries, delay
+            while mtries > 1:
+                try:
+                    return f(*args, **kwargs)
+                except ExceptionToCheck as e:
+                    msg = "%s, Retrying in %d seconds..." % (str(e), mdelay)
+                    print(msg)
+                    time.sleep(mdelay)
+                    mtries -= 1
+            return f(*args, **kwargs)
+        return f_retry  # true decorator
+    return deco_retry
+
+
 # Methods for matrix generation
 # Used in test_autograd.py and test_torch.py
 def prod_single_zero(dim_size):
@@ -1312,6 +1373,13 @@ def random_fullrank_matrix_distinct_singular_value(matrix_size, *batch_dims,
 
 
 def random_matrix(rows, columns, *batch_dims, **kwargs):
+    """Return rectangular matrix or batches of rectangular matrices.
+
+    Parameters:
+      dtype - the data type
+      device - the device kind
+      singular - when True, the output will be singular
+    """
     dtype = kwargs.get('dtype', torch.double)
     device = kwargs.get('device', 'cpu')
     silent = kwargs.get("silent", False)
@@ -1324,7 +1392,7 @@ def random_matrix(rows, columns, *batch_dims, **kwargs):
     s = torch.zeros(rows, columns, dtype=dtype, device=device)
     k = min(rows, columns)
     for i in range(k):
-        s[i, i] = (i + 1) / (k + 1)
+        s[i, i] = float(i + 1) / (k + 1)
     if singular:
         # make matrix singular
         s[k - 1, k - 1] = 0
@@ -1333,6 +1401,98 @@ def random_matrix(rows, columns, *batch_dims, **kwargs):
             # in LU factorization will be non-trivial
             s[0, 0] = 0
     return u.matmul(s.expand(batch_dims + (rows, columns)).matmul(v.transpose(-2, -1)))
+
+
+def random_lowrank_matrix(rank, rows, columns, *batch_dims, **kwargs):
+    """Return rectangular matrix or batches of rectangular matrices with
+    given rank.
+    """
+    B = random_matrix(rows, rank, *batch_dims, **kwargs)
+    C = random_matrix(rank, columns, *batch_dims, **kwargs)
+    return B.matmul(C)
+
+
+def random_sparse_matrix(rows, columns, density=0.01, **kwargs):
+    """Return rectangular random sparse matrix within given density.
+
+    The density of the result approaches to given density as the size
+    of the matrix is increased and a relatively small value of density
+    is specified but higher than min(rows, columns)/(rows * columns)
+    for non-singular matrices.
+    """
+    dtype = kwargs.get('dtype', torch.double)
+    device = kwargs.get('device', 'cpu')
+    singular = kwargs.get("singular", False)
+
+    k = min(rows, columns)
+    nonzero_elements = max(min(rows, columns), int(rows * columns * density))
+
+    row_indices = [i % rows for i in range(nonzero_elements)]
+    column_indices = [i % columns for i in range(nonzero_elements)]
+    random.shuffle(column_indices)
+    indices = [row_indices, column_indices]
+    values = torch.randn(nonzero_elements, dtype=dtype, device=device)
+    # ensure that the diagonal dominates
+    values *= torch.tensor([-float(i - j)**2 for i, j in zip(*indices)], dtype=dtype, device=device).exp()
+    A = torch.sparse_coo_tensor(indices, values, (rows, columns), device=device)
+    return A.coalesce()
+
+
+def random_sparse_pd_matrix(matrix_size, density=0.01, **kwargs):
+    """Return random sparse positive-definite matrix with given density.
+
+    The eigenvalues of the matrix are defined as::
+      arange(1, matrix_size+1)/matrix_size
+
+    Algorithm:
+      A = diag(arange(1, matrix_size+1)/matrix_size)
+      while <A density is smaller than required>:
+          <choose random i, j in range(matrix_size), theta in [0, 2*pi]>
+          R = <rotation matrix (i,j,theta)>
+          A = R^T A R
+    """
+    import math
+    torch = kwargs.get('torch', globals()['torch'])
+    dtype = kwargs.get('dtype', torch.double)
+    device = kwargs.get('device', 'cpu')
+    data = dict([((i, i), float(i + 1) / matrix_size)
+                 for i in range(matrix_size)])
+
+
+    def multiply(data, N, i, j, cs, sn, left=True):
+        for k in range(N):
+            if left:
+                ik, jk = (k, i), (k, j)
+            else:
+                ik, jk = (i, k), (j, k)
+            aik, ajk = data.get(ik, 0), data.get(jk, 0)
+            aik, ajk = cs * aik + sn * ajk, -sn * aik + cs * ajk
+            if aik:
+                data[ik] = aik
+            else:
+                data.pop(ik, None)
+            if ajk:
+                data[jk] = ajk
+            else:
+                data.pop(jk, None)
+
+    target_nnz = density * matrix_size * matrix_size
+    while len(data) < target_nnz:
+        i = random.randint(0, matrix_size - 1)
+        j = random.randint(0, matrix_size - 1)
+        if i != j:
+            theta = random.uniform(0, 2 * math.pi)
+            cs = math.cos(theta)
+            sn = math.sin(theta)
+            multiply(data, matrix_size, i, j, cs, sn, left=True)
+            multiply(data, matrix_size, i, j, cs, sn, left=False)
+    icoords, jcoords, values = [], [], []
+    for (i, j), v in sorted(data.items()):
+        icoords.append(i)
+        jcoords.append(j)
+        values.append(v)
+    indices = [icoords, jcoords]
+    return torch.sparse_coo_tensor(indices, values, (matrix_size, matrix_size), dtype=dtype, device=device)
 
 
 def do_test_dtypes(self, dtypes, layout, device):

@@ -80,17 +80,20 @@ YAML_SOURCES = [
     File("pytorch-build-params.yml"),
     File("caffe2-build-params.yml"),
     File("binary-build-params.yml"),
+    File("promote-build-params.yml"),
     Header("Job specs"),
     File("pytorch-job-specs.yml"),
     File("caffe2-job-specs.yml"),
     File("binary-job-specs.yml"),
     File("job-specs-setup.yml"),
     File("job-specs-custom.yml"),
+    File("job-specs-promote.yml"),
     File("binary_update_htmls.yml"),
     File("binary-build-tests.yml"),
     File("docker_jobs.yml"),
     File("workflows.yml"),
 
+    File("workflows-setup-job.yml"),
     File("windows-build-test.yml"),
     Listgen(pytorch_build_definitions.get_workflow_jobs, 3),
     File("workflows-pytorch-macos-builds.yml"),
@@ -98,6 +101,7 @@ YAML_SOURCES = [
     File("workflows-pytorch-ios-builds.yml"),
     File("workflows-pytorch-mobile-builds.yml"),
     File("workflows-pytorch-ge-config-tests.yml"),
+    File("workflows-pytorch-bazel-builds.yml"),
     Listgen(caffe2_build_definitions.get_workflow_jobs, 3),
     File("workflows-binary-builds-smoke-subset.yml"),
     Listgen(binary_build_definitions.get_binary_smoke_test_jobs, 3),
@@ -112,6 +116,7 @@ YAML_SOURCES = [
     File("workflows-s3-html.yml"),
     File("workflows-docker-builder.yml"),
     File("workflows-ecr-gc.yml"),
+    File("workflows-promote.yml")
 ]
 
 
