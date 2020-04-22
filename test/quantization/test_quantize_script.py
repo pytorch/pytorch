@@ -1739,14 +1739,17 @@ class TestQuantizeDynamicScript(JitTestCase):
                    .run(m.graph)
 
 
-    def test_insert_quant_dequant_conv_dynamic(self):
+    def test_dynamic_multi_op(self):
         class M(torch.nn.Module):
             def __init__(self):
                 super(M, self).__init__()
-                self.conv = torch.nn.Conv2d(3, 5, 3).float()
+                self.conv = torch.nn.Conv2d(3, 1, kernel_size=3).to(dtype=torch.float)
+                self.fc1 = torch.nn.Linear(64, 10).to(dtype=torch.float)
 
             def forward(self, x):
-                return self.conv(x)
+                x = self.conv(x)
+                x = x.view(-1, 64).contiguous()
+                return self.fc1(x)
 
         m = torch.jit.script(M())
 
@@ -1757,32 +1760,30 @@ class TestQuantizeDynamicScript(JitTestCase):
 
         m = wrap_cpp_module(torch._C._jit_pass_insert_quant_dequant(m._c, "forward", False, True))
 
-        assert len(m._modules._c.items()) == 1, \
-            'Expected to have single submodule of conv'
-
         m(data)
         quant_func = "aten::quantize_per_tensor"
 
-        # quantizing activations
+        # quantizing activations only for fc.
         FileCheck().check("aten::_choose_qparams_per_tensor") \
                    .check(quant_func) \
+                   .check('prim::GetAttr[name="fc1"]') \
                    .check("prim::CallMethod[name=\"forward\"]") \
                    .check_not(quant_func) \
                    .check("return") \
                    .run(str(get_forward_graph(m._c)))
-        # quantizing weight in forward function of conv module, no choose_qparams
+        # quantizing weight in forward function of fc module, no choose_qparams.
         FileCheck().check_not("aten::_choose_qparams_per_tensor") \
                    .check(quant_func) \
-                   .check("prim::CallMethod[name=\"_conv_forward\"]") \
+                   .check("prim::CallFunction") \
                    .check_not(quant_func) \
+                   .check("return") \
+                   .run(str(get_forward_graph(m.fc1._c)))
+        # no quantization in forward function of conv module.
+        FileCheck().check_not("aten::_choose_qparams_per_tensor") \
+                   .check_not(quant_func) \
+                   .check("prim::CallMethod[name=\"_conv_forward\"]") \
                    .check("return") \
                    .run(str(get_forward_graph(m.conv._c)))
-        # shouldn't have quant/dequant in _conv_foward function
-        FileCheck().check_not(quant_func) \
-                   .check("aten::conv2d") \
-                   .check_not(quant_func) \
-                   .check("return") \
-                   .run(str(get_module_method(m, 'conv', '_conv_forward').graph))
 
     def test_insert_quant_dequant_linear_dynamic(self):
         class M(torch.nn.Module):
