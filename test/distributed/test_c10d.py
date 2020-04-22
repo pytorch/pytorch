@@ -1876,7 +1876,13 @@ class DistributedDataParallelSingleProcessTest(TestCase):
     def setUp(self):
         self.rank = 0
         self.world_size = 1
-        self.file = tempfile.NamedTemporaryFile(delete=False)
+        self.file = tempfile.NamedTemporaryFile(delete=False)  # noqa: P201
+
+    def tearDown(self):
+        try:
+            os.remove(self.file_name)
+        except OSError:
+            pass
 
     def _test_base(self, net, inp, check_allclose=True):
         store = c10d.FileStore(self.file.name, self.world_size)
