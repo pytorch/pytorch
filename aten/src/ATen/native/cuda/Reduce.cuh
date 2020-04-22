@@ -864,6 +864,7 @@ int get_output_vec_size(TensorIterator &iter) {
   update_vec_size(iter.shape()[0]);
 
   int j = 0;
+  const int output_index = iter.num_reduce_dims();
   for(auto i : iter.strides(iter.noutputs()).slice(1)) {
     if (j == output_index) {
       update_vec_size(i / sizeof(scalar_t));
