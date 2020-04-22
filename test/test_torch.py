@@ -5853,20 +5853,20 @@ class TestTorchDeviceType(TestCase):
                 self.assertEqual((), torch.nn.functional.multi_margin_loss(input, target, reduction='mean').shape)
                 self.assertEqual((), torch.nn.functional.multi_margin_loss(input, target, reduction='sum').shape)
 
-    # Uses deprecated indexing by uint8 to trigger a warning
+    # Uses mismatched arange out size to trigger a warning
     def test_cpp_warnings_have_python_context(self, device):
         import inspect
         # Creates long string in advance to avoid a too-long Python line
-        s = ".+Triggered internally at.+IndexingUtils.+"
+        s = ".+Triggered internally at.+RangeFactories.+"
 
-        def warn_fn(t):
-            indices = torch.tensor((0, 1), dtype=torch.uint8)
-            return t[indices]
+        def warn_fn():
+            out = torch.empty((5,))
+            torch.arange(0, 3, out=out)
+            return out
 
+        # Checks eager-mode warning
         with warnings.catch_warnings(record=True) as w:
-            t = torch.tensor((1, 2))
-            indices = torch.tensor((0, 1), dtype=torch.uint8)
-            t[indices]  # triggers warning
+            warn_fn()
             frameinfo = inspect.getframeinfo(inspect.currentframe())
             warning = w[0]
 
@@ -5874,8 +5874,25 @@ class TestTorchDeviceType(TestCase):
             self.assertTrue(re.search(s, str(warning.message)) is not None)
 
             # Checks the Python features of the warning
-            self.assertEqual(frameinfo.lineno - 1, warning.lineno)
+            # Note: the eager mode warning refers to the line in the function
+            # that throws the warning.
+            self.assertEqual(frameinfo.lineno - 6, warning.lineno)
             self.assertEqual(len(w), 1)
+
+        # Checks jitted warning
+        with warnings.catch_warnings(record=True) as w:
+            scripted_warn_fn = torch.jit.script(warn_fn)
+            scripted_warn_fn()
+
+            # Checks for cpp context in the warning message
+            self.assertTrue(re.search(s, str(warning.message)) is not None)
+
+            # Checks the Python features of the warning
+            # Note: the jitted warning's lineno refers to the call to the jitted
+            # function, which in our test suite has a layer of indirection
+            # that makes checking the Python lineno fragile
+            self.assertEqual(len(w), 1)
+
 
     def _np_compare(self, fn_name, vals, device, dtype):
         assert TEST_NUMPY
