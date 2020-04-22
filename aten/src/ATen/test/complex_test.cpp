@@ -1,5 +1,5 @@
 #include <gtest/gtest.h>
-#include "c10/util/Complex.h"
+#include <c10/util/LegacyComplex.h>
 
 template<typename T, typename int_t>
 static void TestBinaryOpsForIntType(T real, T img, int_t num) {

@@ -403,7 +403,7 @@ class Tensor(torch._C._TensorBase):
         return _C._VariableFunctions.rsub(self, other)
 
     def __rdiv__(self, other):
-        if self.dtype.is_floating_point:
+        if self.dtype.is_floating_point or self.dtype.is_complex:
             return self.reciprocal() * other
         else:
             return (self.double().reciprocal() * other).type_as(self)

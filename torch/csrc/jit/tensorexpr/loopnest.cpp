@@ -802,6 +802,99 @@ void LoopNest::computeInlineWithRandom(Stmt* s) {
   inlined_random_functions_.insert(stmt_to_tensor_.at(s)->function());
 }
 
+// TODO: Unify with DepTracker
+class UseFinder : public IRVisitor {
+ public:
+  std::unordered_map<const Buf*, std::vector<BufUse>> findUses(Stmt* s) {
+    uses_.clear();
+    s->accept(this);
+    return uses_;
+  }
+
+ private:
+  void visit(const Store* v) override {
+    if (stores_[v->buf()].insert(last_stmt_).second) {
+      uses_[v->buf()].push_back({(Stmt*)v, true});
+    }
+    last_stmt_ = (Stmt*)v;
+    IRVisitor::visit(v);
+  }
+  void visit(const Load* v) override {
+    if (loads_[v->buf()].insert(last_stmt_).second) {
+      uses_[v->buf()].push_back({last_stmt_, false});
+    }
+    IRVisitor::visit(v);
+  }
+
+  Stmt* last_stmt_ = nullptr;
+  std::unordered_map<const Buf*, std::vector<BufUse>> uses_;
+
+  // Sets of loads and stores in order to keep the results unique
+  std::unordered_map<const Buf*, std::unordered_set<Stmt*>> loads_;
+  std::unordered_map<const Buf*, std::unordered_set<Stmt*>> stores_;
+};
+
+std::unordered_map<const Buf*, std::vector<BufUse>> findUses(Stmt* s) {
+  UseFinder uf;
+  return uf.findUses(s);
+}
+
+class ContainedStmtsFinder : public IRVisitor {
+ public:
+  // Simply list all Stores and LetStmts that are children of the given stmt
+  const std::unordered_set<Stmt*>& findContainedStmts(Stmt* s) {
+    contained_.clear();
+    s->accept(this);
+    return contained_;
+  }
+
+ private:
+  void visit(const Store* v) override {
+    contained_.insert((Stmt*)v);
+    IRVisitor::visit(v);
+  }
+  void visit(const LetStmt* v) override {
+    contained_.insert((Stmt*)v);
+    IRVisitor::visit(v);
+  }
+
+  std::unordered_set<Stmt*> contained_;
+};
+
+bool containsAll(const std::vector<BufUse>& uses, Block* b) {
+  std::unordered_set<Stmt*> not_found;
+  for (auto use : uses) {
+    not_found.insert(use.s);
+  }
+
+  ContainedStmtsFinder csf;
+  const std::unordered_set<Stmt*>& contained = csf.findContainedStmts(b);
+  for (auto s : contained) {
+    not_found.erase(s);
+  }
+  return not_found.empty();
+}
+
+Block* findParentBlock(Stmt* s) {
+  while (s) {
+    if (auto b = dynamic_cast<Block*>(s)) {
+      return b;
+    }
+    s = s->get_parent();
+  }
+  return nullptr;
+}
+
+Block* findLowestContainingBlock(const std::vector<BufUse>& uses) {
+  // TODO: we're not using the most efficient algorithm here for simplicity.
+  // Replace with something more performant in case it becomes a bottleneck.
+  Block* b = findParentBlock(uses[0].s);
+  while (b && !containsAll(uses, b)) {
+    b = findParentBlock(b->get_parent());
+  }
+  return b;
+}
+
 Stmt* LoopNest::insertAllocFree(Stmt* stmt) {
   // Add allocs and frees for intermediate buffers at the global level.
   // TODO: move allocs and frees to the imemediate areas to reuse buffers.
@@ -831,13 +924,20 @@ Stmt* LoopNest::insertAllocFree(Stmt* stmt) {
     b->prepend_stmt(alloc);
     b->append_stmt(free);
   }
+
+  // Now insert allocations and frees for temporary buffers. Do that in the
+  // innermost possible scope.
+  std::unordered_map<const Buf*, std::vector<BufUse>> uses = findUses(stmt);
+
   for (const auto& temp_buf : temp_bufs_) {
     const Buf* buf = temp_buf.first;
     Stmt* alloc =
         new Allocate(buf->base_handle(), temp_buf.second, buf->dims());
     Stmt* free = new Free(buf->base_handle());
-    b->prepend_stmt(alloc);
-    b->append_stmt(free);
+
+    Block* alloc_block = findLowestContainingBlock(uses.at(buf));
+    alloc_block->prepend_stmt(alloc);
+    alloc_block->append_stmt(free);
   }
   return b;
 }
