@@ -194,13 +194,13 @@ class MultiProcessTestCase(TestCase):
                 setattr(cls, attr, cls.join_or_run(fn))
 
     def setUp(self):
-        super(MultiProcessTestCase, self).setUp()
+        super().setUp()
         self.skip_return_code_checks = []
         self.rank = self.MAIN_PROCESS_RANK
         self.file_name = tempfile.NamedTemporaryFile(delete=False).name
 
     def tearDown(self):
-        super(MultiProcessTestCase, self).tearDown()
+        super().tearDown()
         for p in self.processes:
             p.terminate()
 
