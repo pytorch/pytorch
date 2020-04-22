@@ -46,7 +46,7 @@ from quantization.test_numerics import TestModelNumerics  # noqa: F401
 from quantization.test_numeric_suite import TestEagerModeNumericSuite  # noqa: F401
 
 # Backward Compatibility
-from quantization.test_backward_compatibility import TestBC  # noqa: F401
+from quantization.test_backward_compatibility import TestSerialization  # noqa: F401
 
 if __name__ == '__main__':
     run_tests()
