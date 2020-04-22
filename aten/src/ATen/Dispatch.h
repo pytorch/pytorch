@@ -6,17 +6,25 @@
 #include <c10/util/Exception.h>
 #include <ATen/core/DeprecatedTypeProperties.h>
 
-#define AT_PRIVATE_CASE_TYPE(enum_type, type, ...) \
-  case enum_type: {                                \
-    using scalar_t = type;                         \
-    return __VA_ARGS__();                          \
+// Workaround for C10_UNUSED because CUDA 10.1 and below fails to handle unused attribute in the type aliasing context.
+// Keep name long and verbose to avoid macro collisions.
+#if defined(__CUDACC__) && CUDA_VERSION <= 10100
+#define C10_UNUSED_DISPATCH_CUDA_WORKAROUND
+#else
+#define C10_UNUSED_DISPATCH_CUDA_WORKAROUND C10_UNUSED
+#endif // defined(__CUDACC__) && CUDA_VERSION <= 10100
+
+#define AT_PRIVATE_CASE_TYPE(enum_type, type, ...)              \
+  case enum_type: {                                             \
+    using scalar_t = type;                                      \
+    return __VA_ARGS__();                                       \
   }
 
 #define AT_QINT_PRIVATE_CASE_TYPE(enum_type, type, underlying_enum, underlying_type, ...) \
   case enum_type: {                                                     \
-    const auto& UNDERLYING_TYPE C10_UNUSED = underlying_enum;           \
-    using scalar_t C10_UNUSED = type;                                   \
-    using underlying_t C10_UNUSED = underlying_type;                    \
+    using scalar_t = type;                                              \
+    using underlying_t C10_UNUSED_DISPATCH_CUDA_WORKAROUND = scalar_t::underlying; \
+    const auto& UNDERLYING_TYPE C10_UNUSED_DISPATCH_CUDA_WORKAROUND = toUnderlying(enum_type); \
     return __VA_ARGS__();                                               \
   }
 
@@ -281,14 +289,16 @@ inline void deprecated_AT_DISPATCH_ALL_TYPES_AND_HALF_AND_COMPLEX() {}
 
 #define AT_DISPATCH_QINT_TYPES(TYPE, NAME, ...)                         \
   [&] {                                                                 \
-    const auto& SCALAR_TYPE C10_UNUSED = TYPE;                          \
-    switch (TYPE) {                                                     \
+    const auto& the_type = TYPE;                                       \
+    /* don't use TYPE again in case it is an expensive or side-effect op */ \
+    at::ScalarType _st = ::detail::scalar_type(the_type);               \
+    switch (_st) {                                                      \
       AT_QINT_PRIVATE_CASE_TYPE(                                        \
-          at::kQInt8, at::qint8, at::kChar, int8_t, __VA_ARGS__)                    \
+          at::kQInt8, at::qint8, at::kChar, int8_t, __VA_ARGS__)        \
+      AT_QINT_PRIVATE_CASE_TYPE(                                      \
+          at::kQUInt8, at::quint8, at::kByte, uint8_t, __VA_ARGS__)     \
       AT_QINT_PRIVATE_CASE_TYPE(                                        \
-          at::kQUInt8, at::quint8, at::kByte, uint8_t, __VA_ARGS__)                 \
-      AT_QINT_PRIVATE_CASE_TYPE(                                        \
-          at::kQInt32, at::qint32, at::kInt, int, __VA_ARGS__)                      \
+          at::kQInt32, at::qint32, at::kInt, int, __VA_ARGS__)          \
       default:                                                          \
         AT_ERROR(#NAME, " not implemented for '", toString(TYPE), "'"); \
     }                                                                   \
