@@ -1,9 +1,6 @@
 name: clang-format
 
 on:
-  push:
-    branches:
-    - master
   pull_request:
 
 jobs:
@@ -30,7 +27,13 @@ jobs:
       - name: Run clang-format
         run: |
           set -eux
+          tools/git-clang-format HEAD~ --verbose
+          GIT_DIFF=$(git diff)
+          if [[ -z $GIT_DIFF ]]; then
+            exit 0
+          fi
           echo "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"
-          echo "| Run tools/clang_format.py to fix formatting errors |"
+          echo "| Use tools/git-clang-format to fix these errors     |"
           echo "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"
-          tools/clang_format.py --verbose --diff
+          echo $GIT_DIFF
+          exit 1
