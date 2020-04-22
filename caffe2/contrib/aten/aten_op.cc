@@ -9,7 +9,7 @@ at::Tensor index_with_uint8_handling(
     at::TensorList indices) {
   // Support BC only for the simplest case of mask indexing
   if (indices.size() == 1 && indices[0].scalar_type() == at::kByte) {
-    TORCH_WARN(
+    TORCH_WARN_ONCE(
         "Indexing with uint8 mask tensor in ATenOp is now deprecated,"
         " please use a bool mask instead.");
     return at::index(self, {indices[0].to(at::kBool)});

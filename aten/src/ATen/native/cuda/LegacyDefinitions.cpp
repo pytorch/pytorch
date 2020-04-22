@@ -15,7 +15,7 @@ Tensor & masked_fill__cuda(Tensor& self, const Tensor & mask, Scalar value) {
   // As we dispatch on self and TH is type-checked, we need different definitions.
   // This can be fixed by moving to ATen.
   if (b_mask.dtype() == at::ScalarType::Byte) {
-    TORCH_WARN("masked_fill_ received a mask with dtype torch.uint8, this behavior is now deprecated," \
+    TORCH_WARN_ONCE("masked_fill_ received a mask with dtype torch.uint8, this behavior is now deprecated," \
             "please use a mask with dtype torch.bool instead.");
     legacy::cuda::_th_masked_fill_(self, b_mask, value);
   } else {
@@ -35,7 +35,7 @@ Tensor & masked_fill__cuda(Tensor& self, const Tensor & mask, const Tensor & val
   // As we dispatch on self and TH is type-checked, we need different definitions.
   // This can be fixed by moving to ATen.
   if (b_mask.dtype() == at::ScalarType::Byte) {
-    TORCH_WARN("masked_fill_ received a mask with dtype torch.uint8, this behavior is now deprecated," \
+    TORCH_WARN_ONCE("masked_fill_ received a mask with dtype torch.uint8, this behavior is now deprecated," \
             "please use a mask with dtype torch.bool instead.");
     legacy::cuda::_th_masked_fill_(self, b_mask, value.item());
   } else {
@@ -51,7 +51,7 @@ Tensor & masked_scatter__cuda(Tensor& self, const Tensor & mask, const Tensor & 
   // As we dispatch on self and TH is type-checked, we need different definitions.
   // This can be fixed by moving to ATen.
   if (b_mask.dtype() == at::ScalarType::Byte) {
-    TORCH_WARN("masked_scatter_ received a mask with dtype torch.uint8, this behavior is now deprecated," \
+    TORCH_WARN_ONCE("masked_scatter_ received a mask with dtype torch.uint8, this behavior is now deprecated," \
             "please use a mask with dtype torch.bool instead.");
     return legacy::cuda::_th_masked_scatter_(self, b_mask, source);
   } else {
