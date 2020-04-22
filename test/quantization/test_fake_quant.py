@@ -183,8 +183,12 @@ class TestFakeQuantizePerTensor(TestCase):
         Y = fq_module(X)
         # Fake quant is disabled,output is identical to input
         self.assertEqual(Y, X)
-        scale = fq_module.scale
-        zero_point = fq_module.zero_point
+
+        # Explicit copy at this point in time, because FakeQuant keeps internal state
+        # in mutable buffers.
+        scale = fq_module.scale.clone().detach()
+        zero_point = fq_module.zero_point.clone().detach()
+
         torch.quantization.disable_observer(fq_module)
         torch.quantization.enable_fake_quant(fq_module)
         X = 10.0 * torch.rand(20, 10, dtype=torch.float32) - 5.0
