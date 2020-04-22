@@ -5,7 +5,6 @@ import tempfile
 import time
 import unittest
 import logging
-import six
 import traceback
 
 from collections import namedtuple
@@ -194,13 +193,13 @@ class MultiProcessTestCase(TestCase):
                 setattr(cls, attr, cls.join_or_run(fn))
 
     def setUp(self):
-        super(MultiProcessTestCase, self).setUp()
+        super().setUp()
         self.skip_return_code_checks = []
         self.rank = self.MAIN_PROCESS_RANK
         self.file_name = tempfile.NamedTemporaryFile(delete=False).name
 
     def tearDown(self):
-        super(MultiProcessTestCase, self).tearDown()
+        super().tearDown()
         for p in self.processes:
             p.terminate()
 
@@ -219,18 +218,11 @@ class MultiProcessTestCase(TestCase):
             self.processes.append(process)
 
     def _fork_processes(self):
-        if six.PY3:
-            proc = torch.multiprocessing.get_context("fork").Process
-        else:
-            # fork is the default on Python 2
-            proc = torch.multiprocessing.Process
+        proc = torch.multiprocessing.get_context("fork").Process
         self._start_processes(proc)
 
     def _spawn_processes(self):
-        if six.PY3:
-            proc = torch.multiprocessing.get_context("spawn").Process
-        else:
-            raise RuntimeError("Cannot use spawn start method with Python 2")
+        proc = torch.multiprocessing.get_context("spawn").Process
         self._start_processes(proc)
 
     @classmethod
@@ -322,11 +314,21 @@ class MultiProcessTestCase(TestCase):
         for i, p in enumerate(self.processes):
             if p.exitcode is None:
                 raise RuntimeError('Process {} terminated or timed out after {} seconds'.format(i, elapsed_time))
-            self.assertEqual(p.exitcode, first_process.exitcode)
+            self.assertEqual(
+                p.exitcode,
+                first_process.exitcode,
+                "Expect process {} exit code to match Process 0 exit code of {}, but got {}".format(
+                    i, first_process.exitcode, p.exitcode
+                ),
+            )
         for skip in TEST_SKIPS.values():
             if first_process.exitcode == skip.exit_code:
                 raise unittest.SkipTest(skip.message)
-        self.assertEqual(first_process.exitcode, 0)
+        self.assertEqual(
+            first_process.exitcode,
+            0,
+            "Expected zero exit code but got {}".format(first_process.exitcode)
+        )
 
     @property
     def is_master(self):

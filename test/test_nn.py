@@ -1,15 +1,10 @@
 
 import math
-import sys
 import random
 import string
 import unittest
 import io
-try:
-    import unittest.mock as mock
-except ImportError:
-    # isn't available in py2
-    pass
+import unittest.mock as mock
 import itertools
 import warnings
 import pickle
@@ -394,10 +389,7 @@ class TestNN(NNTestCase):
         path = download_file('https://download.pytorch.org/test_data/legacy_conv2d.pt')
         with warnings.catch_warnings():
             warnings.simplefilter('ignore', SourceChangeWarning)
-            if sys.version_info[0] == 2:
-                m = torch.load(path)
-            else:
-                m = torch.load(path, encoding='utf-8')
+            m = torch.load(path, encoding='utf-8')
         input = torch.randn((1, 1, 1, 1), dtype=torch.float)
         self.assertEqual(m(input).size(), (1, 1, 1, 1))
 
@@ -1891,7 +1883,6 @@ class TestNN(NNTestCase):
         y2 = m(input_)
         self.assertEqual(y1, y2)
 
-    @unittest.skipIf(not PY3, "mock is not available in Python 2")
     def test_random_pruning_0perc(self):
         r"""Test that a mask of 1s does not change forward or backward.
         """
@@ -1930,7 +1921,6 @@ class TestNN(NNTestCase):
         y2 = m(input_)
         self.assertEqual(y1, y2)
 
-    @unittest.skipIf(not PY3, "mock is not available in Python 2")
     def test_random_pruning(self):
         input_ = torch.ones(1, 5)
         m = nn.Linear(5, 2)
@@ -1963,7 +1953,6 @@ class TestNN(NNTestCase):
         self.assertEqual(old_weight_orig[1, 0], m.weight_orig[1, 0])
         self.assertEqual(old_weight_orig[0, 3], m.weight_orig[0, 3])
 
-    @unittest.skipIf(not PY3, "mock is not available in Python 2")
     def test_random_pruning_forward(self):
         r"""check forward with mask (by hand).
         """
@@ -1985,7 +1974,6 @@ class TestNN(NNTestCase):
         self.assertEqual(yhat[0, 0], m.weight_orig[0, 3] + m.bias[0])
         self.assertEqual(yhat[0, 1], m.weight_orig[1, 0] + m.bias[1])
 
-    @unittest.skipIf(not PY3, "mock is not available in Python 2")
     def test_remove_pruning_forward(self):
         r"""Remove pruning and check forward is unchanged from previous
         pruned state.
@@ -2328,7 +2316,6 @@ class TestNN(NNTestCase):
 
         self.assertEqual(computed_mask, expected_mask)
 
-    @unittest.skipIf(not PY3, "mock is not available in Python 2")
     def test_pruning_rollback(self):
         r"""Test that if something fails when the we try to compute the mask,
         then the model isn't left in some intermediate half-pruned state.
@@ -3057,7 +3044,7 @@ class TestNN(NNTestCase):
             return (src_indices < src_lengths).int().detach()
 
         def _multihead_attn_test_helper(add_key_padding_mask=False, add_bias_kv=False, add_zero_attn=False,
-                                        saved_kv=False, same_embed_dim=False):
+                                        saved_kv=False, same_embed_dim=False, byte_mask=False):
             for _ in range(100):
                 batch_sz, seq_len = [random.randint(2, 10) for r in range(2)]
                 d_head = random.randint(3, 10)
@@ -3085,16 +3072,20 @@ class TestNN(NNTestCase):
                     seq_mask = np.random.randint(0, 2, (1, seq_len))
                     key_padding_mask = (np.repeat(seq_mask, batch_sz, axis=0) == 1)
                     key_padding_mask_tensor = torch.from_numpy(key_padding_mask)
-
+                    if byte_mask:
+                        key_padding_mask_tensor = key_padding_mask_tensor.byte()
                 decoder_state = np.random.rand(batch_sz, d_model)
                 K = np.random.rand(*dims)
                 V = K
                 Q = np.expand_dims(decoder_state, 1)
                 attn_mask = np.random.randint(0 , 2, size=(1, seq_len))
                 attn_mask_tensor = torch.from_numpy(attn_mask).float()
-                attn_mask_tensor.masked_fill_(attn_mask_tensor == 0, float('-inf'))
-                attn_mask_tensor.masked_fill_(attn_mask_tensor > 0, float('0.0'))
-                attn_mask_tensor = attn_mask_tensor.double()
+                if byte_mask:
+                    attn_mask_tensor = (attn_mask_tensor == 0).byte()
+                else:
+                    attn_mask_tensor.masked_fill_(attn_mask_tensor == 0, float('-inf'))
+                    attn_mask_tensor.masked_fill_(attn_mask_tensor > 0, float('0.0'))
+                    attn_mask_tensor = attn_mask_tensor.double()
 
                 decoder_state_tensor = torch.from_numpy(decoder_state).to(torch.get_default_dtype())
                 source_hid_tensor = torch.from_numpy(K).to(torch.get_default_dtype()).transpose(0, 1)
@@ -3239,6 +3230,10 @@ class TestNN(NNTestCase):
             _multihead_attn_test_helper(add_key_padding_mask=True, add_zero_attn=True,
                                         saved_kv=True, same_embed_dim=True)
 
+        def test_multihead_attn_all_arguments4():
+            _multihead_attn_test_helper(add_key_padding_mask=True, add_zero_attn=True,
+                                        saved_kv=True, same_embed_dim=True, byte_mask=True)
+
         test_multihead_attn_add_zero_attn()  # Test MultiheadAttention with add_zero_attn
         test_multihead_attn_add_bias_kv()  # Test MultiheadAttention with add_bias_kv
         test_multihead_attn_no_masking()   # Test MultiheadAttention without masking
@@ -3249,6 +3244,7 @@ class TestNN(NNTestCase):
         with self.assertRaisesRegex(AssertionError, "bias cannot be added to static key."):
             test_multihead_attn_all_arguments2()  # Test MultiheadAttention with all the argument.
         test_multihead_attn_all_arguments3()  # Test MultiheadAttention with all the argument.
+        test_multihead_attn_all_arguments4()  # Test MultiheadAttention with all the argument.
 
     def test_multihead_attn_3d_attn_mask(self):
         embed_dim = 8
@@ -3572,7 +3568,6 @@ class TestNN(NNTestCase):
         self.assertEqual(bn.num_batches_tracked.dtype, torch.long)
         self.assertEqual(bn.num_batches_tracked.item(), 0)
 
-    @unittest.skipIf(not PY3, 'Python 2.7 generates cyclic trash')
     def test_load_state_dict_ref_cycle(self):
         # load_state_dict shouldn't cause a reference cycle involving Tensors
         import gc
@@ -6205,6 +6200,8 @@ class TestNN(NNTestCase):
                         # dt3 is used as dtype for target = [1, -1], so let's skip unsigned type
                         if dt3 == torch.uint8:
                             continue
+                        if dt1.is_complex or dt2.is_complex or dt3.is_complex:
+                            continue
                         input1 = input1.to(dt1)
                         input2 = input2.to(dt2)
                         target = target.to(dt3)
@@ -6217,6 +6214,8 @@ class TestNN(NNTestCase):
             target = torch.tensor([[1, 2, 3], [4, 5, 6]], dtype=torch.double, device=device)
             expected = torch.nn.functional.kl_div(input, target)
             for input_dtype in torch.testing.get_all_math_dtypes(device):
+                if input_dtype.is_complex:
+                    continue
                 for target_dtype in [torch.float32, torch.float64, torch.float16]:
                     if (torch.device(device).type == 'cpu' and target_dtype == torch.float16):
                         continue
@@ -6231,6 +6230,8 @@ class TestNN(NNTestCase):
             target = torch.tensor([[1, 2, 3], [4, 5, 6]], dtype=torch.double, device=device).log()
             expected = torch.nn.functional.kl_div(input, target, log_target=True)
             for input_dtype in torch.testing.get_all_math_dtypes(device):
+                if input_dtype.is_complex:
+                    continue
                 for target_dtype in [torch.float32, torch.float64, torch.float16]:
                     if (torch.device(device).type == 'cpu' and target_dtype == torch.float16):
                         continue
