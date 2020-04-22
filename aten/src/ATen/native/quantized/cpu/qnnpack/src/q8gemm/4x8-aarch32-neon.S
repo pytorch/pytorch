@@ -11,6 +11,20 @@
 
 .syntax unified
 
+#
+# New Struct for pytorch_qnnp_conv_quantization_params
+# kernel zp             : 0 offset
+# input zp              : 2
+# requantization_scale  : 4
+# output zp             : 8
+# output max            : 10
+# output min            : 11
+# vfmin                 : 12
+# vfmax                 : 16
+# vfmagic               : 20
+# vimagic               : 24
+#
+
 # void pytorch_q8gemm_ukernel_4x8__aarch32_neon(
 #     size_t mr,
 #     size_t nr,
@@ -78,9 +92,11 @@ BEGIN_FUNCTION pytorch_q8gemm_ukernel_4x8__aarch32_neon
     SUBS r2, r2, 8
     # q15 := vacc3x4567
     VMOV.I32 q15, q9
-    # Load multiplier:
-    # - d12 = vmultiplier
+    # Load requantization_scale:
+    # - d12 = requantization_scale 
     VLD1.32 {d12[]}, [r7]!
+    # add 4 bytes to get to vfmax
+    ADD r7, r7, 4
     BLO 1f
 
     .p2align 5
@@ -639,103 +655,100 @@ BEGIN_FUNCTION pytorch_q8gemm_ukernel_4x8__aarch32_neon
 
     .p2align 4
 2:
-    # Load right_shift
-    # - q4 = d8:d9 = vright_shift
+    # Load vfmax:
+    VLD1.32 {d10[], d11[]}, [r7]!
+    # Load vfmin:
     VLD1.32 {d8[], d9[]}, [r7]!
+    # Load vfmagic:
+    VLD1.32 {d0[], d1[]}, [r7]!
+    # Load vimagic:
+    VLD1.32 {d2[], d3[]}, [r7]!
 
-    VQRDMULH.S32  q8, q8, d12[0]
-    VQRDMULH.S32  q9, q9, d12[0]
-    VQRDMULH.S32 q10, q10, d12[0]
-    VQRDMULH.S32 q11, q11, d12[0]
+    # Moved here to hide load latency on d14
+    VCVT.F32.S32 q8, q8
+    VCVT.F32.S32 q9, q9
+    VCVT.F32.S32 q10, q10
+    VCVT.F32.S32 q11, q11
+    VCVT.F32.S32 q12, q12
+    VCVT.F32.S32 q13, q13
+    VCVT.F32.S32 q14, q14
+    VCVT.F32.S32 q15, q15
 
-    # Compute vzero_shift_mask
-    # - q5 = vzero_shift_mask
-    VCEQ.S32 q5, q4, 0
+    VMUL.F32 q8, q8, d12[0]
+    VMUL.F32 q9, q9, d12[0]
+    VMUL.F32 q10, q10, d12[0]
+    VMUL.F32 q11, q11, d12[0]
+    VMUL.F32 q12, q12, d12[0]
+    VMUL.F32 q13, q13, d12[0]
+    VMUL.F32 q14, q14, d12[0]
+    VMUL.F32 q15, q15, d12[0]
 
-    VQRDMULH.S32 q12, q12, d12[0]
-    VQRDMULH.S32 q13, q13, d12[0]
-    VQRDMULH.S32 q14, q14, d12[0]
-    VQRDMULH.S32 q15, q15, d12[0]
+    VMIN.F32 q8, q8, q5
+    VMIN.F32 q9, q9, q5
+    VMIN.F32 q10, q10, q5
+    VMIN.F32 q11, q11, q5
+    VMIN.F32 q12, q12, q5
+    VMIN.F32 q13, q13, q5
+    VMIN.F32 q14, q14, q5
+    VMIN.F32 q15, q15, q5
 
-    VBIC q0,  q8, q5
-    VBIC q1,  q9, q5
-    VBIC q2, q10, q5
-    VBIC q3, q11, q5
+    VMAX.F32 q8, q8, q4
+    VMAX.F32 q9, q9, q4
+    VMAX.F32 q10, q10, q4
+    VMAX.F32 q11, q11, q4
+    VMAX.F32 q12, q12, q4
+    VMAX.F32 q13, q13, q4
+    VMAX.F32 q14, q14, q4
+    VMAX.F32 q15, q15, q4
 
-    VSRA.S32  q8, q0, 31
-    VSRA.S32  q9, q1, 31
-    VSRA.S32 q10, q2, 31
-    VSRA.S32 q11, q3, 31
-
-    # Load zero_point
-    # - q7 = d14:d15 = vzero_point
-    VLD1.16 {d14[], d15[]}, [r7]!
-
-    VBIC q0, q12, q5
-    VBIC q1, q13, q5
-    VBIC q2, q14, q5
-    VBIC q3, q15, q5
-
-    VSRA.S32 q12, q0, 31
-    VSRA.S32 q13, q1, 31
-    VSRA.S32 q14, q2, 31
-    VSRA.S32 q15, q3, 31
-
-    # Load max:
-    # - q5 = d10:d11 = vmax
-    VLD1.8 {d10[], d11[]}, [r7]!
-
-    VRSHL.S32  q8,  q8, q4
-    VRSHL.S32  q9,  q9, q4
-    VRSHL.S32 q10, q10, q4
-    VRSHL.S32 q11, q11, q4
-    VRSHL.S32 q12, q12, q4
-    VRSHL.S32 q13, q13, q4
-    VRSHL.S32 q14, q14, q4
-    VRSHL.S32 q15, q15, q4
+    VADD.F32 q8, q8, q0
+    VADD.F32 q9, q9, q0
+    VADD.F32 q10, q10, q0
+    VADD.F32 q11, q11, q0
+    VADD.F32 q12, q12, q0
+    VADD.F32 q13, q13, q0
+    VADD.F32 q14, q14, q0
+    VADD.F32 q15, q15, q0
 
     # Load c, c_stride:
     # - r2 = c
     # - r2 = c_stride
     LDRD r2, r3, [sp, 88]
 
+    VSUB.S32 q8, q8, q1
+    VSUB.S32 q9, q9, q1
+    VSUB.S32 q10, q10, q1
+    VSUB.S32 q11, q11, q1
+    VSUB.S32 q12, q12, q1
+    VSUB.S32 q13, q13, q1
+    VSUB.S32 q14, q14, q1
+    VSUB.S32 q15, q15, q1
+
+    ADD r4, r2, r3
     VQMOVN.S32 d16,  q8
     VQMOVN.S32 d17,  q9
+    CMP r0, 2
     VQMOVN.S32 d18, q10
     VQMOVN.S32 d19, q11
+    MOVLO r4, r2
     VQMOVN.S32 d20, q12
     VQMOVN.S32 d21, q13
     VQMOVN.S32 d22, q14
     VQMOVN.S32 d23, q15
 
-    # Load min:
-    # - q4 = q8:q9 = vmin
-    VLD1.8 {d8[], d9[]}, [r7]!
-    ADD r4, r2, r3
 
-    VQADD.S16  q8,  q8, q7
-    VQADD.S16  q9,  q9, q7
-    CMP r0, 2
-    VQADD.S16 q10, q10, q7
-    VQADD.S16 q11, q11, q7
-    MOVLO r4, r2
-
-    VQMOVUN.S16 d16,  q8
-    VQMOVUN.S16 d17,  q9
     ADD r5, r4, r3
-    VQMOVUN.S16 d18, q10
-    VQMOVUN.S16 d19, q11
+    VQMOVUN.S16 d16,  q8
     MOVLS r5, r4
-
-    VMIN.U8 q8, q8, q5
+    VQMOVUN.S16 d17,  q9
+    VQMOVUN.S16 d18, q10
     CMP r0, 4
-    VMIN.U8 q9, q9, q5
     ADD r3, r5, r3
 
-    VMAX.U8 q8, q8, q4
     MOVNE r3, r5
     CMP r1, 8
-    VMAX.U8 q9, q9, q4
+    VQMOVUN.S16 d19, q11
+
 
     BNE 4f
 

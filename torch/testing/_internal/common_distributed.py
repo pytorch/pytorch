@@ -322,11 +322,21 @@ class MultiProcessTestCase(TestCase):
         for i, p in enumerate(self.processes):
             if p.exitcode is None:
                 raise RuntimeError('Process {} terminated or timed out after {} seconds'.format(i, elapsed_time))
-            self.assertEqual(p.exitcode, first_process.exitcode)
+            self.assertEqual(
+                p.exitcode,
+                first_process.exitcode,
+                "Expect process {} exit code to match Process 0 exit code of {}, but got {}".format(
+                    i, first_process.exitcode, p.exitcode
+                ),
+            )
         for skip in TEST_SKIPS.values():
             if first_process.exitcode == skip.exit_code:
                 raise unittest.SkipTest(skip.message)
-        self.assertEqual(first_process.exitcode, 0)
+        self.assertEqual(
+            first_process.exitcode,
+            0,
+            "Expected zero exit code but got {}".format(first_process.exitcode)
+        )
 
     @property
     def is_master(self):

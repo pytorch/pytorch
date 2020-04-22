@@ -71,21 +71,9 @@ Tensor& quantized_hardtanh_(
   return self;
 }
 
-// Keep the registry in the anonymous namespace.
-namespace {
-class QClamp final : public c10::OperatorKernel {
- public:
-  Tensor operator()(Tensor qx, optional<Scalar> min, optional<Scalar> max) {
-    return quantized_clamp(qx, min, max);
-  }
-};
-
-static auto registry = c10::RegisterOperators().op(
-    "quantized::clamp(Tensor qx, Scalar? min, Scalar? max) -> Tensor qy",
-    c10::RegisterOperators::options()
-        .aliasAnalysis(at::AliasAnalysisKind::FROM_SCHEMA)
-        .kernel<QClamp>(DispatchKey::QuantizedCPU));
-} // namespace
+TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
+  m.impl("clamp", quantized_clamp);
+}
 
 } // namespace native
 } // namespace at

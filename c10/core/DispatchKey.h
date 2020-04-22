@@ -30,6 +30,10 @@ enum class DispatchKey : uint8_t {
 
   Undefined = 0,
 
+  // Define an alias for Undefined to represent CatchAll (long term
+  // this will get eliminated, but for now it's convenient)
+  CatchAll = Undefined,
+
 
 
   // ~~~~~~~~~~~~~~~~~~~~~~~~~~ BACKENDS ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
@@ -63,9 +67,10 @@ enum class DispatchKey : uint8_t {
 
   // Here are backends which specify more specialized operators
   // based on the dtype of the tensor.
-  QuantizedCPU, // registered at build/aten/src/ATen/QuantizedCPUType.cpp
-  ComplexCPU,   // lives out of tree at https://gitlab.com/pytorch-complex/pytorch-cpu-strided-complex
-  ComplexCUDA,  // and https://gitlab.com/pytorch-complex/pytorch-cuda-strided-complex
+  QuantizedCPU,  // registered at build/aten/src/ATen/QuantizedCPUType.cpp
+  QuantizedCUDA, // registered at build/aten/src/ATen/QuantizedCUDAType.cpp
+  ComplexCPU,    // lives out of tree at https://gitlab.com/pytorch-complex/pytorch-cpu-strided-complex
+  ComplexCUDA,   // and https://gitlab.com/pytorch-complex/pytorch-cuda-strided-complex
                         // tested at test/cpp_extensions/complex_registration_extension.cpp
                         // TODO: Remove Complex dispatch keys when Complex is moved in tree
 
@@ -114,6 +119,8 @@ enum class DispatchKey : uint8_t {
   // the bulk of this logic.
   Autograd,
 
+  Profiler,
+
   // Pre-autograd dispatch keys allow backends to override the autograd behavior
   // (aka Autograd) for operators which have a Variable kernel
   // already registered.  For example, XLA wants to define autograd for
@@ -157,8 +164,6 @@ enum class DispatchKey : uint8_t {
   // to operate on this type id.  See aten/src/ATen/test/backend_fallback_test.cpp
   // for a usage example
   TESTING_ONLY_GenericMode,
-
-
 
   // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ FIN ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
   NumDispatchKeys, // Sentinel

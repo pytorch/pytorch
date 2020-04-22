@@ -38,6 +38,7 @@ class TORCH_API LoopNest {
   void prepareForCodegen();
   void splitWithTail(For* f, int factor, For** outer, For** inner, For** tail);
   void splitWithMask(For* f, int factor, For** outer, For** inner);
+  void reorderAxis(Tensor* t, For* a, For* b);
 
   void setGPUBlockIndex(For* f, int idx);
   void setGPUThreadIndex(For* f, int idx);
@@ -68,6 +69,9 @@ class TORCH_API LoopNest {
 
 TORCH_API Stmt* FlattenIndexes(Stmt* s);
 
+// TODO: Revisit this once we decide on how dependencies analysis should look
+// like. Maybe we would choose to use a different API and BufUse would be
+// removed, or if we decide to keep it we need to properly document its API.
 struct BufUse {
   Stmt* s;
   bool isStore;
