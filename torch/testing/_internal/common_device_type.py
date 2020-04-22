@@ -401,14 +401,14 @@ class skipIf(object):
 class skipCPUIf(skipIf):
 
     def __init__(self, dep, reason):
-        super(skipCPUIf, self).__init__(dep, reason, device_type='cpu')
+        super().__init__(dep, reason, device_type='cpu')
 
 
 # Skips a test on CUDA if the condition is true.
 class skipCUDAIf(skipIf):
 
     def __init__(self, dep, reason):
-        super(skipCUDAIf, self).__init__(dep, reason, device_type='cuda')
+        super().__init__(dep, reason, device_type='cuda')
 
 
 # Only runs on cuda, and only run when there is enough GPU RAM
@@ -552,14 +552,14 @@ class dtypes(object):
 class dtypesIfCPU(dtypes):
 
     def __init__(self, *args):
-        super(dtypesIfCPU, self).__init__(*args, device_type='cpu')
+        super().__init__(*args, device_type='cpu')
 
 
 # Overrides specified dtypes on CUDA.
 class dtypesIfCUDA(dtypes):
 
     def __init__(self, *args):
-        super(dtypesIfCUDA, self).__init__(*args, device_type='cuda')
+        super().__init__(*args, device_type='cuda')
 
 
 def onlyCPU(fn):

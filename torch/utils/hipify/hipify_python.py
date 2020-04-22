@@ -55,10 +55,7 @@ class InputError(Exception):
 
 
 def openf(filename, mode):
-    if sys.version_info[0] == 3:
-        return open(filename, mode, errors='ignore')
-    else:
-        return open(filename, mode)
+    return open(filename, mode, errors='ignore')
 
 
 # Color coding for printing

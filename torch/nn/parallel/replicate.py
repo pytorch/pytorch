@@ -1,6 +1,8 @@
 import torch.cuda.comm as comm
 from torch.cuda._utils import _get_device_index
 
+from collections import OrderedDict
+
 
 def _is_script_module(module):
     import torch.jit
@@ -108,7 +110,15 @@ def replicate(network, devices, detach=False):
     for i, module in enumerate(modules):
         module_indices[module] = i
         for j in range(num_replicas):
-            module_copies[j].append(module._replicate_for_data_parallel())
+            replica = module._replicate_for_data_parallel()
+            # This is a temporary fix for DDP. DDP needs to access the 
+            # replicated model parameters. It used to do so through 
+            # `mode.parameters()`. The fix added in #33907 for DP stops the
+            # `parameters()` API from exposing the replicated parameters.
+            # Hence, we add a `_former_parameters` dict here to support DDP.
+            replica._former_parameters = OrderedDict()
+
+            module_copies[j].append(replica)
 
     for i, module in enumerate(modules):
         for key, child in module._modules.items():
@@ -134,6 +144,8 @@ def replicate(network, devices, detach=False):
                     # parameters in replicas are no longer leaves,
                     # so setattr them as non-parameter attributes
                     setattr(replica, key, param)
+                    # expose the parameter for DDP
+                    replica._former_parameters[key] = param
         for key, buf in module._buffers.items():
             if buf is None:
                 for j in range(num_replicas):
