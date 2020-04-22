@@ -92,9 +92,29 @@ void sinh_kernel_cuda(TensorIterator& iter) {
   });
 }
 
+template<typename scalar_t>
+__host__ __device__ static inline scalar_t cosh_wrapper(scalar_t v) {
+  return ::cosh(v);
+}
+
+template<typename T>
+__host__ __device__ static inline thrust::complex<T> cosh_wrapper(thrust::complex<T> v) {
+  return thrust::cosh(v);
+}
+
+void cosh_kernel_cuda(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(ScalarType::Half, iter.dtype(), "cosh_cuda", [&]() {
+    using thrust_t = typename ztype_cuda<scalar_t>::thrust_t;
+    gpu_kernel(iter, []GPU_LAMBDA(thrust_t a) -> thrust_t {
+      return cosh_wrapper(a);
+    });
+  });
+}
+
 REGISTER_DISPATCH(acos_stub, &acos_kernel_cuda);
 REGISTER_DISPATCH(asin_stub, &asin_kernel_cuda);
 REGISTER_DISPATCH(sin_stub, &sin_kernel_cuda);
 REGISTER_DISPATCH(sinh_stub, &sinh_kernel_cuda);
+REGISTER_DISPATCH(cosh_stub, &cosh_kernel_cuda);
 
 }} // namespace at::native

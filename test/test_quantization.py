@@ -34,9 +34,13 @@ from quantization.test_quantize import TestFusion  # noqa: F401
 from quantization.test_quantize import TestObserver  # noqa: F401
 # TODO: merge with TestObserver
 from quantization.test_quantize import TestRecordHistogramObserver  # noqa: F401
+# TODO: remove this global setting
+# JIT tests use double as the default dtype
+torch.set_default_dtype(torch.double)
 from quantization.test_quantize_script import TestQuantizeScriptJitPasses  # noqa: F401
 from quantization.test_quantize_script import TestQuantizeScriptPTSQOps  # noqa: F401
 from quantization.test_quantize_script import TestQuantizeDynamicScript  # noqa: F401
+torch.set_default_dtype(torch.float)
 
 # Model numerics
 # TODO: move to test_quantize
