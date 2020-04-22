@@ -52,7 +52,7 @@ class TORCH_API TensorExprKernel {
     InterpreterState(code_).run(stack);
   }
 
-  Stmt* generateStmtForInputs(const at::ArrayRef<IValue>& inputs);
+  Stmt* getStmtForInputs(const at::ArrayRef<IValue>& inputs);
 
  private:
   enum BackendType {
@@ -161,6 +161,9 @@ class TORCH_API TensorExprKernel {
   std::vector<CodeGen::BufferArg> prepareBufferArgs();
 
   std::string getCodegenName(BackendType backendType);
+  void codegenRun(
+      at::Device device,
+      const std::vector<CodeGen::CallArg>& runArgs);
 
   std::vector<CodeGen::CallArg> prepareRunArgs(
       const at::ArrayRef<IValue>& inputs,
@@ -168,16 +171,8 @@ class TORCH_API TensorExprKernel {
       at::Device device);
   BackendType inferBackendTypeFromDevice(at::Device device);
   at::Device pickDeviceType(const at::ArrayRef<IValue>& inputs);
-  BackendType pickAndCheckBackendType(const at::ArrayRef<IValue>& inputs);
 
   void bindInput(const torch::jit::Value* input);
-
-  ExprHandle createInputIndexExpr(
-      const Buffer& buffer,
-      const std::vector<VarHandle>& axes,
-      const c10::VaryingShape& sizes,
-      const c10::VaryingStrides& strides,
-      const c10::VaryingStrides& contiguity);
 
  private:
   struct ShapeArg {

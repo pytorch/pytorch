@@ -1268,80 +1268,6 @@ TensorExprKernel::BackendType TensorExprKernel::inferBackendTypeFromDevice(
   return backendType;
 }
 
-TensorExprKernel::BackendType TensorExprKernel::pickAndCheckBackendType(
-    const at::ArrayRef<IValue>& inputs) {
-  checkInputs(inputs, inputTypes_);
-
-  at::Device device = pickDeviceType(inputs);
-  BackendType backendType = inferBackendTypeFromDevice(device);
-  return backendType;
-}
-
-ExprHandle TensorExprKernel::createInputIndexExpr(
-    const Buffer& buffer,
-    const std::vector<VarHandle>& axes,
-    const c10::VaryingShape& sizes,
-    const c10::VaryingStrides& strides,
-    const c10::VaryingStrides& contiguity) {
-  if (axes.size() != strides.size()) {
-    throw malformed_input("axes and strides size mismatch");
-  }
-
-  std::vector<ShapeArg> strideArgs;
-  std::vector<ShapeArg> sizeArgs;
-  ExprHandle stride = 1;
-  ExprHandle index = 0;
-  std::vector<ExprHandle> indices;
-
-  if (axes.size() == 0) {
-    throw malformed_input("axes are zero creating input index");
-  }
-  size_t n = axes.size() - 1;
-
-  for (size_t i = 0; i < axes.size(); i++) {
-    // For discontiguous tensors, create a parameter to represent stride.
-    if (!*contiguity[i]) {
-      VarHandle v = VarHandle{
-          "stride_" + buffer.data()->name_hint() + "_" + c10::to_string(i),
-          kInt};
-      strideArgs.emplace_back(n - i, v);
-      stride = v;
-    }
-
-    ExprHandle size;
-    auto sizeVal = *sizes[n - i];
-    CHECK(sizeVal >= 0);
-    size = static_cast<int32_t>(sizeVal);
-
-    index = index + axes[n - i] * stride;
-    stride = stride * size;
-  }
-
-  kernelArgs_.emplace_back(buffer, std::move(sizeArgs), std::move(strideArgs));
-  return buffer(index);
-}
-
-void printStrides(const c10::VaryingShape& t) {
-  auto s = t.sizes();
-
-  if (!s) {
-    std::cerr << "<?>\n";
-    return;
-  }
-  std::cerr << "[";
-  int idx = 0;
-  for (auto ss : *s) {
-    if (idx++) {
-      std::cerr << ", ";
-    }
-    if (!ss) {
-      std::cerr << "?";
-    } else {
-      std::cerr << *ss;
-    }
-  }
-  std::cerr << "]\n";
-}
 void TensorExprKernel::bindInput(const torch::jit::Value* input) {
   auto const& t = input->type();
   switch (t->kind()) {
@@ -1358,8 +1284,6 @@ void TensorExprKernel::bindInput(const torch::jit::Value* input) {
             DimArg(IntImm::make(size), "i" + c10::to_string(i)));
       }
       auto const& strides = tt->strides();
-      printStrides(tt->sizes());
-      printStrides(tt->strides());
       tensors_.emplace(
           input->unique(),
           Compute(
@@ -1522,40 +1446,33 @@ void TensorExprKernel::lowerToBackend(const at::ArrayRef<IValue>& inputs) {
   }
 }
 
-Stmt* TensorExprKernel::generateStmtForInputs(
-    const at::ArrayRef<IValue>& inputs) {
+void TensorExprKernel::codegenRun(
+    at::Device device,
+    const std::vector<CodeGen::CallArg>& runArgs) {
+  codegenCache_.at(torch::get_hash(device))->call(runArgs);
+}
+
+Stmt* TensorExprKernel::getStmtForInputs(const at::ArrayRef<IValue>& inputs) {
   lowerToBackend(inputs);
   at::Device device = pickDeviceType(inputs);
   return codegenCache_.at(torch::get_hash(device))->stmt();
-  //   return generateStmt(backendType);
 }
 
 void TensorExprKernel::runKernel(Stack& stack) {
   KernelScope kernelScope(&kernelArena_);
   // Set up arguments (inputs, then outputs) for kernel call.
   auto inputs = last(stack, nInputs_);
-  checkInputs(inputs, inputTypes_);
+
+  lowerToBackend(inputs);
 
   at::Device device = pickDeviceType(inputs);
-  if (!codegenCache_.count(torch::get_hash(device))) {
-    BackendType backendType = inferBackendTypeFromDevice(device);
-    Stmt* stmt = generateStmt(backendType);
-
-    // Set up formal params (inputs, then outputs) for kernel.
-    std::vector<CodeGen::BufferArg> params = prepareBufferArgs();
-
-    // Generate code.
-    codegenCache_.emplace(
-        torch::get_hash(device),
-        CreateCodeGen(getCodegenName(backendType), stmt, params, device));
-  }
 
   std::vector<at::Tensor> outputs;
   std::vector<CodeGen::CallArg> runArgs =
       prepareRunArgs(inputs, outputs, device);
 
   // Call the kernel.
-  codegenCache_.at(torch::get_hash(device))->call(runArgs);
+  codegenRun(device, runArgs);
 
   // Update the stack.
   drop(stack, nInputs_);

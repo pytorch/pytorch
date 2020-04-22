@@ -397,13 +397,39 @@ RegisterOperators reg(
          listMulIntLeftInPlace,
          aliasAnalysisFromSchema()),
      Operator("aten::len.t(t[] a) -> int", listLen, aliasAnalysisFromSchema()),
+     Operator(
+         "prim::Uninitialized() -> Any",
+         [](Stack& stack) {
+           push(stack, IValue::uninitialized());
+           return 0;
+         },
+         aliasAnalysisSpecialCase()),
+     Operator(
+         "prim::Print(...) -> ()",
+         [](Stack& stack) {
+           auto num_inputs = pop(stack).toInt();
+           std::stringstream ss;
+           bool first = true;
+           for (const IValue& i : last(stack, num_inputs)) {
+             if (!first)
+               ss << " ";
+             first = false;
+             ss << i;
+           }
+           drop(stack, num_inputs);
+           ss << std::endl;
+           auto* handler = getPrintHandler();
+           TORCH_INTERNAL_ASSERT(handler);
+           handler(ss.str());
+           return 0;
+         },
+         aliasAnalysisSpecialCase()),
      DEFINE_COMPARISON_OP(aten::eq, a == b),
      DEFINE_COMPARISON_OP(aten::ne, a != b),
      DEFINE_COMPARISON_OP(aten::lt, a < b),
      DEFINE_COMPARISON_OP(aten::gt, a > b),
      DEFINE_COMPARISON_OP(aten::le, a <= b),
      DEFINE_COMPARISON_OP(aten::ge, a >= b),
-
      DEFINE_BINARY_OP(aten::add, a + b),
      DEFINE_BINARY_OP(aten::sub, a - b),
      DEFINE_BINARY_OP(aten::mul, a* b),
