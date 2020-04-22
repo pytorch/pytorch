@@ -1052,10 +1052,7 @@ Stmt* PolynomialTransformer::mutate(const For* v) {
   const Var* var_new = dynamic_cast<const Var*>(var_new_expr);
   const Expr* start_new = start->accept_mutator(this);
   const Expr* stop_new = stop->accept_mutator(this);
-  Stmt* body_new = body->accept_mutator(this);
-  if (!body_new) {
-    return new Block({});
-  }
+  Stmt* body_new = body;
 
   const Expr* loops = new Sub(stop_new, start_new);
   loops = loops->accept_mutator(this);
@@ -1063,8 +1060,15 @@ Stmt* PolynomialTransformer::mutate(const For* v) {
     if (immediateEquals(loops, 0)) {
       return new Block({});
     } else if (immediateEquals(loops, 1)) {
-      return Substitute(body_new, {{var_new, start_new}});
+      body_new = Substitute(body, {{var_new, start_new}});
+      body_new = body_new->accept_mutator(this);
+      return body_new;
     }
+  }
+
+  body_new = body_new->accept_mutator(this);
+  if (!body_new) {
+    return new Block({});
   }
 
   if (var == var_new && start == start_new && stop == stop_new &&
@@ -1075,6 +1079,27 @@ Stmt* PolynomialTransformer::mutate(const For* v) {
     body_new = Stmt::clone(body);
   }
   return new For(var_new, start_new, stop_new, body_new, loop_options);
+}
+
+Stmt* PolynomialTransformer::mutate(const Block* v) {
+  std::vector<Stmt*> stmts;
+  for (Stmt* stmt : v->stmts()) {
+    Stmt* stmt_new = stmt->accept_mutator(this);
+    if (stmt_new == nullptr) {
+      continue;
+    }
+
+    if (auto* subBlock = dynamic_cast<Block*>(stmt_new)) {
+      for (auto* s : subBlock->stmts()) {
+        subBlock->remove_stmt(s);
+        stmts.push_back(s);
+      }
+    } else {
+      stmts.push_back(Stmt::clone(stmt_new));
+    }
+  }
+
+  return new Block(stmts);
 }
 
 // TermExpander
