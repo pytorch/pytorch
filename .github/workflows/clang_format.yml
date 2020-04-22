@@ -32,8 +32,11 @@ jobs:
           if [[ -z $GIT_DIFF ]]; then
             exit 0
           fi
-          echo "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"
-          echo "| Use tools/git-clang-format to fix this             |"
-          echo "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"
+          echo "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"
+          echo "| Run: "
+          echo "|    tools/git-clang-format ${{ github.event.pull_request.base.sha }} "
+          echo "| to fix this error. "
+          echo "| For more info, see: https://github.com/pytorch/pytorch/wiki/clang-format "
+          echo "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"
           echo $GIT_DIFF
           exit 1
