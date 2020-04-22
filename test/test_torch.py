@@ -5581,10 +5581,11 @@ class TestTorchDeviceType(TestCase):
                 actual = base.pow(exponent)
                 self.assertEqual(actual, expected.to(actual), allow_inf=True)
 
-                actual = base.clone()
-                actual2 = actual.pow_(exponent)
-                self.assertEqual(actual, expected.to(actual), allow_inf=True)
-                self.assertEqual(actual2, expected.to(actual), allow_inf=True)
+                if torch.can_cast(torch.result_type(base, exponent), base.dtype):
+                    actual = base.clone()
+                    actual2 = actual.pow_(exponent)
+                    self.assertEqual(actual, expected, allow_inf=True)
+                    self.assertEqual(actual2, expected, allow_inf=True)
 
             actual = torch.pow(base, exponent)
             self.assertEqual(actual, expected.to(actual), allow_inf=True)
@@ -6012,6 +6013,7 @@ class TestTorchDeviceType(TestCase):
                                                 r'Integers to negative integer powers are not allowed\.'):
                         torch.pow(m1[4], num)
                 else:
+                    expected_dtype = torch.result_type(num, m1[4])
                     # base - tensor, exponent - number
                     # contiguous
                     res1 = torch.pow(m1[4], num)
@@ -6019,6 +6021,12 @@ class TestTorchDeviceType(TestCase):
                     for i in range(res2.size(0)):
                         res2[i] = math.pow(m1[4][i], num)
                     self.assertEqual(res1, res2)
+
+                    # scalar ** tensor to enforce correct handling of dtypes for __rpow__().
+                    res1 = num ** m1[4]
+                    res2 = torch.tensor(num, dtype=expected_dtype, device=device) ** m1[4]
+                    self.assertEqual(res1, res2)
+                    self.assertEqual(res1.dtype, expected_dtype)
 
                     # non-contiguous
                     res1 = torch.pow(m1[:, 4], num)
@@ -6046,6 +6054,7 @@ class TestTorchDeviceType(TestCase):
             out = torch.zeros(1, dtype=dtype, device=device)
             torch.pow(m1, 1, out=out)
             self.assertEqual(out, m1)
+
 
     def test_neg(self, device):
         int_types = [torch.int, torch.short, torch.int8, torch.uint8]
