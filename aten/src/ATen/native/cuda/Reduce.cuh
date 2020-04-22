@@ -84,8 +84,9 @@ struct ReduceConfig {
   int num_threads;
 
   bool vectorize_input = false;
+  int output_vec_size = 1;
 
-  void set_block_dimension(int64_t dim0, int64_t dim1, int64_t output_vec_size) {
+  void set_block_dimension(int64_t dim0, int64_t dim1) {
     const int max_num_threads = MAX_NUM_THREADS / output_vec_size;
     int dim0_pow2 = dim0 < max_num_threads ? static_cast<int>(last_pow2(dim0)) : max_num_threads;
     int dim1_pow2 = dim1 < max_num_threads ? static_cast<int>(last_pow2(dim1)) : max_num_threads;
@@ -111,7 +112,7 @@ struct ReduceConfig {
     return dim3(block_width, block_height);
   }
 
-  dim3 grid(int output_vec_size) const {
+  dim3 grid() const {
     return dim3(div_up(num_outputs / output_vec_size, step_output), ctas_per_output);
   }
 
@@ -169,7 +170,6 @@ struct ReduceConfig {
     return offset;
   }
 
-  template <int output_vec_size>
   int shared_memory_size() const {
     if (!should_block_y_reduce() &&
         (!should_block_x_reduce() ||
@@ -179,7 +179,7 @@ struct ReduceConfig {
     return element_size_bytes * num_threads * output_vec_size;
   }
 
-  int64_t global_memory_size(int output_vec_size) const {
+  int64_t global_memory_size() const {
     if (!should_global_reduce()) {
       return 0;
     }
@@ -190,11 +190,11 @@ struct ReduceConfig {
     return size;
   }
 
-  int semaphore_size(int output_vec_size) const {
+  int semaphore_size() const {
     if (!should_global_reduce()) {
       return 0;
     }
-    return sizeof(int) * grid(output_vec_size).x;
+    return sizeof(int) * grid().x;
   }
 
   int values_per_thread() const {
@@ -802,14 +802,25 @@ struct ReduceOp {
   }
 };
 
-template<int max_threads, int output_vec_size, typename R>
+template<int max_threads, typename R>
 static void launch_reduce_kernel(const ReduceConfig& config, const R& reduction) {
   dim3 block = config.block();
-  dim3 grid = config.grid(output_vec_size);
+  dim3 grid = config.grid();
 
   auto stream = at::cuda::getCurrentCUDAStream();
-  int shared_memory = config.shared_memory_size<output_vec_size>();
-  reduce_kernel<max_threads / output_vec_size, output_vec_size, R><<<grid, block, shared_memory, stream>>>(reduction);
+  int shared_memory = config.shared_memory_size();
+
+  switch(config.output_vec_size) {
+  case 4:
+    reduce_kernel<max_threads / 4, 4, R><<<grid, block, shared_memory, stream>>>(reduction);
+    break;
+  case 2:
+    reduce_kernel<max_threads / 2, 2, R><<<grid, block, shared_memory, stream>>>(reduction);
+    break;
+  default:
+    reduce_kernel<max_threads / 1, 1, R><<<grid, block, shared_memory, stream>>>(reduction);
+  }
+
   AT_CUDA_CHECK(cudaGetLastError());
 }
 
@@ -935,7 +946,6 @@ inline void gpu_reduce_kernel(TensorIterator& iter, const ops_t& ops, ident_t id
   int64_t num_outputs = iter.num_output_elements();
   int64_t inputs_per_output = iter.numel() / num_outputs;
   int input_index = iter.ntensors() - 1;
-  int output_vec_size = 1;
 
   auto config = ReduceConfig(sizeof(arg_t), num_outputs, inputs_per_output);
 
@@ -981,13 +991,13 @@ inline void gpu_reduce_kernel(TensorIterator& iter, const ops_t& ops, ident_t id
     if (reduction_on_fastest_striding_dimension && dim0 > 128 && iter.num_reduce_dims() == 1) {
       config.vectorize_input = true;
     } else if (!reduction_on_fastest_striding_dimension) {
-      output_vec_size = get_output_vec_size<scalar_t>(iter);
-      dim0 /= output_vec_size;
+      config.output_vec_size = get_output_vec_size<scalar_t>(iter);
+      dim0 /= config.output_vec_size;
     }
   }
 
   // Adjust block_width and block_height
-  config.set_block_dimension(dim0, dim1, output_vec_size);
+  config.set_block_dimension(dim0, dim1);
 
   int block_width = config.block_width;
   int block_height = config.block_height;
@@ -1017,7 +1027,7 @@ inline void gpu_reduce_kernel(TensorIterator& iter, const ops_t& ops, ident_t id
   const int blocks_per_sm = at::cuda::getCurrentDeviceProperties()->maxThreadsPerMultiProcessor / (block_width * block_height);
   const int num_mp = at::cuda::getCurrentDeviceProperties()->multiProcessorCount;
   const int target_grid_size = num_mp * blocks_per_sm;
-  int grid = config.grid(output_vec_size).x;
+  int grid = config.grid().x;
   if (config.input_mult[1] != 0 && config.values_per_thread() >= max_values_per_thread && grid <= target_grid_size) {
     // Divide the input across thread-blocks if the amount of work per-thread
     // is large enough and the size of the output is small enough. This will
@@ -1041,11 +1051,11 @@ inline void gpu_reduce_kernel(TensorIterator& iter, const ops_t& ops, ident_t id
   at::DataPtr semaphores;
   if (config.should_global_reduce()) {
     auto& allocator = *c10::cuda::CUDACachingAllocator::get();
-    buffer = allocator.allocate(config.global_memory_size(output_vec_size));
-    semaphores = allocator.allocate(config.semaphore_size(output_vec_size));
+    buffer = allocator.allocate(config.global_memory_size());
+    semaphores = allocator.allocate(config.semaphore_size());
 
     auto stream = at::cuda::getCurrentCUDAStream();
-    AT_CUDA_CHECK(cudaMemsetAsync(semaphores.get(), 0, config.semaphore_size(output_vec_size), stream));
+    AT_CUDA_CHECK(cudaMemsetAsync(semaphores.get(), 0, config.semaphore_size(), stream));
   }
 
   AT_ASSERT(can_use_32bit_indexing);
@@ -1068,16 +1078,7 @@ inline void gpu_reduce_kernel(TensorIterator& iter, const ops_t& ops, ident_t id
   reduce.accumulate = iter.should_accumulate();
   reduce.final_output = iter.is_final_output();
 
-  switch(output_vec_size) {
-  case 4:
-    launch_reduce_kernel<ReduceConfig::MAX_NUM_THREADS, 4>(config, reduce);
-    break;
-  case 2:
-    launch_reduce_kernel<ReduceConfig::MAX_NUM_THREADS, 2>(config, reduce);
-    break;
-  default:
-    launch_reduce_kernel<ReduceConfig::MAX_NUM_THREADS, 1>(config, reduce);
-  }
+  launch_reduce_kernel<ReduceConfig::MAX_NUM_THREADS>(config, reduce);
 }
 
 }} // namespace at::native
