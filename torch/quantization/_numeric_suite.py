@@ -318,12 +318,8 @@ def prepare_model_outputs(float_module, q_module, white_list, Logger):
     """
     if white_list is None:
         white_list = DEFAULT_NUMERIC_SUITE_COMPARE_MODEL_OUTPUT_WHITE_LIST
-    print("dict of float model:", float_module.__dict__)
-    print("dict of q model:", q_module.__dict__)
     remove_qconfig(float_module)
     remove_qconfig(q_module)
-    print("after remove qconfig, dict of float model:", float_module.__dict__)
-    print("after remove qconfig, dict of q model:", q_module.__dict__)
     qconfig_debug = torch.quantization.QConfig(activation=Logger, weight=None)
     float_module.qconfig = qconfig_debug
     prepare(float_module, inplace=True, white_list=white_list)
