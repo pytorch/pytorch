@@ -273,6 +273,7 @@ class TestQuantizeScriptJitPasses(JitTestCase):
         # number of layers.
         # this only works when default dtype is double
         torch.set_default_dtype(torch.double)
+
         class SubModule(torch.nn.Module):
             def __init__(self, num_blocks, enable_bias, enable_affine):
                 super(SubModule, self).__init__()
