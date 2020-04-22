@@ -315,7 +315,7 @@ bool hitGraphInput(Value* value) {
 // Get the module access path for a Value representing a module instance
 // by tracing back the GetAttr nodes and recording all the attribute
 // names along the way.
-// For example, the module access path will be ['conv1', 'basic_block', 'sub']
+// For example, the module access path will be ['sub', 'basic_block', 'conv1']
 // for `self.sub.basic_block.conv1`
 std::vector<std::string> getModuleAccessPath(Value* instance, Value* self) {
   std::vector<std::string> path;
@@ -864,6 +864,7 @@ ModuleMethodVector InsertObserversHelper::getInvokedMethods(
   ModuleMethodVector invoked_methods;
   Method method = module.get_method(method_name);
   auto graph = method.graph();
+
   std::stack<Block*> blocks_to_visit;
   blocks_to_visit.push(graph->block());
   while (!blocks_to_visit.empty()) {
