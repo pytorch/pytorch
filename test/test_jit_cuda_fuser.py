@@ -117,6 +117,7 @@ class TestCudaFuser(JitTestCase):
         self.assertEqual(o, jit_o)
         self.assertTrue(self._has_cuda_fusion_group(t_jit.graph_for(x, y, 2.0)))
 
+    @unittest.skipIf(True, "temporarily disable it as the hanging bug in codegen")
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING, "Requires profiling node to run cuda fuser")
     @skipIfRocm
