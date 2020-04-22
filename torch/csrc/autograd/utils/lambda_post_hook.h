@@ -11,18 +11,22 @@ class LambdaPostHook : public torch::autograd::FunctionPostHook {
   using variable_list = std::vector<torch::autograd::Variable>;
 
  public:
-  /* implicit */ LambdaPostHook(std::function<void(const variable_list&)> fn)
+  // The lambda function takes as arguments the outputs and inputs of the
+  // autograd function and can modify the outputs of the autograd function by
+  // returning a new output if needed.
+  /* implicit */ LambdaPostHook(
+      std::function<variable_list(const variable_list&, const variable_list&)>
+          fn)
       : fn_(std::move(fn)) {}
 
   variable_list operator()(
       const variable_list& outputs,
       const variable_list& inputs) override {
-    fn_(inputs);
-    return outputs;
+    return fn_(outputs, inputs);
   }
 
  protected:
-  std::function<void(const variable_list&)> fn_;
+  std::function<variable_list(const variable_list&, const variable_list&)> fn_;
 };
 
 } // namespace utils

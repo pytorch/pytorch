@@ -119,8 +119,10 @@ Reducer::Reducer(
         hooks_.emplace_back(
             grad_accumulator->add_post_hook(
                 torch::make_unique<torch::autograd::utils::LambdaPostHook>(
-                    [=](const torch::autograd::variable_list& /* unused */) {
+                    [=](const torch::autograd::variable_list& outputs,
+                        const torch::autograd::variable_list& /* unused */) {
                       this->autograd_hook(index);
+                      return outputs;
                     })),
             grad_accumulator);
 
