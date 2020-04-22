@@ -237,6 +237,14 @@ Args:
            the ellipsis dimensions are at the beginning of the output.
     operands (Tensor): The operands to compute the Einstein sum of.
 
+.. note::
+
+    This function does not perform any memory or speed optimization on the given expression.
+    So doing the same overall computation with a different formula can lead to different memory
+    and speed.
+    If you want better speed, projects like opt_einsum (https://optimized-einsum.readthedocs.io/en/stable/)
+    can be used to get the best formula for your overall operation.
+
 Examples::
 
     >>> x = torch.randn(5)

@@ -462,7 +462,8 @@ class Module(object):
         module has multiple inputs or outputs. The hook should not modify its
         arguments, but it can optionally return a new gradient with respect to
         input that will be used in place of :attr:`grad_input` in subsequent
-        computations.
+        computations. :attr:`grad_input` will only correspond to the inputs given
+        as positional arguments.
 
         Returns:
             :class:`torch.utils.hooks.RemovableHandle`:
@@ -491,6 +492,7 @@ class Module(object):
 
             hook(module, input) -> None or modified input
 
+        The input contains only the positional arguments given to the module.
         The hook can modify the input. User can either return a tuple or a
         single modified value in the hook. We will wrap the value into a tuple
         if a single value is returned(unless that value is already a tuple).
@@ -512,6 +514,7 @@ class Module(object):
 
             hook(module, input, output) -> None or modified output
 
+        The input contains only the positional arguments given to the module.
         The hook can modify the output. It can modify the input inplace but
         it will not have effect on forward since this is called after
         :func:`forward` is called.
