@@ -25,14 +25,16 @@ void pytorch_q8dwconv_ukernel_mp8x25__neon(
       vld1_dup_u8((const uint8_t*)&quantization_params->neon.input_zero_point);
   const uint8x8_t vkernel_zero_point =
       vld1_dup_u8((const uint8_t*)&quantization_params->neon.kernel_zero_point);
-  const int32x4_t vmultiplier =
-      vld1q_dup_s32(&quantization_params->neon.multiplier);
-  const int32x4_t vright_shift =
-      vld1q_dup_s32(&quantization_params->neon.right_shift);
-  const int16x8_t vzero_point =
+  const float32x4_t requantization_scale_v =
+      vdupq_n_f32(quantization_params->neon.requantization_scale);
+  const int16x8_t voutput_zero_point =
       vld1q_dup_s16(&quantization_params->neon.output_zero_point);
-  const uint8x8_t vmin = vld1_dup_u8(&quantization_params->neon.output_min);
-  const uint8x8_t vmax = vld1_dup_u8(&quantization_params->neon.output_max);
+  const uint8x8_t voutput_min = vld1_dup_u8(&quantization_params->neon.output_min);
+  const uint8x8_t voutput_max = vld1_dup_u8(&quantization_params->neon.output_max);
+  const float32x4_t vfmin = vdupq_n_f32(quantization_params->neon.vfmin);
+  const float32x4_t vfmax = vdupq_n_f32(quantization_params->neon.vfmax);
+  const float32x4_t vfmagic = vdupq_n_f32(quantization_params->neon.vfmagic);
+  const int32x4_t vimagic = vdupq_n_s32(quantization_params->neon.vimagic);
 
   do {
     uint8_t* output_start = output;
@@ -747,30 +749,36 @@ void pytorch_q8dwconv_ukernel_mp8x25__neon(
         outacc += 4;
         vacc_lo = vaddq_s32(vacc_lo, vacc_lo_old);
         vacc_hi = vaddq_s32(vacc_hi, vacc_hi_old);
-        vacc_lo = vqrdmulhq_s32(vacc_lo, vmultiplier);
-        vacc_hi = vqrdmulhq_s32(vacc_hi, vmultiplier);
 
-        const int32x4_t vzero_shift_mask =
-            vreinterpretq_s32_u32(vceqq_s32(vright_shift, vmovq_n_s32(0)));
-        vacc_lo =
-            vsraq_n_s32(vacc_lo, vbicq_s32(vacc_lo, vzero_shift_mask), 31);
-        vacc_hi =
-            vsraq_n_s32(vacc_hi, vbicq_s32(vacc_hi, vzero_shift_mask), 31);
-
-        vacc_lo = vrshlq_s32(vacc_lo, vright_shift);
-        vacc_hi = vrshlq_s32(vacc_hi, vright_shift);
+        const float32x4_t vacc_lo_f =
+          vmulq_f32(vcvtq_f32_s32(vacc_lo), requantization_scale_v);
+        const float32x4_t vacc_hi_f =
+          vmulq_f32(vcvtq_f32_s32(vacc_hi), requantization_scale_v);
 
 #ifdef __aarch64__
+        vacc_lo = vcvtnq_s32_f32(vacc_lo_f);
+        vacc_hi = vcvtnq_s32_f32(vacc_hi_f);
+
         const int16x8_t vacc = vqaddq_s16(
-            vqmovn_high_s32(vqmovn_s32(vacc_lo), vacc_hi), vzero_point);
-#else
-        const int16x8_t vacc = vqaddq_s16(
-            vcombine_s16(vqmovn_s32(vacc_lo), vqmovn_s32(vacc_hi)),
-            vzero_point);
-#endif
+            vqmovn_high_s32(vqmovn_s32(vacc_lo), vacc_hi), voutput_zero_point);
+
         uint8x8_t vout = vqmovun_s16(vacc);
-        vout = vmax_u8(vout, vmin);
-        vout = vmin_u8(vout, vmax);
+        vout = vmax_u8(vout, voutput_min);
+        vout = vmin_u8(vout, voutput_max);
+#else
+        const float32x4_t vacc_lo_f_clamped =
+            vminq_f32(vmaxq_f32(vacc_lo_f, vfmin), vfmax);
+        const float32x4_t vacc_hi_f_clamped =
+            vminq_f32(vmaxq_f32(vacc_hi_f, vfmin), vfmax);
+        vacc_lo = vsubq_s32(
+            vreinterpretq_s32_f32(vaddq_f32(vacc_lo_f_clamped, vfmagic)), vimagic);
+        vacc_hi = vsubq_s32(
+            vreinterpretq_s32_f32(vaddq_f32(vacc_hi_f_clamped, vfmagic)), vimagic);
+        const int16x8_t vacc =
+            vcombine_s16(vqmovn_s32(vacc_lo), vqmovn_s32(vacc_hi));
+
+        uint8x8_t vout = vqmovun_s16(vacc);
+#endif
 
         vst1_u8(output, vout);
         output += 8;
@@ -855,30 +863,35 @@ void pytorch_q8dwconv_ukernel_mp8x25__neon(
         vacc_lo = vaddq_s32(vacc_lo, vacc_lo_old);
         vacc_hi = vaddq_s32(vacc_hi, vacc_hi_old);
 
-        vacc_lo = vqrdmulhq_s32(vacc_lo, vmultiplier);
-        vacc_hi = vqrdmulhq_s32(vacc_hi, vmultiplier);
-
-        const int32x4_t vzero_shift_mask =
-            vreinterpretq_s32_u32(vceqq_s32(vright_shift, vmovq_n_s32(0)));
-        vacc_lo =
-            vsraq_n_s32(vacc_lo, vbicq_s32(vacc_lo, vzero_shift_mask), 31);
-        vacc_hi =
-            vsraq_n_s32(vacc_hi, vbicq_s32(vacc_hi, vzero_shift_mask), 31);
-
-        vacc_lo = vrshlq_s32(vacc_lo, vright_shift);
-        vacc_hi = vrshlq_s32(vacc_hi, vright_shift);
+        const float32x4_t vacc_lo_f =
+          vmulq_f32(vcvtq_f32_s32(vacc_lo), requantization_scale_v);
+        const float32x4_t vacc_hi_f =
+          vmulq_f32(vcvtq_f32_s32(vacc_hi), requantization_scale_v);
 
 #ifdef __aarch64__
+        vacc_lo = vcvtnq_s32_f32(vacc_lo_f);
+        vacc_hi = vcvtnq_s32_f32(vacc_hi_f);
+
         const int16x8_t vacc = vqaddq_s16(
-            vqmovn_high_s32(vqmovn_s32(vacc_lo), vacc_hi), vzero_point);
-#else
-        const int16x8_t vacc = vqaddq_s16(
-            vcombine_s16(vqmovn_s32(vacc_lo), vqmovn_s32(vacc_hi)),
-            vzero_point);
-#endif
+            vqmovn_high_s32(vqmovn_s32(vacc_lo), vacc_hi), voutput_zero_point);
+
         uint8x8_t vout = vqmovun_s16(vacc);
-        vout = vmax_u8(vout, vmin);
-        vout = vmin_u8(vout, vmax);
+        vout = vmax_u8(vout, voutput_min);
+        vout = vmin_u8(vout, voutput_max);
+#else
+        const float32x4_t vacc_lo_f_clamped =
+            vminq_f32(vmaxq_f32(vacc_lo_f, vfmin), vfmax);
+        const float32x4_t vacc_hi_f_clamped =
+            vminq_f32(vmaxq_f32(vacc_hi_f, vfmin), vfmax);
+        vacc_lo = vsubq_s32(
+            vreinterpretq_s32_f32(vaddq_f32(vacc_lo_f_clamped, vfmagic)), vimagic);
+        vacc_hi = vsubq_s32(
+            vreinterpretq_s32_f32(vaddq_f32(vacc_hi_f_clamped, vfmagic)), vimagic);
+        const int16x8_t vacc =
+            vcombine_s16(vqmovn_s32(vacc_lo), vqmovn_s32(vacc_hi));
+
+        uint8x8_t vout = vqmovun_s16(vacc);
+#endif
 
         if (c & 4) {
           vst1_lane_u32(
