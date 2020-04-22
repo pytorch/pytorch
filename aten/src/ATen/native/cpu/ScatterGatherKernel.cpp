@@ -9,8 +9,8 @@ namespace {
 
 // Used for `gather`-like methods
 // Test:
-// 1. index.size(d) == self.size(d) for all d != dim
-// 2. index.size(d) == src.size(d) for all d
+// 1. index.size(d) == src.size(d) for all d != dim
+// 2. index.size(d) == self.size(d) for all d
 void gather_shape_check(const Tensor& self, int64_t dim, const Tensor& index, const Tensor& src) {
   auto self_dims = ensure_nonempty_dim(self.dim());
   auto src_dims = ensure_nonempty_dim(src.dim());
@@ -27,19 +27,19 @@ void gather_shape_check(const Tensor& self, int64_t dim, const Tensor& index, co
     auto index_size = ensure_nonempty_size(index, i);
     if (i != dim) {
       TORCH_CHECK(
-        index_size == ensure_nonempty_size(self, i),
-        "Input size does not match at dimension ", i,
-        " get ", ensure_nonempty_size(self, i),
+        index_size == ensure_nonempty_size(src, i),
+        "Output size does not match at dimension ", i,
+        " get ", ensure_nonempty_size(src, i),
         " vs ", ensure_nonempty_size(index, i)
       );
     }
-
     TORCH_CHECK(
-      index_size == ensure_nonempty_size(src, i),
-      "Output size does not match at dimension ", i,
-      " get ", ensure_nonempty_size(src, i),
+      index_size == ensure_nonempty_size(self, i),
+      "Input size does not match at dimension ", i,
+      " get ", ensure_nonempty_size(self, i),
       " vs ", ensure_nonempty_size(index, i)
     );
+
   }
 }
 
