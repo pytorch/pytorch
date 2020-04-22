@@ -30,8 +30,7 @@ Element* makeFreshValueImpl(
 
 Element::Element(const Value* value_, unsigned index_)
     : index(index_), values({value_}) {}
-Element::Element(unsigned index_)
-    : index(index_), values({}) {}
+Element::Element(unsigned index_) : index(index_), values({}) {}
 
 const Element* MemoryDAG::fromIndex(unsigned x) const {
   TORCH_INTERNAL_ASSERT(x < indexToElementMap_.size());
