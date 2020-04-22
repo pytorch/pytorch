@@ -10,8 +10,12 @@
 namespace torch {
 namespace distributed {
 namespace rpc {
-
+// Default RPC timeout
 constexpr auto kDefaultRpcTimeout = std::chrono::seconds(60);
+// Unset RPC timeout. This is the value agent::send() will have if user does not
+// pass in a specific timeout, and indicates that we must use the default
+// timeout for RPCs.
+constexpr float kUnsetRpcTimeout = -1;
 constexpr auto kDefaultInitMethod = "env://";
 
 using steady_clock_time_point =
@@ -147,7 +151,8 @@ class TORCH_API RpcAgent {
   // should be ignored by the caller.
   virtual std::shared_ptr<FutureMessage> send(
       const WorkerInfo& to,
-      Message&& message) = 0;
+      Message&& message,
+      const float rpcTimeoutSeconds = kUnsetRpcTimeout) = 0;
 
   // Retries sending the message up to maxRetries times until an ACK is
   // receieved. The duration between consecutive sends is increased over
