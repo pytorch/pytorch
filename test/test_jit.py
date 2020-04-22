@@ -149,6 +149,19 @@ torch._C._jit_set_profiling_executor(GRAPH_EXECUTOR != ProfilingMode.LEGACY)
 # of the tests with "with enable_profiling_mode"
 torch._C._jit_set_profiling_mode(False)
 
+# this counteracts jit caching in python
+# which effectively merges separate calls
+# to torch.jit.script into one compiled function
+# which is most likely not what test authors
+# intend when they compile multiple times
+# Without `_jit_set_bailout_depth`, if we change 
+# the shapes of the arguments we
+# will fall back to the simple
+# executor, this setting makes the profiling
+# executor to specialize for every
+# new set of shapes
+torch._C._jit_set_bailout_depth(100)
+
 def LSTMCell(input, hidden, w_ih, w_hh, b_ih=None, b_hh=None):
     hx, cx = hidden
     gates = F.linear(input, w_ih, b_ih) + F.linear(hx, w_hh, b_hh)
