@@ -204,8 +204,6 @@ cmake_dependent_option(
 cmake_dependent_option(
     USE_GLOO "Use Gloo. Only available if USE_DISTRIBUTED is on." ON
     "USE_DISTRIBUTED" OFF)
-# NB: USE_NCCL is intentionally left independent from USE_DISTRIBUTED, because
-# DataParallel also uses NCCL.
 option(USE_TBB "Use TBB" OFF)
 option(ONNX_ML "Enable traditional ONNX ML API." ON)
 

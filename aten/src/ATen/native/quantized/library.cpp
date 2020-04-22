@@ -1,4 +1,4 @@
-#include <ATen/core/op_registration/op_registration.h>
+#include <torch/library.h>
 
 #include <torch/custom_class.h>
 #include <ATen/native/quantized/cpu/conv_packed_params.h>
