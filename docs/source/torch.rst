@@ -194,6 +194,7 @@ Pointwise Ops
 ~~~~~~~~~~~~~~~~~~~~~~
 
 .. autofunction:: abs
+.. autofunction:: absolute
 .. autofunction:: acos
 .. autofunction:: add
 .. autofunction:: addcdiv

@@ -111,14 +111,14 @@ def convert_script(model, inplace=False, debug=False):
 def convert_dynamic_script(model, debug=False):
     return _convert_script(model, is_dynamic=True, debug=debug)
 
-def _quantize_script(model, qconfig_dict, run_fn, run_args, is_dynamic, debug):
+def _quantize_script(model, qconfig_dict, run_fn=None, run_args=None, is_dynamic=False, debug=False):
     _check_is_script_module(model)
     _check_forward_method(model)
     torch._C._jit_pass_dedup_module_uses(model._c)
     model = wrap_cpp_module(torch._C._jit_pass_fold_convbn(model._c))
     if is_dynamic:
         model = prepare_dynamic_script(model, qconfig_dict)
-        run_fn(model._c._get_method('forward'), *run_args)
+        model(*run_args)
         model = convert_dynamic_script(model, debug)
     else:
         model = prepare_script(model, qconfig_dict, True)
@@ -133,5 +133,5 @@ def quantize_script(model, qconfig_dict, run_fn, run_args, inplace=False, debug=
         model = model.copy()
     return _quantize_script(model, qconfig_dict, run_fn, run_args, is_dynamic=False, debug=debug)
 
-def quantize_dynamic_script(model, qconfig_dict, run_fn, run_args, debug=False):
-    return _quantize_script(model, qconfig_dict, run_fn, run_args, is_dynamic=True, debug=debug)
+def quantize_dynamic_script(model, qconfig_dict, sample_model_inputs, debug=False):
+    return _quantize_script(model, qconfig_dict, run_args=sample_model_inputs, is_dynamic=True, debug=debug)
