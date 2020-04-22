@@ -32,7 +32,7 @@ def generate_code(ninja_global=None,
     root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     sys.path.insert(0, root)
     from tools.autograd.gen_autograd import gen_autograd, gen_autograd_python
-    from tools.jit.gen_jit_dispatch import gen_jit_dispatch
+    from tools.jit.gen_unboxing_wrappers import gen_unboxing_wrappers
 
     # Build ATen based Variable classes
     install_dir = install_dir or 'torch/csrc'
@@ -57,7 +57,7 @@ def generate_code(ninja_global=None,
             autograd_dir,
             disable_autograd=disable_autograd,
         )
-        gen_jit_dispatch(
+        gen_unboxing_wrappers(
             declarations_path or DECLARATIONS_PATH,
             jit_gen_dir,
             tools_jit_templates,
