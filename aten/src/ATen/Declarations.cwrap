@@ -60,11 +60,11 @@
   name: _th_masked_select
   cname: maskedSelect
   cpu_bool: True
-  cuda_bool: True
   cpu_bfloat16: True
-  cuda_bfloat16: True
   variants:
     - function
+  backends:
+    - CPU
   return: argument 0
   arguments:
     - arg: THTensor* result
@@ -77,11 +77,11 @@
   name: _th_masked_select_bool
   cname: maskedSelectBool
   cpu_bool: True
-  cuda_bool: True
   cpu_bfloat16: True
-  cuda_bfloat16: True
   variants:
     - function
+  backends:
+    - CPU
   return: argument 0
   arguments:
     - arg: THTensor* result

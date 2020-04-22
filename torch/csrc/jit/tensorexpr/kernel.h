@@ -166,8 +166,7 @@ class TensorExprKernel {
       const std::vector<VarHandle>& axes,
       const c10::VaryingShape& sizes,
       const c10::VaryingStrides& strides,
-      const c10::VaryingStrides& contiguity,
-      const std::unordered_map<int64_t, VarHandle>& sizeVars);
+      const c10::VaryingStrides& contiguity);
 
  private:
   struct ShapeArg {

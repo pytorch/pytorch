@@ -431,9 +431,19 @@ void IRPrinter::visit(const RoundOff* v) {
 
 void IRPrinter::visit(const ReduceOp* v) {
   os() << "ReduceOp(";
+  os() << *v->accumulator() << ", ";
   os() << *v->initializer() << ", ";
   os() << v->complete() << ", {";
   bool first = true;
+  for (auto* d : v->output_args()) {
+    if (!first) {
+      os() << ", ";
+    }
+    os() << *d;
+    first = false;
+  }
+  first = true;
+
   for (auto* d : v->reduce_args()) {
     if (!first) {
       os() << ", ";
