@@ -29,9 +29,9 @@ void testKernel_1() {
   auto graph = std::make_shared<Graph>();
   parseIR(graph_string, &*graph);
 
-  auto a = at::rand({5, 3}, at::kCPU);
-  auto b = at::rand({5, 3}, at::kCPU);
-  auto o = at::zeros({5, 3}, at::kCPU);
+  auto a = at::rand({5, 3}, TensorOptions(kCPU).dtype(at::kFloat));
+  auto b = at::rand({5, 3}, TensorOptions(kCPU).dtype(at::kFloat));
+  auto o = at::zeros({5, 3}, TensorOptions(kCPU).dtype(at::kFloat));
   auto ref = a * (a * b);
   TensorExprKernel k(graph);
   std::vector<at::Tensor> inputs = {a, b};
@@ -58,9 +58,10 @@ void testKernel_2() {
   auto graph = std::make_shared<Graph>();
   parseIR(graph_string, &*graph);
 
-  auto a = at::rand({5, 3}, at::kCPU);
-  auto b = at::rand({3, 5}, at::kCPU).transpose(0, 1);
-  auto o = at::zeros({5, 3}, at::kCPU);
+  auto a = at::rand({5, 3}, TensorOptions(kCPU).dtype(at::kFloat));
+  auto b =
+      at::rand({3, 5}, TensorOptions(kCPU).dtype(at::kFloat)).transpose(0, 1);
+  auto o = at::zeros({5, 3}, TensorOptions(kCPU).dtype(at::kFloat));
   auto ref = a * (a * b);
   TensorExprKernel k(graph);
   std::vector<at::Tensor> inputs = {a, b};
@@ -87,10 +88,10 @@ void testKernel_3() {
   auto graph = std::make_shared<Graph>();
   parseIR(graph_string, &*graph);
 
-  auto a = at::rand({5, 3}, at::kCPU);
-  auto b = at::rand({10, 6}, at::kCPU)
+  auto a = at::rand({5, 3}, TensorOptions(kCPU).dtype(at::kFloat));
+  auto b = at::rand({10, 6}, TensorOptions(kCPU).dtype(at::kFloat))
                .index({Slice(None, None, 2), Slice(None, None, 2)});
-  auto o = at::zeros({5, 3}, at::kCPU);
+  auto o = at::zeros({5, 3}, TensorOptions(kCPU).dtype(at::kFloat));
   auto ref = a * (a * b);
   TensorExprKernel k(graph);
   std::vector<at::Tensor> inputs = {a, b};
