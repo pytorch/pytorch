@@ -27,13 +27,13 @@ jobs:
       - name: Run clang-format
         run: |
           set -eux
-          tools/git-clang-format HEAD~ --verbose
+          tools/git-clang-format --verbose ${{ github.event.pull_request.base.sha }}
           GIT_DIFF=$(git diff)
           if [[ -z $GIT_DIFF ]]; then
             exit 0
           fi
           echo "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"
-          echo "| Use tools/git-clang-format to fix these errors     |"
+          echo "| Use tools/git-clang-format to fix this             |"
           echo "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"
           echo $GIT_DIFF
           exit 1
