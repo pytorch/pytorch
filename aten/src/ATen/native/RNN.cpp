@@ -400,22 +400,24 @@ struct QuantizedCellParamsFP16 : public CellParamsBase{
     TORCH_CHECK(false, "matmul is not supported with quantized cell params");
   }
   Tensor linear_common(const Tensor& input, const Tensor& packed_weight, const Tensor& bias) const {
+#ifdef USE_FBGEMM
     // Stupid hack because somehow we ended up with two separate
     // FBGEMM packed fp16 weight formats in the system. Remove when
     // we kill one of them.
     if (cpp_custom_type_hack::isa<fbgemm::PackedGemmMatrixFP16>(packed_weight)) {
       return at::native::fbgemm_linear_fp16_weight_fp32_activation(input, packed_weight, bias);
-    } else {
-      const auto kFuncName = "quantized::linear_dynamic_fp16";
-      const auto kOvrldName = "";
-      const std::vector<c10::IValue> output_list =
-          callOp(kFuncName, kOvrldName, input, packed_weight);
-      TORCH_INTERNAL_ASSERT(
-          output_list.size() == 1,
-          "The output vector should have exact one element");
-      const Tensor output = output_list[0].toTensor();
-      return output;
     }
+#endif // USE_FBGEMM
+
+    const auto kFuncName = "quantized::linear_dynamic_fp16";
+    const auto kOvrldName = "";
+    const std::vector<c10::IValue> output_list =
+        callOp(kFuncName, kOvrldName, input, packed_weight);
+    TORCH_INTERNAL_ASSERT(
+        output_list.size() == 1,
+        "The output vector should have exact one element");
+    const Tensor output = output_list[0].toTensor();
+    return output;
     TORCH_INTERNAL_ASSERT(false);
   }
   Tensor linear_ih(const Tensor& input) const override {
