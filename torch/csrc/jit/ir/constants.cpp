@@ -21,8 +21,9 @@ bool insertableTensor(const at::Tensor& ten) {
 // Check that TorchScript can handle inlining string.
 // TODO: support inlining any string (e.g. \x, \u, \U escapes).
 static bool isSupportedStringLiteral(const std::string& str) {
+  const auto maxASCII = 0x7fu;
   for (auto c : str) {
-    if (c > 0x7fu)
+    if (c > maxASCII)
       return false;
   }
   return true;
