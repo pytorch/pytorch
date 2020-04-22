@@ -3,6 +3,7 @@
 #include <c10/util/Exception.h>
 #include <ATen/cuda/Exceptions.h>
 #include <ATen/native/sparse/cuda/SparseCUDABlas.cuh>
+#include <c10/cuda/CUDACachingAllocator.h>
 
 #include <TH/THGeneral.h>
 
@@ -100,8 +101,8 @@ void csrmm2(
   // cusparseSpMM actually supports int64_t. 
   // In order to support int64 here, index pointers csrrowptra, csrcolinda have to be passed as int64_t. 
   TORCH_CHECK((m <= INT_MAX) && (n <= INT_MAX) && (k <= INT_MAX) && (nnz <= INT_MAX) && (ldb <= INT_MAX) && (ldc <= INT_MAX),
-    "By now, cusparseSpMM only supports m, n, k, nnz, ldb, ldc with the bound [val] <= ", INT_MAX, ".", 
-    "Please submit an issue on Github."
+    "At the moment, cusparseSpMM only supports m, n, k, nnz, ldb, ldc with the bound [val] <= ", INT_MAX, ".", 
+    "If you need this, please file an issue on GitHub."
   );
 
   int64_t ma = m, ka = k; 
@@ -157,8 +158,8 @@ void csrmm2(
     &bufferSize           /* output */
   )); 
 
-  void* externalBuffer; // device pointer
-  AT_CUDA_CHECK(cudaMalloc(&externalBuffer, bufferSize)); 
+  auto& allocator = *c10::cuda::CUDACachingAllocator::get();
+  auto dataPtr = allocator.allocate(bufferSize);
 
   TORCH_CUDASPARSE_CHECK(cusparseSpMM(
     handle, opa, opb, 
@@ -168,15 +169,12 @@ void csrmm2(
     descC, 
     cusparse_value_type,  /* data type in which the computation is executed */
     CUSPARSE_CSRMM_ALG1,  /* default computing algorithm for CSR sparse matrix format */
-    externalBuffer        /* external buffer */
+    dataPtr.get()         /* external buffer */
   )); 
 
-  AT_CUDA_CHECK(cudaFree(externalBuffer)); 
   TORCH_CUDASPARSE_CHECK(cusparseDestroySpMat(descA)); 
   TORCH_CUDASPARSE_CHECK(cusparseDestroyDnMat(descB)); 
   TORCH_CUDASPARSE_CHECK(cusparseDestroyDnMat(descC)); 
-
-  AT_CUDA_CHECK(cudaDeviceSynchronize());
 
   // TODO: Proper fix is to create real descriptor classes
 }
