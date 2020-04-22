@@ -6,25 +6,25 @@
 #include <c10/util/Exception.h>
 #include <ATen/core/DeprecatedTypeProperties.h>
 
-// Workaround for C10_UNUSED because CUDA 9.2 fails to handle unused attribute in the type aliasing context.
+// Workaround for C10_UNUSED because CUDA <= 10.0 fails to handle unused attribute in the type aliasing context.
 // Keep name long and verbose to avoid macro collisions.
-#if defined(__CUDACC__) && CUDA_VERSION <= 9200
-#define C10_UNUSED_DISPATCH_CUDA9_WORKAROUND
+#if defined(__CUDACC__) && CUDA_VERSION <= 10000
+#define C10_UNUSED_DISPATCH_CUDA_10_0_WORKAROUND
 #else
-#define C10_UNUSED_DISPATCH_CUDA9_WORKAROUND C10_UNUSED
-#endif // defined(__CUDACC__) && CUDA_VERSION <= 9200
+#define C10_UNUSED_DISPATCH_CUDA_10_0_WORKAROUND C10_UNUSED
+#endif // defined(__CUDACC__) && CUDA_VERSION <= 10000
 
 #define AT_PRIVATE_CASE_TYPE(enum_type, type, ...)              \
   case enum_type: {                                             \
-    using scalar_t C10_UNUSED_DISPATCH_CUDA9_WORKAROUND = type; \
+    using scalar_t C10_UNUSED_DISPATCH_CUDA_10_0_WORKAROUND = type; \
     return __VA_ARGS__();                                       \
   }
 
 #define AT_QINT_PRIVATE_CASE_TYPE(enum_type, type, underlying_enum, underlying_type, ...) \
   case enum_type: {                                                                       \
-    const auto& UNDERLYING_TYPE C10_UNUSED_DISPATCH_CUDA9_WORKAROUND = underlying_enum;   \
-    using scalar_t C10_UNUSED_DISPATCH_CUDA9_WORKAROUND = type;                           \
-    using underlying_t C10_UNUSED_DISPATCH_CUDA9_WORKAROUND = underlying_type;            \
+    const auto& UNDERLYING_TYPE C10_UNUSED_DISPATCH_CUDA_10_0_WORKAROUND = underlying_enum;   \
+    using scalar_t C10_UNUSED_DISPATCH_CUDA_10_0_WORKAROUND = type;                           \
+    using underlying_t C10_UNUSED_DISPATCH_CUDA_10_0_WORKAROUND = underlying_type;            \
     return __VA_ARGS__();                                                                 \
   }
 
