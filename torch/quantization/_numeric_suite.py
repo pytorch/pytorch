@@ -3,40 +3,9 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 import torch
 import torch.nn as nn
 import torch.nn.quantized as nnq
-from torch.quantization import (
-    DEFAULT_DYNAMIC_MODULE_MAPPING,
-    DEFAULT_MODULE_MAPPING,
-    DEFAULT_QAT_MODULE_MAPPING,
-    DeQuantStub,
-    RecordingObserver,
-    prepare,
-)
+from torch.quantization import prepare
 
-
-_EXCLUDE_QCONFIG_PROPAGATE_LIST = {DeQuantStub}
-_INCLUDE_QCONFIG_PROPAGATE_LIST = {nn.Sequential}
-
-
-def compute_error(x, y, error_type="l2"):
-    r"""Compute the error between two tensors.
-
-    Args:
-        x: first tensor to compare
-        y: second tensor to compare
-        error_type: type of the error to compute, can be "l2" or "snr"
-
-    Return:
-        return the error computed
-    """
-
-    Ps = torch.norm(x)
-    Pn = torch.norm(x - y)
-    if error_type == "l2":
-        return Pn / Ps
-    elif error_type == "snr":
-        return 20 * torch.log10(Ps / Pn)
-    else:
-        raise TypeError("error_type {} is not supported.".format(error_type))
+from .default_mappings import DEFAULT_NUMERIC_SUITE_COMPARE_MODEL_OUTPUT_WHITE_LIST
 
 
 def _find_match(str_list, key_str, postfix):
@@ -79,15 +48,15 @@ def compare_weights(float_dict, quantized_dict):
     return weight_dict
 
 
-def _get_observer_dict(mod, target_dict, observer_name, prefix=""):
+def get_observer_dict(mod, target_dict, observer_type, prefix=""):
     r"""Traverse the modules and save all observers into dict.
     This is mainly used for quantization accuracy debug.
     Args:
         mod: the top module we want to save all observers
         prefix: the prefix for the current module
-        observer_name: the name of observer we want to get, "logger" is used
+        observer_type: the type of observer we want to get, RecordingLogger is used
             to do the module level comparison between quantized module and its
-            matching float shadow module, and "activation_post_process" is
+            matching float shadow module, and TensorLogger is
             used to compare the module outputs between float and quantized
             models
         target_dict: the dictionary used to save all the observers
@@ -96,27 +65,35 @@ def _get_observer_dict(mod, target_dict, observer_name, prefix=""):
     def get_prefix(prefix):
         return prefix if prefix == "" else prefix + "."
 
-    if hasattr(mod, observer_name):
-        if observer_name == "logger":
-            target_dict[get_prefix(prefix) + "stats"] = mod.logger.stats
-        elif observer_name == "activation_post_process":
-            target_dict[
-                get_prefix(prefix) + "stats"
-            ] = mod.activation_post_process.tensor_val
+    for name, child in mod.named_children():
+        if isinstance(child, observer_type):
+            target_dict[get_prefix(prefix) + "stats"] = child.stats
+            break
 
     for name, child in mod.named_children():
         module_prefix = get_prefix(prefix) + name if prefix else name
-        _get_observer_dict(child, target_dict, observer_name, module_prefix)
+        get_observer_dict(child, target_dict, observer_type, module_prefix)
 
 
 class Logger(nn.Module):
-    r"""Class used in Shadow module to process the outputs of the original and
-    shadow modules.
+    r"""Base class used in Shadow module to process the outputs of the module
     """
 
     def __init__(self):
         super(Logger, self).__init__()
         self.stats = {}
+
+    def forward(self, x):
+        pass
+
+
+class RecordingLogger(Logger):
+    r"""Class used in Shadow module to record the outputs of the original and
+    shadow modules
+    """
+
+    def __init__(self):
+        super(RecordingLogger, self).__init__()
         self.stats["float"] = None
         self.stats["quantized"] = None
 
@@ -133,7 +110,7 @@ class Logger(nn.Module):
                 self.stats["quantized"] = torch.cat(
                     (self.stats["quantized"], x.dequantize().detach())
                 )
-            else:  # Output is in float for dynamic quantization
+            else:
                 self.stats["quantized"] = torch.cat(
                     (self.stats["quantized"], x.detach())
                 )
@@ -141,10 +118,31 @@ class Logger(nn.Module):
             self.stats["float"] = torch.cat((self.stats["float"], y.detach()))
 
 
+class TensorLogger(Logger):
+    r"""Class used to log the outputs of the module
+    """
+
+    def __init__(self):
+        super(TensorLogger, self).__init__()
+        self.stats["tensor_val"] = None
+
+    def forward(self, x):
+        if self.stats["tensor_val"] is None:
+            self.stats["tensor_val"] = x
+        else:
+            self.stats["tensor_val"] = torch.cat((self.stats["tensor_val"], x))
+        return x
+
+
 class Shadow(nn.Module):
     r"""Shadow module attaches the float module to its matching quantized module
     as the shadow. Then it uses Logger module to process the outputs of both
     modules to do the comparison.
+
+    Args:
+        q_module: quantized module that we want to shadow
+        float_module: float module used to shadow q_module
+        Logger: class used to process the outputs of q_module and float_module
     """
 
     def __init__(self, q_module, float_module, Logger):
@@ -161,8 +159,59 @@ class Shadow(nn.Module):
         self.logger(output, shadow_output)
         return output
 
+    def add(self, x, y):
+        # type: (Tensor, Tensor) -> Tensor
+        output = self.orig_module.add(x, y)
+        x = x.dequantize()
+        y = y.dequantize()
+        shadow_output = self.shadow_module.add(x, y)
+        self.logger(output, shadow_output)
+        return output
 
-def _prepare_model_with_stubs(float_module, q_module, module_swap_list, Logger):
+    def add_scalar(self, x, y):
+        # type: (Tensor, float) -> Tensor
+        output = self.orig_module.add_scalar(x, y)
+        x = x.dequantize()
+        shadow_output = self.shadow_module.add_scalar(x, y)
+        self.logger(output, shadow_output)
+        return output
+
+    def mul(self, x, y):
+        # type: (Tensor, Tensor) -> Tensor
+        output = self.orig_module.mul(x, y)
+        x = x.dequantize()
+        y = y.dequantize()
+        shadow_output = self.shadow_module.mul(x, y)
+        self.logger(output, shadow_output)
+        return output
+
+    def mul_scalar(self, x, y):
+        # type: (Tensor, float) -> Tensor
+        output = self.orig_module.mul_scalar(x, y)
+        x = x.dequantize()
+        shadow_output = self.shadow_module.mul_scalar(x, y)
+        self.logger(output, shadow_output)
+        return output
+
+    def cat(self, x, dim=0):
+        # type: (List[Tensor], int) -> Tensor
+        output = self.orig_module.cat(x, dim)
+        x = [y.dequantize() for y in x]
+        shadow_output = self.shadow_module.cat(x, dim)
+        self.logger(output, shadow_output)
+        return output
+
+    def add_relu(self, x, y):
+        # type: (Tensor, Tensor) -> Tensor
+        output = self.orig_module.add_relu(x, y)
+        x = x.dequantize()
+        y = y.dequantize()
+        shadow_output = self.shadow_module.add_relu(x, y)
+        self.logger(output, shadow_output)
+        return output
+
+
+def prepare_model_with_stubs(float_module, q_module, module_swap_list, Logger):
     r"""Prepare the model by attaching the float module to its matching quantized
     module as the shadow if the float module type is in module_swap_list.
 
@@ -186,7 +235,7 @@ def _prepare_model_with_stubs(float_module, q_module, module_swap_list, Logger):
         float_mod = float_module_children[name]
 
         if type(float_mod) not in module_swap_list:
-            _prepare_model_with_stubs(float_mod, mod, module_swap_list, Logger)
+            prepare_model_with_stubs(float_mod, mod, module_swap_list, Logger)
 
         if type(float_mod) in module_swap_list:
             reassign[name] = Shadow(mod, float_mod, Logger)
@@ -195,7 +244,9 @@ def _prepare_model_with_stubs(float_module, q_module, module_swap_list, Logger):
         q_module._modules[key] = value
 
 
-def compare_model_stub(float_model, q_model, module_swap_list, data, Logger=Logger):
+def compare_model_stub(
+    float_model, q_model, module_swap_list, data, Logger=RecordingLogger
+):
     r"""Returns a dict with key corresponding to module names and each entry being
     a dictionary with two keys 'float' and 'quantized', containing the output
     tensors of quantized and its matching float shadow module. This dict can be
@@ -209,14 +260,14 @@ def compare_model_stub(float_model, q_model, module_swap_list, data, Logger=Logg
         Logger: the class to be used in shadow module to process the outputs of
             quantized module and its float shadow module
     """
-    _prepare_model_with_stubs(float_model, q_model, module_swap_list, Logger)
+    prepare_model_with_stubs(float_model, q_model, module_swap_list, Logger)
     q_model(data)
     ob_dict = {}
-    _get_observer_dict(q_model, ob_dict, "logger")
+    get_observer_dict(q_model, ob_dict, Logger)
     return ob_dict
 
 
-def _get_matching_activations(float_dict, quantized_dict):
+def get_matching_activations(float_module, q_module, Logger):
     r"""Find the matching activation between float and quantized dict.
 
     Args:
@@ -228,25 +279,69 @@ def _get_matching_activations(float_dict, quantized_dict):
         entry being a dictionary with two keys 'float' and 'quantized', containing
         the matching float and quantized activations
     """
+    float_dict = {}
+    quantized_dict = {}
+    get_observer_dict(q_module, quantized_dict, Logger)
+    get_observer_dict(float_module, float_dict, Logger)
     act_dict = {}
     for key in quantized_dict:
         match_key = _find_match(sorted(float_dict, reverse=True), key, "stats")
         if match_key is not None:
             act_dict[key] = {}
-            act_dict[key]["float"] = float_dict[match_key]
-            act_dict[key]["quantized"] = quantized_dict[key]
+            act_dict[key]["float"] = float_dict[match_key]["tensor_val"]
+            act_dict[key]["quantized"] = quantized_dict[key]["tensor_val"]
     return act_dict
 
 
-def compare_model_outputs(float_model, q_model, data, white_list=None):
+def remove_qconfig(module):
+    r"""Clean up the qconfig left in the module so that new qconfig can be
+    propagated.
+
+    Args:
+        module: module to be cleaned up
+    """
+    for child in module.children():
+        remove_qconfig(child)
+
+    if hasattr(module, "qconfig"):
+        del module.qconfig
+
+
+def prepare_model_outputs(float_module, q_module, white_list, Logger):
+    r"""Prepare the model by attaching the tensor logger to both float module
+    and quantized module if they are in the white_list.
+
+    Args:
+        float_module: the float module
+        q_module: the quantized module
+        white_list: list of module types to attach tensor logger
+    """
+    if white_list is None:
+        white_list = DEFAULT_NUMERIC_SUITE_COMPARE_MODEL_OUTPUT_WHITE_LIST
+    print("dict of float model:", float_module.__dict__)
+    print("dict of q model:", q_module.__dict__)
+    remove_qconfig(float_module)
+    remove_qconfig(q_module)
+    print("after remove qconfig, dict of float model:", float_module.__dict__)
+    print("after remove qconfig, dict of q model:", q_module.__dict__)
+    qconfig_debug = torch.quantization.QConfig(activation=Logger, weight=None)
+    float_module.qconfig = qconfig_debug
+    prepare(float_module, inplace=True, white_list=white_list)
+    q_module.qconfig = qconfig_debug
+    prepare(q_module, inplace=True, white_list=white_list)
+
+
+def compare_model_outputs(
+    float_model, q_model, data, white_list=None, Logger=TensorLogger
+):
     r"""Returns a dict with key corresponding to quantized module names and each
     entry being a dictionary with two keys 'float' and 'quantized', containing
     the activations of quantized model and float model at matching locations. This
     dict can be used to compare and compute the propagation quantization error.
 
     Args:
-        float_module: the float module used to generate the q_module
-        q_module: the quantized module
+        float_model: the float module used to generate the q_model
+        q_model: the quantized module
         data: input data
         white_list: list of modules want to compare
 
@@ -255,29 +350,8 @@ def compare_model_outputs(float_model, q_model, data, white_list=None):
         and each entry being a dictionary with two keys 'float' and 'quantized',
         containing the matching float and quantized activations
     """
-    if white_list is None:
-        white_list = (
-            set(DEFAULT_MODULE_MAPPING.values())
-            | set(DEFAULT_QAT_MODULE_MAPPING.values())
-            | set(DEFAULT_DYNAMIC_MODULE_MAPPING.values())
-            | set(DEFAULT_MODULE_MAPPING.keys())
-            | set(DEFAULT_QAT_MODULE_MAPPING.keys())
-            | set(DEFAULT_DYNAMIC_MODULE_MAPPING.keys())
-            | _INCLUDE_QCONFIG_PROPAGATE_LIST
-        ) - _EXCLUDE_QCONFIG_PROPAGATE_LIST
-
-    qconfig_debug = torch.quantization.QConfig(
-        activation=RecordingObserver, weight=None
-    )
-    float_model.qconfig = qconfig_debug
-    prepare(float_model, inplace=True)
-    q_model.qconfig = qconfig_debug
-    prepare(q_model, inplace=True, white_list=white_list)
+    prepare_model_outputs(float_model, q_model, white_list, Logger)
     float_model(data)
     q_model(data)
-    float_ob_dict = {}
-    qtz_ob_dict = {}
-    _get_observer_dict(q_model, qtz_ob_dict, "activation_post_process")
-    _get_observer_dict(float_model, float_ob_dict, "activation_post_process")
-    act_compare_dict = _get_matching_activations(float_ob_dict, qtz_ob_dict)
+    act_compare_dict = get_matching_activations(float_model, q_model, Logger)
     return act_compare_dict

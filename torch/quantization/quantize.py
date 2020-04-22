@@ -86,7 +86,7 @@ def add_observer_(module):
         None, module is modified inplace with added observer modules and forward_hooks
     """
     for child in module.children():
-        if type(child) == nnq.FloatFunctional:
+        if type(child) == nnq.FloatFunctional or type(child) == nnq.QFunctional:
             if hasattr(child, 'qconfig') and child.qconfig is not None:
                 child.activation_post_process = child.qconfig.activation()
         else:
