@@ -47,17 +47,20 @@ Int* getPredicate(const TensorView* const pred_tv, std::vector<Val*> indices) {
     if (!pred->isOneInt())
       preds.push_back(pred);
 
-  if(preds.size() == 0)
+  if (preds.size() == 0)
     return new Int(1);
 
   Val* cond = preds[0];
-  
-  for (decltype(preds.size()) i{1}; i < preds.size(); i++){
+
+  for (decltype(preds.size()) i{1}; i < preds.size(); i++) {
     cond = andOp(cond, preds[i]);
   }
 
-  TORCH_INTERNAL_ASSERT(cond->getValType().value() == ValType::Scalar && cond->getDataType().value() == DataType::Int,
-  "Error computing predicate, should be returning an Int, but returning ", cond);
+  TORCH_INTERNAL_ASSERT(
+      cond->getValType().value() == ValType::Scalar &&
+          cond->getDataType().value() == DataType::Int,
+      "Error computing predicate, should be returning an Int, but returning ",
+      cond);
 
   return static_cast<Int*>(cond);
 }
@@ -100,9 +103,11 @@ void UnrollPass::handle(ForLoop* fl) {
       unroll_pred_inds.push_back((*it)->index());
       it++;
     }
-    
-    TORCH_INTERNAL_ASSERT(it != for_loops.end(), "Error unrolling loops, expected an unrolled loop but wasn't found.");
-  
+
+    TORCH_INTERNAL_ASSERT(
+        it != for_loops.end(),
+        "Error unrolling loops, expected an unrolled loop but wasn't found.");
+
     // This is the outer most loop that needs to be unrolled
     ForLoop* first_unroll = *it;
 
@@ -157,7 +162,8 @@ void UnrollPass::handle(ForLoop* fl) {
     } // for expr
   } else { //  if(!within_unroll)
     // modify in place, so grab a copy of exprs first.
-    std::vector<Expr*> exprs(fl->body().exprs().begin(), fl->body().exprs().end());
+    std::vector<Expr*> exprs(
+        fl->body().exprs().begin(), fl->body().exprs().end());
     for (auto expr : exprs) {
       if (!ir_utils::isTVOp(expr))
         continue;
@@ -174,7 +180,7 @@ void UnrollPass::handle(ForLoop* fl) {
       }
     }
   } // else (if(!within_unroll))
-  
+
   for_loops.pop_back();
   within_unroll = prev_unroll;
 }

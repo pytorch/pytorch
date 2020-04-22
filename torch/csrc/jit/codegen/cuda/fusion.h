@@ -80,7 +80,6 @@ struct ExprSort : public IterVisitor {
       bool breadth_first);
 };
 
-
 struct InputsOf : public IterVisitor {
   using IterVisitor::handle;
 

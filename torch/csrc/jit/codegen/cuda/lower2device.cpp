@@ -433,29 +433,28 @@ void validate(Fusion* fusion) {
               ".");
       }
     } // if ir_utils::isTV
-  } // for(Val* val : fusion->vals()) 
+  } // for(Val* val : fusion->vals())
 } // validate
 
 // Remove circular computeAt references
-void fixComputeAt(Fusion* fusion){
+void fixComputeAt(Fusion* fusion) {
   FusionGuard fg(fusion);
 
   std::vector<Expr*> exprs = fusion->exprs(true);
   std::set<TensorView*> visited;
-  for(auto it = exprs.rbegin(); it != exprs.rend(); it++){
+  for (auto it = exprs.rbegin(); it != exprs.rend(); it++) {
     Expr* expr = *it;
-    if(!ir_utils::isTVOp(expr))
+    if (!ir_utils::isTVOp(expr))
       continue;
-    
+
     TensorView* tv = ir_utils::asTV(expr->output(0));
     TensorView* ctv = tv->getComputeAtView();
 
-    if(ctv != nullptr && visited.find(ctv) == visited.end()){
+    if (ctv != nullptr && visited.find(ctv) == visited.end()) {
       ctv->computeAt(tv, ctv->getComputeAtAxis());
       tv->clearComputeAt();
     }
     visited.emplace(tv);
-    
   }
 }
 

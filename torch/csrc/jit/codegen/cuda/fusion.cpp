@@ -34,12 +34,10 @@ std::vector<Expr*> ExprSort::getExprs(
   return es.exprs;
 }
 
-
 std::vector<Statement*> InputsOf::next(Val* v) {
   if (FusionGuard::getCurFusion()->origin(v) == nullptr)
     inputs.emplace(v);
   return IterVisitor::next(v);
-    
 }
 
 std::set<Val*> InputsOf::output(Fusion* fusion, Val* output_) {
@@ -166,7 +164,7 @@ std::set<Val*> Fusion::inputsOf(Val* val) {
 
 void Fusion::validateInputs() {
   std::set<Val*> all_inputs;
-  for(Val* out : outputs()){
+  for (Val* out : outputs()) {
     auto outs_inputs = inputsOf(out);
     std::set_union(
         all_inputs.begin(),
@@ -175,10 +173,13 @@ void Fusion::validateInputs() {
         outs_inputs.end(),
         std::inserter(all_inputs, all_inputs.begin()));
   }
-  for(Val* inp : all_inputs){
-    if(!inp->isConstScalar())
-      TORCH_CHECK(hasInput(inp),
-      "Could not figure out how ", inp, " is generated, however it was not specified as an input.");
+  for (Val* inp : all_inputs) {
+    if (!inp->isConstScalar())
+      TORCH_CHECK(
+          hasInput(inp),
+          "Could not figure out how ",
+          inp,
+          " is generated, however it was not specified as an input.");
   }
 }
 
