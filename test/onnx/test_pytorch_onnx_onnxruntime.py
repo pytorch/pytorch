@@ -15,8 +15,8 @@ import copy
 from torch.nn.utils import rnn as rnn_utils
 from model_defs.lstm_flattening_result import LstmFlatteningResult
 from model_defs.rnn_model_with_packed_sequence import RnnModelWithPackedSequence
-from test_pytorch_common import (skipIfUnsupportedMinOpsetVersion, enableScriptTest, skipIfUnsupportedOpsetVersion,
-                                 skipIfNoLapack)
+from test_pytorch_common import (skipIfUnsupportedMinOpsetVersion, enableScriptTest, 
+                                 skipIfUnsupportedOpsetVersion, skipIfNoLapack)
 from test_pytorch_common import BATCH_SIZE
 from test_pytorch_common import RNN_BATCH_SIZE, RNN_SEQUENCE_LENGTH, RNN_INPUT_SIZE, RNN_HIDDEN_SIZE
 import model_defs.word_language_model as word_language_model
@@ -1519,17 +1519,6 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.arange(1., 6., requires_grad=True)
         k = torch.tensor(3)
         self.run_test(MyModule(), (x, k))
-
-    def test_nms(self):
-        class Module(torch.jit.ScriptModule):
-            @torch.jit.script_method
-            def forward(self, boxes, scores):
-                return torchvision.ops.nms(boxes, scores, 0.5)
-
-        boxes = torch.rand(5, 4)
-        boxes[:, 2:] += torch.rand(5, 2)
-        scores = torch.randn(5)
-        self.run_test(Module(), (boxes, scores))
 
     @skipIfUnsupportedMinOpsetVersion(10)
     def test_topk_script(self):
