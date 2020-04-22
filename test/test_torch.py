@@ -12306,7 +12306,7 @@ class TestTorchDeviceType(TestCase):
                   # This test is disabled on CUDA 9, due to:
                   # See: https://github.com/pytorch/pytorch/issues/31006
                   ((torch.half,) if torch.version.cuda and float(torch.version.cuda) >= 10.0 else ()))
-    @dtypes(*(set(torch.testing.get_all_dtypes()) - {torch.half, torch.bool}))
+    @dtypes(*(set(torch.testing.get_all_dtypes()) - {torch.half, torch.bool, torch.complex64, torch.complex128}))
     def test_blas_alpha_beta_empty(self, device, dtype):
         if dtype is torch.bfloat16 and self.device_type == 'xla':
             # TODO (@zasdfgbnm): this causes the following error on test
