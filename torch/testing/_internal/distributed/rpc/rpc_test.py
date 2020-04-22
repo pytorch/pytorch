@@ -370,6 +370,110 @@ class RpcTest(RpcAgentTestFixture):
         dst = worker_name((self.rank + 1) % self.world_size)
         self._test_self_remote_rref_as_remote_arg(dst)
 
+    def _test_rref_proxy_tensor(self, dst):
+        rref = rpc.remote(dst, my_function, args=(torch.ones(2, 2), 1, 3))
+
+        expected = torch.ones(2, 2) + 1 + 3
+        self.assertEqual(expected.size(), rref.rpc_sync().size())
+        self.assertEqual(expected + 1, rref.rpc_async().add(1).wait())
+        self.assertEqual(expected.view(1, 4), rref.remote().view(1, 4).to_here())
+
+    @dist_init
+    def test_rref_proxy_tensor(self):
+        self._test_rref_proxy_tensor(worker_name((self.rank + 1) % self.world_size))
+
+    @dist_init
+    def test_rref_proxy_tensor_self(self):
+        self._test_rref_proxy_tensor(rpc.get_worker_info())
+
+    @dist_init
+    def test_rref_proxy_reuse(self):
+        rref = rpc.remote(
+            worker_name((self.rank + 1) % self.world_size), 
+            my_function, 
+            args=(torch.ones(2, 2), 1, 3)
+        )
+        expected = torch.ones(2, 2) + 1 + 3
+
+        proxy_rpc_sync = rref.rpc_sync()
+        proxy_rpc_async = rref.rpc_async()
+        proxy_remote = rref.remote()
+
+        self.assertEqual(expected.size(), proxy_rpc_sync.size())
+        self.assertEqual(expected + 1, proxy_rpc_sync.add(1))
+        self.assertEqual(expected.view(1, 4), proxy_rpc_sync.view(1, 4))
+
+        self.assertEqual(expected.size(), proxy_rpc_async.size().wait())
+        self.assertEqual(expected + 3, proxy_rpc_async.add(3).wait())
+        self.assertEqual(expected.view(4, 1), proxy_rpc_async.view(4, 1).wait())
+
+        self.assertEqual(expected.size(), proxy_remote.size().to_here())
+        self.assertEqual(expected + 5, proxy_remote.add(5).to_here())
+        self.assertEqual(expected.view(-1), proxy_remote.view(-1).to_here())
+
+    def _test_rref_proxy_class(self, dst):
+        rref = rpc.remote(dst, MyClass, args=(7,))
+        expected = MyClass(7)
+        self.assertEqual(expected.get_value(), rref.rpc_sync().get_value())
+        self.assertEqual(expected.get_value(), rref.rpc_async().get_value().wait())
+        self.assertEqual(expected.get_value(), rref.remote().get_value().to_here())
+
+        expected.increment_value(3)
+        self.assertEqual(None, rref.rpc_sync().increment_value(1))
+        self.assertEqual(None, rref.rpc_async().increment_value(1).wait())
+        self.assertEqual(None, rref.remote().increment_value(1).to_here())
+
+        self.assertEqual(expected.get_value(), rref.rpc_sync().get_value())
+        self.assertEqual(expected.get_value(), rref.rpc_async().get_value().wait())
+        self.assertEqual(expected.get_value(), rref.remote().get_value().to_here())
+
+        self.assertEqual(
+            expected.my_instance_method(2), 
+            rref.rpc_sync().my_instance_method(2)
+        )
+        self.assertEqual(
+            expected.my_instance_method(3), 
+            rref.rpc_async().my_instance_method(3).wait()
+        )
+        self.assertEqual(
+            expected.my_instance_method(4), 
+            rref.remote().my_instance_method(4).to_here()
+        )
+
+        self.assertEqual(
+            expected.my_static_method(9), 
+            rref.rpc_sync().my_static_method(9)
+        )
+        self.assertEqual(
+            expected.my_static_method(10), 
+            rref.rpc_async().my_static_method(10).wait()
+        )
+        self.assertEqual(
+            expected.my_static_method(11), 
+            rref.remote().my_static_method(11).to_here()
+        )
+
+        self.assertEqual(
+            expected.my_class_method(2, torch.zeros(2, 2)), 
+            rref.rpc_sync().my_class_method(2, torch.zeros(2, 2))
+        )
+        self.assertEqual(
+            expected.my_class_method(2, torch.ones(3, 3)), 
+            rref.rpc_async().my_class_method(2, torch.ones(3, 3)).wait()
+        )
+        self.assertEqual(
+            expected.my_class_method(2, torch.ones(4, 4)), 
+            rref.remote().my_class_method(2, torch.ones(4, 4)).to_here()
+        )
+
+    @dist_init
+    def test_rref_proxy_class(self):
+        self._test_rref_proxy_class(worker_name((self.rank + 1) % self.world_size))
+
+    @dist_init
+    def test_rref_proxy_class_self(self):
+        self._test_rref_proxy_class(rpc.get_worker_info())
+
     @dist_init
     def test_self_remote_rref_as_self_remote_arg(self):
         self._test_self_remote_rref_as_remote_arg(rpc.get_worker_info())
