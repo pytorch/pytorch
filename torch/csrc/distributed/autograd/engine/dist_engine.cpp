@@ -248,7 +248,7 @@ void DistEngine::computeDependencies(
   autogradContext->setGraphTask(std::move(graphTask));
 }
 
-std::shared_ptr<FutureVariableList> DistEngine::execute_graph_task_until_ready_queue_empty(
+std::shared_ptr<FutureVariableList>& DistEngine::execute_graph_task_until_ready_queue_empty(
     const std::shared_ptr<GraphTask>& graph_task,
     std::shared_ptr<Node> root_to_execute,
     bool incrementOutstandingTasks) {
@@ -308,9 +308,9 @@ std::shared_ptr<rpc::FutureMessage> DistEngine::runEngineAndAccumulateGradients(
   // passes ran into errors.
   autogradContext->clearOutstandingRpcs();
 
-  auto graphTask = autogradContext->retrieveGraphTask();
-  auto futureGrads = execute_graph_task_until_ready_queue_empty(
-      /*graph_task*/ graphTask,
+  // Use a reference here to avoid refcount bump on futureGrads.
+  auto& futureGrads = execute_graph_task_until_ready_queue_empty(
+      /*graph_task*/ autogradContext->retrieveGraphTask(),
       /*root_to_execute*/ graphRoot,
       /*incrementOutstandingTasks*/ incrementOutstandingTasks);
 

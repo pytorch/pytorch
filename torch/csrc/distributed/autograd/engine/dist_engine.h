@@ -109,10 +109,14 @@ class TORCH_API DistEngine {
   //
   // XXX: calling this function assumes that we will have NO GPU nodetasks be executed
   // for the graph_task, the caller of this function need to ensure this otherwise
-  // there will be non deterministic behaviors. A correct way to fix this is to
-  // re-design the autograd engine so that GPU worker thread to behave the same as CPU
-  // caller thread, record the operation/thread for the device, and reuse it in backward.
- std::shared_ptr<torch::autograd::FutureVariableList> execute_graph_task_until_ready_queue_empty(
+  // there will be undefined behaviors. A correct way to fix this is to re-design
+  // the autograd engine so that GPU worker thread to behave the same as CPU caller
+  // thread, record the operation/thread for the device, and reuse it in backward.
+  //
+  // NB: We should return a reference here to avoid any reference count bumps for
+  // future_result_ (since we have specific asserts for this to ensure AccumulateGrad
+  // correctness with the grads passed in)
+ std::shared_ptr<torch::autograd::FutureVariableList>& execute_graph_task_until_ready_queue_empty(
      const std::shared_ptr<torch::autograd::GraphTask>& graph_task,
      std::shared_ptr<torch::autograd::Node> root_to_execute,
      bool incrementOutstandingTasks=true);
