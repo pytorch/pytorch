@@ -8,7 +8,6 @@ from collections import OrderedDict
 
 import torch
 from torch.testing import FileCheck
-from torch._six import PY2
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
@@ -1256,10 +1255,7 @@ class TestDict(JitTestCase):
         self.assertEqual(len(eager_out[1]), len(script_out[1]))
 
         # Check that the item is the correct types
-        if PY2:
-            self.assertTrue(isinstance(script_out[0][0], unicode))
-        else:
-            self.assertTrue(isinstance(script_out[0][0], str))
+        self.assertTrue(isinstance(script_out[0][0], str))
         self.assertTrue(isinstance(script_out[0][1], torch.Tensor))
 
     def test_clear(self):

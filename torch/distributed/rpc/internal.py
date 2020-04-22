@@ -31,12 +31,8 @@ class _InternalRPCPickler:
     """
 
     def __init__(self):
-        # python2 does not have dispatch_table, add "if torch._six.PY3" condition,
-        # as _InternalRPCPickler still got build in python2 even
-        # we skipped python 2 tests for rpc_test
-        if torch._six.PY3:
-            self._dispatch_table = copyreg.dispatch_table.copy()
-            self._dispatch_table[torch.Tensor] = self._tensor_reducer
+        self._dispatch_table = copyreg.dispatch_table.copy()
+        self._dispatch_table[torch.Tensor] = self._tensor_reducer
 
     @classmethod
     def _tensor_receiver(cls, tensor_index):

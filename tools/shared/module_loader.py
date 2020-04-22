@@ -8,9 +8,6 @@ def import_module(name, path):
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
         return module
-    elif sys.version_info >= (3, 0):
+    else:
         from importlib.machinery import SourceFileLoader
         return SourceFileLoader(name, path).load_module()
-    else:
-        import imp
-        return imp.load_source(name, path)
