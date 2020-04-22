@@ -1,5 +1,10 @@
 #include <torch/csrc/autograd/profiler.h>
+#include <torch/csrc/autograd/function.h>
 #include <torch/csrc/jit/frontend/code_template.h>
+
+#include <torch/csrc/jit/runtime/operator.h>
+
+#include <ATen/core/op_registration/op_registration.h>
 
 #include <fstream>
 #include <list>
@@ -236,6 +241,7 @@ void enableProfiler(const ProfilerConfig& new_config, bool emit_start) {
       },
       /* needs_inputs */ config.report_input_shapes,
       /* scopes */ {RecordScope::FUNCTION, RecordScope::USER_SCOPE});
+  c10::impl::tls_set_dispatch_key_included(c10::DispatchKey::Profiler, true);
 
   if (emit_start) {
     if (config.state == ProfilerState::CUDA) {
@@ -270,6 +276,8 @@ thread_event_lists disableProfiler(bool consolidate_results) {
 
   ProfilerState old_state = config.state;
   popCallback();
+
+  c10::impl::tls_set_dispatch_key_included(c10::DispatchKey::Profiler, false);
   config = ProfilerConfig{ProfilerState::Disabled, false};
   if (!consolidate_results || old_state == ProfilerState::NVTX) {
     return thread_event_lists();
