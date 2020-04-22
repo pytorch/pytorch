@@ -48,7 +48,7 @@ enum class UnaryOpType {
   Asin,
   Atan,
   Atanh,
-  Cast,
+  //Cast,
   Ceil,
   Cos,
   Cosh,

@@ -79,7 +79,7 @@ static _enum_unordered_map<UnaryOpType, std::string> unary_op_type_string_map{
     {UnaryOpType::Asin,       "asinf"},
     {UnaryOpType::Atan,       "atanf"},
     {UnaryOpType::Atanh,      "atanhf"},
-    {UnaryOpType::Cast,       "cast"},
+    //{UnaryOpType::Cast,       "cast"},
     {UnaryOpType::Ceil,       "ceilf"},
     {UnaryOpType::Cos,        "cosf"},
     {UnaryOpType::Cosh,       "coshf"},
