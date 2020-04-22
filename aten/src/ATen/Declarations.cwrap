@@ -384,20 +384,6 @@
     - THTensor* self
 ]]
 [[
-  name: _th_cosh
-  cname: cosh
-  types:
-    - floating_point
-  backends:
-    - CUDA
-  variants: function
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - THTensor* self
-]]
-[[
   name: _th_tan
   cname: tan
   types:

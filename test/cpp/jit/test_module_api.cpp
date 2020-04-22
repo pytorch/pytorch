@@ -100,12 +100,15 @@ void testModuleParameter() {
 void testModuleDeepcopy() {
   auto cu = std::make_shared<CompilationUnit>();
   auto cls = ClassType::create("foo.bar", cu, true);
+  auto str_attr = "str_attr";
   auto int_attr = "int_attr";
   auto tensor_attr = "tensor_attr";
   cls->addAttribute(int_attr, IntType::get());
+  cls->addAttribute(str_attr, StringType::get());
   cls->addAttribute(tensor_attr, TensorType::get());
   Module m(cu, cls);
   m.setattr(int_attr, IValue(2));
+  m.setattr(str_attr, IValue("str"));
   m.setattr(tensor_attr, at::randn(5));
 
   Module m2 = m.deepcopy();
@@ -113,6 +116,9 @@ void testModuleDeepcopy() {
   // Make sure copy works
   ASSERT_EQ(m2.attr(int_attr).toInt(), 2);
   ASSERT_EQ(m3.attr(int_attr).toInt(), 2);
+
+  // Test overlaps
+  ASSERT_TRUE(!IValue(m2._ivalue()).overlaps(IValue(m._ivalue())));
 
   // Both deepcopy and clone_instance will preserve the type
   ASSERT_EQ(m.type(), m2.type());

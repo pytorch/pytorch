@@ -134,30 +134,13 @@ struct cpu_scatter_gather_base_kernel {
       gather_shape_check(self, dim, index);
     }
 
-    auto index_sizes = ensure_nonempty_vec(index.sizes().vec());
-    auto index_strides = ensure_nonempty_vec(index.strides().vec());
-
-    // `dim` is traversed in the kernel,
-    // that is why index.stride(dim) = 0 and index.size(dim) = 1.
-    // Also, index.size(dim) = 1 makes sure that TensorIterator.DimCounter
-    // has the following form : (i_1,..., i_{dim-1}, 0, i_{dim+1},...,i_n).
-    index_sizes[dim] = 1;
-    index_strides[dim] = 0;
-
-    // set self.shape = src.shape = index.shape,
-    // this defines the number of elements to iterate over,
-    // and set self.stride(dim) = src.stride(dim) = 0,
-    // because `dim` is traversed in the kernel.
-    auto self_restrided = restride_dim(self, dim, index_sizes);
-    auto index_restrided = index.as_strided(index_sizes, index_strides);
-    auto src_restrided = restride_dim(src, dim, index_sizes);
-
     auto iter = TensorIterator();
     iter.dont_compute_common_dtype();
     iter.dont_resize_outputs();
-    iter.add_output(self_restrided);
-    iter.add_input(src_restrided, src.device(), src.scalar_type());
-    iter.add_input(index_restrided);
+    iter.declare_static_shape(index.sizes(), /*squash_dim=*/dim);
+    iter.add_output(self);
+    iter.add_input(src, src.device(), src.scalar_type());
+    iter.add_input(index);
     iter.build();
 
     auto self_dim_stride = ensure_nonempty_stride(self, dim);
