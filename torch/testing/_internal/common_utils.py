@@ -30,10 +30,7 @@ from copy import deepcopy
 from numbers import Number
 import tempfile
 import json
-if sys.version_info[0] == 2:
-    from urllib2 import urlopen  # noqa f811
-else:
-    from urllib.request import urlopen
+from urllib.request import urlopen
 
 import __main__
 import errno
@@ -208,11 +205,7 @@ def run_tests(argv=UNITTEST_ARGS):
                 test_source = 'python-unittest'
 
             test_report_path = os.path.join('test-reports', test_source)
-            if PY3:
-                os.makedirs(test_report_path, exist_ok=True)
-            else:
-                if not os.path.exists(test_report_path):
-                    os.makedirs(test_report_path)
+            os.makedirs(test_report_path, exist_ok=True)
             verbose = '--verbose' in argv or '-v' in argv
             if verbose:
                 print('Test results will be stored in {}'.format(test_report_path))
@@ -250,14 +243,7 @@ def _check_module_exists(name):
     our tests, e.g., setting multiprocessing start method when imported
     (see librosa/#747, torchvision/#544).
     """
-    if not PY3:  # Python 2
-        import imp
-        try:
-            imp.find_module(name)
-            return True
-        except ImportError:
-            return False
-    elif not PY34:  # Python [3, 3.4)
+    if not PY34:  # Python [3, 3.4)
         import importlib
         loader = importlib.find_loader(name)
         return loader is not None
@@ -272,16 +258,12 @@ TEST_SCIPY = _check_module_exists('scipy')
 TEST_MKL = torch.backends.mkl.is_available()
 TEST_NUMBA = _check_module_exists('numba')
 
-# Skip the test until issue #28313 gets fixed on Py2.
-TEST_DILL = _check_module_exists('dill') and PY3
+TEST_DILL = _check_module_exists('dill')
 
-# On Py2, importing librosa 0.6.1 triggers a TypeError (if using newest joblib)
-# see librosa/librosa#729.
-# TODO: allow Py2 when librosa 0.6.2 releases
-TEST_LIBROSA = _check_module_exists('librosa') and PY3
+TEST_LIBROSA = _check_module_exists('librosa')
 
 # Python 2.7 doesn't have spawn
-NO_MULTIPROCESSING_SPAWN = os.environ.get('NO_MULTIPROCESSING_SPAWN', '0') == '1' or sys.version_info[0] == 2
+NO_MULTIPROCESSING_SPAWN = os.environ.get('NO_MULTIPROCESSING_SPAWN', '0') == '1'
 TEST_WITH_ASAN = os.getenv('PYTORCH_TEST_WITH_ASAN', '0') == '1'
 TEST_WITH_TSAN = os.getenv('PYTORCH_TEST_WITH_TSAN', '0') == '1'
 TEST_WITH_UBSAN = os.getenv('PYTORCH_TEST_WITH_UBSAN', '0') == '1'
@@ -466,10 +448,7 @@ def to_gpu(obj, type_map=None):
 
 
 def get_function_arglist(func):
-    if sys.version_info > (3,):
-        return inspect.getfullargspec(func).args
-    else:
-        return inspect.getargspec(func).args
+    return inspect.getfullargspec(func).args
 
 
 def set_rng_seed(seed):
@@ -668,7 +647,7 @@ class TestCase(expecttest.TestCase):
     exact_dtype = False
 
     def __init__(self, method_name='runTest'):
-        super(TestCase, self).__init__(method_name)
+        super().__init__(method_name)
 
         test_method = getattr(self, method_name)
         # Wraps the tested method if we should do CUDA memory check.
@@ -878,7 +857,7 @@ class TestCase(expecttest.TestCase):
                              allow_inf=allow_inf, exact_dtype=exact_dtype)
         elif isinstance(x, torch.Tensor) and isinstance(y, torch.Tensor):
             def assertTensorsEqual(a, b):
-                super(TestCase, self).assertEqual(a.size(), b.size(), message)
+                super(__class__, self).assertEqual(a.size(), b.size(), message)
                 if exact_dtype:
                     self.assertEqual(a.dtype, b.dtype)
                 if a.numel() > 0:
@@ -916,8 +895,8 @@ class TestCase(expecttest.TestCase):
                             max_err = diff.max()
                             self.assertLessEqual(max_err, atol, message)
 
-            super(TestCase, self).assertEqual(x.is_sparse, y.is_sparse, message)
-            super(TestCase, self).assertEqual(x.is_quantized, y.is_quantized, message)
+            super().assertEqual(x.is_sparse, y.is_sparse, message)
+            super().assertEqual(x.is_quantized, y.is_quantized, message)
             if x.is_sparse:
                 x = self.safeCoalesce(x)
                 y = self.safeCoalesce(y)
@@ -947,9 +926,9 @@ class TestCase(expecttest.TestCase):
             else:
                 assertTensorsEqual(x, y)
         elif isinstance(x, string_classes) and isinstance(y, string_classes):
-            super(TestCase, self).assertEqual(x, y, message)
+            super().assertEqual(x, y, message)
         elif type(x) == set and type(y) == set:
-            super(TestCase, self).assertEqual(x, y, message)
+            super().assertEqual(x, y, message)
         elif isinstance(x, dict) and isinstance(y, dict):
             if isinstance(x, OrderedDict) and isinstance(y, OrderedDict):
                 self.assertEqual(x.items(), y.items(), atol=atol, rtol=rtol,
@@ -963,22 +942,22 @@ class TestCase(expecttest.TestCase):
                                  atol=atol, rtol=rtol, message=message,
                                  allow_inf=allow_inf, exact_dtype=exact_dtype)
         elif is_iterable(x) and is_iterable(y):
-            super(TestCase, self).assertEqual(len(x), len(y), message)
+            super().assertEqual(len(x), len(y), message)
             for x_, y_ in zip(x, y):
                 self.assertEqual(x_, y_, atol=atol, rtol=rtol, message=message,
                                  allow_inf=allow_inf, exact_dtype=exact_dtype)
         elif isinstance(x, bool) and isinstance(y, bool):
-            super(TestCase, self).assertEqual(x, y, message)
+            super().assertEqual(x, y, message)
         elif isinstance(x, Number) and isinstance(y, Number):
             if abs(x) == inf or abs(y) == inf:
                 if allow_inf:
-                    super(TestCase, self).assertEqual(x, y, message)
+                    super().assertEqual(x, y, message)
                 else:
                     self.fail("Expected finite numeric values - x={}, y={}".format(x, y))
                 return
-            super(TestCase, self).assertLessEqual(abs(x - y), atol, message)
+            super().assertLessEqual(abs(x - y), atol, message)
         else:
-            super(TestCase, self).assertEqual(x, y, message)
+            super().assertEqual(x, y, message)
 
     def assertAlmostEqual(self, x, y, places=None, msg='', delta=None, allow_inf=None):
         prec = delta
@@ -994,7 +973,7 @@ class TestCase(expecttest.TestCase):
 
         if isinstance(x, torch.Tensor) and isinstance(y, torch.Tensor):
             if x.size() != y.size():
-                super(TestCase, self).assertNotEqual(x.size(), y.size())
+                super().assertNotEqual(x.size(), y.size())
             self.assertGreater(x.numel(), 0)
             y = y.type_as(x)
             y = y.cuda(device=x.get_device()) if x.is_cuda else y.cpu()
@@ -1009,16 +988,16 @@ class TestCase(expecttest.TestCase):
                 max_err = diff.max().item()
                 self.assertGreater(max_err, atol, message)
         elif type(x) == str and type(y) == str:
-            super(TestCase, self).assertNotEqual(x, y)
+            super().assertNotEqual(x, y)
         elif is_iterable(x) and is_iterable(y):
-            super(TestCase, self).assertNotEqual(x, y)
+            super().assertNotEqual(x, y)
         else:
             try:
                 self.assertGreater(abs(x - y), atol, message)
                 return
             except (TypeError, AssertionError):
                 pass
-            super(TestCase, self).assertNotEqual(x, y, message)
+            super().assertNotEqual(x, y, message)
 
     def assertObjectIn(self, obj, iterable):
         for elem in iterable:
@@ -1124,7 +1103,7 @@ class TestCase(expecttest.TestCase):
         If you call this multiple times in a single function, you must
         give a unique subname each time.
         """
-        if not (isinstance(s, str) or (sys.version_info[0] == 2 and isinstance(s, unicode))):
+        if not isinstance(s, str):
             raise TypeError("assertExpected is strings only")
 
         def remove_prefix(text, prefix):
@@ -1215,14 +1194,8 @@ class TestCase(expecttest.TestCase):
 
 
 def download_file(url, binary=True):
-    if sys.version_info < (3,):
-        from urlparse import urlsplit
-        import urllib2
-        request = urllib2
-        error = urllib2
-    else:
-        from urllib.parse import urlsplit
-        from urllib import request, error
+    from urllib.parse import urlsplit
+    from urllib import request, error
 
     filename = os.path.basename(urlsplit(url)[2])
     data_dir = get_writable_path(os.path.join(os.path.dirname(__file__), 'data'))

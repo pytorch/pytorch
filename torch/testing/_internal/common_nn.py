@@ -4385,7 +4385,7 @@ class TestBase(object):
 class ModuleTest(TestBase):
 
     def __init__(self, *args, **kwargs):
-        super(ModuleTest, self).__init__(*args, **kwargs)
+        super().__init__(*args, **kwargs)
         self.jacobian_input = kwargs.get('jacobian_input', True)
         self.should_test_cuda = kwargs.get('test_cuda', True)
         self.should_test_pickle = kwargs.get('pickle', True)
@@ -4561,7 +4561,7 @@ class CriterionTest(TestBase):
     _required_arg_names = TestBase._required_arg_names.union({'target'})
 
     def __init__(self, *args, **kwargs):
-        super(CriterionTest, self).__init__(*args, **kwargs)
+        super().__init__(*args, **kwargs)
         self.should_test_cuda = kwargs.get('test_cuda', True)
         self.check_forward_only = kwargs.get('check_forward_only', True)
 
@@ -4638,7 +4638,7 @@ class InputVariableMixin(object):
 
 class NewModuleTest(InputVariableMixin, ModuleTest):
     def __init__(self, *args, **kwargs):
-        super(NewModuleTest, self).__init__(*args, **kwargs)
+        super().__init__(*args, **kwargs)
         self.cudnn = kwargs.get('cudnn', False)
         self.check_inplace = kwargs.get('check_inplace', False)
         self.check_gradgrad = kwargs.get('check_gradgrad', True)
@@ -4792,7 +4792,7 @@ class NewCriterionTest(InputVariableMixin, CriterionTest):
     # TODO: check that criterions don't ignore grad_output
 
     def __init__(self, *args, **kwargs):
-        super(NewCriterionTest, self).__init__(*args, **kwargs)
+        super().__init__(*args, **kwargs)
         self.check_gradgrad = kwargs.get('check_gradgrad', True)
         self.check_half = kwargs.get('check_half', True)
         self.check_bfloat16 = kwargs.get('check_bfloat16', False)
