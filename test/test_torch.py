@@ -2591,6 +2591,16 @@ class _TestTorchMixin(object):
         t = torch.tensor([[False, True], [True, True]])
         self.assertEqual(torch.gather(t, 1, torch.tensor([[0, 0], [1, 0]])), torch.tensor([[False, False], [True, True]]))
 
+        # Complex64, Complex128 test case
+        t = torch.tensor([[0+1j, 0+0j], [1+1j, 1+0j]], dtype=torch.complex64)
+        actual = torch.gather(t, 1, torch.tensor([[0, 0], [1, 0]]))
+        expected = torch.tensor([[0+1j, 0+1j], [1+0j, 1+1j]], dtype=torch.complex64)
+        self.assertEqual(actual, expected)
+        t = torch.tensor([[0+1j, 0+0j], [1+1j, 1+0j]], dtype=torch.complex128)
+        actual = torch.gather(t, 1, torch.tensor([[1, 0], [1, 1]]))
+        expected = torch.tensor([[0+0j, 0+1j], [1+0j, 1+0j]], dtype=torch.complex128)
+        self.assertEqual(actual, expected)
+
     def test_gather(self):
         self._test_gather(self, lambda t: t)
 
