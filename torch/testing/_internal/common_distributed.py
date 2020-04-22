@@ -5,7 +5,6 @@ import tempfile
 import time
 import unittest
 import logging
-import six
 import traceback
 
 from collections import namedtuple
@@ -219,18 +218,11 @@ class MultiProcessTestCase(TestCase):
             self.processes.append(process)
 
     def _fork_processes(self):
-        if six.PY3:
-            proc = torch.multiprocessing.get_context("fork").Process
-        else:
-            # fork is the default on Python 2
-            proc = torch.multiprocessing.Process
+        proc = torch.multiprocessing.get_context("fork").Process
         self._start_processes(proc)
 
     def _spawn_processes(self):
-        if six.PY3:
-            proc = torch.multiprocessing.get_context("spawn").Process
-        else:
-            raise RuntimeError("Cannot use spawn start method with Python 2")
+        proc = torch.multiprocessing.get_context("spawn").Process
         self._start_processes(proc)
 
     @classmethod
