@@ -79,5 +79,20 @@ class TestOptimizer(unittest.TestCase):
 
         torch.testing.assert_allclose(initial_result, optimized_result, rtol=1e-2, atol=1e-3)
 
+    def test_generate_mobile_module_lints(self):
+        class MyTestModule(torch.nn.Module):
+            def __init__(self, weight):
+                super().__init__()
+                self.weight = weight
+
+            def forward(self, x):
+                return x * self.weight
+
+        scripted_model = torch.jit.script(MyTestModule(torch.tensor([2.0])))
+        lint_map = mobile_optimizer.generate_mobile_module_lints(scripted_model)
+        print("lint_map", lint_map)
+        self.assertEqual(len(lint_map), 1)
+
+
 if __name__ == '__main__':
     unittest.main()

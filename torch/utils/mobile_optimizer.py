@@ -19,3 +19,18 @@ def optimize_for_mobile(scripted_model):
 
     optimized_cpp_module = torch._C._jit_pass_optimize_for_mobile(scripted_model._c)
     return torch.jit._recursive.wrap_cpp_module(optimized_cpp_module)
+
+
+def generate_mobile_module_lints(scripted_model):
+    """
+    Args:
+        scripted_model: An instance of torch script module with type of ScriptModule
+
+    Returns:
+        lint_map: A dictionary that contains modules lints
+    """
+    if not isinstance(scripted_model, torch.jit.ScriptModule):
+        raise TypeError(
+            'Got {}, but ScriptModule is expected.'.format(type(scripted_model)))
+
+    return torch._C._jit_pass_mobile_module_lints(scripted_model._c)

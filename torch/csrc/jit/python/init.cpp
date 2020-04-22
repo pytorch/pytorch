@@ -25,6 +25,7 @@
 #include <torch/csrc/jit/passes/loop_unrolling.h>
 #include <torch/csrc/jit/passes/lower_graph.h>
 #include <torch/csrc/jit/passes/lower_tuples.h>
+#include <torch/csrc/jit/passes/mobile_module_lints.h>
 #include <torch/csrc/jit/passes/onnx.h>
 #include <torch/csrc/jit/passes/onnx/cast_all_constant_to_floating.h>
 #include <torch/csrc/jit/passes/onnx/constant_fold.h>
@@ -530,7 +531,10 @@ void initJITBindings(PyObject* module) {
             insertPermutes(graph, paramsDict);
             return paramsDict;
           },
-          pybind11::return_value_policy::move);
+          pybind11::return_value_policy::move)
+      .def(
+        "_jit_pass_mobile_module_lints",
+          [](script::Module& module) { return GenerateModuleLints(module); });
 
   // NOLINTNEXTLINE(bugprone-unused-raii)
   py::class_<CompleteArgumentSpec>(m, "CompleteArgumentSpec")
