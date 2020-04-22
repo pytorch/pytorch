@@ -40,18 +40,12 @@ class CAFFE2_API Tensor final {
  public:
   Tensor() : impl_() {}
 
-  // caffe2::Tensor is explicitly marked as moveable-only because before
-  // the refactoring the class used to be a value type and a lot of user code
-  // is written this way. With PyTorch unification, caffe2::Tensor actually
-  // has semantics of a shared_ptr now (via intrusive_ptr). However, to prevent
-  // accidental mistakes when changing legacy code we keep caffe2::Tensor
-  // to have movable semantics.
-  //
-  // If you need to get a pointer to the same Tensor instance (not to be
-  // confused with shared storage), `UnsafeSharedInstance` can be used. It has
-  // the same behavior as `at::Tensor a = b`.
-  Tensor(const Tensor&) = delete;
-  Tensor& operator=(const Tensor&) = delete;
+  Tensor(const Tensor& t) : impl_(t.impl_) {}
+  Tensor& operator=(const Tensor& t) {
+    impl_ = t.impl_;
+    return *this;
+  }
+
   Tensor(Tensor&&) = default;
   Tensor& operator=(Tensor&&) = default;
 
