@@ -41,8 +41,8 @@ but it could not be found. Install ninja with `pip install ninja`
 or `conda install ninja`.
 """
 
-BACKEND = os.environ["BACKEND"]
-TEMP_DIR = os.environ["TEMP_DIR"]
+BACKEND = os.getenv("BACKEND", None)
+TEMP_DIR = os.getenv("TEMP_DIR", None)
 INIT_METHOD = os.getenv("INIT_METHOD", "env://")
 
 DEFAULT_TIMEOUT = 300
@@ -139,7 +139,7 @@ def skip_if_no_gpu(func):
     def wrapper(*args, **kwargs):
         if not torch.cuda.is_available():
             sys.exit(SKIP_IF_NO_CUDA_EXIT_CODE)
-        if torch.cuda.device_count() < int(os.environ["WORLD_SIZE"]):
+        if torch.cuda.device_count() < int(os.getenv("WORLD_SIZE", -1)):
             sys.exit(SKIP_IF_NO_GPU_EXIT_CODE)
 
         return func(*args, **kwargs)
@@ -152,7 +152,7 @@ def skip_if_small_worldsize(func):
 
     @wraps(func)
     def wrapper(*args, **kwargs):
-        if (os.environ["BACKEND"] != "mpi") and int(os.environ["WORLD_SIZE"]) <= 2:
+        if (os.environ["BACKEND"] != "mpi") and int(os.getenv("WORLD_SIZE", -1)) <= 2:
             sys.exit(SKIP_IF_SMALL_WORLDSIZE_EXIT_CODE)
 
         return func(*args, **kwargs)
@@ -198,7 +198,7 @@ def require_backends_available(backends):
 
 
 def require_world_size(world_size):
-    if int(os.environ["WORLD_SIZE"]) < world_size:
+    if int(os.getenv("WORLD_SIZE", -1)) < world_size:
         return unittest.skip("Test requires world size of %d" % world_size)
     return lambda func: func
 
