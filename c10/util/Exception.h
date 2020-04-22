@@ -78,7 +78,6 @@ class C10_API Error : public std::exception {
 
  private:
   // Compute the full message from msg_ and msg_without_backtrace_
-  // TODO: Maybe this should be private
   std::string msg() const;
   std::string msg_without_backtrace() const;
 };
