@@ -35,7 +35,7 @@ void _call_end_callbacks_on_fut(
             "Undefined RecordFunction handle. This can happen if the handle is "
             "not correctly persisted and is destroyed before the future is "
             "realized.");
-        at::ThreadLocalStateGuard guard(tls_state);
+        at::ThreadLocalStateGuard g(tls_state);
         auto& rec = getRecordFunctionFromTensor(handle);
         rec._end();
       });
