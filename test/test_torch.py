@@ -10073,17 +10073,21 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(a.dtype, torch.float)
         self.assertEqual(a.size(), torch.Size([1]))
 
-    def test_exponential(self, device):
+    @dtypes(torch.float32)
+    def test_exponential(self, device, dtype):
         a = torch.tensor([10], dtype=torch.float, device=device).exponential_(0.5)
         self.assertEqual(a.dtype, torch.float)
         self.assertEqual(a.size(), torch.Size([1]))
-        expected = torch.tensor([10], dtype=torch.float, device=device).exponential_(0)
-        actual = torch.tensor([0.0], dtype=torch.float, device=device)
-        self.assertTrue(torch.allclose(expected, actual, rtol=0, atol=0))
-        # fail with negative lambda
-        self.assertRaises(RuntimeError, lambda: torch.tensor(
-            [10], dtype=torch.float, device=device).exponential_(-0.5))
 
+        # Tests extremal behavior
+        tests = ((-0, float('inf')), (0, float('inf')), (float('inf'), 0))
+        for test in tests:
+            t = torch.empty((1,), device=device, dtype=dtype).exponential_(test[0])
+            self.assertTrue(t.item() == test[1])
+
+        # Tests that negative lambda fails
+        with self.assertRaises(RuntimeError):
+            torch.empty((1,), device=device, dtype=dtype).exponential_(-0.5)
 
     def test_pairwise_distance_empty(self, device):
         shape = (2, 0)
