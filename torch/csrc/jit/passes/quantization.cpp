@@ -395,15 +395,11 @@ class ModuleCloneHelper {
     }
     // Copy slots. If a slot is a module - recursively clone it.
     size_t N = type->numAttributes();
-    // std::cout << "Number of attributes " << N << " type " <<
-    // type->name()->qualifiedName() << std::endl;
 
     for (size_t i = 0; i < N; ++i) {
       IValue s = module._ivalue()->getSlot(i);
       if (type->getAttribute(i)->is_module()) {
         const Module& orig = Module(s.toObject());
-        // std::cout << "attribute is module " << std::endl;
-        // orig.dump(false, false, false);
         Module cloned = clone_impl(orig, module_qconfig_map, type_remap);
         r.register_module(type->getAttributeName(i), cloned);
       } else {
@@ -452,8 +448,6 @@ class ModuleCloneHelper {
       if (node->kind() == prim::CallMethod) {
         Value* instance = node->inputs()[0];
         auto path = getModuleAccessPath(instance, self);
-        // std::cout << "Before findchildModule  " <<
-        // node->owningGraph()->toString();
         auto child = findChildModule(source, path);
         auto qconfig = module_qconfig_map.at(child._ivalue());
         instance->setType(type_remap_fn(instance->type(), qconfig));
@@ -907,8 +901,6 @@ void InsertObserversHelper::insertObserverFor(
   while (module.hasattr(observer_name)) {
     observer_name = "_observer_" + c10::to_string(uid_++);
   }
-  std::cout << "Inserting observers for " << v->debugName() << " obs "
-            << observer_name << std::endl;
   module.register_module(observer_name, observer);
   observer_name_and_modules.push_back(std::make_pair(observer_name, observer));
 
@@ -1431,7 +1423,6 @@ InsertObserversHelper::insertObserversFor(
     }
     block_observer_map_[block] = observer_name_and_modules;
   }
-  std::cout << "Graph after inserting obs " << block->owningGraph()->toString();
   return std::make_tuple(
       block_input_observers, block_output_observers, output_idxs);
 }
