@@ -6214,6 +6214,8 @@ class TestNN(NNTestCase):
                         # dt3 is used as dtype for target = [1, -1], so let's skip unsigned type
                         if dt3 == torch.uint8:
                             continue
+                        if dt1.is_complex or dt2.is_complex or dt3.is_complex:
+                            continue
                         input1 = input1.to(dt1)
                         input2 = input2.to(dt2)
                         target = target.to(dt3)
@@ -6226,6 +6228,8 @@ class TestNN(NNTestCase):
             target = torch.tensor([[1, 2, 3], [4, 5, 6]], dtype=torch.double, device=device)
             expected = torch.nn.functional.kl_div(input, target)
             for input_dtype in torch.testing.get_all_math_dtypes(device):
+                if input_dtype.is_complex:
+                    continue
                 for target_dtype in [torch.float32, torch.float64, torch.float16]:
                     if (torch.device(device).type == 'cpu' and target_dtype == torch.float16):
                         continue
@@ -6240,6 +6244,8 @@ class TestNN(NNTestCase):
             target = torch.tensor([[1, 2, 3], [4, 5, 6]], dtype=torch.double, device=device).log()
             expected = torch.nn.functional.kl_div(input, target, log_target=True)
             for input_dtype in torch.testing.get_all_math_dtypes(device):
+                if input_dtype.is_complex:
+                    continue
                 for target_dtype in [torch.float32, torch.float64, torch.float16]:
                     if (torch.device(device).type == 'cpu' and target_dtype == torch.float16):
                         continue
