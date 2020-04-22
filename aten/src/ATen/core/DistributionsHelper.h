@@ -12,6 +12,8 @@
 #include <c10/util/Half.h>
 #include <c10/util/BFloat16.h>
 #include <c10/util/Optional.h>
+#include <c10/macros/Macros.h>
+
 #include <type_traits>
 #include <limits>
 #include <cmath>
@@ -306,7 +308,7 @@ struct exponential_distribution {
   }
 
   template <typename RNG>
-  inline T operator()(RNG generator) {
+  __ubsan_ignore_float_divide_by_zero__ inline T operator()(RNG generator) {
     // Follows numpy exponential for the case when lambda is zero.
     if (lambda == static_cast<T>(0.0)) {
       return static_cast<T>(0.0);
