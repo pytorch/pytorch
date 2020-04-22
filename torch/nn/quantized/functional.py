@@ -395,8 +395,8 @@ def hardswish(input, scale, zero_point):
     """
     if not input.is_quantized:
         raise ValueError("Input to 'quantized.hardswish' must be quantized!")
-    output = torch.quantize_per_tensor(torch.zeros(input.shape),
-                                       scale, int(zero_point), input.dtype)
+    output = torch._empty_affine_quantized(
+        input.shape, scale=scale, zero_point=int(zero_point), dtype=input.dtype)
     torch._C._nn.hardswish(input, out=output)
     return output
 
