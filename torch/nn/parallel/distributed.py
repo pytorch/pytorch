@@ -305,8 +305,7 @@ class DistributedDataParallel(Module):
                 for p in ps:
                     yield p
 
-            ms = m.modules() if recurse else [m]
-            for m in m.modules():
+            for m in m.modules() if recurse else [m]:
                 for p in model_parameters(m):
                     yield p
 

@@ -1630,6 +1630,9 @@ class TestQuantizeScriptPTSQOps(JitTestCase):
                 x = F.upsample(x, (32, 32))
                 x = F.upsample_bilinear(x, (32, 32))
                 x = F.upsample_nearest(x, (32, 32))
+                x = torch.clamp(x, -3, 3)
+                x = x.clamp(-2.5, 2.5)
+                # x = x.clamp_(-2, 2)  # Enable when quantized `clamp_` is ready
                 x = F.sigmoid(x)
                 x = x.permute(0, 2, 3, 1)
                 x = torch.repeat_interleave(x, 3, 1)
