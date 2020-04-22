@@ -453,6 +453,15 @@ class Module(object):
     def register_backward_hook(self, hook):
         r"""Registers a backward hook on the module.
 
+        .. warning ::
+
+            The current implementation will not have the presented behavior
+            for complex :class:`Module` that perform many operations.
+            In some failure cases, :attr:`grad_input` and :attr:`grad_output` will only
+            contain the gradients for a subset of the inputs and outputs.
+            For such :class:`Module`, you should use :func:`torch.Tensor.register_hook`
+            directly on a specific input or output to get the required gradients.
+
         The hook will be called every time the gradients with respect to module
         inputs are computed. The hook should have the following signature::
 
@@ -470,15 +479,6 @@ class Module(object):
                 a handle that can be used to remove the added hook by calling
                 ``handle.remove()``
 
-        .. warning ::
-
-            The current implementation will not have the presented behavior
-            for complex :class:`Module` that perform many operations.
-            In some failure cases, :attr:`grad_input` and :attr:`grad_output` will only
-            contain the gradients for a subset of the inputs and outputs.
-            For such :class:`Module`, you should use :func:`torch.Tensor.register_hook`
-            directly on a specific input or output to get the required gradients.
-
         """
         handle = hooks.RemovableHandle(self._backward_hooks)
         self._backward_hooks[handle.id] = hook
@@ -493,6 +493,7 @@ class Module(object):
             hook(module, input) -> None or modified input
 
         The input contains only the positional arguments given to the module.
+        Keyword arguments won't be passed to the hooks and only to the ``forward``.
         The hook can modify the input. User can either return a tuple or a
         single modified value in the hook. We will wrap the value into a tuple
         if a single value is returned(unless that value is already a tuple).
@@ -515,6 +516,7 @@ class Module(object):
             hook(module, input, output) -> None or modified output
 
         The input contains only the positional arguments given to the module.
+        Keyword arguments won't be passed to the hooks and only to the ``forward``.
         The hook can modify the output. It can modify the input inplace but
         it will not have effect on forward since this is called after
         :func:`forward` is called.

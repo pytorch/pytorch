@@ -122,9 +122,10 @@ non-Tensor arguments::
     operations, (e.g., invocation of another custom
     :class:`~torch.autograd.function`), higher order derivatives will work.
     In this case, the Tensors saved with ``save_for_backward`` can also be used
-    in a differentiable manner but Tensor saved in the ``ctx`` cannot be used.
-    If you need one, you should make it an output of the custom ``Function`` and
-    save it with ``save_for_backward``.
+    in the backward and have gradients flowing back but Tensors saved in the ``ctx``
+    won't have gradients flowing back for them.
+    If you need gradients to flow back for a Tensor saved in the ``ctx``, you should
+    make it an output of the custom ``Function`` and save it with ``save_for_backward``.
 
 You probably want to check if the backward method you implemented actually
 computes the derivatives of your function. It is possible by comparing with

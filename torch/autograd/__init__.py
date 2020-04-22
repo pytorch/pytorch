@@ -59,8 +59,8 @@ def backward(tensors, grad_tensors=None, retain_graph=None, create_graph=False, 
 
     .. note::
         Using this method with ``create_graph=True`` will create a reference cycle
-        between the parameter and its gradient which can lead to memory leak.
-        We recommend using ``autograd.grad`` below when creating the graph to avoid this.
+        between the parameter and its gradient which can cause a memory leak.
+        We recommend using ``autograd.grad`` when creating the graph to avoid this.
         If you have to use this function, make sure to reset the ``.grad`` fields of your
         parameters to ``None`` after use to break the cycle and avoid the leak.
 
