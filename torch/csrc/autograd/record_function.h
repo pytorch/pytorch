@@ -1,6 +1,7 @@
 #pragma once
 
 #include <ATen/core/ivalue.h>
+#include <ATen/ThreadLocalState.h>
 #include <c10/util/SmallVector.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
@@ -217,6 +218,25 @@ struct TORCH_API RecordFunction {
   // during the record function's lifetime, between start and
   // end invocations.
   uint64_t callbacks_version_ = 0;
+};
+
+class TORCH_API RecordFunctionGuard {
+ public:
+  explicit RecordFunctionGuard(bool is_enabled)
+      : prev_value_(at::_tls_is_record_function_enabled()) {
+    at::_tls_set_record_function_enabled(is_enabled);
+  }
+  virtual ~RecordFunctionGuard() {
+    at::_tls_set_record_function_enabled(prev_value_);
+  }
+ private:
+  bool prev_value_ = false;
+};
+
+class TORCH_API DisableRecordFunctionGuard : public RecordFunctionGuard {
+ public:
+  DisableRecordFunctionGuard() : RecordFunctionGuard(false) {}
+  virtual ~DisableRecordFunctionGuard() {}
 };
 
 // Returns whether there're callbacks registered with pushCallback
