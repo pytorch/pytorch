@@ -399,27 +399,30 @@ struct QuantizedCellParamsFP16 : public CellParamsBase{
   Tensor matmul_hh(const Tensor& /* unused */) const override {
     TORCH_CHECK(false, "matmul is not supported with quantized cell params");
   }
+  Tensor linear_common(const Tensor& input, const Tensor& packed_weight, const Tensor& bias) const {
+    // Stupid hack because somehow we ended up with two separate
+    // FBGEMM packed fp16 weight formats in the system. Remove when
+    // we kill one of them.
+    if (cpp_custom_type_hack::isa<fbgemm::PackedGemmMatrixFP16>(packed_weight)) {
+      return at::native::fbgemm_linear_fp16_weight_fp32_activation(input, packed_weight, bias);
+    } else {
+      const auto kFuncName = "quantized::linear_dynamic_fp16";
+      const auto kOvrldName = "";
+      const std::vector<c10::IValue> output_list =
+          callOp(kFuncName, kOvrldName, input, packed_weight);
+      TORCH_INTERNAL_ASSERT(
+          output_list.size() == 1,
+          "The output vector should have exact one element");
+      const Tensor output = output_list[0].toTensor();
+      return output;
+    }
+    TORCH_INTERNAL_ASSERT(false);
+  }
   Tensor linear_ih(const Tensor& input) const override {
-    const auto kFuncName = "quantized::linear_dynamic_fp16";
-    const auto kOvrldName = "";
-    const std::vector<c10::IValue> output_ih_list =
-        callOp(kFuncName, kOvrldName, input, packed_ih);
-    TORCH_INTERNAL_ASSERT(
-        output_ih_list.size() == 1,
-        "The output vector should have exact one element");
-    const Tensor output_ih = output_ih_list[0].toTensor();
-    return output_ih;
+    return linear_common(input, packed_ih, b_ih_);
   }
   Tensor linear_hh(const Tensor& h) const override {
-    const auto kFuncName = "quantized::linear_dynamic_fp16";
-    const auto kOvrldName = "";
-    const std::vector<c10::IValue> output_hh_list =
-        callOp(kFuncName, kOvrldName, h, packed_hh);
-    TORCH_INTERNAL_ASSERT(
-        output_hh_list.size() == 1,
-        "The output vector should have exact one element");
-    const Tensor output_hh = output_hh_list[0].toTensor();
-    return output_hh;
+    return linear_common(h, packed_hh, b_hh_);
   }
 
   const Tensor &b_ih() const override {

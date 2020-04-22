@@ -1151,7 +1151,7 @@ graph(%Ra, %Rb):
 
         graph = torch.jit.script(broadcast).graph
         torch._C._jit_pass_complete_shape_analysis(graph, (x, y), False)
-        FileCheck().check("Double(4, 3, 8, 5)").run(str(graph))
+        FileCheck().check("Double(4:120, 3:40, 8:5, 5:1)").run(str(graph))
 
     # TODO: update verify to work with GraphExecutors
     @unittest.skip("verify needs to be updated to work with GraphExecutors")
@@ -10909,7 +10909,7 @@ a")
 
         cm = ScriptMod(Mod())
         # specialized tensor in graph
-        FileCheck().check("Double(1, 3)").run(cm.forward.graph)
+        FileCheck().check("Double(1:3, 3:1)").run(cm.forward.graph)
         buffer = io.BytesIO()
         torch.jit.save(cm, buffer)
         buffer.seek(0)
@@ -11842,7 +11842,7 @@ a")
         a = torch.zeros(2, 2)
         b = torch.zeros(4, dtype=torch.long)
         torch._C._jit_pass_complete_shape_analysis(foo.graph, (a, b), False)
-        FileCheck().check("Double(2, 4)").run(str(foo.graph))
+        FileCheck().check("Double(2:4, 4:1)").run(str(foo.graph))
 
     def test_onnx_export_speculate(self):
 
@@ -12183,7 +12183,7 @@ a")
         out = fn()
         self.assertEqual(out.dtype, torch.double)
         # Testing shape analysis correctly setting type
-        FileCheck().check("Double(3, 4)").check_not("Float(3, 4)").run(fn.graph_for())
+        FileCheck().check("Double(3:4, 4:1)").check_not("Float(3:4, 4:1)").run(fn.graph_for())
 
         @torch.jit.script
         def randint():
@@ -12193,7 +12193,7 @@ a")
         self.assertEqual(out.dtype, torch.double)
         # although the type should be int here, testing that the runtime dtype
         # and shape analysis dtype is the same.
-        FileCheck().check("Double(1, 2)").check_not("Float(1, 2)").run(randint.graph_for())
+        FileCheck().check("Double(1:2, 2:1)").check_not("Float(1:2, 2:1)").run(randint.graph_for())
 
     def test_erase_number_types(self):
         def func(a):
@@ -15575,7 +15575,7 @@ a")
         test_shape_prop(torch.tensor(0.5))
         graph = test_shape_prop.graph_for(torch.tensor(0.5))
         # Shape analysis of z should propagate through if statement
-        FileCheck().check("Long(2, 2)").check("prim::If").run(graph)
+        FileCheck().check("Long(2:2, 2:1)").check("prim::If").run(graph)
 
     def test_partial_returns(self):
         with self.assertRaisesRegex(RuntimeError, "does not return along all"):
