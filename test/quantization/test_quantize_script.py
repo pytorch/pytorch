@@ -1846,6 +1846,3 @@ class TestQuantizeDynamicScript(JitTestCase):
                    .check("aten::lstm") \
                    .check("return") \
                    .run(str(get_module_method(m, 'lstm', 'forward__0').graph))
-
-if __name__ == "__main__":
-    run_tests()

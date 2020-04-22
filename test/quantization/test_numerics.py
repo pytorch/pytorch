@@ -124,6 +124,3 @@ class TestModelNumerics(QuantizationTestCase):
                     out_fq = fq_model(eval_data)
                     SQNRdB = 20 * torch.log10(torch.norm(out_ref) / torch.norm(out_ref - out_fq))
                     self.assertGreater(SQNRdB, SQNRTarget[idx], msg='Quantized model numerics diverge from float')
-
-if __name__ == "__main__":
-    run_tests()

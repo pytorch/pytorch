@@ -309,6 +309,3 @@ class TestFakeQuantizePerChannel(TestCase):
         loaded_dict = torch.load(b)
         for key in state_dict:
             self.assertEqual(state_dict[key], loaded_dict[key])
-
-if __name__ == '__main__':
-    run_tests()

@@ -163,7 +163,3 @@ class TestQATModule(TestCase):
                 self.assertEqual(num_batches_tracked_ref, num_batches_tracked_actual, atol=precision)
                 self.assertEqual(running_mean_ref, running_mean_actual, atol=precision)
                 self.assertEqual(running_var_ref, running_var_actual, atol=precision)
-
-
-if __name__ == '__main__':
-    run_tests()

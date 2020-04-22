@@ -2897,7 +2897,3 @@ class TestComparatorOps(TestCase):
             result = getattr(qA, op)(b)
             self.assertEqual(result_ref, result,
                              "'tensor.{}(scalar)'' failed".format(op))
-
-
-if __name__ == "__main__":
-    run_tests()

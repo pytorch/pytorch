@@ -424,6 +424,3 @@ class TestQuantizedTensor(TestCase):
         qparams = torch._choose_qparams_per_tensor(X, reduce_range)
         np.testing.assert_array_almost_equal(X_scale, qparams[0], decimal=3)
         self.assertEqual(X_zp, qparams[1])
-
-if __name__ == "__main__":
-    run_tests()

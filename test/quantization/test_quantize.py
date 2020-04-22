@@ -1780,7 +1780,3 @@ class TestRecordHistogramObserver(QuantizationTestCase):
         self.assertEqual(myobs.histogram, loaded_obs.histogram)
         self.assertEqual(myobs.bins, loaded_obs.bins)
         self.assertEqual(myobs.calculate_qparams(), loaded_obs.calculate_qparams())
-
-
-if __name__ == '__main__':
-    run_tests()

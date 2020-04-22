@@ -5,6 +5,7 @@ from torch.testing._internal.common_quantization import (
     QuantizationTestCase,
 )
 
+import unittest
 
 class TestEagerModeNumericSuite(QuantizationTestCase):
     @unittest.skipUnless(

@@ -880,6 +880,3 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         self.assertEqual(qY_ref.int_repr().numpy(), qY.int_repr().numpy(),
                          message="LayerNorm module API failed, qY_ref\n{} vs qY\n{}"
                          .format(qY_ref, qY))
-
-if __name__ == '__main__':
-    run_tests()
