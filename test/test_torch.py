@@ -170,7 +170,6 @@ class _TestTorchMixin(object):
                        'is_distributed',
                        'is_nonzero',
                        'is_same_size',
-                       'isclose',
                        'log_softmax',
                        'map2_',
                        'new',
@@ -192,25 +191,6 @@ class _TestTorchMixin(object):
         test_namespace(torch.nn.functional, 'assert_int_or_pair', 'feature_alpha_dropout')
         # TODO: add torch.* tests when we have proper namespacing on ATen functions
         # test_namespace(torch)
-
-    def test_allclose(self):
-        x = torch.tensor([1.0, 2.0, 3.0])
-        y = torch.tensor([1.01, 2.01, 3.01])
-        self.assertTrue(torch.allclose(x, y, rtol=0, atol=0.02))
-        self.assertTrue(torch.allclose(x, y, rtol=0.01, atol=0.0))
-        self.assertFalse(torch.allclose(x, y))
-        self.assertTrue(torch.allclose(torch.tensor([0.0]), torch.tensor([1e-8])))
-        x = torch.tensor([2.0, 3.0, nan])
-        y = torch.tensor([2.01, 3.01, nan])
-        self.assertFalse(torch.allclose(x, y, rtol=1e-2))
-        self.assertTrue(torch.allclose(x, y, rtol=1e-2, equal_nan=True))
-        self.assertFalse(torch.allclose(x, y, rtol=1e-3, equal_nan=True))
-        inf_t = torch.tensor([inf])
-        self.assertTrue(torch.allclose(inf_t, inf_t))
-        self.assertTrue(torch.allclose(-inf_t, -inf_t))
-        self.assertFalse(torch.allclose(inf_t, -inf_t))
-        self.assertFalse(torch.allclose(inf_t, torch.tensor([1e20])))
-        self.assertFalse(torch.allclose(-inf_t, torch.tensor([-1e20])))
 
     def test_linear_algebra_scalar_raises(self):
         m = torch.randn(5, 5)
@@ -5308,6 +5288,197 @@ def add_neg_dim_tests():
 class TestTorchDeviceType(TestCase):
     exact_dtype = True
 
+    def _isclose_helper(self, tests, device, dtype, equal_nan, atol=1e-08, rtol=1e-05):
+        for test in tests:
+            a = torch.tensor((test[0],), device=device, dtype=dtype)
+            b = torch.tensor((test[1],), device=device, dtype=dtype)
+
+            actual = torch.isclose(a, b, equal_nan=equal_nan, atol=atol, rtol=rtol)
+            expected = test[2]
+            self.assertEqual(actual.item(), expected)
+
+    # torch.close is not implemented for bool tensors
+    # see https://github.com/pytorch/pytorch/issues/33048
+    def test_isclose_bool(self, device):
+        tests = (
+            (True, True, True),
+            (False, False, True),
+            (True, False, False),
+            (False, True, False),
+        )
+
+        with self.assertRaises(RuntimeError):
+            self._isclose_helper(tests, device, torch.bool, False)
+
+    @dtypes(torch.uint8,
+            torch.int8, torch.int16, torch.int32, torch.int64)
+    def test_isclose_integer(self, device, dtype):
+        tests = (
+            (0, 0, True),
+            (0, 1, False),
+            (1, 0, False),
+        )
+
+        self._isclose_helper(tests, device, dtype, False)
+
+        # atol and rtol tests
+        tests = [
+            (0, 1, True),
+            (1, 0, False),
+            (1, 3, True),
+        ]
+
+        self._isclose_helper(tests, device, dtype, False, atol=.5, rtol=.5)
+
+        if dtype is torch.uint8:
+            tests = [
+                (-1, 1, False),
+                (1, -1, False)
+            ]
+        else:
+            tests = [
+                (-1, 1, True),
+                (1, -1, True)
+            ]
+
+        self._isclose_helper(tests, device, dtype, False, atol=1.5, rtol=.5)
+
+    # torch.close is not implemented for cpu half tensors
+    # see https://github.com/pytorch/pytorch/issues/36451
+    @dtypes(torch.float16, torch.float32, torch.float64)
+    def test_isclose_float(self, device, dtype):
+        tests = (
+            (0, 0, True),
+            (0, -1, False),
+            (float('inf'), float('inf'), True),
+            (-float('inf'), float('inf'), False),
+            (float('inf'), float('nan'), False),
+            (float('nan'), float('nan'), False),
+            (0, float('nan'), False),
+            (1, 1, True),
+        )
+
+        if dtype is torch.half and self.device_type == 'cpu':
+            with self.assertRaises(RuntimeError):
+                self._isclose_helper(tests, device, dtype, False)
+        else:
+            self._isclose_helper(tests, device, dtype, False)
+
+        # atol and rtol tests
+        eps = 1e-2 if dtype is torch.half else 1e-6
+        tests = (
+            (0, 1, True),
+            (0, 1 + eps, False),
+            (1, 0, False),
+            (1, 3, True),
+            (1 - eps, 3, False),
+            (-.25, .5, True),
+            (-.25 - eps, .5, False),
+            (.25, -.5, True),
+            (.25 + eps, -.5, False),
+        )
+
+        if dtype is torch.half and self.device_type == 'cpu':
+            with self.assertRaises(RuntimeError):
+                self._isclose_helper(tests, device, dtype, False, atol=.5, rtol=.5)
+        else:
+            self._isclose_helper(tests, device, dtype, False, atol=.5, rtol=.5)
+
+        # equal_nan = True tests
+        tests = (
+            (0, float('nan'), False),
+            (float('inf'), float('nan'), False),
+            (float('nan'), float('nan'), True),
+        )
+
+        if dtype is torch.half and self.device_type == 'cpu':
+            with self.assertRaises(RuntimeError):
+                self._isclose_helper(tests, device, dtype, True)
+        else:
+            self._isclose_helper(tests, device, dtype, True)
+
+    # torch.close with equal_nan=True is not implemented for complex inputs
+    # see https://github.com/numpy/numpy/issues/15959
+    @dtypes(torch.complex64, torch.complex128)
+    def test_isclose_complex(self, device, dtype):
+        tests = (
+            (complex(1, 1), complex(1, 1 + 1e-8), True),
+            (complex(0, 1), complex(1, 1), False),
+            (complex(1, 1), complex(1, 0), False),
+            (complex(1, 1), complex(1, float('nan')), False),
+            (complex(1, float('nan')), complex(1, float('nan')), False),
+            (complex(1, 1), complex(1, float('inf')), False),
+            (complex(float('inf'), 1), complex(1, float('inf')), False),
+            (complex(-float('inf'), 1), complex(1, float('inf')), False),
+            (complex(-float('inf'), 1), complex(float('inf'), 1), False),
+            (complex(float('inf'), 1), complex(float('inf'), 1), True),
+            (complex(float('inf'), 1), complex(float('inf'), 1 + 1e-4), False),
+        )
+
+        self._isclose_helper(tests, device, dtype, False)
+
+        # atol and rtol tests
+
+        # atol and rtol tests
+        eps = 1e-6
+        tests = (
+            # Complex versions of float tests (real part)
+            (complex(0, 0), complex(1, 0), True),
+            (complex(0, 0), complex(1 + eps, 0), False),
+            (complex(1, 0), complex(0, 0), False),
+            (complex(1, 0), complex(3, 0), True),
+            (complex(1 - eps, 0), complex(3, 0), False),
+            (complex(-.25, 0), complex(.5, 0), True),
+            (complex(-.25 - eps, 0), complex(.5, 0), False),
+            (complex(.25, 0), complex(-.5, 0), True),
+            (complex(.25 + eps, 0), complex(-.5, 0), False),
+            # Complex versions of float tests (imaginary part)
+            (complex(0, 0), complex(0, 1), True),
+            (complex(0, 0), complex(0, 1 + eps), False),
+            (complex(0, 1), complex(0, 0), False),
+            (complex(0, 1), complex(0, 3), True),
+            (complex(0, 1 - eps), complex(0, 3), False),
+            (complex(0, -.25), complex(0, .5), True),
+            (complex(0, -.25 - eps), complex(0, .5), False),
+            (complex(0, .25), complex(0, -.5), True),
+            (complex(0, .25 + eps), complex(0, -.5), False),
+            # Complex-specific tests
+            (complex(1, -1), complex(-1, 1), False),
+            (complex(1, -1), complex(2, -2), True),
+            (complex(-math.sqrt(2), math.sqrt(2)),
+             complex(-math.sqrt(.5), math.sqrt(.5)), True),
+            (complex(-math.sqrt(2), math.sqrt(2)),
+             complex(-math.sqrt(.501), math.sqrt(.499)), False),
+            (complex(2, 4), complex(1., 8.8523607), True),
+            (complex(2, 4), complex(1., 8.8523607 + eps), False),
+        )
+
+        self._isclose_helper(tests, device, dtype, False, atol=.5, rtol=.5)
+
+        # equal_nan = True tests
+        tests = (
+            (complex(1, 1), complex(1, float('nan')), False),
+            (complex(float('nan'), 1), complex(1, float('nan')), False),
+            (complex(float('nan'), 1), complex(float('nan'), 1), True),
+        )
+
+        with self.assertRaises(RuntimeError):
+            self._isclose_helper(tests, device, dtype, True)
+
+    # Tests that rtol or atol values less than zero thow RuntimeErrors
+    @dtypes(torch.bool, torch.uint8,
+            torch.int8, torch.int16, torch.int32, torch.int64,
+            torch.float16, torch.float32, torch.float64)
+    def test_isclose_atol_rtol_greater_than_zero(self, device, dtype):
+        t = torch.tensor((1,), device=device, dtype=dtype)
+
+        with self.assertRaises(RuntimeError):
+            torch.isclose(t, t, atol=-1, rtol=1)
+        with self.assertRaises(RuntimeError):
+            torch.isclose(t, t, atol=1, rtol=-1)
+        with self.assertRaises(RuntimeError):
+            torch.isclose(t, t, atol=-1, rtol=-1)
+
     def check_internal_mem_overlap(self, inplace_op, num_inputs,
                                    dtype, device,
                                    expected_failure=False):
@@ -10073,17 +10244,21 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(a.dtype, torch.float)
         self.assertEqual(a.size(), torch.Size([1]))
 
-    def test_exponential(self, device):
+    @dtypes(torch.float32)
+    def test_exponential(self, device, dtype):
         a = torch.tensor([10], dtype=torch.float, device=device).exponential_(0.5)
         self.assertEqual(a.dtype, torch.float)
         self.assertEqual(a.size(), torch.Size([1]))
-        expected = torch.tensor([10], dtype=torch.float, device=device).exponential_(0)
-        actual = torch.tensor([0.0], dtype=torch.float, device=device)
-        self.assertTrue(torch.allclose(expected, actual, rtol=0, atol=0))
-        # fail with negative lambda
-        self.assertRaises(RuntimeError, lambda: torch.tensor(
-            [10], dtype=torch.float, device=device).exponential_(-0.5))
 
+        # Tests extremal behavior
+        tests = ((-0, float('inf')), (0, float('inf')), (float('inf'), 0))
+        for test in tests:
+            t = torch.empty((1,), device=device, dtype=dtype).exponential_(test[0])
+            self.assertTrue(t.item() == test[1])
+
+        # Tests that negative lambda fails
+        with self.assertRaises(RuntimeError):
+            torch.empty((1,), device=device, dtype=dtype).exponential_(-0.5)
 
     def test_pairwise_distance_empty(self, device):
         shape = (2, 0)
@@ -11299,7 +11474,6 @@ class TestTorchDeviceType(TestCase):
         dst = dst.masked_scatter(mask, src)
         self.assertEqual(dst, torch.tensor([True, True, True], device=device))
 
-    @dtypesIfCUDA(*[dtype for dtype in torch.testing.get_all_dtypes() if dtype not in [torch.bfloat16]])
     @dtypes(*torch.testing.get_all_dtypes())
     def test_masked_select(self, device, dtype):
         if device == 'cpu':
@@ -11335,7 +11509,11 @@ class TestTorchDeviceType(TestCase):
             return
 
         # Ensure that masks are expanded to match tensor properly
-        a = torch.rand(100, 100, device=device).mul(100).to(dtype)
+        if IS_WINDOWS and dtype == torch.bfloat16 and torch.device(device).type == 'cuda':
+            # TODO .to() for bfloat16 does not work on windows
+            a = torch.ones(100, 100, device=device, dtype=dtype)
+        else:
+            a = torch.rand(100, 100, device=device).mul(100).to(dtype)
         mask_first_el_each_row = torch.zeros(100, device=device).bool()
         mask_first_el_each_row[0] = True
         a_masked = a.masked_select(mask_first_el_each_row)
@@ -11347,7 +11525,10 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(a_masked, a[0, :])
 
         # Ensure that tensor is expanded to match mask properly
-        a = torch.rand(100, device=device).mul(100).to(maskType)
+        if IS_WINDOWS and dtype == torch.bfloat16 and torch.device(device).type == 'cuda':
+            a = torch.ones(100, device=device, dtype=dtype)
+        else:
+            a = torch.rand(100, device=device).mul(100).to(maskType)
         mask_copy_3_times = torch.tensor([[True], [True], [False], [True]], device=device)
         a_masked = a.masked_select(mask_copy_3_times)
         self.assertEqual(a_masked, a.unsqueeze(0).expand(3, 100).flatten())
@@ -15496,42 +15677,40 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         # verifies out dtype overrides inference
         self.assertEqual(torch.full(o.shape, 1., out=o).dtype, o.dtype)
 
+    def _float_to_int_conversion_helper(self, vals, device, dtype):
+        assert TEST_NUMPY
+
+        a = np.array(vals, dtype=np.float32).astype(torch_to_numpy_dtype_dict[dtype])
+        t = torch.tensor(vals, device=device, dtype=torch.float).to(dtype)
+        self.assertEqual(torch.from_numpy(a), t.cpu())
+
     # Checks that float->integer casts don't produce undefined behavior errors.
     # Note: In C++, casting from a floating value to an integral dtype
     # is undefined if the floating point value is not within the integral
     # dtype's dynamic range. This can (and should) cause undefined behavior
     # errors with UBSAN. These casts are deliberate in PyTorch, however, and
     # NumPy has the same behavior.
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     @dtypes(torch.bool, torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64)
-    def test_float_to_int_undefined_conversion(self, device, dtype):
+    def test_float_to_int_conversion_finite(self, device, dtype):
         min = torch.finfo(torch.float).min
         max = torch.finfo(torch.float).max
-        t = torch.tensor((min, max), device=device, dtype=torch.float)
-        self.assertEqual(t.to(dtype).dtype, dtype)
+
+        # Note: CUDA max float -> integer conversion is divergent on some dtypes
+        vals = (min, -2, -1.5, -.5, 0, .5, 1.5, 2, max)
+        if self.device_type == 'cuda':
+            vals = (min, -2, -1.5, -.5, 0, .5, 1.5, 2)
+
+        self._float_to_int_conversion_helper(vals, device, dtype)
 
     # Note: CUDA will fail this test on most dtypes, often dramatically.
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     @onlyCPU
     @dtypes(torch.bool, torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64)
-    def test_float_to_int_conversion_precision(self, device, dtype):
-        min = np.finfo(np.float32).min
-        max = np.finfo(np.float32).max
-        t = torch.tensor((float('-inf'), min, max, float('inf'), float('nan')), device=device, dtype=torch.float)
-        a = np.array((float('-inf'), min, max, float('inf'), float('nan')), dtype=np.float32)
+    def test_float_to_int_conversion_nonfinite(self, device, dtype):
+        vals = (float('-inf'), float('inf'), float('nan'))
 
-        torch_to_np = {
-            torch.bool  : np.bool,
-            torch.uint8 : np.uint8,
-            torch.int8  : np.int8,
-            torch.int16 : np.int16,
-            torch.int32 : np.int32,
-            torch.int64 : np.int64
-        }
-
-        torch_result = t.to(dtype)
-        numpy_result = torch.from_numpy(a.astype(torch_to_np[dtype]))
-        self.assertEqual(torch_result, numpy_result)
-
+        self._float_to_int_conversion_helper(vals, device, dtype)
 
     # TODO: re-enable this test
     @unittest.skipIf(True, "real and imag not implemented for complex")
@@ -15623,6 +15802,31 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         inp = inp.abs()
         for v in inp:
             self.assertGreater(math.copysign(1.0, v), 0.0)
+
+    @dtypes(torch.float)
+    def test_absolute(self, device, dtype):
+        # absolute is an alias for abs. Just check to see that results
+        # are the same.
+        t = torch.randn(10, 10, device=device, dtype=dtype)
+        r_abs = t.abs()
+        r_absolute = t.absolute()
+        self.assertEqual(r_abs, r_absolute)
+
+        r_abs = torch.abs(t)
+        r_absolute = torch.absolute(t)
+        self.assertEqual(r_abs, r_absolute)
+
+        r_abs = torch.empty((10, 10), device=device, dtype=dtype)
+        r_absolute = torch.empty((10, 10), device=device, dtype=dtype)
+        torch.abs(t, out=r_abs)
+        torch.absolute(t, out=r_absolute)
+        self.assertEqual(r_abs, r_absolute)
+
+        from copy import deepcopy
+        t_copy = deepcopy(t)
+        t.absolute_()
+        t_copy.abs_()
+        self.assertEqual(t, t_copy)
 
     def test_bucketization(self, device):
         values_1d = torch.tensor([1, 2, 3, 4, 5, 6, 7, 8, 9], device=device)
