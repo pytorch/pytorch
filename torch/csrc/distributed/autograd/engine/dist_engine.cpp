@@ -23,6 +23,52 @@ using torch::autograd::variable_list;
 static constexpr char* kNumBackwardPasses = "num_current_backward_passes";
 static constexpr char* kNumAutogradContexts = "num_autograd_contexts";
 
+// This hook does 3 things:
+//   1. Call pre hooks of the original AccumulateGrad to modify the input grad.
+//   2. Accumuate the gard to RPC context.
+//   3. Call post hooks of the original AccumulateGrad.
+class DistAccumulateGradCaptureHook
+    : public GraphTask::ExecInfo::Capture::GradCaptureHook {
+ public:
+  DistAccumulateGradCaptureHook(
+      std::shared_ptr<AccumulateGrad> accumulateGrad,
+      ContextPtr autogradContext)
+      : accumulateGrad_(std::move(accumulateGrad)),
+        autogradContext_(std::move(autogradContext)) {}
+
+  at::Tensor operator()(const at::Tensor& grad) override {
+    variable_list inputGrads = {grad};
+    // It's intended that pre/post hooks are still called even if the grad is
+    // undenfined here.
+    for (const auto& hook : accumulateGrad_->pre_hooks()) {
+      inputGrads = (*hook)(inputGrads);
+    }
+
+    // It is possible that the grad is not defined since a separate
+    // invocation of the autograd engine on the same node might actually
+    // compute this gradient.
+    if (inputGrads[0].defined()) {
+      // There are 3 internal references to 'inputGrads[0]' at this moment:
+      //   1. 'inputGrads[0]' in this function.
+      //   2. 'graph_task->captured_vars_' on the callsite in the local engine.
+      //   3. 'InputBuffer& inputs' on the callsite as the inputs of the
+      //   function node.
+      autogradContext_->accumulateGrad(
+          accumulateGrad_->variable, inputGrads[0], 3 /* num_expected_refs */);
+    }
+
+    const variable_list kEmptyOuput;
+    for (const auto& hook : accumulateGrad_->post_hooks()) {
+      (*hook)(kEmptyOuput, inputGrads);
+    }
+    return inputGrads[0];
+  }
+
+ private:
+  std::shared_ptr<AccumulateGrad> accumulateGrad_;
+  ContextPtr autogradContext_;
+};
+
 DistEngine::DistEngine()
     : initializedContextIds_(), engine_(Engine::get_default_engine()) {}
 
@@ -179,6 +225,24 @@ void DistEngine::computeDependencies(
     // Create a dummy GraphRoot and run init_to_execute with it.
     GraphRoot dummyRoot(edges, {});
     graphTask->init_to_execute(dummyRoot, outputEdges);
+    for (auto& mapEntry : graphTask->exec_info_) {
+      auto& execInfo = mapEntry.second;
+      if (!execInfo.captures_) {
+        continue;
+      }
+      auto fn = mapEntry.first;
+      // There may be nodes other than 'AccumulateGrad', e.g. RecvRPCBackward,
+      // to be captured.
+      if (auto accumulateGradFn = dynamic_cast<AccumulateGrad*>(fn)) {
+        for (auto& capture : *execInfo.captures_) {
+          capture.hooks_.push_back(
+              std::make_unique<DistAccumulateGradCaptureHook>(
+                  std::dynamic_pointer_cast<AccumulateGrad>(
+                      accumulateGradFn->shared_from_this()),
+                  autogradContext));
+        }
+      }
+    }
 
     // Mark all 'RecvRPCBackward' as needing execution.
     for (const auto& recvBackwardEdge : recvBackwardEdges) {
@@ -226,23 +290,6 @@ std::shared_ptr<rpc::FutureMessage> DistEngine::runEngineAndAccumulateGradients(
     try {
       const variable_list& grads = futureGrads.constValue();
       TORCH_INTERNAL_ASSERT(grads.size() == outputEdges.size());
-
-      // Accumulate all the gradients in the context.
-      for (size_t i = 0; i < grads.size(); i++) {
-        // It is possible that the grad is not defined since a separate
-        // invocation of the autograd engine on the same node might actually
-        // compute this gradient. Also accumulate grads only for
-        // AccumulateGrad function.
-        if (grads[i].defined() &&
-            dynamic_cast<AccumulateGrad*>(outputEdges[i].function.get())) {
-          auto& variable =
-              std::static_pointer_cast<AccumulateGrad>(outputEdges[i].function)
-                  ->variable;
-          autogradContext->accumulateGrad(
-              variable, grads[i], 1 /* num_expected_refs */);
-        }
-      }
-
       accumulateGradFuture->markCompleted(rpc::Message());
     } catch (std::exception& e) {
       accumulateGradFuture->setErrorIfNeeded(e.what());

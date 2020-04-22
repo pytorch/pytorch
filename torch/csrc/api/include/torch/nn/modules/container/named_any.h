@@ -67,6 +67,10 @@ class NamedAnyModule {
   NamedAnyModule(std::string name, const ModuleHolder<M>& module_holder)
       : NamedAnyModule(std::move(name), module_holder.ptr()) {}
 
+  /// Creates a `NamedAnyModule` from a type-erased `AnyModule`.
+  NamedAnyModule(std::string name, AnyModule any_module)
+    : name_(std::move(name)), module_(std::move(any_module)) {}
+
   /// Returns a reference to the name.
   const std::string& name() const noexcept {
     return name_;
@@ -83,10 +87,6 @@ class NamedAnyModule {
   }
 
  private:
-  /// Creates a `NamedAnyModule` from a type-erased `AnyModule`.
-  NamedAnyModule(std::string name, AnyModule any_module)
-    : name_(std::move(name)), module_(std::move(any_module)) {}
-
   std::string name_;
   AnyModule module_;
 };
