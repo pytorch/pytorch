@@ -861,8 +861,7 @@ int get_output_vec_size(TensorIterator &iter) {
   uint64_t base_address = reinterpret_cast<uint64_t>(iter.data_ptr(iter.noutputs())) / sizeof(scalar_t);
   update_vec_size(base_address);
 
-  const int output_index = iter.num_reduce_dims();
-  update_vec_size(iter.shape()[output_index]);
+  update_vec_size(iter.shape()[0]);
 
   int j = 0;
   for(auto i : iter.strides(iter.noutputs()).slice(1)) {
