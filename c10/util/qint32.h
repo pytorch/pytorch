@@ -9,7 +9,6 @@ namespace c10 {
 struct alignas(4) qint32 {
   using underlying = int32_t;
   int32_t val_;
-  qint32() = default;
   explicit qint32(int32_t val) : val_(val) {}
 };
 
