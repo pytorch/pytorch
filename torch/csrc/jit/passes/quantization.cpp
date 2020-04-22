@@ -395,7 +395,6 @@ class ModuleCloneHelper {
     }
     // Copy slots. If a slot is a module - recursively clone it.
     size_t N = type->numAttributes();
-
     for (size_t i = 0; i < N; ++i) {
       IValue s = module._ivalue()->getSlot(i);
       if (type->getAttribute(i)->is_module()) {
@@ -1846,6 +1845,7 @@ ModuleMethodVector InsertQuantDeQuantHelper::getInvokedMethods(
     Module& module,
     const std::string& method_name) {
   auto graph = module.get_method(method_name).graph();
+
   ModuleMethodVector invoked_methods;
   std::stack<Block*> blocks_to_visit;
   blocks_to_visit.push(graph->block());
@@ -1887,6 +1887,7 @@ void InsertQuantDeQuantHelper::run(
 
   Method method = module.get_method(method_name);
   auto graph = method.graph();
+
   // We only need to register new parameters if the graph has
   // been quantized before
   // TODO: dedup this part with code in quantizeTensors
