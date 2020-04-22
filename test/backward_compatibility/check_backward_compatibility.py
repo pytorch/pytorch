@@ -55,6 +55,15 @@ white_list = [
 # The nightly will fail to parse newly added syntax to schema declarations
 # Add new schemas that will fail the nightly here
 dont_parse_list = [
+    ('quantized::linear_unpack_fp16', datetime.date(2020, 6, 1)),
+    ('quantized::linear_unpack', datetime.date(2020, 6, 1)),
+    ('quantized::linear_prepack_fp16', datetime.date(2020, 6, 1)),
+    ('quantized::linear_prepack', datetime.date(2020, 6, 1)),
+    ('quantized::linear_dynamic_fp16', datetime.date(2020, 6, 1)),
+    ('quantized::linear_relu_dynamic', datetime.date(2020, 6, 1)),
+    ('quantized::linear_dynamic', datetime.date(2020, 6, 1)),
+    ('quantized::linear_relu', datetime.date(2020, 6, 1)),
+    ('quantized::linear', datetime.date(2020, 6, 1)),
 ]
 
 
@@ -75,9 +84,6 @@ def dont_parse(schema_line):
         regexp = re.compile(item[0])
         if regexp.search(schema_line):
             return True
-    if "torch.classes" in schema_line:
-        # TODO Fix type __torch__.torch.classes.xxx
-        return True
     return False
 
 
