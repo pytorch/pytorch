@@ -75,6 +75,11 @@ public:
   }
   BFloat16& operator[](int idx) = delete;
   const BFloat16& operator[](int idx) const  = delete;
+  int zero_mask() const {
+    // returns an integer mask where all zero elements are translated to 1-bit and others are translated to 0-bit
+    __m256i cmp = _mm256_cmpeq_epi16(values, _mm256_set1_epi16(0));
+    return _mm256_movemask_epi8(cmp);
+  }
   static Vec256<BFloat16> loadu(const void* ptr) {
     return _mm256_loadu_si256(reinterpret_cast<const __m256i*>(ptr));
   }
