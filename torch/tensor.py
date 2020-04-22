@@ -1,4 +1,3 @@
-import sys
 import torch
 import torch._C as _C
 from torch._namedtensor_internals import update_names, check_serializing_named_tensor, resolve_ellipsis
@@ -14,13 +13,9 @@ import functools
 
 
 def _wrap_type_error_to_not_implemented(f):
-    from torch import _six
-    import inspect
-
     # functools.wraps doesn't work well with methods in python 2
     method_assignments = ('__name__', '__doc__')
-    assigned = (method_assignments if _six.PY2 and inspect.ismethoddescriptor(f)
-                else functools.WRAPPER_ASSIGNMENTS)
+    assigned = functools.WRAPPER_ASSIGNMENTS
 
     @functools.wraps(f, assigned=assigned)
     def wrapped(*args, **kwargs):
@@ -155,17 +150,8 @@ class Tensor(torch._C._TensorBase):
         self.requires_grad, _, self._backward_hooks = state
 
     def __repr__(self):
-        # All strings are unicode in Python 3, while we have to encode unicode
-        # strings in Python2. If we can't, let python decide the best
-        # characters to replace unicode characters with.
-        if sys.version_info > (3,):
-            return torch._tensor_str._str(self)
-        else:
-            if hasattr(sys.stdout, 'encoding'):
-                return torch._tensor_str._str(self).encode(
-                    sys.stdout.encoding or 'UTF-8', 'replace')
-            else:
-                return torch._tensor_str._str(self).encode('UTF-8', 'replace')
+        # All strings are unicode in Python 3.
+        return torch._tensor_str._str(self)
 
     def backward(self, gradient=None, retain_graph=None, create_graph=False):
         r"""Computes the gradient of current tensor w.r.t. graph leaves.
