@@ -16,10 +16,33 @@ class AttributePropagator {
  public:
   AttributePropagator(Module& module) : module_(module) {}
 
+  void optimizeSubGraphs(
+      std::shared_ptr<Graph>& graph,
+      std::function<void(std::shared_ptr<Graph>&)> func) {
+    func(graph);
+    std::stack<Block*> blocks({graph->block()});
+    while (!blocks.empty()) {
+      Block* block = blocks.top();
+      blocks.pop();
+      for (auto n : block->nodes()) {
+        for (Block* sub_block : n->blocks()) {
+          blocks.push(sub_block);
+        }
+        if (n->kind() == prim::fork) {
+          auto subgraph = n->g(attr::Subgraph);
+          optimizeSubGraphs(subgraph, func);
+        }
+      }
+    }
+  }
+
   void run(std::shared_ptr<Graph>& graph) {
-    Inline(*graph);
+    optimizeSubGraphs(
+        graph, [](std::shared_ptr<Graph>& subgraph) { Inline(*subgraph); });
     propagateAttributes(graph);
-    runOptimization(graph, /* unroll? */ false);
+    optimizeSubGraphs(graph, [](std::shared_ptr<Graph>& subgraph) {
+      runOptimization(subgraph, /* unroll? */ false);
+    });
     cleanupFrozenModule(graph);
   }
 
@@ -64,13 +87,17 @@ class AttributePropagator {
   // corresponding value. Based on initial test on resnet50 and other torch
   // vision tests. GetAttrs are not too frequent so it is ok to chase GetAttr
   // chain to retrieve their values.
-  bool findConstantAttr(Value* input, std::string& name, Module& attrModule) {
+  bool findConstantAttr(
+      Value* input,
+      std::string& name,
+      Module& attrModule,
+      std::shared_ptr<Graph>& graph) {
     if (!input->type()->expect<ClassType>()->is_module()) {
       return false;
     }
     Node* node = input->node();
     names_.clear();
-    while (!(node->outputs()[0]->type() == attrModule.type())) {
+    while (!(node->outputs()[0]->type() == graph->inputs()[0]->type())) {
       if (node->kind() == prim::GetAttr) {
         names_.push_front(node->s(attr::name));
         node = node->inputs()[0]->node();
@@ -120,7 +147,6 @@ class AttributePropagator {
     std::stack<Block*> blocks({graph->block()});
     std::unique_ptr<AliasDb> aliasDb =
         torch::make_unique<AliasDb>(graph, /* isFrozen */ true);
-    IValue::HashAliasedIValues usedAttrs;
     while (!blocks.empty()) {
       Block* block = blocks.top();
       blocks.pop();
@@ -138,7 +164,7 @@ class AttributePropagator {
           }
           auto name = n->s(attr::name);
           auto attrModule = module_;
-          if (!findConstantAttr(n->inputs()[0], name, attrModule)) {
+          if (!findConstantAttr(n->inputs()[0], name, attrModule, graph)) {
             continue;
           }
 
@@ -150,7 +176,7 @@ class AttributePropagator {
             if (attr.isObject() || !AliasDb::isMutableType(attr.type())) {
               continue;
             }
-            usedAttrs.insert(attr);
+            usedAttrs_.insert(attr);
           }
 
           if (n->kind() == prim::SetAttr || aliasDb->hasOutputWriters(n)) {
@@ -161,13 +187,19 @@ class AttributePropagator {
             auto mptr = attrModule._ivalue();
             insertMutableAttr(name, attr, mptr);
           }
+        } else if (n->kind() == prim::fork) {
+          std::cout << "FORK: ";
+          n->dump();
+          applyToSubGraph(n, graph, [this](std::shared_ptr<Graph>& subgraph) {
+            recordMutableAttrs(subgraph);
+          });
         }
       }
     }
     // FIXME: Current Alias analysis fails to track subvalues.
     // This is not a common scenario, for freezing, detect and error out.
     IValue::HashAliasedIValues seen;
-    for (auto& val : usedAttrs) {
+    for (auto& val : usedAttrs_) {
       IValue::HashAliasedIValues subValues;
       val.getSubValues(subValues);
       TORCH_CHECK(
@@ -219,7 +251,7 @@ class AttributePropagator {
     std::unordered_map<ModulePtr, std::unordered_map<std::string, Value*>>
         attrValues;
     auto isEval = !module_.hasattr("training") || !module_.is_training();
-    GRAPH_DEBUG("Freezing Module in ", isEval ? "eval mode" : "training mode");
+    GRAPH_DEBUG("Freezing Module: ", module_.type()->name()->name());
     auto block = graph->block();
     std::stack<Block*> blocks({block});
 
@@ -243,7 +275,7 @@ class AttributePropagator {
           auto name = n->s(attr::name);
           auto attrModule = module_;
           auto input = n->inputs()[0];
-          if (!findConstantAttr(input, name, attrModule)) {
+          if (!findConstantAttr(input, name, attrModule, graph)) {
             GRAPH_DEBUG(
                 input->type()->expect<ClassType>()->is_module()
                     ? "attribute: " + name + " is mutable."
@@ -286,9 +318,40 @@ class AttributePropagator {
               paramConst->debugName());
           n->outputs().at(0)->replaceAllUsesWith(paramConst);
           n->removeAllInputs();
+        } else if (n->kind() == prim::fork) {
+          applyToSubGraph(n, graph, [this](std::shared_ptr<Graph>& subgraph) {
+            propagateAttributes(subgraph);
+          });
         }
       }
     }
+  }
+
+  void applyToSubGraph(
+      Node* n,
+      std::shared_ptr<Graph>& graph,
+      std::function<void(std::shared_ptr<Graph>&)> func) {
+    TORCH_CHECK(n->kind() == prim::fork);
+    auto attrModule = module_;
+    auto node = n->inputs()[0]->node();
+    // TODO: Short cut
+    TORCH_INTERNAL_ASSERT(node->kind() == prim::GetAttr);
+    auto name = node->s(attr::name);
+    auto input = node->inputs()[0];
+    if (!findConstantAttr(input, name, attrModule, graph)) {
+      // Module needs to be preserved.
+      std::cout << "WHAT\n";
+      node->dump();
+      attrModule.dump(false, false, false);
+      return;
+    }
+    std::cout << "GOOD\n";
+    node->dump();
+    attrModule = attrModule.attr(name).toModule();
+    auto subgraph = n->g(attr::Subgraph);
+    std::swap(module_, attrModule);
+    func(subgraph);
+    module_ = attrModule;
   }
 
   bool moduleEscapes(Module& subModule, std::shared_ptr<Graph>& graph) {
@@ -332,12 +395,32 @@ class AttributePropagator {
               auto attr = module.attr(name);
               insertMutableAttr(name, attr, mptr);
               if (attr.isModule()) {
-                modules.insert(attr.toModule()._ivalue());
+                auto module = attr.toModule();
+                if (modules.count(module._ivalue()) == 0) {
+                  if (moduleEscapes(module, graph)) {
+                    // Preserve all attributes and methods of 'module' type.
+                    auto type = module.type();
+                    attrsToKeep_[type].insert(type->numAttributes());
+                  }
+                  modules.insert(module._ivalue());
+                }
               }
               break;
             }
           }
+        } else if (n->kind() == prim::fork) {
+          applyToSubGraph(n, graph, [this](std::shared_ptr<Graph>& subgraph) {
+            recordReferencedAttrs(subgraph);
+          });
         }
+
+        /*if (n->kind() == prim::CallMethod) {
+        auto classType = n->inputs().at(0)->type()->cast<ClassType>();
+        TORCH_INTERNAL_ASSERT(classType, "Interface call not supported");
+        // Found a call, Preserve all attributes and methods of this type.
+        std::cout << classType->name()->qualifiedName() << " TYPE \n";
+        attrsToKeep_[classType].insert(classType->numAttributes());
+      }*/
       }
     }
   }
@@ -351,9 +434,13 @@ class AttributePropagator {
   void handleSharedClassType(Module& module, std::shared_ptr<Graph>& graph) {
     auto type = module.type();
     size_t N = type->numAttributes();
-    if (moduleEscapes(module, graph)) {
+    /*if (moduleEscapes(module, graph)) {
       // Perserve all its attributes and methods.
       attrsToKeep_[type].insert(N);
+      return;
+    }*/
+    if (attrsToKeep_[type].count(N)) {
+      // Module escapes. Preserve all its attributes and methods.
       return;
     }
     auto it2 = preservedScalarAttrs_.find(module._ivalue());
@@ -428,6 +515,9 @@ class AttributePropagator {
   // IValues.
   std::unordered_map<ModulePtr, std::unordered_set<std::string>>
       preservedScalarAttrs_;
+
+  // Track all used attributes ivalues that can be aliased.
+  IValue::HashAliasedIValues usedAttrs_;
 
   // Contains the attribute slots that need to be preserved for each ClassType.
   std::unordered_map<ClassTypePtr, std::unordered_set<size_t>> attrsToKeep_;
