@@ -20,7 +20,7 @@ Element* makeFreshValueImpl(
       std::make_unique<Element>(v, indexToElementMap_.size()));
   return indexToElementMap_.back().get();
 }
-}
+} // namespace
 
 Element::Element(const Value* value_, unsigned index_)
     : index(index_), value(value_) {}
@@ -111,7 +111,9 @@ void MemoryDAGBuilder::makePointerTo(Element* from, Element* to) {
   makePointerToImpl(from, to);
 }
 
-void MemoryDAGBuilder::addToContainedElements(Element* elem, Element* container) {
+void MemoryDAGBuilder::addToContainedElements(
+    Element* elem,
+    Element* container) {
   TORCH_INTERNAL_ASSERT(
       elem != container, "Elements cannot contain themselves");
   container->containedElements.set(elem->index);
@@ -122,10 +124,6 @@ Element* MemoryDAGBuilder::makeFreshValue(const Value* v) {
   return makeFreshValueImpl(v, indexToElementMap_);
 }
 
-std::unique_ptr<MemoryDAG> MemoryDAGBuilder::build() {
-  return std::make_unique<MemoryDAG>(std::move(indexToElementMap_));
-}
-
 const MemoryLocations& MemoryDAG::getMemoryLocations(const Element* e) const {
   if (e->cachedMemoryLocations_) {
     return *e->cachedMemoryLocations_;
@@ -133,8 +131,8 @@ const MemoryLocations& MemoryDAG::getMemoryLocations(const Element* e) const {
 
   MemoryLocations ret;
   if (e->pointsTo.empty()) {
-    // Base case: if we don't point to anything, this element is a memory location.
-    // Return itself.
+    // Base case: if we don't point to anything, this element is a memory
+    // location. Return itself.
     ret.set(e->index);
   } else {
     for (auto el : e->pointsTo) {
@@ -175,8 +173,8 @@ void MemoryDAG::setWildcards(
   // We take advantage of the fact that we only edited memory locations.
   //
   // Say we added a pointer from `MemoryLocationFoo -> WildcardBar`.
-  // For every element, if the cache contains `MemoryLocationFoo`, then we must add
-  // `WildcardBar` to it.
+  // For every element, if the cache contains `MemoryLocationFoo`, then we must
+  // add `WildcardBar` to it.
   for (const std::unique_ptr<Element>& e : this->indexToElementMap_) {
     if (!e->value) {
       // This element is a wildcard element, we can skip it.
