@@ -148,14 +148,14 @@ struct GuardElimination {
           }
         }
 
-        // remove guards on the guard output
+        // remove redundant dominated guards
         std::vector<Use> users = n->output()->uses();
         for (auto use : users) {
           auto user = use.user;
           if (user->kind() == prim::Guard) {
             GRAPH_UPDATE(
                 "Removing dominated guard ", user, " and replacing with ", n);
-            user->output()->replaceAllUsesWith(n->output());
+            user->output()->replaceAllUsesWith(guard_output);
             user->destroy();
           }
         }
