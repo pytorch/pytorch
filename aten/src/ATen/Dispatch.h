@@ -24,6 +24,7 @@
   case enum_type: {                                                     \
     using scalar_t = type;                                              \
     using underlying_t C10_UNUSED_DISPATCH_CUDA_WORKAROUND = scalar_t::underlying; \
+    const auto& SCALAR_TYPE C10_UNUSED_DISPATCH_CUDA_WORKAROUND = toUnderlying(enum_type); \
     const auto& UNDERLYING_TYPE C10_UNUSED_DISPATCH_CUDA_WORKAROUND = toUnderlying(enum_type); \
     return __VA_ARGS__();                                               \
   }
