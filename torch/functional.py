@@ -4,7 +4,6 @@ from ._lowrank import svd_lowrank, pca_lowrank
 from ._overrides import has_torch_function, handle_torch_function
 from ._jit_internal import boolean_dispatch, List
 from ._jit_internal import _overload as overload
-from torch._six import PY2
 
 Tensor = torch.Tensor
 from torch import _VF
@@ -856,9 +855,6 @@ def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):  # noqa
         if type(input) is not Tensor and has_torch_function((input,)):
             return handle_torch_function(
                 norm, (input,), input, p=p, dim=dim, keepdim=keepdim, out=out, dtype=dtype)
-        # py2 considers isinstance(unicodestr, str) == False
-        if PY2 and isinstance(p, unicode):
-            p = str(p)
 
     ndim = input.dim()
 
@@ -983,6 +979,9 @@ def _lu_impl(A, pivot=True, get_infos=False, out=None):
         equal to 32 on a CUDA device, the LU factorization is repeated
         for singular matrices due to the bug in the MAGMA library (see
         magma issue 13).
+
+    .. note::
+       ``L``, ``U``, and ``P`` can be derived using :func:`torch.lu_unpack`.
 
     Arguments:
         A (Tensor): the tensor to factor of size :math:`(*, m, n)`

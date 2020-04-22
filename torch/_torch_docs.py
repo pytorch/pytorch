@@ -123,6 +123,13 @@ Example::
     tensor([ 1,  2,  3])
 """.format(**common_args))
 
+add_docstr(torch.absolute,
+           r"""
+absolute(input, out=None) -> Tensor
+
+Alias for :func:`torch.abs`
+""".format(**common_args))
+
 add_docstr(torch.acos,
            r"""
 acos(input, out=None) -> Tensor
@@ -476,7 +483,7 @@ Args:
     other (Tensor): second tensor to compare
     atol (float, optional): absolute tolerance. Default: 1e-08
     rtol (float, optional): relative tolerance. Default: 1e-05
-    equal_nan (bool, optional): if ``True``, then two ``NaN`` s will be compared as equal. Default: ``False``
+    equal_nan (bool, optional): if ``True``, then two ``NaN`` s will be considered equal. Default: ``False``
 
 Example::
 
@@ -809,7 +816,7 @@ Example:
 
 add_docstr(torch.bmm,
            r"""
-bmm(input, mat2, out=None) -> Tensor
+bmm(input, mat2, deterministic=False, out=None) -> Tensor
 
 Performs a batch matrix-matrix product of matrices stored in :attr:`input`
 and :attr:`mat2`.
@@ -830,6 +837,10 @@ If :attr:`input` is a :math:`(b \times n \times m)` tensor, :attr:`mat2` is a
 Args:
     input (Tensor): the first batch of matrices to be multiplied
     mat2 (Tensor): the second batch of matrices to be multiplied
+    deterministic (bool, optional): flag to choose between a faster non-deterministic
+                                    calculation, or a slower deterministic calculation.
+                                    This argument is only available for sparse-dense CUDA bmm.
+                                    Default: ``False``
     {out}
 
 Example::
@@ -2580,6 +2591,7 @@ Example::
 add_docstr(torch.isinf,
            r"""
 Returns a new tensor with boolean elements representing if each element is `+/-INF` or not.
+Complex values are infinite when their real and/or imaginary part is infinite.
 
     Arguments:
         tensor (Tensor): A tensor to check
@@ -2593,9 +2605,44 @@ Returns a new tensor with boolean elements representing if each element is `+/-I
         tensor([False,  True,  False,  True,  False])
 """)
 
+add_docstr(torch.isclose,
+           r"""
+isclose(input, other, rtol=1e-05, atol=1e-08, equal_nan=False) -> Tensor
+
+Returns a new tensor with boolean elements representing if each element of
+:attr:`input` is "close" to the corresponding element of :attr:`other`.
+Closeness is defined as:
+
+. math::
+    \lvert \text{input} - \text{other} \rvert \leq \texttt{atol} + \texttt{rtol} \times \lvert \text{other} \rvert
+""" + r"""
+
+where :attr:`input` and :attr:`other` are finite. Where :attr:`input`
+and/or :attr:`other` are nonfinite they are close if and only if
+they are equal, with NaNs being considered equal to each other when
+:attr:`equal_nan` is True.
+
+Args:
+    input (Tensor): first tensor to compare
+    other (Tensor): second tensor to compare
+    atol (float, optional): absolute tolerance. Default: 1e-08
+    rtol (float, optional): relative tolerance. Default: 1e-05
+    equal_nan (bool, optional): if ``True``, then two ``NaN`` s will be considered equal. Default: ``False``
+
+Examples::
+
+    >>> torch.isclose(torch.tensor((1., 2, 3)), torch.tensor((1 + 1e-10, 3, 4)))
+    tensor([ True, False, False])
+    >>> torch.isclose(torch.tensor((float('inf'), 4)), torch.tensor((float('inf'), 6)), rtol=.5)
+    tensor([True, True])
+""")
+
 add_docstr(torch.isfinite,
            r"""
-Returns a new tensor with boolean elements representing if each element is `Finite` or not.
+Returns a new tensor with boolean elements representing if each element is `finite` or not.
+
+Real values are finite when they are not NaN, negative infinity, or infinity.
+Complex values are finite when both their real and imaginary parts are finite.
 
     Arguments:
         tensor (Tensor): A tensor to check
@@ -2612,6 +2659,7 @@ Returns a new tensor with boolean elements representing if each element is `Fini
 add_docstr(torch.isnan,
            r"""
 Returns a new tensor with boolean elements representing if each element is `NaN` or not.
+Complex values are considered `NaN` when either their real and/or imaginary part is NaN.
 
 Arguments:
     input (Tensor): A tensor to check

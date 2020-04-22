@@ -304,11 +304,6 @@ class TORCH_API RpcAgent {
         std::chrono::steady_clock::now() + timedelta);
   }
 
-  // storing futures before adding callback
-  std::vector<
-      std::pair<std::shared_ptr<FutureMessage>, std::shared_ptr<RpcRetryInfo>>>
-      futures;
-
   // Condition Variable to signal when the rpcRetryMap_ has been populated.
   std::condition_variable rpcRetryMapCV_;
 
