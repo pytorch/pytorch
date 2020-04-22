@@ -218,6 +218,78 @@ PyObject* rpc_init(PyObject* /* unused */) {
                   local value. Otherwise, throws an exception.
               )")
           .def(
+              "rpc_sync",
+              [&](PyRRef& self) {
+                return self.createRRefProxy(self, RRefProxyType::RPC_SYNC);
+              },
+              py::call_guard<py::gil_scoped_release>(),
+              R"(
+                  Create a helper proxy to easily launch an ``rpc_sync`` using
+                  the owner of the RRef as the destination to run functions on
+                  the object referenced by this RRef. More specifically,
+                  ``rref.rpc_sync().func_name(*args, **kwargs)`` is the same as
+                  the following:
+
+                  >>> def run(rref, func_name, args, kwargs):
+                  >>>   return getattr(rref.local_value(), func_name)(*args, **kwargs)
+                  >>>
+                  >>> rpc.rpc_sync(rref.owner(), run, args=(rref, func_name, args, kwargs))
+
+                  Example::
+                      >>> from torch.distributed import rpc
+                      >>> rref = rpc.remote("worker1", torch.add, args=(torch.zeros(2, 2), 1))
+                      >>> rref.rpc_sync().size()  # returns torch.Size([2, 2])
+                      >>> rref.rpc_sync().view(1, 4)  # returns tensor([[1., 1., 1., 1.]])
+              )")
+          .def(
+              "rpc_async",
+              [&](PyRRef& self) {
+                return self.createRRefProxy(self, RRefProxyType::RPC_ASYNC);
+              },
+              py::call_guard<py::gil_scoped_release>(),
+              R"(
+                  Create a helper proxy to easily launch an ``rpc_async`` using
+                  the owner of the RRef as the destination to run functions on
+                  the object referenced by this RRef. More specifically,
+                  ``rref.rpc_async().func_name(*args, **kwargs)`` is the same as
+                  the following:
+
+                  >>> def run(rref, func_name, args, kwargs):
+                  >>>   return getattr(rref.local_value(), func_name)(*args, **kwargs)
+                  >>>
+                  >>> rpc.rpc_async(rref.owner(), run, args=(rref, func_name, args, kwargs))
+
+                  Example::
+                      >>> from torch.distributed import rpc
+                      >>> rref = rpc.remote("worker1", torch.add, args=(torch.zeros(2, 2), 1))
+                      >>> rref.rpc_async().size().wait()  # returns torch.Size([2, 2])
+                      >>> rref.rpc_async().view(1, 4).wait()  # returns tensor([[1., 1., 1., 1.]])
+              )")
+          .def(
+              "remote",
+              [&](PyRRef& self) {
+                return self.createRRefProxy(self, RRefProxyType::REMOTE);
+              },
+              py::call_guard<py::gil_scoped_release>(),
+              R"(
+                  Create a helper proxy to easily launch an ``remote`` using
+                  the owner of the RRef as the destination to run functions on
+                  the object referenced by this RRef. More specifically,
+                  ``rref.remote().func_name(*args, **kwargs)`` is the same as
+                  the following:
+
+                  >>> def run(rref, func_name, args, kwargs):
+                  >>>   return getattr(rref.local_value(), func_name)(*args, **kwargs)
+                  >>>
+                  >>> rpc.remote(rref.owner(), run, args=(rref, func_name, args, kwargs))
+
+                  Example::
+                      >>> from torch.distributed import rpc
+                      >>> rref = rpc.remote("worker1", torch.add, args=(torch.zeros(2, 2), 1))
+                      >>> rref.remote().size().to_here()  # returns torch.Size([2, 2])
+                      >>> rref.remote().view(1, 4).to_here()  # returns tensor([[1., 1., 1., 1.]])
+              )")
+          .def(
               py::pickle(
                   [](const PyRRef& self) {
                     TORCH_CHECK(
@@ -536,7 +608,7 @@ If the future completes with an error, an exception is thrown.
       },
       R"(
           Retrieve the default timeout for all RPCs that was set during RPC initialization.
-
+          The returned value will be in seconds.
           Returns:
             ``float`` indicating the RPC timeout in seconds.
       )");
@@ -562,11 +634,15 @@ If the future completes with an error, an exception is thrown.
         RpcAgent::getCurrentRpcAgent()->setRpcTimeout(rpcTimeout);
       },
       R"(
-          Set the default timeout for all RPCs. If an RPC is not completed
-          within this time, an exception indicating it has timed out will be
-          raised. To control timeout for specific RPCs, a timeout parameter can
-          be passed into :meth:`~torch.distributed.rpc.rpc_sync` and
+          Set the default timeout for all RPCs. The input unit is expected to be
+          in seconds.If an RPC is not completed within this time, an exception
+          indicating it has timed out will be raised. To control timeout for
+          specific RPCs, a timeout parameter can be passed into
+          :meth:`~torch.distributed.rpc.rpc_sync` and
           :meth:`~torch.distributed.rpc.rpc_async`.
+
+          Arguments:
+            rpcTimeoutSeconds (float): Timeout value in seconds.
       )");
 
   Py_RETURN_TRUE;

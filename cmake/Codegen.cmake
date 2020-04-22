@@ -206,7 +206,7 @@ if(INTERN_BUILD_ATEN_OPS)
   add_dependencies(ATEN_CUDA_FILES_GEN_LIB ATEN_CUDA_FILES_GEN_TARGET)
 endif()
 
-function(get_filelist name outputvar)
+function(append_filelist name outputvar)
   set(_rootdir "${CMAKE_CURRENT_LIST_DIR}/../")
   # configure_file adds its input to the list of CMAKE_RERUN dependencies
   configure_file(
@@ -222,5 +222,6 @@ function(get_filelist name outputvar)
     message(FATAL_ERROR "Failed to fetch filelist ${name} from build_variables.bzl")
   endif()
   string(REPLACE "\n" "" _tempvar "${_tempvar}")
-  set(${outputvar} ${_tempvar} PARENT_SCOPE)
+  list(APPEND ${outputvar} ${_tempvar})
+  set(${outputvar} "${${outputvar}}" PARENT_SCOPE)
 endfunction()

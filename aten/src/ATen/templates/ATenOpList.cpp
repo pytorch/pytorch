@@ -1,4 +1,4 @@
-#include <ATen/core/OpsAlreadyMovedToC10.h>
+#include <ATen/core/ATenOpList.h>
 
 #include <string>
 #include <cstring>
@@ -7,8 +7,6 @@
 #include <ATen/core/operator_name.h>
 
 // ${generated_comment}
-
-// TODO Once all ATen ops are moved to c10, this file should be removed
 
 namespace at {
 
@@ -27,22 +25,12 @@ struct OpNameHash final {
 };
 }
 
-bool is_aten_op_and_unboxing_is_already_handled_by_c10(const c10::OperatorName& opName) {
+bool is_custom_op(const c10::OperatorName& opName) {
   static std::unordered_set<std::pair<const char*, const char*>, OpNameHash, OpNameEquals> ops {
-    ${aten_ops_with_unboxing_already_handled_by_c10}
+    ${aten_ops}
     {"", ""}
   };
-  return ops.count(std::make_pair(opName.name.c_str(), opName.overload_name.c_str())) != 0;
+  return ops.count(std::make_pair(
+             opName.name.c_str(), opName.overload_name.c_str())) == 0;
 }
-
-bool is_aten_op_and_unboxing_is_not_handled_by_c10_yet(const c10::OperatorName& opName) {
-  static std::unordered_set<std::pair<const char*, const char*>, OpNameHash, OpNameEquals> ops {
-    ${aten_ops_with_unboxing_not_handled_by_c10_yet}
-    {"", ""}
-  };
-  return ops.count(std::make_pair(opName.name.c_str(), opName.overload_name.c_str())) != 0;
-}
-
-
-
 }

@@ -23,14 +23,14 @@
 
 // ${generated_comment}
 
+// This file contains manual unboxing wrappers for ops that aren't
+// use_c10_dispatcher: full because the templated unboxing logic in c10 doesn't
+// support them yet. The ultimate goal is to make all ops use the templated
+// unboxing and delete this codegen file.
+
 // NOTE [Sharded File]: This file is generated in a sharded fashion to speed up
 // incremental rebuilds. See the comment at the top of
 // templates/VariableType.cpp for an analogous, in-depth discussion.
-//
-// Note that unlike VariableType.cpp, when sharding this file we take
-// care to generate all overloads of a particular name in a single
-// file and in a particular order. See gen_jit_dispatch.py for
-// details.
 
 namespace torch { namespace jit {
 
@@ -93,12 +93,6 @@ std::array<bool, N> as_bool_array(const c10::List<bool>& list) {
   return res;
 }
 
-int (*DUMMY_OPERATION_JITONLY)(Stack*) =
-  [](Stack* stack) -> int {
-    TORCH_CHECK(false, "Operator has been stripped in the custom build.")
-    return 0;
-  };
-
 KernelFunction::InternalBoxedKernelFunction *DUMMY_OPERATION =
   [](c10::OperatorKernel *, const c10::OperatorHandle &, std::vector<c10::IValue> *) -> void {
     TORCH_CHECK(false, "Operator has been stripped in the custom build.")
@@ -115,19 +109,6 @@ public:
     auto op = dispatcher.findSchema(name).value();
     registrationHandles_.push_back(std::move(registration));
     dispatcher.setManuallyBoxedKernelFor_(op, boxed_kernel_wrapper);
-    return std::move(*this);
-  }
-
-  Registerer&& jitOnlyOp(const std::string& schema, std::function<int (Stack*)> boxed_kernel_wrapper) && {
-    torch::jit::registerOperator(
-      torch::jit::Operator(
-        schema,
-        Operation([boxed_kernel_wrapper = std::move(boxed_kernel_wrapper)] (Stack& stack) -> int {
-          return boxed_kernel_wrapper(&stack);
-        }),
-        c10::AliasAnalysisKind::FROM_SCHEMA
-      )
-    );
     return std::move(*this);
   }
 
