@@ -631,9 +631,12 @@ void Engine::evaluate_function(
     if (auto* capture_vec = fn_info.captures_.get()) {
       // Lock mutex for writing to graph_task->captured_vars_.
       std::lock_guard<std::mutex> lock(graph_task->mutex_);
-      for (auto capture : *capture_vec) {
-        graph_task->captured_vars_[capture.output_idx_] =
-            inputs[capture.input_idx_];
+      for (const auto& capture : *capture_vec) {
+        auto& captured_grad = graph_task->captured_vars_[capture.output_idx_];
+        captured_grad = inputs[capture.input_idx_];
+        for (auto& hook : capture.hooks_) {
+          captured_grad = (*hook)(captured_grad);
+        }
       }
     }
     if (!fn_info.needed_) {
@@ -936,7 +939,10 @@ void Engine::mark_graph_task_completed(
     const std::shared_ptr<GraphTask>& graph_task) {
   // Allow only one thread one attempt to process this logic.
   if (graph_task->future_completed_.exchange(true)) {
-    // Future is already marked as completed.
+    // Future is already marked complete, or being marked as such.
+    // In case the marking complete is only in progress, we add a
+    // waitNoThrow() to guarantee the future is marked complete on exit.
+    graph_task->future_result_->waitNoThrow();
     return;
   }
 

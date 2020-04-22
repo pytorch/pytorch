@@ -36,6 +36,8 @@ if [ -n "${IN_CIRCLECI}" ]; then
 fi
 
 if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
+  # Print GPU info
+  rocminfo | egrep 'Name:.*\sgfx|Marketing'
   # TODO: Move this to Docker
   sudo apt-get -qq update
   sudo apt-get -qq install --no-install-recommends libsndfile1
@@ -271,7 +273,7 @@ test_bazel() {
 
   get_bazel
 
-  tools/bazel test --test_tag_filters=-gpu-required --test_filter=-*_CUDA :all_tests
+  tools/bazel test --test_output=all --test_tag_filters=-gpu-required --test_filter=-*_CUDA :all_tests
 }
 
 if ! [[ "${BUILD_ENVIRONMENT}" == *libtorch* || "${BUILD_ENVIRONMENT}" == *-bazel-* ]]; then

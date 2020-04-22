@@ -250,20 +250,6 @@ RegisterOperators reg({
           return 0;
         },
         aliasAnalysisFromSchema()),
-    Operator(
-        "aten::Size(int[] sizes) -> int[]",
-        [](Stack& stack) { return 0; },
-        aliasAnalysisFromSchema()),
-    Operator(
-        "aten::size(Tensor self) -> int[]",
-        [](Stack& stack) {
-          RECORD_FUNCTION("size", last(stack, 1));
-
-          auto t = std::move(pop(stack)).toTensor();
-          pack(stack, t.sizes().vec());
-          return 0;
-        },
-        aliasAnalysisFromSchema()),
     // not currently being generated, here for BC
     Operator(
         "aten::list_with_default(int[] list, int[] defaults) -> int[]",
