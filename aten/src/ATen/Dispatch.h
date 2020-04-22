@@ -12,7 +12,7 @@
 #define C10_UNUSED_DISPATCH_CUDA_10_1_WORKAROUND
 #else
 #define C10_UNUSED_DISPATCH_CUDA_10_1_WORKAROUND C10_UNUSED
-#endif // defined(__CUDACC__) && CUDA_VERSION <= 10000
+#endif // defined(__CUDACC__) && CUDA_VERSION <= 10100
 
 #define AT_PRIVATE_CASE_TYPE(enum_type, type, ...)              \
   case enum_type: {                                             \
