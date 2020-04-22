@@ -532,9 +532,9 @@ void initJITBindings(PyObject* module) {
             return paramsDict;
           },
           pybind11::return_value_policy::move)
-      .def(
-        "_jit_pass_mobile_module_lints",
-          [](script::Module& module) { return GenerateModuleLints(module); });
+      .def("_jit_pass_mobile_module_lints", [](script::Module& module) {
+        return GenerateModuleLints(module);
+      });
 
   // NOLINTNEXTLINE(bugprone-unused-raii)
   py::class_<CompleteArgumentSpec>(m, "CompleteArgumentSpec")

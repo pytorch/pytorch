@@ -81,17 +81,18 @@ class TestOptimizer(unittest.TestCase):
 
     def test_generate_mobile_module_lints(self):
         class MyTestModule(torch.nn.Module):
-            def __init__(self, weight):
-                super().__init__()
-                self.weight = weight
+            def __init__(self):
+                super(MyTestModule, self).__init__()
+                self.linear = torch.nn.Linear(4, 4)
 
-            def forward(self, x):
-                return x * self.weight
+            def forward(self, x, h):
+                new_h = torch.tanh(self.linear(x) + h)
+                return new_h, new_h
 
-        scripted_model = torch.jit.script(MyTestModule(torch.tensor([2.0])))
+        scripted_model = torch.jit.script(MyTestModule())
         lint_map = mobile_optimizer.generate_mobile_module_lints(scripted_model)
-        print("lint_map", lint_map)
         self.assertEqual(len(lint_map), 1)
+        self.assertIsNotNone(lint_map["ML_BUNDLED_INPUT"])
 
 
 if __name__ == '__main__':
