@@ -95,7 +95,6 @@ class RecordingLogger(Logger):
         self.stats["quantized"] = None
 
     def forward(self, x, y):
-        print("in RecordingLogger forward")
         if self.stats["float"] is None:
             if x.is_quantized:
                 self.stats["quantized"] = x.dequantize().detach()
