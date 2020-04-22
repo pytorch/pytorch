@@ -67,7 +67,7 @@ std::tuple<Tensor, Tensor, int64_t> compute_unique(
     thrust::adjacent_difference(policy, range_ptr + 1, range_ptr + num_out + 1, counts_ptr);
   }
 
-  THCudaCheck(cudaGetLastError());
+  AT_CUDA_CHECK(cudaGetLastError());
   return std::tuple<Tensor, Tensor, int64_t>(inverse_indices, counts, num_out);
 }
 

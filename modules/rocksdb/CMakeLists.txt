@@ -19,8 +19,8 @@
 # (2) When we are not building with the main repo, we will need to do the usual
 #     cmake setup: version checks, project options, find dependent packages,
 #     etc.
-if (CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
-  if (NOT USE_ROCKSDB)
+if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
+  if(NOT USE_ROCKSDB)
     return()
   endif()
 else()
@@ -69,6 +69,6 @@ install(TARGETS caffe2_rocksdb DESTINATION lib)
 # them.
 # Note(jiayq): this also depends on a separate cmake move to reorg test builds
 # and binary builds after modules. When it is done, this note should be removed.
-if (CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
+if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
   set(Caffe2_MODULES ${Caffe2_MODULES} caffe2_rocksdb PARENT_SCOPE)
 endif()
