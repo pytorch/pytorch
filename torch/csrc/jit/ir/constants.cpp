@@ -18,9 +18,23 @@ bool insertableTensor(const at::Tensor& ten) {
   return !ten.requires_grad();
 }
 
+
+// Check that TorchScript can handle inlining string.
+// TODO: support inlining any string (e.g. \x, \u, \U escapes).
+static bool isSupportedStringLiteral(const std::string& str) {
+  for (auto c : str) {
+    if (c > 0x7fu)
+      return false;
+  }
+  return true;
+}
+
 bool insertableIValue(const IValue& ivalue) {
+  if (ivalue.isString()) {
+     return isSupportedStringLiteral(ivalue.toString()->string());
+  }
   if (ivalue.isInt() || ivalue.isNone() || ivalue.isBool() ||
-      ivalue.isDouble() || ivalue.isString() || ivalue.isDevice()) {
+      ivalue.isDouble() || ivalue.isDevice()) {
     return true;
   }
   if (ivalue.isTensor()) {
@@ -108,13 +122,24 @@ c10::optional<Value*> tryInsertConstant(
         std::vector<double>(double_list.begin(), double_list.end()));
     n->output()->setType(ListType::ofFloats());
   } else if (val.isString()) {
-    n->s_(attr::value, val.toString()->string());
-    n->output()->setType(StringType::get());
+    auto& str = val.toString()->string();
+    if (isSupportedStringLiteral(str)) {
+      n->s_(attr::value, str);
+      n->output()->setType(StringType::get());
+    } else {
+      n->destroy();
+      return c10::nullopt;
+    }
   } else if (val.type()->isSubtypeOf(ListType::ofStrings())) {
     std::vector<std::string> ss;
     auto generic_list = val.toListRef();
     for (const IValue& ival : generic_list) {
-      ss.push_back(ival.toStringRef());
+      if (isSupportedStringLiteral(ival.toStringRef())) {
+        ss.push_back(ival.toStringRef());
+      } else {
+        n->destroy();
+        return c10::nullopt;
+      }
     }
     n->ss_(attr::value, ss);
     n->output()->setType(ListType::create(StringType::get()));
