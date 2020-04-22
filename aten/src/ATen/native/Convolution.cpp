@@ -699,6 +699,18 @@ at::Tensor _convolution(
     if (params.use_cpu_depthwise3x3_winograd(input, weight)) {
       output = convolution_depthwise3x3_winograd_stub(
         input.device().type(), input, weight, bias, params.stride, params.padding, params.groups);
+    } else if (
+        !params.transposed && (input.ndimension() == 5) &&
+        (input.device().type() == c10::DeviceType::CPU) &&
+        !params.is_dilated()) {
+      // fast path for grouped conv3d
+      output = at::slow_conv3d(
+          input,
+          weight,
+          weight.sizes().slice(2),
+          bias,
+          params.stride,
+          params.padding);
     } else if (params.groups == 1) {
       output = at::_convolution_nogroup(
           input.contiguous(), weight, bias, params.stride, params.padding, params.dilation, params.transposed, params.output_padding);
@@ -785,6 +797,9 @@ at::Tensor _convolution_nogroup(
     } else if (dim == 5) { /* dim == 5, CPU, non-dilated */
       /* CPU implementation has specialized MM kernels
          for non-dilated case here */
+
+      // This path is already overwritten with the fast impl in _convolution
+      // See: https://github.com/pytorch/pytorch/pull/3635
       return at::slow_conv3d(
           input, weight, kernel_size, bias,
           stride, padding);
@@ -829,7 +844,13 @@ std::tuple<Tensor,Tensor,Tensor> _convolution_double_backward(
   params.dilation = dilation_.vec();
   params.transposed = transposed_;
   params.output_padding = output_padding_.vec();
-  params.groups = groups_;
+  // TODO: hacky way of inferring the groups number for grouped Conv3D
+  // See: https://github.com/pytorch/pytorch/pull/36355
+  if (!params.transposed && input.dim() > 4) {
+    params.groups = input.size(1) / weight.size(1);
+  } else {
+    params.groups = groups_;
+  }
   params.benchmark = benchmark;
   params.deterministic = deterministic;
   params.cudnn_enabled = cudnn_enabled;
@@ -902,7 +923,6 @@ std::tuple<Tensor,Tensor,Tensor> _convolution_double_backward(
         if (gOt.is_cuda()) {
           gOt = gOt.contiguous();
         }
-
         // Compute conv
         if (params.transposed) {
           gw_conv_params.transposed = false;

@@ -679,6 +679,20 @@ graph(%self, %input):
     %second_module = match::module[name="ReLU"](%self)
     %second_output = prim::CallMethod[name="forward"](%second_module, %first_output)
     return (%second_output) )");
+  const PatternInfo conv3d_functional_relu = PatternInfo::parse_from_str(R"(
+graph(%self, %input, %inplace):
+    %relu = prim::Constant[name="relu"]()
+    %first_module = match::module[name="Conv3d"](%self)
+    %first_output = prim::CallMethod[name="forward"](%first_module, %input)
+    %second_output = prim::CallFunction(%relu, %first_output, %inplace)
+    return (%second_output) )");
+  const PatternInfo conv3d_relu = PatternInfo::parse_from_str(R"(
+graph(%self, %input):
+    %first_module = match::module[name="Conv3d"](%self)
+    %first_output = prim::CallMethod[name="forward"](%first_module, %input)
+    %second_module = match::module[name="ReLU"](%self)
+    %second_output = prim::CallMethod[name="forward"](%second_module, %first_output)
+    return (%second_output) )");
   const PatternInfo matmul_add = PatternInfo::parse_from_str(R"(
 graph(%input, %weight, %bias, %4):
      %weight_t = aten::t(%weight)
@@ -751,6 +765,8 @@ graph(%self, %a, %b, %inplace):
       {
           conv2d_functional_relu,
           conv2d_relu,
+          conv3d_functional_relu,
+          conv3d_relu,
           matmul_add,
           add_module_relu,
           add_functional_relu,
