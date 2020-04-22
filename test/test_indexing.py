@@ -3,7 +3,6 @@ from torch.testing._internal.common_device_type import instantiate_device_type_t
 import torch
 from torch import tensor
 import unittest
-import warnings
 
 class TestIndexing(TestCase):
     def test_single_int(self, device):
@@ -45,11 +44,10 @@ class TestIndexing(TestCase):
         v = torch.tensor([True, False, True], dtype=torch.bool, device=device)
         boolIndices = torch.tensor([True, False, False], dtype=torch.bool, device=device)
         uint8Indices = torch.tensor([1, 0, 0], dtype=torch.uint8, device=device)
-        with warnings.catch_warnings(record=True) as w:
+        with self.maybeWarnsRegex(UserWarning, ".+deprecated.+"):
             self.assertEqual(v[boolIndices].shape, v[uint8Indices].shape)
             self.assertEqual(v[boolIndices], v[uint8Indices])
             self.assertEqual(v[boolIndices], tensor([True], dtype=torch.bool, device=device))
-            self.assertEquals(len(w), 2)
 
     def test_bool_indices_accumulate(self, device):
         mask = torch.zeros(size=(10, ), dtype=torch.bool, device=device)
@@ -67,10 +65,9 @@ class TestIndexing(TestCase):
     def test_byte_mask(self, device):
         v = torch.randn(5, 7, 3, device=device)
         mask = torch.ByteTensor([1, 0, 1, 1, 0]).to(device)
-        with warnings.catch_warnings(record=True) as w:
+        with self.maybeWarnsRegex(UserWarning, ".+deprecated.+"):
             self.assertEqual(v[mask].shape, (3, 7, 3))
             self.assertEqual(v[mask], torch.stack([v[0], v[2], v[3]]))
-            self.assertEquals(len(w), 2)
 
         v = torch.tensor([1.], device=device)
         self.assertEqual(v[v == 0], torch.tensor([], device=device))
@@ -78,13 +75,12 @@ class TestIndexing(TestCase):
     def test_byte_mask_accumulate(self, device):
         mask = torch.zeros(size=(10, ), dtype=torch.uint8, device=device)
         y = torch.ones(size=(10, 10), device=device)
-        with warnings.catch_warnings(record=True) as w:
+        with self.maybeWarnsRegex(UserWarning, ".+deprecated.+"):
             y.index_put_((mask, ), y[mask], accumulate=True)
             self.assertEqual(y, torch.ones(size=(10, 10), device=device))
-            self.assertEquals(len(w), 2)
 
-    def test_index_put_accumulate_large_tensor(self, device): 
-        # This test is for tensors with number of elements >= INT_MAX (2^31 - 1). 
+    def test_index_put_accumulate_large_tensor(self, device):
+        # This test is for tensors with number of elements >= INT_MAX (2^31 - 1).
         N = (1 << 31) + 5
         dt = torch.int8
         a = torch.ones(N, dtype=dt, device=device)
@@ -105,9 +101,8 @@ class TestIndexing(TestCase):
         # note: these broadcast together and are transposed to the first dim
         mask1 = torch.ByteTensor([1, 0, 1, 1, 0]).to(device)
         mask2 = torch.ByteTensor([1, 1, 1]).to(device)
-        with warnings.catch_warnings(record=True) as w:
+        with self.maybeWarnsRegex(UserWarning, ".+deprecated.+"):
             self.assertEqual(v[mask1, :, mask2].shape, (3, 7))
-            self.assertEquals(len(w), 2)
 
     def test_byte_mask2d(self, device):
         v = torch.randn(5, 7, 3, device=device)
@@ -341,9 +336,8 @@ class TestIndexing(TestCase):
         b = torch.ByteTensor([True, False, True, False]).to(device)
         value = torch.tensor([3., 4., 5., 6.], device=device)
 
-        with warnings.catch_warnings(record=True) as w:
+        with self.maybeWarnsRegex(UserWarning, ".+deprecated.+"):
             x[b] = value
-            self.assertEquals(len(w), 1)
 
         self.assertEqual(x[0], value)
         self.assertEqual(x[1], torch.arange(4, 8, device=device))
