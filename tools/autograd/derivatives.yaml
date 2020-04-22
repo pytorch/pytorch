@@ -110,6 +110,9 @@
 - name: abs(Tensor self) -> Tensor
   self: grad * self.sign()
 
+- name: absolute(Tensor self) -> Tensor
+  self: grad * self.sign()
+
 - name: acos(Tensor self) -> Tensor
   self: grad * -((-self * self + 1).rsqrt())
 
