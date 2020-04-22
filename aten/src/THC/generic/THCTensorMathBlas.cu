@@ -2,7 +2,7 @@
 #define THC_GENERIC_FILE "THC/generic/THCTensorMathBlas.cu"
 #else
 
-#include "ATen/cuda/CUDAContext.h"
+#include <ATen/cuda/CUDAContext.h>
 #include <ATen/NamedTensorUtils.h>
 
 #define ERROR_ONLY_FP_TYPES(func) \

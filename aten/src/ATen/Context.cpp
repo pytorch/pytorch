@@ -16,7 +16,7 @@
 #include <TH/TH.h> // for USE_LAPACK
 
 #ifdef USE_FBGEMM
-#include "fbgemm/Fbgemm.h"
+#include <fbgemm/Fbgemm.h>
 #endif // USE_FBGEMM
 
 namespace at {

@@ -3,6 +3,7 @@
 // Engine implements backpropagation from output variables and their gradients
 // to "root" variables (variables created by the user with requires_grad=True).
 
+#include <ATen/Tensor.h>
 #include <ATen/ThreadLocalState.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/csrc/autograd/anomaly_mode.h>
@@ -37,6 +38,14 @@ void validate_outputs(
 static constexpr int NO_DEVICE = -2;
 static constexpr int CPU_DEVICE = -1;
 
+// Maximum reentrant backward depth before switching to a new thread
+// This limit is based on the TSAN's deadlock detector, where it will
+// fail if a program hold more than 65 locks in one thread at once.
+// As we hold mutex in every of our custom C++ autograd Node, we would
+// like to avoid TSAN complains on this when doing reentrant backwards
+// For reference, see https://github.com/google/sanitizers/issues/950
+static constexpr int MAX_DEPTH = 60;
+
 // GraphTask holds metadata needed for a single execution of backward()
 struct GraphTask {
   std::atomic<uint64_t> outstanding_tasks_{0};
@@ -56,10 +65,25 @@ struct GraphTask {
 
   struct ExecInfo {
     struct Capture {
+      Capture(const Capture&) = delete;
+      Capture(Capture&&) = default;
+
       Capture(int input_idx, int output_idx)
           : input_idx_(input_idx), output_idx_(output_idx) {}
       int input_idx_; // within Node inputs
       int output_idx_; // within the output vector of a GraphTask
+
+      // This hook will be executed after a grad is captured. The captured
+      // grad will be replaced by the return value of the hook.
+      struct GradCaptureHook {
+        virtual ~GradCaptureHook() = default;
+        virtual at::Tensor operator()(const at::Tensor& grad) = 0;
+      };
+      // The hooks will be called one by one in the order as they were added.
+      // The input grad of a hook will be the output of its preceding hook. The
+      // first hook will take the captured grad as the input. The output of the
+      // last hook will replace the captured grad.
+      std::vector<std::unique_ptr<GradCaptureHook>> hooks_;
     };
 
     bool should_execute() const {
