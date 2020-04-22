@@ -129,18 +129,18 @@ AliasDb::~AliasDb() = default;
 // Structure that keeps tracks of all writes at a high level. When alias
 // analysis is done, this will be used to construct a more efficient WriteIndex.
 struct AliasDb::WriteRegistry {
-    void registerWrite(const Value* v, Node* n) {
-      writes_.emplace(n, v);
-    }
-    void registerWriteToAllContained(const Value* v, Node* n) {
-      containedWrites_.emplace(n, v);
-    }
-    void registerWriteToAllWildcards(Node* n) {
-      writesToAllWildcards_.insert(n);
-    }
-    std::unordered_map<Node*, const Value*> writes_;
-    std::unordered_map<Node*, const Value*> containedWrites_;
-    std::unordered_set<Node*> writesToAllWildcards_;
+  void registerWrite(const Value* v, Node* n) {
+    writes_[n].emplace_back(v);
+  }
+  void registerWriteToAllContained(const Value* v, Node* n) {
+    containedWrites_[n].emplace_back(v);
+  }
+  void registerWriteToAllWildcards(Node* n) {
+    writesToAllWildcards_.insert(n);
+  }
+  std::unordered_map<Node*, std::vector<const Value*>> writes_;
+  std::unordered_map<Node*, std::vector<const Value*>> containedWrites_;
+  std::unordered_set<Node*> writesToAllWildcards_;
 };
 
 AliasDb::AliasDb(std::shared_ptr<Graph> graph, bool isFrozen)
@@ -149,41 +149,45 @@ AliasDb::AliasDb(std::shared_ptr<Graph> graph, bool isFrozen)
       memoryDAGBuilder_(std::make_unique<MemoryDAGBuilder>()),
       writeRegistry_(std::make_unique<AliasDb::WriteRegistry>()) {
   analyze(graph_);
-  memoryDAG_ = memoryDAGBuilder_->build();
 
-  // null out the builder to make accessing it a hard error
-  memoryDAGBuilder_ = nullptr;
+  memoryDAG_ = std::make_unique<MemoryDAG>(std::move(memoryDAGBuilder_));
+  memoryDAGBuilder_ = nullptr; // to make further access a hard error
 
   memoryDAG_->setWildcards(
       wildcards_, elementMap_, [&](const Value* v) -> Element* {
         return getWildcard(v->type());
       });
 
+  // Now we build up the various write indices based on information in the write
+  // registry that we populated during analysis
+
   // Initialize the write index
   writeIndex_ = TWriteIndex();
-  // dereference to make operator[] less ugly.
-  auto& writeIndex = *writeIndex_;
+  auto& writeIndex = *writeIndex_; // to make operator[] less ugly
 
   // build the write index
   for (const auto& write : writeRegistry_->writes_) {
-    auto it = elementMap_.find(write.second);
-    TORCH_INTERNAL_ASSERT(
-        it != elementMap_.end(), "Tried to write to value not in MemoryDAG");
-    const auto& writtenMemoryLocations =
-        memoryDAG_->getMemoryLocations(it->second);
-    writeIndex[write.first] |= writtenMemoryLocations;
+    Node* node = write.first;
+    const std::vector<const Value*> writtenValues = write.second;
+    for (const Value* writtenValue : writtenValues) {
+      auto it = elementMap_.find(writtenValue);
+      TORCH_INTERNAL_ASSERT(
+          it != elementMap_.end(), "Tried to write to value not in MemoryDAG");
+      const auto& writtenMemoryLocations =
+          memoryDAG_->getMemoryLocations(it->second);
+      writeIndex[node] |= writtenMemoryLocations;
+    }
   }
 
   for (const auto& write : writeRegistry_->containedWrites_) {
-    auto elem = elementMap_.at(write.second);
-    MemoryLocations mem_locations;
-    memoryDAG_->collectAllContainedMemoryLocations(elem, mem_locations);
-    for (unsigned loc : mem_locations) {
-      auto contained_elem = memoryDAG_->fromIndex(loc);
-      // we only register writes on memory locations
-      if (contained_elem->pointsTo.empty()) {
-        writeIndex[write.first].set(contained_elem->index);
-      }
+    Node* node = write.first;
+    const std::vector<const Value*> writtenValues = write.second;
+    for (const Value* writtenValue : writtenValues) {
+      auto elem = elementMap_.at(writtenValue);
+      MemoryLocations writtenMemoryLocations;
+      memoryDAG_->collectAllContainedMemoryLocations(
+          elem, writtenMemoryLocations);
+      writeIndex[node] |= writtenMemoryLocations;
     }
   }
 
@@ -193,11 +197,10 @@ AliasDb::AliasDb(std::shared_ptr<Graph> graph, bool isFrozen)
     }
   }
 
-  // null out the write registry to make accessing it a hard error.
-  writeRegistry_ = nullptr;
+  writeRegistry_ = nullptr; // to make future access an error
 
   // initialize the write cache
-  writeCache_ = buildWriteCache();
+  writtenToLocationsIndex_ = buildWrittenToLocationsIndex();
   GRAPH_DEBUG(toString());
 }
 
@@ -242,7 +245,8 @@ bool AliasDb::hasWriters(const Value* v) const {
   }
 
   const auto& el = it->second;
-  return writeCache_->intersects(memoryDAG_->getMemoryLocations(el));
+  return writtenToLocationsIndex_->intersects(
+      memoryDAG_->getMemoryLocations(el));
 }
 
 void AliasDb::getWritesImpl(Node* n, MemoryLocations& ret) const {
@@ -878,7 +882,8 @@ void AliasDb::analyzeContainerConstruct(Node* node) {
   for (auto input : node->inputs()) {
     auto maybe_wildcard_elem = setWildcard(input);
     if (maybe_wildcard_elem) {
-      memoryDAGBuilder_->addToContainedElements(*maybe_wildcard_elem, container_elem);
+      memoryDAGBuilder_->addToContainedElements(
+          *maybe_wildcard_elem, container_elem);
     }
   }
 }
@@ -1494,14 +1499,14 @@ c10::optional<Element*> AliasDb::setWildcard(const Value* v) {
   if (!maybe_wildcardElement) {
     return c10::nullopt;
   }
+  // Ensure that we create a corresponding element for `v` still, as it is an
+  // invariant that all mutable values have an element.
+  getOrCreateElement(v);
   wildcards_.insert(v);
-  auto e = getOrCreateElement(v);
-  wc_[e].push_back(v);
-
   return *maybe_wildcardElement;
 }
 
-MemoryLocations AliasDb::buildWriteCache() const {
+MemoryLocations AliasDb::buildWrittenToLocationsIndex() const {
   MemoryLocations ret;
   for (const auto& pr : *writeIndex_) {
     const auto& writtenLocs = pr.second;

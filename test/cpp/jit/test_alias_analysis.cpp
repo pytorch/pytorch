@@ -1037,21 +1037,21 @@ void testMemoryDAG() {
     // a <- e
     // f <- e
     // g is by itself
-    MemoryDAGBuilder t;
-    auto a = t.makeFreshValue(aValue);
-    auto b = t.makeFreshValue(bValue);
-    auto c = t.makeFreshValue(cValue);
-    auto d = t.makeFreshValue(dValue);
-    auto e = t.makeFreshValue(eValue);
-    auto f = t.makeFreshValue(fValue);
-    auto g = t.makeFreshValue(gValue);
-    t.makePointerTo(b, a);
-    t.makePointerTo(c, b);
-    t.makePointerTo(d, b);
-    t.makePointerTo(e, a);
-    t.makePointerTo(e, f);
+    auto t = std::make_unique<MemoryDAGBuilder>();
+    auto a = t->makeFreshValue(aValue);
+    auto b = t->makeFreshValue(bValue);
+    auto c = t->makeFreshValue(cValue);
+    auto d = t->makeFreshValue(dValue);
+    auto e = t->makeFreshValue(eValue);
+    auto f = t->makeFreshValue(fValue);
+    auto g = t->makeFreshValue(gValue);
+    t->makePointerTo(b, a);
+    t->makePointerTo(c, b);
+    t->makePointerTo(d, b);
+    t->makePointerTo(e, a);
+    t->makePointerTo(e, f);
 
-    const auto& dag = t.build();
+    auto dag = std::make_unique<MemoryDAG>(std::move(t));
 
     /**
      * Test mayAlias()
@@ -1076,15 +1076,15 @@ void testMemoryDAG() {
 
     // b(a)
     // c(a)
-    MemoryDAGBuilder t;
-    auto a = t.makeFreshValue(aValue);
-    auto b = t.makeFreshValue(bValue);
-    t.addToContainedElements(a, b);
+    auto t = std::make_unique<MemoryDAGBuilder>();
+    auto a = t->makeFreshValue(aValue);
+    auto b = t->makeFreshValue(bValue);
+    t->addToContainedElements(a, b);
 
-    auto c = t.makeFreshValue(cValue);
-    t.addToContainedElements(a, c);
+    auto c = t->makeFreshValue(cValue);
+    t->addToContainedElements(a, c);
 
-    const auto& dag = t.build();
+    auto dag = std::make_unique<MemoryDAG>(std::move(t));
     AT_ASSERT(dag->mayContainAlias(a, b));
     AT_ASSERT(dag->mayContainAlias(b, a));
 
@@ -1103,18 +1103,18 @@ void testMemoryDAG() {
     // b(a)
     // c(a)
     // d(b(a))
-    MemoryDAGBuilder t;
-    auto a = t.makeFreshValue(aValue);
-    auto b = t.makeFreshValue(bValue);
-    t.addToContainedElements(a, b);
+    auto t = std::make_unique<MemoryDAGBuilder>();
+    auto a = t->makeFreshValue(aValue);
+    auto b = t->makeFreshValue(bValue);
+    t->addToContainedElements(a, b);
 
-    auto c = t.makeFreshValue(cValue);
-    t.addToContainedElements(a, c);
+    auto c = t->makeFreshValue(cValue);
+    t->addToContainedElements(a, c);
 
-    auto d = t.makeFreshValue(dValue);
-    t.addToContainedElements(b, d);
+    auto d = t->makeFreshValue(dValue);
+    t->addToContainedElements(b, d);
 
-    const auto& dag = t.build();
+    auto dag = std::make_unique<MemoryDAG>(std::move(t));
     AT_ASSERT(dag->mayContainAlias(b, d));
     AT_ASSERT(dag->mayContainAlias(d, b));
 
@@ -1125,23 +1125,23 @@ void testMemoryDAG() {
   }
   {
     // f(e)
-    MemoryDAGBuilder t;
-    auto a = t.makeFreshValue(aValue);
-    auto b = t.makeFreshValue(bValue);
-    t.addToContainedElements(a, b);
+    auto t = std::make_unique<MemoryDAGBuilder>();
+    auto a = t->makeFreshValue(aValue);
+    auto b = t->makeFreshValue(bValue);
+    t->addToContainedElements(a, b);
 
-    auto c = t.makeFreshValue(cValue);
-    t.addToContainedElements(a, c);
+    auto c = t->makeFreshValue(cValue);
+    t->addToContainedElements(a, c);
 
-    auto d = t.makeFreshValue(dValue);
-    t.addToContainedElements(b, d);
+    auto d = t->makeFreshValue(dValue);
+    t->addToContainedElements(b, d);
 
-    auto f = t.makeFreshValue(aValue);
-    auto e = t.makeFreshValue(bValue);
+    auto f = t->makeFreshValue(aValue);
+    auto e = t->makeFreshValue(bValue);
 
-    t.addToContainedElements(f, e);
+    t->addToContainedElements(f, e);
 
-    const auto& dag = t.build();
+    auto dag = std::make_unique<MemoryDAG>(std::move(t));
     for (auto elem : {a, b, c, d}) {
       AT_ASSERT(!dag->mayContainAlias(f, elem));
       AT_ASSERT(!dag->mayContainAlias(e, elem));

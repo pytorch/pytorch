@@ -323,7 +323,8 @@ struct MutationRemover {
       node->destroy();
 
       // TODO: don't strictly need to reset write cache, evaluate on models
-      aliasDb_->writeCache_ = aliasDb_->buildWriteCache();
+      aliasDb_->writtenToLocationsIndex_ =
+          aliasDb_->buildWrittenToLocationsIndex();
     }
   }
 
@@ -387,7 +388,8 @@ struct MutationRemover {
 
       // now that we have removed a mutating op, the write cache is stale
       // TODO: don't strictly need to reset write cache, evaluate on models
-      aliasDb_->writeCache_ = aliasDb_->buildWriteCache();
+      aliasDb_->writtenToLocationsIndex_ =
+          aliasDb_->buildWrittenToLocationsIndex();
     }
   }
 

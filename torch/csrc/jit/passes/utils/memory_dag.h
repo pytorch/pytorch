@@ -1,8 +1,8 @@
 #pragma once
 
 #include <c10/util/ArrayRef.h>
-#include <c10/util/sparse_bitset.h>
 #include <c10/util/Optional.h>
+#include <c10/util/sparse_bitset.h>
 #include <memory>
 #include <unordered_map>
 #include <unordered_set>
@@ -19,6 +19,30 @@ namespace jit {
 struct Element;
 struct Value;
 class MemoryDAG;
+
+/**
+ * Helper to build up the points-to graph.
+ *
+ * We separate the "building" into a different class because it allows us to
+ * cache internally to MemoryDAG without worrying about how the DAG structure
+ * is mutated.
+ */
+class TORCH_API MemoryDAGBuilder {
+ public:
+  // Make `from` point at `to`.
+  void makePointerTo(Element* from, Element* to);
+
+  void addToContainedElements(Element* contained, Element* container);
+
+  // Make a fresh element (i.e. an element that doesn't point to anything) and
+  // return it.
+  Element* makeFreshValue(const Value* v);
+
+  friend MemoryDAG;
+
+ private:
+  std::vector<std::unique_ptr<Element>> indexToElementMap_;
+};
 
 // class MemoryDAG
 //
@@ -37,9 +61,8 @@ class MemoryDAG;
 // which memory locations an element may point to.
 class TORCH_API MemoryDAG {
  public:
-  // This is not meant to be used directly, see `MemoryDAGBuilder` below.
-  MemoryDAG(std::vector<std::unique_ptr<Element>> indexToElementMap)
-      : indexToElementMap_(std::move(indexToElementMap)) {}
+  MemoryDAG(std::unique_ptr<MemoryDAGBuilder> builder)
+      : indexToElementMap_(std::move(builder->indexToElementMap_)) {}
   // explicitly delete copy constructor because otherwise windows build is
   // confused for an exported class see
   // https://stackoverflow.com/a/51033485/105137
@@ -88,33 +111,6 @@ class TORCH_API MemoryDAG {
   std::vector<std::unique_ptr<Element>> indexToElementMap_;
 };
 
-/**
- * Helper to build up the points-to graph.
- *
- * We separate the "building" into a different class because it allows us to
- * cache internally to MemoryDAG without worrying about how the DAG structure
- * is mutated.
- */
-class TORCH_API MemoryDAGBuilder {
- public:
-  // Make `from` point at `to`.
-  void makePointerTo(Element* from, Element* to);
-
-  void addToContainedElements(Element* contained, Element* container);
-  // Make a fresh element (i.e. an element that doesn't point to anything) and
-  // return it.
-  Element* makeFreshValue(const Value* v);
-
-  // Produce a query-able MemoryDAG from `this`.
-  //
-  // NOTE: This function consumes this builder, and any further mutation/usage
-  // is undefined.
-  std::unique_ptr<MemoryDAG> build();
-
- private:
-  std::vector<std::unique_ptr<Element>> indexToElementMap_;
-};
-
 // `Element` represents the vertex in the points-to graph. It represents
 // anything that could have an aliasing relationship, mostly IR `Value`s, but
 // also the "inside of a list", or wildcards.
@@ -144,10 +140,10 @@ struct Element {
   // Make `from` point at `to`.
   void makePointerTo(Element* from, Element* to);
 
-  // We do path compression to make repeated memory location queries faster.
-  // An empty cache means it is invalidated (it can never be empty otherwise,
-  // since every element must point to at least one memory location).
   friend class MemoryDAG;
+  // We memoize the results of `getMemoryLocations` to speed up queries.
+  // A nullopt means that this cache is not yet populated. Since `MemoryDAG` is
+  // immutable, this cache should never need to be invalidated.
   mutable c10::optional<MemoryLocations> cachedMemoryLocations_;
 };
 

@@ -235,18 +235,20 @@ class AliasDb {
   /**
    * State for tracking write info.
    */
-  // Map of nodes to the memory locations that they write to
-  using TWriteIndex = ska::flat_hash_map<Node*, MemoryLocations>;
-  c10::optional<TWriteIndex> writeIndex_;
-
+  // Write registry where the analysis can record the writes as it sees them.
+  // This information is later denormalized into various caches to improve query
+  // efficiency.
   struct WriteRegistry;
   std::unique_ptr<WriteRegistry> writeRegistry_;
 
-  mutable c10::optional<MemoryLocations> writeCache_;
-  MemoryLocations buildWriteCache() const;
+  // Map of nodes to the memory locations that they write to
+  using TWriteIndex = ska::flat_hash_map<Node*, MemoryLocations>;
+  c10::optional<TWriteIndex> writeIndex_;
+  // Collection of all memory locations that are written to.
+  c10::optional<MemoryLocations> writtenToLocationsIndex_;
+  MemoryLocations buildWrittenToLocationsIndex() const;
 
   std::unordered_set<const Value*> wildcards_;
-  std::unordered_map<Element*, std::vector<const Value*>> wc_;
 
   std::string getElementName(const Element* e) const;
 };
