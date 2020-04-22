@@ -62,8 +62,7 @@ class IDEEPOperator : public OperatorBase {
       StopAllObservers();
       return result;
     } catch (EnforceNotMet& err) {
-      err.AppendMessage(getErrorMsg());
-      throw;
+      TORCH_RETHROW(err, getErrorMsg());
     } catch (ideep::error& e) {
       LOG(ERROR) << "IDEEP error:" << e.message;
       throw;

@@ -4,6 +4,7 @@
 #include <c10/util/Logging.h>
 
 #include <iostream>
+#include <sstream>
 #include <numeric>
 #include <string>
 
@@ -14,8 +15,7 @@ Error::Error(
     const std::string& backtrace,
     const void* caller)
     : msg_stack_{new_msg}, backtrace_(backtrace), caller_(caller) {
-  msg_ = msg();
-  msg_without_backtrace_ = msg_without_backtrace();
+  refresh_msg();
 }
 
 // PyTorch-style error message
@@ -38,29 +38,50 @@ Error::Error(
               "] ",
               condition,
               ". ",
-              msg,
-              "\n"),
+              msg),
           backtrace,
           caller) {}
 
-std::string Error::msg() const {
-  return std::accumulate(
-             msg_stack_.begin(), msg_stack_.end(), std::string("")) +
-      backtrace_;
+std::string Error::compute_msg(bool include_backtrace) const {
+  if (msg_stack_.size() == 0) {
+    if (include_backtrace) return backtrace_;
+    return "";
+  }
+
+  std::ostringstream oss;
+
+  if (msg_stack_.size() == 2) {
+    // Fold error and context in one line
+    oss << msg_stack_[0] << " (" << msg_stack_[1] << ")";
+  } else {
+    oss << msg_stack_[0];
+    for (size_t i = 1; i < msg_stack_.size(); i++) {
+      oss << "\n  " << msg_stack_[i];
+    }
+  }
+
+  if (include_backtrace) {
+    oss << "\n";
+    oss << backtrace_;
+  }
+
+  return oss.str();
 }
 
-std::string Error::msg_without_backtrace() const {
-  return std::accumulate(msg_stack_.begin(), msg_stack_.end(), std::string(""));
+void Error::refresh_msg() {
+  msg_ = compute_msg(/*include_backtrace*/ true);
+  msg_without_backtrace_ = compute_msg(/*include_backtrace*/ false);
 }
 
-void Error::AppendMessage(const std::string& new_msg) {
+void Error::add_context(const std::string& new_msg) {
   msg_stack_.push_back(new_msg);
-  // Refresh the cache
-  // TODO: Calling AppendMessage O(n) times has O(n^2) cost.  We can fix
+  // TODO: Calling add_context O(n) times has O(n^2) cost.  We can fix
   // this perf problem by populating the fields lazily... if this ever
   // actually is a problem.
-  msg_ = msg();
-  msg_without_backtrace_ = msg_without_backtrace();
+  // NB: If you do fix this, make sure you do it in a thread safe way!
+  // what() is almost certainly expected to be thread safe even when
+  // accessed across multiple threads
+  refresh_msg();
 }
 
 namespace Warning {

@@ -64,7 +64,7 @@ void ThrowEnforceFiniteNotMet(
 // PyTorch-style error message
 // (This must be defined here for access to GetFetchStackTrace)
 Error::Error(SourceLocation source_location, const std::string& msg)
-    : Error(msg, str(" (", source_location, ")\n", (*GetFetchStackTrace())())) {
+    : Error(msg, str("Exception raised from ", source_location, " (most recent call first):\n", (*GetFetchStackTrace())())) {
 }
 
 using APIUsageLoggerType = std::function<void(const std::string&)>;
