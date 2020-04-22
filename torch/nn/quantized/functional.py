@@ -345,8 +345,8 @@ def leaky_relu(input, negative_slope=0.01, inplace=False,
     """
     if scale is not None and zero_point is not None:
         assert not inplace, "Cannot rescale with `inplace`"
-        output = torch.quantize_per_tensor(torch.zeros(input.shape),
-                                           scale, int(zero_point), input.dtype)
+        output = torch._empty_affine_quantized(
+            input.shape, scale=scale, zero_point=int(zero_point), dtype=input.dtype)
         torch._C._nn.leaky_relu(input, negative_slope, out=output)
         return output
     if inplace:
@@ -421,8 +421,8 @@ def elu(input, alpha=1., inplace=False, scale=None, zero_point=None):
 
     if scale is not None and zero_point is not None:
         assert not inplace, "Cannot rescale with `inplace`"
-        output = torch.quantize_per_tensor(torch.zeros(input.shape),
-                                           scale, int(zero_point), input.dtype)
+        output = torch._empty_affine_quantized(
+            input.shape, scale=scale, zero_point=int(zero_point), dtype=input.dtype)
         torch._C._nn.elu(input, alpha, out=output)
         return output
     elif inplace:
