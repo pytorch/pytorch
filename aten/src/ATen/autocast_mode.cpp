@@ -1,5 +1,5 @@
 #include <ATen/ATen.h>
-#include <torch/library.h>
+#include <ATen/core/op_registration/op_registration.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/autocast_mode.h>
 
@@ -373,7 +373,7 @@ Therefore, for the moment, this is all copy pasted in from VariableTypeEverythin
 Explicit registration for out-of-place ops
 *****************************************/
 TORCH_LIBRARY_IMPL(_, Autocast, m) {
-  m.fallback(torch::CppFunction::makeFallthrough());
+  m.fallback(c10::CppFunction::makeFallthrough());
 }
 
 TORCH_LIBRARY_IMPL(aten, Autocast, m) {

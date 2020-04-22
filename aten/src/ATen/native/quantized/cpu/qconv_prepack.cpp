@@ -2,7 +2,7 @@
 #include <vector>
 
 #include <ATen/ATen.h>
-#include <torch/library.h>
+#include <ATen/core/op_registration/op_registration.h>
 #include <ATen/native/quantized/cpu/conv_packed_params.h>
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
 #include <ATen/native/quantized/cpu/init_qnnpack.h>
