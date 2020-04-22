@@ -44,7 +44,9 @@ static inline Tensor& unary_op_impl_out(Tensor& result, const Tensor& self, Stub
   return result;
 }
 
-// Mimics returning a floating point tensor for complex inputs by default
+// An alternate version of unary_op_impl_out that follows the same pattern
+// for non-complex inputs, but returns a floating point tensor
+// for complex inputs by default.
 // Note: This is done by running the operation as usual and then copying the
 // operation's result to the expected result type.
 template <typename Stub>
@@ -80,6 +82,9 @@ static inline Tensor unary_op_impl(const Tensor& self, OutImpl& out_impl) {
   return out_impl(result, self);
 }
 
+// An alternate version of unary_op_impl that follows the same pattern 
+// for non-complex inputs, but returns a floating point tensor
+// for complex inputs by default.
 template <typename OutImpl>
 static inline Tensor unary_op_impl_with_complex_to_float(const Tensor& self, OutImpl& out_impl) {
   if (self.is_complex()) {
