@@ -271,6 +271,8 @@ class TestQuantizeScriptJitPasses(JitTestCase):
         # This test case attempt to try combinations of conv2d with bias/nobias
         # as well as BatchNorm with affine/no-affine along with varying the
         # number of layers.
+        # this only works when default dtype is double
+        torch.set_default_dtype(torch.double)
         class SubModule(torch.nn.Module):
             def __init__(self, num_blocks, enable_bias, enable_affine):
                 super(SubModule, self).__init__()
@@ -320,6 +322,7 @@ class TestQuantizeScriptJitPasses(JitTestCase):
 
             x = torch.rand(1, 20, 10, 10)
             self.assertEqual(eager(x), scripted_or_traced(x))
+        torch.set_default_dtype(torch.float)
 
     def test_fuse_linear(self):
         input_strs = ["""
@@ -1632,10 +1635,10 @@ class TestQuantizeScriptPTSQOps(JitTestCase):
                 x = F.sigmoid(x)
                 x = x.permute(0, 2, 3, 1)
                 x = torch.repeat_interleave(x, 3, 1)
-                x = self.conv(x)
                 x = self.tanh(x)
                 x = F.tanh(x)
                 x = torch.tanh(x)
+                x = self.conv(x)
                 return x
 
         m = torch.jit.script(M())
@@ -1652,8 +1655,8 @@ class TestQuantizeScriptPTSQOps(JitTestCase):
         # is being propagated to the end, so that we don't insert extra
         # observers and also successfully fused two quantized::conv2d
         # patterns
-        # two quantize_per_tensor, one for input, one for weight
-        FileCheck().check_count("aten::quantize_per_tensor", 2, exactly=True) \
+        # one quantize_per_tensor for input
+        FileCheck().check_count("aten::quantize_per_tensor", 1, exactly=True) \
                    .check_count("quantized::conv2d", 2, exactly=True) \
                    .check("aten::dequantize") \
                    .run(m.graph)
