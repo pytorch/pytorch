@@ -362,6 +362,8 @@ _(aten, hamming_window) \
 _(aten, hann_window) \
 _(aten, hardshrink) \
 _(aten, hardshrink_backward) \
+_(aten, hardsigmoid) \
+_(aten, hardsigmoid_backward) \
 _(aten, hardtanh) \
 _(aten, hardtanh_backward) \
 _(aten, hardtanh_forward) \
