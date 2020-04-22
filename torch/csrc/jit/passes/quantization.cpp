@@ -336,6 +336,7 @@ std::vector<std::string> getModuleAccessPath(Value* instance, Value* self) {
       iter->debugName(),
       " which is not self:",
       self->debugName());
+  std::reverse(path.begin(), path.end());
   return path;
 }
 
@@ -394,10 +395,15 @@ class ModuleCloneHelper {
     }
     // Copy slots. If a slot is a module - recursively clone it.
     size_t N = type->numAttributes();
+    // std::cout << "Number of attributes " << N << " type " <<
+    // type->name()->qualifiedName() << std::endl;
+
     for (size_t i = 0; i < N; ++i) {
       IValue s = module._ivalue()->getSlot(i);
       if (type->getAttribute(i)->is_module()) {
         const Module& orig = Module(s.toObject());
+        // std::cout << "attribute is module " << std::endl;
+        // orig.dump(false, false, false);
         Module cloned = clone_impl(orig, module_qconfig_map, type_remap);
         r.register_module(type->getAttributeName(i), cloned);
       } else {
@@ -446,6 +452,8 @@ class ModuleCloneHelper {
       if (node->kind() == prim::CallMethod) {
         Value* instance = node->inputs()[0];
         auto path = getModuleAccessPath(instance, self);
+        // std::cout << "Before findchildModule  " <<
+        // node->owningGraph()->toString();
         auto child = findChildModule(source, path);
         auto qconfig = module_qconfig_map.at(child._ivalue());
         instance->setType(type_remap_fn(instance->type(), qconfig));
@@ -863,7 +871,6 @@ ModuleMethodVector InsertObserversHelper::getInvokedMethods(
   ModuleMethodVector invoked_methods;
   Method method = module.get_method(method_name);
   auto graph = method.graph();
-
   std::stack<Block*> blocks_to_visit;
   blocks_to_visit.push(graph->block());
   while (!blocks_to_visit.empty()) {
@@ -900,6 +907,8 @@ void InsertObserversHelper::insertObserverFor(
   while (module.hasattr(observer_name)) {
     observer_name = "_observer_" + c10::to_string(uid_++);
   }
+  std::cout << "Inserting observers for " << v->debugName() << " obs "
+            << observer_name << std::endl;
   module.register_module(observer_name, observer);
   observer_name_and_modules.push_back(std::make_pair(observer_name, observer));
 
@@ -1422,6 +1431,7 @@ InsertObserversHelper::insertObserversFor(
     }
     block_observer_map_[block] = observer_name_and_modules;
   }
+  std::cout << "Graph after inserting obs " << block->owningGraph()->toString();
   return std::make_tuple(
       block_input_observers, block_output_observers, output_idxs);
 }
@@ -1603,7 +1613,8 @@ class InsertQuantDeQuantHelper {
 
   c10::optional<Module> findChildModuleToQuantize(
       Module& module,
-      Value* child_instance);
+      Node* n,
+      Value* self);
   void collectObserverNodesAndValueToQuantize(Module& module, Value*);
   // Cleanup observer nodes from graph and observer modules
   // from module object and ClassType
@@ -1826,13 +1837,16 @@ std::tuple<c10::QScheme, QParamVector> InsertQuantDeQuantHelper::
 
 c10::optional<Module> InsertQuantDeQuantHelper::findChildModuleToQuantize(
     Module& module,
-    Value* child_instance) {
+    Node* n,
+    Value* self) {
+  Value* child_instance = n->inputs()[0];
   TORCH_INTERNAL_ASSERT(
       child_instance->node()->kind() == prim::GetAttr,
       "Child instance should come from GetAttr.");
   auto child_module_name = child_instance->node()->s(attr::name);
   if (child_module_name.find("_observer_") == std::string::npos) {
-    return module.attr(child_module_name).toModule();
+    // return module.attr(child_module_name).toModule();
+    return getInvokedModule(module, n, self);
   }
   return c10::nullopt;
 }
@@ -1841,7 +1855,6 @@ ModuleMethodVector InsertQuantDeQuantHelper::getInvokedMethods(
     Module& module,
     const std::string& method_name) {
   auto graph = module.get_method(method_name).graph();
-
   ModuleMethodVector invoked_methods;
   std::stack<Block*> blocks_to_visit;
   blocks_to_visit.push(graph->block());
@@ -1857,7 +1870,7 @@ ModuleMethodVector InsertQuantDeQuantHelper::getInvokedMethods(
         if (module_instance == graph->inputs()[0]) {
           m = module;
         } else {
-          m = findChildModuleToQuantize(module, module_instance);
+          m = findChildModuleToQuantize(module, n, graph->inputs()[0]);
         }
         if (m) {
           invoked_methods.push_back({*m, module_method_name});
@@ -1883,7 +1896,6 @@ void InsertQuantDeQuantHelper::run(
 
   Method method = module.get_method(method_name);
   auto graph = method.graph();
-
   // We only need to register new parameters if the graph has
   // been quantized before
   // TODO: dedup this part with code in quantizeTensors
