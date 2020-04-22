@@ -118,7 +118,8 @@ std::shared_ptr<FutureMessage> pyRpcBuiltin(
     const WorkerInfo& dst,
     const std::string& opName,
     const py::args& args,
-    const py::kwargs& kwargs) {
+    const py::kwargs& kwargs,
+    const float rpcTimeoutSeconds) {
   Stack stack;
   auto op = matchBuiltinOp(opName, args, kwargs, stack);
   // Release GIL since args and kwargs processing is done.
@@ -126,7 +127,11 @@ std::shared_ptr<FutureMessage> pyRpcBuiltin(
   auto scriptCall = std::make_unique<ScriptCall>(op, std::move(stack));
   auto agent = RpcAgent::getCurrentRpcAgent();
   return sendMessageWithAutograd(
-      *agent, dst, std::move(*scriptCall).toMessage(), false);
+      *agent,
+      dst,
+      std::move(*scriptCall).toMessage(),
+      false,
+      rpcTimeoutSeconds);
 }
 
 PyRRef pyRemoteBuiltin(
@@ -181,7 +186,8 @@ PyRRef pyRemoteBuiltin(
 std::shared_ptr<FutureMessage> pyRpcPythonUdf(
     const WorkerInfo& dst,
     std::string& pickledPythonUDF,
-    std::vector<torch::Tensor>& tensors) {
+    std::vector<torch::Tensor>& tensors,
+    const float rpcTimeoutSeconds) {
   auto serializedPyObj =
       SerializedPyObj(std::move(pickledPythonUDF), std::move(tensors));
   auto pythonCall = std::make_unique<PythonCall>(std::move(serializedPyObj));
@@ -191,7 +197,8 @@ std::shared_ptr<FutureMessage> pyRpcPythonUdf(
       *agent,
       dst,
       std::move(*pythonCall).toMessage(),
-      true /*forceGradRecording*/);
+      true /*forceGradRecording*/,
+      rpcTimeoutSeconds);
 }
 
 PyRRef pyRemotePythonUdf(
