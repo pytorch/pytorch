@@ -668,7 +668,7 @@ class TestCase(expecttest.TestCase):
     exact_dtype = False
 
     def __init__(self, method_name='runTest'):
-        super(TestCase, self).__init__(method_name)
+        super().__init__(method_name)
 
         test_method = getattr(self, method_name)
         # Wraps the tested method if we should do CUDA memory check.
@@ -878,7 +878,7 @@ class TestCase(expecttest.TestCase):
                              allow_inf=allow_inf, exact_dtype=exact_dtype)
         elif isinstance(x, torch.Tensor) and isinstance(y, torch.Tensor):
             def assertTensorsEqual(a, b):
-                super(TestCase, self).assertEqual(a.size(), b.size(), message)
+                super(__class__, self).assertEqual(a.size(), b.size(), message)
                 if exact_dtype:
                     self.assertEqual(a.dtype, b.dtype)
                 if a.numel() > 0:
@@ -916,8 +916,8 @@ class TestCase(expecttest.TestCase):
                             max_err = diff.max()
                             self.assertLessEqual(max_err, atol, message)
 
-            super(TestCase, self).assertEqual(x.is_sparse, y.is_sparse, message)
-            super(TestCase, self).assertEqual(x.is_quantized, y.is_quantized, message)
+            super().assertEqual(x.is_sparse, y.is_sparse, message)
+            super().assertEqual(x.is_quantized, y.is_quantized, message)
             if x.is_sparse:
                 x = self.safeCoalesce(x)
                 y = self.safeCoalesce(y)
@@ -947,9 +947,9 @@ class TestCase(expecttest.TestCase):
             else:
                 assertTensorsEqual(x, y)
         elif isinstance(x, string_classes) and isinstance(y, string_classes):
-            super(TestCase, self).assertEqual(x, y, message)
+            super().assertEqual(x, y, message)
         elif type(x) == set and type(y) == set:
-            super(TestCase, self).assertEqual(x, y, message)
+            super().assertEqual(x, y, message)
         elif isinstance(x, dict) and isinstance(y, dict):
             if isinstance(x, OrderedDict) and isinstance(y, OrderedDict):
                 self.assertEqual(x.items(), y.items(), atol=atol, rtol=rtol,
@@ -963,22 +963,22 @@ class TestCase(expecttest.TestCase):
                                  atol=atol, rtol=rtol, message=message,
                                  allow_inf=allow_inf, exact_dtype=exact_dtype)
         elif is_iterable(x) and is_iterable(y):
-            super(TestCase, self).assertEqual(len(x), len(y), message)
+            super().assertEqual(len(x), len(y), message)
             for x_, y_ in zip(x, y):
                 self.assertEqual(x_, y_, atol=atol, rtol=rtol, message=message,
                                  allow_inf=allow_inf, exact_dtype=exact_dtype)
         elif isinstance(x, bool) and isinstance(y, bool):
-            super(TestCase, self).assertEqual(x, y, message)
+            super().assertEqual(x, y, message)
         elif isinstance(x, Number) and isinstance(y, Number):
             if abs(x) == inf or abs(y) == inf:
                 if allow_inf:
-                    super(TestCase, self).assertEqual(x, y, message)
+                    super().assertEqual(x, y, message)
                 else:
                     self.fail("Expected finite numeric values - x={}, y={}".format(x, y))
                 return
-            super(TestCase, self).assertLessEqual(abs(x - y), atol, message)
+            super().assertLessEqual(abs(x - y), atol, message)
         else:
-            super(TestCase, self).assertEqual(x, y, message)
+            super().assertEqual(x, y, message)
 
     def assertAlmostEqual(self, x, y, places=None, msg='', delta=None, allow_inf=None):
         prec = delta
@@ -994,7 +994,7 @@ class TestCase(expecttest.TestCase):
 
         if isinstance(x, torch.Tensor) and isinstance(y, torch.Tensor):
             if x.size() != y.size():
-                super(TestCase, self).assertNotEqual(x.size(), y.size())
+                super().assertNotEqual(x.size(), y.size())
             self.assertGreater(x.numel(), 0)
             y = y.type_as(x)
             y = y.cuda(device=x.get_device()) if x.is_cuda else y.cpu()
@@ -1009,16 +1009,16 @@ class TestCase(expecttest.TestCase):
                 max_err = diff.max().item()
                 self.assertGreater(max_err, atol, message)
         elif type(x) == str and type(y) == str:
-            super(TestCase, self).assertNotEqual(x, y)
+            super().assertNotEqual(x, y)
         elif is_iterable(x) and is_iterable(y):
-            super(TestCase, self).assertNotEqual(x, y)
+            super().assertNotEqual(x, y)
         else:
             try:
                 self.assertGreater(abs(x - y), atol, message)
                 return
             except (TypeError, AssertionError):
                 pass
-            super(TestCase, self).assertNotEqual(x, y, message)
+            super().assertNotEqual(x, y, message)
 
     def assertObjectIn(self, obj, iterable):
         for elem in iterable:
