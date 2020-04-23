@@ -7,7 +7,7 @@ import torch
 from torch import nn
 import torch.nn.parallel as dp
 from torch.testing._internal.common_cuda import TEST_MULTIGPU, TEST_CUDA
-from torch.testing._internal.common_utils import run_tests, TestCase, repeat_test_for_types, ALL_TENSORTYPES, PY3
+from torch.testing._internal.common_utils import run_tests, TestCase, repeat_test_for_types, ALL_TENSORTYPES
 from torch.testing._internal.common_utils import _assertGradAndGradgradChecks
 from torch.testing._internal.common_utils import dtype2prec_DONTUSE
 from torch.testing._internal.common_utils import skipIfRocm
@@ -257,7 +257,7 @@ class TestDataParallel(TestCase):
         test(s.cpu(), None, inp, [1, 0], should_fail=True)
         test(s.cuda(1), None, inp, [1, 0], should_fail=False)
 
-    @unittest.skipIf(not TEST_MULTIGPU or not PY3, "multi-GPU not supported")
+    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_data_parallel_model_no_refcycles(self):
         # Python 2.7 will create reference cycles with the following
         # Module on multiple GPUs, but Python 3 shouldn't unless

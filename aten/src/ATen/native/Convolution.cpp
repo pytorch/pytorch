@@ -39,7 +39,7 @@ struct ConvParams {
   bool needs_64bit_indexing_no_split(const at::Tensor& input, const at::Tensor& weight) const;
   bool use_cudnn(const at::Tensor& input, const at::Tensor& weight) const;
   bool use_cudnn_depthwise(const at::Tensor& input, const at::Tensor& weight) const;
-  bool use_miopen(const at::Tensor& input, bool bias_defined) const;
+  bool use_miopen(const at::Tensor& input, const at::Tensor& weight, bool bias_defined) const;
   bool use_mkldnn(const at::Tensor& input) const;
   bool use_nnpack(const at::Tensor& input) const;
   bool is_depthwise(const at::Tensor& input, const at::Tensor& weight) const;
@@ -197,8 +197,10 @@ auto ConvParams::use_cudnn(const at::Tensor& input, const at::Tensor& weight) co
   return !is_output_padding_big();
 }
 
-auto ConvParams::use_miopen(const at::Tensor& input, bool bias_defined) const -> bool {
-
+auto ConvParams::use_miopen(const at::Tensor& input, const at::Tensor& weight, bool bias_defined) const -> bool {
+  if (needs_64bit_indexing_no_split(input, weight)) {
+    return false;
+  }
   return ((input.scalar_type() == at::kFloat) || (input.scalar_type() == at::kHalf) || (input.scalar_type() == at::kBFloat16))
          && detail::getCUDAHooks().compiledWithMIOpen()
          && input.is_cuda()
@@ -631,7 +633,7 @@ at::Tensor _convolution(
           output = output + reshape_bias(input.dim(), bias);
         }
 
-      } else if (params.use_miopen(input, bias.defined())){
+      } else if (params.use_miopen(input, weight, bias.defined())){
         output = at::miopen_depthwise_convolution(
             input.contiguous(), weight, bias,
             padding, stride, dilation, params.groups, params.benchmark, params.deterministic);
@@ -661,7 +663,7 @@ at::Tensor _convolution(
         output = output + reshape_bias(input.dim(), bias);
       }
     }
-  } else if (params.use_miopen(input, bias.defined())) {
+  } else if (params.use_miopen(input, weight, bias.defined())) {
     TORCH_CHECK(input.options().type_equal(weight.options()),
              "Input type (", input.toString(), ") and weight type (", weight.toString(),
              ") should be the same");
@@ -699,6 +701,18 @@ at::Tensor _convolution(
     if (params.use_cpu_depthwise3x3_winograd(input, weight)) {
       output = convolution_depthwise3x3_winograd_stub(
         input.device().type(), input, weight, bias, params.stride, params.padding, params.groups);
+    } else if (
+        !params.transposed && (input.ndimension() == 5) &&
+        (input.device().type() == c10::DeviceType::CPU) &&
+        !params.is_dilated()) {
+      // fast path for grouped conv3d
+      output = at::slow_conv3d(
+          input,
+          weight,
+          weight.sizes().slice(2),
+          bias,
+          params.stride,
+          params.padding);
     } else if (params.groups == 1) {
       output = at::_convolution_nogroup(
           input.contiguous(), weight, bias, params.stride, params.padding, params.dilation, params.transposed, params.output_padding);
@@ -785,6 +799,9 @@ at::Tensor _convolution_nogroup(
     } else if (dim == 5) { /* dim == 5, CPU, non-dilated */
       /* CPU implementation has specialized MM kernels
          for non-dilated case here */
+
+      // This path is already overwritten with the fast impl in _convolution
+      // See: https://github.com/pytorch/pytorch/pull/3635
       return at::slow_conv3d(
           input, weight, kernel_size, bias,
           stride, padding);
@@ -829,7 +846,13 @@ std::tuple<Tensor,Tensor,Tensor> _convolution_double_backward(
   params.dilation = dilation_.vec();
   params.transposed = transposed_;
   params.output_padding = output_padding_.vec();
-  params.groups = groups_;
+  // TODO: hacky way of inferring the groups number for grouped Conv3D
+  // See: https://github.com/pytorch/pytorch/pull/36355
+  if (!params.transposed && input.dim() > 4) {
+    params.groups = input.size(1) / weight.size(1);
+  } else {
+    params.groups = groups_;
+  }
   params.benchmark = benchmark;
   params.deterministic = deterministic;
   params.cudnn_enabled = cudnn_enabled;
@@ -902,7 +925,6 @@ std::tuple<Tensor,Tensor,Tensor> _convolution_double_backward(
         if (gOt.is_cuda()) {
           gOt = gOt.contiguous();
         }
-
         // Compute conv
         if (params.transposed) {
           gw_conv_params.transposed = false;
