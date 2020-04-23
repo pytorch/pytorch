@@ -9637,6 +9637,7 @@ class TestNNDeviceType(NNTestCase):
     @dtypesIfCUDA(torch.half, torch.float)
     @dtypes(torch.float)
     def test_softmax_backward(self, device, dtype):
+        # Non-even sizes and non-zero shifts test fallback paths in vectorized kernel
         sizes = [(0, 10), (32, 20), (10, 0), (31, 20), (32, 21), (31, 23)]
         shifts = [(0, 0), (1, 0), (0, 1), (1, 1)]
         for fn in [F.softmax, F.log_softmax]:
