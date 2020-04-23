@@ -260,20 +260,40 @@ class TestMkldnn(TestCase):
         self.assertEqual(x1.grad, x2.grad.to_dense())
 
     def test_batch_norm2d(self):
-        N = torch.randint(3, 10, (1,)).item()
-        C = torch.randint(3, 100, (1,)).item()
-        x = torch.randn(N, C, 35, 45, dtype=torch.float32) * 10
+        x = torch.randn(64, 3, 35, 45, dtype=torch.float32) * 10
 
-        # TODO: support training
-        for train in [False]:
-            bn = torch.nn.BatchNorm2d(C).float().train(train)
-            mkldnn_bn = mkldnn_utils.to_mkldnn(copy.deepcopy(bn))
-            self.assertEqual(
-                bn(x),
-                mkldnn_bn(x.to_mkldnn()).to_dense())
+        for train in [True, False]:
+            # TODO: support none affine
+            for affine in [True]:
+                for track_running_stats in [True, False]:
+                    bn = torch.nn.BatchNorm2d(
+                        3,
+                        affine=affine,
+                        track_running_stats=track_running_stats).float().train(train)
+                    if (train or not track_running_stats):
+                        mkldnn_bn = copy.deepcopy(bn)
+                    else:
+                        mkldnn_bn = mkldnn_utils.to_mkldnn(copy.deepcopy(bn))
+                    x1 = x.clone()
+                    x2 = x.clone().to_mkldnn()
+                    if train:
+                        x1.requires_grad_()
+                        x2.requires_grad_()
+                    y1 = bn(x1)
+                    y2 = mkldnn_bn(x2).to_dense()
+                    if train:
+                        loss1 = y1.sum()
+                        loss2 = y2.sum()
+                        loss1.backward()
+                        loss2.backward()
+                        self.assertEqual(x1.grad, x2.grad.to_dense())
+                        np.testing.assert_allclose(
+                            bn.weight.grad, mkldnn_bn.weight.grad, rtol=1e-3, atol=1e-3)
 
-            self._test_serialization(mkldnn_bn, (x.to_mkldnn(),))
-            self._test_tracing(mkldnn_bn, (x.to_mkldnn(),))
+                    self.assertEqual(y1, y2)
+                    if (not train and track_running_stats):
+                        self._test_serialization(mkldnn_bn, (x.to_mkldnn(),))
+                        self._test_tracing(mkldnn_bn, (x.to_mkldnn(),))
 
     def test_add(self):
         N = torch.randint(3, 10, (1,)).item()
