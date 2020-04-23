@@ -784,7 +784,8 @@ void checkScopeCallbacks() {
       /* needs_inputs */ false);
 
   bool bad_scope = false;
-  auto pushScopedCallback = [&](profiler::RecordScope scope, size_t& cnt) {
+  auto pushScopedCallback = [&](
+      profiler::RecordScope scope, size_t& cnt, profiler::CallbackKind kind) {
     profiler::pushCallback(
         [&bad_scope, &cnt, scope](const profiler::RecordFunction& fn) {
           if (fn.scope() == scope) {
@@ -796,15 +797,25 @@ void checkScopeCallbacks() {
         },
         [](const profiler::RecordFunction&) {},
         /* needs_inputs */ false,
-        /* scopes */ {scope});
+        /* scopes */ {scope},
+        kind);
   };
 
   size_t fun_cnt = 0;
-  pushScopedCallback(profiler::RecordScope::FUNCTION, fun_cnt);
+  pushScopedCallback(
+      profiler::RecordScope::FUNCTION,
+      fun_cnt,
+      profiler::CallbackKind::PRIVATE_USE_1);
   size_t ts_fun_cnt = 0;
-  pushScopedCallback(profiler::RecordScope::TORCHSCRIPT_FUNCTION, ts_fun_cnt);
+  pushScopedCallback(
+      profiler::RecordScope::TORCHSCRIPT_FUNCTION,
+      ts_fun_cnt,
+      profiler::CallbackKind::PRIVATE_USE_2);
   size_t user_scope_cnt = 0;
-  pushScopedCallback(profiler::RecordScope::USER_SCOPE, user_scope_cnt);
+  pushScopedCallback(
+      profiler::RecordScope::USER_SCOPE,
+      user_scope_cnt,
+      profiler::CallbackKind::PRIVATE_USE_3);
 
   TORCH_CHECK(profiler::hasCallbacks());
 
@@ -1050,13 +1061,6 @@ void testThreadLocalDebugInfo() {
   {
     at::DebugInfoGuard guard(at::DebugInfoKind::TEST_INFO, debug_info);
     {
-      bool throws_ = false;
-      try {
-        at::DebugInfoGuard guard(at::DebugInfoKind::TEST_INFO, debug_info);
-      } catch (const std::exception&) {
-        throws_ = true;
-      }
-      TORCH_CHECK(throws_);
       checkDebugInfo(at::DebugInfoKind::TEST_INFO, 42);
       {
         auto debug_info = std::make_shared<TestThreadLocalDebugInfo>();
