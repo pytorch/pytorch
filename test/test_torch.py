@@ -24,12 +24,12 @@ from torch.testing._internal.common_methods_invocations import tri_tests_args, r
     _compare_trilu_indices
 from torch.testing._internal.common_utils import TestCase, iter_indices, TEST_NUMPY, TEST_SCIPY, TEST_MKL, \
     TEST_LIBROSA, TEST_WITH_ROCM, run_tests, skipIfNoLapack, suppress_warnings, \
-    IS_WINDOWS, PY3, NO_MULTIPROCESSING_SPAWN, do_test_dtypes, do_test_empty_full, \
+    IS_WINDOWS, NO_MULTIPROCESSING_SPAWN, do_test_dtypes, do_test_empty_full, \
     IS_SANDCASTLE, load_tests, slowTest, skipCUDANonDefaultStreamIf, skipCUDAMemoryLeakCheckIf, \
     BytesIOContext, skipIfRocm, torch_to_numpy_dtype_dict
 from multiprocessing.reduction import ForkingPickler
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, \
-    skipCPUIfNoLapack, skipCUDAIfNoMagma, skipCUDAIfRocm, skipCUDAIfNotRocm, onlyCUDA, onlyCPU, \
+    skipCPUIfNoLapack, skipCPUIfNoMkl, skipCUDAIfNoMagma, skipCUDAIfRocm, skipCUDAIfNotRocm, onlyCUDA, onlyCPU, \
     dtypes, dtypesIfCUDA, dtypesIfCPU, deviceCountAtLeast, skipCUDAIf, precisionOverride, \
     PYTORCH_CUDA_MEMCHECK, largeCUDATensorTest, onlyOnCPUAndCUDA
 import torch.backends.quantized
@@ -1297,9 +1297,6 @@ class _TestTorchMixin(object):
     @unittest.skipIf(NO_MULTIPROCESSING_SPAWN, "Disabled for environments that \
                      don't support multiprocessing with spawn start method")
     @unittest.skipIf(IS_WINDOWS, 'FIXME: CUDA OOM error on Windows')
-    @unittest.skipIf(not PY3,
-                     "spawn start method is not supported in Python 2, \
-                     but we need it for for testing failure case for CPU RNG on Windows")
     def test_multinomial_invalid_probs(self):
         test_method = _TestTorchMixin._test_multinomial_invalid_probs
         self._spawn_method(test_method, torch.Tensor([1, -1, 1]))
@@ -3290,20 +3287,14 @@ class _TestTorchMixin(object):
         self.assertEqual(torch.nn.Parameter, type(s2['bias']))
 
     def test_pickle(self):
-        if sys.version_info[0] == 2:
-            import cPickle as pickle
-        else:
-            import pickle
+        import pickle
         a = torch.randn(5, 5)
         serialized = pickle.dumps(a)
         b = pickle.loads(serialized)
         self.assertEqual(a, b)
 
     def test_pickle_parameter(self):
-        if sys.version_info[0] == 2:
-            import cPickle as pickle
-        else:
-            import pickle
+        import pickle
         a = torch.nn.Parameter(torch.randn(5, 5))
         serialized = pickle.dumps(a)
         b = pickle.loads(serialized)
@@ -3312,10 +3303,7 @@ class _TestTorchMixin(object):
         self.assertEqual(a, b)
 
     def test_pickle_parameter_no_requires_grad(self):
-        if sys.version_info[0] == 2:
-            import cPickle as pickle
-        else:
-            import pickle
+        import pickle
         a = torch.nn.Parameter(torch.randn(5, 5), requires_grad=False)
         serialized = pickle.dumps(a)
         b = pickle.loads(serialized)
@@ -4664,14 +4652,10 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         for tensor, value in zip(ok, ok_values):
             self.assertEqual(int(tensor), int(value))
             self.assertEqual(float(tensor), float(value))
-            if sys.version_info[0] < 3:
-                self.assertEqual(long(tensor), long(value))
 
         for tensor in not_ok:
             self.assertRaises(ValueError, lambda: int(tensor))
             self.assertRaises(ValueError, lambda: float(tensor))
-            if sys.version_info[0] < 3:
-                self.assertRaises(ValueError, lambda: long(tensor))
 
     def test_offset_scalar_cast(self):
         x = torch.Tensor([1, 2, 3])
@@ -12079,7 +12063,7 @@ class TestTorchDeviceType(TestCase):
             ("cos", doubles, True, True, 'cpu'),
             ("cos", doubles, False, True, 'cuda'),
             ("cosh", doubles, True, True, 'cpu'),
-            ("cosh", doubles, False, True, 'cuda'),
+            ("cosh", doubles, True, True, 'cuda'),
             ("digamma", doubles, True, True, 'cpu'),
             ("erf", doubles, True, True, 'cpu'),
             ("erf", doubles, False, True, 'cuda'),
@@ -12323,7 +12307,7 @@ class TestTorchDeviceType(TestCase):
     # passes on ROCm w/ python 2.7, fails w/ python 3.6
     @skipCUDAIfRocm
     # stft -> rfft -> _fft -> _fft_with_size -> _fft_mkl
-    @unittest.skipIf(not TEST_MKL, "PyTorch is built without MKL support")
+    @skipCPUIfNoMkl
     @dtypes(torch.double)
     def test_stft(self, device, dtype):
         if not TEST_LIBROSA:
@@ -12385,6 +12369,7 @@ class TestTorchDeviceType(TestCase):
         _test((10,), 5, 4, win_sizes=(1, 1), expected_error=RuntimeError)
 
     @skipIfRocm
+    @unittest.skipIf(not TEST_MKL, "PyTorch is built without MKL support")
     def test_fft_input_modification(self, device):
         # FFT functions should not modify their input (gh-34551)
 
@@ -15553,32 +15538,6 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         concat_list.append(torch.ones((SIZE2, 1024 * 512), dtype=torch.uint8, device=device))
         result = torch.cat(concat_list)
         self.assertEqual(result.size(0), SIZE1 + SIZE2)
-
-    @onlyOnCPUAndCUDA
-    def test_cat_bad_dtypes(self, device):
-        def cross_product(a, b, skip_same=True):
-            result = []
-            for dtype_a in a:
-                for dtype_b in b:
-                    if skip_same and (dtype_a == dtype_b):
-                        continue
-                    result.append((dtype_a, dtype_b))
-            return result
-
-        in_shape = (1, 2, 3)
-        out_shape = (2, 2, 3)
-
-        all_dtypes = (torch.uint8, torch.int8, torch.int16, torch.int32,
-                      torch.int64, torch.float, torch.double, torch.half,
-                      torch.bfloat16)
-        all_dtype_combinations = cross_product(all_dtypes, all_dtypes,
-                                               skip_same=True)
-        out = torch.empty(out_shape)
-        for (dtype_a, dtype_b) in all_dtype_combinations:
-            a = torch.ones(in_shape, dtype=dtype_a).to(device)
-            b = torch.ones(in_shape, dtype=dtype_b).to(device)
-            self.assertRaises(RuntimeError, lambda: torch.cat([a, b]))
-            self.assertRaises(RuntimeError, lambda: torch.cat([a, b], out=out))
 
 
     @onlyCPU
