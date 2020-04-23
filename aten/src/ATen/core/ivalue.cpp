@@ -476,35 +476,17 @@ IValue IValue::copy() const {
     case IValue::Tag::Tensor:
       copy = IValue(toTensor());
       break;
-    case IValue::Tag::Tuple: {
-      std::vector<IValue> copied_tuple;
-      for (const auto& e : toTuple()->elements()) {
-        copied_tuple.push_back(e.copy());
-      }
-      copy = IValue(ivalue::Tuple::create(copied_tuple));
-    }
+    case IValue::Tag::Tuple:
+      copy = IValue(toTuple());
       break;
-    case IValue::Tag::GenericList: {
-      auto list = toList();
-      auto copied_list = c10::impl::GenericList(list.elementType());
-      for (IValue v : list) {
-        copied_list.push_back(v.copy());
-      }
-      copy = IValue(copied_list);
-    }
+    case IValue::Tag::GenericList:
+      copy = IValue(toList());
       break;
-    case IValue::Tag::GenericDict: {
-      auto dict = toGenericDict();
-      auto copied_dict = c10::impl::GenericDict(dict.keyType(), dict.valueType());
-      for (const auto& entry : dict) {
-        copied_dict.insert(entry.key().copy(), entry.value().copy());
-      }
-      copy = IValue(copied_dict);
-    }
+    case IValue::Tag::GenericDict:
+      copy = IValue(toGenericDict());
       break;
-    case IValue::Tag::Object: {
+    case IValue::Tag::Object:
       copy = IValue(toObject()->copy());
-    }
       break;
     case IValue::Tag::String:
     case IValue::Tag::None:
