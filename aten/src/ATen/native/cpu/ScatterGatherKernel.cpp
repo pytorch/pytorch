@@ -9,23 +9,37 @@ namespace {
 
 // Used for `gather`-like methods
 // Test:
-// 1. index.size(d) == self.size(d) for all d != dim
-void gather_shape_check(const Tensor& self, int64_t dim, const Tensor& index) {
+// 1. index.size(d) == src.size(d) for all d != dim
+// 2. index.size(d) == self.size(d) for all d
+void gather_shape_check(const Tensor& self, int64_t dim, const Tensor& index, const Tensor& src) {
   auto self_dims = ensure_nonempty_dim(self.dim());
+  auto src_dims = ensure_nonempty_dim(src.dim());
 
   TORCH_CHECK(self_dims == ensure_nonempty_dim(index.dim()),
     "Index tensor must have the same number of dimensions as input tensor"
   );
 
+  TORCH_CHECK(src_dims == ensure_nonempty_dim(index.dim()),
+    "Index tensor must have the same number of dimensions as output tensor"
+  );
+
   for (int64_t i = 0; i < self_dims; ++i) {
+    auto index_size = ensure_nonempty_size(index, i);
     if (i != dim) {
       TORCH_CHECK(
-        ensure_nonempty_size(index, i) == ensure_nonempty_size(self, i),
-        "Size does not match at dimension ", i,
-        " get ", ensure_nonempty_size(self, i),
+        index_size == ensure_nonempty_size(src, i),
+        "Output size does not match at dimension ", i,
+        " get ", ensure_nonempty_size(src, i),
         " vs ", ensure_nonempty_size(index, i)
       );
     }
+    TORCH_CHECK(
+      index_size == ensure_nonempty_size(self, i),
+      "Input size does not match at dimension ", i,
+      " get ", ensure_nonempty_size(self, i),
+      " vs ", ensure_nonempty_size(index, i)
+    );
+
   }
 }
 
@@ -131,7 +145,7 @@ struct cpu_scatter_gather_base_kernel {
       scatter_shape_check(self, dim, index, src);
     }
     else {
-      gather_shape_check(self, dim, index);
+      gather_shape_check(self, dim, index, src);
     }
 
     auto iter = TensorIterator();

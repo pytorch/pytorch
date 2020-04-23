@@ -22,6 +22,7 @@ from torch.testing._internal.common_quantization import (
     QuantizationTestCase,
 )
 
+import unittest
 
 class SubModule(torch.nn.Module):
     def __init__(self):
@@ -77,7 +78,11 @@ class ModelWithFunctionals(torch.nn.Module):
         return w
 
 
-class EagerModeNumericSuiteTest(QuantizationTestCase):
+class TestEagerModeNumericSuite(QuantizationTestCase):
+    @unittest.skipUnless(
+        'fbgemm' in torch.backends.quantized.supported_engines,
+        " Quantized operations require FBGEMM."
+    )
     def test_compare_weights(self):
         r"""Compare the weights of float and quantized conv layer
         """
