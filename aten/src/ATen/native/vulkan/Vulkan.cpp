@@ -4,14 +4,15 @@
 #include <unistd.h>
 #include <iostream>
 
-#include <ATen/native/vulkan/VulkanDebugUtils.h>
-#include <ATen/native/vulkan/VulkanVulkan.h>
+#include <c10/util/Exception.h>
+
+#include <ATen/native/vulkan/Vulkan.h>
 #include "vulkan_wrapper.h"
 
 #include <ATen/native/vulkan/glsl.h>
 #include <ATen/native/vulkan/spv.h>
 
-#ifdef USE_VULKAN_SHADERC_RUNTIME
+#ifdef USE_VULKAN_GLES_SHADERC_RUNTIME
 #include "shaderc/shaderc.hpp"
 #define GLSL_SPV(name) name##_glsl
 #else
@@ -22,15 +23,10 @@
 #define ROUND_UP(x, y) (((x) + (y) - (1)) / (y) * (y))
 #define ALIGN_UP4(x) ROUND_UP((x), 4)
 
-#define VK_CHECK_RESULT(f)                                          \
-  {                                                                 \
-    VkResult res = (f);                                             \
-    if (res != VK_SUCCESS) {                                        \
-      std::cout << FLF << " VK_CHECK_RESULT Fatal VkResult:" << res \
-                << std::endl;                                       \
-      assert(res == VK_SUCCESS);                                    \
-      throw std::runtime_error("VK_CHECK_RESULT Fail");             \
-    }                                                               \
+#define VK_CHECK_RESULT(f)                                         \
+  {                                                                \
+    VkResult res = (f);                                            \
+    TORCH_CHECK(res == VK_SUCCESS, "Vulkan error VkResult:", res); \
   }
 
 namespace at {
@@ -45,22 +41,11 @@ class AVKContext;
 static std::unique_ptr<AVKContext> vkContext;
 
 void initVulkanContextOnce() {
-  COUT_FLF;
-
   static const int once = []() {
     bool res = InitVulkan();
-    if (!res) {
-      std::cout << FLF << " ERROR Failed to InitVulkan" << std::endl;
-      assert(false);
-    }
-    std::cout << FLF << "InitVulkan ok" << std::endl;
-
+    TORCH_CHECK(res, "Vulkan Failed to InitVulkan");
     vkContext = std::make_unique<AVKContext>();
-    if (!vkContext) {
-      std::cout << FLF << " ERROR Failed to create AVKContext" << std::endl;
-      assert(false);
-    }
-    std::cout << FLF << " AVKContext created ok" << std::endl;
+    TORCH_CHECK(vkContext, "Vulkan Failed to create Vulkan Context");
     return 0;
   }();
   ((void)once);
@@ -69,7 +54,6 @@ void initVulkanContextOnce() {
 class AVKContext {
  public:
   AVKContext() {
-    COUT_FLF;
     createInstance();
     findPhysicalDevice();
     createDevice();
@@ -94,17 +78,9 @@ class AVKContext {
     if (enableValidationLayers) {
       uint32_t layer_present_count;
       vkEnumerateInstanceLayerProperties(&layer_present_count, nullptr);
-      std::cout << "validation_layer_present_count:" << layer_present_count
-                << std::endl;
-
       std::vector<VkLayerProperties> layer_props(layer_present_count);
       vkEnumerateInstanceLayerProperties(
           &layer_present_count, layer_props.data());
-      for (uint32_t i = 0; i < layer_present_count; i++) {
-        printf(
-            "validation_layer_present[%u]:%s\n", i, layer_props[i].layerName);
-      }
-
       const char* instance_layers[] = {
           "VK_LAYER_GOOGLE_unique_objects",
           "VK_LAYER_GOOGLE_threading",
@@ -123,12 +99,8 @@ class AVKContext {
             found = true;
           }
         }
-
         if (found) {
           enabledValidationLayers_.push_back(instance_layers[i]);
-        } else {
-          std::cout << "Validation layer not supported " << instance_layers[i]
-                    << std::endl;
         }
       }
 
@@ -138,11 +110,6 @@ class AVKContext {
       std::vector<VkExtensionProperties> extension_props(extension_count);
       vkEnumerateInstanceExtensionProperties(
           nullptr, &extension_count, extension_props.data());
-      for (uint32_t i = 0; i < extension_count; i++) {
-        std::cout << "extension_present " << i << " "
-                  << extension_props[i].extensionName << std::endl;
-      }
-
       bool foundExtension = false;
       for (VkExtensionProperties prop : extension_props) {
         if (strcmp(VK_EXT_DEBUG_REPORT_EXTENSION_NAME, prop.extensionName) ==
@@ -154,10 +121,6 @@ class AVKContext {
 
       if (foundExtension) {
         enabledExtensions.push_back(VK_EXT_DEBUG_REPORT_EXTENSION_NAME);
-      } else {
-        std::cout
-            << "Extension VK_EXT_DEBUG_REPORT_EXTENSION_NAME not supported"
-            << std::endl;
       }
     }
 
@@ -192,18 +155,15 @@ class AVKContext {
       auto vkCreateDebugReportCallbackEXT =
           (PFN_vkCreateDebugReportCallbackEXT)vkGetInstanceProcAddr(
               instance_, "vkCreateDebugReportCallbackEXT");
-      if (vkCreateDebugReportCallbackEXT == nullptr) {
-        throw std::runtime_error(
-            "Could not load vkCreateDebugReportCallbackEXT");
-      }
-
+      TORCH_CHECK(
+          vkCreateDebugReportCallbackEXT,
+          "Could not load vkCreateDebugReportCallbackEXT");
       VK_CHECK_RESULT(vkCreateDebugReportCallbackEXT(
           instance_,
           &debugReportCallbackCreateInfo,
           nullptr,
           &debugReportCallback_));
     }
-    COUT_FLF;
   }
 
   static VKAPI_ATTR VkBool32 VKAPI_CALL debugReportCallbackFn(
@@ -237,10 +197,7 @@ class AVKContext {
   void findPhysicalDevice() {
     uint32_t deviceCount;
     vkEnumeratePhysicalDevices(instance_, &deviceCount, nullptr);
-    if (deviceCount == 0) {
-      throw std::runtime_error("could not find a device with vulkan support");
-    }
-
+    TORCH_CHECK(deviceCount > 0, "Could not find a device with vulkan support");
     std::vector<VkPhysicalDevice> devices(deviceCount);
     vkEnumeratePhysicalDevices(instance_, &deviceCount, devices.data());
     int i = 0;
@@ -272,12 +229,9 @@ class AVKContext {
       }
     }
 
-    if (i == queueFamilies.size()) {
-      assert(false);
-      throw std::runtime_error(
-          "could not find a queue family that supports operations");
-    }
-
+    TORCH_CHECK(
+        i == queueFamilies.size(),
+        "Could not find a queue family that supports operations");
     return i;
   }
 
@@ -316,10 +270,7 @@ class AVKContext {
     if (enableValidationLayers) {
       auto func = (PFN_vkDestroyDebugReportCallbackEXT)vkGetInstanceProcAddr(
           instance_, "vkDestroyDebugReportCallbackEXT");
-      if (func == nullptr) {
-        throw std::runtime_error(
-            "Could not load vkDestroyDebugReportCallbackEXT");
-      }
+      TORCH_CHECK(func, "Could not load vkDestroyDebugReportCallbackEXT");
       func(instance_, debugReportCallback_, nullptr);
     }
 
@@ -353,22 +304,16 @@ class AVKBuffer {
       : bufferSize_(bufferSize),
         physicalDevice_(physicalDevice),
         device_(device) {
-    COUT_FLF;
     VkBufferCreateInfo bufferCreateInfo = {};
     bufferCreateInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
     bufferCreateInfo.size = bufferSize;
     bufferCreateInfo.usage = isUniform ? VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT
                                        : VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
     bufferCreateInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-    COUT_FLF;
-
     VK_CHECK_RESULT(
         vkCreateBuffer(device_, &bufferCreateInfo, nullptr, &buffer_));
-    COUT_FLF;
     VkMemoryRequirements memoryRequirements;
-    COUT_FLF;
     vkGetBufferMemoryRequirements(device_, buffer_, &memoryRequirements);
-    COUT_FLF;
     VkMemoryAllocateInfo allocateInfo = {};
     allocateInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
     allocateInfo.allocationSize = memoryRequirements.size;
@@ -378,12 +323,9 @@ class AVKBuffer {
         VK_MEMORY_PROPERTY_HOST_COHERENT_BIT |
             VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT);
 
-    COUT_FLF;
     VK_CHECK_RESULT(
         vkAllocateMemory(device, &allocateInfo, nullptr, &bufferMemory_));
-    COUT_FLF;
     VK_CHECK_RESULT(vkBindBufferMemory(device_, buffer_, bufferMemory_, 0));
-    COUT_FLF;
   }
 
   void toHost(void* outputData, int64_t size) {
@@ -401,11 +343,8 @@ class AVKBuffer {
   }
 
   ~AVKBuffer() {
-    COUT_FLF;
     vkFreeMemory(device_, bufferMemory_, nullptr);
-    COUT_FLF;
     vkDestroyBuffer(device_, buffer_, nullptr);
-    COUT_FLF;
   }
 
   uint32_t bufferSize_;
@@ -424,8 +363,6 @@ AVKImage::AVKImage(int64_t W, int64_t H, int64_t C) {
   filter_ = VK_FILTER_NEAREST;
   samplerAddressMode_ = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
   format_ = VK_FORMAT_R16G16B16A16_SFLOAT;
-
-  COUT_FLF;
 
   VkImageCreateInfo imageInfo = {};
   imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
@@ -446,14 +383,10 @@ AVKImage::AVKImage(int64_t W, int64_t H, int64_t C) {
   imageInfo.pNext = nullptr;
   imageInfo.flags = 0;
 
-  COUT_FLF;
   VK_CHECK_RESULT(vkCreateImage(device, &imageInfo, nullptr, &image_));
-  COUT_FLF;
 
   VkMemoryRequirements memReqs = {};
-  COUT_FLF;
   vkGetImageMemoryRequirements(device, image_, &memReqs);
-  COUT_FLF;
   VkMemoryAllocateInfo allocInfo = {};
   allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
   allocInfo.allocationSize = memReqs.size;
@@ -462,36 +395,23 @@ AVKImage::AVKImage(int64_t W, int64_t H, int64_t C) {
       memReqs.memoryTypeBits,
       VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
 
-  COUT_FLF;
   VK_CHECK_RESULT(vkAllocateMemory(device, &allocInfo, nullptr, &imageMemory_));
-  COUT_FLF;
   VK_CHECK_RESULT(vkBindImageMemory(device, image_, imageMemory_, 0));
-  COUT_FLF;
 
-  COUT_FLF;
   VkImageViewCreateInfo _imageViewCreateInfo = imageViewCreateInfo();
-  COUT_FLF;
   VK_CHECK_RESULT(
       vkCreateImageView(device, &_imageViewCreateInfo, nullptr, &imageView_));
-  COUT_FLF;
 
   VkSamplerCreateInfo _samplerCreateInfo = samplerCreateInfo();
-  COUT_FLF;
   VK_CHECK_RESULT(
       vkCreateSampler(device, &_samplerCreateInfo, nullptr, &sampler_));
-  COUT_FLF;
 }
 
 AVKImage::~AVKImage() {
-  COUT_FLF;
   vkDestroySampler(vkContext->device_, sampler_, nullptr);
-  COUT_FLF;
   vkDestroyImageView(vkContext->device_, imageView_, nullptr);
-  COUT_FLF;
   vkFreeMemory(vkContext->device_, imageMemory_, nullptr);
-  COUT_FLF;
   vkDestroyImage(vkContext->device_, image_, nullptr);
-  COUT_FLF;
 }
 
 VkImageViewCreateInfo AVKImage::imageViewCreateInfo() {
@@ -542,17 +462,14 @@ class ComputeUnit {
       const uint32_t* code,
       const uint32_t codeSize,
       const VkDescriptorSetLayout& descrSetLayout) {
-    COUT_FLF;
     auto& device = vkContext->device_;
     VkShaderModuleCreateInfo createInfo = {};
     createInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
     createInfo.pCode = code;
     createInfo.codeSize = codeSize;
 
-    COUT_FLF;
     VK_CHECK_RESULT(vkCreateShaderModule(
         device, &createInfo, nullptr, &computeShaderModule_));
-    COUT_FLF;
 
     VkPipelineShaderStageCreateInfo shaderStageCreateInfo = {};
     shaderStageCreateInfo.sType =
@@ -567,62 +484,28 @@ class ComputeUnit {
     pipelineLayoutCreateInfo.setLayoutCount = 1;
     pipelineLayoutCreateInfo.pSetLayouts = &descrSetLayout;
 
-    COUT_FLF;
     VK_CHECK_RESULT(vkCreatePipelineLayout(
         device, &pipelineLayoutCreateInfo, nullptr, &pipelineLayout_));
-    COUT_FLF;
 
     VkComputePipelineCreateInfo pipelineCreateInfo = {};
     pipelineCreateInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
     pipelineCreateInfo.stage = shaderStageCreateInfo;
     pipelineCreateInfo.layout = pipelineLayout_;
 
-    COUT_FLF;
     VK_CHECK_RESULT(vkCreateComputePipelines(
         device, VK_NULL_HANDLE, 1, &pipelineCreateInfo, nullptr, &pipeline_));
-    COUT_FLF;
   }
 
-#ifdef USE_VULKAN_SHADERC_RUNTIME
+#ifdef USE_VULKAN_GLES_SHADERC_RUNTIME
   void createComputePipelineCompile(
       std::string glslSrc,
       const VkDescriptorSetLayout& descrSetLayout) {
-    COUT_FLF;
-    std::cout << "\nGLSL{\n"
-              << glslSrc << "\n}GLSL size:" << glslSrc.size() << std::endl;
     shaderc::Compiler compiler;
-    COUT_FLF;
     shaderc::CompileOptions options;
     options.SetGenerateDebugInfo();
     options.SetTargetEnvironment(
         shaderc_target_env_vulkan, shaderc_env_version_vulkan_1_0);
     options.SetForcedVersionProfile(450, shaderc_profile_core);
-
-    shaderc::PreprocessedSourceCompilationResult ppRes =
-        compiler.PreprocessGlsl(
-            glslSrc.c_str(),
-            glslSrc.size(),
-            shaderc_compute_shader,
-            "vulkan_shader.comp",
-            options);
-
-    auto ppCompStat = ppRes.GetCompilationStatus();
-    auto numErrors = ppRes.GetNumErrors();
-    auto numWarnings = ppRes.GetNumWarnings();
-    std::cout << "shaderc compilation numError:" << numError
-              << " numWarnings:" << numWarnings << std::endl;
-    if (ppCompStat != shaderc_compilation_status_success) {
-      std::cout << "Shader preproc compilation error ppCompStat:" << ppCompStat
-                << ppRes.GetErrorMessage() << std::endl;
-      assert(false);
-    } else {
-      COUT_FLF;
-      std::vector<char> preproc{ppRes.cbegin(), ppRes.cend()};
-      std::cout << "GLSL Preproc{" << preproc.data() << "}GLSL Preproc"
-                << std::endl;
-      COUT_FLF;
-    }
-    COUT_FLF;
     shaderc::SpvCompilationResult compilationResult = compiler.CompileGlslToSpv(
         glslSrc.c_str(),
         glslSrc.size(),
@@ -630,14 +513,12 @@ class ComputeUnit {
         "vulkan_shader.comp",
         "main",
         options);
-    COUT_FLF;
-    auto compStat = compilationResult.GetCompilationStatus();
-    if (compStat != shaderc_compilation_status_success) {
-      std::cout << "Shader compilation error compStat:" << compStat
-                << compilationResult.GetErrorMessage() << std::endl;
-      assert(false);
-    }
-    COUT_FLF;
+    auto compilationStatus = compilationResult.GetCompilationStatus();
+    TORCH_INTERNAL_ASSERT(
+        compStat == shaderc_compilation_status_success,
+        "Shader compilation error: status:",
+        compilationStatus,
+        compilationResult.GetErrorMessage());
     std::vector<uint32_t> shaderSpvCode(
         compilationResult.cbegin(), compilationResult.cend());
     const uint32_t codeSizeBytes = 4 * shaderSpvCode.size();
@@ -650,38 +531,30 @@ class ComputeUnit {
       uint32_t groupCountX,
       uint32_t groupCountY,
       uint32_t groupCountZ) {
-    COUT_FLF;
     auto& device = vkContext->device_;
     VkCommandPoolCreateInfo commandPoolCreateInfo = {};
     commandPoolCreateInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
     commandPoolCreateInfo.flags = 0;
     commandPoolCreateInfo.queueFamilyIndex = vkContext->queueFamilyIndex_;
-    COUT_FLF;
     VK_CHECK_RESULT(vkCreateCommandPool(
         device, &commandPoolCreateInfo, nullptr, &commandPool_));
-    COUT_FLF;
     VkCommandBufferAllocateInfo commandBufferAllocateInfo = {};
     commandBufferAllocateInfo.sType =
         VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
     commandBufferAllocateInfo.commandPool = commandPool_;
     commandBufferAllocateInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
     commandBufferAllocateInfo.commandBufferCount = 1;
-    COUT_FLF;
 
     VK_CHECK_RESULT(vkAllocateCommandBuffers(
         device, &commandBufferAllocateInfo, &commandBuffer_));
 
-    COUT_FLF;
     VkCommandBufferBeginInfo beginInfo = {};
     beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-    COUT_FLF;
     VK_CHECK_RESULT(vkBeginCommandBuffer(commandBuffer_, &beginInfo));
-    COUT_FLF;
 
     vkCmdBindPipeline(
         commandBuffer_, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline_);
-    COUT_FLF;
     vkCmdBindDescriptorSets(
         commandBuffer_,
         VK_PIPELINE_BIND_POINT_COMPUTE,
@@ -691,19 +564,14 @@ class ComputeUnit {
         &descriptorSet,
         0,
         nullptr);
-    COUT_FLF;
     vkCmdDispatch(commandBuffer_, groupCountX, groupCountY, groupCountZ);
-    COUT_FLF;
     VK_CHECK_RESULT(vkEndCommandBuffer(commandBuffer_));
-    COUT_FLF;
   }
   void runCommandBuffer() {
-    COUT_FLF;
     VkSubmitInfo submitInfo = {};
     submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
     submitInfo.commandBufferCount = 1;
     submitInfo.pCommandBuffers = &commandBuffer_;
-    COUT_FLF;
 
     VkFence fence;
     VkFenceCreateInfo fenceCreateInfo = {};
@@ -712,14 +580,10 @@ class ComputeUnit {
     VK_CHECK_RESULT(
         vkCreateFence(vkContext->device_, &fenceCreateInfo, NULL, &fence))
 
-    COUT_FLF;
     VK_CHECK_RESULT(vkQueueSubmit(vkContext->queue_, 1, &submitInfo, fence));
-    COUT_FLF;
     vkWaitForFences(vkContext->device_, 1, &fence, VK_TRUE, 100000000000);
-    COUT_FLF;
 
     vkDestroyFence(vkContext->device_, fence, NULL);
-    COUT_FLF;
   }
 
  private:
@@ -730,18 +594,15 @@ class ComputeUnit {
   VkShaderModule computeShaderModule_; // own
 };
 
-VulkanVulkanTensor::VulkanVulkanTensor(std::vector<int64_t> sizes)
-    : sizes_(sizes) {
-  COUT_FLF;
+VulkanTensor::VulkanTensor(std::vector<int64_t> sizes) : sizes_(sizes) {
   assert(sizes_.size() == 4);
   initVulkanContextOnce();
 }
 
-#ifdef USE_VULKAN_SHADERC_RUNTIME
+#ifdef USE_VULKAN_GLES_SHADERC_RUNTIME
 auto makeComputeUnit(
     const char* glslSrc,
     const VkDescriptorSetLayout& descrSetLayout) {
-  COUT_FLPF;
   auto computeUnit = std::make_unique<ComputeUnit>();
   computeUnit->createComputePipelineCompile(
       std::string{glslSrc, std::strlen(glslSrc)}, descrSetLayout);
@@ -752,7 +613,6 @@ auto makeComputeUnit(
     const unsigned char* spvCode,
     const unsigned int spvCodeSize,
     const VkDescriptorSetLayout& descrSetLayout) {
-  COUT_FLPF;
   auto computeUnit = std::make_unique<ComputeUnit>();
   const uint32_t* code = reinterpret_cast<const uint32_t*>(spvCode);
   const uint32_t codeSize = spvCodeSize;
@@ -766,8 +626,7 @@ struct uniforms {
   int32_t h;
 };
 
-void VulkanVulkanTensor::setDataFromHost(const float* inputData) {
-  COUT_FLF;
+void VulkanTensor::setDataFromHost(const float* inputData) {
   initVulkanContextOnce();
 
   auto& device = vkContext->device_;
@@ -786,12 +645,10 @@ void VulkanVulkanTensor::setDataFromHost(const float* inputData) {
 
   tensorImage_ = std::make_unique<AVKImage>(W, H, C);
 
-  COUT_FLF;
   int64_t inputDataSize = sizeof(float) * numel;
   int64_t bufferDataSizeAligned = ROUND_UP(inputDataSize, vkContext->sboAlign_);
   AVKBuffer bufferData{bufferDataSizeAligned, physicalDevice, device, false};
   bufferData.toDevice((void*)inputData, inputDataSize);
-  COUT_FLF;
 
   uniforms wh{W, H};
   int64_t bufferConstSize = sizeof(wh);
@@ -800,12 +657,10 @@ void VulkanVulkanTensor::setDataFromHost(const float* inputData) {
   AVKBuffer bufferConst{bufferConstSizeAligned, physicalDevice, device, true};
   bufferConst.toDevice((void*)&wh, bufferConstSize);
 
-  COUT_FLF;
   VkDescriptorSet descriptorSet = {};
   VkDescriptorSetLayout descrSetLayout = {};
   VkDescriptorPool descrPool = {};
 
-  COUT_FLF;
   VkDescriptorSetLayoutBinding descrSetLayoutBinding[] = {
       {
           0, // binding
@@ -829,7 +684,6 @@ void VulkanVulkanTensor::setDataFromHost(const float* inputData) {
           nullptr // pImmutableSamplers
       }};
 
-  COUT_FLF;
   VkDescriptorSetLayoutCreateInfo descrSetLayoutCreateInfo{
       VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO, // sType
       nullptr, // pNext
@@ -838,17 +692,14 @@ void VulkanVulkanTensor::setDataFromHost(const float* inputData) {
       descrSetLayoutBinding // pBindings
   };
 
-  COUT_FLF;
   VK_CHECK_RESULT(vkCreateDescriptorSetLayout(
       device, &descrSetLayoutCreateInfo, nullptr, &descrSetLayout));
-  COUT_FLF;
 
   VkDescriptorPoolSize descrPoolSize[] = {
       {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1},
       {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1},
       {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1}};
 
-  COUT_FLF;
   VkDescriptorPoolCreateInfo descrPoolCreateInfo{
       VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO, // sType
       nullptr, // pNext
@@ -858,10 +709,8 @@ void VulkanVulkanTensor::setDataFromHost(const float* inputData) {
       descrPoolSize // pPoolSizes
   };
 
-  COUT_FLF;
   VK_CHECK_RESULT(vkCreateDescriptorPool(
       device, &descrPoolCreateInfo, nullptr, &descrPool));
-  COUT_FLF;
 
   VkDescriptorSetAllocateInfo descriptorSetAllocateInfo{
       VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO, // sType
@@ -870,16 +719,13 @@ void VulkanVulkanTensor::setDataFromHost(const float* inputData) {
       1, // descriptorSetCount
       &descrSetLayout // pSetLayouts
   };
-  COUT_FLF;
   VK_CHECK_RESULT(vkAllocateDescriptorSets(
       device, &descriptorSetAllocateInfo, &descriptorSet));
-  COUT_FLF;
 
   VkDescriptorBufferInfo descrBufferData = {};
   descrBufferData.buffer = bufferData.buffer_;
   descrBufferData.offset = 0;
   descrBufferData.range = bufferData.bufferSize_;
-  COUT_FLF;
   VkWriteDescriptorSet writeDescrBufferData = {
       VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, // sType
       nullptr, // pNext
@@ -892,15 +738,12 @@ void VulkanVulkanTensor::setDataFromHost(const float* inputData) {
       &descrBufferData, // pBufferInfo
       nullptr, // pTexelBufferView
   };
-  COUT_FLF;
   vkUpdateDescriptorSets(device, 1, &writeDescrBufferData, 0, nullptr);
-  COUT_FLF;
 
   VkDescriptorBufferInfo descrBufferConst = {};
   descrBufferConst.buffer = bufferConst.buffer_;
   descrBufferConst.offset = 0;
   descrBufferConst.range = bufferConst.bufferSize_;
-  COUT_FLF;
   VkWriteDescriptorSet writeDescrBufferConst = {
       VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, // sType
       nullptr, // pNext
@@ -913,15 +756,12 @@ void VulkanVulkanTensor::setDataFromHost(const float* inputData) {
       &descrBufferConst, // pBufferInfo
       nullptr, // pTexelBufferView
   };
-  COUT_FLF;
   vkUpdateDescriptorSets(device, 1, &writeDescrBufferConst, 0, nullptr);
-  COUT_FLF;
 
   VkDescriptorImageInfo descrImage = {};
   descrImage.sampler = tensorImage_->sampler_;
   descrImage.imageLayout = tensorImage_->imageLayout_;
   descrImage.imageView = tensorImage_->imageView_;
-  COUT_FLF;
   VkWriteDescriptorSet writeDescrImage = {
       VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, // sType
       nullptr, // pNext
@@ -934,25 +774,17 @@ void VulkanVulkanTensor::setDataFromHost(const float* inputData) {
       nullptr, // pBufferInfo
       nullptr, // pTexelBufferView
   };
-  COUT_FLF;
   vkUpdateDescriptorSets(device, 1, &writeDescrImage, 0, nullptr);
-  COUT_FLF;
   auto computeUnit = makeComputeUnit(
       at::native::vulkan::GLSL_SPV(vulkan_nchw_buf_to_tex), descrSetLayout);
-  COUT_FLF;
   computeUnit->createCommandBuffer(
       descriptorSet, UP_DIV(W, 8), UP_DIV(H, 8), C_4);
-  COUT_FLF;
   computeUnit->runCommandBuffer();
-  COUT_FLF;
   vkDestroyDescriptorPool(device, descrPool, nullptr);
-  COUT_FLF;
   vkDestroyDescriptorSetLayout(device, descrSetLayout, nullptr);
-  COUT_FLF;
 }
 
-void VulkanVulkanTensor::copyDataToHost(float* output) {
-  COUT_FLF;
+void VulkanTensor::copyDataToHost(float* output) {
   initVulkanContextOnce();
 
   auto& device = vkContext->device_;
@@ -969,13 +801,10 @@ void VulkanVulkanTensor::copyDataToHost(float* output) {
   int W = sizes_[3];
   int C_4 = UP_DIV(C, 4);
 
-  COUT_FLF;
   int64_t bufferDataSize = sizeof(float) * numel;
   int64_t bufferDataSizeAligned =
       ROUND_UP(bufferDataSize, vkContext->sboAlign_);
   AVKBuffer bufferData{bufferDataSizeAligned, physicalDevice, device, false};
-
-  COUT_FLF;
 
   uniforms wh{W, H};
   int64_t bufferConstSize = sizeof(wh);
@@ -984,12 +813,10 @@ void VulkanVulkanTensor::copyDataToHost(float* output) {
   AVKBuffer bufferConst{bufferConstSizeAligned, physicalDevice, device, true};
   bufferConst.toDevice((void*)&wh, bufferConstSize);
 
-  COUT_FLF;
   VkDescriptorSet descriptorSet = {};
   VkDescriptorSetLayout descrSetLayout = {};
   VkDescriptorPool descrPool = {};
 
-  COUT_FLF;
   VkDescriptorSetLayoutBinding descrSetLayoutBinding[] = {
       {
           0, // binding
@@ -1013,7 +840,6 @@ void VulkanVulkanTensor::copyDataToHost(float* output) {
           nullptr // pImmutableSamplers
       }};
 
-  COUT_FLF;
   VkDescriptorSetLayoutCreateInfo descrSetLayoutCreateInfo{
       VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO, // sType
       nullptr, // pNext
@@ -1022,17 +848,14 @@ void VulkanVulkanTensor::copyDataToHost(float* output) {
       descrSetLayoutBinding // pBindings
   };
 
-  COUT_FLF;
   VK_CHECK_RESULT(vkCreateDescriptorSetLayout(
       device, &descrSetLayoutCreateInfo, nullptr, &descrSetLayout));
-  COUT_FLF;
 
   VkDescriptorPoolSize descrPoolSize[] = {
       {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1},
       {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1},
       {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1}};
 
-  COUT_FLF;
   VkDescriptorPoolCreateInfo descrPoolCreateInfo{
       VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO, // sType
       nullptr, // pNext
@@ -1042,10 +865,8 @@ void VulkanVulkanTensor::copyDataToHost(float* output) {
       descrPoolSize // pPoolSizes
   };
 
-  COUT_FLF;
   VK_CHECK_RESULT(vkCreateDescriptorPool(
       device, &descrPoolCreateInfo, nullptr, &descrPool));
-  COUT_FLF;
 
   VkDescriptorSetAllocateInfo descriptorSetAllocateInfo{
       VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO, // sType
@@ -1054,16 +875,13 @@ void VulkanVulkanTensor::copyDataToHost(float* output) {
       1, // descriptorSetCount
       &descrSetLayout // pSetLayouts
   };
-  COUT_FLF;
   VK_CHECK_RESULT(vkAllocateDescriptorSets(
       device, &descriptorSetAllocateInfo, &descriptorSet));
-  COUT_FLF;
 
   VkDescriptorBufferInfo descrBufferData = {};
   descrBufferData.buffer = bufferData.buffer_;
   descrBufferData.offset = 0;
   descrBufferData.range = bufferData.bufferSize_;
-  COUT_FLF;
   VkWriteDescriptorSet writeDescrBufferData = {
       VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, // sType
       nullptr, // pNext
@@ -1076,15 +894,12 @@ void VulkanVulkanTensor::copyDataToHost(float* output) {
       &descrBufferData, // pBufferInfo
       nullptr, // pTexelBufferView
   };
-  COUT_FLF;
   vkUpdateDescriptorSets(device, 1, &writeDescrBufferData, 0, nullptr);
-  COUT_FLF;
 
   VkDescriptorBufferInfo descrBufferConst = {};
   descrBufferConst.buffer = bufferConst.buffer_;
   descrBufferConst.offset = 0;
   descrBufferConst.range = bufferConst.bufferSize_;
-  COUT_FLF;
   VkWriteDescriptorSet writeDescrBufferConst = {
       VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, // sType
       nullptr, // pNext
@@ -1097,15 +912,12 @@ void VulkanVulkanTensor::copyDataToHost(float* output) {
       &descrBufferConst, // pBufferInfo
       nullptr, // pTexelBufferView
   };
-  COUT_FLF;
   vkUpdateDescriptorSets(device, 1, &writeDescrBufferConst, 0, nullptr);
-  COUT_FLF;
 
   VkDescriptorImageInfo descrImage = {};
   descrImage.sampler = tensorImage_->sampler_;
   descrImage.imageView = tensorImage_->imageView_;
   descrImage.imageLayout = tensorImage_->imageLayout_;
-  COUT_FLF;
   VkWriteDescriptorSet writeDescrImage = {
       VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, // sType
       nullptr, // pNext
@@ -1118,26 +930,17 @@ void VulkanVulkanTensor::copyDataToHost(float* output) {
       nullptr, // pBufferInfo
       nullptr, // pTexelBufferView
   };
-  COUT_FLF;
   vkUpdateDescriptorSets(device, 1, &writeDescrImage, 0, nullptr);
-  COUT_FLF;
   auto computeUnit =
       makeComputeUnit(GLSL_SPV(vulkan_tex_to_nchw_buf), descrSetLayout);
-  COUT_FLF;
   computeUnit->createCommandBuffer(
       descriptorSet, UP_DIV(W, 8), UP_DIV(H, 8), C_4);
-  COUT_FLF;
   computeUnit->runCommandBuffer();
-  COUT_FLF;
 
   bufferData.toHost(output, bufferDataSize);
 
-  COUT_FLF;
   vkDestroyDescriptorPool(device, descrPool, nullptr);
-  COUT_FLF;
   vkDestroyDescriptorSetLayout(device, descrSetLayout, nullptr);
-  COUT_FLF;
-  at::native::vulkan::debug::vk_print4d("copyDataToHost", output, N, C, H, W);
 }
 
 } // namespace vulkan

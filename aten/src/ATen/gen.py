@@ -171,8 +171,6 @@ cuda_file_manager = FileManager()
 def backend_to_devicetype(backend):
     if backend == 'QuantizedCPU':
         return 'CPU'
-    if backend == 'Vulkan':
-        return 'VULKAN'
     return backend
 
 backends = ['CPU', 'CUDA']
@@ -364,7 +362,7 @@ def generate_storage_type_and_tensor(backend, density, declarations, per_op_regi
         fm.write(env['Type'] + ".cpp", SPARSE_TYPE_DERIVED_CPP, env)
     fm.write(env['Type'] + ".h", TYPE_DERIVED_H, env)
 
-    if env['DeviceType'] == 'CPU' or env['DeviceType'] == 'VULKAN':
+    if env['DeviceType'] == 'CPU' or env['DeviceType'] == 'Vulkan':
         top_env['cpu_type_headers'].append(
             '#include "ATen/{}.h"'.format(env['Type']))
     else:

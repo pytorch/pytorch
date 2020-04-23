@@ -1,4 +1,4 @@
-#ifdef USE_VULKANGL
+#ifdef USE_GLES
 
 #include <stdio.h>
 #include <cassert>
@@ -7,9 +7,16 @@
 #include <sstream>
 #include <string>
 
-#include <ATen/native/vulkan/VulkanDebugUtils.h>
-#include <ATen/native/vulkan/VulkanGL.h>
+#include <c10/util/Exception.h>
+
+#include <ATen/native/vulkan/GLES.h>
 #include <ATen/native/vulkan/glsl.h>
+
+#define GL_CHECK_ERROR                                        \
+  {                                                           \
+    GLenum error = glGetError();                              \
+    TORCH_CHECK(error == GL_NO_ERROR, "GLES error: ", error); \
+  }
 
 #define UP_DIV(x, y) (((x) + (y) - (1)) / (y))
 #define ROUND_UP(x, y) (((x) + (y) - (1)) / (y) * (y))
@@ -24,17 +31,14 @@ namespace gl {
 class AGLContext {
  public:
   AGLContext() {
-    COUT_FLF;
     if (!(eglGetCurrentContext() != EGL_NO_CONTEXT)) {
       display_ = eglGetDisplay(EGL_DEFAULT_DISPLAY);
       if (display_ == EGL_NO_DISPLAY) {
-        APRINT("eglGetDisplay error");
         isCreateError_ = true;
       }
       int majorVersion;
       int minorVersion;
       eglInitialize(display_, &majorVersion, &minorVersion);
-      APRINT("GLContext version major:%d minor:%d", majorVersion, minorVersion);
       EGLint numConfigs;
       static const EGLint configAttribs[] = {EGL_SURFACE_TYPE,
                                              EGL_PBUFFER_BIT,
@@ -57,7 +61,6 @@ class AGLContext {
             display_, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
         eglTerminate(display_);
         display_ = EGL_NO_DISPLAY;
-        APRINT("eglChooseConfig error !!!");
         isCreateError_ = true;
       }
 
@@ -75,82 +78,39 @@ class AGLContext {
       glGetIntegerv(GL_MAJOR_VERSION, &major);
       int minor;
       glGetIntegerv(GL_MINOR_VERSION, &minor);
-      APRINT(
-          "GLContext: GL_MAJOR_VERSION:%d GL_MINOR_VERSION:%d", major, minor);
-      APRINT(
-          "GLContext: GL_SHADING_LANGUAGE_VERSION:%s",
-          (const char*)glGetString(GL_SHADING_LANGUAGE_VERSION));
-
-      std::string vendor{(const char*)glGetString(GL_VENDOR)};
-      std::string renderer{(const char*)glGetString(GL_RENDERER)};
-      APRINT("GLContext: GL_VENDOR:%s", vendor.c_str());
-      APRINT("GLContext: GL_RENDERER:%s", renderer.c_str());
-
-      std::string s;
-      s.append(vendor);
-      s.append(" ");
-      s.append(renderer);
-      APRINT("GLContext gGLInfo: %s", s.c_str());
 
       int maxShaderStorageBlockSize;
       glGetIntegerv(
           GL_MAX_SHADER_STORAGE_BLOCK_SIZE, &maxShaderStorageBlockSize);
-      APRINT(
-          "GLContext: GL_MAX_SHADER_STORAGE_BLOCK_SIZE:%d",
-          maxShaderStorageBlockSize);
 
       GLint maxCompGroupSizeX, maxCompGroupSizeY, maxCompGroupSizeZ;
       glGetIntegeri_v(GL_MAX_COMPUTE_WORK_GROUP_SIZE, 0, &maxCompGroupSizeX);
       glGetIntegeri_v(GL_MAX_COMPUTE_WORK_GROUP_SIZE, 1, &maxCompGroupSizeY);
       glGetIntegeri_v(GL_MAX_COMPUTE_WORK_GROUP_SIZE, 2, &maxCompGroupSizeZ);
-      APRINT(
-          "GLContext: GL_MAX_COMPUTE_WORK_GROUP_SIZE: %d,%d,%d",
-          maxCompGroupSizeX,
-          maxCompGroupSizeY,
-          maxCompGroupSizeZ);
 
       GLint maxCompGroupCountX, maxCompGroupCountY, maxCompGroupCountZ;
       glGetIntegeri_v(GL_MAX_COMPUTE_WORK_GROUP_COUNT, 0, &maxCompGroupCountX);
       glGetIntegeri_v(GL_MAX_COMPUTE_WORK_GROUP_COUNT, 1, &maxCompGroupCountY);
       glGetIntegeri_v(GL_MAX_COMPUTE_WORK_GROUP_COUNT, 2, &maxCompGroupCountZ);
-      APRINT(
-          "GLContext: GL_MAX_COMPUTE_WORK_GROUP_COUNT: %d,%d,%d",
-          maxCompGroupCountX,
-          maxCompGroupCountY,
-          maxCompGroupCountZ);
 
       GLint maxCompGroupInvocations;
       glGetIntegerv(
           GL_MAX_COMPUTE_WORK_GROUP_INVOCATIONS, &maxCompGroupInvocations);
-      APRINT(
-          "GLContext: GL_MAX_COMPUTE_WORK_GROUP_INVOCATIONS: %d",
-          maxCompGroupInvocations);
 
       GLint maxCompUniformBlocks;
       glGetIntegerv(GL_MAX_COMPUTE_UNIFORM_BLOCKS, &maxCompUniformBlocks);
-      APRINT(
-          "GLContext: GL_MAX_COMPUTE_UNIFORM_BLOCKS: %d", maxCompUniformBlocks);
 
       GLint maxCompSharedMemorySize;
       glGetIntegerv(
           GL_MAX_COMPUTE_SHARED_MEMORY_SIZE, &maxCompSharedMemorySize);
-      APRINT(
-          "GLContext: GL_MAX_COMPUTE_SHARED_MEMORY_SIZE: %d",
-          maxCompSharedMemorySize);
 
       int extNum;
       glGetIntegerv(GL_NUM_EXTENSIONS, &extNum);
-      for (int i = 0; i < extNum; i++) {
-        const GLubyte* extName = glGetStringi(GL_EXTENSIONS, i);
-        APRINT("GLContext ext %3d: %s", i, extName);
-      }
-
       if (major < 3) {
         isCreateError_ = true;
       }
     } else {
       context_ = EGL_NO_CONTEXT;
-      APRINT("eglGetCurrentContext() != EGL_NO_CONTEXT");
       isCreateError_ = true;
     }
   }
@@ -191,32 +151,32 @@ class AGLSSBuffer {
     type_ = type;
     assert(size > 0);
     glGenBuffers(1, &id_);
-    AGL_CHECK_ERROR;
+    GL_CHECK_ERROR;
     glBindBuffer(type_, id_);
-    AGL_CHECK_ERROR;
+    GL_CHECK_ERROR;
     assert(id_ > 0);
     glBufferData(type_, size, NULL, GL_DYNAMIC_DRAW);
-    AGL_CHECK_ERROR;
+    GL_CHECK_ERROR;
     size_ = size;
   }
 
   ~AGLSSBuffer() {
     glDeleteBuffers(1, &id_);
-    AGL_CHECK_ERROR;
+    GL_CHECK_ERROR;
   }
 
   void* map(GLbitfield bufMask) {
     glBindBuffer(type_, id_);
-    AGL_CHECK_ERROR;
+    GL_CHECK_ERROR;
     auto p = glMapBufferRange(type_, 0, size_, bufMask);
-    AGL_CHECK_ERROR;
+    GL_CHECK_ERROR;
     return p;
   }
 
   void unmap() {
     glBindBuffer(type_, id_);
     glUnmapBuffer(type_);
-    AGL_CHECK_ERROR;
+    GL_CHECK_ERROR;
   }
 
   buffer_size_t size() const {
@@ -225,7 +185,7 @@ class AGLSSBuffer {
 
   void bindInProgram(int binding) {
     glBindBufferBase(GL_SHADER_STORAGE_BUFFER, binding, id_);
-    AGL_CHECK_ERROR;
+    GL_CHECK_ERROR;
   }
 
   std::unique_ptr<AGLSSBuffer> static from(
@@ -254,7 +214,6 @@ class AGLSSBuffer {
     int64_t n = size_ / sizeof(float);
     std::vector<float> ret(n);
     float* retDataPtr = ret.data();
-    std::cout << "copyToHostVec size:" << size_ << " n:" << n << std::endl;
     const float* bufferDataPtr = (const float*)map(GL_MAP_READ_BIT);
     if (!bufferDataPtr) {
       assert(false);
@@ -278,59 +237,45 @@ class AGLSSBuffer {
   GLuint id_ = 0;
   buffer_size_t size_;
   GLenum type_;
-}; // class AGLSSBuffer
+}; // class AGLBuffer
 
-AGLTexture::AGLTexture(
-    int w,
-    int h,
-    int d,
-    GLenum texFormat,
-    GLenum target,
-    bool HWC4) {
+AGLTexture::AGLTexture(int w, int h, int d, GLenum texFormat, GLenum target) {
   texFormat_ = texFormat;
   if (target == GL_TEXTURE_3D) {
     assert(w > 0 && h > 0 && d > 0);
     target_ = target;
     glGenTextures(1, &id_);
-    AGL_CHECK_ERROR;
+    GL_CHECK_ERROR;
     glBindTexture(target_, id_);
     glTexParameteri(target_, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
     glTexParameteri(target_, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
     glTexParameteri(target_, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(target_, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     glTexParameteri(target_, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
-    AGL_CHECK_ERROR;
-    int realW = w;
-    int realH = h;
-    int realD = d;
-    if (HWC4) {
-      realH = h;
-      realW = w;
-      realD = UP_DIV(d, 4);
-    }
-    glTexStorage3D(target_, 1 /* level */, texFormat_, realW, realH, realD);
-    AGL_CHECK_ERROR;
+    GL_CHECK_ERROR;
+    glTexStorage3D(target_, 1 /* level */, texFormat_, w, h, d);
+    GL_CHECK_ERROR;
   } else if (target == GL_TEXTURE_2D) {
     assert(w > 0 && h > 0);
     target_ = target;
     glGenTextures(1, &id_);
-    AGL_CHECK_ERROR;
+    GL_CHECK_ERROR;
     glBindTexture(target_, id_);
-    AGL_CHECK_ERROR;
+    GL_CHECK_ERROR;
     glTexParameteri(target_, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
     glTexParameteri(target_, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
     glTexParameteri(target_, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(target_, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     glTexParameteri(target_, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
-    AGL_CHECK_ERROR;
+    GL_CHECK_ERROR;
     glTexStorage2D(target_, 1 /* level */, texFormat_, w, h);
-    AGL_CHECK_ERROR;
+    GL_CHECK_ERROR;
   }
 }
 
 AGLTexture::~AGLTexture() {
   glDeleteTextures(1, &id_);
-  AGL_CHECK_ERROR;
+  GL_CHECK_ERROR;
 }
 
 unsigned int AGLTexture::id() const {
@@ -346,19 +291,19 @@ void AGLTexture::read(GLuint unit) {
       0 /* layer */,
       GL_READ_ONLY,
       texFormat_);
-  AGL_CHECK_ERROR;
+  GL_CHECK_ERROR;
 }
 
 void AGLTexture::write(GLuint unit) {
   glBindImageTexture(unit, id_, 0, GL_TRUE, 0, GL_WRITE_ONLY, texFormat_);
-  AGL_CHECK_ERROR;
+  GL_CHECK_ERROR;
 }
 
 void AGLTexture::sample(GLuint unit, GLuint texId) {
   glActiveTexture(GL_TEXTURE0 + texId);
   glUniform1i(unit, texId);
   glBindTexture(target_, id_);
-  AGL_CHECK_ERROR;
+  GL_CHECK_ERROR;
 }
 
 enum AGLPrecision { highp = 0, mediump = 1, lowp = 2, count = 3 };
@@ -373,36 +318,38 @@ class AGLShader {
  public:
   AGLShader(const std::string& shaderCode) {
     shaderId_ = glCreateShader(GL_COMPUTE_SHADER);
-    AGL_CHECK_ERROR;
+    GL_CHECK_ERROR;
 
     const char* shaderCodeArr[1];
     shaderCodeArr[0] = shaderCode.c_str();
     glShaderSource(shaderId_, 1, shaderCodeArr, NULL);
-    AGL_CHECK_ERROR;
+    GL_CHECK_ERROR;
 
-    bool res = compileShader(shaderId_);
-    assert(res);
+    compileShader(shaderId_);
 
     programId_ = glCreateProgram();
-    AGL_CHECK_ERROR;
+    GL_CHECK_ERROR;
     glAttachShader(programId_, shaderId_);
-    AGL_CHECK_ERROR;
+    GL_CHECK_ERROR;
     glLinkProgram(programId_);
-    AGL_CHECK_ERROR;
+    GL_CHECK_ERROR;
     GLint linked;
     glGetProgramiv(programId_, GL_LINK_STATUS, &linked);
     if (!linked) {
       GLsizei len;
       glGetProgramiv(programId_, GL_INFO_LOG_LENGTH, &len);
       if (len <= 0) {
-        glGetProgramInfoLog(programId_, 0, &len, NULL);
-      }
-      if (len > 0) {
-        char* buffer = new char[len + 1];
-        buffer[len] = '\0';
-        glGetProgramInfoLog(programId_, len, NULL, buffer);
-        APRINT("shaderCompile ERROR:%s", buffer);
-        delete[] buffer;
+        GLsizei infoLogLen;
+        glGetProgramInfoLog(programId_, 0, &infoLogLen, NULL);
+        if (infoLogLen > 0) {
+          char* buffer = new char[infoLogLen + 1];
+          buffer[len] = '\0';
+          glGetProgramInfoLog(programId_, infoLogLen, NULL, buffer);
+          TORCH_CHECK(false, "Shader linking error:", buffer);
+          delete[] buffer;
+        } else {
+          TORCH_CHECK(false, "Shader linking error");
+        }
       }
     }
   }
@@ -410,7 +357,7 @@ class AGLShader {
   ~AGLShader() {
     glDeleteShader(shaderId_);
     glDeleteProgram(programId_);
-    AGL_CHECK_ERROR;
+    GL_CHECK_ERROR;
   }
 
   unsigned int getProgramId() const {
@@ -428,7 +375,7 @@ class AGLShader {
 
   void useProgram() {
     glUseProgram(programId_);
-    AGL_CHECK_ERROR;
+    GL_CHECK_ERROR;
   }
 
   int getAttribLocation(const char* name) const {
@@ -455,7 +402,7 @@ class AGLShader {
       char* buffer = new char[len + 1];
       glGetShaderInfoLog(s, len, NULL, buffer);
       buffer[len] = 0;
-      APRINT("shaderCompile ERROR:%s", buffer);
+      TORCH_CHECK(false, "Shader compilation error:", buffer);
       delete[] buffer;
       return false;
     }
@@ -475,17 +422,15 @@ std::string getImageFormat() {
 }
 
 void bindTexInProgram(int texId, int programTexId, int binding) {
-  COUT_FLF;
   glActiveTexture(GL_TEXTURE0 + programTexId);
-  AGL_CHECK_ERROR;
+  GL_CHECK_ERROR;
   glUniform1i(binding, programTexId);
-  AGL_CHECK_ERROR;
+  GL_CHECK_ERROR;
   glBindTexture(GL_TEXTURE_3D, texId);
-  AGL_CHECK_ERROR;
+  GL_CHECK_ERROR;
 }
 
 void bindImageTexInProgram(int texId, GLuint unit) {
-  COUT_FLF;
   glBindImageTexture(
       unit,
       texId,
@@ -494,17 +439,15 @@ void bindImageTexInProgram(int texId, GLuint unit) {
       0 /* layer */,
       GL_WRITE_ONLY,
       getTexFormat());
-  AGL_CHECK_ERROR;
+  GL_CHECK_ERROR;
 }
 
 void wait() {
-  COUT_FLF;
   glFinish();
   glFlush();
 }
 
 void compute(GLuint dim0, GLuint dim1, GLuint dim2) {
-  COUT_FLF;
   glDispatchCompute(dim0, dim1, dim2);
 }
 
@@ -533,68 +476,37 @@ double compute(
     int compGroupSize0,
     int compGroupSize1,
     int compGroupSize2) {
-  COUT_FLF;
   glFlush();
   glFinish();
 
   auto tp = atime_now();
   compute(dim0, dim1, dim2);
   glFinish();
-  auto ret = atime_duration_to_now(tp);
-
-  APRINT(
-      "compute %16s(%3d,%3d,%3d)xCG(%3d,%3d,%3d) cpuTime:%.6fs",
-      log,
-      dim0,
-      dim1,
-      dim2,
-      compGroupSize0,
-      compGroupSize1,
-      compGroupSize2,
-      ret);
-  return ret;
+  return atime_duration_to_now(tp);
 }
 
 static std::unique_ptr<AGLContext> glContext;
 
 void initGLContextOnce() {
-  COUT_FLF;
-
   static const int once = []() {
-    APRINT("Creating GLContext...");
     glContext = std::make_unique<AGLContext>();
-    if (!glContext || glContext->isCreateError()) {
-      APRINT("ERROR Failed to create GLContext");
-      assert(false);
-    }
-    APRINT("GLContext created ok");
+    TORCH_CHECK(
+        glContext && !glContext->isCreateError(),
+        "ERROR Failed to create GLContext");
     return 0;
   }();
   ((void)once);
 }
 
-void printShaderCode(const std::string& s) {
-  std::string token;
-  std::istringstream tokenStream(s);
-  int i = 0;
-  while (std::getline(tokenStream, token, '\n')) {
-    std::printf("%03d %s", i++, token.c_str());
-  }
-}
-
 std::unique_ptr<AGLShader> createShader(
     const char* content,
     const std::vector<std::string>& prefix = {}) {
-  COUT_FLF;
   std::ostringstream tc;
   tc << AGLShader::getHead(getImageFormat(), getPrecision());
   for (auto& s : prefix) {
     tc << s << "\n";
   }
   tc << content;
-
-  auto shaderCode = tc.str();
-  printShaderCode(shaderCode);
   return std::make_unique<AGLShader>(tc.str());
 }
 
@@ -602,7 +514,6 @@ std::shared_ptr<AGLShader> getShader(
     const std::string& key,
     const char* content,
     const std::vector<std::string>& prefix = {}) {
-  COUT_FLF;
   initGLContextOnce();
   std::shared_ptr<AGLShader> shader{createShader(content, prefix)};
   return shader;
@@ -639,16 +550,6 @@ void addCompGroupSizeDefines(
     int oldCompGroupSizeZ = compGroupSize[2];
     compGroupSize[2] =
         maxCompGroupInvocations / (compGroupSize[0] * compGroupSize[1]);
-    APRINT(
-        "compGroupSize(%3d, %3d, %3d) compGroupInvocations:%4d > GL_MAX_COMPUTE_WORK_GROUP_INVOCATIONS:%4d => changeZto (%3d, %3d, %3d)",
-        compGroupSize[0],
-        compGroupSize[1],
-        oldCompGroupSizeZ,
-        compGroupInvocations,
-        maxCompGroupInvocations,
-        compGroupSize[0],
-        compGroupSize[1],
-        compGroupSize[2]);
   }
 
   header.push_back(
@@ -665,13 +566,8 @@ void hostCHW_to_deviceTex(
     const int C,
     const int H,
     const int W) {
-  COUT_FLF;
   const int C_4 = UP_DIV(C, 4);
   GLsizeiptr size = ROUND_UP(C, 4) * W * H * sizeof(float);
-  std::cout << "hostCHW_to_deviceTex(C:" << C << " H:" << H << " W:" << W << ")"
-            << std::endl;
-
-  std::cout << "size:" << size << std::endl;
   auto buffer = AGLSSBuffer::from(inputData, size, C * H * W * sizeof(float));
 
   auto shader = getShader(
@@ -679,15 +575,15 @@ void hostCHW_to_deviceTex(
   shader->useProgram();
 
   bindImageTexInProgram(texId, 0 /* unit */);
-  AGL_CHECK_ERROR;
+  GL_CHECK_ERROR;
 
   buffer->bindInProgram(1);
   glUniform1i(2, W);
   glUniform1i(3, H);
-  AGL_CHECK_ERROR;
+  GL_CHECK_ERROR;
 
   compute(UP_DIV(W, 8), UP_DIV(H, 8), C_4, "hCHW2dTex", 8, 8, 1);
-  AGL_CHECK_ERROR;
+  GL_CHECK_ERROR;
 }
 
 double deviceTex2hostCHW(
@@ -704,19 +600,19 @@ double deviceTex2hostCHW(
   program->useProgram();
 
   bindImageTexInProgram(texId, 0 /* unit */);
-  AGL_CHECK_ERROR;
+  GL_CHECK_ERROR;
   buffer->bindInProgram(1);
 
   glUniform1i(2, d0);
   glUniform1i(3, d1);
-  AGL_CHECK_ERROR;
+  GL_CHECK_ERROR;
 
   double shaderTime =
       compute(UP_DIV(d0, 8), UP_DIV(d1, 8), d2_4, "dTex2hCHW", 8, 8, 1);
-  AGL_CHECK_ERROR;
+  GL_CHECK_ERROR;
 
   glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT);
-  AGL_CHECK_ERROR;
+  GL_CHECK_ERROR;
 
   auto dOutputData = buffer->map(GL_MAP_READ_BIT);
   if (dOutputData) {
@@ -726,14 +622,12 @@ double deviceTex2hostCHW(
   return shaderTime;
 }
 
-VulkanGLTensor::VulkanGLTensor(std::vector<int64_t> sizes) : sizes_(sizes) {
-  COUT_FLF;
+GLTensor::GLTensor(std::vector<int64_t> sizes) : sizes_(sizes) {
   assert(sizes_.size() == 4);
   initGLContextOnce();
 }
 
-void VulkanGLTensor::setDataFromHost(const float* data) {
-  COUT_FLF;
+void GLTensor::setDataFromHost(const float* data) {
   initGLContextOnce();
 
   int N = sizes_[0];
@@ -742,14 +636,13 @@ void VulkanGLTensor::setDataFromHost(const float* data) {
   int W = sizes_[3];
   int C_4 = UP_DIV(C, 4);
 
-  auto tex = std::make_unique<AGLTexture>(
-      W, H, C_4, getTexFormat(), GL_TEXTURE_3D, false);
+  auto tex =
+      std::make_unique<AGLTexture>(W, H, C_4, getTexFormat(), GL_TEXTURE_3D);
   hostCHW_to_deviceTex(tex->id(), data, C, H, W);
   tex_ = std::move(tex);
 }
 
-void VulkanGLTensor::copyDataToHost(float* output) {
-  COUT_FLF;
+void GLTensor::copyDataToHost(float* output) {
   initGLContextOnce();
 
   int N = sizes_[0];
@@ -759,26 +652,22 @@ void VulkanGLTensor::copyDataToHost(float* output) {
   int C_4 = UP_DIV(C, 4);
 
   deviceTex2hostCHW(tex_->id(), output, W, H, C);
-
-  at::native::vulkan::debug::vk_print4d(
-      "dense_to_phvulkan", output, N, C, H, W);
 }
 
-void VulkanGLTensor::allocateStorage() {
-  COUT_FLF;
-  at::native::vulkan::gl::initGLContextOnce();
+void GLTensor::allocateStorage() {
+  at::native::vulkan::details::gl::initGLContextOnce();
   int N = sizes_[0];
   int C = sizes_[1];
   int H = sizes_[2];
   int W = sizes_[3];
   int C_4 = UP_DIV(C, 4);
 
-  auto tex = std::make_unique<AGLTexture>(
-      W, H, C_4, getTexFormat(), GL_TEXTURE_3D, false);
+  auto tex =
+      std::make_unique<AGLTexture>(W, H, C_4, getTexFormat(), GL_TEXTURE_3D);
   tex_ = std::move(tex);
 }
 
-int VulkanGLTensor::texId() const {
+int GLTensor::texId() const {
   if (!tex_) {
     assert(false);
   }
@@ -787,8 +676,8 @@ int VulkanGLTensor::texId() const {
 }
 
 void upsample_nearest2d(
-    VulkanGLTensor& output,
-    const VulkanGLTensor& input,
+    GLTensor& output,
+    const GLTensor& input,
     int64_t IH,
     int64_t IW,
     int64_t OH,
@@ -797,21 +686,17 @@ void upsample_nearest2d(
     int64_t _C,
     float scaleH,
     float scaleW) {
-  COUT_FLF;
-
   int64_t C = _N * _C;
   int64_t C_4 = UP_DIV(C, 4);
 
-  COUT_FLF;
   int compGroupSize[3];
   std::vector<std::string> header;
   addCompGroupSizeDefines(header, compGroupSize, 8, 8, 1);
   auto shaderKey = "upsampleNearest2d_glsl";
-  auto program = getShader(
-      shaderKey, at::native::vulkan::upsampleNearest2d_glsl, header);
+  auto program =
+      getShader(shaderKey, at::native::vulkan::upsampleNearest2d_glsl, header);
 
   program->useProgram();
-  // { binding
   bindImageTexInProgram(output.texId(), 0 /* unit */);
   bindTexInProgram(input.texId(), 0, 1 /* binding */);
 
@@ -820,8 +705,7 @@ void upsample_nearest2d(
 
   glUniform1f(4, scaleW);
   glUniform1f(5, scaleH);
-  AGL_CHECK_ERROR;
-  // } binding
+  GL_CHECK_ERROR;
 
   compute(
       UP_DIV(OW, compGroupSize[0]),
@@ -831,16 +715,14 @@ void upsample_nearest2d(
       compGroupSize[0],
       compGroupSize[1],
       compGroupSize[2]);
-  AGL_CHECK_ERROR;
+  GL_CHECK_ERROR;
 }
 
 void add(
-    VulkanGLTensor& output,
-    const VulkanGLTensor& input0,
-    const VulkanGLTensor& input1,
+    GLTensor& output,
+    const GLTensor& input0,
+    const GLTensor& input1,
     float alpha) {
-  COUT_FLF;
-
   auto sizes = output.sizes();
   auto N = sizes[0];
   auto C = sizes[1];
@@ -852,10 +734,9 @@ void add(
   std::vector<std::string> prefix;
   addCompGroupSizeDefines(prefix, compGroupSize, 8, 8, 1);
 
-  auto shaderKey = "binary_add_glsl";
-  auto binAddProgram =
-      getShader(shaderKey, at::native::vulkan::binary_add_glsl, prefix);
-  binAddProgram->useProgram();
+  auto shaderKey = "add_glsl";
+  auto addProgram = getShader(shaderKey, at::native::vulkan::add_glsl, prefix);
+  addProgram->useProgram();
 
   bindImageTexInProgram(output.texId(), 0 /* unit */);
   bindTexInProgram(input0.texId(), 0, 1 /* binding */);
@@ -863,7 +744,7 @@ void add(
 
   glUniform4i(3, W, H, C_4, 1);
   glUniform1f(4, alpha);
-  AGL_CHECK_ERROR;
+  GL_CHECK_ERROR;
 
   compute(
       UP_DIV(W, compGroupSize[0]),
@@ -873,7 +754,7 @@ void add(
       compGroupSize[0],
       compGroupSize[1],
       compGroupSize[2]);
-  AGL_CHECK_ERROR;
+  GL_CHECK_ERROR;
 }
 
 auto kernelNCHW_OCHW_repack_O4C4HWi4o4(
@@ -926,26 +807,26 @@ std::unique_ptr<AGLTexture> conv2d_kernel_tex_from_hostCHW(
   auto C_4 = UP_DIV(C, 4);
 
   auto kernelOutTex = std::make_unique<AGLTexture>(
-      C_4 * 4, OC_4, KH * KW, getTexFormat(), GL_TEXTURE_3D, false);
+      C_4 * 4, OC_4, KH * KW, getTexFormat(), GL_TEXTURE_3D);
 
-  auto p = getShader(
-      "KO4C4HW_to_tex_glsl", at::native::vulkan::gl::KO4C4HW_to_tex_glsl);
+  auto p =
+      getShader("KO4C4HW_to_tex_glsl", at::native::vulkan::KO4C4HW_to_tex_glsl);
   p->useProgram();
   bindImageTexInProgram(kernelOutTex->id(), 0 /* unit */);
   kernelBuf->bindInProgram(2);
   glUniform1i(3, KW * KH);
   glUniform1i(4, C_4);
-  AGL_CHECK_ERROR;
+  GL_CHECK_ERROR;
 
   compute(C_4, OC_4, KH * KW, "hK2dTex", 1, 1, 1);
-  AGL_CHECK_ERROR;
+  GL_CHECK_ERROR;
   return kernelOutTex;
 }
 
 void conv2d(
-    VulkanGLTensor& output,
-    const VulkanGLTensor& input,
-    const VulkanGLTensor& weight,
+    GLTensor& output,
+    const GLTensor& input,
+    const GLTensor& weight,
     const float* bias,
     int64_t SY,
     int64_t SX,
@@ -954,7 +835,6 @@ void conv2d(
     int64_t DY,
     int64_t DX,
     int64_t G) {
-  COUT_FLF;
   assert(false);
   // weights are repacked on gpu to texture in special format that does not
   // match VTensor format, do not want to mix in VTensor at the moment -
@@ -963,8 +843,8 @@ void conv2d(
 }
 
 void conv2d(
-    VulkanGLTensor& output,
-    const VulkanGLTensor& input,
+    GLTensor& output,
+    const GLTensor& input,
     const float* weight,
     int64_t KH,
     int64_t KW,
@@ -976,24 +856,13 @@ void conv2d(
     int64_t DY,
     int64_t DX,
     int64_t G) {
-  COUT_FLF;
-
-  std::cout << "KH:" << KH << " KW:" << KW << " SY:" << SY << " SX:" << SX
-            << " PY:" << PY << " PX:" << PX << " DY:" << DY << " DX:" << DX
-            << " G:" << G << std::endl;
-
   auto osizes = output.sizes();
   auto isizes = input.sizes();
 
-  COUT_FLF;
   int64_t OC = osizes[1];
   int64_t C = isizes[1];
-  std::cout << "OC:" << OC << " C:" << C << std::endl;
-
   int64_t H = isizes[2];
   int64_t W = isizes[3];
-  std::cout << "H:" << H << " W:" << W << std::endl;
-
   const int64_t OC_4 = UP_DIV(OC, 4);
   const int64_t C_4 = UP_DIV(C, 4);
 
@@ -1001,58 +870,44 @@ void conv2d(
   const int64_t KHE = (KH - 1) * DY + 1;
   const int64_t OW = ((W - KWE + 2 * PX) / SX) + 1;
   const int64_t OH = ((H - KHE + 2 * PY) / SY) + 1;
-  std::cout << "OH:" << OH << " OW:" << OW << std::endl;
-  COUT_FLF;
   assert(osizes[2] == OH);
   assert(osizes[3] == OW);
 
-  COUT_FLF;
   auto biasBuf = AGLSSBuffer::from(
       bias, sizeof(float) * ALIGN_UP4(OC), sizeof(float) * OC);
 
-  COUT_FLF;
   auto kernelTex = conv2d_kernel_tex_from_hostCHW(weight, OC, C, KH, KW);
 
   int compGroupSize[3];
   std::vector<std::string> header;
-  COUT_FLF;
   addCompGroupSizeDefines(header, compGroupSize, 1, 1, OC_4);
 
   auto shaderKey = "conv_tex_IKnc4hw_glsl";
-  COUT_FLF;
-  auto convProgram = getShader(
-      shaderKey, at::native::vulkan::conv_tex_IKnc4hw_glsl, header);
+  auto convProgram =
+      getShader(shaderKey, at::native::vulkan::conv_tex_IKnc4hw_glsl, header);
 
-  COUT_FLF;
   convProgram->useProgram();
-  AGL_CHECK_ERROR;
-  COUT_FLF;
+  GL_CHECK_ERROR;
   bindImageTexInProgram(output.texId(), 0 /* unit */);
-  AGL_CHECK_ERROR;
-  COUT_FLF;
+  GL_CHECK_ERROR;
   bindTexInProgram(input.texId(), 0, 1 /* binding */);
-  AGL_CHECK_ERROR;
-  COUT_FLF;
+  GL_CHECK_ERROR;
   bindTexInProgram(kernelTex->id(), 1, 2 /* binding */);
-  AGL_CHECK_ERROR;
-  COUT_FLF;
+  GL_CHECK_ERROR;
   biasBuf->bindInProgram(3);
-  AGL_CHECK_ERROR;
+  GL_CHECK_ERROR;
 
-  COUT_FLF;
   glUniform2i(4, PX, PY);
   glUniform2i(5, KW, KH);
   glUniform2i(6, SX, SY);
   glUniform2i(7, DX, DY);
   glUniform1i(8, 4);
-  AGL_CHECK_ERROR;
+  GL_CHECK_ERROR;
 
-  COUT_FLF;
   glUniform3i(10, OW, OH, OC_4);
   glUniform3i(11, W, H, C_4);
-  AGL_CHECK_ERROR;
+  GL_CHECK_ERROR;
 
-  COUT_FLF;
   compute(
       UP_DIV(OW, 4 * compGroupSize[0]),
       UP_DIV(OH, compGroupSize[1]),
@@ -1061,7 +916,7 @@ void conv2d(
       compGroupSize[0],
       compGroupSize[1],
       compGroupSize[2]);
-  AGL_CHECK_ERROR;
+  GL_CHECK_ERROR;
 }
 
 } // namespace gl

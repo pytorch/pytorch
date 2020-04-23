@@ -1,4 +1,4 @@
-# VULKAN,VULKANGL Shaders processing
+# Shaders processing
 
 execute_process(
   COMMAND
@@ -9,7 +9,7 @@ execute_process(
   RESULT_VARIABLE error_code)
 
 if(error_code)
-  message(FATAL_ERROR "Failed to gen glsl.h and glsl.cpp with shaders sources for VULKAN backend")
+  message(FATAL_ERROR "Failed to gen glsl.h and glsl.cpp with shaders sources for Vulkan backend")
 endif()
 
 if(NOT USE_VULKAN_SHADERC_RUNTIME)
@@ -31,7 +31,7 @@ execute_process(
   RESULT_VARIABLE error_code)
 
   if(error_code)
-    message(FATAL_ERROR "Failed to gen spv.h and spv.cpp with precompiled shaders for VULKAN backend")
+    message(FATAL_ERROR "Failed to gen spv.h and spv.cpp with precompiled shaders for Vulkan backend")
   endif()
 
 endif()

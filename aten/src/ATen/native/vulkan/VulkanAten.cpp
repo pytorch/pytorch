@@ -1,18 +1,21 @@
-
 #include <ATen/ATen.h>
+
+#if defined(USE_VULKAN) || defined(USE_GLES)
+
 #include <ATen/Config.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/OpaqueTensorImpl.h>
 #include <ATen/native/UpSample.h>
 #include <ATen/native/utils/ParamUtils.h>
-#include <ATen/native/vulkan/VulkanDebugUtils.h>
-
-#ifdef USE_VULKANGL
-#include <ATen/native/vulkan/VulkanGL.h>
-#endif
 
 #ifdef USE_VULKAN
-#include <ATen/native/vulkan/VulkanVulkan.h>
+#include <ATen/native/vulkan/Vulkan.h>
+#else
+
+#ifdef USE_GLES
+#include <ATen/native/vulkan/GLES.h>
+#endif
+
 #endif
 
 namespace at {
@@ -34,10 +37,13 @@ struct CAFFE2_API IntrusivePtrTargetWrapper : c10::intrusive_ptr_target {
 };
 
 #ifdef USE_VULKAN
-using VTensor = at::native::vulkan::details::vulkan::VulkanVulkanTensor;
+using VTensor = at::native::vulkan::details::vulkan::VulkanTensor;
+#else
+
+#ifdef USE_GLES
+using VTensor = at::native::vulkan::details::gl::GLTensor;
 #endif
-#ifdef USE_VULKANGL
-using VTensor = at::native::vulkan::details::gl::VulkanGLTensor;
+
 #endif
 
 using VTensorWrapper = IntrusivePtrTargetWrapper<VTensor>;
@@ -45,75 +51,43 @@ using VTensorWrapperPtr = c10::intrusive_ptr<VTensorWrapper>;
 using VulkanTensorImpl = OpaqueTensorImpl<VTensorWrapperPtr>;
 using VulkanTensor = at::Tensor;
 
-std::ostream& operator<<(std::ostream& s, const VulkanTensor& phvTensor) {
-  s << "VulkanTensor{...}";
-  return s;
-}
-
 at::Tensor new_with_vtensor_vulkan(VTensor&& vt, const TensorOptions& options) {
-  COUT_FLF;
-
   auto dims = vt.sizes();
   VTensorWrapperPtr handle = c10::make_intrusive<VTensorWrapper>(std::move(vt));
   return detail::make_tensor<VulkanTensorImpl>(
       DispatchKeySet(DispatchKey::VulkanTensorId),
       options.dtype(),
-      at::Device(at::kVULKAN),
+      at::Device(at::kVulkan),
       handle,
       std::vector<int64_t>(dims.begin(), dims.end()));
 }
 
 VTensor& vtensor_from_vulkan(const VulkanTensor& vulkan_tensor) {
-  COUT_FLF;
-
   AT_ASSERTM(
       vulkan_tensor.is_vulkan(), "vulkan_to_dense expects Vulkan tensor input");
-  TORCH_INTERNAL_ASSERT(at::impl::variable_excluded_from_dispatch());
-  VulkanTensorImpl* phvImpl =
+  VulkanTensorImpl* impl =
       static_cast<VulkanTensorImpl*>(vulkan_tensor.unsafeGetTensorImpl());
-  return phvImpl->unsafe_opaque_handle()->get_target();
-}
-
-VTensor vtensor_view_from_dense(const at::Tensor& tensor) {
-  COUT_FLF;
-
-  AT_ASSERTM(
-      tensor.device().type() == DeviceType::CPU,
-      "vtensor_view_from_dense expects CPU tensor input");
-  AT_ASSERTM(
-      tensor.layout() == Layout::Strided,
-      "vtensor_view_from_dense expects dense tensor input");
-  AT_ASSERTM(
-      tensor.scalar_type() == ScalarType::Float,
-      "vtensor_view_from_dense expects float tensor input");
-  TORCH_INTERNAL_ASSERT(at::impl::variable_excluded_from_dispatch());
-  assert(false); // Not implemented
-  return VTensor{tensor.sizes().vec()};
+  return impl->unsafe_opaque_handle()->get_target();
 }
 
 at::Tensor empty_vulkan(
     IntArrayRef sizes,
     const TensorOptions& options,
     c10::optional<c10::MemoryFormat> optional_memory_format) {
-  COUT_FLF;
-
   TORCH_CHECK(
       !options.has_memory_format(),
-      "'memory_format' argument is incompatible with vulkan tensor");
+      "'memory_format' argument is incompatible with Vulkan tensor");
   TORCH_CHECK(
       !optional_memory_format.has_value(),
-      "'memory_format' argument is incompatible with vulkan tensor");
+      "'memory_format' argument is incompatible with Vulkan tensor");
 
   VTensor vt{sizes.vec()};
   return new_with_vtensor_vulkan(std::move(vt), options);
 }
 
 at::Tensor vulkan_to_dense(const at::Tensor& vulkan_tensor) {
-  COUT_FLF;
-
   VTensor& vtensor = vtensor_from_vulkan(vulkan_tensor);
   auto dims = vtensor.sizes();
-  COUT_FLF;
   Tensor cpu_tensor = at::empty(
       std::vector<int64_t>(dims.begin(), dims.end()),
       vulkan_tensor.options()
@@ -125,8 +99,6 @@ at::Tensor vulkan_to_dense(const at::Tensor& vulkan_tensor) {
 }
 
 at::Tensor dense_to_vulkan(const at::Tensor& cpu_tensor) {
-  COUT_FLF;
-
   AT_ASSERTM(
       cpu_tensor.device().type() == DeviceType::CPU,
       "dense_to_vulkan expects CPU tensor input");
@@ -137,20 +109,13 @@ at::Tensor dense_to_vulkan(const at::Tensor& cpu_tensor) {
       cpu_tensor.scalar_type() == ScalarType::Float,
       "dense_to_vulkan expects float tensor input");
   AT_ASSERTM(cpu_tensor.dim() == 4, "dense_to_vulkan expects tensor dim == 4");
+
   auto cpu_tensor_cont = cpu_tensor.contiguous();
-  auto sizes = cpu_tensor_cont.sizes();
-  // IKTODO: Channels first assumption only, support channels last
-  float* dataNCHW = cpu_tensor_cont.template data_ptr<float>();
-
-  at::native::vulkan::debug::vk_print_tensor_data(
-      "dense_to_vulkan", dataNCHW, sizes);
-
   Tensor vulkan_tensor =
       empty_vulkan(cpu_tensor_cont.sizes(), cpu_tensor_cont.options(), {});
 
   VTensor& vtensor = vtensor_from_vulkan(vulkan_tensor);
-  vtensor.setDataFromHost(dataNCHW);
-
+  vtensor.setDataFromHost(cpu_tensor_cont.template data_ptr<float>());
   return vulkan_tensor;
 }
 
@@ -159,12 +124,8 @@ at::Tensor upsample_nearest2d_vulkan(
     IntArrayRef outputSizes,
     c10::optional<double> scales_h,
     c10::optional<double> scales_w) {
-  COUT_FLF;
-  std::cout << FLF << " outputSizes:" << outputSizes;
   VTensor& x = vtensor_from_vulkan(input);
   auto inputSizes = input.sizes();
-  COUT_FLF;
-
   auto in = inputSizes[0];
   auto ic = inputSizes[1];
   auto ih = inputSizes[2];
@@ -172,33 +133,23 @@ at::Tensor upsample_nearest2d_vulkan(
 
   auto oh = outputSizes[0];
   auto ow = outputSizes[1];
-
-  COUT_FLF;
   const float height_scale = compute_scales_value<float>(scales_h, ih, oh);
   const float width_scale = compute_scales_value<float>(scales_w, iw, ow);
-  std::cout << " height_scale:" << height_scale
-            << " width_scale:" << width_scale << std::endl;
-
-  COUT_FLF;
   Tensor output = empty_vulkan({in, ic, oh, ow}, input.options(), {});
-  std::cout << " output tensor sizes: " << output.sizes() << std::endl;
-
-  COUT_FLF;
   VTensor& y = vtensor_from_vulkan(output);
   y.allocateStorage();
 
-#ifdef USE_VULKANGL
-  at::native::vulkan::gl::upsample_nearest2d(
+#ifdef USE_GLES
+  at::native::vulkan::details::gl::upsample_nearest2d(
       y, x, ih, iw, oh, ow, in, ic, height_scale, width_scale);
 #else
-  assert(false);
+  // XXX Not implemented
+  AT_ERROR("upsample_nearest2d_vulkan: Not implemented yet for Vulkan");
 #endif
   return output;
 }
 
 Tensor vulkan_add(const Tensor& self, const Tensor& other, Scalar alpha) {
-  COUT_FLF;
-
   VTensor& x = vtensor_from_vulkan(self);
   VTensor& y = vtensor_from_vulkan(other);
   float a = alpha.to<float>();
@@ -206,28 +157,33 @@ Tensor vulkan_add(const Tensor& self, const Tensor& other, Scalar alpha) {
   VTensor output = VTensor{self.sizes().vec()};
   output.allocateStorage();
 
-#ifdef USE_VULKANGL
-  at::native::vulkan::gl::add(output, x, y, a);
+#ifdef USE_GLES
+  at::native::vulkan::details::gl::add(output, x, y, a);
 #else
-  assert(false);
+  // XXX Not implemented
+  AT_ERROR("vulkan_add: Not implemented yet for Vulkan");
 #endif
 
   return new_with_vtensor_vulkan(std::move(output), self.options());
 }
 
 at::Tensor vulkan_convolution(
-    const at::Tensor& input, // VULKAN
+    const at::Tensor& input, // Vulkan
     const at::Tensor& weight, // CPU
     const at::Tensor& bias, // CPU
     IntArrayRef padding,
     IntArrayRef stride,
     IntArrayRef dilation,
     int64_t groups) {
-  COUT_FLF;
   auto isizes = input.sizes();
-  assert(isizes.size() == 4);
+  TORCH_INTERNAL_ASSERT(
+      isizes.size() == 4, "vulkan_convolution: Expected 4-dimensional input");
   auto wsizes = weight.sizes();
-  assert(wsizes.size() == 4);
+  TORCH_INTERNAL_ASSERT(
+      wsizes.size() == 4, "vulkan_convolution: Expected 4-dimensional weight");
+  TORCH_INTERNAL_ASSERT(
+      groups == 1,
+      "vulkan_convolution: group convolutions are not supported yet");
 
   int64_t N = isizes[0];
   int64_t C = isizes[1];
@@ -235,7 +191,6 @@ at::Tensor vulkan_convolution(
   int64_t W = isizes[3];
 
   int64_t OC = wsizes[0];
-  assert(wsizes[1] == C);
   int64_t KH = wsizes[2];
   int64_t KW = wsizes[3];
 
@@ -260,20 +215,17 @@ at::Tensor vulkan_convolution(
   voutput.allocateStorage();
 
   float* biasData{};
-  COUT_FLF;
   if (bias.defined()) {
-    std::cout << "bias defined" << std::endl;
     biasData = bias.template data_ptr<float>();
   } else {
-    std::cout << "bias NOT defined" << std::endl;
     biasData = (float*)std::malloc(sizeof(float) * OC);
     std::memset(biasData, 0, sizeof(float) * OC);
   }
 
   float* weightData = weight.template data_ptr<float>();
 
-#ifdef USE_VULKANGL
-  at::native::vulkan::gl::conv2d(
+#ifdef USE_GLES
+  at::native::vulkan::details::gl::conv2d(
       voutput,
       vinput,
       weightData,
@@ -288,10 +240,60 @@ at::Tensor vulkan_convolution(
       DX,
       groups);
 #else
-  assert(false);
+  // XXX Not implemented
+  AT_ERROR("vulkan_convolution: Not implemented yet for Vulkan");
 #endif
   return new_with_vtensor_vulkan(std::move(voutput), input.options());
 }
 
 } // namespace native
 } // namespace at
+
+#else
+// if not (defined(USE_VULKAN) || defined(USE_GLES))
+
+namespace at {
+namespace native {
+
+at::Tensor vulkan_to_dense(const at::Tensor& vulkan_tensor) {
+  AT_ERROR("vulkan_to_dense: ATen not compiled with Vulkan or GLES support");
+}
+
+at::Tensor dense_to_vulkan(const at::Tensor& cpu_tensor) {
+  AT_ERROR("dense_to_vulkan: ATen not compiled with Vulkan or GLES support");
+}
+
+Tensor vulkan_add(const Tensor& self, const Tensor& other, Scalar alpha) {
+  AT_ERROR("vulkan_add: ATen not compiled with Vulkan or GLES support");
+}
+
+at::Tensor empty_vulkan(
+    IntArrayRef sizes,
+    const TensorOptions& options,
+    c10::optional<c10::MemoryFormat> optional_memory_format) {
+  AT_ERROR("empty_vulkan: ATen not compiled with Vulkan or GLES support");
+}
+
+at::Tensor vulkan_convolution(
+    const at::Tensor& input,
+    const at::Tensor& weight,
+    const at::Tensor& bias,
+    IntArrayRef padding,
+    IntArrayRef stride,
+    IntArrayRef dilation,
+    int64_t groups) {
+  AT_ERROR("vulkan_convolution: ATen not compiled with Vulkan or GLES support");
+}
+
+at::Tensor upsample_nearest2d_vulkan(
+    const at::Tensor& input,
+    IntArrayRef outputSizes,
+    c10::optional<double> scales_h,
+    c10::optional<double> scales_w) {
+  AT_ERROR(
+      "upsample_nearest2d_vulkan: ATen not compiled with Vulkan or GLES support");
+}
+
+} // namespace native
+} // namespace at
+#endif

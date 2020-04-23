@@ -27,7 +27,7 @@ std::string DeviceTypeName(DeviceType d, bool lower_case) {
       return lower_case ? "msnpu" : "MSNPU";
     case DeviceType::XLA:
       return lower_case ? "xla" : "XLA";
-    case DeviceType::VULKAN:
+    case DeviceType::Vulkan:
       return lower_case ? "vulkan" : "VULKAN";
     default:
       AT_ERROR(
@@ -61,7 +61,7 @@ bool isValidDeviceType(DeviceType d) {
     case DeviceType::FPGA:
     case DeviceType::MSNPU:
     case DeviceType::XLA:
-    case DeviceType::VULKAN:
+    case DeviceType::Vulkan:
       return true;
     default:
       return false;

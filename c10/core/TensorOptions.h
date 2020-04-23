@@ -397,7 +397,7 @@ struct C10_API TensorOptions {
           case DeviceType::XLA:
             return DispatchKey::XLATensorId;
           // IKTODO? Is it right to have (Dense - Vulkan) here ?
-          case DeviceType::VULKAN:
+          case DeviceType::Vulkan:
             return DispatchKey::VulkanTensorId;
           default:
             AT_ERROR("Unsupported device type for dense layout: ", device().type());
@@ -420,12 +420,12 @@ struct C10_API TensorOptions {
           default:
             AT_ERROR("Unsupported device type for mkldnn layout: ", device().type());
         }
-      case Layout::Vulkan:
+      case Layout::Texture4C:
         switch (device().type()) {
-          case DeviceType::VULKAN:
+          case DeviceType::Vulkan:
             return DispatchKey::VulkanTensorId;
           default:
-            AT_ERROR("Unsupported device type for vulkan layout: ", device().type());
+            AT_ERROR("Unsupported device type for texture4C layout: ", device().type());
         }
       default:
         AT_ERROR("Unsupported layout: ", layout());
@@ -651,7 +651,7 @@ inline DeviceType computeDeviceType(DispatchKey tid) {
   } else if (tid == DispatchKey::MkldnnCPUTensorId) {
     return DeviceType::CPU;
   } else if (tid == DispatchKey::VulkanTensorId) {
-    return DeviceType::VULKAN;
+    return DeviceType::Vulkan;
   } else {
     AT_ASSERTM(false, "Unknown DispatchKey: ", tid);
   }

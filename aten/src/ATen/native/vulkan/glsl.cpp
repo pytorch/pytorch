@@ -28,12 +28,12 @@ const char* KO4C4HW_to_tex_glsl =
 "    imageStore(uOutput, ivec3(pos.x+3, pos.y, pos.z), color3);\n"
 "}\n"
 ;
-const char* binary_add_glsl = 
+const char* add_glsl = 
 "layout(FORMAT, binding=0) writeonly uniform PRECISION image3D uOutput;\n"
 "layout(location=1) uniform PRECISION sampler3D uInput0;\n"
 "layout(location=2) uniform PRECISION sampler3D uInput1;\n"
 "layout(location=3) uniform ivec4 imgSize;\n"
-"layout(location=4) uniform ivec4 uAlpha;\n"
+"layout(location=4) uniform float uAlpha;\n"
 "layout (local_size_x = WORKGROUP_X, local_size_y = WORKGROUP_Y, local_size_z = WORKGROUP_Z) in;\n"
 "void main()\n"
 "{\n"

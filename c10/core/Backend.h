@@ -154,7 +154,7 @@ static inline DeviceType backendToDeviceType(Backend b) {
     case Backend::QuantizedCPU:
       return DeviceType::CPU;
     case Backend::Vulkan:
-      return DeviceType::VULKAN;
+      return DeviceType::Vulkan;
     case Backend::Undefined:
       AT_ERROR("Undefined backend is not a valid device type");
     default:

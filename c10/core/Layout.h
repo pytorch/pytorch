@@ -6,12 +6,12 @@
 #include <iostream>
 
 namespace c10 {
-enum class Layout : int8_t { Strided, Sparse, Mkldnn, Vulkan };
+enum class Layout : int8_t { Strided, Sparse, Mkldnn, Texture4C };
 
 constexpr auto kStrided = Layout::Strided;
 constexpr auto kSparse = Layout::Sparse;
 constexpr auto kMkldnn = Layout::Mkldnn;
-constexpr auto kVulkan = Layout::Vulkan;
+constexpr auto kTexture4C = Layout::Texture4C;
 
 inline Layout layout_from_backend(Backend backend) {
   switch (backend) {
@@ -22,7 +22,7 @@ inline Layout layout_from_backend(Backend backend) {
     case Backend::MkldnnCPU:
       return Layout::Mkldnn;
     case Backend::Vulkan:
-      return Layout::Vulkan;
+      return Layout::Texture4C;
     default:
       return Layout::Strided;
   }
@@ -36,8 +36,8 @@ inline std::ostream& operator<<(std::ostream& stream, at::Layout layout) {
       return stream << "Sparse";
     case at::kMkldnn:
       return stream << "Mkldnn";
-    case at::kVulkan:
-      return stream << "Vulkan";
+    case at::kTexture4C:
+      return stream << "Texture4C";
     default:
       AT_ERROR("Unknown layout");
   }

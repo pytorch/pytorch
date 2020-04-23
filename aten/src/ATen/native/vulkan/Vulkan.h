@@ -2,6 +2,7 @@
 #ifdef USE_VULKAN
 
 #include <memory>
+#include <vector>
 
 #include "vulkan_wrapper.h"
 
@@ -34,16 +35,16 @@ class AVKImage {
   VkSampler sampler_;
 };
 
-class VulkanVulkanTensor {
+class VulkanTensor {
  public:
-  VulkanVulkanTensor(std::vector<int64_t> sizes);
-  ~VulkanVulkanTensor() = default;
+  VulkanTensor(std::vector<int64_t> sizes);
+  ~VulkanTensor() = default;
 
-  VulkanVulkanTensor(VulkanVulkanTensor&&) = default;
-  VulkanVulkanTensor& operator=(VulkanVulkanTensor&&) = default;
+  VulkanTensor(VulkanTensor&&) = default;
+  VulkanTensor& operator=(VulkanTensor&&) = default;
 
-  VulkanVulkanTensor(const VulkanVulkanTensor&) = delete;
-  VulkanVulkanTensor& operator=(const VulkanVulkanTensor&) = delete;
+  VulkanTensor(const VulkanTensor&) = delete;
+  VulkanTensor& operator=(const VulkanTensor&) = delete;
 
   std::vector<int64_t> sizes() const {
     return sizes_;
