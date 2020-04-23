@@ -44,7 +44,7 @@ if which sccache > /dev/null; then
 fi
 
 # If we run too many parallel jobs, we will OOM
-MAX_JOBS=2 USE_DISTRIBUTED=1 python setup.py install
+MAX_JOBS=2 USE_DISTRIBUTED=1 USE_BLAS=0 python setup.py install
 
 assert_git_not_dirty
 
