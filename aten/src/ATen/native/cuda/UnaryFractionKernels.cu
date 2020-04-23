@@ -64,6 +64,18 @@ __host__ __device__ static inline scalar_t reciprocal_wrapper(scalar_t a) {
 
 template<typename T>
 __host__ __device__ static inline thrust::complex<T> reciprocal_wrapper(thrust::complex<T> v) {
+  // Handle extreme cases for numpy compatibility
+  auto both_inf = [](T real, T imag) {
+    return (std::isinf(real) && std::isinf(imag));
+  };
+
+  if (std::isnan(v.real()) || std::isnan(v.imag()) || both_inf(v.real(), v.imag())) {
+    // If either is Nan or both are infinite, return {nan, nan}
+    return {std::numeric_limits<T>::quiet_NaN(), std::numeric_limits<T>::quiet_NaN()};
+  } else if (std::isinf(v.real()) || std::isinf(v.imag())) {
+    // If either is Inf, return {0, 0}
+    return {0, 0};
+  }
   const thrust::complex<T> one = thrust::complex<T>(1.0, 0);
   return one/v;
 }

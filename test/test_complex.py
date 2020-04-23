@@ -30,20 +30,6 @@ class TestComplexTensor(TestCase):
         exp_fn(torch.complex64)
         exp_fn(torch.complex128)
 
-    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
-    def test_reciprocal(self, device):
-        def reciprocal_fn(device, dtype):
-            x = torch.randn(10, 10, dtype=dtype, device=device)
-            if device != 'cpu':
-                expected = np.reciprocal(x.cpu().numpy())
-            else:
-                expected = np.reciprocal(x.numpy())
-            actual = torch.reciprocal(x)
-            self.assertEqual(actual, torch.from_numpy(expected))
-
-        reciprocal_fn(device, torch.complex64)
-        reciprocal_fn(device, torch.complex128)
-
     @onlyCPU
     def test_copy_real_imag_methods(self, device):
         real = torch.randn(4)
