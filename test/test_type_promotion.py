@@ -384,7 +384,7 @@ class TestTypePromotion(TestCase):
                     val2 = value_for_type[dt2]
                     t1 = torch.tensor([val1], dtype=dt1, device=device)
                     t2 = torch.tensor([val2], dtype=dt2, device=device)
-                    expected = torch.tensor([op["compare_op"](val1, val2)], dtype=torch.bool)
+                    expected = torch.tensor([op["compare_op"](val1, val2)], device=device, dtype=torch.bool)
 
                     out_res = op["out_op"](t1, t2, device)
                     self.assertEqual(out_res, expected)
@@ -401,7 +401,7 @@ class TestTypePromotion(TestCase):
                     # test that comparing a zero dim tensor with another zero dim tensor has type promotion behavior
                     t1 = torch.tensor(val1, dtype=dt1, device=device)
                     t2 = torch.tensor(val2, dtype=dt2, device=device)
-                    expected = torch.tensor(op["compare_op"](val1, val2), dtype=torch.bool)
+                    expected = torch.tensor(op["compare_op"](val1, val2), device=device, dtype=torch.bool)
 
                     out_res = op["out_op"](t1, t2, device)
                     self.assertEqual(out_res, expected)
@@ -841,12 +841,12 @@ class TestTypePromotion(TestCase):
         y = torch.tensor([4, 5, 6], device=device, dtype=torch.int32)
         expected_out = torch.tensor([1, 2, 3, 4, 5, 6], device=device, dtype=torch.int32)
         out = torch.cat([x, y])
-        self.assertEqual(out, expected_out, exact_dtype=True) 
+        self.assertEqual(out, expected_out, exact_dtype=True)
         z = torch.tensor([7, 8, 9], device=device, dtype=torch.int16)
         expected_out = torch.tensor([1, 2, 3, 4, 5, 6, 7, 8, 9],
                                     device=device, dtype=torch.int32)
         out = torch.cat([x, y, z])
-        self.assertEqual(out, expected_out, exact_dtype=True) 
+        self.assertEqual(out, expected_out, exact_dtype=True)
 
     @onlyOnCPUAndCUDA
     def test_cat_out_different_dtypes(self, device):
@@ -855,13 +855,13 @@ class TestTypePromotion(TestCase):
         y = torch.tensor([4, 5, 6], device=device, dtype=torch.int32)
         expected_out = torch.tensor([1, 2, 3, 4, 5, 6], device=device, dtype=torch.int16)
         torch.cat([x, y], out=out)
-        self.assertEqual(out, expected_out, exact_dtype=True) 
+        self.assertEqual(out, expected_out, exact_dtype=True)
         z = torch.tensor([7, 8, 9], device=device, dtype=torch.int16)
         out = torch.zeros(9, device=device, dtype=torch.int64)
         expected_out = torch.tensor([1, 2, 3, 4, 5, 6, 7, 8, 9],
                                     device=device, dtype=torch.int64)
         torch.cat([x, y, z], out=out)
-        self.assertEqual(out, expected_out, exact_dtype=True) 
+        self.assertEqual(out, expected_out, exact_dtype=True)
 
     @onlyOnCPUAndCUDA
     def test_cat_invalid_dtype_promotion(self, device):
