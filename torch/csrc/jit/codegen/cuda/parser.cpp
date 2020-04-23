@@ -178,11 +178,9 @@ class IrParser {
             auto alpha = value_map[node->inputs()[2]->unique()];
 
             if (alpha->isOneInt()) {
-              printf("one int\n");
               auto out = binaryOp(op_mapping[node->kind()], lhs, rhs);
               value_map.emplace(node->output()->unique(), out);
             } else {
-              printf("not one int\n");
               auto weight_other = binaryOp(BinaryOpType::Mul, rhs, alpha);
               value_set.emplace(weight_other);
               auto out = binaryOp(op_mapping[node->kind()], lhs, weight_other);

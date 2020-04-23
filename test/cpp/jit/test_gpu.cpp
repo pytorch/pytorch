@@ -874,12 +874,9 @@ void testGPU_FusionCodeGen3() {
   tv3->axis(-2)->parallelize(ParallelType::Unroll);
   tv3->axis(-1)->parallelize(ParallelType::TIDx);
   
-  std::cout << "start code gen" << std::endl;
-
   GPULower gpulw(&fusion);
   std::stringstream cdg;
   gpulw.printKernel(cdg);
-  std::cout << cdg.str() << std::endl;
 }
 
 void testGPU_FusionCodeGen4() {
