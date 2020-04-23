@@ -228,17 +228,17 @@ inline std::string if_empty_then(std::string x, std::string y) {
   if (C10_UNLIKELY_OR_CONST(!(cond))) {       \
     C10_THROW_ERROR(Error,                    \
         #cond " INTERNAL ASSERT FAILED at"    \
-        __FILE__                              \
+        C10_STRINGIZE(__FILE__)               \
     );                                        \
   }
 #else
 #define TORCH_INTERNAL_ASSERT(cond, ...)      \
   if (C10_UNLIKELY_OR_CONST(!(cond))) {       \
     C10_THROW_ERROR(Error, ::c10::str(        \
-        #cond " INTERNAL ASSERT FAILED at ",  \
-        __FILE__,                             \
-        ":",                                  \
-        __LINE__,                             \
+        #cond " INTERNAL ASSERT FAILED at "   \
+        C10_STRINGIZE(__FILE__)               \
+        ":"                                   \
+        C10_STRINGIZE(__LINE__)               \
         ", please report a bug to PyTorch. ", \
         ::c10::str(__VA_ARGS__)               \
     ));                                       \
@@ -270,7 +270,7 @@ inline std::string if_empty_then(std::string x, std::string y) {
   if (C10_UNLIKELY_OR_CONST(!(cond))) {       \
     C10_THROW_ERROR(error_t,                  \
         #cond " CHECK FAILED at "             \
-        __FILE__                              \
+        C10_STRINGIZE(__FILE__)               \
     );                                        \
   }
 #else
@@ -311,7 +311,7 @@ inline std::string if_empty_then(std::string x, std::string y) {
   if (C10_UNLIKELY_OR_CONST(!(cond))) {       \
     C10_THROW_ERROR(Error,                    \
         #cond " INDEX CHECK FAILED at "       \
-        __FILE__                              \
+        C10_STRINGIZE(__FILE__)               \
     );                                        \
   }
 #else
@@ -334,7 +334,7 @@ inline std::string if_empty_then(std::string x, std::string y) {
   if (C10_UNLIKELY_OR_CONST(!(cond))) {       \
     C10_THROW_ERROR(Error,                    \
         #cond " VALUE CHECK FAILED at "       \
-        __FILE__                              \
+        C10_STRINGIZE(__FILE__)               \
     );                                        \
   }
 #else
