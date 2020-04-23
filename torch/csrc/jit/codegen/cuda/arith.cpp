@@ -15,6 +15,8 @@ TORCH_CUDA_API Val* newValLike(const Val* const val, DataType dtype) {
     case (ValType::NamedScalar):
     case (ValType::Scalar):
       switch (dtype) {
+        case (DataType::Bool):
+          return new Bool();
         case (DataType::Float):
           return new Float();
         case (DataType::Half):
@@ -86,7 +88,10 @@ TORCH_CUDA_API Val* unaryOp(UnaryOpType type, Val* v1) {
 
 TORCH_CUDA_API Val* binaryOp(BinaryOpType type, Val* v1, Val* v2) {
   Val* out = promoteNew(v1, v2);
-  if (type >= BinaryOpType::Mod) {
+  if (is_logical_op(type)) {
+    if (out->getDataType().value() != DataType::Bool)
+      out = newValLike(out, DataType::Bool);
+  } else if (type >= BinaryOpType::Mod) {
     if (out->getDataType().value() != DataType::Int)
       out = newValLike(out, DataType::Int);
   }
@@ -123,6 +128,14 @@ TORCH_CUDA_API Val* ceilDiv(Val* v1, Val* v2) {
 }
 
 TORCH_CUDA_API Val* andOp(Val* v1, Val* v2) {
+  TORCH_CHECK(
+      v1->getDataType().value() == DataType::Bool,
+      "Input1 should be of type bool, not ",
+      v1->getDataType().value());
+  TORCH_CHECK(
+      v2->getDataType().value() == DataType::Bool,
+      "Input2 should be of type bool, not ",
+      v2->getDataType().value());
   return binaryOp(BinaryOpType::And, v1, v2);
 }
 

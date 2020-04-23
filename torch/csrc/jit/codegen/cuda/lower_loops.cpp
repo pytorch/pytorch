@@ -58,8 +58,8 @@ Int* getPredicate(const TensorView* const pred_tv, std::vector<Val*> indices) {
 
   TORCH_INTERNAL_ASSERT(
       cond->getValType().value() == ValType::Scalar &&
-          cond->getDataType().value() == DataType::Int,
-      "Error computing predicate, should be returning an Int, but returning ",
+          cond->getDataType().value() == DataType::Bool,
+      "Error computing predicate, should be returning an Bool, but returning ",
       cond);
 
   return static_cast<Int*>(cond);

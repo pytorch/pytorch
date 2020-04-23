@@ -30,7 +30,7 @@ std::vector<Int*> PredicateCompute::computePredicates(const TensorIndex* ti) {
       Val* pred = lt(ti->index(i), root->axis(i)->extent());
       TORCH_CHECK(
           pred->getValType().value() == ValType::Scalar &&
-          pred->getDataType().value() == DataType::Int);
+          pred->getDataType().value() == DataType::Bool);
       preds.push_back(static_cast<Int*>(pred));
     } else {
       preds.push_back(new Int(1));
