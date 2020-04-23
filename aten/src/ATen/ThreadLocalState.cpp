@@ -56,7 +56,7 @@ bool _unused = []() {
 
 ThreadLocalState::ThreadLocalState(bool keep_grad_mode)
     : dispatch_key_(c10::impl::tls_local_dispatch_key_set()),
-      debug_info_(ThreadLocalDebugInfo::_current()),
+      debug_info_(ThreadLocalDebugInfo::current()),
       keep_grad_mode_(keep_grad_mode) {
   for (auto st = (size_t)0; st < (size_t)ThreadLocalSetting::NUM_SETTINGS; ++st) {
     if (!getters()[st] ||

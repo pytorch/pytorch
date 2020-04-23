@@ -13,12 +13,13 @@ struct Node;
 
 namespace profiler {
 
-// Kind of record function scope;
 // workaround for the older GCC versions:
 #ifndef _MSC_VER
 #  pragma GCC diagnostic push
 #  pragma GCC diagnostic ignored "-Wattributes"
 #endif
+
+// Kind of record function scope;
 enum class TORCH_API RecordScope : uint8_t {
   // c10/ATen ops, autograd nodes
   FUNCTION = 0,
@@ -28,6 +29,21 @@ enum class TORCH_API RecordScope : uint8_t {
   USER_SCOPE,
   NUM_SCOPES, // must be the last in the list
 };
+
+// Predefined kinds of TLS callbacks
+enum class TORCH_API CallbackKind : uint8_t {
+  // A bucket for all kinds of callbacks, cannot be used
+  // simultaneously for two or more pairs of callbacks
+  DEFAULT = 0,
+  // PyTorch profiling callbacks
+  PROFILER,
+
+  PRIVATE_USE_1,
+  PRIVATE_USE_2,
+  PRIVATE_USE_3,
+  NUM_KINDS, // must be the last in the list
+};
+
 #ifndef _MSC_VER
 #  pragma GCC diagnostic pop
 #endif
@@ -172,11 +188,11 @@ struct TORCH_API RecordFunction {
   static bool _needsInputs();
 
   inline uint64_t _globalCallbacksVersion() const {
-    return callbacks_version_;
+    return global_callbacks_version_;
   }
 
   inline void _setGlobalCallbacksVersion(uint64_t cv) {
-    callbacks_version_ = cv;
+    global_callbacks_version_ = cv;
   }
 
   // Returns boolean set of active (ran start callback) global callbacks
@@ -212,11 +228,11 @@ struct TORCH_API RecordFunction {
   // The logical thread_id that this RecordFunction was created with.
   uint16_t thread_id_ = 0;
 
-  // Global callbacks version this record function was started with.
+  // Callbacks version this record function was started with.
   // Used to ensure that the set of callbacks was not changed
   // during the record function's lifetime, between start and
   // end invocations.
-  uint64_t callbacks_version_ = 0;
+  uint64_t global_callbacks_version_ = 0;
 };
 
 class TORCH_API RecordFunctionGuard {
@@ -319,8 +335,8 @@ TORCH_API void TEST_unsetGlobalSamplingProbability();
  *   scopes - types of scopes to execute the callbacks on (see RecordScope);
  *     passing empty set means the callbacks will be executed for all possible
  *     scope types
- *  is_thread_local - whether this pair of callbacks should be set
- *    only for the current thread or globally (per process)
+ *   kind - kind of a callback (CallbackKind) to add; only one callback
+ *     pair of a given kind can be registered at any given time
  */
 TORCH_API void pushCallback(
     std::function<bool(const RecordFunction&)> start,
@@ -328,15 +344,21 @@ TORCH_API void pushCallback(
         [](const RecordFunction&) {},
     bool needs_inputs = false,
     std::unordered_set<RecordScope, std::hash<RecordScope>> scopes =
-        std::unordered_set<RecordScope, std::hash<RecordScope>>());
+        std::unordered_set<RecordScope, std::hash<RecordScope>>(),
+    CallbackKind kind = CallbackKind::DEFAULT);
+
+/**
+ * popCallback removes a pair of TLS callbacks registered earlier with
+ * pushCallback
+ */
+TORCH_API void removeCallback(CallbackKind kind = CallbackKind::DEFAULT);
 
 /**
  * pushGlobalCallback adds a pair of global callbacks to run with RecordFunction:
  *   sampling_prob - whether the callbacks are sampled and the sampling
  *     probability
  *   other params - see pushCallback
- *
- *  WARNING: not thread safe
+ * WARNING: not thread safe
  */
 TORCH_API void pushGlobalCallback(
     std::function<bool(const RecordFunction&)> start,
@@ -348,16 +370,12 @@ TORCH_API void pushGlobalCallback(
         std::unordered_set<RecordScope, std::hash<RecordScope>>());
 
 /**
- * popCallback removes the last pair of thread local callbacks
- * added earlier with pushCallback
+ * clearGlobalCallbacks clears all global callbacks
+ * WARNING: not thread safe
  */
-TORCH_API void popCallback();
+ TORCH_API void clearGlobalCallbacks();
 
-/**
- * popGlobalCallback removes the last pair of global callbacks
- * added earlier with pushCallback
- */
-TORCH_API void popGlobalCallback();
+ TORCH_API void clearThreadLocalCallbacks();
 
 // Returns whether there're callbacks registered with pushCallback
 TORCH_API bool hasCallbacks();

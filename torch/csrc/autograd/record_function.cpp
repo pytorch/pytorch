@@ -20,13 +20,16 @@ float sample_zero_one() {
 
 class RecordFunctionCallback {
  public:
+  RecordFunctionCallback() : active_(false) {}
+
   explicit RecordFunctionCallback(
-      std::function<void(const RecordFunction&)> start,
+      std::function<bool(const RecordFunction&)> start,
       std::function<void(const RecordFunction&)> end =
         [](const RecordFunction&) {}):
       start_(std::move(start)),
       end_(std::move(end)) {
     scopes_.fill(true);
+    active_ = true;
   }
 
   RecordFunctionCallback& needsInputs(bool needs_inputs) {
@@ -69,7 +72,7 @@ class RecordFunctionCallback {
     return is_sampled_;
   }
 
-  inline std::function<void(const RecordFunction&)>& start() {
+  inline std::function<bool(const RecordFunction&)>& start() {
     return start_;
   }
 
@@ -77,37 +80,60 @@ class RecordFunctionCallback {
     return end_;
   }
 
+  inline bool active() const {
+    return active_;
+  }
+
  private:
-  std::function<void(const RecordFunction&)> start_;
+  std::function<bool(const RecordFunction&)> start_;
   std::function<void(const RecordFunction&)> end_;
   bool needs_inputs_ = false;
   double sampling_prob_ = 1.0;
   bool is_sampled_ = false;
   std::array<bool, static_cast<size_t>(RecordScope::NUM_SCOPES)> scopes_;
+  bool active_;
 };
 
-thread_local std::vector<RecordFunctionCallback> tls_callbacks_;
+// default initialization to inactive callbacks
+thread_local std::array<RecordFunctionCallback, (size_t)CallbackKind::NUM_KINDS> tls_callbacks_ {};
 
 class CallbackManager {
  public:
-  void pushCallback(RecordFunctionCallback cb, bool is_thread_local) {
+  void pushThreadLocalCallback(RecordFunctionCallback cb, CallbackKind kind) {
     TORCH_CHECK(
-        !is_thread_local || !cb.isSampled(),
+        !cb.isSampled(),
         "Sampled thread local callbacks are not supported");
-    auto& cb_list = is_thread_local ? tls_callbacks_ : callbacks_;
-    cb_list.emplace_back(std::move(cb));
-    if (!is_thread_local) {
-      ++global_callbacks_version_;
-    }
+    TORCH_CHECK(
+        !tls_callbacks_[(size_t)kind].active(),
+        "Already registered TLS callbacks for key ", (size_t)kind);
+
+    tls_callbacks_[(size_t)kind] = std::move(cb);
     recomputeFlags();
   }
 
-  void popCallback(bool is_thread_local) {
-    auto& cb_list = is_thread_local ? tls_callbacks_ : callbacks_;
-    TORCH_CHECK(!cb_list.empty(), "Empty callbacks stack");
-    cb_list.pop_back();
-    if (!is_thread_local) {
-      ++global_callbacks_version_;
+  void pushGlobalCallback(RecordFunctionCallback cb) {
+    callbacks_.emplace_back(std::move(cb));
+    recomputeFlags();
+    ++global_callbacks_version_;
+  }
+
+  void removeThreadLocalCallback(CallbackKind kind) {
+    TORCH_CHECK(
+        tls_callbacks_[(size_t)kind].active(),
+        "Trying to remove inactive TLS callback for key ", (size_t)kind);
+    tls_callbacks_[(size_t)kind] = RecordFunctionCallback();
+    recomputeFlags();
+  }
+
+  void clearGlobalCallbacks() {
+    callbacks_.clear();
+    recomputeFlags();
+    ++global_callbacks_version_;
+  }
+
+  void clearThreadLocalCallbacks() {
+    for (size_t idx = 0; idx < (size_t)CallbackKind::NUM_KINDS; ++idx) {
+      tls_callbacks_[(size_t)idx] = RecordFunctionCallback();
     }
   }
 
@@ -116,7 +142,12 @@ class CallbackManager {
   }
 
   inline bool hasThreadLocalCallbacks() const {
-    return !tls_callbacks_.empty();
+    for (const auto& cb : tls_callbacks_) {
+      if (cb.active()) {
+        return true;
+      }
+    }
+    return false;
   }
 
   inline bool needsInputs() const {
@@ -135,7 +166,7 @@ class CallbackManager {
       }
     }
     for (auto& cb : tls_callbacks_) {
-      if (cb.checkScope(rf.scope())) {
+      if (cb.active() && cb.checkScope(rf.scope())) {
         tryRunCallback(cb.start(), rf);
       }
     }
@@ -156,7 +187,7 @@ class CallbackManager {
               << "execution";
     }
     for (auto& cb : tls_callbacks_) {
-      if (cb.checkScope(rf.scope())) {
+      if (cb.active() && cb.checkScope(rf.scope())) {
         tryRunCallback(cb.end(), rf);
       }
     }
@@ -173,7 +204,7 @@ class CallbackManager {
   }
 
  private:
-  bool tryRunCallback(std::function<void(const RecordFunction&)>& fn, RecordFunction& rf) {
+  bool tryRunCallback(const std::function<void(const RecordFunction&)>& fn, RecordFunction& rf) {
     try {
       fn(rf);
       return true;
@@ -196,7 +227,7 @@ class CallbackManager {
       }
     }
     for (const auto& cb : tls_callbacks_) {
-      if (cb.needsInputs()) {
+      if (cb.active() && cb.needsInputs()) {
         has_callbacks_with_inputs_ = true;
         return;
       }
@@ -245,7 +276,8 @@ inline CallbackManager& manager() {
 } // namespace
 
 bool hasCallbacks() {
-  return manager().hasGlobalCallbacks() || manager().hasThreadLocalCallbacks();
+  auto& m = manager();
+  return m.hasGlobalCallbacks() || m.hasThreadLocalCallbacks();
 }
 
 bool hasGlobalCallbacks() {
@@ -260,15 +292,16 @@ void pushCallback(
     std::function<bool(const RecordFunction&)> start,
     std::function<void(const RecordFunction&)> end,
     bool needs_inputs,
-    std::unordered_set<RecordScope, std::hash<RecordScope>> scopes) {
-  manager().pushCallback(
+    std::unordered_set<RecordScope, std::hash<RecordScope>> scopes,
+    CallbackKind kind) {
+  manager().pushThreadLocalCallback(
       RecordFunctionCallback(std::move(start), std::move(end))
       .needsInputs(needs_inputs)
-      .scopes(scopes), /* is_thread_local */ true);
+      .scopes(scopes), kind);
 }
 
-void popCallback() {
-  manager().popCallback(/* is_thread_local */ true);
+void removeCallback(CallbackKind kind) {
+  manager().removeThreadLocalCallback(kind);
 }
 
 void pushGlobalCallback(
@@ -277,15 +310,19 @@ void pushGlobalCallback(
     bool needs_inputs,
     double sampling_prob,
     std::unordered_set<RecordScope, std::hash<RecordScope>> scopes) {
-  manager().pushCallback(
+  manager().pushGlobalCallback(
       RecordFunctionCallback(std::move(start), std::move(end))
       .needsInputs(needs_inputs)
       .samplingProb(sampling_prob)
-      .scopes(scopes), /* is_thread_local */ false);
+      .scopes(scopes));
 }
 
-void popGlobalCallback() {
-  manager().popCallback(/* is_thread_local */ false);
+void clearGlobalCallbacks() {
+  manager().clearGlobalCallbacks();
+}
+
+void clearThreadLocalCallbacks() {
+  manager().clearThreadLocalCallbacks();
 }
 
 void _runBeforeCallbacks(RecordFunction* rf, const std::string& funcName) {

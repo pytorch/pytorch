@@ -756,12 +756,8 @@ void checkTracedInputs(const TracedTestInputs& inputs) {
 using namespace torch::autograd;
 
 void cleanUpCallbacks() {
-  while (profiler::hasGlobalCallbacks()) {
-    profiler::popGlobalCallback();
-  }
-  while (profiler::hasThreadLocalCallbacks()) {
-    profiler::popCallback();
-  }
+  profiler::clearGlobalCallbacks();
+  profiler::clearThreadLocalCallbacks();
 }
 
 void checkScopeCallbacks() {
@@ -879,7 +875,7 @@ void testRecordFunction() {
     jit_inputs = traced_inputs;
     traced_inputs.clear();
   }
-  autograd::profiler::popCallback();
+  autograd::profiler::removeCallback();
 
   TORCH_CHECK(ts_names.size() == 2);
   TORCH_CHECK(ts_names.find("forward") != ts_names.end());
@@ -1045,7 +1041,7 @@ void testThreadLocalDebugInfo() {
     auto t2 = t.pow(2);
     t2.backward(torch::ones_like(t2, at::MemoryFormat::Preserve));
   }
-  autograd::profiler::popCallback();
+  autograd::profiler::removeCallback();
   TORCH_CHECK(done);
 
   // check nested debug info

@@ -11,23 +11,28 @@ namespace at {
 // settings we're interested in propagating
 // across threads and network
 enum class ThreadLocalSetting : uint8_t {
-  // Note: grad_mode is not automatically propagated from
+  // c10 kernel dispatch ky
+  DISPATCH_KEY = 0,
+  // note: grad_mode is not automatically propagated from
   // the forward pass into the backward pass threads
-  GRAD_MODE = 0,
+  GRAD_MODE,
   // Whether or not to execute record functions
   RECORD_FUNCTION,
-  // Profiler enabled/disabled
+  // Push/pop profiler callbacks across threads
   PROFILER,
+
+  PRIVATE_USE_1,
+  PRIVATE_USE_2,
+  PRIVATE_USE_3,
   NUM_SETTINGS, // must be the last in the list
 };
 
 // A simple representation of a thread local value
 union SettingValue {
   int64_t value;
-  struct {
-    int32_t first;
-    int32_t second;
-  } pair;
+  int32_t values32[2];
+  int16_t values16[4];
+  int8_t values8[8];
 };
 
 // Thread local state contains values that are preserved across
