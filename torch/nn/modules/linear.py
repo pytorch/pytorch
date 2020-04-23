@@ -94,7 +94,7 @@ class Linear(Module):
 
 class Bilinear(Module):
     r"""Applies a bilinear transformation to the incoming data:
-    :math:`y = x_1 A x_2 + b`
+    :math:`y = x_1^T A x_2 + b`
 
     Args:
         in1_features: size of each first input sample
