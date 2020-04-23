@@ -1,7 +1,28 @@
-#include "infer_schema.h"
+#include <ATen/core/op_registration/infer_schema.h>
 #include <sstream>
 
 namespace c10 {
+
+namespace detail {
+namespace infer_schema {
+namespace {
+std::vector<Argument> createArgumentVector(c10::ArrayRef<ArgumentDef> args) {
+  std::vector<Argument> result;
+  result.reserve(args.size());
+  for (size_t i = 0; i < args.size(); ++i) {
+    // Arguments are named "_<index>"
+    result.push_back(Argument("_" + c10::guts::to_string(i), (*args[i].getTypeFn)()));
+  }
+  return result;
+}
+}
+// This is intentionally a separate function and in a .cpp file
+// because then the template is smaller and that benefits binary size
+C10_EXPORT FunctionSchema make_function_schema(std::string&& name, std::string&& overload_name, c10::ArrayRef<ArgumentDef> arguments, c10::ArrayRef<ArgumentDef> returns) {
+  return FunctionSchema(std::move(name), std::move(overload_name), createArgumentVector(arguments), createArgumentVector(returns));
+}
+}
+}
 
 C10_EXPORT c10::optional<std::string> findSchemaDifferences(const FunctionSchema& lhs, const FunctionSchema& rhs) {
   if (lhs.arguments().size() != rhs.arguments().size()) {

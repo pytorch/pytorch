@@ -68,10 +68,12 @@ class TestMkldnn(TestCase):
 
         # because MKLDNN only supports float32, we need to lessen the precision.
         # these numbers are just empirical results that seem to work.
-        self.assertWarnsRegex(lambda: gradcheck(func, [root], atol=4e-2, rtol=1e-2),
-                              'double precision floating point')
-        self.assertWarnsRegex(lambda: gradgradcheck(func, [root], atol=4e-2, rtol=1e-2),
-                              'double precision floating point')
+        self.assertWarnsRegex(UserWarning,
+                              'double precision floating point',
+                              lambda: gradcheck(func, [root], atol=4e-2, rtol=1e-2))
+        self.assertWarnsRegex(UserWarning,
+                              'double precision floating point',
+                              lambda: gradgradcheck(func, [root], atol=4e-2, rtol=1e-2))
 
     def test_autograd_from_mkldnn(self):
         # MKLDNN only supports float32
@@ -82,8 +84,9 @@ class TestMkldnn(TestCase):
 
         # because MKLDNN only supports float32, we need to lessen the precision.
         # these numbers are just empirical results that seem to work.
-        self.assertWarnsRegex(lambda: gradcheck(func, [root], atol=4e-2, rtol=1e-2),
-                              'double precision floating point')
+        self.assertWarnsRegex(UserWarning,
+                              'double precision floating point',
+                              lambda: gradcheck(func, [root], atol=4e-2, rtol=1e-2))
 
     def test_detach(self):
         root = torch.randn(4, 5, dtype=torch.float32).to_mkldnn().requires_grad_()

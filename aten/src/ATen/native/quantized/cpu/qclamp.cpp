@@ -1,6 +1,6 @@
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
-#include <ATen/core/op_registration/op_registration.h>
+#include <torch/library.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cpu/Loops.h>
 #include <ATen/native/quantized/cpu/quantized_ops.h>
@@ -71,21 +71,9 @@ Tensor& quantized_hardtanh_(
   return self;
 }
 
-// Keep the registry in the anonymous namespace.
-namespace {
-class QClamp final : public c10::OperatorKernel {
- public:
-  Tensor operator()(Tensor qx, optional<Scalar> min, optional<Scalar> max) {
-    return quantized_clamp(qx, min, max);
-  }
-};
-
-static auto registry = c10::RegisterOperators().op(
-    "quantized::clamp(Tensor qx, Scalar? min, Scalar? max) -> Tensor qy",
-    c10::RegisterOperators::options()
-        .aliasAnalysis(at::AliasAnalysisKind::FROM_SCHEMA)
-        .kernel<QClamp>(DispatchKey::QuantizedCPUTensorId));
-} // namespace
+TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
+  m.impl("clamp", quantized_clamp);
+}
 
 } // namespace native
 } // namespace at

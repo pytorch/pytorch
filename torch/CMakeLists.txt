@@ -71,6 +71,7 @@ set(TORCH_PYTHON_SRCS
     ${TORCH_SRC_DIR}/csrc/jit/python/init.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/onnx.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/onnx/fixup_onnx_conditionals.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/passes/onnx/function_substitution.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/onnx/fixup_onnx_loop.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/onnx/helper.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/onnx/prepare_division_for_onnx.cpp
@@ -278,6 +279,7 @@ if(USE_NCCL)
     list(APPEND TORCH_PYTHON_SRCS
       ${TORCH_SRC_DIR}/csrc/cuda/python_nccl.cpp)
     list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_NCCL)
+    list(APPEND TORCH_PYTHON_INCLUDE_DIRECTORIES ${NCCL_INCLUDE_DIRS})
 endif()
 
 # In the most recent CMake versions, a new 'TRANSFORM' subcommand of 'list' allows much of the boilerplate of defining the lists

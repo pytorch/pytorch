@@ -1,6 +1,6 @@
 #pragma once
 
-#include <fbgemm/FbgemmFakeFP16.h>
+#include <fbgemm/FbgemmConvert.h>
 #include "caffe2/core/context.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/perfkernels/typed_axpy.h"
