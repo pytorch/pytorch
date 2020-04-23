@@ -4,8 +4,10 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
+from typing import List, Optional
+
 import torch
-from torch._jit_internal import List as _List
+from torch import Tensor
 from torch.nn.modules.utils import _pair, _triple
 
 # Although some of the functions and docstrings are mirrored from the torch.nn,
@@ -301,7 +303,7 @@ def max_pool2d(input, kernel_size, stride=None, padding=0, dilation=1,
     if return_indices:
         raise NotImplementedError("return_indices is not yet implemented!")
     if stride is None:
-        stride = torch.jit.annotate(_List[int], [])
+        stride = torch.jit.annotate(List[int], [])
     return torch.nn.functional.max_pool2d(input, kernel_size, stride, padding,
                                           dilation, ceil_mode, return_indices)
 
