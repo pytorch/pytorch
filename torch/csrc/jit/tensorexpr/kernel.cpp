@@ -1056,9 +1056,11 @@ Stmt* TensorExprKernel::generateStmt(BackendType backendType) {
             "Invalid loop-level: " + c10::to_string(loopLevels));
       }
     }
-    l.prepareForCodegen();
-  } else if (backendType == kLLVMCodeGen) {
-    l.prepareForCodegen();
+  }
+
+  l.prepareForCodegen();
+
+  if (backendType == kLLVMCodeGen) {
 
     std::vector<For*> innerLoops;
     std::vector<For*> worklist;
