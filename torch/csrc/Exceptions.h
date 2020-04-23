@@ -266,8 +266,8 @@ struct ValueError : public PyTorchError {
 };
 
 struct WarningMeta {
-  WarningMeta(const c10::SourceLocation _source_location,
-      const std::string _msg,
+  WarningMeta(const c10::SourceLocation& _source_location,
+      const std::string& _msg,
       const bool _verbatim) :
       source_location_{_source_location},
       msg_{_msg},
