@@ -179,9 +179,9 @@ void normal_kernel(Tensor& self, double mean, double std, RNG generator) {
     normal_fill(self, static_cast<float>(mean), static_cast<float>(std), generator);
 #endif
   } else {
-    // half and bfloat16 cannot be properly tested due to the lack of other operations
-    // like add/sub/mean implemented for half and bfloat16.
-    AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "normal_kernel_cpu", [&] {
+    // bfloat16 cannot be properly tested due to the lack of other operations
+    // like add/sub/mean implemented for half
+    AT_DISPATCH_FLOATING_TYPES_AND_HALF(self.scalar_type(), "normal_kernel_cpu", [&] {
       if (size >= 16 && self.is_contiguous()) {
         normal_fill<scalar_t>(self, static_cast<scalar_t>(mean), static_cast<scalar_t>(std), generator);
       } else {
@@ -207,7 +207,7 @@ struct NormalKernel {
 
 template<typename RNG>
 void uniform_kernel(TensorIterator& iter, double from, double to, RNG generator) {
-  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "uniform_kernel_cpu", [&]() {
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "uniform_kernel_cpu", [&]() {
     std::lock_guard<std::mutex> lock(generator->mutex_);
     at::uniform_real_distribution<scalar_t> uniform(static_cast<scalar_t>(from), static_cast<scalar_t>(to));
     cpu_serial_kernel(iter, [&uniform, generator]() -> scalar_t {
@@ -227,7 +227,7 @@ struct UniformKernel {
 
 template<typename RNG>
 void cauchy_kernel(TensorIterator& iter, double median, double sigma, RNG generator) {
-  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "cauchy_cpu", [&]() {
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "cauchy_cpu", [&]() {
     std::lock_guard<std::mutex> lock(generator->mutex_);
     cpu_serial_kernel(iter, [median, sigma, generator]() -> scalar_t {
       at::cauchy_distribution<double> cauchy(median, sigma);
