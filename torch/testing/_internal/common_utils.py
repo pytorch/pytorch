@@ -818,10 +818,100 @@ class TestCase(expecttest.TestCase):
         b_tol = self.get_default_tolerance(b)
         return (max(a_tol[0], b_tol[0]), max(a_tol[1], b_tol[1]))
 
+    # Returns tensors a and b in dtypes suitable for comparison
+    # Note: torch.isclose is used to compare non-bool tensors, and internally
+    # it converts its input to floating point values
+    # (since it multiplies by rtol, a double).
+    # This function only returns bool, float or complex tensors to avoid
+    # another conversion.
+    def castToCompare(self, a, b):
+        # Special-case for bool tensors, which are compared logically
+        if a.dtype is torch.bool and b.dtype is torch.bool:
+            return a, b
+
+        wide_types = (torch.complex128, torch.float64, torch.int64)
+
+        # Constructs common dtype
+        if torch.is_complex(a) or torch.is_complex(b):
+            common_dtype = "complex"
+        else:
+            common_dtype = "float"
+
+        if a.dtype in wide_types or b.dtype in wide_types:
+            if common_dtype == "complex":
+                common_dtype = "complex128"
+            else:
+                common_dtype += "64"
+        else:
+            if common_dtype == "complex":
+                common_dtype = "complex64"
+            else:
+                common_dtype += "32"
+
+        common_dtype = getattr(torch, common_dtype)
+
+        # Special-case for CUDA float16
+        # Note: bfloat16 lacks necessary comparison functions
+        # Note: float16 on CPU lacks necessary comparison functions
+        # TODO: when isclose is implemented for these type x device
+        # combinations, update this to allow them to be compared directly
+        if a.device.type == 'cuda' and b.device.type == 'cuda':
+            if a.dtype is torch.float16 and a.dtype == b.dtype:
+                common_dtype = torch.float16
+
+        return a.to(common_dtype), b.to(common_dtype)
+
+    # Checks if two (dense) tesnors are equal
+    def assertTensorsEqual(self, a, b, rtol, atol, equal_nan, exact_dtype=False):
+        # Validates tensors are on the same device
+        if a.device != b.device:
+            raise Exception("Attempted to compare equality of tensors on"
+                            " different devices. Got device {0} and"
+                            " {1}.".format(a.device, b.device))
+
+        # Checks size and (if exact_dtype) dtype match
+        super(__class__, self).assertEqual(a.size(), b.size())
+        if exact_dtype:
+            self.assertEqual(a.dtype, b.dtype)
+
+        # Short-circuits on zero element tensors
+        if a.numel() == 0:
+            return
+
+        # Gets a common comparison type
+        a, b = self.castToCompare(a, b)
+
+        # Comparing boolean tensors ignores atol and rtol: all values must match
+        if a.dtype is torch.bool:
+            self.assertTrue((a == b).all().item())
+            return
+
+        # Comparing complex tensors compares the real and imaginary parts
+        # separately.
+        # Note: this is intentionally diverge from torch.isclose for
+        # complex tensors, which implements a more mathematically natural
+        # notion of "closeness" for complex numbers.
+        if a.is_complex():
+            float_dtype = torch.float32 if a.dtype == torch.complex64 else torch.float64
+            a_real = a.copy_real().to(float_dtype)
+            b_real = b.copy_real().to(float_dtype)
+            self.assertTrue(torch.allclose(a_real, b_real, rtol=rtol, atol=atol, equal_nan=equal_nan))
+
+            a_imag = a.copy_imag().to(float_dtype)
+            b_imag = b.copy_imag().to(float_dtype)
+            self.assertTrue(torch.allclose(a_imag, b_imag, rtol=rtol, atol=atol, equal_nan=equal_nan))
+            return
+
+        # All other types use torch.allclose directly
+        self.assertTrue(torch.allclose(a, b, rtol=rtol, atol=atol, equal_nan=equal_nan))
+
+    # TODO: equal_nan should be false by default, but our test suite has
+    # relied on it being true by default for awhile.
     def assertEqual(self, x, y, message='', **kwargs):
         self.assertIsNone(kwargs.get('prec', None), 'prec is no longer supported. Use atol or rtol.')
         rtol = kwargs.get('rtol', None)
         atol = kwargs.get('atol', None)
+        equal_nan = kwargs.get('equal_nan', True)
         allow_inf = kwargs.get('allow_inf', False)
         exact_dtype = kwargs.get('exact_dtype', None)
         # we allow setting an absolute tolerance as a positional arg for BC with legacy testing behavior.
@@ -840,6 +930,9 @@ class TestCase(expecttest.TestCase):
             if atol is None:
                 atol = 0
 
+        # Legacy kludge to account for tests that set precision
+        atol = max(atol, self.precision)
+
         if exact_dtype is None:
             exact_dtype = self.exact_dtype
 
@@ -856,52 +949,13 @@ class TestCase(expecttest.TestCase):
             self.assertEqual(x, y.item(), atol=atol, rtol=rtol, message=message,
                              allow_inf=allow_inf, exact_dtype=exact_dtype)
         elif isinstance(x, torch.Tensor) and isinstance(y, torch.Tensor):
-            def assertTensorsEqual(a, b):
-                super(__class__, self).assertEqual(a.size(), b.size(), message)
-                if exact_dtype:
-                    self.assertEqual(a.dtype, b.dtype)
-                if a.numel() > 0:
-                    if (a.device.type == 'cpu' and (a.dtype == torch.float16 or a.dtype == torch.bfloat16)):
-                        # CPU half and bfloat16 tensors don't have the methods we need below
-                        a = a.to(torch.float32)
-                    if (a.device.type == 'cuda' and a.dtype == torch.bfloat16):
-                        # CUDA bfloat16 tensors don't have the methods we need below
-                        a = a.to(torch.float32)
-                    b = b.to(a)
-
-                    if (a.dtype == torch.bool) != (b.dtype == torch.bool):
-                        raise TypeError("Was expecting both tensors to be bool type.")
-                    else:
-                        if a.dtype == torch.bool and b.dtype == torch.bool:
-                            # we want to respect precision but as bool doesn't support subtraction,
-                            # boolean tensor has to be converted to int
-                            a = a.to(torch.int)
-                            b = b.to(torch.int)
-
-                        if a.is_complex():
-                            # todo: assert_allclose should handle complex types directly.
-                            float_dtype = torch.float if a.dtype == torch.complex64 else torch.double
-                            self.assertEqual(a.copy_real().to(float_dtype), b.copy_real().to(float_dtype),
-                                             atol=atol, rtol=rtol, message=message)
-                            self.assertEqual(a.copy_imag().to(float_dtype), b.copy_imag().to(float_dtype),
-                                             atol=atol, rtol=rtol, message=message)
-                        elif a.is_floating_point():
-                            torch.testing.assert_allclose(a, b, atol=atol, rtol=rtol, equal_nan=True, msg=message)
-                        else:
-                            diff = a - b
-                            # TODO: implement abs on CharTensor (int8)
-                            if diff.is_signed() and diff.dtype != torch.int8:
-                                diff = diff.abs()
-                            max_err = diff.max()
-                            self.assertLessEqual(max_err, atol, message)
-
             super().assertEqual(x.is_sparse, y.is_sparse, message)
             super().assertEqual(x.is_quantized, y.is_quantized, message)
             if x.is_sparse:
                 x = self.safeCoalesce(x)
                 y = self.safeCoalesce(y)
-                assertTensorsEqual(x._indices(), y._indices())
-                assertTensorsEqual(x._values(), y._values())
+                self.assertTensorsEqual(x._indices(), y._indices(), rtol, atol, equal_nan, exact_dtype)
+                self.assertTensorsEqual(x._values(), y._values(), rtol, atol, equal_nan, exact_dtype)
             elif x.is_quantized and y.is_quantized:
                 self.assertEqual(x.qscheme(), y.qscheme(), atol=atol, rtol=rtol,
                                  message=message, allow_inf=allow_inf, exact_dtype=exact_dtype)
@@ -924,7 +978,7 @@ class TestCase(expecttest.TestCase):
                                  y.int_repr().to(torch.int32), atol=atol, rtol=rtol,
                                  message=message, allow_inf=allow_inf, exact_dtype=exact_dtype)
             else:
-                assertTensorsEqual(x, y)
+                self.assertTensorsEqual(x, y, rtol, atol, equal_nan, exact_dtype)
         elif isinstance(x, string_classes) and isinstance(y, string_classes):
             super().assertEqual(x, y, message)
         elif type(x) == set and type(y) == set:

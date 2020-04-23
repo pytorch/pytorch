@@ -438,7 +438,7 @@ class TestCuda(TestCase):
         # s2, but both copies are synchronized on s1 in the dst device. Hence,
         # x is copied to y after x_plus_one is copied to y. If x and y are on
         # the same device, both copy() ops are synchronized on s1.
-        self.assertEqual(y, x)
+        self.assertEqual(y.cpu(), x.cpu())
 
         # same src stream different dst streams
         with torch.cuda.stream(s1):
@@ -451,7 +451,7 @@ class TestCuda(TestCase):
 
         s0.synchronize()
         # Similarly, both copy() ops are synchronized on s0.
-        self.assertEqual(y, x)
+        self.assertEqual(y.cpu(), x.cpu())
 
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
     def test_copy_streams(self):
@@ -472,7 +472,7 @@ class TestCuda(TestCase):
             event.record()
             self.assertFalse(event.query())
             event.synchronize()
-            self.assertEqual(a, b)
+            self.assertEqual(a.cpu(), b.cpu())
 
         # 10MB copies
         x = torch.ones(10000000, dtype=torch.uint8).cuda()
@@ -561,7 +561,7 @@ class TestCuda(TestCase):
         result = comm.broadcast(input, (0, 1))
         for i, t in enumerate(result):
             self.assertEqual(t.get_device(), i)
-            self.assertEqual(t, input)
+            self.assertEqual(t.cpu(), input.cpu())
             if input.is_cuda and input.get_device() == i:
                 self.assertEqual(t.data_ptr(), input.data_ptr())
 
@@ -576,7 +576,7 @@ class TestCuda(TestCase):
         b_tensors = [comm.broadcast(t, (0, 1)) for t in tensors]
         for (_, bt), t in zip(b_tensors, tensors):
             self.assertEqual(bt.get_device(), 1)
-            self.assertEqual(bt, t)
+            self.assertEqual(bt.cpu(), t.cpu())
             self.assertIsInstance(bt, type(t))
 
         bc_tensors = comm.broadcast_coalesced(tensors, (0, 1), buffer_size=buffer_size)
@@ -724,7 +724,7 @@ class TestCuda(TestCase):
             chunk_end = chunk_start + chunk_sizes[i]
             index = [slice(None, None), slice(None, None)]
             index[dim] = slice(chunk_start, chunk_end)
-            self.assertEqual(r, input[tuple(index)], 0)
+            self.assertEqual(r.cpu(), input[tuple(index)].cpu(), 0)
             chunk_start = chunk_end
 
     def test_scatter_cpu(self):
@@ -768,7 +768,7 @@ class TestCuda(TestCase):
         index[dim] = slice(0, x.size(dim))
         self.assertEqual(result[tuple(index)], x)
         index[dim] = slice(x.size(dim), x.size(dim) + y.size(dim))
-        self.assertEqual(result[tuple(index)], y)
+        self.assertEqual(result[tuple(index)].cpu(), y.cpu())
 
         # Bool test case
         t = torch.tensor([[False, True], [True, True]], device='cuda')
@@ -897,7 +897,7 @@ class TestCuda(TestCase):
             x_copy = torch.load(f, map_location=gpu_remap)
 
         for original, copy in zip(x, x_copy):
-            self.assertEqual(copy, original)
+            self.assertEqual(copy.cpu(), original.cpu())
             self.assertIs(type(copy), type(original))
             self.assertEqual(copy.get_device(), 0)
 
@@ -909,7 +909,7 @@ class TestCuda(TestCase):
             f.seek(0)
             x_copy = torch.load(f, map_location={'cuda:1': 'cuda:0'})
         for original, copy in zip(x, x_copy):
-            self.assertEqual(copy, original)
+            self.assertEqual(copy.cpu(), original.cpu())
             self.assertIs(type(copy), type(original))
             self.assertEqual(copy.get_device(), 0)
 
@@ -1634,7 +1634,7 @@ class TestCuda(TestCase):
             # Test that different GPU has different cache
             x0 = torch.randn(2, 3, 3, device='cuda:0')
             x1 = x0.cuda(1)
-            self.assertEqual(x0.rfft(2), x1.rfft(2))
+            self.assertEqual(x0.rfft(2).cpu(), x1.rfft(2).cpu())
             # If a plan is used across different devices, the following line (or
             # the assert above) would trigger illegal memory access. Other ways
             # to trigger the error include
@@ -1793,18 +1793,18 @@ class TestCuda(TestCase):
         w_cpu = w.cpu()
         # test shared memory impl
         t = torch.randint(50, input_size, dtype=torch.int8, device='cuda')
-        self.assertEqual(t.cpu().bincount(), t.bincount())
-        self.assertEqual(t.cpu().bincount(w_cpu), t.bincount(w))
+        self.assertEqual(t.cpu().bincount(), t.bincount().cpu())
+        self.assertEqual(t.cpu().bincount(w_cpu), t.bincount(w).cpu())
         # test multi block memory impl
         # see `THRESH_NUMBER_BINS_FOR_MULTI_BLOCK_MEM` in SummaryOps.cu
         t = torch.randint(500, input_size, dtype=torch.int64, device='cuda')
-        self.assertEqual(t.cpu().bincount(), t.bincount())
-        self.assertEqual(t.cpu().bincount(w_cpu), t.bincount(w))
+        self.assertEqual(t.cpu().bincount(), t.bincount().cpu())
+        self.assertEqual(t.cpu().bincount(w_cpu), t.bincount(w).cpu())
         # test global memory impl
         # see `THRESH_NUMBER_BINS_FOR_GLOBAL_MEM` in SummaryOps.cu
         t = torch.randint(2000, input_size, dtype=torch.int64, device='cuda')
-        self.assertEqual(t.cpu().bincount(), t.bincount())
-        self.assertEqual(t.cpu().bincount(w_cpu), t.bincount(w))
+        self.assertEqual(t.cpu().bincount(), t.bincount().cpu())
+        self.assertEqual(t.cpu().bincount(w_cpu), t.bincount(w).cpu())
 
         t = torch.zeros([10], dtype=torch.int32, device='cuda')
         # 35488 * 65536 as int32 would cause overflow to negative value

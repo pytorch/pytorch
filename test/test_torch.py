@@ -2532,7 +2532,7 @@ class _TestTorchMixin(object):
                     ii = [i, j, k]
                     ii[dim] = idx[i, j, k]
                     expected[i, j, k] = src[tuple(ii)]
-        self.assertEqual(actual, expected, 0)
+        self.assertEqual(actual.cpu(), expected.cpu(), 0)
 
         if test_bounds:
             idx[0][0][0] = 23
@@ -5272,6 +5272,21 @@ def add_neg_dim_tests():
 class TestTorchDeviceType(TestCase):
     exact_dtype = True
 
+    def _tensors_equal_helper(self, tests, device, dtype, equal_nan, exact_dtype=True, atol=1e-08, rtol=1e-05):
+        for test in tests:
+            a = torch.tensor((test[0],), device=device, dtype=dtype)
+            b = torch.tensor((test[1],), device=device, dtype=dtype)
+
+            caught_exception = False
+            try:
+                self.assertTensorsEqual(a, b, rtol, atol, equal_nan, exact_dtype)
+            except Exception as e:
+                self.assertTrue(not test[2])
+                caught_exception = True
+
+            if not caught_exception:
+                self.assertTrue(test[2])
+
     def _isclose_helper(self, tests, device, dtype, equal_nan, atol=1e-08, rtol=1e-05):
         for test in tests:
             a = torch.tensor((test[0],), device=device, dtype=dtype)
@@ -5280,6 +5295,17 @@ class TestTorchDeviceType(TestCase):
             actual = torch.isclose(a, b, equal_nan=equal_nan, atol=atol, rtol=rtol)
             expected = test[2]
             self.assertEqual(actual.item(), expected)
+
+    # Note: assertTensorEqual is implemented for bool, unlike torch.isclose
+    def test_assertTensorsEqual_bool(self, device):
+        tests = (
+            (True, True, True),
+            (False, False, True),
+            (True, False, False),
+            (False, True, False),
+        )
+
+        self._tensors_equal_helper(tests, device, torch.bool, False)
 
     # torch.close is not implemented for bool tensors
     # see https://github.com/pytorch/pytorch/issues/33048
@@ -5296,7 +5322,7 @@ class TestTorchDeviceType(TestCase):
 
     @dtypes(torch.uint8,
             torch.int8, torch.int16, torch.int32, torch.int64)
-    def test_isclose_integer(self, device, dtype):
+    def test_isclose_tensors_equal_integer(self, device, dtype):
         tests = (
             (0, 0, True),
             (0, 1, False),
@@ -5304,6 +5330,7 @@ class TestTorchDeviceType(TestCase):
         )
 
         self._isclose_helper(tests, device, dtype, False)
+        self._tensors_equal_helper(tests, device, dtype, False)
 
         # atol and rtol tests
         tests = [
@@ -5313,6 +5340,7 @@ class TestTorchDeviceType(TestCase):
         ]
 
         self._isclose_helper(tests, device, dtype, False, atol=.5, rtol=.5)
+        self._tensors_equal_helper(tests, device, dtype, False, atol=.5, rtol=.5)
 
         if dtype is torch.uint8:
             tests = [
@@ -5326,11 +5354,12 @@ class TestTorchDeviceType(TestCase):
             ]
 
         self._isclose_helper(tests, device, dtype, False, atol=1.5, rtol=.5)
+        self._tensors_equal_helper(tests, device, dtype, False, atol=1.5, rtol=.5)
 
     # torch.close is not implemented for cpu half tensors
     # see https://github.com/pytorch/pytorch/issues/36451
     @dtypes(torch.float16, torch.float32, torch.float64)
-    def test_isclose_float(self, device, dtype):
+    def test_isclose_tensors_equal_float(self, device, dtype):
         tests = (
             (0, 0, True),
             (0, -1, False),
@@ -5347,6 +5376,8 @@ class TestTorchDeviceType(TestCase):
                 self._isclose_helper(tests, device, dtype, False)
         else:
             self._isclose_helper(tests, device, dtype, False)
+
+        self._tensors_equal_helper(tests, device, dtype, False)
 
         # atol and rtol tests
         eps = 1e-2 if dtype is torch.half else 1e-6
@@ -5368,6 +5399,8 @@ class TestTorchDeviceType(TestCase):
         else:
             self._isclose_helper(tests, device, dtype, False, atol=.5, rtol=.5)
 
+        self._tensors_equal_helper(tests, device, dtype, False, atol=.5, rtol=.5)
+
         # equal_nan = True tests
         tests = (
             (0, float('nan'), False),
@@ -5381,10 +5414,16 @@ class TestTorchDeviceType(TestCase):
         else:
             self._isclose_helper(tests, device, dtype, True)
 
+        self._tensors_equal_helper(tests, device, dtype, True)
+
     # torch.close with equal_nan=True is not implemented for complex inputs
     # see https://github.com/numpy/numpy/issues/15959
+    # Note: assertTensorEqual is divergent from torch.isclose for complex
+    # tensors. It compares each part of the complex tensor independently,
+    # unlike torch.isclose, which uses a mathematical notion
+    # of 'closeness.'
     @dtypes(torch.complex64, torch.complex128)
-    def test_isclose_complex(self, device, dtype):
+    def test_isclose_tensors_equal_complex(self, device, dtype):
         tests = (
             (complex(1, 1), complex(1, 1 + 1e-8), True),
             (complex(0, 1), complex(1, 1), False),
@@ -5400,8 +5439,7 @@ class TestTorchDeviceType(TestCase):
         )
 
         self._isclose_helper(tests, device, dtype, False)
-
-        # atol and rtol tests
+        self._tensors_equal_helper(tests, device, dtype, False)
 
         # atol and rtol tests
         eps = 1e-6
@@ -5426,7 +5464,13 @@ class TestTorchDeviceType(TestCase):
             (complex(0, -.25 - eps), complex(0, .5), False),
             (complex(0, .25), complex(0, -.5), True),
             (complex(0, .25 + eps), complex(0, -.5), False),
-            # Complex-specific tests
+        )
+
+        self._isclose_helper(tests, device, dtype, False, atol=.5, rtol=.5)
+        self._tensors_equal_helper(tests, device, dtype, False, atol=.5, rtol=.5)
+
+        # isclose atol and rtol complex-specific tests
+        tests = (
             (complex(1, -1), complex(-1, 1), False),
             (complex(1, -1), complex(2, -2), True),
             (complex(-math.sqrt(2), math.sqrt(2)),
@@ -5435,9 +5479,20 @@ class TestTorchDeviceType(TestCase):
              complex(-math.sqrt(.501), math.sqrt(.499)), False),
             (complex(2, 4), complex(1., 8.8523607), True),
             (complex(2, 4), complex(1., 8.8523607 + eps), False),
+            (complex(1, 99), complex(4, 100), True),
         )
 
         self._isclose_helper(tests, device, dtype, False, atol=.5, rtol=.5)
+
+        # assertTensorEqual atol and rtol complex-specific tests
+        tests = (
+            (complex(1, -1), complex(-1, 1), False),
+            (complex(1, -1), complex(2, -2), True),
+            (complex(1, 99), complex(4, 100), False),
+        )
+
+        self._tensors_equal_helper(tests, device, dtype, False, atol=.5, rtol=.5)
+
 
         # equal_nan = True tests
         tests = (
@@ -5448,6 +5503,8 @@ class TestTorchDeviceType(TestCase):
 
         with self.assertRaises(RuntimeError):
             self._isclose_helper(tests, device, dtype, True)
+
+        self._tensors_equal_helper(tests, device, dtype, True)
 
     # Tests that rtol or atol values less than zero thow RuntimeErrors
     @dtypes(torch.bool, torch.uint8,
@@ -6558,7 +6615,7 @@ class TestTorchDeviceType(TestCase):
 
         result = torch.block_diag()
         result_check = torch.empty(1, 0, device=device)
-        self.assertEqual(result, result_check)
+        self.assertEqual(result, result_check.cpu())
         self.assertEqual(result.device.type, 'cpu')
 
         test_dtypes = [
@@ -13620,10 +13677,10 @@ class TestTorchDeviceType(TestCase):
 
         # test bincount on non-contiguous slices
         all0s = torch.zeros((32, 2), dtype=torch.int64, device=device)
-        self.assertEqual(all0s[:, 0].bincount(), torch.tensor([32]))
+        self.assertEqual(all0s[:, 0].bincount(), torch.tensor([32], device=device))
 
         all1s = torch.ones((32, 2), dtype=torch.int64, device=device)
-        self.assertEqual(all1s[:, 0].bincount(), torch.tensor([0, 32]))
+        self.assertEqual(all1s[:, 0].bincount(), torch.tensor([0, 32], device=device))
 
         # test large number of bins - global memory use
         big_exp = torch.zeros(10000000, device=device)
@@ -14230,7 +14287,7 @@ class TestTorchDeviceType(TestCase):
                 continue
             A = random_sparse_pd_matrix(m, density=density, device=device, dtype=dtype)
             B = random_sparse_pd_matrix(m, density=density, device=device, dtype=dtype)
-            A_eigenvalues = torch.arange(1, m + 1, dtype=dtype) / m
+            A_eigenvalues = torch.arange(1, m + 1, device=device, dtype=dtype) / m
             e_smallest = A_eigenvalues[..., :k]
             e_largest, _ = torch.sort(A_eigenvalues[..., -k:], descending=True)
 

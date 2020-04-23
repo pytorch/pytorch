@@ -4233,8 +4233,8 @@ class TestNN(NNTestCase):
             res_gpu = torch.nn.functional.ctc_loss(log_probs.cuda(), targets.cuda(), input_lengths, target_lengths,
                                                    reduction='sum', zero_infinity=True)
             grad_gpu, = torch.autograd.grad(res_gpu, log_probs, grad_out.cuda())
-        self.assertAlmostEqual(res_cpu, res_gpu, delta=1e-4)
-        self.assertAlmostEqual(grad_cpu, grad_gpu, delta=1e-4)
+        self.assertAlmostEqual(res_cpu, res_gpu.cpu(), delta=1e-4)
+        self.assertAlmostEqual(grad_cpu, grad_gpu.cpu(), delta=1e-4)
 
     @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
     def test_CTCLoss_zero_infinity(self):
@@ -5025,7 +5025,19 @@ class TestNN(NNTestCase):
             rnn.cpu()
             hx = (hx[0].cpu(), hx[1].cpu()) if isinstance(rnn, nn.LSTM) else hx.cpu()
             output_cpu = rnn(input.cpu(), hx)
-            self.assertEqual(output_cuda, output_cpu)
+
+
+
+            self._compare_helper(output_cuda, output_cpu)
+
+    # Helper function that can compare tensors and tuples of tensors
+    # by casting them to the CPU for comparison.
+    def _compare_helper(self, a, b):
+        if isinstance(a, torch.Tensor):
+            self.assertEqual(a.cpu(), b.cpu())
+        else:
+            for a_part, b_part in zip(a, b):
+                self._compare_helper(a_part, b_part)
 
     @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
     @repeat_test_for_types(NO_HALF_TENSORTYPES)
@@ -5039,7 +5051,7 @@ class TestNN(NNTestCase):
         def check_rnn_grads(rnn1, rnn2):
             for x_layer, y_layer in zip(rnn1.all_weights, rnn2.all_weights):
                 for x, y in zip(x_layer, y_layer):
-                    self.assertEqual(x.grad, y.grad, atol=5e-5)
+                    self.assertEqual(x.grad, y.grad.cpu(), atol=5e-5)
 
         input_size = 10
         hidden_size = 6
@@ -5083,16 +5095,16 @@ class TestNN(NNTestCase):
                         torch.autograd.backward([output1, hy1], [grad_output, grad_hy])
                         torch.autograd.backward([output2, hy2], [grad_output.cuda(), grad_hy.cuda()])
 
-                    self.assertEqual(output1, output2)
-                    self.assertEqual(hy1, hy2)
+                    self.assertEqual(output1, output2.cpu())
+                    self._compare_helper(hy1, hy2)
 
                     check_rnn_grads(rnn, rnn_cuda)
-                    self.assertEqual(inp.grad.data, inp_cu.grad.data)
+                    self.assertEqual(inp.grad.data, inp_cu.grad.data.cpu())
                     if is_lstm:
-                        self.assertEqual(hx[0].grad.data, hx_cuda[0].grad.data)
-                        self.assertEqual(hx[1].grad.data, hx_cuda[1].grad.data)
+                        self.assertEqual(hx[0].grad.data, hx_cuda[0].grad.data.cpu())
+                        self.assertEqual(hx[1].grad.data, hx_cuda[1].grad.data.cpu())
                     else:
-                        self.assertEqual(hx.grad.data, hx_cuda.grad.data)
+                        self.assertEqual(hx.grad.data, hx_cuda.grad.data.cpu())
 
     def test_transformer_args_check(self):
         model_name = 'Transformer'
@@ -5454,12 +5466,15 @@ class TestNN(NNTestCase):
             self.assertEqual(list(outputs_cpu.keys()), list(outputs_gpu.keys()))
             for key in outputs_cpu.keys():
                 if key != 'weights':
-                    self.assertEqual(outputs_cpu[key], outputs_gpu[key], atol=5e-5, message=key)
+                    if isinstance(outputs_cpu[key], torch.Tensor):
+                        self.assertEqual(outputs_cpu[key], outputs_gpu[key].cpu(), atol=5e-5, message=key)
+                    else:
+                        self.assertEqual(outputs_cpu[key], outputs_gpu[key], atol=5e-5, message=key)
 
             # check grad weights separately, as nested dict
             for cpu_layer_weight, gpu_layer_weight in zip(outputs_cpu['weights'], outputs_gpu['weights']):
                 for (cpu_weight, gpu_weight) in zip(cpu_layer_weight, gpu_layer_weight):
-                    self.assertEqual(cpu_weight.grad.data, gpu_weight.grad.data, atol=5e-5)
+                    self.assertEqual(cpu_weight.grad.data, gpu_weight.grad.data.cpu(), atol=5e-5)
 
         for module in (nn.RNN, nn.LSTM, nn.GRU):
             for bias, bidirectional, batch_first, contig, variable_len, lens_as_tensor \
@@ -5565,11 +5580,11 @@ class TestNN(NNTestCase):
 
         # otherwise, subsequent warnings will be hidden, and further tests rely on them
         warnings.simplefilter("always")
-        self.assertEqual(m(input), expected_output)
+        self._compare_helper(m(input), expected_output)
 
         # remove weight norm
         m = torch.nn.utils.remove_weight_norm(m, name=name)
-        self.assertEqual(m(input), expected_output)
+        self._compare_helper(m(input), expected_output)
 
     @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
     def test_partial_flat_weights(self):
@@ -6533,11 +6548,11 @@ class TestNN(NNTestCase):
                         grid_cuda = get_grid('cuda', grid_cpu.detach()).requires_grad_()
                         out_cuda = F.grid_sample(input_cuda, grid_cuda, mode=mode, padding_mode=padding_mode,
                                                  align_corners=align_corners)
-                        self.assertEqual(out_cpu, out_cuda)
+                        self.assertEqual(out_cpu, out_cuda.cpu())
 
                         out_cuda.backward(gradients.cuda())
-                        self.assertEqual(input_cpu.grad, input_cuda.grad)
-                        self.assertEqual(grid_cpu.grad, grid_cuda.grad, atol=5e-5)
+                        self.assertEqual(input_cpu.grad, input_cuda.grad.cpu())
+                        self.assertEqual(grid_cpu.grad, grid_cuda.grad.cpu(), atol=5e-5)
 
                         # check that zero-dimensional input strides don't error out
                         base_input = torch.randn(N, C, 1, IW)
@@ -6548,7 +6563,7 @@ class TestNN(NNTestCase):
                         input_cuda = base_input.cuda().expand_as(input_cuda).requires_grad_()
                         out_cuda = F.grid_sample(input_cuda, grid_cuda, mode=mode, padding_mode=padding_mode,
                                                  align_corners=align_corners)
-                        self.assertEqual(out_cpu, out_cuda)
+                        self.assertEqual(out_cpu, out_cuda.cpu())
 
             # test same size output
             test_shape(N, C, H, W, H, W, mode, padding_mode, align_corners)
@@ -6761,11 +6776,11 @@ class TestNN(NNTestCase):
                     grid_cuda = grid_cpu.detach().transpose(0, 1).cuda().transpose(0, 1).requires_grad_()
                     out_cuda = F.grid_sample(input_cuda, grid_cuda, mode=mode, padding_mode=padding_mode,
                                              align_corners=align_corners)
-                    self.assertEqual(out_cpu, out_cuda)
+                    self.assertEqual(out_cpu, out_cuda.cpu())
 
                     out_cuda.backward(gradients.cuda())
-                    self.assertEqual(input_cpu.grad, input_cuda.grad)
-                    self.assertEqual(grid_cpu.grad, grid_cuda.grad, atol=5e-5)
+                    self.assertEqual(input_cpu.grad, input_cuda.grad.cpu())
+                    self.assertEqual(grid_cpu.grad, grid_cuda.grad.cpu(), atol=5e-5)
 
                     # check that zero-dimensional input strides don't error out
                     base_input = torch.randn(N, C, 1, IH, IW)
@@ -6778,7 +6793,7 @@ class TestNN(NNTestCase):
                     grid_cuda = grid_cpu.detach().cuda().requires_grad_()
                     out_cuda = F.grid_sample(input_cuda, grid_cuda, mode=mode, padding_mode=padding_mode,
                                              align_corners=align_corners)
-                    self.assertEqual(out_cpu, out_cuda)
+                    self.assertEqual(out_cpu, out_cuda.cpu())
 
             # test same size output
             test_shape(N, C, D, H, W, D, H, W, mode, padding_mode, align_corners)
@@ -6908,8 +6923,8 @@ class TestNN(NNTestCase):
                     warnings.simplefilter("always")  # python2 requires this so other tests can trigger
                     out_cuda = F.affine_grid(input_gpu, sz, align_corners=align_corners)
                 out_cuda.backward(gradients.cuda())
-                self.assertEqual(out_cpu, out_cuda)
-                self.assertEqual(input_cpu.grad, input_gpu.grad)
+                self.assertEqual(out_cpu, out_cuda.cpu())
+                self.assertEqual(input_cpu.grad, input_gpu.grad.cpu())
 
     def test_affine_grid_3d(self):
         # test known input on CPU
@@ -6960,8 +6975,8 @@ class TestNN(NNTestCase):
                     warnings.simplefilter("always")  # python2 requires this so other tests can trigger
                     out_cuda = F.affine_grid(input_gpu, sz, align_corners=align_corners)
                 out_cuda.backward(gradients.cuda())
-                self.assertEqual(out_cpu, out_cuda)
-                self.assertEqual(input_cpu.grad, input_gpu.grad)
+                self.assertEqual(out_cpu, out_cuda.cpu())
+                self.assertEqual(input_cpu.grad, input_gpu.grad.cpu())
 
     @unittest.skipIf((not TEST_NUMPY) or (not TEST_SCIPY) or (scipy.__version__ < '1.0.0'),
                      "Scipy v1.0 and/or numpy not found")
@@ -7288,7 +7303,7 @@ class TestNN(NNTestCase):
                     in_t = torch.ones(2, 2, 2, 2).to(device)
                     out_t = F.interpolate(in_t, scale_factor=scale_factor, **kwargs)
                     out_size = int(math.floor(in_t.shape[-1] * scale_factor))
-                    self.assertEqual(torch.ones(2, 2, out_size, out_size), out_t.data, atol=1e-5)
+                    self.assertEqual(torch.ones(2, 2, out_size, out_size), out_t.data.cpu(), atol=1e-5)
 
                     input = torch.randn(2, 2, 2, 2, requires_grad=True)
                     gradcheck(lambda x: F.interpolate(x, out_size, **kwargs), [input])
@@ -7334,7 +7349,7 @@ class TestNN(NNTestCase):
                     in_t = torch.ones(2, 2, 2, 2).to(device)
                     out_t = F.interpolate(in_t, scale_factor=scale_factor, **kwargs)
                     out_size = int(math.floor(in_t.shape[-1] * scale_factor))
-                    self.assertEqual(torch.ones(2, 2, out_size, out_size), out_t.data, atol=1e-5)
+                    self.assertEqual(torch.ones(2, 2, out_size, out_size), out_t.data.cpu(), atol=1e-5)
 
                     input = torch.randn(2, 2, 2, 2, requires_grad=True)
                     gradcheck(lambda x: F.interpolate(x, out_size, **kwargs), [input])
@@ -7395,7 +7410,7 @@ class TestNN(NNTestCase):
             out_shape = [1, 1] + [out_size] * dim
             with warnings.catch_warnings(record=True) as w:
                 out_t = m(in_t)
-            self.assertEqual(torch.ones(out_shape), out_t)
+            self.assertEqual(torch.ones(out_shape), out_t.cpu())
 
             self.assertEqual(
                 F.interpolate(in_t, (out_size,) * dim, **kwargs),
@@ -8900,7 +8915,7 @@ class TestNNDeviceType(NNTestCase):
         delta = IN.running_var.sqrt() * torch.arange(c, device=device, dtype=dtype)
         delta = delta.view(-1, *[1 for _ in range(2, input.dim())])
         output = IN(input_var + delta)
-        self.assertEqual(output.transpose(0, 1).reshape(c, -1).mean(1), torch.arange(c))
+        self.assertEqual(output.transpose(0, 1).reshape(c, -1).mean(1), torch.arange(c, device=device))
 
     def _test_InstanceNorm_cuda_half(self, cls, input, device):
         # THNN
@@ -9208,7 +9223,7 @@ class TestNNDeviceType(NNTestCase):
         self.assertEqual(t, expected)
 
         t = torch.nn.functional.one_hot(torch.empty([4, 0], dtype=torch.long, device=device), 100)
-        expected = torch.empty([4, 0, 100])
+        expected = torch.empty([4, 0, 100], device=device)
         self.assertEqual(t, expected)
 
         with self.assertRaises(RuntimeError):
@@ -9677,7 +9692,7 @@ class TestNNDeviceType(NNTestCase):
         out = m(inp)
         inp_ref = inp.cpu()
         out_ref = m(inp_ref)
-        self.assertEqual(out_ref, out)
+        self.assertEqual(out_ref, out.cpu())
 
     @onlyCUDA
     def test_upsamplingNearest2d_launch_config(self, device):
@@ -9686,7 +9701,7 @@ class TestNNDeviceType(NNTestCase):
         out = m(inp)
         inp_ref = inp.cpu()
         out_ref = m(inp_ref)
-        self.assertEqual(out_ref, out)
+        self.assertEqual(out_ref, out.cpu())
 
     @onlyCUDA
     def test_upsamplingNearest3d_launch_config(self, device):
@@ -9695,7 +9710,7 @@ class TestNNDeviceType(NNTestCase):
         out = m(inp)
         inp_ref = inp.cpu()
         out_ref = m(inp_ref)
-        self.assertEqual(out_ref, out)
+        self.assertEqual(out_ref, out.cpu())
 
     @unittest.expectedFailure
     @skipIfRocm
@@ -10455,15 +10470,15 @@ class TestNNDeviceType(NNTestCase):
     def _test_maxpool_indices(self, num_dim, adaptive=False, device="cpu", dtype=torch.float):
         def expected_indices(dim):
             if dim == 1:
-                return torch.tensor([1, 3], dtype=torch.double).repeat(2, 2, 1)
+                return torch.tensor([1, 3], device=device, dtype=torch.double).repeat(2, 2, 1)
             if dim == 2:
-                return torch.tensor([[5, 7], [13, 15]], dtype=torch.double).repeat(2, 2, 1, 1)
+                return torch.tensor([[5, 7], [13, 15]], device=device, dtype=torch.double).repeat(2, 2, 1, 1)
 
         def expected_grad(dim):
             if dim == 1:
-                return torch.tensor([0, 1, 0, 1], dtype=torch.double).repeat(2, 2, 1)
+                return torch.tensor([0, 1, 0, 1], device=device, dtype=torch.double).repeat(2, 2, 1)
             grad = expected_grad(dim - 1)
-            zero = torch.zeros(grad.size())
+            zero = torch.zeros(grad.size(), device=device)
             return torch.stack((zero, grad, zero, grad), 2)
 
         def expected_output(dim):
@@ -10490,7 +10505,7 @@ class TestNNDeviceType(NNTestCase):
             expected_output = expected_output(num_dim)
             self.assertEqual(indices.dim(), input.dim())
             self.assertEqual(indices.data.squeeze(), expected_indices)
-            self.assertEqual(output.data.squeeze(), expected_output)
+            self.assertEqual(output.data.squeeze().cpu(), expected_output)
         self.assertTrue(output.requires_grad)
         self.assertFalse(indices.requires_grad)
 

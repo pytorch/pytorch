@@ -482,8 +482,8 @@ class TestJit(JitTestCase):
         input = torch.rand(2, 3).cuda(torch.cuda.device_count() - 1)
         origin_result = m(input)
         self.assertEqual(origin_result, m2(input))
-        self.assertEqual(origin_result, m3(input.cpu()))
-        self.assertEqual(origin_result, m4(input.cuda(0)))
+        self.assertEqual(origin_result.cpu(), m3(input.cpu()))
+        self.assertEqual(origin_result.cpu(), m4(input.cuda(0)).cpu())
 
     @unittest.skipIf(not RUN_CUDA, "restore device requires CUDA")
     def test_restore_shared_storage_on_cuda(self):
@@ -496,8 +496,8 @@ class TestJit(JitTestCase):
 
         m = Foo()
         m2 = self.getExportImportCopy(m, map_location=torch.device('cuda:0'))
-        self.assertEqual(tuple(m.parameters()), tuple(m2.parameters()))
-        self.assertEqual(tuple(m.buffers()), tuple(m2.buffers()))
+        self.assertEqual(tuple(m.parameters()), tuple(p.cpu() for p in m2.parameters()))
+        self.assertEqual(tuple(m.buffers()), tuple(b.cpu() for b in m2.buffers()))
         self.assertTrue(m2.p0.is_cuda)
         self.assertTrue(m2.b0.is_cuda)
         self.assertTrue(m2.p0.is_shared())
@@ -2078,12 +2078,12 @@ graph(%Ra, %Rb):
         cuda_out = traced_model(x.float().cuda())
         traced_model.cpu()
         cpu_out = traced_model(x.float())
-        self.assertEqual(cpu_out, cuda_out)
+        self.assertEqual(cpu_out, cuda_out.cpu())
         traced_model.to('cuda')
         cuda_out = traced_model(x.float().cuda())
         traced_model.to('cpu')
         cpu_out = traced_model(x.float())
-        self.assertEqual(cpu_out, cuda_out)
+        self.assertEqual(cpu_out, cuda_out.cpu())
         traced_model.double()
 
         # state_dict + load_state_dict

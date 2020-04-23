@@ -79,7 +79,7 @@ class TestDataParallel(JitTestCase):
             for b in replica.buffers():
                 self.assertEqual(b.get_device(), i)
             replica_input = input.cuda(i)
-            self.assertEqual(replica(replica_input).data, expected_output)
+            self.assertEqual(replica(replica_input).data.cpu(), expected_output.cpu())
 
     @unittest.skipIf(not RUN_CUDA_MULTI_GPU, "multi-GPU not supported")
     def test_python_submodule_script(self):
@@ -144,10 +144,10 @@ class TestDataParallel(JitTestCase):
         # replica which is on the same GPU has a shallow copy of the original
         # params and buffers
         r0_forward = replica[0](x)
-        self.assertEqual(second_forward, r0_forward)
+        self.assertEqual(second_forward.cpu(), r0_forward.cpu())
 
         # replica which is on a different GPU has a deep copy of the original
         # params and buffers
         x1 = torch.ones(2, 2, requires_grad=True).cuda(device=1)
         r1_forward = replica[1](x1)
-        self.assertEqual(first_forward, r1_forward)
+        self.assertEqual(first_forward.cpu(), r1_forward.cpu())
