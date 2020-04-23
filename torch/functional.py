@@ -1,3 +1,5 @@
+from typing import Tuple, Optional
+
 import torch
 import torch.nn.functional as F
 from ._lowrank import svd_lowrank, pca_lowrank
@@ -235,6 +237,12 @@ Args:
            Ellipses `...` represent a fixed number of dimensions. If the right hand side is inferred,
            the ellipsis dimensions are at the beginning of the output.
     operands (Tensor): The operands to compute the Einstein sum of.
+
+.. note::
+
+    This function does not optimize the given expression, so a different formula for the same computation may
+    run faster or consume less memory. Projects like opt_einsum (https://optimized-einsum.readthedocs.io/en/stable/)
+    can optimize the formula for you.
 
 Examples::
 

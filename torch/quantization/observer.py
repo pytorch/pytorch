@@ -4,10 +4,10 @@ import math
 import warnings
 from abc import ABCMeta, abstractmethod
 from functools import partial
+from typing import List, Tuple, Optional
 
 import torch
 import torch.nn as nn
-from torch._jit_internal import List, Optional
 
 def _with_args(cls_or_self, **kwargs):
     r"""Wrapper that allows creation of class factories.

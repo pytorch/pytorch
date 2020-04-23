@@ -19,4 +19,4 @@ else
 fi
 
 echo "Running pre-commit clang-format"
-tools/git-clang-format HEAD~
+tools/git-clang-format HEAD~ --force

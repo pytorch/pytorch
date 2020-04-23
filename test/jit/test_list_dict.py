@@ -450,14 +450,14 @@ class TestList(JitTestCase):
             self.assertEqual(fn(*inputs), torch.jit.script(fn)(*inputs))
 
         def foo(names, results):
-            # type: (List[int], List[int])
+            # type: (List[int], List[int]) -> List[Tuple[int, int]]
             return [(k + 5, v - 2) for k, v in zip(names, results)]
 
         test_func(foo, ([1, 2, 4], [4, 7, 9]))
         test_func(foo, ([5], [4, 7, 9]))
 
         def fn(x):
-            # type: (int)
+            # type: (int) -> List[int]
             return [i for i in range(x)]  # noqa: C416
 
         test_func(fn, (9,))
