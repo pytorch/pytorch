@@ -4,10 +4,10 @@ import math
 import warnings
 from abc import ABCMeta, abstractmethod
 from functools import partial
+from typing import List, Tuple, Optional
 
 import torch
 import torch.nn as nn
-from torch._jit_internal import List, Optional
 
 def _with_args(cls_or_self, **kwargs):
     r"""Wrapper that allows creation of class factories.
@@ -127,16 +127,16 @@ class _ObserverBase(ObserverBase):
     @torch.jit.export
     def _calculate_qparams(self, min_val, max_val):
         # type: (Tensor, Tensor) -> Tuple[Tensor, Tensor]
-        r"""Calculates the per channel quantization parameters, given min and max
-        value tensors.
+        r"""Calculates the quantization parameters, given min and max
+        value tensors. Works for both per tensor and per channel cases
 
         Args:
             min_val: Minimum values per channel
             max_val: Maximum values per channel
 
         Returns:
-            scales: Per channel scales tensor of shape (#channels,)
-            zero_points: Per channel zero points tensor of shape (#channels,)
+            scales: Scales tensor of shape (#channels,)
+            zero_points: Zero points tensor of shape (#channels,)
         """
         if min_val.numel() == 0 or max_val.numel() == 0:
             warnings.warn(
@@ -184,6 +184,13 @@ class _ObserverBase(ObserverBase):
             zero_point = qmin - torch.round(min_val / scale)
             zero_point = torch.max(zero_point, torch.tensor(qmin, device=device, dtype=zero_point.dtype))
             zero_point = torch.min(zero_point, torch.tensor(qmax, device=device, dtype=zero_point.dtype))
+
+        # if len(scale.shape) == 0:
+        #     scale = torch.tensor(scale)
+        #     scale = torch.tensor([scale])
+        # if len(zero_point.shape) == 0:
+        #     zero_point = torch.tensor(zero_point)
+        #     zero_point = torch.tensor([zero_point])
 
         return scale, zero_point
 

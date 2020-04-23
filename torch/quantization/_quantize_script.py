@@ -1,5 +1,7 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 
+from typing import List, Optional
+
 import torch
 from .qconfig import QConfig
 from torch.jit._recursive import wrap_cpp_module
@@ -85,7 +87,7 @@ def _prepare_script(model, qconfig_dict, is_dynamic):
                                                                'forward',
                                                                scripted_qconfig_dict,
                                                                False,
-                                                               is_dynamic)) 
+                                                               is_dynamic))
 
 def prepare_script(model, qconfig_dict, inplace=False):
     if not inplace:

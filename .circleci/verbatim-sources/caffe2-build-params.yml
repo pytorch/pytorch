@@ -24,5 +24,6 @@ caffe2_params: &caffe2_params
     USE_CUDA_DOCKER_RUNTIME: << parameters.use_cuda_docker_runtime >>
     DOCKER_IMAGE: << parameters.docker_image >>
     BUILD_ONLY: << parameters.build_only >>
+    BASE_REF: << pipeline.git.base_revision >>
   resource_class: << parameters.resource_class >>
 
