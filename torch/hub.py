@@ -10,12 +10,8 @@ import torch
 import warnings
 import zipfile
 
-if sys.version_info[0] == 2:
-    from urlparse import urlparse
-    from urllib2 import urlopen  # noqa f811
-else:
-    from urllib.request import urlopen
-    from urllib.parse import urlparse  # noqa: F401
+from urllib.request import urlopen
+from urllib.parse import urlparse  # noqa: F401
 
 try:
     from tqdm.auto import tqdm  # automatically select proper tqdm submodule if available
@@ -24,7 +20,7 @@ except ImportError:
         from tqdm import tqdm
     except ImportError:
         # fake tqdm if it's not installed
-        class tqdm(object):
+        class tqdm(object):  # type: ignore
 
             def __init__(self, total=None, disable=False,
                          unit=None, unit_scale=None, unit_divisor=None):
@@ -74,12 +70,9 @@ def import_module(name, path):
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
         return module
-    elif sys.version_info >= (3, 0):
+    else:
         from importlib.machinery import SourceFileLoader
         return SourceFileLoader(name, path).load_module()
-    else:
-        import imp
-        return imp.load_source(name, path)
 
 
 def _remove_if_exists(path):
