@@ -83,11 +83,11 @@ def _process_group_construct_rpc_backend_options_handler(
 ):
     from . import ProcessGroupRpcBackendOptions
 
-    rpc_backend_options = ProcessGroupRpcBackendOptions()
-    rpc_backend_options.rpc_timeout = rpc_timeout
-    rpc_backend_options.init_method = init_method
-    rpc_backend_options.num_send_recv_threads = num_send_recv_threads
-    return rpc_backend_options
+    return ProcessGroupRpcBackendOptions(
+        rpc_timeout=rpc_timeout,
+        init_method=init_method,
+        num_send_recv_threads=num_send_recv_threads
+    )
 
 
 def _process_group_init_backend_handler(
@@ -101,8 +101,14 @@ def _process_group_init_backend_handler(
             "Default process group must not be initialized before init_rpc."
         )
 
+    process_group_timeout = rpc_constants.DEFAULT_PROCESS_GROUP_TIMEOUT
+
     dist.init_process_group(
-        backend="gloo", store=store, rank=rank, world_size=world_size
+        backend=dist.Backend.GLOO,
+        store=store,
+        rank=rank,
+        world_size=world_size,
+        timeout=process_group_timeout,
     )
 
     try:

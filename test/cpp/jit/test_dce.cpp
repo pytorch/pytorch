@@ -22,17 +22,14 @@ void testDCE() {
 graph():
   %48 : None = prim::Constant()
   %50 : bool = prim::Constant[value=1]()
-  %10 : bool? = prim::Constant()
-  %8 : Device? = prim::Constant()
-  %4 : int? = prim::Constant()
   %0 : int = prim::Constant[value=2]()
   %12 : int = prim::Constant[value=1]()
   %24 : int = prim::Constant[value=3]()
   %31 : int = prim::Constant[value=0]()
   %2 : int[] = prim::ListConstruct(%0, %0)
-  %a.1 : Tensor = aten::ones(%2, %4, %4, %8, %10)
+  %a.1 : Tensor = prim::MakeTestTensor()
   %14 : int[] = prim::ListConstruct(%12)
-  %tot.1 : Tensor = aten::zeros(%14, %4, %4, %8, %10)
+  %tot.1 : Tensor = prim::MakeTestTensor()
   %tot : Tensor = prim::Loop(%24, %50, %tot.1)
     block0(%i : int, %tot.6 : Tensor):
       %33 : Tensor = aten::select(%a.1, %31, %31)
@@ -46,7 +43,7 @@ graph():
       -> (%50, %tot.3)
   return (%tot)
 )IR";
-  script::parseIR(input, graph.get());
+  parseIR(input, graph.get());
   EliminateDeadCode(graph);
   // Check that dead code elimin
   testing::FileCheck().run(input, *graph);

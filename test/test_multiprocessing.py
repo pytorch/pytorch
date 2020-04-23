@@ -22,7 +22,6 @@ load_tests = load_tests
 TEST_REPEATS = 30
 HAS_SHM_FILES = os.path.isdir('/dev/shm')
 TEST_CUDA_IPC = torch.cuda.is_available() and \
-    sys.version_info[0] == 3 and \
     sys.platform != 'darwin' and \
     sys.platform != 'win32'
 TEST_MULTIGPU = TEST_CUDA_IPC and torch.cuda.device_count() > 1
@@ -78,11 +77,6 @@ def receive_and_send(queue, out_queue, event, count):
         t = queue.get()
         out_queue.put(t.clone())
     event.wait()
-
-
-def call_backward():
-    x = torch.randn(3, 3, requires_grad=True)
-    x.sum().backward()
 
 
 def sum_tensors(inq, outq):
@@ -156,6 +150,9 @@ def mixed_type_producer(queue, event):
         event.wait()
         event.clear()
 
+def simple_autograd_function(a=1):
+    torch.rand(3).requires_grad_(True).mean().backward()
+    return a ** 2
 
 @contextlib.contextmanager
 def fs_sharing():
@@ -357,6 +354,21 @@ class TestMultiprocessing(TestCase):
         p.start()
         p.join(1)
         self.assertEqual(t, torch.ones(5, 5) * 3, 0)
+
+    @unittest.skipIf(IS_WINDOWS, "Test needs to use fork multiprocessing")
+    def test_autograd_errors(self):
+        ctx = mp.get_context('fork')
+        simple_autograd_function()
+        with self.assertRaisesRegex(RuntimeError, r'Unable to handle autograd'):
+            with ctx.Pool(3) as pool:
+                pool.map(simple_autograd_function, [1, 2, 3])
+
+    @unittest.skipIf(NO_MULTIPROCESSING_SPAWN, "Test needs to use spawn multiprocessing")
+    def test_autograd_fine_with_spawn(self):
+        ctx = mp.get_context('spawn')
+        simple_autograd_function()
+        with ctx.Pool(3) as pool:
+            pool.map(simple_autograd_function, [1, 2, 3])
 
     @unittest.skipIf(NO_MULTIPROCESSING_SPAWN, "Disabled for environments that \
                      don't support multiprocessing with spawn start method")
@@ -820,15 +832,6 @@ if __name__ == "__main__":
     def test_is_shared_cuda(self):
         t = torch.randn(5, 5).cuda()
         self.assertTrue(t.is_shared())
-
-    @unittest.skip('this test occasionally fails and deadlocks; see https://github.com/pytorch/pytorch/issues/5834')
-    def test_backwards_fork(self):
-        r"backwards() should succeed when called before and after a fork"
-        call_backward()
-        p = mp.Process(target=call_backward)
-        p.start()
-        p.join(1)
-        self.assertFalse(p.is_alive())
 
 
 if __name__ == '__main__':

@@ -2,16 +2,28 @@
 #define THC_GENERIC_FILE "THC/generic/THCStorageCopy.cpp"
 #else
 
+#ifdef __HIP_PLATFORM_HCC__
+#include <hip/hip_version.h>
+#endif
+
 void THCStorage_(copyCPU)(THCState *state, THCStorage *self, struct THStorage *src)
 {
   THArgCheck(self->numel() == src->numel(), 2, "size does not match");
-  cudaStream_t stream = THCState_getCurrentStream(state);
+  cudaStream_t stream = c10::cuda::getCurrentCUDAStream();
+#if HIP_VERSION >= 301
+  THCudaCheck(hipMemcpyWithStream(THCStorage_(data)(state, self),
+                                  THStorage_(data)(src),
+                                  self->numel() * sizeof(scalar_t),
+                                  cudaMemcpyHostToDevice,
+                                  stream)); 
+#else
   THCudaCheck(cudaMemcpyAsync(THCStorage_(data)(state, self),
                               THStorage_(data)(src),
                               self->numel() * sizeof(scalar_t),
                               cudaMemcpyHostToDevice,
                               stream));
   THCudaCheck(cudaStreamSynchronize(stream));
+#endif
 }
 
 #define TH_CUDA_STORAGE_IMPLEMENT_COPY(TYPEC)                          \
@@ -39,13 +51,21 @@ TH_CUDA_STORAGE_IMPLEMENT_COPY(BFloat16)
 void THStorage_(copyCuda)(THCState *state, THStorage *self, struct THCStorage *src)
 {
   THArgCheck(self->numel() == src->numel(), 2, "size does not match");
-  cudaStream_t stream = THCState_getCurrentStream(state);
+  cudaStream_t stream = c10::cuda::getCurrentCUDAStream();
+#if HIP_VERSION >= 301
+  THCudaCheck(hipMemcpyWithStream(THStorage_(data)(self),
+                                  THCStorage_(data)(state, src),
+                                  self->numel() * sizeof(scalar_t),
+                                  cudaMemcpyDeviceToHost,
+                                  stream));
+#else
   THCudaCheck(cudaMemcpyAsync(THStorage_(data)(self),
                               THCStorage_(data)(state, src),
                               self->numel() * sizeof(scalar_t),
                               cudaMemcpyDeviceToHost,
                               stream));
   THCudaCheck(cudaStreamSynchronize(stream));
+#endif
 }
 
 #define TH_CUDA_STORAGE_IMPLEMENT_COPYTO(TYPEC)                             \

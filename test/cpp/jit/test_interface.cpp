@@ -3,15 +3,13 @@
 #include <test/cpp/jit/test_utils.h>
 
 #include <ATen/core/qualified_name.h>
-#include <torch/csrc/jit/import.h>
-#include <torch/csrc/jit/import_source.h>
-#include <torch/csrc/jit/script/resolver.h>
+#include <torch/csrc/jit/frontend/resolver.h>
+#include <torch/csrc/jit/serialization/import.h>
+#include <torch/csrc/jit/serialization/import_source.h>
 #include <torch/torch.h>
 
 namespace torch {
 namespace jit {
-
-using namespace torch::jit::script;
 
 static const std::vector<std::string> subMethodSrcs = {R"JIT(
 def one(self, x: Tensor, y: Tensor) -> Tensor:

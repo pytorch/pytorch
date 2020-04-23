@@ -3,13 +3,17 @@
 #include <torch/arg.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/expanding_array.h>
-#include <torch/nn/options/common.h>
 #include <torch/types.h>
 
 namespace torch {
 namespace nn {
 
-/// Options for a fold module.
+/// Options for the `Fold` module.
+///
+/// Example:
+/// ```
+/// Fold model(FoldOptions({8, 8}, {3, 3}).dilation(2).padding({2, 1}).stride(2));
+/// ```
 struct TORCH_API FoldOptions {
   FoldOptions(ExpandingArray<2> output_size, ExpandingArray<2> kernel_size)
       : output_size_(std::move(output_size)),
@@ -35,11 +39,28 @@ struct TORCH_API FoldOptions {
   TORCH_ARG(ExpandingArray<2>, stride) = 1;
 };
 
-TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(Fold, FoldFuncOptions)
+namespace functional {
+/// Options for `torch::nn::functional::fold`.
+///
+/// See the documentation for `torch::nn::FoldOptions` class to learn what
+/// arguments are supported.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::fold(input, F::FoldFuncOptions({3, 2}, {2, 2}));
+/// ```
+using FoldFuncOptions = FoldOptions;
+} // namespace functional
 
 // ============================================================================
 
-/// Options for an Unfold functional and module.
+/// Options for the `Unfold` module.
+///
+/// Example:
+/// ```
+/// Unfold model(UnfoldOptions({2, 4}).dilation(2).padding({2, 1}).stride(2));
+/// ```
 struct TORCH_API UnfoldOptions {
   UnfoldOptions(ExpandingArray<2> kernel_size)
       : kernel_size_(std::move(kernel_size)) {}
@@ -59,7 +80,19 @@ struct TORCH_API UnfoldOptions {
   TORCH_ARG(ExpandingArray<2>, stride) = 1;
 };
 
-TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(Unfold, UnfoldFuncOptions)
+namespace functional {
+/// Options for `torch::nn::functional::unfold`.
+///
+/// See the documentation for `torch::nn::UnfoldOptions` class to learn what
+/// arguments are supported.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::unfold(input, F::UnfoldFuncOptions({2, 2}).padding(1).stride(2));
+/// ```
+using UnfoldFuncOptions = UnfoldOptions;
+} // namespace functional
 
 } // namespace nn
 } // namespace torch

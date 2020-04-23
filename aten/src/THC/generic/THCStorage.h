@@ -28,9 +28,6 @@ THC_API scalar_t THCStorage_(get)(THCState *state, const THCStorage*, ptrdiff_t)
 THC_API THCStorage* THCStorage_(new)(THCState *state);
 THC_API THCStorage* THCStorage_(newWithSize)(THCState *state, ptrdiff_t size);
 THC_API THCStorage* THCStorage_(newWithSize1)(THCState *state, scalar_t);
-THC_API THCStorage* THCStorage_(newWithSize2)(THCState *state, scalar_t, scalar_t);
-THC_API THCStorage* THCStorage_(newWithSize3)(THCState *state, scalar_t, scalar_t, scalar_t);
-THC_API THCStorage* THCStorage_(newWithSize4)(THCState *state, scalar_t, scalar_t, scalar_t, scalar_t);
 THC_API THCStorage* THCStorage_(newWithMapping)(THCState *state, const char *filename, ptrdiff_t size, int shared);
 
 THC_API THCStorage* THCStorage_(newWithAllocator)(

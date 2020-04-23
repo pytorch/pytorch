@@ -13,7 +13,11 @@
 namespace torch {
 namespace nn {
 
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Identity ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
 /// A placeholder identity operator that is argument-insensitive.
+/// See https://pytorch.org/docs/master/nn.html#torch.nn.Identity to learn
+/// about the exact behavior of this module.
 class TORCH_API IdentityImpl : public Cloneable<IdentityImpl> {
  public:
   void reset() override;
@@ -30,9 +34,19 @@ class TORCH_API IdentityImpl : public Cloneable<IdentityImpl> {
 /// module storage semantics.
 TORCH_MODULE(Identity);
 
-// ============================================================================
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Linear ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Applies a linear transformation with optional bias.
+/// See https://pytorch.org/docs/master/nn.html#torch.nn.Linear to learn
+/// about the exact behavior of this module.
+///
+/// See the documentation for `torch::nn::LinearOptions` class to learn what
+/// constructor arguments are supported for this module.
+///
+/// Example:
+/// ```
+/// Linear model(LinearOptions(5, 2).bias(false));
+/// ```
 class TORCH_API LinearImpl : public Cloneable<LinearImpl> {
  public:
   LinearImpl(int64_t in_features, int64_t out_features)
@@ -63,13 +77,24 @@ class TORCH_API LinearImpl : public Cloneable<LinearImpl> {
 
 /// A `ModuleHolder` subclass for `LinearImpl`.
 /// See the documentation for `LinearImpl` class to learn what methods it
-/// provides, or the documentation for `ModuleHolder` to learn about PyTorch's
+/// provides, and examples of how to use `Linear` with `torch::nn::LinearOptions`.
+/// See the documentation for `ModuleHolder` to learn about PyTorch's
 /// module storage semantics.
 TORCH_MODULE(Linear);
 
-// ============================================================================
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Flatten ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// A placeholder for Flatten operator
+/// See https://pytorch.org/docs/master/nn.html#torch.nn.Flatten to learn
+/// about the exact behavior of this module.
+///
+/// See the documentation for `torch::nn::FlattenOptions` class to learn what
+/// constructor arguments are supported for this module.
+///
+/// Example:
+/// ```
+/// Flatten model(FlattenOptions().start_dim(2).end_dim(4));
+/// ```
 class TORCH_API FlattenImpl : public Cloneable<FlattenImpl> {
  public:
   explicit FlattenImpl(const FlattenOptions& options_ = {});
@@ -88,13 +113,24 @@ class TORCH_API FlattenImpl : public Cloneable<FlattenImpl> {
 
 /// A `ModuleHolder` subclass for `FlattenImpl`.
 /// See the documentation for `FlattenImpl` class to learn what methods it
-/// provides, or the documentation for `ModuleHolder` to learn about PyTorch's
+/// provides, and examples of how to use `Flatten` with `torch::nn::FlattenOptions`.
+/// See the documentation for `ModuleHolder` to learn about PyTorch's
 /// module storage semantics.
 TORCH_MODULE(Flatten);
 
-// ============================================================================
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Bilinear ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Applies a billinear transformation with optional bias.
+/// See https://pytorch.org/docs/master/nn.html#torch.nn.Bilinear to learn
+/// about the exact behavior of this module.
+///
+/// See the documentation for `torch::nn::BilinearOptions` class to learn what
+/// constructor arguments are supported for this module.
+///
+/// Example:
+/// ```
+/// Bilinear model(BilinearOptions(3, 2, 4).bias(false));
+/// ```
 class TORCH_API BilinearImpl : public Cloneable<BilinearImpl> {
  public:
   BilinearImpl(int64_t in1_features, int64_t in2_features, int64_t out_features) : BilinearImpl(BilinearOptions(in1_features, in2_features, out_features)) {}
@@ -125,7 +161,8 @@ class TORCH_API BilinearImpl : public Cloneable<BilinearImpl> {
 
 /// A `ModuleHolder` subclass for `BilinearImpl`.
 /// See the documentation for `BilinearImpl` class to learn what methods it
-/// provides, or the documentation for `ModuleHolder` to learn about PyTorch's
+/// provides, and examples of how to use `Bilinear` with `torch::nn::BilinearOptions`.
+/// See the documentation for `ModuleHolder` to learn about PyTorch's
 /// module storage semantics.
 TORCH_MODULE(Bilinear);
 

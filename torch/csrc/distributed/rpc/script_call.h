@@ -3,8 +3,8 @@
 #include <c10/util/Optional.h>
 #include <torch/csrc/distributed/rpc/message.h>
 #include <torch/csrc/distributed/rpc/rpc_command_base.h>
-#include <torch/csrc/jit/operator.h>
-#include <torch/csrc/jit/pickler.h>
+#include <torch/csrc/jit/runtime/operator.h>
+#include <torch/csrc/jit/serialization/pickler.h>
 #include <vector>
 
 namespace torch {
@@ -35,7 +35,7 @@ class TORCH_API ScriptCall : public RpcCommandBase {
   const std::vector<at::IValue>& stack() const;
   std::vector<at::IValue>& stackRef();
 
-  Message toMessage() && override;
+  Message toMessageImpl() && override;
   static std::unique_ptr<ScriptCall> fromMessage(const Message& message);
 
   virtual ~ScriptCall() = default;

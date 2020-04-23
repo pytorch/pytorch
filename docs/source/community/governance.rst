@@ -54,7 +54,7 @@ Core Developers
 
 The PyTorch project is developed by a team of core developers. You can
 find the list of core developers at `PyTorch Governance \| Persons of
-Interest </docs/stable/community/persons_of_interest.html>`__.
+Interest </docs/source/community/persons_of_interest.rst>`__.
 
 While membership is determined by presence in the "PyTorch core" team in
 the "PyTorch"
@@ -136,7 +136,7 @@ relatively minor, a pull request on GitHub can be opened up immediately
 for review and merge by the project committers. For larger changes,
 please open an issue to make a proposal to discuss prior. Please also
 see the `PyTorch Contributor
-Guide </docs/stable/community/contribution_guide.html>`__ for contribution
+Guide </docs/source/community/contribution_guide.rst>`__ for contribution
 guidelines.
 
 **Q: Can I become a committer on the project?** Unfortunately, the

@@ -5,7 +5,11 @@
 
 #include <TH/THBlasUtils.h>
 
+#ifdef USE_FBGEMM
+#include <fbgemm/Fbgemm.h>
+#else
 #include <caffe2/perfkernels/embedding_lookup_idx.h>
+#endif
 
 #include <cstring>
 #include <iostream>
@@ -100,8 +104,30 @@ void index_select_add<float>(const Tensor &select_indices,
       offsets_data = offsets_include_last.data();
     }
 
+#ifdef USE_FBGEMM
+    auto kernel_fp32_i64 =
+      fbgemm::GenerateEmbeddingSpMDM<float, int64_t, int64_t>(
+        /* block_size */ddim,
+        /* has_weight */false,
+        /* normalize_by_lengths */false,
+        /* prefetch */16,
+        /* is_weight_positional */false,
+        /* use_offsets */true
+      );
+#endif
     at::parallel_for(
         0, output_size, 1, [&](int64_t start_idx, int64_t end_idx) {
+#ifdef USE_FBGEMM
+          kernel_fp32_i64(
+            /* output_size */end_idx - start_idx,
+            /* index_size */offsets_data[end_idx] - offsets_data[start_idx],
+            /* data_size */src.size(0),
+            /* input */src_data,
+            /* indices */select_indices_data + offsets_data[start_idx],
+            /* offsets_or_lengths */offsets_data + start_idx,
+            /* weights */nullptr,
+            /* output */output_data + start_idx * ddim);
+#else
           caffe2::EmbeddingLookupIdx(
               /*block_size=*/ddim,
               /*output_size=*/end_idx - start_idx,
@@ -114,6 +140,7 @@ void index_select_add<float>(const Tensor &select_indices,
               /*scale_bias=*/nullptr,
               /*normalize_by_lengths=*/false,
               /*out=*/output_data + start_idx * ddim);
+#endif
         });
   } else {
     AT_ASSERT(select_indices.numel() == add_indices.numel());
@@ -204,8 +231,30 @@ void index_select_scale_add<float>(const Tensor &select_indices,
       offsets_data = offsets_include_last.data();
     }
 
+#ifdef USE_FBGEMM
+    auto kernel_fp32_i64 =
+      fbgemm::GenerateEmbeddingSpMDM<float, int64_t, int64_t>(
+        /* block_size */ddim,
+        /* has_weight */true,
+        /* normalize_by_lengths */false,
+        /* prefetch */16,
+        /* is_weight_positional */false,
+        /* use_offsets */true
+      );
+#endif
     at::parallel_for(
         0, output_size, 1, [&](int64_t start_idx, int64_t end_idx) {
+#ifdef USE_FBGEMM
+          kernel_fp32_i64(
+            /* output_size */end_idx - start_idx,
+            /* index_size */offsets_data[end_idx] - offsets_data[start_idx],
+            /* data_size */src.size(0),
+            /* input */src_data,
+            /* indices */select_indices_data + offsets_data[start_idx],
+            /* offsets_or_lengths */offsets_data + start_idx,
+            /* weights */scale_data + offsets_data[start_idx],
+            /* output */output_data + start_idx * ddim);
+#else
           caffe2::EmbeddingLookupIdx(
               /*block_size=*/ddim,
               /*output_size=*/end_idx - start_idx,
@@ -218,6 +267,7 @@ void index_select_scale_add<float>(const Tensor &select_indices,
               /*scale_bias=*/nullptr,
               /*normalize_by_lengths=*/false,
               /*out=*/output_data + start_idx * ddim);
+#endif
         });
   } else {
     AT_ASSERT(select_indices.numel() == add_indices.numel());
@@ -374,6 +424,14 @@ _embedding_bag_cpu(const Tensor &weight, const Tensor &indices,
   checkScalarType("embedding_bag", offsets_arg, kLong);
   auto weight_arg = TensorArg(weight, "weight", 1);
   checkScalarTypes("embedding_bag", weight_arg, {kFloat, kDouble});
+  int64_t offset_0 = offsets.data_ptr<int64_t>()[0];
+  int64_t offset_n = offsets.data_ptr<int64_t>()[offsets.size(0)-1];
+  TORCH_CHECK(offset_0 == 0, "offsets[0] has to be 0, i.e., the first sequence "
+                             "in the mini-batch has to start from position 0. "
+                             "However, got ", offsets[0]);
+  TORCH_CHECK(offset_n <= indices.size(0), "offsets[-1] can not "
+               "be greater than input's length ", indices.size(0), " but got offsets[-1] of ",
+               offset_n);
 
   if (per_sample_weights.defined()) {
     TORCH_CHECK(mode == MODE_SUM,
@@ -381,8 +439,8 @@ _embedding_bag_cpu(const Tensor &weight, const Tensor &indices,
     auto per_input_weights_arg = TensorArg(
         per_sample_weights,"per_sample_weights", 1);
     checkSameType("embedding_bag", weight_arg, per_input_weights_arg);
-    AT_ASSERT(per_sample_weights.dim() == 1);
-    AT_ASSERT(per_sample_weights.numel() == indices.numel());
+    TORCH_CHECK(per_sample_weights.dim() == 1);
+    TORCH_CHECK(per_sample_weights.numel() == indices.numel());
   }
 
   auto bag_size = make_bag_size(offsets, indices, mode, weight.requires_grad());

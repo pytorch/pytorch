@@ -6,7 +6,7 @@ import cimodel.lib.miniutils as miniutils
 
 
 class Conf(object):
-    def __init__(self, os, cuda_version, pydistro, parms, smoke, libtorch_variant, gcc_config_variant):
+    def __init__(self, os, cuda_version, pydistro, parms, smoke, libtorch_variant, gcc_config_variant, libtorch_config_variant):
 
         self.os = os
         self.cuda_version = cuda_version
@@ -15,11 +15,14 @@ class Conf(object):
         self.smoke = smoke
         self.libtorch_variant = libtorch_variant
         self.gcc_config_variant = gcc_config_variant
+        self.libtorch_config_variant = libtorch_config_variant
 
     def gen_build_env_parms(self):
         elems = [self.pydistro] + self.parms + [binary_build_data.get_processor_arch_name(self.cuda_version)]
         if self.gcc_config_variant is not None:
             elems.append(str(self.gcc_config_variant))
+        if self.libtorch_config_variant is not None:
+            elems.append(str(self.libtorch_config_variant))
         return elems
 
     def gen_docker_image(self):
@@ -33,8 +36,8 @@ class Conf(object):
 
         docker_distro_prefix = miniutils.override(self.pydistro, docker_word_substitution)
 
-        # The cpu nightlies are built on the pytorch/manylinux-cuda100 docker image
-        alt_docker_suffix = self.cuda_version or "100"
+        # The cpu nightlies are built on the pytorch/manylinux-cuda102 docker image
+        alt_docker_suffix = self.cuda_version or "102"
         docker_distro_suffix = "" if self.pydistro == "conda" else alt_docker_suffix
         return miniutils.quote("pytorch/" + docker_distro_prefix + "-cuda" + docker_distro_suffix)
 
@@ -67,7 +70,17 @@ class Conf(object):
             job_def["requires"].append("update_s3_htmls_for_nightlies_devtoolset7")
             job_def["filters"] = {"branches": {"only": "postnightly"}}
         else:
-            job_def["filters"] = {"branches": {"only": "nightly"}}
+            job_def["filters"] = {
+                "branches": {
+                    "only": "nightly"
+                },
+                # Will run on tags like v1.5.0-rc1, etc.
+                "tags": {
+                    # Using a raw string here to avoid having to escape
+                    # anything
+                    "only": r"/v[0-9]+(\.[0-9]+)*-rc[0-9]+/"
+                }
+            }
         if self.libtorch_variant:
             job_def["libtorch_variant"] = miniutils.quote(self.libtorch_variant)
         if phase == "test":
@@ -95,11 +108,18 @@ class Conf(object):
 
 def get_root(smoke, name):
 
-    return binary_build_data.TopLevelNode(
-        name,
-        binary_build_data.CONFIG_TREE_DATA,
-        smoke,
-    )
+    if smoke:
+        return binary_build_data.TopLevelNode(
+            name,
+            binary_build_data.CONFIG_TREE_DATA_NO_WINDOWS,
+            smoke,
+        )
+    else:
+        return binary_build_data.TopLevelNode(
+            name,
+            binary_build_data.CONFIG_TREE_DATA,
+            smoke,
+        )
 
 
 def gen_build_env_list(smoke):
@@ -117,6 +137,7 @@ def gen_build_env_list(smoke):
             c.find_prop("smoke"),
             c.find_prop("libtorch_variant"),
             c.find_prop("gcc_config_variant"),
+            c.find_prop("libtorch_config_variant"),
         )
         newlist.append(conf)
 

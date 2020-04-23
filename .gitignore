@@ -57,11 +57,6 @@ torch/csrc/jit/generated/*
 torch/csrc/jit/fuser/config.h
 torch/csrc/nn/THCUNN.cpp
 torch/csrc/nn/THCUNN.cwrap
-torch/csrc/nn/THNN_generic.cpp
-torch/csrc/nn/THNN_generic.cwrap
-torch/csrc/nn/THNN_generic.h
-torch/csrc/nn/THNN.cpp
-torch/csrc/nn/THNN.cwrap
 torch/bin/
 torch/cmake/
 torch/lib/*.a*
@@ -254,3 +249,12 @@ TAGS
 
 # ccls file
 .ccls-cache/
+
+# clang-format storage location used by apply_clang_format.py
+.clang-format-bin
+
+# clangd background index
+.clangd/
+
+# bazel symlinks
+bazel-*
