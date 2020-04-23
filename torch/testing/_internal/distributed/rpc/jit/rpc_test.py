@@ -145,7 +145,7 @@ class MyScriptModuleWithRRefs(torch.jit.ScriptModule):
 @torch.jit.script
 class MyScriptClass:
     def __init__(self, a):
-        # type: (int)
+        # type: (int) -> None
         self.a = a
 
     def get_value(self):

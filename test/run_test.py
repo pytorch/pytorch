@@ -148,7 +148,7 @@ SLOW_TESTS = [
     'test_tensorboard',
     'distributed/test_c10d',
     'distributed/test_c10d_spawn',
-    'test_quantization'
+    'test_quantization',
     'test_determination',
 ]
 _DEP_MODULES_CACHE = {}
