@@ -26,7 +26,7 @@ from jit.test_python_ir import TestPythonIr  # noqa: F401
 # Torch
 from torch import Tensor
 from torch._C import TensorType, BoolType, parse_ir, _propagate_shapes
-from torch._six import PY2, PY37, StringIO
+from torch._six import PY37, StringIO
 from torch.autograd import Variable, Function
 from torch.jit.annotations import BroadcastingList2, BroadcastingList3, Any  # noqa: F401
 from torch.onnx import OperatorExportTypes
@@ -3854,15 +3854,14 @@ def foo(x):
             self.assertFalse(m._c.getattr('training'))
             self.assertFalse(m(torch.ones(2, 2)))
 
-            if not PY2:
-                buffer = io.BytesIO()
-                torch.jit.save(m, buffer)
-                buffer.seek(0)
+            buffer = io.BytesIO()
+            torch.jit.save(m, buffer)
+            buffer.seek(0)
 
-                loaded = torch.jit.load(buffer)
+            loaded = torch.jit.load(buffer)
 
-                self.assertFalse(loaded.training)
-                self.assertFalse(loaded._c.getattr('training'))
+            self.assertFalse(loaded.training)
+            self.assertFalse(loaded._c.getattr('training'))
 
         class M(nn.Module):
             def __init__(self):
@@ -6041,7 +6040,6 @@ a")
         for g in [foo.graph, foo2.graph, foo3.graph]:
             FileCheck().check("int =").check("ListConstruct").check("aten::cat").run(str(g))
 
-    @unittest.skipIf(PY2, "Requires python 3")
     def test_stack(self):
         with enable_profiling_mode():
             @torch.jit.script
@@ -6546,14 +6544,6 @@ a")
         ast = torch.jit.frontend.get_jit_def(fn)
         self.assertExpected(str(ast))
 
-    @unittest.skipIf(not PY2, "Requires python 2")
-    def test_python_frontend_py2(self):
-        def fn():
-            raise Exception("hello")
-        ast = torch.jit.frontend.get_jit_def(fn)
-        self.assertExpected(str(ast))
-
-    @unittest.skipIf(PY2, "Requires python 3")
     def test_python_frontend_py3(self):
         def fn():
             raise Exception("hello")
@@ -6564,7 +6554,6 @@ a")
         return [torch.tensor(val, dtype=dtype) for val in arr]
 
 
-    @unittest.skipIf(PY2, "tuple printing in py2 is different than torchscript")
     def test_string_print(self):
         def func(a):
             print(a, "a" 'b' '''c''' """d""", 2, 1.5)
@@ -7223,11 +7212,10 @@ a")
                   vals=[(i, j) for i in float_vals for j in range(-10, 10)])
         checkMath("pow", 2, is_float=False, ret_type="float")
         checkMath("pow", 2, is_float=True, ret_type="float")
-        if not PY2:
-            checkMathWrap("floor", ret_type="int")
-            checkMathWrap("ceil", ret_type="int")
-            checkMathWrap("gcd", 2, is_float=False, ret_type="int")
-            checkMath("isfinite", 1, ret_type="bool")
+        checkMathWrap("floor", ret_type="int")
+        checkMathWrap("ceil", ret_type="int")
+        checkMathWrap("gcd", 2, is_float=False, ret_type="int")
+        checkMath("isfinite", 1, ret_type="bool")
         if PY37:
             checkMathWrap("remainder", 2)
         checkMathWrap("factorial", 1, is_float=False, ret_type="int", vals=[(i, 0) for i in range(-2, 10)])
@@ -7324,7 +7312,6 @@ a")
         self.checkScript(func, inputs_true, optimize=True)
         self.checkScript(func, inputs_false, optimize=True)
 
-    @unittest.skipIf(PY2, "tuple printing in py2 is different than torchscript")
     def test_print(self):
         def func(x, y):
             q = (x + y).sigmoid()
@@ -7669,16 +7656,8 @@ a")
         self.assertEqual(div_int_future(), torch.jit.script(div_int_future)())
         self.checkScript(div_float_future, ())
 
-        if PY2:
-            with self.assertRaisesRegex(torch.jit.frontend.FrontendError, 'from __future__ import division') as cm:
-                torch.jit.script(div_int_nofuture)
-            FileCheck().check("div_int_nofuture").run(str(cm.exception))
-            with self.assertRaisesRegex(torch.jit.frontend.FrontendError, 'from __future__ import division') as cm:
-                torch.jit.script(div_float_nofuture)
-            FileCheck().check("div_float_nofuture").run(str(cm.exception))
-        else:
-            self.checkScript(div_int_nofuture, ())
-            self.checkScript(div_float_nofuture, ())
+        self.checkScript(div_int_nofuture, ())
+        self.checkScript(div_float_nofuture, ())
 
     def test_floor_div(self):
         @torch.jit.script
@@ -12965,15 +12944,14 @@ a")
         self.checkScript(subscript_tuple_assign, ([12, 7, 9, 11], torch.tensor((3, 13, 17)), 0))
 
         # python 2 does not support star assignments so we use compilation unit to test instead
-        if not PY2:
-            star_code = dedent('''
-            def star_tuple_assign():
-                # type: () -> Tuple[int, int, Tuple[int, int], Tuple[int, int]]
-                a, (b, *c), *d = 1, (2, 3, 4), 5, 6
-                return a, b, c, d
-            ''')
+        star_code = dedent('''
+        def star_tuple_assign():
+            # type: () -> Tuple[int, int, Tuple[int, int], Tuple[int, int]]
+            a, (b, *c), *d = 1, (2, 3, 4), 5, 6
+            return a, b, c, d
+        ''')
 
-            self.checkScript(star_code, (), name='star_tuple_assign')
+        self.checkScript(star_code, (), name='star_tuple_assign')
 
         def subscript_tuple_augmented_assign(a):
             # type: (Tuple[int, int]) -> Tuple[int, int]
@@ -15119,7 +15097,6 @@ a")
         self.checkScript(round_float, (1.5,))
         self.checkScript(round_int, (2,))
 
-    @unittest.skipIf(PY2, "oct() format changed from PY2 to PY3")
     def test_convert_base(self):
         def test_hex(x):
             # type: (int) -> str
@@ -16468,8 +16445,7 @@ a")
                 def ignored_code(self, x):
                     self.some_state = torch.tensor((100,))
 
-        if not PY2:
-            FileCheck().check("TorchScript will now drop the function").run(str(warns[0]))
+        FileCheck().check("TorchScript will now drop the function").run(str(warns[0]))
 
         # Assert ignored code is run
         m = M()
@@ -17163,7 +17139,6 @@ a")
 
         self.assertTrue('forward' in dir(M()))
 
-    @unittest.skipIf(PY2, "kwarg expansion requires Python 3")
     def test_kwarg_expansion_error(self):
         @torch.jit.ignore
         def something_else(h, i):
@@ -17211,7 +17186,6 @@ a")
             x = torch.jit.script(Linear(10, 10))
             torch._C._jit_pass_erase_shape_information(x.graph)
 
-    @unittest.skipIf(PY2, "kwarg expansion requires Python 3")
     def test_kwargs_error_msg(self):
         def other(**kwargs):
             print(kwargs)

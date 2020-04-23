@@ -12,6 +12,7 @@
 
 #include <ATen/core/boxing/impl/test_helpers.h>
 #include <ATen/core/op_registration/op_registration.h>
+#include <torch/library.h>
 #include <ATen/core/Tensor.h>
 #include <functional>
 
@@ -21,7 +22,10 @@ using c10::OperatorHandle;
 using c10::Dispatcher;
 using c10::IValue;
 using c10::DispatchKey;
-using c10::Library;
+
+using torch::Library;
+using torch::CppFunction;
+
 using at::Tensor;
 
 namespace {
@@ -1442,7 +1446,7 @@ TEST(NewOperatorRegistrationTest, dispatchMultiple) {
 
 TEST(NewOperatorRegistrationTest, fallback) {
   auto m = MAKE_TORCH_LIBRARY_IMPL(_, CPU);
-  m.fallback(c10::CppFunction::makeFromBoxedFunction<&backend_fallback_kernel>());
+  m.fallback(CppFunction::makeFromBoxedFunction<&backend_fallback_kernel>());
 
   auto registrar1 = c10::RegisterOperators().op("_test::dummy(Tensor dummy, str input) -> ()");
 
@@ -1495,9 +1499,9 @@ TEST(NewOperatorRegistrationTest, CppFunction) {
   m.def("fn2", dummy_fn);
   m.def("fn3", [](const Tensor& x) { return x; });
   // These require explicit schema
-  m.def("fn4(Tensor x) -> Tensor", c10::CppFunction::makeFallthrough());
-  m.def("fn5(Tensor x) -> Tensor", c10::CppFunction::makeUnboxedOnly(dummy_fn));
-  m.def("fn6(Tensor x) -> Tensor", c10::CppFunction::makeFromBoxedFunction<&backend_fallback_kernel>());
+  m.def("fn4(Tensor x) -> Tensor", CppFunction::makeFallthrough());
+  m.def("fn5(Tensor x) -> Tensor", CppFunction::makeUnboxedOnly(dummy_fn));
+  m.def("fn6(Tensor x) -> Tensor", CppFunction::makeFromBoxedFunction<&backend_fallback_kernel>());
 }
 
 // Some internal tests that have to be done from C++
