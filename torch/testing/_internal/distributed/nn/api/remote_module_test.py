@@ -53,8 +53,7 @@ class RemoteModuleTest(RpcAgentTestFixture):
             return
         name_0 = _gen_global_unique_name()
         name_1 = _gen_global_unique_name()
-        self.assertEqual(name_0, "worker0_0")
-        self.assertEqual(name_1, "worker0_1")
+        self.assertNotEqual(name_0, name_1)
 
     @staticmethod
     def _create_remote_module_iter(dst_worker_name, modes=None):

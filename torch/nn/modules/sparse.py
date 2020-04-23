@@ -1,4 +1,7 @@
+from typing import Optional
+
 import torch
+from torch import Tensor
 from torch.nn.parameter import Parameter
 
 from .module import Module

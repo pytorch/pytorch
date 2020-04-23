@@ -20,6 +20,9 @@ std::ostream& operator<<(std::ostream & out, const Type & t) {
       out << "Tensor";
     }
     if (auto ndim = value->sizes().size()) {
+      bool has_valid_strides_info =
+          value->strides().isComplete() && value->strides().size() == ndim;
+
       out << "(";
       for (size_t i = 0; i < *ndim; ++i) {
         if (i > 0) {
@@ -29,6 +32,9 @@ std::ostream& operator<<(std::ostream & out, const Type & t) {
           out << *s;
         } else {
           out << "*";
+        }
+        if (has_valid_strides_info) {
+          out << ":" << *value->strides()[i];
         }
       }
       out << ")";

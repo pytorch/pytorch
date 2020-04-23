@@ -775,15 +775,13 @@ void initPythonIRBindings(PyObject* module_) {
             return self.getMethod(name);
           },
           py::return_value_policy::reference)
-      .def(
-          "getMethodNames",
-          [](InterfaceType& self) {
-            std::vector<std::string> names;
-            for (const FunctionSchema& fn : self.methods()) {
-              names.emplace_back(fn.name());
-            }
-            return names;
-          });
+      .def("getMethodNames", [](InterfaceType& self) {
+        std::vector<std::string> names;
+        for (const FunctionSchema& fn : self.methods()) {
+          names.emplace_back(fn.name());
+        }
+        return names;
+      });
 
   py::class_<Use>(m, "Use")
       .def_readonly("user", &Use::user)

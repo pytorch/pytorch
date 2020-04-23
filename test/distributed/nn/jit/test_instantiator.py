@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import unittest
+import uuid
 from typing import Tuple
 
 import torch
@@ -42,7 +43,7 @@ class TestInstantiator(unittest.TestCase):
         self.assertEqual(return_type_str, "Tuple[Tensor, int, str]")
 
     def test_instantiate_remote_module_template(self):
-        generated_module_name = "_RemoteModule_worker0_0"
+        generated_module_name = f"_remote_module_{uuid.uuid4().hex}"
         generated_module = instantiator.instantiate_remote_module_template(
             generated_module_name, MyModuleInterface, True  # is_scriptable
         )

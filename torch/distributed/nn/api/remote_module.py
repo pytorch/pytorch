@@ -1,5 +1,5 @@
 #!/usr/bin/python3
-import threading
+import uuid
 from typing import Any, Callable, Dict, Tuple
 
 import torch
@@ -7,22 +7,13 @@ import torch.distributed.rpc as rpc
 from torch.distributed.nn.jit import instantiator
 
 
-_NEXT_LOCAL_ID = 0
-_NEXT_LOCAL_ID_LOCK = threading.Lock()
-
-
 def _gen_global_unique_name():
-    global _NEXT_LOCAL_ID
-    with _NEXT_LOCAL_ID_LOCK:
-        local_unique_id = _NEXT_LOCAL_ID
-        _NEXT_LOCAL_ID += 1
-    self_worker_name = rpc._get_current_rpc_agent().get_worker_info().name
-    return f"{self_worker_name}_{local_unique_id}"
+    return f"{uuid.uuid4().hex}"
 
 
 def _instantiate_template(global_unique_name, module_interface_cls, is_scriptable):
     # Generate the template instance name.
-    generated_module_name = f"_RemoteModule_{global_unique_name}"
+    generated_module_name = f"_remote_module_{global_unique_name}"
 
     # Instantiate _RemoteModule class template on the local side.
     generated_module = instantiator.instantiate_remote_module_template(

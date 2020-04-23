@@ -117,6 +117,12 @@ def instantiate_remote_module_template(
     )
     write(out_path, generated_code_text)
 
+    # From importlib doc,
+    # > If you are dynamically importing a module that was created since
+    # the interpreter began execution (e.g., created a Python source file),
+    # you may need to call invalidate_caches() in order for the new module
+    # to be noticed by the import system.
+    importlib.invalidate_caches()
     generated_module = importlib.import_module(
         f"torch.distributed.nn.jit.templates.instantiated.{generated_module_name}"
     )
