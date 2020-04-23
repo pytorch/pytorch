@@ -359,22 +359,13 @@
 - func: addmv(Tensor self, Tensor mat, Tensor vec, *, Scalar beta=1, Scalar alpha=1) -> Tensor
   use_c10_dispatcher: full
   variants: function, method
-  dispatch:
-    CPU: legacy::cpu::_th_addmv
-    CUDA: legacy::cuda::_th_addmv
   supports_named_tensor: True
 
 - func: addmv_(Tensor(a!) self, Tensor mat, Tensor vec, *, Scalar beta=1, Scalar alpha=1) -> Tensor(a!)
   variants: function, method
-  dispatch:
-    CPU: legacy::cpu::_th_addmv_
-    CUDA: legacy::cuda::_th_addmv_
   supports_named_tensor: True
 
 - func: addmv.out(Tensor self, Tensor mat, Tensor vec, *, Scalar beta=1, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
-  dispatch:
-    CPU: legacy::cpu::_th_addmv_out
-    CUDA: legacy::cuda::_th_addmv_out
   supports_named_tensor: True
 
 - func: addr(Tensor self, Tensor vec1, Tensor vec2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
@@ -885,15 +876,9 @@
 - func: cosh_(Tensor(a!) self) -> Tensor(a!)
   supports_named_tensor: True
   variants: function, method
-  dispatch:
-    CPU: _cosh__cpu
-    CUDA: _cosh__cuda
 
 - func: cosh.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   supports_named_tensor: True
-  dispatch:
-    CPU: _cosh_out_cpu
-    CUDA: _cosh_out_cuda
 
 - func: cosine_embedding_loss(Tensor input1, Tensor input2, Tensor target, float margin=0.0, int reduction=Mean) -> Tensor
   use_c10_dispatcher: full
@@ -2093,16 +2078,13 @@
   use_c10_dispatcher: full
   variants: function, method
   dispatch:
-    CPU: mv_cpu
-    CUDA: legacy::cuda::_th_mv
+    CPU: mv
+    CUDA: mv
     SparseCPU: mv_sparse
     SparseCUDA: mv_sparse
   supports_named_tensor: True
 
 - func: mv.out(Tensor self, Tensor vec, *, Tensor(a!) out) -> Tensor(a!)
-  dispatch:
-    CPU: mv_cpu_out
-    CUDA: legacy::cuda::_th_mv_out
   supports_named_tensor: True
 
 - func: mvlgamma(Tensor self, int p) -> Tensor
@@ -3146,6 +3128,11 @@
   dispatch:
     CPU: _s_poisson_cpu
     CUDA: _s_poisson_cuda
+
+- func: binomial(Tensor count, Tensor prob, Generator? generator=None) -> Tensor
+  dispatch:
+    CPU: _s_binomial_cpu
+    CUDA: _s_binomial_cuda
 
 # When more variants get ported to native, this dispatch will get more
 # complicated
