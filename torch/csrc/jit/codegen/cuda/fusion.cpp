@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
+#include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/ir_printer.h>
 
 namespace torch {
@@ -31,6 +32,22 @@ std::vector<Expr*> ExprSort::getExprs(
   ExprSort es;
   es.traverse(fusion, from_outputs_only, breadth_first);
   return es.exprs;
+}
+
+void InputsOf::handle(TensorView* tv) {
+  if (FusionGuard::getCurFusion()->hasInput(tv))
+    inputs.push_back(tv);
+}
+
+std::vector<TensorView*> InputsOf::output(Fusion* fusion, Val* output_) {
+  TORCH_CHECK(
+      fusion->hasOutput(output_),
+      "Asked for the inputs of ",
+      output_,
+      " however, it is not an output of the provided fusion.");
+  InputsOf io;
+  io.traverseFrom(FusionGuard::getCurFusion(), {output_});
+  return io.inputs;
 }
 
 Fusion::~Fusion() {
@@ -93,6 +110,14 @@ void Fusion::removeVal(Val* val) {
     removeExpr(use);
 
   val_set_.erase(val);
+
+  for (auto it = val_deque_.begin(); it != val_deque_.end(); it++)
+    if (*it == val) {
+      val_deque_.erase(it);
+      break;
+    }
+
+  delete val;
 }
 
 void Fusion::addInput(Val* const input) {
@@ -132,6 +157,10 @@ std::vector<Expr*> Fusion::exprs(bool from_outputs_only, bool breadth_first) {
   return ExprSort::getExprs(this, from_outputs_only, breadth_first);
 }
 
+std::vector<TensorView*> Fusion::inputsOf(Val* val) {
+  return InputsOf::output(this, val);
+}
+
 void Fusion::print() {
   FusionGuard fg(this);
   std::cout << "%kernel {\n";
@@ -152,6 +181,7 @@ StmtNameType Fusion::registerVal(Val* val) {
     }
   }
   val_set_.emplace(val);
+  val_deque_.push_back(val);
   return getValName(*(val->getValType()));
 }
 
@@ -212,6 +242,10 @@ bool Fusion::used(Val* val) const {
 
 const std::set<Val*>& Fusion::vals() const noexcept {
   return val_set_;
+}
+
+const std::deque<Val*>& Fusion::deterministic_vals() const noexcept {
+  return val_deque_;
 }
 
 const std::set<Expr*>& Fusion::unordered_exprs() const noexcept {

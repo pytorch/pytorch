@@ -8,7 +8,7 @@
 #include <ATen/quantized/Quantizer.h>
 #include <ATen/MemoryOverlap.h>
 #include <ATen/NamedTensorUtils.h>
-#include <ATen/core/op_registration/op_registration.h>
+#include <torch/library.h>
 
 namespace {
 
@@ -163,10 +163,7 @@ Tensor& copy_(Tensor& self, const Tensor& src, bool non_blocking) {
   return self;
 }
 
-static auto registry = torch::import()
-  .def("aten::copy_(Tensor(a!) self, Tensor src, bool non_blocking=False) -> Tensor(a!)",
-       CppFunction::makeUnboxedOnly(copy_));
-
+TORCH_LIBRARY_IMPL(aten, CatchAll, m) { m.impl_UNBOXED("copy_", copy_); }
 DEFINE_DISPATCH(copy_stub);
 
 } // namespace native

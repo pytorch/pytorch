@@ -34,11 +34,9 @@
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/core/Array.h>
-#include <ATen/cuda/detail/OffsetCalculator.cuh>
 #include <ATen/detail/FunctionTraits.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cuda/MemoryAccess.cuh>
-#include <ATen/native/cuda/CUDA9Workarounds.cuh>
 #include <c10/macros/Macros.h>
 #include <c10/core/ScalarType.h>
 #include <c10/util/TypeCast.h>
@@ -65,27 +63,6 @@ static constexpr int launch_bound2 = 4;
 
 
 namespace at { namespace native {
-
-template<int N>
-static OffsetCalculator<N> make_input_offset_calculator(const TensorIterator& iter) {
-  // array size can not be 0, this happens when N == 0
-  constexpr int array_size = std::max<int>(N, 1);
-  TORCH_INTERNAL_ASSERT(N == iter.ntensors() - 1);
-  std::array<const int64_t*, array_size> strides;
-  int64_t element_sizes[array_size];
-  for (int i = 0; i < N; i++) {
-    strides[i] = iter.strides(i + 1).data();
-    element_sizes[i] = iter.element_size(i + 1);
-  }
-  return OffsetCalculator<N>(iter.ndim(), iter.shape().data(), strides.data(), element_sizes);
-}
-
-static OffsetCalculator<1> make_output_offset_calculator(const TensorIterator& iter) {
-  std::array<const int64_t*, 1> strides;
-  strides[0] = iter.strides(0).data();
-  int64_t element_size = iter.element_size(0);
-  return OffsetCalculator<1>(iter.ndim(), iter.shape().data(), strides.data(), &element_size);
-}
 
 // NOTE: @zasdfgbnm is currently working on rewriting the gpu loops.
 // Some of the old codes has been moved to namespace legacy, and
@@ -165,8 +142,7 @@ __device__ inline void elementwise_kernel_helper(func_t f, policy_t policy) {
   int idx = blockIdx.x;
 
   return_t results[thread_work_size];
-  cuda9::workaround::enable_default_constructor<args_t> args_[thread_work_size];
-  args_t *args = reinterpret_cast<args_t *>(&args_);
+  args_t args[thread_work_size];
 
   // load
   policy.load(args, idx);
