@@ -1161,19 +1161,15 @@ graph(%input, %weight):
                    .check("CallMethod") \
                    .run(model.graph)
 
-    def test_qconfig_w_types(self):
+    def test_qconfig_with_types(self):
         data = [(torch.rand((1, 5), dtype=torch.float), torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
         qconfig_dict = {torch.nn.Linear : default_qconfig, 'sub2.fc1' : default_per_channel_qconfig}
+        # Modules where name is specified in qconfig_dict takes precedence over type for that module.
         qconfig_dict = preprocess_qconfig_dict(NestedModel().eval(), qconfig_dict)
         # check to make sure it matches expected dict.
         expected_qconfig_dict = {'sub1.fc' : default_qconfig, 'sub2.fc1': default_per_channel_qconfig,
                                  'sub2.fc2': default_qconfig, 'fc3': default_qconfig}
         self.assertEqual(qconfig_dict, expected_qconfig_dict)
-        # Convert and run model.
-        model = torch.jit.script(NestedModel()).eval()
-        model = quantize_script(model, qconfig_dict, _test_only_eval_fn, [data])
-        FileCheck().check("quantized::linear") \
-                   .run(model.graph)
 
     def test_module_list(self):
         class SimpleLinearLayer(torch.nn.Module):
@@ -1204,8 +1200,7 @@ graph(%input, %weight):
         assert len(attrs_with_prefix(model, '_observer')) == 3
         model(data)
         model = convert_script(model, debug=False)
-        FileCheck().check("quantized::linear") \
-                   .check("quantized::linear") \
+        FileCheck().check_count("quantized::linear", 2, exactly=True) \
                    .run(model.graph)
 
 class TestQuantizeScriptPTSQOps(JitTestCase):
@@ -1738,53 +1733,6 @@ class TestQuantizeDynamicScript(JitTestCase):
                    .check_not('Observer = prim::GetAttr[name="_observer_') \
                    .run(m.graph)
 
-
-    def test_dynamic_multi_op(self):
-        class M(torch.nn.Module):
-            def __init__(self):
-                super(M, self).__init__()
-                self.conv = torch.nn.Conv2d(3, 1, kernel_size=3).to(dtype=torch.float)
-                self.fc1 = torch.nn.Linear(64, 10).to(dtype=torch.float)
-
-            def forward(self, x):
-                x = self.conv(x)
-                x = x.view(-1, 64).contiguous()
-                return self.fc1(x)
-
-        m = torch.jit.script(M())
-
-        m = prepare_dynamic_script(m, {'': default_dynamic_qconfig})
-        data = torch.randn(1, 3, 10, 10, dtype=torch.float)
-
-        m(data)
-
-        m = wrap_cpp_module(torch._C._jit_pass_insert_quant_dequant(m._c, "forward", False, True))
-
-        m(data)
-        quant_func = "aten::quantize_per_tensor"
-
-        # quantizing activations only for fc.
-        FileCheck().check("aten::_choose_qparams_per_tensor") \
-                   .check(quant_func) \
-                   .check('prim::GetAttr[name="fc1"]') \
-                   .check("prim::CallMethod[name=\"forward\"]") \
-                   .check_not(quant_func) \
-                   .check("return") \
-                   .run(str(get_forward_graph(m._c)))
-        # quantizing weight in forward function of fc module, no choose_qparams.
-        FileCheck().check_not("aten::_choose_qparams_per_tensor") \
-                   .check(quant_func) \
-                   .check("prim::CallFunction") \
-                   .check_not(quant_func) \
-                   .check("return") \
-                   .run(str(get_forward_graph(m.fc1._c)))
-        # no quantization in forward function of conv module.
-        FileCheck().check_not("aten::_choose_qparams_per_tensor") \
-                   .check_not(quant_func) \
-                   .check("prim::CallMethod[name=\"_conv_forward\"]") \
-                   .check("return") \
-                   .run(str(get_forward_graph(m.conv._c)))
-
     def test_insert_quant_dequant_linear_dynamic(self):
         class M(torch.nn.Module):
             def __init__(self):
@@ -1838,43 +1786,30 @@ class TestQuantizeDynamicScript(JitTestCase):
                 return self.fc(x)
 
         data = torch.rand((1, 5), dtype=torch.float)
-        qconfig_dict = {'': default_dynamic_qconfig}
+        qconfig_dict = {nn.Linear : default_dynamic_qconfig}
+        qconfig_dict = preprocess_qconfig_dict(M().eval(), qconfig_dict)
         model = torch.jit.script(M()).eval()
         model = quantize_dynamic_script(model, qconfig_dict, data)
         FileCheck().check("quantized::linear_dynamic") \
                    .run(model.graph)
 
-    def test_dynamic_qconfig_w_types(self):
-        class LinearReluModel(torch.nn.Module):
-            def __init__(self):
-                super(LinearReluModel, self).__init__()
-                self.fc = torch.nn.Linear(5, 5).to(dtype=torch.float)
-                self.relu = torch.nn.ReLU()
-
-            def forward(self, x):
-                x = self.relu(self.fc(x))
-                return x
-
+    def test_dynamic_multi_op(self):
         class M(torch.nn.Module):
             def __init__(self):
                 super(M, self).__init__()
-                self.sub1 = LinearReluModel()
-                self.fc = torch.nn.Linear(5, 5).float()
+                self.fc1 = torch.nn.Linear(5, 5).to(dtype=torch.float)
 
             def forward(self, x):
-                x = self.sub1(x)
-                return self.fc(x)
+                x = x + 5
+                return self.fc1(x)
 
-        data = torch.rand((1, 5), dtype=torch.float)
-        qconfig_dict = {torch.nn.Linear : default_dynamic_qconfig, 'fc': default_dynamic_qconfig}
-        qconfig_dict = preprocess_qconfig_dict(M().eval(), qconfig_dict)
-        # check to make sure it matches expected dict.
-        expected_qconfig_dict = {'fc': default_dynamic_qconfig, 'sub1.fc': default_dynamic_qconfig}
-        self.assertEqual(expected_qconfig_dict, qconfig_dict)
-        # Convert and run model.
-        model = torch.jit.script(M()).eval()
-        model = quantize_dynamic_script(model, qconfig_dict, data)
-        FileCheck().check("quantized::linear_dynamic") \
+        m = torch.jit.script(M())
+        data = torch.randn((1, 5), dtype=torch.float)
+        qconfig_dict = {'' : default_dynamic_qconfig}
+        model = quantize_dynamic_script(m, qconfig_dict, data)
+        # add op is not dynamically quantized.
+        FileCheck().check("aten::add") \
+                   .check("quantized::linear_dynamic") \
                    .run(model.graph)
 
     def test_prepare_dynamic_lstm(self):
