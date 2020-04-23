@@ -962,6 +962,12 @@ class Module:
             key = prefix + name
             if key in state_dict:
                 input_param = state_dict[key]
+                if isinstance(param, _UninitializedParameter):
+                    if not isinstance(input_param, _UninitializedParameter):
+                        # We override the parameter with a new one if it was already 
+                        # Initialized
+                        self.register_parameter(name, torch.nn.Parameter(state_dict[key]))
+                    continue
 
                 # Backward compatibility: loading 1-dim tensor from 0.3.* to version 0.4+
                 if len(param.shape) == 0 and len(input_param.shape) == 1:
