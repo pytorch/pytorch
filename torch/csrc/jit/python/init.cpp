@@ -771,6 +771,9 @@ void initJITBindings(PyObject* module) {
           return py::none();
         IValue v = *self.default_value();
         return toPyObject(std::move(v));
+      })
+      .def("has_default_value", [](Argument& self) -> py::bool_ {
+        return self.default_value().has_value();
       });
   m.def("_jit_get_all_schemas", []() {
     const std::vector<std::shared_ptr<Operator>>& operations =

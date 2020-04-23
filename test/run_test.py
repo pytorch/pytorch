@@ -100,6 +100,8 @@ if PY36:
     TESTS.extend([
         'test_jit_py3',
         'test_determination',
+        'distributed/nn/api/test_remote_module_spawn',
+        'distributed/nn/jit/test_instantiator',
         'distributed/rpc/jit/test_rpc_spawn',
         'distributed/rpc/faulty_agent/test_rpc_spawn',
     ])

@@ -1,0 +1,47 @@
+#!/usr/bin/python3
+from typing import Tuple
+
+import torch
+import torch.distributed.rpc as rpc
+from torch import Tensor, nn
+from torch._jit_internal import Future, RRef
+from ${module_interface_cls_module_name} import ${module_interface_cls_name} as module_interface_cls  # noqa
+
+
+class _RemoteModule(nn.Module):  # noqa
+    module_rref: RRef[module_interface_cls]  # noqa
+    is_scriptable: bool
+
+    def __init__(self, module_rref, is_scriptable):
+        super().__init__()
+        self.module_rref = module_rref
+        self.is_scriptable = is_scriptable
+
+    ${jit_export_decorator}
+    def forward_async(self, ${arg_types})${arrow_and_future_return_type}:  # noqa
+        args = (self.module_rref, ${args})
+        kwargs = {${kwargs}}
+        return rpc.rpc_async(
+            self.module_rref.owner(),
+            torch.distributed.nn.jit.templates.instantiated.${generated_module_name}._remote_forward,
+            args,
+            kwargs,
+        )
+
+    ${jit_export_decorator}
+    def forward(self, ${arg_types})${arrow_and_return_type}:  # noqa
+        args = (self.module_rref, ${args})
+        kwargs = {${kwargs}}
+        ret_fut = rpc.rpc_async(
+            self.module_rref.owner(),
+            torch.distributed.nn.jit.templates.instantiated.${generated_module_name}._remote_forward,
+            args,
+            kwargs,
+        )
+        return ret_fut.wait()
+
+
+${jit_script_decorator}
+def _remote_forward(module_rref: RRef[module_interface_cls], ${arg_types})${arrow_and_return_type}:  # noqa
+    module = module_rref.local_value()
+    return module.forward(${args}, ${kwargs})

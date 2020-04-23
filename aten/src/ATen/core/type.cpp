@@ -653,8 +653,8 @@ bool ListType::isSubtypeOfExt(const TypePtr rhs_, std::ostream* why_not) const {
   return false;
 }
 
- bool TupleType::operator==(const Type& rhs) const {
-   bool typesSame =
+bool TupleType::operator==(const Type& rhs) const {
+  bool typesSame =
        compare(rhs, [](const TypePtr a, const TypePtr b) { return *a == *b; });
    if (!typesSame) {
      return false;
