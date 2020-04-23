@@ -5,6 +5,7 @@ from typing import List, Optional
 import torch
 from .qconfig import QConfig
 from torch.jit._recursive import wrap_cpp_module
+import copy
 
 class ConvPackedParams(torch.nn.Module):
     def __init__(self):
@@ -91,7 +92,7 @@ def _prepare_script(model, qconfig_dict, is_dynamic):
 
 def prepare_script(model, qconfig_dict, inplace=False):
     if not inplace:
-        model = model.copy()
+        model = copy.deepcopy(model)
     return _prepare_script(model, qconfig_dict, is_dynamic=False)
 
 def prepare_dynamic_script(model, qconfig_dict):
@@ -107,7 +108,7 @@ def _convert_script(model, is_dynamic, debug=False):
 
 def convert_script(model, inplace=False, debug=False):
     if not inplace:
-        model = model.copy()
+        model = copy.deepcopy(model)
     return _convert_script(model, is_dynamic=False, debug=debug)
 
 def convert_dynamic_script(model, debug=False):
@@ -132,7 +133,7 @@ def _quantize_script(model, qconfig_dict, run_fn=None, run_args=None, is_dynamic
 def quantize_script(model, qconfig_dict, run_fn, run_args, inplace=False, debug=False):
     assert not inplace, "We don't support inplace right now"
     if not inplace:
-        model = model.copy()
+        model = copy.deepcopy(model)
     return _quantize_script(model, qconfig_dict, run_fn, run_args, is_dynamic=False, debug=debug)
 
 def quantize_dynamic_script(model, qconfig_dict, sample_model_inputs, debug=False):

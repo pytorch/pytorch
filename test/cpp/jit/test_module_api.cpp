@@ -62,54 +62,23 @@ void testModuleCopy() {
   ASSERT_EQ(m3.attr(attr_name).toInt(), 3);
 }
 
-void testModuleConstant() {
-  auto cu = std::make_shared<CompilationUnit>();
-  auto cls = ClassType::create("foo.bar", cu, true);
-  auto attr_name = "attr";
-  auto const_name = "const";
-  cls->addAttribute(attr_name, IntType::get());
-  cls->addConstant(const_name, IValue(3));
-  Module m(cu, cls);
-  auto v = IValue(2);
-  m.register_attribute(attr_name, IntType::get(), v, false);
-  ASSERT_TRUE(m.hasattr(attr_name));
-  ASSERT_TRUE(m.hasattr(const_name));
-  ASSERT_EQ(m.attr(attr_name).toInt(), 2);
-  ASSERT_EQ(m.attr(const_name).toInt(), 3);
-}
-
-void testModuleParameter() {
-  auto cu = std::make_shared<CompilationUnit>();
-  auto cls = ClassType::create("foo.bar", cu, true);
-  Module m(cu, cls);
-  // Tensor parameter
-  m.register_parameter(
-      "tensor_param", at::empty({3}, at::kFloat), /* is_buffer */ false);
-  // None parameter
-  m.register_attribute(
-      "none_param", NoneType::get(), IValue(), /* is_param */ true);
-  m.register_attribute(
-      "none_param2", NoneType::get(), IValue(), /* is_param */ true);
-  auto param_list = m.parameters();
-  ASSERT_EQ(param_list.size(), 1);
-  ASSERT_TRUE(m.hasattr("tensor_param"));
-  ASSERT_TRUE(m.hasattr("none_param"));
-  ASSERT_TRUE(m.hasattr("none_param2"));
-}
-
 void testModuleDeepcopy() {
   auto cu = std::make_shared<CompilationUnit>();
   auto cls = ClassType::create("foo.bar", cu, true);
   auto str_attr = "str_attr";
   auto int_attr = "int_attr";
   auto tensor_attr = "tensor_attr";
+  auto tensor_list_attr = "tensor_list_attr";
   cls->addAttribute(int_attr, IntType::get());
   cls->addAttribute(str_attr, StringType::get());
   cls->addAttribute(tensor_attr, TensorType::get());
+  cls->addAttribute(tensor_list_attr, ListType::ofTensors());
   Module m(cu, cls);
+  c10::List<at::Tensor> list({at::rand(5), at::rand(5)});
   m.setattr(int_attr, IValue(2));
   m.setattr(str_attr, IValue("str"));
   m.setattr(tensor_attr, at::randn(5));
+  m.setattr(tensor_list_attr, list);
 
   Module m2 = m.deepcopy();
   Module m3 = m.copy();
@@ -119,6 +88,7 @@ void testModuleDeepcopy() {
 
   // Test overlaps
   ASSERT_TRUE(!IValue(m2._ivalue()).overlaps(IValue(m._ivalue())));
+  ASSERT_TRUE(IValue(m3._ivalue()).overlaps(IValue(m._ivalue())));
 
   // Both deepcopy and copy will preserve the type
   ASSERT_EQ(m.type(), m2.type());
@@ -150,7 +120,7 @@ void testModuleDeepcopy() {
   ASSERT_TRUE(t1.equal(t3));
 }
 
-void testModuleCopyString() {
+void testModuleDeepcopyString() {
   auto cu = std::make_shared<CompilationUnit>();
   auto cls = ClassType::create("foo.bar", cu, true);
   auto attr1 = "attr1";
@@ -166,7 +136,7 @@ void testModuleCopyString() {
   ASSERT_EQ(copied.attr(attr1).toString()->string(), original_str);
 }
 
-void testModuleCopyAliasing() {
+void testModuleDeepcopyAliasing() {
   // check deepcopy preserves aliasing
   auto cu = std::make_shared<CompilationUnit>();
   auto cls = ClassType::create("foo.bar", cu, true);
@@ -201,6 +171,41 @@ void testModuleCopyAliasing() {
   auto copied_attr3 = copied.attr(attr3);
   auto copied_attr4 = copied.attr(attr3);
   ASSERT_TRUE(copied_attr3.isAliasOf(copied_attr4));
+}
+
+void testModuleConstant() {
+  auto cu = std::make_shared<CompilationUnit>();
+  auto cls = ClassType::create("foo.bar", cu, true);
+  auto attr_name = "attr";
+  auto const_name = "const";
+  cls->addAttribute(attr_name, IntType::get());
+  cls->addConstant(const_name, IValue(3));
+  Module m(cu, cls);
+  auto v = IValue(2);
+  m.register_attribute(attr_name, IntType::get(), v, false);
+  ASSERT_TRUE(m.hasattr(attr_name));
+  ASSERT_TRUE(m.hasattr(const_name));
+  ASSERT_EQ(m.attr(attr_name).toInt(), 2);
+  ASSERT_EQ(m.attr(const_name).toInt(), 3);
+}
+
+void testModuleParameter() {
+  auto cu = std::make_shared<CompilationUnit>();
+  auto cls = ClassType::create("foo.bar", cu, true);
+  Module m(cu, cls);
+  // Tensor parameter
+  m.register_parameter(
+      "tensor_param", at::empty({3}, at::kFloat), /* is_buffer */ false);
+  // None parameter
+  m.register_attribute(
+      "none_param", NoneType::get(), IValue(), /* is_param */ true);
+  m.register_attribute(
+      "none_param2", NoneType::get(), IValue(), /* is_param */ true);
+  auto param_list = m.parameters();
+  ASSERT_EQ(param_list.size(), 1);
+  ASSERT_TRUE(m.hasattr("tensor_param"));
+  ASSERT_TRUE(m.hasattr("none_param"));
+  ASSERT_TRUE(m.hasattr("none_param2"));
 }
 
 } // namespace jit
