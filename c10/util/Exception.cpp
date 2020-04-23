@@ -10,12 +10,9 @@
 
 namespace c10 {
 
-Error::Error(
-    const std::string& new_msg,
-    const std::string& backtrace,
-    const void* caller)
-    : msg_stack_{new_msg}, backtrace_(backtrace), caller_(caller) {
-  refresh_msg();
+Error::Error(std::string msg, std::string backtrace, const void* caller)
+    : msg_(std::move(msg)), backtrace_(std::move(backtrace)), caller_(caller) {
+  refresh_what();
 }
 
 // PyTorch-style error message
@@ -42,46 +39,41 @@ Error::Error(
           backtrace,
           caller) {}
 
-std::string Error::compute_msg(bool include_backtrace) const {
-  if (msg_stack_.size() == 0) {
-    if (include_backtrace) return backtrace_;
-    return "";
-  }
-
+std::string Error::compute_what(bool include_backtrace) const {
   std::ostringstream oss;
 
-  if (msg_stack_.size() == 2) {
+  oss << msg_;
+
+  if (context_.size() == 1) {
     // Fold error and context in one line
-    oss << msg_stack_[0] << " (" << msg_stack_[1] << ")";
+    oss << " (" << context_[0] << ")";
   } else {
-    oss << msg_stack_[0];
-    for (size_t i = 1; i < msg_stack_.size(); i++) {
-      oss << "\n  " << msg_stack_[i];
+    for (const auto& c : context_) {
+      oss << "\n  " << c;
     }
   }
 
   if (include_backtrace) {
-    oss << "\n";
-    oss << backtrace_;
+    oss << "\n" << backtrace_;
   }
 
   return oss.str();
 }
 
-void Error::refresh_msg() {
-  msg_ = compute_msg(/*include_backtrace*/ true);
-  msg_without_backtrace_ = compute_msg(/*include_backtrace*/ false);
+void Error::refresh_what() {
+  what_ = compute_what(/*include_backtrace*/ true);
+  what_without_backtrace_ = compute_what(/*include_backtrace*/ false);
 }
 
-void Error::add_context(const std::string& new_msg) {
-  msg_stack_.push_back(new_msg);
+void Error::add_context(std::string new_msg) {
+  context_.push_back(std::move(new_msg));
   // TODO: Calling add_context O(n) times has O(n^2) cost.  We can fix
   // this perf problem by populating the fields lazily... if this ever
   // actually is a problem.
   // NB: If you do fix this, make sure you do it in a thread safe way!
   // what() is almost certainly expected to be thread safe even when
   // accessed across multiple threads
-  refresh_msg();
+  refresh_what();
 }
 
 namespace Warning {

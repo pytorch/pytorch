@@ -26,12 +26,13 @@ namespace c10 {
 /// NB: c10::Error is handled specially by the default torch to suppress the
 /// backtrace, see torch/csrc/Exceptions.h
 class C10_API Error : public std::exception {
-  // Given a message stack, the first message is the actual error message,
-  // and then each subsequent message is context (in order of
-  // decreasing specificity).  Context will be automatically formatted
-  // appropriately, so it is not necessary to add extra leading/trailing
-  // newlines to the messages here.
-  std::vector<std::string> msg_stack_;
+  // The actual error message.
+  std::string msg_;
+
+  // Context for the message (in order of decreasing specificity).  Context will
+  // be automatically formatted appropriately, so it is not necessary to add
+  // extra leading/trailing newlines to strings inside this vector
+  std::vector<std::string> context_;
 
   // The C++ backtrace at the point when this exception was raised.  This
   // may be empty if there is no valid backtrace.  (We don't use optional
@@ -43,8 +44,8 @@ class C10_API Error : public std::exception {
   // signature of std::exception requires).  Currently, the invariant
   // is that these fields are ALWAYS populated consistently with respect
   // to msg_stack_ and backtrace_.
-  std::string msg_;
-  std::string msg_without_backtrace_;
+  std::string what_;
+  std::string what_without_backtrace_;
 
   // This is a little debugging trick: you can stash a relevant pointer
   // in caller, and then when you catch the exception, you can compare
@@ -56,7 +57,8 @@ class C10_API Error : public std::exception {
  public:
   // PyTorch-style Error constructor.  NB: the implementation of this
   // is actually in Logging.cpp
-  Error(SourceLocation source_location, const std::string& msg);
+  Error(SourceLocation source_location, std::string msg);
+
   // Caffe2-style error message
   Error(
       const char* file,
@@ -68,18 +70,22 @@ class C10_API Error : public std::exception {
 
   // Base constructor
   Error(
-      const std::string& msg,
-      const std::string& backtrace,
+      std::string msg,
+      std::string backtrace,
       const void* caller = nullptr);
 
-  // Add some new context to the message stack (pushing it to the top
-  // of the message stack)
+  // Add some new context to the message stack.  The last added context
+  // will be formatted at the end of the context list upon printing.
   // WARNING: This method is O(n) in the size of the stack, so don't go
   // wild adding a ridiculous amount of context to error messages.
-  void add_context(const std::string& msg);
+  void add_context(std::string msg);
 
-  const std::vector<std::string>& msg_stack() const {
-    return msg_stack_;
+  const std::string& msg() const {
+    return msg_;
+  }
+
+  const std::vector<std::string>& context() const {
+    return context_;
   }
 
   const std::string& backtrace() const {
@@ -90,7 +96,7 @@ class C10_API Error : public std::exception {
   /// The returned pointer is invalidated if you call add_context() on
   /// this object.
   const char* what() const noexcept override {
-    return msg_.c_str();
+    return what_.c_str();
   }
 
   const void* caller() const noexcept {
@@ -101,12 +107,12 @@ class C10_API Error : public std::exception {
   /// The returned pointer is invalidated if you call add_context() on
   /// this object.
   const char* what_without_backtrace() const noexcept {
-    return msg_without_backtrace_.c_str();
+    return what_without_backtrace_.c_str();
   }
 
  private:
-  void refresh_msg();
-  std::string compute_msg(bool include_backtrace) const;
+  void refresh_what();
+  std::string compute_what(bool include_backtrace) const;
 };
 
 class C10_API WarningHandler {
