@@ -989,8 +989,50 @@ std::tuple<Tensor, Tensor> NAME(                                               \
   return std::make_tuple(std::move(packed_output.data), std::move(std::get<1>(result)));             \
 }
 
+#define ONE_HIDDEN_QRNN_DYNAMIC(NAME, CELL)                                             \
+std::tuple<Tensor, Tensor> NAME(                                               \
+    const Tensor& _input, \
+    const Tensor& hx, \
+    TensorList _params, \
+    bool has_biases, \
+    int64_t num_layers, \
+    double dropout_p,  \
+    bool train, \
+    bool bidirectional, \
+    bool batch_first) { \
+                                                                   \
+  check_device(_input, _params, hx); \
+  auto input = batch_first ? _input.transpose(0, 1) : _input;                  \
+  auto params = gather_quantized_params_dynamic(_params);                            \
+  auto results = _rnn_impl_with_concat<CELL, FullLayer, FullBidirectionalLayer>( \
+      input, params, hx.unbind(0), num_layers, dropout_p, train, bidirectional); \
+  if (batch_first) {                                                           \
+    std::get<0>(results).transpose_(0, 1);               \
+  }                                                                            \
+  return results;                                                              \
+}                                                                              \
+                                                                               \
+std::tuple<Tensor, Tensor> NAME(                                               \
+    const Tensor& data, \
+    const Tensor& batch_sizes, \
+    const Tensor& hx, \
+    TensorList _params, \
+    bool has_biases, \
+    int64_t num_layers, \
+    double dropout_p, \
+    bool train, \
+    bool bidirectional) {  \
+  PackedSequence input { data, batch_sizes };                                  \
+  auto params = gather_quantized_params_dynamic(_params);                            \
+  auto result = _rnn_impl_with_concat<CELL, PackedLayer, PackedBidirectionalLayer>( \
+          input, params, hx.unbind(0), num_layers, dropout_p, train, bidirectional); \
+  auto & packed_output = std::get<0>(result);                                  \
+  return std::make_tuple(std::move(packed_output.data), std::move(std::get<1>(result)));             \
+}
 ONE_HIDDEN_RNN(gru, GRUCell<CellParams>)
 ONE_HIDDEN_QRNN(quantized_gru, GRUCell<QuantizedCellParams>)
+ONE_HIDDEN_QRNN_DYNAMIC(quantized_gru_dynamic, GRUCell<QuantizedCellParamsDynamic>)
+
 using tanf_cell_type = SimpleCell<tanh_f, CellParams>;
 ONE_HIDDEN_RNN(rnn_tanh, tanf_cell_type)
 using relu_cell_type = SimpleCell<relu_f, CellParams>;
@@ -1271,6 +1313,14 @@ std::tuple<Tensor, Tensor, Tensor> quantized_lstm(
                          std::move(std::get<2>(results)));
 }
 
+/* std::tuple<Tensor, Tensor> quantized_lstm_cell_dynamic(
+    const Tensor& input, TensorList hx,
+    const Tensor& w_ih, const Tensor& w_hh, const Tensor& b_ih, const Tensor& b_hh) {
+  return LSTMCell<QuantizedCellParamsDynamic>{}(input, std::make_tuple(hx[0], hx[1]), QuantizedCellParamsDynamic{w_ih, w_hh, b_ih, b_hh});
+}
+*/
+
+
 #define DEFINE_QUANTIZED_RNN_CELL(name, hx_type, cell_type, return_type, prepare_hx_fn) \
 return_type name( \
     const Tensor& input, \
@@ -1304,13 +1354,37 @@ return_type name( \
       input, prepare_hx_fn(hx), params); \
 }
 
+#define DEFINE_QUANTIZED_RNN_CELL_DYNAMIC(name, hx_type, cell_type, return_type, prepare_hx_fn) \
+return_type name( \
+    const Tensor& input, \
+    hx_type hx, \
+    const Tensor& w_ih, \
+    const Tensor& w_hh, \
+    const Tensor& b_ih, \
+    const Tensor& b_hh ) { \
+  QuantizedCellParamsDynamic params( \
+      w_ih, \
+      w_hh, \
+      b_ih, \
+      b_hh); \
+  return cell_type{}( \
+      input, prepare_hx_fn(hx), params); \
+}
+
 // Quantized LSTM cell
 using quantized_lstm_cell_type = LSTMCell<QuantizedCellParams>;
 using quantized_lstm_return_type = std::tuple<Tensor, Tensor>;
 std::tuple<Tensor, Tensor> prepare_quantized_lstm_hx(TensorList hx) {
+  TORCH_CHECK(hx.size() == 2, "lstm_cell expects two hidden states");
   return std::make_tuple(hx[0], hx[1]);
 }
+
+// Quantized LSTM cell
+using quantized_lstm_cell_dynamic_type = LSTMCell<QuantizedCellParamsDynamic>;
+
 DEFINE_QUANTIZED_RNN_CELL(quantized_lstm_cell, TensorList, quantized_lstm_cell_type, quantized_lstm_return_type, prepare_quantized_lstm_hx);
+
+DEFINE_QUANTIZED_RNN_CELL_DYNAMIC(quantized_lstm_cell_dynamic, TensorList, quantized_lstm_cell_dynamic_type, quantized_lstm_return_type, prepare_quantized_lstm_hx);
 
 // Helpers for simpler cells
 using simple_hx_type = const Tensor&;
@@ -1320,14 +1394,22 @@ simple_hx_type prepare_quantized_hx(simple_hx_type hx) {
 
 // Quantized GRU cell
 using quantized_gru_cell_type = GRUCell<QuantizedCellParams>;
+using quantized_gru_cell_dynamic_type = GRUCell<QuantizedCellParamsDynamic>;
+
 DEFINE_QUANTIZED_RNN_CELL(quantized_gru_cell, simple_hx_type, quantized_gru_cell_type, Tensor, prepare_quantized_hx);
+
+DEFINE_QUANTIZED_RNN_CELL_DYNAMIC(quantized_gru_cell_dynamic, simple_hx_type, quantized_gru_cell_dynamic_type, Tensor, prepare_quantized_hx);
 
 // Quantized RNN w/ ReLU cell
 using quantized_rnn_relu_cell_type = SimpleCell<relu_f, QuantizedCellParams>;
 DEFINE_QUANTIZED_RNN_CELL(quantized_rnn_relu_cell, simple_hx_type, quantized_rnn_relu_cell_type, Tensor, prepare_quantized_hx);
+using quantized_rnn_relu_cell_dynamic_type = SimpleCell<relu_f, QuantizedCellParamsDynamic>;
+DEFINE_QUANTIZED_RNN_CELL_DYNAMIC(quantized_rnn_relu_cell_dynamic, simple_hx_type, quantized_rnn_relu_cell_dynamic_type, Tensor, prepare_quantized_hx);
 
 // Quantized RNN w/ tanh cell
 using quantized_rnn_tanh_cell_type = SimpleCell<tanh_f, QuantizedCellParams>;
 DEFINE_QUANTIZED_RNN_CELL(quantized_rnn_tanh_cell, simple_hx_type, quantized_rnn_tanh_cell_type, Tensor, prepare_quantized_hx);
+using quantized_rnn_tanh_cell_dynamic_type = SimpleCell<tanh_f, QuantizedCellParamsDynamic>;
+DEFINE_QUANTIZED_RNN_CELL_DYNAMIC(quantized_rnn_tanh_cell_dynamic, simple_hx_type, quantized_rnn_tanh_cell_dynamic_type, Tensor, prepare_quantized_hx);
 
 }}  // namespace at::native
