@@ -33,6 +33,10 @@ TEST(ExceptionTest, TORCH_INTERNAL_ASSERT_DEBUG_ONLY) {
 #endif
 }
 
+TEST(WarningTest, JustPrintWarning) {
+  TORCH_WARN("I'm a warning");
+}
+
 TEST(ExceptionTest, ErrorFormatting) {
   expectThrowsEq([]() {
     TORCH_CHECK(false, "This is invalid");
