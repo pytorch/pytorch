@@ -6115,16 +6115,15 @@ class TestTorchDeviceType(TestCase):
                 range_high = 4 if dtype in (torch.int8, torch.uint8) else 10
                 m1 = torch.randint(1, range_high, (100, 100), dtype=dtype, device=device)
 
-            if m1.is_complex():
-                pow_fn = pow
-            else:
-                pow_fn = math.pow
-
             # The complex64 implementation in CPU may show some precision issues
             # when comparing the resulting float value with python double precision
             tol_kwargs = {}
-            if dtype is torch.complex64:
+            if dtype in (torch.complex64, torch.float32):
                 tol_kwargs = {'atol': 10e-4}
+
+            exponents = [-2.8, -2, -1, -0.5, 0, 0.5, 1, 2, 3, 4, 3.3]
+            if m1.is_complex():
+                exponents += [-2.5j, -1.0j, 0j, 1.0j, 2.5j, 1.0 + 1.0j, -1.0 - 1.5j]
 
             for num in [-2.8, -2, -1, -0.5, 0, 0.5, 1, 2, 3, 4, 3.3]:
                 if isinstance(num, int) and num < 0 and not m1.is_floating_point() and not m1.is_complex():
@@ -6137,14 +6136,14 @@ class TestTorchDeviceType(TestCase):
                     res1 = torch.pow(m1[4], num)
                     res2 = res1.clone().zero_()
                     for i in range(res2.size(0)):
-                        res2[i] = pow_fn(m1[4][i], num)
+                        res2[i] = pow(m1[4][i], num)
                     self.assertEqual(res1, res2, **tol_kwargs)
 
                     # non-contiguous
                     res1 = torch.pow(m1[:, 4], num)
                     res2 = res1.clone().zero_()
                     for i in range(res2.size(0)):
-                        res2[i] = pow_fn(m1[i, 4], num)
+                        res2[i] = pow(m1[i, 4], num)
                     self.assertEqual(res1, res2, **tol_kwargs)
 
             # base - number, exponent - tensor
@@ -6152,14 +6151,14 @@ class TestTorchDeviceType(TestCase):
             res1 = torch.pow(3, m1[4])
             res2 = res1.clone().zero_()
             for i in range(res2.size(0)):
-                res2[i] = pow_fn(3, m1[4, i])
+                res2[i] = pow(3, m1[4, i])
             self.assertEqual(res1, res2, **tol_kwargs)
 
             # non-contiguous
             res1 = torch.pow(3, m1[:, 4])
             res2 = res1.clone().zero_()
             for i in range(res2.size(0)):
-                res2[i] = pow_fn(3, m1[i][4])
+                res2[i] = pow(3, m1[i][4])
             self.assertEqual(res1, res2, **tol_kwargs)
 
             # resize behavior for exp == 1
@@ -17260,10 +17259,6 @@ _float_types_no_half = [torch.float, torch.double]
 # with _float_types when bfloat16 bringup is complete on all platforms
 _float_types2 = _float_types + [torch.bfloat16] if TEST_WITH_ROCM else _float_types
 
-_float_types_complex = _float_types + [torch.complex64, torch.complex128]
-
-_float_types2_complex = _float_types2 + [torch.complex64, torch.complex128]
-
 _signed_types = [
     torch.half, torch.float, torch.double,
     torch.int8, torch.short, torch.int, torch.long
@@ -17428,7 +17423,7 @@ tensor_op_tests = [
     ('pow', '-2', _small_3d, lambda t, d: [_number(-2., -2, t)],
         1e-1, 1e-5, 1e-5, _float_types_no_half, _cpu_types, False, [skipCUDAIfRocm]),
     ('pow', 'tensor', _small_3d, lambda t, d: [_small_3d(t, d).abs()],
-        1e-1, 1e-4, 1e-4, _float_types_complex),
+        1e-1, 1e-5, 1e-5, _float_types),
     ('addbmm', '', _small_2d, lambda t, d: [_small_3d(t, d), _small_3d(t, d)],
         1e-1, 1e-1, 1e-4, _float_types2),
     ('addbmm', 'scalar', _small_2d, lambda t, d: [_number(0.4, 2, t), _small_3d(t, d), _small_3d(t, d)],
