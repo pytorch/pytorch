@@ -951,36 +951,44 @@ inline void gpu_reduce_kernel(TensorIterator& iter, const ops_t& ops, ident_t id
 
   int64_t dim0;
   int64_t dim1;
-
-  // Adjust block size to map block width to fastest changing dimension of input
-  // tensor. This grants the best possible memory accessing pattern, given that
-  // for non-contiguous tensor with space in between, we cannot have perfect
-  // memory coalescing.
   int64_t fastest_moving_stride;
-  bool reduction_on_fastest_striding_dimension =
-      (iter.num_reduce_dims() == iter.ndim()) ||
-      (iter.strides(/*arg=*/input_index)[0] <
-       iter.strides(/*arg=*/input_index)[iter.num_reduce_dims()]);
-  // Notice that dim0 & dim1 does NOT guarantee any launch configuration here!
-  // dim0 & dim1 are more like the upper bound of the block dimension. The
-  // actual launch config and reduction scheme is determined by setting values
-  // to `config.input_mult` and `config.output_mult`.
-  // We try to max out dim1 so that we have enough threads per CTA to deliver
-  // performance for larger problem size.
-  if (reduction_on_fastest_striding_dimension) {
-    // Map block.x to the fastest reducing dimension. It implies:
-    //   1. block_x_reduce is required.
-    //   2. block.y now max out to num_outputs.
-    dim0 = iter.shape()[0];
-    dim1 = num_outputs;
-    fastest_moving_stride = iter.strides(/*arg=*/input_index)[0];
+  bool reduction_on_fastest_striding_dimension;
+
+  if (iter.ndim() > 0) {
+    // Adjust block size to map block width to fastest changing dimension of input
+    // tensor. This grants the best possible memory accessing pattern, given that
+    // for non-contiguous tensor with space in between, we cannot have perfect
+    // memory coalescing.
+    bool reduction_on_fastest_striding_dimension =
+        (iter.num_reduce_dims() == iter.ndim()) ||
+        (iter.strides(/*arg=*/input_index)[0] <
+        iter.strides(/*arg=*/input_index)[iter.num_reduce_dims()]);
+    // Notice that dim0 & dim1 does NOT guarantee any launch configuration here!
+    // dim0 & dim1 are more like the upper bound of the block dimension. The
+    // actual launch config and reduction scheme is determined by setting values
+    // to `config.input_mult` and `config.output_mult`.
+    // We try to max out dim1 so that we have enough threads per CTA to deliver
+    // performance for larger problem size.
+    if (reduction_on_fastest_striding_dimension) {
+      // Map block.x to the fastest reducing dimension. It implies:
+      //   1. block_x_reduce is required.
+      //   2. block.y now max out to num_outputs.
+      dim0 = iter.shape()[0];
+      dim1 = num_outputs;
+      fastest_moving_stride = iter.strides(/*arg=*/input_index)[0];
+    } else {
+      // Map block.x to the fastest non reducing dimension. It implies:
+      //   1. block_x_reduce is turned off.
+      //   2. block.y now max out to inputs_per_output.
+      dim0 = iter.shape()[iter.num_reduce_dims()];
+      dim1 = inputs_per_output;
+      fastest_moving_stride = iter.strides(/*arg=*/input_index)[iter.num_reduce_dims()];
+    }
   } else {
-    // Map block.x to the fastest non reducing dimension. It implies:
-    //   1. block_x_reduce is turned off.
-    //   2. block.y now max out to inputs_per_output.
-    dim0 = iter.shape()[iter.num_reduce_dims()];
-    dim1 = inputs_per_output;
-    fastest_moving_stride = iter.strides(/*arg=*/input_index)[iter.num_reduce_dims()];
+    reduction_on_fastest_striding_dimension = true;
+    fastest_moving_stride = sizeof(scalar_t);
+    dim0 = 1;
+    dim1 = 1;
   }
 
   // if the fastest moving dimension is contiguous and large enough, we do vectorized
