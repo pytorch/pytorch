@@ -422,6 +422,32 @@ class TestAsync(JitTestCase):
 
         self.checkTrace(TestModuleWrapper(), (torch.randn(5, 5),))
 
+    def test_trace_modulecalls_with_different_output_types(self):
+        def add_one(input):
+            return input + torch.ones(input.size())
+
+        class DifferentOutputModule(nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, input):
+                fut_res = torch.jit._fork(add_one, (input))
+
+                # return different types from module call
+                return input, fut_res
+
+        class TestModule(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.gen_output = DifferentOutputModule()
+
+            def forward(self, input):
+                res, fut_res = self.gen_output(input)
+                res = res + fut_res.wait()
+                return res
+
+        self.checkTrace(TestModule(), (torch.randn(5, 5),))
+
     def test_save_load_with_extra_files(self):
         class MyMod(torch.jit.ScriptModule):
             @torch.jit.script_method
