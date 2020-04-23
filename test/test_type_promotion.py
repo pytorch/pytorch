@@ -684,7 +684,7 @@ class TestTypePromotion(TestCase):
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     @dtypes(torch.complex64, torch.complex128)
-    def test_abs_complex_to_float(self, device, dtype):
+    def test_abs_angle_complex_to_float(self, device, dtype):
         # Constructs random complex values
         from random import random
         random_vals = []
@@ -696,45 +696,54 @@ class TestTypePromotion(TestCase):
             a = np.array(vals, dtype=torch_to_numpy_dtype_dict[dtype])
             t = torch.tensor(vals, device=device, dtype=dtype)
 
-            # Tests abs
-            np_result = torch.from_numpy(np.abs(a))
-            torch_result = torch.abs(t).cpu()
-            self.assertEqual(np_result, torch_result, exact_dtype=True)
+            for fn_name in ('abs', 'angle'):
+                torch_fn = getattr(torch, fn_name)
+                np_fn = getattr(np, fn_name)
 
-            # Tests float out
-            float_dtype = torch.float32 if dtype is torch.complex64 else torch.float64
-            np_float_out = np.empty_like(a).astype(np.float32)
-            np.abs(a, out=np_float_out)
-            float_out = torch.empty_like(t).float()
-            torch.abs(t, out=float_out)
-            self.assertEqual(torch.from_numpy(np_float_out), float_out.cpu())
+                # Tests function
+                np_result = torch.from_numpy(np_fn(a))
+                torch_result = torch_fn(t).cpu()
+                self.assertEqual(np_result, torch_result, exact_dtype=True)
 
-            # Tests float out (resized out)
-            float_out = torch.empty(1, device=device, dtype=float_dtype)
-            torch.abs(t, out=float_out)
-            self.assertEqual(torch.from_numpy(np_float_out), float_out.cpu())
+                # Tests float out
+                float_dtype = torch.float32 if dtype is torch.complex64 else torch.float64
+                np_float_out = np_fn(a).astype(torch_to_numpy_dtype_dict[float_dtype])
+                float_out = torch.empty_like(t).float()
+                torch_fn(t, out=float_out)
+                self.assertEqual(torch.from_numpy(np_float_out), float_out.cpu())
 
-            # Tests complex out
-            np_complex_out = np.empty_like(a)
-            np.abs(a, out=np_complex_out)
-            complex_out = torch.empty_like(t)
-            torch.abs(t, out=complex_out)
-            self.assertEqual(torch.from_numpy(np_complex_out), complex_out.cpu())
+                # Tests float out (resized out)
+                float_out = torch.empty(1, device=device, dtype=float_dtype)
+                torch_fn(t, out=float_out)
+                self.assertEqual(torch.from_numpy(np_float_out), float_out.cpu())
 
-            # Tests complex out (resized out)
-            complex_out = torch.empty(1, device=device, dtype=dtype)
-            torch.abs(t, out=complex_out)
-            self.assertEqual(torch.from_numpy(np_complex_out), complex_out.cpu())
+                # Tests complex out
+                np_complex_out = np_fn(a)
+                complex_out = torch.empty_like(t)
+                torch_fn(t, out=complex_out)
+                self.assertEqual(torch.from_numpy(np_complex_out), complex_out.cpu())
 
-            # Tests long out behavior (expected failure)
-            long_out = torch.empty(0, device=device, dtype=torch.long)
-            with self.assertRaises(RuntimeError):
-                torch.abs(t, out=long_out)
+                # Tests complex out (resized out)
+                complex_out = torch.empty(1, device=device, dtype=dtype)
+                torch_fn(t, out=complex_out)
+                self.assertEqual(torch.from_numpy(np_complex_out), complex_out.cpu())
 
-            # Tests inplace
-            np.abs(a, out=a)
-            t.abs_()
-            self.assertEqual(torch.from_numpy(a), t.cpu())
+                # Tests long out behavior (expected failure)
+                long_out = torch.empty(0, device=device, dtype=torch.long)
+                with self.assertRaises(RuntimeError):
+                    torch_fn(t, out=long_out)
+
+                # Tests inplace
+                if fn_name == 'abs':
+                    torch_inplace_method = getattr(torch.Tensor, fn_name + "_")
+                    np_fn(a, out=a)
+                    torch_inplace_method(t)
+                    self.assertEqual(torch.from_numpy(a), t.cpu())
+
+                # Note: angle does not have an in-place variant
+                if fn_name == 'angle':
+                    with self.assertRaises(AttributeError):
+                        torch_inplace_method = getattr(torch.Tensor, fn_name + "_")
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     @float_double_default_dtype
