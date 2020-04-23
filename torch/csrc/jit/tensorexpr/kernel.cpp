@@ -1061,7 +1061,6 @@ Stmt* TensorExprKernel::generateStmt(BackendType backendType) {
   l.prepareForCodegen();
 
   if (backendType == kLLVMCodeGen) {
-
     std::vector<For*> innerLoops;
     std::vector<For*> worklist;
 
