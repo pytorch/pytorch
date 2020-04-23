@@ -1,5 +1,8 @@
 import warnings
+from typing import Tuple, Optional
+
 import torch
+from torch import Tensor
 from . import Linear
 from torch.nn.init import xavier_uniform_
 from torch.nn.init import constant_

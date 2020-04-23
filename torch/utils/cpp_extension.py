@@ -584,13 +584,12 @@ class BuildExtension(build_ext, object):
     def get_ext_filename(self, ext_name):
         # Get the original shared library name. For Python 3, this name will be
         # suffixed with "<SOABI>.so", where <SOABI> will be something like
-        # cpython-37m-x86_64-linux-gnu. On Python 2, there is no such ABI name.
-        # The final extension, .so, would be .lib/.dll on Windows of course.
+        # cpython-37m-x86_64-linux-gnu.
         ext_filename = super(BuildExtension, self).get_ext_filename(ext_name)
         # If `no_python_abi_suffix` is `True`, we omit the Python 3 ABI
         # component. This makes building shared libraries with setuptools that
         # aren't Python modules nicer.
-        if self.no_python_abi_suffix and sys.version_info >= (3, 0):
+        if self.no_python_abi_suffix:
             # The parts will be e.g. ["my_extension", "cpython-37m-x86_64-linux-gnu", "so"].
             ext_filename_parts = ext_filename.split('.')
             # Omit the second to last element.
