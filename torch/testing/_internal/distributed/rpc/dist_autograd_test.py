@@ -189,9 +189,6 @@ class ExecMode(Enum):
     RPC_ASYNC = 4  # Run the operation using rpc_async
 
 
-@unittest.skipIf(
-    not torch._six.PY3, "Pytorch distributed autograd package does not support python2"
-)
 class DistAutogradTest(RpcAgentTestFixture):
     def _exec_func_with_dst(self, dst, exec_mode, method, *args):
         if ExecMode.LOCAL == exec_mode:
@@ -2104,10 +2101,6 @@ class DistAutogradTest(RpcAgentTestFixture):
             self.assertEqual(1, len(grads))
             self.assertTrue(t in grads)
 
-@unittest.skipIf(
-    not torch._six.PY3,
-    "Pytorch distributed autograd package does not support python2",
-)
 class FaultyAgentDistAutogradTest(FaultyRpcAgentTestFixture):
     # Reusing a simplified helper function from DistAutogradTest to ensure
     # autograd context is successfully cleaned up even when RPCs are failing.
