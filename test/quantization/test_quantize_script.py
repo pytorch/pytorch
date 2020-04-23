@@ -6,10 +6,6 @@ import torch.nn.functional as F
 import torch.jit
 from torch._C import parse_ir
 
-# TODO: remove this global setting
-# JIT tests use double as the default dtype
-torch.set_default_dtype(torch.double)
-
 # torch.quantization
 from torch.quantization import QConfig
 from torch.quantization import default_dynamic_qconfig
@@ -33,7 +29,6 @@ from torch.quantization._quantize_script import quantize_dynamic_script
 from torch.quantization._quantize_script import preprocess_qconfig_dict
 
 # Testing utils
-from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.common_quantization import SingleLayerLinearModel, AnnotatedSingleLayerLinearModel
 from torch.testing._internal.common_quantization import ConvModel, AnnotatedConvModel
 from torch.testing._internal.common_quantization import NestedModel
@@ -277,6 +272,9 @@ class TestQuantizeScriptJitPasses(JitTestCase):
         # This test case attempt to try combinations of conv2d with bias/nobias
         # as well as BatchNorm with affine/no-affine along with varying the
         # number of layers.
+        # this only works when default dtype is double
+        torch.set_default_dtype(torch.double)
+
         class SubModule(torch.nn.Module):
             def __init__(self, num_blocks, enable_bias, enable_affine):
                 super(SubModule, self).__init__()
@@ -326,6 +324,7 @@ class TestQuantizeScriptJitPasses(JitTestCase):
 
             x = torch.rand(1, 20, 10, 10)
             self.assertEqual(eager(x), scripted_or_traced(x))
+        torch.set_default_dtype(torch.float)
 
     def test_fuse_linear(self):
         input_strs = ["""
@@ -1279,7 +1278,8 @@ class TestQuantizeScriptPTSQOps(JitTestCase):
             def forward(self, x):
                 return self.relu(self.conv(x))
 
-        data = [(torch.randn(1, 1, 10, 10, dtype=torch.float), torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
+        data = [(torch.randn(1, 1, 10, 10, dtype=torch.float),
+                 torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
         model = self._test_op_impl(M(), data, "quantized::conv2d_relu")
 
         FileCheck().check_not("aten::conv2d") \
@@ -1287,6 +1287,36 @@ class TestQuantizeScriptPTSQOps(JitTestCase):
                    .check_not("quantized::conv2d(") \
                    .check_not("quantized::relu(") \
                    .run(model.graph)
+
+    @unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
+                         " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
+                         " with instruction set support avx2 or newer.")
+    def test_quantized_conv3d_relu(self):
+        class M(torch.nn.Module):
+            def __init__(self, functional):
+                super(M, self).__init__()
+                self.conv = torch.nn.Conv3d(1, 4, 2, 3).float()
+                if functional:
+                    self.relu = F.relu
+                else:
+                    self.relu = torch.nn.ReLU()
+
+            def forward(self, x):
+                return self.relu(self.conv(x))
+
+        data = [(torch.randn(1, 1, 5, 5, 5, dtype=torch.float),
+                 torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
+        model = self._test_op_impl(M(functional=False), data,
+                                   "quantized::conv3d_relu")
+        model_functional = self._test_op_impl(M(functional=True), data,
+                                              "quantized::conv3d_relu")
+
+        checker = FileCheck().check_not("aten::conv3d") \
+                             .check_not("aten::relu") \
+                             .check_not("quantized::conv3d(") \
+                             .check_not("quantized::relu(")
+        checker.run(model.graph)
+        checker.run(model_functional.graph)
 
     def test_quantized_add(self):
         class Add(torch.nn.Module):
@@ -1643,13 +1673,16 @@ class TestQuantizeScriptPTSQOps(JitTestCase):
                 x = F.upsample(x, (32, 32))
                 x = F.upsample_bilinear(x, (32, 32))
                 x = F.upsample_nearest(x, (32, 32))
+                x = torch.clamp(x, -3, 3)
+                x = x.clamp(-2.5, 2.5)
+                # x = x.clamp_(-2, 2)  # Enable when quantized `clamp_` is ready
                 x = F.sigmoid(x)
                 x = x.permute(0, 2, 3, 1)
                 x = torch.repeat_interleave(x, 3, 1)
-                x = self.conv(x)
                 x = self.tanh(x)
                 x = F.tanh(x)
                 x = torch.tanh(x)
+                x = self.conv(x)
                 return x
 
         m = torch.jit.script(M())
@@ -1666,8 +1699,8 @@ class TestQuantizeScriptPTSQOps(JitTestCase):
         # is being propagated to the end, so that we don't insert extra
         # observers and also successfully fused two quantized::conv2d
         # patterns
-        # two quantize_per_tensor, one for input, one for weight
-        FileCheck().check_count("aten::quantize_per_tensor", 2, exactly=True) \
+        # one quantize_per_tensor for input
+        FileCheck().check_count("aten::quantize_per_tensor", 1, exactly=True) \
                    .check_count("quantized::conv2d", 2, exactly=True) \
                    .check("aten::dequantize") \
                    .run(m.graph)
@@ -1857,6 +1890,3 @@ class TestQuantizeDynamicScript(JitTestCase):
                    .check("aten::lstm") \
                    .check("return") \
                    .run(str(get_module_method(m, 'lstm', 'forward__0').graph))
-
-if __name__ == "__main__":
-    run_tests()
