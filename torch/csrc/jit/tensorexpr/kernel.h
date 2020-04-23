@@ -12,7 +12,7 @@ namespace tensorexpr {
 template <typename T>
 inline std::vector<int64_t> bufferSizes(const T& t) {
   std::vector<int64_t> sizes;
-  for (int i = 0; i < t->buf()->ndim(); i++) {
+  for (size_t i = 0; i < t->buf()->ndim(); i++) {
     sizes.push_back(dynamic_cast<const IntImm*>(t->buf()->dim(i))->value());
   }
   return sizes;
@@ -166,8 +166,7 @@ class TensorExprKernel {
       const std::vector<VarHandle>& axes,
       const c10::VaryingShape& sizes,
       const c10::VaryingStrides& strides,
-      const c10::VaryingStrides& contiguity,
-      const std::unordered_map<int64_t, VarHandle>& sizeVars);
+      const c10::VaryingStrides& contiguity);
 
  private:
   struct ShapeArg {

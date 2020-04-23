@@ -16,6 +16,7 @@ namespace {
 template <> class Vec256<std::complex<float>> {
 private:
   __m256 values;
+  static const Vec256<std::complex<float>> ones;
 public:
   using value_type = std::complex<float>;
   static constexpr int size() {
@@ -248,7 +249,8 @@ public:
     exp = _mm256_blend_ps(exp, _mm256_permute_ps(exp, 0xB1), 0xAA);   //exp(a)           exp(a)
 
     auto sin_cos = Sleef_sincosf8_u10(values);                        //[sin(a), cos(a)] [sin(b), cos(b)]
-    auto cos_sin = _mm256_blend_ps(sin_cos.y, sin_cos.x, 0xAA);       //cos(b)           sin(b)
+    auto cos_sin = _mm256_blend_ps(_mm256_permute_ps(sin_cos.y, 0xB1),
+                                   sin_cos.x, 0xAA);                  //cos(b)           sin(b)
     return _mm256_mul_ps(exp, cos_sin);
   }
   Vec256<std::complex<float>> expm1() const {
@@ -307,8 +309,8 @@ public:
     return sqrt().reciprocal();
   }
   Vec256<std::complex<float>> pow(const Vec256<std::complex<float>> &exp) const {
-    __at_align32__ std::complex<double> x_tmp[size()];
-    __at_align32__ std::complex<double> y_tmp[size()];
+    __at_align32__ std::complex<float> x_tmp[size()];
+    __at_align32__ std::complex<float> y_tmp[size()];
     store(x_tmp);
     exp.store(y_tmp);
     for (int i = 0; i < size(); i++) {
@@ -326,16 +328,31 @@ public:
     return _mm256_cmp_ps(values, other.values, _CMP_NEQ_OQ);
   }
   Vec256<std::complex<float>> operator<(const Vec256<std::complex<float>>& other) const {
-    AT_ERROR("not supported for complex numbers");
+    TORCH_CHECK(false, "not supported for complex numbers");
   }
   Vec256<std::complex<float>> operator<=(const Vec256<std::complex<float>>& other) const {
-    AT_ERROR("not supported for complex numbers");
+    TORCH_CHECK(false, "not supported for complex numbers");
   }
   Vec256<std::complex<float>> operator>(const Vec256<std::complex<float>>& other) const {
-    AT_ERROR("not supported for complex numbers");
+    TORCH_CHECK(false, "not supported for complex numbers");
   }
   Vec256<std::complex<float>> operator>=(const Vec256<std::complex<float>>& other) const {
-    AT_ERROR("not supported for complex numbers");
+    TORCH_CHECK(false, "not supported for complex numbers");
+  }
+
+  Vec256<std::complex<float>> eq(const Vec256<std::complex<float>>& other) const;
+  Vec256<std::complex<float>> ne(const Vec256<std::complex<float>>& other) const;
+  Vec256<std::complex<float>> lt(const Vec256<std::complex<float>>& other) const {
+    TORCH_CHECK(false, "not supported for complex numbers");
+  }
+  Vec256<std::complex<float>> le(const Vec256<std::complex<float>>& other) const {
+    TORCH_CHECK(false, "not supported for complex numbers");
+  }
+  Vec256<std::complex<float>> gt(const Vec256<std::complex<float>>& other) const {
+    TORCH_CHECK(false, "not supported for complex numbers");
+  }
+  Vec256<std::complex<float>> ge(const Vec256<std::complex<float>>& other) const {
+    TORCH_CHECK(false, "not supported for complex numbers");
   }
 };
 
@@ -459,6 +476,18 @@ Vec256<std::complex<float>> inline operator|(const Vec256<std::complex<float>>& 
 template <>
 Vec256<std::complex<float>> inline operator^(const Vec256<std::complex<float>>& a, const Vec256<std::complex<float>>& b) {
   return _mm256_xor_ps(a, b);
+}
+
+const Vec256<std::complex<float>> Vec256<std::complex<float>>::ones(_mm256_set1_ps(1.0f));
+
+Vec256<std::complex<float>> Vec256<std::complex<float>>::eq(
+    const Vec256<std::complex<float>>& other) const {
+  return (*this == other) & Vec256<std::complex<float>>::ones;
+}
+
+Vec256<std::complex<float>> Vec256<std::complex<float>>::ne(
+    const Vec256<std::complex<float>>& other) const {
+  return (*this != other) & Vec256<std::complex<float>>::ones;
 }
 
 #ifdef __AVX2__

@@ -48,7 +48,7 @@ static std::vector<ExprHandle> texprSizes(const c10::VaryingShape& shape) {
 
 static std::vector<DimArg> texprDims(const torch::jit::Value* v) {
   if (v->type()->kind() != TypeKind::TensorType) {
-    throw malformed_input();
+    throw malformed_input("type is not Tensor");
   }
 
   auto tt = v->type()->cast<TensorType>();
@@ -87,7 +87,7 @@ ExprHandle TensorExprKernel::constant(const torch::jit::Value* v) {
   }
 
   if (!scalars_.count(v->unique())) {
-    throw malformed_input();
+    throw malformed_input("no scalar in Constant");
   }
 
   return scalars_.at(v->unique());
@@ -135,7 +135,7 @@ ExprHandle TensorExprKernel::demoteOutput(
     const ExprHandle& e,
     const torch::jit::Value* v) {
   if (v->type()->kind() != TypeKind::TensorType) {
-    throw malformed_input();
+    throw malformed_input("type is not tensor in demoteOutput");
   }
 
   auto tt = *v->type()->cast<TensorType>()->scalarType();
@@ -913,7 +913,7 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
             int64_t dim = constant(n->inputs()[1]).AsNode<IntImm>()->value();
             if (dim < 0) {
               if (axes.size() == 0) {
-                throw malformed_input();
+                throw malformed_input("axes are zero handling unsqueeze");
               }
 
               dim += axes.size() - 1;
@@ -1010,7 +1010,6 @@ void TensorExprKernel::lowerToBackend(BackendType backendType) {
       l.computeInline(l.getLoopBodyFor(tensorOutputs_[i]));
 
       Tensor* tensor = tensorOutputs[i];
-      const Var* index = tensor->arg(0);
       int loopLevels = getTECudaPointwiseLoopLevels();
       const int kDefaultLoopLevels = 2;
       loopLevels = (loopLevels > 0) ? loopLevels : kDefaultLoopLevels;
@@ -1300,19 +1299,19 @@ ExprHandle TensorExprKernel::createInputIndexExpr(
     const std::vector<VarHandle>& axes,
     const c10::VaryingShape& sizes,
     const c10::VaryingStrides& strides,
-    const c10::VaryingStrides& contiguity,
-    const std::unordered_map<int64_t, VarHandle>& sizeVars) {
+    const c10::VaryingStrides& contiguity) {
   if (axes.size() != strides.size()) {
-    throw malformed_input();
+    throw malformed_input("axes and strides size mismatch");
   }
 
   std::vector<ShapeArg> strideArgs;
   std::vector<ShapeArg> sizeArgs;
   ExprHandle stride = 1;
   ExprHandle index = 0;
+  std::vector<ExprHandle> indices;
 
   if (axes.size() == 0) {
-    throw malformed_input();
+    throw malformed_input("axes are zero creating input index");
   }
   size_t n = axes.size() - 1;
 
@@ -1326,21 +1325,10 @@ ExprHandle TensorExprKernel::createInputIndexExpr(
       stride = v;
     }
 
-    // If size is dynamic (indicated by negative value) create a size param.
     ExprHandle size;
     auto sizeVal = *sizes[n - i];
-    if (sizeVal < 0) {
-      auto it = sizeVars.find(sizeVal);
-      if (it == sizeVars.end()) {
-        throw malformed_input();
-      }
-
-      auto const& v = it->second;
-      sizeArgs.emplace_back(n - i, v);
-      size = v;
-    } else {
-      size = static_cast<int32_t>(sizeVal);
-    }
+    CHECK(sizeVal >= 0);
+    size = static_cast<int32_t>(sizeVal);
 
     index = index + axes[n - i] * stride;
     stride = stride * size;
@@ -1360,37 +1348,11 @@ void TensorExprKernel::bindInput(const torch::jit::Value* input) {
           ToDtype(static_cast<ScalarType>(*tt->scalarType())),
           {0});
       std::vector<DimArg> inputTensorDims;
-      std::unordered_map<int64_t, VarHandle> sizeVars;
       for (size_t i = 0; i < *tt->sizes().size(); i++) {
         auto const& size = *tt->sizes()[i];
-        if (size < 0) {
-          VarHandle v(
-              "size_" + c10::to_string(input->unique()) + "_" +
-                  c10::to_string(i),
-              kInt);
-          sizeVars.emplace(size, v);
-          inputTensorDims.emplace_back(v);
-        } else {
-          inputTensorDims.emplace_back(
-              DimArg(IntImm::make(size), "i" + c10::to_string(i)));
-        }
+        inputTensorDims.emplace_back(
+            DimArg(IntImm::make(size), "i" + c10::to_string(i)));
       }
-#ifdef DYNAMIC_SHAPES
-      tensors_.emplace(
-          input->unique(),
-          Compute(
-              "input",
-              inputTensorDims,
-              [&](const std::vector<VarHandle>& axes) {
-                return createInputIndexExpr(
-                    inBuffer,
-                    axes,
-                    tt->sizes(),
-                    tt->strides(),
-                    tt->contiguity(),
-                    sizeVars);
-              }));
-#else
       auto const& strides = tt->strides();
       tensors_.emplace(
           input->unique(),
@@ -1406,7 +1368,6 @@ void TensorExprKernel::bindInput(const torch::jit::Value* input) {
               }));
       kernelArgs_.emplace_back(
           inBuffer, std::vector<ShapeArg>(), std::vector<ShapeArg>());
-#endif
       break;
     }
     case TypeKind::FloatType: {
@@ -1458,7 +1419,7 @@ void TensorExprKernel::compile() {
   // Move output operands from `tensors_` to `tensorOutputs_`
   for (const auto& output : graph_->outputs()) {
     if (!tensors_.count(output->unique())) {
-      throw malformed_input();
+      throw malformed_input("cannot find output Tensor");
     }
     tensorOutputs_.emplace_back(tensors_.at(output->unique()));
     tensors_.erase(output->unique());
@@ -1527,7 +1488,7 @@ void TensorExprKernel::runKernel(Stack& stack) {
       } else {
         const IntImm* s = dynamic_cast<const IntImm*>(dim);
         if (!s) {
-          throw malformed_input(dim);
+          throw malformed_input("output expected Int", dim);
         }
         tensorSize.push_back(s->value());
       }

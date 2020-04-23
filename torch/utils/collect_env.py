@@ -14,8 +14,6 @@ try:
 except (ImportError, NameError, AttributeError):
     TORCH_AVAILABLE = False
 
-PY3 = sys.version_info >= (3, 0)
-
 # System Environment Information
 SystemEnv = namedtuple('SystemEnv', [
     'torch_version',
@@ -42,10 +40,9 @@ def run(command):
                          stderr=subprocess.PIPE, shell=True)
     output, err = p.communicate()
     rc = p.returncode
-    if PY3:
-        enc = locale.getpreferredencoding()
-        output = output.decode(enc)
-        err = err.decode(enc)
+    enc = locale.getpreferredencoding()
+    output = output.decode(enc)
+    err = err.decode(enc)
     return rc, output.strip(), err.strip()
 
 
@@ -228,9 +225,6 @@ def get_pip_packages(run_lambda):
         else:
             grep_cmd = r'grep "torch\|numpy"'
         return run_and_read_all(run_lambda, pip + ' list --format=freeze | ' + grep_cmd)
-
-    if not PY3:
-        return 'pip', run_with_pip('pip')
 
     # Try to figure out if the user is running pip or pip3.
     out2 = run_with_pip('pip')

@@ -1,7 +1,7 @@
 import os
 import io
 import sys
-
+import random
 import torch
 from torch import Tensor
 from typing import NamedTuple
@@ -20,6 +20,72 @@ if __name__ == "__main__":
 
 
 class TestSaveLoad(JitTestCase):
+    def test_versioned_symbols(self):
+        """
+        Tests Torchscript symbol versioning. See note [Versioned Symbols].
+        This test uses an undocumented, test-only function
+        torch._test_serialization_subcmul.
+
+        This function is implemented as (a - alpha * b) with a default value
+        of 1 for alpha. In file format version 2, however, it was implemented
+        as (b - alpha * a) with a default value of 2 for alpha.
+        This test verifies a module seralized with file format version 2
+        exhibits the old behavior, and that the same module newly serialized
+        exhibits the current behavior.
+        #T
+        """
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super(MyModule, self).__init__()
+
+            def forward(self, a, b, alpha: float):
+                no_alpha = torch._test_serialization_subcmul(a, b)
+                with_alpha = torch._test_serialization_subcmul(a, b, alpha)
+                return no_alpha, with_alpha
+
+        def historic_subcmul(a, b, alpha=2):
+            return b - alpha * a
+
+        def current_subcmul(a, b, alpha=1):
+            return a - alpha * b
+
+        # Loads and verifies the historic behavior of the module
+        # that was serialized with version 2
+        module_v2 = torch.jit.load(pytorch_test_dir + "/jit/fixtures/_test_serialization_subcmul_v2.pt")
+        a = torch.randn((5,))
+        b = torch.randn((5,))
+        alpha = random.random()
+        args = (a, b, alpha)
+        no_alpha_v2, with_alpha_v2 = module_v2(*args)
+        self.assertEqual(no_alpha_v2, historic_subcmul(a, b))
+        self.assertEqual(with_alpha_v2, historic_subcmul(*args))
+
+        # Scripts, saves, loads and verifies the current behavior of the module
+        scripted_module = torch.jit.script(MyModule())
+        buffer = io.BytesIO()
+        torch.jit.save(scripted_module, buffer)
+        buffer.seek(0)
+        module_current = torch.jit.load(buffer)
+        no_alpha_current, with_alpha_current = module_current(*args)
+        self.assertEqual(no_alpha_current, current_subcmul(a, b))
+        self.assertEqual(with_alpha_current, current_subcmul(*args))
+
+    def test_versioned_symbols_reserialization(self):
+        """
+        Tests that loading and saving serialized Torchscript with a versioned
+        symbol won't persist the original function and will inline the
+        versioned builtin.
+        """
+        module_v2 = torch.jit.load(pytorch_test_dir + "/jit/fixtures/_test_serialization_subcmul_v2.pt")
+        buffer = io.BytesIO()
+        torch.jit.save(module_v2, buffer)
+        buffer.seek(0)
+        module_reserialized = torch.jit.load(buffer)
+
+        subcmul_nodes = sum("subcmul" in n.kind() for
+                            n in module_reserialized.graph.nodes())
+        self.assertEqual(subcmul_nodes, 0)
+
     def test_different_modules(self):
         """
         Exercise the situation where we have the same qualified name

@@ -28,6 +28,7 @@ file(GLOB C10_SRCS
         *.cpp
         core/*.cpp
         core/boxing/*.cpp
+        core/boxing/impl/*.cpp
         core/dispatch/*.cpp
         core/op_registration/*.cpp
         core/impl/*.cpp
@@ -51,6 +52,15 @@ endif()
 
 if(${USE_GLOG})
     target_link_libraries(c10 PUBLIC glog::glog)
+endif()
+
+find_package(Backtrace)
+if(Backtrace_FOUND)
+  target_include_directories(c10 PRIVATE ${Backtrace_INCLUDE_DIRS})
+  target_link_libraries(c10 PRIVATE ${Backtrace_LIBRARIES})
+  target_compile_definitions(c10 PRIVATE SUPPORTS_BACKTRACE=1)
+else()
+  target_compile_definitions(c10 PRIVATE SUPPORTS_BACKTRACE=0)
 endif()
 
 if(USE_NUMA)

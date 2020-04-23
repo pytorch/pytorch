@@ -51,9 +51,12 @@ class Linear(nnq.Linear):
         return 'DynamicQuantizedLinear'
 
     def extra_repr(self):
-        return 'in_features={}, out_features={}, qscheme={}'.format(
-            self.in_features, self.out_features, self.weight().qscheme()
+        extra_repr_str = 'in_features={}, out_features={}, dtype={}'.format(
+            self.in_features, self.out_features, self._packed_params.dtype
         )
+        if self._packed_params.dtype == torch.qint8:
+            extra_repr_str += ', qscheme={}'.format(self.weight().qscheme())
+        return extra_repr_str
 
     @classmethod
     def from_float(cls, mod):
