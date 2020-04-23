@@ -427,6 +427,188 @@ ilpReduce(int shift,
   return threadVal;
 }
 
+/**
+ * This will apply the Epilogue with vectorized reads & writes when input & output have the same shift
+ */
+template <int ILP, typename scalar_t, typename accum_t, typename outscalar_t, template<typename, typename, typename> class Epilogue>
+__device__ __forceinline__ void
+WriteFpropResultsVectorized(
+             int size,
+             const int shift,
+             scalar_t *input,
+             outscalar_t *output,
+             Epilogue<scalar_t, accum_t, outscalar_t> epilogue) {
+  using LoadT = at::native::memory::aligned_vector<scalar_t, ILP>;
+  using StoreT = at::native::memory::aligned_vector<outscalar_t, ILP>;
+
+  int offset = threadIdx.x;
+
+  // if unaligned, do one value / thread and move on, guaranteeing aligned reads/writes later
+  if (shift > 0) {
+    input -= shift;
+    output -= shift;
+
+    if (threadIdx.x >= shift) {
+      output[offset] = epilogue(input[offset]);
+    }
+    size -= blockDim.x;
+    input += blockDim.x;
+    output += blockDim.x;
+  }
+
+  const int last = size % (ILP * blockDim.x);
+
+  scalar_t in_v[ILP];
+  LoadT* in_value = reinterpret_cast<LoadT*>(&in_v);
+
+  outscalar_t out_v[ILP];
+  StoreT* out_value = reinterpret_cast<StoreT*>(&out_v);
+
+  for (; offset * ILP < (size - last); offset += blockDim.x) {
+    *in_value = reinterpret_cast<LoadT*>(input)[offset];
+
+    #pragma unroll
+    for (int j = 0; j < ILP; ++j) {
+      out_v[j] = epilogue(in_v[j]);
+    }
+
+    reinterpret_cast<StoreT*>(output)[offset] = *out_value;
+  }
+
+  offset = size - last + threadIdx.x;
+  // handle the tail
+  for (; offset < size; offset += blockDim.x) {
+    output[offset] = epilogue(input[offset]);
+  }
+}
+
+template <int ILP, typename scalar_t, typename accum_t, typename outscalar_t, template<typename, typename, typename> class Epilogue>
+__device__ __forceinline__ void
+WriteBpropResultsVectorized(
+             int size,
+             const int shift,
+             scalar_t *gradInput,
+             outscalar_t *output,
+             outscalar_t *gradOutput,
+             Epilogue<scalar_t, accum_t, outscalar_t> epilogue) {
+  using gradInputT = at::native::memory::aligned_vector<scalar_t, ILP>;
+  using outputT = at::native::memory::aligned_vector<outscalar_t, ILP>;
+
+  int offset = threadIdx.x;
+
+  // if unaligned, do one value / thread and move on, guaranteeing aligned reads/writes later
+  if (shift > 0) {
+    gradInput -= shift;
+    output -= shift;
+    gradOutput -= shift;
+
+    if (threadIdx.x >= shift) {
+      gradInput[offset] = epilogue(gradOutput[offset], output[offset]);
+    }
+    size -= blockDim.x;
+    gradInput += blockDim.x;
+    output += blockDim.x;
+    gradOutput += blockDim.x;
+  }
+
+  const int last = size % (ILP * blockDim.x);
+
+  scalar_t dX[ILP];
+  gradInputT *dX_v = reinterpret_cast<gradInputT*>(&dX);
+
+  outscalar_t Y[ILP];
+  outputT *Y_v = reinterpret_cast<outputT*>(&Y);
+
+  outscalar_t dY[ILP];
+  outputT *dY_v = reinterpret_cast<outputT*>(&dY);
+
+  for (; offset * ILP < (size - last); offset += blockDim.x) {
+    *Y_v = reinterpret_cast<outputT*>(output)[offset];
+    *dY_v = reinterpret_cast<outputT*>(gradOutput)[offset];
+
+    #pragma unroll
+    for (int j = 0; j < ILP; ++j) {
+      dX[j] = epilogue(dY[j], Y[j]);
+    }
+
+    reinterpret_cast<gradInputT*>(gradInput)[offset] = *dX_v;
+  }
+
+  offset = size - last + threadIdx.x;
+  for (; offset < size; offset += blockDim.x) {
+    gradInput[offset] = epilogue(gradOutput[offset], output[offset]);
+  }
+}
+
+/**
+ * This will apply the Epilogue with non-vectrorized reads & writes for the general case
+ */
+template <int ILP, typename scalar_t, typename accum_t, typename outscalar_t, template<typename, typename, typename> class Epilogue>
+__device__ __forceinline__ void
+WriteFpropResults(
+             int classes,
+             scalar_t *input,
+             outscalar_t *output,
+             Epilogue<scalar_t, accum_t, outscalar_t> epilogue) {
+  int offset = threadIdx.x;
+
+  int last = classes % (ILP * blockDim.x);
+
+  // Main bulk of loop with ILP
+  for (; offset < classes - last; offset += blockDim.x * ILP) {
+    scalar_t tmp[ILP];
+
+    #pragma unroll
+    for (int j = 0; j < ILP; ++j) {
+      tmp[j] = input[offset + j * blockDim.x];
+    }
+    #pragma unroll
+    for (int j = 0; j < ILP; ++j) {
+      output[offset + j * blockDim.x] = epilogue(tmp[j]);
+    }
+  }
+
+  // Remainder - no ILP
+  for (; offset < classes; offset += blockDim.x) {
+    output[offset] = epilogue(input[offset]);
+  }
+}
+
+template <int ILP, typename scalar_t, typename accum_t, typename outscalar_t, template<typename, typename, typename> class Epilogue>
+__device__ __forceinline__ void
+WriteBpropResults(
+             int classes,
+             scalar_t *gradInput,
+             outscalar_t *output,
+             outscalar_t *gradOutput,
+             Epilogue<scalar_t, accum_t, outscalar_t> epilogue) {
+
+  int offset = threadIdx.x;
+
+  int last = classes % (ILP * blockDim.x);
+
+  for (; offset < classes - last; offset += blockDim.x * ILP) {
+    outscalar_t tmpOutput[ILP];
+    outscalar_t tmpGradOutput[ILP];
+
+    #pragma unroll
+    for (int j = 0; j < ILP; ++j) {
+      tmpOutput[j] = output[offset + j * blockDim.x];
+      tmpGradOutput[j] = gradOutput[offset + j * blockDim.x];
+    }
+
+    #pragma unroll
+    for (int j = 0; j < ILP; ++j) {
+      gradInput[offset + j * blockDim.x] = epilogue(tmpGradOutput[j], tmpOutput[j]);
+    }
+  }
+
+  // Remainder - no ILP
+  for (; offset < classes; offset += blockDim.x) {
+    gradInput[offset] = epilogue(gradOutput[offset], output[offset]);
+  }
+}
+
 template <int ILP, typename scalar_t, typename accscalar_t, typename outscalar_t, template <typename, typename, typename> class Epilogue>
 __global__ void
 cunn_SoftMaxForward(outscalar_t *output, scalar_t *input, int classes)
@@ -443,6 +625,8 @@ cunn_SoftMaxForward(outscalar_t *output, scalar_t *input, int classes)
   output += blockIdx.x * classes;
 
   const int shift = ((uint64_t)input) % ALIGN_BYTES / sizeof(scalar_t);
+  const int output_shift = ((uint64_t)output) % ALIGN_BYTES / sizeof(outscalar_t);
+
   // find the max
   accscalar_t threadMax = ilpReduce<MaxFloat, ILP, scalar_t, accscalar_t>(
       shift, input, classes, MaxFloat<scalar_t, accscalar_t>(), -at::numeric_limits<accscalar_t>::max());
@@ -456,29 +640,12 @@ cunn_SoftMaxForward(outscalar_t *output, scalar_t *input, int classes)
       sdata, threadExp, Add<accscalar_t>(), static_cast<accscalar_t>(0));
 
   Epilogue<scalar_t, accscalar_t, outscalar_t> epilogue(max_k, sumAll);
-  int offset = threadIdx.x;
-  int last = classes % (ILP * blockDim.x);
-  // outer grid-stride-loop over ILP elements
-  scalar_t tmp[ILP];
-  outscalar_t output_tmp[ILP];
-  LoadT *tmp_vec = reinterpret_cast<LoadT*>(&tmp[0]);
-  for (; offset < classes - last; offset += blockDim.x * ILP) {
 
-    // Each loop is going to handle threadIdx.x * ILP values
-    // offset is threadIdx.x, so stride is j * blockDim.x * ILP
-    *tmp_vec = *reinterpret_cast<LoadT*>(&input[offset * ILP]);
-    #pragma unroll
-    for (int j = 0; j < ILP; ++j) {
-      output_tmp[j] = epilogue(tmp[j]);
-    }
-
-    StoreT *out_vec = reinterpret_cast<StoreT*>(&output[offset * ILP]);
-    *out_vec = *reinterpret_cast<StoreT*>(&output_tmp[0]);
+  if (shift == output_shift) {
+    WriteFpropResultsVectorized<ILP, scalar_t, accscalar_t, outscalar_t, Epilogue>(classes, shift, input, output, epilogue);
+  } else {
+    WriteFpropResults<ILP, scalar_t, accscalar_t, outscalar_t, Epilogue>(classes, input, output, epilogue);
   }
-
-  // this handles the tail
-  for (; offset < classes; offset += blockDim.x)
-    output[offset] = epilogue(input[offset]);
 }
 
 template <int ILP, typename scalar_t, typename accscalar_t, typename outscalar_t, template<typename, typename, typename> class Epilogue>
@@ -495,38 +662,21 @@ cunn_SoftMaxBackward(scalar_t *gradInput, outscalar_t *output, outscalar_t *grad
   gradOutput += blockIdx.x * classes;
 
   const int shift = ((uint64_t)gradInput) % ALIGN_BYTES / sizeof(scalar_t);
+  const int output_shift = ((uint64_t)output) % ALIGN_BYTES / sizeof(outscalar_t);
+  const int grad_output_shift = ((uint64_t)gradOutput) % ALIGN_BYTES / sizeof(outscalar_t);
 
-  accscalar_t threadSum = ilpReduce<AddFloat, 4, outscalar_t, accscalar_t>(
+  accscalar_t threadSum = ilpReduce<AddFloat, ILP, outscalar_t, accscalar_t>(
       shift, gradOutput, classes, AddFloat<outscalar_t, accscalar_t>(), accscalar_t(0));
   accscalar_t sum_k = blockReduce<Add, accscalar_t>(
         sdata, threadSum, Add<accscalar_t>(), accscalar_t(0));
 
   Epilogue<scalar_t, accscalar_t, outscalar_t> epilogue(sum_k);
-  int offset = threadIdx.x;
-  int last = classes % (ILP * blockDim.x);
 
-  outscalar_t tmpGradOutput[ILP];
-  outscalar_t tmpOutput[ILP];
-  outscalar_t tmpFinal[ILP];
-  StoreT *tmpGradOut_vec = reinterpret_cast<StoreT*>(&tmpGradOutput[0]);
-  StoreT *tmpOut_vec = reinterpret_cast<StoreT*>(&tmpOutput[0]);
-  StoreT *final_vec = reinterpret_cast<StoreT*>(&tmpFinal[0]);
-
-  for (; offset < classes - last; offset += blockDim.x * ILP) {
-
-    *tmpGradOut_vec = *reinterpret_cast<StoreT*>(&gradOutput[offset * ILP]);
-    *tmpOut_vec = *reinterpret_cast<StoreT*>(&output[offset * ILP]);
-
-    #pragma unroll
-    for (int j = 0; j < ILP; ++j) {
-      tmpFinal[j] = epilogue(tmpGradOutput[j], tmpOutput[j]);
-    }
-
-    *reinterpret_cast<StoreT*>(&gradInput[offset * ILP]) = *final_vec;
+  if (shift == output_shift && shift == grad_output_shift) {
+    WriteBpropResultsVectorized<ILP, scalar_t, accscalar_t, outscalar_t, Epilogue>(classes, shift, gradInput, output, gradOutput, epilogue);
+  } else {
+    WriteBpropResults<ILP, scalar_t, accscalar_t, outscalar_t, Epilogue>(classes, gradInput, output, gradOutput, epilogue);
   }
-
-  for (; offset < classes; offset += blockDim.x)
-    gradInput[offset] = epilogue(gradOutput[offset], output[offset]);
 }
 
 template<template<typename, typename, typename> class Epilogue, bool is_log_softmax>
