@@ -73,9 +73,9 @@ class Linear(Module):
         super(Linear, self).__init__()
         self.in_features = in_features
         self.out_features = out_features
-        self.must_initialize = param_mode == ParameterMode.Infer
 
         if param_mode == ParameterMode.Infer:
+            self.in_features = None
             self.weight = _UninitializedParameter()
         elif param_mode == ParameterMode.Explicit:
             self.weight = Parameter(torch.Tensor(out_features, in_features))
@@ -90,7 +90,7 @@ class Linear(Module):
 
     def reset_parameters(self) -> None:
         # Defer until parameter initialization
-        if not self.must_initialize:
+        if self.in_features is not None:
             init.kaiming_uniform_(self.weight, a=math.sqrt(5))
             if self.bias is not None:
                 fan_in, _ = init._calculate_fan_in_and_fan_out(self.weight)
@@ -99,10 +99,9 @@ class Linear(Module):
 
     def forward(self, input: Tensor) -> Tensor:
         # Inputs are reshaped on the first forward call
-        if self.must_initialize:
+        if self.in_features is None:
             self.in_features = input.shape[-1]
             self.weight = Parameter(torch.Tensor(self.out_features, self.in_features))
-            self.must_initialize = False
             self.reset_parameters()
         return F.linear(input, self.weight, self.bias)
 
