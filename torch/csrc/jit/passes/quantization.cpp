@@ -1476,6 +1476,26 @@ void insertDeQuantCall(
   }
 }
 
+Node* insertChooseQParamsCall(
+    Graph* graph,
+    Value* original_val,
+    Node* insert_point) {
+  WithInsertPoint ins(insert_point);
+  std::string choose_qparams_func = "_choose_qparams_per_tensor";
+  auto reduce_range = graph->insertConstant(false);
+  // choose_qparams_per_tensor has 2 outputs, (scale, zero_point).
+  Node* choose_qparams = graph->create(
+      at::Symbol::aten(choose_qparams_func),
+      {original_val, reduce_range},
+      /* num_outputs = */ 2);
+  choose_qparams->output(0)->setDebugName(original_val->debugName() + ".scale");
+  choose_qparams->output(0)->setType(FloatType::get());
+  choose_qparams->output(1)->setDebugName(
+      original_val->debugName() + ".zero_point");
+  choose_qparams->output(1)->setType(IntType::get());
+  graph->insertNode(choose_qparams);
+  return choose_qparams;
+}
 void insertQuantDeQuantCall(
     Module& module,
     Value* self,
@@ -1497,20 +1517,7 @@ void insertQuantDeQuantCall(
   }
   Node *quant, *choose_qparams;
   if (is_dynamic && !isWeight(module, v)) {
-    std::string choose_qparams_func = "_choose_qparams_per_tensor";
-    auto reduce_range = g->insertConstant(false);
-    // choose_qparams_per_tensor has 2 outputs, (scale, zero_point).
-    choose_qparams = g->create(
-        at::Symbol::aten(choose_qparams_func),
-        {v, reduce_range},
-        /* num_outputs = */ 2);
-
-    choose_qparams->output(0)->setDebugName(v->debugName() + ".scale");
-    choose_qparams->output(0)->setType(FloatType::get());
-    choose_qparams->output(1)->setDebugName(v->debugName() + ".zero_point");
-    choose_qparams->output(1)->setType(IntType::get());
-    g->insertNode(choose_qparams);
-
+    choose_qparams = insertChooseQParamsCall(g, v, v->node()->next());
     std::vector<Value*> quant_inputs = {v};
     for (auto& out : choose_qparams->outputs()) {
       quant_inputs.push_back(out);
@@ -2703,6 +2710,66 @@ void ReplicateDeQuant(std::shared_ptr<Graph>& graph) {
   }
 }
 
+void ReplicateChooseQParamsQuant(std::shared_ptr<Graph>& graph) {
+  std::stack<Block*> blocks_to_visit;
+  std::vector<Node*> quant_nodes_to_rewrite;
+  std::vector<Node*> choose_qparam_nodes_to_rewrite;
+  blocks_to_visit.push(graph->block());
+  while (!blocks_to_visit.empty()) {
+    Block* b = blocks_to_visit.top();
+    blocks_to_visit.pop();
+    for (Node* n : b->nodes()) {
+      if ((n->kind() == Symbol::aten("quantize_per_tensor") ||
+           n->kind() == Symbol::aten("quantize_per_channel")) &&
+          n->output()->uses().size() > 1) {
+        quant_nodes_to_rewrite.push_back(n);
+      }
+      for (Block* subblock : n->blocks()) {
+        blocks_to_visit.push(subblock);
+      }
+    }
+  }
+  for (Node* n : quant_nodes_to_rewrite) {
+    Value* original_val = n->inputs()[0];
+    Value* quantized_val = n->output();
+    Value* dtype = n->inputs()[3];
+    TORCH_CHECK(original_val->uses().size() == 2);
+    for (const Use& use : original_val->uses()) {
+      if (use.user->kind() == Symbol::aten("_choose_qparams_per_tensor")) {
+        choose_qparam_nodes_to_rewrite.push_back(use.user);
+      }
+    }
+    std::vector<Use> uses = quantized_val->uses();
+    for (size_t i = 0; i < uses.size(); ++i) {
+      auto* user = uses[i].user;
+      Node* choose_qparam =
+          insertChooseQParamsCall(graph.get(), original_val, user);
+      WithInsertPoint ins(user);
+      std::vector<Value*> quant_inputs = {original_val};
+      for (auto& out : choose_qparam->outputs()) {
+        quant_inputs.push_back(out);
+      }
+      quant_inputs.push_back(dtype);
+      Node* quant = graph->create(n->kind(), quant_inputs);
+      quant->output()->setDebugName(original_val->debugName() + ".quant");
+      graph->insertNode(quant);
+      user->replaceInputWith(quantized_val, quant->output());
+    }
+  }
+  for (Node* n : quant_nodes_to_rewrite) {
+    n->removeAllInputs();
+  }
+  for (Node* n : choose_qparam_nodes_to_rewrite) {
+    n->removeAllInputs();
+  }
+  for (Node* n : quant_nodes_to_rewrite) {
+    n->destroy();
+  }
+  for (Node* n : choose_qparam_nodes_to_rewrite) {
+    n->destroy();
+  }
+}
+
 // This is the pass to handle ops that does not require observation
 // for example: flatten, average_pool, upsample
 // This is called after inline and before graph execution
@@ -3005,6 +3072,40 @@ void FoldQuantizedPrepackingOps(Module& module) {
   PrePackingOpsFolder(module, filter_fn, "quantized");
 }
 
+void RemoveRedundantQuantizeOps(
+    std::shared_ptr<Graph>& graph,
+    bool is_dynamic) {
+  const PatternInfo& dynamic_quant_ops = PatternInfo::parse_from_str(R"(
+    graph(%a, %reduce_range, %a_dtype):
+        %a_scale : float, %a_zero_point : int = aten::_choose_qparams_per_tensor(%a, %reduce_range)
+        %a_quant = aten::quantize_per_tensor(%a, %a_scale, %a_zero_point, %a_dtype)
+        %a_dequant = aten::dequantize(%a_quant)
+        return (%a_dequant) )");
+  const std::string dynamic_quant_replacement = R"(
+    graph(%a, %reduce_range, %a_dtype):
+        return (%a) )";
+
+  const Graph& pattern_dynamic_quant_graph = *dynamic_quant_ops.pattern_graph;
+  const auto& dynamic_quant_vmap = dynamic_quant_ops.vmap;
+  const auto& matches =
+      findPatternMatches(pattern_dynamic_quant_graph, *graph.get());
+  for (const auto& match : matches) {
+    auto dequant_node =
+        match.values_map.at(dynamic_quant_vmap.at("a_dequant"))->node();
+    Value* dequant_out = dequant_node->output();
+    TORCH_CHECK(
+        dequant_out->uses().size() == 1,
+        "Expect dequant output to have single use");
+    Node* user = dequant_out->uses()[0].user;
+    if (!nodeQuantizable(user, is_dynamic)) {
+      SubgraphRewriter rewriter;
+      rewriter.RegisterRewritePattern(
+          dynamic_quant_ops.pattern_string, dynamic_quant_replacement);
+      rewriter.runOnGraph(graph);
+    }
+  }
+}
+
 script::Module Finalize(script::Module& module, bool is_dynamic) {
   SwapFunctionalLinear(module);
   auto graph = module.get_method("forward").graph();
@@ -3012,10 +3113,14 @@ script::Module Finalize(script::Module& module, bool is_dynamic) {
   ConstantPropagation(graph);
   ReplicateQuant(graph);
   ReplicateDeQuant(graph);
+  if (is_dynamic) {
+    ReplicateChooseQParamsQuant(graph);
+  }
   SwapDeQuant(graph);
   InsertPrepackUnpack(graph);
   ConstantPropagation(graph);
   QuantFusion(graph, is_dynamic);
+  RemoveRedundantQuantizeOps(graph, is_dynamic);
   auto frozen = freeze_module(module);
   FoldQuantizedPrepackingOps(frozen);
   return frozen;

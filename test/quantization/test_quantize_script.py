@@ -1877,6 +1877,24 @@ class TestQuantizeDynamicScript(JitTestCase):
         FileCheck().check("quantized::linear_dynamic") \
                    .run(model.graph)
 
+    def test_dynamic_quant_multi_uses(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+                self.fc = torch.nn.Linear(5, 5).float()
+
+            def forward(self, x):
+                size = x.size()
+                return self.fc(x), size
+
+        model = torch.jit.script(M()).eval()
+        data = torch.rand((1, 5), dtype=torch.float)
+        qconfig_dict = {'': default_dynamic_qconfig}
+
+        model = quantize_dynamic_script(model, qconfig_dict, [data])
+        FileCheck().check("quantized::linear_dynamic") \
+                   .run(model.graph)
+
     def test_prepare_dynamic_lstm(self):
         class M(torch.nn.Module):
             def __init__(self):
