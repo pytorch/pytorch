@@ -1,6 +1,7 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 import copy
 import unittest
+import numpy as np
 
 try:
     import torchvision
@@ -132,14 +133,17 @@ class TestMkldnn(TestCase):
                         loss1.backward()
 
                 y_mkldnn = mkldnn_conv2d(x2).to_dense()
+
                 if train:
                     loss2 = y_mkldnn.sum()
                     loss2.backward()
 
-                self.assertEqual(y_aten, y_mkldnn)
+                np.testing.assert_allclose(
+                    y_aten.detach(), y_mkldnn.detach(), rtol=1e-5, atol=1e-5)
                 if train:
                     self.assertEqual(x1.grad, x2.grad.to_dense())
-                    self.assertEqual(conv2d.weight.grad, mkldnn_conv2d.weight.grad, 1e-2)
+                    np.testing.assert_allclose(
+                        conv2d.weight.grad, mkldnn_conv2d.weight.grad, rtol=1e-3, atol=1e-3)
                     if bias:
                         self.assertEqual(conv2d.bias.grad, mkldnn_conv2d.bias.grad)
                 else:

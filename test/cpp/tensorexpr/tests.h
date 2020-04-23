@@ -124,6 +124,7 @@ namespace jit {
   _(SimplifyRoundModPattern)              \
   _(SimplifyRoundModPatternFactorization) \
   _(SimplifyRoundModPatternMultivar)      \
+  _(SimplifyDivisionScalarFactorization)  \
   _(StmtClone)
 
 #define TH_FORALL_TENSOREXPR_TESTS_LLVM(_) \

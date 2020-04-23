@@ -1,8 +1,8 @@
+#include <fbgemm/FbgemmFakeFP16.h>
 #include "caffe2/caffe2/operators/elementwise_add_op.h"
 #include "caffe2/caffe2/operators/elementwise_div_op.h"
 #include "caffe2/caffe2/operators/elementwise_mul_op.h"
 #include "caffe2/caffe2/operators/elementwise_sub_op.h"
-#include "caffe2/fb/fbgemm/fbgemm_fp16/include/fbgemm/FbgemmFloat16.h"
 #include "caffe2/fb/fbgemm/sum_fp16_fake_op.h"
 #include "caffe2/operators/utility_ops.h"
 

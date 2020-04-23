@@ -37,14 +37,14 @@ const Variable & checked_cast_variable(const Tensor & t, const char * name, int 
   if (!t.defined()) {
     AT_ERROR("Expected a Tensor of type Variable but found an undefined Tensor for argument #", pos, " '", name, "'");
   }
-  return as_variable_ref(t);
+  return t;
 }
 
 Variable & checked_cast_variable(Tensor & t, const char * name, int pos) {
   if (!t.defined()) {
     AT_ERROR("Expected a Tensor of type Variable but found an undefined Tensor for argument #", pos, " '", name, "'");
   }
-  return as_variable_ref(t);
+  return t;
 }
 }
 
@@ -120,7 +120,7 @@ void set_data(const Tensor & self, const Tensor & new_data) {
 }
 
 Tensor data(const Tensor & self) {
-  return as_variable_ref(self).variable_data();
+  return self.variable_data();
 }
 
 bool is_leaf(const Tensor & self) {
@@ -228,7 +228,7 @@ Tensor & copy_(Tensor & self, const Tensor & src, bool non_blocking) {
     self_.copy_(src_, non_blocking);
   }
   increment_version(self);
-  rebase_history(as_variable_ref( self ), std::move(grad_fn));
+  rebase_history(self , std::move(grad_fn));
 #if !defined(PYTORCH_DISABLE_TRACING)
   if(torch::jit::tracer::isTracing()) {
     jit::tracer::setOutput(output, self);
@@ -242,7 +242,7 @@ Tensor& resize_(
     IntArrayRef size,
     c10::optional<MemoryFormat> optional_memory_format) {
   auto& self_ = unpack(self, "self", 0);
-  if (as_variable_ref(self).requires_grad()) {
+  if (self.requires_grad()) {
     AT_ERROR("cannot resize variables that require grad");
   }
 #if !defined(PYTORCH_DISABLE_TRACING)
@@ -265,7 +265,7 @@ Tensor& resize_as_(
     c10::optional<MemoryFormat> optional_memory_format) {
   auto& self_ = unpack(self, "self", 0);
   auto& the_template_ = unpack(the_template, "the_template", 1);
-  if (as_variable_ref(self).requires_grad()) {
+  if (self.requires_grad()) {
     AT_ERROR("cannot resize variables that require grad");
   }
 #if !defined(PYTORCH_DISABLE_TRACING)
@@ -321,7 +321,7 @@ Tensor & detach_(Tensor & self) {
   }
 #endif
   // <NON_GENERATED_CODE>
-  if (as_variable_ref(self).is_view()) {
+  if (self.is_view()) {
     AT_ERROR("Can't detach views in-place. Use detach() instead");
   }
   // I think the choice here is conservative.  In principle, doing
@@ -330,7 +330,7 @@ Tensor & detach_(Tensor & self) {
   // grad_fn and output_nr; there's other metadata like debug name
   // and hooks which aren't cleared.  Is this function supposed to
   // clear those too? I'm not too sure, so I'm leaving it be for now.
-  auto autograd_meta = impl::materialize_autograd_meta(as_variable_ref(self));
+  auto autograd_meta = impl::materialize_autograd_meta(self);
   autograd_meta->set_requires_grad(false, self.unsafeGetTensorImpl());
   autograd_meta->grad_fn_.reset();
   autograd_meta->output_nr_ = 0;
