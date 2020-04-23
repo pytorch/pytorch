@@ -629,6 +629,13 @@ std::tuple<Tensor, Tensor> batch_norm_stats_cuda_template(const Tensor& input_, 
   Tensor dummy_var_;
   Tensor mean_;
   Tensor invstd_;
+  if (input_.size(0) == 0) {
+    auto input_options = input_.options();
+    return std::make_tuple(
+      at::zeros({n_input}, input_options),
+      at::zeros({n_input}, input_options)
+    );
+  }
   auto input_reshaped = input_.reshape({input_.size(0), input_.size(1), -1}); // internally we merge the feature dimensions
 
   auto bs = input_reshaped.size(0);
