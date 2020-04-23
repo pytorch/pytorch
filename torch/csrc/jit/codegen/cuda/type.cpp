@@ -52,9 +52,10 @@ template <typename KeyType, typename ValType>
 using _enum_unordered_map =
     std::unordered_map<KeyType, ValType, _enum_class_hash<KeyType>>;
 static _enum_unordered_map<DataType, std::string> data_type_string_map{
+    {DataType::Bool,  "bool"},
     {DataType::Float, "float"},
-    {DataType::Half, "__half"},
-    {DataType::Int, "size_t"}};
+    {DataType::Half,  "__half"},
+    {DataType::Int,   "size_t"}};
 static _enum_unordered_map<ValType, std::string> val_type_string_map{
     {ValType::TensorIndex, "TensorIndex"},
     {ValType::TensorView, "TensorView"},
@@ -172,6 +173,7 @@ static _enum_unordered_map<ParallelType, std::string> parallel_type_string_map{
     {ParallelType::Serial, "Serial"}};
 
 static _enum_unordered_map<at::ScalarType, DataType> at_type_map{
+    {at::ScalarType::Bool, DataType::Bool},
     {at::ScalarType::Float, DataType::Float},
     {at::ScalarType::Half, DataType::Half},
     {at::ScalarType::Int, DataType::Int}};

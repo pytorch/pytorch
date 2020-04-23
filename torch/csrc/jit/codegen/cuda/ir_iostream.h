@@ -35,6 +35,7 @@ struct Split;
 struct Merge;
 struct Reorder;
 
+struct Bool;
 struct Float;
 struct Half;
 struct Int;
@@ -99,6 +100,7 @@ struct TORCH_CUDA_API IRPrinter : public OptInConstDispatch {
   virtual void handle(const TensorIndex* const);
   virtual void handle(const TensorContiguity* const);
 
+  virtual void handle(const Bool* const);
   virtual void handle(const Float* const);
   virtual void handle(const Half* const);
   virtual void handle(const Int* const);

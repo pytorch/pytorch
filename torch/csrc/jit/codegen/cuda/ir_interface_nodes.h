@@ -17,6 +17,41 @@ namespace jit {
 namespace fuser {
 
 /*
+ * A Bool value.
+ * This value can be a symbolic value (defined after the kernel
+ * is compiled) or a constant value (inlined into the kernel definition).
+ */
+struct TORCH_CUDA_API Bool : public Val {
+  ~Bool() = default;
+
+  Bool() : Val(ValType::Scalar, DataType::Bool), maybe_value_{c10::nullopt} {}
+
+  Bool(bool _value)
+      : Val(ValType::Scalar, DataType::Bool), maybe_value_{_value} {}
+
+  Bool(const Bool& other) = delete;
+  Bool& operator=(const Bool& other) = delete;
+
+  Bool(Bool&& other) = delete;
+  Bool& operator=(Bool&& other) = delete;
+
+  bool isSymbolic() const {
+    return !(maybe_value_.has_value());
+  }
+  bool isConst() const {
+    return maybe_value_.has_value();
+  }
+  c10::optional<bool> value() const noexcept {
+    return maybe_value_;
+  }
+
+  bool sameAs(const Bool* const other) const;
+
+ private:
+  const c10::optional<bool> maybe_value_;
+};
+
+/*
  * A Float32 value. For now we don't have any other type besides
  * Float32. This value can be a symbolic value (defined after the kernel
  * is compiled) or a constant value (inlined into the kernel definition).

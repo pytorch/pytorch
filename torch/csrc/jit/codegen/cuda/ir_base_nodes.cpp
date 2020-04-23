@@ -49,6 +49,10 @@ struct ConstCheck : OptOutConstDispatch {
  private:
   bool is_const_ = false;
 
+  void handle(const Bool* const b) override {
+    is_const_ = b->isConst();
+  }
+
   void handle(const Float* const f) override {
     is_const_ = f->isConst();
   }

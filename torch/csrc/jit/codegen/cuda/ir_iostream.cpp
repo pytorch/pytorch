@@ -136,6 +136,21 @@ void IRPrinter::handle(const TensorContiguity* const t) {
   os << "format_tag: " << t->getContiguityTag();
 }
 
+void IRPrinter::handle(const Bool* const b) {
+  if (print_inline_ && FusionGuard::getCurFusion()->origin(b) != nullptr) {
+    os << "( ";
+    handle(FusionGuard::getCurFusion()->origin(b));
+    os << " )";
+    return;
+  }
+
+  if (b->isSymbolic()) {
+    os << "b" << b->name();
+  } else {
+    os << "bool(" << *(b->value()) << ")";
+  }
+}
+
 void IRPrinter::handle(const Float* const f) {
   if (print_inline_ && FusionGuard::getCurFusion()->origin(f) != nullptr) {
     os << "( ";

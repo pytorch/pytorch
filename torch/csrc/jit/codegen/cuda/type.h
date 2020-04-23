@@ -24,6 +24,7 @@ enum class ValType {
 };
 
 enum class DataType {
+  Bool,
   Float,
   Half,
   Int,

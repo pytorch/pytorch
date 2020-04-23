@@ -18,6 +18,10 @@ struct ScalarCheck : OptInDispatch {
   Val* v2_;
   bool same = false;
 
+  void handle(Bool* b) override {
+    same = static_cast<Bool*>(v1_)->sameAs(static_cast<Bool*>(v2_));
+  }
+
   void handle(Float* f) override {
     same = static_cast<Float*>(v1_)->sameAs(static_cast<Float*>(v2_));
   }
@@ -55,6 +59,12 @@ struct ScalarCheck : OptInDispatch {
   }
 };
 } // namespace
+
+bool Bool::sameAs(const Bool* const other) const {
+  if (isConst() && other->isConst())
+    return *value() == *(other->value());
+  return this == other;
+}
 
 bool Float::sameAs(const Float* const other) const {
   if (isConst() && other->isConst())

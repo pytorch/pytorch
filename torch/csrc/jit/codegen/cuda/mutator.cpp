@@ -102,6 +102,9 @@ Statement* OptOutMutator::mutate(TensorIndex* ti) {
   return mutated_val;
 }
 
+Statement* OptOutMutator::mutate(Bool* n) {
+  return n;
+}
 Statement* OptOutMutator::mutate(Float* n) {
   return n;
 }

@@ -44,6 +44,9 @@ void Val::dispatch(T handler, Val* val) {
   switch (*(val->getValType())) {
     case ValType::Scalar:
       switch (*(val->getDataType())) {
+        case DataType::Bool:
+          ptr(handler)->handle(static_cast<Bool*>(val));
+          return;
         case DataType::Float:
           ptr(handler)->handle(static_cast<Float*>(val));
           return;
@@ -127,6 +130,9 @@ void Val::constDispatch(T handler, const Val* const val) {
   switch (*(val->getValType())) {
     case ValType::Scalar:
       switch (*(val->getDataType())) {
+        case DataType::Bool:
+          ptr(handler)->handle(static_cast<const Bool* const>(val));
+          return;
         case DataType::Float:
           ptr(handler)->handle(static_cast<const Float* const>(val));
           return;
@@ -221,6 +227,8 @@ Statement* Val::mutatorDispatch(T mutator, Val* val) {
   switch (*(val->getValType())) {
     case ValType::Scalar:
       switch (*(val->getDataType())) {
+        case DataType::Bool:
+          return ptr(mutator)->mutate(static_cast<Bool*>(val));
         case DataType::Float:
           return ptr(mutator)->mutate(static_cast<Float*>(val));
         case DataType::Half:

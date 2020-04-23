@@ -60,6 +60,7 @@ struct IterDomain;
 struct TensorDomain;
 struct TensorView;
 struct TensorIndex;
+struct Bool;
 struct Float;
 struct Half;
 struct Int;
@@ -100,6 +101,7 @@ struct TORCH_CUDA_API OptOutConstDispatch {
   virtual void handle(const TensorDomain* const) {}
   virtual void handle(const TensorView* const) {}
   virtual void handle(const TensorIndex* const) {}
+  virtual void handle(const Bool* const) {}
   virtual void handle(const Float* const) {}
   virtual void handle(const Half* const) {}
   virtual void handle(const Int* const) {}
@@ -137,6 +139,7 @@ struct TORCH_CUDA_API OptOutDispatch {
   virtual void handle(TensorDomain*) {}
   virtual void handle(TensorView*) {}
   virtual void handle(TensorIndex*) {}
+  virtual void handle(Bool*) {}
   virtual void handle(Float*) {}
   virtual void handle(Half*) {}
   virtual void handle(Int*) {}
@@ -181,6 +184,9 @@ struct TORCH_CUDA_API OptInConstDispatch {
   }
   virtual void handle(const TensorIndex* const) {
     AT_ERROR("Handle not overriden for TensorIndex.");
+  }
+  virtual void handle(const Bool* const) {
+    TORCH_INTERNAL_ASSERT(false, "Handle not overriden for Bool.");
   }
   virtual void handle(const Float* const) {
     TORCH_INTERNAL_ASSERT(false, "Handle not overriden for Float.");
@@ -252,6 +258,9 @@ struct TORCH_CUDA_API OptInDispatch {
   }
   virtual void handle(TensorIndex*) {
     AT_ERROR("Handle not overriden for TensorIndex.");
+  }
+  virtual void handle(Bool*) {
+    TORCH_INTERNAL_ASSERT(false, "Handle not overriden for Bool.");
   }
   virtual void handle(Float*) {
     TORCH_INTERNAL_ASSERT(false, "Handle not overriden for Float.");
@@ -340,6 +349,7 @@ struct TORCH_CUDA_API OptOutMutator {
   virtual Statement* mutate(TensorDomain*);
   virtual Statement* mutate(TensorView*);
   virtual Statement* mutate(TensorIndex*);
+  virtual Statement* mutate(Bool*);
   virtual Statement* mutate(Float*);
   virtual Statement* mutate(Half*);
   virtual Statement* mutate(Int*);
@@ -394,6 +404,9 @@ struct TORCH_CUDA_API OptInMutator {
   }
   virtual Statement* mutate(TensorIndex*) {
     AT_ERROR("Mutate not overriden for TensorIndex.");
+  }
+  virtual Statement* mutate(Bool*) {
+    TORCH_INTERNAL_ASSERT(false, "Mutate not overriden for Bool.");
   }
   virtual Statement* mutate(Float*) {
     TORCH_INTERNAL_ASSERT(false, "Mutate not overriden for Float.");
