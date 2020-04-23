@@ -2655,6 +2655,15 @@ class TestAutograd(TestCase):
         with torch.autograd.profiler.profile() as prof:
             x.resize_([3, 2])
 
+    def test_profiler_custom_op(self):
+        inst = torch.classes._TorchScriptTesting._PickleTester([3, 4])
+
+        with torch.autograd.profiler.profile() as prof:
+            torch.ops._TorchScriptTesting.take_an_instance(inst)
+
+        self.assertEqual(len(prof.function_events), 1)
+        self.assertEqual(prof.function_events[0].name, '_TorchScriptTesting::take_an_instance')
+
     def test_record_function_callbacks(self):
         x = torch.randn(10, 10)
         with profile() as p:

@@ -346,3 +346,15 @@ void RecordProfile::processEvents(const std::vector<Event*>& events) {
 }
 
 }}}
+
+void profile_wrapper(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
+  c10::impl::ExcludeDispatchKeyGuard key_guard(c10::DispatchKey::Profiler);
+  RECORD_FUNCTION(op.schema().name(), *stack, torch::autograd::Node::peek_at_next_sequence_nr());
+  op.callBoxed(stack);
+}
+
+auto registry = c10::Dispatcher::singleton()
+  .registerFallback(
+    c10::DispatchKey::Profiler,
+    c10::KernelFunction::makeFromBoxedFunction<&profile_wrapper>(),
+    "");
