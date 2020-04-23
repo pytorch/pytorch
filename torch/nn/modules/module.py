@@ -84,6 +84,7 @@ class Module(object):
         self.training = True
         self._parameters = OrderedDict()
         self._buffers = OrderedDict()
+        self._persistent_buffers = set()
         self._backward_hooks = OrderedDict()
         self._forward_hooks = OrderedDict()
         self._forward_pre_hooks = OrderedDict()
@@ -104,12 +105,14 @@ class Module(object):
         """
         raise NotImplementedError
 
-    def register_buffer(self, name, tensor):
-        r"""Adds a persistent buffer to the module.
+    def register_buffer(self, name, tensor, persistent=True):
+        r"""Adds a buffer to the module.
 
         This is typically used to register a buffer that should not to be
         considered a model parameter. For example, BatchNorm's ``running_mean``
-        is not a parameter, but is part of the persistent state.
+        is not a parameter, but is part of the module's state. Buffers, by
+        default, are persistent and will be saved alongside parameters. This
+        behavior can be changed by setting :attr:`persistent` to ``False``.
 
         Buffers can be accessed as attributes using given names.
 
@@ -117,6 +120,8 @@ class Module(object):
             name (string): name of the buffer. The buffer can be accessed
                 from this module using the given name
             tensor (Tensor): buffer to be registered.
+            persistent (bool): whether the buffer is part of this module's
+                `state_dict`.
 
         Example::
 
@@ -141,6 +146,10 @@ class Module(object):
                             .format(torch.typename(tensor), name))
         else:
             self._buffers[name] = tensor
+            if persistent:
+                self._persistent_buffers.add(name)
+            else:
+                self._persistent_buffers.discard(name)
 
     def register_parameter(self, name, param):
         r"""Adds a parameter to the module.
@@ -617,6 +626,7 @@ class Module(object):
                 raise AttributeError(
                     "cannot assign parameters before Module.__init__() call")
             remove_from(self.__dict__, self._buffers, self._modules)
+            self._persistent_buffers.discard(name)
             self.register_parameter(name, value)
         elif params is not None and name in params:
             if value is not None:
@@ -631,6 +641,7 @@ class Module(object):
                     raise AttributeError(
                         "cannot assign module before Module.__init__() call")
                 remove_from(self.__dict__, self._parameters, self._buffers)
+                self._persistent_buffers.discard(name)
                 modules[name] = value
             elif modules is not None and name in modules:
                 if value is not None:
@@ -654,6 +665,7 @@ class Module(object):
             del self._parameters[name]
         elif name in self._buffers:
             del self._buffers[name]
+            self._persistent_buffers.discard(name)
         elif name in self._modules:
             del self._modules[name]
         else:
@@ -687,7 +699,7 @@ class Module(object):
             if param is not None:
                 destination[prefix + name] = param if keep_vars else param.detach()
         for name, buf in self._buffers.items():
-            if buf is not None:
+            if buf is not None and name in self._persistent_buffers:
                 destination[prefix + name] = buf if keep_vars else buf.detach()
 
     def state_dict(self, destination=None, prefix='', keep_vars=False):
@@ -766,7 +778,8 @@ class Module(object):
         for hook in self._load_state_dict_pre_hooks.values():
             hook(state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys, error_msgs)
 
-        local_name_params = itertools.chain(self._parameters.items(), self._buffers.items())
+        persistent_buffers = {k: v for k, v in self._buffers.items() if k in self._persistent_buffers}
+        local_name_params = itertools.chain(self._parameters.items(), persistent_buffers)
         local_state = {k: v for k, v in local_name_params if v is not None}
 
         for name, param in local_state.items():
