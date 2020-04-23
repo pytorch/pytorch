@@ -1602,10 +1602,6 @@ class InsertQuantDeQuantHelper {
     }
   }
 
-  c10::optional<Module> findChildModuleToQuantize(
-      Module& module,
-      Node* n,
-      Value* self);
   void collectObserverNodesAndValueToQuantize(Module& module, Value*);
   // Cleanup observer nodes from graph and observer modules
   // from module object and ClassType
@@ -1826,22 +1822,6 @@ std::tuple<c10::QScheme, QParamVector> InsertQuantDeQuantHelper::
   return std::make_tuple(qscheme, qparams);
 }
 
-c10::optional<Module> InsertQuantDeQuantHelper::findChildModuleToQuantize(
-    Module& module,
-    Node* n,
-    Value* self) {
-  Value* child_instance = n->inputs()[0];
-  TORCH_INTERNAL_ASSERT(
-      child_instance->node()->kind() == prim::GetAttr,
-      "Child instance should come from GetAttr.");
-  auto child_module_name = child_instance->node()->s(attr::name);
-  if (child_module_name.find("_observer_") == std::string::npos) {
-    // return module.attr(child_module_name).toModule();
-    return getInvokedModule(module, n, self);
-  }
-  return c10::nullopt;
-}
-
 ModuleMethodVector InsertQuantDeQuantHelper::getInvokedMethods(
     Module& module,
     const std::string& method_name) {
@@ -1862,7 +1842,14 @@ ModuleMethodVector InsertQuantDeQuantHelper::getInvokedMethods(
         if (module_instance == graph->inputs()[0]) {
           m = module;
         } else {
-          m = findChildModuleToQuantize(module, n, graph->inputs()[0]);
+          TORCH_INTERNAL_ASSERT(
+              module_instance->node()->kind() == prim::GetAttr,
+              "Module instance should come from GetAttr.");
+          if (module_method_name.find("_observer_") == std::string::npos) {
+            m = getInvokedModule(module, n, graph->inputs()[0]);
+          } else {
+            m = c10::nullopt;
+          }
         }
         if (m) {
           invoked_methods.push_back({*m, module_method_name});

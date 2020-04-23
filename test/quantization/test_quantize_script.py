@@ -1161,19 +1161,15 @@ graph(%input, %weight):
                    .check("CallMethod") \
                    .run(model.graph)
 
-    def test_qconfig_w_types(self):
+    def test_qconfig_with_types(self):
         data = [(torch.rand((1, 5), dtype=torch.float), torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
         qconfig_dict = {torch.nn.Linear : default_qconfig, 'sub2.fc1' : default_per_channel_qconfig}
+        # Modules where name is specified in qconfig_dict takes precedence over type for that module.
         qconfig_dict = preprocess_qconfig_dict(NestedModel().eval(), qconfig_dict)
         # check to make sure it matches expected dict.
         expected_qconfig_dict = {'sub1.fc' : default_qconfig, 'sub2.fc1': default_per_channel_qconfig,
                                  'sub2.fc2': default_qconfig, 'fc3': default_qconfig}
         self.assertEqual(qconfig_dict, expected_qconfig_dict)
-        # Convert and run model.
-        model = torch.jit.script(NestedModel()).eval()
-        model = quantize_script(model, qconfig_dict, _test_only_eval_fn, [data])
-        FileCheck().check("quantized::linear") \
-                   .run(model.graph)
 
     def test_module_list(self):
         class SimpleLinearLayer(torch.nn.Module):
@@ -1204,8 +1200,7 @@ graph(%input, %weight):
         assert len(attrs_with_prefix(model, '_observer')) == 3
         model(data)
         model = convert_script(model, debug=False)
-        FileCheck().check("quantized::linear") \
-                   .check("quantized::linear") \
+        FileCheck().check_count("quantized::linear", 2, exactly=True) \
                    .run(model.graph)
 
 class TestQuantizeScriptPTSQOps(JitTestCase):
@@ -1837,40 +1832,8 @@ class TestQuantizeDynamicScript(JitTestCase):
                 return self.fc(x)
 
         data = torch.rand((1, 5), dtype=torch.float)
-        qconfig_dict = {'': default_dynamic_qconfig}
-        model = torch.jit.script(M()).eval()
-        model = quantize_dynamic_script(model, qconfig_dict, data)
-        FileCheck().check("quantized::linear_dynamic") \
-                   .run(model.graph)
-
-    def test_dynamic_qconfig_w_types(self):
-        class LinearReluModel(torch.nn.Module):
-            def __init__(self):
-                super(LinearReluModel, self).__init__()
-                self.fc = torch.nn.Linear(5, 5).to(dtype=torch.float)
-                self.relu = torch.nn.ReLU()
-
-            def forward(self, x):
-                x = self.relu(self.fc(x))
-                return x
-
-        class M(torch.nn.Module):
-            def __init__(self):
-                super(M, self).__init__()
-                self.sub1 = LinearReluModel()
-                self.fc = torch.nn.Linear(5, 5).float()
-
-            def forward(self, x):
-                x = self.sub1(x)
-                return self.fc(x)
-
-        data = torch.rand((1, 5), dtype=torch.float)
-        qconfig_dict = {torch.nn.Linear : default_dynamic_qconfig, 'fc': default_dynamic_qconfig}
+        qconfig_dict = {nn.Linear : default_dynamic_qconfig}
         qconfig_dict = preprocess_qconfig_dict(M().eval(), qconfig_dict)
-        # check to make sure it matches expected dict.
-        expected_qconfig_dict = {'fc': default_dynamic_qconfig, 'sub1.fc': default_dynamic_qconfig}
-        self.assertEqual(expected_qconfig_dict, qconfig_dict)
-        # Convert and run model.
         model = torch.jit.script(M()).eval()
         model = quantize_dynamic_script(model, qconfig_dict, data)
         FileCheck().check("quantized::linear_dynamic") \
