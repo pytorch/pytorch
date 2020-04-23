@@ -2974,31 +2974,22 @@ def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corne
     else:
         raise ValueError('either size or scale_factor should be defined')
 
-    # Need to check for explicitly passed recompute_scale_factor
-    # before handling the default case below.  This logic can
-    # probably be simplified once the default changes.
-    if recompute_scale_factor and size is not None:
-        raise ValueError("recompute_scale_factor is not meaningful with an explicit size.")
-
     if recompute_scale_factor is None:
-        # TODO: Change default and update warning.
-        recompute_scale_factor = True
-
         # only warn when the scales have floating values since
         # the result for ints is the same with/without recompute_scale_factor
         for scale in scale_factors or []:
             if math.floor(scale) != scale:
-                warnings.warn("The default behavior for interpolate/upsample with float scale_factor will change "
-                              "in 1.6.0 to align with other frameworks/libraries, and use scale_factor directly, "
+                warnings.warn("The default behavior for interpolate/upsample with float scale_factor changd "
+                              "in 1.6.0 to align with other frameworks/libraries, and now uses scale_factor directly, "
                               "instead of relying on the computed output size. "
-                              "If you wish to keep the old behavior, please set recompute_scale_factor=True. "
+                              "If you wish to restore the old behavior, please set recompute_scale_factor=True. "
                               "See the documentation of nn.Upsample for details. ")
                 break
-
-    # If recompute_scale_factor is True, we compute output_size here,
-    # then un-set scale_factors.  The C++ code will recompute it based
-    # on the (integer) output size.
-    if recompute_scale_factor and output_size is None:
+    elif recompute_scale_factor:
+        if size is not None:
+            raise ValueError("recompute_scale_factor is not meaningful with an explicit size.")
+        # We compute output_size here, then un-set scale_factors.
+        # The C++ code will recompute it based on the (integer) output size.
         if not torch.jit.is_scripting() and torch._C._get_tracing_state():
             # make scale_factor a tensor in tracing so constant doesn't get baked in
             output_size = [(torch.floor((input.size(i + 2).float() * torch.tensor(scale_factors[i],
