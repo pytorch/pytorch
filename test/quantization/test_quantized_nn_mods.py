@@ -148,7 +148,7 @@ class FunctionalAPITest(QuantizationTestCase):
            Y_scale=st.floats(4.2, 5.6),
            Y_zero_point=st.integers(0, 4),
            use_bias=st.booleans(),
-           use_channelwise=st.booleans(),
+           use_channelwise=[False],
            qengine=st.sampled_from(("qnnpack", "fbgemm")))
     def test_conv2d_api(
         self, batch_size, in_channels_per_group, H, W, out_channels_per_group,

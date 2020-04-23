@@ -38,10 +38,6 @@ jobs:
       - name: Ensure C++ source files are not executable
         run: |
           (! find . \( -path ./third_party -o -path ./.git -o -path ./torch/bin -o -path ./build \) -prune -o -type f -executable -regextype posix-egrep -not -regex '.+(\.(bash|sh|py|so)|git-pre-commit|git-clang-format)$' -print | grep . || (echo 'The above files have executable permission; please remove their executable permission by using `chmod -x`'; false))
-      - name: MyPy typecheck
-        run: |
-          pip install mypy mypy-extensions
-          mypy @mypy-files.txt
       - name: C++ docs check
         run: |
           sudo apt-get install -y doxygen && pip install -r requirements.txt
