@@ -15,7 +15,7 @@ from hypothesis import strategies as st
 import torch.testing._internal.hypothesis_utils as hu
 hu.assert_deadline_disabled()
 
-from torch.testing._internal.common_utils import TEST_WITH_UBSAN, TestCase, run_tests, IS_PPC, IS_MACOS
+from torch.testing._internal.common_utils import TEST_WITH_UBSAN, TestCase, IS_PPC, IS_MACOS
 from torch.testing._internal.common_quantized import _quantize, _dequantize, _calculate_dynamic_qparams, \
     override_quantized_engine
 
@@ -109,6 +109,37 @@ def _test_hardswish(self, X, Y_scale, Y_zero_point, engine):
         self.assertEqual(
             qY, qY_hat,
             message="Hardswish failed: {} vs {}".format(qY, qY_hat))
+
+"""Common logic for hardswish testing, called from fbgemm and qnnpack testers"""
+def _test_hardsigmoid(self, X, engine):
+    if engine not in torch.backends.quantized.supported_engines:
+        return
+    with override_quantized_engine(engine):
+        X, (scale, zero_point, torch_type) = X
+
+        X = torch.from_numpy(X)
+
+        qX = torch.quantize_per_tensor(X, scale=scale,
+                                       zero_point=zero_point,
+                                       dtype=torch_type)
+        dqX = qX.dequantize()
+
+
+        # Quantize the reference to account for max error.
+        # Note that the output scale has +1, because we use scale of 1.0/2^BITS
+        # in the implementations.
+        f_min, f_max = 0.0, 1.0
+        q_min, q_max = torch.iinfo(torch_type).min, torch.iinfo(torch_type).max
+        output_scale = (f_max - f_min) / (q_max - q_min + 1.0)
+        output_zero_point = 0 if torch_type == torch.qint32 else q_min
+        dqY_hat = F.hardsigmoid(dqX)
+        qY_hat = torch.quantize_per_tensor(dqY_hat, scale=output_scale,
+                                           zero_point=output_zero_point,
+                                           dtype=torch_type)
+
+        qY = torch.nn.quantized.functional.hardsigmoid(qX)
+        self.assertEqual(qY, qY_hat,
+                         message="Hardsigmoid failed: {} vs. {}".format(qY, qY_hat))
 
 class TestQuantizedOps(TestCase):
 
@@ -265,31 +296,7 @@ class TestQuantizedOps(TestCase):
                        elements=hu.floats(-1e3, 1e3, allow_nan=False, allow_infinity=False),
                        qparams=hu.qparams()))
     def test_qhardsigmoid(self, X):
-        X, (scale, zero_point, torch_type) = X
-
-        X = torch.from_numpy(X)
-
-        qX = torch.quantize_per_tensor(X, scale=scale,
-                                       zero_point=zero_point,
-                                       dtype=torch_type)
-        dqX = qX.dequantize()
-
-
-        # Quantize the reference to account for max error.
-        # Note that the output scale has +1, because we use scale of 1.0/2^BITS
-        # in the implementations.
-        f_min, f_max = 0.0, 1.0
-        q_min, q_max = torch.iinfo(torch_type).min, torch.iinfo(torch_type).max
-        output_scale = (f_max - f_min) / (q_max - q_min + 1.0)
-        output_zero_point = 0 if torch_type == torch.qint32 else q_min
-        dqY_hat = F.hardsigmoid(dqX)
-        qY_hat = torch.quantize_per_tensor(dqY_hat, scale=output_scale,
-                                           zero_point=output_zero_point,
-                                           dtype=torch_type)
-
-        qY = torch.nn.quantized.functional.hardsigmoid(qX)
-        self.assertEqual(qY, qY_hat,
-                         message="Hardsigmoid failed: {} vs. {}".format(qY, qY_hat))
+        _test_hardsigmoid(self, X, 'fbgemm')
 
 
     """Tests the correctness of the quantized::qlayer_norm op."""
@@ -2817,6 +2824,13 @@ class TestQNNPackOps(TestCase):
     def test_hardswish(self, X, Y_scale, Y_zero_point):
         _test_hardswish(self, X, Y_scale, Y_zero_point, 'qnnpack')
 
+    """Tests the correctness of the quantized::hardsigmoid op."""
+    @given(X=hu.tensor(shapes=hu.array_shapes(1, 8, 1, 8),
+                       elements=hu.floats(-1e6, 1e6, allow_nan=False, allow_infinity=False),
+                       qparams=hu.qparams(dtypes=(torch.quint8))))
+    def test_qhardsigmoid(self, X):
+        _test_hardsigmoid(self, X, 'qnnpack')
+
 """Tests the correctness of the tensor comparators."""
 class TestComparatorOps(TestCase):
     """Tests the element-wise equality ops."""
@@ -2883,7 +2897,3 @@ class TestComparatorOps(TestCase):
             result = getattr(qA, op)(b)
             self.assertEqual(result_ref, result,
                              "'tensor.{}(scalar)'' failed".format(op))
-
-
-if __name__ == "__main__":
-    run_tests()
