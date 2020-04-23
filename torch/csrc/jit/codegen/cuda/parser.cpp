@@ -253,7 +253,7 @@ class IrParser {
         "aten::frac(Tensor self) -> Tensor",
         "aten::reciprocal(Tensor self) -> Tensor",
         "aten::relu(Tensor self) -> Tensor",
-        "aten::sigmoid(Tensor self) -> Tensor"
+        "aten::sigmoid(Tensor self) -> Tensor",
         };
     for (auto signature : UnaryOp) {
       auto ptr_op = getOperatorForLiteral(signature);
@@ -294,6 +294,19 @@ class IrParser {
             auto operand = value_maps[node->input()->unique()];
 
             auto out = unaryOp(op_mapping[node->kind()], operand);
+            value_maps.emplace(node->output()->unique(), out);
+          });
+    }
+
+    {
+      auto ptr_op = getOperatorForLiteral(
+          "aten::rand_like(Tensor self, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor");
+      registerParseRule(ptr_op,
+          [](const Node* const node,
+             std::unordered_map<size_t, CgValue>& value_maps) -> void {
+            auto operand = value_maps[node->inputs()[0]->unique()];
+
+            auto out = unaryOp(UnaryOpType::RandLike, operand);
             value_maps.emplace(node->output()->unique(), out);
           });
     }
@@ -350,6 +363,10 @@ class IrParser {
         cg_val = new Int();
       }
       value_maps_.emplace(val->unique(), cg_val);
+      return true;
+    } else if (val->type()->isSubtypeOf(
+                   static_cast<c10::TypePtr>(NoneType::get()))) {
+      // TODO: should we consider adding support for NoneType;
       return true;
     }
     return false;

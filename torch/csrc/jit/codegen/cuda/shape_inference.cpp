@@ -72,6 +72,7 @@ class NaiveShapeTypePropagator {
       case aten::reciprocal:
       case aten::relu:
       case aten::sigmoid:
+      case aten::rand_like:
         {
           TORCH_CHECK(
                node->input(0)->type()->cast<TensorType>()->isComplete(),

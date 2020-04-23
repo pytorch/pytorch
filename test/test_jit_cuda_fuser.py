@@ -117,6 +117,7 @@ class TestCudaFuser(JitTestCase):
         self.assertEqual(o, jit_o)
         self.assertTrue(self._has_cuda_fusion_group(t_jit.graph_for(x, y, 2.0)))
 
+    @unittest.skipIf(True, "real broadcast with different output not supported yet")
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING, "Requires profiling node to run cuda fuser")
     @skipIfRocm
@@ -130,6 +131,27 @@ class TestCudaFuser(JitTestCase):
         t_jit = torch.jit.script(t)
         x = torch.randn(32, 32, dtype=torch.float, device="cuda")
         y = torch.randn(2, 32, 32, dtype=torch.float, device="cuda")
+        z = torch.randn(4, 32, 32, dtype=torch.float, device="cuda")
+        jit_o = t_jit(x, y, z)
+        jit_o = t_jit(x, y, z)
+        o = t(x, y, z)
+        self.assertEqual(o, jit_o)
+        # Currently cannot fuse this
+        self.assertTrue(self._has_cuda_fusion_group(t_jit.graph_for(x, y, z)))
+
+    @unittest.skipIf(not RUN_CUDA, "requires CUDA")
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING, "Requires profiling node to run cuda fuser")
+    @skipIfRocm
+    def test_broadcasting_multiple_output(self):
+        def t(x : torch.Tensor, y : torch.Tensor, z : torch.Tensor):
+            o = x + 12
+            o1 = o + y
+            o2 = o + z
+            oo = o1.sum() + o2.sum()
+            return oo
+        t_jit = torch.jit.script(t)
+        x = torch.randn(32, 32, dtype=torch.float, device="cuda")
+        y = torch.randn(4, 32, 32, dtype=torch.float, device="cuda")
         z = torch.randn(4, 32, 32, dtype=torch.float, device="cuda")
         jit_o = t_jit(x, y, z)
         jit_o = t_jit(x, y, z)

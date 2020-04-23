@@ -64,6 +64,7 @@ class CudaKernel {
 
   dim3 block_;
   dim3 grid_;
+  bool has_random_;
 };
 
 // compile Fusion to CUDA functions:

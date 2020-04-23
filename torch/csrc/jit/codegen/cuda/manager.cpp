@@ -206,7 +206,7 @@ void runCudaFusionGroup(const Node* const fusion_node, Stack& stack) {
         std::make_move_iterator(outputs.begin()),
         std::make_move_iterator(outputs.end()));
   } catch (...) {
-    TORCH_CHECK(DISABLED_FALLBACK, "codegen errored out.");
+    TORCH_CHECK(!DISABLED_FALLBACK, "codegen errored out.");
     EraseShapeInformation(graph);
     InterpreterState{Code(graph,"fallback_cuda_fuser")}.run(stack);
   }

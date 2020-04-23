@@ -1,5 +1,6 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/nvrtc_stub/ATenNVRTC.h>
+#include <ATen/CUDAGeneratorImpl.h>
 #include <c10/core/ScalarType.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/util/ArrayRef.h>
@@ -120,6 +121,10 @@ struct KernelArgumentHolder {
         " Tried to create argument to send to a fused kernel, but got a non-scalar type.");
   }
 
+  void push(const uint64_t& val) {
+    arguments.push_back(new ULongArg(val));
+  }
+
   // Create buffer, flatten arguments into it, align by 8 Bytes, return pointers
   // in the buffer
   void** getBuffer() {
@@ -183,6 +188,7 @@ void compileKernel(Fusion& fusion, CudaKernel* entry) {
   // set device for the operation;
   const auto prior_device = at::cuda::current_device();
   at::cuda::set_device(entry->device_);
+  entry->has_random_ = fusion.random();
 
   const auto prop = at::cuda::getCurrentDeviceProperties();
   int nvrtc_major, nvrtc_minor;
@@ -268,6 +274,23 @@ void runKernel(
 
   for (auto& output : outputs) {
     kernel_args.push(output);
+  }
+
+  // TODO: this probably won't work for us.
+  if (entry->has_random_) {
+    std::pair<uint64_t, uint64_t> philox_engine_inputs;
+    const auto rand_offset =
+        4 * (std::ceil(numel / (4.0 * 128 * nBlocks)) + 1);
+    auto gen = at::cuda::detail::getDefaultCUDAGenerator();
+    {
+      // See Note [Acquire lock when using random generators]
+      std::lock_guard<std::mutex> lock(gen.mutex());
+      philox_engine_inputs =
+          at::check_generator<at::CUDAGeneratorImpl>(gen)->philox_engine_inputs(
+              rand_offset);
+    }
+    kernel_args.push(philox_engine_inputs.first);
+    kernel_args.push(philox_engine_inputs.second);
   }
 
   // launch kernel;

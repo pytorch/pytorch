@@ -27,6 +27,14 @@ struct ArgAbstract {
   virtual void* arg() = 0;
 };
 
+struct ULongArg : public ArgAbstract {
+  uint64_t val_;
+  ULongArg(uint64_t _val) : val_(_val){};
+  void* arg() {
+    return &val_;
+  }
+};
+
 struct IntArg : public ArgAbstract {
   int val_;
   IntArg(int _val) : val_(_val){};
