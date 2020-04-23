@@ -44,11 +44,55 @@ static inline Tensor& unary_op_impl_out(Tensor& result, const Tensor& self, Stub
   return result;
 }
 
+// An alternate version of unary_op_impl_out that follows the same pattern
+// for non-complex inputs, but returns a floating point tensor
+// for complex inputs by default.
+// Note: This is done by running the operation as usual and then copying the
+// operation's result to the expected result type.
+template <typename Stub>
+static inline Tensor& unary_op_impl_with_complex_to_float_out(Tensor& result, const Tensor& self, Stub& stub) {
+    if (self.is_complex() && !result.is_complex()) {
+      // Checks if the corresponding float type can be cast to the desired dtype
+      const auto float_type = c10::toValueType(self.scalar_type());
+      TORCH_CHECK(canCast(float_type, result.scalar_type()),
+            "result type ", float_type, " can't be cast to the desired output type ",
+            result.scalar_type());
+
+      // Runs the function complex->complex, as TensorIterator expects
+      Tensor complex_result = at::empty({0}, self.options());
+      auto iter = TensorIterator::unary_op(complex_result, self,
+        /*check_mem_overlap=*/true);
+      stub(iter.device_type(), iter);
+
+      // Copies the complex result to the actual result and returns it
+      result.resize_(complex_result.sizes());
+      result.copy_(complex_result);
+      return result;
+    }
+
+    return unary_op_impl_out(result, self, stub);
+}
+
 // out_impl passed into unary_op_impl and unary_op_impl_  must go through at:: device dispatch
 // otherwise it won't dispatch to out-of-source devices like XLA.
 // For example it must be at::bitwise_not_out instead of bitwise_not_out(which is at::native!).
 template <typename OutImpl>
 static inline Tensor unary_op_impl(const Tensor& self, OutImpl& out_impl) {
+  Tensor result = at::empty({0}, self.options());
+  return out_impl(result, self);
+}
+
+// An alternate version of unary_op_impl that follows the same pattern 
+// for non-complex inputs, but returns a floating point tensor
+// for complex inputs by default.
+template <typename OutImpl>
+static inline Tensor unary_op_impl_with_complex_to_float(const Tensor& self, OutImpl& out_impl) {
+  if (self.is_complex()) {
+    const auto float_type = c10::toValueType(self.scalar_type());
+    Tensor result = at::empty({0}, self.options().dtype(float_type));
+    return out_impl(result, self);
+  }
+
   Tensor result = at::empty({0}, self.options());
   return out_impl(result, self);
 }
@@ -66,51 +110,25 @@ Tensor& asin_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(
 Tensor asin(const Tensor& self) { return unary_op_impl(self, at::asin_out); }
 Tensor& asin_(Tensor& self) { return unary_op_impl_(self, at::asin_out); }
 
-// Note [Complex abs]
-// Complex inputs to abs return float results by default.
-// abs, in both NumPy and C++, returns a float result when given a complex input.
-// This makes sense mathematically since the absolute value of a complex
-// number has no imaginary part.
+// Note [Complex abs and angle]
+// Complex inputs to abs and angle return float results by default.
+// abs and angle, in both NumPy and C++, returns a float result when given a
+// complex input. This makes sense mathematically since the absolute value
+// and angle of a complex number has no imaginary part.
 Tensor& abs_out(Tensor& result, const Tensor& self) {
-  // Mimics abs returning a floating point tensor for complex inputs by default
-  // Note: This is done by running the operation as usual and then copying the
-  // operation's result to the expected result type.
-  if (self.is_complex() && !result.is_complex()) {
-    // Checks if the corresponding float type can be cast to the desired dtype
-    const auto float_type = c10::toValueType(self.scalar_type());
-    TORCH_CHECK(canCast(float_type, result.scalar_type()),
-          "result type ", float_type, " can't be cast to the desired output type ",
-          result.scalar_type());
-
-    // Runs the function complex->complex, as TensorIterator expects
-    Tensor complex_result = at::empty({0}, self.options());
-    auto iter = TensorIterator::unary_op(complex_result, self,
-      /*check_mem_overlap=*/false);
-    abs_stub(iter.device_type(), iter);
-
-    // Copies the complex result to the actual result and returns it
-    result.resize_(complex_result.sizes());
-    result.copy_(complex_result);
-    return result;
-  }
-
-  return unary_op_impl_out(result, self, abs_stub);
+  return unary_op_impl_with_complex_to_float_out(result, self, abs_stub);
 }
 Tensor abs(const Tensor& self) {
-  // Overrides default return type to be floating point when given a
-  // complex input. See note [Complex abs].
-  if (self.is_complex()) {
-    const auto float_type = c10::toValueType(self.scalar_type());
-    Tensor result = at::empty({0}, self.options().dtype(float_type));
-    return at::abs_out(result, self);
-  }
-
-  return unary_op_impl(self, at::abs_out);
+  return unary_op_impl_with_complex_to_float(self, at::abs_out);
 }
 Tensor& abs_(Tensor& self) { return unary_op_impl_(self, at::abs_out); }
 
-Tensor& angle_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, angle_stub); }
-Tensor angle(const Tensor& self) { return unary_op_impl(self, at::angle_out); }
+Tensor& angle_out(Tensor& result, const Tensor& self) {
+  return unary_op_impl_with_complex_to_float_out(result, self, angle_stub);
+}
+Tensor angle(const Tensor& self) {
+  return unary_op_impl_with_complex_to_float(self, at::angle_out);
+}
 
 Tensor real(const Tensor& self) {
   TORCH_CHECK(!self.is_complex(), "real is not yet implemented for complex tensors.");
