@@ -2,6 +2,7 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/MemoryOverlap.h>
 #include <ATen/cuda/detail/IndexUtils.cuh>
+#include <ATen/native/TypeProperties.h>
 #include <ATen/Dispatch.h>
 #include <c10/core/MemoryFormat.h>
 #include <c10/util/Optional.h>
@@ -257,7 +258,8 @@ void parallel_cat(Tensor &out, const TensorList &inputs, int64_t dimension,
 } // namespace
 
 Tensor cat_cuda(TensorList inputs, int64_t dimension) {
-  Tensor out = at::empty({0}, inputs.front().options());
+  ScalarType high_type = result_type(inputs);
+  Tensor out = at::empty({0}, inputs.front().options().dtype(high_type));
   cat_out_cuda(out, inputs, dimension);
   return out;
 }
@@ -297,6 +299,11 @@ Tensor& cat_out_cuda(Tensor& out, TensorList inputs, int64_t dimension) {
   const Tensor *notSkippedTensor = NULL;  // non-owning reference
   int nDims = 0;
 
+  // Check for type promotion
+  TORCH_CHECK(canCast(result_type(inputs), out.scalar_type()), "input types ",
+                      " can't be cast to the desired output type ",
+                      out.scalar_type());
+
   // Inputs cannot alias the output tensor
   for (int i = 0; i < inputs.size(); i++) {
     auto lap = at::get_overlap_status(out, inputs[i]);
@@ -305,15 +312,6 @@ Tensor& cat_out_cuda(Tensor& out, TensorList inputs, int64_t dimension) {
                 "unsupported operation: the input tensors cannot refer to any "
                 "of the output memory locations. Found overlap in input "
                 "tensor ", i);
-  }
-
-  // Dtypes should be the same
-  const auto first_in_cat = inputs[0];
-  for (int64_t i = 1; i < inputs.size(); i++) {
-    TORCH_CHECK(first_in_cat.dtype() == inputs[i].dtype(),
-              "Expected object of scalar type ", first_in_cat.dtype(),
-              " but got scalar type ", inputs[i].dtype(),
-              " for sequence element ", i, ".");
   }
 
   for (int i = 0; i < inputs.size(); i++)
@@ -379,12 +377,19 @@ Tensor& cat_out_cuda(Tensor& out, TensorList inputs, int64_t dimension) {
     [=](const Tensor& t) {
       return !t.defined() || t.is_contiguous(memory_format);
     });
+  ScalarType firstType = inputs[0].scalar_type();
+  const bool allSameType = std::all_of(inputs.begin(), inputs.end(),
+    [firstType](const Tensor& t) {
+      return t.scalar_type() == firstType;
+    });
+
   if (inputs.size() > 1 &&
       !hasSkippedInput &&
       out.dim() <= CAT_ARRAY_MAX_INPUT_DIMS &&
       at::cuda::detail::canUse32BitIndexMath(out) &&
       allContiguous &&
-      all32BitIndexable) {
+      all32BitIndexable &&
+      allSameType) {
 
     AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
         at::ScalarType::Half, at::ScalarType::Bool, at::ScalarType::BFloat16,
