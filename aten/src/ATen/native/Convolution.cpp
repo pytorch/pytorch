@@ -39,7 +39,7 @@ struct ConvParams {
   bool needs_64bit_indexing_no_split(const at::Tensor& input, const at::Tensor& weight) const;
   bool use_cudnn(const at::Tensor& input, const at::Tensor& weight) const;
   bool use_cudnn_depthwise(const at::Tensor& input, const at::Tensor& weight) const;
-  bool use_miopen(const at::Tensor& input, bool bias_defined) const;
+  bool use_miopen(const at::Tensor& input, const at::Tensor& weight, bool bias_defined) const;
   bool use_mkldnn(const at::Tensor& input) const;
   bool use_nnpack(const at::Tensor& input) const;
   bool is_depthwise(const at::Tensor& input, const at::Tensor& weight) const;
@@ -197,8 +197,10 @@ auto ConvParams::use_cudnn(const at::Tensor& input, const at::Tensor& weight) co
   return !is_output_padding_big();
 }
 
-auto ConvParams::use_miopen(const at::Tensor& input, bool bias_defined) const -> bool {
-
+auto ConvParams::use_miopen(const at::Tensor& input, const at::Tensor& weight, bool bias_defined) const -> bool {
+  if (needs_64bit_indexing_no_split(input, weight)) {
+    return false;
+  }
   return ((input.scalar_type() == at::kFloat) || (input.scalar_type() == at::kHalf) || (input.scalar_type() == at::kBFloat16))
          && detail::getCUDAHooks().compiledWithMIOpen()
          && input.is_cuda()
@@ -631,7 +633,7 @@ at::Tensor _convolution(
           output = output + reshape_bias(input.dim(), bias);
         }
 
-      } else if (params.use_miopen(input, bias.defined())){
+      } else if (params.use_miopen(input, weight, bias.defined())){
         output = at::miopen_depthwise_convolution(
             input.contiguous(), weight, bias,
             padding, stride, dilation, params.groups, params.benchmark, params.deterministic);
@@ -661,7 +663,7 @@ at::Tensor _convolution(
         output = output + reshape_bias(input.dim(), bias);
       }
     }
-  } else if (params.use_miopen(input, bias.defined())) {
+  } else if (params.use_miopen(input, weight, bias.defined())) {
     TORCH_CHECK(input.options().type_equal(weight.options()),
              "Input type (", input.toString(), ") and weight type (", weight.toString(),
              ") should be the same");
