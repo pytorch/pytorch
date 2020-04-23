@@ -99,7 +99,6 @@ namespace c10 {
   _(prim, zip)                       \
   _(prim, enumerate)                 \
   _(prim, range)                     \
-  _(prim, list)                      \
   _(prim, rangelist)                 \
   _(prim, isinstance)                \
   _(prim, tolist)                    \

@@ -12,7 +12,7 @@ import caffe2.python.onnx.backend as c2
 class TestQuantizedOps(unittest.TestCase):
 
 
-    def generic_test(self, model, sample_inputs, input_names=None, decimal=3):
+    def generic_test(self, model, sample_inputs, input_names=None, decimal=3, relaxed_check=False):
         torch.backends.quantized.engine = "qnnpack"
         pt_inputs = tuple(torch.from_numpy(x) for x in sample_inputs)
         model.qconfig = torch.quantization.default_qconfig
@@ -34,7 +34,19 @@ class TestQuantizedOps(unittest.TestCase):
         f.seek(0)
         onnx_model = onnx.load(f)
         caffe_res = c2.run_model(onnx_model, dict(zip(input_names, sample_inputs)))[0]
-        np.testing.assert_almost_equal(output.detach().numpy(), caffe_res, decimal=decimal)
+        # Due to change in requantization logic for certain ops such conv, linear
+        # in pytorch's integration of qnnpack, numerics may have a mismatc with C2.
+        # This mismatch should not be off my more than 1.
+        # This flag helps us override default behavior under certain circumstances.
+        if relaxed_check:
+            output_diff = np.absolute(np.squeeze(output.detach().numpy()) - caffe_res)
+            max_diff = np.amax(output_diff)
+
+            # This check had to be changed to account for changes in
+            # qnnpack's requant logic.
+            np.testing.assert_(max_diff <= 1, "Maximum absolute difference must be less than 1")
+        else:
+            np.testing.assert_almost_equal(output.detach().numpy(), caffe_res, decimal=decimal)
 
 
     def generic_unary_test(self, op):
@@ -114,7 +126,13 @@ class TestQuantizedOps(unittest.TestCase):
         onnx_model = self.export_to_onnx(model, x, input_names)
 
         caffe_res = c2.run_model(onnx_model, dict(zip(input_names, x_numpy)))[0]
-        np.testing.assert_almost_equal(np.squeeze(outputs.numpy()), caffe_res, decimal=3)
+        output_diff = np.absolute(np.squeeze(outputs.numpy()) - caffe_res)
+        max_diff = np.amax(output_diff)
+
+        # Permute pytorch output to NHWC
+        # This check had to be changed to account for changes in
+        # qnnpack's requant logic.
+        np.testing.assert_(max_diff <= 1, "Maximum absolute difference must be less than 1")
 
     def test_qconv_model(self):
         class ConvModel(torch.nn.Module):
@@ -141,9 +159,13 @@ class TestQuantizedOps(unittest.TestCase):
 
         y = np.expand_dims(x_numpy, axis=0)
         caffe_res = c2.run_model(onnx_model, dict(zip(input_names, y)))[0]
+        output_diff = np.absolute(np.squeeze(outputs.numpy()) - caffe_res)
+        max_diff = np.amax(output_diff)
 
         # Permute pytorch output to NHWC
-        np.testing.assert_almost_equal(outputs.numpy(), caffe_res, decimal=3)
+        # This check had to be changed to account for changes in
+        # qnnpack's requant logic.
+        np.testing.assert_(max_diff <= 1, "Maximum absolute difference must be less than 1")
 
     def test_upsample(self):
         class QUpsampleModule(torch.nn.Module):
@@ -257,7 +279,7 @@ class TestQuantizedOps(unittest.TestCase):
                 return x
 
         x = np.random.rand(2, 3, 10, 10).astype("float32")
-        self.generic_test(SimpleModel(), (x,), input_names=["x"])
+        self.generic_test(SimpleModel(), (x,), input_names=["x"], relaxed_check=True)
 
 if __name__ == '__main__':
     unittest.main()

@@ -49,6 +49,7 @@ struct TypeHash {
  */
 
 struct Fusion;
+struct TensorView;
 
 // Fusion Guard is our "context manager". It holds the actrive fusion and allows
 // it to be accessed anywhere through FusionGuard::getCurFusion().
@@ -77,6 +78,20 @@ struct ExprSort : public IterVisitor {
       Fusion* fusion,
       bool from_outputs_only,
       bool breadth_first);
+};
+
+// Expr sort will take a fusion and return a topologically sorted list of
+// expressions.
+struct InputsOf : public IterVisitor {
+  using IterVisitor::handle;
+
+ private:
+  std::vector<TensorView*> inputs;
+
+  void handle(TensorView* tv) override;
+
+ public:
+  static std::vector<TensorView*> output(Fusion* fusion, Val* output_);
 };
 
 /*
@@ -139,6 +154,8 @@ struct TORCH_CUDA_API Fusion : public IRInputOutput {
       bool from_outputs_only = false,
       bool breadth_first = false);
 
+  std::vector<TensorView*> inputsOf(Val* val);
+
   // Print this fusion to cout.
   void print();
 
@@ -159,6 +176,8 @@ struct TORCH_CUDA_API Fusion : public IRInputOutput {
 
   // Return the set of Vals registered with this fusion
   const std::set<Val*>& vals() const noexcept;
+  // Return in insertion order
+  const std::deque<Val*>& deterministic_vals() const noexcept;
 
   // Return the set of Exprs registered with this fusion
   const std::set<Expr*>& unordered_exprs() const noexcept;
@@ -175,6 +194,7 @@ struct TORCH_CUDA_API Fusion : public IRInputOutput {
  private:
   // Sets of all Vals/Exprs registered with this fusion
   std::set<Val*> val_set_;
+  std::deque<Val*> val_deque_;
   std::set<Expr*> expr_set_;
 
   // Return an int that monotonically increases for each val/expr, some are

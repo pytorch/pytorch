@@ -31,6 +31,7 @@ Tensor _bincount_cpu_template(
   }
 
   Tensor output;
+  int64_t self_size = self.size(0);
   int64_t nbins = static_cast<int64_t>(*self.max().data_ptr<input_t>()) + 1L;
   nbins = std::max(nbins, minlength); // at least minlength # of bins
 
@@ -39,13 +40,13 @@ Tensor _bincount_cpu_template(
     output = native::zeros({nbins}, weights.options());
     weights_t* output_p = output.data_ptr<weights_t>();
     const weights_t* weights_p = weights.data_ptr<weights_t>();
-    for (int64_t i = 0; i < self.size(0); i++) {
+    for (int64_t i = 0; i < self_size; i++) {
       output_p[self_p[i]] += weights_p[i];
     }
   } else {
     output = native::zeros({nbins}, kLong);
     int64_t* output_p = output.data_ptr<int64_t>();
-    for (int64_t i = 0; i < self.size(0); i++) {
+    for (int64_t i = 0; i < self_size; i++) {
       output_p[self_p[i]] += 1L;
     }
   }
