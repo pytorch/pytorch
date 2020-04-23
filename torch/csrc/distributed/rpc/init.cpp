@@ -631,7 +631,7 @@ If the future completes with an error, an exception is thrown.
   module.def(
       "_set_rpc_timeout",
       [](const float rpcTimeoutSeconds) {
-          const auto secToMsConversion = 1000;
+        const auto secToMsConversion = 1000;
         auto rpcTimeout = std::chrono::milliseconds(
             static_cast<int>(rpcTimeoutSeconds * secToMsConversion));
         RpcAgent::getCurrentRpcAgent()->setRpcTimeout(rpcTimeout);
