@@ -66,7 +66,7 @@ def get_weight(m):
 #    and the `cpp_var_map` entry must be
 #    `{'random_samples': random_samples}` in order to populate the C++ variable `random_samples`
 #    used in the C++ constructor argument with the Python tensor value `random_samples`.
-# 
+#
 # For NN functional:
 # 1. Make sure you already have a test dict with the functional configuration you want to test.
 # 2. If the test dict's `constructor` entry looks like `wrap_functional(F.some_functional_name, ...)`,
@@ -1816,8 +1816,16 @@ new_module_tests = [
         module_name='MaxPool2d',
         constructor_args=((3, 3), (2, 2), (1, 1)),
         cpp_constructor_args='torch::nn::MaxPool2dOptions({3, 3}).stride({2, 2}).padding({1, 1})',
+        input_size=(3, 7, 7),
+        desc='3d_input'
+    ),
+    dict(
+        module_name='MaxPool2d',
+        constructor_args=((3, 3), (2, 2), (1, 1)),
+        cpp_constructor_args='torch::nn::MaxPool2dOptions({3, 3}).stride({2, 2}).padding({1, 1})',
         input_size=(1, 3, 7, 7),
         check_with_channels_last=True,
+        desc='4d_input'
     ),
     dict(
         module_name='AvgPool1d',
@@ -3811,9 +3819,9 @@ criterion_tests = [
     ),
     dict(
         module_name='MultiMarginLoss',
-        constructor_args=(1, 1., torch.rand(10)),
+        constructor_args=(1, 1., torch.rand(10).double()),
         cpp_constructor_args='torch::nn::MultiMarginLossOptions().p(1).margin(1.).weight(torch::rand(10))',
-        legacy_constructor_args=(1, torch.rand(10)),
+        legacy_constructor_args=(1, torch.rand(10).double()),
         input_size=(5, 10),
         target_fn=lambda: torch.rand(5).mul(8).floor().long(),
         reference_fn=lambda i, t, m:
@@ -4377,7 +4385,7 @@ class TestBase(object):
 class ModuleTest(TestBase):
 
     def __init__(self, *args, **kwargs):
-        super(ModuleTest, self).__init__(*args, **kwargs)
+        super().__init__(*args, **kwargs)
         self.jacobian_input = kwargs.get('jacobian_input', True)
         self.should_test_cuda = kwargs.get('test_cuda', True)
         self.should_test_pickle = kwargs.get('pickle', True)
@@ -4553,7 +4561,7 @@ class CriterionTest(TestBase):
     _required_arg_names = TestBase._required_arg_names.union({'target'})
 
     def __init__(self, *args, **kwargs):
-        super(CriterionTest, self).__init__(*args, **kwargs)
+        super().__init__(*args, **kwargs)
         self.should_test_cuda = kwargs.get('test_cuda', True)
         self.check_forward_only = kwargs.get('check_forward_only', True)
 
@@ -4630,7 +4638,7 @@ class InputVariableMixin(object):
 
 class NewModuleTest(InputVariableMixin, ModuleTest):
     def __init__(self, *args, **kwargs):
-        super(NewModuleTest, self).__init__(*args, **kwargs)
+        super().__init__(*args, **kwargs)
         self.cudnn = kwargs.get('cudnn', False)
         self.check_inplace = kwargs.get('check_inplace', False)
         self.check_gradgrad = kwargs.get('check_gradgrad', True)
@@ -4784,7 +4792,7 @@ class NewCriterionTest(InputVariableMixin, CriterionTest):
     # TODO: check that criterions don't ignore grad_output
 
     def __init__(self, *args, **kwargs):
-        super(NewCriterionTest, self).__init__(*args, **kwargs)
+        super().__init__(*args, **kwargs)
         self.check_gradgrad = kwargs.get('check_gradgrad', True)
         self.check_half = kwargs.get('check_half', True)
         self.check_bfloat16 = kwargs.get('check_bfloat16', False)

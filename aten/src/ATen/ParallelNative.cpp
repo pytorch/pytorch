@@ -125,13 +125,15 @@ void _parallel_run(
   std::tie(num_tasks, chunk_size) =
       internal::calc_num_tasks_and_chunk_size(begin, end, grain_size);
 
-  std::atomic_flag err_flag = ATOMIC_FLAG_INIT;
-  std::exception_ptr eptr;
-  std::vector<std::shared_ptr<c10::ivalue::Future>> futures(num_tasks);
-  for (size_t task_id = 0; task_id < num_tasks; ++task_id) {
-    futures[task_id] = std::make_shared<c10::ivalue::Future>(c10::NoneType::get());
-  }
-  auto task = [f, &eptr, &err_flag, &futures, begin, end, chunk_size]
+  struct {
+    std::atomic_flag err_flag = ATOMIC_FLAG_INIT;
+    std::exception_ptr eptr;
+    std::mutex mutex;
+    volatile size_t remaining;
+    std::condition_variable cv;
+  } state;
+
+  auto task = [f, &state, begin, end, chunk_size]
       (int /* unused */, size_t task_id) {
     int64_t local_start = begin + task_id * chunk_size;
     if (local_start < end) {
@@ -140,21 +142,30 @@ void _parallel_run(
         ParallelRegionGuard guard(task_id);
         f(local_start, local_end, task_id);
       } catch (...) {
-        if (!err_flag.test_and_set()) {
-          eptr = std::current_exception();
+        if (!state.err_flag.test_and_set()) {
+          state.eptr = std::current_exception();
         }
       }
     }
-    futures[task_id]->markCompleted();
+    {
+      std::unique_lock<std::mutex> lk(state.mutex);
+      if (--state.remaining == 0) {
+        state.cv.notify_one();
+      }
+    }
   };
+  state.remaining = num_tasks;
   _run_with_pool(task, num_tasks);
 
   // Wait for all tasks to finish.
-  for (size_t task_id = 0; task_id < num_tasks; ++task_id) {
-    futures[task_id]->wait();
+  {
+    std::unique_lock<std::mutex> lk(state.mutex);
+    if (state.remaining != 0) {
+      state.cv.wait(lk);
+    }
   }
-  if (eptr) {
-    std::rethrow_exception(eptr);
+  if (state.eptr) {
+    std::rethrow_exception(state.eptr);
   }
 }
 

@@ -9,7 +9,7 @@ namespace at {
 
 // Thread local state contains values that are preserved across
 // thread boundaries (e.g. at::launch/JIT fork, autograd, at::parallel_for)
-class ThreadLocalState {
+class TORCH_API ThreadLocalState {
  public:
   // Saves the thread local variables' values and
   // returns them as a ThreadLocalState
@@ -34,11 +34,16 @@ class ThreadLocalState {
   bool grad_mode_enabled_;
 #endif
 
+  // Whether RecordFunctions need to be disabled;
+  // used in core PyTorch to avoid infitite recursion
+  // in observers framework
+  bool record_function_enabled_;
+
   friend class ThreadLocalStateGuard;
 };
 
 // Guard to set and reset the thread local state
-class ThreadLocalStateGuard {
+class TORCH_API ThreadLocalStateGuard {
  public:
   explicit ThreadLocalStateGuard(const ThreadLocalState& state)
       : prev_state_(ThreadLocalState()) {
@@ -55,4 +60,8 @@ class ThreadLocalStateGuard {
   const ThreadLocalState prev_state_;
 };
 
-} // namespace torch
+// Internal, turns on/off record function observers
+TORCH_API bool _tls_is_record_function_enabled();
+TORCH_API void _tls_set_record_function_enabled(bool);
+
+} // namespace at

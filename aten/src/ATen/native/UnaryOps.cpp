@@ -44,11 +44,55 @@ static inline Tensor& unary_op_impl_out(Tensor& result, const Tensor& self, Stub
   return result;
 }
 
+// An alternate version of unary_op_impl_out that follows the same pattern
+// for non-complex inputs, but returns a floating point tensor
+// for complex inputs by default.
+// Note: This is done by running the operation as usual and then copying the
+// operation's result to the expected result type.
+template <typename Stub>
+static inline Tensor& unary_op_impl_with_complex_to_float_out(Tensor& result, const Tensor& self, Stub& stub) {
+    if (self.is_complex() && !result.is_complex()) {
+      // Checks if the corresponding float type can be cast to the desired dtype
+      const auto float_type = c10::toValueType(self.scalar_type());
+      TORCH_CHECK(canCast(float_type, result.scalar_type()),
+            "result type ", float_type, " can't be cast to the desired output type ",
+            result.scalar_type());
+
+      // Runs the function complex->complex, as TensorIterator expects
+      Tensor complex_result = at::empty({0}, self.options());
+      auto iter = TensorIterator::unary_op(complex_result, self,
+        /*check_mem_overlap=*/true);
+      stub(iter.device_type(), iter);
+
+      // Copies the complex result to the actual result and returns it
+      result.resize_(complex_result.sizes());
+      result.copy_(complex_result);
+      return result;
+    }
+
+    return unary_op_impl_out(result, self, stub);
+}
+
 // out_impl passed into unary_op_impl and unary_op_impl_  must go through at:: device dispatch
 // otherwise it won't dispatch to out-of-source devices like XLA.
 // For example it must be at::bitwise_not_out instead of bitwise_not_out(which is at::native!).
 template <typename OutImpl>
 static inline Tensor unary_op_impl(const Tensor& self, OutImpl& out_impl) {
+  Tensor result = at::empty({0}, self.options());
+  return out_impl(result, self);
+}
+
+// An alternate version of unary_op_impl that follows the same pattern 
+// for non-complex inputs, but returns a floating point tensor
+// for complex inputs by default.
+template <typename OutImpl>
+static inline Tensor unary_op_impl_with_complex_to_float(const Tensor& self, OutImpl& out_impl) {
+  if (self.is_complex()) {
+    const auto float_type = c10::toValueType(self.scalar_type());
+    Tensor result = at::empty({0}, self.options().dtype(float_type));
+    return out_impl(result, self);
+  }
+
   Tensor result = at::empty({0}, self.options());
   return out_impl(result, self);
 }
@@ -66,12 +110,25 @@ Tensor& asin_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(
 Tensor asin(const Tensor& self) { return unary_op_impl(self, at::asin_out); }
 Tensor& asin_(Tensor& self) { return unary_op_impl_(self, at::asin_out); }
 
-Tensor& abs_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, abs_stub); }
-Tensor abs(const Tensor& self) { return unary_op_impl(self, at::abs_out); }
+// Note [Complex abs and angle]
+// Complex inputs to abs and angle return float results by default.
+// abs and angle, in both NumPy and C++, returns a float result when given a
+// complex input. This makes sense mathematically since the absolute value
+// and angle of a complex number has no imaginary part.
+Tensor& abs_out(Tensor& result, const Tensor& self) {
+  return unary_op_impl_with_complex_to_float_out(result, self, abs_stub);
+}
+Tensor abs(const Tensor& self) {
+  return unary_op_impl_with_complex_to_float(self, at::abs_out);
+}
 Tensor& abs_(Tensor& self) { return unary_op_impl_(self, at::abs_out); }
 
-Tensor& angle_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, angle_stub); }
-Tensor angle(const Tensor& self) { return unary_op_impl(self, at::angle_out); }
+Tensor& angle_out(Tensor& result, const Tensor& self) {
+  return unary_op_impl_with_complex_to_float_out(result, self, angle_stub);
+}
+Tensor angle(const Tensor& self) {
+  return unary_op_impl_with_complex_to_float(self, at::angle_out);
+}
 
 Tensor real(const Tensor& self) {
   TORCH_CHECK(!self.is_complex(), "real is not yet implemented for complex tensors.");
@@ -84,6 +141,14 @@ Tensor imag(const Tensor& self) {
   // Note: unreachable
   return at::zeros_like(self);
 }
+
+Tensor& copy_real_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, real_stub); }
+
+Tensor copy_real(const Tensor& self) { return unary_op_impl(self, at::copy_real_out); }
+
+Tensor& copy_imag_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, imag_stub); }
+
+Tensor copy_imag(const Tensor& self) { return unary_op_impl(self, at::copy_imag_out); }
 
 Tensor& conj_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, conj_stub); }
 Tensor conj(const Tensor& self) { return unary_op_impl(self, at::conj_out); }
@@ -164,6 +229,10 @@ Tensor& sinh_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(
 Tensor sinh(const Tensor& self) { return unary_op_impl(self, at::sinh_out); }
 Tensor& sinh_(Tensor& self) { return unary_op_impl_(self, at::sinh_out); }
 
+Tensor& cosh_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, cosh_stub); }
+Tensor cosh(const Tensor& self) { return unary_op_impl(self, at::cosh_out); }
+Tensor& cosh_(Tensor& self) { return unary_op_impl_(self, at::cosh_out); }
+
 Tensor& sqrt_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, sqrt_stub); }
 Tensor sqrt(const Tensor& self) { return unary_op_impl(self, at::sqrt_out); }
 Tensor& sqrt_(Tensor& self) { return unary_op_impl_(self, at::sqrt_out); }
@@ -215,21 +284,25 @@ Tensor& logical_not_out(Tensor& result, const Tensor& self) {
 }
 
 Tensor clamp(const Tensor& self, optional<Scalar> min, optional<Scalar> max) {
+  TORCH_CHECK(!self.is_complex(), "clamp is not yet implemented for complex tensors.");
   Tensor result = at::empty({0}, self.options());
   return clamp_out(result, self, min, max);
 }
 
 Tensor clamp_max(const Tensor& self, Scalar max) {
+  TORCH_CHECK(!self.is_complex(), "clamp is not yet implemented for complex tensors.");
   Tensor result = at::empty({0}, self.options());
   return clamp_max_out(result, self, max);
 }
 
 Tensor clamp_min(const Tensor& self, Scalar min) {
+  TORCH_CHECK(!self.is_complex(), "clamp is not yet implemented for complex tensors.");
   Tensor result = at::empty({0}, self.options());
   return clamp_min_out(result, self, min);
 }
 
 Tensor& _clamp__cpu(Tensor& self, optional<Scalar> min, optional<Scalar> max) {
+  TORCH_CHECK(!self.is_complex(), "clamp is not yet implemented for complex tensors.");
   return clamp_out(self, self, min, max);
 }
 
@@ -254,6 +327,7 @@ Tensor& _clamp_out_cpu(
     const Tensor& self,
     optional<Scalar> min,
     optional<Scalar> max) {
+  TORCH_CHECK(!self.is_complex(), "clamp is not yet implemented for complex tensors.");
   if (min && max) {
     TORCH_CHECK(self.device().type() == DeviceType::CPU,
                 "clamp only supports CPU device type, got: ", self.device().type());
@@ -273,10 +347,12 @@ Tensor& _clamp_out_cpu(
 }
 
 Tensor& _clamp_max__cpu(Tensor& self, Scalar max) {
+  TORCH_CHECK(!self.is_complex(), "clamp is not yet implemented for complex tensors.");
   return clamp_max_out(self, self, max);
 }
 
 Tensor& _clamp_max_out_cpu(Tensor& result, const Tensor& self, Scalar max) {
+  TORCH_CHECK(!self.is_complex(), "clamp is not yet implemented for complex tensors.");
   TORCH_CHECK(self.device().type() == DeviceType::CPU,
               "clamp_max only supports CPU device type, got: ", self.device().type());
   TORCH_CHECK(self.layout() == Layout::Strided,
@@ -288,10 +364,12 @@ Tensor& _clamp_max_out_cpu(Tensor& result, const Tensor& self, Scalar max) {
 }
 
 Tensor& _clamp_min__cpu(Tensor& self, Scalar min) {
+  TORCH_CHECK(!self.is_complex(), "clamp is not yet implemented for complex tensors.");
   return clamp_min_out(self, self, min);
 }
 
 Tensor& _clamp_min_out_cpu(Tensor& result, const Tensor& self, Scalar min) {
+  TORCH_CHECK(!self.is_complex(), "clamp is not yet implemented for complex tensors.");
   TORCH_CHECK(self.device().type() == DeviceType::CPU,
               "clamp_min only supports CPU device type, got: ", self.device().type());
   TORCH_CHECK(self.layout() == Layout::Strided,
@@ -358,7 +436,6 @@ Tensor& mvlgamma_(Tensor& self, int64_t p) {
 
 IMPLEMENT_UNARY_OP_VEC(atan)
 IMPLEMENT_UNARY_OP_VEC(cos)
-IMPLEMENT_UNARY_OP_VEC(cosh)
 IMPLEMENT_UNARY_OP_VEC(erf)
 IMPLEMENT_UNARY_OP_VEC(erfc)
 IMPLEMENT_UNARY_OP_VEC_CUDA(erfinv)

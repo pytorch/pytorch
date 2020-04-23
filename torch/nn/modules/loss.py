@@ -294,7 +294,7 @@ class KLDivLoss(_Loss):
 
     As with :class:`~torch.nn.NLLLoss`, the `input` given is expected to contain
     *log-probabilities* and is not restricted to a 2D Tensor.
-    The targets are given as *probabilities* by default, but could be passed
+    The targets are interpreted as *probabilities* by default, but could be considered
     as *log-probabilities* with :attr:`log_target` set to ``True``.
 
     This criterion expects a `target` `Tensor` of the same size as the

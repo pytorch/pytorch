@@ -35,12 +35,6 @@ TRAVIS_DL_URL_PREFIX="https://s3.amazonaws.com/travis-python-archives/binaries/u
 # configuration, so we hardcode everything here rather than do it
 # from scratch
 case "$image" in
-  pytorch-linux-bionic-clang9-thrift-llvmdev)
-    CLANG_VERSION=9
-    THRIFT=yes
-    LLVMDEV=yes
-    PROTOBUF=yes
-    ;;
   pytorch-linux-xenial-py3.8)
     # TODO: This is a hack, get rid of this as soon as you get rid of the travis downloads
     TRAVIS_DL_URL_PREFIX="https://s3.amazonaws.com/travis-python-archives/binaries/ubuntu/16.04/x86_64"
@@ -153,6 +147,13 @@ case "$image" in
     DB=yes
     VISION=yes
     ;;
+  pytorch-linux-bionic-py3.6-clang9)
+    ANACONDA_PYTHON_VERSION=3.6
+    CLANG_VERSION=9
+    PROTOBUF=yes
+    DB=yes
+    VISION=yes
+    ;;
   pytorch-linux-xenial-rocm-py3.6-clang7)
     ANACONDA_PYTHON_VERSION=3.6
     CLANG_VERSION=7
@@ -174,6 +175,8 @@ fi
 tmp_tag="tmp-$(cat /dev/urandom | tr -dc 'a-z' | fold -w 32 | head -n 1)"
 
 # Build image
+# TODO: build-arg THRIFT is not turned on for any image, remove it once we confirm
+# it's no longer needed.
 docker build \
        --no-cache \
        --build-arg "TRAVIS_DL_URL_PREFIX=${TRAVIS_DL_URL_PREFIX}" \
