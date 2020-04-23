@@ -34,6 +34,7 @@ file(GLOB C10_SRCS
         core/impl/*.cpp
         macros/*.cpp
         util/*.cpp
+        fmt/*.cc
         )
 file(GLOB_RECURSE C10_ALL_TEST_FILES test/*.cpp)
 file(GLOB_RECURSE C10_HEADERS *.h)
