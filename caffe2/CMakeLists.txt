@@ -257,9 +257,9 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
 
   set(GENERATED_CXX_TORCH
     "${TORCH_SRC_DIR}/csrc/autograd/generated/Functions.cpp"
-    "${TORCH_SRC_DIR}/csrc/jit/generated/register_aten_ops_0.cpp"
-    "${TORCH_SRC_DIR}/csrc/jit/generated/register_aten_ops_1.cpp"
-    "${TORCH_SRC_DIR}/csrc/jit/generated/register_aten_ops_2.cpp"
+    "${TORCH_SRC_DIR}/csrc/jit/generated/generated_unboxing_wrappers_0.cpp"
+    "${TORCH_SRC_DIR}/csrc/jit/generated/generated_unboxing_wrappers_1.cpp"
+    "${TORCH_SRC_DIR}/csrc/jit/generated/generated_unboxing_wrappers_2.cpp"
     )
 
   if(NOT INTERN_DISABLE_AUTOGRAD)
@@ -269,6 +269,11 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       "${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType_2.cpp"
       "${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType_3.cpp"
       "${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType_4.cpp"
+      "${TORCH_SRC_DIR}/csrc/autograd/generated/ProfiledType_0.cpp"
+      "${TORCH_SRC_DIR}/csrc/autograd/generated/ProfiledType_1.cpp"
+      "${TORCH_SRC_DIR}/csrc/autograd/generated/ProfiledType_2.cpp"
+      "${TORCH_SRC_DIR}/csrc/autograd/generated/ProfiledType_3.cpp"
+      "${TORCH_SRC_DIR}/csrc/autograd/generated/ProfiledType_4.cpp"
     )
   endif()
 
@@ -315,6 +320,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     "${CMAKE_BINARY_DIR}/aten/src/ATen/Declarations.yaml"
     "${TOOLS_PATH}/autograd/templates/VariableType.h"
     "${TOOLS_PATH}/autograd/templates/VariableType.cpp"
+    "${TOOLS_PATH}/autograd/templates/ProfiledType.cpp"
     "${TOOLS_PATH}/autograd/templates/Functions.h"
     "${TOOLS_PATH}/autograd/templates/Functions.cpp"
     "${TOOLS_PATH}/autograd/templates/python_functions.h"
@@ -333,8 +339,8 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     "${TOOLS_PATH}/autograd/load_derivatives.py"
     "${TOOLS_PATH}/autograd/nested_dict.py"
     "${TOOLS_PATH}/autograd/utils.py"
-    "${TOOLS_PATH}/jit/gen_jit_dispatch.py"
-    "${TOOLS_PATH}/jit/templates/register_aten_ops.cpp"
+    "${TOOLS_PATH}/jit/gen_unboxing_wrappers.py"
+    "${TOOLS_PATH}/jit/templates/generated_unboxing_wrappers.cpp"
     WORKING_DIRECTORY "${TORCH_ROOT}")
 
 
@@ -345,9 +351,9 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     DEPENDS ${TORCH_GENERATED_CODE}
     )
 
-  get_filelist("libtorch_cmake_sources" TORCH_SRCS)
-  list(APPEND TORCH_SRCS ${GENERATED_CXX_TORCH})
+  set(TORCH_SRCS ${GENERATED_CXX_TORCH})
   list(APPEND TORCH_SRCS ${GENERATED_H_TORCH})
+  append_filelist("libtorch_cmake_sources" TORCH_SRCS)
 
   # Required workaround for LLVM 9 includes.
   if(NOT MSVC)
@@ -359,7 +365,6 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
        ${TORCH_SRC_DIR}/csrc/jit/mobile/function.cpp
        ${TORCH_SRC_DIR}/csrc/jit/mobile/import.cpp
        ${TORCH_SRC_DIR}/csrc/jit/mobile/module.cpp
-       ${TORCH_SRC_DIR}/csrc/jit/mobile/register_mobile_ops.cpp
        ${TORCH_SRC_DIR}/csrc/jit/mobile/register_mobile_autograd.cpp
        ${TORCH_SRC_DIR}/csrc/jit/mobile/interpreter.cpp
        )
@@ -383,35 +388,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       ${TORCH_SRC_DIR}/csrc/utils/byte_order.cpp
     )
     if(USE_DISTRIBUTED)
-      list(APPEND TORCH_SRCS
-        ${TORCH_SRC_DIR}/csrc/distributed/autograd/context/container.cpp
-        ${TORCH_SRC_DIR}/csrc/distributed/autograd/context/context.cpp
-        ${TORCH_SRC_DIR}/csrc/distributed/autograd/engine/dist_engine.cpp
-        ${TORCH_SRC_DIR}/csrc/distributed/autograd/functions/recvrpc_backward.cpp
-        ${TORCH_SRC_DIR}/csrc/distributed/autograd/functions/sendrpc_backward.cpp
-        ${TORCH_SRC_DIR}/csrc/distributed/autograd/rpc_messages/autograd_metadata.cpp
-        ${TORCH_SRC_DIR}/csrc/distributed/autograd/rpc_messages/propagate_gradients_req.cpp
-        ${TORCH_SRC_DIR}/csrc/distributed/autograd/rpc_messages/propagate_gradients_resp.cpp
-        ${TORCH_SRC_DIR}/csrc/distributed/autograd/rpc_messages/cleanup_autograd_context_req.cpp
-        ${TORCH_SRC_DIR}/csrc/distributed/autograd/rpc_messages/cleanup_autograd_context_resp.cpp
-        ${TORCH_SRC_DIR}/csrc/distributed/autograd/rpc_messages/rpc_with_autograd.cpp
-        ${TORCH_SRC_DIR}/csrc/distributed/autograd/utils.cpp
-        ${TORCH_SRC_DIR}/csrc/distributed/rpc/message.cpp
-        ${TORCH_SRC_DIR}/csrc/distributed/rpc/python_call.cpp
-        ${TORCH_SRC_DIR}/csrc/distributed/rpc/python_remote_call.cpp
-        ${TORCH_SRC_DIR}/csrc/distributed/rpc/python_resp.cpp
-        ${TORCH_SRC_DIR}/csrc/distributed/rpc/request_callback.cpp
-        ${TORCH_SRC_DIR}/csrc/distributed/rpc/rpc_agent.cpp
-        ${TORCH_SRC_DIR}/csrc/distributed/rpc/rref_context.cpp
-        ${TORCH_SRC_DIR}/csrc/distributed/rpc/rref_proto.cpp
-        ${TORCH_SRC_DIR}/csrc/distributed/rpc/rref_impl.cpp
-        ${TORCH_SRC_DIR}/csrc/distributed/rpc/torchscript_functions.cpp
-        ${TORCH_SRC_DIR}/csrc/distributed/rpc/script_call.cpp
-        ${TORCH_SRC_DIR}/csrc/distributed/rpc/script_remote_call.cpp
-        ${TORCH_SRC_DIR}/csrc/distributed/rpc/script_resp.cpp
-        ${TORCH_SRC_DIR}/csrc/distributed/rpc/types.cpp
-        ${TORCH_SRC_DIR}/csrc/distributed/rpc/utils.cpp
-      )
+      append_filelist("libtorch_distributed_sources" TORCH_SRCS)
     endif()
   endif()
 
@@ -699,7 +676,12 @@ endif()
   install(DIRECTORY "${TORCH_SRC_DIR}/csrc"
     DESTINATION ${TORCH_INSTALL_INCLUDE_DIR}/torch
     FILES_MATCHING PATTERN "*.h")
-  install(FILES "${TORCH_SRC_DIR}/script.h" "${TORCH_SRC_DIR}/extension.h" "${TORCH_SRC_DIR}/custom_class.h" "${TORCH_SRC_DIR}/custom_class_detail.h"
+  install(FILES
+    "${TORCH_SRC_DIR}/script.h"
+    "${TORCH_SRC_DIR}/extension.h"
+    "${TORCH_SRC_DIR}/custom_class.h"
+    "${TORCH_SRC_DIR}/library.h"
+    "${TORCH_SRC_DIR}/custom_class_detail.h"
     DESTINATION ${TORCH_INSTALL_INCLUDE_DIR}/torch)
 
 
