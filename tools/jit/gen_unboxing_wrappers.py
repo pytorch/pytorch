@@ -2,7 +2,7 @@
 To run this file by hand from the root of the PyTorch
 repository, run:
 
-python -m tools.jit.gen_jit_dispatch \
+python -m tools.jit.gen_unboxing_wrappers \
        build/aten/src/ATen/Declarations.yaml \
        $OUTPUT_DIR \
        tools/jit/templates
@@ -11,6 +11,12 @@ Where $OUTPUT_DIR is where you would like the files to be
 generated.  In the full build system, OUTPUT_DIR is
 torch/csrc/jit/generated/
 """
+
+# This file generates generated_unboxing_wrappers, which contains
+# manual unboxing wrappers for ops that aren't use_c10_dispatcher: full
+# because the templated unboxing logic in c10 doesn't support them yet.
+# The ultimate goal is to make all ops use the templated unboxing and
+# delete this codegen file.
 
 import argparse
 import re
@@ -182,24 +188,8 @@ CONSTRUCTOR = CodeTemplate("""\
 }
 """)
 
-CONSTRUCTOR_JITONLY = CodeTemplate("""\
-[](Stack* stack) {
-    using namespace at;
-    ${lvalues}
-    ${call}
-    drop(*stack, ${num_inputs});
-    pack(*stack, std::move(result_));
-    return 0;
-}
-""")
-
 OPERATOR = CodeTemplate("""\
   .op("${signature}",
-    ${op})
-""")
-
-OPERATOR_JITONLY = CodeTemplate("""\
-  .jitOnlyOp("${signature}",
     ${op})
 """)
 
@@ -294,7 +284,7 @@ def load_op_list(path):
     return op_list
 
 
-def gen_jit_dispatch(
+def gen_unboxing_wrappers(
     declarations,
     out,
     template_path,
@@ -303,7 +293,7 @@ def gen_jit_dispatch(
     selected_op_list=None,
     force_schema_registration=False,
 ):
-    REGISTER_ATEN_OPS_CPP = CodeTemplate.from_file(template_path + '/register_aten_ops.cpp')
+    GENERATED_UNBOXING_WRAPPERS_CPP = CodeTemplate.from_file(template_path + '/generated_unboxing_wrappers.cpp')
 
     ops = []
 
@@ -332,12 +322,6 @@ def gen_jit_dispatch(
                     device=device, pin_memory=pin_memory,
                     args_with_tensor_options=pack_arguments(args_with_tensor_options[1:]),
                     first=args_with_tensor_options[0], num_inputs=num_inputs)
-        # The use_c10_dispatcher setting in native_functions.yaml now has a new option
-        # 'with_codegenerated_unboxing_wrapper' which means we take the codegened unboxing wrapper from
-        # register_aten_ops.cpp and stuff it into c10. This new argument is the default, 'unboxed_only' is not the
-        # default anymore. For the (very few) ops that don't support boxed dispatch yet (i.e. ops taking TensorOptions
-        # arguments), we set them to 'unboxed_only' and they follow the old behavior of having register_aten_ops.cpp
-        # register the jit op.
         elif decl['use_c10_dispatcher'] == 'with_codegenerated_unboxing_wrapper':
             if len(decl['returns']) == 0:
                 return_type = "void"
@@ -360,7 +344,7 @@ def gen_jit_dispatch(
                                                   return_type=return_type,
                                                   formals_types_with_leading_comma=argument_types_with_leading_comma)
         else:
-            assert decl['use_c10_dispatcher'] in ['unboxed_only', 'full']
+            assert decl['use_c10_dispatcher'] == 'full'
             if is_namespace_function:
                 return CALL_NAMESPACE.substitute(name=decl['name'],
                                                  args=pack_arguments(args),
@@ -376,10 +360,7 @@ def gen_jit_dispatch(
 
     def emit_decl_variant(decl):
         if ('emit_dummy_placeholder' in decl):
-            if decl['use_c10_dispatcher'] == 'unboxed_only':
-                return "DUMMY_OPERATION_JITONLY"
-            else:
-                return "DUMMY_OPERATION"
+            return "DUMMY_OPERATION"
         kw_assignments = []
 
         # mutable arguments in aten are passed as non const references
@@ -402,17 +383,7 @@ def gen_jit_dispatch(
 
         returns = decl['returns']
 
-        if decl['use_c10_dispatcher'] == 'unboxed_only':
-            # Ops taking TensorOptions aren't supported in this mechanism yet because boxed dispatch doesn't
-            # work for them. They use the old mechanism of registering a jitonly op for now.
-            # TODO We should get rid of this once TensorOptions are supported.
-            constructor = CONSTRUCTOR_JITONLY.substitute(name=decl['name'],
-                                                         call=call,
-                                                         kw_assignments=kw_assignments,
-                                                         num_inputs=num_inputs,
-                                                         op_capture=op_capture,
-                                                         lvalues=lvalues)
-        elif decl['use_c10_dispatcher'] == 'with_codegenerated_unboxing_wrapper':
+        if decl['use_c10_dispatcher'] == 'with_codegenerated_unboxing_wrapper':
             constructor = CONSTRUCTOR.substitute(name=decl['name'],
                                                  call=call,
                                                  kw_assignments=kw_assignments,
@@ -513,7 +484,7 @@ def gen_jit_dispatch(
     # generation is deterministic
     jit_decl_groups = sort_decls(jit_decls)
 
-    # NOTE: see Note [Sharded File] at the top of the register_aten_ops.cpp
+    # NOTE: see Note [Sharded File] at the top of the generated_unboxing_wrappers.cpp
     # template regarding sharding of the generated files.
     #
     # If you edit the number of shards here, you will also have to
@@ -526,10 +497,7 @@ def gen_jit_dispatch(
     for group in jit_decl_groups:
         x = sum(ord(c) for c in group[0]['name']) % num_shards
         for decl in group:
-            if decl['use_c10_dispatcher'] == 'unboxed_only':
-                shards[x].append(OPERATOR_JITONLY.substitute(signature=decl['schema_string'],
-                                                             op=emit_decl_variant(decl)))
-            elif decl['use_c10_dispatcher'] == 'with_codegenerated_unboxing_wrapper':
+            if decl['use_c10_dispatcher'] == 'with_codegenerated_unboxing_wrapper':
                 shards[x].append(OPERATOR.substitute(signature=decl['schema_string'],
                                                      op=emit_decl_variant(decl)))
             else:
@@ -539,7 +507,7 @@ def gen_jit_dispatch(
         env = {
             'constructors': shard,
         }
-        write(out, 'register_aten_ops_%d.cpp' % i, REGISTER_ATEN_OPS_CPP, env)
+        write(out, 'generated_unboxing_wrappers_%d.cpp' % i, GENERATED_UNBOXING_WRAPPERS_CPP, env)
 
 
 default_map = {'{}': 'None', 'nullptr': 'None', 'c10::nullopt': 'None'}
@@ -574,7 +542,7 @@ def main():
     parser.add_argument('template_path', metavar='TEMPLATE_PATH',
                         help='path to templates directory')
     args = parser.parse_args()
-    gen_jit_dispatch(args.declarations, args.out, args.template_path)
+    gen_unboxing_wrappers(args.declarations, args.out, args.template_path)
 
 
 if __name__ == '__main__':

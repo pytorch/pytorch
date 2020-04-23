@@ -134,9 +134,8 @@ class TestCppExtensionJIT(common.TestCase):
                                  stdout=subprocess.PIPE,
                                  stderr=subprocess.PIPE)
             output, err = p.communicate()
-            if common.PY3:
-                output = output.decode("ascii")
-                err = err.decode("ascii")
+            output = output.decode("ascii")
+            err = err.decode("ascii")
 
             if not p.returncode == 0 or not err == '':
                 raise AssertionError("Flags: {}\nReturncode: {}\nStderr: {}\n"
