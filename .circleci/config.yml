@@ -222,7 +222,6 @@ pytorch_params: &pytorch_params
     DOCKER_IMAGE: << parameters.docker_image >>
     USE_CUDA_DOCKER_RUNTIME: << parameters.use_cuda_docker_runtime >>
     BUILD_ONLY: << parameters.build_only >>
-    BASE_REF: << pipeline.git.base_revision >>
   resource_class: << parameters.resource_class >>
 
 pytorch_ios_params: &pytorch_ios_params
@@ -244,7 +243,6 @@ pytorch_ios_params: &pytorch_ios_params
     IOS_ARCH: << parameters.ios_arch >>
     IOS_PLATFORM: << parameters.ios_platform >>
     SELECTED_OP_LIST: << parameters.op_list >>
-    BASE_REF: << pipeline.git.base_revision >>
 
 pytorch_windows_params: &pytorch_windows_params
   parameters:
@@ -280,7 +278,6 @@ pytorch_windows_params: &pytorch_windows_params
     USE_CUDA: <<parameters.use_cuda>>
     TORCH_CUDA_ARCH_LIST: "7.5"
     JOB_BASE_NAME: <<parameters.test_name>>
-    BASE_REF: << pipeline.git.base_revision >>
 caffe2_params: &caffe2_params
   parameters:
     build_environment:
@@ -307,7 +304,6 @@ caffe2_params: &caffe2_params
     USE_CUDA_DOCKER_RUNTIME: << parameters.use_cuda_docker_runtime >>
     DOCKER_IMAGE: << parameters.docker_image >>
     BUILD_ONLY: << parameters.build_only >>
-    BASE_REF: << pipeline.git.base_revision >>
   resource_class: << parameters.resource_class >>
 
 binary_linux_build_params: &binary_linux_build_params
@@ -536,8 +532,6 @@ jobs:
         type: string
         default: ""
     executor: windows-cpu-with-nvidia-cuda
-    environment:
-      BASE_REF: << pipeline.git.base_revision >>
     steps:
       - checkout
       - run:
@@ -616,8 +610,6 @@ jobs:
         type: string
         default: ""
     executor: windows-with-nvidia-gpu
-    environment:
-      BASE_REF: << pipeline.git.base_revision >>
     steps:
       - checkout
       - run:
