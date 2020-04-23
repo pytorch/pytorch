@@ -226,6 +226,7 @@ UNPACK_METHODS = {
     'c10::optional<Layout>': 'layoutOptional',
     'c10::optional<MemoryFormat>': 'memoryformatOptional',
     'c10::optional<Scalar>': 'scalarOptional',
+    'c10::optional<IntArrayRef>': 'intlistOptional',
     'c10::optional<int64_t>': 'toInt64Optional',
     'c10::optional<bool>': 'toBoolOptional',
     'c10::optional<double>': 'toDoubleOptional',
