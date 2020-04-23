@@ -163,6 +163,7 @@ class TestTypeHints(TestCase):
                     '-mmypy',
                     '--follow-imports', 'silent',
                     '--check-untyped-defs',
+                    '--no-strict-optional',  # needed because of torch.lu_unpack, see gh-36584
                     os.path.abspath(fn)],
                     cwd=tmp_dir,
                     check=True)
@@ -179,17 +180,49 @@ class TestTypeHints(TestCase):
         examples_folder = os.path.join(test_path, "type_hint_tests")
         examples = os.listdir(examples_folder)
         for example in examples:
-            try: 
+            try:
                 example_path = os.path.join(examples_folder, example)
-                subprocess.run([ 
-                    sys.executable, 
-                    '-mmypy', 
-                    '--follow-imports', 'silent', 
-                    '--check-untyped-defs', 
-                    example_path],  
-                    check=True) 
-            except subprocess.CalledProcessError as e: 
+                subprocess.run([
+                    sys.executable,
+                    '-mmypy',
+                    '--follow-imports', 'silent',
+                    '--check-untyped-defs',
+                    example_path],
+                    check=True)
+            except subprocess.CalledProcessError as e:
                 raise AssertionError("mypy failed for example {}.  Look above this error for mypy's output.".format(example))
+
+    @unittest.skipIf(sys.version_info[0] == 2, "no type hints for Python 2")
+    @unittest.skipIf(not HAVE_MYPY, "need mypy")
+    def test_run_mypy(self):
+        """
+        Runs mypy over all files specified in mypy.ini
+        Note that mypy.ini is not shipped in an installed version of PyTorch,
+        so this test will only run mypy in a development setup or in CI.
+        """
+        def is_torch_mypyini(path_to_file):
+            with open(path_to_file, 'r') as f:
+                first_line = f.readline()
+
+            if first_line.startswith('# This is the PyTorch MyPy config file'):
+                return True
+
+            return False
+
+        test_dir = os.path.dirname(os.path.realpath(__file__))
+        repo_rootdir = os.path.join(test_dir, '..')
+        mypy_inifile = os.path.join(repo_rootdir, 'mypy.ini')
+        if not (os.path.exists(mypy_inifile) and is_torch_mypyini(mypy_inifile)):
+            self.skipTest(True)
+
+        cwd = os.getcwd()
+        try:
+            os.chdir(repo_rootdir)
+            subprocess.run([sys.executable, '-mmypy'], check=True)
+        except subprocess.CalledProcessError as e:
+            raise AssertionError("mypy failed. Look above this error for mypy's output.")
+        finally:
+            os.chdir(cwd)
 
 if __name__ == '__main__':
     run_tests()
