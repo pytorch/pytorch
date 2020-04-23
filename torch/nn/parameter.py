@@ -50,9 +50,46 @@ class Parameter(torch.Tensor):
 
 
 class _UninitializedParameter(Parameter):
-    r"""A parameter that is not yet initialized for lazy modules support.
+    r"""A parameter that is not yet initialized for shape inference support.
 
     UninitializedParameters are detected by the optimizer ...
     """
+    def detach(self):
+        # When detaching this parameter, we just let it be itself
+        # So it can be detected by the load_state_dict of a model
+        return self
+
     def __repr__(self):
-        return 'Uninitialized lazy parameter'
+        return 'Uninitialized parameter'
+
+
+class _UninitializedBuffer(torch.Tensor):
+    r"""A buffer that is not yet initialized for shape inference support.
+    """
+    def __new__(cls, data=None, requires_grad=True):
+        if data is None:
+            data = torch.Tensor()
+        return torch.Tensor._make_subclass(cls, data, requires_grad)
+
+    def __deepcopy__(self, memo):
+        if id(self) in memo:
+            return memo[id(self)]
+        else:
+            result = type(self)(self.data.clone(memory_format=torch.preserve_format), self.requires_grad)
+            memo[id(self)] = result
+            return result
+
+    def detach(self):
+        # When detaching this buffer, we just let it be itself
+        # So it can be detected by the load_state_dict of a model
+        return self
+
+    def __repr__(self):
+        return 'Uninitialized buffer'
+
+    def __reduce_ex__(self, proto):
+        # See Note [Don't serialize hooks]
+        return (
+            torch._utils._rebuild_parameter,
+            (self.data, self.requires_grad, OrderedDict())
+        )

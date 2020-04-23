@@ -4,7 +4,7 @@ import itertools
 import warnings
 
 import torch
-from ..parameter import Parameter, _UninitializedParameter
+from ..parameter import Parameter, _UninitializedParameter, _UninitializedBuffer
 import torch.utils.hooks as hooks
 
 from torch import Tensor, device, dtype
@@ -962,11 +962,16 @@ class Module:
             key = prefix + name
             if key in state_dict:
                 input_param = state_dict[key]
+                # Detect Unitialized parameters or buffers
                 if isinstance(param, _UninitializedParameter):
                     if not isinstance(input_param, _UninitializedParameter):
                         # We override the parameter with a new one if it was already 
                         # Initialized
-                        self.register_parameter(name, torch.nn.Parameter(state_dict[key]))
+                        self.register_parameter(name, torch.nn.Parameter(input_param))
+                    continue
+                elif isinstance(param, _UninitializedBuffer):
+                    if not isinstance(input_param, _UninitializedBuffer):
+                        self.register_buffer(name, input_param)
                     continue
 
                 # Backward compatibility: loading 1-dim tensor from 0.3.* to version 0.4+
