@@ -138,7 +138,7 @@ struct ProfilerThreadLocalState : public at::DebugInfoBase {
   }
 
   thread_event_lists consolidate() {
-    std::lock_guard<std::mutex> guard(mutex_);
+    std::lock_guard<std::mutex> g(mutex_);
     thread_event_lists result;
     for (auto it = event_lists_map_.begin(); it != event_lists_map_.end(); ++it) {
       auto & list = it->second;
