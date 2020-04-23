@@ -72,6 +72,16 @@ class NaiveShapeTypePropagator {
       case aten::reciprocal:
       case aten::relu:
       case aten::sigmoid:
+      case aten::threshold:
+      case aten::clamp:
+        {
+          TORCH_CHECK(
+               node->input(0)->type()->cast<TensorType>()->isComplete(),
+              "shape propagation failed");
+          node->output()->setType(node->input(0)->type()->cast<TensorType>());
+          break;
+        }
+      // TODO: rand_like should support cast.
       case aten::rand_like:
         {
           TORCH_CHECK(

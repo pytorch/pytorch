@@ -24,7 +24,9 @@ typedef Val* CgValue;
 typedef Expr* CgOp;
 
 typedef void (
-    *ParseFuncPtr)(const Node* const, std::unordered_map<size_t, CgValue>&);
+    *ParseFuncPtr)(const Node* const,
+    std::unordered_map<size_t, CgValue>&,
+    std::unordered_set<CgValue>&);
 
 // TODO: add a mutex to make it thread safe.
 class IrParser {
@@ -58,7 +60,7 @@ class IrParser {
     // we only explicitly register inputs in the graph.
     for (auto val : block->inputs()) {
       TORCH_CHECK(registerValue(val, broadcast_dim));
-      fusion_->addInput(value_maps_[val->unique()]);
+      fusion_->addInput(value_map_[val->unique()]);
     }
 
     // compose nodes in topo order;
@@ -69,7 +71,7 @@ class IrParser {
     // mark output;
     for (auto jit_output : block->outputs()) {
       TensorView* out =
-          static_cast<TensorView*>(value_maps_[jit_output->unique()]);
+          static_cast<TensorView*>(value_map_[jit_output->unique()]);
       fusion_->addOutput(out);
 
       // Merge all dimensions because we're only supporting pointwise
@@ -90,7 +92,7 @@ class IrParser {
     // squeeze with computeAt to set overall structure.
     for (auto jit_output : block->outputs()) {
       TensorView* out =
-          static_cast<TensorView*>(value_maps_[jit_output->unique()]);
+          static_cast<TensorView*>(value_map_[jit_output->unique()]);
 
       for (Val* inp : fusion_->inputsOf(out)) {
         if (inp->getValType().value() == ValType::TensorView)
@@ -99,8 +101,18 @@ class IrParser {
     }
 
     // Run through intermediates, unroll, and bind their axes
-    for (auto entry : value_maps_) {
+    for (auto entry : value_map_) {
       CgValue val = entry.second;
+      if (fusion_->hasInput(val) || fusion_->hasOutput(val))
+        continue;
+      if (val->getValType().value() != ValType::TensorView)
+        continue;
+      TensorView* tv = static_cast<TensorView*>(val);
+      tv->axis(-2)->parallelize(ParallelType::Unroll);
+      tv->axis(-1)->parallelize(ParallelType::TIDx);
+    }
+
+    for (auto val : value_set_) {
       if (fusion_->hasInput(val) || fusion_->hasOutput(val))
         continue;
       if (val->getValType().value() != ValType::TensorView)
@@ -154,17 +166,28 @@ class IrParser {
       auto ptr_op = getOperatorForLiteral(signature);
       registerParseRule(ptr_op,
           [](const Node* const node,
-             std::unordered_map<size_t, CgValue>& value_maps) -> void {
+             std::unordered_map<size_t, CgValue>& value_map,
+             std::unordered_set<CgValue>& value_set) -> void {
             static std::unordered_map<Symbol, BinaryOpType> op_mapping({
                 {aten::add, BinaryOpType::Add},
                 {aten::sub, BinaryOpType::Sub},
             });
             // TODO: handle scaling factor when it's not constant 1;
-            auto lhs = value_maps[node->inputs()[0]->unique()];
-            auto rhs = value_maps[node->inputs()[1]->unique()];
+            auto lhs = value_map[node->inputs()[0]->unique()];
+            auto rhs = value_map[node->inputs()[1]->unique()];
+            auto alpha = value_map[node->inputs()[2]->unique()];
 
-            auto out = binaryOp(op_mapping[node->kind()], lhs, rhs);
-            value_maps.emplace(node->output()->unique(), out);
+            if (alpha->isOneInt()) {
+              printf("one int\n");
+              auto out = binaryOp(op_mapping[node->kind()], lhs, rhs);
+              value_map.emplace(node->output()->unique(), out);
+            } else {
+              printf("not one int\n");
+              auto weight_other = binaryOp(BinaryOpType::Mul, rhs, alpha);
+              value_set.emplace(weight_other);
+              auto out = binaryOp(op_mapping[node->kind()], lhs, weight_other);
+              value_map.emplace(node->output()->unique(), out);
+            }
           });
     }
 
@@ -197,7 +220,8 @@ class IrParser {
       auto ptr_op = getOperatorForLiteral(signature);
       registerParseRule(ptr_op,
           [](const Node* const node,
-             std::unordered_map<size_t, CgValue>& value_maps) -> void {
+             std::unordered_map<size_t, CgValue>& value_map,
+             std::unordered_set<CgValue>& value_set) -> void {
             static std::unordered_map<Symbol, BinaryOpType> op_mapping({
                 {aten::div,       BinaryOpType::Div},
                 {aten::mul,       BinaryOpType::Mul},
@@ -216,11 +240,11 @@ class IrParser {
                 {aten::ne,        BinaryOpType::NE},
                 {aten::eq,        BinaryOpType::Eq}
             });
-            auto lhs = value_maps[node->inputs()[0]->unique()];
-            auto rhs = value_maps[node->inputs()[1]->unique()];
+            auto lhs = value_map[node->inputs()[0]->unique()];
+            auto rhs = value_map[node->inputs()[1]->unique()];
 
             auto out = binaryOp(op_mapping[node->kind()], lhs, rhs);
-            value_maps.emplace(node->output()->unique(), out);
+            value_map.emplace(node->output()->unique(), out);
           });
     }
 
@@ -259,7 +283,8 @@ class IrParser {
       auto ptr_op = getOperatorForLiteral(signature);
       registerParseRule(ptr_op,
           [](const Node* const node,
-             std::unordered_map<size_t, CgValue>& value_maps) -> void {
+             std::unordered_map<size_t, CgValue>& value_map,
+             std::unordered_set<CgValue>& value_set) -> void {
             static std::unordered_map<Symbol, UnaryOpType> op_mapping({
                 {aten::neg,        UnaryOpType::Neg},
                 {aten::abs,        UnaryOpType::Abs},
@@ -291,10 +316,10 @@ class IrParser {
                 {aten::relu,       UnaryOpType::Relu},
                 {aten::sigmoid,    UnaryOpType::Sigmoid},
             });
-            auto operand = value_maps[node->input()->unique()];
+            auto operand = value_map[node->input()->unique()];
 
             auto out = unaryOp(op_mapping[node->kind()], operand);
-            value_maps.emplace(node->output()->unique(), out);
+            value_map.emplace(node->output()->unique(), out);
           });
     }
 
@@ -303,11 +328,49 @@ class IrParser {
           "aten::rand_like(Tensor self, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor");
       registerParseRule(ptr_op,
           [](const Node* const node,
-             std::unordered_map<size_t, CgValue>& value_maps) -> void {
-            auto operand = value_maps[node->inputs()[0]->unique()];
+             std::unordered_map<size_t, CgValue>& value_map,
+             std::unordered_set<CgValue>& value_set) -> void {
+            auto operand = value_map[node->inputs()[0]->unique()];
 
             auto out = unaryOp(UnaryOpType::RandLike, operand);
-            value_maps.emplace(node->output()->unique(), out);
+            value_map.emplace(node->output()->unique(), out);
+          });
+    }
+
+    {
+      auto ptr_op = getOperatorForLiteral(
+          "aten::threshold(Tensor self, Scalar threshold, Scalar value) -> Tensor");
+      registerParseRule(ptr_op,
+          [](const Node* const node,
+             std::unordered_map<size_t, CgValue>& value_map,
+             std::unordered_set<CgValue>& value_set) -> void {
+            auto operand = value_map[node->inputs()[0]->unique()];
+            auto th = value_map[node->inputs()[1]->unique()];
+            auto value = value_map[node->inputs()[2]->unique()];
+
+            auto out = threshold(operand, th, value);
+            value_map.emplace(node->output()->unique(), out);
+          });
+    }
+
+    {
+      auto ptr_op = getOperatorForLiteral(
+          "aten::clamp(Tensor self, Scalar? min, Scalar? max) -> Tensor");
+      registerParseRule(ptr_op,
+          [](const Node* const node,
+             std::unordered_map<size_t, CgValue>& value_map,
+             std::unordered_set<CgValue>& value_set) -> void {
+            auto operand = value_map[node->inputs()[0]->unique()];
+            // TODO: we need to get a proper lower bound per dtype in operand.
+            auto low = value_map.count(node->inputs()[1]->unique()) != 0 ?
+                value_map[node->inputs()[1]->unique()] :
+                new Float(std::numeric_limits<float>::min());
+            auto high = value_map.count(node->inputs()[2]->unique()) != 0 ?
+                value_map[node->inputs()[2]->unique()] :
+                new Float(std::numeric_limits<float>::max());
+
+            auto out = clamp(operand, low, high);
+            value_map.emplace(node->output()->unique(), out);
           });
     }
 
@@ -329,7 +392,7 @@ class IrParser {
           node->kind().toDisplayString());
       for (auto& pair_op_func : iter->second) {
         if (node->matches(pair_op_func.first->schema())) {
-          pair_op_func.second(node, value_maps_);
+          pair_op_func.second(node, value_map_, value_set_);
           return;
         }
       }
@@ -352,17 +415,17 @@ class IrParser {
       } else {
         cg_val = new Float();
       }
-      value_maps_.emplace(val->unique(), cg_val);
+      value_map_.emplace(val->unique(), cg_val);
       return true;
     } else if (val->type()->isSubtypeOf(
                    static_cast<c10::TypePtr>(IntType::get()))) {
       CgValue cg_val;
       if (auto ival = constant_as<int>(val)) {
-        cg_val = new Float(ival.value());
+        cg_val = new Int(ival.value());
       } else {
         cg_val = new Int();
       }
-      value_maps_.emplace(val->unique(), cg_val);
+      value_map_.emplace(val->unique(), cg_val);
       return true;
     } else if (val->type()->isSubtypeOf(
                    static_cast<c10::TypePtr>(NoneType::get()))) {
@@ -383,7 +446,7 @@ class IrParser {
       // TODO: make this a static function in Tensor class;
       // create tensor;
       cg_val = new TensorView(tensor_type);
-      value_maps_.emplace(val->unique(), cg_val);
+      value_map_.emplace(val->unique(), cg_val);
       return true;
     }
     return false;
@@ -393,7 +456,8 @@ class IrParser {
   Fusion* fusion_;
 
   // maps from JitValue::unique() to fusion Val;
-  std::unordered_map<size_t, CgValue> value_maps_;
+  std::unordered_map<size_t, CgValue> value_map_;
+  std::unordered_set<CgValue> value_set_;
   // parsing rule registry.
   static std::unordered_map<
       Symbol,
