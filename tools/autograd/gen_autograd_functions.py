@@ -162,6 +162,8 @@ def process_function(func):
             saved_variables.append('std::vector<int64_t> {};'.format(name))
         elif arg['type'] == 'c10::optional<IntArrayRef>':
             saved_variables.append('c10::OptionalArray<int64_t> {};'.format(name))
+        elif arg['type'] == 'c10::optional<ArrayRef<double>> ':
+            saved_variables.append('c10::OptionalArray<double> {};'.format(name))
         elif arg['type'] == 'int64_t':
             saved_variables.append('{} {} = 0;'.format(arg['type'], name))
         else:

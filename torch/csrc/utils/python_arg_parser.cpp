@@ -24,6 +24,7 @@ static std::unordered_map<std::string, ParameterType> type_map = {
   {"complex", ParameterType::COMPLEX},
   {"TensorList", ParameterType::TENSOR_LIST},
   {"IntArrayRef", ParameterType::INT_LIST},
+  {"ArrayRef<double>", ParameterType::FLOAT_LIST},
   {"Generator", ParameterType::GENERATOR},
   {"bool", ParameterType::BOOL},
   {"Storage", ParameterType::STORAGE},
@@ -309,6 +310,7 @@ auto FunctionParameter::check(PyObject* obj, std::vector<py::handle> &overloaded
       // if a size is specified (e.g. IntArrayRef[2]) we also allow passing a single int
       return size > 0 && THPUtils_checkLong(obj);
     }
+    case ParameterType::FLOAT_LIST: return (PyTuple_Check(obj) || PyList_Check(obj));
     case ParameterType::GENERATOR: return THPGenerator_Check(obj);
     case ParameterType::BOOL: return PyBool_Check(obj);
     case ParameterType::STORAGE: return isStorage(obj);
@@ -333,6 +335,7 @@ std::string FunctionParameter::type_name() const {
     case ParameterType::COMPLEX: return "complex";
     case ParameterType::TENSOR_LIST: return "tuple of Tensors";
     case ParameterType::INT_LIST: return "tuple of ints";
+    case ParameterType::FLOAT_LIST: return "tuple of floats";
     case ParameterType::GENERATOR: return "torch.Generator";
     case ParameterType::BOOL: return "bool";
     case ParameterType::STORAGE: return "torch.Storage";
@@ -417,6 +420,10 @@ void FunctionParameter::set_default_str(const std::string& str) {
   } else if (type_ == ParameterType::INT_LIST) {
     if (str != "None") {
       default_intlist = parse_intlist_args(str, size);
+    }
+  } else if (type_ == ParameterType::FLOAT_LIST) {
+    if (str != "None") {
+      throw std::runtime_error("Defaults not supported for float[]");
     }
   } else if (type_ == ParameterType::SCALARTYPE) {
     if (str == "None") {
