@@ -138,7 +138,7 @@ class TestDataParallel(TestCase):
                 var2.grad.fill_(0.0)
             loss = out.sum()
             loss.backward()
-            self.assertEqual(out, expected)
+            self.assertEqualOnCPU(out, expected)
             self.assertEqual(gvar1_exp, var1.grad)
             self.assertEqual(gvar2_exp, var2.grad)
 
@@ -315,9 +315,9 @@ class TestDataParallel(TestCase):
                 loss = out.sum()
                 loss.backward()
                 self.assertEqual(out.get_device(), dev_id[0])
-                self.assertEqual(out, expected_out)
+                self.assertEqualOnCPU(out, expected_out)
                 for expected, param in zip(expected_grads, l.parameters()):
-                    self.assertEqual(param.grad, expected)
+                    self.assertEqualOnCPU(param.grad, expected)
 
         # Check for None device_ids
         l = l.cuda()
@@ -342,9 +342,9 @@ class TestDataParallel(TestCase):
                 loss = out.sum()
                 loss.backward()
                 self.assertEqual(out.get_device(), dev_id[0])
-                self.assertEqual(out, expected_out)
+                self.assertEqualOnCPU(out, expected_out)
                 for expected, param in zip(expected_grads, l.parameters()):
-                    self.assertEqual(param.grad, expected)
+                    self.assertEqualOnCPU(param.grad, expected)
 
         # Check for None device_ids
         l = l.cuda()
@@ -365,7 +365,7 @@ class TestDataParallel(TestCase):
         i = torch.randn(2, 2).float().cuda(1)
         gpus = range(torch.cuda.device_count())
         output = dp.data_parallel(Net(), i, gpus)
-        self.assertEqual(output, fn(i))
+        self.assertEqualOnCPU(output, fn(i))
         self.assertIsInstance(output[0], torch.Tensor)
         self.assertIsInstance(output[1], tuple)
         self.assertIsInstance(output[1][0], torch.Tensor)
@@ -394,7 +394,7 @@ class TestDataParallel(TestCase):
         input = (i.cos(), (i.sin(), i), i.sin())
         gpus = range(torch.cuda.device_count())
         output = dp.data_parallel(Net(), input, gpus)
-        self.assertEqual(output, fn(input))
+        self.assertEqualOnCPU(output, fn(input))
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     @repeat_test_for_types(ALL_TENSORTYPES)
@@ -529,14 +529,14 @@ class TestDataParallel(TestCase):
         x = tensor.detach().requires_grad_()
         result = dp.scatter(x, (0, 1))
         self.assertEqual(len(result), 2)
-        self.assertEqual(result[0], x[:2])
+        self.assertEqualOnCPU(result[0], x[:2])
         self.assertEqual(result[0].get_device(), 0)
-        self.assertEqual(result[1], x[2:])
+        self.assertEqualOnCPU(result[1], x[2:])
         self.assertEqual(result[1].get_device(), 1)
         grad = result[0].detach().clone().fill_(2)
         result[0].backward(grad)
-        self.assertEqual(x.grad[:2], grad)
-        self.assertEqual(x.grad[2:], grad.clone().zero_())
+        self.assertEqualOnCPU(x.grad[:2], grad)
+        self.assertEqualOnCPU(x.grad[2:], grad.clone().zero_())
         _assertGradAndGradgradChecks(self, lambda y: dp.scatter(y, (0, 1)), (x,))
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
@@ -554,8 +554,8 @@ class TestDataParallel(TestCase):
         )
         result = dp.gather(inputs, output_device)
         self.assertEqual(result.size(), torch.Size([4, 4]))
-        self.assertEqual(result[:2], inputs[0])
-        self.assertEqual(result[2:], inputs[1])
+        self.assertEqualOnCPU(result[:2], inputs[0])
+        self.assertEqualOnCPU(result[2:], inputs[1])
         if output_device != -1:
             self.assertEqual(result.get_device(), output_device)
         else:
@@ -564,8 +564,8 @@ class TestDataParallel(TestCase):
         if output_device != -1:
             grad = grad.cuda(output_device)
         result.backward(grad)
-        self.assertEqual(inputs[0].grad, grad[:2])
-        self.assertEqual(inputs[1].grad, grad[2:])
+        self.assertEqualOnCPU(inputs[0].grad, grad[:2])
+        self.assertEqualOnCPU(inputs[1].grad, grad[2:])
         _assertGradAndGradgradChecks(self, lambda x, y: dp.gather((x, y), output_device), inputs)
 
         # test scalar inputs, should stack into a vector in this case
@@ -575,8 +575,8 @@ class TestDataParallel(TestCase):
         )
         result = dp.gather(inputs, output_device)
         self.assertEqual(result.size(), torch.Size([2]))
-        self.assertEqual(result[0], inputs[0])
-        self.assertEqual(result[1], inputs[1])
+        self.assertEqualOnCPU(result[0], inputs[0])
+        self.assertEqualOnCPU(result[1], inputs[1])
         if output_device != -1:
             self.assertEqual(result.get_device(), output_device)
         else:
@@ -585,8 +585,8 @@ class TestDataParallel(TestCase):
         if output_device != -1:
             grad = grad.cuda(output_device)
         result.backward(grad)
-        self.assertEqual(inputs[0].grad, grad[0])
-        self.assertEqual(inputs[1].grad, grad[1])
+        self.assertEqualOnCPU(inputs[0].grad, grad[0])
+        self.assertEqualOnCPU(inputs[1].grad, grad[1])
         _assertGradAndGradgradChecks(self, lambda x, y: dp.gather((x, y), output_device), inputs)
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
@@ -620,7 +620,7 @@ class TestDataParallel(TestCase):
                 for p in replica.parameters():
                     self.assertEqual(p.get_device(), i)
                 replica_input = input.cuda(i)
-                self.assertEqual(replica(replica_input), expected_output)
+                self.assertEqualOnCPU(replica(replica_input), expected_output)
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_replicate_buffers(self):

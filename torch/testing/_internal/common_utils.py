@@ -818,6 +818,21 @@ class TestCase(expecttest.TestCase):
         b_tol = self.get_default_tolerance(b)
         return (max(a_tol[0], b_tol[0]), max(a_tol[1], b_tol[1]))
 
+    # Helper function that can compare tensors and tuples of tensors
+    # by casting them to the CPU for comparison.
+    def assertEqualOnCPU(self, a, b, rtol=None, atol=None, equal_nan=False, exact_dtype=False):
+        if isinstance(a, torch.Tensor):
+            self.assertEqual(a.cpu(), b.cpu(), rtol=rtol, atol=atol,
+                             equal_nan=equal_nan, exact_dtype=exact_dtype)
+        elif is_iterable(a):
+            for a_part, b_part in zip(a, b):
+                self.assertEqualOnCPU(a_part, b_part, rtol, atol, equal_nan, exact_dtype)
+        elif isinstance(a, dict):
+            for k, v in a.items():
+                self.assertEqualOnCPU(v, b[k], rtol, atol, equal_nan, exact_dtype)
+        else:
+            self.assertEqual(a, b, rtol=rtol, atol=atol, equal_nan=equal_nan, exact_dtype=exact_dtype)
+
     # Returns tensors a and b in dtypes suitable for comparison
     # Note: torch.isclose is used to compare non-bool tensors, and internally
     # it converts its input to floating point values

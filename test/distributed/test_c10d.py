@@ -681,7 +681,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             # Run with 1 input tensor
             x = fn(torch.tensor([self.rank]))
             broadcast([x], i, 0)
-            self.assertEqual(torch.tensor([i]), x)
+            self.assertEqual(torch.tensor([i]), x.cpu())
 
             # Run with 2 input tensors
             num = 2
@@ -692,8 +692,8 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
                 ]
 
                 broadcast(xs, i, j)
-                self.assertEqual(torch.tensor([i * num + j]), xs[0])
-                self.assertEqual(torch.tensor([i * num + j]), xs[1])
+                self.assertEqual(torch.tensor([i * num + j]), xs[0].cpu())
+                self.assertEqual(torch.tensor([i * num + j]), xs[1].cpu())
 
         # Test overloaded convenience function
         x = torch.tensor([self.rank + 1.0])
@@ -721,7 +721,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
                 torch.tensor([
                     (i * self.world_size) + (i % self.world_size)
                 ]),
-                inputs[i],
+                inputs[i].cpu(),
                 message=("Mismatch in iteration %d" % i),
             )
 
@@ -767,7 +767,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             tensor = fn(input)
             work = pg.allreduce([tensor], opts)
             work.wait()
-            self.assertEqual(output, tensor)
+            self.assertEqual(output, tensor.cpu())
 
         # Multi input tests
         tests = simple_multi_input_reduce_tests(self.rank, self.world_size)
@@ -778,13 +778,13 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             work = pg.allreduce(tensors, opts)
             work.wait()
             for tensor in tensors:
-                self.assertEqual(output, tensor)
+                self.assertEqual(output, tensor.cpu())
 
         # Test overloaded convenience function (defaults to using sum)
         x = fn(torch.tensor([self.rank + 1.0]))
         work = pg.allreduce(x)
         work.wait()
-        self.assertEqual(torch.tensor([float(self.world_size * (self.world_size + 1) / 2)]), x)
+        self.assertEqual(torch.tensor([float(self.world_size * (self.world_size + 1) / 2)]), x.cpu())
 
     def test_allreduce_basics(self):
         self._test_allreduce_basics(lambda t: t.clone())
@@ -804,7 +804,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
                     (i * self.world_size) +
                     (self.world_size * (self.world_size - 1) / 2)
                 ]),
-                inputs[i],
+                inputs[i].cpu(),
                 message=("Mismatch in iteration %d" % i),
             )
 
@@ -925,8 +925,8 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
                 tensors = [fn(input) for input in inputs]
                 work = pg.allreduce(tensors)
                 work.wait()
-                self.assertEqual(tensors, outputs)
-                self.assertEqual(work.result(), outputs)
+                self.assertEqualOnCPU(tensors, outputs)
+                self.assertEqualOnCPU(outputs, work.result())
 
     def test_sparse_allreduce_basics(self):
         self._test_sparse_allreduce_basics(lambda t: t)
@@ -1024,7 +1024,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         # Wait for work to complete
         for i in range(self.world_size):
             work[i].wait()
-            self.assertEqual(torch.tensor([i]), outputs[i])
+            self.assertEqual(torch.tensor([i]), outputs[i].cpu())
 
     def test_scatter_basics(self):
         self._test_scatter_basics(lambda t: t.clone())
@@ -1168,7 +1168,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         for i in range(self.world_size):
             work[i].wait()
             if i == self.rank:
-                self.assertEqual(expected, outputs)
+                self.assertEqualOnCPU(expected, outputs)
 
     def test_gather_basics(self):
         self._test_gather_basics(lambda t: t.clone())
@@ -1206,11 +1206,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             iter = i // self.world_size
             root = i % self.world_size
             if root == self.rank:
-                self.assertEqual(
-                    expected_outputs[iter],
-                    outputs[iter],
-                    message=("Mismatch in iteration %d for root %d" % (iter, root))
-                )
+                self.assertEqualOnCPU(expected_outputs[iter], outputs[iter])
 
     def test_gather_stress(self):
         inputs = [torch.tensor([i + self.rank]) for i in range(1000)]
@@ -1278,7 +1274,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             ]
             work = pg.allgather(output, input)
             work.wait()
-            self.assertEqual(expected_output, output)
+            self.assertEqualOnCPU(expected_output, output)
 
     def test_allgather_basics(self):
         self._test_allgather_basics(lambda t: t.clone())
@@ -1307,11 +1303,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
 
         for i, work_handle in enumerate(work_handles):
             work_handle.wait()
-            self.assertEqual(
-                expected_outputs[i],
-                outputs[i],
-                message=("Mismatch in iteration %d" % i),
-            )
+            self.assertEqualOnCPU(expected_outputs[i], outputs[i])
 
     def test_allgather_stress(self):
         inputs = [torch.tensor([i + self.rank]) for i in range(1000)]
@@ -1402,7 +1394,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
                 work = pg.reduce([tmp], opts)
                 work.wait()
                 if root == self.rank:
-                    self.assertEqual(output, tmp)
+                    self.assertEqual(output, tmp.cpu())
 
     def test_reduce_basics(self):
         self._test_reduce_basics(lambda t: t.clone())
@@ -1435,7 +1427,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
                         (iter * self.world_size) +
                         (self.world_size * (self.world_size - 1) / 2)
                     ]),
-                    outputs[i],
+                    outputs[i].cpu(),
                     message=("Mismatch in iteration %d with root rank %d" % (iter, root)),
                 )
 
@@ -1604,7 +1596,7 @@ class ProcessGroupNCCLTest(TestCase):
             broadcast(tensors, self.rank, rt)
 
             for i in range(self.num_gpus):
-                self.assertEqual(tensors[i], tensors[rt])
+                self.assertEqual(tensors[i].cpu(), tensors[rt].cpu())
 
     def test_allreduce_ops(self):
         store = c10d.FileStore(self.file.name, self.world_size)
@@ -1626,7 +1618,7 @@ class ProcessGroupNCCLTest(TestCase):
         for i in range(self.num_gpus):
             self.assertEqual(
                 torch.tensor([float(self.num_gpus * (self.num_gpus + 1) / 2)]),
-                tensors[i])
+                tensors[i].cpu())
 
         # Product
         tensors = []
@@ -1638,7 +1630,7 @@ class ProcessGroupNCCLTest(TestCase):
         for i in range(self.num_gpus):
             self.assertEqual(
                 torch.tensor([float(math.factorial(self.num_gpus))]),
-                tensors[i])
+                tensors[i].cpu())
 
         # Min
         tensors = []
@@ -1648,7 +1640,7 @@ class ProcessGroupNCCLTest(TestCase):
         allreduce(tensors, c10d.ReduceOp.MIN)
 
         for i in range(self.num_gpus):
-            self.assertEqual(torch.tensor([1.0]), tensors[i])
+            self.assertEqual(torch.tensor([1.0]), tensors[i].cpu())
 
         # Max
         tensors = []
@@ -1658,7 +1650,7 @@ class ProcessGroupNCCLTest(TestCase):
         allreduce(tensors, c10d.ReduceOp.MAX)
 
         for i in range(self.num_gpus):
-            self.assertEqual(torch.tensor([self.num_gpus]), tensors[i])
+            self.assertEqual(torch.tensor([self.num_gpus]), tensors[i].cpu())
 
     def test_reduce_ops(self):
         store = c10d.FileStore(self.file.name, self.world_size)
@@ -1681,7 +1673,7 @@ class ProcessGroupNCCLTest(TestCase):
 
             self.assertEqual(
                 torch.tensor([float(self.num_gpus * (self.num_gpus + 1) / 2)]),
-                tensors[rt])
+                tensors[rt].cpu())
 
     def test_allgather_ops(self):
         store = c10d.FileStore(self.file.name, self.world_size)
@@ -1706,7 +1698,7 @@ class ProcessGroupNCCLTest(TestCase):
         # Verification
         for device_ts in output_ts:
             for s_idx, t in enumerate(device_ts):
-                self.assertEqual(torch.tensor([s_idx]), t)
+                self.assertEqual(torch.tensor([s_idx]), t.cpu())
 
     def test_reduce_scatter_ops(self):
         store = c10d.FileStore(self.file.name, self.world_size)
@@ -1748,14 +1740,14 @@ class ProcessGroupNCCLTest(TestCase):
                 float(self.num_gpus * (self.num_gpus - 1) / 2) +
                 (virtual_rank + i) * virtual_world_size
             ])
-            self.assertEqual(expected, output[i])
+            self.assertEqual(expected, output[i].cpu())
 
         # Min
         reduce_scatter(output, tensor_lists, c10d.ReduceOp.MIN)
 
         for i in range(self.num_gpus):
             expected = torch.tensor([self.rank * self.world_size + i])
-            self.assertEqual(expected, output[i])
+            self.assertEqual(expected, output[i].cpu())
 
         # Max
         reduce_scatter(output, tensor_lists, c10d.ReduceOp.MAX)
@@ -1764,7 +1756,7 @@ class ProcessGroupNCCLTest(TestCase):
             expected = torch.tensor(
                 [self.rank * self.world_size + i + virtual_world_size - 1]
             )
-            self.assertEqual(expected, output[i])
+            self.assertEqual(expected, output[i].cpu())
 
         # Product
         tensor_lists = [
@@ -1781,7 +1773,7 @@ class ProcessGroupNCCLTest(TestCase):
 
         for i in range(self.num_gpus):
             expected = torch.tensor([float(math.factorial(virtual_world_size))])
-            self.assertEqual(expected, output[i])
+            self.assertEqual(expected, output[i].cpu())
 
     def test_barrier(self):
         store = c10d.FileStore(self.file.name, self.world_size)
@@ -1811,7 +1803,7 @@ class ProcessGroupNCCLTest(TestCase):
             for j in range(i):
                 self.assertEqual(
                     torch.tensor([float(i * (i + 1) / 2)]),
-                    tensors_list[i - 2][j])
+                    tensors_list[i - 2][j].cpu())
 
 
 class Net(nn.Module):
@@ -2278,7 +2270,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         work.wait()
 
         # The expected result of the allreduce should be the average
-        self.assertEqual(local_grad_sum,
+        self.assertEqual(local_grad_sum.cpu(),
                          torch.ones(10) * (self.world_size + 1) * len(devices) / 2.0)
 
     @requires_nccl()
@@ -2298,7 +2290,10 @@ class DistributedDataParallelTest(MultiProcessTestCase):
                                                      devices)
         c10d._sync_reduction(work, grads_batch[0], local_grad_sum)
         # The expected result of the allreduce should be the average
-        self.assertEqual(grads_batch[0], (torch.ones(10) * (self.world_size + 1) * len(devices) / 2.0).chunk(5))
+        expected = (torch.ones(10) * (self.world_size + 1) * len(devices) / 2.0).chunk(5)
+        actual = grads_batch[0]
+        for e, a in zip(expected, actual):
+            self.assertEqual(e, a.cpu())
 
     @requires_nccl()
     @skip_if_not_multigpu

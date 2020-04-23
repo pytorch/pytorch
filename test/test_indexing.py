@@ -83,8 +83,8 @@ class TestIndexing(TestCase):
             self.assertEqual(y, torch.ones(size=(10, 10), device=device))
             self.assertEquals(len(w), 2)
 
-    def test_index_put_accumulate_large_tensor(self, device): 
-        # This test is for tensors with number of elements >= INT_MAX (2^31 - 1). 
+    def test_index_put_accumulate_large_tensor(self, device):
+        # This test is for tensors with number of elements >= INT_MAX (2^31 - 1).
         N = (1 << 31) + 5
         dt = torch.int8
         a = torch.ones(N, dtype=dt, device=device)
@@ -208,9 +208,9 @@ class TestIndexing(TestCase):
 
         for a in tensors:
             self.assertNotEqual(a.data_ptr(), a[True].data_ptr())
-            self.assertEqual(torch.empty(0, *a.shape), a[False])
+            self.assertEqual(torch.empty(0, *a.shape), a[False].cpu())
             self.assertNotEqual(a.data_ptr(), a[true].data_ptr())
-            self.assertEqual(torch.empty(0, *a.shape), a[false])
+            self.assertEqual(torch.empty(0, *a.shape), a[false].cpu())
             self.assertEqual(a.data_ptr(), a[None].data_ptr())
             self.assertEqual(a.data_ptr(), a[...].data_ptr())
 

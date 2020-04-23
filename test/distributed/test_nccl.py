@@ -36,7 +36,7 @@ class TestNCCL(TestCase):
 
         nccl.broadcast(tensors)
         for i in range(torch.cuda.device_count()):
-            self.assertEqual(tensors[i], expected)
+            self.assertEqual(tensors[i].cpu(), expected)
 
     @unittest.skipIf(IS_WINDOWS, "NCCL doesn't support Windows")
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
@@ -49,7 +49,7 @@ class TestNCCL(TestCase):
         tensors = [tensors[i].cuda(i) for i in range(nGPUs)]
         nccl.reduce(tensors)
 
-        self.assertEqual(tensors[0], expected)
+        self.assertEqual(tensors[0].cpu(), expected)
 
     @unittest.skipIf(IS_WINDOWS, "NCCL doesn't support Windows")
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
@@ -63,7 +63,7 @@ class TestNCCL(TestCase):
         nccl.all_reduce(tensors)
 
         for tensor in tensors:
-            self.assertEqual(tensor, expected)
+            self.assertEqual(tensor.cpu(), expected)
 
     @unittest.skipIf(IS_WINDOWS, "NCCL doesn't support Windows")
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
@@ -77,7 +77,7 @@ class TestNCCL(TestCase):
         nccl.all_gather(inputs, outputs)
 
         for tensor in outputs:
-            self.assertEqual(tensor, expected)
+            self.assertEqual(tensor.cpu(), expected)
 
     @unittest.skipIf(IS_WINDOWS, "NCCL doesn't support Windows")
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
@@ -97,7 +97,7 @@ class TestNCCL(TestCase):
         nccl.reduce_scatter(inputs, outputs)
 
         for i in range(nGPUs):
-            self.assertEqual(outputs[i], expected[i])
+            self.assertEqual(outputs[i].cpu(), expected[i])
 
 
 if __name__ == '__main__':
