@@ -100,7 +100,7 @@ class BasePruningMethod(ABC):
             found = 0
             # there should technically be only 1 hook with hook.name == name
             # assert this using `found`
-            hooks_to_remove = []
+            existing_hook_id = None
             for k, hook in module._forward_pre_hooks.items():
                 # if it exists, take existing thing, remove hook, then
                 # go through normal thing
@@ -109,7 +109,7 @@ class BasePruningMethod(ABC):
                     and hook._tensor_name == name
                 ):
                     old_method = hook
-                    hooks_to_remove.append(k)
+                    existing_hook_id = k
                     found += 1
             assert (
                 found <= 1
@@ -117,9 +117,6 @@ class BasePruningMethod(ABC):
                 same tensor {} of module {}. Use a PruningContainer.".format(
                 name, module
             )
-
-            for k in hooks_to_remove:
-                del module._forward_pre_hooks[k]
 
             # Apply the new pruning method, either from scratch or on top of
             # the previous one.
@@ -143,9 +140,9 @@ class BasePruningMethod(ABC):
                     # setattr(container, '_tensor_name', name)
                     container.add_pruning_method(method)
                     method = container  # rename container --> method
-            return method
+            return method, existing_hook_id
 
-        method = _get_composite_method(cls, module, name, *args, **kwargs)
+        method, existing_hook_id = _get_composite_method(cls, module, name, *args, **kwargs)
         # at this point we have no forward_pre_hooks but we could have an
         # active reparametrization of the tensor if another pruning method
         # had been applied (in which case `method` would be a PruningContainer
@@ -182,7 +179,10 @@ class BasePruningMethod(ABC):
             setattr(module, name, method.apply_mask(module))
             # associate the pruning method to the module via a hook to
             # compute the function before every forward() (compile by run)
-            module.register_forward_pre_hook(method)
+            if existing_hook_id is None:
+                module.register_forward_pre_hook(method)
+            else:
+                module._forward_pre_hooks[existing_hook_id] = method
 
         except Exception as e:
             if not isinstance(method, PruningContainer):
