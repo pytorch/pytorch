@@ -41,13 +41,7 @@ Object Object::copy() const {
   size_t N = type()->numAttributes();
   for (size_t i = 0; i < N; ++i) {
     IValue s = _ivalue()->getSlot(i);
-    if (type()->getAttribute(i)->is_module()) {
-      const Object& orig = s.toObject();
-      Object copied = orig.copy();
-      obj._ivalue()->setAttr(type()->getAttributeName(i), copied._ivalue());
-    } else {
-      obj._ivalue()->setAttr(type()->getAttributeName(i), s);
-    }
+    obj._ivalue()->setAttr(type()->getAttributeName(i), s.copy());
   }
 
   return obj;
