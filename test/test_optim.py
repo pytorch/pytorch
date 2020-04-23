@@ -181,8 +181,8 @@ class TestOptim(TestCase):
         for _i in range(20):
             optimizer.step(fn)
             optimizer_cuda.step(fn_cuda)
-            self.assertEqual(weight, weight_cuda)
-            self.assertEqual(bias, bias_cuda)
+            self.assertEqualOnCPU(weight, weight_cuda)
+            self.assertEqualOnCPU(bias, bias_cuda)
 
         # validate deepcopy() copies all public attributes
         def getPublicAttr(obj):
