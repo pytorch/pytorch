@@ -4,6 +4,7 @@
 #include <torch/csrc/autograd/input_buffer.h>
 #include <torch/csrc/distributed/autograd/context/container.h>
 #include <torch/csrc/distributed/autograd/engine/dist_engine.h>
+#include <ATen/Parallel.h>
 
 namespace torch {
 namespace distributed {
@@ -248,7 +249,7 @@ void DistEngine::computeDependencies(
   autogradContext->setGraphTask(std::move(graphTask));
 }
 
-std::shared_ptr<FutureVariableList>& DistEngine::execute_graph_task_until_ready_queue_empty(
+void DistEngine::execute_graph_task_until_ready_queue_empty(
     const std::shared_ptr<GraphTask>& graph_task,
     std::shared_ptr<Node> root_to_execute,
     bool incrementOutstandingTasks) {
@@ -295,7 +296,6 @@ std::shared_ptr<FutureVariableList>& DistEngine::execute_graph_task_until_ready_
     // would notify the owner thread that the task has been completed.
     graph_task->mark_as_completed_and_run_post_processing();
   }
-  return graph_task->future_result_;
 }
 
 std::shared_ptr<rpc::FutureMessage> DistEngine::runEngineAndAccumulateGradients(
@@ -307,12 +307,15 @@ std::shared_ptr<rpc::FutureMessage> DistEngine::runEngineAndAccumulateGradients(
   // lingering if we're running backward multiple times and some of the
   // passes ran into errors.
   autogradContext->clearOutstandingRpcs();
-
+  auto graph_task = autogradContext->retrieveGraphTask();
+  at::launch([this, graph_task, graphRoot, incrementOutstandingTasks](){
+    execute_graph_task_until_ready_queue_empty(
+          /*graph_task*/ graph_task,
+          /*root_to_execute*/ graphRoot,
+          /*incrementOutstandingTasks*/ incrementOutstandingTasks);
+  });
   // Use a reference here to avoid refcount bump on futureGrads.
-  auto& futureGrads = execute_graph_task_until_ready_queue_empty(
-      /*graph_task*/ autogradContext->retrieveGraphTask(),
-      /*root_to_execute*/ graphRoot,
-      /*incrementOutstandingTasks*/ incrementOutstandingTasks);
+  auto& futureGrads = graph_task->future_result_;
 
   // Build a future that waits for the callbacks to execute (since callbacks
   // execute after the original future is completed). This ensures we return a
