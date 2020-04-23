@@ -1,5 +1,4 @@
 # Torch
-from torch._six import PY2
 from torch.jit.annotations import BroadcastingList2, BroadcastingList3  # noqa: F401
 from torch.testing._internal.common_methods_invocations import non_differentiable, create_input, \
     unpack_variables
@@ -249,9 +248,9 @@ def get_call(method_name, func_type, args, kwargs):
 
 def get_constant(x):
     if x == inf:
-        return 'float(\'inf\')' if PY2 else 'math.inf'
+        return 'math.inf'
     if x == -inf:
-        return 'float(\'-inf\')' if PY2 else '-math.inf'
+        return '-math.inf'
     return x
 
 def get_script_args(args):

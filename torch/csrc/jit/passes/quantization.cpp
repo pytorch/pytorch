@@ -132,6 +132,8 @@ std::vector<std::string> _single_input_general_aten_funcs = {
     "contiguous",
     "permute",
     "repeat_interleave",
+    "clamp",
+    // "clamp_",  // Enable when quantized `clamp_` is ready
     "relu",
     "sigmoid",
     "tanh",
@@ -690,6 +692,20 @@ graph(%self, %input):
     %second_module = match::module[name="ReLU"](%self)
     %second_output = prim::CallMethod[name="forward"](%second_module, %first_output)
     return (%second_output) )");
+  const PatternInfo conv3d_functional_relu = PatternInfo::parse_from_str(R"(
+graph(%self, %input, %inplace):
+    %relu = prim::Constant[name="relu"]()
+    %first_module = match::module[name="Conv3d"](%self)
+    %first_output = prim::CallMethod[name="forward"](%first_module, %input)
+    %second_output = prim::CallFunction(%relu, %first_output, %inplace)
+    return (%second_output) )");
+  const PatternInfo conv3d_relu = PatternInfo::parse_from_str(R"(
+graph(%self, %input):
+    %first_module = match::module[name="Conv3d"](%self)
+    %first_output = prim::CallMethod[name="forward"](%first_module, %input)
+    %second_module = match::module[name="ReLU"](%self)
+    %second_output = prim::CallMethod[name="forward"](%second_module, %first_output)
+    return (%second_output) )");
   const PatternInfo matmul_add = PatternInfo::parse_from_str(R"(
 graph(%input, %weight, %bias, %4):
      %weight_t = aten::t(%weight)
@@ -762,6 +778,8 @@ graph(%self, %a, %b, %inplace):
       {
           conv2d_functional_relu,
           conv2d_relu,
+          conv3d_functional_relu,
+          conv3d_relu,
           matmul_add,
           add_module_relu,
           add_functional_relu,
@@ -2727,11 +2745,12 @@ void ReplicateChooseQParamsQuant(std::shared_ptr<Graph>& graph) {
         choose_qparam_nodes_to_rewrite.push_back(use.user);
       }
     }
-    for (const Use& use : quantized_val->uses()) {
+    std::vector<Use> uses = quantized_val->uses();
+    for (const Use& use : uses) {
       auto* user = use.user;
+      WithInsertPoint ins(user);
       Node* choose_qparam =
           insertChooseQParamsCall(graph.get(), original_val, user);
-      WithInsertPoint ins(user);
       std::vector<Value*> quant_inputs = {original_val};
       for (auto& out : choose_qparam->outputs()) {
         quant_inputs.push_back(out);
@@ -2746,11 +2765,11 @@ void ReplicateChooseQParamsQuant(std::shared_ptr<Graph>& graph) {
   for (Node* n : quant_nodes_to_rewrite) {
     n->removeAllInputs();
   }
-  for (Node* n : choose_qparam_nodes_to_rewrite) {
-    n->removeAllInputs();
-  }
   for (Node* n : quant_nodes_to_rewrite) {
     n->destroy();
+  }
+  for (Node* n : choose_qparam_nodes_to_rewrite) {
+    n->removeAllInputs();
   }
   for (Node* n : choose_qparam_nodes_to_rewrite) {
     n->destroy();
@@ -3062,35 +3081,29 @@ void FoldQuantizedPrepackingOps(Module& module) {
 void RemoveRedundantQuantizeOps(
     std::shared_ptr<Graph>& graph,
     bool is_dynamic) {
-  const PatternInfo& dynamic_quant_ops = PatternInfo::parse_from_str(R"(
+  const std::string dynamic_quant_ops = R"(
     graph(%a, %reduce_range, %a_dtype):
         %a_scale : float, %a_zero_point : int = aten::_choose_qparams_per_tensor(%a, %reduce_range)
         %a_quant = aten::quantize_per_tensor(%a, %a_scale, %a_zero_point, %a_dtype)
         %a_dequant = aten::dequantize(%a_quant)
-        return (%a_dequant) )");
+        return (%a_dequant) )";
   const std::string dynamic_quant_replacement = R"(
     graph(%a, %reduce_range, %a_dtype):
         return (%a) )";
-
-  const Graph& pattern_dynamic_quant_graph = *dynamic_quant_ops.pattern_graph;
-  const auto& dynamic_quant_vmap = dynamic_quant_ops.vmap;
-  const auto& matches =
-      findPatternMatches(pattern_dynamic_quant_graph, *graph.get());
-  for (const auto& match : matches) {
-    auto dequant_node =
-        match.values_map.at(dynamic_quant_vmap.at("a_dequant"))->node();
+  auto filter = [&](const Match& match,
+                    const std::unordered_map<std::string, Value*>& vmap) {
+    const auto& match_vmap = match.values_map;
+    auto dequant_node = match_vmap.at(vmap.at("a_dequant"))->node();
     Value* dequant_out = dequant_node->output();
     TORCH_CHECK(
         dequant_out->uses().size() == 1,
         "Expect dequant output to have single use");
     Node* user = dequant_out->uses()[0].user;
-    if (!nodeQuantizable(user, is_dynamic)) {
-      SubgraphRewriter rewriter;
-      rewriter.RegisterRewritePattern(
-          dynamic_quant_ops.pattern_string, dynamic_quant_replacement);
-      rewriter.runOnGraph(graph);
-    }
-  }
+    return !nodeQuantizable(user, is_dynamic);
+  };
+  SubgraphRewriter rewriter;
+  rewriter.RegisterRewritePattern(dynamic_quant_ops, dynamic_quant_replacement);
+  rewriter.runOnGraph(graph, filter);
 }
 
 script::Module Finalize(script::Module& module, bool is_dynamic) {
@@ -3106,8 +3119,8 @@ script::Module Finalize(script::Module& module, bool is_dynamic) {
   SwapDeQuant(graph);
   InsertPrepackUnpack(graph);
   ConstantPropagation(graph);
-  QuantFusion(graph, is_dynamic);
   RemoveRedundantQuantizeOps(graph, is_dynamic);
+  QuantFusion(graph, is_dynamic);
   auto frozen = freeze_module(module);
   FoldQuantizedPrepackingOps(frozen);
   return frozen;
