@@ -1,12 +1,8 @@
 import torch.jit
 from textwrap import dedent
-from torch._six import PY2
 
 def execWrapper(code, glob, loc):
-    if PY2:
-        exec(code) in glob, loc
-    else:
-        exec(code, glob, loc)
+    exec(code, glob, loc)
 
 def _gen_unsupported_methods_properties():
     tensor_attrs = set(filter(lambda x: x[0] != "_", dir(torch.Tensor)))

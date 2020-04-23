@@ -9,6 +9,7 @@
 #endif
 
 #include <ATen/core/Array.h>
+#include <ATen/core/TransformationHelper.h>
 #include <c10/util/Half.h>
 #include <c10/util/BFloat16.h>
 #include <c10/util/Optional.h>
@@ -36,122 +37,62 @@
 
 namespace at {
 
-// Using DistAccumType in accumulate types for distributions.
-// Note: Ideally we'd be using ATen/AccumulateType.h but looks
-// like the there is some inconsistency in how accumulate types
-// are mapped currently, e.g. for the cpu side, float is mapped
-// to double.
-template <typename T>
-struct DistAccumType {  };
-
-#if defined(__CUDACC__) || defined(__HIPCC__)
-template <> struct DistAccumType<half> { using type = float; };
-#endif
-template <> struct DistAccumType<Half> { using type = float; };
-template <> struct DistAccumType<float> { using type = float; };
-template <> struct DistAccumType<double> { using type = double; };
-
-template <typename T>
-using dist_acctype = typename DistAccumType<T>::type;
-
 /**
  * Samples a discrete uniform distribution in the range [base, base+range) of type T
- * This is a transformation function for
- * https://pytorch.org/docs/stable/tensors.html?highlight=random#torch.Tensor.random_
- * when both `from` and `to` are specified.
  */
 template <typename T>
 struct uniform_int_from_to_distribution {
 
-  C10_HOST_DEVICE inline uniform_int_from_to_distribution(uint64_t range_, int64_t base_) {
-    range = range_;
-    base = base_;
+  C10_HOST_DEVICE inline uniform_int_from_to_distribution(uint64_t range, int64_t base) {
+    range_ = range;
+    base_ = base;
   }
 
-  template <typename V,
-            typename std::enable_if<std::is_integral<V>::value, int>::type = 0>
-  C10_HOST_DEVICE inline T operator()(V val) {
-    return static_cast<T>(static_cast<int64_t>((val % range) + base));
-  }
-
-  template <typename RNG,
-            typename std::enable_if<(!std::is_fundamental<RNG>::value), int>::type = 0>
+  template <typename RNG>
   C10_HOST_DEVICE inline T operator()(RNG generator) {
     if ((
       std::is_same<T, int64_t>::value ||
       std::is_same<T, double>::value ||
       std::is_same<T, float>::value ||
-      std::is_same<T, at::BFloat16>::value) && range >= 1ULL << 32)
+      std::is_same<T, at::BFloat16>::value) && range_ >= 1ULL << 32)
     {
-      return operator()(generator->random64());
+      return uniform_int_from_to_transformation<T>(generator->random64(), range_, base_);
     } else {
-      return operator()(generator->random());
+      return uniform_int_from_to_transformation<T>(generator->random(), range_, base_);
     }
   }
 
   private:
-    uint64_t range;
-    int64_t base;
+    uint64_t range_;
+    int64_t base_;
 };
 
 /**
  * Samples a discrete uniform distribution in the range [min_value(int64_t), max_value(int64_t)]
- * This is a transformation function for
- * https://pytorch.org/docs/stable/tensors.html?highlight=random#torch.Tensor.random_
- * when `from=min_value(int64_t)` and to=None
  */
 template <typename T>
 struct uniform_int_full_range_distribution {
 
-  template <typename V,
-            typename std::enable_if<std::is_integral<V>::value, int>::type = 0>
-  C10_HOST_DEVICE inline T operator()(V val) {
-    return static_cast<T>(static_cast<int64_t>(val));
-  }
-
-  template <typename RNG,
-            typename std::enable_if<(!std::is_fundamental<RNG>::value), int>::type = 0>
+  template <typename RNG>
   C10_HOST_DEVICE inline T operator()(RNG generator) {
-    return operator()(generator->random64());
+    return uniform_int_full_range_transformation<T>(generator->random64());
   }
 
 };
 
 /**
  * Samples a discrete uniform distribution in the range [0, max_value(T)] for integral types
- * and [0, 2^mantissa] for floating point types. This is a transformation function for
- * https://pytorch.org/docs/stable/tensors.html?highlight=random#torch.Tensor.random_
- * when used without specifing `from` and `to`.
+ * and [0, 2^mantissa] for floating-point types.
  */
 template <typename T>
 struct uniform_int_distribution {
 
-  template <typename V,
-            typename std::enable_if<std::is_integral<V>::value, int>::type = 0>
-  C10_HOST_DEVICE inline T operator()(V val) {
-    if (std::is_same<T, bool>::value) {
-      return static_cast<bool>(val & 1);
-    } else if (std::is_same<T, double>::value) {
-      return static_cast<T>(val % static_cast<uint64_t>((1ULL << std::numeric_limits<T>::digits) + 1));
-    } else if (std::is_same<T, int64_t>::value) {
-      return static_cast<T>(val % (static_cast<uint64_t>(std::numeric_limits<T>::max()) + 1));
-    } else if (std::is_floating_point<T>::value || std::is_same<T, at::Half>::value || std::is_same<T, at::BFloat16>::value) {
-      return static_cast<T>(val % static_cast<uint64_t>((1ULL << std::numeric_limits<T>::digits) + 1));
-    } else if (std::is_integral<T>::value) {
-      return static_cast<T>(val % (static_cast<uint64_t>(std::numeric_limits<T>::max()) + 1));
-    } else {
-      assert(false);
-      return 0;
-    }
-  }
-
-  template <typename RNG,
-            typename std::enable_if<(!std::is_fundamental<RNG>::value), int>::type = 0>
+  template <typename RNG>
   C10_HOST_DEVICE inline T operator()(RNG generator) {
     if (std::is_same<T, double>::value || std::is_same<T, int64_t>::value) {
-      return operator()(generator->random64());
+      return uniform_int_transformation<T>(generator->random64());
     } else {
-      return operator()(generator->random());
+      return uniform_int_transformation<T>(generator->random());
     }
   }
 
@@ -163,35 +104,25 @@ struct uniform_int_distribution {
 template <typename T>
 struct uniform_real_distribution {
 
-  C10_HOST_DEVICE inline uniform_real_distribution(T a_in, T b_in) {
-    TORCH_CHECK_IF_NOT_ON_CUDA(a_in <= b_in);
-    TORCH_CHECK_IF_NOT_ON_CUDA(b_in-a_in <= std::numeric_limits<T>::max());
-    a = a_in;
-    b = b_in;
+  C10_HOST_DEVICE inline uniform_real_distribution(T from, T to) {
+    TORCH_CHECK_IF_NOT_ON_CUDA(from <= to);
+    TORCH_CHECK_IF_NOT_ON_CUDA(to - from <= std::numeric_limits<T>::max());
+    from_ = from;
+    to_ = to;
   }
 
-  template <typename V,
-            typename std::enable_if<std::is_integral<V>::value, int>::type = 0>
-  C10_HOST_DEVICE inline T operator()(V val) {
-    constexpr auto MASK = static_cast<V>((static_cast<uint64_t>(1) << std::numeric_limits<T>::digits) - 1);
-    constexpr auto DIVISOR = static_cast<T>(1) / (static_cast<uint64_t>(1) << std::numeric_limits<T>::digits);
-    dist_acctype<T> x = (val & MASK) * DIVISOR;
-    return (x * (b - a) + a);
-  }
-
-  template <typename RNG,
-            typename std::enable_if<(!std::is_fundamental<RNG>::value), int>::type = 0>
+  template <typename RNG>
   C10_HOST_DEVICE inline dist_acctype<T> operator()(RNG generator){
     if(std::is_same<T, double>::value) {
-      return operator()(generator->random64());
+      return uniform_real_transformation<T>(generator->random64(), from_, to_);
     } else {
-      return operator()(generator->random());
+      return uniform_real_transformation<T>(generator->random(), from_, to_);
     }
   }
 
   private:
-    T a;
-    T b;
+    T from_;
+    T to_;
 };
 
 /**

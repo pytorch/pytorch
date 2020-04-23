@@ -35,8 +35,7 @@ bool use_convolution2d(
     const IntArrayRef,
     const IntArrayRef,
     const IntArrayRef,
-    const int64_t,
-    const bool) {
+    const int64_t) {
   return false;
 }
 
@@ -47,8 +46,7 @@ Tensor convolution2d(
     const IntArrayRef,
     const IntArrayRef,
     const IntArrayRef,
-    const int64_t,
-    const bool) {
+    const int64_t) {
   TORCH_CHECK(false, internal::kError);
 }
 
