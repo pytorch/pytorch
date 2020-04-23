@@ -114,6 +114,8 @@ namespace jit {
   _(GPU_FusionDependency)        \
   _(GPU_FusionCodeGen)           \
   _(GPU_FusionCodeGen2)          \
+  _(GPU_FusionCodeGen3)          \
+  _(GPU_FusionCodeGen4)          \
   _(GPU_FusionSimplePWise)       \
   _(GPU_FusionExecKernel)        \
   _(GPU_FusionForLoop)           \
