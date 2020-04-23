@@ -114,6 +114,40 @@ commands:
       - brew_install:
           formulae: libtool
 
+  optional_merge_target_branch:
+    steps:
+      - run:
+          name: (Optional) Merge target branch
+          no_output_timeout: "10m"
+          command: |
+            if [ -n "$CIRCLE_PULL_REQUEST" ]; then
+              PR_NUM=$(basename $CIRCLE_PULL_REQUEST)
+              CIRCLE_PR_BASE_BRANCH=$(curl -s https://api.github.com/repos/$CIRCLE_PROJECT_USERNAME/$CIRCLE_PROJECT_REPONAME/pulls/$PR_NUM | jq -r '.base.ref')
+              if [[ "${BUILD_ENVIRONMENT}" == *"xla"* || "${BUILD_ENVIRONMENT}" == *"gcc5"* ]] ; then
+                set -x
+                git config --global user.email "circleci.ossci@gmail.com"
+                git config --global user.name "CircleCI"
+                git config remote.origin.url https://github.com/pytorch/pytorch.git
+                git config --add remote.origin.fetch +refs/heads/master:refs/remotes/origin/master
+                git fetch --tags --progress https://github.com/pytorch/pytorch.git +refs/heads/master:refs/remotes/origin/master --depth=100 --quiet
+                export GIT_MERGE_TARGET=`git log -n 1 --pretty=format:"%H" origin/$CIRCLE_PR_BASE_BRANCH`
+                echo "GIT_MERGE_TARGET: " ${GIT_MERGE_TARGET}
+                export GIT_COMMIT=${CIRCLE_SHA1}
+                echo "GIT_COMMIT: " ${GIT_COMMIT}
+                git checkout -f ${GIT_COMMIT}
+                git reset --hard ${GIT_COMMIT}
+                git merge --allow-unrelated-histories --no-edit --no-ff ${GIT_MERGE_TARGET}
+                echo "Merged $CIRCLE_PR_BASE_BRANCH branch before building in environment $BUILD_ENVIRONMENT"
+                set +x
+              else
+                echo "No need to merge with $CIRCLE_PR_BASE_BRANCH, skipping..."
+              fi
+            else
+              echo "This is not a pull request, skipping..."
+            fi
+
+
+
 ##############################################################################
 # Binary build (nightlies nightly build) defaults
 # The binary builds use the docker executor b/c at time of writing the machine
@@ -366,6 +400,7 @@ jobs:
     - attach_scripts
     - setup_linux_system_environment
     - checkout
+    - optional_merge_target_branch
     - setup_ci_environment
     - run:
         name: Build
@@ -376,28 +411,6 @@ jobs:
           echo "DOCKER_IMAGE: "${DOCKER_IMAGE}
           time docker pull ${DOCKER_IMAGE} >/dev/null
           export id=$(docker run --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -t -d -w /var/lib/jenkins ${DOCKER_IMAGE})
-
-          # TODO We may want to move the rebase logic to a separate step after checkout
-          # Rebase to master only if in xenial_py3_6_gcc5_4 case
-          if [[ "${CIRCLE_BRANCH}" != "master" && "${BUILD_ENVIRONMENT}" == *"gcc5"* ]]; then
-            echo "Merge master branch into $CIRCLE_BRANCH before build in environment $BUILD_ENVIRONMENT"
-            set -x
-            git config --global user.email "circleci.ossci@gmail.com"
-            git config --global user.name "CircleCI"
-            git config remote.origin.url https://github.com/pytorch/pytorch.git
-            git config --add remote.origin.fetch +refs/heads/master:refs/remotes/origin/master
-            git fetch --tags --progress https://github.com/pytorch/pytorch.git +refs/heads/master:refs/remotes/origin/master --depth=100 --quiet
-            export GIT_MERGE_TARGET=`git log -n 1 --pretty=format:"%H" origin/master`
-            echo "GIT_MERGE_TARGET: " ${GIT_MERGE_TARGET}
-            export GIT_COMMIT=${CIRCLE_SHA1}
-            echo "GIT_COMMIT: " ${GIT_COMMIT}
-            git checkout -f ${GIT_COMMIT}
-            git reset --hard ${GIT_COMMIT}
-            git merge --allow-unrelated-histories --no-edit --no-ff ${GIT_MERGE_TARGET}
-            set +x
-          else
-            echo "Do NOT merge master branch into $CIRCLE_BRANCH in environment $BUILD_ENVIRONMENT"
-          fi
 
           git submodule sync && git submodule update -q --init --recursive
 
