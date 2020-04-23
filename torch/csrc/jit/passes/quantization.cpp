@@ -47,17 +47,17 @@ struct PatternsAndModules {
   Module packed_params_module;
 };
 
-std::vector<std::string> _quantizable_call_funcs = {
+std::vector<std::string> _static_quantizable_call_funcs = {
     "conv2d",
     "linear",
     "batch_norm",
 };
 
-std::vector<std::string> _quantizable_dynamic_call_funcs = {
+std::vector<std::string> _dynamic_quantizable_call_funcs = {
     "linear",
 };
 
-std::vector<std::string> _quantizable_aten_funcs = {
+std::vector<std::string> _static_quantizable_aten_funcs = {
     "conv2d",
     "conv3d",
     "linear",
@@ -71,7 +71,7 @@ std::vector<std::string> _quantizable_aten_funcs = {
     "mul_",
 };
 
-std::vector<std::string> _quantizable_dynamic_aten_funcs = {
+std::vector<std::string> _dynamic_quantizable_aten_funcs = {
     "linear",
 };
 
@@ -278,13 +278,15 @@ bool mayRequireObservation(Value* v) {
   return !hasScalarInput(v->node());
 }
 
-bool nodeQuantizable(Node* n, bool is_dynamic) {
+bool nodeQuantizable(Node* n, bool is_dynamic = false) {
   return isFunctionNode(
       n,
       /* call_funcs = */
-      is_dynamic ? _quantizable_dynamic_call_funcs : _quantizable_call_funcs,
+      is_dynamic ? _dynamic_quantizable_call_funcs
+                 : _static_quantizable_call_funcs,
       /* aten_funcs = */
-      is_dynamic ? _quantizable_dynamic_aten_funcs : _quantizable_aten_funcs);
+      is_dynamic ? _dynamic_quantizable_aten_funcs
+                 : _static_quantizable_aten_funcs);
 }
 
 // We don't want to analyze the graph for some `builtin` CallFunctions
@@ -292,7 +294,7 @@ bool nodeQuantizable(Node* n, bool is_dynamic) {
 bool userDefinedCallFunction(Node* n) {
   return n->kind() == prim::CallFunction &&
       !isFunctionNode(n, _single_input_general_call_funcs, {}) &&
-      !isFunctionNode(n, _quantizable_call_funcs, {});
+      !isFunctionNode(n, _static_quantizable_call_funcs, {});
 }
 
 std::shared_ptr<Graph> getCallFunctionGraph(Node* n) {
@@ -1109,8 +1111,7 @@ bool InsertObserversHelper::valueNeedsToBeQuantized(Value* v) {
   // of the quantizable function.
   if (!is_dynamic) {
     // Check whether producer is quantizable
-    if (mayRequireObservation(v) &&
-        nodeQuantizable(v->node(), /* is_dynamic */ false)) {
+    if (mayRequireObservation(v) && nodeQuantizable(v->node())) {
       return true;
     }
   }
@@ -1618,10 +1619,6 @@ class InsertQuantDeQuantHelper {
     }
   }
 
-  c10::optional<Module> findChildModuleToQuantize(
-      Module& module,
-      Node* n,
-      Value* self);
   void collectObserverNodesAndValueToQuantize(Module& module, Value*);
   // Cleanup observer nodes from graph and observer modules
   // from module object and ClassType
@@ -1842,22 +1839,6 @@ std::tuple<c10::QScheme, QParamVector> InsertQuantDeQuantHelper::
   return std::make_tuple(qscheme, qparams);
 }
 
-c10::optional<Module> InsertQuantDeQuantHelper::findChildModuleToQuantize(
-    Module& module,
-    Node* n,
-    Value* self) {
-  Value* child_instance = n->inputs()[0];
-  TORCH_INTERNAL_ASSERT(
-      child_instance->node()->kind() == prim::GetAttr,
-      "Child instance should come from GetAttr.");
-  auto child_module_name = child_instance->node()->s(attr::name);
-  if (child_module_name.find("_observer_") == std::string::npos) {
-    // return module.attr(child_module_name).toModule();
-    return getInvokedModule(module, n, self);
-  }
-  return c10::nullopt;
-}
-
 ModuleMethodVector InsertQuantDeQuantHelper::getInvokedMethods(
     Module& module,
     const std::string& method_name) {
@@ -1878,7 +1859,14 @@ ModuleMethodVector InsertQuantDeQuantHelper::getInvokedMethods(
         if (module_instance == graph->inputs()[0]) {
           m = module;
         } else {
-          m = findChildModuleToQuantize(module, n, graph->inputs()[0]);
+          TORCH_INTERNAL_ASSERT(
+              module_instance->node()->kind() == prim::GetAttr,
+              "Module instance should come from GetAttr.");
+          if (module_method_name.find("_observer_") == std::string::npos) {
+            m = getInvokedModule(module, n, graph->inputs()[0]);
+          } else {
+            m = c10::nullopt;
+          }
         }
         if (m) {
           invoked_methods.push_back({*m, module_method_name});
@@ -2739,9 +2727,8 @@ void ReplicateChooseQParamsQuant(std::shared_ptr<Graph>& graph) {
         choose_qparam_nodes_to_rewrite.push_back(use.user);
       }
     }
-    std::vector<Use> uses = quantized_val->uses();
-    for (size_t i = 0; i < uses.size(); ++i) {
-      auto* user = uses[i].user;
+    for (const Use& use : quantized_val->uses()) {
+      auto* user = use.user;
       Node* choose_qparam =
           insertChooseQParamsCall(graph.get(), original_val, user);
       WithInsertPoint ins(user);
