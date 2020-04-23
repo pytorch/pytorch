@@ -1,6 +1,5 @@
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
-#include <torch/csrc/jit/codegen/cuda/tensor.h>
 #include <torch/csrc/jit/codegen/cuda/type.h>
 
 #include <torch/csrc/jit/codegen/cuda/dispatch.h>
@@ -43,15 +42,6 @@ T* ptr(T* obj) {
 template <typename T>
 void Val::dispatch(T handler, Val* val) {
   switch (*(val->getValType())) {
-    case ValType::IterDomain:
-      ptr(handler)->handle(static_cast<IterDomain*>(val));
-      return;
-    case ValType::TensorDomain:
-      ptr(handler)->handle(static_cast<TensorDomain*>(val));
-      return;
-    case ValType::TensorView:
-      ptr(handler)->handle(static_cast<TensorView*>(val));
-      return;
     case ValType::Scalar:
       switch (*(val->getDataType())) {
         case DataType::Float:
@@ -63,6 +53,21 @@ void Val::dispatch(T handler, Val* val) {
         default:
           break;
       }
+    case ValType::IterDomain:
+      ptr(handler)->handle(static_cast<IterDomain*>(val));
+      return;
+    case ValType::TensorDomain:
+      ptr(handler)->handle(static_cast<TensorDomain*>(val));
+      return;
+    case ValType::TensorView:
+      ptr(handler)->handle(static_cast<TensorView*>(val));
+      return;
+    case ValType::TensorIndex:
+      ptr(handler)->handle(static_cast<TensorIndex*>(val));
+      return;
+    case ValType::NamedScalar:
+      ptr(handler)->handle(static_cast<NamedScalar*>(val));
+      return;
     default:
       break;
   }
@@ -87,6 +92,15 @@ void Expr::dispatch(T handler, Expr* expr) {
     case ExprType::BinaryOp:
       ptr(handler)->handle(static_cast<BinaryOp*>(expr));
       return;
+    case ExprType::ForLoop:
+      ptr(handler)->handle(static_cast<ForLoop*>(expr));
+      return;
+    case ExprType::IfThenElse:
+      ptr(handler)->handle(static_cast<IfThenElse*>(expr));
+      return;
+    case ExprType::Allocate:
+      ptr(handler)->handle(static_cast<Allocate*>(expr));
+      return;
     default:
       TORCH_INTERNAL_ASSERT(false, "Unknown exprtype in dispatch!");
   }
@@ -105,15 +119,6 @@ void Statement::dispatch(T handler, Statement* stmt) {
 template <typename T>
 void Val::constDispatch(T handler, const Val* const val) {
   switch (*(val->getValType())) {
-    case ValType::IterDomain:
-      ptr(handler)->handle(static_cast<const IterDomain* const>(val));
-      return;
-    case ValType::TensorDomain:
-      ptr(handler)->handle(static_cast<const TensorDomain* const>(val));
-      return;
-    case ValType::TensorView:
-      ptr(handler)->handle(static_cast<const TensorView* const>(val));
-      return;
     case ValType::Scalar:
       switch (*(val->getDataType())) {
         case DataType::Float:
@@ -125,6 +130,21 @@ void Val::constDispatch(T handler, const Val* const val) {
         default:
           break;
       }
+    case ValType::IterDomain:
+      ptr(handler)->handle(static_cast<const IterDomain* const>(val));
+      return;
+    case ValType::TensorDomain:
+      ptr(handler)->handle(static_cast<const TensorDomain* const>(val));
+      return;
+    case ValType::TensorView:
+      ptr(handler)->handle(static_cast<const TensorView* const>(val));
+      return;
+    case ValType::TensorIndex:
+      ptr(handler)->handle(static_cast<const TensorIndex* const>(val));
+      return;
+    case ValType::NamedScalar:
+      ptr(handler)->handle(static_cast<const NamedScalar* const>(val));
+      return;
     default:
       break;
   }
@@ -148,6 +168,15 @@ void Expr::constDispatch(T handler, const Expr* const expr) {
       return;
     case ExprType::BinaryOp:
       ptr(handler)->handle(static_cast<const BinaryOp* const>(expr));
+      return;
+    case ExprType::ForLoop:
+      ptr(handler)->handle(static_cast<const ForLoop* const>(expr));
+      return;
+    case ExprType::IfThenElse:
+      ptr(handler)->handle(static_cast<const IfThenElse* const>(expr));
+      return;
+    case ExprType::Allocate:
+      ptr(handler)->handle(static_cast<const Allocate* const>(expr));
       return;
     default:
       TORCH_INTERNAL_ASSERT(false, "Unknown exprtype in dispatch!");
@@ -178,12 +207,6 @@ void Statement::constDispatch(T handler, const Statement* const stmt) {
 template <typename T>
 Statement* Val::mutatorDispatch(T mutator, Val* val) {
   switch (*(val->getValType())) {
-    case ValType::IterDomain:
-      return ptr(mutator)->mutate(static_cast<IterDomain*>(val));
-    case ValType::TensorDomain:
-      return ptr(mutator)->mutate(static_cast<TensorDomain*>(val));
-    case ValType::TensorView:
-      return ptr(mutator)->mutate(static_cast<TensorView*>(val));
     case ValType::Scalar:
       switch (*(val->getDataType())) {
         case DataType::Float:
@@ -193,6 +216,16 @@ Statement* Val::mutatorDispatch(T mutator, Val* val) {
         default:
           break;
       }
+    case ValType::IterDomain:
+      return ptr(mutator)->mutate(static_cast<IterDomain*>(val));
+    case ValType::TensorDomain:
+      return ptr(mutator)->mutate(static_cast<TensorDomain*>(val));
+    case ValType::TensorView:
+      return ptr(mutator)->mutate(static_cast<TensorView*>(val));
+    case ValType::TensorIndex:
+      return ptr(mutator)->mutate(static_cast<TensorIndex*>(val));
+    case ValType::NamedScalar:
+      return ptr(mutator)->mutate(static_cast<NamedScalar*>(val));
     default:
       break;
   }
@@ -212,6 +245,12 @@ Statement* Expr::mutatorDispatch(T mutator, Expr* expr) {
       return ptr(mutator)->mutate(static_cast<UnaryOp*>(expr));
     case ExprType::BinaryOp:
       return ptr(mutator)->mutate(static_cast<BinaryOp*>(expr));
+    case ExprType::ForLoop:
+      return ptr(mutator)->mutate(static_cast<ForLoop*>(expr));
+    case ExprType::IfThenElse:
+      return ptr(mutator)->mutate(static_cast<IfThenElse*>(expr));
+    case ExprType::Allocate:
+      return ptr(mutator)->mutate(static_cast<Allocate*>(expr));
     default:
       TORCH_INTERNAL_ASSERT(false, "Unknown exprtype in dispatch!");
   }
@@ -246,6 +285,17 @@ template void Val::dispatch(OptInDispatch, Val*);
 template void Val::dispatch(OptInDispatch*, Val*);
 template void Expr::dispatch(OptInDispatch, Expr*);
 template void Expr::dispatch(OptInDispatch*, Expr*);
+
+template void Statement::constDispatch(
+    OptOutConstDispatch,
+    const Statement* const);
+template void Statement::constDispatch(
+    OptOutConstDispatch*,
+    const Statement* const);
+template void Val::constDispatch(OptOutConstDispatch, const Val* const);
+template void Val::constDispatch(OptOutConstDispatch*, const Val* const);
+template void Expr::constDispatch(OptOutConstDispatch, const Expr* const);
+template void Expr::constDispatch(OptOutConstDispatch*, const Expr* const);
 
 template void Statement::constDispatch(
     OptInConstDispatch,
@@ -292,6 +342,16 @@ void OptInDispatch::handle(Val* v) {
   Val::dispatch(this, v);
 }
 
+void OptOutConstDispatch::handle(const Statement* const s) {
+  Statement::constDispatch(this, s);
+}
+void OptOutConstDispatch::handle(const Expr* const e) {
+  Expr::constDispatch(this, e);
+}
+void OptOutConstDispatch::handle(const Val* const v) {
+  Val::constDispatch(this, v);
+}
+
 void OptInConstDispatch::handle(const Statement* const s) {
   Statement::constDispatch(this, s);
 }
@@ -302,6 +362,21 @@ void OptInConstDispatch::handle(const Val* const v) {
   Val::constDispatch(this, v);
 }
 
+Statement* OptInMutator::mutate(Statement* s) {
+  return Statement::mutatorDispatch(this, s);
+}
+
+Statement* OptInMutator::mutate(Expr* e) {
+  return Expr::mutatorDispatch(this, e);
+}
+
+Statement* OptInMutator::mutate(Val* v) {
+  // If value is already mutated, return the mutation
+  if (mutations.find(v) != mutations.end())
+    return mutations[v];
+  return Val::mutatorDispatch(this, v);
+}
+
 Statement* OptOutMutator::mutate(Statement* s) {
   return Statement::mutatorDispatch(this, s);
 }
@@ -309,6 +384,9 @@ Statement* OptOutMutator::mutate(Expr* e) {
   return Expr::mutatorDispatch(this, e);
 }
 Statement* OptOutMutator::mutate(Val* v) {
+  // If value is already mutated, return the mutation
+  if (mutations.find(v) != mutations.end())
+    return mutations[v];
   return Val::mutatorDispatch(this, v);
 }
 

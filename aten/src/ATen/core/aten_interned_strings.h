@@ -226,6 +226,7 @@ _(aten, binary_cross_entropy_with_logits_backward) \
 _(aten, binary_cross_entropy_with_logits_target_backward) \
 _(aten, bincount) \
 _(aten, blackman_window) \
+_(aten, block_diag) \
 _(aten, bmm) \
 _(aten, broadcast_tensors) \
 _(aten, cartesian_prod) \
@@ -361,6 +362,8 @@ _(aten, hamming_window) \
 _(aten, hann_window) \
 _(aten, hardshrink) \
 _(aten, hardshrink_backward) \
+_(aten, hardsigmoid) \
+_(aten, hardsigmoid_backward) \
 _(aten, hardtanh) \
 _(aten, hardtanh_backward) \
 _(aten, hardtanh_forward) \

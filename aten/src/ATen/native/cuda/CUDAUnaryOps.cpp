@@ -59,7 +59,6 @@ Tensor& _clamp_min_out_cuda(Tensor& result, const Tensor& self, Scalar min) {
 
 IMPLEMENT_UNARY_OP_PREQUEL(atan)
 IMPLEMENT_UNARY_OP_PREQUEL(cos)
-IMPLEMENT_UNARY_OP_PREQUEL(cosh)
 IMPLEMENT_UNARY_OP_PREQUEL(erf)
 IMPLEMENT_UNARY_OP_PREQUEL(erfc)
 IMPLEMENT_UNARY_OP_PREQUEL(exp)

@@ -19,7 +19,8 @@ enum class ValType {
   TensorDomain,
   IterDomain,
   TensorView,
-  Scalar
+  Scalar,
+  NamedScalar
 };
 
 enum class DataType { Float, Int, Null };
@@ -29,11 +30,10 @@ enum class ExprType {
   BinaryOp,
   ForLoop,
   IfThenElse,
+  Allocate,
   Split,
   Merge,
   Reorder
-  // , Swap
-  // , Index
 };
 
 enum class UnaryOpType { Neg, Cast };
@@ -46,7 +46,8 @@ enum class BinaryOpType {
   // Int operations, leave position oif Mod we depend on its location of first
   Mod,
   LT,
-  CeilDiv
+  CeilDiv,
+  And
 };
 
 enum class ParallelType {
@@ -73,6 +74,9 @@ TORCH_CUDA_API std::ostream& operator<<(std::ostream&, const ExprType);
 TORCH_CUDA_API std::ostream& operator<<(std::ostream&, const UnaryOpType);
 TORCH_CUDA_API std::ostream& operator<<(std::ostream&, const BinaryOpType);
 TORCH_CUDA_API std::ostream& operator<<(std::ostream&, const ParallelType);
+
+std::string stringify(const ParallelType);
+std::string stringifyThreadSize(const ParallelType);
 
 TORCH_CUDA_API c10::optional<std::string> inline_op_str(const UnaryOpType);
 TORCH_CUDA_API c10::optional<std::string> inline_op_str(const BinaryOpType);

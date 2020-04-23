@@ -127,6 +127,14 @@ inline c10::intrusive_ptr<torch::CustomClassHolder> IValue::toCapsule() const & 
   TORCH_INTERNAL_ASSERT(isCapsule());
   return toIntrusivePtr<torch::CustomClassHolder>();
 }
+inline at::Generator IValue::toGenerator() && {
+  AT_ASSERT(isGenerator(), "Expected Generator but got ", tagKind());
+  return at::Generator(moveToIntrusivePtr<at::GeneratorImpl>());
+}
+inline at::Generator IValue::toGenerator() const & {
+  AT_ASSERT(isGenerator(), "Expected Generator but got ", tagKind());
+  return at::Generator(toIntrusivePtr<at::GeneratorImpl>());
+}
 
 namespace ivalue {
 
@@ -440,8 +448,6 @@ struct ivalue::PyObjectHolder : c10::intrusive_ptr_target {
   virtual ~PyObjectHolder() {};
 };
 
-std::vector<std::pair<IValue, IValue>> iterationOrder(const c10::Dict<IValue, IValue>& dict);
-
 #undef TORCH_FORALL_TAGS
 
 namespace detail {
@@ -508,6 +514,7 @@ DEFINE_TO(at::ScalarType, toScalarType)
 DEFINE_TO(at::Layout, toLayout)
 DEFINE_TO(at::MemoryFormat, toMemoryFormat)
 DEFINE_TO(at::QScheme, toQScheme)
+DEFINE_TO(at::Generator, toGenerator)
 
 template <class T>
 struct _fake_type {};
