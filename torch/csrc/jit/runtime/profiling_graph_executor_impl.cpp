@@ -39,7 +39,7 @@ static std::atomic<bool> profiling_mode{false};
 #else
 static std::atomic<bool> executor_mode{true};
 static std::atomic<bool> profiling_mode{false};
-
+#endif
 
 static std::atomic<size_t> num_profiled_runs{1};
 static std::atomic<size_t> bailout_depth{1};
