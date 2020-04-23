@@ -1628,7 +1628,7 @@ def bilinear(input1, input2, weight, bias=None):
     # type: (Tensor, Tensor, Tensor, Optional[Tensor]) -> Tensor
     r"""
     Applies a bilinear transformation to the incoming data:
-    :math:`y = x_1 A x_2 + b`
+    :math:`y = x_1^T A x_2 + b`
 
     Shape:
 
@@ -3633,7 +3633,7 @@ def normalize(input, p=2, dim=1, eps=1e-12, out=None):
 
 
 def assert_int_or_pair(arg, arg_name, message):
-    # type: (List[int], str, str)
+    # type: (List[int], str, str) -> None
     assert isinstance(arg, int) or len(arg) == 2, message.format(arg_name)
 
 
@@ -3679,7 +3679,7 @@ def fold(input, output_size, kernel_size, dilation=1, padding=0, stride=1):
     tensor.
 
     .. warning::
-        Currently, only 4-D output tensors (batched image-like tensors) are
+        Currently, only 3-D output tensors (unfolded batched image-like tensors) are
         supported.
 
     See :class:`torch.nn.Fold` for details
