@@ -3,9 +3,11 @@
 #include <ATen/AccumulateType.h>
 #include <ATen/Dispatch.h>
 #include <ATen/native/TensorIterator.h>
+#include <ATen/native/cuda/Loops.cuh>
 #include <c10/util/Half.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
+#include <ATen/detail/FunctionTraits.h>
 
 #include <curand.h>
 #include <curand_kernel.h>
@@ -14,7 +16,11 @@
 #include <limits>
 #include <utility>
 #include <mutex>
+#include <tuple>
+#include <type_traits>
 
+namespace at {
+namespace native {
 namespace {
 
 // launch bounds used for kernels utilizing TensorIterator
@@ -161,7 +167,100 @@ void distribution_nullary_kernel(at::TensorIterator& iter,
   AT_CUDA_CHECK(cudaGetLastError());
 }
 
+// Binary kernel
+template <typename func_t, typename inp_offset_calc_t, typename out_offset_calc_t>
+__global__ void distribution_binary_elementwise_kernel(
+    int numel,
+    func_t f,
+    std::pair<uint64_t, uint64_t> seeds,
+    typename function_traits<func_t>::result_type *output_data,
+    const typename function_traits<func_t>::template arg<1>::type *input_data_1,
+    const typename function_traits<func_t>::template arg<2>::type *input_data_2,
+    inp_offset_calc_t inp_calc,
+    out_offset_calc_t out_calc) {
+  using input_t_1 = typename function_traits<func_t>::template arg<1>::type;
+  using input_t_2 = typename function_traits<func_t>::template arg<2>::type;
+
+  input_t_1 inputs_1[thread_work_size];
+  input_t_2 inputs_2[thread_work_size];
+
+  int base_index = BLOCK_WORK_SIZE * blockIdx.x;
+  int remaining = std::min<int>(numel - base_index, BLOCK_WORK_SIZE);
+
+  curandStatePhilox4_32_10_t state;
+  curand_init(seeds.first, blockIdx.x * blockDim.x + threadIdx.x, seeds.second, &state);
+
+  // load data into registers
+  int thread_idx = threadIdx.x;
+  #pragma unroll
+  for (int i = 0; i < thread_work_size; i++) {
+    if (thread_idx >= remaining) {
+      break;
+    }
+    int input_idx = thread_idx + base_index;
+    auto offsets = inp_calc.get(input_idx);
+    inputs_1[i] = input_data_1[offsets[0]];
+    inputs_2[i] = input_data_2[offsets[1]];
+
+    thread_idx += num_threads;
+  }
+
+  // compute and store
+  thread_idx = threadIdx.x;
+  #pragma unroll
+  for (int i = 0; i < thread_work_size; i++) {
+    if (thread_idx >= remaining) {
+      break;
+    }
+    int input_idx = thread_idx + base_index;
+    auto offsets = out_calc.get(input_idx);
+    output_data[offsets[0]] = f(state, inputs_1[i], inputs_2[i]);
+    thread_idx += num_threads;
+  }
+}
+
+template <typename func_t>
+void distribution_binary_kernel(TensorIterator &iter, std::pair<uint64_t, uint64_t> seeds, const func_t &f) {
+  static_assert(std::is_same<typename function_traits<func_t>::template arg<0>::type, curandStatePhilox4_32_10_t&>::value, "the first argument of functor must be curandStatePhilox4_32_10_t");
+  using input_t_1 = typename function_traits<func_t>::template arg<1>::type;
+  using input_t_2 = typename function_traits<func_t>::template arg<2>::type;
+  using output_t = typename function_traits<func_t>::result_type;
+
+  if (!iter.can_use_32bit_indexing()) {
+    for (auto& sub_iter : iter.with_32bit_indexing()) {
+      distribution_binary_kernel(sub_iter, seeds, f);
+    }
+    return;
+  }
+
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(iter.can_use_32bit_indexing());
+
+  int64_t numel = iter.numel();
+  if (numel == 0) {
+    return;
+  }
+
+  output_t *output_data = static_cast<output_t *>(iter.data_ptr(0));
+  const input_t_1 *input_data_1 = static_cast<const input_t_1 *>(iter.data_ptr(1));
+  const input_t_2 *input_data_2 = static_cast<const input_t_2 *>(iter.data_ptr(2));
+
+  int64_t grid = (numel + block_work_size - 1) / block_work_size;
+  auto stream = at::cuda::getCurrentCUDAStream();
+
+  if (iter.is_contiguous()) {
+    distribution_binary_elementwise_kernel<<<grid,num_threads, 0, stream>>>(
+        numel, f, seeds, output_data, input_data_1, input_data_2,
+        TrivialOffsetCalculator<2>(), TrivialOffsetCalculator<1>());
+  } else {
+    distribution_binary_elementwise_kernel<<<grid, num_threads, 0, stream>>>(
+        numel, f, seeds, output_data, input_data_1, input_data_2,
+        make_input_offset_calculator<2>(iter), make_output_offset_calculator(iter));
+  }
+}
+
 } // namespace
+}} // namespace at::native
+
 
 namespace at {
 namespace native {

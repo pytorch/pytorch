@@ -1777,7 +1777,7 @@ if _enabled:
             return torch.jit._recursive.wrap_cpp_module(self._c._clone_instance())
 
         def __deepcopy__(self):
-            return torch.jit._recursive.wrap_cpp_module(self._c._deepcopy())
+            return torch.jit._recursive.wrap_cpp_module(self._c.deepcopy())
 
         def __getstate__(self):
             raise pickle.PickleError(
