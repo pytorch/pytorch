@@ -20,7 +20,7 @@ except ImportError:
         from tqdm import tqdm
     except ImportError:
         # fake tqdm if it's not installed
-        class tqdm(object):
+        class tqdm(object):  # type: ignore
 
             def __init__(self, total=None, disable=False,
                          unit=None, unit_scale=None, unit_divisor=None):

@@ -84,7 +84,7 @@ import time
 
 from caffe2.python import cnn, workspace, core
 
-import caffe2.python.SparseTransformer as SparseTransformer
+import caffe2.python.SparseTransformer as SparseTransformer  # type: ignore[import]
 
 
 def MLP(order):
@@ -604,8 +604,7 @@ def Benchmark(model_gen, arg):
             "{0}_init_batch_{1}.pbtxt".format(arg.model, arg.batch_size), "w"
         ) as fid:
             fid.write(str(model.param_init_net.Proto()))
-            with open("{0}.pbtxt".format(arg.model,
-                                         arg.batch_size), "w") as fid:
+            with open("{0}.pbtxt".format(arg.model), "w") as fid:
                 fid.write(str(model.net.Proto()))
 
     workspace.RunNetOnce(model.param_init_net)

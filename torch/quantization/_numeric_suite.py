@@ -160,7 +160,6 @@ class Shadow(nn.Module):
         return output
 
     def add(self, x, y):
-        # type: (Tensor, Tensor) -> Tensor
         output = self.orig_module.add(x, y)
         x = x.dequantize()
         y = y.dequantize()
@@ -169,7 +168,6 @@ class Shadow(nn.Module):
         return output
 
     def add_scalar(self, x, y):
-        # type: (Tensor, float) -> Tensor
         output = self.orig_module.add_scalar(x, y)
         x = x.dequantize()
         shadow_output = self.shadow_module.add_scalar(x, y)
@@ -177,7 +175,6 @@ class Shadow(nn.Module):
         return output
 
     def mul(self, x, y):
-        # type: (Tensor, Tensor) -> Tensor
         output = self.orig_module.mul(x, y)
         x = x.dequantize()
         y = y.dequantize()
@@ -186,7 +183,6 @@ class Shadow(nn.Module):
         return output
 
     def mul_scalar(self, x, y):
-        # type: (Tensor, float) -> Tensor
         output = self.orig_module.mul_scalar(x, y)
         x = x.dequantize()
         shadow_output = self.shadow_module.mul_scalar(x, y)
@@ -194,7 +190,6 @@ class Shadow(nn.Module):
         return output
 
     def cat(self, x, dim=0):
-        # type: (List[Tensor], int) -> Tensor
         output = self.orig_module.cat(x, dim)
         x = [y.dequantize() for y in x]
         shadow_output = self.shadow_module.cat(x, dim)
@@ -202,7 +197,6 @@ class Shadow(nn.Module):
         return output
 
     def add_relu(self, x, y):
-        # type: (Tensor, Tensor) -> Tensor
         output = self.orig_module.add_relu(x, y)
         x = x.dequantize()
         y = y.dequantize()
