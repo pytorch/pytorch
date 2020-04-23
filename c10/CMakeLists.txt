@@ -45,6 +45,10 @@ target_compile_options(c10 PRIVATE "-DC10_BUILD_MAIN_LIB")
 if(${COMPILER_SUPPORTS_HIDDEN_VISIBILITY})
   target_compile_options(c10 PRIVATE "-fvisibility=hidden")
 endif()
+# If building shared library, define the proper macros for vendored fmt library
+if(${BUILD_SHARED_LIBS})
+  target_compile_definitions(c10 PRIVATE FMT_EXPORT INTERFACE FMT_SHARED)
+endif()
 
 # ---[ Dependency of c10
 if(${USE_GFLAGS})
