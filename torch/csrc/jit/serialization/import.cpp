@@ -48,7 +48,6 @@ void postSetStateValidate(const IValue& v) {
           "but expected a value of type '{}'",
           attrName,
           attrType->python_str());
-
     }
   }
 }
