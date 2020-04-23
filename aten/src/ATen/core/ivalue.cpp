@@ -486,7 +486,7 @@ IValue IValue::copy() const {
       copy = IValue(toGenericDict());
       break;
     case IValue::Tag::Object:
-      copy = IValue(toObject()->copy());
+      copy = IValue(toObject());
       break;
     case IValue::Tag::String:
     case IValue::Tag::None:
