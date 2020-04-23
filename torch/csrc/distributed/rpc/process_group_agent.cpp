@@ -437,6 +437,7 @@ void ProcessGroupAgent::handleSend(const SendWork& work) {
   std::vector<std::shared_ptr<c10d::ProcessGroup::Work>> pendingSends;
   const auto dst = work.to_.id_;
 
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
   auto serializedPayloadData = const_cast<char*>(serializedPayload->data());
   auto serializedPayloadSize = serializedPayload->size();
   std::string* deleteWhenDone = serializedPayload.release();
