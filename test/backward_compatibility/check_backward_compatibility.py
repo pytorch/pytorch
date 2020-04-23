@@ -47,6 +47,9 @@ white_list = [
     ('quantized::conv3d_relu', datetime.date(2020, 6, 1)),
     ('aten::quantized_lstm', datetime.date(2020, 6, 1)),
     ('aten::quantized_gru', datetime.date(2020, 6, 1)),
+    ('quantized::make_quantized_cell_params', datetime.date(2020, 6, 1)),
+    ('quantized::make_quantized_cell_params_fp16', datetime.date(2020, 6, 1)),
+    ('quantized::make_quantized_cell_params_dynamic', datetime.date(2020, 6, 1)),
     ('_aten::*', datetime.date(2020, 6, 1)),
     ('_prim::*', datetime.date(2020, 6, 1)),
 ]
@@ -57,6 +60,9 @@ white_list = [
 dont_parse_list = [
     ('aten::quantized_lstm', datetime.date(2020, 6, 1)),
     ('aten::quantized_gru', datetime.date(2020, 6, 1)),
+    ('quantized::make_quantized_cell_params', datetime.date(2020, 6, 1)),
+    ('quantized::make_quantized_cell_params_fp16', datetime.date(2020, 6, 1)),
+    ('quantized::make_quantized_cell_params_dynamic', datetime.date(2020, 6, 1)),
 ]
 
 
