@@ -1841,7 +1841,7 @@ void fake_quantize_tensor_kernel(
     return (std::fmin(
                 std::fmax(
                     static_cast<int64_t>(
-                        std::nearbyint(self * inv_scale + z_point)),
+                        z_point + std::nearbyint(self * inv_scale)),
                     quant_min),
                 quant_max) -
             z_point) *
@@ -1860,33 +1860,39 @@ void fake_quantize_grad_tensor_kernel(
   float inv_scale = 1.0f / sc;
   auto iter = TensorIterator::binary_op(input_grad, input, output_grad);
   cpu_kernel(iter, [&](float x, float dy) -> float {
-    int64_t xq = static_cast<int64_t>(std::nearbyint(x * inv_scale + z_point));
+    int64_t xq = static_cast<int64_t>(z_point + std::nearbyint(x * inv_scale));
     return dy * (xq >= quant_min && xq <= quant_max);
   });
 }
 
-void fake_quant_per_channel_cpu(TensorIterator &iter, int64_t quant_min, int64_t quant_max) {
-  cpu_kernel(iter,
-    [=](float self, float scale, int64_t zero_point) -> float {
-      float inv_scale = 1.0f / scale;
-      return (std::fmin(
+void fake_quant_per_channel_cpu(
+    TensorIterator& iter,
+    int64_t quant_min,
+    int64_t quant_max) {
+  cpu_kernel(iter, [=](float self, float scale, int64_t zero_point) -> float {
+    float inv_scale = 1.0f / scale;
+    return (std::fmin(
                 std::fmax(
                     static_cast<int64_t>(
-                        std::nearbyint(self * inv_scale + zero_point)),
+                        zero_point + std::nearbyint(self * inv_scale)),
                     quant_min),
                 quant_max) -
             zero_point) *
         scale;
-    });
+  });
 }
 
-void fake_quant_grad_per_channel_cpu(TensorIterator &iter, int64_t quant_min, int64_t quant_max) {
-  cpu_kernel(iter,
-    [=](float x, float dy, float scale, int64_t zero_point) -> float {
-      float inv_scale = 1.0f / scale;
-      int64_t xq = static_cast<int64_t>(std::nearbyint(x * inv_scale + zero_point));
-      return dy * (xq >= quant_min && xq <= quant_max);
-    });
+void fake_quant_grad_per_channel_cpu(
+    TensorIterator& iter,
+    int64_t quant_min,
+    int64_t quant_max) {
+  cpu_kernel(
+      iter, [=](float x, float dy, float scale, int64_t zero_point) -> float {
+        float inv_scale = 1.0f / scale;
+        int64_t xq =
+            static_cast<int64_t>(zero_point + std::nearbyint(x * inv_scale));
+        return dy * (xq >= quant_min && xq <= quant_max);
+      });
 }
 
 template <typename T>
