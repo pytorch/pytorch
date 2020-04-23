@@ -748,91 +748,92 @@ class TestTypePromotion(TestCase):
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     @float_double_default_dtype
     @onlyCPU
-    def test_numpy_array_binary_ufunc_promotion(self, device):
+    @dtypes(*list(itertools.product(torch_to_numpy_dtype_dict.keys(),
+                                    torch_to_numpy_dtype_dict.keys())))
+    def test_numpy_array_binary_ufunc_promotion(self, device, dtypes):
         import operator
-        np_types = numpy_to_torch_dtype_dict.keys()
-        torch_types = numpy_to_torch_dtype_dict.values()
+        np_type = torch_to_numpy_dtype_dict[dtypes[0]]
+        torch_type = dtypes[1]
 
-        for np_type, torch_type in itertools.product(np_types, torch_types):
-            t = torch.tensor((1,), device=device, dtype=torch_type)
-            a = np.array((1,), dtype=np_type)
-            a_as_t = torch.from_numpy(a).to(device=device)
+        t = torch.tensor((1,), device=device, dtype=torch_type)
+        a = np.array((1,), dtype=np_type)
+        a_as_t = torch.from_numpy(a).to(device=device)
 
-            for np_first in (True, False):
-                for op in (operator.add, torch.add):
+        for np_first in (True, False):
+            for op in (operator.add, torch.add):
 
-                    # Acquires results of binary ufunc type promotion.
-                    try:
-                        actual = op(a, t) if np_first else op(t, a)
-                    except Exception as e:
-                        actual = e
+                # Acquires results of binary ufunc type promotion.
+                try:
+                    actual = op(a, t) if np_first else op(t, a)
+                except Exception as e:
+                    actual = e
 
-                    try:
-                        expected = op(a_as_t, t) if np_first else op(t, a_as_t)
-                    except Exception as e:
-                        expected = e
+                try:
+                    expected = op(a_as_t, t) if np_first else op(t, a_as_t)
+                except Exception as e:
+                    expected = e
 
-                    same_result = (type(expected) == type(actual)) and expected == actual
+                same_result = (type(expected) == type(actual)) and expected == actual
 
-                    # Note: An "undesired failure," as opposed to an "expected failure"
-                    # is both expected (we know the test will fail) and
-                    # undesirable (if PyTorch was working properly the test would
-                    # not fail). This test is affected by three issues (see below)
-                    # that will cause undesired failures. It detects when these
-                    # issues will occur and updates this bool accordingly.
-                    undesired_failure = False
+                # Note: An "undesired failure," as opposed to an "expected failure"
+                # is both expected (we know the test will fail) and
+                # undesirable (if PyTorch was working properly the test would
+                # not fail). This test is affected by three issues (see below)
+                # that will cause undesired failures. It detects when these
+                # issues will occur and updates this bool accordingly.
+                undesired_failure = False
 
-                    # A NumPy array as the first argument to the plus operator
-                    # or as any argument to torch.add is not working as
-                    # intended.
-                    # See https://github.com/pytorch/pytorch/issues/36363.
-                    if np_first and op is operator.add:
-                        undesired_failure = True
-                    if op is torch.add:
-                        undesired_failure = True
+                # A NumPy array as the first argument to the plus operator
+                # or as any argument to torch.add is not working as
+                # intended.
+                # See https://github.com/pytorch/pytorch/issues/36363.
+                if np_first and op is operator.add:
+                    undesired_failure = True
+                if op is torch.add:
+                    undesired_failure = True
 
-                    # float16 x bool, uint, int, and float16 interactions are not
-                    # working as intended.
-                    # See https://github.com/pytorch/pytorch/issues/36058.
-                    float16_failures = (torch.bool, torch.uint8,
-                                        torch.int8, torch.int16, torch.int32, torch.int64,
-                                        torch.float16)
-                    if torch_type is torch.float16 and \
-                            numpy_to_torch_dtype_dict[np_type] in float16_failures:
-                        undesired_failure = True
+                # float16 x bool, uint, int, and float16 interactions are not
+                # working as intended.
+                # See https://github.com/pytorch/pytorch/issues/36058.
+                float16_failures = (torch.bool, torch.uint8,
+                                    torch.int8, torch.int16, torch.int32, torch.int64,
+                                    torch.float16)
+                if torch_type is torch.float16 and \
+                        numpy_to_torch_dtype_dict[np_type] in float16_failures:
+                    undesired_failure = True
 
-                    if torch_type in float16_failures and np_type is np.float16:
-                        undesired_failure = True
+                if torch_type in float16_failures and np_type is np.float16:
+                    undesired_failure = True
 
-                    # bool x complex interactions are not working as intended.
-                    # See https://github.com/pytorch/pytorch/issues/36057.
-                    if torch_type in (torch.complex64, torch.complex128) and np_type is np.bool:
-                        undesired_failure = True
+                # bool x complex interactions are not working as intended.
+                # See https://github.com/pytorch/pytorch/issues/36057.
+                if torch_type in (torch.complex64, torch.complex128) and np_type is np.bool:
+                    undesired_failure = True
 
-                    if torch_type is torch.bool and np_type in (np.complex64, np.complex128):
-                        undesired_failure = True
+                if torch_type is torch.bool and np_type in (np.complex64, np.complex128):
+                    undesired_failure = True
 
-                    # Expects the same result if undesired_failure is false
-                    # and a different result otherwise.
-                    # Note: These cases prettyprint the failing inputs to make
-                    # debugging test failures easier.
-                    if undesired_failure and same_result:
-                        msg = ("Failure: {0} == {1}. "
-                               "torch type was {2}. NumPy type was {3}. np_first is {4} "
-                               "default type is {5}.").format(actual, expected,
-                                                              torch_type, np_type,
-                                                              np_first,
-                                                              torch.get_default_dtype())
-                        self.fail(msg)
+                # Expects the same result if undesired_failure is false
+                # and a different result otherwise.
+                # Note: These cases prettyprint the failing inputs to make
+                # debugging test failures easier.
+                if undesired_failure and same_result:
+                    msg = ("Failure: {0} == {1}. "
+                           "torch type was {2}. NumPy type was {3}. np_first is {4} "
+                           "default type is {5}.").format(actual, expected,
+                                                          torch_type, np_type,
+                                                          np_first,
+                                                          torch.get_default_dtype())
+                    self.fail(msg)
 
-                    if not undesired_failure and not same_result:
-                        msg = ("Failure: {0} != {1}. "
-                               "torch type was {2}. NumPy type was {3}. np_first is {4} "
-                               "default type is {5}.").format(actual, expected,
-                                                              torch_type, np_type,
-                                                              np_first,
-                                                              torch.get_default_dtype())
-                        self.fail(msg)
+                if not undesired_failure and not same_result:
+                    msg = ("Failure: {0} != {1}. "
+                           "torch type was {2}. NumPy type was {3}. np_first is {4} "
+                           "default type is {5}.").format(actual, expected,
+                                                          torch_type, np_type,
+                                                          np_first,
+                                                          torch.get_default_dtype())
+                    self.fail(msg)
 
 
     @onlyOnCPUAndCUDA
@@ -841,12 +842,12 @@ class TestTypePromotion(TestCase):
         y = torch.tensor([4, 5, 6], device=device, dtype=torch.int32)
         expected_out = torch.tensor([1, 2, 3, 4, 5, 6], device=device, dtype=torch.int32)
         out = torch.cat([x, y])
-        self.assertEqual(out, expected_out, exact_dtype=True) 
+        self.assertEqual(out, expected_out, exact_dtype=True)
         z = torch.tensor([7, 8, 9], device=device, dtype=torch.int16)
         expected_out = torch.tensor([1, 2, 3, 4, 5, 6, 7, 8, 9],
                                     device=device, dtype=torch.int32)
         out = torch.cat([x, y, z])
-        self.assertEqual(out, expected_out, exact_dtype=True) 
+        self.assertEqual(out, expected_out, exact_dtype=True)
 
     @onlyOnCPUAndCUDA
     def test_cat_out_different_dtypes(self, device):
@@ -855,13 +856,13 @@ class TestTypePromotion(TestCase):
         y = torch.tensor([4, 5, 6], device=device, dtype=torch.int32)
         expected_out = torch.tensor([1, 2, 3, 4, 5, 6], device=device, dtype=torch.int16)
         torch.cat([x, y], out=out)
-        self.assertEqual(out, expected_out, exact_dtype=True) 
+        self.assertEqual(out, expected_out, exact_dtype=True)
         z = torch.tensor([7, 8, 9], device=device, dtype=torch.int16)
         out = torch.zeros(9, device=device, dtype=torch.int64)
         expected_out = torch.tensor([1, 2, 3, 4, 5, 6, 7, 8, 9],
                                     device=device, dtype=torch.int64)
         torch.cat([x, y, z], out=out)
-        self.assertEqual(out, expected_out, exact_dtype=True) 
+        self.assertEqual(out, expected_out, exact_dtype=True)
 
     @onlyOnCPUAndCUDA
     def test_cat_invalid_dtype_promotion(self, device):
