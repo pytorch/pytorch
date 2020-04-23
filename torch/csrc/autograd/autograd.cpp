@@ -69,6 +69,17 @@ variable_list run_backward(
     const Variable& output = outputs[i];
     auto gradient_edge = impl::gradient_edge(output);
     TORCH_CHECK(
+      grad_outputs[i].is_complex() == output.is_complex(),
+      "For complex Tensors, both grad_output and output are required ",
+      "to have the same dtype. Mismatch in dtype: grad_output[",
+      grad_outputs[i], "] has a dtype of ", grad_outputs[i].dtype(),
+      " and output[", output, "] has a dtype of ", output.dtype(),
+      ".");
+    if(output.is_complex()) {
+      TORCH_WARN_ONCE("Complex backward is not fully supported yet and could lead to wrong ",
+                      "gradients for functions we have not fixed yet");
+    }
+    TORCH_CHECK(
         gradient_edge.function,
         "element ", i, " of tensors does not require grad and does not have a grad_fn",
         i);
