@@ -23,6 +23,7 @@ from torch.testing._internal.common_quantization import (
     QuantizationTestCase,
 )
 
+import unittest
 
 class SubModule(torch.nn.Module):
     def __init__(self):
@@ -78,7 +79,11 @@ class ModelWithFunctionals(torch.nn.Module):
         return w
 
 
-class EagerModeNumericSuiteTest(QuantizationTestCase):
+class TestEagerModeNumericSuite(QuantizationTestCase):
+    @unittest.skipUnless(
+        'fbgemm' in torch.backends.quantized.supported_engines,
+        " Quantized operations require FBGEMM."
+    )
     def test_compare_weights(self):
         r"""Compare the weights of float and quantized conv layer
         """
@@ -99,6 +104,10 @@ class EagerModeNumericSuiteTest(QuantizationTestCase):
             q_model = quantize(model, default_eval_fn, self.img_data)
             compare_and_validate_results(model, q_model)
 
+    @unittest.skipUnless(
+        'fbgemm' in torch.backends.quantized.supported_engines,
+        " Quantized operations require FBGEMM."
+    )
     def test_compare_model_stub(self):
         r"""Compare the output of quantized conv layer and its float shadow module
         """
@@ -153,6 +162,10 @@ class EagerModeNumericSuiteTest(QuantizationTestCase):
         for k, v in ob_dict.items():
             self.assertTrue(v["float"].shape == v["quantized"].shape)
 
+    @unittest.skipUnless(
+        'fbgemm' in torch.backends.quantized.supported_engines,
+        " Quantized operations require FBGEMM."
+    )
     def test_compare_model_outputs(self):
         r"""Compare the output of conv layer in quantized model and corresponding
         output of conv layer in float model
