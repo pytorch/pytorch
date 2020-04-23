@@ -5,8 +5,8 @@ import tempfile
 import time
 import unittest
 import logging
-import six
 import traceback
+import types
 
 from collections import namedtuple
 from functools import wraps
@@ -167,40 +167,37 @@ class MultiProcessTestCase(TestCase):
     def world_size(self):
         return 4
 
-    @staticmethod
-    def join_or_run(fn):
+    def join_or_run(self, fn):
         @wraps(fn)
         def wrapper(self):
             if self.rank == self.MAIN_PROCESS_RANK:
                 self._join_processes(fn)
             else:
                 try:
-                    fn(self)
+                    fn()
                 except Exception as e:
                     logging.error('Caught exception: \n{}exiting process with exit code: {}'
                                   .format(traceback.format_exc(), MultiProcessTestCase.TEST_ERROR_EXIT_CODE))
                     sys.exit(MultiProcessTestCase.TEST_ERROR_EXIT_CODE)
-        return wrapper
+        return types.MethodType(wrapper, self)
 
     # The main process spawns N subprocesses that run the test.
-    # This function patches overwrites every test function to either
+    # Constructor patches current instance test method to
     # assume the role of the main process and join its subprocesses,
     # or run the underlying test function.
-    @classmethod
-    def setUpClass(cls):
-        for attr in dir(cls):
-            if attr.startswith('test'):
-                fn = getattr(cls, attr)
-                setattr(cls, attr, cls.join_or_run(fn))
+    def __init__(self, method_name='runTest'):
+        super().__init__(method_name)
+        fn = getattr(self, method_name)
+        setattr(self, method_name, self.join_or_run(fn))
 
     def setUp(self):
-        super(MultiProcessTestCase, self).setUp()
+        super().setUp()
         self.skip_return_code_checks = []
         self.rank = self.MAIN_PROCESS_RANK
         self.file_name = tempfile.NamedTemporaryFile(delete=False).name
 
     def tearDown(self):
-        super(MultiProcessTestCase, self).tearDown()
+        super().tearDown()
         for p in self.processes:
             p.terminate()
 
@@ -219,18 +216,11 @@ class MultiProcessTestCase(TestCase):
             self.processes.append(process)
 
     def _fork_processes(self):
-        if six.PY3:
-            proc = torch.multiprocessing.get_context("fork").Process
-        else:
-            # fork is the default on Python 2
-            proc = torch.multiprocessing.Process
+        proc = torch.multiprocessing.get_context("fork").Process
         self._start_processes(proc)
 
     def _spawn_processes(self):
-        if six.PY3:
-            proc = torch.multiprocessing.get_context("spawn").Process
-        else:
-            raise RuntimeError("Cannot use spawn start method with Python 2")
+        proc = torch.multiprocessing.get_context("spawn").Process
         self._start_processes(proc)
 
     @classmethod
