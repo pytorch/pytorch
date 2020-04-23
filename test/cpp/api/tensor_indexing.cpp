@@ -166,7 +166,9 @@ TEST(TensorIndexingTest, TestBoolIndices) {
       assert_tensor_equal(v.index({boolIndices}), v.index({uint8Indices}));
       assert_tensor_equal(v.index({boolIndices}), torch::tensor({true}, torch::kBool));
 
-      ASSERT_EQ(count_substr_occurrences(buffer.str(), "indexing with dtype torch.uint8 is now deprecated"), 2);
+      // Note: indexing with torch.uint8 only warns once per program
+      // Since this is the first instance in this test file, it occurs once here
+      ASSERT_EQ(count_substr_occurrences(buffer.str(), "indexing with dtype torch.uint8 is now deprecated"), 1);
     }
   }
 }
@@ -198,7 +200,8 @@ TEST(TensorIndexingTest, TestByteMask) {
       ASSERT_EQ(v.index({mask}).sizes(), torch::IntArrayRef({3, 7, 3}));
       assert_tensor_equal(v.index({mask}), torch::stack({v[0], v[2], v[3]}));
 
-      ASSERT_EQ(count_substr_occurrences(buffer.str(), "indexing with dtype torch.uint8 is now deprecated"), 2);
+      // Note: indexing with torch.uint8 only warns once per program
+      ASSERT_EQ(count_substr_occurrences(buffer.str(), "indexing with dtype torch.uint8 is now deprecated"), 0);
     }
   }
   {
@@ -217,7 +220,8 @@ TEST(TensorIndexingTest, TestByteMaskAccumulate) {
     y.index_put_({mask}, y.index({mask}), /*accumulate=*/true);
     assert_tensor_equal(y, torch::ones({10, 10}));
 
-    ASSERT_EQ(count_substr_occurrences(buffer.str(), "indexing with dtype torch.uint8 is now deprecated"), 2);
+    // Note: indexing with torch.uint8 only warns once per program
+    ASSERT_EQ(count_substr_occurrences(buffer.str(), "indexing with dtype torch.uint8 is now deprecated"), 0);
   }
 }
 
@@ -232,7 +236,8 @@ TEST(TensorIndexingTest, TestMultipleByteMask) {
 
     ASSERT_EQ(v.index({mask1, Slice(), mask2}).sizes(), torch::IntArrayRef({3, 7}));
 
-    ASSERT_EQ(count_substr_occurrences(buffer.str(), "indexing with dtype torch.uint8 is now deprecated"), 2);
+    // Note: indexing with torch.uint8 only warns once per program
+    ASSERT_EQ(count_substr_occurrences(buffer.str(), "indexing with dtype torch.uint8 is now deprecated"), 0);
   }
 }
 
@@ -544,7 +549,8 @@ TEST(TensorIndexingTest, TestByteTensorAssignment) {
 
     x.index_put_({b}, value);
 
-    ASSERT_EQ(count_substr_occurrences(buffer.str(), "indexing with dtype torch.uint8 is now deprecated"), 1);
+    // Note: indexing with torch.uint8 only warns once per program
+    ASSERT_EQ(count_substr_occurrences(buffer.str(), "indexing with dtype torch.uint8 is now deprecated"), 0);
   }
 
   assert_tensor_equal(x.index({0}), value);
@@ -712,7 +718,8 @@ TEST(NumpyTests, TestBooleanShapeMismatch) {
     ASSERT_THROWS_WITH(arr.index({index}), "mask");
     ASSERT_THROWS_WITH(arr.index({Slice(), index}), "mask");
 
-    ASSERT_EQ(count_substr_occurrences(buffer.str(), "indexing with dtype torch.uint8 is now deprecated"), 2);
+    // Note: indexing with torch.uint8 only warns once per program
+    ASSERT_EQ(count_substr_occurrences(buffer.str(), "indexing with dtype torch.uint8 is now deprecated"), 0);
   }
 }
 
