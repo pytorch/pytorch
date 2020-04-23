@@ -6,7 +6,6 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/native/TensorFactories.h>
 #include <ATen/native/quantized/affine_quantizer.h>
-#include <ATen/native/utils/Allocator.h>
 #include <ATen/quantized/QTensorImpl.h>
 #include <c10/core/Allocator.h>
 #include <c10/core/CPUAllocator.h>
@@ -83,8 +82,7 @@ inline Tensor new_qtensor(
 
 #ifdef USE_PYTORCH_QNNPACK
   if (at::globalContext().qEngine() == at::QEngine::QNNPACK) {
-    static QAllocator qallocator;
-    allocator = &qallocator;
+    allocator = c10::GetDefaultMobileCPUAllocator();
   }
 #endif
 

@@ -7,7 +7,7 @@ from copy import deepcopy
 from hypothesis import given
 from hypothesis import strategies as st
 
-from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_ROCM
+from torch.testing._internal.common_utils import TestCase, TEST_WITH_ROCM
 import torch.testing._internal.hypothesis_utils as hu
 
 hu.assert_deadline_disabled()
@@ -481,6 +481,3 @@ class TestQuantizedTensor(TestCase):
             # dequantized values must be the same
             r_cpu, r_cuda = qr_cpu.dequantize().numpy(), qr_cuda.dequantize().cpu().numpy()
             np.testing.assert_almost_equal(r_cuda, r_cpu, decimal=5)
-
-if __name__ == "__main__":
-    run_tests()
