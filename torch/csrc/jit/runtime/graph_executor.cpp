@@ -382,7 +382,7 @@ struct DifferentiableGraphOp {
     if (!t.defined()) {
       return t;
     }
-    return autograd::as_variable_ref(t).detach();
+    return t.detach();
   }
 
   void detach(IValue& v) const {

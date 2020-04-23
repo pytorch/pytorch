@@ -465,7 +465,6 @@ Stmt* StmtClone::mutate(const Free* v) {
 }
 
 Stmt* StmtClone::mutate(const Cond* v) {
-  const Expr* cond_old = v->condition();
   Stmt* true_old = v->true_stmt();
   Stmt* false_old = v->false_stmt();
 

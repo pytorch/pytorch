@@ -563,7 +563,7 @@ static void _trace_post_record(
     Value* value = node->outputs()[i];
     if (var->cdata.defined()) {
       value->inferTypeFrom(var->cdata);
-      jit::tracer::setValueTrace(autograd::as_variable_ref(var->cdata), value);
+      jit::tracer::setValueTrace(var->cdata, value);
     }
   }
 }
