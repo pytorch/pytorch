@@ -499,7 +499,7 @@ void smooth_l1_kernel(TensorIterator& iter) {
             [&one_vec, &point_five_vec](Vec a, Vec b) {
               auto z = (a - b).abs();
               return Vec::blendv(
-                  point_five_vec * z * z, z - point_five_vec, z < one_vec);
+                  point_five_vec * z * z, z - point_five_vec, z >= one_vec);
             });
       });
 }
