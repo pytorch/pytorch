@@ -143,7 +143,20 @@ struct GuardElimination {
         while (uses.size() > 0) {
           auto use = uses.at(uses.size() - 1);
           uses.pop_back();
-          if (isDominatedBy(use.user, n)) {
+
+          if (!isDominatedBy(use.user, n)) {
+            continue;
+          }
+
+          // the dominated guard type may be different from the dominator
+          // if it is only executed for a subtype, or if it is executed
+          // in a different global context for grad enabled
+          // check that the types are equal before continuing
+
+          auto dominator_type = guard_output->type();
+          auto dominated_type = use.user->output()->type();
+
+          if (*dominator_type == *dominated_type) {
             use.user->replaceInput(use.offset, guard_output);
           }
         }

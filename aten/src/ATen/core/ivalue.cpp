@@ -287,9 +287,9 @@ std::ostream& printMaybeAnnotatedList(
     std::ostream& out,
     const IValue& the_list,
     IValueFormatter formatter) {
-
   auto list_elem_type = the_list.type()->expect<ListType>()->getElementType();
-  if (the_list.toListRef().size() == 0 || !elementTypeCanBeInferredFromMembers(list_elem_type)) {
+  if (the_list.toListRef().size() == 0 ||
+      !elementTypeCanBeInferredFromMembers(list_elem_type)) {
     out << "annotate(" << the_list.type()->python_str() << ", ";
     printList(out, the_list.toListRef(), "[", "]", formatter);
     out << ")";
@@ -304,7 +304,6 @@ std::ostream& printDict(
     std::ostream& out,
     const Dict& v,
     IValueFormatter formatter) {
-
   out << "{";
 
   bool first = true;

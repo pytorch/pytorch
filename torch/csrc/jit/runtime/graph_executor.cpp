@@ -803,8 +803,7 @@ void runOptimization(std::shared_ptr<Graph>& graph, bool unroll) {
   if (unroll) {
     UnrollLoops(graph);
     // run again with unrolled loops
-    RemoveMutation(
-        graph, /*remove_list_mutation*/ true, /*remove_tensor_mutation*/ false);
+    RemoveListMutation(graph);
     PeepholeOptimize(graph);
     ConstantPropagation(graph);
   }

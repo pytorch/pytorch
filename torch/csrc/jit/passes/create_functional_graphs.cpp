@@ -412,17 +412,14 @@ void InlineFunctionalGraphs(const std::shared_ptr<Graph>& graph) {
   InlineFunctionalGraphs(graph->block());
 }
 
-void RemoveMutation(
-    const std::shared_ptr<Graph>& graph,
-    bool remove_list_mutation,
-    bool remove_tensor_mutation) {
+void RemoveListMutation(const std::shared_ptr<Graph>& graph) {
   MutationRemover mr(graph);
-  if (remove_list_mutation) {
-    mr.removeListMutation();
-  }
-  if (remove_tensor_mutation) {
-    mr.removeTensorMutation();
-  }
+  mr.removeListMutation();
+}
+
+void RemoveTensorMutation(const std::shared_ptr<Graph>& graph) {
+  MutationRemover mr(graph);
+  mr.removeTensorMutation();
 }
 
 } // namespace jit
