@@ -373,7 +373,7 @@ class SerializationMixin(object):
 
                     self.assertEqual(tensor.device, intended_device)
                     self.assertIsInstance(tensor, tensor_class)
-                    self.assertEqual(tensor, tensor_class([[1.0, 2.0], [3.0, 4.0]]))
+                    self.assertEqualOnCPU(tensor, tensor_class([[1.0, 2.0], [3.0, 4.0]]))
 
         check_map_locations(cpu_map_locations, torch.FloatTensor, torch.device('cpu'))
         if torch.cuda.is_available():

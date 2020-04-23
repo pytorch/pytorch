@@ -389,7 +389,7 @@ class TestMultiprocessing(TestCase):
         t = []
         for _ in range(5):
             t.append(q.get())
-        self.assertEqual(t[0], torch.full([5], 0))
+        self.assertEqualOnCPU(t[0], torch.full([5], 0))
         del t
         e.set()
         p.join(1)
@@ -721,8 +721,8 @@ if __name__ == "__main__":
         for _ in range(10):
             float_tensor = queue.get()
             byte_tensor = queue.get()
-            self.assertEqual(float_tensor, all_ones)
-            self.assertEqual(byte_tensor, all_zeros)
+            self.assertEqualOnCPU(float_tensor, all_ones)
+            self.assertEqualOnCPU(byte_tensor, all_zeros)
             del float_tensor, byte_tensor
             event.set()
 
