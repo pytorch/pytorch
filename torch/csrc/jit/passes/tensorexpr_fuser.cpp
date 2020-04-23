@@ -342,7 +342,5 @@ RegisterOperators TensorExprOps({
         AliasAnalysisKind::PURE_FUNCTION),
 });
 
-static RegisterPass pass(fuseTensorExprs);
-
 } // namespace jit
 } // namespace torch

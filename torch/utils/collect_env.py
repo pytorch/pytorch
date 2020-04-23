@@ -14,8 +14,6 @@ try:
 except (ImportError, NameError, AttributeError):
     TORCH_AVAILABLE = False
 
-PY3 = sys.version_info >= (3, 0)
-
 # System Environment Information
 SystemEnv = namedtuple('SystemEnv', [
     'torch_version',
@@ -42,10 +40,9 @@ def run(command):
                          stderr=subprocess.PIPE, shell=True)
     output, err = p.communicate()
     rc = p.returncode
-    if PY3:
-        enc = locale.getpreferredencoding()
-        output = output.decode(enc)
-        err = err.decode(enc)
+    enc = locale.getpreferredencoding()
+    output = output.decode(enc)
+    err = err.decode(enc)
     return rc, output.strip(), err.strip()
 
 
@@ -70,9 +67,9 @@ def run_and_parse_first_match(run_lambda, command, regex):
 
 def get_conda_packages(run_lambda):
     if get_platform() == 'win32':
-        grep_cmd = r'findstr /R "torch soumith mkl magma"'
+        grep_cmd = r'findstr /R "torch numpy cudatoolkit soumith mkl magma"'
     else:
-        grep_cmd = r'grep "torch\|soumith\|mkl\|magma"'
+        grep_cmd = r'grep "torch\|numpy\|cudatoolkit\|soumith\|mkl\|magma"'
     conda = os.environ.get('CONDA_EXE', 'conda')
     out = run_and_read_all(run_lambda, conda + ' list | ' + grep_cmd)
     if out is None:
@@ -219,6 +216,8 @@ def get_os(run_lambda):
 
 
 def get_pip_packages(run_lambda):
+    """Returns `pip list` output. Note: will also find conda-installed pytorch
+    and numpy packages."""
     # People generally have `pip` as `pip` or `pip3`
     def run_with_pip(pip):
         if get_platform() == 'win32':
@@ -226,9 +225,6 @@ def get_pip_packages(run_lambda):
         else:
             grep_cmd = r'grep "torch\|numpy"'
         return run_and_read_all(run_lambda, pip + ' list --format=freeze | ' + grep_cmd)
-
-    if not PY3:
-        return 'pip', run_with_pip('pip')
 
     # Try to figure out if the user is running pip or pip3.
     out2 = run_with_pip('pip')

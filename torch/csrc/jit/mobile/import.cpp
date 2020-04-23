@@ -1,9 +1,10 @@
-#include "import.h"
+#include <torch/csrc/jit/mobile/import.h>
 #include <ATen/core/ivalue.h>
 #include <caffe2/serialize/inline_container.h>
 #include <torch/csrc/jit/api/compilation_unit.h>
 #include <torch/csrc/jit/mobile/type_parser.h>
 #include <torch/csrc/jit/runtime/instruction.h>
+#include <torch/csrc/jit/serialization/import_export_constants.h>
 #include <torch/csrc/jit/serialization/unpickler.h>
 #include <torch/custom_class.h>
 
@@ -45,7 +46,6 @@ using caffe2::serialize::PyTorchStreamReader;
 using caffe2::serialize::ReadAdapterInterface;
 
 OpCode parseOpCode(const char* str);
-namespace {
 
 IValue expect_field(
     IValue tup,
@@ -61,6 +61,17 @@ IValue expect_field(
   return row->elements().at(1);
 }
 
+std::string operator_str(
+    const std::string& name,
+    const std::string& overloadname) {
+  std::string result = name;
+  if (!overloadname.empty()) {
+    result += "." + overloadname;
+  }
+  return result;
+}
+
+namespace {
 void print_unsupported_ops_and_throw(
     const std::unordered_set<std::string>& unsupported_ops) {
   std::string error_message("{");
@@ -83,13 +94,19 @@ void parseMethods(
         new mobile::Function(c10::QualifiedName(function_name)));
 
     const auto& ins_list =
-        expect_field(table, "instructions", 0).toTuple()->elements();
+        expect_field(table, "instructions", BYTECODE_INDEX_INSTRUCTION)
+            .toTuple()
+            ->elements();
     const auto& ops_list =
-        expect_field(table, "operators", 1).toTuple()->elements();
+        expect_field(table, "operators", BYTECODE_INDEX_OPERATOR)
+            .toTuple()
+            ->elements();
     const auto& consts_list =
-        expect_field(table, "constants", 2).toTuple()->elements();
+        expect_field(table, "constants", BYTECODE_INDEX_CONSTANT)
+            .toTuple()
+            ->elements();
     const auto& types_list =
-        expect_field(table, "types", 3).toTuple()->elements();
+        expect_field(table, "types", BYTECODE_INDEX_TYPE).toTuple()->elements();
     const auto& register_size = expect_field(table, "register_size", 4).toInt();
 
     for (const auto& ins : ins_list) {
@@ -112,9 +129,8 @@ void parseMethods(
       auto op_found = function->append_operator(
           op_item[0].toString()->string(), op_item[1].toString()->string());
       if (!op_found) {
-        unsupported_op_names.emplace(
-            op_item[0].toString()->string() + "." +
-            op_item[1].toString()->string());
+        unsupported_op_names.emplace(operator_str(
+            op_item[0].toString()->string(), op_item[1].toString()->string()));
       }
     }
 

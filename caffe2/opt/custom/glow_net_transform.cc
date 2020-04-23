@@ -103,7 +103,11 @@ void onnxifi(
     bool use_onnx,
     size_t max_batch_size,
     size_t max_seq_size,
-    bool load_model_by_blob) {
+    bool load_model_by_blob,
+    bool predictor_net_ssa_rewritten) {
+  // Split SparseLengthsSumSparse so that we can lower the SparseLengthsSum part
+  splitSparseLengthsSumSparse(net, *ws);
+
   // Clean up the external input/output of the net
   net->mutable_external_input()->Clear();
   net->mutable_external_output()->Clear();
@@ -128,6 +132,7 @@ void onnxifi(
   opts.load_model_by_blob = load_model_by_blob;
   opts.merge_fp32_inputs_into_fp16 = FLAGS_merge_fp32_inputs_into_fp16;
   opts.loop_test = FLAGS_onnxifi_loop_test_mode;
+  opts.predictor_net_ssa_rewritten = predictor_net_ssa_rewritten;
 
   ShapeInfoMap more_shape_hints = shape_hints;
   if (!FLAGS_onnxifi_shape_hints.empty()) {

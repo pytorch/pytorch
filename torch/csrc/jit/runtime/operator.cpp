@@ -76,10 +76,10 @@ struct OperatorRegistry {
     // Remove operator from symbol map
     auto op_it = operators.find(sym);
     TORCH_CHECK(
-      op_it != operators.end(),
-      "operator with signature ",
-      sig,
-      " is missing from symbol registry");
+        op_it != operators.end(),
+        "operator with signature ",
+        sig,
+        " is missing from symbol registry");
 
     auto& op_vec = op_it->second;
     auto it = op_vec.begin();
@@ -321,8 +321,7 @@ void registerOperator(Operator&& op) {
   getRegistry().registerOperator(std::move(op));
 }
 
-void deregisterOperator(const FunctionSchema& schema)
-{
+void deregisterOperator(const FunctionSchema& schema) {
   getRegistry().deregisterOperator(schema);
 }
 

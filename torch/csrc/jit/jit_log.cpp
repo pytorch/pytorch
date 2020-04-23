@@ -78,7 +78,7 @@ std::string log_function(const std::shared_ptr<torch::jit::Graph>& graph) {
   torch::jit::GraphFunction func("source_dump", graph, nullptr);
   std::vector<at::Tensor> tensors;
   std::vector<c10::NamedTypePtr> deps;
-  PythonPrint pp(tensors, deps, false);
+  PythonPrint pp(tensors, deps);
   pp.printFunction(func);
   return pp.str();
 }

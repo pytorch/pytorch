@@ -4,7 +4,6 @@
 #include <vector>
 
 #include <ATen/core/ivalue.h>
-#include <torch/csrc/ThreadLocalState.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
 namespace at {
@@ -92,22 +91,28 @@ struct Suspend : public std::exception {
   c10::intrusive_ptr<Future> future;
 };
 
+// InterpreterContinuation propagates dist_autograd_context_id
+// through (and only through) the forward pass manually, other
+// thread local settings are propagated with ThreadLocalState
 struct InterpreterContinuation {
   InterpreterContinuation(
       InterpreterState state_,
       Stack stack_,
-      torch::ThreadLocalState thread_local_state_)
-      : state(state_),
-        stack(std::move(stack_)),
-        thread_local_state(std::move(thread_local_state_)) {}
+      int64_t dist_autograd_context_id = 0)
+      : state(state_), stack(std::move(stack_)) {
+#ifdef USE_DISTRIBUTED
+    dist_autograd_context_id_ = dist_autograd_context_id;
+#endif
+  }
 
   void operator()();
 
  private:
   InterpreterState state;
   Stack stack;
-  // Thread local state that needs to be carried over to the continuation.
-  torch::ThreadLocalState thread_local_state;
+#ifdef USE_DISTRIBUTED
+  int64_t dist_autograd_context_id_;
+#endif
 };
 
 // what is the tensors type, including state from the current execution context

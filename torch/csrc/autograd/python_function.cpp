@@ -544,7 +544,7 @@ static void _trace_post_record(
     return;
   }
 
-  node->i_(attr::inplace, is_inplace);
+  node->i_(jit::attr::inplace, is_inplace);
 
   // Isolate C variable ptrs in a vector
   int num_outputs = PyTuple_GET_SIZE(output_objects);
@@ -563,7 +563,7 @@ static void _trace_post_record(
     Value* value = node->outputs()[i];
     if (var->cdata.defined()) {
       value->inferTypeFrom(var->cdata);
-      jit::tracer::setValueTrace(autograd::as_variable_ref(var->cdata), value);
+      jit::tracer::setValueTrace(var->cdata, value);
     }
   }
 }

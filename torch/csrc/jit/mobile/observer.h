@@ -5,7 +5,7 @@
 
 namespace torch {
 
-class MobileDebugInfo : public at::ThreadLocalDebugInfoBase {
+class MobileDebugInfo : public at::DebugInfoBase {
  public:
   const std::string& getModelName() {
     return model_name_;

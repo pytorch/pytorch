@@ -27,6 +27,8 @@ using TypePtr = std::shared_ptr<Type>;
 struct ClassType;
 using ClassTypePtr = std::shared_ptr<ClassType>;
 
+TORCH_API bool _fastEqualsForContainer(const IValue& lhs, const IValue& rhs);
+
 namespace ivalue {
 struct Tuple;
 struct Future;
@@ -61,6 +63,7 @@ struct PyObjectHolder;
   _(Uninitialized) \
   _(Capsule) \
   _(RRef) \
+  _(Generator) \
 
 // [doxygen private]
 // These methods are not actually private but we don't want to document them, so
@@ -119,6 +122,53 @@ struct CAFFE2_API IValue final {
     return *this;
   }
   void dump() const;
+
+  /**
+   * Equality comparison. The semantics are the same as Python's `==`:
+   * 1. Numerical types are compared by value.
+   * 2. Tensors compute element-wise equality, returning a BoolTensor (see: `torch.eq()`)
+   * 3. Strings are compared by value.
+   * 4. Sequence types (list, tuple) are compared lexicographically by
+   *    comparing their elements. Different sequence types never compare equal.
+   * 5. Mappings (dict) must have equal (key, value) pairs.
+   * 6. If not listed above, the default behavior for is to test identity equality
+   *    (e.g. pointer equality).
+   *
+   * Why does this return an IValue instead of a bool? Because in PyTorch,
+   * `tensor1 == tensor2` returns a `BoolTensor`, not a bool.
+   *
+   * NOTE: we (like Python) assume that identity equality implies value equality for efficiency.
+   * TODO: need to support customizing equality
+   */
+  IValue equals(const IValue& rhs) const;
+  /**
+   * This implements the same semantics as `bool(lhs == rhs)` in Python. which
+   * is the same as `equals()` except for Tensor types.
+   */
+  TORCH_API friend bool operator==(const IValue& lhs, const IValue& rhs);
+  TORCH_API friend bool operator!=(const IValue& lhs, const IValue& rhs);
+
+  /**
+   * Identity comparison. Checks if `this` is the same object as `rhs`. The
+   * semantics are the same as Python's `is` operator.
+   *
+   * NOTE: Like in Python, this operation is poorly defined for primitive types
+   * like numbers and strings. Prefer to use `==` unless you really want to
+   * check identity equality.
+   */
+  bool is(const IValue& rhs) const;
+
+  /**
+   * @private [doxygen private]
+   * [container equality]
+   * This is an equality implementation that assumes objects with the same
+   * identity equal themselves, for efficiency reasons. We primarily have this
+   * for consistency, because Python does the same thing. This actually
+   * provokes user-visible changes in behavior due to quirks in torch:
+   *      [tensor1] == [tensor1] -> True (because container equality will first compare identity)
+   *      [tensor1] == [tensor1_copy] -> RuntimeError: bool value of Tensor is ambiguous
+   */
+  friend bool _fastEqualsForContainer(const IValue& lhs, const IValue& rhs);
 
   /// @private [doxygen private]
   bool isAliasOf(const IValue& rhs) const {
@@ -468,6 +518,19 @@ struct CAFFE2_API IValue final {
     return static_cast<at::QScheme>(toInt());
   }
 
+  // Generator
+  IValue(at::Generator g)
+  : tag(Tag::Generator), is_intrusive_ptr(g.defined())  {
+    // Note: the undefined generator is not refcounted, so while it
+    // is tagged as a generator, is_intrusive_ptr is set to false.
+    // This is not an optional optimization: our incref call
+    // *will not* do the right thing when called on an
+    // undefined generator.
+    payload.as_intrusive_ptr = g.unsafeReleaseGeneratorImpl();
+  }
+  bool isGenerator() const { return Tag::Generator == tag; }
+  at::Generator toGenerator() &&;
+  at::Generator toGenerator() const &;
 
   // for debugging
   std::string tagKind() const {
@@ -566,6 +629,7 @@ struct CAFFE2_API IValue final {
   void getSubValues(HashAliasedIValues& subValues) const;
 
  private:
+  static bool ptrEqual(const IValue& lhs, const IValue& rhs);
   // NOTE: IValue tags are intentionally private. In the future we may encode
   // this value different (e.g. using NaN boxing), and this would make it more
   // costly to determine the tag for all types vs just determining if something
