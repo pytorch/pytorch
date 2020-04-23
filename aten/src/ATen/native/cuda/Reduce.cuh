@@ -959,7 +959,7 @@ inline void gpu_reduce_kernel(TensorIterator& iter, const ops_t& ops, ident_t id
     // tensor. This grants the best possible memory accessing pattern, given that
     // for non-contiguous tensor with space in between, we cannot have perfect
     // memory coalescing.
-    bool reduction_on_fastest_striding_dimension =
+    reduction_on_fastest_striding_dimension =
         (iter.num_reduce_dims() == iter.ndim()) ||
         (iter.strides(/*arg=*/input_index)[0] <
         iter.strides(/*arg=*/input_index)[iter.num_reduce_dims()]);
