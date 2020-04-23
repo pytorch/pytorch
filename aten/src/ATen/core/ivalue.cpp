@@ -527,6 +527,9 @@ IValue IValue::deepcopy(
       AT_ERROR("Can't deepcopy IValue with tag: ", tagKind());
     }
   }
+  // NB: this doesn't work if an object contains itself, and it may
+  // come up in the future when we expand the object system, we will
+  // have a follow up PR to fix this when it becomes an issue.
   if (!isAliasOf(copy)) {
     memo[*this] = copy;
   }
