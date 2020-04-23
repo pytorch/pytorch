@@ -605,7 +605,7 @@ class TestCppExtensionJIT(common.TestCase):
         for i, p in enumerate(net.parameters()):
             self.assertTrue(p.device.type == "cuda")
             self.assertTrue(p.device.index == 0)
-            self.assertEqual(cpu_parameters[i], p)
+            self.assertEqual(cpu_parameters[i], p.cpu())
 
         net.cpu()
         net.add_new_parameter("a", torch.eye(5))
