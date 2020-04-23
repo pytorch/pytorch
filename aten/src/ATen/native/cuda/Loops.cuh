@@ -41,21 +41,25 @@ template<int N>
 static OffsetCalculator<N> make_input_offset_calculator(const TensorIterator& iter) {
   // array size can not be 0, this happens when N == 0
   constexpr int array_size = std::max<int>(N, 1);
-  TORCH_INTERNAL_ASSERT(N == iter.ntensors() - 1);
+  TORCH_INTERNAL_ASSERT(N == iter.ntensors() - iter.noutputs());
   std::array<const int64_t*, array_size> strides;
   int64_t element_sizes[array_size];
   for (int i = 0; i < N; i++) {
-    strides[i] = iter.strides(i + 1).data();
-    element_sizes[i] = iter.element_size(i + 1);
+    strides[i] = iter.strides(i + iter.noutputs()).data();
+    element_sizes[i] = iter.element_size(i + iter.noutputs());
   }
   return OffsetCalculator<N>(iter.ndim(), iter.shape().data(), strides.data(), element_sizes);
 }
 
-static OffsetCalculator<1> make_output_offset_calculator(const TensorIterator& iter) {
-  std::array<const int64_t*, 1> strides;
-  strides[0] = iter.strides(0).data();
-  int64_t element_size = iter.element_size(0);
-  return OffsetCalculator<1>(iter.ndim(), iter.shape().data(), strides.data(), &element_size);
+template <int num_outputs = 1>
+static OffsetCalculator<num_outputs> make_output_offset_calculator(const TensorIterator& iter) {
+  std::array<const int64_t*, num_outputs> strides;
+  int64_t element_sizes[num_outputs];
+  for (int i = 0; i < num_outputs; i++) {
+    strides[i] = iter.strides(i).data();
+    element_sizes[i] = iter.element_size(i);
+  }
+  return OffsetCalculator<num_outputs>(iter.ndim(), iter.shape().data(), strides.data(), element_sizes);
 }
 
 }}  // namespace at::native
@@ -125,6 +129,28 @@ void gpu_kernel_with_scalars(TensorIterator& iter, const func_t& f) {
   } else {
     gpu_kernel(iter, f);
   }
+}
+
+template <typename func_t>
+void gpu_kernel_multiple_outputs(TensorIterator& iter, const func_t& f) {
+  ASSERT_HOST_DEVICE_LAMBDA(func_t);
+
+  for (int arg = 0; arg < iter.ntensors(); arg++) {
+    TORCH_INTERNAL_ASSERT(iter.device(arg).is_cuda());
+  }
+
+  if (iter.numel() == 0) {
+    return;
+  }
+
+  if (!iter.can_use_32bit_indexing()) {
+    for (auto& sub_iter : iter.with_32bit_indexing()) {
+      gpu_kernel_multiple_outputs(sub_iter, f);
+    }
+    return;
+  }
+
+  gpu_kernel_multiple_outputs_impl(iter, f);
 }
 
 }} //namespace at::native

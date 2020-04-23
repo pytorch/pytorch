@@ -182,6 +182,14 @@ __global__ void unrolled_elementwise_kernel(int N, func_t f, array_t data, inp_c
   elementwise_kernel_helper(f, memory::policies::unroll<array_t, inp_calc_t, out_calc_t>(data, remaining, ic, oc));
 }
 
+template<int num_outputs, typename func_t, typename array_t, typename inp_calc_t, typename out_calc_t>
+C10_LAUNCH_BOUNDS_1(num_threads)
+__global__ void unrolled_elementwise_kernel_for_multi_outputs(int N, func_t f, array_t data, inp_calc_t ic, out_calc_t oc) {
+  int remaining = N - block_work_size * blockIdx.x;
+  elementwise_kernel_helper(
+      f, memory::policies::multi_outputs_unroll<array_t, inp_calc_t, out_calc_t, num_outputs>(data, remaining, ic, oc));
+}
+
 // this function assume trivial 1d and no dynamic casting
 template<typename func_t, typename array_t>
 static inline void launch_vectorized_kernel(int64_t N, const func_t& f, array_t data) {
@@ -215,6 +223,15 @@ static inline void launch_unrolled_kernel(int64_t N, const func_t& f, array_t da
   int64_t grid = (N + block_work_size - 1) / block_work_size;
   auto stream = at::cuda::getCurrentCUDAStream();
   unrolled_elementwise_kernel<func_t, array_t><<<grid, num_threads, 0, stream>>>(N, f, data, ic, oc);
+  AT_CUDA_CHECK(cudaGetLastError());
+}
+
+template <int num_outputs, typename func_t, typename array_t, typename inp_calc_t, typename out_calc_t>
+static inline void launch_unrolled_kernel_for_multi_outputs(int64_t N, const func_t& f, array_t data, inp_calc_t ic, out_calc_t oc) {
+  TORCH_INTERNAL_ASSERT(N > 0 && N <= std::numeric_limits<int32_t>::max());
+  int64_t grid = (N + block_work_size - 1) / block_work_size;
+  auto stream = at::cuda::getCurrentCUDAStream();
+  unrolled_elementwise_kernel_for_multi_outputs<num_outputs, func_t, array_t><<<grid, num_threads, 0, stream>>>(N, f, data, ic, oc);
   AT_CUDA_CHECK(cudaGetLastError());
 }
 
@@ -294,6 +311,31 @@ void gpu_kernel_impl(TensorIterator& iter, const func_t& f) {
       });
     }
   }
+}
+
+template <typename func_t>
+void gpu_kernel_multiple_outputs_impl(TensorIterator& iter, const func_t& f) {
+  using traits = function_traits<func_t>;
+  using output_t = typename traits::result_type;
+  TORCH_INTERNAL_ASSERT(memory::detail::is_tuple<output_t>::value);
+  constexpr int num_outputs = std::tuple_size<output_t>::value;
+  TORCH_INTERNAL_ASSERT(num_outputs > 1);
+  constexpr int num_inputs = traits::arity;
+  constexpr int ntensors = num_outputs + num_inputs;
+
+  TORCH_INTERNAL_ASSERT(iter.can_use_32bit_indexing());
+  TORCH_INTERNAL_ASSERT(iter.ntensors() == ntensors);
+
+  at::detail::Array<char*, ntensors> data;
+  for (int i = 0; i < ntensors; i++) {
+    data[i] = (char*)iter.data_ptr(i);
+  }
+
+  int64_t numel = iter.numel();
+
+  auto input_calc = make_input_offset_calculator<num_inputs>(iter);
+  auto output_calc = make_output_offset_calculator<num_outputs>(iter);
+  modern::launch_unrolled_kernel_for_multi_outputs<num_outputs>(numel, f, data, input_calc, output_calc);
 }
 
 }} // namespace at::native
