@@ -516,7 +516,7 @@ struct ReduceOp {
     while (idx + (vt0 - 1) * stride < end) {
       #pragma unroll
       for (index_t i = 0; i < vt0; i++) {
-        values[i] = data[calc(idx + i * stride)];
+        values[i] = data[calc(idx + i * stride) / output_vec_size];
       }
       #pragma unroll
       for (index_t i = 0; i < vt0; i++) {
@@ -535,7 +535,7 @@ struct ReduceOp {
       if (idx >= end) {
         break;
       }
-      values[i] = data[calc(idx)];
+      values[i] = data[calc(idx) / output_vec_size];
       idx += stride;
     }
     idx = idx_;
