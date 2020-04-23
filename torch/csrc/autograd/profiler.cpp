@@ -138,7 +138,7 @@ struct ProfilerThreadLocalState : public at::DebugInfoBase {
   }
 
   thread_event_lists consolidate() {
-    std::lock_guard<std::mutex> guard(mutex);
+    std::lock_guard<std::mutex> guard(mutex_);
     thread_event_lists result;
     for (auto it = event_lists_map_.begin(); it != event_lists_map_.end(); ++it) {
       auto & list = it->second;
@@ -156,7 +156,7 @@ struct ProfilerThreadLocalState : public at::DebugInfoBase {
     if (config_.state == ProfilerState::NVTX) {
       cuda_stubs->nvtxMarkA(name.c_str());
     } else {
-      std::lock_guard<std::mutex> guard(mutex);
+      std::lock_guard<std::mutex> guard(mutex_);
       auto& list = getEventList();
       list.record(
           EventKind::Mark,
@@ -206,7 +206,7 @@ struct ProfilerThreadLocalState : public at::DebugInfoBase {
         cuda_stubs->nvtxRangePushA(name.str());
       }
     } else {
-      std::lock_guard<std::mutex> guard(mutex);
+      std::lock_guard<std::mutex> guard(mutex_);
       auto& list = getEventList();
       list.record(
           EventKind::PushRange,
@@ -217,27 +217,29 @@ struct ProfilerThreadLocalState : public at::DebugInfoBase {
     }
   }
 
-  void popRange() {
+  void popRange(uint64_t orig_thread_id) {
     if (config_.state == ProfilerState::Disabled) {
       return;
     }
     if (config_.state == ProfilerState::NVTX) {
       cuda_stubs->nvtxRangePop();
     } else {
-      std::lock_guard<std::mutex> guard(mutex);
-      auto& list = getEventList();
+      std::lock_guard<std::mutex> guard(mutex_);
+      auto& list = getEventList(orig_thread_id);
       list.record(
           EventKind::PopRange,
           StringView(""),
-          RecordFunction::currentThreadId(),
+          orig_thread_id,
           config_.state == ProfilerState::CUDA);
     }
   }
 
  private:
   // not thread safe
-  RangeEventList& getEventList() {
-    auto thread_id = RecordFunction::currentThreadId();
+  RangeEventList& getEventList(int64_t thread_id = -1) {
+    if (thread_id < 0) {
+      thread_id = RecordFunction::currentThreadId();
+    }
     auto it = event_lists_map_.find(thread_id);
     if (it != event_lists_map_.end()) {
       return *(it->second);
@@ -248,7 +250,7 @@ struct ProfilerThreadLocalState : public at::DebugInfoBase {
     }
   }
 
-  std::mutex mutex;
+  std::mutex mutex_;
   std::unordered_map<uint16_t, std::shared_ptr<RangeEventList>>
       event_lists_map_;
   ProfilerConfig config_ = ProfilerConfig(ProfilerState::Disabled, false);
@@ -291,7 +293,7 @@ void pushProfilingCallbacks(bool needs_inputs = false) {
         if (!state_ptr || state_ptr->config().state == ProfilerState::Disabled) {
           return;
         }
-        state_ptr->popRange();
+        state_ptr->popRange(fn.getStartCallbacksThreadId());
       },
       needs_inputs,
       /* scopes */ {RecordScope::FUNCTION, RecordScope::USER_SCOPE},

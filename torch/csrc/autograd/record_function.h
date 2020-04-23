@@ -339,7 +339,7 @@ TORCH_API void TEST_unsetGlobalSamplingProbability();
  *     pair of a given kind can be registered at any given time
  */
 TORCH_API void pushCallback(
-    std::function<bool(const RecordFunction&)> start,
+    std::function<void(const RecordFunction&)> start,
     std::function<void(const RecordFunction&)> end =
         [](const RecordFunction&) {},
     bool needs_inputs = false,
@@ -361,7 +361,7 @@ TORCH_API void removeCallback(CallbackKind kind = CallbackKind::DEFAULT);
  * WARNING: not thread safe
  */
 TORCH_API void pushGlobalCallback(
-    std::function<bool(const RecordFunction&)> start,
+    std::function<void(const RecordFunction&)> start,
     std::function<void(const RecordFunction&)> end =
         [](const RecordFunction&) {},
     bool needs_inputs = false,

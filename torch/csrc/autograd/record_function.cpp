@@ -23,7 +23,7 @@ class RecordFunctionCallback {
   RecordFunctionCallback() : active_(false) {}
 
   explicit RecordFunctionCallback(
-      std::function<bool(const RecordFunction&)> start,
+      std::function<void(const RecordFunction&)> start,
       std::function<void(const RecordFunction&)> end =
         [](const RecordFunction&) {}):
       start_(std::move(start)),
@@ -72,7 +72,7 @@ class RecordFunctionCallback {
     return is_sampled_;
   }
 
-  inline std::function<bool(const RecordFunction&)>& start() {
+  inline std::function<void(const RecordFunction&)>& start() {
     return start_;
   }
 
@@ -85,7 +85,7 @@ class RecordFunctionCallback {
   }
 
  private:
-  std::function<bool(const RecordFunction&)> start_;
+  std::function<void(const RecordFunction&)> start_;
   std::function<void(const RecordFunction&)> end_;
   bool needs_inputs_ = false;
   double sampling_prob_ = 1.0;
@@ -289,7 +289,7 @@ bool hasThreadLocalCallbacks() {
 }
 
 void pushCallback(
-    std::function<bool(const RecordFunction&)> start,
+    std::function<void(const RecordFunction&)> start,
     std::function<void(const RecordFunction&)> end,
     bool needs_inputs,
     std::unordered_set<RecordScope, std::hash<RecordScope>> scopes,
@@ -305,7 +305,7 @@ void removeCallback(CallbackKind kind) {
 }
 
 void pushGlobalCallback(
-    std::function<bool(const RecordFunction&)> start,
+    std::function<void(const RecordFunction&)> start,
     std::function<void(const RecordFunction&)> end,
     bool needs_inputs,
     double sampling_prob,

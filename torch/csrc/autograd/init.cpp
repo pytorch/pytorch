@@ -53,8 +53,8 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
       .def("has_cuda", &Event::has_cuda)
       .def("shapes", &Event::shapes);
 
-  m.def("_enable_profiler", [](const ProfilerConfig& config) { enableProfiler(config); });
-  m.def("_disable_profiler", []() { return disableProfiler(); });
+  m.def("_enable_profiler", enableProfiler);
+  m.def("_disable_profiler", disableProfiler);
   m.def("_profiler_enabled", profilerEnabled);
 
   // TODO: remove when jit future can hold PyObject (https://github.com/pytorch/pytorch/issues/34999)
