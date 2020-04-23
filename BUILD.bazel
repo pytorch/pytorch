@@ -70,6 +70,7 @@ cc_library(
     name = "c10",
     srcs = glob([
         "c10/core/*.cpp",
+        "c10/fmt/*.cpp",
         "c10/core/impl/*.cpp",
         "c10/util/*.cpp",
     ]) + if_cuda(
