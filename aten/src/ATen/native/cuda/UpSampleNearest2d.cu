@@ -333,5 +333,60 @@ Tensor upsample_nearest2d_backward_cuda(
   return grad_input;
 }
 
+using at::native::upsample_cuda::compute_output_size;
+using at::native::upsample_cuda::get_scale_value;
+
+Tensor& upsample_nearest2d_out_cuda(
+    Tensor& out,
+    const Tensor& input,
+    c10::optional<IntArrayRef> output_size,
+    c10::optional<ArrayRef<double>> scale_factors) {
+  auto osize = compute_output_size(input.sizes(), output_size, scale_factors);
+  auto scale_h = get_scale_value(scale_factors, 0);
+  auto scale_w = get_scale_value(scale_factors, 1);
+  upsample_nearest2d_out_cuda_template(out, input, osize, scale_h, scale_w);
+  return out;
+}
+
+Tensor upsample_nearest2d_cuda(
+    const Tensor& input,
+    c10::optional<IntArrayRef> output_size,
+    c10::optional<ArrayRef<double>> scale_factors) {
+  Tensor output = at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  auto osize = compute_output_size(input.sizes(), output_size, scale_factors);
+  auto scale_h = get_scale_value(scale_factors, 0);
+  auto scale_w = get_scale_value(scale_factors, 1);
+  upsample_nearest2d_out_cuda_template(output, input, osize, scale_h, scale_w);
+  return output;
+}
+
+Tensor& upsample_nearest2d_backward_out_cuda(
+    Tensor& grad_input,
+    const Tensor& grad_output,
+    c10::optional<IntArrayRef> output_size,
+    IntArrayRef input_size,
+    c10::optional<ArrayRef<double>> scale_factors) {
+  auto osize = compute_output_size(input_size, output_size, scale_factors);
+  auto scale_h = get_scale_value(scale_factors, 0);
+  auto scale_w = get_scale_value(scale_factors, 1);
+  upsample_nearest2d_backward_out_cuda_template(
+      grad_input, grad_output, osize, input_size, scale_h, scale_w);
+  return grad_input;
+}
+
+Tensor upsample_nearest2d_backward_cuda(
+    const Tensor& grad_output,
+    c10::optional<IntArrayRef> output_size,
+    IntArrayRef input_size,
+    c10::optional<ArrayRef<double>> scale_factors) {
+  auto osize = compute_output_size(input_size, output_size, scale_factors);
+  auto scale_h = get_scale_value(scale_factors, 0);
+  auto scale_w = get_scale_value(scale_factors, 1);
+  auto grad_input = at::zeros(input_size, grad_output.options());
+  upsample_nearest2d_backward_out_cuda_template(
+      grad_input, grad_output, osize, input_size, scale_h, scale_w);
+  return grad_input;
+}
+
 } // namespace native
 } // namespace at
