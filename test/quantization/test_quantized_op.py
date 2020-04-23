@@ -15,7 +15,7 @@ from hypothesis import strategies as st
 import torch.testing._internal.hypothesis_utils as hu
 hu.assert_deadline_disabled()
 
-from torch.testing._internal.common_utils import TEST_WITH_UBSAN, TestCase, run_tests, IS_PPC, IS_MACOS
+from torch.testing._internal.common_utils import TEST_WITH_UBSAN, TestCase, IS_PPC, IS_MACOS
 from torch.testing._internal.common_quantized import _quantize, _dequantize, _calculate_dynamic_qparams, \
     override_quantized_engine
 
@@ -2897,7 +2897,3 @@ class TestComparatorOps(TestCase):
             result = getattr(qA, op)(b)
             self.assertEqual(result_ref, result,
                              "'tensor.{}(scalar)'' failed".format(op))
-
-
-if __name__ == "__main__":
-    run_tests()
