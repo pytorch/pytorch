@@ -788,6 +788,7 @@ class TestPostTrainingDynamic(QuantizationTestCase):
         for qengine in ['fbgemm', 'qnnpack']:
             with override_quantized_engine(qengine):
                 if qengine in torch.backends.quantized.supported_engines:
+                    print('lstm, supported qengine', qengine)
                     # Test default instantiation
                     seq_len = 128
                     batch = 16
@@ -811,6 +812,7 @@ class TestPostTrainingDynamic(QuantizationTestCase):
                                                               dropout=0.0,
                                                               bidirectional=bidirectional,
                                                               dtype=dtype)
+                    print('Created cell dq')
 
                     y, (h, c) = cell_dq(x, (h, c))
 
