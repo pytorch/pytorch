@@ -77,6 +77,23 @@ class TestATen(hu.HypothesisTestCase):
         self.assertReferenceChecks(gc, op, inputs, ref)
 
     @given(**hu.gcs)
+    def test_index_uint8(self, gc, dc):
+        # Indexing with uint8 is deprecated, but we need to provide backward compatibility for some old models exported through ONNX
+        op = core.CreateOperator(
+            "ATen",
+            ['self', 'mask'],
+            ["Z"],
+            operator="index")
+
+        def ref(self, mask):
+            return (self[mask.astype(np.bool)],)
+
+        tensor = np.random.randn(2, 3, 4).astype(np.float32)
+        mask = np.array([[1, 0, 0], [1, 1, 0]]).astype(np.uint8)
+
+        self.assertReferenceChecks(gc, op, [tensor, mask], ref)
+
+    @given(**hu.gcs)
     def test_index_put(self, gc, dc):
         op = core.CreateOperator(
             "ATen",

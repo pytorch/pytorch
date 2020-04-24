@@ -6,11 +6,43 @@
 #include <ATen/core/Dict.h>
 
 namespace c10 {
+bool _fastEqualsForContainer(const IValue& lhs, const IValue& rhs) {
+  if (lhs.is(rhs)) {
+    // Like Python, for containers we consider identity equality to be
+    // sufficient but not necessary for value equality
+    return true;
+  }
+  return lhs == rhs;
+}
+
 namespace ivalue {
+
+// This is in ivalue.cpp because we need to access Type::python_str, which
+// is declared in jit_type.h
+void checkCustomClassType(TypePtr expected_type, TypePtr actual_type) {
+  // NB: doing pointer comparison here
+  // If in the future there ever arises a need to call operator== on custom class
+  // Type's, this needs to be changed!
+  TORCH_CHECK(actual_type == expected_type,
+              "Tried to convert an IValue of type ",
+              actual_type->python_str(),
+              " to custom class type ",
+              expected_type->python_str());
+}
 
 CAFFE2_API c10::intrusive_ptr<ConstantString> ConstantString::create(
     std::string str_) {
   return c10::make_intrusive<ConstantString>(std::move(str_));
+}
+
+bool operator==(const ivalue::Tuple& lhs, const ivalue::Tuple& rhs) {
+  return lhs.elements_.size() == rhs.elements_.size() &&
+      // see [container equality]
+      std::equal(
+             lhs.elements_.cbegin(),
+             lhs.elements_.cend(),
+             rhs.elements_.cbegin(),
+             _fastEqualsForContainer);
 }
 
 TupleTypePtr Tuple::type() const {
@@ -24,7 +56,7 @@ TupleTypePtr Tuple::type() const {
 } // namespace ivalue
 
 TypePtr IValue::type() const {
-  switch(tag) {
+  switch (tag) {
     case Tag::None:
       return NoneType::get();
     case Tag::Tensor:
@@ -47,6 +79,8 @@ TypePtr IValue::type() const {
       return ListType::create(toList().elementType());
     case Tag::Future:
       return toFuture()->type();
+    case Tag::RRef:
+      return RRefType::create(toRRef()->type());
     case Tag::Device:
       return DeviceObjType::get();
     case Tag::Object:
@@ -59,10 +93,173 @@ TypePtr IValue::type() const {
       return CapsuleType::get();
     case Tag::Tuple:
       return toTuple()->type();
+    case Tag::Generator:
+      return GeneratorType::get();
   }
   // switch above is complete but this silences compiler warnings
   TORCH_INTERNAL_ASSERT(false, "unhandled case in IValue::type()");
 }
+
+void IValue::getSubValues(HashAliasedIValues& subValues) const {
+  switch (this->tag) {
+    case Tag::Tensor:
+      subValues.insert(*this);
+      return;
+    case Tag::Tuple:
+    case Tag::GenericList: {
+      subValues.insert(*this);
+      c10::ArrayRef<IValue> elems;
+      if (isTuple()) {
+        elems = this->toTuple()->elements();
+      } else {
+        elems = this->toListRef();
+      }
+      for (auto& elem : elems) {
+        elem.getSubValues(subValues);
+      }
+      break;
+    }
+    case Tag::GenericDict:
+      subValues.insert(*this);
+      for (const auto& pair : this->toGenericDict()) {
+        pair.value().getSubValues(subValues);
+        pair.key().getSubValues(subValues);
+      }
+      break;
+    case Tag::Object: {
+      // Record Object IValue and its attributes.
+      subValues.insert(*this);
+      auto obj_type = type()->expect<ClassType>();
+      auto obj_value = toObject();
+      auto attribute_names = obj_type->attributeNames();
+      for (const auto& name: attribute_names) {
+        auto attribute = obj_value->getAttr(name);
+        attribute.getSubValues(subValues);
+      }
+      break;
+    }
+    case Tag::Future:
+    case Tag::Device:
+    case Tag::PyObject:
+    case Tag::Uninitialized:
+    case Tag::Capsule:
+      TORCH_INTERNAL_ASSERT(
+          false, "sub ivalue is nat enabled for: ", this->tagKind());
+      // Fall through
+    default:
+      // don't record scalars.
+      break;
+  }
+}
+
+bool IValue::overlaps(const IValue& rhs) const {
+  HashAliasedIValues rhsSubValues, thisSubValues;
+  rhs.getSubValues(rhsSubValues);
+  getSubValues(thisSubValues);
+  for (auto& sub : thisSubValues) {
+    if (rhsSubValues.count(sub)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool operator!=(const IValue& lhs, const IValue& rhs) {
+  return !(lhs == rhs);
+}
+
+bool operator==(const IValue& lhs, const IValue& rhs) {
+  IValue eq = lhs.equals(rhs);
+  if (eq.isBool()) {
+    return eq.toBool();
+  }
+  // The only case we don't return bool is for tensor comparison. In Python,
+  // `bool()` is called on the return value of `__eq__` if the return value is
+  // not a boolean. Mimic that behavior here.
+  TORCH_INTERNAL_ASSERT(eq.isTensor());
+  return eq.toTensor().is_nonzero();
+}
+
+bool IValue::ptrEqual(const IValue& lhs, const IValue& rhs) {
+  TORCH_INTERNAL_ASSERT(lhs.is_intrusive_ptr);
+  TORCH_INTERNAL_ASSERT(rhs.is_intrusive_ptr);
+  return lhs.tag == rhs.tag &&
+      lhs.payload.as_intrusive_ptr == rhs.payload.as_intrusive_ptr;
+}
+
+IValue IValue::equals(const IValue& rhs) const {
+  const IValue& lhs = *this;
+  switch (lhs.tag) {
+    case Tag::None:
+      // In Python you're not supposed to do this comparison apparently. Not
+      // sure if we should warn here or what
+      return rhs.isNone();
+    case Tag::Tensor:
+      if (!rhs.isTensor()) {
+        return false;
+      }
+      return lhs.toTensor().eq(rhs.toTensor());
+    case Tag::Double:
+      return rhs.isDouble() && lhs.toDouble() == rhs.toDouble();
+    case Tag::Int:
+      return rhs.isInt() && lhs.toInt() == rhs.toInt();
+    case Tag::Bool:
+      return rhs.isBool() && lhs.toBool() == rhs.toBool();
+    case Tag::String:
+      return rhs.isString() && lhs.toStringRef() == rhs.toStringRef();
+    case Tag::GenericDict:
+      return rhs.isGenericDict() && lhs.toGenericDict() == rhs.toGenericDict();
+    case Tag::Tuple:
+      return rhs.isTuple() && *lhs.toTuple() == *rhs.toTuple();
+    case Tag::Device:
+      return rhs.isDevice() && lhs.toDevice() == rhs.toDevice();
+    case Tag::GenericList:
+      return rhs.isList() && lhs.toList() == rhs.toList();
+    case Tag::Blob:
+    case Tag::Future:
+    case Tag::RRef:
+    case Tag::Object:
+    case Tag::PyObject:
+    case Tag::Capsule:
+    case Tag::Generator:
+      return ptrEqual(lhs, rhs);
+    case Tag::Uninitialized:
+      // Unitialized ivalues show up in no-ops when the compiler can prove a
+      // value will never be used. Just return false on any equality comparison.
+      return false;
+  }
+  // the above switch should be exhaustive
+  TORCH_INTERNAL_ASSERT(false, "we should never reach here")
+}
+
+static bool isUndefinedTensor(const IValue& iv) {
+  return iv.isTensor() && !iv.toTensor().defined();
+}
+
+bool IValue::is(const IValue& rhs) const {
+  const IValue& lhs = *this;
+  // Special handling for undefined tensors:
+  // 1. Undefined_tensor is None and vice versa.
+  if ((isUndefinedTensor(lhs) && rhs.isNone()) ||
+      (lhs.isNone() && isUndefinedTensor(rhs))) {
+    return true;
+  }
+  // 2. Undefined_tensor is Undefined_tensor.
+  if (isUndefinedTensor(lhs) && isUndefinedTensor(rhs)) {
+    return true;
+  }
+
+  if (lhs.isTensor()) {
+    // Use the standard way of comparing two tensors for identity
+    return rhs.isTensor() && lhs.toTensor().is_same(rhs.toTensor());
+  }
+
+  if (lhs.is_intrusive_ptr) {
+    return rhs.is_intrusive_ptr && ptrEqual(lhs, rhs);
+  }
+  return lhs == rhs;
+}
+
 namespace {
 
 using IValueFormatter = std::function<void(std::ostream&, const IValue&)>;
@@ -76,7 +273,7 @@ std::ostream& printList(
     IValueFormatter formatter) {
   out << start;
   for (size_t i = 0; i < list.size(); ++i) {
-    if (i > 0){
+    if (i > 0) {
       out << ", ";
     }
     formatter(out, IValue(list[i]));
@@ -120,6 +317,22 @@ std::ostream& printDict(
   out << "}";
   return out;
 }
+}
+
+// Properly disambiguate the type of an empty dict
+std::ostream& printMaybeAnnotatedDict(
+    std::ostream& out,
+    const IValue& the_dict,
+    IValueFormatter formatter) {
+  auto value_type = the_dict.type()->cast<DictType>()->getValueType();
+  if (the_dict.toGenericDict().size() == 0 ||
+      !elementTypeCanBeInferredFromMembers(value_type)) {
+    out << "annotate(" << the_dict.type()->python_str() << ",";
+    printDict(out, the_dict.toGenericDict(), formatter) << ")";
+  } else {
+    return printDict(out, the_dict.toGenericDict(), formatter);
+  }
+  return out;
 }
 
 std::ostream& IValue::repr(
@@ -175,7 +388,7 @@ std::ostream& IValue::repr(
       return out << ")";
     }
     case IValue::Tag::GenericDict:
-      return printDict(out, v.toGenericDict(), formatter);
+      return printMaybeAnnotatedDict(out, v, formatter);
     default:
       TORCH_INTERNAL_ASSERT(false, "repr() not defined on: ", v.tagKind());
   }
@@ -221,6 +434,8 @@ std::ostream& operator<<(std::ostream & out, const IValue & v) {
       return out << "Capsule";
     case IValue::Tag::GenericList:
       return printList(out, v.toList(), "[", "]", formatter);
+    case IValue::Tag::RRef:
+      return out << "RRef";
     case IValue::Tag::Future:
       return out << "Future";
     case IValue::Tag::Uninitialized:
@@ -233,6 +448,8 @@ std::ostream& operator<<(std::ostream & out, const IValue & v) {
       auto py_obj = v.toPyObject();
       return out << "<PyObject at" << py_obj << ">";
     }
+    case IValue::Tag::Generator:
+      return out << "Generator";
     case IValue::Tag::Object: {
       // TODO we should attempt to call __str__ if the object defines it.
       auto obj = v.toObject();
@@ -249,23 +466,26 @@ void IValue::dump() const {
   std::cout << *this << "\n";
 }
 
+std::shared_ptr<ClassType> ivalue::Object::type() const {
+  return type_.type_->expect<ClassType>();
+}
 
 std::string ivalue::Object::name() const {
-  return this->type_.type_->name()->qualifiedName();
+  return type()->name()->qualifiedName();
 }
 
 IValue ivalue::Object::getAttr(const std::string& name) const {
-  const size_t slot = type_.type_->getAttributeSlot(name);
+  const size_t slot = type()->getAttributeSlot(name);
   return getSlot(slot);
 }
 
 void ivalue::Object::setAttr(const std::string& name, IValue v) {
-  const size_t slot = type_.type_->getAttributeSlot(name);
+  const size_t slot = type()->getAttributeSlot(name);
   setSlot(slot, std::move(v));
 }
 
 void ivalue::Object::unsafeRemoveAttr(const std::string& name) {
-  const size_t slot = type_.type_->getAttributeSlot(name);
+  const size_t slot = type()->getAttributeSlot(name);
   unsafeRemoveSlot(slot);
 }
 
@@ -274,34 +494,16 @@ void ivalue::Object::resizeObject(size_t slot) {
   slots_.resize(type()->numAttributes());
 }
 
-
-static bool CompareKeys(const std::pair<IValue, IValue>& aWrap,
-                        const std::pair<IValue, IValue>& bWrap) {
-  const auto a = aWrap.first;
-  const auto b = bWrap.first;
-  if (a.isString() && b.isString()) {
-    return a.toStringRef().compare(b.toStringRef()) < 0;
-  } else if (a.isInt() && b.isInt()) {
-    return a.toInt() < b.toInt();
-  } else if (a.isDouble() && b.isDouble()) {
-    return a.toDouble() < b.toDouble();
-  } else if (a.isTensor() && b.isTensor()) {
-    return a.toTensor().unsafeGetTensorImpl() < b.toTensor().unsafeGetTensorImpl();
-  }
-  AT_ERROR("Illegal dict key");
+StrongTypePtr::StrongTypePtr(
+    std::shared_ptr<torch::jit::CompilationUnit> cu,
+    std::shared_ptr<Type> type) {
+  cu_ = std::move(cu);
+  type_ = type;
+  TORCH_INTERNAL_ASSERT(type_);
 }
 
-std::vector<std::pair<IValue, IValue>> iterationOrder(const c10::Dict<IValue, IValue>& dict) {
-  std::vector<std::pair<IValue, IValue>> ordered;
-  for (auto& element : dict) {
-    ordered.emplace_back(element.key(), element.value());
-  }
-  std::sort(ordered.begin(), ordered.end(), CompareKeys);
-  return ordered;
-}
-
-std::unordered_map<std::string, c10::StrongTypePtr>& getCustomClassTypeMap() {
-    static std::unordered_map<std::string, c10::StrongTypePtr> tmap;
+std::unordered_map<std::string, c10::ClassTypePtr>& getCustomClassTypeMap() {
+    static std::unordered_map<std::string, c10::ClassTypePtr> tmap;
     return tmap;
 }
 

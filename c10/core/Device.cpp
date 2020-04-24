@@ -34,7 +34,7 @@ DeviceType parse_type(const std::string& device_string) {
     return device->second;
   }
   AT_ERROR(
-      "Expected one of cpu, cuda, mkldnn, opengl, opencl, ideep, hip, msnpu device type at start of device string: ", device_string);
+      "Expected one of cpu, cuda, mkldnn, opengl, opencl, ideep, hip, msnpu, xla device type at start of device string: ", device_string);
 }
 } // namespace
 
@@ -63,7 +63,7 @@ DeviceType parse_type(const std::string& device_string) {
 // }
 Device::Device(const std::string& device_string) : Device(Type::CPU) {
   TORCH_CHECK(!device_string.empty(), "Device string must not be empty");
-  int index = device_string.find(":");
+  auto index = device_string.find(':');
   if (index == std::string::npos) {
     type_ = parse_type(device_string);
   } else {

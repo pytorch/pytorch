@@ -6,12 +6,12 @@ import torch.jit._recursive
 
 from torch.jit._recursive import ScriptMethodStub
 from torch.jit._builtins import _find_builtin, _get_builtin_table, _register_builtin  # noqa
-from torch._jit_internal import _qualified_name
+from torch._jit_internal import Future, _qualified_name
 from torch.autograd import Variable, function
 from torch.jit.frontend import get_jit_class_def, get_jit_def, get_default_args
 from torch.nn import Module
 from torch.serialization import validate_cuda_device
-from torch._six import PY2, PY37, with_metaclass, string_classes, get_function_from_type
+from torch._six import PY37, with_metaclass, string_classes, get_function_from_type
 from torch.utils import set_module
 
 import collections
@@ -20,6 +20,7 @@ import copy
 import functools
 import inspect
 import os
+import pathlib
 import pickle
 import re
 import sys
@@ -31,9 +32,6 @@ import weakref
 # These are imported so users can access them from the `torch.jit` module
 from torch._jit_internal import Final, _overload, _overload_method
 from torch._jit_internal import ignore, export, unused
-
-if sys.version_info[0] > 2:
-    import pathlib
 
 def _parse_env(name, default, true_message, false_message):
     value = os.environ.get(name)
@@ -62,7 +60,6 @@ _jit_script_class_compile = torch._C._jit_script_class_compile
 # destruction order issues.
 _python_cu = torch._C.CompilationUnit()
 
-Future = torch._C.Future
 set_module(Future, "torch.jit")
 _fork = torch._C.fork
 _wait = torch._C.wait
@@ -144,9 +141,7 @@ def save(m, f, _extra_files=DEFAULT_EXTRA_FILES_MAP):
             extra_files['foo.txt'] = 'bar'
             torch.jit.save(m, 'scriptmodule.pt', _extra_files=extra_files)
     """
-    if isinstance(f, str) or \
-            (sys.version_info[0] == 2 and isinstance(f, unicode)) or \
-            (sys.version_info[0] == 3 and isinstance(f, pathlib.Path)):
+    if isinstance(f, str) or isinstance(f, pathlib.Path):
         m.save(f, _extra_files=_extra_files)
     else:
         ret = m.save_to_buffer(_extra_files=_extra_files)
@@ -216,6 +211,8 @@ def load(f, map_location=None, _extra_files=DEFAULT_EXTRA_FILES_MAP):
     if isinstance(f, string_classes):
         if not os.path.exists(f):
             raise ValueError("The provided filename {} does not exist".format(f))
+        if os.path.isdir(f):
+            raise ValueError("The provided filename {} is a directory".format(f))
     if isinstance(map_location, string_classes):
         map_location = torch.device(map_location)
     elif not (map_location is None or
@@ -226,9 +223,7 @@ def load(f, map_location=None, _extra_files=DEFAULT_EXTRA_FILES_MAP):
         validate_cuda_device(map_location)
 
     cu = torch._C.CompilationUnit()
-    if isinstance(f, str) or \
-            (sys.version_info[0] == 2 and isinstance(f, unicode)) or \
-            (sys.version_info[0] == 3 and isinstance(f, pathlib.Path)):
+    if isinstance(f, str) or isinstance(f, pathlib.Path):
         cpp_module = torch._C.import_ir_module(cu, f, map_location, _extra_files)
     else:
         cpp_module = torch._C.import_ir_module_from_buffer(cu, f.read(), map_location, _extra_files)
@@ -242,7 +237,7 @@ def export_opnames(m):
     """
     return torch._C._export_opnames(m._c)
 
-def _get_trace_graph(f, args=(), kwargs=None, _force_outplace=False,
+def _get_trace_graph(f, args=(), kwargs=None, strict=True, _force_outplace=False,
                      return_inputs=False, _return_inputs_states=False):
     """
     .. warning::
@@ -279,7 +274,7 @@ def _get_trace_graph(f, args=(), kwargs=None, _force_outplace=False,
         kwargs = {}
     if not isinstance(args, tuple):
         args = (args,)
-    outs = ONNXTracedModule(f, _force_outplace, return_inputs, _return_inputs_states)(*args, **kwargs)
+    outs = ONNXTracedModule(f, strict, _force_outplace, return_inputs, _return_inputs_states)(*args, **kwargs)
     return outs
 
 
@@ -323,12 +318,13 @@ def _create_interpreter_name_lookup_fn(frames_up=1):
 
 
 class ONNXTracedModule(Module):
-    def __init__(self, inner, force_outplace=False, return_inputs=False, return_inputs_states=False):
+    def __init__(self, inner, strict=True, force_outplace=False, return_inputs=False, return_inputs_states=False):
         super(ONNXTracedModule, self).__init__()
         # inner may be a Module, or it may be an arbitrary callable
         # If it's a Module, we get its parameters automatically, which lets
         # us avoid a special casing functions versus modules.
         self.inner = inner
+        self.strict = strict
         self._force_outplace = force_outplace
         self._return_inputs = return_inputs
         self._return_inputs_states = return_inputs_states
@@ -362,6 +358,7 @@ class ONNXTracedModule(Module):
             wrapper,
             in_vars + module_state,
             _create_interpreter_name_lookup_fn(),
+            self.strict,
             self._force_outplace,
         )
 
@@ -390,24 +387,9 @@ def _clone_inputs(args):
 
 
 # This is purely for developer debugging.  We are not going to advertise it.
-_JIT_DUMP = os.environ.get('PYTORCH_JIT_DUMP', False)
 _JIT_TIME = os.environ.get('PYTORCH_JIT_TIME', False)  # CUDA-only timing
 _JIT_DISABLE = os.environ.get('PYTORCH_JIT_DISABLE', False)
 _JIT_STATS = os.environ.get('PYTORCH_JIT_STATS', False)
-
-
-def _dump_trace(trace_name, pass_name, input_key, trace):
-    if not _JIT_DUMP:
-        return
-
-    import torch.contrib._graph_vis as graph_vis
-
-    filename = "{}_{}".format(trace_name, pass_name)
-    # TODO: Also paste out the backtrace when the trace was compiled
-    # (and maybe also when it was run?)
-    with open(filename + ".ir", "w") as f:
-        f.write("Input key: {}\n\n{}".format(input_key, str(trace)))
-    graph_vis.write(trace.graph(), filename + ".html")
 
 
 @contextlib.contextmanager
@@ -537,7 +519,7 @@ class TracingCheckError(Exception):
 
 # Check the traced module against a set of user-provided validation inputs
 @torch.no_grad()
-def _check_trace(check_inputs, func, traced_func, check_tolerance,
+def _check_trace(check_inputs, func, traced_func, check_tolerance, strict,
                  force_outplace, is_trace_module, _module_class):
     # Note: tracing is independent of optimizations, which consume the trace
     for inputs in check_inputs:
@@ -553,6 +535,7 @@ def _check_trace(check_inputs, func, traced_func, check_tolerance,
                 func.__self__ if hasattr(func, '__self__') else func,
                 copied_dict,
                 check_trace=False,
+                strict=strict,
                 _force_outplace=force_outplace,
                 _module_class=_module_class,
                 _compilation_unit=torch._C.CompilationUnit(),
@@ -566,6 +549,7 @@ def _check_trace(check_inputs, func, traced_func, check_tolerance,
                 func,
                 _clone_inputs(inputs),
                 check_trace=False,
+                strict=strict,
                 _force_outplace=force_outplace,
                 _module_class=_module_class,
             )
@@ -668,6 +652,10 @@ def _check_trace(check_inputs, func, traced_func, check_tolerance,
             all_ok = True
             for i, (orig, ref) in enumerate(zip(original, reference)):
                 try:
+                    if orig.is_quantized:
+                        orig = orig.dequantize()
+                    if ref.is_quantized:
+                        ref = ref.dequantize()
                     torch.testing.assert_allclose(orig.double(), ref.double(), rtol=check_tolerance,
                                                   atol=torch.testing._get_default_tolerance(orig, ref)[1])
                 except AssertionError as e:
@@ -746,6 +734,7 @@ def trace(func,
           check_trace=True,
           check_inputs=None,
           check_tolerance=1e-5,
+          strict=True,
           _force_outplace=False,
           _module_class=None,
           _compilation_unit=_python_cu):
@@ -823,6 +812,10 @@ def trace(func,
         check_tolerance (float, optional): Floating-point comparison tolerance to use in the checker procedure.
                                            This can be used to relax the checker strictness in the event that
                                            results diverge numerically for a known reason, such as operator fusion.
+        strict (bool, optional): run the tracer in a strict mode or not (default: True). Only turn this off when you
+                                 want the tracer to record your mutable container types (currently list/dict) and you
+                                 are sure that the list/dict that you are using in your problem is a `constant` structure
+                                 and does not get used as control flow (if, for) conditions.
 
     Returns:
         If ``callable`` is ``nn.Module`` or ``forward`` of ``nn.Module``, ``trace`` returns
@@ -887,13 +880,13 @@ def trace(func,
     if isinstance(func, torch.nn.Module):
         return trace_module(func, {'forward': example_inputs}, None,
                             check_trace, wrap_check_inputs(check_inputs),
-                            check_tolerance, _force_outplace, _module_class)
+                            check_tolerance, strict, _force_outplace, _module_class)
 
     if (hasattr(func, '__self__') and isinstance(func.__self__, torch.nn.Module) and
             func.__name__ == 'forward'):
         return trace_module(func.__self__, {'forward': example_inputs}, None,
                             check_trace, wrap_check_inputs(check_inputs),
-                            check_tolerance, _force_outplace, _module_class)
+                            check_tolerance, strict, _force_outplace, _module_class)
 
     # Special case for common case of passing a single Tensor
     if isinstance(example_inputs, (torch.Tensor, dict)):
@@ -911,14 +904,15 @@ def trace(func,
     name = _qualified_name(func)
     traced = torch._C._create_function_from_trace(name, func, example_inputs,
                                                   var_lookup_fn,
+                                                  strict,
                                                   _force_outplace)
 
     # Check the trace against new traces created from user-specified inputs
     if check_trace:
         if check_inputs is not None:
-            _check_trace(check_inputs, func, traced, check_tolerance, _force_outplace, False, _module_class)
+            _check_trace(check_inputs, func, traced, check_tolerance, strict, _force_outplace, False, _module_class)
         else:
-            _check_trace([example_inputs], func, traced, check_tolerance, _force_outplace, False, _module_class)
+            _check_trace([example_inputs], func, traced, check_tolerance, strict, _force_outplace, False, _module_class)
 
     return traced
 
@@ -930,6 +924,7 @@ def trace_module(mod,
                  check_trace=True,
                  check_inputs=None,
                  check_tolerance=1e-5,
+                 strict=True,
                  _force_outplace=False,
                  _module_class=None,
                  _compilation_unit=_python_cu):
@@ -1039,17 +1034,17 @@ def trace_module(mod,
             # this is needed since Module.__call__ sets up some extra tracing
             func = mod if method_name == "forward" else getattr(mod, method_name)
             example_inputs = make_tuple(example_inputs)
-            module._c._create_method_from_trace(method_name, func, example_inputs, var_lookup_fn, _force_outplace)
+            module._c._create_method_from_trace(method_name, func, example_inputs, var_lookup_fn, strict, _force_outplace)
             check_trace_method = module._c._get_method(method_name)
 
             # Check the trace against new traces created from user-specified inputs
             if check_trace:
                 if check_inputs is not None:
                     _check_trace(check_inputs, func, check_trace_method,
-                                 check_tolerance, _force_outplace, True, _module_class)
+                                 check_tolerance, strict, _force_outplace, True, _module_class)
                 else:
                     _check_trace([inputs], func, check_trace_method,
-                                 check_tolerance, _force_outplace, True, _module_class)
+                                 check_tolerance, strict, _force_outplace, True, _module_class)
     finally:
         torch.jit._trace_module_map = old_module_map
 
@@ -1331,6 +1326,32 @@ def interface(obj):
     return obj
 
 
+def _script_if_tracing(fn):
+    """
+    Compiles ``fn`` when it is first called during tracing. ``torch.jit.script``
+    has a non-negligible start up time when it is first called due to
+    lazy-initializations of many compiler builtins. Therefore you should not use
+    it in library code. However, you may want to have parts of your library work
+    in tracing even if they use control flow. In these cases, you should use
+    ``@torch.jit._script_if_tracing`` to substitute for
+    ``torch.jit.script``.
+    """
+    # You can't modify closed-over variables in Python 2, so make this a dict and
+    # mutate it
+    compiled_fn = {}
+
+    @functools.wraps(fn)
+    def wrapper(*args):
+        if not is_tracing():
+            # Not tracing, don't do anything
+            return fn(*args)
+
+        if 'fn' not in compiled_fn:
+            compiled_fn['fn'] = script(fn, _frames_up=1)
+        return compiled_fn['fn'](*args)
+
+    return wrapper
+
 
 def script_method(fn):
     if not _enabled:
@@ -1354,7 +1375,7 @@ def script_method(fn):
 
 
 # These OrderedDictWrapper classes replace the actual OrderedDicts in
-# module with versions that get/set properties inside of script::Module.
+# module with versions that get/set properties inside of Module.
 # This allows us to reuse most of nn.Module while still storing the
 # data in C++.
 # Each OrderedDict needs to support:
@@ -1407,7 +1428,7 @@ class OrderedModuleDict(OrderedDictWrapper):
         # contains _both_ script modules and non-script python-only modules
 
         # because script modules are subclassed in python and the
-        # C++ script::Module class will not hold references to them,
+        # C++ Module class will not hold references to them,
         # to ensure that you always get the same python value here
         # we store it in the python dict as well
         self._python_modules = python_dict
@@ -1513,7 +1534,7 @@ if _enabled:
 
     class ScriptModule(with_metaclass(ScriptMeta, Module)):
         """
-        ``ScriptModule``s wrap a C++ ``torch::jit::script::Module``. ``ScriptModule``s
+        ``ScriptModule``s wrap a C++ ``torch::jit::Module``. ``ScriptModule``s
         contain methods, attributes, parameters, and
         constants. These can be accessed the same as on a normal ``nn.Module``.
         """
@@ -1565,6 +1586,8 @@ if _enabled:
             ast = torch._C._parse_source_def(src)
             self._methods[ast.name().name] = ScriptMethodStub(rcb, ast, None)
 
+        def _replicate_for_data_parallel(self):
+            return self._actual_script_module._replicate_for_data_parallel()
 
     class RecursiveScriptModule(ScriptModule):
         # XXX: RecursiveScriptModule inherits from ScriptModule for the sole
@@ -1613,7 +1636,7 @@ if _enabled:
             control of how the RecursiveScriptModule instance is created).
 
             Arguments:
-                cpp_module:  The C++ script::Module that will hold the actual state of
+                cpp_module:  The C++ Module that will hold the actual state of
                              this RecursiveScriptModule instance.
                 init_fn:  Lambda that initializes the RecursiveScriptModule passed to it.
             """
@@ -1637,6 +1660,15 @@ if _enabled:
             return self.forward.graph
 
         @property
+        def inlined_graph(self):
+            r"""
+            Returns a string representation of the internal graph for the
+            ``forward`` method. This graph will be preprocessed to inline all function and method calls.
+            See `Interpreting Graphs`_ for details.
+            """
+            return self.forward.inlined_graph
+
+        @property
         def code(self):
             r"""
             Returns a pretty-printed representation (as valid Python syntax) of
@@ -1652,6 +1684,20 @@ if _enabled:
             See :func:`torch.jit.save <torch.jit.save>` for details.
             """
             return self._c.save(*args, **kwargs)
+
+        def _save_for_lite_interpreter(self, *args, **kwargs):
+            r"""
+            _save_for_lite_interpreter(f)
+
+            Add (or update) the bytecode session to the script model. The updated model is used
+            in lite interpreter for mobile applications.
+
+            Arguments:
+                f: a string containing a file name.
+                _extra_files: Map from filename to contents which will be stored as part of 'f'.
+
+            """
+            return self._c._save_for_mobile(*args, **kwargs)
 
         def save_to_buffer(self, *args, **kwargs):
             return self._c.save_to_buffer(*args, **kwargs)
@@ -1778,6 +1824,14 @@ if _enabled:
                 return True
             return self_method()
 
+        def _replicate_for_data_parallel(self):
+            # we have to initialize ScriptModule properly so that
+            # it works with pybind11
+            def init_fn(script_module):
+                # Don't do anything here, we'll initialize the ScriptModule below
+                return
+            return RecursiveScriptModule._construct(self._c._replicate_for_data_parallel(), init_fn)
+
     # Need to copy all RecursiveScriptModule methods to ScriptModule.
     #
     # This is because `super(MyScriptModule, self).foo()` does not use
@@ -1839,7 +1893,16 @@ class TracedModule(ScriptModule):
         # Copy a subset of `orig` to a temporary nn.Module.
         # This is a way to customize what will actually get compiled by create_script_module
         id_set = set()
-        tmp_module = Module()
+
+        # This allows us to preserve the original module's qualified name by defining a new
+        # type with the attribute _jit_override_qualname. In torch._jit_internal._qualified_name
+        # we have a special case that will look up this attribute to override whatever qualname
+        # we would get from the python type system
+        class QualnameWrapper(torch.nn.Module):
+            pass
+        QualnameWrapper._jit_override_qualname = torch._jit_internal._qualified_name(type(orig))
+
+        tmp_module = QualnameWrapper()
 
         def check_unique(param):
             if param in id_set:
@@ -1856,6 +1919,9 @@ class TracedModule(ScriptModule):
             if buf is not None:
                 tmp_module._buffers[name] = buf
                 check_unique(buf)
+        for name, val in orig.__dict__.items():
+            if torch._C._jit_is_script_object(val) and name not in orig._parameters and name not in orig._buffers:
+                setattr(tmp_module, name, val)
 
         if orig._backward_hooks:
             raise ValueError("Modules that have backward hooks assigned can't be compiled: " + str(orig))
@@ -1863,8 +1929,6 @@ class TracedModule(ScriptModule):
         for name, submodule in orig._modules.items():
             tmp_module._modules[name] = make_module(submodule, TracedModule, _compilation_unit=None)
 
-        # TODO: this way of doing it means we lose name information on the class,
-        # since the qualname is basically "nn.Module"
         script_module = torch.jit._recursive.create_script_module(tmp_module, lambda module: (), share_types=False)
 
         self.__dict__['_name'] = type(orig).__name__
@@ -1917,6 +1981,14 @@ def is_scripting():
     """
     return False
 
+
+def is_tracing():
+    """
+    Returns ``True`` in tracing (if a function is called during the tracing of
+    code with ``torch.jit.trace``) and ``False`` otherwise.
+    """
+    return torch._C._is_tracing
+
 def _unwrap_optional(x):
     assert x is not None, "Unwrapping null optional"
     return x
@@ -1948,6 +2020,8 @@ def _set_jit_overload_cache(key, compiled_fns):
     _jit_function_overload_caching[key] = [fn.qualified_name for fn in compiled_fns]
 
 def _try_get_jit_cached_function(key):
+    if getattr(key, "__disable_jit_function_caching__", False) is True:
+        return None
     qual_name = _jit_caching_layer.get(key, None)
     if qual_name:
         return _python_cu.find_function(qual_name)
@@ -1973,8 +2047,7 @@ def _add_script_class(cls, name):
 def _get_script_class(name):
     global _script_classes
     if name not in _script_classes:
-        raise RuntimeError("Unknown reference to ScriptClass '{}'. "
-                           "Did you forget to import it?".format(name))
+        return None
     return _script_classes[name]
 
 # overloads are registered in _jit_internal and compiled here so that _overload
@@ -2041,7 +2114,8 @@ def _get_named_tuple_properties(obj):
     has_annotations = hasattr(obj, '__annotations__')
     for field in fields:
         if has_annotations and field in obj.__annotations__:
-            annotations.append(torch.jit.annotations.ann_to_type(obj.__annotations__[field]))
+            the_type = torch.jit.annotations.ann_to_type(obj.__annotations__[field], _jit_internal.fake_range())
+            annotations.append(the_type)
         else:
             annotations.append(torch._C.TensorType.get())
     return type(obj).__name__, fields, annotations

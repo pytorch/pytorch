@@ -7,6 +7,10 @@
 #include <algorithm>
 #include <mutex>
 
+#ifdef __HIP_PLATFORM_HCC__
+#include <hip/hip_version.h>
+#endif
+
 float THCudaBlas_Sdot(THCState *state, int64_t n, float *x, int64_t incx, float *y, int64_t incy)
 {
   if (n == 1) {
@@ -73,6 +77,20 @@ at::Half THCudaBlas_Hdot(THCState *state, int64_t n, at::Half *x, int64_t incx, 
   THError("Cublas_Hdot only supports n, incx and incy "
           "up to signed integer limits: %d", INT_MAX);
   return 0.0;
+#elif HIP_VERSION >= 210
+  if (n == 1) {
+    incx = 1;
+    incy = 1;
+  }
+
+  at::Half result;
+  cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
+  cublasSetStream(handle, at::cuda::getCurrentCUDAStream().stream());
+  THCublasCheck(rocblas_hdot(handle, n,
+                             reinterpret_cast<rocblas_half*>(x), incx,
+                             reinterpret_cast<rocblas_half*>(y), incy,
+                             reinterpret_cast<rocblas_half*>(&result)));
+  return result;
 #else
   THError("Cublas_Hdot requires CUDA 8.0+");
   return 0.0;

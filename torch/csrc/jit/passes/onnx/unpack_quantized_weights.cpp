@@ -1,9 +1,9 @@
 #include <torch/csrc/jit/passes/onnx/unpack_quantized_weights.h>
-#include <torch/csrc/jit/constants.h>
-#include <torch/csrc/jit/irparser.h>
+#include <torch/csrc/jit/ir/constants.h>
+#include <torch/csrc/jit/ir/irparser.h>
+#include <torch/csrc/jit/ir/subgraph_matcher.h>
 #include <torch/csrc/jit/passes/onnx/helper.h>
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
-#include <torch/csrc/jit/subgraph_matcher.h>
 #include <stack>
 
 using ::c10::Dispatcher;
@@ -31,6 +31,7 @@ double getScaleFromInput(Node* input_node) {
   c10::optional<IValue> scale;
   std::string input_name = input_node->kind().toQualString();
   std::unordered_set<std::string> noscale_ops = {"quantized::max_pool2d",
+                                                 "aten::max_pool2d",
                                                  "aten::relu",
                                                  "prim::ListUnpack",
                                                  "aten::split_with_sizes",
@@ -39,7 +40,10 @@ double getScaleFromInput(Node* input_node) {
                                                  "aten::slice",
                                                  "aten::avg_pool2d",
                                                  "quantized::cat",
-                                                 "prim::ListConstruct"};
+                                                 "prim::ListConstruct",
+                                                 "aten::upsample_nearest2d",
+                                                 "aten::sigmoid",
+                                                 "aten::reshape"};
   if (input_name == "aten::quantize_per_tensor") {
     TORCH_CHECK(
         input_node->inputs().size() > 1,
@@ -79,6 +83,10 @@ double getScaleFromInput(Node* input_node) {
         "quantized::add expected scale to be 3rd input");
     scale = toIValue(input_node->inputs()[2]);
     return scale.value().toDouble();
+  } else if (input_name == "aten::sigmoid") {
+    // For the _caffe2::Int8Sigmoid op output scale is 1.0/256
+    // And output zero_point is set to 0 (quint8 type).
+    return 1.0L / 256;
   }
   // For the ops below the scale is not part of the op signature, so we traverse
   // up the graph to get the scale from its input when defined in the graph.
@@ -131,7 +139,7 @@ void unpackQuantizedWeightsHelper(
     const std::string& unpack_fn) {
   Graph pattern_graph;
   std::unordered_map<std::string, Value*> vmap;
-  script::parseIR(pattern, &pattern_graph, vmap);
+  parseIR(pattern, &pattern_graph, vmap);
   const auto& matches = findPatternMatches(pattern_graph, *graph);
 
   for (const auto& match : matches) {
@@ -262,7 +270,7 @@ void insertPermutesHelper(
     const std::string& pattern) {
   Graph pattern_graph;
   std::unordered_map<std::string, Value*> vmap;
-  script::parseIR(pattern, &pattern_graph, vmap);
+  parseIR(pattern, &pattern_graph, vmap);
 
   const auto& matches = findPatternMatches(pattern_graph, *graph);
 

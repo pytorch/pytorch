@@ -55,7 +55,7 @@ Tensor& mkldnn_add_out(
 
   ideep::tensor& z = itensor_from_mkldnn(result);
   const std::vector<float> scales{1.0, alpha.to<float>()};
-  ideep::sum::compute<AllocForMKLDNN>(scales, {x, y}, z);
+  ideep::sum::compute(scales, {x, y}, z);
 
   return result;
 }
@@ -66,7 +66,7 @@ Tensor mkldnn_add(const Tensor& self, const Tensor& other, Scalar alpha) {
 
   ideep::tensor z;
   const std::vector<float> scales{1.0, alpha.to<float>()};
-  ideep::sum::compute<AllocForMKLDNN>(scales, {x, y}, z);
+  ideep::sum::compute(scales, {x, y}, z);
 
   return new_with_itensor_mkldnn(std::move(z), self.options());
 }
@@ -83,7 +83,7 @@ Tensor& mkldnn_mul_out(Tensor& result, const Tensor& self, const Tensor& other) 
 
   // for zero_dim tensor
   if (other.ndimension() == 0) {
-    ideep::eltwise_forward::compute<AllocForMKLDNN>(
+    ideep::eltwise_forward::compute(
       x, z, ideep::algorithm::eltwise_linear,
       ideep::prop_kind::forward_inference, /*alpha*/ other.item().to<float>());
 
@@ -92,8 +92,7 @@ Tensor& mkldnn_mul_out(Tensor& result, const Tensor& self, const Tensor& other) 
     AT_ASSERTM(self.sizes() == other.sizes(),
                "mkldnn_mul_out: currently mkldnn not support broadcasting");
     ideep::tensor y = itensor_from_mkldnn(other);
-    auto op = ideep::eltwise_binary::eltwise_binary_op::ELTWISE_MUL;
-    ideep::eltwise_binary::compute<AllocForMKLDNN>(op, x, y, z);
+    ideep::binary::compute(x, y, z, dnnl::algorithm::binary_mul);
 
     return result;
   }

@@ -40,7 +40,7 @@ bool AsyncTask::Run(const ExecutionOptions& options) {
   // TODO: insert CUDA's async stream waits; tracing and counters
   OperatorBase* op = nullptr;
   try {
-    for (auto op_idx = 0; op_idx < ops_.size(); ++op_idx) {
+    for (auto op_idx = 0U; op_idx < ops_.size(); ++op_idx) {
       op = ops_[op_idx];
       int stream_id = 0; // TODO: thread local stream id
       if (!op->RunAsync(stream_id)) {

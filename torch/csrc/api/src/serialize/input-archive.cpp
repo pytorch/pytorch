@@ -3,8 +3,8 @@
 #include <torch/types.h>
 #include <torch/utils.h>
 
-#include <torch/csrc/jit/import.h>
-#include <torch/csrc/jit/script/module.h>
+#include <torch/csrc/jit/serialization/import.h>
+#include <torch/csrc/jit/api/module.h>
 #include <caffe2/serialize/read_adapter_interface.h>
 #include <c10/util/Exception.h>
 
@@ -16,7 +16,7 @@
 namespace torch {
 namespace serialize {
 
-InputArchive::InputArchive() : module_("Module", std::make_shared<jit::script::CompilationUnit>()) {}
+InputArchive::InputArchive() : module_("Module", std::make_shared<jit::CompilationUnit>()) {}
 
 void InputArchive::read(const std::string& key, c10::IValue& ivalue) {
   ivalue = module_.attr(key);
@@ -161,7 +161,7 @@ std::vector<std::string> InputArchive::keys() {
   std::vector<std::string> all_keys;
   all_keys.reserve(module_.named_attributes(/*recurse=*/false).size());
 
-  for (const torch::jit::script::NameValue& s : module_.named_attributes(/*recurse=*/false)) {
+  for (const torch::jit::NameValue& s : module_.named_attributes(/*recurse=*/false)) {
     all_keys.push_back(s.name);
   }
 

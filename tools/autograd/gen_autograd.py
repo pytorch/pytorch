@@ -30,9 +30,12 @@ from collections import defaultdict
 from .utils import YamlLoader, split_name_params
 
 # See NOTE [ Autograd View Variables ] in variable.h for details.
-# A map: function name => two options:
-#      1. name of the argument that all outputs are view of
-#      2. map: output idx => name of the argument that this result is view of
+# If you update list VIEW_FUNCTIONS or RETURNS_VIEWS_OF_INPUT,
+# you **MUST** also update the public list of view ops accordingly in
+# docs/source/tensor_view.rst. Note not all ATen functions are exposed to public,
+# e.g alias & sparse_coo_tensor_with_dims_and_tensors.
+#
+# A map: function name => name of the argument that all outputs are view of
 VIEW_FUNCTIONS = {
     'numpy_T': 'self',
     'alias': 'self',
@@ -66,7 +69,6 @@ VIEW_FUNCTIONS = {
 # of viewing functions, and is used by the JIT to determine when an operator
 # returns a view of its inputs
 RETURNS_VIEWS_OF_INPUT = set(VIEW_FUNCTIONS.keys()).union({'chunk', 'split'})
-
 
 def format_return_type(returns):
     if len(returns) == 0:
@@ -111,6 +113,14 @@ def load_aten_declarations(path):
                                               for arg in declaration['arguments']]
         declaration['type_method_args'] = [arg['name'] for arg in declaration['arguments']]
         declaration['api_name'] = declaration['name']
+        # NB: keep this in sync with common_with_cwrap.py
+        if declaration.get('overload_name'):
+            declaration['type_wrapper_name'] = "{}_{}".format(
+                declaration['name'], declaration['overload_name'])
+        else:
+            declaration['type_wrapper_name'] = declaration['name']
+        declaration['operator_name_with_overload'] = declaration['schema_string'].split('(')[0]
+        declaration['unqual_operator_name_with_overload'] = declaration['operator_name_with_overload'].split('::')[1]
         declaration['return_type'] = format_return_type(declaration['returns'])
 
         declaration['base_name'] = declaration['name']

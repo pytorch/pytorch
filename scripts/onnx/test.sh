@@ -54,13 +54,24 @@ pytest "${args[@]}" \
   --ignore "$top_dir/test/onnx/test_pytorch_onnx_onnxruntime.py" \
   --ignore "$top_dir/test/onnx/test_custom_ops.py" \
   --ignore "$top_dir/test/onnx/test_models_onnxruntime.py" \
+  --ignore "$top_dir/test/onnx/test_utility_funs.py" \
   "${test_paths[@]}"
 
 # onnxruntime only support py3
 # "Python.h" not found in py2, needed by TorchScript custom op compilation.
-if [[ "$BUILD_ENVIRONMENT" == *py3* ]]; then
+if [[ "$BUILD_ENVIRONMENT" == *ort1-py3.6* ]]; then
   pytest "${args[@]}" \
-    "$top_dir/test/onnx/test_pytorch_onnx_onnxruntime.py" \
+    "$top_dir/test/onnx/test_pytorch_onnx_onnxruntime.py::TestONNXRuntime_opset7" \
+    "$top_dir/test/onnx/test_pytorch_onnx_onnxruntime.py::TestONNXRuntime_opset8" \
+    "$top_dir/test/onnx/test_pytorch_onnx_onnxruntime.py::TestONNXRuntime" \
     "$top_dir/test/onnx/test_custom_ops.py" \
-    "$top_dir/test/onnx/test_models_onnxruntime.py"
+    "$top_dir/test/onnx/test_models_onnxruntime.py" \
+    "$top_dir/test/onnx/test_utility_funs.py"
+fi
+if [[ "$BUILD_ENVIRONMENT" == *ort2-py3.6* ]]; then
+  # Update the loop for new opsets
+  for i in $(seq 10 12); do
+    pytest "${args[@]}" \
+      "$top_dir/test/onnx/test_pytorch_onnx_onnxruntime.py::TestONNXRuntime_opset$i"
+  done
 fi

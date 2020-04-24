@@ -1,7 +1,7 @@
 #include "caffe2/opt/shape_info.h"
-#include "caffe2/core/tensor_int8.h"
-
 #include "caffe2/core/operator.h"
+#include "caffe2/core/tensor_int8.h"
+#include "caffe2/utils/string_utils.h"
 
 namespace caffe2 {
 
@@ -50,6 +50,39 @@ ShapeInfo constructShapeInfoWithDefaultDimType(
     dimType[0] = defaultFirstDimType;
   }
   return ShapeInfo(dimType, shape);
+}
+
+void parseShapeInfoMapFromString(
+    const std::string& input,
+    ShapeInfoMap& shape_hints) {
+  auto hints = caffe2::split(';', input);
+  for (const auto& hint : hints) {
+    auto kv = caffe2::split(':', hint);
+    if (kv.size() == 2) {
+      auto dims = caffe2::split(',', kv.back());
+      TensorShape input;
+      if (kv.front().find("int8") != std::string::npos) {
+        input.set_data_type(TensorProto_DataType_UINT8);
+      } else {
+        input.set_data_type(TensorProto_DataType_FLOAT);
+      }
+      bool valid = true;
+      for (const auto& d : dims) {
+        try {
+          input.add_dims(std::stoi(d));
+        } catch (const std::exception& e) {
+          valid = false;
+          CAFFE_THROW("Cannot parse shape hint: ", hint);
+        }
+      }
+      if (valid) {
+        shape_hints.emplace(
+            kv.front(), constructShapeInfoWithDefaultDimType(input));
+      }
+    } else {
+      CAFFE_THROW("Cannot parse shape hint: ", hint);
+    }
+  }
 }
 
 } // namespace caffe2

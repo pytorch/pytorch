@@ -118,10 +118,8 @@ IMPLEMENT_CUDA_TENSOR_BASIC_FUNC(  exp, THCNumerics<scalar_t>::exp,   Real)
 IMPLEMENT_CUDA_TENSOR_BASIC_FUNC(  cos, THCNumerics<scalar_t>::cos,   Real)
 IMPLEMENT_CUDA_TENSOR_BASIC_FUNC( sqrt, THCNumerics<scalar_t>::sqrt,  Real)
 
-IMPLEMENT_CUDA_TENSOR_BASIC_FUNC(  cosh, THCNumerics<scalar_t>::cosh,  Real)
 IMPLEMENT_CUDA_TENSOR_BASIC_FUNC(   tan, THCNumerics<scalar_t>::tan,   Real)
 IMPLEMENT_CUDA_TENSOR_BASIC_FUNC(  atan, THCNumerics<scalar_t>::atan,  Real)
-IMPLEMENT_CUDA_TENSOR_BASIC_FUNC(  tanh, THCNumerics<scalar_t>::tanh,  Real)
 IMPLEMENT_CUDA_TENSOR_BASIC_FUNC(   erf, THCNumerics<scalar_t>::erf,   Real)
 IMPLEMENT_CUDA_TENSOR_BASIC_FUNC(  erfc, THCNumerics<scalar_t>::erfc,  Real)
 
@@ -205,24 +203,6 @@ void THCTensor_(cdiv)(THCState* state, THCTensor *self_, THCTensor *src1, THCTen
 {
   auto out = at::Tensor(retainTensorImpl(self_));
   at::div_out(out, at::Tensor(retainTensorImpl(src1)), at::Tensor(retainTensorImpl(src2)));
-}
-
-void THCTensor_(cremainder)(THCState *state, THCTensor *self, THCTensor *src1, THCTensor *src2)
-{
-  THCAssertSameGPU(THCTensor_(checkGPU)(state, 3, self, src1, src2));
-  THArgCheck(THCTensor_(nElement)(state, src1) ==
-             THCTensor_(nElement)(state, src2), 2, "sizes do not match");
-
-  if (self == src1) {
-    if (!THC_pointwiseApply2<scalar_t, scalar_t>(state, self, src2, TensorCRemainderOp<scalar_t>())) {
-      THArgCheck(false, 2, CUTORCH_DIM_WARNING);
-    }
-  } else {
-    THCTensor_(resizeAs)(state, self, src1);
-    if (!THC_pointwiseApply3<scalar_t, scalar_t, scalar_t>(state, self, src1, src2, TensorCRemainderOp<scalar_t>())) {
-      THArgCheck(false, 2, CUTORCH_DIM_WARNING);
-    }
-  }
 }
 
 void THCTensor_(cfmod)(THCState *state, THCTensor *self, THCTensor *src1, THCTensor *src2)
