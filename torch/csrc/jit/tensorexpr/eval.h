@@ -6,6 +6,8 @@
 
 #include <c10/macros/Macros.h>
 #include <c10/util/Logging.h>
+#include <c10/util/math_compat.h>
+#include <c10/util/string_utils.h>
 #include <torch/csrc/jit/tensorexpr/buffer.h>
 #include <torch/csrc/jit/tensorexpr/codegen.h>
 #include <torch/csrc/jit/tensorexpr/exceptions.h>
@@ -15,6 +17,7 @@
 #include <torch/csrc/jit/tensorexpr/ir_printer.h>
 #include <torch/csrc/jit/tensorexpr/tensor.h>
 #include <torch/csrc/jit/tensorexpr/types.h>
+#include <torch/csrc/jit/tensorexpr/var_substitutor.h>
 
 namespace torch {
 namespace jit {
@@ -127,7 +130,7 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
 
   TORCH_API void call(const std::vector<CallArg>& args) override {
     if (args.size() != buffer_args().size()) {
-      throw malformed_input();
+      throw malformed_input("bad args in IREvaluator call");
     }
     for (size_t i = 0; i < args.size(); i++) {
       bind(buffer_args()[i], args[i]);
@@ -344,7 +347,7 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
     v->rhs()->accept(this);
     Value rhs_v = value_;
     if (lhs_v.dtype() != rhs_v.dtype()) {
-      throw malformed_input(v);
+      throw malformed_input("bad dtype in binary op", v);
     }
     IRNodeType expr_type = v->expr_type();
     if (expr_type == IRNodeType::kAnd || expr_type == IRNodeType::kOr ||
@@ -383,7 +386,7 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
 
     if (lhs_v.dtype() != rhs_v.dtype() ||
         ret_val1_v.dtype() != ret_val2_v.dtype()) {
-      throw malformed_input(v);
+      throw malformed_input("bad dtype in CompareSelect", v);
     }
 
     switch (lhs_v.dtype().scalar_type()) {
@@ -409,7 +412,7 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
   TORCH_API void visit(const Let* v) override {
     const Var* var = dynamic_cast<const Var*>(v->var());
     if (!var) {
-      throw malformed_input(v);
+      throw malformed_input("bad Var in Let", v);
     }
     v->value()->accept(this);
     Value value = value_;
@@ -433,7 +436,7 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
   TORCH_API void visit(const LetStmt* v) override {
     const Var* var = v->var();
     if (!var) {
-      throw malformed_input(v);
+      throw malformed_input("bad Var in LetStmt", v);
     }
 
     v->value()->accept(this);
@@ -458,7 +461,7 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
   TORCH_API void visit(const Var* v) override {
     auto iter = eval_context_.find(v);
     if (iter == eval_context_.end()) {
-      throw malformed_input(v);
+      throw malformed_input("could not find Var in context", v);
     }
 
     value_ = iter->second;
@@ -497,7 +500,7 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
     Dtype dst_dtype = v->dtype();
     Dtype src_dtype = src_value->dtype();
     if (src_dtype.lanes() != dst_dtype.lanes()) {
-      throw malformed_input(v);
+      throw malformed_input("lane mismatch in Cast", v);
     }
 
     if (src_dtype != dst_dtype) {
@@ -521,7 +524,7 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
     v->stop()->accept(this);
     int stop = value_.as<int>();
     if (eval_context_.count(var_node)) {
-      throw malformed_input(v);
+      throw malformed_input("could not find var_node in For context", v);
     }
 
     for (int i = start; i < stop; i++) {
@@ -578,11 +581,12 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
     const Var* base_node = v->base_handle();
     auto iter = buffer_mapping_.find(base_node);
     if (iter == buffer_mapping_.end()) {
-      throw malformed_input(v);
+      throw malformed_input("could not find base node in Load", v);
     }
     void* ptr = iter->second;
 
-    v->index()->accept(this);
+    const Expr* flat_idx = flatten_index(v->buf()->dims(), v->indices());
+    flat_idx->accept(this);
     std::vector<int> index = value().as_vec<int>();
     v->mask()->accept(this);
     std::vector<int> mask = value().as_vec<int>();
@@ -610,35 +614,36 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
     const Var* base_node = v->base_handle();
     auto iter = buffer_mapping_.find(base_node);
     if (iter == buffer_mapping_.end()) {
-      throw malformed_input(v);
+      throw malformed_input("could not find base node in Store", v);
     }
 
     void* ptr = iter->second;
 
-    v->index()->accept(this);
+    const Expr* flat_idx = flatten_index(v->buf()->dims(), v->indices());
+    flat_idx->accept(this);
     std::vector<int> index = value().as_vec<int>();
     v->mask()->accept(this);
     std::vector<int> mask = value().as_vec<int>();
     if (index.size() != mask.size()) {
-      throw malformed_input(v);
+      throw malformed_input("mask size mismatch in Store", v);
     }
 
     ScalarType v_sdtype = v->value()->dtype().scalar_type();
 
     switch (v_sdtype) {
-#define TYPE_CASE(Type, Name)                               \
-  case ScalarType::Name: {                                  \
-    v->value()->accept(this);                               \
-    std::vector<Type> value = this->value().as_vec<Type>(); \
-    if (index.size() != value.size()) {                     \
-      throw malformed_input(v);                             \
-    }                                                       \
-    Type* ptr##Name = static_cast<Type*>(ptr);              \
-    for (size_t i = 0; i < index.size(); i++) {             \
-      if (mask[i]) {                                        \
-        ptr##Name[index[i]] = value[i];                     \
-      }                                                     \
-    }                                                       \
+#define TYPE_CASE(Type, Name)                                   \
+  case ScalarType::Name: {                                      \
+    v->value()->accept(this);                                   \
+    std::vector<Type> value = this->value().as_vec<Type>();     \
+    if (index.size() != value.size()) {                         \
+      throw malformed_input("value size mismatch in Store", v); \
+    }                                                           \
+    Type* ptr##Name = static_cast<Type*>(ptr);                  \
+    for (size_t i = 0; i < index.size(); i++) {                 \
+      if (mask[i]) {                                            \
+        ptr##Name[index[i]] = value[i];                         \
+      }                                                         \
+    }                                                           \
   } break;
       AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, TYPE_CASE);
 #undef TYPE_CASE
@@ -665,7 +670,7 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
     if (values.size() >= 2ULL) {
       v2 = values[1].as_vec<float>();
       if (v1.size() != v2.size()) {
-        throw malformed_input(v);
+        throw malformed_input("value size mismatch in Intrinsics", v);
       }
     }
 
@@ -714,6 +719,7 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
           "Free a buffer that is not currently bound: " +
           buffer_var->name_hint());
     }
+    buffer_mapping_.erase(buffer_var);
   }
 
   void visit(const Cond* v) override {
@@ -790,7 +796,7 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
         float intpart;
         return std::modf(v, &intpart);
       default:
-        throw std::runtime_error("invalid op_type: " + std::to_string(op_type));
+        throw std::runtime_error("Invalid op_type: " + c10::to_string(op_type));
     }
   }
 
@@ -801,11 +807,11 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
       case kFmod:
         return std::fmod(v1, v2);
       case kRemainder:
-        return std::remainderf(v1, v2);
+        return std::remainder(v1, v2);
       case kAtan2:
         return std::atan2(v1, v2);
       default:
-        throw std::runtime_error("nvalid op_type: " + std::to_string(op_type));
+        throw std::runtime_error("Invalid op_type: " + c10::to_string(op_type));
     }
   }
 
@@ -814,33 +820,6 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
   std::unordered_map<const Var*, void*> buffer_mapping_;
   std::unordered_map<const Var*, std::unique_ptr<std::vector<int>>>
       internal_buffers_;
-};
-
-using VarMapping = std::vector<std::pair<const Var*, const Expr*>>;
-
-class VarSubMutator : public IRMutator {
- public:
-  VarSubMutator(const VarMapping& var_mapping) {
-    for (const auto& entry : var_mapping) {
-      const Var* key_var = entry.first;
-      const Expr* value = entry.second;
-      if (!key_var) {
-        throw malformed_input();
-      }
-      var_mapping_[key_var] = value;
-    }
-  }
-
-  const Expr* mutate(const Var* var) override {
-    auto iter = var_mapping_.find(var);
-    if (iter == var_mapping_.end()) {
-      return var;
-    }
-    return iter->second;
-  }
-
- private:
-  std::unordered_map<const Var*, const Expr*> var_mapping_;
 };
 
 template <class CodeGenType>
@@ -857,7 +836,13 @@ class ExprEval {
       : dtype_(expr.dtype()) {
     std::vector<BufferArg> buffer_args_extended = buffer_args;
     Buffer ret_buf("ret_val", dtype_, {1});
-    Stmt* store_stmt = Store::make(VarHandle(ret_buf.data()), 0, expr);
+    std::vector<const Expr*> indices;
+    const Expr* zero = new IntImm(0);
+    for (size_t i = 0; i < ret_buf.data()->ndim(); i++) {
+      indices.push_back(zero);
+    }
+    Stmt* store_stmt =
+        new Store(ret_buf.data(), indices, expr.node(), new IntImm(1));
     buffer_args_extended.push_back(ret_buf);
     codegen_.reset(new CodeGenType(store_stmt, buffer_args_extended));
   }
@@ -929,28 +914,6 @@ inline const Expr* Substitute(const Expr* expr, const VarMapping& var_mapping) {
 inline Stmt* Substitute(Stmt* stmt, const VarMapping& var_mapping) {
   VarSubMutator var_sub(var_mapping);
   return stmt->accept_mutator(&var_sub);
-}
-
-// Uses the evaluator to fold an Expression with constant terms.
-// E.g. evaluateOp(Add(3, 4)) => 7.
-// Expr v must not have any unbound Vars.
-static Expr* evaluateOp(const Expr* v) {
-  ExprHandle handle(v);
-  ExprEval<SimpleIREvaluator> eval(handle);
-
-  switch (v->dtype().scalar_type()) {
-#define TYPE_CASE(Type, Name)                                 \
-  case ScalarType::Name: {                                    \
-    Type val = eval.value<Type>();                            \
-    return getImmediateByType(v->dtype().scalar_type(), val); \
-  }
-    AT_FORALL_SCALAR_TYPES_AND(Half, TYPE_CASE);
-#undef TYPE_CASE
-    default:
-      LOG(FATAL) << "Unsupported datatype: " << v->dtype();
-      return nullptr;
-  }
-  return nullptr;
 }
 
 } // namespace tensorexpr

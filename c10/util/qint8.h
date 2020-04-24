@@ -11,6 +11,7 @@ namespace c10 {
 struct alignas(1) qint8 {
   using underlying = int8_t;
   int8_t val_;
+  qint8() = default;
   explicit qint8(int8_t val) : val_(val) {}
 };
 

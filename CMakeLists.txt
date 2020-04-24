@@ -147,6 +147,7 @@ cmake_dependent_option(
     USE_STATIC_CUDNN "Use cuDNN static libraries" OFF
     "USE_CUDNN" OFF)
 option(USE_FBGEMM "Use FBGEMM (quantized 8-bit server operators)" ON)
+option(USE_FAKELOWP "Use FakeLowp operators" OFF)
 option(USE_FFMPEG "Use ffmpeg" OFF)
 option(USE_GFLAGS "Use GFLAGS" OFF)
 option(USE_GLOG "Use GLOG" OFF)
@@ -205,6 +206,21 @@ cmake_dependent_option(
     "USE_DISTRIBUTED" OFF)
 option(USE_TBB "Use TBB" OFF)
 option(ONNX_ML "Enable traditional ONNX ML API." ON)
+
+# Linux distributions do not want too many embedded sources, in that sense we
+# need to be able to build pytorch with an (almost) empty third_party
+# directory.
+# USE_SYSTEM_LIBS is a shortcut variable to toggle all the # USE_SYSTEM_*
+# variables on. Individual USE_SYSTEM_* variables can be toggled with
+# USE_SYSTEM_LIBS being "OFF".
+option(USE_SYSTEM_LIBS "Use all available system-provided libraries." OFF)
+option(USE_SYSTEM_CPUINFO "Use system-provided cpuinfo." OFF)
+option(USE_SYSTEM_SLEEF "Use system-provided sleef." OFF)
+if(USE_SYSTEM_LIBS)
+  set(USE_SYSTEM_CPUINFO ON)
+  set(USE_SYSTEM_SLEEF ON)
+  set(BUILD_CUSTOM_PROTOBUF OFF)
+endif()
 
 # Used when building Caffe2 through setup.py
 option(BUILDING_WITH_TORCH_LIBS "Tell cmake if Caffe2 is being built alongside torch libs" ON)
@@ -363,7 +379,15 @@ include(cmake/Utils.cmake)
 include(cmake/public/utils.cmake)
 
 # ---[ Version numbers for generated libraries
-set(TORCH_DEFAULT_VERSION "1.1.0")
+file(READ version.txt TORCH_DEFAULT_VERSION)
+# Strip trailing newline
+string(REGEX REPLACE "\n$" "" TORCH_DEFAULT_VERSION "${TORCH_DEFAULT_VERSION}")
+if("${TORCH_DEFAULT_VERSION} " STREQUAL " ")
+  message(WARNING "Could not get version from base 'version.txt'")
+  # If we can't get the version from the version file we should probably
+  # set it to something non-sensical like 0.0.0
+  set(TORCH_DEFAULT_VERSION, "0.0.0")
+endif()
 set(TORCH_BUILD_VERSION "${TORCH_DEFAULT_VERSION}" CACHE STRING "Torch build version")
 if(DEFINED ENV{PYTORCH_BUILD_VERSION})
   set(TORCH_BUILD_VERSION "$ENV{PYTORCH_BUILD_VERSION}"

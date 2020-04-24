@@ -56,8 +56,14 @@ class malformed_input : public std::runtime_error {
       : std::runtime_error("MALFORMED INPUT: " + err) {}
   explicit malformed_input(const Expr* expr)
       : std::runtime_error("MALFORMED INPUT: " + std::to_string(expr)) {}
+  explicit malformed_input(const std::string& err, const Expr* expr)
+      : std::runtime_error(
+            "MALFORMED INPUT: " + err + " - " + std::to_string(expr)) {}
   explicit malformed_input(const Stmt* stmt)
       : std::runtime_error("MALFORMED INPUT: " + std::to_string(stmt)) {}
+  explicit malformed_input(const std::string& err, const Stmt* stmt)
+      : std::runtime_error(
+            "MALFORMED INPUT: " + err + " - " + std::to_string(stmt)) {}
 };
 
 } // namespace tensorexpr

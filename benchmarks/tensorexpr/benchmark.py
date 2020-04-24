@@ -177,9 +177,7 @@ class Benchmark(object):
                 result_dict["algorithmic"],
             )
             if "compute_workload" in result_dict:
-                msg += ", compute %.2f Gops/s" % (
-                    result_dict["compute_workload"] / iter_time / 1e9
-                )
+                msg += ", compute %.2f Gops/s" % result_dict["compute_workload"]
             print(msg)
         else:
             raise Exception("Unknown output_type " + self.output_type)
