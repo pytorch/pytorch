@@ -8,12 +8,12 @@
 // This manages two thread-local DispatchKeySets:
 //
 //  - The included type set, which adds a tensor type for consideration
-//    in dispatch.  (For example, you might add ProfilingTensorId to
+//    in dispatch.  (For example, you might add Profiling to
 //    the included type set to turn on profiling on all tensor operations.)
 //
 //  - The excluded type set, which disqualifies a tensor type from dispatch.
 //    (For example, after redispatching on variable, we disqualify
-//    VariableTensorId so we don't attempt to handle variable again.)
+//    Autograd so we don't attempt to handle variable again.)
 //    (Exclusion wins over inclusion.)
 //
 // NB: Originally, I implemented the excluded type set as storing the inverted
@@ -56,11 +56,18 @@ struct C10_API LocalDispatchKeySet {
 
 C10_API LocalDispatchKeySet tls_local_dispatch_key_set();
 
+// Internal, use ThreadLocalStateGuard
+C10_API void _force_tls_local_dispatch_key_set(LocalDispatchKeySet key_set);
+
 // RAII API for manipulating the thread-local dispatch state.
 
 class C10_API IncludeDispatchKeyGuard {
 public:
   IncludeDispatchKeyGuard(DispatchKey);
+  IncludeDispatchKeyGuard(const IncludeDispatchKeyGuard&) = delete;
+  IncludeDispatchKeyGuard operator=(const IncludeDispatchKeyGuard&) = delete;
+  IncludeDispatchKeyGuard(IncludeDispatchKeyGuard&&) = delete;
+  IncludeDispatchKeyGuard operator=(IncludeDispatchKeyGuard&&) = delete;
   ~IncludeDispatchKeyGuard();
 private:
   // A little micro-optimization to save us from tls_get_addr call
@@ -73,6 +80,10 @@ private:
 class C10_API ExcludeDispatchKeyGuard {
 public:
   ExcludeDispatchKeyGuard(DispatchKey);
+  ExcludeDispatchKeyGuard(const ExcludeDispatchKeyGuard&) = delete;
+  ExcludeDispatchKeyGuard operator=(const ExcludeDispatchKeyGuard&) = delete;
+  ExcludeDispatchKeyGuard(ExcludeDispatchKeyGuard&&) = delete;
+  ExcludeDispatchKeyGuard operator=(ExcludeDispatchKeyGuard&&) = delete;
   ~ExcludeDispatchKeyGuard();
 private:
   // A little micro-optimization to save us from tls_get_addr call
@@ -95,9 +106,9 @@ private:
 // The non-RAII API is less efficient than the RAII guards because both the
 // getter and setter will do a tls_getaddr lookup (the RAII struct only needs one!)
 
-bool tls_is_dispatch_key_excluded(DispatchKey x);
-void tls_set_dispatch_key_excluded(DispatchKey x, bool desired_state);
-bool tls_is_dispatch_key_included(DispatchKey x);
-void tls_set_dispatch_key_included(DispatchKey x, bool desired_state);
+C10_API bool tls_is_dispatch_key_excluded(DispatchKey x);
+C10_API void tls_set_dispatch_key_excluded(DispatchKey x, bool desired_state);
+C10_API bool tls_is_dispatch_key_included(DispatchKey x);
+C10_API void tls_set_dispatch_key_included(DispatchKey x, bool desired_state);
 
 }} // namespace c10::impl

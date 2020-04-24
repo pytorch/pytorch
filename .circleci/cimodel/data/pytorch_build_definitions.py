@@ -13,7 +13,7 @@ DOCKER_IMAGE_PATH_BASE = "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/"
 
 # ARE YOU EDITING THIS NUMBER?  MAKE SURE YOU READ THE GUIDANCE AT THE
 # TOP OF .circleci/config.yml
-DOCKER_IMAGE_VERSION = "07597f23-fa81-474c-8bef-5c8a91b50595"
+DOCKER_IMAGE_VERSION = "8fcf46ef-4a34-480b-a8ee-b0a30a4d3e59"
 
 
 @dataclass
@@ -114,7 +114,7 @@ class Conf:
         if not self.is_important:
             # If you update this, update
             # caffe2_build_definitions.py too
-            job_def["filters"] = {"branches": {"only": ["master", r"/ci-all\/.*/"]}}
+            job_def["filters"] = {"branches": {"only": ["master", r"/ci-all\/.*/", r"/release\/.*/"]}}
         job_def.update(self.gen_workflow_params(phase))
 
         return {job_name : job_def}
@@ -187,9 +187,9 @@ def instantiate_configs():
 
     root = get_root()
     found_configs = conf_tree.dfs(root)
-    restrict_phases = None
     for fc in found_configs:
 
+        restrict_phases = None
         distro_name = fc.find_prop("distro_name")
         compiler_name = fc.find_prop("compiler_name")
         compiler_version = fc.find_prop("compiler_version")
@@ -226,7 +226,7 @@ def instantiate_configs():
                 python_version = fc.find_prop("pyver")
                 parms_list[0] = fc.find_prop("abbreviated_pyver")
 
-        if cuda_version in ["9.2", "10", "10.1"]:
+        if cuda_version in ["9.2", "10", "10.1", "10.2"]:
             # TODO The gcc version is orthogonal to CUDA version?
             parms_list.append("gcc7")
 
@@ -288,7 +288,7 @@ def get_workflow_jobs():
 
     config_list = instantiate_configs()
 
-    x = ["setup"]
+    x = []
     for conf_options in config_list:
 
         phases = conf_options.restrict_phases or dimensions.PHASES

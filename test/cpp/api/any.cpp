@@ -84,22 +84,93 @@ TEST_F(AnyModuleTest, WrongArgumentType) {
       "but received value of type double");
 }
 
+struct M_test_wrong_number_of_arguments : torch::nn::Module {
+  int forward(int a, int b) {
+    return a + b;
+  }
+};
+
 TEST_F(AnyModuleTest, WrongNumberOfArguments) {
-  struct M : torch::nn::Module {
-    int forward(int a, int b) {
-      return a + b;
-    }
-  };
-  AnyModule any(M{});
+  AnyModule any(M_test_wrong_number_of_arguments{});
+#if defined(_MSC_VER)
+  std::string module_name = "struct M_test_wrong_number_of_arguments";
+#else
+  std::string module_name = "M_test_wrong_number_of_arguments";
+#endif
   ASSERT_THROWS_WITH(
       any.forward(),
-      "M's forward() method expects 2 arguments, but received 0");
+      module_name + "'s forward() method expects 2 argument(s), but received 0. "
+      "If " + module_name + "'s forward() method has default arguments, "
+      "please make sure the forward() method is declared with a corresponding `FORWARD_HAS_DEFAULT_ARGS` macro.");
   ASSERT_THROWS_WITH(
       any.forward(5),
-      "M's forward() method expects 2 arguments, but received 1");
+      module_name + "'s forward() method expects 2 argument(s), but received 1. "
+      "If " + module_name + "'s forward() method has default arguments, "
+      "please make sure the forward() method is declared with a corresponding `FORWARD_HAS_DEFAULT_ARGS` macro.");
   ASSERT_THROWS_WITH(
       any.forward(1, 2, 3),
-      "M's forward() method expects 2 arguments, but received 3");
+      module_name + "'s forward() method expects 2 argument(s), but received 3.");
+}
+
+struct M_default_arg_with_macro : torch::nn::Module {
+  double forward(int a, int b = 2, double c = 3.0) {
+    return a + b + c;
+  }
+ protected:
+  FORWARD_HAS_DEFAULT_ARGS({1, torch::nn::AnyValue(2)}, {2, torch::nn::AnyValue(3.0)})
+};
+
+struct M_default_arg_without_macro : torch::nn::Module {
+  double forward(int a, int b = 2, double c = 3.0) {
+    return a + b + c;
+  }
+};
+
+TEST_F(AnyModuleTest, PassingArgumentsToModuleWithDefaultArgumentsInForwardMethod) {
+  {
+    AnyModule any(M_default_arg_with_macro{});
+
+    ASSERT_EQ(any.forward<double>(1), 6.0);
+    ASSERT_EQ(any.forward<double>(1, 3), 7.0);
+    ASSERT_EQ(any.forward<double>(1, 3, 5.0), 9.0);
+
+    ASSERT_THROWS_WITH(
+        any.forward(),
+        "M_default_arg_with_macro's forward() method expects at least 1 argument(s) and at most 3 argument(s), but received 0.");
+    ASSERT_THROWS_WITH(
+        any.forward(1, 2, 3.0, 4),
+        "M_default_arg_with_macro's forward() method expects at least 1 argument(s) and at most 3 argument(s), but received 4.");
+  }
+  {
+    AnyModule any(M_default_arg_without_macro{});
+
+    ASSERT_EQ(any.forward<double>(1, 3, 5.0), 9.0);
+
+#if defined(_MSC_VER)
+    std::string module_name = "struct M_default_arg_without_macro";
+#else
+    std::string module_name = "M_default_arg_without_macro";
+#endif
+
+    ASSERT_THROWS_WITH(
+        any.forward(),
+        module_name + "'s forward() method expects 3 argument(s), but received 0. "
+        "If " + module_name + "'s forward() method has default arguments, "
+        "please make sure the forward() method is declared with a corresponding `FORWARD_HAS_DEFAULT_ARGS` macro.");
+    ASSERT_THROWS_WITH(
+        any.forward<double>(1),
+        module_name + "'s forward() method expects 3 argument(s), but received 1. "
+        "If " + module_name + "'s forward() method has default arguments, "
+        "please make sure the forward() method is declared with a corresponding `FORWARD_HAS_DEFAULT_ARGS` macro.");
+    ASSERT_THROWS_WITH(
+        any.forward<double>(1, 3),
+        module_name + "'s forward() method expects 3 argument(s), but received 2. "
+        "If " + module_name + "'s forward() method has default arguments, "
+        "please make sure the forward() method is declared with a corresponding `FORWARD_HAS_DEFAULT_ARGS` macro.");
+    ASSERT_THROWS_WITH(
+        any.forward(1, 2, 3.0, 4),
+        module_name + "'s forward() method expects 3 argument(s), but received 4.");
+  }
 }
 
 struct M : torch::nn::Module {
@@ -246,17 +317,17 @@ TEST_F(AnyModuleTest, ConvertsVariableToTensorCorrectly) {
 
 namespace torch {
 namespace nn {
-struct TestValue {
+struct TestAnyValue {
   template <typename T>
-  explicit TestValue(T&& value) : value_(std::forward<T>(value)) {}
-  AnyModule::Value operator()() {
+  explicit TestAnyValue(T&& value) : value_(std::forward<T>(value)) {}
+  AnyValue operator()() {
     return std::move(value_);
   }
-  AnyModule::Value value_;
+  AnyValue value_;
 };
 template <typename T>
-AnyModule::Value make_value(T&& value) {
-  return TestValue(std::forward<T>(value))();
+AnyValue make_value(T&& value) {
+  return TestAnyValue(std::forward<T>(value))();
 }
 } // namespace nn
 } // namespace torch
@@ -318,11 +389,11 @@ TEST_F(AnyValueTest, GetThrowsForTheWrongType) {
   ASSERT_NE(value.try_get<int>(), nullptr);
   ASSERT_THROWS_WITH(
       value.get<float>(),
-      "Attempted to cast Value to float, "
+      "Attempted to cast AnyValue to float, "
       "but its actual type is int");
   ASSERT_THROWS_WITH(
       value.get<long>(),
-      "Attempted to cast Value to long, "
+      "Attempted to cast AnyValue to long, "
       "but its actual type is int");
 }
 

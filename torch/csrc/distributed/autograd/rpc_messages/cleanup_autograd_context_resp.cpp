@@ -4,7 +4,7 @@ namespace torch {
 namespace distributed {
 namespace autograd {
 
-rpc::Message CleanupAutogradContextResp::toMessage() && {
+rpc::Message CleanupAutogradContextResp::toMessageImpl() && {
   std::vector<torch::Tensor> tensors;
   std::vector<char> payload;
   return rpc::Message(

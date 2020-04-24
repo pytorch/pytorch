@@ -44,7 +44,7 @@ class TestCustomOps(unittest.TestCase):
         y = torch.randn(2, 3, 4, requires_grad=False)
 
         model = CustomAddModel()
-        onnxir, _ = do_export(model, (x, y))
+        onnxir, _ = do_export(model, (x, y), opset_version=11)
         onnx_model = onnx.ModelProto.FromString(onnxir)
         prepared = c2.prepare(onnx_model)
         caffe2_out = prepared.run(inputs=[x.cpu().numpy(), y.cpu().numpy()])

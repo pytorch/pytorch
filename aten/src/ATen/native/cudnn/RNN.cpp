@@ -1076,6 +1076,13 @@ std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> _cudnn_rnn_backward(
 
 // TODO: I am not sure if we actually need the 'dropout' and 'train' parameters
 // to initialize just the state tensor
+//
+// NB: You can have any color you like, as long as it's a CUDA byte
+// tensor.  Why does this function take a TensorOptions at all in that case?
+// This is a factory function: it produces tensors but takes no tensors
+// as input.  The codegen currently assumes that ALL factory functions
+// take TensorOptions, so it's just a lot easier for this function to
+// be bound if it also does it.
 Tensor _cudnn_init_dropout_state(double dropout, bool train, int64_t dropout_seed, const TensorOptions& options) {
   auto handle = getCudnnHandle();
   DropoutDescriptor dropout_desc;
@@ -1229,7 +1236,7 @@ std::pair<Tensor, hidden_type> _cudnn_impl(
   auto weight_buf = try_get_weight_buf(
       input, params, has_biases, mode, hidden_size, num_layers, bidirectional);
   if (!weight_buf.defined()) {
-    AT_WARN(WEIGHT_FORMAT_WARN);
+    TORCH_WARN(WEIGHT_FORMAT_WARN);
   }
 
   TORCH_CHECK(_batch_sizes.dim() == 1, "batch_sizes tensor should be 1D");
@@ -1259,7 +1266,7 @@ std::pair<Tensor, hidden_type> _cudnn_impl(
   auto weight_buf = try_get_weight_buf(
       input, params, has_biases, mode, hidden_size, num_layers, bidirectional);
   if (!weight_buf.defined()) {
-    AT_WARN(WEIGHT_FORMAT_WARN);
+    TORCH_WARN(WEIGHT_FORMAT_WARN);
   }
 
   auto & dropout_state = get_dropout_state(dropout_p, train, input.options());

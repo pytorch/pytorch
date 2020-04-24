@@ -23,25 +23,40 @@ struct THPEngine {
     PyObject_HEAD
 };
 
-static torch::autograd::python::PythonEngine engine;
-
-static Engine& get_python_engine() {
-  return engine;
-}
+static bool _reinitialize_engine = false;
 
 namespace torch { namespace autograd { namespace python {
 
-void PythonEngine::thread_init(int device) {
+PythonEngine::PythonEngine() = default;
+
+Engine& PythonEngine::get_python_engine() {
+  static PythonEngine engine;
+  // This is "probably" thread-safe because the flag is set in a fork handler
+  // before any threads are created, and this function is only called with the
+  // GIL held. However, using fork + threads is playing with fire so this is
+  // more of a "best effort" thing. For example, if the fork occurs while the
+  // backwards threads hold a lock, we'll probably deadlock in the engine
+  // destructor.
+  if (_reinitialize_engine) {
+    engine.release_workers();
+    engine.~PythonEngine();
+    new (&engine) torch::autograd::python::PythonEngine();
+    _reinitialize_engine = false;
+  }
+  return engine;
+}
+
+void PythonEngine::thread_init(int device, const std::shared_ptr<ReadyQueue>& ready_queue) {
   // Create a PyThreadState, but release the GIL. This lets pybind11::gil_scoped_acquire calls
   // inside thread_main acquire the GIL without having to create a new
   // PyThreadState each time.
   pybind11::gil_scoped_acquire gil;
   pybind11::gil_scoped_release no_gil;
-  Engine::thread_init(device);
+  Engine::thread_init(device, ready_queue);
 }
 
 void PythonEngine::thread_on_exception(
-    std::shared_ptr<GraphTask>& graph_task,
+    std::shared_ptr<GraphTask> graph_task,
     const std::shared_ptr<Node>& fn,
     std::exception& e) {
   auto python_err = dynamic_cast<python_error*>(&e);
@@ -75,9 +90,10 @@ variable_list PythonEngine::execute(
 
 std::shared_ptr<FutureVariableList> PythonEngine::execute_with_graph_task(
     const std::shared_ptr<GraphTask>& graph_task,
-    std::shared_ptr<Node> graph_root) {
+    std::shared_ptr<Node> graph_root,
+    bool async_mode) {
   try {
-    return Engine::execute_with_graph_task(graph_task, graph_root);
+    return Engine::execute_with_graph_task(graph_task, graph_root, async_mode);
   } catch (python_error& e) {
     pybind11::gil_scoped_acquire gil;
     if (!PyErr_Occurred()) {
@@ -91,27 +107,10 @@ std::shared_ptr<FutureVariableList> PythonEngine::execute_with_graph_task(
 
 PyObject *THPEngineClass = nullptr;
 
-static bool _reinitialize_engine = false;
-
-static void _maybe_reinitialize_engine_after_fork() {
-  // This is "probably" thread-safe because the flag is set in a fork handler
-  // before any threads are created, and this function is only called with the
-  // GIL held. However, using fork + threads is playing with fire so this is
-  // more of a "best effort" thing. For example, if the fork occurs while the
-  // backwards threads hold a lock, we'll probably deadlock in the engine
-  // destructor.
-  if (_reinitialize_engine) {
-    engine.~PythonEngine();
-    new (&engine) torch::autograd::python::PythonEngine();
-    _reinitialize_engine = false;
-  }
-}
-
 // Implementation of torch._C._EngineBase.run_backward
 PyObject *THPEngine_run_backward(THPEngine *self, PyObject *args, PyObject *kwargs)
 {
   HANDLE_TH_ERRORS
-  _maybe_reinitialize_engine_after_fork();
   PyObject *tensors = nullptr;
   PyObject *grad_tensors = nullptr;
   unsigned char keep_graph = 0;
@@ -196,6 +195,7 @@ PyObject *THPEngine_run_backward(THPEngine *self, PyObject *args, PyObject *kwar
   variable_list outputs;
   {
     pybind11::gil_scoped_release no_gil;
+    auto& engine = python::PythonEngine::get_python_engine();
     outputs = engine.execute(roots, grads, keep_graph, create_graph, output_edges);
   }
 
@@ -219,7 +219,7 @@ PyObject *THPEngine_run_backward(THPEngine *self, PyObject *args, PyObject *kwar
 
 PyObject* THPEngine_queue_callback(PyObject *self, PyObject *_callback) {
   HANDLE_TH_ERRORS
-  _maybe_reinitialize_engine_after_fork();
+  auto& engine = python::PythonEngine::get_python_engine();
   std::shared_ptr<PyObject> callback(_callback, [](PyObject *obj) { pybind11::gil_scoped_acquire gil; Py_DECREF(obj); });
   Py_INCREF(_callback);
   engine.queue_callback([callback]() {
@@ -233,6 +233,7 @@ PyObject* THPEngine_queue_callback(PyObject *self, PyObject *_callback) {
 
 PyObject* THPEngine_is_checkpoint_valid(PyObject *self, PyObject *noargs) {
   HANDLE_TH_ERRORS
+  auto& engine = python::PythonEngine::get_python_engine();
   if(engine.is_checkpoint_valid()) {
     Py_RETURN_TRUE;
   } else {
@@ -310,6 +311,6 @@ bool THPEngine_initModule(PyObject *module)
     return false;
   Py_INCREF(&THPEngineType);
   PyModule_AddObject(module, "_ImperativeEngine", (PyObject *)&THPEngineType);
-  set_default_engine_stub(get_python_engine);
+  set_default_engine_stub(python::PythonEngine::get_python_engine);
   return true;
 }

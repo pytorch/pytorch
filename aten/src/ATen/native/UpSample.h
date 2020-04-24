@@ -2,6 +2,7 @@
 
 #include <ATen/ATen.h>
 #include <ATen/TensorUtils.h>
+#include <ATen/native/DispatchStub.h>
 
 
 /**
@@ -44,6 +45,17 @@
 namespace at {
 namespace native {
 
+using scale_t = c10::optional<double>;
+using upsampling_1d = void(*)(Tensor& output, const Tensor& input, scale_t scales_w);
+using upsampling_2d = void(*)(Tensor& output, const Tensor& input, scale_t scales_h, scale_t scales_w);
+using upsampling_3d = void(*)(Tensor& output, const Tensor& input, scale_t scales_d, scale_t scales_h, scale_t scales_w);
+DECLARE_DISPATCH(upsampling_1d, upsample_nearest1d_kernel);
+DECLARE_DISPATCH(upsampling_2d, upsample_nearest2d_kernel);
+DECLARE_DISPATCH(upsampling_3d, upsample_nearest3d_kernel);
+DECLARE_DISPATCH(upsampling_1d, upsample_nearest1d_backward_kernel);
+DECLARE_DISPATCH(upsampling_2d, upsample_nearest2d_backward_kernel);
+DECLARE_DISPATCH(upsampling_3d, upsample_nearest3d_backward_kernel);
+
 static inline void upsample_1d_shape_check(
     const Tensor& input,
     const Tensor& grad_output,
@@ -60,10 +72,11 @@ static inline void upsample_1d_shape_check(
       ")");
 
   if (input.defined()) {
+    // Allow for empty batch size but not other dimensions
     TORCH_CHECK(
-        input.numel() != 0 && input.dim() == 3,
-        "Non-empty 3D data tensor expected but got a tensor with sizes ",
-        input.sizes());
+                (input.size(1) != 0 && input.size(2) != 0) && input.dim() == 3,
+                "Non-empty 3D data tensor expected but got a tensor with sizes ",
+                input.sizes());
   } else if (grad_output.defined()) {
     check_dim_size(grad_output, 3, 0, nbatch);
     check_dim_size(grad_output, 3, 1, nchannels);
@@ -95,10 +108,14 @@ static inline void upsample_2d_shape_check(
       ")");
 
   if (input.defined()) {
+    // Allow for empty batch size but not other dimensions
     TORCH_CHECK(
-        input.numel() != 0 && input.dim() == 4,
-        "Non-empty 4D data tensor expected but got a tensor with sizes ",
-        input.sizes());
+                (input.numel() != 0 ||
+                 (input.size(1) != 0 && input.size(2) != 0 && input.size(3) != 0)
+                 ) &&
+                input.dim() == 4,
+                "Non-empty 4D data tensor expected but got a tensor with sizes ",
+                input.sizes());
   } else if (grad_output.defined()) {
     check_dim_size(grad_output, 4, 0, nbatch);
     check_dim_size(grad_output, 4, 1, nchannels);
@@ -136,10 +153,13 @@ static inline void upsample_3d_shape_check(
       ")");
 
   if (input.defined()) {
+    // Allow for empty batch size but not other dimensions
+    bool valid_empty = input.size(0) == 0 && input.size(1) != 0 &&
+      input.size(2) != 0 && input.size(3) != 0 && input.size(4) != 0;
     TORCH_CHECK(
-        input.numel() != 0 && input.dim() == 5,
-        "Non-empty 5D data tensor expected but got a tensor with sizes ",
-        input.sizes());
+                (input.numel() != 0 || valid_empty) && input.dim() == 5,
+                "Non-empty 5D data tensor expected but got a tensor with sizes ",
+                input.sizes());
   } else if (grad_output.defined()) {
     check_dim_size(grad_output, 5, 0, nbatch);
     check_dim_size(grad_output, 5, 1, nchannels);

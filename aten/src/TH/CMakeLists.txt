@@ -1,15 +1,11 @@
 set(extra_src)
 
 # IF AVX FOUND
-IF(C_AVX_FOUND)
-  LIST(APPEND extra_src ${CMAKE_CURRENT_SOURCE_DIR}/vector/AVX.cpp)
-ENDIF(C_AVX_FOUND)
+if(C_AVX_FOUND)
+  list(APPEND extra_src ${CMAKE_CURRENT_SOURCE_DIR}/vector/AVX.cpp)
+endif(C_AVX_FOUND)
 
-IF(C_AVX2_FOUND)
-  LIST(APPEND extra_src ${CMAKE_CURRENT_SOURCE_DIR}/vector/AVX2.cpp)
-ENDIF(C_AVX2_FOUND)
-
-SET(hdr
+set(hdr
   THGeneral.h THHalf.h THAllocator.h THStorage.h THStorageFunctions.h THTensor.h THTensorApply.h THBlas.h
   THLapack.h THVector.h )
 
@@ -48,10 +44,10 @@ set(ATen_CUDA_INCLUDE ${ATen_CUDA_INCLUDE}
   ${CMAKE_CURRENT_SOURCE_DIR}
 PARENT_SCOPE)
 
-CONFIGURE_FILE(THGeneral.h.in "${CMAKE_CURRENT_BINARY_DIR}/THGeneral.h")
+configure_file(THGeneral.h.in "${CMAKE_CURRENT_BINARY_DIR}/THGeneral.h")
 
 
-INSTALL(FILES
+install(FILES
   TH.h
   THAllocator.h
   THBlas.h
@@ -90,13 +86,12 @@ INSTALL(FILES
   THGenerator.hpp
   DESTINATION "${ATEN_INSTALL_INCLUDE_SUBDIR}/TH")
 
-INSTALL(FILES
+install(FILES
   vector/AVX.h
-  vector/AVX2.h
   ../ATen/native/cpu/avx_mathfun.h
   DESTINATION "${ATEN_INSTALL_INCLUDE_SUBDIR}/TH/vector")
 
-INSTALL(FILES
+install(FILES
   generic/THBlas.cpp
   generic/THBlas.h
   generic/THLapack.cpp

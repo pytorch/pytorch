@@ -1,6 +1,6 @@
 #include <torch/csrc/jit/passes/inline_autodiff_subgraphs.h>
 
-#include <torch/csrc/jit/ir.h>
+#include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/utils/subgraph_utils.h>
 
@@ -12,7 +12,8 @@ namespace jit {
 // Autograd-aware
 bool canRunWithAutograd(Node* node) {
   auto kind = node->kind();
-  return kind != prim::FusionGroup && (kind.is_aten() || kind.is_prim());
+  return kind != prim::FusionGroup && kind != prim::CudaFusionGroup &&
+      (kind.is_aten() || kind.is_prim());
 }
 
 namespace {

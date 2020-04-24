@@ -1,5 +1,5 @@
 FROM nvidia/cuda:10.1-cudnn7-devel-ubuntu16.04
-ARG PYTHON_VERSION=3.7
+ARG PYTHON_VERSION=3.8
 ARG WITH_TORCHVISION=1
 RUN apt-get update && apt-get install -y --no-install-recommends \
          build-essential \
@@ -12,7 +12,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
      rm -rf /var/lib/apt/lists/*
 
 
-RUN curl -o ~/miniconda.sh -O  https://repo.continuum.io/miniconda/Miniconda3-latest-Linux-x86_64.sh  && \
+RUN curl -o ~/miniconda.sh https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh && \
      chmod +x ~/miniconda.sh && \
      ~/miniconda.sh -b -p /opt/conda && \
      rm ~/miniconda.sh && \
@@ -24,7 +24,7 @@ ENV PATH /opt/conda/bin:$PATH
 WORKDIR /opt/pytorch
 COPY . .
 
-RUN git submodule update --init --recursive
+RUN git submodule sync && git submodule update --init --recursive
 RUN TORCH_CUDA_ARCH_LIST="3.5 5.2 6.0 6.1 7.0+PTX" TORCH_NVCC_FLAGS="-Xfatbin -compress-all" \
     CMAKE_PREFIX_PATH="$(dirname $(which conda))/../" \
     pip install -v .

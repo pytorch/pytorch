@@ -7,9 +7,9 @@ namespace at {
 
 namespace {
   DeviceType sparseTensorSetToDeviceType(DispatchKeySet key_set) {
-    if (key_set.has(DispatchKey::SparseCPUTensorId)) {
+    if (key_set.has(DispatchKey::SparseCPU)) {
       return kCPU;
-    } else if (key_set.has(DispatchKey::SparseCUDATensorId)) {
+    } else if (key_set.has(DispatchKey::SparseCUDA)) {
       return kCUDA;
     } else {
       AT_ERROR("Cannot construct SparseTensor with non-sparse tensor type ID ", key_set);
@@ -56,9 +56,6 @@ bool SparseTensorImpl::is_contiguous(at::MemoryFormat memory_format) const {
 }
 int64_t SparseTensorImpl::stride(int64_t d) const {
   AT_ERROR("sparse tensors do not have strides");
-}
-void SparseTensorImpl::resize_dim(int64_t ndim) {
-  AT_ERROR("sparse tensors do not have resize_dim");
 }
 void SparseTensorImpl::set_size(int64_t dim, int64_t new_size) {
   AT_ERROR("sparse tensors do not have set_size");

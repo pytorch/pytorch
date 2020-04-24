@@ -10,7 +10,7 @@ try:
 except ImportError:
     import functools
 
-    class ContextDecorator(object):
+    class ContextDecorator(object):  # type: ignore[no-redef]
         def __call__(self, func):
             @functools.wraps(func)
             def wrapped(*args, **kwargs):
@@ -147,7 +147,7 @@ class EventList(list):
                     f.write('{"name": "%s", '
                             '"ph": "f", '
                             '"ts": %s, '
-                            'tid": %s, '
+                            '"tid": %s, '
                             '"pid": "CUDA functions", '
                             '"id": %s, '
                             '"cat": "cpu_to_cuda", '
@@ -366,13 +366,46 @@ class record_function(ContextDecorator):
     """
     def __init__(self, name):
         self.name = name
+        # Whether or not we should run record function's end callbacks when exiting.
+        self.run_callbacks_on_exit = True
 
     def __enter__(self):
         self.handle = torch.ops.profiler._record_function_enter(self.name)
+        return self
 
     def __exit__(self, *args):
-        torch.ops.profiler._record_function_exit(self.handle)
+        if self.run_callbacks_on_exit:
+            torch.ops.profiler._record_function_exit(self.handle)
         return False
+
+    def _call_end_callbacks_on_future(self, fut):
+        """
+        _call_end_callbacks_on_future is meant to be used for profiling async
+        calls that return a future. Calling this function will extend recording
+        beyond this scope, until the future is satisfied. It is useful for profiling
+        the end to end time of asynchronous calls. This function should only be called
+        once to attach the callback onto the future, and will throw if called multiple
+        times.
+
+        Arguments:
+            fut: (torch.distributed.rpc.Future or torch._C.Future): future for which to schedule
+            callback for.
+        """
+        # Throw if we have already attached a callback onto the future.
+        if not self.run_callbacks_on_exit:
+            raise RuntimeError("_call_end_callbacks_on_future can only be called once.")
+
+        # We are scheduling to run this RecordFunction's end callbacks when the
+        # passed in future completes, so don't run end callbacks on exit.
+        self.run_callbacks_on_exit = False
+        # TODO: Currently, we have two different futures that can be returned,
+        # thus, two different code paths. We should clean this up when the
+        # futures are merged and rpc_async returns a consistent type (https://github.com/pytorch/pytorch/issues/34999).
+        if isinstance(fut, torch.distributed.rpc.Future):
+            torch.autograd._call_end_callbacks_on_fut(self.handle, fut)
+        else:
+            # jit Future, call jit operator
+            torch.ops.profiler._call_end_callbacks_on_jit_fut(self.handle, fut)
 
 
 class emit_nvtx(object):
@@ -787,7 +820,8 @@ def parse_nvprof_trace(path):
     unique = EnforceUnique()
     for row in conn.execute(kernel_query):
         unique.see(row['marker_id'], row['runtime_id'])
-        assert row['cbid'] == 13  # 13 == Launch
+        # 211 is cudaKernelLaunch for cuda >= 9.2; 13 is for older cuda versions
+        assert (row['cbid'] == 211) or (row['cbid'] == 13)
         evt = functions_map[row['marker_id']]
         evt.append_kernel(row['kernel_name'],
                           0,

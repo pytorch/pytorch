@@ -21,3 +21,12 @@ a.reference.internal:hover {
 .function a.anchorjs-link {
     font-family: anchorjs-icons !important;
 }
+/* Prevents keywords from overlapping */
+article.pytorch-article .class dt em.property {
+    position: initial !important;
+}
+
+/* Properly aligns keywords the left */
+article.pytorch-article .class dt {
+    padding-left: 0.5em !important;
+}

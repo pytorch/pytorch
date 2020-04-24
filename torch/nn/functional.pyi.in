@@ -182,7 +182,6 @@ def embedding_bag(input: Tensor, weight: Tensor, offsets: Optional[Tensor] = ...
                   norm_type: float = ..., scale_grad_by_freq: bool = ..., mode: str = ...,
                   sparse: bool = ...) -> Tensor: ...
 
-
 def batch_norm(input: Tensor, running_mean: Optional[Tensor], running_var: Optional[Tensor],
                weight: Optional[Tensor] = ..., bias: Optional[Tensor] = ..., training: bool = ...,
                momentum: float = ..., eps: float = ...) -> Tensor: ...
@@ -218,7 +217,7 @@ def poisson_nll_loss(input: Tensor, target: Tensor, log_input: bool = ..., full:
 
 
 def kl_div(input: Tensor, target: Tensor, size_average: Optional[bool] = ..., reduce: Optional[bool] = ...,
-           reduction: str = ...) -> Tensor: ...
+           reduction: str = ..., log_target: bool = ...) -> Tensor: ...
 
 
 def cross_entropy(input: Tensor, target: Tensor, weight: Optional[Tensor] = ..., size_average: Optional[bool] = ...,
