@@ -516,6 +516,7 @@ template_rule(
         "@AT_MKL_ENABLED@": "0",
         "@AT_NNPACK_ENABLED@": "0",
         "@CAFFE2_STATIC_LINK_CUDA_INT@": "0",
+        "@USE_BLAS@": "1",
     },
 )
 

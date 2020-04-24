@@ -29,7 +29,7 @@ from torch.testing._internal.common_utils import TestCase, iter_indices, TEST_NU
     BytesIOContext, skipIfRocm, torch_to_numpy_dtype_dict
 from multiprocessing.reduction import ForkingPickler
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, \
-    skipCPUIfNoLapack, skipCUDAIfNoMagma, skipCUDAIfRocm, skipCUDAIfNotRocm, onlyCUDA, onlyCPU, \
+    skipCPUIfNoLapack, skipCPUIfNoMkl, skipCUDAIfNoMagma, skipCUDAIfRocm, skipCUDAIfNotRocm, onlyCUDA, onlyCPU, \
     dtypes, dtypesIfCUDA, dtypesIfCPU, deviceCountAtLeast, skipCUDAIf, precisionOverride, \
     PYTORCH_CUDA_MEMCHECK, largeCUDATensorTest, onlyOnCPUAndCUDA
 import torch.backends.quantized
@@ -12307,7 +12307,7 @@ class TestTorchDeviceType(TestCase):
     # passes on ROCm w/ python 2.7, fails w/ python 3.6
     @skipCUDAIfRocm
     # stft -> rfft -> _fft -> _fft_with_size -> _fft_mkl
-    @unittest.skipIf(not TEST_MKL, "PyTorch is built without MKL support")
+    @skipCPUIfNoMkl
     @dtypes(torch.double)
     def test_stft(self, device, dtype):
         if not TEST_LIBROSA:
@@ -12369,6 +12369,7 @@ class TestTorchDeviceType(TestCase):
         _test((10,), 5, 4, win_sizes=(1, 1), expected_error=RuntimeError)
 
     @skipIfRocm
+    @unittest.skipIf(not TEST_MKL, "PyTorch is built without MKL support")
     def test_fft_input_modification(self, device):
         # FFT functions should not modify their input (gh-34551)
 
@@ -12461,27 +12462,38 @@ class TestTorchDeviceType(TestCase):
             self.assertEqual([(2, 0, 0), (2, 0)], [A_LU.shape, pivots.shape])
 
     @skipCUDAIfRocm
-    def test_blas_alpha_beta_empty(self, device):
+    @dtypesIfCUDA(*(torch.float, torch.double) +
+                  # This test is disabled on CUDA 9, due to:
+                  # See: https://github.com/pytorch/pytorch/issues/31006
+                  ((torch.half,) if torch.version.cuda and float(torch.version.cuda) >= 10.0 else ()))
+    @dtypes(*(set(torch.testing.get_all_dtypes()) - {torch.half, torch.bool, torch.complex64, torch.complex128}))
+    def test_blas_alpha_beta_empty(self, device, dtype):
+        if dtype is torch.bfloat16 and self.device_type == 'xla':
+            # TODO (@zasdfgbnm): this causes the following error on test
+            # TestTorchDeviceTypeXLA.test_blas_alpha_beta_empty_xla_bfloat16:
+            #
+            #   RuntimeError: _th_equal not supported on CPUType for BFloat16
+            return
         # ensure beta is respected
         value = 11
-        input = torch.full((2,), value, device=device)
-        mat = torch.ones((2, 0), device=device)
-        vec = torch.ones((0,), device=device)
-        out = torch.randn((2,), device=device)
+        input = torch.full((2,), value, dtype=dtype, device=device)
+        mat = torch.ones((2, 0), dtype=dtype, device=device)
+        vec = torch.ones((0,), dtype=dtype, device=device)
+        out = torch.empty((2,), dtype=dtype, device=device)
         alpha = 6
         beta = 3
-        self.assertEqual(torch.full((2,), beta * value, device=device),
+        self.assertEqual(torch.full((2,), beta * value, dtype=dtype, device=device),
                          torch.addmv(input=input, mat=mat, vec=vec, alpha=alpha, beta=beta))
-        self.assertEqual(torch.full((2,), beta * value, device=device),
+        self.assertEqual(torch.full((2,), beta * value, dtype=dtype, device=device),
                          torch.addmv(input=input, mat=mat, vec=vec, alpha=alpha, beta=beta, out=out))
 
         # torch.addmm
-        input = torch.full((2, 3), value, device=device)
-        mat2 = torch.ones((0, 3), device=device)
-        out = torch.randn((2, 3), device=device)
-        self.assertEqual(torch.full((2, 3), beta * value, device=device),
+        input = torch.full((2, 3), value, dtype=dtype, device=device)
+        mat2 = torch.ones((0, 3), dtype=dtype, device=device)
+        out = torch.empty((2, 3), dtype=dtype, device=device)
+        self.assertEqual(torch.full((2, 3), beta * value, dtype=dtype, device=device),
                          torch.addmm(input=input, mat1=mat, mat2=mat2, alpha=alpha, beta=beta))
-        self.assertEqual(torch.full((2, 3), beta * value, device=device),
+        self.assertEqual(torch.full((2, 3), beta * value, dtype=dtype, device=device),
                          torch.addmm(input=input, mat1=mat, mat2=mat2, alpha=alpha, beta=beta, out=out))
 
     @onlyCPU  # not supported by CUBLAS
