@@ -157,6 +157,18 @@ def get_shutdown_error_regex(rpc_backend):
     error_regex = error_regex[:-1]
     return error_regex
 
+def get_timeout_error_regex(rpc_backend_name):
+    """
+    Given an RPC backend name, returns a partial string indicating the error we
+    should receive when an RPC has timed out. Useful for use with
+    assertRaisesRegex() to ensure we have the right errors during timeout.
+    """
+    if rpc_backend_name == "PROCESS_GROUP":
+        return "RPC ran for more than"
+    else:
+        return "(Timed out)|(Task expired)"
+
+
 def wait_until_pending_users_flushed():
     '''
     The RRef protocol holds forkIds of rrefs in a map until those forks are
@@ -188,3 +200,16 @@ def initialize_pg(init_method, rank, world_size):
 
 def worker_name(rank):
     return "worker{}".format(rank)
+
+def get_function_event(function_events, partial_event_name):
+    """
+    Returns the first event that matches partial_event_name in the provided
+    function_events. These function_events should be the output of
+    torch.autograd.profiler.function_events().
+
+    Args:
+    function_events: function_events returned by the profiler.
+    event_name (str): partial key that the event was profiled with.
+    """
+    event = [event for event in function_events if partial_event_name in event.name][0]
+    return event

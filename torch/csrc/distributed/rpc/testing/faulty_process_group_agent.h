@@ -39,8 +39,11 @@ class FaultyProcessGroupAgent : public ProcessGroupAgent {
       int failNumSends = 0);
 
   // Faulty send function for this class.
-  std::shared_ptr<FutureMessage> send(const WorkerInfo& to, Message&& message)
-      override;
+  std::shared_ptr<FutureMessage> send(
+      const WorkerInfo& to,
+      Message&& message,
+      const float rpcTimeoutSeconds =
+          torch::distributed::rpc::kUnsetRpcTimeout) override;
 
  protected:
   // This function checks the messageTypesToFail_ to determine whether to use
