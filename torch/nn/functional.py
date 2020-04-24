@@ -3703,7 +3703,7 @@ def fold(input, output_size, kernel_size, dilation=1, padding=0, stride=1):
         raise NotImplementedError("Input Error: Only 3D input Tensors are supported (got {}D)".format(input.dim()))
 
 
-    def _pad_circular(self,input, padding):
+    def _pad_circular(input, padding):
         # type: (Tensor, List[int]) -> Tensor
         """
         Arguments
@@ -3715,7 +3715,7 @@ def fold(input, output_size, kernel_size, dilation=1, padding=0, stride=1):
         """
 
         input = torch.cat([input, input[:, :, 0:padding[-1]]], dim=2)
-        if padding[-1]==0 and padding[-2] != 0 :
+        if padding[-1] == 0 and padding[-2] != 0 :
             input = torch.cat([input[:, :, -(padding[-1] + padding[-2]):], input], dim=2)
         else:
             input = torch.cat([input[:, :, -(padding[-1] + padding[-2]):-padding[-1]], input], dim=2)
@@ -3724,7 +3724,7 @@ def fold(input, output_size, kernel_size, dilation=1, padding=0, stride=1):
         if len(padding) > 2:
             input = torch.cat([input, input[:, :, :, 0:padding[-3]]], dim=3)
             
-            if padding[-3]==0 and padding[-4] != 0:
+            if padding[-3] == 0 and padding[-4] != 0:
                 input = torch.cat([input[:, :, :, -(padding[-3] + padding[-4]):], input], dim=3)
             else:
                 input = torch.cat([input[:, :, :, -(padding[-3] + padding[-4]):-padding[-3]], input], dim=3)
@@ -3732,7 +3732,7 @@ def fold(input, output_size, kernel_size, dilation=1, padding=0, stride=1):
         if len(padding) > 4:
             input = torch.cat([input, input[:, :, :, :, 0:padding[-5]]], dim=4)
             
-            if padding[-5]==0 and padding[-6] != 0:
+            if padding[-5] == 0 and padding[-6] != 0:
                 input = torch.cat([input[:, :, :, :, -(padding[-5] + padding[-6]):], input], dim=4)
             else:
                 input = torch.cat([input[:, :, :, :, -(padding[-5] + padding[-6]):-padding[-5]], input], 
