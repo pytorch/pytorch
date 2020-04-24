@@ -199,7 +199,6 @@ struct THCNumerics<at::Half> {
   static inline __host__ __device__ at::Half exp(at::Half a) { return std::exp(a); }
   static inline __host__ __device__ at::Half cos(at::Half a) { return ::cos(a); }
   static inline __host__ __device__ at::Half sqrt(at::Half a) { return ::sqrt(a); }
-  static inline __host__ __device__ at::Half cosh(at::Half a) { return ::cosh(a); }
   static inline __host__ __device__ at::Half tan(at::Half a) { return ::tan(a); }
   static inline __host__ __device__ at::Half atan(at::Half a) { return ::atan(a); }
   static inline __host__ __device__ at::Half tanh(at::Half a) { return ::tanh(a); }
@@ -252,7 +251,6 @@ struct THCNumerics<float> {
   static inline __host__ __device__  float exp  (float a) { return   expf(a); }
   static inline __host__ __device__  float cos  (float a) { return   cosf(a); }
   static inline __host__ __device__  float sqrt (float a) { return  sqrtf(a); }
-  static inline __host__ __device__  float cosh (float a) { return  coshf(a); }
   static inline __host__ __device__  float tan  (float a) { return   tanf(a); }
   static inline __host__ __device__  float atan (float a) { return  atanf(a); }
   static inline __host__ __device__  float tanh (float a) { return  tanhf(a); }
@@ -284,7 +282,6 @@ struct THCNumerics<at::BFloat16> {
   static inline __host__ __device__  at::BFloat16 exp  (at::BFloat16 a) { return   expf(a); }
   static inline __host__ __device__  at::BFloat16 cos  (at::BFloat16 a) { return   cosf(a); }
   static inline __host__ __device__  at::BFloat16 sqrt (at::BFloat16 a) { return  sqrtf(a); }
-  static inline __host__ __device__  at::BFloat16 cosh (at::BFloat16 a) { return  coshf(a); }
   static inline __host__ __device__  at::BFloat16 tan  (at::BFloat16 a) { return   tanf(a); }
   static inline __host__ __device__  at::BFloat16 atan (at::BFloat16 a) { return  atanf(a); }
   static inline __host__ __device__  at::BFloat16 tanh (at::BFloat16 a) { return  tanhf(a); }
@@ -337,7 +334,6 @@ struct THCNumerics<double> {
   static inline __host__ __device__  double exp  (double a) { return   ::exp(a); }
   static inline __host__ __device__  double cos  (double a) { return   ::cos(a); }
   static inline __host__ __device__  double sqrt (double a) { return  ::sqrt(a); }
-  static inline __host__ __device__  double cosh (double a) { return  ::cosh(a); }
   static inline __host__ __device__  double tan  (double a) { return   ::tan(a); }
   static inline __host__ __device__  double atan (double a) { return  ::atan(a); }
   static inline __host__ __device__  double tanh (double a) { return  ::tanh(a); }

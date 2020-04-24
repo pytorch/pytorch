@@ -1,0 +1,11 @@
+This is a vendored copy of the fmt library, v6.2.0.
+
+See https://github.com/fmtlib/fmt for more info.
+
+The procedure for updating:
+1. Download the release zip from github
+2. Unzip it somewhere
+3. Copy headers: `cp include/fmt/* c10/fmt/`
+4. Copy sources: `cp src/* c10/fmt/`
+5. Fix up sources to correctly use the flattened structure
+   (e.g. `#include "fmt/os.h"` becomes `#include "os.h"`)
