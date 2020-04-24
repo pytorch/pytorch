@@ -310,7 +310,12 @@ if(USE_XNNPACK)
 endif()
 
 # ---[ Caffe2 uses cpuinfo library in the thread pool
-if(NOT TARGET cpuinfo)
+if(NOT TARGET cpuinfo AND USE_SYSTEM_CPUINFO)
+  add_library(cpuinfo SHARED IMPORTED)
+  find_library(CPUINFO_LIBRARY cpuinfo)
+  message("Found cpuinfo: ${CPUINFO_LIBRARY}")
+  set_target_properties(cpuinfo PROPERTIES IMPORTED_LOCATION "${CPUINFO_LIBRARY}")
+elseif(NOT TARGET cpuinfo)
   if(NOT DEFINED CPUINFO_SOURCE_DIR)
     set(CPUINFO_SOURCE_DIR "${CMAKE_CURRENT_LIST_DIR}/../third_party/cpuinfo" CACHE STRING "cpuinfo source directory")
   endif()
