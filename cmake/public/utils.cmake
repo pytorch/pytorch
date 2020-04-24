@@ -96,11 +96,14 @@ macro(caffe2_interface_library SRC DST)
         "I got " ${__src_target_type} ".")
   endif()
   # For all other interface properties, manually inherit from the source target.
+  # Note that we assume that we are building for CUDA if the target's language
+  # is not C++, and we forward the compile options to the host compiler.
+  set(SRC_COMPILE_OPTS "$<TARGET_PROPERTY:${SRC},INTERFACE_COMPILE_OPTIONS>")
   set_target_properties(${DST} PROPERTIES
     INTERFACE_COMPILE_DEFINITIONS
     $<TARGET_PROPERTY:${SRC},INTERFACE_COMPILE_DEFINITIONS>
     INTERFACE_COMPILE_OPTIONS
-    $<TARGET_PROPERTY:${SRC},INTERFACE_COMPILE_OPTIONS>
+    $<IF:$<COMPILE_LANGUAGE:CXX>,${SRC_COMPILE_OPTS},$<JOIN:${SRC_COMPILE_OPTS}," -Xcompiler ">>
     INTERFACE_INCLUDE_DIRECTORIES
     $<TARGET_PROPERTY:${SRC},INTERFACE_INCLUDE_DIRECTORIES>
     INTERFACE_SYSTEM_INCLUDE_DIRECTORIES
