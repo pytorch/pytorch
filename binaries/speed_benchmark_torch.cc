@@ -41,10 +41,6 @@ C10_DEFINE_string(
     input_memory_format,
     "contiguous_format",
     "Input memory format (contiguous_format/channels_last)");
-C10_DEFINE_bool(
-  no_inputs,
-  false,
-  "Whether the model has any input. Will ignore other input arugments if true");
 C10_DEFINE_int(
     use_bundled_input,
     -1,
@@ -77,17 +73,11 @@ split(char separator, const std::string& string, bool ignore_empty = true) {
 }
 
 std::vector<c10::IValue> create_inputs() {
-  if (FLAGS_no_inputs) {
-    return {};
-  }
 
   if (FLAGS_use_bundled_input >= 0) {
     // Need to get these after the model is loaded.
     return {};
   }
-
-  CAFFE_ENFORCE_GE(FLAGS_input_dims.size(), 0, "Input dims must be specified.");
-  CAFFE_ENFORCE_GE(FLAGS_input_type.size(), 0, "Input type must be specified.");
 
   std::vector<std::string> input_dims_list = split(';', FLAGS_input_dims);
   std::vector<std::string> input_type_list = split(';', FLAGS_input_type);
