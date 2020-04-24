@@ -10,6 +10,7 @@ VALGRIND=${VALGRIND:=ON}
 ./atest
 ./scalar_test
 ./broadcast_test
+./complex_test
 ./wrapdim_test
 ./apply_utils_test
 ./dlconvertor_test
@@ -39,6 +40,9 @@ fi
 if [[ -x ./cuda_half_test ]]; then
   ./cuda_half_test
 fi
+if [[ -x ./cuda_vectorized_test ]]; then
+  ./cuda_vectorized_test
+fi
 if [[ -x ./cuda_distributions_test ]]; then
   ./cuda_distributions_test
 fi
@@ -50,7 +54,7 @@ if [[ -x ./cuda_tensor_interop_test ]]; then
 fi
 if [ "$VALGRIND" == "ON" ]
 then
-  valgrind --suppressions="$VALGRIND_SUP" --error-exitcode=1 ./basic "[cpu]"
+  valgrind --suppressions="$VALGRIND_SUP" --error-exitcode=1 ./basic --gtest_filter='-*CUDA'
   valgrind --suppressions="$VALGRIND_SUP" --error-exitcode=1 ./tensor_interop_test
 fi
 

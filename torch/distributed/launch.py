@@ -63,7 +63,7 @@ Node 2:
 
 **Important Notices:**
 
-1. This utilty and multi-process distributed (single-node or
+1. This utility and multi-process distributed (single-node or
 multi-node) GPU training currently only achieves the best performance using
 the NCCL distributed backend. Thus NCCL backend is the recommended backend to
 use for GPU training.
@@ -152,7 +152,7 @@ def parse_args():
     @retval ArgumentParser
     """
     parser = ArgumentParser(description="PyTorch distributed training launch "
-                                        "helper utilty that will spawn up "
+                                        "helper utility that will spawn up "
                                         "multiple distributed processes")
 
     # Optional arguments for the launch helper

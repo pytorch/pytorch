@@ -1,4 +1,5 @@
 import io
+import warnings
 
 import torch
 from ._utils import _type, _cuda
@@ -30,6 +31,7 @@ class _StorageBase(object):
         return new_storage
 
     def __reduce__(self):
+        warnings.warn("pickle support for Storage will be removed in 1.5. Use `torch.save` instead", FutureWarning)
         b = io.BytesIO()
         torch.save(self, b)
         return (_load_from_bytes, (b.getvalue(),))
@@ -45,7 +47,7 @@ class _StorageBase(object):
 
     def tolist(self):
         """Returns a list containing the elements of this storage"""
-        return [v for v in self]
+        return list(self)
 
     def cpu(self):
         """Returns a CPU copy of this storage if it's not already on the CPU"""

@@ -55,14 +55,41 @@ inline double stod(const std::string& str, std::size_t* pos = 0) {
   return val;
 }
 
-inline long long stoll(const std::string& str) {
+inline long long stoll(const std::string& str, std::size_t* pos = 0) {
   // std::stoll doesn't exist in our Android environment, we need to implement
   // it ourselves.
-  std::istringstream s(str);
+  std::stringstream ss;
+  ss << str;
+  long long result = 0;
+  ss >> result;
+  if (pos) {
+    if (ss.tellg() == std::streampos(-1)) {
+      *pos = str.size();
+    } else {
+      *pos = ss.tellg();
+    }
+  }
+  return result;
+}
+
+inline long long stoll(const std::string& str, size_t pos, int base) {
+  // std::stoll doesn't exist in our Android environment, we need to implement
+  // it ourselves.
+  std::stringstream s;
+  if (str.size() > 0 && str.at(0) == '0') {
+    if (str.size() > 1 && (str.at(1) == 'x' || str.at(1) == 'X')) {
+      s << std::hex << str;
+    } else {
+      s << std::oct << str;
+    }
+  } else {
+    s << str;
+  }
   long long result = 0;
   s >> result;
   return result;
 }
+
 #else
 #define CAFFE2_TESTONLY_WE_ARE_USING_CUSTOM_STRING_FUNCTIONS 0
 using std::stod;

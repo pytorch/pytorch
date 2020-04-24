@@ -35,7 +35,11 @@ goto cuda_build_end
 
 :: Override VS env here
 pushd .
-call "C:\Program Files (x86)\Microsoft Visual Studio\2017\Community\VC\Auxiliary\Build\vcvarsall.bat" x64
+if "%VC_VERSION%" == "" (
+    call "C:\Program Files (x86)\Microsoft Visual Studio\%VC_YEAR%\%VC_PRODUCT%\VC\Auxiliary\Build\vcvarsall.bat" x64
+) else (
+    call "C:\Program Files (x86)\Microsoft Visual Studio\%VC_YEAR%\%VC_PRODUCT%\VC\Auxiliary\Build\vcvarsall.bat" x64 -vcvars_ver=%VC_VERSION%
+)
 @echo on
 popd
 
@@ -45,7 +49,14 @@ set CUDA_PATH_V9_2=%CUDA_PATH%
 goto cuda_build_common
 
 :cuda_build_10
-call "C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\VC\Auxiliary\Build\vcvarsall.bat" x64
+pushd .
+if "%VC_VERSION%" == "" (
+    call "C:\Program Files (x86)\Microsoft Visual Studio\%VC_YEAR%\%VC_PRODUCT%\VC\Auxiliary\Build\vcvarsall.bat" x64
+) else (
+    call "C:\Program Files (x86)\Microsoft Visual Studio\%VC_YEAR%\%VC_PRODUCT%\VC\Auxiliary\Build\vcvarsall.bat" x64 -vcvars_ver=%VC_VERSION%
+)
+@echo on
+popd
 
 set CUDA_PATH=C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v10.1
 set CUDA_PATH_V10_1=%CUDA_PATH%
@@ -74,8 +85,8 @@ if "%TORCH_CUDA_ARCH_LIST%" == "" set TORCH_CUDA_ARCH_LIST=5.2
 sccache --stop-server
 sccache --start-server
 sccache --zero-stats
-set CC=sccache cl
-set CXX=sccache cl
+set CC=sccache-cl
+set CXX=sccache-cl
 
 set CMAKE_GENERATOR=Ninja
 
@@ -111,7 +122,19 @@ if not "%USE_CUDA%"=="0" (
     copy %TMP_DIR_WIN%\bin\sccache.exe %TMP_DIR_WIN%\bin\nvcc.exe
   )
 
-  set CUDA_NVCC_EXECUTABLE=%TMP_DIR_WIN%\bin\nvcc
+  :: randomtemp is used to resolve the intermittent build error related to CUDA.
+  :: code: https://github.com/peterjc123/randomtemp
+  :: issue: https://github.com/pytorch/pytorch/issues/25393
+  ::
+  :: Previously, CMake uses CUDA_NVCC_EXECUTABLE for finding nvcc and then
+  :: the calls are redirected to sccache. sccache looks for the actual nvcc
+  :: in PATH, and then pass the arguments to it.
+  :: Currently, randomtemp is placed before sccache (%TMP_DIR_WIN%\bin\nvcc)
+  :: so we are actually pretending sccache instead of nvcc itself.
+  curl -kL https://github.com/peterjc123/randomtemp/releases/download/v0.3/randomtemp.exe --output %TMP_DIR_WIN%\bin\randomtemp.exe
+  set RANDOMTEMP_EXECUTABLE=%TMP_DIR_WIN%\bin\nvcc.exe
+  set CUDA_NVCC_EXECUTABLE=%TMP_DIR_WIN%\bin\randomtemp.exe
+  set RANDOMTEMP_BASEDIR=%TMP_DIR_WIN%\bin
 
   if "%REBUILD%"=="" set USE_CUDA=1
 

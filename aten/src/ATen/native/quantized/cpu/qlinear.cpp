@@ -1,6 +1,6 @@
 #include <ATen/ATen.h>
 #include <ATen/Parallel.h>
-#include <ATen/core/op_registration/op_registration.h>
+#include <torch/library.h>
 #include <ATen/cpp_custom_type_hack.h>
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
 #include <ATen/native/quantized/cpu/qnnpack_utils.h>
@@ -14,10 +14,10 @@ namespace native {
 namespace {
 
 template <bool ReluFused>
-class QLinearInt8 final : public torch::OperatorKernel {
+class QLinearInt8 final {
  public:
 #ifdef USE_FBGEMM
-  at::Tensor fbgemm_linear(
+  static at::Tensor fbgemm_linear(
       at::Tensor input,
       at::Tensor packed_weight,
       double output_scale,
@@ -218,7 +218,7 @@ class QLinearInt8 final : public torch::OperatorKernel {
   }
 #endif
 #ifdef USE_PYTORCH_QNNPACK
-  at::Tensor qnnpack_linear(
+  static at::Tensor qnnpack_linear(
       at::Tensor input,
       at::Tensor packed_weight,
       double output_scale,
@@ -231,7 +231,8 @@ class QLinearInt8 final : public torch::OperatorKernel {
     auto& pack_ptr =
         cpp_custom_type_hack::cast<PackedLinearWeightsQnnp>(packed_weight);
     auto packB = pack_ptr.w.get();
-    auto kernel_zp = pack_ptr.w_zp;
+    // Adjust weight zero point, similar to weight data.
+    auto kernel_zp = pack_ptr.w_zp + 128;
     auto kernel_scale = pack_ptr.w_scale;
     size_t rows_w = pack_ptr.bias.size(0);
     size_t cols_w = input_contig.size(input_contig.dim() - 1);
@@ -325,7 +326,7 @@ class QLinearInt8 final : public torch::OperatorKernel {
     return output;
   }
 #endif
-  at::Tensor operator()(
+  static at::Tensor run(
       at::Tensor input,
       at::Tensor packed_weight,
       double output_scale,
@@ -351,14 +352,15 @@ class QLinearInt8 final : public torch::OperatorKernel {
   }
 };
 
-static auto registry =
-    torch::RegisterOperators()
-        .op("quantized::linear(Tensor X, Tensor W_prepack, float Y_scale_i, int Y_zero_point_i) -> Tensor Y",
-            torch::RegisterOperators::options().kernel<QLinearInt8<false>>(
-                TensorTypeId::QuantizedCPUTensorId))
-        .op("quantized::linear_relu(Tensor X, Tensor W_prepack, float Y_scale_i, int Y_zero_point_i) -> Tensor Y",
-            torch::RegisterOperators::options().kernel<QLinearInt8<true>>(
-                TensorTypeId::QuantizedCPUTensorId));
+TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
+  m.impl("linear", QLinearInt8<false>::run);
+  m.impl("linear_relu", QLinearInt8<true>::run);
+}
+
+TORCH_LIBRARY_IMPL(_quantized, QuantizedCPU, m) {
+  m.impl("linear", QLinearInt8<false>::run);
+}
+
 } // namespace
 } // namespace native
 } // namespace at

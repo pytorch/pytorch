@@ -7,15 +7,11 @@
 @end
 
 @implementation TestAppTests {
-  torch::jit::script::Module _module;
+  torch::jit::Module _module;
 }
 
 + (void)setUp {
   [super setUp];
-  auto qengines = at::globalContext().supportedQEngines();
-  if (std::find(qengines.begin(), qengines.end(), at::QEngine::QNNPACK) != qengines.end()) {
-    at::globalContext().setQEngine(at::QEngine::QNNPACK);
-  }
 }
 
 - (void)setUp {

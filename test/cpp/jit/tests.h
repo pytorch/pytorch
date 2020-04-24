@@ -3,8 +3,8 @@
 /**
  * See README.md for instructions on how to add a new test.
  */
-#include <torch/csrc/WindowsTorchApiMacro.h>
 #include <c10/macros/Export.h>
+#include <torch/csrc/WindowsTorchApiMacro.h>
 
 namespace torch {
 namespace jit {
@@ -26,7 +26,6 @@ namespace jit {
   _(DifferentiateWithRequiresGrad)     \
   _(FromQualString)                    \
   _(InternedStrings)                   \
-  _(IValue)                            \
   _(PassManagement)                    \
   _(Proto)                             \
   _(RegisterFusionCachesKernel)        \
@@ -42,12 +41,11 @@ namespace jit {
   _(MemoryDAG)                         \
   _(IRParser)                          \
   _(ConstantPooling)                   \
-  _(ConstantPropagation)               \
-  _(NetDefConverter)                   \
   _(THNNConv)                          \
   _(ATenNativeBatchNorm)               \
   _(NoneSchemaMatch)                   \
   _(ClassParser)                       \
+  _(UnifyTypes)                        \
   _(Profiler)                          \
   _(InsertAndEliminateRedundantGuards) \
   _(InsertBailOuts)                    \
@@ -56,16 +54,21 @@ namespace jit {
   _(ThreadLocalDebugInfo)              \
   _(SubgraphMatching)                  \
   _(SubgraphRewriter)                  \
+  _(ModuleClone)                       \
   _(ModuleCloneInstance)               \
+  _(ModuleConstant)                    \
+  _(ModuleParameter)                   \
   _(ModuleDefine)                      \
   _(QualifiedName)                     \
   _(ClassImport)                       \
   _(ProfiledTensorTypeHashing)         \
   _(ScriptObject)                      \
   _(SaveExtraFilesHook)                \
+  _(TypeTags)                          \
   _(DCE)                               \
   _(CustomFusionNestedBlocks)          \
   _(ClassDerive)                       \
+  _(SaveLoadTorchbind)                 \
   _(ModuleInterfaceSerialization)      \
   _(ClassTypeAddRemoveAttr)            \
   _(Inliner)                           \
@@ -73,9 +76,50 @@ namespace jit {
   _(LiteInterpreterConv)               \
   _(LiteInterpreterInline)             \
   _(LiteInterpreterTuple)              \
-  _(LiteInterpreterPrimOverload)       \
-  _(CommonAncestor)
+  _(LiteInterpreterUpsampleNearest2d)  \
+  _(CommonAncestor)                    \
+  _(AutogradSymbols)                   \
+  _(MobileTypeParser)                  \
+  _(LiteInterpreterBuiltinFunction)    \
+  _(LiteInterpreterPrim)               \
+  _(LiteInterpreterLoadOrigJit)        \
+  _(LiteInterpreterWrongMethodName)    \
+  _(LiteInterpreterParams)             \
+  _(LiteInterpreterSetState)           \
+  _(TorchbindIValueAPI)                \
+  _(LiteInterpreterDict)
 
+#if defined(USE_CUDA)
+#define TH_FORALL_TESTS_CUDA(_)  \
+  _(ArgumentSpec)                \
+  _(CompleteArgumentSpec)        \
+  _(Fusion)                      \
+  _(GraphExecutor)               \
+  _(ModuleConversion)            \
+  _(Interp)                      \
+  _(GPU_FusionDispatch)          \
+  _(GPU_FusionSimpleArith)       \
+  _(GPU_FusionSimpleTypePromote) \
+  _(GPU_FusionCastOp)            \
+  _(GPU_FusionMutator)           \
+  _(GPU_FusionRegister)          \
+  _(GPU_FusionTopoSort)          \
+  _(GPU_FusionTensor)            \
+  _(GPU_FusionTensorContiguity)  \
+  _(GPU_FusionTVSplit)           \
+  _(GPU_FusionTVMerge)           \
+  _(GPU_FusionTVReorder)         \
+  _(GPU_FusionEquality)          \
+  _(GPU_FusionReplaceAll)        \
+  _(GPU_FusionParser)            \
+  _(GPU_FusionDependency)        \
+  _(GPU_FusionCodeGen)           \
+  _(GPU_FusionCodeGen2)          \
+  _(GPU_FusionSimplePWise)       \
+  _(GPU_FusionExecKernel)        \
+  _(GPU_FusionForLoop)           \
+  _(GPU_FusionLoopUnroll)
+#else
 #define TH_FORALL_TESTS_CUDA(_) \
   _(ArgumentSpec)               \
   _(CompleteArgumentSpec)       \
@@ -83,6 +127,7 @@ namespace jit {
   _(GraphExecutor)              \
   _(ModuleConversion)           \
   _(Interp)
+#endif
 
 #define DECLARE_JIT_TEST(name) void test##name();
 TH_FORALL_TESTS(DECLARE_JIT_TEST)
@@ -94,6 +139,8 @@ TH_FORALL_TESTS_CUDA(DECLARE_JIT_TEST)
 // and python test runners), but is instead invoked manually by the
 // torch_python_test.cpp
 void testEvalModeForLoadedModule();
+void testSerializationInterop();
+void testTorchSaveError();
 
 } // namespace jit
 } // namespace torch

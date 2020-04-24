@@ -3,14 +3,17 @@
 
 #include "cmake_macros.h"
 
-#if defined(TRACE_ENABLED) && defined(__ANDROID__)
+#ifdef __ANDROID__
 #include <android/log.h>
-
-#include <android/trace.h>
-#include <dlfcn.h>
-
 #define ALOGI(...) \
   __android_log_print(ANDROID_LOG_INFO, "pytorch-jni", __VA_ARGS__)
+#define ALOGE(...) \
+  __android_log_print(ANDROID_LOG_ERROR, "pytorch-jni", __VA_ARGS__)
+#endif
+
+#if defined(TRACE_ENABLED) && defined(__ANDROID__)
+#include <android/trace.h>
+#include <dlfcn.h>
 #endif
 
 namespace pytorch_jni {
@@ -87,4 +90,6 @@ class JIValue : public facebook::jni::JavaClass<JIValue> {
   static at::IValue JIValueToAtIValue(
       facebook::jni::alias_ref<JIValue> jivalue);
 };
+
+void common_registerNatives();
 } // namespace pytorch_jni

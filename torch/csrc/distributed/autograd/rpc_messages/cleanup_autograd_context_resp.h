@@ -14,7 +14,7 @@ class TORCH_API CleanupAutogradContextResp : public rpc::RpcCommandBase {
  public:
   CleanupAutogradContextResp() = default;
   // Serialization and deserialization methods.
-  rpc::Message toMessage() && override;
+  rpc::Message toMessageImpl() && override;
   static std::unique_ptr<CleanupAutogradContextResp> fromMessage(
       const rpc::Message& message);
 };

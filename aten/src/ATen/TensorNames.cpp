@@ -1,10 +1,8 @@
-#include <ATen/core/EnableNamedTensor.h>
 #include <ATen/TensorNames.h>
 #include <ATen/WrapDimUtils.h>
 
 namespace at { namespace namedinference {
 
-#ifdef BUILD_NAMEDTENSOR
 
 Dimname TensorName::toDimname() const {
   return name_;
@@ -125,6 +123,5 @@ std::vector<Dimname> TensorNames::toDimnameVec() const {
   return result;
 }
 
-#endif
 
 }} // namespace at::namedinference

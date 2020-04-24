@@ -61,7 +61,7 @@ Tensor flip_cpu(const Tensor& self, IntArrayRef dims) {
     }
   }
 
-  AT_DISPATCH_ALL_TYPES(in_tensor.scalar_type(), "flip_cpu", [&] {
+  AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Bool, in_tensor.scalar_type(), "flip_cpu", [&] {
     flip_cpu_kernel<scalar_t>(
       total_dims,
       stride_contiguous_v,
@@ -90,19 +90,9 @@ Tensor roll_cpu(const Tensor& self, IntArrayRef shifts, IntArrayRef dims) {
   if (start < 0) {
     start = start + size;
   }
-  auto tensors = self.unbind(dim);
-  std::vector<Tensor> vec = std::vector<Tensor>(size);
-  int64_t index = 0;
-  for (int64_t i = start; i < size; i++) {
-    vec[index++] = std::move(tensors[i]);
-  }
-
-  for (int64_t i = 0; i < start; i++) {
-    // `tensors` is dead after this, so we can avoid refcount bumps by moving.
-    vec[index++] = std::move(tensors[i]);
-  }
-
-  return at::stack(vec, dim);
+  auto t0 = self.narrow(dim, start, size-start);
+  auto t1 = self.narrow(dim, 0, start);
+  return at::cat({t0, t1}, dim);
 }
 
 Tensor rot90(const Tensor& self, int64_t k, IntArrayRef dims) {

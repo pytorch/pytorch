@@ -1,4 +1,5 @@
 #include <limits>
+#include <utility>
 
 #include "caffe2/core/logging.h"
 #include "caffe2/opt/converter.h"
@@ -93,6 +94,19 @@ OperatorDef Converter::convertToOperatorDef(
   caffe2::OperatorDef op;
   op.set_type(nnOp->getName());
   return op;
+}
+
+DeviceOption Converter::getDeviceOption(
+    const nom::repr::NeuralNetOperator* nnOp) const {
+  auto* annotation = nnOp->getAnnotation();
+  // Default to using the stored operator.
+  if (annotation && isa<Caffe2Annotation>(annotation)) {
+    return dyn_cast<Caffe2Annotation>(annotation)
+        ->getOperatorDef()
+        .device_option();
+  }
+  caffe2::DeviceOption opt;
+  return opt;
 }
 
 std::vector<int> getKernelShape(
@@ -606,7 +620,7 @@ void injectDataEdgeIndicators(caffe2::NetDef* net) {
     caffe2::OperatorDef op;
     op.set_type("Export");
     op.add_input(output);
-    *net->add_op() = op;
+    *net->add_op() = std::move(op);
   }
   net->clear_external_input();
   net->clear_external_output();

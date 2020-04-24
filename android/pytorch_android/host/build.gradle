@@ -14,7 +14,12 @@ repositories {
 
 sourceSets {
     main {
-        java.srcDir '../src/main/java'
+        java {
+            srcDir '../src/main/java'
+            exclude 'org/pytorch/PyTorchAndroid.java'
+            exclude 'org/pytorch/LiteModuleLoader.java'
+            exclude 'org/pytorch/LiteNativePeer.java'
+        }
     }
     test {
         java {

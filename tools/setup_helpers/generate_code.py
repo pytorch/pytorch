@@ -25,36 +25,46 @@ def generate_code(ninja_global=None,
                   install_dir=None,
                   subset=None,
                   disable_autograd=False,
-                  selected_op_list_path=None):
+                  selected_op_list_path=None,
+                  selected_op_list=None,
+                  force_schema_registration=False):
     # cwrap depends on pyyaml, so we can't import it earlier
     root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     sys.path.insert(0, root)
     from tools.autograd.gen_autograd import gen_autograd, gen_autograd_python
-    from tools.jit.gen_jit_dispatch import gen_jit_dispatch
+    from tools.jit.gen_unboxing_wrappers import gen_unboxing_wrappers
 
     # Build ATen based Variable classes
-    autograd_gen_dir = install_dir or 'torch/csrc/autograd/generated'
-    jit_gen_dir = install_dir or 'torch/csrc/jit/generated'
+    install_dir = install_dir or 'torch/csrc'
+    autograd_gen_dir = os.path.join(install_dir, 'autograd', 'generated')
+    jit_gen_dir = os.path.join(install_dir, 'jit', 'generated')
     for d in (autograd_gen_dir, jit_gen_dir):
         if not os.path.exists(d):
             os.makedirs(d)
+    runfiles_dir = os.environ.get("RUNFILES_DIR", None)
+    data_dir = os.path.join(runfiles_dir, 'pytorch') if runfiles_dir else ''
+    autograd_dir = os.path.join(data_dir, 'tools', 'autograd')
+    tools_jit_templates = os.path.join(data_dir, 'tools', 'jit', 'templates')
 
     if subset == "pybindings" or not subset:
-        gen_autograd_python(declarations_path or DECLARATIONS_PATH, autograd_gen_dir, 'tools/autograd')
+        gen_autograd_python(declarations_path or DECLARATIONS_PATH, autograd_gen_dir, autograd_dir)
 
     if subset == "libtorch" or not subset:
+        # TODO: add selected op mechanism in augotrad to save learning size
         gen_autograd(
             declarations_path or DECLARATIONS_PATH,
             autograd_gen_dir,
-            'tools/autograd',
+            autograd_dir,
             disable_autograd=disable_autograd,
         )
-        gen_jit_dispatch(
+        gen_unboxing_wrappers(
             declarations_path or DECLARATIONS_PATH,
             jit_gen_dir,
-            'tools/jit/templates',
+            tools_jit_templates,
             disable_autograd=disable_autograd,
-            selected_op_list_path=selected_op_list_path)
+            selected_op_list_path=selected_op_list_path,
+            selected_op_list=selected_op_list,
+            force_schema_registration=force_schema_registration)
 
 
 def main():
@@ -77,6 +87,19 @@ def main():
         '--selected-op-list-path',
         help='Path to the yaml file that contains the list of operators to include for custom build.',
     )
+    parser.add_argument(
+        '--selected-op-list',
+        nargs="*",
+        type=str,
+        help="""List of operator names to include for custom build, in addition to those in selected-op-list-path.
+        For example, --selected-op-list aten::add.Tensor aten::_convolution.""",
+    )
+    parser.add_argument(
+        '--force_schema_registration',
+        action='store_true',
+        help='force it to generate schema-only registrations for ops that are not'
+        'listed on --selected-op-list'
+    )
     options = parser.parse_args()
     generate_code(
         options.ninja_global,
@@ -86,6 +109,8 @@ def main():
         options.subset,
         options.disable_autograd,
         options.selected_op_list_path,
+        options.selected_op_list,
+        options.force_schema_registration,
     )
 
 

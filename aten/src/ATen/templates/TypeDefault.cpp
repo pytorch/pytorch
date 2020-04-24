@@ -13,8 +13,14 @@
 #include <c10/core/TensorOptions.h>
 #include <ATen/DeviceGuard.h>
 #include <ATen/SparseTensorUtils.h>
-#include <ATen/core/op_registration/op_registration.h>
-#include <ATen/core/EnableNamedTensor.h>
+#include <torch/library.h>
+
+namespace {
+static const char* named_tensors_unsupported_error =
+  " is not yet supported with named tensors. Please drop names via "
+  "`tensor = tensor.rename(None)`, call the op with an unnamed tensor, "
+  "and set names on the result of the operation.";
+}
 
 namespace at {
 namespace TypeDefault {
@@ -23,11 +29,8 @@ ${type_method_definitions}
 
 }  // namespace TypeDefault
 
-#ifndef USE_STATIC_DISPATCH
-namespace {
-auto registerer = torch::RegisterOperators()
+TORCH_LIBRARY(aten, m) {
   ${function_registrations};
 }
-#endif
 
 }  // namespace at

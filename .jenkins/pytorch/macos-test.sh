@@ -54,7 +54,17 @@ test_python_all() {
   # using the address associated with the loopback interface.
   export GLOO_SOCKET_IFNAME=lo0
   echo "Ninja version: $(ninja --version)"
-  python test/run_test.py --verbose
+
+  if [ -n "$CIRCLE_PULL_REQUEST" ]; then
+    DETERMINE_FROM=$(mktemp)
+    file_diff_from_base "$DETERMINE_FROM"
+  fi
+
+  # Increase default limit on open file handles from 256 to 1024
+  ulimit -n 1024
+
+  python test/run_test.py --verbose --determine-from="$DETERMINE_FROM"
+
   assert_git_not_dirty
 }
 
@@ -102,7 +112,6 @@ test_custom_script_ops() {
 
   # Run tests Python-side and export a script module.
   python test_custom_ops.py -v
-  python test_custom_classes.py -v
   python model.py --export-script-module=model.pt
   # Run tests C++-side and load the exported script module.
   build/test_custom_ops ./model.pt

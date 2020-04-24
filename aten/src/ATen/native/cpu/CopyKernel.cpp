@@ -19,9 +19,10 @@ static void copy_kernel(TensorIterator& iter, bool non_blocking) {
       cpu_kernel(iter, [=](at::BFloat16 a) -> at::BFloat16 { return a; });
     } else if (isQIntType(dtype)) {
       AT_DISPATCH_QINT_TYPES(dtype, "copy_kernel", [&] {
-        cpu_kernel(
+        cpu_kernel_vec(
             iter,
-            [=](scalar_t a) -> scalar_t {return a; });
+            [=](scalar_t a) -> scalar_t { return a; },
+            [=](Vec256<scalar_t> a) -> Vec256<scalar_t> { return a; });
       });
     } else if (isComplexType(dtype)) {
       AT_DISPATCH_COMPLEX_TYPES(dtype, "copy_kernel", [&] {
@@ -42,7 +43,22 @@ static void copy_kernel(TensorIterator& iter, bool non_blocking) {
     AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(ScalarType::Half, ScalarType::Bool, ScalarType::BFloat16, dtype, "copy_", [&] {
       using dest_t = scalar_t;
       AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(ScalarType::Half, ScalarType::Bool, ScalarType::BFloat16, iter.dtype(1), "copy_", [&] {
-        cpu_kernel(iter, c10::static_cast_with_inter_type<dest_t, scalar_t>::apply);
+        // Note (@zasdfgbnm):
+        //
+        // The code below can not be simplified as
+        //    cpu_kernel(iter, c10::static_cast_with_inter_type<dest_t, scalar_t>::apply);
+        //
+        // because this would force the compiler to instantiate the inline function and generate a function call in the loop
+        // instead of inlining it, making all the optimizations like vectorization impossible.
+        // You can verify this by looking the the symbols of `libtorch_cpu.so`:
+        //
+        //    readelf -Ws libtorch_cpu.so | grep static_cast_with_inter_type
+        //
+        // If done correctly, the above command should have no output.
+        //
+        // See: https://github.com/pytorch/pytorch/issues/31271
+        cpu_kernel(iter, [](scalar_t src) -> dest_t {
+          return c10::static_cast_with_inter_type<dest_t, scalar_t>::apply(src); });
       });
     });
   }

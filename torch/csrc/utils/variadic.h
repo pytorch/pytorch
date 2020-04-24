@@ -52,7 +52,7 @@ template <size_t... Is>
 struct Indices {};
 
 // Decrements the index N, adds N-1 to the list of indices and forwards
-// whatever we arleady have.
+// whatever we already have.
 template <size_t N, size_t... Is>
 struct MakeIndices : MakeIndices<N - 1, N - 1, Is...> {};
 

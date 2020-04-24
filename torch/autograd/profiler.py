@@ -10,7 +10,7 @@ try:
 except ImportError:
     import functools
 
-    class ContextDecorator(object):
+    class ContextDecorator(object):  # type: ignore[no-redef]
         def __call__(self, func):
             @functools.wraps(func)
             def wrapped(*args, **kwargs):
@@ -116,55 +116,56 @@ class EventList(list):
         Arguments:
             path (str): Path where the trace will be written.
         """
-        import json
+        import os
         with open(path, 'w') as f:
             chrome_events = []
             next_id = 0
+            # Use file IO over using json.dump since JSON dumping is very slow and
+            # this technique is proven to give a 4x speedup.
+            f.write("[")
             for evt in self:
-                chrome_events.append(dict(
-                    name=evt.name,
-                    ph='X',
-                    ts=evt.cpu_interval.start,
-                    dur=evt.cpu_interval.elapsed_us(),
-                    tid=evt.thread,
-                    pid='CPU functions',
-                    args={},
-                ))
+                f.write('{"name": "%s", '
+                        '"ph": "X", '
+                        '"ts": %s, '
+                        '"dur": %s, '
+                        '"tid": %s, '
+                        '"pid": "CPU functions", '
+                        '"args": {}}, ' % (evt.name, evt.cpu_interval.start,
+                                           evt.cpu_interval.elapsed_us(), evt.thread))
                 for k in evt.kernels:
                     # 's' and 'f' draw Flow arrows from
                     # the CPU launch to the GPU kernel
-                    chrome_events.append(dict(
-                        name=evt.name,
-                        ph='s',
-                        ts=evt.cpu_interval.start,
-                        tid=evt.thread,
-                        pid='CPU functions',
-                        id=next_id,
-                        cat='cpu_to_cuda',
-                        args={},
-                    ))
-                    chrome_events.append(dict(
-                        name=k.name,
-                        ph='f',
-                        ts=k.interval.start,
-                        tid=k.device,
-                        pid='CUDA functions',
-                        id=next_id,
-                        cat='cpu_to_cuda',
-                        args={},
-                    ))
-                    chrome_events.append(dict(
-                        name=k.name,
-                        ph='X',
-                        ts=k.interval.start,
-                        dur=k.interval.elapsed_us(),
-                        tid=k.device,
-                        pid='CUDA functions',
-                        args={},
-                    ))
+                    f.write('{"name": "%s", '
+                            '"ph": "s", '
+                            '"ts": %s, '
+                            '"tid": %s, '
+                            '"pid": "CPU functions", '
+                            '"id": %s, '
+                            '"cat": "cpu_to_cuda", '
+                            '"args": {}}, ' % (evt.name, evt.cpu_interval.start,
+                                               evt.thread, next_id))
+                    f.write('{"name": "%s", '
+                            '"ph": "f", '
+                            '"ts": %s, '
+                            '"tid": %s, '
+                            '"pid": "CUDA functions", '
+                            '"id": %s, '
+                            '"cat": "cpu_to_cuda", '
+                            '"args": {}}, ' % (k.name, k.interval.start, k.device, next_id))
+                    f.write('{"name": "%s", '
+                            '"ph": "X", '
+                            '"ts": %s, '
+                            '"dur": %s, '
+                            '"tid": %s, '
+                            '"pid": "CUDA functions", '
+                            '"args": {}}, ' % (k.name, k.interval.start,
+                                               k.interval.elapsed_us(), k.device))
                     next_id += 1
 
-            json.dump(chrome_events, f)
+            # remove trailing whitespace and comma
+            f.seek(f.tell() - 2, os.SEEK_SET)
+            f.truncate()
+            f.write("]")
 
     def key_averages(self, group_by_input_shapes=False):
         """Averages all function events over their keys.
@@ -232,6 +233,12 @@ class profile(object):
     .. warning:
         This context managers should not be called recursively, i.e. at most one
         instance should be enabled at any given time.
+
+    .. warning:
+        Due to some CUDA multiprocessing limitations (multiprocessing-cuda-note_),
+        one cannot use the profiler with ``use_cuda = True`` to benchmark
+        DataLoaders with ``num_workers > 0``. If you wish to benchmark data loading,
+        please use ``use_cuda = False`` or ``num_workers = 0``.
 
     Example:
         >>> x = torch.randn((1, 1), requires_grad=True)
@@ -359,13 +366,46 @@ class record_function(ContextDecorator):
     """
     def __init__(self, name):
         self.name = name
+        # Whether or not we should run record function's end callbacks when exiting.
+        self.run_callbacks_on_exit = True
 
     def __enter__(self):
         self.handle = torch.ops.profiler._record_function_enter(self.name)
+        return self
 
     def __exit__(self, *args):
-        torch.ops.profiler._record_function_exit(self.handle)
+        if self.run_callbacks_on_exit:
+            torch.ops.profiler._record_function_exit(self.handle)
         return False
+
+    def _call_end_callbacks_on_future(self, fut):
+        """
+        _call_end_callbacks_on_future is meant to be used for profiling async
+        calls that return a future. Calling this function will extend recording
+        beyond this scope, until the future is satisfied. It is useful for profiling
+        the end to end time of asynchronous calls. This function should only be called
+        once to attach the callback onto the future, and will throw if called multiple
+        times.
+
+        Arguments:
+            fut: (torch.distributed.rpc.Future or torch._C.Future): future for which to schedule
+            callback for.
+        """
+        # Throw if we have already attached a callback onto the future.
+        if not self.run_callbacks_on_exit:
+            raise RuntimeError("_call_end_callbacks_on_future can only be called once.")
+
+        # We are scheduling to run this RecordFunction's end callbacks when the
+        # passed in future completes, so don't run end callbacks on exit.
+        self.run_callbacks_on_exit = False
+        # TODO: Currently, we have two different futures that can be returned,
+        # thus, two different code paths. We should clean this up when the
+        # futures are merged and rpc_async returns a consistent type (https://github.com/pytorch/pytorch/issues/34999).
+        if isinstance(fut, torch.distributed.rpc.Future):
+            torch.autograd._call_end_callbacks_on_fut(self.handle, fut)
+        else:
+            # jit Future, call jit operator
+            torch.ops.profiler._call_end_callbacks_on_jit_fut(self.handle, fut)
 
 
 class emit_nvtx(object):
@@ -780,7 +820,8 @@ def parse_nvprof_trace(path):
     unique = EnforceUnique()
     for row in conn.execute(kernel_query):
         unique.see(row['marker_id'], row['runtime_id'])
-        assert row['cbid'] == 13  # 13 == Launch
+        # 211 is cudaKernelLaunch for cuda >= 9.2; 13 is for older cuda versions
+        assert (row['cbid'] == 211) or (row['cbid'] == 13)
         evt = functions_map[row['marker_id']]
         evt.append_kernel(row['kernel_name'],
                           0,

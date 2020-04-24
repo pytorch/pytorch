@@ -102,32 +102,32 @@ public:
   // No explicit construct/copy/destroy for aggregate type.
 
   // DR 776.
-  AT_CPP14_CONSTEXPR void fill(const value_type& __u)
+  constexpr void fill(const value_type& __u)
   { std::fill_n(begin(), size(), __u); }
 
-  AT_CPP14_CONSTEXPR void swap(array& __other)
+  constexpr void swap(array& __other)
   { std::swap_ranges(begin(), end(), __other.begin()); }
 
   // Iterators.
-  AT_CPP14_CONSTEXPR iterator begin() noexcept
+  constexpr iterator begin() noexcept
   { return iterator(data()); }
 
   constexpr const_iterator begin() const noexcept
   { return const_iterator(data()); }
 
-  AT_CPP14_CONSTEXPR iterator end() noexcept
+  constexpr iterator end() noexcept
   { return iterator(data() + _Nm); }
 
   constexpr const_iterator end() const noexcept
   { return const_iterator(data() + _Nm); }
 
-  AT_CPP14_CONSTEXPR reverse_iterator rbegin() noexcept
+  constexpr reverse_iterator rbegin() noexcept
   { return reverse_iterator(end()); }
 
   constexpr const_reverse_iterator rbegin() const noexcept
   { return const_reverse_iterator(end()); }
 
-  AT_CPP14_CONSTEXPR reverse_iterator rend() noexcept
+  constexpr reverse_iterator rend() noexcept
   { return reverse_iterator(begin()); }
 
   constexpr const_reverse_iterator rend() const noexcept
@@ -153,13 +153,13 @@ public:
   constexpr bool empty() const noexcept { return size() == 0; }
 
   // Element access.
-  AT_CPP14_CONSTEXPR reference operator[](size_type __n) noexcept
+  constexpr reference operator[](size_type __n) noexcept
   { return _AT_Type::_S_ref(_M_elems, __n); }
 
   constexpr const_reference operator[](size_type __n) const noexcept
   { return _AT_Type::_S_ref(_M_elems, __n); }
 
-  AT_CPP14_CONSTEXPR reference at(size_type __n) {
+  constexpr reference at(size_type __n) {
     if (__n >= _Nm) {
       detail::__throw_out_of_range(std::string() +
           "array::at: __n (which is " + to_string(__n) + ") " +
@@ -178,13 +178,13 @@ public:
          _AT_Type::_S_ref(_M_elems, 0));
      }
 
-  AT_CPP14_CONSTEXPR reference front() noexcept
+  constexpr reference front() noexcept
   { return *begin(); }
 
   constexpr const_reference front() const noexcept
   { return _AT_Type::_S_ref(_M_elems, 0); }
 
-  AT_CPP14_CONSTEXPR reference back() noexcept
+  constexpr reference back() noexcept
   { return _Nm ? *(end() - 1) : *end(); }
 
   constexpr const_reference back() const noexcept
@@ -193,7 +193,7 @@ public:
             : _AT_Type::_S_ref(_M_elems, 0);
   }
 
-  AT_CPP14_CONSTEXPR pointer data() noexcept
+  constexpr pointer data() noexcept
   { return _AT_Type::_S_ptr(_M_elems); }
 
   constexpr const_pointer data() const noexcept

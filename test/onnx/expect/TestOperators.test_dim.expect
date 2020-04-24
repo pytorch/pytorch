@@ -1,0 +1,32 @@
+ir_version: 6
+producer_name: "pytorch"
+producer_version: "1.5"
+graph {
+  node {
+    output: "1"
+    name: "Constant_0"
+    op_type: "Constant"
+    attribute {
+      name: "value"
+      t {
+        data_type: 1
+        raw_data: "\000\000\000@"
+      }
+      type: TENSOR
+    }
+  }
+  name: "torch-jit-export"
+  output {
+    name: "1"
+    type {
+      tensor_type {
+        elem_type: 1
+        shape {
+        }
+      }
+    }
+  }
+}
+opset_import {
+  version: 9
+}

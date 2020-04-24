@@ -2,6 +2,23 @@
 #include <gtest/gtest.h>
 
 namespace {
+
+namespace test_min {
+using c10::guts::min;
+static_assert(min(3, 5) == 3, "");
+static_assert(min(5, 3) == 3, "");
+static_assert(min(3, 3) == 3, "");
+static_assert(min(3.0, 3.1) == 3.0, "");
+}
+
+namespace test_max {
+using c10::guts::max;
+static_assert(max(3, 5) == 5, "");
+static_assert(max(5, 3) == 5, "");
+static_assert(max(3, 3) == 3, "");
+static_assert(max(3.0, 3.1) == 3.1, "");
+}
+
 namespace test_if_constexpr {
 
 using c10::guts::if_constexpr;
@@ -96,13 +113,13 @@ TEST(if_constexpr, returnTypeCanDiffer_withIdentityArg) {
         [&](auto) -> int64_t { return 3; },
         [&](auto) -> std::string { return "3"; }
     );
-    static_assert(std::is_same<std::string, decltype(a_string)>::value);
+    static_assert(std::is_same<std::string, decltype(a_string)>::value, "");
 
     auto an_int = if_constexpr<true>(
         [&](auto) -> int64_t { return 3; },
         [&](auto) -> std::string { return "3"; }
     );
-    static_assert(std::is_same<int64_t, decltype(an_int)>::value);
+    static_assert(std::is_same<int64_t, decltype(an_int)>::value, "");
 }
 
 TEST(if_constexpr, returnTypeCanDiffer_withoutIdentityArg) {
@@ -110,13 +127,13 @@ TEST(if_constexpr, returnTypeCanDiffer_withoutIdentityArg) {
         [&] () -> int64_t { return 3; },
         [&] () -> std::string { return "3"; }
     );
-    static_assert(std::is_same<std::string, decltype(a_string)>::value);
+    static_assert(std::is_same<std::string, decltype(a_string)>::value, "");
 
     auto an_int = if_constexpr<true>(
         [&] () -> int64_t { return 3; },
         [&] () -> std::string { return "3"; }
     );
-    static_assert(std::is_same<int64_t, decltype(an_int)>::value);
+    static_assert(std::is_same<int64_t, decltype(an_int)>::value, "");
 }
 
 }

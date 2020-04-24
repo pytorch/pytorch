@@ -1,5 +1,5 @@
-#include <torch/csrc/jit/ir.h>
-#include <torch/csrc/jit/irparser.h>
+#include <torch/csrc/jit/ir/ir.h>
+#include <torch/csrc/jit/ir/irparser.h>
 #include <torch/csrc/jit/testing/file_check.h>
 #include "test/cpp/jit/test_base.h"
 
@@ -17,7 +17,7 @@ namespace jit {
  */
 static void checkRoundtrip(const std::string& s) {
   auto graph = std::make_shared<Graph>();
-  script::parseIR(s, &*graph);
+  parseIR(s, &*graph);
   std::ostringstream ss;
   ss << *graph;
   std::string parsed = ss.str();
@@ -42,7 +42,7 @@ void testIRParser() {
   {
     auto graph = std::make_shared<Graph>();
     std::unordered_map<std::string, Value*> vmap;
-    script::parseIR(
+    parseIR(
         R"IR(
 graph(%0 : Tensor, %1 : Tensor):
   %2 : Tensor = foo::add(%0, %1)
@@ -117,7 +117,7 @@ graph(%0 : Tensor,
   }
   {
     auto graph = std::make_shared<Graph>();
-    script::parseIR(
+    parseIR(
         R"IR(
 graph(%a):
   return (%a))IR",
@@ -125,9 +125,9 @@ graph(%a):
     AT_ASSERT(graph->inputs()[0]->type()->isSubtypeOf(TensorType::get()));
   }
   {
-    // Check that parser corectly handles values reusing the same name.
+    // Check that parser correctly handles values reusing the same name.
     auto graph = std::make_shared<Graph>();
-    script::parseIR(
+    parseIR(
         R"IR(
 graph(%x):
   %x = a::a(%x)
@@ -151,8 +151,8 @@ graph(%x):
 graph(%0 : Tensor,
       %1 : Tensor,
       %2 : Tensor):
-  %3 : int, %4 : Tensor = qqq::qqq[i_asdf=2, f_asdf=3.14, s_asdf="hello", ss_asdf=["hello world", "bye bye"]](%0)
-  %5 : int, %6 : Tensor = ppp::ppp[i_asdf=2, f_asdf=3.14, s_asdf="\"\"\"\"\nhe\"llo", q=[3, 2, 4]](%0)
+  %3 : int, %4 : Tensor = qqq::qqq[i_asdf=2, f_asdf=3., s_asdf="hello", ss_asdf=["hello world", "bye bye"]](%0)
+  %5 : int, %6 : Tensor = ppp::ppp[i_asdf=2, f_asdf=3., s_asdf="\"\"\"\"\nhe\"llo", q=[3, 2, 4]](%0)
   %7 : float = vvv::vvv[s_asdf="hello"](%0)
   %8 : string = z::z()
   return (%7)
@@ -204,6 +204,17 @@ graph(%0 : Tensor,
   }
 
   {
+    checkRoundtrip(
+        R"IR(
+graph():
+  %0 : float[] = prim::Constant[value=[1., 2., 3.]]()
+  %1 : str[] = prim::Constant[value=["ab", "cd", "ef"]]()
+  %2 : (float[], str[]) = prim::TupleConstruct(%0, %1)
+  return (%2)
+)IR");
+  }
+
+  {
     bool error_thrown = false;
     try {
       checkRoundtrip(
@@ -228,9 +239,69 @@ graph(%0 : Tensor,
     # CHECK: return
       return (%a))IR";
 
-    script::parseIR(text, &*graph);
+    parseIR(text, &*graph);
     AT_ASSERT(graph->inputs()[0]->type()->isSubtypeOf(TensorType::get()));
     torch::jit::testing::FileCheck().run(text, *graph);
+  }
+
+  {
+    auto graph = std::make_shared<Graph>();
+    std::unordered_map<std::string, Value*> vmap;
+    parseIR(
+        R"IR(
+graph(%a : Float(4, 5),
+      %b : Float(4:5, 5:1),
+      %c : Double(*, *)):
+  return (%a)
+)IR",
+        &*graph,
+        vmap);
+    Value* a = graph->inputs()[0];
+    Value* b = graph->inputs()[1];
+    Value* c = graph->inputs()[2];
+
+    auto a_type = a->type()->cast<TensorType>();
+    auto a_sizes = *a_type->sizes().concrete_sizes();
+    auto a_strides = a_type->strides().concrete_sizes();
+    AT_ASSERT(a_sizes[0] == 4 && a_sizes[1] == 5);
+    AT_ASSERT(a_strides == c10::nullopt);
+
+    auto b_type = b->type()->cast<TensorType>();
+    auto b_sizes = *b_type->sizes().concrete_sizes();
+    auto b_strides = *(b_type->strides().sizes());
+    AT_ASSERT(b_sizes[0] == 4 && b_sizes[1] == 5);
+    AT_ASSERT(*b_strides[0] == 5 && *b_strides[1] == 1);
+
+    auto c_type = c->type()->cast<TensorType>();
+    AT_ASSERT(*c_type->sizes().size() == 2);
+    AT_ASSERT(c_type->sizes().concrete_sizes() == c10::nullopt);
+    AT_ASSERT(c_type->strides().concrete_sizes() == c10::nullopt);
+  }
+  {
+    auto graph = std::make_shared<Graph>();
+    std::unordered_map<std::string, Value*> vmap;
+    bool error_thrown = false;
+    try {
+      parseIR(
+          R"IR(
+graph(%a : Float(4:5, 5)):
+  return (%a)
+)IR",
+          &*graph,
+          vmap);
+    } catch (const std::exception& error) {
+      error_thrown = true;
+    }
+    AT_ASSERT(error_thrown);
+  }
+  {
+    checkRoundtrip(
+        R"IR(
+graph(%a : Float(4, 5),
+      %b : Float(4:5, 5:1),
+      %c : Double(*, *)):
+  return (%a)
+)IR");
   }
 }
 } // namespace jit

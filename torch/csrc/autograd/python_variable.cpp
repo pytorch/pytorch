@@ -23,11 +23,8 @@
 #include <torch/csrc/utils/python_strings.h>
 #include <torch/csrc/utils/python_arg_parser.h>
 #include <torch/csrc/utils/tensor_new.h>
-#include <torch/csrc/jit/tracer.h>
-#include <ATen/core/EnableNamedTensor.h>
-#ifdef BUILD_NAMEDTENSOR
+#include <torch/csrc/jit/frontend/tracer.h>
 #include <ATen/NamedTensorUtils.h>
-#endif
 
 #include <ATen/ATen.h>
 #include <pybind11/pybind11.h>
@@ -141,12 +138,27 @@ static PyObject *THPVariable_pynew(PyTypeObject *type, PyObject *args, PyObject 
 {
   HANDLE_TH_ERRORS
   jit::tracer::warn("torch.Tensor", jit::tracer::WARN_CONSTRUCTOR);
-  auto tensor = torch::utils::legacy_tensor_ctor(torch::tensors::get_default_tensor_type_id(), torch::tensors::get_default_scalar_type(), args, kwargs);
+  auto tensor = torch::utils::legacy_tensor_ctor(torch::tensors::get_default_dispatch_key(), torch::tensors::get_default_scalar_type(), args, kwargs);
   return THPVariable_NewWithVar(type, std::move(tensor));
   END_HANDLE_TH_ERRORS
 }
 
-// Instantiates a subclass of torch.Tensor. Used by nn.Parameter()
+// Instantiates a subclass of self with the same data.
+static PyObject* THPVariable_as_subclass(THPVariable* self, PyObject* args, PyObject* kwargs) {
+  HANDLE_TH_ERRORS
+  static PythonArgParser parser({
+    "as_subclass(PyObject* cls)",
+  });
+  ParsedArgs<1> parsed_args{};
+  auto r = parser.parse(args, kwargs, parsed_args);
+  PyObject* cls = r.pyobject(0);
+  if (!PyType_Check(cls)) {
+    throw TypeError("cls must be a type (got %s)", Py_TYPE(cls)->tp_name);
+  }
+  return THPVariable_NewWithVar((PyTypeObject*)cls, self->cdata.alias());
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject* THPVariable_make_subclass(PyObject* _ignored, PyObject* args, PyObject* kwargs) {
   HANDLE_TH_ERRORS
   static PythonArgParser parser({
@@ -158,7 +170,7 @@ static PyObject* THPVariable_make_subclass(PyObject* _ignored, PyObject* args, P
   if (!PyType_Check(cls)) {
     throw TypeError("cls must be a type (got %s)", Py_TYPE(cls)->tp_name);
   }
-  auto data = as_variable_ref(r.tensor(1)).detach();
+  auto data = r.tensor(1).detach();
   // We set `data`'s `allow_tensor_metadata_change` to true here, because we want to
   // allow the following use case for backward compatibility:
   //
@@ -323,7 +335,6 @@ PyObject *THPVariable_get_ndim(THPVariable *self, void *unused)
   END_HANDLE_TH_ERRORS
 }
 
-#ifdef BUILD_NAMEDTENSOR
 PyObject *THPVariable_get_names(THPVariable *self, void *unused)
 {
   HANDLE_TH_ERRORS
@@ -370,7 +381,6 @@ int THPVariable_set_names(THPVariable *self, PyObject *names) {
   return 0;
   END_HANDLE_TH_ERRORS_RET(-1)
 }
-#endif
 
 int THPVariable_set_requires_grad(THPVariable *self, PyObject *obj, void *unused)
 {
@@ -431,7 +441,7 @@ PyObject *THPVariable_get_base(THPVariable *self, void *unused)
 {
   HANDLE_TH_ERRORS
   if (self->cdata.is_view()) {
-    return THPVariable_Wrap(self->cdata.base());
+    return THPVariable_Wrap(self->cdata._base());
   }
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
@@ -476,6 +486,14 @@ PyObject *THPVariable_is_quantized(THPVariable *self, void *unused)
   END_HANDLE_TH_ERRORS
 }
 
+PyObject *THPVariable_is_complex(THPVariable *self, void *unused)
+{
+  HANDLE_TH_ERRORS
+  auto& self_ = self->cdata;
+  return torch::autograd::utils::wrap(self_.is_complex());
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject *THPVariable_dtype(THPVariable *self, void *unused)
 {
   HANDLE_TH_ERRORS
@@ -507,7 +525,7 @@ static struct PyGetSetDef THPVariable_properties[] = {
   {"_grad_fn", (getter)THPVariable_get_grad_fn, (setter)THPVariable_set_grad_fn, nullptr, nullptr},
   {"is_leaf", (getter)THPVariable_is_leaf, nullptr, nullptr, nullptr},
   {"data", (getter)THPVariable_get_data, (setter)THPVariable_set_data, nullptr, nullptr},
-  {"_grad", (getter)THPVariable_get_grad, (setter)THPVariable_set_grad, nullptr, nullptr}, // only for legacy reasons
+  {"_grad", (getter)THPVariable_get_grad, (setter)THPVariable_set_grad, nullptr, nullptr}, // Allows the python class to override .grad
   {"grad", (getter)THPVariable_get_grad, (setter)THPVariable_set_grad, nullptr, nullptr},
   {"_base", (getter)THPVariable_get_base, nullptr, nullptr, nullptr},
   {"volatile", (getter)THPVariable_get_volatile, (setter)THPVariable_set_volatile, nullptr, nullptr},
@@ -519,14 +537,13 @@ static struct PyGetSetDef THPVariable_properties[] = {
   {"is_cuda", (getter)THPVariable_is_cuda, nullptr, nullptr, nullptr},
   {"is_sparse", (getter)THPVariable_is_sparse, nullptr, nullptr, nullptr},
   {"is_mkldnn", (getter)THPVariable_is_mkldnn, nullptr, nullptr, nullptr},
+  {"is_complex", (getter)THPVariable_is_complex, nullptr, nullptr, nullptr},
   {"is_quantized", (getter)THPVariable_is_quantized, nullptr, nullptr, nullptr},
   {"dtype", (getter)THPVariable_dtype, nullptr, nullptr, nullptr},
   {"layout", (getter)THPVariable_layout, nullptr, nullptr, nullptr},
   {"device", (getter)THPVariable_device, nullptr, nullptr, nullptr},
   {"ndim", (getter)THPVariable_get_ndim, nullptr, nullptr, nullptr},
-#ifdef BUILD_NAMEDTENSOR
   {"names", (getter)THPVariable_get_names, (setter)THPVariable_set_names, nullptr, nullptr},
-#endif
   {nullptr}
 };
 
@@ -537,7 +554,8 @@ static PyMappingMethods THPVariable_as_mapping = {
 };
 
 static PyMethodDef extra_methods[] = {
-  {"_make_subclass", (PyCFunction)(void(*)(void))THPVariable_make_subclass, METH_STATIC | METH_VARARGS | METH_KEYWORDS, nullptr},
+  {"as_subclass", (PyCFunction)THPVariable_as_subclass, METH_VARARGS | METH_KEYWORDS, nullptr},
+  {"_make_subclass", (PyCFunction)THPVariable_make_subclass, METH_STATIC | METH_VARARGS | METH_KEYWORDS, nullptr},
   {nullptr}
 };
 

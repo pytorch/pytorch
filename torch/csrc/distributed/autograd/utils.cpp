@@ -21,8 +21,7 @@ using torch::distributed::rpc::WorkerInfo;
 void addSendRpcBackward(
     const ContextPtr& autogradContext,
     const AutogradMetadata& autogradMetadata,
-    std::vector<torch::Tensor>& tensors,
-    const rpc::worker_id_t dst) {
+    std::vector<torch::Tensor>& tensors) {
   // Attach autograd information only for tensors requiring grad.
   std::vector<torch::Tensor> tensors_with_grad;
   std::copy_if(
@@ -96,7 +95,7 @@ Message getMessageWithAutograd(
   AutogradMetadata autogradMetadata(
       autogradContext->contextId(), autogradContainer.newAutogradMessageId());
   auto rpcWithAutograd = std::make_unique<RpcWithAutograd>(
-      RpcAgent::getDefaultRpcAgent()->getWorkerInfo().id_,
+      RpcAgent::getCurrentRpcAgent()->getWorkerInfo().id_,
       msgType,
       autogradMetadata,
       std::move(wrappedRpcMsg));
@@ -104,7 +103,7 @@ Message getMessageWithAutograd(
   if (tensorsRequireGrad) {
     // Record autograd information for 'send'.
     addSendRpcBackward(
-        autogradContext, autogradMetadata, rpcWithAutograd->tensors(), dstId);
+        autogradContext, autogradMetadata, rpcWithAutograd->tensors());
   }
   // Record the workerID
   autogradContext->addKnownWorkerId(dstId);
@@ -116,14 +115,15 @@ std::shared_ptr<FutureMessage> sendMessageWithAutograd(
     RpcAgent& agent,
     const WorkerInfo& dst,
     torch::distributed::rpc::Message&& wrappedRpcMsg,
-    bool forceGradRecording) {
+    bool forceGradRecording,
+    const float rpcTimeoutSeconds) {
   auto msg = getMessageWithAutograd(
       dst.id_,
       std::move(wrappedRpcMsg),
       MessageType::FORWARD_AUTOGRAD_REQ,
       forceGradRecording);
 
-  return agent.send(dst, std::move(msg));
+  return agent.send(dst, std::move(msg), rpcTimeoutSeconds);
 }
 
 } // namespace autograd

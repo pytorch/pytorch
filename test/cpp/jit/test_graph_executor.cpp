@@ -1,6 +1,6 @@
 #include "test/cpp/jit/test_base.h"
 #include "test/cpp/jit/test_utils.h"
-#include "torch/csrc/jit/graph_executor.h"
+#include "torch/csrc/jit/runtime/graph_executor.h"
 
 namespace torch {
 namespace jit {
@@ -18,7 +18,7 @@ void testGraphExecutor() {
   auto w_hh = t_def(at::randn({4 * hidden_size, hidden_size}, at::kCUDA));
 
   auto g = build_lstm();
-  GraphExecutor executor(g);
+  GraphExecutor executor(g, "");
   auto stack = createStack({input, hx, cx, w_ih, w_hh});
   executor.run(stack);
   ASSERT_EQ(stack.size(), 2);

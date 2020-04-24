@@ -98,19 +98,9 @@ class Binomial(Distribution):
         return self._param.size()
 
     def sample(self, sample_shape=torch.Size()):
+        shape = self._extended_shape(sample_shape)
         with torch.no_grad():
-            max_count = max(int(self.total_count.max()), 1)
-            shape = self._extended_shape(sample_shape) + (max_count,)
-            bernoullis = torch.bernoulli(self.probs.unsqueeze(-1).expand(shape))
-            if self.total_count.min() != max_count:
-                arange = torch.arange(max_count, dtype=self._param.dtype, device=self._param.device)
-                mask = arange >= self.total_count.unsqueeze(-1)
-                if torch._C._get_tracing_state():
-                    # [JIT WORKAROUND] lack of support for .masked_fill_()
-                    bernoullis[mask.expand(shape)] = 0.
-                else:
-                    bernoullis.masked_fill_(mask, 0.)
-            return bernoullis.sum(dim=-1)
+            return torch.binomial(self.total_count.expand(shape), self.probs.expand(shape))
 
     def log_prob(self, value):
         if self._validate_args:

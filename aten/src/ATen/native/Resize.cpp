@@ -1,7 +1,7 @@
 #include <ATen/ATen.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/ResizeCommon.h>
-#include <ATen/core/op_registration/op_registration.h>
+#include <torch/library.h>
 #include <c10/core/TensorOptions.h>
 
 namespace at { namespace native {
@@ -54,9 +54,7 @@ Tensor& resize_as_(
     }
     self.unsafeGetTensorImpl()->empty_tensor_restride(memory_format);
   }
-#ifdef BUILD_NAMEDTENSOR
   namedinference::propagate_names(result, the_template);
-#endif
   return result;
 }
 
@@ -64,14 +62,11 @@ Tensor& resize_(
     Tensor& self,
     IntArrayRef size,
     c10::optional<MemoryFormat> optional_memory_format) {
-#ifdef BUILD_NAMEDTENSOR
   if (self.has_names()) {
     return resize_named_tensor_(self, size, optional_memory_format);
   }
-#endif
   auto* self_ = self.unsafeGetTensorImpl();
   resize_impl_cpu_(self_, size, /*strides=*/c10::nullopt);
-  self_->maybe_zero_dim(size.size() == 0);
   if (optional_memory_format.has_value()) {
     auto memory_format =
         optional_memory_format.value();
@@ -84,16 +79,13 @@ Tensor& resize_(
   return self;
 }
 
-static auto registry = torch::RegisterOperators()
-  .op(torch::RegisterOperators::options()
-    .schema("aten::resize_(Tensor(a!) self, int[] size, *, MemoryFormat? memory_format=None) -> Tensor(a!)")
-    .impl_unboxedOnlyKernel<decltype(resize_), &resize_>(TensorTypeId::CPUTensorId)
-    .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA))
-  .op(torch::RegisterOperators::options()
-    .schema("aten::resize_as_(Tensor(a!) self, Tensor the_template, *, MemoryFormat? memory_format=None) -> Tensor(a!)")
-    .impl_unboxedOnlyCatchAllKernel<decltype(resize_as_), &resize_as_>()
-    .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA))
-  ;
+TORCH_LIBRARY_IMPL(aten, CPU, m) {
+  m.impl_UNBOXED("resize_", resize_);
+}
+
+TORCH_LIBRARY_IMPL(aten, CatchAll, m) {
+  m.impl_UNBOXED("resize_as_", resize_as_);
+}
 
 } // namespace native
 } // namespace at

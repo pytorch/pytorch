@@ -259,9 +259,9 @@ void initializeStreamsEvents(
     if (tensors[i].is_sparse()) {
       if (tensors[i].is_coalesced()) {
         c10::cuda::CUDACachingAllocator::recordStream(
-            tensors[i].indices().storage().data(), streams[i]);
+            tensors[i].indices().storage().data_ptr(), streams[i]);
         c10::cuda::CUDACachingAllocator::recordStream(
-            tensors[i].values().storage().data(), streams[i]);
+            tensors[i].values().storage().data_ptr(), streams[i]);
       } else {
         // We will need to coalesce first, which means new tensors will
         // be allocated on the streams we just allocated, and there
@@ -269,7 +269,7 @@ void initializeStreamsEvents(
       }
     } else {
       c10::cuda::CUDACachingAllocator::recordStream(
-          tensors[i].storage().data(), streams[i]);
+          tensors[i].storage().data_ptr(), streams[i]);
     }
   }
 }
@@ -315,7 +315,7 @@ void initializeStreamsEvents(
       // new streams in this Work to prevent being freed before the Work
       // finishes.
       c10::cuda::CUDACachingAllocator::recordStream(
-          tensor.storage().data(), streams[i]);
+          tensor.storage().data_ptr(), streams[i]);
     }
   }
 }
@@ -333,14 +333,17 @@ ProcessGroupGloo::SendWork::SendWork(
 
 bool ProcessGroupGloo::SendWork::wait() {
   bool sendCompleted = false;
-  std::unique_lock<std::mutex> lock(mutex_);
+  std::exception_ptr exception{nullptr};
   try {
     sendCompleted = buffer_->waitSend();
   } catch (...) {
-    exception_ = std::current_exception();
+    exception = std::current_exception();
   }
-
+  // Lock to write completed_ and exception_, and throw if there is an
+  // exception.
+  std::lock_guard<std::mutex> lock(mutex_);
   completed_ = true;
+  exception_ = exception;
   if (exception_) {
     std::rethrow_exception(exception_);
   }
@@ -363,14 +366,17 @@ int ProcessGroupGloo::RecvWork::sourceRank() const {
 
 bool ProcessGroupGloo::RecvWork::wait() {
   bool recvCompleted = false;
-  std::unique_lock<std::mutex> lock(mutex_);
+  std::exception_ptr exception{nullptr};
   try {
     recvCompleted = buffer_->waitRecv(&srcRank_);
   } catch (...) {
-    exception_ = std::current_exception();
+    exception = std::current_exception();
   }
-
+  // Lock to write completed_ and exception_, and throw if there is an
+  // exception.
+  std::lock_guard<std::mutex> lock(mutex_);
   completed_ = true;
+  exception_ = exception;
   if (exception_) {
     std::rethrow_exception(exception_);
   }
@@ -948,7 +954,7 @@ class AsyncSparseAllreduceWork : public ProcessGroupGloo::AsyncWork {
           continue;
         }
         const auto actual = metadata[i].sizes();
-        AT_CHECK(actual == expected, "Sparse dimensions do not match");
+        TORCH_CHECK(actual == expected, "Sparse dimensions do not match");
       }
     }
 
@@ -976,6 +982,7 @@ class AsyncSparseAllreduceWork : public ProcessGroupGloo::AsyncWork {
     // Copy back to input tensors.
     outputs.reserve(inputs.size());
     for (size_t i = 0; i < inputs.size(); i++) {
+      inputs[i].copy_(output);
       if (output.is_sparse()) {
         outputs.push_back(output.clone());
       } else {
@@ -1209,6 +1216,12 @@ class AsyncSparseAllreduceCUDAWork : public AsyncSparseAllreduceWork {
     for (size_t i = 0; i < inputs.size(); i++) {
       guard.set_index(inputs[i].device().index());
       events[i].block(at::cuda::getCurrentCUDAStream());
+    }
+
+    // Copy outputs back to inputs after synchronization, so that users can
+    // access all reduce results from input tensors
+    for (size_t i = 0; i < inputs.size(); i++) {
+      inputs[i].copy_(outputs[i]);
     }
   }
 
@@ -1824,6 +1837,14 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::allgather_coalesced(
       std::move(context), output_lists, input_list, tag);
   enqueue(work);
   return work;
+}
+
+std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::allgather_base(
+    at::Tensor& /*unused */,
+    at::Tensor& /*unused */,
+    const AllgatherOptions& /*unused */) {
+  throw std::runtime_error(
+      "no support for allgather_base in Gloo process group");
 }
 
 namespace {

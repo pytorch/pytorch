@@ -1,13 +1,14 @@
 import os
 import sys
+import io
 
 import torch
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
-from jit_utils import JitTestCase
-from common_utils import suppress_warnings
+from torch.testing._internal.jit_utils import JitTestCase
+from torch.testing._internal.common_utils import suppress_warnings
 
 if __name__ == '__main__':
     raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
@@ -283,6 +284,34 @@ class TestTypeSharing(JitTestCase):
 
         self.assertDifferentType(fn1_mod, fn2_mod)
 
+    def test_builtin_function_same(self):
+        class Caller(torch.nn.Module):
+            def __init__(self, fn):
+                super(Caller, self).__init__()
+                self.fn = fn
+
+            def forward(self, input):
+                return self.fn(input, input)
+
+        c1 = Caller(torch.add)
+        c2 = Caller(torch.add)
+
+        self.assertSameType(c1, c2)
+
+    def test_builtin_function_different(self):
+        class Caller(torch.nn.Module):
+            def __init__(self, fn):
+                super(Caller, self).__init__()
+                self.fn = fn
+
+            def forward(self, input):
+                return self.fn(input, input)
+
+        c1 = Caller(torch.add)
+        c2 = Caller(torch.sub)
+
+        self.assertDifferentType(c1, c2)
+
     def test_script_function_attribute_same(self):
         """
         Same functions passed in should lead to same types
@@ -408,3 +437,67 @@ class TestTypeSharing(JitTestCase):
         a = M((torch.ones(1), ))
         b = M((torch.zeros(1), ))
         self.assertDifferentType(a, b)
+
+    def test_loaded_modules_work(self):
+        class AB(torch.nn.Module):
+            def __init__(self):
+                super(AB, self).__init__()
+                self.a = 1
+                self.b = 1
+
+            def forward(self):
+                return self.a + self.b
+
+        class A(torch.nn.Module):
+            def __init__(self):
+                super(A, self).__init__()
+                self.a = 1
+
+            def forward(self):
+                return self.a
+
+        class Wrapper(torch.nn.Module):
+            def __init__(self, sub):
+                super(Wrapper, self).__init__()
+                self.sub = sub
+
+            def forward(self):
+                return self.sub()
+
+        def package(x):
+            buffer = io.BytesIO()
+            torch.jit.save(torch.jit.script(x), buffer)
+            buffer.seek(0)
+            return torch.jit.script(Wrapper(torch.jit.load(buffer)))
+
+
+        a = package(AB())
+        a()
+        b = package(A())
+        b()
+
+    def test_module_dict_same_type_different_name(self):
+        """
+        We should be able to differentiate between two ModuleDict instances
+        that have different keys but the same value types.
+        """
+        class A(torch.nn.Module):
+            def __init__(self):
+                super(A, self).__init__()
+
+            def forward(self, x):
+                return x
+
+        class Foo(torch.nn.Module):
+            def __init__(self, s):
+                super(Foo, self).__init__()
+                self.dict = torch.nn.ModuleDict(s)
+
+            def forward(self, x):
+                return x
+
+        a = Foo({'foo': A()})
+        b = Foo({'bar': A()})
+        c = Foo({'bar': A()})
+        self.assertDifferentType(a, b)
+        self.assertSameType(b, c)

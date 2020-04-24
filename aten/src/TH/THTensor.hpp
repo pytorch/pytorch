@@ -40,16 +40,9 @@ inline THStorage* THTensor_getStoragePtr(const THTensor* tensor) {
   return tensor->storage().unsafeGetStorageImpl();
 }
 
-inline void THTensor_maybe_zero_dim(THTensor *tensor, bool condition_when_zero_dim) {
-  bool set_zero_dim = condition_when_zero_dim && tensor->sizes().size() == 1 && tensor->size(0) == 1;
-  if (set_zero_dim) {
-    tensor->set_sizes_and_strides({}, {});
-  }
-}
-
 // [NOTE: nDimension vs nDimensionLegacyNoScalars vs nDimensionLegacyAll]
 // nDimension                 corresponds to the "true" ATen dimension.
-// nDimensionLegacyNoScalars  correpsonds to the ATen dimension, except scalars are viewed as 1-dimensional tensors.
+// nDimensionLegacyNoScalars  corresponds to the ATen dimension, except scalars are viewed as 1-dimensional tensors.
 // nDimensionLegacyAll        corresponds to the ATen dimension, except scalars are viewed as 1-dimensional tensors
 //                            and tensors with a dimension of size zero are collapsed to 0-dimensional tensors.
 //
@@ -115,7 +108,6 @@ inline std::vector<int64_t> THTensor_stridesLegacyNoScalars(const THTensor *self
 TH_API void THTensor_stealAndSetStoragePtr(THTensor* tensor, THStorage* storage);
 
 TH_API void THTensor_free(THTensor *self);
-TH_API void THTensor_setStorageNd(THTensor *self, THStorage *storage, ptrdiff_t storageOffset, int nDimension, const int64_t *size, const int64_t *stride);
 TH_API void THTensor_resizeNd(THTensor *self, int nDimension, const int64_t *size, const int64_t *stride);
 
 TH_CPP_API void THTensor_resize(THTensor *self, at::IntArrayRef size, at::IntArrayRef stride);
