@@ -549,6 +549,7 @@ class RpcTest(RpcAgentTestFixture):
             )
         rpc.shutdown()
 
+    @requires_process_group_agent("PROCESS_GROUP rpc backend specific test, skip")
     def test_world_size_one(self):
         if self.rank == 0:
             rpc.init_rpc(
