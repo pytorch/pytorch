@@ -1,6 +1,5 @@
 #include <torch/csrc/jit/ir/alias_analysis.h>
 
-#include <c10/fmt/ostream.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/runtime/operator.h>
 #include <torch/csrc/utils/memory.h>
@@ -1076,11 +1075,12 @@ Element* AliasDb::getOrCreateElement(const Value* value) {
 void AliasDb::replaceWithNewValue(Value* existing, Value* new_value) {
   TORCH_INTERNAL_ASSERT(
       *unshapedType(existing->type()) == *unshapedType(new_value->type()),
-      fmt::format(
-          "Types must be strictly equal if you are replacing aliasing information. "
-          "Got existing: '{}', new_value: '{}'",
-          existing->type()->python_str(),
-          new_value->type()->python_str()));
+      "Types must be strictly equal if you are replacing aliasing information. ",
+      "Got existing: '",
+      existing->type()->python_str(),
+      "', new_value: '",
+      new_value->type()->python_str(),
+      "'");
   if (!isMutableTypeInternal(existing)) {
     return;
   }
@@ -1093,11 +1093,12 @@ void AliasDb::replaceWithNewValue(Value* existing, Value* new_value) {
 void AliasDb::copyValue(Value* from, Value* to) {
   TORCH_INTERNAL_ASSERT(
       *unshapedType(from->type()) == *unshapedType(to->type()),
-      fmt::format(
-          "Types must be strictly equal if you are copying aliasing information. "
-          "Got from: '{}', to: '{}'",
-          from->type()->python_str(),
-          to->type()->python_str()));
+      "Types must be strictly equal if you are copying aliasing information. ",
+      "Got from: '",
+      from->type()->python_str(),
+      "', to: '",
+      to->type()->python_str(),
+      "'");
   if (!isMutableTypeInternal(to)) {
     return;
   }
@@ -1532,15 +1533,12 @@ void Lint(const AliasDb* db) {
     auto it = db->elementMap_.find(v);
     if (it == db->elementMap_.end()) {
       failed = true;
-      ss << fmt::format(
-          "Value %{} of type {} wasn't found in the element map.\n"
-          "It was defined in {}",
-          v->debugName(),
-          v->type()->python_str(),
-          *v->node());
+      ss << "Value %" << v->debugName() << " of type "
+         << v->type()->python_str() << " wasn't found in the element map.\n"
+         << "It was defined in " << *v->node();
     }
   }
-  TORCH_INTERNAL_ASSERT(failed == false, ss.str());
+  TORCH_INTERNAL_ASSERT(!failed, ss.str());
 
   // Two checks that we want to add but can't until the mutation API is more
   // fully developed.
