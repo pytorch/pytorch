@@ -244,7 +244,7 @@ void DistAutogradContainer::sendReleaseContextRpc(
                   "Could not release Dist Autograd Context on node ",
                   worker_id,
                   ": ",
-                  error->what());
+                  cleanupFuture.error()->what());
               LOG(ERROR) << errorMsg;
               return;
             }
