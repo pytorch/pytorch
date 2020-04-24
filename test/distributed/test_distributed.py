@@ -2212,7 +2212,7 @@ class _DistTestBase(object):
                 bs_array[num_processes // 2] = 0    # another empty batch in the middle
         if bs_array.sum().item() == 0:
             bs_array[0] = 1     # make sure the batch is not fully empty
-        
+
         local_bs = bs_array[rank].item()
         bs_offset = bs_array[:rank].sum().item()
         global_bs = bs_array.sum().item()
