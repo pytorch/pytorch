@@ -1,7 +1,7 @@
 #pragma once
 
 #include <c10/util/ArrayRef.h>
-#include <c10/util/complex.h>
+#include <c10/util/complex_type.h>
 #include <c10/util/Half.h>
 #include <c10/util/BFloat16.h>
 #include <c10/util/Optional.h>
