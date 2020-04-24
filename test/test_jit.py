@@ -5427,7 +5427,7 @@ a")
         buffer.seek(0)
         loaded = torch.jit.load(buffer)
         # should work
-        copy.deepcopy(loaded)
+        loaded.copy()
 
     def test_mul(self):
         def func(a, b):
@@ -10661,7 +10661,7 @@ a")
 
         m = torch.jit.script(M())
         # test copy
-        m_c = copy.deepcopy(m)
+        m_c = m.copy()
 
     # Suppression: ONNX warns when exporting RNNs because of potential batch size mismatch.
     @suppress_warnings
