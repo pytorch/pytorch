@@ -320,8 +320,14 @@ public:
     alias_kind_ = v;
   }
 
-  void setNamespaceIfNotSet(const char* ns) {
-    name_.setNamespaceIfNotSet(ns);
+  c10::optional<c10::string_view> getNamespace() const {
+    return name_.getNamespace();
+  }
+
+  // Returns true if we successfully set the namespace (as there
+  // was none set, and false otherwise)
+  bool setNamespaceIfNotSet(const char* ns) {
+    return name_.setNamespaceIfNotSet(ns);
   }
 
   // can a function with this schema be substituted for a function of rhs's

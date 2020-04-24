@@ -269,6 +269,7 @@ The following operators are supported:
 * MaxPool3d
 * RNN
 * abs
+* absolute
 * acos
 * adaptive_avg_pool1d
 * adaptive_avg_pool2d

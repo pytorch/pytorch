@@ -6,7 +6,7 @@ from hypothesis import given
 from hypothesis import strategies as st
 import torch.testing._internal.hypothesis_utils as hu
 hu.assert_deadline_disabled()
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import TestCase
 from torch.quantization import FakeQuantize
 from torch.quantization import default_observer, default_per_channel_weight_observer
 import io
@@ -309,6 +309,3 @@ class TestFakeQuantizePerChannel(TestCase):
         loaded_dict = torch.load(b)
         for key in state_dict:
             self.assertEqual(state_dict[key], loaded_dict[key])
-
-if __name__ == '__main__':
-    run_tests()

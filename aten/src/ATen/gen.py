@@ -149,7 +149,7 @@ SPARSE_TYPE_DERIVED_CPP = CodeTemplate.from_file(TEMPLATE_PATH + "/SparseTypeDer
 TYPE_DERIVED_H = CodeTemplate.from_file(TEMPLATE_PATH + "/TypeDerived.h")
 TYPE_DEFAULT_H = CodeTemplate.from_file(TEMPLATE_PATH + "/TypeDefault.h")
 TYPE_DEFAULT_CPP = CodeTemplate.from_file(TEMPLATE_PATH + "/TypeDefault.cpp")
-OPS_ALREADY_MOVED_TO_C10_CPP = CodeTemplate.from_file(TEMPLATE_PATH + "/OpsAlreadyMovedToC10.cpp")
+OPS_ALREADY_MOVED_TO_C10_CPP = CodeTemplate.from_file(TEMPLATE_PATH + "/ATenOpList.cpp")
 BACKEND_SELECT_REGISTER_CPP = CodeTemplate.from_file(TEMPLATE_PATH + "/BackendSelectRegister.cpp")
 SCHEMA_REGISTER_CPP = CodeTemplate.from_file(TEMPLATE_PATH + "/SchemaRegister.cpp")
 TENSOR_H = CodeTemplate.from_file(TEMPLATE_PATH + "/TensorBody.h")
@@ -196,8 +196,7 @@ top_env = {
     'cpu_type_headers': [],
     'cuda_type_headers': [],
     'function_registrations': [],
-    'aten_ops_with_unboxing_already_handled_by_c10': [],
-    'aten_ops_with_unboxing_not_handled_by_c10_yet': [],
+    'aten_ops': [],
     'type_method_declarations': [],
     'type_method_definitions': [],
     'tensor_method_declarations': [],
@@ -364,11 +363,11 @@ def generate_storage_type_and_tensor(backend, density, declarations, per_op_regi
 
     if env['DeviceType'] == 'CPU':
         top_env['cpu_type_headers'].append(
-            '#include "ATen/{}.h"'.format(env['Type']))
+            '#include <ATen/{}.h>'.format(env['Type']))
     else:
         assert env['DeviceType'] == 'CUDA'
         top_env['cuda_type_headers'].append(
-            '#include "ATen/{}.h"'.format(env['Type']))
+            '#include <ATen/{}.h>'.format(env['Type']))
 
 
 # yields (backend, density) tuples
@@ -392,7 +391,7 @@ def gen_per_op_registration_filename(opname):
 # so that the script runs quickly when we are just querying the
 # outputs
 def declare_outputs():
-    core_files = ['TensorBody.h', 'TensorMethods.h', 'OpsAlreadyMovedToC10.cpp']
+    core_files = ['TensorBody.h', 'TensorMethods.h', 'ATenOpList.cpp']
     for f in core_files:
         core_file_manager.will_write(f)
     files = ['Declarations.yaml', 'TypeDefault.cpp', 'TypeDefault.h',
@@ -504,7 +503,7 @@ def generate_outputs():
     core_files = {
         'TensorBody.h': TENSOR_H,
         'TensorMethods.h': TENSOR_METHODS_H,
-        'OpsAlreadyMovedToC10.cpp': OPS_ALREADY_MOVED_TO_C10_CPP,
+        'ATenOpList.cpp': OPS_ALREADY_MOVED_TO_C10_CPP,
     }
 
     for core_file, core_template_file in core_files.items():
