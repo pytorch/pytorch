@@ -363,9 +363,8 @@ void RequestCallbackImpl::processRpc(
         // the OwnerRRef has been created
         const auto& rref = futureOwner->constValue();
         if (rref->hasValue()) {
-          SerializedPyObj result =
-              PythonRpcHandler::getInstance().serialize(
-                  toPyObj(rref->getValue()));
+          SerializedPyObj result = PythonRpcHandler::getInstance().serialize(
+              toPyObj(rref->getValue()));
           markComplete(
               PythonRRefFetchRet(std::move(result).toIValues()).toMessage());
           return;
@@ -385,9 +384,8 @@ void RequestCallbackImpl::processRpc(
             return;
           }
           try {
-            SerializedPyObj result =
-                PythonRpcHandler::getInstance().serialize(
-                    toPyObj(rref->getValue()));
+            SerializedPyObj result = PythonRpcHandler::getInstance().serialize(
+                toPyObj(rref->getValue()));
             Message m =
                 PythonRRefFetchRet(std::move(result).toIValues()).toMessage();
             m.setId(messageId);
