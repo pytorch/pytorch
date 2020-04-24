@@ -534,5 +534,54 @@ void testSplitNonReduceAxis() {
   }
 }
 
+void testReorderedReductionInitializer() {
+  KernelScope kernel_scope;
+  /* From the quip:
+  for k in 0..1:  // blockIdx
+    for m in 0..128:
+      for n in 0..64: // threadIdx
+        SumOp(c(k, n), 0, a(k, m, n), {m})
+  */
+
+  Buffer in(BufHandle("in", {1, 12, 6}), kFloat);
+  std::vector<float> in_(12 * 6, 1.f);
+
+  Tensor* tensor_ = Reduce("sum", {{1, "k"}, {12, "n"}}, Sum(), in, {{6, "m"}});
+  LoopNest l_({tensor_});
+
+  l_.prepareForCodegen();
+  Stmt* s_ = Stmt::clone(l_.root_stmt());
+  s_ = IRSimplifier::simplify(s_);
+
+  Tensor* tensor = Reduce("sum", {{1, "k"}, {12, "n"}}, Sum(), in, {{6, "m"}});
+  LoopNest l({tensor});
+
+  auto loops = l.getLoopStmtsFor(tensor);
+  l.setGPUBlockIndex(loops[0], 0);
+  l.setGPUThreadIndex(loops[1], 0);
+
+  l.reorderAxis(tensor, loops[1], loops[2]);
+
+  Stmt* s = l.root_stmt();
+  s = IRSimplifier::simplify(s);
+
+  l.prepareForCodegen();
+
+  s = l.root_stmt();
+  s = IRSimplifier::simplify(s);
+
+  std::vector<float> out1(16, -1.f);
+  SimpleIREvaluator cg(s_, {in, tensor_});
+  cg.call({in_, out1});
+
+  std::vector<float> out2(16, -1.f);
+  SimpleIREvaluator cg2(s, {in, tensor});
+  cg2.call({in_, out2});
+
+  for (int i = 0; i < 16; ++i) {
+    ASSERT_EQ(out1[i], out2[i]);
+  }
+}
+
 } // namespace jit
 } // namespace torch

@@ -290,24 +290,32 @@ public:
     return _mm256_cmp_pd(values, other.values, _CMP_NEQ_OQ);
   }
   Vec256<std::complex<double>> operator<(const Vec256<std::complex<double>>& other) const {
-    AT_ERROR("not supported for complex numbers");
+    TORCH_CHECK(false, "not supported for complex numbers");
   }
   Vec256<std::complex<double>> operator<=(const Vec256<std::complex<double>>& other) const {
-    AT_ERROR("not supported for complex numbers");
+    TORCH_CHECK(false, "not supported for complex numbers");
   }
   Vec256<std::complex<double>> operator>(const Vec256<std::complex<double>>& other) const {
-    AT_ERROR("not supported for complex numbers");
+    TORCH_CHECK(false, "not supported for complex numbers");
   }
   Vec256<std::complex<double>> operator>=(const Vec256<std::complex<double>>& other) const {
-    AT_ERROR("not supported for complex numbers");
+    TORCH_CHECK(false, "not supported for complex numbers");
   }
 
   Vec256<std::complex<double>> eq(const Vec256<std::complex<double>>& other) const;
   Vec256<std::complex<double>> ne(const Vec256<std::complex<double>>& other) const;
-  Vec256<std::complex<double>> lt(const Vec256<std::complex<double>>& other) const;
-  Vec256<std::complex<double>> le(const Vec256<std::complex<double>>& other) const;
-  Vec256<std::complex<double>> gt(const Vec256<std::complex<double>>& other) const;
-  Vec256<std::complex<double>> ge(const Vec256<std::complex<double>>& other) const;
+  Vec256<std::complex<double>> lt(const Vec256<std::complex<double>>& other) const {
+    TORCH_CHECK(false, "not supported for complex numbers");
+  }
+  Vec256<std::complex<double>> le(const Vec256<std::complex<double>>& other) const {
+    TORCH_CHECK(false, "not supported for complex numbers");
+  }
+  Vec256<std::complex<double>> gt(const Vec256<std::complex<double>>& other) const {
+    TORCH_CHECK(false, "not supported for complex numbers");
+  }
+  Vec256<std::complex<double>> ge(const Vec256<std::complex<double>>& other) const {
+    TORCH_CHECK(false, "not supported for complex numbers");
+  }
 };
 
 template <> Vec256<std::complex<double>> inline operator+(const Vec256<std::complex<double>> &a, const Vec256<std::complex<double>> &b) {
@@ -439,12 +447,6 @@ Vec256<std::complex<double>> Vec256<std::complex<double>>::eq(const Vec256<std::
 Vec256<std::complex<double>> Vec256<std::complex<double>>::ne(const Vec256<std::complex<double>>& other) const {
   return (*this != other) & Vec256<std::complex<double>>::ones;
 }
-
-#ifdef __AVX2__
-template <> inline Vec256<std::complex<double>> fmadd(const Vec256<std::complex<double>>& a, const Vec256<std::complex<double>>& b, const Vec256<std::complex<double>>& c) {
-  return a * b + c;
-}
-#endif
 
 #endif
 

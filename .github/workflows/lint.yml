@@ -34,14 +34,10 @@ jobs:
           (! git grep -I -l $'\t' -- . ':(exclude)*.svg' ':(exclude)**Makefile' ':(exclude)**/contrib/**' ':(exclude)third_party' ':(exclude).gitattributes' ':(exclude).gitmodules' || (echo "The above files have tabs; please convert them to spaces"; false))
       - name: Ensure canonical include
         run: |
-          (! git grep -I -l $'#include "' -- ./c10 || (echo "The above files have include with quotes; please convert them to #include <xxxx>"; false))
+          (! git grep -I -l $'#include "' -- ./c10 ./aten ./torch/csrc ':(exclude)aten/src/ATen/native/quantized/cpu/qnnpack/**' || (echo "The above files have include with quotes; please convert them to #include <xxxx>"; false))
       - name: Ensure C++ source files are not executable
         run: |
-          (! find . \( -path ./third_party -o -path ./.git -o -path ./torch/bin -o -path ./build \) -prune -o -type f -executable -regextype posix-egrep -not -regex '.+(\.(bash|sh|py|so)|git-pre-commit)$' -print | grep . || (echo 'The above files have executable permission; please remove their executable permission by using `chmod -x`'; false))
-      - name: MyPy typecheck
-        run: |
-          pip install mypy mypy-extensions
-          mypy @mypy-files.txt
+          (! find . \( -path ./third_party -o -path ./.git -o -path ./torch/bin -o -path ./build \) -prune -o -type f -executable -regextype posix-egrep -not -regex '.+(\.(bash|sh|py|so)|git-pre-commit|git-clang-format)$' -print | grep . || (echo 'The above files have executable permission; please remove their executable permission by using `chmod -x`'; false))
       - name: C++ docs check
         run: |
           sudo apt-get install -y doxygen && pip install -r requirements.txt
@@ -156,16 +152,16 @@ jobs:
           # Run Clang-Tidy
           # The negative filters below are to exclude files that include onnx_pb.h or
           # caffe2_pb.h, otherwise we'd have to build protos as part of this CI job.
-          python tools/clang_tidy.py                  \
-            --verbose                                 \
-            --paths torch/csrc/                       \
-            --diff "$MERGE_BASE"                      \
-            -g"-torch/csrc/jit/export.cpp"            \
-            -g"-torch/csrc/jit/import.cpp"            \
-            -g"-torch/csrc/jit/netdef_converter.cpp"  \
-            -g"-torch/csrc/onnx/init.cpp"             \
-            -g"-torch/csrc/cuda/nccl.*"               \
-            -g"-torch/csrc/cuda/python_nccl.cpp"      \
+          python tools/clang_tidy.py                               \
+            --verbose                                              \
+            --paths torch/csrc/                                    \
+            --diff "$MERGE_BASE"                                   \
+            -g"-torch/csrc/jit/serialization/export.cpp"           \
+            -g"-torch/csrc/jit/serialization/import.cpp"           \
+            -g"-torch/csrc/jit/serialization/import_legacy.cpp"    \
+            -g"-torch/csrc/onnx/init.cpp"                          \
+            -g"-torch/csrc/cuda/nccl.*"                            \
+            -g"-torch/csrc/cuda/python_nccl.cpp"                   \
             "$@" > ${GITHUB_WORKSPACE}/clang-tidy-output.txt
 
           cat ${GITHUB_WORKSPACE}/clang-tidy-output.txt

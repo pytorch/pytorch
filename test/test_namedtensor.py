@@ -6,7 +6,6 @@ import itertools
 import functools
 import torch
 from torch import Tensor
-from torch._six import PY2
 import torch.nn.functional as F
 from multiprocessing.reduction import ForkingPickler
 import pickle
@@ -162,7 +161,6 @@ class TestNamedTensor(TestCase):
         self.assertTrue(partially_named.has_names())
         self.assertTrue(fully_named.has_names())
 
-    @unittest.skipIf(PY2, "Ellipsis object not supported in python 2")
     def test_py3_ellipsis(self):
         # Need to exec or else flake8 will complain about invalid python 2.
         tensor = torch.randn(2, 3, 5, 7)

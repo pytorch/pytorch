@@ -5,7 +5,7 @@
 #include <ATen/Tensor.h>
 #include <ATen/native/DistributionTemplates.h>
 #include <ATen/native/cpu/DistributionTemplates.h>
-#include <ATen/core/op_registration/op_registration.h>
+#include <torch/library.h>
 #include <c10/util/Optional.h>
 #include <torch/all.h>
 #include <stdexcept>
@@ -39,83 +39,81 @@ struct TestCPUGenerator : public c10::GeneratorImpl {
 
 // ==================================================== Random ========================================================
 
-Tensor& random_(Tensor& self, Generator generator) {
+Tensor& random_(Tensor& self, c10::optional<Generator> generator) {
   return at::native::templates::random_impl<native::templates::cpu::RandomKernel, TestCPUGenerator>(self, generator);
 }
 
-Tensor& random_from_to(Tensor& self, int64_t from, optional<int64_t> to, Generator generator) {
+Tensor& random_from_to(Tensor& self, int64_t from, optional<int64_t> to, c10::optional<Generator> generator) {
   return at::native::templates::random_from_to_impl<native::templates::cpu::RandomFromToKernel, TestCPUGenerator>(self, from, to, generator);
 }
 
-Tensor& random_to(Tensor& self, int64_t to, Generator generator) {
+Tensor& random_to(Tensor& self, int64_t to, c10::optional<Generator> generator) {
   return random_from_to(self, 0, to, generator);
 }
 
 // ==================================================== Normal ========================================================
 
-Tensor& normal_(Tensor& self, double mean, double std, Generator gen) {
+Tensor& normal_(Tensor& self, double mean, double std, c10::optional<Generator> gen) {
   return at::native::templates::normal_impl_<native::templates::cpu::NormalKernel, TestCPUGenerator>(self, mean, std, gen);
 }
 
-Tensor& normal_Tensor_float_out(Tensor& output, const Tensor& mean, double std, Generator gen) {
+Tensor& normal_Tensor_float_out(Tensor& output, const Tensor& mean, double std, c10::optional<Generator> gen) {
   return at::native::templates::normal_out_impl<native::templates::cpu::NormalKernel, TestCPUGenerator>(output, mean, std, gen);
 }
 
-Tensor& normal_float_Tensor_out(Tensor& output, double mean, const Tensor& std, Generator gen) {
+Tensor& normal_float_Tensor_out(Tensor& output, double mean, const Tensor& std, c10::optional<Generator> gen) {
   return at::native::templates::normal_out_impl<native::templates::cpu::NormalKernel, TestCPUGenerator>(output, mean, std, gen);
 }
 
-Tensor& normal_Tensor_Tensor_out(Tensor& output, const Tensor& mean, const Tensor& std, Generator gen) {
+Tensor& normal_Tensor_Tensor_out(Tensor& output, const Tensor& mean, const Tensor& std, c10::optional<Generator> gen) {
   return at::native::templates::normal_out_impl<native::templates::cpu::NormalKernel, TestCPUGenerator>(output, mean, std, gen);
 }
 
-Tensor normal_Tensor_float(const Tensor& mean, double std, Generator gen) {
+Tensor normal_Tensor_float(const Tensor& mean, double std, c10::optional<Generator> gen) {
   return at::native::templates::normal_impl<native::templates::cpu::NormalKernel, TestCPUGenerator>(mean, std, gen);
 }
 
-Tensor normal_float_Tensor(double mean, const Tensor& std, Generator gen) {
+Tensor normal_float_Tensor(double mean, const Tensor& std, c10::optional<Generator> gen) {
   return at::native::templates::normal_impl<native::templates::cpu::NormalKernel, TestCPUGenerator>(mean, std, gen);
 }
 
-Tensor normal_Tensor_Tensor(const Tensor& mean, const Tensor& std, Generator gen) {
+Tensor normal_Tensor_Tensor(const Tensor& mean, const Tensor& std, c10::optional<Generator> gen) {
   return at::native::templates::normal_impl<native::templates::cpu::NormalKernel, TestCPUGenerator>(mean, std, gen);
 }
 
 // ==================================================== Uniform =======================================================
 
-Tensor& uniform_(Tensor& self, double from, double to, Generator generator) {
+Tensor& uniform_(Tensor& self, double from, double to, c10::optional<Generator> generator) {
   return at::native::templates::uniform_impl_<native::templates::cpu::UniformKernel, TestCPUGenerator>(self, from, to, generator);
 }
 
 // ==================================================== Cauchy ========================================================
 
-Tensor& custom_rng_cauchy_(Tensor& self, double median, double sigma, Generator generator) {
+Tensor& custom_rng_cauchy_(Tensor& self, double median, double sigma, c10::optional<Generator> generator) {
   auto iter = TensorIterator::nullary_op(self);
   native::templates::cpu::cauchy_kernel(iter, median, sigma, check_generator<TestCPUGenerator>(generator));
   return self;
 }
 
+TORCH_LIBRARY_IMPL(aten, CustomRNGKeyId, m) {
+  // Random
+  m.impl_UNBOXED("random_.from",             random_from_to);
+  m.impl_UNBOXED("random_.to",               random_to);
+  m.impl_UNBOXED("random_",                  random_);
+  // Normal
+  m.impl_UNBOXED("normal_",                  normal_);
+  m.impl_UNBOXED("normal.Tensor_float_out",  normal_Tensor_float_out);
+  m.impl_UNBOXED("normal.float_Tensor_out",  normal_float_Tensor_out);
+  m.impl_UNBOXED("normal.Tensor_Tensor_out", normal_Tensor_Tensor_out);
+  m.impl_UNBOXED("normal.Tensor_float",      normal_Tensor_float);
+  m.impl_UNBOXED("normal.float_Tensor",      normal_float_Tensor);
+  m.impl_UNBOXED("normal.Tensor_Tensor",     normal_Tensor_Tensor);
+  m.impl_UNBOXED("uniform_",                 uniform_);
+  // Cauchy
+  m.impl_UNBOXED("cauchy_",                  custom_rng_cauchy_);
+}
+
 class RNGTest : public ::testing::Test {
- protected:
-  void SetUp() override {
-    static auto registry = torch::import()
-      // Random
-      .impl_UNBOXED("aten::random_.from",             kCustomRNG, random_from_to)
-      .impl_UNBOXED("aten::random_.to",               kCustomRNG, random_to)
-      .impl_UNBOXED("aten::random_",                  kCustomRNG, random_)
-      // Normal
-      .impl_UNBOXED("aten::normal_",                  kCustomRNG, normal_)
-      .impl_UNBOXED("aten::normal.Tensor_float_out",  kCustomRNG, normal_Tensor_float_out)
-      .impl_UNBOXED("aten::normal.float_Tensor_out",  kCustomRNG, normal_float_Tensor_out)
-      .impl_UNBOXED("aten::normal.Tensor_Tensor_out", kCustomRNG, normal_Tensor_Tensor_out)
-      .impl_UNBOXED("aten::normal.Tensor_float",      kCustomRNG, normal_Tensor_float)
-      .impl_UNBOXED("aten::normal.float_Tensor",      kCustomRNG, normal_float_Tensor)
-      .impl_UNBOXED("aten::normal.Tensor_Tensor",     kCustomRNG, normal_Tensor_Tensor)
-      .impl_UNBOXED("aten::uniform_",                 kCustomRNG, uniform_)
-      // Cauchy
-      .impl_UNBOXED("aten::cauchy_",                  kCustomRNG, custom_rng_cauchy_)
-    ;
-  }
 };
 
 // ==================================================== Random ========================================================

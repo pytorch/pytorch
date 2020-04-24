@@ -207,6 +207,21 @@ cmake_dependent_option(
 option(USE_TBB "Use TBB" OFF)
 option(ONNX_ML "Enable traditional ONNX ML API." ON)
 
+# Linux distributions do not want too many embedded sources, in that sense we
+# need to be able to build pytorch with an (almost) empty third_party
+# directory.
+# USE_SYSTEM_LIBS is a shortcut variable to toggle all the # USE_SYSTEM_*
+# variables on. Individual USE_SYSTEM_* variables can be toggled with
+# USE_SYSTEM_LIBS being "OFF".
+option(USE_SYSTEM_LIBS "Use all available system-provided libraries." OFF)
+option(USE_SYSTEM_CPUINFO "Use system-provided cpuinfo." OFF)
+option(USE_SYSTEM_SLEEF "Use system-provided sleef." OFF)
+if(USE_SYSTEM_LIBS)
+  set(USE_SYSTEM_CPUINFO ON)
+  set(USE_SYSTEM_SLEEF ON)
+  set(BUILD_CUSTOM_PROTOBUF OFF)
+endif()
+
 # Used when building Caffe2 through setup.py
 option(BUILDING_WITH_TORCH_LIBS "Tell cmake if Caffe2 is being built alongside torch libs" ON)
 

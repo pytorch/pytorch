@@ -18,42 +18,60 @@ bool allclose(const Tensor& self, const Tensor& other, double rtol, double atol,
   return at::isclose(self, other, rtol, atol, equal_nan).all().item<uint8_t>();
 }
 
+// Note [closeness]
+// A number A is close to B when either:
+//
+// (1) A is equal to B, with NaNs comparing equal when equal_nan is true.
+// (2) The error abs(A - B) is finite and less than the max error
+//      (atol + abs(rtol * B)).
+//
+// Note that this is consistent with NumPy's isclose but divergent from
+// Python's isclose, which computes the max error symmetrically as
+// max(rtol * max(abs(A), abs(B)), atol).
+// TODO: use bitwise operator overloads once we add them
+// TODO: revisit complex inputs and equal_nan=true after
+//  https://github.com/numpy/numpy/issues/15959 is resolved
 Tensor isclose(const Tensor& self, const Tensor& other, double rtol, double atol, bool equal_nan) {
-  // TODO: use bitwise operator overloads once we add them
+  TORCH_CHECK(self.scalar_type() == other.scalar_type(), self.scalar_type(), " did not match ", other.scalar_type());
+  TORCH_CHECK(!(self.is_complex() && equal_nan),
+    "isclose with equal_nan=True is not supported for complex inputs.");
 
-  TORCH_CHECK(self.scalar_type() == other.scalar_type(), self.scalar_type(), " did not match ", other.scalar_type())
+  // Checks that rtol and atol are non-negative
+  // Note: consistent with Python's isclose but divergent from NumPy's, which
+  //  allows negative atol and rtol.
+  TORCH_CHECK(rtol >= 0, "rtol must be greater than or equal to zero, but got ", rtol);
+  TORCH_CHECK(atol >= 0, "atol must be greater than or equal to zero, but got ", atol);
 
-  // The original formula `atol + rtol * other.abs()` works incorrectly when
-  // `other` has integral dtype and `other == min_value` and `abs(min_value)` is negative:
-  // std::abs(std::numeric_limits<int64_t>::lowest()) == std::numeric_limits<int64_t>::lowest() < 0
-  auto max_error = atol + (rtol * other).abs();
+  // Computes equality closeness
+  Tensor close = self == other;
+  if (equal_nan && self.is_floating_point()) {
+      close.__ior__((self != self).__iand__(other != other));
+  }
 
-  // `max_error` could be a float or double depending on the type of the input
-  // tensors.
-  // Specifically, if other is an int tensor, multiplying by rtol results in
-  // float tensor.
-  // It is also possible for parameters to be 'wrapped_number's, in which case
-  // max_error could be promoted to double when actual error is still a float.
-  Tensor actual_error;
-  if (actual_error.scalar_type() != max_error.scalar_type()) {
-    // To silence ASAN that does not like (x - std::numeric_limits<int64_t>::lowest())
-    actual_error = (self - other.to(max_error.scalar_type())).abs();
+  // Note [closeness error computation]
+  // atol and rtol are provided as doubles, so the computation
+  // rtol * other will produce a float or complex tensor.
+  // When the difference (self - other) is compared to it then the
+  // tensor representing the difference will also be cast to float or complex.
+  // However, since (self - other) in uint8 is very likely to produce a
+  // negative value, this moves the cast forward so the difference is
+  // always computed in a float or complex type.
+  // If the values of the integer tensors cannot be exactly represented
+  // by the default scalar type then this may cause an incorrect result.
+
+  // Computes allowed and actual error
+  Tensor cast_other;
+  if (c10::isIntegralType(self.scalar_type(), /*include_bool=*/true)) {
+    cast_other = other.to(at::get_default_dtype());
   } else {
-    actual_error = (self - other).abs();
+    cast_other = other;
   }
+  Tensor allowed_error = atol + (rtol * cast_other).abs();
+  Tensor actual_error = (self - cast_other).abs();
 
-  auto close = actual_error <= max_error;
+  // Computes finite closeness
+  close.__ior__(at::isfinite(actual_error).__iand__(actual_error <= allowed_error));
 
-  if (isFloatingType(self.scalar_type()) && isFloatingType(other.scalar_type())) {
-    // Handle +/-inf
-    close.__ior__(self == other);
-    close.__iand__((self == INFINITY) == (other == INFINITY));
-    close.__iand__((self == -INFINITY) == (other == -INFINITY));
-
-    if (equal_nan) {
-      close.__ior__((self != self).__and__((other != other)));
-    }
-  }
   return close;
 }
 
@@ -62,20 +80,34 @@ Tensor isnan(const Tensor& self) {
 }
 
 Tensor isinf(const Tensor &self) {
-  // Integral tensor types are always not inf
-  if (isIntegralType(self.scalar_type())) {
+  // Note: Integral tensor values are never infinite
+  if (c10::isIntegralType(self.scalar_type(), /*include_bool=*/true)) {
     return at::zeros_like(self, at::kBool, at::MemoryFormat::Preserve);
   }
+
+  // Note: a complex value is infinite when either part is infinite
+  if (self.is_complex()) {
+    const auto float_type = c10::toValueType(self.scalar_type());
+    return at::isinf(self.copy_real().to(float_type)).__ior__
+          (at::isinf(self.copy_imag().to(float_type)));
+  }
+
   return AT_DISPATCH_FLOATING_TYPES_AND_HALF(self.scalar_type(), "isinf", [&]() {
     return self.abs() == std::numeric_limits<scalar_t>::infinity();
   });
 }
 
 Tensor isfinite(const Tensor& self) {
-  // Integral tensor types are finite
-  if (!self.is_floating_point()) {
+  // Note: Integral tensor values are always finite
+  if (c10::isIntegralType(self.scalar_type(), /*include_bool=*/true)) {
     return at::ones_like(self, at::kBool, at::MemoryFormat::Preserve);
   }
+
+  // Note: a complex value is finite iff both parts are finite
+  if (self.is_complex()) {
+    return at::isfinite(self.abs());
+  }
+
   return AT_DISPATCH_FLOATING_TYPES_AND_HALF(self.scalar_type(), "isfinite", [&]() {
     return (self == self) * (self.abs() != std::numeric_limits<scalar_t>::infinity());
   });

@@ -39,49 +39,58 @@ using OperationCreator = Operation (*)(const Node*);
  * symbolic derivatives, which also requires them to have static lifetime
  * so that changes to symbolic derivatives are remembered.
  *
- * Now, currently, the c10 operator library doesn't store jit::Operator
- * instances, but we use a listener pattern that notifies JIT about changes in
- * the c10 operator library and then registers jit::Operator instances to the
- * JIT operator registry, acting as wrappers to the c10 operators.
- *
- * However, that results in code duplication as JIT and c10 will likely get
- * their own mechanisms for storing derivatives and other operator related
- * information, and all of this would have to be wrapped from c10 into JIT.
- *
- * We should consider merging the JIT and c10 registries, moving jit::Operator
- * to c10 and storing these jit::Operator instances in the c10 operator library
- * instead, allowing us to have these mechanisms only implemented once.
- * However, the current jit::Operator implementation has additional features
- * like OperationCreator that aren't needed in c10 (they're only used for
- * prim ops like If/Else or While which wouldn't be in the c10 operator
- * library), and which depend on other JIT features which we don't want to move
- * to c10 (notably jit/ir.h). We might, however, be able, to split jit::Operator
- * into a c10::Operator with the core features and a jit::Operator that adds the
- * JIT-only features like OperationCreator, and then use c10::Operator in the
- * c10 operator library.
+ * Currently, the JIT operator library contains a jit::Operator instance
+ * with a wrapper for each c10 operator. The c10 operator library registers
+ * those wrappers using listeners in register_c10_ops.cpp.
+ * TODO Instead of doing it this way, we should only have pure-jit ops in
+ * the jit library but have the JIT operator lookup look into the c10 library
+ * too.
  */
 
+// An Operator is a thin wrapper around either a pure JIT operator (e.g. prim
+// ops) or a c10 operator, allowing some common operations and abstracting away
+// the concrete operator nature.
 struct TORCH_API Operator {
+ private:
+  struct C10Operator final {
+    c10::OperatorHandle handle_;
+    Operation op_;
+  };
+  struct UnparsedFunctionSchema final {
+    std::string schema_string_;
+    mutable c10::optional<c10::AliasAnalysisKind> alias_analysis_;
+  };
+  struct JitOnlyOperator final {
+    // The only valid transition for schema_ is from right->left, i.e.
+    // when the schema gets parsed.
+    mutable c10::either<FunctionSchema, UnparsedFunctionSchema> schema_;
+
+    c10::either<Operation, OperationCreator> op_;
+  };
+
+ public:
   Operator(c10::OperatorHandle opHandle, Operation operation)
-      : schema_(std::make_shared<FunctionSchema>(opHandle.schema())),
-        op_(std::make_shared<Operation>(std::move(operation))),
-        c10Handle_(opHandle) {}
+      : op_(c10::make_left<C10Operator, JitOnlyOperator>(
+            C10Operator{std::move(opHandle), std::move(operation)})) {}
 
   Operator(
-      const std::string& schema,
+      std::string schema,
       Operation op,
       c10::AliasAnalysisKind alias_analysis)
-      : schema_string_(schema),
-        alias_analysis_(alias_analysis),
-        op_(std::make_shared<Operation>(std::move(op))) {}
+      : op_(c10::make_right<C10Operator, JitOnlyOperator>(JitOnlyOperator{
+            c10::make_right<FunctionSchema, UnparsedFunctionSchema>(
+                UnparsedFunctionSchema{std::move(schema), alias_analysis}),
+            c10::make_left<Operation, OperationCreator>(std::move(op))})) {}
 
   Operator(
-      const std::string& schema,
+      std::string schema,
       OperationCreator op_creator,
       c10::AliasAnalysisKind alias_analysis)
-      : schema_string_(schema),
-        alias_analysis_(alias_analysis),
-        op_creator_(std::move(op_creator)) {}
+      : op_(c10::make_right<C10Operator, JitOnlyOperator>(JitOnlyOperator{
+            c10::make_right<FunctionSchema, UnparsedFunctionSchema>(
+                UnparsedFunctionSchema{std::move(schema), alias_analysis}),
+            c10::make_right<Operation, OperationCreator>(
+                std::move(op_creator))})) {}
 
   // Helper constructor to register `op` to run
   // run for _every_ IR Node where n.kind() == name, regardless of arguments.
@@ -91,86 +100,86 @@ struct TORCH_API Operator {
       Symbol name,
       OperationCreator op_creator,
       c10::AliasAnalysisKind alias_analysis)
-      : schema_(std::make_shared<FunctionSchema>(varArgSchemaWithName(name))),
-        op_creator_(std::move(op_creator)) {
-    schema_->setAliasAnalysis(alias_analysis);
-  }
+      : op_(c10::make_right<C10Operator, JitOnlyOperator>(JitOnlyOperator{
+            c10::make_left<FunctionSchema, UnparsedFunctionSchema>(
+                varArgSchemaWithName(name, alias_analysis)),
+            c10::make_right<Operation, OperationCreator>(
+                std::move(op_creator))})) {}
 
   Operation getOperation(const Node* node = nullptr) const {
-    if (op_) {
-      return *op_;
-    }
-    AT_ASSERT(node != nullptr);
-    return op_creator_(node);
+    return op_.fold<Operation>(
+        [](const C10Operator& op) { return op.op_; },
+        [node](const JitOnlyOperator& op) {
+          return op.op_.fold<Operation>(
+              [](const Operation& op) { return op; },
+              [node](const OperationCreator& op_creator) {
+                return op_creator(node);
+              });
+        });
   }
 
   const FunctionSchema& schema() const {
-    // we lazily parse schema initialized from strings so that
-    // we do less work during static operator registration
-    if (!schema_) {
-      schema_ =
-          std::make_shared<FunctionSchema>(parseSchema(schema_string_.value()));
-      if (alias_analysis_.has_value()) {
-        schema_->setAliasAnalysis(*alias_analysis_);
-      }
-      schema_string_ = c10::nullopt;
-      alias_analysis_ = c10::nullopt;
-    }
-    return *schema_;
+    return op_.fold<const FunctionSchema&>(
+        [](const C10Operator& op) -> const FunctionSchema& {
+          return op.handle_.schema();
+        },
+        [](const JitOnlyOperator& op) -> const FunctionSchema& {
+          // we lazily parse schema initialized from strings so that
+          // we do less work during static operator registration
+          if (op.schema_.is_right()) {
+            auto& unmaterializedSchema = op.schema_.right();
+            FunctionSchema schema =
+                parseSchema(unmaterializedSchema.schema_string_);
+            if (unmaterializedSchema.alias_analysis_.has_value()) {
+              // TODO What if it gets set later?
+              schema.setAliasAnalysis(*unmaterializedSchema.alias_analysis_);
+            }
+            op.schema_ = c10::make_left<FunctionSchema, UnparsedFunctionSchema>(
+                std::move(schema));
+          }
+          return op.schema_.left();
+        });
   }
 
   bool isC10Op() const {
-    return c10Handle_.has_value();
+    return op_.is_left();
   }
 
   c10::AliasAnalysisKind aliasAnalysisKind() const {
-    if (isC10Op()) {
-      // Update schema_ because its alias analysis info might have changed if
-      // new c10 registrations came in
-      // TODO We're doing an isValid check because the c10 operator might
-      // already be deregistered.
-      //      Instead, we should automatically deregister the JIT wrapper when
-      //      the c10 op gets deregistered and remove this isValid() check.
-      if (c10Handle_->isValid()) {
-        schema_->setAliasAnalysis(c10Handle_->schema().aliasAnalysis());
-      }
+    const FunctionSchema& schemaRef = schema();
+    c10::AliasAnalysisKind alias_analysis = schemaRef.aliasAnalysis();
 
-      const FunctionSchema& schemaRef = schema();
-      TORCH_CHECK(
-          schemaRef.aliasAnalysis() == AliasAnalysisKind::FROM_SCHEMA ||
-              !schemaRef.hasAnyAliasInfo(),
-          "In operator registration: Tried to register operator ",
-          schemaRef,
-          " with aliasing information in the schema but without AliasAnalysisKind::FROM_SCHEMA.");
-    }
-    return schema().aliasAnalysis();
+    TORCH_CHECK(
+        alias_analysis == AliasAnalysisKind::FROM_SCHEMA ||
+            !schemaRef.hasAnyAliasInfo(),
+        "In operator registration: Tried to register operator ",
+        schemaRef,
+        " with aliasing information in the schema but without AliasAnalysisKind::FROM_SCHEMA.");
+    return alias_analysis;
   }
+
   bool hasOperation() const {
-    return op_ != nullptr;
+    return op_.fold<bool>(
+        [](const C10Operator&) { return true; },
+        [](const JitOnlyOperator& op) { return op.op_.is_left(); });
   }
 
  private:
-  static FunctionSchema varArgSchemaWithName(Symbol name) {
-    return FunctionSchema(
+  static FunctionSchema varArgSchemaWithName(
+      Symbol name,
+      AliasAnalysisKind alias_analysis) {
+    auto result = FunctionSchema(
         name,
         "",
         {},
         {},
         /*is_vararg*/ true,
         /*is_varret*/ true);
+    result.setAliasAnalysis(alias_analysis);
+    return result;
   }
-  mutable c10::optional<std::string> schema_string_;
-  // cannot use c10::optional because windows has issues that require an
-  // assignment operator to be generated cannot use std::unique_ptr because
-  // initializer lists of Operators end up copying the Operator
-  mutable std::shared_ptr<FunctionSchema> schema_;
-  mutable c10::optional<c10::AliasAnalysisKind> alias_analysis_;
 
-  // Essentially a variant<Operation, OperationCreator>.
-  // NB: std::function has a default state (where it == nullptr).
-  std::shared_ptr<Operation> op_;
-  OperationCreator op_creator_;
-  c10::optional<c10::OperatorHandle> c10Handle_;
+  c10::either<C10Operator, JitOnlyOperator> op_;
 };
 
 TORCH_API std::string canonicalSchemaString(const FunctionSchema& schema);

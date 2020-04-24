@@ -11,6 +11,10 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
+namespace {
+constexpr auto kSecToMsConversion = 1000;
+}
+
 //////////////////////////  MessageCounter  /////////////////////////////////
 
 ProcessGroupAgent::MessageCounter::MessageCounter(int worldSize)
@@ -292,7 +296,8 @@ void ProcessGroupAgent::shutdownImpl() {
 
 std::shared_ptr<FutureMessage> ProcessGroupAgent::send(
     const WorkerInfo& to,
-    Message&& message) {
+    Message&& message,
+    const float rpcTimeoutSeconds) {
   // Throw if we previously encountered an exception in ::listenLoop.
   {
     std::unique_lock<std::mutex> guard(listenLoopExceptionMutex_);
@@ -325,9 +330,15 @@ std::shared_ptr<FutureMessage> ProcessGroupAgent::send(
   if (message.isRequest()) {
     // millisecond level precision of when request started.
     auto futureStartTime = std::chrono::steady_clock::now();
-    // Prepare endTime from timeout.
-    auto timeout = rpcTimeout_.load();
-    // Set infinite timeout if specified.
+    // if passed in timeout is unset, then use the currently set default timeout
+    // for all RPCs.
+    auto timeout = rpcTimeoutSeconds == kUnsetRpcTimeout
+        ? getRpcTimeout()
+        : std::chrono::milliseconds(
+              static_cast<int>(rpcTimeoutSeconds * kSecToMsConversion));
+
+    // Prepare endTime from timeout. Set infinite timeout if
+    // specified.
     steady_clock_time_point endTime = timeout.count() == 0
         ? kInfiniteTimeoutTimePoint
         : futureStartTime + timeout;
@@ -525,9 +536,16 @@ bool ProcessGroupAgent::handleRecv(RecvWork& work) {
       ++serverActiveAsyncCalls_;
       // Callback processing returned an incomplete future. Add sending the
       // response as a callback which fires when the future completes.
+      // Use a weak_ptr, so we can std::move the future's value.
       auto fromId = work.from_.id_;
       auto requestId = work.id_;
-      futureResponse->addCallback([this, fromId, requestId, futureResponse]() {
+      futureResponse->addCallback([this,
+                                   fromId,
+                                   requestId,
+                                   weak = std::weak_ptr<FutureMessage>(
+                                       futureResponse)]() {
+        auto futureResponse = weak.lock();
+        TORCH_INTERNAL_ASSERT(futureResponse);
         --serverActiveCalls_;
         --serverActiveAsyncCalls_;
         if (!futureResponse->hasError()) {
@@ -785,13 +803,9 @@ void ProcessGroupAgent::pollTimedOutRPCs() {
           "RPC ran for more than ",
           timedOutFuture.timeout_.count(),
           " milliseconds and timed out.");
-      // This is a dummy response that's not send over RPC, so the ID field is
-      // not used for any request/response matching.
-      const auto exceptionMsg = createExceptionResponse(err, -1);
       if (!timedOutFuture.future_->hasError()) {
         --clientActiveCalls_;
-        timedOutFuture.future_->setError(std::string(
-            exceptionMsg.payload().begin(), exceptionMsg.payload().end()));
+        timedOutFuture.future_->setError(err);
         // The future timed out and will not be processed by handleRecv(), even
         // if we eventually get a response. In order to keep track of all
         // send/recv pairs, we increment the count here.
