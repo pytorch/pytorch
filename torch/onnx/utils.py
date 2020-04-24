@@ -774,7 +774,7 @@ def _run_symbolic_function(g, n, inputs, env, operator_export_type=OperatorExpor
                     return g.op("Constant", value_s=n["value"])
                 elif n.output().type().isSubtypeOf(ListType.ofInts()) or output().type().isSubtypeOf(ListType.ofFloats()):
                     vals = n.output().toIValue()
-                    value = torch.stack([torch.tensor(v)] for v in vals) if len(vals) else []
+                    value = torch.stack([torch.tensor(v) for v in vals]) if len(vals) else []
                     return g.op("Constant", value_t=value)
                 elif n.output().type().kind() == "DeviceObjType":
                     return None
