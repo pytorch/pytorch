@@ -19,6 +19,8 @@ from torch.testing._internal.common_utils import TestCase, run_tests, TemporaryF
 
 from torch.autograd.gradcheck import gradgradcheck, gradcheck
 
+types = [torch.float, torch.bfloat16]
+dtype2prec = {torch.float: 1e-5, torch.bfloat16: 1e-2}
 
 # Comment the line below to find out the CI machines having MKL-DNN build disabled
 @unittest.skipIf(not torch._C.has_mkldnn, "MKL-DNN build is disabled")
@@ -29,17 +31,19 @@ class TestMkldnn(TestCase):
                            torch.randn((1, 2, 3, 4, 5),
                                        dtype=torch.float, device=torch.device('cpu'))[:, :, :, :, 1]]:
             cpu_tensor.requires_grad_()
-            mkldnn_tensor = cpu_tensor.to_mkldnn()
-            cpu_tensor_1 = mkldnn_tensor.to_dense()
-            self.assertEqual(cpu_tensor, cpu_tensor_1)
-            self.assertEqual(mkldnn_tensor.dtype, torch.float)
-            self.assertEqual(mkldnn_tensor.device, torch.device('cpu'))
-            self.assertEqual(mkldnn_tensor.size(), torch.Size([1, 2, 3, 4]))
-            self.assertEqual(mkldnn_tensor.numel(), cpu_tensor.numel())
-            self.assertEqual(mkldnn_tensor.element_size(), cpu_tensor.element_size())
-            self.assertRaisesRegex(RuntimeError,
-                                   "Cannot access data pointer of Tensor that doesn't have storage",
-                                   lambda: mkldnn_tensor.data_ptr() != 0)
+            for dtype in types:
+                mkldnn_tensor = cpu_tensor.to_mkldnn(dtype)
+                cpu_tensor_1 = mkldnn_tensor.to_dense(dtype)
+                self.assertEqual(cpu_tensor, cpu_tensor_1,
+                    dtype2prec[dtype])
+                self.assertEqual(mkldnn_tensor.dtype, dtype)
+                self.assertEqual(mkldnn_tensor.device, torch.device('cpu'))
+                self.assertEqual(mkldnn_tensor.size(), torch.Size([1, 2, 3, 4]))
+                self.assertEqual(mkldnn_tensor.numel(), cpu_tensor.numel())
+                self.assertEqual(mkldnn_tensor.element_size(), cpu_tensor.to(dtype).element_size())
+                self.assertRaisesRegex(RuntimeError,
+                                       "Cannot access data pointer of Tensor that doesn't have storage",
+                                       lambda: mkldnn_tensor.data_ptr() != 0)
 
     def test_unsupported(self):
         # unsupported types and unsupported types with gpu

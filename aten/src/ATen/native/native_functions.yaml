@@ -3515,8 +3515,7 @@
   requires_tensor: True
 
 
-- func: to_dense(Tensor self) -> Tensor
-  use_c10_dispatcher: full
+- func: to_dense(Tensor self, ScalarType? dtype=None) -> Tensor
   variants: method
   dispatch:
     SparseCPU: sparse_to_dense
@@ -3683,8 +3682,7 @@
     CPU: dense_to_sparse
     CUDA: dense_to_sparse
 
-- func: to_mkldnn(Tensor self) -> Tensor
-  use_c10_dispatcher: full
+- func: to_mkldnn(Tensor self, ScalarType? dtype=None) -> Tensor
   variants: method
   dispatch:
     CPU: dense_to_mkldnn

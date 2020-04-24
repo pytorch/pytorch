@@ -8,35 +8,53 @@ namespace at { namespace native {
 
 #if AT_MKLDNN_ENABLED()
 
-Tensor mkldnn_to_dense(const Tensor& mkldnn_tensor) {
+Tensor mkldnn_to_dense(const Tensor& mkldnn_tensor, c10::optional<ScalarType> dtype) {
+  TORCH_INTERNAL_ASSERT(mkldnn_tensor.scalar_type() == ScalarType::Float ||
+                        mkldnn_tensor.scalar_type() == ScalarType::BFloat16,
+                        "mkldnn_to_dense expects float or bfloat16 tensor input");
   ideep::tensor& stensor = itensor_from_mkldnn(mkldnn_tensor);
   auto dims = stensor.get_dims();
   // NOTE: int32_t dims from ideep::tensor but sizes needs int64_t
+  auto data_type = dtype.has_value() ? dtype.value() : mkldnn_tensor.scalar_type();
   Tensor cpu_tensor = at::empty(
     std::vector<int64_t>(dims.begin(), dims.end()),
-    mkldnn_tensor.options().layout(c10::kStrided));
+    mkldnn_tensor.options().layout(c10::kStrided).dtype(data_type));
   if (stensor.is_empty()) return cpu_tensor;
-  auto pub_tensor = stensor.to_public(cpu_tensor.template data_ptr<float>());
+  auto pub_tensor =
+      cpu_tensor.scalar_type() == ScalarType::Float
+          ? stensor.to_public(cpu_tensor.template data_ptr<float>(),
+                              get_mkldnn_dtype(data_type))
+          : stensor.to_public(cpu_tensor.template data_ptr<BFloat16>(),
+                              get_mkldnn_dtype(data_type));
   cpu_tensor.as_strided_(dims, pub_tensor.get_strides());
   return cpu_tensor;
 }
 
-Tensor dense_to_mkldnn(const Tensor& cpu_tensor) {
-  AT_ASSERTM(cpu_tensor.device().type() == DeviceType::CPU,
-             "dense_to_mkldnn expects CPU tensor input");
-  AT_ASSERTM(cpu_tensor.layout() == Layout::Strided,
-             "dense_to_mkldnn expects strided tensor input");
-  AT_ASSERTM(cpu_tensor.scalar_type() == ScalarType::Float,
-             "dense_to_mkldnn expects float tensor input");
-  AT_ASSERTM(cpu_tensor.dim() <= 5,
-             "Can't convert cpu tensor with the number of dimensions > 5");
+Tensor dense_to_mkldnn(const Tensor& cpu_tensor, c10::optional<ScalarType> dtype) {
+  TORCH_INTERNAL_ASSERT(cpu_tensor.device().type() == DeviceType::CPU,
+                        "dense_to_mkldnn expects CPU tensor input");
+  TORCH_INTERNAL_ASSERT(cpu_tensor.layout() == Layout::Strided,
+                        "dense_to_mkldnn expects strided tensor input");
+  TORCH_INTERNAL_ASSERT(cpu_tensor.scalar_type() == ScalarType::Float ||
+                        cpu_tensor.scalar_type() == ScalarType::BFloat16,
+                        "dense_to_mkldnn expects bfloat16 or float tensor input");
+  TORCH_INTERNAL_ASSERT(cpu_tensor.dim() <= 5,
+                        "Can't convert cpu tensor with the number of dimensions > 5");
   // TODO: consider to convert non-contiguous tensor to `ideep::tensor` directly.
   auto cpu_tensor_cont = cpu_tensor.contiguous();
-  Tensor mkldnn_tensor = empty_mkldnn(cpu_tensor_cont.sizes(), cpu_tensor_cont.options());
+  auto data_type = dtype.has_value() ? dtype.value() : cpu_tensor.scalar_type();
+  Tensor mkldnn_tensor = empty_mkldnn(
+      cpu_tensor_cont.sizes(), cpu_tensor_cont.options().dtype(data_type));
   ideep::tensor& dtensor = itensor_from_mkldnn(mkldnn_tensor);
-  dtensor.feed_from(dtensor.get_dims(),
-                    ideep::tensor::data_type::f32,
-                    (cpu_tensor_cont.template data_ptr<float>()));
+  if (cpu_tensor.scalar_type() == ScalarType::Float) {
+    dtensor.feed_from(dtensor.get_dims(),
+                      get_mkldnn_dtype(cpu_tensor_cont.scalar_type()),
+                      cpu_tensor_cont.template data_ptr<float>());
+  } else {
+    dtensor.feed_from(dtensor.get_dims(),
+                      get_mkldnn_dtype(cpu_tensor_cont.scalar_type()),
+                      cpu_tensor_cont.template data_ptr<BFloat16>());
+  }
   return mkldnn_tensor;
 }
 
@@ -88,12 +106,12 @@ Tensor mkldnn_reorder_conv2d_weight(
 
 #else
 
-Tensor mkldnn_to_dense(const Tensor& mkldnn_tensor) {
-  AT_ERROR("MKL-DNN build is disabled");
+Tensor mkldnn_to_dense(const Tensor& mkldnn_tensor, c10::optional<ScalarType> dtype) {
+  TORCH_CHECK(false, "MKL-DNN build is disabled");
 }
 
-Tensor dense_to_mkldnn(const Tensor& cpu_tensor) {
-  AT_ERROR("MKL-DNN build is disabled");
+Tensor dense_to_mkldnn(const Tensor& cpu_tensor, c10::optional<ScalarType> dtype) {
+  TORCH_CHECK(false, "MKL-DNN build is disabled");
 }
 
 Tensor mkldnn_reorder_conv2d_weight(
@@ -102,7 +120,7 @@ Tensor mkldnn_reorder_conv2d_weight(
     IntArrayRef stride,
     IntArrayRef dilation,
     int64_t groups) {
-  AT_ERROR("mkldnn_reorder_conv2d_weight: MKL-DNN build is disabled");
+  TORCH_CHECK(false, "mkldnn_reorder_conv2d_weight: MKL-DNN build is disabled");
 }
 
 #endif // AT_MKLDNN_ENABLED()
