@@ -788,7 +788,6 @@ class TestPostTrainingDynamic(QuantizationTestCase):
         for qengine in ['fbgemm', 'qnnpack']:
             with override_quantized_engine(qengine):
                 if qengine in torch.backends.quantized.supported_engines:
-                    print('Qengine', qengine)
                     # Test default instantiation
                     seq_len = 128
                     batch = 16
