@@ -257,6 +257,10 @@ void DistEngine::execute_graph_task_until_ready_queue_empty(
   // Create a ready queue per call to traverse the graph_task from root_to_execute
   // This allow concurrent execution of the same GraphTask from different threads
   std::shared_ptr<ReadyQueue> cpu_ready_queue = std::make_shared<ReadyQueue>();
+  // Initialize the thread local ready queue with the ready queue created above
+  // This allows the dist engine support local reentrant backward calls
+  engine_.init_local_ready_queue(cpu_ready_queue);
+
   cpu_ready_queue->push(
       NodeTask(graph_task, std::move(root_to_execute), InputBuffer(0)),
       incrementOutstandingTasks);
