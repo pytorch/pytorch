@@ -85,3 +85,4 @@ TEST(DeviceTests, ReinterpretCast) {
   cudaDeviceSynchronize();
   ASSERT_EQ(cudaGetLastError(), cudaSuccess);
 }
+
