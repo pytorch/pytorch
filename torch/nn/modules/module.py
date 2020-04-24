@@ -779,7 +779,7 @@ class Module(object):
             hook(state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys, error_msgs)
 
         persistent_buffers = {k: v for k, v in self._buffers.items() if k in self._persistent_buffers}
-        local_name_params = itertools.chain(self._parameters.items(), persistent_buffers)
+        local_name_params = itertools.chain(self._parameters.items(), persistent_buffers.items())
         local_state = {k: v for k, v in local_name_params if v is not None}
 
         for name, param in local_state.items():
