@@ -624,8 +624,13 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cuda_template(const Tenso
 
 template<typename scalar_t, typename index_t>
 std::tuple<Tensor, Tensor> batch_norm_stats_cuda_template(const Tensor& input_, double epsilon) {
+  auto input_options = input_.options();
+  // promote only mean_/invstd_ precision
+  if (input_.scalar_type() == at::ScalarType::Half || input_.scalar_type() == at::ScalarType::BFloat16) {
+    input_options = input_options.dtype(ScalarType::Float);
+  }
+
   if (input_.size(0) == 0) {  // empty batch
-    auto input_options = input_.options();
     int64_t n_input = input_.size(1);
     return std::make_tuple(
       at::zeros({n_input}, input_options),
@@ -644,13 +649,8 @@ std::tuple<Tensor, Tensor> batch_norm_stats_cuda_template(const Tensor& input_, 
   auto bs = input_reshaped.size(0);
   auto features = input_reshaped.size(2);
   auto input = input_reshaped.generic_packed_accessor<scalar_t, 3, RestrictPtrTraits, index_t>();
-  auto input_options = input_.options();
-  dummy_mean_ = at::empty({0}, input_options);
-  dummy_var_ = at::empty({0}, input_options);
-  // promote only mean_/invstd_ precision
-  if (input_.scalar_type() == at::ScalarType::Half || input_.scalar_type() == at::ScalarType::BFloat16) {
-    input_options = input_options.dtype(ScalarType::Float);
-  }
+  dummy_mean_ = at::empty({0}, input_.options()); // not promoted
+  dummy_var_ = at::empty({0}, input_.options());
   mean_ = at::empty({n_input}, input_options);
   invstd_ = at::empty({n_input}, input_options);
   auto mean = packed_accessor_or_dummy<accscalar_t, 1, RestrictPtrTraits, index_t>(mean_);
