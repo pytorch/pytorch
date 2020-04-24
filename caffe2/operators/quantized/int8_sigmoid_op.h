@@ -77,8 +77,8 @@ class Int8SigmoidOp final : public Operator<CPUContext> {
     const qnnp_status runStatus =
         qnnp_run_operator(this->qnnpackOperator_, nullptr /* thread pool */);
 #else
-    pthreadpool_t threadpool =
-        reinterpret_cast<pthreadpool_t>(ws_->GetThreadPool());
+    c2_pthreadpool_t threadpool =
+        reinterpret_cast<c2_pthreadpool_t>(ws_->GetThreadPool());
     const qnnp_status runStatus =
         qnnp_run_operator(this->qnnpackOperator_, threadpool);
 #endif

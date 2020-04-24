@@ -52,7 +52,6 @@ endif()
 # Note: the folders that are being commented out have not been properly
 # addressed yet.
 
-# For pthreadpool_new_if_impl. TODO: Remove when threadpools are unitied.
 if(NOT MSVC)
   if(NOT TARGET fxdiv)
     set(FXDIV_BUILD_TESTS OFF CACHE BOOL "")

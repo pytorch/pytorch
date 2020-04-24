@@ -605,7 +605,7 @@ class PyTorchAndroidJni : public facebook::jni::JavaClass<PyTorchAndroidJni> {
   }
 
   static void setNumThreads(facebook::jni::alias_ref<jclass>, jint numThreads) {
-    caffe2::mobile_threadpool()->setNumThreads(numThreads);
+    caffe2::mobile_threadpool()->set_thread_count(numThreads);
   }
 };
 #endif
