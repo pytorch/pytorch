@@ -86,6 +86,7 @@ C10_DEFINE_TEST(TestLog10, Rev) {
 // Power functions
 
 C10_DEFINE_TEST(TestPowSqrt, Equal) {
+  // x^0.5 = sqrt(x)
   {
   c10::complex<float> x(0.1, 1.2);
   c10::complex<float> y = std::pow(x, float(0.5));
@@ -103,6 +104,7 @@ C10_DEFINE_TEST(TestPowSqrt, Equal) {
 }
 
 C10_DEFINE_TEST(TestPow, Square) {
+  // x^2 = x * x
   {
   c10::complex<float> x(0.1, 1.2);
   c10::complex<float> y = std::pow(x, float(2));
@@ -159,6 +161,7 @@ C10_DEFINE_TEST(TestSinCosSinhCosh, Identity) {
 }
 
 C10_DEFINE_TEST(TestTan, Identity) {
+  // tan(x) = sin(x) / cos(x)
   {
   c10::complex<float> x(0.1, 1.2);
   c10::complex<float> y = std::tan(x);
@@ -176,6 +179,7 @@ C10_DEFINE_TEST(TestTan, Identity) {
 }
 
 C10_DEFINE_TEST(TestTanh, Identity) {
+  // tanh(x) = sinh(x) / cosh(x)
   {
   c10::complex<float> x(0.1, 1.2);
   c10::complex<float> y = std::tanh(x);
@@ -195,6 +199,9 @@ C10_DEFINE_TEST(TestTanh, Identity) {
 // Rev trigonometric functions
 
 C10_DEFINE_TEST(TestRevTrigonometric, Rev) {
+  // asin(sin(x)) = x
+  // acos(cos(x)) = x
+  // atan(tan(x)) = x
   {
   c10::complex<float> x(0.5, 0.6);
   c10::complex<float> s = std::sin(x);
@@ -230,6 +237,9 @@ C10_DEFINE_TEST(TestRevTrigonometric, Rev) {
 // Rev hyperbolic functions
 
 C10_DEFINE_TEST(TestRevHyperbolic, Rev) {
+  // asinh(sinh(x)) = x
+  // acosh(cosh(x)) = x
+  // atanh(tanh(x)) = x
   {
   c10::complex<float> x(0.5, 0.6);
   c10::complex<float> s = std::sinh(x);
