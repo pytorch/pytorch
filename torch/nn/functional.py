@@ -3735,7 +3735,7 @@ def fold(input, output_size, kernel_size, dilation=1, padding=0, stride=1):
             if padding[-5] == 0 and padding[-6] != 0:
                 input = torch.cat([input[:, :, :, :, -(padding[-5] + padding[-6]):], input], dim=4)
             else:
-                input = torch.cat([input[:, :, :, :, -(padding[-5] + padding[-6]):-padding[-5]], input], 
+                input = torch.cat([input[:, :, :, :, -(padding[-5] + padding[-6]):-padding[-5]], input], dim=4)
 
         return input
 
