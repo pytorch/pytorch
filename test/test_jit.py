@@ -5159,6 +5159,13 @@ def foo(xyz):
                 return x
         self.getExportImportCopy(C())
 
+    def test_serialize_long_lines(self):
+        class OrderModuleLong(torch.nn.Module):
+            def forward(self, long_arg_name: List[torch.Tensor]):
+                return [(long_arg_name[1],), (long_arg_name[0].argmax(),)]
+        src = str(torch.jit.script(OrderModuleLong()).code)
+        # make long_arg_name[1] does not get reordered after the argmax
+        FileCheck().check("long_arg_name[1]").check("argmax").run(src)
 
     def test_tensor_shape(self):
         x = torch.empty(34, 56, 78)
