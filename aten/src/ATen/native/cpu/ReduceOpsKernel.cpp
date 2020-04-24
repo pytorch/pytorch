@@ -36,17 +36,12 @@ static inline void cpu_cum_base_kernel(Tensor& result,
     return;
   }
 
-  auto self_sizes = ensure_nonempty_vec(self.sizes().vec());
-  self_sizes[dim] = 1;
-
-  auto result_restrided = restride_dim(result, dim, self_sizes);
-  auto self_restrided = restride_dim(self, dim, self_sizes);
-
   auto iter = TensorIterator();
   iter.dont_compute_common_dtype();
   iter.dont_resize_outputs();
-  iter.add_output(result_restrided);
-  iter.add_input(self_restrided);
+  iter.declare_static_shape(self.sizes(), /*squash_dim=*/dim);
+  iter.add_output(result);
+  iter.add_input(self);
   iter.build();
 
   auto result_dim_stride = ensure_nonempty_stride(result, dim);

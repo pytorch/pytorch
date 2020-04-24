@@ -123,9 +123,9 @@ gradients are correct.
 
 Multithreaded Autograd
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^
-We are now using the caller thread to drive the autograd execution, user
-could write their own threading code and does not block on the Autograd
-engine, example code could be:
+The autograd engine allows the caller thread to drive the backward execution, user
+could write their own threading code and does not block on the concurrent backwards,
+example code could be:
 
 .. code::
 
@@ -155,21 +155,21 @@ Note that some behaviors that user should be aware of:
 Concurrency on CPU
 ------------------
 
-Now when you run ``backward()`` or ``grad()`` via python or C++ API in multiple
+When you run ``backward()`` or ``grad()`` via python or C++ API in multiple
 threads on CPU, you are expecting to see extra concurrency instead of serializing
 all the backward calls in a specific order during execution.
 
 Non-determinism
 ------------------
 
-if we are calling ``backward()`` on multiple thread concurrently but with
+If you are calling ``backward()`` on multiple thread concurrently but with
 shared inputs (i.e. Hogwild CPU training). Since parameters are automatically
 shared across threads, gradient accumulation might become non-deterministic on
 backward calls across threads, because two backward calls might access and try
 to accumulate the same ``.grad`` attribute. This is technically not safe, and
 it might result in racing condition and the result might be invalid to use.
 
-But this is expected pattern if user are using the multithreading
+But this is expected pattern if you are using the multithreading
 approach to drive the whole training process but using shared
 parameters, user who use multithreading should have the threading model
 in mind and should expect this to happen. User could use the functional API
@@ -184,24 +184,25 @@ part of forward single thread, then run second part in multiple threads,
 then the first part of graph is shared. In this case different threads
 execute ``grad()`` or ``backward()`` on the same graph might have issue of
 destroying the graph on the fly of one thread, and the other thread will
-crash in this case. We will error out to the user similar to what call
+crash in this case. Autograd will error out to the user similar to what call
 ``backward()`` twice with out ``retain_graph=True``, and let the user know
 they should use ``retain_graph=True``.
 
 Thread Safety on Autograd Node
 ------------------------------
 
-Since we enable CPU parallelism in this PR, it's important that we ensure
-thread safety on CPU with parallel backwards that share part/whole of the
-GraphTask. custom Python autograd.function is automatically thread safe
-because of GIL, but built-in C++ Node and custom C++ Node are not.
+Since Autograd allows the caller thread to drive its backward execution for
+potential parallelism, it's important that we ensure thread safety on CPU with
+parallel backwards that share part/whole of the GraphTask.
 
-To protect thread safety, we use thread locking on autograd Nodes that might
-have state write/read, like AccumulateGrad, CopySlices, custom C++
-``autograd::Function``, etc.
+Custom Python ``autograd.function`` is automatically thread safe because of GIL.
+for built-in C++ Autograd Nodes(e.g. AccumulateGrad, CopySlices) and custom
+``autograd::Function``, the Autograd Engine uses thread mutex locking to protect
+thread safety on autograd Nodes that might have state write/read.
 
 No thread safety on C++ hooks
 ------------------------------
 
-We rely on the user to write thread safe C++ hooks if they want the hook to be
-correctly applied in multithreading environment.
+Autograd relies on the user to write thread safe C++ hooks. If you want the hook
+to be correctly applied in multithreading environment, you will need to write
+proper thread locking code to ensure the hooks are thread safe.

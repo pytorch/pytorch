@@ -24,6 +24,7 @@ from torch.testing._internal.dist_utils import (
     dist_init,
     get_function_event,
     get_shutdown_error_regex,
+    get_timeout_error_regex,
     initialize_pg,
     wait_until_node_failure,
     wait_until_pending_users_flushed,
@@ -294,9 +295,6 @@ def check_rref_confirmed(rref):
 load_tests = load_tests
 
 
-@unittest.skipIf(
-    not torch._six.PY3, "Pytorch distributed rpc package does not support python2"
-)
 class RpcTest(RpcAgentTestFixture):
     @dist_init
     def test_worker_id(self):
@@ -369,6 +367,110 @@ class RpcTest(RpcAgentTestFixture):
     def test_self_remote_rref_as_remote_arg(self):
         dst = worker_name((self.rank + 1) % self.world_size)
         self._test_self_remote_rref_as_remote_arg(dst)
+
+    def _test_rref_proxy_tensor(self, dst):
+        rref = rpc.remote(dst, my_function, args=(torch.ones(2, 2), 1, 3))
+
+        expected = torch.ones(2, 2) + 1 + 3
+        self.assertEqual(expected.size(), rref.rpc_sync().size())
+        self.assertEqual(expected + 1, rref.rpc_async().add(1).wait())
+        self.assertEqual(expected.view(1, 4), rref.remote().view(1, 4).to_here())
+
+    @dist_init
+    def test_rref_proxy_tensor(self):
+        self._test_rref_proxy_tensor(worker_name((self.rank + 1) % self.world_size))
+
+    @dist_init
+    def test_rref_proxy_tensor_self(self):
+        self._test_rref_proxy_tensor(rpc.get_worker_info())
+
+    @dist_init
+    def test_rref_proxy_reuse(self):
+        rref = rpc.remote(
+            worker_name((self.rank + 1) % self.world_size), 
+            my_function, 
+            args=(torch.ones(2, 2), 1, 3)
+        )
+        expected = torch.ones(2, 2) + 1 + 3
+
+        proxy_rpc_sync = rref.rpc_sync()
+        proxy_rpc_async = rref.rpc_async()
+        proxy_remote = rref.remote()
+
+        self.assertEqual(expected.size(), proxy_rpc_sync.size())
+        self.assertEqual(expected + 1, proxy_rpc_sync.add(1))
+        self.assertEqual(expected.view(1, 4), proxy_rpc_sync.view(1, 4))
+
+        self.assertEqual(expected.size(), proxy_rpc_async.size().wait())
+        self.assertEqual(expected + 3, proxy_rpc_async.add(3).wait())
+        self.assertEqual(expected.view(4, 1), proxy_rpc_async.view(4, 1).wait())
+
+        self.assertEqual(expected.size(), proxy_remote.size().to_here())
+        self.assertEqual(expected + 5, proxy_remote.add(5).to_here())
+        self.assertEqual(expected.view(-1), proxy_remote.view(-1).to_here())
+
+    def _test_rref_proxy_class(self, dst):
+        rref = rpc.remote(dst, MyClass, args=(7,))
+        expected = MyClass(7)
+        self.assertEqual(expected.get_value(), rref.rpc_sync().get_value())
+        self.assertEqual(expected.get_value(), rref.rpc_async().get_value().wait())
+        self.assertEqual(expected.get_value(), rref.remote().get_value().to_here())
+
+        expected.increment_value(3)
+        self.assertEqual(None, rref.rpc_sync().increment_value(1))
+        self.assertEqual(None, rref.rpc_async().increment_value(1).wait())
+        self.assertEqual(None, rref.remote().increment_value(1).to_here())
+
+        self.assertEqual(expected.get_value(), rref.rpc_sync().get_value())
+        self.assertEqual(expected.get_value(), rref.rpc_async().get_value().wait())
+        self.assertEqual(expected.get_value(), rref.remote().get_value().to_here())
+
+        self.assertEqual(
+            expected.my_instance_method(2), 
+            rref.rpc_sync().my_instance_method(2)
+        )
+        self.assertEqual(
+            expected.my_instance_method(3), 
+            rref.rpc_async().my_instance_method(3).wait()
+        )
+        self.assertEqual(
+            expected.my_instance_method(4), 
+            rref.remote().my_instance_method(4).to_here()
+        )
+
+        self.assertEqual(
+            expected.my_static_method(9), 
+            rref.rpc_sync().my_static_method(9)
+        )
+        self.assertEqual(
+            expected.my_static_method(10), 
+            rref.rpc_async().my_static_method(10).wait()
+        )
+        self.assertEqual(
+            expected.my_static_method(11), 
+            rref.remote().my_static_method(11).to_here()
+        )
+
+        self.assertEqual(
+            expected.my_class_method(2, torch.zeros(2, 2)), 
+            rref.rpc_sync().my_class_method(2, torch.zeros(2, 2))
+        )
+        self.assertEqual(
+            expected.my_class_method(2, torch.ones(3, 3)), 
+            rref.rpc_async().my_class_method(2, torch.ones(3, 3)).wait()
+        )
+        self.assertEqual(
+            expected.my_class_method(2, torch.ones(4, 4)), 
+            rref.remote().my_class_method(2, torch.ones(4, 4)).to_here()
+        )
+
+    @dist_init
+    def test_rref_proxy_class(self):
+        self._test_rref_proxy_class(worker_name((self.rank + 1) % self.world_size))
+
+    @dist_init
+    def test_rref_proxy_class_self(self):
+        self._test_rref_proxy_class(rpc.get_worker_info())
 
     @dist_init
     def test_self_remote_rref_as_self_remote_arg(self):
@@ -1761,8 +1863,11 @@ class RpcTest(RpcAgentTestFixture):
         rpc.shutdown()
 
     @dist_init
-    @requires_process_group_agent("PROCESS_GROUP rpc backend specific test, skip")
-    def test_rpc_timeouts(self):
+    def test_default_timeout_used(self):
+        """
+        Tests that if no timeout is passed into rpc_async and rpc_sync, then the
+        default timeout is used.
+        """
         dst_rank = (self.rank + 1) % self.world_size
         rpc._set_rpc_timeout(timedelta(milliseconds=1))
         # futures should time out and be marked with an exception indicating it as such.
@@ -1770,8 +1875,9 @@ class RpcTest(RpcAgentTestFixture):
             rpc.rpc_async(worker_name(dst_rank), my_sleep_func, args=())
             for _ in range(10)
         ]
+        expected_error = get_timeout_error_regex(dist_utils.TEST_CONFIG.rpc_backend_name)
         for fut in futs:
-            with self.assertRaisesRegex(RuntimeError, "RPC ran for more than"):
+            with self.assertRaisesRegex(RuntimeError, expected_error):
                 fut.wait()
 
         # ensure that if a new timeout is set old futures don't time out but new ones do.
@@ -1780,18 +1886,61 @@ class RpcTest(RpcAgentTestFixture):
         fut1 = rpc.rpc_async(worker_name(dst_rank), my_sleep_func, args=(1,))
         # now, set a short timeout.
         rpc._set_rpc_timeout(timedelta(milliseconds=1))
-        # f2 should time out, f should not.
+        # fut2 should time out, fut1 should not.
         fut2 = rpc.rpc_async(worker_name(dst_rank), my_sleep_func, args=(1,))
-        with self.assertRaises(RuntimeError):
+        with self.assertRaisesRegex(RuntimeError, expected_error):
             fut2.wait()
         fut1.wait()
 
-        # future should run to completion if the timeout is zero.
+        # Zero timeout means infinity, so future should run to completion.
         rpc._set_rpc_timeout(timedelta(seconds=0))
         rpc.rpc_async(worker_name(dst_rank), my_sleep_func, args=()).wait()
 
         # reset to default timeout so shutdown messages can process cleanly.
         rpc._set_rpc_timeout(rpc.constants.DEFAULT_RPC_TIMEOUT)
+
+    @dist_init
+    def test_rpc_timeouts(self):
+        # TODO: enable timeouts for rpc.remote/RRef (https://github.com/pytorch/pytorch/issues/33803)
+        dst_rank = (self.rank + 1) % self.world_size
+        dst_worker = worker_name(dst_rank)
+        timeout = 0.1  # 100 ms
+        expected_error = get_timeout_error_regex(dist_utils.TEST_CONFIG.rpc_backend_name)
+        # Test async UDF
+        fut = rpc.rpc_async(dst_worker, my_sleep_func, args=(1,), timeout=timeout)
+        with self.assertRaisesRegex(RuntimeError, expected_error):
+            fut.wait()
+
+        # Ensure run to completion if there is no timeout and we use the default
+        # RPC timeout.
+        rpc.rpc_async(dst_worker, my_sleep_func, args=(1,)).wait()
+
+        # Test sync UDF
+        with self.assertRaisesRegex(RuntimeError, expected_error):
+            rpc.rpc_sync(dst_worker, my_sleep_func, args=(1,), timeout=timeout)
+
+        # Ensure run to completion if there is no timeout and we use the default
+        # RPC timeout.
+        rpc.rpc_sync(dst_worker, my_sleep_func, args=(1,))
+
+        # If we set a default timeout for RPCs, it should be respected, though
+        # still overridden if we pass in a different timeout to the APIs.
+        rpc._set_rpc_timeout(timedelta(milliseconds=1))
+        fut = rpc.rpc_async(dst_worker, my_sleep_func, args=(1,))
+        with self.assertRaisesRegex(RuntimeError, expected_error):
+            fut.wait()
+        with self.assertRaisesRegex(RuntimeError, expected_error):
+            rpc.rpc_sync(dst_worker, my_sleep_func, args=(1,))
+
+        # The RPCs should run to completion since we override the timeout.
+        rpc.rpc_async(dst_worker, my_sleep_func, args=(1,), timeout=5).wait()
+        rpc.rpc_sync(dst_worker, my_sleep_func, args=(1,), timeout=5)
+        # Passing in a zero timeout should ensure that the RPC won't time out.
+        rpc.rpc_async(dst_worker, my_sleep_func, args=(1,), timeout=0).wait()
+        rpc.rpc_sync(dst_worker, my_sleep_func, args=(1,), timeout=0)
+        # Reset for clean shutdown
+        rpc._set_rpc_timeout(timedelta(seconds=60))
+
 
     def test_requires_process_group_agent_decorator(self):
         @requires_process_group_agent("test_func did not run")
@@ -2007,10 +2156,6 @@ class RpcTest(RpcAgentTestFixture):
             self.assertFalse(t_ret.is_contiguous())
 
 
-@unittest.skipIf(
-    not torch._six.PY3,
-    "Pytorch distributed autograd package does not support python2",
-)
 class FaultyAgentRpcTest(FaultyRpcAgentTestFixture):
 
     # no faulty_messages defined so this fails all retryable messages - see

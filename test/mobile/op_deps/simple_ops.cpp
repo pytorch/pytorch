@@ -3,7 +3,7 @@
 #include <iostream>
 
 #include <c10/core/TensorOptions.h>
-#include <ATen/core/op_registration/op_registration.h>
+#include <torch/library.h>
 
 #include "utils.h"
 
