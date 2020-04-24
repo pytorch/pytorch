@@ -2,12 +2,12 @@
 
 #include <c10/util/ArrayRef.h>
 #include <c10/util/Optional.h>
+#include <c10/util/flat_hash_map.h>
 #include <c10/util/sparse_bitset.h>
 #include <memory>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
-#include "c10/util/flat_hash_map.h"
 
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
@@ -29,6 +29,7 @@ class MemoryDAG;
  */
 class TORCH_API MemoryDAGBuilder {
  public:
+  MemoryDAGBuilder() {}
   MemoryDAGBuilder(const MemoryDAGBuilder&) = delete;
   MemoryDAGBuilder& operator=(const MemoryDAGBuilder&) = delete;
 
