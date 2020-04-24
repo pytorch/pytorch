@@ -483,16 +483,16 @@ void cummin_helper_cuda(const Tensor& self, Tensor& values, Tensor& indices, int
  */
 template<typename scalar_t, class BinaryOp>
 __global__ void tensor_kernel_scan_outer_dim(scalar_t *tgt_, scalar_t *src_,
-                                              int num_orows, int num_irows, int row_size,
+                                              unsigned num_orows, unsigned num_irows, unsigned row_size,
                                               scalar_t init, BinaryOp binary_op)
 {
-  for (int orow = blockIdx.x; orow < num_orows; orow += gridDim.x) {
-    for (int irow = blockIdx.y * blockDim.x + threadIdx.x; irow < num_irows; irow += gridDim.y * blockDim.x) {
+  for (unsigned orow = blockIdx.x; orow < num_orows; orow += gridDim.x) {
+    for (unsigned irow = blockIdx.y * blockDim.x + threadIdx.x; irow < num_irows; irow += gridDim.y * blockDim.x) {
       scalar_t *src = src_ + orow * row_size * num_irows + irow;
       scalar_t *tgt = tgt_ + orow * row_size * num_irows + irow;
       scalar_t acc = init;
 
-      for (int col = 0; col < row_size; ++col) {
+      for (unsigned col = 0; col < row_size; ++col) {
         acc = binary_op(acc, *src);
         *tgt = acc;
 
@@ -515,17 +515,17 @@ __global__ void tensor_kernel_scan_outer_dim(scalar_t *tgt_, scalar_t *src_,
  */
 template<typename T, int num_threads_x, int num_threads_y, class BinaryFunction>
 __global__ void tensor_kernel_scan_innermost_dim(T *tgt_, T *src_,
-                                                  int num_rows, int row_size,
+                                                  unsigned num_rows, unsigned row_size,
                                                   T init, BinaryFunction binary_op)
 {
   __shared__ T sbuf[num_threads_y][2 * num_threads_x];
 
   T* row_buf = sbuf[threadIdx.y];
 
-  for (int block_row = blockIdx.x * blockDim.y;
+  for (unsigned block_row = blockIdx.x * blockDim.y;
        block_row < num_rows;
        block_row += blockDim.y * gridDim.x) {
-    int row = block_row + threadIdx.y;
+    unsigned row = block_row + threadIdx.y;
     T block_total = init;
 
     T *row_src = src_ + row * row_size;
@@ -533,10 +533,10 @@ __global__ void tensor_kernel_scan_innermost_dim(T *tgt_, T *src_,
 
     // Perform scan on one block at a time, keeping track of the total value of
     // all blocks processed so far.
-    for (int block_col = 0; block_col < row_size; block_col += 2 * num_threads_x) {
+    for (unsigned block_col = 0; block_col < row_size; block_col += 2 * num_threads_x) {
       // Load data into shared memory (two values per thread).
-      int col1 = block_col + threadIdx.x;
-      int col2 = block_col + num_threads_x + threadIdx.x;
+      unsigned col1 = block_col + threadIdx.x;
+      unsigned col2 = block_col + num_threads_x + threadIdx.x;
       if (row < num_rows) {
         if (col1 < row_size) {
           row_buf[threadIdx.x] = row_src[col1];
@@ -558,18 +558,18 @@ __global__ void tensor_kernel_scan_innermost_dim(T *tgt_, T *src_,
       __syncthreads();
 
       // Parallel reduction (up-sweep).
-      for (int s = num_threads_x, d = 1; s >= 1; s >>= 1, d <<= 1) {
+      for (unsigned s = num_threads_x, d = 1; s >= 1; s >>= 1, d <<= 1) {
         if (row < num_rows && threadIdx.x < s) {
-          int offset = (2 * threadIdx.x + 1) * d - 1;
+          unsigned offset = (2 * threadIdx.x + 1) * d - 1;
           row_buf[offset + d] = binary_op(row_buf[offset], row_buf[offset + d]);
         }
         __syncthreads();
       }
 
       // Down-sweep.
-      for (int s = 2, d = num_threads_x / 2; d >= 1; s <<= 1, d >>= 1) {
+      for (unsigned s = 2, d = num_threads_x / 2; d >= 1; s <<= 1, d >>= 1) {
         if (row < num_rows && threadIdx.x < s - 1) {
-          int offset = 2 * (threadIdx.x + 1) * d - 1;
+          unsigned offset = 2 * (threadIdx.x + 1) * d - 1;
           row_buf[offset + d] = binary_op(row_buf[offset], row_buf[offset + d]);
         }
         __syncthreads();
@@ -599,7 +599,7 @@ __host__ void scan_outer_dim(const Tensor& self, Tensor& result,
   int num_irows = std::accumulate(sizes.begin() + dim + 1, sizes.end(), 1, std::multiplies<int>());
 
   dim3 threads(std::min(512, int(num_irows)));
-  int maxGridDim = at::cuda::getCurrentDeviceProperties()->maxGridSize[0];
+  int maxGridDim = 1024;
   dim3 grid(std::min(maxGridDim, num_orows), std::min(maxGridDim, cuda::ATenCeilDiv(num_irows, int(threads.x))));
 
   tensor_kernel_scan_outer_dim<scalar_t><<<grid, threads, 0, at::cuda::getCurrentCUDAStream()>>>(
@@ -616,7 +616,7 @@ void scan_innermost_dim(const Tensor& self, Tensor& result, scalar_t init, Binar
   int num_rows = self.numel() / row_size;
 
   dim3 threads(16, 32);
-  dim3 grid(std::min(at::cuda::getCurrentDeviceProperties()->maxGridSize[0], cuda::ATenCeilDiv(num_rows, int(threads.y))));
+  dim3 grid(std::min(1024, cuda::ATenCeilDiv(num_rows, int(threads.y))));
 
   tensor_kernel_scan_innermost_dim<scalar_t, 16, 32><<<grid, threads, 0, at::cuda::getCurrentCUDAStream()>>>(
     result.data_ptr<scalar_t>(), self.data_ptr<scalar_t>(),
