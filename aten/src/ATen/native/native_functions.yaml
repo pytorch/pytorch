@@ -457,6 +457,7 @@
     CPU: as_strided_tensorimpl
     CUDA: as_strided_tensorimpl
     QuantizedCPU: as_strided_qtensorimpl
+    QuantizedCUDA: as_strided_qtensorimpl
   device_guard: False
   supports_named_tensor: True
 
@@ -1196,7 +1197,8 @@
 - func: _empty_affine_quantized(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, float scale=1, int zero_point=0, MemoryFormat? memory_format=contiguous_format) -> Tensor
   dispatch:
     CPU: empty_affine_quantized_other_backends_stub
-    QuantizedCPU: empty_affine_quantized_cpu
+    QuantizedCPU: empty_affine_quantized
+    QuantizedCUDA: empty_affine_quantized
 
 # it's a factory function receiving a tensor argument, thus overriding explicitly
 # other overrides are to provide a more helpful error message that dtype is required
@@ -3223,6 +3225,7 @@
     SparseCUDA: clone_sparse
     MkldnnCPU: mkldnn_clone
     QuantizedCPU: quantized_clone
+    QuantizedCUDA: quantized_clone
   supports_named_tensor: True
 
 - func: resize_as_(Tensor(a!) self, Tensor the_template, *, MemoryFormat? memory_format=None) -> Tensor(a!)
@@ -3690,7 +3693,8 @@
 - func: quantize_per_tensor(Tensor self, float scale, int zero_point, ScalarType dtype) -> Tensor
   variants: function
   dispatch:
-    CPU: quantize_per_tensor_cpu
+    CPU: quantize_per_tensor
+    CUDA: quantize_per_tensor
 
 - func: quantize_per_tensor.tensors(Tensor[] tensors, Tensor scales, Tensor zero_points, ScalarType dtype) -> Tensor[]
   variants: function
@@ -3707,6 +3711,7 @@
   variants: function, method
   dispatch:
     QuantizedCPU: dequantize_quant
+    QuantizedCUDA: dequantize_quant
 
 - func: dequantize.tensors(Tensor[] tensors) -> Tensor[]
   variants: function
@@ -3718,12 +3723,14 @@
   variants: function, method
   dispatch:
     QuantizedCPU: q_scale_quant
+    QuantizedCUDA: q_scale_quant
 
 - func: q_zero_point(Tensor self) -> int
   use_c10_dispatcher: full
   variants: function, method
   dispatch:
     QuantizedCPU: q_zero_point_quant
+    QuantizedCUDA: q_zero_point_quant
 
 - func: q_per_channel_scales(Tensor self) -> Tensor
   variants: function, method
@@ -3744,12 +3751,14 @@
   use_c10_dispatcher: full
   variants: function, method
   dispatch:
-    QuantizedCPU: int_repr_quant
+    QuantizedCPU: int_repr_quant_cpu
+    QuantizedCUDA: int_repr_quant_cuda
 
 - func: _make_per_tensor_quantized_tensor(Tensor self, float scale, int zero_point) -> Tensor
   use_c10_dispatcher: full
   dispatch:
     CPU: make_per_tensor_quantized_tensor_cpu
+    CUDA: make_per_tensor_quantized_tensor_cuda
 
 - func: _make_per_channel_quantized_tensor(Tensor self, Tensor scale, Tensor zero_point, int axis) -> Tensor
   dispatch:
@@ -3760,6 +3769,7 @@
   variants: method
   dispatch:
     QuantizedCPU: qscheme_quant
+    QuantizedCUDA: qscheme_quant
 
 - func: fake_quantize_per_tensor_affine(Tensor self, float scale, int zero_point, int quant_min, int quant_max) -> Tensor
   use_c10_dispatcher: full
@@ -3934,7 +3944,8 @@
   dispatch:
     CPU: set_storage_cpu_
     CUDA: set_storage_cuda_
-    QuantizedCPU: set_storage_quantized_cpu_
+    QuantizedCPU: set_storage_quantized_
+    QuantizedCUDA: set_storage_quantized_
 
 - func: set_.source_Tensor(Tensor(a!) self, Tensor source) -> Tensor(a!)
   variants: method
@@ -3953,6 +3964,7 @@
   variants: method
   dispatch:
     QuantizedCPU: set_quantizer_
+    QuantizedCUDA: set_quantizer_
 
 - func: is_set_to(Tensor self, Tensor tensor) -> bool
   use_c10_dispatcher: full
@@ -4004,6 +4016,7 @@
     CUDA: view
     MkldnnCPU: mkldnn_view
     QuantizedCPU: view
+    QuantizedCUDA: view
 
 - func: put_(Tensor(a!) self, Tensor index, Tensor source, bool accumulate=False) -> Tensor(a!)
   variants: method
@@ -5257,7 +5270,7 @@
   dispatch:
     CPU: legacy::cpu::_th_equal
     CUDA: legacy::cuda::_th_equal
-    QuantizedCPU: quantized_equal
+    QuantizedCPU: quantized_equal_cpu
   supports_named_tensor: True
 
 - func: pow.Tensor_Tensor_out(Tensor self, Tensor exponent, *, Tensor(a!) out) -> Tensor(a!)
