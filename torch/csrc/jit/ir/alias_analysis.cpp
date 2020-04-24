@@ -1535,11 +1535,11 @@ void Lint(const AliasDb* db) {
     if (it == db->elementMap_.end()) {
       failed = true;
       ss << fmt::format(
-           "Value %{} of type {} wasn't found in the element map.\n"
-           "It was defined in {}",
-           v->debugName(),
-           v->type()->python_str(),
-           *v->node());
+          "Value %{} of type {} wasn't found in the element map.\n"
+          "It was defined in {}",
+          v->debugName(),
+          v->type()->python_str(),
+          *v->node());
     }
   }
   TORCH_INTERNAL_ASSERT(failed == false, ss.str());
