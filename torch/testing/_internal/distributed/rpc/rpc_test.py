@@ -549,6 +549,43 @@ class RpcTest(RpcAgentTestFixture):
             )
         rpc.shutdown()
 
+    @requires_process_group_agent("PROCESS_GROUP rpc backend specific test, skip")
+    def test_world_size_one(self):
+        if self.rank == 0:
+            rpc.init_rpc(
+                name="me",
+                backend=self.rpc_backend,
+                rank=0,
+                world_size=1,
+                rpc_backend_options=self.rpc_backend_options,
+            )
+
+            expect = torch.ones(2, 2) * 2
+            result = rpc.rpc_sync(
+                "me",
+                my_tensor_function,
+                args=(torch.ones(2, 2), torch.ones(2, 2))
+            )
+            self.assertEqual(expect, result)
+
+            expect = torch.ones(3, 3) * 2
+            result = rpc.rpc_async(
+                "me",
+                my_tensor_function,
+                args=(torch.ones(3, 3), torch.ones(3, 3))
+            ).wait()
+            self.assertEqual(expect, result)
+
+            expect = torch.ones(4, 4) * 2
+            result = rpc.remote(
+                "me",
+                my_tensor_function,
+                args=(torch.ones(4, 4), torch.ones(4, 4))
+            ).to_here()
+            self.assertEqual(expect, result)
+
+            rpc.shutdown()
+
     @dist_init(setup_rpc=False)
     def test_invalid_names(self):
         from torch.distributed.rpc import WorkerInfo
