@@ -1177,7 +1177,7 @@ graph(%input, %weight):
                 self.fc = torch.nn.Linear(5, 5).float()
 
             def forward(self, x):
-                return self.fc
+                return self.fc(x)
 
         class ComplexModel(torch.nn.Module):
             def __init__(self):
@@ -1188,7 +1188,7 @@ graph(%input, %weight):
                 # type: (torch.Tensor) -> List[torch.Tensor]
                 states = []
                 for layer in self.layers:
-                    val = layer.fc(x)
+                    val = layer(x)
                     states.append(val)
                 return states
 
