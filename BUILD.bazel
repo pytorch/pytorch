@@ -56,6 +56,7 @@ cc_library(
         "c10/cuda/impl/*.h",
         "c10/macros/*.h",
         "c10/util/*.h",
+        "c10/util/*.hpp",
     ]) + [
         "c10/macros/cmake_macros.h",
         "c10/cuda/impl/cuda_cmake_macros.h",
