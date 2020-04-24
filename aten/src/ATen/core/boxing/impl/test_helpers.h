@@ -73,6 +73,14 @@ inline void expectThrows(Functor&& functor, const char* expectMessageContains) {
     << expectMessageContains << "\" but didn't throw";
 }
 
+template<class T, size_t N>
+void expectListEquals(c10::ArrayRef<T> expected, std::array<T, N> actual) {
+  EXPECT_EQ(expected.size(), actual.size());
+  for (size_t i = 0; i < expected.size(); ++i) {
+    EXPECT_EQ(expected[i], actual[i]);
+  }
+}
+
 template<class T>
 void expectListEquals(c10::ArrayRef<T> expected, c10::ArrayRef<T> actual) {
   EXPECT_EQ(expected.size(), actual.size());
