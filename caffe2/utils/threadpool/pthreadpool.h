@@ -8,7 +8,7 @@
 
 #include <stddef.h> // for size_t
 
-typedef struct c2_pthreadpool* c2_pthreadpool_t;
+typedef struct pthreadpool* c2_pthreadpool_t;
 
 typedef void (*c2_pthreadpool_function_1d_t)(void*, size_t);
 typedef void (*c2_pthreadpool_function_1d_tiled_t)(void*, size_t, size_t);
