@@ -3,7 +3,7 @@
 #else
 
 #ifdef USE_FBGEMM
-#include "fbgemm/FbgemmI64.h"
+#include <fbgemm/FbgemmI64.h>
 #endif // USE_FBGEMM
 
 #ifdef BLAS_F2C

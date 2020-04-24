@@ -7,9 +7,14 @@ GENERATED_CPP = [
     "autograd/generated/VariableType_2.cpp",
     "autograd/generated/VariableType_3.cpp",
     "autograd/generated/VariableType_4.cpp",
-    "jit/generated/register_aten_ops_0.cpp",
-    "jit/generated/register_aten_ops_1.cpp",
-    "jit/generated/register_aten_ops_2.cpp",
+    "jit/generated/generated_unboxing_wrappers_0.cpp",
+    "jit/generated/generated_unboxing_wrappers_1.cpp",
+    "jit/generated/generated_unboxing_wrappers_2.cpp",
+    "autograd/generated/ProfiledType_0.cpp",
+    "autograd/generated/ProfiledType_1.cpp",
+    "autograd/generated/ProfiledType_2.cpp",
+    "autograd/generated/ProfiledType_3.cpp",
+    "autograd/generated/ProfiledType_4.cpp",
     "autograd/generated/python_functions.cpp",
     "autograd/generated/python_nn_functions.cpp",
     "autograd/generated/python_torch_functions.cpp",
@@ -18,14 +23,20 @@ GENERATED_CPP = [
 
 libtorch_generated_sources = [
     ":generate-code=autograd/generated/Functions.cpp",
-    ":generate-code=jit/generated/register_aten_ops_0.cpp",
-    ":generate-code=jit/generated/register_aten_ops_1.cpp",
-    ":generate-code=jit/generated/register_aten_ops_2.cpp",
+    ":generate-code=jit/generated/generated_unboxing_wrappers_0.cpp",
+    ":generate-code=jit/generated/generated_unboxing_wrappers_1.cpp",
+    ":generate-code=jit/generated/generated_unboxing_wrappers_2.cpp",
     ":generate-code=autograd/generated/VariableType_0.cpp",
     ":generate-code=autograd/generated/VariableType_1.cpp",
     ":generate-code=autograd/generated/VariableType_2.cpp",
     ":generate-code=autograd/generated/VariableType_3.cpp",
     ":generate-code=autograd/generated/VariableType_4.cpp",
+    ":generate-code=autograd/generated/ProfiledType_0.cpp",
+    ":generate-code=autograd/generated/ProfiledType_1.cpp",
+    ":generate-code=autograd/generated/ProfiledType_2.cpp",
+    ":generate-code=autograd/generated/ProfiledType_3.cpp",
+    ":generate-code=autograd/generated/ProfiledType_4.cpp",
+    "torch/csrc/autograd/VariableTypeManual.cpp",
 ]
 
 # copied from https://github.com/pytorch/pytorch/blob/master/tools/cpp_build/torch/CMakeLists.txt
@@ -203,17 +214,8 @@ libtorch_distributed_sources = [
     "torch/csrc/distributed/rpc/utils.cpp",
 ]
 
-libtorch_extra_sources = [
-    "torch/csrc/autograd/VariableTypeManual.cpp",
-    "torch/csrc/jit/api/module_save.cpp",
+libtorch_core_jit_sources = [
     "torch/csrc/jit/codegen/cuda/interface.cpp",
-    "torch/csrc/jit/codegen/fuser/cpu/fused_kernel.cpp",
-    "torch/csrc/jit/mobile/function.cpp",
-    "torch/csrc/jit/mobile/import.cpp",
-    "torch/csrc/jit/mobile/interpreter.cpp",
-    "torch/csrc/jit/mobile/module.cpp",
-    "torch/csrc/jit/mobile/register_mobile_autograd.cpp",
-    "torch/csrc/jit/mobile/register_mobile_ops.cpp",
     "torch/csrc/jit/passes/create_functional_graphs.cpp",
     "torch/csrc/jit/passes/lower_graph.cpp",
     "torch/csrc/jit/runtime/register_c10_ops.cpp",
@@ -222,6 +224,23 @@ libtorch_extra_sources = [
     "torch/csrc/jit/runtime/register_prim_ops_fulljit.cpp",
     "torch/csrc/jit/runtime/register_special_ops.cpp",
     "torch/csrc/jit/runtime/register_string_ops.cpp",
+]
+
+libtorch_cmake_sources = libtorch_core_sources + libtorch_core_jit_sources + [
+    "torch/csrc/jit/passes/inline_fork_wait.cpp",
+    "torch/csrc/jit/passes/remove_inplace_ops.cpp",
+    "torch/csrc/jit/passes/utils/check_alias_annotation.cpp",
+]
+
+libtorch_extra_sources = libtorch_core_jit_sources + [
+    "torch/csrc/autograd/VariableTypeManual.cpp",
+    "torch/csrc/jit/api/module_save.cpp",
+    "torch/csrc/jit/codegen/fuser/cpu/fused_kernel.cpp",
+    "torch/csrc/jit/mobile/function.cpp",
+    "torch/csrc/jit/mobile/import.cpp",
+    "torch/csrc/jit/mobile/interpreter.cpp",
+    "torch/csrc/jit/mobile/module.cpp",
+    "torch/csrc/jit/mobile/register_mobile_autograd.cpp",
     "torch/csrc/jit/serialization/export.cpp",
     "torch/csrc/jit/serialization/export_module.cpp",
     "torch/csrc/jit/serialization/import_legacy.cpp",

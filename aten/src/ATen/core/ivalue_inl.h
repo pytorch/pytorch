@@ -448,8 +448,6 @@ struct ivalue::PyObjectHolder : c10::intrusive_ptr_target {
   virtual ~PyObjectHolder() {};
 };
 
-std::vector<std::pair<IValue, IValue>> iterationOrder(const c10::Dict<IValue, IValue>& dict);
-
 #undef TORCH_FORALL_TAGS
 
 namespace detail {

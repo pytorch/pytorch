@@ -287,7 +287,7 @@ enum pytorch_qnnp_status pytorch_qnnp_setup_average_pooling2d_nhwc_q8(
    *  | | | | | | | |
    *  ---------------
    *
-   *  Thus we are going from width=7 height=5 input to height=2 width=3
+   *  Thus we are going from width=7 height=5 input to width=3 height=2
    *  Convince yourself that input 5x7 with pooling params of 3x3 kernel
    *  with 2x2 stride gets you to 2x3 output.
    *  Now for each output place (0,0), (0,1), (0,2), (1,0), (1,1), (1,2)

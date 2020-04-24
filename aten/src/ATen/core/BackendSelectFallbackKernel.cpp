@@ -1,9 +1,5 @@
-#include <ATen/core/op_registration/op_registration.h>
+#include <torch/library.h>
 
-namespace {
-
-static auto registry = c10::import()
-  .fallback(c10::DispatchKey::BackendSelect, c10::CppFunction::makeFallthrough())
-;
-
+TORCH_LIBRARY_IMPL(_, BackendSelect, m) {
+  m.fallback(torch::CppFunction::makeFallthrough());
 }
