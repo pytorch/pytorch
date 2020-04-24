@@ -186,13 +186,14 @@ static void* argToPtr(
 }
 
 void LLVMCodeGen::call(const std::vector<CallArg>& args) {
-  if (args.size() != buffer_args().size()) {
+  const auto& buf_args = buffer_args();
+  if (args.size() != buf_args.size()) {
     throw malformed_input("wrong number of args in call");
   }
 
   void** argv = impl_->getArgvAddress();
-  for (size_t i = 0, e = buffer_args().size(); i < e; i++) {
-    auto const& bufferArg = buffer_args()[i];
+  for (size_t i = 0, e = buf_args.size(); i < e; i++) {
+    auto const& bufferArg = buf_args[i];
     auto const& callArg = args[i];
     argv[i] = argToPtr(bufferArg, callArg);
   }
