@@ -6,7 +6,6 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/native/TensorFactories.h>
 #include <ATen/native/quantized/affine_quantizer.h>
-#include <ATen/native/utils/Allocator.h>
 #include <ATen/quantized/QTensorImpl.h>
 #include <c10/core/Allocator.h>
 #include <c10/core/CPUAllocator.h>
@@ -61,18 +60,6 @@ QTensorImpl* get_qtensorimpl(const Tensor& self) {
   TORCH_INTERNAL_ASSERT(self.is_quantized(), "get_qtensorimpl: not a quantized tensor");
   return static_cast<QTensorImpl*>(self.unsafeGetTensorImpl());
 }
-
-#ifdef USE_PYTORCH_QNNPACK
-
-// QNNPACK can access up to 8 bytes beyond the beginning of the tensor's storage
-// boundary which does trigger ASAN, and can result in a segfault if the memory falls
-// on a different page out of the process's address space.
-// Here we define a custom allocator that allocates the extra storage required to keep
-// this behavior safe.  This same allocator can be used for FBGEMM as well.
-
-using QAllocator = native::GuardingAllocator<8u, 0u>;
-
-#endif
 
 inline Tensor new_qtensor(
     IntArrayRef sizes,
