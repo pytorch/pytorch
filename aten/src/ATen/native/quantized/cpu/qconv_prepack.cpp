@@ -235,7 +235,6 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeightsQnnp<kSpa
       std::numeric_limits<uint8_t>::max());
 
   auto weight_contig = weight.contiguous(c10::MemoryFormat::ChannelsLast);
-  auto weight_zp = weight.q_zero_point();
 
   // We set the pre-packed conv weights to nullptr below as we call pre-pack
   // during the first invocation of operator run. Refer to qconv.cpp for more
@@ -253,8 +252,8 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeightsQnnp<kSpa
               groups,
               c10::nullopt, /* input_scale */
               {kernel_h, kernel_w},
-              weight.q_scale(),
-              weight_zp});
+              static_cast<float>(weight.q_scale()),
+              static_cast<int32_t>(weight.q_zero_point())});
 
   return ret_ptr;
 }
