@@ -94,6 +94,7 @@ INSTANTIATE(int16_t);
 INSTANTIATE(int);
 INSTANTIATE(int64_t);
 INSTANTIATE(c10::BFloat16);
+#undef INSTANTIATE
 
 } // namespace blas_impl
 
