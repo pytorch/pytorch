@@ -65,7 +65,8 @@ if [[ "$BUILD_ENVIRONMENT" != *ppc64le* ]] && [[ "$BUILD_ENVIRONMENT" != *-bazel
   pip_install --user tb-nightly
   # mypy will fail to install on Python <3.4.  In that case,
   # we just won't run these tests.
-  pip_install --user mypy || true
+  # Pin MyPy version because new errors are likely to appear with each release
+  pip_install --user "mypy==0.770" || true
 fi
 
 # faulthandler become built-in since 3.3
