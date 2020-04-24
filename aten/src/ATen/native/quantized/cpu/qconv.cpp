@@ -177,7 +177,7 @@ void PackedConvWeight<kSpatialDim>::GetQuantizationParams(
 
 template <int kSpatialDim>
 at::Tensor PackedConvWeight<kSpatialDim>::apply(
-    at::Tensor input,
+    const at::Tensor& input,
     double output_scale,
     int64_t output_zero_point) {
   return apply_impl<false>(input, output_scale, output_zero_point);
@@ -185,7 +185,7 @@ at::Tensor PackedConvWeight<kSpatialDim>::apply(
 
 template <int kSpatialDim>
 at::Tensor PackedConvWeight<kSpatialDim>::apply_relu(
-    at::Tensor input,
+    const at::Tensor& input,
     double output_scale,
     int64_t output_zero_point) {
   return apply_impl<true>(input, output_scale, output_zero_point);
@@ -194,7 +194,7 @@ at::Tensor PackedConvWeight<kSpatialDim>::apply_relu(
 template <int kSpatialDim>
 template <bool kReluFused>
 at::Tensor PackedConvWeight<kSpatialDim>::apply_impl(
-    at::Tensor act,
+    const at::Tensor& act,
     double output_scale,
     int64_t output_zero_point) {
   // Quantized kernels are all written with NHWC (channels last) layout in
@@ -422,43 +422,23 @@ at::Tensor PackedConvWeight<kSpatialDim>::apply_impl(
   return output;
 }
 
-template at::Tensor PackedConvWeight<2>::apply_impl<true>(
-    at::Tensor act,
-    double output_scale,
-    int64_t output_zero_point);
-
-template at::Tensor PackedConvWeight<2>::apply_impl<false>(
-    at::Tensor act,
-    double output_scale,
-    int64_t output_zero_point);
-
 template at::Tensor PackedConvWeight<2>::apply(
-    at::Tensor act,
+    const at::Tensor& act,
     double output_scale,
     int64_t output_zero_point);
 
 template at::Tensor PackedConvWeight<2>::apply_relu(
-    at::Tensor act,
-    double output_scale,
-    int64_t output_zero_point);
-
-template at::Tensor PackedConvWeight<3>::apply_impl<true>(
-    at::Tensor act,
-    double output_scale,
-    int64_t output_zero_point);
-
-template at::Tensor PackedConvWeight<3>::apply_impl<false>(
-    at::Tensor act,
+    const at::Tensor& act,
     double output_scale,
     int64_t output_zero_point);
 
 template at::Tensor PackedConvWeight<3>::apply(
-    at::Tensor act,
+    const at::Tensor& act,
     double output_scale,
     int64_t output_zero_point);
 
 template at::Tensor PackedConvWeight<3>::apply_relu(
-    at::Tensor act,
+    const at::Tensor& act,
     double output_scale,
     int64_t output_zero_point);
 
@@ -468,7 +448,7 @@ template at::Tensor PackedConvWeight<3>::apply_relu(
 
 template <int kSpatialDim>
 at::Tensor PackedConvWeightsQnnp<kSpatialDim>::apply(
-    at::Tensor input,
+    const at::Tensor& input,
     double output_scale,
     int64_t output_zero_point) {
   return apply_impl<false>(input, output_scale, output_zero_point);
@@ -476,7 +456,7 @@ at::Tensor PackedConvWeightsQnnp<kSpatialDim>::apply(
 
 template <int kSpatialDim>
 at::Tensor PackedConvWeightsQnnp<kSpatialDim>::apply_relu(
-    at::Tensor input,
+    const at::Tensor& input,
     double output_scale,
     int64_t output_zero_point) {
   return apply_impl<false>(input, output_scale, output_zero_point);
@@ -485,7 +465,7 @@ at::Tensor PackedConvWeightsQnnp<kSpatialDim>::apply_relu(
 template <int kSpatialDim>
 template <bool kReluFused>
 at::Tensor PackedConvWeightsQnnp<kSpatialDim>::apply_impl(
-    at::Tensor act,
+    const at::Tensor& act,
     double output_scale,
     int64_t output_zero_point) {
   TORCH_CHECK(
@@ -619,43 +599,23 @@ at::Tensor PackedConvWeightsQnnp<kSpatialDim>::apply_impl(
   return output;
 }
 
-template at::Tensor PackedConvWeightsQnnp<2>::apply_impl<true>(
-    at::Tensor act,
-    double output_scale,
-    int64_t output_zero_point);
-
-template at::Tensor PackedConvWeightsQnnp<2>::apply_impl<false>(
-    at::Tensor act,
-    double output_scale,
-    int64_t output_zero_point);
-
 template at::Tensor PackedConvWeightsQnnp<2>::apply(
-    at::Tensor act,
+    const at::Tensor& act,
     double output_scale,
     int64_t output_zero_point);
 
 template at::Tensor PackedConvWeightsQnnp<2>::apply_relu(
-    at::Tensor act,
-    double output_scale,
-    int64_t output_zero_point);
-
-template at::Tensor PackedConvWeightsQnnp<3>::apply_impl<true>(
-    at::Tensor act,
-    double output_scale,
-    int64_t output_zero_point);
-
-template at::Tensor PackedConvWeightsQnnp<3>::apply_impl<false>(
-    at::Tensor act,
+    const at::Tensor& act,
     double output_scale,
     int64_t output_zero_point);
 
 template at::Tensor PackedConvWeightsQnnp<3>::apply(
-    at::Tensor act,
+    const at::Tensor& act,
     double output_scale,
     int64_t output_zero_point);
 
 template at::Tensor PackedConvWeightsQnnp<3>::apply_relu(
-    at::Tensor act,
+    const at::Tensor& act,
     double output_scale,
     int64_t output_zero_point);
 

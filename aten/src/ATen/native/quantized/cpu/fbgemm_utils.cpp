@@ -257,12 +257,7 @@ torch::jit::class_<ConvPackedParamsBase<kSpatialDim>> register_conv_params() {
                 at::Tensor groups_tensor;
                 torch::List<int64_t> stride, padding, dilation;
                 int64_t groups;
-                weight = std::move(std::get<0>(state));
-                bias = std::move(std::get<1>(state));
-                stride_tensor = std::get<2>(state);
-                padding_tensor = std::get<3>(state);
-                dilation_tensor = std::get<4>(state);
-                groups_tensor = std::get<5>(state);
+                std::tie(weight, bias, stride_tensor, padding_tensor, dilation_tensor, groups_tensor) = state;
                 for (at::Tensor s : stride_tensor) {
                   stride.emplace_back(s[0].item<int64_t>());
                 }

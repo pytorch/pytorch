@@ -69,12 +69,12 @@ struct PackedConvWeightsQnnp : public ConvPackedParamsBase<kSpatialDim> {
   int32_t w_zp;
 
   at::Tensor apply(
-      at::Tensor input,
+      const at::Tensor& input,
       double output_scale,
       int64_t output_zero_point) override;
 
   at::Tensor apply_relu(
-      at::Tensor input,
+      const at::Tensor& input,
       double output_scale,
       int64_t output_zero_point) override;
 
@@ -107,7 +107,7 @@ struct PackedConvWeightsQnnp : public ConvPackedParamsBase<kSpatialDim> {
  private:
   template <bool ReluFused>
   at::Tensor apply_impl(
-      at::Tensor input,
+      const at::Tensor& input,
       double output_scale,
       int64_t output_zero_point);
 };

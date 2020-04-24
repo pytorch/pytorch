@@ -6,11 +6,11 @@
 template <int kSpatialDim = 2>
 struct ConvPackedParamsBase : public torch::jit::CustomClassHolder {
   virtual at::Tensor apply(
-      at::Tensor input,
+      const at::Tensor& input,
       double output_scale,
       int64_t output_zero_point) = 0;
   virtual at::Tensor apply_relu(
-      at::Tensor input,
+      const at::Tensor& input,
       double output_scale,
       int64_t output_zero_point) = 0;
 

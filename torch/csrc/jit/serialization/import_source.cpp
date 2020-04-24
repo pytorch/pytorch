@@ -265,7 +265,7 @@ struct SourceImporterImpl : public Resolver,
   c10::optional<Assign> qconvAttributeAssignmentSpecialHandlingHack(
       const QualifiedName& qualified_classname,
       const Assign& assign) {
-    std::regex mangle_re("\\.___torch_mangle_\\d+");
+    static std::regex mangle_re("\\.___torch_mangle_\\d+");
     auto replaced_string =
         std::regex_replace(qualified_classname.qualifiedName(), mangle_re, "");
     auto is_conv2d = [](const std::string& type) {
