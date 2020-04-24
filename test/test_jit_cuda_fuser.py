@@ -210,8 +210,7 @@ class TestCudaFuser(JitTestCase):
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING, "Requires profiling node to run cuda fuser")
     @skipIfRocm
     def test_binary_ops(self):
-        #operations = [torch.div, torch.mul, torch.atan2, torch.max, torch.min, torch.pow, torch.remainder, torch.fmod, torch.eq, torch.ne, torch.ge, torch.gt, torch.le, torch.lt]
-        operations = [torch.div, torch.mul, torch.atan2, torch.max, torch.min, torch.pow, torch.remainder, torch.fmod]
+        operations = [torch.div, torch.mul, torch.atan2, torch.max, torch.min, torch.pow, torch.remainder, torch.fmod, torch.eq, torch.ne, torch.ge, torch.gt, torch.le, torch.lt]
         for op in operations:
             self._binary_test_helper(op)
 
