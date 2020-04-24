@@ -2683,6 +2683,9 @@
 - func: stft(Tensor self, int n_fft, int? hop_length=None, int? win_length=None, Tensor? window=None, bool normalized=False, bool onesided=True) -> Tensor
   variants: function, method
 
+- func: istft(Tensor self, int n_fft, int? hop_length=None, int? win_length=None, Tensor? window=None, bool center=True, bool normalized=False, bool onesided=True, int? length=None) -> Tensor
+  variants: function, method
+
 - func: stride.int(Tensor self, int dim) -> int
   use_c10_dispatcher: full
   variants: function, method
