@@ -1,12 +1,12 @@
 #include <ATen/ATen.h>
 #include <ATen/Parallel.h>
-#include <torch/library.h>
 #include <ATen/core/op_registration/op_registration.h>
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
 #include <ATen/native/quantized/cpu/packed_params.h>
 #include <ATen/native/quantized/cpu/qnnpack_utils.h>
 #include <ATen/native/quantized/cpu/quant_utils.h>
 #include <caffe2/utils/threadpool/ThreadPoolMobile.h>
+#include <torch/library.h>
 
 #include <torch/custom_class.h>
 
@@ -403,7 +403,9 @@ template <bool ReluFused>
 class QLinearDynamicFp16 final {
  public:
 #ifdef USE_FBGEMM
-  static at::Tensor run(at::Tensor input, const c10::intrusive_ptr<LinearPackedParamsBase>& packed_weight) {
+  static at::Tensor run(
+      at::Tensor input,
+      const c10::intrusive_ptr<LinearPackedParamsBase>& packed_weight) {
     // We make a strong guarantee that models using these operators will have
     // the same numerics across different machines. Therefore, we do not provide
     // a fallback path and rather fail loudly if we cannot run FBGEMM.

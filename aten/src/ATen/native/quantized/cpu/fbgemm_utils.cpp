@@ -206,20 +206,18 @@ Tensor ConvertToChannelsLast3dTensor(const Tensor& src) {
 
 #endif // USE_FBGEMM
 
-
 torch::jit::class_<LinearPackedParamsBase> register_linear_params() {
   using SerializationType = std::tuple<at::Tensor, c10::optional<at::Tensor>>;
   static auto register_linear_params =
-      torch::jit::class_<LinearPackedParamsBase>("quantized", "LinearPackedParamsBase")
+      torch::jit::class_<LinearPackedParamsBase>(
+          "quantized", "LinearPackedParamsBase")
           .def_pickle(
               [](const c10::intrusive_ptr<LinearPackedParamsBase>& params)
                   -> SerializationType { // __getstate__
                 at::Tensor weight;
                 c10::optional<at::Tensor> bias;
                 std::tie(weight, bias) = params->unpack();
-                return std::make_tuple(
-                    std::move(weight),
-                    std::move(bias));
+                return std::make_tuple(std::move(weight), std::move(bias));
               },
               [](SerializationType state)
                   -> c10::intrusive_ptr<
@@ -246,7 +244,7 @@ torch::jit::class_<LinearPackedParamsBase> register_linear_params() {
                         " in serialized LinearPackedParams object!");
                   }
                 }
-#endif  // USE_FBGEMM
+#endif // USE_FBGEMM
 #ifdef USE_PYTORCH_QNNPACK
                 if (at::globalContext().qEngine() == at::QEngine::QNNPACK) {
                   TORCH_CHECK(
@@ -256,7 +254,7 @@ torch::jit::class_<LinearPackedParamsBase> register_linear_params() {
                   return PackedLinearWeightsQnnp::prepack(
                       std::move(weight), std::move(bias));
                 }
-#endif  // USE_PYTORCH_QNNPACK
+#endif // USE_PYTORCH_QNNPACK
                 TORCH_CHECK(false, "Unknown qengine");
               });
   return register_linear_params;

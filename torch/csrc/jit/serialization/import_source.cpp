@@ -272,10 +272,17 @@ struct SourceImporterImpl : public Resolver,
     };
 
     // module demangled qualname -> ReplacementDescr
-    static std::unordered_map<std::string, AttrTypeReplacementDescr> replacements {
-      {"__torch__.torch.nn.quantized.modules.linear.LinearPackedParams", {"_packed_params", "Tensor", "__torch__.torch.classes.quantized.LinearPackedParamsBase"}},
-      {"__torch__.torch.nn.quantized.modules.linear.Linear", {"_packed_params", "Tensor", "__torch__.torch.classes.quantized.LinearPackedParamsBase"}},
-    };
+    static std::unordered_map<std::string, AttrTypeReplacementDescr>
+        replacements{
+            {"__torch__.torch.nn.quantized.modules.linear.LinearPackedParams",
+             {"_packed_params",
+              "Tensor",
+              "__torch__.torch.classes.quantized.LinearPackedParamsBase"}},
+            {"__torch__.torch.nn.quantized.modules.linear.Linear",
+             {"_packed_params",
+              "Tensor",
+              "__torch__.torch.classes.quantized.LinearPackedParamsBase"}},
+        };
     static std::regex mangle_re("\\.___torch_mangle_\\d+");
     auto demangled_classname =
         std::regex_replace(qualified_classname.qualifiedName(), mangle_re, "");
@@ -286,9 +293,10 @@ struct SourceImporterImpl : public Resolver,
       }
       auto type = Var(assign.type().get());
 
-      auto &attr_name = replacements.at(demangled_classname).attr_name;
-      auto &expected_type = replacements.at(demangled_classname).expected_type;
-      auto &replacement_type = replacements.at(demangled_classname).replacement_type;
+      auto& attr_name = replacements.at(demangled_classname).attr_name;
+      auto& expected_type = replacements.at(demangled_classname).expected_type;
+      auto& replacement_type =
+          replacements.at(demangled_classname).replacement_type;
       if (lhs.name().name() == attr_name &&
           type.name().name() == expected_type) {
         Parser p(std::make_shared<Source>(replacement_type));

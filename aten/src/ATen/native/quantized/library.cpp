@@ -37,19 +37,31 @@ TORCH_LIBRARY(quantized, m) {
   m.def("conv2d_unpack(Tensor packed_weights) -> (Tensor unpacked_weights, Tensor? B_origin)");
   m.def("conv3d_unpack(Tensor packed_weights) -> (Tensor unpacked_weights, Tensor? B_origin)");
   m.def("layer_norm(Tensor input, int[] normalized_shape, Tensor weight, Tensor bias, float eps, float output_scale, int output_zero_point) -> Tensor");
-  m.def("linear(Tensor X, __torch__.torch.classes.quantized.LinearPackedParamsBase W_prepack, float Y_scale_i, int Y_zero_point_i) -> Tensor Y");
-  m.def("linear_relu(Tensor X, __torch__.torch.classes.quantized.LinearPackedParamsBase W_prepack, float Y_scale_i, int Y_zero_point_i) -> Tensor Y");
-  m.def("linear_dynamic(Tensor X, __torch__.torch.classes.quantized.LinearPackedParamsBase W_prepack) -> Tensor Y");
-  m.def("linear_relu_dynamic(Tensor X, __torch__.torch.classes.quantized.LinearPackedParamsBase W_prepack) -> Tensor Y");
-  m.def("linear_dynamic_fp16(Tensor X, __torch__.torch.classes.quantized.LinearPackedParamsBase W_prepack) -> Tensor Y");
-  m.def("linear_prepack(Tensor W, Tensor? B=None) -> __torch__.torch.classes.quantized.LinearPackedParamsBase W_prepack");
-  m.def("linear_prepack_fp16(Tensor W, Tensor? B=None) -> __torch__.torch.classes.quantized.LinearPackedParamsBase W_prepack");
+  m.def(
+      "linear(Tensor X, __torch__.torch.classes.quantized.LinearPackedParamsBase W_prepack, float Y_scale_i, int Y_zero_point_i) -> Tensor Y");
+  m.def(
+      "linear_relu(Tensor X, __torch__.torch.classes.quantized.LinearPackedParamsBase W_prepack, float Y_scale_i, int Y_zero_point_i) -> Tensor Y");
+  m.def(
+      "linear_dynamic(Tensor X, __torch__.torch.classes.quantized.LinearPackedParamsBase W_prepack) -> Tensor Y");
+  m.def(
+      "linear_relu_dynamic(Tensor X, __torch__.torch.classes.quantized.LinearPackedParamsBase W_prepack) -> Tensor Y");
+  m.def(
+      "linear_dynamic_fp16(Tensor X, __torch__.torch.classes.quantized.LinearPackedParamsBase W_prepack) -> Tensor Y");
+  m.def(
+      "linear_prepack(Tensor W, Tensor? B=None) -> __torch__.torch.classes.quantized.LinearPackedParamsBase W_prepack");
+  m.def(
+      "linear_prepack_fp16(Tensor W, Tensor? B=None) -> __torch__.torch.classes.quantized.LinearPackedParamsBase W_prepack");
   m.def("linear_prepack_legacy(Tensor W, Tensor? B=None) -> Tensor W_prepack");
-  m.def("linear_prepack_fp16_legacy(Tensor W, Tensor? B=None) -> Tensor W_prepack");
-  m.def("linear_unpack(__torch__.torch.classes.quantized.LinearPackedParamsBase W_prepack) -> (Tensor W_origin, Tensor? B_origin)");
-  m.def("linear_unpack_fp16(__torch__.torch.classes.quantized.LinearPackedParamsBase W_prepack) -> (Tensor W_origin, Tensor? B_origin)");
-  m.def("linear_unpack.legacy(Tensor W_prepack) -> (Tensor W_origin, Tensor? B_origin)");
-  m.def("linear_unpack_fp16.legacy(Tensor W_prepack) -> (Tensor W_origin, Tensor? B_origin)");
+  m.def(
+      "linear_prepack_fp16_legacy(Tensor W, Tensor? B=None) -> Tensor W_prepack");
+  m.def(
+      "linear_unpack(__torch__.torch.classes.quantized.LinearPackedParamsBase W_prepack) -> (Tensor W_origin, Tensor? B_origin)");
+  m.def(
+      "linear_unpack_fp16(__torch__.torch.classes.quantized.LinearPackedParamsBase W_prepack) -> (Tensor W_origin, Tensor? B_origin)");
+  m.def(
+      "linear_unpack.legacy(Tensor W_prepack) -> (Tensor W_origin, Tensor? B_origin)");
+  m.def(
+      "linear_unpack_fp16.legacy(Tensor W_prepack) -> (Tensor W_origin, Tensor? B_origin)");
   m.def("mul(Tensor qa, Tensor qb, float scale, int zero_point)-> Tensor qc");
   m.def("mul_relu(Tensor qa, Tensor qb, float scale, int zero_point)-> Tensor qc");
   m.def("mul_out(Tensor qa, Tensor qb, Tensor(a!) out)-> Tensor(a!) out");
@@ -71,10 +83,15 @@ TORCH_LIBRARY(_quantized, m) {
   m.def("conv2d(Tensor qx, Tensor weight, int[] stride, int[] padding, int[] dilation, int groups, float output_scale, int output_zero_point) -> Tensor");
   m.def("conv2d_relu(Tensor qx, Tensor weight, int[] stride, int[] padding, int[] dilation, int groups, float output_scale, int output_zero_point) -> Tensor");
   m.def("conv2d_prepack(Tensor weight, Tensor? bias, int[] stride, int[] padding, int[] dilation, int groups) -> Tensor");
-  m.def("linear(Tensor X, __torch__.torch.classes.quantized.LinearPackedParamsBase W_prepack, float Y_scale_i, int Y_zero_point_i) -> Tensor Y");
-  m.def("linear_dynamic(Tensor X, __torch__.torch.classes.quantized.LinearPackedParamsBase W_prepack) -> Tensor Y");
-  m.def("linear_prepack(Tensor W, Tensor? B=None) -> __torch__.torch.classes.quantized.LinearPackedParamsBase W_prepack");
-  m.def("linear_prepack_fp16(Tensor W, Tensor? B=None) -> __torch__.torch.classes.quantized.LinearPackedParamsBase W_prepack");
+  m.def(
+      "linear(Tensor X, __torch__.torch.classes.quantized.LinearPackedParamsBase W_prepack, float Y_scale_i, int Y_zero_point_i) -> Tensor Y");
+  m.def(
+      "linear_dynamic(Tensor X, __torch__.torch.classes.quantized.LinearPackedParamsBase W_prepack) -> Tensor Y");
+  m.def(
+      "linear_prepack(Tensor W, Tensor? B=None) -> __torch__.torch.classes.quantized.LinearPackedParamsBase W_prepack");
+  m.def(
+      "linear_prepack_fp16(Tensor W, Tensor? B=None) -> __torch__.torch.classes.quantized.LinearPackedParamsBase W_prepack");
   m.def("linear_prepack_legacy(Tensor W, Tensor? B=None) -> Tensor W_prepack");
-  m.def("linear_prepack_fp16_legacy(Tensor W, Tensor? B=None) -> Tensor W_prepack");
+  m.def(
+      "linear_prepack_fp16_legacy(Tensor W, Tensor? B=None) -> Tensor W_prepack");
 }

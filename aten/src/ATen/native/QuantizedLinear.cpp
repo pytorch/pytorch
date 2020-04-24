@@ -21,7 +21,6 @@
 #include <fbgemm/QuantUtils.h>
 #endif // USE_FBGEMM
 
-
 namespace caffe2 {
 CAFFE_KNOWN_TYPE(c10::intrusive_ptr<LinearPackedParamsBase>);
 } // namespace caffe2
@@ -367,13 +366,12 @@ Tensor fbgemm_pack_gemm_matrix_fp16(const Tensor& weight) {
   // flows across dll boundaries.
   auto ptr = std::make_unique<fbgemm::PackedGemmMatrixFP16>(
       fbgemm::matrix_op_t::Transpose, K, N, 1, weight_contig_ptr);
-  c10::intrusive_ptr<LinearPackedParamsBase> packed_weight = c10::make_intrusive<PackedLinearWeightFp16>(
-    std::move(ptr), c10::nullopt
-  );
-  auto unique_ptr_wrapper = std::make_unique<decltype(packed_weight)>(
-    std::move(packed_weight)
-  );
-  return cpp_custom_type_hack::create(std::move(unique_ptr_wrapper), weight.options());
+  c10::intrusive_ptr<LinearPackedParamsBase> packed_weight =
+      c10::make_intrusive<PackedLinearWeightFp16>(std::move(ptr), c10::nullopt);
+  auto unique_ptr_wrapper =
+      std::make_unique<decltype(packed_weight)>(std::move(packed_weight));
+  return cpp_custom_type_hack::create(
+      std::move(unique_ptr_wrapper), weight.options());
 }
 
 Tensor fbgemm_linear_fp16_weight_fp32_activation(
@@ -391,7 +389,9 @@ Tensor fbgemm_linear_fp16_weight_fp32_activation(
   // Pull out the PackedGemmMatrixFP16 instance from the owning tensor
   const fbgemm::PackedGemmMatrixFP16& packed_weight_fp16 =
       *c10::dynamic_intrusive_pointer_cast<PackedLinearWeightFp16>(
-        cpp_custom_type_hack::cast<c10::intrusive_ptr<LinearPackedParamsBase>>(packed_weight))->w;
+           cpp_custom_type_hack::cast<
+               c10::intrusive_ptr<LinearPackedParamsBase>>(packed_weight))
+           ->w;
 
   TORCH_CHECK(input.size(input.dim() - 1) == packed_weight_fp16.numRows())
   TORCH_CHECK(input.dim() >= 2);

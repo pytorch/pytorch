@@ -1,10 +1,10 @@
 #include <ATen/ATen.h>
-#include <torch/library.h>
 #include <ATen/cpp_custom_type_hack.h>
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
 #include <ATen/native/quantized/cpu/packed_params.h>
 #include <ATen/native/quantized/cpu/qnnpack_utils.h>
 #include <torch/custom_class.h>
+#include <torch/library.h>
 
 torch::jit::class_<LinearPackedParamsBase> register_linear_params();
 
@@ -40,7 +40,8 @@ std::tuple<at::Tensor, c10::optional<at::Tensor>> PackedLinearWeight::unpack() {
   // (QLinearUnpackWeightInt8): ");
   packB->unpack(weight_ptr_int8);
 
-  return std::tuple<at::Tensor, c10::optional<at::Tensor>>(weight_origin, bias_);
+  return std::tuple<at::Tensor, c10::optional<at::Tensor>>(
+      weight_origin, bias_);
 }
 #endif // USE_FBGEMM
 
@@ -84,7 +85,7 @@ class QLinearUnpackWeightInt8 final {
 class QLinearUnpackWeightFp16 final {
  public:
   static std::tuple<at::Tensor, c10::optional<Tensor>> run(
-        const c10::intrusive_ptr<LinearPackedParamsBase>& packed_weight) {
+      const c10::intrusive_ptr<LinearPackedParamsBase>& packed_weight) {
     auto& ctx = at::globalContext();
 
     TORCH_CHECK(
@@ -100,10 +101,13 @@ class QLinearUnpackWeightInt8Legacy final {
  public:
   static std::tuple<at::Tensor, c10::optional<Tensor>> run(
       const at::Tensor& packed_weight) {
-    TORCH_WARN_ONCE("quantized.linear_unpack(Tensor) is deprecated! Please "
-                    "upgrade your model to use the newer quantized.linear_"
-                    "unpack(LinearPackedParamsBase) overload");
-    return cpp_custom_type_hack::cast<c10::intrusive_ptr<LinearPackedParamsBase>>(packed_weight)->unpack();
+    TORCH_WARN_ONCE(
+        "quantized.linear_unpack(Tensor) is deprecated! Please "
+        "upgrade your model to use the newer quantized.linear_"
+        "unpack(LinearPackedParamsBase) overload");
+    return cpp_custom_type_hack::cast<
+               c10::intrusive_ptr<LinearPackedParamsBase>>(packed_weight)
+        ->unpack();
   }
 };
 
@@ -111,9 +115,10 @@ class QLinearUnpackWeightFp16Legacy final {
  public:
   static std::tuple<at::Tensor, c10::optional<Tensor>> run(
       const at::Tensor& packed_weight) {
-    TORCH_WARN_ONCE("quantized.linear_unpack(Tensor) is deprecated! Please "
-                    "upgrade your model to use the newer quantized.linear_"
-                    "unpack(LinearPackedParamsBase) overload");
+    TORCH_WARN_ONCE(
+        "quantized.linear_unpack(Tensor) is deprecated! Please "
+        "upgrade your model to use the newer quantized.linear_"
+        "unpack(LinearPackedParamsBase) overload");
     auto& ctx = at::globalContext();
 
     TORCH_CHECK(
@@ -121,7 +126,9 @@ class QLinearUnpackWeightFp16Legacy final {
         "quantized::linear_unpack_fp16 is currently "
         "not supported by QNNPACK");
 
-    return cpp_custom_type_hack::cast<c10::intrusive_ptr<LinearPackedParamsBase>>(packed_weight)->unpack();
+    return cpp_custom_type_hack::cast<
+               c10::intrusive_ptr<LinearPackedParamsBase>>(packed_weight)
+        ->unpack();
   }
 };
 

@@ -1,5 +1,4 @@
 #include <ATen/ATen.h>
-#include <torch/library.h>
 #include <ATen/cpp_custom_type_hack.h>
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
 #include <ATen/native/quantized/cpu/init_qnnpack.h>
@@ -7,6 +6,7 @@
 #include <ATen/native/quantized/cpu/qnnpack_utils.h>
 #include <ATen/quantized/Quantizer.h>
 #include <torch/custom_class.h>
+#include <torch/library.h>
 #include <algorithm>
 #include <vector>
 
@@ -264,25 +264,28 @@ class QLinearPackWeightInt8 final {
 
 class QLinearPackWeightFp16 final {
  public:
-  static c10::intrusive_ptr<LinearPackedParamsBase> run(at::Tensor weight, c10::optional<Tensor> bias) {
+  static c10::intrusive_ptr<LinearPackedParamsBase> run(
+      at::Tensor weight,
+      c10::optional<Tensor> bias) {
     auto& ctx = at::globalContext();
 #ifdef USE_FBGEMM
-  if (ctx.qEngine() == at::QEngine::FBGEMM) {
-    return PackedLinearWeightFp16::prepack(std::move(weight), std::move(bias));
-  }
+    if (ctx.qEngine() == at::QEngine::FBGEMM) {
+      return PackedLinearWeightFp16::prepack(
+          std::move(weight), std::move(bias));
+    }
 #endif // USE_FBGEMM
 #ifdef USE_PYTORCH_QNNPACK
-  if (ctx.qEngine() == at::QEngine::QNNPACK) {
+    if (ctx.qEngine() == at::QEngine::QNNPACK) {
+      TORCH_CHECK(
+          false,
+          "quantized::linear_prepack_fp16 is currently "
+          "not supported by QNNPACK");
+    }
+#endif // USE_PYTORCH_QNNPACK
     TORCH_CHECK(
         false,
-        "quantized::linear_prepack_fp16 is currently "
-        "not supported by QNNPACK");
-  }
-#endif // USE_PYTORCH_QNNPACK
-  TORCH_CHECK(
-      false,
-      "Didn't find engine for operation quantized::linear_prepack_fp16 ",
-      toString(ctx.qEngine()));
+        "Didn't find engine for operation quantized::linear_prepack_fp16 ",
+        toString(ctx.qEngine()));
   }
 };
 
