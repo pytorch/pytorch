@@ -27,6 +27,8 @@ using dist_acctype = typename DistAccumType<T>::type;
 
 /**
  * A transformation function for `torch.Tensor.random_()`, when both `from` and `to` are specified.
+ * `range` is `to - from`
+ * `base` is `from`
  */
 template <typename T, typename V>
 C10_HOST_DEVICE inline T uniform_int_from_to_transformation(V val, uint64_t range, int64_t base) {
@@ -63,7 +65,7 @@ C10_HOST_DEVICE inline T uniform_int_transformation(V val) {
 }
 
 template <typename T, typename V>
-C10_HOST_DEVICE inline T uniform_real_transformation(V val, T from, T to) {
+C10_HOST_DEVICE inline dist_acctype<T> uniform_real_transformation(V val, T from, T to) {
   constexpr auto MASK = static_cast<V>((static_cast<uint64_t>(1) << std::numeric_limits<T>::digits) - 1);
   constexpr auto DIVISOR = static_cast<T>(1) / (static_cast<uint64_t>(1) << std::numeric_limits<T>::digits);
   dist_acctype<T> x = (val & MASK) * DIVISOR;
