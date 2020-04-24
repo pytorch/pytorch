@@ -3621,7 +3621,7 @@ for shape in [(1,), ()]:
         run_test(grad_mode=False, requires_grad=False, is_view=True,
                  should_raise_tuple=(None, None, None))
 
-    def test_autograd_simple_views_python(self):
+    def _do_test_autograd_simple_views_python(self, dtype):
         # This is not necessarily the absolute correct behavior, but this is the current
         # one. This test is here to make sure that any change to this behavior is detected
         # and not silent. The TODOs below mark the places with unexpected behavior.
@@ -3720,8 +3720,8 @@ for shape in [(1,), ()]:
 
                         return tmp.sum()
 
-                    a = torch.ones(2, requires_grad=True)
-                    b = torch.ones(2, requires_grad=True)
+                    a = torch.ones(2, dtype=dtype, requires_grad=True)
+                    b = torch.ones(2, dtype=dtype, requires_grad=True)
 
 
                     if fn_id == "two_output" and inplace and output_is_a_view:
@@ -3761,6 +3761,10 @@ for shape in [(1,), ()]:
                         self.assertTrue(bw_called[0] == expected_called)
                         self.assertTrue(ga_nz[0] == expected_ga_nz)
                         self.assertTrue((len(w) == 1) == expected_warning)
+
+    def test_autograd_simple_views_python(self):
+        self._do_test_autograd_simple_views_python(torch.double)
+        self._do_test_autograd_simple_views_python(torch.cdouble)
 
     def test_autograd_complex_views_python(self):
         # This is not necessarily the absolute correct behavior, but this is the current

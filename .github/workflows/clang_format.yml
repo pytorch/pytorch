@@ -26,23 +26,20 @@ jobs:
         id: get_pr_tip
       - name: Run clang-format
         run: |
-          set -eux
+          set -eu
           # only run clang-format on whitelisted files
-          find . -type f \
-            -path './torch/csrc/jit/*' -or \
-            -path './test/cpp/jit/*' -or \
-            -path './test/cpp/tensorexpr/*' \
-            | xargs tools/git-clang-format --verbose ${{ github.event.pull_request.base.sha }} --
+          echo "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"
+          echo "| clang-format failures found! Run: "
+          echo "|    tools/clang_format_ci.sh ${{ github.event.pull_request.base.sha }} "
+          echo "| to fix this error. "
+          echo "| For more info, see: https://github.com/pytorch/pytorch/wiki/clang-format "
+          echo "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"
+
+          tools/clang_format_ci.sh ${{ github.event.pull_request.base.sha }}
 
           GIT_DIFF=$(git diff)
           if [[ -z $GIT_DIFF ]]; then
             exit 0
           fi
           echo $GIT_DIFF
-          echo "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"
-          echo "| Run: "
-          echo "|    tools/git-clang-format ${{ github.event.pull_request.base.sha }} "
-          echo "| to fix this error. "
-          echo "| For more info, see: https://github.com/pytorch/pytorch/wiki/clang-format "
-          echo "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"
           exit 1
