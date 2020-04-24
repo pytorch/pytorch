@@ -6,7 +6,7 @@ from copy import deepcopy
 from hypothesis import given
 from hypothesis import strategies as st
 
-from torch.testing._internal.common_utils import TestCase, run_tests
+from torch.testing._internal.common_utils import TestCase
 import torch.testing._internal.hypothesis_utils as hu
 
 hu.assert_deadline_disabled()
@@ -424,6 +424,3 @@ class TestQuantizedTensor(TestCase):
         qparams = torch._choose_qparams_per_tensor(X, reduce_range)
         np.testing.assert_array_almost_equal(X_scale, qparams[0], decimal=3)
         self.assertEqual(X_zp, qparams[1])
-
-if __name__ == "__main__":
-    run_tests()
