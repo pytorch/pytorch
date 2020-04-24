@@ -2732,10 +2732,8 @@ class TestAutograd(TestCase):
         print(prof.function_events)
 
         top_level_expected_events_and_shapes = [
-            (None, [[30, 20]]),
-            ('addmm', [[30], [128, 20], [20, 30], [], []]),
-            (None, [[40, 30]]),
-            ('addmm', [[40], [128, 30], [30, 40], [], []])
+            ('linear', [[128, 20], [30, 20], [30]]),
+            ('linear', [[128, 30], [40, 30], [40]])
         ]
 
         expected_iter = iter(top_level_expected_events_and_shapes)
