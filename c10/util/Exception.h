@@ -4,7 +4,7 @@
 #include <c10/macros/Macros.h>
 #include <c10/util/StringUtil.h>
 #include <c10/util/Deprecated.h>
-#include <c10/fmt/format.h>
+#include <c10/util/format.h>
 
 #include <cstddef>
 #include <exception>

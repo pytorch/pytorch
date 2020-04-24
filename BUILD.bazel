@@ -51,12 +51,12 @@ cc_library(
     name = "c10_headers",
     hdrs = glob([
         "c10/core/*.h",
-        "c10/fmt/*.h",
         "c10/core/impl/*.h",
         "c10/cuda/*.h",
         "c10/cuda/impl/*.h",
         "c10/macros/*.h",
         "c10/util/*.h",
+        "c10/util/fmt/*.h",
     ]) + [
         "c10/macros/cmake_macros.h",
         "c10/cuda/impl/cuda_cmake_macros.h",

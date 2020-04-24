@@ -45,8 +45,6 @@ if(${COMPILER_SUPPORTS_HIDDEN_VISIBILITY})
   target_compile_options(c10 PRIVATE "-fvisibility=hidden")
 endif()
 
-target_compile_definitions(c10 PRIVATE FMT_HEADER_ONLY)
-
 # ---[ Dependency of c10
 if(${USE_GFLAGS})
    target_link_libraries(c10 PUBLIC gflags)

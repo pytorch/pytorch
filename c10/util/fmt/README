@@ -8,3 +8,4 @@ The procedure for updating:
 1. Download the release zip from github
 2. Unzip it somewhere
 3. Copy headers: `cp include/fmt/* c10/fmt/`
+4. Modify c10/format.h to include what you want
