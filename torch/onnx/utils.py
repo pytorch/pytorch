@@ -18,7 +18,7 @@ import warnings
 from torch._six import string_classes
 from torch.jit import _unique_state_dict
 from torch.onnx import ONNX_ARCHIVE_MODEL_PROTO_NAME, ExportTypes, OperatorExportTypes, TrainingMode
-from torch._C import ListType, _propagate_and_assign_input_shapes, _assign_output_shapes, _check_onnx_proto
+from torch._C import ListType, OptionalType, _propagate_and_assign_input_shapes, _assign_output_shapes, _check_onnx_proto
 
 
 # the flag to tell the user whether it's in the middle of ONNX export or not
@@ -92,23 +92,31 @@ def export(model, args, f, export_params=True, verbose=False, training=None,
             use_external_data_format=use_external_data_format)
 
 
+def _is_constant_tensor_list(node):
+    if node.kind() != "prim::Constant":
+        return False
+    output_type = node.output().type()
+    if output_type.isSubtypeOf(ListType.ofTensors()):
+        return True
+    if output_type.isSubtypeOf(ListType(OptionalType.ofTensor())):
+        vals = node.output().toIValue()
+        # no None Values
+        return all(vals)
+
 # ONNX can't handle constants that are lists of tensors, which can
 # get generated in constant prop. So we split them back into prim::ListConstructs
 def _split_tensor_list_constants(g, block):
     for node in block.nodes():
         for subblock in node.blocks():
             _split_tensor_list_constants(g, subblock)
-        if node.kind() == "prim::Constant":
-            output_type = node.output().type()
-            if output_type.isSubtypeOf(ListType.ofTensors()):
-                inputs = [g.create("prim::Constant").t_('value', t)
-                           .insertBefore(node).output() for t in node.output().toIValue()]
-                lc = (g.create("prim::ListConstruct", inputs)
-                      .insertBefore(node)
-                      .output()
-                      .setType(ListType.ofTensors()))
-                node.output().replaceAllUsesWith(lc)
-
+        if _is_constant_tensor_list(node):
+            inputs = [g.create("prim::Constant").t_('value', t)
+                      .insertBefore(node).output() for t in node.output().toIValue()]
+            lc = (g.create("prim::ListConstruct", inputs)
+                  .insertBefore(node)
+                  .output()
+                  .setType(ListType.ofTensors()))
+            node.output().replaceAllUsesWith(lc)
 
 def _optimize_graph(graph, operator_export_type, _disable_torch_constant_prop=False, fixed_batch_size=False, params_dict=None):
     # Inline everyting
@@ -772,7 +780,7 @@ def _run_symbolic_function(g, n, inputs, env, operator_export_type=OperatorExpor
                     return g.op("Constant", value_t=n["value"])
                 if n.kindOf("value") == "s":
                     return g.op("Constant", value_s=n["value"])
-                elif n.output().type().isSubtypeOf(ListType.ofInts()) or output().type().isSubtypeOf(ListType.ofFloats()):
+                elif n.output().type().isSubtypeOf(ListType.ofInts()) or n.output().type().isSubtypeOf(ListType.ofFloats()):
                     vals = n.output().toIValue()
                     value = torch.stack([torch.tensor(v) for v in vals]) if len(vals) else []
                     return g.op("Constant", value_t=value)
