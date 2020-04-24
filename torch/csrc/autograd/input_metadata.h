@@ -1,10 +1,10 @@
 #pragma once
 
 #include <ATen/ATen.h>
-#include "c10/core/Device.h"
-#include "c10/core/DeviceType.h"
-#include "c10/core/Stream.h"
-#include "c10/core/impl/DeviceGuardImplInterface.h"
+#include <c10/core/Device.h>
+#include <c10/core/DeviceType.h>
+#include <c10/core/Stream.h>
+#include <c10/core/impl/DeviceGuardImplInterface.h>
 
 #include <cstdint>
 

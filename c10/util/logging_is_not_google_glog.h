@@ -105,6 +105,12 @@ static_assert(
 
 #define VLOG_IS_ON(verboselevel) (CAFFE2_LOG_THRESHOLD <= -(verboselevel))
 
+// Log with source location information override (to be used in generic
+// warning/error handlers implemented as functions, not macros)
+#define LOG_AT_FILE_LINE(n, file, line) \
+  if (n >= CAFFE2_LOG_THRESHOLD)        \
+  ::c10::MessageLogger(file, line, n).stream()
+
 // Log only if condition is met.  Otherwise evaluates to void.
 #define FATAL_IF(condition)            \
   condition ? (void)0                  \

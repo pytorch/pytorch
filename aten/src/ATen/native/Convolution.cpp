@@ -4,6 +4,7 @@
 #include <ATen/native/cpu/DepthwiseConvKernel.h>
 #include <ATen/native/utils/ParamUtils.h>
 #include <ATen/native/ConvUtils.h>
+#include <ATen/native/xnnpack/Engine.h>
 
 #include <ATen/Config.h>
 #if AT_NNPACK_ENABLED()
@@ -35,13 +36,14 @@ struct ConvParams {
   bool is_padding_neg() const;
   bool is_stride_nonpos() const;
   void view1d_as_2d();
-  bool use_cpu_depthwise3x3_winograd(const at::Tensor& input, const at::Tensor& weight) const;
+  bool use_cpu_depthwise3x3_winograd(const at::Tensor& input, const at::Tensor& weight, const at::Tensor& bias) const;
   bool needs_64bit_indexing_no_split(const at::Tensor& input, const at::Tensor& weight) const;
   bool use_cudnn(const at::Tensor& input, const at::Tensor& weight) const;
   bool use_cudnn_depthwise(const at::Tensor& input, const at::Tensor& weight) const;
   bool use_miopen(const at::Tensor& input, const at::Tensor& weight, bool bias_defined) const;
   bool use_mkldnn(const at::Tensor& input) const;
   bool use_nnpack(const at::Tensor& input) const;
+  bool use_xnnpack(const at::Tensor& input, const at::Tensor& weight, const at::Tensor& bias) const;
   bool is_depthwise(const at::Tensor& input, const at::Tensor& weight) const;
 };
 
@@ -126,7 +128,9 @@ auto ConvParams::view1d_as_2d() -> void {
 }
 
 auto ConvParams::use_cpu_depthwise3x3_winograd(
-    const at::Tensor& input, const at::Tensor& weight) const -> bool {
+    const at::Tensor& input,
+    const at::Tensor& weight,
+    const at::Tensor& bias) const -> bool {
 #ifdef __ARM_NEON__
   // Currently only 3x3 depthwise convolutions on tensors of float are supported.
   return (input.ndimension() == 4) &&
@@ -141,6 +145,9 @@ auto ConvParams::use_cpu_depthwise3x3_winograd(
          (weight.device().type() == c10::DeviceType::CPU) &&
          (weight.scalar_type() == at::kFloat) &&
          weight.is_contiguous() &&
+         (!bias.defined() ||
+            ((bias.device().type() == c10::DeviceType::CPU) &&
+             (bias.scalar_type() == at::kFloat))) &&
          !is_strided() &&
          !is_dilated() &&
          !transposed;
@@ -225,6 +232,7 @@ auto ConvParams::use_mkldnn(const at::Tensor& input) const -> bool {
 #endif
   return false;
 }
+
 auto ConvParams::use_nnpack(const at::Tensor& input) const -> bool {
 #if AT_NNPACK_ENABLED()
   return at::_nnpack_available() &&
@@ -237,6 +245,26 @@ auto ConvParams::use_nnpack(const at::Tensor& input) const -> bool {
          && input.size(0) >= 16 // ensure large enough batch size to ensure perf, tuneable
 #endif
      ;
+#endif
+  return false;
+}
+
+auto ConvParams::use_xnnpack(
+    const at::Tensor& input,
+    const at::Tensor& weight,
+    const at::Tensor& bias) const -> bool {
+#ifdef C10_MOBILE
+  if (!transposed) {
+    return (input.size(1) == groups) &&
+            xnnpack::use_convolution2d(
+                input,
+                weight,
+                bias,
+                padding,
+                stride,
+                dilation,
+                groups);
+  }
 #endif
   return false;
 }
@@ -568,7 +596,6 @@ at::Tensor _convolution(
   auto k = weight.ndimension();
   c10::IntArrayRef weight_sizes = weight.sizes();
   int64_t dim = k - 2;
-  
 
   TORCH_CHECK(dim > 0, "weight should have at least three dimensions");
 
@@ -585,7 +612,7 @@ at::Tensor _convolution(
 
   check_shape_forward(input, weight_sizes, bias, params);
 
-  if (input.size(0) == 0) {    
+  if (input.size(0) == 0) {
     // don't send empty inputs through backends
     // but need to compute correct output size first and set up history for params
     std::vector<int64_t> o;
@@ -697,11 +724,27 @@ at::Tensor _convolution(
                                       params.padding, params.stride, params.dilation, params.groups);
     }
 #endif
-  } else if (input.device().type() == c10::DeviceType::CPU || input.device().type() == c10::DeviceType::CUDA) {
-    if (params.use_cpu_depthwise3x3_winograd(input, weight)) {
-      output = convolution_depthwise3x3_winograd_stub(
-        input.device().type(), input, weight, bias, params.stride, params.padding, params.groups);
-    } else if (
+  } else if (params.use_xnnpack(input, weight, bias)) {
+    // Using prepacked conv is preferred, but XNNPACK is still the fastest
+    // option for NHWC.
+    output = xnnpack::convolution2d(
+        input,
+        weight,
+        bias,
+        params.padding,
+        params.stride,
+        params.dilation,
+        params.groups);
+  } else if (params.use_cpu_depthwise3x3_winograd(input, weight, bias)) {
+    output = convolution_depthwise3x3_winograd_stub(
+        input.device().type(),
+        input,
+        weight,
+        bias,
+        params.stride,
+        params.padding,
+        params.groups);
+  } else if (
         !params.transposed && (input.ndimension() == 5) &&
         (input.device().type() == c10::DeviceType::CPU) &&
         !params.is_dilated()) {
@@ -713,7 +756,8 @@ at::Tensor _convolution(
           bias,
           params.stride,
           params.padding);
-    } else if (params.groups == 1) {
+  } else if (input.device().type() == c10::DeviceType::CPU || input.device().type() == c10::DeviceType::CUDA) {
+    if (params.groups == 1) {
       output = at::_convolution_nogroup(
           input.contiguous(), weight, bias, params.stride, params.padding, params.dilation, params.transposed, params.output_padding);
     } else {
