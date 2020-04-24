@@ -2,8 +2,6 @@
 
 namespace caffe2 {
 
-namespace {
-
 struct adagrad_update_prefetch_inlined {
   void operator()(
       int N,
@@ -156,5 +154,4 @@ REGISTER_CPU_OPERATOR(
         int,
         adagrad_update_prefetch_inlined>);
 
-} // namespace
 } // namespace caffe2

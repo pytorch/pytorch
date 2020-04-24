@@ -14,12 +14,14 @@ std::shared_ptr<FutureMessage> pyRpcBuiltin(
     const WorkerInfo& dst,
     const std::string& opName,
     const py::args& args,
-    const py::kwargs& kwargs);
+    const py::kwargs& kwargs,
+    const float rpcTimeoutSeconds);
 
 std::shared_ptr<FutureMessage> pyRpcPythonUdf(
     const WorkerInfo& dst,
     std::string& pickledPythonUDF,
-    std::vector<torch::Tensor>& tensors);
+    std::vector<torch::Tensor>& tensors,
+    const float rpcTimeoutSeconds);
 
 PyRRef pyRemoteBuiltin(
     const WorkerInfo& dst,
