@@ -74,6 +74,8 @@ class NaiveShapeTypePropagator {
       case aten::sigmoid:
       case aten::threshold:
       case aten::clamp:
+      case aten::gelu:
+      case aten::tanh:
         {
           TORCH_CHECK(
                node->input(0)->type()->cast<TensorType>()->isComplete(),

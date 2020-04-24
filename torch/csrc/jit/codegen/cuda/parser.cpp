@@ -246,7 +246,8 @@ class IrParser {
           });
     }
 
-    std::array<const char*, 29> UnaryOp= {
+    // TODO: cast operations should be merged in.
+    std::array<const char*, 31> UnaryOp= {
         "aten::neg(Tensor self) -> Tensor",
         "aten::abs(Tensor self) -> Tensor",
         "aten::log(Tensor self) -> Tensor",
@@ -265,6 +266,7 @@ class IrParser {
         "aten::asin(Tensor self) -> Tensor",
         "aten::sinh(Tensor self) -> Tensor",
         "aten::tan(Tensor self) -> Tensor",
+        "aten::tanh(Tensor self) -> Tensor",
         "aten::atan(Tensor self) -> Tensor",
         "aten::sqrt(Tensor self) -> Tensor",
         "aten::rsqrt(Tensor self) -> Tensor",
@@ -276,6 +278,7 @@ class IrParser {
         "aten::reciprocal(Tensor self) -> Tensor",
         "aten::relu(Tensor self) -> Tensor",
         "aten::sigmoid(Tensor self) -> Tensor",
+        "aten::gelu(Tensor self) -> Tensor",
         };
     for (auto signature : UnaryOp) {
       auto ptr_op = getOperatorForLiteral(signature);
@@ -302,6 +305,7 @@ class IrParser {
                 {aten::asin,       UnaryOpType::Asin},
                 {aten::sinh,       UnaryOpType::Sinh},
                 {aten::tan,        UnaryOpType::Tan},
+                {aten::tanh,       UnaryOpType::Tanh},
                 {aten::atan,       UnaryOpType::Atan},
                 {aten::sqrt,       UnaryOpType::Sqrt},
                 {aten::rsqrt,      UnaryOpType::Rsqrt},
@@ -313,6 +317,7 @@ class IrParser {
                 {aten::reciprocal, UnaryOpType::Reciprocal},
                 {aten::relu,       UnaryOpType::Relu},
                 {aten::sigmoid,    UnaryOpType::Sigmoid},
+                {aten::gelu,       UnaryOpType::Gelu},
             });
             auto operand = value_map[node->input()->unique()];
 
