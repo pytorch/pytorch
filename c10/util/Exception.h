@@ -1,9 +1,9 @@
 #ifndef C10_UTIL_EXCEPTION_H_
 #define C10_UTIL_EXCEPTION_H_
 
-#include "c10/macros/Macros.h"
-#include "c10/util/StringUtil.h"
-#include "c10/util/Deprecated.h"
+#include <c10/macros/Macros.h>
+#include <c10/util/StringUtil.h>
+#include <c10/util/Deprecated.h>
 
 #include <cstddef>
 #include <exception>
@@ -212,17 +212,17 @@ inline std::string if_empty_then(std::string x, std::string y) {
   if (C10_UNLIKELY_OR_CONST(!(cond))) {       \
     C10_THROW_ERROR(Error,                    \
         #cond " INTERNAL ASSERT FAILED at"    \
-        __FILE__                              \
+        C10_STRINGIZE(__FILE__)               \
     );                                        \
   }
 #else
 #define TORCH_INTERNAL_ASSERT(cond, ...)      \
   if (C10_UNLIKELY_OR_CONST(!(cond))) {       \
     C10_THROW_ERROR(Error, ::c10::str(        \
-        #cond " INTERNAL ASSERT FAILED at ",  \
-        __FILE__,                             \
-        ":",                                  \
-        __LINE__,                             \
+        #cond " INTERNAL ASSERT FAILED at "   \
+        C10_STRINGIZE(__FILE__)               \
+        ":"                                   \
+        C10_STRINGIZE(__LINE__)               \
         ", please report a bug to PyTorch. ", \
         ::c10::str(__VA_ARGS__)               \
     ));                                       \
@@ -254,7 +254,7 @@ inline std::string if_empty_then(std::string x, std::string y) {
   if (C10_UNLIKELY_OR_CONST(!(cond))) {       \
     C10_THROW_ERROR(error_t,                  \
         #cond " CHECK FAILED at "             \
-        __FILE__                              \
+        C10_STRINGIZE(__FILE__)               \
     );                                        \
   }
 #else
@@ -295,7 +295,7 @@ inline std::string if_empty_then(std::string x, std::string y) {
   if (C10_UNLIKELY_OR_CONST(!(cond))) {       \
     C10_THROW_ERROR(Error,                    \
         #cond " INDEX CHECK FAILED at "       \
-        __FILE__                              \
+        C10_STRINGIZE(__FILE__)               \
     );                                        \
   }
 #else
@@ -318,7 +318,7 @@ inline std::string if_empty_then(std::string x, std::string y) {
   if (C10_UNLIKELY_OR_CONST(!(cond))) {       \
     C10_THROW_ERROR(Error,                    \
         #cond " VALUE CHECK FAILED at "       \
-        __FILE__                              \
+        C10_STRINGIZE(__FILE__)               \
     );                                        \
   }
 #else
@@ -362,12 +362,6 @@ namespace c10 { namespace detail {
 C10_DEPRECATED_MESSAGE("AT_ERROR(msg) is deprecated, use TORCH_CHECK(false, msg) instead.")
 */
 inline void deprecated_AT_ERROR() {}
-
-/*
-// Deprecation disabled until we fix sites in our codebase
-C10_DEPRECATED_MESSAGE("AT_INDEX_ERROR(msg) is deprecated, use TORCH_CHECK_INDEX(false, msg) instead.")
-*/
-inline void deprecated_AT_INDEX_ERROR() {}
 
 /*
 // Deprecation disabled until we fix sites in our codebase
@@ -418,13 +412,6 @@ inline void deprecated_AT_ASSERTM() {}
   do {                                                                        \
     ::c10::detail::deprecated_AT_ERROR();                                     \
     C10_EXPAND_MSVC_WORKAROUND(TORCH_CHECK(false, ::c10::str(__VA_ARGS__)));  \
-  } while (false)
-
-// Deprecated alias; this alias was deprecated for consistency with TORCH_CHECK.
-#define AT_INDEX_ERROR(...)                                                         \
-  do {                                                                              \
-    ::c10::detail::deprecated_AT_INDEX_ERROR();                                     \
-    C10_EXPAND_MSVC_WORKAROUND(TORCH_CHECK_INDEX(false, ::c10::str(__VA_ARGS__)));  \
   } while (false)
 
 #endif // C10_UTIL_EXCEPTION_H_

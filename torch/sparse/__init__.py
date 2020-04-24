@@ -1,5 +1,8 @@
 # The Tensor classes are added to this module by python_tensor.cpp
+from typing import Optional, Tuple
+
 import torch
+from torch import Tensor
 
 __all__ = [
     'addmm',

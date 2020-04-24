@@ -173,7 +173,7 @@ parseWireSections(const void* data, size_t data_size) {
     }
     // Parse name
     const char* namePtr = ptr;
-    while (*ptr != ' ' && ptr != endp) {
+    while (ptr != endp && *ptr != ' ') {
       ptr++;
     }
     if (ptr == endp) {
@@ -185,7 +185,7 @@ parseWireSections(const void* data, size_t data_size) {
     }
     // Parse size
     const char* sizePtr = ptr;
-    while (*ptr != '\n' && ptr != endp) {
+    while (ptr != endp && *ptr != '\n') {
       ptr++;
     }
     if (ptr == endp) {
@@ -264,12 +264,10 @@ std::string wireSerialize(
   }
 
   if (!tensors.empty()) {
-    torch::jit::Pickler pickler(
-        [&](const void* buf, size_t sz) -> size_t {
-          metaEntry.append(static_cast<const char*>(buf), sz);
-          return sz;
-        },
-        nullptr);
+    torch::jit::Pickler pickler([&](const void* buf, size_t sz) -> size_t {
+      metaEntry.append(static_cast<const char*>(buf), sz);
+      return sz;
+    });
     pickler.protocol();
     pickler.pushIValue(cloneSparseTensors(tensors));
     pickler.stop();

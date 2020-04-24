@@ -5,13 +5,13 @@ import re
 import torch
 from .._jit_internal import List, BroadcastingList1, BroadcastingList2, \
     BroadcastingList3, Tuple, is_tuple, is_list, Dict, is_dict, Optional, \
-    is_optional, _qualified_name, Any, RRef, is_rref
+    is_optional, _qualified_name, Any, RRef, is_rref, Future, is_future
 from torch._C import TensorType, TupleType, FloatType, IntType, \
     ListType, StringType, DictType, BoolType, OptionalType, ClassType, InterfaceType, AnyType, NoneType, \
-    DeviceObjType, RRefType
+    DeviceObjType, RRefType, FutureType
 
 from textwrap import dedent
-from torch._six import builtins, PY2
+from torch._six import builtins
 from torch._utils_internal import get_source_lines_and_file
 
 
@@ -40,6 +40,7 @@ class EvalEnv(object):
         'Dict': Dict,
         'Optional': Optional,
         'RRef': RRef,
+        'Future': Future,
     }
 
     def __init__(self, rcb):
@@ -94,14 +95,7 @@ def is_vararg(the_callable):
         the_callable = the_callable.__call__
 
     if is_function_or_method(the_callable):
-        if PY2:
-            # [inspect args]
-            # `inspect.getfullargspec` is not available in Python 2 but
-            # `inspect.getargspec` is deprecated in Python 3, so we have to
-            # switch over them
-            return inspect.getargspec(the_callable).varargs is not None
-        else:
-            return inspect.getfullargspec(the_callable).varargs is not None
+        return inspect.getfullargspec(the_callable).varargs is not None
     else:
         return False
 
@@ -112,11 +106,7 @@ def get_param_names(fn, n_args):
         fn = fn.__call__
 
     if is_function_or_method(fn):
-        if PY2:
-            # see [inspect args]
-            return inspect.getargspec(fn).args
-        else:
-            return inspect.getfullargspec(fn).args
+        return inspect.getfullargspec(fn).args
     else:
         # The `fn` was not a method or function (maybe a class with a __call__
         # method, so use a default param name list)
@@ -271,6 +261,8 @@ def try_ann_to_type(ann, loc):
             return OptionalType(try_ann_to_type(ann.__args__[1], loc))
     elif is_rref(ann):
         return RRefType(try_ann_to_type(ann.__args__[0], loc))
+    elif is_future(ann):
+        return FutureType(try_ann_to_type(ann.__args__[0], loc))
     elif ann is float:
         return FloatType.get()
     elif ann is int:

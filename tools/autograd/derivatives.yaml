@@ -110,6 +110,9 @@
 - name: abs(Tensor self) -> Tensor
   self: grad * self.sign()
 
+- name: absolute(Tensor self) -> Tensor
+  self: grad * self.sign()
+
 - name: acos(Tensor self) -> Tensor
   self: grad * -((-self * self + 1).rsqrt())
 
@@ -208,6 +211,10 @@
 - name: bmm(Tensor self, Tensor mat2) -> Tensor
   self: grad.bmm(mat2.transpose(1, 2))
   mat2: self.transpose(1, 2).bmm(grad)
+
+- name: _bmm(Tensor self, Tensor mat2, *, bool deterministic=False) -> Tensor
+  self: at::_bmm(grad, mat2.transpose(1, 2), deterministic)
+  mat2: at::_bmm(self.transpose(1, 2), grad, deterministic)
 
 - name: cat(Tensor[] tensors, int dim=0) -> Tensor
   tensors: cat_tensors_backward(grad, to_args_sizes(tensors), dim)
@@ -412,12 +419,18 @@
   other: zeros_like(other)
 
 - name: hardsigmoid(Tensor self) -> Tensor
-  self: hardsigmoid_backward(grad, result)
+  self: hardsigmoid_backward(grad, self)
 
 - name: histc(Tensor self, int bins=100, Scalar min=0, Scalar max=0) -> Tensor
   self: not_implemented("histc")
 
+- name: hardswish(Tensor self) -> Tensor
+  self: hardswish_backward(grad, self)
+
 - name: imag(Tensor self) -> Tensor
+  self: Scalar(std::complex<double>{0.0, 1.0})*grad.to(self.scalar_type())
+
+- name: copy_imag(Tensor self) -> Tensor
   self: Scalar(std::complex<double>{0.0, 1.0})*grad.to(self.scalar_type())
 
 - name: index.Tensor(Tensor self, Tensor?[] indices) -> Tensor
@@ -728,7 +741,10 @@
   self: zeros_like(grad, at::MemoryFormat::Preserve)
 
 - name: real(Tensor self) -> Tensor
-  self: grad.real()
+  self: at::real(grad)
+
+- name: copy_real(Tensor self) -> Tensor
+  self: grad.copy_real()
 
 - name: reciprocal(Tensor self) -> Tensor
   self: -grad * result * result
@@ -1031,9 +1047,9 @@
   indices: non_differentiable
   self: not_implemented("embedding_renorm")
 
-- name: kl_div(Tensor self, Tensor target, int reduction=Mean) -> Tensor
-  self: kl_div_backward(grad, self, target, reduction)
-  target: kl_div_target_backward(grad, self, target, reduction)
+- name: kl_div(Tensor self, Tensor target, int reduction=Mean, *, bool log_target=False) -> Tensor
+  self: kl_div_backward(grad, self, target, reduction, log_target)
+  target: kl_div_target_backward(grad, self, target, reduction, log_target)
 
 - name: l1_loss(Tensor self, Tensor target, int reduction=Mean) -> Tensor
   self: l1_loss_backward(grad, self, target, reduction)
@@ -1263,6 +1279,11 @@
   self: im2col_backward(grad, {self.size(2), self.size(3)}, kernel_size, dilation, padding, stride)
 
 # NN double backwards support
+- name: im2col_backward(Tensor grad_output, int[2] input_size, int[2] kernel_size, int[2] dilation, int[2] padding, int[2] stride) -> Tensor
+  grad_output: im2col(grad, kernel_size, dilation, padding, stride)
+
+- name: col2im_backward(Tensor grad_output, int[2] kernel_size, int[2] dilation, int[2] padding, int[2] stride) -> Tensor
+  grad_output: col2im(grad, {grad_output.size(2), grad_output.size(3)}, kernel_size, dilation, padding, stride)
 
 - name: _adaptive_avg_pool2d_backward(Tensor grad_output, Tensor self) -> Tensor
   grad_output: _adaptive_avg_pool2d(grad, { grad_output.size(-2), grad_output.size(-1) })
@@ -1308,8 +1329,8 @@
   grad_output: hardtanh_backward(grad, self, min_val, max_val)
   self: zeros_like(grad, at::MemoryFormat::Preserve)
 
-- name: kl_div_backward(Tensor grad_output, Tensor self, Tensor target, int reduction=Mean) -> Tensor
-  grad_output: kl_div_double_backward_grad_output(grad, self, target, reduction)
+- name: kl_div_backward(Tensor grad_output, Tensor self, Tensor target, int reduction=Mean, *, bool log_target=False) -> Tensor
+  grad_output: kl_div_double_backward_grad_output(grad, self, target, reduction, log_target)
   self: zeros_like(grad, at::MemoryFormat::Preserve)
   target: zeros_like(grad, at::MemoryFormat::Preserve)
 
@@ -1360,7 +1381,7 @@
   target: non_differentiable
 
 - name: rrelu_with_noise_backward(Tensor grad_output, Tensor self, Tensor noise, Scalar lower, Scalar upper, bool training, bool self_is_result) -> Tensor
-  # self_is_result is always false here since double backward call is an out-of-place call, self is input itself 
+  # self_is_result is always false here since double backward call is an out-of-place call, self is input itself
   grad_output: rrelu_with_noise_backward(grad, self, noise, lower, upper, training, false)
   self: zeros_like(grad, at::MemoryFormat::Preserve)
 

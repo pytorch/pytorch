@@ -1,4 +1,3 @@
-# @lint-ignore-every PYTHON3COMPATIMPORTS
 
 r"""
 The torch package contains data structures for multi-dimensional
@@ -14,9 +13,13 @@ import os
 import sys
 import platform
 import ctypes
+
+if sys.version_info < (3,):
+    raise Exception("Python 2 has reached end-of-life and is no longer supported by PyTorch.")
+
 from ._utils import _import_dotted_name
 from ._utils_internal import get_file_path, prepare_multiprocessing_environment, \
-    USE_RTLD_GLOBAL_WITH_LIBTORCH
+    USE_RTLD_GLOBAL_WITH_LIBTORCH, USE_GLOBAL_DEPS
 from .version import __version__
 from ._six import string_classes as _string_classes
 
@@ -71,6 +74,11 @@ if platform.system() == 'Windows':
 
         os.environ['PATH'] = ';'.join(dll_paths)
 
+    import glob
+    dlls = glob.glob(os.path.join(th_dll_path, '*.dll'))
+    for dll in dlls:
+        ctypes.CDLL(dll)
+
 
 # See Note [Global dependencies]
 def _load_global_deps():
@@ -122,8 +130,13 @@ else:
     # C++ symbols from libtorch clobbering C++ symbols from other
     # libraries, leading to mysterious segfaults.
     #
+    # If building in an environment where libtorch_global_deps isn't available
+    # like parts of fbsource, but where RTLD_GLOBAL causes segfaults, you will
+    # want USE_RTLD_GLOBAL_WITH_LIBTORCH = False and USE_GLOBAL_DEPS = False
+    #
     # See Note [Global dependencies]
-    _load_global_deps()
+    if USE_GLOBAL_DEPS:
+        _load_global_deps()
     from torch._C import *
 
 __all__ += [name for name in dir(_C)

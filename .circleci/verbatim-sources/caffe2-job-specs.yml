@@ -151,7 +151,7 @@
             # Install Anaconda if we need to
             if [ -n "${CAFFE2_USE_ANACONDA}" ]; then
               rm -rf ${TMPDIR}/anaconda
-              curl --retry 3 -o ${TMPDIR}/conda.sh https://repo.continuum.io/miniconda/Miniconda${ANACONDA_VERSION}-latest-MacOSX-x86_64.sh
+              curl --retry 3 -o ${TMPDIR}/conda.sh https://repo.anaconda.com/miniconda/Miniconda${ANACONDA_VERSION}-latest-MacOSX-x86_64.sh
               chmod +x ${TMPDIR}/conda.sh
               /bin/bash ${TMPDIR}/conda.sh -b -p ${TMPDIR}/anaconda
               rm -f ${TMPDIR}/conda.sh
