@@ -282,7 +282,8 @@ struct MakeDefsDominateUses {
         // the domination condition is met.
         while (b_itr != common_ancestor) {
           b_itr->registerOutput(v_itr);
-          Value* remapped = b_itr->owningNode()->addOutput();
+          Value* remapped =
+              b_itr->owningNode()->addOutput()->setType(v_itr->type());
           v_itr = remapped;
           b_itr = b_itr->owningNode()->owningBlock();
         }
