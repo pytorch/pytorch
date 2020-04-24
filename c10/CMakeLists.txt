@@ -47,9 +47,6 @@ endif()
 
 target_compile_definitions(c10 PRIVATE FMT_HEADER_ONLY)
 
-if(${BUILD_SHARED_LIBS})
-endif()
-
 # ---[ Dependency of c10
 if(${USE_GFLAGS})
    target_link_libraries(c10 PUBLIC gflags)
