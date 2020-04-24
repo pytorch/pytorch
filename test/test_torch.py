@@ -2394,32 +2394,6 @@ class _TestTorchMixin(object):
                 added = zeros.index_add(0, torch.arange(0, size[0], dtype=torch.long, device=device), tensor)
                 self.assertEqual(added, tensor)
 
-    # XLA tests fail for self.assertRaises for complex dtypes
-    @onlyOnCPUAndCUDA
-    def test_complex_assert_raises(self, device):
-        for dtype in [torch.complex64, torch.complex128]:
-            size = [5, 5]
-            tensor = torch.rand(size, dtype=dtype, device=device)
-
-            # index_add calls atomicAdd on cuda.
-            zeros = torch.zeros(size, dtype=dtype, device=device)
-
-            # index_add is not supported for complex dtypes on cuda yet
-            if device.startswith('cuda') and dtype.is_complex:
-                self.assertRaises(RuntimeError,
-                                  lambda: zeros.index_add(0, torch.arange(0, size[0], dtype=torch.long, device=device), tensor))
-
-            self.assertRaises(RuntimeError, lambda: torch.sign(torch.tensor([4j], device=device, dtype=dtype)))
-
-            a = torch.rand((2, 2), dtype=dtype, device=device)
-            b = torch.rand((2, 2), dtype=dtype, device=device)
-            c = torch.rand((2, 2), dtype=dtype, device=device)
-            alpha = 3
-
-            # addcmul is not supported for complex dtypes on cuda yet
-            if device.startswith('cuda') and dtype.is_complex:
-                self.assertRaises(RuntimeError, lambda: torch.addcmul(a, b, c, value=alpha))
-
     def test_t(self):
         # Test 0D tensors
         x = torch.randn(())
@@ -5505,6 +5479,32 @@ class TestTorchDeviceType(TestCase):
             torch.isclose(t, t, atol=1, rtol=-1)
         with self.assertRaises(RuntimeError):
             torch.isclose(t, t, atol=-1, rtol=-1)
+
+    # XLA tests fail for self.assertRaises for complex dtypes
+    @onlyOnCPUAndCUDA
+    def test_complex_assert_raises(self, device):
+        for dtype in [torch.complex64, torch.complex128]:
+            size = [5, 5]
+            tensor = torch.rand(size, dtype=dtype, device=device)
+
+            # index_add calls atomicAdd on cuda.
+            zeros = torch.zeros(size, dtype=dtype, device=device)
+
+            # index_add is not supported for complex dtypes on cuda yet
+            if device.startswith('cuda') and dtype.is_complex:
+                self.assertRaises(RuntimeError,
+                                  lambda: zeros.index_add(0, torch.arange(0, size[0], dtype=torch.long, device=device), tensor))
+
+            self.assertRaises(RuntimeError, lambda: torch.sign(torch.tensor([4j], device=device, dtype=dtype)))
+
+            a = torch.rand((2, 2), dtype=dtype, device=device)
+            b = torch.rand((2, 2), dtype=dtype, device=device)
+            c = torch.rand((2, 2), dtype=dtype, device=device)
+            alpha = 3
+
+            # addcmul is not supported for complex dtypes on cuda yet
+            if device.startswith('cuda') and dtype.is_complex:
+                self.assertRaises(RuntimeError, lambda: torch.addcmul(a, b, c, value=alpha))
 
     def check_internal_mem_overlap(self, inplace_op, num_inputs,
                                    dtype, device,
