@@ -2766,7 +2766,7 @@ void ReplicateChooseQParamsQuantDequant(std::shared_ptr<Graph>& graph) {
     Node* matched_quantize = match.nodes_map.at(pattern_quant);
     Node* matched_choose_qparam = match.nodes_map.at(pattern_choose_qparam);
     if (matched_dequantize->output()->uses().size() > 1) {
-      nodes_to_rewrite.push_back(std::make_tuple(
+      nodes_to_rewrite.emplace_back(std::make_tuple(
           matched_choose_qparam, matched_quantize, matched_dequantize));
     }
   }
