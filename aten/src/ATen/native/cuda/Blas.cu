@@ -15,7 +15,7 @@ Tensor &addmv_impl_cuda(Tensor& result, const Tensor &self, const Tensor &mat, c
     Tensor self_as_matrix = self.reshape({mat.size(0), 1}).contiguous();
     at::addmm_out(result, self_as_matrix, mat, vec_as_matrix, beta_, alpha_);
     result.resize_({result.size(0)});
-    return;
+    return result;
   }
 
   AT_DISPATCH_FLOATING_TYPES(mat.scalar_type(), "addmv_impl_cuda", [&] {
