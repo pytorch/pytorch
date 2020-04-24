@@ -307,15 +307,15 @@ std::shared_ptr<rpc::FutureMessage> DistEngine::runEngineAndAccumulateGradients(
   // lingering if we're running backward multiple times and some of the
   // passes ran into errors.
   autogradContext->clearOutstandingRpcs();
-  auto graph_task = autogradContext->retrieveGraphTask();
-  at::launch([this, graph_task, graphRoot, incrementOutstandingTasks](){
+  auto graphTask = autogradContext->retrieveGraphTask();
+  at::launch([this, graphTask, graphRoot, incrementOutstandingTasks](){
     execute_graph_task_until_ready_queue_empty(
-          /*graph_task*/ graph_task,
+          /*graph_task*/ graphTask,
           /*root_to_execute*/ graphRoot,
           /*incrementOutstandingTasks*/ incrementOutstandingTasks);
   });
   // Use a reference here to avoid refcount bump on futureGrads.
-  auto& futureGrads = graph_task->future_result_;
+  auto& futureGrads = graphTask->future_result_;
 
   // Build a future that waits for the callbacks to execute (since callbacks
   // execute after the original future is completed). This ensures we return a
@@ -424,10 +424,12 @@ std::shared_ptr<rpc::FutureMessage> DistEngine::executeSendFunctionAsync(
   } else {
     lock.unlock();
     auto graphTask = autogradContext->retrieveGraphTask();
-    execute_graph_task_until_ready_queue_empty(
-        /*graph_task*/ graphTask,
-        /*root_to_execute*/ sendFunction,
-        /*incrementOutstandingTasks*/ false);
+    at::launch([this, graphTask, sendFunction](){
+      execute_graph_task_until_ready_queue_empty(
+            /*graph_task*/ graphTask,
+            /*root_to_execute*/ sendFunction,
+            /*incrementOutstandingTasks*/ false);
+    });
     return std::make_shared<rpc::FutureMessage>(rpc::Message());
   }
 }
