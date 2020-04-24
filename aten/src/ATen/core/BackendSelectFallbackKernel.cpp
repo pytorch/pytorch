@@ -1,9 +1,5 @@
-#include <ATen/core/op_registration/op_registration.h>
-
-namespace {
+#include <torch/library.h>
 
 TORCH_LIBRARY_IMPL(_, BackendSelect, m) {
-  m.fallback(c10::CppFunction::makeFallthrough());
-}
-
+  m.fallback(torch::CppFunction::makeFallthrough());
 }

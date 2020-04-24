@@ -1,4 +1,4 @@
-#include "register_ops_utils.h"
+#include <torch/csrc/jit/runtime/register_ops_utils.h>
 
 #include <algorithm>
 #include <bitset>
@@ -144,8 +144,10 @@ RegisterOperators reg(
            if (sz == s->string().size()) {
              push(stack, b);
            } else {
-             throw std::runtime_error(
-                 "float() only accepts a string of single float number");
+             std::stringstream error_str;
+             error_str << "could not convert string "
+                       << "to float: '" << s->string() << "'";
+             throw std::runtime_error(error_str.str());
            }
          },
          aliasAnalysisFromSchema()),
@@ -362,14 +364,13 @@ RegisterOperators reg(
      Operator("aten::len.t(t[] a) -> int", listLen, aliasAnalysisFromSchema()),
      Operator(
          "prim::Uninitialized() -> Any",
-         [](Stack& stack) {
+         [](Stack* stack) {
            push(stack, IValue::uninitialized());
-           return 0;
          },
          aliasAnalysisSpecialCase()),
      Operator(
          "prim::Print(...) -> ()",
-         [](Stack& stack) {
+         [](Stack* stack) {
            auto num_inputs = pop(stack).toInt();
            std::stringstream ss;
            bool first = true;
@@ -384,7 +385,6 @@ RegisterOperators reg(
            auto* handler = getPrintHandler();
            TORCH_INTERNAL_ASSERT(handler);
            handler(ss.str());
-           return 0;
          },
          aliasAnalysisSpecialCase()),
      DEFINE_COMPARISON_OP(aten::eq, a == b),

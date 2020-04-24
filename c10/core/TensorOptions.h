@@ -380,13 +380,8 @@ struct C10_API TensorOptions {
             }
             return DispatchKey::CPU;
             }
-          case DeviceType::CUDA: {
-            auto dtype_tmp = typeMetaToScalarType(dtype());
-            if (isQIntType(dtype_tmp)) {
-              return DispatchKey::QuantizedCUDA;
-            }
+          case DeviceType::CUDA:
             return DispatchKey::CUDA;
-            }
           case DeviceType::MKLDNN:
             return DispatchKey::MKLDNN;
           case DeviceType::OPENGL:
