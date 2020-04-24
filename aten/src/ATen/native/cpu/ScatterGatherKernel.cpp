@@ -58,7 +58,7 @@ struct cpu_scatter_gather_base_kernel {
       scatter_shape_check(self, dim, index, src);
     }
     else {
-      gather_shape_check(self, dim, index, src);
+      gather_shape_check(self, dim, index);
     }
 
     auto iter = TensorIterator();
