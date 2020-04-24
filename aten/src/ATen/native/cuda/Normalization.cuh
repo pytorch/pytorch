@@ -624,7 +624,7 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cuda_template(const Tenso
 
 template<typename scalar_t, typename index_t>
 std::tuple<Tensor, Tensor> batch_norm_stats_cuda_template(const Tensor& input_, double epsilon) {
-  if (input_.size(0) == 0) {
+  if (input_.size(0) == 0) {  // empty batch
     auto input_options = input_.options();
     int64_t n_input = input_.size(1);
     return std::make_tuple(
