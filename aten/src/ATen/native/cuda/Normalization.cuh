@@ -629,7 +629,7 @@ std::tuple<Tensor, Tensor> batch_norm_stats_cuda_template(const Tensor& input_, 
     int64_t n_input = input_.size(1);
     return std::make_tuple(
       at::zeros({n_input}, input_options),
-      at::zeros({n_input}, input_options)
+      at::ones({n_input}, input_options)
     );
   }
 
