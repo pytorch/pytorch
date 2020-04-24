@@ -490,12 +490,6 @@ Vec256<std::complex<float>> Vec256<std::complex<float>>::ne(
   return (*this != other) & Vec256<std::complex<float>>::ones;
 }
 
-#ifdef __AVX2__
-template <> inline Vec256<std::complex<float>> fmadd(const Vec256<std::complex<float>>& a, const Vec256<std::complex<float>>& b, const Vec256<std::complex<float>>& c) {
-  return a * b + c;
-}
-#endif
-
 #endif
 
 }}}
