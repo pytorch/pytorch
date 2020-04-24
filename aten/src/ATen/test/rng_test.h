@@ -2,7 +2,7 @@
 #include <ATen/Generator.h>
 #include <ATen/Tensor.h>
 #include <ATen/native/TensorIterator.h>
-#include <ATen/core/op_registration/op_registration.h>
+#include <torch/library.h>
 #include <c10/util/Optional.h>
 #include <torch/all.h>
 #include <stdexcept>

@@ -317,7 +317,7 @@ void RequestCallbackImpl::processRpc(
 
       if (futureOwner->completed()) { // optional fast-path
         // the OwnerRRef has been created
-        auto& rref = futureOwner->wait();
+        const auto& rref = futureOwner->constValue();
         if (rref->hasValue()) {
           markComplete(ScriptRRefFetchRet({rref->getValue()}).toMessage());
           return;
@@ -325,7 +325,7 @@ void RequestCallbackImpl::processRpc(
       }
 
       futureOwner->addCallback([responseFuture, messageId, futureOwner]() {
-        auto& rref = futureOwner->wait();
+        const auto& rref = futureOwner->constValue();
         auto whenValueSet = rref->getFuture();
 
         // Our response is satisfied when the rpc.remote() request
@@ -356,7 +356,7 @@ void RequestCallbackImpl::processRpc(
 
       if (futureOwner->completed()) { // optional fast-path
         // the OwnerRRef has been created
-        auto& rref = futureOwner->wait();
+        const auto& rref = futureOwner->constValue();
         if (rref->hasValue()) {
           auto value = rref->getValue();
           py::object pyValue;
@@ -373,7 +373,7 @@ void RequestCallbackImpl::processRpc(
       }
 
       futureOwner->addCallback([responseFuture, messageId, futureOwner]() {
-        auto& rref = futureOwner->wait();
+        const auto& rref = futureOwner->constValue();
         auto whenValueSet = rref->getFuture();
 
         // Our response is satisfied when the the rpc.remote() request

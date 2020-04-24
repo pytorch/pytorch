@@ -39,8 +39,4 @@ inline __host__ __device__ THHalf pow(THHalf a, THHalf b) {
   return THCNumerics<THHalf>::pow(a, b);
 }
 
-inline __host__ __device__ THHalf tanh(THHalf a) {
-  return THCNumerics<THHalf>::tanh(a);
-}
-
 #endif
