@@ -36,6 +36,8 @@ if [ -n "${IN_CIRCLECI}" ]; then
 fi
 
 if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
+  # Print GPU info
+  rocminfo | egrep 'Name:.*\sgfx|Marketing'
   # TODO: Move this to Docker
   sudo apt-get -qq update
   sudo apt-get -qq install --no-install-recommends libsndfile1
@@ -63,7 +65,8 @@ if [[ "$BUILD_ENVIRONMENT" != *ppc64le* ]] && [[ "$BUILD_ENVIRONMENT" != *-bazel
   pip_install --user tb-nightly
   # mypy will fail to install on Python <3.4.  In that case,
   # we just won't run these tests.
-  pip_install --user mypy || true
+  # Pin MyPy version because new errors are likely to appear with each release
+  pip_install --user "mypy==0.770" || true
 fi
 
 # faulthandler become built-in since 3.3
@@ -275,7 +278,7 @@ test_bazel() {
 
   get_bazel
 
-  tools/bazel test --test_tag_filters=-gpu-required --test_filter=-*_CUDA :all_tests
+  tools/bazel test --test_output=all --test_tag_filters=-gpu-required --test_filter=-*_CUDA :all_tests
 }
 
 if ! [[ "${BUILD_ENVIRONMENT}" == *libtorch* || "${BUILD_ENVIRONMENT}" == *-bazel-* ]]; then

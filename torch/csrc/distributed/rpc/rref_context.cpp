@@ -254,7 +254,6 @@ c10::intrusive_ptr<OwnerRRef> RRefContext::getOrCreateOwnerRRef(
     // private.
     auto rref = c10::make_intrusive<OwnerRRef>(getWorkerId(), rrefId, type);
     owners_[rref->rrefId()] = rref;
-    // ownerCV_.notify_all();
     const auto pendingOwnerIter = pendingOwners_.find(rrefId);
     if (pendingOwnerIter != pendingOwners_.end()) {
       pendingOwnerIter->second->markCompleted(rref);
@@ -324,6 +323,10 @@ RRefContext::getOwnerRRef(const RRefId& rrefId) {
     }
   } else {
     // Scenario (2) retrieving an existing RRef
+    // NB: This assumes passing value to the Future constructor implicitly
+    // marks the Future as completed. This is true for utils::Future, but
+    // not so for ivalue::Future. Hence, when merging the two Future
+    // implementations later, we might need to modify code here as well.
     return std::make_shared<
         torch::utils::Future<c10::intrusive_ptr<OwnerRRef>>>(
         c10::static_intrusive_pointer_cast<OwnerRRef>(iter->second));

@@ -79,16 +79,28 @@ class TORCH_API RRefContext {
       const TypePtr& type);
 
   // Get the ``OwnerRRef`` of id ``rrefId``. If it does not exist, create a new
-  // one.
+  // one. This function is called in two places:
+  // 1. when processing ``rpc.remote()``, i.e., ``SCRIPT_REMOTE_CALL``
+  //    ``PYTHON_REMOTE_CALL``.
+  // 2. when unpickling ``OwnerRRef``.
+  // What's common in these two cases are, 1) the RRefId is already generated
+  // 2) the TypePtr is presented. So it can always create the ``OwnerRRef`` if
+  // it is not yet available.
   c10::intrusive_ptr<OwnerRRef> getOrCreateOwnerRRef(
       const RRefId& rrefId,
       const TypePtr& type);
 
   // Create an empty owner rref of type.
+  // This method is called to first time generate an ``OwnerRRef``, e.g.,
+  // 1) ``rpc.RRef(obj)``
+  // 2) create the ``OwnerRRef`` on `rpc.remote()` caller side.
+  // What's common in these two cases are, 1) the RRefId hasn't been generated
+  // 2) the TypePtr is presented.
   c10::intrusive_ptr<OwnerRRef> createOwnerRRef(const TypePtr& type);
 
   // Returns a Future of the OwnerRRef, which will be marked completed when
-  // OwnerRRef is created.
+  // OwnerRRef is created. This method is used when the TypePtr is not
+  // available, e.g., when processing to_here().
   std::shared_ptr<torch::utils::Future<c10::intrusive_ptr<OwnerRRef>>>
   getOwnerRRef(const RRefId& rrefId);
 
