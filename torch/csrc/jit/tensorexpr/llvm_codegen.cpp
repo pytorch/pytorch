@@ -1474,25 +1474,12 @@ void LLVMCodeGenImpl::visit(const Allocate* v) {
     size = irb_.CreateMul(size, irb_.CreateZExt(value_, LongTy_));
   }
 
-  llvm::Instruction* I = llvm::CallInst::CreateMalloc(
-    irb_.GetInsertBlock(),
-    LongTy_,
-    dtypeToLLVM(v->dtype()),
-    size,
-    nullptr,
-    nullptr
-  );
-
-  // Insert the bitcast into the block.
-  irb_.SetInsertPoint(irb_.GetInsertBlock());
-  value_ = irb_.Insert(I);
+  value_ = irb_.CreateAlloca(dtypeToLLVM(v->dtype()), size);
   varToVal_[v->buffer_var()] = value_;
   value_ = llvm::ConstantInt::get(IntTy_, 0);
 }
 
 void LLVMCodeGenImpl::visit(const Free* v) {
-  llvm::Value* ptr = varToVal_.at(v->buffer_var());
-  irb_.Insert(llvm::CallInst::CreateFree(ptr, irb_.GetInsertBlock()));
   value_ = llvm::ConstantInt::get(IntTy_, 0);
 }
 

@@ -1325,11 +1325,7 @@ void testLLVMRFactorVectorizedReduction() {
   ++I;
 
   For* outer_loop = dynamic_cast<For*>(*I);
-  For* new_outer;
-  For* split;
-  For* tail;
-  loopnest.splitWithTail(outer_loop, 8, &new_outer, &split, &tail);
-  loopnest.vectorize(split);
+  loopnest.vectorize(outer_loop);
 
   s = IRSimplifier::simplify(s);
   LLVMCodeGen cg(s, {a, b});
