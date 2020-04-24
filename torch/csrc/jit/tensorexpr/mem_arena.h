@@ -36,7 +36,6 @@ class KernelScope {
  private:
   KernelScope(const KernelScope&) = delete;
   KernelScope& operator=(const KernelScope&) = delete;
-  KernelArena* kernel_arena_ = nullptr; // arena to be used in this scope
   KernelArena* old_kernel_arena_ =
       nullptr; // previous arena, will be restored in destructor
   bool owning_ = false; // determines whether the arena will be freed along with

@@ -44,7 +44,6 @@ void testExprBasicValueTest02() {
 void testExprLetTest01() {
   KernelScope kernel_scope;
   VarHandle x("x", kFloat);
-  ExprHandle value = ExprHandle(3.f);
   ExprHandle body = ExprHandle(2.f) + (x * ExprHandle(3.f) + ExprHandle(4.f));
   ExprHandle result = Let::make(x, ExprHandle(3.f), body);
   SimpleIRExprEval eval(result);
@@ -55,7 +54,6 @@ void testExprLetTest02() {
   KernelScope kernel_scope;
   VarHandle x("x", kFloat);
   VarHandle y("y", kFloat);
-  ExprHandle value = ExprHandle(3.f);
   ExprHandle body =
       ExprHandle(2.f) + (x * ExprHandle(3.f) + ExprHandle(4.f) * y);
   ExprHandle e1 = Let::make(x, ExprHandle(3.f), body);
@@ -69,9 +67,9 @@ void testExprLetStmtTest01() {
   Buffer a_buf("a", kFloat, {1});
   Buffer b_buf("b", kFloat, {1});
 
-  ExprHandle load_a = Load::make(a_buf, 0, 1);
+  ExprHandle load_a = Load::make(a_buf, {0}, 1);
   VarHandle var = VarHandle("v", kFloat);
-  Stmt* store_b = Store::make(b_buf, 0, var, 1);
+  Stmt* store_b = Store::make(b_buf, {0}, var, 1);
   Stmt* let_store = LetStmt::make(var, load_a, store_b);
   SimpleIREvaluator eval(let_store, a_buf, b_buf);
 
@@ -86,14 +84,9 @@ void testExprLetStmtTest01() {
   ExpectAllNear(b_v, b_ref, 1e-5);
 }
 
-static ExprHandle test_01(const ExprHandle& expr) {
-  return expr;
-}
-
 void testExprIntTest() {
   KernelScope kernel_scope;
   VarHandle x("x", kInt);
-  ExprHandle value = ExprHandle(3);
   ExprHandle body = ExprHandle(2) + (x * ExprHandle(3) + ExprHandle(4));
   ExprHandle result = Let::make(x, ExprHandle(3), body);
   SimpleIRExprEval eval(result);
@@ -103,7 +96,6 @@ void testExprIntTest() {
 void testExprFloatTest() {
   KernelScope kernel_scope;
   VarHandle x("x", kFloat);
-  ExprHandle value = ExprHandle((float)3);
   ExprHandle body =
       ExprHandle((float)2) + (x * ExprHandle((float)3) + ExprHandle((float)4));
   ExprHandle result = Let::make(x, ExprHandle((float)3), body);
@@ -114,7 +106,6 @@ void testExprFloatTest() {
 void testExprByteTest() {
   KernelScope kernel_scope;
   VarHandle x("x", kByte);
-  ExprHandle value = ExprHandle((uint8_t)3);
   ExprHandle body = ExprHandle((uint8_t)2) +
       (x * ExprHandle((uint8_t)3) + ExprHandle((uint8_t)4));
   ExprHandle result = Let::make(x, ExprHandle((uint8_t)3), body);
@@ -125,7 +116,6 @@ void testExprByteTest() {
 void testExprCharTest() {
   KernelScope kernel_scope;
   VarHandle x("x", kChar);
-  ExprHandle value = ExprHandle((int8_t)3);
   ExprHandle body = ExprHandle((int8_t)2) +
       (x * ExprHandle((int8_t)3) + ExprHandle((int8_t)4));
   ExprHandle result = Let::make(x, ExprHandle((int8_t)3), body);
@@ -136,7 +126,6 @@ void testExprCharTest() {
 void testExprShortTest() {
   KernelScope kernel_scope;
   VarHandle x("x", kShort);
-  ExprHandle value = ExprHandle((int16_t)3);
   ExprHandle body = ExprHandle((int16_t)2) +
       (x * ExprHandle((int16_t)3) + ExprHandle((int16_t)4));
   ExprHandle result = Let::make(x, ExprHandle((int16_t)3), body);
@@ -147,7 +136,6 @@ void testExprShortTest() {
 void testExprLongTest() {
   KernelScope kernel_scope;
   VarHandle x("x", kLong);
-  ExprHandle value = ExprHandle((int64_t)3);
   ExprHandle body = ExprHandle((int64_t)2) +
       (x * ExprHandle((int64_t)3) + ExprHandle((int64_t)4));
   ExprHandle result = Let::make(x, ExprHandle((int64_t)3), body);
@@ -158,7 +146,6 @@ void testExprLongTest() {
 void testExprHalfTest() {
   KernelScope kernel_scope;
   VarHandle x("x", kHalf);
-  ExprHandle value = ExprHandle((at::Half)3);
   ExprHandle body = ExprHandle((at::Half)2) +
       (x * ExprHandle((at::Half)3) + ExprHandle((at::Half)4));
   ExprHandle result = Let::make(x, ExprHandle((at::Half)3), body);
@@ -169,7 +156,6 @@ void testExprHalfTest() {
 void testExprDoubleTest() {
   KernelScope kernel_scope;
   VarHandle x("x", kDouble);
-  ExprHandle value = ExprHandle((double)3);
   ExprHandle body = ExprHandle((double)2) +
       (x * ExprHandle((double)3) + ExprHandle((double)4));
   ExprHandle result = Let::make(x, ExprHandle((double)3), body);
@@ -182,9 +168,9 @@ void testExprVectorAdd01() {
   const int kVectorCount = 128;
   const int kTotalSize = kVectorSize * kVectorCount;
 
-  Buffer a_buf(VarHandle("A", kHandle), kFloat, {ExprHandle(kTotalSize)});
-  Buffer b_buf(VarHandle("B", kHandle), kFloat, {ExprHandle(kTotalSize)});
-  Buffer c_buf(VarHandle("C", kHandle), kFloat, {ExprHandle(kTotalSize)});
+  Buffer a_buf(BufHandle("A", {ExprHandle(kTotalSize)}), kFloat);
+  Buffer b_buf(BufHandle("B", {ExprHandle(kTotalSize)}), kFloat);
+  Buffer c_buf(BufHandle("C", {ExprHandle(kTotalSize)}), kFloat);
 
   /*
   Build the following:
@@ -197,16 +183,16 @@ void testExprVectorAdd01() {
   VarHandle index = VarHandle("index", kInt);
   ExprHandle load_a = Load::make(
       a_buf,
-      Ramp::make(index * kVectorSize, 1, kVectorSize),
+      {Ramp::make(index * kVectorSize, 1, kVectorSize)},
       Broadcast::make(1, kVectorSize));
   ExprHandle load_b = Load::make(
       b_buf,
-      Ramp::make(index * kVectorSize, 1, kVectorSize),
+      {Ramp::make(index * kVectorSize, 1, kVectorSize)},
       Broadcast::make(1, kVectorSize));
   ExprHandle value = load_a + load_b;
   Stmt* store_c = Store::make(
       c_buf,
-      Ramp::make(index * kVectorSize, 1, kVectorSize),
+      {Ramp::make(index * kVectorSize, 1, kVectorSize)},
       value,
       Broadcast::make(1, kVectorSize));
   Stmt* stmt = For::make(index, 0, kVectorCount, store_c);
@@ -232,9 +218,9 @@ void testExprVectorAdd01() {
 void testExprCompareSelectEQ() {
   KernelScope kernel_scope;
   constexpr int N = 1024;
-  Buffer a(VarHandle("A", kHandle), kInt, {N});
-  Buffer b(VarHandle("B", kHandle), kInt, {N});
-  Buffer c(VarHandle("C", kHandle), kInt, {N});
+  Buffer a(BufHandle("A", {N}), kInt);
+  Buffer b(BufHandle("B", {N}), kInt);
+  Buffer c(BufHandle("C", {N}), kInt);
   std::vector<int> a_buffer(N, 1);
   std::vector<int> b_buffer(N, 1);
   std::vector<int> c_buffer(N, 0);
@@ -248,10 +234,10 @@ void testExprCompareSelectEQ() {
       N,
       Store::make(
           c,
-          i,
+          {i},
           CompareSelect::make(
-              Load::make(a, i, mask),
-              Load::make(b, i, mask),
+              Load::make(a, {i}, mask),
+              Load::make(b, {i}, mask),
               CompareSelectOperation::kEQ),
           mask));
 
@@ -403,11 +389,11 @@ void testExprDynamicShapeAdd() {
   KernelScope kernel_scope;
   auto testWithSize = [](int32_t size) {
     VarHandle n("n", kInt);
-    Buffer a(VarHandle("a", kHandle), kFloat, {n});
-    Buffer b(VarHandle("b", kHandle), kFloat, {n});
-    Buffer c(VarHandle("c", kHandle), kFloat, {n});
+    Buffer a(BufHandle("a", {n}), kFloat);
+    Buffer b(BufHandle("b", {n}), kFloat);
+    Buffer c(BufHandle("c", {n}), kFloat);
     VarHandle i("i", kInt);
-    Stmt* s = For::make(i, 0, n, Store::make(c, i, a(i) + b(i), 1));
+    Stmt* s = For::make(i, 0, n, Store::make(c, {i}, a(i) + b(i), 1));
     std::vector<float> aData(size, 1.0f);
     std::vector<float> bData(size, 2.0f);
     std::vector<float> cData(size, 0.0f);
@@ -426,9 +412,9 @@ void testCond01() {
   Buffer a_buf("a", kFloat, {N});
   VarHandle index = VarHandle("index", kInt);
   Stmt* assign_x2 =
-      Store::make(VarHandle(a_buf.data()), index, cast<float>(index) * 2, 1);
+      Store::make(BufHandle(a_buf.data()), {index}, cast<float>(index) * 2, 1);
   Stmt* assign_x3 =
-      Store::make(VarHandle(a_buf.data()), index, cast<float>(index) * 3, 1);
+      Store::make(BufHandle(a_buf.data()), {index}, cast<float>(index) * 3, 1);
   ExprHandle even_cond = CompareSelect::make(Mod::make(index, 2), 0, kEQ);
   Stmt* assign = Cond::make(even_cond, assign_x2, assign_x3);
   Stmt* for_stmt = For::make(index, 0, N, assign);
@@ -475,8 +461,7 @@ void testStmtClone() {
 
   Buffer a_buf("a", kInt, {N});
   VarHandle index = VarHandle("index", kInt);
-  Stmt* body =
-      Store::make(VarHandle(a_buf.data()), index, 5, 1);
+  Stmt* body = Store::make(BufHandle(a_buf.data()), {index}, 5, 1);
   Stmt* loop = For::make(index, 0, N, body);
 
   Stmt* cloned_loop = Stmt::clone(loop);
@@ -490,7 +475,7 @@ void testStmtClone() {
 
   // Let's add another assign to the body in the cloned loop and verify that the
   // original statement hasn't changed while the cloned one has.
-  Stmt* body_addition = Store::make(VarHandle(a_buf.data()), index, 33, 1);
+  Stmt* body_addition = Store::make(BufHandle(a_buf.data()), {index}, 33, 1);
   Block* cloned_body =
       static_cast<Block*>(static_cast<const For*>(cloned_loop)->body());
   cloned_body->append_stmt(body_addition);

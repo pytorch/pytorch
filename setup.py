@@ -105,9 +105,6 @@
 #   MKL_THREADING
 #     MKL threading mode: SEQ, TBB or OMP (default)
 #
-#   USE_FBGEMM
-#     Enables use of FBGEMM
-#
 #   USE_REDIS
 #     Whether to use Redis for distributed workflows (Linux only)
 #
@@ -160,8 +157,17 @@
 #   USE_TBB
 #      enable TBB support
 #
+#   USE_SYSTEM_LIBS (work in progress)
+#      Use system-provided libraries to satisfy the build dependencies.
+#      When turned on, the following cmake variables will be toggled as well:
+#        USE_SYSTEM_CPUINFO=ON USE_SYSTEM_SLEEF=ON BUILD_CUSTOM_PROTOBUF=OFF
 
 from __future__ import print_function
+
+import sys
+if sys.version_info < (3,):
+    raise Exception("Python 2 has reached end-of-life and is no longer supported by PyTorch.")
+
 from setuptools import setup, Extension, distutils, find_packages
 from collections import defaultdict
 from distutils import core
@@ -174,7 +180,6 @@ import distutils.sysconfig
 import filecmp
 import subprocess
 import shutil
-import sys
 import os
 import json
 import glob
@@ -219,7 +224,7 @@ for i, arg in enumerate(sys.argv):
         break
     if arg == '-q' or arg == '--quiet':
         VERBOSE_SCRIPT = False
-    if arg == 'clean':
+    if arg == 'clean' or arg == 'egg_info':
         RUN_BUILD_DEPS = False
     filtered_args.append(arg)
 sys.argv = filtered_args
@@ -793,6 +798,7 @@ if __name__ == '__main__':
                 'include/c10/macros/*.h',
                 'include/c10/core/*.h',
                 'include/ATen/core/boxing/*.h',
+                'include/ATen/core/boxing/impl/*.h',
                 'include/ATen/core/dispatch/*.h',
                 'include/ATen/core/op_registration/*.h',
                 'include/c10/core/impl/*.h',
@@ -801,6 +807,7 @@ if __name__ == '__main__':
                 'include/c10/cuda/impl/*.h',
                 'include/c10/hip/*.h',
                 'include/c10/hip/impl/*.h',
+                'include/c10d/*.hpp',
                 'include/caffe2/**/*.h',
                 'include/torch/*.h',
                 'include/torch/csrc/*.h',

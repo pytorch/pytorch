@@ -98,6 +98,8 @@ c10::optional<at::Tensor> runTorchSlice_opset9(
   for (size_t i = 0; i < axesAttr.size(); ++i) {
     // ONNX slice accepts negative starts and ends values.
     int64_t axis = axesAttr[i], start = startsAttr[i], end = endsAttr[i];
+    // ONNX slice accepts negative axis, fix this for aten op
+    axis += axis < 0 ? inputTensorValues[0].sizes().size() : 0;
     handleNegativeStartEndIndex(start, end, axis, updated_val.sizes());
     int64_t length = end - start;
     if (length < 0 || start > updated_val.sizes()[axis] - length)
@@ -148,8 +150,10 @@ c10::optional<at::Tensor> runTorchSlice_opset10(
     }
     auto axes_a = inputTensorValues[3].accessor<int64_t, 1>();
     axes.reserve(inputTensorValues[3].sizes()[0]);
+    // ONNX slice accepts negative axis, fix this for aten op
     for (size_t i = 0; i < inputTensorValues[3].sizes()[0]; ++i) {
-      axes[i] = axes_a[i];
+      axes[i] = axes_a[i] < 0 ? axes_a[i] + inputTensorValues[0].sizes().size()
+                              : axes_a[i];
     }
   } else {
     axes = std::vector<int64_t>(inputTensorValues[1].sizes()[0], 0);
@@ -229,6 +233,12 @@ c10::optional<at::Tensor> runTorchBackendForOnnx(
   } else if (node->kind() == onnx::Mul) {
     updated_val = at::mul(inputTensorValues[0], inputTensorValues[1]);
     return c10::optional<at::Tensor>(updated_val);
+  } else if (node->kind() == onnx::Sub) {
+    updated_val = at::sub(inputTensorValues[0], inputTensorValues[1]);
+    return c10::optional<at::Tensor>(updated_val);
+  } else if (node->kind() == onnx::Add) {
+    updated_val = at::add(inputTensorValues[0], inputTensorValues[1]);
+    return c10::optional<at::Tensor>(updated_val);
   } else if (node->kind() == onnx::Unsqueeze) {
     assert(inputTensorValues.size() == 1);
     if (!node->hasAttributeS("axes")) {
@@ -278,6 +288,39 @@ c10::optional<at::Tensor> runTorchBackendForOnnx(
       }
     }
     return c10::optional<at::Tensor>(at::reshape(updated_val, shape));
+  } else if (node->kind() == onnx::Shape) {
+    TORCH_INTERNAL_ASSERT(inputTensorValues.size() == 1);
+    updated_val = at::_shape_as_tensor(inputTensorValues[0]);
+    return c10::optional<at::Tensor>(updated_val);
+  } else if (node->kind() == onnx::ReduceL1 || node->kind() == onnx::ReduceL2) {
+    assert(inputTensorValues.size() == 1);
+    if (!node->hasAttributeS("axes")) {
+      return c10::nullopt;
+    }
+    if (!node->hasAttributeS("keepdims")) {
+      return c10::nullopt;
+    }
+    int p = node->kind() == onnx::ReduceL1 ? 1 : 2;
+    updated_val = at::norm(
+        inputTensorValues[0], p, node->is(attr::axes), node->i(attr::keepdims));
+    return c10::optional<at::Tensor>(updated_val);
+  } else if (node->kind() == onnx::Gather) {
+    assert(inputTensorValues.size() == 2);
+    if (!node->hasAttributeS("axis")) {
+      return c10::nullopt;
+    }
+    auto axis = node->i(attr::axis);
+    // If axis attribute for onnx::Gather has a value less than 0,
+    // It needs to be adjusted (+= dim sizes) for aten op
+    axis += axis < 0 ? inputTensorValues[0].sizes().size() : 0;
+    at::Tensor indices = inputTensorValues[1];
+    // If indices input for onnx::Gather has a value less than 0,
+    // It needs to be adjusted (+= dim value) for aten op
+    auto less_mask = at::lt(indices, 0);
+    auto indices_corr = at::add(indices, inputTensorValues[0].sizes()[axis]);
+    auto indices_masked = at::where(less_mask, indices_corr, indices);
+    updated_val = at::index_select(inputTensorValues[0], axis, indices_masked);
+    return c10::optional<at::Tensor>(updated_val);
   } else {
     return c10::nullopt;
   }

@@ -257,9 +257,15 @@ FunctionSchema getSchemaWithNameAndDefaults(
       checkMutableFunctionDefault(range, arg, it->second);
       c10::optional<IValue> value = tryCalculateDefaultParam(arg, it->second);
       if (!value) {
-        throw ErrorReport(range)
-            << "Expected a default value of type " << arg.type()->python_str()
-            << " on parameter \"" << arg.name() << "\"";
+        ErrorReport error(range);
+        error << "Expected a default value of type " << arg.type()->python_str()
+              << " on parameter \"" << arg.name() << "\".";
+        if (arg.is_inferred_type()) {
+          error << "Because \"" << arg.name()
+                << "\" was not annotated with an explicit type "
+                << "it is assumed to be type 'Tensor'.";
+        }
+        throw error;
       }
       new_args.emplace_back(
           arg.name(), arg.type(), arg.N(), *value, arg.kwarg_only());
@@ -518,7 +524,11 @@ bool ivalue_tags_match(const Module& lhs, const Module& rhs) {
       visited.emplace(item.a.internalToPointer());
     }
     if (*unshapedType(item.a.type()) != *unshapedType(item.b.type())) {
-      return false;
+      // Since named types are saved and loaded in the test suite, we cannot
+      // expect them to be equal. We should still check their slots however.
+      if (!item.a.type()->cast<c10::NamedType>()) {
+        return false;
+      }
     }
     // check tags for objects that contain subobjects
     if (item.a.isObject()) {
@@ -848,12 +858,21 @@ void initJitScriptBindings(PyObject* module) {
             didFinishEmitModule(m);
           })
       .def(
+          "_register_attribute",
+          [](Module& m,
+             const std::string& name,
+             TypePtr type,
+             py::handle value) {
+            m.register_attribute(name, type, toIValue(value, type));
+          })
+      .def(
           "_create_method_from_trace",
           [](Module& self,
              const std::string& name,
              py::function func,
              py::tuple input_tuple,
              py::function var_lookup_fn,
+             bool strict,
              bool force_outplace) {
             // prereq: Module's buffers and parameters are unique
             // this was ensured in python before calling this function
@@ -861,7 +880,12 @@ void initJitScriptBindings(PyObject* module) {
 
             std::shared_ptr<Graph> graph =
                 std::get<0>(tracer::createGraphByTracing(
-                    func, typed_inputs, var_lookup_fn, force_outplace, &self));
+                    func,
+                    typed_inputs,
+                    var_lookup_fn,
+                    strict,
+                    force_outplace,
+                    &self));
             const auto method_name = QualifiedName(*self.type()->name(), name);
             auto fn = self._ivalue()->compilation_unit()->create_function(
                 method_name, graph);
@@ -873,13 +897,16 @@ void initJitScriptBindings(PyObject* module) {
           [](Module& self) {
             std::vector<at::Tensor> tensors;
             std::vector<c10::NamedTypePtr> deps;
-            PythonPrint pp(tensors, deps, false);
+            PythonPrint pp(tensors, deps);
             pp.printNamedType(self.type());
             return pp.str();
           })
       .def("apply", &Module::apply)
       .def("_clone", &Module::clone)
-      .def("_clone_instance", &Module::clone_instance);
+      .def("_clone_instance", &Module::clone_instance)
+      .def_property_readonly("qualified_name", [](const Module& self) {
+        return self.type()->name()->qualifiedName();
+      });
 
   slot_dict_impl<detail::ParameterPolicy>::bind(m, "ParameterDict");
   slot_dict_impl<detail::BufferPolicy>::bind(m, "BufferDict");
@@ -973,7 +1000,8 @@ void initJitScriptBindings(PyObject* module) {
           [](const StrongFunctionPtr& self) {
             std::vector<at::Tensor> tensors;
             std::vector<c10::NamedTypePtr> deps;
-            PythonPrint pp(tensors, deps, false);
+
+            PythonPrint pp(tensors, deps);
             pp.printFunction(*self.function_);
             return pp.str();
           })
@@ -1015,7 +1043,7 @@ void initJitScriptBindings(PyObject* module) {
       .def_property_readonly("code", [](Method& self) {
         std::vector<at::Tensor> tensors;
         std::vector<c10::NamedTypePtr> deps;
-        PythonPrint pp(tensors, deps, false);
+        PythonPrint pp(tensors, deps);
         pp.printMethod(self.function());
         return pp.str();
       });
@@ -1061,10 +1089,11 @@ void initJitScriptBindings(PyObject* module) {
          py::function func,
          py::tuple input_tuple,
          py::function var_lookup_fn,
+         bool strict,
          bool force_outplace) {
         auto typed_inputs = toTraceableStack(input_tuple);
         std::shared_ptr<Graph> graph = std::get<0>(tracer::createGraphByTracing(
-            func, typed_inputs, var_lookup_fn, force_outplace));
+            func, typed_inputs, var_lookup_fn, strict, force_outplace));
         auto cu = get_python_cu();
         auto name = c10::QualifiedName(qualname);
         auto result = cu->create_function(

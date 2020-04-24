@@ -100,7 +100,8 @@ class CPUSparseLengthsReductionOp : public Operator<CPUContext> {
                   USE_WEIGHT,
                   USE_MEAN,
                   /*prefetch distance*/ 16,
-                  USE_POSITIONAL_WEIGHT);
+                  USE_POSITIONAL_WEIGHT,
+                  /*use_offsets*/ false);
         } else {
           CAFFE_ENFORCE((std::is_same<IndexType, std::int64_t>::value));
           kernel_fp32_i64_ =
@@ -109,7 +110,8 @@ class CPUSparseLengthsReductionOp : public Operator<CPUContext> {
                   USE_WEIGHT,
                   USE_MEAN,
                   /*prefetch distance*/ 16,
-                  USE_POSITIONAL_WEIGHT);
+                  USE_POSITIONAL_WEIGHT,
+                  /*use_offsets*/ false);
         }
       } else {
         CAFFE_ENFORCE((std::is_same<InputType, at::Half>::value));
@@ -120,7 +122,8 @@ class CPUSparseLengthsReductionOp : public Operator<CPUContext> {
                   USE_WEIGHT,
                   USE_MEAN,
                   /*prefetch distance*/ 16,
-                  USE_POSITIONAL_WEIGHT);
+                  USE_POSITIONAL_WEIGHT,
+                  /*use_offsets*/ false);
         } else {
           CAFFE_ENFORCE((std::is_same<IndexType, std::int64_t>::value));
           kernel_fp16_i64_ =
@@ -129,7 +132,8 @@ class CPUSparseLengthsReductionOp : public Operator<CPUContext> {
                   USE_WEIGHT,
                   USE_MEAN,
                   /*prefetch distance*/ 16,
-                  USE_POSITIONAL_WEIGHT);
+                  USE_POSITIONAL_WEIGHT,
+                  /*use_offsets*/ false);
         }
       }
     }

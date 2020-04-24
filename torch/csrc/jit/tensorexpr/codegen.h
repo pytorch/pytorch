@@ -56,12 +56,14 @@ class TORCH_API CodeGen {
 class CodeGen::BufferArg {
  public:
   BufferArg(const Buffer& buffer)
-      : var_(buffer.data()), dtype_(buffer.dtype()) {}
+      : var_(buffer.data()->base_handle()), dtype_(buffer.dtype()) {}
   BufferArg(Tensor* tensor)
-      : var_(tensor->function()->func_var(tensor->output_index())),
+      : var_(tensor->function()
+                 ->func_var(tensor->output_index())
+                 ->base_handle()),
         dtype_(tensor->function()->body(tensor->output_index())->dtype()) {}
   BufferArg(const Function& func)
-      : var_(func.func_var(0)), dtype_(func.body(0)->dtype()) {
+      : var_(func.func_var(0)->base_handle()), dtype_(func.body(0)->dtype()) {
     // TODO: Support multiple-output functions
     if (func.func_vars().size() != 1) {
       throw unimplemented_lowering();

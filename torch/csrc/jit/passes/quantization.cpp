@@ -32,31 +32,13 @@ using NameModuleVector = std::vector<std::pair<std::string, Module>>;
 using graph_rewrite_helper::getFuncName;
 using graph_rewrite_helper::getIValue;
 using graph_rewrite_helper::getValue;
+using graph_rewrite_helper::PatternInfo;
 using graph_rewrite_helper::replaceConvolutionWithConv2d;
 
 // Map of quantization parameter name and value
 // for example _scale, _zero_point,
 // _scalar_type and _axis(for per channel quantization)
 using QParamVector = std::vector<std::pair<std::string, IValue>>;
-
-// This struct contains a compiled IR patterns slated for use in the
-// findPatternMatches function. The struct encapsulates the common
-// information from parseIR that is used in conjunction with the
-// pattern matching facility. A const instance of this struct can
-// also be stored away to cache the compiled IR pattern and reduce
-// runtime cost
-struct PatternInfo {
-  std::string pattern_string;
-  std::unique_ptr<Graph> pattern_graph;
-  std::unordered_map<std::string, Value*> vmap;
-
-  static PatternInfo parse_from_str(std::string pattern_string) {
-    PatternInfo rv{
-        std::move(pattern_string), std::make_unique<Graph>(), decltype(vmap){}};
-    parseIR(rv.pattern_string, rv.pattern_graph.get(), rv.vmap);
-    return rv;
-  }
-};
 
 struct PatternsAndModules {
   bool is_conv;
@@ -65,26 +47,103 @@ struct PatternsAndModules {
   Module packed_params_module;
 };
 
+std::vector<std::string> _quantizable_call_funcs = {
+    "conv2d",
+    "linear",
+    "batch_norm",
+};
+
+std::vector<std::string> _quantizable_aten_funcs = {
+    "conv2d",
+    "conv3d",
+    "linear",
+    "addmm",
+    "matmul",
+    "add_",
+    "add",
+    "cat",
+    "lstm",
+    "mul",
+    "mul_",
+};
+
 // These are the prim::CallFunctions that doesn't require observation and
 // have a single input Tensor
 // example: `prim::CallFunction(%dropout, %input_tensor, ...)
 // so we propagate observed property from %input_tensor to the
 // output of the `prim::CallFunction`
 std::vector<std::string> _single_input_general_call_funcs = {
+    "adaptive_avg_pool1d",
     "adaptive_avg_pool2d",
+    "adaptive_avg_pool3d",
+    "avg_pool1d",
+    "avg_pool2d",
+    "avg_pool3d",
+    "_max_pool1d",
     "_max_pool2d",
+    "_max_pool3d",
     "dropout",
     "interpolate",
     "upsample",
     "upsample_bilinear",
     "upsample_nearest",
     "relu",
+    "sigmoid",
+    "tanh",
 };
 
-std::vector<std::string> _quantizable_call_funcs = {
-    "conv2d",
-    "linear",
+// Similar to prim::CallFunctions, there are aten ops that doesn't
+// require observation and have a single input Tensor
+// e.g. `aten::max_pool2d(%input_tensor, ...)`
+std::vector<std::string> _single_input_general_aten_funcs = {
+    "max_pool1d",
+    "max_pool2d",
+    "max_pool3d",
+    "avg_pool1d",
+    "avg_pool2d",
+    "avg_pool3d",
+    "flatten",
+    "max",
+    "min",
+    "mean",
+    "upsample_nearest1d",
+    "upsample_nearest2d",
+    "upsample_nearest3d",
+    "adaptive_avg_pool1d",
+    "adaptive_avg_pool2d",
+    "adaptive_avg_pool3d",
+    "upsample_linear1d",
+    "upsample_bilinear2d",
+    "upsample_trilinear3d",
+    "upsample_bicubic2d",
+    "dropout",
+    "reshape",
+    "chunk",
+    "view",
+    "transpose",
+    "contiguous",
+    "permute",
+    "repeat_interleave",
+    "clamp",
+    // "clamp_",  // Enable when quantized `clamp_` is ready
+    "relu",
+    "sigmoid",
+    "tanh",
 };
+
+struct FuncArg {
+  std::string func_name;
+  int arg_index;
+};
+
+using AtenFuncArgs = std::vector<FuncArg>;
+using CallFuncArgs = std::vector<FuncArg>;
+
+// Special checks for ops that do not require observers for all input tensors.
+// For each operator in this list observers are inserted for the input based
+// on the index specified.
+AtenFuncArgs _observe_inputs_aten_func = {};
+CallFuncArgs _observe_inputs_call_func = {{"batch_norm", 1}};
 
 void fillQConfigMap(
     const Module& module,
@@ -111,10 +170,7 @@ void fillQConfigMap(
   }
 }
 
-bool isFunctionNode(
-    Node* n,
-    const std::vector<std::string>& call_funcs,
-    const std::vector<std::string>& aten_funcs) {
+bool isAtenFunc(Node* n, const std::vector<std::string>& aten_funcs) {
   std::vector<Symbol> aten_func_symbols;
   std::transform(
       aten_funcs.begin(),
@@ -122,17 +178,23 @@ bool isFunctionNode(
       std::back_inserter(aten_func_symbols),
       [](const std::string& s) { return Symbol::aten(s); });
 
-  bool is_quantizable =
-      std::find(
-          aten_func_symbols.begin(), aten_func_symbols.end(), n->kind()) !=
+  return std::find(
+             aten_func_symbols.begin(), aten_func_symbols.end(), n->kind()) !=
       aten_func_symbols.end();
+}
+
+bool isFunctionNode(
+    Node* n,
+    const std::vector<std::string>& call_funcs,
+    const std::vector<std::string>& aten_funcs) {
+  bool is_func_node = isAtenFunc(n, aten_funcs);
   if (n->kind() == prim::CallFunction) {
     auto func_name = getFuncName(n->inputs()[0]);
-    is_quantizable |=
+    is_func_node |=
         std::find(call_funcs.begin(), call_funcs.end(), func_name) !=
         call_funcs.end();
   }
-  return is_quantizable;
+  return is_func_node;
 }
 
 // checks if a block will always raise an Exception
@@ -154,49 +216,20 @@ bool alwaysRaisesException(Block* block) {
   return false;
 }
 
-bool isAddScalar(Node* n) {
-  return (n->kind() == Symbol::aten("add") ||
-          n->kind() == Symbol::aten("add_")) &&
+bool hasScalarInput(Node* n) {
+  std::vector<std::string> scalar_ops = {"add", "add_", "mul", "mul_"};
+
+  return isAtenFunc(n, scalar_ops) &&
       n->input(0)->type()->isSubtypeOf(TensorType::get()) &&
       n->input(1)->type()->isSubtypeOf(NumberType::get());
 }
 
-// If the op doesn't require observation, return
-// the the list of input `Value`s that we should check to see
-// if they are observed/quantized, if so, we can say the output
-// of this op is observed/quantized as well, since for these ops we can derive
-// the quantization parameters for output given inputs
-std::vector<Value*> getGeneralOpTensorInputs(Node* n) {
-  std::vector<std::string> single_input_aten_funcs = {
-      "max_pool2d",
-      "avg_pool2d",
-      "flatten",
-      "max",
-      "min",
-      "mean",
-      "upsample_nearest1d",
-      "upsample_nearest2d",
-      "upsample_nearest3d",
-      "adaptive_avg_pool1d",
-      "adaptive_avg_pool2d",
-      "adaptive_avg_pool3d",
-      "upsample_linear1d",
-      "upsample_bilinear2d",
-      "upsample_trilinear3d",
-      "upsample_bicubic2d",
-      "dropout",
-      "reshape",
-      "chunk",
-      "view",
-      "transpose",
-      "contiguous",
-      "permute",
-      "repeat_interleave",
-      "relu",
-      // TODO: sort returns a tuple of Tensors, we have
-      // to extend the API to support that
-      // "sort",
-  };
+// For a given value `v`, get the list of values that we need to check
+// if they are observed/quantized or not, if so, we can say the
+// `v` is also observed/quantized, since we can derive
+// the quantization parameters for `v` given the list of values
+std::vector<Value*> getPassThroughInputs(Value* v) {
+  Node* n = v->node();
   if (isFunctionNode(
           n,
           // We don't have call functions
@@ -204,12 +237,14 @@ std::vector<Value*> getGeneralOpTensorInputs(Node* n) {
           /* call_funcs = */ _single_input_general_call_funcs,
           /* aten_funcs = */ {})) {
     return {n->input(1)};
-  } else if (isFunctionNode(
-                 n,
-                 // We don't have call functions
-                 // after inline
-                 /* call_funcs = */ {},
-                 /* aten_funcs = */ single_input_aten_funcs)) {
+  } else if (
+      isFunctionNode(
+          n,
+          // We don't have call functions
+          // after inline
+          /* call_funcs = */ {},
+          /* aten_funcs = */ _single_input_general_aten_funcs) ||
+      (n->kind() == Symbol::aten("sort") && v->offset() == 0)) {
     return {n->input(0)};
   } else if (n->kind() == prim::If && n->outputs().size() == 1) {
     std::vector<Value*> inputs;
@@ -234,7 +269,7 @@ std::vector<Value*> getGeneralOpTensorInputs(Node* n) {
 }
 
 bool mayRequireObservation(Value* v) {
-  return !isAddScalar(v->node());
+  return !hasScalarInput(v->node());
 }
 
 bool nodeQuantizable(Node* n) {
@@ -243,16 +278,7 @@ bool nodeQuantizable(Node* n) {
       /* call_funcs = */
       _quantizable_call_funcs,
       /* aten_funcs = */
-      {
-          "conv2d",
-          "conv3d",
-          "linear",
-          "addmm",
-          "matmul",
-          "add_",
-          "add",
-          "cat",
-      });
+      _quantizable_aten_funcs);
 }
 
 // We don't want to analyze the graph for some `builtin` CallFunctions
@@ -612,16 +638,18 @@ class InsertObserversHelper {
   std::unordered_set<Graph*> visited_graph_of_observer_map_;
   std::unordered_map<Value*, Module> observer_for_value_;
   // Map from values from callsite into the values in the CallMethod graph
-  std::unordered_map<Value*, std::unordered_set<Value*>> boundary_value_map_;
-  std::unordered_set<Value*> observed_values_;
-  // This is used for the observed values to pass through the ops like flatten,
-  // so that output value of platten do not need to be observed
   // key of the map is the value from caller graph, and the value of the map
   // is the list of values in the callee graph (the graph
   // corresponding to the called method),
-  // the reason it is a vector is that a value in the caller graph
+  // the reason it is a set is that a value in the caller graph
   // can both correspond to the output of one callee graph and input of another
   // callee graph.
+  std::unordered_map<Value*, std::unordered_set<Value*>> boundary_value_map_;
+  std::unordered_set<Value*> observed_values_;
+  // This is used for the observed values to pass through the ops like flatten,
+  // so that output value of flatten does not need to be observed
+  // key is the output of the op, value is a vector of values that need
+  // to be observed in order to pass the observed property to the output
   std::unordered_map<Value*, std::vector<Value*>> pass_through_value_map_;
   // Unique id generator for observer module, used for generating
   // unique observer names when we insert observer module, we
@@ -639,16 +667,30 @@ class InsertObserversHelper {
   // These are the IR patterns we match to skip inserting observers.
   // They are compiled once on construction and used repeatedly within
   // the pass.
-  const PatternInfo conv_functional_relu = PatternInfo::parse_from_str(R"(
+  const PatternInfo conv2d_functional_relu = PatternInfo::parse_from_str(R"(
 graph(%self, %input, %inplace):
     %relu = prim::Constant[name="relu"]()
     %first_module = match::module[name="Conv2d"](%self)
     %first_output = prim::CallMethod[name="forward"](%first_module, %input)
     %second_output = prim::CallFunction(%relu, %first_output, %inplace)
     return (%second_output) )");
-  const PatternInfo conv_relu = PatternInfo::parse_from_str(R"(
+  const PatternInfo conv2d_relu = PatternInfo::parse_from_str(R"(
 graph(%self, %input):
     %first_module = match::module[name="Conv2d"](%self)
+    %first_output = prim::CallMethod[name="forward"](%first_module, %input)
+    %second_module = match::module[name="ReLU"](%self)
+    %second_output = prim::CallMethod[name="forward"](%second_module, %first_output)
+    return (%second_output) )");
+  const PatternInfo conv3d_functional_relu = PatternInfo::parse_from_str(R"(
+graph(%self, %input, %inplace):
+    %relu = prim::Constant[name="relu"]()
+    %first_module = match::module[name="Conv3d"](%self)
+    %first_output = prim::CallMethod[name="forward"](%first_module, %input)
+    %second_output = prim::CallFunction(%relu, %first_output, %inplace)
+    return (%second_output) )");
+  const PatternInfo conv3d_relu = PatternInfo::parse_from_str(R"(
+graph(%self, %input):
+    %first_module = match::module[name="Conv3d"](%self)
     %first_output = prim::CallMethod[name="forward"](%first_module, %input)
     %second_module = match::module[name="ReLU"](%self)
     %second_output = prim::CallMethod[name="forward"](%second_module, %first_output)
@@ -675,43 +717,92 @@ graph(%self, %a, %b, %inplace):
      %second_output = prim::CallFunction(%relu, %first_output, %inplace)
      return (%second_output) )");
 
+  const PatternInfo bn_relu = PatternInfo::parse_from_str(R"(
+graph(%self, %input):
+    %first_module = match::module[name="BatchNorm2d"](%self)
+    %first_output = prim::CallMethod[name="forward"](%first_module, %input)
+    %second_module = match::module[name="ReLU"](%self)
+    %second_output = prim::CallMethod[name="forward"](%second_module, %first_output)
+    return (%second_output) )");
+
+  // TODO: Make fusion support BN+Functional Relu with inplace.
+  const PatternInfo bn_functional_relu = PatternInfo::parse_from_str(R"(
+graph(%self, %input, %inplace):
+    %relu = prim::Constant[name="relu"]()
+    %first_module = match::module[name="BatchNorm2d"](%self)
+    %first_output = prim::CallMethod[name="forward"](%first_module, %input)
+    %second_output = prim::CallFunction(%relu, %first_output, %inplace)
+    return (%second_output) )");
+
+  const PatternInfo mul_module_relu = PatternInfo::parse_from_str(R"(
+graph(%self, %a, %b):
+     %first_output = aten::mul(%a, %b)
+     %second_module = match::module[name="ReLU"](%self)
+     %second_output = prim::CallMethod[name="forward"](%second_module, %first_output)
+     return (%second_output) )");
+
+  const PatternInfo inplace_mul_module_relu = PatternInfo::parse_from_str(R"(
+graph(%self, %a, %b):
+     %first_output = aten::mul_(%a, %b)
+     %second_module = match::module[name="ReLU"](%self)
+     %second_output = prim::CallMethod[name="forward"](%second_module, %first_output)
+     return (%second_output) )");
+
+  const PatternInfo mul_functional_relu = PatternInfo::parse_from_str(R"(
+graph(%self, %a, %b, %inplace):
+     %first_output = aten::mul(%a, %b)
+     %relu = prim::Constant[name="relu"]()
+     %second_output = prim::CallFunction(%relu, %first_output, %inplace)
+     return (%second_output) )");
+
+  const PatternInfo inplace_mul_functional_relu =
+      PatternInfo::parse_from_str(R"(
+graph(%self, %a, %b, %inplace):
+     %first_output = aten::mul_(%a, %b)
+     %relu = prim::Constant[name="relu"]()
+     %second_output = prim::CallFunction(%relu, %first_output, %inplace)
+     return (%second_output) )");
+
   const std::vector<std::reference_wrapper<const PatternInfo>> delay_patterns =
       {
-          conv_functional_relu,
-          conv_relu,
+          conv2d_functional_relu,
+          conv2d_relu,
+          conv3d_functional_relu,
+          conv3d_relu,
           matmul_add,
           add_module_relu,
           add_functional_relu,
+          bn_relu,
+          bn_functional_relu,
+          mul_module_relu,
+          inplace_mul_module_relu,
+          mul_functional_relu,
+          inplace_mul_functional_relu,
   };
 };
 
 // Check if `use` is an aten function of name `func_name` and if value
-// `v` is the nth argument of the function
-bool isAtenFuncNthArg(
-    Value* v,
-    Node* use,
+// `v` is the nth argument (if provided) of the function.
+bool matchAtenFuncToUse(
+    const Use& use,
     const std::string& func_name,
-    int n) {
-  return use->kind() == Symbol::aten(func_name) && v == use->inputs().at(n);
+    c10::optional<int> n) {
+  Node* node = use.user;
+  return node->kind() == Symbol::aten(func_name) &&
+      (!n.has_value() || n.value() == use.offset);
 }
 
 // Check if `use` is a CallFunction of name `func_name` and if value
-// `v` is the nth argument of the function
-bool isCallFunctionNthArg(
-    Value* v,
-    Node* use,
+// `v` is the nth argument (if provided) of the function
+bool matchCallFuncToUse(
+    const Use& use,
     const std::string& func_name,
-    int n) {
-  return use->kind() == prim::CallFunction &&
-      getFuncName(use->inputs()[0]) == func_name && v == use->inputs().at(n);
+    c10::optional<int> n) {
+  Node* node = use.user;
+  return node->kind() == prim::CallFunction &&
+      getFuncName(node->inputs()[0]) == func_name &&
+      (!n.has_value() || n.value() == use.offset);
 }
-
-struct FuncArg {
-  std::string func_name;
-  int arg_index;
-};
-using AtenFuncArgs = std::vector<FuncArg>;
-using CallFuncArgs = std::vector<FuncArg>;
 
 // Check any use of `v` matches the aten function call
 // or CallFunction patterns
@@ -721,14 +812,13 @@ bool matchArgPattern(
     const CallFuncArgs& call_func_args) {
   for (const Use& u : v->uses()) {
     for (const auto& func_arg : aten_func_args) {
-      if (isAtenFuncNthArg(v, u.user, func_arg.func_name, func_arg.arg_index)) {
+      if (matchAtenFuncToUse(u, func_arg.func_name, func_arg.arg_index)) {
         return true;
       }
     }
 
     for (const auto& func_arg : call_func_args) {
-      if (isCallFunctionNthArg(
-              v, u.user, func_arg.func_name, func_arg.arg_index)) {
+      if (matchCallFuncToUse(u, func_arg.func_name, func_arg.arg_index)) {
         return true;
       }
     }
@@ -744,17 +834,45 @@ bool isBiasOfConvOrLinear(Value* v) {
   return result;
 }
 
-bool isWeightOfConvOrLinear(Value* v) {
+bool isWeight(Value* v) {
   bool result = matchArgPattern(
       v,
-      AtenFuncArgs({{"conv2d", 1}, {"conv3d", 1}, {"linear", 1}}),
+      AtenFuncArgs({{"conv2d", 1}, {"conv3d", 1}, {"linear", 1}, {"lstm", 2}}),
       CallFuncArgs({{"linear", 2}}));
   return result;
 }
 
+// Go through the CallMethod graph to check if the value is Weight.
+bool isWeight(Module& module, Value* v) {
+  if (isWeight(v)) {
+    return true;
+  }
+  c10::optional<bool> result;
+  auto* self = v->owningGraph()->inputs()[0];
+  for (const Use& u : v->uses()) {
+    Node* n = u.user;
+    if (n->kind() == prim::CallMethod) {
+      auto m = getInvokedModule(module, n, self);
+      auto g = m.get_method(n->s(attr::name)).graph();
+      auto call_method_result = isWeight(m, g->inputs()[u.offset]);
+      if (result.has_value()) {
+        // Check to make sure all the CallMethods in the graph produce the same
+        // output.
+        TORCH_CHECK(
+            call_method_result == result.value(),
+            "Expected all CallMethods to use either weight "
+            "or non-weight value.",
+            v->debugName());
+      } else {
+        result = call_method_result;
+      }
+    }
+  }
+  return result.has_value() ? result.value() : false;
+}
+
 Module getObserverModuleFor(Value* v, const QConfig& qconfig) {
-  return isWeightOfConvOrLinear(v) ? std::get<1>(qconfig)
-                                   : std::get<0>(qconfig);
+  return isWeight(v) ? std::get<1>(qconfig) : std::get<0>(qconfig);
 }
 
 ModuleMethodVector InsertObserversHelper::getInvokedMethods(
@@ -874,9 +992,8 @@ void InsertObserversHelper::fillPassThroughValueMap(
         auto g = getCallFunctionGraph(n);
         blocks_to_visit.push(g->block());
       }
-      auto inputs = getGeneralOpTensorInputs(n);
-      for (auto* input : inputs) {
-        for (auto* output : n->outputs()) {
+      for (auto* output : n->outputs()) {
+        for (auto* input : getPassThroughInputs(output)) {
           pass_through_value_map_[output].push_back(input);
         }
       }
@@ -970,6 +1087,26 @@ void InsertObserversHelper::preprocess(
   }
 }
 
+bool useQuantizable(const Use& use, bool is_dynamic) {
+  for (const auto& func_input : _observe_inputs_aten_func) {
+    if (matchAtenFuncToUse(use, func_input.func_name, c10::nullopt)) {
+      return use.offset == func_input.arg_index;
+    }
+  }
+
+  for (const auto& func_input : _observe_inputs_call_func) {
+    if (matchCallFuncToUse(use, func_input.func_name, c10::nullopt)) {
+      return use.offset == func_input.arg_index;
+    }
+  }
+  // Dynamic quantized ops that require special handling for inputs.
+  if (is_dynamic && matchAtenFuncToUse(use, "lstm", c10::nullopt)) {
+    return use.offset == 2;
+  }
+
+  return nodeQuantizable(use.user);
+}
+
 // TODO: remove this as a class method
 bool InsertObserversHelper::valueNeedsToBeQuantized(Value* v) {
   if (isBiasOfConvOrLinear(v) ||
@@ -985,9 +1122,9 @@ bool InsertObserversHelper::valueNeedsToBeQuantized(Value* v) {
       return true;
     }
   }
-  // Check whether user is quantizable
+  // Check whether node input value is quantizable
   for (const auto& use : v->uses()) {
-    if (nodeQuantizable(use.user)) {
+    if (useQuantizable(use, is_dynamic)) {
       return true;
     }
   }
@@ -1011,7 +1148,6 @@ void InsertObserversHelper::fillValueObserverMap(
     return;
   }
   auto qconfig = *qconfig_opt;
-
   for (auto* v : graph->inputs()) {
     if (valueNeedsToBeQuantized(v)) {
       observer_for_value_[v] = getObserverModuleFor(v, qconfig);
@@ -1349,45 +1485,77 @@ void insertDeQuantCall(
 }
 
 void insertQuantDeQuantCall(
+    Module& module,
     Value* self,
     Node* observer,
     bool is_per_channel,
-    const std::vector<std::string>& qparam_names) {
+    const std::vector<std::string>& qparam_names,
+    bool is_dynamic = false) {
   Graph* g = observer->owningGraph();
-  // Original value that is observed
-  Value* v = observer->input(1);
-
+  // Observer output
+  Value* v = observer->output();
   // Inserting before insert point
   WithInsertPoint ins(v->node()->next());
-  std::vector<Value*> inputs = {v};
-  // Insert GetAttr nodes for quantization parameters
-  for (const auto& qparam_name : qparam_names) {
-    inputs.push_back(g->insertGetAttr(self, qparam_name));
-  }
+
   std::string quantize_func;
   if (is_per_channel) {
     quantize_func = "quantize_per_channel";
   } else {
     quantize_func = "quantize_per_tensor";
   }
-  Node* quant = g->create(at::Symbol::aten(quantize_func), inputs);
-  quant->output()->setDebugName(v->debugName() + ".quant");
-  g->insertNode(quant);
+  Node *quant, *choose_qparams;
+  if (is_dynamic && !isWeight(module, v)) {
+    std::string choose_qparams_func = "_choose_qparams_per_tensor";
+    auto reduce_range = g->insertConstant(false);
+    // choose_qparams_per_tensor has 2 outputs, (scale, zero_point).
+    choose_qparams = g->create(
+        at::Symbol::aten(choose_qparams_func),
+        {v, reduce_range},
+        /* num_outputs = */ 2);
+
+    choose_qparams->output(0)->setDebugName(v->debugName() + ".scale");
+    choose_qparams->output(0)->setType(FloatType::get());
+    choose_qparams->output(1)->setDebugName(v->debugName() + ".zero_point");
+    choose_qparams->output(1)->setType(IntType::get());
+    g->insertNode(choose_qparams);
+
+    std::vector<Value*> quant_inputs = {v};
+    for (auto& out : choose_qparams->outputs()) {
+      quant_inputs.push_back(out);
+    }
+    // Last argument is dtype.
+    auto dtype = g->insertGetAttr(self, qparam_names.back());
+    quant_inputs.push_back(dtype);
+    quant = g->create(at::Symbol::aten(quantize_func), quant_inputs);
+    quant->output()->setDebugName(v->debugName() + ".quant");
+    g->insertNode(quant);
+  } else {
+    std::vector<Value*> inputs = {v};
+    // Insert GetAttr nodes for quantization parameters
+    for (const auto& qparam_name : qparam_names) {
+      inputs.push_back(g->insertGetAttr(self, qparam_name));
+    }
+    quant = g->create(at::Symbol::aten(quantize_func), inputs);
+    quant->output()->setDebugName(v->debugName() + ".quant");
+    g->insertNode(quant);
+  }
+  Value* original_val = observer->input(1);
+  v->replaceAllUsesWith(original_val);
 
   // two passes to insert the dequant for every usage
-  // in first pass, identify all the nodes using "v"
+  // in first pass, identify all the nodes using original observed value.
   std::vector<Use> uses;
-  for (const auto& use : v->uses()) {
+  for (const auto& use : original_val->uses()) {
     // Skip quant node and observer node (we need to keep
     // observer nodes around since we need them to
     // find the quantization parameters)
-    if (use.user != quant && use.user != observer) {
+    if (use.user != quant && use.user != observer &&
+        use.user != choose_qparams) {
       uses.push_back(use);
     }
   }
-
-  // in second pass, replace the input "v" with dequant output
-  insertDeQuantCall(g, quant->output(), v, uses);
+  // in second pass, replace the original observed value with dequant output
+  insertDeQuantCall(g, quant->output(), original_val, uses);
 }
 
 // find the observer for Value `v` and return the name of the observer
@@ -1461,6 +1629,10 @@ class InsertQuantDeQuantHelper {
   void cleanup(Module& module, Graph* g);
   void quantizeTensors(Module& module, Graph* g, Value* self);
 
+  void setDynamicFlag(bool is_dynamic) {
+    is_dynamic_ = is_dynamic;
+  }
+
  private:
   std::unordered_map<Graph*, std::vector<std::string>>
       observer_modules_to_remove_;
@@ -1481,6 +1653,8 @@ class InsertQuantDeQuantHelper {
   // Record qscheme for every graph, this is for checking
   // each graph is only quantized with one type of QScheme
   std::unordered_map<Graph*, c10::QScheme> qscheme_for_graph_;
+
+  bool is_dynamic_ = false;
 };
 
 void InsertQuantDeQuantHelper::collectObserverNodesAndValueToQuantize(
@@ -1504,8 +1678,6 @@ void InsertQuantDeQuantHelper::collectObserverNodesAndValueToQuantize(
   nodes_to_destroy_[g].push_back(observer);
   // GetAttr node for observer module
   nodes_to_destroy_[g].push_back(observer->inputs()[0]->node());
-  Value* original_value = observer->input(1);
-  v->replaceAllUsesWith(original_value);
   observer_nodes_for_graph_[g].push_back(observer);
 }
 
@@ -1592,7 +1764,8 @@ void InsertQuantDeQuantHelper::quantizeTensors(
       module.register_attribute(qparam_name, qparam.type(), qparam);
       qparam_names.push_back(qparam_name);
     }
-    insertQuantDeQuantCall(self, n, isPerChannel(qscheme), qparam_names);
+    insertQuantDeQuantCall(
+        module, self, n, isPerChannel(qscheme), qparam_names, is_dynamic_);
   }
 }
 
@@ -2339,33 +2512,33 @@ void swapDeQuant(Block* block) {
         continue;
       }
     }
-    auto inputs = getGeneralOpTensorInputs(n);
-    if (inputs.size() > 0) {
-      bool is_dequantized = true;
-      for (auto* input : inputs) {
-        // note that we don't need to recursively check for prim::If
-        // here because if all inputs of a prim::If is dequantized
-        // the dequantize will be factored out before we get to this
-        // point
-        is_dequantized &= input->node()->kind() == Symbol::aten("dequantize");
-      }
-      if (!is_dequantized) {
-        continue;
-      }
-      // Delete dequantize node, we have one dequantize
-      // for each use of the value
-      for (auto* dequantized_val : inputs) {
-        auto* dequantize_node = dequantized_val->node();
-        TORCH_INTERNAL_ASSERT(
-            dequantized_val->uses().size() == 1,
-            "Expect to have one dequantize node for each use");
-        // Replace useses of dequantized_val with the input of
-        // dequantize node
-        dequantized_val->replaceAllUsesWith(dequantize_node->inputs()[0]);
-        dequantize_node->removeAllInputs();
-        dequantize_node->destroy();
-      }
-      for (auto* output : n->outputs()) {
+    for (auto* output : n->outputs()) {
+      auto inputs = getPassThroughInputs(output);
+      if (inputs.size() > 0) {
+        bool is_dequantized = true;
+        for (auto* input : inputs) {
+          // note that we don't need to recursively check for prim::If
+          // here because if all inputs of a prim::If is dequantized
+          // the dequantize will be factored out before we get to this
+          // point
+          is_dequantized &= input->node()->kind() == Symbol::aten("dequantize");
+        }
+        if (!is_dequantized) {
+          continue;
+        }
+        // Delete dequantize node, we have one dequantize
+        // for each use of the value
+        for (auto* dequantized_val : inputs) {
+          auto* dequantize_node = dequantized_val->node();
+          TORCH_INTERNAL_ASSERT(
+              dequantized_val->uses().size() == 1,
+              "Expect to have one dequantize node for each use");
+          // Replace useses of dequantized_val with the input of
+          // dequantize node
+          dequantized_val->replaceAllUsesWith(dequantize_node->inputs()[0]);
+          dequantize_node->removeAllInputs();
+          dequantize_node->destroy();
+        }
         std::vector<Use> uses = output->uses();
         // Insert new dequantize node for each use of the output
         insertDeQuantCall(graph, output, output, uses);
@@ -2401,9 +2574,11 @@ TORCH_API Module InsertObservers(
 Module InsertQuantDeQuant(
     Module& input_module,
     const std::string& method_name,
-    bool inplace) {
+    bool inplace,
+    bool is_dynamic) {
   Module module = inplace ? input_module : input_module.clone();
   InsertQuantDeQuantHelper h;
+  h.setDynamicFlag(is_dynamic);
   h.run(module, method_name);
   h.cleanup(module);
   return module;
@@ -2539,8 +2714,14 @@ void SwapDeQuant(std::shared_ptr<Graph>& graph) {
   swapDeQuant(graph->block());
 }
 
-void QuantFusion(std::shared_ptr<Graph>& graph) {
-  for (const auto& info : quant_fusion_pattern_and_replacements()) {
+void QuantFusion(std::shared_ptr<Graph>& graph, bool is_dynamic) {
+  std::vector<QuantFusionInfo> patterns;
+  if (is_dynamic) {
+    patterns = dynamic_quant_fusion_pattern_and_replacements();
+  } else {
+    patterns = quant_fusion_pattern_and_replacements();
+  }
+  for (const auto& info : patterns) {
     SubgraphRewriter rewriter;
     rewriter.RegisterRewritePattern(info.pattern, info.replacement);
     rewriter.runOnGraph(graph, info.filter);
@@ -2828,7 +3009,7 @@ void FoldQuantizedPrepackingOps(Module& module) {
   PrePackingOpsFolder(module, filter_fn, "quantized");
 }
 
-script::Module Finalize(script::Module& module) {
+script::Module Finalize(script::Module& module, bool is_dynamic) {
   SwapFunctionalLinear(module);
   auto graph = module.get_method("forward").graph();
   Inline(*graph);
@@ -2838,7 +3019,7 @@ script::Module Finalize(script::Module& module) {
   SwapDeQuant(graph);
   InsertPrepackUnpack(graph);
   ConstantPropagation(graph);
-  QuantFusion(graph);
+  QuantFusion(graph, is_dynamic);
   auto frozen = freeze_module(module);
   FoldQuantizedPrepackingOps(frozen);
   return frozen;

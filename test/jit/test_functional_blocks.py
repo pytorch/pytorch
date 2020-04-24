@@ -16,7 +16,7 @@ if __name__ == '__main__':
                        "instead.")
 
 class TestFunctionalBlocks(JitTestCase):
-    def test_simple_no_merge(self):
+    def test_subgraph_creation(self):
         def fn(x, y, z):
             x = x + 1
             y = y + 1
@@ -38,8 +38,8 @@ class TestFunctionalBlocks(JitTestCase):
         # Don't allow any outputs which escape scope, so there is one final addition in the graph
         FileCheck().check("Tensor = prim::Functional").check_next("aten::add").run(graph)
 
-        # z + 1, z.add_(2) z * z considered non functional
-        FileCheck().check("add").check("add_").check("mul").check("FunctionalGraph").run(graph)
+        # z + 1, z.add_(2) considered non functional, z = z * z should be considered functional
+        FileCheck().check("add").check("add_").check_not("mul").check("FunctionalGraph").run(graph)
 
     def test_lower_linear(self):
         # linear is one of main use cases of removing mutation so add test so it doesnt regress
