@@ -247,6 +247,27 @@ class AnnotatedConvBnModel(torch.nn.Module):
         x = self.dequant(x)
         return x
 
+class AnnotatedConvBnReLUModel(torch.nn.Module):
+    def __init__(self):
+        super(AnnotatedConvBnReLUModel, self).__init__()
+        self.qconfig = default_qconfig
+        self.conv = torch.nn.Conv2d(3, 5, 3, bias=False).to(dtype=torch.float)
+        self.bn = torch.nn.BatchNorm2d(5).to(dtype=torch.float)
+        self.relu = nn.ReLU(inplace=True)
+        self.quant = QuantStub()
+        self.dequant = DeQuantStub()
+
+    def forward(self, x):
+        x = self.quant(x)
+        x = self.conv(x)
+        x = self.bn(x)
+        x = self.relu(x)
+        x = self.dequant(x)
+        return x
+
+    def fuse_model(self):
+        torch.quantization.fuse_modules(self, [['conv', 'bn', 'relu']], inplace=True)
+
 class TwoLayerLinearModel(torch.nn.Module):
     def __init__(self):
         super().__init__()
