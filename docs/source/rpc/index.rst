@@ -8,7 +8,7 @@ The distributed RPC framework provides mechanisms for multi-machine model traini
 -  :ref:`distributed-rpc-framework`
 
 Design Notes
------------
+------------
 The distributed autograd design note covers the design of the RPC-based distributed autograd framework that is useful for applications such as model parallel training.
 
 -  :ref:`distributed-autograd-design`

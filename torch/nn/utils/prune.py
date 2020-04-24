@@ -44,9 +44,9 @@ class BasePruningMethod(ABC):
 
         Args:
             t (torch.Tensor): tensor representing the parameter to prune
-            default_mask (torch.Tensor): Base mask from previous pruning 
-                iterations, that need to be respected after the new mask is 
-                applied. Same dims as ``t``.
+            default_mask (torch.Tensor): Base mask from previous pruning
+            iterations, that need to be respected after the new mask is
+            applied. Same dims as ``t``.
 
         Returns:
             mask (torch.Tensor): mask to apply to ``t``, of same dims as ``t``
@@ -89,7 +89,7 @@ class BasePruningMethod(ABC):
                 will act.
             args: arguments passed on to a subclass of
                 :class:`BasePruningMethod`
-            kwargs: keyword arguments passed on to a subclass of a 
+            kwargs: keyword arguments passed on to a subclass of a
                 :class:`BasePruningMethod`
         """
 
@@ -156,7 +156,7 @@ class BasePruningMethod(ABC):
         # pruning
         orig = getattr(module, name)
 
-        # If this is the first time pruning is applied, take care of moving 
+        # If this is the first time pruning is applied, take care of moving
         # the original tensor to a new parameter called name + '_orig' and
         # and deleting the original parameter
         if not isinstance(method, PruningContainer):
@@ -171,7 +171,7 @@ class BasePruningMethod(ABC):
         else:
             default_mask = getattr(module, name + "_mask").detach().clone(memory_format=torch.contiguous_format)
 
-        # Use try/except because if anything goes wrong with the mask 
+        # Use try/except because if anything goes wrong with the mask
         # computation etc., you'd want to roll back.
         try:
             # get the final mask, computed according to the specific method
@@ -198,7 +198,7 @@ class BasePruningMethod(ABC):
         according to the pruning rule specified in :meth:`compute_mask`.
 
         Args:
-            t (torch.Tensor): tensor to prune (of same dimensions as 
+            t (torch.Tensor): tensor to prune (of same dimensions as
                 ``default_mask``).
             default_mask (torch.Tensor, optional): mask from previous pruning
                 iteration, if any. To be considered when determining what
@@ -218,7 +218,7 @@ class BasePruningMethod(ABC):
         named ``name+'_orig'`` is removed from the parameter list. Similarly,
         the buffer named ``name+'_mask'`` is removed from the buffers.
 
-        Note: 
+        Note:
             Pruning itself is NOT undone or reversed!
         """
         # before removing pruning from a tensor, it has to have been applied
@@ -246,8 +246,8 @@ class PruningContainer(BasePruningMethod):
     Keeps track of the order in which pruning methods are applied and handles
     combining successive pruning calls.
 
-    Accepts as argument an instance of a BasePruningMethod or an iterable of 
-    them. 
+    Accepts as argument an instance of a BasePruningMethod or an iterable of
+    them.
     """
 
     def __init__(self, *args):
@@ -295,13 +295,13 @@ class PruningContainer(BasePruningMethod):
         return self._pruning_methods[idx]
 
     def compute_mask(self, t, default_mask):
-        r"""Applies the latest ``method`` by computing the new partial masks 
+        r"""Applies the latest ``method`` by computing the new partial masks
         and returning its combination with the ``default_mask``.
         The new partial mask should be computed on the entries or channels
-        that were not zeroed out by the ``default_mask``. 
-        Which portions of the tensor ``t`` the new mask will be calculated from 
+        that were not zeroed out by the ``default_mask``.
+        Which portions of the tensor ``t`` the new mask will be calculated from
         depends on the ``PRUNING_TYPE`` (handled by the type handler):
-            * for 'unstructured', the mask will be computed from the raveled 
+            * for 'unstructured', the mask will be computed from the raveled
             list of nonmasked entries;
 
             * for 'structured', the mask will be computed from the nonmasked
@@ -331,7 +331,7 @@ class PruningContainer(BasePruningMethod):
 
             Returns:
                 new_mask (torch.Tensor): new mask that combines the effects
-                    of the old mask and the new mask from the current 
+                    of the old mask and the new mask from the current
                     pruning method (of same dimensions as mask and t).
             """
             new_mask = mask  # start off from existing mask
@@ -425,7 +425,7 @@ class RandomUnstructured(BasePruningMethod):
             will act.
         amount (int or float): quantity of parameters to prune.
             If ``float``, should be between 0.0 and 1.0 and represent the
-            fraction of parameters to prune. If ``int``, it represents the 
+            fraction of parameters to prune. If ``int``, it represents the
             absolute number of parameters to prune.
     """
 
@@ -468,7 +468,7 @@ class RandomUnstructured(BasePruningMethod):
                 will act.
             amount (int or float): quantity of parameters to prune.
                 If ``float``, should be between 0.0 and 1.0 and represent the
-                fraction of parameters to prune. If ``int``, it represents the 
+                fraction of parameters to prune. If ``int``, it represents the
                 absolute number of parameters to prune.
         """
         return super(RandomUnstructured, cls).apply(
@@ -477,13 +477,13 @@ class RandomUnstructured(BasePruningMethod):
 
 
 class L1Unstructured(BasePruningMethod):
-    r"""Prune (currently unpruned) units in a tensor by zeroing out the ones 
+    r"""Prune (currently unpruned) units in a tensor by zeroing out the ones
     with the lowest L1-norm.
 
     Args:
         amount (int or float): quantity of parameters to prune.
             If ``float``, should be between 0.0 and 1.0 and represent the
-            fraction of parameters to prune. If ``int``, it represents the 
+            fraction of parameters to prune. If ``int``, it represents the
             absolute number of parameters to prune.
     """
 
@@ -530,7 +530,7 @@ class L1Unstructured(BasePruningMethod):
                 will act.
             amount (int or float): quantity of parameters to prune.
                 If ``float``, should be between 0.0 and 1.0 and represent the
-                fraction of parameters to prune. If ``int``, it represents the 
+                fraction of parameters to prune. If ``int``, it represents the
                 absolute number of parameters to prune.
         """
         return super(L1Unstructured, cls).apply(module, name, amount=amount)
@@ -542,7 +542,7 @@ class RandomStructured(BasePruningMethod):
     Args:
         amount (int or float): quantity of parameters to prune.
             If ``float``, should be between 0.0 and 1.0 and represent the
-            fraction of parameters to prune. If ``int``, it represents the 
+            fraction of parameters to prune. If ``int``, it represents the
             absolute number of parameters to prune.
         dim (int, optional): index of the dim along which we define
             channels to prune. Default: -1.
@@ -559,14 +559,14 @@ class RandomStructured(BasePruningMethod):
     def compute_mask(self, t, default_mask):
         r"""Computes and returns a mask for the input tensor ``t``.
         Starting from a base ``default_mask`` (which should be a mask of ones
-        if the tensor has not been pruned yet), generate a random mask to 
+        if the tensor has not been pruned yet), generate a random mask to
         apply on top of the ``default_mask`` by randomly zeroing out channels
         along the specified dim of the tensor.
 
         Args:
             t (torch.Tensor): tensor representing the parameter to prune
-            default_mask (torch.Tensor): Base mask from previous pruning 
-                iterations, that need to be respected after the new mask is 
+            default_mask (torch.Tensor): Base mask from previous pruning
+                iterations, that need to be respected after the new mask is
                 applied. Same dims as ``t``.
 
         Returns:
@@ -613,7 +613,7 @@ class RandomStructured(BasePruningMethod):
         if nparams_toprune == 0:  # k=0 not supported by torch.kthvalue
             mask = default_mask
         else:
-            # apply the new structured mask on top of prior (potentially 
+            # apply the new structured mask on top of prior (potentially
             # unstructured) mask
             mask = make_mask(t, self.dim, tensor_size, nparams_toprune)
             mask *= default_mask.to(dtype=mask.dtype)
@@ -631,7 +631,7 @@ class RandomStructured(BasePruningMethod):
                 will act.
             amount (int or float): quantity of parameters to prune.
                 If ``float``, should be between 0.0 and 1.0 and represent the
-                fraction of parameters to prune. If ``int``, it represents the 
+                fraction of parameters to prune. If ``int``, it represents the
                 absolute number of parameters to prune.
             dim (int, optional): index of the dim along which we define
                 channels to prune. Default: -1.
@@ -648,7 +648,7 @@ class LnStructured(BasePruningMethod):
     Args:
         amount (int or float): quantity of channels to prune.
             If ``float``, should be between 0.0 and 1.0 and represent the
-            fraction of parameters to prune. If ``int``, it represents the 
+            fraction of parameters to prune. If ``int``, it represents the
             absolute number of parameters to prune.
         n (int, float, inf, -inf, 'fro', 'nuc'): See documentation of valid
             entries for argument ``p`` in :func:`torch.norm`.
@@ -674,8 +674,8 @@ class LnStructured(BasePruningMethod):
 
         Args:
             t (torch.Tensor): tensor representing the parameter to prune
-            default_mask (torch.Tensor): Base mask from previous pruning 
-                iterations, that need to be respected after the new mask is 
+            default_mask (torch.Tensor): Base mask from previous pruning
+                iterations, that need to be respected after the new mask is
                 applied.  Same dims as ``t``.
 
         Returns:
@@ -750,7 +750,7 @@ class LnStructured(BasePruningMethod):
                 will act.
             amount (int or float): quantity of parameters to prune.
                 If ``float``, should be between 0.0 and 1.0 and represent the
-                fraction of parameters to prune. If ``int``, it represents the 
+                fraction of parameters to prune. If ``int``, it represents the
                 absolute number of parameters to prune.
             n (int, float, inf, -inf, 'fro', 'nuc'): See documentation of valid
                 entries for argument ``p`` in :func:`torch.norm`.
@@ -826,10 +826,10 @@ def random_unstructured(module, name, amount):
     by removing the specified ``amount`` of (currently unpruned) units
     selected at random.
     Modifies module in place (and also return the modified module) by:
-    1) adding a named buffer called ``name+'_mask'`` corresponding to the 
+    1) adding a named buffer called ``name+'_mask'`` corresponding to the
     binary mask applied to the parameter `name` by the pruning method.
     2) replacing the parameter ``name`` by its pruned version, while the
-    original (unpruned) parameter is stored in a new parameter named 
+    original (unpruned) parameter is stored in a new parameter named
     ``name+'_orig'``.
 
     Args:
@@ -838,7 +838,7 @@ def random_unstructured(module, name, amount):
                 will act.
         amount (int or float): quantity of parameters to prune.
             If ``float``, should be between 0.0 and 1.0 and represent the
-            fraction of parameters to prune. If ``int``, it represents the 
+            fraction of parameters to prune. If ``int``, it represents the
             absolute number of parameters to prune.
 
     Returns:
@@ -858,12 +858,12 @@ def l1_unstructured(module, name, amount):
     r"""Prunes tensor corresponding to parameter called ``name`` in ``module``
     by removing the specified `amount` of (currently unpruned) units with the
     lowest L1-norm.
-    Modifies module in place (and also return the modified module) 
+    Modifies module in place (and also return the modified module)
     by:
-    1) adding a named buffer called ``name+'_mask'`` corresponding to the 
+    1) adding a named buffer called ``name+'_mask'`` corresponding to the
     binary mask applied to the parameter ``name`` by the pruning method.
-    2) replacing the parameter ``name`` by its pruned version, while the 
-    original (unpruned) parameter is stored in a new parameter named 
+    2) replacing the parameter ``name`` by its pruned version, while the
+    original (unpruned) parameter is stored in a new parameter named
     ``name+'_orig'``.
 
     Args:
@@ -872,7 +872,7 @@ def l1_unstructured(module, name, amount):
                 will act.
         amount (int or float): quantity of parameters to prune.
             If ``float``, should be between 0.0 and 1.0 and represent the
-            fraction of parameters to prune. If ``int``, it represents the 
+            fraction of parameters to prune. If ``int``, it represents the
             absolute number of parameters to prune.
 
     Returns:
@@ -891,12 +891,12 @@ def random_structured(module, name, amount, dim):
     r"""Prunes tensor corresponding to parameter called ``name`` in ``module``
     by removing the specified ``amount`` of (currently unpruned) channels
     along the specified ``dim`` selected at random.
-    Modifies module in place (and also return the modified module) 
+    Modifies module in place (and also return the modified module)
     by:
-    1) adding a named buffer called ``name+'_mask'`` corresponding to the 
+    1) adding a named buffer called ``name+'_mask'`` corresponding to the
     binary mask applied to the parameter ``name`` by the pruning method.
-    2) replacing the parameter ``name`` by its pruned version, while the 
-    original (unpruned) parameter is stored in a new parameter named 
+    2) replacing the parameter ``name`` by its pruned version, while the
+    original (unpruned) parameter is stored in a new parameter named
     ``name+'_orig'``.
 
     Args:
@@ -905,7 +905,7 @@ def random_structured(module, name, amount, dim):
                 will act.
         amount (int or float): quantity of parameters to prune.
             If ``float``, should be between 0.0 and 1.0 and represent the
-            fraction of parameters to prune. If ``int``, it represents the 
+            fraction of parameters to prune. If ``int``, it represents the
             absolute number of parameters to prune.
         dim (int): index of the dim along which we define channels to prune.
 
@@ -928,12 +928,12 @@ def ln_structured(module, name, amount, n, dim):
     r"""Prunes tensor corresponding to parameter called ``name`` in ``module``
     by removing the specified ``amount`` of (currently unpruned) channels
     along the specified ``dim`` with the lowest L``n``-norm.
-    Modifies module in place (and also return the modified module) 
+    Modifies module in place (and also return the modified module)
     by:
-    1) adding a named buffer called ``name+'_mask'`` corresponding to the 
+    1) adding a named buffer called ``name+'_mask'`` corresponding to the
     binary mask applied to the parameter ``name`` by the pruning method.
     2) replacing the parameter ``name`` by its pruned version, while the
-    original (unpruned) parameter is stored in a new parameter named 
+    original (unpruned) parameter is stored in a new parameter named
     ``name+'_orig'``.
 
     Args:
@@ -942,7 +942,7 @@ def ln_structured(module, name, amount, n, dim):
                 will act.
         amount (int or float): quantity of parameters to prune.
             If ``float``, should be between 0.0 and 1.0 and represent the
-            fraction of parameters to prune. If ``int``, it represents the 
+            fraction of parameters to prune. If ``int``, it represents the
             absolute number of parameters to prune.
         n (int, float, inf, -inf, 'fro', 'nuc'): See documentation of valid
             entries for argument ``p`` in :func:`torch.norm`.
@@ -965,10 +965,10 @@ def global_unstructured(parameters, pruning_method, **kwargs):
     Globally prunes tensors corresponding to all parameters in ``parameters``
     by applying the specified ``pruning_method``.
     Modifies modules in place by:
-    1) adding a named buffer called ``name+'_mask'`` corresponding to the 
+    1) adding a named buffer called ``name+'_mask'`` corresponding to the
     binary mask applied to the parameter ``name`` by the pruning method.
     2) replacing the parameter ``name`` by its pruned version, while the
-    original (unpruned) parameter is stored in a new parameter named 
+    original (unpruned) parameter is stored in a new parameter named
     ``name+'_orig'``.
 
     Args:
@@ -976,22 +976,22 @@ def global_unstructured(parameters, pruning_method, **kwargs):
             the model to prune in a global fashion, i.e. by aggregating all
             weights prior to deciding which ones to prune. module must be of
             type :class:`nn.Module`, and name must be a string.
-        pruning_method (function): a valid pruning function from this module, 
-            or a custom one implemented by the user that satisfies the 
+        pruning_method (function): a valid pruning function from this module,
+            or a custom one implemented by the user that satisfies the
             implementation guidelines and has ``PRUNING_TYPE='unstructured'``.
         kwargs: other keyword arguments such as:
-            amount (int or float): quantity of parameters to prune across the 
+            amount (int or float): quantity of parameters to prune across the
             specified parameters.
             If ``float``, should be between 0.0 and 1.0 and represent the
-            fraction of parameters to prune. If ``int``, it represents the 
+            fraction of parameters to prune. If ``int``, it represents the
             absolute number of parameters to prune.
 
     Raises:
         TypeError: if ``PRUNING_TYPE != 'unstructured'``
 
     Note:
-        Since global structured pruning doesn't make much sense unless the 
-        norm is normalized by the size of the parameter, we now limit the 
+        Since global structured pruning doesn't make much sense unless the
+        norm is normalized by the size of the parameter, we now limit the
         scope of global pruning to unstructured methods.
 
     Examples:
@@ -1068,12 +1068,12 @@ def global_unstructured(parameters, pruning_method, **kwargs):
 def custom_from_mask(module, name, mask):
     r"""Prunes tensor corresponding to parameter called ``name`` in ``module``
     by applying the pre-computed mask in ``mask``.
-    Modifies module in place (and also return the modified module) 
+    Modifies module in place (and also return the modified module)
     by:
-    1) adding a named buffer called ``name+'_mask'`` corresponding to the 
+    1) adding a named buffer called ``name+'_mask'`` corresponding to the
     binary mask applied to the parameter ``name`` by the pruning method.
     2) replacing the parameter ``name`` by its pruned version, while the
-    original (unpruned) parameter is stored in a new parameter named 
+    original (unpruned) parameter is stored in a new parameter named
     ``name+'_orig'``.
 
     Args:
@@ -1083,7 +1083,7 @@ def custom_from_mask(module, name, mask):
         mask (Tensor): binary mask to be applied to the parameter.
 
     Returns:
-        module (nn.Module): modified (i.e. pruned) version of the input module 
+        module (nn.Module): modified (i.e. pruned) version of the input module
 
     Examples:
         >>> m = prune.custom_from_mask(
@@ -1104,7 +1104,7 @@ def remove(module, name):
     named ``name+'_orig'`` is removed from the parameter list. Similarly,
     the buffer named ``name+'_mask'`` is removed from the buffers.
 
-    Note: 
+    Note:
         Pruning itself is NOT undone or reversed!
 
     Args:
@@ -1160,12 +1160,12 @@ def _validate_pruning_amount_init(amount):
     Args:
         amount (int or float): quantity of parameters to prune.
             If float, should be between 0.0 and 1.0 and represent the
-            fraction of parameters to prune. If int, it represents the 
+            fraction of parameters to prune. If int, it represents the
             absolute number of parameters to prune.
 
     Raises:
         ValueError: if amount is a float not in [0, 1], or if it's a negative
-            integer. 
+            integer.
         TypeError: if amount is neither a float nor an integer.
 
     Note:
@@ -1196,7 +1196,7 @@ def _validate_pruning_amount(amount, tensor_size):
     Args:
         amount (int or float): quantity of parameters to prune.
             If float, should be between 0.0 and 1.0 and represent the
-            fraction of parameters to prune. If int, it represents the 
+            fraction of parameters to prune. If int, it represents the
             absolute number of parameters to prune.
         tensor_size (int): absolute number of parameters in the tensor
             to prune.
@@ -1232,7 +1232,7 @@ def _validate_structured_pruning(t):
 
 
 def _compute_nparams_toprune(amount, tensor_size):
-    r"""Since amount can be expressed either in absolute value or as a 
+    r"""Since amount can be expressed either in absolute value or as a
     percentage of the number of units/channels in a tensor, this utility
     function converts the percentage to absolute value to standardize
     the handling of pruning.
@@ -1240,7 +1240,7 @@ def _compute_nparams_toprune(amount, tensor_size):
     Args:
         amount (int or float): quantity of parameters to prune.
             If float, should be between 0.0 and 1.0 and represent the
-            fraction of parameters to prune. If int, it represents the 
+            fraction of parameters to prune. If int, it represents the
             absolute number of parameters to prune.
         tensor_size (int): absolute number of parameters in the tensor
             to prune.
@@ -1268,10 +1268,10 @@ def _validate_pruning_dim(t, dim):
 
 
 def _compute_norm(t, n, dim):
-    r"""Compute the L_n-norm across all entries in tensor `t` along all dimension 
+    r"""Compute the L_n-norm across all entries in tensor `t` along all dimension
     except for the one identified by dim.
     Example: if `t` is of shape, say, 3x2x4 and dim=2 (the last dim),
-    then norm will have Size [4], and each entry will represent the 
+    then norm will have Size [4], and each entry will represent the
     `L_n`-norm computed using the 3x2=6 entries for each of the 4 channels.
 
     Args:

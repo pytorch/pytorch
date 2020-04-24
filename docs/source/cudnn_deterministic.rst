@@ -6,3 +6,5 @@
     a performance cost) by setting ``torch.backends.cudnn.deterministic =
     True``.
     Please see the notes on :doc:`/notes/randomness` for background.
+
+_link: https://github.com/vdumoulin/conv_arithmetic/blob/master/README.md

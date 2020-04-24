@@ -215,7 +215,7 @@ def vjp(func, inputs, v=None, create_graph=False, strict=False):
         vjp (tuple of Tensors or Tensor): result of the dot product with the same shape
             as the inputs.
 
-    Example::
+    Example:
 
         >>> def exp_reducer(x):
         ...   return x.exp().sum(dim=1)
@@ -297,7 +297,7 @@ def jvp(func, inputs, v=None, create_graph=False, strict=False):
         jvp (tuple of Tensors or Tensor): result of the dot product with the same shape
             as the output.
 
-    Example::
+    Example:
 
         >>> def exp_reducer(x):
         ...   return x.exp().sum(dim=1)
@@ -319,7 +319,7 @@ def jvp(func, inputs, v=None, create_graph=False, strict=False):
         (tensor([2.2399, 2.5005]),
          tensor([5., 5.]))
 
-    Note::
+    Note:
 
         The jvp is currently computed by using the backward of the backward (sometimes called the double
         backwards trick) as we don't have support for forward mode AD in PyTorch at the moment.
@@ -380,10 +380,10 @@ def jacobian(func, inputs, create_graph=False, strict=False):
             linearized inputs and output. If one of the two is a tuple, then the Jacobian
             will be a tuple of Tensors. If both of them are tuples, then the Jacobian will
             be a tuple of tuple of Tensors where ``Jacobian[i][j]`` will contain the Jacobian
-            of the ``i``th output and ``j``th input and will have as size the concatenation of the
+            of the ``i``\th output and ``j``\th input and will have as size the concatenation of the
             sizes of the corresponding output and the corresponding input.
 
-    Example::
+    Example:
 
         >>> def exp_reducer(x):
         ...   return x.exp().sum(dim=1)
@@ -466,11 +466,11 @@ def hessian(func, inputs, create_graph=False, strict=False):
         Hessian (Tensor or a tuple of tuple of Tensors) if there are a single input,
             this will be a single Tensor containing the Hessian for the input.
             If it is a tuple, then the Hessian will be a tuple of tuples where
-            ``Hessian[i][j]`` will contain the Hessian of the ``i``th input
-            and ``j``th input with size the sum of the size of the ``i``th input plus
-            the size of the ``j``th input.
+            ``Hessian[i][j]`` will contain the Hessian of the ``i``\th input
+            and ``j``\th input with size the sum of the size of the ``i``\th input plus
+            the size of the ``j``\th input.
 
-    Example::
+    Example:
 
         >>> def pow_reducer(x):
         ...   return x.pow(3).sum()
@@ -568,7 +568,7 @@ def vhp(func, inputs, v=None, create_graph=False, strict=False):
         vhp (tuple of Tensors or Tensor): result of the dot product with the same shape
             as the inputs.
 
-    Example::
+    Example:
 
         >>> def pow_reducer(x):
         ...   return x.pow(3).sum()
@@ -657,7 +657,7 @@ def hvp(func, inputs, v=None, create_graph=False, strict=False):
         hvp (tuple of Tensors or Tensor): result of the dot product with the same shape
             as the inputs.
 
-    Example::
+    Example:
 
         >>> def pow_reducer(x):
         ...   return x.pow(3).sum()
@@ -683,7 +683,7 @@ def hvp(func, inputs, v=None, create_graph=False, strict=False):
          (tensor([0., 0.]),
           tensor([6., 6.])))
 
-    Note::
+    Note:
 
         This function is significantly slower than `vhp` due to backward mode AD constraints.
         If your functions is twice continuously differentiable, then hvp = vhp.t(). So if you

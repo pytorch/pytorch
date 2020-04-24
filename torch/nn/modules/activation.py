@@ -515,8 +515,8 @@ class GLU(Module):
 class GELU(Module):
     r"""Applies the Gaussian Error Linear Units function:
 
-    .. math::
-        \text{GELU}(x) = x * \Phi(x)
+    .. math:: \text{GELU}(x) = x * \Phi(x)
+
     where :math:`\Phi(x)` is the Cumulative Distribution Function for Gaussian Distribution.
 
     Shape:

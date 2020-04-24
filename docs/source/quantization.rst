@@ -1,7 +1,7 @@
 .. _quantization-doc:
 
 Quantization
-===========================
+============
 
 Introduction to Quantization
 ----------------------------
@@ -158,7 +158,7 @@ Operations that are available from the ``torch`` namespace or as methods on Tens
 * :meth:`~torch.Tensor.topk` — Returns k largest values of a tensor
 
 ``torch.nn.functional``
-~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~
 
 Basic activations are supported.
 
@@ -450,7 +450,7 @@ Utility functions
 
 Observers
 ~~~~~~~~~~~~~~~
-.. autoclass:: Observer
+.. autoclass:: ObserverBase
     :members:
 .. autoclass:: MinMaxObserver
 .. autoclass:: MovingAverageMinMaxObserver

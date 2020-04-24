@@ -2232,7 +2232,8 @@ def poisson_nll_loss(input, target, log_input=True, full=False, size_average=Non
 
 def kl_div(input, target, size_average=None, reduce=None, reduction='mean', log_target=False):
     # type: (Tensor, Tensor, Optional[bool], Optional[bool], str, bool) -> Tensor
-    r"""The `Kullback-Leibler divergence`_ Loss.
+    r"""The `Kullback-Leibler divergence Loss
+    <https://en.wikipedia.org/wiki/Kullback-Leibler_divergence>__
 
     See :class:`~torch.nn.KLDivLoss` for details.
 
@@ -2268,9 +2269,6 @@ def kl_div(input, target, size_average=None, reduce=None, reduction='mean', log_
         :attr:``reduction`` = ``'mean'`` doesn't return the true kl divergence value, please use
         :attr:``reduction`` = ``'batchmean'`` which aligns with KL math definition.
         In the next major release, ``'mean'`` will be changed to be the same as 'batchmean'.
-
-    .. _Kullback-Leibler divergence:
-        https://en.wikipedia.org/wiki/Kullback-Leibler_divergence
     """
     if not torch.jit.is_scripting():
         tens_ops = (input, target)
