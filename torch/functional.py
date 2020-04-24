@@ -1,10 +1,11 @@
+from typing import Tuple, Optional
+
 import torch
 import torch.nn.functional as F
 from ._lowrank import svd_lowrank, pca_lowrank
 from ._overrides import has_torch_function, handle_torch_function
 from ._jit_internal import boolean_dispatch, List
 from ._jit_internal import _overload as overload
-from torch._six import PY2
 
 Tensor = torch.Tensor
 from torch import _VF
@@ -236,6 +237,12 @@ Args:
            Ellipses `...` represent a fixed number of dimensions. If the right hand side is inferred,
            the ellipsis dimensions are at the beginning of the output.
     operands (Tensor): The operands to compute the Einstein sum of.
+
+.. note::
+
+    This function does not optimize the given expression, so a different formula for the same computation may
+    run faster or consume less memory. Projects like opt_einsum (https://optimized-einsum.readthedocs.io/en/stable/)
+    can optimize the formula for you.
 
 Examples::
 
@@ -856,9 +863,6 @@ def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):  # noqa
         if type(input) is not Tensor and has_torch_function((input,)):
             return handle_torch_function(
                 norm, (input,), input, p=p, dim=dim, keepdim=keepdim, out=out, dtype=dtype)
-        # py2 considers isinstance(unicodestr, str) == False
-        if PY2 and isinstance(p, unicode):
-            p = str(p)
 
     ndim = input.dim()
 
