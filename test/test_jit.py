@@ -5236,6 +5236,13 @@ def foo(xyz):
                 return x
         self.getExportImportCopy(C())
 
+    def test_serialize_long_lines(self):
+        class OrderModuleLong(torch.nn.Module):
+            def forward(self, long_arg_name: List[torch.Tensor]):
+                return [(long_arg_name[1],), (long_arg_name[0].argmax(),)]
+        src = str(torch.jit.script(OrderModuleLong()).code)
+        # make long_arg_name[1] does not get reordered after the argmax
+        FileCheck().check("long_arg_name[1]").check("argmax").run(src)
 
     def test_tensor_shape(self):
         x = torch.empty(34, 56, 78)
@@ -10019,12 +10026,19 @@ a")
 
     @unittest.skipIf(not TEST_MKL, "PyTorch is built without MKL support")
     def test_torch_functional(self):
-        def foo(input, n_fft):
+        def stft(input, n_fft):
             # type: (Tensor, int) -> Tensor
             return torch.stft(input, n_fft)
 
         inps = (torch.randn(10), 7)
-        self.assertEqual(foo(*inps), torch.jit.script(foo)(*inps))
+        self.assertEqual(stft(*inps), torch.jit.script(stft)(*inps))
+
+        def istft(input, n_fft):
+            # type: (Tensor, int) -> Tensor
+            return torch.istft(input, n_fft)
+
+        inps2 = (torch.stft(*inps), inps[1])
+        self.assertEqual(torch.istft(*inps2), torch.jit.script(torch.istft)(*inps2))
 
         def lu(x):
             # type: (Tensor) -> Tuple[Tensor, Tensor]
