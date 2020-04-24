@@ -76,7 +76,6 @@ class TestCppExtensionAOT(common.TestCase):
         # `True`. This *should* mean that on Python 3, the produced shared
         # library does not have an ABI suffix like
         # "cpython-37m-x86_64-linux-gnu" before the library suffix, e.g. "so".
-        # On Python 2 there is no ABI suffix anyway.
         root = os.path.join("cpp_extensions", "no_python_abi_suffix_test", "build")
         matches = [f for _, _, fs in os.walk(root) for f in fs if f.endswith("so")]
         self.assertEqual(len(matches), 1, str(matches))
