@@ -64,7 +64,10 @@ class SobolEngine(object):
                 g = None
 
             shift_ints = torch.randint(2, (self.dimension, self.MAXBIT), device=cpu, generator=g)
+            print(shift_ints)
+            print(shift_ints.dtype)
             self.shift = torch.mv(shift_ints, torch.pow(2, torch.arange(0, self.MAXBIT, device=cpu)))
+            print('done torch.mv')
 
             ltm_dims = (self.dimension, self.MAXBIT, self.MAXBIT)
             ltm = torch.randint(2, ltm_dims, device=cpu, generator=g).tril()
