@@ -404,6 +404,8 @@ __global__ void batch_norm_reduce_statistics_kernel(
     index_t n = 0;
     for (int j = 0; j < world_size; j++) {
       scalar_t count = counts[j];
+      if (n + count == 0) continue; // for empty batch
+
       accscalar_t m = vec_mean[j][i];
       accscalar_t v = accscalar_t(1.0) / (vec_invstd[j][i]);
       v = (v * v - epsilon) * count;
@@ -622,6 +624,14 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cuda_template(const Tenso
 
 template<typename scalar_t, typename index_t>
 std::tuple<Tensor, Tensor> batch_norm_stats_cuda_template(const Tensor& input_, double epsilon) {
+  if (input_.size(0) == 0) {
+    auto input_options = input_.options();
+    int64_t n_input = input_.size(1);
+    return std::make_tuple(
+      at::zeros({n_input}, input_options),
+      at::zeros({n_input}, input_options)
+    );
+  }
 
   using accscalar_t = at::acc_type<scalar_t, true>;
   int64_t n_input = input_.size(1);
@@ -629,13 +639,6 @@ std::tuple<Tensor, Tensor> batch_norm_stats_cuda_template(const Tensor& input_, 
   Tensor dummy_var_;
   Tensor mean_;
   Tensor invstd_;
-  if (input_.size(0) == 0) {
-    auto input_options = input_.options();
-    return std::make_tuple(
-      at::zeros({n_input}, input_options),
-      at::zeros({n_input}, input_options)
-    );
-  }
   auto input_reshaped = input_.reshape({input_.size(0), input_.size(1), -1}); // internally we merge the feature dimensions
 
   auto bs = input_reshaped.size(0);
@@ -669,6 +672,8 @@ template<typename input_scalar_t, typename stat_scalar_t, typename index_t>
 void batch_norm_elemt_cuda_template(Tensor& output_, const Tensor& input_, const Tensor& weight_, const Tensor& bias_,
                                                                   const Tensor& mean_, const Tensor& invstd_,
                                                                   double epsilon) {
+
+  if (input_.size(0) == 0) return;  // empty batch
 
   using stat_accscalar_t = at::acc_type<stat_scalar_t, true>;
   int64_t n_input = input_.size(1);
@@ -743,6 +748,17 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> batch_norm_backward_reduce_cuda_templ
                                                                                     const Tensor& mean_, const Tensor& invstd_, const Tensor& weight_,
                                                                                     const bool input_g, const bool weight_g, const bool bias_g) {
 
+  if (input_.size(0) == 0) {  // empty batch
+    int64_t n_input = input_.size(1);
+    auto weight_options = weight_.options();
+    return std::make_tuple(
+      at::zeros_like(mean_, LEGACY_CONTIGUOUS_MEMORY_FORMAT),
+      at::zeros_like(mean_, LEGACY_CONTIGUOUS_MEMORY_FORMAT),
+      at::zeros({n_input}, weight_options),
+      at::zeros({n_input}, weight_options)
+    );
+  }
+
   using stat_accscalar_t = at::acc_type<stat_scalar_t, true>;
   int64_t n_input = input_.size(1);
   Tensor sum_dy_;
@@ -793,6 +809,8 @@ template<typename input_scalar_t, typename stat_scalar_t, typename index_t>
 Tensor batch_norm_backward_elemt_cuda_template(const Tensor& grad_out_, const Tensor& input_,
                                                const Tensor& mean_, const Tensor& invstd_,
                                                const Tensor& weight_, const Tensor& mean_dy_, const Tensor& mean_dy_xmu_) {
+
+  if (input_.size(0) == 0) return at::empty_like(input_); // empty batch
 
   using stat_accscalar_t = at::acc_type<stat_scalar_t, true>;
   int64_t n_input = input_.size(1);
