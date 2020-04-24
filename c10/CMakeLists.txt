@@ -34,7 +34,6 @@ file(GLOB C10_SRCS
         core/impl/*.cpp
         macros/*.cpp
         util/*.cpp
-        fmt/*.cc
         )
 file(GLOB_RECURSE C10_ALL_TEST_FILES test/*.cpp)
 file(GLOB_RECURSE C10_HEADERS *.h)
@@ -45,9 +44,10 @@ target_compile_options(c10 PRIVATE "-DC10_BUILD_MAIN_LIB")
 if(${COMPILER_SUPPORTS_HIDDEN_VISIBILITY})
   target_compile_options(c10 PRIVATE "-fvisibility=hidden")
 endif()
-# If building shared library, define the proper macros for vendored fmt library
+
+target_compile_definitions(c10 PRIVATE FMT_HEADER_ONLY)
+
 if(${BUILD_SHARED_LIBS})
-  target_compile_definitions(c10 PRIVATE FMT_EXPORT INTERFACE FMT_SHARED)
 endif()
 
 # ---[ Dependency of c10
