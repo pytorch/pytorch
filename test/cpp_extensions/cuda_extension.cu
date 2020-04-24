@@ -8,8 +8,7 @@
 #include <cuda_runtime.h>
 
 #include <ATen/ATen.h>
-#include <torch/extension.h>                                                                                  
-    
+
 __global__ void sigmoid_add_kernel(
     const float* __restrict__ x,
     const float* __restrict__ y,
