@@ -32,7 +32,7 @@ def export_to_pbtxt(model, inputs, *args, **kwargs):
 
 
 def export_to_pb(model, inputs, *args, **kwargs):
-    kwargs['operator_export_type'] = torch.onnx.OperatorExportTypes.ONNX
+    # kwargs['operator_export_type'] = torch.onnx.OperatorExportTypes.ONNX
     f = io.BytesIO()
     with torch.no_grad():
         torch.onnx.export(model, inputs, f, *args, **kwargs)
@@ -263,11 +263,13 @@ class TestOperators(TestCase):
 
     def test_conv(self):
         x = torch.ones(20, 16, 50, 40, requires_grad=True)
-        self.assertONNX(nn.Conv2d(16, 13, 3, bias=False), x, keep_initializers_as_inputs=True)
+        self.assertONNX(nn.Conv2d(16, 13, 3, bias=False), x, keep_initializers_as_inputs=True,
+                        operator_export_type=torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK)
 
     def test_conv_onnx_irv4(self):
         x = torch.ones(20, 16, 50, 40, requires_grad=True)
-        self.assertONNX(nn.Conv2d(16, 13, 3, bias=False), x)
+        self.assertONNX(nn.Conv2d(16, 13, 3, bias=False), x,
+                        operator_export_type=torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK)
 
     def test_conv_onnx_irv4_opset8(self):
         # This test point checks that for opset 8 (or lower), even if
@@ -306,7 +308,8 @@ class TestOperators(TestCase):
         x = torch.ones(2, 3, 4, 5, requires_grad=True)
         self.assertONNX(nn.ConvTranspose2d(3, 3, 3, stride=3, bias=False,
                                            padding=1, output_padding=2), x,
-                        keep_initializers_as_inputs=True)
+                        keep_initializers_as_inputs=True,
+                        operator_export_type=torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK)
 
     def test_maxpool(self):
         x = torch.randn(20, 16, 50)
@@ -600,7 +603,8 @@ class TestOperators(TestCase):
         emb_bag = nn.EmbeddingBag(10, 8)
         input = torch.tensor([1, 2, 3, 4]).long()
         offset = torch.tensor([0]).long()
-        self.assertONNX(emb_bag, (input, offset), keep_initializers_as_inputs=True)
+        self.assertONNX(emb_bag, (input, offset), keep_initializers_as_inputs=True,
+                        operator_export_type=torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK)
 
     def test_implicit_expand(self):
         x = torch.randn(3, 4, requires_grad=True)
