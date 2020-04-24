@@ -1,6 +1,12 @@
 #include <torch/library.h>
 
+#include <ATen/native/quantized/cpu/packed_params.h>
+
+torch::jit::class_<LinearPackedParamsBase> register_linear_params();
+
 TORCH_LIBRARY(quantized, m) {
+  register_linear_params();
+
   m.def("add(Tensor qa, Tensor qb, float scale, int zero_point) -> Tensor qc");
   m.def("add_relu(Tensor qa, Tensor qb, float scale, int zero_point) -> Tensor qc");
   m.def("add_out(Tensor qa, Tensor qb, Tensor(a!) out) -> Tensor(a!) out");
