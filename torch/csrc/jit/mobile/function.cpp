@@ -1,10 +1,10 @@
-#include "function.h"
+#include <torch/csrc/jit/mobile/function.h>
+#include <torch/csrc/jit/mobile/interpreter.h>
 #include <torch/csrc/jit/runtime/instruction.h>
 #include <torch/csrc/jit/runtime/operator.h>
 #include <torch/csrc/jit/runtime/vararg_functions.h>
 #include <torch/custom_class_detail.h>
 #include <torch/library.h>
-#include "interpreter.h"
 
 namespace torch {
 namespace jit {
