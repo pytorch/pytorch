@@ -310,7 +310,7 @@ namespace detail {
     const float scale_to_inf = scale_to_inf_val;
     const float scale_to_zero = scale_to_zero_val;
 
-          float base = (fabsf(f) * scale_to_inf) * scale_to_zero;
+          float base = (std::fabsf(f) * scale_to_inf) * scale_to_zero;
 
           const uint32_t w = fp32_to_bits(f);
           const uint32_t shl1_w = w + w;
