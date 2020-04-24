@@ -237,12 +237,13 @@ void DistAutogradContainer::sendReleaseContextRpc(
           CleanupAutogradContextReq(context_id).toMessage(),
           options);
 
-      cleanupFuture->addCallback([](const rpc::FutureMessage& cleanupFuture) {
+      cleanupFuture->addCallback([worker_id](const rpc::FutureMessage& cleanupFuture) {
         if (cleanupFuture.hasError()) {
           std::string errorMsg = c10::str(
-              "Could not release Dist Autograd Context after ",
-              kNumCleanupContextRetries,
-              " attempts.");
+              "Could not release Dist Autograd Context on node ",
+              worker_id,
+              ": ",
+              error->what());
           LOG(ERROR) << errorMsg;
           return;
         }
