@@ -12392,6 +12392,236 @@ class TestTorchDeviceType(TestCase):
         _ = torch.irfft(half_spectrum_copy, 2, signal_sizes=(2, 2))
         self.assertEqual(half_spectrum, half_spectrum_copy)
 
+    @onlyOnCPUAndCUDA
+    @unittest.skipIf(not TEST_MKL, "PyTorch is built without MKL support")
+    @dtypes(torch.double)
+    def test_istft_round_trip_simple_cases(self, device, dtype):
+        """stft -> istft should recover the original signale"""
+        def _test(input, n_fft, length):
+            stft = torch.stft(input, n_fft=n_fft)
+            inverse = torch.istft(stft, n_fft=n_fft, length=length)
+            self.assertEqual(input, inverse, exact_dtype=True)
+
+        _test(torch.ones(4, dtype=dtype, device=device), 4, 4)
+        _test(torch.zeros(4, dtype=dtype, device=device), 4, 4)
+
+    @onlyOnCPUAndCUDA
+    @unittest.skipIf(not TEST_MKL, "PyTorch is built without MKL support")
+    @dtypes(torch.double)
+    def test_istft_round_trip_various_params(self, device, dtype):
+        """stft -> istft should recover the original signale"""
+        def _test_istft_is_inverse_of_stft(stft_kwargs):
+            # generates a random sound signal for each tril and then does the stft/istft
+            # operation to check whether we can reconstruct signal
+            data_sizes = [(2, 20), (3, 15), (4, 10)]
+            num_trials = 100
+            istft_kwargs = stft_kwargs.copy()
+            del istft_kwargs['pad_mode']
+            for sizes in data_sizes:
+                for i in range(num_trials):
+                    original = torch.randn(*sizes, dtype=dtype, device=device)
+                    stft = torch.stft(original, **stft_kwargs)
+                    inversed = torch.istft(stft, length=original.size(1), **istft_kwargs)
+
+                    # trim the original for case when constructed signal is shorter than original
+                    original = original[..., :inversed.size(-1)]
+                    self.assertEqual(
+                        inversed, original, 'istft comparison against original', atol=7e-6, exact_dtype=True)
+
+        patterns = [
+            # hann_window, centered, normalized, onesided
+            {
+                'n_fft': 12,
+                'hop_length': 4,
+                'win_length': 12,
+                'window': torch.hann_window(12, dtype=dtype, device=device),
+                'center': True,
+                'pad_mode': 'reflect',
+                'normalized': True,
+                'onesided': True,
+            },
+            # hann_window, centered, not normalized, not onesided
+            {
+                'n_fft': 12,
+                'hop_length': 2,
+                'win_length': 8,
+                'window': torch.hann_window(8, dtype=dtype, device=device),
+                'center': True,
+                'pad_mode': 'reflect',
+                'normalized': False,
+                'onesided': False,
+            },
+            # hamming_window, centered, normalized, not onesided
+            {
+                'n_fft': 15,
+                'hop_length': 3,
+                'win_length': 11,
+                'window': torch.hamming_window(11, dtype=dtype, device=device),
+                'center': True,
+                'pad_mode': 'constant',
+                'normalized': True,
+                'onesided': False,
+            },
+            # hamming_window, not centered, not normalized, onesided
+            # window same size as n_fft
+            {
+                'n_fft': 5,
+                'hop_length': 2,
+                'win_length': 5,
+                'window': torch.hamming_window(5, dtype=dtype, device=device),
+                'center': False,
+                'pad_mode': 'constant',
+                'normalized': False,
+                'onesided': True,
+            },
+            # hamming_window, not centered, not normalized, not onesided
+            # window same size as n_fft
+            {
+                'n_fft': 3,
+                'hop_length': 2,
+                'win_length': 3,
+                'window': torch.hamming_window(3, dtype=dtype, device=device),
+                'center': False,
+                'pad_mode': 'reflect',
+                'normalized': False,
+                'onesided': False,
+            },
+        ]
+        for i, pattern in enumerate(patterns):
+            _test_istft_is_inverse_of_stft(pattern)
+
+    @onlyOnCPUAndCUDA
+    def test_istft_throws(self, device):
+        """istft should throw exception for invalid parameters"""
+        stft = torch.zeros((3, 5, 2), device=device)
+        # the window is size 1 but it hops 20 so there is a gap which throw an error
+        self.assertRaises(
+            RuntimeError, torch.istft, stft, n_fft=4,
+            hop_length=20, win_length=1, window=torch.ones(1))
+        # A window of zeros does not meet NOLA
+        invalid_window = torch.zeros(4, device=device)
+        self.assertRaises(
+            RuntimeError, torch.istft, stft, n_fft=4, win_length=4, window=invalid_window)
+        # Input cannot be empty
+        self.assertRaises(RuntimeError, torch.istft, torch.zeros((3, 0, 2)), 2)
+        self.assertRaises(RuntimeError, torch.istft, torch.zeros((0, 3, 2)), 2)
+
+    @onlyOnCPUAndCUDA
+    @dtypes(torch.double)
+    def test_istft_of_sine(self, device, dtype):
+        def _test(amplitude, L, n):
+            # stft of amplitude*sin(2*pi/L*n*x) with the hop length and window size equaling L
+            x = torch.arange(2 * L + 1, dtype=dtype)
+            original = amplitude * torch.sin(2 * math.pi / L * x * n)
+            # stft = torch.stft(original, L, hop_length=L, win_length=L,
+            #                   window=torch.ones(L), center=False, normalized=False)
+            stft = torch.zeros((L // 2 + 1, 2, 2), dtype=dtype)
+            stft_largest_val = (amplitude * L) / 2.0
+            if n < stft.size(0):
+                stft[n, :, 1] = -stft_largest_val
+
+            if 0 <= L - n < stft.size(0):
+                # symmetric about L // 2
+                stft[L - n, :, 1] = stft_largest_val
+
+            inverse = torch.istft(
+                stft, L, hop_length=L, win_length=L,
+                window=torch.ones(L, dtype=dtype), center=False, normalized=False)
+            # There is a larger error due to the scaling of amplitude
+            original = original[..., :inverse.size(-1)]
+            self.assertEqual(inverse, original, 1e-3)
+
+        _test(amplitude=123, L=5, n=1)
+        _test(amplitude=150, L=5, n=2)
+        _test(amplitude=111, L=5, n=3)
+        _test(amplitude=160, L=7, n=4)
+        _test(amplitude=145, L=8, n=5)
+        _test(amplitude=80, L=9, n=6)
+        _test(amplitude=99, L=10, n=7)
+
+    @onlyOnCPUAndCUDA
+    @dtypes(torch.double)
+    def test_istft_linearity(self, device, dtype):
+        num_trials = 100
+
+        def _test(data_size, kwargs):
+            for i in range(num_trials):
+                tensor1 = torch.randn(data_size, device=device, dtype=dtype)
+                tensor2 = torch.randn(data_size, device=device, dtype=dtype)
+                a, b = torch.rand(2, dtype=dtype, device=device)
+                istft1 = torch.istft(tensor1, **kwargs)
+                istft2 = torch.istft(tensor2, **kwargs)
+                istft = a * istft1 + b * istft2
+                estimate = torch.istft(a * tensor1 + b * tensor2, **kwargs)
+                self.assertEqual(istft, estimate, 1e-5)
+        patterns = [
+            # hann_window, centered, normalized, onesided
+            (
+                (2, 7, 7, 2),
+                {
+                    'n_fft': 12,
+                    'window': torch.hann_window(12, device=device, dtype=dtype),
+                    'center': True,
+                    'normalized': True,
+                    'onesided': True,
+                },
+            ),
+            # hann_window, centered, not normalized, not onesided
+            (
+                (2, 12, 7, 2),
+                {
+                    'n_fft': 12,
+                    'window': torch.hann_window(12, device=device, dtype=dtype),
+                    'center': True,
+                    'normalized': False,
+                    'onesided': False,
+                },
+            ),
+            # hamming_window, centered, normalized, not onesided
+            (
+                (2, 12, 7, 2),
+                {
+                    'n_fft': 12,
+                    'window': torch.hamming_window(12, device=device, dtype=dtype),
+                    'center': True,
+                    'normalized': True,
+                    'onesided': False,
+                },
+            ),
+            # hamming_window, not centered, not normalized, onesided
+            (
+                (2, 7, 3, 2),
+                {
+                    'n_fft': 12,
+                    'window': torch.hamming_window(12, device=device, dtype=dtype),
+                    'center': False,
+                    'normalized': False,
+                    'onesided': True,
+                },
+            )
+        ]
+        for data_size, kwargs in patterns:
+            _test(data_size, kwargs)
+
+    @onlyOnCPUAndCUDA
+    @skipCUDAIfRocm
+    def test_batch_istft(self, device):
+        original = torch.tensor([
+            [[4., 0.], [4., 0.], [4., 0.], [4., 0.], [4., 0.]],
+            [[0., 0.], [0., 0.], [0., 0.], [0., 0.], [0., 0.]],
+            [[0., 0.], [0., 0.], [0., 0.], [0., 0.], [0., 0.]]
+        ], device=device)
+
+        single = original.repeat(1, 1, 1, 1)
+        multi = original.repeat(4, 1, 1, 1)
+
+        i_original = torch.istft(original, n_fft=4, length=4)
+        i_single = torch.istft(single, n_fft=4, length=4)
+        i_multi = torch.istft(multi, n_fft=4, length=4)
+
+        self.assertEqual(i_original.repeat(1, 1), i_single, 1e-6, exact_dtype=True)
+        self.assertEqual(i_original.repeat(4, 1), i_multi, 1e-6, exact_dtype=True)
+
     @skipCUDAIfRocm
     def test_blas_empty(self, device):
 

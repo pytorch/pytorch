@@ -818,12 +818,7 @@ class TestCase(expecttest.TestCase):
         b_tol = self.get_default_tolerance(b)
         return (max(a_tol[0], b_tol[0]), max(a_tol[1], b_tol[1]))
 
-    def assertEqual(self, x, y, message='', **kwargs):
-        self.assertIsNone(kwargs.get('prec', None), 'prec is no longer supported. Use atol or rtol.')
-        rtol = kwargs.get('rtol', None)
-        atol = kwargs.get('atol', None)
-        allow_inf = kwargs.get('allow_inf', False)
-        exact_dtype = kwargs.get('exact_dtype', None)
+    def assertEqual(self, x, y, message='', *, atol=None, rtol=None, allow_inf=False, exact_dtype=None):
         # we allow setting an absolute tolerance as a positional arg for BC with legacy testing behavior.
         if isinstance(message, Number):
             self.assertIsNone(atol, "don't combine positional prec and atol")
@@ -965,7 +960,7 @@ class TestCase(expecttest.TestCase):
             prec = 10**(-places)
         self.assertEqual(x, y, msg, atol=prec, allow_inf=allow_inf)
 
-    def assertNotEqual(self, x, y, message='', atol=None):
+    def assertNotEqual(self, x, y, message='', *, atol=None):
         if not isinstance(message, str):
             raise Error("fix this test, message should be a string")
         if atol is None:
