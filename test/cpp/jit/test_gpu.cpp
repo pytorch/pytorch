@@ -1158,15 +1158,47 @@ void testGPU_FusionLoopUnroll() {
 }
 
 void testGPU_FusionUnaryOps() {
-  Fusion fusion;
-  FusionGuard fg(&fusion);
-
+  std::vector<std::function<at::Tensor(at::Tensor&)>> aten_funcs {
+    at::abs,
+    at::acos,
+    at::asin,
+    at::atan,
+    //at::hardatanh,
+    at::ceil,
+    at::cos,
+    at::cosh,
+    at::erf,
+    at::erfc,
+    at::exp,
+    at::expm1,
+    at::floor,
+    at::frac,
+    at::gelu,
+    at::lgamma,
+    at::log,
+    at::log10,
+    at::log1p,
+    at::log2,
+    at::neg,
+    //at::RandLike,
+    at::reciprocal,
+    at::relu,
+    at::round,
+    at::rsqrt,
+    at::sigmoid,
+    at::sin,
+    at::sinh,
+    at::sqrt,
+    at::tan,
+    //at::hardtanh,
+    at::trunc
+  };
   std::vector<UnaryOpType> uop_types = {
     UnaryOpType::Abs,
     UnaryOpType::Acos,
     UnaryOpType::Asin,
     UnaryOpType::Atan,
-    UnaryOpType::Atanh,
+    //UnaryOpType::Atanh,
     UnaryOpType::Ceil,
     UnaryOpType::Cos,
     UnaryOpType::Cosh,
@@ -1183,7 +1215,7 @@ void testGPU_FusionUnaryOps() {
     UnaryOpType::Log1p,
     UnaryOpType::Log2,
     UnaryOpType::Neg,
-    UnaryOpType::RandLike,
+    //UnaryOpType::RandLike,
     UnaryOpType::Reciprocal,
     UnaryOpType::Relu,
     UnaryOpType::Round,
@@ -1193,37 +1225,54 @@ void testGPU_FusionUnaryOps() {
     UnaryOpType::Sinh,
     UnaryOpType::Sqrt,
     UnaryOpType::Tan,
-    UnaryOpType::Tanh,
+    //UnaryOpType::Tanh,
     UnaryOpType::Trunc
   };
+  TORCH_CHECK(uop_types.size() == aten_funcs.size());
+  for(int i = 0 ; i < uop_types.size(); ++i) {
+    Fusion fusion;
+    FusionGuard fg(&fusion);
 
-  std::vector<IterDomain*> dom;
-  for (int i = 0; i < 2; i++)
-    dom.push_back(new IterDomain(new Int(0), new Int()));
+    std::vector<IterDomain*> dom;
+    for (int i = 0; i < 2; i++)
+      dom.push_back(new IterDomain(new Int(0), new Int()));
 
-  TensorView* tv0 = new TensorView(new TensorDomain(dom), DataType::Float);
+    TensorView* tv0 = new TensorView(new TensorDomain(dom), DataType::Float);
+    TensorView* tv1 = static_cast<TensorView*>(unaryOp(uop_types[i], tv0));
 
-  std::vector<Val*> tvs;
+    fusion.addInput(tv0);
+    fusion.addOutput(tv1);
+    tv0->computeAt(tv1, -1);
 
-  TensorView* tv1 = tv0;
-  for(auto uop_type : uop_types) {
-    tvs.push_back(unaryOp(uop_type, tv1));
-    tv1 = static_cast<TensorView*>(tvs.back());
+    tv1->axis(0)->parallelize(ParallelType::BIDx);
+    tv1->axis(-1)->parallelize(ParallelType::TIDx);
+
+    torch::jit::fuser::cuda::CudaKernel prog;
+    prog.device_ = 0;
+    prog.grid(1);
+    prog.block(4);
+
+    auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+
+    at::Tensor input1     = at::rand({1,4}, options);
+    at::Tensor output     = at::empty_like(input1);
+    at::Tensor ref_output = at::empty_like(input1);
+
+    std::vector<at::Tensor> inputs{{input1}};
+    std::vector<at::Tensor> outputs{{output}};
+
+    torch::jit::fuser::cuda::compileKernel(fusion, &prog);
+    torch::jit::fuser::cuda::runTestKernel(prog, inputs, outputs);
+
+    ref_output = aten_funcs[i](input1);
+
+    TORCH_CHECK(output.equal(ref_output),
+                "\nOp Type: -- ", uop_types[i],
+                " -- had a mismatch.\n",
+                "IN : ", input1, "\n",
+                "JIT: ", output, "\n",
+                "REF: ", ref_output, "\n");
   }
-
-  fusion.addInput(tv0);
-  fusion.addOutput(tv1);
-  tv0->computeAt(tv1, -1);
-
-  tv1->axis(0)->parallelize(ParallelType::BIDx);
-  tv1->axis(-1)->parallelize(ParallelType::TIDx);
-
-  torch::jit::fuser::cuda::CudaKernel prog;
-  prog.device_ = 0;
-  prog.grid(64);
-  prog.block(32);
-
-  torch::jit::fuser::cuda::compileKernel(fusion, &prog);
 }
 
 void testGPU_FusionBinaryOps() {

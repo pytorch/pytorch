@@ -145,7 +145,7 @@ __device__ float frac(const float x) {
   return x - truncf(x);
 }
 __device__ float gelu(const float x) {
-  return 0.5f * x * (1.f + tanhf(sqrtf(3.14159274101 / 2.f) * (x + 0.044715 * powf(x,3.f))));
+  return x * normcdf(x);
 }
 __device__ float reciprocal(const float x) {
   return 1.f / x;
