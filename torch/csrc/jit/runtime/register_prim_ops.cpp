@@ -364,9 +364,7 @@ RegisterOperators reg(
      Operator("aten::len.t(t[] a) -> int", listLen, aliasAnalysisFromSchema()),
      Operator(
          "prim::Uninitialized() -> Any",
-         [](Stack* stack) {
-           push(stack, IValue::uninitialized());
-         },
+         [](Stack* stack) { push(stack, IValue::uninitialized()); },
          aliasAnalysisSpecialCase()),
      Operator(
          "prim::Print(...) -> ()",

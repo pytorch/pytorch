@@ -44,7 +44,7 @@ void callBoxedWorkaround(const c10::OperatorHandle& op, torch::jit::Stack* stack
   }
   TORCH_INTERNAL_ASSERT(jit_op);
 
-  auto offset = jit_op->getOperation()(*stack);
+  auto offset = jit_op->getOperation()(stack);
   TORCH_INTERNAL_ASSERT(offset == 0);
 }
 
