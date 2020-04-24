@@ -10661,7 +10661,8 @@ a")
 
         m = torch.jit.script(M())
         # test copy
-        m_c = copy.deepcopy(m)
+        copy.deepcopy(m)
+        copy.copy(m)
 
     # Suppression: ONNX warns when exporting RNNs because of potential batch size mismatch.
     @suppress_warnings
