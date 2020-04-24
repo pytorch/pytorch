@@ -10,10 +10,6 @@
 #include <ATen/ATen.h>
 #include <torch/extension.h>                                                                                  
     
-void something(torch::Tensor x) {                                                                             
-  torch::Tensor y = torch::zeros({1,2}, x.options());
-}
-
 __global__ void sigmoid_add_kernel(
     const float* __restrict__ x,
     const float* __restrict__ y,
