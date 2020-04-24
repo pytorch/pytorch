@@ -178,11 +178,16 @@ function get_exit_code() {
 }
 
 function file_diff_from_base() {
+  if [[ -n "${BASE_REF}" ]]; then
+    echo "BASE_REF must be set. (example BASE_REF=master)"
+    exit 1
+  fi
   # The fetch may fail on Docker hosts, but it's not always necessary.
   set +e
-  git fetch origin master --quiet
+  git fetch origin "${BASE_REF}" --quiet
   set -e
-  git diff --name-only "$(git merge-base origin master HEAD)" > "$1"
+  # finds the files changed from the merge base of our PR branch and our base reference
+  git diff --name-only "$(git merge-base HEAD "${BASE_REF}")..HEAD" > "$1"
 }
 
 function get_bazel() {

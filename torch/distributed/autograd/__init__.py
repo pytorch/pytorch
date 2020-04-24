@@ -5,7 +5,7 @@ import torch
 
 
 def is_available():
-    return sys.version_info >= (3, 0) and hasattr(torch._C, "_dist_autograd_init")
+    return hasattr(torch._C, "_dist_autograd_init")
 
 
 if is_available() and not torch._C._dist_autograd_init():

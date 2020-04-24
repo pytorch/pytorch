@@ -380,7 +380,7 @@ struct MutationRemover {
       // it is an invariant that all mutable types have an element in the memory
       // dag so we must regive x an alias db element. We have already verified
       // that the mutated value is a fresh alias with a single use.
-      aliasDb_->unsafeGiveFreshAlias(mutated_value);
+      aliasDb_->createValue(mutated_value);
 
       // We must erase the destroyed node from the AliasDb lists of writes
       aliasDb_->writeIndex_->erase(node);

@@ -1,4 +1,3 @@
-import unittest
 from typing import Dict, Tuple
 
 import torch
@@ -146,7 +145,7 @@ class MyScriptModuleWithRRefs(torch.jit.ScriptModule):
 @torch.jit.script
 class MyScriptClass:
     def __init__(self, a):
-        # type: (int)
+        # type: (int) -> None
         self.a = a
 
     def get_value(self):
@@ -684,9 +683,6 @@ def save_rref(rref_var, fname):
     torch.save(rref_var, fname)
 
 
-@unittest.skipIf(
-    not torch._six.PY3, "Pytorch distributed rpc package does not support python2"
-)
 class JitRpcTest(RRefAPITest, LocalRRefTest, JitRpcAsyncOpTest, RpcAgentTestFixture):
     @dist_init
     def test_torchscript_function(self):

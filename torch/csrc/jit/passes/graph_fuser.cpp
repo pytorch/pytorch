@@ -119,12 +119,13 @@ bool isSimpleMap(Node* node) {
   return true;
 }
 
-Value* broadcastSizes(at::ArrayRef<Value*> sizes) {
+Value* broadcastSizes(at::ArrayRef<Value*> sizes, AliasDb* db) {
   AT_ASSERT(!sizes.empty());
   Graph* graph = sizes[0]->owningGraph();
   Node* broadcast_n =
       graph->insertNode(graph->create(prim::BroadcastSizes, sizes));
   broadcast_n->output()->setType(ListType::ofInts());
+  db->createValue(broadcast_n->output());
   return broadcast_n->output();
 }
 
@@ -277,8 +278,9 @@ struct GraphFuser {
       temporary_nodes.emplace_back(outer);
       auto inner_outputs = inner->outputs();
       auto outer_outputs = outer->outputs();
-      for (size_t i = 0; i < inner_outputs.size(); ++i)
+      for (size_t i = 0; i < inner_outputs.size(); ++i) {
         inner_to_outer[inner_outputs[i]] = outer_outputs[i];
+      }
     }
 
     // Replace uses of producer_group outputs and destroy the producer
@@ -286,6 +288,7 @@ struct GraphFuser {
     for (size_t i = 0; i < subgraph_outputs.size(); ++i) {
       auto outer_output = inner_to_outer.at(subgraph_outputs[i]);
       producer_group->outputs()[i]->replaceAllUsesWith(outer_output);
+      aliasDb_->replaceWithNewValue(producer_group->outputs()[i], outer_output);
     }
     producer_group->destroy();
     producer_group =
@@ -306,6 +309,7 @@ struct GraphFuser {
         consumer_subgraph->registerOutput(merged->outputs()[i]);
         auto new_output = consumer_group->addOutput();
         output->replaceAllUsesWith(new_output);
+        aliasDb_->replaceWithNewValue(output, new_output);
         new_output->setType(output->type());
       }
       node->destroy();
@@ -583,9 +587,24 @@ struct GraphFuser {
     auto* g = inputs[0]->owningGraph();
     auto* input_list =
         g->insertNode(g->createList(TensorType::get(), inputs))->output();
+    aliasDb_->createValue(input_list);
     auto* output_list = g->insert(aten::broadcast_tensors, {input_list});
+    aliasDb_->createValue(output_list);
     auto* unpack_node = g->insertNode(
         g->create(prim::ListUnpack, {output_list}, inputs.size()));
+
+    // We are doing:
+    //   input_list = listConstruct(a, b, ...)
+    //   output_list = broadcast_tensors(input_list)
+    //   a_broadcasted, b_broadcasted = listUnpack(output_list)
+    // `a_broadcasted` should receive the same aliasing info as `a`
+    TORCH_INTERNAL_ASSERT(unpack_node->outputs().size() == inputs.size());
+    for (size_t i = 0; i < inputs.size(); i++) {
+      Value* original_input = inputs[i];
+      Value* broadcasted_output = unpack_node->outputs()[i];
+      aliasDb_->copyValue(original_input, broadcasted_output);
+    }
+
     return unpack_node->outputs();
   }
 
@@ -774,6 +793,10 @@ struct GraphFuser {
       for (auto chunk_sel : producer_chunk_outputs) {
         Value* input_chunk_sel = bchunk->addOutput();
         input_chunk_sel->setType(chunk_sel->type());
+        // Add a fresh value for each output element of the broadcasting chunk
+        // node. This is safe because it will be consumed only by the chunked
+        // ops.
+        aliasDb_->createValue(input_chunk_sel);
         chunked_inputs.back().push_back(input_chunk_sel);
       }
     }
@@ -819,13 +842,15 @@ struct GraphFuser {
       auto tensor_inputs = filter(
           producer_for_chunk_node->inputs(),
           [](Value* v) { return v->type()->isSubtypeOf(TensorType::get()); });
-      auto tensor_sizes = fmap(tensor_inputs, [](Value* v) {
-        return v->owningGraph()->insert(aten::size, {v});
+      auto tensor_sizes = fmap(tensor_inputs, [&](Value* v) {
+        Value* output = v->owningGraph()->insert(aten::size, {v});
+        aliasDb_->createValue(output);
+        return output;
       });
       AT_ASSERT(!tensor_sizes.empty());
       Value* output_size = tensor_sizes.size() == 1
           ? tensor_sizes[0]
-          : broadcastSizes(tensor_sizes);
+          : broadcastSizes(tensor_sizes, aliasDb_);
       for (Use u : size_calc_uses) {
         u.user->output()->replaceAllUsesWith(output_size);
         u.user->destroy();
@@ -917,7 +942,9 @@ struct GraphFuser {
     AT_ASSERT(inputs.size() == sinputs.size());
     for (size_t i = 0; i < inputs.size(); ++i) {
       if (inputs[i]->type()->isSubtypeOf(TensorType::get())) {
-        shape_of[sinputs[i]] = graph->insert(aten::size, {inputs[i]});
+        Value* soutput = graph->insert(aten::size, {inputs[i]});
+        aliasDb_->createValue(soutput);
+        shape_of[sinputs[i]] = soutput;
       }
     }
 
@@ -931,7 +958,9 @@ struct GraphFuser {
     for (size_t i = 0; i < outputs.size(); ++i) {
       if (usedOnlyInSize(outputs[i]))
         continue;
-      shape_of[soutputs[i]] = graph->insert(aten::size, {outputs[i]});
+      Value* soutput = graph->insert(aten::size, {outputs[i]});
+      aliasDb_->createValue(soutput);
+      shape_of[soutputs[i]] = soutput;
     }
 
     for (Node* n : subgraph->nodes()) {
@@ -952,6 +981,9 @@ struct GraphFuser {
             graph->create(prim::ChunkSizes, shape_of.at(n->input()), 2));
         sizes_node->i_(attr::dim, n->i(attr::dim));
         sizes_node->i_(attr::chunks, n->i(attr::chunks));
+        for (Value* output : sizes_node->outputs()) {
+          aliasDb_->createValue(output);
+        }
         Value* regular_size = sizes_node->outputs().at(0);
         Value* last_size = sizes_node->outputs().at(1);
         regular_size->setType(ListType::ofInts());
@@ -970,7 +1002,8 @@ struct GraphFuser {
           fmap(tensor_inputs, [&](Value* v) { return shape_of.at(v); });
       AT_ASSERT(!shapes.empty());
       shape_of.emplace(
-          n->output(), shapes.size() == 1 ? shapes[0] : broadcastSizes(shapes));
+          n->output(),
+          shapes.size() == 1 ? shapes[0] : broadcastSizes(shapes, aliasDb_));
     }
     return shape_of;
   }
@@ -1152,12 +1185,12 @@ struct GraphFuser {
   }
 };
 
-void PeepholeOptimizeShapeExpressions(Block* block) {
+void PeepholeOptimizeShapeExpressions(Block* block, AliasDb* db) {
   auto nodes = block->nodes();
   for (auto it = nodes.begin(); it != nodes.end(); ++it) {
     Node* node = *it;
     for (Block* subblock : node->blocks()) {
-      PeepholeOptimizeShapeExpressions(subblock);
+      PeepholeOptimizeShapeExpressions(subblock, db);
     }
     if (node->kind() == prim::BroadcastSizes) {
       // Remove no-op broadcasts.
@@ -1182,7 +1215,7 @@ void PeepholeOptimizeShapeExpressions(Block* block) {
           node->output()->replaceAllUsesWith(inputs[0]);
         } else {
           WithInsertPoint insert_guard{node};
-          node->output()->replaceAllUsesWith(broadcastSizes(inputs));
+          node->output()->replaceAllUsesWith(broadcastSizes(inputs, db));
         }
         it.destroyCurrent();
         --it; // Revisit the node with deduplicated inputs
@@ -1209,13 +1242,14 @@ void PeepholeOptimizeShapeExpressions(Block* block) {
 void FuseGraph(std::shared_ptr<Graph>& graph, bool strict_fuser_check) {
   AliasDb db(graph);
   GraphFuser(&db, graph->block(), strict_fuser_check).run();
+  Lint(&db);
   // After FuseGraph some common subexpressions may come back
   EliminateCommonSubexpression(graph);
   // We might have emitted a fair amount of useless shape propagating code, so
   // remove it
   EliminateDeadCode(graph);
   // Improve the quality of shape propagation code that was left
-  PeepholeOptimizeShapeExpressions(graph->block());
+  PeepholeOptimizeShapeExpressions(graph->block(), &db);
 }
 
 void CustomFuseGraph(
@@ -1231,6 +1265,7 @@ void CustomFuseGraph(
       kind);
   g.setInputArgLimit(arg_limit);
   g.run();
+  Lint(&db);
 }
 
 } // namespace jit
