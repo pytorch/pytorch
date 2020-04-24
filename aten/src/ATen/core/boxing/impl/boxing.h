@@ -40,6 +40,7 @@ decltype(auto) boxAndCallBoxedFunc(KernelFunction::InternalBoxedKernelFunction* 
   return guts::if_constexpr<!supports_boxing<Result, Args...>::value>([] () -> Result {
     TORCH_INTERNAL_ASSERT(false, "Tried to call KernelFunction::callUnboxed() for a kernel that only has a boxed kernel and doesn't support calling from an unboxed API yet.");
   }, /* else */ [&] (auto __) -> Result {
+    (void)__; // silence gcc warning about unused arg
     // TODO Reuse stack vector instead of allocating?
     torch::jit::Stack stack;
     torch::jit::push(stack, std::forward<Args>(args)...);
