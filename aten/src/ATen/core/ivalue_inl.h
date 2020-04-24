@@ -597,6 +597,28 @@ c10::List<Elem> generic_to(
   return impl::toTypedList<Elem>(std::move(ivalue).toList());
 }
 
+namespace detail {
+template <typename Elem, size_t... I>
+std::array<Elem, sizeof...(I)> generic_to_array(
+    IValue ivalue,
+    _fake_type<std::array<Elem, sizeof...(I)>>,
+    std::index_sequence<I...>) {
+  // We need to do a deep copy of the array because there might be other
+  // references to this same IValue that also use the list. We can't just
+  // move the elements out.
+  auto list = std::move(ivalue).to<List<Elem>>();
+  TORCH_CHECK(list.size() == sizeof...(I), "Tried to convert a List with ", list.size()," elements to a fixed-size array of size ", sizeof...(I));
+  return {list[I]...};
+}
+}
+
+template <typename Elem, size_t N>
+std::array<Elem, N> generic_to(
+    IValue ivalue,
+    _fake_type<std::array<Elem, N>> ft) {
+  return detail::generic_to_array(ivalue, ft, std::make_index_sequence<N>());
+}
+
 template <typename Key, typename Value>
 c10::Dict<Key, Value> generic_to(
     IValue ivalue,
@@ -791,6 +813,14 @@ inline IValue::IValue(const std::vector<T>& v) : IValue(c10::List<T>()) {
   list.reserve(v.size());
   for (const auto& e : v) {
     list.push_back(e);
+  }
+}
+template<class T, size_t N> inline IValue::IValue(std::array<T, N> v)
+: IValue(c10::List<T>()) {
+  auto list = to<c10::List<T>>();
+  list.reserve(v.size());
+  for (auto& e : v) {
+    list.push_back(std::move(e));
   }
 }
 
