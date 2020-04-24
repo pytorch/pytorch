@@ -386,8 +386,8 @@ class RpcTest(RpcAgentTestFixture):
     @dist_init
     def test_rref_proxy_reuse(self):
         rref = rpc.remote(
-            worker_name((self.rank + 1) % self.world_size), 
-            my_function, 
+            worker_name((self.rank + 1) % self.world_size),
+            my_function,
             args=(torch.ones(2, 2), 1, 3)
         )
         expected = torch.ones(2, 2) + 1 + 3
@@ -425,41 +425,41 @@ class RpcTest(RpcAgentTestFixture):
         self.assertEqual(expected.get_value(), rref.remote().get_value().to_here())
 
         self.assertEqual(
-            expected.my_instance_method(2), 
+            expected.my_instance_method(2),
             rref.rpc_sync().my_instance_method(2)
         )
         self.assertEqual(
-            expected.my_instance_method(3), 
+            expected.my_instance_method(3),
             rref.rpc_async().my_instance_method(3).wait()
         )
         self.assertEqual(
-            expected.my_instance_method(4), 
+            expected.my_instance_method(4),
             rref.remote().my_instance_method(4).to_here()
         )
 
         self.assertEqual(
-            expected.my_static_method(9), 
+            expected.my_static_method(9),
             rref.rpc_sync().my_static_method(9)
         )
         self.assertEqual(
-            expected.my_static_method(10), 
+            expected.my_static_method(10),
             rref.rpc_async().my_static_method(10).wait()
         )
         self.assertEqual(
-            expected.my_static_method(11), 
+            expected.my_static_method(11),
             rref.remote().my_static_method(11).to_here()
         )
 
         self.assertEqual(
-            expected.my_class_method(2, torch.zeros(2, 2)), 
+            expected.my_class_method(2, torch.zeros(2, 2)),
             rref.rpc_sync().my_class_method(2, torch.zeros(2, 2))
         )
         self.assertEqual(
-            expected.my_class_method(2, torch.ones(3, 3)), 
+            expected.my_class_method(2, torch.ones(3, 3)),
             rref.rpc_async().my_class_method(2, torch.ones(3, 3)).wait()
         )
         self.assertEqual(
-            expected.my_class_method(2, torch.ones(4, 4)), 
+            expected.my_class_method(2, torch.ones(4, 4)),
             rref.remote().my_class_method(2, torch.ones(4, 4)).to_here()
         )
 
@@ -547,6 +547,43 @@ class RpcTest(RpcAgentTestFixture):
                 rpc_backend_options=self.rpc_backend_options,
             )
         rpc.shutdown()
+
+    @requires_process_group_agent("PROCESS_GROUP rpc backend specific test, skip")
+    def test_world_size_one(self):
+        if self.rank == 0:
+            rpc.init_rpc(
+                name="me",
+                backend=self.rpc_backend,
+                rank=0,
+                world_size=1,
+                rpc_backend_options=self.rpc_backend_options,
+            )
+
+            expect = torch.ones(2, 2) * 2
+            result = rpc.rpc_sync(
+                "me",
+                my_tensor_function,
+                args=(torch.ones(2, 2), torch.ones(2, 2))
+            )
+            self.assertEqual(expect, result)
+
+            expect = torch.ones(3, 3) * 2
+            result = rpc.rpc_async(
+                "me",
+                my_tensor_function,
+                args=(torch.ones(3, 3), torch.ones(3, 3))
+            ).wait()
+            self.assertEqual(expect, result)
+
+            expect = torch.ones(4, 4) * 2
+            result = rpc.remote(
+                "me",
+                my_tensor_function,
+                args=(torch.ones(4, 4), torch.ones(4, 4))
+            ).to_here()
+            self.assertEqual(expect, result)
+
+            rpc.shutdown()
 
     @dist_init(setup_rpc=False)
     def test_invalid_names(self):
@@ -2201,3 +2238,4 @@ class FaultyAgentRpcTest(FaultyRpcAgentTestFixture):
         self.assertEqual(self.rpc_backend_options.num_send_recv_threads, 8)
         self.assertEqual(self.rpc_backend_options.num_fail_sends, 3)
         self.assertEqual(len(self.rpc_backend_options.messages_to_fail), 4)
+        self.assertEqual(self.rpc_backend_options.rpc_timeout, rpc.constants.DEFAULT_RPC_TIMEOUT_SEC)

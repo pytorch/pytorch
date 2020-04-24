@@ -2534,6 +2534,9 @@ class _TestTorchMixin(object):
                     expected[i, j, k] = src[tuple(ii)]
         self.assertEqual(actual, expected, 0)
 
+        bad_src = torch.randn(*[i - 1 for i in idx_size])
+        self.assertRaises(RuntimeError, lambda: torch.gather(bad_src, dim, idx))
+
         if test_bounds:
             idx[0][0][0] = 23
             self.assertRaises(RuntimeError, lambda: torch.gather(src, dim, idx))
@@ -12106,7 +12109,7 @@ class TestTorchDeviceType(TestCase):
             ("tan", doubles, True, True, 'cpu'),
             ("tan", doubles, False, True, 'cuda'),
             ("tanh", doubles, True, True, 'cpu'),
-            ("tanh", doubles, False, True, 'cuda'),
+            ("tanh", doubles, True, True, 'cuda'),
             ("trunc", doubles, True, True, 'cpu'),
             ("trunc", doubles, True, True, 'cuda')
         ]
