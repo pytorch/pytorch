@@ -29,7 +29,7 @@ from torch.testing._internal.common_utils import TestCase, iter_indices, TEST_NU
     BytesIOContext, skipIfRocm, torch_to_numpy_dtype_dict
 from multiprocessing.reduction import ForkingPickler
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, \
-    skipCPUIfNoLapack, skipCUDAIfNoMagma, skipCUDAIfRocm, skipCUDAIfNotRocm, onlyCUDA, onlyCPU, \
+    skipCPUIfNoLapack, skipCPUIfNoMkl, skipCUDAIfNoMagma, skipCUDAIfRocm, skipCUDAIfNotRocm, onlyCUDA, onlyCPU, \
     dtypes, dtypesIfCUDA, dtypesIfCPU, deviceCountAtLeast, skipCUDAIf, precisionOverride, \
     PYTORCH_CUDA_MEMCHECK, largeCUDATensorTest, onlyOnCPUAndCUDA
 import torch.backends.quantized
@@ -2533,6 +2533,9 @@ class _TestTorchMixin(object):
                     ii[dim] = idx[i, j, k]
                     expected[i, j, k] = src[tuple(ii)]
         self.assertEqual(actual, expected, 0)
+
+        bad_src = torch.randn(*[i - 1 for i in idx_size])
+        self.assertRaises(RuntimeError, lambda: torch.gather(bad_src, dim, idx))
 
         if test_bounds:
             idx[0][0][0] = 23
@@ -12106,7 +12109,7 @@ class TestTorchDeviceType(TestCase):
             ("tan", doubles, True, True, 'cpu'),
             ("tan", doubles, False, True, 'cuda'),
             ("tanh", doubles, True, True, 'cpu'),
-            ("tanh", doubles, False, True, 'cuda'),
+            ("tanh", doubles, True, True, 'cuda'),
             ("trunc", doubles, True, True, 'cpu'),
             ("trunc", doubles, True, True, 'cuda')
         ]
@@ -12307,7 +12310,7 @@ class TestTorchDeviceType(TestCase):
     # passes on ROCm w/ python 2.7, fails w/ python 3.6
     @skipCUDAIfRocm
     # stft -> rfft -> _fft -> _fft_with_size -> _fft_mkl
-    @unittest.skipIf(not TEST_MKL, "PyTorch is built without MKL support")
+    @skipCPUIfNoMkl
     @dtypes(torch.double)
     def test_stft(self, device, dtype):
         if not TEST_LIBROSA:
@@ -12369,6 +12372,7 @@ class TestTorchDeviceType(TestCase):
         _test((10,), 5, 4, win_sizes=(1, 1), expected_error=RuntimeError)
 
     @skipIfRocm
+    @unittest.skipIf(not TEST_MKL, "PyTorch is built without MKL support")
     def test_fft_input_modification(self, device):
         # FFT functions should not modify their input (gh-34551)
 
