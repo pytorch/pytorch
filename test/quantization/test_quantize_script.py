@@ -1199,7 +1199,8 @@ graph(%input, %weight):
         assert len(attrs_with_prefix(model, '_observer')) == 3
         model(data)
         model = convert_script(model, debug=False)
-        FileCheck().check_count("quantized::linear", 2, exactly=True) \
+        FileCheck().check("quantized::linear") \
+                   .check("quantized::linear") \
                    .run(model.graph)
 
 class TestQuantizeScriptPTSQOps(JitTestCase):
