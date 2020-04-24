@@ -162,7 +162,7 @@ __device__ float sigmoid(const float x) {
 __device__ float threshold(const float x, const float t, const float v) {
   return x <= t ? v : x;
 }
-__device__ float where(const int c, const float a, const float b) {
+__device__ float where(const bool c, const float a, const float b) {
   return c ? a : b;
 }
 __device__ float randLike(Philox rnd) {

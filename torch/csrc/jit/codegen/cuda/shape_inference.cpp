@@ -128,6 +128,14 @@ class NaiveShapeTypePropagator {
           node->output()->setType(promoted_type);
           break;
         }
+      case aten::where:
+        {
+          auto promoted_type = binary_broadcast_type(
+              node->input(1)->type()->cast<TensorType>(),
+              node->input(2)->type()->cast<TensorType>());
+          node->output()->setType(promoted_type);
+          break;
+        }
       default:
         TORCH_CHECK(false, "shape/type inference failed.");
         // TODO: generate a proper error log, as this probably means something

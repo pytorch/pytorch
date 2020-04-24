@@ -178,8 +178,8 @@ TORCH_CUDA_API Val* addcmul(Val* v1, Val* v2, Val* v3, Val* s) {
 
 TORCH_CUDA_API Val* where(Val* c, Val* v1, Val* v2) {
   TORCH_CHECK(
-      c->getDataType().value() == DataType::Int,
-      "Condition should be of DataType Int, not ",
+      c->getDataType().value() == DataType::Bool,
+      "Condition should be of DataType Bool, not ",
       c->getDataType().value());
 
   Val* out = promoteNew(v1, v2);

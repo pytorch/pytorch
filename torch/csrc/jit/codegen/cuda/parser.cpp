@@ -377,6 +377,21 @@ class IrParser {
           });
     }
 
+    {
+      auto ptr_op = getOperatorForLiteral(
+          "aten::where(Tensor condition, Tensor self, Tensor other) -> Tensor");
+      registerParseRule(ptr_op,
+          [](const Node* const node,
+             std::unordered_map<size_t, CgValue>& value_map,
+             std::unordered_set<CgValue>& value_set) -> void {
+            auto condition = value_map[node->inputs()[0]->unique()];
+            auto x = value_map[node->inputs()[1]->unique()];
+            auto y = value_map[node->inputs()[2]->unique()];
+
+            auto out = where(condition, x, y);
+            value_map.emplace(node->output()->unique(), out);
+          });
+    }
   }
 
   void processJitNode(const JitOp* node) {
