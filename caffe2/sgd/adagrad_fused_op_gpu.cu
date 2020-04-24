@@ -23,29 +23,6 @@ static inline __device__ void gpuAtomicAdd(float* address, float val) {
   atomicAdd(address, val);
 }
 
-static inline __device__ void gpuAtomicAdd(c10::Half* address, c10::Half val) {
-#if (                         \
-    (CUDA_VERSION < 10000) || \
-    (defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 700)))
-  unsigned int* address_as_ui =
-      (unsigned int*)((char*)address - ((size_t)address & 2));
-  unsigned int old = *address_as_ui;
-  unsigned int assumed;
-
-  do {
-    assumed = old;
-    at::Half hsum;
-    hsum.x = (size_t)address & 2 ? (old >> 16) : (old & 0xffff);
-    hsum = hsum + val;
-    old = (size_t)address & 2 ? (old & 0xffff) | (hsum.x << 16)
-                              : (old & 0xffff0000) | hsum.x;
-    old = atomicCAS(address_as_ui, assumed, old);
-  } while (assumed != old);
-#else
-  atomicAdd(reinterpret_cast<__half*>(address), val);
-#endif
-}
-
 void inclusive_scan_wrapper(
     const int* length_data,
     int len_length,
