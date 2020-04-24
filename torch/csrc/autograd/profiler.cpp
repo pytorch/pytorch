@@ -5,6 +5,7 @@
 #include <torch/csrc/jit/runtime/operator.h>
 
 #include <ATen/core/op_registration/op_registration.h>
+#include <torch/library.h>
 
 #include <fstream>
 #include <list>
@@ -353,8 +354,6 @@ void profile_wrapper(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
   op.callBoxed(stack);
 }
 
-auto registry = c10::Dispatcher::singleton()
-  .registerFallback(
-    c10::DispatchKey::Profiler,
-    c10::KernelFunction::makeFromBoxedFunction<&profile_wrapper>(),
-    "");
+TORCH_LIBRARY_IMPL(_, Profiler, m) {
+  m.fallback(torch::CppFunction::makeFromBoxedFunction<&profile_wrapper>());
+}
