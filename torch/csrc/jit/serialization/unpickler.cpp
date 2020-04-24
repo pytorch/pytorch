@@ -491,8 +491,8 @@ void Unpickler::readGlobal(
           type = entry->second;
         } else {
           if (type_resolver_ == nullptr) {
-            // If we haven't injected a custom way of retrieving types from names,
-            // use a barebones type parser.
+            // If we haven't injected a custom way of retrieving types from
+            // names, use a barebones type parser.
             type = c10::parseType(type_str);
           } else {
             type = type_resolver_(type_str).type_;
