@@ -43,6 +43,6 @@ export IMAGE_COMMIT_TAG=${BUILD_ENVIRONMENT}-${IMAGE_COMMIT_ID}
 
 # These are required for both the build job and the test job.
 # In the latter to test cpp extensions.
-export MACOSX_DEPLOYMENT_TARGET=10.6
+export MACOSX_DEPLOYMENT_TARGET=10.5
 export CXX=clang++
 export CC=clang
