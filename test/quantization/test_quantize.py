@@ -23,7 +23,7 @@ from torch.quantization import default_per_channel_weight_observer
 from torch.quantization import default_per_channel_qconfig
 from torch.quantization._quantize_script import quantize_script, quantize_dynamic_script
 
-from torch.testing._internal.common_utils import run_tests, TEST_WITH_UBSAN, IS_WINDOWS
+from torch.testing._internal.common_utils import TEST_WITH_UBSAN, IS_WINDOWS
 from torch.testing._internal.common_quantization import QuantizationTestCase, \
     AnnotatedSingleLayerLinearModel, SingleLayerLinearModel, \
     AnnotatedConvModel, ConvModel, \
@@ -52,7 +52,7 @@ import copy
 @unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
                      " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
                      " with instruction set support avx2 or newer.")
-class EagerModePostTrainingQuantTest(QuantizationTestCase):
+class TestPostTrainingStatic(QuantizationTestCase):
     @given(qconfig=st.sampled_from((torch.quantization.default_qconfig, torch.quantization.default_per_channel_qconfig)))
     def test_single_layer(self, qconfig):
         r"""Quantize SingleLayerLinearModel which has one Linear module, make sure it is swapped
@@ -404,7 +404,7 @@ class EagerModePostTrainingQuantTest(QuantizationTestCase):
 @unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
                      " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
                      " with instruction set support avx2 or newer.")
-class PostTrainingDynamicQuantTest(QuantizationTestCase):
+class TestPostTrainingDynamic(QuantizationTestCase):
     def test_single_layer(self):
         r"""Dynamic Quantize SingleLayerLinearDynamicModel which has one Linear module,
         make sure it is swapped to nnqd.Linear which is the quantized version of
@@ -831,7 +831,7 @@ class PostTrainingDynamicQuantTest(QuantizationTestCase):
 @unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
                      " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
                      " with instruction set support avx2 or newer.")
-class EagerModeQuantizationAwareTrainingTest(QuantizationTestCase):
+class TestQuantizationAwareTraining(QuantizationTestCase):
     def test_manual(self):
         model = ManualLinearQATModel()
         model = prepare_qat(model)
@@ -968,7 +968,7 @@ class EagerModeQuantizationAwareTrainingTest(QuantizationTestCase):
     " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
     " with instruction set support avx2 or newer.",
 )
-class GraphModePostTrainingQuantTest(QuantizationTestCase):
+class TestGraphModePostTrainingStatic(QuantizationTestCase):
     def test_single_linear(self):
         r"""Compare the result of quantizing single linear layer in
         eager mode and graph mode
@@ -1188,7 +1188,7 @@ class GraphModePostTrainingQuantTest(QuantizationTestCase):
             self.assertEqual(model_fake_quantized(self.calib_data[0][0]), result_eager)
 
 
-class FunctionalModuleTest(QuantizationTestCase):
+class TestFunctionalModule(QuantizationTestCase):
     # Histogram Observers are slow, so have no-deadline to ensure test doesn't time out
     @given(train_mode=st.booleans())
     def test_functional_module(self, train_mode):
@@ -1221,7 +1221,7 @@ class FunctionalModuleTest(QuantizationTestCase):
 @unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
                      " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
                      " with instruction set support avx2 or newer.")
-class FusionTest(QuantizationTestCase):
+class TestFusion(QuantizationTestCase):
     def test_fuse_module_train(self):
         model = ModelForFusion(default_qat_qconfig).train()
         # Test step by step fusion
@@ -1461,7 +1461,7 @@ class FusionTest(QuantizationTestCase):
 
         checkQAT(model)
 
-class ObserverTest(QuantizationTestCase):
+class TestObserver(QuantizationTestCase):
     @given(qdtype=st.sampled_from((torch.qint8, torch.quint8)),
            qscheme=st.sampled_from((torch.per_tensor_affine, torch.per_tensor_symmetric)),
            reduce_range=st.booleans())
@@ -1697,7 +1697,7 @@ class ObserverTest(QuantizationTestCase):
 @unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
                      " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
                      " with instruction set support avx2 or newer.")
-class RecordHistogramObserverTest(QuantizationTestCase):
+class TestRecordHistogramObserver(QuantizationTestCase):
     def test_record_observer(self):
         model = AnnotatedSingleLayerLinearModel()
         model.qconfig = default_debug_qconfig
@@ -1780,7 +1780,3 @@ class RecordHistogramObserverTest(QuantizationTestCase):
         self.assertEqual(myobs.histogram, loaded_obs.histogram)
         self.assertEqual(myobs.bins, loaded_obs.bins)
         self.assertEqual(myobs.calculate_qparams(), loaded_obs.calculate_qparams())
-
-
-if __name__ == '__main__':
-    run_tests()
