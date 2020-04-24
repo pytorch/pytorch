@@ -65,14 +65,14 @@ if 'fbgemm' in torch.backends.quantized.supported_engines:
     conv_packed_params = torch.jit.script(ConvPackedParams())._c
 
 def _preprocess_qconfig_dict_helper(module, qconfig_dict, prefix=''):
-    dict_with_names = {}
     for name, child in module.named_children():
         module_prefix = prefix + '.' + name if prefix else name
-        if type(child) in qconfig_dict.keys():
-            dict_with_names[module_prefix] = qconfig_dict[type(child)]
+        # Existing string names in dict take precedence over type names.
+        if type(child) in qconfig_dict.keys() and module_prefix not in qconfig_dict.keys():
+            qconfig_dict[module_prefix] = qconfig_dict[type(child)]
         else:
-            dict_with_names.update(_preprocess_qconfig_dict_helper(child, qconfig_dict, module_prefix))
-    return dict_with_names
+            qconfig_dict.update(_preprocess_qconfig_dict_helper(child, qconfig_dict, module_prefix))
+    return qconfig_dict
 
 def _check_is_script_module(model):
     if not isinstance(model, torch.jit.ScriptModule):
@@ -103,11 +103,10 @@ def _prepare_script(model, qconfig_dict, is_dynamic):
                                                                is_dynamic))
 
 def preprocess_qconfig_dict(module, qconfig_dict):
-    dict_with_names = {}
     dict_has_types = any(map(lambda x : isinstance(x, type), qconfig_dict.keys()))
     if dict_has_types:
-        dict_with_names = _preprocess_qconfig_dict_helper(module, qconfig_dict)
-        qconfig_dict = {x : qconfig_dict.get(x, dict_with_names[x]) for x in dict_with_names}
+        qconfig_dict = _preprocess_qconfig_dict_helper(module, qconfig_dict)
+        qconfig_dict = dict(filter(lambda x : type(x[0]) is str, qconfig_dict.items()))
     return qconfig_dict
 
 def prepare_script(model, qconfig_dict, inplace=False):
