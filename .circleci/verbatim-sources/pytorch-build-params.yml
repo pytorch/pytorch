@@ -44,6 +44,12 @@ pytorch_ios_params: &pytorch_ios_params
 
 pytorch_windows_params: &pytorch_windows_params
   parameters:
+    executor:
+      type: string
+      default: "windows-cpu-with-nvidia-cuda"
+    build_environment:
+      type: string
+      default: ""
     test_name:
       type: string
       default: ""
@@ -66,7 +72,7 @@ pytorch_windows_params: &pytorch_windows_params
       type: string
       default: ""
   environment:
-    BUILD_ENVIRONMENT: "pytorch-win-ws2019-cuda10-cudnn7-py3"
+    BUILD_ENVIRONMENT: <<parameters.build_environment>>
     SCCACHE_BUCKET: "ossci-compiler-cache"
     CUDA_VERSION: <<parameters.cuda_version>>
     PYTHON_VERSION: <<parameters.python_version>>
