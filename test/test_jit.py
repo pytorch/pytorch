@@ -5353,7 +5353,7 @@ a")
         def foo(a):
             return 0.5 == float('0.5 hello')
         s = torch.rand(1)
-        with self.assertRaisesRegex(RuntimeError, "only accepts a string of single float number"):
+        with self.assertRaisesRegex(RuntimeError, "could not convert string to float"):
             self.assertTrue(foo(s))
 
         @torch.jit.script
@@ -6527,6 +6527,23 @@ a")
             return str((x, x))
 
         self.assertEqual("(1, 1)", to_str(1))
+
+    def test_int_cast(self):
+        @torch.jit.script
+        def to_int(x):
+            # type: (str) -> int
+            return int(x)
+
+        self.assertEqual(5, to_int('5'))
+        self.assertEqual(-5, to_int('-5'))
+        self.assertEqual(2147483647, to_int('2147483647'))
+        self.assertEqual(-2147483648, to_int('-2147483648'))
+
+        with self.assertRaisesRegex(RuntimeError, "invalid literal for int()"):
+            to_int('0x20')
+
+        with self.assertRaisesRegex(RuntimeError, "invalid literal for int()"):
+            to_int('0b0001')
 
     def test_python_frontend(self):
         def fn(x, y, z):

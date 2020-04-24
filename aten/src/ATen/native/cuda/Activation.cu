@@ -171,7 +171,7 @@ template<typename scalar_t>
 void launch_prelu_cuda_backward_share_weights_kernel(TensorIterator &iter, const scalar_t* weight_data) {
   if (!iter.can_use_32bit_indexing()) {
     for (auto& sub_iter : iter.with_32bit_indexing()) {
-      launch_prelu_cuda_backward_share_weights_kernel(iter, weight_data);
+      launch_prelu_cuda_backward_share_weights_kernel(sub_iter, weight_data);
     }
     return;
   }
@@ -180,6 +180,8 @@ void launch_prelu_cuda_backward_share_weights_kernel(TensorIterator &iter, const
   if (numel == 0) {
     return;
   }
+  
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(iter.can_use_32bit_indexing());
 
   scalar_t *input_grad_data = static_cast<scalar_t *>(iter.data_ptr(0));
   scalar_t *weight_grad_collector_data = static_cast<scalar_t *>(iter.data_ptr(1));
@@ -189,20 +191,11 @@ void launch_prelu_cuda_backward_share_weights_kernel(TensorIterator &iter, const
   int64_t grid = (numel + block_work_size - 1) / block_work_size;
   auto stream = at::cuda::getCurrentCUDAStream();
 
-  if (iter.is_contiguous()) {
-    prelu_cuda_backward_share_weights_kernel<scalar_t><<<grid, num_threads, 0, stream>>>(
-      numel, input_data, grad_out_data, input_grad_data, weight_grad_collector_data, weight_data,
-      TrivialOffsetCalculator<2>(), TrivialOffsetCalculator<2>()
-    );
-  } else {
-    std::array<const int64_t*, 2> out_strides = {iter.strides(0).data(), iter.strides(1).data()};
-    std::array<const int64_t*, 2> inp_strides = {iter.strides(2).data(), iter.strides(3).data()};
-    prelu_cuda_backward_share_weights_kernel<scalar_t><<<grid, num_threads, 0, stream>>>(
-      numel, input_data, grad_out_data, input_grad_data, weight_grad_collector_data, weight_data,
-      OffsetCalculator<2>(iter.ndim(), iter.shape().data(), inp_strides.data()),
-      OffsetCalculator<2>(iter.ndim(), iter.shape().data(), out_strides.data())
-    );
-  }
+  TORCH_INTERNAL_ASSERT(iter.is_contiguous());
+  prelu_cuda_backward_share_weights_kernel<scalar_t><<<grid, num_threads, 0, stream>>>(
+    numel, input_data, grad_out_data, input_grad_data, weight_grad_collector_data, weight_data,
+    TrivialOffsetCalculator<2>(), TrivialOffsetCalculator<2>()
+  );
 }
 
 template <typename scalar_t>

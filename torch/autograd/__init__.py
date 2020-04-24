@@ -57,6 +57,13 @@ def backward(tensors, grad_tensors=None, retain_graph=None, create_graph=False, 
     This function accumulates gradients in the leaves - you might need to zero
     them before calling it.
 
+    .. note::
+        Using this method with ``create_graph=True`` will create a reference cycle
+        between the parameter and its gradient which can cause a memory leak.
+        We recommend using ``autograd.grad`` when creating the graph to avoid this.
+        If you have to use this function, make sure to reset the ``.grad`` fields of your
+        parameters to ``None`` after use to break the cycle and avoid the leak.
+
     Arguments:
         tensors (sequence of Tensor): Tensors of which the derivative will be
             computed.
