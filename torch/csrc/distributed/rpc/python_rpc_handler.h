@@ -17,6 +17,13 @@ namespace rpc {
 // torch/distributed/internal_rpc_utils.py are imported only once.
 class PYBIND11_EXPORT PythonRpcHandler {
  public:
+  struct RRefProxyFunctions {
+    py::object rrefProxyCtor_;
+    py::object rpcSync_;
+    py::object rpcAsync_;
+    py::object remote_;
+  };
+
   static PythonRpcHandler& getInstance();
 
   // Run a pickled Python UDF and return the result py::object
@@ -61,6 +68,8 @@ class PYBIND11_EXPORT PythonRpcHandler {
   // to resolve types according to the above rules.
   TypePtr parseTypeFromStr(const std::string& typeStr);
 
+  const RRefProxyFunctions& getRRefProxyFunctions() const;
+
  private:
   PythonRpcHandler();
   ~PythonRpcHandler() = default;
@@ -81,6 +90,8 @@ class PYBIND11_EXPORT PythonRpcHandler {
 
   // Ref to 'torch.distributed.rpc.internal._handle_exception'
   py::object pyHandleException_;
+
+  RRefProxyFunctions rrefProxyFunctions_;
 
   // Shared ptr to python compilation unit in jit, it is constructed in python
   // side (see _python_cu = torch._C.CompilationUnit() in jit/__init__.py)

@@ -1,10 +1,11 @@
+from typing import Tuple, Optional
+
 import torch
 import torch.nn.functional as F
 from ._lowrank import svd_lowrank, pca_lowrank
 from ._overrides import has_torch_function, handle_torch_function
 from ._jit_internal import boolean_dispatch, List
 from ._jit_internal import _overload as overload
-from torch._six import PY2
 
 Tensor = torch.Tensor
 from torch import _VF
@@ -236,6 +237,12 @@ Args:
            Ellipses `...` represent a fixed number of dimensions. If the right hand side is inferred,
            the ellipsis dimensions are at the beginning of the output.
     operands (Tensor): The operands to compute the Einstein sum of.
+
+.. note::
+
+    This function does not optimize the given expression, so a different formula for the same computation may
+    run faster or consume less memory. Projects like opt_einsum (https://optimized-einsum.readthedocs.io/en/stable/)
+    can optimize the formula for you.
 
 Examples::
 
@@ -856,9 +863,6 @@ def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):  # noqa
         if type(input) is not Tensor and has_torch_function((input,)):
             return handle_torch_function(
                 norm, (input,), input, p=p, dim=dim, keepdim=keepdim, out=out, dtype=dtype)
-        # py2 considers isinstance(unicodestr, str) == False
-        if PY2 and isinstance(p, unicode):
-            p = str(p)
 
     ndim = input.dim()
 
@@ -983,6 +987,9 @@ def _lu_impl(A, pivot=True, get_infos=False, out=None):
         equal to 32 on a CUDA device, the LU factorization is repeated
         for singular matrices due to the bug in the MAGMA library (see
         magma issue 13).
+
+    .. note::
+       ``L``, ``U``, and ``P`` can be derived using :func:`torch.lu_unpack`.
 
     Arguments:
         A (Tensor): the tensor to factor of size :math:`(*, m, n)`
