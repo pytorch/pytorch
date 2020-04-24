@@ -63,9 +63,9 @@ class TestSerialization(TestCase):
         qmodule_traced = torch.jit.load(traced_module_file)
 
         expected = torch.load(expected_file)
-        self.assertEqual(qmodule(input_tensor), expected, prec=prec)
-        self.assertEqual(qmodule_scripted(input_tensor), expected, prec=prec)
-        self.assertEqual(qmodule_traced(input_tensor), expected, prec=prec)
+        self.assertEqual(qmodule(input_tensor), expected, atol=prec)
+        self.assertEqual(qmodule_scripted(input_tensor), expected, atol=prec)
+        self.assertEqual(qmodule_traced(input_tensor), expected, atol=prec)
 
     # TODO: add qnnpack test(https://github.com/pytorch/pytorch/pull/36771)
     @unittest.skipUnless(
