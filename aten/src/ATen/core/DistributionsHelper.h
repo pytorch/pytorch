@@ -99,7 +99,7 @@ struct uniform_int_distribution {
 };
 
 /**
- * Samples a uniform distribution in the range [a, b) of type T
+ * Samples a uniform distribution in the range [from, to) of type T
  */
 template <typename T>
 struct uniform_real_distribution {
