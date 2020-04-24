@@ -160,7 +160,10 @@ struct GraphFuser {
       Block* block,
       FusionCallback callback,
       Symbol kind)
-      : block_(block), aliasDb_(aliasDb), callback_(callback), kind_(kind) {}
+      : block_(block),
+        aliasDb_(aliasDb),
+        callback_(std::move(callback)),
+        kind_(kind) {}
 
   void setInputArgLimit(size_t limit) {
     subgraph_arg_limit_ = limit;

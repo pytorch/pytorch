@@ -470,8 +470,6 @@ void AliasDb::analyzeImpl(Node* node) {
     case prim::Loop:
       return analyzeLoop(node);
     case prim::FusionGroup:
-      // FusionGroups are pure functions
-      return analyzeCreator(node);
     case prim::CudaFusionGroup:
     case prim::FunctionalGraph:
     case prim::DifferentiableGraph:

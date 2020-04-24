@@ -29,6 +29,9 @@ class MemoryDAG;
  */
 class TORCH_API MemoryDAGBuilder {
  public:
+  MemoryDAGBuilder(const MemoryDAGBuilder&) = delete;
+  MemoryDAGBuilder& operator=(const MemoryDAGBuilder&) = delete;
+
   // Make `from` point at `to`.
   void makePointerTo(Element* from, Element* to);
 
