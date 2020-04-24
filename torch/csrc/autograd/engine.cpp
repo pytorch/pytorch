@@ -215,8 +215,7 @@ bool ReadyQueue::empty() const {
   return heap_.empty();
 }
 
-// This limit is based on the default python recursion limit which is 1000
-Engine::Engine() : max_recursion_depth_(100), non_reentrant_device_thread_count_(0) {}
+Engine::Engine() : max_recursion_depth_(MAX_DEPTH), non_reentrant_device_thread_count_(0) {}
 
 // Send shutdown tasks to all device_ready_queues_ if no backward tasks are running
 // Even though readyQueue should be empty, shutdown tasks have the highest priority
@@ -486,7 +485,9 @@ void GraphTask::set_exception(
     std::exception& e,
     const std::shared_ptr<Node>& fn) {
   set_exception_without_signal(fn);
-  future_result_->setErrorIfNeeded(e.what());
+  if (!future_completed_.exchange(true)) {
+    future_result_->setError(e.what());
+  }
 }
 
 static variable_list call_pre_hooks(Node& fn, variable_list inputs) {
@@ -542,7 +543,11 @@ void validate_outputs(
       }
       grads[i] = at::sum_to(std::move(grads[i]), metadata.shape());
     }
-    TORCH_CHECK(isFloatingType(grads[i].scalar_type()));
+
+    bool input_is_complex = isComplexType(c10::typeMetaToScalarType(metadata.options().dtype()));
+    bool grad_is_complex = isComplexType(grads[i].scalar_type());
+
+    TORCH_CHECK(isFloatingType(grads[i].scalar_type()) || (input_is_complex == grad_is_complex));
     if (c10::typeMetaToScalarType(metadata.options().dtype()) != grads[i].scalar_type()) {
       grads[i] = grads[i].to(c10::typeMetaToScalarType(metadata.options().dtype()));
     }
@@ -581,7 +586,7 @@ static variable_list call_function(
   variable_list outputs;
 
   {
-    at::DebugInfoGuard guard(graph_task->debug_info_);
+    at::ThreadLocalStateGuard guard(graph_task->thread_locals_);
     if (has_post_hooks) {
       // In functions/accumulate_grad.cpp, there is some logic to check the
       // conditions under which the incoming gradient can be stolen directly
@@ -630,9 +635,12 @@ void Engine::evaluate_function(
     if (auto* capture_vec = fn_info.captures_.get()) {
       // Lock mutex for writing to graph_task->captured_vars_.
       std::lock_guard<std::mutex> lock(graph_task->mutex_);
-      for (auto capture : *capture_vec) {
-        graph_task->captured_vars_[capture.output_idx_] =
-            inputs[capture.input_idx_];
+      for (const auto& capture : *capture_vec) {
+        auto& captured_grad = graph_task->captured_vars_[capture.output_idx_];
+        captured_grad = inputs[capture.input_idx_];
+        for (auto& hook : capture.hooks_) {
+          captured_grad = (*hook)(captured_grad);
+        }
       }
     }
     if (!fn_info.needed_) {
@@ -796,13 +804,7 @@ auto Engine::execute(const edge_list& roots,
     graph_task->init_to_execute(*graph_root, outputs);
   }
 
-  variable_list results = execute_with_graph_task(graph_task, graph_root)->wait();
-  // If it's owning thread backward call (not reentrant), local_ready_queue must
-  // be empty when we finish Engine::execute
-  if (not_reentrant_backward_call) {
-    TORCH_INTERNAL_ASSERT(local_ready_queue->empty());
-  }
-  return results;
+  return execute_with_graph_task(graph_task, graph_root)->wait();
 }
 
 void Engine::initialize_device_threads_pool() {
@@ -937,18 +939,29 @@ std::shared_ptr<FutureVariableList> Engine::execute_with_graph_task(
   return graph_task->future_result_;
 }
 
-void Engine::mark_graph_task_completed(const std::shared_ptr<GraphTask>& graph_task) {
-  std::unique_lock<std::mutex> lock(graph_task->mutex_);
-  if (graph_task->future_result_->completed()) {
-    // Future is already marked as completed.
+void Engine::mark_graph_task_completed(
+    const std::shared_ptr<GraphTask>& graph_task) {
+  // Allow only one thread one attempt to process this logic.
+  if (graph_task->future_completed_.exchange(true)) {
+    // Future is already marked complete, or being marked as such.
+    // In case the marking complete is only in progress, we add a
+    // waitNoThrow() to guarantee the future is marked complete on exit.
+    graph_task->future_result_->waitNoThrow();
     return;
   }
 
   try {
     // Run post processing, before marking the future as complete.
+    // Drop lock prior to completing, to avoid holding across callbacks.
+    std::unique_lock<std::mutex> lock(graph_task->mutex_);
+
     graph_task_exec_post_processing(graph_task);
-    graph_task->future_result_->markCompleted(
-        std::move(graph_task->captured_vars_));
+    std::vector<Variable> vars = std::move(graph_task->captured_vars_);
+
+    // Need to unlock before we call markCompleted to avoid holding locks
+    // when the callbacks are called.
+    lock.unlock();
+    graph_task->future_result_->markCompleted(std::move(vars));
   } catch (std::exception& e) {
     graph_task->future_result_->setErrorIfNeeded(e.what());
   }

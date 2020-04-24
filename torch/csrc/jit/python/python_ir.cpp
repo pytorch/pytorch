@@ -659,7 +659,7 @@ void initPythonIRBindings(PyObject* module_) {
             return py::none();
           })
       .def(
-          "sizes",
+          "strides",
           [](Type& t) -> py::object {
             if (auto ptt = t.expect<TensorType>()) {
               if (auto cs = ptt->strides().concrete_sizes()) {
@@ -684,11 +684,17 @@ void initPythonIRBindings(PyObject* module_) {
       .def(
           "__eq__",
           [](std::shared_ptr<Type>& self, std::shared_ptr<Type>& other) {
+            if (!other) {
+              return false;
+            }
             return *self == *other;
           })
       .def(
           "isSubtypeOf",
           [](std::shared_ptr<Type>& self, std::shared_ptr<Type> other) {
+            if (!other) {
+              return false;
+            }
             return self->isSubtypeOf(other);
           })
       .def("is_interface_type", [](const std::shared_ptr<Type>& self) {

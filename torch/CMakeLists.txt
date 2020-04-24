@@ -71,6 +71,7 @@ set(TORCH_PYTHON_SRCS
     ${TORCH_SRC_DIR}/csrc/jit/python/init.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/onnx.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/onnx/fixup_onnx_conditionals.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/passes/onnx/function_substitution.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/onnx/fixup_onnx_loop.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/onnx/helper.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/onnx/prepare_division_for_onnx.cpp
@@ -110,6 +111,7 @@ set(TORCH_PYTHON_SRCS
     ${TORCH_SRC_DIR}/csrc/utils/tensor_new.cpp
     ${TORCH_SRC_DIR}/csrc/utils/tensor_numpy.cpp
     ${TORCH_SRC_DIR}/csrc/utils/tensor_types.cpp
+    ${TORCH_SRC_DIR}/csrc/utils/python_dispatch.cpp
     )
 
 # NB: This has to match the condition under which the JIT test directory
@@ -118,6 +120,7 @@ if(BUILD_TEST AND NOT USE_ROCM)
     add_definitions(-DBUILDING_TESTS)
     list(APPEND TORCH_PYTHON_SRCS
       ${TORCH_ROOT}/test/cpp/jit/torch_python_test.cpp
+      ${TENSOREXPR_TEST_SRCS_WITH_PADDED}
       ${JIT_TEST_SRCS}
       )
 endif()
@@ -276,7 +279,7 @@ if(USE_NCCL)
     list(APPEND TORCH_PYTHON_SRCS
       ${TORCH_SRC_DIR}/csrc/cuda/python_nccl.cpp)
     list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_NCCL)
-    list(APPEND TORCH_PYTHON_LINK_LIBRARIES __caffe2_nccl)
+    list(APPEND TORCH_PYTHON_INCLUDE_DIRECTORIES ${NCCL_INCLUDE_DIRS})
 endif()
 
 # In the most recent CMake versions, a new 'TRANSFORM' subcommand of 'list' allows much of the boilerplate of defining the lists

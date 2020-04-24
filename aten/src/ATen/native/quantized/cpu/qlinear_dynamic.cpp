@@ -1,6 +1,6 @@
 #include <ATen/ATen.h>
 #include <ATen/Parallel.h>
-#include <ATen/core/op_registration/op_registration.h>
+#include <torch/library.h>
 #include <ATen/cpp_custom_type_hack.h>
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
 #include <ATen/native/quantized/cpu/qnnpack_utils.h>
@@ -15,10 +15,10 @@ namespace native {
 namespace {
 
 template <bool ReluFused>
-class QLinearDynamicInt8 final : public torch::OperatorKernel {
+class QLinearDynamicInt8 final {
  public:
 #ifdef USE_FBGEMM
-  at::Tensor fbgemm_linear(at::Tensor input, at::Tensor packed_weight) {
+  static at::Tensor fbgemm_linear(at::Tensor input, at::Tensor packed_weight) {
     // fp32 * int8 -> fp32 (with quantization on activation, and dequantization
     // on the result).
 
@@ -213,7 +213,7 @@ class QLinearDynamicInt8 final : public torch::OperatorKernel {
 #endif // USE_FBGEMM
 #ifdef USE_PYTORCH_QNNPACK
 
-  at::Tensor qnnpack_linear(at::Tensor input, at::Tensor packed_weight) {
+  static at::Tensor qnnpack_linear(at::Tensor input, at::Tensor packed_weight) {
     TORCH_CHECK(
         input.dim() >= 2,
         "The dimension of input tensor should be larger than or equal to 2");
@@ -316,7 +316,8 @@ class QLinearDynamicInt8 final : public torch::OperatorKernel {
     return output;
   }
 #endif // USE_PYTORCH_QNNPACK
-  at::Tensor operator()(at::Tensor input, at::Tensor packed_weight) {
+
+  static at::Tensor run(at::Tensor input, at::Tensor packed_weight) {
     auto& ctx = at::globalContext();
 
 #ifdef USE_FBGEMM
@@ -337,10 +338,10 @@ class QLinearDynamicInt8 final : public torch::OperatorKernel {
 };
 
 template <bool ReluFused>
-class QLinearDynamicFp16 final : public torch::OperatorKernel {
+class QLinearDynamicFp16 final {
  public:
 #ifdef USE_FBGEMM
-  at::Tensor operator()(at::Tensor input, at::Tensor packed_weight) {
+  static at::Tensor run(at::Tensor input, at::Tensor packed_weight) {
     // We make a strong guarantee that models using these operators will have
     // the same numerics across different machines. Therefore, we do not provide
     // a fallback path and rather fail loudly if we cannot run FBGEMM.
@@ -383,7 +384,7 @@ class QLinearDynamicFp16 final : public torch::OperatorKernel {
     return output;
   }
 #else // USE_FBGEMM
-  at::Tensor operator()(
+  static at::Tensor run(
       at::Tensor /* input */,
       at::Tensor /* packed_weight */) {
     // We make a strong guarantee that models using these operators will have
@@ -395,20 +396,15 @@ class QLinearDynamicFp16 final : public torch::OperatorKernel {
 #endif // USE_FBGEMM
 };
 
-static auto registry =
-    torch::RegisterOperators()
-        .op("quantized::linear_dynamic(Tensor X, Tensor W_prepack) -> Tensor Y",
-            torch::RegisterOperators::options()
-                .kernel<QLinearDynamicInt8<false>>(DispatchKey::CPUTensorId))
-        .op("_quantized::linear_dynamic(Tensor X, Tensor W_prepack) -> Tensor Y",
-            torch::RegisterOperators::options()
-                .kernel<QLinearDynamicInt8<false>>(DispatchKey::CPUTensorId))
-        .op("quantized::linear_relu_dynamic(Tensor X, Tensor W_prepack) -> Tensor Y",
-            torch::RegisterOperators::options()
-                .kernel<QLinearDynamicInt8<true>>(DispatchKey::CPUTensorId))
-        .op("quantized::linear_dynamic_fp16(Tensor X, Tensor W_prepack) -> Tensor Y",
-            torch::RegisterOperators::options()
-                .kernel<QLinearDynamicFp16<false>>(DispatchKey::CPUTensorId));
+TORCH_LIBRARY_IMPL(quantized, CPU, m) {
+  m.impl("linear_dynamic", QLinearDynamicInt8<false>::run);
+  m.impl("linear_relu_dynamic", QLinearDynamicInt8<true>::run);
+  m.impl("linear_dynamic_fp16", QLinearDynamicFp16<false>::run);
+}
+
+TORCH_LIBRARY_IMPL(_quantized, CPU, m) {
+  m.impl("linear_dynamic", QLinearDynamicInt8<false>::run);
+}
 
 } // namespace
 } // namespace native

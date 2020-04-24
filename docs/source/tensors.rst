@@ -158,6 +158,8 @@ view of a storage and defines numeric operations on it.
 
    .. automethod:: abs
    .. automethod:: abs_
+   .. automethod:: absolute
+   .. automethod:: absolute_
    .. automethod:: acos
    .. automethod:: acos_
    .. automethod:: add
@@ -296,7 +298,6 @@ view of a storage and defines numeric operations on it.
    .. automethod:: hardshrink
    .. automethod:: histc
    .. automethod:: ifft
-   .. automethod:: imag
    .. automethod:: index_add_
    .. automethod:: index_add
    .. automethod:: index_copy_
@@ -311,6 +312,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: int_repr
    .. automethod:: inverse
    .. automethod:: irfft
+   .. automethod:: isclose
    .. automethod:: is_contiguous
    .. automethod:: is_complex
    .. automethod:: is_floating_point
@@ -321,6 +323,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: is_shared
    .. automethod:: is_signed
    .. autoattribute:: is_sparse
+   .. automethod:: istft
    .. automethod:: item
    .. automethod:: kthvalue
    .. automethod:: le
@@ -354,6 +357,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: lt_
    .. automethod:: lu
    .. automethod:: lu_solve
+   .. automethod:: as_subclass
    .. automethod:: map_
    .. automethod:: masked_scatter_
    .. automethod:: masked_scatter
@@ -413,7 +417,6 @@ view of a storage and defines numeric operations on it.
       :noindex:
    .. automethod:: remainder
    .. automethod:: remainder_
-   .. automethod:: real
    .. automethod:: renorm
    .. automethod:: renorm_
    .. automethod:: repeat

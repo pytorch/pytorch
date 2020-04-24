@@ -1,7 +1,7 @@
 #include <type_traits>
 #include <tuple>
 #include <sstream>
-#include <c10/util/complex.h>
+#include <c10/util/complex_type.h>
 #include <c10/macros/Macros.h>
 #include <gtest/gtest.h>
 
@@ -11,18 +11,35 @@
 #define MAYBE_GLOBAL
 #endif
 
-const double PI = 3.141592653589793238463;
+#define PI 3.141592653589793238463
 
 namespace memory {
 
 MAYBE_GLOBAL void test_size() {
-  static_assert(sizeof(c10::complex<float>) == 8, "");
-  static_assert(sizeof(c10::complex<double>) == 16, "");
+  static_assert(sizeof(c10::complex<float>) == 2 * sizeof(float), "");
+  static_assert(sizeof(c10::complex<double>) == 2 * sizeof(double), "");
 }
 
 MAYBE_GLOBAL void test_align() {
-  static_assert(alignof(c10::complex<float>) == 8, "");
-  static_assert(alignof(c10::complex<double>) == 16, "");
+  static_assert(alignof(c10::complex<float>) == 2 * sizeof(float), "");
+  static_assert(alignof(c10::complex<double>) == 2 * sizeof(double), "");
+}
+
+MAYBE_GLOBAL void test_pod() {
+  static_assert(std::is_standard_layout<c10::complex<float>>::value, "");
+  static_assert(std::is_standard_layout<c10::complex<double>>::value, "");
+}
+
+TEST(TestMemory, ReinterpretCast) {
+  std::complex<float> z(1, 2);
+  c10::complex<float> zz = *reinterpret_cast<c10::complex<float>*>(&z);
+  ASSERT_EQ(zz.real(), float(1));
+  ASSERT_EQ(zz.imag(), float(2));
+
+  std::complex<double> zzz(1, 2);
+  c10::complex<double> zzzz = *reinterpret_cast<c10::complex<double>*>(&zzz);
+  ASSERT_EQ(zzzz.real(), double(1));
+  ASSERT_EQ(zzzz.imag(), double(2));
 }
 
 }  // memory
@@ -93,14 +110,12 @@ void test_construct_from_thrust() {
   ASSERT_EQ(c10::complex<scalar_t>(thrust::complex<scalar_t>(num1, num2)).real(), num1);
   ASSERT_EQ(c10::complex<scalar_t>(thrust::complex<scalar_t>(num1, num2)).imag(), num2);
 }
-#endif
 
 TEST(TestConstructors, FromThrust) {
-#if defined(__CUDACC__) || defined(__HIPCC__)
   test_construct_from_thrust<float>();
   test_construct_from_thrust<double>();
-#endif
 }
+#endif
 
 
 }  // constructors
@@ -109,7 +124,7 @@ namespace assignment {
 
 template<typename scalar_t>
 constexpr c10::complex<scalar_t> one() {
-  c10::complex<scalar_t> result;
+  c10::complex<scalar_t> result(3, 4);
   result = scalar_t(1);
   return result;
 }
@@ -161,17 +176,15 @@ C10_HOST_DEVICE std::tuple<c10::complex<double>, c10::complex<float>> one_two_th
   ret0 = ret1 = src;
   return std::make_tuple(ret0, ret1);
 }
-#endif
 
 TEST(TestAssignment, FromThrust) {
-#if defined(__CUDACC__) || defined(__HIPCC__)
   auto tup = one_two_thrust();
   ASSERT_EQ(std::get<c10::complex<double>>(tup).real(), double(1));
   ASSERT_EQ(std::get<c10::complex<double>>(tup).imag(), double(2));
   ASSERT_EQ(std::get<c10::complex<float>>(tup).real(), float(1));
   ASSERT_EQ(std::get<c10::complex<float>>(tup).imag(), float(2));
-#endif
 }
+#endif
 
 } // namespace assignment
 
@@ -185,6 +198,13 @@ MAYBE_GLOBAL void test_complex_literals() {
   static_assert(std::is_same<decltype(0.5_id), c10::complex<double>>::value, "");
   static_assert((0.5_id).real() == float(), "");
   static_assert((0.5_id).imag() == float(0.5), "");
+
+  static_assert(std::is_same<decltype(1_if), c10::complex<float>>::value, "");
+  static_assert((1_if).real() == float(), "");
+  static_assert((1_if).imag() == float(1), "");
+  static_assert(std::is_same<decltype(1_id), c10::complex<double>>::value, "");
+  static_assert((1_id).real() == double(), "");
+  static_assert((1_id).imag() == double(1), "");
 }
 
 } // namespace literals

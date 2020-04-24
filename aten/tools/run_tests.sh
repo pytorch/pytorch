@@ -10,6 +10,7 @@ VALGRIND=${VALGRIND:=ON}
 ./atest
 ./scalar_test
 ./broadcast_test
+./complex_test
 ./wrapdim_test
 ./apply_utils_test
 ./dlconvertor_test

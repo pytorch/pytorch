@@ -2,6 +2,7 @@
 #include <ATen/core/function.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/jit/api/function_impl.h>
+#include <torch/csrc/jit/frontend/name_mangler.h>
 #include <torch/csrc/jit/frontend/source_range.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
@@ -244,7 +245,13 @@ struct TORCH_API CompilationUnit {
   // We also use mangling to distinguish different Module instances. Since each
   // Module is a singleton class instance, different instances of the same
   // Python Module will have different types but the same qualified name.
-  c10::QualifiedName mangle(const c10::QualifiedName& name) const;
+  c10::QualifiedName mangle(const c10::QualifiedName& name) const {
+    auto mangled = name;
+    while (get_type(mangled) || find_function(mangled)) {
+      mangled = mangler_.mangle(mangled);
+    }
+    return mangled;
+  }
 
  private:
   std::unique_ptr<Function> define(
@@ -277,7 +284,7 @@ struct TORCH_API CompilationUnit {
   // module's compilation unit.
   std::vector<c10::NamedTypePtr> classes_;
 
-  mutable size_t mangleIndex_ = 0;
+  mutable NameMangler mangler_;
 };
 
 // An owning pointer to a Function. Just a pair of a raw Function ptr and it's

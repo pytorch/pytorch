@@ -423,30 +423,32 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 
   bool is_sparse() const {
     // NB: This method is not virtual and avoid dispatches for performance reasons.
-    return key_set_.has(DispatchKey::SparseCPUTensorId) ||
-           key_set_.has(DispatchKey::SparseCUDATensorId) ||
-           key_set_.has(DispatchKey::SparseHIPTensorId);
+    return key_set_.has(DispatchKey::SparseCPU) ||
+           key_set_.has(DispatchKey::SparseCUDA) ||
+           key_set_.has(DispatchKey::SparseHIP);
   }
 
   bool is_quantized() const {
     // NB: This method is not virtual and avoid dispatches for performance reasons.
-    return key_set_.has(DispatchKey::QuantizedCPUTensorId);
+    return key_set_.has(DispatchKey::QuantizedCPU) ||
+        key_set_.has(DispatchKey::QuantizedCUDA);
   }
 
   bool is_cuda() const {
     // NB: This method is not virtual and avoid dispatches for performance reasons.
-    return key_set_.has(DispatchKey::CUDATensorId) ||
-           key_set_.has(DispatchKey::SparseCUDATensorId);
+    return key_set_.has(DispatchKey::CUDA) ||
+        key_set_.has(DispatchKey::SparseCUDA) ||
+        key_set_.has(DispatchKey::QuantizedCUDA);
   }
 
   bool is_hip() const {
     // NB: This method is not virtual and avoid dispatches for performance reasons.
-    return key_set_.has(DispatchKey::HIPTensorId) ||
-           key_set_.has(DispatchKey::SparseHIPTensorId);
+    return key_set_.has(DispatchKey::HIP) ||
+           key_set_.has(DispatchKey::SparseHIP);
   }
 
   bool is_mkldnn() const {
-    return key_set_.has(DispatchKey::MkldnnCPUTensorId);
+    return key_set_.has(DispatchKey::MkldnnCPU);
   }
 
   int64_t get_device() const {
@@ -508,6 +510,20 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   void set_wrapped_number(bool value) {
     TORCH_INTERNAL_ASSERT(dim() == 0);
     is_wrapped_number_ = value;
+  }
+
+  /**
+   * Returns true if Tensor supports as_strided and as_strided_backward.
+   * This is used in autograd to perform inplace update on view Tensors.
+   * See Note [View + Inplace update for base tensor] and
+   * [View + Inplace update for view tensor] for details.
+   * Note this method only returns true for XLA backend, where it
+   * simulates strided Tensor to support most view ops, but it cannot
+   * fully support general `as_strided` case.
+   * It can be expanded as needed in the future, e.g sparse Tensor.
+   */
+  inline bool support_as_strided() const {
+    return device().type() != at::kXLA;
   }
 
   // ~~~~~ Autograd API ~~~~~
@@ -859,19 +875,19 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   /**
    * One TensorImpl can be copied to another TensorImpl if they have the same
    * DispatchKeySet. The only two special cases (for legacy reason) are:
-   * CPUTensorId is compatible with CUDATensorId and SparseCPUTensorId is
-   * compatible with SparseCUDATensorId.
+   * CPU is compatible with CUDA and SparseCPU is
+   * compatible with SparseCUDA.
    */
   inline bool has_compatible_shallow_copy_type(DispatchKeySet from) {
     auto is_dense = [](DispatchKeySet ts) {
-      return ts.has(DispatchKey::CPUTensorId) ||
-             ts.has(DispatchKey::CUDATensorId) ||
-             ts.has(DispatchKey::HIPTensorId);
+      return ts.has(DispatchKey::CPU) ||
+             ts.has(DispatchKey::CUDA) ||
+             ts.has(DispatchKey::HIP);
     };
     auto is_sparse = [](DispatchKeySet ts) {
-      return ts.has(DispatchKey::SparseCPUTensorId) ||
-             ts.has(DispatchKey::SparseCUDATensorId) ||
-             ts.has(DispatchKey::SparseHIPTensorId);
+      return ts.has(DispatchKey::SparseCPU) ||
+             ts.has(DispatchKey::SparseCUDA) ||
+             ts.has(DispatchKey::SparseHIP);
     };
     return (key_set_ == from) || (is_dense(key_set_) && is_dense(from)) || (is_sparse(key_set_) && is_sparse(from));
   }
@@ -1618,7 +1634,7 @@ protected:
   c10::optional<c10::Device> device_opt_;
 
   // The set of DispatchKeys which describe this tensor.  NB: this
-  // does NOT include VariableTensorId (historically, it did, but
+  // does NOT include Autograd (historically, it did, but
   // not anymore!)
   DispatchKeySet key_set_;
 

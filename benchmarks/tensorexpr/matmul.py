@@ -1,4 +1,4 @@
-import benchmark
+from . import benchmark
 import numpy as np
 
 
@@ -11,9 +11,10 @@ class MatMulBench(benchmark.Benchmark):
         self.K = K
         self.d1 = self.rand([B, M, N], device=device, requires_grad=self.requires_grad)
         self.d2 = self.rand([B, N, K], device=device, requires_grad=self.requires_grad)
+        self.inputs = [self.d1, self.d2]
 
-    def forward(self):
-        y = self.matmul(self.d1, self.d2)
+    def forward(self, d1, d2):
+        y = self.matmul(d1, d2)
         return y
 
     def reference(self):

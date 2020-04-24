@@ -1,4 +1,3 @@
-# @lint-ignore-every PYTHON3COMPATIMPORTS
 
 from .modules import ConvBn2d
 from .modules import ConvBn3d
