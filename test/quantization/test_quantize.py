@@ -681,6 +681,9 @@ class TestPostTrainingDynamic(QuantizationTestCase):
         for qengine in ['fbgemm', 'qnnpack']:
             with override_quantized_engine(qengine):
                 if qengine in torch.backends.quantized.supported_engines:
+                    if qengine == 'qnnpack':
+                        if IS_WINDOWS or TEST_WITH_UBSAN:
+                            continue
                     for dtype in [torch.qint8, torch.float16]:
                         if dtype == torch.float16 and qengine == "qnnpack":
                             # fp16 dynamic quant is not supported for qnnpack
@@ -789,7 +792,7 @@ class TestPostTrainingDynamic(QuantizationTestCase):
                 if qengine in torch.backends.quantized.supported_engines:
                     if qengine == 'qnnpack':
                         if IS_WINDOWS or TEST_WITH_UBSAN:
-                            return
+                            continue
 
                     # Test default instantiation
                     seq_len = 128
