@@ -74,8 +74,10 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_batch_norm(
       auto len = x.get_nelems() / w.get_nelems(); // n*h*w
       ideep::tensor m = itensor_from_tensor(running_mean);
       ideep::tensor v = itensor_from_tensor(running_var);
-      const std::vector<float> scales_mean{1 - momentum, momentum};
-      const std::vector<float> scales_var{1 - momentum , momentum * len / (len - 1)};
+      const std::vector<float> scales_mean{static_cast<float>(1 - momentum),
+                                           static_cast<float>(momentum)};
+      const std::vector<float> scales_var{static_cast<float>(1 - momentum),
+                                          static_cast<float>(momentum * len / (len - 1))};
       ideep::sum::compute(scales_mean, {m, saved_mean}, m);
       ideep::sum::compute(scales_var, {v, saved_var}, v);
     }

@@ -111,7 +111,8 @@ WarningHandler* get_warning_handler() noexcept(true) {
 void WarningHandler::process(
     const SourceLocation& source_location,
     const std::string& msg) {
-  std::cerr << "Warning: " << msg << " (" << source_location << ")\n";
+  LOG_AT_FILE_LINE(WARNING, source_location.file, source_location.line)
+      << "Warning: " << msg << " (function " << source_location.function << ")";
 }
 
 
