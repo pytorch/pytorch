@@ -1547,3 +1547,6 @@ endif()
 #
 # End ATen checks
 #
+
+set(FMT_INSTALL ON CACHE BOOL " " FORCE)
+add_subdirectory(${CMAKE_SOURCE_DIR}/third_party/fmt)
