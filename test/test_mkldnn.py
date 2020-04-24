@@ -182,6 +182,27 @@ class TestMkldnn(TestCase):
                 conv2d(x),
                 conv2d_loaded(x.to_mkldnn()).to_dense())
 
+    def test_conv2d_bf16(self):
+        for groups in [1, 4]:
+            N = torch.randint(3, 10, (1,)).item()
+            C = torch.randint(1, 3, (1,)).item() * groups
+            M = torch.randint(1, 3, (1,)).item() * groups
+            x = torch.randn(N, C, 224, 224, dtype=torch.float32)
+            x_bf16 = x.bfloat16()
+            for bias in [True, False]:
+                conv2d = torch.nn.Conv2d(in_channels=C,
+                                         out_channels=M,
+                                         kernel_size=3,
+                                         stride=2,
+                                         padding=1,
+                                         bias=bias,
+                                         groups=groups)
+                mkldnn_conv2d = mkldnn_utils.to_mkldnn(copy.deepcopy(conv2d))
+                mkldnn_conv2d_bf16 = mkldnn_utils.to_mkldnn(copy.deepcopy(conv2d), torch.bfloat16)
+                y = mkldnn_conv2d(x.to_mkldnn()).to_dense()
+                y_bf16 = mkldnn_conv2d_bf16(x_bf16.to_mkldnn()).to_dense()
+                self.assertEqual(y, y_bf16, atol=1e-2, rtol=1e-2)
+
     def test_relu(self):
         x = torch.randn((4, 5), dtype=torch.float32) * 10
         x1 = x.clone().requires_grad_()
@@ -507,6 +528,20 @@ class TestMkldnn(TestCase):
             if bias:
                 self.assertEqual(linear.bias.grad, mkldnn_linear.bias.grad)
 
+    def test_linear_bf16(self):
+        in_features = torch.randint(3, 10, (1,)).item()
+        out_features = torch.randint(3, 100, (1,)).item()
+        x = torch.randn(3, in_features, dtype=torch.float32) * 10
+        x_bf16 = x.bfloat16()
+
+        for bias in [True, False]:
+            linear = torch.nn.Linear(in_features, out_features, bias=bias)
+            mkldnn_linear = mkldnn_utils.to_mkldnn(copy.deepcopy(linear))
+            mkldnn_linear_bf16 = mkldnn_utils.to_mkldnn(copy.deepcopy(linear), torch.bfloat16)
+            y = mkldnn_linear(x.to_mkldnn()).to_dense()
+            y_bf16 = mkldnn_linear_bf16(x_bf16.to_mkldnn()).to_dense()
+            self.assertEqual(y, y_bf16, atol=1e-1, rtol=1e-1)
+
     def test_softmax(self):
         x = torch.randn(3, 4, 5, dtype=torch.float32) * 10
         for dim in range(x.ndim):
@@ -611,6 +646,18 @@ class TestMkldnn(TestCase):
         model = torchvision.models.resnet.resnext50_32x4d(pretrained=False)
         self._test_imagenet_model(model)
 
+    @skipIfNoTorchVision
+    def test_resnext50_32x4d_bf16(self):
+        model = torchvision.models.resnet.resnext50_32x4d(pretrained=False)
+        model = model.train(False)
+        mkldnn_model = mkldnn_utils.to_mkldnn(copy.deepcopy(model))
+        mkldnn_model_bf16 = mkldnn_utils.to_mkldnn(copy.deepcopy(model), torch.bfloat16)
+        x = torch.randn(1, 3, 224, 224, dtype=torch.float32)
+        x_bf16 = x.bfloat16()
+        y = mkldnn_model(x.to_mkldnn()).to_dense()
+        y_bf16 = mkldnn_model_bf16(x_bf16.to_mkldnn()).to_dense()
+        with torch.no_grad():
+            self.assertEqual(y, y_bf16, atol=1e-2, rtol=1e-2)
 
 if __name__ == '__main__':
     run_tests()

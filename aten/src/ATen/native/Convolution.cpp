@@ -710,11 +710,11 @@ at::Tensor _convolution(
   } else if (params.use_mkldnn(input)) {
 #if AT_MKLDNN_ENABLED()
     TORCH_CHECK(input.options().type_equal(weight.options())
-             || (input.is_mkldnn() && weight.type().backend() == at::Backend::CPU && weight.scalar_type() == kFloat),
+             || (input.is_mkldnn() && weight.scalar_type() == kFloat),
              "Input type (", input.toString(), ") and weight type (", weight.toString(),
-             ") should be the same or input should be a MKLDNN tensor and weight is a dense tensor");
+             ") should be the same or input should be a MKLDNN tensor and weight is a dense tensor with float type");
     TORCH_CHECK(!bias.defined() || (input.options().type_equal(bias.options()))
-             || (input.is_mkldnn() && bias.type().backend() == at::Backend::CPU && bias.scalar_type() == kFloat),
+             || (input.is_mkldnn() && bias.scalar_type() == kFloat),
              "Input type (", input.toString(), ") and bias type (", bias.toString(),
              ") should be the same or input should be a MKLDNN tensor and bias is a dense tensor");
     if (!input_is_mkldnn) {
