@@ -14,7 +14,7 @@ sys.path.append(pytorch_test_dir)
 from torch.testing._internal.jit_utils import JitTestCase
 import torch.testing._internal.jit_utils
 from torch.testing._internal.common_utils import IS_SANDCASTLE
-from typing import List
+from typing import List, Tuple
 
 if __name__ == '__main__':
     raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
@@ -378,7 +378,7 @@ class TestClassType(JitTestCase):
                 return self.x
 
         def test(li, reverse=False):
-            # type: (List[Foo], bool)
+            # type: (List[Foo], bool) -> Tuple[List[int], List[int]]
             li_sorted = sorted(li)
             ret_sorted = torch.jit.annotate(List[int], [])
             for foo in li_sorted:
@@ -417,6 +417,7 @@ class TestClassType(JitTestCase):
                 li = [Foo(1)]
                 li.sort(li)
                 return li
+            test()
 
         with self.assertRaisesRegex(RuntimeError, "must define a __lt__"):
             @torch.jit.script

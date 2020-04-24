@@ -37,6 +37,10 @@ C10_DEFINE_string(
     "semicolon to separate the dimension of different "
     "tensors.");
 C10_DEFINE_string(input_type, "", "Input type (uint8_t/float)");
+C10_DEFINE_string(
+    input_memory_format,
+    "contiguous_format",
+    "Input memory format (contiguous_format/channels_last)");
 C10_DEFINE_bool(
   no_inputs,
   false,
@@ -87,10 +91,17 @@ std::vector<c10::IValue> create_inputs() {
 
   std::vector<std::string> input_dims_list = split(';', FLAGS_input_dims);
   std::vector<std::string> input_type_list = split(';', FLAGS_input_type);
+  std::vector<std::string> input_memory_format_list =
+      split(';', FLAGS_input_memory_format);
+
   CAFFE_ENFORCE_EQ(
       input_dims_list.size(),
       input_type_list.size(),
       "Input dims and type should have the same number of items.");
+  CAFFE_ENFORCE_EQ(
+      input_dims_list.size(),
+      input_memory_format_list.size(),
+      "Input dims and format should have the same number of items.");
 
   std::vector<c10::IValue> inputs;
   for (size_t i = 0; i < input_dims_list.size(); ++i) {
@@ -99,15 +110,35 @@ std::vector<c10::IValue> create_inputs() {
     for (const auto& s : input_dims_str) {
       input_dims.push_back(c10::stoi(s));
     }
+
+    at::ScalarType input_type;
     if (input_type_list[i] == "float") {
-      inputs.push_back(torch::ones(input_dims, at::ScalarType::Float));
+      input_type = at::ScalarType::Float;
     } else if (input_type_list[i] == "uint8_t") {
-      inputs.push_back(torch::ones(input_dims, at::ScalarType::Byte));
+      input_type = at::ScalarType::Byte;
     } else if (input_type_list[i] == "int64") {
-      inputs.push_back(torch::ones(input_dims, torch::kI64));
+      input_type = at::ScalarType::Long;
     } else {
       CAFFE_THROW("Unsupported input type: ", input_type_list[i]);
     }
+
+    at::MemoryFormat input_memory_format;
+    if (input_memory_format_list[i] == "channels_last") {
+      if (input_dims.size() != 4u) {
+        CAFFE_THROW(
+            "channels_last memory format only available on 4D tensors!");
+      }
+      input_memory_format = at::MemoryFormat::ChannelsLast;
+    } else if (input_memory_format_list[i] == "contiguous_format") {
+      input_memory_format = at::MemoryFormat::Contiguous;
+    } else {
+      CAFFE_THROW(
+          "Unsupported input memory format: ", input_memory_format_list[i]);
+    }
+
+    inputs.push_back(torch::ones(
+        input_dims,
+        at::TensorOptions(input_type).memory_format(input_memory_format)));
   }
 
   if (FLAGS_pytext_len > 0) {

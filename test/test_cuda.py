@@ -2736,13 +2736,6 @@ t2.start()
                         type_no_autocast = torch.norm(a_ignore).dtype
                     self.assertTrue(torch.norm(a_ignore).dtype is type_no_autocast)
 
-                # Tests if CastPolicy::promote ops ignore double and int
-                with self.assertRaises(RuntimeError):
-                    torch.cat((a_ignore, c_16))
-                with torch.cuda.amp.autocast(enabled=False):
-                    type_no_autocast = torch.cat((a_ignore, b_ignore)).dtype
-                self.assertTrue(torch.cat((a_ignore, b_ignore)).dtype is type_no_autocast)
-
     @skipIfRocm
     def test_autocast_custom_enabled(self):
         class MyMM(torch.autograd.Function):
