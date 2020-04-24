@@ -1,5 +1,6 @@
 #include <ATen/native/TensorTransformations.h>
 
+#include <ATen/NamedTensorUtils.h>
 #include <ATen/NativeFunctions.h>
 #include <c10/util/Exception.h>
 
@@ -19,7 +20,7 @@ Tensor channel_shuffle(const Tensor& self, int64_t groups) {
       "Number of groups to divide channels in must be positive.",
       " Value of groups:", groups);
   AT_ASSERTM((c % groups) == 0,
-             "Number of channels must be divisible gy groups. Got ",
+             "Number of channels must be divisible by groups. Got ",
              c, " channels and ", groups, " groups.");
   int64_t oc = c / groups;
 
@@ -36,9 +37,13 @@ Tensor channel_shuffle(const Tensor& self, int64_t groups) {
   // For server we will have to do a custom implementation.
   // For ChannelsFirst, a.k.a Contiguous, memory format we will also need
   // a fast custom implementation perhaps.
-  return input_reshaped.permute({0 /* b */, 2 /* oc */, 1 /* groups */, 3})
-                       .contiguous()
-                       .reshape(self.sizes());
+  Tensor output_tensor =
+      input_reshaped.permute({0 /* b */, 2 /* oc */, 1 /* groups */, 3})
+      .contiguous()
+      .reshape(self.sizes());
+  return namedinference::propagate_names_if_nonempty(
+      output_tensor,
+      self.names());
 }
 
 }} // namespace at::native

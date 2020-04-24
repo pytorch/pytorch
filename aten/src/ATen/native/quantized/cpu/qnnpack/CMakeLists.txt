@@ -60,14 +60,16 @@ if(NOT DEFINED CLOG_SOURCE_DIR)
   set(CLOG_SOURCE_DIR "${PROJECT_SOURCE_DIR}/deps/clog")
 endif()
 
-if(NOT DEFINED CPUINFO_SOURCE_DIR)
-  message(STATUS "Downloading cpuinfo to ${CONFU_DEPENDENCIES_SOURCE_DIR}/cpuinfo (define CPUINFO_SOURCE_DIR to avoid it)")
-  configure_file(cmake/DownloadCpuinfo.cmake "${CONFU_DEPENDENCIES_BINARY_DIR}/cpuinfo-download/CMakeLists.txt")
-  execute_process(COMMAND "${CMAKE_COMMAND}" -G "${CMAKE_GENERATOR}" .
-    WORKING_DIRECTORY "${CONFU_DEPENDENCIES_BINARY_DIR}/cpuinfo-download")
-  execute_process(COMMAND "${CMAKE_COMMAND}" --build .
-    WORKING_DIRECTORY "${CONFU_DEPENDENCIES_BINARY_DIR}/cpuinfo-download")
-  set(CPUINFO_SOURCE_DIR "${CONFU_DEPENDENCIES_SOURCE_DIR}/cpuinfo" CACHE STRING "cpuinfo source directory")
+if(NOT USE_SYSTEM_CPUINFO)
+  if(NOT DEFINED CPUINFO_SOURCE_DIR)
+    message(STATUS "Downloading cpuinfo to ${CONFU_DEPENDENCIES_SOURCE_DIR}/cpuinfo (define CPUINFO_SOURCE_DIR to avoid it)")
+    configure_file(cmake/DownloadCpuinfo.cmake "${CONFU_DEPENDENCIES_BINARY_DIR}/cpuinfo-download/CMakeLists.txt")
+    execute_process(COMMAND "${CMAKE_COMMAND}" -G "${CMAKE_GENERATOR}" .
+      WORKING_DIRECTORY "${CONFU_DEPENDENCIES_BINARY_DIR}/cpuinfo-download")
+    execute_process(COMMAND "${CMAKE_COMMAND}" --build .
+      WORKING_DIRECTORY "${CONFU_DEPENDENCIES_BINARY_DIR}/cpuinfo-download")
+    set(CPUINFO_SOURCE_DIR "${CONFU_DEPENDENCIES_SOURCE_DIR}/cpuinfo" CACHE STRING "cpuinfo source directory")
+  endif()
 endif()
 
 if(NOT DEFINED FP16_SOURCE_DIR)
@@ -143,6 +145,7 @@ set(PYTORCH_QNNPACK_INIT_SRCS
   src/fc-prepack.cc
   src/fully-connected.c
   src/global-average-pooling.c
+  src/hardsigmoid.c
   src/hardswish.c
   src/leaky-relu.c
   src/max-pooling.c
@@ -301,7 +304,12 @@ endif()
 target_link_libraries(pytorch_qnnpack PUBLIC clog)
 
 # ---[ Configure cpuinfo
-if(NOT TARGET cpuinfo)
+if(NOT TARGET cpuinfo AND USE_SYSTEM_CPUINFO)
+  add_library(cpuinfo SHARED IMPORTED)
+  find_library(CPUINFO_LIBRARY cpuinfo)
+  message("Found cpuinfo: ${CPUINFO_LIBRARY}")
+  set_target_properties(cpuinfo PROPERTIES IMPORTED_LOCATION "${CPUINFO_LIBRARY}")
+elseif(NOT TARGET cpuinfo)
   set(CPUINFO_BUILD_TOOLS OFF CACHE BOOL "")
   set(CPUINFO_BUILD_UNIT_TESTS OFF CACHE BOOL "")
   set(CPUINFO_BUILD_MOCK_TESTS OFF CACHE BOOL "")
@@ -461,6 +469,15 @@ if(PYTORCH_QNNPACK_BUILD_TESTS)
   target_include_directories(tanh-test PRIVATE src test)
   target_link_libraries(tanh-test PRIVATE pytorch_qnnpack cpuinfo gtest gtest_main)
   add_test(tanh-test tanh-test)
+
+  add_executable(hardsigmoid-test test/hardsigmoid.cc)
+  set_target_properties(hardsigmoid-test PROPERTIES
+    CXX_STANDARD 14
+    CXX_STANDARD_REQUIRED YES
+    CXX_EXTENSIONS NO)
+  target_include_directories(hardsigmoid-test PRIVATE src test)
+  target_link_libraries(hardsigmoid-test PRIVATE pytorch_qnnpack cpuinfo gtest gtest_main)
+  add_test(hardsigmoid-test hardsigmoid-test)
 
   add_executable(hardswish-test test/hardswish.cc)
   set_target_properties(hardswish-test PROPERTIES
@@ -698,6 +715,13 @@ if(PYTORCH_QNNPACK_BUILD_BENCHMARKS)
     CXX_STANDARD_REQUIRED YES
     CXX_EXTENSIONS NO)
   target_link_libraries(tanh-bench PRIVATE pytorch_qnnpack benchmark)
+
+  add_executable(hardsigmoid-bench bench/hardsigmoid.cc)
+  set_target_properties(hardsigmoid-bench PROPERTIES
+    CXX_STANDARD 14
+    CXX_STANDARD_REQUIRED YES
+    CXX_EXTENSIONS NO)
+  target_link_libraries(hardsigmoid-bench PRIVATE pytorch_qnnpack benchmark)
 
   add_executable(hardswish-bench bench/hardswish.cc)
   set_target_properties(hardswish-bench PROPERTIES

@@ -15,6 +15,7 @@
 namespace at {
 namespace native {
 
+#ifdef USE_PYTORCH_QNNPACK
 namespace {
 Tensor quantized_channel_shuffle_impl(
     const Tensor& self,
@@ -72,7 +73,7 @@ Tensor quantized_channel_shuffle_impl(
       qnnpack_uniq_ptr(qnnpack_operator);
 
   const pytorch_qnnp_status setupStatus = pytorch_qnnp_setup_channel_shuffle_nc_x8(
-      qnnpack_operator,
+      qnnpack_uniq_ptr.get(),
       self_nhwc.numel() / channels /* batch size */,
       (uint8_t*)self_nhwc.data_ptr<c10::quint8>() /* self data */,
       channels /* self stride */,
@@ -92,12 +93,18 @@ Tensor quantized_channel_shuffle_impl(
   return qy.contiguous(self.suggest_memory_format());
 }
 } // namespace
+#endif
 
 // at::native functions for the native_functions.yaml
 Tensor quantized_channel_shuffle(
     const Tensor& self,
     int64_t groups) {
+#ifdef USE_PYTORCH_QNNPACK
   return quantized_channel_shuffle_impl(self, groups);
+#endif
+  // If QNNPACK is not available then fall back to the
+  // non quantized path.
+  return at::native::channel_shuffle(self, groups);
 }
 
 // Keep the registry in the anonymous namespace.
