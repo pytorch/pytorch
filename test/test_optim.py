@@ -1797,7 +1797,7 @@ class TestSWAUtils(TestCase):
 
         update_bn(dl_xy, dnn, device=x.device)
         self.assertEqual(preactivation_mean, dnn.bn.running_mean)
-        self.assertEqual(preactivation_var, dnn.bn.running_var, prec=1e-1)
+        self.assertEqual(preactivation_var, dnn.bn.running_var, atol=1e-1)
 
         def _reset_bn(module):
             if issubclass(module.__class__, 
@@ -1808,12 +1808,12 @@ class TestSWAUtils(TestCase):
         dnn.apply(_reset_bn)
         update_bn(dl_xy, dnn, device=x.device)
         self.assertEqual(preactivation_mean, dnn.bn.running_mean)
-        self.assertEqual(preactivation_var, dnn.bn.running_var, prec=1e-1)
+        self.assertEqual(preactivation_var, dnn.bn.running_var, atol=1e-1)
         # using the dl_x loader instead of dl_xy
         dnn.apply(_reset_bn)
         update_bn(dl_x, dnn, device=x.device)
         self.assertEqual(preactivation_mean, dnn.bn.running_mean)
-        self.assertEqual(preactivation_var, dnn.bn.running_var, prec=1e-1)
+        self.assertEqual(preactivation_var, dnn.bn.running_var, atol=1e-1)
 
     def test_update_bn_dnn(self):
         # Test update_bn for a fully-connected network with BatchNorm1d
