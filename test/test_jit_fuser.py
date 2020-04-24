@@ -172,6 +172,21 @@ class TestFuser(JitTestCase):
         self.assertAllFused(scripted.graph_for(x, y))
 
     @unittest.skipIf(not RUN_CUDA, "No CUDA")
+    def test_remainder_cuda(self):
+        def cuda_rem(x, y):
+            return 1 + torch.remainder(x, y) - 1
+
+        a = torch.tensor([-5.3]).cuda()
+        b = torch.tensor([-2]).cuda()
+        inputs = [a, b]
+        ge = self.checkScript(cuda_rem, inputs)
+        a = torch.tensor([-0.8]).cuda()
+        b = torch.tensor([-1.5]).cuda()
+        ge = self.checkScript(cuda_rem, inputs)
+        graph = ge.graph_for(*inputs)
+        self.assertAllFused(graph)
+
+    @unittest.skipIf(not RUN_CUDA, "No CUDA")
     def test_chunk_cuda(self):
         def fn(x):
             a, b, c = x.chunk(3, 1)

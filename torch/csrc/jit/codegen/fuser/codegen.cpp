@@ -240,7 +240,7 @@ static std::string encodeRHS(const Node* n) {
       {aten::type_as, "(${0})"},
       {aten::mul, "${0} * ${1}"},
       {aten::ne, "${0_nocast} != ${1_nocast}"},
-      {aten::remainder, "remainderf(${0}, ${1})"},
+      {aten::remainder, "fmod((${1} + fmod(${0}, ${1})), ${1})"},
       {aten::pow, {"powf(${0}, ${1})", "pow(${0}, ${1})"}},
 
       // alpha
