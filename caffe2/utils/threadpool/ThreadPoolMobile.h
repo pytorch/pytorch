@@ -3,6 +3,7 @@
 #include <caffe2/utils/threadpool/pthreadpool.h>
 #include <pthreadpool.h>
 #include <functional>
+#include <memory>
 
 namespace caffe2 {
 
@@ -20,8 +21,8 @@ public:
   size_t get_thread_count() const;
   void set_thread_count(size_t thread_count);
 
-  // Run, in parallel, function fn(task_id) over task_id in [0, range).
-  // This function is blocking.  All input is processed the time it returns.
+  // Run, in parallel, function fn(task_id) over task_id in range [0, range).
+  // This function is blocking.  All input is processed by the time it returns.
   void run(const std::function<void(size_t)>& fn, size_t range);
 
 private:

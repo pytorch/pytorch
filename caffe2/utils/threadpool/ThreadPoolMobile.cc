@@ -17,7 +17,7 @@ size_t MobileThreadPool::get_thread_count() const {
 void MobileThreadPool::set_thread_count(const size_t thread_count) {
   // As it stands, pthreadpool is an entirely data parallel framework with no
   // support for task parallelism.  Hence, all functions are blocking, and no
-  // user-facing tasks can be in flight when the control is returned to the
+  // user-provided tasks can be in flight when the control is returned to the
   // user of the API, which means re-initializing the library, without the
   // need to wait on any pending tasks, is all one needs to do to re-adjust
   // the thread count.
