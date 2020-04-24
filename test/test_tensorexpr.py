@@ -33,7 +33,7 @@ class BaseTestClass(unittest.TestCase):
     def tearDown(self):
         torch._C._jit_set_profiling_executor(self.old_profiling_executor)
         torch._C._jit_set_profiling_mode(self.old_profiling_mode)
-        
+
         torch._C._jit_set_texpr_fuser_enabled(self.texpr_fuser_state)
         torch._C._jit_override_can_fuse_on_gpu(self.old_gpu_fuser_state)
         torch._C._jit_override_can_fuse_on_cpu(self.old_cpu_fuser_state)
