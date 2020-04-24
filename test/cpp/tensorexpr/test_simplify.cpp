@@ -1561,7 +1561,7 @@ void testSimplifyConstantCond() {
 
     Cond* body = new Cond(condition.node(), true_val, false_val);
     Stmt* simplified = IRSimplifier::simplify(body);
-    Block* block = static_cast<Block*>(simplified);
+    Block* block = dynamic_cast<Block*>(simplified);
     IS_NODE_WITH_NAME(Store, block->stmts().front(), store);
     IS_VAR_WITH_NAME(store->base_handle(), "A");
   }
@@ -1577,7 +1577,7 @@ void testSimplifyConstantCond() {
 
     Stmt* body = new Cond(condition.node(), true_val, false_val);
     Stmt* simplified = IRSimplifier::simplify(body);
-    Block* block = static_cast<Block*>(simplified);
+    Block* block = dynamic_cast<Block*>(simplified);
     IS_NODE_WITH_NAME(Store, block->stmts().front(), store);
     IS_VAR_WITH_NAME(store->base_handle(), "B");
   }
@@ -1594,7 +1594,7 @@ void testSimplifyConstantCond() {
 
     Stmt* body = new Cond(condition.node(), true_val, false_val);
     Stmt* simplified = IRSimplifier::simplify(body);
-    Block* block = static_cast<Block*>(simplified);
+    Block* block = dynamic_cast<Block*>(simplified);
     IS_NODE_WITH_NAME(Store, block->stmts().front(), store);
     IS_VAR_WITH_NAME(store->base_handle(), "B");
   }
@@ -1610,7 +1610,7 @@ void testSimplifyConstantCond() {
 
     Stmt* body = new Cond(condition.node(), true_val, false_val);
     Stmt* simplified = IRSimplifier::simplify(body);
-    Block* block = static_cast<Block*>(simplified);
+    Block* block = dynamic_cast<Block*>(simplified);
     IS_NODE_WITH_NAME(Store, block->stmts().front(), store);
     IS_VAR_WITH_NAME(store->base_handle(), "A");
   }
@@ -1626,7 +1626,7 @@ void testSimplifyConstantCond() {
 
     Stmt* body = new Cond(condition.node(), true_val, false_val);
     Stmt* simplified = IRSimplifier::simplify(body);
-    Block* block = static_cast<Block*>(simplified);
+    Block* block = dynamic_cast<Block*>(simplified);
     IS_NODE_WITH_NAME(Store, block->stmts().front(), store);
     IS_VAR_WITH_NAME(store->base_handle(), "A");
   }
@@ -1659,7 +1659,7 @@ void testSimplifyEliminateZeroLengthFor() {
     auto body =
         For::make(i, 0, 0, Store::make(c, {i}, Load::make(a, {i}, mask), mask));
     Stmt* simplified = IRSimplifier::simplify(body);
-    Block* block = static_cast<Block*>(simplified);
+    Block* block = dynamic_cast<Block*>(simplified);
     ASSERT_EQ(block->stmts().size(), 0);
   }
 
@@ -1672,7 +1672,7 @@ void testSimplifyEliminateZeroLengthFor() {
     auto body =
         For::make(i, 2, 2, Store::make(c, {i}, Load::make(a, {i}, mask), mask));
     Stmt* simplified = IRSimplifier::simplify(body);
-    Block* block = static_cast<Block*>(simplified);
+    Block* block = dynamic_cast<Block*>(simplified);
     ASSERT_EQ(block->stmts().size(), 0);
   }
 
@@ -1686,7 +1686,7 @@ void testSimplifyEliminateZeroLengthFor() {
     auto body =
         For::make(i, x, x, Store::make(c, {i}, Load::make(a, {i}, mask), mask));
     Stmt* simplified = IRSimplifier::simplify(body);
-    Block* block = static_cast<Block*>(simplified);
+    Block* block = dynamic_cast<Block*>(simplified);
     ASSERT_EQ(block->stmts().size(), 0);
   }
 
@@ -1700,7 +1700,7 @@ void testSimplifyEliminateZeroLengthFor() {
     auto body = For::make(
         i, 0, x - x, Store::make(c, {i}, Load::make(a, {i}, mask), mask));
     Stmt* simplified = IRSimplifier::simplify(body);
-    Block* block = static_cast<Block*>(simplified);
+    Block* block = dynamic_cast<Block*>(simplified);
     ASSERT_EQ(block->stmts().size(), 0);
   }
 
@@ -1729,7 +1729,7 @@ void testSimplifyOneLoopFor() {
     auto body =
         For::make(i, 0, 1, Store::make(c, {i}, Load::make(a, {i}, mask), mask));
     Stmt* simplified = IRSimplifier::simplify(body);
-    Block* block = static_cast<Block*>(simplified);
+    Block* block = dynamic_cast<Block*>(simplified);
     IS_NODE_WITH_NAME(Store, block->stmts().front(), store);
     IS_VAR_WITH_NAME(store->base_handle(), "C");
     IS_IMM_WITH_VAL(Int, store->flat_index(), 0);
@@ -1744,7 +1744,7 @@ void testSimplifyOneLoopFor() {
     auto body =
         For::make(i, 2, 3, Store::make(c, {i}, Load::make(a, {i}, mask), mask));
     Stmt* simplified = IRSimplifier::simplify(body);
-    Block* block = static_cast<Block*>(simplified);
+    Block* block = dynamic_cast<Block*>(simplified);
     IS_NODE_WITH_NAME(Store, block->stmts().front(), store);
     IS_VAR_WITH_NAME(store->base_handle(), "C");
     IS_IMM_WITH_VAL(Int, store->flat_index(), 2);
@@ -1760,7 +1760,7 @@ void testSimplifyOneLoopFor() {
     auto body = For::make(
         i, x, x + 1, Store::make(c, {i}, Load::make(a, {i}, mask), mask));
     Stmt* simplified = IRSimplifier::simplify(body);
-    Block* block = static_cast<Block*>(simplified);
+    Block* block = dynamic_cast<Block*>(simplified);
     IS_NODE_WITH_NAME(Store, block->stmts().front(), store);
     IS_VAR_WITH_NAME(store->base_handle(), "C");
     IS_VAR_WITH_NAME(store->flat_index(), "x");
@@ -1776,7 +1776,7 @@ void testSimplifyOneLoopFor() {
     auto body = For::make(
         i, 0, x - x + 1, Store::make(c, {i}, Load::make(a, {i}, mask), mask));
     Stmt* simplified = IRSimplifier::simplify(body);
-    Block* block = static_cast<Block*>(simplified);
+    Block* block = dynamic_cast<Block*>(simplified);
     IS_NODE_WITH_NAME(Store, block->stmts().front(), store);
     IS_VAR_WITH_NAME(store->base_handle(), "C");
     IS_IMM_WITH_VAL(Int, store->flat_index(), 0);
@@ -1829,9 +1829,7 @@ void testSimplifyMultilevelFor() {
         For::make(i, 0, 1, Store::make(c, {i}, Load::make(a, {i}, mask), mask));
     auto outer = For::make(j, 0, 1, body);
     Stmt* simplified = IRSimplifier::simplify(outer);
-    Block* block = static_cast<Block*>(simplified);
-    // TODO until block inlining is done
-    block = static_cast<Block*>(block->stmts().front());
+    Block* block = dynamic_cast<Block*>(simplified);
     IS_NODE_WITH_NAME(Store, block->stmts().front(), store);
     IS_VAR_WITH_NAME(store->base_handle(), "C");
     IS_IMM_WITH_VAL(Int, store->flat_index(), 0);
@@ -1853,9 +1851,8 @@ void testSimplifyMultilevelFor() {
     IS_VAR_WITH_NAME(for_->var(), "j");
     IS_IMM_WITH_VAL(Int, for_->start(), 0);
     IS_IMM_WITH_VAL(Int, for_->stop(), 2);
-
-    // TODO until block inlining is done
-    Block* block = static_cast<Block*>(for_->body()->stmts().front());
+    Block* block = dynamic_cast<Block*>(for_->body());
+    ASSERT_NE(block, nullptr);
     IS_NODE_WITH_NAME(Store, block->stmts().front(), store);
     IS_VAR_WITH_NAME(store->base_handle(), "C");
     IS_IMM_WITH_VAL(Int, store->flat_index(), 0);
@@ -1872,7 +1869,7 @@ void testSimplifyMultilevelFor() {
         For::make(i, 0, 2, Store::make(c, {i}, Load::make(a, {i}, mask), mask));
     auto outer = For::make(j, 0, 1, body);
     Stmt* simplified = IRSimplifier::simplify(outer);
-    Block* block = static_cast<Block*>(simplified);
+    Block* block = dynamic_cast<Block*>(simplified);
     IS_NODE_WITH_NAME(For, block->stmts().front(), for_);
     IS_VAR_WITH_NAME(for_->var(), "i");
     IS_IMM_WITH_VAL(Int, for_->start(), 0);
@@ -1901,18 +1898,99 @@ void testSimplifyForCleansUp() {
     Stmt* body = l.root_stmt();
     Stmt* simplified = IRSimplifier::simplify(body);
 
-    // TODO until block inlining.
-    Block* block = static_cast<Block*>(simplified);
-    block = static_cast<Block*>(block->stmts().front());
+    Block* block = dynamic_cast<Block*>(simplified);
     IS_NODE_WITH_NAME(For, block->stmts().front(), for_);
     // for is over "m".
     IS_VAR_WITH_NAME(for_->var(), "m");
-    // TODO until block inlining.
-    block = static_cast<Block*>(for_->body()->stmts().front());
     // x[m] = m;
-    IS_NODE_WITH_NAME(Store, block->stmts().front(), store);
+    IS_NODE_WITH_NAME(Store, for_->body()->stmts().front(), store);
     IS_VAR_WITH_NAME(store->flat_index(), "m");
     IS_VAR_WITH_NAME(store->value(), "m");
+  }
+}
+
+void testSimplifyFlattenBlock() {
+  KernelScope kernel_scope;
+
+  {
+    // Flatten multiple blocks down to one.
+    // { { { stmt1, stmt2 } } } =>  { stmt1, stmt2 }
+    Buffer a(BufHandle("A", {1}), kInt);
+    Store* store1 = Store::make(a, {0}, 1, 1);
+    Store* store2 = Store::make(a, {0}, 0, 1);
+
+    Block* block1 = new Block({store1, store2});
+    Block* block2 = new Block({block1});
+
+    Block* enclosing = new Block({block2});
+    Stmt* simplified = IRSimplifier::simplify(enclosing);
+
+    IS_NODE_WITH_NAME(Block, simplified, block);
+    ASSERT_EQ(block->nstmts(), 2);
+
+    IS_NODE_WITH_NAME(Store, block->stmts().front(), store1_);
+    IS_NODE_WITH_NAME(Store, block->stmts().back(), store2_);
+
+    ASSERT_EQ(store1->value(), store1_->value());
+    ASSERT_EQ(store2->value(), store2_->value());
+  }
+
+  {
+    // Flatten multiple sub blocks containing statements.
+    // { { stmt1 }, { stmt2 } } =>  { stmt1, stmt2 }
+    Buffer a(BufHandle("A", {1}), kInt);
+    Store* store1 = Store::make(a, {0}, 1, 1);
+    Store* store2 = Store::make(a, {0}, 0, 1);
+
+    Block* block1 = new Block({store1});
+    Block* block2 = new Block({store2});
+
+    Block* enclosing = new Block({block1, block2});
+    Stmt* simplified = IRSimplifier::simplify(enclosing);
+
+    IS_NODE_WITH_NAME(Block, simplified, block);
+    ASSERT_EQ(block->nstmts(), 2);
+
+    IS_NODE_WITH_NAME(Store, block->stmts().front(), store1_);
+    IS_NODE_WITH_NAME(Store, block->stmts().back(), store2_);
+
+    ASSERT_EQ(store1->value(), store1_->value());
+    ASSERT_EQ(store2->value(), store2_->value());
+  }
+
+  {
+    // Flatten sub blocks with different depths.
+    // { stmt1 , { { stmt2 } } } =>  { stmt1, stmt2 }
+    Buffer a(BufHandle("A", {1}), kInt);
+    Store* store1 = Store::make(a, {0}, 1, 1);
+    Store* store2 = Store::make(a, {0}, 0, 1);
+
+    Block* block1 = new Block({store2});
+    Block* block2 = new Block({block1});
+
+    Block* enclosing = new Block({store1, block2});
+    Stmt* simplified = IRSimplifier::simplify(enclosing);
+
+    IS_NODE_WITH_NAME(Block, simplified, block);
+    ASSERT_EQ(block->nstmts(), 2);
+
+    IS_NODE_WITH_NAME(Store, block->stmts().front(), store1_);
+    IS_NODE_WITH_NAME(Store, block->stmts().back(), store2_);
+
+    ASSERT_EQ(store1->value(), store1_->value());
+    ASSERT_EQ(store2->value(), store2_->value());
+  }
+
+  {
+    // Flatten many layers around an empty block to an empty block.
+    Stmt* last = new Block({});
+    for (int i = 0; i < 11; ++i) {
+      last = new Block({last});
+    }
+
+    Stmt* simplified = IRSimplifier::simplify(last);
+    IS_NODE_WITH_NAME(Block, simplified, block);
+    ASSERT_EQ(block->nstmts(), 0);
   }
 }
 

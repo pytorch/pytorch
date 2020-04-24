@@ -34,6 +34,7 @@ file(GLOB C10_SRCS
         core/impl/*.cpp
         macros/*.cpp
         util/*.cpp
+        fmt/*.cc
         )
 file(GLOB_RECURSE C10_ALL_TEST_FILES test/*.cpp)
 file(GLOB_RECURSE C10_HEADERS *.h)
@@ -44,6 +45,10 @@ target_compile_options(c10 PRIVATE "-DC10_BUILD_MAIN_LIB")
 if(${COMPILER_SUPPORTS_HIDDEN_VISIBILITY})
   target_compile_options(c10 PRIVATE "-fvisibility=hidden")
 endif()
+# If building shared library, define the proper macros for vendored fmt library
+if(${BUILD_SHARED_LIBS})
+  target_compile_definitions(c10 PRIVATE FMT_EXPORT INTERFACE FMT_SHARED)
+endif()
 
 # ---[ Dependency of c10
 if(${USE_GFLAGS})
@@ -52,6 +57,15 @@ endif()
 
 if(${USE_GLOG})
     target_link_libraries(c10 PUBLIC glog::glog)
+endif()
+
+find_package(Backtrace)
+if(Backtrace_FOUND)
+  target_include_directories(c10 PRIVATE ${Backtrace_INCLUDE_DIRS})
+  target_link_libraries(c10 PRIVATE ${Backtrace_LIBRARIES})
+  target_compile_definitions(c10 PRIVATE SUPPORTS_BACKTRACE=1)
+else()
+  target_compile_definitions(c10 PRIVATE SUPPORTS_BACKTRACE=0)
 endif()
 
 if(USE_NUMA)

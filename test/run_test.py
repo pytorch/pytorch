@@ -17,7 +17,6 @@ import torch._six
 from torch.utils import cpp_extension
 from torch.testing._internal.common_utils import TEST_WITH_ROCM, shell
 import torch.distributed as dist
-PY2 = sys.version_info <= (3,)
 PY33 = sys.version_info >= (3, 3)
 PY36 = sys.version_info >= (3, 6)
 
@@ -84,7 +83,6 @@ TESTS = [
 ]
 
 # skip < 3.3 because mock is added in 3.3 and is used in rpc_spawn
-# skip python2 for rpc and dist_autograd tests that do not support python2
 if PY33:
     TESTS.extend([
         'distributed/rpc/faulty_agent/test_dist_autograd_spawn',
@@ -583,11 +581,8 @@ def get_dep_modules(test):
         ],
     )
     # HACK: some platforms default to ascii, so we can't just run_script :(
-    if PY2:
-        finder.run_script(test_location)
-    else:
-        with open(test_location, 'r', encoding='utf-8') as fp:
-            finder.load_module('__main__', fp, test_location, ('', 'r', 1))
+    with open(test_location, 'r', encoding='utf-8') as fp:
+        finder.load_module('__main__', fp, test_location, ('', 'r', 1))
 
     dep_modules = set(finder.modules.keys())
     _DEP_MODULES_CACHE[test] = dep_modules

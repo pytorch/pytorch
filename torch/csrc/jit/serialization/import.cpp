@@ -42,14 +42,12 @@ void postSetStateValidate(const IValue& v) {
     // Verify that all the non-optional attributes have been initialized
     // TODO: Issue #20497
     if (attrType->kind() != TypeKind::OptionalType) {
-      TORCH_CHECK(
+      TORCH_CHECK_FMT(
           !slot.isNone(),
-          "The field '",
+          "The field '{}' was left uninitialized after '__setstate__', "
+          "but expected a value of type '{}'",
           attrName,
-          "' was left unitialized after __setstate__, but expected a ",
-          "value of type '",
-          attrType->python_str(),
-          "'");
+          attrType->python_str());
     }
   }
 }

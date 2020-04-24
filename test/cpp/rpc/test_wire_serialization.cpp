@@ -1,12 +1,11 @@
 #include <gtest/gtest.h>
 
-#include <torch/torch.h>
 #include <torch/csrc/distributed/rpc/utils.h>
+#include <torch/torch.h>
 
 #include <memory>
 #include <string>
 #include <vector>
-
 
 TEST(WireSerialize, Base) {
   auto run = [](const std::string& payload,
@@ -61,17 +60,42 @@ TEST(WireSerialize, CloneSparseTensors) {
   EXPECT_NE(&v2.get(0).storage(), &tiny.storage()); // Cloned.
   EXPECT_TRUE(torch::equal(v2.get(0), tiny));
 
-  at::Tensor sparse =
-      at::empty({2, 3}, at::dtype<float>().layout(at::kSparse));
+  at::Tensor sparse = at::empty({2, 3}, at::dtype<float>().layout(at::kSparse));
   auto v3 = torch::distributed::rpc::cloneSparseTensors({sparse});
   // There is no storage() to compare, but at least confirm equality.
   EXPECT_TRUE(v3.get(0).is_same(sparse));
 }
 
+TEST(WireSerialize, Errors) {
+  auto checkMessage = [](auto&& f, const char* msg) {
+    try {
+      f();
+      FAIL();
+    } catch (const std::runtime_error& e) {
+      EXPECT_STREQ(e.what(), msg);
+    } catch (...) {
+      FAIL();
+    }
+  };
+  checkMessage(
+      []() { (void)torch::distributed::rpc::wireDeserialize("", 0); },
+      "failed parse");
+  checkMessage(
+      []() { (void)torch::distributed::rpc::wireDeserialize(" ", 1); },
+      "failed parse");
+  auto serialized =
+      torch::distributed::rpc::wireSerialize({}, {torch::randn({5, 5})});
+  checkMessage(
+      [&]() {
+        (void)torch::distributed::rpc::wireDeserialize(
+            serialized.data(), serialized.size() / 2);
+      },
+      "failed bounds");
+}
+
 // Enable this once JIT Pickler supports sparse tensors.
 TEST(WireSerialize, DISABLED_Sparse) {
-  at::Tensor main =
-      at::empty({2, 3}, at::dtype<float>().layout(at::kSparse));
+  at::Tensor main = at::empty({2, 3}, at::dtype<float>().layout(at::kSparse));
   auto ser = torch::distributed::rpc::wireSerialize({}, {main.to(at::kSparse)});
   auto deser = torch::distributed::rpc::wireDeserialize(ser.data(), ser.size());
   EXPECT_TRUE(torch::equal(main, deser.second[0]));

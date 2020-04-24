@@ -105,9 +105,6 @@
 #   MKL_THREADING
 #     MKL threading mode: SEQ, TBB or OMP (default)
 #
-#   USE_FBGEMM
-#     Enables use of FBGEMM
-#
 #   USE_REDIS
 #     Whether to use Redis for distributed workflows (Linux only)
 #
@@ -796,6 +793,7 @@ if __name__ == '__main__':
                 'include/c10/*.h',
                 'include/c10/macros/*.h',
                 'include/c10/core/*.h',
+                'include/c10/fmt/*.h',
                 'include/ATen/core/boxing/*.h',
                 'include/ATen/core/boxing/impl/*.h',
                 'include/ATen/core/dispatch/*.h',

@@ -51,6 +51,7 @@ cc_library(
     name = "c10_headers",
     hdrs = glob([
         "c10/core/*.h",
+        "c10/fmt/*.h",
         "c10/core/impl/*.h",
         "c10/cuda/*.h",
         "c10/cuda/impl/*.h",
@@ -70,6 +71,7 @@ cc_library(
     name = "c10",
     srcs = glob([
         "c10/core/*.cpp",
+        "c10/fmt/*.cc",
         "c10/core/impl/*.cpp",
         "c10/util/*.cpp",
     ]) + if_cuda(
@@ -193,6 +195,12 @@ genrule(
         "torch/csrc/autograd/generated/VariableType_3.cpp",
         "torch/csrc/autograd/generated/VariableType_4.cpp",
         # "torch/csrc/autograd/generated/VariableTypeEverything.cpp",
+        "torch/csrc/autograd/generated/ProfiledType_0.cpp",
+        "torch/csrc/autograd/generated/ProfiledType_1.cpp",
+        "torch/csrc/autograd/generated/ProfiledType_2.cpp",
+        "torch/csrc/autograd/generated/ProfiledType_3.cpp",
+        "torch/csrc/autograd/generated/ProfiledType_4.cpp",
+        # "torch/csrc/autograd/generated/ProfiledTypeEverything.cpp",
         "torch/csrc/autograd/generated/RegistrationDeclarations.h",
         "torch/csrc/autograd/generated/Functions.h",
         "torch/csrc/autograd/generated/Functions.cpp",
