@@ -18,7 +18,7 @@ import warnings
 from torch._six import string_classes
 from torch.jit import _unique_state_dict
 from torch.onnx import ONNX_ARCHIVE_MODEL_PROTO_NAME, ExportTypes, OperatorExportTypes, TrainingMode
-from torch._C import ListType, OptionalType, _propagate_and_assign_input_shapes, _assign_output_shapes, _check_onnx_proto
+from torch._C import ListType, NoneType, OptionalType, _propagate_and_assign_input_shapes, _assign_output_shapes, _check_onnx_proto
 
 
 # the flag to tell the user whether it's in the middle of ONNX export or not
@@ -99,9 +99,7 @@ def _is_constant_tensor_list(node):
     if output_type.isSubtypeOf(ListType.ofTensors()):
         return True
     if output_type.isSubtypeOf(ListType(OptionalType.ofTensor())):
-        vals = node.output().toIValue()
-        # no None Values
-        return all(vals)
+        return True
 
 # ONNX can't handle constants that are lists of tensors, which can
 # get generated in constant prop. So we split them back into prim::ListConstructs
@@ -110,8 +108,10 @@ def _split_tensor_list_constants(g, block):
         for subblock in node.blocks():
             _split_tensor_list_constants(g, subblock)
         if _is_constant_tensor_list(node):
-            inputs = [g.create("prim::Constant").t_('value', t)
-                      .insertBefore(node).output() for t in node.output().toIValue()]
+            inputs = [g.create("prim::Constant").t_('value', t).insertBefore(node).output()
+                      if t is not None
+                      else g.create("prim::Constant").insertBefore(node).output().setType(NoneType.get())
+                      for t in node.output().toIValue()]
             lc = (g.create("prim::ListConstruct", inputs)
                   .insertBefore(node)
                   .output()
