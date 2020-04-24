@@ -34,8 +34,7 @@ class TestMkldnn(TestCase):
             for dtype in types:
                 mkldnn_tensor = cpu_tensor.to_mkldnn(dtype)
                 cpu_tensor_1 = mkldnn_tensor.to_dense(dtype)
-                self.assertEqual(cpu_tensor, cpu_tensor_1,
-                    dtype2prec[dtype])
+                self.assertEqual(cpu_tensor, cpu_tensor_1, dtype2prec[dtype])
                 self.assertEqual(mkldnn_tensor.dtype, dtype)
                 self.assertEqual(mkldnn_tensor.device, torch.device('cpu'))
                 self.assertEqual(mkldnn_tensor.size(), torch.Size([1, 2, 3, 4]))
