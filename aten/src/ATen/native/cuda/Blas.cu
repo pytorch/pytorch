@@ -1,12 +1,10 @@
 #include <ATen/ATen.h>
 #include <ATen/Dispatch.h>
-#include <ATen/native/Blas.h>
 #include <ATen/cuda/CUDABlas.h>
 
 namespace at { namespace native {
-namespace {
 
-void addmv_impl_cuda(Tensor& result, const Tensor &self, const Tensor &mat, const Tensor &vec, Scalar beta_, Scalar alpha_) {
+Tensor &addmv_impl_cuda(Tensor& result, const Tensor &self, const Tensor &mat, const Tensor &vec, Scalar beta_, Scalar alpha_) {
   auto r_stride = result.stride(0);
   auto vec_size = vec.size(0);
   auto vec_stride = vec.stride(0);
@@ -50,10 +48,7 @@ void addmv_impl_cuda(Tensor& result, const Tensor &self, const Tensor &mat, cons
       }
     }
   });
+  return result;
 }
-
-} // anonymous namespace
-
-REGISTER_DISPATCH(addmv_stub, &addmv_impl_cuda);
 
 }} // namespace at::native
