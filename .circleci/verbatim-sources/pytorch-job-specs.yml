@@ -144,8 +144,6 @@ jobs:
         type: string
         default: ""
     executor: windows-cpu-with-nvidia-cuda
-    environment:
-      BASE_REF: << pipeline.git.base_revision >>
     steps:
       - checkout
       - run:
@@ -224,8 +222,6 @@ jobs:
         type: string
         default: ""
     executor: windows-with-nvidia-gpu
-    environment:
-      BASE_REF: << pipeline.git.base_revision >>
     steps:
       - checkout
       - run:
