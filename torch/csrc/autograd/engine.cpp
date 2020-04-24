@@ -974,7 +974,6 @@ bool Engine::is_checkpoint_valid() {
 void Engine::init_local_ready_queue(std::shared_ptr<ReadyQueue> ready_queue) {
   if (ready_queue) {
     // if ready_queue provided in the caller, use the caller's ready_queue to initialize local_ready_queue
-    TORCH_INTERNAL_ASSERT(!local_ready_queue);
     local_ready_queue = std::move(ready_queue);
   } else if (!local_ready_queue){
     // otherwise if local_ready_queue not allocated, allocate a new ready_queue
