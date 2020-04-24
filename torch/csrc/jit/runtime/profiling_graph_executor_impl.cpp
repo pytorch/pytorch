@@ -1,4 +1,3 @@
-#include <torch/csrc/jit/runtime/profiling_graph_executor_impl.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/bailout_graph.h>
 #include <torch/csrc/jit/passes/canonicalize_ops.h>
@@ -21,6 +20,7 @@
 #include <torch/csrc/jit/passes/requires_grad_analysis.h>
 #include <torch/csrc/jit/passes/shape_analysis.h>
 #include <torch/csrc/jit/passes/specialize_autogradzero.h>
+#include <torch/csrc/jit/runtime/profiling_graph_executor_impl.h>
 
 C10_DECLARE_bool();
 
@@ -32,7 +32,7 @@ C10_DEFINE_bool(
 namespace torch {
 namespace jit {
 
-//TODO: keep the else clause for trial runs
+// TODO: keep the else clause for trial runs
 #if defined(FBCODE_CAFFE2) || defined(C10_MOBILE)
 static std::atomic<bool> executor_mode{true};
 static std::atomic<bool> profiling_mode{false};
