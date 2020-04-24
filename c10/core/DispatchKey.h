@@ -34,8 +34,6 @@ enum class DispatchKey : uint8_t {
   // this will get eliminated, but for now it's convenient)
   CatchAll = Undefined,
 
-
-
   // ~~~~~~~~~~~~~~~~~~~~~~~~~~ BACKENDS ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
   // A "backend" is colloquially used to refer to handlers for dispatch
   // which actually implement the numerics of an operation in question.
@@ -50,11 +48,13 @@ enum class DispatchKey : uint8_t {
 
   // Here are backends which you think of as traditionally specifying
   // how to implement operations on some device.
-  CPU,    // registered at build/aten/src/ATen/CPUType.cpp
-  CUDA,   // registered at build/aten/src/ATen/CUDAType.cpp
-  HIP,    // NB: I think this is not actually used, due to Note [Masquerading as CUDA]
-  MSNPU,  // unused externally, but tested at test/cpp_extensions/msnpu_extension.cpp
-  XLA,    // lives out of tree at https://github.com/pytorch/xla
+  CPU, // registered at build/aten/src/ATen/CPUType.cpp
+  CUDA, // registered at build/aten/src/ATen/CUDAType.cpp
+  HIP, // NB: I think this is not actually used, due to Note [Masquerading as
+       // CUDA]
+  MSNPU, // unused externally, but tested at
+         // test/cpp_extensions/msnpu_extension.cpp
+  XLA, // lives out of tree at https://github.com/pytorch/xla
 
   // These are Caffe2 device types which we grandfathered into
   // DispatchKey.
@@ -68,10 +68,13 @@ enum class DispatchKey : uint8_t {
   // Here are backends which specify more specialized operators
   // based on the dtype of the tensor.
   QuantizedCPU, // registered at build/aten/src/ATen/QuantizedCPUType.cpp
-  ComplexCPU,   // lives out of tree at https://gitlab.com/pytorch-complex/pytorch-cpu-strided-complex
-  ComplexCUDA,  // and https://gitlab.com/pytorch-complex/pytorch-cuda-strided-complex
-                        // tested at test/cpp_extensions/complex_registration_extension.cpp
-                        // TODO: Remove Complex dispatch keys when Complex is moved in tree
+  QuantizedCUDA, // registered at build/aten/src/ATen/QuantizedCUDAType.cpp
+  ComplexCPU, // lives out of tree at
+              // https://gitlab.com/pytorch-complex/pytorch-cpu-strided-complex
+  ComplexCUDA, // and
+               // https://gitlab.com/pytorch-complex/pytorch-cuda-strided-complex
+  // tested at test/cpp_extensions/complex_registration_extension.cpp
+  // TODO: Remove Complex dispatch keys when Complex is moved in tree
 
   // This backend is to support custom RNGs; it lets you go
   // to a different kernel if you pass in a generator that is not a
@@ -88,13 +91,15 @@ enum class DispatchKey : uint8_t {
   // based on the layout of the tensor.  Note that the sparse backends
   // are one case where ordering matters: sparse multi-dispatches with
   // the corresponding dense tensors, and must be handled before them.
-  MkldnnCPU,  // registered at build/aten/src/ATen/MkldnnCPUType.cpp
-                      // NB: not to be confused with MKLDNN, which is Caffe2 only
-  SparseCPU,  // registered at build/aten/src/ATen/SparseCPUType.cpp
+  MkldnnCPU, // registered at build/aten/src/ATen/MkldnnCPUType.cpp
+  // NB: not to be confused with MKLDNN, which is Caffe2 only
+  SparseCPU, // registered at build/aten/src/ATen/SparseCPUType.cpp
   SparseCUDA, // registered at build/aten/src/ATen/SparseCUDAType.cpp
-  SparseHIP,  // TODO: I think this is not actually used, due to Note [Masquerading as CUDA]
+  SparseHIP, // TODO: I think this is not actually used, due to Note
+             // [Masquerading as CUDA]
 
-  // Here are reserved backends for user-defined backends, see Note [Private use DispatchKey]
+  // Here are reserved backends for user-defined backends, see Note [Private use
+  // DispatchKey]
   // To see some example about how to use this, check out MSNPU
   PrivateUse1,
   PrivateUse2,
@@ -106,8 +111,6 @@ enum class DispatchKey : uint8_t {
   // can be registered to implement the custom determination of the
   // correct backend.
   BackendSelect,
-
-
 
   // ~~~~~~~~~~~~~~~~~~~~~~~~~~~ AUTOGRAD ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
   // All backends are oblivious to autograd; autograd is handled as a
@@ -137,12 +140,11 @@ enum class DispatchKey : uint8_t {
   // and inputs are saved for backward in the post-autocast type.
   Autocast,
 
-  // Here are some reserved pre-autograd keys for user-defined backends, see Note [Private use DispatchKey]
+  // Here are some reserved pre-autograd keys for user-defined backends, see
+  // Note [Private use DispatchKey]
   PrivateUse1_PreAutograd,
   PrivateUse2_PreAutograd,
   PrivateUse3_PreAutograd,
-
-
 
   // ~~~~~~~~~~~~~~~~~~~~~~~~~~~ WRAPPERS ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
   // There are a number of alternative modes which may want to handle before
@@ -160,7 +162,8 @@ enum class DispatchKey : uint8_t {
   // Don't use it for anything real; its only acceptable use is within a ingle
   // process test.  Use it by toggling the mode on and off via
   // TESTING_ONLY_tls_generic_mode_set_enabled and then registering operators
-  // to operate on this type id.  See aten/src/ATen/test/backend_fallback_test.cpp
+  // to operate on this type id.  See
+  // aten/src/ATen/test/backend_fallback_test.cpp
   // for a usage example
   TESTING_ONLY_GenericMode,
 
@@ -173,8 +176,6 @@ enum class DispatchKey : uint8_t {
   CPUTensorId = CPU,
   CUDATensorId = CUDA,
 };
-
-
 
 // Note [Private use DispatchKey]
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~
