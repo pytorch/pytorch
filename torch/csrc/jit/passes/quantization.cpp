@@ -1875,8 +1875,6 @@ ModuleMethodVector InsertQuantDeQuantHelper::getInvokedMethods(
               "Module instance should come from GetAttr.");
           if (module_method_name.find("_observer_") == std::string::npos) {
             m = getInvokedModule(module, n, graph->inputs()[0]);
-          } else {
-            m = c10::nullopt;
           }
         }
         if (m) {
