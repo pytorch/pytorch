@@ -553,6 +553,7 @@ class RpcTest(RpcAgentTestFixture):
         if self.rank == 0:
             rpc.init_rpc(
                 name="me",
+                backend=self.rpc_backend,
                 rank=0,
                 world_size=1,
                 rpc_backend_options=self.rpc_backend_options,
