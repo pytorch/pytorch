@@ -682,7 +682,6 @@ class TestPostTrainingDynamic(QuantizationTestCase):
             with override_quantized_engine(qengine):
                 if qengine in torch.backends.quantized.supported_engines:
                     for dtype in [torch.qint8, torch.float16]:
-                        print(dtype, qengine)
                         if dtype == torch.float16 and qengine == "qnnpack":
                             # fp16 dynamic quant is not supported for qnnpack
                             continue
@@ -788,7 +787,10 @@ class TestPostTrainingDynamic(QuantizationTestCase):
         for qengine in ['fbgemm', 'qnnpack']:
             with override_quantized_engine(qengine):
                 if qengine in torch.backends.quantized.supported_engines:
-                    print('lstm, supported qengine', qengine)
+                    if qengine == 'qnnpack':
+                        if IS_WINDOWS or TEST_WITH_UBSAN:
+                            return
+
                     # Test default instantiation
                     seq_len = 128
                     batch = 16
@@ -812,7 +814,6 @@ class TestPostTrainingDynamic(QuantizationTestCase):
                                                               dropout=0.0,
                                                               bidirectional=bidirectional,
                                                               dtype=dtype)
-                    print('Created cell dq')
 
                     y, (h, c) = cell_dq(x, (h, c))
 
