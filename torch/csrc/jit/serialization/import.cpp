@@ -45,10 +45,11 @@ void postSetStateValidate(const IValue& v) {
     if (attrType->kind() != TypeKind::OptionalType) {
       TORCH_CHECK(
           !slot.isNone(),
-          fmt::format("The field '{}' was left uninitialized after '__setstate__', "
-          "but expected a value of type '{}'",
-          attrName,
-          attrType->python_str()));
+          fmt::format(
+              "The field '{}' was left uninitialized after '__setstate__', "
+              "but expected a value of type '{}'",
+              attrName,
+              attrType->python_str()));
     }
   }
 }
