@@ -309,8 +309,8 @@ public:
     return sqrt().reciprocal();
   }
   Vec256<std::complex<float>> pow(const Vec256<std::complex<float>> &exp) const {
-    __at_align32__ std::complex<double> x_tmp[size()];
-    __at_align32__ std::complex<double> y_tmp[size()];
+    __at_align32__ std::complex<float> x_tmp[size()];
+    __at_align32__ std::complex<float> y_tmp[size()];
     store(x_tmp);
     exp.store(y_tmp);
     for (int i = 0; i < size(); i++) {
