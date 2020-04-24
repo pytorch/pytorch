@@ -42,7 +42,7 @@ def RemoteModule(
     """
         The returned RemoteModule instance will have auto-generated
         forward_async / forward methods, check the implementation in
-        local_foward_async_template.py / local_foward_template.py,
+        remote_module.py.template,
         the arguments they take are the same as the forward method
         of the module created by the module_creator.
 

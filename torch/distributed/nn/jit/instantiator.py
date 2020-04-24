@@ -98,7 +98,7 @@ def instantiate_remote_module_template(
         }
 
     remote_forward_template = CodeTemplate.from_file(
-        os.path.join(TEMPLATE_DIR_PATH, "remote_module_template.py")
+        os.path.join(TEMPLATE_DIR_PATH, "remote_module.py.template")
     )
     env = dict(
         generated_module_name=generated_module_name,
