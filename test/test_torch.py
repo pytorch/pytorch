@@ -4701,8 +4701,16 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         pass
 
     def test_is_nonzero(self):
-        self.assertExpectedRaises(RuntimeError, lambda: torch.tensor([]).is_nonzero(), subname="empty")
-        self.assertExpectedRaises(RuntimeError, lambda: torch.tensor([0, 0]).is_nonzero(), subname="multiple")
+        self.assertExpectedRaisesInline(
+            RuntimeError,
+            lambda: torch.tensor([]).is_nonzero(),
+            "bool value of Tensor with no values is ambiguous",
+        )
+        self.assertExpectedRaisesInline(
+            RuntimeError,
+            lambda: torch.tensor([0, 0]).is_nonzero(),
+            "bool value of Tensor with more than one value is ambiguous",
+        )
         self.assertFalse(torch.tensor(0).is_nonzero())
         self.assertTrue(torch.tensor(1).is_nonzero())
         self.assertFalse(torch.tensor([0]).is_nonzero())
