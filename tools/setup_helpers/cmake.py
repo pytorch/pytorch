@@ -351,6 +351,7 @@ class CMake:
         # build detector.
         # This line works around that bug by manually updating the build.ninja timestamp
         # after the entire build is finished.
-        ninja_build_file = os.path.join(self.build_dir, 'build.ninja')
-        if os.path.exists(ninja_build_file):
-            os.utime(ninja_build_file, None)
+        if False:
+          ninja_build_file = os.path.join(self.build_dir, 'build.ninja')
+          if os.path.exists(ninja_build_file):
+              os.utime(ninja_build_file, None)
