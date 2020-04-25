@@ -582,8 +582,8 @@ elseif(USE_CUDA)
 endif()
 
 
-if(NOT MSVC)
-  target_link_libraries(torch_cpu PRIVATE fxdiv)
+if(NOT MSVC AND USE_XNNPACK)
+  TARGET_LINK_LIBRARIES(torch_cpu PRIVATE fxdiv)
 endif()
 
 # ==========================================================
