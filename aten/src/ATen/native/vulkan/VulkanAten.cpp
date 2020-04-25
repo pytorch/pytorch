@@ -21,21 +21,6 @@
 namespace at {
 namespace native {
 
-template <typename T>
-struct CAFFE2_API IntrusivePtrTargetWrapper : c10::intrusive_ptr_target {
- private:
-  T target_;
-
- public:
-  IntrusivePtrTargetWrapper() = delete;
-  IntrusivePtrTargetWrapper(const T& target) : target_(target) {}
-  IntrusivePtrTargetWrapper(T&& target) : target_(std::move(target)) {}
-
-  T& get_target() {
-    return target_;
-  }
-};
-
 #ifdef USE_VULKAN
 using VTensor = at::native::vulkan::details::vulkan::VulkanTensor;
 #else
@@ -46,14 +31,12 @@ using VTensor = at::native::vulkan::details::gl::GLTensor;
 
 #endif
 
-using VTensorWrapper = IntrusivePtrTargetWrapper<VTensor>;
-using VTensorWrapperPtr = c10::intrusive_ptr<VTensorWrapper>;
-using VulkanTensorImpl = OpaqueTensorImpl<VTensorWrapperPtr>;
-using VulkanTensor = at::Tensor;
+using VTensorPtr = c10::intrusive_ptr<VTensor>;
+using VulkanTensorImpl = OpaqueTensorImpl<VTensorPtr>;
 
 at::Tensor new_with_vtensor_vulkan(VTensor&& vt, const TensorOptions& options) {
   auto dims = vt.sizes();
-  VTensorWrapperPtr handle = c10::make_intrusive<VTensorWrapper>(std::move(vt));
+  VTensorPtr handle = c10::make_intrusive<VTensor>(std::move(vt));
   return detail::make_tensor<VulkanTensorImpl>(
       DispatchKeySet(DispatchKey::VulkanTensorId),
       options.dtype(),
@@ -62,13 +45,12 @@ at::Tensor new_with_vtensor_vulkan(VTensor&& vt, const TensorOptions& options) {
       std::vector<int64_t>(dims.begin(), dims.end()));
 }
 
-VTensor& vtensor_from_vulkan(const VulkanTensor& vulkan_tensor) {
+VTensor& vtensor_from_vulkan(const at::Tensor& tensor) {
   AT_ASSERTM(
-      vulkan_tensor.is_vulkan(),
-      "vtensor_from_vulkan expects Vulkan tensor input");
+      tensor.is_vulkan(), "vtensor_from_vulkan expects Vulkan tensor input");
   VulkanTensorImpl* impl =
-      static_cast<VulkanTensorImpl*>(vulkan_tensor.unsafeGetTensorImpl());
-  return impl->unsafe_opaque_handle()->get_target();
+      static_cast<VulkanTensorImpl*>(tensor.unsafeGetTensorImpl());
+  return *(impl->unsafe_opaque_handle());
 }
 
 at::Tensor empty_vulkan(

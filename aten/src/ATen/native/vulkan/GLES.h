@@ -10,6 +10,8 @@
 #include <GLES3/gl31.h>
 #include <GLES3/gl32.h>
 
+#include <c10/util/intrusive_ptr.h>
+
 namespace at {
 namespace native {
 namespace vulkan {
@@ -41,7 +43,7 @@ class AGLTexture {
   GLenum texFormat_{GL_RGBA32F};
 }; // class AGLTexture
 
-class GLTensor {
+class GLTensor : public c10::intrusive_ptr_target {
  public:
   GLTensor(std::vector<int64_t> sizes);
 

@@ -6,6 +6,8 @@
 
 #include "vulkan_wrapper.h"
 
+#include <c10/util/intrusive_ptr.h>
+
 namespace at {
 namespace native {
 namespace vulkan {
@@ -35,7 +37,7 @@ class AVKImage {
   VkSampler sampler_;
 };
 
-class VulkanTensor {
+class VulkanTensor : public c10::intrusive_ptr_target {
  public:
   VulkanTensor(std::vector<int64_t> sizes);
   ~VulkanTensor() = default;
