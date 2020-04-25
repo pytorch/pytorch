@@ -144,6 +144,10 @@ PyObject *THPEngine_run_backward(THPEngine *self, PyObject *args, PyObject *kwar
     THPUtils_assert(THPVariable_Check(_tensor), "element %d of tensors "
         "tuple is not a Tensor", i);
     auto& variable = ((THPVariable*)_tensor)->cdata;
+    if(variable.is_complex()) {
+      TORCH_WARN_ONCE("Complex backward is not fully supported yet and could lead to wrong ",
+                      "gradients for functions we have not fixed yet");
+    }
     auto gradient_edge = torch::autograd::impl::gradient_edge(variable);
     THPUtils_assert(gradient_edge.function,
         "element %d of tensors does not require grad and does not have a grad_fn", i);
