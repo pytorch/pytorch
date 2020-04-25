@@ -1,7 +1,7 @@
 #define _USE_MATH_DEFINES
 
 #include <math.h>
-#include <c10/util/wrap_complex.h>
+#define WRAP_COMPLEX
 #include <ATen/ATen.h>
 #include <ATen/Dispatch.h>
 #include <ATen/native/TensorIterator.h>

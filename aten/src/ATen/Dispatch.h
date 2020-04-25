@@ -1,7 +1,7 @@
 // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!1
 // Warning: If you use this file and deal with complex
 // tensors, then you might need to manually do
-// #include <c10/util/wrap_complex.h>
+// #define WRAP_COMPLEX
 // at the beginning of your file
 // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
@@ -12,15 +12,29 @@
 #include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Half.h>
+#include <c10/util/complex_type.h>
 
 #ifndef WRAP_COMPLEX
 template <typename T>
-using wrap_complex_t = T;
+using wrap_complex = T;
+#else
+template <typename T>
+struct wrap_complex_helper {
+  using type = T;
+};
+
+template <typename T>
+struct wrap_complex_helper<c10::complex<T>> {
+  using type = std::complex<T>;
+};
+
+template <typename T>
+using wrap_complex = typename wrap_complex_helper<T>::type;
 #endif
 
 #define AT_PRIVATE_CASE_TYPE(enum_type, type, ...) \
   case enum_type: {                                \
-    using scalar_t = wrap_complex_t<type>;         \
+    using scalar_t = wrap_complex<type>;         \
     return __VA_ARGS__();                          \
   }
 
@@ -31,7 +45,7 @@ using wrap_complex_t = T;
 //   #include <ATen/Dispatch.h>
 // Then wrap_complex_t<T> will be T itself for complex types.
 // Otherwise if the file including this does:
-//   #include <c10/util/wrap_complex.h>
+//   #define WRAP_COMPLEX
 //   #include <ATen/Dispatch.h>
 // Then wrap_complex_t<T> will convert c10::complex to std::complex
 

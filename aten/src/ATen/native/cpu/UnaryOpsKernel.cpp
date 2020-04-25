@@ -1,6 +1,6 @@
 #include <cmath>
 #include <type_traits>
-#include <c10/util/wrap_complex.h>
+#define WRAP_COMPLEX
 #include <ATen/Config.h>
 #include <ATen/Dispatch.h>
 #include <ATen/CPUGeneratorImpl.h>

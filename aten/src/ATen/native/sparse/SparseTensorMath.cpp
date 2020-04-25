@@ -1,4 +1,4 @@
-#include <c10/util/wrap_complex.h>
+#define WRAP_COMPLEX
 #include <ATen/native/sparse/SparseTensorMath.h>
 
 #include <ATen/ATen.h>

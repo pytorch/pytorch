@@ -1,5 +1,5 @@
 // Returns the frequency of elements of input non-negative integer tensor.
-#include <c10/util/wrap_complex.h>
+#define WRAP_COMPLEX
 #include <ATen/ATen.h>
 #include <ATen/Dispatch.h>
 

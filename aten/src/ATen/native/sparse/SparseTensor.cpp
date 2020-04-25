@@ -1,5 +1,5 @@
 // Basic functions on sparse tensors
-#include <c10/util/wrap_complex.h>
+#define WRAP_COMPLEX
 #include <ATen/ATen.h>
 #include <ATen/Layout.h>
 #include <ATen/Parallel.h>

@@ -1,4 +1,4 @@
-#include <c10/util/wrap_complex.h>
+#define WRAP_COMPLEX
 #include <ATen/native/GridSampler.h>
 #include <ATen/ATen.h>
 #include <ATen/Device.h>
