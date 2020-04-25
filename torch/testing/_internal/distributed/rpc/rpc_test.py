@@ -1919,6 +1919,56 @@ class RpcTest(RpcAgentTestFixture):
         self.assertEqual(default_timeout, timeout)
         rpc.shutdown()
 
+    @dist_init(setup_rpc=False)
+    def test_default_timeout_backend_opts_dispatch(self):
+        # Similar to above test, but also verifies that
+        timeout = 0.5
+        rpc_backend_options = rpc.backend_registry.construct_rpc_backend_options(
+            self.rpc_backend,
+            # For any RpcAgent.
+            rpc_timeout=timeout,
+            init_method=self.init_method,
+            # For ProcessGroupAgent.
+            num_send_recv_threads=32,
+        )
+        rpc.init_rpc(
+            name=worker_name(self.rank),
+            backend=self.rpc_backend,
+            rank=self.rank,
+            world_size=self.world_size,
+            rpc_backend_options=rpc_backend_options,
+        )
+
+        default_timeout = rpc.get_rpc_timeout()
+        self.assertEqual(default_timeout, timeout)
+        rpc.shutdown()
+
+    @dist_init(setup_rpc=False)
+    @requires_process_group_agent("PROCESS_GROUP rpc backend specific test, skip")
+    def test_process_group_options_throw_on_timedelta_timeout(self):
+        from datetime import timedelta
+
+        timeout = timedelta()
+        # Ensure that constructing ProcessGroupRpcBackendOptions with timedelta fails
+        with self.assertRaisesRegex(TypeError, "incompatible constructor arguments"):
+            rpc_backend_options = rpc.ProcessGroupRpcBackendOptions(
+                init_method=self.rpc_backend_options.init_method,
+                num_send_recv_threads=self.rpc_backend_options.num_send_recv_threads,
+                rpc_timeout=timeout,
+            )
+
+        # Ensure that constructing via dispatch to the rpc backend options handler
+        # with timedelta also fails
+        with self.assertRaisesRegex(TypeError, "incompatible constructor arguments"):
+            rpc_backend_options = rpc.backend_registry.construct_rpc_backend_options(
+                self.rpc_backend,
+                # For any RpcAgent.
+                rpc_timeout=timeout,
+                init_method=self.init_method,
+                # For ProcessGroupAgent.
+                num_send_recv_threads=32,
+            )
+
     @dist_init
     def test_default_timeout_used(self):
         """

@@ -63,8 +63,6 @@ def construct_rpc_backend_options(
     init_method=rpc_constants.DEFAULT_INIT_METHOD,
     **kwargs
 ):
-    if not isinstance(rpc_timeout, float):
-        raise RuntimeError("rpc_timeout must be a float")
 
     return backend.value.construct_rpc_backend_options_handler(
         rpc_timeout, init_method, **kwargs
