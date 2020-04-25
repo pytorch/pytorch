@@ -34,7 +34,7 @@ using wrap_complex = typename wrap_complex_helper<T>::type;
 
 #define AT_PRIVATE_CASE_TYPE(enum_type, type, ...) \
   case enum_type: {                                \
-    using scalar_t = wrap_complex<type>;         \
+    using scalar_t = wrap_complex<type>;           \
     return __VA_ARGS__();                          \
   }
 
