@@ -306,16 +306,16 @@ c10::intrusive_ptr<OwnerRRef> RRefContext::createOwnerRRef(
       getWorkerId(), genGloballyUniqueId(), type);
 }
 
-std::shared_ptr<torch::utils::Future<c10::intrusive_ptr<OwnerRRef>>>
-RRefContext::getOwnerRRef(const RRefId& rrefId) {
+std::shared_ptr<Future<c10::intrusive_ptr<OwnerRRef>>> RRefContext::
+    getOwnerRRef(const RRefId& rrefId) {
   std::unique_lock<std::mutex> lock(mutex_);
   const auto iter = owners_.find(rrefId);
   if (iter == owners_.end()) {
     // Scenario (1) RRef is used before it is created
     const auto pendingOwnerIter = pendingOwners_.find(rrefId);
     if (pendingOwnerIter == pendingOwners_.end()) {
-      auto futureOwner = std::make_shared<
-          torch::utils::Future<c10::intrusive_ptr<OwnerRRef>>>();
+      auto futureOwner =
+          std::make_shared<Future<c10::intrusive_ptr<OwnerRRef>>>();
       pendingOwners_[rrefId] = futureOwner;
       return futureOwner;
     } else {
@@ -327,8 +327,7 @@ RRefContext::getOwnerRRef(const RRefId& rrefId) {
     // marks the Future as completed. This is true for utils::Future, but
     // not so for ivalue::Future. Hence, when merging the two Future
     // implementations later, we might need to modify code here as well.
-    return std::make_shared<
-        torch::utils::Future<c10::intrusive_ptr<OwnerRRef>>>(
+    return std::make_shared<Future<c10::intrusive_ptr<OwnerRRef>>>(
         c10::static_intrusive_pointer_cast<OwnerRRef>(iter->second));
   }
 }
@@ -555,13 +554,12 @@ void RRefContext::recordThreadLocalPendingRRefs() {
   recording_ = true;
 }
 
-std::shared_ptr<torch::utils::Future<bool>> RRefContext::
-    waitForThreadLocalPendingRRefs() {
-  std::shared_ptr<torch::utils::Future<bool>> future;
+std::shared_ptr<Future<bool>> RRefContext::waitForThreadLocalPendingRRefs() {
+  std::shared_ptr<Future<bool>> future;
   if (userTable_.empty()) {
-    future = std::make_shared<torch::utils::Future<bool>>(true);
+    future = std::make_shared<Future<bool>>(true);
   } else {
-    future = std::make_shared<torch::utils::Future<bool>>();
+    future = std::make_shared<Future<bool>>();
     auto remainingRRefs =
         std::make_shared<std::atomic<uint64_t>>(userTable_.size());
     for (auto& state : userTable_) {
