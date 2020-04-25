@@ -1,3 +1,4 @@
+# torch
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -8,14 +9,19 @@ import torch.nn.quantized.dynamic as nnqd
 import torch.nn.quantized.functional as qF
 import torch.quantization
 
+# Testing utils
 from torch.testing._internal.common_quantization import QuantizationTestCase, prepare_dynamic
 from torch.testing._internal.common_quantized import _calculate_dynamic_qparams, override_quantized_engine
+from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.common_utils import IS_PPC, TEST_WITH_UBSAN
+
+# Hypothesis utils
 from hypothesis import assume, given
 from hypothesis import strategies as st
 import torch.testing._internal.hypothesis_utils as hu
 hu.assert_deadline_disabled()
 
+# Standard library
 import io
 import numpy as np
 import unittest
@@ -880,3 +886,6 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         self.assertEqual(qY_ref.int_repr().numpy(), qY.int_repr().numpy(),
                          message="LayerNorm module API failed, qY_ref\n{} vs qY\n{}"
                          .format(qY_ref, qY))
+
+if __name__ == '__main__':
+    run_tests()

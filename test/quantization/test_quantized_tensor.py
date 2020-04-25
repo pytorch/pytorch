@@ -1,18 +1,21 @@
-import numpy as np
-import math
-import torch
-import io
-import unittest
-from copy import deepcopy
-from hypothesis import given
-from hypothesis import strategies as st
-
+# Testing utils
+from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.common_utils import TestCase, TEST_WITH_ROCM
 import torch.testing._internal.hypothesis_utils as hu
 
+# Hypothesis utils
+from hypothesis import given
+from hypothesis import strategies as st
 hu.assert_deadline_disabled()
 
+# Standard library
+from copy import deepcopy
+import io
+import math
+import numpy as np
 import tempfile
+import torch
+import unittest
 
 class Foo(torch.nn.Module):
     def __init__(self):
@@ -481,3 +484,6 @@ class TestQuantizedTensor(TestCase):
             # dequantized values must be the same
             r_cpu, r_cuda = qr_cpu.dequantize().numpy(), qr_cuda.dequantize().cpu().numpy()
             np.testing.assert_almost_equal(r_cuda, r_cpu, decimal=5)
+
+if __name__ == '__main__':
+    run_tests()

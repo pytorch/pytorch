@@ -1,9 +1,5 @@
 # -*- coding: utf-8 -*-
 
-import sys
-import os
-import unittest
-
 # torch
 import torch
 import torch.nn.quantized as nnq
@@ -11,7 +7,13 @@ import torch.nn.quantized.dynamic as nnqd
 import torch.nn.intrinsic.quantized as nniq
 
 # Testing utils
+from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.common_utils import TestCase
+
+# Standard library
+import sys
+import os
+import unittest
 
 class TestSerialization(TestCase):
     """ Test backward compatiblity for serialization and numerics
@@ -140,3 +142,6 @@ class TestSerialization(TestCase):
                                  groups=1, bias=True, padding_mode="zeros")
         self._test_op(module, input_size=[1, 3, 6, 6, 6], generate=False)
         # TODO: graph mode quantized conv3d module
+
+if __name__ == '__main__':
+    run_tests()

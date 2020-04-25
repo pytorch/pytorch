@@ -1,16 +1,24 @@
+# torch
 import torch
 import torch.cuda
 import torch.jit
-import numpy as np
+
+# Testing utils
+from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import TestCase
+from torch.quantization import FakeQuantize
+from torch.quantization import default_observer, default_per_channel_weight_observer
+
+# Hypothesis utils
 from hypothesis import given
 from hypothesis import strategies as st
 import torch.testing._internal.hypothesis_utils as hu
 hu.assert_deadline_disabled()
-from torch.testing._internal.common_utils import TestCase
-from torch.quantization import FakeQuantize
-from torch.quantization import default_observer, default_per_channel_weight_observer
+
+# Standard library
 import io
 import unittest
+import numpy as np
 
 # Reference method for fake quantize
 def _fake_quantize_per_tensor_affine_reference(X, scale, zero_point, quant_min, quant_max):
@@ -309,3 +317,6 @@ class TestFakeQuantizePerChannel(TestCase):
         loaded_dict = torch.load(b)
         for key in state_dict:
             self.assertEqual(state_dict[key], loaded_dict[key])
+
+if __name__ == '__main__':
+    run_tests()

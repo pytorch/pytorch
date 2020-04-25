@@ -1,12 +1,13 @@
-import unittest
-import math
+# torch
 import torch
 import torch.nn as nn
-import torch.nn.quantized as nnq
 import torch.nn.intrinsic as nni
 import torch.nn.intrinsic.quantized as nniq
 import torch.nn.intrinsic.qat as nniqat
+import torch.nn.quantized as nnq
 from torch.nn.utils.rnn import PackedSequence
+
+# torch quantization
 from torch.quantization import \
     get_observer_dict, default_weight_observer, \
     quantize, prepare, convert, prepare_qat, quantize_qat, fuse_modules, \
@@ -15,7 +16,6 @@ from torch.quantization import \
     PerChannelMinMaxObserver, RecordingObserver, MovingAverageMinMaxObserver, \
     MovingAveragePerChannelMinMaxObserver, QuantWrapper, default_eval_fn, \
     float16_dynamic_qconfig, MinMaxDynamicQuantObserver
-
 from torch.quantization import QConfig
 from torch.quantization import default_histogram_observer
 from torch.quantization import default_observer
@@ -23,6 +23,8 @@ from torch.quantization import default_per_channel_weight_observer
 from torch.quantization import default_per_channel_qconfig
 from torch.quantization._quantize_script import quantize_script, quantize_dynamic_script
 
+# Testing utils
+from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.common_utils import TEST_WITH_UBSAN, IS_WINDOWS
 from torch.testing._internal.common_quantization import QuantizationTestCase, \
     AnnotatedSingleLayerLinearModel, SingleLayerLinearModel, \
@@ -36,18 +38,22 @@ from torch.testing._internal.common_quantization import QuantizationTestCase, \
     TwoLayerLinearModel, NestedModel, ResNetBase, LSTMDynamicModel, \
     ModelWithNoQconfigPropagation, ModelForFusionWithBias, \
     ActivationsTestModel, ActivationsQATTestModel, NormalizationTestModel
-
 from torch.testing._internal.common_quantization import AnnotatedTwoLayerLinearModel, AnnotatedNestedModel, \
     AnnotatedSubNestedModel, AnnotatedCustomConfigNestedModel
 from torch.testing._internal.common_quantization import AnnotatedSkipQuantModel
-
 from torch.testing._internal.common_quantized import override_quantized_engine
+
+# Hypothesis utils
 from hypothesis import given
 from hypothesis import strategies as st
 import torch.testing._internal.hypothesis_utils as hu
 hu.assert_deadline_disabled()
-import io
+
+# Standard library
 import copy
+import io
+import math
+import unittest
 
 @unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
                      " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
@@ -1780,3 +1786,6 @@ class TestRecordHistogramObserver(QuantizationTestCase):
         self.assertEqual(myobs.histogram, loaded_obs.histogram)
         self.assertEqual(myobs.bins, loaded_obs.bins)
         self.assertEqual(myobs.calculate_qparams(), loaded_obs.calculate_qparams())
+
+if __name__ == '__main__':
+    run_tests()

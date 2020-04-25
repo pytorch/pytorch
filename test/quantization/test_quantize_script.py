@@ -28,6 +28,7 @@ from torch.quantization._quantize_script import prepare_dynamic_script
 from torch.quantization._quantize_script import quantize_dynamic_script
 
 # Testing utils
+from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.common_quantization import SingleLayerLinearModel, AnnotatedSingleLayerLinearModel
 from torch.testing._internal.common_quantization import ConvModel, AnnotatedConvModel
 from torch.testing._internal.common_quantization import test_only_eval_fn as _test_only_eval_fn
@@ -1845,3 +1846,6 @@ class TestQuantizeDynamicScript(JitTestCase):
                    .check("aten::lstm") \
                    .check("return") \
                    .run(str(get_module_method(m, 'lstm', 'forward__0').graph))
+
+if __name__ == '__main__':
+    run_tests()

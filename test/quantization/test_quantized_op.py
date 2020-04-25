@@ -1,23 +1,28 @@
 from __future__ import division
 from builtins import round
 
-import numpy as np
-import unittest
-
+# torch
 import torch
 import torch.jit
 import torch.nn.functional as F
 from torch.nn.modules.utils import _single, _pair
 
+# Testing utils
+from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import TEST_WITH_UBSAN, TestCase, IS_PPC, IS_MACOS
+from torch.testing._internal.common_quantized import _quantize, _dequantize, _calculate_dynamic_qparams, \
+    override_quantized_engine
+
+# Hypothesis utils
 from hypothesis import settings, HealthCheck
 from hypothesis import assume, given, note
 from hypothesis import strategies as st
 import torch.testing._internal.hypothesis_utils as hu
 hu.assert_deadline_disabled()
 
-from torch.testing._internal.common_utils import TEST_WITH_UBSAN, TestCase, IS_PPC, IS_MACOS
-from torch.testing._internal.common_quantized import _quantize, _dequantize, _calculate_dynamic_qparams, \
-    override_quantized_engine
+# Standard library
+import numpy as np
+import unittest
 
 np_dtype = {
     torch.quint8 : np.uint8,
@@ -2897,3 +2902,6 @@ class TestComparatorOps(TestCase):
             result = getattr(qA, op)(b)
             self.assertEqual(result_ref, result,
                              "'tensor.{}(scalar)'' failed".format(op))
+
+if __name__ == '__main__':
+    run_tests()

@@ -1,11 +1,18 @@
+# torch
 import torch
+
+# torch quantization
 from torch.quantization import default_eval_fn, quantize
 from torch.quantization._numeric_suite import compare_weights
+
+# Testing Utils
+from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.common_quantization import (
     AnnotatedConvModel,
     QuantizationTestCase,
 )
 
+# Standard library
 import unittest
 
 class TestEagerModeNumericSuite(QuantizationTestCase):
@@ -28,3 +35,6 @@ class TestEagerModeNumericSuite(QuantizationTestCase):
         self.assertEqual(len(weight_dict), 1)
         for k, v in weight_dict.items():
             self.assertTrue(v["float"].shape == v["quantized"].shape)
+
+if __name__ == '__main__':
+    run_tests()
