@@ -1124,7 +1124,7 @@ class Module(object):
         r"""Sets gradients of all model parameters to zero."""
         if getattr(self, '_is_replica', False):
             warnings.warn(
-                "Calling .zero_grad() from a module that was passed to a nn.DataParallel() has no effect. "
+                "Calling .zero_grad() from a module created with nn.DataParallel() has no effect. "
                 "The parameters are copied (in a differentiable manner) from the original module. "
                 "This means they are not leaf nodes in autograd and so don't accumulate gradients. "
                 "If you need gradients in your forward method, consider using autograd.grad instead.")
