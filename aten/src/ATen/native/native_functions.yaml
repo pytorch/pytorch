@@ -3540,7 +3540,6 @@
     SparseCPU: sparse_to_dense
     SparseCUDA: sparse_to_dense
     MkldnnCPU: mkldnn_to_dense
-    Vulkan: vulkan_to_dense
   requires_tensor: True
 
 - func: to_dense_backward(Tensor grad, Tensor input) -> Tensor
@@ -3707,12 +3706,6 @@
   variants: method
   dispatch:
     CPU: dense_to_mkldnn
-
-- func: to_vulkan(Tensor self) -> Tensor
-  use_c10_dispatcher: full
-  variants: method
-  dispatch:
-    CPU: dense_to_vulkan
 
 - func: mkldnn_reorder_conv2d_weight(Tensor self, int[2] padding=0, int[2] stride=1, int[2] dilation=1, int groups=1) -> Tensor
   variants: function

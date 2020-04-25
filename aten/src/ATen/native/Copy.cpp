@@ -5,6 +5,7 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/quantized/Copy.h>
+#include <ATen/native/vulkan/VulkanAten.h>
 #include <ATen/quantized/Quantizer.h>
 #include <ATen/MemoryOverlap.h>
 #include <ATen/NamedTensorUtils.h>
@@ -78,7 +79,7 @@ void copy_same_type_transpose_(Tensor& self, const Tensor& src) {
 // (e.g. XLA) may be supported by overriding copy_ and _copy_from.
 bool is_supported_device(Device device) {
   DeviceType device_type = device.type();
-  return device_type == kCPU || device_type == kCUDA || device_type == kHIP;
+  return device_type == kCPU || device_type == kCUDA || device_type == kHIP || device_type == kVulkan;
 }
 
 } // namespace
@@ -124,6 +125,10 @@ static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) 
 
   if (!self.is_quantized() && src.is_quantized()) {
     TORCH_CHECK(false, "Copying from quantized Tensor to non-quantized Tensor is not allowed, please use dequantize to get a float Tensor from a quantized Tensor");
+  }
+
+  if(self.device().type() == at::kVulkan || src.device().type() == at::kVulkan) {
+    return vulkan_copy_(self, src);
   }
 
   auto iter = TensorIterator();

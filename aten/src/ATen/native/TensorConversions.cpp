@@ -29,6 +29,12 @@ static inline Tensor to_impl(const Tensor& self, const TensorOptions& options, b
     return self;
   }
 
+  if (options.device().type() == at::kVulkan) {
+    auto r = at::empty(self.sizes(), options, c10::nullopt);
+    r.copy_(self, non_blocking);
+    return r;
+  }
+
   if (memory_format == MemoryFormat::Preserve) {
     if (self.is_non_overlapping_and_dense()) {
       // Copy all strides

@@ -64,7 +64,8 @@ at::Tensor new_with_vtensor_vulkan(VTensor&& vt, const TensorOptions& options) {
 
 VTensor& vtensor_from_vulkan(const VulkanTensor& vulkan_tensor) {
   AT_ASSERTM(
-      vulkan_tensor.is_vulkan(), "vulkan_to_dense expects Vulkan tensor input");
+      vulkan_tensor.is_vulkan(),
+      "vtensor_from_vulkan expects Vulkan tensor input");
   VulkanTensorImpl* impl =
       static_cast<VulkanTensorImpl*>(vulkan_tensor.unsafeGetTensorImpl());
   return impl->unsafe_opaque_handle()->get_target();
@@ -85,38 +86,60 @@ at::Tensor empty_vulkan(
   return new_with_vtensor_vulkan(std::move(vt), options);
 }
 
-at::Tensor vulkan_to_dense(const at::Tensor& vulkan_tensor) {
-  VTensor& vtensor = vtensor_from_vulkan(vulkan_tensor);
-  auto dims = vtensor.sizes();
-  Tensor cpu_tensor = at::empty(
-      std::vector<int64_t>(dims.begin(), dims.end()),
-      vulkan_tensor.options()
-          .device(at::Device(at::kCPU))
-          .layout(c10::kStrided));
-  float* tensorOutputData = cpu_tensor.template data_ptr<float>();
-  vtensor.copyDataToHost(tensorOutputData);
-  return cpu_tensor;
+at::Tensor& copy_from_vulkan_(at::Tensor& self, const at::Tensor& src) {
+  AT_ASSERTM(
+      src.device().type() == DeviceType::Vulkan,
+      "copy_from_vulkan input tensor's device is not Vulkan");
+  AT_ASSERTM(
+      self.device().type() == DeviceType::CPU,
+      "copy_from_vulkan is implemented only for CPU device output");
+  AT_ASSERTM(
+      self.layout() == Layout::Strided,
+      "copy_from_vulkan is implemented only for Strided layout output");
+  AT_ASSERTM(
+      self.scalar_type() == ScalarType::Float,
+      "copy_from_vulkan is implemented only for float dtype output");
+  AT_ASSERTM(
+      self.dim() == 4,
+      "copy_from_vulkan is implemented only for dim == 4 output");
+
+  VTensor& vtensor = vtensor_from_vulkan(src);
+  vtensor.copyDataToHost(self.template data_ptr<float>());
+  return self;
 }
 
-at::Tensor dense_to_vulkan(const at::Tensor& cpu_tensor) {
+at::Tensor& copy_to_vulkan_(at::Tensor& self, const at::Tensor& src) {
   AT_ASSERTM(
-      cpu_tensor.device().type() == DeviceType::CPU,
-      "dense_to_vulkan expects CPU tensor input");
+      self.device().type() == DeviceType::Vulkan,
+      "copy_to_vulkan output tensor's device is not Vulkan");
   AT_ASSERTM(
-      cpu_tensor.layout() == Layout::Strided,
-      "dense_to_vulkan_expects strided tensor input");
+      src.device().type() == DeviceType::CPU,
+      "copy_to_vulkan is implemented only for CPU device input");
   AT_ASSERTM(
-      cpu_tensor.scalar_type() == ScalarType::Float,
-      "dense_to_vulkan expects float tensor input");
-  AT_ASSERTM(cpu_tensor.dim() == 4, "dense_to_vulkan expects tensor dim == 4");
+      src.layout() == Layout::Strided,
+      "copy_to_vulkan is implemented only for Strided layout input");
+  AT_ASSERTM(
+      src.scalar_type() == ScalarType::Float,
+      "copy_to_vulkan is implemented only for float dtype");
+  AT_ASSERTM(src.dim() == 4, "copy_to_vulkan is implemented only for dim == 4");
 
-  auto cpu_tensor_cont = cpu_tensor.contiguous();
-  Tensor vulkan_tensor =
-      empty_vulkan(cpu_tensor_cont.sizes(), cpu_tensor_cont.options(), {});
-
-  VTensor& vtensor = vtensor_from_vulkan(vulkan_tensor);
+  auto cpu_tensor_cont = src.contiguous();
+  VTensor& vtensor = vtensor_from_vulkan(self);
   vtensor.setDataFromHost(cpu_tensor_cont.template data_ptr<float>());
-  return vulkan_tensor;
+  return self;
+}
+
+at::Tensor& vulkan_copy_(at::Tensor& self, const at::Tensor& src) {
+  if (src.device().type() == at::kVulkan && self.device().type() == at::kCPU) {
+    return copy_from_vulkan_(self, src);
+  }
+  if (src.device().type() == at::kCPU && self.device().type() == at::kVulkan) {
+    return copy_to_vulkan_(self, src);
+  }
+  AT_ASSERTM(
+      src.device().type() == DeviceType::Vulkan,
+      "vulkan_copy_ is implemented only for CPU,Strided,float,dim 4->Vulkan; Vulkan->CPU,Strided,float,dim 4");
+  return self;
 }
 
 at::Tensor upsample_nearest2d_vulkan(
@@ -255,12 +278,8 @@ at::Tensor vulkan_convolution(
 namespace at {
 namespace native {
 
-at::Tensor vulkan_to_dense(const at::Tensor& vulkan_tensor) {
-  AT_ERROR("vulkan_to_dense: ATen not compiled with Vulkan or GLES support");
-}
-
-at::Tensor dense_to_vulkan(const at::Tensor& cpu_tensor) {
-  AT_ERROR("dense_to_vulkan: ATen not compiled with Vulkan or GLES support");
+at::Tensor& vulkan_copy_(at::Tensor& self, const at::Tensor& src) {
+  AT_ERROR("vulkan_copy_: ATen not compiled with Vulkan or GLES support");
 }
 
 Tensor vulkan_add(const Tensor& self, const Tensor& other, Scalar alpha) {
