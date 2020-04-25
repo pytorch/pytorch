@@ -42,7 +42,7 @@ from torch.testing import get_all_complex_dtypes
 import torch
 import torch.cuda
 from torch._utils_internal import get_writable_path
-from torch._six import string_classes, inf
+from torch._six import string_classes
 import torch.backends.cudnn
 import torch.backends.mkl
 from enum import Enum
