@@ -138,14 +138,12 @@ Tensor qnnpack_add(Tensor qa, Tensor qb, double scale, int64_t zero_point) {
   const auto a_scale = qa_contig.q_scale();
   const auto b_scale = qb_contig.q_scale();
 
-  Tensor qy = at::new_qtensor_cpu(
+  Tensor qy = at::native::empty_affine_quantized_cpu(
       qa_contig.sizes(),
-      TensorOptions(kQUInt8)
-          .device(kCPU)
-          .memory_format(qa.suggest_memory_format()),
-      make_per_tensor_affine_quantizer(
-        scale, zero_point, kQUInt8)
-      );
+      at::device(kCPU).dtype(kQUInt8).memory_format(qa.suggest_memory_format()),
+      scale,
+      zero_point,
+      c10::nullopt);
 
   if (qa_contig.size(0) == 0) {
     return qy;
