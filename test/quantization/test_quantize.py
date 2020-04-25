@@ -1780,3 +1780,18 @@ class TestRecordHistogramObserver(QuantizationTestCase):
         self.assertEqual(myobs.histogram, loaded_obs.histogram)
         self.assertEqual(myobs.bins, loaded_obs.bins)
         self.assertEqual(myobs.calculate_qparams(), loaded_obs.calculate_qparams())
+
+    def test_histogram_observer_one_sided(self):
+        myobs = HistogramObserver(bins=8, dtype=torch.quint8, qscheme=torch.per_tensor_affine, reduce_range=True)
+        x = torch.tensor([0.0, 0.3, 1.2, 1.7])
+        y = torch.tensor([0.1, 1.3, 2.0, 2.7])
+        myobs(x)
+        myobs(y)
+        self.assertEqual(myobs.min_val, 0)
+        qparams = myobs.calculate_qparams()
+        self.assertEqual(qparams[1].item(), 0)
+
+
+
+if __name__ == '__main__':
+    run_tests()
