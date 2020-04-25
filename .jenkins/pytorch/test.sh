@@ -65,7 +65,8 @@ if [[ "$BUILD_ENVIRONMENT" != *ppc64le* ]] && [[ "$BUILD_ENVIRONMENT" != *-bazel
   pip_install --user tb-nightly
   # mypy will fail to install on Python <3.4.  In that case,
   # we just won't run these tests.
-  pip_install --user mypy || true
+  # Pin MyPy version because new errors are likely to appear with each release
+  pip_install --user "mypy==0.770" || true
 fi
 
 # faulthandler become built-in since 3.3
@@ -176,6 +177,10 @@ test_aten() {
     ${SUDO} ln -s "$TORCH_LIB_PATH"/libmkldnn* build/bin
     ${SUDO} ln -s "$TORCH_LIB_PATH"/libnccl* build/bin
 
+    if [[ "$BUILD_ENVIRONMENT" == *clang* ]]; then
+      echo "Disable valgrind testing due to https://github.com/pytorch/pytorch/issues/37117"
+      VALGRIND=OFF
+    fi
     ls build/bin
     aten/tools/run_tests.sh build/bin
     assert_git_not_dirty

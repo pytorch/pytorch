@@ -1350,10 +1350,11 @@ struct PythonPrintImpl {
   // assigning a temporary variable
   std::unordered_set<Node*> output_inline_;
 
-  // see [reordering of inlines] 
+  // see [reordering of inlines]
   // used to track parts of an inline statement we already scanned
-  // for splitting long lines, so that we do not revisit them causing n^2 behavior.
-  // stores the maximum offset into inputs that has already been scanned for the node.
+  // for splitting long lines, so that we do not revisit them causing n^2
+  // behavior. stores the maximum offset into inputs that has already been
+  // scanned for the node.
   std::unordered_map<Node*, int64_t> visited_split_inline_uses_;
 
   // what valid identifiers are in use for the current function

@@ -105,9 +105,6 @@
 #   MKL_THREADING
 #     MKL threading mode: SEQ, TBB or OMP (default)
 #
-#   USE_FBGEMM
-#     Enables use of FBGEMM
-#
 #   USE_REDIS
 #     Whether to use Redis for distributed workflows (Linux only)
 #
@@ -160,6 +157,10 @@
 #   USE_TBB
 #      enable TBB support
 #
+#   USE_SYSTEM_LIBS (work in progress)
+#      Use system-provided libraries to satisfy the build dependencies.
+#      When turned on, the following cmake variables will be toggled as well:
+#        USE_SYSTEM_CPUINFO=ON USE_SYSTEM_SLEEF=ON BUILD_CUSTOM_PROTOBUF=OFF
 
 from __future__ import print_function
 

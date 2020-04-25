@@ -3,10 +3,9 @@
 #include <ATen/cpu/vec256/intrinsics.h>
 #include <ATen/cpu/vec256/vec256_base.h>
 #include <ATen/native/quantized/affine_quantizer.h>
+#include <c10/util/qint32.h>
 #include <c10/util/qint8.h>
 #include <c10/util/quint8.h>
-#include <c10/util/qint32.h>
-
 
 #include <array>
 
@@ -1093,8 +1092,8 @@ struct Vec256QuantizedConverter {
     float_vec_return_type rv;
     for (int i = 0; i < float_num_vecs(); ++i) {
       for (int j = 0; j < 8; ++j) {
-        rv[i][j] =
-            at::native::dequantize_val<T>(scale[j], zero_point[j], T(vals[8 * i + j]));
+        rv[i][j] = at::native::dequantize_val<T>(
+            scale[j], zero_point[j], T(vals[8 * i + j]));
       }
     }
     return rv;
