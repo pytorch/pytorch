@@ -63,7 +63,7 @@ class TestList(JitTestCase):
             if True:
                 x = [1, 2, 3]
             return
-        with self.assertRaisesRegex(RuntimeError, r"previously has type List\[Tensor\]"):
+        with self.assertRaisesRegex(RuntimeError, "previously had type"):
             self.checkScript(reassign_from_empty_literal, (), optimize=False)
 
         def reassign_from_empty_builtin():
@@ -84,7 +84,7 @@ class TestList(JitTestCase):
             if True:
                 x = [1.0]
             return
-        with self.assertRaisesRegex(RuntimeError, "previously has type"):
+        with self.assertRaisesRegex(RuntimeError, "previously had type"):
             self.checkScript(reassign_bad_type, (), optimize=False)
 
         def reassign_nested():
@@ -94,7 +94,7 @@ class TestList(JitTestCase):
                 if True:
                     x = [1.0]
             return
-        with self.assertRaisesRegex(RuntimeError, "previously has type"):
+        with self.assertRaisesRegex(RuntimeError, "previously had type"):
             self.checkScript(reassign_nested, (), optimize=False)
 
     def test_del(self):

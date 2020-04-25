@@ -10773,7 +10773,7 @@ a")
             v = torch.rand(10, 3)
             self.checkScript(foo, (v,))
 
-            with self.assertRaisesRegex(RuntimeError, r"Variable 'a' previously has type Tuple"):
+            with self.assertRaisesRegex(RuntimeError, r"Variable 'a' previously had type 'Tuple"):
                 @torch.jit.script
                 def mixtypes(x):
                     a = (x, x)
@@ -10801,7 +10801,7 @@ a")
                     c0 = 1.0
                 return c0
 
-        with self.assertRaisesRegex(RuntimeError, "Variable 'c0' previously has type float"):
+        with self.assertRaisesRegex(RuntimeError, "Variable 'c0' previously had type 'float'"):
             @torch.jit.script
             def diff_existing_type(x):
                 c0 = 1.0
