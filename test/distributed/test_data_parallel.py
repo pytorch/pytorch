@@ -1,8 +1,8 @@
 import contextlib
+import io
 import unittest
 from copy import deepcopy
 from collections import OrderedDict
-import io
 
 import torch
 from torch import nn
@@ -675,8 +675,10 @@ class TestDataParallel(TestCase):
     def test_save_replica_module(self):
         # DataParallel replicas can be saved (gh-37182)
         module = torch.nn.Linear(8, 8).cuda()
-        dpm = torch.nn.parallel.replicate(module, devices=[0, 1])
+        dpm = torch.nn.parallel.replicate(module, devices=[0, 1], detach=False)
         data = io.BytesIO()
+        torch.save(dpm, data)
+        dpm = torch.nn.parallel.replicate(module, devices=[0, 1], detach=True)
         torch.save(dpm, data)
 
 
