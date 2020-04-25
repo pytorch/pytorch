@@ -16,10 +16,10 @@ namespace vulkan {
 
 void initVulkanContextOnce();
 
-class AVKImage {
+class VImage {
  public:
-  AVKImage(int64_t W, int64_t H, int64_t C);
-  ~AVKImage();
+  VImage(int64_t W, int64_t H, int64_t C);
+  ~VImage();
 
   VkImageViewCreateInfo imageViewCreateInfo();
   VkSamplerCreateInfo samplerCreateInfo();
@@ -64,7 +64,7 @@ class VulkanTensor : public c10::intrusive_ptr_target {
 
  private:
   std::vector<int64_t> sizes_;
-  std::unique_ptr<AVKImage> tensorImage_;
+  std::unique_ptr<VImage> tensorImage_;
 };
 
 } // namespace vulkan

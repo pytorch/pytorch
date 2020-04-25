@@ -19,17 +19,17 @@ namespace vulkan {
 namespace details {
 namespace gl {
 
-class AGLTexture {
+class GLTexture {
  public:
-  ~AGLTexture();
-  AGLTexture(
+  ~GLTexture();
+  GLTexture(
       int w,
       int h,
       int d,
       GLenum texFormat,
       GLenum target = GL_TEXTURE_3D);
-  AGLTexture(const AGLTexture&) = delete;
-  AGLTexture& operator=(const AGLTexture&) = delete;
+  GLTexture(const GLTexture&) = delete;
+  GLTexture& operator=(const GLTexture&) = delete;
 
   unsigned int id() const;
 
@@ -41,7 +41,7 @@ class AGLTexture {
   unsigned int id_;
   GLenum target_;
   GLenum texFormat_{GL_RGBA32F};
-}; // class AGLTexture
+};
 
 class GLTensor : public c10::intrusive_ptr_target {
  public:
@@ -72,7 +72,7 @@ class GLTensor : public c10::intrusive_ptr_target {
 
  private:
   std::vector<int64_t> sizes_;
-  std::unique_ptr<AGLTexture> tex_;
+  std::unique_ptr<GLTexture> tex_;
 };
 
 void upsample_nearest2d(

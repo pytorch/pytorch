@@ -37,28 +37,28 @@ namespace vulkan {
 
 static const bool enableValidationLayers = true;
 
-class AVKContext;
-static std::unique_ptr<AVKContext> vkContext;
+class VContext;
+static std::unique_ptr<VContext> vkContext;
 
 void initVulkanContextOnce() {
   static const int once = []() {
     bool res = InitVulkan();
     TORCH_CHECK(res, "Vulkan Failed to InitVulkan");
-    vkContext = std::make_unique<AVKContext>();
+    vkContext = std::make_unique<VContext>();
     TORCH_CHECK(vkContext, "Vulkan Failed to create Vulkan Context");
     return 0;
   }();
   ((void)once);
 }
 
-class AVKContext {
+class VContext {
  public:
-  AVKContext() {
+  VContext() {
     createInstance();
     findPhysicalDevice();
     createDevice();
   }
-  ~AVKContext() {
+  ~VContext() {
     cleanup();
   }
 
@@ -197,7 +197,8 @@ class AVKContext {
   void findPhysicalDevice() {
     uint32_t deviceCount;
     vkEnumeratePhysicalDevices(instance_, &deviceCount, nullptr);
-    TORCH_CHECK(deviceCount > 0, "Could not find a device with vulkan support");
+    TORCH_CHECK(
+        deviceCount > 0, "Vulkan: Could not find a device with vulkan support");
     std::vector<VkPhysicalDevice> devices(deviceCount);
     vkEnumeratePhysicalDevices(instance_, &deviceCount, devices.data());
     int i = 0;
@@ -222,16 +223,19 @@ class AVKContext {
         physicalDevice_, &queueFamilyCount, queueFamilies.data());
 
     uint32_t i = 0;
+
+    bool queueFound = false;
     for (; i < queueFamilies.size(); ++i) {
       VkQueueFamilyProperties props = queueFamilies[i];
       if (props.queueCount > 0 && (props.queueFlags & VK_QUEUE_COMPUTE_BIT)) {
+        queueFound = true;
         break;
       }
     }
 
     TORCH_CHECK(
-        i == queueFamilies.size(),
-        "Could not find a queue family that supports operations");
+        queueFound,
+        "Vulkan: Could not find a queue family that supports operations");
     return i;
   }
 
@@ -294,9 +298,9 @@ uint32_t findMemoryType(
   return -1;
 }
 
-class AVKBuffer {
+class VBuffer {
  public:
-  AVKBuffer(
+  VBuffer(
       uint32_t bufferSize,
       VkPhysicalDevice physicalDevice,
       VkDevice device,
@@ -342,7 +346,7 @@ class AVKBuffer {
     vkUnmapMemory(device_, bufferMemory_);
   }
 
-  ~AVKBuffer() {
+  ~VBuffer() {
     vkFreeMemory(device_, bufferMemory_, nullptr);
     vkDestroyBuffer(device_, buffer_, nullptr);
   }
@@ -354,7 +358,7 @@ class AVKBuffer {
   VkDevice device_;
 };
 
-AVKImage::AVKImage(int64_t W, int64_t H, int64_t C) {
+VImage::VImage(int64_t W, int64_t H, int64_t C) {
   auto& device = vkContext->device_;
   auto& physicalDevice = vkContext->physicalDevice_;
   int32_t C_4 = UP_DIV(C, 4);
@@ -407,14 +411,14 @@ AVKImage::AVKImage(int64_t W, int64_t H, int64_t C) {
       vkCreateSampler(device, &_samplerCreateInfo, nullptr, &sampler_));
 }
 
-AVKImage::~AVKImage() {
+VImage::~VImage() {
   vkDestroySampler(vkContext->device_, sampler_, nullptr);
   vkDestroyImageView(vkContext->device_, imageView_, nullptr);
   vkFreeMemory(vkContext->device_, imageMemory_, nullptr);
   vkDestroyImage(vkContext->device_, image_, nullptr);
 }
 
-VkImageViewCreateInfo AVKImage::imageViewCreateInfo() {
+VkImageViewCreateInfo VImage::imageViewCreateInfo() {
   VkImageViewCreateInfo info = {};
   info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
   info.image = image_;
@@ -428,7 +432,7 @@ VkImageViewCreateInfo AVKImage::imageViewCreateInfo() {
   return info;
 }
 
-VkSamplerCreateInfo AVKImage::samplerCreateInfo() {
+VkSamplerCreateInfo VImage::samplerCreateInfo() {
   VkSamplerCreateInfo info = {};
   info.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
   info.magFilter = filter_;
@@ -643,18 +647,18 @@ void VulkanTensor::setDataFromHost(const float* inputData) {
   int32_t W = sizes_[3];
   int32_t C_4 = UP_DIV(C, 4);
 
-  tensorImage_ = std::make_unique<AVKImage>(W, H, C);
+  tensorImage_ = std::make_unique<VImage>(W, H, C);
 
   int64_t inputDataSize = sizeof(float) * numel;
   int64_t bufferDataSizeAligned = ROUND_UP(inputDataSize, vkContext->sboAlign_);
-  AVKBuffer bufferData{bufferDataSizeAligned, physicalDevice, device, false};
+  VBuffer bufferData{bufferDataSizeAligned, physicalDevice, device, false};
   bufferData.toDevice((void*)inputData, inputDataSize);
 
   uniforms wh{W, H};
   int64_t bufferConstSize = sizeof(wh);
   int64_t bufferConstSizeAligned =
       ROUND_UP(bufferConstSize, vkContext->uboAlign_);
-  AVKBuffer bufferConst{bufferConstSizeAligned, physicalDevice, device, true};
+  VBuffer bufferConst{bufferConstSizeAligned, physicalDevice, device, true};
   bufferConst.toDevice((void*)&wh, bufferConstSize);
 
   VkDescriptorSet descriptorSet = {};
@@ -804,13 +808,13 @@ void VulkanTensor::copyDataToHost(float* output) {
   int64_t bufferDataSize = sizeof(float) * numel;
   int64_t bufferDataSizeAligned =
       ROUND_UP(bufferDataSize, vkContext->sboAlign_);
-  AVKBuffer bufferData{bufferDataSizeAligned, physicalDevice, device, false};
+  VBuffer bufferData{bufferDataSizeAligned, physicalDevice, device, false};
 
   uniforms wh{W, H};
   int64_t bufferConstSize = sizeof(wh);
   int64_t bufferConstSizeAligned =
       ROUND_UP(bufferConstSize, vkContext->uboAlign_);
-  AVKBuffer bufferConst{bufferConstSizeAligned, physicalDevice, device, true};
+  VBuffer bufferConst{bufferConstSizeAligned, physicalDevice, device, true};
   bufferConst.toDevice((void*)&wh, bufferConstSize);
 
   VkDescriptorSet descriptorSet = {};

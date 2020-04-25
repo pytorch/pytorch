@@ -28,9 +28,9 @@ namespace vulkan {
 namespace details {
 namespace gl {
 
-class AGLContext {
+class GLContext {
  public:
-  AGLContext() {
+  GLContext() {
     if (!(eglGetCurrentContext() != EGL_NO_CONTEXT)) {
       display_ = eglGetDisplay(EGL_DEFAULT_DISPLAY);
       if (display_ == EGL_NO_DISPLAY) {
@@ -115,7 +115,7 @@ class AGLContext {
     }
   }
 
-  ~AGLContext() {
+  ~GLContext() {
     if (display_ != EGL_NO_DISPLAY) {
       if (context_ != EGL_NO_CONTEXT) {
         eglDestroyContext(display_, context_);
@@ -145,9 +145,9 @@ class AGLContext {
 
 using buffer_size_t = GLsizeiptr;
 
-class AGLSSBuffer {
+class GLBuffer {
  public:
-  AGLSSBuffer(buffer_size_t size, GLenum type = GL_SHADER_STORAGE_BUFFER) {
+  GLBuffer(buffer_size_t size, GLenum type = GL_SHADER_STORAGE_BUFFER) {
     type_ = type;
     assert(size > 0);
     glGenBuffers(1, &id_);
@@ -160,7 +160,7 @@ class AGLSSBuffer {
     size_ = size;
   }
 
-  ~AGLSSBuffer() {
+  ~GLBuffer() {
     glDeleteBuffers(1, &id_);
     GL_CHECK_ERROR;
   }
@@ -188,11 +188,11 @@ class AGLSSBuffer {
     GL_CHECK_ERROR;
   }
 
-  std::unique_ptr<AGLSSBuffer> static from(
+  std::unique_ptr<GLBuffer> static from(
       const float* data,
       GLsizeiptr size,
       size_t sizeCopy) {
-    auto buffer = std::make_unique<AGLSSBuffer>(size);
+    auto buffer = std::make_unique<GLBuffer>(size);
     float* bufferDataPtr =
         (float*)(buffer->map(GL_MAP_WRITE_BIT | GL_MAP_INVALIDATE_BUFFER_BIT));
     if (!bufferDataPtr) {
@@ -204,9 +204,7 @@ class AGLSSBuffer {
     return buffer;
   }
 
-  std::unique_ptr<AGLSSBuffer> static from(
-      const float* data,
-      buffer_size_t size) {
+  std::unique_ptr<GLBuffer> static from(const float* data, buffer_size_t size) {
     return from(data, size, size);
   }
 
@@ -237,9 +235,9 @@ class AGLSSBuffer {
   GLuint id_ = 0;
   buffer_size_t size_;
   GLenum type_;
-}; // class AGLBuffer
+};
 
-AGLTexture::AGLTexture(int w, int h, int d, GLenum texFormat, GLenum target) {
+GLTexture::GLTexture(int w, int h, int d, GLenum texFormat, GLenum target) {
   texFormat_ = texFormat;
   if (target == GL_TEXTURE_3D) {
     assert(w > 0 && h > 0 && d > 0);
@@ -273,16 +271,16 @@ AGLTexture::AGLTexture(int w, int h, int d, GLenum texFormat, GLenum target) {
   }
 }
 
-AGLTexture::~AGLTexture() {
+GLTexture::~GLTexture() {
   glDeleteTextures(1, &id_);
   GL_CHECK_ERROR;
 }
 
-unsigned int AGLTexture::id() const {
+unsigned int GLTexture::id() const {
   return id_;
 }
 
-void AGLTexture::read(GLuint unit) {
+void GLTexture::read(GLuint unit) {
   glBindImageTexture(
       unit,
       id_,
@@ -294,29 +292,21 @@ void AGLTexture::read(GLuint unit) {
   GL_CHECK_ERROR;
 }
 
-void AGLTexture::write(GLuint unit) {
+void GLTexture::write(GLuint unit) {
   glBindImageTexture(unit, id_, 0, GL_TRUE, 0, GL_WRITE_ONLY, texFormat_);
   GL_CHECK_ERROR;
 }
 
-void AGLTexture::sample(GLuint unit, GLuint texId) {
+void GLTexture::sample(GLuint unit, GLuint texId) {
   glActiveTexture(GL_TEXTURE0 + texId);
   glUniform1i(unit, texId);
   glBindTexture(target_, id_);
   GL_CHECK_ERROR;
 }
 
-enum AGLPrecision { highp = 0, mediump = 1, lowp = 2, count = 3 };
-static AGLPrecision gPrecision = highp;
-std::string getPrecision() {
-  static const char* precisionStr[AGLPrecision::count] = {
-      "highp", "mediump", "lowp"};
-  return precisionStr[gPrecision];
-}
-
-class AGLShader {
+class GLShader {
  public:
-  AGLShader(const std::string& shaderCode) {
+  GLShader(const std::string& shaderCode) {
     shaderId_ = glCreateShader(GL_COMPUTE_SHADER);
     GL_CHECK_ERROR;
 
@@ -354,7 +344,7 @@ class AGLShader {
     }
   }
 
-  ~AGLShader() {
+  ~GLShader() {
     glDeleteShader(shaderId_);
     glDeleteProgram(programId_);
     GL_CHECK_ERROR;
@@ -364,14 +354,7 @@ class AGLShader {
     return programId_;
   }
 
-  static std::string getHead(std::string imageFormat, std::string precision) {
-    std::ostringstream headOs;
-    headOs << "#version 310 es\n";
-    headOs << "#define PRECISION " << precision << "\n";
-    headOs << "precision PRECISION float;\n";
-    headOs << "#define FORMAT " << imageFormat << "\n";
-    return headOs.str();
-  }
+  static std::string getHead(std::string imageFormat, std::string precision) {}
 
   void useProgram() {
     glUseProgram(programId_);
@@ -411,14 +394,10 @@ class AGLShader {
 
   unsigned int shaderId_ = 0;
   unsigned int programId_ = 0;
-}; // class AGLShader
+};
 
 GLenum getTexFormat() {
   return GL_RGBA32F;
-}
-
-std::string getImageFormat() {
-  return "rgba32f";
 }
 
 void bindTexInProgram(int texId, int programTexId, int binding) {
@@ -485,11 +464,11 @@ double compute(
   return atime_duration_to_now(tp);
 }
 
-static std::unique_ptr<AGLContext> glContext;
+static std::unique_ptr<GLContext> glContext;
 
 void initGLContextOnce() {
   static const int once = []() {
-    glContext = std::make_unique<AGLContext>();
+    glContext = std::make_unique<GLContext>();
     TORCH_CHECK(
         glContext && !glContext->isCreateError(),
         "ERROR Failed to create GLContext");
@@ -498,24 +477,28 @@ void initGLContextOnce() {
   ((void)once);
 }
 
-std::unique_ptr<AGLShader> createShader(
+std::unique_ptr<GLShader> createShader(
     const char* content,
     const std::vector<std::string>& prefix = {}) {
   std::ostringstream tc;
-  tc << AGLShader::getHead(getImageFormat(), getPrecision());
+  tc << "#version 310 es\n";
+  tc << "#define PRECISION highp\n";
+  tc << "precision PRECISION float;\n";
+  tc << "#define FORMAT rgba32f\n";
+
   for (auto& s : prefix) {
     tc << s << "\n";
   }
   tc << content;
-  return std::make_unique<AGLShader>(tc.str());
+  return std::make_unique<GLShader>(tc.str());
 }
 
-std::shared_ptr<AGLShader> getShader(
+std::shared_ptr<GLShader> getShader(
     const std::string& key,
     const char* content,
     const std::vector<std::string>& prefix = {}) {
   initGLContextOnce();
-  std::shared_ptr<AGLShader> shader{createShader(content, prefix)};
+  std::shared_ptr<GLShader> shader{createShader(content, prefix)};
   return shader;
 }
 
@@ -568,7 +551,7 @@ void hostCHW_to_deviceTex(
     const int W) {
   const int C_4 = UP_DIV(C, 4);
   GLsizeiptr size = ROUND_UP(C, 4) * W * H * sizeof(float);
-  auto buffer = AGLSSBuffer::from(inputData, size, C * H * W * sizeof(float));
+  auto buffer = GLBuffer::from(inputData, size, C * H * W * sizeof(float));
 
   auto shader = getShader(
       "nchw_buf_to_tex_glsl", at::native::vulkan::nchw_buf_to_tex_glsl);
@@ -594,7 +577,7 @@ double deviceTex2hostCHW(
     int d2) {
   auto d2_4 = UP_DIV(d2, 4);
   auto size = d2_4 * 4 * d0 * d1 * sizeof(float);
-  auto buffer = std::make_unique<AGLSSBuffer>(size);
+  auto buffer = std::make_unique<GLBuffer>(size);
   auto program = getShader(
       "tex_to_nchw_buf_glsl", at::native::vulkan::tex_to_nchw_buf_glsl);
   program->useProgram();
@@ -637,7 +620,7 @@ void GLTensor::setDataFromHost(const float* data) {
   int C_4 = UP_DIV(C, 4);
 
   auto tex =
-      std::make_unique<AGLTexture>(W, H, C_4, getTexFormat(), GL_TEXTURE_3D);
+      std::make_unique<GLTexture>(W, H, C_4, getTexFormat(), GL_TEXTURE_3D);
   hostCHW_to_deviceTex(tex->id(), data, C, H, W);
   tex_ = std::move(tex);
 }
@@ -663,7 +646,7 @@ void GLTensor::allocateStorage() {
   int C_4 = UP_DIV(C, 4);
 
   auto tex =
-      std::make_unique<AGLTexture>(W, H, C_4, getTexFormat(), GL_TEXTURE_3D);
+      std::make_unique<GLTexture>(W, H, C_4, getTexFormat(), GL_TEXTURE_3D);
   tex_ = std::move(tex);
 }
 
@@ -764,7 +747,7 @@ auto kernelNCHW_OCHW_repack_O4C4HWi4o4(
     const int KH,
     const int KW) {
   const uint32_t kBufSizeNumel = ALIGN_UP4(OC) * ALIGN_UP4(C) * KH * KW;
-  auto kernelBuf = std::make_unique<AGLSSBuffer>(sizeof(float) * kBufSizeNumel);
+  auto kernelBuf = std::make_unique<GLBuffer>(sizeof(float) * kBufSizeNumel);
   const int oc_4SizeNumel = UP_DIV(C, 4) * KW * KH * 16;
   float* kernelPtr =
       (float*)(kernelBuf->map(GL_MAP_WRITE_BIT | GL_MAP_INVALIDATE_BUFFER_BIT));
@@ -795,7 +778,7 @@ auto kernelNCHW_OCHW_repack_O4C4HWi4o4(
   return kernelBuf;
 }
 
-std::unique_ptr<AGLTexture> conv2d_kernel_tex_from_hostCHW(
+std::unique_ptr<GLTexture> conv2d_kernel_tex_from_hostCHW(
     const float* data,
     int64_t OC,
     int64_t C,
@@ -806,7 +789,7 @@ std::unique_ptr<AGLTexture> conv2d_kernel_tex_from_hostCHW(
   auto OC_4 = UP_DIV(OC, 4);
   auto C_4 = UP_DIV(C, 4);
 
-  auto kernelOutTex = std::make_unique<AGLTexture>(
+  auto kernelOutTex = std::make_unique<GLTexture>(
       C_4 * 4, OC_4, KH * KW, getTexFormat(), GL_TEXTURE_3D);
 
   auto p =
@@ -873,8 +856,8 @@ void conv2d(
   assert(osizes[2] == OH);
   assert(osizes[3] == OW);
 
-  auto biasBuf = AGLSSBuffer::from(
-      bias, sizeof(float) * ALIGN_UP4(OC), sizeof(float) * OC);
+  auto biasBuf =
+      GLBuffer::from(bias, sizeof(float) * ALIGN_UP4(OC), sizeof(float) * OC);
 
   auto kernelTex = conv2d_kernel_tex_from_hostCHW(weight, OC, C, KH, KW);
 
