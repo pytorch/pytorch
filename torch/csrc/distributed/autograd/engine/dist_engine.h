@@ -112,6 +112,8 @@ class TORCH_API DistEngine {
   // there will be undefined behaviors. A correct way to fix this is to re-design
   // the autograd engine so that GPU worker thread to behave the same as CPU caller
   // thread, record the operation/thread for the device, and reuse it in backward.
+  // TODO: 1. Add assert in the dist engine to ensure no GPU NodeTasks during backward
+  //       2. properly setup the thread local ready queue to enable reentrant backwards
  void execute_graph_task_until_ready_queue_empty(
      const std::shared_ptr<torch::autograd::GraphTask>& graph_task,
      std::shared_ptr<torch::autograd::Node> root_to_execute,
