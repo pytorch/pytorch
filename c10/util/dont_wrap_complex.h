@@ -1,6 +1,5 @@
-#pragma once
-
 #ifndef WRAP_COMPLEX
+#define WRAP_COMPLEX
 
 #include <c10/util/complex_type.h>
 
