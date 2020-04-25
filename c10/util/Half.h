@@ -309,7 +309,7 @@ namespace detail {
     const float scale_to_zero = scale_to_zero_val;
 
 #if defined(_MSC_VER) && _MSC_VER == 1916
-          float base = ((std::signbit(f) != 0 ? -f : f) * scale_to_inf) * scale_to_zero;
+          float base = ((signbit(f) != 0 ? -f : f) * scale_to_inf) * scale_to_zero;
 #else
           float base = (fabsf(f) * scale_to_inf) * scale_to_zero;
 #endif
