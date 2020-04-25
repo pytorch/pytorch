@@ -65,6 +65,7 @@ std::vector<c10::intrusive_ptr<RRef>> RRefContext::destroyInstance(
     }
   }
   ctx.owners_.clear();
+  ctx.pendingOwners_.clear();
   return deletedRRefs;
 }
 
@@ -253,7 +254,11 @@ c10::intrusive_ptr<OwnerRRef> RRefContext::getOrCreateOwnerRRef(
     // private.
     auto rref = c10::make_intrusive<OwnerRRef>(getWorkerId(), rrefId, type);
     owners_[rref->rrefId()] = rref;
-    ownerCV_.notify_all();
+    const auto pendingOwnerIter = pendingOwners_.find(rrefId);
+    if (pendingOwnerIter != pendingOwners_.end()) {
+      pendingOwnerIter->second->markCompleted(rref);
+      pendingOwners_.erase(pendingOwnerIter);
+    }
     return rref;
   } else {
     // Scenario (2) retrieving an existing RRef
@@ -301,16 +306,30 @@ c10::intrusive_ptr<OwnerRRef> RRefContext::createOwnerRRef(
       getWorkerId(), genGloballyUniqueId(), type);
 }
 
-c10::intrusive_ptr<OwnerRRef> RRefContext::getOwnerRRef(const RRefId& rrefId) {
+std::shared_ptr<torch::utils::Future<c10::intrusive_ptr<OwnerRRef>>>
+RRefContext::getOwnerRRef(const RRefId& rrefId) {
   std::unique_lock<std::mutex> lock(mutex_);
   const auto iter = owners_.find(rrefId);
   if (iter == owners_.end()) {
     // Scenario (1) RRef is used before it is created
-    ownerCV_.wait(lock, [&] { return owners_.find(rrefId) != owners_.end(); });
-    return c10::static_intrusive_pointer_cast<OwnerRRef>(owners_[rrefId]);
+    const auto pendingOwnerIter = pendingOwners_.find(rrefId);
+    if (pendingOwnerIter == pendingOwners_.end()) {
+      auto futureOwner = std::make_shared<
+          torch::utils::Future<c10::intrusive_ptr<OwnerRRef>>>();
+      pendingOwners_[rrefId] = futureOwner;
+      return futureOwner;
+    } else {
+      return pendingOwnerIter->second;
+    }
   } else {
     // Scenario (2) retrieving an existing RRef
-    return c10::static_intrusive_pointer_cast<OwnerRRef>(iter->second);
+    // NB: This assumes passing value to the Future constructor implicitly
+    // marks the Future as completed. This is true for utils::Future, but
+    // not so for ivalue::Future. Hence, when merging the two Future
+    // implementations later, we might need to modify code here as well.
+    return std::make_shared<
+        torch::utils::Future<c10::intrusive_ptr<OwnerRRef>>>(
+        c10::static_intrusive_pointer_cast<OwnerRRef>(iter->second));
   }
 }
 
