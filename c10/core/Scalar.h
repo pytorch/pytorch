@@ -161,11 +161,11 @@ AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF(DEFINE_TO)
 // is not done. This should be removed once the migration is done.
 template <>
 inline std::complex<float> Scalar::to() const {
-  throw toComplexFloat();
+  return static_cast<std::complex<float>>(toComplexFloat());
 }
 template <>
 inline std::complex<double> Scalar::to() const {
-  throw toComplexDouble();
+  return static_cast<std::complex<double>>(toComplexDouble());
 }
 // end TODO
 
