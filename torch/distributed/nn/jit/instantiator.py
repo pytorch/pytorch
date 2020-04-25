@@ -4,7 +4,13 @@ import inspect
 import os
 
 import torch
-from src.ATen.code_template import CodeTemplate
+try:
+    # For fb.
+    from src.ATen.code_template import CodeTemplate
+except ImportError:
+    # For open-source.
+    from tools.shared.module_loader import import_module
+    CodeTemplate = import_module('code_template', 'aten/src/ATen/code_template.py').CodeTemplate
 from torch.distributed.nn.jit.templates import dir_path as TEMPLATE_DIR_PATH
 
 
