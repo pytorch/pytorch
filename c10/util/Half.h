@@ -12,9 +12,7 @@
 #include <c10/macros/Macros.h>
 #include <c10/util/C++17.h>
 
-// MSVC >= 2015 reports _MSVC_LANG as __cplusplus
-#if (defined(__cplusplus) && (__cplusplus >= 201103L)) || \
-    (defined(_MSVC_LANG) && (_MSVC_LANG >= 201103L))
+#if defined(__cplusplus) && (__cplusplus >= 201103L)
 #include <cmath>
 #include <cstdint>
 #elif !defined(__OPENCL_VERSION__)
