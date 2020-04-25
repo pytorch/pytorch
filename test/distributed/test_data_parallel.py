@@ -647,7 +647,7 @@ class TestDataParallel(TestCase):
             def forward(self, x):
                 with self._testcase.assertWarnsRegex(
                         UserWarning,
-                        r"Calling \.zero_grad\(\) from a module that was passed to a nn\.DataParallel\(\) has no effect."):
+                        r"Calling \.zero_grad\(\) from a module created with nn\.DataParallel\(\) has no effect."):
                     self.zero_grad()
                 return x
 
