@@ -853,9 +853,9 @@ class TestCase(expecttest.TestCase):
         if common_dtype is torch.bfloat16:
             common_dtype = torch.float32
 
-        # CPU float16 -> float32
+        # non-CUDA (CPU, for example) float16 -> float32
         # TODO: update this when isclose is implemented for CPU float16
-        if common_dtype is torch.float16 and a.device.type == 'cpu':
+        if common_dtype is torch.float16 and a.device.type != 'cuda':
             common_dtype = torch.float32
 
         return common_dtype
@@ -936,7 +936,8 @@ class TestCase(expecttest.TestCase):
 
     # Compares x and y
     # TODO: make message kwarg-only
-    def assertEqual(self, x, y, message=None, *, atol=None, rtol=None, equal_nan=True, exact_dtype=None):
+    def assertEqual(self, x, y, message=None, *, atol=None, rtol=None, equal_nan=True,
+                    exact_dtype=None, exact_device=False):
         # we allow setting an absolute tolerance as a positional arg for BC with legacy testing behavior.
         if isinstance(message, Number):
             self.assertIsNone(atol, "don't combine positional prec and atol")
@@ -950,16 +951,16 @@ class TestCase(expecttest.TestCase):
 
         if isinstance(x, torch.Tensor) and isinstance(y, Number):
             self.assertEqual(x.item(), y, atol=atol, rtol=rtol, message=message,
-                             exact_dtype=exact_dtype)
+                             exact_dtype=exact_dtype, exact_device=exact_device)
         elif isinstance(y, torch.Tensor) and isinstance(x, Number):
             self.assertEqual(x, y.item(), atol=atol, rtol=rtol, message=message,
-                             exact_dtype=exact_dtype)
+                             exact_dtype=exact_dtype, exact_device=exact_device)
         elif isinstance(x, torch.Tensor) and isinstance(y, numpy.bool_):
             self.assertEqual(x.item(), y, atol=atol, rtol=rtol, message=message,
-                             exact_dtype=exact_dtype)
+                             exact_dtype=exact_dtype, exact_device=exact_device)
         elif isinstance(y, torch.Tensor) and isinstance(x, numpy.bool_):
             self.assertEqual(x, y.item(), atol=atol, rtol=rtol, message=message,
-                             exact_dtype=exact_dtype)
+                             exact_dtype=exact_dtype, exact_device=exact_device)
         elif isinstance(x, torch.Tensor) and isinstance(y, torch.Tensor):
             super().assertEqual(x.is_sparse, y.is_sparse, message)
             super().assertEqual(x.is_quantized, y.is_quantized, message)
@@ -969,37 +970,42 @@ class TestCase(expecttest.TestCase):
                 result0 = self.compareTensors(x._indices(), y._indices(),
                                               rtol=rtol, atol=atol,
                                               equal_nan=equal_nan, exact_dtype=exact_dtype,
-                                              exact_device=False)
+                                              exact_device=exact_device)
                 result1 = self.compareTensors(x._values(), y._values(),
                                               rtol=rtol, atol=atol,
                                               equal_nan=equal_nan, exact_dtype=exact_dtype,
-                                              exact_device=False)
+                                              exact_device=exact_device)
                 self.assertTrue(result0 and result1, msg=message)
             elif x.is_quantized and y.is_quantized:
                 self.assertEqual(x.qscheme(), y.qscheme(), atol=atol, rtol=rtol,
-                                 message=message, exact_dtype=exact_dtype)
+                                 message=message, exact_dtype=exact_dtype,
+                                 exact_device=exact_device)
                 if x.qscheme() == torch.per_tensor_affine:
                     self.assertEqual(x.q_scale(), y.q_scale(), atol=atol, rtol=rtol,
-                                     message=message, exact_dtype=exact_dtype)
+                                     message=message, exact_dtype=exact_dtype,
+                                     exact_device=exact_device)
                     self.assertEqual(x.q_zero_point(), y.q_zero_point(),
                                      atol=atol, rtol=rtol, message=message,
-                                     exact_dtype=exact_dtype)
+                                     exact_dtype=exact_dtype, exact_device=exact_device)
                 elif x.qscheme() == torch.per_channel_affine:
                     self.assertEqual(x.q_per_channel_scales(), y.q_per_channel_scales(), atol=atol, rtol=rtol,
-                                     message=message, exact_dtype=exact_dtype)
+                                     message=message, exact_dtype=exact_dtype,
+                                     exact_device=exact_device)
                     self.assertEqual(x.q_per_channel_zero_points(), y.q_per_channel_zero_points(),
                                      atol=atol, rtol=rtol, message=message,
-                                     exact_dtype=exact_dtype)
+                                     exact_dtype=exact_dtype, exact_device=exact_device)
                     self.assertEqual(x.q_per_channel_axis(), y.q_per_channel_axis(),
-                                     atol=atol, rtol=rtol, message=message)
-                self.assertEqual(x.dtype, y.dtype)
+                                     atol=atol, rtol=rtol, message=message,
+                                     exact_dtype=exact_dtype, exact_device=exact_device)
+                self.assertTrue(x.dtype is y.dtype, msg=message)
                 self.assertEqual(x.int_repr().to(torch.int32),
                                  y.int_repr().to(torch.int32), atol=atol, rtol=rtol,
-                                 message=message, exact_dtype=exact_dtype)
+                                 message=message, exact_dtype=exact_dtype,
+                                 exact_device=exact_device)
             else:
                 result = self.compareTensors(x, y, rtol=rtol, atol=atol,
                                              equal_nan=equal_nan, exact_dtype=exact_dtype,
-                                             exact_device=False)
+                                             exact_device=exact_device)
                 self.assertTrue(result, msg=message)
         elif isinstance(x, string_classes) and isinstance(y, string_classes):
             super().assertEqual(x, y, message)
@@ -1008,22 +1014,24 @@ class TestCase(expecttest.TestCase):
         elif isinstance(x, dict) and isinstance(y, dict):
             if isinstance(x, OrderedDict) and isinstance(y, OrderedDict):
                 self.assertEqual(x.items(), y.items(), atol=atol, rtol=rtol,
-                                 message=message, exact_dtype=exact_dtype)
+                                 message=message, exact_dtype=exact_dtype,
+                                 exact_device=exact_device)
             else:
                 self.assertEqual(set(x.keys()), set(y.keys()), atol=atol, rtol=rtol,
-                                 message=message, exact_dtype=exact_dtype)
+                                 message=message, exact_dtype=exact_dtype,
+                                 exact_device=exact_device)
                 key_list = list(x.keys())
                 self.assertEqual([x[k] for k in key_list],
                                  [y[k] for k in key_list],
                                  atol=atol, rtol=rtol, message=message,
-                                 exact_dtype=exact_dtype)
+                                 exact_dtype=exact_dtype, exact_device=exact_device)
         elif is_iterable(x) and is_iterable(y):
             super().assertEqual(len(x), len(y), message)
             for x_, y_ in zip(x, y):
                 self.assertEqual(x_, y_, atol=atol, rtol=rtol, message=message,
-                                 exact_dtype=exact_dtype)
+                                 exact_dtype=exact_dtype, exact_device=exact_device)
         elif isinstance(x, bool) and isinstance(y, bool):
-            super().assertEqual(x, y, message)
+            self.assertTrue(x == y, msg=message)
         elif isinstance(x, Number) and isinstance(y, Number):
             # Short-circuits on identity
             if x == y or (equal_nan and x != x and y != y):
@@ -1042,7 +1050,7 @@ class TestCase(expecttest.TestCase):
 
             self.assertTrue(abs(x - y) <= (atol + rtol * abs(y)), msg=message)
         else:
-            super().assertEqual(x, y, message)
+            super().assertEqual(x, y, msg=message)
 
     def assertAlmostEqual(self, x, y, places=None, msg='', delta=None):
         prec = delta
