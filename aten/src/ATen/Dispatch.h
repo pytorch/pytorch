@@ -1,5 +1,6 @@
 // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!1
-// Warning: If you use this file, you will need to
+// Warning: If you use this file and deal with complex
+// tensors, then you might need to manually do
 // #include <c10/util/wrap_complex.h>
 // at the beginning of your file
 // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
@@ -24,9 +25,8 @@
 
 // ^^^ Note:
 // For non-complex types, wrap_complex_t<T> is just T itself. For complex types
-// What `wrap_complex` is totally depends on the file that include this file
+// What `wrap_complex` is totally depends on how the cpp file include files:
 // If the file including this does something like:
-//   #include <c10/util/dont_wrap_complex.h>
 //   #include <ATen/Dispatch.h>
 // Then wrap_complex_t<T> will be T itself for complex types.
 // Otherwise if the file including this does:
