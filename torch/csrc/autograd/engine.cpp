@@ -543,7 +543,11 @@ void validate_outputs(
       }
       grads[i] = at::sum_to(std::move(grads[i]), metadata.shape());
     }
-    TORCH_CHECK(isFloatingType(grads[i].scalar_type()));
+
+    bool input_is_complex = isComplexType(c10::typeMetaToScalarType(metadata.options().dtype()));
+    bool grad_is_complex = isComplexType(grads[i].scalar_type());
+
+    TORCH_CHECK(isFloatingType(grads[i].scalar_type()) || (input_is_complex == grad_is_complex));
     if (c10::typeMetaToScalarType(metadata.options().dtype()) != grads[i].scalar_type()) {
       grads[i] = grads[i].to(c10::typeMetaToScalarType(metadata.options().dtype()));
     }
