@@ -96,22 +96,6 @@ backend_test.exclude(r'(test_hardsigmoid'  # Does not support Hardsigmoid.
                      '|test_.*negative_ind.*'  # negative axis is not supported yet
                      '|test_argmax_.*select_last_index.*'  # unsupported case
                      '|test_argmin_.*select_last_index_.*'  # unsupported case
-                     '|test_celu.*'  # cannot translate Celu op
-                     '|test_gradient.*'  # cannot translate Gradient op
-                     '|test_greater_equal.*'
-                     '|test_min_.*_cpu'  # Tensor type mismatch
-                     '|test_max_.*_cpu'  # Tensor type mismatch
-                     '|test_min_.*_cuda'
-                     '|test_max_.*_cuda'
-                     '|test_less_equal.*'
-                     '|test_inverse.*'
-                     '|test_softmax_cross_entropy.*'
-                     '|test_mean_square_distance.*'
-                     '|test_unfoldtodepth.*'
-                     '|test_momentum.*'
-                     '|test_nesterov_momentum'
-                     '|test_adagrad.*'
-                     '|test_pow_types.*'
                      ')')
 
 # Quick patch to unbreak master CI, is working on the debugging.
