@@ -1,5 +1,6 @@
 from .optimizer import Optimizer
-from torch.nn.module import Module
+from ..nn.modules import Module
+from .lr_scheduler import _LRScheduler
 from .. import device, Tensor
 from typing import Iterable, Any, Optional, Callable, Union, List
 
