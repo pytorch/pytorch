@@ -32,3 +32,5 @@ template <typename T>
 auto wrap_complex(T t) -> wrap_complex_t<T> {
   return wrap_complex_helper<T>::cast(t);
 }
+
+#define WRAP_COMPLEX

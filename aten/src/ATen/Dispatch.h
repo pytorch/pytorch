@@ -12,6 +12,10 @@
 #include <c10/util/Exception.h>
 #include <c10/util/Half.h>
 
+#ifndef WRAP_COMPLEX
+#include <c10/util/dont_wrap_complex.h>
+#endif
+
 #define AT_PRIVATE_CASE_TYPE(enum_type, type, ...) \
   case enum_type: {                                \
     using scalar_t = wrap_complex_t<type>;         \
