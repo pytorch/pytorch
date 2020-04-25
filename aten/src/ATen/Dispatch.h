@@ -14,7 +14,8 @@
 #include <c10/util/Half.h>
 
 #ifndef WRAP_COMPLEX
-#include <c10/util/dont_wrap_complex.h>
+template <typename T>
+using wrap_complex_t = T;
 #endif
 
 #define AT_PRIVATE_CASE_TYPE(enum_type, type, ...) \
