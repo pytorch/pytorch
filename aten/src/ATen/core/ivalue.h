@@ -400,6 +400,8 @@ struct CAFFE2_API IValue final {
       class T,
       enable_if_ivalue_constructible<T> = nullptr>
   IValue(const std::vector<T>& v);
+  template<class T, size_t N>
+  IValue(std::array<T, N> v);
 
   // GenericDict
   IValue(c10::Dict<IValue, IValue> v);
