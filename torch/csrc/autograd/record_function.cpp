@@ -200,6 +200,9 @@ void pushCallback(
     bool needs_inputs,
     double sampling_prob,
     std::unordered_set<RecordScope, std::hash<RecordScope>> scopes) {
+  if (!hasCallbacks()) {
+    enableObservers(true);
+  }
   manager().pushCallback(
       std::move(start),
       std::move(end),
@@ -210,6 +213,17 @@ void pushCallback(
 
 void popCallback() {
   manager().popCallback();
+  if (!hasCallbacks()) {
+    enableObservers(false);
+  }
+}
+
+bool observersEnabled() {
+  return c10::impl::tls_is_dispatch_key_included(c10::DispatchKey::Profiler);
+}
+
+void enableObservers(bool enable) {
+  c10::impl::tls_set_dispatch_key_included(c10::DispatchKey::Profiler, enable);
 }
 
 void _runBeforeCallbacks(RecordFunction* rf, const std::string& funcName) {
@@ -218,7 +232,7 @@ void _runBeforeCallbacks(RecordFunction* rf, const std::string& funcName) {
 }
 
 RecordFunction::RecordFunction(RecordScope scope) : scope_(scope) {
-  if (manager().hasCallbacks() && at::_tls_is_record_function_enabled()) {
+  if (manager().hasCallbacks() && observersEnabled()) {
     active_ = true;
   }
 }
