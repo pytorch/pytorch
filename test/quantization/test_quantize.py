@@ -1561,8 +1561,8 @@ class TestObserver(QuantizationTestCase):
         for i in range(len(x)):
             self.assertEqual(obs.min_val[i], ref_min_val[i])
             self.assertEqual(obs.max_val[i], ref_max_val[i])
-            self.assertEqual(torch.tensor([qparams[0][i]]), ref_qparams[i][0])
-            self.assertEqual(torch.tensor([qparams[1][i]]), ref_qparams[i][1])
+            self.assertEqual(qparams[0][i], ref_qparams[i][0])
+            self.assertEqual(qparams[1][i], ref_qparams[i][1])
 
     @given(qdtype=st.sampled_from((torch.qint8, torch.quint8)),
            qscheme=st.sampled_from((torch.per_channel_affine, torch.per_channel_symmetric)),
@@ -1780,3 +1780,18 @@ class TestRecordHistogramObserver(QuantizationTestCase):
         self.assertEqual(myobs.histogram, loaded_obs.histogram)
         self.assertEqual(myobs.bins, loaded_obs.bins)
         self.assertEqual(myobs.calculate_qparams(), loaded_obs.calculate_qparams())
+
+    def test_histogram_observer_one_sided(self):
+        myobs = HistogramObserver(bins=8, dtype=torch.quint8, qscheme=torch.per_tensor_affine, reduce_range=True)
+        x = torch.tensor([0.0, 0.3, 1.2, 1.7])
+        y = torch.tensor([0.1, 1.3, 2.0, 2.7])
+        myobs(x)
+        myobs(y)
+        self.assertEqual(myobs.min_val, 0)
+        qparams = myobs.calculate_qparams()
+        self.assertEqual(qparams[1].item(), 0)
+
+
+
+if __name__ == '__main__':
+    run_tests()
