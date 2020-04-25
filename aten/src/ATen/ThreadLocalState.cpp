@@ -15,6 +15,7 @@ ThreadLocalState::ThreadLocalState(bool keep_grad_mode)
     grad_mode_enabled_ = GradMode::is_enabled();
   }
 #endif
+  record_function_enabled_ = _tls_is_record_function_enabled();
 }
 
 /* static */
@@ -26,9 +27,19 @@ void ThreadLocalState::setThreadLocalState(
   }
 #endif
 
+  c10::impl::_force_tls_local_dispatch_key_set(state.dispatch_key_);
+
   ThreadLocalDebugInfo::_forceCurrentDebugInfo(state.debug_info_);
 
-  c10::impl::_force_tls_local_dispatch_key_set(state.dispatch_key_);
+  _tls_set_record_function_enabled(state.record_function_enabled_);
+}
+
+thread_local bool is_record_function_enabled_ = true;
+bool _tls_is_record_function_enabled() {
+  return is_record_function_enabled_;
+}
+void _tls_set_record_function_enabled(bool is_enabled) {
+  is_record_function_enabled_ = is_enabled;
 }
 
 } // namespace at
