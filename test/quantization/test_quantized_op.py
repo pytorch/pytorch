@@ -529,6 +529,43 @@ class TestQuantizedOps(TestCase):
             qY_hat = op(qX, min_val, max_val)
             self.assertEqual(qY, qY_hat, msg="{} qclamp failed".format(name))
 
+    """Tests the correctness of the quantized::clamp_with_tensors op."""
+    @given(X=hu.tensor(shapes=hu.array_shapes(1, 8, 1, 8),
+                       elements=hu.floats(-1e6, 1e6, allow_nan=False),
+                       qparams=hu.qparams()))
+    def test_qclamp_with_tensors(self, X):
+        X, (scale, zero_point, torch_type) = X
+        min_tensor = np.random.uniform(-1e5, 0, size=X.shape).astype(np.float32)
+        max_tensor = np.random.uniform(0, 1e5, size=X.shape).astype(np.float32)
+
+        Y = X.copy()
+        min_mask = Y < min_tensor
+        Y[min_mask] = min_tensor[min_mask]
+        max_mask = Y > max_tensor
+        Y[max_mask] = max_tensor[max_mask]
+        qY = torch.quantize_per_tensor(torch.from_numpy(Y), scale=scale,
+                                       zero_point=zero_point, dtype=torch_type)
+
+        X = torch.from_numpy(X)
+        qX = torch.quantize_per_tensor(X, scale=scale, zero_point=zero_point,
+                                       dtype=torch_type)
+        min_tensor = torch.from_numpy(min_tensor)
+        q_min_tensor = torch.quantize_per_tensor(min_tensor, scale=scale,
+                                                 zero_point=zero_point,
+                                                 dtype=torch_type)
+        max_tensor = torch.from_numpy(max_tensor)
+        q_max_tensor = torch.quantize_per_tensor(max_tensor, scale=scale,
+                                                 zero_point=zero_point,
+                                                 dtype=torch_type)
+
+        ops_under_test = {
+            'ops.quantized': torch.ops.quantized.clamp_with_tensors,
+        }
+
+        for name, op in ops_under_test.items():
+            qY_hat = op(qX, q_min_tensor, q_max_tensor)
+            self.assertEqual(qY, qY_hat, message="{} qclamp_with_tensors failed".format(name))
+
     """Tests the correctness of the quantized::hardtanh op."""
     @skipIfNoFBGEMM
     @given(X=hu.tensor(shapes=hu.array_shapes(1, 8, 1, 8, max_numel=10**5),

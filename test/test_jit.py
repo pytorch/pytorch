@@ -6348,11 +6348,31 @@ a")
         def test_script_clamp_min(x):
             return torch.clamp(x, min=2)
 
+        def test_script_clamp_with_tensors_max_none(x):
+            min = torch.full(x.shape, 2, dtype=x.dtype, device=x.device)
+            return torch.clamp_with_tensors(x, min=min, max=None)
+
+        def test_script_clamp_with_tensors_max(x):
+            max = torch.full(x.shape, 2, dtype=x.dtype, device=x.device)
+            return torch.clamp_with_tensors(x, max=max)
+
+        def test_script_clamp_with_tensors_min_none(x):
+            max = torch.full(x.shape, 2, dtype=x.dtype, device=x.device)
+            return torch.clamp_with_tensors(x, min=None, max=max)
+
+        def test_script_clamp_with_tensors_min(x):
+            min = torch.full(x.shape, 2, dtype=x.dtype, device=x.device)
+            return torch.clamp_with_tensors(x, min=min)
+
         input = [torch.arange(0, 3)]
         self.checkScript(test_script_clamp_max_none, input, optimize=True)
         self.checkScript(test_script_clamp_max, input, optimize=True)
         self.checkScript(test_script_clamp_min_none, input, optimize=True)
         self.checkScript(test_script_clamp_min, input, optimize=True)
+        self.checkScript(test_script_clamp_with_tensors_max_none, input, optimize=True)
+        self.checkScript(test_script_clamp_with_tensors_max, input, optimize=True)
+        self.checkScript(test_script_clamp_with_tensors_min_none, input, optimize=True)
+        self.checkScript(test_script_clamp_with_tensors_min, input, optimize=True)
 
     def test_script_bool_constant(self):
         def test_script_bool_constant():

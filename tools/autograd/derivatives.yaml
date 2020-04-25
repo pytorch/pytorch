@@ -326,6 +326,27 @@
 - name: clamp_max(Tensor self, Scalar max) -> Tensor
   self: grad * (self <= max).to(grad.dtype())
 
+- name: clamp_with_tensors(Tensor self, Tensor? min=None, Tensor? max=None) -> Tensor
+  self: clamp_with_tensors_backward(grad, self, min, max)
+  min: clamp_with_tensors_backward_for_min(grad, self, min, max)
+  max: clamp_with_tensors_backward_for_max(grad, self, min, max)
+
+- name: clamp_with_tensors_min(Tensor self, Tensor min) -> Tensor
+  self: grad * (self >= min).to(grad.dtype())
+  min: grad * (self < min).to(grad.dtype())
+
+- name: clamp_with_tensors_max(Tensor self, Tensor max) -> Tensor
+  self: grad * (self <= max).to(grad.dtype())
+  max: grad * (self > max).to(grad.dtype())
+
+- name: clamp_with_tensors.min_tensor(Tensor self, Tensor min, Scalar max) -> Tensor
+  self: clamp_with_tensors_backward(grad, self, min, wrapped_scalar_tensor(max).to(min))
+  min: clamp_with_tensors_backward_for_min(grad, self, min, wrapped_scalar_tensor(max).to(min))
+
+- name: clamp_with_tensors.max_tensor(Tensor self, Scalar min, Tensor max) -> Tensor
+  self: clamp_with_tensors_backward(grad, self, wrapped_scalar_tensor(min).to(max), max)
+  max: clamp_with_tensors_backward_for_max(grad, self, wrapped_scalar_tensor(min).to(max), max)
+
 - name: clone(Tensor self, *, MemoryFormat? memory_format=None) -> Tensor
   self: grad
 

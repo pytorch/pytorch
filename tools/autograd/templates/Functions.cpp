@@ -48,6 +48,12 @@ struct IndexRangeGenerator {
     size_t i = 0;
 };
 
+static Tensor wrapped_scalar_tensor(Scalar s) {
+  auto tensor = scalar_to_tensor(s);
+  tensor.unsafeGetTensorImpl()->set_wrapped_number(true);
+  return tensor;
+}
+
 void copy_range(variable_list& out, IndexRange range, const Tensor & t) {
   AT_ASSERT(range.second <= out.size());
   AT_ASSERTM(range.second - range.first == 1, "inconsistent range for Tensor output");
@@ -597,6 +603,45 @@ Tensor clamp_backward(const Tensor & grad, const Tensor &self, const optional<Sc
     return grad * (self <= *max).type_as(grad);
   } else {
     return grad;
+  }
+}
+
+Tensor clamp_with_tensors_backward(const Tensor & grad, const Tensor &self, const Tensor & min, const Tensor & max) {
+  // clamp: gradients not defined on min and max, so we return the subgradient 1 for these cases.
+  if (max.defined() && min.defined()) {
+    return grad * at::bitwise_and(self >= min, self <= max).type_as(grad);
+  } else if (min.defined()) {
+    return grad * (self >= min).type_as(grad);
+  } else if (max.defined()) {
+    return grad * (self <= max).type_as(grad);
+  } else {
+    return grad;
+  }
+}
+
+Tensor clamp_with_tensors_backward_for_min(const Tensor & grad, const Tensor &self, const Tensor & min, const Tensor & max) {
+  // The gradient for min can be different depending if max is defined or not
+  if (!max.defined()) {
+    return grad * (self < min).type_as(grad);
+  } else {
+    // We clamp max tensor to make sure that it is not smaller than min in forward.
+    // This is necessary to fix the divergent behaviour in AVX and base CPU kernels.
+    // So we must adjust the gradient computation too.
+    // https://github.com/pytorch/pytorch/pull/32587#issuecomment-591389582
+    return grad * (at::bitwise_or(self < min, min > max)).type_as(grad);
+  }
+}
+
+Tensor clamp_with_tensors_backward_for_max(const Tensor & grad, const Tensor &self, const Tensor & min, const Tensor & max) {
+  // The gradient for max can be different depending if min is defined or not
+  if (!min.defined()) {
+    return grad * (self > max).type_as(grad);
+  } else {
+    // We clamp max tensor to make sure that it is not smaller than min in forward.
+    // This is necessary to fix the divergent behaviour in AVX and base CPU kernels.
+    // So we must adjust the gradient computation too.
+    // https://github.com/pytorch/pytorch/pull/32587#issuecomment-591389582
+    return grad * at::bitwise_and(self >= min, at::bitwise_and(self > max, max >= min)).type_as(grad);
   }
 }
 

@@ -43,6 +43,9 @@ TORCH_LIBRARY(quantized, m) {
   m.def("batch_norm3d(Tensor qx, Tensor? weight, Tensor? bias, Tensor mean, Tensor var, float eps, float output_scale, int output_zero_point) -> Tensor");
   m.def("batch_norm3d_relu(Tensor qx, Tensor? weight, Tensor? bias, Tensor mean, Tensor var, float eps, float output_scale, int output_zero_point) -> Tensor");
   m.def("clamp(Tensor qx, Scalar? min, Scalar? max) -> Tensor qy");
+  m.def("clamp_with_tensors(Tensor qx, Tensor min, Tensor max) -> Tensor qy");
+  m.def("clamp_with_min_tensor_max_scalar(Tensor qx, Tensor min, Scalar max) -> Tensor qy");
+  m.def("clamp_with_min_scalar_max_tensor(Tensor qx, Scalar min, Tensor max) -> Tensor qy");
   m.def("threshold(Tensor qx, Scalar threshold, Scalar value) -> Tensor qy");
   m.def("cat(Tensor[] qx, int dim, float? scale, int? zero_point) -> Tensor");
   m.def("cat_relu(Tensor[] qx, int dim, float? scale, int? zero_point) -> Tensor");

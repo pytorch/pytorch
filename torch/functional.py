@@ -20,6 +20,8 @@ __all__ = [
     'block_diag',
     'cdist',
     'chain_matmul',
+    'clamp',
+    'clamp_',
     'einsum',
     'istft',
     'lu',
@@ -1405,6 +1407,116 @@ lu = boolean_dispatch(
     module_name=__name__,
     func_name='lu')
 lu.__doc__ = _lu_impl.__doc__
+
+def clamp(input, min=None, max=None, out=None):
+    r"""
+    Clamp all elements in :attr:`input` into the range `[` :attr:`min`, :attr:`max` `]` and return
+    a resulting tensor:
+
+    .. math::
+        y_i = \begin{cases}
+            \text{min}_i & \text{if } x_i < \text{min}_i \\
+            x_i & \text{if } \text{min}_i \leq x_i \leq \text{max}_i \\
+            \text{max}_i & \text{if } x_i > \text{max}_i
+        \end{cases}
+
+    The :attr:`input` and arguments :attr:`min` and attr:`max` should have matching types.
+    I.e. if :attr:`input` is of type `FloatTensor` or `DoubleTensor`, then args :attr:`min`
+    and :attr:`max` must be `FloatTensor`, `DoubleTensor`, or real numbers.
+
+    For tensor :attr:`max` or :attr:`min` arguments `max = torch.max(min, max)` is called to make sure that 
+    :attr:`max` is greater than or equal to :attr:`min`.
+
+    Args:
+        input (Tensor): the input tensor
+        min (Tensor or Number): lower-bound of the range to be clamped to
+        max (Tensor or Number): upper-bound of the range to be clamped to
+        out (Tensor, optional): the output tensor.
+
+    Example::
+
+        >>> a = torch.randn(4)
+        >>> a
+        tensor([-1.7120,  0.1734, -0.0478, -0.0922])
+        >>> torch.clamp(a, min=-0.5, max=0.5)
+        tensor([-0.5000,  0.1734, -0.0478, -0.0922])
+        >>>
+        >>> min_tensor = torch.tensor([-0.5, -1.0, 0.0, -0.5])
+        >>> max_tensor = torch.tensor([1.0, 1.0, 0.0, -0.1])
+        >>> torch.clamp(a, min=min_tensor, max=max_tensor)
+        tensor([-0.5000,  0.1734,  0.0000, -0.1000])
+
+    .. function:: clamp(input, *, min, out=None) -> Tensor
+
+    Clamps all elements in :attr:`input` to be larger or equal to :attr:`min`.
+
+    The :attr:`input` and argument :attr:`min` should have matching types.
+    I.e. if :attr:`input` is of type `FloatTensor` or `DoubleTensor`, then arg :attr:`min`
+    must be `FloatTensor`, `DoubleTensor`, or real number.
+
+    Args:
+        input (Tensor): the input tensor
+        min (Tensor or Number): minimal value of each element in the output
+        out (Tensor, optional): the output tensor.
+
+    Example::
+
+        >>> a = torch.randn(4)
+        >>> a
+        tensor([-0.0299, -2.3184,  2.1593, -0.8883])
+        >>> torch.clamp(a, min=0.5)
+        tensor([ 0.5000,  0.5000,  2.1593,  0.5000])
+        >>>
+        >>> min_tensor = torch.tensor([-0.5, -1.0, 0.0, -0.5])
+        >>> torch.clamp(a, min=min_tensor)
+        tensor([-0.0299, -1.0000,  2.1593, -0.5000])
+
+    .. function:: clamp(input, *, max, out=None) -> Tensor
+
+    Clamps all elements in :attr:`input` to be smaller or equal :attr:`max`.
+
+    The :attr:`input` and argument :attr:`max` should have matching types.
+    I.e. if :attr:`input` is of type `FloatTensor` or `DoubleTensor`, then arg :attr:`max`
+    must be `FloatTensor`, `DoubleTensor`, or real number.
+
+    Args:
+        input (Tensor): the input tensor
+        max (Tensor or Number): maximal value of each element in the output
+        out (Tensor, optional): the output tensor.
+
+    Example::
+
+        >>> a = torch.randn(4)
+        >>> a
+        tensor([ 0.7753, -0.4702, -0.4599,  1.1899])
+        >>> torch.clamp(a, max=0.5)
+        tensor([ 0.5000, -0.4702, -0.4599,  0.5000])
+        >>>
+        >>> max_tensor = torch.tensor([ 1.0000,  1.0000,  0.0000, -0.1000])
+        >>> torch.clamp(a, max=max_tensor)
+        tensor([ 0.7753, -0.4702, -0.4599, -0.1000])
+    """
+    if type(input) is not Tensor and has_torch_function((input,)):
+        return handle_torch_function(clamp, (input,), input, min=min, max=max, out=out)
+    # Overwriting reason:
+    # This dispatches to different ATen functions depending on the type of
+    # min and max.
+    if (isinstance(min, torch.Tensor) and min.numel() > 1) or (isinstance(max, torch.Tensor) and max.numel() > 1):
+        return torch._C._VariableFunctions.clamp_with_tensors(input, min, max, out=out)
+    else:
+        return torch._C._VariableFunctions.clamp(input, min, max, out=out)
+
+
+def clamp_(input, min=None, max=None):
+    if type(input) is not Tensor and has_torch_function((input,)):
+        return handle_torch_function(clamp_, (input,), input, min=min, max=max)
+    # Overwriting reason:
+    # This dispatches to different ATen functions depending on the type of
+    # min and max.
+    if (isinstance(min, torch.Tensor) and min.numel() > 1) or (isinstance(max, torch.Tensor) and max.numel() > 1):
+        return torch._C._VariableFunctions.clamp_with_tensors_(input, min, max)
+    else:
+        return torch._C._VariableFunctions.clamp_(input, min, max)
 
 def align_tensors(*tensors):
     raise RuntimeError('`align_tensors` not yet implemented.')

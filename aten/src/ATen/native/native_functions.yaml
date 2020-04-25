@@ -777,6 +777,74 @@
 
 - func: clamp_min.out(Tensor self, Scalar min, *, Tensor(a!) out) -> Tensor(a!)
 
+- func: clamp_with_tensors(Tensor self, Tensor? min=None, Tensor? max=None) -> Tensor
+  variants: function, method
+  dispatch:
+    CPU: clamp_with_tensors
+    CUDA: clamp_with_tensors
+    QuantizedCPU: quantized_clamp_with_tensors
+
+- func: clamp_with_tensors_(Tensor(a!) self, Tensor? min=None, Tensor? max=None) -> Tensor(a!)
+  variants: function, method
+
+- func: clamp_with_tensors.out(Tensor self, Tensor? min=None, Tensor? max=None, *, Tensor(a!) out) -> Tensor(a!)
+
+- func: clamp_with_tensors_max(Tensor self, Tensor max) -> Tensor
+  use_c10_dispatcher: full
+  variants: function, method
+
+- func: clamp_with_tensors_max_(Tensor(a!) self, Tensor max) -> Tensor(a!)
+  variants: function, method
+
+- func: clamp_with_tensors_max.out(Tensor self, Tensor max, *, Tensor(a!) out) -> Tensor(a!)
+
+- func: clamp_with_tensors_min(Tensor self, Tensor min) -> Tensor
+  use_c10_dispatcher: full
+  variants: function, method
+
+- func: clamp_with_tensors_min_(Tensor(a!) self, Tensor min) -> Tensor(a!)
+  variants: function, method
+
+- func: clamp_with_tensors_min.out(Tensor self, Tensor min, *, Tensor(a!) out) -> Tensor(a!)
+
+- func: clamp_with_tensors.min_tensor(Tensor self, Tensor min, Scalar max) -> Tensor
+  use_c10_dispatcher: full
+  variants: function, method
+  dispatch:
+    CPU: clamp_with_min_tensor
+    CUDA: clamp_with_min_tensor
+    QuantizedCPU: quantized_clamp_with_min_tensor
+
+- func: clamp_with_tensors_.min_tensor(Tensor(a!) self, Tensor min, Scalar max) -> Tensor(a!)
+  variants: function, method
+  dispatch:
+    CPU: clamp_with_min_tensor_
+    CUDA: clamp_with_min_tensor_
+
+- func: clamp_with_tensors.min_tensor_out(Tensor self, Tensor min, Scalar max, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: clamp_with_min_tensor_out
+    CUDA: clamp_with_min_tensor_out
+
+- func: clamp_with_tensors.max_tensor(Tensor self, Scalar min, Tensor max) -> Tensor
+  use_c10_dispatcher: full
+  variants: function, method
+  dispatch:
+    CPU: clamp_with_max_tensor
+    CUDA: clamp_with_max_tensor
+    QuantizedCPU: quantized_clamp_with_max_tensor
+
+- func: clamp_with_tensors_.max_tensor(Tensor(a!) self, Scalar min, Tensor max) -> Tensor(a!)
+  variants: function, method
+  dispatch:
+    CPU: clamp_with_max_tensor_
+    CUDA: clamp_with_max_tensor_
+
+- func: clamp_with_tensors.max_tensor_out(Tensor self, Scalar min, Tensor max, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: clamp_with_max_tensor_out
+    CUDA: clamp_with_max_tensor_out
+
 - func: cudnn_is_acceptable(Tensor self) -> bool
   use_c10_dispatcher: full
   device_guard: False

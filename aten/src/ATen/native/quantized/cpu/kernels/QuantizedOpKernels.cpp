@@ -631,6 +631,119 @@ void qclamp_kernel(
   });
 }
 
+void qclamp_with_tensors_kernel(
+    const Tensor& qx,
+    const Tensor& min_tensor,
+    const Tensor& max_tensor,
+    Tensor& qy) {
+  AT_DISPATCH_QINT_TYPES(qx.scalar_type(), "qclamp", [&]() {
+    qy = at::_empty_affine_quantized(
+        qx.sizes(),
+        at::device(kCPU).dtype(SCALAR_TYPE),
+        qx.q_scale(),
+        qx.q_zero_point(),
+        qx.suggest_memory_format());
+    auto iter = TensorIterator();
+    iter.set_check_mem_overlap(false);
+    iter.add_output(qy);
+    iter.add_input(qx);
+    iter.add_input(min_tensor);
+    iter.add_input(max_tensor);
+    iter.build();
+
+    using Vec = Vec256<scalar_t>;
+    cpu_kernel_vec(
+        iter,
+        [&](scalar_t value, scalar_t min_scalar, scalar_t max_scalar) -> scalar_t {
+          underlying_t min_clamped =
+              std::max<underlying_t>(value.val_, min_scalar.val_);
+          return scalar_t(std::min<underlying_t>(min_clamped, max_scalar.val_));
+        },
+        [&](Vec val, Vec min_vec, Vec max_vec) -> Vec {
+          auto min_clamped = val.maximum(min_vec);
+          return min_clamped.minimum(max_vec);
+        });
+  });
+}
+
+void qclamp_with_min_tensor_kernel(
+    const Tensor& qx,
+    const Tensor& min_tensor,
+    Scalar max_scalar,
+    Tensor& qy) {
+  AT_DISPATCH_QINT_TYPES(qx.scalar_type(), "qclamp", [&]() {
+    qy = at::_empty_affine_quantized(
+        qx.sizes(),
+        at::device(kCPU).dtype(SCALAR_TYPE),
+        qx.q_scale(),
+        qx.q_zero_point(),
+        qx.suggest_memory_format());
+    auto iter = TensorIterator();
+    iter.set_check_mem_overlap(false);
+    iter.add_output(qy);
+    iter.add_input(qx);
+    iter.add_input(min_tensor);
+    iter.build();
+    
+    using Vec = Vec256<scalar_t>;
+    auto max = max_scalar.to<float>();
+    scalar_t max_q =
+        at::native::quantize_val<scalar_t>(qx.q_scale(), qx.q_zero_point(), max);
+    auto max_vec = Vec(max_q);
+    
+    cpu_kernel_vec(
+        iter,
+        [&](scalar_t value, scalar_t min_scalar) -> scalar_t {
+          underlying_t min_clamped =
+              std::max<underlying_t>(value.val_, min_scalar.val_);
+          return scalar_t(std::min<underlying_t>(min_clamped, max_q.val_));
+        },
+        [&](Vec val, Vec min_vec) -> Vec {
+          auto min_clamped = val.maximum(min_vec);
+          return min_clamped.minimum(max_vec);
+        });
+  });
+}
+
+void qclamp_with_max_tensor_kernel(
+    const Tensor& qx,
+    Scalar min_scalar,
+    const Tensor& max_tensor,
+    Tensor& qy) {
+  AT_DISPATCH_QINT_TYPES(qx.scalar_type(), "qclamp", [&]() {
+    qy = at::_empty_affine_quantized(
+        qx.sizes(),
+        at::device(kCPU).dtype(SCALAR_TYPE),
+        qx.q_scale(),
+        qx.q_zero_point(),
+        qx.suggest_memory_format());
+    auto iter = TensorIterator();
+    iter.set_check_mem_overlap(false);
+    iter.add_output(qy);
+    iter.add_input(qx);
+    iter.add_input(max_tensor);
+    iter.build();
+    
+    using Vec = Vec256<scalar_t>;
+    auto min = min_scalar.to<float>();
+    scalar_t min_q =
+        at::native::quantize_val<scalar_t>(qx.q_scale(), qx.q_zero_point(), min);
+    auto min_vec = Vec(min_q);
+    
+    cpu_kernel_vec(
+        iter,
+        [&](scalar_t value, scalar_t max_scalar) -> scalar_t {
+          underlying_t min_clamped =
+              std::max<underlying_t>(value.val_, min_q.val_);
+          return scalar_t(std::min<underlying_t>(min_clamped, max_scalar.val_));
+        },
+        [&](Vec val, Vec max_vec) -> Vec {
+          auto min_clamped = val.maximum(min_vec);
+          return min_clamped.minimum(max_vec);
+        });
+  });
+}
+
 void qthreshold_kernel(
   // TODO: For future tasks, since output quantization parameters are set equal to
   // the input ones, it might make sense to implement this completely in the
@@ -699,7 +812,6 @@ void qthreshold_kernel(
   });
 }
 
-
 void qhardswish_kernel(const Tensor& qx, Tensor& qy) {
   const auto i_scale = qx.q_scale();
   const auto i_zero_point = qx.q_zero_point();
@@ -740,7 +852,6 @@ void qhardswish_kernel(const Tensor& qx, Tensor& qy) {
         });
   });
 }
-
 
 void qtanh_kernel(const Tensor& qx, Tensor& qy) {
   int64_t zero_point = qx.q_zero_point();
@@ -2601,6 +2712,9 @@ REGISTER_DISPATCH(qrelu_leaky_stub, &leaky_qrelu_out_kernel);
 REGISTER_DISPATCH(qsigmoid_stub, &qsigmoid_kernel);
 REGISTER_DISPATCH(qhardsigmoid_stub, &qhardsigmoid_kernel);
 REGISTER_DISPATCH(qclamp_stub, &qclamp_kernel);
+REGISTER_DISPATCH(qclamp_with_tensors_stub, &qclamp_with_tensors_kernel);
+REGISTER_DISPATCH(qclamp_with_min_tensor_stub, &qclamp_with_min_tensor_kernel);
+REGISTER_DISPATCH(qclamp_with_max_tensor_stub, &qclamp_with_max_tensor_kernel);
 REGISTER_DISPATCH(qthreshold_stub, &qthreshold_kernel);
 REGISTER_DISPATCH(qtanh_stub, &qtanh_kernel);
 REGISTER_DISPATCH(qhardswish_stub, &qhardswish_kernel);

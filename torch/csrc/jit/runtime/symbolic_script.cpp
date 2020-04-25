@@ -1335,19 +1335,64 @@ const std::vector<std::string> functions = {
         def clamp(self,
                   min: Optional[number],
                   max: Optional[number]):
-          def backward(grad_output):
-            if min is not None and max is not None:
-                mask = ((self >= float(min)) * (self <= float(max))).type_as(self)
-                return grad_output * mask, None, None
-            elif min is not None:
-                mask = (self >= float(min)).type_as(self)
-                return grad_output * mask, None, None
-            elif max is not None:
-                mask = (self <= float(max)).type_as(self)
-                return grad_output * mask, None, None
-            else: #min is None and max is None
-                return grad_output, None, None
-          return torch.clamp(self, min=min, max=max), backward
+            def backward(grad_output):
+                if min is not None and max is not None:
+                    mask = ((self >= float(min)) * (self <= float(max))).type_as(self)
+                    return grad_output * mask, None, None
+                elif min is not None:
+                    mask = (self >= float(min)).type_as(self)
+                    return grad_output * mask, None, None
+                elif max is not None:
+                    mask = (self <= float(max)).type_as(self)
+                    return grad_output * mask, None, None
+                else: #min is None and max is None
+                    return grad_output, None, None
+            return torch.clamp(self, min=min, max=max), backward
+
+        def clamp_with_tensors_0(self,
+                  min: Optional[Tensor],
+                  max: Optional[Tensor]):
+            def backward(grad_output):
+                if min is not None and max is not None:
+                    ge_min = self >= min
+
+                    self_mask = torch.bitwise_and(ge_min, self <= max).type_as(self)
+                    min_mask = torch.bitwise_or(ge_min.bitwise_not(), min > max).type_as(self)
+                    max_mask = torch.bitwise_and(ge_min, torch.bitwise_and(self > max, max >= min)).type_as(self)
+                    return grad_output * self_mask, grad_output * min_mask, grad_output * max_mask
+                elif min is not None:
+                    self_mask = (self >= min).type_as(self)
+                    min_mask = (self < min).type_as(self)
+                    return grad_output * self_mask, grad_output * min_mask, None
+                elif max is not None:
+                    self_mask = (self <= max).type_as(self)
+                    max_mask = (self > max).type_as(self)
+                    return grad_output * self_mask, None, grad_output * max_mask
+                else: #min is None and max is None
+                    return grad_output, None, None
+            return torch.clamp_with_tensors(self, min=min, max=max), backward
+
+        def clamp_with_tensors_1(self,
+                  min: Tensor,
+                  max: number):
+            def backward(grad_output):
+                ge_min = self >= min
+
+                self_mask = torch.bitwise_and(ge_min, self <= float(max)).type_as(self)
+                min_mask = torch.bitwise_or(ge_min.bitwise_not(), min > max).type_as(self)
+                return grad_output * self_mask, grad_output * min_mask, None
+            return torch.clamp_with_tensors(self, min=min, max=max), backward
+
+        def clamp_with_tensors_2(self,
+                  min: number,
+                  max: Tensor):
+            def backward(grad_output):
+                ge_min = self >= float(min)
+
+                self_mask = torch.bitwise_and(ge_min, self <= max).type_as(self)
+                max_mask = torch.bitwise_and(ge_min, torch.bitwise_and(self > max, max >= min)).type_as(self)
+                return grad_output * self_mask, None, grad_output * max_mask
+            return torch.clamp_with_tensors(self, min=min, max=max), backward
     )"};
 
 std::unordered_map<std::string, GradientPair> schema_to_graphs;

@@ -520,8 +520,8 @@ def clamp(input, min_, max_):
 
     Args:
         input: quantized input
-        min_: minimum value for clamping
-        max_: maximum value for clamping
+        min_: minimum value or Tensor of values for clamping
+        max_: maximum value or Tensor of values for clamping
     """
     if not input.is_quantized:
         raise ValueError("Input to 'quantized.clamp' must be quantized!")

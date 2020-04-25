@@ -438,8 +438,6 @@ def gen_pyi(declarations_path, out):
         'get_default_dtype': ['def get_default_dtype() -> _dtype: ...'],
         'from_numpy': ['def from_numpy(ndarray) -> Tensor: ...'],
         'numel': ['def numel(self: Tensor) -> _int: ...'],
-        'clamp': ["def clamp(self, min: _float=-inf, max: _float=inf,"
-                  " *, out: Optional[Tensor]=None) -> Tensor: ..."],
         'as_tensor': ["def as_tensor(data: Any, dtype: _dtype=None, device: Optional[_device]=None) -> Tensor: ..."],
         'get_num_threads': ['def get_num_threads() -> _int: ...'],
         'set_num_threads': ['def set_num_threads(num: _int) -> None: ...'],
@@ -536,10 +534,6 @@ def gen_pyi(declarations_path, out):
                      'def __init__(self, other: Tensor) -> None: ...',
                      'def __init__(self, size: {}, *, {}) -> None: ...'.format(type_to_python('IntArrayRef'), DEVICE_PARAM),
                      ],
-        # clamp has no default values in the Declarations
-        'clamp': ["def clamp(self, min: _float=-inf, max: _float=inf,"
-                  " *, out: Optional[Tensor]=None) -> Tensor: ..."],
-        'clamp_': ["def clamp_(self, min: _float=-inf, max: _float=inf) -> Tensor: ..."],
         '__getitem__': ["def __getitem__(self, {}) -> Tensor: ...".format(INDICES)],
         '__setitem__': ["def __setitem__(self, {}, val: Union[Tensor, Number])"
                         " -> None: ...".format(INDICES)],

@@ -32,6 +32,12 @@
 namespace at {
 namespace native {
 
+static Tensor wrapped_scalar_tensor(Scalar s) {
+  auto tensor = scalar_to_tensor(s);
+  tensor.unsafeGetTensorImpl()->set_wrapped_number(true);
+  return tensor;
+}
+
 // NOTE: These are helper functions that reduce redundant code in implementing the most typical kind of unary operators.
 // YOU ARE NOT OBLIGED TO USE THESE HELPERS---if you're writing something more specialized, please don't try to make
 // them work for your case, but just write something new instead. Here we use helper functions instead of a flat fat
@@ -366,8 +372,27 @@ Tensor& logical_not_out(Tensor& result, const Tensor& self) {
   return result;
 }
 
+Tensor clamp(const Tensor& self, optional<Scalar> min, optional<Scalar> max) {
+  Tensor result = at::empty({0}, self.options());
+  return at::clamp_out(result, self, min, max);
+}
+
+Tensor clamp_max(const Tensor& self, Scalar max) {
+  Tensor result = at::empty({0}, self.options());
+  return at::clamp_max_out(result, self, max);
+}
+
+Tensor clamp_min(const Tensor& self, Scalar min) {
+  Tensor result = at::empty({0}, self.options());
+  return at::clamp_min_out(result, self, min);
+}
+
+Tensor& clamp_(Tensor& self, optional<Scalar> min, optional<Scalar> max) {
+  return at::clamp_out(self, self, min, max);
+}
+
 Tensor& clamp_out(Tensor& result, const Tensor& self, optional<Scalar> min, optional<Scalar> max) {
-  TORCH_CHECK(!self.is_complex(), "clamp is not yet implemented for complex tensors.");
+  TORCH_CHECK(!self.is_complex(), "clamp does not support complex inputs.");
   if (min && max) {
     TORCH_CHECK(self.layout() == Layout::Strided,
                 "clamp only supports strided layout, got: ", self.layout());
@@ -384,17 +409,12 @@ Tensor& clamp_out(Tensor& result, const Tensor& self, optional<Scalar> min, opti
   return result;
 }
 
-Tensor clamp(const Tensor& self, optional<Scalar> min, optional<Scalar> max) {
-  Tensor result = at::empty({0}, self.options());
-  return at::clamp_out(result, self, min, max);
-}
-
-Tensor& clamp_(Tensor& self, optional<Scalar> min, optional<Scalar> max) {
-  return at::clamp_out(self, self, min, max);
+Tensor& clamp_max_(Tensor& self, Scalar max) {
+  return at::clamp_max_out(self, self, max);
 }
 
 Tensor& clamp_max_out(Tensor& result, const Tensor& self, Scalar max) {
-  TORCH_CHECK(!self.is_complex(), "clamp is not yet implemented for complex tensors.");
+  TORCH_CHECK(!self.is_complex(), "clamp does not support complex inputs.");
   TORCH_CHECK(self.layout() == Layout::Strided,
               "clamp_max only supports strided layout, got: ", self.layout());
   auto iter = TensorIterator::unary_op(result, self,
@@ -403,17 +423,12 @@ Tensor& clamp_max_out(Tensor& result, const Tensor& self, Scalar max) {
   return result;
 }
 
-Tensor clamp_max(const Tensor& self, Scalar max) {
-  Tensor result = at::empty({0}, self.options());
-  return at::clamp_max_out(result, self, max);
-}
-
-Tensor& clamp_max_(Tensor& self, Scalar max) {
-  return at::clamp_max_out(self, self, max);
+Tensor& clamp_min_(Tensor& self, Scalar min) {
+  return at::clamp_min_out(self, self, min);
 }
 
 Tensor& clamp_min_out(Tensor& result, const Tensor& self, Scalar min) {
-  TORCH_CHECK(!self.is_complex(), "clamp is not yet implemented for complex tensors.");
+  TORCH_CHECK(!self.is_complex(), "clamp does not support complex inputs.");
   TORCH_CHECK(self.layout() == Layout::Strided,
               "clamp_min only supports strided layout, got: ", self.layout());
   auto iter = TensorIterator::unary_op(result, self,
@@ -422,13 +437,129 @@ Tensor& clamp_min_out(Tensor& result, const Tensor& self, Scalar min) {
   return result;
 }
 
-Tensor clamp_min(const Tensor& self, Scalar min) {
+Tensor clamp_with_tensors(const Tensor& self, const Tensor& min, const Tensor& max) {
   Tensor result = at::empty({0}, self.options());
-  return at::clamp_min_out(result, self, min);
+  return at::clamp_with_tensors_out(result, self, min, max);
 }
 
-Tensor& clamp_min_(Tensor& self, Scalar min) {
-  return at::clamp_min_out(self, self, min);
+Tensor clamp_with_tensors_max(const Tensor& self, const Tensor& max) {
+  Tensor result = at::empty({0}, self.options());
+  return at::clamp_with_tensors_max_out(result, self, max);
+}
+
+Tensor clamp_with_tensors_min(const Tensor& self, const Tensor& min) {
+  Tensor result = at::empty({0}, self.options());
+  return at::clamp_with_tensors_min_out(result, self, min);
+}
+
+Tensor& clamp_with_tensors_(Tensor& self, const Tensor& min, const Tensor& max) {
+  return at::clamp_with_tensors_out(self, self, min, max);
+}
+
+Tensor& clamp_with_tensors_out(
+    Tensor& result,
+    const Tensor& self,
+    const Tensor& min,
+    const Tensor& max) {
+  TORCH_CHECK(!self.is_complex(), "clamp does not support complex inputs.");
+  if (min.defined() && max.defined()) {
+    TORCH_CHECK(self.layout() == Layout::Strided,
+                "clamp only supports strided layout, got: ", self.layout());
+
+    // We clamp max tensor to make sure that it is not smaller than min
+    // This is necessary to fix the divergent behaviour in AVX and base CPU kernels
+    // https://github.com/pytorch/pytorch/pull/32587#issuecomment-591389582
+    auto adjusted_max = at::clamp_with_tensors_min(max, min);
+
+    auto iter = TensorIterator();
+    iter.set_check_mem_overlap(true);
+    iter.add_output(result);
+    iter.add_input(self);
+    iter.add_input(min);
+    iter.add_input(adjusted_max);
+    iter.promote_common_dtype();
+    iter.build();
+    clamp_with_tensors_stub(iter.device_type(), iter);
+  } else if (max.defined()) {
+    at::clamp_with_tensors_max_out(result, self, max);
+  } else if (min.defined()) {
+    at::clamp_with_tensors_min_out(result, self, min);
+  } else {
+    AT_ERROR("At least one of 'min' or 'max' must not be None");
+  }
+  return result;
+}
+
+Tensor& clamp_with_tensors_max_(Tensor& self, const Tensor& max) {
+  return at::clamp_with_tensors_max_out(self, self, max);
+}
+
+Tensor& clamp_with_tensors_max_out(Tensor& result, const Tensor& self, const Tensor& max) {
+  TORCH_CHECK(!self.is_complex(), "clamp does not support complex inputs.");
+  TORCH_CHECK(self.layout() == Layout::Strided,
+              "clamp_max only supports strided layout, got: ", self.layout());
+  auto iter = TensorIterator();
+  iter.set_check_mem_overlap(true);
+  iter.add_output(result);
+  iter.add_input(self);
+  iter.add_input(max);
+  iter.promote_common_dtype();
+  iter.build();
+  clamp_max_with_tensor_stub(iter.device_type(), iter);
+  return result;
+}
+
+Tensor& clamp_with_tensors_min_(Tensor& self, const Tensor& min) {
+  return at::clamp_with_tensors_min_out(self, self, min);
+}
+
+Tensor& clamp_with_tensors_min_out(Tensor& result, const Tensor& self, const Tensor& min) {
+  TORCH_CHECK(!self.is_complex(), "clamp does not support complex inputs.");
+  TORCH_CHECK(self.layout() == Layout::Strided,
+              "clamp_min only supports strided layout, got: ", self.layout());
+  auto iter = TensorIterator();
+  iter.set_check_mem_overlap(true);
+  iter.add_output(result);
+  iter.add_input(self);
+  iter.add_input(min);
+  iter.promote_common_dtype();
+  iter.build();
+  clamp_min_with_tensor_stub(iter.device_type(), iter);
+  return result;
+}
+
+Tensor clamp_with_min_tensor(const Tensor& self, const Tensor& min, Scalar max) {
+  Tensor result = at::empty({0}, self.options());
+  return at::clamp_with_tensors_out(result, self, min, wrapped_scalar_tensor(max).to(min));
+}
+
+Tensor& clamp_with_min_tensor_(Tensor& self, const Tensor& min, Scalar max) {
+  return at::clamp_with_tensors_out(self, self, min, wrapped_scalar_tensor(max).to(min));
+}
+
+Tensor& clamp_with_min_tensor_out(
+    Tensor& result,
+    const Tensor& self,
+    const Tensor& min,
+    Scalar max) {
+  return at::clamp_with_tensors_out(result, self, min, wrapped_scalar_tensor(max).to(min));
+}
+
+Tensor clamp_with_max_tensor(const Tensor& self, Scalar min, const Tensor& max) {
+  Tensor result = at::empty({0}, self.options());
+  return at::clamp_with_tensors_out(result, self, wrapped_scalar_tensor(min).to(max), max);
+}
+
+Tensor& clamp_with_max_tensor_(Tensor& self, Scalar min, const Tensor& max) {
+  return at::clamp_with_tensors_out(self, self, wrapped_scalar_tensor(min).to(max), max);
+}
+
+Tensor& clamp_with_max_tensor_out(
+    Tensor& result,
+    const Tensor& self,
+    Scalar min,
+    const Tensor& max) {
+  return at::clamp_with_tensors_out(result, self, wrapped_scalar_tensor(min).to(max), max);
 }
 
 Tensor polygamma(int64_t n, const Tensor& self) {
@@ -520,6 +651,9 @@ DEFINE_DISPATCH(ceil_stub);
 DEFINE_DISPATCH(clamp_stub);
 DEFINE_DISPATCH(clamp_max_stub);
 DEFINE_DISPATCH(clamp_min_stub);
+DEFINE_DISPATCH(clamp_with_tensors_stub);
+DEFINE_DISPATCH(clamp_max_with_tensor_stub);
+DEFINE_DISPATCH(clamp_min_with_tensor_stub);
 DEFINE_DISPATCH(cos_stub);
 DEFINE_DISPATCH(cosh_stub);
 DEFINE_DISPATCH(digamma_stub);

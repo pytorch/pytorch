@@ -246,6 +246,9 @@ _(aten, chunk) \
 _(aten, clamp) \
 _(aten, clamp_max) \
 _(aten, clamp_min) \
+_(aten, clamp_with_tensors) \
+_(aten, clamp_with_tensors_max) \
+_(aten, clamp_with_tensors_min) \
 _(aten, clone) \
 _(aten, coalesce) \
 _(aten, combinations) \

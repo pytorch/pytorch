@@ -337,6 +337,14 @@ class Tensor(torch._C._TensorBase):
         else:
             return LU, pivots
 
+    def clamp(self, min=None, max=None):
+        r"""See :func:`torch.clamp`"""
+        return torch.clamp(self, min, max)
+
+    def clamp_(self, min=None, max=None):
+        r"""In-place version of :meth:`~Tensor.clamp`"""
+        return torch.clamp_(self, min, max)
+
     def stft(self, n_fft, hop_length=None, win_length=None, window=None,
              center=True, pad_mode='reflect', normalized=False, onesided=True):
         r"""See :func:`torch.stft`

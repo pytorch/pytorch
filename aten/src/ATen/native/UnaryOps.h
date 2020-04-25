@@ -11,6 +11,7 @@ namespace at { namespace native {
 
 using unary_fn = void(*)(TensorIterator&);
 using unary_fn_with_scalar = void(*)(TensorIterator&, Scalar a);
+using unary_fn_with_two_scalars = void(*)(TensorIterator&, Scalar a, Scalar b);
 
 DECLARE_DISPATCH(unary_fn, abs_stub);
 DECLARE_DISPATCH(unary_fn, angle_stub);
@@ -26,8 +27,12 @@ DECLARE_DISPATCH(unary_fn, atan_stub);
 DECLARE_DISPATCH(unary_fn, bitwise_not_stub);
 DECLARE_DISPATCH(unary_fn, logical_not_stub);
 DECLARE_DISPATCH(unary_fn, ceil_stub);
+DECLARE_DISPATCH(unary_fn_with_two_scalars, clamp_stub);
 DECLARE_DISPATCH(unary_fn_with_scalar, clamp_max_stub);
 DECLARE_DISPATCH(unary_fn_with_scalar, clamp_min_stub);
+DECLARE_DISPATCH(unary_fn, clamp_with_tensors_stub);
+DECLARE_DISPATCH(unary_fn, clamp_max_with_tensor_stub);
+DECLARE_DISPATCH(unary_fn, clamp_min_with_tensor_stub);
 DECLARE_DISPATCH(unary_fn, cos_stub);
 DECLARE_DISPATCH(unary_fn, cosh_stub);
 DECLARE_DISPATCH(unary_fn, digamma_stub);
@@ -71,7 +76,6 @@ DECLARE_DISPATCH(void(*)(TensorIterator&, const uint64_t, const int64_t, c10::op
 DECLARE_DISPATCH(void(*)(TensorIterator&, c10::optional<Generator>), random_full_64_bits_range_stub);
 DECLARE_DISPATCH(void(*)(TensorIterator&, c10::optional<Generator>), random_stub);
 DECLARE_DISPATCH(void(*)(TensorIterator&, const int64_t), polygamma_stub);
-DECLARE_DISPATCH(void(*)(TensorIterator&, Scalar a, Scalar b), clamp_stub);
 DECLARE_DISPATCH(void(*)(Tensor&, const Tensor&, int64_t, bool, c10::optional<Generator>), multinomial_stub);
 
 // Missing unary functions

@@ -773,20 +773,6 @@ cholesky_inverse(upper=False) -> Tensor
 See :func:`torch.cholesky_inverse`
 """)
 
-add_docstr_all('clamp',
-               r"""
-clamp(min, max) -> Tensor
-
-See :func:`torch.clamp`
-""")
-
-add_docstr_all('clamp_',
-               r"""
-clamp_(min, max) -> Tensor
-
-In-place version of :meth:`~Tensor.clamp`
-""")
-
 add_docstr_all('clone',
                r"""
 clone(memory_format=torch.preserve_format) -> Tensor

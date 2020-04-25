@@ -393,6 +393,33 @@ static void clamp_min_kernel(TensorIterator& iter, Scalar min_scalar) {
   });
 }
 
+static void clamp_with_tensors_kernel(TensorIterator& iter) {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(kBFloat16, iter.dtype(), "clamp_cpu", [&]() {
+    ztype<scalar_t>::value_t (*zabs_)(scalar_t) = zabs;
+    cpu_kernel_vec(iter,
+     [=](scalar_t a, scalar_t min, scalar_t max) -> scalar_t { return zabs_(a) < zabs_(min) ? min : (zabs_(a) > zabs_(max) ? max : a); },
+     [=](Vec256<scalar_t> a, Vec256<scalar_t> min_vec, Vec256<scalar_t> max_vec) { return vec256::clamp(a, min_vec, max_vec); });
+  });
+}
+
+static void clamp_min_with_tensor_kernel(TensorIterator& iter) {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(kBFloat16, iter.dtype(), "clamp_min_cpu", [&]() {
+    ztype<scalar_t>::value_t (*zabs_)(scalar_t) = zabs;
+    cpu_kernel_vec(iter,
+     [=](scalar_t a, scalar_t min) -> scalar_t { return zabs_(a) < zabs_(min) ? min : a; },
+     [=](Vec256<scalar_t> a, Vec256<scalar_t> min_vec) { return vec256::clamp_min(a, min_vec); });
+  });
+}
+
+static void clamp_max_with_tensor_kernel(TensorIterator& iter) {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(kBFloat16, iter.dtype(), "clamp_max_cpu", [&]() {
+    ztype<scalar_t>::value_t (*zabs_)(scalar_t) = zabs;
+    cpu_kernel_vec(iter,
+     [=](scalar_t a, scalar_t max) -> scalar_t { return zabs_(a) > zabs_(max) ? max : a; },
+     [=](Vec256<scalar_t> a, Vec256<scalar_t> max_vec) { return vec256::clamp_max(a, max_vec); });
+  });
+}
+
 static void cauchy_kernel(TensorIterator& iter, double median, double sigma, c10::optional<Generator> gen) {
   CPUGeneratorImpl* generator = get_generator_or_default<CPUGeneratorImpl>(gen, detail::getDefaultCPUGenerator());
   templates::cpu::cauchy_kernel(iter, median, sigma, generator);
@@ -626,6 +653,9 @@ REGISTER_DISPATCH(polygamma_stub, &polygamma_kernel);
 REGISTER_DISPATCH(clamp_stub, &clamp_kernel);
 REGISTER_DISPATCH(clamp_max_stub, &clamp_max_kernel);
 REGISTER_DISPATCH(clamp_min_stub, &clamp_min_kernel);
+REGISTER_DISPATCH(clamp_with_tensors_stub, &clamp_with_tensors_kernel);
+REGISTER_DISPATCH(clamp_max_with_tensor_stub, &clamp_max_with_tensor_kernel);
+REGISTER_DISPATCH(clamp_min_with_tensor_stub, &clamp_min_with_tensor_kernel);
 
 
 IMPLEMENT_COMPLEX_KERNEL(FLOATING, acos)
