@@ -149,6 +149,7 @@ cmake_dependent_option(
 option(USE_FBGEMM "Use FBGEMM (quantized 8-bit server operators)" ON)
 option(USE_FAKELOWP "Use FakeLowp operators" OFF)
 option(USE_FFMPEG "Use ffmpeg" OFF)
+option(USE_CODE_ANALYZER "Build with settings for tools/code_analyzer" OFF)
 option(USE_GFLAGS "Use GFLAGS" OFF)
 option(USE_GLOG "Use GLOG" OFF)
 option(USE_LEVELDB "Use LEVELDB" OFF)
@@ -434,6 +435,10 @@ if(USE_FBGEMM AND ((CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64" AND CMAKE_SIZEOF_VO
 endif()
 
 include(cmake/Dependencies.cmake)
+
+if(USE_CODE_ANALYZER)
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -S -emit-llvm -DSTRIP_ERROR_MESSAGES")
+endif()
 
 if(USE_FBGEMM)
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DUSE_FBGEMM")
