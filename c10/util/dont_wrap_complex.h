@@ -1,5 +1,7 @@
 #pragma once
 
+#ifndef WRAP_COMPLEX
+
 #include <c10/util/complex_type.h>
 
 template <typename T>
@@ -9,3 +11,5 @@ template <typename T>
 C10_HOST_DEVICE inline T wrap_complex(T t) {
   return t;
 }
+
+#endif
