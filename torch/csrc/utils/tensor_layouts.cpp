@@ -21,6 +21,7 @@ void initializeLayouts() {
   // for now, let's look these up by Backend; we could create our own enum in the future.
   registerLayoutObject((THPLayout*)strided_layout, at::Backend::CPU);
   registerLayoutObject((THPLayout*)strided_layout, at::Backend::CUDA);
+  registerLayoutObject((THPLayout*)strided_layout, at::Backend::FPGA);
   registerLayoutObject((THPLayout*)strided_layout, at::Backend::MSNPU);
   registerLayoutObject((THPLayout*)strided_layout, at::Backend::XLA);
   registerLayoutObject((THPLayout*)strided_layout, at::Backend::QuantizedCPU);
