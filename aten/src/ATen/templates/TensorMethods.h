@@ -183,17 +183,20 @@ inline std::complex<double>* Tensor::data_ptr() const {
 AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF(DEFINE_ITEM)
 #undef DEFINE_ITEM
 
+// TODO(@zasdfgbnm): Remove this!
+// This is needed only when the migration of std::complex to c10::complex
+// is not done. This should be removed once the migration is done.
 template <>
 inline std::complex<float> Tensor::item() const {
   // casting from c10::complex<float> to std::complex<float>
   return static_cast<std::complex<float>>(item().toComplexFloat());
 }
-
 template <>
 inline std::complex<double> Tensor::item() const {
   // casting from c10::complex<double> to std::complex<double>
   return static_cast<std::complex<double>>(item().toComplexFloat()); 
 }
+// end TODO
 
 // Gradient Node and Edges
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
