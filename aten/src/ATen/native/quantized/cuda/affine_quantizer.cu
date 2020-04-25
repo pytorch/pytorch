@@ -17,19 +17,21 @@ void quantize_tensor_per_tensor_affine_cuda(
       qtensor.scalar_type(), "quantize_tensor_per_tensor_affine_cuda", [&]() {
         constexpr int64_t qmin = std::numeric_limits<underlying_t>::min();
         constexpr int64_t qmax = std::numeric_limits<underlying_t>::max();
-        at::cuda::CUDA_tensor_apply2<float, scalar_t>(
-            /*a=*/rtensor,
-            /*b=*/qtensor,
-            [=] __device__(float& rtensor_val, scalar_t& qtensor_val) {
-              int64_t qvalue;
-              qvalue = static_cast<int64_t>(
-                  nearbyint(rtensor_val / scale + zero_point));
-              qvalue = std::max<int64_t>(qvalue, qmin);
-              qvalue = std::min<int64_t>(qvalue, qmax);
-              qtensor_val.val_ = qvalue;
-            },
-            /*aType=*/at::cuda::TensorArgType::ReadOnly,
-            /*bType=*/at::cuda::TensorArgType::ReadWrite);
+
+        auto iter = TensorIterator();
+        iter.add_output(qtensor);
+        iter.add_input(rtensor);
+        iter.dont_compute_common_dtype();
+        iter.build();
+
+        gpu_kernel(iter, [=] GPU_LAMBDA (float rtensor_val) -> scalar_t {
+          scalar_t qtensor_value;
+          int64_t qvalue = static_cast<int64_t>(nearbyint(rtensor_val / scale + zero_point));
+          qvalue = std::min<int64_t>(std::max<int64_t>(qvalue, qmin), qmax);
+          qtensor_value.val_ = qvalue;
+          return qtensor_value;
+        });
+
       });
 }
 
