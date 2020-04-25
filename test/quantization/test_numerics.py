@@ -1,11 +1,11 @@
 import torch
 import torch.jit
-from torch.testing._internal.common_utils import run_tests, TEST_WITH_UBSAN, IS_PPC
+from torch.testing._internal.common_utils import TEST_WITH_UBSAN, IS_PPC
 from torch.testing._internal.common_quantization import QuantizationTestCase, \
     ModelMultipleOps, ModelMultipleOpsNoAvgPool
 from torch.testing._internal.common_quantized import override_quantized_engine
 
-class ModelNumerics(QuantizationTestCase):
+class TestModelNumerics(QuantizationTestCase):
     def test_float_quant_compare_per_tensor(self):
         for qengine in ["fbgemm", "qnnpack"]:
             if qengine not in torch.backends.quantized.supported_engines:
@@ -124,6 +124,3 @@ class ModelNumerics(QuantizationTestCase):
                     out_fq = fq_model(eval_data)
                     SQNRdB = 20 * torch.log10(torch.norm(out_ref) / torch.norm(out_ref - out_fq))
                     self.assertGreater(SQNRdB, SQNRTarget[idx], msg='Quantized model numerics diverge from float')
-
-if __name__ == "__main__":
-    run_tests()
