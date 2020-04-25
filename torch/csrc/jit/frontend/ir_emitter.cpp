@@ -1,7 +1,6 @@
 #include <torch/csrc/jit/frontend/ir_emitter.h>
 #include <c10/util/Exception.h>
 #include <c10/util/StringUtil.h>
-#include <fmt/core.h>
 #include <torch/csrc/jit/api/function_impl.h>
 #include <torch/csrc/jit/frontend/canonicalize_modified_loop.h>
 #include <torch/csrc/jit/frontend/convert_to_ssa.h>
@@ -373,12 +372,11 @@ struct Environment {
       std::stringstream why_not;
       if (!as_simple_value->type()->isSubtypeOfExt(parent_type, &why_not)) {
         auto error = ErrorReport(loc);
-        error << fmt::format(
-            "Variable '{}' previously had type '{}', "
-            "but is now being assigned to a value of type '{}'",
-            name,
-            simple_parent->type()->python_str(),
-            as_simple_value->type()->python_str());
+        error << "Variable '" << name << "' previously has type "
+              << simple_parent->type()->python_str()
+              << " but is now being assigned to a value of type "
+              << as_simple_value->type()->python_str();
+
         // Special-cased error msg if we're trying to assign to a tensor list.
         if (simple_parent->type()->kind() == TypeKind::ListType &&
             as_simple_value->type()->kind() == TypeKind::ListType) {

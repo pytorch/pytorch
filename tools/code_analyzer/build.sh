@@ -62,8 +62,8 @@ build_torch_mobile() {
 
   if [ ! -d "${TORCH_INSTALL_PREFIX}" ]; then
     BUILD_ROOT="${TORCH_BUILD_ROOT}" "${SRC_ROOT}/scripts/build_mobile.sh" \
-      -DCMAKE_CXX_FLAGS="-S -emit-llvm -DSTRIP_ERROR_MESSAGES" \
-      -DUSE_STATIC_DISPATCH=OFF
+      -DUSE_STATIC_DISPATCH=OFF \
+      -DUSE_CODE_ANALYZER=ON
   fi
 }
 
@@ -75,7 +75,7 @@ build_test_project() {
   BUILD_ROOT="${TEST_BUILD_ROOT}" \
     TORCH_INSTALL_PREFIX="${TORCH_INSTALL_PREFIX}" \
     "${TEST_SRC_ROOT}/build.sh" \
-    -DCMAKE_CXX_FLAGS="-S -emit-llvm -DSTRIP_ERROR_MESSAGES"
+    -DUSE_CODE_ANALYZER=ON
 }
 
 call_analyzer() {
