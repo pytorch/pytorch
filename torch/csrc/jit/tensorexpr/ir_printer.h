@@ -76,9 +76,9 @@ class TORCH_API IRPrinter : public IRVisitor {
   UniqueNameManager* name_manager() {
     return &name_manager_;
   }
+  void emitIndent();
 
  private:
-  void emitIndent();
   int indent_ = 0;
   PrinterStream printer_os_;
   UniqueNameManager name_manager_;
