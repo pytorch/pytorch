@@ -235,29 +235,7 @@ c10::intrusive_ptr<RRef> RRefContext::getOrCreateRRef(
   auto& rrefId = rrefForkData.rrefId_;
   auto& forkId = rrefForkData.forkId_;
   if (ownerId == getWorkerId()) {
-    // We have found the rref through the rrefId
-    auto ownerRRef = getOwnerRRef(rrefId);
-    // Now double check if the two types are matched
-    //
-    // Why we are special casing the check for tensor type here?
-    // this is because tensor types might get specialized on tensors when
-    // we pass inputs to the function, i.e. TensorType can filled with
-    // specific shape info, requires_grad info, etc. so the OwerRRef we
-    // found might already have those infos, but the `type` we passed in
-    // here is a plain TensorType, they are not equal relationship:
-    // specialized TensorType <: plain TensorType
-    //
-    // In RPC we don't care the difference as we ser/de with just the
-    // plain TensorType. This is not a issue for UserRRef creation either,
-    // since Tensor can only get specialized with a previous run of local
-    // JIT function, and we shouldn't preserve the specialized SubTensorType
-    // information on other workers because it's only information only.
-    if (type == TensorType::get()) {
-      TORCH_INTERNAL_ASSERT(ownerRRef->type()->isSubtypeOf(TensorType::get()));
-    } else {
-      TORCH_INTERNAL_ASSERT(ownerRRef->type() == type);
-    }
-    return ownerRRef;
+    return getOrCreateOwnerRRef(rrefId, type);
   } else {
     return createUserRRef(ownerId, rrefId, forkId, type);
   }
@@ -281,7 +259,34 @@ c10::intrusive_ptr<OwnerRRef> RRefContext::getOrCreateOwnerRRef(
     // Scenario (2) retrieving an existing RRef
     auto ownerRRef =
         c10::static_intrusive_pointer_cast<OwnerRRef>(iter->second);
-    TORCH_INTERNAL_ASSERT(ownerRRef->type() == type);
+    // Now double check if the two types match
+    //
+    // Why we are special casing the check for tensor type here?
+    // this is because tensor types might get specialized on tensors when
+    // we pass inputs to the function, i.e. TensorType can filled with
+    // specific shape info, requires_grad info, etc. so the OwerRRef we
+    // found might already have those infos, but the `type` we passed in
+    // here is a plain TensorType, they are not equal relationship:
+    // specialized TensorType <: plain TensorType
+    //
+    // In RPC we don't care the difference as we ser/de with just the
+    // plain TensorType. This is not a issue for UserRRef creation either,
+    // since Tensor can only get specialized with a previous run of local
+    // JIT function, and we shouldn't preserve the specialized SubTensorType
+    // information on other workers because it's only information only.
+    if (type == TensorType::get()) {
+      TORCH_INTERNAL_ASSERT(
+          ownerRRef->type()->isSubtypeOf(TensorType::get()),
+          "Expect OwnerRRef to be a sub-type of TensorType, but got ",
+          ownerRRef->type()->python_str());
+    } else {
+      TORCH_INTERNAL_ASSERT(
+          ownerRRef->type() == type,
+          "OwnerRRef type is ",
+          ownerRRef->type()->python_str(),
+          ", expected type is ",
+          type);
+    }
     return ownerRRef;
   }
 }
