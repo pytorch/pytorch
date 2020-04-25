@@ -23,7 +23,7 @@ from torch.quantization import default_per_channel_weight_observer
 from torch.quantization import default_per_channel_qconfig
 from torch.quantization._quantize_script import quantize_script, quantize_dynamic_script
 
-from torch.testing._internal.common_utils import TEST_WITH_UBSAN, IS_WINDOWS
+from torch.testing._internal.common_utils import TEST_WITH_UBSAN, IS_WINDOWS, IS_PPC, IS_MACOS
 from torch.testing._internal.common_quantization import QuantizationTestCase, \
     AnnotatedSingleLayerLinearModel, SingleLayerLinearModel, \
     AnnotatedConvModel, ConvModel, \
@@ -679,11 +679,11 @@ class TestPostTrainingDynamic(QuantizationTestCase):
         ref_out, ref_hid = ref(x, hiddens)
 
         for qengine in ['fbgemm', 'qnnpack']:
+            if qengine == 'qnnpack':
+                if IS_PPC or TEST_WITH_UBSAN or IS_MACOS or IS_WINDOWS:
+                    continue
             with override_quantized_engine(qengine):
                 if qengine in torch.backends.quantized.supported_engines:
-                    if qengine == 'qnnpack':
-                        if IS_WINDOWS or TEST_WITH_UBSAN:
-                            continue
                     for dtype in [torch.qint8, torch.float16]:
                         if dtype == torch.float16 and qengine == "qnnpack":
                             # fp16 dynamic quant is not supported for qnnpack
@@ -788,11 +788,11 @@ class TestPostTrainingDynamic(QuantizationTestCase):
 
     def test_default_quantized_lstm(self):
         for qengine in ['fbgemm', 'qnnpack']:
+            if qengine == 'qnnpack':
+                if IS_PPC or TEST_WITH_UBSAN or IS_MACOS or IS_WINDOWS:
+                    continue
             with override_quantized_engine(qengine):
                 if qengine in torch.backends.quantized.supported_engines:
-                    if qengine == 'qnnpack':
-                        if IS_WINDOWS or TEST_WITH_UBSAN:
-                            continue
 
                     # Test default instantiation
                     seq_len = 128
