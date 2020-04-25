@@ -24,6 +24,7 @@ namespace rpc {
 namespace {
 
 constexpr std::chrono::milliseconds kDeleteAllUsersTimeout(100000);
+constexpr float kSecToMsConversion = 1000;
 
 template <typename T>
 using shared_ptr_class_ = py::class_<T, std::shared_ptr<T>>;
@@ -250,7 +251,7 @@ PyObject* rpc_init(PyObject* /* unused */) {
               R"(
                   Create a helper proxy to easily launch an ``rpc_async`` using
                   the owner of the RRef as the destination to run functions on
-                  the object referenced by this RRef. More specifically, 
+                  the object referenced by this RRef. More specifically,
                   ``rref.rpc_async().func_name(*args, **kwargs)`` is the same as
                   the following:
 
@@ -274,7 +275,7 @@ PyObject* rpc_init(PyObject* /* unused */) {
               R"(
                   Create a helper proxy to easily launch an ``remote`` using
                   the owner of the RRef as the destination to run functions on
-                  the object referenced by this RRef. More specifically, 
+                  the object referenced by this RRef. More specifically,
                   ``rref.remote().func_name(*args, **kwargs)`` is the same as
                   the following:
 
@@ -604,9 +605,8 @@ If the future completes with an error, an exception is thrown.
   module.def(
       "get_rpc_timeout",
       []() {
-        const float msToSecDiv = 1000.f;
         return RpcAgent::getCurrentRpcAgent()->getRpcTimeout().count() /
-            msToSecDiv;
+            kSecToMsConversion;
       },
       R"(
           Retrieve the default timeout for all RPCs that was set during RPC initialization.
@@ -631,14 +631,13 @@ If the future completes with an error, an exception is thrown.
   module.def(
       "_set_rpc_timeout",
       [](const float rpcTimeoutSeconds) {
-        const auto secToMsConversion = 1000;
         auto rpcTimeout = std::chrono::milliseconds(
-            static_cast<int>(rpcTimeoutSeconds * secToMsConversion));
+            static_cast<int>(rpcTimeoutSeconds * kSecToMsConversion));
         RpcAgent::getCurrentRpcAgent()->setRpcTimeout(rpcTimeout);
       },
       R"(
           Set the default timeout for all RPCs. The input unit is expected to be
-          in seconds.If an RPC is not completed within this time, an exception
+          in seconds. If an RPC is not completed within this time, an exception
           indicating it has timed out will be raised. To control timeout for
           specific RPCs, a timeout parameter can be passed into
           :meth:`~torch.distributed.rpc.rpc_sync` and
