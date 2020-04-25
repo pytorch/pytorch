@@ -1,5 +1,5 @@
 // Returns unique elements of input tensor.
-
+#include <c10/util/wrap_complex.h>
 #include <ATen/ATen.h>
 #include <ATen/Dispatch.h>
 

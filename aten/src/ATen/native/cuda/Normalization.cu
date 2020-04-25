@@ -1,3 +1,4 @@
+#include <c10/util/wrap_complex.h>
 #include <ATen/native/cuda/Normalization.cuh>
 
 namespace at { namespace native {

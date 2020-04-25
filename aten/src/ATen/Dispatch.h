@@ -1,3 +1,9 @@
+// !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!1
+// Warning: If you use this file, you will need to
+// #include <c10/util/wrap_complex.h>
+// at the beginning of your file
+// !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
 #pragma once
 
 #include <ATen/core/DeprecatedTypeProperties.h>
@@ -8,9 +14,21 @@
 
 #define AT_PRIVATE_CASE_TYPE(enum_type, type, ...) \
   case enum_type: {                                \
-    using scalar_t = type;                         \
+    using scalar_t = wrap_complex_t<type>;         \
     return __VA_ARGS__();                          \
   }
+
+// ^^^ Note:
+// For non-complex types, wrap_complex_t<T> is just T itself. For complex types
+// What `wrap_complex` is totally depends on the file that include this file
+// If the file including this does something like:
+//   #include <c10/util/dont_wrap_complex.h>
+//   #include <ATen/Dispatch.h>
+// Then wrap_complex_t<T> will be T itself for complex types.
+// Otherwise if the file including this does:
+//   #include <c10/util/wrap_complex.h>
+//   #include <ATen/Dispatch.h>
+// Then wrap_complex_t<T> will convert c10::complex to std::complex
 
 // Workaround for C10_UNUSED because CUDA 10.1 and below fails to handle unused
 // attribute in the type aliasing context. Keep name long and verbose to avoid

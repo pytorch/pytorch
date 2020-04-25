@@ -5,6 +5,7 @@
 #include <c10/util/BFloat16.h>
 #include <c10/util/Optional.h>
 #include <c10/util/typeid.h>
+#include <c10/util/complex_type.h>
 
 #include <complex>
 #include <cstdint>
@@ -31,8 +32,8 @@ namespace c10 {
   _(float, Float) /* 6 */                                \
   _(double, Double) /* 7 */                              \
   _(at::ComplexHalf, ComplexHalf) /* 8 */                \
-  _(std::complex<float>, ComplexFloat) /* 9 */           \
-  _(std::complex<double>, ComplexDouble) /* 10 */        \
+  _(c10::complex<float>, ComplexFloat) /* 9 */           \
+  _(c10::complex<double>, ComplexDouble) /* 10 */        \
   _(bool, Bool) /* 11 */                                 \
   _(c10::qint8, QInt8) /* 12 */                          \
   _(c10::quint8, QUInt8) /* 13 */                        \
@@ -52,8 +53,8 @@ namespace c10 {
   _(at::Half, Half)                                                \
   _(float, Float)                                                  \
   _(double, Double)                                                \
-  _(std::complex<float>, ComplexFloat)                             \
-  _(std::complex<double>, ComplexDouble)                           \
+  _(c10::complex<float>, ComplexFloat)                             \
+  _(c10::complex<double>, ComplexDouble)                           \
   _(bool, Bool)                                                    \
   _(at::BFloat16, BFloat16)
 
@@ -197,8 +198,8 @@ AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(SPECIALIZE_CPPTypeToScalarType)
   _(c10::qint32, QInt32)
 
 #define AT_FORALL_COMPLEX_TYPES(_)             \
-  _(std::complex<float>, ComplexFloat)         \
-  _(std::complex<double>, ComplexDouble)
+  _(c10::complex<float>, ComplexFloat)         \
+  _(c10::complex<double>, ComplexDouble)
 
 static inline caffe2::TypeMeta scalarTypeToTypeMeta(ScalarType scalar_type) {
 #define DEFINE_CASE(ctype, name) \

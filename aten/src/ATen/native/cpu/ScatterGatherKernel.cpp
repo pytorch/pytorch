@@ -1,3 +1,4 @@
+#include <c10/util/wrap_complex.h>
 #include <ATen/native/ScatterGatherShapeChecks.h>
 #include <ATen/native/ReduceOpsUtils.h>
 #include <ATen/native/TensorIterator.h>

@@ -1,5 +1,6 @@
 // Adapted from interp.cpp from Caffe util by Pauline Luc
 // Originally developed by George Papandreou
+#include <c10/util/wrap_complex.h>
 #include <ATen/ATen.h>
 #include <ATen/AccumulateType.h>
 #include <ATen/NativeFunctions.h>

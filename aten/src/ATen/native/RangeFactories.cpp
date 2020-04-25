@@ -1,3 +1,4 @@
+#include <c10/util/wrap_complex.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/AccumulateType.h>
 #include <ATen/Parallel.h>

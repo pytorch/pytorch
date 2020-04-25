@@ -1,3 +1,4 @@
+#include <c10/util/wrap_complex.h>
 #include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
 #include <ATen/cpu/vec256/vec256.h>

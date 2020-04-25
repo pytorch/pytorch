@@ -1,4 +1,5 @@
 #include <limits>
+#include <c10/util/wrap_complex.h>
 #include <ATen/native/UnaryOps.h>
 #include <ATen/native/cuda/Loops.cuh>
 #include <ATen/AccumulateType.h>

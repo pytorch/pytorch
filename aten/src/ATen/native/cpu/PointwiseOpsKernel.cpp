@@ -1,4 +1,5 @@
 // Ternary and higher-order pointwise operations
+#include <c10/util/wrap_complex.h>
 #include <ATen/ATen.h>
 
 #include <ATen/Dispatch.h>

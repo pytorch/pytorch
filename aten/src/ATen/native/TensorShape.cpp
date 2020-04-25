@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <vector>
+#include <c10/util/wrap_complex.h>
 #include <ATen/ATen.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/InferSize.h>

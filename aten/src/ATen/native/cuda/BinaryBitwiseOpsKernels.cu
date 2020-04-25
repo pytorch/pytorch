@@ -1,3 +1,4 @@
+#include <c10/util/wrap_complex.h>
 #include <ATen/Dispatch.h>
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/cuda/Loops.cuh>

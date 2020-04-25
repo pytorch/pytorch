@@ -1,3 +1,4 @@
+#include <c10/util/wrap_complex.h>
 #include <ATen/ATen.h>
 #include <ATen/LegacyTHFunctionsCUDA.h>
 #include <ATen/cuda/CUDABlas.h>

@@ -1,5 +1,6 @@
 #include <cmath>
 #include <type_traits>
+#include <c10/util/wrap_complex.h>
 #include <ATen/Config.h>
 #include <ATen/Dispatch.h>
 #include <ATen/CPUGeneratorImpl.h>
