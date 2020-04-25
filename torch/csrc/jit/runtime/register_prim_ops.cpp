@@ -675,86 +675,86 @@ int dictConstructFromList(Stack& stack) {
 
 #define CREATE_DICT_OPS(key_type)                                             \
   Operator(                                                                   \
-      "aten::len.Dict(Dict(" key_type ", t) self) -> int",                    \
+      "aten::len.Dict_" key_type "(Dict(" key_type ", t) self) -> int",                    \
       dictLen,                                                                \
       aliasAnalysisFromSchema()),                                             \
       Operator(                                                               \
-          "aten::keys(Dict(" key_type ", t) self) -> " key_type "[](*)",      \
+          "aten::keys." key_type "(Dict(" key_type ", t) self) -> " key_type "[](*)",      \
           dictKeys,                                                           \
           aliasAnalysisFromSchema()),                                         \
       Operator(                                                               \
-          "aten::values(Dict(" key_type ", t) self) -> t[](*)",               \
+          "aten::values." key_type "(Dict(" key_type ", t) self) -> t[](*)",               \
           dictValues,                                                         \
           aliasAnalysisFromSchema()),                                         \
       Operator(                                                               \
-          "aten::__getitem__.Dict(Dict(" key_type ", t) self, " key_type      \
+          "aten::__getitem__.Dict_" key_type "(Dict(" key_type ", t) self, " key_type      \
           " key) -> t(*)",                                                    \
           dictIndex,                                                          \
           aliasAnalysisFromSchema()),                                         \
       Operator(                                                               \
-          "aten::get(Dict(" key_type ", t) self, " key_type " key) -> t(*)?", \
+          "aten::get." key_type "(Dict(" key_type ", t) self, " key_type " key) -> t(*)?", \
           dictGet<false>,                                                     \
           aliasAnalysisFromSchema()),                                         \
       Operator(                                                               \
-          "aten::get(Dict(" key_type ", t) self, " key_type                   \
+          "aten::get.default_" key_type "(Dict(" key_type ", t) self, " key_type                   \
           " key, t default_value) -> t(*)",                                   \
           dictGet<true>,                                                      \
           aliasAnalysisFromSchema()),                                         \
       Operator(                                                               \
-          "aten::setdefault(Dict(" key_type ", t)(a!) self, " key_type        \
+          "aten::setdefault." key_type "(Dict(" key_type ", t)(a!) self, " key_type        \
           "(b -> *) key, t(c -> *) default_value) -> t(*)",                   \
           dictSetDefault,                                                     \
           aliasAnalysisFromSchema()),                                         \
       Operator(                                                               \
-          "aten::Delete.Dict(Dict(" key_type ", t)(a!) self, " key_type       \
+          "aten::Delete.Dict_" key_type "(Dict(" key_type ", t)(a!) self, " key_type       \
           " key) -> ()",                                                      \
           dictDelete,                                                         \
           aliasAnalysisFromSchema()),                                         \
       Operator(                                                               \
-          "aten::pop.Dict(Dict(" key_type ", t)(a!) self, " key_type          \
+          "aten::pop.Dict_" key_type "(Dict(" key_type ", t)(a!) self, " key_type          \
           " key) -> t(*)",                                                    \
           dictPop<false>,                                                     \
           aliasAnalysisFromSchema()),                                         \
       Operator(                                                               \
-          "aten::pop.Dict_default(Dict(" key_type ", t)(a!) self, " key_type  \
+          "aten::pop.Dict_default_" key_type "(Dict(" key_type ", t)(a!) self, " key_type  \
           " key, t default_value) -> t(*)",                                   \
           dictPop<true>,                                                      \
           aliasAnalysisFromSchema()),                                         \
       Operator(                                                               \
-          "aten::popitem(Dict(" key_type ", t)(a!) self) -> ((" key_type      \
+          "aten::popitem." key_type "(Dict(" key_type ", t)(a!) self) -> ((" key_type      \
           ", t))",                                                            \
           dictPopItem,                                                        \
           aliasAnalysisFromSchema()),                                         \
       Operator(                                                               \
-          "aten::clear(Dict(" key_type ", t)(a!) self) -> ()",                \
+          "aten::clear." key_type "(Dict(" key_type ", t)(a!) self) -> ()",                \
           dictClear,                                                          \
           aliasAnalysisFromSchema()),                                         \
       Operator(                                                               \
-          "aten::update(Dict(" key_type ", t)(a!) self, Dict(" key_type       \
+          "aten::update." key_type "(Dict(" key_type ", t)(a!) self, Dict(" key_type       \
           ", t)(a!) to_add) -> ()",                                           \
           dictUpdate,                                                         \
           aliasAnalysisFromSchema()),                                         \
       Operator(                                                               \
-          "aten::items(Dict(" key_type ", t) self) -> ((" key_type ", t)[])", \
+          "aten::items." key_type "(Dict(" key_type ", t) self) -> ((" key_type ", t)[])", \
           dictItems,                                                          \
           aliasAnalysisFromSchema()),                                         \
       Operator(                                                               \
-          "aten::copy.Dict(Dict(" key_type ", t)(a) self) -> Dict(" key_type  \
+          "aten::copy.Dict_" key_type "(Dict(" key_type ", t)(a) self) -> Dict(" key_type  \
           ", t)",                                                             \
           dictCopy,                                                           \
           aliasAnalysisFromSchema()),                                         \
       Operator(                                                               \
-          "aten::__contains__(Dict(" key_type ", t) dict, " key_type          \
+          "aten::__contains__." key_type "(Dict(" key_type ", t) dict, " key_type          \
           " key) -> bool",                                                    \
           dictContains,                                                       \
           aliasAnalysisFromSchema()),                                         \
       Operator(                                                               \
-          "aten::_set_item(Dict(" key_type ", t)(a!) l, " key_type            \
+          "aten::_set_item." key_type "(Dict(" key_type ", t)(a!) l, " key_type            \
           "(b -> *) idx, t(c -> *) v) -> ()",                                 \
           dictSetItem,                                                        \
           aliasAnalysisFromSchema()),                                         \
       Operator(                                                               \
-          "aten::dict((" key_type ", tVal)[] inputs) -> Dict(" key_type       \
+          "aten::dict." key_type "((" key_type ", tVal)[] inputs) -> Dict(" key_type       \
           ", tVal)",                                                          \
           dictConstructFromList,                                              \
           aliasAnalysisFromSchema())
