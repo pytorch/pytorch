@@ -26,7 +26,7 @@ from torch.testing._internal.common_utils import TestCase, iter_indices, TEST_NU
     TEST_LIBROSA, TEST_WITH_ROCM, run_tests, skipIfNoLapack, suppress_warnings, \
     IS_WINDOWS, NO_MULTIPROCESSING_SPAWN, do_test_dtypes, do_test_empty_full, \
     IS_SANDCASTLE, load_tests, slowTest, skipCUDANonDefaultStreamIf, skipCUDAMemoryLeakCheckIf, \
-    BytesIOContext, skipIfRocm, torch_to_numpy_dtype_dict
+    BytesIOContext, skipIfRocm, torch_to_numpy_dtype_dict, numpy_to_torch_dtype_dict
 from multiprocessing.reduction import ForkingPickler
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, \
     skipCPUIfNoLapack, skipCPUIfNoMkl, skipCUDAIfNoMagma, skipCUDAIfRocm, skipCUDAIfNotRocm, onlyCUDA, onlyCPU, \
@@ -5294,6 +5294,36 @@ def add_neg_dim_tests():
 # Device-generic tests. Instantiated below and not run directly.
 class TestTorchDeviceType(TestCase):
     exact_dtype = True
+
+    @unittest.skipIf(not TEST_NUMPY, 'NumPy not found')
+    @dtypes(*list(product(torch_to_numpy_dtype_dict.keys(),
+                          torch_to_numpy_dtype_dict.keys())))
+    def test_compare_type(self, device, dtypes):
+        a = torch.empty(0, device=device, dtype=dtypes[0])
+        b = torch.empty(0, device=device, dtype=dtypes[1])
+        torch_compare_dtype = self.compare_type(a, b, allow_ints=True)
+        np_compare_dtype = np.promote_types(
+            torch_to_numpy_dtype_dict[dtypes[0]],
+            torch_to_numpy_dtype_dict[dtypes[1]])
+
+        # Note: NumPy returns instances of dtypes so this converts them
+        # to their more commonly used representation
+        # (ex. dtype('int16') -> np.int16)
+        np_compare_dtype = getattr(np, str(np_compare_dtype))
+
+        # Special-cases float16 inputs on non-CUDA devices
+        if np_compare_dtype is np.float16 and self.device_type != 'cuda':
+            self.assertTrue(torch_compare_dtype is torch.float32)
+            return
+
+        # Checks that float16 and bfloat16 have the same promotion on CPU
+        if self.device_type == 'cpu' and dtypes[0] is torch.float16:
+            c = torch.empty(0, device=device, dtype=torch.bfloat16)
+            bfloat16_type = self.compare_type(c, b, allow_ints=True)
+            self.assertTrue(torch_compare_dtype is bfloat16_type)
+
+        self.assertTrue(torch_compare_dtype ==
+                        numpy_to_torch_dtype_dict[np_compare_dtype])
 
     def _comparetensors_helper(self, tests, device, dtype, equal_nan, exact_dtype=True, atol=1e-08, rtol=1e-05):
         for test in tests:

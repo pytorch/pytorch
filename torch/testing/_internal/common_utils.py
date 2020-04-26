@@ -795,59 +795,77 @@ class TestCase(expecttest.TestCase):
         dtypes = [x for x in get_all_dtypes() if x not in get_all_complex_dtypes()]
         return dtype in dtypes and not dtype.is_floating_point
 
-    # Returns a dtype suitable for comparing tensors a and b
-    # Note: torch.isclose is used to compare non-bool tensors, and internally
-    # it converts its input to floating point values
-    # (since it multiplies by rtol, a double).
-    # This function only returns bool, float or complex tensors to avoid
-    # another conversion, unless allow_ints is True.
-    def compare_type(self, a, b, *, allow_ints=False):
-        type_rank = {
-            'complex'  : 3,
-            'float'    : 2,
-            'int'      : 1,
-            'uint'     : 0
-        }
+    # Returns a dtype suitable for comparing tensors a and b.
+    # This closely follows NumPy's type promotion logic, except it includes
+    # bfloat16 and accounts of the current state of PyTorch's bfloat16 and
+    # float16 implementations.
+    # Note: since torch.isclose converts its inputs to floating point values
+    # (it multiplies by rtol, a double) this function takes an optional
+    # allow_ints argument. If false, it only returns bool, float, or complex
+    # tensors. This can prevent a second conversion when comparing tensors.
+    def compare_type(self, a, b, *, allow_ints=True):
 
-        # Maps torch dtypes to their "kind" and width they should be compared
-        # to other dtypes in.
-        # For example torch.bfloat16 x torch.int16 promotes to torch.float32.
+        class _TypeMeta:
+            def __init__(self, rank, kind, width):
+                self.rank = rank
+                self.kind = kind
+                self.width = width
+
+
+        # Maps torch dtypes to their rank, kind and width
         type_meta = {
-            torch.complex128 : ('complex', 128),
-            torch.complex64  : ('complex', 64),
-            torch.float64    : ('float', 64),
-            torch.float32    : ('float', 32),
-            torch.float16    : ('float', 32),
-            torch.bfloat16   : ('float', 32),
-            torch.int64      : ('int', 64),
-            torch.int32      : ('int', 32),
-            torch.int16      : ('int', 16),
-            torch.int8       : ('int', 16),
-            torch.uint8      : ('uint', 16),
-            torch.bool       : ('uint', 1),
+            torch.complex128 : _TypeMeta(11, 'complex', 64),
+            torch.complex64  : _TypeMeta(10, 'complex', 32),
+            torch.float64    : _TypeMeta(9, 'float', 64),
+            torch.float32    : _TypeMeta(8, 'float', 32),
+            torch.bfloat16   : _TypeMeta(7, 'float', 16),
+            torch.float16    : _TypeMeta(6, 'float', 16),
+            torch.int64      : _TypeMeta(5, 'int', 64),
+            torch.int32      : _TypeMeta(4, 'int', 32),
+            torch.int16      : _TypeMeta(3, 'int', 16),
+            torch.int8       : _TypeMeta(2, 'int', 8),
+            torch.uint8      : _TypeMeta(1, 'uint', 8),
+            torch.bool       : _TypeMeta(0, 'uint', 1),
         }
 
-        # Computes common dtype
-        if a.dtype == b.dtype:
-            common_dtype = a.dtype
-            common_meta = type_meta[a.dtype]
-            type_kind = common_meta[0]
-            width = common_meta[1]
-        else:
-            a_meta = type_meta[a.dtype]
-            b_meta = type_meta[b.dtype]
-            type_kind = a_meta[0] if type_rank[a_meta[0]] >= type_rank[b_meta[0]] else b_meta[0]
-            width = a_meta[1] if a_meta[1] >= b_meta[1] else b_meta[1]
-            common_dtype = getattr(torch, type_kind + str(width))
+        # Acquires common meta and acquires widest width
+        a_meta = type_meta[a.dtype]
+        b_meta = type_meta[b.dtype]
+        high_meta = a_meta if a_meta.rank >= b_meta.rank else b_meta
+        low_meta = b_meta if high_meta is a_meta else a_meta
 
-        # Special-cases torch.bool, which only happens if both tensors have
-        # dtype bool.
-        if common_dtype is torch.bool:
-            return common_dtype
+        # Short-circuits for boolean comparisons
+        if high_meta.rank == 0:
+            return torch.bool
 
-        # Promotes uints and ints to float if integer types are not allowed
-        if type_kind == 'uint' or type_kind == 'int' and not allow_ints:
-            common_dtype = getattr(torch, 'float' + str(width))
+        # Upcasts to float, if requested
+        if not allow_ints and (high_meta.kind == 'uint' or high_meta.kind == 'int'):
+            high_meta.kind = 'float'
+            high_meta.width = min(64, high_meta.width * 2)
+
+        # Acquires width
+        width = max(high_meta.width, low_meta.width)
+
+        # Adjusts width
+        # Doubles int width when upcasting
+        if ((high_meta.kind == 'float' or high_meta.kind == 'complex') and
+           low_meta.kind == 'int'):
+            width = min(64, max(low_meta.width * 2, high_meta.width))
+
+        # Doubles uint width when upcasting
+        if high_meta.kind != 'uint' and low_meta.kind == 'uint':
+            width = min(64, max(low_meta.width * 2, high_meta.width))
+
+        # Accounts for complex types being represented as double width
+        if high_meta.kind == 'complex':
+            width *= 2
+
+        # Accounts for bfloat16 x float16
+        if high_meta.rank == 7 and low_meta.rank == 6:
+            width = 32
+
+        # Acquires common dtype
+        common_dtype = getattr(torch, high_meta.kind + str(width))
 
         # TODO: update this when isclose is implemented for CPU/CUDA bfloat16
         if common_dtype is torch.bfloat16:
@@ -855,13 +873,19 @@ class TestCase(expecttest.TestCase):
 
         # non-CUDA (CPU, for example) float16 -> float32
         # TODO: update this when isclose is implemented for CPU float16
-        if common_dtype is torch.float16 and a.device.type != 'cuda':
+        if (common_dtype is torch.float16 and
+            (a.device != b.device or a.device.type != 'cuda' or
+             b.device.type != 'cuda')):
             common_dtype = torch.float32
 
         return common_dtype
 
-    # Checks if two dense tensors are equal, returning true when they are
-    # TODO: default exact_device to True
+    # Checks if two dense tensors are equal, returning true when they are.
+    # If exact_dtype is true both tensors must have the same dtype.
+    # If exact_device is true both tensors must be on the same device.
+    # Note: tensors on different devices are moved to the CPU to be compared when
+    # exact_device is False.
+    # TODO: default exact_device to True.
     def compareTensors(self, a, b, *, rtol, atol, equal_nan,
                        exact_dtype=False, exact_device=False):
         self.assertTrue(isinstance(a, torch.Tensor) and isinstance(b, torch.Tensor))
