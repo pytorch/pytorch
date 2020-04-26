@@ -12,6 +12,8 @@ namespace {
 
 template <typename iscalar_t>
 iscalar_t get_nvalues(const std::vector<iscalar_t>& sizes, const int64_t sparse_dim) {
+  /* Return the number of elements of sparse values entries.
+   */
   iscalar_t nvalues = 1;
   for (auto it = sizes.begin() + sparse_dim; it != sizes.end(); ++it) {
     nvalues *= *it;
@@ -38,8 +40,7 @@ std::vector<iscalar_t> get_offsets(const Tensor& indices, const std::vector<isca
     given dimension will be mapped to the first entry. Otherwise, the
     value is ignored.
 
-    The items in the returned vector are sorted.
-
+    The items in the returned vector are in increasing order.
   */
   auto ndim = indices.size(0);
   auto nnz = indices.size(1);
@@ -67,14 +68,14 @@ std::vector<iscalar_t> get_offsets(const Tensor& indices, const std::vector<isca
 template <typename iscalar_t>
 std::vector<iscalar_t> get_dense_offsets(iscalar_t &mx, const std::vector<iscalar_t>& offsets) {
   /*
-    Return dense set of offsets.
+    Return the dense set of offsets:
 
-    If
-      pool = get_dense_offsets(mx, offsets)
-    then
-      pool.size() == offsets.size()
-      pool[i] == pool[j] iff offsets[i] == offsets[j]
-      set(pool) == set(range(mx))
+      If
+        pool = get_dense_offsets(mx, offsets)
+      then
+        pool.size() == offsets.size()
+        pool[i] == pool[j] iff offsets[i] == offsets[j]
+        set(pool) == set(range(mx))
   */
   auto n = offsets.size();
   std::vector<iscalar_t> pool(n, 0);
@@ -137,10 +138,7 @@ void cpu_sparse_coo_softmax(Tensor output, const Tensor& input, const int64_t di
   mx_sizes[0] = mx_p;
   at::Tensor mx = at::empty(mx_sizes, values.options());
   scalar_t* mx_data_base = mx.data_ptr<scalar_t>();
-
-  int64_t nvalues = 1;
-  for (int64_t i = 1; i < mx.dim(); ++i)
-    nvalues *= mx.size(i);
+  auto nvalues = get_nvalues(sizes, sparse_dim);
 
   auto ninf = -std::numeric_limits<scalar_t>::infinity();
   for (int64_t j=0; j < nvalues * mx_p; j++) {
