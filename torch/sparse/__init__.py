@@ -142,7 +142,7 @@ def sum(input, dim=None, dtype=None):
 
 
 def softmax(input, dim, dtype=None):
-    # type: (Tensor, int) -> Tensor
+    # type: (Tensor, int, Optional[int]) -> Tensor
     r"""Applies a softmax function.
 
     Softmax is defined as:
@@ -173,7 +173,7 @@ def softmax(input, dim, dtype=None):
 
 
 def log_softmax(input, dim, dtype=None):
-    # type: (Tensor, int) -> Tensor
+    # type: (Tensor, int, Optional[int]) -> Tensor
     r"""Applies a softmax function followed by logarithm.
 
     See :class:`~torch.sparse.softmax` for more details.
