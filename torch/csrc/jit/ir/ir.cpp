@@ -1005,6 +1005,7 @@ bool Node::isNondeterministic() const {
       "aten::normal(float mean, Tensor std, *, Generator? generator) -> Tensor",
       "aten::normal(Tensor mean, float std, *, Generator? generator) -> Tensor",
       "aten::poisson(Tensor self, Generator? generator) -> Tensor",
+      "aten::binomial(Tensor count, Tensor prob, Generator? generator=None) -> Tensor",
       "aten::rrelu(Tensor self, Scalar lower, Scalar upper, bool training, Generator? generator) -> Tensor",
       "aten::rrelu_with_noise(Tensor self, Tensor noise, Scalar lower, Scalar upper, bool training, Generator? generator) -> Tensor",
       "aten::rand(int[] size, *, int? dtype, int? layout, Device? device, bool? pin_memory) -> Tensor",
@@ -1825,16 +1826,30 @@ at::ArrayRef<Value*> createTupleUnpack(Value* v) {
   return g.insertNode(g.createTupleUnpack(v))->outputs();
 }
 
-std::vector<Value*> inlineCallTo(Node* to_replace, Function* callee) {
+// inline_optimized_graph argument is used in substitute function call for
+// ONNX conversion
+std::vector<Value*> inlineCallTo(
+    Node* to_replace,
+    Function* callee,
+    bool inline_optimized_graph /*=true*/) {
   WithInsertPoint guard(to_replace);
   TORCH_INTERNAL_ASSERT(callee->isGraphFunction());
   std::unordered_map<Value*, Value*> value_map;
-  auto new_outputs = insertGraph(
-      *to_replace->owningGraph(),
-      *(callee->optimized_graph()),
-      to_replace->inputs(),
-      value_map);
+  std::vector<torch::jit::Value*> new_outputs;
 
+  if (inline_optimized_graph) {
+    new_outputs = insertGraph(
+        *to_replace->owningGraph(),
+        *(callee->optimized_graph()),
+        to_replace->inputs(),
+        value_map);
+  } else {
+    new_outputs = insertGraph(
+        *to_replace->owningGraph(),
+        *(callee->graph()),
+        to_replace->inputs(),
+        value_map);
+  }
   std::unordered_map<InlinedCallStack*, InlinedCallStackPtr>
       new_callstack_entries;
 

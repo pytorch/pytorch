@@ -2,7 +2,7 @@
 #include <vector>
 
 #include <ATen/ATen.h>
-#include <ATen/core/op_registration/op_registration.h>
+#include <torch/library.h>
 #include <ATen/cpp_custom_type_hack.h>
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
 #include <ATen/native/quantized/cpu/qnnpack_utils.h>
@@ -19,9 +19,9 @@ namespace {
  */
 
 template <int kSpatialDim = 2>
-class QConvUnpackWeightsInt8 final : public c10::OperatorKernel {
+class QConvUnpackWeightsInt8 final {
  public:
-  std::tuple<at::Tensor, c10::optional<at::Tensor>> operator()(
+  static std::tuple<at::Tensor, c10::optional<at::Tensor>> run(
       Tensor packed_weights) {
     auto& ctx = at::globalContext();
 
@@ -49,7 +49,7 @@ class QConvUnpackWeightsInt8 final : public c10::OperatorKernel {
 
  private:
 #ifdef USE_FBGEMM
-  std::tuple<Tensor, c10::optional<Tensor>> fbgemm_conv_unpack(
+  static std::tuple<Tensor, c10::optional<Tensor>> fbgemm_conv_unpack(
       Tensor packed_weights) {
     // Pull out the packed weight instance from the owning tensor.
     auto& pack_ptr = cpp_custom_type_hack::cast<PackedConvWeight<kSpatialDim>>(
@@ -130,7 +130,7 @@ class QConvUnpackWeightsInt8 final : public c10::OperatorKernel {
 #endif
 
 #ifdef USE_PYTORCH_QNNPACK
-  std::tuple<at::Tensor, c10::optional<Tensor>> qnnpack_conv_unpack(
+  static std::tuple<at::Tensor, c10::optional<Tensor>> qnnpack_conv_unpack(
       at::Tensor packed_weight) {
     auto& pack_ptr =
         cpp_custom_type_hack::cast<PackedConvWeightsQnnp>(packed_weight);
@@ -140,21 +140,13 @@ class QConvUnpackWeightsInt8 final : public c10::OperatorKernel {
 #endif
 };
 
-static auto registry =
-    c10::RegisterOperators()
-        .op("quantized::conv_unpack(Tensor packed_weights)"
-            " -> (Tensor unpacked_weights, Tensor? B_origin)",
-            c10::RegisterOperators::options().kernel<QConvUnpackWeightsInt8<2>>(
-                DispatchKey::CPUTensorId)) // conv_unpack is deprecated, please
-                                            // use conv2d_unpack for 2D conv.
-        .op("quantized::conv2d_unpack(Tensor packed_weights)"
-            " -> (Tensor unpacked_weights, Tensor? B_origin)",
-            c10::RegisterOperators::options().kernel<QConvUnpackWeightsInt8<2>>(
-                DispatchKey::CPUTensorId)) // We use  conv2d_unpack to be
-                                            // consistent with conv3d_unpack
-        .op("quantized::conv3d_unpack",
-            c10::RegisterOperators::options().kernel<QConvUnpackWeightsInt8<3>>(
-                DispatchKey::CPUTensorId));
+TORCH_LIBRARY_IMPL(quantized, CPU, m) {
+  // conv_unpack is deprecated, please use conv2d_unpack for 2D conv.
+  m.impl("conv_unpack", QConvUnpackWeightsInt8<2>::run);
+  // We use  conv2d_unpack to be consistent with conv3d_unpack
+  m.impl("conv2d_unpack", QConvUnpackWeightsInt8<2>::run);
+  m.impl("conv3d_unpack", QConvUnpackWeightsInt8<3>::run);
+}
 
 } // namespace
 } // namespace native

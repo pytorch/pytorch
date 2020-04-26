@@ -1,36 +1,39 @@
+# Table of contents
+
 - [Contributing to PyTorch](#contributing-to-pytorch)
 - [Developing PyTorch](#developing-pytorch)
 - [Codebase structure](#codebase-structure)
 - [Unit testing](#unit-testing)
-  * [Better local unit tests with pytest](#better-local-unit-tests-with-pytest)
+  - [Better local unit tests with pytest](#better-local-unit-tests-with-pytest)
 - [Writing documentation](#writing-documentation)
-  * [Building documentation](#building-documentation)
-    + [Tips](#tips)
-    + [Building C++ Documentation](#building-c---documentation)
-  * [Previewing changes](#previewing-changes)
-    + [Submitting changes for review](#submitting-changes-for-review)
-  * [Adding documentation tests](#adding-documentation-tests)
+  - [Building documentation](#building-documentation)
+    - [Tips](#tips)
+    - [Building C++ Documentation](#building-c-documentation)
+  - [Previewing changes](#previewing-changes)
+    - [Submitting changes for review](#submitting-changes-for-review)
+  - [Adding documentation tests](#adding-documentation-tests)
 - [Profiling with `py-spy`](#profiling-with-py-spy)
 - [Managing multiple build trees](#managing-multiple-build-trees)
-- [C++ development tips](#c---development-tips)
-  * [Build only what you need](#build-only-what-you-need)
-  * [Code completion and IDE support](#code-completion-and-ide-support)
-  * [Make no-op build fast](#make-no-op-build-fast)
-    + [Use Ninja](#use-ninja)
-    + [Use CCache](#use-ccache)
-    + [Use a faster linker](#use-a-faster-linker)
-  * [C++ frontend development tips](#c---frontend-development-tips)
+- [C++ development tips](#c-development-tips)
+  - [Build only what you need](#build-only-what-you-need)
+  - [Code completion and IDE support](#code-completion-and-ide-support)
+  - [Make no-op build fast](#make-no-op-build-fast)
+    - [Use Ninja](#use-ninja)
+    - [Use CCache](#use-ccache)
+    - [Use a faster linker](#use-a-faster-linker)
+  - [C++ frontend development tips](#c-frontend-development-tips)
 - [CUDA development tips](#cuda-development-tips)
 - [Windows development tips](#windows-development-tips)
-  * [Known MSVC (and MSVC with NVCC) bugs](#known-msvc--and-msvc-with-nvcc--bugs)
-  * [Running clang-tidy](#running-clang-tidy)
-  * [Pre-commit tidy/linting hook](#pre-commit-tidy-linting-hook)
-  * [Building PyTorch with ASAN](#building-pytorch-with-asan)
-    + [Getting `ccache` to work](#getting--ccache--to-work)
-    + [Why this stuff with `LD_PRELOAD` and `LIBASAN_RT`?](#why-this-stuff-with--ld-preload--and--libasan-rt--)
-    + [Why LD_PRELOAD in the build function?](#why-ld-preload-in-the-build-function-)
-    + [Why no leak detection?](#why-no-leak-detection-)
+  - [Known MSVC (and MSVC with NVCC) bugs](#known-msvc-and-msvc-with-nvcc-bugs)
+- [Running clang-tidy](#running-clang-tidy)
+- [Pre-commit tidy/linting hook](#pre-commit-tidylinting-hook)
+- [Building PyTorch with ASAN](#building-pytorch-with-asan)
+  - [Getting `ccache` to work](#getting-ccache-to-work)
+  - [Why this stuff with `LD_PRELOAD` and `LIBASAN_RT`?](#why-this-stuff-with-ld_preload-and-libasan_rt)
+  - [Why LD_PRELOAD in the build function?](#why-ld_preload-in-the-build-function)
+  - [Why no leak detection?](#why-no-leak-detection)
 - [Caffe2 notes](#caffe2-notes)
+- [CI failure tips](#ci-failure-tips)
 
 ## Contributing to PyTorch
 
@@ -938,3 +941,38 @@ are Caffe2/PyTorch specific. Here they are:
 - `mypy*`, `requirements.txt`, `setup.py`, `test`, `tools` are
   PyTorch-specific. Don't put Caffe2 code in them without extra
   coordination.
+
+## CI failure tips
+
+Once you submit a PR or push a new commit to a branch that is in
+an active PR, CI jobs will be run automatically. Some of these may
+fail and you will need to find out why, by looking at the logs.
+
+Fairly often, a CI failure might be unrelated to your changes. In this
+case, you can usually ignore the failure.
+
+Some failures might be related to specific hardware or environment
+configurations. In this case, if the job is run by CircleCI, you can
+ssh into the job's session to perform manual debugging using the
+following steps:
+
+1. In the CircleCI page for the failed job, make sure you are logged in
+   and then click the `Rerun` actions dropdown button on the top right.
+   Click `Rerun Job with SSH`.
+
+2. When the job reruns, a new step will be added in the `STEPS` tab
+   labelled `Set up SSH`. Inside that tab will be an ssh command that
+   you can execute in a shell.
+
+3. Once you are connected through ssh, you may need to enter a docker
+   container. Run `docker ps` to check if there are any docker
+   containers running. Note that your CI job might be in the process
+   of initiating a docker container, which means it will not show up
+   yet. It is best to wait until the CI job reaches a step where it is
+   building pytorch or running pytorch tests. If the job does have a
+   docker container, run `docker exec -it IMAGE_ID /bin/bash` to
+   connect to it.
+
+4. Now you can find the pytorch working directory, which could be
+   `~/workspace` or `~/project`, and run commands locally to debug
+   the failure.

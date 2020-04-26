@@ -1,5 +1,5 @@
 if(USE_FAKELOWP)
-  message(STATUS "Including FAKELOWP operators")
+  message(STATUS "Including FakeLowP operators")
 
   # ---[ CPU files.
   file(GLOB_RECURSE tmp *.cc)
@@ -11,32 +11,22 @@ if(USE_FAKELOWP)
   # We will only build the perf kernel files if the compiler supports avx2
   # extensions.
   if(CAFFE2_COMPILER_SUPPORTS_AVX2_EXTENSIONS)
-    add_library(Caffe2_fakelowp_ops STATIC ${FAKELOWP_CPU_SRCS})  
-    add_dependencies(Caffe2_fakelowp_ops fbgemm Caffe2_PROTO c10)
-    target_include_directories(Caffe2_fakelowp_ops BEFORE
+    add_library(caffe2_fakelowp_ops OBJECT ${FAKELOWP_CPU_SRCS})  
+    add_dependencies(caffe2_fakelowp_ops fbgemm cpuinfo Caffe2_PROTO c10)
+    target_include_directories(caffe2_fakelowp_ops BEFORE
       PRIVATE $<BUILD_INTERFACE:${FBGEMM_SOURCE_DIR}/include>)
-    if(MSVC AND NOT "${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")
-      target_compile_options(Caffe2_fakelowp_ops
-          PRIVATE "/arch:AVX2"
-          PRIVATE "/D__FMA__"
-          PRIVATE "/D__F16C__")
+    if(MSVC)
+      set_property(SOURCE ${FAKELOWP_CPU_SRCS}
+        APPEND_STRING PROPERTY COMPILE_FLAGS " /arch:AVX2 ")
     else()
-      target_compile_options(Caffe2_fakelowp_ops
-          PRIVATE "-mavx2"
-          PRIVATE "-mfma"
-          PRIVATE "-mavx"
-          PRIVATE "-mf16c")
+      set_property(SOURCE ${FAKELOWP_CPU_SRCS}
+        APPEND_STRING PROPERTY COMPILE_FLAGS " -mavx2 -mfma -mf16c -mxsave ")
     endif()
-    caffe2_interface_library(
-      Caffe2_fakelowp_ops Caffe2_fakelowp_ops_interface)
-    list(APPEND
-      Caffe2_DEPENDENCY_WHOLE_LINK_LIBS
-      "Caffe2_fakelowp_ops_interface")
+    set(Caffe2_CPU_SRCS ${Caffe2_CPU_SRCS}
+      $<TARGET_OBJECTS:caffe2_fakelowp_ops>)
   endif()
+  # ---[ Send the lists to the parent scope.
+  set(Caffe2_CPU_SRCS ${Caffe2_CPU_SRCS} PARENT_SCOPE)
 else()
   message(STATUS "Excluding FakeLowP operators")
 endif()
-
-set(Caffe2_DEPENDENCY_WHOLE_LINK_LIBS
-    ${Caffe2_DEPENDENCY_WHOLE_LINK_LIBS}
-    PARENT_SCOPE)

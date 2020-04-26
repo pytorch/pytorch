@@ -126,7 +126,7 @@ def wait_until_node_failure(rank, expected_error_regex=".*"):
             rpc.rpc_sync("worker{}".format(rank), noop, args=())
             time.sleep(0.1)
         except Exception as e:
-            if re.match(pattern=expected_error_regex, string=str(e)):
+            if re.search(pattern=expected_error_regex, string=str(e)):
                 return str(e)
 
 # Shutdown sequence is not well defined, so we may see any of the following errors
@@ -137,7 +137,13 @@ def get_shutdown_error_regex(rpc_backend):
     is used to match against possible errors to ensure failures were raised properly.
     """
     if rpc_backend == "PROCESS_GROUP":
-        error_regexes = ["Encountered exception in ProcessGroupAgent::enqueueSend"]
+        error_regexes = [
+            "Encountered exception in ProcessGroupAgent::enqueueSend",
+            "Encountered exception in ProcessGroupAgent::listenLoop()",
+            "Exception in thread pool task",
+            "Connection reset by peer",
+            "Connection closed by peer"
+        ]
     else:
         error_regexes = [
             "Request aborted during client shutdown",
@@ -150,6 +156,18 @@ def get_shutdown_error_regex(rpc_backend):
     # Strip out the last | or else it will match anything
     error_regex = error_regex[:-1]
     return error_regex
+
+def get_timeout_error_regex(rpc_backend_name):
+    """
+    Given an RPC backend name, returns a partial string indicating the error we
+    should receive when an RPC has timed out. Useful for use with
+    assertRaisesRegex() to ensure we have the right errors during timeout.
+    """
+    if rpc_backend_name == "PROCESS_GROUP":
+        return "RPC ran for more than"
+    else:
+        return "(Timed out)|(Task expired)"
+
 
 def wait_until_pending_users_flushed():
     '''
@@ -182,3 +200,16 @@ def initialize_pg(init_method, rank, world_size):
 
 def worker_name(rank):
     return "worker{}".format(rank)
+
+def get_function_event(function_events, partial_event_name):
+    """
+    Returns the first event that matches partial_event_name in the provided
+    function_events. These function_events should be the output of
+    torch.autograd.profiler.function_events().
+
+    Args:
+    function_events: function_events returned by the profiler.
+    event_name (str): partial key that the event was profiled with.
+    """
+    event = [event for event in function_events if partial_event_name in event.name][0]
+    return event

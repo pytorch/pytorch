@@ -63,8 +63,7 @@ std::shared_ptr<FutureMessage> sendPythonRemoteCall(
     const WorkerInfo& dst,
     SerializedPyObj serializedPyObj,
     const IValue& rrefId,
-    const IValue& forkId,
-    const std::shared_ptr<torch::autograd::profiler::RecordFunction>& rf) {
+    const IValue& forkId) {
   auto pythonRemoteCall = std::make_unique<PythonRemoteCall>(
       std::move(serializedPyObj), rrefId, forkId);
 
@@ -75,8 +74,7 @@ std::shared_ptr<FutureMessage> sendPythonRemoteCall(
       *agent,
       dst,
       std::move(*pythonRemoteCall).toMessage(),
-      true /*forceGradRecording*/,
-      rf);
+      true /*forceGradRecording*/);
 }
 
 } // namespace
@@ -119,9 +117,9 @@ py::object toPyObj(const Message& message) {
 std::shared_ptr<FutureMessage> pyRpcBuiltin(
     const WorkerInfo& dst,
     const std::string& opName,
-    const std::shared_ptr<torch::autograd::profiler::RecordFunction>& rf,
     const py::args& args,
-    const py::kwargs& kwargs) {
+    const py::kwargs& kwargs,
+    const float rpcTimeoutSeconds) {
   Stack stack;
   auto op = matchBuiltinOp(opName, args, kwargs, stack);
   // Release GIL since args and kwargs processing is done.
@@ -129,13 +127,16 @@ std::shared_ptr<FutureMessage> pyRpcBuiltin(
   auto scriptCall = std::make_unique<ScriptCall>(op, std::move(stack));
   auto agent = RpcAgent::getCurrentRpcAgent();
   return sendMessageWithAutograd(
-      *agent, dst, std::move(*scriptCall).toMessage(), false, rf);
+      *agent,
+      dst,
+      std::move(*scriptCall).toMessage(),
+      false,
+      rpcTimeoutSeconds);
 }
 
 PyRRef pyRemoteBuiltin(
     const WorkerInfo& dst,
     const std::string& opName,
-    const std::shared_ptr<torch::autograd::profiler::RecordFunction>& rf,
     const py::args& args,
     const py::kwargs& kwargs) {
   Stack stack;
@@ -154,10 +155,11 @@ PyRRef pyRemoteBuiltin(
         op, std::move(stack), userRRef->rrefId(), userRRef->forkId());
 
     auto fm = sendMessageWithAutograd(
-        *agent, dst, std::move(*scriptRemoteCall).toMessage(), false, rf);
+        *agent, dst, std::move(*scriptRemoteCall).toMessage(), false);
 
+    userRRef->registerOwnerCreationFuture(fm);
     ctx.addPendingUser(userRRef->forkId(), userRRef);
-    fm->addCallback([forkId{userRRef->forkId()}, fm]() {
+    fm->addCallback([forkId{userRRef->forkId()}](const FutureMessage& fm) {
       callback::confirmPendingUser(fm, forkId);
     });
     return PyRRef(userRRef);
@@ -169,11 +171,14 @@ PyRRef pyRemoteBuiltin(
     auto scriptRemoteCall = std::make_unique<ScriptRemoteCall>(
         op, std::move(stack), ownerRRef->rrefId(), ownerRRef->rrefId());
     auto fm = sendMessageWithAutograd(
-        *agent, dst, std::move(*scriptRemoteCall).toMessage(), false, rf);
+        *agent, dst, std::move(*scriptRemoteCall).toMessage(), false);
+
+    ownerRRef->registerOwnerCreationFuture(fm);
 
     // Builtin operators does not return py::object, and hence does not require
     // GIL for destructing the potentially deleted OwerRRef.
-    fm->addCallback([fm]() { callback::finishCreatingOwnerRRef(fm); });
+    fm->addCallback(
+        [](const FutureMessage& fm) { callback::finishCreatingOwnerRRef(fm); });
     return PyRRef(ownerRRef);
   }
 }
@@ -182,7 +187,7 @@ std::shared_ptr<FutureMessage> pyRpcPythonUdf(
     const WorkerInfo& dst,
     std::string& pickledPythonUDF,
     std::vector<torch::Tensor>& tensors,
-    const std::shared_ptr<torch::autograd::profiler::RecordFunction>& rf) {
+    const float rpcTimeoutSeconds) {
   auto serializedPyObj =
       SerializedPyObj(std::move(pickledPythonUDF), std::move(tensors));
   auto pythonCall = std::make_unique<PythonCall>(std::move(serializedPyObj));
@@ -193,14 +198,13 @@ std::shared_ptr<FutureMessage> pyRpcPythonUdf(
       dst,
       std::move(*pythonCall).toMessage(),
       true /*forceGradRecording*/,
-      rf);
+      rpcTimeoutSeconds);
 }
 
 PyRRef pyRemotePythonUdf(
     const WorkerInfo& dst,
     std::string& pickledPythonUDF,
-    std::vector<torch::Tensor>& tensors,
-    const std::shared_ptr<torch::autograd::profiler::RecordFunction>& rf) {
+    std::vector<torch::Tensor>& tensors) {
   auto& ctx = RRefContext::getInstance();
   auto serializedPyObj =
       SerializedPyObj(std::move(pickledPythonUDF), std::move(tensors));
@@ -210,11 +214,12 @@ PyRRef pyRemotePythonUdf(
         dst,
         std::move(serializedPyObj),
         userRRef->rrefId().toIValue(),
-        userRRef->forkId().toIValue(),
-        rf);
+        userRRef->forkId().toIValue());
+
+    userRRef->registerOwnerCreationFuture(fm);
 
     ctx.addPendingUser(userRRef->forkId(), userRRef);
-    fm->addCallback([forkId{userRRef->forkId()}, fm]() {
+    fm->addCallback([forkId{userRRef->forkId()}](const FutureMessage& fm) {
       callback::confirmPendingUser(fm, forkId);
     });
     return PyRRef(userRRef);
@@ -226,10 +231,11 @@ PyRRef pyRemotePythonUdf(
         dst,
         std::move(serializedPyObj),
         ownerRRef->rrefId().toIValue(),
-        ownerRRef->rrefId().toIValue(),
-        rf);
+        ownerRRef->rrefId().toIValue());
 
-    fm->addCallback([fm]() {
+    ownerRRef->registerOwnerCreationFuture(fm);
+
+    fm->addCallback([](const FutureMessage& fm) {
       auto deletedRRef = callback::finishCreatingOwnerRRef(fm);
       if (deletedRRef && deletedRRef->isPyObj()) {
         pybind11::gil_scoped_acquire ag;

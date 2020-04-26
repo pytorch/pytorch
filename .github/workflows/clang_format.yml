@@ -1,9 +1,6 @@
 name: clang-format
 
 on:
-  push:
-    branches:
-    - master
   pull_request:
 
 jobs:
@@ -29,8 +26,20 @@ jobs:
         id: get_pr_tip
       - name: Run clang-format
         run: |
-          set -eux
-          echo "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"
-          echo "| Run tools/clang_format.py to fix formatting errors |"
-          echo "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"
-          tools/clang_format.py --verbose --diff
+          set -eu
+          # only run clang-format on whitelisted files
+          echo "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"
+          echo "| clang-format failures found! Run: "
+          echo "|    tools/clang_format_ci.sh ${{ github.event.pull_request.base.sha }} "
+          echo "| to fix this error. "
+          echo "| For more info, see: https://github.com/pytorch/pytorch/wiki/clang-format "
+          echo "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"
+
+          tools/clang_format_ci.sh ${{ github.event.pull_request.base.sha }}
+
+          GIT_DIFF=$(git diff)
+          if [[ -z $GIT_DIFF ]]; then
+            exit 0
+          fi
+          echo $GIT_DIFF
+          exit 1

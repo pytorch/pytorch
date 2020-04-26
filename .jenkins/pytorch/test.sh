@@ -36,6 +36,8 @@ if [ -n "${IN_CIRCLECI}" ]; then
 fi
 
 if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
+  # Print GPU info
+  rocminfo | egrep 'Name:.*\sgfx|Marketing'
   # TODO: Move this to Docker
   sudo apt-get -qq update
   sudo apt-get -qq install --no-install-recommends libsndfile1
@@ -63,7 +65,8 @@ if [[ "$BUILD_ENVIRONMENT" != *ppc64le* ]] && [[ "$BUILD_ENVIRONMENT" != *-bazel
   pip_install --user tb-nightly
   # mypy will fail to install on Python <3.4.  In that case,
   # we just won't run these tests.
-  pip_install --user mypy || true
+  # Pin MyPy version because new errors are likely to appear with each release
+  pip_install --user "mypy==0.770" || true
 fi
 
 # faulthandler become built-in since 3.3
@@ -174,6 +177,10 @@ test_aten() {
     ${SUDO} ln -s "$TORCH_LIB_PATH"/libmkldnn* build/bin
     ${SUDO} ln -s "$TORCH_LIB_PATH"/libnccl* build/bin
 
+    if [[ "$BUILD_ENVIRONMENT" == *clang* ]]; then
+      echo "Disable valgrind testing due to https://github.com/pytorch/pytorch/issues/37117"
+      VALGRIND=OFF
+    fi
     ls build/bin
     aten/tools/run_tests.sh build/bin
     assert_git_not_dirty
@@ -187,6 +194,11 @@ test_torchvision() {
 test_libtorch() {
   if [[ "$BUILD_ENVIRONMENT" != *rocm* ]]; then
     echo "Testing libtorch"
+
+    # Start background download
+    python tools/download_mnist.py --quiet -d test/cpp/api/mnist &
+
+    # Run JIT cpp tests
     mkdir -p test/test-reports/cpp-unittest
     python test/cpp/jit/tests_setup.py setup
     if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
@@ -195,9 +207,10 @@ test_libtorch() {
       build/bin/test_jit  --gtest_filter='-*CUDA' --gtest_output=xml:test/test-reports/cpp-unittest/test_jit.xml
     fi
     python test/cpp/jit/tests_setup.py shutdown
-    python tools/download_mnist.py --quiet -d test/cpp/api/mnist
+    # Wait for background download to finish
+    wait
     OMP_NUM_THREADS=2 TORCH_CPP_TEST_MNIST_PATH="test/cpp/api/mnist" build/bin/test_api --gtest_output=xml:test/test-reports/cpp-unittest/test_api.xml
-    build/bin/test_tensorexpr
+    build/bin/test_tensorexpr --gtest_output=xml:test/test-reports/cpp-unittests/test_tensorexpr.xml
     assert_git_not_dirty
   fi
 }
@@ -244,7 +257,7 @@ test_xla() {
 
   echo "Running C++ Tests"
   pushd test/cpp
-  CC=clang-7 CXX=clang++-7 ./run_tests.sh
+  CC=clang-9 CXX=clang++-9 ./run_tests.sh
   popd
   assert_git_not_dirty
 }
@@ -269,7 +282,7 @@ test_bazel() {
 
   get_bazel
 
-  tools/bazel test --test_tag_filters=-gpu-required --test_filter=-*_CUDA :all_tests
+  tools/bazel test --test_output=all --test_tag_filters=-gpu-required --test_filter=-*_CUDA :all_tests
 }
 
 if ! [[ "${BUILD_ENVIRONMENT}" == *libtorch* || "${BUILD_ENVIRONMENT}" == *-bazel-* ]]; then

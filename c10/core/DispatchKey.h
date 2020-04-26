@@ -30,7 +30,9 @@ enum class DispatchKey : uint8_t {
 
   Undefined = 0,
 
-
+  // Define an alias for Undefined to represent CatchAll (long term
+  // this will get eliminated, but for now it's convenient)
+  CatchAll = Undefined,
 
   // ~~~~~~~~~~~~~~~~~~~~~~~~~~ BACKENDS ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
   // A "backend" is colloquially used to refer to handlers for dispatch
@@ -41,33 +43,38 @@ enum class DispatchKey : uint8_t {
   // meaningful (e.g., it's valid to reorder these backends without changing
   // semantics).  The only situation when backend ordering is meaningful
   // is when the backend participates in multiple dispatch with another
-  // backend; e.g., CPUTensorId and SparseCPUTensorId (sparse must have
+  // backend; e.g., CPU and SparseCPU (sparse must have
   // higher priority).
 
   // Here are backends which you think of as traditionally specifying
   // how to implement operations on some device.
-  CPUTensorId,    // registered at build/aten/src/ATen/CPUType.cpp
-  CUDATensorId,   // registered at build/aten/src/ATen/CUDAType.cpp
-  HIPTensorId,    // NB: I think this is not actually used, due to Note [Masquerading as CUDA]
-  MSNPUTensorId,  // unused externally, but tested at test/cpp_extensions/msnpu_extension.cpp
-  XLATensorId,    // lives out of tree at https://github.com/pytorch/xla
+  CPU, // registered at build/aten/src/ATen/CPUType.cpp
+  CUDA, // registered at build/aten/src/ATen/CUDAType.cpp
+  HIP, // NB: I think this is not actually used, due to Note [Masquerading as
+       // CUDA]
+  MSNPU, // unused externally, but tested at
+         // test/cpp_extensions/msnpu_extension.cpp
+  XLA, // lives out of tree at https://github.com/pytorch/xla
 
   // These are Caffe2 device types which we grandfathered into
   // DispatchKey.
   // TODO: Caffe2-only DispatchKeys actually should be removed from this enum
   // and just simply be undispatchable.
-  MKLDNNTensorId, // (MKLDNN is treated as another "device" in Caffe2)
-  OpenGLTensorId,
-  OpenCLTensorId,
-  IDEEPTensorId,
+  MKLDNN, // (MKLDNN is treated as another "device" in Caffe2)
+  OpenGL,
+  OpenCL,
+  IDEEP,
 
   // Here are backends which specify more specialized operators
   // based on the dtype of the tensor.
-  QuantizedCPUTensorId, // registered at build/aten/src/ATen/QuantizedCPUType.cpp
-  ComplexCPUTensorId,   // lives out of tree at https://gitlab.com/pytorch-complex/pytorch-cpu-strided-complex
-  ComplexCUDATensorId,  // and https://gitlab.com/pytorch-complex/pytorch-cuda-strided-complex
-                        // tested at test/cpp_extensions/complex_registration_extension.cpp
-                        // TODO: Remove Complex dispatch keys when Complex is moved in tree
+  QuantizedCPU, // registered at build/aten/src/ATen/QuantizedCPUType.cpp
+  QuantizedCUDA, // registered at build/aten/src/ATen/QuantizedCUDAType.cpp
+  ComplexCPU, // lives out of tree at
+              // https://gitlab.com/pytorch-complex/pytorch-cpu-strided-complex
+  ComplexCUDA, // and
+               // https://gitlab.com/pytorch-complex/pytorch-cuda-strided-complex
+  // tested at test/cpp_extensions/complex_registration_extension.cpp
+  // TODO: Remove Complex dispatch keys when Complex is moved in tree
 
   // This backend is to support custom RNGs; it lets you go
   // to a different kernel if you pass in a generator that is not a
@@ -84,17 +91,19 @@ enum class DispatchKey : uint8_t {
   // based on the layout of the tensor.  Note that the sparse backends
   // are one case where ordering matters: sparse multi-dispatches with
   // the corresponding dense tensors, and must be handled before them.
-  MkldnnCPUTensorId,  // registered at build/aten/src/ATen/MkldnnCPUType.cpp
-                      // NB: not to be confused with MKLDNNTensorId, which is Caffe2 only
-  SparseCPUTensorId,  // registered at build/aten/src/ATen/SparseCPUType.cpp
-  SparseCUDATensorId, // registered at build/aten/src/ATen/SparseCUDAType.cpp
-  SparseHIPTensorId,  // TODO: I think this is not actually used, due to Note [Masquerading as CUDA]
+  MkldnnCPU, // registered at build/aten/src/ATen/MkldnnCPUType.cpp
+  // NB: not to be confused with MKLDNN, which is Caffe2 only
+  SparseCPU, // registered at build/aten/src/ATen/SparseCPUType.cpp
+  SparseCUDA, // registered at build/aten/src/ATen/SparseCUDAType.cpp
+  SparseHIP, // TODO: I think this is not actually used, due to Note
+             // [Masquerading as CUDA]
 
-  // Here are reserved backends for user-defined backends, see Note [Private use TensorId]
+  // Here are reserved backends for user-defined backends, see Note [Private use
+  // DispatchKey]
   // To see some example about how to use this, check out MSNPU
-  PrivateUse1_TensorId,
-  PrivateUse2_TensorId,
-  PrivateUse3_TensorId,
+  PrivateUse1,
+  PrivateUse2,
+  PrivateUse3,
 
   // In some situations, it is not immediately obvious what the correct
   // backend for function is, because the function in question doesn't
@@ -103,25 +112,25 @@ enum class DispatchKey : uint8_t {
   // correct backend.
   BackendSelect,
 
-
-
   // ~~~~~~~~~~~~~~~~~~~~~~~~~~~ AUTOGRAD ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
   // All backends are oblivious to autograd; autograd is handled as a
   // layer which happens on top of all backends.  It inspects the autograd
   // metadata of all inputs, determines what autograd metadata should be
   // constructed by the output, and otherwise defers to the backend to
-  // actually do the numeric computation.  VariableTensorId contains
+  // actually do the numeric computation.  Autograd contains
   // the bulk of this logic.
-  VariableTensorId,
+  Autograd,
+
+  Profiler,
 
   // Pre-autograd dispatch keys allow backends to override the autograd behavior
-  // (aka VariableTensorId) for operators which have a Variable kernel
+  // (aka Autograd) for operators which have a Variable kernel
   // already registered.  For example, XLA wants to define autograd for
   // einsum directly.  Registering a custom autograd implementation at the
-  // XLATensorId key won't work because we process VariableTensorId
-  // before XLATensorId.  This key has higher priority and gets processed
+  // XLA key won't work because we process Autograd
+  // before XLA.  This key has higher priority and gets processed
   // first.  You generally should NOT redispatch after handling autograd
-  // here (since that would result in execution of the VariableTensorId
+  // here (since that would result in execution of the Autograd
   // operator, which you're trying to skip).  In PreAutograd implementations,
   // you are responsible for handling autograd yourself, or deferring to other
   // operators which support autograd.
@@ -129,14 +138,13 @@ enum class DispatchKey : uint8_t {
 
   // Autocasting precedes VariableTypeId, to ensure casts are autograd-exposed
   // and inputs are saved for backward in the post-autocast type.
-  AutocastTensorId,
+  Autocast,
 
-  // Here are some reserved pre-autograd keys for user-defined backends, see Note [Private use TensorId]
-  PrivateUse1_PreAutogradTensorId,
-  PrivateUse2_PreAutogradTensorId,
-  PrivateUse3_PreAutogradTensorId,
-
-
+  // Here are some reserved pre-autograd keys for user-defined backends, see
+  // Note [Private use DispatchKey]
+  PrivateUse1_PreAutograd,
+  PrivateUse2_PreAutograd,
+  PrivateUse3_PreAutograd,
 
   // ~~~~~~~~~~~~~~~~~~~~~~~~~~~ WRAPPERS ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
   // There are a number of alternative modes which may want to handle before
@@ -147,26 +155,29 @@ enum class DispatchKey : uint8_t {
   // Don't use it for anything real; its only acceptable use is within a single
   // process test.  Use it by creating a TensorImpl with this DispatchKey, and
   // then registering operators to operate on this type id.  See
-  // aten/src/ATen/test/backend_fallback_test.cpp for a usage example.
-  TESTING_ONLY_GenericWrapperTensorId,
+  // aten/src/ATen/core/dispatch/backend_fallback_test.cpp for a usage example.
+  TESTING_ONLY_GenericWrapper,
 
   // TESTING: This is intended to be a generic testing tensor type id.
   // Don't use it for anything real; its only acceptable use is within a ingle
   // process test.  Use it by toggling the mode on and off via
   // TESTING_ONLY_tls_generic_mode_set_enabled and then registering operators
-  // to operate on this type id.  See aten/src/ATen/test/backend_fallback_test.cpp
+  // to operate on this type id.  See
+  // aten/src/ATen/core/dispatch/backend_fallback_test.cpp
   // for a usage example
-  TESTING_ONLY_GenericModeTensorId,
-
-
+  TESTING_ONLY_GenericMode,
 
   // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ FIN ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
   NumDispatchKeys, // Sentinel
+
+  // ~~~~~~~~~~~~~~~~~~~~~~~~~ BC ALIASES ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
+  // The aliases exist for backwards compatibility reasons, they shouldn't
+  // be used
+  CPUTensorId = CPU,
+  CUDATensorId = CUDA,
 };
 
-
-
-// Note [Private use TensorId]
+// Note [Private use DispatchKey]
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~
 // Private use tensor IDs are preallocated tensor type IDs for use in user
 // applications.  Similar to private use fields in HTTP, they can be used
@@ -181,12 +192,12 @@ enum class DispatchKey : uint8_t {
 // libraries intended to be distributed to further users: please contact
 // the PyTorch developers to get a type ID registered in this case.
 //
-// We provide two classes of private user tensor id: regular TensorIds
-// and PreAutogradTensorIds.  TensorIds serve the role of ordinary "backend"
-// TensorIds; if you were adding support for a new type of accelerator, you
-// would use a TensorId, and reuse autograd definitions already defined in
-// PyTorch for operators you define.  PreAutogradTensorIds serve as "wrapper"
-// TensorIds: they are most appropriate for tensors that compose multiple
+// We provide two classes of private user tensor id: regular DispatchKeys
+// and PreAutograd DispatchKeys.  DispatchKeys serve the role of ordinary "backend"
+// DispatchKeys; if you were adding support for a new type of accelerator, you
+// would use a DispatchKey, and reuse autograd definitions already defined in
+// PyTorch for operators you define.  PreAutograd DispatchKeys serve as "wrapper"
+// DispatchKeys: they are most appropriate for tensors that compose multiple
 // internal tensors, and for cases when the built-in autograd formulas for
 // operators are not appropriate.
 
@@ -200,8 +211,8 @@ C10_API std::ostream& operator<<(std::ostream&, DispatchKey);
 // For backwards compatibility with XLA repository
 // (I don't want to fix this in XLA right now because there might be
 // more renaming coming in the future.)
-static inline DispatchKey XLATensorId() {
-  return DispatchKey::XLATensorId;
+static inline DispatchKey XLA() {
+  return DispatchKey::XLA;
 }
 
 // These are some convenience identifiers for dispatch keys which are
@@ -209,7 +220,7 @@ static inline DispatchKey XLATensorId() {
 // dispatch keys directly correspond to DeviceType; and most APIs that
 // accept DispatchKey also accept DeviceType; e.g.,
 // torch::dispatch(torch::kCPU, ...) is also valid.
-constexpr DispatchKey kAutograd = DispatchKey::VariableTensorId;
+constexpr DispatchKey kAutograd = DispatchKey::Autograd;
 
 } // namespace c10
 
