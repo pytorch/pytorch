@@ -9,7 +9,6 @@ from test_pytorch_common import skipIfUnsupportedOpsetVersion
 
 import onnx
 import onnxruntime  # noqa
-import numpy as np
 
 import io
 import copy
