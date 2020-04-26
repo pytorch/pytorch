@@ -100,7 +100,7 @@ if "%USE_CUDA%"=="1" (
 )
 
 @echo off
-echo @echo off >> %TMP_DIR%\bin\pytorch_env_restore.bat
+echo @echo off >> %TMP_DIR_WIN%\bin\pytorch_env_restore.bat
 for /f "usebackq tokens=*" %%i in (`set`) do echo set "%%i" >> %TMP_DIR_WIN%\bin\pytorch_env_restore.bat
 @echo on
 
