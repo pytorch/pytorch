@@ -94,5 +94,75 @@ INSTANTIATE(int16_t);
 INSTANTIATE(int);
 INSTANTIATE(int64_t);
 INSTANTIATE(c10::BFloat16);
+#undef INSTANTIATE
 
-}}} // namespace at::native::blas_impl
+} // namespace blas_impl
+
+template <typename scalar_t>
+inline void scal(int64_t n, scalar_t a, scalar_t *x, int64_t incx)
+{
+  if (n == 1) incx = 1;
+  if (blas_impl::scal_use_fast_path<scalar_t>(n, incx)) {
+    int i_n = (int)n;
+    int i_incx = (int)incx;
+    blas_impl::scal_fast_path<scalar_t>(&i_n, &a, x, &i_incx);
+    return;
+  }
+  for (int64_t i = 0; i < n; i++) {
+    if (a == 0) {
+      x[i * incx] = 0;
+    } else {
+      x[i * incx] *= a;
+    }
+  }
+}
+
+template<typename scalar_t>
+bool gemv(char trans, int64_t m, int64_t n, scalar_t alpha, scalar_t *a, int64_t lda, scalar_t *x, int64_t incx, scalar_t beta, scalar_t *y, int64_t incy) {
+  if(n == 1) lda = m;
+
+  if (blas_impl::gemv_use_fast_path<scalar_t>(m, n, lda, incx, incy)) {
+    TORCH_CHECK(lda >= std::max<int64_t>(1L, m), "lda should be at least max(1,", m, "), but have ", lda);
+    int i_m = (int)m;
+    int i_n = (int)n;
+    int i_lda = (int)lda;
+    int i_incx = (int)incx;
+    int i_incy = (int)incy;
+    blas_impl::gemv_fast_path<scalar_t>(&trans, &i_m, &i_n, &alpha, a, &i_lda, x, &i_incx, &beta, y, &i_incy);
+    return true;
+  }
+
+  if ((trans == 'T') || (trans == 't')) {
+    for (int64_t i = 0; i < n; i++)
+    {
+      scalar_t sum = 0;
+      scalar_t *row_ = a + lda * i;
+      for (int64_t j = 0; j < m; j++) {
+        sum += x[j * incx] * row_[j];
+      }
+      if (beta == 0) {
+        y[i * incy] = alpha * sum;
+      } else {
+        y[i * incy] = beta * y[i * incy] + alpha * sum;
+      }
+    }
+  } else {
+    if (beta != 1) scal<scalar_t>(m, beta, y, incy);
+
+    for (int64_t j = 0; j < n; j++) {
+      scalar_t *column_ = a + lda * j;
+      scalar_t z = alpha * x[j * incx];
+      for (int64_t i = 0; i < m; i++) {
+        y[i * incy] += z * column_[i];
+      }
+    }
+  }
+  return false;
+}
+
+#define INSTANTIATE(scalar_t, _) \
+template bool gemv<scalar_t>(char trans, int64_t m, int64_t n, scalar_t alpha, scalar_t *a, int64_t lda, scalar_t *x, int64_t incx, scalar_t beta, scalar_t *y, int64_t incy);
+AT_FORALL_SCALAR_TYPES_AND(BFloat16, INSTANTIATE);
+#undef INSTANTIATE
+
+}} // namespace at::native
