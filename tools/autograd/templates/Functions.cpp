@@ -584,9 +584,15 @@ std::tuple<Tensor, Tensor, Tensor> addmm_backward(const Tensor& grad_output, con
       grad3 = grad3.t();
     }
   } else {
-    grad1 = maybe_multiply(grad_output, beta);
-    grad2 = mm_mat1_backward(grad_output, mat2, mat1, alpha);
-    grad3 = mm_mat2_backward(grad_output, mat1, mat2.sizes(), mat2.strides(), alpha);
+    if (output_mask[0]) {
+      grad1 = maybe_multiply(grad_output, beta);
+    }
+    if (output_mask[1]) {
+      grad2 = mm_mat1_backward(grad_output, mat2, mat1, alpha);
+    }
+    if (output_mask[2]) {
+      grad3 = mm_mat2_backward(grad_output, mat1, mat2.sizes(), mat2.strides(), alpha);
+    }
   }
   return std::tuple<Tensor, Tensor, Tensor>{grad1, grad2, grad3};
 }

@@ -103,6 +103,10 @@ class TestEagerModeNumericSuite(QuantizationTestCase):
             q_model = quantize(model, default_eval_fn, self.img_data)
             compare_and_validate_results(model, q_model)
 
+    @unittest.skipUnless(
+        'fbgemm' in torch.backends.quantized.supported_engines,
+        " Quantized operations require FBGEMM."
+    )
     def test_compare_model_stub(self):
         r"""Compare the output of quantized conv layer and its float shadow module
         """
