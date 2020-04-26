@@ -392,8 +392,8 @@ int THPVariable_set_requires_grad(THPVariable *self, PyObject *obj, void *unused
     THPUtils_setError(autograd::utils::requires_grad_leaf_error(obj == Py_True).c_str());
     return -1;
   }
-  if (requires_grad && !var.is_floating_point()) {
-    THPUtils_setError("only Tensors of floating point dtype can require gradients");
+  if (requires_grad && !(var.is_floating_point() || var.is_complex())) {
+    THPUtils_setError("only Tensors of floating point and complex dtype can require gradients");
     return -1;
   }
   var.set_requires_grad(requires_grad);
