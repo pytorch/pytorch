@@ -239,7 +239,7 @@ PyObject* rpc_init(PyObject* /* unused */) {
               R"(
                   Create a helper proxy to easily launch an ``rpc_sync`` using
                   the owner of the RRef as the destination to run functions on
-                  the object referenced by this RRef. More specifically, 
+                  the object referenced by this RRef. More specifically,
                   ``rref.rpc_sync().func_name(*args, **kwargs)`` is the same as
                   the following:
 
@@ -263,7 +263,7 @@ PyObject* rpc_init(PyObject* /* unused */) {
               R"(
                   Create a helper proxy to easily launch an ``rpc_async`` using
                   the owner of the RRef as the destination to run functions on
-                  the object referenced by this RRef. More specifically, 
+                  the object referenced by this RRef. More specifically,
                   ``rref.rpc_async().func_name(*args, **kwargs)`` is the same as
                   the following:
 
@@ -287,7 +287,7 @@ PyObject* rpc_init(PyObject* /* unused */) {
               R"(
                   Create a helper proxy to easily launch an ``remote`` using
                   the owner of the RRef as the destination to run functions on
-                  the object referenced by this RRef. More specifically, 
+                  the object referenced by this RRef. More specifically,
                   ``rref.remote().func_name(*args, **kwargs)`` is the same as
                   the following:
 
@@ -352,8 +352,10 @@ PyObject* rpc_init(PyObject* /* unused */) {
           [&](FutureMessage& fut) { return toPyObj(fut.wait()); },
           py::call_guard<py::gil_scoped_release>(),
           R"(
-Wait on future to complete and return the object it completed with.
-If the future completes with an error, an exception is thrown.)")
+              Wait on future to complete and return the object it completed
+              with. If the future completes with an error, an exception is
+              thrown.
+          )")
       .def(
           "add_done_callback",
           [&](FutureMessage& fut, py::function cb) {
@@ -366,7 +368,28 @@ If the future completes with an error, an exception is thrown.)")
                 pybind11::gil_scoped_acquire ag;
                 pf.func_(fut);
             });
-          });
+          },
+          R"(
+              Registers a callback to the ``Future``, which will be fired
+              when the value in ``Future`` is ready. Multiple callbacks can
+              be added to the same ``Future``, and will be invoked in the
+              same order as they were added. The callback takes one argument,
+              which is the reference to this ``Future``. The callback function
+              can use the ``Future.wait()`` API to get the value.
+
+              Arguments:
+                  callback (callable): a Python callable, which takes this
+                  ``Future`` object as the only argument.
+
+              Example::
+                  >>> def callback(fut):
+                  >>>     print(f"RPC return value is {fut.wait()}.")
+                  >>>
+                  >>> fut = dist.rpc_async("worker1", torch.add, args=(torch.ones(2), 3))
+                  >>> # The inserted callback will print the return value when
+                  >>> # receiving the response from "worker1"
+                  >>> fut.add_done_callback(callback)
+          )");
 
   shared_ptr_class_<ProcessGroupRpcBackendOptions>(
       module,

@@ -4,6 +4,7 @@ import time
 import unittest
 from collections import namedtuple
 from datetime import timedelta
+from functools import partial
 from unittest import mock
 
 import torch
@@ -387,8 +388,8 @@ class RpcTest(RpcAgentTestFixture):
     @dist_init
     def test_rref_proxy_reuse(self):
         rref = rpc.remote(
-            worker_name((self.rank + 1) % self.world_size), 
-            my_function, 
+            worker_name((self.rank + 1) % self.world_size),
+            my_function,
             args=(torch.ones(2, 2), 1, 3)
         )
         expected = torch.ones(2, 2) + 1 + 3
@@ -426,41 +427,41 @@ class RpcTest(RpcAgentTestFixture):
         self.assertEqual(expected.get_value(), rref.remote().get_value().to_here())
 
         self.assertEqual(
-            expected.my_instance_method(2), 
+            expected.my_instance_method(2),
             rref.rpc_sync().my_instance_method(2)
         )
         self.assertEqual(
-            expected.my_instance_method(3), 
+            expected.my_instance_method(3),
             rref.rpc_async().my_instance_method(3).wait()
         )
         self.assertEqual(
-            expected.my_instance_method(4), 
+            expected.my_instance_method(4),
             rref.remote().my_instance_method(4).to_here()
         )
 
         self.assertEqual(
-            expected.my_static_method(9), 
+            expected.my_static_method(9),
             rref.rpc_sync().my_static_method(9)
         )
         self.assertEqual(
-            expected.my_static_method(10), 
+            expected.my_static_method(10),
             rref.rpc_async().my_static_method(10).wait()
         )
         self.assertEqual(
-            expected.my_static_method(11), 
+            expected.my_static_method(11),
             rref.remote().my_static_method(11).to_here()
         )
 
         self.assertEqual(
-            expected.my_class_method(2, torch.zeros(2, 2)), 
+            expected.my_class_method(2, torch.zeros(2, 2)),
             rref.rpc_sync().my_class_method(2, torch.zeros(2, 2))
         )
         self.assertEqual(
-            expected.my_class_method(2, torch.ones(3, 3)), 
+            expected.my_class_method(2, torch.ones(3, 3)),
             rref.rpc_async().my_class_method(2, torch.ones(3, 3)).wait()
         )
         self.assertEqual(
-            expected.my_class_method(2, torch.ones(4, 4)), 
+            expected.my_class_method(2, torch.ones(4, 4)),
             rref.remote().my_class_method(2, torch.ones(4, 4)).to_here()
         )
 
@@ -2194,26 +2195,55 @@ class RpcTest(RpcAgentTestFixture):
 
     @dist_init
     def test_callback(self):
-        if self.rank == 0:
-            set_by_cb = concurrent.futures.Future()
+        set_by_cb = concurrent.futures.Future()
+        n = self.rank + 1
 
-            n = self.rank + 1
-            def callback(fut):
-                ret = fut.wait()
-                self.assertEqual(ret, torch.ones(n, n) * 2)
-                set_by_cb.set_result(ret.clone() + 1)
+        def callback(fut):
+            ret = fut.wait()
+            self.assertEqual(ret, torch.ones(n, n) * 2)
+            set_by_cb.set_result(ret.clone() + 1)
 
-            fut = rpc.rpc_async(
-                worker_name(n % self.world_size),
-                torch.add,
-                args=(torch.ones(n, n), torch.ones(n, n))
+        fut = rpc.rpc_async(
+            worker_name(n % self.world_size),
+            torch.add,
+            args=(torch.ones(n, n), torch.ones(n, n))
+        )
+
+        fut.add_done_callback(callback)
+
+        self.assertEqual(fut.wait(), torch.ones(n, n) * 2)
+        self.assertEqual(set_by_cb.result(), torch.ones(n, n) * 2 + 1)
+        self.assertEqual(fut.wait(), torch.ones(n, n) * 2)
+
+    @dist_init
+    def test_multi_callbacks(self):
+        num_cbs = 10
+        set_by_cbs = [concurrent.futures.Future() for _ in range(num_cbs)]
+        n = self.rank + 1
+
+        def callback(idx, fm):
+            ret = fm.wait()
+            self.assertEqual(ret, torch.ones(n, n) * 2)
+            set_by_cbs[idx].set_result(ret.clone() + idx)
+
+        fut = rpc.rpc_async(
+            worker_name(n % self.world_size),
+            torch.add,
+            args=(torch.ones(n, n), torch.ones(n, n))
+        )
+
+        for idx in range(num_cbs):
+            fut.add_done_callback(partial(callback, idx))
+
+        self.assertEqual(fut.wait(), torch.ones(n, n) * 2)
+
+        for idx in range(num_cbs):
+            self.assertEqual(
+                set_by_cbs[idx].result(),
+                torch.ones(n, n) * 2 + idx
             )
 
-            fut.add_done_callback(callback)
-
-            self.assertEqual(fut.wait(), torch.ones(n, n) * 2)
-            self.assertEqual(set_by_cb.result(), torch.ones(n, n) * 2 + 1)
-            self.assertEqual(fut.wait(), torch.ones(n, n) * 2)
+        self.assertEqual(fut.wait(), torch.ones(n, n) * 2)
 
 
 class FaultyAgentRpcTest(FaultyRpcAgentTestFixture):
