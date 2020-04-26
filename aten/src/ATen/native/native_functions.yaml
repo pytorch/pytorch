@@ -1655,7 +1655,7 @@
 - func: linear(Tensor input, Tensor weight, Tensor? bias=None) -> Tensor
   python_module: nn
 
-- func: mkldnn_linear(Tensor self, Tensor weight, Tensor? bias=None) -> Tensor
+- func: mkldnn_linear(Tensor input, Tensor weight, Tensor? bias=None) -> Tensor
   python_module: nn
   dispatch:
     MkldnnCPU: mkldnn_linear
