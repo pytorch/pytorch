@@ -63,7 +63,43 @@ __global__ void ComputeMulGradientCUDAKernel(
     __syncthreads();
   }
 }
-
+template <typename TGrad, typename TIn, int D>
+__global__ void ComputeMulGradientOuterCUDAKernel(
+    const int outer_size,
+    const SimpleArray<FixedDivisor<int>, D> Y_dims,
+    const SimpleArray<int, D> Y_strides,
+    const SimpleArray<int, D> W_strides,
+    const SimpleArray<FixedDivisor<int>, D> X_dims,
+    const TGrad* dY,
+    const TIn* W,
+    TGrad* dX) {
+  CUDA_1D_KERNEL_LOOP(i, outer_size) {
+    TGrad sum = 0;
+    const int X_index = i;
+    int Y_index = 0;
+    int X_index_val = X_index;
+#pragma unroll
+    for (int d = D - 1; d >= 0; --d) {
+      int r;
+      X_dims.data[d].DivMod(X_index_val, &X_index_val, &r);
+      Y_index += r * Y_strides.data[d];
+    }
+    int W_index = 0;
+    int Y_index_val = Y_index;
+#pragma unroll
+    for (int d = D - 1; d >= 0; --d) {
+      int r;
+      Y_dims.data[d].DivMod(Y_index_val, &Y_index_val, &r);
+      W_index += r * W_strides.data[d];
+    }
+#if __CUDA_ARCH__ >= 350
+    sum += __ldg(dY + Y_index) * __ldg(W + W_index);
+#else
+    sum += dY[Y_index] * W[W_index];
+#endif
+    dX[i] = sum;
+  }
+}
 template <typename TGrad, typename TIn, int D>
 void ComputeMulGradientCUDAImpl(
     const int outer_size,
@@ -89,21 +125,37 @@ void ComputeMulGradientCUDAImpl(
     W_strides_arr.data[i] = W_dims[i] == 1 ? 0 : cur_stride;
     cur_stride *= W_dims[i];
   }
-  int threads = std::min(inner_size, CAFFE_CUDA_NUM_THREADS);
-  ComputeMulGradientCUDAKernel<TGrad, TIn, D>
-      <<<std::min(outer_size, CAFFE_MAXIMUM_NUM_BLOCKS),
-         threads,
-         0,
-         context->cuda_stream()>>>(
-          outer_size,
-          inner_size,
-          Y_dims_arr,
-          Y_strides_arr,
-          W_strides_arr,
-          X_dims_arr,
-          dY,
-          W,
-          dX);
+  if (inner_size == 1) {
+    ComputeMulGradientOuterCUDAKernel<TGrad, TIn, D>
+        <<<CAFFE_MAXIMUM_NUM_BLOCKS,
+           CAFFE_CUDA_NUM_THREADS,
+           0,
+           context->cuda_stream()>>>(
+            outer_size,
+            Y_dims_arr,
+            Y_strides_arr,
+            W_strides_arr,
+            X_dims_arr,
+            dY,
+            W,
+            dX);
+  } else {
+    int threads = std::min(inner_size, CAFFE_CUDA_NUM_THREADS);
+    ComputeMulGradientCUDAKernel<TGrad, TIn, D>
+        <<<std::min(outer_size, CAFFE_MAXIMUM_NUM_BLOCKS),
+           threads,
+           0,
+           context->cuda_stream()>>>(
+            outer_size,
+            inner_size,
+            Y_dims_arr,
+            Y_strides_arr,
+            W_strides_arr,
+            X_dims_arr,
+            dY,
+            W,
+            dX);
+  }
 }
 
 template <typename TGrad, typename TIn>

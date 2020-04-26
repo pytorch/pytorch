@@ -159,6 +159,128 @@ invoke(Functor&& f, Args&&... args) {
 
 
 
+
+
+
+namespace detail {
+struct _identity final {
+  template<class T>
+  using type_identity = T;
+
+  template<class T>
+  decltype(auto) operator()(T&& arg) {
+    return std::forward<T>(arg);
+  }
+};
+
+template<class Func, class Enable = void>
+struct function_takes_identity_argument : std::false_type {};
+template<class Func>
+struct function_takes_identity_argument<Func, void_t<decltype(std::declval<Func>()(_identity()))>> : std::true_type {};
+
+template<bool Condition>
+struct _if_constexpr;
+
+template<>
+struct _if_constexpr<true> final {
+  template<class ThenCallback, class ElseCallback, std::enable_if_t<function_takes_identity_argument<ThenCallback>::value, void*> = nullptr>
+  static decltype(auto) call(ThenCallback&& thenCallback, ElseCallback&& /* elseCallback */) {
+    // The _identity instance passed in can be used to delay evaluation of an expression,
+    // because the compiler can't know that it's just the identity we're passing in.
+    return thenCallback(_identity());
+  }
+
+  template<class ThenCallback, class ElseCallback, std::enable_if_t<!function_takes_identity_argument<ThenCallback>::value, void*> = nullptr>
+  static decltype(auto) call(ThenCallback&& thenCallback, ElseCallback&& /* elseCallback */) {
+    return thenCallback();
+  }
+};
+
+template<>
+struct _if_constexpr<false> final {
+  template<class ThenCallback, class ElseCallback, std::enable_if_t<function_takes_identity_argument<ElseCallback>::value, void*> = nullptr>
+  static decltype(auto) call(ThenCallback&& /* thenCallback */, ElseCallback&& elseCallback) {
+    // The _identity instance passed in can be used to delay evaluation of an expression,
+    // because the compiler can't know that it's just the identity we're passing in.
+    return elseCallback(_identity());
+  }
+
+  template<class ThenCallback, class ElseCallback, std::enable_if_t<!function_takes_identity_argument<ElseCallback>::value, void*> = nullptr>
+  static decltype(auto) call(ThenCallback&& /* thenCallback */, ElseCallback&& elseCallback) {
+    return elseCallback();
+  }
+};
+} // namespace detail
+
+/*
+ * Get something like C++17 if constexpr in C++14.
+ *
+ * Example 1: simple constexpr if/then/else
+ *   template<int arg> int increment_absolute_value() {
+ *     int result = arg;
+ *     if_constexpr<(arg > 0)>(
+ *       [&] { ++result; }  // then-case
+ *       [&] { --result; }  // else-case
+ *     );
+ *     return result;
+ *   }
+ *
+ * Example 2: without else case (i.e. conditionally prune code from assembly)
+ *   template<int arg> int decrement_if_positive() {
+ *     int result = arg;
+ *     if_constexpr<(arg > 0)>(
+ *       // This decrement operation is only present in the assembly for
+ *       // template instances with arg > 0.
+ *       [&] { --result; }
+ *     );
+ *     return result;
+ *   }
+ *
+ * Example 3: branch based on type (i.e. replacement for SFINAE)
+ *   template <class T>
+ *   int func(T t) {
+ *     return if_constexpr<std::is_same<T, MyClass1>::value>(
+ *       [&](auto _) { return _(t).value; }, // this code is invalid for T == MyClass2
+ *       [&](auto _) { return _(t).val; }    // this code is invalid for T == MyClass1
+ *     );
+ *   }
+ *
+ * Note: The _ argument passed in Example 3 is the identity function, i.e. it does nothing.
+ *       It is used to force the compiler to delay type checking, because the compiler
+ *       doesn't know what kind of _ is passed in. Without it, the compiler would fail
+ *       when you try to access t.value but the member doesn't exist.
+ *
+ * Note: A reference implementation of if_constexpr in C++17 would look like this:
+ *   template<bool Condition, class ThenCallback, class ElseCallback>
+ *   decltype(auto) if_constexpr(ThenCallback&& thenCallback, ElseCallback&& elseCallback) {
+ *     if constexpr(Condition) {
+ *       if constexpr (function_takes_identity_argument<ThenCallback>::value) {
+ *         return std::forward<ThenCallback>(thenCallback)(_identity());
+ *       } else {
+ *         return std::forward<ThenCallback>(thenCallback)();
+ *       }
+ *     } else {
+ *       if constexpr (function_takes_identity_argument<ElseCallback>::value) {
+ *         return std::forward<ElseCallback>(elseCallback)(_identity());
+ *       } else {
+ *         return std::forward<ElseCallback>(elseCallback)();
+ *       }
+ *     }
+ *   }
+ */
+template<bool Condition, class ThenCallback, class ElseCallback>
+decltype(auto) if_constexpr(ThenCallback&& thenCallback, ElseCallback&& elseCallback) {
+  return detail::_if_constexpr<Condition>::call(std::forward<ThenCallback>(thenCallback),
+                                                 std::forward<ElseCallback>(elseCallback));
+}
+
+template<bool Condition, class ThenCallback>
+decltype(auto) if_constexpr(ThenCallback&& thenCallback) {
+  return if_constexpr<Condition>(std::forward<ThenCallback>(thenCallback), [] (auto) {});
+}
+
+
+
 // GCC 4.8 doesn't define std::to_string, even though that's in C++11. Let's define it.
 namespace detail {
 class DummyClassForToString final {};

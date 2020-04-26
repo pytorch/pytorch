@@ -2524,6 +2524,30 @@ class TestQuantizedConv(unittest.TestCase):
                 (stride_d, stride_h, stride_w), (pad_d, pad_h, pad_w),
                 channelwise)
 
+
+class TestPadding(TestCase):
+    @given(batch_size=st.integers(1, 64),
+           channels=st.integers(1, 64),
+           width=st.integers(16, 128),
+           qtype=st.sampled_from(hu._ALL_QINT_TYPES))
+    def test_reflection_pad1d(self, batch_size, channels, width, qtype):
+        padding = width // 4
+
+        x = torch.arange(batch_size * channels * width).to(torch.float)
+        x = x.resize(batch_size, channels, width)
+        # Per-Tensor test
+        scale, zp = _calculate_dynamic_qparams(x, qtype)
+        qx = torch.quantize_per_tensor(x, scale, zp, qtype)
+
+        padding_op = torch.nn.ReflectionPad1d(padding)
+
+        y_ref = padding_op(x)
+        qy_ref = torch.quantize_per_tensor(y_ref, scale, zp, qtype)
+        qy_hat = padding_op(qx)
+
+        self.assertEqual(qy_ref, qy_hat)
+
+
 @unittest.skipUnless('qnnpack' in torch.backends.quantized.supported_engines,
                      "This Pytorch Build has not been built with QNNPACK")
 @unittest.skipIf(IS_PPC, "QNNPACK is not currently supported on ppc64le")
