@@ -16022,6 +16022,12 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         a = np.array(vals).astype(np.uint8)
         t = torch.tensor(vals, device=device).to(torch.uint8)
         self.assertEqual(torch.from_numpy(a), t.cpu())
+        
+    def test_negative_uint8_conversion_third(self, device):
+        vals = (-math.pi, 0, 1 / 3, 1, math.pi, 3 / 7)
+        a = np.array(vals).astype(np.uint8)
+        t = torch.tensor(vals, device=device).to(torch.uint8)
+        self.assertEqual(torch.from_numpy(a), t.cpu())
 
     def _float_to_int_conversion_helper(self, vals, device, dtype):
         assert TEST_NUMPY
