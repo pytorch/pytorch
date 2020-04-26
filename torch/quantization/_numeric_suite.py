@@ -287,6 +287,20 @@ def get_matching_activations(float_module, q_module, Logger):
     return act_dict
 
 
+def remove_qconfig(module):
+    r"""Clean up the qconfig left in the module so that new qconfig can be
+    propagated.
+
+    Args:
+        module: module to be cleaned up
+    """
+    for child in module.children():
+        remove_qconfig(child)
+
+    if hasattr(module, "qconfig"):
+        del module.qconfig
+
+
 def prepare_model_outputs(
     float_module,
     q_module,
@@ -301,6 +315,8 @@ def prepare_model_outputs(
         q_module: the quantized module
         white_list: list of module types to attach tensor logger
     """
+    remove_qconfig(float_module)
+    remove_qconfig(q_module)
     qconfig_debug = torch.quantization.QConfig(activation=Logger, weight=None)
     float_module.qconfig = qconfig_debug
     prepare(float_module, inplace=True, white_list=white_list)

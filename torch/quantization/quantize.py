@@ -316,8 +316,7 @@ def convert(module, mapping=None, inplace=False):
 
     for key, value in reassign.items():
         module._modules[key] = value
-        if hasattr(module._modules[key], 'qconfig'):
-            delattr(module._modules[key], 'qconfig')
+
     return module
 
 def swap_module(mod, mapping):
