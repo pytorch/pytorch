@@ -2613,7 +2613,7 @@ Returns a new tensor with boolean elements representing if each element of
 :attr:`input` is "close" to the corresponding element of :attr:`other`.
 Closeness is defined as:
 
-. math::
+.. math::
     \lvert \text{input} - \text{other} \rvert \leq \texttt{atol} + \texttt{rtol} \times \lvert \text{other} \rvert
 """ + r"""
 
