@@ -191,9 +191,8 @@ class TestEagerModeNumericSuite(QuantizationTestCase):
 
         # Test functionals
         model = ModelWithFunctionals().eval()
-        q_model = copy.deepcopy(model)
-        q_model.qconfig = torch.quantization.get_default_qconfig("fbgemm")
-        q_model = prepare(q_model)
+        model.qconfig = torch.quantization.get_default_qconfig("fbgemm")
+        q_model = prepare(model, inplace=False)
         q_model(data)
         q_model = convert(q_model)
         act_compare_dict = compare_model_outputs(model, q_model, data)
