@@ -236,7 +236,7 @@ if(MSVC)
       ${NVTOOLEXT_HOME}/lib/x64/nvToolsExt64_1.lib)
   set_property(
       TARGET torch::nvtoolsext PROPERTY INTERFACE_INCLUDE_DIRECTORIES
-      "${NVTOOLEXT_HOME}/include")
+      ${NVTOOLEXT_HOME}/include)
 
 elseif(APPLE)
   set_property(
