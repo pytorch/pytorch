@@ -806,6 +806,8 @@ class TestCase(expecttest.TestCase):
     def compare_type(self, a, b, *, allow_ints=True):
 
         class _TypeMeta:
+            __slots__ = ['rank', 'kind', 'width']
+
             def __init__(self, rank, kind, width):
                 self.rank = rank
                 self.kind = kind
