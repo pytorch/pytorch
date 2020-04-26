@@ -272,6 +272,15 @@ inline std::string if_empty_then(std::string x, std::string y) {
 #endif
 #define TORCH_CHECK(cond, ...) TORCH_CHECK_WITH(Error, cond, __VA_ARGS__)
 
+// An utility macro that does what `TORCH_CHECK` does if compiled in the host code, 
+// otherwise does nothing. Supposed to be used in the code shared between host and
+// device code as an alternative for `TORCH_CHECK`.
+#if defined(__CUDACC__) || defined(__HIPCC__)
+#define TORCH_CHECK_IF_NOT_ON_CUDA(cond, ...)
+#else
+#define TORCH_CHECK_IF_NOT_ON_CUDA(cond, ...) TORCH_CHECK(cond, __VA_ARGS__)
+#endif
+
 // Debug only version of TORCH_INTERNAL_ASSERT. This macro only checks in debug
 // build, and does nothing in release build.  It is appropriate to use
 // in situations where you want to add an assert to a hotpath, but it is
