@@ -1196,7 +1196,7 @@ if(USE_TENSORPIPE)
       CMAKE_ARGS -DCMAKE_INSTALL_PREFIX=<INSTALL_DIR> -DBUILD_TESTING=OFF -DTP_BUILD_PYTHON=OFF -DTP_BUILD_LIBUV=ON -DCMAKE_CXX_FLAGS=${CMAKE_CXX_FLAGS} ${TP_EXTRA_CMAKE_ARGS}
       EXCLUDE_FROM_ALL 1)
 
-    include_directories(SYSTEM tensorpipe/include)
+    include_directories(${PROJECT_BINARY_DIR}/tensorpipe/include)
 
     add_library(tensorpipe STATIC IMPORTED)
     add_dependencies(tensorpipe tensorpipe-build)
