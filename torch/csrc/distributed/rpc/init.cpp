@@ -15,6 +15,7 @@
 #include <torch/types.h>
 
 #include <pybind11/chrono.h>
+#include <pybind11/functional.h>
 #include <pybind11/operators.h>
 
 namespace torch {
@@ -22,6 +23,18 @@ namespace distributed {
 namespace rpc {
 
 namespace {
+
+// Wrap Python function to guard deref
+struct PythonFunction {
+  PythonFunction(py::function func) : func_(std::move(func)) {}
+
+  ~PythonFunction() {
+    pybind11::gil_scoped_acquire ag;
+    func_ = py::none();
+  }
+
+  py::function func_;
+};
 
 constexpr std::chrono::milliseconds kDeleteAllUsersTimeout(100000);
 
@@ -333,15 +346,27 @@ PyObject* rpc_init(PyObject* /* unused */) {
   // TODO Once python object can be tagged as IValue and c10::ivalue::Future is
   // implemented as generic Future<IValue>, we can consider all rpc call
   // to return a future<IValue> later on.
-  auto future = shared_ptr_class_<FutureMessage>(module, "Future")
-                    .def(
-                        "wait",
-                        [&](FutureMessage& fut) { return toPyObj(fut.wait()); },
-                        py::call_guard<py::gil_scoped_release>(),
-                        R"(
+  shared_ptr_class_<FutureMessage>(module, "Future")
+      .def(
+          "wait",
+          [&](FutureMessage& fut) { return toPyObj(fut.wait()); },
+          py::call_guard<py::gil_scoped_release>(),
+          R"(
 Wait on future to complete and return the object it completed with.
-If the future completes with an error, an exception is thrown.
-              )");
+If the future completes with an error, an exception is thrown.)")
+      .def(
+          "add_done_callback",
+          [&](FutureMessage& fut, py::function cb) {
+            // We this an additional layer of wrapper here to guard the
+            // destruction of the py::function object. Because, the
+            // FutureMessage owns a reference to the py::function in its
+            // callback vector, but FutureMessage does acquire GIL.
+            PythonFunction pf(std::move(cb));
+            fut.addCallback([pf](const FutureMessage& fut) {
+                pybind11::gil_scoped_acquire ag;
+                pf.func_(fut);
+            });
+          });
 
   shared_ptr_class_<ProcessGroupRpcBackendOptions>(
       module,

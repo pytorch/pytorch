@@ -2192,6 +2192,29 @@ class RpcTest(RpcAgentTestFixture):
             self.assertEqual(t_view, t_ret)
             self.assertFalse(t_ret.is_contiguous())
 
+    @dist_init
+    def test_callback(self):
+        if self.rank == 0:
+            set_by_cb = concurrent.futures.Future()
+
+            n = self.rank + 1
+            def callback(fut):
+                ret = fut.wait()
+                self.assertEqual(ret, torch.ones(n, n) * 2)
+                set_by_cb.set_result(ret.clone() + 1)
+
+            fut = rpc.rpc_async(
+                worker_name(n % self.world_size),
+                torch.add,
+                args=(torch.ones(n, n), torch.ones(n, n))
+            )
+
+            fut.add_done_callback(callback)
+
+            self.assertEqual(fut.wait(), torch.ones(n, n) * 2)
+            self.assertEqual(set_by_cb.result(), torch.ones(n, n) * 2 + 1)
+            self.assertEqual(fut.wait(), torch.ones(n, n) * 2)
+
 
 class FaultyAgentRpcTest(FaultyRpcAgentTestFixture):
 
