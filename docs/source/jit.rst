@@ -40,25 +40,18 @@ For an end-to-end example of converting a PyTorch model to TorchScript and runni
 Creating TorchScript Code
 --------------------------
 
-.. autofunction:: script(obj)
+.. autosummary::
+    :toctree: generated
 
-.. autofunction:: trace(func, example_inputs, optimize=None, check_trace=True, check_inputs=None, check_tolerance=1e-5)
-
-.. autofunction:: trace_module(mod, inputs, optimize=None, check_trace=True, check_inputs=None, check_tolerance=1e-5)
-
-.. autoclass:: ScriptModule()
-    :members:
-
-.. autoclass:: ScriptFunction()
-
-.. autofunction:: save
-
-.. autofunction:: load
-
-.. autofunction:: ignore
-
-.. autofunction:: unused
-
+    script
+    trace
+    trace_module
+    ScriptModule
+    ScriptFunction
+    save
+    load
+    ignore
+    unused
 
 Mixing Tracing and Scripting
 ----------------------------
@@ -207,39 +200,38 @@ Disable JIT for Debugging
 ~~~~~~~~~~~~~~~~~~~~~~~~~
 .. envvar:: PYTORCH_JIT
 
-    Setting the environment variable ``PYTORCH_JIT=0`` will disable all script
-    and tracing annotations. If there is hard-to-debug error in one of your
-    TorchScript model, you can use this flag to force everything to run using native
-    Python. Since TorchScript (scripting and tracing) are disabled with this flag,
-    you can use tools like ``pdb`` to debug the model code.
+Setting the environment variable ``PYTORCH_JIT=0`` will disable all script
+and tracing annotations. If there is hard-to-debug error in one of your
+TorchScript model, you can use this flag to force everything to run using native
+Python. Since TorchScript (scripting and tracing) are disabled with this flag,
+you can use tools like ``pdb`` to debug the model code.  For example::
 
-    Given an example 
+    @torch.jit.script
+    def scripted_fn(x : torch.Tensor):
+        for i in range(12):
+            x = x + x
+        return x
 
-        @torch.jit.script
-        def scripted_fn(x : torch.Tensor):
-            for i in range(12):
-                x = x + x
-            return x
+    def fn(x):
+        x = torch.neg(x)
+        import pdb; pdb.set_trace()
+        return scripted_fn(x)
 
+    traced_fn = torch.jit.trace(fn, (torch.rand(4, 5),))
+    traced_fn(torch.rand(3, 4))
 
-        def fn(x):
-            x = torch.neg(x)
-            import pdb; pdb.set_trace()
-            return scripted_fn(x)
+Debugging this script with ``pdb`` works except for when we invoke the
+:func:`@torch.jit.script <torch.jit.script>` function. We can globally disable
+JIT, so that we can call the :func:`@torch.jit.script <torch.jit.script>`
+function as a normal Python function and not compile it. If the above script
+is called ``disable_jit_example.py``, we can invoke it like so::
 
-        traced_fn = torch.jit.trace(fn, (torch.rand(4, 5),))
-        traced_fn(torch.rand(3, 4))
+    $ PYTORCH_JIT=0 python disable_jit_example.py
 
-    Debugging this script with ``pdb`` works except for when we invoke the :func:`@torch.jit.script <torch.jit.script>`
-    function. We can globally disable JIT, so that we can call the :func:`@torch.jit.script <torch.jit.script>`
-    function as a normal Python function and not compile it. If the above script
-    is called ``disable_jit_example.py``, we can invoke it like so::
-
-        $ PYTORCH_JIT=0 python disable_jit_example.py
-
-    and we will be able to step into the :func:`@torch.jit.script <torch.jit.script>` function as a normal Python
-    function. To disable the TorchScript compiler for a specific function, see
-    :func:`@torch.jit.ignore <torch.jit.ignore>`.
+and we will be able to step into the :func:`@torch.jit.script
+<torch.jit.script>` function as a normal Python function. To disable the
+TorchScript compiler for a specific function, see
+:func:`@torch.jit.ignore <torch.jit.ignore>`.
 
 
 Inspecting Code
