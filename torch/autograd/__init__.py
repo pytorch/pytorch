@@ -28,6 +28,14 @@ def _make_grads(outputs, grads):
                                    + str(grad.shape) + " and output["
                                    + str(outputs.index(out)) + "] has a shape of "
                                    + str(out.shape) + ".")
+            if (out.dtype.is_complex != grad.dtype.is_complex):
+                raise RuntimeError("For complex Tensors, both grad_output and output"
+                                   " are required to have the same dtype."
+                                   " Mismatch in dtype: grad_output["
+                                   + str(grads.index(grad)) + "] has a dtype of "
+                                   + str(grad.dtype) + " and output["
+                                   + str(outputs.index(out)) + "] has a dtype of "
+                                   + str(out.dtype) + ".")
             new_grads.append(grad)
         elif grad is None:
             if out.requires_grad:
