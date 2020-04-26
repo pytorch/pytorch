@@ -370,8 +370,10 @@ TensorPipeEntry tensorpipeSerialize(const Message& rpcMessage) {
   tpMessage.metadata.resize(2 * sizeof(int64_t));
   int64_t mtype = static_cast<int>(rpcMessage.type());
   int64_t mId = rpcMessage.id();
-  memcpy(tpMessage.metadata.data(), &mtype, sizeof(int64_t));
-  memcpy(tpMessage.metadata.data() + sizeof(int64_t), &mId, sizeof(int64_t));
+  tpMessage.metadata.append(
+      reinterpret_cast<char*>(&mtype), sizeof(mtype));
+  tpMessage.metadata.append(
+      reinterpret_cast<char*>(&mId), sizeof(mId));
 
   // Tensors
   tpMessage.tensors.reserve(tensors.size());
