@@ -1,6 +1,6 @@
 #pragma once
 
-#include <THHalf.h>
+#include <TH/THHalf.h>
 #include <c10/util/BFloat16.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <cstddef>

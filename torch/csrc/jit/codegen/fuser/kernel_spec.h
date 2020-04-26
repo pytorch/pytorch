@@ -1,14 +1,14 @@
 #pragma once
 
 #include <ATen/ATen.h>
+#include <ATen/core/stack.h>
 #include <c10/util/Optional.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/csrc/jit/codegen/fuser/arg_spec.h>
 #include <torch/csrc/jit/codegen/fuser/fused_kernel.h>
 #include <torch/csrc/jit/codegen/fuser/interface.h>
-#include <torch/csrc/jit/runtime/interpreter.h>
 #include <torch/csrc/jit/ir/ir.h>
-#include <ATen/core/stack.h>
+#include <torch/csrc/jit/runtime/interpreter.h>
 
 #include <cstdint>
 #include <memory>
@@ -59,7 +59,7 @@ struct TORCH_API KernelSpec {
   KernelSpec(const int64_t _key, const std::shared_ptr<Graph>& _graph)
       : key_{_key},
         graph_{_graph},
-        code_{_graph},
+        code_{_graph, "<fused code>"},
         nInputs_{_graph->inputs().size()},
         nTensorInputs_{},
         inputBroadcastGroups_{},

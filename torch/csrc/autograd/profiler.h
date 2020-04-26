@@ -14,6 +14,9 @@
 #ifndef _WIN32
 #include <ctime>
 #endif
+#if defined(C10_IOS) && defined(C10_MOBILE)
+#include <sys/time.h> // for gettimeofday()
+#endif
 
 #include <torch/csrc/autograd/record_function.h>
 
@@ -24,8 +27,6 @@ namespace torch { namespace autograd {
 struct Node;
 
 namespace profiler {
-
-TORCH_API uint16_t getThreadId();
 
 struct TORCH_API CUDAStubs {
   virtual void record(int* device, CUDAEventStub* event, int64_t* cpu_ns) {
@@ -67,24 +68,17 @@ constexpr inline size_t ceilToMultiple(size_t a, size_t b) {
   return ((a + b - 1) / b) * b;
 }
 
-#if (defined(__MACH__) && !defined(CLOCK_REALTIME)) || defined(C10_IOS)
-#include <sys/time.h>
-// clock_gettime is not implemented on older versions of OS X (< 10.12).
-// If implemented, CLOCK_REALTIME will have already been defined.
-
+inline int64_t getTime() {
+#if defined(C10_IOS) && defined(C10_MOBILE)
 // clock_gettime is only available on iOS 10.0 or newer. Unlike OS X, iOS can't rely on
 // CLOCK_REALTIME, as it is defined no matter if clock_gettime is implemented or not
-#endif
-
-inline int64_t getTime() {
-#ifdef _WIN32
-  using namespace std::chrono;
-  using clock = std::conditional<high_resolution_clock::is_steady, high_resolution_clock, steady_clock>::type;
-  return duration_cast<nanoseconds>(clock::now().time_since_epoch()).count();
-#elif (defined(__MACH__) && !defined(CLOCK_REALTIME)) || defined(C10_IOS)
   struct timeval now;
   gettimeofday(&now, NULL);
   return static_cast<int64_t>(now.tv_sec) * 1000000000 + static_cast<int64_t>(now.tv_usec) * 1000;
+#elif defined(_WIN32) || defined(__MACH__)
+  using namespace std::chrono;
+  using clock = std::conditional<high_resolution_clock::is_steady, high_resolution_clock, steady_clock>::type;
+  return duration_cast<nanoseconds>(clock::now().time_since_epoch()).count();
 #else
   // clock_gettime is *much* faster than std::chrono implementation on Linux
   struct timespec t{};
@@ -180,6 +174,9 @@ private:
 // a std::vector resize from taking a large amount of time inside
 // a profiling  event
 struct RangeEventList {
+  // This mutex is used to serialize access when different threads are writing
+  // to the same instance of RangeEventList.
+  std::mutex mutex_;
   constexpr static size_t MB = 1024 * 1024;
   constexpr static size_t event_block_size = 16 * MB;
   constexpr static size_t num_block_elements =
@@ -188,20 +185,9 @@ struct RangeEventList {
                 "num_block_elements is calculated incorrectly");
   using block_type = std::vector<Event>;
 
-  void allocBlock() {
-    blocks.emplace_front();
-    auto & new_block = blocks.front();
-    new_block.reserve(num_block_elements);
-    // Materialize all pages in the new block to release jitter when recording events.
-    const char * const end_ptr = reinterpret_cast<char*>(new_block.data() + num_block_elements);
-    for (volatile const char * ptr = reinterpret_cast<char*>(new_block.data());
-         ptr < end_ptr; ptr += 4 * 1024) {
-      (*ptr);
-    }
-  }
-
   template<typename... Args>
   void record(Args&&... args) {
+    std::lock_guard<std::mutex> guard(mutex_);
     if (blocks.empty() || blocks.front().size() == num_block_elements) {
       allocBlock();
     }
@@ -209,23 +195,39 @@ struct RangeEventList {
   }
 
   std::vector<Event> consolidate() {
+    std::unique_lock<std::mutex> lock(mutex_);
+    std::forward_list<block_type> localBlocks;
+    localBlocks.swap(blocks);
+    lock.unlock();
     std::vector<Event> result;
-    for (auto & block : blocks) {
+
+    for (auto & block : localBlocks) {
       result.insert(result.begin(),
                     std::make_move_iterator(block.begin()),
                     std::make_move_iterator(block.end()));
     }
-    blocks.clear();
     return result;
   }
 
   std::forward_list<block_type> blocks;
+  private:
+     // allocBlock() assumes that mutex_ is held when called, in order to prevent
+    // multiple threads' block writes stomping over each other.
+    void allocBlock() {
+      blocks.emplace_front();
+      auto & new_block = blocks.front();
+      new_block.reserve(num_block_elements);
+      // Materialize all pages in the new block to release jitter when recording events.
+      const char * const end_ptr = reinterpret_cast<char*>(new_block.data() + num_block_elements);
+      for (volatile const char * ptr = reinterpret_cast<char*>(new_block.data());
+          ptr < end_ptr; ptr += 4 * 1024) {
+        (*ptr);
+      }
+    }
 };
 
 TORCH_API RangeEventList& getEventList();
 TORCH_API void mark(std::string name, bool include_cuda = true);
-TORCH_API void pushRange(std::string name);
-TORCH_API void popRange();
 
 using thread_event_lists = std::vector<std::vector<Event>>;
 // NOTE: changing profiler modes is **NOT THREAD SAFE**. You should ensure that

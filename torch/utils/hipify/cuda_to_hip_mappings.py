@@ -7954,6 +7954,11 @@ PYTORCH_SPECIFIC_MAPPINGS = collections.OrderedDict(
         ("gloo::CudaBroadcastOneToAll", ("gloo::HipBroadcastOneToAll", API_PYTORCH)),
         ("gloo::CudaHostWorkspace", ("gloo::HipHostWorkspace", API_PYTORCH)),
         ("gloo::CudaDeviceWorkspace", ("gloo::HipDeviceWorkspace", API_PYTORCH)),
+        ("CUDNN_RNN_RELU", ("miopenRNNRELU", API_PYTORCH)),
+        ("CUDNN_RNN_TANH", ("miopenRNNTANH", API_PYTORCH)),
+        ("CUDNN_LSTM", ("miopenLSTM", API_PYTORCH)),
+        ("CUDNN_GRU", ("miopenGRU", API_PYTORCH)),
+        ("cudnnRNNMode_t", ("miopenRNNMode_t", API_PYTORCH)),
     ]
 )
 

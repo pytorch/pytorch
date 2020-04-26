@@ -22,10 +22,20 @@ struct TORCH_API ReflectionPadOptions {
   TORCH_ARG(ExpandingArray<D*2>, padding);
 };
 
-/// `ReflectionPadOptions` specialized for 1-D ReflectionPad.
+/// `ReflectionPadOptions` specialized for the `ReflectionPad1d` module.
+///
+/// Example:
+/// ```
+/// ReflectionPad1d model(ReflectionPad1dOptions({3, 1}));
+/// ```
 using ReflectionPad1dOptions = ReflectionPadOptions<1>;
 
-/// `ReflectionPadOptions` specialized for 2-D ReflectionPad.
+/// `ReflectionPadOptions` specialized for the `ReflectionPad2d` module.
+///
+/// Example:
+/// ```
+/// ReflectionPad2d model(ReflectionPad2dOptions({1, 1, 2, 0}));
+/// ```
 using ReflectionPad2dOptions = ReflectionPadOptions<2>;
 
 // ============================================================================
@@ -44,18 +54,38 @@ struct TORCH_API ReplicationPadOptions {
   TORCH_ARG(ExpandingArray<D*2>, padding);
 };
 
-/// `ReplicationPadOptions` specialized for 1-D ReplicationPad.
+/// `ReplicationPadOptions` specialized for the `ReplicationPad1d` module.
+///
+/// Example:
+/// ```
+/// ReplicationPad1d model(ReplicationPad1dOptions({3, 1}));
+/// ```
 using ReplicationPad1dOptions = ReplicationPadOptions<1>;
 
-/// `ReplicationPadOptions` specialized for 2-D ReplicationPad.
+/// `ReplicationPadOptions` specialized for the `ReplicationPad2d` module.
+///
+/// Example:
+/// ```
+/// ReplicationPad2d model(ReplicationPad2dOptions({1, 1, 2, 0}));
+/// ```
 using ReplicationPad2dOptions = ReplicationPadOptions<2>;
 
-/// `ReplicationPadOptions` specialized for 3-D ReplicationPad.
+/// `ReplicationPadOptions` specialized for the `ReplicationPad3d` module.
+///
+/// Example:
+/// ```
+/// ReplicationPad3d model(ReplicationPad3dOptions({1, 2, 1, 2, 1, 2}));
+/// ```
 using ReplicationPad3dOptions = ReplicationPadOptions<3>;
 
 // ============================================================================
 
-/// Options for a ZeroPad2d module.
+/// Options for the `ZeroPad2d` module.
+///
+/// Example:
+/// ```
+/// ZeroPad2d model(ZeroPad2dOptions({1, 1, 2, 0}));
+/// ```
 struct TORCH_API ZeroPad2dOptions {
   ZeroPad2dOptions(ExpandingArray<4> padding) : padding_(padding) {}
 
@@ -84,20 +114,41 @@ struct TORCH_API ConstantPadOptions {
   TORCH_ARG(double, value);
 };
 
-/// `ConstantPadOptions` specialized for 1-D ConstantPad.
+/// `ConstantPadOptions` specialized for the `ConstantPad1d` module.
+///
+/// Example:
+/// ```
+/// ConstantPad1d model(ConstantPad1dOptions({3, 1}, 3.5));
+/// ```
 using ConstantPad1dOptions = ConstantPadOptions<1>;
 
-/// `ConstantPadOptions` specialized for 2-D ConstantPad.
+/// `ConstantPadOptions` specialized for the `ConstantPad2d` module.
+///
+/// Example:
+/// ```
+/// ConstantPad2d model(ConstantPad2dOptions({3, 0, 2, 1}, 3.5));
+/// ```
 using ConstantPad2dOptions = ConstantPadOptions<2>;
 
-/// `ConstantPadOptions` specialized for 3-D ConstantPad.
+/// `ConstantPadOptions` specialized for the `ConstantPad3d` module.
+///
+/// Example:
+/// ```
+/// ConstantPad3d model(ConstantPad3dOptions({1, 2, 1, 2, 1, 2}, 3.5));
+/// ```
 using ConstantPad3dOptions = ConstantPadOptions<3>;
 
 // ============================================================================
 
 namespace functional {
 
-/// Options for a pad functional.
+/// Options for `torch::nn::functional::pad`.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::pad(input, F::PadFuncOptions({1, 2, 2, 1, 1, 2}).mode(torch::kReplicate));
+/// ```
 struct TORCH_API PadFuncOptions {
   typedef c10::variant<
     enumtype::kConstant,

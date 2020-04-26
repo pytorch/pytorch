@@ -370,16 +370,16 @@ static std::vector<Dimname> compute_matmul_outnames(
 }
 
 void propagate_names_for_addmv(
-    TensorImpl* result,
-    TensorImpl* mat,
-    TensorImpl* vec,
-    TensorImpl* bias) {
-  if (!impl::has_names(result) && !impl::has_names(mat) &&
-      !impl::has_names(vec) && !impl::has_names(bias)) {
+    Tensor& result,
+    const Tensor& mat,
+    const Tensor& vec,
+    const Tensor& bias) {
+  if (!result.has_names() && !mat.has_names() &&
+      !vec.has_names() && !bias.has_names()) {
     return;
   }
-  auto mv_outnames = compute_matmul_outnames(impl::get_names(mat), impl::get_names(vec));
-  auto add_outnames = unify_from_right(mv_outnames, impl::get_names(bias));
+  auto mv_outnames = compute_matmul_outnames(mat.names(), vec.names());
+  auto add_outnames = unify_from_right(mv_outnames, bias.names());
   propagate_names(result, add_outnames);
 }
 

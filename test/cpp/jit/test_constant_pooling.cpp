@@ -14,7 +14,7 @@ namespace jit {
 void testConstantPooling() {
   {
     auto graph = std::make_shared<Graph>();
-    script::parseIR(
+    parseIR(
         R"IR(
 graph():
   %8 : int = prim::Constant[value=1]()
@@ -29,7 +29,7 @@ graph():
   }
   {
     auto graph = std::make_shared<Graph>();
-    script::parseIR(
+    parseIR(
         R"IR(
 graph(%cond : Tensor):
   %a : str = prim::Constant[value="bcd"]()
@@ -53,7 +53,7 @@ graph(%cond : Tensor):
   }
   {
     auto graph = std::make_shared<Graph>();
-    script::parseIR(
+    parseIR(
         R"IR(
 graph():
   %2 : int = prim::Constant[value=2]()
@@ -76,8 +76,8 @@ graph():
     ConstantPropagation(graph);
     ConstantPooling(graph);
     testing::FileCheck()
-        .check_count("Float(2) = prim::Constant", 1, /*exactly*/ true)
-        ->check_count("Long(2) = prim::Constant", 1, /*exactly*/ true)
+        .check_count("Float(2:1) = prim::Constant", 1, /*exactly*/ true)
+        ->check_count("Long(2:1) = prim::Constant", 1, /*exactly*/ true)
         ->run(*graph);
   }
 }

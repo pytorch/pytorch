@@ -11,6 +11,7 @@
 #include <torch/nn/modules/container/sequential.h>
 
 // Layers
+#include <torch/nn/modules/adaptive.h>
 #include <torch/nn/modules/batchnorm.h>
 #include <torch/nn/modules/instancenorm.h>
 #include <torch/nn/modules/conv.h>

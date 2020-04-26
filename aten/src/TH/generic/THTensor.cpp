@@ -59,7 +59,7 @@ THTensor *THTensor_(new)(void)
 {
   return c10::make_intrusive<at::TensorImpl, at::UndefinedTensorImpl>(
     c10::intrusive_ptr<at::StorageImpl>::reclaim(THStorage_(new)()),
-    at::DispatchKey::CPUTensorId
+    at::DispatchKey::CPU
   ).release();
 }
 
@@ -69,51 +69,29 @@ THTensor *THTensor_(newWithTensor)(THTensor *tensor)
   return at::native::alias(THTensor_wrap(tensor)).unsafeReleaseTensorImpl();
 }
 
-/* Storage init */
-THTensor *THTensor_(newWithStorage)(THStorage *storage, ptrdiff_t storageOffset, at::IntArrayRef sizes, at::IntArrayRef strides) {
-  if (strides.data()) {
-    TORCH_CHECK(sizes.size() == strides.size(), "number of sizes and strides must match");
-  }
-  THStorage *new_storage = THStorage_(new)();
+THTensor *THTensor_(newWithStorage1d)(THStorage *storage, ptrdiff_t storageOffset,
+                               int64_t size0, int64_t stride0)
+{
+  c10::raw::intrusive_ptr::incref(storage);
   THTensor *self = c10::make_intrusive<at::TensorImpl, at::UndefinedTensorImpl>(
-    c10::intrusive_ptr<at::StorageImpl>::reclaim(new_storage),
-    at::DispatchKey::CPUTensorId
+    c10::intrusive_ptr<at::StorageImpl>::reclaim(storage),
+    at::DispatchKey::CPU
   ).release();
-  THTensor_(setStorageNd)(self, storage != nullptr ? storage : new_storage, storageOffset, sizes.size(),
-                          const_cast<int64_t*>(sizes.data()), const_cast<int64_t*>(strides.data()));
+  THTensor_(setStorage)(self, storage, storageOffset,  {size0}, {stride0});
 
   return self;
 }
 
-THTensor *THTensor_(newWithStorage1d)(THStorage *storage, ptrdiff_t storageOffset,
-                               int64_t size0, int64_t stride0)
-{
-  return THTensor_(newWithStorage)(storage, storageOffset, {size0}, {stride0});
-}
-
-THTensor *THTensor_(newWithSize)(at::IntArrayRef size, at::IntArrayRef stride)
-{
-  return THTensor_(newWithStorage)(NULL, 0, size, stride);
-}
-
 THTensor *THTensor_(newWithSize1d)(int64_t size0)
 {
-  return THTensor_(newWithSize)({size0}, {});
-}
+  THStorage *new_storage = THStorage_(new)();
+  THTensor *self = c10::make_intrusive<at::TensorImpl, at::UndefinedTensorImpl>(
+    c10::intrusive_ptr<at::StorageImpl>::reclaim(new_storage),
+    at::DispatchKey::CPU
+  ).release();
+  THTensor_(setStorage)(self, new_storage, 0, {size0}, {});
 
-THTensor *THTensor_(newWithSize2d)(int64_t size0, int64_t size1)
-{
-  return THTensor_(newWithSize)({size0, size1}, {});
-}
-
-THTensor *THTensor_(newWithSize3d)(int64_t size0, int64_t size1, int64_t size2)
-{
-  return THTensor_(newWithSize)({size0, size1, size2}, {});
-}
-
-THTensor *THTensor_(newWithSize4d)(int64_t size0, int64_t size1, int64_t size2, int64_t size3)
-{
-  return THTensor_(newWithSize)({size0, size1, size2, size3}, {});
+  return self;
 }
 
 THTensor *THTensor_(newClone)(THTensor *self)
@@ -210,12 +188,11 @@ void THTensor_(resize5d)(THTensor *self, int64_t size0, int64_t size1, int64_t s
 void THTensor_(set)(THTensor *self, THTensor *src)
 {
   if(self != src)
-    THTensor_(setStorageNd)(self,
+    THTensor_(setStorage)(self,
                             THTensor_getStoragePtr(src),
                             src->storage_offset(),
-                            src->dim(),
-                            THTensor_getSizePtr(src),
-                            THTensor_getStridePtr(src));
+                            src->sizes(),
+                            src->strides());
 }
 
 void THTensor_(setStorage)(THTensor *self, THStorage *storage_, ptrdiff_t storageOffset_, at::IntArrayRef size_, at::IntArrayRef stride_)
@@ -440,11 +417,6 @@ void THTensor_(freeCopyTo)(THTensor *self, THTensor *dst)
 }
 
 /*******************************************************************************/
-
-void THTensor_(setStorageNd)(THTensor *self, THStorage *storage, ptrdiff_t storageOffset, int nDimension, const int64_t *size, const int64_t *stride)
-{
-  return THTensor_setStorageNd(self, storage, storageOffset, nDimension, size, stride);
-}
 
 void THTensor_(resizeNd)(THTensor *self, int nDimension, const int64_t *size, const int64_t *stride)
 {

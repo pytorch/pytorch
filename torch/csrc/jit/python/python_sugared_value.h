@@ -1,9 +1,9 @@
 #pragma once
 
-#include <torch/csrc/jit/python/pybind_utils.h>
-#include <torch/csrc/jit/frontend/concrete_module_type.h>
 #include <torch/csrc/jit/api/module.h>
+#include <torch/csrc/jit/frontend/concrete_module_type.h>
 #include <torch/csrc/jit/frontend/sugared_value.h>
+#include <torch/csrc/jit/python/pybind_utils.h>
 #include <memory>
 #include <sstream>
 #include <string>
@@ -11,7 +11,6 @@
 
 namespace torch {
 namespace jit {
-namespace script {
 
 std::string typeString(py::handle h);
 
@@ -175,10 +174,18 @@ struct VISIBILITY_HIDDEN ModuleValue : public SugaredValue {
 
   SugaredValuePtr iter(const SourceRange& loc, Function& m) override;
 
+  std::shared_ptr<SugaredValue> getitem(
+      const SourceRange& loc,
+      Function& m,
+      Value* idx) override;
+
  private:
   Value* self_;
   std::shared_ptr<ConcreteModuleType> concreteType_;
 };
+
+bool isNamedTupleClass(const py::object& obj);
+TypePtr registerNamedTuple(const py::object& obj, const SourceRange& loc);
 
 void recurseThroughNestedModules(
     const SourceRange& loc,
@@ -186,7 +193,8 @@ void recurseThroughNestedModules(
     std::vector<SugaredValuePtr>& keys,
     std::vector<SugaredValuePtr>& values,
     std::shared_ptr<ModuleValue> self,
-    const std::string& prefix);
+    const std::string& prefix,
+    const std::string& field);
 
 // Used to support named_modules()
 struct VISIBILITY_HIDDEN SugaredModuleDict : public SugaredValue {
@@ -201,6 +209,14 @@ struct VISIBILITY_HIDDEN SugaredModuleDict : public SugaredValue {
 
   std::string kind() const override {
     return "ModuleDict";
+  }
+
+  std::shared_ptr<SugaredTupleValue> getKeys() {
+    return keys_;
+  }
+
+  std::shared_ptr<SugaredTupleValue> getModules() {
+    return modules_;
   }
 
   std::shared_ptr<SugaredValue> attr(
@@ -253,6 +269,5 @@ struct VISIBILITY_HIDDEN PythonClassValue : public ClassValue {
   py::object py_type_;
 };
 
-} // namespace script
 } // namespace jit
 } // namespace torch

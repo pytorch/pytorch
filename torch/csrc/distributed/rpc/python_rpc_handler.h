@@ -17,22 +17,17 @@ namespace rpc {
 // torch/distributed/internal_rpc_utils.py are imported only once.
 class PYBIND11_EXPORT PythonRpcHandler {
  public:
+  struct RRefProxyFunctions {
+    py::object rrefProxyCtor_;
+    py::object rpcSync_;
+    py::object rpcAsync_;
+    py::object remote_;
+  };
+
   static PythonRpcHandler& getInstance();
 
-  // Deserialize Python function, run it, and serialize its return value.
-  std::vector<char> generatePythonUDFResult(
-      const std::vector<char>& pickledPayload,
-      const std::vector<torch::Tensor>& requestTensorTable,
-      std::vector<torch::Tensor>& responseTensorTable);
-
-  // Returned python UDF result is pickled binary string, so run python
-  // function to unpickle the python UDF result and return py::object to user
-  py::object loadPythonUDFResult(
-      const std::vector<char>& pickledPayload,
-      const std::vector<torch::Tensor>& tensorTable);
-
   // Run a pickled Python UDF and return the result py::object
-  py::object runPythonUDF(const SerializedPyObj& serializedObj);
+  py::object runPythonUdf(py::object&& pythonUdf);
 
   // Serialized a py::object into a string
   SerializedPyObj serialize(const py::object& obj);
@@ -60,7 +55,7 @@ class PYBIND11_EXPORT PythonRpcHandler {
   // PythonRpcHandler.
   void cleanup();
 
-  std::shared_ptr<torch::jit::script::CompilationUnit> jitCompilationUnit();
+  std::shared_ptr<torch::jit::CompilationUnit> jitCompilationUnit();
 
   // Parse the string to recover the jit_type, this is used for RRef python
   // pickling/unpickling type recovery. The type string inference rule is as
@@ -72,6 +67,8 @@ class PYBIND11_EXPORT PythonRpcHandler {
   // We use a ScriptTypeParser instance with custom PythonTypeResolver
   // to resolve types according to the above rules.
   TypePtr parseTypeFromStr(const std::string& typeStr);
+
+  const RRefProxyFunctions& getRRefProxyFunctions() const;
 
  private:
   PythonRpcHandler();
@@ -85,25 +82,27 @@ class PYBIND11_EXPORT PythonRpcHandler {
   // Ref to `torch.distributed.rpc.internal._run_function`.
   py::object pyRunFunction_;
 
-  // Ref to `torch.distributed.rpc.internal._load_return_value`.
-  py::object pyLoadReturnValue_;
-
   // Ref to `torch.distributed.rpc.internal.serialize`.
   py::object pySerialize_;
+
+  // Ref to `torch.distributed.rpc.internal.deserialize`.
+  py::object pyDeserialize_;
 
   // Ref to 'torch.distributed.rpc.internal._handle_exception'
   py::object pyHandleException_;
 
+  RRefProxyFunctions rrefProxyFunctions_;
+
   // Shared ptr to python compilation unit in jit, it is constructed in python
   // side (see _python_cu = torch._C.CompilationUnit() in jit/__init__.py)
-  // and imported in C++ (see get_python_cu() in csrc/jit/python/pybind_utils.h).
-  // We import the compilation unit here only once for less cost and thread
-  // safety.
-  std::shared_ptr<torch::jit::script::CompilationUnit> jitCompilationUnit_;
+  // and imported in C++ (see get_python_cu() in
+  // csrc/jit/python/pybind_utils.h). We import the compilation unit here only
+  // once for less cost and thread safety.
+  std::shared_ptr<torch::jit::CompilationUnit> jitCompilationUnit_;
 
   // jit type parser to parse type_str back to TypePtr for RRef type
   // recovery when pickling and unpickling RRef
-  std::shared_ptr<jit::script::ScriptTypeParser> typeParser_;
+  std::shared_ptr<jit::ScriptTypeParser> typeParser_;
 };
 
 } // namespace rpc

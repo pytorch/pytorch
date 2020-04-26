@@ -15,6 +15,9 @@ class CAFFE2_API OperatorHandle;
  * Implement this interface and register your instance with the dispatcher
  * to get notified when operators are registered or deregistered with
  * the dispatcher.
+ *
+ * NB: registration events only occur when a 'def' occurs; we don't trigger
+ * on 'impl' or 'fallback' calls.
  */
 class CAFFE2_API OpRegistrationListener {
 public:
@@ -31,15 +34,29 @@ class SchemaRegistrationHandleRAII;
 
 /**
  * Top-level dispatch interface for dispatching via the dynamic dispatcher.
+ * Most end users shouldn't use this directly; if you're trying to register
+ * ops look in op_registration
  */
 class CAFFE2_API Dispatcher final {
 private:
   struct OperatorDef final {
-    explicit OperatorDef(FunctionSchema&& schema, OperatorOptions&& options)
-    : op(std::move(schema), std::move(options)), refcount(0) {}
+    explicit OperatorDef(OperatorName&& op_name)
+    : op(std::move(op_name)) {}
 
     impl::OperatorEntry op;
-    size_t refcount;
+
+    // These refer to the number of outstanding RegistrationHandleRAII
+    // for this operator.  def_count reflects only def() registrations
+    // (in the new world, this should only ever be 1, but old style
+    // registrations may register the schema multiple times, which
+    // will increase this count).  def_and_impl_count reflects the number
+    // of combined def() and impl() registrations.  When the last def() gets
+    // unregistered, we must immediately call the Deregistered listeners, but we
+    // must not actually delete the handle as there are other outstanding RAII
+    // destructors which will try to destruct and they had better still have a
+    // working operator handle in this case
+    size_t def_count = 0;
+    size_t def_and_impl_count = 0;
   };
   friend class OperatorHandle;
 
@@ -52,22 +69,15 @@ public:
 
   static Dispatcher& singleton();
 
-  /**
-   * Register a new operator schema.
-   *
-   * If a schema with the same operator name and overload name already exists,
-   * this function will check that both schemas are exactly identical.
-   *
-   * @return An OperatorHandle for the registered schema which can be used to
-   *         register kernels for the operator and a RegistrationHandleRAII RAII
-   *         object that manages the lifetime of the registration. Once that
-   *         object is destructed, the kernel will be deregistered.
-   */
-  std::pair<RegistrationHandleRAII, OperatorHandle> registerSchema(FunctionSchema schema, OperatorOptions options);
+  // ------------------------------------------------------------------------
+  //
+  // Accessing operators by schema
+  //
+  // ------------------------------------------------------------------------
 
   /**
    * Looks for an operator schema with the given name and overload name
-   * and returns it if it is registered.
+   * and returns it if it is registered WITH A SCHEMA.
    * Returns nullopt otherwise.
    */
   c10::optional<OperatorHandle> findSchema(const OperatorName& operator_name);
@@ -87,6 +97,48 @@ public:
    */
   OperatorHandle findSchemaOrThrow(const char* name, const char* overload_name);
 
+  // Like findSchema, but also returns OperatorHandle even if there is no schema
+  c10::optional<OperatorHandle> findOp(const OperatorName& operator_name);
+
+  // ------------------------------------------------------------------------
+  //
+  // Invoking operators
+  //
+  // ------------------------------------------------------------------------
+
+  template<class Return, class... Args>
+  Return callUnboxed(const OperatorHandle& op, Args... args) const;
+
+  // Like callUnboxed, but override the default DispatchKey calculation code,
+  // instead dispatching straight to the provided DispatchKey
+  template<class Return, class... Args>
+  Return callUnboxedWithDispatchKey(const OperatorHandle& op, DispatchKey dispatchKey, Args... args) const;
+
+  // Like callUnboxed, but intended for use in a redispatch: you are currently
+  // in some currentDispatchKey, you have finished processing the key and
+  // you now want to redispatch to the next dispatch key in the chain.
+  // This will mask out the current key and all previous keys from the
+  // eligible set, and redo the calculation.
+  template<class Return, class... Args>
+  Return callUnboxedRedispatch(const OperatorHandle& op, DispatchKey currentDispatchKey, Args... args) const;
+
+  // Invoke an operator via the boxed calling convention using an IValue stack
+  void callBoxed(const OperatorHandle& op, Stack* stack) const;
+
+  // ------------------------------------------------------------------------
+  //
+  // Performing registrations (NON user public; use op_registration)
+  //
+  // ------------------------------------------------------------------------
+
+  /**
+   * Register a new operator schema.
+   *
+   * If a schema with the same operator name and overload name already exists,
+   * this function will check that both schemas are exactly identical.
+   */
+  RegistrationHandleRAII registerDef(FunctionSchema schema, std::string debug);
+
   /**
    * Register a kernel to the dispatch table for an operator.
    * If dispatch_key is nullopt, then this registers a fallback kernel.
@@ -94,17 +146,9 @@ public:
    * @return A RAII object that manages the lifetime of the registration.
    *         Once that object is destructed, the kernel will be deregistered.
    */
-  RegistrationHandleRAII registerKernel(const OperatorHandle& op, DispatchKey dispatch_key, KernelFunction kernel);
-
-  /**
-   * Register a fallback kernel for an operator.
-   * After this, when trying to lookup a kernel for an unknown dispatch key,
-   * it will not fail anymore, but return the fallback kernel instead.
-   *
-   * @return A RAII object that manages the lifetime of the registration.
-   *         Once that object is destructed, the kernel will be deregistered.
-   */
-  RegistrationHandleRAII registerCatchallKernel(const OperatorHandle& op, KernelFunction kernel);
+  // NB: steals the inferred function schema, as we may need to hold on to
+  // it for a bit until the real schema turns up
+  RegistrationHandleRAII registerImpl(OperatorName op_name, c10::optional<DispatchKey> dispatch_key, KernelFunction kernel, std::unique_ptr<FunctionSchema> inferred_function_schema, std::string debug);
 
   /**
    * Register a fallback kernel for a backend.
@@ -112,15 +156,26 @@ public:
    * key of the given operator arguments, it will check if there is such a
    * fallback kernel for the given dispatch key and, if yes, call that one.
    */
-  RegistrationHandleRAII registerBackendFallbackKernel(DispatchKey dispatch_key, KernelFunction kernel);
+  RegistrationHandleRAII registerFallback(DispatchKey dispatch_key, KernelFunction kernel, std::string debug);
 
-  template<class Return, class... Args>
-  Return callUnboxed(const OperatorHandle& op, Args... args) const;
+  /**
+   * Use to register whenever we had a TORCH_LIBRARY declaration in the frontend
+   * API.  These invocations are only permitted once per program, so we raise
+   * an error if this is called again for the same namespace.
+   */
+  RegistrationHandleRAII registerLibrary(std::string ns, std::string debug);
 
-  template<class Return, class... Args>
-  Return callUnboxedWithDispatchKey(const OperatorHandle& op, DispatchKey dispatchKey, Args... args) const;
+  // This function is a temporary hack that allows generated_unboxing_wrappers.cpp to register its codegen'ed
+  // unboxing wrapper for aten operators. We still need those for some operators because not all work
+  // with the templated unboxing logic yet.
+  // TODO Delete setBoxedKernelFor_ once all operators work with the templated boxing logic
+  void setManuallyBoxedKernelFor_(const OperatorHandle& op, KernelFunction::InternalBoxedKernelFunction* func);
 
-  void callBoxed(const OperatorHandle& op, Stack* stack) const;
+  // ------------------------------------------------------------------------
+  //
+  // Listeners on registrations
+  //
+  // ------------------------------------------------------------------------
 
   /**
    * Add a listener that gets called whenever a new op is registered or an existing
@@ -128,21 +183,35 @@ public:
    * for all previously registered ops, so it can be used to keep track of ops
    * registered with this dispatcher.
    */
-  void addRegistrationListener(std::unique_ptr<OpRegistrationListener> listener);
+  RegistrationHandleRAII addRegistrationListener(std::unique_ptr<OpRegistrationListener> listener);
+
+  void checkInvariants() const;
 
 private:
   Dispatcher();
 
-  OperatorHandle findOrRegisterSchema_(FunctionSchema&& schema, OperatorOptions&& options);
+  OperatorHandle findOrRegisterSchema_(FunctionSchema&& schema);
+  OperatorHandle findOrRegisterName_(const OperatorName& op_name);
 
-  void deregisterSchema_(const OperatorHandle& op, const OperatorName& op_name);
-  void deregisterBackendFallbackKernel_(DispatchKey dispatchKey);
+  void deregisterDef_(const OperatorHandle& op, const OperatorName& op_name);
+  void deregisterImpl_(
+    const OperatorHandle& op,
+    const OperatorName& op_name,
+    c10::optional<DispatchKey> dispatch_key,
+    std::list<impl::OperatorEntry::KernelEntry>::iterator kernel_handle);
+  void deregisterFallback_(DispatchKey dispatchKey);
+  void deregisterLibrary_(const std::string& ns);
+  void cleanup(const OperatorHandle& op, const OperatorName& op_name);
+  void checkSchemaCompatibility(const OperatorHandle& op, const FunctionSchema& schema, const std::string& debug);
+
   [[noreturn]] static void reportError(const DispatchTable& dispatchTable, DispatchKey dispatchKey);
 
   const KernelFunction& dispatch_(const DispatchTable& dispatchTable, DispatchKey dispatch_key) const;
 
   std::list<OperatorDef> operators_;
   LeftRight<ska::flat_hash_map<OperatorName, OperatorHandle>> operatorLookupTable_;
+  // Map from namespace to debug string (saying, e.g., where the library was defined)
+  ska::flat_hash_map<std::string, std::string> libraries_;
   impl::KernelFunctionTable backendFallbackKernels_;
   // Set of backends which have specified they do NOT want fallthrough behavior
   // (we store the inverse because it avoids a negation when we use this for
@@ -164,12 +233,28 @@ public:
   OperatorHandle(const OperatorHandle&) = default;
   OperatorHandle& operator=(const OperatorHandle&) = default;
 
+  const OperatorName& operator_name() const {
+    return operatorIterator_->op.operator_name();
+  }
+
+  bool hasSchema() const {
+    return operatorIterator_->op.hasSchema();
+  }
+
   const FunctionSchema& schema() const {
     return operatorIterator_->op.schema();
   }
 
-  const OperatorOptions& options() const {
-    return operatorIterator_->op.options();
+  const std::string& debug() const {
+    return operatorIterator_->op.debug();
+  }
+
+  std::string dumpState() const {
+    return operatorIterator_->op.dumpState();
+  }
+
+  void checkInvariants() const {
+    return operatorIterator_->op.checkInvariants();
   }
 
   template<class Return, class... Args>
@@ -210,8 +295,20 @@ template<class Return, class... Args>
 inline Return Dispatcher::callUnboxed(const OperatorHandle& op, Args... args) const {
   detail::unused_arg_(args...);  // workaround for a false-positive warning about unused parameters in gcc 5
   const auto& dispatchTable = op.operatorIterator_->op.dispatch_table();
-  auto dispatchKey = dispatchTable.dispatchKeyExtractor().getDispatchKeyUnboxed<Args...>(backendsWithoutFallthrough_, args...);
+  auto dispatchKey = dispatchTable.dispatchKeyExtractor().getDispatchKeyUnboxed<Args...>(backendsWithoutFallthrough_, DispatchKeySet::FULL, args...);
   return callUnboxedWithDispatchKey<Return, Args...>(op, dispatchKey, args...);
+}
+
+template<class Return, class... Args>
+inline Return Dispatcher::callUnboxedRedispatch(const OperatorHandle& op, DispatchKey currentDispatchKey, Args... args) const {
+  detail::unused_arg_(args...);  // workaround for a false-positive warning about unused parameters in gcc 5
+  const auto& dispatchTable = op.operatorIterator_->op.dispatch_table();
+  auto dispatchKey = dispatchTable.dispatchKeyExtractor().getDispatchKeyUnboxed<Args...>(
+    backendsWithoutFallthrough_,
+    DispatchKeySet(DispatchKeySet::FULL_AFTER, currentDispatchKey),
+    args...);
+  const KernelFunction& kernel = dispatch_(dispatchTable, dispatchKey);
+  return kernel.template callUnboxed<Return, Args...>(op, std::forward<Args>(args)...);
 }
 
 inline void Dispatcher::callBoxed(const OperatorHandle& op, Stack* stack) const {

@@ -1,3 +1,5 @@
+from typing import List
+
 from torch._six import container_abcs
 from itertools import repeat
 
@@ -25,6 +27,7 @@ def _repeat_tuple(t, n):
 
 
 def _list_with_default(out_size, defaults):
+    # type: (List[int], List[int]) -> List[int]
     if isinstance(out_size, int):
         return out_size
     if len(defaults) <= len(out_size):

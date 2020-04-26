@@ -5,7 +5,6 @@
 
 namespace torch {
 namespace jit {
-namespace script {
 
 // Simple data structure for containing a type T in nested control blocks
 // Should only be used after initial compilation where type checking and
@@ -52,6 +51,5 @@ struct MiniEnvironment {
   std::unordered_map<std::string, T> table;
 };
 
-} // namespace script
 } // namespace jit
 } // namespace torch

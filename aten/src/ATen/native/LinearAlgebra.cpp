@@ -156,6 +156,21 @@ Tensor& addr_out(Tensor &result, const Tensor& self, const Tensor& vec1, const T
   return at::_addr_out(result, self, vec1, vec2, beta, alpha);
 }
 
+Tensor& ger_out(Tensor &result, const Tensor& self, const Tensor& vec2) {
+  check_1d(self, "self", "ger");
+  check_1d(vec2, "vec2", "ger");
+  if (result.dim() != 2 || result.size(0) != self.size(0) || result.size(1) != vec2.size(0)) {
+    result.resize_({ self.size(0), vec2.size(0) });
+  }
+  return at::_addr_out(result, result, self, vec2, Scalar(0), Scalar(1));
+}
+
+Tensor ger(const Tensor& self, const Tensor& vec2) {
+  Tensor result = at::empty({0}, self.options());
+  at::ger_out(result, self, vec2);
+  return result;
+}
+
 template <typename scalar_t, bool is_bmm>
 inline void baddbmm_cpu_kernel(const Tensor& result, const Tensor& self, const Tensor& mat2, Scalar beta_, Scalar alpha_) {
   int64_t bs = result.size(0);
@@ -237,7 +252,11 @@ static inline Tensor& bmm_out_or_baddbmm_(Tensor& self_or_result, const Tensor& 
   if (self_or_result.numel() == 0) {
     return self_or_result;
   } else if (contraction_size == 0) {
-    return self_or_result.zero_();
+    if (is_bmm_out) {
+      return self_or_result.zero_();
+    } else {
+      return self_or_result.mul_(beta);
+    }
   }
 
   auto batch_items_contiguous_or_transposed = [&](const Tensor& t) {
@@ -514,7 +533,7 @@ Tensor frobenius_norm(const Tensor& self, IntArrayRef dim, bool keepdim) {
     return at::norm(self, 2, dim, keepdim, self.scalar_type());
   }
   if (self.is_complex()){
-    return at::sqrt(at::sum((self.conj() * self).real(), dim, keepdim));
+    return at::sqrt(at::sum((self.conj() * self).copy_real(), dim, keepdim));
   } else {
     return at::sqrt(at::sum((self * self), dim, keepdim));
   }
@@ -534,7 +553,7 @@ Tensor &frobenius_norm_out(
     return at::norm_out(result, self, 2, dim, keepdim, self.scalar_type());
   }
   if (self.is_complex()){
-    return at::sqrt_out(result, at::sum((self.conj() * self).real(), dim, keepdim));
+    return at::sqrt_out(result, at::sum((self.conj() * self).copy_real(), dim, keepdim));
   } else {
     return at::sqrt_out(result, at::sum((self * self), dim, keepdim));
   }

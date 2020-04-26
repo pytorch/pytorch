@@ -1,6 +1,6 @@
+#include <torch/csrc/jit/runtime/operator.h>
 #include <ATen/ATen.h>
 #include <ATen/core/alias_info.h>
-#include <torch/csrc/jit/runtime/operator.h>
 #include <torch/csrc/jit/frontend/edit_distance.h>
 
 #include <queue>
@@ -48,6 +48,49 @@ struct OperatorRegistry {
   void registerOperator(Operator&& op) {
     std::lock_guard<std::mutex> guard(lock);
     to_register.push_back(std::make_shared<Operator>(std::move(op)));
+  }
+
+  void deregisterOperator(const FunctionSchema& schema) {
+    Symbol sym = Symbol::fromQualString(schema.name());
+    auto sig = canonicalSchemaString(schema);
+
+    std::lock_guard<std::mutex> guard(lock);
+    // Try removing from pending operators list first
+    auto pending_it = to_register.begin();
+    while (pending_it != to_register.end() && (*pending_it)->schema() != schema)
+      ++pending_it;
+
+    if (pending_it != to_register.end()) {
+      to_register.erase(pending_it);
+      return;
+    }
+
+    // Remove operator from signature map
+    auto sig_it = operators_by_sig.find(sig);
+    if (sig_it == operators_by_sig.end()) {
+      return;
+    }
+
+    operators_by_sig.erase(sig_it);
+
+    // Remove operator from symbol map
+    auto op_it = operators.find(sym);
+    TORCH_CHECK(
+        op_it != operators.end(),
+        "operator with signature ",
+        sig,
+        " is missing from symbol registry");
+
+    auto& op_vec = op_it->second;
+    auto it = op_vec.begin();
+    while (it != op_vec.end() && (*it)->schema() != schema)
+      ++it;
+    if (it != op_vec.end()) {
+      op_vec.erase(it);
+    }
+    if (op_vec.empty()) {
+      operators.erase(op_it);
+    }
   }
 
   const std::shared_ptr<Operator>& lookupByLiteral(const char* name) {
@@ -98,7 +141,7 @@ struct OperatorRegistry {
         rankings(cmp);
     static constexpr size_t MAX_EDIT_DIST = 2u;
     for (const auto& op : operators) {
-      auto edit_dist = script::ComputeEditDistance(
+      auto edit_dist = ComputeEditDistance(
           input_op.toQualString(), op.first.toQualString(), MAX_EDIT_DIST);
       if (edit_dist <= MAX_EDIT_DIST) {
         rankings.emplace(edit_dist, op.first);
@@ -117,7 +160,7 @@ struct OperatorRegistry {
     registerPendingOperators();
     std::vector<std::shared_ptr<Operator>> values;
     values.clear();
-    for (auto & kv : operators) {
+    for (auto& kv : operators) {
       values.insert(values.end(), kv.second.begin(), kv.second.end());
     }
     return values;
@@ -139,25 +182,13 @@ bool printerHasSpecialCaseFor(Symbol sym) {
   // schema to editing this list here. These cases should only be things
   // that require special handling because they do not fit normal schema
   const static std::unordered_set<Symbol> handled = {
-      prim::Constant,
-      prim::Uninitialized,
-      prim::fork,
-      prim::ListConstruct,
-      prim::DictConstruct,
-      prim::ListUnpack,
-      prim::Print,
-      prim::PythonOp,
-      prim::TupleConstruct,
-      prim::TupleIndex,
-      prim::TupleSlice,
-      prim::TupleUnpack,
-      prim::CreateObject,
-      prim::GetAttr,
-      prim::SetAttr,
-      prim::CallFunction,
-      prim::isinstance,
-      prim::unchecked_cast,
-      prim::tolist,
+      prim::Constant,      prim::Uninitialized, prim::fork,
+      prim::ListConstruct, prim::DictConstruct, prim::ListUnpack,
+      prim::Print,         prim::PythonOp,      prim::TupleConstruct,
+      prim::TupleIndex,    prim::TupleSlice,    prim::TupleUnpack,
+      prim::CreateObject,  prim::GetAttr,       prim::SetAttr,
+      prim::CallFunction,  prim::isinstance,    prim::unchecked_cast,
+      prim::tolist,        prim::rpc_async,
   };
 
   // WARNING: by adding a value to this set, you are asserting that your
@@ -171,12 +202,14 @@ bool printerHasSpecialCaseFor(Symbol sym) {
       prim::AutogradAnyNonZero, // temporarily inserted by autograd
       prim::AutogradAdd, // temporarily inserted by autograd
       prim::ConstantChunk, // optimization pass adds it
-      prim::DifferentiableGraph, // optimization pass adds it
+      prim::DifferentiableGraph, // optimization pass adds it,
+      prim::FunctionalGraph, // optimization pass adds it,
       prim::BroadcastSizes, // optimization pass (fuser) adds it
       prim::ChunkSizes, // optimization pass (fuser) adds it
       prim::Drop, // used in interpreter only
       prim::FusedConcat, // optimization pass adds it
       prim::FusionGroup, // optimization pass adds it
+      prim::CudaFusionGroup, // optimization pass adds it
       prim::Load, // used in interpreter only
       prim::MMTreeReduce, // used as an optimization
       prim::MMBatchSide, // used as an optimization
@@ -207,7 +240,9 @@ bool aliasAnalysisHasSpecialCaseFor(Symbol symbol) {
       prim::If,
       prim::Loop,
       prim::FusionGroup,
+      prim::CudaFusionGroup,
       prim::DifferentiableGraph,
+      prim::FunctionalGraph,
       prim::Constant,
       prim::Uninitialized,
       prim::DictConstruct,
@@ -241,6 +276,7 @@ bool aliasAnalysisHasSpecialCaseFor(Symbol symbol) {
       prim::isinstance,
       prim::unchecked_cast,
       prim::tolist,
+      prim::rpc_async,
   };
 
   // Operators that should not be used by alias analysis
@@ -285,6 +321,10 @@ void registerOperator(Operator&& op) {
   getRegistry().registerOperator(std::move(op));
 }
 
+void deregisterOperator(const FunctionSchema& schema) {
+  getRegistry().deregisterOperator(schema);
+}
+
 const std::vector<std::shared_ptr<Operator>> getAllOperators() {
   return getRegistry().getAllOperators();
 }
@@ -294,7 +334,8 @@ const std::vector<std::shared_ptr<Operator>>& getAllOperatorsFor(Symbol name) {
 }
 
 std::shared_ptr<Operator> findOperatorFor(const c10::OperatorName& full_name) {
-  for (const auto& op : getRegistry().getOperators(Symbol::fromQualString(full_name.name))) {
+  for (const auto& op :
+       getRegistry().getOperators(Symbol::fromQualString(full_name.name))) {
     if (op->schema().overload_name() == full_name.overload_name) {
       return op;
     }

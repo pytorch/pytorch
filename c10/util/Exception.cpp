@@ -1,7 +1,7 @@
-#include "c10/util/Exception.h"
-#include "c10/util/Backtrace.h"
-#include "c10/util/Type.h"
-#include "c10/util/Logging.h"
+#include <c10/util/Exception.h>
+#include <c10/util/Backtrace.h>
+#include <c10/util/Type.h>
+#include <c10/util/Logging.h>
 
 #include <iostream>
 #include <numeric>
@@ -66,32 +66,54 @@ void Error::AppendMessage(const std::string& new_msg) {
 namespace Warning {
 
 namespace {
-  WarningHandler* getHandler() {
+  WarningHandler* getBaseHandler() {
     static WarningHandler base_warning_handler_ = WarningHandler();
     return &base_warning_handler_;
   };
-  static thread_local WarningHandler* warning_handler_ = getHandler();
+
+  class ThreadWarningHandler {
+    public:
+      ThreadWarningHandler() = delete;
+
+      static WarningHandler* get_handler() {
+        if (!warning_handler_) {
+          warning_handler_ = getBaseHandler();
+        }
+        return warning_handler_;
+      }
+
+      static void set_handler(WarningHandler* handler) {
+        warning_handler_ = handler;
+      }
+
+    private:
+      static thread_local WarningHandler* warning_handler_;
+  };
+
+  thread_local WarningHandler* ThreadWarningHandler::warning_handler_ = nullptr;
 
 }
 
-void warn(SourceLocation source_location, const std::string& msg) {
-  warning_handler_->process(source_location, msg);
+void warn(SourceLocation source_location, const std::string& msg, const bool verbatim) {
+  ThreadWarningHandler::get_handler()->process(source_location, msg, verbatim);
 }
 
 void set_warning_handler(WarningHandler* handler) noexcept(true) {
-  warning_handler_ = handler;
+  ThreadWarningHandler::set_handler(handler);
 }
 
 WarningHandler* get_warning_handler() noexcept(true) {
-  return warning_handler_;
+  return ThreadWarningHandler::get_handler();
 }
 
 } // namespace Warning
 
 void WarningHandler::process(
     const SourceLocation& source_location,
-    const std::string& msg) {
-  std::cerr << "Warning: " << msg << " (" << source_location << ")\n";
+    const std::string& msg,
+    const bool /*verbatim*/) {
+  LOG_AT_FILE_LINE(WARNING, source_location.file, source_location.line)
+      << "Warning: " << msg << " (function " << source_location.function << ")";
 }
 
 

@@ -2,19 +2,36 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cpu/Loops.h>
+#include <ATen/native/quantized/cpu/quant_utils.h>
 #include <ATen/quantized/QTensorImpl.h>
 #include <ATen/quantized/Quantizer.h>
 
 namespace at {
 namespace native {
 
-Tensor quantize_per_tensor_cpu(
+Tensor quantize_per_tensor(
     const Tensor& self,
     double scale,
     int64_t zero_point,
     ScalarType dtype) {
   auto quantizer = make_per_tensor_affine_quantizer(scale, zero_point, dtype);
   return quantizer->quantize(self);
+}
+
+std::vector<Tensor> quantize_per_tensor_list_cpu(
+    TensorList tensors,
+    const Tensor& scales,
+    const Tensor& zero_points,
+    ScalarType dtype) {
+  std::vector<Tensor> quantized_tensors;
+  for (auto i = 0; i < tensors.size(); ++i) {
+    quantized_tensors.push_back(at::quantize_per_tensor(
+        tensors[i],
+        scales[i].item<double>(),
+        zero_points[i].item<int64_t>(),
+        dtype));
+  }
+  return quantized_tensors;
 }
 
 Tensor quantize_per_channel_cpu(
@@ -32,6 +49,14 @@ Tensor dequantize_quant(const Tensor& self) {
   return get_qtensorimpl(self)->quantizer()->dequantize(self);
 }
 
+std::vector<Tensor> dequantize_tensors_quant(TensorList tensors) {
+  std::vector<Tensor> dequantized_tensors;
+  for (auto i = 0; i < tensors.size(); ++i) {
+    dequantized_tensors.push_back(tensors[i].dequantize());
+  }
+  return dequantized_tensors;
+}
+
 double q_scale_quant(const Tensor& self) {
   auto quantizer = get_qtensorimpl(self)->quantizer();
   TORCH_CHECK(quantizer->qscheme() == kPerTensorAffine);
@@ -47,61 +72,23 @@ int64_t q_zero_point_quant(const Tensor& self) {
 Tensor q_per_channel_scales_quant(const Tensor& self) {
   auto quantizer = get_qtensorimpl(self)->quantizer();
   TORCH_CHECK(quantizer->qscheme() == kPerChannelAffine);
-  return static_cast<PerChannelAffineQuantizer*>(quantizer.get())->scales().to(kDouble);
+  return static_cast<PerChannelAffineQuantizer*>(quantizer.get())
+      ->scales()
+      .to(kDouble);
 }
 
 Tensor q_per_channel_zero_points_quant(const Tensor& self) {
   auto quantizer = get_qtensorimpl(self)->quantizer();
   TORCH_CHECK(quantizer->qscheme() == kPerChannelAffine);
-  return static_cast<PerChannelAffineQuantizer*>(quantizer.get())->zero_points().to(kLong);
+  return static_cast<PerChannelAffineQuantizer*>(quantizer.get())
+      ->zero_points()
+      .to(kLong);
 }
 
 int64_t q_per_channel_axis_quant(const Tensor& self) {
   auto quantizer = get_qtensorimpl(self)->quantizer();
   TORCH_CHECK(quantizer->qscheme() == kPerChannelAffine);
   return static_cast<PerChannelAffineQuantizer*>(quantizer.get())->axis();
-}
-
-// When input Tensor is non-dense, i.e. the allocated memory
-// is larger than the memory used by all the elements, we'll
-// convert it to dense tensor, otherwise we'll keep the memory
-// format of the output the same as input
-Tensor int_repr_quant(const Tensor& self) {
-  Tensor dst;
-  AT_DISPATCH_QINT_TYPES(self.scalar_type(), "int_repr", [&]() {
-    dst = at::empty(
-        self.sizes(),
-        self.options().dtype(UNDERLYING_TYPE),
-        self.suggest_memory_format());
-    auto iter = TensorIterator();
-    iter.add_output(dst);
-    iter.add_input(self);
-    iter.dont_compute_common_dtype();
-    iter.build();
-    cpu_kernel(iter, [](scalar_t value) -> underlying_t { return value.val_; });
-  });
-  return dst;
-}
-
-Tensor make_per_tensor_quantized_tensor_cpu(
-    const Tensor& self,
-    double scale,
-    int64_t zero_point) {
-  Tensor dst = at::_empty_affine_quantized(
-      self.sizes(),
-      self.options().dtype(toQIntType(self.scalar_type())),
-      scale,
-      zero_point);
-  Tensor self_contig = self.contiguous();
-  AT_DISPATCH_QINT_TYPES(dst.scalar_type(), "make_per_tensor_quantized_tensor", [&]() {
-    underlying_t* self_data = self_contig.data_ptr<underlying_t>();
-    underlying_t* dst_data =
-        reinterpret_cast<underlying_t*>(dst.data_ptr<scalar_t>());
-    if (self.numel() > 0) {
-      memcpy(dst_data, self_data, self.nbytes());
-    }
-  });
-  return dst;
 }
 
 Tensor make_per_channel_quantized_tensor_cpu(
@@ -128,7 +115,7 @@ Tensor make_per_channel_quantized_tensor_cpu(
   return dst;
 }
 
-Tensor& set_storage(
+Tensor& set_storage_quantized_(
     Tensor& self,
     Storage storage,
     int64_t storage_offset,
@@ -151,7 +138,9 @@ Tensor& set_quantizer_(Tensor& self, ConstQuantizerPtr quantizer) {
   return self;
 }
 
-Tensor quantized_clone(const Tensor& self, c10::optional<c10::MemoryFormat> optional_memory_format) {
+Tensor quantized_clone(
+    const Tensor& self,
+    c10::optional<c10::MemoryFormat> optional_memory_format) {
   // TODO: add per channel support
   TORCH_INTERNAL_ASSERT(
       self.qscheme() == at::kPerTensorAffine,
@@ -162,25 +151,29 @@ Tensor quantized_clone(const Tensor& self, c10::optional<c10::MemoryFormat> opti
 
   // TODO: To support all features of MemoryFormat::Preserve we need to add
   // _empty_affine_quantized_strided function and use it similarly to
-  // Tensor clone(const Tensor& src, c10::optional<c10::MemoryFormat> optional_memory_format)
-  // if (self.is_non_overlapping_and_dense()) -> _empty_affine_quantized_strided
+  // Tensor clone(const Tensor& src, c10::optional<c10::MemoryFormat>
+  // optional_memory_format) if (self.is_non_overlapping_and_dense()) ->
+  // _empty_affine_quantized_strided
   if (memory_format == MemoryFormat::Preserve) {
     memory_format = self.suggest_memory_format();
   }
 
   Tensor dst = at::_empty_affine_quantized(
       self.sizes(),
-      self.options(),
+      self.options().memory_format(memory_format),
       self.q_scale(),
       self.q_zero_point(),
-      memory_format);
+      c10::nullopt);
 
   at::native::copy_(dst, self, false);
 
   return dst;
 }
 
-bool quantized_equal(const Tensor& self, const Tensor& other) {
+bool quantized_equal_cpu(const Tensor& self, const Tensor& other) {
+  TORCH_CHECK(
+      self.device().type() == kCPU && other.device().type() == kCPU,
+      "quantized_equal is implemented only for the QuantizedCPU backend");
   if (!other.is_quantized()) {
     return false;
   }
@@ -208,6 +201,27 @@ bool quantized_equal(const Tensor& self, const Tensor& other) {
   void* self_data = self_contig.data_ptr();
   void* other_data = other_contig.data_ptr();
   return 0 == memcmp(self_data, other_data, self.numel() * self.element_size());
+}
+
+/* Calculate the quantization params for the activation tensor */
+std::tuple<double, int64_t> _choose_qparams_per_tensor(
+    const Tensor& self,
+    bool reduce_range) {
+  at::Tensor a;
+  auto input_contig = self.contiguous();
+  float x_min = input_contig.min().item<float>();
+  float x_max = input_contig.max().item<float>();
+
+  auto q_params = quant_utils::ChooseQuantizationParams(
+      /*min=*/x_min,
+      /*max=*/x_max,
+      /*qmin=*/0,
+      /*qmax=*/255,
+      /*preserve_sparsity=*/false,
+      /*force_scale_power_of_two=*/false,
+      /*reduce_range=*/reduce_range);
+
+  return std::make_tuple(q_params.scale, q_params.zero_point);
 }
 
 } // namespace native

@@ -3,22 +3,65 @@
 namespace torch {
 namespace jit {
 
-std::vector<Pass>& getCustomPostFusionPasses() {
-  static std::vector<Pass> passes;
+std::vector<GraphPassEntry>& getCustomPostPasses() {
+  static std::vector<GraphPassEntry> passes;
   return passes;
 }
 
-std::vector<Pass>& getCustomPreFusionPasses() {
-  static std::vector<Pass> passes;
+std::vector<GraphPassEntry>& getCustomPrePasses() {
+  static std::vector<GraphPassEntry> passes;
   return passes;
 }
 
-RegisterPostFusionPass::RegisterPostFusionPass(Pass p) {
-  getCustomPostFusionPasses().emplace_back(std::move(p));
+GraphPassNameType registerPostPass(GraphPass p) {
+  getCustomPostPasses().emplace_back(GraphPassEntry{std::move(p), graphPassID});
+  return graphPassID++;
 }
 
-RegisterPreFusionPass::RegisterPreFusionPass(Pass p) {
-  getCustomPreFusionPasses().emplace_back(std::move(p));
+GraphPassNameType registerPass(GraphPass p) {
+  return registerPostPass(std::move(p));
+}
+
+GraphPassNameType registerPrePass(GraphPass p) {
+  getCustomPrePasses().emplace_back(GraphPassEntry{std::move(p), graphPassID});
+  return graphPassID++;
+}
+
+void clearPostPass(GraphPassNameType pid) {
+  auto& passes = getCustomPostPasses();
+  auto it = passes.begin();
+  for (; it != passes.end(); it++) {
+    if (pid == (*it).second)
+      break;
+  }
+  if (it != passes.end())
+    passes.erase(it);
+}
+
+void clearPrePass(GraphPassNameType pid) {
+  auto& passes = getCustomPrePasses();
+  auto it = passes.begin();
+  for (; it != passes.end(); it++) {
+    if (pid == (*it).second)
+      break;
+  }
+  if (it != passes.end())
+    passes.erase(it);
+}
+
+void clearAllPostPasses() {
+  auto& passes = getCustomPostPasses();
+  passes.erase(passes.begin(), passes.end());
+}
+
+void clearAllPrePasses() {
+  auto& passes = getCustomPrePasses();
+  passes.erase(passes.begin(), passes.end());
+}
+
+// LEGACY CALL
+RegisterPostPass::RegisterPostPass(GraphPass p) {
+  registerPass(p);
 }
 
 } // namespace jit

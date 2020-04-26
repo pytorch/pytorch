@@ -217,7 +217,7 @@ def poisson_nll_loss(input: Tensor, target: Tensor, log_input: bool = ..., full:
 
 
 def kl_div(input: Tensor, target: Tensor, size_average: Optional[bool] = ..., reduce: Optional[bool] = ...,
-           reduction: str = ...) -> Tensor: ...
+           reduction: str = ..., log_target: bool = ...) -> Tensor: ...
 
 
 def cross_entropy(input: Tensor, target: Tensor, weight: Optional[Tensor] = ..., size_average: Optional[bool] = ...,

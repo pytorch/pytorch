@@ -19,7 +19,13 @@ install {
                 developerConnection scmDeveloperConnection
             }
 
-            licenses projectLicenses
+            licenses {
+              license {
+                name = POM_LICENSE_NAME
+                url = POM_LICENSE_URL
+                distribution = POM_LICENSE_DIST
+              }
+            }
 
             developers {
                 developer {

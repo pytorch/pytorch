@@ -1397,7 +1397,6 @@ AT_ERROR("lu_solve: MAGMA library not found in "
 
   int info_tmp = 0;
   if (b.dim() == 2) {
-    magma_int_t info = 0;
     Tensor pivots_tmp = pivots.cpu();
     magmaLuSolve<scalar_t>(n, nrhs, lu_data, n, pivots_tmp.data_ptr<magma_int_t>(), b_data, n, &info_tmp);
     info = info_tmp;

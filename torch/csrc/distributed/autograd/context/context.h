@@ -71,12 +71,14 @@ class TORCH_API DistAutogradContext {
   friend class BackwardPassCleanupGuard;
   friend class DistEngine;
   friend class RecvRpcBackward;
+  friend class DistAccumulateGradCaptureHook;
 
   // Record that we would like to accumulate the provided gradient on the given
   // variable.
   void accumulateGrad(
       const torch::autograd::Variable& variable,
-      const torch::Tensor& grad);
+      const torch::Tensor& grad,
+      size_t num_expected_refs);
 
   // Retrieve the GraphTask.
   std::shared_ptr<torch::autograd::GraphTask> retrieveGraphTask();
@@ -92,6 +94,8 @@ class TORCH_API DistAutogradContext {
   // Waits for all outstanding RPCs for this context to finish and clears all
   // outstanding rpcs held in this context. This should be called only once.
   std::shared_ptr<rpc::FutureMessage> clearAndWaitForOutstandingRpcsAsync();
+
+  void clearOutstandingRpcs();
 
   const int64_t contextId_;
 

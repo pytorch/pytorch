@@ -14,7 +14,7 @@ using namespace torch::test;
 struct SequentialTest : torch::test::SeedingFixture {};
 
 TEST_F(SequentialTest, CanContainThings) {
-  Sequential sequential(Linear(3, 4), ReLU(), BatchNorm(3));
+  Sequential sequential(Linear(3, 4), ReLU(), BatchNorm1d(3));
 }
 
 TEST_F(SequentialTest, ConstructsFromSharedPointer) {
@@ -94,22 +94,6 @@ TEST_F(SequentialTest, ConstructsFromModuleHolder) {
   ASSERT_EQ(sequential->size(), 3);
 }
 
-TEST_F(SequentialTest, LegacyBuilderForOrderedDictOfNamedModules) {
-  std::stringstream buffer;
-  CerrRedirect cerr_redirect(buffer.rdbuf());
-
-  Sequential sequential_named(modules_ordered_dict({
-    {"m1", Linear(3, 4)},
-    {"m2", ReLU()},
-    {"m3", BatchNorm(3)}
-  }));
-  ASSERT_EQ(sequential_named->size(), 3);
-
-  ASSERT_EQ(
-    count_substr_occurrences(buffer.str(), "`torch::nn::modules_ordered_dict` is deprecated"),
-    1);
-}
-
 TEST_F(SequentialTest, PushBackAddsAnElement) {
   struct M : torch::nn::Module {
     explicit M(int value_) : value(value_) {}
@@ -155,6 +139,18 @@ TEST_F(SequentialTest, PushBackAddsAnElement) {
   sequential_named->push_back(std::string("m2"), M(1));
   ASSERT_EQ(sequential_named->size(), 6);
   ASSERT_EQ(sequential_named->named_children()[5].key(), "m2");
+
+  // named and unnamed AnyModule's
+  Sequential sequential_any;
+  auto a=torch::nn::AnyModule(torch::nn::Linear(1,2));
+  ASSERT_EQ(sequential_any->size(), 0);
+  ASSERT_TRUE(sequential_any->is_empty());
+  sequential_any->push_back(a);
+  ASSERT_EQ(sequential_any->size(), 1);
+  ASSERT_EQ(sequential_any->named_children()[0].key(), "0");
+  sequential_any->push_back("fc", a);
+  ASSERT_EQ(sequential_any->size(), 2);
+  ASSERT_EQ(sequential_any->named_children()[1].key(), "fc");
 }
 
 TEST_F(SequentialTest, AccessWithAt) {
@@ -279,7 +275,7 @@ TEST_F(SequentialTest, SanityCheckForHoldingStandardModules) {
       Linear(10, 3),
       Conv2d(1, 2, 3),
       Dropout(0.5),
-      BatchNorm(5),
+      BatchNorm2d(5),
       Embedding(4, 10),
       LSTM(4, 5));
 }
@@ -346,7 +342,7 @@ TEST_F(SequentialTest, HasReferenceSemantics) {
 }
 
 TEST_F(SequentialTest, IsCloneable) {
-  Sequential sequential(Linear(3, 4), Functional(torch::relu), BatchNorm(3));
+  Sequential sequential(Linear(3, 4), Functional(torch::relu), BatchNorm1d(3));
   Sequential clone =
       std::dynamic_pointer_cast<SequentialImpl>(sequential->clone());
   ASSERT_EQ(sequential->size(), clone->size());
@@ -386,7 +382,7 @@ TEST_F(SequentialTest, RegistersElementsAsSubmodules) {
 }
 
 TEST_F(SequentialTest, CloneToDevice_CUDA) {
-  Sequential sequential(Linear(3, 4), Functional(torch::relu), BatchNorm(3));
+  Sequential sequential(Linear(3, 4), Functional(torch::relu), BatchNorm1d(3));
   torch::Device device(torch::kCUDA, 0);
   Sequential clone =
       std::dynamic_pointer_cast<SequentialImpl>(sequential->clone(device));
@@ -403,7 +399,7 @@ TEST_F(SequentialTest, PrettyPrintSequential) {
       Linear(10, 3),
       Conv2d(1, 2, 3),
       Dropout(0.5),
-      BatchNorm(5),
+      BatchNorm2d(5),
       Embedding(4, 10),
       LSTM(4, 5));
   ASSERT_EQ(
@@ -412,16 +408,16 @@ TEST_F(SequentialTest, PrettyPrintSequential) {
       "  (0): torch::nn::Linear(in_features=10, out_features=3, bias=true)\n"
       "  (1): torch::nn::Conv2d(1, 2, kernel_size=[3, 3], stride=[1, 1])\n"
       "  (2): torch::nn::Dropout(p=0.5, inplace=false)\n"
-      "  (3): torch::nn::BatchNorm(num_features=5, eps=1e-05, momentum=0.1, affine=true, track_running_stats=true)\n"
+      "  (3): torch::nn::BatchNorm2d(5, eps=1e-05, momentum=0.1, affine=true, track_running_stats=true)\n"
       "  (4): torch::nn::Embedding(num_embeddings=4, embedding_dim=10)\n"
-      "  (5): torch::nn::LSTM(input_size=4, hidden_size=5, layers=1, dropout=0)\n"
+      "  (5): torch::nn::LSTM(input_size=4, hidden_size=5, num_layers=1, bias=true, batch_first=false, dropout=0, bidirectional=false)\n"
       ")");
 
   Sequential sequential_named({
       {"linear", Linear(10, 3)},
       {"conv2d", Conv2d(1, 2, 3)},
       {"dropout", Dropout(0.5)},
-      {"batchnorm", BatchNorm(5)},
+      {"batchnorm2d", BatchNorm2d(5)},
       {"embedding", Embedding(4, 10)},
       {"lstm", LSTM(4, 5)}
   });
@@ -431,9 +427,9 @@ TEST_F(SequentialTest, PrettyPrintSequential) {
       "  (linear): torch::nn::Linear(in_features=10, out_features=3, bias=true)\n"
       "  (conv2d): torch::nn::Conv2d(1, 2, kernel_size=[3, 3], stride=[1, 1])\n"
       "  (dropout): torch::nn::Dropout(p=0.5, inplace=false)\n"
-      "  (batchnorm): torch::nn::BatchNorm(num_features=5, eps=1e-05, momentum=0.1, affine=true, track_running_stats=true)\n"
+      "  (batchnorm2d): torch::nn::BatchNorm2d(5, eps=1e-05, momentum=0.1, affine=true, track_running_stats=true)\n"
       "  (embedding): torch::nn::Embedding(num_embeddings=4, embedding_dim=10)\n"
-      "  (lstm): torch::nn::LSTM(input_size=4, hidden_size=5, layers=1, dropout=0)\n"
+      "  (lstm): torch::nn::LSTM(input_size=4, hidden_size=5, num_layers=1, bias=true, batch_first=false, dropout=0, bidirectional=false)\n"
       ")");
 }
 
@@ -602,21 +598,21 @@ TEST_F(SequentialTest, ModuleForwardMethodOptionalArg) {
     torch::manual_seed(0);
     Sequential sequential(Identity(), RNN(2, 3));
     auto x = torch::ones({2, 3, 2});
-    auto rnn_output = sequential->forward<RNNOutput>(x);
+    auto rnn_output = sequential->forward<std::tuple<torch::Tensor, torch::Tensor>>(x);
     auto expected_output = torch::tensor(
-    {{{0.0000, 0.0000,  0.4886},
-      {0.0000, 0.0000,  0.4886},
-      {0.0000, 0.0000,  0.4886}},
-     {{0.0000, 0.0000,  0.3723},
-      {0.0000, 0.0000,  0.3723},
-      {0.0000, 0.0000,  0.3723}}});
-    ASSERT_TRUE(torch::allclose(rnn_output.output, expected_output, 1e-05, 2e-04));
+    {{{-0.0645, -0.7274,  0.4531},
+      {-0.0645, -0.7274,  0.4531},
+      {-0.0645, -0.7274,  0.4531}},
+     {{-0.3970, -0.6950,  0.6009},
+      {-0.3970, -0.6950,  0.6009},
+      {-0.3970, -0.6950,  0.6009}}});
+    ASSERT_TRUE(torch::allclose(std::get<0>(rnn_output), expected_output, 1e-05, 2e-04));
   }
   {
     torch::manual_seed(0);
     Sequential sequential(Identity(), LSTM(2, 3));
     auto x = torch::ones({2, 3, 2});
-    auto rnn_output = sequential->forward<RNNOutput>(x);
+    auto rnn_output = sequential->forward<std::tuple<torch::Tensor, std::tuple<torch::Tensor, torch::Tensor>>>(x);
     auto expected_output = torch::tensor(
     {{{-0.2693, -0.1240,  0.0744},
       {-0.2693, -0.1240,  0.0744},
@@ -624,13 +620,13 @@ TEST_F(SequentialTest, ModuleForwardMethodOptionalArg) {
      {{-0.3889, -0.1919,  0.1183},
       {-0.3889, -0.1919,  0.1183},
       {-0.3889, -0.1919,  0.1183}}});
-    ASSERT_TRUE(torch::allclose(rnn_output.output, expected_output, 1e-05, 2e-04));
+    ASSERT_TRUE(torch::allclose(std::get<0>(rnn_output), expected_output, 1e-05, 2e-04));
   }
   {
     torch::manual_seed(0);
     Sequential sequential(Identity(), GRU(2, 3));
     auto x = torch::ones({2, 3, 2});
-    auto rnn_output = sequential->forward<RNNOutput>(x);
+    auto rnn_output = sequential->forward<std::tuple<torch::Tensor, torch::Tensor>>(x);
     auto expected_output = torch::tensor(
     {{{-0.1134,  0.0467,  0.2336},
       {-0.1134,  0.0467,  0.2336},
@@ -638,6 +634,36 @@ TEST_F(SequentialTest, ModuleForwardMethodOptionalArg) {
      {{-0.1189,  0.0502,  0.2960},
       {-0.1189,  0.0502,  0.2960},
       {-0.1189,  0.0502,  0.2960}}});
-    ASSERT_TRUE(torch::allclose(rnn_output.output, expected_output, 1e-05, 2e-04));
+    ASSERT_TRUE(torch::allclose(std::get<0>(rnn_output), expected_output, 1e-05, 2e-04));
+  }
+  {
+    torch::manual_seed(0);
+    Sequential sequential(Identity(), RNNCell(2, 3));
+    auto x = torch::ones({2, 2});
+    auto rnn_output = sequential->forward<torch::Tensor>(x);
+    auto expected_output = torch::tensor(
+    {{-0.0645, -0.7274,  0.4531},
+     {-0.0645, -0.7274,  0.4531}});
+    ASSERT_TRUE(torch::allclose(rnn_output, expected_output, 1e-05, 2e-04));
+  }
+  {
+    torch::manual_seed(0);
+    Sequential sequential(Identity(), LSTMCell(2, 3));
+    auto x = torch::ones({2, 2});
+    auto rnn_output = sequential->forward<std::tuple<torch::Tensor, torch::Tensor>>(x);
+    auto expected_output = torch::tensor(
+    {{-0.2693, -0.1240,  0.0744},
+     {-0.2693, -0.1240,  0.0744}});
+    ASSERT_TRUE(torch::allclose(std::get<0>(rnn_output), expected_output, 1e-05, 2e-04));
+  }
+  {
+    torch::manual_seed(0);
+    Sequential sequential(Identity(), GRUCell(2, 3));
+    auto x = torch::ones({2, 2});
+    auto rnn_output = sequential->forward<torch::Tensor>(x);
+    auto expected_output = torch::tensor(
+    {{-0.1134,  0.0467,  0.2336},
+     {-0.1134,  0.0467,  0.2336}});
+    ASSERT_TRUE(torch::allclose(rnn_output, expected_output, 1e-05, 2e-04));
   }
 }

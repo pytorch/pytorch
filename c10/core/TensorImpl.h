@@ -423,30 +423,32 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 
   bool is_sparse() const {
     // NB: This method is not virtual and avoid dispatches for performance reasons.
-    return key_set_.has(DispatchKey::SparseCPUTensorId) ||
-           key_set_.has(DispatchKey::SparseCUDATensorId) ||
-           key_set_.has(DispatchKey::SparseHIPTensorId);
+    return key_set_.has(DispatchKey::SparseCPU) ||
+           key_set_.has(DispatchKey::SparseCUDA) ||
+           key_set_.has(DispatchKey::SparseHIP);
   }
 
   bool is_quantized() const {
     // NB: This method is not virtual and avoid dispatches for performance reasons.
-    return key_set_.has(DispatchKey::QuantizedCPUTensorId);
+    return key_set_.has(DispatchKey::QuantizedCPU) ||
+        key_set_.has(DispatchKey::QuantizedCUDA);
   }
 
   bool is_cuda() const {
     // NB: This method is not virtual and avoid dispatches for performance reasons.
-    return key_set_.has(DispatchKey::CUDATensorId) ||
-           key_set_.has(DispatchKey::SparseCUDATensorId);
+    return key_set_.has(DispatchKey::CUDA) ||
+        key_set_.has(DispatchKey::SparseCUDA) ||
+        key_set_.has(DispatchKey::QuantizedCUDA);
   }
 
   bool is_hip() const {
     // NB: This method is not virtual and avoid dispatches for performance reasons.
-    return key_set_.has(DispatchKey::HIPTensorId) ||
-           key_set_.has(DispatchKey::SparseHIPTensorId);
+    return key_set_.has(DispatchKey::HIP) ||
+           key_set_.has(DispatchKey::SparseHIP);
   }
 
   bool is_mkldnn() const {
-    return key_set_.has(DispatchKey::MkldnnCPUTensorId);
+    return key_set_.has(DispatchKey::MkldnnCPU);
   }
 
   int64_t get_device() const {
@@ -508,6 +510,20 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   void set_wrapped_number(bool value) {
     TORCH_INTERNAL_ASSERT(dim() == 0);
     is_wrapped_number_ = value;
+  }
+
+  /**
+   * Returns true if Tensor supports as_strided and as_strided_backward.
+   * This is used in autograd to perform inplace update on view Tensors.
+   * See Note [View + Inplace update for base tensor] and
+   * [View + Inplace update for view tensor] for details.
+   * Note this method only returns true for XLA backend, where it
+   * simulates strided Tensor to support most view ops, but it cannot
+   * fully support general `as_strided` case.
+   * It can be expanded as needed in the future, e.g sparse Tensor.
+   */
+  inline bool support_as_strided() const {
+    return device().type() != at::kXLA;
   }
 
   // ~~~~~ Autograd API ~~~~~
@@ -859,19 +875,19 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   /**
    * One TensorImpl can be copied to another TensorImpl if they have the same
    * DispatchKeySet. The only two special cases (for legacy reason) are:
-   * CPUTensorId is compatible with CUDATensorId and SparseCPUTensorId is
-   * compatible with SparseCUDATensorId.
+   * CPU is compatible with CUDA and SparseCPU is
+   * compatible with SparseCUDA.
    */
   inline bool has_compatible_shallow_copy_type(DispatchKeySet from) {
     auto is_dense = [](DispatchKeySet ts) {
-      return ts.has(DispatchKey::CPUTensorId) ||
-             ts.has(DispatchKey::CUDATensorId) ||
-             ts.has(DispatchKey::HIPTensorId);
+      return ts.has(DispatchKey::CPU) ||
+             ts.has(DispatchKey::CUDA) ||
+             ts.has(DispatchKey::HIP);
     };
     auto is_sparse = [](DispatchKeySet ts) {
-      return ts.has(DispatchKey::SparseCPUTensorId) ||
-             ts.has(DispatchKey::SparseCUDATensorId) ||
-             ts.has(DispatchKey::SparseHIPTensorId);
+      return ts.has(DispatchKey::SparseCPU) ||
+             ts.has(DispatchKey::SparseCUDA) ||
+             ts.has(DispatchKey::SparseHIP);
     };
     return (key_set_ == from) || (is_dense(key_set_) && is_dense(from)) || (is_sparse(key_set_) && is_sparse(from));
   }
@@ -1353,15 +1369,14 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
         TORCH_CHECK(
             dim() == 4,
             "required rank 4 tensor to use channels_last format");
-        set_sizes_and_strides(sizes(), get_channels_last_strides(sizes()));
+        set_sizes_and_strides(sizes(), get_channels_last_strides_2d(sizes()));
         break;
       }
       case MemoryFormat::ChannelsLast3d: {
         TORCH_CHECK(
             dim() == 5,
             "required rank 5 tensor to use channels_last_3d format");
-        TORCH_CHECK(false, "unsupported memory format ", memory_format);
-        //TODO Implement set_sizes_and_strides for channels last 3d
+        set_sizes_and_strides(sizes(), get_channels_last_strides_3d(sizes()));
         break;
       }
       case MemoryFormat::Preserve:
@@ -1377,6 +1392,10 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 
   bool is_strides_like_channels_last() const {
     return is_channels_last_;
+  }
+
+  bool is_strides_like_channels_last_3d() const {
+    return is_channels_last_3d_;
   }
 
   bool is_non_overlapping_and_dense() const {
@@ -1459,9 +1478,13 @@ private:
    */
   bool compute_contiguous() const;
 
-  bool compute_channels_last_contiguous() const;
+  bool compute_channels_last_contiguous_2d() const;
 
-  bool compute_strides_like_channels_last() const;
+  bool compute_channels_last_contiguous_3d() const;
+
+  bool compute_strides_like_channels_last_2d() const;
+
+  bool compute_strides_like_channels_last_3d() const;
 
   bool compute_non_overlapping_and_dense() const;
 
@@ -1479,13 +1502,36 @@ protected:
    */
   void refresh_contiguous() {
     is_contiguous_ = compute_contiguous();
-    is_channels_last_contiguous_ = compute_channels_last_contiguous();
-    // is_channels_last_ is suggested memory_format.
-    // Being channels_last_contiguous doesn't necessarily mean the tensor is
-    // strided like channels_last: for strides on size-1 dimension could suggest
-    // desired memory_layout, but it doesn't affect memory storage
-    is_channels_last_ = compute_strides_like_channels_last();
-    is_non_overlapping_and_dense_ = is_contiguous_ || is_channels_last_contiguous_ || compute_non_overlapping_and_dense();
+    // Note:
+    // Dim 0, 1, 2 will never be a channels last 2d/3d format
+    // Dim 3+ is possibly be a channels last 2d format (Dim 4 only at this point)
+    // Dim 4+ is possibly be a channels last 3d format (Dim 5 only at this point)
+    switch (dim()) {
+      case 4:
+        is_channels_last_contiguous_ = compute_channels_last_contiguous_2d();
+        is_channels_last_3d_contiguous_ = false;
+        is_channels_last_ = compute_strides_like_channels_last_2d();
+        is_channels_last_3d_ = false;
+        is_non_overlapping_and_dense_ = is_contiguous_ || is_channels_last_contiguous_ || compute_non_overlapping_and_dense();
+        break;
+      case 5:
+        is_channels_last_contiguous_ = compute_channels_last_contiguous_2d();
+        is_channels_last_3d_contiguous_ = !is_channels_last_contiguous_ && compute_channels_last_contiguous_3d();
+        is_channels_last_ = !is_channels_last_3d_contiguous_ && compute_strides_like_channels_last_2d();
+        is_channels_last_3d_ = !is_channels_last_ && compute_strides_like_channels_last_3d();
+        is_non_overlapping_and_dense_ = is_contiguous_ || is_channels_last_contiguous_ || is_channels_last_3d_contiguous_|| compute_non_overlapping_and_dense();
+        break;
+      default:
+        is_channels_last_contiguous_ = false;
+        is_channels_last_3d_contiguous_ = false;
+        // is_channels_last_ and is_channels_last_3d_ are suggested memory_format.
+        // Being channels_last_contiguous doesn't necessarily mean the tensor is
+        // strided like channels_last: for strides on channel dimension could suggest
+        // desired memory_layout, but it doesn't affect memory storage
+        is_channels_last_ = false;
+        is_channels_last_3d_ = false;
+        is_non_overlapping_and_dense_ = is_contiguous_ || compute_non_overlapping_and_dense();
+    }
   }
 
   /**
@@ -1588,7 +1634,7 @@ protected:
   c10::optional<c10::Device> device_opt_;
 
   // The set of DispatchKeys which describe this tensor.  NB: this
-  // does NOT include VariableTensorId (historically, it did, but
+  // does NOT include Autograd (historically, it did, but
   // not anymore!)
   DispatchKeySet key_set_;
 
@@ -1596,8 +1642,8 @@ protected:
   // should pack this into a bitfield.
   bool is_contiguous_ = true;
 
-  // Tensor is stored in the channels last memory format, when dimensions
-  // order is NCHW and C-strides < W-strides < H-strides < N-strides
+  // Tensor is stored in the channels last 2d memory format, when dimensions
+  // order is (N)CHW and C-strides < W-strides < H-strides (< N-strides)
   // (If size of any dimension is equal to 1, this dimension strides value
   // is not taken into account).
   bool is_channels_last_ = false;
@@ -1605,6 +1651,16 @@ protected:
   // Channels last contiguous tensor is channel last tensor which occupies
   // contiguous memory block.
   bool is_channels_last_contiguous_ = false;
+
+  // Tensor is stored in the channels last 3d memory format, when dimensions
+  // order is (N)CDHW and C-strides < W-strides < H-strides < D - strides (< N-strides)
+  // (If size of any dimension is equal to 1, this dimension strides value
+  // is not taken into account).
+  bool is_channels_last_3d_ = false;
+
+  // Channels last 3d contiguous tensor is channel last 3d tensor which occupies
+  // contiguous memory block.
+  bool is_channels_last_3d_contiguous_ = false;
 
   // Dense tensor is the tensor that store values in a contiguous block of memory.
   // Non-overlapping tensor is the tensor in which elements occupy individual
@@ -1694,7 +1750,7 @@ protected:
 //    miscellaneous bitfield
 //
 static_assert(sizeof(void*) != sizeof(int64_t) || // if 64-bit...
-              sizeof(TensorImpl) == sizeof(int64_t) * 30,
+              sizeof(TensorImpl) == sizeof(int64_t) * 31,
               "You changed the size of TensorImpl on 64-bit arch."
               "See Note [TensorImpl size constraints] on how to proceed.");
 } // namespace c10

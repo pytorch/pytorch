@@ -6,7 +6,6 @@
 
 namespace torch {
 namespace jit {
-namespace script {
 
 struct Resolver;
 using ResolverPtr = std::shared_ptr<Resolver>;
@@ -65,6 +64,5 @@ struct NativeResolver : public Resolver {
 inline std::shared_ptr<NativeResolver> nativeResolver() {
   return std::make_shared<NativeResolver>();
 }
-} // namespace script
 } // namespace jit
 } // namespace torch

@@ -15,12 +15,12 @@ namespace nn {
 ///
 ///   torch::nn::ModuleList mlist(
 ///     torch::nn::Linear(3, 4),
-///     torch::nn::BatchNorm(4),
+///     torch::nn::BatchNorm1d(4),
 ///     torch::nn::Dropout(0.5)
 ///   );
 ///
-///   for (const auto &module : mlist) {
-///     module.pretty_print();
+///   for (const auto &module : *mlist) {
+///     module->pretty_print(std::cout);
 ///   }
 ///
 /// \endrst
@@ -39,7 +39,7 @@ namespace nn {
 ///
 ///   torch::nn::ModuleList mlist(
 ///     torch::nn::Linear(3, 4),
-///     torch::nn::BatchNorm(4),
+///     torch::nn::BatchNorm1d(4),
 ///     torch::nn::Dropout(0.5)
 ///   );
 ///

@@ -18,9 +18,7 @@ class Tensor;
 namespace torch {
 using at::Tensor;
 namespace jit {
-namespace script {
 struct Module;
-} // namespace script
 } // namespace jit
 } // namespace torch
 
@@ -108,7 +106,7 @@ class TORCH_API InputArchive final {
   }
 
  private:
-  jit::script::Module module_;
+  jit::Module module_;
   std::string hierarchy_prefix_;
 };
 } // namespace serialize

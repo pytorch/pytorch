@@ -4,14 +4,14 @@
 #include <ATen/core/ivalue.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/autograd/grad_mode.h>
+#include <torch/csrc/jit/frontend/tracer.h>
+#include <torch/csrc/jit/ir/ir.h>
+#include <torch/csrc/jit/resource_guard.h>
 #include <torch/csrc/jit/runtime/argument_spec.h>
 #include <torch/csrc/jit/runtime/autodiff.h>
 #include <torch/csrc/jit/runtime/custom_operator.h>
 #include <torch/csrc/jit/runtime/interpreter.h>
-#include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/runtime/profiling_record.h>
-#include <torch/csrc/jit/resource_guard.h>
-#include <torch/csrc/jit/frontend/tracer.h>
 
 #include <torch/csrc/autograd/edge.h>
 #include <torch/csrc/autograd/function.h>
@@ -56,13 +56,17 @@ struct GraphExecutorImplBase {
     return copy;
   }
 
-  GraphExecutorImplBase(const std::shared_ptr<Graph>& graph)
+  GraphExecutorImplBase(
+      const std::shared_ptr<Graph>& graph,
+      std::string function_name)
       : graph(prepareGraph(graph)),
+        function_name_(std::move(function_name)),
         num_inputs(this->graph->inputs().size()),
         num_outputs(this->graph->outputs().size()) {}
 
   // entry point where execution begins
   void run(Stack& stack);
+  c10::intrusive_ptr<Future> runAsync(Stack& stack);
 
   virtual ExecutionPlan getPlanFor(
       Stack& stack,
@@ -77,6 +81,7 @@ struct GraphExecutorImplBase {
   // can't make it so because Graph::copy() is not const (and making it const is
   // not that easy at this point).
   std::shared_ptr<Graph> graph;
+  std::string function_name_;
 
   // If false, we'll run the graph as we get it, without any optimizations.
   // Useful for debugging.

@@ -15,9 +15,9 @@ from torch.utils.data import _utils, Dataset, IterableDataset, TensorDataset, Da
 from torch.utils.data._utils import MP_STATUS_CHECK_INTERVAL
 from torch.utils.data.dataset import random_split
 from torch._utils import ExceptionWrapper
-from torch.testing._internal.common_utils import (TestCase, run_tests, TEST_NUMPY, IS_WINDOWS, PY3,
+from torch.testing._internal.common_utils import (TestCase, run_tests, TEST_NUMPY, IS_WINDOWS,
                                                   IS_PYTORCH_CI, NO_MULTIPROCESSING_SPAWN, skipIfRocm,
-                                                  load_tests, TEST_WITH_TSAN)
+                                                  load_tests, TEST_WITH_TSAN, IS_SANDCASTLE)
 
 try:
     import psutil
@@ -135,6 +135,33 @@ class TestDatasetRandomSplit(TestCase):
         data_loader = DataLoader(dataset)
         for batch in data_loader:
             pass
+
+    def test_splits_reproducibility(self):
+        self.assertEqual(
+            [list(x) for x in random_split(range(10), [3, 7], generator=torch.Generator().manual_seed(1))],
+            [[5, 6, 1], [2, 0, 8, 9, 3, 7, 4]],
+        )
+        self.assertEqual(
+            random_split(range(100), [60, 40], generator=torch.Generator().manual_seed(42)),
+            random_split(range(100), [60, 40], generator=torch.Generator().manual_seed(42)),
+        )
+
+    def test_splits_generator(self):
+        # A random_split without a specific generator should affect the default one
+        state = torch.get_rng_state()
+        a = torch.rand(10)
+        torch.set_rng_state(state)
+        random_split(range(10), [5, 5])
+        b = torch.rand(10)
+        self.assertNotEqual(a, b)
+
+        # A random_split with a specific generator should not affect the default one
+        state = torch.get_rng_state()
+        a = torch.rand(10)
+        torch.set_rng_state(state)
+        random_split(range(10), [5, 5], generator=torch.Generator().manual_seed(42))
+        b = torch.rand(10)
+        self.assertEqual(a, b)
 
 
 class CUDACountingDataset(Dataset):
@@ -293,6 +320,8 @@ def set_faulthander_if_available(_=None):
 set_faulthander_if_available()
 
 # Process `pid` must have called `set_faulthander_if_available`
+
+
 def print_traces_of_all_threads(pid):
     if HAS_FAULTHANDLER:
         if not IS_WINDOWS:
@@ -777,6 +806,43 @@ class TestDataLoader(TestCase):
         with self.assertRaisesRegex(RuntimeError, 'Error in worker_init_fn'):
             list(iter(loader))
 
+    @unittest.skipIf(IS_SANDCASTLE, "subprocess doesn't work in FB internal CI")
+    @unittest.skipIf(IS_WINDOWS, "No 'resource' module on Windows")
+    def test_fd_limit_exceeded(self):
+        # See NOTE [ DataLoader on Linux and open files limit ]
+        import subprocess
+        subprocess.check_output([sys.executable, '-c', """\
+import torch
+import resource
+from torch.utils.data import DataLoader, IterableDataset
+
+class RandomDataset(IterableDataset):
+    def __init__(self, len, size):
+        super(RandomDataset).__init__()
+        self.len = len
+        self.size = size
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        if self.len <= 0:
+            raise StopIteration
+        self.len -= 1
+        return torch.randn(self.size)
+
+try:
+    keep_fds_alive = []
+    resource.setrlimit(resource.RLIMIT_NOFILE, (100, 100))
+    for random_t in DataLoader(RandomDataset(200, (2,2)),
+                               num_workers=1):
+      random_t.max(dim=0)
+      keep_fds_alive.append(random_t)
+except RuntimeError as e:
+    assert "ulimit -n" in str(e)
+    assert "set_sharing_strategy" in str(e)
+"""])
+
     def test_invalid_assign_after_init(self):
         dl = DataLoader(self.dataset)
         for attr in ('batch_size', 'sampler', 'batch_sampler', 'drop_last', 'dataset'):
@@ -875,7 +941,6 @@ class TestDataLoader(TestCase):
         with self.assertRaisesRegex(ValueError, "timeout option should be non-negative"):
             DataLoader(self.dataset, timeout=-1)
 
-
         # disable auto-batching
         with self.assertRaisesRegex(ValueError,
                                     "batch_size=None option disables auto-batching and is mutually exclusive"):
@@ -890,7 +955,7 @@ class TestDataLoader(TestCase):
                 DataLoader(self.dataset, num_workers=0, multiprocessing_context=valid_ctx)
             with self.assertRaisesRegex(ValueError, "should specify a valid start method in"):
                 DataLoader(self.dataset, num_workers=1, multiprocessing_context='bad')
-            with self.assertRaisesRegex(ValueError, "multiprocessing_context option should be a valid context "):
+            with self.assertRaisesRegex(TypeError, "multiprocessing_context option should be a valid context "):
                 DataLoader(self.dataset, num_workers=1, multiprocessing_context=object())
         else:
             with self.assertRaisesRegex(ValueError, "multiprocessing_context relies on Python >= 3.4"):
@@ -997,10 +1062,11 @@ class TestDataLoader(TestCase):
         for _ in range(20):
             self.assertNotWarn(lambda: next(it), "Should not warn before exceeding length")
         for _ in range(3):
-            self.assertWarnsRegex(
-                lambda: next(it),
+            with self.assertWarnsRegex(
+                UserWarning,
                 r"but [0-9]+ samples have been fetched\. For multiprocessing data-loading, this",
-                "Should always warn after exceeding length")
+                    msg="Should always warn after exceeding length"):
+                next(it)
 
         # [no auto-batching] test that workers exit gracefully
         workers = dataloader_iter._workers
@@ -1468,7 +1534,7 @@ class TestDataLoader(TestCase):
                                 if 'DataLoader worker (pid' not in str(loader_p.exception):
                                     fail('loader process did not raise expected exception, but had {}'.format(
                                         loader_p.exception))
-                            elif PY3 and isinstance(loader_p.exception, ConnectionRefusedError):
+                            elif isinstance(loader_p.exception, ConnectionRefusedError):
                                 # Sometimes, when the worker is being killed and is freeing its
                                 # resources, the unpickling in loader process will be met an
                                 # a `ConnectionRefusedError` as it can not open a socket to receive
@@ -1477,12 +1543,6 @@ class TestDataLoader(TestCase):
                                 # handler. So we permit this as an allowed error as well.
                                 # After all, we are happy as long as it terminates.
                                 pass
-                            elif not PY3 and isinstance(loader_p.exception, OSError):
-                                # Same reasoning as the above if-block for Py2,
-                                # where ConnectionRefusedError isn't a thing.
-                                if loader_p.exception.errno != errno.ECONNREFUSED:
-                                    fail('loader process did not raise expected exception, but had {}'.format(
-                                        loader_p.exception))
                             else:
                                 fail('loader process did not raise expected exception, but had {}'.format(
                                     loader_p.exception))

@@ -2,7 +2,6 @@
 
 namespace torch {
 namespace jit {
-namespace script {
 using namespace c10;
 const std::unordered_map<std::string, TypePtr>& string_to_type_lut() {
   static std::unordered_map<std::string, TypePtr> map = {
@@ -21,7 +20,6 @@ const std::unordered_map<std::string, TypePtr>& string_to_type_lut() {
       {"list", AnyListType::get()},
       {"tuple", AnyTupleType::get()}};
   return map;
-}
 }
 } // namespace jit
 } // namespace torch

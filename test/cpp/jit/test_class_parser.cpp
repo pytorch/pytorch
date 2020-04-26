@@ -4,7 +4,6 @@
 
 namespace torch {
 namespace jit {
-using namespace torch::jit::script;
 const auto testSource = R"JIT(
   class FooTest:
     def __init__(self, x):

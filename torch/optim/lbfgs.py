@@ -261,7 +261,7 @@ class LBFGS(Optimizer):
         for p in self._params:
             numel = p.numel()
             # view as to avoid deprecated pointwise semantics
-            p.data.add_(update[offset:offset + numel].view_as(p.data), alpha=step_size)
+            p.add_(update[offset:offset + numel].view_as(p), alpha=step_size)
             offset += numel
         assert offset == self._numel()
 
@@ -270,7 +270,7 @@ class LBFGS(Optimizer):
 
     def _set_param(self, params_data):
         for p, pdata in zip(self._params, params_data):
-            p.data.copy_(pdata)
+            p.copy_(pdata)
 
     def _directional_evaluate(self, closure, x, t, d):
         self._add_grad(t, d)
@@ -279,6 +279,7 @@ class LBFGS(Optimizer):
         self._set_param(x)
         return loss, flat_grad
 
+    @torch.no_grad()
     def step(self, closure):
         """Performs a single optimization step.
 
@@ -287,6 +288,9 @@ class LBFGS(Optimizer):
                 and returns the loss.
         """
         assert len(self.param_groups) == 1
+
+        # Make sure the closure is always called with grad enabled
+        closure = torch.enable_grad()(closure)
 
         group = self.param_groups[0]
         lr = group['lr']
@@ -429,7 +433,8 @@ class LBFGS(Optimizer):
                     # re-evaluate function only if not in last iteration
                     # the reason we do this: in a stochastic setting,
                     # no use to re-evaluate that function here
-                    loss = float(closure())
+                    with torch.enable_grad():
+                        loss = float(closure())
                     flat_grad = self._gather_flat_grad()
                     opt_cond = flat_grad.abs().max() <= tolerance_grad
                     ls_func_evals = 1

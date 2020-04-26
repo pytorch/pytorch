@@ -39,6 +39,12 @@ class CAFFE2_API TvmTransformer final : public BackendTransformerBase {
       const ShapeInfoMap& shape_hints,
       const std::unordered_set<int>& blacklisted_ops) override;
 
+  static const std::unordered_set<std::string>& getSupportedOps();
+
+  static bool canConvertFullGraph(
+      const caffe2::NetDef& net,
+      const std::unordered_set<int>& blacklisted_ops);
+
  private:
   // Given TVM runnable subnets, contract them into one TVMJitOp
   NetDef buildTvmOp(
@@ -75,5 +81,11 @@ CAFFE2_API void tvmTransform(
     size_t max_batch_size,
     size_t max_seq_size,
     bool debug);
+
+CAFFE2_API void cleanUpPredictNet(
+    NetDef* net,
+    const std::vector<std::string>& input_names,
+    const std::vector<std::string>& output_names,
+    const std::vector<std::string>& weight_names);
 
 } // namespace caffe2

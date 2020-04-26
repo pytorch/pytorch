@@ -1,9 +1,9 @@
 #ifndef C10_UTIL_EXCEPTION_H_
 #define C10_UTIL_EXCEPTION_H_
 
-#include "c10/macros/Macros.h"
-#include "c10/util/StringUtil.h"
-#include "c10/util/Deprecated.h"
+#include <c10/macros/Macros.h>
+#include <c10/util/StringUtil.h>
+#include <c10/util/Deprecated.h>
 
 #include <cstddef>
 #include <exception>
@@ -88,14 +88,30 @@ class C10_API WarningHandler {
   /// The default warning handler. Prints the message to stderr.
   virtual void process(
       const SourceLocation& source_location,
-      const std::string& msg);
+      const std::string& msg,
+      const bool verbatim);
 };
 
 namespace Warning {
 
+// Note: [Verbatim Warnings]
+// Warnings originating in C++ code can appear out-of-place to Python users:
+// a user runs a line in Python, but the warning references a line in C++.
+// Some parts of PyTorch, like the JIT, are cognizant of this mismatch
+// and take care to map warnings back to the user's program, but most
+// of PyTorch simply throws a context-free warning. To allow warning
+// handlers to add context where appropriate, warn takes the
+// "verbatim" flag. When this is false a warning handler might append
+// the C++ warning to a Python warning message that relates the warning
+// back to the user's program. Callers who have already accounted for
+// context in their warnings should set verbatim to true so their warnings
+// appear without modification.
+
 /// Issue a warning with a given message. Dispatched to the current
 /// warning handler.
-C10_API void warn(SourceLocation source_location, const std::string& msg);
+C10_API void warn(SourceLocation source_location,
+    const std::string& msg,
+    bool verbatim);
 /// Sets the global warning handler. This is not thread-safe, so it should
 /// generally be called once during initialization or while holding the GIL
 /// for programs that use python.
@@ -212,17 +228,17 @@ inline std::string if_empty_then(std::string x, std::string y) {
   if (C10_UNLIKELY_OR_CONST(!(cond))) {       \
     C10_THROW_ERROR(Error,                    \
         #cond " INTERNAL ASSERT FAILED at"    \
-        __FILE__                              \
+        C10_STRINGIZE(__FILE__)               \
     );                                        \
   }
 #else
 #define TORCH_INTERNAL_ASSERT(cond, ...)      \
   if (C10_UNLIKELY_OR_CONST(!(cond))) {       \
     C10_THROW_ERROR(Error, ::c10::str(        \
-        #cond " INTERNAL ASSERT FAILED at ",  \
-        __FILE__,                             \
-        ":",                                  \
-        __LINE__,                             \
+        #cond " INTERNAL ASSERT FAILED at "   \
+        C10_STRINGIZE(__FILE__)               \
+        ":"                                   \
+        C10_STRINGIZE(__LINE__)               \
         ", please report a bug to PyTorch. ", \
         ::c10::str(__VA_ARGS__)               \
     ));                                       \
@@ -254,7 +270,7 @@ inline std::string if_empty_then(std::string x, std::string y) {
   if (C10_UNLIKELY_OR_CONST(!(cond))) {       \
     C10_THROW_ERROR(error_t,                  \
         #cond " CHECK FAILED at "             \
-        __FILE__                              \
+        C10_STRINGIZE(__FILE__)               \
     );                                        \
   }
 #else
@@ -272,6 +288,15 @@ inline std::string if_empty_then(std::string x, std::string y) {
 #endif
 #define TORCH_CHECK(cond, ...) TORCH_CHECK_WITH(Error, cond, __VA_ARGS__)
 
+// An utility macro that does what `TORCH_CHECK` does if compiled in the host code, 
+// otherwise does nothing. Supposed to be used in the code shared between host and
+// device code as an alternative for `TORCH_CHECK`.
+#if defined(__CUDACC__) || defined(__HIPCC__)
+#define TORCH_CHECK_IF_NOT_ON_CUDA(cond, ...)
+#else
+#define TORCH_CHECK_IF_NOT_ON_CUDA(cond, ...) TORCH_CHECK(cond, __VA_ARGS__)
+#endif
+
 // Debug only version of TORCH_INTERNAL_ASSERT. This macro only checks in debug
 // build, and does nothing in release build.  It is appropriate to use
 // in situations where you want to add an assert to a hotpath, but it is
@@ -279,10 +304,11 @@ inline std::string if_empty_then(std::string x, std::string y) {
 #ifdef NDEBUG
 // Optimized version - generates no code.
 #define TORCH_INTERNAL_ASSERT_DEBUG_ONLY(...) \
-  while (false)           \
-  TORCH_INTERNAL_ASSERT(__VA_ARGS__)
+  while (false)                               \
+  C10_EXPAND_MSVC_WORKAROUND(TORCH_INTERNAL_ASSERT(__VA_ARGS__))
 #else
-#define TORCH_INTERNAL_ASSERT_DEBUG_ONLY(...) C10_EXPAND_MSVC_WORKAROUND(TORCH_INTERNAL_ASSERT(__VA_ARGS__))
+#define TORCH_INTERNAL_ASSERT_DEBUG_ONLY(...) \
+  C10_EXPAND_MSVC_WORKAROUND(TORCH_INTERNAL_ASSERT(__VA_ARGS__))
 #endif
 
 // TODO: We're going to get a lot of similar looking string literals
@@ -294,7 +320,7 @@ inline std::string if_empty_then(std::string x, std::string y) {
   if (C10_UNLIKELY_OR_CONST(!(cond))) {       \
     C10_THROW_ERROR(Error,                    \
         #cond " INDEX CHECK FAILED at "       \
-        __FILE__                              \
+        C10_STRINGIZE(__FILE__)               \
     );                                        \
   }
 #else
@@ -317,7 +343,7 @@ inline std::string if_empty_then(std::string x, std::string y) {
   if (C10_UNLIKELY_OR_CONST(!(cond))) {       \
     C10_THROW_ERROR(Error,                    \
         #cond " VALUE CHECK FAILED at "       \
-        __FILE__                              \
+        C10_STRINGIZE(__FILE__)               \
     );                                        \
   }
 #else
@@ -338,14 +364,14 @@ inline std::string if_empty_then(std::string x, std::string y) {
 // arguments which are concatenated into the warning message using operator<<
 //
 #define TORCH_WARN(...) \
-  ::c10::Warning::warn({__func__, __FILE__, static_cast<uint32_t>(__LINE__)}, ::c10::str(__VA_ARGS__))
+  ::c10::Warning::warn({__func__, __FILE__, static_cast<uint32_t>(__LINE__)}, ::c10::str(__VA_ARGS__), false)
 
 // Report a warning to the user only once.  Accepts an arbitrary number of extra
 // arguments which are concatenated into the warning message using operator<<
 //
 #define TORCH_WARN_ONCE(...) \
   C10_UNUSED static const auto C10_ANONYMOUS_VARIABLE(torch_warn_once_) = [&] { \
-    ::c10::Warning::warn({__func__, __FILE__, static_cast<uint32_t>(__LINE__)}, ::c10::str(__VA_ARGS__)); \
+    ::c10::Warning::warn({__func__, __FILE__, static_cast<uint32_t>(__LINE__)}, ::c10::str(__VA_ARGS__), false); \
     return true; \
   }()
 
@@ -364,21 +390,6 @@ inline void deprecated_AT_ERROR() {}
 
 /*
 // Deprecation disabled until we fix sites in our codebase
-C10_DEPRECATED_MESSAGE("AT_INDEX_ERROR(msg) is deprecated, use TORCH_CHECK_INDEX(false, msg) instead.")
-*/
-inline void deprecated_AT_INDEX_ERROR() {}
-
-/*
-// Deprecation disabled until we fix sites in our codebase
-C10_DEPRECATED_MESSAGE("AT_WARN is deprecated, use TORCH_WARN instead.")
-*/
-inline void deprecated_AT_WARN() {}
-
-C10_DEPRECATED_MESSAGE("AT_CHECK is deprecated, use TORCH_CHECK instead.")
-inline void deprecated_AT_CHECK() {}
-
-/*
-// Deprecation disabled until we fix sites in our codebase
 C10_DEPRECATED_MESSAGE("AT_ASSERT is deprecated, if you mean to indicate an internal invariant failure, use " \
                        "TORCH_INTERNAL_ASSERT instead; if you mean to do user error checking, use " \
                        "TORCH_CHECK.  See https://github.com/pytorch/pytorch/issues/20287 for more details.")
@@ -394,15 +405,6 @@ C10_DEPRECATED_MESSAGE("AT_ASSERTM is deprecated, if you mean to indicate an int
 inline void deprecated_AT_ASSERTM() {}
 
 }} // namespace c10::detail
-
-// Deprecated alias; this alias was deprecated because it wasn't clear to
-// people that you should use a macro with AT_ prefix inside the torch/csrc
-// directory.  Use TORCH_CHECK instead.
-#define AT_CHECK(...)                                     \
-  do {                                                    \
-    ::c10::detail::deprecated_AT_CHECK();                 \
-    C10_EXPAND_MSVC_WORKAROUND(TORCH_CHECK(__VA_ARGS__)); \
-  } while (false)
 
 // Deprecated alias; this alias was deprecated because people kept mistakenly
 // using it for user error checking.  Use TORCH_INTERNAL_ASSERT or TORCH_CHECK
@@ -436,22 +438,5 @@ inline void deprecated_AT_ASSERTM() {}
     ::c10::detail::deprecated_AT_ERROR();                                     \
     C10_EXPAND_MSVC_WORKAROUND(TORCH_CHECK(false, ::c10::str(__VA_ARGS__)));  \
   } while (false)
-
-// Deprecated alias; this alias was deprecated for consistency with TORCH_CHECK.
-#define AT_INDEX_ERROR(...)                                                         \
-  do {                                                                              \
-    ::c10::detail::deprecated_AT_INDEX_ERROR();                                     \
-    C10_EXPAND_MSVC_WORKAROUND(TORCH_CHECK_INDEX(false, ::c10::str(__VA_ARGS__)));  \
-  } while (false)
-
-// Deprecated alias; this alias was deprecated because it wasn't clear to
-// people that you should use a macro with AT_ prefix inside the torch/csrc
-// directory.  Use TORCH_WARN instead.
-#define AT_WARN(...)                                      \
-  do {                                                    \
-    ::c10::detail::deprecated_AT_WARN();                  \
-    C10_EXPAND_MSVC_WORKAROUND(TORCH_WARN(__VA_ARGS__));  \
-  } while (false)
-
 
 #endif // C10_UTIL_EXCEPTION_H_

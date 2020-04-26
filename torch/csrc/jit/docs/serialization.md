@@ -285,7 +285,7 @@ The load process has the following steps:
 
 1. Unpickle `constants.pkl`, which produces a tuple of all tensor constants
    referenced in code.
-2. Unpickle `data.pkl` into the top-level `script::Module` and return it.
+2. Unpickle `data.pkl` into the top-level `Module` and return it.
 
 The unpickling process consists of a single call to unpickle the module
 object contained in `data.pkl`. The `Unpickler` is given a callback that lets it

@@ -6,6 +6,11 @@
 namespace torch {
 namespace throughput_benchmark {
 
+std::ostream& operator<<(std::ostream& os, const BenchmarkExecutionStats& value) {
+    return os << "Average latency / iter (ms): " << value.latency_avg_ms
+              << "\n Total number of iters: " << value.num_iters;
+}
+
 void ThroughputBenchmark::addInput(py::args args, py::kwargs kwargs) {
   CHECK(script_module_.initialized() ^ module_.initialized());
   if (script_module_.initialized()) {
@@ -32,7 +37,7 @@ py::object ThroughputBenchmark::runOnce(py::args&& args, py::kwargs&& kwargs)  {
 }
 
 ThroughputBenchmark::ThroughputBenchmark(
-    jit::script::Module script_module)
+    jit::Module script_module)
     : script_module_(script_module) {}
 
 ThroughputBenchmark::ThroughputBenchmark(
@@ -102,6 +107,12 @@ void ScriptModuleBenchmark::addInput(py::args&& args, py::kwargs&& kwargs) {
       std::move(kwargs),
       model_._ivalue());
   inputs_.emplace_back(std::move(stack));
+}
+
+template <>
+void ScriptModuleBenchmark::addInput(ScriptModuleInput&& input) {
+  input.insert(input.begin(), model_._ivalue());
+  inputs_.emplace_back(std::move(input));
 }
 
 template <>

@@ -423,4 +423,18 @@ C10_EXPORT_CAFFE2_OP_TO_C10_CPU(
       "bool aligned"
     ") -> Tensor",
     RoIAlignRotatedOpFloatCPU);
+
+C10_EXPORT_CAFFE2_OP_TO_C10_CPU(
+    RoIAlignRotated2,
+    "__caffe2::RoIAlignRotated("
+      "Tensor features, "
+      "Tensor rois, "
+      "str order, "
+      "float spatial_scale, "
+      "int pooled_h, "
+      "int pooled_w, "
+      "int sampling_ratio, "
+      "bool aligned"
+    ") -> Tensor",
+    RoIAlignRotatedOpFloatCPU);
 // clang-format on

@@ -7,7 +7,7 @@ namespace caffe2 {
 std::vector<TensorShape> TensorInferenceForConvGradient(
     const OperatorDef& def,
     const std::vector<TensorShape>& in) {
-  CAFFE_ENFORCE_EQ(in.size(), 3, "ConvGradient requires 3 inputs");
+  CAFFE_ENFORCE_EQ(in.size(), 3U, "ConvGradient requires 3 inputs");
 
   if (in[0].unknown_shape()) {
     std::vector<TensorShape> out(1);
@@ -37,7 +37,7 @@ std::vector<TensorShape> TensorInferenceForConvGradient(
 OpSchema::Cost CostInferenceForConvGradient(
     const OperatorDef& def,
     const vector<TensorShape>& inputs) {
-  CAFFE_ENFORCE_EQ(inputs.size(), 3, "ConvGradient requires 3 inputs");
+  CAFFE_ENFORCE_EQ(inputs.size(), 3U, "ConvGradient requires 3 inputs");
   ArgumentHelper helper(def);
   const auto order =
       StringToStorageOrder(helper.GetSingleArgument<string>("order", "NCHW"));
