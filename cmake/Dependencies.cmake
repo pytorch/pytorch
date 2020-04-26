@@ -1554,7 +1554,20 @@ endif()
 #
 
 set(FMT_INSTALL ON CACHE BOOL " " FORCE)
+
+# Override install location of `fmt` libs.
+#
+# `fmt` uses CMAKE_INSTALL_LIBDIR to determine where to put libraries. PyTorch
+# somewhat misbehaves and installs everything to TORCH_INSTALL_LIB_DIR. For
+# consistency, make `fmt` do the same thing by temporarily overriding
+# CMAKE_INSTALL_LIBDIR.
+
+set(OLD_CMAKE_INSTALL_LIBDIR ${CMAKE_INSTALL_LIBDIR})
+set(CMAKE_INSTALL_LIBDIR ${TORCH_INSTALL_LIB_DIR})
+
 add_subdirectory(${CMAKE_SOURCE_DIR}/third_party/fmt)
+
+set(CMAKE_INSTALL_LIBDIR ${OLD_CMAKE_INSTALL_LIBDIR})
 
 # Disable compiler feature checks for `fmt`.
 #
