@@ -4,16 +4,7 @@
 import re
 from code_template import CodeTemplate
 
-try:
-    import typing  # noqa: F401
-except ImportError:
-    raise RuntimeError(
-        'Missing build dependency: Unable to import the `typing` module. '
-        'Please install it via `conda install typing` or `pip install typing`')
-
-# flake8 doesn't take into account usages in type annotations.
-from typing import Union, Set  # noqa: F401
-from typing import Any, Dict, List, Optional, Tuple, NamedTuple
+from typing import Any, Dict, List, Optional, Set, Tuple, NamedTuple
 
 try:
     from mypy_extensions import TypedDict
@@ -769,7 +760,7 @@ def gen_dispatch_key_init(var_name, formals):
         subexprs.append('c10::detail::multi_dispatch_key_set({})'.format(args))
     return [
         'DispatchKeySet _dk_set = {};'.format(' | '.join(subexprs)),
-        'DispatchKeySet _dk_mask = c10::DispatchKeySet(c10::DispatchKeySet::FULL).remove(DispatchKey::BackendSelect);',
+        'DispatchKeySet _dk_mask = c10::DispatchKeySet(DispatchKeySet::FULL_AFTER, DispatchKey::BackendSelect);',
         'DispatchKey {} = c10::impl::dispatchTypeId(_dk_set, _dk_mask);'.format(var_name),
     ]
 
