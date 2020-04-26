@@ -16011,6 +16011,12 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         # verifies out dtype overrides inference
         self.assertEqual(torch.full(o.shape, 1., out=o).dtype, o.dtype)
 
+    def test_negative_uint8_conversion(self, device):
+        vals = (-5, -3, -1, 0, 1, 3, 5)
+        a = np.array(vals, dtype=np.uint8)
+        t = torch.tensor(vals, device=device, dtype=torch.uint8)
+        self.assertEqual(torch.from_numpy(a), t.cpu())
+
     def _float_to_int_conversion_helper(self, vals, device, dtype):
         assert TEST_NUMPY
 
