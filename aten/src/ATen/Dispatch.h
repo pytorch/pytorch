@@ -7,32 +7,11 @@
 #include <c10/util/Half.h>
 #include <c10/util/complex_type.h>
 
-// wrap_complex converts std::complex to c10::complex
-template <typename T>
-struct wrap_complex_helper {
-  using type = T;
-};
-
-template <typename T>
-struct wrap_complex_helper<std::complex<T>> {
-  using type = c10::complex<T>;
-};
-
-template <typename T>
-using wrap_complex = typename wrap_complex_helper<T>::type;
 
 #define AT_PRIVATE_CASE_TYPE(enum_type, type, ...) \
   case enum_type: {                                \
     using scalar_t = type;                         \
     return __VA_ARGS__();                          \
-  }
-
-#define USE_C10_COMPLEX(...) [&]{                  \
-  using _std_scalar_t = scalar_t;                  \
-    return [&] {                                   \
-      using scalar_t = wrap_complex<_std_scalar_t>;\
-      return __VA_ARGS__();                        \
-    }();                                           \
   }
 
 // Workaround for C10_UNUSED because CUDA 10.1 and below fails to handle unused
@@ -539,9 +518,9 @@ inline void deprecated_AT_DISPATCH_ALL_TYPES_AND_HALF_AND_COMPLEX() {}
       AT_PRIVATE_CASE_TYPE(at::ScalarType::Long, int64_t, __VA_ARGS__)      \
       AT_PRIVATE_CASE_TYPE(at::ScalarType::Short, int16_t, __VA_ARGS__)     \
       AT_PRIVATE_CASE_TYPE(                                                 \
-          at::ScalarType::ComplexFloat, std::complex<float>, __VA_ARGS__)   \
+          at::ScalarType::ComplexFloat, c10::complex<float>, __VA_ARGS__)   \
       AT_PRIVATE_CASE_TYPE(                                                 \
-          at::ScalarType::ComplexDouble, std::complex<double>, __VA_ARGS__) \
+          at::ScalarType::ComplexDouble, c10::complex<double>, __VA_ARGS__) \
       AT_PRIVATE_CASE_TYPE(                                                 \
           SCALARTYPE1,                                                      \
           decltype(c10::impl::ScalarTypeToCPPType<SCALARTYPE1>::t),         \
@@ -558,11 +537,6 @@ inline void deprecated_AT_DISPATCH_ALL_TYPES_AND_HALF_AND_COMPLEX() {}
         AT_ERROR(#NAME, " not implemented for '", TYPE, "'");               \
     }                                                                       \
   }()
-
-#define AT_DISPATCH_ALL_TYPES_AND_C10_COMPLEX_AND3(                         \
-    SCALARTYPE1, SCALARTYPE2, SCALARTYPE3, TYPE, NAME, ...)                 \
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(                                   \
-    SCALARTYPE1, SCALARTYPE2, SCALARTYPE3, TYPE, NAME, USE_C10_COMPLEX(...))
 
 // ----------------------------------------------------------------------------
 // DEPRECATED MACROS, DON'T USE THESE
