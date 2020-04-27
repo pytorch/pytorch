@@ -8,11 +8,11 @@ import setuptools
 import subprocess
 import sys
 import sysconfig
-import tempfile
 import warnings
 import collections
 
 import torch
+import torch._appdirs
 from .file_baton import FileBaton
 from ._cpp_extension_versioner import ExtensionVersioner
 from .hipify import hipify_python
@@ -172,9 +172,11 @@ def get_default_build_root():
     folder returned by this function. For example, if ``p`` is the path
     returned by this function and ``ext`` the name of an extension, the build
     folder for the extension will be ``p/ext``.
+
+    This directory is **user-specific** so that multiple users on the same
+    machine won't meet permission issues.
     '''
-    # tempfile.gettempdir() will be /tmp on UNIX and \TEMP on Windows.
-    return os.path.realpath(os.path.join(tempfile.gettempdir(), 'torch_extensions'))
+    return os.path.realpath(torch._appdirs.user_cache_dir(appname='torch_extensions'))
 
 
 def check_compiler_ok_for_platform(compiler):
@@ -1389,11 +1391,7 @@ def _get_build_directory(name, verbose):
         if verbose:
             print('Creating extension directory {}...'.format(build_directory))
         # This is like mkdir -p, i.e. will also create parent directories.
-        try:
-            original_umask = os.umask(0)
-            os.makedirs(build_directory, 0o777)  # create folder with 777 so other users can reuse
-        finally:
-            os.umask(original_umask)
+        os.makedirs(build_directory, exist_ok=True)
 
     return build_directory
 
