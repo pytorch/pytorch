@@ -54,7 +54,7 @@ class TestDocCoverage(unittest.TestCase):
             'avg_pool1d', 'conv_transpose2d', 'conv_transpose1d', 'conv3d',
             'relu_', 'pixel_shuffle', 'conv2d', 'selu_', 'celu_', 'threshold_',
             'cosine_similarity', 'rrelu_', 'conv_transpose3d', 'conv1d', 'pdist',
-            'adaptive_avg_pool1d', 'conv_tbc'
+            'adaptive_avg_pool1d', 'conv_tbc', 'channel_shuffle'
         }
         has_docstring = set(
             a for a in dir(torch)
