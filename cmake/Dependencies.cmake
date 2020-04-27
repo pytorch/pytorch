@@ -596,7 +596,7 @@ if(USE_FBGEMM)
   caffe2_update_option(USE_FBGEMM ON)
 else()
   caffe2_update_option(USE_FBGEMM OFF)
-  message(WARNING 
+  message(WARNING
     "Turning USE_FAKELOWP off as it depends on USE_FBGEMM.")
   caffe2_update_option(USE_FAKELOWP OFF)
 endif()
@@ -1552,3 +1552,17 @@ endif()
 #
 # End ATen checks
 #
+
+set(FMT_INSTALL ON CACHE BOOL " " FORCE)
+add_subdirectory(${CMAKE_SOURCE_DIR}/third_party/fmt)
+
+# Disable compiler feature checks for `fmt`.
+#
+# CMake compiles a little program to check compiler features. Some of our build
+# configurations (notably the mobile build analyzer) will populate
+# CMAKE_CXX_FLAGS in ways that break feature checks. Since we already know
+# `fmt` is compatible with a superset of the compilers that PyTorch is, it
+# shouldn't be too bad to just disable the checks.
+target_compile_features(fmt INTERFACE "")
+
+list(APPEND Caffe2_DEPENDENCY_LIBS fmt::fmt)
