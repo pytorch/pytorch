@@ -33,7 +33,7 @@ inline at::Tensor dummyTensor(c10::DispatchKey dispatch_key) {
 template<class... Args>
 inline std::vector<c10::IValue> callOp(const c10::OperatorHandle& op, Args... args) {
   auto stack = makeStack(std::forward<Args>(args)...);
-  c10::Dispatcher::singleton().callBoxed(op, &stack);
+  op.callBoxed(&stack);
   return stack;
 }
 
@@ -71,6 +71,22 @@ inline void expectThrows(Functor&& functor, const char* expectMessageContains) {
   }
   ADD_FAILURE() << "Expected to throw exception containing \""
     << expectMessageContains << "\" but didn't throw";
+}
+
+template<class T, size_t N>
+void expectListEquals(c10::ArrayRef<T> expected, std::array<T, N> actual) {
+  EXPECT_EQ(expected.size(), actual.size());
+  for (size_t i = 0; i < expected.size(); ++i) {
+    EXPECT_EQ(expected[i], actual[i]);
+  }
+}
+
+template<class T>
+void expectListEquals(c10::ArrayRef<T> expected, c10::ArrayRef<T> actual) {
+  EXPECT_EQ(expected.size(), actual.size());
+  for (size_t i = 0; i < expected.size(); ++i) {
+    EXPECT_EQ(expected[i], actual[i]);
+  }
 }
 
 template<class T>
