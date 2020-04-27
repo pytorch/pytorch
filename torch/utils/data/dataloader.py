@@ -9,11 +9,13 @@ import threading
 import itertools
 import warnings
 
+
 import multiprocessing as python_multiprocessing
 import torch
 import torch.multiprocessing as multiprocessing
 from torch._utils import ExceptionWrapper
 from torch._six import queue, string_classes
+import psutil
 
 from . import IterableDataset, Sampler, SequentialSampler, RandomSampler, BatchSampler
 from . import _utils
@@ -118,7 +120,7 @@ class DataLoader(object):
     __initialized = False
 
     def __init__(self, dataset, batch_size=1, shuffle=False, sampler=None,
-                 batch_sampler=None, num_workers=0, collate_fn=None,
+                 batch_sampler=None, num_workers=0, blocking=False, collate_fn=None,
                  pin_memory=False, drop_last=False, timeout=0,
                  worker_init_fn=None, multiprocessing_context=None):
         torch._C._log_api_usage_once("python.data_loader")
@@ -136,6 +138,7 @@ class DataLoader(object):
         self.timeout = timeout
         self.worker_init_fn = worker_init_fn
         self.multiprocessing_context = multiprocessing_context
+        self.blocking = blocking
 
         # Arg-check dataset related before checking samplers because we want to
         # tell users that iterable-style datasets are incompatible with custom
@@ -700,6 +703,9 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
         # contains all `True`s if not using an iterable-style dataset
         # (i.e., if kind != Iterable).
         self._workers_status = []
+        self._block_policy = loader.blocking
+        self._batch_size = loader.batch_size
+
         for i in range(self._num_workers):
             index_queue = multiprocessing_context.Queue()
             # index_queue.cancel_join_thread()
@@ -742,8 +748,10 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
         self._worker_pids_set = True
 
         # prime the prefetch loop
-        for _ in range(2 * self._num_workers):
-            self._try_put_index()
+        if not self._block_policy:
+            for _ in range(2 * self._num_workers):
+                self._try_put_index()
+
 
     def _try_get_data(self, timeout=_utils.MP_STATUS_CHECK_INTERVAL):
         # Tries to fetch data from `self._data_queue` once for a given timeout.
@@ -925,6 +933,8 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
                     return data
 
     def _next_data(self):
+        if self._block_policy:
+            self._try_put_index()
         while True:
             # If the worker responsible for `self._rcvd_idx` has already ended
             # and was unable to fulfill this task (due to exhausting an `IterableDataset`),
@@ -948,7 +958,7 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
             # Now `self._rcvd_idx` is the batch index we want to fetch
 
             # Check if the next sample has already been generated
-            if len(self._task_info[self._rcvd_idx]) == 2:
+            if len(self._task_info[self._rcvd_idx]) == 2 and not self._block_policy:
                 data = self._task_info.pop(self._rcvd_idx)[1]
                 return self._process_data(data)
 
@@ -963,25 +973,66 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
                     self._try_put_index()
                     continue
 
-            if idx != self._rcvd_idx:
-                # store out-of-order samples
-                self._task_info[idx] += (data,)
-            else:
+            # store out-of-order samples
+            self._task_info[idx] += (data,)
+            if idx == self._rcvd_idx and not self._block_policy:
                 del self._task_info[idx]
+                return self._process_data(data)
+            elif self._tasks_outstanding == 0 and self._block_policy:
+                img = []
+                label = []
+                for i in range(self._rcvd_idx, self._send_idx):
+                    info = self._task_info[i]
+                    _data = self._task_info.pop(i)[1]
+                    img.append(_data[0])
+                    label.append(_data[1])
+                    self._rcvd_idx += 1
+                data = [torch.cat(img, dim=0), torch.cat(label, dim=0)]
                 return self._process_data(data)
 
     def _try_put_index(self):
-        assert self._tasks_outstanding < 2 * self._num_workers
+        if self._block_policy:
+            assert self._tasks_outstanding < self._num_workers
+        else:
+            assert self._tasks_outstanding < 2 * self._num_workers
         try:
             index = self._next_index()
         except StopIteration:
             return
+        available_workers = 0
         for _ in range(self._num_workers):  # find the next active worker, if any
             worker_queue_idx = next(self._worker_queue_idx_cycle)
             if self._workers_status[worker_queue_idx]:
-                break
+                if self._block_policy:
+                    available_workers += 1
+                else:
+                    break
         else:
             # not found (i.e., didn't break)
+            if self._block_policy:
+                if self._batch_size < available_workers:
+                    available_workers = self._batch_size
+                start = 0
+                div = self._batch_size // available_workers
+                rem = self._batch_size % available_workers
+                for _ in range(self._num_workers):  # find the next active worker, if any
+                    if start == len(index):
+                        break
+                    worker_queue_idx = next(self._worker_queue_idx_cycle)
+                    if self._workers_status[worker_queue_idx]:
+                        if rem != 0:
+                            end = start + div + 1
+                            rem -= 1
+                        else:
+                            end = start + div
+                        if end > self._batch_size:
+                            end = self._batch_size
+                        idx = index[start: end]
+                        start = end
+                        self._index_queues[worker_queue_idx].put((self._send_idx, idx))
+                        self._task_info[self._send_idx] = (worker_queue_idx,)
+                        self._tasks_outstanding += 1
+                        self._send_idx += 1
             return
 
         self._index_queues[worker_queue_idx].put((self._send_idx, index))
@@ -990,8 +1041,9 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
         self._send_idx += 1
 
     def _process_data(self, data):
-        self._rcvd_idx += 1
-        self._try_put_index()
+        if not self._block_policy:
+            self._try_put_index()
+            self._rcvd_idx += 1
         if isinstance(data, ExceptionWrapper):
             data.reraise()
         return data
