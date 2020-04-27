@@ -98,6 +98,7 @@ parser.add_argument('--subprocess', action='store_true',
 parser.add_argument('--seed', type=int, default=1234)
 parser.add_argument('--accept', action='store_true')
 parser.add_argument('--ge_config', type=str)
+parser.add_argument('--repeat', type=int, default=1)
 parser.add_argument('--test_bailouts', action='store_true')
 
 GRAPH_EXECUTOR = ProfilingMode.SIMPLE if IS_SANDCASTLE else ProfilingMode.PROFILING
@@ -109,6 +110,7 @@ elif args.ge_config == 'simple':
 
 TEST_BAILOUTS = args.test_bailouts
 TEST_IN_SUBPROCESS = args.subprocess
+REPEAT_COUNT = args.repeat
 SEED = args.seed
 if not expecttest.ACCEPT:
     expecttest.ACCEPT = args.accept
@@ -210,6 +212,10 @@ def run_tests(argv=UNITTEST_ARGS):
             if verbose:
                 print('Test results will be stored in {}'.format(test_report_path))
             unittest.main(argv=argv, testRunner=xmlrunner.XMLTestRunner(output=test_report_path, verbosity=2 if verbose else 1))
+        elif REPEAT_COUNT > 1:
+            for _ in range(REPEAT_COUNT):
+                if not unittest.main(exit=False, argv=argv).result.wasSuccessful():
+                    sys.exit(-1)
         else:
             unittest.main(argv=argv)
 
