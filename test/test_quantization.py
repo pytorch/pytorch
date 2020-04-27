@@ -30,6 +30,7 @@ from quantization.test_workflow_module import TestFakeQuantizePerTensor  # noqa:
 from quantization.test_workflow_module import TestFakeQuantizePerChannel  # noqa: F401
 from quantization.test_workflow_module import TestObserver  # noqa: F401
 # TODO: merge with TestObserver
+# TODO: some tests belong to test_quantize.py, e.g. test_record_observer
 from quantization.test_workflow_module import TestRecordHistogramObserver  # noqa: F401
 
 # Workflow
