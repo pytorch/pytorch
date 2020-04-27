@@ -4,7 +4,6 @@ import torch.nn.functional as F
 import torch.nn.quantized.functional as qF
 
 # Standard library
-import unittest
 import numpy as np
 
 # Testing utils

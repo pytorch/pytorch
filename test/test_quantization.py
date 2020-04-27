@@ -16,7 +16,6 @@ from quantization.test_quantized_op import TestComparatorOps  # noqa: F401
 from quantization.test_quantized_functional import TestQuantizedFunctional  # noqa: F401
 
 # Quantized Module
-# TODO: split functional
 from quantization.test_quantized_module import TestStaticQuantizedModule  # noqa: F401
 from quantization.test_quantized_module import TestDynamicQuantizedModule  # noqa: F401
 
@@ -33,7 +32,6 @@ from quantization.test_workflow_module import TestObserver  # noqa: F401
 # TODO: merge with TestObserver
 from quantization.test_workflow_module import TestRecordHistogramObserver  # noqa: F401
 
-
 # Workflow
 # 1. Eager mode quantization
 from quantization.test_quantize import TestPostTrainingStatic  # noqa: F401
@@ -44,14 +42,11 @@ from quantization.test_quantize import TestGraphModePostTrainingStatic  # noqa: 
 # TODO: merge with other tests in test_quantize.py?
 from quantization.test_quantize import TestFunctionalModule  # noqa: F401
 from quantization.test_quantize import TestFusion  # noqa: F401
+from quantization.test_quantize import TestModelNumerics  # noqa: F401
 # 2. Graph mode quantization
 from quantization.test_quantize_script import TestQuantizeScriptJitPasses  # noqa: F401
 from quantization.test_quantize_script import TestQuantizeScriptPTSQOps  # noqa: F401
 from quantization.test_quantize_script import TestQuantizeDynamicScript  # noqa: F401
-
-# Model Numerics
-# TODO: move to test_quantize
-from quantization.test_numerics import TestModelNumerics  # noqa: F401
 
 # Tooling: numric_suite
 from quantization.test_numeric_suite import TestEagerModeNumericSuite  # noqa: F401
