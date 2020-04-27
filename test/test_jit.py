@@ -99,8 +99,6 @@ if torch.cuda.is_available():
             RUN_CUDA_HALF = False
 
 
-PY35 = sys.version_info >= (3, 5)
-
 def canonical(graph):
     return torch._C._jit_pass_canonicalize(graph).str(False)
 
@@ -5468,7 +5466,6 @@ a")
         b = torch.rand(1, requires_grad=True)
         self.checkScript(func, (a, b), optimize=True)
 
-    @unittest.skipIf(not PY35, "Python 3.5 needed")
     def test_matmul_py3(self):
         code = dedent("""
         def fn(a, b):
@@ -11081,7 +11078,6 @@ a")
         self.checkScript(fn2, (x, y, z), optimize=True)
         self.checkScript(fn3, (x, y, z), optimize=True)
 
-    @unittest.skipIf(not PY35, "Python 3.5 needed")
     def test_type_annotation_py3(self):
         code = dedent("""
         import torch
@@ -14151,7 +14147,6 @@ a")
             return fn
 
     #  Python AST Frontend , Python 3-style type annotations , Script function
-    @unittest.skipIf(not PY35, "Python 3.5 needed")
     def test_annot_ast_py3_fn(self):
         code = dedent('''
             from typing import Tuple, List, Optional
@@ -14168,7 +14163,6 @@ a")
             test_str.append(str(fn.schema))
         self.assertExpectedStripMangled("\n".join(test_str))
 
-    @unittest.skipIf(not PY35, "Python 3.5 needed")
     def test_multiline_annot_ast_py3_fn(self):
         code = dedent('''
             from typing import Tuple, List, Optional
@@ -14224,7 +14218,6 @@ a")
                 return a + b + c
 
     #  Python AST Frontend , Python 3-style type annotations , Script method
-    @unittest.skipIf(not PY35, "Python 3.5 needed")
     def test_annot_ast_py3_method(self):
         code = dedent('''
             from typing import Tuple, List, Optional
@@ -14246,7 +14239,6 @@ a")
         self.assertExpectedStripMangled("\n".join(test_str))
 
     #  Python AST Frontend , MyPy-style type comments , Script function
-    @unittest.skipIf(not PY35, "Python 3.5 needed")
     def test_annot_ast_mypy_fn(self):
         code = dedent('''
             import torch
@@ -14263,7 +14255,6 @@ a")
         self.assertExpected("\n".join(test_str))
 
     #  Python AST Frontend , MyPy-style type comments , Script method
-    @unittest.skipIf(not PY35, "Python 3.5 needed")
     def test_annot_ast_mypy_method(self):
         code = dedent('''
             import torch
@@ -17871,6 +17862,14 @@ class TestDocs(unittest.TestCase):
         if result.returncode != 0:
             report_error(result)
 
+
+class TestProducerVersion(unittest.TestCase):
+
+    def test_version(self):
+        # issue gh-32561
+        self.assertEqual(torch.onnx.producer_version, torch.__version__[:3])
+
+
 for test in autograd_method_tests():
     add_autograd_test(*test)
 
@@ -17891,11 +17890,9 @@ for test in criterion_tests:
 
 if __name__ == '__main__':
     run_tests()
-    PY36 = sys.version_info >= (3, 6)
-    if PY36:
-        import test_jit_py3
-        import jit.test_module_interface
-        suite = unittest.findTestCases(test_jit_py3)
-        unittest.TextTestRunner().run(suite)
-        suite = unittest.findTestCases(jit.test_module_interface)
-        unittest.TextTestRunner().run(suite)
+    import test_jit_py3
+    import jit.test_module_interface
+    suite = unittest.findTestCases(test_jit_py3)
+    unittest.TextTestRunner().run(suite)
+    suite = unittest.findTestCases(jit.test_module_interface)
+    unittest.TextTestRunner().run(suite)
