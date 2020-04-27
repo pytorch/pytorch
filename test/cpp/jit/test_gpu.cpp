@@ -738,7 +738,7 @@ void testGPU_FusionCodeGen() {
   std::vector<at::Tensor> outputs{{output}};
 
   torch::jit::fuser::cuda::compileKernel(fusion, &prog);
-  torch::jit::fuser::cuda::runTestKernel(prog, {}, outputs);
+  torch::jit::fuser::cuda::runTestKernel(&prog, {}, outputs);
 
   at::Tensor output_ref = at::zeros_like(output, options);
   output_ref = output_ref + 0.0 + 1.0 + 2.0 + 3.0;
@@ -821,7 +821,7 @@ void testGPU_FusionCodeGen2() {
   std::vector<at::Tensor> outputs{{output}};
 
   torch::jit::fuser::cuda::compileKernel(fusion, &prog);
-  torch::jit::fuser::cuda::runTestKernel(prog, inputs, outputs);
+  torch::jit::fuser::cuda::runTestKernel(&prog, inputs, outputs);
 
   at::Tensor tv2_ref = input2 + 2.0;
   at::Tensor output_ref = input1 + tv2_ref;
@@ -994,7 +994,7 @@ void testGPU_FusionSimplePWise() {
   std::vector<at::Tensor> outputs{{output}};
 
   torch::jit::fuser::cuda::compileKernel(fusion, &prog);
-  torch::jit::fuser::cuda::runTestKernel(prog, inputs, outputs);
+  torch::jit::fuser::cuda::runTestKernel(&prog, inputs, outputs);
 
   at::Tensor tv2_ref = input2 + 2.0;
   at::Tensor output_ref = input1 + tv2_ref;
@@ -1051,7 +1051,7 @@ void testGPU_FusionExecKernel() {
   std::vector<at::Tensor> outputs{{output}};
 
   torch::jit::fuser::cuda::compileKernel(fusion, &prog);
-  torch::jit::fuser::cuda::runTestKernel(prog, inputs, outputs);
+  torch::jit::fuser::cuda::runTestKernel(&prog, inputs, outputs);
 
   at::Tensor check = at::full({1, 128}, 4, options);
   ;
@@ -1150,7 +1150,7 @@ void testGPU_FusionLoopUnroll() {
   std::vector<at::Tensor> outputs{{output}};
 
   torch::jit::fuser::cuda::compileKernel(fusion, &prog);
-  torch::jit::fuser::cuda::runTestKernel(prog, inputs, outputs);
+  torch::jit::fuser::cuda::runTestKernel(&prog, inputs, outputs);
 
   at::Tensor check = at::full({inp_size}, 4, options);
 
@@ -1262,7 +1262,7 @@ void testGPU_FusionUnaryOps() {
     std::vector<at::Tensor> outputs{{output}};
 
     torch::jit::fuser::cuda::compileKernel(fusion, &prog);
-    torch::jit::fuser::cuda::runTestKernel(prog, inputs, outputs);
+    torch::jit::fuser::cuda::runTestKernel(&prog, inputs, outputs);
 
     ref_output = aten_funcs[i](input1);
 
@@ -1396,11 +1396,11 @@ void testGPU_FusionTernaryOps() {
   Float*       f0 = new Float(0.f);
   Float*       f1 = new Float(1.f);
   Float*       f6 = new Float(6.f);
-  Int*		   i1 = new Int(1);
+  Bool*		   b1 = new Bool(true);
 
   Val*     intrm1 = clamp    (tv0,    f0,     f6);
   Val*     intrm2 = threshold(intrm1, f1,     f0);
-  TensorView* out = static_cast<TensorView*>(where(i1, intrm2, tv1));
+  TensorView* out = static_cast<TensorView*>(where(b1, intrm2, tv1));
 
   fusion.addInput(tv0);
   fusion.addInput(tv1);
@@ -1445,6 +1445,52 @@ void testGPU_FusionCastOps() {
   prog.block(32);
 
   torch::jit::fuser::cuda::compileKernel(fusion, &prog);
+}
+
+void testGPU_FusionRandLike() {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  std::vector<IterDomain*> dom;
+  for (int i = 0; i < 2; i++)
+    dom.push_back(new IterDomain(new Int(0), new Int()));
+
+  TensorView* tv0 = new TensorView(new TensorDomain(dom), DataType::Float);
+  TensorView* tv1 = static_cast<TensorView*>(unaryOp(UnaryOpType::RandLike, tv0));
+
+  fusion.addInput(tv0);
+  fusion.addOutput(tv1);
+  tv0->computeAt(tv1, -1);
+
+  tv1->axis(0)->parallelize(ParallelType::BIDx);
+  tv1->axis(-1)->parallelize(ParallelType::TIDx);
+
+  torch::jit::fuser::cuda::CudaKernel prog;
+  prog.device_ = 0;
+  prog.grid(1);
+  prog.block(4);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+
+  at::Tensor input1     = at::rand({1,4}, options);
+  at::Tensor output     = at::empty_like(input1);
+
+  std::vector<at::Tensor> inputs{{input1}};
+  std::vector<at::Tensor> outputs{{output}};
+
+  at::manual_seed(0);
+  torch::jit::fuser::cuda::compileKernel(fusion, &prog);
+  torch::jit::fuser::cuda::runTestKernel(&prog, inputs, outputs);
+
+  at::manual_seed(0);
+  at::Tensor ref_output = at::rand_like(input1);
+
+  TORCH_CHECK(output.equal(ref_output),
+              "\nOp Type: -- ", UnaryOpType::RandLike,
+              " -- had a mismatch.\n",
+              "IN : ", input1, "\n",
+              "JIT: ", output, "\n",
+              "REF: ", ref_output, "\n");
 }
 
 void testGPU_Fusion() {}

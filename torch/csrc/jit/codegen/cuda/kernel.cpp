@@ -314,12 +314,20 @@ void runKernel(
 // WARNING:
 // This function is here for testing purposes only
 void runTestKernel(
-    CudaKernel& entry,
+    CudaKernel* entry,
     const std::vector<at::Tensor>& inputs,
     std::vector<at::Tensor>& outputs) {
   const auto prior_device = at::cuda::current_device();
-  at::cuda::set_device(entry.device_);
+  at::cuda::set_device(entry->device_);
   auto stream = at::cuda::getCurrentCUDAStream();
+
+  // TODO: Proper API to establish reasonable launch configurations;
+  // Naive launch config;
+  size_t numel = outputs[0].numel();
+
+  // TODO: we can't randomly clap down this until we got striding.
+  // const auto nBlocks = std::min(entry->max_blocks_, ceilDiv(numel, 128));
+  const auto nBlocks = ceilDiv(numel, 128);
 
   KernelArgumentHolder kernel_args;
 
@@ -334,15 +342,32 @@ void runTestKernel(
     kernel_args.push(output);
   }
 
+  // TODO: this probably won't work for us.
+  if (entry->has_random_) {
+    std::pair<uint64_t, uint64_t> philox_engine_inputs;
+    const auto rand_offset =
+        4 * (std::ceil(numel / (4.0 * 128 * nBlocks)) + 1);
+    auto gen = at::cuda::detail::getDefaultCUDAGenerator();
+    {
+      // See Note [Acquire lock when using random generators]
+      std::lock_guard<std::mutex> lock(gen.mutex());
+      philox_engine_inputs =
+          at::check_generator<at::CUDAGeneratorImpl>(gen)->philox_engine_inputs(
+              rand_offset);
+    }
+    kernel_args.push(philox_engine_inputs.first);
+    kernel_args.push(philox_engine_inputs.second);
+  }
+
   // launch kernel;
   AT_CUDA_DRIVER_CHECK(nvrtc().cuLaunchKernel(
-      entry.function_,
-      entry.grid_.x,
-      entry.grid_.y,
-      entry.grid_.z,
-      entry.block_.x,
-      entry.block_.y,
-      entry.block_.z,
+      entry->function_,
+      entry->grid_.x,
+      entry->grid_.y,
+      entry->grid_.z,
+      entry->block_.x,
+      entry->block_.y,
+      entry->block_.z,
       0,
       stream,
       kernel_args.getBuffer(),
