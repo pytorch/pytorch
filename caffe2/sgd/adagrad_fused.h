@@ -20,6 +20,8 @@ class SparseAdagradFusedWithSparseLengthsSumGradientOp final
       Workspace* ws)
       : Operator<CPUContext>(operator_def, ws),
         epsilon_(this->template GetSingleArgument<float>("epsilon", 1e-5)) {
+    LOG(INFO) << "gradient optimization operator in use: "
+              << "SparseAdagradFusedWithSparseLengthsSumGradientOp";
     const T decay = this->template GetSingleArgument<T>("decay", 1.0);
     CAFFE_ENFORCE_EQ(
         decay, 1.0, "Decay is not supported for SparseSimdAdagradOp");
@@ -148,6 +150,8 @@ class SparseAdagradFusedWithSparseLengthsWeightedSumGradientOp final
       Workspace* ws)
       : Operator<CPUContext>(operator_def, ws),
         epsilon_(this->template GetSingleArgument<float>("epsilon", 1e-5)) {
+    LOG(INFO) << "gradient optimization operator in use: "
+              << "SparseAdagradFusedWithSparseLengthsWeightedSumGradientOp";
     const T decay = this->template GetSingleArgument<T>("decay", 1.0);
     CAFFE_ENFORCE_EQ(
         decay, 1.0, "Decay is not supported for SparseSimdAdagradOp");
@@ -315,6 +319,9 @@ class SparseAdagradFusedWithSparseLengthsWeightedSumGradientApproxOp final
       Workspace* ws)
       : Operator<CPUContext>(operator_def, ws),
         epsilon_(this->template GetSingleArgument<float>("epsilon", 1e-5)) {
+    LOG(INFO)
+        << "gradient optimization operator in use: "
+        << "SparseAdagradFusedWithSparseLengthsWeightedSumGradientApproxOp";
     const T decay = this->template GetSingleArgument<T>("decay", 1.0);
     CAFFE_ENFORCE_EQ(
         decay, 1.0, "Decay is not supported for SparseSimdAdagradOp");
