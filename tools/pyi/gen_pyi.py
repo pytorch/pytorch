@@ -75,6 +75,7 @@ blacklist = [
     'norm',
     'chain_matmul',
     'stft',
+    'istft',
     'tensordot',
     'norm',
     'split',
