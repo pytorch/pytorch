@@ -17,7 +17,7 @@
 #include <caffe2/serialize/istream_adapter.h>
 
 #include <ATen/ATen.h>
-#include <fmt/core.h>
+#include <fmt/format.h>
 
 #include <fstream>
 #include <string>
