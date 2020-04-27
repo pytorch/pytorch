@@ -1,6 +1,5 @@
 import os
 import sys
-import unittest
 import inspect
 from typing import List, Dict
 from textwrap import dedent
@@ -8,7 +7,6 @@ from collections import OrderedDict
 
 import torch
 from torch.testing import FileCheck
-from torch._six import PY2
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
@@ -451,14 +449,14 @@ class TestList(JitTestCase):
             self.assertEqual(fn(*inputs), torch.jit.script(fn)(*inputs))
 
         def foo(names, results):
-            # type: (List[int], List[int])
+            # type: (List[int], List[int]) -> List[Tuple[int, int]]
             return [(k + 5, v - 2) for k, v in zip(names, results)]
 
         test_func(foo, ([1, 2, 4], [4, 7, 9]))
         test_func(foo, ([5], [4, 7, 9]))
 
         def fn(x):
-            # type: (int)
+            # type: (int) -> List[int]
             return [i for i in range(x)]  # noqa: C416
 
         test_func(fn, (9,))
@@ -649,7 +647,6 @@ class TestList(JitTestCase):
 
         self.checkScript(test_pop_slice, ())
 
-    @unittest.skipIf(sys.version_info < (3, 3), "clear not supported in version < 3.3")
     def test_mutable_list_clear_empty(self):
         def test_clear_empty():
             a = torch.jit.annotate(List[int], [])
@@ -658,7 +655,6 @@ class TestList(JitTestCase):
             return len(a) == 0
         self.checkScript(test_clear_empty, ())
 
-    @unittest.skipIf(sys.version_info < (3, 3), "clear not supported in version < 3.3")
     def test_mutable_list_clear(self):
         def test_clear():
             a = [1, 2, 3, 4]
@@ -1256,10 +1252,7 @@ class TestDict(JitTestCase):
         self.assertEqual(len(eager_out[1]), len(script_out[1]))
 
         # Check that the item is the correct types
-        if PY2:
-            self.assertTrue(isinstance(script_out[0][0], unicode))
-        else:
-            self.assertTrue(isinstance(script_out[0][0], str))
+        self.assertTrue(isinstance(script_out[0][0], str))
         self.assertTrue(isinstance(script_out[0][1], torch.Tensor))
 
     def test_clear(self):

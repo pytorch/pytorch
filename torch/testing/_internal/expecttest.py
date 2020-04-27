@@ -196,6 +196,15 @@ class TestCase(unittest.TestCase):
             else:
                 self.assertEqual(expect, actual, msg=help_text)
 
+    def assertExpectedRaisesInline(self, exc_type, callable, expect, *args, **kwargs):
+        try:
+            callable(*args, **kwargs)
+        except exc_type as e:
+            self.assertExpectedInline(str(e), expect)
+            return
+        # Don't put this in the try block; the AssertionError will catch it
+        self.fail(msg="Did not raise when expected to")
+
 
 if __name__ == "__main__":
     import doctest

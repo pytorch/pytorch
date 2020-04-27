@@ -8,7 +8,7 @@
 #include <ATen/quantized/Quantizer.h>
 #include <ATen/MemoryOverlap.h>
 #include <ATen/NamedTensorUtils.h>
-#include <ATen/core/op_registration/op_registration.h>
+#include <torch/library.h>
 
 namespace {
 
@@ -112,7 +112,7 @@ static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) 
   }
 
   if (self.is_quantized() && !src.is_quantized()) {
-    return quantized_copy_from_float_(self, src);
+    return quantized_copy_from_float_cpu_(self, src);
   }
 
   if (self.is_quantized() && src.is_quantized()) {

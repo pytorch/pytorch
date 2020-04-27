@@ -12,7 +12,7 @@
 #include <ATen/Config.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/Parallel.h>
-#include <ATen/core/op_registration/op_registration.h>
+#include <torch/library.h>
 
 namespace at {
 namespace native {
@@ -245,26 +245,19 @@ Tensor quantized_instance_norm_impl(
       qx, num_channels, weight, bias, eps, output_scale, output_zero_point);
 }
 
-// Keep the registry in the anonymous namespace.
-namespace {
-class QLayerNorm2d final : public torch::OperatorKernel {
- public:
-  Tensor operator()(
-      Tensor input,
-      std::vector<int64_t> normalized_shape,
-      Tensor weight /* optional */,
-      Tensor bias /* optional */,
-      double eps,
-      double output_scale,
-      int64_t output_zero_point) {
-    return quantized_layer_norm_impl(
-        input, normalized_shape, weight, bias, eps, output_scale, output_zero_point);
-  }
-};
-
-class QGroupNorm final : public torch::OperatorKernel {
- public:
-  Tensor operator()(
+TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
+  // TODO: this is kind of... blegh
+  m.impl("layer_norm", [](
+    Tensor input,
+    std::vector<int64_t> normalized_shape,  // because IntArrayRef doesn't work
+    Tensor weight /* optional */,
+    Tensor bias /* optional */,
+    double eps,
+    double output_scale,
+    int64_t output_zero_point) {
+      return quantized_layer_norm_impl(input, normalized_shape, weight, bias, eps, output_scale, output_zero_point);
+  });
+  m.impl("group_norm", [](
       Tensor qx,
       int64_t num_groups,
       Tensor weight,
@@ -274,12 +267,8 @@ class QGroupNorm final : public torch::OperatorKernel {
       int64_t output_zero_point) {
     return quantized_group_norm_impl(
         qx, num_groups, weight, bias, eps, output_scale, output_zero_point);
-  }
-};
-
-class QInstanceNorm final : public torch::OperatorKernel {
- public:
-  Tensor operator()(
+  });
+  m.impl("instance_norm", [](
       Tensor qx,
       Tensor weight,
       Tensor bias,
@@ -288,40 +277,8 @@ class QInstanceNorm final : public torch::OperatorKernel {
       int64_t output_zero_point) {
     return quantized_instance_norm_impl(
         qx, weight, bias, eps, output_scale, output_zero_point);
-  }
-};
-
-static auto registry = torch::RegisterOperators().op(
-    "quantized::layer_norm(Tensor input, "
-    "int[] normalized_shape, "
-    "Tensor weight, "
-    "Tensor bias, "
-    "float eps, "
-    "float output_scale, "
-    "int output_zero_point) -> Tensor",
-    torch::RegisterOperators::options().kernel<QLayerNorm2d>(
-        DispatchKey::QuantizedCPU))
-.op(
-    "quantized::group_norm(Tensor qx, "
-    "int num_groups, "
-    "Tensor weight, "
-    "Tensor bias, "
-    "float eps, "
-    "float output_scale, "
-    "int output_zero_point) -> Tensor",
-    torch::RegisterOperators::options().kernel<QGroupNorm>(
-        DispatchKey::QuantizedCPU))
-.op(
-    "quantized::instance_norm(Tensor qx, "
-    "Tensor weight, "
-    "Tensor bias, "
-    "float eps, "
-    "float output_scale, "
-    "int output_zero_point) -> Tensor",
-    torch::RegisterOperators::options().kernel<QInstanceNorm>(
-        DispatchKey::QuantizedCPU));
-
-} // namespace
+  });
+}
 
 DEFINE_DISPATCH(LayerNormKernel);
 DEFINE_DISPATCH(LayerNormBackwardKernel);
