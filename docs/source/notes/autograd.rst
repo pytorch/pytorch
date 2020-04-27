@@ -123,9 +123,13 @@ gradients are correct.
 
 Multithreaded Autograd
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^
-The autograd engine allows the caller thread to drive the backward execution, user
-could write their own threading code and does not block on the concurrent backwards,
-example code could be:
+The autograd engine is responsible for running all the backward operations
+necessary to compute the backward pass. This section will describe all the details
+that can help you make the best use of it in a multithreaded environment.(this is
+relevant only for PyTorch 1.6+ as the behavior in previous version was different).
+
+User could train their model with multithreading code (e.g. Hogwild training), and
+does not block on the concurrent backward computations, example code could be:
 
 .. code::
 
@@ -169,12 +173,11 @@ backward calls across threads, because two backward calls might access and try
 to accumulate the same ``.grad`` attribute. This is technically not safe, and
 it might result in racing condition and the result might be invalid to use.
 
-But this is expected pattern if you are using the multithreading
-approach to drive the whole training process but using shared
-parameters, user who use multithreading should have the threading model
-in mind and should expect this to happen. User could use the functional API
-:func:`torch.autograd.grad` to calculate the gradients instead of
-``backward()`` to avoid non-determinism.
+But this is expected pattern if you are using the multithreading approach to
+drive the whole training process but using shared parameters, user who use
+multithreading should have the threading model in mind and should expect this
+to happen. User could use the functional API :func:`torch.autograd.grad` to
+calculate the gradients instead of ``backward()`` to avoid non-determinism.
 
 Graph retaining
 ------------------

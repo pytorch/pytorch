@@ -82,7 +82,7 @@ call_torchbind_method_from_stack(
                    std::remove_cv_t<std::remove_reference_t<
                        c10::guts::typelist::
                            element_t<ivalue_arg_indices, IValueArgTypes>>>,
-                   AllowDeprecatedTypes>(std::move(
+                   AllowDeprecatedTypes>::call(std::move(
       torch::jit::peek(stack, ivalue_arg_indices, num_ivalue_args)))...);
 }
 

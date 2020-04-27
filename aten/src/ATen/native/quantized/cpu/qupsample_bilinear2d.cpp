@@ -1,7 +1,7 @@
 #include <ATen/ATen.h>
 #include <ATen/native/UpSample.h>
+#include <ATen/native/quantized/affine_quantizer.h>
 #include <ATen/native/quantized/cpu/quantized_ops.h>
-#include <ATen/quantized/Quantizer.h>
 
 #include <algorithm>
 #include <cmath>
@@ -78,7 +78,7 @@ static void upsample_bilinear2d_out_frame(
                 (w0lambda * pos1[h1p * input_width] +
                  w1lambda * pos1[h1p * input_width + w1p]) - input.q_zero_point();
         // requantization
-        pos2[0] = at::quantize_val<scalar_t>(
+        pos2[0] = at::native::quantize_val<scalar_t>(
                       output_scale, output.q_zero_point(), result)
                       .val_;
         pos1 += input_width * input_height;
