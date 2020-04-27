@@ -23,7 +23,7 @@ from torch.quantization import default_per_channel_weight_observer
 from torch.quantization import default_per_channel_qconfig
 from torch.quantization._quantize_script import quantize_script, quantize_dynamic_script
 
-from torch.testing._internal.common_utils import TEST_WITH_UBSAN, IS_WINDOWS, IS_PPC, IS_MACOS
+from torch.testing._internal.common_utils import run_tests, TEST_WITH_UBSAN, IS_WINDOWS, IS_PPC, IS_MACOS
 from torch.testing._internal.common_quantization import QuantizationTestCase, \
     AnnotatedSingleLayerLinearModel, SingleLayerLinearModel, \
     AnnotatedConvModel, ConvModel, \
@@ -1374,88 +1374,94 @@ class TestFusion(QuantizationTestCase):
         model = quantize(model, test_only_eval_fn, self.img_data)
         checkQuantized(model)
 
-    def test_fusion_sequential_model_train(self):
-        model = ModelWithSequentialFusion().train()
-        model.to(torch.float)
-        fuse_modules(model, [['conv1', 'relu1'] ,
-                             ['features.0.0', 'features.0.1', 'features.0.2'],
-                             ['features.1.0', 'features.1.1', 'features.1.2'],
-                             ['features.2.0', 'features.2.1', 'features.2.2'],
-                             ['classifier.0', 'classifier.1']], inplace=True)
-        self.assertEqual(type(model.conv1), nni.ConvReLU2d,
-                         "Fused Conv + Relu: nni.ConvReLU2d")
-        self.assertEqual(type(model.conv1[0]), nn.Conv2d,
-                         "Fused Conv + Relu: Conv2d")
-        self.assertEqual(type(model.conv1[1]), nn.ReLU,
-                         "Fused Conv + Relu: Relu")
-        self.assertEqual(type(model.relu1), nn.Identity,
-                         "Fused Conv + Relu: Identity")
-        for i in range(3):
-            self.assertEqual(type(model.features[i][0]), nni.ConvBnReLU2d,
-                             "Fused submodule Conv + folded BN")
-            self.assertEqual(type(model.features[i][1]), nn.Identity,
-                             "Fused submodule (skipped BN)")
-            self.assertEqual(type(model.features[i][2]), nn.Identity,
-                             "Non-fused submodule Conv")
-        self.assertEqual(type(model.classifier[0]), nni.LinearReLU)
-        self.assertEqual(type(model.classifier[1]), nn.Identity)
-        model.qconfig = default_qat_qconfig
-        prepare_qat(model, inplace=True)
-        self.checkObservers(model)
-        model(self.img_data[0][0])
+    @given(qengine=st.sampled_from(("fbgemm", "qnnpack")))
+    def test_fusion_sequential_model_train(self, qengine):
+        if qengine in torch.backends.quantized.supported_engines:
+            with override_quantized_engine(qengine):
+                model = ModelWithSequentialFusion().train()
+                model.to(torch.float)
+                fuse_modules(model, [['conv1', 'relu1'] ,
+                                     ['features.0.0', 'features.0.1', 'features.0.2'],
+                                     ['features.1.0', 'features.1.1', 'features.1.2'],
+                                     ['features.2.0', 'features.2.1', 'features.2.2'],
+                                     ['classifier.0', 'classifier.1']], inplace=True)
+                self.assertEqual(type(model.conv1), nni.ConvReLU2d,
+                                 "Fused Conv + Relu: nni.ConvReLU2d")
+                self.assertEqual(type(model.conv1[0]), nn.Conv2d,
+                                 "Fused Conv + Relu: Conv2d")
+                self.assertEqual(type(model.conv1[1]), nn.ReLU,
+                                 "Fused Conv + Relu: Relu")
+                self.assertEqual(type(model.relu1), nn.Identity,
+                                 "Fused Conv + Relu: Identity")
+                for i in range(3):
+                    self.assertEqual(type(model.features[i][0]), nni.ConvBnReLU2d,
+                                     "Fused submodule Conv + folded BN")
+                    self.assertEqual(type(model.features[i][1]), nn.Identity,
+                                     "Fused submodule (skipped BN)")
+                    self.assertEqual(type(model.features[i][2]), nn.Identity,
+                                     "Non-fused submodule Conv")
+                self.assertEqual(type(model.classifier[0]), nni.LinearReLU)
+                self.assertEqual(type(model.classifier[1]), nn.Identity)
+                model.qconfig = torch.quantization.get_default_qat_qconfig(qengine)
+                prepare_qat(model, inplace=True)
+                self.checkObservers(model)
+                model(self.img_data[0][0])
 
 
-        def checkQAT(model):
-            self.assertEqual(type(model.conv1), nniqat.ConvReLU2d)
-            self.assertEqual(type(model.relu1), nn.Identity)
-        for i in range(3):
-            self.assertEqual(type(model.features[i][0]), nniqat.ConvBnReLU2d,
-                             "Fused submodule Conv + folded BN")
-            self.assertEqual(type(model.features[i][1]), nn.Identity,
-                             "Fused submodule (skipped BN)")
-            self.assertEqual(type(model.features[i][2]), nn.Identity,
-                             "Non-fused submodule Conv")
-        self.assertEqual(type(model.classifier[0]), nniqat.LinearReLU)
-        self.assertEqual(type(model.classifier[1]), nn.Identity)
+                def checkQAT(model):
+                    self.assertEqual(type(model.conv1), nniqat.ConvReLU2d)
+                    self.assertEqual(type(model.relu1), nn.Identity)
+                for i in range(3):
+                    self.assertEqual(type(model.features[i][0]), nniqat.ConvBnReLU2d,
+                                     "Fused submodule Conv + folded BN")
+                    self.assertEqual(type(model.features[i][1]), nn.Identity,
+                                     "Fused submodule (skipped BN)")
+                    self.assertEqual(type(model.features[i][2]), nn.Identity,
+                                     "Non-fused submodule Conv")
+                self.assertEqual(type(model.classifier[0]), nniqat.LinearReLU)
+                self.assertEqual(type(model.classifier[1]), nn.Identity)
 
-        checkQAT(model)
-        model(self.img_data[1][0])
-        convert(model, inplace=True)
-        model(self.img_data[1][0])
-        self.checkModelWithSequentialQuantized(model)
+                checkQAT(model)
+                model(self.img_data[1][0])
+                convert(model, inplace=True)
+                model(self.img_data[1][0])
+                self.checkModelWithSequentialQuantized(model)
 
-    def test_fusion_sequential_model_eval(self):
-        model = ModelWithSequentialFusion().eval()
-        model.to(torch.float)
-        fuse_modules(model, [['conv1', 'relu1'] ,
-                             ['features.0.0', 'features.0.1', 'features.0.2'],
-                             ['features.1.0', 'features.1.1', 'features.1.2'],
-                             ['features.2.0', 'features.2.1', 'features.2.2'],
-                             ['classifier.0', 'classifier.1']], inplace=True)
-        self.assertEqual(type(model.conv1), nni.ConvReLU2d,
-                         "Fused Conv + Relu: nni.ConvReLU2d")
-        self.assertEqual(type(model.conv1[0]), nn.Conv2d,
-                         "Fused Conv + Relu: Conv2d")
-        self.assertEqual(type(model.conv1[1]), nn.ReLU,
-                         "Fused Conv + Relu: Relu")
-        self.assertEqual(type(model.relu1), nn.Identity,
-                         "Fused Conv + Relu: Identity")
-        for i in range(3):
-            self.assertEqual(type(model.features[i][0]), nni.ConvReLU2d,
-                             "Fused submodule Conv + folded BN")
-            self.assertEqual(type(model.features[i][1]), nn.Identity,
-                             "Fused submodule (skipped BN)")
-            self.assertEqual(type(model.features[i][2]), nn.Identity,
-                             "Non-fused submodule Conv")
-        self.assertEqual(type(model.classifier[0]), nni.LinearReLU)
-        self.assertEqual(type(model.classifier[1]), nn.Identity)
-        model.qconfig = default_qconfig
-        prepare(model, inplace=True)
-        self.checkObservers(model)
-        model(self.img_data[0][0])
-        convert(model, inplace=True)
-        model(self.img_data[1][0])
-        self.checkModelWithSequentialQuantized(model)
+    @given(qengine=st.sampled_from(("fbgemm", "qnnpack")))
+    def test_fusion_sequential_model_eval(self, qengine):
+        if qengine in torch.backends.quantized.supported_engines:
+            with override_quantized_engine(qengine):
+                model = ModelWithSequentialFusion().eval()
+                model.to(torch.float)
+                fuse_modules(model, [['conv1', 'relu1'] ,
+                                     ['features.0.0', 'features.0.1', 'features.0.2'],
+                                     ['features.1.0', 'features.1.1', 'features.1.2'],
+                                     ['features.2.0', 'features.2.1', 'features.2.2'],
+                                     ['classifier.0', 'classifier.1']], inplace=True)
+                self.assertEqual(type(model.conv1), nni.ConvReLU2d,
+                                 "Fused Conv + Relu: nni.ConvReLU2d")
+                self.assertEqual(type(model.conv1[0]), nn.Conv2d,
+                                 "Fused Conv + Relu: Conv2d")
+                self.assertEqual(type(model.conv1[1]), nn.ReLU,
+                                 "Fused Conv + Relu: Relu")
+                self.assertEqual(type(model.relu1), nn.Identity,
+                                 "Fused Conv + Relu: Identity")
+                for i in range(3):
+                    self.assertEqual(type(model.features[i][0]), nni.ConvReLU2d,
+                                     "Fused submodule Conv + folded BN")
+                    self.assertEqual(type(model.features[i][1]), nn.Identity,
+                                     "Fused submodule (skipped BN)")
+                    self.assertEqual(type(model.features[i][2]), nn.Identity,
+                                     "Non-fused submodule Conv")
+                self.assertEqual(type(model.classifier[0]), nni.LinearReLU)
+                self.assertEqual(type(model.classifier[1]), nn.Identity)
+                model.qconfig = torch.quantization.get_default_qconfig(qengine)
+                prepare(model, inplace=True)
+                self.checkObservers(model)
+                model(self.img_data[0][0])
+                convert(model, inplace=True)
+                model(self.img_data[1][0])
+                self.checkModelWithSequentialQuantized(model)
 
     def checkModelWithSequentialQuantized(self, model):
         self.assertEqual(type(model.conv1), nniq.ConvReLU2d)
@@ -1467,33 +1473,36 @@ class TestFusion(QuantizationTestCase):
         self.assertEqual(type(model.classifier[0]), nniq.LinearReLU)
         self.assertEqual(type(model.classifier[1]), nn.Identity)
 
-    def test_fusion_conv_with_bias(self):
-        model = ModelForFusionWithBias().train()
-        # output with no fusion.
-        out_ref = model(self.img_data[0][0])
+    @given(qengine=st.sampled_from(("fbgemm", "qnnpack")))
+    def test_fusion_conv_with_bias(self, qengine):
+        if qengine in torch.backends.quantized.supported_engines:
+            with override_quantized_engine(qengine):
+                model = ModelForFusionWithBias().train()
+                # output with no fusion.
+                out_ref = model(self.img_data[0][0])
 
-        model.qconfig = QConfig(activation=torch.nn.Identity,
-                                weight=torch.nn.Identity)
-        model = fuse_modules(model, [["conv1", "bn1", "relu1"],
-                                     ["conv2", "bn2"]])
-        prep_model = prepare_qat(model, inplace=False)
-        # output with fusion but no observers.
-        out_fused = prep_model(self.img_data[0][0])
-        self.assertEqual(out_ref, out_fused)
+                model.qconfig = QConfig(activation=torch.nn.Identity,
+                                        weight=torch.nn.Identity)
+                model = fuse_modules(model, [["conv1", "bn1", "relu1"],
+                                             ["conv2", "bn2"]])
+                prep_model = prepare_qat(model, inplace=False)
+                # output with fusion but no observers.
+                out_fused = prep_model(self.img_data[0][0])
+                self.assertEqual(out_ref, out_fused)
 
-        model.qconfig = default_qat_qconfig
-        prepare_qat(model, inplace=True)
+                model.qconfig = torch.quantization.get_default_qconfig(qengine)
+                prepare_qat(model, inplace=True)
 
-        model(self.img_data[0][0])
+                model(self.img_data[0][0])
 
-        def checkQAT(model):
-            self.assertEqual(type(model.conv1), nniqat.ConvBnReLU2d)
-            self.assertEqual(type(model.bn1), nn.Identity)
-            self.assertEqual(type(model.relu1), nn.Identity)
-            self.assertEqual(type(model.conv2), nniqat.ConvBn2d)
-            self.assertEqual(type(model.bn2), nn.Identity)
+                def checkQAT(model):
+                    self.assertEqual(type(model.conv1), nniqat.ConvBnReLU2d)
+                    self.assertEqual(type(model.bn1), nn.Identity)
+                    self.assertEqual(type(model.relu1), nn.Identity)
+                    self.assertEqual(type(model.conv2), nniqat.ConvBn2d)
+                    self.assertEqual(type(model.bn2), nn.Identity)
 
-        checkQAT(model)
+                checkQAT(model)
 
 class TestObserver(QuantizationTestCase):
     @given(qdtype=st.sampled_from((torch.qint8, torch.quint8)),
@@ -1732,20 +1741,25 @@ class TestObserver(QuantizationTestCase):
                      " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
                      " with instruction set support avx2 or newer.")
 class TestRecordHistogramObserver(QuantizationTestCase):
-    def test_record_observer(self):
-        model = AnnotatedSingleLayerLinearModel()
-        model.qconfig = default_debug_qconfig
-        model = prepare(model)
-        # run the evaluation and dump all tensors
-        test_only_eval_fn(model, self.calib_data)
-        test_only_eval_fn(model, self.calib_data)
-        observer_dict = {}
-        get_observer_dict(model, observer_dict)
+    @given(qengine=st.sampled_from(("fbgemm", "qnnpack")))
+    def test_record_observer(self, qengine):
+        if qengine in torch.backends.quantized.supported_engines:
+            with override_quantized_engine(qengine):
+                model = AnnotatedSingleLayerLinearModel(qengine)
+                model.qconfig = default_debug_qconfig
+                model = prepare(model)
+                # run the evaluation and dump all tensors
+                test_only_eval_fn(model, self.calib_data)
+                test_only_eval_fn(model, self.calib_data)
+                observer_dict = {}
+                get_observer_dict(model, observer_dict)
 
-        self.assertTrue('fc1.module.activation_post_process' in observer_dict.keys(),
-                        'observer is not recorded in the dict')
-        self.assertEqual(len(observer_dict['fc1.module.activation_post_process'].get_tensor_value()), 2 * len(self.calib_data))
-        self.assertEqual(observer_dict['fc1.module.activation_post_process'].get_tensor_value()[0], model(self.calib_data[0][0]))
+                self.assertTrue('fc1.module.activation_post_process' in observer_dict.keys(),
+                                'observer is not recorded in the dict')
+                self.assertEqual(len(observer_dict['fc1.module.activation_post_process'].get_tensor_value()),
+                                 2 * len(self.calib_data))
+                self.assertEqual(observer_dict['fc1.module.activation_post_process'].get_tensor_value()[0],
+                                 model(self.calib_data[0][0]))
 
     @given(qdtype=st.sampled_from((torch.qint8, torch.quint8)),
            qscheme=st.sampled_from((torch.per_tensor_affine, torch.per_tensor_symmetric)))

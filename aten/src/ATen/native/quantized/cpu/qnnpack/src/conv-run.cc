@@ -281,7 +281,7 @@ struct QnnpackDeleter {
   }
 };
 
-__attribute__((no_sanitize("function")))
+__attribute__((no_sanitize("undefined")))
 enum pytorch_qnnp_status qnnpackConv(
     const conv_param_t& conv_p,
     void* packed_weights,
