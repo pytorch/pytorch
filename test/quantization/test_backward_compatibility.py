@@ -71,73 +71,47 @@ class TestSerialization(TestCase):
         self.assertEqual(qmodule_scripted(input_tensor), expected, atol=prec)
         self.assertEqual(qmodule_traced(input_tensor), expected, atol=prec)
 
-    # TODO: add qnnpack test(https://github.com/pytorch/pytorch/pull/36771)
-    @unittest.skipUnless(
-        'fbgemm' in torch.backends.quantized.supported_engines or
-        'qnnpack' in torch.backends.quantized.supported_engines,
-        " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
-        " with instruction set support avx2 or newer.",
-    )
     @given(qengine=st.sampled_from(("qnnpack", "fbgemm")))
     def test_linear(self, qengine):
-        with override_quantized_engine(qengine):
-            module = nnq.Linear(3, 1, bias_=True, dtype=torch.qint8)
-            self._test_op(module, input_size=[1, 3], generate=False)
+        if qengine in torch.backends.quantized.supported_engines:
+            with override_quantized_engine(qengine):
+                module = nnq.Linear(3, 1, bias_=True, dtype=torch.qint8)
+                self._test_op(module, input_size=[1, 3], generate=False)
 
-    @unittest.skipUnless(
-        'fbgemm' in torch.backends.quantized.supported_engines or
-        'qnnpack' in torch.backends.quantized.supported_engines,
-        " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
-        " with instruction set support avx2 or newer.",
-    )
     @given(qengine=st.sampled_from(("qnnpack", "fbgemm")))
     def test_linear_relu(self, qengine):
-        with override_quantized_engine(qengine):
-            module = nniq.LinearReLU(3, 1, bias=True, dtype=torch.qint8)
-            self._test_op(module, input_size=[1, 3], generate=False)
+        if qengine in torch.backends.quantized.supported_engines:
+            with override_quantized_engine(qengine):
+                module = nniq.LinearReLU(3, 1, bias=True, dtype=torch.qint8)
+                self._test_op(module, input_size=[1, 3], generate=False)
 
-    @unittest.skipUnless(
-        'fbgemm' in torch.backends.quantized.supported_engines or
-        'qnnpack' in torch.backends.quantized.supported_engines,
-        " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
-        " with instruction set support avx2 or newer.",
-    )
     @given(qengine=st.sampled_from(("qnnpack", "fbgemm")))
     def test_linear_dynamic(self, qengine):
-        with override_quantized_engine(qengine):
-            module_qint8 = nnqd.Linear(3, 1, bias_=True, dtype=torch.qint8)
-            self._test_op(module_qint8, "qint8", input_size=[1, 3], input_quantized=False, generate=False)
-            if qengine == 'fbgemm':
-                module_float16 = nnqd.Linear(3, 1, bias_=True, dtype=torch.float16)
-                self._test_op(module_float16, "float16", input_size=[1, 3], input_quantized=False, generate=False)
+        if qengine in torch.backends.quantized.supported_engines:
+            with override_quantized_engine(qengine):
+                module_qint8 = nnqd.Linear(3, 1, bias_=True, dtype=torch.qint8)
+                self._test_op(module_qint8, "qint8", input_size=[1, 3], input_quantized=False, generate=False)
+                if qengine == 'fbgemm':
+                    module_float16 = nnqd.Linear(3, 1, bias_=True, dtype=torch.float16)
+                    self._test_op(module_float16, "float16", input_size=[1, 3], input_quantized=False, generate=False)
 
-    @unittest.skipUnless(
-        'fbgemm' in torch.backends.quantized.supported_engines or
-        'qnnpack' in torch.backends.quantized.supported_engines,
-        " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
-        " with instruction set support avx2 or newer.",
-    )
     @given(qengine=st.sampled_from(("qnnpack", "fbgemm")))
     def test_conv2d(self, qengine):
-        with override_quantized_engine(qengine):
-            module = nnq.Conv2d(3, 3, kernel_size=3, stride=1, padding=0, dilation=1,
-                                groups=1, bias=True, padding_mode="zeros")
-            self._test_op(module, input_size=[1, 3, 6, 6], generate=False)
-            # TODO: graph mode quantized conv2d module
+        if qengine in torch.backends.quantized.supported_engines:
+            with override_quantized_engine(qengine):
+                module = nnq.Conv2d(3, 3, kernel_size=3, stride=1, padding=0, dilation=1,
+                                    groups=1, bias=True, padding_mode="zeros")
+                self._test_op(module, input_size=[1, 3, 6, 6], generate=False)
+                # TODO: graph mode quantized conv2d module
 
-    @unittest.skipUnless(
-        'fbgemm' in torch.backends.quantized.supported_engines or
-        'qnnpack' in torch.backends.quantized.supported_engines,
-        " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
-        " with instruction set support avx2 or newer.",
-    )
     @given(qengine=st.sampled_from(("qnnpack", "fbgemm")))
     def test_conv2d_relu(self, qengine):
-        with override_quantized_engine(qengine):
-            module = nniq.ConvReLU2d(3, 3, kernel_size=3, stride=1, padding=0, dilation=1,
-                                     groups=1, bias=True, padding_mode="zeros")
-            self._test_op(module, input_size=[1, 3, 6, 6], generate=False)
-            # TODO: graph mode quantized conv2d module
+        if qengine in torch.backends.quantized.supported_engines:
+            with override_quantized_engine(qengine):
+                module = nniq.ConvReLU2d(3, 3, kernel_size=3, stride=1, padding=0, dilation=1,
+                                         groups=1, bias=True, padding_mode="zeros")
+                self._test_op(module, input_size=[1, 3, 6, 6], generate=False)
+                # TODO: graph mode quantized conv2d module
 
     @unittest.skipUnless(
         'fbgemm' in torch.backends.quantized.supported_engines,
