@@ -1,9 +1,3 @@
-// !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!1
-// Warning: If you use this file and deal with complex
-// tensors, then you might need to manually do
-// // at the beginning of your file
-// !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-
 #pragma once
 
 #include <ATen/core/DeprecatedTypeProperties.h>
