@@ -168,9 +168,9 @@ class SingleLayerLinearModel(torch.nn.Module):
         return x
 
 class AnnotatedSingleLayerLinearModel(torch.nn.Module):
-    def __init__(self):
+    def __init__(self, qengine):
         super().__init__()
-        self.qconfig = default_qconfig
+        self.qconfig = torch.quantization.get_default_qconfig(qengine)
         self.fc1 = QuantWrapper(torch.nn.Linear(5, 5).to(dtype=torch.float))
 
     def forward(self, x):
@@ -207,9 +207,9 @@ class ConvModel(torch.nn.Module):
         return x
 
 class AnnotatedConvModel(torch.nn.Module):
-    def __init__(self):
+    def __init__(self, qengine):
         super().__init__()
-        self.qconfig = default_qconfig
+        self.qconfig = torch.quantization.get_default_qconfig(qengine)
         self.conv = torch.nn.Conv2d(3, 5, 3, bias=False).to(dtype=torch.float)
         self.quant = QuantStub()
         self.dequant = DeQuantStub()
@@ -354,14 +354,17 @@ class NestedModel(torch.nn.Module):
         return x
 
 class AnnotatedNestedModel(torch.nn.Module):
-    def __init__(self):
+    def __init__(self, qengine):
         super().__init__()
         self.sub1 = LinearReluModel()
         self.sub2 = TwoLayerLinearModel()
         self.fc3 = QuantWrapper(torch.nn.Linear(5, 5).to(dtype=torch.float))
         self.fc3.qconfig = default_qconfig
         self.sub2.fc1 = QuantWrapper(self.sub2.fc1)
-        self.sub2.fc1.qconfig = default_per_channel_qconfig
+        if qengine is 'fbgemm':
+            self.sub2.fc1.qconfig = default_per_channel_qconfig
+        else:
+            self.sub2.fc1.qconfig = default_qconfig
 
     def forward(self, x):
         x = self.sub1(x)
