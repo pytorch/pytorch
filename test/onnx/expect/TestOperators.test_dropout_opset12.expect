@@ -16,31 +16,17 @@ graph {
     }
   }
   node {
-    output: "2"
-    name: "Constant_1"
-    op_type: "Constant"
-    attribute {
-      name: "value"
-      t {
-        data_type: 7
-        raw_data: "\001\000\000\000\000\000\000\000"
-      }
-      type: TENSOR
-    }
-  }
-  node {
     input: "x"
     input: "1"
-    input: "2"
+    output: "2"
     output: "3"
-    output: "4"
-    name: "Dropout_2"
+    name: "Dropout_1"
     op_type: "Dropout"
   }
   node {
-    input: "3"
-    output: "5"
-    name: "ReduceMax_3"
+    input: "2"
+    output: "4"
+    name: "ReduceMax_2"
     op_type: "ReduceMax"
     attribute {
       name: "keepdims"
@@ -66,7 +52,7 @@ graph {
     }
   }
   output {
-    name: "5"
+    name: "4"
     type {
       tensor_type {
         elem_type: 1
