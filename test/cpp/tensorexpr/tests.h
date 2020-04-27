@@ -57,6 +57,13 @@ namespace jit {
   _(ReduceAnyAll)                           \
   _(ReduceMatmul2D)                         \
   _(ReduceRfactorLike)                      \
+  _(ReduceRfactor)                          \
+  _(Reduce3DRfactor)                        \
+  _(Reduce3DRfactor2)                       \
+  _(Reduce3DRfactor3)                       \
+  _(Reduce3DRfactorRepeated)                \
+  _(ReduceRfactorInsertionPoint)            \
+  _(Reduce3DRfactorInsertionPoint)          \
   _(SplitReduceAxis)                        \
   _(SplitNonReduceAxis)                     \
   _(TypeTest01)                             \
@@ -144,6 +151,7 @@ namespace jit {
   _(SimplifyForWontLoseLoopOptions)         \
   _(SimplifyMultilevelFor)                  \
   _(SimplifyForCleansUp)                    \
+  _(SimplifyFlattenBlock)                   \
   _(StmtClone)                              \
   _(BoundsInference_1)                      \
   _(BoundsInference_2)                      \
@@ -164,7 +172,10 @@ namespace jit {
   _(LoopNestReorderLongStringOfPreOrphans)  \
   _(LoopNestReorderLongStringOfPostOrphans) \
   _(LoopNestReorderLongStringFull)          \
-  _(OuterLoopVectorization)
+  _(OuterLoopVectorization)                 \
+  _(Kernel_1)                               \
+  _(Kernel_2)                               \
+  _(Kernel_3)
 
 #define TH_FORALL_TENSOREXPR_TESTS_LLVM(_) \
   _(LLVMByteImmTest)                       \

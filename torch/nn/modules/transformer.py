@@ -1,5 +1,8 @@
-import torch
 import copy
+from typing import Optional
+
+import torch
+from torch import Tensor
 from .. import functional as F
 from .module import Module
 from .activation import MultiheadAttention
