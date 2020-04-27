@@ -3,6 +3,8 @@
 #include <ATen/Dispatch.h>
 #include <ATen/native/UpSample.h>
 #include <ATen/Parallel.h>
+#include <ATen/cpu/vec256/functional.h>
+#include <ATen/cpu/vec256/vec256.h>
 
 namespace at {
 namespace native {
@@ -156,7 +158,6 @@ void cpu_upsample_nearest_channels_last(
   auto input_data = input.data_ptr<scalar_t>();
   auto output_data = output.data_ptr<scalar_t>();
 
-  // treat nbatch and channels as one dimension
   int64_t num_batches =  input_sizes[0];
   int64_t channels =  input_sizes[1];
   int64_t input_depth = (ndim == 5) ? input_sizes[2] : 1;
@@ -165,28 +166,25 @@ void cpu_upsample_nearest_channels_last(
   int64_t output_height = (ndim >= 4) ? output_sizes[ndim - 2] : 1;
   int64_t input_width = input_sizes[ndim - 1];
   int64_t output_width = output_sizes[ndim - 1];
-  auto num_work_items = num_batches * output_depth
-                      * output_height
-                      * output_width
-                      ;
+  int64_t numel = output.numel();
 
+  using Vec = vec256::Vec256<scalar_t>;
   auto loop2d = [&](int64_t start, int64_t end) {
     int64_t n = 0;
     int64_t oh = 0;
     int64_t ow = 0;
     data_index_init(start, n, num_batches, oh, output_height, ow, output_width);
 
-    // We can unroll this loop by some factor. Perhaps by 4 or something.
-    // But if we are doing memcpy then it may not help.
-    // Then we need custom sort of memcpy.
     for (int64_t i = start; i < end; i++) {
       int64_t ih = nearest_idx(oh, input_height, output_height, scales[0]);
       int64_t iw = nearest_idx(ow, input_width, output_width, scales[1]);
-      auto input_data_ptr = input_data + n * (input_height * input_width * channels)
-        + ih * (input_width * channels) + iw * channels;
-      auto output_data_ptr = output_data + n * (output_height * output_width * channels)
-        + oh * (output_width * channels) + ow * channels;
-      std::memcpy(output_data_ptr, input_data_ptr, sizeof(scalar_t) * channels);
+      int64_t j = n * (input_height * input_width * channels)
+          + ih * (input_width * channels) + iw * channels;
+      vec256::map(
+          [](Vec x) { return x; },
+          &output_data[i],
+          &input_data[j],
+          channels);
       data_index_step(n, num_batches, oh, output_height, ow, output_width);
     }
   };
@@ -199,33 +197,29 @@ void cpu_upsample_nearest_channels_last(
     data_index_init(start, n, num_batches, oh, output_height, ow, output_width);
     data_index_init(start, n, num_batches, od, output_depth, oh, output_height, ow, output_width);
 
-    // We need to unroll this loop by some factor. Perhaps by 4 or something.
-    // But we are doing memcpy then it may not help.
-    // Then we need custom sort of memcpy.
     for (int64_t i = start; i < end; i++) {
       int64_t id = nearest_idx(od, input_depth, output_depth, scales[0]);
       int64_t ih = nearest_idx(oh, input_height, output_height, scales[1]);
       int64_t iw = nearest_idx(ow, input_width, output_width, scales[2]);
-      auto input_data_ptr = input_data
-        + n * (input_depth * input_height * input_width * channels)
-        + id * (input_height * input_width * channels)
-        + ih * (input_width * channels) + iw * channels;
-      auto output_data_ptr = output_data
-        + n * (output_depth * output_height * output_width * channels)
-        + od * (output_height * output_width * channels)
-        + oh * (output_width * channels) + ow * channels;
-      std::memcpy(output_data_ptr, input_data_ptr, sizeof(scalar_t) * channels);
+      int64_t j = n * (input_depth * input_height * input_width * channels)
+          + id * (input_height * input_width * channels)
+          + ih * (input_width * channels) + iw * channels;
+      vec256::map(
+          [](Vec x) { return x; },
+          &output_data[i],
+          &input_data[j],
+          channels);
       data_index_step(n, num_batches, od, output_depth, oh, output_height, ow, output_width);
     }
   };
 
   if (ndim == 4) {
     // upsample nearest 2d
-    at::parallel_for(0, num_work_items, at::internal::GRAIN_SIZE, loop2d);
+    at::parallel_for(0, numel / channels, at::internal::GRAIN_SIZE / channels, loop2d);
   } else {
     // upsample nearest 3d
     TORCH_INTERNAL_ASSERT(ndim == 5);
-    at::parallel_for(0, num_work_items, at::internal::GRAIN_SIZE, loop3d);
+    at::parallel_for(0, numel / channels, at::internal::GRAIN_SIZE / channels, loop3d);
   }
 
   if (!output_.is_contiguous(channels_last_memory_format)) {
