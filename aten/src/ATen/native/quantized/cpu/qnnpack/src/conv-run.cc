@@ -135,7 +135,7 @@ struct q8conv_context {
   const pytorch_q8conv_ukernel_function ukernel;
 };
 static void compute_q8conv(
-    struct q8conv_context context[1],
+    const struct q8conv_context context[1],
     size_t group_index,
     size_t image_index,
     size_t mr_block_start,
@@ -281,6 +281,7 @@ struct QnnpackDeleter {
   }
 };
 
+__attribute__((no_sanitize("function")))
 enum pytorch_qnnp_status qnnpackConv(
     const conv_param_t& conv_p,
     void* packed_weights,
