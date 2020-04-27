@@ -1,22 +1,16 @@
-#include <ATen/ATen.h>
-#include <ATen/Parallel.h>
 #include <ATen/quantized/Quantizer.h>
-#include <c10/core/Allocator.h>
-#include <c10/core/CPUAllocator.h>
+#include <ATen/ATen.h>
 #include <ATen/Dispatch.h>
 #include <ATen/NativeFunctions.h>
-#include <ATen/native/TensorFactories.h>
-#include <ATen/quantized/QTensorImpl.h>
+#include <ATen/Parallel.h>
 #include <ATen/core/Tensor.h>
-#include <typeinfo>
+#include <ATen/native/TensorFactories.h>
+#include <ATen/native/quantized/affine_quantizer.h>
+#include <ATen/quantized/QTensorImpl.h>
+#include <c10/core/Allocator.h>
+#include <c10/core/CPUAllocator.h>
 #include <cmath>
-
-#ifdef USE_FBGEMM
-#include <fbgemm/QuantUtils.h>
-#endif
-#ifdef __ARM_NEON__
-#include <arm_neon.h>
-#endif
+#include <typeinfo>
 
 namespace at {
 
@@ -515,15 +509,12 @@ QTensorImpl* get_qtensorimpl(const Tensor& self) {
   return static_cast<QTensorImpl*>(self.unsafeGetTensorImpl());
 }
 
-inline Tensor new_qtensor_cpu(
+inline Tensor new_qtensor(
     IntArrayRef sizes,
     const TensorOptions& options,
     QuantizerPtr quantizer) {
-  AT_ASSERT(options.device().is_cpu());
-
   auto memory_format = options.memory_format_opt().value_or(MemoryFormat::Contiguous);
-
-  at::Allocator* allocator = at::getCPUAllocator();
+  at::Allocator* allocator = GetAllocator(options.device().type());
 
 #ifdef USE_PYTORCH_QNNPACK
   if (at::globalContext().qEngine() == at::QEngine::QNNPACK) {
@@ -531,11 +522,13 @@ inline Tensor new_qtensor_cpu(
   }
 #endif
 
+  at::DispatchKey tensorDispatchKey = options.computeDispatchKey();
   native::check_size_nonnegative(sizes);
   int64_t nelements = at::prod_intlist(sizes);
   auto dtype = options.dtype();
-  TORCH_CHECK(isQIntType(typeMetaToScalarType(dtype)),
-           "ScalarType is not supported in new_qtensor_cpu.");
+  TORCH_CHECK(
+      isQIntType(typeMetaToScalarType(dtype)),
+      "ScalarType is not supported in new_qtensor.");
   auto storage = c10::make_intrusive<StorageImpl>(
       dtype,
       nelements,
@@ -543,7 +536,7 @@ inline Tensor new_qtensor_cpu(
       allocator,
       /*resizable=*/true);
   auto tensor = detail::make_tensor<QTensorImpl>(
-      storage, at::DispatchKeySet(at::DispatchKey::QuantizedCPU), quantizer);
+      storage, at::DispatchKeySet(tensorDispatchKey), quantizer);
   get_qtensorimpl(tensor)->set_sizes_contiguous(sizes);
   get_qtensorimpl(tensor)->empty_tensor_restride(memory_format);
   return tensor;
@@ -551,81 +544,46 @@ inline Tensor new_qtensor_cpu(
 
 Tensor PerTensorAffineQuantizer::quantize(Tensor rtensor) {
   TORCH_CHECK(
-      rtensor.scalar_type() == kFloat,
-      "quantize only works on Float Tensor.");
-  TORCH_CHECK(
-      rtensor.device() == kCPU,
-      "quantize only works for CPU backend right now.");
+      rtensor.scalar_type() == kFloat, "quantize only works on Float Tensor.");
   // Here we need a std::intrusive_ptr<Quantizer>.. but actually "this" is the
   // quantizer that can be reused, so I'm using intrusive_from_this here
-  Tensor qtensor = new_qtensor_cpu(
+  Tensor qtensor = new_qtensor(
       rtensor.sizes(),
       rtensor.options().dtype(scalar_type_),
       intrusive_from_this());
 
   rtensor = rtensor.contiguous();
-  AT_DISPATCH_QINT_TYPES(qtensor.scalar_type(), "quantize_tensor", [&]() {
-    qtensor = quantize_tensor<scalar_t>(rtensor, qtensor, scale_, zero_point_);
-  });
+  native::quantize_tensor_per_tensor_affine(
+      rtensor, qtensor, scale_, zero_point_);
   return qtensor;
 }
 
 Tensor PerTensorAffineQuantizer::dequantize(Tensor qtensor) {
-  TORCH_CHECK(qtensor.is_quantized(),
-           "dequantize is only supported in quantized Tensor.");
-  TORCH_CHECK(
-      qtensor.device() == kCPU,
-      "dequantize only works for CPU backend right now.");
   Tensor rtensor = at::empty(qtensor.sizes(), qtensor.options().dtype(at::kFloat));
   qtensor = qtensor.contiguous();
-
-  AT_DISPATCH_QINT_TYPES(qtensor.scalar_type(), "dequantize_tensor", [&]() {
-    rtensor = dequantize_tensor<scalar_t>(qtensor, rtensor, scale_, zero_point_);
-  });
-
+  native::dequantize_tensor_per_tensor_affine(
+      qtensor, rtensor, scale_, zero_point_);
   return rtensor;
 }
 
 Tensor PerChannelAffineQuantizer::quantize(Tensor rtensor) {
-  TORCH_CHECK(
-      rtensor.scalar_type() == kFloat,
-      "quantize only works on Float Tensor.");
-  TORCH_CHECK(
-      rtensor.device() == kCPU,
-      "quantize only works for CPU backend right now.");
   // Here we need a std::intrusive_ptr<Quantizer>.. but actually "this" is the
   // quantizer that can be reused, so I'm using intrusive_from_this here
-  Tensor qtensor = new_qtensor_cpu(
+  Tensor qtensor = new_qtensor(
       rtensor.sizes(),
       rtensor.options().dtype(scalar_type_),
       intrusive_from_this());
-
   rtensor = rtensor.contiguous();
-  AT_DISPATCH_QINT_TYPES(qtensor.scalar_type(),
-                         "quantize_tensor_per_channel_affine",
-                         [&]() {
-    qtensor = quantize_tensor_per_channel_affine<scalar_t>(
-        rtensor, qtensor, scales_, zero_points_, axis_);
-  });
+  native::quantize_tensor_per_channel_affine(
+      rtensor, qtensor, scales_, zero_points_, axis_);
   return qtensor;
 }
 
 Tensor PerChannelAffineQuantizer::dequantize(Tensor qtensor) {
-  TORCH_CHECK(qtensor.is_quantized(),
-           "dequantize is only supported in quantized Tensor.");
-  TORCH_CHECK(
-      qtensor.device() == kCPU,
-      "dequantize only works for CPU backend right now.");
   Tensor rtensor = at::empty(qtensor.sizes(), qtensor.options().dtype(at::kFloat));
   qtensor = qtensor.contiguous();
-
-  AT_DISPATCH_QINT_TYPES(qtensor.scalar_type(),
-                         "dequantize_tensor_per_channel_affine",
-                         [&]() {
-    rtensor = dequantize_tensor_per_channel_affine<scalar_t>(
-        qtensor, rtensor, scales_, zero_points_, axis_);
-  });
-
+  native::dequantize_tensor_per_channel_affine(
+      qtensor, rtensor, scales_, zero_points_, axis_);
   return rtensor;
 }
 
