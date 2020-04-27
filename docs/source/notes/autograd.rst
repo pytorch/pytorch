@@ -160,8 +160,9 @@ Concurrency on CPU
 ------------------
 
 When you run ``backward()`` or ``grad()`` via python or C++ API in multiple
-threads on CPU, you are expecting to see extra concurrency instead of serializing
-all the backward calls in a specific order during execution.
+threads on CPU, you are expecting to see extra concurrency instead of
+serializing all the backward calls in a specific order during execution
+(behavior before PyTorch 1.6).
 
 Non-determinism
 ------------------
