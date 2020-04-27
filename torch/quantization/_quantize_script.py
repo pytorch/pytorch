@@ -64,16 +64,6 @@ if 'fbgemm' in torch.backends.quantized.supported_engines:
     linear_packed_params = torch.jit.script(torch.nn.quantized.modules.linear.LinearPackedParams())._c
     conv_packed_params = torch.jit.script(ConvPackedParams())._c
 
-def _preprocess_qconfig_dict_helper(module, qconfig_dict, prefix=''):
-    for name, child in module.named_children():
-        module_prefix = prefix + '.' + name if prefix else name
-        # Existing string names in dict take precedence over type names.
-        if type(child) in qconfig_dict.keys() and module_prefix not in qconfig_dict.keys():
-            qconfig_dict[module_prefix] = qconfig_dict[type(child)]
-        else:
-            qconfig_dict.update(_preprocess_qconfig_dict_helper(child, qconfig_dict, module_prefix))
-    return qconfig_dict
-
 def _check_is_script_module(model):
     if not isinstance(model, torch.jit.ScriptModule):
         raise ValueError('input must be a script module, got: ' + str(type(model)))
@@ -92,22 +82,14 @@ def get_scripted_qconfig_dict(qconfig_dict):
 
 def _prepare_script(model, qconfig_dict, is_dynamic):
     _check_is_script_module(model)
-    if not all(map(lambda x : isinstance(x, str), qconfig_dict.keys())):
-        raise ValueError('qconfig_dict should contain names(str) as keys. '
-                         'Run preprocess_qconfig_dict first to convert types to names')
+    if any(map(lambda x : not isinstance(x, str), qconfig_dict.keys())):
+        raise ValueError('qconfig_dict should contain names(str) as keys.')
     scripted_qconfig_dict = get_scripted_qconfig_dict(qconfig_dict)
     return wrap_cpp_module(torch._C._jit_pass_insert_observers(model._c,
                                                                'forward',
                                                                scripted_qconfig_dict,
                                                                False,
                                                                is_dynamic))
-
-def preprocess_qconfig_dict(module, qconfig_dict):
-    dict_has_types = any(map(lambda x : isinstance(x, type), qconfig_dict.keys()))
-    if dict_has_types:
-        qconfig_dict = _preprocess_qconfig_dict_helper(module, qconfig_dict)
-        qconfig_dict = dict(filter(lambda x : type(x[0]) is str, qconfig_dict.items()))
-    return qconfig_dict
 
 def prepare_script(model, qconfig_dict, inplace=False):
     if not inplace:

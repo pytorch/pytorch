@@ -126,6 +126,7 @@ std::vector<std::string> _single_input_general_aten_funcs = {
     "upsample_bicubic2d",
     "dropout",
     "reshape",
+    "resize_", // Non-inplace resize is deprecated
     "chunk",
     "view",
     "transpose",
@@ -1902,10 +1903,9 @@ ModuleMethodVector InsertQuantDeQuantHelper::getInvokedMethods(
         if (module_instance == graph->inputs()[0]) {
           m = module;
         } else {
-          TORCH_INTERNAL_ASSERT(
-              module_instance->node()->kind() == prim::GetAttr,
-              "Module instance should come from GetAttr.");
-          if (module_method_name.find("_observer_") == std::string::npos) {
+          auto child_module_name = module_instance->node()->s(attr::name);
+          if (module_instance->node()->kind() == prim::GetAttr &&
+              child_module_name.find("_observer_") == std::string::npos) {
             m = getInvokedModule(module, n, graph->inputs()[0]);
           }
         }
