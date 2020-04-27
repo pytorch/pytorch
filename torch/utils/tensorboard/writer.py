@@ -583,19 +583,21 @@ class SummaryWriter(object):
             image(tag, img_tensor, dataformats=dataformats), global_step, walltime)
 
     def add_image_with_boxes(self, tag, img_tensor, box_tensor, global_step=None,
-                             walltime=None, rescale=1, dataformats='CHW'):
+                             walltime=None, rescale=1, dataformats='CHW', labels=None):
         """Add image and draw bounding boxes on the image.
 
         Args:
             tag (string): Data identifier
             img_tensor (torch.Tensor, numpy.array, or string/blobname): Image data
             box_tensor (torch.Tensor, numpy.array, or string/blobname): Box data (for detected objects)
+              box should be represented as [x1, y1, x2, y2].
             global_step (int): Global step value to record
             walltime (float): Optional override default walltime (time.time())
               seconds after epoch of event
             rescale (float): Optional scale override
             dataformats (string): Image data format specification of the form
               NCHW, NHWC, CHW, HWC, HW, WH, etc.
+            labels (list of string): The label to be shown for each bounding box.
         Shape:
             img_tensor: Default is :math:`(3, H, W)`. It can be specified with ``dataformats`` argument.
             e.g. CHW or HWC
@@ -608,8 +610,13 @@ class SummaryWriter(object):
             img_tensor = workspace.FetchBlob(img_tensor)
         if self._check_caffe2_blob(box_tensor):
             box_tensor = workspace.FetchBlob(box_tensor)
+        if labels is not None:
+            if isinstance(labels, str):
+                labels = [labels]
+            if len(labels) != box_tensor.shape[0]:
+                labels = None
         self._get_file_writer().add_summary(image_boxes(
-            tag, img_tensor, box_tensor, rescale=rescale, dataformats=dataformats), global_step, walltime)
+            tag, img_tensor, box_tensor, rescale=rescale, dataformats=dataformats, labels=labels), global_step, walltime)
 
     def add_figure(self, tag, figure, global_step=None, close=True, walltime=None):
         """Render matplotlib figure into an image and add it to summary.

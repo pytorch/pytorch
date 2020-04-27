@@ -374,6 +374,8 @@ class TORCH_API PolynomialTransformer : public IRMutator {
 
   Stmt* mutate(const For* v) override;
 
+  Stmt* mutate(const Block* v) override;
+
   template <typename Op>
   static const Expr* mutateBinaryOp(
       const BinaryOpNode<Op>* v,

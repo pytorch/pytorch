@@ -1,4 +1,4 @@
-#include "import_source.h"
+#include <torch/csrc/jit/serialization/import_source.h>
 
 #include <ATen/core/qualified_name.h>
 #include <torch/csrc/jit/frontend/parser.h>
@@ -494,9 +494,9 @@ SourceImporter::SourceImporter(
           std::move(loader),
           version)) {}
 
-TypePtr SourceImporter::loadNamedType(const QualifiedName& name) const {
-  TypePtr t = pImpl->findNamedType(name);
-  TORCH_INTERNAL_ASSERT(t != nullptr);
+TypePtr SourceImporter::loadType(const QualifiedName& name) const {
+  ScriptTypeParser type_parser(pImpl);
+  TypePtr t = type_parser.parseType(name.qualifiedName());
   return t;
 }
 
