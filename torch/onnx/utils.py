@@ -111,7 +111,7 @@ def _split_tensor_list_constants(g, block):
             inputs = []
             for val in node.output().toIValue():
                 input = g.insertConstant(val)
-                input.moveBefore(node)
+                input.node().moveBefore(node)
                 inputs.append(input)
 
             lc = (g.create("prim::ListConstruct", inputs)

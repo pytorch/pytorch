@@ -7,7 +7,6 @@ endif(MSVC)
 list(APPEND ATen_CPU_TEST_SRCS
   ${CMAKE_CURRENT_SOURCE_DIR}/scalar_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/apply_utils_test.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/backend_fallback_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/basic.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/atest.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/Dimname_test.cpp
@@ -42,6 +41,7 @@ list(APPEND ATen_CPU_TEST_SRCS
 
 list(APPEND ATen_CUDA_TEST_SRCS
   ${CMAKE_CURRENT_SOURCE_DIR}/cuda_complex_test.cu
+  ${CMAKE_CURRENT_SOURCE_DIR}/cuda_complex_math_test.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/cuda_integer_divider_test.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/cuda_apply_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/cuda_stream_test.cpp
