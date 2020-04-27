@@ -1,6 +1,7 @@
-#include <ATen/native/cuda/DistributionTemplates.h>
+#include <ATen/Dispatch.h>
 #include <ATen/CUDAGeneratorImpl.h>
 #include <ATen/native/UnaryOps.h>
+#include <ATen/native/cuda/DistributionTemplates.h>
 #include <ATen/native/Distributions.h>
 #include <ATen/native/TensorIterator.h>
 

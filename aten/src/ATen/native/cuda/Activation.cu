@@ -1,4 +1,5 @@
 #define _USE_MATH_DEFINES
+
 #include <ATen/native/Activation.h>
 
 #include <math.h>
