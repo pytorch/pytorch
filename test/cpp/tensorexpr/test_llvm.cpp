@@ -1201,7 +1201,6 @@ void testLLVMEliminatedStmt() {
   cg.call({aData, cData});
 }
 
-
 void testLLVMSimpleReduction() {
   KernelScope kernel_scope;
 

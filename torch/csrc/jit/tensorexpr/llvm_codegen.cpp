@@ -42,7 +42,7 @@ class LLVMCodeGenImpl : public IRVisitor {
   llvm::BasicBlock* bb_;
   llvm::Value* value_{nullptr};
   llvm::JITTargetAddress kernelAddress_;
-  std::unique_ptr<void*[]> argv_{nullptr};
+  std::unique_ptr<void* []> argv_ { nullptr };
 
 #define LLVM_TYPE_DECLARE(_1, Name) llvm::Type* Name##Ty_;
   AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, LLVM_TYPE_DECLARE);
@@ -1469,19 +1469,42 @@ void LLVMCodeGenImpl::visit(const FunctionCall* v) {
 
 void LLVMCodeGenImpl::visit(const Allocate* v) {
   llvm::Value* size =
-    llvm::ConstantInt::getSigned(LongTy_, v->dtype().byte_size());
+      llvm::ConstantInt::getSigned(LongTy_, v->dtype().byte_size());
   for (const Expr* e : v->dims()) {
     e->accept(this);
     size = irb_.CreateMul(size, irb_.CreateZExt(value_, LongTy_));
   }
 
-  value_ = irb_.CreateAlloca(dtypeToLLVM(v->dtype()), size);
-  varToVal_[v->buffer_var()] = value_;
   value_ = llvm::ConstantInt::get(IntTy_, 0);
+
+  if (llvm::ConstantInt* CI = llvm::dyn_cast<llvm::ConstantInt>(size)) {
+    if (CI->getSExtValue() < 512) {
+      llvm::Value* alloca = irb_.CreateAlloca(dtypeToLLVM(v->dtype()), size);
+      varToVal_[v->buffer_var()] = alloca;
+      return;
+    }
+  }
+
+  llvm::Instruction* I = llvm::CallInst::CreateMalloc(
+      irb_.GetInsertBlock(),
+      LongTy_,
+      dtypeToLLVM(v->dtype()),
+      size,
+      nullptr,
+      nullptr);
+
+  // Insert the bitcast into the block.
+  irb_.SetInsertPoint(irb_.GetInsertBlock());
+  llvm::Value* malloc = irb_.Insert(I);
+  varToVal_[v->buffer_var()] = malloc;
 }
 
 void LLVMCodeGenImpl::visit(const Free* v) {
   value_ = llvm::ConstantInt::get(IntTy_, 0);
+  llvm::Value* ptr = varToVal_.at(v->buffer_var());
+  if (!llvm::isa<llvm::AllocaInst>(ptr)) {
+    irb_.Insert(llvm::CallInst::CreateFree(ptr, irb_.GetInsertBlock()));
+  }
 }
 
 void LLVMCodeGenImpl::visit(const Cond* v) {
