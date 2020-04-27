@@ -11,6 +11,7 @@ from quantization.test_quantized_op import TestQNNPackOps  # noqa: F401
 from quantization.test_quantized_op import TestQuantizedLinear  # noqa: F401
 from quantization.test_quantized_op import TestDynamicQuantizedLinear  # noqa: F401
 from quantization.test_quantized_op import TestComparatorOps  # noqa: F401
+
 # Quantized Functional and Module
 # TODO: split functional
 from quantization.test_quantized_module import TestFunctional  # noqa: F401
@@ -18,11 +19,19 @@ from quantization.test_quantized_module import TestStaticQuantizedModule  # noqa
 from quantization.test_quantized_module import TestDynamicQuantizedModule  # noqa: F401
 
 # Quantization aware training
-from quantization.test_fake_quant import TestFakeQuantizePerTensor  # noqa: F401
-from quantization.test_fake_quant import TestFakeQuantizePerChannel  # noqa: F401
 from quantization.test_qat_module import TestQATModule  # noqa: F401
 
+# Workflow related module
+# TODO: merge the fake quant per tensor and per channel test cases
+from quantization.test_workflow_module import TestFakeQuantizePerTensor  # noqa: F401
+from quantization.test_workflow_module import TestFakeQuantizePerChannel  # noqa: F401
+from quantization.test_workflow_module import TestObserver  # noqa: F401
+# TODO: merge with TestObserver
+from quantization.test_workflow_module import TestRecordHistogramObserver  # noqa: F401
+
+
 # Workflow
+## 1. Eager mode quantization
 from quantization.test_quantize import TestPostTrainingStatic  # noqa: F401
 from quantization.test_quantize import TestPostTrainingDynamic  # noqa: F401
 from quantization.test_quantize import TestQuantizationAwareTraining  # noqa: F401
@@ -31,9 +40,7 @@ from quantization.test_quantize import TestGraphModePostTrainingStatic  # noqa: 
 # TODO: move to test_quantized_module
 from quantization.test_quantize import TestFunctionalModule  # noqa: F401
 from quantization.test_quantize import TestFusion  # noqa: F401
-from quantization.test_quantize import TestObserver  # noqa: F401
-# TODO: merge with TestObserver
-from quantization.test_quantize import TestRecordHistogramObserver  # noqa: F401
+## 2. Graph mode quantization
 from quantization.test_quantize_script import TestQuantizeScriptJitPasses  # noqa: F401
 from quantization.test_quantize_script import TestQuantizeScriptPTSQOps  # noqa: F401
 from quantization.test_quantize_script import TestQuantizeDynamicScript  # noqa: F401
