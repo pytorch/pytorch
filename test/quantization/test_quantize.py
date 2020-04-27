@@ -6,19 +6,33 @@ import torch.nn.intrinsic as nni
 import torch.nn.intrinsic.quantized as nniq
 import torch.nn.intrinsic.qat as nniqat
 from torch.nn.utils.rnn import PackedSequence
-from torch.quantization import \
-    default_weight_observer, \
-    quantize, prepare, convert, prepare_qat, quantize_qat, fuse_modules, \
-    quantize_dynamic, default_qconfig, default_debug_qconfig, default_qat_qconfig, \
-    default_dynamic_qconfig, per_channel_dynamic_qconfig, HistogramObserver, QuantWrapper, default_eval_fn, \
-    float16_dynamic_qconfig
+from torch.quantization import (
+    quantize,
+    prepare,
+    convert,
+    prepare_qat,
+    quantize_qat,
+    fuse_modules,
+    quantize_dynamic,
+    QuantWrapper,
+    QConfig,
+    default_qconfig,
+    default_per_channel_qconfig,
+    default_qat_qconfig,
+    default_dynamic_qconfig,
+    per_channel_dynamic_qconfig,
+    default_eval_fn,
+    float16_dynamic_qconfig,
+    default_observer,
+    default_weight_observer,
+    default_per_channel_weight_observer,
+    default_histogram_observer,
+)
 
-from torch.quantization import QConfig
-from torch.quantization import default_histogram_observer
-from torch.quantization import default_observer
-from torch.quantization import default_per_channel_weight_observer
-from torch.quantization import default_per_channel_qconfig
-from torch.quantization._quantize_script import quantize_script, quantize_dynamic_script
+from torch.quantization._quantize_script import (
+    quantize_script,
+    quantize_dynamic_script
+)
 
 from torch.testing._internal.common_utils import TEST_WITH_UBSAN, IS_WINDOWS, IS_PPC, IS_MACOS
 from torch.testing._internal.common_quantization import QuantizationTestCase, \
@@ -31,7 +45,7 @@ from torch.testing._internal.common_quantization import QuantizationTestCase, \
     test_only_eval_fn, test_only_train_fn, \
     prepare_dynamic, convert_dynamic, SingleLayerLinearDynamicModel, \
     TwoLayerLinearModel, NestedModel, ResNetBase, LSTMDynamicModel, \
-    ModelWithNoQconfigPropagation, ModelForFusionWithBias, \
+    ModelForFusionWithBias, \
     ActivationsTestModel, ActivationsQATTestModel, NormalizationTestModel
 
 from torch.testing._internal.common_quantization import AnnotatedTwoLayerLinearModel, AnnotatedNestedModel, \

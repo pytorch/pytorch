@@ -12,16 +12,18 @@ from quantization.test_quantized_op import TestQuantizedLinear  # noqa: F401
 from quantization.test_quantized_op import TestDynamicQuantizedLinear  # noqa: F401
 from quantization.test_quantized_op import TestComparatorOps  # noqa: F401
 
-# Quantized Functional and Module
+# Quantized Functional
+from quantization.test_quantized_functional import TestQuantizedFunctional  # noqa: F401
+
+# Quantized Module
 # TODO: split functional
-from quantization.test_quantized_module import TestFunctional  # noqa: F401
 from quantization.test_quantized_module import TestStaticQuantizedModule  # noqa: F401
 from quantization.test_quantized_module import TestDynamicQuantizedModule  # noqa: F401
 
-# Quantization aware training
+# Quantization Aware Training
 from quantization.test_qat_module import TestQATModule  # noqa: F401
 
-# Workflow related module
+# Module
 # TODO: merge the fake quant per tensor and per channel test cases
 from quantization.test_workflow_module import TestFakeQuantizePerTensor  # noqa: F401
 from quantization.test_workflow_module import TestFakeQuantizePerChannel  # noqa: F401
@@ -31,21 +33,21 @@ from quantization.test_workflow_module import TestRecordHistogramObserver  # noq
 
 
 # Workflow
-## 1. Eager mode quantization
+# 1. Eager mode quantization
 from quantization.test_quantize import TestPostTrainingStatic  # noqa: F401
 from quantization.test_quantize import TestPostTrainingDynamic  # noqa: F401
 from quantization.test_quantize import TestQuantizationAwareTraining  # noqa: F401
 # TODO: move to test_quantize_script
 from quantization.test_quantize import TestGraphModePostTrainingStatic  # noqa: F401
-# TODO: move to test_quantized_module
+# TODO: merge with other tests in test_quantize.py?
 from quantization.test_quantize import TestFunctionalModule  # noqa: F401
 from quantization.test_quantize import TestFusion  # noqa: F401
-## 2. Graph mode quantization
+# 2. Graph mode quantization
 from quantization.test_quantize_script import TestQuantizeScriptJitPasses  # noqa: F401
 from quantization.test_quantize_script import TestQuantizeScriptPTSQOps  # noqa: F401
 from quantization.test_quantize_script import TestQuantizeDynamicScript  # noqa: F401
 
-# Model numerics
+# Model Numerics
 # TODO: move to test_quantize
 from quantization.test_numerics import TestModelNumerics  # noqa: F401
 
