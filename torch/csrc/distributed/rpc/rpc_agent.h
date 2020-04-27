@@ -31,7 +31,8 @@ struct RpcBackendOptions {
       : RpcBackendOptions(kDefaultRpcTimeoutSeconds, kDefaultInitMethod) {}
 
   RpcBackendOptions(float rpcTimeoutSeconds, std::string initMethod)
-      : rpcTimeoutSeconds(rpcTimeoutSeconds), initMethod(initMethod) {}
+      : rpcTimeoutSeconds(rpcTimeoutSeconds),
+        initMethod(std::move(initMethod)) {}
 
   float rpcTimeoutSeconds;
   std::string initMethod;

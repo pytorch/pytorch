@@ -193,6 +193,11 @@ def my_rref_function(rref_a, rref_b):
     return rref_a.to_here() + rref_b.to_here()
 
 
+def delayed_add(a, b, seconds=0.05):
+    time.sleep(seconds)
+    return a + b
+
+
 def no_result():
     print("do nothing")
 
@@ -287,6 +292,10 @@ def clear_global_rref():
 
 def check_rref_confirmed(rref):
     return rref.confirmed_by_owner()
+
+
+def get_rref_debug_info():
+    return _rref_context_get_debug_info()
 
 
 # load_tests from common_utils is used to automatically filter tests for
@@ -1516,6 +1525,126 @@ class RpcTest(RpcAgentTestFixture):
 
         self.assertEqual(result, sum(vals))
 
+    @requires_process_group_agent("PROCESS_GROUP rpc backend specific test, skip")
+    def test_single_threaded_rref_owner(self):
+        # This test aims to verify if the server can handle all internal RPC
+        # messages using just one thread.
+        caller_rank = 0
+        callee_rank = 1
+        rpc_backend_options = rpc.ProcessGroupRpcBackendOptions(
+            init_method=self.rpc_backend_options.init_method,
+            num_send_recv_threads=1
+        ) if self.rank == callee_rank else self.rpc_backend_options
+
+        rpc.init_rpc(
+            name=worker_name(self.rank),
+            backend=self.rpc_backend,
+            rank=self.rank,
+            world_size=self.world_size,
+            rpc_backend_options=rpc_backend_options,
+        )
+
+        if self.rank == caller_rank:
+            dst = worker_name(callee_rank)
+            rrefs = []
+
+            # makes sure there is no existing OwnerRRefs on dst
+            info = rpc.rpc_sync(dst, get_rref_debug_info)
+            self.assertEqual(0, int(info["num_owner_rrefs"]))
+
+            # creating RRefs on dst
+            for i in range(20):
+                rrefs.append(
+                    rpc.remote(dst, delayed_add, args=(torch.zeros(2, 2), i))
+                )
+
+            # using RRefs on dst
+            futs = []
+            for i in range(len(rrefs)):
+                futs.append(
+                    rpc.rpc_async(dst, my_rref_function, args=(rrefs[i], rrefs[i]))
+                )
+
+            # wait for results and check
+            for i in range(len(futs)):
+                self.assertEqual(2 * (torch.zeros(2, 2) + i), futs[i].wait())
+
+            # check we created the expected number of RRefs on dst
+            info = rpc.rpc_sync(dst, get_rref_debug_info)
+            num_owner_rrefs = int(info["num_owner_rrefs"])
+            self.assertEqual(len(futs), num_owner_rrefs)
+
+            # trigger RRef deletion
+            del futs
+            del rrefs
+
+            # wait until OwnerRRefs are cleared on dst
+            while num_owner_rrefs > 0:
+                info = rpc.rpc_sync(dst, get_rref_debug_info)
+                num_owner_rrefs = int(info["num_owner_rrefs"])
+                time.sleep(0.01)
+
+        # use a barrier to prevent messages sent during shutdown occupies the
+        # only thread on callee (rank == 1) too early.
+        dist.barrier()
+        rpc.shutdown()
+
+    @requires_process_group_agent("PROCESS_GROUP rpc backend specific test, skip")
+    def test_single_threaded_rref_to_here(self):
+        # This test aims to verify if the server can handle all internal RPC
+        # messages using just one thread.
+        caller_rank = 0
+        callee_rank = 1
+        rpc_backend_options = rpc.ProcessGroupRpcBackendOptions(
+            init_method=self.rpc_backend_options.init_method,
+            num_send_recv_threads=1
+        ) if self.rank == callee_rank else self.rpc_backend_options
+
+        rpc.init_rpc(
+            name=worker_name(self.rank),
+            backend=self.rpc_backend,
+            rank=self.rank,
+            world_size=self.world_size,
+            rpc_backend_options=rpc_backend_options,
+        )
+
+        if self.rank == caller_rank:
+            dst = worker_name(callee_rank)
+            rrefs = []
+
+            # makes sure there is no existing OwnerRRefs on dst
+            info = rpc.rpc_sync(dst, get_rref_debug_info)
+            self.assertEqual(0, int(info["num_owner_rrefs"]))
+
+            # creating RRefs on dst
+            for i in range(20):
+                rrefs.append(
+                    rpc.remote(dst, delayed_add, args=(torch.zeros(2, 2), i))
+                )
+
+            # wait for results and check
+            for i in range(len(rrefs)):
+                self.assertEqual(torch.zeros(2, 2) + i, rrefs[i].to_here())
+
+            # check we created the expected number of RRefs on dst
+            info = rpc.rpc_sync(dst, get_rref_debug_info)
+            num_owner_rrefs = int(info["num_owner_rrefs"])
+            self.assertEqual(len(rrefs), num_owner_rrefs)
+
+            # trigger RRef deletion
+            del rrefs
+
+            # wait until OwnerRRefs are cleared on dst
+            while num_owner_rrefs > 0:
+                info = rpc.rpc_sync(dst, get_rref_debug_info)
+                num_owner_rrefs = int(info["num_owner_rrefs"])
+                time.sleep(0.01)
+
+        # use a barrier to prevent messages sent during shutdown occupies the
+        # only thread on callee (rank == 1) too early.
+        dist.barrier()
+        rpc.shutdown()
+
     # Notice `rpc.api.shutdown()` accesses `_delete_all_user_rrefs`
     # through `torch.distributed.rpc.api`, so patching
     # `torch.distributed.rpc._delete_all_user_rrefs` will not help.
@@ -1920,30 +2049,6 @@ class RpcTest(RpcAgentTestFixture):
         rpc.shutdown()
 
     @dist_init(setup_rpc=False)
-    def test_default_timeout_backend_opts_dispatch(self):
-        # Similar to above test, but also verifies that
-        timeout = 0.5
-        rpc_backend_options = rpc.backend_registry.construct_rpc_backend_options(
-            self.rpc_backend,
-            # For any RpcAgent.
-            rpc_timeout=timeout,
-            init_method=self.init_method,
-            # For ProcessGroupAgent.
-            num_send_recv_threads=32,
-        )
-        rpc.init_rpc(
-            name=worker_name(self.rank),
-            backend=self.rpc_backend,
-            rank=self.rank,
-            world_size=self.world_size,
-            rpc_backend_options=rpc_backend_options,
-        )
-
-        default_timeout = rpc.get_rpc_timeout()
-        self.assertEqual(default_timeout, timeout)
-        rpc.shutdown()
-
-    @dist_init(setup_rpc=False)
     @requires_process_group_agent("PROCESS_GROUP rpc backend specific test, skip")
     def test_process_group_options_throw_on_timedelta_timeout(self):
         from datetime import timedelta
@@ -1955,18 +2060,6 @@ class RpcTest(RpcAgentTestFixture):
                 init_method=self.rpc_backend_options.init_method,
                 num_send_recv_threads=self.rpc_backend_options.num_send_recv_threads,
                 rpc_timeout=timeout,
-            )
-
-        # Ensure that constructing via dispatch to the rpc backend options handler
-        # with timedelta also fails
-        with self.assertRaisesRegex(TypeError, "incompatible constructor arguments"):
-            rpc_backend_options = rpc.backend_registry.construct_rpc_backend_options(
-                self.rpc_backend,
-                # For any RpcAgent.
-                rpc_timeout=timeout,
-                init_method=self.init_method,
-                # For ProcessGroupAgent.
-                num_send_recv_threads=32,
             )
 
     @dist_init

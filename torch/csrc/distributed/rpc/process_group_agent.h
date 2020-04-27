@@ -158,10 +158,10 @@ class ProcessGroupAgent : public RpcAgent {
   // the timeout). This ensures that the messages accounted for in
   // hasPendingMessage() are tallied properly during a graceful shutdown.
   bool handleRecv(RecvWork& work);
-  // Loop for receiving messages. Calls listenLoopInternal and handles errors
-  // such as timeouts on the process group.
-  virtual void listenLoopInternal();
-  // Main function for receiving messages
+  // Loop that receives and processes messages
+  void listenLoopInternal();
+  // Calls listenLoopInternal and handles errors such as timeouts on the
+  // process group.
   void listenLoop();
   // exception_pointer correspnding to an exception raised in listenLoop (if
   // there is one), and lock to guard access.
