@@ -1871,10 +1871,11 @@ ModuleMethodVector InsertQuantDeQuantHelper::getInvokedMethods(
         if (module_instance == graph->inputs()[0]) {
           m = module;
         } else {
-          auto child_module_name = module_instance->node()->s(attr::name);
-          if (module_instance->node()->kind() == prim::GetAttr &&
-              child_module_name.find("_observer_") == std::string::npos) {
-            m = getInvokedModule(module, n, graph->inputs()[0]);
+          if (module_instance->node()->kind() == prim::GetAttr) {
+            auto child_module_name = module_instance->node()->s(attr::name);
+            if (child_module_name.find("_observer_") == std::string::npos) {
+              m = getInvokedModule(module, n, graph->inputs()[0]);
+            }
           }
         }
         if (m) {
