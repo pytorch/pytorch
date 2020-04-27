@@ -208,13 +208,6 @@ endif()
 if(USE_CUDNN)
     list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_CUDNN)
 
-    # NOTE: these are at the front, in case there's another cuDNN in
-    # CUDA path.
-    # Basically, this is the case where $CUDA_HOME/lib64 has an old or
-    # incompatible libcudnn.so, which we can inadvertently link to if
-    # we're not careful.
-    list(INSERT TORCH_PYTHON_LINK_LIBRARIES 0 ${CUDNN_LIBRARY_PATH})
-    list(INSERT TORCH_PYTHON_INCLUDE_DIRECTORIES 0 ${CUDNN_INCLUDE_PATH})
     list(APPEND TORCH_PYTHON_SRCS
       ${TORCH_SRC_DIR}/csrc/cuda/shared/cudnn.cpp
       )
