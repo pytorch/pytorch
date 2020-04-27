@@ -2037,7 +2037,7 @@ void quantize_tensor_per_tensor_affine_cpu(
         int num_tasks = at::get_num_threads();
         at::parallel_for(0, num_tasks, 1, [&](int64_t begin, int64_t end) {
           for (int task_id = begin; task_id < end; ++task_id) {
-            fbgemm::Quantize<underlying_t>(
+            fbgemm::Quantize<underlying_t, false /*LEGACY*/>(
                 rd, /*src=*/
                 qd, /*dst=*/
                 rtensor.numel(), /*len*/
