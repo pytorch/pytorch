@@ -1481,7 +1481,7 @@ def reduce_scatter(output,
         no_copy (bool, optional): Do not flatten input tensors if they are
             contiguous views into an already flattened tensor and backend
             is NCCL. If output tensor shares storage with input tensors,
-            it must be properly aligned, i.e.
+            it must be properly aligned, thus 
             offset == rank * flat_input.numel() // world_size.
             In all other circumstances this argument has no effect.
 
