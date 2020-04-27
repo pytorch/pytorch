@@ -265,6 +265,20 @@ struct ValueError : public PyTorchError {
   }
 };
 
+struct WarningMeta {
+  WarningMeta(const c10::SourceLocation& _source_location,
+      const std::string& _msg,
+      const bool _verbatim) :
+      source_location_{_source_location},
+      msg_{_msg},
+      verbatim_{_verbatim} { }
+
+
+  const c10::SourceLocation source_location_;
+  const std::string msg_;
+  const bool verbatim_;
+};
+
 // ATen warning handler for Python
 struct PyWarningHandler: at::WarningHandler {
 public:
@@ -273,7 +287,8 @@ public:
   TORCH_API ~PyWarningHandler() noexcept(false) override;
 
   void process(const at::SourceLocation &source_location,
-               const std::string &msg) override;
+               const std::string &msg,
+               const bool verbatim) override;
 
   /** Call if an exception has been thrown
 
@@ -286,8 +301,7 @@ public:
   }
 
 private:
-  using warning_buffer_t =
-    std::vector<std::pair<c10::SourceLocation, std::string>>;
+  using warning_buffer_t = std::vector<WarningMeta>;
 
   warning_buffer_t warning_buffer_;
 
