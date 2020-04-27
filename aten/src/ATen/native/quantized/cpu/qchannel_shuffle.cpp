@@ -34,13 +34,12 @@ Tensor quantized_channel_shuffle_impl(
       "Quantized channel shuffle works only on uint8_t.",
       "But got:", self.scalar_type());
   const Tensor self_nhwc = self.contiguous(MemoryFormat::ChannelsLast);
-  Tensor qy = at::new_qtensor_cpu(
+  Tensor qy = at::native::empty_affine_quantized(
       self_nhwc.sizes(),
-      TensorOptions(kQUInt8)
-          .device(kCPU)
-          .memory_format(MemoryFormat::ChannelsLast),
-      make_per_tensor_affine_quantizer(
-          self_nhwc.q_scale(), self_nhwc.q_zero_point(), kQUInt8)
+      at::device(kCPU).dtype(kQUInt8).memory_format(MemoryFormat::ChannelsLast),
+      self_nhwc.q_scale(),
+      self_nhwc.q_zero_point(),
+      c10::nullopt
       );
 
   // Degenerate case of just copying.
