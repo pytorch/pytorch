@@ -9318,6 +9318,46 @@ class TestNNDeviceType(NNTestCase):
 
     @onlyCUDA
     @dtypesIfCUDA(torch.half, torch.float, torch.double)
+    def test_avg_pool2d_nhwc(self, device, dtype):
+        def helper(n, c, h, w, kernel_size, stride=None,
+                   count_include_pad=True, divisor_override=None, padding=0):
+            if stride is None:
+                stride = kernel_size
+            input = torch.randn(n, c, h, w, dtype=dtype, device=device)
+            input = input.contiguous(memory_format=torch.channels_last).requires_grad_()
+            grad = torch.randn(n, c, (h - kernel_size) // stride + 1, (w - kernel_size) // stride + 1,
+                               dtype=dtype, device=device)
+            pool = torch.nn.AvgPool2d(kernel_size, stride=stride, count_include_pad=count_include_pad,
+                                      divisor_override=divisor_override).to(device)
+
+            ref_input = input.detach().clone().contiguous().requires_grad_(True)
+            ref_grad = grad.detach().clone().contiguous()
+            ref_pool = torch.nn.AvgPool2d(kernel_size, stride=stride, count_include_pad=count_include_pad,
+                                          divisor_override=divisor_override).to(device)
+
+            out = pool(input)
+            out.backward(grad)
+            ref_out = ref_pool(ref_input)
+            ref_out.backward(ref_grad)
+
+            self.assertTrue(out.is_contiguous(memory_format=torch.channels_last))
+            self.assertTrue(ref_out.is_contiguous())
+            self.assertTrue(torch.allclose(out, ref_out))
+            self.assertTrue(torch.allclose(input.grad, ref_input.grad))
+
+        helper(4, 8, 8, 8, 3)
+        helper(4, 8, 8, 8, 3, count_include_pad=False, padding=1)
+        helper(4, 8, 8, 8, 3, count_include_pad=False, padding=2, stride=2)
+        helper(4, 8, 8, 8, 3, divisor_override=42)
+        helper(4, 8, 8, 8, 7)
+        helper(200, 512, 28, 28, 2)
+        helper(4, 8, 7, 7, 3, stride=1)
+        helper(4, 8, 7, 7, 3, padding=2, stride=1)
+        helper(10, 512, 31, 31, 3, stride=2)
+        helper(1, 129, 8, 8, 3, stride=2)
+
+    @onlyCUDA
+    @dtypesIfCUDA(torch.half, torch.float, torch.double)
     def test_max_pool2d_nhwc(self, device, dtype):
         def helper(n, c, h, w, kernel_size, stride=None):
             if stride is None:
