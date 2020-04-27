@@ -283,7 +283,7 @@ template <typename T>
 std::vector<T> complex_to_float(const std::complex<T>* src, size_t len) {
   std::vector<T> new_src;
   new_src.reserve(2 * len);
-  for (int i = 0; i < len; i++) {
+  for (size_t i = 0; i < len; i++) {
     auto elem = src[i];
     new_src.emplace_back(elem.real());
     new_src.emplace_back(elem.imag());
