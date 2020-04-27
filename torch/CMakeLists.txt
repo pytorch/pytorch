@@ -20,6 +20,10 @@ endif()
 set(TORCH_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
 set(TORCH_ROOT "${TORCH_SRC_DIR}/..")
 
+if(NOT TORCH_INSTALL_LIB_DIR)
+  set(TORCH_INSTALL_LIB_DIR lib)
+endif()
+
 if(MSVC)
     set(LIBSHM_SUBDIR libshm_windows)
 else()

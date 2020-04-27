@@ -1553,7 +1553,6 @@ endif()
 # End ATen checks
 #
 
-set(FMT_INSTALL ON CACHE BOOL " " FORCE)
 add_subdirectory(${CMAKE_SOURCE_DIR}/third_party/fmt)
 
 # Disable compiler feature checks for `fmt`.
@@ -1563,6 +1562,6 @@ add_subdirectory(${CMAKE_SOURCE_DIR}/third_party/fmt)
 # CMAKE_CXX_FLAGS in ways that break feature checks. Since we already know
 # `fmt` is compatible with a superset of the compilers that PyTorch is, it
 # shouldn't be too bad to just disable the checks.
-set_target_properties(fmt PROPERTIES INTERFACE_COMPILE_FEATURES "")
+set_target_properties(fmt-header-only PROPERTIES INTERFACE_COMPILE_FEATURES "")
 
-list(APPEND Caffe2_DEPENDENCY_LIBS fmt::fmt)
+list(APPEND Caffe2_DEPENDENCY_LIBS fmt::fmt-header-only)
