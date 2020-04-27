@@ -420,7 +420,6 @@ class TestRecordHistogramObserver(QuantizationTestCase):
         self.assertEqual(qparams[1].item(), 0)
 
 class TestFakeQuantizePerTensor(TestCase):
-
     @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),
            X=hu.tensor(shapes=hu.array_shapes(1, 5,),
                        qparams=hu.qparams(dtypes=torch.quint8)))
