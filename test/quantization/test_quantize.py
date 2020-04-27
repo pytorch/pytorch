@@ -23,7 +23,7 @@ from torch.quantization import default_per_channel_weight_observer
 from torch.quantization import default_per_channel_qconfig
 from torch.quantization._quantize_script import quantize_script, quantize_dynamic_script
 
-from torch.testing._internal.common_utils import TEST_WITH_UBSAN, IS_WINDOWS, IS_PPC, IS_MACOS
+from torch.testing._internal.common_utils import run_tests, TEST_WITH_UBSAN, IS_WINDOWS, IS_PPC, IS_MACOS
 from torch.testing._internal.common_quantization import QuantizationTestCase, \
     AnnotatedSingleLayerLinearModel, SingleLayerLinearModel, \
     AnnotatedConvModel, ConvModel, \
