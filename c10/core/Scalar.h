@@ -52,6 +52,8 @@ class C10_API Scalar {
   DEFINE_IMPLICIT_COMPLEX_CTOR(at::ComplexHalf, ComplexHalf, z)
   DEFINE_IMPLICIT_COMPLEX_CTOR(std::complex<float>, ComplexFloat, z)
   DEFINE_IMPLICIT_COMPLEX_CTOR(std::complex<double>, ComplexDouble, z)
+  DEFINE_IMPLICIT_COMPLEX_CTOR(c10::complex<float>, ComplexFloat, z)
+  DEFINE_IMPLICIT_COMPLEX_CTOR(c10::complex<double>, ComplexDouble, z)
 
 #undef DEFINE_IMPLICIT_COMPLEX_CTOR
 
