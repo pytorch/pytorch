@@ -1203,6 +1203,32 @@ class TestQuantizeScriptPTSQOps(JitTestCase):
         " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
         " with instruction set support avx2 or newer.",
     )
+    def test_quantized_functional_linear(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+                self.linear = F.linear
+                self.w = torch.randn(4, 30)
+                self.b = torch.randn(4)
+
+            def forward(self, x):
+                return self.linear(x, self.w, self.b)
+
+        data = [(torch.rand((1, 30), dtype=torch.float),
+                 torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
+        model = self._test_op_impl(M(), data, "quantized::linear")
+        # make sure there is only one quantize_per_tensor for input
+        # and linear_prepack is folded
+        FileCheck().check_count("aten::quantize_per_tensor", 1, exactly=True) \
+                   .run(model.graph)
+        FileCheck().check_not("quantized::linear_prepack") \
+                   .run(model.graph)
+
+    @unittest.skipUnless(
+        'fbgemm' in torch.backends.quantized.supported_engines,
+        " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
+        " with instruction set support avx2 or newer.",
+    )
     def test_quantized_linear_relu(self):
         class M(torch.nn.Module):
             def __init__(self, functional):
@@ -1215,6 +1241,39 @@ class TestQuantizeScriptPTSQOps(JitTestCase):
 
             def forward(self, x):
                 return self.relu(self.linear(x))
+
+        data = [(torch.randn((1, 30), dtype=torch.float),
+                 torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
+        model = self._test_op_impl(M(functional=False), data,
+                                   "quantized::linear_relu")
+        model_functional = self._test_op_impl(M(functional=True), data,
+                                              "quantized::linear_relu")
+        checker = FileCheck().check_not("aten::linear") \
+                             .check_not("aten::relu") \
+                             .check_not("quantized::linear(") \
+                             .check_not("quantized::relu(")
+        checker.run(model.graph)
+        checker.run(model_functional.graph)
+
+    @unittest.skipUnless(
+        'fbgemm' in torch.backends.quantized.supported_engines,
+        " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
+        " with instruction set support avx2 or newer.",
+    )
+    def test_quantized_functional_linear_relu(self):
+        class M(torch.nn.Module):
+            def __init__(self, functional):
+                super(M, self).__init__()
+                self.linear = F.linear
+                self.w = torch.randn(4, 30)
+                self.b = torch.randn(4)
+                if functional:
+                    self.relu = F.relu
+                else:
+                    self.relu = torch.nn.ReLU()
+
+            def forward(self, x):
+                return self.relu(self.linear(x, self.w, self.b))
 
         data = [(torch.randn((1, 30), dtype=torch.float),
                  torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
@@ -1670,6 +1729,7 @@ class TestQuantizeScriptPTSQOps(JitTestCase):
                 x = torch.mean(x)
                 x = torch.sigmoid(x)
                 x = x.reshape([-1])
+                x = x.resize_(1, 1, x.numel())
                 x = self.sigmoid(x)
                 x = x.view(-1)
                 x = x.transpose(1, 2)
