@@ -5960,7 +5960,6 @@ class TestTorchDeviceType(TestCase):
 
         t = torch.tensor(vals, device=device, dtype=dtype)
         torch_result = torch_fn(t).cpu()
-        print(np_result, torch_result)
         self.assertEqual(np_result, torch_result)
 
     @unittest.skipIf(not TEST_NUMPY, 'NumPy not found')
