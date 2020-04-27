@@ -27,11 +27,12 @@ using wrap_complex = typename wrap_complex_helper<T>::type;
     return __VA_ARGS__();                          \
   }
 
-#define USE_C10_COMPLEX(...)                       \
+#define USE_C10_COMPLEX(...) [&]{                  \
   using _std_scalar_t = scalar_t;                  \
-  [&] {                                            \
-    using scalar_t = wrap_complex<_std_scalar_t>;  \
-    return __VA_ARGS__();                          \
+    return [&] {                                   \
+      using scalar_t = wrap_complex<_std_scalar_t>;\
+      return __VA_ARGS__();                        \
+    }();                                           \
   }
 
 // Workaround for C10_UNUSED because CUDA 10.1 and below fails to handle unused
@@ -557,6 +558,11 @@ inline void deprecated_AT_DISPATCH_ALL_TYPES_AND_HALF_AND_COMPLEX() {}
         AT_ERROR(#NAME, " not implemented for '", TYPE, "'");               \
     }                                                                       \
   }()
+
+#define AT_DISPATCH_ALL_TYPES_AND_C10_COMPLEX_AND3(                         \
+    SCALARTYPE1, SCALARTYPE2, SCALARTYPE3, TYPE, NAME, ...)                 \
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(                                   \
+    SCALARTYPE1, SCALARTYPE2, SCALARTYPE3, TYPE, NAME, USE_C10_COMPLEX(...))
 
 // ----------------------------------------------------------------------------
 // DEPRECATED MACROS, DON'T USE THESE
