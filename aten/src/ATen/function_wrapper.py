@@ -760,7 +760,7 @@ def gen_dispatch_key_init(var_name, formals):
         subexprs.append('c10::detail::multi_dispatch_key_set({})'.format(args))
     return [
         'DispatchKeySet _dk_set = {};'.format(' | '.join(subexprs)),
-        'DispatchKeySet _dk_mask = c10::DispatchKeySet(c10::DispatchKeySet::FULL).remove(DispatchKey::BackendSelect);',
+        'DispatchKeySet _dk_mask = c10::DispatchKeySet(DispatchKeySet::FULL_AFTER, DispatchKey::BackendSelect);',
         'DispatchKey {} = c10::impl::dispatchTypeId(_dk_set, _dk_mask);'.format(var_name),
     ]
 

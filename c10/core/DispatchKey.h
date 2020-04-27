@@ -155,7 +155,7 @@ enum class DispatchKey : uint8_t {
   // Don't use it for anything real; its only acceptable use is within a single
   // process test.  Use it by creating a TensorImpl with this DispatchKey, and
   // then registering operators to operate on this type id.  See
-  // aten/src/ATen/test/backend_fallback_test.cpp for a usage example.
+  // aten/src/ATen/core/dispatch/backend_fallback_test.cpp for a usage example.
   TESTING_ONLY_GenericWrapper,
 
   // TESTING: This is intended to be a generic testing tensor type id.
@@ -163,7 +163,7 @@ enum class DispatchKey : uint8_t {
   // process test.  Use it by toggling the mode on and off via
   // TESTING_ONLY_tls_generic_mode_set_enabled and then registering operators
   // to operate on this type id.  See
-  // aten/src/ATen/test/backend_fallback_test.cpp
+  // aten/src/ATen/core/dispatch/backend_fallback_test.cpp
   // for a usage example
   TESTING_ONLY_GenericMode,
 
