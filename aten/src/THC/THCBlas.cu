@@ -108,16 +108,6 @@ void adjustLdLevel2(int64_t m, int64_t n, int64_t *lda)
     *lda = std::max<int64_t>(m, 1);
 }
 
-void THCudaBlas_Sgemv(THCState *state, char trans, int64_t m, int64_t n, float alpha, float *a, int64_t lda, float *x, int64_t incx, float beta, float *y, int64_t incy)
-{
-  at::cuda::blas::gemv<float>(trans, m, n, alpha, a, lda, x, incx, beta, y, incy);
-}
-
-void THCudaBlas_Dgemv(THCState *state, char trans, int64_t m, int64_t n, double alpha, double *a, int64_t lda, double *x, int64_t incx, double beta, double *y, int64_t incy)
-{
-  at::cuda::blas::gemv<double>(trans, m, n, alpha, a, lda, x, incx, beta, y, incy);
-}
-
 void THCudaBlas_Sger(THCState *state, int64_t m, int64_t n, float alpha, float *x, int64_t incx, float *y, int64_t incy, float *a, int64_t lda)
 {
   adjustLdLevel2(m, n, &lda);
