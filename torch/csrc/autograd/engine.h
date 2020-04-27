@@ -30,11 +30,6 @@ namespace torch { namespace autograd {
 
 using FutureVariableList = torch::utils::Future<variable_list>;
 
-void validate_outputs(
-    const edge_list& edges,
-    variable_list& grads,
-    const std::function<std::string(const std::string&)>& format_error);
-
 static constexpr int NO_DEVICE = -2;
 static constexpr int CPU_DEVICE = -1;
 
@@ -46,8 +41,14 @@ static constexpr int CPU_DEVICE = -1;
 // For reference, see https://github.com/google/sanitizers/issues/950
 static constexpr int MAX_DEPTH = 60;
 
+void set_device(int device);
+void validate_outputs(
+    const edge_list& edges,
+    variable_list& grads,
+    const std::function<std::string(const std::string&)>& format_error);
+
 // GraphTask holds metadata needed for a single execution of backward()
-struct GraphTask {
+struct GraphTask: std::enable_shared_from_this<GraphTask> {
   std::atomic<uint64_t> outstanding_tasks_{0};
   // Indicates if an error occurred while executing any task.  When this is
   // true, it signals all threads to stop executing.
@@ -123,6 +124,11 @@ struct GraphTask {
     return exec_info_.empty();
   }
 
+  // check if the GraphTask is completed or not
+  bool completed();
+  // mark the graph task as completed and trigger post processing
+  void mark_as_completed_and_run_post_processing();
+
   // Set an appropriate exception on this graph_task which was encountered while
   // running the provided function.
   void set_exception(std::exception& e, const std::shared_ptr<Node>& fn);
@@ -170,6 +176,9 @@ struct GraphTask {
         future_result_(std::make_shared<FutureVariableList>()) {
           TORCH_INTERNAL_ASSERT(cpu_ready_queue_ != nullptr);
         }
+ private:
+  // run GraphTask post processing
+  void exec_post_processing();
 };
 
 struct NodeTask {
@@ -333,7 +342,6 @@ struct TORCH_API Engine {
       bool reentrant_thread);
   void reentrant_thread_init();
   void add_thread_pool_task(const std::weak_ptr<GraphTask>& graph_task);
-  void set_device(int device);
   void initialize_device_threads_pool();
 
   // Ensures device_ready_queues_ are initialized only once
@@ -380,9 +388,6 @@ private:
 
  void execute_graph_task_with_continuation(
      const std::shared_ptr<GraphTask>& graph_task);
- void graph_task_exec_post_processing(
-     const std::shared_ptr<GraphTask>& graph_task);
- void mark_graph_task_completed(const std::shared_ptr<GraphTask>& graph_task);
 };
 
 // allow python_engine to override the default engine when it loads
