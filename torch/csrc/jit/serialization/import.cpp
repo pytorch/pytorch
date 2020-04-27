@@ -135,7 +135,7 @@ class ScriptModuleDeserializer final {
 
 IValue ScriptModuleDeserializer::readArchive(const std::string& archive_name) {
   auto type_resolver = [&](const c10::QualifiedName& qn) {
-    auto cls = source_importer_.loadNamedType(qn)->expect<ClassType>();
+    auto cls = source_importer_.loadType(qn);
     return c10::StrongTypePtr(compilation_unit_, std::move(cls));
   };
 
