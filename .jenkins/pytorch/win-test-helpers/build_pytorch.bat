@@ -62,6 +62,7 @@ set CUDA_TOOLKIT_ROOT_DIR=%CUDA_PATH%
 set CUDNN_ROOT_DIR=%CUDA_PATH%
 set NVTOOLSEXT_PATH=C:\Program Files\NVIDIA Corporation\NvToolsExt
 set PATH=%CUDA_PATH%\bin;%CUDA_PATH%\libnvvp;%PATH%
+set CUDA_SEPARABLE_COMPILATION=YES
 
 :cuda_build_end
 
