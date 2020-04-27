@@ -49,119 +49,132 @@ hu.assert_deadline_disabled()
 import io
 import copy
 
-@unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
-                     " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
+@unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines or
+                     'qnnpack' in torch.backends.quantized.supported_engines,
+                     " Quantized operations require FBGEMM/QNNPACK. FBGEMM is only optimized for CPUs"
                      " with instruction set support avx2 or newer.")
 class TestPostTrainingStatic(QuantizationTestCase):
-    @given(qconfig=st.sampled_from((torch.quantization.default_qconfig, torch.quantization.default_per_channel_qconfig)))
-    def test_single_layer(self, qconfig):
+    @given(qengine=st.sampled_from(("qnnpack", "fbgemm")))
+    def test_single_layer(self, qengine):
         r"""Quantize SingleLayerLinearModel which has one Linear module, make sure it is swapped
         to nnq.Linear which is the quantized version of the module
         """
-        model = AnnotatedSingleLayerLinearModel()
-        model.qconfig = qconfig
-        model = prepare(model)
-        # Check if observers and quant/dequant nodes are inserted
-        self.checkNoPrepModules(model)
-        self.checkHasPrepModules(model.fc1)
-        self.checkObservers(model)
+        if qengine in torch.backends.quantized.supported_engines:
+            with override_quantized_engine(qengine):
+                qconfig = torch.quantization.get_default_qconfig(qengine)
+                model = AnnotatedSingleLayerLinearModel()
+                model.qconfig = qconfig
+                model = prepare(model)
+                # Check if observers and quant/dequant nodes are inserted
+                self.checkNoPrepModules(model)
+                self.checkHasPrepModules(model.fc1)
+                self.checkObservers(model)
 
-        test_only_eval_fn(model, self.calib_data)
-        model = convert(model)
+                test_only_eval_fn(model, self.calib_data)
+                model = convert(model)
 
-        def checkQuantized(model):
-            self.checkNoPrepModules(model)
-            self.checkHasPrepModules(model.fc1)
-            self.checkWrappedQuantizedLinear(model.fc1)
-            test_only_eval_fn(model, self.calib_data)
-            self.checkScriptable(model, self.calib_data)
+                def checkQuantized(model):
+                    self.checkNoPrepModules(model)
+                    self.checkHasPrepModules(model.fc1)
+                    self.checkWrappedQuantizedLinear(model.fc1)
+                    test_only_eval_fn(model, self.calib_data)
+                    self.checkScriptable(model, self.calib_data)
 
-        checkQuantized(model)
+                checkQuantized(model)
 
-        # test one line API - out of place version
-        base = AnnotatedSingleLayerLinearModel()
-        base.qconfig = qconfig
-        keys_before = set(list(base.state_dict().keys()))
-        model = quantize(base, test_only_eval_fn, self.calib_data)
-        checkQuantized(model)
-        keys_after = set(list(base.state_dict().keys()))
-        self.assertEqual(keys_before, keys_after)  # simple check that nothing changed
+                # test one line API - out of place version
+                base = AnnotatedSingleLayerLinearModel()
+                base.qconfig = qconfig
+                keys_before = set(list(base.state_dict().keys()))
+                model = quantize(base, test_only_eval_fn, self.calib_data)
+                checkQuantized(model)
+                keys_after = set(list(base.state_dict().keys()))
+                self.assertEqual(keys_before, keys_after)  # simple check that nothing changed
 
-        # in-place version
-        model = AnnotatedSingleLayerLinearModel()
-        model.qconfig = qconfig
-        quantize(model, test_only_eval_fn, self.calib_data, inplace=True)
-        checkQuantized(model)
+                # in-place version
+                model = AnnotatedSingleLayerLinearModel()
+                model.qconfig = qconfig
+                quantize(model, test_only_eval_fn, self.calib_data, inplace=True)
+                checkQuantized(model)
 
-    def test_two_layers(self):
+    @given(qengine=st.sampled_from(("fbgemm")))
+    def test_two_layers(self, qengine):
         r"""TwoLayerLinearModel has two Linear modules but we only quantize the second one
         `fc2`, and `fc1`is not quantized
         """
-        model = AnnotatedTwoLayerLinearModel()
-        model = prepare(model)
+        if qengine in torch.backends.quantized.supported_engines:
+            with override_quantized_engine(qengine):
+                model = AnnotatedTwoLayerLinearModel()
+                model = prepare(model)
 
-        self.checkNoPrepModules(model)
-        self.checkObservers(model)
-        self.checkNoPrepModules(model.fc1)
-        self.checkHasPrepModules(model.fc2)
+                self.checkNoPrepModules(model)
+                self.checkObservers(model)
+                self.checkNoPrepModules(model.fc1)
+                self.checkHasPrepModules(model.fc2)
 
-        test_only_eval_fn(model, self.calib_data)
-        model = convert(model)
+                test_only_eval_fn(model, self.calib_data)
+                model = convert(model)
 
-        def checkQuantized(model):
-            self.checkNoPrepModules(model)
-            self.checkNoPrepModules(model.fc1)
-            self.checkHasPrepModules(model.fc2)
-            self.assertEqual(type(model.fc1), torch.nn.Linear)
-            self.checkWrappedQuantizedLinear(model.fc2)
-            test_only_eval_fn(model, self.calib_data)
-            self.checkScriptable(model, self.calib_data)
+                def checkQuantized(model):
+                    self.checkNoPrepModules(model)
+                    self.checkNoPrepModules(model.fc1)
+                    self.checkHasPrepModules(model.fc2)
+                    self.assertEqual(type(model.fc1), torch.nn.Linear)
+                    self.checkWrappedQuantizedLinear(model.fc2)
+                    test_only_eval_fn(model, self.calib_data)
+                    self.checkScriptable(model, self.calib_data)
 
-        checkQuantized(model)
+                checkQuantized(model)
 
-        # test one line API
-        model = quantize(AnnotatedTwoLayerLinearModel(), test_only_eval_fn,
-                         self.calib_data)
-        checkQuantized(model)
+                # test one line API
+                model = quantize(AnnotatedTwoLayerLinearModel(), test_only_eval_fn,
+                                 self.calib_data)
+                checkQuantized(model)
 
-    def test_nested1(self):
+    @given(qengine=st.sampled_from(("fbgemm")))
+    def test_nested1(self, qengine):
         r"""Test quantization for nested model, top level 'fc3' and
         'fc1' of submodule 'sub2', 'sub2.fc2' is not quantized
         """
-        model = AnnotatedNestedModel()
+        if qengine in torch.backends.quantized.supported_engines:
+            with override_quantized_engine(qengine):
+                model = AnnotatedNestedModel()
+                model.qconfig = torch.quantization.get_default_qconfig(qengine)
 
-        def checkPrepModules(model, before_calib=False):
-            if before_calib:
-                self.checkObservers(model)
-            self.checkNoPrepModules(model)
-            self.checkNoPrepModules(model.sub1)
-            self.checkNoPrepModules(model.sub1.fc)
-            self.checkNoPrepModules(model.sub1.relu)
-            self.checkNoPrepModules(model.sub2)
-            self.checkHasPrepModules(model.sub2.fc1)
-            self.checkNoPrepModules(model.sub2.fc2)
-            self.checkHasPrepModules(model.fc3)
+                def checkPrepModules(model, before_calib=False):
+                    if before_calib:
+                        self.checkObservers(model)
+                    self.checkNoPrepModules(model)
+                    self.checkNoPrepModules(model.sub1)
+                    self.checkNoPrepModules(model.sub1.fc)
+                    self.checkNoPrepModules(model.sub1.relu)
+                    self.checkNoPrepModules(model.sub2)
+                    self.checkHasPrepModules(model.sub2.fc1)
+                    self.checkNoPrepModules(model.sub2.fc2)
+                    self.checkHasPrepModules(model.fc3)
 
-        model = prepare(model)
-        checkPrepModules(model, True)
-        test_only_eval_fn(model, self.calib_data)
-        model = convert(model)
+                model = prepare(model)
+                model.qconfig = torch.quantization.get_default_qconfig(qengine)
+                checkPrepModules(model, True)
+                test_only_eval_fn(model, self.calib_data)
+                model = convert(model)
 
-        def checkQuantized(model):
-            checkPrepModules(model)
-            self.checkLinear(model.sub1.fc)
-            self.checkWrappedQuantizedLinear(model.fc3)
-            self.checkWrappedQuantizedLinear(model.sub2.fc1)
-            self.checkLinear(model.sub2.fc2)
-            test_only_eval_fn(model, self.calib_data)
-            self.checkScriptable(model, self.calib_data)
+                def checkQuantized(model):
+                    checkPrepModules(model)
+                    self.checkLinear(model.sub1.fc)
+                    self.checkWrappedQuantizedLinear(model.fc3)
+                    self.checkWrappedQuantizedLinear(model.sub2.fc1)
+                    self.checkLinear(model.sub2.fc2)
+                    test_only_eval_fn(model, self.calib_data)
+                    self.checkScriptable(model, self.calib_data)
 
-        checkQuantized(model)
+                checkQuantized(model)
 
-        # test one line API
-        model = quantize(AnnotatedNestedModel(), test_only_eval_fn,
-                         self.calib_data)
-        checkQuantized(model)
+                # test one line API
+                model = quantize(AnnotatedNestedModel(), test_only_eval_fn,
+                                 self.calib_data)
+                model.qconfig = torch.quantization.get_default_qconfig(qengine)
+                checkQuantized(model)
 
 
     def test_nested2(self):
@@ -202,44 +215,47 @@ class TestPostTrainingStatic(QuantizationTestCase):
                          self.calib_data)
         checkQuantized(model)
 
-    def test_nested3(self):
+    @given(qengine=st.sampled_from(("qnnpack", "fbgemm")))
+    def test_nested3(self, qengine):
         r"""More complicated nested test case with child qconfig overrides
         parent qconfig
         """
-        model = AnnotatedCustomConfigNestedModel()
-        model = prepare(model)
+        if qengine in torch.backends.quantized.supported_engines:
+            with override_quantized_engine(qengine):
+                model = AnnotatedCustomConfigNestedModel()
+                model = prepare(model)
 
-        def checkPrepModules(model, before_calib=False):
-            if before_calib:
-                self.checkObservers(model)
-            self.checkNoPrepModules(model)
-            self.checkNoPrepModules(model.sub1)
-            self.checkNoPrepModules(model.sub1.fc)
-            self.checkNoPrepModules(model.sub1.relu)
-            self.checkNoPrepModules(model.sub2)
-            self.checkHasPrepModules(model.sub2.fc1)
-            self.checkHasPrepModules(model.sub2.fc2)
-            self.checkHasPrepModules(model.fc3)
+                def checkPrepModules(model, before_calib=False):
+                    if before_calib:
+                        self.checkObservers(model)
+                    self.checkNoPrepModules(model)
+                    self.checkNoPrepModules(model.sub1)
+                    self.checkNoPrepModules(model.sub1.fc)
+                    self.checkNoPrepModules(model.sub1.relu)
+                    self.checkNoPrepModules(model.sub2)
+                    self.checkHasPrepModules(model.sub2.fc1)
+                    self.checkHasPrepModules(model.sub2.fc2)
+                    self.checkHasPrepModules(model.fc3)
 
-        checkPrepModules(model, True)
+                checkPrepModules(model, True)
 
-        test_only_eval_fn(model, self.calib_data)
-        model = convert(model)
+                test_only_eval_fn(model, self.calib_data)
+                model = convert(model)
 
-        def checkQuantized(model):
-            checkPrepModules(model)
-            self.checkWrappedQuantizedLinear(model.sub2.fc1)
-            self.checkWrappedQuantizedLinear(model.sub2.fc2)
-            self.checkWrappedQuantizedLinear(model.fc3)
-            test_only_eval_fn(model, self.calib_data)
-            self.checkScriptable(model, self.calib_data)
+                def checkQuantized(model):
+                    checkPrepModules(model)
+                    self.checkWrappedQuantizedLinear(model.sub2.fc1)
+                    self.checkWrappedQuantizedLinear(model.sub2.fc2)
+                    self.checkWrappedQuantizedLinear(model.fc3)
+                    test_only_eval_fn(model, self.calib_data)
+                    self.checkScriptable(model, self.calib_data)
 
-        checkQuantized(model)
+                checkQuantized(model)
 
-        # test one line API
-        model = quantize(AnnotatedCustomConfigNestedModel(), test_only_eval_fn,
-                         self.calib_data)
-        checkQuantized(model)
+                # test one line API
+                model = quantize(AnnotatedCustomConfigNestedModel(), test_only_eval_fn,
+                                 self.calib_data)
+                checkQuantized(model)
 
     def test_skip_quant(self):
         r"""The case when we want to skip quantizing some layers
@@ -292,28 +308,31 @@ class TestPostTrainingStatic(QuantizationTestCase):
         model = quantize(QuantStubModel(), test_only_eval_fn, self.calib_data)
         checkQuantized(model)
 
-    @given(qconfig=st.sampled_from((torch.quantization.default_qconfig, torch.quantization.default_per_channel_qconfig)))
-    def test_resnet_base(self, qconfig):
+    @given(qengine=st.sampled_from(("qnnpack", "fbgemm")))
+    def test_resnet_base(self, qengine):
         r"""Test quantization for bottleneck topology used in resnet/resnext
         and add coverage for conversion of average pool and float functional
         """
-        model = ResNetBase().float().eval()
-        model = QuantWrapper(model)
-        model.qconfig = qconfig
-        fuse_list = ['module.conv1', 'module.bn1', 'module.relu1']
-        fuse_modules(model, fuse_list, inplace=True)
-        model = prepare(model)
-        self.checkObservers(model)
-        test_only_eval_fn(model, self.img_data)
-        model = convert(model)
+        if qengine in torch.backends.quantized.supported_engines:
+            with override_quantized_engine(qengine):
+                qconfig = torch.quantization.get_default_qconfig(qengine)
+                model = ResNetBase().float().eval()
+                model = QuantWrapper(model)
+                model.qconfig = qconfig
+                fuse_list = ['module.conv1', 'module.bn1', 'module.relu1']
+                fuse_modules(model, fuse_list, inplace=True)
+                model = prepare(model)
+                self.checkObservers(model)
+                test_only_eval_fn(model, self.img_data)
+                model = convert(model)
 
-        def checkQuantized(model):
-            self.assertEqual(type(model.module.conv1), nn.intrinsic.quantized.ConvReLU2d)
-            self.assertEqual(type(model.module.myop), nn.quantized.QFunctional)
-            self.assertEqual(type(model.module.avgpool), nn.AdaptiveAvgPool2d)
-            test_only_eval_fn(model, self.img_data)
+                def checkQuantized(model):
+                    self.assertEqual(type(model.module.conv1), nn.intrinsic.quantized.ConvReLU2d)
+                    self.assertEqual(type(model.module.myop), nn.quantized.QFunctional)
+                    self.assertEqual(type(model.module.avgpool), nn.AdaptiveAvgPool2d)
+                    test_only_eval_fn(model, self.img_data)
 
-        checkQuantized(model)
+                checkQuantized(model)
 
     def test_normalization(self):
         r"""
