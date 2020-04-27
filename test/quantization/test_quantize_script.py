@@ -13,7 +13,7 @@ from torch.quantization import QConfigDynamic
 from torch.quantization import default_observer
 from torch.quantization import default_weight_observer
 from torch.quantization import default_per_channel_weight_observer
-from torch.quantization import default_qconfig, default_per_channel_qconfig
+from torch.quantization import default_qconfig
 from torch.quantization import get_default_qconfig
 from torch.quantization import quantize
 
@@ -26,12 +26,10 @@ from torch.quantization._quantize_script import convert_script
 from torch.quantization._quantize_script import quantize_script
 from torch.quantization._quantize_script import prepare_dynamic_script
 from torch.quantization._quantize_script import quantize_dynamic_script
-from torch.quantization._quantize_script import preprocess_qconfig_dict
 
 # Testing utils
 from torch.testing._internal.common_quantization import SingleLayerLinearModel, AnnotatedSingleLayerLinearModel
 from torch.testing._internal.common_quantization import ConvModel, AnnotatedConvModel
-from torch.testing._internal.common_quantization import NestedModel
 from torch.testing._internal.common_quantization import test_only_eval_fn as _test_only_eval_fn
 
 from torch.testing import FileCheck
@@ -1160,16 +1158,6 @@ graph(%input, %weight):
                    .check("CallMethod") \
                    .run(model.graph)
 
-    def test_qconfig_with_types(self):
-        data = [(torch.rand((1, 5), dtype=torch.float), torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
-        qconfig_dict = {torch.nn.Linear : default_qconfig, 'sub2.fc1' : default_per_channel_qconfig}
-        # Modules where name is specified in qconfig_dict takes precedence over type for that module.
-        qconfig_dict = preprocess_qconfig_dict(NestedModel().eval(), qconfig_dict)
-        # check to make sure it matches expected dict.
-        expected_qconfig_dict = {'sub1.fc' : default_qconfig, 'sub2.fc1': default_per_channel_qconfig,
-                                 'sub2.fc2': default_qconfig, 'fc3': default_qconfig}
-        self.assertEqual(qconfig_dict, expected_qconfig_dict)
-
     def test_module_list(self):
         class SimpleLinearLayer(torch.nn.Module):
             def __init__(self):
@@ -1662,6 +1650,7 @@ class TestQuantizeScriptPTSQOps(JitTestCase):
                 x = torch.mean(x)
                 x = torch.sigmoid(x)
                 x = x.reshape([-1])
+                x = x.resize_(1, 1, x.numel())
                 x = self.sigmoid(x)
                 x = x.view(-1)
                 x = x.transpose(1, 2)
@@ -1866,8 +1855,7 @@ class TestQuantizeDynamicScript(JitTestCase):
                 return self.fc(x)
 
         data = torch.rand((1, 5), dtype=torch.float)
-        qconfig_dict = {nn.Linear : default_dynamic_qconfig}
-        qconfig_dict = preprocess_qconfig_dict(M().eval(), qconfig_dict)
+        qconfig_dict = {'': default_dynamic_qconfig}
         model = torch.jit.script(M()).eval()
         model = quantize_dynamic_script(model, qconfig_dict, data)
         FileCheck().check("quantized::linear_dynamic") \
