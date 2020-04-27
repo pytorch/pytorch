@@ -1649,7 +1649,7 @@ class TestQuantizedOps(TestCase):
             num_diff_off_by_one = torch.sum((diff > 0) * (diff <= Y_scale))
             pct_diff_off_by_one = float(num_diff_off_by_one) / (diff.numel() + 1e-5)
 
-            note("LayerNorm failed:\n {} input vs\n {} actual vs \n{} expected"
+            note("GroupNorm failed:\n {} input vs\n {} actual vs \n{} expected"
                  .format(X, qY, qY_hat))
             note("Pct diff: {}".format(pct_diff))
             note("Pct diff off by one: {}".format(pct_diff_off_by_one))
@@ -1726,7 +1726,7 @@ class TestQuantizedOps(TestCase):
             num_diff_off_by_one = torch.sum((diff > 0) * (diff <= Y_scale))
             pct_diff_off_by_one = float(num_diff_off_by_one) / (diff.numel() + 1e-5)
 
-            note("LayerNorm failed:\n {} input vs\n {} actual vs \n{} expected"
+            note("InstanceNorm failed:\n {} input vs\n {} actual vs \n{} expected"
                  .format(X, qY, qY_hat))
             note("Pct diff: {}".format(pct_diff))
             note("Pct diff off by one: {}".format(pct_diff_off_by_one))
