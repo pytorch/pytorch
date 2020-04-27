@@ -231,12 +231,10 @@ if(MSVC)
     set(NVTOOLEXT_HOME $ENV{NVTOOLSEXT_PATH})
     file(TO_CMAKE_PATH ${NVTOOLEXT_HOME} NVTOOLEXT_HOME)
   endif()
-  set_property(
-      TARGET torch::nvtoolsext PROPERTY INTERFACE_LINK_LIBRARIES
-      ${NVTOOLEXT_HOME}/lib/x64/nvToolsExt64_1.lib)
-  set_property(
-      TARGET torch::nvtoolsext PROPERTY INTERFACE_INCLUDE_DIRECTORIES
-      ${NVTOOLEXT_HOME}/include)
+  set_target_properties(
+      torch::nvtoolsext PROPERTIES
+      INTERFACE_LINK_LIBRARIES ${NVTOOLEXT_HOME}/lib/x64/nvToolsExt64_1.lib
+      INTERFACE_INCLUDE_DIRECTORIES ${NVTOOLEXT_HOME}/include)
 
 elseif(APPLE)
   set_property(
