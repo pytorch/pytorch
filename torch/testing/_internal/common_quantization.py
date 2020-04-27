@@ -24,64 +24,100 @@ from torch.quantization.default_mappings import DEFAULT_DYNAMIC_MODULE_MAPPING
 
 """Test graph mode post training static quantization works
    for individual ops end to end.
+   More info here: torch/csrc/jit/testing/file_check.h
 
 Args:
-    module: Quantizable module to generate a graph from
+    module: Quantizable module to generate a graph from or a quantized graph
     data: Data to be tested against
-    checks: List of tuples (TYPE, ARGS).
-        TYPE: Can be one of ['', 'not', 'same', 'next', 'count', 'dag']
-              Empty string implies "check"
-        ARGS: Argument list to pass to the appropriate type
-              More info here: torch/csrc/jit/testing/file_check.h
-    ordered_checks: Same as the `checks` except the order is preserved.
-                    Please, note that the order of the checks matters.
-                    The order makes sure the checks are "chained", that
-                    is every consecutive match will be after the
-                    previous one: torch/csrc/jit/testing/file_check.h
-    qengine: Quantization engine
+    check: List of arguments to FileCheck().check
+    check_not: List of arguments to FileCheck().check_not
+    check_count: List of arguments to FileCheck().check_count
+    ordered_checks: List of checks to run in order.
+        The list must have (TYPE, ARGS) format.
+            TYPE is any check that is accepted by the FileCheck()
+            ARGS is a valid argument to the specified TYPE
+    qengine: Quantization engine (default: fbgemm)
 
 Returns:
     model: Quantized graph model
     checker: `FileCheck` instance
-"""
-def test_module_graph(module, data=None, checks=None, ordered_checks=None,
-                      qengine=None):
-    def _make_check_type(check_type):
-        if check_type[:5] == 'check':
-            return check_type
-        if check_type != '':
-            check_type = '_' + check_type
-        check_type = 'check' + check_type
-        return check_type
 
+Note:
+    Arguments `check`, `check_not`, `check_count` are not ordered, and for every
+    entry in the argument list runs a new instance of the `FileCheck`.
+    If you must run the matching patterns in a specific order,
+    use the `ordered_check` argument.
+Note:
+    When providing a graph,
+
+Example:
+    # Checks if the module has linear, after that checks that linear is not
+    # followed by another linear.
+    _test_module_graph(M(),
+                       check='aten::linear',
+                       ordered_check=(('check', 'aten::linear'),
+                                     ('check_not', 'aten::linear')))
+"""
+def _test_module_graph(module, data=None, check=None, check_not=None,
+                      check_count=None, ordered_checks=None, qengine=None):
     if qengine is None:
         qengine = 'fbgemm'
     assert qengine in ['fbgemm', 'qnnpack'], \
         'Qengine must be one of (fbgemm, qnnpack)'
-    qconfig_dict = {'': get_default_qconfig(qengine)}
-    model = torch.jit.script(module).eval()
-    model = quantize_script(model, qconfig_dict, test_only_eval_fn, [data],
-                            inplace=False)
 
-    if checks is not None:
-        for check_type, check_args in checks:
-            check_type = _make_check_type(check_type)
-            checker = FileCheck()
-            getattr(checker, check_type)(*check_args).run(model.graph)
+    if isinstance(module, torch._C.Graph):
+        # If already a graph, just run the checks
+        model = None
+        model_graph = module
+        model_graph_count = module
+    elif isinstance(module, torch.jit.ScriptModule):
+        # Check if the module is already scripted
+        model = module
+    else:
+        qconfig_dict = {'': get_default_qconfig(qengine)}
+        model = torch.jit.script(module).eval()
+        model = quantize_script(model, qconfig_dict, test_only_eval_fn, [data],
+                                inplace=False)
 
+    # Check if data exists
+    if data is None:
+        if model is not None:
+            model_graph = model.graph
+    else:
+        *inputs, target = data[0]
+        # Make sure it runs
+        model(*inputs)
+        # We could use `graph_for(*input)` but it might break the `check_count`.
+        model_graph = model.graph_for(*inputs)
+        model_graph_count = model.graph
+
+    # Run the checks
+    if check is not None:
+        if not isinstance(check, (list, tuple)):
+            check = (check,)
+        for c in check:
+            FileCheck().check(c).run(model_graph)
+    if check_not is not None:
+        if not isinstance(check_not, (list, tuple)):
+            check_not = (check_not,)
+        for c in check_not:
+            FileCheck().check_not(c).run(model_graph)
+    if check_count is not None:
+        if not isinstance(check_count, (list, tuple)):
+            raise ValueError("`check_count` must be a list of lists")
+        if len(check_count) == 3 and isinstance(check_count[0], str):
+            check_count = (check_count,)  # tuple of iterables
+        for c in check_count:
+            FileCheck().check_count(*c).run(model_graph_count)
     if ordered_checks is not None:
         checker = FileCheck()
         for check_type, check_args in ordered_checks:
-            check_type = _make_check_type(check_type)
+            if not isinstance(check_args, (list, tuple)):
+                check_args = (check_args,)
             getattr(checker, check_type)(*check_args)
-        checker.run(model.graph)
+        checker.run(model_graph)
 
-    # make sure it runs
-    if data is not None:
-        *inputs, target = data[0]
-        model(*inputs)
-
-    return model, checker
+    return model
 
 def test_only_eval_fn(model, calib_data):
     r"""
@@ -311,6 +347,27 @@ class AnnotatedConvBnModel(torch.nn.Module):
         x = self.bn(x)
         x = self.dequant(x)
         return x
+
+class AnnotatedConvBnReLUModel(torch.nn.Module):
+    def __init__(self):
+        super(AnnotatedConvBnReLUModel, self).__init__()
+        self.qconfig = default_qconfig
+        self.conv = torch.nn.Conv2d(3, 5, 3, bias=False).to(dtype=torch.float)
+        self.bn = torch.nn.BatchNorm2d(5).to(dtype=torch.float)
+        self.relu = nn.ReLU(inplace=True)
+        self.quant = QuantStub()
+        self.dequant = DeQuantStub()
+
+    def forward(self, x):
+        x = self.quant(x)
+        x = self.conv(x)
+        x = self.bn(x)
+        x = self.relu(x)
+        x = self.dequant(x)
+        return x
+
+    def fuse_model(self):
+        torch.quantization.fuse_modules(self, [['conv', 'bn', 'relu']], inplace=True)
 
 class TwoLayerLinearModel(torch.nn.Module):
     def __init__(self):

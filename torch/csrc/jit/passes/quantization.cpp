@@ -118,6 +118,7 @@ std::vector<std::string> _single_input_general_aten_funcs = {
     "upsample_bicubic2d",
     "dropout",
     "reshape",
+    "resize_", // Non-inplace resize is deprecated
     "chunk",
     "view",
     "transpose",
@@ -664,23 +665,44 @@ class InsertObserversHelper {
 
   // Is dynamic quantization enabled for the observer pass.
   bool is_dynamic = false;
+
   // These are the IR patterns we match to skip inserting observers.
   // They are compiled once on construction and used repeatedly within
   // the pass.
-  const PatternInfo linear_functional_relu = PatternInfo::parse_from_str(R"(
-graph(%self, %input, %inplace):
-    %relu = prim::Constant[name="relu"]()
-    %first_module = match::module[name="Linear"](%self)
-    %first_output = prim::CallMethod[name="forward"](%first_module, %input)
-    %second_output = prim::CallFunction(%relu, %first_output, %inplace)
-    return (%second_output) )");
-  const PatternInfo linear_relu = PatternInfo::parse_from_str(R"(
+
+  // nn.Linear + nn.ReLU
+  const PatternInfo nn_linear_nn_relu = PatternInfo::parse_from_str(R"(
 graph(%self, %input):
     %first_module = match::module[name="Linear"](%self)
     %first_output = prim::CallMethod[name="forward"](%first_module, %input)
     %second_module = match::module[name="ReLU"](%self)
     %second_output = prim::CallMethod[name="forward"](%second_module, %first_output)
     return (%second_output) )");
+  // nn.Linear + F.relu
+  const PatternInfo nn_linear_f_relu = PatternInfo::parse_from_str(R"(
+graph(%self, %input, %inplace):
+    %relu = prim::Constant[name="relu"]()
+    %first_module = match::module[name="Linear"](%self)
+    %first_output = prim::CallMethod[name="forward"](%first_module, %input)
+    %second_output = prim::CallFunction(%relu, %first_output, %inplace)
+    return (%second_output) )");
+  // F.linear + nn.ReLU
+  const PatternInfo f_linear_nn_relu = PatternInfo::parse_from_str(R"(
+graph(%self, %input, %weight, %bias):
+    %linear = prim::Constant[name="linear"]()
+    %first_output = prim::CallFunction(%linear, %input, %weight, %bias)
+    %second_module = match::module[name="ReLU"](%self)
+    %second_output = prim::CallMethod[name="forward"](%second_module, %first_output)
+    return (%second_output) )");
+  // F.linear + F.relU
+  const PatternInfo f_linear_f_relu = PatternInfo::parse_from_str(R"(
+graph(%self, %input, %weight, %bias, %inplace):
+    %linear = prim::Constant[name="linear"]()
+    %relu = prim::Constant[name="relu"]()
+    %first_output = prim::CallFunction(%linear, %input, %weight, %bias)
+    %second_output = prim::CallFunction(%relu, %first_output, %inplace)
+    return (%second_output) )");
+
   const PatternInfo conv2d_functional_relu = PatternInfo::parse_from_str(R"(
 graph(%self, %input, %inplace):
     %relu = prim::Constant[name="relu"]()
@@ -779,8 +801,10 @@ graph(%self, %a, %b, %inplace):
 
   const std::vector<std::reference_wrapper<const PatternInfo>> delay_patterns =
       {
-          linear_functional_relu,
-          linear_relu,
+          nn_linear_nn_relu,
+          nn_linear_f_relu,
+          f_linear_nn_relu,
+          f_linear_f_relu,
           conv2d_functional_relu,
           conv2d_relu,
           conv3d_functional_relu,
