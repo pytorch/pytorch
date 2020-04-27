@@ -34,8 +34,12 @@ Tensor euclidean_dist_out(const Tensor& x1, const Tensor& x2) {
   Tensor x2_ = at::cat({x2, x2_pad, x2_norm}, -1);
   Tensor result = x1_.matmul(x2_.transpose(-2, -1));
   // Clamp to an eps to avoid invalid gradients when `sqrt` output is 0
-  result.clamp_min_(1e-9).sqrt_();
-  return result;
+  return AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(at::kHalf,
+      result.scalar_type(), "eps", [result] {
+            scalar_t eps = std::numeric_limits<at::scalar_value_type<scalar_t>::type>::min();
+            result.clamp_min_(eps).sqrt_();
+            return result;
+      });
 }
 
 static Tensor cdist_impl(const Tensor& x1, const Tensor& x2, const double p, c10::optional<int64_t> compute_mode) {
