@@ -22,6 +22,12 @@ inline int stoi(const std::string& str, std::size_t* pos = 0) {
   int n = 0;
   ss << str;
   ss >> n;
+  if (ss.fail()) {
+    // To mimic `std::stoi` and to avoid including `Exception.h`, throw
+    // `std::invalid_argument`.
+    // We can't easily detect out-of-range, so we don't use `std::out_of_range`.
+    throw std::invalid_argument("Not an integer");
+  }
   if (pos) {
     if (ss.tellg() == std::streampos(-1)) {
       *pos = str.size();
@@ -37,6 +43,12 @@ inline uint64_t stoull(const std::string& str) {
   uint64_t n = 0;
   ss << str;
   ss >> n;
+  if (ss.fail()) {
+    // To mimic `std::stoull` and to avoid including `Exception.h`, throw
+    // `std::invalid_argument`.
+    // We can't easily detect out-of-range, so we don't use `std::out_of_range`.
+    throw std::invalid_argument("Not an unsigned 64-bit integer");
+  }
   return n;
 }
 
@@ -45,6 +57,12 @@ inline double stod(const std::string& str, std::size_t* pos = 0) {
   ss << str;
   double val = 0;
   ss >> val;
+  if (ss.fail()) {
+    // To mimic `std::stod` and to avoid including `Exception.h`, throw
+    // `std::invalid_argument`.
+    // We can't easily detect out-of-range, so we don't use `std::out_of_range`.
+    throw std::invalid_argument("Not a double-precision floating point number");
+  }
   if (pos) {
     if (ss.tellg() == std::streampos(-1)) {
       *pos = str.size();
@@ -62,6 +80,12 @@ inline long long stoll(const std::string& str, std::size_t* pos = 0) {
   ss << str;
   long long result = 0;
   ss >> result;
+  if (ss.fail()) {
+    // To mimic `std::stoll` and to avoid including `Exception.h`, throw
+    // `std::invalid_argument`.
+    // We can't easily detect out-of-range, so we don't use `std::out_of_range`.
+    throw std::invalid_argument("Not a long long integer");
+  }
   if (pos) {
     if (ss.tellg() == std::streampos(-1)) {
       *pos = str.size();
@@ -75,18 +99,24 @@ inline long long stoll(const std::string& str, std::size_t* pos = 0) {
 inline long long stoll(const std::string& str, size_t pos, int base) {
   // std::stoll doesn't exist in our Android environment, we need to implement
   // it ourselves.
-  std::stringstream s;
+  std::stringstream ss;
   if (str.size() > 0 && str.at(0) == '0') {
     if (str.size() > 1 && (str.at(1) == 'x' || str.at(1) == 'X')) {
-      s << std::hex << str;
+      ss << std::hex << str;
     } else {
-      s << std::oct << str;
+      ss << std::oct << str;
     }
   } else {
-    s << str;
+    ss << str;
   }
   long long result = 0;
-  s >> result;
+  ss >> result;
+  if (ss.fail()) {
+    // To mimic `std::stoll` and to avoid including `Exception.h`, throw
+    // `std::invalid_argument`.
+    // We can't easily detect out-of-range, so we don't use `std::out_of_range`.
+    throw std::invalid_argument("Not a long long integer");
+  }
   return result;
 }
 

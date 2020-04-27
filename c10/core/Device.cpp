@@ -73,12 +73,17 @@ Device::Device(const std::string& device_string) : Device(Type::CPU) {
     type_ = parse_type(s);
 
     std::string device_index = device_string.substr(index + 1);
+    std::size_t pos = 0;
+    bool fail_stoi = false;
     try {
-      index_ = c10::stoi(device_index);
+      index_ = c10::stoi(device_index, &pos);
     } catch (const std::exception &) {
-      AT_ERROR("Could not parse device index '", device_index,
-               "' in device string '", device_string, "'");
+      fail_stoi = true;
     }
+    TORCH_CHECK(
+      !fail_stoi && pos == device_index.size(),
+      "Could not parse device index '", device_index,
+      "' in device string '", device_string, "'");
     TORCH_CHECK(index_ >= 0,
              "Device index must be non-negative, got ", index_);
   }
