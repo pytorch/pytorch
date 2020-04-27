@@ -173,9 +173,7 @@ struct GraphTask: std::enable_shared_from_this<GraphTask> {
         reentrant_depth_(reentrant_depth),
         exit_on_error_(exit_on_error),
         cpu_ready_queue_(std::move(cpu_ready_queue)),
-        future_result_(std::make_shared<FutureVariableList>()) {
-          TORCH_INTERNAL_ASSERT(cpu_ready_queue_ != nullptr);
-        }
+        future_result_(std::make_shared<FutureVariableList>()) {}
  private:
   // run GraphTask post processing
   void exec_post_processing();
@@ -268,38 +266,30 @@ struct TORCH_API Engine {
 
   // Given a pre-populated GraphTask and GraphRoot, computes the backward pass
   // for the graph.
-  // The async_mode is a mode where we run the graph_task in an async way.
-  // when async_mode=True, we will launch execute_graph_task_with_continuation in
-  // a separate thread and return the graph_task->future_results_ immediately.
-  // execute_graph_task_with_continuation will execute the graph task from its
-  // associated ready_queue until the queue is empty, and re-launch it to the end
-  // of thread pool tasks' queue, this is so that we don't block the computation
-  // and IO, which is used by the Distributed Autograd Engine.
   //
   // NB: This API should only be used by internal autograd specific
   // machinery and shouldn't be exposed to users in anyway.
   virtual std::shared_ptr<FutureVariableList> execute_with_graph_task(
       const std::shared_ptr<GraphTask>& graph_task,
-      std::shared_ptr<Node> graph_root,
-      bool async_mode = false);
-
-  // Enqueues a blocked task for execution on the CPU thread. A blocked task is
-  // basically a task that isn't triggered automatically to be
-  // 'ready to execute' by the autograd engine. This task needs to be unblocked
-  // for execution via an external mechanism. This method assumes that
-  // the appropriate GraphTask has already been initialized appropriately.
-  // Another important part is that this does not increment 'outstanding_tasks_'
-  // in the appropriate GraphTask. It is assumed we've already done this before
-  // hand for this task (to ensure we block for its execution). This is useful
-  // in the distributed autograd case where we need to increment
-  // 'outstanding_tasks_' first to indicate the local autograd engine needs to
-  // wait for this task, but the task might actually be received later over the
-  // network for execution.
-  void enqueue_blocked_task_on_cpu(NodeTask task);
+      std::shared_ptr<Node> graph_root);
 
   virtual std::unique_ptr<AnomalyMetadata> make_anomaly_metadata() {
     return nullptr;
   }
+
+  // We pass cpu_ready_queue to evaluate_function, so that it knows
+  // the correct ready queue to push to after a NodeTask is ready
+  void evaluate_function(
+      std::shared_ptr<GraphTask>& graph_task,
+      Node* func,
+      InputBuffer& inputs,
+      const std::shared_ptr<ReadyQueue>& cpu_ready_queue);
+
+  void initialize_device_threads_pool();
+  virtual void thread_on_exception(
+      std::shared_ptr<GraphTask> graph_task,
+      const std::shared_ptr<Node>& fn,
+      std::exception& e);
 
   void queue_callback(std::function<void()> callback);
 
@@ -313,10 +303,6 @@ struct TORCH_API Engine {
  protected:
   Engine();
   void compute_dependencies(Node* root, GraphTask& task);
-  void evaluate_function(
-      std::shared_ptr<GraphTask>& graph_task,
-      Node* func,
-      InputBuffer& inputs);
 
   // initialize the thread local ready queue with the ready queue that is created
   // elsewhere (i.e. thread_init, Engine::execute, etc), or create a new
@@ -324,25 +310,20 @@ struct TORCH_API Engine {
   void init_local_ready_queue(std::shared_ptr<ReadyQueue> ready_queue = nullptr);
 
   std::shared_ptr<ReadyQueue> ready_queue(
-      const std::shared_ptr<GraphTask>& graph_task,
+      std::shared_ptr<ReadyQueue> cpu_ready_queue,
       at::Device device);
   std::shared_ptr<ReadyQueue> ready_queue_by_index(
-      const std::shared_ptr<GraphTask>& graph_task,
+      std::shared_ptr<ReadyQueue> cpu_ready_queue,
       int device_index);
   // start device threads (CUDA, XLA, etc.) in Engine,
   // note that it does NOT start CPU thread.
   void start_device_threads();
   virtual void thread_init(int device, const std::shared_ptr<ReadyQueue>& ready_queue);
-  virtual void thread_on_exception(
-      std::shared_ptr<GraphTask> graph_task,
-      const std::shared_ptr<Node>& fn,
-      std::exception& e);
   virtual void thread_main(
       const std::shared_ptr<GraphTask>& task,
       bool reentrant_thread);
   void reentrant_thread_init();
   void add_thread_pool_task(const std::weak_ptr<GraphTask>& graph_task);
-  void initialize_device_threads_pool();
 
   // Ensures device_ready_queues_ are initialized only once
   std::once_flag start_device_threads_flag_;
@@ -386,8 +367,6 @@ private:
   std::condition_variable non_reentrant_device_thread_finish_;
   std::mutex non_reentrant_device_thread_finish_mutex_;
 
- void execute_graph_task_with_continuation(
-     const std::shared_ptr<GraphTask>& graph_task);
 };
 
 // allow python_engine to override the default engine when it loads
