@@ -1,4 +1,3 @@
-#define WRAP_COMPLEX
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cuda/Reduce.cuh>
 #include <ATen/native/DispatchStub.h>

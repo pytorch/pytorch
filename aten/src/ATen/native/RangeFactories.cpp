@@ -1,4 +1,3 @@
-#define WRAP_COMPLEX
 #include <ATen/NativeFunctions.h>
 #include <ATen/AccumulateType.h>
 #include <ATen/Parallel.h>

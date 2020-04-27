@@ -1,4 +1,3 @@
-#define WRAP_COMPLEX
 #include <ATen/NativeFunctions.h>
 #include <ATen/Dispatch.h>
 #include <ATen/native/DispatchStub.h>

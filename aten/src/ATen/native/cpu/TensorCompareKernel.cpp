@@ -1,4 +1,3 @@
-#define WRAP_COMPLEX
 #include <ATen/native/TensorCompare.h>
 
 #include <numeric>

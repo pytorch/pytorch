@@ -1,4 +1,3 @@
-#define WRAP_COMPLEX
 #include <ATen/native/batch_norm.h>
 
 #include <ATen/ATen.h>

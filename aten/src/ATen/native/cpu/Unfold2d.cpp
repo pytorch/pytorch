@@ -1,4 +1,3 @@
-#define WRAP_COMPLEX
 #include <ATen/Parallel.h>
 #include <ATen/cpu/vec256/vec256.h>
 #include <ATen/native/Unfold2d.h>

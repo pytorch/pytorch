@@ -1,4 +1,3 @@
-#define WRAP_COMPLEX
 #include <ATen/Dispatch.h>
 #include <ATen/native/BinaryOps.h>
 #include <ATen/native/DispatchStub.h>

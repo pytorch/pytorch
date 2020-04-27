@@ -1,4 +1,3 @@
-#define WRAP_COMPLEX
 #include <ATen/native/TensorTransformations.h>
 #include <ATen/WrapDimUtilsMulti.h>
 

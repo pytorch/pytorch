@@ -1,4 +1,3 @@
-#define WRAP_COMPLEX
 #include <ATen/AccumulateType.h>
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/native/Pool.h>

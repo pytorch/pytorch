@@ -1,5 +1,4 @@
 #define _USE_MATH_DEFINES
-#define WRAP_COMPLEX
 #include <ATen/native/Activation.h>
 
 #include <math.h>

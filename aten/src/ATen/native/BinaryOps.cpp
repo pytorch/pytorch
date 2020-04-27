@@ -1,5 +1,4 @@
 #include <type_traits>
-#define WRAP_COMPLEX
 #include <ATen/native/BinaryOps.h>
 
 #include <ATen/ATen.h>

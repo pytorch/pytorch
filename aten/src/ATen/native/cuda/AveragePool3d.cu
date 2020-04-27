@@ -1,4 +1,3 @@
-#define WRAP_COMPLEX
 #include <ATen/AccumulateType.h>
 #include <ATen/native/Pool.h>
 #include <ATen/cuda/CUDAContext.h>

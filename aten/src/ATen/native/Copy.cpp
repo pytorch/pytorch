@@ -1,4 +1,3 @@
-#define WRAP_COMPLEX
 #include <ATen/native/Copy.h>
 
 #include <ATen/ATen.h>

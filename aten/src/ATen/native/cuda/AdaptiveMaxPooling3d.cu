@@ -1,4 +1,3 @@
-#define WRAP_COMPLEX
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/cuda/CUDAContext.h>

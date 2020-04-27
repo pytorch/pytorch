@@ -7,7 +7,6 @@
 // Graves et al call the probabilities y, we use log_probs (also calling them inputs)
 // A few optimizations (similar to those here, but also some I didn't take) are described in
 // 2. Minmin Sun: http://on-demand.gputechconf.com/gtc/2016/presentation/s6383-minmin-sun-speech-recognition.pdf
-#define WRAP_COMPLEX
 #include <ATen/TensorUtils.h>
 #include <c10/util/Exception.h>
 #include <c10/macros/Macros.h>

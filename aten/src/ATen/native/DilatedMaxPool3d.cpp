@@ -1,4 +1,3 @@
-#define WRAP_COMPLEX
 #include <ATen/ATen.h>
 #include <ATen/Parallel.h>
 #include <ATen/NamedTensorUtils.h>

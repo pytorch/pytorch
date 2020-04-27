@@ -1,4 +1,3 @@
-#define WRAP_COMPLEX
 #include <ATen/ATen.h>
 #include <ATen/LegacyTHFunctionsCPU.h>
 #include <ATen/TensorUtils.h>

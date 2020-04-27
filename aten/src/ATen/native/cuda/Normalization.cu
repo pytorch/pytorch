@@ -1,4 +1,3 @@
-#define WRAP_COMPLEX
 #include <ATen/native/cuda/Normalization.cuh>
 
 namespace at { namespace native {

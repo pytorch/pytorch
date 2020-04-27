@@ -1,7 +1,6 @@
 #ifndef _USE_MATH_DEFINES
 #define _USE_MATH_DEFINES
 #endif
-#define WRAP_COMPLEX
 #include <ATen/native/Activation.h>
 
 #include <math.h>

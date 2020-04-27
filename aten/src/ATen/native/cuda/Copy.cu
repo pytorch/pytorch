@@ -72,9 +72,10 @@ void copy_device_to_device(TensorIterator& iter, bool non_blocking) {
       });
     } else {
       AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
-          kHalf, kBool, kBFloat16, dtype, "copy_", [&] {
+          kHalf, kBool, kBFloat16, dtype, "copy_",
+          USE_C10_COMPLEX([&] {
             gpu_kernel(iter, [] GPU_LAMBDA(scalar_t x) { return x; });
-          });
+          }));
     }
   }
 

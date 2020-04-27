@@ -1,4 +1,3 @@
-#define WRAP_COMPLEX
 #include <ATen/Dispatch.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/cuda/NumericLimits.cuh>

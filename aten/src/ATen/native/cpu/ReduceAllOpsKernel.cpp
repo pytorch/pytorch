@@ -1,4 +1,3 @@
-#define WRAP_COMPLEX
 #include<ATen/native/ReduceAllOps.h>
 
 #include <ATen/Dispatch.h>

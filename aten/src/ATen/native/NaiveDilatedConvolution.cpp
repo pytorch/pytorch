@@ -1,7 +1,6 @@
 
 
 #include <tuple>
-#define WRAP_COMPLEX
 #include <ATen/ATen.h>
 #include <ATen/native/im2col.h>
 #include <ATen/native/vol2col.h>

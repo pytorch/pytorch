@@ -47,7 +47,6 @@
 //                   ...)
 //
 // where & and * represent the C-style address-of and indirection operations.
-#define WRAP_COMPLEX
 #include <ATen/native/TensorAdvancedIndexing.h>
 #include <ATen/native/IndexingUtils.h>
 

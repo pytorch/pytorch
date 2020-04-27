@@ -1,5 +1,4 @@
 // Functions that fill Tensors with constants.
-#define WRAP_COMPLEX
 #include <ATen/ATen.h>
 #include <ATen/Dispatch.h>
 #include <ATen/native/TensorIterator.h>

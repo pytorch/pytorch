@@ -1,4 +1,3 @@
-#define WRAP_COMPLEX
 #include <ATen/native/Activation.h>
 
 #include <ATen/ATen.h>

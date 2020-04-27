@@ -5,7 +5,6 @@
 #endif
 #include <math.h>
 #endif
-#define WRAP_COMPLEX
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/Dispatch.h>

@@ -1,7 +1,6 @@
 #include <numeric>
 #include <iterator>
 #include <algorithm>
-#define WRAP_COMPLEX
 #include <ATen/Dispatch.h>
 #include <ATen/cpu/vec256/vec256.h>
 #include <ATen/native/ReduceOps.h>

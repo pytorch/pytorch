@@ -5,7 +5,6 @@
 #endif
 #include <math.h>
 #endif
-#define WRAP_COMPLEX
 #include <ATen/ATen.h>
 #include <ATen/CPUGeneratorImpl.h>
 #include <ATen/Utils.h>

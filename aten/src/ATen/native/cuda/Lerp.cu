@@ -1,4 +1,3 @@
-#define WRAP_COMPLEX
 #include <ATen/NativeFunctions.h>
 #include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/Dispatch.h>

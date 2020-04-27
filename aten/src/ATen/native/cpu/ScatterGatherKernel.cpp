@@ -1,4 +1,3 @@
-#define WRAP_COMPLEX
 #include <ATen/native/ScatterGatherShapeChecks.h>
 #include <ATen/native/ReduceOpsUtils.h>
 #include <ATen/native/TensorIterator.h>

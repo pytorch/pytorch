@@ -1,4 +1,3 @@
-#define WRAP_COMPLEX
 #include <ATen/native/layer_norm.h>
 
 #include <ATen/ATen.h>
