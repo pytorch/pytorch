@@ -111,7 +111,7 @@ namespace {
 class QChannelShuffle final : public c10::OperatorKernel {
  public:
   Tensor operator()(Tensor qx, int64_t groups) {
-    return quantized_channel_shuffle_impl(qx, groups);
+    return quantized_channel_shuffle(qx, groups);
   }
 };
 
