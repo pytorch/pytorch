@@ -13,25 +13,48 @@ if(error_code)
 endif()
 
 if(NOT USE_VULKAN_SHADERC_RUNTIME)
+  # Precompiling shaders
+  if(ANDROID)
+    if(NOT ANDROID_NDK)
+      message(FATAL_ERROR "ANDROID_NDK not set")
+    endif()
 
-if(NOT ANDROID_NDK)
-  message(FATAL_ERROR "Failed to find glslc to compile glsl")
-endif()
+    set(GLSLC_PATH "${ANDROID_NDK}/shader-tools/${ANDROID_NDK_HOST_SYSTEM_NAME}/glslc")
+    message(STATUS "GLSLC_PATH:${GLSLC_PATH}")
+  else()
+    if(NOT DEFINED ENV{VULKAN_SDK})
+      message(FATAL_ERROR "USE_VULKAN requires environment var VULKAN_SDK set")
+    endif()
 
-set(GLSLC_PATH "${ANDROID_NDK}/shader-tools/${ANDROID_NDK_HOST_SYSTEM_NAME}/glslc")
+    message(STATUS "VULKAN_SDK:$ENV{VULKAN_SDK}")
 
-execute_process(
-  COMMAND
-  "${PYTHON_EXECUTABLE}" 
-  ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/vulkan/gen_spv.py
-  --glsl-path ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/vulkan/glsl
-  --output-path ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/vulkan
-  --glslc-path=${GLSLC_PATH}
-  --tmp-spv-path=${CMAKE_BINARY_DIR}
-  RESULT_VARIABLE error_code)
+    message(STATUS "CMAKE_HOST_SYSTEM_PROCESSOR:${CMAKE_HOST_SYSTEM_PROCESSOR}")
 
-  if(error_code)
-    message(FATAL_ERROR "Failed to gen spv.h and spv.cpp with precompiled shaders for Vulkan backend")
+    find_program(
+      GLSLC_PATH glslc
+      PATHS 
+      ENV VULKAN_SDK
+      PATHS "$ENV{VULKAN_SDK}/${CMAKE_HOST_SYSTEM_PROCESSOR}/bin")
+
+    if(GLSLC_PATH)
+      message(STATUS "GLSLC_PATH:${GLSLC_PATH}")
+    else()
+      message(FATAL_ERROR "USE_VULKAN glslc not found")
+    endif(GLSLC_PATH)
   endif()
+
+  execute_process(
+    COMMAND
+    "${PYTHON_EXECUTABLE}"
+    ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/vulkan/gen_spv.py
+    --glsl-path ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/vulkan/glsl
+    --output-path ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/vulkan
+    --glslc-path=${GLSLC_PATH}
+    --tmp-spv-path=${CMAKE_BINARY_DIR}
+    RESULT_VARIABLE error_code)
+
+    if(error_code)
+      message(FATAL_ERROR "Failed to gen spv.h and spv.cpp with precompiled shaders for Vulkan backend")
+    endif()
 
 endif()

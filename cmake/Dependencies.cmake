@@ -451,90 +451,143 @@ endif()
 
 # ---[ Vulkan GLES deps
 if(USE_VULKAN)
-  if(NOT ANDROID)
-    message(FATAL_ERROR "USE_VULKAN currently is supported only for ANDROID")
-  endif()
+  if(ANDROID)
+    if(NOT ANDROID_NDK)
+      message(FATAL_ERROR "USE_VULKAN requires ANDROID_NDK set")
+    endif()
 
-  if(NOT ANDROID_NDK)
-    message(FATAL_ERROR "USE_VULKAN requires ANDROID_NDK set")
-  endif()
-  
-  # Vulkan from ANDROID_NDK
-  set(Vulkan_ANDROID_NDK_INCLUDE_DIR "${ANDROID_NDK}/sources/third-party/vulkan/src/include")
-  message(STATUS "Vulkan_ANDROID_NDK_INCLUDE_DIR:${Vulkan_ANDROID_NDK_INCLUDE_DIR}")
+    # Vulkan from ANDROID_NDK
+    set(VULKAN_INCLUDE_DIR "${ANDROID_NDK}/sources/third-party/vulkan/src/include")
+    message(STATUS "VULKAN_INCLUDE_DIR:${VULKAN_INCLUDE_DIR}")
 
-  set(VULKAN_ANDROID_NDK_WRAPPER_DIR "${ANDROID_NDK}/sources/third_party/vulkan/src/common")
-  message(STATUS "Vulkan_ANDROID_NDK_WRAPPER_DIR:${VULKAN_ANDROID_NDK_WRAPPER_DIR}")
-  set(VULKAN_WRAPPER_DIR "${VULKAN_ANDROID_NDK_WRAPPER_DIR}")
+    set(VULKAN_ANDROID_NDK_WRAPPER_DIR "${ANDROID_NDK}/sources/third_party/vulkan/src/common")
+    message(STATUS "Vulkan_ANDROID_NDK_WRAPPER_DIR:${VULKAN_ANDROID_NDK_WRAPPER_DIR}")
+    set(VULKAN_WRAPPER_DIR "${VULKAN_ANDROID_NDK_WRAPPER_DIR}")
 
-  add_library(
-    VulkanWrapper
-    STATIC 
-    ${VULKAN_WRAPPER_DIR}/vulkan_wrapper.h
-    ${VULKAN_WRAPPER_DIR}/vulkan_wrapper.cpp)
+    add_library(
+      VulkanWrapper
+      STATIC
+      ${VULKAN_WRAPPER_DIR}/vulkan_wrapper.h
+      ${VULKAN_WRAPPER_DIR}/vulkan_wrapper.cpp)
 
-  target_include_directories (VulkanWrapper PUBLIC .)
-  target_include_directories (VulkanWrapper PUBLIC "${VULKAN_INCLUDE_DIR}")
+    target_include_directories (VulkanWrapper PUBLIC .)
+    target_include_directories (VulkanWrapper PUBLIC "${VULKAN_INCLUDE_DIR}")
 
-  target_link_libraries (VulkanWrapper ${CMAKE_DL_LIBS})
-  
-  include_directories(SYSTEM ${VULKAN_WRAPPER_DIR})
-  list(APPEND Caffe2_DEPENDENCY_LIBS VulkanWrapper)
+    target_link_libraries (VulkanWrapper ${CMAKE_DL_LIBS})
 
-  # Shaderc
-  if(USE_VULKAN_SHADERC_RUNTIME)
-    # Shaderc from ANDROID_NDK
-    set(Shaderc_ANDROID_NDK_INCLUDE_DIR "${ANDROID_NDK}/sources/third_party/shaderc/include")
-    message(STATUS "Shaderc_ANDROID_NDK_INCLUDE_DIR:${Shaderc_ANDROID_NDK_INCLUDE_DIR}")
+    include_directories(SYSTEM ${VULKAN_WRAPPER_DIR})
+    list(APPEND Caffe2_DEPENDENCY_LIBS VulkanWrapper)
 
-    find_path(
-      GOOGLE_SHADERC_INCLUDE_DIRS
-      NAMES shaderc/shaderc.hpp
-      PATHS "${Shaderc_ANDROID_NDK_INCLUDE_DIR}")
+    # Shaderc
+    if(USE_VULKAN_SHADERC_RUNTIME)
+      # Shaderc from ANDROID_NDK
+      set(Shaderc_ANDROID_NDK_INCLUDE_DIR "${ANDROID_NDK}/sources/third_party/shaderc/include")
+      message(STATUS "Shaderc_ANDROID_NDK_INCLUDE_DIR:${Shaderc_ANDROID_NDK_INCLUDE_DIR}")
 
-    set(Shaderc_ANDROID_NDK_LIB_DIR "${ANDROID_NDK}/sources/third_party/shaderc/libs/${ANDROID_STL}/${ANDROID_ABI}")
-    message(STATUS "Shaderc_ANDROID_NDK_LIB_DIR:${Shaderc_ANDROID_NDK_LIB_DIR}")
+      find_path(
+        GOOGLE_SHADERC_INCLUDE_DIRS
+        NAMES shaderc/shaderc.hpp
+        PATHS "${Shaderc_ANDROID_NDK_INCLUDE_DIR}")
 
-    find_library(
-      GOOGLE_SHADERC_LIBRARIES
-      NAMES shaderc
-      PATHS "${Shaderc_ANDROID_NDK_LIB_DIR}")
+      set(Shaderc_ANDROID_NDK_LIB_DIR "${ANDROID_NDK}/sources/third_party/shaderc/libs/${ANDROID_STL}/${ANDROID_ABI}")
+      message(STATUS "Shaderc_ANDROID_NDK_LIB_DIR:${Shaderc_ANDROID_NDK_LIB_DIR}")
 
-    # Shaderc in NDK is not prebuilt
-    if (NOT GOOGLE_SHADERC_LIBRARIES)
-      set(NDK_SHADERC_DIR "${ANDROID_NDK}/sources/third_party/shaderc")
-      set(NDK_BUILD_CMD "${ANDROID_NDK}/ndk-build")
+      find_library(
+        GOOGLE_SHADERC_LIBRARIES
+        NAMES shaderc
+        PATHS "${Shaderc_ANDROID_NDK_LIB_DIR}")
 
-      execute_process(
-        COMMAND ${NDK_BUILD_CMD}
-        NDK_PROJECT_PATH=${NDK_SHADERC_DIR}
-        APP_BUILD_SCRIPT=${NDK_SHADERC_DIR}/Android.mk
-        APP_PLATFORM=${ANDROID_PLATFORM}
-        APP_STL=${ANDROID_STL}
-        APP_ABI=${ANDROID_ABI}
-        libshaderc_combined -j8
-        WORKING_DIRECTORY "${NDK_SHADERC_DIR}"
-        RESULT_VARIABLE error_code)
+      # Shaderc in NDK is not prebuilt
+      if (NOT GOOGLE_SHADERC_LIBRARIES)
+        set(NDK_SHADERC_DIR "${ANDROID_NDK}/sources/third_party/shaderc")
+        set(NDK_BUILD_CMD "${ANDROID_NDK}/ndk-build")
 
-      if(error_code)
-        message(FATAL_ERROR "Failed to build ANDROID_NDK shaderc error_code:${error_code}")
-      else()
-        unset(GOOGLE_SHADERC_LIBRARIES CACHE)
-        find_library(
-          GOOGLE_SHADERC_LIBRARIES
-          NAMES shaderc
-          HINTS "${Shaderc_ANDROID_NDK_LIB_DIR}")
+        execute_process(
+          COMMAND ${NDK_BUILD_CMD}
+          NDK_PROJECT_PATH=${NDK_SHADERC_DIR}
+          APP_BUILD_SCRIPT=${NDK_SHADERC_DIR}/Android.mk
+          APP_PLATFORM=${ANDROID_PLATFORM}
+          APP_STL=${ANDROID_STL}
+          APP_ABI=${ANDROID_ABI}
+          libshaderc_combined -j8
+          WORKING_DIRECTORY "${NDK_SHADERC_DIR}"
+          RESULT_VARIABLE error_code)
+
+        if(error_code)
+          message(FATAL_ERROR "Failed to build ANDROID_NDK shaderc error_code:${error_code}")
+        else()
+          unset(GOOGLE_SHADERC_LIBRARIES CACHE)
+          find_library(
+            GOOGLE_SHADERC_LIBRARIES
+            NAMES shaderc
+            HINTS "${Shaderc_ANDROID_NDK_LIB_DIR}")
+        endif()
+      endif(NOT GOOGLE_SHADERC_LIBRARIES)
+
+      if(GOOGLE_SHADERC_INCLUDE_DIRS AND GOOGLE_SHADERC_LIBRARIES)
+        message(STATUS "shaderc FOUND include:${GOOGLE_SHADERC_INCLUDE_DIRS}")
+        message(STATUS "shaderc FOUND libs:${GOOGLE_SHADERC_LIBRARIES}")
+        set(Shaderc_FOUND TRUE)
       endif()
-    endif()
 
-    if(GOOGLE_SHADERC_INCLUDE_DIRS AND GOOGLE_SHADERC_LIBRARIES)
-      message(STATUS "shaderc FOUND include:${GOOGLE_SHADERC_INCLUDE_DIRS}")
-      message(STATUS "shaderc FOUND libs:${GOOGLE_SHADERC_LIBRARIES}")
-      set(Shaderc_FOUND TRUE)
+      include_directories(SYSTEM ${GOOGLE_SHADERC_INCLUDE_DIRS})
+      list(APPEND Caffe2_DEPENDENCY_LIBS ${GOOGLE_SHADERC_LIBRARIES})
+    endif(USE_VULKAN_SHADERC_RUNTIME)
+  else()
+    # USE_VULKAN AND NOT ANDROID
+    if(NOT DEFINED ENV{VULKAN_SDK})
+      message(FATAL_ERROR "USE_VULKAN requires environment var  VULKAN_SDK set")
     endif()
-    
-    include_directories(SYSTEM ${GOOGLE_SHADERC_INCLUDE_DIRS})
-    list(APPEND Caffe2_DEPENDENCY_LIBS ${GOOGLE_SHADERC_LIBRARIES})
+    message(STATUS "VULKAN_SDK:$ENV{VULKAN_SDK}")
+
+    set(VULKAN_INCLUDE_DIR "$ENV{VULKAN_SDK}/source/Vulkan-Headers/include")
+    message(STATUS "VULKAN_INCLUDE_DIR:${VULKAN_INCLUDE_DIR}")
+
+    # Vulkan wrapper from VULKAN_SDK
+    set(VULKAN_SDK_WRAPPER_DIR "$ENV{VULKAN_SDK}/source/Vulkan-Tools/common")
+    message(STATUS "Vulkan_SDK_WRAPPER_DIR:${VULKAN_SDK_WRAPPER_DIR}")
+    set(VULKAN_WRAPPER_DIR "${VULKAN_SDK_WRAPPER_DIR}")
+
+    add_library(
+      VulkanWrapper
+      STATIC 
+      ${VULKAN_WRAPPER_DIR}/vulkan_wrapper.h
+      ${VULKAN_WRAPPER_DIR}/vulkan_wrapper.cpp)
+
+    target_include_directories (VulkanWrapper PUBLIC .)
+    target_include_directories (VulkanWrapper PUBLIC "${VULKAN_INCLUDE_DIR}")
+
+    target_link_libraries (VulkanWrapper ${CMAKE_DL_LIBS})
+
+    include_directories(SYSTEM ${VULKAN_WRAPPER_DIR})
+    list(APPEND Caffe2_DEPENDENCY_LIBS VulkanWrapper)
+
+    if(USE_VULKAN_SHADERC_RUNTIME)
+      # shaderc from VULKAN_SDK
+      find_path(
+          GOOGLE_SHADERC_INCLUDE_DIRS
+          NAMES shaderc/shaderc.h
+          PATHS $ENV{VULKAN_SDK}/include)
+
+      find_library(
+          GOOGLE_SHADERC_LIBRARIES
+          NAMES shaderc_combined
+          PATHS $ENV{VULKAN_SDK}/lib)
+
+      find_package_handle_standard_args(
+          Shaderc
+          DEFAULT_MSG
+          GOOGLE_SHADERC_INCLUDE_DIRS
+          GOOGLE_SHADERC_LIBRARIES)
+      if (NOT Shaderc_FOUND)
+        message(FATAL_ERROR "USE_VULKAN: Shaderc not found in VULKAN_SDK")
+      else()
+        message(STATUS "shaderc FOUND include:${GOOGLE_SHADERC_INCLUDE_DIRS}")
+        message(STATUS "shaderc FOUND libs:${GOOGLE_SHADERC_LIBRARIES}")
+      endif()
+      include_directories(SYSTEM ${GOOGLE_SHADERC_INCLUDE_DIRS})
+      list(APPEND Caffe2_DEPENDENCY_LIBS ${GOOGLE_SHADERC_LIBRARIES})
+    endif(USE_VULKAN_SHADERC_RUNTIME)
   endif()
 else()
   if(USE_GLES)

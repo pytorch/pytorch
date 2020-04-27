@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <unistd.h>
 #include <iostream>
+#include <cstring>
 
 #include <c10/util/Exception.h>
 
@@ -175,22 +176,19 @@ class VContext {
       const char* pLayerPrefix,
       const char* pMsg,
       void* pUserData) {
+    std::stringstream s;
     if (msgFlags & VK_DEBUG_REPORT_ERROR_BIT_EXT) {
-      std::cout << "ERROR: " << pLayerPrefix << " " << msgCode << " " << pMsg
-                << std::endl;
+      s << "ERROR:";
     } else if (msgFlags & VK_DEBUG_REPORT_WARNING_BIT_EXT) {
-      std::cout << "WARNING: " << pLayerPrefix << " " << msgCode << " " << pMsg
-                << std::endl;
+      s << "WARN:";
     } else if (msgFlags & VK_DEBUG_REPORT_PERFORMANCE_WARNING_BIT_EXT) {
-      std::cout << "PERF_WARNING: " << pLayerPrefix << " " << msgCode << " "
-                << pMsg << std::endl;
+      s << "PERF_WARNING:";
     } else if (msgFlags & VK_DEBUG_REPORT_INFORMATION_BIT_EXT) {
-      std::cout << "INFO: " << pLayerPrefix << " " << msgCode << " " << pMsg
-                << std::endl;
-    } else if (msgFlags & VK_DEBUG_REPORT_DEBUG_BIT_EXT) {
-      std::cout << "DEBUG: " << pLayerPrefix << " " << msgCode << " " << pMsg
-                << std::endl;
+      s << "INFO:";
     }
+    s << pLayerPrefix << " " << msgCode << " " << pMsg << std::endl;
+    auto log = s.str();
+    //TODO Where to log if VLOG,LOG disabled?
     return VK_FALSE;
   }
 
@@ -599,8 +597,13 @@ class ComputeUnit {
 };
 
 VulkanTensor::VulkanTensor(std::vector<int64_t> sizes) : sizes_(sizes) {
-  assert(sizes_.size() == 4);
+  AT_ASSERTM(
+      sizes_.size() == 4,
+      "VulkanTensor is implemented only for tensors dim == 4");
   initVulkanContextOnce();
+}
+
+void VulkanTensor::allocateStorage() {
 }
 
 #ifdef USE_VULKAN_GLES_SHADERC_RUNTIME

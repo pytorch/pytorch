@@ -58,9 +58,7 @@ class VulkanTensor : public c10::intrusive_ptr_target {
   bool hasStorage() {
     return static_cast<bool>(tensorImage_);
   }
-  void allocateStorage() {
-    assert(false);
-  }
+  void allocateStorage();
 
  private:
   std::vector<int64_t> sizes_;
