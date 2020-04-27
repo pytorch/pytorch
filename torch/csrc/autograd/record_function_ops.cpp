@@ -15,7 +15,6 @@ namespace profiler {
 
 at::Tensor record_function_enter(const std::string& name) {
   auto rec = std::make_unique<RecordFunction>(RecordScope::USER_SCOPE);
-  // Only add new scope if profiling is enabled.
   if (auto* current = rec->current()) {
     if (current->name() == StringView("profiler::_record_function_enter")) {
       // RecordFunction requires parent_ to be alive for it's entire lifetime.
@@ -24,8 +23,8 @@ at::Tensor record_function_enter(const std::string& name) {
       // a direct child of the parent RecordFunction.
       current->_end();
     }
-    rec->_before(name);
   }
+  rec->_before(name);
   return at::cpp_custom_type_hack::create(std::move(rec), at::TensorOptions());
 }
 
