@@ -85,7 +85,7 @@ def convert(fname, graph, OUTPUT, OP, OP_DEP):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description='Util to produce transitive dependencies for custom build')
+        description='Util to parse & convert op_deps_pass output')
     parser.add_argument(
         '--op-dependency',
         required=True,
