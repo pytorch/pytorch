@@ -329,7 +329,7 @@ void upsample_nearest1d_kernel_impl(
     Tensor& output,
     const Tensor& input,
     c10::optional<double> scales_w) {
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "upsample_nearest1d", [&] {
+  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::Byte, input.scalar_type(), "upsample_nearest1d", [&] {
     cpu_upsample_nearest<scalar_t, scale_t>(output, input, {scales_w});
   });
 }
@@ -340,11 +340,11 @@ void upsample_nearest2d_kernel_impl(
     c10::optional<double> scales_h,
     c10::optional<double> scales_w) {
   if (input.is_contiguous(at::MemoryFormat::ChannelsLast)) {
-    AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "upsample_nearest2d_channels_last", [&] {
+    AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::Byte, input.scalar_type(), "upsample_nearest2d_channels_last", [&] {
       cpu_upsample_nearest_channels_last<scalar_t, scale_t>(output, input, {scales_h, scales_w});
     });
   } else {
-    AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "upsample_nearest2d", [&] {
+    AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::Byte, input.scalar_type(), "upsample_nearest2d", [&] {
       cpu_upsample_nearest<scalar_t, scale_t>(output, input, {scales_h, scales_w});
     });
   }
@@ -357,11 +357,11 @@ void upsample_nearest3d_kernel_impl(
     c10::optional<double> scales_h,
     c10::optional<double> scales_w) {
   if (input.is_contiguous(at::MemoryFormat::ChannelsLast3d)) {
-    AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "upsample_nearest3d_channels_last", [&] {
+    AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::Byte, input.scalar_type(), "upsample_nearest3d_channels_last", [&] {
       cpu_upsample_nearest_channels_last<scalar_t, scale_t>(output, input, {scales_d, scales_h, scales_w});
     });
   } else {
-    AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "upsample_nearest3d", [&] {
+    AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::Byte, input.scalar_type(), "upsample_nearest3d", [&] {
       cpu_upsample_nearest<scalar_t, scale_t>(output, input, {scales_d, scales_h, scales_w});
     });
   }
