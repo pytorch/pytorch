@@ -19,6 +19,7 @@ import json
 # Autograd tests use double as the default dtype
 torch.set_default_dtype(torch.double)
 
+import torch.utils.cpp_extension
 from torch import nn
 from torch._six import inf, nan, istuple
 from torch.autograd.gradcheck import gradgradcheck, gradcheck
@@ -4041,6 +4042,33 @@ for shape in [(1,), ()]:
 
         foo = MyFn.apply(base, True)
         self.assertEqual(foo.grad_fn.__class__.__name__, "MyFnBackward")
+
+    def test_custom_compound_op(self):
+        # Test that a custom compound op (i.e. a custom op that just calls other aten ops)
+        # correctly returns gradients of those other ops
+
+        source = """
+        #include <torch/library.h>
+        torch::Tensor my_add(torch::Tensor x, torch::Tensor y) {
+          return x + y;
+        }
+        TORCH_LIBRARY(my, m) {
+            m.def("add", &my_add);
+        }
+        """
+
+        torch.utils.cpp_extension.load_inline(
+            name="is_python_module",
+            cpp_sources=source,
+            verbose=True,
+            is_python_module=False,
+        )
+
+        a = torch.randn(5, 5, requires_grad=True)
+        b = torch.randn(5, 5, requires_grad=True)
+
+        gradcheck(torch.ops.my.add, [a, b])
+
 
 
 def index_variable(shape, max_indices):
