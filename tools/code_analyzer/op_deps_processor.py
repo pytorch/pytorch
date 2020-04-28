@@ -67,7 +67,7 @@ def process_base_ops(graph, base_ops):
         'depends': [{'name': name} for name in base_ops]})
 
 
-def convert(fname, graph, OUTPUT, OP, OP_DEP):
+def convert(fname, graph, output_template, op_template, op_dep_template):
     ops = []
     for op in graph:
         op_name = op['name']
@@ -79,7 +79,7 @@ def convert(fname, graph, OUTPUT, OP, OP_DEP):
                 # skip itself reference
                 continue
             op_deps.append(
-                OP_DEP.substitute(
+                op_dep_template.substitute(
                     op_name=op_name,
                     dep_name=dep_name))
 
@@ -88,12 +88,12 @@ def convert(fname, graph, OUTPUT, OP, OP_DEP):
             continue
 
         ops.append(
-            OP.substitute(
+            op_template.substitute(
                 op_name=op_name,
                 op_deps=op_deps))
 
     with open(fname, 'w') as out:
-        out.write(OUTPUT.substitute(ops=ops))
+        out.write(output_template.substitute(ops=ops))
 
 
 if __name__ == "__main__":
