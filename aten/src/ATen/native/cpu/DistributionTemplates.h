@@ -235,4 +235,24 @@ void cauchy_kernel(TensorIterator& iter, double median, double sigma, RNG genera
   });
 }
 
+// ================================================== LogNormal =======================================================
+
+template<typename RNG>
+void log_normal_kernel(TensorIterator& iter, double mean, double std, RNG generator) {
+  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "log_normal_cpu", [&]() {
+    std::lock_guard<std::mutex> lock(generator->mutex_);
+    cpu_serial_kernel(iter, [mean, std, generator]() -> scalar_t {
+      at::lognormal_distribution<double> logNormal(mean, std);
+      return static_cast<scalar_t>(logNormal(generator));
+    });
+  });
+}
+
+template<typename RNG>
+struct LogNormalKernel {
+  void operator()(TensorIterator& iter, double mean, double std, c10::optional<Generator> gen) {
+    log_normal_kernel(iter, mean, std, check_generator<RNG>(gen));
+  }
+};
+
 }}}}

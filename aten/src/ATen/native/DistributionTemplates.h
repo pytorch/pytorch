@@ -288,6 +288,16 @@ at::Tensor& uniform_impl_(at::Tensor& self, double from, double to, c10::optiona
   return self;
 }
 
+// ================================================== LogNormal =======================================================
+
+template<template<typename> class log_normal_kernel, typename RNG>
+at::Tensor& log_normal_impl_(at::Tensor& self, double mean, double std, c10::optional<Generator> gen) {
+  TORCH_CHECK(std > 0.0, "log_normal_ expects std > 0.0, but found std=", std);
+  auto iter = TensorIterator::nullary_op(self);
+  log_normal_kernel<RNG>()(iter, mean, std, gen);
+  return self;
+}
+
 #undef CHECK_OUT_OF_BOUNDS_AND_SHOW_WARNING
 
 }}}

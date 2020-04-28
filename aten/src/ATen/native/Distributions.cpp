@@ -193,12 +193,20 @@ Tensor& bernoulli_scalar_cpu_(Tensor& self, double p, c10::optional<Generator> g
   return self;
 }
 
+// ================================================== LogNormal =======================================================
+
+template<typename RNG>
+struct LogNormalStub {
+  void operator()(TensorIterator& iter, double mean, double std, c10::optional<Generator> gen) {
+    log_normal_stub(iter.device_type(), iter, mean, std, gen);
+  }
+};
+
 Tensor& log_normal_(Tensor& self, double mean, double std, c10::optional<Generator> gen) {
-  TORCH_CHECK(std > 0.0, "log_normal_ expects std > 0.0, but found std=", std);
-  auto iter = TensorIterator::nullary_op(self);
-  log_normal_stub(iter.device_type(), iter, mean, std, gen);
-  return self;
+  return at::native::templates::log_normal_impl_<LogNormalStub, Generator>(self, mean, std, gen);
 }
+
+// ====================================================================================================================
 
 Tensor& cauchy_(Tensor& self, double median, double sigma, c10::optional<Generator> gen) {
   auto iter = TensorIterator::nullary_op(self);
