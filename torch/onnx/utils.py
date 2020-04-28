@@ -720,6 +720,17 @@ def _graph_op(g, opname, *raw_args, **kwargs):
 # help the target of an ONNX export export more efficiently.  However,
 # ONNX doesn't currently formalize inplace. Fortunately, it's sound to drop
 # inplace annotations, but we are losing information this way.
+def _find_symbolic_fn(ns, domain, op_name, opset_version, operator_export_type, msg=''):
+    import torch.onnx.symbolic_registry as sym_registry
+    if not sym_registry.is_registered_op(op_name, domain, opset_version):
+        if operator_export_type == OperatorExportTypes.ONNX_ATEN_FALLTHROUGH:
+            # Use the original node directly
+            return None
+        else:
+            warnings.warn("ONNX export failed on operator {}::{} because "
+                          "torch.onnx.symbolic_opset{}.{} does not exist. {}"
+                          .format(ns, op_name, opset_version, op_name, msg))
+    return sym_registry.get_registered_op(op_name, domain, opset_version)
 
 
 def _run_symbolic_function(g, n, inputs, env, operator_export_type=OperatorExportTypes.ONNX):
@@ -756,16 +767,14 @@ def _run_symbolic_function(g, n, inputs, env, operator_export_type=OperatorExpor
                 outputs = n.outputsSize()
                 attrs["outputs"] = outputs
                 return _graph_at(g, op_name, *inputs, aten=True, **attrs)
-
             else:
                 # Export it regularly
+                domain = ''
+                symbolic_fn = _find_symbolic_fn(ns, domain, op_name, opset_version, operator_export_type)
+                if symbolic_fn is None:
+                    return None
                 attrs = {k: n[k] for k in n.attributeNames()}
-                if not is_exportable_aten_op:
-                    warnings.warn("ONNX export failed on ATen operator {} because "
-                                  "torch.onnx.symbolic_opset{}.{} does not exist"
-                                  .format(op_name, opset_version, op_name))
-                op_fn = sym_registry.get_registered_op(op_name, '', opset_version)
-                return op_fn(g, *inputs, **attrs)
+                return symbolic_fn(g, *inputs, **attrs)
 
         elif ns == "prim":
             if op_name == "Constant" and not n.mustBeNone():
@@ -800,45 +809,44 @@ def _run_symbolic_function(g, n, inputs, env, operator_export_type=OperatorExpor
             else:
                 # TODO: we sould lift prim's symbolic out
                 symbolic_name = 'prim_' + op_name
-                is_exportable = sym_registry.is_registered_op(symbolic_name, '', opset_version)
-                if not is_exportable:
-                    warnings.warn("ONNX export failed on primitive operator {}; please report a bug".format(op_name))
-                symbolic_fn = sym_registry.get_registered_op(symbolic_name, '', opset_version)
+                domain = ''
+                symbolic_fn = _find_symbolic_fn(ns, domain, symbolic_name, opset_version,
+                                           operator_export_type)
+                if symbolic_fn is not None:
+                    return symbolic_fn
                 attrs = {k: n[k] for k in n.attributeNames()}
                 return symbolic_fn(g, *inputs, **attrs)
-
         elif ns == "quantized":
             domain = ''
             if operator_export_type == OperatorExportTypes.ONNX_ATEN_FALLBACK:
                 domain = 'caffe2'
-            attrs = {k: n[k] for k in n.attributeNames()}
-
-            if not sym_registry.is_registered_op(op_name, domain, opset_version):
-                warnings.warn("ONNX export failed on quantized operator {}::{} because "
-                              "torch.onnx.symbolic_opset{}.{} does not exist. "
-                              .format(ns, op_name, opset_version, op_name))
-            op_fn = sym_registry.get_registered_op(op_name, domain, opset_version)
-            return op_fn(g, *inputs, **attrs)
-
-        # custom ops
-        elif sym_registry.is_registered_version(ns, opset_version):
-            if not sym_registry.is_registered_op(op_name, ns, opset_version):
-                warnings.warn("ONNX export failed on custom operator {}::{} because "
-                              "torch.onnx.symbolic_opset{}.{} does not exist. "
-                              "Have you registered your symbolic function with "
-                              "torch.onnx.register_custom_op_symbolic(symbolic_name, symbolic_fn)?"
-                              .format(ns, op_name, opset_version, op_name))
-            symbolic_fn = sym_registry.get_registered_op(op_name, ns, opset_version)
+            symbolic_fn = _find_symbolic_fn(ns, domain, op_name, opset_version, operator_export_type)
+            if symbolic_fn is not None:
+                return symbolic_fn
             attrs = {k: n[k] for k in n.attributeNames()}
             return symbolic_fn(g, *inputs, **attrs)
 
+        # custom ops
+        elif sym_registry.is_registered_version(ns, opset_version):
+            domain = ns
+            error_msg = "Have you registered your symbolic function with " \
+                        "torch.onnx.register_custom_op_symbolic(symbolic_name, symbolic_fn)?"
+            symbolic_fn = _find_symbolic_fn(ns, domain, op_name, opset_version, operator_export_type,
+                                             error_msg)
+            if symbolic_fn is not None:
+                return symbolic_fn
+            attrs = {k: n[k] for k in n.attributeNames()}
+            return symbolic_fn(g, *inputs, **attrs)
         else:
-            warnings.warn("ONNX export failed on an operator with unrecognized namespace {}::{}; "
-                          "If you are trying to export a custom operator, make sure you registered "
-                          "it with the right domain and version."
-                          "Otherwise please report a bug".format(ns, op_name))
+            if operator_export_type != OperatorExportTypes.ONNX_ATEN_FALLTHROUGH:
+                warnings.warn("ONNX export failed on an operator with unrecognized namespace {}::{}; "
+                              "If you are trying to export a custom operator, make sure you registered "
+                              "it with the right domain and version."
+                              "Otherwise please report a bug".format(ns, op_name))
             return None
-
+    except RuntimeError:
+        if operator_export_type == OperatorExportTypes.ONNX_ATEN_FALLTHROUGH:
+            return None
     except TypeError as e:
         # Handle the specific case where we didn't successfully dispatch.
         # Otherwise, the backtrace will have the clues you need.
