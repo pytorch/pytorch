@@ -1579,18 +1579,7 @@ std::tuple<Tensor, Tensor, Tensor> quantized_lstm_input(
     params.emplace_back(static_cast<c10::intrusive_ptr<CellParamsBase>>(param));
   }
   TORCH_CHECK(hx.size() == 2, "lstm expects two hidden states");
-  if (at::cudnn_is_acceptable(_input)) {
-    Tensor output, hy, cy;
-    // TODOJAMES
-    // lstm_cudnn_stub(_input.device().type(), output, hy, cy, _input, hx,
-    // _params, has_biases,
-    //                 num_layers, dropout_p, train, bidirectional,
-    //                 batch_first);
-    return std::make_tuple(std::move(output), std::move(hy), std::move(cy));
-  }
   auto result_dtype = dtype.has_value() ? dtype.value() : at::kChar;
-  // TODOJAMES
-  // check_device(_input, _params, hx);
   auto input = batch_first ? _input.transpose(0, 1) : _input;
   TORCH_CHECK(has_biases, "quantized LSTM requires biases");
   TORCH_CHECK(
