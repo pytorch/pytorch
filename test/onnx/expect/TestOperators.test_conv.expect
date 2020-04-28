@@ -6,6 +6,7 @@ graph {
     input: "input"
     input: "weight"
     output: "2"
+    name: "Conv_0"
     op_type: "Conv"
     attribute {
       name: "dilations"
