@@ -362,35 +362,36 @@ class TestPostTrainingStatic(QuantizationTestCase):
         if qengine == 'qnnpack':
             if IS_WINDOWS or TEST_WITH_UBSAN:
                 return
-        with override_quantized_engine(qengine):
-            model = TwoLayerLinearModel()
-            model = torch.quantization.QuantWrapper(model)
-            model.qconfig = torch.quantization.get_default_qconfig(qengine)
+        if qengine in torch.backends.quantized.supported_engines:
+            with override_quantized_engine(qengine):
+                model = TwoLayerLinearModel()
+                model = torch.quantization.QuantWrapper(model)
+                model.qconfig = torch.quantization.get_default_qconfig(qengine)
 
-            model = prepare(model)
-            # calibrate
-            test_only_eval_fn(model, self.calib_data)
-            model = convert(model)
-            x = torch.rand(2, 5, dtype=torch.float)
-            ref = model(x)
+                model = prepare(model)
+                # calibrate
+                test_only_eval_fn(model, self.calib_data)
+                model = convert(model)
+                x = torch.rand(2, 5, dtype=torch.float)
+                ref = model(x)
 
-            quant_state_dict = model.state_dict()
+                quant_state_dict = model.state_dict()
 
-            # Create model again for eval
-            model = TwoLayerLinearModel()
-            model = torch.quantization.QuantWrapper(model)
-            model.qconfig = torch.quantization.get_default_qconfig(qengine)
-            model = prepare(model)
-            model = convert(model)
-            new_state_dict = model.state_dict()
+                # Create model again for eval
+                model = TwoLayerLinearModel()
+                model = torch.quantization.QuantWrapper(model)
+                model.qconfig = torch.quantization.get_default_qconfig(qengine)
+                model = prepare(model)
+                model = convert(model)
+                new_state_dict = model.state_dict()
 
-            # Check to make sure the state dict keys match original model after convert.
-            self.assertEqual(set(new_state_dict.keys()), set(quant_state_dict.keys()))
+                # Check to make sure the state dict keys match original model after convert.
+                self.assertEqual(set(new_state_dict.keys()), set(quant_state_dict.keys()))
 
-            model.load_state_dict(quant_state_dict)
+                model.load_state_dict(quant_state_dict)
 
-            out = model(x)
-            self.assertEqual(ref, out)
+                out = model(x)
+                self.assertEqual(ref, out)
 
     def test_activations(self):
         r"""
