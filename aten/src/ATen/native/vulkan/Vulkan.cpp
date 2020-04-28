@@ -10,14 +10,17 @@
 #include <ATen/native/vulkan/Vulkan.h>
 #include "vulkan_wrapper.h"
 
-#include <ATen/native/vulkan/glsl.h>
-#include <ATen/native/vulkan/spv.h>
-
 #ifdef USE_VULKAN_GLES_SHADERC_RUNTIME
+
+#include <ATen/native/vulkan/glsl.h>
 #include "shaderc/shaderc.hpp"
 #define GLSL_SPV(name) name##_glsl
+
 #else
+
+#include <ATen/native/vulkan/spv.h>
 #define GLSL_SPV(name) name##_spv, name##_spv_len
+
 #endif
 
 #define UP_DIV(x, y) (((x) + (y) - (1)) / (y))

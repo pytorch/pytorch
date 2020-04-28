@@ -1,7 +1,5 @@
-#include <ATen/ATen.h>
-
 #if defined(USE_VULKAN) || defined(USE_GLES)
-
+#include <ATen/ATen.h>
 #include <ATen/Config.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/OpaqueTensorImpl.h>
@@ -249,50 +247,6 @@ at::Tensor vulkan_convolution(
   AT_ERROR("vulkan_convolution: Not implemented yet for Vulkan");
 #endif
   return new_with_vtensor_vulkan(std::move(voutput), input.options());
-}
-
-} // namespace native
-} // namespace at
-
-#else
-// if not (defined(USE_VULKAN) || defined(USE_GLES))
-
-namespace at {
-namespace native {
-
-at::Tensor& vulkan_copy_(at::Tensor& self, const at::Tensor& src) {
-  AT_ERROR("vulkan_copy_: ATen not compiled with Vulkan or GLES support");
-}
-
-Tensor vulkan_add(const Tensor& self, const Tensor& other, Scalar alpha) {
-  AT_ERROR("vulkan_add: ATen not compiled with Vulkan or GLES support");
-}
-
-at::Tensor empty_vulkan(
-    IntArrayRef sizes,
-    const TensorOptions& options,
-    c10::optional<c10::MemoryFormat> optional_memory_format) {
-  AT_ERROR("empty_vulkan: ATen not compiled with Vulkan or GLES support");
-}
-
-at::Tensor vulkan_convolution(
-    const at::Tensor& input,
-    const at::Tensor& weight,
-    const at::Tensor& bias,
-    IntArrayRef padding,
-    IntArrayRef stride,
-    IntArrayRef dilation,
-    int64_t groups) {
-  AT_ERROR("vulkan_convolution: ATen not compiled with Vulkan or GLES support");
-}
-
-at::Tensor upsample_nearest2d_vulkan(
-    const at::Tensor& input,
-    IntArrayRef outputSizes,
-    c10::optional<double> scales_h,
-    c10::optional<double> scales_w) {
-  AT_ERROR(
-      "upsample_nearest2d_vulkan: ATen not compiled with Vulkan or GLES support");
 }
 
 } // namespace native

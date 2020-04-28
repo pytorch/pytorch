@@ -1,15 +1,25 @@
 # Shaders processing
+if(NOT USE_VULKAN AND NOT USE_GLES)
+  return()
+endif()
 
-execute_process(
-  COMMAND
-  "${PYTHON_EXECUTABLE}" 
-  ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/vulkan/gen_glsl.py
-  --glsl-path ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/vulkan/glsl
-  --output-path ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/vulkan
-  RESULT_VARIABLE error_code)
+set(VULKAN_GEN_OUTPUT_PATH "${CMAKE_BINARY_DIR}/vulkan/ATen/native/vulkan")
 
-if(error_code)
-  message(FATAL_ERROR "Failed to gen glsl.h and glsl.cpp with shaders sources for Vulkan backend")
+if(USE_GLES OR USE_VULKAN_SHADERC_RUNTIME)
+  execute_process(
+    COMMAND
+    "${PYTHON_EXECUTABLE}" 
+    ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/vulkan/gen_glsl.py
+    --glsl-path ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/vulkan/glsl
+    --output-path ${VULKAN_GEN_OUTPUT_PATH}
+    RESULT_VARIABLE error_code)
+
+  if(error_code)
+    message(FATAL_ERROR "Failed to gen glsl.h and glsl.cpp with shaders sources for Vulkan backend")
+  endif()
+
+  set(vulkan_generated_cpp ${VULKAN_GEN_OUTPUT_PATH}/glsl.cpp)
+  return()
 endif()
 
 if(NOT USE_VULKAN_SHADERC_RUNTIME)
@@ -48,13 +58,14 @@ if(NOT USE_VULKAN_SHADERC_RUNTIME)
     "${PYTHON_EXECUTABLE}"
     ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/vulkan/gen_spv.py
     --glsl-path ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/vulkan/glsl
-    --output-path ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/vulkan
+    --output-path ${VULKAN_GEN_OUTPUT_PATH}
     --glslc-path=${GLSLC_PATH}
-    --tmp-spv-path=${CMAKE_BINARY_DIR}
+    --tmp-spv-path=${CMAKE_BINARY_DIR}/vulkan/spv
     RESULT_VARIABLE error_code)
 
     if(error_code)
       message(FATAL_ERROR "Failed to gen spv.h and spv.cpp with precompiled shaders for Vulkan backend")
     endif()
 
+  set(vulkan_generated_cpp ${VULKAN_GEN_OUTPUT_PATH}/spv.cpp)
 endif()

@@ -129,7 +129,13 @@ if __name__ == '__main__':
 
   if OUTPUT_DIR_PATH is None: 
       raise Exception("")
-  
+
+  if not os.path.exists(OUTPUT_DIR_PATH):
+    os.makedirs(OUTPUT_DIR_PATH)
+
+  if not os.path.exists(TMP_DIR_PATH):
+    os.makedirs(TMP_DIR_PATH)
+
   genCppH(
       hFilePath=OUTPUT_DIR_PATH + "/spv.h", 
       cppFilePath=OUTPUT_DIR_PATH + "/spv.cpp", 

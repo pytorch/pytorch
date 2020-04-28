@@ -74,5 +74,8 @@ if __name__ == '__main__':
   if OUTPUT_DIR_PATH is None: 
       raise Exception("--output-path was not specifie")
 
+  if not os.path.exists(OUTPUT_DIR_PATH):
+    os.makedirs(OUTPUT_DIR_PATH)
+
   glsls = findAllGlsls(GLSL_DIR_PATH)
   genCppH(OUTPUT_DIR_PATH + "/" + H_NAME, OUTPUT_DIR_PATH + "/" + CPP_NAME, glsls)

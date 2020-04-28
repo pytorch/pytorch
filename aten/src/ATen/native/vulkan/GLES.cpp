@@ -354,8 +354,6 @@ class GLShader {
     return programId_;
   }
 
-  static std::string getHead(std::string imageFormat, std::string precision) {}
-
   void useProgram() {
     glUseProgram(programId_);
     GL_CHECK_ERROR;

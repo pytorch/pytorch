@@ -51,6 +51,9 @@ set(TH_CPU_INCLUDE
   ${CMAKE_BINARY_DIR}/aten/src)
 list(APPEND ATen_CPU_INCLUDE ${TH_CPU_INCLUDE})
 
+if(USE_VULKAN OR USE_GLES)
+  list(APPEND ATen_CPU_INCLUDE ${CMAKE_BINARY_DIR}/vulkan)
+endif()
 
 # Find the HIP package, set the HIP paths, load the HIP CMake.
 if(USE_ROCM)
