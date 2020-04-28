@@ -2,9 +2,7 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 import copy
 import errno
 import fcntl
-import multiprocessing
 import os
-import six
 import sys
 import time
 import tempfile
@@ -22,7 +20,11 @@ from torch.testing._internal.common_utils import TestCase, run_tests, find_free_
 from torch.distributed.distributed_c10d import _get_default_group
 from torch._utils_internal import TEST_MASTER_ADDR as MASTER_ADDR
 from torch._utils_internal import TEST_MASTER_PORT as MASTER_PORT
-from torch.testing._internal.common_distributed import simple_sparse_reduce_tests, skip_if_rocm
+from torch.testing._internal.common_distributed import (
+    MultiProcessTestCase,
+    simple_sparse_reduce_tests,
+    skip_if_rocm,
+)
 
 try:
     import torchvision
@@ -2203,47 +2205,40 @@ class _DistTestBase(object):
 if BACKEND == "gloo" or BACKEND == "nccl":
     WORLD_SIZE = os.environ["WORLD_SIZE"]
 
-    class TestDistBackend(TestCase, _DistTestBase):
-        MANAGER_PROCESS_RANK = -1
+    class TestDistBackend(MultiProcessTestCase, _DistTestBase):
 
-        @staticmethod
-        def manager_join(fn):
-            @wraps(fn)
-            def wrapper(self):
-                if self.rank == self.MANAGER_PROCESS_RANK:
-                    self._join_and_reduce(fn)
-                else:
-                    fn(self)
-
-            return wrapper
+        # Needed since MultiProcessTestCase assumes a world_size of 4, but we
+        # run these tests under other various world_sizes.
+        @property
+        def world_size(self):
+            return os.environ["WORLD_SIZE"]
 
         @classmethod
         def setUpClass(cls):
             os.environ["MASTER_ADDR"] = str(MASTER_ADDR)
             os.environ["MASTER_PORT"] = str(MASTER_PORT)
             os.environ["WORLD_SIZE"] = str(WORLD_SIZE)
-            for attr in dir(cls):
-                if attr.startswith("test"):
-                    fn = getattr(cls, attr)
-                    if not getattr(fn, "__unittest_skip__", False):
-                        setattr(cls, attr, cls.manager_join(fn))
+            super().setUpClass()
 
         def setUp(self):
-            super(TestDistBackend, self).setUp()
-            # We rely on the manager process to delete the temporary file.
+            super().setUp()
             global INIT_METHOD
+            # initialize Barrier.
+            Barrier.init()
+            # We rely on tearDown for deleting the temporary file
+            # TODO: this temporary file should be deduped with the file_name
+            # in MultiProcessTestCase as part of supporting spawn mode for these tests.
+            # https://github.com/pytorch/pytorch/issues/36663
             self.temporary_file = None
             if INIT_METHOD.startswith("file://"):
                 self.temporary_file = tempfile.NamedTemporaryFile(delete=False)
                 INIT_METHOD = "file://{}".format(self.temporary_file.name)
 
-            self.processes = []
-            self.rank = self.MANAGER_PROCESS_RANK
-            Barrier.init()
-            for rank in range(int(WORLD_SIZE)):
-                self.processes.append(self._spawn_process(rank))
+            # TODO: enable spawn mode https://github.com/pytorch/pytorch/issues/36663
+            self._fork_processes()
 
         def tearDown(self):
+            super(MultiProcessTestCase, self).tearDown()
             super(TestDistBackend, self).tearDown()
 
             # Clean up temporary file if we used one.
@@ -2255,29 +2250,11 @@ if BACKEND == "gloo" or BACKEND == "nccl":
                     if err.errno != errno.ENOENT:
                         raise
 
-            for p in self.processes:
-                p.terminate()
-
-        def _spawn_process(self, rank):
-            os.environ["RANK"] = str(rank)
-            name = "process " + str(rank)
-            # TODO: test_distributed.py test suite does not work with spawn
-            # mode, so we enforce fork mode for now. In the long term, we should
-            # enable spawn mode and refactor this suite to inherit from
-            # common_distributed.MultiProcessTestCase.
-            if six.PY3:
-                # Note: explicitly specifying fork, as spawn is the default in
-                # py3.8+ on macos.
-                proc_handler = multiprocessing.get_context("fork").Process
-            else:
-                # fork is the default on Python 2
-                proc_handler = multiprocessing.Process
-            process = proc_handler(target=self._run, name=name, args=(rank,))
-            process.start()
-            return process
-
-        def _run(self, rank):
+        @classmethod
+        def _run(cls, rank, test_name, file_name):
+            self = cls(test_name)
             self.rank = rank
+            self.file_name = file_name
             try:
                 dist.init_process_group(
                     init_method=INIT_METHOD,
@@ -2298,59 +2275,10 @@ if BACKEND == "gloo" or BACKEND == "nccl":
 
             # self.id() == e.g. '__main__.TestDistributed.test_get_rank'
             # We're retreiving a corresponding test and executing it.
-            getattr(self, self.id().split(".")[2])()
+            getattr(self, test_name)()
             self._barrier()
             dist.destroy_process_group()
             sys.exit(0)
-
-        def _join_and_reduce(self, fn):
-            skip_ok = (
-                getattr(fn, "skip_if_no_cuda_distributed", False) or
-                getattr(fn, "skip_if_no_gpu", False) or
-                getattr(fn, "skip_if_small_worldsize", False) or
-                getattr(fn, "skip_if_rocm", False)
-            )
-            join_timeout = get_timeout(self.id())
-            for rank, process in enumerate(self.processes):
-                process.join(join_timeout)
-                self.assertFalse(
-                    process.is_alive(),
-                    "Timeout waiting for rank %d to terminate" % rank)
-
-            first_process = self.processes[0]
-            for p in self.processes:
-                self.assertEqual(p.exitcode, first_process.exitcode)
-
-            if first_process.exitcode == SKIP_IF_BACKEND_UNAVAILABLE:
-                raise unittest.SkipTest("Compiled without the " + BACKEND + " backend")
-
-            if skip_ok:
-                # do this first so we don't give an error message about
-                # mismatched exit codes if the first isn't valid
-                assert (
-                    first_process.exitcode == 0 or
-                    first_process.exitcode == SKIP_IF_NO_CUDA_EXIT_CODE or
-                    first_process.exitcode == SKIP_IF_NO_GPU_EXIT_CODE or
-                    first_process.exitcode == SKIP_IF_SMALL_WORLDSIZE_EXIT_CODE or
-                    first_process.exitcode == SKIP_IF_ROCM_EXIT_CODE
-                ), "unexpected exit code {}".format(first_process.exitcode)
-
-                if first_process.exitcode == SKIP_IF_NO_CUDA_EXIT_CODE:
-                    raise unittest.SkipTest("cuda is not available")
-                if first_process.exitcode == SKIP_IF_NO_GPU_EXIT_CODE:
-                    raise unittest.SkipTest(
-                        "One unique gpu per process is not available"
-                    )
-                if first_process.exitcode == SKIP_IF_SMALL_WORLDSIZE_EXIT_CODE:
-                    raise unittest.SkipTest("worldsize is too small to run group tests")
-                if first_process.exitcode == SKIP_IF_ROCM_EXIT_CODE:
-                    raise unittest.SkipTest("Test skipped for ROCm")
-
-            self.assertEqual(
-                first_process.exitcode,
-                0,
-                "Expect 0 exit code, but got {}".format(first_process.exitcode)
-            )
 
 
 elif BACKEND == "mpi":

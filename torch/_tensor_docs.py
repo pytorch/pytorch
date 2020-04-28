@@ -1535,6 +1535,13 @@ inverse() -> Tensor
 See :func:`torch.inverse`
 """)
 
+add_docstr_all('isclose',
+               r"""
+isclose(other, rtol=1e-05, atol=1e-08, equal_nan=False) -> Tensor
+
+See :func:`torch.isclose`
+""")
+
 add_docstr_all('is_contiguous',
                r"""
 is_contiguous(memory_format=torch.contiguous_format) -> bool
@@ -3446,6 +3453,14 @@ add_docstr_all('stft',
 stft(frame_length, hop, fft_size=None, return_onesided=True, window=None, pad_end=0) -> Tensor
 
 See :func:`torch.stft`
+""")
+
+add_docstr_all('istft',
+               r"""
+istft(n_fft, hop_length=None, win_length=None, window=None,
+ center=True, normalized=False, onesided=True, length=None) -> Tensor
+
+See :func:`torch.istft`
 """)
 
 add_docstr_all('fft',
