@@ -1331,7 +1331,6 @@ class TestQuantizeScriptPTSQOps(JitTestCase):
             data = torch.randn(1, 1, 10, 10, dtype=torch.float)
             m(data, data)
             m = convert_script(m, True)
-            print(m.graph)
             FileCheck().check_not("aten::add") \
                        .check_not("aten::add_") \
                        .check("quantized::add") \
@@ -1382,7 +1381,6 @@ class TestQuantizeScriptPTSQOps(JitTestCase):
             data = torch.randn(1, 1, 10, 10, dtype=torch.float)
             m(data, data)
             m = convert_script(m, True)
-            print(m.graph)
             FileCheck().check_not("aten::add") \
                        .check_not("aten::relu") \
                        .check_not("aten::relu_") \
