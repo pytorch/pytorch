@@ -629,8 +629,8 @@ class TestUtilityFuns(TestCase):
         x = torch.randn(2, 3, 4, requires_grad=False)
         y = torch.randn(2, 3, 4, requires_grad=False)
         model = FooModel()
-        graph, _, __ = torch.onnx.utils._model_to_graph(model, (x, y), operator_export_type=
-                                                        torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLTHROUGH)
+        graph, _, __ = torch.onnx.utils._model_to_graph(model, (x, y),
+                                                        operator_export_type=torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLTHROUGH)
         iter = graph.nodes()
         assert next(iter).kind() == "custom_namespace::custom_op"
 
