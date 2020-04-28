@@ -27,7 +27,9 @@ class TypeParser {
   explicit TypeParser(
       std::string pythonStr,
       std::function<TypePtr(const std::string&)> resolver = nullptr)
-      : pythonStr_(std::move(pythonStr)), start_(0), resolver_(resolver) {
+      : pythonStr_(std::move(pythonStr)),
+        start_(0),
+        resolver_(std::move(resolver)) {
     lex();
   }
 

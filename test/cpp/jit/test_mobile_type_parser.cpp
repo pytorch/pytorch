@@ -71,8 +71,12 @@ void testMobileTypeParser() {
 
   std::string remapped_int_list("List[remapped_int]");
   ASSERT_ANY_THROW(c10::parseType(remapped_int_list));
-  ASSERT_EQ(c10::parseType(remapped_int_list, resolver)->python_str(), "List[int]");
-  ASSERT_EQ(c10::parseType("Dict[remapped_int, remapped_float]", resolver)->python_str(), "Dict[int, float]");
+  ASSERT_EQ(
+      c10::parseType(remapped_int_list, resolver)->python_str(), "List[int]");
+  ASSERT_EQ(
+      c10::parseType("Dict[remapped_int, remapped_float]", resolver)
+          ->python_str(),
+      "Dict[int, float]");
   ASSERT_ANY_THROW(c10::parseType("unknown_type", resolver));
 }
 } // namespace jit
