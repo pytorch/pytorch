@@ -543,24 +543,41 @@ if(USE_VULKAN)
     set(VULKAN_INCLUDE_DIR "$ENV{VULKAN_SDK}/source/Vulkan-Headers/include")
     message(STATUS "VULKAN_INCLUDE_DIR:${VULKAN_INCLUDE_DIR}")
 
-    # Vulkan wrapper from VULKAN_SDK
-    set(VULKAN_SDK_WRAPPER_DIR "$ENV{VULKAN_SDK}/source/Vulkan-Tools/common")
-    message(STATUS "Vulkan_SDK_WRAPPER_DIR:${VULKAN_SDK_WRAPPER_DIR}")
-    set(VULKAN_WRAPPER_DIR "${VULKAN_SDK_WRAPPER_DIR}")
+    if(USE_VULKAN_WRAPPER)
+      # Vulkan wrapper from VULKAN_SDK
+      set(VULKAN_SDK_WRAPPER_DIR "$ENV{VULKAN_SDK}/source/Vulkan-Tools/common")
+      message(STATUS "Vulkan_SDK_WRAPPER_DIR:${VULKAN_SDK_WRAPPER_DIR}")
+      set(VULKAN_WRAPPER_DIR "${VULKAN_SDK_WRAPPER_DIR}")
 
-    add_library(
-      VulkanWrapper
-      STATIC 
-      ${VULKAN_WRAPPER_DIR}/vulkan_wrapper.h
-      ${VULKAN_WRAPPER_DIR}/vulkan_wrapper.cpp)
+      add_library(
+        VulkanWrapper
+        STATIC
+        ${VULKAN_WRAPPER_DIR}/vulkan_wrapper.h
+        ${VULKAN_WRAPPER_DIR}/vulkan_wrapper.cpp)
 
-    target_include_directories (VulkanWrapper PUBLIC .)
-    target_include_directories (VulkanWrapper PUBLIC "${VULKAN_INCLUDE_DIR}")
+      target_include_directories (VulkanWrapper PUBLIC .)
+      target_include_directories (VulkanWrapper PUBLIC "${VULKAN_INCLUDE_DIR}")
 
-    target_link_libraries (VulkanWrapper ${CMAKE_DL_LIBS})
+      target_link_libraries (VulkanWrapper ${CMAKE_DL_LIBS})
 
-    include_directories(SYSTEM ${VULKAN_WRAPPER_DIR})
-    list(APPEND Caffe2_DEPENDENCY_LIBS VulkanWrapper)
+      include_directories(SYSTEM ${VULKAN_WRAPPER_DIR})
+      list(APPEND Caffe2_DEPENDENCY_LIBS VulkanWrapper)
+    else(USE_VULKAN_WRAPPER)
+      find_library(VULKAN_LIBRARY
+        NAMES vulkan
+        PATHS
+        "$ENV{VULKAN_SDK}/${CMAKE_HOST_SYSTEM_PROCESSOR}/lib")
+
+      if(NOT VULKAN_LIBRARY)
+        message(FATAL_ERROR "USE_VULKAN: Vulkan library not found")
+      endif()
+
+      message(STATUS "VULKAN_LIBRARY:${VULKAN_LIBRARY}")
+      message(STATUS "VULKAN_INCLUDE_DIR:${VULKAN_INCLUDE_DIR}")
+
+      include_directories(SYSTEM ${VULKAN_INCLUDE_DIR})
+      list(APPEND Caffe2_DEPENDENCY_LIBS ${VULKAN_LIBRARY})
+    endif(USE_VULKAN_WRAPPER)
 
     if(USE_VULKAN_SHADERC_RUNTIME)
       # shaderc from VULKAN_SDK

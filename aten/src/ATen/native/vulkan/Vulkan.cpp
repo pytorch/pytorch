@@ -2,13 +2,18 @@
 
 #include <stdio.h>
 #include <unistd.h>
-#include <iostream>
 #include <cstring>
+#include <iostream>
 
 #include <c10/util/Exception.h>
 
-#include <ATen/native/vulkan/Vulkan.h>
+#ifdef USE_VULKAN_WRAPPER
 #include "vulkan_wrapper.h"
+#else
+#include <vulkan/vulkan.h>
+#endif
+
+#include <ATen/native/vulkan/Vulkan.h>
 
 #ifdef USE_VULKAN_GLES_SHADERC_RUNTIME
 
@@ -46,8 +51,10 @@ static std::unique_ptr<VContext> vkContext;
 
 void initVulkanContextOnce() {
   static const int once = []() {
+#ifdef USE_VULKAN_WRAPPER
     bool res = InitVulkan();
-    TORCH_CHECK(res, "Vulkan Failed to InitVulkan");
+    TORCH_CHECK(res, "Vulkan Wrapperer Failed to InitVulkan");
+#endif
     vkContext = std::make_unique<VContext>();
     TORCH_CHECK(vkContext, "Vulkan Failed to create Vulkan Context");
     return 0;
@@ -191,7 +198,7 @@ class VContext {
     }
     s << pLayerPrefix << " " << msgCode << " " << pMsg << std::endl;
     auto log = s.str();
-    //TODO Where to log if VLOG,LOG disabled?
+    // TODO Where to log if VLOG,LOG disabled?
     return VK_FALSE;
   }
 
@@ -606,8 +613,7 @@ VulkanTensor::VulkanTensor(std::vector<int64_t> sizes) : sizes_(sizes) {
   initVulkanContextOnce();
 }
 
-void VulkanTensor::allocateStorage() {
-}
+void VulkanTensor::allocateStorage() {}
 
 #ifdef USE_VULKAN_GLES_SHADERC_RUNTIME
 auto makeComputeUnit(

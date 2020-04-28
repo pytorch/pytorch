@@ -4,7 +4,11 @@
 #include <memory>
 #include <vector>
 
+#ifdef USE_VULKAN_WRAPPER
 #include "vulkan_wrapper.h"
+#else
+#include <vulkan/vulkan.h>
+#endif
 
 #include <c10/util/intrusive_ptr.h>
 
