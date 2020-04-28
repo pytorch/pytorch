@@ -214,6 +214,8 @@ Disable JIT for Debugging
     you can use tools like ``pdb`` to debug the model code.
 
     Given an example 
+    
+    .. testcode::
 
         @torch.jit.script
         def scripted_fn(x : torch.Tensor):
