@@ -23,6 +23,17 @@ def _backend_type_repr(self):
 BackendType = enum.Enum(value="BackendType", names={})
 BackendType.__repr__ = _backend_type_repr
 
+def backend_registered(backend_name):
+    """
+    Checks if backend_name is registered as an RPC backend.
+
+    Arguments:
+        backend_name (str): string to identify the RPC backend.
+    Returns:
+        True if the backend has been registered with `register_backend`, else False.
+    """
+    return backend_name in BackendType.__members__.keys()
+
 
 def register_backend(
     backend_name, construct_rpc_backend_options_handler, init_backend_handler
@@ -39,7 +50,7 @@ def register_backend(
              This returns the agent.
     """
     global BackendType
-    if backend_name in BackendType.__members__.keys():
+    if backend_registered(backend_name):
         raise RuntimeError("RPC backend {}: already registered".format(backend_name))
     # Create a new enum type, `BackendType`, with extended members.
     existing_enum_dict = {member.name: member.value for member in BackendType}
