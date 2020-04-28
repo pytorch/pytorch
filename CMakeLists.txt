@@ -282,16 +282,10 @@ if(MSVC)
     # NB2: This is NOT enough to prevent warnings from nvcc on MSVC.  At the
     # moment only CMP0092 is enough to prevent those warnings too.
     string(REPLACE "/W3" "" ${flag_var} "${${flag_var}}")
-    # Suppress EHs is overridden by EHa warning
-    string(REPLACE "/EHsc" "" ${flag_var} "${${flag_var}}")
 
     # Turn off warnings (Windows build is currently is extremely warning
     # unclean and the warnings aren't telling us anything useful.)
-    #
-    # Turn on EHa; I'm not altogether clear why we use the asynchronous
-    # exception handling model, but someone added it at some point, so
-    # keep using it.
-    string(APPEND ${flag_var} " /w /EHa")
+    string(APPEND ${flag_var} " /w")
 
     if(${CAFFE2_USE_MSVC_STATIC_RUNTIME})
       if(${flag_var} MATCHES "/MD")
