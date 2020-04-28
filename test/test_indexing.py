@@ -79,12 +79,13 @@ class TestIndexing(TestCase):
         mask = torch.zeros(size=(10, ), dtype=torch.uint8, device=device)
         y = torch.ones(size=(10, 10), device=device)
         with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
             y.index_put_((mask, ), y[mask], accumulate=True)
             self.assertEqual(y, torch.ones(size=(10, 10), device=device))
             self.assertEquals(len(w), 2)
 
-    def test_index_put_accumulate_large_tensor(self, device): 
-        # This test is for tensors with number of elements >= INT_MAX (2^31 - 1). 
+    def test_index_put_accumulate_large_tensor(self, device):
+        # This test is for tensors with number of elements >= INT_MAX (2^31 - 1).
         N = (1 << 31) + 5
         dt = torch.int8
         a = torch.ones(N, dtype=dt, device=device)
@@ -106,6 +107,7 @@ class TestIndexing(TestCase):
         mask1 = torch.ByteTensor([1, 0, 1, 1, 0]).to(device)
         mask2 = torch.ByteTensor([1, 1, 1]).to(device)
         with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
             self.assertEqual(v[mask1, :, mask2].shape, (3, 7))
             self.assertEquals(len(w), 2)
 
