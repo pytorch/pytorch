@@ -1125,7 +1125,12 @@ if(USE_ROCM)
   else()
     caffe2_update_option(USE_ROCM OFF)
   endif()
+endif()
 
+# ---[ ROCm
+if(USE_ROCM)
+  # We check again for USE_ROCM because it might have been set to OFF
+  # in the if above
   include_directories(SYSTEM ${HIP_PATH}/include)
   include_directories(SYSTEM ${ROCBLAS_PATH}/include)
   include_directories(SYSTEM ${ROCFFT_PATH}/include)
