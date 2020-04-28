@@ -1860,13 +1860,11 @@ ModuleMethodVector InsertQuantDeQuantHelper::getInvokedMethods(
         // calling method on self
         if (module_instance == graph->inputs()[0]) {
           m = module;
-        } else {
-          if (module_instance->node()->kind() == prim::GetAttr) {
-            auto child_module_name = module_instance->node()->s(attr::name);
-            if (child_module_name.find("_observer_") == std::string::npos) {
-              m = getInvokedModule(module, n, graph->inputs()[0]);
-            }
-          }
+        } else if (
+            module_instance->node()->kind() == prim::GetAttr &&
+            module_instance->node()->s(attr::name).find("_observer_") ==
+                std::string::npos) {
+          m = getInvokedModule(module, n, graph->inputs()[0]);
         }
         if (m) {
           invoked_methods.push_back({*m, module_method_name});
