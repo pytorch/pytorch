@@ -49,8 +49,7 @@ hu.assert_deadline_disabled()
 import io
 import copy
 
-@unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines or
-                     'qnnpack' in torch.backends.quantized.supported_engines,
+@unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
                      " Quantized operations require FBGEMM/QNNPACK. FBGEMM is only optimized for CPUs"
                      " with instruction set support avx2 or newer.")
 class TestPostTrainingStatic(QuantizationTestCase):
@@ -872,28 +871,31 @@ class TestQuantizationAwareTraining(QuantizationTestCase):
                                      self.train_data)
                 checkQuantized(model)
 
-    def test_activations(self):
-        model = ActivationsQATTestModel()
-        model = prepare_qat(model)
+    @given(qengine=st.sampled_from(("qnnpack", "fbgemm")))
+    def test_activations(self, qengine):
+        if qengine in torch.backends.quantized.supported_engines:
+            with override_quantized_engine(qengine):
+                model = ActivationsQATTestModel(qengine)
+                model = prepare_qat(model)
 
-        self.assertEqual(type(model.fc1), torch.nn.qat.modules.Linear)
-        self.assertEqual(type(model.hardswish), torch.nn.qat.modules.Hardswish)
+                self.assertEqual(type(model.fc1), torch.nn.qat.modules.Linear)
+                self.assertEqual(type(model.hardswish), torch.nn.qat.modules.Hardswish)
 
-        self.checkObservers(model)
-        test_only_train_fn(model, self.train_data)
-        model = convert(model)
+                self.checkObservers(model)
+                test_only_train_fn(model, self.train_data)
+                model = convert(model)
 
-        def checkQuantized(model):
-            self.assertEqual(type(model.fc1), nnq.Linear)
-            self.assertEqual(type(model.hardswish), nnq.Hardswish)
-            test_only_eval_fn(model, self.calib_data)
-            self.checkScriptable(model, self.calib_data)
+                def checkQuantized(model):
+                    self.assertEqual(type(model.fc1), nnq.Linear)
+                    self.assertEqual(type(model.hardswish), nnq.Hardswish)
+                    test_only_eval_fn(model, self.calib_data)
+                    self.checkScriptable(model, self.calib_data)
 
-        checkQuantized(model)
+                checkQuantized(model)
 
-        model = quantize_qat(ActivationsQATTestModel(), test_only_train_fn,
-                             self.train_data)
-        checkQuantized(model)
+                model = quantize_qat(ActivationsQATTestModel(qengine), test_only_train_fn,
+                                     self.train_data)
+                checkQuantized(model)
 
     @given(qengine=st.sampled_from(("qnnpack", "fbgemm")))
     def test_eval_only_fake_quant(self, qengine):

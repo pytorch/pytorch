@@ -304,9 +304,9 @@ class ActivationsTestModel(torch.nn.Module):
         return x
 
 class ActivationsQATTestModel(torch.nn.Module):
-    def __init__(self):
+    def __init__(self, qengine):
         super().__init__()
-        self.qconfig = torch.quantization.get_default_qconfig("fbgemm")
+        self.qconfig = torch.quantization.get_default_qconfig(qengine)
         self.quant = torch.quantization.QuantStub()
         self.fc1 = torch.nn.Linear(5, 8).to(dtype=torch.float)
         self.hardswish = torch.nn.Hardswish().to(dtype=torch.float)
