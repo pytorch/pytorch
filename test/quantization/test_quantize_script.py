@@ -762,15 +762,15 @@ graph(%input, %weight):
                 c = F.conv2d(a, w2)
                 return b + c
 
-        m = torch.jit.script(M())
+        m = torch.jit.script(M()).eval()
         qconfig_dict = {'': script_qconfig(default_qconfig)}
         m = wrap_cpp_module(torch._C._jit_pass_insert_observers(m._c, "forward", qconfig_dict, False))
         m(torch.rand(1, 3, 10, 10), torch.rand(3, 3, 3, 3), torch.rand(3, 3, 3, 3), torch.rand(3, 3, 3, 3))
-        torch._C._jit_pass_insert_quant_dequant(m._c, "forward", True)
-
-        # we just check we have one dequant on every op input, even input
-        # is sharded as multi uses
-        FileCheck().check_count("aten::dequantize", 9, exactly=True) \
+        m = wrap_cpp_module(torch._C._jit_pass_insert_quant_dequant(m._c, "forward", False))
+        # We replicate dequant in finalize call
+        m = wrap_cpp_module(torch._C._jit_pass_quant_finalize(m._c))
+        # check that quantized ops are inserted correctly.
+        FileCheck().check_count("quantized::conv2d_prepack", 3, exactly=True) \
                    .run(str(get_forward_graph(m._c)))
 
     def test_insert_quant_dequant_shared_class_type(self):
