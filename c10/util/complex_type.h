@@ -434,9 +434,15 @@ constexpr T imag(const c10::complex<T>& z) {
 
 template<typename T>
 C10_HOST_DEVICE T abs(const c10::complex<T>& z) {
-  auto r = std::real(z);
-  auto i = std::imag(z);
-  return std::sqrt(r * r + i * i);
+  // Algorithm reference:
+  //   https://www.johndcook.com/blog/2010/06/02/whats-so-hard-about-finding-a-hypotenuse/
+  //   https://en.wikipedia.org/wiki/Hypot#Implementation
+  auto r = std::abs(std::real(z));
+  auto i = std::abs(std::imag(z));
+  auto max = std::max(r, i);
+  auto min = std::min(r, i);
+  auto r = min / max;
+  return max * std::sqrt(1 + r * r);
 }
 
 template<typename T>
