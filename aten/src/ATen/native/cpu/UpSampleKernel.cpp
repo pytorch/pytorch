@@ -190,9 +190,10 @@ void cpu_upsample_nearest_channels_last(
     for (int64_t i = begin; i < end; i++) {
       int64_t ih = nearest_idx(oh, input_height, output_height, scales[0]);
       int64_t iw = nearest_idx(ow, input_width, output_width, scales[1]);
-      int64_t j = n * input_height * input_width * channels +
+      scalar_t* output_ptr = output_data + i * channels;
+      scalar_t* input_ptr = input_data + n * input_height * input_width * channels +
           ih * input_width * channels + iw * channels;
-      copy_func_vec(&output_data[i], &input_data[j], channels);
+      copy_func_vec(output_ptr, input_ptr, channels);
       data_index_step(n, num_batches, oh, output_height, ow, output_width);
     }
   };
@@ -208,10 +209,11 @@ void cpu_upsample_nearest_channels_last(
       int64_t id = nearest_idx(od, input_depth, output_depth, scales[0]);
       int64_t ih = nearest_idx(oh, input_height, output_height, scales[1]);
       int64_t iw = nearest_idx(ow, input_width, output_width, scales[2]);
-      int64_t j = n * input_depth * input_height * input_width * channels +
+      scalar_t* output_ptr = output_data + i * channels;
+      scalar_t* input_ptr = input_data + n * input_depth * input_height * input_width * channels +
           id * input_height * input_width * channels +
           ih * input_width * channels + iw * channels;
-      copy_func_vec(&output_data[i], &input_data[j], channels);
+      copy_func_vec(output_ptr, input_ptr, channels);
       data_index_step(n, num_batches, od, output_depth, oh, output_height, ow, output_width);
     }
   };
