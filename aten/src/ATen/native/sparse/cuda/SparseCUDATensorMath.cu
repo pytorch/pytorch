@@ -11,6 +11,7 @@
 #include <ATen/WrapDimUtilsMulti.h>
 #include <ATen/ExpandUtils.h>
 #include <c10/cuda/CUDACachingAllocator.h>
+#include <ATen/cuda/CuSparseDescriptors.h>
 
 #include <THC/THCTensorMathPointwise.cuh>
 #include <THC/THCThrustAllocator.cuh>
@@ -795,21 +796,6 @@ void search_end_matrix_indices(int64_t* mat_el_end_indices, int64_t num_matrices
   cudaDeviceSynchronize();
 }
 
-cudaDataType getTensorCudaDataType(Tensor self) {
-  cudaDataType cuda_data_type;
-  switch (self.scalar_type()) {
-    case ScalarType::Float:
-      cuda_data_type = CUDA_R_32F;
-      break;
-    case ScalarType::Double:
-      cuda_data_type = CUDA_R_64F;
-      break;
-    default:
-      TORCH_CHECK(false, "Tensor types must be either float32 or float64");
-      break;
-  }
-  return cuda_data_type;
-}
 #endif
 
 Tensor& bmm_out_sparse_cuda(Tensor& result, const SparseTensor& self, const Tensor& mat2) {
@@ -905,8 +891,8 @@ Tensor& _bmm_out_sparse_cuda(Tensor& result, const SparseTensor& self, const Ten
     values.scalar_type(), "bmm_sparse_cuda", [&] {
       scalar_t alpha_val = alpha.to<scalar_t>();
       scalar_t beta_val = beta.to<scalar_t>();
-      uint32_t* row_indices_start_ptr = reinterpret_cast<uint32_t*>(indices_dim1.data_ptr());
-      uint32_t* col_indices_start_ptr = reinterpret_cast<uint32_t*>(indices_dim2.data_ptr());
+      int* row_indices_start_ptr = reinterpret_cast<int*>(indices_dim1.data_ptr());
+      int* col_indices_start_ptr = reinterpret_cast<int*>(indices_dim2.data_ptr());
       scalar_t* values_start_ptr = reinterpret_cast<scalar_t*>(values.data_ptr());
       scalar_t* mat2_start_ptr = reinterpret_cast<scalar_t*>(mat2_contig.data_ptr());
       scalar_t* result_start_ptr = reinterpret_cast<scalar_t*>(tmp_result.data_ptr());
@@ -923,56 +909,29 @@ Tensor& _bmm_out_sparse_cuda(Tensor& result, const SparseTensor& self, const Ten
           // Create tensors to view just the current set of matrices
           int64_t sparse_nnz = mat_el_end_idx - mat_el_begin_idx;
 
-          cudaDataType cuda_data_type = getTensorCudaDataType(mat2_contig);
-          uint32_t* row_indices_ptr = &row_indices_start_ptr[mat_el_begin_idx];
-          uint32_t* col_indices_ptr = &col_indices_start_ptr[mat_el_begin_idx];
-          scalar_t* values_ptr = &values_start_ptr[mat_el_begin_idx];
+          cudaDataType cuda_data_type = CuSpValueType<scalar_t>().type;
 
-          cusparseSpMatDescr_t sparse_descr;
-          TORCH_CUDASPARSE_CHECK(cusparseCreateCoo(
-            &sparse_descr,
-            dim_i,
-            dim_j,
-            sparse_nnz,
-            reinterpret_cast<void*>(row_indices_ptr),
-            reinterpret_cast<void*>(col_indices_ptr),
-            reinterpret_cast<void*>(values_ptr),
-            CUSPARSE_INDEX_32I,
-            CUSPARSE_INDEX_BASE_ZERO,
-            cuda_data_type
-          ));
+          int* row_indices_ptr = &row_indices_start_ptr[mat_el_begin_idx];
+          int* col_indices_ptr = &col_indices_start_ptr[mat_el_begin_idx];
+          scalar_t* values_ptr = &values_start_ptr[mat_el_begin_idx];
+          auto sparse_descr = CuSparseSpMatCooDescriptor<scalar_t, int>(dim_i, dim_j, sparse_nnz, row_indices_ptr, col_indices_ptr, values_ptr);
+
           scalar_t* mat2_ptr = &mat2_start_ptr[dim_k*dim_j*cur_mat_num];
-          cusparseDnMatDescr_t dense_descr;
-          TORCH_CUDASPARSE_CHECK(cusparseCreateDnMat(
-            &dense_descr,
-            dim_k,
-            dim_j,
-            dim_k,
-            reinterpret_cast<void*>(mat2_ptr),
-            cuda_data_type,
-            CUSPARSE_ORDER_COL
-          ));
+          auto dense_descr = CuSparseDnMatDescriptor<scalar_t>(dim_k, dim_j, dim_k, mat2_ptr);
+          
           scalar_t* result_ptr = &result_start_ptr[dim_i*dim_k*cur_mat_num];
-          cusparseDnMatDescr_t result_descr;
-          TORCH_CUDASPARSE_CHECK(cusparseCreateDnMat(
-            &result_descr,
-            dim_i,
-            dim_k,
-            dim_i,
-            reinterpret_cast<void*>(result_ptr),
-            cuda_data_type,
-            CUSPARSE_ORDER_COL
-          ));
+          auto result_descr = CuSparseDnMatDescriptor<scalar_t>(dim_i, dim_k, dim_i, result_ptr);
+          
           size_t workspace_buffer_size = 0;
           TORCH_CUDASPARSE_CHECK(cusparseSpMM_bufferSize(
             cusparse_handle,
             CUSPARSE_OPERATION_NON_TRANSPOSE,
             CUSPARSE_OPERATION_TRANSPOSE,
-            (void*)&alpha_val,
-            sparse_descr,
-            dense_descr,
-            (void*)&beta_val,
-            result_descr,
+            &alpha_val,
+            sparse_descr.desc(),
+            dense_descr.desc(),
+            &beta_val,
+            result_descr.desc(),
             cuda_data_type,
             mm_alg,
             &workspace_buffer_size
@@ -983,18 +942,15 @@ Tensor& _bmm_out_sparse_cuda(Tensor& result, const SparseTensor& self, const Ten
             cusparse_handle,
             CUSPARSE_OPERATION_NON_TRANSPOSE,
             CUSPARSE_OPERATION_TRANSPOSE,
-            (void*)&alpha_val,
-            sparse_descr,
-            dense_descr,
-            (void*)&beta_val,
-            result_descr,
+            &alpha_val,
+            sparse_descr.desc(),
+            dense_descr.desc(),
+            &beta_val,
+            result_descr.desc(),
             cuda_data_type,
             mm_alg,
             workspace_buffer
           ));
-          TORCH_CUDASPARSE_CHECK(cusparseDestroySpMat(sparse_descr));
-          TORCH_CUDASPARSE_CHECK(cusparseDestroyDnMat(dense_descr));
-          TORCH_CUDASPARSE_CHECK(cusparseDestroyDnMat(result_descr));
           mat_el_begin_idx = mat_el_end_idx;
         } else {
           tmp_result[cur_mat_num].zero_();

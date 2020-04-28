@@ -26,6 +26,7 @@ template <> struct CuSpValueType<float> { const cudaDataType_t type = CUDA_R_32F
 template <> struct CuSpValueType<double> { const cudaDataType_t type = CUDA_R_64F; };
 
 template <typename T> struct CuSpIndexType {};
+template <> struct CuSpIndexType<uint16_t> { const cusparseIndexType_t type = CUSPARSE_INDEX_16U; };
 template <> struct CuSpIndexType<int> { const cusparseIndexType_t type = CUSPARSE_INDEX_32I; };
 template <> struct CuSpIndexType<int64_t> { const cusparseIndexType_t type = CUSPARSE_INDEX_64I; };
 
@@ -86,6 +87,31 @@ class TORCH_CUDA_API CuSparseSpMatCsrDescriptor
         csrvala,                    /* values of the sparse matrix, size = nnz */
         indexType_,                 /* data type of row offsets index */
         indexType_,                 /* data type of col indices */
+        CUSPARSE_INDEX_BASE_ZERO,   /* base index of row offset and col indes */
+        valueType_                  /* data type of values */
+    ));
+    desc_.reset(raw_desc);
+  }
+};
+
+template <typename valueType, typename indexType>
+class TORCH_CUDA_API CuSparseSpMatCooDescriptor
+    : public _CuSparseDescriptor<cusparseSpMatDescr, &cusparseDestroySpMat> {
+ public:
+  CuSparseSpMatCooDescriptor(
+      int64_t row, int64_t col, int64_t nnz,
+      indexType* cooRooInd, indexType* cooColInd, valueType* cooValues) {
+    constexpr cudaDataType_t valueType_ = CuSpValueType<valueType>().type;
+    constexpr cusparseIndexType_t indexType_ = CuSpIndexType<indexType>().type;
+
+    cusparseSpMatDescr_t raw_desc;
+    TORCH_CUDASPARSE_CHECK(cusparseCreateCoo(
+        &raw_desc,                  /* output */
+        row, col, nnz,              /* rows, cols, number of non zero elements */
+        cooRooInd,                  /* row offsets of the sparse matrix, size = rows +1 */
+        cooColInd,                  /* column indices of the sparse matrix, size = nnz */
+        cooValues,                  /* values of the sparse matrix, size = nnz */
+        indexType_,                 /* data type of cooRowInd and cooColInd */
         CUSPARSE_INDEX_BASE_ZERO,   /* base index of row offset and col indes */
         valueType_                  /* data type of values */
     ));
