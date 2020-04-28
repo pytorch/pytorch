@@ -93,6 +93,7 @@ ${return_type} ${type_wrapper_name}(${type_method_formals}) {
 NATIVE_DISPATCH_DEFINITION_BACKEND = CodeTemplate("""\
 ${return_type} ${type_wrapper_name}(${type_method_formals}) {
     ${named_guard_declaration}
+    ${device_init}
     ${device_guard_declaration}
     ${return_call} at::native::${native_type_method_dispatch}(${native_actuals});
 }
@@ -763,6 +764,37 @@ def gen_dispatch_key_init(var_name, formals):
         'DispatchKeySet _dk_mask = c10::DispatchKeySet(DispatchKeySet::FULL_AFTER, DispatchKey::BackendSelect);',
         'DispatchKey {} = c10::impl::dispatchTypeId(_dk_set, _dk_mask);'.format(var_name),
     ]
+
+
+def needs_backend_select(declaration_option):
+    # We register an op under the BackendSelect dispatch key
+    # if a TensorOptions argument has been gathered from its declared args
+    # We skip all the 'new_*' and '*_like' ops as they are special cased and avoid dispatching.
+    # See TypeDefault.cpp
+    if declaration_option['name'].endswith('_like') or declaration_option['name'].startswith('new_'):
+        return False
+
+    return any(a.get('dynamic_type') == 'TensorOptions' for a in declaration_option['arguments'])
+
+
+def gen_device_init(option, backend_type_env):
+    # type: (Environment) -> List[str]
+    #
+    # generate a device init statement, if the passed function option
+    # requires one. Note: we use needs_backend_select() as a proxy for
+    # this condition, because that's where device initialization code
+    # was formerly generated. However it's not clear what motivated its
+    # presence there, or where initialization was done prior to backend
+    # select's introduction. TODO figure this out and adjust accordingly.
+    #
+    if not needs_backend_select(option):
+        return []
+
+    name = option['name']
+    device_type = backend_type_env['DeviceType']
+    assert device_type in ['CPU', 'CUDA'], \
+        "{name}: unsupported device type '{device_type}'".format(name, device_type)
+    return ['globalLegacyTypeDispatch().init{}();'.format(device_type)]
 
 
 def create_generic(top_env, declarations):
@@ -1596,12 +1628,18 @@ def create_derived(backend_type_env, declarations):
 
             backend = backend_type_env['Backend']
             if backend in option['backend_types']:
+
                 native_dispatch = dispatch.get(backend)
+
                 type_object_declarations.append(
                     NATIVE_DISPATCH_DECLARATION.substitute(env))
+
                 option['native_type_method_dispatch'] = native_dispatch
+                option['device_init'] = gen_device_init(option, backend_type_env)
+
                 type_object_definitions.append(
                     NATIVE_DISPATCH_DEFINITION_BACKEND.substitute(env))
+
                 if native_dispatch:
                     if option['use_c10_dispatcher'] == 'full':
                         op_registrations.append(OpRegistration(

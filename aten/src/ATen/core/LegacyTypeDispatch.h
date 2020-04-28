@@ -40,6 +40,19 @@ class CAFFE2_API LegacyTypeDispatch {
     }
   }
 
+  void initCPU() {
+    static std::once_flag cpu_once;
+    std::call_once(cpu_once, [] {
+      getLegacyDeviceTypeInit().initCPU();
+    });
+  }
+
+  void initCUDA() {
+    static std::once_flag cuda_once;
+    std::call_once(cuda_once, [] {
+      getLegacyDeviceTypeInit().initCUDA();
+    });
+  }
 };
 
 CAFFE2_API LegacyTypeDispatch& globalLegacyTypeDispatch();
