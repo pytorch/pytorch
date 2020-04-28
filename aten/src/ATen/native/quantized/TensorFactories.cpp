@@ -10,7 +10,7 @@ namespace native {
 // We explicitly pass in scale and zero_point because we don't have the infra
 // ready to support quantizer in python frontend, once that is ready, we'll
 // change to use quantizer
-Tensor empty_affine_quantized_cpu(
+Tensor empty_affine_quantized(
     IntArrayRef size,
     const TensorOptions& options_,
     double scale,
@@ -24,7 +24,7 @@ Tensor empty_affine_quantized_cpu(
   TORCH_CHECK(
       options.has_dtype(),
       "Must provide data type for Tensor creation functions.");
-  return new_qtensor_cpu(
+  return new_qtensor(
       size,
       options,
       make_per_tensor_affine_quantizer(
@@ -49,14 +49,11 @@ Tensor empty_per_channel_affine_quantized_cpu(
   TORCH_CHECK(
       options.dtype() == kQInt8 || options.dtype() == kQUInt8,
       "Supported data type for tensor creation is int8 or uint8");
-  return new_qtensor_cpu(
+  return new_qtensor(
       size,
       options,
       make_per_channel_affine_quantizer(
-          scales,
-          zero_points,
-          axis,
-          typeMetaToScalarType(options.dtype())));
+          scales, zero_points, axis, typeMetaToScalarType(options.dtype())));
 }
 
 // Provide better error message if dtype is wrong
