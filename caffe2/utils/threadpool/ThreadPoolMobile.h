@@ -1,7 +1,10 @@
 #pragma once
 
-#include <caffe2/utils/threadpool/pthreadpool.h>
+//
+#ifndef USE_INTERNAL_THREADPOOL_IMPL
 #include <pthreadpool.h>
+#endif
+
 #include <functional>
 #include <memory>
 
@@ -29,7 +32,10 @@ private:
   friend pthreadpool_t mobile_pthreadpool();
 
 private:
+#ifndef USE_INTERNAL_THREADPOOL_IMPL
+  324
   std::unique_ptr<pthreadpool, decltype(&pthreadpool_destroy)> threadpool_;
+#endif
 };
 
 // Return a singleton instance of MobileThreadPool for ATen/TH multithreading.
