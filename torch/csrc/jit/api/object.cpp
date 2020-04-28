@@ -36,15 +36,7 @@ void Object::define(const std::string& src, const ResolverPtr& resolver) {
 }
 
 Object Object::copy() const {
-  Object obj(_ivalue()->compilation_unit(), type());
-
-  size_t N = type()->numAttributes();
-  for (size_t i = 0; i < N; ++i) {
-    IValue s = _ivalue()->getSlot(i);
-    obj._ivalue()->setAttr(type()->getAttributeName(i), s.copy());
-  }
-
-  return obj;
+  return Object(_ivalue());
 }
 
 Object Object::deepcopy() const {

@@ -15,17 +15,16 @@ namespace profiler {
 
 at::Tensor record_function_enter(const std::string& name) {
   auto rec = std::make_unique<RecordFunction>(RecordScope::USER_SCOPE);
-  // Only add new scope if profiling is enabled.
   if (auto* current = rec->current()) {
-    TORCH_INTERNAL_ASSERT(
-        current->name() == StringView("profiler::_record_function_enter"));
-    // RecordFunction requires parent_ to be alive for it's entire lifetime.
-    // Since the currently active RecordFunction will only live for the lifetime
-    // of this op we need to end it early so the new RecordFunction we create is
-    // a direct child of the parent RecordFunction.
-    current->_end();
-    rec->_before(name);
+    if (current->name() == StringView("profiler::_record_function_enter")) {
+      // RecordFunction requires parent_ to be alive for it's entire lifetime.
+      // Since the currently active RecordFunction will only live for the lifetime
+      // of this op we need to end it early so the new RecordFunction we create is
+      // a direct child of the parent RecordFunction.
+      current->_end();
+    }
   }
+  rec->_before(name);
   return at::cpp_custom_type_hack::create(std::move(rec), at::TensorOptions());
 }
 
@@ -39,8 +38,9 @@ void record_function_exit(const at::Tensor& handle) {
   // lifetime until now.
   auto& rec = getRecordFunctionFromTensor(handle);
   if (auto* current = rec.current()) {
-    TORCH_INTERNAL_ASSERT(current->name() == StringView("profiler::_record_function_exit"));
-    current->_end();
+    if (current->name() == StringView("profiler::_record_function_exit")) {
+      current->_end();
+    }
   }
   rec._end();
 }

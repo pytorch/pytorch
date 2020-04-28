@@ -1779,9 +1779,6 @@ if _enabled:
         def copy_instance(self):
             return torch.jit._recursive.wrap_cpp_module(self._c._clone_instance())
 
-        def __copy__(self):
-            return torch.jit._recursive.wrap_cpp_module(self._c.copy())
-
         def __deepcopy__(self, memo):
             # memo is ignoerd because the deepcopy happens in C++
             return torch.jit._recursive.wrap_cpp_module(self._c.deepcopy())
