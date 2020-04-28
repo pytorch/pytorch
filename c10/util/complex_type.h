@@ -441,8 +441,8 @@ C10_HOST_DEVICE T abs(const c10::complex<T>& z) {
   auto i = std::abs(std::imag(z));
   auto max = std::max(r, i);
   auto min = std::min(r, i);
-  auto r = min / max;
-  return max * std::sqrt(1 + r * r);
+  auto rr = min / max;
+  return max * std::sqrt(1 + rr * rr);
 }
 
 template<typename T>
