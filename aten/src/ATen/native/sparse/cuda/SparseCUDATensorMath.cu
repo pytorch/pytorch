@@ -913,17 +913,17 @@ Tensor& _bmm_out_sparse_cuda(Tensor& result, const SparseTensor& self, const Ten
           int* row_indices_ptr = &row_indices_start_ptr[mat_el_begin_idx];
           int* col_indices_ptr = &col_indices_start_ptr[mat_el_begin_idx];
           scalar_t* values_ptr = &values_start_ptr[mat_el_begin_idx];
-          auto sparse_descr = CuSparseSpMatCooDescriptor<scalar_t, int>(
+          auto sparse_descr = at::cuda::sparse::CuSparseSpMatCooDescriptor<scalar_t, int>(
               dim_i, dim_j, sparse_nnz,
               row_indices_ptr, col_indices_ptr, values_ptr);
 
           scalar_t* mat2_ptr = &mat2_start_ptr[dim_k*dim_j*cur_mat_num];
-          auto dense_descr = CuSparseDnMatDescriptor<scalar_t>(dim_k, dim_j, dim_k, mat2_ptr);
+          auto dense_descr = at::cuda::sparse::CuSparseDnMatDescriptor<scalar_t>(dim_k, dim_j, dim_k, mat2_ptr);
           
           scalar_t* result_ptr = &result_start_ptr[dim_i*dim_k*cur_mat_num];
-          auto result_descr = CuSparseDnMatDescriptor<scalar_t>(dim_i, dim_k, dim_i, result_ptr);
+          auto result_descr = at::cuda::sparse::CuSparseDnMatDescriptor<scalar_t>(dim_i, dim_k, dim_i, result_ptr);
           
-          at::native::CuSparseSpMM(
+          at::cuda::sparse::CuSparseSpMM(
             CUSPARSE_OPERATION_NON_TRANSPOSE,
             CUSPARSE_OPERATION_TRANSPOSE,
             alpha_val, beta_val,

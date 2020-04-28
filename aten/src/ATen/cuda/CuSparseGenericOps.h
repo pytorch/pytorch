@@ -20,10 +20,10 @@
 // This file provides wrappers to cusparse Generic APIs 
 // See reference: https://docs.nvidia.com/cuda/cusparse/index.html#cusparse-generic-function-ref
 
-namespace at { namespace native {
+namespace at { namespace cuda { namespace sparse {
 
 // calculates DnMat(C) = alpha * SpMat(A) * DnMat(B) + beta * DnMat(C)
-// Prefer to use with at::native:: to distinguish from the native cusparse API
+// Prefer to use with at::cuda::sparse:: to distinguish from the native cusparse API
 template <typename valueType>
 void CuSparseSpMM(
     cusparseOperation_t opa,
@@ -66,7 +66,8 @@ void CuSparseSpMM(
       ));
 }
 
-} // namespace native
+} // namespace sparse
+} // namespace cuda
 } // namespace at
 
 #endif

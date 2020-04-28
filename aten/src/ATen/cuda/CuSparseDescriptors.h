@@ -17,8 +17,7 @@
 // The code style of this file mostly follows ATen/cudnn/Descriptors.h,
 // with modifications cudnn -> cusparse
 
-namespace at {
-namespace native {
+namespace at { namespace cuda { namespace sparse {
 
 template <typename T> struct CuSpValueType {};
 template <> struct CuSpValueType<__half> { const cudaDataType_t type = CUDA_R_16F; };
@@ -120,7 +119,8 @@ class TORCH_CUDA_API CuSparseSpMatCooDescriptor : public CuSparseSpMatDescriptor
   }
 };
 
-} // namespace native
+} // namespace sparse
+} // namespace cuda
 } // namespace at
 
 #endif

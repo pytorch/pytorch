@@ -100,15 +100,15 @@ void csrmm2(
 
   int64_t ma = m, ka = k; 
   if (transa != 'n') std::swap(ma, ka); 
-  auto descA = CuSparseSpMatCsrDescriptor<T, int>(ma, ka, nnz, csrrowptra, csrcolinda, csrvala);
+  auto descA = at::cuda::sparse::CuSparseSpMatCsrDescriptor<T, int>(ma, ka, nnz, csrrowptra, csrcolinda, csrvala);
 
   int64_t kb = k, nb = n;
   if (transb != 'n') std::swap(kb, nb); 
-  auto descB = CuSparseDnMatDescriptor<T>(kb, nb, ldb, b);
+  auto descB = at::cuda::sparse::CuSparseDnMatDescriptor<T>(kb, nb, ldb, b);
 
-  auto descC = CuSparseDnMatDescriptor<T>(m, n, ldc, c);
+  auto descC = at::cuda::sparse::CuSparseDnMatDescriptor<T>(m, n, ldc, c);
 
-  at::native::CuSparseSpMM(
+  at::cuda::sparse::CuSparseSpMM(
     opa, opb, 
     alpha, beta, 
     descA.desc(), descB.desc(), descC.desc(), 
