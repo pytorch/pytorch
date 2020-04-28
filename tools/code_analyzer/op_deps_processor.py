@@ -1,9 +1,8 @@
 """
 This util is used to parse op_deps_pass output (in yaml) and convert it into
-other formats for downstream use cases.
+other formats for downstream use cases. It is not used by OSS cmake build.
 
-To run this file by hand from the root of the PyTorch
-repository, run:
+To run this file by hand from the root of the PyTorch repository, run:
 
 python -m tools.code_analyzer.op_deps_processor \
   --op-dependency build_code_analyzer/work/torch_result.yaml \
@@ -49,6 +48,7 @@ DOT_OP_DEP = CodeTemplate("""\
     "${op_name}" -> "${dep_name}";
 """)
 
+
 def load_op_deps(fname):
     with open(fname, 'r') as stream:
         return yaml.safe_load(stream)
@@ -87,7 +87,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description='Util to parse & convert op_deps_pass output')
     parser.add_argument(
-        '--op-dependency',
+        '--op_dependency',
         required=True,
         help='input yaml file of op dependency graph produced by op_deps_pass')
     parser.add_argument(

@@ -103,11 +103,12 @@ analyze_torch_mobile() {
 }
 
 convert_output_to_bazel() {
+  cd "${SRC_ROOT}"
+
   DEST="${BUILD_ROOT}/pt_deps.bzl"
 
-  cd "${SRC_ROOT}"
   python -m tools.code_analyzer.op_deps_processor \
-    --op-dependency "${OUTPUT}" \
+    --op_dependency "${OUTPUT}" \
     --output "${DEST}"
 
   echo "Deployed file at: ${DEST}"
