@@ -416,6 +416,7 @@ struct scalar_value_type<ComplexHalf> {
 #pragma warning( push )
 #pragma warning( disable : 4146 )
 #pragma warning( disable : 4804 )
+#pragma warning( disable : 4018 )
 #endif
 
 // The overflow checks may involve float to int conversion which may
