@@ -163,6 +163,10 @@ void Module::clone_method(const Module& orig, const std::string& name) {
   return clone_method(orig, orig.get_method(name).function(), type_remap);
 }
 
+Module Module::copy() const {
+  return Module(_ivalue()->copy());
+}
+
 Module Module::deepcopy() const {
   return Module(_ivalue()->deepcopy());
 }
@@ -228,22 +232,7 @@ Module Module::clone_impl(
 }
 
 Module Module::clone_instance() const {
-  Module r(_ivalue()->compilation_unit(), type());
-
-  // Copy slots. If a slot is a module - recursively clone it.
-  size_t N = type()->numAttributes();
-  for (size_t i = 0; i < N; ++i) {
-    IValue s = _ivalue()->getSlot(i);
-    if (type()->getAttribute(i)->is_module()) {
-      const Module& orig = Module(s.toObject());
-      Module cloned = orig.clone_instance();
-      r._ivalue()->setAttr(type()->getAttributeName(i), cloned._ivalue());
-    } else {
-      r._ivalue()->setAttr(type()->getAttributeName(i), s);
-    }
-  }
-
-  return r;
+  return Module(_ivalue()->copy());
 }
 
 void Module::train(bool on) {

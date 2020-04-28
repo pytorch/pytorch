@@ -470,6 +470,39 @@ std::shared_ptr<ClassType> ivalue::Object::type() const {
   return type_.type_->expect<ClassType>();
 }
 
+IValue IValue::copy() const {
+  IValue copy;
+  switch(tag) {
+    case IValue::Tag::Tensor:
+      copy = IValue(toTensor());
+      break;
+    case IValue::Tag::Tuple:
+      copy = IValue(toTuple());
+      break;
+    case IValue::Tag::GenericList:
+      copy = IValue(toList());
+      break;
+    case IValue::Tag::GenericDict:
+      copy = IValue(toGenericDict());
+      break;
+    case IValue::Tag::Object:
+      copy = IValue(toObject());
+      break;
+    case IValue::Tag::String:
+    case IValue::Tag::None:
+    case IValue::Tag::Double:
+    case IValue::Tag::Int:
+    case IValue::Tag::Bool:
+    case IValue::Tag::Device:
+    case IValue::Tag::Uninitialized:
+      copy = *this;
+      break;
+    default:
+      AT_ERROR("Can't copy IValue with tag: ", tagKind());
+  }
+  return copy;
+}
+
 IValue IValue::deepcopy() const {
   IValue::HashAliasedIValueMap memo;
   return deepcopy(memo);
@@ -558,6 +591,14 @@ void ivalue::Object::unsafeRemoveAttr(const std::string& name) {
 void ivalue::Object::resizeObject(size_t slot) {
   AT_ASSERT(slot < type()->numAttributes());
   slots_.resize(type()->numAttributes());
+}
+
+c10::intrusive_ptr<ivalue::Object> ivalue::Object::copy() const {
+  auto object = ivalue::Object::create(c10::StrongTypePtr(type_.cu_, type()), type()->numAttributes());
+  for (auto i = 0; i < slots_.size(); ++i) {
+    object->setSlot(i, slots_[i].copy());
+  }
+  return object;
 }
 
 c10::intrusive_ptr<ivalue::Object> ivalue::Object::deepcopy() const {

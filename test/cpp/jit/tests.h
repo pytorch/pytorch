@@ -55,9 +55,9 @@ namespace jit {
   _(SubgraphMatching)                  \
   _(SubgraphRewriter)                  \
   _(ModuleClone)                       \
-  _(ModuleCloneInstance)               \
   _(ModuleConstant)                    \
   _(ModuleParameter)                   \
+  _(ModuleCopy)                        \
   _(ModuleDeepcopy)                    \
   _(ModuleDeepcopyString)              \
   _(ModuleDeepcopyAliasing)            \
