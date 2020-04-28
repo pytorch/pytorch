@@ -23,6 +23,7 @@ import os
 # sys.path.insert(0, os.path.abspath('../..'))
 
 import torch
+
 try:
     import torchvision  # noqa: F401
 except ImportError:
@@ -76,7 +77,7 @@ napoleon_use_ivar = True
 # Add any paths that contain templates here, relative to this directory.
 templates_path = ['_templates']
 if RELEASE:
-    templates_path = ['_templates-stable']
+    templates_path = ['_templates-stable'] + templates_path
 
 # The suffix(es) of source filenames.
 # You can specify multiple suffix as a list of string:
@@ -245,7 +246,7 @@ texinfo_documents = [
 # Example configuration for intersphinx: refer to the Python standard library.
 intersphinx_mapping = {
     'python': ('https://docs.python.org/3', None),
-    'numpy': ('https://docs.scipy.org/doc/numpy/', None),
+    'numpy': ('https://numpy.org/doc/stable', None),
 }
 
 # -- A patch that prevents Sphinx from cross-referencing ivar tags -------

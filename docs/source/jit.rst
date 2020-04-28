@@ -10,11 +10,11 @@ TorchScript
 
 
 .. toctree::
-   :maxdepth: 1
-   :caption: Language Reference
-   :hidden:
+    :maxdepth: 1
+    :caption: Language Reference
+    :hidden:
 
-   language_reference <jit_language_reference>
+    jit_language_reference
 
 .. contents:: :local:
     :depth: 2
@@ -160,7 +160,7 @@ TorchScript is a statically typed subset of Python, so many Python features appl
 directly to TorchScript. See the full :ref:`language-reference` for details.
 
 
-.. _Builtin functions:
+.. _builtin functions:
 
 Built-in Functions and Modules
 ------------------------------
@@ -529,14 +529,6 @@ rather build up the result tensor out-of-place with ``torch.cat``:
 
     ...
 
-.. _Builtin functions:
-
-Built-in Functions and Modules
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-See :ref:`builtin-functions` for a full reference of supported functions.
-
-
 Frequently Asked Questions
 --------------------------
 
@@ -600,13 +592,11 @@ Q: How do I store attributes on a :class:`ScriptModule`?
     3. Constants - Annotating a class member as ``Final`` (or adding it to a list called
     ``__constants__`` at the class definition level) will mark the contained names
     as constants. Constants are saved directly in the code of the model. See
-    `Python-defined Constants`_ for details.
+    `builtin-constants` for details.
 
-    4. Attributes - Values that are a `supported type`_ can be added as mutable
+    4. Attributes - Values that are a `supported type` can be added as mutable
     attributes. Most types can be inferred but some may need to be specified, see
-    `Module Attributes`_ for details.
-
-
+    `module attributes` for details.
 
 Q: I would like to trace module's method but I keep getting this error:
 
@@ -733,12 +723,13 @@ TorchScript Classes
     for simple record-like types (think a ``NamedTuple`` with methods
     attached).
 
-Everything in a user defined `TorchScript Class`_ is exported by default, functions
-can be decorated with :func:`@torch.jit.ignore <torch.jit.ignore>` if needed.
+Everything in a user defined `TorchScript Class <torchscript-class>`_ is
+exported by default, functions can be decorated with :func:`@torch.jit.ignore
+<torch.jit.ignore>` if needed.
 
 Attributes
 ^^^^^^^^^^
-The TorchScript compiler needs to know the types of `module attributes`_. Most types
+The TorchScript compiler needs to know the types of `module attributes`. Most types
 can be inferred from the value of the member. Empty lists and dicts cannot have their
 types inferred and must have their types annotated with `PEP 526-style <https://www.python.org/dev/peps/pep-0526/#class-and-instance-variable-annotations>`_ class annotations.
 If a type cannot be inferred and is not explicitly annotated, it will not be added as an attribute
@@ -785,7 +776,7 @@ New API:
 
 Constants
 ^^^^^^^^^
-The ``Final`` type constructor can be used to mark members as `constant`_. If members are not marked constant, they will be copied to the resulting :class:`ScriptModule` as an attribute. Using ``Final`` opens opportunities for optimization if the value is known to be fixed and gives additional type safety.
+The ``Final`` type constructor can be used to mark members as `constant`. If members are not marked constant, they will be copied to the resulting :class:`ScriptModule` as an attribute. Using ``Final`` opens opportunities for optimization if the value is known to be fixed and gives additional type safety.
 
 Old API:
 
@@ -831,7 +822,7 @@ New API:
 Variables
 ^^^^^^^^^
 Containers are assumed to have type ``Tensor`` and be non-optional (see
-`Default Types`_ for more information). Previously, ``torch.jit.annotate`` was used to
+`Default Types` for more information). Previously, ``torch.jit.annotate`` was used to
 tell the TorchScript compiler what the type should be. Python 3 style type hints are
 now supported.
 
@@ -848,3 +839,11 @@ now supported.
         if flag:
             b = 2
         return x, b
+
+References
+~~~~~~~~~~
+.. toctree::
+    :maxdepth: 1
+
+    jit_python_reference
+    jit_unsupported

@@ -205,23 +205,26 @@ operations together (like convolution and relu) allows for better quantization
 accuracy
 
 * ``torch.nn.intrinsic`` — float versions of the modules, can be swapped with
-  quantized version 1 to 1
-    * :class:`~torch.nn.intrinsic.ConvBn2d` — Conv2d + BatchNorm
-    * :class:`~torch.nn.intrinsic.ConvBnReLU2d` — Conv2d + BatchNorm + ReLU
-    * :class:`~torch.nn.intrinsic.ConvReLU2d` — Conv2d + ReLU
-    * :class:`~torch.nn.intrinsic.ConvReLU3d` — Conv3d + ReLU
-    * :class:`~torch.nn.intrinsic.LinearReLU` — Linear + ReLU
-* ``torch.nn.intrinsic.qat`` — versions of layers for quantization-aware training
-    * :class:`~torch.nn.intrinsic.qat.ConvBn2d` — Conv2d + BatchNorm
-    * :class:`~torch.nn.intrinsic.qat.ConvBnReLU2d` — Conv2d + BatchNorm + ReLU
-    * :class:`~torch.nn.intrinsic.qat.ConvReLU2d` — Conv2d + ReLU
-    * :class:`~torch.nn.intrinsic.qat.LinearReLU` — Linear + ReLU
+  quantized version 1 to 1:
+
+  * :class:`~torch.nn.intrinsic.ConvBn2d` — Conv2d + BatchNorm
+  * :class:`~torch.nn.intrinsic.ConvBnReLU2d` — Conv2d + BatchNorm + ReLU
+  * :class:`~torch.nn.intrinsic.ConvReLU2d` — Conv2d + ReLU
+  * :class:`~torch.nn.intrinsic.ConvReLU3d` — Conv3d + ReLU
+  * :class:`~torch.nn.intrinsic.LinearReLU` — Linear + ReLU
+
+* ``torch.nn.intrinsic.qat`` — versions of layers for quantization-aware training:
+  * :class:`~torch.nn.intrinsic.qat.ConvBn2d` — Conv2d + BatchNorm
+  * :class:`~torch.nn.intrinsic.qat.ConvBnReLU2d` — Conv2d + BatchNorm + ReLU
+  * :class:`~torch.nn.intrinsic.qat.ConvReLU2d` — Conv2d + ReLU
+  * :class:`~torch.nn.intrinsic.qat.LinearReLU` — Linear + ReLU
+
 * ``torch.nn.intrinsic.quantized`` — quantized version of fused layers for
   inference (no BatchNorm variants as it's usually folded into convolution for
-  inference)
-    * :class:`~torch.nn.intrinsic.quantized.LinearReLU` — Linear + ReLU
-    * :class:`~torch.nn.intrinsic.quantized.ConvReLU2d` — 2D Convolution + ReLU
-    * :class:`~torch.nn.intrinsic.quantized.ConvReLU3d` — 3D Convolution + ReLU
+  inference):
+  * :class:`~torch.nn.intrinsic.quantized.LinearReLU` — Linear + ReLU
+  * :class:`~torch.nn.intrinsic.quantized.ConvReLU2d` — 2D Convolution + ReLU
+  * :class:`~torch.nn.intrinsic.quantized.ConvReLU3d` — 3D Convolution + ReLU
 
 ``torch.nn.qat``
 ~~~~~~~~~~~~~~~~
@@ -234,29 +237,30 @@ Layers for the quantization-aware training
 ``torch.quantization``
 ~~~~~~~~~~~~~~~~~~~~~~
 
-* Functions for quantization
-    * :func:`~torch.quantization.add_observer_` — Adds observer for the leaf
-      modules (if quantization configuration is provided)
-    * :func:`~torch.quantization.add_quant_dequant`— Wraps the leaf child module using :class:`~torch.quantization.QuantWrapper`
-    * :func:`~torch.quantization.convert` — Converts float module with
-      observers into its quantized counterpart. Must have quantization
-      configuration
-    * :func:`~torch.quantization.get_observer_dict` — Traverses the module
-      children and collects all observers into a ``dict``
-    * :func:`~torch.quantization.prepare` — Prepares a copy of a model for
-      quantization
-    * :func:`~torch.quantization.prepare_qat` — Prepares a copy of a model for
-      quantization aware training
-    * :func:`~torch.quantization.propagate_qconfig_` — Propagates quantization
-      configurations through the module hierarchy and assign them to each leaf
-      module
-    * :func:`~torch.quantization.quantize` — Converts a float module to quantized version
-    * :func:`~torch.quantization.quantize_dynamic` — Converts a float module to
-      dynamically quantized version
-    * :func:`~torch.quantization.quantize_qat` — Converts a float module to
-      quantized version used in quantization aware training
-    * :func:`~torch.quantization.swap_module` — Swaps the module with its
-      quantized counterpart (if quantizable and if it has an observer)
+* Functions for quantization:
+
+  * :func:`~torch.quantization.add_observer_` — Adds observer for the leaf
+    modules (if quantization configuration is provided)
+  * :func:`~torch.quantization.add_quant_dequant`— Wraps the leaf child module using :class:`~torch.quantization.QuantWrapper`
+  * :func:`~torch.quantization.convert` — Converts float module with
+    observers into its quantized counterpart. Must have quantization
+    configuration
+  * :func:`~torch.quantization.get_observer_dict` — Traverses the module
+    children and collects all observers into a ``dict``
+  * :func:`~torch.quantization.prepare` — Prepares a copy of a model for
+    quantization
+  * :func:`~torch.quantization.prepare_qat` — Prepares a copy of a model for
+    quantization aware training
+  * :func:`~torch.quantization.propagate_qconfig_` — Propagates quantization
+    configurations through the module hierarchy and assign them to each leaf
+    module
+  * :func:`~torch.quantization.quantize` — Converts a float module to quantized version
+  * :func:`~torch.quantization.quantize_dynamic` — Converts a float module to
+    dynamically quantized version
+  * :func:`~torch.quantization.quantize_qat` — Converts a float module to
+    quantized version used in quantization aware training
+  * :func:`~torch.quantization.swap_module` — Swaps the module with its
+    quantized counterpart (if quantizable and if it has an observer)
 
 * :func:`~torch.quantization.default_eval_fn` — Default evaluation function
   used by the :func:`torch.quantization.quantize`
@@ -265,9 +269,10 @@ Layers for the quantization-aware training
   quantization/dequantization at training time
 * Default Observers. The rest of observers are available from
   ``torch.quantization.observer``:
-    * :attr:`~torch.quantization.default_observer` — Same as ``MinMaxObserver.with_args(reduce_range=True)``
-    * :attr:`~torch.quantization.default_weight_observer` — Same as ``MinMaxObserver.with_args(dtype=torch.qint8, qscheme=torch.per_tensor_symmetric)``
-    * :class:`~torch.quantization.Observer` — Abstract base class for observers
+  * :attr:`~torch.quantization.default_observer` — Same as ``MinMaxObserver.with_args(reduce_range=True)``
+  * :attr:`~torch.quantization.default_weight_observer` — Same as ``MinMaxObserver.with_args(dtype=torch.qint8, qscheme=torch.per_tensor_symmetric)``
+  * :class:`~torch.quantization.Observer` — Abstract base class for observers
+
 * Quantization configurations
     * :class:`~torch.quantization.QConfig` — Quantization configuration class
     * :attr:`~torch.quantization.default_qconfig` — Same as
@@ -283,6 +288,7 @@ Layers for the quantization-aware training
     * :attr:`~torch.quantization.float16_dynamic_qconfig` — Same as
       ``QConfigDynamic(weight=NoopObserver.with_args(dtype=torch.float16))``
       (See :class:`~torch.quantization.qconfig.QConfigDynamic`)
+
 * Stubs
     * :class:`~torch.quantization.DeQuantStub` - placeholder module for
       dequantize() operation in float-valued models
@@ -373,14 +379,17 @@ Quantized dtypes and quantization schemes
 
 * :attr:`torch.qscheme` — Type to describe the quantization scheme of a tensor.
   Supported types:
-    * :attr:`torch.per_tensor_affine` — per tensor, asymmetric
-    * :attr:`torch.per_channel_affine` — per channel, asymmetric
-    * :attr:`torch.per_tensor_symmetric` — per tensor, symmetric
-    * :attr:`torch.per_channel_symmetric` — per tensor, symmetric
+
+  * :attr:`torch.per_tensor_affine` — per tensor, asymmetric
+  * :attr:`torch.per_channel_affine` — per channel, asymmetric
+  * :attr:`torch.per_tensor_symmetric` — per tensor, symmetric
+  * :attr:`torch.per_channel_symmetric` — per tensor, symmetric
+
 * ``torch.dtype`` — Type to describe the data. Supported types:
-    * :attr:`torch.quint8` — 8-bit unsigned integer
-    * :attr:`torch.qint8` — 8-bit signed integer
-    * :attr:`torch.qint32` — 32-bit signed integer
+
+  * :attr:`torch.quint8` — 8-bit unsigned integer
+  * :attr:`torch.qint8` — 8-bit signed integer
+  * :attr:`torch.qint32` — 32-bit signed integer
 
 
 
@@ -412,10 +421,12 @@ PyTorch provides three approaches to quantize models.
 
 
    1. Prepare the model:
+
       a. Specify where the activations are quantized and dequantized explicitly
          by adding QuantStub and DeQuantStub modules.
       b. Ensure that modules are not reused.
       c. Convert any operations that require requantization into modules
+
    2. Fuse operations like conv + relu or conv+batchnorm + relu together to
       improve both model accuracy and performance.
 

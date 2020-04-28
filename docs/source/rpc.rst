@@ -1,3 +1,11 @@
+.. contents:: :local:
+    :depth: 2
+
+.. toctree::
+   :maxdepth: 0
+   :caption: RPC in PyTorch
+    rpc/index.rst
+
 .. _distributed-rpc-framework:
 
 Distributed RPC Framework
