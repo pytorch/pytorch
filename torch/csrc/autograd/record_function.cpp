@@ -212,21 +212,13 @@ void popCallback() {
   manager().popCallback();
 }
 
-bool observersEnabled() {
-  return c10::impl::tls_is_dispatch_key_included(c10::DispatchKey::Profiler);
-}
-
-void enableObservers(bool enable) {
-  c10::impl::tls_set_dispatch_key_included(c10::DispatchKey::Profiler, enable);
-}
-
 void _runBeforeCallbacks(RecordFunction* rf, const std::string& funcName) {
   TORCH_INTERNAL_ASSERT(rf != nullptr);
   rf->_before(funcName);
 }
 
 RecordFunction::RecordFunction(RecordScope scope) : scope_(scope) {
-  if (manager().hasCallbacks() && observersEnabled()) {
+  if (manager().hasCallbacks() && at::_tls_is_record_function_enabled()) {
     active_ = true;
   }
 }

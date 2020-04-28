@@ -292,8 +292,6 @@ def build_deps():
     report('-- Building version ' + version)
 
     def check_file(f):
-        if bool(os.getenv("USE_SYSTEM_LIBS", False)):
-            return
         if not os.path.exists(f):
             report("Could not find {}".format(f))
             report("Did you run 'git submodule update --init --recursive'?")
