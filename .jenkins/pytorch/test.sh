@@ -179,7 +179,7 @@ test_aten() {
 
     if [[ "$BUILD_ENVIRONMENT" == *clang* ]]; then
       echo "Disable valgrind testing due to https://github.com/pytorch/pytorch/issues/37117"
-      VALGRIND=OFF
+      export VALGRIND=OFF
     fi
     ls build/bin
     aten/tools/run_tests.sh build/bin

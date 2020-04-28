@@ -2626,6 +2626,7 @@ class _TestTorchMixin(object):
 
     def test_masked_scatter(self):
         with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
             for maskType in [torch.uint8, torch.bool]:
                 for dt in torch.testing.get_all_dtypes():
                     num_copy, num_dest = 3, 10
@@ -2669,6 +2670,7 @@ class _TestTorchMixin(object):
 
     def test_masked_fill(self):
         with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
             for dt in torch.testing.get_all_dtypes():
                 for dtype in [torch.uint8, torch.bool]:
                     num_dest = 10
@@ -5888,6 +5890,64 @@ class TestTorchDeviceType(TestCase):
                 self.assertEqual(target.shape, torch.nn.functional.multi_margin_loss(input, target, reduction='none').shape)
                 self.assertEqual((), torch.nn.functional.multi_margin_loss(input, target, reduction='mean').shape)
                 self.assertEqual((), torch.nn.functional.multi_margin_loss(input, target, reduction='sum').shape)
+
+    # Uses mismatched arange out size to trigger a warning
+    def test_cpp_warnings_have_python_context(self, device):
+        import inspect
+        # Creates long string in advance to avoid a too-long Python line
+        s = ".+Triggered internally at.+RangeFactories.+"
+
+        def cpp_warn_fn():
+            out = torch.empty((5,))
+            torch.arange(0, 3, out=out)
+            return out
+
+        # Checks eager-mode cpp warning
+        with warnings.catch_warnings(record=True) as w:
+            cpp_warn_fn()
+            frameinfo = inspect.getframeinfo(inspect.currentframe())
+            warning = w[0]
+
+            # Checks for cpp context in the warning message
+            self.assertTrue(re.search(s, str(warning.message)) is not None)
+
+            # Checks the Python features of the warning
+            # Note: the eager mode warning refers to the line in the function
+            # that throws the warning.
+            self.assertEqual(frameinfo.lineno - 6, warning.lineno)
+            self.assertEqual(len(w), 1)
+
+        # Checks jitted cpp warning
+        with warnings.catch_warnings(record=True) as w:
+            scripted_cpp_warn_fn = torch.jit.script(cpp_warn_fn)
+            scripted_cpp_warn_fn()
+            warning = w[0]
+
+            # Checks for cpp context in the warning message
+            self.assertTrue(re.search(s, str(warning.message)) is not None)
+
+            # Checks the Python features of the warning
+            # Note: the jitted warning's lineno refers to the call to the jitted
+            # function, which in our test suite has a layer of indirection
+            # that makes checking the Python lineno fragile
+            self.assertEqual(len(w), 1)
+
+        # Checks jitted Python warning
+        def warn_fn():
+            warnings.warn("Warning!")
+
+        # The jit mimics an eager-mode Python warning in this case
+        with warnings.catch_warnings(record=True) as w:
+            scripted_warn_fn = torch.jit.script(warn_fn)
+            scripted_warn_fn()
+            frameinfo = inspect.getframeinfo(inspect.currentframe())
+            warning = w[0]
+
+            self.assertTrue(re.search('Warning!', str(warning.message)) is not None)
+
+            # Checks the Python features of the warning
+            self.assertEqual(frameinfo.lineno - 6, warning.lineno)
+            self.assertEqual(len(w), 1)
 
     def _np_compare(self, fn_name, vals, device, dtype):
         assert TEST_NUMPY
@@ -12767,7 +12827,7 @@ class TestTorchDeviceType(TestCase):
     @dtypesIfCUDA(*(torch.float, torch.double) +
                   # This test is disabled on CUDA 9, due to:
                   # See: https://github.com/pytorch/pytorch/issues/31006
-                  ((torch.half,) if torch.version.cuda and float(torch.version.cuda) >= 10.0 else ()))
+                  ((torch.half,) if torch.version.cuda and not torch.version.cuda.startswith('9.') else ()))
     @dtypes(*(set(torch.testing.get_all_dtypes()) - {torch.half, torch.bool, torch.complex64, torch.complex128}))
     def test_blas_alpha_beta_empty(self, device, dtype):
         if dtype is torch.bfloat16 and self.device_type == 'xla':
