@@ -49,16 +49,18 @@ hu.assert_deadline_disabled()
 import io
 import copy
 
+supported_qengines = torch.backends.quantized.supported_engines
+supported_qengines.remove('none')
+
 @unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
                      " Quantized operations require FBGEMM/QNNPACK. FBGEMM is only optimized for CPUs"
                      " with instruction set support avx2 or newer.")
 class TestPostTrainingStatic(QuantizationTestCase):
-    @given(qengine=st.sampled_from(("qnnpack", "fbgemm")))
-    def test_single_layer(self, qengine):
+    def test_single_layer(self):
         r"""Quantize SingleLayerLinearModel which has one Linear module, make sure it is swapped
         to nnq.Linear which is the quantized version of the module
         """
-        if qengine in torch.backends.quantized.supported_engines:
+        for qengine in supported_qengines:
             with override_quantized_engine(qengine):
                 qconfig = torch.quantization.get_default_qconfig(qengine)
                 model = AnnotatedSingleLayerLinearModel(qengine)
@@ -130,12 +132,11 @@ class TestPostTrainingStatic(QuantizationTestCase):
                                  self.calib_data)
                 checkQuantized(model)
 
-    @given(qengine=st.sampled_from(("fbgemm", "qnnpack")))
-    def test_nested1(self, qengine):
+    def test_nested1(self):
         r"""Test quantization for nested model, top level 'fc3' and
         'fc1' of submodule 'sub2', 'sub2.fc2' is not quantized
         """
-        if qengine in torch.backends.quantized.supported_engines:
+        for qengine in supported_qengines:
             with override_quantized_engine(qengine):
                 model = AnnotatedNestedModel(qengine)
 
@@ -211,12 +212,11 @@ class TestPostTrainingStatic(QuantizationTestCase):
                          self.calib_data)
         checkQuantized(model)
 
-    @given(qengine=st.sampled_from(("qnnpack", "fbgemm")))
-    def test_nested3(self, qengine):
+    def test_nested3(self):
         r"""More complicated nested test case with child qconfig overrides
         parent qconfig
         """
-        if qengine in torch.backends.quantized.supported_engines:
+        for qengine in supported_qengines:
             with override_quantized_engine(qengine):
                 model = AnnotatedCustomConfigNestedModel()
                 model = prepare(model)
@@ -304,12 +304,11 @@ class TestPostTrainingStatic(QuantizationTestCase):
         model = quantize(QuantStubModel(), test_only_eval_fn, self.calib_data)
         checkQuantized(model)
 
-    @given(qengine=st.sampled_from(("qnnpack", "fbgemm")))
-    def test_resnet_base(self, qengine):
+    def test_resnet_base(self):
         r"""Test quantization for bottleneck topology used in resnet/resnext
         and add coverage for conversion of average pool and float functional
         """
-        if qengine in torch.backends.quantized.supported_engines:
+        for qengine in supported_qengines:
             with override_quantized_engine(qengine):
                 qconfig = torch.quantization.get_default_qconfig(qengine)
                 model = ResNetBase().float().eval()
@@ -353,15 +352,15 @@ class TestPostTrainingStatic(QuantizationTestCase):
             NormalizationTestModel(), test_only_eval_fn, self.calib_data)
         checkQuantized(model)
 
-    @given(qengine=st.sampled_from(("qnnpack", "fbgemm")))
-    def test_save_load_state_dict(self, qengine):
+    def test_save_load_state_dict(self):
         r"""Test PTQ flow of creating a model and quantizing it and saving the quantized state_dict
         Load the quantized state_dict for eval and compare results against original model
         """
-        if qengine == 'qnnpack':
-            if IS_WINDOWS or TEST_WITH_UBSAN:
-                return
-        if qengine in torch.backends.quantized.supported_engines:
+
+        for qengine in supported_qengines:
+            if qengine == 'qnnpack':
+                if IS_WINDOWS or TEST_WITH_UBSAN:
+                    return
             with override_quantized_engine(qengine):
                 model = TwoLayerLinearModel()
                 model = torch.quantization.QuantWrapper(model)
@@ -849,9 +848,8 @@ class TestPostTrainingDynamic(QuantizationTestCase):
                      " Quantized operations require FBGEMM/QNNPACK. FBGEMM is only optimized for CPUs"
                      " with instruction set support avx2 or newer.")
 class TestQuantizationAwareTraining(QuantizationTestCase):
-    @given(qengine=st.sampled_from(("qnnpack", "fbgemm")))
-    def test_manual(self, qengine):
-        if qengine in torch.backends.quantized.supported_engines:
+    def test_manual(self):
+        for qengine in supported_qengines:
             with override_quantized_engine(qengine):
                 model = ManualLinearQATModel(qengine)
                 model = prepare_qat(model)
@@ -871,9 +869,8 @@ class TestQuantizationAwareTraining(QuantizationTestCase):
                                      self.train_data)
                 checkQuantized(model)
 
-    @given(qengine=st.sampled_from(("qnnpack", "fbgemm")))
-    def test_activations(self, qengine):
-        if qengine in torch.backends.quantized.supported_engines:
+    def test_activations(self):
+        for qengine in supported_qengines:
             with override_quantized_engine(qengine):
                 model = ActivationsQATTestModel(qengine)
                 model = prepare_qat(model)
@@ -897,13 +894,12 @@ class TestQuantizationAwareTraining(QuantizationTestCase):
                                      self.train_data)
                 checkQuantized(model)
 
-    @given(qengine=st.sampled_from(("qnnpack", "fbgemm")))
-    def test_eval_only_fake_quant(self, qengine):
+    def test_eval_only_fake_quant(self):
         r"""Using FakeQuant in evaluation only mode,
         this is useful for estimating accuracy loss when we quantize the
         network
         """
-        if qengine in torch.backends.quantized.supported_engines:
+        for qengine in supported_qengines:
             with override_quantized_engine(qengine):
                 model = ManualLinearQATModel(qengine)
 
@@ -913,9 +909,8 @@ class TestQuantizationAwareTraining(QuantizationTestCase):
                 model.eval()
                 test_only_eval_fn(model, self.calib_data)
 
-    @given(qengine=st.sampled_from(("qnnpack", "fbgemm")))
-    def test_conv_linear(self, qengine):
-        if qengine in torch.backends.quantized.supported_engines:
+    def test_conv_linear(self):
+        for qengine in supported_qengines:
             with override_quantized_engine(qengine):
                 model = ManualConvLinearQATModel()
 
@@ -938,61 +933,59 @@ class TestQuantizationAwareTraining(QuantizationTestCase):
                 model = quantize_qat(model, test_only_train_fn, self.img_data)
                 checkQuantized(model)
 
-    @given(qengine=st.sampled_from(("qnnpack", "fbgemm")))
-    def test_train_save_load_eval(self, qengine):
+    def test_train_save_load_eval(self):
         r"""Test QAT flow of creating a model, doing QAT and saving the quantized state_dict
         During eval, we first call prepare_qat and conver on the model and then load the state_dict
         and compare results against original model
         """
-        if qengine not in torch.backends.quantized.supported_engines:
-            return
-        if qengine == 'qnnpack':
-            if IS_WINDOWS or TEST_WITH_UBSAN:
-                return
-        with override_quantized_engine(qengine):
-            model = TwoLayerLinearModel()
-            model = torch.quantization.QuantWrapper(model)
-            model.qconfig = torch.quantization.get_default_qat_qconfig(qengine)
-            model = prepare_qat(model)
+        for qengine in supported_qengines:
+            if qengine == 'qnnpack':
+                if IS_WINDOWS or TEST_WITH_UBSAN:
+                    return
+            with override_quantized_engine(qengine):
+                model = TwoLayerLinearModel()
+                model = torch.quantization.QuantWrapper(model)
+                model.qconfig = torch.quantization.get_default_qat_qconfig(qengine)
+                model = prepare_qat(model)
 
-            fq_state_dict = model.state_dict()
+                fq_state_dict = model.state_dict()
 
-            test_only_train_fn(model, self.train_data)
-            model = convert(model)
+                test_only_train_fn(model, self.train_data)
+                model = convert(model)
 
-            quant_state_dict = model.state_dict()
+                quant_state_dict = model.state_dict()
 
-            x = torch.rand(2, 5, dtype=torch.float)
-            ref = model(x)
+                x = torch.rand(2, 5, dtype=torch.float)
+                ref = model(x)
 
-            # Create model again for eval. Check result using quantized state_dict
-            model = TwoLayerLinearModel()
-            model = torch.quantization.QuantWrapper(model)
-            model.qconfig = torch.quantization.get_default_qat_qconfig(qengine)
-            torch.quantization.prepare_qat(model, inplace=True)
-            new_state_dict = model.state_dict()
+                # Create model again for eval. Check result using quantized state_dict
+                model = TwoLayerLinearModel()
+                model = torch.quantization.QuantWrapper(model)
+                model.qconfig = torch.quantization.get_default_qat_qconfig(qengine)
+                torch.quantization.prepare_qat(model, inplace=True)
+                new_state_dict = model.state_dict()
 
-            # Check to make sure the model after prepare_qat has the same state_dict as original.
-            self.assertEqual(set(fq_state_dict.keys()), set(new_state_dict.keys()))
+                # Check to make sure the model after prepare_qat has the same state_dict as original.
+                self.assertEqual(set(fq_state_dict.keys()), set(new_state_dict.keys()))
 
-            torch.quantization.convert(model, inplace=True)
-            model.eval()
-            model.load_state_dict(quant_state_dict)
-            out = model(x)
-            self.assertEqual(ref, out)
+                torch.quantization.convert(model, inplace=True)
+                model.eval()
+                model.load_state_dict(quant_state_dict)
+                out = model(x)
+                self.assertEqual(ref, out)
 
-            # Check model created using prepare has same state dict as quantized state_dict
-            model = TwoLayerLinearModel()
-            model.eval()
-            model = torch.quantization.QuantWrapper(model)
-            model.qconfig = torch.quantization.get_default_qconfig(qengine)
-            torch.quantization.prepare(model, inplace=True)
-            torch.quantization.convert(model, inplace=True)
-            self.assertEqual(set(model.state_dict().keys()), set(quant_state_dict.keys()))
-            model.eval()
-            model.load_state_dict(quant_state_dict)
-            out = model(x)
-            self.assertEqual(ref, out)
+                # Check model created using prepare has same state dict as quantized state_dict
+                model = TwoLayerLinearModel()
+                model.eval()
+                model = torch.quantization.QuantWrapper(model)
+                model.qconfig = torch.quantization.get_default_qconfig(qengine)
+                torch.quantization.prepare(model, inplace=True)
+                torch.quantization.convert(model, inplace=True)
+                self.assertEqual(set(model.state_dict().keys()), set(quant_state_dict.keys()))
+                model.eval()
+                model.load_state_dict(quant_state_dict)
+                out = model(x)
+                self.assertEqual(ref, out)
 
 @unittest.skipUnless(
     'fbgemm' in torch.backends.quantized.supported_engines,
@@ -1000,12 +993,11 @@ class TestQuantizationAwareTraining(QuantizationTestCase):
     " with instruction set support avx2 or newer.",
 )
 class TestGraphModePostTrainingStatic(QuantizationTestCase):
-    @given(qengine=st.sampled_from(("qnnpack", "fbgemm")))
-    def test_single_linear(self, qengine):
+    def test_single_linear(self):
         r"""Compare the result of quantizing single linear layer in
         eager mode and graph mode
         """
-        if qengine in torch.backends.quantized.supported_engines:
+        for qengine in supported_qengines:
             with override_quantized_engine(qengine):
                 # eager mode
                 annotated_linear_model = AnnotatedSingleLayerLinearModel(qengine).eval()
@@ -1072,12 +1064,11 @@ class TestGraphModePostTrainingStatic(QuantizationTestCase):
                             inplace=False)
                         self.assertEqual(model_quantized(self.calib_data[0][0]), result_eager)
 
-    @given(qengine=st.sampled_from(("qnnpack", "fbgemm")))
-    def test_conv(self, qengine):
+    def test_conv(self):
         r"""Compare the result of quantizing conv layer in
         eager mode and graph mode
         """
-        if qengine in torch.backends.quantized.supported_engines:
+        for qengine in supported_qengines:
             with override_quantized_engine(qengine):
                 # eager mode
                 annotated_conv_model = AnnotatedConvModel(qengine).eval()
@@ -1127,9 +1118,8 @@ class TestGraphModePostTrainingStatic(QuantizationTestCase):
         result_script = model_script(self.img_data[0][0])
         self.assertEqual(result_eager, result_script)
 
-    @given(qengine=st.sampled_from(("qnnpack", "fbgemm")))
-    def test_nested(self, qengine):
-        if qengine in torch.backends.quantized.supported_engines:
+    def test_nested(self):
+        for qengine in supported_qengines:
             with override_quantized_engine(qengine):
                 # Eager mode
                 eager_model = AnnotatedNestedModel(qengine).eval()
@@ -1196,12 +1186,11 @@ class TestGraphModePostTrainingStatic(QuantizationTestCase):
                 inplace=False)
             self.assertEqual(model_quantized(self.calib_data[0][0]), result_eager)
 
-    @given(qengine=st.sampled_from(("qnnpack", "fbgemm")))
-    def test_single_linear_dynamic(self, qengine):
+    def test_single_linear_dynamic(self):
         r"""Compare the result of dynamic quantization of single linear layer in
         eager mode and graph mode.
         """
-        if qengine in torch.backends.quantized.supported_engines:
+        for qengine in supported_qengines:
             with override_quantized_engine(qengine):
                 # eager mode
                 annotated_linear_model = AnnotatedSingleLayerLinearModel('qnnpack').eval()
@@ -1386,9 +1375,8 @@ class TestFusion(QuantizationTestCase):
         model = quantize(model, test_only_eval_fn, self.img_data)
         checkQuantized(model)
 
-    @given(qengine=st.sampled_from(("fbgemm", "qnnpack")))
-    def test_fusion_sequential_model_train(self, qengine):
-        if qengine in torch.backends.quantized.supported_engines:
+    def test_fusion_sequential_model_train(self):
+        for qengine in supported_qengines:
             with override_quantized_engine(qengine):
                 model = ModelWithSequentialFusion().train()
                 model.to(torch.float)
@@ -1439,9 +1427,8 @@ class TestFusion(QuantizationTestCase):
                 model(self.img_data[1][0])
                 self.checkModelWithSequentialQuantized(model)
 
-    @given(qengine=st.sampled_from(("fbgemm", "qnnpack")))
-    def test_fusion_sequential_model_eval(self, qengine):
-        if qengine in torch.backends.quantized.supported_engines:
+    def test_fusion_sequential_model_eval(self):
+        for qengine in supported_qengines:
             with override_quantized_engine(qengine):
                 model = ModelWithSequentialFusion().eval()
                 model.to(torch.float)
@@ -1485,9 +1472,8 @@ class TestFusion(QuantizationTestCase):
         self.assertEqual(type(model.classifier[0]), nniq.LinearReLU)
         self.assertEqual(type(model.classifier[1]), nn.Identity)
 
-    @given(qengine=st.sampled_from(("fbgemm", "qnnpack")))
-    def test_fusion_conv_with_bias(self, qengine):
-        if qengine in torch.backends.quantized.supported_engines:
+    def test_fusion_conv_with_bias(self):
+        for qengine in supported_qengines:
             with override_quantized_engine(qengine):
                 model = ModelForFusionWithBias().train()
                 # output with no fusion.
@@ -1753,9 +1739,8 @@ class TestObserver(QuantizationTestCase):
                      " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
                      " with instruction set support avx2 or newer.")
 class TestRecordHistogramObserver(QuantizationTestCase):
-    @given(qengine=st.sampled_from(("fbgemm", "qnnpack")))
-    def test_record_observer(self, qengine):
-        if qengine in torch.backends.quantized.supported_engines:
+    def test_record_observer(self):
+        for qengine in supported_qengines:
             with override_quantized_engine(qengine):
                 model = AnnotatedSingleLayerLinearModel(qengine)
                 model.qconfig = default_debug_qconfig
