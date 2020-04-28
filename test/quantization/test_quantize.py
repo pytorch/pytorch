@@ -30,7 +30,7 @@ from torch.testing._internal.common_quantization import QuantizationTestCase, \
     AnnotatedConvBnModel, ConvBnModel, \
     SkipQuantModel, QuantStubModel, \
     ModelForFusion, ModelWithSequentialFusion, ManualLinearQATModel, ManualConvLinearQATModel, \
-    ModelWithFunctionals, \
+    ModelWithFunctionals, ModelForLinearBNFusion, \
     test_only_eval_fn, test_only_train_fn, \
     prepare_dynamic, convert_dynamic, SingleLayerLinearDynamicModel, \
     TwoLayerLinearModel, NestedModel, ResNetBase, LSTMDynamicModel, \
@@ -1453,6 +1453,20 @@ class TestFusion(QuantizationTestCase):
             self.assertEqual(type(model.bn2), nn.Identity)
 
         checkQAT(model)
+
+    def test_fusion_linear_bn_eval(self):
+        model = ModelForLinearBNFusion().train()
+        inp1 = torch.randn(8, 20)
+        inp2 = torch.randn(8, 20)
+
+        # Get some interesting values into the running mean and variance.
+        model(inp1)
+        model.eval()
+        golden = model(inp2)
+
+        model = fuse_modules(model, [["fc", "bn"]])
+        self.assertEqual(type(model.bn), nn.Identity)
+        self.assertEqual(golden, model(inp2))
 
 class TestObserver(QuantizationTestCase):
     @given(qdtype=st.sampled_from((torch.qint8, torch.quint8)),

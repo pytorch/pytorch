@@ -1,6 +1,7 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 
 import torch
+import torch.nn.utils.fusion
 import copy
 
 import torch.nn.intrinsic.modules.fused as torch_fused
@@ -31,6 +32,27 @@ def fuse_conv_bn(conv, bn):
             else torch.nn.intrinsic.ConvBn2d(conv, bn)
     else:
         return torch.nn.utils.fuse_conv_bn_eval(conv, bn)
+
+def fuse_linear_bn(linear, bn):
+    r"""Given the linear and bn modules, fuses them and returns the fused module
+
+    Args:
+        linear: Module instance of type Linear
+        bn: BatchNorm1d instance that needs to be fused with the linear layer
+
+    Examples::
+
+        >>> m1 = nn.Linear(20, 10)
+        >>> b1 = nn.BatchNorm2d(10)
+        >>> m2 = fuse_conv_bn(m1, b1)
+    """
+    assert(linear.training == bn.training),\
+        "Linear and BN both must be in the same mode (train or eval)."
+
+    if linear.training:
+        raise Exception("Fusing Linear+BatchNorm not yet supported in training.")
+    else:
+        return torch.nn.utils.fusion.fuse_linear_bn_eval(linear, bn)
 
 def fuse_conv_bn_relu(conv, bn, relu):
     r"""Given the conv and bn modules, fuses them and returns the fused module
@@ -97,6 +119,7 @@ def fuse_known_modules(mod_list):
         (torch.nn.Conv2d, torch.nn.BatchNorm2d, torch.nn.ReLU): fuse_conv_bn_relu,
         (torch.nn.Conv3d, torch.nn.BatchNorm3d): fuse_conv_bn,
         (torch.nn.Conv3d, torch.nn.BatchNorm3d, torch.nn.ReLU): fuse_conv_bn_relu,
+        (torch.nn.Linear, torch.nn.BatchNorm1d): fuse_linear_bn,
         (torch.nn.Conv2d, torch.nn.ReLU): torch.nn.intrinsic.ConvReLU2d,
         (torch.nn.Conv3d, torch.nn.ReLU): torch.nn.intrinsic.ConvReLU3d,
         (torch.nn.Linear, torch.nn.ReLU): torch.nn.intrinsic.LinearReLU,
@@ -138,6 +161,7 @@ def fuse_modules(model, modules_to_fuse, inplace=False, fuser_func=fuse_known_mo
     conv, bn, relu
     conv, relu
     linear, relu
+    linear, bn
     bn, relu
     All other sequences are left unchanged.
     For these sequences, replaces the first item in the list
