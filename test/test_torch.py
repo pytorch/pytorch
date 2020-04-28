@@ -2621,6 +2621,7 @@ class _TestTorchMixin(object):
 
     def test_masked_scatter(self):
         with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
             for maskType in [torch.uint8, torch.bool]:
                 for dt in torch.testing.get_all_dtypes():
                     num_copy, num_dest = 3, 10
@@ -2664,6 +2665,7 @@ class _TestTorchMixin(object):
 
     def test_masked_fill(self):
         with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
             for dt in torch.testing.get_all_dtypes():
                 for dtype in [torch.uint8, torch.bool]:
                     num_dest = 10
@@ -5954,6 +5956,64 @@ class TestTorchDeviceType(TestCase):
                 self.assertEqual(target.shape, torch.nn.functional.multi_margin_loss(input, target, reduction='none').shape)
                 self.assertEqual((), torch.nn.functional.multi_margin_loss(input, target, reduction='mean').shape)
                 self.assertEqual((), torch.nn.functional.multi_margin_loss(input, target, reduction='sum').shape)
+
+    # Uses mismatched arange out size to trigger a warning
+    def test_cpp_warnings_have_python_context(self, device):
+        import inspect
+        # Creates long string in advance to avoid a too-long Python line
+        s = ".+Triggered internally at.+RangeFactories.+"
+
+        def cpp_warn_fn():
+            out = torch.empty((5,))
+            torch.arange(0, 3, out=out)
+            return out
+
+        # Checks eager-mode cpp warning
+        with warnings.catch_warnings(record=True) as w:
+            cpp_warn_fn()
+            frameinfo = inspect.getframeinfo(inspect.currentframe())
+            warning = w[0]
+
+            # Checks for cpp context in the warning message
+            self.assertTrue(re.search(s, str(warning.message)) is not None)
+
+            # Checks the Python features of the warning
+            # Note: the eager mode warning refers to the line in the function
+            # that throws the warning.
+            self.assertEqual(frameinfo.lineno - 6, warning.lineno)
+            self.assertEqual(len(w), 1)
+
+        # Checks jitted cpp warning
+        with warnings.catch_warnings(record=True) as w:
+            scripted_cpp_warn_fn = torch.jit.script(cpp_warn_fn)
+            scripted_cpp_warn_fn()
+            warning = w[0]
+
+            # Checks for cpp context in the warning message
+            self.assertTrue(re.search(s, str(warning.message)) is not None)
+
+            # Checks the Python features of the warning
+            # Note: the jitted warning's lineno refers to the call to the jitted
+            # function, which in our test suite has a layer of indirection
+            # that makes checking the Python lineno fragile
+            self.assertEqual(len(w), 1)
+
+        # Checks jitted Python warning
+        def warn_fn():
+            warnings.warn("Warning!")
+
+        # The jit mimics an eager-mode Python warning in this case
+        with warnings.catch_warnings(record=True) as w:
+            scripted_warn_fn = torch.jit.script(warn_fn)
+            scripted_warn_fn()
+            frameinfo = inspect.getframeinfo(inspect.currentframe())
+            warning = w[0]
+
+            self.assertTrue(re.search('Warning!', str(warning.message)) is not None)
+
+            # Checks the Python features of the warning
+            self.assertEqual(frameinfo.lineno - 6, warning.lineno)
+            self.assertEqual(len(w), 1)
 
     def _np_compare(self, fn_name, vals, device, dtype):
         assert TEST_NUMPY
@@ -12831,27 +12891,38 @@ class TestTorchDeviceType(TestCase):
             self.assertEqual([(2, 0, 0), (2, 0)], [A_LU.shape, pivots.shape])
 
     @skipCUDAIfRocm
-    def test_blas_alpha_beta_empty(self, device):
+    @dtypesIfCUDA(*(torch.float, torch.double) +
+                  # This test is disabled on CUDA 9, due to:
+                  # See: https://github.com/pytorch/pytorch/issues/31006
+                  ((torch.half,) if torch.version.cuda and not torch.version.cuda.startswith('9.') else ()))
+    @dtypes(*(set(torch.testing.get_all_dtypes()) - {torch.half, torch.bool, torch.complex64, torch.complex128}))
+    def test_blas_alpha_beta_empty(self, device, dtype):
+        if dtype is torch.bfloat16 and self.device_type == 'xla':
+            # TODO (@zasdfgbnm): this causes the following error on test
+            # TestTorchDeviceTypeXLA.test_blas_alpha_beta_empty_xla_bfloat16:
+            #
+            #   RuntimeError: _th_equal not supported on CPUType for BFloat16
+            return
         # ensure beta is respected
         value = 11
-        input = torch.full((2,), value, device=device)
-        mat = torch.ones((2, 0), device=device)
-        vec = torch.ones((0,), device=device)
-        out = torch.randn((2,), device=device)
+        input = torch.full((2,), value, dtype=dtype, device=device)
+        mat = torch.ones((2, 0), dtype=dtype, device=device)
+        vec = torch.ones((0,), dtype=dtype, device=device)
+        out = torch.empty((2,), dtype=dtype, device=device)
         alpha = 6
         beta = 3
-        self.assertEqual(torch.full((2,), beta * value, device=device),
+        self.assertEqual(torch.full((2,), beta * value, dtype=dtype, device=device),
                          torch.addmv(input=input, mat=mat, vec=vec, alpha=alpha, beta=beta))
-        self.assertEqual(torch.full((2,), beta * value, device=device),
+        self.assertEqual(torch.full((2,), beta * value, dtype=dtype, device=device),
                          torch.addmv(input=input, mat=mat, vec=vec, alpha=alpha, beta=beta, out=out))
 
         # torch.addmm
-        input = torch.full((2, 3), value, device=device)
-        mat2 = torch.ones((0, 3), device=device)
-        out = torch.randn((2, 3), device=device)
-        self.assertEqual(torch.full((2, 3), beta * value, device=device),
+        input = torch.full((2, 3), value, dtype=dtype, device=device)
+        mat2 = torch.ones((0, 3), dtype=dtype, device=device)
+        out = torch.empty((2, 3), dtype=dtype, device=device)
+        self.assertEqual(torch.full((2, 3), beta * value, dtype=dtype, device=device),
                          torch.addmm(input=input, mat1=mat, mat2=mat2, alpha=alpha, beta=beta))
-        self.assertEqual(torch.full((2, 3), beta * value, device=device),
+        self.assertEqual(torch.full((2, 3), beta * value, dtype=dtype, device=device),
                          torch.addmm(input=input, mat1=mat, mat2=mat2, alpha=alpha, beta=beta, out=out))
 
     @onlyCPU  # not supported by CUBLAS

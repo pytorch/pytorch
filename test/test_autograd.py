@@ -31,7 +31,7 @@ from torch.utils.checkpoint import checkpoint
 from torch.testing._internal.common_utils import (TEST_MKL, TEST_WITH_ROCM, TestCase, run_tests, skipIfNoLapack,
                                                   suppress_warnings, slowTest,
                                                   load_tests, random_symmetric_pd_matrix, random_symmetric_matrix,
-                                                  IS_WINDOWS, IS_MACOS, CudaMemoryLeakCheck)
+                                                  IS_WINDOWS, IS_MACOS, CudaMemoryLeakCheck, skipIfRocm)
 from torch.autograd import Variable, Function, detect_anomaly
 from torch.autograd.function import InplaceFunction
 from torch.testing import randn_like
@@ -2655,6 +2655,7 @@ class TestAutograd(TestCase):
         with torch.autograd.profiler.profile() as prof:
             x.resize_([3, 2])
 
+    @skipIfRocm
     def test_profiler_custom_op(self):
         inst = torch.classes._TorchScriptTesting._PickleTester([3, 4])
 
