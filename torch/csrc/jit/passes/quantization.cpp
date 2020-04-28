@@ -1475,11 +1475,28 @@ void InsertObserversHelper::propagateObservedProperty(
   }
 }
 
+Node* insertChooseQParams(Graph* graph, Value* original_val) {
+  std::string choose_qparams_func = "_choose_qparams_per_tensor";
+  auto reduce_range = graph->insertConstant(false);
+  // choose_qparams_per_tensor has 2 outputs, (scale, zero_point).
+  Node* choose_qparams = graph->create(
+      at::Symbol::aten(choose_qparams_func),
+      {original_val, reduce_range},
+      /* num_outputs = */ 2);
+  choose_qparams->output(0)->setDebugName(original_val->debugName() + ".scale");
+  choose_qparams->output(0)->setType(FloatType::get());
+  choose_qparams->output(1)->setDebugName(
+      original_val->debugName() + ".zero_point");
+  choose_qparams->output(1)->setType(IntType::get());
+  graph->insertNode(choose_qparams);
+  return choose_qparams;
+}
+
 Node* insertQuant(
     Graph* graph,
-    std::vector<Value*> inputs,
+    const std::vector<Value*>& inputs,
     NodeKind quant_kind,
-    std::string debugName) {
+    const std::string& debugName) {
   Node* quant = graph->create(quant_kind, inputs);
   quant->output()->setDebugName(debugName);
   graph->insertNode(quant);
@@ -1523,20 +1540,7 @@ DynamicQuantOps insertChooseQParamQuantDequant(
     Value* original_val,
     Value* dtype,
     NodeKind quant_kind) {
-  std::string choose_qparams_func = "_choose_qparams_per_tensor";
-  auto reduce_range = graph->insertConstant(false);
-  // choose_qparams_per_tensor has 2 outputs, (scale, zero_point).
-  Node* choose_qparams = graph->create(
-      at::Symbol::aten(choose_qparams_func),
-      {original_val, reduce_range},
-      /* num_outputs = */ 2);
-  choose_qparams->output(0)->setDebugName(original_val->debugName() + ".scale");
-  choose_qparams->output(0)->setType(FloatType::get());
-  choose_qparams->output(1)->setDebugName(
-      original_val->debugName() + ".zero_point");
-  choose_qparams->output(1)->setType(IntType::get());
-  graph->insertNode(choose_qparams);
-
+  Node* choose_qparams = insertChooseQParams(graph, original_val);
   std::vector<Value*> quant_inputs = {original_val};
   for (auto& out : choose_qparams->outputs()) {
     quant_inputs.push_back(out);
@@ -3100,9 +3104,7 @@ void FoldQuantizedPrepackingOps(Module& module) {
   PrePackingOpsFolder(module, filter_fn, "quantized");
 }
 
-void RemoveRedundantQuantizeOps(
-    std::shared_ptr<Graph>& graph,
-    bool is_dynamic) {
+void RemoveRedundantQuantizeOps(std::shared_ptr<Graph>& graph) {
   const std::string dynamic_quant_ops = R"(
     graph(%a, %reduce_range, %a_dtype):
         %a_scale : float, %a_zero_point : int = aten::_choose_qparams_per_tensor(%a, %reduce_range)
@@ -3121,7 +3123,7 @@ void RemoveRedundantQuantizeOps(
         dequant_out->uses().size() == 1,
         "Expect dequant output to have single use");
     Node* user = dequant_out->uses()[0].user;
-    return !nodeQuantizable(user, is_dynamic);
+    return !nodeQuantizable(user, /* is_dynamic */ true);
   };
   SubgraphRewriter rewriter;
   rewriter.RegisterRewritePattern(dynamic_quant_ops, dynamic_quant_replacement);
@@ -3133,10 +3135,8 @@ script::Module Finalize(script::Module& module, bool is_dynamic) {
   auto graph = module.get_method("forward").graph();
   Inline(*graph);
   ConstantPropagation(graph);
-  if (is_dynamic) {
-    ReplicateChooseQParamsQuantDequant(graph);
-    RemoveRedundantQuantizeOps(graph, is_dynamic);
-  }
+  ReplicateChooseQParamsQuantDequant(graph);
+  RemoveRedundantQuantizeOps(graph);
   ReplicateQuant(graph);
   ReplicateDeQuant(graph);
   SwapDeQuant(graph);

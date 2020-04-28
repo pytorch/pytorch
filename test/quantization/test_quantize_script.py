@@ -751,28 +751,6 @@ graph(%input, %weight):
                        .check("return") \
                        .run(str(get_module_method(m, 'conv', '_conv_forward').graph))
 
-    def test_insert_quant_dequant_multi_uses(self):
-        class M(torch.nn.Module):
-            def __init__(self):
-                super(M, self).__init__()
-
-            def forward(self, x, w0, w1, w2):
-                a = F.conv2d(x, w0)
-                b = F.conv2d(a, w1)
-                c = F.conv2d(a, w2)
-                return b + c
-
-        m = torch.jit.script(M()).eval()
-        qconfig_dict = {'': script_qconfig(default_qconfig)}
-        m = wrap_cpp_module(torch._C._jit_pass_insert_observers(m._c, "forward", qconfig_dict, False))
-        m(torch.rand(1, 3, 10, 10), torch.rand(3, 3, 3, 3), torch.rand(3, 3, 3, 3), torch.rand(3, 3, 3, 3))
-        m = wrap_cpp_module(torch._C._jit_pass_insert_quant_dequant(m._c, "forward", False))
-        # We replicate dequant in finalize call
-        m = wrap_cpp_module(torch._C._jit_pass_quant_finalize(m._c))
-        # check that quantized ops are inserted correctly.
-        FileCheck().check_count("quantized::conv2d_prepack", 3, exactly=True) \
-                   .run(str(get_forward_graph(m._c)))
-
     def test_insert_quant_dequant_shared_class_type(self):
         class M(torch.nn.Module):
             def __init__(self):
@@ -1331,6 +1309,7 @@ class TestQuantizeScriptPTSQOps(JitTestCase):
             data = torch.randn(1, 1, 10, 10, dtype=torch.float)
             m(data, data)
             m = convert_script(m, True)
+            print(m.graph)
             FileCheck().check_not("aten::add") \
                        .check_not("aten::add_") \
                        .check("quantized::add") \
@@ -1381,6 +1360,7 @@ class TestQuantizeScriptPTSQOps(JitTestCase):
             data = torch.randn(1, 1, 10, 10, dtype=torch.float)
             m(data, data)
             m = convert_script(m, True)
+            print(m.graph)
             FileCheck().check_not("aten::add") \
                        .check_not("aten::relu") \
                        .check_not("aten::relu_") \
