@@ -11191,12 +11191,13 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual((1, 1, 0), torch.tensor([[[]]], device=device).shape)
         self.assertEqual((1, 1, 0), torch.as_tensor([[[]]], device=device).shape)
 
+    @onlyOnCPUAndCUDA
     def test_vander(self, device):
         x = torch.tensor([1, 2, 3, 5], device=device)
 
         self.assertEqual((0, 0), torch.vander(torch.tensor([]), 0).shape)
 
-        with self.assertRaisesRegex(RuntimeError, "n must be non-negative."):
+        with self.assertRaisesRegex(RuntimeError, "N must be non-negative."):
             torch.vander(x, N=-1)
 
         with self.assertRaisesRegex(RuntimeError, "x must be a one-dimensional tensor."):
@@ -11207,12 +11208,12 @@ class TestTorchDeviceType(TestCase):
             with self.assertRaises(RuntimeError):
                 torch.vander(x.to(torch.complex64))
 
-    @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
+    @unittest.skipIf(not TEST_NUMPY, 'NumPy not found')
+    @onlyOnCPUAndCUDA
     @dtypes(torch.bool, torch.uint8, torch.int8, torch.short, torch.int, torch.long, torch.float, torch.double)
     def test_vander_types(self, device, dtype):
-        # Note: negative uint8 values will cause this test to overflow
-        # with undefined behavior, so we don't test it.
         if dtype is torch.uint8:
+            # Note: no negative uint8 values
             X = [[1, 2, 3, 5], [0, 1 / 3, 1, math.pi, 3 / 7]]
         elif dtype is torch.bool:
             # Note: see https://github.com/pytorch/pytorch/issues/37398
@@ -11234,8 +11235,9 @@ class TestTorchDeviceType(TestCase):
 
             self.assertEqual(
                 pt_res,
-                torch.from_numpy(np_res).to(dtype),
-                atol=1e-3)
+                torch.from_numpy(np_res),
+                atol=1e-3,
+                exact_dtype=False)
 
     def test_eye(self, device):
         for dtype in torch.testing.get_all_dtypes():

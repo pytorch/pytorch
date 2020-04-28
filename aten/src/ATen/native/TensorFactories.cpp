@@ -924,10 +924,12 @@ Tensor vander(const Tensor& x, c10::optional<int64_t> N, bool increasing) {
   int64_t n = x.size(0);
   if (N.has_value()) {
     n = *N;
-    TORCH_CHECK(n >= 0, "n must be non-negative.");
+    TORCH_CHECK(n >= 0, "N must be non-negative.");
   }
 
-  auto result = at::empty({x.size(0), n}, x.options().dtype(x.scalar_type()));
+  // Note: result is long if x is an integer tensor (like int8) because
+  // cumprod promotes integer tensors to long
+  auto result = at::empty({x.size(0), n}, x.options().dtype(at::promote_types(x.scalar_type(), c10::ScalarType::Long)));
 
   if (n > 0) {
     result.select(1, 0).fill_(1);
