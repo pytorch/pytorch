@@ -4,6 +4,8 @@ This module contains utility method for mobile model optimization and lint.
 
 import torch
 from enum import Enum
+from torch._C import MobileOptimizerType
+from typing import Dict
 
 class LintCode(Enum):
     BUNDLED_INPUT = 1
@@ -11,11 +13,13 @@ class LintCode(Enum):
     DROPOUT = 3
     BATCHNORM = 4
 
-def optimize_for_mobile(script_module):
+def optimize_for_mobile(script_module, whitelist_optimizer_dict: Dict[MobileOptimizerType, bool] = None):
     """
     Args:
         script_module: An instance of torch script module with type of ScriptModule
-
+        whitelist_optimizer_dict: A dictionary with key type of MobileOptimizerType and value type of bool.
+        When dict is not passed, optimization method will run all the optimizer pass; otherwise, optimizer
+        method will run the whitelist optimization pass that has value of True.
     Returns:
         script_module: A new optimized torch script module
     """
@@ -23,7 +27,10 @@ def optimize_for_mobile(script_module):
         raise TypeError(
             'Got {}, but ScriptModule is expected.'.format(type(script_module)))
 
-    optimized_cpp_module = torch._C._jit_pass_optimize_for_mobile(script_module._c)
+    if whitelist_optimizer_dict is None:
+        whitelist_optimizer_dict = {}
+
+    optimized_cpp_module = torch._C._jit_pass_optimize_for_mobile(script_module._c, whitelist_optimizer_dict)
     return torch.jit._recursive.wrap_cpp_module(optimized_cpp_module)
 
 
@@ -58,6 +65,7 @@ def generate_mobile_module_lints(script_module: torch.jit.ScriptModule):
                               "saving the module.".format(op_name)})
         if "batch_norm" in op_name:
             lint_list.append({"name": LintCode.BATCHNORM.name, "message": "Operator {} exists, remember to call eval() before "
-                              "saving the module.".format(op_name)})
+                              "saving the module and call torch.utils.mobile_optimizer.optimize_for_mobile to drop batch_norm "
+                              "operator.".format(op_name)})
 
     return lint_list

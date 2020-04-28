@@ -2,8 +2,10 @@ import unittest
 import torch
 import torch.backends.xnnpack
 import torch.utils.bundled_inputs
+from torch.testing._internal.jit_utils import get_forward, get_forward_graph
 from torch.utils.mobile_optimizer import *
 from torch.nn import functional as F
+from torch._C import MobileOptimizerType
 
 FileCheck = torch._C.FileCheck
 
@@ -60,6 +62,18 @@ class TestOptimizer(unittest.TestCase):
                 o = F.linear(o, self.linear_weight, self.linear_bias)
                 return F.relu(o)
 
+        class BNTestModule(torch.nn.Module):
+            def __init__(self):
+                super(BNTestModule, self).__init__()
+                self.conv = torch.nn.Conv2d(1, 20, 5, 1)
+                self.bn = torch.nn.BatchNorm2d(num_features=20)
+                self.bn.eps = 0.0023
+
+            def forward(self, x):
+                x = self.conv(x)
+                x = self.bn(x)
+                return x
+
         data_shape = (batch_size, input_channels, height, width)
         input_data = torch.normal(1, 20, size=data_shape)
 
@@ -79,6 +93,41 @@ class TestOptimizer(unittest.TestCase):
                    .run(optimized_scripted_model.graph)
 
         torch.testing.assert_allclose(initial_result, optimized_result, rtol=1e-2, atol=1e-3)
+
+        whitelist_optimizer_dict = {
+            MobileOptimizerType.FOLD_CONV_BATCH_NORM: True,
+            MobileOptimizerType.INSERT_FOLD_PREPACK_OPS: True
+        }
+        optimized_scripted_model_with_dict = optimize_for_mobile(scripted_model, whitelist_optimizer_dict)
+        optimized_result_with_dict = optimized_scripted_model_with_dict(input_data)
+
+        FileCheck().check_not("Tensor = aten::conv2d") \
+                   .check_not("Tensor = prim::CallFunction") \
+                   .check_not("prepacked::conv2d_clamp_prepack") \
+                   .check_count("prepacked::conv2d_clamp_run", 1, exactly=True) \
+                   .check_not("prepacked::linear_clamp_prepack") \
+                   .check_count("prepacked::linear_clamp_run", 1, exactly=True) \
+                   .run(optimized_scripted_model_with_dict.graph)
+
+        torch.testing.assert_allclose(initial_result, optimized_result_with_dict, rtol=1e-2, atol=1e-3)
+
+        bn_test_module = BNTestModule()
+        bn_scripted_module = torch.jit.script(bn_test_module)
+        bn_scripted_module.eval()
+        self.assertEqual(len(torch.jit.export_opnames(bn_scripted_module)), 13)
+        FileCheck().check_count("prim::CallMethod[name=\"forward\"]", 2, exactly=True) \
+                   .run(str(get_forward(bn_scripted_module._c).graph))
+
+        whitelist_optimizer_dict_with_bn_fold = {
+            MobileOptimizerType.FOLD_CONV_BATCH_NORM: True,
+            MobileOptimizerType.INSERT_FOLD_PREPACK_OPS: False
+        }
+        bn_fold_scripted_module = optimize_for_mobile(bn_scripted_module, whitelist_optimizer_dict_with_bn_fold)
+        self.assertEqual(len(torch.jit.export_opnames(bn_fold_scripted_module)), 1)
+        FileCheck().check_count("prim::CallMethod[name=\"forward\"]", 1, exactly=True) \
+                   .run(str(get_forward_graph(bn_fold_scripted_module._c)))
+        bn_input = torch.rand(1, 1, 6, 6)
+        torch.testing.assert_allclose(bn_scripted_module(bn_input), bn_fold_scripted_module(bn_input), rtol=1e-2, atol=1e-3)
 
     def test_generate_mobile_module_lints(self):
         class MyTestModule(torch.nn.Module):

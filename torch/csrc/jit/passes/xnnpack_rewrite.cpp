@@ -296,13 +296,28 @@ void FoldPrePackingOps(script::Module& m) {
   PrePackingOpsFolder(m, filter_fn, "prepack_folding");
 }
 
-c10::optional<script::Module> optimizeForMobile(const script::Module& m) {
+script::Module optimizeForMobile(
+    const script::Module& m,
+    const std::map<MobileOptimizerType, bool>& whitelist_optimizers) {
   auto cloned_module = m.clone();
   cloned_module.eval();
-  cloned_module = FoldConvBatchNorm2d(cloned_module);
-  insertPrePackedOps(cloned_module);
-  cloned_module = freeze_module(cloned_module);
-  FoldPrePackingOps(cloned_module);
+
+  auto bn_it =
+      whitelist_optimizers.find(MobileOptimizerType::FOLD_CONV_BATCH_NORM);
+  if (bn_it == whitelist_optimizers.end() ||
+      (bn_it != whitelist_optimizers.end() && bn_it->second)) {
+    cloned_module = FoldConvBatchNorm2d(cloned_module);
+  }
+
+  auto prepack_it =
+      whitelist_optimizers.find(MobileOptimizerType::INSERT_FOLD_PREPACK_OPS);
+  if (prepack_it == whitelist_optimizers.end() ||
+      (prepack_it != whitelist_optimizers.end() && prepack_it->second)) {
+    insertPrePackedOps(cloned_module);
+    cloned_module = freeze_module(cloned_module);
+    FoldPrePackingOps(cloned_module);
+  }
+
   return cloned_module;
 }
 
@@ -328,11 +343,13 @@ void FoldPrePackingOps(script::Module& m) {
       "XNNPACK is not enabled. Please build with USE_XNNPACK=1");
 }
 
-c10::optional<script::Module> optimizeForMobile(const script::Module& m) {
+script::Module optimizeForMobile(
+    const script::Module& module,
+    const std::unordered_map<MobileOptimizerType, bool>& whitelist_optimizers) {
   TORCH_INTERNAL_ASSERT(
       "Mobile optimizaiton only available with XNNPACK at the moment. "
       "XNNPACK is not enabled. Please build with USE_XNNPACK=1");
-  return c10::nullopt;
+  return module;
 }
 
 #endif
