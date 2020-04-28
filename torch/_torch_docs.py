@@ -5102,6 +5102,16 @@ WARNING: Can only be called once and before any inter-op parallel work
 is started (e.g. JIT execution).
 """)
 
+add_docstr(torch.init_num_threads,
+           r"""
+init_num_threads()
+
+Initializes the number of parallel threads used on the current thread.
+
+Call this whenever a new thread is created in order to propagate values from
+:func:`torch.set_num_threads` onto the new thread.
+""")
+
 add_docstr(torch.sigmoid,
            r"""
 sigmoid(input, out=None) -> Tensor

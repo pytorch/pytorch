@@ -176,6 +176,11 @@ static PyObject * THPModule_setNumThreads(PyObject *module, PyObject *arg)
   Py_RETURN_NONE;
 }
 
+static PyObject * THPModule_initNumThreads(PyObject *self, PyObject */*args*/) {
+  at::init_num_threads();
+  Py_RETURN_NONE;
+}
+
 static PyObject * THPModule_getNumInteropThreads(PyObject *module, PyObject *noargs)
 {
   return PyLong_FromLong(at::get_num_interop_threads());
@@ -548,6 +553,7 @@ static PyMethodDef TorchMethods[] = {
   {"_get_backcompat_keepdim_warn", (PyCFunction)THPModule_getBackcompatKeepdimWarn, METH_NOARGS, nullptr},
   {"get_num_threads", (PyCFunction)THPModule_getNumThreads,     METH_NOARGS,  nullptr},
   {"set_num_threads", (PyCFunction)THPModule_setNumThreads,     METH_O,       nullptr},
+  {"init_num_threads", (PyCFunction)THPModule_initNumThreads,   METH_NOARGS,  nullptr},
   {"get_num_interop_threads", (PyCFunction)THPModule_getNumInteropThreads,     METH_NOARGS,  nullptr},
   {"set_num_interop_threads", (PyCFunction)THPModule_setNumInteropThreads,     METH_O,       nullptr},
   {"_get_cudnn_enabled", (PyCFunction)THPModule_userEnabledCuDNN, METH_NOARGS,     nullptr},
