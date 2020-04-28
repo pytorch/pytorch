@@ -11197,36 +11197,45 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual((0, 0), torch.vander(torch.tensor([]), 0).shape)
 
         with self.assertRaisesRegex(RuntimeError, "n must be non-negative."):
-            torch.vander(x, n=-1)
+            torch.vander(x, N=-1)
 
         with self.assertRaisesRegex(RuntimeError, "x must be a one-dimensional tensor."):
             torch.vander(torch.stack((x, x)))
 
         # This passes on the xla backend
         if device != 'xla':
-            with self.assertRaisesRegex(RuntimeError, 
-                                        r"_th_cumprod not supported on CUDAType for ComplexFloat|" + 
-                                        "\"cumprod_out_cpu\" not implemented for 'ComplexFloat'"):
-                torch.vander(x.type(torch.complex64))
+            with self.assertRaises(RuntimeError):
+                torch.vander(x.to(torch.complex64))
 
     @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
     @dtypes(torch.bool, torch.uint8, torch.int8, torch.short, torch.int, torch.long, torch.float, torch.double)
     def test_vander_types(self, device, dtype):
-        X = [[1, 2, 3, 5], [-math.pi, 0, 1 / 3, 1, math.pi, 3 / 7]]
+        # Note: negative uint8 values will cause this test to overflow
+        # with undefined behavior, so we don't test it.
+        if dtype is torch.uint8:
+            X = [[1, 2, 3, 5], [0, 1 / 3, 1, math.pi, 3 / 7]]
+        elif dtype is torch.bool:
+            # Note: see https://github.com/pytorch/pytorch/issues/37398
+            # for why this is necessary.
+            X = [[True, True, True, True], [False, True, True, True, True]]
+        else:
+            X = [[1, 2, 3, 5], [-math.pi, 0, 1 / 3, 1, math.pi, 3 / 7]]
+
         N = [None, 0, 1, 3]
         increasing = [False, True]
 
         for x, n, inc in product(X, N, increasing):
-            np_x = np.array(x, dtype=torch_to_numpy_dtype_dict[dtype])
-            pt_x = torch.tensor(x, device=device).type(dtype)
+            numpy_dtype = torch_to_numpy_dtype_dict[dtype]
+            pt_x = torch.tensor(x, device=device, dtype=dtype)
+            np_x = np.array(x, dtype=numpy_dtype)
 
             pt_res = torch.vander(pt_x, increasing=inc) if n is None else torch.vander(pt_x, n, inc)
             np_res = np.vander(np_x, n, inc)
 
             self.assertEqual(
                 pt_res,
-                torch.from_numpy(np_res), exact_dtype=False, atol=0.0001)
-
+                torch.from_numpy(np_res).to(dtype),
+                atol=1e-3)
 
     def test_eye(self, device):
         for dtype in torch.testing.get_all_dtypes():

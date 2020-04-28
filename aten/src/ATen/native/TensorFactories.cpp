@@ -916,15 +916,18 @@ Tensor hann_window(
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~ vandermonde_matrix ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Tensor vander(const Tensor& x, bool increasing) {
-  return native::vander(x, /*n=*/x.size(0), increasing);
-}
 
-Tensor vander(const Tensor& x, int64_t n, bool increasing) {
+Tensor vander(const Tensor& x, c10::optional<int64_t> N, bool increasing) {
   TORCH_CHECK(x.dim() == 1, "x must be a one-dimensional tensor.");
-  TORCH_CHECK(n >= 0, "n must be non-negative.");
 
-  auto result = at::empty({x.size(0), n}, x.options().dtype(at::promote_types(x.scalar_type(), c10::ScalarType::Long)));
+  // Acquires n, defaulting to size if not provided
+  int64_t n = x.size(0);
+  if (N.has_value()) {
+    n = *N;
+    TORCH_CHECK(n >= 0, "n must be non-negative.");
+  }
+
+  auto result = at::empty({x.size(0), n}, x.options().dtype(x.scalar_type()));
 
   if (n > 0) {
     result.select(1, 0).fill_(1);
