@@ -158,8 +158,10 @@ RegisterOperators reg(
            if (sz == s->string().size()) {
              push(stack, b);
            } else {
-             throw std::runtime_error(
-                 "float() only accepts a string of single float number");
+             std::stringstream error_str;
+             error_str << "could not convert string "
+                       << "to float: '" << s->string() << "'";
+             throw std::runtime_error(error_str.str());
            }
            return 0;
          },
