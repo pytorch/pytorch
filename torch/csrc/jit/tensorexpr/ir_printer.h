@@ -36,22 +36,24 @@ class TORCH_API IRPrinter : public IRVisitor {
   void visit(const Cast* v) override;
   void visit(const Var* v) override;
   void visit(const Let* v) override;
-  void visit(const LetStmt* v) override;
   void visit(const Ramp* v) override;
   void visit(const Load* v) override;
-  void visit(const For* v) override;
-  void visit(const Block* v) override;
-  void visit(const Store* v) override;
   void visit(const Broadcast* v) override;
   void visit(const IfThenElse* v) override;
   void visit(const BaseCallNode* v) override;
-  void visit(const Allocate* v) override;
-  void visit(const Free* v) override;
-  void visit(const Cond* v) override;
   void visit(const Term* v) override;
   void visit(const Polynomial* v) override;
   void visit(const RoundOff* v) override;
   void visit(const ReduceOp* v) override;
+
+  void visit(const LetStmt* v) override;
+  void visit(const AtomicAdd* v) override;
+  void visit(const Store* v) override;
+  void visit(const For* v) override;
+  void visit(const Cond* v) override;
+  void visit(const Block* v) override;
+  void visit(const Allocate* v) override;
+  void visit(const Free* v) override;
 
   std::ostream& os() {
     return printer_os_;
@@ -74,9 +76,9 @@ class TORCH_API IRPrinter : public IRVisitor {
   UniqueNameManager* name_manager() {
     return &name_manager_;
   }
+  void emitIndent();
 
  private:
-  void emitIndent();
   int indent_ = 0;
   PrinterStream printer_os_;
   UniqueNameManager name_manager_;
