@@ -34,7 +34,12 @@ from torch.quantization._quantize_script import (
     quantize_dynamic_script
 )
 
-from torch.testing._internal.common_utils import TEST_WITH_UBSAN, IS_WINDOWS
+from torch.testing._internal.common_utils import (
+    TEST_WITH_UBSAN,
+    IS_WINDOWS,
+    IS_PPC,
+)
+
 from torch.testing._internal.common_quantization import (
     QuantizationTestCase,
     AnnotatedSingleLayerLinearModel,
