@@ -207,6 +207,34 @@ cmake_dependent_option(
 option(USE_TBB "Use TBB" OFF)
 option(ONNX_ML "Enable traditional ONNX ML API." ON)
 
+# Linux distributions do not want too many embedded sources, in that sense we
+# need to be able to build pytorch with an (almost) empty third_party
+# directory.
+# USE_SYSTEM_LIBS is a shortcut variable to toggle all the # USE_SYSTEM_*
+# variables on. Individual USE_SYSTEM_* variables can be toggled with
+# USE_SYSTEM_LIBS being "OFF".
+option(USE_SYSTEM_LIBS "Use all available system-provided libraries." OFF)
+option(USE_SYSTEM_CPUINFO "Use system-provided cpuinfo." OFF)
+option(USE_SYSTEM_SLEEF "Use system-provided sleef." OFF)
+option(USE_SYSTEM_GLOO "Use system-provided gloo." OFF)
+option(USE_SYSTEM_FP16 "Use system-provided fp16." OFF)
+option(USE_SYSTEM_PTHREADPOOL "Use system-provided pthreadpool." OFF)
+option(USE_SYSTEM_PSIMD "Use system-provided psimd." OFF)
+option(USE_SYSTEM_FXDIV "Use system-provided fxdiv." OFF)
+option(USE_SYSTEM_BENCHMARK "Use system-provided google benchmark." OFF)
+if(USE_SYSTEM_LIBS)
+  set(USE_SYSTEM_CPUINFO ON)
+  set(USE_SYSTEM_SLEEF ON)
+  set(USE_SYSTEM_GLOO ON)
+  set(BUILD_CUSTOM_PROTOBUF OFF)
+  set(USE_SYSTEM_EIGEN_INSTALL ON)
+  set(USE_SYSTEM_FP16 ON)
+  set(USE_SYSTEM_PTHREADPOOL ON)
+  set(USE_SYSTEM_PSIMD ON)
+  set(USE_SYSTEM_FXDIV ON)
+  set(USE_SYSTEM_BENCHMARK ON)
+endif()
+
 # Used when building Caffe2 through setup.py
 option(BUILDING_WITH_TORCH_LIBS "Tell cmake if Caffe2 is being built alongside torch libs" ON)
 
@@ -254,16 +282,10 @@ if(MSVC)
     # NB2: This is NOT enough to prevent warnings from nvcc on MSVC.  At the
     # moment only CMP0092 is enough to prevent those warnings too.
     string(REPLACE "/W3" "" ${flag_var} "${${flag_var}}")
-    # Suppress EHs is overridden by EHa warning
-    string(REPLACE "/EHsc" "" ${flag_var} "${${flag_var}}")
 
     # Turn off warnings (Windows build is currently is extremely warning
     # unclean and the warnings aren't telling us anything useful.)
-    #
-    # Turn on EHa; I'm not altogether clear why we use the asynchronous
-    # exception handling model, but someone added it at some point, so
-    # keep using it.
-    string(APPEND ${flag_var} " /w /EHa")
+    string(APPEND ${flag_var} " /w")
 
     if(${CAFFE2_USE_MSVC_STATIC_RUNTIME})
       if(${flag_var} MATCHES "/MD")

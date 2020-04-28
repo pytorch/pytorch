@@ -29,7 +29,7 @@ from torch.testing._internal.common_utils import TestCase, iter_indices, TEST_NU
     BytesIOContext, skipIfRocm, torch_to_numpy_dtype_dict
 from multiprocessing.reduction import ForkingPickler
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, \
-    skipCPUIfNoLapack, skipCUDAIfNoMagma, skipCUDAIfRocm, skipCUDAIfNotRocm, onlyCUDA, onlyCPU, \
+    skipCPUIfNoLapack, skipCPUIfNoMkl, skipCUDAIfNoMagma, skipCUDAIfRocm, skipCUDAIfNotRocm, onlyCUDA, onlyCPU, \
     dtypes, dtypesIfCUDA, dtypesIfCPU, deviceCountAtLeast, skipCUDAIf, precisionOverride, \
     PYTORCH_CUDA_MEMCHECK, largeCUDATensorTest, onlyOnCPUAndCUDA
 import torch.backends.quantized
@@ -421,7 +421,7 @@ class _TestTorchMixin(object):
 
     def test_where_tensor(self):
         def rand_tensor(size, dtype, device):
-            if dtype.is_floating_point:
+            if dtype.is_floating_point or dtype.is_complex:
                 return torch.rand(size=size, dtype=dtype, device=device)
             elif dtype == torch.uint8:
                 return torch.randint(1, 5, size=size, dtype=dtype, device=device)
@@ -452,6 +452,8 @@ class _TestTorchMixin(object):
                         else:
                             if x1.is_floating_point():
                                 condition = (x1 < 0.5)
+                            elif x1.is_complex():
+                                condition = (x1.abs() < 0.5)
                             else:
                                 condition = (x1 == 1)
                             expected = condition.to(x1.dtype) * x1 + (~condition).to(x2.dtype) * x2
@@ -592,7 +594,7 @@ class _TestTorchMixin(object):
             lambda n, d: logsumexp(n, d),
             use_integral=False)
 
-    def _test_reduce_integer_upcast(self, fn, has_out=True):
+    def _test_reduce_integer_upcast(self, fn, has_out=True, test_complex=True):
         shape = (3, 4, 5)
         reduced_shape = fn(torch.ones(shape)).shape
 
@@ -609,25 +611,34 @@ class _TestTorchMixin(object):
 
         for dtype in [dtype for dtype in torch.testing.get_all_math_dtypes('cpu') if dtype != torch.float16]:
             x = torch.ones(shape, dtype=dtype)
-            expected_dtype = dtype if dtype.is_floating_point else torch.int64
+            expected_dtype = dtype if dtype.is_floating_point or dtype.is_complex else torch.int64
             self.assertIs(expected_dtype, fn(x).dtype)
             self.assertEqual(fn(x.type(expected_dtype)), fn(x))
 
             if dtype.is_floating_point:
                 other_dtype = torch.float32 if dtype == torch.float64 else torch.float64
+            elif dtype.is_complex:
+                other_dtype = torch.complex64 if dtype == torch.complex128 else torch.complex128
             else:
                 other_dtype = torch.int32 if dtype != torch.int32 else torch.int16
             self.assertIs(other_dtype, fn(x, dtype=other_dtype).dtype)
             self.assertEqual(fn(x.type(other_dtype)), fn(x, dtype=other_dtype), exact_dtype=False)
 
-            # test mixed int/float
-            mixed_dtype = torch.int32 if dtype.is_floating_point else torch.float32
-            self.assertIs(mixed_dtype, fn(x, dtype=mixed_dtype).dtype)
-            self.assertEqual(fn(x.type(mixed_dtype)), fn(x, dtype=mixed_dtype), exact_dtype=False)
+            # test mixed int/float/complex
+            if dtype.is_floating_point:
+                mixed_dtypes = [torch.int32, torch.complex64]
+            elif dtype.is_complex:
+                mixed_dtypes = [torch.int32, torch.float32]
+            else:
+                mixed_dtypes = [torch.float32, torch.complex64]
 
-            if has_out:
-                _test_out(dtype, other_dtype)
-                _test_out(dtype, mixed_dtype)
+            for mixed_dtype in mixed_dtypes:
+                self.assertIs(mixed_dtype, fn(x, dtype=mixed_dtype).dtype)
+                self.assertEqual(fn(x.type(mixed_dtype)), fn(x, dtype=mixed_dtype), exact_dtype=False)
+
+                if has_out:
+                    _test_out(dtype, other_dtype)
+                    _test_out(dtype, mixed_dtype)
 
     def test_sum_integer_upcast(self):
         self._test_reduce_integer_upcast(lambda x, **kwargs: torch.sum(x, **kwargs), False)
@@ -2366,14 +2377,20 @@ class _TestTorchMixin(object):
         for device in torch.testing.get_all_device_types():
             for dtype in torch.testing.get_all_math_dtypes(device):
                 size = [5, 5]
-                if dtype.is_floating_point:
+                if dtype.is_floating_point or dtype.is_complex:
                     tensor = torch.rand(size, dtype=dtype, device=device)
                 elif dtype.is_signed:
                     tensor = torch.randint(-5, 15, size, dtype=dtype, device=device)
                 else:
                     tensor = torch.randint(0, 10, size, dtype=dtype, device=device)
+
                 # index_add calls atomicAdd on cuda.
                 zeros = torch.zeros(size, dtype=dtype, device=device)
+
+                # index_add is not supported for complex dtypes on cuda yet
+                if device.startswith('cuda') and dtype.is_complex:
+                    continue
+
                 added = zeros.index_add(0, torch.arange(0, size[0], dtype=torch.long, device=device), tensor)
                 self.assertEqual(added, tensor)
 
@@ -2534,6 +2551,9 @@ class _TestTorchMixin(object):
                     expected[i, j, k] = src[tuple(ii)]
         self.assertEqual(actual, expected, 0)
 
+        bad_src = torch.randn(*[i - 1 for i in idx_size])
+        self.assertRaises(RuntimeError, lambda: torch.gather(bad_src, dim, idx))
+
         if test_bounds:
             idx[0][0][0] = 23
             self.assertRaises(RuntimeError, lambda: torch.gather(src, dim, idx))
@@ -2606,6 +2626,7 @@ class _TestTorchMixin(object):
 
     def test_masked_scatter(self):
         with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
             for maskType in [torch.uint8, torch.bool]:
                 for dt in torch.testing.get_all_dtypes():
                     num_copy, num_dest = 3, 10
@@ -2649,6 +2670,7 @@ class _TestTorchMixin(object):
 
     def test_masked_fill(self):
         with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
             for dt in torch.testing.get_all_dtypes():
                 for dtype in [torch.uint8, torch.bool]:
                     num_dest = 10
@@ -4698,8 +4720,16 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         pass
 
     def test_is_nonzero(self):
-        self.assertExpectedRaises(RuntimeError, lambda: torch.tensor([]).is_nonzero(), subname="empty")
-        self.assertExpectedRaises(RuntimeError, lambda: torch.tensor([0, 0]).is_nonzero(), subname="multiple")
+        self.assertExpectedRaisesInline(
+            RuntimeError,
+            lambda: torch.tensor([]).is_nonzero(),
+            "bool value of Tensor with no values is ambiguous",
+        )
+        self.assertExpectedRaisesInline(
+            RuntimeError,
+            lambda: torch.tensor([0, 0]).is_nonzero(),
+            "bool value of Tensor with more than one value is ambiguous",
+        )
         self.assertFalse(torch.tensor(0).is_nonzero())
         self.assertTrue(torch.tensor(1).is_nonzero())
         self.assertFalse(torch.tensor([0]).is_nonzero())
@@ -5463,6 +5493,32 @@ class TestTorchDeviceType(TestCase):
         with self.assertRaises(RuntimeError):
             torch.isclose(t, t, atol=-1, rtol=-1)
 
+    # XLA tests fail for self.assertRaises for complex dtypes
+    @onlyOnCPUAndCUDA
+    def test_complex_assert_raises(self, device):
+        for dtype in [torch.complex64, torch.complex128]:
+            size = [5, 5]
+            tensor = torch.rand(size, dtype=dtype, device=device)
+
+            # index_add calls atomicAdd on cuda.
+            zeros = torch.zeros(size, dtype=dtype, device=device)
+
+            # index_add is not supported for complex dtypes on cuda yet
+            if device.startswith('cuda') and dtype.is_complex:
+                self.assertRaises(RuntimeError,
+                                  lambda: zeros.index_add(0, torch.arange(0, size[0], dtype=torch.long, device=device), tensor))
+
+            self.assertRaises(RuntimeError, lambda: torch.sign(torch.tensor([4j], device=device, dtype=dtype)))
+
+            a = torch.rand((2, 2), dtype=dtype, device=device)
+            b = torch.rand((2, 2), dtype=dtype, device=device)
+            c = torch.rand((2, 2), dtype=dtype, device=device)
+            alpha = 3
+
+            # addcmul is not supported for complex dtypes on cuda yet
+            if device.startswith('cuda') and dtype.is_complex:
+                self.assertRaises(RuntimeError, lambda: torch.addcmul(a, b, c, value=alpha))
+
     def check_internal_mem_overlap(self, inplace_op, num_inputs,
                                    dtype, device,
                                    expected_failure=False):
@@ -5835,6 +5891,64 @@ class TestTorchDeviceType(TestCase):
                 self.assertEqual((), torch.nn.functional.multi_margin_loss(input, target, reduction='mean').shape)
                 self.assertEqual((), torch.nn.functional.multi_margin_loss(input, target, reduction='sum').shape)
 
+    # Uses mismatched arange out size to trigger a warning
+    def test_cpp_warnings_have_python_context(self, device):
+        import inspect
+        # Creates long string in advance to avoid a too-long Python line
+        s = ".+Triggered internally at.+RangeFactories.+"
+
+        def cpp_warn_fn():
+            out = torch.empty((5,))
+            torch.arange(0, 3, out=out)
+            return out
+
+        # Checks eager-mode cpp warning
+        with warnings.catch_warnings(record=True) as w:
+            cpp_warn_fn()
+            frameinfo = inspect.getframeinfo(inspect.currentframe())
+            warning = w[0]
+
+            # Checks for cpp context in the warning message
+            self.assertTrue(re.search(s, str(warning.message)) is not None)
+
+            # Checks the Python features of the warning
+            # Note: the eager mode warning refers to the line in the function
+            # that throws the warning.
+            self.assertEqual(frameinfo.lineno - 6, warning.lineno)
+            self.assertEqual(len(w), 1)
+
+        # Checks jitted cpp warning
+        with warnings.catch_warnings(record=True) as w:
+            scripted_cpp_warn_fn = torch.jit.script(cpp_warn_fn)
+            scripted_cpp_warn_fn()
+            warning = w[0]
+
+            # Checks for cpp context in the warning message
+            self.assertTrue(re.search(s, str(warning.message)) is not None)
+
+            # Checks the Python features of the warning
+            # Note: the jitted warning's lineno refers to the call to the jitted
+            # function, which in our test suite has a layer of indirection
+            # that makes checking the Python lineno fragile
+            self.assertEqual(len(w), 1)
+
+        # Checks jitted Python warning
+        def warn_fn():
+            warnings.warn("Warning!")
+
+        # The jit mimics an eager-mode Python warning in this case
+        with warnings.catch_warnings(record=True) as w:
+            scripted_warn_fn = torch.jit.script(warn_fn)
+            scripted_warn_fn()
+            frameinfo = inspect.getframeinfo(inspect.currentframe())
+            warning = w[0]
+
+            self.assertTrue(re.search('Warning!', str(warning.message)) is not None)
+
+            # Checks the Python features of the warning
+            self.assertEqual(frameinfo.lineno - 6, warning.lineno)
+            self.assertEqual(len(w), 1)
+
     def _np_compare(self, fn_name, vals, device, dtype):
         assert TEST_NUMPY
 
@@ -5973,6 +6087,10 @@ class TestTorchDeviceType(TestCase):
             # This test won't work on torch.half because math.pow will generate a much more accurate result. We skip it
             # for now.
             if dtype == torch.half:
+                continue
+
+            # deferring to https://github.com/pytorch/pytorch/pull/36793
+            if dtype.is_complex:
                 continue
 
             m1 = torch.empty(0, dtype=dtype, device=device)
@@ -10099,6 +10217,8 @@ class TestTorchDeviceType(TestCase):
 
     def test_sign(self, device):
         for dtype in torch.testing.get_all_math_dtypes(device):
+            if dtype.is_complex:
+                continue
 
             # Include NaN for floating point numbers
             if dtype.is_floating_point:
@@ -10430,66 +10550,70 @@ class TestTorchDeviceType(TestCase):
             lambda: torch.multinomial(x, 3))
 
     def test_add(self, device):
-        # [res] torch.add([res,] tensor1, tensor2)
-        m1 = torch.randn(100, 100, device=device)
-        v1 = torch.randn(100, device=device)
+        dtypes = [torch.float, torch.double] + torch.testing.get_all_complex_dtypes()
+        for dtype in dtypes:
+            # [res] torch.add([res,] tensor1, tensor2)
+            m1 = torch.randn(100, 100, dtype=dtype, device=device)
+            v1 = torch.randn(100, dtype=dtype, device=device)
 
-        # contiguous
-        res1 = torch.add(m1[4], v1)
-        res2 = res1.clone().zero_()
-        for i in range(m1.size(1)):
-            res2[i] = m1[4, i] + v1[i]
-        self.assertEqual(res1, res2)
+            # contiguous
+            res1 = torch.add(m1[4], v1)
+            res2 = res1.clone().zero_()
+            for i in range(m1.size(1)):
+                res2[i] = m1[4, i] + v1[i]
+            self.assertEqual(res1, res2)
 
-        m1 = torch.randn(100, 100, device=device)
-        v1 = torch.randn(100, device=device)
+            m1 = torch.randn(100, 100, device=device)
+            v1 = torch.randn(100, device=device)
 
-        # non-contiguous
-        res1 = torch.add(m1[:, 4], v1)
-        res2 = res1.clone().zero_()
-        for i in range(m1.size(0)):
-            res2[i] = m1[i, 4] + v1[i]
-        self.assertEqual(res1, res2)
+            # non-contiguous
+            res1 = torch.add(m1[:, 4], v1)
+            res2 = res1.clone().zero_()
+            for i in range(m1.size(0)):
+                res2[i] = m1[i, 4] + v1[i]
+            self.assertEqual(res1, res2)
 
-        # [res] torch.add([res,] tensor, value)
-        m1 = torch.randn(10, 10, device=device)
+            # [res] torch.add([res,] tensor, value)
+            m1 = torch.randn(10, 10, device=device)
 
-        # contiguous
-        res1 = m1.clone()
-        res1[3].add_(2)
-        res2 = m1.clone()
-        for i in range(m1.size(1)):
-            res2[3, i] = res2[3, i] + 2
-        self.assertEqual(res1, res2)
+            # contiguous
+            res1 = m1.clone()
+            res1[3].add_(2)
+            res2 = m1.clone()
+            for i in range(m1.size(1)):
+                res2[3, i] = res2[3, i] + 2
+            self.assertEqual(res1, res2)
 
-        # non-contiguous
-        m1 = torch.randn(10, 10, device=device)
-        res1 = m1.clone()
-        res1[:, 3].add_(2)
-        res2 = m1.clone()
-        for i in range(m1.size(0)):
-            res2[i, 3] = res2[i, 3] + 2
-        self.assertEqual(res1, res2)
+            # non-contiguous
+            m1 = torch.randn(10, 10, device=device)
+            res1 = m1.clone()
+            res1[:, 3].add_(2)
+            res2 = m1.clone()
+            for i in range(m1.size(0)):
+                res2[i, 3] = res2[i, 3] + 2
+            self.assertEqual(res1, res2)
 
-        # inter-type
-        m1 = torch.randn(10, 10, device=device)
-        self.assertEqual(m1 + 3, m1 + torch.tensor(3))
-        self.assertEqual(3 + m1, torch.tensor(3) + m1)
+            # inter-type
+            m1 = torch.randn(10, 10, dtype=dtype, device=device)
+            self.assertEqual(m1 + 3, m1 + torch.tensor(3))
+            self.assertEqual(3 + m1, torch.tensor(3) + m1)
+
+            # contiguous + non-contiguous
+            m1 = torch.randn(10, 10, dtype=dtype, device=device)
+            m2 = torch.randn(10, 10, dtype=dtype, device=device).t()
+            res = m1 + m2
+            self.assertTrue(res.is_contiguous())
+            self.assertEqual(res, m1 + m2.contiguous())
+
+            # 1d + empty
+            m1 = torch.tensor([1.0], dtype=dtype, device=device)
+            m2 = torch.tensor([], dtype=dtype, device=device)
+            self.assertEqual(m1 + m2, [])
+
+        # inter-type unint8
         one = torch.tensor(1, dtype=torch.uint8, device=device)
         self.assertEqual(torch.add(one, 1), 2)
         self.assertEqual(torch.add(one, 1).dtype, torch.uint8)
-
-        # contiguous + non-contiguous
-        m1 = torch.randn(10, 10, device=device)
-        m2 = torch.randn(10, 10, device=device).t()
-        res = m1 + m2
-        self.assertTrue(res.is_contiguous())
-        self.assertEqual(res, m1 + m2.contiguous())
-
-        # 1d + empty
-        m1 = torch.tensor([1.0], dtype=torch.float, device=device)
-        m2 = torch.tensor([], dtype=torch.float, device=device)
-        self.assertEqual(m1 + m2, [])
 
         # bool
         m1 = torch.tensor([True, False, False, True, False, False], dtype=torch.bool, device=device)
@@ -11085,7 +11209,7 @@ class TestTorchDeviceType(TestCase):
 
     def test_addcmul(self, device):
         def rand_tensor(size, dtype, device):
-            if dtype.is_floating_point:
+            if dtype.is_floating_point or dtype.is_complex:
                 return torch.rand(size=size, dtype=dtype, device=device)
             if dtype == torch.uint8:
                 return torch.randint(1, 5, size=size, dtype=dtype, device=device)
@@ -11100,9 +11224,15 @@ class TestTorchDeviceType(TestCase):
                 alpha = 0.1
             else:
                 alpha = 3
+
+            # addcmul is not supported for complex dtypes on cuda yet
+            if device.startswith('cuda') and dtype.is_complex:
+                continue
+
             actual = torch.addcmul(a, b, c, value=alpha)
             expected = a + alpha * b * c
-            self.assertTrue(torch.allclose(expected, actual))
+
+            self.assertEqual(expected, actual)
 
             with self.maybeWarnsRegex(
                     UserWarning, "This overload of addcmul is deprecated"):
@@ -12025,7 +12155,7 @@ class TestTorchDeviceType(TestCase):
                 self.assertEqual(actual, torch.addcdiv(a, alpha, b, c))
 
         def non_zero_rand(size, dtype, device):
-            if dtype.is_floating_point:
+            if dtype.is_floating_point or dtype.is_complex:
                 a = torch.rand(size=size, dtype=dtype, device=device)
             elif dtype == torch.uint8:
                 a = torch.randint(1, 5, size=size, dtype=dtype, device=device)
@@ -12034,11 +12164,13 @@ class TestTorchDeviceType(TestCase):
             return a + (a == 0).type(dtype)
 
         for dtype in torch.testing.get_all_math_dtypes(device):
-            _test_addcdiv(
-                non_zero_rand((2, 2), dtype=dtype, device=device),
-                0.5,
-                non_zero_rand((2, 2), dtype=dtype, device=device),
-                non_zero_rand((2, 2), dtype=dtype, device=device))
+            # TODO: update this after torch.allclose is added for complex
+            if not dtype.is_complex:
+                _test_addcdiv(
+                    non_zero_rand((2, 2), dtype=dtype, device=device),
+                    0.5,
+                    non_zero_rand((2, 2), dtype=dtype, device=device),
+                    non_zero_rand((2, 2), dtype=dtype, device=device))
 
     # TODO: run on non-native device types
     @dtypes(torch.double)
@@ -12106,7 +12238,7 @@ class TestTorchDeviceType(TestCase):
             ("tan", doubles, True, True, 'cpu'),
             ("tan", doubles, False, True, 'cuda'),
             ("tanh", doubles, True, True, 'cpu'),
-            ("tanh", doubles, False, True, 'cuda'),
+            ("tanh", doubles, True, True, 'cuda'),
             ("trunc", doubles, True, True, 'cpu'),
             ("trunc", doubles, True, True, 'cuda')
         ]
@@ -12307,7 +12439,7 @@ class TestTorchDeviceType(TestCase):
     # passes on ROCm w/ python 2.7, fails w/ python 3.6
     @skipCUDAIfRocm
     # stft -> rfft -> _fft -> _fft_with_size -> _fft_mkl
-    @unittest.skipIf(not TEST_MKL, "PyTorch is built without MKL support")
+    @skipCPUIfNoMkl
     @dtypes(torch.double)
     def test_stft(self, device, dtype):
         if not TEST_LIBROSA:
@@ -12369,6 +12501,7 @@ class TestTorchDeviceType(TestCase):
         _test((10,), 5, 4, win_sizes=(1, 1), expected_error=RuntimeError)
 
     @skipIfRocm
+    @unittest.skipIf(not TEST_MKL, "PyTorch is built without MKL support")
     def test_fft_input_modification(self, device):
         # FFT functions should not modify their input (gh-34551)
 
@@ -12387,6 +12520,236 @@ class TestTorchDeviceType(TestCase):
         half_spectrum_copy = half_spectrum.clone()
         _ = torch.irfft(half_spectrum_copy, 2, signal_sizes=(2, 2))
         self.assertEqual(half_spectrum, half_spectrum_copy)
+
+    @onlyOnCPUAndCUDA
+    @unittest.skipIf(not TEST_MKL, "PyTorch is built without MKL support")
+    @dtypes(torch.double)
+    def test_istft_round_trip_simple_cases(self, device, dtype):
+        """stft -> istft should recover the original signale"""
+        def _test(input, n_fft, length):
+            stft = torch.stft(input, n_fft=n_fft)
+            inverse = torch.istft(stft, n_fft=n_fft, length=length)
+            self.assertEqual(input, inverse, exact_dtype=True)
+
+        _test(torch.ones(4, dtype=dtype, device=device), 4, 4)
+        _test(torch.zeros(4, dtype=dtype, device=device), 4, 4)
+
+    @onlyOnCPUAndCUDA
+    @unittest.skipIf(not TEST_MKL, "PyTorch is built without MKL support")
+    @dtypes(torch.double)
+    def test_istft_round_trip_various_params(self, device, dtype):
+        """stft -> istft should recover the original signale"""
+        def _test_istft_is_inverse_of_stft(stft_kwargs):
+            # generates a random sound signal for each tril and then does the stft/istft
+            # operation to check whether we can reconstruct signal
+            data_sizes = [(2, 20), (3, 15), (4, 10)]
+            num_trials = 100
+            istft_kwargs = stft_kwargs.copy()
+            del istft_kwargs['pad_mode']
+            for sizes in data_sizes:
+                for i in range(num_trials):
+                    original = torch.randn(*sizes, dtype=dtype, device=device)
+                    stft = torch.stft(original, **stft_kwargs)
+                    inversed = torch.istft(stft, length=original.size(1), **istft_kwargs)
+
+                    # trim the original for case when constructed signal is shorter than original
+                    original = original[..., :inversed.size(-1)]
+                    self.assertEqual(
+                        inversed, original, 'istft comparison against original', atol=7e-6, exact_dtype=True)
+
+        patterns = [
+            # hann_window, centered, normalized, onesided
+            {
+                'n_fft': 12,
+                'hop_length': 4,
+                'win_length': 12,
+                'window': torch.hann_window(12, dtype=dtype, device=device),
+                'center': True,
+                'pad_mode': 'reflect',
+                'normalized': True,
+                'onesided': True,
+            },
+            # hann_window, centered, not normalized, not onesided
+            {
+                'n_fft': 12,
+                'hop_length': 2,
+                'win_length': 8,
+                'window': torch.hann_window(8, dtype=dtype, device=device),
+                'center': True,
+                'pad_mode': 'reflect',
+                'normalized': False,
+                'onesided': False,
+            },
+            # hamming_window, centered, normalized, not onesided
+            {
+                'n_fft': 15,
+                'hop_length': 3,
+                'win_length': 11,
+                'window': torch.hamming_window(11, dtype=dtype, device=device),
+                'center': True,
+                'pad_mode': 'constant',
+                'normalized': True,
+                'onesided': False,
+            },
+            # hamming_window, not centered, not normalized, onesided
+            # window same size as n_fft
+            {
+                'n_fft': 5,
+                'hop_length': 2,
+                'win_length': 5,
+                'window': torch.hamming_window(5, dtype=dtype, device=device),
+                'center': False,
+                'pad_mode': 'constant',
+                'normalized': False,
+                'onesided': True,
+            },
+            # hamming_window, not centered, not normalized, not onesided
+            # window same size as n_fft
+            {
+                'n_fft': 3,
+                'hop_length': 2,
+                'win_length': 3,
+                'window': torch.hamming_window(3, dtype=dtype, device=device),
+                'center': False,
+                'pad_mode': 'reflect',
+                'normalized': False,
+                'onesided': False,
+            },
+        ]
+        for i, pattern in enumerate(patterns):
+            _test_istft_is_inverse_of_stft(pattern)
+
+    @onlyOnCPUAndCUDA
+    def test_istft_throws(self, device):
+        """istft should throw exception for invalid parameters"""
+        stft = torch.zeros((3, 5, 2), device=device)
+        # the window is size 1 but it hops 20 so there is a gap which throw an error
+        self.assertRaises(
+            RuntimeError, torch.istft, stft, n_fft=4,
+            hop_length=20, win_length=1, window=torch.ones(1))
+        # A window of zeros does not meet NOLA
+        invalid_window = torch.zeros(4, device=device)
+        self.assertRaises(
+            RuntimeError, torch.istft, stft, n_fft=4, win_length=4, window=invalid_window)
+        # Input cannot be empty
+        self.assertRaises(RuntimeError, torch.istft, torch.zeros((3, 0, 2)), 2)
+        self.assertRaises(RuntimeError, torch.istft, torch.zeros((0, 3, 2)), 2)
+
+    @onlyOnCPUAndCUDA
+    @dtypes(torch.double)
+    def test_istft_of_sine(self, device, dtype):
+        def _test(amplitude, L, n):
+            # stft of amplitude*sin(2*pi/L*n*x) with the hop length and window size equaling L
+            x = torch.arange(2 * L + 1, dtype=dtype)
+            original = amplitude * torch.sin(2 * math.pi / L * x * n)
+            # stft = torch.stft(original, L, hop_length=L, win_length=L,
+            #                   window=torch.ones(L), center=False, normalized=False)
+            stft = torch.zeros((L // 2 + 1, 2, 2), dtype=dtype)
+            stft_largest_val = (amplitude * L) / 2.0
+            if n < stft.size(0):
+                stft[n, :, 1] = -stft_largest_val
+
+            if 0 <= L - n < stft.size(0):
+                # symmetric about L // 2
+                stft[L - n, :, 1] = stft_largest_val
+
+            inverse = torch.istft(
+                stft, L, hop_length=L, win_length=L,
+                window=torch.ones(L, dtype=dtype), center=False, normalized=False)
+            # There is a larger error due to the scaling of amplitude
+            original = original[..., :inverse.size(-1)]
+            self.assertEqual(inverse, original, 1e-3)
+
+        _test(amplitude=123, L=5, n=1)
+        _test(amplitude=150, L=5, n=2)
+        _test(amplitude=111, L=5, n=3)
+        _test(amplitude=160, L=7, n=4)
+        _test(amplitude=145, L=8, n=5)
+        _test(amplitude=80, L=9, n=6)
+        _test(amplitude=99, L=10, n=7)
+
+    @onlyOnCPUAndCUDA
+    @dtypes(torch.double)
+    def test_istft_linearity(self, device, dtype):
+        num_trials = 100
+
+        def _test(data_size, kwargs):
+            for i in range(num_trials):
+                tensor1 = torch.randn(data_size, device=device, dtype=dtype)
+                tensor2 = torch.randn(data_size, device=device, dtype=dtype)
+                a, b = torch.rand(2, dtype=dtype, device=device)
+                istft1 = torch.istft(tensor1, **kwargs)
+                istft2 = torch.istft(tensor2, **kwargs)
+                istft = a * istft1 + b * istft2
+                estimate = torch.istft(a * tensor1 + b * tensor2, **kwargs)
+                self.assertEqual(istft, estimate, 1e-5)
+        patterns = [
+            # hann_window, centered, normalized, onesided
+            (
+                (2, 7, 7, 2),
+                {
+                    'n_fft': 12,
+                    'window': torch.hann_window(12, device=device, dtype=dtype),
+                    'center': True,
+                    'normalized': True,
+                    'onesided': True,
+                },
+            ),
+            # hann_window, centered, not normalized, not onesided
+            (
+                (2, 12, 7, 2),
+                {
+                    'n_fft': 12,
+                    'window': torch.hann_window(12, device=device, dtype=dtype),
+                    'center': True,
+                    'normalized': False,
+                    'onesided': False,
+                },
+            ),
+            # hamming_window, centered, normalized, not onesided
+            (
+                (2, 12, 7, 2),
+                {
+                    'n_fft': 12,
+                    'window': torch.hamming_window(12, device=device, dtype=dtype),
+                    'center': True,
+                    'normalized': True,
+                    'onesided': False,
+                },
+            ),
+            # hamming_window, not centered, not normalized, onesided
+            (
+                (2, 7, 3, 2),
+                {
+                    'n_fft': 12,
+                    'window': torch.hamming_window(12, device=device, dtype=dtype),
+                    'center': False,
+                    'normalized': False,
+                    'onesided': True,
+                },
+            )
+        ]
+        for data_size, kwargs in patterns:
+            _test(data_size, kwargs)
+
+    @onlyOnCPUAndCUDA
+    @skipCUDAIfRocm
+    def test_batch_istft(self, device):
+        original = torch.tensor([
+            [[4., 0.], [4., 0.], [4., 0.], [4., 0.], [4., 0.]],
+            [[0., 0.], [0., 0.], [0., 0.], [0., 0.], [0., 0.]],
+            [[0., 0.], [0., 0.], [0., 0.], [0., 0.], [0., 0.]]
+        ], device=device)
+
+        single = original.repeat(1, 1, 1, 1)
+        multi = original.repeat(4, 1, 1, 1)
+
+        i_original = torch.istft(original, n_fft=4, length=4)
+        i_single = torch.istft(single, n_fft=4, length=4)
+        i_multi = torch.istft(multi, n_fft=4, length=4)
+
+        self.assertEqual(i_original.repeat(1, 1), i_single, 1e-6, exact_dtype=True)
+        self.assertEqual(i_original.repeat(4, 1), i_multi, 1e-6, exact_dtype=True)
 
     @skipCUDAIfRocm
     def test_blas_empty(self, device):
@@ -12461,27 +12824,38 @@ class TestTorchDeviceType(TestCase):
             self.assertEqual([(2, 0, 0), (2, 0)], [A_LU.shape, pivots.shape])
 
     @skipCUDAIfRocm
-    def test_blas_alpha_beta_empty(self, device):
+    @dtypesIfCUDA(*(torch.float, torch.double) +
+                  # This test is disabled on CUDA 9, due to:
+                  # See: https://github.com/pytorch/pytorch/issues/31006
+                  ((torch.half,) if torch.version.cuda and not torch.version.cuda.startswith('9.') else ()))
+    @dtypes(*(set(torch.testing.get_all_dtypes()) - {torch.half, torch.bool, torch.complex64, torch.complex128}))
+    def test_blas_alpha_beta_empty(self, device, dtype):
+        if dtype is torch.bfloat16 and self.device_type == 'xla':
+            # TODO (@zasdfgbnm): this causes the following error on test
+            # TestTorchDeviceTypeXLA.test_blas_alpha_beta_empty_xla_bfloat16:
+            #
+            #   RuntimeError: _th_equal not supported on CPUType for BFloat16
+            return
         # ensure beta is respected
         value = 11
-        input = torch.full((2,), value, device=device)
-        mat = torch.ones((2, 0), device=device)
-        vec = torch.ones((0,), device=device)
-        out = torch.randn((2,), device=device)
+        input = torch.full((2,), value, dtype=dtype, device=device)
+        mat = torch.ones((2, 0), dtype=dtype, device=device)
+        vec = torch.ones((0,), dtype=dtype, device=device)
+        out = torch.empty((2,), dtype=dtype, device=device)
         alpha = 6
         beta = 3
-        self.assertEqual(torch.full((2,), beta * value, device=device),
+        self.assertEqual(torch.full((2,), beta * value, dtype=dtype, device=device),
                          torch.addmv(input=input, mat=mat, vec=vec, alpha=alpha, beta=beta))
-        self.assertEqual(torch.full((2,), beta * value, device=device),
+        self.assertEqual(torch.full((2,), beta * value, dtype=dtype, device=device),
                          torch.addmv(input=input, mat=mat, vec=vec, alpha=alpha, beta=beta, out=out))
 
         # torch.addmm
-        input = torch.full((2, 3), value, device=device)
-        mat2 = torch.ones((0, 3), device=device)
-        out = torch.randn((2, 3), device=device)
-        self.assertEqual(torch.full((2, 3), beta * value, device=device),
+        input = torch.full((2, 3), value, dtype=dtype, device=device)
+        mat2 = torch.ones((0, 3), dtype=dtype, device=device)
+        out = torch.empty((2, 3), dtype=dtype, device=device)
+        self.assertEqual(torch.full((2, 3), beta * value, dtype=dtype, device=device),
                          torch.addmm(input=input, mat1=mat, mat2=mat2, alpha=alpha, beta=beta))
-        self.assertEqual(torch.full((2, 3), beta * value, device=device),
+        self.assertEqual(torch.full((2, 3), beta * value, dtype=dtype, device=device),
                          torch.addmm(input=input, mat1=mat, mat2=mat2, alpha=alpha, beta=beta, out=out))
 
     @onlyCPU  # not supported by CUBLAS
@@ -14729,7 +15103,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
     @onlyCPU
     @dtypes(*torch.testing.get_all_math_dtypes('cpu'))
     def test_threshold(self, device, dtype):
-        if dtype != torch.uint8 and dtype != torch.float16:
+        if dtype != torch.uint8 and dtype != torch.float16 and not dtype.is_complex:
             # 100 is wide enough to use AVX2 instructions for all types
             x = torch.randn(100, dtype=torch.float, device=device).sign().to(dtype=dtype)
             y = torch.threshold(x, 0, 0)
@@ -14763,8 +15137,8 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
                              0.01)
             self.assertEqual(a1.div(a2), a1 / a2)
 
-    @dtypesIfCUDA(*torch.testing.get_all_math_dtypes('cuda'))
-    @dtypes(*torch.testing.get_all_math_dtypes('cpu'))
+    @dtypesIfCUDA(*set(torch.testing.get_all_math_dtypes('cuda')) - {torch.complex64, torch.complex128})
+    @dtypes(*set(torch.testing.get_all_math_dtypes('cpu')) - {torch.complex64, torch.complex128})
     def test_floor_divide_tensor(self, device, dtype):
         x = torch.randn(10, device=device).mul(30).to(dtype)
         y = torch.arange(1, 11, dtype=dtype, device=device)
@@ -14775,8 +15149,8 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         self.assertEqual(z.dtype, x.dtype)
         self.assertEqual(z, z_alt)
 
-    @dtypesIfCUDA(*torch.testing.get_all_math_dtypes('cuda'))
-    @dtypes(*torch.testing.get_all_math_dtypes('cpu'))
+    @dtypesIfCUDA(*set(torch.testing.get_all_math_dtypes('cuda')) - {torch.complex64, torch.complex128})
+    @dtypes(*set(torch.testing.get_all_math_dtypes('cpu')) - {torch.complex64, torch.complex128})
     def test_floor_divide_scalar(self, device, dtype):
         x = torch.randn(100, device=device).mul(10).to(dtype)
 
@@ -14811,10 +15185,12 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
     def test_rdiv(self, device, dtype):
         if dtype is torch.float16:
             return
-
-        x = torch.rand(100, device=device).add(1).mul(4).to(dtype)
+        elif dtype.is_complex:
+            x = torch.rand(100, dtype=dtype, device=device).add(1).mul(4)
+        else:
+            x = torch.rand(100, device=device).add(1).mul(4).to(dtype)
         y = 30 / x
-        if dtype.is_floating_point:
+        if dtype.is_floating_point or dtype.is_complex:
             z = torch.tensor([30 / v.item() for v in x], dtype=dtype, device=device)
         else:
             z = torch.tensor([math.trunc(30. / v.item()) for v in x], dtype=dtype, device=device)
