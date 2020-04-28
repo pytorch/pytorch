@@ -70,11 +70,15 @@ struct _str_wrapper<const char*> final {
 
 // For c10::str() with an empty argument list (which is common in our assert macros),
 // we don't want to pay the binary size for constructing and destructing a stringstream
-// or even constructing a string. Let's just return a reference to an empty string.
+// or even constructing a string. Let's just return a reference to a global empty string.
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wpragmas"
+#pragma GCC diagnostic ignored "-Wglobal-constructors"
+const std::string empty_string_literal;
+#pragma GCC diagnostic pop
 template<>
 struct _str_wrapper<> final {
   static const std::string& call() {
-    thread_local const std::string empty_string_literal;
     return empty_string_literal;
   }
 };

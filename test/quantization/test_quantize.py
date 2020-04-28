@@ -1787,6 +1787,4 @@ class TestRecordHistogramObserver(QuantizationTestCase):
 
 
 if __name__ == '__main__':
-    raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
-                       "\tpython test/test_quantization.py TESTNAME\n\n"
-                       "instead.")
+    run_tests()
