@@ -19,7 +19,7 @@
 # all factory functions that have 'backend_select' flag in its native_functions.yaml definition.
 
 from code_template import CodeTemplate
-from function_wrapper import gen_dispatch_key_init, needs_backend_select
+from function_wrapper import gen_dispatch_key_init
 
 GENERATED_COMMENT = CodeTemplate(
     "@" + "generated from ${filename}")
@@ -39,6 +39,16 @@ Tensor ${function_name}(${method_formals}) {
   return OP.callUnboxedWithDispatchKey<${formals_types}>(_dk, ${type_method_actuals});
 }
 """)
+
+def needs_backend_select(declaration_option):
+    # We register an op under the BackendSelect dispatch key
+    # if a TensorOptions argument has been gathered from its declared args
+    # We skip all the 'new_*' and '*_like' ops as they are special cased and avoid dispatching.
+    # See TypeDefault.cpp
+    if declaration_option['name'].endswith('_like') or declaration_option['name'].startswith('new_'):
+        return False
+
+    return any(a.get('dynamic_type') == 'TensorOptions' for a in declaration_option['arguments'])
 
 def register_backend_select_methods(declarations, template_path, file_manager):
     backend_select_method_definitions = []

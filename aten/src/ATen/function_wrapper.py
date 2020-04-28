@@ -723,6 +723,14 @@ def find_multidispatch_formals(formals):
     return [f for f in formals if is_multidispatch_formal(f)]
 
 
+def find_formal_by_type(formal_name, formals):
+    # type: (List[AtFormal]) -> Optional[AtFormal]
+    for formal in formals:
+        if formal_name == formal['dynamic_type']:
+            return formal
+    return None
+
+
 def format_formal(f):
     # type: (AtFormal) -> str
     return '{} {}'.format(f['type'], f['name'])
@@ -766,28 +774,17 @@ def gen_dispatch_key_init(var_name, formals):
     ]
 
 
-def needs_backend_select(declaration_option):
-    # We register an op under the BackendSelect dispatch key
-    # if a TensorOptions argument has been gathered from its declared args
-    # We skip all the 'new_*' and '*_like' ops as they are special cased and avoid dispatching.
-    # See TypeDefault.cpp
-    if declaration_option['name'].endswith('_like') or declaration_option['name'].startswith('new_'):
-        return False
-
-    return any(a.get('dynamic_type') == 'TensorOptions' for a in declaration_option['arguments'])
+def is_factory(option):
+    # type: (FunctionOption) -> bool
+    formals = option['formals_list']
+    return find_formal_by_type('TensorOptions', formals) and 'method' not in option['variants']
 
 
 def gen_device_init(option, backend_type_env):
     # type: (FunctionOption, Environment) -> List[str]
+    # generate a device init statement, if the passed function option is a Tensor factory.
     #
-    # generate a device init statement, if the passed function option
-    # requires one. Note: we use needs_backend_select() as a proxy for
-    # this condition, because that's where device initialization code
-    # was formerly generated. However it's not clear what motivated its
-    # presence there, or where initialization was done prior to backend
-    # select's introduction. TODO figure this out and adjust accordingly.
-    #
-    if not needs_backend_select(option):
+    if not is_factory(option):
         return []
 
     name = option['name']
@@ -1131,12 +1128,6 @@ def create_generic(top_env, declarations):
         option['method_actuals'] = [
             f['name'] if f['name'] != 'self' else 'const_cast<Tensor&>(*this)' for f in formals]
 
-        def find_formal(formal_name, formals):
-            for formal in formals:
-                if formal_name == formal['dynamic_type']:
-                    return formal
-            return None
-
         def gen_tensor_method(option, formals):
             # type: (Any, List[AtFormal]) -> FunctionCode
             def swizzle_self(f):  # blegh
@@ -1220,7 +1211,7 @@ def create_generic(top_env, declarations):
 
             return FunctionCode(definition=fn_definition, declaration=fn_declaration)
 
-        assert find_formal('Type', formals) is None, \
+        assert find_formal_by_type('Type', formals) is None, \
             "Found Type argument in {}({}). Use TensorOptions instead.".format(
                 option['name'], ", ".join(option['method_formals_with_defaults']))
 
@@ -1235,7 +1226,7 @@ def create_generic(top_env, declarations):
         # For method-only entries, the first argument should be self
         if is_method and not is_namespace_function:
             assert formals[0]['name'] == 'self'
-        is_factory_method = find_formal('TensorOptions', formals) and 'method' not in option['variants']
+        is_factory_method = is_factory(option)
 
         check_methods_do_not_start_with_underscore(option['name'], is_method)
 
@@ -1244,7 +1235,7 @@ def create_generic(top_env, declarations):
         # first argument.  Scalar type test will be removed once TH is removed.
         # If you need more complex device guard behavior, you should disable
         # device guard and then manually add the guards you need.
-        dispatch_options = find_formal('TensorOptions', formals)
+        dispatch_options = find_formal_by_type('TensorOptions', formals)
         guard_tensor = None if dispatch_options else find_dispatch_tensor(formals)
         option['device_guard_declaration'] = device_guard(option, dispatch_options, guard_tensor)
         option['named_guard_declaration'] = named_guard(option, find_tensors(formals),
