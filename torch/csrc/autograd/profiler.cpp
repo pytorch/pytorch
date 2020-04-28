@@ -201,7 +201,7 @@ void enableProfiler(ProfilerConfig config) {
       /* sampling_prob */ 1.0,
       /* scopes */ {RecordScope::FUNCTION, RecordScope::USER_SCOPE});
   state = new_state;
-  g_.emplace_back();
+  g_.emplace_back(std::make_shared<RecordFunctionGuard>());
 
   if(state == ProfilerState::CUDA) {
     // event recording appears to have some startup overhead, so we need to
