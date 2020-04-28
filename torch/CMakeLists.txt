@@ -41,78 +41,8 @@ set(TOOLS_PATH "${TORCH_ROOT}/tools")
 set(TORCH_PYTHON_SRCS
     ${GENERATED_THNN_CXX}
     ${GENERATED_CXX_PYTHON}
-    ${TORCH_SRC_DIR}/csrc/CudaIPCTypes.cpp
-    ${TORCH_SRC_DIR}/csrc/DataLoader.cpp
-    ${TORCH_SRC_DIR}/csrc/Device.cpp
-    ${TORCH_SRC_DIR}/csrc/Dtype.cpp
-    ${TORCH_SRC_DIR}/csrc/DynamicTypes.cpp
-    ${TORCH_SRC_DIR}/csrc/Exceptions.cpp
-    ${TORCH_SRC_DIR}/csrc/TypeInfo.cpp
-    ${TORCH_SRC_DIR}/csrc/Generator.cpp
-    ${TORCH_SRC_DIR}/csrc/Layout.cpp
-    ${TORCH_SRC_DIR}/csrc/MemoryFormat.cpp
-    ${TORCH_SRC_DIR}/csrc/python_dimname.cpp
-    ${TORCH_SRC_DIR}/csrc/QScheme.cpp
-    ${TORCH_SRC_DIR}/csrc/Module.cpp
-    ${TORCH_SRC_DIR}/csrc/PtrWrapper.cpp
-    ${TORCH_SRC_DIR}/csrc/Size.cpp
-    ${TORCH_SRC_DIR}/csrc/Storage.cpp
-    ${TORCH_SRC_DIR}/csrc/api/src/python/init.cpp
-    ${TORCH_SRC_DIR}/csrc/autograd/functions/init.cpp
-    ${TORCH_SRC_DIR}/csrc/autograd/init.cpp
-    ${TORCH_SRC_DIR}/csrc/autograd/python_anomaly_mode.cpp
-    ${TORCH_SRC_DIR}/csrc/autograd/python_cpp_function.cpp
-    ${TORCH_SRC_DIR}/csrc/autograd/python_engine.cpp
-    ${TORCH_SRC_DIR}/csrc/autograd/python_function.cpp
-    ${TORCH_SRC_DIR}/csrc/autograd/python_hook.cpp
-    ${TORCH_SRC_DIR}/csrc/autograd/python_legacy_variable.cpp
-    ${TORCH_SRC_DIR}/csrc/autograd/python_variable.cpp
-    ${TORCH_SRC_DIR}/csrc/autograd/python_variable_indexing.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/python/init.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/passes/onnx.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/passes/onnx/fixup_onnx_conditionals.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/passes/onnx/function_substitution.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/passes/onnx/fixup_onnx_loop.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/passes/onnx/helper.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/passes/onnx/prepare_division_for_onnx.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/passes/onnx/peephole.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/passes/onnx/cast_all_constant_to_floating.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/passes/onnx/constant_fold.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/passes/onnx/scalar_type_analysis.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/passes/onnx/unpack_quantized_weights.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/passes/onnx/prepare_inplace_ops_for_onnx.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/python/python_arg_flatten.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/python/python_custom_class.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/python/python_interpreter.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/python/python_ir.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/python/python_tracer.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/python/script_init.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/python/python_sugared_value.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/frontend/concrete_module_type.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/python/python_tree_views.cpp
-    ${TORCH_SRC_DIR}/csrc/multiprocessing/init.cpp
-    ${TORCH_SRC_DIR}/csrc/onnx/init.cpp
-    ${TORCH_SRC_DIR}/csrc/utils/init.cpp
-    ${TORCH_SRC_DIR}/csrc/utils/throughput_benchmark.cpp
-    ${TORCH_SRC_DIR}/csrc/serialization.cpp
-    ${TORCH_SRC_DIR}/csrc/tensor/python_tensor.cpp
-    ${TORCH_SRC_DIR}/csrc/utils.cpp
-    ${TORCH_SRC_DIR}/csrc/utils/cuda_lazy_init.cpp
-    ${TORCH_SRC_DIR}/csrc/utils/invalid_arguments.cpp
-    ${TORCH_SRC_DIR}/csrc/utils/object_ptr.cpp
-    ${TORCH_SRC_DIR}/csrc/utils/python_arg_parser.cpp
-    ${TORCH_SRC_DIR}/csrc/utils/structseq.cpp
-    ${TORCH_SRC_DIR}/csrc/utils/tensor_apply.cpp
-    ${TORCH_SRC_DIR}/csrc/utils/tensor_dtypes.cpp
-    ${TORCH_SRC_DIR}/csrc/utils/tensor_layouts.cpp
-    ${TORCH_SRC_DIR}/csrc/utils/tensor_list.cpp
-    ${TORCH_SRC_DIR}/csrc/utils/tensor_memoryformats.cpp
-    ${TORCH_SRC_DIR}/csrc/utils/tensor_qschemes.cpp
-    ${TORCH_SRC_DIR}/csrc/utils/tensor_new.cpp
-    ${TORCH_SRC_DIR}/csrc/utils/tensor_numpy.cpp
-    ${TORCH_SRC_DIR}/csrc/utils/tensor_types.cpp
-    ${TORCH_SRC_DIR}/csrc/utils/python_dispatch.cpp
     )
+append_filelist("libtorch_python_core_sources" TORCH_PYTHON_SRCS)
 
 # NB: This has to match the condition under which the JIT test directory
 #     is included (at the time of writing that's in caffe2/CMakeLists.txt).
@@ -243,23 +173,7 @@ endif()
 if(USE_DISTRIBUTED)
     list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_DISTRIBUTED)
     if(NOT MSVC)
-      list(APPEND TORCH_PYTHON_SRCS
-        ${TORCH_SRC_DIR}/csrc/distributed/autograd/init.cpp
-        ${TORCH_SRC_DIR}/csrc/distributed/c10d/comm.cpp
-        ${TORCH_SRC_DIR}/csrc/distributed/c10d/init.cpp
-        ${TORCH_SRC_DIR}/csrc/distributed/c10d/reducer.cpp
-        ${TORCH_SRC_DIR}/csrc/distributed/rpc/init.cpp
-        ${TORCH_SRC_DIR}/csrc/distributed/rpc/process_group_agent.cpp
-        ${TORCH_SRC_DIR}/csrc/distributed/rpc/py_rref.cpp
-        ${TORCH_SRC_DIR}/csrc/distributed/rpc/python_functions.cpp
-        ${TORCH_SRC_DIR}/csrc/distributed/rpc/python_rpc_handler.cpp
-        ${TORCH_SRC_DIR}/csrc/distributed/rpc/request_callback_impl.cpp
-        ${TORCH_SRC_DIR}/csrc/distributed/rpc/testing/faulty_process_group_agent.cpp
-        ${TORCH_SRC_DIR}/csrc/distributed/rpc/testing/init.cpp
-        ${TORCH_SRC_DIR}/csrc/distributed/rpc/unpickled_python_call.cpp
-        ${TORCH_SRC_DIR}/csrc/distributed/rpc/unpickled_python_remote_call.cpp
-        ${TORCH_SRC_DIR}/csrc/jit/runtime/register_distributed_ops.cpp
-        )
+      append_filelist("libtorch_python_distributed_sources" TORCH_PYTHON_SRCS)
       list(APPEND TORCH_PYTHON_LINK_LIBRARIES c10d)
       list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_C10D)
       if(USE_CUDA OR USE_ROCM)
