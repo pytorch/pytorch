@@ -99,8 +99,6 @@ if torch.cuda.is_available():
             RUN_CUDA_HALF = False
 
 
-PY35 = sys.version_info >= (3, 5)
-
 def canonical(graph):
     return torch._C._jit_pass_canonicalize(graph).str(False)
 
@@ -5201,6 +5199,13 @@ def foo(xyz):
                 return x
         self.getExportImportCopy(C())
 
+    def test_serialize_long_lines(self):
+        class OrderModuleLong(torch.nn.Module):
+            def forward(self, long_arg_name: List[torch.Tensor]):
+                return [(long_arg_name[1],), (long_arg_name[0].argmax(),)]
+        src = str(torch.jit.script(OrderModuleLong()).code)
+        # make long_arg_name[1] does not get reordered after the argmax
+        FileCheck().check("long_arg_name[1]").check("argmax").run(src)
 
     def test_tensor_shape(self):
         x = torch.empty(34, 56, 78)
@@ -5395,7 +5400,7 @@ a")
         def foo(a):
             return 0.5 == float('0.5 hello')
         s = torch.rand(1)
-        with self.assertRaisesRegex(RuntimeError, "only accepts a string of single float number"):
+        with self.assertRaisesRegex(RuntimeError, "could not convert string to float"):
             self.assertTrue(foo(s))
 
         @torch.jit.script
@@ -5479,7 +5484,6 @@ a")
         b = torch.rand(1, requires_grad=True)
         self.checkScript(func, (a, b), optimize=True)
 
-    @unittest.skipIf(not PY35, "Python 3.5 needed")
     def test_matmul_py3(self):
         code = dedent("""
         def fn(a, b):
@@ -6569,6 +6573,23 @@ a")
             return str((x, x))
 
         self.assertEqual("(1, 1)", to_str(1))
+
+    def test_int_cast(self):
+        @torch.jit.script
+        def to_int(x):
+            # type: (str) -> int
+            return int(x)
+
+        self.assertEqual(5, to_int('5'))
+        self.assertEqual(-5, to_int('-5'))
+        self.assertEqual(2147483647, to_int('2147483647'))
+        self.assertEqual(-2147483648, to_int('-2147483648'))
+
+        with self.assertRaisesRegex(RuntimeError, "invalid literal for int()"):
+            to_int('0x20')
+
+        with self.assertRaisesRegex(RuntimeError, "invalid literal for int()"):
+            to_int('0b0001')
 
     def test_python_frontend(self):
         def fn(x, y, z):
@@ -9967,12 +9988,19 @@ a")
 
     @unittest.skipIf(not TEST_MKL, "PyTorch is built without MKL support")
     def test_torch_functional(self):
-        def foo(input, n_fft):
+        def stft(input, n_fft):
             # type: (Tensor, int) -> Tensor
             return torch.stft(input, n_fft)
 
         inps = (torch.randn(10), 7)
-        self.assertEqual(foo(*inps), torch.jit.script(foo)(*inps))
+        self.assertEqual(stft(*inps), torch.jit.script(stft)(*inps))
+
+        def istft(input, n_fft):
+            # type: (Tensor, int) -> Tensor
+            return torch.istft(input, n_fft)
+
+        inps2 = (torch.stft(*inps), inps[1])
+        self.assertEqual(torch.istft(*inps2), torch.jit.script(torch.istft)(*inps2))
 
         def lu(x):
             # type: (Tensor) -> Tuple[Tensor, Tensor]
@@ -11068,7 +11096,6 @@ a")
         self.checkScript(fn2, (x, y, z), optimize=True)
         self.checkScript(fn3, (x, y, z), optimize=True)
 
-    @unittest.skipIf(not PY35, "Python 3.5 needed")
     def test_type_annotation_py3(self):
         code = dedent("""
         import torch
@@ -14138,7 +14165,6 @@ a")
             return fn
 
     #  Python AST Frontend , Python 3-style type annotations , Script function
-    @unittest.skipIf(not PY35, "Python 3.5 needed")
     def test_annot_ast_py3_fn(self):
         code = dedent('''
             from typing import Tuple, List, Optional
@@ -14155,7 +14181,6 @@ a")
             test_str.append(str(fn.schema))
         self.assertExpectedStripMangled("\n".join(test_str))
 
-    @unittest.skipIf(not PY35, "Python 3.5 needed")
     def test_multiline_annot_ast_py3_fn(self):
         code = dedent('''
             from typing import Tuple, List, Optional
@@ -14211,7 +14236,6 @@ a")
                 return a + b + c
 
     #  Python AST Frontend , Python 3-style type annotations , Script method
-    @unittest.skipIf(not PY35, "Python 3.5 needed")
     def test_annot_ast_py3_method(self):
         code = dedent('''
             from typing import Tuple, List, Optional
@@ -14233,7 +14257,6 @@ a")
         self.assertExpectedStripMangled("\n".join(test_str))
 
     #  Python AST Frontend , MyPy-style type comments , Script function
-    @unittest.skipIf(not PY35, "Python 3.5 needed")
     def test_annot_ast_mypy_fn(self):
         code = dedent('''
             import torch
@@ -14250,7 +14273,6 @@ a")
         self.assertExpected("\n".join(test_str))
 
     #  Python AST Frontend , MyPy-style type comments , Script method
-    @unittest.skipIf(not PY35, "Python 3.5 needed")
     def test_annot_ast_mypy_method(self):
         code = dedent('''
             import torch
@@ -17858,6 +17880,14 @@ class TestDocs(unittest.TestCase):
         if result.returncode != 0:
             report_error(result)
 
+
+class TestProducerVersion(unittest.TestCase):
+
+    def test_version(self):
+        # issue gh-32561
+        self.assertEqual(torch.onnx.producer_version, torch.__version__[:3])
+
+
 for test in autograd_method_tests():
     add_autograd_test(*test)
 
@@ -17878,11 +17908,9 @@ for test in criterion_tests:
 
 if __name__ == '__main__':
     run_tests()
-    PY36 = sys.version_info >= (3, 6)
-    if PY36:
-        import test_jit_py3
-        import jit.test_module_interface
-        suite = unittest.findTestCases(test_jit_py3)
-        unittest.TextTestRunner().run(suite)
-        suite = unittest.findTestCases(jit.test_module_interface)
-        unittest.TextTestRunner().run(suite)
+    import test_jit_py3
+    import jit.test_module_interface
+    suite = unittest.findTestCases(test_jit_py3)
+    unittest.TextTestRunner().run(suite)
+    suite = unittest.findTestCases(jit.test_module_interface)
+    unittest.TextTestRunner().run(suite)

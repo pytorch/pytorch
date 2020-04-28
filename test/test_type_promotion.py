@@ -229,9 +229,8 @@ class TestTypePromotion(TestCase):
     def test_many_promotions(self, device):
         # Can also include half on CPU in cases where it will be promoted to a
         # supported dtype
-        complex_dtypes = torch.testing.get_all_complex_dtypes()
-        dtypes1 = torch.testing.get_all_math_dtypes('cuda') + complex_dtypes
-        dtypes2 = torch.testing.get_all_math_dtypes(device) + complex_dtypes
+        dtypes1 = torch.testing.get_all_math_dtypes('cuda')
+        dtypes2 = torch.testing.get_all_math_dtypes(device)
         ops = [torch.add, torch.sub, torch.mul, torch.div, torch.rsub]
         for dt1, dt2 in itertools.product(dtypes1, dtypes2):
             for op, non_contiguous in itertools.product(ops, [True, False]):
@@ -337,7 +336,9 @@ class TestTypePromotion(TestCase):
             torch.int64: (1 << 35),
             torch.float16: (1 << 10),
             torch.float32: (1 << 20),
-            torch.float64: (1 << 35)
+            torch.float64: (1 << 35),
+            torch.complex64: (1 << 20),
+            torch.complex128: (1 << 35)
         }
         comparison_ops = [
             dict(
@@ -380,6 +381,8 @@ class TestTypePromotion(TestCase):
         for op in comparison_ops:
             for dt1 in torch.testing.get_all_math_dtypes(device):
                 for dt2 in torch.testing.get_all_math_dtypes(device):
+                    if (dt1.is_complex or dt2.is_complex) and not (op["name"] == "eq" or op["name"] == "ne"):
+                        continue
                     val1 = value_for_type[dt1]
                     val2 = value_for_type[dt2]
                     t1 = torch.tensor([val1], dtype=dt1, device=device)
@@ -415,11 +418,37 @@ class TestTypePromotion(TestCase):
                     self.assertTrue(t1.dtype == dt1)
                     self.assertTrue(t2.dtype == dt2)
 
+    # XLA tests fail for self.assertRaises for complex dtypes
+    @onlyOnCPUAndCUDA
+    def test_complex_assertraises(self, device):
+        comparison_ops = [
+            dict(name="lt", compare_op=lambda x, y: x < y, ),
+            dict(name="le", compare_op=lambda x, y: x <= y, ),
+            dict(name="gt", compare_op=lambda x, y: x > y, ),
+            dict(name="ge", compare_op=lambda x, y: x >= y, ),
+            dict(name="eq", compare_op=lambda x, y: x == y, ),
+            dict(name="ne", compare_op=lambda x, y: x != y, ),
+        ]
+        for op in comparison_ops:
+            for dt1 in torch.testing.get_all_math_dtypes(device):
+                for dt2 in torch.testing.get_all_math_dtypes(device):
+                    if (dt1.is_complex or dt2.is_complex) and not (op["name"] == "eq" or op["name"] == "ne"):
+                        u = torch.tensor([1], dtype=dt1, device=device)
+                        v = torch.tensor([2], dtype=dt2, device=device)
+                        self.assertRaises(RuntimeError, lambda: torch.tensor([op["compare_op"](u, v)], dtype=torch.bool))
+
+        for dtype in [torch.complex64, torch.complex128]:
+            t = self._get_test_tensor(device, dtype, False)
+            self.assertRaises(RuntimeError, lambda: t.to_sparse())
+
     @float_double_default_dtype
     def test_lt_with_type_promotion(self, device):
         for dt in torch.testing.get_all_math_dtypes(device):
             x = torch.tensor([0], dtype=dt, device=device)
             expected = torch.tensor([True], dtype=torch.bool, device=device)
+
+            if dt.is_complex:
+                continue
 
             actual = x < 0.5
             self.assertTrue(actual, expected)
@@ -536,6 +565,7 @@ class TestTypePromotion(TestCase):
             # ensure sparsity. Bool should already have sufficient sparsity.
             mask = self._get_test_tensor(device, torch.bool)
             t = t * mask
+
         if coalesced:
             s = t.to_sparse()
         else:
@@ -561,6 +591,9 @@ class TestTypePromotion(TestCase):
         return None
 
     def _test_sparse_op(self, op_name, inplace, dtype1, dtype2, device, coalesced):
+        if dtype1.is_complex or dtype2.is_complex:
+            return
+
         suffix = '_' if inplace else ''
         err = "{} {}({}, {})".format("  coalesced" if coalesced else "uncoalesced", op_name + suffix, dtype1, dtype2)
 
@@ -571,6 +604,7 @@ class TestTypePromotion(TestCase):
 
         (dense1, sparse1) = self._test_sparse_op_input_tensors(device, dtype1, coalesced)
         (dense2, sparse2) = self._test_sparse_op_input_tensors(device, dtype2, coalesced, op_name != 'div')
+
         common_dtype = torch.result_type(dense1, dense2)
         if self.device_type == 'cpu' and common_dtype == torch.half:
             self.assertRaises(RuntimeError, lambda: op(s1, d2))
@@ -803,14 +837,6 @@ class TestTypePromotion(TestCase):
                     undesired_failure = True
 
                 if torch_type in float16_failures and np_type is np.float16:
-                    undesired_failure = True
-
-                # bool x complex interactions are not working as intended.
-                # See https://github.com/pytorch/pytorch/issues/36057.
-                if torch_type in (torch.complex64, torch.complex128) and np_type is np.bool:
-                    undesired_failure = True
-
-                if torch_type is torch.bool and np_type in (np.complex64, np.complex128):
                     undesired_failure = True
 
                 # Expects the same result if undesired_failure is false

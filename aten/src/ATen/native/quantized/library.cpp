@@ -2,6 +2,8 @@
 
 #include <torch/custom_class.h>
 #include <ATen/native/quantized/cpu/conv_packed_params.h>
+#include <ATen/native/quantized/cpu/fbgemm_utils.h>
+
 template <int kSpatialDim>
 torch::jit::class_<ConvPackedParamsBase<kSpatialDim>> register_conv_params();
 
