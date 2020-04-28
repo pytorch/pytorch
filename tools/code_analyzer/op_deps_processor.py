@@ -64,7 +64,7 @@ def process_base_ops(graph, base_ops):
     # add base ops section at the beginning
     graph.insert(0, {
         'name': '__BASE__',
-        'depends': [ {'name': name} for name in base_ops ]})
+        'depends': [{'name': name} for name in base_ops]})
 
 
 def convert(fname, graph, OUTPUT, OP, OP_DEP):
