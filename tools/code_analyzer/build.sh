@@ -107,9 +107,18 @@ convert_output_to_bazel() {
 
   DEST="${BUILD_ROOT}/pt_deps.bzl"
 
-  python -m tools.code_analyzer.op_deps_processor \
-    --op_dependency "${OUTPUT}" \
+  args=(
+    --op_dependency "${OUTPUT}"
     --output "${DEST}"
+  )
+
+  if [ -n "${BASE_OPS_FILE}" ] && [ -f "${BASE_OPS_FILE}" ]; then
+    args+=(
+      --base_ops $(< ${BASE_OPS_FILE})
+    )
+  fi
+
+  python -m tools.code_analyzer.op_deps_processor "${args[@]}"
 
   echo "Deployed file at: ${DEST}"
 }
