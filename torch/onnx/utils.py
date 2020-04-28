@@ -811,7 +811,7 @@ def _run_symbolic_function(g, n, inputs, env, operator_export_type=OperatorExpor
                 symbolic_name = 'prim_' + op_name
                 domain = ''
                 symbolic_fn = _find_symbolic_fn(ns, domain, symbolic_name, opset_version,
-                                           operator_export_type)
+                                                operator_export_type)
                 if symbolic_fn is not None:
                     return symbolic_fn
                 attrs = {k: n[k] for k in n.attributeNames()}
@@ -832,7 +832,7 @@ def _run_symbolic_function(g, n, inputs, env, operator_export_type=OperatorExpor
             error_msg = "Have you registered your symbolic function with " \
                         "torch.onnx.register_custom_op_symbolic(symbolic_name, symbolic_fn)?"
             symbolic_fn = _find_symbolic_fn(ns, domain, op_name, opset_version, operator_export_type,
-                                             error_msg)
+                                            error_msg)
             if symbolic_fn is not None:
                 return symbolic_fn
             attrs = {k: n[k] for k in n.attributeNames()}
