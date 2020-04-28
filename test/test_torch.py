@@ -10207,6 +10207,12 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(a.dtype, dtype)
         self.assertEqual(a.size(), torch.Size([1]))
 
+    @dtypes(torch.float, torch.double)
+    def test_geometric(self, device, dtype):
+        a = torch.tensor([10], dtype=dtype, device=device).geometric_(0.5)
+        self.assertEqual(a.dtype, dtype)
+        self.assertEqual(a.size(), torch.Size([1]))
+
     def test_empty_strided(self, device):
         for shape in [(2, 3, 4), (0, 2, 0)]:
             # some of these cases are pretty strange, just verifying that if as_strided
@@ -10343,11 +10349,6 @@ class TestTorchDeviceType(TestCase):
         y = torch.ones([2, 3, 1], dtype=torch.uint8, device=device)
         y[-1][-1][-1] = 0
         self.assertEqual(y, x.all(2, keepdim=True))
-
-    def test_geometric(self, device):
-        a = torch.tensor([10], dtype=torch.float, device=device).geometric_(0.5)
-        self.assertEqual(a.dtype, torch.float)
-        self.assertEqual(a.size(), torch.Size([1]))
 
     @dtypes(torch.float32)
     def test_exponential(self, device, dtype):

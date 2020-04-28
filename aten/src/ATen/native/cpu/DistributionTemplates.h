@@ -255,4 +255,24 @@ struct LogNormalKernel {
   }
 };
 
+// =================================================== Geometric ======================================================
+
+template<typename RNG>
+void geometric_kernel(TensorIterator& iter, double p, RNG generator) {
+  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "geometric_cpu", [&]() {
+    std::lock_guard<std::mutex> lock(generator->mutex_);
+    cpu_serial_kernel(iter, [p, generator]() -> scalar_t {
+      at::geometric_distribution<double> geometric(p);
+      return (scalar_t)geometric(generator);
+    });
+  });
+}
+
+template<typename RNG>
+struct GeometricKernel {
+  void operator()(TensorIterator& iter, double p, c10::optional<Generator> gen) {
+    geometric_kernel(iter, p, check_generator<RNG>(gen));
+  }
+};
+
 }}}}

@@ -298,6 +298,16 @@ at::Tensor& log_normal_impl_(at::Tensor& self, double mean, double std, c10::opt
   return self;
 }
 
+// =================================================== Geometric ======================================================
+
+template<template<typename> class geometric_kernel, typename RNG>
+Tensor& geometric_impl_(Tensor& self, double p, c10::optional<Generator> gen) {
+  TORCH_CHECK(0 < p && p < 1, "geometric_ expects p to be in (0, 1), but got p=", p);
+  auto iter = TensorIterator::nullary_op(self);
+  geometric_kernel<RNG>()(iter, p, gen);
+  return self;
+}
+
 #undef CHECK_OUT_OF_BOUNDS_AND_SHOW_WARNING
 
 }}}
