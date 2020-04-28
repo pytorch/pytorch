@@ -12,9 +12,9 @@
 #include <torch/csrc/jit/serialization/source_range_serialization.h>
 #include <torch/csrc/jit/serialization/unpickler.h>
 
-#include "caffe2/serialize/file_adapter.h"
-#include "caffe2/serialize/inline_container.h"
-#include "caffe2/serialize/istream_adapter.h"
+#include <caffe2/serialize/file_adapter.h>
+#include <caffe2/serialize/inline_container.h>
+#include <caffe2/serialize/istream_adapter.h>
 
 #include <ATen/ATen.h>
 
@@ -135,7 +135,7 @@ class ScriptModuleDeserializer final {
 
 IValue ScriptModuleDeserializer::readArchive(const std::string& archive_name) {
   auto type_resolver = [&](const c10::QualifiedName& qn) {
-    auto cls = source_importer_.loadNamedType(qn)->expect<ClassType>();
+    auto cls = source_importer_.loadType(qn);
     return c10::StrongTypePtr(compilation_unit_, std::move(cls));
   };
 
