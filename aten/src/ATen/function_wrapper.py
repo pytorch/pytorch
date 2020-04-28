@@ -724,7 +724,7 @@ def find_multidispatch_formals(formals):
 
 
 def find_formal_by_type(formal_name, formals):
-    # type: (List[AtFormal]) -> Optional[AtFormal]
+    # type: (str, List[AtFormal]) -> Optional[AtFormal]
     for formal in formals:
         if formal_name == formal['dynamic_type']:
             return formal
