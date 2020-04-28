@@ -110,8 +110,8 @@ Tensor new_with_sizes(c10::DispatchKey dispatch_key, at::ScalarType scalar_type,
   return torch::empty(sizes, options(dispatch_key, scalar_type, device));
 }
 
-Tensor new_with_storage(c10::DispatchKey dispatch_key, at::ScalarType scalar_type, Storage storage) {
-  auto tensor = at::empty({}, options(dispatch_key, scalar_type));
+Tensor new_with_storage(c10::DispatchKey dispatch_key, Storage storage) {
+  auto tensor = at::empty({}, options(dispatch_key, c10::typeMetaToScalarType(storage.dtype())));
   tensor.set_(std::move(storage));
   return tensor;
 }
@@ -489,7 +489,7 @@ Tensor legacy_tensor_ctor(c10::DispatchKey dispatch_key, at::ScalarType scalar_t
     at::OptionalDeviceGuard device_guard(deviceOptional);
     return at::empty({0}, options(dispatch_key, scalar_type));
   } else if (r.idx == 1) {
-    return new_with_storage(dispatch_key, scalar_type, r.storage(0));
+    return new_with_storage(dispatch_key, r.storage(0));
   } else if (r.idx == 2) {
     auto cdata = reinterpret_cast<void*>(r.toInt64(0));
     return at::unsafeTensorFromTH(cdata, true);
@@ -536,7 +536,7 @@ Tensor legacy_tensor_new(c10::DispatchKey dispatch_key, at::ScalarType scalar_ty
     at::OptionalDeviceGuard device_guard(deviceOptional);
     return at::empty({0}, options(dispatch_key, scalar_type));
   } else if (r.idx == 1) {
-    return new_with_storage(dispatch_key, scalar_type, r.storage(0));
+    return new_with_storage(dispatch_key, r.storage(0));
   } else if (r.idx == 2) {
     auto cdata = reinterpret_cast<void*>(r.toInt64(0));
     return at::unsafeTensorFromTH(cdata, true);
