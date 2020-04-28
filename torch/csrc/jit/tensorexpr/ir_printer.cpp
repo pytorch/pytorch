@@ -459,6 +459,23 @@ void IRPrinter::visit(const Cond* v) {
   }
 }
 
+void IRPrinter::visit(const AtomicAdd* v) {
+  emitIndent();
+  os() << "atomicAdd(&" << *v->base_handle() << "[";
+  size_t i = 0;
+  for (const Expr* ind : v->indices()) {
+    if (i++) {
+      os() << ", ";
+    }
+    ind->accept(this);
+  }
+  if (v->indices().empty()) {
+    os() << "0";
+  }
+  os() << "], " << *v->value() << ");";
+  os() << std::endl;
+}
+
 void IRPrinter::emitIndent() {
   os() << std::setw(2 * indent_) << "";
 }
