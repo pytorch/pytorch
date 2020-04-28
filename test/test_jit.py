@@ -17838,6 +17838,14 @@ class TestDocs(unittest.TestCase):
         if result.returncode != 0:
             report_error(result)
 
+
+class TestProducerVersion(unittest.TestCase):
+
+    def test_version(self):
+        # issue gh-32561
+        self.assertEqual(torch.onnx.producer_version, torch.__version__[:3])
+
+
 for test in autograd_method_tests():
     add_autograd_test(*test)
 
