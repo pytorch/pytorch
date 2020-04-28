@@ -78,24 +78,24 @@ void cpu_upsample_nearest(
   int64_t input_width = input_sizes[ndim - 1];
   int64_t output_width = output_sizes[ndim - 1];
 
-  auto loop1d = [&](int64_t start, int64_t end) {
+  auto loop1d = [&](int64_t begin, int64_t end) {
     int64_t c = 0;
     int64_t ow = 0;
-    data_index_init(start, c, channels, ow, output_width);
-    for (int64_t i = start; i < end; i++) {
+    data_index_init(begin, c, channels, ow, output_width);
+    for (int64_t i = begin; i < end; i++) {
       int64_t iw = nearest_idx(ow, input_width, output_width, scales[0]);
       output_data[i] = input_data[c * input_width + iw];
       data_index_step(c, channels, ow, output_width);
     }
   };
 
-  auto loop2d = [&](int64_t start, int64_t end) {
+  auto loop2d = [&](int64_t begin, int64_t end) {
     int64_t c = 0;
     int64_t oh = 0;
     int64_t ow = 0;
-    data_index_init(start, c, channels, oh, output_height, ow, output_width);
+    data_index_init(begin, c, channels, oh, output_height, ow, output_width);
 
-    for (int64_t i = start; i < end; i++) {
+    for (int64_t i = begin; i < end; i++) {
       int64_t ih = nearest_idx(oh, input_height, output_height, scales[0]);
       int64_t iw = nearest_idx(ow, input_width, output_width, scales[1]);
       output_data[i] = input_data[c * input_height * input_width + ih * input_width + iw];
@@ -103,14 +103,14 @@ void cpu_upsample_nearest(
     }
   };
 
-  auto loop3d = [&](int64_t start, int64_t end) {
+  auto loop3d = [&](int64_t begin, int64_t end) {
     int64_t c = 0;
     int64_t od = 0;
     int64_t oh = 0;
     int64_t ow = 0;
-    data_index_init(start, c, channels, od, output_depth, oh, output_height, ow, output_width);
+    data_index_init(begin, c, channels, od, output_depth, oh, output_height, ow, output_width);
 
-    for (int64_t i = start; i < end; i++) {
+    for (int64_t i = begin; i < end; i++) {
       int64_t id = nearest_idx(od, input_depth, output_depth, scales[0]);
       int64_t ih = nearest_idx(oh, input_height, output_height, scales[1]);
       int64_t iw = nearest_idx(ow, input_width, output_width, scales[2]);
@@ -169,46 +169,49 @@ void cpu_upsample_nearest_channels_last(
   int64_t numel = output.numel();
 
   using Vec = vec256::Vec256<scalar_t>;
-  auto loop2d = [&](int64_t start, int64_t end) {
+  auto copy_func_vec = [](scalar_t* out, scalar_t* in, int64_t size) {
+    int64_t d = 0;
+    for (; d < size - (size % Vec::size()); d += Vec::size()) {
+      Vec out_vec = Vec::loadu(in + d);
+      out_vec.store(out + d);
+    }
+    if (size - d > 0) {
+      Vec out_vec = Vec::loadu(in + d, size - d);
+      out_vec.store(out + d, size - d);
+    }
+  };
+
+  auto loop2d = [&](int64_t begin, int64_t end) {
     int64_t n = 0;
     int64_t oh = 0;
     int64_t ow = 0;
-    data_index_init(start, n, num_batches, oh, output_height, ow, output_width);
+    data_index_init(begin, n, num_batches, oh, output_height, ow, output_width);
 
-    for (int64_t i = start; i < end; i++) {
+    for (int64_t i = begin; i < end; i++) {
       int64_t ih = nearest_idx(oh, input_height, output_height, scales[0]);
       int64_t iw = nearest_idx(ow, input_width, output_width, scales[1]);
-      int64_t j = n * (input_height * input_width * channels)
-          + ih * (input_width * channels) + iw * channels;
-      vec256::map(
-          [](Vec x) { return x; },
-          &output_data[i],
-          &input_data[j],
-          channels);
+      int64_t j = n * input_height * input_width * channels +
+          ih * input_width * channels + iw * channels;
+      copy_func_vec(&output_data[i], &input_data[j], channels);
       data_index_step(n, num_batches, oh, output_height, ow, output_width);
     }
   };
 
-  auto loop3d = [&](int64_t start, int64_t end) {
+  auto loop3d = [&](int64_t begin, int64_t end) {
     int64_t n = 0;
     int64_t od = 0;
     int64_t oh = 0;
     int64_t ow = 0;
-    data_index_init(start, n, num_batches, oh, output_height, ow, output_width);
-    data_index_init(start, n, num_batches, od, output_depth, oh, output_height, ow, output_width);
+    data_index_init(begin, n, num_batches, od, output_depth, oh, output_height, ow, output_width);
 
-    for (int64_t i = start; i < end; i++) {
+    for (int64_t i = begin; i < end; i++) {
       int64_t id = nearest_idx(od, input_depth, output_depth, scales[0]);
       int64_t ih = nearest_idx(oh, input_height, output_height, scales[1]);
       int64_t iw = nearest_idx(ow, input_width, output_width, scales[2]);
-      int64_t j = n * (input_depth * input_height * input_width * channels)
-          + id * (input_height * input_width * channels)
-          + ih * (input_width * channels) + iw * channels;
-      vec256::map(
-          [](Vec x) { return x; },
-          &output_data[i],
-          &input_data[j],
-          channels);
+      int64_t j = n * input_depth * input_height * input_width * channels +
+          id * input_height * input_width * channels +
+          ih * input_width * channels + iw * channels;
+      copy_func_vec(&output_data[i], &input_data[j], channels);
       data_index_step(n, num_batches, od, output_depth, oh, output_height, ow, output_width);
     }
   };
@@ -312,7 +315,6 @@ void cpu_upsample_nearest_backward(
     at::parallel_for(0, channels, at::internal::GRAIN_SIZE / output_slice_size, loop3d);
   }
 
-  // Should this actually check for is_contiguous(input.suggest_memory_format())
   if (!grad_input_.is_contiguous()) {
     grad_input_.copy_(grad_input);
   }
@@ -484,6 +486,175 @@ void cpu_upsample_linear(
   }
 
   if (!output_.is_contiguous()) {
+    output_.copy_(output);
+  }
+}
+
+template <typename scalar_t, typename scale_type>
+void cpu_upsample_linear_channels_last(
+    Tensor& output_,
+    const Tensor& input_,
+    bool align_corners,
+    const scale_type& scales) {
+  TORCH_CHECK(input_.dtype() == output_.dtype(), "expected dtype ", input_.dtype(),
+              " for `output` but got dtype ", output_.dtype());
+
+  auto input_sizes = input_.sizes().vec();
+  auto output_sizes = output_.sizes().vec();
+  auto ndim = input_sizes.size();
+  TORCH_CHECK(ndim >=4 && ndim <= 5, "Upsample with NHWC format supports tensors with 4 or 5 dims.")
+
+  auto channels_last_memory_format = ndim == 4 ? at::MemoryFormat::ChannelsLast : at::MemoryFormat::ChannelsLast3d;
+  auto input = input_.contiguous(channels_last_memory_format);
+  auto output = output_.contiguous(channels_last_memory_format);
+
+  auto input_data = input.data_ptr<scalar_t>();
+  auto output_data = output.data_ptr<scalar_t>();
+
+  int64_t num_batches =  input_sizes[0];
+  int64_t channels =  input_sizes[1];
+  int64_t input_depth = (ndim == 5) ? input_sizes[2] : 1;
+  int64_t output_depth = (ndim == 5) ? output_sizes[2] : 1;
+  int64_t input_height = (ndim >= 4) ? input_sizes[ndim - 2] : 1;
+  int64_t output_height = (ndim >= 4) ? output_sizes[ndim - 2] : 1;
+  int64_t input_width = input_sizes[ndim - 1];
+  int64_t output_width = output_sizes[ndim - 1];
+
+  int64_t output_slice_size = output_depth * output_height * output_width * channels;
+
+  using Vec = vec256::Vec256<scalar_t>;
+  auto loop2d = [&](int64_t begin, int64_t end) {
+    const scalar_t height_scale = area_pixel_compute_scale<scalar_t>(
+        input_height, output_height, align_corners, scales[0]);
+    const scalar_t width_scale = area_pixel_compute_scale<scalar_t>(
+        input_width, output_width, align_corners, scales[1]);
+
+    auto input_indexr = [=](int64_t n, int64_t h, int64_t w) {
+      return input_data + n * input_height * input_width * channels +
+          h * input_width * channels + w * channels;
+    };
+
+    int64_t ih0, ih1, iw0, iw1;
+    scalar_t h0lambda, h1lambda, w0lambda, w1lambda;
+    for (int64_t n = begin; n < end; n++) {
+      for (int64_t oh = 0; oh < output_height; oh++) {
+        compute_source_index_and_lambda(
+            ih0, ih1, h0lambda, h1lambda, height_scale, oh, input_height, output_height, align_corners);
+        for (int64_t ow = 0; ow < output_width; ow++) {
+          compute_source_index_and_lambda(
+              iw0, iw1, w0lambda, w1lambda, width_scale, ow, input_width, output_width, align_corners);
+
+          scalar_t* out = output_data + n * output_slice_size +
+              oh * output_width * channels + ow * channels;
+          scalar_t* i00 = input_indexr(n, ih0, iw0);
+          scalar_t* i01 = input_indexr(n, ih0, iw1);
+          scalar_t* i10 = input_indexr(n, ih1, iw0);
+          scalar_t* i11 = input_indexr(n, ih1, iw1);
+
+          int64_t size = channels;
+          int64_t d = 0;
+          for (; d < size - (size % Vec::size()); d += Vec::size()) {
+            Vec out_vec =
+                Vec(h0lambda * w0lambda) * Vec::loadu(i00 + d) + /* h0 * w0 * i00 */
+                Vec(h0lambda * w1lambda) * Vec::loadu(i01 + d) + /* h0 * w1 * i01 */
+                Vec(h1lambda * w0lambda) * Vec::loadu(i10 + d) + /* h1 * w0 * i10 */
+                Vec(h1lambda * w1lambda) * Vec::loadu(i11 + d);  /* h1 * w1 * i11 */
+            out_vec.store(out + d);
+          }
+          if (size - d > 0) {
+            Vec out_vec =
+                Vec(h0lambda * w0lambda) * Vec::loadu(i00 + d, size - d) + /* h0 * w0 * i00 */
+                Vec(h0lambda * w1lambda) * Vec::loadu(i01 + d, size - d) + /* h0 * w1 * i01 */
+                Vec(h1lambda * w0lambda) * Vec::loadu(i10 + d, size - d) + /* h1 * w0 * i10 */
+                Vec(h1lambda * w1lambda) * Vec::loadu(i11 + d, size - d);  /* h1 * w1 * i11 */
+            out_vec.store(out + d, size - d);
+          }
+        }
+      }
+    }
+  };
+
+  auto loop3d = [&](int64_t begin, int64_t end) {
+    const scalar_t depth_scale = area_pixel_compute_scale<scalar_t>(
+        input_depth, output_depth, align_corners, scales[0]);
+    const scalar_t height_scale = area_pixel_compute_scale<scalar_t>(
+        input_height, output_height, align_corners, scales[1]);
+    const scalar_t width_scale = area_pixel_compute_scale<scalar_t>(
+        input_width, output_width, align_corners, scales[2]);
+
+    auto input_indexr = [=](int64_t n, int64_t d, int64_t h, int64_t w) {
+      return input_data + n * input_depth * input_height * input_width * channels +
+          d * input_height * input_width * channels +
+          h * input_width * channels + w * channels;
+    };
+
+    int64_t id0, id1, ih0, ih1, iw0, iw1;
+    scalar_t d0lambda, d1lambda, h0lambda, h1lambda, w0lambda, w1lambda;
+    for (int64_t n = begin; n < end; n++) {
+      for (int64_t od = 0; od < output_depth; od++) {
+        compute_source_index_and_lambda(
+            id0, id1, d0lambda, d1lambda, depth_scale, od, input_depth, output_depth, align_corners);
+        for (int64_t oh = 0; oh < output_height; oh++) {
+           compute_source_index_and_lambda(
+               ih0, ih1, h0lambda, h1lambda, height_scale, oh, input_height, output_height, align_corners);
+           for (int64_t ow = 0; ow < output_width; ow++) {
+              compute_source_index_and_lambda(
+                  iw0, iw1, w0lambda, w1lambda, width_scale, ow, input_width, output_width, align_corners);
+
+              scalar_t* out = output_data + n * output_slice_size +
+                  od * output_height * output_width * channels +
+                  oh * output_width * channels + ow * channels;
+              scalar_t* i000 = input_indexr(n, id0, ih0, iw0);
+              scalar_t* i001 = input_indexr(n, id0, ih0, iw1);
+              scalar_t* i010 = input_indexr(n, id0, ih1, iw0);
+              scalar_t* i011 = input_indexr(n, id0, ih1, iw1);
+              scalar_t* i100 = input_indexr(n, id1, ih0, iw0);
+              scalar_t* i101 = input_indexr(n, id1, ih0, iw1);
+              scalar_t* i110 = input_indexr(n, id1, ih1, iw0);
+              scalar_t* i111 = input_indexr(n, id1, ih1, iw1);
+
+              int64_t size = channels;
+              int64_t d = 0;
+              for (; d < size - (size % Vec::size()); d += Vec::size()) {
+                Vec out_vec =
+                    Vec(d0lambda * h0lambda * w0lambda) * Vec::loadu(i000 + d) + /* d0 * h0 * w0 * i000 */
+                    Vec(d0lambda * h0lambda * w1lambda) * Vec::loadu(i001 + d) + /* d0 * h0 * w1 * i001 */
+                    Vec(d0lambda * h1lambda * w0lambda) * Vec::loadu(i010 + d) + /* d0 * h1 * w0 * i010 */
+                    Vec(d0lambda * h1lambda * w1lambda) * Vec::loadu(i011 + d) + /* d0 * h1 * w1 * i011 */
+                    Vec(d1lambda * h0lambda * w0lambda) * Vec::loadu(i100 + d) + /* d1 * h0 * w0 * i100 */
+                    Vec(d1lambda * h0lambda * w1lambda) * Vec::loadu(i101 + d) + /* d1 * h0 * w1 * i101 */
+                    Vec(d1lambda * h1lambda * w0lambda) * Vec::loadu(i110 + d) + /* d1 * h1 * w0 * i110 */
+                    Vec(d1lambda * h1lambda * w1lambda) * Vec::loadu(i111 + d);  /* d1 * h1 * w1 * i111 */
+                out_vec.store(out + d);
+              }
+              if (size - d > 0) {
+                 Vec out_vec =
+                    Vec(d0lambda * h0lambda * w0lambda) * Vec::loadu(i000 + d, size - d) + /* d0 * h0 * w0 * i000 */
+                    Vec(d0lambda * h0lambda * w1lambda) * Vec::loadu(i001 + d, size - d) + /* d0 * h0 * w1 * i001 */
+                    Vec(d0lambda * h1lambda * w0lambda) * Vec::loadu(i010 + d, size - d) + /* d0 * h1 * w0 * i010 */
+                    Vec(d0lambda * h1lambda * w1lambda) * Vec::loadu(i011 + d, size - d) + /* d0 * h1 * w1 * i011 */
+                    Vec(d1lambda * h0lambda * w0lambda) * Vec::loadu(i100 + d, size - d) + /* d1 * h0 * w0 * i100 */
+                    Vec(d1lambda * h0lambda * w1lambda) * Vec::loadu(i101 + d, size - d) + /* d1 * h0 * w1 * i101 */
+                    Vec(d1lambda * h1lambda * w0lambda) * Vec::loadu(i110 + d, size - d) + /* d1 * h1 * w0 * i110 */
+                    Vec(d1lambda * h1lambda * w1lambda) * Vec::loadu(i111 + d, size - d);  /* d1 * h1 * w1 * i111 */
+                out_vec.store(out + d, size - d);
+              }
+           }
+        }
+      }
+    }
+  };
+
+  if (ndim == 4) {
+    // upsample nearest 2d
+    at::parallel_for(0, num_batches, at::internal::GRAIN_SIZE / output_slice_size / 4, loop2d);
+  } else {
+    // upsample nearest 3d
+    TORCH_INTERNAL_ASSERT(ndim == 5);
+    at::parallel_for(0, num_batches, at::internal::GRAIN_SIZE / output_slice_size / 8, loop3d);
+  }
+
+  if (!output_.is_contiguous(channels_last_memory_format)) {
     output_.copy_(output);
   }
 }
@@ -714,9 +885,15 @@ void upsample_bilinear2d_kernel_impl(
     bool align_corners,
     c10::optional<double> scales_h,
     c10::optional<double> scales_w) {
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "upsample_bilinear2d", [&] {
-    cpu_upsample_linear<scalar_t, scale_t>(output, input, align_corners, {scales_h, scales_w});
-  });
+  if (input.is_contiguous(at::MemoryFormat::ChannelsLast)) {
+    AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "upsample_bilinear2d_channels_last", [&] {
+      cpu_upsample_linear_channels_last<scalar_t, scale_t>(output, input, align_corners, {scales_h, scales_w});
+    });
+  } else {
+    AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "upsample_bilinear2d", [&] {
+      cpu_upsample_linear<scalar_t, scale_t>(output, input, align_corners, {scales_h, scales_w});
+    });
+  }
 }
 
 void upsample_trilinear3d_kernel_impl(
@@ -726,9 +903,15 @@ void upsample_trilinear3d_kernel_impl(
     c10::optional<double> scales_d,
     c10::optional<double> scales_h,
     c10::optional<double> scales_w) {
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "upsample_trilinear3d", [&] {
-    cpu_upsample_linear<scalar_t, scale_t>(output, input, align_corners, {scales_d, scales_h, scales_w});
-  });
+  if (input.is_contiguous(at::MemoryFormat::ChannelsLast3d)) {
+    AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "upsample_trilinear3d_channels_last", [&] {
+      cpu_upsample_linear_channels_last<scalar_t, scale_t>(output, input, align_corners, {scales_d, scales_h, scales_w});
+    });
+  } else {
+    AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "upsample_trilinear3d", [&] {
+      cpu_upsample_linear<scalar_t, scale_t>(output, input, align_corners, {scales_d, scales_h, scales_w});
+    });
+  }
 }
 
 void upsample_linear1d_backward_kernel_impl(
