@@ -12,6 +12,7 @@
 #include <ATen/ExpandUtils.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <ATen/cuda/CuSparseDescriptors.h>
+#include <ATen/cuda/CuSparseGenericOps.h>
 
 #include <THC/THCTensorMathPointwise.cuh>
 #include <THC/THCThrustAllocator.cuh>
@@ -909,8 +910,6 @@ Tensor& _bmm_out_sparse_cuda(Tensor& result, const SparseTensor& self, const Ten
           // Create tensors to view just the current set of matrices
           int64_t sparse_nnz = mat_el_end_idx - mat_el_begin_idx;
 
-          cudaDataType cuda_data_type = CuSpValueType<scalar_t>().type;
-
           int* row_indices_ptr = &row_indices_start_ptr[mat_el_begin_idx];
           int* col_indices_ptr = &col_indices_start_ptr[mat_el_begin_idx];
           scalar_t* values_ptr = &values_start_ptr[mat_el_begin_idx];
@@ -924,35 +923,13 @@ Tensor& _bmm_out_sparse_cuda(Tensor& result, const SparseTensor& self, const Ten
           scalar_t* result_ptr = &result_start_ptr[dim_i*dim_k*cur_mat_num];
           auto result_descr = CuSparseDnMatDescriptor<scalar_t>(dim_i, dim_k, dim_i, result_ptr);
           
-          size_t workspace_buffer_size = 0;
-          TORCH_CUDASPARSE_CHECK(cusparseSpMM_bufferSize(
-            cusparse_handle,
+          at::native::CuSparseSpMM(
             CUSPARSE_OPERATION_NON_TRANSPOSE,
             CUSPARSE_OPERATION_TRANSPOSE,
-            &alpha_val,
-            sparse_descr.desc(),
-            dense_descr.desc(),
-            &beta_val,
-            result_descr.desc(),
-            cuda_data_type,
-            mm_alg,
-            &workspace_buffer_size
-          ));
-          auto dataPtr_2 = allocator.allocate(workspace_buffer_size);
-          void* workspace_buffer = dataPtr_2.get();
-          TORCH_CUDASPARSE_CHECK(cusparseSpMM(
-            cusparse_handle,
-            CUSPARSE_OPERATION_NON_TRANSPOSE,
-            CUSPARSE_OPERATION_TRANSPOSE,
-            &alpha_val,
-            sparse_descr.desc(),
-            dense_descr.desc(),
-            &beta_val,
-            result_descr.desc(),
-            cuda_data_type,
-            mm_alg,
-            workspace_buffer
-          ));
+            alpha_val, beta_val,
+            sparse_descr.desc(), dense_descr.desc(), result_descr.desc(),
+            mm_alg
+          );
           mat_el_begin_idx = mat_el_end_idx;
         } else {
           tmp_result[cur_mat_num].zero_();

@@ -5,6 +5,7 @@
 #include <ATen/native/sparse/cuda/SparseCUDABlas.cuh>
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <ATen/cuda/CuSparseDescriptors.h>
+#include <ATen/cuda/CuSparseGenericOps.h>
 
 #include <TH/THGeneral.h>
 
@@ -107,34 +108,11 @@ void csrmm2(
 
   auto descC = CuSparseDnMatDescriptor<T>(m, n, ldc, c);
 
-  auto handle = at::cuda::getCurrentCUDASparseHandle();
-
-  // cusparseSpMM_bufferSize returns the bufferSize that can be used by cusparseSpMM
-  size_t bufferSize; 
-  TORCH_CUDASPARSE_CHECK(cusparseSpMM_bufferSize(
-    handle, opa, opb,     
-    &alpha,               
-    descA.desc(), descB.desc(), 
-    &beta, 
-    descC.desc(), 
-    CuSpValueType<T>().type, /* data type in which the computation is executed */
-    CUSPARSE_CSRMM_ALG1,      /* default computing algorithm for CSR sparse matrix format */
-    &bufferSize               /* output */
-  )); 
-
-  auto& allocator = *c10::cuda::CUDACachingAllocator::get();
-  auto dataPtr = allocator.allocate(bufferSize);
-
-  TORCH_CUDASPARSE_CHECK(cusparseSpMM(
-    handle, opa, opb, 
-    &alpha, 
-    descA.desc(), descB.desc(), 
-    &beta, 
-    descC.desc(), 
-    CuSpValueType<T>().type, /* data type in which the computation is executed */
-    CUSPARSE_CSRMM_ALG1,      /* default computing algorithm for CSR sparse matrix format */
-    dataPtr.get()             /* external buffer */
-  )); 
+  at::native::CuSparseSpMM(
+    opa, opb, 
+    alpha, beta, 
+    descA.desc(), descB.desc(), descC.desc(), 
+    CUSPARSE_CSRMM_ALG1);
 }
 template void csrmm2<float>(
   char transa, char transb, 
