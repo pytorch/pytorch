@@ -16,7 +16,7 @@ constexpr auto kDefaultNumSendRecvThreads = 4;
 struct ProcessGroupRpcBackendOptions : public RpcBackendOptions {
   ProcessGroupRpcBackendOptions(
       int num_send_recv_threads,
-      std::chrono::milliseconds rpc_timeout,
+      float rpc_timeout,
       std::string init_method)
       : RpcBackendOptions(rpc_timeout, init_method),
         numSendRecvThreads(num_send_recv_threads) {
