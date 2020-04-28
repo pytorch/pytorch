@@ -43,8 +43,8 @@ def select_model_mode_for_export(model, mode):
             if is_originally_training:
                 warnings.warn("You are exporting the model to ONNX while in training mode with "
                               "'train' parameter not specified. The model will default to inference mode export. "
-                              "If you wish to export a training amenable ONNX model, specify train=TrainingMode.TRAIN or "
-                              "train=TrainingMode.PRESERVE (to preserve the original model state) in torch.onnx.export().")
+                              "If you wish to export a training amenable ONNX model, specify training=TrainingMode.TRAINING or "
+                              "training=TrainingMode.PRESERVE (to preserve the original model state) in torch.onnx.export().")
 
         # if mode == TrainingMode.EVAL or (mode == TrainingMode.PRESERVE and not is_originally_training) => is_training = False
         is_export_training = False
