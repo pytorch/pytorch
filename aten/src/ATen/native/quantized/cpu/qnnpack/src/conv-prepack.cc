@@ -15,6 +15,11 @@ PrePackConvWeights::PrePackConvWeights(
   const uint32_t kernel_height = conv_p.kernel_dims[1];
   const uint32_t groups = conv_p.groups;
 
+  if (conv_p.transpose && ukernel_type != pytorch_qnnp_ukernel_type_conv && ) {
+    pytorch_qnnp_log_error("Wrong micro-kernel for deconvolution");
+    assert("QNNPACK Runtime Error.");
+  }
+
   const size_t kernel_size = kernel_height * kernel_width;
   switch (ukernel_type) {
     case pytorch_qnnp_ukernel_type_dwconv: {
@@ -163,19 +168,34 @@ PrePackConvWeights::PrePackConvWeights(
                 (void*)((uintptr_t)packed_weights_ + group * packed_group_weights_size));
           }
           break;
-        case pytorch_qnnp_ukernel_type_conv:
+        case pytorch_qnnp_ukernel_type_conv:  // The transpose can only be here
           for (uint32_t group = 0; group < groups; group++) {
-            pytorch_pack_q8conv_wrq(
-                conv_p.group_output_channels,
-                kernel_size,
-                conv_p.group_input_channels,
-                nr,
-                kr,
-                kernel +
-                    group * conv_p.group_output_channels * kernel_size *
-                        conv_p.group_input_channels,
-                bias + group * conv_p.group_output_channels,
-                (void*)((uintptr_t)packed_weights_ + group * packed_group_weights_size));
+            const uint8_t* const kernel_p = kernel
+              + group * conv_p.group_output_channels * kernel_size
+              * conv_p.group_input_channels;
+            const uint8_t* const bias_p = bias
+              + group * conv_p.group_output_channels
+            if (conv_p.transpose) {  // Note that only runtime packing is here
+              pytorch_pack_q8deconv_wrq(
+                  conv_p.group_output_channels,
+                  kernel_size,
+                  conv_p.group_input_channels,
+                  nr,
+                  kr,
+                  kernel_p,
+                  bias_p,
+                  (void*)((uintptr_t)packed_weights_ + group * packed_group_weights_size));
+            } else {
+              pytorch_pack_q8conv_wrq(
+                  conv_p.group_output_channels,
+                  kernel_size,
+                  conv_p.group_input_channels,
+                  nr,
+                  kr,
+                  kernel_p,
+                  bias_p,
+                  (void*)((uintptr_t)packed_weights_ + group * packed_group_weights_size));
+            }
           }
           break;
         default:
