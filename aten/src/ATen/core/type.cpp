@@ -779,7 +779,10 @@ VaryingShape<Stride> TensorType::
     if (stride_indices[i] == stride_indices.size() - 1) {
       s.contiguous_ = strides[stride_indices[i]] == 1;
     } else {
-      s.contiguous_ = strides[stride_indices[i]] == strides[stride_indices[i-1]]*sizes[stride_indices[i-1]] && strides[stride_indices[i]] != 0;
+      if (i == 0) {
+        std::cerr << "stride_indices[i] = " << stride_indices[i] << ", strides[stride_indices[i]] = " << strides[stride_indices[i]] << ",strides = (" << c10::Join(",", strides) << "), size = (" << c10::Join(",", sizes) << ")" << std::endl;
+      }
+      s.contiguous_ = strides[stride_indices[i]] != 0 && strides[stride_indices[i]] == strides[stride_indices[i-1]]*sizes[stride_indices[i-1]];
     }
     stride_properties.push_back(s);
   }
