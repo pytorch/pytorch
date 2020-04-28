@@ -4,6 +4,7 @@
 #include <ATen/cuda/Exceptions.h>
 #include <ATen/native/sparse/cuda/SparseCUDABlas.cuh>
 #include <c10/cuda/CUDACachingAllocator.h>
+#include <ATen/cuda/CuSparseDescriptors.h>
 
 #include <TH/THGeneral.h>
 
@@ -107,41 +108,13 @@ void csrmm2(
 
   int64_t ma = m, ka = k; 
   if (transa != 'n') std::swap(ma, ka); 
-
-  cusparseSpMatDescr_t descA; 
-  TORCH_CUDASPARSE_CHECK(cusparseCreateCsr(
-    &descA,                     /* output */
-    ma, ka, nnz,                /* rows, cols, number of non zero elements */
-    csrrowptra,                 /* row offsets of the sparse matrix, size = rows +1 */
-    csrcolinda,                 /* column indices of the sparse matrix, size = nnz */
-    csrvala,                    /* values of the sparse matrix, size = nnz */
-    CUSPARSE_INDEX_32I,         /* data type of row offsets index */
-    CUSPARSE_INDEX_32I,         /* data type of col indices */
-    CUSPARSE_INDEX_BASE_ZERO,   /* base index of row offset and col indes */
-    cusparse_value_type         /* data type of values */
-  )); 
+  auto descA = CuSparseSpMatCsrDescriptor<T, int>(ma, ka, nnz, csrrowptra, csrcolinda, csrvala);
 
   int64_t kb = k, nb = n;
   if (transb != 'n') std::swap(kb, nb); 
+  auto descB = CuSparseDnMatDescriptor<T>(kb, nb, ldb, b);
 
-  cusparseDnMatDescr_t descB; 
-  TORCH_CUDASPARSE_CHECK(cusparseCreateDnMat(
-    &descB,               /* output */
-    kb, nb, ldb,          /* rows, cols, leading dimension */
-    b,                    /* values */
-    cusparse_value_type,  /* data type of values */
-    CUSPARSE_ORDER_COL    /* memory layout, ONLY column-major is supported now */
-  )); 
-
-  cusparseDnMatDescr_t descC; 
-  TORCH_CUDASPARSE_CHECK(cusparseCreateDnMat(
-    &descC,               /* output */
-    m, n, ldc,            /* rows, cols, leading dimension */
-    c,                    /* values */ 
-    cusparse_value_type,  /* data type of values */ 
-    CUSPARSE_ORDER_COL    /* memory layout, ONLY column-major is supported now */
-  )); 
-
+  auto descC = CuSparseDnMatDescriptor<T>(m, n, ldc, c);
 
   auto handle = at::cuda::getCurrentCUDASparseHandle();
 
@@ -150,9 +123,9 @@ void csrmm2(
   TORCH_CUDASPARSE_CHECK(cusparseSpMM_bufferSize(
     handle, opa, opb,     
     &alpha,               
-    descA, descB, 
+    descA.desc(), descB.desc(), 
     &beta, 
-    descC, 
+    descC.desc(), 
     cusparse_value_type,  /* data type in which the computation is executed */
     CUSPARSE_CSRMM_ALG1,  /* default computing algorithm for CSR sparse matrix format */
     &bufferSize           /* output */
@@ -164,19 +137,13 @@ void csrmm2(
   TORCH_CUDASPARSE_CHECK(cusparseSpMM(
     handle, opa, opb, 
     &alpha, 
-    descA, descB, 
+    descA.desc(), descB.desc(), 
     &beta, 
-    descC, 
+    descC.desc(), 
     cusparse_value_type,  /* data type in which the computation is executed */
     CUSPARSE_CSRMM_ALG1,  /* default computing algorithm for CSR sparse matrix format */
     dataPtr.get()         /* external buffer */
   )); 
-
-  TORCH_CUDASPARSE_CHECK(cusparseDestroySpMat(descA)); 
-  TORCH_CUDASPARSE_CHECK(cusparseDestroyDnMat(descB)); 
-  TORCH_CUDASPARSE_CHECK(cusparseDestroyDnMat(descC)); 
-
-  // TODO: Proper fix is to create real descriptor classes
 }
 template void csrmm2<float>(
   char transa, char transb, 
