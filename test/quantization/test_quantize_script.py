@@ -1165,7 +1165,11 @@ class TestQuantizeScriptPTSQOps(JitTestCase):
     def _test_op_impl(self, module, data, quantized_op):
         qconfig_dict = {'': get_default_qconfig('fbgemm')}
         model = torch.jit.script(module).eval()
+        print(1)
+        print(model._c.dump_to_str(True, False, False))
         model = quantize_script(model, qconfig_dict, _test_only_eval_fn, [data], inplace=False)
+        print(2)
+        print(model._c.dump_to_str(True, False, False))
         FileCheck().check(quantized_op) \
                    .run(model.graph)
 
@@ -1573,6 +1577,22 @@ class TestQuantizeScriptPTSQOps(JitTestCase):
                        .check_not("quantized::relu") \
                        .run(m.graph)
 
+    def test_hardtanh(self):
+        class Hardtanh(torch.nn.Module):
+            def __init__(self):
+                super(Hardtanh, self).__init__()
+
+            def forward(self, x):
+                return F.hardtanh(x)
+
+        data = [
+            (torch.rand((1, 3, 10, 10), dtype=torch.float),
+             torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
+
+        m = self._test_op_impl(Hardtanh(), data, "quantized::hardtanh")
+        print(m)
+
+
     def test_swap_dequantize_all_ops(self):
         """ A test that checks dequantize will be swapped for
         all supported general ops without actually checking for execution of these ops
@@ -1639,6 +1659,7 @@ class TestQuantizeScriptPTSQOps(JitTestCase):
                 x = self.tanh(x)
                 x = F.tanh(x)
                 x = torch.tanh(x)
+                x = F.hardtanh(x)
                 x = self.conv(x)
                 return x
 
