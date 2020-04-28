@@ -1031,6 +1031,7 @@ class TestSparse(TestCase):
             ab = a.bmm(b)
 
     @cuda_only
+    @skipIfRocm
     @unittest.skipIf(
         (torch.version.cuda
             and [int(x) for x in torch.version.cuda.split(".")] >= [10, 1]),
@@ -1210,6 +1211,7 @@ class TestSparse(TestCase):
         self._test_spadd_shape(10, [50, 30, 20], [2, 0])
 
     @cuda_only
+    @skipIfRocm
     @unittest.skipIf(not TEST_WITH_ROCM, "runs only on ROCm")
     def test_sparse_add_out_bfloat16(self):
         # fp32
