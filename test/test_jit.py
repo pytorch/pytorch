@@ -16914,7 +16914,9 @@ a")
 
         def foo():
             a = FooTest()
-            return hasattr(a, "foo"), hasattr(a, "x"), hasattr(a, "bla")
+            val1 = hasattr(a, "foo"), hasattr(a, "x"), hasattr(a, "bla")
+            val2 = hasattr(FooTest, "foo"), hasattr(FooTest, "a")
+            return val1, val2
 
         self.assertEqual(foo(), torch.jit.script(foo)())
 

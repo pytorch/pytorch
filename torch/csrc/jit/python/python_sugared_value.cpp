@@ -524,7 +524,7 @@ bool PythonClassValue::hasAttr(
   try {
     py::getattr(py_type_, field.c_str());
     return true;
-  } catch (...) {
+  } catch (py::error_already_set& e) {
     return false;
   }
 }
