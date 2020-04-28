@@ -1368,8 +1368,8 @@ See :class:`~torch.nn.Softplus` for more details.
 
 def _get_softmax_dim(name, ndim, stacklevel):
     # type: (str, int, int) -> int
-    warnings.warn("Implicit dimension choice for {} has been deprecated. "
-                  "Change the call to include dim=X as an argument.".format(name), stacklevel=stacklevel)
+    raise ValueError("Implicit dimension choice for {} has been deprecated. "
+                  "Change the call to include dim=X as an argument.".format(name))
     if ndim == 0 or ndim == 1 or ndim == 3:
         ret = 0
     else:
