@@ -32,6 +32,10 @@ std::unordered_map<uint16_t, std::shared_ptr<RangeEventList>>
 thread_local std::shared_ptr<RangeEventList> event_list;
 thread_local uint16_t thread_id;
 
+// use RecordFunctionGuard to keep track of observers,
+// enable/disableProfiler are tied to the code range
+thread_local std::vector<std::shared_ptr<RecordFunctionGuard>> g_;
+
 } // namespace
 
 void registerCUDAMethods(CUDAStubs* stubs) {
@@ -197,7 +201,7 @@ void enableProfiler(ProfilerConfig config) {
       /* sampling_prob */ 1.0,
       /* scopes */ {RecordScope::FUNCTION, RecordScope::USER_SCOPE});
   state = new_state;
-  c10::impl::tls_set_dispatch_key_included(c10::DispatchKey::Profiler, true);
+  g_.emplace_back(std::make_shared<RecordFunctionGuard>());
 
   if(state == ProfilerState::CUDA) {
     // event recording appears to have some startup overhead, so we need to
@@ -228,7 +232,8 @@ thread_event_lists disableProfiler() {
 
   popCallback();
   state = ProfilerState::Disabled;
-  c10::impl::tls_set_dispatch_key_included(c10::DispatchKey::Profiler, false);
+  TORCH_INTERNAL_ASSERT(!g_.empty());
+  g_.pop_back();
 
   if (old_state == ProfilerState::NVTX) {
     return thread_event_lists();
