@@ -1,17 +1,24 @@
 #pragma once
 
+// guard the whole file
+#if !defined(_MSC_VER) && defined(__CUDACC__) && CUSPARSE_VERSION >= 10301 // CUDA release >= 10.2 and not windows
+
 #include <ATen/cuda/ATenCUDAGeneral.h>
 #include <ATen/cuda/Exceptions.h>
 
 #include <cusparse.h>
+#include <library_types.h>
+
+// LIMITATION (cusparseSpMM): 
+// The generic APIs are currently (CUDA 10.1) available for all platforms except Windows. 
+// Using these APIs in any other systems will result in compile-time or run-time failures. 
+// Their support will be extended in the next releases. 
 
 // The code style of this file mostly follows ATen/cudnn/Descriptors.h,
 // with modifications cudnn -> cusparse
 
 namespace at {
 namespace native {
-
-namespace {
 
 template <typename T> struct CuSpValueType {};
 template <> struct CuSpValueType<__half> { const cudaDataType_t type = CUDA_R_16F; };
@@ -32,7 +39,7 @@ struct CuSparseDescriptorDeleter {
 };
 
 template <typename T, cusparseStatus_t (*dtor)(T*)>
-class CuSparseDescriptor {
+class _CuSparseDescriptor {
  public:
   T* desc() const { return desc_.get(); }
   T* desc() { return desc_.get(); }
@@ -41,11 +48,9 @@ class CuSparseDescriptor {
   std::unique_ptr<T, CuSparseDescriptorDeleter<T, dtor>> desc_;
 };
 
-} // namespace
-
 template <typename valueType>
 class TORCH_CUDA_API CuSparseDnMatDescriptor
-    : public CuSparseDescriptor<cusparseDnMatDescr, &cusparseDestroyDnMat> {
+    : public _CuSparseDescriptor<cusparseDnMatDescr, &cusparseDestroyDnMat> {
  public:
   CuSparseDnMatDescriptor(int64_t row, int64_t col, int64_t ldb, valueType* value) {
     constexpr cudaDataType_t valueType_ = CuSpValueType<valueType>().type;
@@ -64,7 +69,7 @@ class TORCH_CUDA_API CuSparseDnMatDescriptor
 
 template <typename valueType, typename indexType>
 class TORCH_CUDA_API CuSparseSpMatCsrDescriptor
-    : public CuSparseDescriptor<cusparseSpMatDescr, &cusparseDestroySpMat> {
+    : public _CuSparseDescriptor<cusparseSpMatDescr, &cusparseDestroySpMat> {
  public:
   CuSparseSpMatCsrDescriptor(
       int64_t row, int64_t col, int64_t nnz,
@@ -90,3 +95,5 @@ class TORCH_CUDA_API CuSparseSpMatCsrDescriptor
 
 } // namespace native
 } // namespace at
+
+#endif

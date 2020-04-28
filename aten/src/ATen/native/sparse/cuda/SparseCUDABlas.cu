@@ -10,15 +10,6 @@
 
 #include <cusparse.h>
 
-#if !defined(_MSC_VER) && defined(__CUDACC__) && CUSPARSE_VERSION >= 10301 // CUDA release >= 10.2 and not windows
-#include <library_types.h>
-#endif
-
-// LIMITATION (cusparseSpMM): 
-// The generic APIs are currently (CUDA 10.1) available for all platforms except Windows. 
-// Using these APIs in any other systems will result in compile-time or run-time failures. 
-// Their support will be extended in the next releases. 
-
 #if !defined(CUSPARSE_VERSION) || (CUSPARSE_VERSION < 10200)
 const char* cusparseGetErrorString(cusparseStatus_t status) {
   switch(status)
@@ -82,6 +73,7 @@ cusparseOperation_t convertTransToCusparseOperation(char trans) {
   }
 }
 
+// use new cusparse API
 #if !defined(_MSC_VER) && defined(__CUDACC__) && CUSPARSE_VERSION >= 10301 // CUDA release >= 10.2 and not windows
 
 template<typename T> 
@@ -92,7 +84,6 @@ void csrmm2(
   T *b, int64_t ldb, T beta, T *c, int64_t ldc)
 {
   static_assert(std::is_same<float, T>::value || std::is_same<double, T>::value); 
-  constexpr auto cusparse_value_type = std::is_same<float, T>::value ? CUDA_R_32F : CUDA_R_64F; 
 
   if (csrvala == nullptr || b == nullptr || c == nullptr) return; 
 
@@ -126,9 +117,9 @@ void csrmm2(
     descA.desc(), descB.desc(), 
     &beta, 
     descC.desc(), 
-    cusparse_value_type,  /* data type in which the computation is executed */
-    CUSPARSE_CSRMM_ALG1,  /* default computing algorithm for CSR sparse matrix format */
-    &bufferSize           /* output */
+    CuSpValueType<T>().type, /* data type in which the computation is executed */
+    CUSPARSE_CSRMM_ALG1,      /* default computing algorithm for CSR sparse matrix format */
+    &bufferSize               /* output */
   )); 
 
   auto& allocator = *c10::cuda::CUDACachingAllocator::get();
@@ -140,9 +131,9 @@ void csrmm2(
     descA.desc(), descB.desc(), 
     &beta, 
     descC.desc(), 
-    cusparse_value_type,  /* data type in which the computation is executed */
-    CUSPARSE_CSRMM_ALG1,  /* default computing algorithm for CSR sparse matrix format */
-    dataPtr.get()         /* external buffer */
+    CuSpValueType<T>().type, /* data type in which the computation is executed */
+    CUSPARSE_CSRMM_ALG1,      /* default computing algorithm for CSR sparse matrix format */
+    dataPtr.get()             /* external buffer */
   )); 
 }
 template void csrmm2<float>(
