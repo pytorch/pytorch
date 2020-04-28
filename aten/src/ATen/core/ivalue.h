@@ -631,8 +631,6 @@ struct CAFFE2_API IValue final {
   // Inserts all subvalues of this in subValues.
   void getSubValues(HashAliasedIValues& subValues) const;
 
-  IValue copy() const;
-
   IValue deepcopy() const;
   IValue deepcopy(
       HashAliasedIValueMap& memo) const;

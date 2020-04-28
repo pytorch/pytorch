@@ -164,7 +164,7 @@ void Module::clone_method(const Module& orig, const std::string& name) {
 }
 
 Module Module::copy() const {
-  return Module(_ivalue()->copy());
+  return Module(_ivalue());
 }
 
 Module Module::deepcopy() const {
@@ -232,7 +232,7 @@ Module Module::clone_impl(
 }
 
 Module Module::clone_instance() const {
-  return Module(_ivalue()->copy());
+  return Module(_ivalue());
 }
 
 void Module::train(bool on) {
