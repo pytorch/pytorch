@@ -94,9 +94,10 @@ class CallbackManager {
         }
       }
     } else {
-      LOG(WARNING) << "Callbacks changed while running a record function, "
-                   << "you might be partially overlapping a record function "
-                   << "with a profiling scope";
+      C10_LOG_EVERY_MS(WARNING, 1000)
+          << "Callbacks changed while running a record function, "
+          << "you might be partially overlapping a record function "
+          << "with a profiling scope";
     }
   }
 

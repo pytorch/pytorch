@@ -3,7 +3,6 @@ import sys
 import time
 import unittest
 from collections import namedtuple
-from datetime import timedelta
 from unittest import mock
 
 import torch
@@ -396,8 +395,8 @@ class RpcTest(RpcAgentTestFixture):
     @dist_init
     def test_rref_proxy_reuse(self):
         rref = rpc.remote(
-            worker_name((self.rank + 1) % self.world_size), 
-            my_function, 
+            worker_name((self.rank + 1) % self.world_size),
+            my_function,
             args=(torch.ones(2, 2), 1, 3)
         )
         expected = torch.ones(2, 2) + 1 + 3
@@ -435,41 +434,41 @@ class RpcTest(RpcAgentTestFixture):
         self.assertEqual(expected.get_value(), rref.remote().get_value().to_here())
 
         self.assertEqual(
-            expected.my_instance_method(2), 
+            expected.my_instance_method(2),
             rref.rpc_sync().my_instance_method(2)
         )
         self.assertEqual(
-            expected.my_instance_method(3), 
+            expected.my_instance_method(3),
             rref.rpc_async().my_instance_method(3).wait()
         )
         self.assertEqual(
-            expected.my_instance_method(4), 
+            expected.my_instance_method(4),
             rref.remote().my_instance_method(4).to_here()
         )
 
         self.assertEqual(
-            expected.my_static_method(9), 
+            expected.my_static_method(9),
             rref.rpc_sync().my_static_method(9)
         )
         self.assertEqual(
-            expected.my_static_method(10), 
+            expected.my_static_method(10),
             rref.rpc_async().my_static_method(10).wait()
         )
         self.assertEqual(
-            expected.my_static_method(11), 
+            expected.my_static_method(11),
             rref.remote().my_static_method(11).to_here()
         )
 
         self.assertEqual(
-            expected.my_class_method(2, torch.zeros(2, 2)), 
+            expected.my_class_method(2, torch.zeros(2, 2)),
             rref.rpc_sync().my_class_method(2, torch.zeros(2, 2))
         )
         self.assertEqual(
-            expected.my_class_method(2, torch.ones(3, 3)), 
+            expected.my_class_method(2, torch.ones(3, 3)),
             rref.rpc_async().my_class_method(2, torch.ones(3, 3)).wait()
         )
         self.assertEqual(
-            expected.my_class_method(2, torch.ones(4, 4)), 
+            expected.my_class_method(2, torch.ones(4, 4)),
             rref.remote().my_class_method(2, torch.ones(4, 4)).to_here()
         )
 
@@ -1943,7 +1942,7 @@ class RpcTest(RpcAgentTestFixture):
             world_size=self.world_size,
             rpc_backend_options=self.rpc_backend_options,
         )
-        rpc._set_rpc_timeout(timedelta(seconds=10))
+        rpc._set_rpc_timeout(10)
         # This barrier is needed to ensure that some workers do not exit before
         # others have been brought up, for non ProcessGroupAgent backends.
         initialize_pg(self.init_method, self.rank, self.world_size)
@@ -1989,8 +1988,8 @@ class RpcTest(RpcAgentTestFixture):
         rpc.shutdown(graceful=False)
 
     @dist_init(setup_rpc=False)
-    def test_get_rpc_timeout(self):
-        timeout = timedelta(seconds=1)
+    def test_set_and_get_default_rpc_timeout(self):
+        timeout = 0.5
 
         # A new `RpcBackendOptions` is constructed
         # when accessing `self.rpc_backend_options`.
@@ -2028,6 +2027,41 @@ class RpcTest(RpcAgentTestFixture):
         self.assertEqual(int(info["agent.thread_pool_size"]), NUM_THREADS)
         rpc.shutdown()
 
+    @dist_init(setup_rpc=False)
+    @requires_process_group_agent("PROCESS_GROUP rpc backend specific test, skip")
+    def test_process_group_set_default_timeout(self):
+        timeout = 0.5
+        rpc_backend_options = rpc.ProcessGroupRpcBackendOptions(
+            init_method=self.rpc_backend_options.init_method,
+            num_send_recv_threads=self.rpc_backend_options.num_send_recv_threads,
+            rpc_timeout=timeout
+        )
+        rpc.init_rpc(
+            name=worker_name(self.rank),
+            backend=self.rpc_backend,
+            rank=self.rank,
+            world_size=self.world_size,
+            rpc_backend_options=rpc_backend_options,
+        )
+
+        default_timeout = rpc.get_rpc_timeout()
+        self.assertEqual(default_timeout, timeout)
+        rpc.shutdown()
+
+    @dist_init(setup_rpc=False)
+    @requires_process_group_agent("PROCESS_GROUP rpc backend specific test, skip")
+    def test_process_group_options_throw_on_timedelta_timeout(self):
+        from datetime import timedelta
+
+        timeout = timedelta()
+        # Ensure that constructing ProcessGroupRpcBackendOptions with timedelta fails
+        with self.assertRaisesRegex(TypeError, "incompatible constructor arguments"):
+            rpc_backend_options = rpc.ProcessGroupRpcBackendOptions(
+                init_method=self.rpc_backend_options.init_method,
+                num_send_recv_threads=self.rpc_backend_options.num_send_recv_threads,
+                rpc_timeout=timeout,
+            )
+
     @dist_init
     def test_default_timeout_used(self):
         """
@@ -2035,7 +2069,7 @@ class RpcTest(RpcAgentTestFixture):
         default timeout is used.
         """
         dst_rank = (self.rank + 1) % self.world_size
-        rpc._set_rpc_timeout(timedelta(milliseconds=1))
+        rpc._set_rpc_timeout(0.001)  # 1 ms
         # futures should time out and be marked with an exception indicating it as such.
         futs = [
             rpc.rpc_async(worker_name(dst_rank), my_sleep_func, args=())
@@ -2047,11 +2081,11 @@ class RpcTest(RpcAgentTestFixture):
                 fut.wait()
 
         # ensure that if a new timeout is set old futures don't time out but new ones do.
-        rpc._set_rpc_timeout(timedelta(seconds=200))
+        rpc._set_rpc_timeout(200)  # 200 seconds
         # create a longstanding RPC.
         fut1 = rpc.rpc_async(worker_name(dst_rank), my_sleep_func, args=(1,))
         # now, set a short timeout.
-        rpc._set_rpc_timeout(timedelta(milliseconds=1))
+        rpc._set_rpc_timeout(0.001)
         # fut2 should time out, fut1 should not.
         fut2 = rpc.rpc_async(worker_name(dst_rank), my_sleep_func, args=(1,))
         with self.assertRaisesRegex(RuntimeError, expected_error):
@@ -2059,11 +2093,11 @@ class RpcTest(RpcAgentTestFixture):
         fut1.wait()
 
         # Zero timeout means infinity, so future should run to completion.
-        rpc._set_rpc_timeout(timedelta(seconds=0))
+        rpc._set_rpc_timeout(0)
         rpc.rpc_async(worker_name(dst_rank), my_sleep_func, args=()).wait()
 
         # reset to default timeout so shutdown messages can process cleanly.
-        rpc._set_rpc_timeout(rpc.constants.DEFAULT_RPC_TIMEOUT)
+        rpc._set_rpc_timeout(rpc.constants.DEFAULT_RPC_TIMEOUT_SEC)
 
     @dist_init
     def test_rpc_timeouts(self):
@@ -2091,7 +2125,7 @@ class RpcTest(RpcAgentTestFixture):
 
         # If we set a default timeout for RPCs, it should be respected, though
         # still overridden if we pass in a different timeout to the APIs.
-        rpc._set_rpc_timeout(timedelta(milliseconds=1))
+        rpc._set_rpc_timeout(0.001)
         fut = rpc.rpc_async(dst_worker, my_sleep_func, args=(1,))
         with self.assertRaisesRegex(RuntimeError, expected_error):
             fut.wait()
@@ -2105,7 +2139,7 @@ class RpcTest(RpcAgentTestFixture):
         rpc.rpc_async(dst_worker, my_sleep_func, args=(1,), timeout=0).wait()
         rpc.rpc_sync(dst_worker, my_sleep_func, args=(1,), timeout=0)
         # Reset for clean shutdown
-        rpc._set_rpc_timeout(timedelta(seconds=60))
+        rpc._set_rpc_timeout(rpc.constants.DEFAULT_RPC_TIMEOUT_SEC)
 
 
     def test_requires_process_group_agent_decorator(self):
@@ -2347,3 +2381,4 @@ class FaultyAgentRpcTest(FaultyRpcAgentTestFixture):
         self.assertEqual(self.rpc_backend_options.num_send_recv_threads, 8)
         self.assertEqual(self.rpc_backend_options.num_fail_sends, 3)
         self.assertEqual(len(self.rpc_backend_options.messages_to_fail), 4)
+        self.assertEqual(self.rpc_backend_options.rpc_timeout, rpc.constants.DEFAULT_RPC_TIMEOUT_SEC)

@@ -456,9 +456,7 @@ endforeach()
 
 # Set C++14 support
 set(CUDA_PROPAGATE_HOST_FLAGS_BLACKLIST "-Werror")
-if(MSVC)
-  list(APPEND CUDA_PROPAGATE_HOST_FLAGS_BLACKLIST "/EHa")
-else()
+if(NOT MSVC)
   list(APPEND CUDA_NVCC_FLAGS "-std=c++14")
   list(APPEND CUDA_NVCC_FLAGS "-Xcompiler" "-fPIC")
 endif()
