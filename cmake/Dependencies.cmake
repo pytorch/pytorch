@@ -881,10 +881,10 @@ if(BUILD_PYTHON)
 endif()
 
 # ---[ pybind11
-set(OLD_CMAKE_FIND_PACKAGE_PREFER_CONFIG ${CMAKE_FIND_PACKAGE_PREFER_CONFIG})
-set(CMAKE_FIND_PACKAGE_PREFER_CONFIG TRUE)
-find_package(pybind11)
-set(CMAKE_FIND_PACKAGE_PREFER_CONFIG ${OLD_CMAKE_FIND_PACKAGE_PREFER_CONFIG})
+find_package(pybind11 CONFIG)
+if(NOT pybind11_FOUND)
+  find_package(pybind11)
+endif()
 
 if(pybind11_FOUND)
     message(STATUS "System pybind11 found")
