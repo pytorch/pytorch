@@ -157,6 +157,10 @@
 #   USE_TBB
 #      enable TBB support
 #
+#   USE_SYSTEM_LIBS (work in progress)
+#      Use system-provided libraries to satisfy the build dependencies.
+#      When turned on, the following cmake variables will be toggled as well:
+#        USE_SYSTEM_CPUINFO=ON USE_SYSTEM_SLEEF=ON BUILD_CUSTOM_PROTOBUF=OFF
 
 from __future__ import print_function
 
@@ -288,6 +292,8 @@ def build_deps():
     report('-- Building version ' + version)
 
     def check_file(f):
+        if bool(os.getenv("USE_SYSTEM_LIBS", False)):
+            return
         if not os.path.exists(f):
             report("Could not find {}".format(f))
             report("Did you run 'git submodule update --init --recursive'?")
