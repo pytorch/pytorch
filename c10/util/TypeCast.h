@@ -69,7 +69,7 @@ template <typename dest_value_t, typename src_value_t>
 #if defined(__CUDACC__)
 template <typename dest_value_t, typename src_value_t>
   struct static_cast_with_inter_type<thrust::complex<dest_value_t>, c10::complex<src_value_t>> {
-    C10_HOST_DEVICE static inline std::complex<dest_value_t> apply(std::complex<src_value_t> src) {
+    C10_HOST_DEVICE static inline thrust::complex<dest_value_t> apply(c10::complex<src_value_t> src) {
       return thrust::complex<dest_value_t>(src.real(), src.imag());
     }
 };
