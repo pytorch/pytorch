@@ -1,7 +1,9 @@
 # coding=utf-8
 import math
 import warnings
+
 import torch
+from torch import Tensor
 from torch.nn.parameter import Parameter
 from .. import functional as F
 from .. import init

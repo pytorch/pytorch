@@ -24,10 +24,6 @@ void registerCustomClass(at::ClassTypePtr class_type) {
 }
 
 at::ClassTypePtr getCustomClass(const std::string& name) {
-  // BC hack so we can upgrade a binary internally
-  if (name == "__torch__.torch.classes.SentencePiece") {
-    return getCustomClass("__torch__.torch.classes.fb.SentencePiece");
-  }
   return customClasses().count(name) ? customClasses()[name] : nullptr;
 }
 
