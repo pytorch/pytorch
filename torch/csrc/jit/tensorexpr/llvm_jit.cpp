@@ -8,6 +8,7 @@
 #include <string>
 #include <vector>
 #include "llvm/ExecutionEngine/ExecutionEngine.h"
+#include "llvm/ExecutionEngine/JITEventListener.h"
 #include "llvm/ExecutionEngine/MCJIT.h"
 
 namespace llvm {
@@ -25,6 +26,13 @@ class TORCH_API PytorchLLVMJITImpl {
 
   void addModule(std::unique_ptr<Module> M) {
     EE_ = EngineBuilder(std::move(M)).create(TM_);
+
+    EE_->RegisterJITEventListener(
+        JITEventListener::createIntelJITEventListener());
+    EE_->RegisterJITEventListener(
+        JITEventListener::createOProfileJITEventListener());
+    EE_->RegisterJITEventListener(
+        JITEventListener::createPerfJITEventListener());
 
     // Register implementations of intrinsics
     EE_->addGlobalMapping("log10f", (uint64_t)&log10f);
