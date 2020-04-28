@@ -5,6 +5,7 @@
 #include <vector>
 #include <cstdarg>
 #include <exception>
+#include <sstream>
 
 #include <torch/csrc/THP.h>
 
@@ -140,8 +141,9 @@ ValueError::ValueError(const char *format, ...) {
 
 void PyWarningHandler::process(
     const c10::SourceLocation& source_location,
-    const std::string& msg) {
-  warning_buffer_.push_back({source_location, msg});
+    const std::string& msg,
+    const bool verbatim) {
+  warning_buffer_.push_back({source_location, msg, verbatim});
 };
 
 PyWarningHandler::PyWarningHandler() noexcept(true):
@@ -160,20 +162,24 @@ PyWarningHandler::~PyWarningHandler() noexcept(false) {
       // An error happened after the warning
       // Simply handle with the previous handler
       for(const auto& warning: warning_buffer_) {
-        auto source_location = warning.first;
-        const auto& msg = processErrorMsg(warning.second);
-        c10::Warning::warn(source_location, msg);
+        auto source_location = warning.source_location_;
+        const auto& msg = processErrorMsg(warning.msg_);
+        c10::Warning::warn(source_location, msg, warning.verbatim_);
       }
       warning_buffer_.clear();
     } else {
       pybind11::gil_scoped_acquire gil;
       auto result = 0;
-      for(const auto& warning: warning_buffer_) {
-        auto source_location = warning.first;
-        const auto& msg = processErrorMsg(warning.second);
+      for (const auto& warning: warning_buffer_) {
+        auto source_location = warning.source_location_;
+        const auto& msg = processErrorMsg(warning.msg_);
         if (source_location.file == nullptr) {
           result = PyErr_WarnEx(PyExc_RuntimeWarning, msg.c_str(), 1);
-        } else {
+        } else if (warning.verbatim_) {
+          // Sets the source location from the warning
+          // Note: PyErr_WarnExplicit will disregard Python's warning filter
+          // and always appear. This is in contrast to PyErr_WarnEx,
+          // which respects the warning filter.
           result = PyErr_WarnExplicit(
               /*category=*/PyExc_UserWarning,
               /*message=*/msg.c_str(),
@@ -181,6 +187,13 @@ PyWarningHandler::~PyWarningHandler() noexcept(false) {
               /*lineno=*/source_location.line,
               /*module=*/nullptr,
               /*registry=*/nullptr);
+        } else {
+          // Lets Python set the source location and puts the C++ warning
+          // location into the message.
+          std::ostringstream os;
+          os << msg << " (Triggered internally at  " << source_location.file;
+          os << ":" << source_location.line << ".)";
+          result = PyErr_WarnEx(PyExc_UserWarning, os.str().c_str(), 1);
         }
         if (result < 0) {
           break;

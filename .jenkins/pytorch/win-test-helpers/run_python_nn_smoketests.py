@@ -3,9 +3,9 @@
 from __future__ import print_function
 
 import subprocess
+import os
 
-
-TESTS = [
+COMMON_TESTS = [
     (
         "Checking that caffe2.python is available",
         "from caffe2.python import core",
@@ -14,6 +14,9 @@ TESTS = [
         "Checking that MKL is available",
         "import torch; exit(0 if torch.backends.mkl.is_available() else 1)",
     ),
+]
+
+GPU_TESTS = [
     (
         "Checking that CUDA archs are setup correctly",
         "import torch; torch.randn([3,5]).cuda()",
@@ -31,6 +34,10 @@ TESTS = [
 
 if __name__ == "__main__":
 
+    if 'USE_CUDA' in os.environ and os.environ['USE_CUDA'] == '1':
+        TESTS = COMMON_TESTS + GPU_TESTS
+    else:
+        TESTS = COMMON_TESTS
     for description, python_commands in TESTS:
         print(description)
         command_args = ["python", "-c", python_commands]
