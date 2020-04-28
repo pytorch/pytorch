@@ -68,9 +68,11 @@ class TORCH_CUDA_API CuSparseDnMatDescriptor
   }
 };
 
+class TORCH_CUDA_API CuSparseSpMatDescriptor
+    : public _CuSparseDescriptor<cusparseSpMatDescr, &cusparseDestroySpMat> {};
+
 template <typename valueType, typename indexType>
-class TORCH_CUDA_API CuSparseSpMatCsrDescriptor
-    : public _CuSparseDescriptor<cusparseSpMatDescr, &cusparseDestroySpMat> {
+class TORCH_CUDA_API CuSparseSpMatCsrDescriptor : public CuSparseSpMatDescriptor {
  public:
   CuSparseSpMatCsrDescriptor(
       int64_t row, int64_t col, int64_t nnz,
@@ -95,8 +97,7 @@ class TORCH_CUDA_API CuSparseSpMatCsrDescriptor
 };
 
 template <typename valueType, typename indexType>
-class TORCH_CUDA_API CuSparseSpMatCooDescriptor
-    : public _CuSparseDescriptor<cusparseSpMatDescr, &cusparseDestroySpMat> {
+class TORCH_CUDA_API CuSparseSpMatCooDescriptor : public CuSparseSpMatDescriptor {
  public:
   CuSparseSpMatCooDescriptor(
       int64_t row, int64_t col, int64_t nnz,
