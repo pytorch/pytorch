@@ -626,7 +626,7 @@ __declspec(dllexport)
 #endif
 PyObject* initModule() {
   HANDLE_TH_ERRORS
-  at::init_num_threads();
+  at::internal::lazy_init_num_threads();
 
   C10_LOG_API_USAGE_ONCE("torch.python.import");
 
