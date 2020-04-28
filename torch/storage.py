@@ -43,7 +43,8 @@ class _StorageBase(object):
         """Returns a copy of this storage"""
         device = self.get_device() if self.is_cuda else -1
         with torch.cuda.device(device):
-            return type(self)(self.size()).copy_(self)
+            new_tensor = torch.Tensor(self)
+            return new_tensor.clone().storage()
 
     def tolist(self):
         """Returns a list containing the elements of this storage"""
