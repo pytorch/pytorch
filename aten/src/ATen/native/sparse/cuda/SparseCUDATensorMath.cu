@@ -10,6 +10,7 @@
 #include <ATen/cuda/detail/IndexUtils.cuh>
 #include <ATen/WrapDimUtilsMulti.h>
 #include <ATen/ExpandUtils.h>
+#include <c10/cuda/CUDACachingAllocator.h>
 
 #include <THC/THCTensorMathPointwise.cuh>
 #include <THC/THCThrustAllocator.cuh>
@@ -876,7 +877,10 @@ Tensor& _bmm_out_sparse_cuda(Tensor& result, const SparseTensor& self, const Ten
   int64_t mat_el_end_indices_host[num_matrices];
   int64_t* mat_el_end_indices_device;
 
-  cudaMalloc(&mat_el_end_indices_device, num_matrices*sizeof(int64_t));
+  auto& allocator = *c10::cuda::CUDACachingAllocator::get();
+
+  auto dataPtr = allocator.allocate(num_matrices*sizeof(int64_t));
+  mat_el_end_indices_device = reinterpret_cast<int64_t*>(dataPtr.get());
   search_end_matrix_indices(mat_el_end_indices_device, num_matrices, indices_dim0);
   cudaMemcpy(
     mat_el_end_indices_host,
@@ -884,7 +888,6 @@ Tensor& _bmm_out_sparse_cuda(Tensor& result, const SparseTensor& self, const Ten
     num_matrices*sizeof(int64_t),
     cudaMemcpyDeviceToHost
   );
-  cudaFree(mat_el_end_indices_device);
 
   // Need a pointer to an array to access within a lambda
   int64_t* mat_el_end_indices = &mat_el_end_indices_host[0];
