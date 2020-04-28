@@ -13,6 +13,7 @@ import torch
 import torch.backends.cudnn
 import torch.utils.cpp_extension
 from torch.utils.cpp_extension import CUDA_HOME, ROCM_HOME
+from torch.autograd.gradcheck import gradcheck
 
 
 TEST_CUDA = torch.cuda.is_available() and CUDA_HOME is not None
@@ -832,7 +833,7 @@ class TestCppExtensionJIT(common.TestCase):
         a = torch.randn(5, 5, requires_grad=True)
         b = torch.randn(5, 5, requires_grad=True)
 
-        gradcheck(torch.ops.my.add, [a, b])
+        gradcheck(torch.ops.my.add, [a, b], eps=1e-2)
 
 
 if __name__ == "__main__":
