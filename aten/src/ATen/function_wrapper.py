@@ -778,7 +778,7 @@ def needs_backend_select(declaration_option):
 
 
 def gen_device_init(option, backend_type_env):
-    # type: (Environment) -> List[str]
+    # type: (FunctionOption, Environment) -> List[str]
     #
     # generate a device init statement, if the passed function option
     # requires one. Note: we use needs_backend_select() as a proxy for
@@ -793,7 +793,7 @@ def gen_device_init(option, backend_type_env):
     name = option['name']
     device_type = backend_type_env['DeviceType']
     assert device_type in ['CPU', 'CUDA'], \
-        "{name}: unsupported device type '{device_type}'".format(name, device_type)
+        "{}: unsupported device type '{}'".format(name, device_type)
     return ['globalLegacyTypeDispatch().init{}();'.format(device_type)]
 
 
