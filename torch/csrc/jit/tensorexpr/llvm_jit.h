@@ -18,15 +18,12 @@ class PytorchLLVMJITImpl;
 
 class TORCH_API PytorchLLVMJIT {
  public:
-  PytorchLLVMJIT();
+  PytorchLLVMJIT(TargetMachine* TM);
   ~PytorchLLVMJIT();
 
-  Error addModule(ThreadSafeModule M);
+  void addModule(std::unique_ptr<Module> M);
 
-  JITSymbol findSymbol(const std::string Name);
-
-  TargetMachine& getTargetMachine();
-  const DataLayout& getDataLayout();
+  void* findSymbol(const std::string& Name);
 
  private:
   // Use the PImpl idiom here to hide the no-rtti parts of the JIT structure.

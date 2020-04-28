@@ -41,7 +41,7 @@ class LLVMCodeGenImpl : public IRVisitor {
   llvm::Function* fn_;
   llvm::BasicBlock* bb_;
   llvm::Value* value_{nullptr};
-  llvm::JITTargetAddress kernelAddress_;
+  void* kernelAddress_;
 
 #define LLVM_TYPE_DECLARE(_1, Name) llvm::Type* Name##Ty_;
   AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, LLVM_TYPE_DECLARE);
@@ -65,7 +65,7 @@ class LLVMCodeGenImpl : public IRVisitor {
       Dtype dtype);
   ~LLVMCodeGenImpl() = default;
 
-  llvm::JITTargetAddress getKernelAddress() const;
+  void* getKernelAddress() const;
 
   void visit(const Add* v) override;
   void visit(const Sub* v) override;
@@ -202,7 +202,7 @@ void* LLVMCodeGen::getKernelAddress(LLVMCodeGenImpl* impl) {
   return (void*)impl->getKernelAddress();
 }
 
-llvm::JITTargetAddress LLVMCodeGenImpl::getKernelAddress() const {
+void* LLVMCodeGenImpl::getKernelAddress() const {
   return kernelAddress_;
 }
 
@@ -228,7 +228,7 @@ LLVMCodeGenImpl::LLVMCodeGenImpl(
   auto JTMB = makeTargetMachineBuilder();
   TM_ = llvm::cantFail(JTMB.createTargetMachine());
 
-  jit_ = std::make_unique<llvm::orc::PytorchLLVMJIT>();
+  jit_ = std::make_unique<llvm::orc::PytorchLLVMJIT>(TM_.get());
   module_ = std::make_unique<llvm::Module>("pytorch", getContext());
   module_->setDataLayout(cantFail(JTMB.getDefaultDataLayoutForTarget()));
   module_->setTargetTriple(JTMB.getTargetTriple().str());
@@ -257,10 +257,8 @@ LLVMCodeGenImpl::LLVMCodeGenImpl(
   emitWrapper(params);
   emitKernel(stmt, params);
 
-  cantFail(jit_->addModule(
-      llvm::orc::ThreadSafeModule(std::move(module_), context_)));
-  auto sym = jit_->findSymbol("wrapper");
-  kernelAddress_ = cantFail(sym.getAddress());
+  jit_->addModule(std::move(module_));
+  kernelAddress_ = jit_->findSymbol("wrapper");
 
   USE_TRIGGER(llvm_codegen_created);
 }

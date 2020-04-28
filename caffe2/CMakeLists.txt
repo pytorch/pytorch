@@ -527,7 +527,7 @@ torch_compile_options(torch_cpu)  # see cmake/public/utils.cmake
 if(USE_LLVM AND LLVM_FOUND)
   llvm_map_components_to_libnames(LLVM_LINK_LIBS
     support core analysis executionengine instcombine
-    scalaropts transformutils native orcjit)
+    scalaropts transformutils native mcjit orcjit)
   target_link_libraries(torch_cpu PRIVATE ${LLVM_LINK_LIBS})
 endif(USE_LLVM AND LLVM_FOUND)
 
