@@ -233,7 +233,7 @@ function(torch_compile_options libname)
       target_compile_options(${libname} PUBLIC
         ${MSVC_RUNTIME_LIBRARY_OPTION}
         ${MSVC_DEBINFO_OPTION}
-        /EHa
+        /EHsc
         /DNOMINMAX
         /wd4267
         /wd4251
