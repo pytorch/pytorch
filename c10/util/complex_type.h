@@ -439,8 +439,8 @@ C10_HOST_DEVICE T abs(const c10::complex<T>& z) {
   //   https://en.wikipedia.org/wiki/Hypot#Implementation
   auto r = std::abs(std::real(z));
   auto i = std::abs(std::imag(z));
-  auto max = std::max(r, i);
-  auto min = std::min(r, i);
+  auto max = r > i ? r : i;
+  auto min = r > i ? i : r;
   auto rr = min / max;
   return max * std::sqrt(1 + rr * rr);
 }
