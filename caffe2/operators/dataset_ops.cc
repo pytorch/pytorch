@@ -388,13 +388,19 @@ class UnPackRecordsOp : public Operator<CPUContext> {
       for (int i = 0; i < numRows; i++) {
         data_ptr->emplace_back(*inputs[i]);
       }
-    } else {
+    } else if (Input(0).IsType<Shared2DTensorVectorPtr>()) {
       CAFFE_ENFORCE_EQ(Input(0).numel(), 1);
       const auto* inputs = Input(0).template data<Shared2DTensorVectorPtr>();
       CAFFE_ENFORCE(inputs[0] != nullptr);
       data_ptr = inputs[0];
       numRows = inputs[0]->size();
       CAFFE_ENFORCE_GE(numRows, 0);
+    } else {
+      // input contains a single tensor
+      CAFFE_ENFORCE_EQ(InputSize(), 1);
+      CAFFE_ENFORCE_EQ(OutputSize(), 1);
+      *Output(0) = Input(0);
+      return true;
     }
 
     auto numTensors = OutputSize();
