@@ -5,7 +5,7 @@
 #ifdef USE_XNNPACK
 
 #include <xnnpack.h>
-#include <caffe2/utils/threadpool/ThreadPoolMobile.h>
+#include <caffe2/utils/threadpool/PThreadPool.h>
 
 namespace at {
 namespace native {

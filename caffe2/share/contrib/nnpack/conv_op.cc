@@ -11,7 +11,7 @@
 #include "caffe2/operators/conv_pool_op_base.h"
 
 #include "caffe2/utils/math.h"
-#include "caffe2/utils/threadpool/pthreadpool.h"
+#include "caffe2/utils/threadpool/c2_pthreadpool.h"
 #include "nnpack.h"
 
 C10_DEFINE_bool(caffe2_profile_nnpack, false, "");

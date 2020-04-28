@@ -9,7 +9,7 @@
 #include "pytorch_jni_common.h"
 #if defined(__ANDROID__)
 #include <caffe2/utils/threadpool/ThreadPool.h>
-#include <caffe2/utils/threadpool/ThreadPoolMobile.h>
+#include <caffe2/utils/threadpool/PThreadPool.h>
 #endif
 
 namespace pytorch_jni {

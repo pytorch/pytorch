@@ -1,4 +1,4 @@
-#include "caffe2/utils/threadpool/pthreadpool.h"
+#include "caffe2/utils/threadpool/c2_pthreadpool.h"
 #include "caffe2/utils/threadpool/ThreadPool.h"
 
 
@@ -25,6 +25,15 @@ void c2_pthreadpool_compute_1d(
             function(argument, workId);
           },
           range);
+}
+
+void c2_pthreadpool_parallelize_1d(
+    const c2_pthreadpool_t threadpool,
+    const c2_pthreadpool_function_1d_t function,
+    void* const argument,
+    const size_t range,
+    uint32_t) {
+  c2_pthreadpool_compute_1d(threadpool, function, argument, range);
 }
 
 size_t c2_pthreadpool_get_threads_count(c2_pthreadpool_t threadpool) {

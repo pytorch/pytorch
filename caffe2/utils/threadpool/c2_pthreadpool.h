@@ -5,7 +5,7 @@
 
 #include "ThreadPoolCommon.h"
 
-
+#include <stdint.h> // for uint32_t
 #include <stddef.h> // for size_t
 
 typedef struct pthreadpool* c2_pthreadpool_t;
@@ -81,6 +81,13 @@ void c2_pthreadpool_compute_1d(
     void* argument,
     size_t range);
 
+void c2_pthreadpool_parallelize_1d(
+    c2_pthreadpool_t threadpool,
+    c2_pthreadpool_function_1d_t function,
+    void* argument,
+    size_t range,
+    uint32_t flags);
+
 void c2_pthreadpool_compute_1d_tiled(
     c2_pthreadpool_t threadpool,
     c2_pthreadpool_function_1d_tiled_t function,
@@ -137,6 +144,21 @@ void c2_pthreadpool_compute_4d_tiled(
  * @param[in,out]  threadpool  The thread pool to destroy.
  */
 void c2_pthreadpool_destroy(c2_pthreadpool_t threadpool);
+
+#ifdef USE_INTERNAL_THREADPOOL_IMPL
+
+#define c2_pthreadpool_create pthreadpool_create
+#define c2_pthreadpool_get_threads_count pthreadpool_get_threads_count
+#define c2_pthreadpool_compute_1d pthreadpool_compute_1d
+#define c2_pthreadpool_parallelize_1d pthreadpool_parallelize_1d
+#define c2_pthreadpool_compute_1d_tiled pthreadpool_compute_1d_tiled
+#define c2_pthreadpool_compute_2d pthreadpool_compute_2d
+#define c2_pthreadpool_compute_2d_tiled pthreadpool_compute_2d_tiled
+#define c2_pthreadpool_compute_3d_tiled pthreadpool_compute_3d_tiled
+#define c2_pthreadpool_compute_4d_tiled pthreadpool_compute_4d_tiled
+#define c2_pthreadpool_destroy pthreadpool_destroy
+
+#endif
 
 #ifdef __cplusplus
 } /* extern "C" */

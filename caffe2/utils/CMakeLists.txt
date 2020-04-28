@@ -1,10 +1,8 @@
 if(INTERN_BUILD_MOBILE AND NOT BUILD_CAFFE2_MOBILE)
-  message(STATUS "PYTORCH MOBILE: ----------------------------------------------------------------------------------------")
-
   list(APPEND Caffe2_CPU_SRCS
     utils/string_utils.cc
     utils/threadpool/ThreadPool.cc
-    utils/threadpool/ThreadPoolMobile.cc
+    utils/threadpool/PThreadPool.cc
   )
   set(Caffe2_CPU_SRCS ${Caffe2_CPU_SRCS} PARENT_SCOPE)
   return()
@@ -28,17 +26,16 @@ list(APPEND Caffe2_CPU_SRCS
   utils/string_utils.cc
   utils/threadpool/ThreadPool.cc)
 
-message(STATUS "PYTORCH: ----------------------------------------------------------------------------------------")
-
 # ---[ threadpool/pthreadpool* is a local modification of the NNPACK
 # pthreadpool with a very similar interface. Neither NNPACK, nor this
 # thread pool supports Windows.
 if(NOT MSVC)
   add_definitions(-DUSE_INTERNAL_THREADPOOL_IMPL)
   set(Caffe2_CPU_SRCS ${Caffe2_CPU_SRCS}
-          utils/threadpool/pthreadpool.cc
-          utils/threadpool/pthreadpool_impl.cc
-          utils/threadpool/ThreadPoolMobile.cc
+          utils/threadpool/c2_pthreadpool.cc
+          utils/threadpool/c2_pthreadpool_impl.cc
+          utils/threadpool/ThreadPool.cc
+          utils/threadpool/PThreadPool.cc
           )
 endif()
 

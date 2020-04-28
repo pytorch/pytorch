@@ -1617,6 +1617,7 @@ class TestQuantizeScriptPTSQOps(JitTestCase):
                 x = torch.mean(x)
                 x = torch.sigmoid(x)
                 x = x.reshape([-1])
+                x = x.resize_(1, 1, x.numel())
                 x = self.sigmoid(x)
                 x = x.view(-1)
                 x = x.transpose(1, 2)
