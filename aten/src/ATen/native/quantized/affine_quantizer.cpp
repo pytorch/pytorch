@@ -257,7 +257,8 @@ T quantize_val(double scale, int64_t zero_point, float value) {
   int64_t qvalue;
   constexpr int64_t qmin = std::numeric_limits<typename T::underlying>::min();
   constexpr int64_t qmax = std::numeric_limits<typename T::underlying>::max();
-  qvalue = static_cast<int64_t>(Round(value / scale + zero_point));
+  float inv_scale = 1.0f / static_cast<float>(scale);
+  qvalue = static_cast<int64_t>(zero_point + Round(value * inv_scale));
   qvalue = std::max<int64_t>(qvalue, qmin);
   qvalue = std::min<int64_t>(qvalue, qmax);
   return static_cast<T>(qvalue);
