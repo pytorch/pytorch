@@ -4,6 +4,9 @@
 namespace c10 {
 // std::string serializeType(const Type &t);
 TypePtr parseType(const std::string& pythonStr);
+TypePtr parseType(
+    const std::string& pythonStr,
+    std::function<TypePtr(const std::string&)> resolver);
 } // namespace c10
 
 namespace torch {
@@ -54,6 +57,23 @@ void testMobileTypeParser() {
 
   std::string non_id("(int)");
   ASSERT_ANY_THROW(c10::parseType(non_id));
+
+  // Test resolver
+  auto resolver = [](const std::string& name) -> TypePtr {
+    if (name == "remapped_int") {
+      return IntType::get();
+    } else if (name == "remapped_float") {
+      return FloatType::get();
+    } else {
+      TORCH_CHECK(false, "Don't know this type");
+    }
+  };
+
+  std::string remapped_int_list("List[remapped_int]");
+  ASSERT_ANY_THROW(c10::parseType(remapped_int_list));
+  ASSERT_EQ(c10::parseType(remapped_int_list, resolver)->python_str(), "List[int]");
+  ASSERT_EQ(c10::parseType("Dict[remapped_int, remapped_float]", resolver)->python_str(), "Dict[int, float]");
+  ASSERT_ANY_THROW(c10::parseType("unknown_type", resolver));
 }
 } // namespace jit
 } // namespace torch

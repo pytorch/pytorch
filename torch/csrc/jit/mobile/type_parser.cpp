@@ -24,8 +24,10 @@ bool isSpecialChar(char a) {
 
 class TypeParser {
  public:
-  explicit TypeParser(std::string pythonStr)
-      : pythonStr_(std::move(pythonStr)), start_(0) {
+  explicit TypeParser(
+      std::string pythonStr,
+      std::function<TypePtr(const std::string&)> resolver = nullptr)
+      : pythonStr_(std::move(pythonStr)), start_(0), resolver_(resolver) {
     lex();
   }
 
@@ -63,12 +65,20 @@ class TypeParser {
       expect("]");
       return TupleType::create(types);
     } else {
-      TORCH_CHECK(
-          false,
-          "Type ",
-          token,
-          " is not supported in the parser, ",
-          "or the token is in wrong format.");
+      if (resolver_) {
+        // We don't know what this type is, look it up in the resolver
+        // environment.
+        return resolver_(token);
+      } else {
+        // If we don't have a resolver, then just hard error if we don't know
+        // what the type is.
+        TORCH_CHECK(
+            false,
+            "Type ",
+            token,
+            " is not supported in the parser, ",
+            "or the token is in wrong format.");
+      }
     }
     return nullptr;
   }
@@ -131,11 +141,19 @@ class TypeParser {
   std::string pythonStr_;
   size_t start_;
   std::string next_token_;
+  std::function<TypePtr(const std::string&)> resolver_;
 };
 } // namespace
 
+TORCH_API TypePtr parseType(
+    const std::string& pythonStr,
+    std::function<TypePtr(const std::string&)> resolver) {
+  TypeParser paser(pythonStr, std::move(resolver));
+  return paser.parse();
+}
+
 TORCH_API TypePtr parseType(const std::string& pythonStr) {
-  TypeParser paser(pythonStr);
+  TypeParser paser(pythonStr, nullptr);
   return paser.parse();
 }
 } // namespace c10

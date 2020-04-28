@@ -36,7 +36,6 @@
 
 namespace c10 {
 // std::string serializeType(const Type &t);
-TypePtr parseType(const std::string& pythonStr);
 } // namespace c10
 
 namespace torch {
@@ -206,13 +205,19 @@ c10::IValue BytecodeDeserializer::readArchive(
     return len;
   };
 
-  auto class_resolver = [&](const c10::QualifiedName& qn) {
+  // A dummy type environment: if we don't recognize the type name, generate a
+  // fake one in our compilation unit and hand that back.
+  auto dummyResolver = [&](const std::string& name) {
+    c10::QualifiedName qn(name);
     if (compilation_unit_->get_class(qn) == nullptr) {
       auto typeptr = ClassType::create(qn, compilation_unit_, true);
       compilation_unit_->register_type(typeptr);
     }
-    return c10::StrongTypePtr(
-        compilation_unit_, compilation_unit_->get_class(qn));
+    return compilation_unit_->get_class(qn);
+  };
+  auto type_resolver = [&](const c10::QualifiedName& qn) {
+    auto type = c10::parseType(qn.qualifiedName(), dummyResolver);
+    return c10::StrongTypePtr(compilation_unit_, type);
   };
 
   auto obj_loader = [&](at::StrongTypePtr type, IValue input) {
@@ -259,7 +264,7 @@ c10::IValue BytecodeDeserializer::readArchive(
 
   Unpickler unpickler(
       reader,
-      std::move(class_resolver),
+      std::move(type_resolver),
       std::move(obj_loader),
       std::move(read_record),
       device_);

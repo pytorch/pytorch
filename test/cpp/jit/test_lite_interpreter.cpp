@@ -140,21 +140,34 @@ void testLiteInterpreterTuple() {
 }
 
 void testLiteInterpreterDict() {
-  Module m("m");
-  m.define(R"JIT(
-  def foo(self, x):
-      return {"result": x + 1}
-
-  def forward(self, x):
-      d = self.foo(x)
-      return d
-  )JIT");
+  auto m = load("/scratch/suo/bi_pytext_0427.bc");
   std::stringstream ss;
   m._save_for_mobile(ss);
-  mobile::Module bc = _load_for_mobile(ss);
-  std::vector<torch::jit::IValue> inputs({torch::ones({})});
-  auto output = bc.run_method("forward", inputs);
-  AT_ASSERT(output.toGenericDict().at("result").toTensor().item().toInt() == 2);
+  auto bc = _load_for_mobile(ss);
+  std::vector<torch::jit::IValue> inputs;
+
+  auto L = c10::List<int64_t>({1, 1, 1});
+  auto length = L.size();
+  auto LL = c10::List<c10::List<int64_t>>({L});
+  inputs.emplace_back(torch::jit::IValue(LL));
+  auto bite_lens = c10::List<int64_t>({3});
+  inputs.emplace_back(torch::jit::IValue(bite_lens));
+  auto res = bc.run_method("forward", inputs);
+//  Module m("m");
+//  m.define(R"JIT(
+//  def foo(self, x):
+//      return {"result": x + 1}
+//
+//  def forward(self, x):
+//      d = self.foo(x)
+//      return d
+//  )JIT");
+//  std::stringstream ss;
+//  m._save_for_mobile(ss);
+//  mobile::Module bc = _load_for_mobile(ss);
+//  std::vector<torch::jit::IValue> inputs({torch::ones({})});
+//  auto output = bc.run_method("forward", inputs);
+//  AT_ASSERT(output.toGenericDict().at("result").toTensor().item().toInt() == 2);
 }
 
 void testLiteInterpreterPrimOverload() {
