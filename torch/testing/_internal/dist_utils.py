@@ -65,8 +65,12 @@ def dist_init(old_test_method=None, setup_rpc=True, clean_shutdown=True,
 
         self.worker_id = self.rank
 
-        if faulty_messages:
-            _build_faulty_backend_options(faulty_messages)
+        if (
+            rpc.backend_registry.backend_registered("FAULTY_PROCESS_GROUP")
+            and self.rpc_backend
+            == rpc.backend_registry.BackendType.FAULTY_PROCESS_GROUP
+        ):
+            _build_faulty_backend_options(self, faulty_messages)
 
         if setup_rpc:
             rpc.init_rpc(
@@ -96,18 +100,22 @@ TEST_CONFIG.build_rpc_backend_options = lambda test_object: rpc.backend_registry
     num_send_recv_threads=8,
 )
 
-def _build_faulty_backend_options(faulty_messages):
+def _build_faulty_backend_options(faulty_agent_fixture, faulty_messages):
     '''
     Constructs the backend options object for the faulty process group agent
     based on the faulty_messages input to dist_init.
     '''
+    default_retryable_msg_types = faulty_agent_fixture.retryable_message_types
     TEST_CONFIG.build_rpc_backend_options = lambda test_object: rpc.backend_registry.construct_rpc_backend_options(
         test_object.rpc_backend,
         init_method=test_object.init_method,
         num_send_recv_threads=8,
-        num_fail_sends=1,
-        messages_to_fail=faulty_messages,
+        num_fail_sends=faulty_agent_fixture.num_fail_sends,
+        messages_to_fail=faulty_messages
+        if faulty_messages is not None
+        else default_retryable_msg_types,
     )
+
 
 def noop():
     pass
