@@ -31,11 +31,10 @@ def export_to_pbtxt(model, inputs, *args, **kwargs):
         *args, **kwargs)
 
 
-def export_to_pb(model, inputs, *args, **kwargs):
-    # kwargs['operator_export_type'] = torch.onnx.OperatorExportTypes.ONNX
+def export_to_pb(model, inputs, operator_export_type=torch.onnx.OperatorExportTypes.ONNX, *args, **kwargs):
     f = io.BytesIO()
     with torch.no_grad():
-        torch.onnx.export(model, inputs, f, *args, **kwargs)
+        torch.onnx.export(model, inputs, f, operator_export_type=operator_export_type, *args, **kwargs)
     return f.getvalue()
 
 
@@ -263,13 +262,11 @@ class TestOperators(TestCase):
 
     def test_conv(self):
         x = torch.ones(20, 16, 50, 40, requires_grad=True)
-        self.assertONNX(nn.Conv2d(16, 13, 3, bias=False), x, keep_initializers_as_inputs=True,
-                        operator_export_type=torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK)
+        self.assertONNX(nn.Conv2d(16, 13, 3, bias=False), x, keep_initializers_as_inputs=True)
 
     def test_conv_onnx_irv4(self):
         x = torch.ones(20, 16, 50, 40, requires_grad=True)
-        self.assertONNX(nn.Conv2d(16, 13, 3, bias=False), x,
-                        operator_export_type=torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK)
+        self.assertONNX(nn.Conv2d(16, 13, 3, bias=False), x)
 
     def test_conv_onnx_irv4_opset8(self):
         # This test point checks that for opset 8 (or lower), even if
@@ -308,8 +305,7 @@ class TestOperators(TestCase):
         x = torch.ones(2, 3, 4, 5, requires_grad=True)
         self.assertONNX(nn.ConvTranspose2d(3, 3, 3, stride=3, bias=False,
                                            padding=1, output_padding=2), x,
-                        keep_initializers_as_inputs=True,
-                        operator_export_type=torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK)
+                        keep_initializers_as_inputs=True)
 
     def test_maxpool(self):
         x = torch.randn(20, 16, 50)
