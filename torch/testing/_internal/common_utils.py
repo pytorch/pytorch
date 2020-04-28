@@ -646,7 +646,7 @@ def check_disabled(test_name):
             " To enable set the environment variable PYTORCH_RUN_DISABLED_TESTS=1")
 
 class TestCase(expecttest.TestCase):
-    precision = 1e-5
+    precision = 1e-7
     maxDiff = None
     _do_cuda_memory_leak_check = False
     _do_cuda_non_default_stream = False
@@ -803,7 +803,7 @@ class TestCase(expecttest.TestCase):
 
     # Returns a dtype suitable for comparing tensors a and b.
     # This closely follows NumPy's type promotion logic, except it includes
-    # bfloat16 and accounts of the current state of PyTorch's bfloat16 and
+    # bfloat16 and accounts for the current state of PyTorch's bfloat16 and
     # float16 implementations.
     # Note: since torch.isclose converts its inputs to floating point values
     # (it multiplies by rtol, a double) this function takes an optional
@@ -888,7 +888,7 @@ class TestCase(expecttest.TestCase):
 
         return common_dtype
 
-    # Checks if two dense tensors are equal, returning true when they are.
+    # Checks if two dense tensors are equal(-ish), returning true when they are.
     # If exact_dtype is true both tensors must have the same dtype.
     # If exact_device is true both tensors must be on the same device.
     # Note: tensors on different devices are moved to the CPU to be compared when
@@ -918,35 +918,36 @@ class TestCase(expecttest.TestCase):
         if exact_dtype and a.dtype is not b.dtype:
             return False
 
-        # Acquires common dtype for comparison and rtol and atol (if None)
-        # Note: self.precision is the (legacy) mechanism for tests to
-        # override atol for floating point and complex comparisons.
-        if rtol is None and atol is None:
-            dtype = self.compare_type(a, b, allow_ints=True)
-            if dtype in self.dtype_precisions:
-                rtol = self.dtype_precisions[dtype][0]
-                atol = max(self.precision, self.dtype_precisions[dtype][1])
-            else:
-                # Integer comparisons have a default atol = rtol = 0
-                atol = rtol = 0
-        else:  # at least one of rtol or atol was given
-            dtype = self.compare_type(a, b, allow_ints=False)
-            rtol = 0 if rtol is None else rtol
-            atol = self.precision if atol is None else max(self.precision, atol)
+        # Acquires atol and rtol
+        # Note: atol can be overriden by a class's precision value. This
+        # legacy behavior allows generated tests to customize their precision.
+        rtol = rtol if rtol is not None else max(self.dtype_precisions.get(a.dtype, (0, 0))[0],
+                                                 self.dtype_precisions.get(b.dtype, (0, 0))[0])
+        atol = atol if atol is not None else max(self.dtype_precisions.get(a.dtype, (0, 0))[1],
+                                                 self.dtype_precisions.get(b.dtype, (0, 0))[1])
+        atol = max(atol, self.precision)
 
+
+        # Special-cases zero rtol and atol less than one since it allows
+        # comparing integer tensors using identity.
+        allow_ints = False
+        if (rtol == 0 and atol < 1):
+            allow_ints = True
+
+        dtype = self.compare_type(a, b, allow_ints=allow_ints)
+
+        # Converts to comparison dtype
         a = a.to(dtype)
         b = b.to(dtype)
 
-        # Special-cases bool and rtol = atol = 0 integer comparisons
-        if (dtype is torch.bool or
-           ((rtol == 0 and atol == 0) and self.is_integral(dtype))):
+        # Integer (including bool) comparisons are identity comparisons
+        if self.is_integral(dtype):
             return (a == b).all().item()
 
-        # Comparing complex tensors compares the real and imaginary parts
-        # separately.
-        # Note: this is intentionally diverge from torch.isclose for
-        # complex tensors, which implements a more mathematically natural
-        # notion of "closeness" for complex numbers.
+        # Compares complex tensors' real and imaginary parts separately.
+        # Note: this is intentionally divergent from complex torch.isclose
+        # which implements a more mathematically natural notion of "closeness"
+        # for complex numbers.
         if a.is_complex():
             float_dtype = torch.float32 if a.dtype == torch.complex64 else torch.float64
             a_real = a.copy_real().to(float_dtype)
