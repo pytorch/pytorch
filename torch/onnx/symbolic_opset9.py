@@ -1589,7 +1589,7 @@ def pixel_shuffle(g, self, upscale_factor):
 
 
 def _generic_rnn(g, variant, input, initial_states, all_weights, has_biases,
-                 num_layers, dropout, train, bidirectional, batch_first=None, batch_sizes=None):
+                 num_layers, dropout, train, bidirectional, type_2, batch_first=None, batch_sizes=None):
 
     warnings.warn("Exporting a model to ONNX with a batch_size other than 1, " +
                   "with a variable length with " + variant + " can cause an error " +
@@ -1602,6 +1602,10 @@ def _generic_rnn(g, variant, input, initial_states, all_weights, has_biases,
     variantToOnnxActivationMap = dict(zip([act_fun.lower() for act_fun in onnxActivations], onnxActivations))
     weights_per_layer = 4 if has_biases else 2
     assert len(all_weights) == num_layers * weights_per_layer * (1 + bidirectional)
+    if bidirectional:
+        if not type_2:
+            raise ValueError("Type-2 bidirectional RNNs are not currently "
+                             "supported by ONNX specification.")
     layer_weights = [all_weights[i:i + weights_per_layer] for i in range(0, len(all_weights), weights_per_layer)]
     if batch_first:
         # batch, seq, feat -> seq, batch, feat
@@ -1723,18 +1727,18 @@ def _generic_rnn(g, variant, input, initial_states, all_weights, has_biases,
         return prev_output, h_outs, c_outs
 
 
-@parse_args('v', 'v', 'v', 'i', 'i', 'f', 'i', 'i', 'i')
-def _lstm_full(g, input, hidden_v, weight_v, has_biases, num_layers, dropout, train, bidirectional, batch_first):
+@parse_args('v', 'v', 'v', 'i', 'i', 'f', 'i', 'i', 'i', 'i')
+def _lstm_full(g, input, hidden_v, weight_v, has_biases, num_layers, dropout, train, bidirectional, type_2, batch_first):
     hidden, weight = sym_help._unpack_list(hidden_v), sym_help._unpack_list(weight_v)
     return _generic_rnn(g, 'LSTM', input, hidden, weight, has_biases, num_layers,
-                        dropout, train, bidirectional, batch_first)
+                        dropout, train, bidirectional, type_2, batch_first)
 
 
-@parse_args('v', 'v', 'v', 'v', 'i', 'i', 'f', 'i', 'i')
-def _lstm_packed(g, input, batch_sizes, hidden_v, weight_v, has_biases, num_layers, dropout, train, bidirectional):
+@parse_args('v', 'v', 'v', 'v', 'i', 'i', 'f', 'i', 'i', 'i')
+def _lstm_packed(g, input, batch_sizes, hidden_v, weight_v, has_biases, num_layers, dropout, train, bidirectional, type_2):
     hidden, weight = sym_help._unpack_list(hidden_v), sym_help._unpack_list(weight_v)
     return _generic_rnn(g, 'LSTM', input, hidden, weight, has_biases, num_layers,
-                        dropout, train, bidirectional, batch_sizes=batch_sizes)
+                        dropout, train, bidirectional, type_2, batch_sizes=batch_sizes)
 
 
 def lstm(g, *args):
@@ -1745,17 +1749,17 @@ def lstm(g, *args):
 
 
 def _one_hidden_rnn(kind):
-    @parse_args('v', 'v', 'v', 'i', 'i', 'f', 'i', 'i', 'i')
-    def _rnn_full(g, input, hidden, weight_v, has_biases, num_layers, dropout, train, bidirectional, batch_first):
+    @parse_args('v', 'v', 'v', 'i', 'i', 'f', 'i', 'i', 'i', 'i')
+    def _rnn_full(g, input, hidden, weight_v, has_biases, num_layers, dropout, train, bidirectional, type_2, batch_first):
         weight = sym_help._unpack_list(weight_v)
         return _generic_rnn(g, kind, input, hidden, weight, has_biases, num_layers,
-                            dropout, train, bidirectional, batch_first)
+                            dropout, train, bidirectional, type_2, batch_first)
 
-    @parse_args('v', 'v', 'v', 'v', 'i', 'i', 'f', 'i', 'i')
-    def _rnn_packed(g, input, batch_sizes, hidden, weight_v, has_biases, num_layers, dropout, train, bidirectional):
+    @parse_args('v', 'v', 'v', 'v', 'i', 'i', 'f', 'i', 'i', 'i')
+    def _rnn_packed(g, input, batch_sizes, hidden, weight_v, has_biases, num_layers, dropout, train, bidirectional, type_2):
         weight = sym_help._unpack_list(weight_v)
         return _generic_rnn(g, kind, input, hidden, weight, has_biases, num_layers,
-                            dropout, train, bidirectional, batch_sizes=batch_sizes)
+                            dropout, train, bidirectional, type_2, batch_sizes=batch_sizes)
 
     def symbolic(g, *args):
         if sym_help._is_tensor_list(args[3]):
