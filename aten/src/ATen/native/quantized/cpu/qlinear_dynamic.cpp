@@ -274,6 +274,12 @@ class QLinearDynamicInt8 final {
           (uint8_t*)qnnp_w_data,
           nullptr);
       packB = pack_ptr.w.get();
+#ifdef C10_MOBILE
+      std::cout << "Packing original tensor bytes" << weight_contig.nbytes() << std::endl;
+      pack_ptr.orig_weight = pack_ptr.orig_weight.detach();
+      pack_ptr.orig_weight.resize_(0);
+      std::cout << "After Packing tensor bytes" << pack_ptr.orig_weight.nbytes() << std::endl;
+#endif
     }
 
     // Quantize input

@@ -598,6 +598,12 @@ class QConvInt8 final {
           reinterpret_cast<uint8_t*>(qnnp_w_data),
           reinterpret_cast<int32_t*>(bias.data_ptr<c10::qint32>()));
       pack_w = pack_data.w.get();
+#ifdef C10_MOBILE
+      std::cout << "Packing original tensor bytes" << weight_contig.nbytes() << std::endl;
+      pack_data.orig_weight = pack_data.orig_weight.detach();
+      pack_data.orig_weight.resize_(0);
+      std::cout << "After Packing tensor bytes" << pack_data.orig_weight.nbytes() << std::endl;
+#endif
     }
     TORCH_INTERNAL_ASSERT(pack_w != nullptr, "Packed Weights are NULL");
     const auto output_shape = MakeConvOutputShape<kSpatialDim>(
