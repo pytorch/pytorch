@@ -35,6 +35,8 @@ thread_local uint16_t thread_id;
 // use RecordFunctionGuard to keep track of observers,
 // enable/disableProfiler are tied to the code range
 thread_local std::vector<std::shared_ptr<RecordFunctionGuard>> g_;
+// use thread_local vector to save profiler callback ids
+thread_local std::vector<uint64_t> callback_handles_;
 
 } // namespace
 
@@ -143,7 +145,7 @@ void enableProfiler(ProfilerConfig config) {
     throw std::runtime_error("can't change kind of profiling (e.g. NVTX to CPU) while profiler is running");
   }
 
-  pushCallback(
+  auto handle = addGlobalCallback(RecordFunctionCallback(
       [config](const RecordFunction& fn) {
         auto* msg = (fn.seqNr() >= 0) ? ", seq = " : "";
         if (config.report_input_shapes) {
@@ -196,11 +198,11 @@ void enableProfiler(ProfilerConfig config) {
         } else {
           popRange();
         }
-      },
-      /* needs_inputs */ config.report_input_shapes,
-      /* sampling_prob */ 1.0,
-      /* scopes */ {RecordScope::FUNCTION, RecordScope::USER_SCOPE});
+      })
+      .needsInputs(config.report_input_shapes)
+      .scopes({RecordScope::FUNCTION, RecordScope::USER_SCOPE}));
   state = new_state;
+  callback_handles_.push_back(handle);
   g_.emplace_back(std::make_shared<RecordFunctionGuard>());
 
   if(state == ProfilerState::CUDA) {
@@ -230,10 +232,12 @@ thread_event_lists disableProfiler() {
   ProfilerState old_state = state;
   mark("__stop_profile");
 
-  popCallback();
-  state = ProfilerState::Disabled;
+  TORCH_INTERNAL_ASSERT(!callback_handles_.empty());
+  removeCallback(callback_handles_.back());
+  callback_handles_.pop_back();
   TORCH_INTERNAL_ASSERT(!g_.empty());
   g_.pop_back();
+  state = ProfilerState::Disabled;
 
   if (old_state == ProfilerState::NVTX) {
     return thread_event_lists();
