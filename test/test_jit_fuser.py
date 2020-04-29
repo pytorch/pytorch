@@ -176,12 +176,12 @@ class TestFuser(JitTestCase):
         def cuda_rem(x, y):
             return 1 + torch.remainder(x, y) - 1
 
-        a = torch.tensor([-5.3]).cuda()
-        b = torch.tensor([-2]).cuda()
+        def cuda_rem(x, y):
+            return 1 + x.abs() - 1
+
+        a = torch.rand([512], dtype=torch.float).cuda()
+        b = torch.rand([512], dtype=torch.float).cuda()
         inputs = [a, b]
-        ge = self.checkScript(cuda_rem, inputs)
-        a = torch.tensor([-0.8]).cuda()
-        b = torch.tensor([-1.5]).cuda()
         ge = self.checkScript(cuda_rem, inputs)
         graph = ge.graph_for(*inputs)
         self.assertAllFused(graph)
