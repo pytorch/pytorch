@@ -3130,6 +3130,10 @@
   variants: method
   device_guard: False
 
+- func: vander(Tensor x, int? N=None, bool increasing=False) -> Tensor
+  use_c10_dispatcher: full
+  supports_named_tensor: True
+
 - func: var(Tensor self, bool unbiased=True) -> Tensor
   use_c10_dispatcher: full
   variants: function, method
