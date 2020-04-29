@@ -322,8 +322,8 @@ enum pytorch_qnnp_status qnnpackConv(
         conv_p.output_min,
         conv_p.output_max);
   }
-  uint32_t stride_width = conv_p.subsampling_dims[0];
-  uint32_t stride_height = conv_p.subsampling_dims[1];
+  uint32_t stride_width = conv_p.stride_dims[0];
+  uint32_t stride_height = conv_p.stride_dims[1];
 
   const std::array<size_t, 2> output_dims =
       conv_p.compute_output_dims({input_width, input_height});
@@ -332,8 +332,8 @@ enum pytorch_qnnp_status qnnpackConv(
   const size_t output_size = output_height * output_width;
 
   // FIXME temporary solution to create a qnnp_op struct for indirection buffer.
-  const bool any_padding =
-      (conv_p.pad[0] | conv_p.pad[1] | conv_p.pad[2] | conv_p.pad[3]) != 0;
+  const bool any_padding = (conv_p.padding[0] | conv_p.padding[1] |
+                            conv_p.padding[2] | conv_p.padding[3]) != 0;
   size_t zero_size = 0, zero_offset = 0;
 
   pytorch_qnnp_operator_t convolution{nullptr};
@@ -363,8 +363,8 @@ enum pytorch_qnnp_status qnnpackConv(
   convolution->stride_width = stride_width;
   convolution->dilation_height = dilation_height;
   convolution->dilation_width = dilation_width;
-  convolution->input_padding_top = conv_p.pad[0];
-  convolution->input_padding_left = conv_p.pad[1];
+  convolution->input_padding_top = conv_p.padding[0];
+  convolution->input_padding_left = conv_p.padding[1];
 
   switch (conv_p.ukernel_type) {
     case pytorch_qnnp_ukernel_type_dwconv: {

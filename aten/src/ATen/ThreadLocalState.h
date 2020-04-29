@@ -34,11 +34,6 @@ class TORCH_API ThreadLocalState {
   bool grad_mode_enabled_;
 #endif
 
-  // Whether RecordFunctions need to be disabled;
-  // used in core PyTorch to avoid infitite recursion
-  // in observers framework
-  bool record_function_enabled_;
-
   friend class ThreadLocalStateGuard;
 };
 
@@ -59,9 +54,5 @@ class TORCH_API ThreadLocalStateGuard {
  private:
   const ThreadLocalState prev_state_;
 };
-
-// Internal, turns on/off record function observers
-TORCH_API bool _tls_is_record_function_enabled();
-TORCH_API void _tls_set_record_function_enabled(bool);
 
 } // namespace at
