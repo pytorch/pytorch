@@ -13,6 +13,20 @@ namespace rpc {
 /////////////////////  Pickle/Unpickle Helplers ////////////////////////////
 
 namespace {
+
+std::shared_ptr<FutureIValue> toFutureIValue(
+    std::shared_ptr<FutureMessage> fm) {
+  auto fv = std::make_shared<FutureIValue>();
+
+  fm->addCallback(
+      [fv](const FutureMessage& fm) {
+        fv->markCompleted(IValue());
+      }
+  );
+
+  return fv;
+}
+
 py::tuple toPyTuple(const RRefForkData& rrefForkData) {
   // add GIL as it is contructing a py::object
   pybind11::gil_scoped_acquire ag;
@@ -112,8 +126,8 @@ PyRRef::PyRRef(const py::object& value, const py::object& type_hint)
         return rref;
       }()) {}
 
-const std::shared_ptr<FutureMessage> PyRRef::getFuture() const {
-  return rref_->getOwnerCreationFuture();
+const std::shared_ptr<FutureIValue> PyRRef::getFuture() const {
+  return toFutureIValue(rref_->getOwnerCreationFuture());
 }
 
 bool PyRRef::isOwner() const {

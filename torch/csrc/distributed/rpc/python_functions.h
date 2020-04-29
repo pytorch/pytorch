@@ -10,14 +10,14 @@ namespace rpc {
 
 py::object toPyObj(const Message& message);
 
-std::shared_ptr<FutureMessage> pyRpcBuiltin(
+std::shared_ptr<FutureIValue> pyRpcBuiltin(
     const WorkerInfo& dst,
     const std::string& opName,
     const py::args& args,
     const py::kwargs& kwargs,
     const float rpcTimeoutSeconds);
 
-std::shared_ptr<FutureMessage> pyRpcPythonUdf(
+std::shared_ptr<FutureIValue> pyRpcPythonUdf(
     const WorkerInfo& dst,
     std::string& pickledPythonUDF,
     std::vector<torch::Tensor>& tensors,

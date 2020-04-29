@@ -128,7 +128,8 @@ TORCH_API Message createExceptionResponse(const std::exception& e, int64_t id);
 TORCH_API Message
 createExceptionResponse(const std::string& exceptionStr, int64_t id);
 
-typedef torch::utils::Future<Message> FutureMessage;
+using FutureMessage = torch::utils::Future<Message>;
+using FutureIValue = torch::utils::Future<at::IValue>;
 
 } // namespace rpc
 } // namespace distributed
