@@ -1421,148 +1421,323 @@ void testGPU_FusionBinaryMathOps() {
   }
 }
 
-void testGPU_FusionBinaryOps() {
-  Fusion fusion;
-  FusionGuard fg(&fusion);
-
-  std::vector<BinaryOpType> bop_types = {
-    BinaryOpType::Add,
-    BinaryOpType::Atan2,
-    BinaryOpType::Div,
-    BinaryOpType::Fmod,
-    BinaryOpType::Max,
-    BinaryOpType::Min,
-    BinaryOpType::Mul,
-    BinaryOpType::Pow,
-    BinaryOpType::Remainder,
-    BinaryOpType::Sub,
-
-    //BinaryOpType::Mod,
-    //BinaryOpType::CeilDiv,
-    //BinaryOpType::And,
-    BinaryOpType::Eq,
-    BinaryOpType::GE,
-    BinaryOpType::GT,
-    BinaryOpType::LE,
-    BinaryOpType::LT,
-    BinaryOpType::NE
-  };
-
-  std::vector<IterDomain*> dom;
-  for (int i = 0; i < 2; i++)
-    dom.push_back(new IterDomain(new Int(0), new Int()));
-
-  TensorView* tv0 = new TensorView(new TensorDomain(dom), DataType::Float);
-  TensorView* tv1 = new TensorView(new TensorDomain(dom), DataType::Float);
-
-  std::vector<Val*> tvs;
-
-  TensorView* tv2 = tv0;
-  for(auto bop_type : bop_types) {
-    tvs.push_back(binaryOp(bop_type, tv1, tv2));
-    tv2 = static_cast<TensorView*>(tvs.back());
-  }
-
-  fusion.addInput(tv0);
-  fusion.addInput(tv1);
-  fusion.addOutput(tv2);
-  tv0->computeAt(tv2, -1);
-  tv1->computeAt(tv2, -1);
-
-  tv2->axis(0)->parallelize(ParallelType::BIDx);
-  tv2->axis(-1)->parallelize(ParallelType::TIDx);
-
-  torch::jit::fuser::cuda::CudaKernel prog;
-  prog.device_ = 0;
-  prog.grid(64);
-  prog.block(32);
-
-  torch::jit::fuser::cuda::compileKernel(fusion, &prog);
-}
-
 void testGPU_FusionMultiInputOps() {
-  Fusion fusion;
-  FusionGuard fg(&fusion);
+  std::vector<at::Tensor(*)(const at::Tensor&, const at::Tensor&, const at::Scalar)> aten_funcs {
+    at::add,
+    at::sub
+  };
+  std::vector<std::pair<Val*(*)(Val*,Val*,Val*),std::string>> miop_types = {
+    {add_alpha, "add_alpha"},
+    {sub_alpha, "sub_alpha"}
+  };
+  TORCH_CHECK(miop_types.size() == aten_funcs.size());
+  for(int i = 0 ; i < miop_types.size(); ++i) {
+    Fusion fusion;
+    FusionGuard fg(&fusion);
 
-  std::vector<IterDomain*> dom;
-  for (int i = 0; i < 2; i++)
-    dom.push_back(new IterDomain(new Int(0), new Int()));
+    std::vector<IterDomain*> dom;
+    for (int i = 0; i < 2; i++)
+      dom.push_back(new IterDomain(new Int(0), new Int()));
 
-  TensorView* tv0 = new TensorView(new TensorDomain(dom), DataType::Float);
-  TensorView* tv1 = new TensorView(new TensorDomain(dom), DataType::Float);
-  TensorView* tv2 = new TensorView(new TensorDomain(dom), DataType::Float);
-  TensorView* tv3 = new TensorView(new TensorDomain(dom), DataType::Float);
-  TensorView* tv4 = new TensorView(new TensorDomain(dom), DataType::Float);
-  TensorView* tv5 = new TensorView(new TensorDomain(dom), DataType::Float);
-  TensorView* tv6 = new TensorView(new TensorDomain(dom), DataType::Float);
-  Float*       f1 = new Float(1.f);
+    Float*       f1 = new Float(1.f);
+    TensorView* tv0 = new TensorView(new TensorDomain(dom), DataType::Float);
+    TensorView* tv1 = new TensorView(new TensorDomain(dom), DataType::Float);
+    TensorView* tv2 = static_cast<TensorView*>(miop_types[i].first(tv0, tv1, f1));
 
-  Val* intrm1 = add_alpha(tv0,    tv1, f1);
-  Val* intrm2 = sub_alpha(intrm1, tv2, f1);
-  Val* intrm3 = lerp(     intrm2, tv3, tv4);
-  TensorView* out    = static_cast<TensorView*>(addcmul(intrm3, tv5, tv6, f1));
+    fusion.addInput(tv0);
+    fusion.addInput(tv1);
+    fusion.addOutput(tv2);
+    tv0->computeAt(tv2, -1);
+    tv1->computeAt(tv2, -1);
 
-  fusion.addInput(tv0);
-  fusion.addInput(tv1);
-  fusion.addInput(tv2);
-  fusion.addInput(tv3);
-  fusion.addInput(tv4);
-  fusion.addInput(tv5);
-  fusion.addInput(tv6);
-  fusion.addOutput(out);
-  tv0->computeAt(out, -1);
-  tv1->computeAt(out, -1);
-  tv2->computeAt(out, -1);
-  tv3->computeAt(out, -1);
-  tv4->computeAt(out, -1);
-  tv5->computeAt(out, -1);
-  tv6->computeAt(out, -1);
+    tv2->axis(0)->parallelize(ParallelType::BIDx);
+    tv2->axis(-1)->parallelize(ParallelType::TIDx);
 
-  out->axis(0)->parallelize(ParallelType::BIDx);
-  out->axis(-1)->parallelize(ParallelType::TIDx);
+    torch::jit::fuser::cuda::CudaKernel prog;
+    prog.device_ = 0;
+    prog.grid(1);
+    prog.block(4);
 
-  torch::jit::fuser::cuda::CudaKernel prog;
-  prog.device_ = 0;
-  prog.grid(64);
-  prog.block(32);
+    auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
 
-  torch::jit::fuser::cuda::compileKernel(fusion, &prog);
+    at::Tensor input1     = at::rand({1,4}, options);
+    at::Tensor input2     = at::rand({1,4}, options);
+    at::Tensor output     = at::empty_like(input1);
+    at::Tensor ref_output = at::empty_like(input1);
+
+    std::vector<at::Tensor> inputs{{input1, input2}};
+    std::vector<at::Tensor> outputs{{output}};
+
+    torch::jit::fuser::cuda::compileKernel(fusion, &prog);
+    torch::jit::fuser::cuda::runTestKernel(&prog, inputs, outputs);
+
+    ref_output = aten_funcs[i](input1, input2, 1.0);
+
+    TORCH_CHECK(output.equal(ref_output),
+                "\nOp Type: -- ", miop_types[i].second,
+                " -- had a mismatch.\n",
+                "IN1 : ", input1, "\n",
+                "IN2 : ", input2, "\n",
+                "JIT: ", output, "\n",
+                "REF: ", ref_output, "\n");
+  }
+  {
+    Fusion fusion;
+    FusionGuard fg(&fusion);
+
+    std::vector<IterDomain*> dom;
+    for (int i = 0; i < 2; i++)
+      dom.push_back(new IterDomain(new Int(0), new Int()));
+
+    TensorView* tv0 = new TensorView(new TensorDomain(dom), DataType::Float);
+    TensorView* tv1 = new TensorView(new TensorDomain(dom), DataType::Float);
+    TensorView* tv2 = new TensorView(new TensorDomain(dom), DataType::Float);
+    TensorView* tv3 = static_cast<TensorView*>(lerp(tv0, tv1, tv2));
+
+    fusion.addInput(tv0);
+    fusion.addInput(tv1);
+    fusion.addInput(tv2);
+    fusion.addOutput(tv3);
+    tv0->computeAt(tv3, -1);
+    tv1->computeAt(tv3, -1);
+    tv2->computeAt(tv3, -1);
+
+    tv3->axis(0)->parallelize(ParallelType::BIDx);
+    tv3->axis(-1)->parallelize(ParallelType::TIDx);
+
+    torch::jit::fuser::cuda::CudaKernel prog;
+    prog.device_ = 0;
+    prog.grid(1);
+    prog.block(4);
+
+    auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+
+    at::Tensor input1     = at::rand({1,4}, options);
+    at::Tensor input2     = at::rand({1,4}, options);
+    at::Tensor input3     = at::rand({1,4}, options);
+    at::Tensor output     = at::empty_like(input1);
+    at::Tensor ref_output = at::empty_like(input1);
+
+    std::vector<at::Tensor> inputs{{input1, input2, input3}};
+    std::vector<at::Tensor> outputs{{output}};
+
+    torch::jit::fuser::cuda::compileKernel(fusion, &prog);
+    torch::jit::fuser::cuda::runTestKernel(&prog, inputs, outputs);
+
+    ref_output = at::lerp(input1, input2, input3);
+
+    TORCH_CHECK(output.allclose(ref_output),
+                "\nOp Type: -- ", "lerp",
+                " -- had a mismatch.\n",
+                "IN1 : ", input1, "\n",
+                "IN2 : ", input2, "\n",
+                "IN3 : ", input3, "\n",
+                "JIT: ", output, "\n",
+                "REF: ", ref_output, "\n");
+  }
+  {
+    Fusion fusion;
+    FusionGuard fg(&fusion);
+
+    std::vector<IterDomain*> dom;
+    for (int i = 0; i < 2; i++)
+      dom.push_back(new IterDomain(new Int(0), new Int()));
+
+    Float*       f1 = new Float(1.f);
+    TensorView* tv0 = new TensorView(new TensorDomain(dom), DataType::Float);
+    TensorView* tv1 = new TensorView(new TensorDomain(dom), DataType::Float);
+    TensorView* tv2 = new TensorView(new TensorDomain(dom), DataType::Float);
+    TensorView* tv3 = static_cast<TensorView*>(addcmul(tv0, tv1, tv2, f1));
+
+    fusion.addInput(tv0);
+    fusion.addInput(tv1);
+    fusion.addInput(tv2);
+    fusion.addOutput(tv3);
+    tv0->computeAt(tv3, -1);
+    tv1->computeAt(tv3, -1);
+    tv2->computeAt(tv3, -1);
+
+    tv3->axis(0)->parallelize(ParallelType::BIDx);
+    tv3->axis(-1)->parallelize(ParallelType::TIDx);
+
+    torch::jit::fuser::cuda::CudaKernel prog;
+    prog.device_ = 0;
+    prog.grid(1);
+    prog.block(4);
+
+    auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+
+    at::Tensor input1     = at::rand({1,4}, options);
+    at::Tensor input2     = at::rand({1,4}, options);
+    at::Tensor input3     = at::rand({1,4}, options);
+    at::Tensor output     = at::empty_like(input1);
+    at::Tensor ref_output = at::empty_like(input1);
+
+    std::vector<at::Tensor> inputs{{input1, input2, input3}};
+    std::vector<at::Tensor> outputs{{output}};
+
+    torch::jit::fuser::cuda::compileKernel(fusion, &prog);
+    torch::jit::fuser::cuda::runTestKernel(&prog, inputs, outputs);
+
+    ref_output = at::addcmul(input1, input2, input3, 1.f);
+
+    TORCH_CHECK(output.allclose(ref_output),
+                "\nOp Type: -- ", "addcmul",
+                " -- had a mismatch.\n",
+                "IN1 : ", input1, "\n",
+                "IN2 : ", input2, "\n",
+                "IN3 : ", input3, "\n",
+                "JIT: ", output, "\n",
+                "REF: ", ref_output, "\n");
+  }
 }
 
 void testGPU_FusionTernaryOps() {
-  Fusion fusion;
-  FusionGuard fg(&fusion);
+  {
+    Fusion fusion;
+    FusionGuard fg(&fusion);
 
-  std::vector<IterDomain*> dom;
-  for (int i = 0; i < 2; i++)
-    dom.push_back(new IterDomain(new Int(0), new Int()));
+    std::vector<IterDomain*> dom;
+    for (int i = 0; i < 2; i++)
+      dom.push_back(new IterDomain(new Int(0), new Int()));
 
-  TensorView* tv0 = new TensorView(new TensorDomain(dom), DataType::Float);
-  TensorView* tv1 = new TensorView(new TensorDomain(dom), DataType::Float);
-  Float*       f0 = new Float(0.f);
-  Float*       f1 = new Float(1.f);
-  Float*       f6 = new Float(6.f);
-  Bool*		   b1 = new Bool(true);
+    Float*       f0 = new Float(0.f);
+    Float*       f1 = new Float(1.f);
+    TensorView* tv0 = new TensorView(new TensorDomain(dom), DataType::Float);
+    TensorView* tv1 = static_cast<TensorView*>(clamp(tv0, f0, f1));
 
-  Val*     intrm1 = clamp    (tv0,    f0,     f6);
-  Val*     intrm2 = threshold(intrm1, f1,     f0);
-  TensorView* out = static_cast<TensorView*>(where(b1, intrm2, tv1));
+    fusion.addInput(tv0);
+    fusion.addOutput(tv1);
+    tv0->computeAt(tv1, -1);
 
-  fusion.addInput(tv0);
-  fusion.addInput(tv1);
-  fusion.addOutput(out);
-  tv0->computeAt(out, -1);
-  tv1->computeAt(out, -1);
+    tv1->axis(0)->parallelize(ParallelType::BIDx);
+    tv1->axis(-1)->parallelize(ParallelType::TIDx);
 
-  out->axis(0)->parallelize(ParallelType::BIDx);
-  out->axis(-1)->parallelize(ParallelType::TIDx);
+    torch::jit::fuser::cuda::CudaKernel prog;
+    prog.device_ = 0;
+    prog.grid(1);
+    prog.block(4);
 
-  torch::jit::fuser::cuda::CudaKernel prog;
-  prog.device_ = 0;
-  prog.grid(64);
-  prog.block(32);
+    auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
 
-  torch::jit::fuser::cuda::compileKernel(fusion, &prog);
+    at::Tensor input1     = at::rand({1,4}, options);
+    at::Tensor output     = at::empty_like(input1);
+    at::Tensor ref_output = at::empty_like(input1);
+
+    std::vector<at::Tensor> inputs{{input1}};
+    std::vector<at::Tensor> outputs{{output}};
+
+    torch::jit::fuser::cuda::compileKernel(fusion, &prog);
+    torch::jit::fuser::cuda::runTestKernel(&prog, inputs, outputs);
+
+    ref_output = at::clamp(input1, 0.f, 1.f);
+
+    TORCH_CHECK(output.equal(ref_output),
+                "\nOp Type: -- ", "clamp",
+                " -- had a mismatch.\n",
+                "IN1 : ", input1, "\n",
+                "JIT: ", output, "\n",
+                "REF: ", ref_output, "\n");
+  }
+  {
+    Fusion fusion;
+    FusionGuard fg(&fusion);
+
+    std::vector<IterDomain*> dom;
+    for (int i = 0; i < 2; i++)
+      dom.push_back(new IterDomain(new Int(0), new Int()));
+
+    Float*       f0 = new Float(0.f);
+    Float*       f1 = new Float(1.f);
+    TensorView* tv0 = new TensorView(new TensorDomain(dom), DataType::Float);
+    TensorView* tv1 = static_cast<TensorView*>(threshold(tv0, f0, f1));
+
+    fusion.addInput(tv0);
+    fusion.addOutput(tv1);
+    tv0->computeAt(tv1, -1);
+
+    tv1->axis(0)->parallelize(ParallelType::BIDx);
+    tv1->axis(-1)->parallelize(ParallelType::TIDx);
+
+    torch::jit::fuser::cuda::CudaKernel prog;
+    prog.device_ = 0;
+    prog.grid(1);
+    prog.block(4);
+
+    auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+
+    at::Tensor input1     = at::rand({1,4}, options);
+    at::Tensor output     = at::empty_like(input1);
+    at::Tensor ref_output = at::empty_like(input1);
+
+    std::vector<at::Tensor> inputs{{input1}};
+    std::vector<at::Tensor> outputs{{output}};
+
+    torch::jit::fuser::cuda::compileKernel(fusion, &prog);
+    torch::jit::fuser::cuda::runTestKernel(&prog, inputs, outputs);
+
+    ref_output = at::threshold(input1, 0.f, 1.f);
+
+    TORCH_CHECK(output.equal(ref_output),
+                "\nOp Type: -- ", "threshold",
+                " -- had a mismatch.\n",
+                "IN1 : ", input1, "\n",
+                "JIT: ", output, "\n",
+                "REF: ", ref_output, "\n");
+  }
+  {
+    Fusion fusion;
+    FusionGuard fg(&fusion);
+
+    std::vector<IterDomain*> dom;
+    for (int i = 0; i < 2; i++)
+      dom.push_back(new IterDomain(new Int(0), new Int()));
+
+    TensorView* tv0 = new TensorView(new TensorDomain(dom), DataType::Bool);
+    TensorView* tv1 = new TensorView(new TensorDomain(dom), DataType::Float);
+    TensorView* tv2 = new TensorView(new TensorDomain(dom), DataType::Float);
+    TensorView* tv3 = static_cast<TensorView*>(where(tv0, tv1, tv2));
+
+    fusion.addInput(tv0);
+    fusion.addInput(tv1);
+    fusion.addInput(tv2);
+    fusion.addOutput(tv3);
+    tv0->computeAt(tv3, -1);
+    tv1->computeAt(tv3, -1);
+    tv2->computeAt(tv3, -1);
+
+    tv3->axis(0)->parallelize(ParallelType::BIDx);
+    tv3->axis(-1)->parallelize(ParallelType::TIDx);
+
+    torch::jit::fuser::cuda::CudaKernel prog;
+    prog.device_ = 0;
+    prog.grid(1);
+    prog.block(4);
+
+    auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+
+    at::Tensor input1     = at::rand({1,4}, options).to(at::kBool);
+    at::Tensor input2     = at::rand({1,4}, options);
+    at::Tensor input3     = at::rand({1,4}, options);
+    at::Tensor output     = at::empty_like(input2);
+    at::Tensor ref_output = at::empty_like(input2);
+
+    std::vector<at::Tensor> inputs{{input1, input2, input3}};
+    std::vector<at::Tensor> outputs{{output}};
+
+    torch::jit::fuser::cuda::compileKernel(fusion, &prog);
+    torch::jit::fuser::cuda::runTestKernel(&prog, inputs, outputs);
+
+    ref_output = at::where(input1, input2, input3);
+
+    TORCH_CHECK(output.equal(ref_output),
+                "\nOp Type: -- ", "where",
+                " -- had a mismatch.\n",
+                "IN1 : ", input1, "\n",
+                "IN2 : ", input2, "\n",
+                "JIT: ", output, "\n",
+                "REF: ", ref_output, "\n");
+  }
 }
 
 void testGPU_FusionCastOps() {
@@ -1587,10 +1762,29 @@ void testGPU_FusionCastOps() {
 
   torch::jit::fuser::cuda::CudaKernel prog;
   prog.device_ = 0;
-  prog.grid(64);
-  prog.block(32);
+  prog.grid(1);
+  prog.block(4);
+
+  auto options = at::TensorOptions().dtype(at::kHalf).device(at::kCUDA, 0);
+
+  at::Tensor input1     = at::rand({1,4}, options);
+  at::Tensor output     = at::empty_like(input1);
+  at::Tensor ref_output = at::empty_like(input1);
+
+  std::vector<at::Tensor> inputs{{input1}};
+  std::vector<at::Tensor> outputs{{output}};
 
   torch::jit::fuser::cuda::compileKernel(fusion, &prog);
+  torch::jit::fuser::cuda::runTestKernel(&prog, inputs, outputs);
+
+  ref_output = at::_cast_Half(at::_cast_Float(input1));
+
+  TORCH_CHECK(output.equal(ref_output),
+              "\nOp Type: -- ", "cast FP16->FP32->FP16",
+              " -- had a mismatch.\n",
+              "IN1 : ", input1, "\n",
+              "JIT: ", output, "\n",
+              "REF: ", ref_output, "\n");
 }
 
 void testGPU_FusionRandLike() {
