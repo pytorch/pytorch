@@ -7375,6 +7375,50 @@ Returns:
 """.format(**factory_common_args))
 
 
+add_docstr(torch.vander,
+           """
+vander(x, N=None, increasing=False) -> Tensor
+""" + r"""
+Generates a Vandermonde matrix.
+
+The columns of the output matrix are elementwise powers of the input vector :math:`x^(N-1), x^(N-2), ..., x^0`.
+If increasing is true, the order of the columns is reversed :math:`x^0, x^1, ..., x^(N-1)`. Such a
+matrix with a geometric progression in each row is named for Alexandre-Theophile Vandermonde.
+
+Arguments:
+    x (Tensor): 1-D input tensor.
+    N (int, optional): Number of columns in the output. If N is not specified,
+        a square array is returned :math:`(N = len(x))`.
+    increasing (bool, optional): Order of the powers of the columns. If True,
+        the powers increase from left to right, if False (the default) they are reversed.
+
+Returns:
+    Tensor: Vandermonde matrix. If increasing is False, the first column is :math:`x^(N-1)`,
+    the second :math:`x^(N-2)` and so forth. If increasing is True, the columns
+    are :math:`x^0, x^1, ..., x^(N-1)`.
+
+Example::
+
+    >>> x = torch.tensor([1, 2, 3, 5])
+    >>> torch.vander(x)
+    tensor([[  1,   1,   1,   1],
+            [  8,   4,   2,   1],
+            [ 27,   9,   3,   1],
+            [125,  25,   5,   1]])
+    >>> torch.vander(x, N=3)
+    tensor([[ 1,  1,  1],
+            [ 4,  2,  1],
+            [ 9,  3,  1],
+            [25,  5,  1]])
+    >>> torch.vander(x, N=3, increasing=True)
+    tensor([[ 1,  1,  1],
+            [ 1,  2,  4],
+            [ 1,  3,  9],
+            [ 1,  5, 25]])
+
+""".format(**factory_common_args))
+
+
 add_docstr(torch.unbind,
            r"""
 unbind(input, dim=0) -> seq

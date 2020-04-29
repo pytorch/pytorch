@@ -299,7 +299,7 @@ endif()
 # that allows us to hijack pthreadpool interface.
 # Thus not doing this ends up building pthreadpool as well as
 # the internal implemenation of pthreadpool which results in symbol conflicts.
-if(USE_XNNPACK)
+if(USE_XNNPACK AND NOT USE_SYSTEM_XNNPACK)
   if(NOT DEFINED PTHREADPOOL_SOURCE_DIR)
     set(CAFFE2_THIRD_PARTY_ROOT "${PROJECT_SOURCE_DIR}/third_party")
     set(PTHREADPOOL_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/pthreadpool" CACHE STRING "pthreadpool source directory")
@@ -430,7 +430,7 @@ if(USE_NNPACK)
 endif()
 
 # ---[ XNNPACK
-if(USE_XNNPACK)
+if(USE_XNNPACK AND NOT USE_SYSTEM_XNNPACK)
   if(NOT DEFINED XNNPACK_SOURCE_DIR)
     set(XNNPACK_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/XNNPACK" CACHE STRING "XNNPACK source directory")
   endif()
@@ -462,6 +462,15 @@ if(USE_XNNPACK)
   endif()
 
   include_directories(SYSTEM ${XNNPACK_INCLUDE_DIR})
+  list(APPEND Caffe2_DEPENDENCY_LIBS XNNPACK)
+elseif(NOT TARGET XNNPACK AND USE_SYSTEM_XNNPACK)
+  add_library(XNNPACK SHARED IMPORTED)
+  find_library(XNNPACK_LIBRARY XNNPACK)
+  set_property(TARGET XNNPACK PROPERTY IMPORTED_LOCATION "${XNNPACK_LIBRARY}")
+  if(NOT XNNPACK_LIBRARY)
+    message(FATAL_ERROR "Cannot find XNNPACK")
+  endif()
+  message("-- Found XNNPACK: ${XNNPACK_LIBRARY}")
   list(APPEND Caffe2_DEPENDENCY_LIBS XNNPACK)
 endif()
 
@@ -617,7 +626,7 @@ if(USE_FBGEMM)
   caffe2_update_option(USE_FBGEMM ON)
 else()
   caffe2_update_option(USE_FBGEMM OFF)
-  message(WARNING 
+  message(WARNING
     "Turning USE_FAKELOWP off as it depends on USE_FBGEMM.")
   caffe2_update_option(USE_FAKELOWP OFF)
 endif()
@@ -1280,20 +1289,39 @@ if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO AND NOT INTERN_DISABLE_ONNX)
   add_definitions(-DONNXIFI_ENABLE_EXT=1)
   # Add op schemas in "ai.onnx.pytorch" domain
   add_subdirectory("${CMAKE_CURRENT_LIST_DIR}/../caffe2/onnx/torch_ops")
-  add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/onnx EXCLUDE_FROM_ALL)
+  if(NOT USE_SYSTEM_ONNX)
+    add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/onnx EXCLUDE_FROM_ALL)
+  endif()
   add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/foxi EXCLUDE_FROM_ALL)
 
-  include_directories(${ONNX_INCLUDE_DIRS})
-  include_directories(${FOXI_INCLUDE_DIRS})
   add_definitions(-DONNX_NAMESPACE=${ONNX_NAMESPACE})
-  # In mobile build we care about code size, and so we need drop
-  # everything (e.g. checker, optimizer) in onnx but the pb definition.
-  if(ANDROID OR IOS)
-    caffe2_interface_library(onnx_proto onnx_library)
+  if(NOT USE_SYSTEM_ONNX)
+    include_directories(${ONNX_INCLUDE_DIRS})
+    # In mobile build we care about code size, and so we need drop
+    # everything (e.g. checker, optimizer) in onnx but the pb definition.
+    if(ANDROID OR IOS)
+      caffe2_interface_library(onnx_proto onnx_library)
+    else()
+      caffe2_interface_library(onnx onnx_library)
+    endif()
+    list(APPEND Caffe2_DEPENDENCY_WHOLE_LINK_LIBS onnx_library)
   else()
-    caffe2_interface_library(onnx onnx_library)
+    add_library(onnx SHARED IMPORTED)
+    find_library(ONNX_LIBRARY onnx)
+    if(NOT ONNX_LIBRARY)
+      message(FATAL_ERROR "Cannot find onnx")
+    endif()
+    set_property(TARGET onnx PROPERTY IMPORTED_LOCATION ${ONNX_LIBRARY})
+    add_library(onnx_proto SHARED IMPORTED)
+    find_library(ONNX_PROTO_LIBRARY onnx_proto)
+    if(NOT ONNX_PROTO_LIBRARY)
+      message(FATAL_ERROR "Cannot find onnx")
+    endif()
+    set_property(TARGET onnx_proto PROPERTY IMPORTED_LOCATION ${ONNX_PROTO_LIBRARY})
+    message("-- Found onnx: ${ONNX_LIBRARY} ${ONNX_PROTO_LIBRARY}")
+    list(APPEND Caffe2_DEPENDENCY_LIBS onnx_proto onnx)
   endif()
-  list(APPEND Caffe2_DEPENDENCY_WHOLE_LINK_LIBS onnx_library)
+  include_directories(${FOXI_INCLUDE_DIRS})
   list(APPEND Caffe2_DEPENDENCY_LIBS foxi_loader)
   # Recover the build shared libs option.
   set(BUILD_SHARED_LIBS ${TEMP_BUILD_SHARED_LIBS})
@@ -1590,3 +1618,16 @@ endif()
 #
 # End ATen checks
 #
+
+add_subdirectory(${CMAKE_SOURCE_DIR}/third_party/fmt)
+
+# Disable compiler feature checks for `fmt`.
+#
+# CMake compiles a little program to check compiler features. Some of our build
+# configurations (notably the mobile build analyzer) will populate
+# CMAKE_CXX_FLAGS in ways that break feature checks. Since we already know
+# `fmt` is compatible with a superset of the compilers that PyTorch is, it
+# shouldn't be too bad to just disable the checks.
+set_target_properties(fmt-header-only PROPERTIES INTERFACE_COMPILE_FEATURES "")
+
+list(APPEND Caffe2_DEPENDENCY_LIBS fmt::fmt-header-only)

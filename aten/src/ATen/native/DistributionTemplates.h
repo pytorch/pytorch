@@ -84,7 +84,7 @@ static void check_from_to_in_range(int64_t from, int64_t to_inc, caffe2::TypeMet
       CHECK_OUT_OF_BOUNDS(to_inc, "to - 1", min, max, dtype);
 
       constexpr auto digits = std::numeric_limits<scalar_t>::digits;
-      const auto two_pow_digits = 1L << digits;
+      const auto two_pow_digits = 1LL << digits;
       const auto minus_two_pow_digits = -two_pow_digits;
       const auto two_pow_digits_name = "2^" + std::to_string(digits);
       const auto minus_two_pow_digits_name = "-(2^" + std::to_string(digits) + ")";
