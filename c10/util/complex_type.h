@@ -234,10 +234,6 @@ struct alignas(sizeof(T) * 2) complex_common {
   C10_HOST_DEVICE explicit operator thrust::complex<U>() const {
     return static_cast<thrust::complex<U>>(thrust::complex<T>(real(), imag()));
   }
-
-  // TODO: Remove this, this is only needed for CUDA 9.2
-  template C10_HOST_DEVICE explicit operator thrust::complex<U><float>() const 
-  template C10_HOST_DEVICE explicit operator thrust::complex<U><double>() const 
 #endif
 
   constexpr T real() const {
