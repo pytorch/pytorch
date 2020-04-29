@@ -812,7 +812,7 @@ def _run_symbolic_function(g, n, inputs, env, operator_export_type=OperatorExpor
                 domain = ''
                 symbolic_fn = _find_symbolic_fn(ns, domain, symbolic_name, opset_version,
                                                 operator_export_type)
-                if symbolic_fn is not None:
+                if symbolic_fn is None:
                     return symbolic_fn
                 attrs = {k: n[k] for k in n.attributeNames()}
                 return symbolic_fn(g, *inputs, **attrs)
@@ -821,7 +821,7 @@ def _run_symbolic_function(g, n, inputs, env, operator_export_type=OperatorExpor
             if operator_export_type == OperatorExportTypes.ONNX_ATEN_FALLBACK:
                 domain = 'caffe2'
             symbolic_fn = _find_symbolic_fn(ns, domain, op_name, opset_version, operator_export_type)
-            if symbolic_fn is not None:
+            if symbolic_fn is None:
                 return symbolic_fn
             attrs = {k: n[k] for k in n.attributeNames()}
             return symbolic_fn(g, *inputs, **attrs)
@@ -833,7 +833,7 @@ def _run_symbolic_function(g, n, inputs, env, operator_export_type=OperatorExpor
                         "torch.onnx.register_custom_op_symbolic(symbolic_name, symbolic_fn)?"
             symbolic_fn = _find_symbolic_fn(ns, domain, op_name, opset_version, operator_export_type,
                                             error_msg)
-            if symbolic_fn is not None:
+            if symbolic_fn is None:
                 return symbolic_fn
             attrs = {k: n[k] for k in n.attributeNames()}
             return symbolic_fn(g, *inputs, **attrs)
