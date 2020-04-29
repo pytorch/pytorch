@@ -22,7 +22,6 @@ from torch.testing._internal.common_quantization import (
     QuantizationTestCase,
 )
 from torch.testing._internal.common_quantized import override_quantized_engine, supported_qengines
-from torch.testing._internal.common_utils import TEST_WITH_UBSAN
 
 class SubModule(torch.nn.Module):
     def __init__(self):
@@ -92,9 +91,6 @@ class TestEagerModeNumericSuite(QuantizationTestCase):
                 self.assertTrue(v["float"].shape == v["quantized"].shape)
 
         for qengine in supported_qengines:
-            if qengine == 'qnnpack':
-                if TEST_WITH_UBSAN:
-                    return
             with override_quantized_engine(qengine):
                 model_list = [AnnotatedConvModel(qengine), AnnotatedConvBnReLUModel(qengine)]
                 for model in model_list:
@@ -117,9 +113,6 @@ class TestEagerModeNumericSuite(QuantizationTestCase):
                 self.assertTrue(v["float"].shape == v["quantized"].shape)
 
         for qengine in supported_qengines:
-            if qengine == 'qnnpack':
-                if TEST_WITH_UBSAN:
-                    return
             with override_quantized_engine(qengine):
                 model_list = [AnnotatedConvModel(qengine), AnnotatedConvBnReLUModel(qengine)]
                 data = self.img_data[0][0]
