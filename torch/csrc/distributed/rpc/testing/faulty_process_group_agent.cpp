@@ -39,10 +39,10 @@ std::vector<MessageType> FaultyProcessGroupAgent::parseMessagesToFailInput(
   return messageTypesToFail;
 }
 
-std::unordered_map<MessageType, float> FaultyProcessGroupAgent::
+std::unordered_map<MessageType, float, std::hash<int>> FaultyProcessGroupAgent::
     parseMessagesToDelay(
         const std::unordered_map<std::string, float>& messagesToDelay) const {
-  std::unordered_map<MessageType, float> delayMessages;
+  std::unordered_map<MessageType, float, std::hash<int>> delayMessages;
   for (const auto& messagePair : messagesToDelay) {
     delayMessages.insert({messageStringToType().find(messagePair.first)->second,
                           messagePair.second});

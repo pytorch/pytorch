@@ -68,7 +68,7 @@ class FaultyProcessGroupAgent : public ProcessGroupAgent {
   float getDelayForMessage(MessageType type) const;
 
   // Parse message types that we should inject arbitrary delays for.
-  std::unordered_map<MessageType, float> parseMessagesToDelay(
+  std::unordered_map<MessageType, float, std::hash<int>> parseMessagesToDelay(
       const std::unordered_map<std::string, float>& messagesToDelay) const;
 
   // Number of sends to intentionally fail before allowing one to succeed.
@@ -80,7 +80,7 @@ class FaultyProcessGroupAgent : public ProcessGroupAgent {
 
   // Mapping of message types to amount we should delay send for in the ::send()
   // function.
-  std::unordered_map<MessageType, float> messagesToDelay_;
+  std::unordered_map<MessageType, float, std::hash<int>> messagesToDelay_;
 
   // Map to track the number of sends we've failed for each RPC.
   std::unordered_map<std::string, int> failMessageCountMap_;
