@@ -37,19 +37,19 @@
     PyObject_IsInstance(obj, THPComplexFloatStorageClass)
 
 
-#define THPDoubleStorage_CData(obj)  (obj)->cdata
-#define THPFloatStorage_CData(obj)   (obj)->cdata
-#define THPHalfStorage_CData(obj)    (obj)->cdata
-#define THPLongStorage_CData(obj)    (obj)->cdata
-#define THPIntStorage_CData(obj)     (obj)->cdata
-#define THPShortStorage_CData(obj)   (obj)->cdata
-#define THPCharStorage_CData(obj)    (obj)->cdata
-#define THPByteStorage_CData(obj)    (obj)->cdata
-#define THPBoolStorage_CData(obj)    (obj)->cdata
-#define THPQUInt8Storage_CData(obj)   (obj)->cdata
-#define THPQInt8Storage_CData(obj)   (obj)->cdata
-#define THPQInt32Storage_CData(obj)   (obj)->cdata
-#define THPBFloat16Storage_CData(obj)   (obj)->cdata
+#define THPDoubleStorage_CData(obj)         (obj)->cdata
+#define THPFloatStorage_CData(obj)          (obj)->cdata
+#define THPHalfStorage_CData(obj)           (obj)->cdata
+#define THPLongStorage_CData(obj)           (obj)->cdata
+#define THPIntStorage_CData(obj)            (obj)->cdata
+#define THPShortStorage_CData(obj)          (obj)->cdata
+#define THPCharStorage_CData(obj)           (obj)->cdata
+#define THPByteStorage_CData(obj)           (obj)->cdata
+#define THPBoolStorage_CData(obj)           (obj)->cdata
+#define THPQUInt8Storage_CData(obj)         (obj)->cdata
+#define THPQInt8Storage_CData(obj)          (obj)->cdata
+#define THPQInt32Storage_CData(obj)         (obj)->cdata
+#define THPBFloat16Storage_CData(obj)       (obj)->cdata
 #define THPComplexDoubleStorage_CData(obj)  (obj)->cdata
 #define THPComplexFloatStorage_CData(obj)   (obj)->cdata
 
