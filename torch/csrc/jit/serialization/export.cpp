@@ -971,33 +971,5 @@ void check_onnx_proto(const std::string& proto_string) {
   onnx::checker::check_model(model);
 }
 
-namespace {
-void export_opnames(const script::Module& m, std::set<std::string>& opnames) {
-  std::vector<c10::IValue> elements;
-  moduleMethodsTuple(m, elements);
-  for (const auto& element : elements) {
-    auto table = element.toTuple()->elements()[1];
-    const auto& ops_list =
-        expect_field(table, "operators", BYTECODE_INDEX_OPERATOR)
-            .toTuple()
-            ->elements();
-    for (const auto& op : ops_list) {
-      auto op_item = op.toTuple()->elements();
-      TORCH_CHECK(
-          op_item.size() == 2,
-          "There should be two parts in an operator name.");
-      opnames.emplace(operator_str(
-          op_item[0].toString()->string(), op_item[1].toString()->string()));
-    }
-  }
-}
-} // namespace
-
-std::vector<std::string> export_opnames(const script::Module& m) {
-  std::set<std::string> names;
-  export_opnames(m, names);
-  return std::vector<std::string>(names.begin(), names.end());
-}
-
 } // namespace jit
 } // namespace torch

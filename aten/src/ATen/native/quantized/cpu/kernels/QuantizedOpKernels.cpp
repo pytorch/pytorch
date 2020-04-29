@@ -163,7 +163,7 @@ int64_t hsum(const uint8_t* A, int len) {
   int64_t row_sum = 0;
   int i = 0;
 
-#ifdef __AVX2__
+#ifdef CPU_CAPABILITY_AVX2
   __m256i sum_v = _mm256_setzero_si256();
   __m256i one_epi16_v = _mm256_set1_epi16(1);
   __m256i one_epi8_v = _mm256_set1_epi8(1);
@@ -184,7 +184,7 @@ int64_t hsum(const uint8_t* A, int len) {
   for (int k = 0; k < 8; ++k) {
     row_sum += temp[k];
   }
-#endif // __AVX2__
+#endif // CPU_CAPABILITY_AVX2
 
   // scalar
   for (; i < len; ++i) {
@@ -199,7 +199,7 @@ int64_t hsum(const int8_t* A, int len) {
   int64_t row_sum = 0;
   int i = 0;
 
-#ifdef __AVX2__
+#ifdef CPU_CAPABILITY_AVX2
   __m256i sum_v = _mm256_setzero_si256();
   __m256i one_epi16_v = _mm256_set1_epi16(1);
   __m256i one_epi8_v = _mm256_set1_epi8(1);
@@ -220,7 +220,7 @@ int64_t hsum(const int8_t* A, int len) {
   for (int k = 0; k < 8; ++k) {
     row_sum += temp[k];
   }
-#endif // __AVX2__
+#endif // CPU_CAPABILITY_AVX2
 
   // scalar
   for (; i < len; ++i) {
@@ -235,7 +235,7 @@ int64_t hsum(const int32_t* A, int len) {
   int64_t row_sum = 0;
   int i = 0;
 
-#ifdef __AVX2__
+#ifdef CPU_CAPABILITY_AVX2
   __m256i sum_epi64 = _mm256_setzero_si256();
   // vectorized
   for (; i < len / 8 * 8; i += 8) {
@@ -255,7 +255,7 @@ int64_t hsum(const int32_t* A, int len) {
   for (int k = 0; k < 4; ++k) {
     row_sum += temp[k];
   }
-#endif // __AVX2__
+#endif // CPU_CAPABILITY_AVX2
 
   // scalar
   for (; i < len; ++i) {
@@ -270,7 +270,7 @@ int64_t hsum_sq(const uint8_t* A, int len) {
   int64_t row_sum = 0;
   int i = 0;
 
-#ifdef __AVX2__
+#ifdef CPU_CAPABILITY_AVX2
   __m256i sum_v_epu32 = _mm256_setzero_si256();
   // vectorized
   for (; i < len / 16 * 16; i += 16) {
@@ -296,7 +296,7 @@ int64_t hsum_sq(const uint8_t* A, int len) {
   for (int k = 0; k < 8; ++k) {
     row_sum += temp[k];
   }
-#endif // __AVX2__
+#endif // CPU_CAPABILITY_AVX2
 
   // scalar
   for (; i < len; ++i) {
@@ -311,7 +311,7 @@ int64_t hsum_sq(const int8_t* A, int len) {
   int64_t row_sum = 0;
   int i = 0;
 
-#ifdef __AVX2__
+#ifdef CPU_CAPABILITY_AVX2
   __m256i sum_v_epi32 = _mm256_setzero_si256();
   // vectorized
   for (; i < len / 16 * 16; i += 16) {
@@ -337,7 +337,7 @@ int64_t hsum_sq(const int8_t* A, int len) {
   for (int k = 0; k < 8; ++k) {
     row_sum += temp[k];
   }
-#endif // __AVX2__
+#endif // CPU_CAPABILITY_AVX2
 
   // scalar
   for (; i < len; ++i) {
@@ -353,7 +353,7 @@ float hsum_sq(const int32_t* A, int len) {
   float row_sum = 0;
   int i = 0;
 
-#ifdef __AVX2__
+#ifdef CPU_CAPABILITY_AVX2
   __m256 sum_ps = _mm256_setzero_ps();
   // vectorized
   for (; i < len / 8 * 8; i += 8) {
@@ -367,7 +367,7 @@ float hsum_sq(const int32_t* A, int len) {
   for (int k = 0; k < 8; ++k) {
     row_sum += static_cast<float>(temp[k]);
   }
-#endif // __AVX2__
+#endif // CPU_CAPABILITY_AVX2
 
   // scalar
   for (; i < len; ++i) {
@@ -1079,7 +1079,7 @@ void do_avg_pool_nhwc_on_AVX2(
     int hsize,
     int wsize,
     int csize) {
-#if defined(__AVX2__) && !defined(_MSC_VER)
+#if defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER)
   // buffer for channel accumulator, used to interchange channel-loop
   // to inner-most, so that memory access of the input tensor data is
   // continuous.
@@ -1149,7 +1149,7 @@ void do_avg_pool_on_AVX2(
     int64_t stride_D,
     int64_t stride_H,
     int64_t stride_W) {
-#if defined(__AVX2__) && !defined(_MSC_VER)
+#if defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER)
   constexpr auto vec_width = Vec256<T>::size() / 4;
   if (vec_width == 8) {
     for (; c + vec_width <= channel_size; c += vec_width) {
@@ -1504,7 +1504,7 @@ int64_t do_quantized_bilinear_on_AVX2(
     const int64_t h1p,
     const int64_t w1p) {
   int64_t c = 0;
-#if defined(__AVX2__) && !defined(_MSC_VER)
+#if defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER)
   constexpr auto vec_width = Vec256<T>::size() / 4;
   if (vec_width == 8) {
     for (; c + vec_width <= channels; c += vec_width) {
