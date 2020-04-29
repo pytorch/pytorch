@@ -308,6 +308,16 @@ Tensor& geometric_impl_(Tensor& self, double p, c10::optional<Generator> gen) {
   return self;
 }
 
+// ================================================== Exponential =====================================================
+
+template<template<typename> class exponential_kernel, typename RNG>
+Tensor& exponential_impl_(Tensor& self, double lambda, c10::optional<Generator> gen) {
+  TORCH_CHECK(lambda >= 0.0, "exponential_ expects lambda >= 0.0, but found lambda=", lambda);
+  auto iter = TensorIterator::nullary_op(self);
+  exponential_kernel<RNG>()(iter, lambda, gen);
+  return self;
+}
+
 #undef CHECK_OUT_OF_BOUNDS_AND_SHOW_WARNING
 
 }}}

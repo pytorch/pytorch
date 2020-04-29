@@ -318,14 +318,8 @@ void bernoulli_mkl_kernel(Tensor &self, const double p, c10::optional<Generator>
 #endif
 
 static void exponential_kernel(TensorIterator& iter, double lambda, c10::optional<Generator> gen) {
-  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "exponential_cpu", [&]() {
-    CPUGeneratorImpl* generator = get_generator_or_default<CPUGeneratorImpl>(gen, detail::getDefaultCPUGenerator());
-    std::lock_guard<std::mutex> lock(generator->mutex_);
-    at::exponential_distribution<double> exponential(lambda);
-    cpu_serial_kernel(iter, [&exponential, generator]() -> scalar_t {
-      return static_cast<scalar_t>(exponential(generator));
-    });
-  });
+  CPUGeneratorImpl* generator = get_generator_or_default<CPUGeneratorImpl>(gen, detail::getDefaultCPUGenerator());
+  templates::cpu::exponential_kernel(iter, lambda, generator);
 }
 
 static void geometric_kernel(TensorIterator& iter, double p, c10::optional<Generator> gen) {

@@ -214,11 +214,17 @@ Tensor& cauchy_(Tensor& self, double median, double sigma, c10::optional<Generat
   return self;
 }
 
+// ================================================== Exponential =====================================================
+
+template<typename RNG>
+struct ExponentialStub {
+  void operator()(TensorIterator& iter, double lambda, c10::optional<Generator> gen) {
+    exponential_stub(iter.device_type(), iter, lambda, gen);
+  }
+};
+
 Tensor& exponential_(Tensor& self, double lambda, c10::optional<Generator> gen) {
-  TORCH_CHECK(lambda >= 0.0, "exponential_ expects lambda >= 0.0, but found lambda=", lambda);
-  auto iter = TensorIterator::nullary_op(self);
-  exponential_stub(iter.device_type(), iter, lambda, gen);
-  return self;
+  return at::native::templates::exponential_impl_<ExponentialStub, Generator>(self, lambda, gen);
 }
 
 // =================================================== Geometric ======================================================
