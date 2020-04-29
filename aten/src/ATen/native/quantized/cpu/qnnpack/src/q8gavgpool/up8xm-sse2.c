@@ -62,8 +62,7 @@ void pytorch_q8gavgpool_ukernel_up8xm__sse2(
     vacc_hi = _mm_add_epi32(vacc_hi, _mm_unpackhi_epi8(vxinput, vzero));
   }
 
-  const __m128 vscale =
-      _mm_loadu_ps((const __m128*)quantization_params->sse2.scale);
+  const __m128 vscale = _mm_loadu_ps(quantization_params->sse2.scale);
 
   const __m128 vacc_lo_f = _mm_mul_ps(_mm_cvtepi32_ps(vacc_lo), vscale);
   const __m128 vacc_hi_f = _mm_mul_ps(_mm_cvtepi32_ps(vacc_hi), vscale);

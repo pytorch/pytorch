@@ -54,8 +54,7 @@ void pytorch_q8gavgpool_ukernel_up8x7__sse2(
       _mm_load_si128((const __m128i*)&quantization_params->sse2.bias);
   const __m128i vzero = _mm_setzero_si128();
 
-  const __m128 vscale =
-      _mm_loadu_ps((const __m128*)quantization_params->sse2.scale);
+  const __m128 vscale = _mm_loadu_ps(quantization_params->sse2.scale);
 
   do {
     const __m128i vi0 = _mm_loadl_epi64((const __m128i*)i0);

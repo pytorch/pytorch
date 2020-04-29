@@ -141,8 +141,7 @@ void pytorch_q8gavgpool_ukernel_mp8x7p7q__sse2(
     }
   }
 
-  const __m128 vscale =
-      _mm_loadu_ps((const __m128*)quantization_params->sse2.scale);
+  const __m128 vscale = _mm_loadu_ps(quantization_params->sse2.scale);
 
   i0 = (const uint8_t*)((uintptr_t)i0 + input_increment);
   i1 = (const uint8_t*)((uintptr_t)i1 + input_increment);
