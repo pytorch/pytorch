@@ -215,6 +215,7 @@
   cname: equal
   cpu_bool: True
   cpu_bfloat16: True
+  cpu_half: True
   cuda_bool: True
   variants:
     - function
@@ -302,6 +303,7 @@
 [[
   name: _th_sort
   cname: sort
+  cpu_half: True
   variants:
     - function
   return: argument 0,1
@@ -625,6 +627,7 @@
   name: _th_dot
   backend_types: {CUDA: [floating_point], CPU: [all]}
   cname: dot
+  cpu_half: True
   variants: function
   return: accreal
   arguments:

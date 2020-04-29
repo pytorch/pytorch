@@ -622,6 +622,7 @@ struct CAFFE2_API IValue final {
   };
 
   using HashAliasedIValues = std::unordered_set<IValue, HashAliasedIValue, CompAliasedIValues>;
+  using HashAliasedIValueMap = std::unordered_map<IValue, IValue, HashAliasedIValue, CompAliasedIValues>;
 
   // Chechs if this and rhs has a subvalues in common.
   // [t1,t2] and [t2, t3] returns true.
@@ -629,6 +630,10 @@ struct CAFFE2_API IValue final {
 
   // Inserts all subvalues of this in subValues.
   void getSubValues(HashAliasedIValues& subValues) const;
+
+  IValue deepcopy() const;
+  IValue deepcopy(
+      HashAliasedIValueMap& memo) const;
 
  private:
   static bool ptrEqual(const IValue& lhs, const IValue& rhs);
