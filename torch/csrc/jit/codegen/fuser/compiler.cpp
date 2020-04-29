@@ -12,7 +12,6 @@
 #include <torch/csrc/jit/passes/canonicalize.h>
 #include <torch/csrc/jit/passes/shape_analysis.h>
 #include <torch/csrc/jit/runtime/operator.h>
-#include <torch/csrc/jit/jit_log.h>
 
 #include <atomic>
 #include <iostream>

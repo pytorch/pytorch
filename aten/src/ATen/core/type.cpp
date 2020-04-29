@@ -6,7 +6,6 @@
 #include <ATen/core/grad_mode.h>
 #include <ATen/core/function.h>
 #include <iostream>
-#include <torch/csrc/jit/jit_log.h>
 
 namespace c10 {
 
@@ -776,13 +775,10 @@ VaryingShape<Stride> TensorType::
     Stride s {stride_indices[i], false, strides[stride_indices[i]]};
     // innermost stride expected to be 1
     // TODO: turn contiguous_ into an enum CONTIGUOUS, NONCONTIGUOUS, BROADCASTED
-    if (stride_indices[i] == stride_indices.size() - 1) {
+    if (i == 0) {
       s.contiguous_ = strides[stride_indices[i]] == 1;
     } else {
-      if (i == 0) {
-        std::cerr << "stride_indices[i] = " << stride_indices[i] << ", strides[stride_indices[i]] = " << strides[stride_indices[i]] << ",strides = (" << c10::Join(",", strides) << "), size = (" << c10::Join(",", sizes) << ")" << std::endl;
-      }
-      s.contiguous_ = strides[stride_indices[i]] != 0 && strides[stride_indices[i]] == strides[stride_indices[i-1]]*sizes[stride_indices[i-1]];
+      s.contiguous_ = strides[stride_indices[i]] == 1 || (strides[stride_indices[i]] != 0 && strides[stride_indices[i]] == strides[stride_indices[i-1]]*sizes[stride_indices[i-1]]);
     }
     stride_properties.push_back(s);
   }
