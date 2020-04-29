@@ -36,6 +36,7 @@
 
 
 namespace at {
+namespace {
 
 /**
  * Samples a discrete uniform distribution in the range [base, base+range) of type T
@@ -295,5 +296,5 @@ struct lognormal_distribution {
     T mean;
     T stdv;
 };
-
+}
 } // namespace at

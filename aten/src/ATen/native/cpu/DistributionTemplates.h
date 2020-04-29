@@ -16,6 +16,7 @@ namespace at {
 namespace native {
 namespace templates {
 namespace cpu {
+namespace {
 
 // ==================================================== Random ========================================================
 
@@ -235,4 +236,4 @@ void cauchy_kernel(TensorIterator& iter, double median, double sigma, RNG genera
   });
 }
 
-}}}}
+}}}}}
