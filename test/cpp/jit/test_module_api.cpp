@@ -46,8 +46,6 @@ void testModuleCopy() {
   Module m2 = m.clone();
   Module m3 = m.copy();
 
-  ASSERT_TRUE(IValue(m3._ivalue()).isAliasOf(IValue(m._ivalue())));
-
   // Make sure copy works
   ASSERT_EQ(m2.attr(attr_name).toInt(), 2);
   ASSERT_EQ(m3.attr(attr_name).toInt(), 2);
@@ -91,7 +89,7 @@ void testModuleDeepcopy() {
 
   // Test overlaps
   ASSERT_TRUE(!IValue(m2._ivalue()).overlaps(IValue(m._ivalue())));
-  ASSERT_TRUE(IValue(m3._ivalue()).isAliasOf(IValue(m._ivalue())));
+  ASSERT_TRUE(IValue(m3._ivalue()).overlaps(IValue(m._ivalue())));
 
   // Both deepcopy and copy will preserve the type
   ASSERT_EQ(m.type(), m2.type());
@@ -99,14 +97,11 @@ void testModuleDeepcopy() {
 
   // change int value of copied instances
   m2.setattr(int_attr, IValue(3));
+  m3.setattr(int_attr, IValue(4));
 
   // Verify value of original instance doesn't change
   ASSERT_EQ(m.attr(int_attr).toInt(), 2);
   ASSERT_EQ(m2.attr(int_attr).toInt(), 3);
-
-  m3.setattr(int_attr, IValue(4));
-  // Verify value of original instance changes
-  ASSERT_EQ(m.attr(int_attr).toInt(), 4);
   ASSERT_EQ(m3.attr(int_attr).toInt(), 4);
 
   // change Tensor value of copied instances

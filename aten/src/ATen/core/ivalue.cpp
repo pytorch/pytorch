@@ -287,12 +287,16 @@ std::ostream& printMaybeAnnotatedList(
     std::ostream& out,
     const IValue& the_list,
     IValueFormatter formatter) {
-  if (the_list.toListRef().size() == 0) {
-    out << "annotate(" << the_list.type()->python_str() << ", [])";
+  auto list_elem_type = the_list.type()->expect<ListType>()->getElementType();
+  if (the_list.toListRef().size() == 0 ||
+      !elementTypeCanBeInferredFromMembers(list_elem_type)) {
+    out << "annotate(" << the_list.type()->python_str() << ", ";
+    printList(out, the_list.toListRef(), "[", "]", formatter);
+    out << ")";
+    return out;
   } else {
     return printList(out, the_list.toListRef(), "[", "]", formatter);
   }
-  return out;
 }
 
 template <typename Dict>
@@ -470,6 +474,39 @@ std::shared_ptr<ClassType> ivalue::Object::type() const {
   return type_.type_->expect<ClassType>();
 }
 
+IValue IValue::copy() const {
+  IValue copy;
+  switch(tag) {
+    case IValue::Tag::Tensor:
+      copy = IValue(toTensor());
+      break;
+    case IValue::Tag::Tuple:
+      copy = IValue(toTuple());
+      break;
+    case IValue::Tag::GenericList:
+      copy = IValue(toList().copy());
+      break;
+    case IValue::Tag::GenericDict:
+      copy = IValue(toGenericDict().copy());
+      break;
+    case IValue::Tag::Object:
+      copy = IValue(toObject().copy());
+      break;
+    case IValue::Tag::String:
+    case IValue::Tag::None:
+    case IValue::Tag::Double:
+    case IValue::Tag::Int:
+    case IValue::Tag::Bool:
+    case IValue::Tag::Device:
+    case IValue::Tag::Uninitialized:
+      copy = *this;
+      break;
+    default:
+      AT_ERROR("Can't copy IValue with tag: ", tagKind());
+  }
+  return copy;
+}
+
 IValue IValue::deepcopy() const {
   IValue::HashAliasedIValueMap memo;
   return deepcopy(memo);
@@ -558,6 +595,14 @@ void ivalue::Object::unsafeRemoveAttr(const std::string& name) {
 void ivalue::Object::resizeObject(size_t slot) {
   AT_ASSERT(slot < type()->numAttributes());
   slots_.resize(type()->numAttributes());
+}
+
+c10::intrusive_ptr<ivalue::Object> ivalue::Object::copy() const {
+  auto object = ivalue::Object::create(c10::StrongTypePtr(type_.cu_, type()), type()->numAttributes());
+  for (auto i = 0; i < slots_.size(); ++i) {
+    object->setSlot(i, slots_[i].copy());
+  }
+  return object;
 }
 
 c10::intrusive_ptr<ivalue::Object> ivalue::Object::deepcopy() const {

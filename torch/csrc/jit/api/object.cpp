@@ -36,7 +36,7 @@ void Object::define(const std::string& src, const ResolverPtr& resolver) {
 }
 
 Object Object::copy() const {
-  return Object(_ivalue());
+  return Object(_ivalue()->copy());
 }
 
 Object Object::deepcopy() const {
