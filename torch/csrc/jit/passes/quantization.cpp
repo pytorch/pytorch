@@ -80,7 +80,9 @@ std::vector<std::string> _dynamic_quantizable_aten_funcs = {
 // example: `prim::CallFunction(%dropout, %input_tensor, ...)
 // so we propagate observed property from %input_tensor to the
 // output of the `prim::CallFunction`
-std::vector<std::string> _single_input_general_call_funcs = {
+// Also these ops doesn't do computation on the value of Tensor, the
+// operation only depends on the shape of the Tensor
+std::vector<std::string> _single_input_general_shape_call_funcs = {
     "adaptive_avg_pool1d",
     "adaptive_avg_pool2d",
     "adaptive_avg_pool3d",
@@ -102,8 +104,10 @@ std::vector<std::string> _single_input_general_call_funcs = {
 
 // Similar to prim::CallFunctions, there are aten ops that doesn't
 // require observation and have a single input Tensor
-// e.g. `aten::max_pool2d(%input_tensor, ...)`
-std::vector<std::string> _single_input_general_aten_funcs = {
+// Also these ops doesn't do computation on the value of Tensor, the
+// operation only depends on the shape of the Tensor
+// e.g. `aten::flatten(%input_tensor, ...)`
+std::vector<std::string> _single_input_general_shape_aten_funcs = {
     "max_pool1d",
     "max_pool2d",
     "max_pool3d",
@@ -139,6 +143,20 @@ std::vector<std::string> _single_input_general_aten_funcs = {
     "sigmoid",
     "tanh",
 };
+
+// Theses are prim::CallFunctions for ops that doesn't require observation and
+// have a single input Tensor
+// Also these ops do computation on the value of Tensor
+std::vector<std::string> _single_input_general_value_call_funcs = {
+};
+
+// Theses are aten functions for ops that doesn't require observation and
+// have a single input Tensor
+// Also these ops do computation on the value of Tensor
+// e.g. `aten::maxpool(%input_tensor, ...)`
+std::vector<std::string> _single_input_general_value_aten_funcs = {
+};
+
 
 struct FuncArg {
   std::string func_name;
@@ -243,7 +261,7 @@ std::vector<Value*> getPassThroughInputs(Value* v) {
           n,
           // We don't have call functions
           // after inline
-          /* call_funcs = */ _single_input_general_call_funcs,
+          /* call_funcs = */ _single_input_general_shape_call_funcs,
           /* aten_funcs = */ {})) {
     return {n->input(1)};
   } else if (
@@ -252,7 +270,7 @@ std::vector<Value*> getPassThroughInputs(Value* v) {
           // We don't have call functions
           // after inline
           /* call_funcs = */ {},
-          /* aten_funcs = */ _single_input_general_aten_funcs) ||
+          /* aten_funcs = */ _single_input_general_shape_aten_funcs) ||
       (n->kind() == Symbol::aten("sort") && v->offset() == 0)) {
     return {n->input(0)};
   } else if (n->kind() == prim::If && n->outputs().size() == 1) {
@@ -296,7 +314,8 @@ bool nodeQuantizable(Node* n, bool is_dynamic = false) {
 // like `linear` because we want to preserve the op boundary
 bool userDefinedCallFunction(Node* n) {
   return n->kind() == prim::CallFunction &&
-      !isFunctionNode(n, _single_input_general_call_funcs, {}) &&
+      !isFunctionNode(n, _single_input_general_shape_call_funcs, {}) &&
+      !isFunctionNode(n, _single_input_general_value_call_funcs, {}) &&
       !isFunctionNode(n, _static_quantizable_call_funcs, {});
 }
 
