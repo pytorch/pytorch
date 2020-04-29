@@ -1756,52 +1756,6 @@ class TestQuantizeDynamicScript(JitTestCase):
                    .check_not('Observer = prim::GetAttr[name="_observer_') \
                    .run(m.graph)
 
-
-    def test_insert_quant_dequant_conv_dynamic(self):
-        class M(torch.nn.Module):
-            def __init__(self):
-                super(M, self).__init__()
-                self.conv = torch.nn.Conv2d(3, 5, 3).float()
-
-            def forward(self, x):
-                return self.conv(x)
-
-        m = torch.jit.script(M())
-
-        m = prepare_dynamic_script(m, {'': default_dynamic_qconfig})
-        data = torch.randn(1, 3, 10, 10, dtype=torch.float)
-
-        m(data)
-
-        m = wrap_cpp_module(torch._C._jit_pass_insert_quant_dequant(m._c, "forward", False, True))
-
-        assert len(m._modules._c.items()) == 1, \
-            'Expected to have single submodule of conv'
-
-        m(data)
-        quant_func = "aten::quantize_per_tensor"
-
-        # quantizing activations
-        FileCheck().check("aten::_choose_qparams_per_tensor") \
-                   .check(quant_func) \
-                   .check("prim::CallMethod[name=\"forward\"]") \
-                   .check_not(quant_func) \
-                   .check("return") \
-                   .run(str(get_forward_graph(m._c)))
-        # quantizing weight in forward function of conv module, no choose_qparams
-        FileCheck().check_not("aten::_choose_qparams_per_tensor") \
-                   .check(quant_func) \
-                   .check("prim::CallMethod[name=\"_conv_forward\"]") \
-                   .check_not(quant_func) \
-                   .check("return") \
-                   .run(str(get_forward_graph(m.conv._c)))
-        # shouldn't have quant/dequant in _conv_foward function
-        FileCheck().check_not(quant_func) \
-                   .check("aten::conv2d") \
-                   .check_not(quant_func) \
-                   .check("return") \
-                   .run(str(get_module_method(m, 'conv', '_conv_forward').graph))
-
     def test_insert_quant_dequant_linear_dynamic(self):
         class M(torch.nn.Module):
             def __init__(self):
@@ -1859,6 +1813,25 @@ class TestQuantizeDynamicScript(JitTestCase):
         model = torch.jit.script(M()).eval()
         model = quantize_dynamic_script(model, qconfig_dict, data)
         FileCheck().check("quantized::linear_dynamic") \
+                   .run(model.graph)
+
+    def test_dynamic_multi_op(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+                self.fc1 = torch.nn.Linear(5, 5).to(dtype=torch.float)
+
+            def forward(self, x):
+                x = x + 5
+                return self.fc1(x)
+
+        m = torch.jit.script(M())
+        data = torch.randn((1, 5), dtype=torch.float)
+        qconfig_dict = {'' : default_dynamic_qconfig}
+        model = quantize_dynamic_script(m, qconfig_dict, data)
+        # add op is not dynamically quantized.
+        FileCheck().check("aten::add") \
+                   .check("quantized::linear_dynamic") \
                    .run(model.graph)
 
     def test_prepare_dynamic_lstm(self):

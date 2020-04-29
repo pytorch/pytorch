@@ -47,13 +47,17 @@ struct PatternsAndModules {
   Module packed_params_module;
 };
 
-std::vector<std::string> _quantizable_call_funcs = {
+std::vector<std::string> _static_quantizable_call_funcs = {
     "conv2d",
     "linear",
     "batch_norm",
 };
 
-std::vector<std::string> _quantizable_aten_funcs = {
+std::vector<std::string> _dynamic_quantizable_call_funcs = {
+    "linear",
+};
+
+std::vector<std::string> _static_quantizable_aten_funcs = {
     "conv2d",
     "conv3d",
     "linear",
@@ -65,6 +69,10 @@ std::vector<std::string> _quantizable_aten_funcs = {
     "lstm",
     "mul",
     "mul_",
+};
+
+std::vector<std::string> _dynamic_quantizable_aten_funcs = {
+    "linear",
 };
 
 // These are the prim::CallFunctions that doesn't require observation and
@@ -273,13 +281,15 @@ bool mayRequireObservation(Value* v) {
   return !hasScalarInput(v->node());
 }
 
-bool nodeQuantizable(Node* n) {
+bool nodeQuantizable(Node* n, bool is_dynamic = false) {
   return isFunctionNode(
       n,
       /* call_funcs = */
-      _quantizable_call_funcs,
+      is_dynamic ? _dynamic_quantizable_call_funcs
+                 : _static_quantizable_call_funcs,
       /* aten_funcs = */
-      _quantizable_aten_funcs);
+      is_dynamic ? _dynamic_quantizable_aten_funcs
+                 : _static_quantizable_aten_funcs);
 }
 
 // We don't want to analyze the graph for some `builtin` CallFunctions
@@ -287,7 +297,7 @@ bool nodeQuantizable(Node* n) {
 bool userDefinedCallFunction(Node* n) {
   return n->kind() == prim::CallFunction &&
       !isFunctionNode(n, _single_input_general_call_funcs, {}) &&
-      !isFunctionNode(n, _quantizable_call_funcs, {});
+      !isFunctionNode(n, _static_quantizable_call_funcs, {});
 }
 
 std::shared_ptr<Graph> getCallFunctionGraph(Node* n) {
@@ -1106,7 +1116,7 @@ bool useQuantizable(const Use& use, bool is_dynamic) {
     return use.offset == 2;
   }
 
-  return nodeQuantizable(use.user);
+  return nodeQuantizable(use.user, is_dynamic);
 }
 
 // TODO: remove this as a class method
