@@ -27,14 +27,9 @@ using c10::KernelFunction;
 
 namespace {
 
-void variable_fallback_kernel(const OperatorHandle& op, Stack* stack) {
-    at::AutoNonVariableTypeMode _var_guard(true);
-    Dispatcher::singleton().callBoxed(op, stack);
-}
-
-static auto registry = Dispatcher::singleton().registerBackendFallbackKernel(
+static auto registry = c10::Dispatcher::singleton().registerBackendFallbackKernel(
     DispatchKey::VariableTensorId,
-    KernelFunction::makeFromBoxedFunction<&variable_fallback_kernel>()
+    KernelFunction::makeFallthrough()
 );
 
 }
