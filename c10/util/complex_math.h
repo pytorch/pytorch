@@ -212,4 +212,6 @@ C10_HOST_DEVICE c10::complex<T> atanh(const c10::complex<T> &x) {
 #endif
 }
 
+#undef CUDA92_BUG
+
 } // namespace std
