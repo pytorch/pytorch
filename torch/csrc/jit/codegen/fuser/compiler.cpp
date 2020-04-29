@@ -263,7 +263,6 @@ std::shared_ptr<FusedKernel> compileKernel(
     auto scalar_type = o->type()->expect<TensorType>()->scalarType();
     TORCH_INTERNAL_ASSERT(scalar_type);
     auto type = TensorType::createContiguous(*scalar_type, device, sizes);
-    GRAPH_DEBUG("type = ", *type);
     output_desc.emplace_back(type);
     const auto& desc = output_desc.back();
 
