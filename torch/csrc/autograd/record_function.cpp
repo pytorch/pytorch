@@ -166,12 +166,14 @@ class CallbackManager {
         ++idx_c;
         ++idx_h;
       }
-      while ((sorted_callbacks[idx_c].second < sorted_handles[idx_h])
-          && (idx_c < sorted_callbacks.size())) {
+      while ((idx_c < sorted_callbacks.size()) &&
+             (idx_h < sorted_handles.size()) &&
+             (sorted_callbacks[idx_c].second < sorted_handles[idx_h])) {
         ++idx_c;
       }
-      while ((sorted_handles[idx_h] < sorted_callbacks[idx_c].second)
-          && (idx_h < sorted_handles.size())) {
+      while ((idx_c < sorted_callbacks.size()) &&
+             (idx_h < sorted_handles.size()) &&
+             (sorted_handles[idx_h] < sorted_callbacks[idx_c].second)) {
         ++idx_h;
       }
     }
