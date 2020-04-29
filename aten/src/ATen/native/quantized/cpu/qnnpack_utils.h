@@ -2,13 +2,10 @@
 
 #ifdef USE_PYTORCH_QNNPACK
 #include <pytorch_qnnpack.h>
+#include <qnnpack_common.h>
 #include <qnnpack_func.h>
 
-struct QnnpackOperatorDeleter {
-  void operator()(pytorch_qnnp_operator_t op) {
-    pytorch_qnnp_delete_operator(op);
-  }
-};
+using QnnpackOperatorDeleter = qnnpack::QnnpackDeleter;
 
 // PackedWeight struct for QNNPACK stores the original Weight and Bias as
 // QNNPACK currently does not support an unpack function. Possible optimization -

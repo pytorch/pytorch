@@ -1,75 +1,15 @@
-
 #include <cstring>
 #include <memory>
 
 #include <conv_utils.h>
 #include <pytorch_qnnpack.h>
+#include <qnnpack_common.h>
+#include <qnnpack/common_conv.h>
 #include <qnnpack/indirection.h>
 #include <qnnpack/log.h>
-#include <qnnpack/math.h>
 #include <qnnpack/params.h>
 
 namespace qnnpack {
-struct q8conv_context {
-  size_t bs;
-  size_t ks;
-  size_t kc;
-  size_t kc_stride;
-  size_t m;
-  size_t m_stride;
-  size_t n;
-  size_t n_stride;
-  const uint8_t** indirect_a;
-  const void* packed_w;
-  uint8_t* c;
-  size_t c_stride;
-  union pytorch_qnnp_conv_quantization_params quantization_params;
-  const pytorch_q8conv_ukernel_function ukernel;
-};
-
-static void compute_q8conv(
-    const struct q8conv_context context[1],
-    size_t group_index,
-    size_t image_index,
-    size_t mr_block_start,
-    size_t nr_block_start,
-    size_t group_range /* always 1 */,
-    size_t image_range /* always 1 */,
-    size_t mr_block_size,
-    size_t nr_block_size) {
-  const size_t bs = context->bs;
-  const size_t ks = context->ks;
-  const size_t kc = context->kc;
-  const size_t kc_stride = context->kc_stride;
-  const size_t m = context->m;
-  const size_t m_stride = context->m_stride;
-  const size_t n = context->n;
-  const size_t n_stride = context->n_stride;
-  const uint8_t** indirect_a = context->indirect_a;
-  const void* packed_w = context->packed_w;
-  uint8_t* c = context->c;
-  const size_t c_stride = context->c_stride;
-
-  context->ukernel(
-      mr_block_size,
-      nr_block_size,
-      kc,
-      ks,
-      indirect_a +
-          (mr_block_start + (image_index + group_index * bs) * m_stride) * ks,
-      (const void*)((uintptr_t)packed_w + (nr_block_start + group_index * n_stride) * (kc_stride * sizeof(uint8_t) + sizeof(int32_t))),
-      c + (mr_block_start + image_index * m) * c_stride + group_index * n +
-          nr_block_start,
-      c_stride,
-      &context->quantization_params);
-};
-
-struct QnnpackDeleter {
-  void operator()(pytorch_qnnp_operator_t op) {
-    pytorch_qnnp_delete_operator(op);
-  }
-};
-
 enum pytorch_qnnp_status qnnpackDeConv(
     const conv_param_t& deconv_p,
     void* packed_weights,
