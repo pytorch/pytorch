@@ -751,28 +751,6 @@ graph(%input, %weight):
                        .check("return") \
                        .run(str(get_module_method(m, 'conv', '_conv_forward').graph))
 
-    def test_insert_quant_dequant_multi_uses(self):
-        class M(torch.nn.Module):
-            def __init__(self):
-                super(M, self).__init__()
-
-            def forward(self, x, w0, w1, w2):
-                a = F.conv2d(x, w0)
-                b = F.conv2d(a, w1)
-                c = F.conv2d(a, w2)
-                return b + c
-
-        m = torch.jit.script(M())
-        qconfig_dict = {'': script_qconfig(default_qconfig)}
-        m = wrap_cpp_module(torch._C._jit_pass_insert_observers(m._c, "forward", qconfig_dict, False))
-        m(torch.rand(1, 3, 10, 10), torch.rand(3, 3, 3, 3), torch.rand(3, 3, 3, 3), torch.rand(3, 3, 3, 3))
-        torch._C._jit_pass_insert_quant_dequant(m._c, "forward", True)
-
-        # we just check we have one dequant on every op input, even input
-        # is sharded as multi uses
-        FileCheck().check_count("aten::dequantize", 9, exactly=True) \
-                   .run(str(get_forward_graph(m._c)))
-
     def test_insert_quant_dequant_shared_class_type(self):
         class M(torch.nn.Module):
             def __init__(self):
@@ -1832,6 +1810,26 @@ class TestQuantizeDynamicScript(JitTestCase):
         # add op is not dynamically quantized.
         FileCheck().check("aten::add") \
                    .check("quantized::linear_dynamic") \
+                   .run(model.graph)
+
+    def test_dynamic_quant_multi_uses(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+                self.fc = torch.nn.Linear(5, 5).float()
+
+            def forward(self, x):
+                size1 = x.size()
+                size2 = x.size()
+                return self.fc(x), size1, size2
+
+        model = torch.jit.script(M()).eval()
+        data = torch.rand((1, 5), dtype=torch.float)
+        qconfig_dict = {'': default_dynamic_qconfig}
+
+        model = quantize_dynamic_script(model, qconfig_dict, [data])
+        FileCheck().check("quantized::linear_dynamic") \
+                   .check_not("aten::_choose_qparams_per_tensor") \
                    .run(model.graph)
 
     def test_prepare_dynamic_lstm(self):
