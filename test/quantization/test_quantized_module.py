@@ -335,7 +335,8 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         # Smoke test extra_repr
         self.assertTrue(module_name in str(converted_qconv_module))
 
-    # use_fused is set to False because of the flakiness
+    # TODO: reenable use_fused=True, currently it is set to False
+    # because of the flakiness
     @given(batch_size=st.integers(1, 3),
            in_channels_per_group=st.sampled_from([2, 4, 5, 8, 16, 32]),
            H=st.integers(4, 16),
