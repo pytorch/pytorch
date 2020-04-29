@@ -58,6 +58,9 @@ namespace jit {
   _(ModuleCloneInstance)               \
   _(ModuleConstant)                    \
   _(ModuleParameter)                   \
+  _(ModuleDeepcopy)                    \
+  _(ModuleDeepcopyString)              \
+  _(ModuleDeepcopyAliasing)            \
   _(ModuleDefine)                      \
   _(QualifiedName)                     \
   _(ClassImport)                       \

@@ -1120,7 +1120,8 @@ struct CAFFE2_API FunctionType : public NamedType {
  private:
   FunctionType(torch::jit::Function* function);
   std::string python_str_impl(TypePrinter printer = nullptr) const override {
-    return "Function";
+    const auto& n = name().value();
+    return n.qualifiedName();
   }
   torch::jit::Function* function_;
 };
