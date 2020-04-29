@@ -123,6 +123,7 @@ libtorch_core_sources = [
     "torch/csrc/jit/passes/lower_tuples.cpp",
     "torch/csrc/jit/passes/pass_manager.cpp",
     "torch/csrc/jit/passes/peephole.cpp",
+    "torch/csrc/jit/passes/create_functional_graphs.cpp",
     "torch/csrc/jit/passes/prepack_folding.cpp",
     "torch/csrc/jit/passes/quantization.cpp",
     "torch/csrc/jit/passes/remove_expands.cpp",
@@ -215,7 +216,6 @@ libtorch_distributed_sources = [
 
 libtorch_core_jit_sources = [
     "torch/csrc/jit/codegen/cuda/interface.cpp",
-    "torch/csrc/jit/passes/create_functional_graphs.cpp",
     "torch/csrc/jit/passes/lower_graph.cpp",
     "torch/csrc/jit/runtime/register_c10_ops.cpp",
     "torch/csrc/jit/runtime/register_prim_ops.cpp",
