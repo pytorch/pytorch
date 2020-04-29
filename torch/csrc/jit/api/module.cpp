@@ -164,7 +164,7 @@ void Module::clone_method(const Module& orig, const std::string& name) {
 }
 
 Module Module::copy() const {
-  return Module(_ivalue());
+  return Module(_ivalue()->copy());
 }
 
 Module Module::deepcopy() const {

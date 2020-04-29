@@ -17,6 +17,7 @@
 #include <caffe2/serialize/istream_adapter.h>
 
 #include <ATen/ATen.h>
+#include <fmt/format.h>
 
 #include <fstream>
 #include <string>
@@ -44,12 +45,11 @@ void postSetStateValidate(const IValue& v) {
     if (attrType->kind() != TypeKind::OptionalType) {
       TORCH_CHECK(
           !slot.isNone(),
-          "The field '",
-          attrName,
-          "' was left unitialized after __setstate__, but expected a ",
-          "value of type '",
-          attrType->python_str(),
-          "'");
+          fmt::format(
+              "The field '{}' was left uninitialized after '__setstate__', "
+              "but expected a value of type '{}'",
+              attrName,
+              attrType->python_str()));
     }
   }
 }
