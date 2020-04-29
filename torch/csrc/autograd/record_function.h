@@ -262,7 +262,7 @@ class TORCH_API RecordFunctionCallback {
 
   RecordFunctionCallback& setShouldRun(
       std::function<bool(const RecordFunctionCallback&)> should_run) {
-    should_run = std::move(should_run);
+    should_run_ = std::move(should_run);
     return *this;
   }
 
