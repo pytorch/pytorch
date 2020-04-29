@@ -2,6 +2,7 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/native/xnnpack/Engine.h>
 #include <ATen/WrapDimUtilsMulti.h>
+#include <c10/macros/Macros.h>
 
 #include <array>
 #include <cctype>
@@ -17,9 +18,11 @@ Tensor linear(const Tensor& input, const Tensor& weight, const Tensor& bias) {
     return at::mkldnn_linear(input, weight, bias);
   }
 #ifdef C10_MOBILE
+#if !defined(C10_IOS)
   if (xnnpack::use_linear(input, weight, bias)) {
     return xnnpack::linear(input, weight, bias);
   }
+#endif
 #endif
   if (input.dim() == 2 && bias.defined()) {
     // Fused op is marginally faster.

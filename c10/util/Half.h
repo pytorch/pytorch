@@ -3,9 +3,9 @@
 /// Defines the Half type (half-precision floating-point) including conversions
 /// to standard C types and basic arithmetic operations. Note that arithmetic
 /// operations are implemented by converting to floating point and
-/// performing the operation in float32, instead of using CUDA half intrinisics.
+/// performing the operation in float32, instead of using CUDA half intrinsics.
 /// Most uses of this type within ATen are memory bound, including the
-/// element-wise kernels, and the half intrinisics aren't efficient on all GPUs.
+/// element-wise kernels, and the half intrinsics aren't efficient on all GPUs.
 /// If you are writing a compute bound kernel, you can use the CUDA half
 /// intrinsics directly on the Half type from device code.
 
@@ -308,7 +308,11 @@ namespace detail {
     const float scale_to_inf = scale_to_inf_val;
     const float scale_to_zero = scale_to_zero_val;
 
+#if defined(_MSC_VER) && _MSC_VER == 1916
+          float base = ((signbit(f) != 0 ? -f : f) * scale_to_inf) * scale_to_zero;
+#else
           float base = (fabsf(f) * scale_to_inf) * scale_to_zero;
+#endif
 
           const uint32_t w = fp32_to_bits(f);
           const uint32_t shl1_w = w + w;

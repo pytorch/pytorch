@@ -7,14 +7,10 @@
 template <int kSpatialDim>
 torch::jit::class_<ConvPackedParamsBase<kSpatialDim>> register_conv_params();
 
-namespace {
-
-static auto conv2d_params = register_conv_params<2>();
-static auto conv3d_params = register_conv_params<3>();
-
-} // namespace
-
 TORCH_LIBRARY(quantized, m) {
+  register_conv_params<2>();
+  register_conv_params<3>();
+
   m.def("add(Tensor qa, Tensor qb, float scale, int zero_point) -> Tensor qc");
   m.def("add_relu(Tensor qa, Tensor qb, float scale, int zero_point) -> Tensor qc");
   m.def("add_out(Tensor qa, Tensor qb, Tensor(a!) out) -> Tensor(a!) out");
@@ -75,6 +71,8 @@ TORCH_LIBRARY(quantized, m) {
 // removed when the operators are all migrated to mobile.
 // https://github.com/pytorch/pytorch/issues/36510
 TORCH_LIBRARY(_quantized, m) {
+  register_conv_params<2>();
+
   m.def("add(Tensor qa, Tensor qb, float scale, int zero_point) -> Tensor qc");
   m.def("conv2d(Tensor qx, __torch__.torch.classes.quantized.Conv2dPackedParamsBase packed_weight, float output_scale, int output_zero_point) -> Tensor");
   m.def("conv2d_relu(Tensor qx, __torch__.torch.classes.quantized.Conv2dPackedParamsBase packed_weight, float output_scale, int output_zero_point) -> Tensor");

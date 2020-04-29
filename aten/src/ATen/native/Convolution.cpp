@@ -7,9 +7,12 @@
 #include <ATen/native/xnnpack/Engine.h>
 
 #include <ATen/Config.h>
+#include <c10/macros/Macros.h>
+
 #if AT_NNPACK_ENABLED()
 #include <nnpack.h>
 #endif
+
 
 constexpr int MIOPEN_DIM_MAX = 5;
 
@@ -724,6 +727,7 @@ at::Tensor _convolution(
                                       params.padding, params.stride, params.dilation, params.groups);
     }
 #endif
+#if !defined(C10_IOS)
   } else if (params.use_xnnpack(input, weight, bias)) {
     // Using prepacked conv is preferred, but XNNPACK is still the fastest
     // option for NHWC.
@@ -735,6 +739,7 @@ at::Tensor _convolution(
         params.stride,
         params.dilation,
         params.groups);
+#endif
   } else if (params.use_cpu_depthwise3x3_winograd(input, weight, bias)) {
     output = convolution_depthwise3x3_winograd_stub(
         input.device().type(),
