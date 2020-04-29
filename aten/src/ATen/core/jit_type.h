@@ -400,7 +400,7 @@ struct CAFFE2_API ShapeSymbol {
       return value_;
     };
 
-    static ShapeSymbol newSymbol () {return -(++num_symbols); };
+    static ShapeSymbol newSymbol () {return fromStaticSize(-static_cast<int64_t>(++num_symbols)); };
     friend CAFFE2_API std::ostream& operator<<(std::ostream& os, const ShapeSymbol& s);
     private:
       ShapeSymbol(int64_t val): value_(val) {}
