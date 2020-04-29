@@ -789,12 +789,16 @@ if(BUILD_PYTHON)
   endif()
 
   # Check that Python works
+  set(PYTHON_VERSION)
   if(DEFINED PYTHON_EXECUTABLE)
     execute_process(
         COMMAND "${PYTHON_EXECUTABLE}" "--version"
-        RESULT_VARIABLE _exitcode)
+        RESULT_VARIABLE _exitcode OUTPUT_VARIABLE PYTHON_VERSION)
     if(NOT ${_exitcode} EQUAL 0)
       message(FATAL_ERROR "The Python executable ${PYTHON_EXECUTABLE} cannot be run. Make sure that it is an absolute path.")
+    endif()
+    if(PYTHON_VERSION)
+      string(REGEX MATCH "([0-9]+)\\.([0-9]+)" PYTHON_VERSION ${PYTHON_VERSION})
     endif()
   endif()
 
@@ -832,7 +836,7 @@ if(BUILD_PYTHON)
 
   # These should fill in the rest of the variables, like versions, but resepct
   # the variables we set above
-  set(Python_ADDITIONAL_VERSIONS 3.7 3.6 3.5)
+  set(Python_ADDITIONAL_VERSIONS ${PYTHON_VERSION} 3.8 3.7 3.6 3.5)
   find_package(PythonInterp 3.0)
   find_package(PythonLibs 3.0)
 
