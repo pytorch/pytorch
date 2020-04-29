@@ -171,6 +171,16 @@ struct PeepholeOptimizeImpl {
             }
           }
         }
+      } else if (node->matches(
+                     "aten::is_floating_point(Tensor self) -> bool")) {
+        auto ptt = node->inputs().at(0)->type()->cast<TensorType>();
+        if (auto maybe_dtype = ptt->scalarType()) {
+          c10::ScalarType dtype = *maybe_dtype;
+          WithInsertPoint guard(node);
+          IValue ival(at::isFloatingType(dtype));
+          auto new_constant = node->owningGraph()->insertConstant(ival);
+          node->output()->replaceAllUsesWith(new_constant);
+        }
       } else if (node->kind() == prim::If) {
         IfView n(node);
         // this handles redundant short circuits like "x and True" or "x or
