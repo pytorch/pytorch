@@ -324,33 +324,32 @@ inline c10::optional<T> merge_primitive(
   return c10::optional<T>{};
 }
 
-
-// If we see `a + b + c`  and know that a, b, and c are the same size and have two dimensions (WxH), 
-// then we can generate a fused kernel for them. 
-// That fused kernel would likely have indexing math to handling both the W and H dimensions. 
-// However, if we knew the WxH dimensions were contiguous, 
-// we can pretend like we only have a single dimension, simplifying the indexing logic. 
-// This can be performed even if the dimensions are transposed, 
-// as long as a, b, and c are transposed in the same way. 
-// We’d like to have the compiler be able to do this dimensionality reduction, 
-// but simply knowing sizes is not enough. 
-// We can extend profiling to also record stride information. 
-// Rather than recording specific strides, 
-// we can simply order the strides from smallest to largest with `stride_indices`
-// A contiguity marker on the smallest stride (c0) indicates the stride is precisely 1, 
-// otherwise a contiguity marker means that $stride_n = size_{n-1}*stride_{n-1}$
+// If we see `a + b + c`  and know that a, b, and c are the same size and have
+// two dimensions (WxH), then we can generate a fused kernel for them. That
+// fused kernel would likely have indexing math to handling both the W and H
+// dimensions. However, if we knew the WxH dimensions were contiguous, we can
+// pretend like we only have a single dimension, simplifying the indexing logic.
+// This can be performed even if the dimensions are transposed,
+// as long as a, b, and c are transposed in the same way.
+// We’d like to have the compiler be able to do this dimensionality reduction,
+// but simply knowing sizes is not enough.
+// We can extend profiling to also record stride information.
+// Rather than recording specific strides,
+// we can simply order the strides from smallest to largest with
+// `stride_indices` A contiguity marker on the smallest stride (c0) indicates
+// the stride is precisely 1, otherwise a contiguity marker means that $stride_n
+// = size_{n-1}*stride_{n-1}$
 struct CAFFE2_API Stride {
   Stride() {}
-  Stride(const c10::optional<size_t>& stride_index, const c10::optional<bool>& contiguous, const c10::optional<size_t>& stride)
-  : stride_index_(stride_index)
-  , contiguous_(contiguous)
-  , stride_(stride) {}
+  Stride(
+      const c10::optional<size_t>& stride_index,
+      const c10::optional<bool>& contiguous,
+      const c10::optional<size_t>& stride)
+      : stride_index_(stride_index), contiguous_(contiguous), stride_(stride) {}
 
-
-  bool operator ==(const Stride &b) const { 
-    return stride_index_ == b.stride_index_ && 
-      contiguous_ == b.contiguous_ && 
-      stride_ == b.stride_; 
+  bool operator==(const Stride& b) const {
+    return stride_index_ == b.stride_index_ && contiguous_ == b.contiguous_ &&
+        stride_ == b.stride_;
   }
 
   c10::optional<size_t> stride_index_;
@@ -362,7 +361,6 @@ template <>
 inline c10::optional<Stride> merge_primitive(
     const c10::optional<Stride>& a,
     const c10::optional<Stride>& b) {
-
   c10::optional<Stride> left = a;
   c10::optional<Stride> right = b;
   if (!left.has_value()) {
@@ -372,43 +370,54 @@ inline c10::optional<Stride> merge_primitive(
     right = {Stride()};
   }
 
-  auto merged_index = merge_primitive(left->stride_index_, right->stride_index_);
+  auto merged_index =
+      merge_primitive(left->stride_index_, right->stride_index_);
   auto merged_cont = merge_primitive(left->contiguous_, right->contiguous_);
   auto merged_stride = merge_primitive(left->stride_, right->stride_);
-  auto r = Stride (merged_index, merged_cont, merged_stride);
+  auto r = Stride(merged_index, merged_cont, merged_stride);
   // normalize
-  if (!r.stride_index_.has_value() && !r.contiguous_.has_value() && !r.stride_.has_value())
-  {
+  if (!r.stride_index_.has_value() && !r.contiguous_.has_value() &&
+      !r.stride_.has_value()) {
     return c10::optional<Stride>{};
   }
 
-  return r;  
+  return r;
 }
 
 struct CAFFE2_API ShapeSymbol {
-    
-    // needed for use in `std::map`
-    ShapeSymbol(): value_(-1) {}
-    // is this symbol a fixed/static dimension
-    bool is_static() const { return value_ >= 0; };  
-    bool operator ==(const ShapeSymbol &b) const { return value_ == b.value_; }
-    bool operator <(const ShapeSymbol &b) const { return value_ < b.value_; }
+  // needed for use in `std::map`
+  ShapeSymbol() : value_(-1) {}
+  // is this symbol a fixed/static dimension
+  bool is_static() const {
+    return value_ >= 0;
+  };
+  bool operator==(const ShapeSymbol& b) const {
+    return value_ == b.value_;
+  }
+  bool operator<(const ShapeSymbol& b) const {
+    return value_ < b.value_;
+  }
 
-    static ShapeSymbol fromStaticSize(int64_t val) {return ShapeSymbol(val); }
-    int64_t static_size() const {
-      TORCH_CHECK(is_static());
-      return value_;
-    };
+  static ShapeSymbol fromStaticSize(int64_t val) {
+    return ShapeSymbol(val);
+  }
+  int64_t static_size() const {
+    TORCH_CHECK(is_static());
+    return value_;
+  };
 
-    static ShapeSymbol newSymbol () {return fromStaticSize(-static_cast<int64_t>(++num_symbols)); };
-    friend CAFFE2_API std::ostream& operator<<(std::ostream& os, const ShapeSymbol& s);
-    private:
-      ShapeSymbol(int64_t val): value_(val) {}
-      int64_t value_;
-      static std::atomic<size_t> num_symbols;
- 
+  static ShapeSymbol newSymbol() {
+    return fromStaticSize(-static_cast<int64_t>(++num_symbols));
+  };
+  friend CAFFE2_API std::ostream& operator<<(
+      std::ostream& os,
+      const ShapeSymbol& s);
+
+ private:
+  ShapeSymbol(int64_t val) : value_(val) {}
+  int64_t value_;
+  static std::atomic<size_t> num_symbols;
 };
-
 
 template <typename T>
 struct CAFFE2_API VaryingShape {
@@ -417,7 +426,7 @@ struct CAFFE2_API VaryingShape {
       : VaryingShape(ListOfOptionalElements(vec.begin(), vec.end())) {}
 
   VaryingShape(c10::ArrayRef<T> vec)
-      : VaryingShape(ListOfOptionalElements(vec.begin(), vec.end())){}
+      : VaryingShape(ListOfOptionalElements(vec.begin(), vec.end())) {}
 
   VaryingShape(c10::optional<size_t> size = c10::nullopt) : dims_(c10::nullopt) {
     if (size) {
@@ -425,10 +434,11 @@ struct CAFFE2_API VaryingShape {
     }
   }
 
-  template<typename U = T,
-  typename = typename std::enable_if< std::is_same<U,ShapeSymbol>::value>::type>
-  inline static VaryingShape<ShapeSymbol> 
-  fromStaticShape(c10::IntArrayRef v) {
+  template <
+      typename U = T,
+      typename =
+          typename std::enable_if<std::is_same<U, ShapeSymbol>::value>::type>
+  inline static VaryingShape<ShapeSymbol> fromStaticShape(c10::IntArrayRef v) {
     std::vector<ShapeSymbol> symbolic_sizes;
     for (auto s : v) {
       symbolic_sizes.push_back(ShapeSymbol::fromStaticSize(s));
@@ -436,8 +446,7 @@ struct CAFFE2_API VaryingShape {
     return VaryingShape<ShapeSymbol>(symbolic_sizes);
   }
 
-  VaryingShape(ListOfOptionalElements dims)
-  : dims_(std::move(dims)) {}
+  VaryingShape(ListOfOptionalElements dims) : dims_(std::move(dims)) {}
 
   VaryingShape(size_t size) : VaryingShape(c10::optional<size_t>(size)) {}
 
@@ -502,7 +511,8 @@ using TensorTypePtr = std::shared_ptr<TensorType>;
 struct CAFFE2_API TensorType : public Type {
   static TensorTypePtr create(const at::Tensor& t);
 
-  // used by TensorType::create(size_t dim) which in turn used by shape_analysis.cpp
+  // used by TensorType::create(size_t dim) which in turn used by
+  // shape_analysis.cpp
   static TensorTypePtr create(
       c10::optional<at::ScalarType> scalar_type,
       c10::optional<Device> device,
@@ -539,7 +549,7 @@ struct CAFFE2_API TensorType : public Type {
     return sizes().size();
   }
 
-  VaryingShape<int64_t> sizes() const; 
+  VaryingShape<int64_t> sizes() const;
 
   VaryingShape<int64_t> strides() const;
 
@@ -593,9 +603,10 @@ struct CAFFE2_API TensorType : public Type {
 
   TensorTypePtr withDim(c10::optional<size_t> d) {
     auto copy = clone();
-    //withDim is only used by the legacy executor
+    // withDim is only used by the legacy executor
     // that only cares about the rank, so create dummy symbols)) :
-    copy->sizes_ = d.has_value() ? VaryingShape<ShapeSymbol>(*d) : VaryingShape<ShapeSymbol>();
+    copy->sizes_ = d.has_value() ? VaryingShape<ShapeSymbol>(*d)
+                                 : VaryingShape<ShapeSymbol>();
     copy->strides_ = VaryingShape<Stride>(d);
     return copy;
   }
@@ -631,7 +642,9 @@ struct CAFFE2_API TensorType : public Type {
   TensorTypePtr contiguous() const {
     auto cloned = clone();
     TORCH_INTERNAL_ASSERT(sizes().concrete_sizes().has_value());
-    auto strides = computeStrideProps(*sizes().concrete_sizes(), contiguousStridesOf(*sizes().concrete_sizes()));
+    auto strides = computeStrideProps(
+        *sizes().concrete_sizes(),
+        contiguousStridesOf(*sizes().concrete_sizes()));
     cloned->strides_ = strides;
     return cloned;
   }
@@ -674,7 +687,6 @@ struct CAFFE2_API TensorType : public Type {
   static const TypeKind Kind = TypeKind::TensorType;
 
  private:
-
   TensorType(
       c10::optional<at::ScalarType> scalar_type,
       c10::optional<Device> device,
@@ -685,12 +697,7 @@ struct CAFFE2_API TensorType : public Type {
 
   TensorTypePtr clone() const {
     return TensorTypePtr(new TensorType(
-        scalar_type_,
-        device_,
-        sizes_,
-        strides_,
-        requires_grad_,
-        undefined_));
+        scalar_type_, device_, sizes_, strides_, requires_grad_, undefined_));
   }
 
   static std::vector<int64_t> contiguousStridesOf(at::IntArrayRef sizes) {
@@ -704,8 +711,9 @@ struct CAFFE2_API TensorType : public Type {
     return strides;
   }
 
-  static VaryingShape<Stride>
-  computeStrideProps(at::IntArrayRef sizes, at::IntArrayRef strides);
+  static VaryingShape<Stride> computeStrideProps(
+      at::IntArrayRef sizes,
+      at::IntArrayRef strides);
 
   c10::optional<at::ScalarType> scalar_type_;
   c10::optional<at::Device> device_;
@@ -1347,7 +1355,9 @@ private:
 
 CAFFE2_API std::ostream& operator<<(std::ostream& out, const Type& t);
 template <typename T>
-CAFFE2_API std::ostream& operator<<(std::ostream& out, const VaryingShape<T>& t);
+CAFFE2_API std::ostream& operator<<(
+    std::ostream& out,
+    const VaryingShape<T>& t);
 CAFFE2_API std::ostream& operator<<(std::ostream& os, const ShapeSymbol& s);
 CAFFE2_API std::ostream& operator<<(std::ostream& os, const Stride& s);
 // what is the type, ignoring extra size/shape information?

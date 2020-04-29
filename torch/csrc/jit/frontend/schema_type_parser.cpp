@@ -185,12 +185,11 @@ TypePtr SchemaTypeParser::parseRefinedTensor() {
             << "Strides info is specified for some but not for all dimensions";
       }
       ptr = at::TensorType::create(
-          dtype, 
-          at::DeviceType::CPU, 
-          c10::VaryingShape<int64_t>(dims), 
+          dtype,
+          at::DeviceType::CPU,
+          c10::VaryingShape<int64_t>(dims),
           c10::VaryingShape<int64_t>(strides),
-          c10::nullopt
-          );
+          c10::nullopt);
     } else {
       ptr = at::TensorType::create(
           dtype,
