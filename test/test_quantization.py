@@ -6,6 +6,7 @@ from torch.testing._internal.common_utils import run_tests
 from quantization.test_quantized_tensor import TestQuantizedTensor  # noqa: F401
 # Quantized Op
 # TODO: merge test cases in quantization.test_quantized
+from quantization.test_quantized_op import TestQuantizedConv
 from quantization.test_quantized_op import TestQuantizedOps  # noqa: F401
 from quantization.test_quantized_op import TestQNNPackOps  # noqa: F401
 from quantization.test_quantized_op import TestQuantizedLinear  # noqa: F401

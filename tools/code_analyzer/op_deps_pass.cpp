@@ -102,6 +102,7 @@ struct RegexOpt {
 class RegexOptParser : public cl::basic_parser<RegexOpt> {
 public:
   RegexOptParser(cl::Option& O) : basic_parser(O) {}
+  virtual ~RegexOptParser() = default;
 
   // parse - Return true on error.
   bool parse(cl::Option&, StringRef, StringRef Arg, RegexOpt& Value) {
@@ -171,19 +172,6 @@ cl::list<RegexOpt, bool, RegexOptParser> TorchLibraryInitPattern(
              "Example: -torch_library_init_pattern "
              "'^.*TORCH_LIBRARY_init_([^(]+)(\\(.*)?$'"),
     cl::ZeroOrMore);
-
-enum class OutputFormatType { Dot, PY, YAML };
-cl::opt<OutputFormatType> OutputFormat(
-    "format",
-    cl::desc("Output format."),
-    cl::values(clEnumValN(OutputFormatType::Dot, "dot", "print as dot"),
-               clEnumValN(OutputFormatType::PY, "py", "print as python source"),
-               clEnumValN(OutputFormatType::YAML, "yaml", "print as yaml")));
-
-cl::opt<bool> TransitiveClosure(
-    "closure",
-    cl::desc("Output transitive closure."),
-    cl::init(false));
 
 cl::opt<int> Verbose(
     "v",
@@ -275,20 +263,7 @@ public:
     std::shared_ptr<PATH> path = DebugPath ? std::make_shared<PATH>() : nullptr;
     simplifyGraph(deps, keyNodes, &result, path.get());
 
-    switch (OutputFormat) {
-      case OutputFormatType::Dot:
-        printAsDot(std::cout, keyNodes, result);
-        break;
-      case OutputFormatType::PY:
-        printAsPython(std::cout, keyNodes, result);
-        break;
-      case OutputFormatType::YAML:
-        printAsYAML(std::cout, keyNodes, result, path.get());
-        break;
-      default:
-        break;
-    }
-
+    printAsYAML(std::cout, keyNodes, result, path.get());
     return false;
   }
 
@@ -523,9 +498,7 @@ private:
           // Output links between key nodes.
           (*output)[key].insert(curNode);
           // Stop expanding key nodes.
-          if (!TransitiveClosure) {
-            continue;
-          }
+          continue;
         }
         expand(curNode);
       }
@@ -819,46 +792,6 @@ private:
     } else {
       std::cerr << "NULL";
     }
-  }
-
-  static void printAsDot(
-      std::ostream& out, const SET& keys, const GRAPH& graph) {
-    out << "digraph {" << std::endl;
-    out << "layout=\"circo\";" << std::endl;
-    for (const auto& K : keys) {
-      auto it = graph.find(K);
-      if (it == graph.end()) {
-        continue;
-      }
-      auto key = demangle(K);
-      for (const auto& value : it->second) {
-        out << '"' << key << '"'
-            << " -> "
-            << '"' << demangle(value) << "\";"
-            << std::endl;
-      }
-    }
-    out << "}" << std::endl;
-  }
-
-  static void printAsPython(
-      std::ostream& out, const SET& keys, const GRAPH& graph) {
-    out << "{" << std::endl;
-    for (const auto& K : keys) {
-      auto it = graph.find(K);
-      if (it == graph.end() || it->second.empty()) {
-        continue;
-      }
-      out << "    \"" << demangle(K) << "\": [" << std::endl;
-      for (const auto& value : it->second) {
-        if (value == K) { // skip itself
-          continue;
-        }
-        out << "        \"" << demangle(value) << "\"," << std::endl;
-      }
-      out << "    ]," << std::endl;
-    }
-    out << "}" << std::endl;
   }
 
   static void printAsYAML(
