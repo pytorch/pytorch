@@ -210,7 +210,7 @@ function(append_filelist name outputvar)
   set(_rootdir "${CMAKE_CURRENT_LIST_DIR}/../")
   # configure_file adds its input to the list of CMAKE_RERUN dependencies
   configure_file(
-      ${CMAKE_CURRENT_LIST_DIR}/../tools/build_variables.bzl
+      ${CMAKE_SOURCE_DIR}/tools/build_variables.bzl
       ${CMAKE_BINARY_DIR}/caffe2/build_variables.bzl)
   execute_process(
     COMMAND "${PYTHON_EXECUTABLE}" -c
