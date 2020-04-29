@@ -228,14 +228,13 @@ constexpr uint32_t CUDA_THREADS_PER_BLOCK_FALLBACK = 256;
 #define CUDA_ALWAYS_ASSERT(cond)
 #else // __APPLE__, _MSC_VER
 #if defined(NDEBUG)
+
+#if (defined(__CUDA_ARCH__) ||  defined(__HIP_ARCH__))
 extern "C" {
-#if !defined(__CUDA_ARCH__)  || !defined(__clang__)
+#if !defined(__CUDA_ARCH__)
   [[noreturn]]
 #endif
-#if (defined(__CUDA_ARCH__) && !(defined(__clang__) && defined(__CUDA__))) || \
-    defined(__HIP_ARCH__) || defined(__HIP__)
 __host__ __device__
-#endif // __CUDA_ARCH__
     void
     __assert_fail(
         const char* assertion,
@@ -243,6 +242,8 @@ __host__ __device__
         unsigned int line,
         const char* function) throw();
 }
+#endif // __CUDA_ARCH__
+
 #endif // NDEBUG
 #define CUDA_ALWAYS_ASSERT(cond)                                         \
   if (C10_UNLIKELY(!(cond))) {                                           \
