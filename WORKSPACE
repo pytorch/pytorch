@@ -113,6 +113,12 @@ new_local_repository(
     path = "third_party/sleef",
 )
 
+new_local_repository(
+    name = "fmt",
+    build_file = "//third_party:fmt.BUILD",
+    path = "third_party/fmt",
+)
+
 new_patched_local_repository(
     name = "tbb",
     patches = [
