@@ -278,7 +278,8 @@ class ScriptModuleSerializer {
 
   void writeByteCode(const Module& module) {
     std::vector<c10::IValue> elements;
-    elements.emplace_back(static_cast<int64_t>(caffe2::serialize::kProducedBytecodeVersion));
+    elements.emplace_back(
+        static_cast<int64_t>(caffe2::serialize::kProducedBytecodeVersion));
     moduleMethodsTuple(module, elements);
     auto telements = Tup(std::move(elements));
     writeArchive("bytecode", telements);

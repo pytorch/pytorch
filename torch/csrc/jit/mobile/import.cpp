@@ -85,7 +85,9 @@ void print_unsupported_ops_and_throw(
 void parseMethods(
     const std::vector<IValue>& vals,
     mobile::CompilationUnit& mcu) {
-  TORCH_CHECK(vals.size() > 0, "Bytecode has no elements. At least one element of version number is required.");
+  TORCH_CHECK(
+      vals.size() > 0,
+      "Bytecode has no elements. At least one element of version number is required.");
   auto model_version = vals[0].toInt();
   TORCH_CHECK(
       model_version == caffe2::serialize::kProducedBytecodeVersion,
@@ -116,11 +118,9 @@ void parseMethods(
         expect_field(table, "constants", BYTECODE_INDEX_CONSTANT)
             .toTuple()
             ->elements();
-    const auto& types_list = expect_field(table, "types", BYTECODE_INDEX_TYPE)
-                                 .toTuple()
-                                 ->elements();
-    const auto& register_size =
-        expect_field(table, "register_size", 4).toInt();
+    const auto& types_list =
+        expect_field(table, "types", BYTECODE_INDEX_TYPE).toTuple()->elements();
+    const auto& register_size = expect_field(table, "register_size", 4).toInt();
 
     for (const auto& ins : ins_list) {
       auto ins_item = ins.toTuple()->elements();
