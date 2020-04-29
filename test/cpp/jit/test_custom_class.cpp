@@ -84,10 +84,8 @@ TORCH_LIBRARY(_TorchScriptTesting, m) {
       .def("add", &Foo::add)
       .def("combine", &Foo::combine);
 
-  m.class_<NoInit>("_NoInit")
-    .def("get_x", [](const c10::intrusive_ptr<NoInit>& self) {
-      return self->x;
-    });
+  m.class_<NoInit>("_NoInit").def(
+      "get_x", [](const c10::intrusive_ptr<NoInit>& self) { return self->x; });
 
   m.class_<MyStackClass<std::string>>("_StackString")
       .def(torch::init<std::vector<std::string>>())

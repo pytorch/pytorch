@@ -1142,10 +1142,11 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             // reduce the number of compilations for too dynamic callers we
             // might miss opportunities where a caller is dynamic but a callee
             // gets stable arguments
-            Function& function = peek(stack, 0, inst.N)
-                                .toObject()
-                                ->type()
-                                ->getMethod(af.constants[inst.X].toStringRef());
+            Function& function =
+                peek(stack, 0, inst.N)
+                    .toObject()
+                    ->type()
+                    ->getMethod(af.constants[inst.X].toStringRef());
             if (!function.isGraphFunction()) {
               runBuiltinFunction(stack, &function, &af);
             } else {
