@@ -1039,7 +1039,7 @@ inline py::object invokeScriptMethodFromPython(
     tuple_slice args,
     py::kwargs kwargs) {
   auto type = object.type();
-  Method init_method(object._ivalue(), type->getMethod(method_name));
+  Method init_method(object._ivalue(), &type->getMethod(method_name));
   invokeScriptMethodFromPython(init_method, std::move(args), std::move(kwargs));
   return py::cast(Object(object));
 }
