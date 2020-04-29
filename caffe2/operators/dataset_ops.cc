@@ -399,7 +399,7 @@ class UnPackRecordsOp : public Operator<CPUContext> {
       // input contains a single tensor
       CAFFE_ENFORCE_EQ(InputSize(), 1);
       CAFFE_ENFORCE_EQ(OutputSize(), 1);
-      *Output(0) = Input(0);
+      Output(0)->CopyFrom(Input(0));
       return true;
     }
 
