@@ -4,7 +4,6 @@
 #include <iostream>
 #include <string>
 #include <vector>
-#include "ATen/core/ivalue.h"
 
 namespace torch {
 namespace jit {
