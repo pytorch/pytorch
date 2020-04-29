@@ -33,6 +33,13 @@ class CAFFE2_API LegacyTypeDispatch {
       getLegacyDeviceTypeInit().initCUDA();
     });
   }
+
+  void initHIP() {
+    static std::once_flag hip_once;
+    std::call_once(hip_once, [] {
+      getLegacyDeviceTypeInit().initHIP();
+    });
+  }
 };
 
 CAFFE2_API LegacyTypeDispatch& globalLegacyTypeDispatch();
