@@ -54,6 +54,19 @@ def load_op_deps(fname):
         return yaml.safe_load(stream)
 
 
+def process_base_ops(graph, base_ops):
+    # remove base ops from all `depends` lists to compress the output graph
+    for op in graph:
+        op['depends'] = [
+            dep for dep in op.get('depends', []) if dep['name'] not in base_ops
+        ]
+
+    # add base ops section at the beginning
+    graph.insert(0, {
+        'name': '__BASE__',
+        'depends': [{'name': name} for name in base_ops]})
+
+
 def convert(fname, graph, output_template, op_template, op_dep_template):
     ops = []
     for op in graph:
@@ -95,12 +108,23 @@ if __name__ == "__main__":
         default='bazel',
         help='output file format [bazel, dot]')
     parser.add_argument(
+        '--base_ops',
+        nargs='*',
+        help='optional list of `base` ops that should always be kept in '
+             'custom build, to make the output stable from trivial changes; '
+             'each item is `namespace`::`operator name` without overload; '
+             'e.g.: aten::empty aten::size ...')
+    parser.add_argument(
         '--output',
         required=True,
         help='output file')
     args = parser.parse_args()
 
     deps = load_op_deps(args.op_dependency)
+
+    if args.base_ops:
+        process_base_ops(deps, args.base_ops)
+
     if args.format == 'bazel':
         convert(args.output, deps, BAZEL_OUTPUT, BAZEL_OP, BAZEL_OP_DEP)
     elif args.format == 'dot':
