@@ -973,7 +973,7 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
             def forward(self, x, y):
                 return x.ge(0.5) & y.le(2)
 
-        x = torch.ones(2, 3, dtype=torch.float)
+        x = torch.ones(2, 3, dtype=torch.double)
         y = torch.ones(2, 3, dtype=torch.float32)
         self.run_model_test(ComparisonModel(), input=(x, y), train=False, batch_size=BATCH_SIZE)
 
