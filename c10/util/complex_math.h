@@ -5,7 +5,9 @@ namespace std {
 template<typename T>
 C10_HOST_DEVICE c10::complex<T> exp(c10::complex<T> x) {
 #if defined(__CUDACC__) || defined(__HIPCC__)
-  return static_cast<c10::complex<T>>(thrust::exp(static_cast<thrust::complex<T>>(x)));
+  auto thrust_x = static_cast<thrust::complex<T>>(x);
+  auto thrust_y = thrust::exp(thrust_x);
+  return static_cast<c10::complex<T>>(thrust_y);
 #else
   return static_cast<c10::complex<T>>(std::exp(static_cast<std::complex<T>>(x)));
 #endif
