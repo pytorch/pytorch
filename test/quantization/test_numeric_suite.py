@@ -22,9 +22,10 @@ from torch.testing._internal.common_quantization import (
     QuantizationTestCase,
 )
 from torch.testing._internal.common_quantized import override_quantized_engine
-import unittest
-from hypothesis import given
-from hypothesis import strategies as st
+from torch.testing._internal.common_utils import TEST_WITH_UBSAN
+
+supported_qengines = torch.backends.quantized.supported_engines
+supported_qengines.remove('none')
 
 class SubModule(torch.nn.Module):
     def __init__(self):
@@ -81,13 +82,7 @@ class ModelWithFunctionals(torch.nn.Module):
 
 
 class TestEagerModeNumericSuite(QuantizationTestCase):
-    @unittest.skipUnless(
-        'fbgemm' in torch.backends.quantized.supported_engines or
-        'qnnpack' in torch.backends.quantized.supported_engines,
-        " Quantized operations require FBGEMM."
-    )
-    @given(qengine=st.sampled_from(("qnnpack", "fbgemm")))
-    def test_compare_weights(self, qengine):
+    def test_compare_weights(self):
         r"""Compare the weights of float and quantized conv layer
         """
 
@@ -99,7 +94,10 @@ class TestEagerModeNumericSuite(QuantizationTestCase):
             for k, v in weight_dict.items():
                 self.assertTrue(v["float"].shape == v["quantized"].shape)
 
-        if qengine in torch.backends.quantized.supported_engines:
+        for qengine in supported_qengines:
+            if qengine == 'qnnpack':
+                if TEST_WITH_UBSAN:
+                    return
             with override_quantized_engine(qengine):
                 model_list = [AnnotatedConvModel(qengine), AnnotatedConvBnReLUModel(qengine)]
                 for model in model_list:
@@ -109,13 +107,7 @@ class TestEagerModeNumericSuite(QuantizationTestCase):
                     q_model = quantize(model, default_eval_fn, self.img_data)
                     compare_and_validate_results(model, q_model)
 
-    @unittest.skipUnless(
-        'fbgemm' in torch.backends.quantized.supported_engines or
-        'qnnpack' in torch.backends.quantized.supported_engines,
-        " Quantized operations require FBGEMM."
-    )
-    @given(qengine=st.sampled_from(("qnnpack", "fbgemm")))
-    def test_compare_model_stub(self, qengine):
+    def test_compare_model_stub(self):
         r"""Compare the output of quantized conv layer and its float shadow module
         """
 
@@ -127,7 +119,10 @@ class TestEagerModeNumericSuite(QuantizationTestCase):
             for k, v in ob_dict.items():
                 self.assertTrue(v["float"].shape == v["quantized"].shape)
 
-        if qengine in torch.backends.quantized.supported_engines:
+        for qengine in supported_qengines:
+            if qengine == 'qnnpack':
+                if TEST_WITH_UBSAN:
+                    return
             with override_quantized_engine(qengine):
                 model_list = [AnnotatedConvModel(qengine), AnnotatedConvBnReLUModel(qengine)]
                 data = self.img_data[0][0]
