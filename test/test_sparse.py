@@ -1039,9 +1039,7 @@ class TestSparse(TestCase):
     def test_bmm_cuda_version_error(self):
         a = torch.rand(2, 2, 2).to_sparse().cuda()
         b = torch.rand(2, 2, 2).cuda()
-        with self.assertRaisesRegex(
-                RuntimeError,
-                "bmm sparse-dense requires CUDA 10.1 or greater"):
+        with self.assertRaises(RuntimeError):
             ab = a.bmm(b)
 
     @cpu_only
@@ -1224,7 +1222,7 @@ class TestSparse(TestCase):
         y = y.bfloat16()
         res_bf16 = torch.add(x, y)
         res_bf16 = res_bf16.float()  # to compare with reference
-        self.assertEqual(res_fp32, res_bf16, prec=1e-2)
+        self.assertEqual(res_fp32, res_bf16, atol=1e-2)
 
     def test_norm(self):
         def test_shape(sparse_dims, nnz, with_size):
