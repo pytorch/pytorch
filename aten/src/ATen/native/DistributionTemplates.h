@@ -69,6 +69,11 @@ at::Tensor& random_impl(at::Tensor& self, c10::optional<Generator> generator) {
 #define CHECK_OUT_OF_BOUNDS(var, name, min, max, dtype) \
   TORCH_CHECK(var >= min && var <= max, name , " is out of bounds for ", dtype); \
 
+#define CHECK_OUT_OF_BOUNDS_AND_SHOW_WARNING(var, name, min, max, dtype_min, dtype_max) \
+  if (var < min || var > max) { \
+    TORCH_WARN(name , " is out of bounds [", dtype_min, ", ", dtype_max, "]. This warning will become an error in version 1.7 release, please fix the code in advance"); \
+  }
+
 static void check_from_to_in_range(int64_t from, int64_t to_inc, caffe2::TypeMeta dtype) {
   const auto scalar_type = typeMetaToScalarType(dtype);
   if (isFloatingType(scalar_type)) {
@@ -77,6 +82,16 @@ static void check_from_to_in_range(int64_t from, int64_t to_inc, caffe2::TypeMet
       const auto max = static_cast<double>(std::numeric_limits<scalar_t>::max());
       CHECK_OUT_OF_BOUNDS(from, "from", min, max, dtype);
       CHECK_OUT_OF_BOUNDS(to_inc, "to - 1", min, max, dtype);
+
+      constexpr auto digits = std::numeric_limits<scalar_t>::digits;
+      const auto two_pow_digits = 1L << digits;
+      const auto minus_two_pow_digits = -two_pow_digits;
+      const auto two_pow_digits_name = "2^" + std::to_string(digits);
+      const auto minus_two_pow_digits_name = "-(2^" + std::to_string(digits) + ")";
+      CHECK_OUT_OF_BOUNDS_AND_SHOW_WARNING(from, "from", minus_two_pow_digits,
+        two_pow_digits, minus_two_pow_digits_name, two_pow_digits_name);
+      CHECK_OUT_OF_BOUNDS_AND_SHOW_WARNING(to_inc, "to - 1", minus_two_pow_digits,
+        two_pow_digits, minus_two_pow_digits_name, two_pow_digits_name);
     });
   } else if (isIntegralType(scalar_type, /*includeBool=*/true)) {
     AT_DISPATCH_INTEGRAL_TYPES_AND(at::ScalarType::Bool, scalar_type, "check_random_integral_bounds", [&]() {
@@ -317,5 +332,6 @@ Tensor& exponential_impl_(Tensor& self, double lambda, c10::optional<Generator> 
 }
 
 #undef CHECK_OUT_OF_BOUNDS
+#undef CHECK_OUT_OF_BOUNDS_AND_SHOW_WARNING
 
 }}}
