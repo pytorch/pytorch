@@ -18,7 +18,7 @@ namespace rpc {
 // FutureError if there is an error.
 std::shared_ptr<FutureIValue> toFutureIValue(
     const std::shared_ptr<FutureMessage>& fm,
-    bool hasValue=true);
+    bool hasValue = true);
 
 std::shared_ptr<FutureIValue> pyRpcBuiltin(
     const WorkerInfo& dst,
