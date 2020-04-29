@@ -82,6 +82,8 @@ def get_scripted_qconfig_dict(qconfig_dict):
 
 def _prepare_script(model, qconfig_dict, is_dynamic):
     _check_is_script_module(model)
+    if any(map(lambda x : not isinstance(x, str), qconfig_dict.keys())):
+        raise ValueError('qconfig_dict should contain names(str) as keys.')
     scripted_qconfig_dict = get_scripted_qconfig_dict(qconfig_dict)
     return wrap_cpp_module(torch._C._jit_pass_insert_observers(model._c,
                                                                'forward',
