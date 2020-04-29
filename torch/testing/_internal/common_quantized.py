@@ -5,6 +5,12 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 import numpy as np
 import torch
 from contextlib import contextmanager
+from torch.testing._internal.common_utils import TEST_WITH_UBSAN
+
+supported_qengines = torch.backends.quantized.supported_engines
+supported_qengines.remove('none')
+if TEST_WITH_UBSAN and 'qnnpack' in supported_qengines:
+    supported_qengines.remove('qnnpack')
 
 """Computes the output shape given convolution parameters."""
 def _conv_output_shape(input_size, kernel_size, padding, stride, dilation,

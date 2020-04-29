@@ -21,11 +21,8 @@ from torch.testing._internal.common_quantization import (
     AnnotatedConvModel,
     QuantizationTestCase,
 )
-from torch.testing._internal.common_quantized import override_quantized_engine
+from torch.testing._internal.common_quantized import override_quantized_engine, supported_qengines
 from torch.testing._internal.common_utils import TEST_WITH_UBSAN
-
-supported_qengines = torch.backends.quantized.supported_engines
-supported_qengines.remove('none')
 
 class SubModule(torch.nn.Module):
     def __init__(self):

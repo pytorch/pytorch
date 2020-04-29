@@ -23,7 +23,6 @@ from torch.quantization import default_per_channel_weight_observer
 from torch.quantization import default_per_channel_qconfig
 from torch.quantization._quantize_script import quantize_script, quantize_dynamic_script
 
-from torch.testing._internal.common_utils import TEST_WITH_UBSAN, IS_WINDOWS
 from torch.testing._internal.common_quantization import QuantizationTestCase, \
     AnnotatedSingleLayerLinearModel, SingleLayerLinearModel, \
     AnnotatedConvModel, ConvModel, \
@@ -41,16 +40,13 @@ from torch.testing._internal.common_quantization import AnnotatedTwoLayerLinearM
     AnnotatedSubNestedModel, AnnotatedCustomConfigNestedModel
 from torch.testing._internal.common_quantization import AnnotatedSkipQuantModel
 
-from torch.testing._internal.common_quantized import override_quantized_engine
+from torch.testing._internal.common_quantized import override_quantized_engine, supported_qengines
 from hypothesis import given
 from hypothesis import strategies as st
 import torch.testing._internal.hypothesis_utils as hu
 hu.assert_deadline_disabled()
 import io
 import copy
-
-supported_qengines = torch.backends.quantized.supported_engines
-supported_qengines.remove('none')
 
 @unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
                      " Quantized operations require FBGEMM/QNNPACK. FBGEMM is only optimized for CPUs"
@@ -358,9 +354,6 @@ class TestPostTrainingStatic(QuantizationTestCase):
         """
 
         for qengine in supported_qengines:
-            if qengine == 'qnnpack':
-                if IS_WINDOWS or TEST_WITH_UBSAN:
-                    return
             with override_quantized_engine(qengine):
                 model = TwoLayerLinearModel()
                 model = torch.quantization.QuantWrapper(model)
@@ -939,9 +932,6 @@ class TestQuantizationAwareTraining(QuantizationTestCase):
         and compare results against original model
         """
         for qengine in supported_qengines:
-            if qengine == 'qnnpack':
-                if IS_WINDOWS or TEST_WITH_UBSAN:
-                    return
             with override_quantized_engine(qengine):
                 model = TwoLayerLinearModel()
                 model = torch.quantization.QuantWrapper(model)
