@@ -882,15 +882,9 @@
 - func: cos_(Tensor(a!) self) -> Tensor(a!)
   supports_named_tensor: True
   variants: function, method
-  dispatch:
-    CPU: _cos__cpu
-    CUDA: _cos__cuda
 
 - func: cos.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   supports_named_tensor: True
-  dispatch:
-    CPU: _cos_out_cpu
-    CUDA: _cos_out_cuda
 
 - func: cosh(Tensor self) -> Tensor
   use_c10_dispatcher: full
