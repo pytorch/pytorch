@@ -150,6 +150,27 @@ struct PeepholeOptimizeImpl {
             node->output()->replaceAllUsesWith(const_sizes_val);
           }
         }
+      } else if (
+          node->matches("aten::size(Tensor self, int dim) -> int") &&
+          shape_peepholes_) {
+        if (auto ptt = node->inputs().at(0)->type()->cast<TensorType>()) {
+          if (auto maybe_ndim = ptt->sizes().size()) {
+            auto ndim = *maybe_ndim;
+            auto maybe_index = toIValue(node->inputs().at(1));
+            if (!maybe_index) {
+              continue;
+            }
+            int64_t index = maybe_index->toInt();
+            int64_t norm_index = index < 0 ? ndim + index : index;
+            if (norm_index >= 0 && norm_index < static_cast<int64_t>(ndim) &&
+                ptt->sizes()[norm_index]) {
+              WithInsertPoint guard(node);
+              IValue ival(*ptt->sizes()[norm_index]);
+              auto const_sizes_val = node->owningGraph()->insertConstant(ival);
+              node->output()->replaceAllUsesWith(const_sizes_val);
+            }
+          }
+        }
       } else if (node->kind() == prim::If) {
         IfView n(node);
         // this handles redundant short circuits like "x and True" or "x or
