@@ -1604,7 +1604,7 @@ def _generic_rnn(g, variant, input, initial_states, all_weights, has_biases,
     assert len(all_weights) == num_layers * weights_per_layer * (1 + bidirectional)
     if bidirectional:
         if not type_2:
-            raise ValueError("Type-2 bidirectional RNNs are not currently "
+            raise ValueError("Type-1 bidirectional RNNs are not currently "
                              "supported by ONNX specification.")
     layer_weights = [all_weights[i:i + weights_per_layer] for i in range(0, len(all_weights), weights_per_layer)]
     if batch_first:
