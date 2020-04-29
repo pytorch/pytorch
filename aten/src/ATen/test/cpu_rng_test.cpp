@@ -107,6 +107,12 @@ Tensor& geometric_(Tensor& self, double p, c10::optional<Generator> gen) {
   return at::native::templates::geometric_impl_<native::templates::cpu::GeometricKernel, TestCPUGenerator>(self, p, gen);
 }
 
+// ================================================== Exponential =====================================================
+
+Tensor& exponential_(Tensor& self, double lambda, c10::optional<Generator> gen) {
+  return at::native::templates::exponential_impl_<native::templates::cpu::ExponentialKernel, TestCPUGenerator>(self, lambda, gen);
+}
+
 TORCH_LIBRARY_IMPL(aten, CustomRNGKeyId, m) {
   // Random
   m.impl_UNBOXED("random_.from",             random_from_to);
@@ -127,6 +133,8 @@ TORCH_LIBRARY_IMPL(aten, CustomRNGKeyId, m) {
   m.impl_UNBOXED("log_normal_",              log_normal_);
   // Geometric
   m.impl_UNBOXED("geometric_",               geometric_);
+  // Exponential
+  m.impl_UNBOXED("exponential_",             exponential_);
 }
 
 class RNGTest : public ::testing::Test {
@@ -327,6 +335,22 @@ TEST_F(RNGTest, Geometric) {
   auto expected = torch::empty_like(actual);
   auto iter = TensorIterator::nullary_op(expected);
   native::templates::cpu::geometric_kernel(iter, p, check_generator<TestCPUGenerator>(gen));
+
+  ASSERT_TRUE(torch::allclose(actual, expected));
+}
+
+// ================================================== Exponential =====================================================
+
+TEST_F(RNGTest, Exponential) {
+  const auto lambda = 42;
+  auto gen = at::make_generator<TestCPUGenerator>(42.0);
+
+  auto actual = torch::empty({3, 3});
+  actual.exponential_(lambda, gen);
+
+  auto expected = torch::empty_like(actual);
+  auto iter = TensorIterator::nullary_op(expected);
+  native::templates::cpu::exponential_kernel(iter, lambda, check_generator<TestCPUGenerator>(gen));
 
   ASSERT_TRUE(torch::allclose(actual, expected));
 }
