@@ -10,7 +10,6 @@ import torch.utils.cpp_extension
 
 import onnx
 import onnxruntime  # noqa
-import numpy as np
 
 import io
 import copy
