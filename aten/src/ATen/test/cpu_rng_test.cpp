@@ -301,8 +301,8 @@ TEST_F(RNGTest, Cauchy) {
 // ================================================== LogNormal =======================================================
 
 TEST_F(RNGTest, LogNormal) {
-  const auto mean = 123.45;
-  const auto std = 67.89;
+  const auto mean = 12.345;
+  const auto std = 6.789;
   auto gen = at::make_generator<TestCPUGenerator>(42.0);
 
   auto actual = torch::empty({3, 3});
