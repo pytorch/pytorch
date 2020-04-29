@@ -16,6 +16,7 @@ namespace at {
 namespace native {
 namespace templates {
 namespace cpu {
+namespace {
 
 // ==================================================== Random ========================================================
 
@@ -255,4 +256,4 @@ struct LogNormalKernel {
   }
 };
 
-}}}}
+}}}}}
