@@ -271,8 +271,8 @@ bool enable_qnnpack_for_ada_avgpool(
   auto input_height = input.sizes()[input.dim() - 2];
   auto input_width = input.sizes()[input.dim() - 1];
 
-  return ((input_height % output_height == 0) &&
-      (input_width % output_width) == 0);
+  return !(input_width == output_width && input_height == output_height) &&
+      (input_height % output_height == 0) && (input_width % output_width == 0);
 }
 #endif
 } // namespace
