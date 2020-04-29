@@ -6,7 +6,7 @@
 #include <c10/util/Exception.h>
 #include <torch/csrc/autograd/edge.h>
 #include <torch/csrc/autograd/grad_mode.h>
-#include <torch/csrc/autograd/record_function.h>
+#include <ATen/core/record_function.h>
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/jit/api/compilation_unit.h>
 #include <torch/csrc/jit/api/function_impl.h>

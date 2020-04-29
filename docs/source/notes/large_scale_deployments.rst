@@ -27,7 +27,7 @@ across the entire set of machines.
 
 New callbacks for any operator invocation can be added with
 ``torch::autograd::profiler::addGlobalCallback``. Hooks will be called with
-``torch::autograd::profiler::RecordFunction`` struct that describes invocation
+``at::RecordFunction`` struct that describes invocation
 context (e.g. `name`). If enabled, ``RecordFunction::inputs()`` contains arguments
 of the function represented as ``torch::IValue`` variant type. Note, that inputs
 logging is relatively expensive and thus has to be enabled explicitly.

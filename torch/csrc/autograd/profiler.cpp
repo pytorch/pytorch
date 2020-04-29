@@ -34,7 +34,7 @@ thread_local uint16_t thread_id;
 
 // use RecordFunctionGuard to keep track of observers,
 // enable/disableProfiler are tied to the code range
-thread_local std::vector<std::shared_ptr<RecordFunctionGuard>> g_;
+thread_local std::vector<std::shared_ptr<at::RecordFunctionGuard>> g_;
 // use thread_local vector to save profiler callback ids
 thread_local std::vector<uint64_t> callback_handles_;
 
@@ -50,7 +50,7 @@ RangeEventList& getEventList() {
   if (!event_list) {
     std::lock_guard<std::mutex> guard(all_event_lists_map_mutex);
     event_list = std::make_shared<RangeEventList>();
-    thread_id = RecordFunction::currentThreadId();
+    thread_id = at::RecordFunction::currentThreadId();
     all_event_lists_map.emplace(thread_id, event_list);
   }
   return *event_list;
@@ -65,7 +65,7 @@ void mark(std::string name, bool include_cuda /* = true */) {
   } else {
     getEventList().record(
         EventKind::Mark,
-        StringView(std::move(name)),
+        at::StringView(std::move(name)),
         thread_id,
         include_cuda && state == ProfilerState::CUDA);
   }
@@ -76,7 +76,7 @@ bool profilerEnabled() {
 }
 
 void pushRange(
-    const StringView& name,
+    const at::StringView& name,
     const char* msg = "",
     int64_t sequence_nr = -1,
     std::vector<std::vector<int64_t>>&& shapes = {}) {
@@ -130,7 +130,7 @@ void popRange() {
   } else {
     getEventList().record(
         EventKind::PopRange,
-        StringView(""),
+        at::StringView(""),
         thread_id,
         state == ProfilerState::CUDA);
   }
@@ -145,8 +145,8 @@ void enableProfiler(ProfilerConfig config) {
     throw std::runtime_error("can't change kind of profiling (e.g. NVTX to CPU) while profiler is running");
   }
 
-  auto handle = addGlobalCallback(RecordFunctionCallback(
-      [config](const RecordFunction& fn) {
+  auto handle = at::addGlobalCallback(at::RecordFunctionCallback(
+      [config](const at::RecordFunction& fn) {
         auto* msg = (fn.seqNr() >= 0) ? ", seq = " : "";
         if (config.report_input_shapes) {
           std::vector<std::vector<int64_t>> inputSizes;
@@ -169,9 +169,9 @@ void enableProfiler(ProfilerConfig config) {
         }
         return true;
       },
-      [](const RecordFunction& fn) {
+      [](const at::RecordFunction& fn) {
         if (fn.getStartCallbacksThreadId() !=
-                RecordFunction::currentThreadId()) {
+                at::RecordFunction::currentThreadId()) {
           // If we're not in a thread that ran start callbacks, then find
           // the eventList that was created for the original thread_id. Then,
           // record the end event on this list so that the block is added to
@@ -191,7 +191,7 @@ void enableProfiler(ProfilerConfig config) {
             auto& eventList = eventListIter->second;
             eventList->record(
                       EventKind::PopRange,
-                      StringView(""),
+                      at::StringView(""),
                       fn.getStartCallbacksThreadId(),
                       state == ProfilerState::CUDA);
           }
@@ -200,10 +200,10 @@ void enableProfiler(ProfilerConfig config) {
         }
       })
       .needsInputs(config.report_input_shapes)
-      .scopes({RecordScope::FUNCTION, RecordScope::USER_SCOPE}));
+      .scopes({at::RecordScope::FUNCTION, at::RecordScope::USER_SCOPE}));
   state = new_state;
   callback_handles_.push_back(handle);
-  g_.emplace_back(std::make_shared<RecordFunctionGuard>());
+  g_.emplace_back(std::make_shared<at::RecordFunctionGuard>());
 
   if(state == ProfilerState::CUDA) {
     // event recording appears to have some startup overhead, so we need to
@@ -233,7 +233,7 @@ thread_event_lists disableProfiler() {
   mark("__stop_profile");
 
   TORCH_INTERNAL_ASSERT(!callback_handles_.empty());
-  removeCallback(callback_handles_.back());
+  at::removeCallback(callback_handles_.back());
   callback_handles_.pop_back();
   TORCH_INTERNAL_ASSERT(!g_.empty());
   g_.pop_back();

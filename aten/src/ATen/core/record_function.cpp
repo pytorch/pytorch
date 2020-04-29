@@ -1,14 +1,10 @@
+#include <ATen/core/record_function.h>
 
 #include <algorithm>
-#include <torch/csrc/autograd/record_function.h>
-#include <torch/csrc/autograd/function.h>
-#include <torch/csrc/autograd/profiler.h>
 #include <cstdlib>
 #include <random>
 
-namespace torch {
-namespace autograd {
-namespace profiler {
+namespace at {
 
 namespace {
 
@@ -298,18 +294,6 @@ void RecordFunction::_before(std::string name, int64_t sequence_nr) {
   manager().runStartCallbacks(*this);
 }
 
-void RecordFunction::_before(Node* fn, int64_t sequence_nr) {
-  if (!active_) {
-    return;
-  }
-  fn_ = fn;
-  name_ = StringView(fn->name());
-  sequence_nr_ = (sequence_nr >= 0) ? sequence_nr : fn->sequence_nr();
-  thread_id_ = currentThreadId();
-
-  manager().runStartCallbacks(*this);
-}
-
 RecordFunction::~RecordFunction() {
   _end();
 }
@@ -330,6 +314,4 @@ RecordFunction* RecordFunction::current() {
   return current_record_func_;
 }
 
-} // namespace profiler
-} // namespace autograd
-} // namespace torch
+} // namespace at

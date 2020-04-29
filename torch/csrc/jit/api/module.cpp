@@ -1,7 +1,7 @@
 #include <torch/csrc/jit/api/module.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/autograd/generated/variable_factories.h>
-#include <torch/csrc/autograd/record_function.h>
+#include <ATen/core/record_function.h>
 #include <torch/csrc/jit/frontend/error_report.h>
 #include <torch/csrc/jit/frontend/ir_emitter.h>
 #include <torch/csrc/jit/frontend/schema_matching.h>
