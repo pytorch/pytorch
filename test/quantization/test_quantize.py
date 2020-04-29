@@ -82,7 +82,10 @@ from torch.testing._internal.common_quantization import (
     AnnotatedSkipQuantModel,
 )
 
-from torch.testing._internal.common_quantized import override_quantized_engine, supported_qengines
+from torch.testing._internal.common_quantized import (
+    override_quantized_engine,
+    supported_qengines,
+)
 from hypothesis import given
 from hypothesis import strategies as st
 import torch.testing._internal.hypothesis_utils as hu

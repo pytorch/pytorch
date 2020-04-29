@@ -221,7 +221,7 @@ class SingleLayerLinearModel(torch.nn.Module):
         return x
 
 class AnnotatedSingleLayerLinearModel(torch.nn.Module):
-    def __init__(self, qengine):
+    def __init__(self, qengine='fbgemm'):
         super().__init__()
         self.qconfig = torch.quantization.get_default_qconfig(qengine)
         self.fc1 = QuantWrapper(torch.nn.Linear(5, 5).to(dtype=torch.float))
