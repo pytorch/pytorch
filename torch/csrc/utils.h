@@ -64,7 +64,9 @@
 
 #define THPUtils_unpackReal_COMPLEX(object)                                                                        \
     (PyComplex_Check(object) ?                                                                                     \
-    (std::complex<double>(PyComplex_RealAsDouble(object), PyComplex_ImagAsDouble(object))) :                         \
+    (std::complex<double>(PyComplex_RealAsDouble(object), PyComplex_ImagAsDouble(object))) :                       \
+    PyFloat_Check(object) ? (std::complex<double>(PyFloat_AsDouble(object), 0)) :                                  \
+    PyLong_Check(object) ? (std::complex<double>(PyLong_AsLongLong(object), 0)) :                                  \
     (throw std::runtime_error("Could not parse real"), std::complex<double>(0,0)))                                 \
 
 #define THPUtils_checkReal_BOOL(object)                                        \
