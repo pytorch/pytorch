@@ -51,6 +51,7 @@ std::vector<std::string> _quantizable_call_funcs = {
     "conv2d",
     "linear",
     "batch_norm",
+    "hardswish",
 };
 
 std::vector<std::string> _quantizable_aten_funcs = {
@@ -65,6 +66,7 @@ std::vector<std::string> _quantizable_aten_funcs = {
     "lstm",
     "mul",
     "mul_",
+    "hardswish",
 };
 
 // These are the prim::CallFunctions that doesn't require observation and
