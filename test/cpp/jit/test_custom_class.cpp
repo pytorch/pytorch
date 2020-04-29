@@ -4,6 +4,7 @@
 #include <iostream>
 #include <string>
 #include <vector>
+#include "ATen/core/ivalue.h"
 
 namespace torch {
 namespace jit {
@@ -30,6 +31,10 @@ struct Foo : torch::CustomClassHolder {
   ~Foo() {
     // std::cout<<"Destroying object with values: "<<x<<' '<<y<<std::endl;
   }
+};
+
+struct NoInit : torch::CustomClassHolder {
+  int64_t x;
 };
 
 template <class T>
@@ -78,6 +83,11 @@ TORCH_LIBRARY(_TorchScriptTesting, m) {
       .def("increment", &Foo::increment)
       .def("add", &Foo::add)
       .def("combine", &Foo::combine);
+
+  m.class_<NoInit>("_NoInit")
+    .def("get_x", [](const c10::intrusive_ptr<NoInit>& self) {
+      return self->x;
+    });
 
   m.class_<MyStackClass<std::string>>("_StackString")
       .def(torch::init<std::vector<std::string>>())
