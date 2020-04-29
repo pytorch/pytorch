@@ -62,6 +62,117 @@ void testModuleCloneInstance() {
   ASSERT_EQ(m3.attr(attr_name).toInt(), 3);
 }
 
+void testModuleDeepcopy() {
+  auto cu = std::make_shared<CompilationUnit>();
+  auto cls = ClassType::create("foo.bar", cu, true);
+  auto str_attr = "str_attr";
+  auto int_attr = "int_attr";
+  auto tensor_attr = "tensor_attr";
+  auto tensor_list_attr = "tensor_list_attr";
+  cls->addAttribute(int_attr, IntType::get());
+  cls->addAttribute(str_attr, StringType::get());
+  cls->addAttribute(tensor_attr, TensorType::get());
+  cls->addAttribute(tensor_list_attr, ListType::ofTensors());
+  Module m(cu, cls);
+  c10::List<at::Tensor> list({at::rand(5), at::rand(5)});
+  m.setattr(int_attr, IValue(2));
+  m.setattr(str_attr, IValue("str"));
+  m.setattr(tensor_attr, at::randn(5));
+  m.setattr(tensor_list_attr, list);
+
+  Module m2 = m.deepcopy();
+  Module m3 = m.clone_instance();
+  // Make sure copy works
+  ASSERT_EQ(m2.attr(int_attr).toInt(), 2);
+  ASSERT_EQ(m3.attr(int_attr).toInt(), 2);
+
+  // Test overlaps
+  ASSERT_TRUE(!IValue(m2._ivalue()).overlaps(IValue(m._ivalue())));
+  ASSERT_TRUE(IValue(m3._ivalue()).overlaps(IValue(m._ivalue())));
+
+  // Both deepcopy and clone_instance will preserve the type
+  ASSERT_EQ(m.type(), m2.type());
+  ASSERT_EQ(m.type(), m3.type());
+
+  // change int value of copied instances
+  m2.setattr(int_attr, IValue(3));
+  m3.setattr(int_attr, IValue(4));
+  // Verify value of original instance doesn't change
+  ASSERT_EQ(m.attr(int_attr).toInt(), 2);
+  ASSERT_EQ(m2.attr(int_attr).toInt(), 3);
+  ASSERT_EQ(m3.attr(int_attr).toInt(), 4);
+
+  // change Tensor value of copied instances
+  at::Tensor t1 = m.attr(tensor_attr).toTensor();
+  at::Tensor t2 =
+      m2.attr(tensor_attr).toTensor(); // deepcopy will copy the Tensor
+  at::Tensor t3 = m3.attr(tensor_attr)
+                      .toTensor(); // clone_instance will not copy the Tensor
+  // check copy works
+  ASSERT_TRUE(t1.equal(t2));
+  ASSERT_TRUE(t1.equal(t3));
+
+  // zero out t1
+  t1.zero_();
+  // check that t2 is not affected because it is a deep copy
+  ASSERT_TRUE(!t1.equal(t2));
+  // check that t3 is the same as t1 since it is a shallow copy
+  ASSERT_TRUE(t1.equal(t3));
+}
+
+void testModuleDeepcopyString() {
+  auto cu = std::make_shared<CompilationUnit>();
+  auto cls = ClassType::create("foo.bar", cu, true);
+  auto attr1 = "attr1";
+  cls->addAttribute(attr1, StringType::get());
+  std::string str = "str";
+  Module m(cu, cls);
+  m.setattr(attr1, str);
+  auto copied = m.deepcopy();
+  auto original_str = str;
+  ASSERT_EQ(copied.attr(attr1).toString()->string(), original_str);
+  // check string mutation is not reflected in the copied module
+  str += "str";
+  ASSERT_EQ(copied.attr(attr1).toString()->string(), original_str);
+}
+
+void testModuleDeepcopyAliasing() {
+  // check deepcopy preserves aliasing
+  auto cu = std::make_shared<CompilationUnit>();
+  auto cls = ClassType::create("foo.bar", cu, true);
+  auto attr1 = "attr1";
+  auto attr2 = "attr2";
+  auto attr3 = "attr3";
+  auto attr4 = "attr4";
+  cls->addAttribute(attr1, ListType::ofTensors());
+  cls->addAttribute(attr2, ListType::ofTensors());
+  cls->addAttribute(attr3, TensorType::get());
+  cls->addAttribute(attr4, TensorType::get());
+  Module m(cu, cls);
+  auto t1 = at::rand(5);
+  auto t2 = at::rand(5);
+  auto t3 = at::rand(5);
+  auto t4 = at::rand({5, 2});
+  c10::List<at::Tensor> list1({t1, t2});
+  c10::List<at::Tensor> list2({t1, t3});
+  // first element of attr1 and attr2 are aliased
+  m.setattr(attr1, list1);
+  m.setattr(attr2, list2);
+  m.setattr(attr3, t4);
+  m.setattr(attr4, t4.view(-1));
+
+  auto copied = m.deepcopy();
+  // test tensor aliasing
+  auto copied_attr1_t1 = copied.attr(attr1).toList().get(0);
+  auto copied_attr2_t1 = copied.attr(attr2).toList().get(0);
+  ASSERT_TRUE(copied_attr1_t1.isAliasOf(copied_attr2_t1));
+
+  // test aliasing from view
+  auto copied_attr3 = copied.attr(attr3);
+  auto copied_attr4 = copied.attr(attr3);
+  ASSERT_TRUE(copied_attr3.isAliasOf(copied_attr4));
+}
+
 void testModuleConstant() {
   auto cu = std::make_shared<CompilationUnit>();
   auto cls = ClassType::create("foo.bar", cu, true);
