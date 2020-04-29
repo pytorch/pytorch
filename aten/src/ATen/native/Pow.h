@@ -17,7 +17,7 @@ namespace native {
 
 template <class T,
   typename std::enable_if<std::is_integral<T>::value, T>::type* = nullptr>
-static inline HOST_DEVICE __ubsan_ignore_unsigned_int_overflow__ T powi_impl(T a, T b) {
+static inline HOST_DEVICE __ubsan_ignore_signed_int_overflow__ T powi_impl(T a, T b) {
   T result = 1;
   while (b) {
     if (b & 1) {

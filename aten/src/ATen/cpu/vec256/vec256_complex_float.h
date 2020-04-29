@@ -2,7 +2,7 @@
 
 #include <ATen/cpu/vec256/intrinsics.h>
 #include <ATen/cpu/vec256/vec256_base.h>
-#if defined(__AVX__) && !defined(_MSC_VER)
+#if (defined(CPU_CAPABILITY_AVX) || defined(CPU_CAPABILITY_AVX2)) && !defined(_MSC_VER)
 #include <sleef.h>
 #endif
 
@@ -11,7 +11,7 @@ namespace vec256 {
 // See Note [Acceptable use of anonymous namespace in header]
 namespace {
 
-#if defined(__AVX__) && !defined(_MSC_VER)
+#if (defined(CPU_CAPABILITY_AVX) || defined(CPU_CAPABILITY_AVX2)) && !defined(_MSC_VER)
 
 template <> class Vec256<std::complex<float>> {
 private:
@@ -309,8 +309,8 @@ public:
     return sqrt().reciprocal();
   }
   Vec256<std::complex<float>> pow(const Vec256<std::complex<float>> &exp) const {
-    __at_align32__ std::complex<double> x_tmp[size()];
-    __at_align32__ std::complex<double> y_tmp[size()];
+    __at_align32__ std::complex<float> x_tmp[size()];
+    __at_align32__ std::complex<float> y_tmp[size()];
     store(x_tmp);
     exp.store(y_tmp);
     for (int i = 0; i < size(); i++) {

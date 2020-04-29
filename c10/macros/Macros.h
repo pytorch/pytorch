@@ -26,11 +26,11 @@
 #if defined(__clang__)
   #define __ubsan_ignore_float_divide_by_zero__ __attribute__((no_sanitize("float-divide-by-zero")))
   #define __ubsan_ignore_undefined__ __attribute__((no_sanitize("undefined")))
-  #define __ubsan_ignore_unsigned_int_overflow__ __attribute__((no_sanitize("unsigned-integer-overflow")))
+  #define __ubsan_ignore_signed_int_overflow__ __attribute__((no_sanitize("signed-integer-overflow")))
 #else
   #define __ubsan_ignore_float_divide_by_zero__
   #define __ubsan_ignore_undefined__
-  #define __ubsan_ignore_unsigned_int_overflow__
+  #define __ubsan_ignore_signed_int_overflow__
 #endif
 
 // Disable the copy and assignment operator for a class. Note that this will
@@ -265,9 +265,7 @@ __host__ __device__
     (TARGET_IPHONE_SIMULATOR || TARGET_OS_SIMULATOR || TARGET_OS_IPHONE))
 #define C10_IOS 1
 #define C10_MOBILE 1
-#elif (defined(__APPLE__) && TARGET_OS_MAC)
-#define C10_IOS 1
-#endif // ANDROID / IOS / MACOS
+#endif // ANDROID / IOS
 
 // Portably determine if a type T is trivially copyable or not.
 #if defined(__GNUG__) && __GNUC__ < 5
