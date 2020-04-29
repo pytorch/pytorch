@@ -11,12 +11,6 @@ C10_HOST_DEVICE c10::complex<T> exp(c10::complex<T> x) {
 #endif
 }
 
-#if CUDA_VERSION < 10000
-// The explicit instantiation is required below for CUDA 9.2
-template c10::complex<float> exp<float>(c10::complex<float>);
-template c10::complex<double> exp<double>(c10::complex<double>);
-#endif
-
 template<typename T>
 C10_HOST_DEVICE c10::complex<T> log(c10::complex<T> x) {
 #if defined(__CUDACC__) || defined(__HIPCC__)
