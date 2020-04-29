@@ -7,7 +7,7 @@
 #include <limits>
 #include <mutex>
 
-#ifdef __AVX2__
+#ifdef CPU_CAPABILITY_AVX2
 #include <ATen/native/cpu/avx_mathfun.h>
 #endif
 
@@ -82,7 +82,7 @@ struct RandomKernel {
 
 // ==================================================== Normal ========================================================
 
-#ifdef __AVX2__
+#ifdef CPU_CAPABILITY_AVX2
 static void normal_fill_16_AVX2(float *data,
                          const __m256* two_pi,
                          const __m256* one,
@@ -173,13 +173,13 @@ template<typename RNG>
 void normal_kernel(Tensor& self, double mean, double std, RNG generator) {
   auto size = self.numel();
   if (self.scalar_type() == ScalarType::Float && size >= 16 && self.is_contiguous()) {
-#ifdef __AVX2__
+#ifdef CPU_CAPABILITY_AVX2
     normal_fill_AVX2(self, static_cast<float>(mean), static_cast<float>(std), generator);
 #else
     normal_fill(self, static_cast<float>(mean), static_cast<float>(std), generator);
 #endif
   } else {
-    // half and bfloat16 cannot be properly tested due to the lack of other operations 
+    // half and bfloat16 cannot be properly tested due to the lack of other operations
     // like add/sub/mean implemented for half and bfloat16.
     AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "normal_kernel_cpu", [&] {
       if (size >= 16 && self.is_contiguous()) {

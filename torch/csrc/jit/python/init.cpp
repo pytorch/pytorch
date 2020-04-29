@@ -273,7 +273,10 @@ void initJITBindings(PyObject* module) {
           [](std::shared_ptr<Graph>& g) { return CreateFunctionalGraphs(g); })
       .def(
           "_jit_pass_remove_mutation",
-          [](std::shared_ptr<Graph>& g) { return RemoveMutation(g); })
+          [](std::shared_ptr<Graph>& g) {
+            RemoveListMutation(g);
+            return RemoveTensorMutation(g);
+          })
       .def(
           "_jit_pass_inline_functional_graphs",
           [](std::shared_ptr<Graph>& g) { return InlineFunctionalGraphs(g); })

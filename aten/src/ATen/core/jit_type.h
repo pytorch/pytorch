@@ -1387,6 +1387,12 @@ struct getTypePtr_<int64_t> final {
   }
 };
 template <>
+struct getTypePtr_<c10::ScalarType> final {
+  static TypePtr call() {
+    return IntType::get();
+  }
+};
+template <>
 struct getTypePtr_<bool> final {
   static TypePtr call() {
     return BoolType::get();
