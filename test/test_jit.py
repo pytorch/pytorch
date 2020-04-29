@@ -3496,7 +3496,6 @@ class TestScript(JitTestCase):
                 eplan.code.request_bailout(i)
                 self.assertEqual(jitted(x), expected)
 
-<<<<<<< HEAD
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING, "skip if profiling isn't enabled")
     def test_dominated_bailout(self):
         with enable_profiling_mode():
@@ -3561,8 +3560,8 @@ class TestScript(JitTestCase):
                 g = torch.jit.last_executed_optimized_graph()
                 # there should still be a Bailout after disable_grad call
                 FileCheck().check("disable_grad").check("BailOut[").check("BailoutTemplate").run(g)
-=======
 
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING, "skip if profiling isn't enabled")
     def test_profiling_merge(self):
         @torch.jit.script
         def test_not_const(x):
@@ -3582,7 +3581,6 @@ class TestScript(JitTestCase):
             FileCheck().check_not("Double(2, 2) = ").run(graph_str)
 
         torch._C._jit_set_num_profiled_runs(old_num_runs)
->>>>>>> fix incorrect profiling merge
 
     def test_nested_bailouts(self):
         @torch.jit.script
