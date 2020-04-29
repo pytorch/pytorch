@@ -46,6 +46,11 @@ white_list = [
     ('quantized::conv2d_prepack', datetime.date(2020, 6, 1)),
     ('quantized::conv3d_relu', datetime.date(2020, 6, 1)),
     ('aten::batch_norm_gather_stats_with_counts', datetime.date(2020, 6, 30)),
+    ('aten::quantized_lstm', datetime.date(2020, 6, 1)),
+    ('aten::quantized_gru', datetime.date(2020, 6, 1)),
+    ('quantized::make_quantized_cell_params', datetime.date(2020, 6, 1)),
+    ('quantized::make_quantized_cell_params_fp16', datetime.date(2020, 6, 1)),
+    ('quantized::make_quantized_cell_params_dynamic', datetime.date(2020, 6, 1)),
     ('aten::len', datetime.date(2020, 6, 30)),
     ('aten::keys', datetime.date(2020, 6, 30)),
     ('aten::values', datetime.date(2020, 6, 30)),
@@ -68,6 +73,11 @@ white_list = [
 # The nightly will fail to parse newly added syntax to schema declarations
 # Add new schemas that will fail the nightly here
 dont_parse_list = [
+    ('aten::quantized_lstm', datetime.date(2020, 6, 1)),
+    ('aten::quantized_gru', datetime.date(2020, 6, 1)),
+    ('quantized::make_quantized_cell_params', datetime.date(2020, 6, 1)),
+    ('quantized::make_quantized_cell_params_fp16', datetime.date(2020, 6, 1)),
+    ('quantized::make_quantized_cell_params_dynamic', datetime.date(2020, 6, 1)),
 ]
 
 

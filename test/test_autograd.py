@@ -31,7 +31,7 @@ from torch.utils.checkpoint import checkpoint
 from torch.testing._internal.common_utils import (TEST_MKL, TEST_WITH_ROCM, TestCase, run_tests, skipIfNoLapack,
                                                   suppress_warnings, slowTest,
                                                   load_tests, random_symmetric_pd_matrix, random_symmetric_matrix,
-                                                  IS_WINDOWS, IS_MACOS, CudaMemoryLeakCheck)
+                                                  IS_WINDOWS, IS_MACOS, CudaMemoryLeakCheck, skipIfRocm)
 from torch.autograd import Variable, Function, detect_anomaly
 from torch.autograd.function import InplaceFunction
 from torch.testing import randn_like
@@ -2655,6 +2655,7 @@ class TestAutograd(TestCase):
         with torch.autograd.profiler.profile() as prof:
             x.resize_([3, 2])
 
+    @skipIfRocm
     def test_profiler_custom_op(self):
         inst = torch.classes._TorchScriptTesting._PickleTester([3, 4])
 
@@ -5623,7 +5624,7 @@ class TestAutogradDeviceType(TestCase):
         self.assertEqual(grad_cudnn, grad_native, atol=1e-4)
 
     @skipCUDAIfRocm
-    def test_leaky_relu_inplace_with_neg_slope(self, device):
+    def test_leaky_relu_inplace_with_zero_or_neg_slope(self, device):
         a = torch.tensor([-1., 1.], device=device, requires_grad=True)
         b = torch.nn.functional.leaky_relu_(a.clone(), -2)
         with self.assertRaisesRegex(RuntimeError, "call out-of-place version"):
@@ -5633,6 +5634,11 @@ class TestAutogradDeviceType(TestCase):
         b = torch.nn.functional.rrelu_(a.clone(), -5.0, 1.0)
         with self.assertRaisesRegex(RuntimeError, "call out-of-place version"):
             b.backward(torch.ones(2, device=device))
+
+        a = torch.tensor([-2., 0., 2.], device=device, requires_grad=True)
+        b = torch.nn.functional.leaky_relu_(a.clone(), 0.0)
+        b.backward(torch.ones(3, device=device))
+        self.assertEqual(a.grad, torch.tensor([0., 0., 1.], device=device))
 
     @onlyCUDA
     def test_free_unneeded_tensor(self, device):
