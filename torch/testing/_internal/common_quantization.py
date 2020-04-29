@@ -508,9 +508,9 @@ class AnnotatedSkipQuantModel(torch.nn.Module):
     r"""We can skip quantization by explicitly
     setting qconfig of a submodule to None
     """
-    def __init__(self):
+    def __init__(self, qengine):
         super().__init__()
-        self.qconfig = default_qconfig
+        self.qconfig = torch.quantization.get_default_qconfig(qengine)
         self.sub = QuantWrapper(InnerModule())
         self.fc = torch.nn.Linear(5, 5).to(dtype=torch.float)
         # don't quantize this fc
