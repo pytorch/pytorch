@@ -14,12 +14,6 @@ except ImportError:
     def TypedDict(name, attrs, total=True):  # type: ignore
         return Dict[Any, Any]
 
-import sys
-if sys.version_info[0] == 3:
-    string_type = str
-else:
-    string_type = basestring
-
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 #
 # what has to be done to add a Operation ...
@@ -1041,7 +1035,7 @@ def create_generic(top_env, declarations):
         for t_raw in ret:
             # See Note [field_name versus name]
             field_name = None
-            if isinstance(t_raw, string_type):
+            if isinstance(t_raw, str):
                 t = t_raw
                 name = None
             else:
