@@ -8,8 +8,6 @@
 #include <qnnpack/log.h>
 #include <qnnpack/operator.h>
 
-// TODO: Might combine the conv and deconv parameters/
-
 namespace qnnpack {
 
 namespace {
