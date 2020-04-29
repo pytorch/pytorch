@@ -22,10 +22,12 @@ namespace rpc {
 
 namespace {
 
-py::object toPyObjInternal(RpcCommandBase& rpc, MessageType messageType) {
-  switch (messageType) {
+py::object toPyObj(const Message& message) {
+  MessageType msgType = message.type();
+  auto response = deserializeResponse(message, msgType);
+  switch (msgType) {
     case MessageType::SCRIPT_RET: {
-      auto& ret = static_cast<ScriptResp&>(rpc);
+      auto& ret = static_cast<ScriptResp&>(*response);
       Stack stack;
       stack.push_back(ret.value());
       {
@@ -37,21 +39,15 @@ py::object toPyObjInternal(RpcCommandBase& rpc, MessageType messageType) {
     }
     case MessageType::PYTHON_RET: {
       // TODO: Try to avoid a copy here.
-      auto& resp = static_cast<PythonResp&>(rpc);
+      auto& resp = static_cast<PythonResp&>(*response);
       auto& pythonRpcHandler = PythonRpcHandler::getInstance();
       py::object ret = pythonRpcHandler.deserialize(resp.serializedPyObj());
       return ret;
     }
     default: {
-      TORCH_CHECK(false, "Unrecognized response message type ", messageType);
+      TORCH_CHECK(false, "Unrecognized response message type ", msgType);
     }
   }
-}
-
-py::object toPyObj(const Message& message) {
-  MessageType msgType = message.type();
-  auto response = deserializeResponse(message, msgType);
-  return toPyObjInternal(*response, msgType);
 }
 
 std::shared_ptr<Operator> matchBuiltinOp(
