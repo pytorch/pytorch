@@ -766,10 +766,8 @@ graph(%input, %weight):
             observer = default_per_channel_weight_observer.with_args(ch_axis=1) \
                 if is_per_channel else default_observer
             qconfig = QConfig(activation=observer, weight=observer)
-            qconfig_dict = {
-                '': script_qconfig(qconfig)
-            }
-            m = wrap_cpp_module(torch._C._jit_pass_insert_observers(m._c, "forward", qconfig_dict, False))
+            qconfig_dict = {'': qconfig}
+            m = prepare_script(m, qconfig_dict)
             # observers for input, output and value between conv1/conv2
             assert len(attrs_with_prefix(m, '_observer_')) == 3, \
                 'Expected to have 3 obervers'
@@ -796,14 +794,6 @@ graph(%input, %weight):
 
             quant_func = "aten::quantize_per_channel" if is_per_channel \
                 else "aten::quantize_per_tensor"
-            # quantize for activations
-            FileCheck().check(quant_func) \
-                       .check("prim::CallMethod[name=\"forward\"]") \
-                       .check(quant_func) \
-                       .check("prim::CallMethod[name=\"forward\"]") \
-                       .check(quant_func) \
-                       .check("return") \
-                       .run(str(get_forward_graph(m._c)))
             for module in ['conv1', 'conv2']:
                 conv = m._c.getattr(module)
                 # quantize weight
