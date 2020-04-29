@@ -340,14 +340,8 @@ static void geometric_kernel(TensorIterator& iter, double p, c10::optional<Gener
 }
 
 static void log_normal_kernel(TensorIterator& iter, double mean, double std, c10::optional<Generator> gen) {
-  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "log_normal_cpu", [&]() {
-    CPUGeneratorImpl* generator = get_generator_or_default<CPUGeneratorImpl>(gen, detail::getDefaultCPUGenerator());
-    std::lock_guard<std::mutex> lock(generator->mutex_);
-    cpu_serial_kernel(iter, [mean, std, generator]() -> scalar_t {
-      at::lognormal_distribution<double> logNormal(mean, std);
-      return (scalar_t)logNormal(generator);
-    });
-  });
+  CPUGeneratorImpl* generator = get_generator_or_default<CPUGeneratorImpl>(gen, detail::getDefaultCPUGenerator());
+  templates::cpu::log_normal_kernel(iter, mean, std, generator);
 }
 
 void uniform_kernel(TensorIterator& iter, double from, double to, c10::optional<Generator> gen) {
