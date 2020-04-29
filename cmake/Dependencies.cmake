@@ -1216,7 +1216,7 @@ if(USE_GLOO)
   endif()
 endif()
 
-if(USE_TENSORPIPE)
+if(USE_DISTRIBUTED AND USE_TENSORPIPE)
   if(MSVC)
     message(WARNING "Tensorpipe cannot be used on Windows.")
   else()
