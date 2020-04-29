@@ -371,7 +371,7 @@ class TORCH_API OwnerRRef final : public RRef {
  private:
   friend class RRefContext;
 
-  // TODO: consolidate value_ into future_
+  // See #32608 for dicussion on whether value_ should be merged into future_
   c10::optional<IValue> value_;
   c10::optional<std::string> error_;
   mutable std::mutex mutex_;
