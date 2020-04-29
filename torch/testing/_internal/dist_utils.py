@@ -28,7 +28,7 @@ INIT_METHOD_TEMPLATE = "file://{file_name}"
 
 
 def dist_init(old_test_method=None, setup_rpc=True, clean_shutdown=True,
-              faulty_messages=None):
+              faulty_messages=None, messages_to_delay=None):
     """
     We use this decorator for setting up and tearing down state since
     MultiProcessTestCase runs each `test*` method in a separate process and
@@ -54,6 +54,7 @@ def dist_init(old_test_method=None, setup_rpc=True, clean_shutdown=True,
             setup_rpc=setup_rpc,
             clean_shutdown=clean_shutdown,
             faulty_messages=faulty_messages,
+            messages_to_delay=messages_to_delay,
         )
 
     @wraps(old_test_method)
@@ -70,7 +71,7 @@ def dist_init(old_test_method=None, setup_rpc=True, clean_shutdown=True,
             and self.rpc_backend
             == rpc.backend_registry.BackendType.FAULTY_PROCESS_GROUP
         ):
-            _build_faulty_backend_options(self, faulty_messages)
+            _build_faulty_backend_options(self, faulty_messages, messages_to_delay)
 
         if setup_rpc:
             rpc.init_rpc(
@@ -100,7 +101,7 @@ TEST_CONFIG.build_rpc_backend_options = lambda test_object: rpc.backend_registry
     num_send_recv_threads=8,
 )
 
-def _build_faulty_backend_options(faulty_agent_fixture, faulty_messages):
+def _build_faulty_backend_options(faulty_agent_fixture, faulty_messages, messages_to_delay):
     '''
     Constructs the backend options object for the faulty process group agent
     based on the faulty_messages input to dist_init.
@@ -114,6 +115,9 @@ def _build_faulty_backend_options(faulty_agent_fixture, faulty_messages):
         messages_to_fail=faulty_messages
         if faulty_messages is not None
         else default_retryable_msg_types,
+        messages_to_delay=messages_to_delay
+        if messages_to_delay is not None
+        else faulty_agent_fixture.default_messages_to_delay,
     )
 
 
@@ -171,7 +175,7 @@ def get_timeout_error_regex(rpc_backend_name):
     should receive when an RPC has timed out. Useful for use with
     assertRaisesRegex() to ensure we have the right errors during timeout.
     """
-    if rpc_backend_name == "PROCESS_GROUP":
+    if rpc_backend_name in ["PROCESS_GROUP", "FAULTY_PROCESS_GROUP"]:
         return "RPC ran for more than"
     else:
         return "(Timed out)|(Task expired)"

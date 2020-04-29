@@ -14,6 +14,7 @@ FaultyProcessGroupAgent::FaultyProcessGroupAgent(
     int numSendRecvThreads,
     std::chrono::milliseconds rpcTimeout,
     const std::vector<std::string>& messagesToFail,
+    std::unordered_map<std::string, float> messagesToDelay,
     int failNumSends)
     : ProcessGroupAgent(
           std::move(workerName),
@@ -21,7 +22,8 @@ FaultyProcessGroupAgent::FaultyProcessGroupAgent(
           numSendRecvThreads,
           rpcTimeout),
       failNumSends_(failNumSends),
-      messageTypesToFail_(parseMessagesToFailInput(messagesToFail)) {}
+      messageTypesToFail_(parseMessagesToFailInput(messagesToFail)),
+      messagesToDelay_(parseMessagesToDelay(messagesToDelay)) {}
 
 std::vector<MessageType> FaultyProcessGroupAgent::parseMessagesToFailInput(
     const std::vector<std::string>& messagesToFail) const {
@@ -31,18 +33,21 @@ std::vector<MessageType> FaultyProcessGroupAgent::parseMessagesToFailInput(
   // determine whether we should fail or not.
   std::vector<MessageType> messageTypesToFail;
   for (const auto& msgString : messagesToFail) {
-    if (msgString == "RREF_FORK_REQUEST") {
-      messageTypesToFail.emplace_back(MessageType::RREF_FORK_REQUEST);
-    } else if (msgString == "RREF_CHILD_ACCEPT") {
-      messageTypesToFail.emplace_back(MessageType::RREF_CHILD_ACCEPT);
-    } else if (msgString == "RREF_USER_DELETE") {
-      messageTypesToFail.emplace_back(MessageType::RREF_USER_DELETE);
-    } else if (msgString == "CLEANUP_AUTOGRAD_CONTEXT_REQ") {
-      messageTypesToFail.emplace_back(
-          MessageType::CLEANUP_AUTOGRAD_CONTEXT_REQ);
-    }
+    messageTypesToFail.emplace_back(
+        messageStringToType().find(msgString)->second);
   }
   return messageTypesToFail;
+}
+
+std::unordered_map<MessageType, float> FaultyProcessGroupAgent::
+    parseMessagesToDelay(
+        const std::unordered_map<std::string, float>& messagesToDelay) const {
+  std::unordered_map<MessageType, float> delayMessages;
+  for (const auto& messagePair : messagesToDelay) {
+    delayMessages.insert({messageStringToType().find(messagePair.first)->second,
+                          messagePair.second});
+  }
+  return delayMessages;
 }
 
 std::shared_ptr<FutureMessage> FaultyProcessGroupAgent::send(
@@ -76,11 +81,43 @@ std::shared_ptr<FutureMessage> FaultyProcessGroupAgent::send(
   }
 }
 
+void FaultyProcessGroupAgent::enqueueSend(SendWork work) {
+  float msgDelay = getDelayForMessage(work.message_.type());
+  if (msgDelay != 0) {
+    // Sleep for the specified delay for the message.
+    std::this_thread::sleep_for(
+        std::chrono::milliseconds(static_cast<int>(msgDelay * 1000)));
+  }
+  ProcessGroupAgent::enqueueSend(std::move(work));
+}
+
 bool FaultyProcessGroupAgent::shouldFailMessage(MessageType type) const {
   // Return true if the input message type is in the messageTypesToFail_ list
   return (
       std::find(messageTypesToFail_.begin(), messageTypesToFail_.end(), type) !=
       messageTypesToFail_.end());
+}
+
+float FaultyProcessGroupAgent::getDelayForMessage(MessageType type) const {
+  return messagesToDelay_.find(type) == messagesToDelay_.end()
+      ? 0
+      : messagesToDelay_.find(type)->second;
+}
+
+// Lazily constructed map that returns string to message type mapping
+const std::unordered_map<std::string, MessageType> FaultyProcessGroupAgent::
+    messageStringToType() const {
+  static std::unordered_map<std::string, MessageType> msgMap = {
+      {"RREF_FORK_REQUEST", MessageType::RREF_FORK_REQUEST},
+      {"RREF_CHILD_ACCEPT", MessageType::RREF_CHILD_ACCEPT},
+      {"RREF_USER_DELETE", MessageType::RREF_USER_DELETE},
+      {"CLEANUP_AUTOGRAD_CONTEXT_REQ",
+       MessageType::CLEANUP_AUTOGRAD_CONTEXT_REQ},
+      {"PYTHON_REMOTE_CALL", MessageType::PYTHON_REMOTE_CALL},
+      {"PYTHON_CALL", MessageType::PYTHON_CALL},
+      {"SCRIPT_CALL", MessageType::SCRIPT_CALL},
+  };
+  return msgMap;
 }
 
 } // namespace rpc
