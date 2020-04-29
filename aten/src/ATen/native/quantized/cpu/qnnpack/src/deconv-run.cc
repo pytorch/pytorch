@@ -71,7 +71,7 @@ struct QnnpackDeleter {
 };
 
 enum pytorch_qnnp_status qnnpackDeConv(
-    const deconv_param_t& deconv_p,
+    const conv_param_t& deconv_p,
     void* packed_weights,
     const size_t batch_size,
     const size_t input_height,
@@ -97,8 +97,8 @@ enum pytorch_qnnp_status qnnpackDeConv(
   const size_t stride_width = deconv_p.stride_dims[0];
   const size_t stride_height = deconv_p.stride_dims[1];
 
-  const size_t dilation_width = deconv_p.dilation_dims[0];
-  const size_t dilation_height = deconv_p.dilation_dims[1];
+  const size_t dilation_width = deconv_p.dilation[0];
+  const size_t dilation_height = deconv_p.dilation[1];
 
   if (input_scale <= 0.0f || !std::isnormal(input_scale)) {
     pytorch_qnnp_log_error(
@@ -177,10 +177,10 @@ enum pytorch_qnnp_status qnnpackDeConv(
 
   deconvolution->packed_weights = packed_weights;
 
-  deconvolution->input_padding_top = deconv_p.padding_dims[0];
-  deconvolution->input_padding_left = deconv_p.padding_dims[1];
-  deconvolution->input_padding_bottom = deconv_p.padding_dims[2];
-  deconvolution->input_padding_right = deconv_p.padding_dims[3];
+  deconvolution->input_padding_top = deconv_p.padding[0];
+  deconvolution->input_padding_left = deconv_p.padding[1];
+  deconvolution->input_padding_bottom = deconv_p.padding[2];
+  deconvolution->input_padding_right = deconv_p.padding[3];
   deconvolution->adjustment_width = deconv_p.adjustment_dims[0];
   deconvolution->adjustment_height = deconv_p.adjustment_dims[1];
 
@@ -244,49 +244,36 @@ enum pytorch_qnnp_status qnnpackDeConv(
       deconvolution, output_tile_size, tiled_output_size);
 
   // Run the kernel
-  switch (deconvolution->ukernel_type) {
-    case pytorch_qnnp_ukernel_type_conv: {
-      const size_t batch_size = deconvolution->batch_size;
-      const size_t groups = deconvolution->groups;
+  const size_t m_stride = round_up(output_size, mr);
+  struct q8conv_context q8conv_context = {
+      .bs = deconvolution->batch_size,
+      .ks = kernel_size,
+      .kc = group_input_channels,
+      .kc_stride = k_stride * kernel_size,
+      .m = output_size,
+      .m_stride = m_stride,
+      .n = group_output_channels,
+      .n_stride = n_stride,
+      .indirect_a = (const uint8_t**)deconvolution->indirection_buffer,
+      .packed_w = packed_weights,
+      .c = output,
+      .c_stride = deconvolution->output_pixel_stride,
+      .quantization_params = deconvolution->conv_quantization_params,
+      .ukernel = pytorch_qnnp_params.q8conv.conv,
+  };
 
-      const size_t kernel_size = deconvolution->kernel_height * deconvolution->kernel_width;
-      const size_t m_stride = round_up(output_size, mr);
-      struct q8conv_context q8conv_context = {
-          .bs = batch_size,
-          .ks = kernel_size,
-          .kc = group_input_channels,
-          .kc_stride = k_stride * kernel_size,
-          .m = output_size,
-          .m_stride = m_stride,
-          .n = group_output_channels,
-          .n_stride = n_stride,
-          .indirect_a = (const uint8_t**)deconvolution->indirection_buffer,
-          .packed_w = packed_weights,
-          .c = output,
-          .c_stride = deconvolution->output_pixel_stride,
-          .quantization_params = deconvolution->conv_quantization_params,
-          .ukernel = pytorch_qnnp_params.q8conv.conv,
-      };
-
-      pthreadpool_compute_4d_tiled(
-          threadpool,
-          (pthreadpool_function_4d_tiled_t)compute_q8conv,
-          &q8conv_context,
-          groups,
-          batch_size,
-          output_size,
-          group_output_channels,
-          1,
-          1,
-          mr,
-          nr);
-      break;
-    }
-    default:
-      pytorch_qnnp_log_error(
-          "Invalid kernel type. QNNPACK deconvolution run failed.");
-      PYTORCH_QNNP_UNREACHABLE;
-  }
+  pthreadpool_compute_4d_tiled(
+      threadpool,
+      (pthreadpool_function_4d_tiled_t)compute_q8conv,
+      &q8conv_context,
+      deconvolution->groups,
+      batch_size,
+      output_size,
+      group_output_channels,
+      1,
+      1,
+      mr,
+      nr);
   return pytorch_qnnp_status_success;
 }
 }  // namespace qnnpack
