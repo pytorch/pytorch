@@ -66,6 +66,7 @@ argument, except for `torch.tensor`. This covers the following ops:
   * :func:`torch.randperm`
   * :func:`torch.tril_indices`
   * :func:`torch.triu_indices`
+  * :func:`torch.vander`
   * :func:`torch.zeros`
   * :func:`torch.zeros_like`
 

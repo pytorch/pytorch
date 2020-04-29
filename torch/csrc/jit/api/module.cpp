@@ -232,7 +232,7 @@ Module Module::clone_impl(
 }
 
 Module Module::clone_instance() const {
-  return Module(_ivalue());
+  return Module(_ivalue()->copy());
 }
 
 void Module::train(bool on) {
