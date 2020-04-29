@@ -1158,6 +1158,39 @@ graph(%input, %weight):
                    .check("CallMethod") \
                    .run(model.graph)
 
+    def test_module_list(self):
+        class SimpleLinearLayer(torch.nn.Module):
+            def __init__(self):
+                super(SimpleLinearLayer, self).__init__()
+                self.fc = torch.nn.Linear(5, 5).float()
+
+            def forward(self, x):
+                return self.fc(x)
+
+        class ComplexModel(torch.nn.Module):
+            def __init__(self):
+                super(ComplexModel, self).__init__()
+                self.layers = torch.nn.ModuleList([SimpleLinearLayer() for i in range(2)])
+
+            def forward(self, x):
+                # type: (torch.Tensor) -> List[torch.Tensor]
+                states = []
+                for layer in self.layers:
+                    val = layer(x)
+                    states.append(val)
+                return states
+
+        data = torch.rand((1, 5), dtype=torch.float)
+        qconfig_dict = {'': default_qconfig}
+        model = torch.jit.script(ComplexModel()).eval()
+        model = prepare_script(model, qconfig_dict)
+        assert len(attrs_with_prefix(model, '_observer')) == 3
+        model(data)
+        model = convert_script(model, debug=False)
+        FileCheck().check("quantized::linear") \
+                   .check("quantized::linear") \
+                   .run(model.graph)
+
 class TestQuantizeScriptPTSQOps(JitTestCase):
     """ Test graph mode post training static quantization works
     for individual ops end to end.
