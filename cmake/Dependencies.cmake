@@ -1220,33 +1220,19 @@ if(USE_DISTRIBUTED AND USE_TENSORPIPE)
   if(MSVC)
     message(WARNING "Tensorpipe cannot be used on Windows.")
   else()
-    if(CAFFE2_LINK_LOCAL_PROTOBUF)
-      set(TP_EXTRA_CMAKE_ARGS -DProtobuf_DIR=${PROJECT_BINARY_DIR}/third_party/protobuf/cmake/${CMAKE_INSTALL_LIBDIR}/cmake/protobuf)
-    endif()
+    set(__PYTORCH_BUILD ${PYTORCH_BUILD})
+    set(PYTORCH_BUILD ON)
+    set(__BUILD_TESTING ${BUILD_TESTING})
+    set(BUILD_TESTING OFF)
+    set(TP_BUILD_PYTHON OFF)
+    set(TP_BUILD_LIBUV ON)
 
-    include(ExternalProject)
+    add_subdirectory(${PROJECT_SOURCE_DIR}/third_party/tensorpipe)
 
-    ExternalProject_Add(tensorpipe-build
-      PREFIX tensorpipe
-      SOURCE_DIR ${PROJECT_SOURCE_DIR}/third_party/tensorpipe
-      BUILD_BYPRODUCTS tensorpipe/${CMAKE_INSTALL_LIBDIR}/libuv_a.a tensorpipe/${CMAKE_INSTALL_LIBDIR}/libtensorpipe.a
-      DEPENDS protobuf::libprotobuf protobuf::protoc
-      CMAKE_ARGS -DPYTORCH_BUILD=ON -DCMAKE_INSTALL_PREFIX=<INSTALL_DIR> -DBUILD_TESTING=OFF -DTP_BUILD_PYTHON=OFF -DTP_BUILD_LIBUV=ON -DCMAKE_CXX_FLAGS=${CMAKE_CXX_FLAGS} ${TP_EXTRA_CMAKE_ARGS}
-      EXCLUDE_FROM_ALL 1)
+    set(PYTORCH_BUILD ${__PYTORCH_BUILD})
+    set(BUILD_TESING ${__BUILD_TESTING})
 
-    include_directories(${PROJECT_BINARY_DIR}/tensorpipe/include)
-
-    add_library(tensorpipe STATIC IMPORTED)
-    add_dependencies(tensorpipe tensorpipe-build)
-    set_property(TARGET tensorpipe
-      PROPERTY IMPORTED_LOCATION ${PROJECT_BINARY_DIR}/tensorpipe/${CMAKE_INSTALL_LIBDIR}/libtensorpipe.a)
-
-    add_library(libuv STATIC IMPORTED)
-    set_property(TARGET libuv
-      PROPERTY IMPORTED_LOCATION ${PROJECT_BINARY_DIR}/tensorpipe/${CMAKE_INSTALL_LIBDIR}/libuv_a.a)
-    file(MAKE_DIRECTORY tensorpipe/include)
-
-    list(APPEND Caffe2_DEPENDENCY_LIBS protobuf::libprotobuf libuv tensorpipe)
+    list(APPEND Caffe2_DEPENDENCY_LIBS tensorpipe)
   endif()
 endif()
 
