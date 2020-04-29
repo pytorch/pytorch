@@ -163,6 +163,10 @@ void Module::clone_method(const Module& orig, const std::string& name) {
   return clone_method(orig, orig.get_method(name).function(), type_remap);
 }
 
+Module Module::deepcopy() const {
+  return Module(_ivalue()->deepcopy());
+}
+
 Module Module::clone() const {
   std::unordered_map<TypePtr, TypePtr> type_remap;
   return clone_impl(type_remap);

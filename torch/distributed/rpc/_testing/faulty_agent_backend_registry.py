@@ -5,6 +5,8 @@ import torch.distributed.rpc as rpc
 import torch.distributed.distributed_c10d as dc10d
 from torch.distributed.rpc import constants as rpc_constants
 
+from datetime import timedelta
+
 def _faulty_process_group_construct_rpc_backend_options_handler(
     rpc_timeout,
     init_method,
@@ -62,7 +64,7 @@ def _faulty_process_group_init_backend_handler(
             name,
             group,
             rpc_backend_options.num_send_recv_threads,
-            rpc_backend_options.rpc_timeout,
+            timedelta(seconds=rpc_backend_options.rpc_timeout),
             rpc_backend_options.messages_to_fail,
             rpc_backend_options.num_fail_sends,
         )
