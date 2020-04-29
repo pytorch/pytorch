@@ -123,17 +123,10 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_batch_norm_backward(const Tensor& grad
   ideep::batch_normalization_backward::compute(
       x, m, v, grady, w, gradx, gradw, gradb, eps);
 
-  if (weight.is_mkldnn()) {
-    return std::make_tuple(
-        new_with_itensor_mkldnn(std::move(gradx), input.options()),
-        new_with_itensor_mkldnn(std::move(gradw), weight.options()),
-        new_with_itensor_mkldnn(std::move(gradb), weight.options()));
-  } else {
-    return std::make_tuple(
-        new_with_itensor_mkldnn(std::move(gradx), input.options()),
-        mkldnn_to_dense(new_with_itensor_mkldnn(std::move(gradw), weight.options())),
-        mkldnn_to_dense(new_with_itensor_mkldnn(std::move(gradb), weight.options())));
-  }
+  return std::make_tuple(
+      new_with_itensor_mkldnn(std::move(gradx), input.options()),
+      mkldnn_to_dense(new_with_itensor_mkldnn(std::move(gradw), weight.options())),
+      mkldnn_to_dense(new_with_itensor_mkldnn(std::move(gradb), weight.options())));
 }
 
 } // namespace native
