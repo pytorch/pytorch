@@ -58,9 +58,10 @@ scalar_t *THTensor_(data)(const THTensor *self) {
 THTensor *THTensor_(new)(void)
 {
   return c10::make_intrusive<at::TensorImpl, at::UndefinedTensorImpl>(
-    c10::intrusive_ptr<at::StorageImpl>::reclaim(THStorage_(new)()),
-    at::DispatchKey::CPU
-  ).release();
+             c10::intrusive_ptr<at::StorageImpl>::reclaim(THStorage_(new)()),
+             at::DispatchKey::CPU,
+             caffe2::TypeMeta::Make<scalar_t>())
+      .release();
 }
 
 /* Pointer-copy init */
@@ -73,10 +74,11 @@ THTensor *THTensor_(newWithStorage1d)(THStorage *storage, ptrdiff_t storageOffse
                                int64_t size0, int64_t stride0)
 {
   c10::raw::intrusive_ptr::incref(storage);
-  THTensor *self = c10::make_intrusive<at::TensorImpl, at::UndefinedTensorImpl>(
-    c10::intrusive_ptr<at::StorageImpl>::reclaim(storage),
-    at::DispatchKey::CPU
-  ).release();
+  THTensor* self = c10::make_intrusive<at::TensorImpl, at::UndefinedTensorImpl>(
+                       c10::intrusive_ptr<at::StorageImpl>::reclaim(storage),
+                       at::DispatchKey::CPU,
+                       caffe2::TypeMeta::Make<scalar_t>())
+                       .release();
   THTensor_(setStorage)(self, storage, storageOffset,  {size0}, {stride0});
 
   return self;
@@ -85,10 +87,12 @@ THTensor *THTensor_(newWithStorage1d)(THStorage *storage, ptrdiff_t storageOffse
 THTensor *THTensor_(newWithSize1d)(int64_t size0)
 {
   THStorage *new_storage = THStorage_(new)();
-  THTensor *self = c10::make_intrusive<at::TensorImpl, at::UndefinedTensorImpl>(
-    c10::intrusive_ptr<at::StorageImpl>::reclaim(new_storage),
-    at::DispatchKey::CPU
-  ).release();
+  THTensor* self =
+      c10::make_intrusive<at::TensorImpl, at::UndefinedTensorImpl>(
+          c10::intrusive_ptr<at::StorageImpl>::reclaim(new_storage),
+          at::DispatchKey::CPU,
+          caffe2::TypeMeta::Make<scalar_t>())
+          .release();
   THTensor_(setStorage)(self, new_storage, 0, {size0}, {});
 
   return self;

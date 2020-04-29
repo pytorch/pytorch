@@ -13,7 +13,6 @@ namespace native {
 Tensor& set_cuda_(Tensor& result) {
   Storage storage(
       Storage::use_byte_size_t(),
-      result.dtype(),
       0,
       at::cuda::getCUDADeviceAllocator(),
       true);

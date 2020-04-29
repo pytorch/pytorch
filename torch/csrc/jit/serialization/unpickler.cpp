@@ -413,7 +413,6 @@ PickleOpCode Unpickler::readInstruction() {
       caffe2::TypeMeta dtype = at::CPU(type).typeMeta();
       at::Storage storage(
           c10::Storage::use_byte_size_t(),
-          dtype,
           numel * dtype.itemsize(),
           std::move(storage_ptr),
           /*allocator=*/nullptr,
@@ -648,7 +647,7 @@ void Unpickler::rebuildTensor(bool quantized) {
     bool requires_grad = elements.at(idx++).toBool();
     // elements[idx++] is empty backwards hooks
     at::TensorImpl* impl = result.unsafeGetTensorImpl();
-    impl->set_storage(storage_tensor.storage());
+    impl->set_storage_keep_dtype(storage_tensor.storage());
     impl->set_storage_offset(storage_offset);
     impl->set_sizes_and_strides(size, stride);
     result = autograd::make_variable(result, requires_grad);

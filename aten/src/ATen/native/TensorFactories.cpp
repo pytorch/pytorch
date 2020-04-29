@@ -122,13 +122,13 @@ Tensor empty_cpu(IntArrayRef size, const TensorOptions& options_, c10::optional<
   int64_t size_bytes = nelements * dtype.itemsize();
   auto storage_impl = c10::make_intrusive<StorageImpl>(
       c10::StorageImpl::use_byte_size_t(),
-      dtype,
       size_bytes,
       allocator->allocate(size_bytes),
       allocator,
       /*resizeable=*/true);
 
-  auto tensor = detail::make_tensor<TensorImpl>(std::move(storage_impl), at::DispatchKey::CPU);
+  auto tensor = detail::make_tensor<TensorImpl>(
+      std::move(storage_impl), at::DispatchKey::CPU, dtype);
   // Default TensorImpl has size [0]
   if (size.size() != 1 || size[0] != 0) {
     tensor.unsafeGetTensorImpl()->set_sizes_contiguous(size);
@@ -984,13 +984,13 @@ Tensor from_file(std::string filename, c10::optional<bool> shared, c10::optional
     size_t size_bytes = my_size * dtype.itemsize();
     auto storage_impl = c10::make_intrusive<at::StorageImpl>(
         c10::StorageImpl::use_byte_size_t(),
-        dtype,
         size_bytes,
         THMapAllocator::makeDataPtr(
             filename.c_str(), flags, size_bytes, nullptr),
         /*allocator=*/nullptr,
         /*resizable=*/false);
-    auto tensor = detail::make_tensor<at::TensorImpl>(storage_impl, at::DispatchKey::CPU);
+    auto tensor = detail::make_tensor<at::TensorImpl>(
+        storage_impl, at::DispatchKey::CPU, dtype);
     tensor.unsafeGetTensorImpl()->set_sizes_contiguous({my_size});
     return tensor;
 }

@@ -18,6 +18,7 @@ struct CAFFE2_API QTensorImpl : public c10::TensorImpl {
   QTensorImpl(
       Storage&& storage,
       DispatchKeySet key_set,
+      const caffe2::TypeMeta& data_type,
       QuantizerPtr quantizer);
 
   // TODO: Expose in PyTorch Frontend
@@ -39,7 +40,7 @@ struct CAFFE2_API QTensorImpl : public c10::TensorImpl {
       const c10::VariableVersion& version_counter,
       bool allow_tensor_metadata_change) const override {
     auto impl = c10::make_intrusive<QTensorImpl>(
-        Storage(storage()), key_set(), quantizer_);
+        Storage(storage()), key_set(), data_type_, quantizer_);
     copy_tensor_metadata(
       /*src_impl=*/this,
       /*dest_impl=*/impl.get(),

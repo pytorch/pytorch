@@ -246,8 +246,8 @@ void Tensor::CopyFrom(const Tensor& src, bool async) {
   if (impl_->dtype() != src.impl_->dtype()) {
     // NB: copy preserves device_type
     // This storage will get initialized by the mutable_data call below.
-    impl_->set_storage(
-        at::Storage::create_legacy(impl_->device_type(), src.impl_->dtype()));
+    impl_->set_storage_and_dtype(
+        at::Storage::create_legacy(impl_->device_type()), src.impl_->dtype());
   }
   impl_->Resize(src.impl_->sizes());
 
