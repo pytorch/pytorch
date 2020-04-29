@@ -8700,6 +8700,24 @@ class TestTorchDeviceType(TestCase):
         run_test((4, 4), (2, 1, 3, 4, 2))  # broadcasting A
         run_test((1, 3, 1, 4, 4), (2, 1, 3, 4, 5))  # broadcasting A & b
 
+    @dtypes(torch.float, torch.double, torch.int64, torch.int32, torch.int16)
+    @dtypesIfCUDA(torch.float, torch.double, torch.int64, torch.int32, torch.int16, torch.half)
+    def test_dim_arg_reduction_scalar(self, device, dtype):
+        example = 4.0
+
+        x = torch.tensor(example, device=device, dtype=dtype)
+        self.assertEqual(x.argmax().item(), 0)
+        self.assertEqual(x.argmax(dim=None).item(), 0)
+        self.assertEqual(x.argmax(dim=0).item(), 0)
+        self.assertEqual(x.argmax(dim=0, keepdim=True), torch.tensor(0, dtype=torch.int64))
+
+        x = torch.tensor(example, device=device, dtype=dtype)
+        self.assertEqual(x.argmin().item(), 0)
+        self.assertEqual(x.argmin(dim=None).item(), 0)
+        self.assertEqual(x.argmin(dim=0).item(), 0)
+        self.assertEqual(x.argmin(dim=0, keepdim=True), torch.tensor(0, dtype=torch.int64))
+
+
     def test_dim_reduction(self, device):
         example = [[-1, 2, 1], [5, 3, 6]]
 
