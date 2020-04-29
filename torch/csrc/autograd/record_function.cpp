@@ -51,6 +51,7 @@ class CallbackManager {
       if (it != cbs.end()) {
         // keeps it sorted
         cbs.erase(it);
+        found = true;
       }
     };
     find_and_remove(sorted_tls_callbacks_);

@@ -894,7 +894,7 @@ void testRecordFunction() {
   };
 
   int non_sampled_cb_ctr = 0;
-  auto h = addGlobalCallback(
+  addGlobalCallback(
     RecordFunctionCallback(
       [&non_sampled_cb_ctr](const RecordFunction& fn) {
         if (std::string(fn.name().str()) == "test") {
@@ -904,7 +904,7 @@ void testRecordFunction() {
       },
       [](const RecordFunction&) {}));
 
-  int handle = setup_sampled_callback(0.5);
+  auto handle = setup_sampled_callback(0.5);
 
   auto run_test_function = []() {
     auto t = torch::randn({1, 2, 3}, at::kCPU);
