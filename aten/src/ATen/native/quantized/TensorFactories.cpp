@@ -53,10 +53,7 @@ Tensor empty_per_channel_affine_quantized_cpu(
       size,
       options,
       make_per_channel_affine_quantizer(
-          scales,
-          zero_points,
-          axis,
-          typeMetaToScalarType(options.dtype())));
+          scales, zero_points, axis, typeMetaToScalarType(options.dtype())));
 }
 
 // Provide better error message if dtype is wrong

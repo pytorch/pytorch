@@ -220,25 +220,6 @@ struct TORCH_API RecordFunction {
   uint64_t callbacks_version_ = 0;
 };
 
-class TORCH_API RecordFunctionGuard {
- public:
-  explicit RecordFunctionGuard(bool is_enabled)
-      : prev_value_(at::_tls_is_record_function_enabled()) {
-    at::_tls_set_record_function_enabled(is_enabled);
-  }
-  virtual ~RecordFunctionGuard() {
-    at::_tls_set_record_function_enabled(prev_value_);
-  }
- private:
-  bool prev_value_ = false;
-};
-
-class TORCH_API DisableRecordFunctionGuard : public RecordFunctionGuard {
- public:
-  DisableRecordFunctionGuard() : RecordFunctionGuard(false) {}
-  virtual ~DisableRecordFunctionGuard() {}
-};
-
 // Returns whether there're callbacks registered with pushCallback
 TORCH_API bool hasCallbacks();
 
@@ -311,6 +292,33 @@ TORCH_API void pushCallback(
  * WARNING: not thread safe, must not overlap with other PyTorch code execution
  */
 TORCH_API void popCallback();
+
+// Enable observers thread locally
+TORCH_API void enableObservers(bool enable = true);
+
+// Returns whether observers are enabled (thread locally)
+TORCH_API bool observersEnabled();
+
+class TORCH_API RecordFunctionGuard {
+ public:
+  explicit RecordFunctionGuard(bool is_enabled = true)
+      : prev_value_(observersEnabled()) {
+    enableObservers(is_enabled);
+  }
+
+  virtual ~RecordFunctionGuard() {
+    enableObservers(prev_value_);
+  }
+
+ private:
+  bool prev_value_ = false;
+};
+
+class TORCH_API DisableRecordFunctionGuard : public RecordFunctionGuard {
+ public:
+  DisableRecordFunctionGuard() : RecordFunctionGuard(false) {}
+  virtual ~DisableRecordFunctionGuard() {}
+};
 
 } // namespace profiler
 }} // namespace torch::autograd

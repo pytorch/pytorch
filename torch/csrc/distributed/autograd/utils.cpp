@@ -115,14 +115,15 @@ std::shared_ptr<FutureMessage> sendMessageWithAutograd(
     RpcAgent& agent,
     const WorkerInfo& dst,
     torch::distributed::rpc::Message&& wrappedRpcMsg,
-    bool forceGradRecording) {
+    bool forceGradRecording,
+    const float rpcTimeoutSeconds) {
   auto msg = getMessageWithAutograd(
       dst.id_,
       std::move(wrappedRpcMsg),
       MessageType::FORWARD_AUTOGRAD_REQ,
       forceGradRecording);
 
-  return agent.send(dst, std::move(msg));
+  return agent.send(dst, std::move(msg), rpcTimeoutSeconds);
 }
 
 } // namespace autograd

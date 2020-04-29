@@ -1,5 +1,4 @@
 import unittest
-import math
 import torch
 import torch.nn as nn
 import torch.nn.quantized as nnq
@@ -7,39 +6,81 @@ import torch.nn.intrinsic as nni
 import torch.nn.intrinsic.quantized as nniq
 import torch.nn.intrinsic.qat as nniqat
 from torch.nn.utils.rnn import PackedSequence
-from torch.quantization import \
-    get_observer_dict, default_weight_observer, \
-    quantize, prepare, convert, prepare_qat, quantize_qat, fuse_modules, \
-    quantize_dynamic, default_qconfig, default_debug_qconfig, default_qat_qconfig, \
-    default_dynamic_qconfig, per_channel_dynamic_qconfig, HistogramObserver, MinMaxObserver, \
-    PerChannelMinMaxObserver, RecordingObserver, MovingAverageMinMaxObserver, \
-    MovingAveragePerChannelMinMaxObserver, QuantWrapper, default_eval_fn, \
-    float16_dynamic_qconfig, MinMaxDynamicQuantObserver
+from torch.quantization import (
+    quantize,
+    prepare,
+    convert,
+    prepare_qat,
+    quantize_qat,
+    fuse_modules,
+    quantize_dynamic,
+    QuantWrapper,
+    QConfig,
+    default_qconfig,
+    default_per_channel_qconfig,
+    default_qat_qconfig,
+    default_dynamic_qconfig,
+    per_channel_dynamic_qconfig,
+    default_eval_fn,
+    float16_dynamic_qconfig,
+    default_observer,
+    default_weight_observer,
+    default_per_channel_weight_observer,
+    default_histogram_observer,
+)
 
-from torch.quantization import QConfig
-from torch.quantization import default_histogram_observer
-from torch.quantization import default_observer
-from torch.quantization import default_per_channel_weight_observer
-from torch.quantization import default_per_channel_qconfig
-from torch.quantization._quantize_script import quantize_script, quantize_dynamic_script
+from torch.quantization._quantize_script import (
+    quantize_script,
+    quantize_dynamic_script
+)
 
-from torch.testing._internal.common_utils import run_tests, TEST_WITH_UBSAN, IS_WINDOWS
-from torch.testing._internal.common_quantization import QuantizationTestCase, \
-    AnnotatedSingleLayerLinearModel, SingleLayerLinearModel, \
-    AnnotatedConvModel, ConvModel, \
-    AnnotatedConvBnModel, ConvBnModel, \
-    SkipQuantModel, QuantStubModel, \
-    ModelForFusion, ModelWithSequentialFusion, ManualLinearQATModel, ManualConvLinearQATModel, \
-    ModelWithFunctionals, \
-    test_only_eval_fn, test_only_train_fn, \
-    prepare_dynamic, convert_dynamic, SingleLayerLinearDynamicModel, \
-    TwoLayerLinearModel, NestedModel, ResNetBase, LSTMDynamicModel, \
-    ModelWithNoQconfigPropagation, ModelForFusionWithBias, \
-    ActivationsTestModel, ActivationsQATTestModel, NormalizationTestModel
+from torch.testing._internal.common_utils import (
+    TEST_WITH_UBSAN,
+    IS_WINDOWS,
+    IS_PPC,
+    IS_MACOS,
+)
 
-from torch.testing._internal.common_quantization import AnnotatedTwoLayerLinearModel, AnnotatedNestedModel, \
-    AnnotatedSubNestedModel, AnnotatedCustomConfigNestedModel
-from torch.testing._internal.common_quantization import AnnotatedSkipQuantModel
+from torch.testing._internal.common_quantization import (
+    QuantizationTestCase,
+    AnnotatedSingleLayerLinearModel,
+    SingleLayerLinearModel,
+    AnnotatedConvModel,
+    ConvModel,
+    AnnotatedConvBnModel,
+    ConvBnModel,
+    SkipQuantModel,
+    QuantStubModel,
+    ModelForFusion,
+    ModelWithSequentialFusion,
+    ManualLinearQATModel,
+    ManualConvLinearQATModel,
+    ModelWithFunctionals,
+    ModelMultipleOps,
+    ModelMultipleOpsNoAvgPool,
+    SingleLayerLinearDynamicModel,
+    TwoLayerLinearModel,
+    NestedModel,
+    ResNetBase,
+    LSTMDynamicModel,
+    ModelForFusionWithBias,
+    ActivationsTestModel,
+    ActivationsQATTestModel,
+    NormalizationTestModel,
+    test_only_eval_fn,
+    test_only_train_fn,
+    prepare_dynamic,
+    convert_dynamic,
+)
+
+# annotated models
+from torch.testing._internal.common_quantization import (
+    AnnotatedTwoLayerLinearModel,
+    AnnotatedNestedModel,
+    AnnotatedSubNestedModel,
+    AnnotatedCustomConfigNestedModel,
+    AnnotatedSkipQuantModel,
+)
 
 from torch.testing._internal.common_quantized import override_quantized_engine
 from hypothesis import given
@@ -52,7 +93,7 @@ import copy
 @unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
                      " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
                      " with instruction set support avx2 or newer.")
-class EagerModePostTrainingQuantTest(QuantizationTestCase):
+class TestPostTrainingStatic(QuantizationTestCase):
     @given(qconfig=st.sampled_from((torch.quantization.default_qconfig, torch.quantization.default_per_channel_qconfig)))
     def test_single_layer(self, qconfig):
         r"""Quantize SingleLayerLinearModel which has one Linear module, make sure it is swapped
@@ -404,7 +445,7 @@ class EagerModePostTrainingQuantTest(QuantizationTestCase):
 @unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
                      " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
                      " with instruction set support avx2 or newer.")
-class PostTrainingDynamicQuantTest(QuantizationTestCase):
+class TestPostTrainingDynamic(QuantizationTestCase):
     def test_single_layer(self):
         r"""Dynamic Quantize SingleLayerLinearDynamicModel which has one Linear module,
         make sure it is swapped to nnqd.Linear which is the quantized version of
@@ -624,214 +665,207 @@ class PostTrainingDynamicQuantTest(QuantizationTestCase):
         model = quantize_dynamic(NestedModel().eval(), qconfig_dict)
         checkQuantized(model)
 
-    @unittest.skip("temporarily disable the test")
-    @given(qengine=st.sampled_from(("fbgemm",)))
-    def test_quantized_rnn(self, qengine):
+    def test_quantized_rnn(self):
+        r"""Test execution and serialization for dynamic quantized lstm modules on int8 and fp16
+        """
         d_in, d_hid = 2, 2
+        model = LSTMDynamicModel().eval()
+        cell = model.lstm
 
-        # TODO: qlinear_prepack_fp16 currently doesn't support QNNPACK
-        # re-add "qnnpack" to the engine set when this is supported
+        # Replace parameter values s.t. the range of values is exactly
+        # 255, thus we will have 0 quantization error in the quantized
+        # GEMM call. This i s for testing purposes.
+        #
+        # Note that the current implementation does not support
+        # accumulation values outside of the range representable by a
+        # 16 bit integer, instead resulting in a saturated value. We
+        # must take care that in our test we do not end up with a dot
+        # product that overflows the int16 range, e.g.
+        # (255*127+255*127) = 64770. So, we hardcode the test values
+        # here and ensure a mix of signedness.
+        vals = [[100, -155],
+                [100, -155],
+                [-155, 100],
+                [-155, 100],
+                [100, -155],
+                [-155, 100],
+                [-155, 100],
+                [100, -155]]
+        if isinstance(cell, torch.nn.LSTM):
+            num_chunks = 4
+        vals = vals[:d_hid * num_chunks]
+        cell.weight_ih_l0 = torch.nn.Parameter(
+            torch.tensor(vals, dtype=torch.float),
+            requires_grad=False)
+        cell.weight_hh_l0 = torch.nn.Parameter(
+            torch.tensor(vals, dtype=torch.float),
+            requires_grad=False)
 
-        with override_quantized_engine(qengine):
-            model = LSTMDynamicModel().eval()
-            cell = model.lstm
+        ref = copy.deepcopy(cell)
+        niter = 10
+        x = torch.tensor([[100, -155],
+                          [-155, 100],
+                          [100, -155]], dtype=torch.float).unsqueeze(0).repeat(niter, 1, 1)
 
-            # Replace parameter values s.t. the range of values is exactly
-            # 255, thus we will have 0 quantization error in the quantized
-            # GEMM call. This i s for testing purposes.
-            #
-            # Note that the current implementation does not support
-            # accumulation values outside of the range representable by a
-            # 16 bit integer, instead resulting in a saturated value. We
-            # must take care that in our test we do not end up with a dot
-            # product that overflows the int16 range, e.g.
-            # (255*127+255*127) = 64770. So, we hardcode the test values
-            # here and ensure a mix of signedness.
-            vals = [[100, -155],
-                    [100, -155],
-                    [-155, 100],
-                    [-155, 100],
-                    [100, -155],
-                    [-155, 100],
-                    [-155, 100],
-                    [100, -155]]
-            if isinstance(cell, torch.nn.LSTM):
-                num_chunks = 4
-            vals = vals[:d_hid * num_chunks]
-            cell.weight_ih_l0 = torch.nn.Parameter(
-                torch.tensor(vals, dtype=torch.float),
-                requires_grad=False)
-            cell.weight_hh_l0 = torch.nn.Parameter(
-                torch.tensor(vals, dtype=torch.float),
-                requires_grad=False)
+        h0_vals = [[-155, 100],
+                   [-155, 155],
+                   [100, -155]]
 
-            ref = copy.deepcopy(cell)
+        hx = torch.tensor(h0_vals, dtype=torch.float).unsqueeze(0)
+        cx = torch.tensor(h0_vals, dtype=torch.float).unsqueeze(0)
 
-            model_int8 = quantize_dynamic(model=model, dtype=torch.qint8)
-            model_fp16 = quantize_dynamic(model=model, dtype=torch.float16)
+        if isinstance(ref, torch.nn.LSTM):
+            hiddens = (hx, cx)
 
-            # Smoke test extra reprs
-            self.assertTrue('DynamicQuantizedLSTM' in str(model_int8))
-            self.assertTrue('DynamicQuantizedLSTM' in str(model_fp16))
-            cell_int8 = model_int8.lstm
-            cell_fp16 = model_fp16.lstm
+        ref_out, ref_hid = ref(x, hiddens)
 
-            assert type(cell_int8) == torch.nn.quantized.dynamic.LSTM, \
-                'torch.nn.LSTM should be converted to torch.nn.quantized.dynamic.LSTM after quantize_dynamic'
-            assert type(cell_fp16) == torch.nn.quantized.dynamic.LSTM, \
-                'torch.nn.LSTM should be converted to torch.nn.quantized.dynamic.LSTM after quantize_dynamic'
+        for qengine in ['fbgemm', 'qnnpack']:
+            if qengine == 'qnnpack':
+                if IS_PPC or TEST_WITH_UBSAN or IS_MACOS or IS_WINDOWS:
+                    continue
+            with override_quantized_engine(qengine):
+                if qengine in torch.backends.quantized.supported_engines:
+                    for dtype in [torch.qint8, torch.float16]:
+                        if dtype == torch.float16 and qengine == "qnnpack":
+                            # fp16 dynamic quant is not supported for qnnpack
+                            continue
+                        model_quantized = quantize_dynamic(model=model, dtype=dtype)
 
-            niter = 10
-            x = torch.tensor([[100, -155],
-                              [-155, 100],
-                              [100, -155]], dtype=torch.float).unsqueeze(0).repeat(niter, 1, 1)
+                        # Smoke test extra reprs
+                        self.assertTrue('DynamicQuantizedLSTM' in str(model_quantized))
+                        cell_quantized = model_quantized.lstm
 
-            h0_vals = [[-155, 100],
-                       [-155, 155],
-                       [100, -155]]
+                        assert type(cell_quantized) == torch.nn.quantized.dynamic.LSTM, \
+                            'torch.nn.LSTM should be converted to torch.nn.quantized.dynamic.LSTM after quantize_dynamic'
 
-            hx = torch.tensor(h0_vals, dtype=torch.float).unsqueeze(0)
-            cx = torch.tensor(h0_vals, dtype=torch.float).unsqueeze(0)
+                        # Compare int8/fp16 quantized to unquantized
+                        output_quantized, final_hiddens_quantized = cell_quantized(x, hiddens)
 
-            if isinstance(ref, torch.nn.LSTM):
-                hiddens = (hx, cx)
+                        torch.testing.assert_allclose(output_quantized, ref_out)
+                        self.assertEqual(output_quantized, ref_out)
+                        for out_val, ref_val in zip(final_hiddens_quantized, ref_hid):
+                            torch.testing.assert_allclose(out_val, ref_val)
 
-            ref_out, ref_hid = ref(x, hiddens)
+                        if dtype == torch.qint8:
+                            # TODO: Revisit serialization tests once torchbind support lands
 
-            # Compare int8 quantized to unquantized
-            output_int8, final_hiddens_int8 = cell_int8(x, hiddens)
+                            class ScriptWrapper(torch.nn.Module):
+                                def __init__(self, cell):
+                                    super(ScriptWrapper, self).__init__()
+                                    self.cell = cell
 
-            torch.testing.assert_allclose(output_int8, ref_out)
-            self.assertEqual(output_int8, ref_out)
-            for out_val, ref_val in zip(final_hiddens_int8, ref_hid):
-                torch.testing.assert_allclose(out_val, ref_val)
+                                def forward(self, x, hiddens):
+                                    # type: (torch.Tensor, Tuple[torch.Tensor, torch.Tensor])
+                                    # -> Tuple[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]
+                                    return self.cell(x, hiddens)
 
-            class ScriptWrapper(torch.nn.Module):
-                def __init__(self, cell):
-                    super(ScriptWrapper, self).__init__()
-                    self.cell = cell
+                            # TODO: TorchScript overloads don't work without this wrapper
+                            cell_script = torch.jit.script(ScriptWrapper(cell_quantized))
+                            out_script, hid_script = cell_script(x, hiddens)
+                            self.assertEqual(len(out_script), len(ref_out))
+                            for out_val, ref_val in zip(out_script, ref_out):
+                                torch.testing.assert_allclose(out_val, ref_val)
 
-                def forward(self, x, hiddens):
-                    # type: (torch.Tensor, Tuple[torch.Tensor, torch.Tensor])
-                    # -> Tuple[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]
-                    return self.cell(x, hiddens)
+                            # Test save/load
+                            b = io.BytesIO()
+                            torch.jit.save(cell_script, b)
+                            b.seek(0)
+                            loaded = torch.jit.load(b)
+                            out_loaded, hid_loaded = loaded(x, hiddens)
+                            for loaded_val, ref_val in zip(out_loaded, ref_out):
+                                torch.testing.assert_allclose(loaded_val, ref_val)
 
-            # TODO: TorchScript overloads don't work without this wrapper
-            cell_script = torch.jit.script(ScriptWrapper(cell_int8))
-            out_script, hid_script = cell_script(x, hiddens)
-            self.assertEqual(len(out_script), len(ref_out))
-            for out_val, ref_val in zip(out_script, ref_out):
-                torch.testing.assert_allclose(out_val, ref_val)
+                            # Test tracing
+                            # TODO: TorchScript overloads don't work without this wrapper
+                            cell_trace = torch.jit.trace(ScriptWrapper(cell_quantized), (x, (hx, cx)))
+                            out_script, hid_script = cell_trace(x, hiddens)
+                            for out_val, ref_val in zip(out_script, ref_out):
+                                torch.testing.assert_allclose(out_val, ref_val)
+                            # Test save/load
+                            b = io.BytesIO()
+                            torch.jit.save(cell_trace, b)
+                            b.seek(0)
+                            loaded = torch.jit.load(b)
+                            out_loaded, hid_loaded = loaded(x, hiddens)
+                            for loaded_val, ref_val in zip(out_loaded, ref_out):
+                                torch.testing.assert_allclose(loaded_val, ref_val)
 
-            # Test save/load
-            b = io.BytesIO()
-            torch.jit.save(cell_script, b)
-            b.seek(0)
-            loaded = torch.jit.load(b)
-            out_loaded, hid_loaded = loaded(x, hiddens)
-            for loaded_val, ref_val in zip(out_loaded, ref_out):
-                torch.testing.assert_allclose(loaded_val, ref_val)
 
-            # Compare fp16 quantized to unquantized
-            output_fp16, final_hiddens_fp16 = cell_fp16(x, hiddens)
+                            class ScriptWrapperPacked(torch.nn.Module):
+                                def __init__(self, cell):
+                                    super(ScriptWrapperPacked, self).__init__()
+                                    self.cell = cell
 
-            torch.testing.assert_allclose(output_fp16, ref_out)
-            self.assertEqual(output_fp16, ref_out)
-            for out, ref_val in zip(final_hiddens_fp16, ref_hid):
-                torch.testing.assert_allclose(out, ref_val)
+                                def forward(self,
+                                            x,  # type: PackedSequence
+                                            hiddens  # type: Tuple[torch.Tensor, torch.Tensor]
+                                            ):
+                                    # type: (...) -> Tuple[PackedSequence, Tuple[torch.Tensor, torch.Tensor]]
+                                    return self.cell(x, hiddens)
 
-            # Test tracing
-            # TODO: TorchScript overloads don't work without this wrapper
-            cell_trace = torch.jit.trace(ScriptWrapper(cell_int8), (x, (hx, cx)))
-            out_script, hid_script = cell_trace(x, hiddens)
-            for out_val, ref_val in zip(out_script, ref_out):
-                torch.testing.assert_allclose(out_val, ref_val)
+                            cell_packed = torch.jit.script(ScriptWrapperPacked(cell_quantized))
+                            packed_input = torch.nn.utils.rnn.pack_padded_sequence(x, torch.tensor([10, 5, 2]))
+                            ref_out_packed, ref_hid_packed = ref(packed_input, hiddens)
+                            output_packed, hiddens_packed = cell_packed(packed_input, hiddens)
 
-            # print(cell_trace.code)
+                            for packed_val, ref_val in zip(output_packed, ref_out_packed):
+                                if isinstance(packed_val, torch.Tensor):
+                                    torch.testing.assert_allclose(packed_val, ref_val)
+                                else:
+                                    self.assertEqual(packed_val, ref_val)
 
-            # Test save/load
-            b = io.BytesIO()
-            torch.jit.save(cell_trace, b)
-            b.seek(0)
-            loaded = torch.jit.load(b)
-            out_loaded, hid_loaded = loaded(x, hiddens)
-            for loaded_val, ref_val in zip(out_loaded, ref_out):
-                torch.testing.assert_allclose(loaded_val, ref_val)
+                            # Test save/load
+                            b = io.BytesIO()
+                            torch.jit.save(cell_packed, b)
+                            b.seek(0)
+                            loaded_packed = torch.jit.load(b)
+                            out_loaded_packed, hid_loaded_packed = loaded_packed(packed_input, hiddens)
+                            for packed_val, ref_val in zip(out_loaded_packed, ref_out_packed):
+                                if isinstance(packed_val, torch.Tensor):
+                                    torch.testing.assert_allclose(packed_val, ref_val)
+                                else:
+                                    self.assertEqual(packed_val, ref_val)
 
-            # Compare fp16 quantized to unquantized
-            output_fp16, final_hiddens_fp16 = cell_fp16(x, hiddens)
 
-            torch.testing.assert_allclose(output_fp16, ref_out)
-            self.assertEqual(output_fp16, ref_out)
-            for out, ref_val in zip(final_hiddens_fp16, ref_hid):
-                torch.testing.assert_allclose(out, ref_val)
+    def test_default_quantized_lstm(self):
+        for qengine in ['fbgemm', 'qnnpack']:
+            if qengine == 'qnnpack':
+                if IS_PPC or TEST_WITH_UBSAN or IS_MACOS or IS_WINDOWS:
+                    continue
+            with override_quantized_engine(qengine):
+                if qengine in torch.backends.quantized.supported_engines:
 
-            class ScriptWrapperPacked(torch.nn.Module):
-                def __init__(self, cell):
-                    super(ScriptWrapperPacked, self).__init__()
-                    self.cell = cell
+                    # Test default instantiation
+                    seq_len = 128
+                    batch = 16
+                    input_size = 3
+                    hidden_size = 7
+                    num_layers = 2
+                    bias = True
+                    bidirectional = False
 
-                def forward(self,
-                            x,  # type: PackedSequence
-                            hiddens  # type: Tuple[torch.Tensor, torch.Tensor]
-                            ):
-                    # type: (...) -> Tuple[PackedSequence, Tuple[torch.Tensor, torch.Tensor]]
-                    return self.cell(x, hiddens)
+                    x = torch.rand(seq_len, batch, input_size)
+                    h = torch.rand(num_layers * (bidirectional + 1), batch, hidden_size)
+                    c = torch.rand(num_layers * (bidirectional + 1), batch, hidden_size)
 
-            cell_packed = torch.jit.script(ScriptWrapperPacked(cell_int8))
-            packed_input = torch.nn.utils.rnn.pack_padded_sequence(x, torch.tensor([10, 5, 2]))
-            ref_out_packed, ref_hid_packed = ref(packed_input, hiddens)
-            output_packed, hiddens_packed = cell_packed(packed_input, hiddens)
+                    dtype = torch.qint8
 
-            for packed_val, ref_val in zip(output_packed, ref_out_packed):
-                if isinstance(packed_val, torch.Tensor):
-                    torch.testing.assert_allclose(packed_val, ref_val)
-                else:
-                    self.assertEqual(packed_val, ref_val)
+                    cell_dq = torch.nn.quantized.dynamic.LSTM(input_size=input_size,
+                                                              hidden_size=hidden_size,
+                                                              num_layers=num_layers,
+                                                              bias=bias,
+                                                              batch_first=False,
+                                                              dropout=0.0,
+                                                              bidirectional=bidirectional,
+                                                              dtype=dtype)
 
-            # Test save/load
-            b = io.BytesIO()
-            torch.jit.save(cell_packed, b)
-            b.seek(0)
-            loaded_packed = torch.jit.load(b)
-            out_loaded_packed, hid_loaded_packed = loaded_packed(packed_input, hiddens)
-            for packed_val, ref_val in zip(out_loaded_packed, ref_out_packed):
-                if isinstance(packed_val, torch.Tensor):
-                    torch.testing.assert_allclose(packed_val, ref_val)
-                else:
-                    self.assertEqual(packed_val, ref_val)
-
-            # Test default instantiation
-            seq_len = 128
-            batch = 16
-            input_size = 3
-            hidden_size = 7
-            num_layers = 2
-            bias = True
-            bidirectional = False
-
-            x = torch.rand(seq_len, batch, input_size)
-            h = torch.rand(num_layers * (bidirectional + 1), batch, hidden_size)
-            c = torch.rand(num_layers * (bidirectional + 1), batch, hidden_size)
-
-            dtype = torch.qint8
-
-            cell_dq = torch.nn.quantized.dynamic.LSTM(input_size=input_size,
-                                                      hidden_size=hidden_size,
-                                                      num_layers=num_layers,
-                                                      bias=bias,
-                                                      batch_first=False,
-                                                      dropout=0.0,
-                                                      bidirectional=bidirectional,
-                                                      dtype=dtype)
-
-            y, (h, c) = cell_dq(x, (h, c))
+                    y, (h, c) = cell_dq(x, (h, c))
 
 
 @unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
                      " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
                      " with instruction set support avx2 or newer.")
-class EagerModeQuantizationAwareTrainingTest(QuantizationTestCase):
+class TestQuantizationAwareTraining(QuantizationTestCase):
     def test_manual(self):
         model = ManualLinearQATModel()
         model = prepare_qat(model)
@@ -968,7 +1002,7 @@ class EagerModeQuantizationAwareTrainingTest(QuantizationTestCase):
     " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
     " with instruction set support avx2 or newer.",
 )
-class GraphModePostTrainingQuantTest(QuantizationTestCase):
+class TestGraphModePostTrainingStatic(QuantizationTestCase):
     def test_single_linear(self):
         r"""Compare the result of quantizing single linear layer in
         eager mode and graph mode
@@ -1188,7 +1222,7 @@ class GraphModePostTrainingQuantTest(QuantizationTestCase):
             self.assertEqual(model_fake_quantized(self.calib_data[0][0]), result_eager)
 
 
-class FunctionalModuleTest(QuantizationTestCase):
+class TestFunctionalModule(QuantizationTestCase):
     # Histogram Observers are slow, so have no-deadline to ensure test doesn't time out
     @given(train_mode=st.booleans())
     def test_functional_module(self, train_mode):
@@ -1221,7 +1255,7 @@ class FunctionalModuleTest(QuantizationTestCase):
 @unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
                      " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
                      " with instruction set support avx2 or newer.")
-class FusionTest(QuantizationTestCase):
+class TestFusion(QuantizationTestCase):
     def test_fuse_module_train(self):
         model = ModelForFusion(default_qat_qconfig).train()
         # Test step by step fusion
@@ -1461,326 +1495,127 @@ class FusionTest(QuantizationTestCase):
 
         checkQAT(model)
 
-class ObserverTest(QuantizationTestCase):
-    @given(qdtype=st.sampled_from((torch.qint8, torch.quint8)),
-           qscheme=st.sampled_from((torch.per_tensor_affine, torch.per_tensor_symmetric)),
-           reduce_range=st.booleans())
-    def test_per_tensor_observers(self, qdtype, qscheme, reduce_range):
-        # reduce_range cannot be true for symmetric quantization with uint8
-        if qdtype == torch.quint8 and qscheme == torch.per_tensor_symmetric:
-            reduce_range = False
-        ObserverList = [MinMaxObserver(dtype=qdtype, qscheme=qscheme, reduce_range=reduce_range),
-                        MovingAverageMinMaxObserver(averaging_constant=0.5,
-                                                    dtype=qdtype,
-                                                    qscheme=qscheme,
-                                                    reduce_range=reduce_range)]
-        for myobs in ObserverList:
-            # Calculate Qparams should return with a warning for observers with no data
-            qparams = myobs.calculate_qparams()
-            if type(myobs) == MinMaxObserver:
-                x = torch.tensor([1.0, 2.0, 2.0, 3.0, 4.0, 5.0, 6.0])
-                y = torch.tensor([4.0, 5.0, 5.0, 6.0, 7.0, 8.0])
-            else:
-                # Moving average of min/max for x and y matches that of
-                # extreme values for x/y used for minmax observer
-                x = torch.tensor([0.0, 2.0, 2.0, 3.0, 4.0, 5.0, 6.0])
-                y = torch.tensor([2.0, 5.0, 5.0, 6.0, 7.0, 10.0])
+class TestModelNumerics(QuantizationTestCase):
+    def test_float_quant_compare_per_tensor(self):
+        for qengine in ["fbgemm", "qnnpack"]:
+            if qengine not in torch.backends.quantized.supported_engines:
+                continue
+            if qengine == 'qnnpack':
+                if IS_PPC or TEST_WITH_UBSAN:
+                    continue
+            with override_quantized_engine(qengine):
+                torch.manual_seed(42)
+                my_model = ModelMultipleOps().to(torch.float32)
+                my_model.eval()
+                calib_data = torch.rand(1024, 3, 15, 15, dtype=torch.float32)
+                eval_data = torch.rand(1, 3, 15, 15, dtype=torch.float32)
+                out_ref = my_model(eval_data)
+                qModel = torch.quantization.QuantWrapper(my_model)
+                qModel.eval()
+                qModel.qconfig = torch.quantization.default_qconfig
+                torch.quantization.fuse_modules(qModel.module, [['conv1', 'bn1', 'relu1']], inplace=True)
+                torch.quantization.prepare(qModel, inplace=True)
+                qModel(calib_data)
+                torch.quantization.convert(qModel, inplace=True)
+                out_q = qModel(eval_data)
+                SQNRdB = 20 * torch.log10(torch.norm(out_ref) / torch.norm(out_ref - out_q))
+                # Quantized model output should be close to floating point model output numerically
+                # Setting target SQNR to be 30 dB so that relative error is 1e-3 below the desired
+                # output
+                self.assertGreater(SQNRdB, 30, msg='Quantized model numerics diverge from float, expect SQNR > 30 dB')
 
-            result = myobs(x)
-            result = myobs(y)
-            self.assertEqual(result, y)
-            self.assertEqual(myobs.min_val, 1.0)
-            self.assertEqual(myobs.max_val, 8.0)
-            qparams = myobs.calculate_qparams()
-            if reduce_range:
-                if qscheme == torch.per_tensor_symmetric:
-                    ref_scale = 0.062745 * 255 / 127
-                    ref_zero_point = 0 if qdtype is torch.qint8 else 128
-                else:
-                    ref_scale = 0.0313725 * 255 / 127
-                    ref_zero_point = -64 if qdtype is torch.qint8 else 0
-            else:
-                if qscheme == torch.per_tensor_symmetric:
-                    ref_scale = 0.062745
-                    ref_zero_point = 0 if qdtype is torch.qint8 else 128
-                else:
-                    ref_scale = 0.0313725
-                    ref_zero_point = -128 if qdtype is torch.qint8 else 0
-            self.assertEqual(qparams[1].item(), ref_zero_point)
-            self.assertAlmostEqual(qparams[0].item(), ref_scale, delta=1e-5)
-            state_dict = myobs.state_dict()
-            b = io.BytesIO()
-            torch.save(state_dict, b)
-            b.seek(0)
-            loaded_dict = torch.load(b)
-            for key in state_dict:
-                self.assertEqual(state_dict[key], loaded_dict[key])
-            loaded_obs = MinMaxObserver(dtype=qdtype, qscheme=qscheme, reduce_range=reduce_range)
-            loaded_obs.load_state_dict(loaded_dict)
-            loaded_qparams = loaded_obs.calculate_qparams()
-            self.assertEqual(myobs.min_val, loaded_obs.min_val)
-            self.assertEqual(myobs.max_val, loaded_obs.max_val)
-            self.assertEqual(myobs.calculate_qparams(), loaded_obs.calculate_qparams())
+    def test_float_quant_compare_per_channel(self):
+        # Test for per-channel Quant
+        torch.manual_seed(67)
+        my_model = ModelMultipleOps().to(torch.float32)
+        my_model.eval()
+        calib_data = torch.rand(2048, 3, 15, 15, dtype=torch.float32)
+        eval_data = torch.rand(10, 3, 15, 15, dtype=torch.float32)
+        out_ref = my_model(eval_data)
+        q_model = torch.quantization.QuantWrapper(my_model)
+        q_model.eval()
+        q_model.qconfig = torch.quantization.default_per_channel_qconfig
+        torch.quantization.fuse_modules(q_model.module, [['conv1', 'bn1', 'relu1']], inplace=True)
+        torch.quantization.prepare(q_model)
+        q_model(calib_data)
+        torch.quantization.convert(q_model)
+        out_q = q_model(eval_data)
+        SQNRdB = 20 * torch.log10(torch.norm(out_ref) / torch.norm(out_ref - out_q))
+        # Quantized model output should be close to floating point model output numerically
+        # Setting target SQNR to be 35 dB
+        self.assertGreater(SQNRdB, 35, msg='Quantized model numerics diverge from float, expect SQNR > 35 dB')
 
+    def test_fake_quant_true_quant_compare(self):
+        for qengine in ["fbgemm", "qnnpack"]:
+            if qengine not in torch.backends.quantized.supported_engines:
+                continue
+            if qengine == 'qnnpack':
+                if IS_PPC or TEST_WITH_UBSAN:
+                    continue
+            with override_quantized_engine(qengine):
+                torch.manual_seed(67)
+                my_model = ModelMultipleOpsNoAvgPool().to(torch.float32)
+                calib_data = torch.rand(2048, 3, 15, 15, dtype=torch.float32)
+                eval_data = torch.rand(10, 3, 15, 15, dtype=torch.float32)
+                my_model.eval()
+                out_ref = my_model(eval_data)
+                fq_model = torch.quantization.QuantWrapper(my_model)
+                fq_model.train()
+                fq_model.qconfig = torch.quantization.default_qat_qconfig
+                torch.quantization.fuse_modules(fq_model.module, [['conv1', 'bn1', 'relu1']], inplace=True)
+                torch.quantization.prepare_qat(fq_model)
+                fq_model.eval()
+                fq_model.apply(torch.quantization.disable_fake_quant)
+                fq_model.apply(torch.nn.intrinsic.qat.freeze_bn_stats)
+                fq_model(calib_data)
+                fq_model.apply(torch.quantization.enable_fake_quant)
+                fq_model.apply(torch.quantization.disable_observer)
+                out_fq = fq_model(eval_data)
+                SQNRdB = 20 * torch.log10(torch.norm(out_ref) / torch.norm(out_ref - out_fq))
+                # Quantized model output should be close to floating point model output numerically
+                # Setting target SQNR to be 35 dB
+                self.assertGreater(SQNRdB, 35, msg='Quantized model numerics diverge from float, expect SQNR > 35 dB')
+                torch.quantization.convert(fq_model)
+                out_q = fq_model(eval_data)
+                SQNRdB = 20 * torch.log10(torch.norm(out_fq) / (torch.norm(out_fq - out_q) + 1e-10))
+                self.assertGreater(SQNRdB, 60, msg='Fake quant and true quant numerics diverge, expect SQNR > 60 dB')
 
-    @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=2, max_dims=4,
-                                              min_side=1, max_side=10),
-                       qparams=hu.qparams()),
-           reduce_range=st.booleans())
-    def test_per_tensor_dynamic_quant_observers(self, X, reduce_range):
-
-        X, (scale, zero_point, torch_type) = X
-        x = torch.from_numpy(X)
-
-        obs = MinMaxDynamicQuantObserver(dtype=torch.quint8, reduce_range=reduce_range)
-
-        result = obs(x)
-        qparams = obs.calculate_qparams()
-        ref = torch._choose_qparams_per_tensor(x, reduce_range)
-
-        self.assertEqual(ref[0], qparams[0])
-        self.assertEqual(ref[1], qparams[1])
-
-    def test_tensor_list_observer(self):
-        from torch.quantization.observer import _MinMaxTensorListObserver
-        x = [torch.tensor([1.0, 2.5, 3.5]),
-             torch.tensor([2.0, 4.5, 3.5]),
-             torch.tensor([4.0, 2.5, 3.5]), ]
-        obs = _MinMaxTensorListObserver()
-        obs(x)
-        qparams = obs.calculate_qparams()
-        ref_min_val = []
-        ref_max_val = []
-        ref_qparams = []
-        for i in x:
-            obs_ref = MinMaxObserver()
-            obs_ref(i)
-            ref_min_val.append(obs_ref.min_val)
-            ref_max_val.append(obs_ref.max_val)
-            ref_qparams.append(obs_ref.calculate_qparams())
-        for i in range(len(x)):
-            self.assertEqual(obs.min_val[i], ref_min_val[i])
-            self.assertEqual(obs.max_val[i], ref_max_val[i])
-            self.assertEqual(torch.tensor([qparams[0][i]]), ref_qparams[i][0])
-            self.assertEqual(torch.tensor([qparams[1][i]]), ref_qparams[i][1])
-
-    @given(qdtype=st.sampled_from((torch.qint8, torch.quint8)),
-           qscheme=st.sampled_from((torch.per_channel_affine, torch.per_channel_symmetric)),
-           ch_axis=st.sampled_from((0, 1, 2, 3)), reduce_range=st.booleans())
-    def test_per_channel_observers(self, qdtype, qscheme, ch_axis, reduce_range):
-        # reduce_range cannot be true for symmetric quantization with uint8
-        if qdtype == torch.quint8 and qscheme == torch.per_channel_symmetric:
-            reduce_range = False
-        ObserverList = [PerChannelMinMaxObserver(reduce_range=reduce_range,
-                                                 ch_axis=ch_axis,
-                                                 dtype=qdtype,
-                                                 qscheme=qscheme),
-                        MovingAveragePerChannelMinMaxObserver(averaging_constant=0.5,
-                                                              reduce_range=reduce_range,
-                                                              ch_axis=ch_axis,
-                                                              dtype=qdtype,
-                                                              qscheme=qscheme)]
-
-        for myobs in ObserverList:
-            # Calculate qparams should work for empty observers
-            qparams = myobs.calculate_qparams()
-            x = torch.tensor(
-                [
-                    [[[1.0, 2.0], [2.0, 2.5]], [[3.0, 4.0], [4.5, 6.0]]],
-                    [[[-4.0, -3.0], [5.0, 5.0]], [[6.0, 3.0], [7.0, 8.0]]],
-                ]
-            )
-            if type(myobs) == MovingAveragePerChannelMinMaxObserver:
-                # Scaling the input tensor to model change in min/max values
-                # across batches
-                result = myobs(0.5 * x)
-                result = myobs(1.5 * x)
-                self.assertEqual(result, 1.5 * x)
-            else:
-                result = myobs(x)
-                self.assertEqual(result, x)
-
-            qparams = myobs.calculate_qparams()
-            ref_min_vals = [[1.0, -4.0], [-4.0, 3.0], [-4.0, 2.0], [-4.0, -3.0]]
-            ref_max_vals = [[6.0, 8.0], [5.0, 8.0], [6.0, 8.0], [7.0, 8.0]]
-            per_channel_symmetric_ref_scales = [
-                [0.04705882, 0.06274509],
-                [0.03921569, 0.0627451],
-                [0.04705882, 0.0627451],
-                [0.05490196, 0.0627451],
-            ]
-            per_channel_affine_ref_scales = [
-                [0.02352941, 0.04705882],
-                [0.03529412, 0.03137255],
-                [0.03921569, 0.03137255],
-                [0.04313726, 0.04313726],
-            ]
-            per_channel_affine_qint8_zp = [
-                [-128, -43],
-                [-15, -128],
-                [-26, -128],
-                [-35, -58],
-            ]
-            per_channel_affine_quint8_zp = [[0, 85], [113, 0], [102, 0], [93, 70]]
-
-            self.assertEqual(myobs.min_vals, ref_min_vals[ch_axis])
-            self.assertEqual(myobs.max_vals, ref_max_vals[ch_axis])
-            if qscheme == torch.per_channel_symmetric:
-                ref_scales = per_channel_symmetric_ref_scales[ch_axis]
-                ref_zero_points = [0, 0] if qdtype is torch.qint8 else [128, 128]
-            else:
-                ref_scales = per_channel_affine_ref_scales[ch_axis]
-                ref_zero_points = (
-                    per_channel_affine_qint8_zp[ch_axis]
-                    if qdtype is torch.qint8
-                    else per_channel_affine_quint8_zp[ch_axis]
-                )
-
-            if reduce_range:
-                ref_scales = [s * 255 / 127 for s in ref_scales]
-                ref_zero_points = [math.floor(z / 2) for z in ref_zero_points]
-
-            self.assertTrue(torch.allclose(qparams[0], torch.tensor(ref_scales, dtype=qparams[0].dtype)))
-            self.assertTrue(torch.allclose(qparams[1], torch.tensor(ref_zero_points, dtype=qparams[1].dtype)))
-
-            # Test for serializability
-            state_dict = myobs.state_dict()
-            b = io.BytesIO()
-            torch.save(state_dict, b)
-            b.seek(0)
-            loaded_dict = torch.load(b)
-            for key in state_dict:
-                self.assertEqual(state_dict[key], loaded_dict[key])
-            loaded_obs = PerChannelMinMaxObserver(reduce_range=reduce_range, ch_axis=ch_axis, dtype=qdtype, qscheme=qscheme)
-            loaded_obs.load_state_dict(loaded_dict)
-            loaded_qparams = loaded_obs.calculate_qparams()
-            self.assertEqual(myobs.min_vals, loaded_obs.min_vals)
-            self.assertEqual(myobs.max_vals, loaded_obs.max_vals)
-            self.assertEqual(myobs.calculate_qparams(), loaded_obs.calculate_qparams())
-
-    def test_observer_scriptable(self):
-        obs_list = [MinMaxObserver(), MovingAverageMinMaxObserver(), MinMaxDynamicQuantObserver()]
-        for obs in obs_list:
-            scripted = torch.jit.script(obs)
-
-            x = torch.rand(3, 4)
-            obs(x)
-            scripted(x)
-            self.assertEqual(obs.calculate_qparams(), scripted.calculate_qparams())
-
-            buf = io.BytesIO()
-            torch.jit.save(scripted, buf)
-            buf.seek(0)
-            loaded = torch.jit.load(buf)
-            self.assertEqual(obs.calculate_qparams(), loaded.calculate_qparams())
-
-        # Check TensorListObserver
-        from torch.quantization.observer import _MinMaxTensorListObserver
-        obs = _MinMaxTensorListObserver()
-        scripted = torch.jit.script(obs)
-        x = [torch.rand(3, 4), torch.rand(4, 5)]
-        obs(x)
-        scripted(x)
-        self.assertEqual(obs.calculate_qparams(), scripted.calculate_qparams())
-
-    def test_no_qconfig_propagation(self):
-        model = ModelWithNoQconfigPropagation()
-        model.qconfig = torch.quantization.default_qconfig
-
-        model = prepare(model)
-        self.assertTrue(hasattr(model.fc1, 'qconfig'),
-                        "QConfig is expected to propagate")
-        self.assertFalse(hasattr(model.no_quant_module, 'qconfig'),
-                         "QConfig is expected to NOT propagate")
-
-
-@unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
-                     " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
-                     " with instruction set support avx2 or newer.")
-class RecordHistogramObserverTest(QuantizationTestCase):
-    def test_record_observer(self):
-        model = AnnotatedSingleLayerLinearModel()
-        model.qconfig = default_debug_qconfig
-        model = prepare(model)
-        # run the evaluation and dump all tensors
-        test_only_eval_fn(model, self.calib_data)
-        test_only_eval_fn(model, self.calib_data)
-        observer_dict = {}
-        get_observer_dict(model, observer_dict)
-
-        self.assertTrue('fc1.module.activation_post_process' in observer_dict.keys(),
-                        'observer is not recorded in the dict')
-        self.assertEqual(len(observer_dict['fc1.module.activation_post_process'].get_tensor_value()), 2 * len(self.calib_data))
-        self.assertEqual(observer_dict['fc1.module.activation_post_process'].get_tensor_value()[0], model(self.calib_data[0][0]))
-
-    @given(qdtype=st.sampled_from((torch.qint8, torch.quint8)),
-           qscheme=st.sampled_from((torch.per_tensor_affine, torch.per_tensor_symmetric)))
-    def test_observer_scriptable(self, qdtype, qscheme):
-        obs = RecordingObserver(dtype=qdtype, qscheme=qscheme)
-        scripted = torch.jit.script(obs)
-
-        x = torch.rand(3, 4)
-        obs(x)
-        scripted(x)
-        self.assertTrue(torch.equal(obs.get_tensor_value()[0], scripted.get_tensor_value()[0]))
-        buf = io.BytesIO()
-        torch.jit.save(scripted, buf)
-        buf.seek(0)
-        loaded = torch.jit.load(buf)
-        self.assertTrue(torch.equal(obs.get_tensor_value()[0], loaded.get_tensor_value()[0]))
-
-    @given(qdtype=st.sampled_from((torch.qint8, torch.quint8)),
-           qscheme=st.sampled_from((torch.per_tensor_affine, torch.per_tensor_symmetric)),
-           reduce_range=st.booleans())
-    def test_histogram_observer(self, qdtype, qscheme, reduce_range):
-        myobs = HistogramObserver(bins=3, dtype=qdtype, qscheme=qscheme, reduce_range=reduce_range)
-        # Calculate qparams should work for empty observers
-        qparams = myobs.calculate_qparams()
-        x = torch.tensor([2.0, 3.0, 4.0, 5.0], requires_grad=True)
-        y = torch.tensor([5.0, 6.0, 7.0, 8.0])
-        out_x = myobs(x)
-        self.assertTrue(out_x.requires_grad)
-        myobs(y)
-        self.assertEqual(myobs.min_val, 2.0)
-        self.assertEqual(myobs.max_val, 8.0)
-        self.assertEqual(myobs.histogram, [2., 3., 3.])
-
-        qparams = myobs.calculate_qparams()
-
-        if reduce_range:
-            if qscheme == torch.per_tensor_symmetric:
-                ref_scale = 0.0470588 * 255 / 127
-                ref_zero_point = 0 if qdtype is torch.qint8 else 128
-            else:
-                ref_scale = 0.0235294 * 255 / 127
-                ref_zero_point = -64 if qdtype is torch.qint8 else 0
-        else:
-            if qscheme == torch.per_tensor_symmetric:
-                ref_scale = 0.0470588
-                ref_zero_point = 0 if qdtype is torch.qint8 else 128
-            else:
-                ref_scale = 0.0235294
-                ref_zero_point = -128 if qdtype is torch.qint8 else 0
-
-        self.assertEqual(qparams[1].item(), ref_zero_point)
-        self.assertAlmostEqual(qparams[0].item(), ref_scale, delta=1e-5)
-        # Test for serializability
-        state_dict = myobs.state_dict()
-        b = io.BytesIO()
-        torch.save(state_dict, b)
-        b.seek(0)
-        loaded_dict = torch.load(b)
-        for key in state_dict:
-            self.assertEqual(state_dict[key], loaded_dict[key])
-        loaded_obs = HistogramObserver(bins=3, dtype=qdtype, qscheme=qscheme, reduce_range=reduce_range)
-        loaded_obs.load_state_dict(loaded_dict)
-        loaded_qparams = loaded_obs.calculate_qparams()
-        self.assertEqual(myobs.min_val, loaded_obs.min_val)
-        self.assertEqual(myobs.max_val, loaded_obs.max_val)
-        self.assertEqual(myobs.histogram, loaded_obs.histogram)
-        self.assertEqual(myobs.bins, loaded_obs.bins)
-        self.assertEqual(myobs.calculate_qparams(), loaded_obs.calculate_qparams())
-
+    # Test to compare weight only quantized model numerics and
+    # activation only quantized model numerics with float
+    def test_weight_only_activation_only_fakequant(self):
+        for qengine in ["fbgemm", "qnnpack"]:
+            if qengine not in torch.backends.quantized.supported_engines:
+                continue
+            if qengine == 'qnnpack':
+                if IS_PPC or TEST_WITH_UBSAN:
+                    continue
+            with override_quantized_engine(qengine):
+                torch.manual_seed(67)
+                calib_data = torch.rand(2048, 3, 15, 15, dtype=torch.float32)
+                eval_data = torch.rand(10, 3, 15, 15, dtype=torch.float32)
+                qconfigset = set([torch.quantization.default_weight_only_qconfig,
+                                  torch.quantization.default_activation_only_qconfig])
+                SQNRTarget = [35, 45]
+                for idx, qconfig in enumerate(qconfigset):
+                    my_model = ModelMultipleOpsNoAvgPool().to(torch.float32)
+                    my_model.eval()
+                    out_ref = my_model(eval_data)
+                    fq_model = torch.quantization.QuantWrapper(my_model)
+                    fq_model.train()
+                    fq_model.qconfig = qconfig
+                    torch.quantization.fuse_modules(fq_model.module, [['conv1', 'bn1', 'relu1']], inplace=True)
+                    torch.quantization.prepare_qat(fq_model)
+                    fq_model.eval()
+                    fq_model.apply(torch.quantization.disable_fake_quant)
+                    fq_model.apply(torch.nn.intrinsic.qat.freeze_bn_stats)
+                    fq_model(calib_data)
+                    fq_model.apply(torch.quantization.enable_fake_quant)
+                    fq_model.apply(torch.quantization.disable_observer)
+                    out_fq = fq_model(eval_data)
+                    SQNRdB = 20 * torch.log10(torch.norm(out_ref) / torch.norm(out_ref - out_fq))
+                    self.assertGreater(SQNRdB, SQNRTarget[idx], msg='Quantized model numerics diverge from float')
 
 if __name__ == '__main__':
-    run_tests()
+    raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
+                       "\tpython test/test_quantization.py TESTNAME\n\n"
+                       "instead.")
