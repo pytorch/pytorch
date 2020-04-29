@@ -14,16 +14,6 @@ namespace rpc {
 
 namespace {
 
-std::shared_ptr<FutureIValue> toFutureIValue(
-    std::shared_ptr<FutureMessage> fm) {
-  auto fv = std::make_shared<FutureIValue>();
-
-  fm->addCallback(
-      [fv](const FutureMessage& fm) { fv->markCompleted(IValue()); });
-
-  return fv;
-}
-
 py::tuple toPyTuple(const RRefForkData& rrefForkData) {
   // add GIL as it is contructing a py::object
   pybind11::gil_scoped_acquire ag;
@@ -124,7 +114,10 @@ PyRRef::PyRRef(const py::object& value, const py::object& type_hint)
       }()) {}
 
 const std::shared_ptr<FutureIValue> PyRRef::getFuture() const {
-  return toFutureIValue(rref_->getOwnerCreationFuture());
+  // Marking hasValue to false, as this Future is only used for signaling
+  // profiler to update profiling result and the profiler does not retrieve
+  // any value from it.
+  return toFutureIValue(rref_->getOwnerCreationFuture(), false /* hasValue */);
 }
 
 bool PyRRef::isOwner() const {

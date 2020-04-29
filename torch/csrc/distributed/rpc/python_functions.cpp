@@ -22,29 +22,36 @@ namespace rpc {
 
 namespace {
 
-void DeleteFutureIValue(FutureIValue* fv) {
-  pybind11::gil_scoped_acquire ag;
-  delete fv;
+py::object toPyObjInternal(RpcCommandBase& rpc, MessageType messageType) {
+  switch (messageType) {
+    case MessageType::SCRIPT_RET: {
+      auto& ret = static_cast<ScriptResp&>(rpc);
+      Stack stack;
+      stack.push_back(ret.value());
+      {
+        pybind11::gil_scoped_acquire ag;
+        // The createPyObjectForStack does not acquire GIL, but creating a new
+        // py::object requires GIL.
+        return torch::jit::createPyObjectForStack(std::move(stack));
+      }
+    }
+    case MessageType::PYTHON_RET: {
+      // TODO: Try to avoid a copy here.
+      auto& resp = static_cast<PythonResp&>(rpc);
+      auto& pythonRpcHandler = PythonRpcHandler::getInstance();
+      py::object ret = pythonRpcHandler.deserialize(resp.serializedPyObj());
+      return ret;
+    }
+    default: {
+      TORCH_CHECK(false, "Unrecognized response message type ", messageType);
+    }
+  }
 }
 
-std::shared_ptr<FutureIValue> toFutureIValue(
-    std::shared_ptr<FutureMessage> fm) {
-  // NB: The custom deleter is necessary because the FutureIValue object
-  // holds a py::object and it would require GIL to delete.
-  std::shared_ptr<FutureIValue> fv(new FutureIValue(), DeleteFutureIValue);
-
-  fm->addCallback([fv](const FutureMessage& fm) {
-    // Don't need to acquire GIL here, as toPyObj acquires GIL
-    // when creating the py::object
-    if (fm.hasError()) {
-      fv->setError(*fm.error());
-    } else {
-      fv->markCompleted(
-          jit::toIValue(toPyObj(fm.constValue()), PyObjectType::get()));
-    }
-  });
-
-  return fv;
+py::object toPyObj(const Message& message) {
+  MessageType msgType = message.type();
+  auto response = deserializeResponse(message, msgType);
+  return toPyObjInternal(*response, msgType);
 }
 
 std::shared_ptr<Operator> matchBuiltinOp(
@@ -102,40 +109,52 @@ std::shared_ptr<FutureMessage> sendPythonRemoteCall(
       true /*forceGradRecording*/);
 }
 
+void DeleteFutureIValue(FutureIValue* fv) {
+  if (fv->constValue().isPyObject()) {
+    pybind11::gil_scoped_acquire ag;
+    delete fv;
+  } else {
+    delete fv;
+  }
+}
+
 } // namespace
 
 using namespace torch::distributed::autograd;
 
-py::object toPyObjInternal(RpcCommandBase& rpc, MessageType messageType) {
-  switch (messageType) {
-    case MessageType::SCRIPT_RET: {
-      auto& ret = static_cast<ScriptResp&>(rpc);
-      Stack stack;
-      stack.push_back(ret.value());
-      {
-        pybind11::gil_scoped_acquire ag;
-        // The createPyObjectForStack does not acquire GIL, but creating a new
-        // py::object requires GIL.
-        return torch::jit::createPyObjectForStack(std::move(stack));
-      }
-    }
-    case MessageType::PYTHON_RET: {
-      // TODO: Try to avoid a copy here.
-      auto& resp = static_cast<PythonResp&>(rpc);
-      auto& pythonRpcHandler = PythonRpcHandler::getInstance();
-      py::object ret = pythonRpcHandler.deserialize(resp.serializedPyObj());
-      return ret;
-    }
-    default: {
-      TORCH_CHECK(false, "Unrecognized response message type ", messageType);
-    }
-  }
-}
+std::shared_ptr<FutureIValue> toFutureIValue(
+    const std::shared_ptr<FutureMessage>& fm,
+    bool hasValue) {
+  if (hasValue) {
+    // NB: The custom deleter is necessary because the FutureIValue object
+    // holds a py::object and it would require GIL to delete.
+    std::shared_ptr<FutureIValue> fv(new FutureIValue(), DeleteFutureIValue);
 
-py::object toPyObj(const Message& message) {
-  MessageType msgType = message.type();
-  auto response = deserializeResponse(message, msgType);
-  return toPyObjInternal(*response, msgType);
+    fm->addCallback([fv](const FutureMessage& fm) {
+      // Don't need to acquire GIL here, as toPyObj acquires GIL
+      // when creating the py::object
+      if (fm.hasError()) {
+        fv->setError(*fm.error());
+      } else {
+        fv->markCompleted(
+            jit::toIValue(toPyObj(fm.constValue()), PyObjectType::get()));
+      }
+    });
+
+    return fv;
+  } else {
+    auto fv = std::make_shared<FutureIValue>();
+
+    fm->addCallback([fv](const FutureMessage& fm) {
+      if (fm.hasError()) {
+        fv->setError(*fm.error());
+      } else {
+        fv->markCompleted(IValue());
+      }
+    });
+
+    return fv;
+  }
 }
 
 std::shared_ptr<FutureIValue> pyRpcBuiltin(
