@@ -316,6 +316,20 @@ class TestJit(JitTestCase):
 
         traced_rec = torch.jit.trace(rec, (input))
 
+    def test_trace_aliased_input(self):
+        class MyClass(torch.nn.Module):
+            def __init__(self):
+                super(MyClass, self).__init__()
+
+            def forward(self, xs: List[Tensor]):
+                y = torch.cat(xs, dim=0)  # torch.stack() results in error as well
+                return y
+
+
+        model = MyClass()
+        sample = torch.ones(2, 2)
+        m2 = torch.jit.trace(model, ((sample, sample, sample),))
+
     def test_trace_legacy_ctor(self):
         class MyModule(nn.Module):
             def forward(self, x):
