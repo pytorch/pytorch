@@ -724,7 +724,7 @@ def find_multidispatch_formals(formals):
 
 
 def find_formal_by_type(formal_name, formals):
-    # type: (str, List[AtFormal]) -> Optional[AtFormal]
+    # type: (str,List[AtFormal]) -> Optional[AtFormal]
     for formal in formals:
         if formal_name == formal['dynamic_type']:
             return formal
@@ -777,7 +777,7 @@ def gen_dispatch_key_init(var_name, formals):
 def is_factory(option):
     # type: (FunctionOption) -> bool
     formals = option['formals_list']
-    return find_formal_by_type('TensorOptions', formals) and 'method' not in option['variants']
+    return find_formal_by_type('TensorOptions', formals) is not None and 'method' not in option['variants']
 
 
 def gen_device_init(option, backend_type_env):
