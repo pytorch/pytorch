@@ -1,7 +1,7 @@
 #pragma once
 
 // guard the whole file
-#if !defined(_MSC_VER) && defined(__CUDACC__) && CUSPARSE_VERSION >= 10301 // CUDA release >= 10.2 and not windows
+#if !defined(_MSC_VER) && defined(__CUDACC__) && (CUDART_VERSION >= 10010)
 
 #include <ATen/cuda/ATenCUDAGeneral.h>
 #include <ATen/cuda/Exceptions.h>
