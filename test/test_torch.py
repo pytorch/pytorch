@@ -5357,8 +5357,6 @@ class TestTorchDeviceType(TestCase):
 
         self._isclose_helper(tests, device, dtype, False, atol=1.5, rtol=.5)
 
-    # torch.close is not implemented for cpu half tensors
-    # see https://github.com/pytorch/pytorch/issues/36451
     @dtypes(torch.float16, torch.float32, torch.float64)
     def test_isclose_float(self, device, dtype):
         tests = (
@@ -5372,11 +5370,7 @@ class TestTorchDeviceType(TestCase):
             (1, 1, True),
         )
 
-        if dtype is torch.half and self.device_type == 'cpu':
-            with self.assertRaises(RuntimeError):
-                self._isclose_helper(tests, device, dtype, False)
-        else:
-            self._isclose_helper(tests, device, dtype, False)
+        self._isclose_helper(tests, device, dtype, False)
 
         # atol and rtol tests
         eps = 1e-2 if dtype is torch.half else 1e-6
@@ -5392,11 +5386,7 @@ class TestTorchDeviceType(TestCase):
             (.25 + eps, -.5, False),
         )
 
-        if dtype is torch.half and self.device_type == 'cpu':
-            with self.assertRaises(RuntimeError):
-                self._isclose_helper(tests, device, dtype, False, atol=.5, rtol=.5)
-        else:
-            self._isclose_helper(tests, device, dtype, False, atol=.5, rtol=.5)
+        self._isclose_helper(tests, device, dtype, False, atol=.5, rtol=.5)
 
         # equal_nan = True tests
         tests = (
@@ -5405,11 +5395,7 @@ class TestTorchDeviceType(TestCase):
             (float('nan'), float('nan'), True),
         )
 
-        if dtype is torch.half and self.device_type == 'cpu':
-            with self.assertRaises(RuntimeError):
-                self._isclose_helper(tests, device, dtype, True)
-        else:
-            self._isclose_helper(tests, device, dtype, True)
+        self._isclose_helper(tests, device, dtype, True)
 
     # torch.close with equal_nan=True is not implemented for complex inputs
     # see https://github.com/numpy/numpy/issues/15959
@@ -15066,9 +15052,9 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         m1 = torch.tensor([2.34, 4.44], dtype=dtype, device=device)
         m2 = torch.tensor([1.23, 2.33], dtype=dtype, device=device)
 
-        if (dtype == torch.half or dtype == torch.bool):
+        if dtype == torch.bool:
             self.assertRaises(RuntimeError, lambda: m1 - m2)
-        elif (dtype == torch.bfloat16):
+        elif (dtype == torch.bfloat16 or dtype == torch.half):
             # bfloat16 has a lower precision so we have to have a separate check for it
             self.assertEqual(m1 - m2, torch.tensor([1.11, 2.11], dtype=dtype), 0.01)
         else:
