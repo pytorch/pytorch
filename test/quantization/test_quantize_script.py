@@ -1593,6 +1593,7 @@ class TestQuantizeScriptPTSQOps(JitTestCase):
                 self.conv = torch.nn.Conv2d(3, 3, 3)
                 self.sigmoid = torch.nn.Sigmoid()
                 self.tanh = torch.nn.Tanh()
+                self.hardtanh = torch.nn.Hardtanh()
 
             def forward(self, x):
                 x = self.conv(x)
@@ -1639,6 +1640,7 @@ class TestQuantizeScriptPTSQOps(JitTestCase):
                 x = self.tanh(x)
                 x = F.tanh(x)
                 x = torch.tanh(x)
+                x = self.hardtanh(x)
                 x = F.hardtanh(x)
                 x = self.conv(x)
                 return x
