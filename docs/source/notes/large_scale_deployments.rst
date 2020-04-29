@@ -61,6 +61,8 @@ Here's an example:
             /* needs_inputs */ true,
             /* sampling_prob */ 0.01
         );
+        // Note, to enable observers in the model calling thread,
+        // call enableObservers() in the thread before running a model
     }
 
     bool onFunctionEnter(const RecordFunction& fn) {
