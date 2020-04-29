@@ -271,8 +271,8 @@ class AnnotatedConvBnReLUModel(torch.nn.Module):
 class TwoLayerLinearModel(torch.nn.Module):
     def __init__(self):
         super().__init__()
-        self.fc1 = torch.nn.Linear(5, 8).to(dtype=torch.float)
-        self.fc2 = torch.nn.Linear(8, 5).to(dtype=torch.float)
+        self.fc1 = torch.nn.Linear(5, 800).to(dtype=torch.float)
+        self.fc2 = torch.nn.Linear(800, 500).to(dtype=torch.float)
 
     def forward(self, x):
         x = self.fc1(x)

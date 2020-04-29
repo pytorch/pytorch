@@ -338,11 +338,12 @@ class TestPostTrainingStatic(QuantizationTestCase):
             NormalizationTestModel(), test_only_eval_fn, self.calib_data)
         checkQuantized(model)
 
-    @given(qengine=st.sampled_from(("qnnpack", "fbgemm")))
-    def test_save_load_state_dict(self, qengine):
+    #@given(qengine=st.sampled_from(("qnnpack")))
+    def test_save_load_state_dict(self):
         r"""Test PTQ flow of creating a model and quantizing it and saving the quantized state_dict
         Load the quantized state_dict for eval and compare results against original model
         """
+        qengine = 'qnnpack'
         if qengine == 'qnnpack':
             if IS_WINDOWS or TEST_WITH_UBSAN:
                 return
@@ -356,9 +357,26 @@ class TestPostTrainingStatic(QuantizationTestCase):
             test_only_eval_fn(model, self.calib_data)
             model = convert(model)
             x = torch.rand(2, 5, dtype=torch.float)
-            ref = model(x)
-
             quant_state_dict = model.state_dict()
+            #print(quant_state_dict)
+
+            print("Running model here")
+            import psutil
+            for i in range(20):
+                ref = model(x)
+                print("Iteration {}, memory {}".format(i, psutil.virtual_memory()))
+
+            #print(quant_state_dict)
+            '''
+            m = torch.jit.script(model)
+            m.eval()
+            m._c = torch._C._freeze_module(m._c)
+            buffer = io.BytesIO()
+            torch.jit.save(m, buffer)
+            buffer.seek(0)
+            m_l = torch.jit.load(buffer)
+            print("running loaded model")
+            m_l(x)
 
             # Create model again for eval
             model = TwoLayerLinearModel()
@@ -367,14 +385,15 @@ class TestPostTrainingStatic(QuantizationTestCase):
             model = prepare(model)
             model = convert(model)
             new_state_dict = model.state_dict()
-
+            #print(new_state_dict)
             # Check to make sure the state dict keys match original model after convert.
             self.assertEqual(set(new_state_dict.keys()), set(quant_state_dict.keys()))
 
             model.load_state_dict(quant_state_dict)
-
+            print("Calling run")
             out = model(x)
             self.assertEqual(ref, out)
+            '''
 
     def test_activations(self):
         r"""
