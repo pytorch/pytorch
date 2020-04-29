@@ -15,7 +15,7 @@ PrePackConvWeights::PrePackConvWeights(
   const uint32_t kernel_height = conv_p.kernel_dims[1];
   const uint32_t groups = conv_p.groups;
 
-  if (conv_p.transpose && ukernel_type != pytorch_qnnp_ukernel_type_conv && ) {
+  if (conv_p.transpose && ukernel_type != pytorch_qnnp_ukernel_type_conv) {
     pytorch_qnnp_log_error("Wrong micro-kernel for deconvolution");
     assert("QNNPACK Runtime Error.");
   }
@@ -173,8 +173,8 @@ PrePackConvWeights::PrePackConvWeights(
             const uint8_t* const kernel_p = kernel
               + group * conv_p.group_output_channels * kernel_size
               * conv_p.group_input_channels;
-            const uint8_t* const bias_p = bias
-              + group * conv_p.group_output_channels
+            const int32_t* const bias_p = bias
+              + group * conv_p.group_output_channels;
             if (conv_p.transpose) {  // Note that only runtime packing is here
               pytorch_pack_q8deconv_wrq(
                   conv_p.group_output_channels,
