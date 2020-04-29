@@ -221,11 +221,17 @@ Tensor& exponential_(Tensor& self, double lambda, c10::optional<Generator> gen) 
   return self;
 }
 
+// =================================================== Geometric ======================================================
+
+template<typename RNG>
+struct GeometricStub {
+  void operator()(TensorIterator& iter, double p, c10::optional<Generator> gen) {
+    geometric_stub(iter.device_type(), iter, p, gen);
+  }
+};
+
 Tensor& geometric_(Tensor& self, double p, c10::optional<Generator> gen) {
-  TORCH_CHECK(0 < p && p < 1, "geometric_ expects p to be in (0, 1), but got p=", p);
-  auto iter = TensorIterator::nullary_op(self);
-  geometric_stub(iter.device_type(), iter, p, gen);
-  return self;
+  return at::native::templates::geometric_impl_<GeometricStub, Generator>(self, p, gen);
 }
 
 // ==================================================== Uniform =======================================================

@@ -329,14 +329,8 @@ static void exponential_kernel(TensorIterator& iter, double lambda, c10::optiona
 }
 
 static void geometric_kernel(TensorIterator& iter, double p, c10::optional<Generator> gen) {
-  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "geometric_cpu", [&]() {
-    CPUGeneratorImpl* generator = get_generator_or_default<CPUGeneratorImpl>(gen, detail::getDefaultCPUGenerator());
-    std::lock_guard<std::mutex> lock(generator->mutex_);
-    cpu_serial_kernel(iter, [p, generator]() -> scalar_t {
-      at::geometric_distribution<double> geometric(p);
-      return (scalar_t)geometric(generator);
-    });
-  });
+  CPUGeneratorImpl* generator = get_generator_or_default<CPUGeneratorImpl>(gen, detail::getDefaultCPUGenerator());
+  templates::cpu::geometric_kernel(iter, p, generator);
 }
 
 static void log_normal_kernel(TensorIterator& iter, double mean, double std, c10::optional<Generator> gen) {
