@@ -58,7 +58,7 @@ Stmt* StmtNode<Op>::accept_mutator(IRMutator* mutator) {
 }
 
 // Concrete Stmt classes
-class LetStmt : public StmtNode<LetStmt> {
+class TORCH_API LetStmt : public StmtNode<LetStmt> {
  public:
   const Var* var() const {
     return var_;
@@ -92,7 +92,7 @@ class LetStmt : public StmtNode<LetStmt> {
   Stmt* body_;
 };
 
-class Block : public StmtNode<Block> {
+class TORCH_API Block : public StmtNode<Block> {
  public:
   static Block* make(const std::vector<Stmt*>& stmts) {
     std::vector<Stmt*> valid_stmts;
@@ -110,6 +110,9 @@ class Block : public StmtNode<Block> {
 
   int nstmts() const {
     return stmts_.size();
+  }
+  bool empty() const {
+    return stmts_.empty();
   }
 
   void prepend_stmt(Stmt* s) {
@@ -144,6 +147,18 @@ class Block : public StmtNode<Block> {
     set_parent(new_stmt, this);
     return true;
   }
+
+  bool remove_stmt(Stmt* stmt) {
+    auto pos = std::find(stmts_.begin(), stmts_.end(), stmt);
+    if (pos == stmts_.end()) {
+      return false;
+    }
+
+    set_parent(stmt, nullptr);
+    stmts_.erase(pos);
+    return true;
+  }
+
   std::list<Stmt*> stmts() const {
     return stmts_;
   }
@@ -226,7 +241,7 @@ class TORCH_API Store : public StmtNode<Store> {
 // Allocate a buffer of given shapes and dtypes and bind it with the given
 // buffer var. The life span is at most through the current program, until it is
 // explicitly freed. An unfreed memory is likely considered an error.
-class Allocate : public StmtNode<Allocate> {
+class TORCH_API Allocate : public StmtNode<Allocate> {
  public:
   static Allocate* make(
       const VarHandle& buffer_var,
@@ -265,7 +280,7 @@ class Allocate : public StmtNode<Allocate> {
 };
 
 // Free the specific buffer. It is an error.
-class Free : public StmtNode<Free> {
+class TORCH_API Free : public StmtNode<Free> {
  public:
   static Free* make(const VarHandle& buffer_var) {
     return new Free(buffer_var.node());
@@ -281,7 +296,7 @@ class Free : public StmtNode<Free> {
   const Var* buffer_var_;
 };
 
-class Cond : public StmtNode<Cond> {
+class TORCH_API Cond : public StmtNode<Cond> {
  public:
   static Cond* make(
       const ExprHandle& condition,
@@ -328,7 +343,7 @@ class Cond : public StmtNode<Cond> {
   Block* false_stmt_ = nullptr;
 };
 
-class LoopOptions {
+class TORCH_API LoopOptions {
  public:
   // GPU Block Index
   bool is_gpu_block_index() const {
@@ -412,12 +427,16 @@ class LoopOptions {
     return oss.str();
   }
 
+  bool isDefault() const {
+    return gpu_block_index_ == -1 && gpu_thread_index_ == -1;
+  }
+
  private:
   int gpu_block_index_ = -1;
   int gpu_thread_index_ = -1;
 };
 
-class For : public StmtNode<For> {
+class TORCH_API For : public StmtNode<For> {
  public:
   const Var* var() const {
     return var_;
@@ -508,6 +527,10 @@ class For : public StmtNode<For> {
     loop_options_.set_gpu_thread_index(thread_index);
   }
 
+  For* cloneWithNewBody(Stmt* body) const {
+    return new For(var_, start_, stop_, body, loop_options_);
+  }
+
  private:
   const Var* var_;
   const Expr* start_;
@@ -515,6 +538,46 @@ class For : public StmtNode<For> {
   Block* body_;
   LoopOptions loop_options_;
 };
+
+// A backend specific IR Node that implements atomic-add.
+// This node could only shows up as an internal with GPU backends.
+// TODO: move to this an internal IR.
+// TODO: make IR nodes extensible.
+class AtomicAdd : public StmtNode<AtomicAdd> {
+ public:
+  AtomicAdd(
+      const Buf* buf,
+      const std::vector<const Expr*>& indices,
+      const Expr* value)
+      : buf_(buf), indices_(indices), value_(value) {}
+
+  const Var* base_handle() const {
+    return buf_->base_handle();
+  }
+
+  const Buf* buf() const {
+    return buf_;
+  }
+
+  const Expr* flat_index() const {
+    TORCH_CHECK(indices_.size() == 1, "Indices haven't been flattened.");
+    return indices_[0];
+  }
+
+  const Expr* value() const {
+    return value_;
+  }
+
+  const std::vector<const Expr*>& indices() const {
+    return indices_;
+  }
+
+ private:
+  const Buf* buf_;
+  std::vector<const Expr*> indices_;
+  const Expr* value_;
+};
+
 } // namespace tensorexpr
 } // namespace jit
 } // namespace torch

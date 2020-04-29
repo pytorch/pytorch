@@ -237,6 +237,18 @@ static TensorIterator make_index_iterator(const AdvancedIndex& info) {
   return iter;
 }
 
+static TensorIterator make_index_out_iterator(const AdvancedIndex& info, Tensor& result) {
+  auto iter = TensorIterator();
+  iter.dont_compute_common_dtype();
+  iter.add_output(result, info.src.device(), info.src.scalar_type());
+  iter.add_input(info.src);
+  for (auto& index : info.indices) {
+    iter.add_input(index);
+  }
+  iter.build();
+  return iter;
+}
+
 Tensor index(const Tensor & self, TensorList indices) {
   TORCH_CHECK_INDEX(indices.size() <= (size_t)self.dim(), "too many indices for tensor of dimension ", self.dim(), " (got ", indices.size(), ")");
 
@@ -244,6 +256,15 @@ Tensor index(const Tensor & self, TensorList indices) {
   auto iter = make_index_iterator(info);
   index_stub(iter.device_type(), iter, info.indexed_sizes, info.indexed_strides);
   return iter.output();
+}
+
+Tensor& index_out(Tensor& result, const Tensor & self, TensorList indices) {
+  TORCH_CHECK_INDEX(indices.size() <= (size_t)self.dim(), "too many indices for tensor of dimension ", self.dim(), " (got ", indices.size(), ")");
+
+  auto info = make_info(self, indices);
+  auto iter = make_index_out_iterator(info, result);
+  index_stub(iter.device_type(), iter, info.indexed_sizes, info.indexed_strides);
+  return result;
 }
 
 Tensor index_put(const Tensor & self, TensorList indices, const Tensor & value, bool accumulate) {
@@ -507,12 +528,12 @@ Tensor gather_cpu(const Tensor & self, int64_t dim, const Tensor & index, bool s
   return gather_out_cpu(result, self, dim, index, sparse_grad);
 }
 
-Tensor & scatter_cpu_(Tensor & self, int64_t dim, const Tensor & index, const Tensor & src) {
+Tensor & scatter_(Tensor & self, int64_t dim, const Tensor & index, const Tensor & src) {
   scatter_stub(self.device().type(), self, dim, index, src);
   return self;
 }
 
-Tensor & scatter_fill_cpu_(Tensor & self, int64_t dim, const Tensor & index, Scalar src) {
+Tensor & scatter_fill_(Tensor & self, int64_t dim, const Tensor & index, Scalar src) {
   scatter_fill_stub(self.device().type(), self, dim, index, src);
   return self;
 }

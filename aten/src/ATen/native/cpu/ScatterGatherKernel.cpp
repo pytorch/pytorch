@@ -1,84 +1,11 @@
 #include <ATen/native/ScatterGatherShapeChecks.h>
-#include <ATen/native/ReduceOpsUtils.h>
+#include <ATen/native/DispatchStub.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/Parallel.h>
 
 namespace at { namespace native {
 
 namespace {
-
-// Used for `gather`-like methods
-// Test:
-// 1. index.size(d) == self.size(d) for all d != dim
-void gather_shape_check(const Tensor& self, int64_t dim, const Tensor& index) {
-  auto self_dims = ensure_nonempty_dim(self.dim());
-
-  TORCH_CHECK(self_dims == ensure_nonempty_dim(index.dim()),
-    "Index tensor must have the same number of dimensions as input tensor"
-  );
-
-  for (int64_t i = 0; i < self_dims; ++i) {
-    if (i != dim) {
-      TORCH_CHECK(
-        ensure_nonempty_size(index, i) == ensure_nonempty_size(self, i),
-        "Size does not match at dimension ", i,
-        " get ", ensure_nonempty_size(self, i),
-        " vs ", ensure_nonempty_size(index, i)
-      );
-    }
-  }
-}
-
-// Used for `scatter`-like methods
-// Tests:
-//  1. index.size(d) <= self.size(d) for all d != dim
-//  2. index.size(d) <= src.size(d) for all d if src is a Tensor
-void scatter_shape_check(
-  const Tensor& self, int64_t dim, const Tensor& index,
-  const c10::optional<Tensor>& src_opt
-) {
-  bool is_wrong_shape = false;
-  int64_t self_dims = ensure_nonempty_dim(self.dim());
-
-  //  Check: index.size(d) <= self.size(d) for all d != dim
-  for (int64_t d = 0; d < self_dims; ++d) {
-    int64_t index_d_size = ensure_nonempty_size(index, d);
-    if (d == dim) continue;
-    if (index_d_size > ensure_nonempty_size(self, d)) {
-      is_wrong_shape = true;
-      break;
-    }
-  }
-
-  //  Check: index.size(d) <= src.size(d) for all d if src is Tensor
-  if (!is_wrong_shape && src_opt.has_value()) {
-    auto src = src_opt.value();
-    for (int64_t d = 0; d < self_dims; ++d) {
-      int64_t index_d_size = ensure_nonempty_size(index, d);
-      if (index_d_size > ensure_nonempty_size(src, d)) {
-        is_wrong_shape = true;
-        break;
-      }
-    }
-  }
-
-  if (src_opt.has_value()) {
-    auto src = src_opt.value();
-    TORCH_CHECK(!is_wrong_shape,
-      "Expected index ", index.sizes(),
-      " to be smaller than self ", self.sizes(),
-      " apart from dimension ", dim,
-      " and to be smaller size than src ", src.sizes()
-    );
-  }
-  else {
-    TORCH_CHECK(!is_wrong_shape,
-      "Expected index ", index.sizes(),
-      " to be smaller than self ", self.sizes(),
-      " apart from dimension ", dim
-    );
-  }
-}
 
 template <bool is_scatter_like = true>
 struct _cpu_scatter_gather_dim_loop {
@@ -134,30 +61,13 @@ struct cpu_scatter_gather_base_kernel {
       gather_shape_check(self, dim, index);
     }
 
-    auto index_sizes = ensure_nonempty_vec(index.sizes().vec());
-    auto index_strides = ensure_nonempty_vec(index.strides().vec());
-
-    // `dim` is traversed in the kernel,
-    // that is why index.stride(dim) = 0 and index.size(dim) = 1.
-    // Also, index.size(dim) = 1 makes sure that TensorIterator.DimCounter
-    // has the following form : (i_1,..., i_{dim-1}, 0, i_{dim+1},...,i_n).
-    index_sizes[dim] = 1;
-    index_strides[dim] = 0;
-
-    // set self.shape = src.shape = index.shape,
-    // this defines the number of elements to iterate over,
-    // and set self.stride(dim) = src.stride(dim) = 0,
-    // because `dim` is traversed in the kernel.
-    auto self_restrided = restride_dim(self, dim, index_sizes);
-    auto index_restrided = index.as_strided(index_sizes, index_strides);
-    auto src_restrided = restride_dim(src, dim, index_sizes);
-
     auto iter = TensorIterator();
     iter.dont_compute_common_dtype();
     iter.dont_resize_outputs();
-    iter.add_output(self_restrided);
-    iter.add_input(src_restrided, src.device(), src.scalar_type());
-    iter.add_input(index_restrided);
+    iter.declare_static_shape(index.sizes(), /*squash_dim=*/dim);
+    iter.add_output(self);
+    iter.add_input(src, src.device(), src.scalar_type());
+    iter.add_input(index);
     iter.build();
 
     auto self_dim_stride = ensure_nonempty_stride(self, dim);

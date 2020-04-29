@@ -7,6 +7,10 @@ if [[ "${BUILD_ENVIRONMENT}" == *-android* ]]; then
   echo 'Skipping tests'
   exit 0
 fi
+if [[ "${BUILD_ENVIRONMENT}" == *-rocm* ]]; then
+  # temporary to locate some kernel issues on the CI nodes
+  export HSAKMT_DEBUG_LEVEL=4
+fi
 
 # Find where cpp tests and Caffe2 itself are installed
 if [[ "$BUILD_ENVIRONMENT" == *cmake* ]]; then
@@ -144,7 +148,7 @@ if [[ "$BUILD_ENVIRONMENT" == *onnx* ]]; then
     # default pip version is too old(9.0.2), unable to support tag `manylinux2010`.
     # Fix the pip error: Couldn't find a version that satisfies the requirement
     sudo pip install --upgrade pip
-    pip install -q --user -i https://test.pypi.org/simple/ ort-nightly==1.1.0.dev1228
+    pip install -q --user -i https://test.pypi.org/simple/ ort-nightly==1.2.0.dev202004201
   fi
   "$ROOT_DIR/scripts/onnx/test.sh"
 fi

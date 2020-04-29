@@ -15,10 +15,10 @@
 
 #include <ATen/ATen.h>
 
+#include <ATen/core/jit_type.h>
+#include <ATen/core/qualified_name.h>
 #include <string>
 #include <vector>
-#include "ATen/core/jit_type.h"
-#include "ATen/core/qualified_name.h"
 
 namespace torch {
 namespace jit {
@@ -278,7 +278,7 @@ class ScriptModuleSerializer {
 
   void writeByteCode(const Module& module) {
     std::vector<c10::IValue> elements;
-    elements.emplace_back(Tup({BYTECODE_VERSION_STR, BYTECODE_VERSION_NUMBER}));
+    elements.emplace_back(static_cast<int64_t>(caffe2::serialize::kProducedBytecodeVersion));
     moduleMethodsTuple(module, elements);
     auto telements = Tup(std::move(elements));
     writeArchive("bytecode", telements);

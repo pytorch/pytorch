@@ -107,7 +107,7 @@ else()
   set(AT_MKLDNN_ENABLED 0)
   set(AT_MKL_ENABLED 0)
 endif()
-set_property(CACHE BLAS PROPERTY STRINGS "Eigen;ATLAS;OpenBLAS;MKL;vecLib;FLAME")
+set_property(CACHE BLAS PROPERTY STRINGS "Eigen;ATLAS;OpenBLAS;MKL;vecLib;FLAME;Generic")
 message(STATUS "Trying to find preferred BLAS backend of choice: " ${BLAS})
 
 if(BLAS STREQUAL "Eigen")
@@ -147,6 +147,12 @@ elseif(BLAS STREQUAL "vecLib")
   find_package(vecLib REQUIRED)
   include_directories(SYSTEM ${vecLib_INCLUDE_DIR})
   list(APPEND Caffe2_PUBLIC_DEPENDENCY_LIBS ${vecLib_LINKER_LIBS})
+elseif(BLAS STREQUAL "Generic")
+  # On Debian family, the CBLAS ABIs have been merged into libblas.so
+  find_library(BLAS_LIBRARIES blas)
+  message("-- Using BLAS: ${BLAS_LIBRARIES}")
+  list(APPEND Caffe2_PUBLIC_DEPENDENCY_LIBS ${BLAS_LIBRARIES})
+  set(GENERIC_BLAS_FOUND TRUE)
 else()
   message(FATAL_ERROR "Unrecognized BLAS option: " ${BLAS})
 endif()
@@ -155,7 +161,7 @@ if(NOT INTERN_BUILD_MOBILE)
   set(AT_MKL_ENABLED 0)
   set(AT_MKL_MT 0)
   set(USE_BLAS 1)
-  if(NOT (ATLAS_FOUND OR OpenBLAS_FOUND OR MKL_FOUND OR VECLIB_FOUND))
+  if(NOT (ATLAS_FOUND OR OpenBLAS_FOUND OR MKL_FOUND OR VECLIB_FOUND OR GENERIC_BLAS_FOUND))
     message(WARNING "Preferred BLAS (" ${BLAS} ") cannot be found, now searching for a general BLAS library")
     find_package(BLAS)
     if(NOT BLAS_FOUND)
@@ -310,7 +316,15 @@ if(USE_XNNPACK)
 endif()
 
 # ---[ Caffe2 uses cpuinfo library in the thread pool
-if(NOT TARGET cpuinfo)
+if(NOT TARGET cpuinfo AND USE_SYSTEM_CPUINFO)
+  add_library(cpuinfo SHARED IMPORTED)
+  find_library(CPUINFO_LIBRARY cpuinfo)
+  if(NOT CPUINFO_LIBRARY)
+    message(FATAL_ERROR "Cannot find cpuinfo")
+  endif()
+  message("Found cpuinfo: ${CPUINFO_LIBRARY}")
+  set_target_properties(cpuinfo PROPERTIES IMPORTED_LOCATION "${CPUINFO_LIBRARY}")
+elseif(NOT TARGET cpuinfo)
   if(NOT DEFINED CPUINFO_SOURCE_DIR)
     set(CPUINFO_SOURCE_DIR "${CMAKE_CURRENT_LIST_DIR}/../third_party/cpuinfo" CACHE STRING "cpuinfo source directory")
   endif()
@@ -389,7 +403,9 @@ if(USE_PYTORCH_QNNPACK)
       # We build static versions of QNNPACK and pthreadpool but link
       # them into a shared library for Caffe2, so they need PIC.
       set_property(TARGET pytorch_qnnpack PROPERTY POSITION_INDEPENDENT_CODE ON)
-      set_property(TARGET pthreadpool PROPERTY POSITION_INDEPENDENT_CODE ON)
+      if(NOT USE_SYSTEM_PTHREADPOOL)
+        set_property(TARGET pthreadpool PROPERTY POSITION_INDEPENDENT_CODE ON)
+      endif()
       set_property(TARGET cpuinfo PROPERTY POSITION_INDEPENDENT_CODE ON)
     endif()
 
@@ -530,7 +546,17 @@ if(BUILD_TEST)
   set(BENCHMARK_ENABLE_TESTING OFF CACHE BOOL "Disable benchmark testing as we don't need it.")
   # We will not need to install benchmark since we link it statically.
   set(BENCHMARK_ENABLE_INSTALL OFF CACHE BOOL "Disable benchmark install to avoid overwriting vendor install.")
-  add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/benchmark)
+  if(NOT USE_SYSTEM_BENCHMARK)
+    add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/benchmark)
+  else()
+    add_library(benchmark SHARED IMPORTED)
+    find_library(BENCHMARK_LIBRARY benchmark)
+    if(NOT BENCHMARK_LIBRARY)
+      message(FATAL_ERROR "Cannot find google benchmark library")
+    endif()
+    message("-- Found benchmark: ${BENCHMARK_LIBRARY}")
+    set_property(TARGET benchmark PROPERTY IMPORTED_LOCATION ${BENCHMARK_LIBRARY})
+  endif()
   include_directories(${CMAKE_CURRENT_LIST_DIR}/../third_party/benchmark/include)
 
   # Recover build options.
@@ -591,6 +617,9 @@ if(USE_FBGEMM)
   caffe2_update_option(USE_FBGEMM ON)
 else()
   caffe2_update_option(USE_FBGEMM OFF)
+  message(WARNING 
+    "Turning USE_FAKELOWP off as it depends on USE_FBGEMM.")
+  caffe2_update_option(USE_FAKELOWP OFF)
 endif()
 
 
@@ -711,7 +740,7 @@ if(USE_FFMPEG)
 endif()
 
 # ---[ Caffe2 depends on FP16 library for half-precision conversions
-if(NOT TARGET fp16)
+if(NOT TARGET fp16 AND NOT USE_SYSTEM_FP16)
   if(NOT DEFINED FP16_SOURCE_DIR)
     set(FP16_SOURCE_DIR "${CMAKE_CURRENT_LIST_DIR}/../third_party/FP16" CACHE STRING "FP16 source directory")
   endif()
@@ -721,6 +750,9 @@ if(NOT TARGET fp16)
   add_subdirectory(
     "${FP16_SOURCE_DIR}"
     "${CONFU_DEPENDENCIES_BINARY_DIR}/FP16")
+elseif(NOT TARGET fp16 AND USE_SYSTEM_FP16)
+  add_library(fp16 STATIC "/usr/include/fp16.h")
+  set_target_properties(fp16 PROPERTIES LINKER_LANGUAGE C)
 endif()
 list(APPEND Caffe2_DEPENDENCY_LIBS fp16)
 
@@ -800,9 +832,14 @@ if(BUILD_PYTHON)
 
   # These should fill in the rest of the variables, like versions, but resepct
   # the variables we set above
-  set(Python_ADDITIONAL_VERSIONS 3.7 3.6 3.5 2.8 2.7 2.6)
-  find_package(PythonInterp 2.7)
-  find_package(PythonLibs 2.7)
+  set(Python_ADDITIONAL_VERSIONS 3.7 3.6 3.5)
+  find_package(PythonInterp 3.0)
+  find_package(PythonLibs 3.0)
+
+  if(${PYTHONLIBS_VERSION_STRING} VERSION_LESS 3)
+    message(FATAL_ERROR
+      "Found Python libraries version ${PYTHONLIBS_VERSION_STRING}. Python 2 has reached end-of-life and is no longer supported by PyTorch.")
+  endif()
 
   # When building pytorch, we pass this in directly from setup.py, and
   # don't want to overwrite it because we trust python more than cmake
@@ -1130,7 +1167,17 @@ if(USE_GLOO)
     set(__BUILD_BENCHMARK ${BUILD_BENCHMARK})
     set(BUILD_TEST OFF)
     set(BUILD_BENCHMARK OFF)
-    add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/gloo)
+    if(NOT USE_SYSTEM_GLOO)
+      add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/gloo)
+    else()
+      add_library(gloo SHARED IMPORTED)
+      find_library(GLOO_LIBRARY gloo)
+      if(NOT GLOO_LIBRARY)
+        message(FATAL_ERROR "Cannot find gloo")
+      endif()
+      message("Found gloo: ${GLOO_LIBRARY}")
+      set_target_properties(gloo PROPERTIES IMPORTED_LOCATION ${GLOO_LIBRARY})
+    endif()
     # Here is a little bit hacky. We have to put PROJECT_BINARY_DIR in front
     # of PROJECT_SOURCE_DIR with/without conda system. The reason is that
     # gloo generates a new config.h in the binary diretory.
@@ -1226,6 +1273,7 @@ if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO AND NOT INTERN_DISABLE_ONNX)
   if(ONNX_ML)
     add_definitions(-DONNX_ML=1)
   endif()
+  add_definitions(-DONNXIFI_ENABLE_EXT=1)
   # Add op schemas in "ai.onnx.pytorch" domain
   add_subdirectory("${CMAKE_CURRENT_LIST_DIR}/../caffe2/onnx/torch_ops")
   add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/onnx EXCLUDE_FROM_ALL)
