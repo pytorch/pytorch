@@ -318,7 +318,7 @@ bool hitGraphInput(Value* value) {
 // Get the module access path for a Value representing a module instance
 // by tracing back the GetAttr nodes and recording all the attribute
 // names along the way.
-// For example, the module access path will be ['conv1', 'basic_block', 'sub']
+// For example, the module access path will be ['sub', 'basic_block', 'conv1']
 // for `self.sub.basic_block.conv1`
 std::vector<std::string> getModuleAccessPath(Value* instance, Value* self) {
   std::vector<std::string> path;
@@ -339,6 +339,7 @@ std::vector<std::string> getModuleAccessPath(Value* instance, Value* self) {
       iter->debugName(),
       " which is not self:",
       self->debugName());
+  std::reverse(path.begin(), path.end());
   return path;
 }
 
@@ -1620,9 +1621,6 @@ class InsertQuantDeQuantHelper {
     }
   }
 
-  c10::optional<Module> findChildModuleToQuantize(
-      Module& module,
-      Value* child_instance);
   void collectObserverNodesAndValueToQuantize(Module& module, Value*);
   // Cleanup observer nodes from graph and observer modules
   // from module object and ClassType
@@ -1843,19 +1841,6 @@ std::tuple<c10::QScheme, QParamVector> InsertQuantDeQuantHelper::
   return std::make_tuple(qscheme, qparams);
 }
 
-c10::optional<Module> InsertQuantDeQuantHelper::findChildModuleToQuantize(
-    Module& module,
-    Value* child_instance) {
-  TORCH_INTERNAL_ASSERT(
-      child_instance->node()->kind() == prim::GetAttr,
-      "Child instance should come from GetAttr.");
-  auto child_module_name = child_instance->node()->s(attr::name);
-  if (child_module_name.find("_observer_") == std::string::npos) {
-    return module.attr(child_module_name).toModule();
-  }
-  return c10::nullopt;
-}
-
 ModuleMethodVector InsertQuantDeQuantHelper::getInvokedMethods(
     Module& module,
     const std::string& method_name) {
@@ -1875,8 +1860,11 @@ ModuleMethodVector InsertQuantDeQuantHelper::getInvokedMethods(
         // calling method on self
         if (module_instance == graph->inputs()[0]) {
           m = module;
-        } else {
-          m = findChildModuleToQuantize(module, module_instance);
+        } else if (
+            module_instance->node()->kind() == prim::GetAttr &&
+            module_instance->node()->s(attr::name).find("_observer_") ==
+                std::string::npos) {
+          m = getInvokedModule(module, n, graph->inputs()[0]);
         }
         if (m) {
           invoked_methods.push_back({*m, module_method_name});
