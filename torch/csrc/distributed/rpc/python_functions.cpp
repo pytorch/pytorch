@@ -33,20 +33,16 @@ std::shared_ptr<FutureIValue> toFutureIValue(
   // holds a py::object and it would require GIL to delete.
   std::shared_ptr<FutureIValue> fv(new FutureIValue(), DeleteFutureIValue);
 
-  fm->addCallback(
-      [fv](const FutureMessage& fm) {
-        // Don't need to acquire GIL here, as toPyObj acquires GIL
-        // when creating the py::object
-        if (fm.hasError()) {
-          fv->setError(*fm.error());
-        } else {
-          fv->markCompleted(jit::toIValue(
-              toPyObj(
-                  fm.constValue()),
-                  PyObjectType::get()));
-        }
-      }
-  );
+  fm->addCallback([fv](const FutureMessage& fm) {
+    // Don't need to acquire GIL here, as toPyObj acquires GIL
+    // when creating the py::object
+    if (fm.hasError()) {
+      fv->setError(*fm.error());
+    } else {
+      fv->markCompleted(
+          jit::toIValue(toPyObj(fm.constValue()), PyObjectType::get()));
+    }
+  });
 
   return fv;
 }
@@ -154,13 +150,12 @@ std::shared_ptr<FutureIValue> pyRpcBuiltin(
   py::gil_scoped_release release;
   auto scriptCall = std::make_unique<ScriptCall>(op, std::move(stack));
   auto agent = RpcAgent::getCurrentRpcAgent();
-  return toFutureIValue(
-      sendMessageWithAutograd(
-          *agent,
-          dst,
-          std::move(*scriptCall).toMessage(),
-          false,
-          rpcTimeoutSeconds));
+  return toFutureIValue(sendMessageWithAutograd(
+      *agent,
+      dst,
+      std::move(*scriptCall).toMessage(),
+      false,
+      rpcTimeoutSeconds));
 }
 
 PyRRef pyRemoteBuiltin(
@@ -222,13 +217,12 @@ std::shared_ptr<FutureIValue> pyRpcPythonUdf(
   auto pythonCall = std::make_unique<PythonCall>(std::move(serializedPyObj));
 
   auto agent = RpcAgent::getCurrentRpcAgent();
-  return toFutureIValue(
-      sendMessageWithAutograd(
-          *agent,
-          dst,
-          std::move(*pythonCall).toMessage(),
-          true /*forceGradRecording*/,
-          rpcTimeoutSeconds));
+  return toFutureIValue(sendMessageWithAutograd(
+      *agent,
+      dst,
+      std::move(*pythonCall).toMessage(),
+      true /*forceGradRecording*/,
+      rpcTimeoutSeconds));
 }
 
 PyRRef pyRemotePythonUdf(

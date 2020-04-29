@@ -19,10 +19,7 @@ std::shared_ptr<FutureIValue> toFutureIValue(
   auto fv = std::make_shared<FutureIValue>();
 
   fm->addCallback(
-      [fv](const FutureMessage& fm) {
-        fv->markCompleted(IValue());
-      }
-  );
+      [fv](const FutureMessage& fm) { fv->markCompleted(IValue()); });
 
   return fv;
 }

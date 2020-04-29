@@ -335,12 +335,13 @@ PyObject* rpc_init(PyObject* /* unused */) {
                     .def(
                         "wait",
                         [&](FutureIValue& fut) {
-                            auto& pythonRpcHandler = PythonRpcHandler::getInstance();
-                            const auto& value = fut.wait();
-                            pybind11::gil_scoped_acquire ag;
-                            auto obj = torch::jit::toPyObject(value);
-                            pythonRpcHandler.handleException(obj);
-                            return obj;
+                          auto& pythonRpcHandler =
+                              PythonRpcHandler::getInstance();
+                          const auto& value = fut.wait();
+                          pybind11::gil_scoped_acquire ag;
+                          auto obj = torch::jit::toPyObject(value);
+                          pythonRpcHandler.handleException(obj);
+                          return obj;
                         },
                         py::call_guard<py::gil_scoped_release>(),
                         R"(
