@@ -52,6 +52,7 @@ std::vector<std::string> _static_quantizable_call_funcs = {
     "linear",
     "batch_norm",
     "hardswish",
+    "layer_norm",
 };
 
 std::vector<std::string> _dynamic_quantizable_call_funcs = {
@@ -71,6 +72,7 @@ std::vector<std::string> _static_quantizable_aten_funcs = {
     "mul",
     "mul_",
     "hardswish",
+    "layer_norm",
 };
 
 std::vector<std::string> _dynamic_quantizable_aten_funcs = {
