@@ -22,7 +22,7 @@ void checkRoundingMode(const std::string& fn_name) {
   TORCH_WARN_ONCE(
       std::fegetround() != FE_TONEAREST,
       fn_name,
-      " current rounding mode is not set to round-to-nearest-ties-to-even. This may cause accuracy issues in quantized models.");
+      " current rounding mode is not set to round-to-nearest-ties-to-even (FE_TONEAREST). This will cause accuracy issues in quantized models.");
 }
 
 void checkCPUTensor(const std::string& fn_name, Tensor t) {
