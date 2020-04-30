@@ -349,6 +349,16 @@ inline bool push_ivalue_copy_2(std::vector<c10::IValue>& stack, const T& v) {
 }
 
 
+template<typename T, typename F = void>
+struct is_instanceable_2 {
+  //static const bool value = false;
+};
+
+template<typename T>
+struct is_instanceable_2<T, std::void_t<decltype(sizeof(T()))>> {
+  static const bool value = true;
+};
+
 template<class Return, class... Args>
 inline Return Dispatcher::callUnboxedWithDispatchKey(const OperatorHandle& op, DispatchKey dispatchKey, Args... args) const {
   detail::unused_arg_(args...);  // workaround for a false-positive warning about unused parameters in gcc 5
@@ -363,8 +373,10 @@ inline Return Dispatcher::callUnboxedWithDispatchKey(const OperatorHandle& op, D
   auto v = std::vector<bool>{push_ivalue_copy_2(stack, args)...};
 
   // check if we can box some useful types here
-  at::Tensor t;
-  at::Scalar s;
+  bool t1 = is_instanceable_2<at::Tensor>::value;
+  bool t2 = is_instanceable_2<at::Scalar>::value;
+  // sanity check
+  bool t3 = is_instanceable_2<double>::value;
 
   return kernel.template callUnboxed<Return, Args...>(op, std::forward<Args>(args)...);
 }
