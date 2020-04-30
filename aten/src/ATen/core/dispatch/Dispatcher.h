@@ -305,7 +305,6 @@ IVALUE_COPY_FOR_TYPE(int64_t);
 IVALUE_COPY_FOR_TYPE(int32_t);
 IVALUE_COPY_FOR_TYPE(bool);
 
-
 // currently not working with incomplete type
 template <typename T, std::enable_if_t<c10::impl::not_ok_to_box<T>::value>* = nullptr>
 inline bool push_ivalue_copy(std::vector<c10::IValue>& stack, const T& v) {
@@ -318,6 +317,38 @@ inline bool push_ivalue_copy(std::vector<c10::IValue>& stack, const T& v) {
   return true;
 }
 
+// attempt to workaround some(?) incomplete types
+
+// complete and possible to instantiate
+template<typename T, typename F = void>
+struct is_instanceable {
+  static const bool value = false;
+};
+
+template<typename T>
+struct is_instanceable<T, std::void_t<decltype(sizeof(T()))>> {
+  static const bool value = true;
+};
+
+template <typename T, std::enable_if_t<!is_instanceable<T>::value>* = nullptr>
+inline bool push_ivalue_copy_2(std::vector<c10::IValue>& stack, const T& v) {
+  // don't do anything with stack
+  return false;
+}
+
+template <typename T, std::enable_if_t<is_instanceable<T>::value>* = nullptr>
+inline bool push_ivalue_copy_2(std::vector<c10::IValue>& stack, const T& v) {
+  bool to_push = (std::is_constructible<IValue, T>::value &&
+      std::is_convertible<T, IValue>::value) || std::is_same<TensorOptions, T>::value;
+  if (to_push) {
+    torch::jit::push(stack, v);
+    return true;
+  } else {
+    return false;
+  }
+}
+
+
 template<class Return, class... Args>
 inline Return Dispatcher::callUnboxedWithDispatchKey(const OperatorHandle& op, DispatchKey dispatchKey, Args... args) const {
   detail::unused_arg_(args...);  // workaround for a false-positive warning about unused parameters in gcc 5
@@ -327,8 +358,9 @@ inline Return Dispatcher::callUnboxedWithDispatchKey(const OperatorHandle& op, D
   // RECORD_FUNCTION macro will attempt to box the arguments only if we have active observers enabled
   RECORD_FUNCTION(op.schema().name(), std::vector<c10::IValue>{get_ivalue_copy(args)...}, at::FunctionSequenceNumber::peek());
 
-  //std::vector<c10::IValue> stack;
-  //auto v = std::vector<bool>{push_ivalue_copy(stack, args)...};
+  // test
+  std::vector<c10::IValue> stack;
+  auto v = std::vector<bool>{push_ivalue_copy_2(stack, args)...};
 
   return kernel.template callUnboxed<Return, Args...>(op, std::forward<Args>(args)...);
 }
