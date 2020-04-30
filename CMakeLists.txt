@@ -234,6 +234,11 @@ if(USE_SYSTEM_LIBS)
   set(USE_SYSTEM_FXDIV ON)
   set(USE_SYSTEM_BENCHMARK ON)
 endif()
+# prepare the third_party/googletest symlink if the path does not exist
+if(DEFINED GOOGLETEST_SOURCE_DIR AND NOT EXISTS "${CMAKE_SOURCE_DIR}/third_party/googletest")
+  execute_process(COMMAND ln -s ${GOOGLETEST_SOURCE_DIR} third_party/googletest
+      WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+endif()
 
 # Used when building Caffe2 through setup.py
 option(BUILDING_WITH_TORCH_LIBS "Tell cmake if Caffe2 is being built alongside torch libs" ON)
