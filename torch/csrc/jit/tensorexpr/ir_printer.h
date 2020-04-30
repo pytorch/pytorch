@@ -35,7 +35,6 @@ class TORCH_API IRPrinter : public IRVisitor {
 #undef IMM_PRINT_VISIT
   void visit(const Cast* v) override;
   void visit(const Var* v) override;
-  void visit(const Let* v) override;
   void visit(const Ramp* v) override;
   void visit(const Load* v) override;
   void visit(const Broadcast* v) override;
@@ -46,7 +45,6 @@ class TORCH_API IRPrinter : public IRVisitor {
   void visit(const RoundOff* v) override;
   void visit(const ReduceOp* v) override;
 
-  void visit(const LetStmt* v) override;
   void visit(const AtomicAdd* v) override;
   void visit(const Store* v) override;
   void visit(const For* v) override;
@@ -78,8 +76,9 @@ class TORCH_API IRPrinter : public IRVisitor {
   }
   void emitIndent();
 
- private:
   int indent_ = 0;
+
+ private:
   PrinterStream printer_os_;
   UniqueNameManager name_manager_;
 };

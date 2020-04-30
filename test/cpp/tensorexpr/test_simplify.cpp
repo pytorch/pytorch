@@ -178,8 +178,8 @@ void testConstantFoldWithVar() {
     ASSERT_NE(root, nullptr);
     ASSERT_NE(dynamic_cast<const IntImm*>(root->lhs()), nullptr);
 
-    ExprHandle result = Let::make(x, ExprHandle(3), newF);
-    SimpleIRExprEval eval(result);
+    SimpleIRExprEval eval(newF);
+    eval.bindVar(x, ExprHandle(3));
     ASSERT_EQ(eval.value<int>(), 3 * (2 + 4));
   }
 
@@ -192,8 +192,8 @@ void testConstantFoldWithVar() {
     ASSERT_NE(root, nullptr);
     ASSERT_NE(dynamic_cast<const FloatImm*>(root->rhs()), nullptr);
 
-    ExprHandle result = Let::make(x, ExprHandle(3.f), newF);
-    SimpleIRExprEval eval(result);
+    SimpleIRExprEval eval(newF);
+    eval.bindVar(x, ExprHandle(3.f));
     ASSERT_EQ(eval.value<float>(), 3 * (2 + 4));
   }
 }
@@ -210,23 +210,11 @@ void testUnFoldableExpr() {
   ASSERT_EQ(dynamic_cast<const FloatImm*>(root->lhs()), nullptr);
   ASSERT_EQ(dynamic_cast<const FloatImm*>(root->rhs()), nullptr);
 
-  ExprHandle result = Let::make(x, ExprHandle(3.f), newF);
-  result = Let::make(y, ExprHandle(2.f), result);
-  SimpleIRExprEval eval(result);
+  SimpleIRExprEval eval(newF);
+  eval.bindVar(x, ExprHandle(3.f));
+  eval.bindVar(y, ExprHandle(2.f));
   ASSERT_EQ(eval.value<float>(), 9 + 10);
 }
-
-// bool operator==(
-//     const torch::jit::tensorexpr::SimplifierHashType& a,
-//     const torch::jit::tensorexpr::SimplifierHashType& b) {
-//   return a._h == b._h;
-// }
-
-// bool operator==(
-//     const torch::jit::tensorexpr::SimplifierHashType& a,
-//     const size_t s) {
-//   return a._h == s;
-// }
 
 void testHashSimple() {
   KernelScope kernel_scope;
