@@ -1,6 +1,7 @@
 #pragma once
 
 #include <ATen/core/ivalue.h>
+#include <ATen/core/stack.h>
 #include <c10/util/Metaprogramming.h>
 
 namespace c10 {
@@ -33,21 +34,24 @@ namespace impl {
   // supported_primitive_arg_types defines which primitive types we allow in
   // kernel functions as arguments or returns.
   // Additionally, we support lists, dicts and optionals containing these types.
-  using supported_primitive_arg_types = guts::typelist::typelist<
+using supported_primitive_arg_types = guts::typelist::typelist<
     int64_t,
     double,
     bool,
     std::string,
     at::Tensor,
     at::Scalar,
-    c10::QScheme
-  >;
+    c10::QScheme,
+    c10::ScalarType>;
 
-  template<class T, bool AllowDeprecatedTypes, class Enable = void> struct assert_is_valid_input_type {
-    assert_is_valid_input_type() {
-      auto tmap = c10::getCustomClassTypeMap();
-      TORCH_CHECK(c10::isCustomClassRegistered<T>(), "Tried to use undefined class as input argument");
-    }
+template <class T, bool AllowDeprecatedTypes, class Enable = void>
+struct assert_is_valid_input_type {
+  assert_is_valid_input_type() {
+    auto tmap = c10::getCustomClassTypeMap();
+    TORCH_CHECK(
+        c10::isCustomClassRegistered<T>(),
+        "Tried to use undefined class as input argument");
+  }
   };
 
   template<class T, bool AllowDeprecatedTypes>
@@ -97,6 +101,18 @@ namespace impl {
   : assert_is_valid_input_type<T, AllowDeprecatedTypes> {
     static_assert(!std::is_same<T, at::Scalar>::value, "You tried to register a kernel with an unsupported input type: std::vector<Scalar>. Please use List<int64_t>, List<double> or Tensor instead.");
     // TODO static_assert(AllowDeprecatedTypes, "You tried to register a kernel with an unsupported input type: std::vector<T>. Please use List<T> instead.");
+  };
+
+  template<class T, bool AllowDeprecatedTypes>
+  struct assert_is_valid_input_type<c10::ArrayRef<T>, AllowDeprecatedTypes>
+  : assert_is_valid_input_type<T, AllowDeprecatedTypes> {
+    static_assert(!std::is_same<T, at::Scalar>::value, "You tried to register a kernel with an unsupported input type: ArrayRef<Scalar>. Please use List<int64_t>, List<double> or Tensor instead.");
+  };
+
+  template<class T, size_t N, bool AllowDeprecatedTypes>
+  struct assert_is_valid_input_type<std::array<T, N>, AllowDeprecatedTypes>
+  : assert_is_valid_input_type<T, AllowDeprecatedTypes> {
+    static_assert(!std::is_same<T, at::Scalar>::value, "You tried to register a kernel with an unsupported input type: std::array<Scalar, N>. Please use std::array<int64_t, N> instead.");
   };
 
   // The following specialisations of assert_is_valid_input_type are technically not
@@ -165,6 +181,12 @@ namespace impl {
     // TODO static_assert(AllowDeprecatedTypes, "You tried to register a kernel with an unsupported output type: std::vector<T>. Please use List<T> instead.");
   };
 
+  template<class T, size_t N, bool AllowDeprecatedTypes>
+  struct assert_is_valid_output_type<std::array<T, N>, AllowDeprecatedTypes>
+  : assert_is_valid_output_type<T, AllowDeprecatedTypes> {
+    static_assert(!std::is_same<T, at::Scalar>::value, "You tried to register a kernel with an unsupported output type: std::array<Scalar, N>. Please use std::array<int64_t, N> instead.");
+  };
+
   // The following specialisations of assert_is_valid_output_type are technically not
   // necessary since we would hit the base case and show an error message
   // there if they didn't exist, but we can show a better error message
@@ -187,12 +209,22 @@ namespace impl {
     static_assert(guts::false_t<T>::value, "You tried to register a kernel with an unsupported integral output type. Please use int64_t instead.");
   };
 
+  template<class T, bool AllowDeprecatedTypes>
+  struct ivalue_to_arg final {
+    static T call(IValue&& v) {
+      assert_is_valid_input_type<T, AllowDeprecatedTypes>();
+      return std::move(v).to<T>();
+    }
+  };
 
   template<class T, bool AllowDeprecatedTypes>
-  T ivalue_to_arg(IValue&& v) {
-    assert_is_valid_input_type<T, AllowDeprecatedTypes>();
-    return std::move(v).to<T>();
-  }
+  struct ivalue_to_arg<ArrayRef<T>, AllowDeprecatedTypes> final {
+    // If an argument is ArrayRef<T>, convert the IValue to a std::vector<T> and pass that
+    // to the operator. std::vector<T> is implicitly convertible to ArrayRef<T>.
+    static std::vector<T> call(IValue&& v) {
+      return ivalue_to_arg<std::vector<T>, AllowDeprecatedTypes>::call(std::move(v));
+    }
+  };
 
   template<class T, bool AllowDeprecatedTypes>
   IValue return_to_ivalue(T&& v) {
@@ -207,7 +239,7 @@ namespace impl {
     constexpr size_t num_ivalue_args = sizeof...(ivalue_arg_indices);
 
     using IValueArgTypes = typename guts::infer_function_traits_t<Functor>::parameter_types;
-    return (*functor)(ivalue_to_arg<std::remove_cv_t<std::remove_reference_t<guts::typelist::element_t<ivalue_arg_indices, IValueArgTypes>>>, AllowDeprecatedTypes>(
+    return (*functor)(ivalue_to_arg<std::remove_cv_t<std::remove_reference_t<guts::typelist::element_t<ivalue_arg_indices, IValueArgTypes>>>, AllowDeprecatedTypes>::call(
       std::move(torch::jit::peek(*stack, ivalue_arg_indices, num_ivalue_args))
     )...);
   }
@@ -277,24 +309,6 @@ namespace impl {
     }
   };
   template<class KernelFunctor> using wrap_kernel_functor_unboxed = wrap_kernel_functor_unboxed_<KernelFunctor, typename guts::infer_function_traits_t<KernelFunctor>::func_type>;
-
-  template<class KernelFunctor, class... Args>
-  class KernelFactory final {
-    static_assert(std::is_constructible<KernelFunctor, Args...>::value, "Wrong argument types for constructor of kernel functor.");
-
-  public:
-    explicit constexpr KernelFactory(Args... args)
-    : constructor_parameters_(std::move(args)...) {}
-
-    std::unique_ptr<OperatorKernel> operator()() const {
-      return guts::apply(
-        [] (const Args&... params) -> std::unique_ptr<OperatorKernel> {return guts::make_unique_base<OperatorKernel, KernelFunctor>(params...); },
-        constructor_parameters_);
-    }
-
-  private:
-    std::tuple<Args...> constructor_parameters_;
-  };
 }
 
 }

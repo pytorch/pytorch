@@ -382,6 +382,9 @@ void initPythonIRBindings(PyObject* module_) {
           })
       .GS(appendNode)
       .GS(prependNode)
+      .def(
+          "insertConstant",
+          [](Graph& g, IValue ival) { return g.insertConstant(ival); })
       .GS(lint)
       .GS(insertNode);
 #undef GS
@@ -659,7 +662,7 @@ void initPythonIRBindings(PyObject* module_) {
             return py::none();
           })
       .def(
-          "sizes",
+          "strides",
           [](Type& t) -> py::object {
             if (auto ptt = t.expect<TensorType>()) {
               if (auto cs = ptt->strides().concrete_sizes()) {
@@ -738,6 +741,8 @@ void initPythonIRBindings(PyObject* module_) {
       .def(py::init([](TypePtr a) { return ListType::create(a); }))
       .def_static("ofInts", &ListType::ofInts)
       .def_static("ofTensors", &ListType::ofTensors)
+      .def_static("ofFloats", &ListType::ofFloats)
+      .def_static("ofBools", &ListType::ofBools)
       .def("getElementType", &ListType::getElementType);
   py::class_<DictType, Type, std::shared_ptr<DictType>>(m, "DictType")
       .def(py::init([](TypePtr key, TypePtr value) {

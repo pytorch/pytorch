@@ -17,9 +17,6 @@ import torch._six
 from torch.utils import cpp_extension
 from torch.testing._internal.common_utils import TEST_WITH_ROCM, shell
 import torch.distributed as dist
-PY2 = sys.version_info <= (3,)
-PY33 = sys.version_info >= (3, 3)
-PY36 = sys.version_info >= (3, 6)
 
 TESTS = [
     'test_autograd',
@@ -50,14 +47,8 @@ TESTS = [
     'test_nn',
     'test_numba_integration',
     'test_optim',
-    'quantization/test_fake_quant',
-    'quantization/test_numerics',
-    'quantization/test_qat',
-    'quantization/test_quantization',
-    'quantization/test_quantized',
-    'quantization/test_quantized_tensor',
-    'quantization/test_quantized_nn_mods',
-    'quantization/test_quantize_script',
+    'test_mobile_optimizer',
+    'test_quantization',
     'test_sparse',
     'test_serialization',
     'test_show_pickle',
@@ -66,10 +57,10 @@ TESTS = [
     'test_type_hints',
     'test_utils',
     'test_namedtuple_return_api',
-    'test_jit_fuser',
-    'test_jit_simple',
+    'test_jit_profiling',
     'test_jit_legacy',
     'test_jit_fuser_legacy',
+    'test_jit_fuser_profiling',
     'test_tensorboard',
     'test_namedtensor',
     'test_type_promotion',
@@ -78,28 +69,17 @@ TESTS = [
     'test_overrides',
     'test_jit_fuser_te',
     'test_tensorexpr',
+    'distributed/rpc/faulty_agent/test_dist_autograd_spawn',
+    'distributed/rpc/faulty_agent/test_rpc_spawn',
+    'distributed/rpc/jit/test_dist_autograd_spawn',
+    'distributed/rpc/test_dist_autograd_spawn',
+    'distributed/rpc/test_dist_optimizer_spawn',
+    'distributed/rpc/test_rpc_spawn',
+    'test_jit_py3',
+    'test_determination',
+    'distributed/rpc/jit/test_rpc_spawn',
+    'distributed/rpc/faulty_agent/test_rpc_spawn',
 ]
-
-# skip < 3.3 because mock is added in 3.3 and is used in rpc_spawn
-# skip python2 for rpc and dist_autograd tests that do not support python2
-if PY33:
-    TESTS.extend([
-        'distributed/rpc/faulty_agent/test_dist_autograd_spawn',
-        'distributed/rpc/faulty_agent/test_rpc_spawn',
-        'distributed/rpc/jit/test_dist_autograd_spawn',
-        'distributed/rpc/test_dist_autograd_spawn',
-        'distributed/rpc/test_dist_optimizer_spawn',
-        'distributed/rpc/test_rpc_spawn',
-    ])
-
-# skip < 3.6 b/c fstrings added in 3.6
-if PY36:
-    TESTS.extend([
-        'test_jit_py3',
-        'test_determination',
-        'distributed/rpc/jit/test_rpc_spawn',
-        'distributed/rpc/faulty_agent/test_rpc_spawn',
-    ])
 
 WINDOWS_BLACKLIST = [
     'distributed/rpc/faulty_agent/test_dist_autograd_spawn',
@@ -127,6 +107,7 @@ ROCM_BLACKLIST = [
     'test_jit_legacy',
     'test_jit_fuser_legacy',
     'test_tensorexpr',
+    'test_type_hints',
 ]
 
 # These tests are slow enough that it's worth calculating whether the patch
@@ -138,8 +119,9 @@ SLOW_TESTS = [
     'test_jit_legacy',
     'test_dataloader',
     'test_overrides',
-    'test_jit_simple',
     'test_jit',
+    'test_jit_profiling',
+    'test_jit_fuser_profiling',
     'test_torch',
     'distributed/test_distributed',
     'distributed/rpc/test_rpc_spawn',
@@ -156,8 +138,7 @@ SLOW_TESTS = [
     'test_tensorboard',
     'distributed/test_c10d',
     'distributed/test_c10d_spawn',
-    'quantization/test_quantized',
-    'quantization/test_quantization',
+    'test_quantization',
     'test_determination',
 ]
 _DEP_MODULES_CACHE = {}
@@ -579,11 +560,8 @@ def get_dep_modules(test):
         ],
     )
     # HACK: some platforms default to ascii, so we can't just run_script :(
-    if PY2:
-        finder.run_script(test_location)
-    else:
-        with open(test_location, 'r', encoding='utf-8') as fp:
-            finder.load_module('__main__', fp, test_location, ('', 'r', 1))
+    with open(test_location, 'r', encoding='utf-8') as fp:
+        finder.load_module('__main__', fp, test_location, ('', 'r', 1))
 
     dep_modules = set(finder.modules.keys())
     _DEP_MODULES_CACHE[test] = dep_modules

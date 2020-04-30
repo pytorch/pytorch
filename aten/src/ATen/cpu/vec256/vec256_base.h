@@ -13,6 +13,7 @@
 #include <ATen/NumericUtils.h>
 #include <c10/util/C++17.h>
 #include <c10/util/BFloat16.h>
+#include <c10/util/BFloat16-math.h>
 #include <c10/util/math_compat.h>
 #include <ATen/native/cpu/zmath.h>
 #include <c10/util/TypeCast.h>
@@ -633,7 +634,7 @@ Vec256<T> inline clamp_min(const Vec256<T> &a, const Vec256<T> &min_vec) {
 
 struct Vec256i;
 
-#ifdef __AVX2__
+#ifdef CPU_CAPABILITY_AVX2
 
 template <class T, typename Op>
 static inline Vec256<T> bitwise_binary_op(const Vec256<T> &a, const Vec256<T> &b, Op op) {
@@ -666,11 +667,12 @@ inline Vec256<T> operator^(const Vec256<T>& a, const Vec256<T>& b) {
 
 template<class T, typename Op>
 static inline Vec256<T> bitwise_binary_op(const Vec256<T> &a, const Vec256<T> &b, Op op) {
-  __at_align32__ intmax_t buffer[256 / sizeof(intmax_t)];
-  for (ptrdiff_t i = 0; i < sizeof(buffer) / sizeof(buffer[0]); ++ i) {
-    const intmax_t *i_a_ptr = reinterpret_cast<const intmax_t*>((const T*) a) + i;
-    const intmax_t *i_b_ptr = reinterpret_cast<const intmax_t*>((const T*) b) + i;
-    buffer[i] = op(*i_a_ptr, *i_b_ptr);
+  static constexpr uint32_t element_no = 32 / sizeof(intmax_t);
+  __at_align32__ intmax_t buffer[element_no];
+  const intmax_t *a_ptr = reinterpret_cast<const intmax_t*>((const T*) a);
+  const intmax_t *b_ptr = reinterpret_cast<const intmax_t*>((const T*) b);
+  for (uint32_t i = 0U; i < element_no; ++ i) {
+    buffer[i] = op(a_ptr[i], b_ptr[i]);
   }
   return Vec256<T>::loadu(buffer);
 }
@@ -691,7 +693,7 @@ inline Vec256<T> operator^(const Vec256<T>& a, const Vec256<T>& b) {
 #endif
 
 template <typename T>
-inline T fmadd(const T& a, const T& b, const T& c) {
+inline Vec256<T> fmadd(const Vec256<T>& a, const Vec256<T>& b, const Vec256<T>& c) {
   return a * b + c;
 }
 

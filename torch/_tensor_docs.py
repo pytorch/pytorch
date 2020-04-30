@@ -173,6 +173,21 @@ abs_() -> Tensor
 In-place version of :meth:`~Tensor.abs`
 """)
 
+add_docstr_all('absolute',
+               r"""
+absolute() -> Tensor
+
+Alias for :func:`abs`
+""")
+
+add_docstr_all('absolute_',
+               r"""
+absolute_() -> Tensor
+
+In-place version of :meth:`~Tensor.absolute`
+Alias for :func:`abs_`
+""")
+
 add_docstr_all('acos',
                r"""
 acos() -> Tensor
@@ -320,9 +335,9 @@ Examples::
 
 
     # Example 2: Applying a per-channel-scale
-    def scale_channels(input, scale):
-        scale = scale.refine_names('C')
-        return input * scale.align_as(input)
+    >>> def scale_channels(input, scale):
+    >>>    scale = scale.refine_names('C')
+    >>>    return input * scale.align_as(input)
 
     >>> num_channels = 3
     >>> scale = torch.randn(num_channels, names=('C',))
@@ -1518,6 +1533,13 @@ add_docstr_all('inverse',
 inverse() -> Tensor
 
 See :func:`torch.inverse`
+""")
+
+add_docstr_all('isclose',
+               r"""
+isclose(other, rtol=1e-05, atol=1e-08, equal_nan=False) -> Tensor
+
+See :func:`torch.isclose`
 """)
 
 add_docstr_all('is_contiguous',
@@ -3431,6 +3453,14 @@ add_docstr_all('stft',
 stft(frame_length, hop, fft_size=None, return_onesided=True, window=None, pad_end=0) -> Tensor
 
 See :func:`torch.stft`
+""")
+
+add_docstr_all('istft',
+               r"""
+istft(n_fft, hop_length=None, win_length=None, window=None,
+ center=True, normalized=False, onesided=True, length=None) -> Tensor
+
+See :func:`torch.istft`
 """)
 
 add_docstr_all('fft',

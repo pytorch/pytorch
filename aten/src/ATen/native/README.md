@@ -325,16 +325,17 @@ set of reviewers.
 ### `use_c10_dispatcher`
 
 ```
-use_c10_dispatcher: 'unboxed_only'
 use_c10_dispatcher: 'with_codegenerated_unboxing_wrapper'
 use_c10_dispatcher: 'full'
 ```
 
 This will indicate the level of integration with the c10 dispatcher.
 If setting this to 'full' works for your operator, please do.
-For a few corner cases, enabling this might not compile
-successfully, so setting this to 'unboxed_only' is a
-workaround. The default is 'with_codegenerated_unboxing_wrapper'.
+This will enabled the full templated boxing and unboxing for your operator.
+Some ops use features that aren't supported by those templates yet,
+and enabling `use_c10_dispatcher: full` for those will result in a compiler error.
+For those, use `use_c10_dispatcher: 'with_codegenerated_unboxing_wrapper'` instead,
+or just omit the argument because 'with_codegenerated_unboxing_wrapper' is the default.
 
 ### `manual_kernel_registration`
 

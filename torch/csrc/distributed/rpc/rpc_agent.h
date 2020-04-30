@@ -10,8 +10,12 @@
 namespace torch {
 namespace distributed {
 namespace rpc {
-
-constexpr auto kDefaultRpcTimeout = std::chrono::seconds(60);
+// Default RPC timeout
+constexpr float kDefaultRpcTimeoutSeconds = 60;
+// Unset RPC timeout. This is the value agent::send() will have if user does not
+// pass in a specific timeout, and indicates that we must use the default
+// timeout for RPCs.
+constexpr float kUnsetRpcTimeout = -1;
 constexpr auto kDefaultInitMethod = "env://";
 
 using steady_clock_time_point =
@@ -24,14 +28,13 @@ using TypeResolver =
 
 struct RpcBackendOptions {
   RpcBackendOptions()
-      : RpcBackendOptions(kDefaultRpcTimeout, kDefaultInitMethod) {}
+      : RpcBackendOptions(kDefaultRpcTimeoutSeconds, kDefaultInitMethod) {}
 
-  RpcBackendOptions(
-      std::chrono::milliseconds rpcTimeout,
-      std::string initMethod)
-      : rpcTimeout(rpcTimeout), initMethod(initMethod) {}
+  RpcBackendOptions(float rpcTimeoutSeconds, std::string initMethod)
+      : rpcTimeoutSeconds(rpcTimeoutSeconds),
+        initMethod(std::move(initMethod)) {}
 
-  std::chrono::milliseconds rpcTimeout;
+  float rpcTimeoutSeconds;
   std::string initMethod;
 };
 
@@ -147,7 +150,8 @@ class TORCH_API RpcAgent {
   // should be ignored by the caller.
   virtual std::shared_ptr<FutureMessage> send(
       const WorkerInfo& to,
-      Message&& message) = 0;
+      Message&& message,
+      const float rpcTimeoutSeconds = kUnsetRpcTimeout) = 0;
 
   // Retries sending the message up to maxRetries times until an ACK is
   // receieved. The duration between consecutive sends is increased over
@@ -303,11 +307,6 @@ class TORCH_API RpcAgent {
     return std::chrono::time_point_cast<std::chrono::milliseconds>(
         std::chrono::steady_clock::now() + timedelta);
   }
-
-  // storing futures before adding callback
-  std::vector<
-      std::pair<std::shared_ptr<FutureMessage>, std::shared_ptr<RpcRetryInfo>>>
-      futures;
 
   // Condition Variable to signal when the rpcRetryMap_ has been populated.
   std::condition_variable rpcRetryMapCV_;

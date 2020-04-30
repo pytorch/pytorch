@@ -1,5 +1,7 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 
+from typing import List, Optional
+
 import torch
 from .qconfig import QConfig
 from torch.jit._recursive import wrap_cpp_module
@@ -80,12 +82,14 @@ def get_scripted_qconfig_dict(qconfig_dict):
 
 def _prepare_script(model, qconfig_dict, is_dynamic):
     _check_is_script_module(model)
+    if any(map(lambda x : not isinstance(x, str), qconfig_dict.keys())):
+        raise ValueError('qconfig_dict should contain names(str) as keys.')
     scripted_qconfig_dict = get_scripted_qconfig_dict(qconfig_dict)
     return wrap_cpp_module(torch._C._jit_pass_insert_observers(model._c,
                                                                'forward',
                                                                scripted_qconfig_dict,
                                                                False,
-                                                               is_dynamic)) 
+                                                               is_dynamic))
 
 def prepare_script(model, qconfig_dict, inplace=False):
     if not inplace:
@@ -111,14 +115,14 @@ def convert_script(model, inplace=False, debug=False):
 def convert_dynamic_script(model, debug=False):
     return _convert_script(model, is_dynamic=True, debug=debug)
 
-def _quantize_script(model, qconfig_dict, run_fn, run_args, is_dynamic, debug):
+def _quantize_script(model, qconfig_dict, run_fn=None, run_args=None, is_dynamic=False, debug=False):
     _check_is_script_module(model)
     _check_forward_method(model)
     torch._C._jit_pass_dedup_module_uses(model._c)
     model = wrap_cpp_module(torch._C._jit_pass_fold_convbn(model._c))
     if is_dynamic:
         model = prepare_dynamic_script(model, qconfig_dict)
-        run_fn(model._c._get_method('forward'), *run_args)
+        model(*run_args)
         model = convert_dynamic_script(model, debug)
     else:
         model = prepare_script(model, qconfig_dict, True)
@@ -133,5 +137,5 @@ def quantize_script(model, qconfig_dict, run_fn, run_args, inplace=False, debug=
         model = model.copy()
     return _quantize_script(model, qconfig_dict, run_fn, run_args, is_dynamic=False, debug=debug)
 
-def quantize_dynamic_script(model, qconfig_dict, run_fn, run_args, debug=False):
-    return _quantize_script(model, qconfig_dict, run_fn, run_args, is_dynamic=True, debug=debug)
+def quantize_dynamic_script(model, qconfig_dict, sample_model_inputs, debug=False):
+    return _quantize_script(model, qconfig_dict, run_args=sample_model_inputs, is_dynamic=True, debug=debug)

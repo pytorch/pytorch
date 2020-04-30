@@ -2,12 +2,13 @@
 
 #include <ATen/cpu/vec256/intrinsics.h>
 #include <ATen/cpu/vec256/vec256_base.h>
+#include <c10/macros/Macros.h>
 
 namespace at {
 namespace vec256 {
 namespace {
 
-#ifdef __AVX2__
+#ifdef CPU_CAPABILITY_AVX2
 
 struct Vec256i {
 protected:
@@ -29,9 +30,9 @@ public:
 
 struct Vec256i {};  // dummy definition to make Vec256i always defined
 
-#endif // __AVX2__
+#endif // CPU_CAPABILITY_AVX2
 
-#ifdef __AVX2__
+#ifdef CPU_CAPABILITY_AVX2
 
 template <>
 class Vec256<int64_t> : public Vec256i {
@@ -593,9 +594,10 @@ Vec256<int64_t> inline emulate(const Vec256<int64_t>& a, const Vec256<int64_t>& 
 // This could be implemented more efficiently using epi32 instructions
 // This is also technically avx compatible, but then we'll need AVX
 // code for add as well.
+// Note: intentionally ignores undefined behavior like (-lowest * -1).
 template <>
 Vec256<int64_t> inline operator*(const Vec256<int64_t>& a, const Vec256<int64_t>& b) {
-  return emulate(a, b, [](int64_t a_point, int64_t b_point){return a_point * b_point;});
+  return emulate(a, b, [](int64_t a_point, int64_t b_point) __ubsan_ignore_undefined__ {return a_point * b_point;});
 }
 
 template <>

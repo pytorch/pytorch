@@ -58,6 +58,9 @@ namespace jit {
   _(ModuleCloneInstance)               \
   _(ModuleConstant)                    \
   _(ModuleParameter)                   \
+  _(ModuleDeepcopy)                    \
+  _(ModuleDeepcopyString)              \
+  _(ModuleDeepcopyAliasing)            \
   _(ModuleDefine)                      \
   _(QualifiedName)                     \
   _(ClassImport)                       \
@@ -117,7 +120,8 @@ namespace jit {
   _(GPU_FusionCodeGen2)          \
   _(GPU_FusionSimplePWise)       \
   _(GPU_FusionExecKernel)        \
-  _(GPU_FusionForLoop)
+  _(GPU_FusionForLoop)           \
+  _(GPU_FusionLoopUnroll)
 #else
 #define TH_FORALL_TESTS_CUDA(_) \
   _(ArgumentSpec)               \

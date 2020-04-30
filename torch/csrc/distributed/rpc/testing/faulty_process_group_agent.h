@@ -11,7 +11,7 @@ struct FaultyProcessGroupRpcBackendOptions
     : public ProcessGroupRpcBackendOptions {
   FaultyProcessGroupRpcBackendOptions(
       int num_send_recv_threads,
-      std::chrono::milliseconds rpc_timeout,
+      float rpc_timeout,
       std::string init_method,
       std::vector<std::string> messages_to_fail,
       int num_fail_sends = 0)
@@ -39,8 +39,11 @@ class FaultyProcessGroupAgent : public ProcessGroupAgent {
       int failNumSends = 0);
 
   // Faulty send function for this class.
-  std::shared_ptr<FutureMessage> send(const WorkerInfo& to, Message&& message)
-      override;
+  std::shared_ptr<FutureMessage> send(
+      const WorkerInfo& to,
+      Message&& message,
+      const float rpcTimeoutSeconds =
+          torch::distributed::rpc::kUnsetRpcTimeout) override;
 
  protected:
   // This function checks the messageTypesToFail_ to determine whether to use

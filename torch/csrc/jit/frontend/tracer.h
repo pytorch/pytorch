@@ -45,6 +45,7 @@ struct TORCH_API TracingState
 
   std::shared_ptr<Graph> graph;
   bool warn = true;
+  bool strict = true;
   bool force_outplace = false;
   std::function<std::string(const Variable& var)> lookup_var_name_fn =
       [](const Variable& var) { return ""; };
@@ -153,6 +154,7 @@ using warn_fn_type = void (*)(const std::string& msg);
 TORCH_API extern const char* WARN_PYTHON_DATAFLOW;
 TORCH_API extern const char* WARN_CONSTRUCTOR;
 TORCH_API extern const char* WARN_RESIZE;
+TORCH_API extern const char* STRICT_TRACER_MSG;
 TORCH_API void _do_warn(const char* _reason, const char* _kind);
 inline void warn(const char* _reason, const char* _kind = nullptr) {
   if (const auto& state = getTracingState()) {
@@ -206,6 +208,7 @@ TORCH_API std::pair<std::shared_ptr<TracingState>, Stack> trace(
     Stack inputs,
     const std::function<Stack(Stack)>& traced_fn,
     std::function<std::string(const Variable&)> var_name_lookup_fn,
+    bool strict = true,
     bool force_outplace = false,
     Module* self = nullptr);
 
@@ -240,6 +243,11 @@ TORCH_API void addInputs(
     const char* name,
     ArrayRef<at::Tensor> value,
     bool allow_undefined = false);
+TORCH_API void addInputs(
+    Node* n,
+    const char* name,
+    ArrayRef<c10::intrusive_ptr<c10::ivalue::Object>> value,
+    const ClassTypePtr& class_type);
 TORCH_API void addInputs(Node* n, const char* name, ArrayRef<double> value);
 TORCH_API void addInputs(Node* n, const char* name, const std::string& value);
 TORCH_API void addInputs(
@@ -270,7 +278,10 @@ TORCH_API void addInputs(
     Node* n,
     const char* name,
     const c10::optional<at::MemoryFormat>& value);
-TORCH_API void addInputs(Node* n, const char* name, const c10::optional<at::Generator>& value);
+TORCH_API void addInputs(
+    Node* n,
+    const char* name,
+    const c10::optional<at::Generator>& value);
 
 inline void addInputs(
     Node* n,

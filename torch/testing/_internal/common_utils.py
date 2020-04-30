@@ -30,15 +30,14 @@ from copy import deepcopy
 from numbers import Number
 import tempfile
 import json
-if sys.version_info[0] == 2:
-    from urllib2 import urlopen  # noqa f811
-else:
-    from urllib.request import urlopen
+from urllib.request import urlopen
 
 import __main__
 import errno
 
 from torch.testing._internal import expecttest
+from torch.testing import get_all_dtypes
+from torch.testing import get_all_complex_dtypes
 
 import torch
 import torch.cuda
@@ -99,17 +98,21 @@ parser.add_argument('--subprocess', action='store_true',
 parser.add_argument('--seed', type=int, default=1234)
 parser.add_argument('--accept', action='store_true')
 parser.add_argument('--ge_config', type=str)
+parser.add_argument('--repeat', type=int, default=1)
 parser.add_argument('--test_bailouts', action='store_true')
 
 GRAPH_EXECUTOR = ProfilingMode.SIMPLE if IS_SANDCASTLE else ProfilingMode.PROFILING
 args, remaining = parser.parse_known_args()
 if args.ge_config == 'legacy':
     GRAPH_EXECUTOR = ProfilingMode.LEGACY
-elif args.ge_config == 'simple':
+elif args.ge_config == 'profiling':
+    GRAPH_EXECUTOR = ProfilingMode.PROFILING
+else:
     GRAPH_EXECUTOR = ProfilingMode.SIMPLE
 
 TEST_BAILOUTS = args.test_bailouts
 TEST_IN_SUBPROCESS = args.subprocess
+REPEAT_COUNT = args.repeat
 SEED = args.seed
 if not expecttest.ACCEPT:
     expecttest.ACCEPT = args.accept
@@ -206,15 +209,15 @@ def run_tests(argv=UNITTEST_ARGS):
                 test_source = 'python-unittest'
 
             test_report_path = os.path.join('test-reports', test_source)
-            if PY3:
-                os.makedirs(test_report_path, exist_ok=True)
-            else:
-                if not os.path.exists(test_report_path):
-                    os.makedirs(test_report_path)
+            os.makedirs(test_report_path, exist_ok=True)
             verbose = '--verbose' in argv or '-v' in argv
             if verbose:
                 print('Test results will be stored in {}'.format(test_report_path))
             unittest.main(argv=argv, testRunner=xmlrunner.XMLTestRunner(output=test_report_path, verbosity=2 if verbose else 1))
+        elif REPEAT_COUNT > 1:
+            for _ in range(REPEAT_COUNT):
+                if not unittest.main(exit=False, argv=argv).result.wasSuccessful():
+                    sys.exit(-1)
         else:
             unittest.main(argv=argv)
 
@@ -248,14 +251,7 @@ def _check_module_exists(name):
     our tests, e.g., setting multiprocessing start method when imported
     (see librosa/#747, torchvision/#544).
     """
-    if not PY3:  # Python 2
-        import imp
-        try:
-            imp.find_module(name)
-            return True
-        except ImportError:
-            return False
-    elif not PY34:  # Python [3, 3.4)
+    if not PY34:  # Python [3, 3.4)
         import importlib
         loader = importlib.find_loader(name)
         return loader is not None
@@ -270,16 +266,12 @@ TEST_SCIPY = _check_module_exists('scipy')
 TEST_MKL = torch.backends.mkl.is_available()
 TEST_NUMBA = _check_module_exists('numba')
 
-# Skip the test until issue #28313 gets fixed on Py2.
-TEST_DILL = _check_module_exists('dill') and PY3
+TEST_DILL = _check_module_exists('dill')
 
-# On Py2, importing librosa 0.6.1 triggers a TypeError (if using newest joblib)
-# see librosa/librosa#729.
-# TODO: allow Py2 when librosa 0.6.2 releases
-TEST_LIBROSA = _check_module_exists('librosa') and PY3
+TEST_LIBROSA = _check_module_exists('librosa')
 
 # Python 2.7 doesn't have spawn
-NO_MULTIPROCESSING_SPAWN = os.environ.get('NO_MULTIPROCESSING_SPAWN', '0') == '1' or sys.version_info[0] == 2
+NO_MULTIPROCESSING_SPAWN = os.environ.get('NO_MULTIPROCESSING_SPAWN', '0') == '1'
 TEST_WITH_ASAN = os.getenv('PYTORCH_TEST_WITH_ASAN', '0') == '1'
 TEST_WITH_TSAN = os.getenv('PYTORCH_TEST_WITH_TSAN', '0') == '1'
 TEST_WITH_UBSAN = os.getenv('PYTORCH_TEST_WITH_UBSAN', '0') == '1'
@@ -464,10 +456,7 @@ def to_gpu(obj, type_map=None):
 
 
 def get_function_arglist(func):
-    if sys.version_info > (3,):
-        return inspect.getfullargspec(func).args
-    else:
-        return inspect.getargspec(func).args
+    return inspect.getfullargspec(func).args
 
 
 def set_rng_seed(seed):
@@ -487,6 +476,12 @@ def freeze_rng_state():
         torch.cuda.set_rng_state(cuda_rng_state)
     torch.set_rng_state(rng_state)
 
+@contextlib.contextmanager
+def set_default_dtype(dtype):
+    saved_dtype = torch.get_default_dtype()
+    torch.set_default_dtype(dtype)
+    yield
+    torch.set_default_dtype(saved_dtype)
 
 def iter_indices(tensor):
     if tensor.dim() == 0:
@@ -555,7 +550,7 @@ class CudaMemoryLeakCheck():
         for i, (before, after) in enumerate(zip(self.befores, afters)):
             if not TEST_WITH_ROCM:
                 self.testcase.assertEqual(
-                    before, after, '{} leaked {} bytes CUDA memory on device {}'.format(
+                    before, after, message='{} leaked {} bytes CUDA memory on device {}'.format(
                         self.name, after - before, i))
             else:
                 # TODO: Investigate ROCm memory leaking.
@@ -660,7 +655,7 @@ class TestCase(expecttest.TestCase):
     exact_dtype = False
 
     def __init__(self, method_name='runTest'):
-        super(TestCase, self).__init__(method_name)
+        super().__init__(method_name)
 
         test_method = getattr(self, method_name)
         # Wraps the tested method if we should do CUDA memory check.
@@ -717,13 +712,6 @@ class TestCase(expecttest.TestCase):
         check_disabled(str(self))
 
         set_rng_seed(SEED)
-
-    def assertTensorsSlowEqual(self, x, y, prec=None, message=''):
-        max_err = 0
-        self.assertEqual(x.size(), y.size())
-        for index in iter_indices(x):
-            max_err = max(max_err, abs(x[index] - y[index]))
-        self.assertLessEqual(max_err, prec, message)
 
     def genSparseTensor(self, size, sparse_dim, nnz, is_uncoalesced, device='cpu'):
         # Assert not given impossible combination, where the sparse dims have
@@ -796,31 +784,83 @@ class TestCase(expecttest.TestCase):
 
         return tg
 
-    def assertEqual(self, x, y, prec=None, message='', allow_inf=False, exact_dtype=None):
+    # Some analysis of tolerance by logging tests from test_torch.py can be found
+    # in https://github.com/pytorch/pytorch/pull/32538.
+    # dtype name : (rtol, atol)
+    dtype_precisions = {
+        'float16': (0.001, 1e-5),
+        'bfloat16': (0.016, 1e-5),
+        'float32': (1.3e-6, 1e-5),
+        'float64': (1e-7, 1e-7),
+        'complex32': (0.001, 1e-5),
+        'complex64': (1.3e-6, 1e-5),
+        'complex128': (1e-7, 1e-7),
+    }
+
+    # todo: implement numpy-like issubdtype
+    def is_integral(self, dtype):
+        # Skip complex/quantized types
+        dtypes = [x for x in get_all_dtypes() if x not in get_all_complex_dtypes()]
+        return dtype in dtypes and not dtype.is_floating_point
+
+    # accepts tensors, dtypes, or np.ndarrays
+    def get_default_tolerance(self, a, b=None):
+        if b is None:
+            dtype = torch.float
+            if isinstance(a, torch.Tensor):
+                dtype = a.dtype
+            elif isinstance(a, torch.dtype):
+                dtype = a
+            elif TEST_NUMPY and isinstance(a, numpy.ndarray):
+                # Some tests call assertEqual with numpy Unicode.
+                if numpy.issubdtype(a.dtype, numpy.dtype('U')):
+                    dtype = torch.float
+                else:
+                    dtype = torch.from_numpy(a).dtype
+            if self.is_integral(dtype):
+                return (0, 0)
+            dtype = str(dtype).split('.')[-1]
+            return self.dtype_precisions.get(dtype, (self.precision, self.precision))
+
+        a_tol = self.get_default_tolerance(a)
+        b_tol = self.get_default_tolerance(b)
+        return (max(a_tol[0], b_tol[0]), max(a_tol[1], b_tol[1]))
+
+    def assertEqual(self, x, y, message='', *, atol=None, rtol=None, allow_inf=False, exact_dtype=None):
+        # we allow setting an absolute tolerance as a positional arg for BC with legacy testing behavior.
+        if isinstance(message, Number):
+            self.assertIsNone(atol, "don't combine positional prec and atol")
+            self.assertIsNone(rtol, "don't combine positionial prec and rtol")
+            atol = message
+            message = ''
+            rtol = 0
+        elif atol is None and rtol is None:
+            # if both are None, use defaults per-dtype
+            (rtol, atol) = self.get_default_tolerance(x, y)
+        else:
+            if rtol is None:
+                rtol = 0
+            if atol is None:
+                atol = 0
+
         if exact_dtype is None:
             exact_dtype = self.exact_dtype
 
-        if isinstance(prec, str) and message == '':
-            message = prec
-            prec = None
-        if prec is None:
-            prec = self.precision
-
         if isinstance(x, torch.Tensor) and isinstance(y, Number):
-            self.assertEqual(x.item(), y, prec=prec, message=message,
+            self.assertEqual(x.item(), y, atol=atol, rtol=rtol, message=message,
                              allow_inf=allow_inf, exact_dtype=exact_dtype)
         elif isinstance(y, torch.Tensor) and isinstance(x, Number):
-            self.assertEqual(x, y.item(), prec=prec, message=message,
+            self.assertEqual(x, y.item(), atol=atol, rtol=rtol, message=message,
                              allow_inf=allow_inf, exact_dtype=exact_dtype)
         elif isinstance(x, torch.Tensor) and isinstance(y, numpy.bool_):
-            self.assertEqual(x.item(), y, prec=prec, message=message,
+            self.assertEqual(x.item(), y, atol=atol, rtol=rtol, message=message,
                              allow_inf=allow_inf, exact_dtype=exact_dtype)
         elif isinstance(y, torch.Tensor) and isinstance(x, numpy.bool_):
-            self.assertEqual(x, y.item(), prec=prec, message=message,
+            self.assertEqual(x, y.item(), atol=atol, rtol=rtol, message=message,
                              allow_inf=allow_inf, exact_dtype=exact_dtype)
         elif isinstance(x, torch.Tensor) and isinstance(y, torch.Tensor):
             def assertTensorsEqual(a, b):
-                super(TestCase, self).assertEqual(a.size(), b.size(), message)
+                super(__class__, self).assertEqual(a.size(), b.size(), message)
                 if exact_dtype:
                     self.assertEqual(a.dtype, b.dtype)
                 if a.numel() > 0:
@@ -841,116 +881,102 @@ class TestCase(expecttest.TestCase):
                             a = a.to(torch.int)
                             b = b.to(torch.int)
 
-                        diff = a - b
-                        if a.dtype.is_complex or a.dtype.is_floating_point:
-                            # check that NaNs are in the same locations
-                            nan_mask = torch.isnan(a)
-                            self.assertTrue(torch.equal(nan_mask, torch.isnan(b)), message)
-                            diff[nan_mask] = 0
-                            # inf check if allow_inf=True
-                            if allow_inf:
-                                inf_mask = torch.isinf(a)
-                                inf_sign = inf_mask.sign()
-                                self.assertTrue(torch.equal(inf_sign, torch.isinf(b).sign()), message)
-                                diff[inf_mask] = 0
-                        # TODO: implement abs on CharTensor (int8)
-                        # TODO: modify abs to return float/double for ComplexFloat/ComplexDouble
-                        if diff.is_signed() and diff.dtype != torch.int8:
-                            diff = diff.abs()
-                            # if diff is complex, the imaginary component for diff will be 0
-                            # from the previous step, hence converting it to float and double is fine.
-                            if diff.dtype == torch.complex64:
-                                diff = diff.to(torch.float)
-                            elif diff.dtype == torch.complex128:
-                                diff = diff.to(torch.double)
-                        max_err = diff.max()
-                        self.assertLessEqual(max_err, prec, message)
-            super(TestCase, self).assertEqual(x.is_sparse, y.is_sparse, message)
-            super(TestCase, self).assertEqual(x.is_quantized, y.is_quantized, message)
+                        if a.is_complex():
+                            # todo: assert_allclose should handle complex types directly.
+                            float_dtype = torch.float if a.dtype == torch.complex64 else torch.double
+                            self.assertEqual(a.copy_real().to(float_dtype), b.copy_real().to(float_dtype),
+                                             atol=atol, rtol=rtol, message=message)
+                            self.assertEqual(a.copy_imag().to(float_dtype), b.copy_imag().to(float_dtype),
+                                             atol=atol, rtol=rtol, message=message)
+                        elif a.is_floating_point():
+                            torch.testing.assert_allclose(a, b, atol=atol, rtol=rtol, equal_nan=True, msg=message)
+                        else:
+                            diff = a - b
+                            # TODO: implement abs on CharTensor (int8)
+                            if diff.is_signed() and diff.dtype != torch.int8:
+                                diff = diff.abs()
+                            max_err = diff.max()
+                            self.assertLessEqual(max_err, atol, message)
+
+            super().assertEqual(x.is_sparse, y.is_sparse, message)
+            super().assertEqual(x.is_quantized, y.is_quantized, message)
             if x.is_sparse:
                 x = self.safeCoalesce(x)
                 y = self.safeCoalesce(y)
                 assertTensorsEqual(x._indices(), y._indices())
                 assertTensorsEqual(x._values(), y._values())
             elif x.is_quantized and y.is_quantized:
-                self.assertEqual(x.qscheme(), y.qscheme(), prec=prec,
-                                 message=message, allow_inf=allow_inf,
-                                 exact_dtype=exact_dtype)
+                self.assertEqual(x.qscheme(), y.qscheme(), atol=atol, rtol=rtol,
+                                 message=message, allow_inf=allow_inf, exact_dtype=exact_dtype)
                 if x.qscheme() == torch.per_tensor_affine:
-                    self.assertEqual(x.q_scale(), y.q_scale(), prec=prec,
-                                     message=message, allow_inf=allow_inf,
-                                     exact_dtype=exact_dtype)
+                    self.assertEqual(x.q_scale(), y.q_scale(), atol=atol, rtol=rtol,
+                                     message=message, allow_inf=allow_inf, exact_dtype=exact_dtype)
                     self.assertEqual(x.q_zero_point(), y.q_zero_point(),
-                                     prec=prec, message=message,
+                                     atol=atol, rtol=rtol, message=message,
                                      allow_inf=allow_inf, exact_dtype=exact_dtype)
                 elif x.qscheme() == torch.per_channel_affine:
-                    self.assertEqual(x.q_per_channel_scales(), y.q_per_channel_scales(), prec=prec,
-                                     message=message, allow_inf=allow_inf,
-                                     exact_dtype=exact_dtype)
+                    self.assertEqual(x.q_per_channel_scales(), y.q_per_channel_scales(), atol=atol, rtol=rtol,
+                                     message=message, allow_inf=allow_inf, exact_dtype=exact_dtype)
                     self.assertEqual(x.q_per_channel_zero_points(), y.q_per_channel_zero_points(),
-                                     prec=prec, message=message,
+                                     atol=atol, rtol=rtol, message=message,
                                      allow_inf=allow_inf, exact_dtype=exact_dtype)
                     self.assertEqual(x.q_per_channel_axis(), y.q_per_channel_axis(),
-                                     prec=prec, message=message)
+                                     atol=atol, rtol=rtol, message=message)
                 self.assertEqual(x.dtype, y.dtype)
                 self.assertEqual(x.int_repr().to(torch.int32),
-                                 y.int_repr().to(torch.int32), prec=prec,
-                                 message=message, allow_inf=allow_inf,
-                                 exact_dtype=exact_dtype)
+                                 y.int_repr().to(torch.int32), atol=atol, rtol=rtol,
+                                 message=message, allow_inf=allow_inf, exact_dtype=exact_dtype)
             else:
                 assertTensorsEqual(x, y)
         elif isinstance(x, string_classes) and isinstance(y, string_classes):
-            super(TestCase, self).assertEqual(x, y, message)
+            super().assertEqual(x, y, message)
         elif type(x) == set and type(y) == set:
-            super(TestCase, self).assertEqual(x, y, message)
+            super().assertEqual(x, y, message)
         elif isinstance(x, dict) and isinstance(y, dict):
             if isinstance(x, OrderedDict) and isinstance(y, OrderedDict):
-                self.assertEqual(x.items(), y.items(), prec=prec,
-                                 message=message, allow_inf=allow_inf,
-                                 exact_dtype=exact_dtype)
+                self.assertEqual(x.items(), y.items(), atol=atol, rtol=rtol,
+                                 message=message, allow_inf=allow_inf, exact_dtype=exact_dtype)
             else:
-                self.assertEqual(set(x.keys()), set(y.keys()), prec=prec,
-                                 message=message, allow_inf=allow_inf,
-                                 exact_dtype=exact_dtype)
+                self.assertEqual(set(x.keys()), set(y.keys()), atol=atol, rtol=rtol,
+                                 message=message, allow_inf=allow_inf, exact_dtype=exact_dtype)
                 key_list = list(x.keys())
                 self.assertEqual([x[k] for k in key_list],
                                  [y[k] for k in key_list],
-                                 prec=prec, message=message,
+                                 atol=atol, rtol=rtol, message=message,
                                  allow_inf=allow_inf, exact_dtype=exact_dtype)
         elif is_iterable(x) and is_iterable(y):
-            super(TestCase, self).assertEqual(len(x), len(y), message)
+            super().assertEqual(len(x), len(y), message)
             for x_, y_ in zip(x, y):
-                self.assertEqual(x_, y_, prec=prec, message=message,
+                self.assertEqual(x_, y_, atol=atol, rtol=rtol, message=message,
                                  allow_inf=allow_inf, exact_dtype=exact_dtype)
         elif isinstance(x, bool) and isinstance(y, bool):
-            super(TestCase, self).assertEqual(x, y, message)
+            super().assertEqual(x, y, message)
         elif isinstance(x, Number) and isinstance(y, Number):
             if abs(x) == inf or abs(y) == inf:
                 if allow_inf:
-                    super(TestCase, self).assertEqual(x, y, message)
+                    super().assertEqual(x, y, message)
                 else:
                     self.fail("Expected finite numeric values - x={}, y={}".format(x, y))
                 return
-            super(TestCase, self).assertLessEqual(abs(x - y), prec, message)
+            super().assertLessEqual(abs(x - y), atol, message)
         else:
-            super(TestCase, self).assertEqual(x, y, message)
+            super().assertEqual(x, y, message)
 
-    def assertAlmostEqual(self, x, y, places=None, msg=None, delta=None, allow_inf=None):
+    def assertAlmostEqual(self, x, y, places=None, msg='', delta=None, allow_inf=None):
         prec = delta
         if places:
             prec = 10**(-places)
-        self.assertEqual(x, y, prec, msg, allow_inf)
+        self.assertEqual(x, y, msg, atol=prec, allow_inf=allow_inf)
 
-    def assertNotEqual(self, x, y, prec=None, message=''):
-        if isinstance(prec, str) and message == '':
-            message = prec
-            prec = None
-        if prec is None:
-            prec = self.precision
+    def assertNotEqual(self, x, y, message='', *, atol=None):
+        if not isinstance(message, str):
+            raise Error("fix this test, message should be a string")
+        if atol is None:
+            (_, atol) = self.get_default_tolerance(x, y)
 
         if isinstance(x, torch.Tensor) and isinstance(y, torch.Tensor):
             if x.size() != y.size():
-                super(TestCase, self).assertNotEqual(x.size(), y.size())
+                super().assertNotEqual(x.size(), y.size())
             self.assertGreater(x.numel(), 0)
             y = y.type_as(x)
             y = y.cuda(device=x.get_device()) if x.is_cuda else y.cpu()
@@ -963,18 +989,18 @@ class TestCase(expecttest.TestCase):
                 # Use `item()` to work around:
                 # https://github.com/pytorch/pytorch/issues/22301
                 max_err = diff.max().item()
-                self.assertGreaterEqual(max_err, prec, message)
+                self.assertGreater(max_err, atol, message)
         elif type(x) == str and type(y) == str:
-            super(TestCase, self).assertNotEqual(x, y)
+            super().assertNotEqual(x, y)
         elif is_iterable(x) and is_iterable(y):
-            super(TestCase, self).assertNotEqual(x, y)
+            super().assertNotEqual(x, y)
         else:
             try:
-                self.assertGreaterEqual(abs(x - y), prec, message)
+                self.assertGreater(abs(x - y), atol, message)
                 return
             except (TypeError, AssertionError):
                 pass
-            super(TestCase, self).assertNotEqual(x, y, message)
+            super().assertNotEqual(x, y, message)
 
     def assertObjectIn(self, obj, iterable):
         for elem in iterable:
@@ -1080,7 +1106,7 @@ class TestCase(expecttest.TestCase):
         If you call this multiple times in a single function, you must
         give a unique subname each time.
         """
-        if not (isinstance(s, str) or (sys.version_info[0] == 2 and isinstance(s, unicode))):
+        if not isinstance(s, str):
             raise TypeError("assertExpected is strings only")
 
         def remove_prefix(text, prefix):
@@ -1171,14 +1197,8 @@ class TestCase(expecttest.TestCase):
 
 
 def download_file(url, binary=True):
-    if sys.version_info < (3,):
-        from urlparse import urlsplit
-        import urllib2
-        request = urllib2
-        error = urllib2
-    else:
-        from urllib.parse import urlsplit
-        from urllib import request, error
+    from urllib.parse import urlsplit
+    from urllib import request, error
 
     filename = os.path.basename(urlsplit(url)[2])
     data_dir = get_writable_path(os.path.join(os.path.dirname(__file__), 'data'))

@@ -16,15 +16,17 @@ namespace rpc {
 namespace callback {
 // It's the callback for RemoteCall.
 void TORCH_API confirmPendingUser(
-    const std::shared_ptr<FutureMessage>& futureMessage,
+    const FutureMessage& futureMessage,
     const ForkId& expectedForkId);
 
 // It's the callback for finishing creating owner rref, it returned deletedRRef,
 // so that the deletedRRef can be handled under GIL in python_functions.cpp if
 // deletedRRef contains python object.
 c10::intrusive_ptr<RRef> TORCH_API
-finishCreatingOwnerRRef(const std::shared_ptr<FutureMessage>& futureMessage);
+finishCreatingOwnerRRef(const FutureMessage& futureMessage);
 } // namespace callback
+
+using torch::utils::Future;
 
 // Manages RRef lifetime and keeps track of RRef forks.
 class TORCH_API RRefContext {
@@ -38,7 +40,7 @@ class TORCH_API RRefContext {
   static std::vector<c10::intrusive_ptr<RRef>> destroyInstance(
       bool ignoreRRefLeak = true);
 
-  static void handleException(const std::shared_ptr<FutureMessage>& fm);
+  static void handleException(const FutureMessage& fm);
 
   RRefContext(const RRefContext&) = delete;
   RRefContext(RRefContext&& other) = delete;
@@ -79,15 +81,30 @@ class TORCH_API RRefContext {
       const TypePtr& type);
 
   // Get the ``OwnerRRef`` of id ``rrefId``. If it does not exist, create a new
-  // one.
+  // one. This function is called in two places:
+  // 1. when processing ``rpc.remote()``, i.e., ``SCRIPT_REMOTE_CALL``
+  //    ``PYTHON_REMOTE_CALL``.
+  // 2. when unpickling ``OwnerRRef``.
+  // What's common in these two cases are, 1) the RRefId is already generated
+  // 2) the TypePtr is presented. So it can always create the ``OwnerRRef`` if
+  // it is not yet available.
   c10::intrusive_ptr<OwnerRRef> getOrCreateOwnerRRef(
       const RRefId& rrefId,
       const TypePtr& type);
 
   // Create an empty owner rref of type.
+  // This method is called to first time generate an ``OwnerRRef``, e.g.,
+  // 1) ``rpc.RRef(obj)``
+  // 2) create the ``OwnerRRef`` on `rpc.remote()` caller side.
+  // What's common in these two cases are, 1) the RRefId hasn't been generated
+  // 2) the TypePtr is presented.
   c10::intrusive_ptr<OwnerRRef> createOwnerRRef(const TypePtr& type);
 
-  c10::intrusive_ptr<OwnerRRef> getOwnerRRef(const RRefId& rrefId);
+  // Returns a Future of the OwnerRRef, which will be marked completed when
+  // ``OwnerRRef`` is created. This method is used when the TypePtr is not
+  // available, e.g., when processing to_here().
+  std::shared_ptr<Future<c10::intrusive_ptr<OwnerRRef>>> getOwnerRRef(
+      const RRefId& rrefId);
 
   // Adding the RRefId of an OwnerRRef into the forks_ map. This is useful when
   // making a remote call to self, which as for now, still goes through serde
@@ -168,7 +185,7 @@ class TORCH_API RRefContext {
   // because this Future is already captured in callbacks of the
   // PendingUserState. If there is no pending UserRRefs, this method returns a
   // completed future.
-  std::shared_ptr<torch::utils::Future<bool>> waitForThreadLocalPendingRRefs();
+  std::shared_ptr<Future<bool>> waitForThreadLocalPendingRRefs();
   // Only call this function when there are errors during a recording session,
   // and it is likely that waitForThreadLocalPendingRRefs() cannot be invoked
   // properly.
@@ -195,7 +212,7 @@ class TORCH_API RRefContext {
     c10::intrusive_ptr<RRef> rref_;
     // Use Future.wait() and Future.markCompleted() to block and unblock user
     // functions. The bool value wrapped by the future_ is not used.
-    torch::utils::Future<bool> future_;
+    Future<bool> future_;
   };
 
   RRefContext(std::shared_ptr<RpcAgent>);
@@ -217,20 +234,19 @@ class TORCH_API RRefContext {
   mutable std::mutex mutex_;
   // Keep OwnerRRefs alive until there is no living UserRRefs.
   std::unordered_map<RRefId, c10::intrusive_ptr<RRef>, RRefId::Hash> owners_;
-  // A conditional variable to block getOwnerRRef() calls until the
-  // corresponding OwnerRRef has been created and inserted into the owners_ map.
-  // The method getOwnerRRef() is triggered by rref.to_here() messages. The
-  // reason for having this CV is because rref.to_here() message and rpc.remote
-  // message may arrive in any order, and to_here() can only be served when the
-  // RRef value is ready. In the previous version, we used to block the
-  // to_here() call by waiting on the CV member variable in OwnerRRef. However,
-  // that means the to_here() call has to first create the OwnerRRef, which
-  // would require knowing the IValue type when if we want to make RRef an
-  // IValue. Instead of sending serialized TypePtr in every to_here() message,
-  // we decided to only create OwnerRRef when processing remote calls.
-  // TODO: As OwnerRRef::getValue() is always called after
-  // OwnerRRef::setValue(), we should be able to remove the CV from OwnerRRef.
-  std::condition_variable ownerCV_;
+  // A map to track OwnerRRefs that are requested but not yet created. This can
+  // happen if the to_here() message is processed on the owner before the
+  // corresponding creator rpc.remote() message. If this happens, instead of
+  // to_here() RPC thread to block waiting for the OwnerRRef creation, the
+  // RRefContext returns a Future, so that the RPC request processing logic can
+  // attach subsequent code as a callback to that Future.
+  // NB: the OwnerRRefs in this map must be cleared when the corresponding
+  // OwnerRRef is created.
+  std::unordered_map<
+      RRefId,
+      std::shared_ptr<Future<c10::intrusive_ptr<OwnerRRef>>>,
+      RRefId::Hash>
+      pendingOwners_;
   // Tracks known living UserRRefs of an OwnerRRef
   std::unordered_map<
       RRefId,

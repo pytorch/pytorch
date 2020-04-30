@@ -1,4 +1,4 @@
-#include "register_ops_utils.h"
+#include <torch/csrc/jit/runtime/register_ops_utils.h>
 
 #include <algorithm>
 #include <bitset>
@@ -32,17 +32,6 @@ RegisterOperators reg(
            return [](Stack& stack) {
              AT_ERROR(
                  "Must be lowered to Interpreter's PROFILE instruction"); // NOLINT
-             return 0;
-           };
-         },
-         aliasAnalysisSpecialCase()),
-     Operator(
-         prim::CudaFusionGroup,
-         [](const Node* node) -> Operation {
-           const auto key = registerFusion(node);
-           return [key](Stack& stack) {
-             RECORD_FUNCTION("CudaFusionGroup", std::vector<c10::IValue>());
-             runFusion(key, stack);
              return 0;
            };
          },
@@ -128,7 +117,7 @@ RegisterOperators reg(
      // the whole gradients in every tensor of the Autograd graph with
      // create_graph=True so we use aliasAnalysisConservative for these two OPs
      Operator(
-         "aten::backward(Tensor[](a!) tensors, Tensor?[]? grad_tensors=None, bool? retain_graph=None, bool create_graph=False) -> ()",
+         "aten::backward.TensorList(Tensor[] tensors, Tensor?[]? grad_tensors=None, bool? retain_graph=None, bool create_graph=False) -> ()",
          [](Stack& stack) {
            bool create_graph = pop(stack).toBool();
            auto retain_graph = pop(stack).toOptional<bool>();
@@ -150,7 +139,7 @@ RegisterOperators reg(
          },
          aliasAnalysisConservative()),
      Operator(
-         "aten::backward(Tensor(a!) self, Tensor? gradient=None, bool? retain_graph=None, bool create_graph=False) -> ()",
+         "aten::backward(Tensor self, Tensor? gradient=None, bool? retain_graph=None, bool create_graph=False) -> ()",
          [](Stack& stack) {
            bool create_graph = pop(stack).toBool();
            auto retain_graph = pop(stack).toOptional<bool>();
@@ -176,33 +165,6 @@ RegisterOperators reg(
            // Write file
            std::fstream output(filename, std::ios::out | std::ios::binary);
            output.write(data.data(), data.size());
-           return 0;
-         },
-         aliasAnalysisFromSchema()),
-     Operator(
-         "prim::Print(...) -> ()",
-         [](Stack& stack) {
-           auto num_inputs = pop(stack).toInt();
-           std::stringstream ss;
-           bool first = true;
-           for (const IValue& i : last(stack, num_inputs)) {
-             if (!first)
-               ss << " ";
-             first = false;
-             ss << i;
-           }
-           drop(stack, num_inputs);
-           ss << std::endl;
-           auto* handler = getPrintHandler();
-           TORCH_INTERNAL_ASSERT(handler);
-           handler(ss.str());
-           return 0;
-         },
-         aliasAnalysisSpecialCase()),
-     Operator(
-         "prim::RaiseException(str msg) -> ()",
-         [](Stack& stack) {
-           throw JITException(pop(stack).toStringRef());
            return 0;
          },
          aliasAnalysisFromSchema()),
@@ -314,22 +276,6 @@ RegisterOperators reg(
            auto a = pop(stack).toDevice();
            auto b = pop(stack).toDevice();
            push(stack, a == b);
-           return 0;
-         },
-         aliasAnalysisFromSchema()),
-     Operator(
-         "prim::device(Tensor a) -> Device",
-         [](Stack& stack) {
-           push(stack, pop(stack).toTensor().device());
-           return 0;
-         },
-         aliasAnalysisFromSchema()),
-     Operator(
-         "prim::dtype(Tensor a) -> int",
-         [](Stack& stack) {
-           at::Tensor a;
-           pop(stack, a);
-           push(stack, static_cast<int64_t>(a.scalar_type()));
            return 0;
          },
          aliasAnalysisFromSchema()),
@@ -640,22 +586,6 @@ RegisterOperators reg(
          },
          aliasAnalysisFromSchema()),
      Operator(
-         // note the compiler knows to type TupleIndex more accurately than it
-         // is listed here.
-         "prim::TupleIndex(Any tup, int i) -> Any",
-         [](Stack& stack) {
-           int64_t index = pop(stack).toInt();
-           auto tuple = pop(stack).toTuple();
-           auto norm_index = normalizeIndex(index, tuple->elements().size());
-           if (norm_index < 0 ||
-               norm_index > static_cast<int64_t>(tuple->elements().size())) {
-             throw std::out_of_range("Tuple list index out of range");
-           }
-           stack.emplace_back(tuple->elements()[norm_index]);
-           return 0;
-         },
-         aliasAnalysisSpecialCase()),
-     Operator(
          prim::tolist,
          // This operator has to be unschematized because the return type
          // depends on the type hint and input. The implementation of this
@@ -785,10 +715,6 @@ RegisterOperators reg(
      // This op is no longer generated, but old models use it instead of
      // unchecked_cast, so we keep it here so it gets handled correctly.
      Operator(
-         "prim::unchecked_unwrap_optional(t(a)? optional) -> t(a)",
-         noop,
-         aliasAnalysisFromSchema()),
-     Operator(
          "prim::unchecked_cast(t x) -> t",
          noop,
          aliasAnalysisSpecialCase()),
@@ -797,13 +723,6 @@ RegisterOperators reg(
          [](Stack& stack) {
            TORCH_CHECK(
                false, "wait is implemented directly in the interpreter");
-           return 0;
-         },
-         aliasAnalysisSpecialCase()),
-     Operator(
-         "prim::Uninitialized() -> Any",
-         [](Stack& stack) {
-           push(stack, IValue::uninitialized());
            return 0;
          },
          aliasAnalysisSpecialCase())});
@@ -852,192 +771,6 @@ RegisterOperators logging_operators(
            return 0;
          },
          aliasAnalysisFromSchema())});
-
-int dictSetItem(Stack& stack) {
-  auto value = pop(stack);
-  auto idx = pop(stack);
-  auto dict = pop(stack).toGenericDict();
-  dict.insert_or_assign(std::move(idx), std::move(value));
-  return 0;
-}
-
-int dictLen(Stack& stack) {
-  auto dict = pop(stack).toGenericDict();
-  push(stack, int64_t(dict.size()));
-  return 0;
-}
-
-int dictValues(Stack& stack) {
-  auto dict = pop(stack).toGenericDict();
-  auto values = c10::impl::GenericList(dict.valueType());
-  const auto& order = iterationOrder(dict);
-  values.reserve(order.size());
-  for (const auto& p : order) {
-    values.emplace_back(p.second);
-  }
-  push(stack, values);
-  return 0;
-}
-
-int dictKeys(Stack& stack) {
-  auto dict = pop(stack).toGenericDict();
-  auto keys = c10::impl::GenericList(dict.keyType());
-  const auto& order = iterationOrder(dict);
-  keys.reserve(order.size());
-  for (const auto& p : order) {
-    keys.emplace_back(p.first);
-  }
-  push(stack, keys);
-  return 0;
-}
-
-int dictIndex(Stack& stack) {
-  auto key = pop(stack);
-  auto dict = pop(stack).toGenericDict();
-  auto value = dict.find(key);
-  if (value == dict.end()) {
-    AT_ERROR("KeyError: ", key);
-  }
-  push(stack, value->value());
-  return 0;
-}
-
-template <bool has_default>
-int dictGet(Stack& stack) {
-  IValue default_value;
-  if (has_default) {
-    default_value = pop(stack);
-  }
-  auto key = pop(stack);
-  auto dict = pop(stack).toGenericDict();
-  auto value = dict.find(key);
-  if (value == dict.end()) {
-    push(stack, std::move(default_value));
-  } else {
-    push(stack, value->value());
-  }
-  return 0;
-}
-
-// If the key is in the dict, return it. Else set it to the default value and
-// return that.
-int dictSetDefault(Stack& stack) {
-  auto default_value = pop(stack);
-  auto key = pop(stack);
-  auto dict = pop(stack).toGenericDict();
-  auto value = dict.find(key);
-  if (value == dict.end()) {
-    dict.insert(key, default_value);
-    push(stack, std::move(default_value));
-  } else {
-    push(stack, value->value());
-  }
-  return 0;
-}
-
-template <bool has_default>
-int dictPop(Stack& stack) {
-  IValue default_value;
-  if (has_default) {
-    default_value = pop(stack);
-  }
-  auto key = pop(stack);
-  auto dict = pop(stack).toGenericDict();
-  auto iter = dict.find(key);
-  if (iter == dict.end()) {
-    if (has_default) {
-      push(stack, default_value);
-    } else {
-      AT_ERROR("KeyError: ", key);
-    }
-  } else {
-    // note: before erase
-    push(stack, iter->value());
-    auto erase_count = dict.erase(key);
-    TORCH_CHECK(
-        erase_count == 1, "Expected to erase 1 item, found ", erase_count);
-  }
-  return 0;
-}
-
-int dictDelete(Stack& stack) {
-  dictPop<false>(stack);
-  // pop pushes an item on the stack but delete does not, so get rid of it
-  pop(stack);
-  return 0;
-}
-
-int dictPopItem(Stack& stack) {
-  auto dict = pop(stack).toGenericDict();
-  if (dict.size() == 0) {
-    AT_ERROR("popitem(): dictionary is empty");
-  }
-  auto item = iterationOrder(dict).at(0);
-  auto erase_count = dict.erase(item.first);
-  TORCH_CHECK(
-      erase_count == 1, "Expected to erase 1 item, found ", erase_count);
-
-  IValue tuple = c10::ivalue::Tuple::create({item.first, item.second});
-  push(stack, tuple);
-  return 0;
-}
-
-int dictContains(Stack& stack) {
-  auto key = pop(stack);
-  auto dict = pop(stack).toGenericDict();
-  push(stack, dict.contains(key));
-  return 0;
-}
-
-int dictClear(Stack& stack) {
-  auto dict = pop(stack).toGenericDict();
-  dict.clear();
-  return 0;
-}
-
-int dictUpdate(Stack& stack) {
-  auto to_add = pop(stack).toGenericDict();
-  auto dict = pop(stack).toGenericDict();
-
-  for (const auto& item : to_add) {
-    dict.insert(item.key(), item.value());
-  }
-  return 0;
-}
-
-int dictItems(Stack& stack) {
-  auto dict = pop(stack).toGenericDict();
-  auto key_type = dict.keyType();
-  auto value_type = dict.valueType();
-  auto items =
-      c10::impl::GenericList(TupleType::create({key_type, value_type}));
-  items.reserve(dict.size());
-  for (const auto& item : iterationOrder(dict)) {
-    items.emplace_back(c10::ivalue::Tuple::create({item.first, item.second}));
-  }
-  push(stack, std::move(items));
-  return 0;
-}
-
-int dictCopy(Stack& stack) {
-  push(stack, pop(stack).toGenericDict().copy());
-  return 0;
-}
-
-int dictConstructFromList(Stack& stack) {
-  auto input_list = pop(stack);
-  auto list = input_list.toList();
-  auto tup_type = list.elementType()->expect<TupleType>();
-  auto dict = c10::impl::GenericDict(
-      tup_type->elements().at(0), tup_type->elements().at(1));
-  dict.reserve(list.size());
-  for (IValue input : list) {
-    const auto tup = input.toTuple()->elements();
-    dict.insert_or_assign(tup[0], tup[1]);
-  }
-  push(stack, dict);
-  return 0;
-}
 
 template <typename T>
 int hashValue(Stack& stack) {
@@ -1233,10 +966,6 @@ RegisterOperators reg2({
         listEq<bool>,
         aliasAnalysisFromSchema()),
     Operator(
-        "aten::ne.int_list(int[] a, int[] b) -> bool",
-        listNe<int64_t>,
-        aliasAnalysisFromSchema()),
-    Operator(
         "aten::ne.float_list(float[] a, float[] b) -> bool",
         listNe<double>,
         aliasAnalysisFromSchema()),
@@ -1345,10 +1074,6 @@ RegisterOperators reg2({
     CREATE_COPY_OP(int, int64_t),
     CREATE_COPY_OP(float, double),
 #undef CREATE_COPY_OP
-
-    DEFINE_BINARY_OP(aten::add, a + b),
-    DEFINE_BINARY_OP(aten::sub, a - b),
-    DEFINE_BINARY_OP(aten::mul, a* b),
 
     // int ** int produces a float, because negative exponents produce float
     // results
@@ -1639,98 +1364,6 @@ RegisterOperators reg2({
           return 0;
         },
         aliasAnalysisFromSchema()),
-#define CREATE_DICT_OPS(key_type)                                             \
-  Operator(                                                                   \
-      "aten::len.Dict(Dict(" key_type ", t) self) -> int",                    \
-      dictLen,                                                                \
-      aliasAnalysisFromSchema()),                                             \
-      Operator(                                                               \
-          "aten::keys(Dict(" key_type ", t) self) -> " key_type "[](*)",      \
-          dictKeys,                                                           \
-          aliasAnalysisFromSchema()),                                         \
-      Operator(                                                               \
-          "aten::values(Dict(" key_type ", t) self) -> t[](*)",               \
-          dictValues,                                                         \
-          aliasAnalysisFromSchema()),                                         \
-      Operator(                                                               \
-          "aten::__getitem__.Dict(Dict(" key_type ", t) self, " key_type      \
-          " key) -> t(*)",                                                    \
-          dictIndex,                                                          \
-          aliasAnalysisFromSchema()),                                         \
-      Operator(                                                               \
-          "aten::get(Dict(" key_type ", t) self, " key_type " key) -> t(*)?", \
-          dictGet<false>,                                                     \
-          aliasAnalysisFromSchema()),                                         \
-      Operator(                                                               \
-          "aten::get(Dict(" key_type ", t) self, " key_type                   \
-          " key, t default_value) -> t(*)",                                   \
-          dictGet<true>,                                                      \
-          aliasAnalysisFromSchema()),                                         \
-      Operator(                                                               \
-          "aten::setdefault(Dict(" key_type ", t)(a!) self, " key_type        \
-          "(b -> *) key, t(c -> *) default_value) -> t(*)",                   \
-          dictSetDefault,                                                     \
-          aliasAnalysisFromSchema()),                                         \
-      Operator(                                                               \
-          "aten::Delete.Dict(Dict(" key_type ", t)(a!) self, " key_type       \
-          " key) -> ()",                                                      \
-          dictDelete,                                                         \
-          aliasAnalysisFromSchema()),                                         \
-      Operator(                                                               \
-          "aten::pop.Dict(Dict(" key_type ", t)(a!) self, " key_type          \
-          " key) -> t(*)",                                                    \
-          dictPop<false>,                                                     \
-          aliasAnalysisFromSchema()),                                         \
-      Operator(                                                               \
-          "aten::pop.Dict_default(Dict(" key_type ", t)(a!) self, " key_type  \
-          " key, t default_value) -> t(*)",                                   \
-          dictPop<true>,                                                      \
-          aliasAnalysisFromSchema()),                                         \
-      Operator(                                                               \
-          "aten::popitem(Dict(" key_type ", t)(a!) self) -> ((" key_type      \
-          ", t))",                                                            \
-          dictPopItem,                                                        \
-          aliasAnalysisFromSchema()),                                         \
-      Operator(                                                               \
-          "aten::clear(Dict(" key_type ", t)(a!) self) -> ()",                \
-          dictClear,                                                          \
-          aliasAnalysisFromSchema()),                                         \
-      Operator(                                                               \
-          "aten::update(Dict(" key_type ", t)(a!) self, Dict(" key_type       \
-          ", t)(a!) to_add) -> ()",                                           \
-          dictUpdate,                                                         \
-          aliasAnalysisFromSchema()),                                         \
-      Operator(                                                               \
-          "aten::items(Dict(" key_type ", t) self) -> ((" key_type ", t)[])", \
-          dictItems,                                                          \
-          aliasAnalysisFromSchema()),                                         \
-      Operator(                                                               \
-          "aten::copy.Dict(Dict(" key_type ", t)(a) self) -> Dict(" key_type  \
-          ", t)",                                                             \
-          dictCopy,                                                           \
-          aliasAnalysisFromSchema()),                                         \
-      Operator(                                                               \
-          "aten::__contains__(Dict(" key_type ", t) dict, " key_type          \
-          " key) -> bool",                                                    \
-          dictContains,                                                       \
-          aliasAnalysisFromSchema()),                                         \
-      Operator(                                                               \
-          "aten::_set_item(Dict(" key_type ", t)(a!) l, " key_type            \
-          "(b -> *) idx, t(c -> *) v) -> ()",                                 \
-          dictSetItem,                                                        \
-          aliasAnalysisFromSchema()),                                         \
-      Operator(                                                               \
-          "aten::dict((" key_type ", tVal)[] inputs) -> Dict(" key_type       \
-          ", tVal)",                                                          \
-          dictConstructFromList,                                              \
-          aliasAnalysisFromSchema())
-
-    CREATE_DICT_OPS("str"),
-    CREATE_DICT_OPS("int"),
-    CREATE_DICT_OPS("float"),
-    CREATE_DICT_OPS("Tensor"),
-#undef CREATE_DICT_OPS
-
     Operator(
         "aten::divmod.int(int x, int y) -> (int, int)",
         [](Stack& stack) {

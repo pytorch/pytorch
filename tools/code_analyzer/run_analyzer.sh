@@ -14,10 +14,13 @@ echo "Analyze: ${INPUT}"
 # only _def and _impl are retained).  But the inliner isn't guaranteed
 # to operate, so for safety we match a more expansive set.
 "${ANALYZER_BIN}" \
-  -op_schema_pattern="^(_aten|_prim|aten|quantized|profiler|_test)::[^ ]+" \
-  -op_register_pattern="c10::RegisterOperators::(op|checkSchemaAndRegisterOp_)|c10::Module::(_?def|_?impl|impl_UNBOXED)" \
+  -op_schema_pattern="^(_aten|_prim|aten|quantized|profiler|_test)::[a-zA-Z0-9_.]+(\(.*)?$" \
+  -op_register_pattern="c10::RegisterOperators::(op|checkSchemaAndRegisterOp_)|c10::Module::(_?def|_?impl|impl_UNBOXED)|torch::Library::(_?def|_?impl|_?impl_UNBOXED)" \
   -op_invoke_pattern="c10::Dispatcher::findSchema|callOp" \
-  -format="${FORMAT}" \
+  -root_symbol_pattern="torch::jit::[^(]" \
+  -torch_library_init_pattern="^.*TORCH_LIBRARY_init_([^(]+)(\(.*)?$" \
+  -torch_library_init_pattern="^.*TORCH_LIBRARY_FRAGMENT_init_([^(]+)(\(.*)?$" \
+  -torch_library_init_pattern="^.*TORCH_LIBRARY_IMPL_init_([^(]+)_([^_]+)(\(.*)?$" \
   ${EXTRA_ANALYZER_FLAGS} \
   "${INPUT}" \
   > "${OUTPUT}"

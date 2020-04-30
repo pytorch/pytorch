@@ -4,6 +4,7 @@
 #include <torch/csrc/autograd/input_buffer.h>
 #include <torch/csrc/distributed/autograd/context/container.h>
 #include <torch/csrc/distributed/autograd/engine/dist_engine.h>
+#include <ATen/Parallel.h>
 
 namespace torch {
 namespace distributed {
@@ -11,17 +12,65 @@ namespace autograd {
 
 using torch::autograd::AccumulateGrad;
 using torch::autograd::edge_list;
+using torch::autograd::InputBuffer;
 using torch::autograd::Engine;
 using torch::autograd::FutureVariableList;
 using torch::autograd::GraphRoot;
 using torch::autograd::GraphTask;
-using torch::autograd::ReadyQueue;
+using torch::autograd::NodeTask;
 using torch::autograd::Node;
+using torch::autograd::ReadyQueue;
 using torch::autograd::validate_outputs;
 using torch::autograd::variable_list;
 
 static constexpr char* kNumBackwardPasses = "num_current_backward_passes";
 static constexpr char* kNumAutogradContexts = "num_autograd_contexts";
+
+// This hook does 3 things:
+//   1. Call pre hooks of the original AccumulateGrad to modify the input grad.
+//   2. Accumuate the gard to RPC context.
+//   3. Call post hooks of the original AccumulateGrad.
+class DistAccumulateGradCaptureHook
+    : public GraphTask::ExecInfo::Capture::GradCaptureHook {
+ public:
+  DistAccumulateGradCaptureHook(
+      std::shared_ptr<AccumulateGrad> accumulateGrad,
+      ContextPtr autogradContext)
+      : accumulateGrad_(std::move(accumulateGrad)),
+        autogradContext_(std::move(autogradContext)) {}
+
+  at::Tensor operator()(const at::Tensor& grad) override {
+    variable_list inputGrads = {grad};
+    // It's intended that pre/post hooks are still called even if the grad is
+    // undenfined here.
+    for (const auto& hook : accumulateGrad_->pre_hooks()) {
+      inputGrads = (*hook)(inputGrads);
+    }
+
+    // It is possible that the grad is not defined since a separate
+    // invocation of the autograd engine on the same node might actually
+    // compute this gradient.
+    if (inputGrads[0].defined()) {
+      // There are 3 internal references to 'inputGrads[0]' at this moment:
+      //   1. 'inputGrads[0]' in this function.
+      //   2. 'graph_task->captured_vars_' on the callsite in the local engine.
+      //   3. 'InputBuffer& inputs' on the callsite as the inputs of the
+      //   function node.
+      autogradContext_->accumulateGrad(
+          accumulateGrad_->variable, inputGrads[0], 3 /* num_expected_refs */);
+    }
+
+    const variable_list kEmptyOuput;
+    for (const auto& hook : accumulateGrad_->post_hooks()) {
+      (*hook)(kEmptyOuput, inputGrads);
+    }
+    return inputGrads[0];
+  }
+
+ private:
+  std::shared_ptr<AccumulateGrad> accumulateGrad_;
+  ContextPtr autogradContext_;
+};
 
 DistEngine::DistEngine()
     : initializedContextIds_(), engine_(Engine::get_default_engine()) {}
@@ -72,25 +121,16 @@ void DistEngine::computeDependencies(
     bool retainGraph) {
   TORCH_INTERNAL_ASSERT(graphRoot, "graphRoot is null!");
 
-  // Build a CPU ready queue that is used by the graphTask in local
-  // autograd engine, since Distributed Autograd Engine calls
-  // Engine::execute_with_graph_task in async mode instead of
-  // Engine::execute, we allocate our own CPU ReadyQueue for
-  // each GraphTask.
-  // NB: We must allocate a separate ready queue for each GraphTask,
-  // because the async mode of autograd engine loop through the
-  // GraphTask's ready queue, so a single ready_queue cannot be
-  // shared by different GraphTasks.
-  auto cpu_ready_queue = std::make_shared<ReadyQueue>();
-
   // Build the graph task and graph root.
+  // NOTE: we don't need to build and pass a cpu_ready_queue to GraphTask
+  // as we use execute_graph_task_until_ready_queue_empty, which will build
+  // a separate ReadyQueue for each call.
   auto graphTask = std::make_shared<GraphTask>(
       /* keep_graph */ retainGraph,
       /* create_graph */ false,
       /* depth */ 0,
-      /* cpu_ready_queue */ cpu_ready_queue,
+      /* cpu_ready_queue */ nullptr,
       /* exit_on_error */ true);
-
 
   // Run BFS to traverse the graph locally. The roots of the graph are
   // GraphRoot and all send functions for this autograd context.
@@ -180,6 +220,24 @@ void DistEngine::computeDependencies(
     // Create a dummy GraphRoot and run init_to_execute with it.
     GraphRoot dummyRoot(edges, {});
     graphTask->init_to_execute(dummyRoot, outputEdges);
+    for (auto& mapEntry : graphTask->exec_info_) {
+      auto& execInfo = mapEntry.second;
+      if (!execInfo.captures_) {
+        continue;
+      }
+      auto fn = mapEntry.first;
+      // There may be nodes other than 'AccumulateGrad', e.g. RecvRPCBackward,
+      // to be captured.
+      if (auto accumulateGradFn = dynamic_cast<AccumulateGrad*>(fn)) {
+        for (auto& capture : *execInfo.captures_) {
+          capture.hooks_.push_back(
+              std::make_unique<DistAccumulateGradCaptureHook>(
+                  std::dynamic_pointer_cast<AccumulateGrad>(
+                      accumulateGradFn->shared_from_this()),
+                  autogradContext));
+        }
+      }
+    }
 
     // Mark all 'RecvRPCBackward' as needing execution.
     for (const auto& recvBackwardEdge : recvBackwardEdges) {
@@ -191,64 +249,103 @@ void DistEngine::computeDependencies(
   autogradContext->setGraphTask(std::move(graphTask));
 }
 
+void DistEngine::execute_graph_task_until_ready_queue_empty(
+    const std::shared_ptr<GraphTask>& graph_task,
+    std::shared_ptr<Node> root_to_execute,
+    bool incrementOutstandingTasks) {
+  engine_.initialize_device_threads_pool();
+  // Create a ready queue per call to traverse the graph_task from root_to_execute
+  // This allow concurrent execution of the same GraphTask from different threads
+  std::shared_ptr<ReadyQueue> cpu_ready_queue = std::make_shared<ReadyQueue>();
+  cpu_ready_queue->push(
+      NodeTask(graph_task, std::move(root_to_execute), InputBuffer(0)),
+      incrementOutstandingTasks);
+
+  torch::autograd::set_device(torch::autograd::CPU_DEVICE);
+  graph_task->owner_ = torch::autograd::CPU_DEVICE;
+  while(!cpu_ready_queue->empty()) {
+    std::shared_ptr<GraphTask> local_graph_task;
+    {
+      // Scope this block of execution since NodeTask is not needed after this
+      // block and can be deallocated (release any references to grad tensors
+      // as part of inputs_)
+      NodeTask task = cpu_ready_queue->pop();
+      if (!(local_graph_task = task.base_.lock())) {
+        continue;
+      }
+      if (task.fn_ && !local_graph_task->has_error_.load()) {
+        AutoGradMode grad_mode(local_graph_task->grad_mode_);
+        try {
+          engine_.evaluate_function(local_graph_task, task.fn_.get(), task.inputs_, cpu_ready_queue);
+        } catch (std::exception& e) {
+          engine_.thread_on_exception(local_graph_task, task.fn_, e);
+          // break the loop in error so that we immediately stop the execution
+          // of this GraphTask, mark it completed if necessary and return the
+          // future with proper ErrorMessage
+          break;
+        }
+      }
+    }
+    // Decrement the outstanding task.
+    --local_graph_task->outstanding_tasks_;
+  }
+  // Check if we've completed execution.
+  if (graph_task->completed()) {
+    // We don't need to explicitly notify the owner thread, since
+    // 'mark_as_completed_and_run_post_processing' would mark the Future as completed and this
+    // would notify the owner thread that the task has been completed.
+    graph_task->mark_as_completed_and_run_post_processing();
+  }
+}
+
 std::shared_ptr<rpc::FutureMessage> DistEngine::runEngineAndAccumulateGradients(
     const ContextPtr& autogradContext,
     const std::shared_ptr<Node>& graphRoot,
-    const edge_list& outputEdges) {
+    const edge_list& outputEdges,
+    bool incrementOutstandingTasks) {
   // Cleanup previous state for outstanding RPCs. Outstanding RPCs could be
   // lingering if we're running backward multiple times and some of the
   // passes ran into errors.
   autogradContext->clearOutstandingRpcs();
-
-  auto futureGrads = engine_.execute_with_graph_task(autogradContext->retrieveGraphTask(), graphRoot, /*async_mode=*/true);
+  auto graphTask = autogradContext->retrieveGraphTask();
+  at::launch([this, graphTask, graphRoot, incrementOutstandingTasks](){
+    execute_graph_task_until_ready_queue_empty(
+          /*graph_task*/ graphTask,
+          /*root_to_execute*/ graphRoot,
+          /*incrementOutstandingTasks*/ incrementOutstandingTasks);
+  });
+  // Use a reference here to avoid refcount bump on futureGrads.
+  auto& futureGrads = graphTask->future_result_;
 
   // Build a future that waits for the callbacks to execute (since callbacks
   // execute after the original future is completed). This ensures we return a
   // future that waits for all gradient accumulation to finish.
   auto accumulateGradFuture = std::make_shared<rpc::FutureMessage>();
 
-  futureGrads->addCallback(
-      [autogradContext, outputEdges, accumulateGradFuture](
-          const variable_list& grads,
-          const c10::optional<torch::utils::FutureError>& error) {
-        if (error) {
-          // Don't accumulate gradients if we receive an error.
-          // We must add the node information here since DistEngine::execute
-          // waits on accumulateGradFuture and will throw an exception once we
-          // set the error below.
-          std::string errorMsg = c10::str(
-              "Error on Node ",
-              DistAutogradContainer::getInstance().getWorkerId(),
-              ": ",
-              error->what());
-          accumulateGradFuture->setError(errorMsg);
-          return;
-        }
+  futureGrads->addCallback([autogradContext, outputEdges, accumulateGradFuture](
+                               const FutureVariableList& futureGrads) {
+    if (futureGrads.hasError()) {
+      // Don't accumulate gradients if we receive an error.
+      // We must add the node information here since DistEngine::execute
+      // waits on accumulateGradFuture and will throw an exception once we
+      // set the error below.
+      std::string errorMsg = c10::str(
+          "Error on Node ",
+          DistAutogradContainer::getInstance().getWorkerId(),
+          ": ",
+          futureGrads.error()->what());
+      accumulateGradFuture->setError(errorMsg);
+      return;
+    }
 
-        try {
-          TORCH_INTERNAL_ASSERT(grads.size() == outputEdges.size());
-
-          // Accumulate all the gradients in the context.
-          for (size_t i = 0; i < grads.size(); i++) {
-            // It is possible that the grad is not defined since a separate
-            // invocation of the autograd engine on the same node might actually
-            // compute this gradient. Also accumulate grads only for
-            // AccumulateGrad function.
-            if (grads[i].defined() &&
-                dynamic_cast<AccumulateGrad*>(outputEdges[i].function.get())) {
-              auto& variable = std::static_pointer_cast<AccumulateGrad>(
-                                   outputEdges[i].function)
-                                   ->variable;
-              autogradContext->accumulateGrad(
-                  variable, grads[i], 1 /* num_expected_refs */);
-            }
-          }
-
-          accumulateGradFuture->markCompleted(rpc::Message());
-        } catch (std::exception& e) {
-          accumulateGradFuture->setErrorIfNeeded(e.what());
-        }
-      });
+    try {
+      const variable_list& grads = futureGrads.constValue();
+      TORCH_INTERNAL_ASSERT(grads.size() == outputEdges.size());
+      accumulateGradFuture->markCompleted(rpc::Message());
+    } catch (std::exception& e) {
+      accumulateGradFuture->setErrorIfNeeded(e.what());
+    }
+  });
 
   return accumulateGradFuture;
 }
@@ -270,58 +367,53 @@ std::shared_ptr<rpc::FutureMessage> DistEngine::executeSendFunctionAsync(
     initializedContextIds_.insert(autogradContext->contextId());
     lock.unlock();
 
-
     // Enqueue the current send function.
     auto graphTask = autogradContext->retrieveGraphTask();
-    engine_.enqueue_blocked_task_on_cpu(torch::autograd::NodeTask(
-        graphTask, sendFunction, torch::autograd::InputBuffer(0)));
-
     // Run the autograd engine.
     auto accumulateGradFuture = runEngineAndAccumulateGradients(
-        autogradContext, dummyRoot, outputEdges);
+        autogradContext,
+        sendFunction,
+        outputEdges,
+        /*incrementOutstandingTasks=*/false);
 
     // Build the 'uber' future that waits for everything.
     auto callbackFuture = std::make_shared<rpc::FutureMessage>();
 
     accumulateGradFuture->addCallback(
-        [autogradContext, callbackFuture](
-            const rpc::Message& message /* unused */,
-            const c10::optional<torch::utils::FutureError>& error) {
+        [autogradContext,
+         callbackFuture](const rpc::FutureMessage& accumulateGradFuture) {
           try {
-            if (error) {
+            if (accumulateGradFuture.hasError()) {
               // Perform cleanup at the end of the backward pass (before we mark
               // the future as completed).
               DistEngine::getInstance().cleanupBackwardPass(autogradContext);
 
               // Skip any further processing on errors.
-              callbackFuture->setError(error->what());
+              callbackFuture->setError(accumulateGradFuture.error()->what());
               return;
             }
 
             // Wait for all RPCs after the autograd engine is done.
             auto rpcFuture =
                 autogradContext->clearAndWaitForOutstandingRpcsAsync();
-            rpcFuture->addCallback(
-                [callbackFuture, autogradContext](
-                    const rpc::Message& /* unused */,
-                    const c10::optional<torch::utils::FutureError>& error) {
-                  try {
-                    // Perform cleanup at the end of the backward pass (before
-                    // we mark the future as completed).
-                    DistEngine::getInstance().cleanupBackwardPass(
-                        autogradContext);
-                  } catch (std::exception& e) {
-                    callbackFuture->setErrorIfNeeded(e.what());
-                    return;
-                  }
+            rpcFuture->addCallback([callbackFuture, autogradContext](
+                                       const rpc::FutureMessage& rpcFuture) {
+              try {
+                // Perform cleanup at the end of the backward pass (before
+                // we mark the future as completed).
+                DistEngine::getInstance().cleanupBackwardPass(autogradContext);
+              } catch (std::exception& e) {
+                callbackFuture->setErrorIfNeeded(e.what());
+                return;
+              }
 
-                  // Finally mark the 'uber' future as completed.
-                  if (!error) {
-                    callbackFuture->markCompleted(rpc::Message());
-                  } else {
-                    callbackFuture->setError(error->what());
-                  }
-                });
+              // Finally mark the 'uber' future as completed.
+              if (!rpcFuture.hasError()) {
+                callbackFuture->markCompleted(rpc::Message());
+              } else {
+                callbackFuture->setError(rpcFuture.error()->what());
+              }
+            });
           } catch (std::exception& e) {
             callbackFuture->setErrorIfNeeded(e.what());
           }
@@ -332,8 +424,12 @@ std::shared_ptr<rpc::FutureMessage> DistEngine::executeSendFunctionAsync(
   } else {
     lock.unlock();
     auto graphTask = autogradContext->retrieveGraphTask();
-    engine_.enqueue_blocked_task_on_cpu(torch::autograd::NodeTask(
-        graphTask, sendFunction, torch::autograd::InputBuffer(0)));
+    at::launch([this, graphTask, sendFunction](){
+      execute_graph_task_until_ready_queue_empty(
+            /*graph_task*/ graphTask,
+            /*root_to_execute*/ sendFunction,
+            /*incrementOutstandingTasks*/ false);
+    });
     return std::make_shared<rpc::FutureMessage>(rpc::Message());
   }
 }
@@ -416,15 +512,6 @@ std::unordered_map<std::string, std::string> DistEngine::getDebugInfo() const {
   std::unordered_map<std::string, std::string> debugInfo;
   auto& DistAutogradContainer = DistAutogradContainer::getInstance();
   debugInfo[kNumBackwardPasses] = std::to_string(numBackwardPasses());
-  // fill in all cpu queue size information for each graph task of the context_id
-  // in initializedContextIds_
-  std::lock_guard<std::mutex> guard(initializedContextIdsLock_);
-  for(auto context_id : initializedContextIds_) {
-    std::shared_ptr<torch::autograd::GraphTask> graph_task = DistAutogradContainer.retrieveContext(context_id)->retrieveGraphTask();
-    std::string kGraphTaskCPUQueueSize = "context_id: "  + std::to_string(context_id) + " graph_task_cpu_queue_size";
-    debugInfo[kGraphTaskCPUQueueSize] =
-        std::to_string(engine_.ready_queue_size(graph_task, at::kCPU));
-  }
   debugInfo[kNumAutogradContexts] = std::to_string(
       DistAutogradContainer::getInstance().numAutogradContexts());
   return debugInfo;

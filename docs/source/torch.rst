@@ -194,6 +194,7 @@ Pointwise Ops
 ~~~~~~~~~~~~~~~~~~~~~~
 
 .. autofunction:: abs
+.. autofunction:: absolute
 .. autofunction:: acos
 .. autofunction:: add
 .. autofunction:: addcdiv
@@ -283,6 +284,7 @@ Comparison Ops
 .. autofunction:: equal
 .. autofunction:: ge
 .. autofunction:: gt
+.. autofunction:: isclose
 .. autofunction:: isfinite
 .. autofunction:: isinf
 .. autofunction:: isnan
@@ -303,6 +305,7 @@ Spectral Ops
 .. autofunction:: rfft
 .. autofunction:: irfft
 .. autofunction:: stft
+.. autofunction:: istft
 .. autofunction:: bartlett_window
 .. autofunction:: blackman_window
 .. autofunction:: hamming_window
@@ -341,6 +344,7 @@ Other Operations
 .. autofunction:: tril_indices
 .. autofunction:: triu
 .. autofunction:: triu_indices
+.. autofunction:: vander
 
 
 BLAS and LAPACK Operations

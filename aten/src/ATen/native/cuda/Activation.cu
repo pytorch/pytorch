@@ -171,7 +171,7 @@ template<typename scalar_t>
 void launch_prelu_cuda_backward_share_weights_kernel(TensorIterator &iter, const scalar_t* weight_data) {
   if (!iter.can_use_32bit_indexing()) {
     for (auto& sub_iter : iter.with_32bit_indexing()) {
-      launch_prelu_cuda_backward_share_weights_kernel(iter, weight_data);
+      launch_prelu_cuda_backward_share_weights_kernel(sub_iter, weight_data);
     }
     return;
   }
@@ -180,6 +180,8 @@ void launch_prelu_cuda_backward_share_weights_kernel(TensorIterator &iter, const
   if (numel == 0) {
     return;
   }
+  
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(iter.can_use_32bit_indexing());
 
   scalar_t *input_grad_data = static_cast<scalar_t *>(iter.data_ptr(0));
   scalar_t *weight_grad_collector_data = static_cast<scalar_t *>(iter.data_ptr(1));
@@ -189,20 +191,11 @@ void launch_prelu_cuda_backward_share_weights_kernel(TensorIterator &iter, const
   int64_t grid = (numel + block_work_size - 1) / block_work_size;
   auto stream = at::cuda::getCurrentCUDAStream();
 
-  if (iter.is_contiguous()) {
-    prelu_cuda_backward_share_weights_kernel<scalar_t><<<grid, num_threads, 0, stream>>>(
-      numel, input_data, grad_out_data, input_grad_data, weight_grad_collector_data, weight_data,
-      TrivialOffsetCalculator<2>(), TrivialOffsetCalculator<2>()
-    );
-  } else {
-    std::array<const int64_t*, 2> out_strides = {iter.strides(0).data(), iter.strides(1).data()};
-    std::array<const int64_t*, 2> inp_strides = {iter.strides(2).data(), iter.strides(3).data()};
-    prelu_cuda_backward_share_weights_kernel<scalar_t><<<grid, num_threads, 0, stream>>>(
-      numel, input_data, grad_out_data, input_grad_data, weight_grad_collector_data, weight_data,
-      OffsetCalculator<2>(iter.ndim(), iter.shape().data(), inp_strides.data()),
-      OffsetCalculator<2>(iter.ndim(), iter.shape().data(), out_strides.data())
-    );
-  }
+  TORCH_INTERNAL_ASSERT(iter.is_contiguous());
+  prelu_cuda_backward_share_weights_kernel<scalar_t><<<grid, num_threads, 0, stream>>>(
+    numel, input_data, grad_out_data, input_grad_data, weight_grad_collector_data, weight_data,
+    TrivialOffsetCalculator<2>(), TrivialOffsetCalculator<2>()
+  );
 }
 
 template <typename scalar_t>
@@ -522,6 +515,38 @@ void hardswish_backward_kernel(TensorIterator& iter) {
   });
 }
 
+void hardsigmoid_kernel(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "hardsigmoid_cuda", [&]() {
+    AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "hardsigmoid_cuda", [&] {
+      const scalar_t zero(0.0f);
+      const scalar_t one_sixth(1.0f / 6.0f);
+      const scalar_t three(3.0f);
+      const scalar_t six(6.0f);
+      gpu_kernel(iter, [zero, one_sixth, three, six]GPU_LAMBDA(scalar_t self_val) -> scalar_t {
+        return std::min(std::max(self_val + three, zero), six) * one_sixth;
+      });
+    });
+  });
+}
+
+void hardsigmoid_backward_kernel(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "hardsigmoid_backward_cuda", [&]() {
+    AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "hardsigmoid_backward_cuda", [&] {
+      const scalar_t zero(0.0f);
+      const scalar_t three(3.0f);
+      const scalar_t neg_three(-3.0f);
+      const scalar_t one_sixth(1.0f / 6.0f);
+      gpu_kernel(
+        iter, 
+        [zero, three, neg_three, one_sixth]GPU_LAMBDA(scalar_t grad_val, scalar_t self_val) -> scalar_t {
+          return (self_val >= neg_three && self_val <= three)
+            ? grad_val * one_sixth
+            : zero;
+      });
+    });
+  });
+}
+
 } // namespace
 
 Tensor gelu_cuda(const Tensor& self) {
@@ -580,6 +605,8 @@ REGISTER_DISPATCH(leaky_relu_stub, &leaky_relu_kernel);
 REGISTER_DISPATCH(leaky_relu_backward_stub, &leaky_relu_backward_kernel);
 REGISTER_DISPATCH(hardswish_stub, &hardswish_kernel);
 REGISTER_DISPATCH(hardswish_backward_stub, &hardswish_backward_kernel);
+REGISTER_DISPATCH(hardsigmoid_stub, &hardsigmoid_kernel);
+REGISTER_DISPATCH(hardsigmoid_backward_stub, &hardsigmoid_backward_kernel);
 REGISTER_DISPATCH(softplus_stub, &softplus_kernel);
 REGISTER_DISPATCH(softplus_backward_stub, &softplus_backward_kernel);
 

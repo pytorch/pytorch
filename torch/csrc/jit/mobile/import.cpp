@@ -1,4 +1,4 @@
-#include "import.h"
+#include <torch/csrc/jit/mobile/import.h>
 #include <ATen/core/ivalue.h>
 #include <caffe2/serialize/inline_container.h>
 #include <torch/csrc/jit/api/compilation_unit.h>
@@ -206,13 +206,23 @@ c10::IValue BytecodeDeserializer::readArchive(
     return len;
   };
 
-  auto class_resolver = [&](const c10::QualifiedName& qn) {
-    if (compilation_unit_->get_class(qn) == nullptr) {
-      auto typeptr = ClassType::create(qn, compilation_unit_, true);
-      compilation_unit_->register_type(typeptr);
+  static const c10::QualifiedName torchPrefix = "__torch__";
+  auto type_resolver = [&](const c10::QualifiedName& qn) {
+    TypePtr type;
+    // HACK: first we check whether the name starts with `__torch__` to tell if
+    // it's "supposed" to be a class type. This is a reliable check today, but
+    // there is no guarantee that this is the case. The real solution is to
+    // merge type parsers so we can share class resolution logic.
+    if (torchPrefix.isPrefixOf(qn)) {
+      if (compilation_unit_->get_class(qn) == nullptr) {
+        auto typeptr = ClassType::create(qn, compilation_unit_, true);
+        compilation_unit_->register_type(typeptr);
+      }
+      type = compilation_unit_->get_class(qn);
+    } else {
+      type = c10::parseType(qn.qualifiedName());
     }
-    return c10::StrongTypePtr(
-        compilation_unit_, compilation_unit_->get_class(qn));
+    return c10::StrongTypePtr(compilation_unit_, type);
   };
 
   auto obj_loader = [&](at::StrongTypePtr type, IValue input) {
@@ -259,7 +269,7 @@ c10::IValue BytecodeDeserializer::readArchive(
 
   Unpickler unpickler(
       reader,
-      std::move(class_resolver),
+      std::move(type_resolver),
       std::move(obj_loader),
       std::move(read_record),
       device_);

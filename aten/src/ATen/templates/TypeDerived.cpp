@@ -27,7 +27,7 @@ $storage_tensor_headers
 #include <utility>
 
 #include <ATen/Config.h>
-#include <ATen/core/op_registration/op_registration.h>
+#include <torch/library.h>
 $extra_cuda_headers
 $legacy_th_headers
 
@@ -53,9 +53,8 @@ ${type_derived_method_definitions}
 
 }  // namespace ${Type}
 
-namespace {
-auto registerer = torch::import()
-  ${function_registrations};
+TORCH_LIBRARY_IMPL(aten, ${Backend}, m) {
+  ${function_registrations}
 }
 
-}
+} // namespace at
