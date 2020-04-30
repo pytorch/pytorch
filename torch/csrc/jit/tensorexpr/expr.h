@@ -191,6 +191,9 @@ class TORCH_API Buf : public ExprNode<Buf> {
   std::vector<const Expr*> dims() const {
     return dims_;
   }
+  void set_dims(std::vector<const Expr*> dims) {
+    dims_ = dims;
+  };
 
  private:
   const Var* base_handle_;

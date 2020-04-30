@@ -751,7 +751,13 @@ def parse_cpu_trace(thread_records):
                                  cuda_end)
             functions.append(fe)
 
-    functions.sort(key=lambda evt: evt.cpu_interval.start)
+    # Sort functions by start time then by end time ascending.
+    # This ensures that--in the case of nested events which
+    # have the same start time (which may happen due to the
+    # granularity of the given clock tick)--we always show
+    # the outermost nested call first. This adds stability
+    # in how FunctionEvents appear
+    functions.sort(key=lambda evt: [evt.cpu_interval.start, -evt.cpu_interval.end])
     return functions
 
 

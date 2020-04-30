@@ -5,6 +5,16 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 import numpy as np
 import torch
 from contextlib import contextmanager
+from torch.testing._internal.common_utils import TEST_WITH_ASAN, TEST_WITH_UBSAN, IS_PPC, IS_MACOS, IS_WINDOWS
+
+supported_qengines = torch.backends.quantized.supported_engines
+supported_qengines.remove('none')
+# Note: We currently do not run QNNPACK tests on WINDOWS and MACOS as it is flaky. Issue #29326
+# QNNPACK is not supported on PPC
+# QNNPACK throws ASAN heap-buffer-overflow error.
+if 'qnnpack' in supported_qengines:
+    if IS_PPC or TEST_WITH_ASAN or TEST_WITH_UBSAN or IS_MACOS or IS_WINDOWS:
+        supported_qengines.remove('qnnpack')
 
 """Computes the output shape given convolution parameters."""
 def _conv_output_shape(input_size, kernel_size, padding, stride, dilation,

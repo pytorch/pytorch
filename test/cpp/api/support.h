@@ -53,7 +53,7 @@ struct WarningCapture : public WarningHandler {
     return c10::Join("\n", messages_);
   }
 
-  void process(const SourceLocation& source_location, const std::string& msg)
+  void process(const SourceLocation& source_location, const std::string& msg, const bool /*verbatim*/)
       override {
     messages_.push_back(msg);
   }

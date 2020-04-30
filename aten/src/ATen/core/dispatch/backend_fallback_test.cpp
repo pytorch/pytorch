@@ -2,8 +2,9 @@
 
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
+#include <ATen/Functions.h>
+#include <ATen/core/op_registration/op_registration.h>
 #include <torch/library.h>
-#include <torch/csrc/jit/runtime/operator.h>
 
 using namespace at;
 
@@ -18,42 +19,12 @@ namespace {
 // Global counter for ease of testing
 static int64_t override_call_count = 0;
 
-// TODO Remove callBoxedWorkaround once op.callBoxed(stack) works for all ops.
-//      Once callBoxedWorkaround is removed, we can move this file to the location
-//      where it actually belongs, i.e. next to Dispatcher.h. The only reason for
-//      this not being there yet is that callBoxedWorkaround depends on JIT.
-
-void callBoxedWorkaround(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
-  // This should just be op.callBoxed(stack), but that doesn't work for all ops yet.
-  // Note: If op.callBoxed(stack) works for you, then that is preferrable because
-  // it's much faster and doesn't come with a dependency on JIT code.
-  // Instead, we take a path through the JIT operator registry, which has a boxed
-  // calling mechanism that works for all ops from native_functions.yaml.
-
-  auto s = Symbol::fromQualString(op.schema().name());
-  auto operators = torch::jit::getAllOperatorsFor(s);
-  // Find the exact match
-  std::shared_ptr<torch::jit::Operator> jit_op;
-  for (const auto& candidate_op : operators) {
-    auto candidate_schema = candidate_op->schema();
-    // NB: this is a VERY slow equality test
-    if (candidate_schema == op.schema()) {
-      jit_op = candidate_op;
-      break;
-    }
-  }
-  TORCH_INTERNAL_ASSERT(jit_op);
-
-  auto offset = jit_op->getOperation()(*stack);
-  TORCH_INTERNAL_ASSERT(offset == 0);
-}
-
 // Mode implementation
 
 void generic_mode_fallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
   override_call_count++;
   c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::TESTING_ONLY_GenericMode);
-  callBoxedWorkaround(op, stack);
+  op.callBoxed(stack);
 }
 
 // Wrapper implementation
@@ -94,7 +65,7 @@ void generic_wrapper_fallback(const c10::OperatorHandle& op, torch::jit::Stack* 
     }
   }
 
-  callBoxedWorkaround(op, stack);
+  op.callBoxed(stack);
 
   // Rewrap outputs
   auto rets = torch::jit::pop(*stack, num_returns);

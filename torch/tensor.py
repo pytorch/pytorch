@@ -395,7 +395,7 @@ class Tensor(torch._C._TensorBase):
         return _C._VariableFunctions.rsub(self, other)
 
     def __rdiv__(self, other):
-        if self.dtype.is_floating_point:
+        if self.dtype.is_floating_point or self.dtype.is_complex:
             return self.reciprocal() * other
         else:
             return (self.double().reciprocal() * other).type_as(self)
@@ -662,7 +662,7 @@ class Tensor(torch._C._TensorBase):
 
             >>> flat_imgs = torch.rand(32, 3 * 128 * 128, names=('N', 'features'))
             >>> imgs = flat_imgs.unflatten('features', (('C', 3), ('H', 128), ('W', 128)))
-            >>> imgs.names, images.shape
+            >>> imgs.names, imgs.shape
             (('N', 'C', 'H', 'W'), torch.Size([32, 3, 128, 128]))
 
         .. warning::
