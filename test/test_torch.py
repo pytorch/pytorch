@@ -3738,15 +3738,15 @@ class _TestTorchMixin(object):
         self.assertEqual(boolStorage.int().tolist(), [1, 0, 1, 1, 1, 1])
         self.assertIs(boolStorage.dtype, torch.bool)
 
-        complexfloat_storage = torch.ComplexFloatStorage([-1, 0, 1+2j, 2.5j, 3.5, 4-2j])
+        complexfloat_storage = torch.ComplexFloatStorage([-1, 0, 1 + 2j, 2.5j, 3.5, 4-2j])
         self.assertEqual(complexfloat_storage.size(), 6)
-        self.assertEqual(complexfloat_storage.tolist(), [-1, 0, 1+2j, 2.5j, 3.5, 4-2j])
+        self.assertEqual(complexfloat_storage.tolist(), [-1, 0, 1 + 2j, 2.5j, 3.5, 4-2j])
         self.assertEqual(complexfloat_storage.type(), 'torch.ComplexFloatStorage')
         self.assertIs(complexfloat_storage.dtype, torch.complex64)
 
         complexdouble_storage = complexfloat_storage.complex_double()
         self.assertEqual(complexdouble_storage.size(), 6)
-        self.assertEqual(complexdouble_storage.tolist(), [-1, 0, 1+2j, 2.5j, 3.5, 4-2j])
+        self.assertEqual(complexdouble_storage.tolist(), [-1, 0, 1 + 2j, 2.5j, 3.5, 4-2j])
         self.assertEqual(complexdouble_storage.type(), 'torch.ComplexDoubleStorage')
         self.assertIs(complexdouble_storage.dtype, torch.complex128)
 
@@ -15206,7 +15206,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
     def test_reciprocal_complex_extremal(self, device, dtype):
         vals = (
             # Inf and Zeros
-            complex(float('inf'), float('inf')), 
+            complex(float('inf'), float('inf')),
             complex(float('inf'), 0.),
             complex(0., float('inf')),
             complex(0., 0.),
