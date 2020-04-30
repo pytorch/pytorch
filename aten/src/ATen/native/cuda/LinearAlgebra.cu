@@ -11,7 +11,7 @@ Tensor baddbmm_cuda(const Tensor& self, const Tensor& batch1, const Tensor& batc
 }
 
 Tensor& baddbmm_out_cuda(Tensor &result, const Tensor& self, const Tensor& batch1, const Tensor& batch2, Scalar beta, Scalar alpha) {
-   Tensor b_self;
+  Tensor b_self;
   std::tie(b_self) = expand_size(self, {batch1.size(0), batch1.size(1), batch2.size(2)}, "baddbmm_out");
   return legacy::cuda::_th_baddbmm_out(result, b_self, batch1, batch2, beta, alpha);
 }
