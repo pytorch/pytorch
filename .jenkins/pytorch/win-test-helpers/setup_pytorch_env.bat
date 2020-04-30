@@ -28,12 +28,6 @@ pip install ninja future "hypothesis==4.53.2" "librosa>=0.6.2" psutil pillow uni
 :: No need to install faulthandler since we only test Python >= 3.6 on Windows
 :: faulthandler is builtin since Python 3.3
 
-if "%CUDA_VERSION%" == "9" goto cuda_build_9
-if "%CUDA_VERSION%" == "10" goto cuda_build_10
-goto cuda_build_end
-
-:cuda_build_9
-
 pushd .
 if "%VC_VERSION%" == "" (
     call "C:\Program Files (x86)\Microsoft Visual Studio\%VC_YEAR%\%VC_PRODUCT%\VC\Auxiliary\Build\vcvarsall.bat" x64
@@ -42,6 +36,14 @@ if "%VC_VERSION%" == "" (
 )
 @echo on
 popd
+
+set DISTUTILS_USE_SDK=1
+
+if "%CUDA_VERSION%" == "9" goto cuda_build_9
+if "%CUDA_VERSION%" == "10" goto cuda_build_10
+goto cuda_build_end
+
+:cuda_build_9
 
 set CUDA_PATH=C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v9.2
 set CUDA_PATH_V9_2=%CUDA_PATH%
@@ -50,15 +52,6 @@ goto cuda_build_common
 
 :cuda_build_10
 
-pushd .
-if "%VC_VERSION%" == "" (
-    call "C:\Program Files (x86)\Microsoft Visual Studio\%VC_YEAR%\%VC_PRODUCT%\VC\Auxiliary\Build\vcvarsall.bat" x64
-) else (
-    call "C:\Program Files (x86)\Microsoft Visual Studio\%VC_YEAR%\%VC_PRODUCT%\VC\Auxiliary\Build\vcvarsall.bat" x64 -vcvars_ver=%VC_VERSION%
-)
-@echo on
-popd
-
 set CUDA_PATH=C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v10.1
 set CUDA_PATH_V10_1=%CUDA_PATH%
 
@@ -66,7 +59,6 @@ goto cuda_build_common
 
 :cuda_build_common
 
-set DISTUTILS_USE_SDK=1
 set CUDNN_LIB_DIR=%CUDA_PATH%\lib\x64
 set CUDA_TOOLKIT_ROOT_DIR=%CUDA_PATH%
 set CUDNN_ROOT_DIR=%CUDA_PATH%

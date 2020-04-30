@@ -2,6 +2,7 @@
 
       - pytorch_windows_build:
           name: pytorch_windows_vs2017_14.11_py36_cuda10.1_build
+          build_environment: pytorch-win-vs2017-14-11-cuda10-cudnn7-py3
           cuda_version: "10"
           python_version: "3.6"
           vc_version: "14.11"
@@ -18,6 +19,8 @@
                 - /release\/.*/
       - pytorch_windows_test:
           name: pytorch_windows_vs2017_14.11_py36_cuda10.1_test1
+          executor: windows-with-nvidia-gpu
+          build_environment: pytorch-win-vs2017-14-11-cuda10-cudnn7-py3
           test_name: pytorch-windows-test1
           cuda_version: "10"
           python_version: "3.6"
@@ -36,6 +39,8 @@
                 - /release\/.*/
       - pytorch_windows_test:
           name: pytorch_windows_vs2017_14.11_py36_cuda10.1_test2
+          executor: windows-with-nvidia-gpu
+          build_environment: pytorch-win-vs2017-14-11-cuda10-cudnn7-py3
           test_name: pytorch-windows-test2
           cuda_version: "10"
           python_version: "3.6"
@@ -54,6 +59,7 @@
                 - /release\/.*/
       - pytorch_windows_build:
           name: pytorch_windows_vs2017_14.16_py36_cuda10.1_build
+          build_environment: pytorch-win-vs2017-14-16-cuda10-cudnn7-py3
           cuda_version: "10"
           python_version: "3.6"
           vc_version: "14.16"
@@ -70,6 +76,8 @@
                 - /release\/.*/
       - pytorch_windows_test:
           name: pytorch_windows_vs2017_14.16_py36_cuda10.1_test1
+          executor: windows-with-nvidia-gpu
+          build_environment: pytorch-win-vs2017-14-16-cuda10-cudnn7-py3
           test_name: pytorch-windows-test1
           cuda_version: "10"
           python_version: "3.6"
@@ -88,6 +96,8 @@
                 - /release\/.*/
       - pytorch_windows_test:
           name: pytorch_windows_vs2017_14.16_py36_cuda10.1_test2
+          executor: windows-with-nvidia-gpu
+          build_environment: pytorch-win-vs2017-14-16-cuda10-cudnn7-py3
           test_name: pytorch-windows-test2
           cuda_version: "10"
           python_version: "3.6"
@@ -106,6 +116,7 @@
                 - /release\/.*/
       - pytorch_windows_build:
           name: pytorch_windows_vs2019_py36_cuda10.1_build
+          build_environment: pytorch-win-vs2019-cuda10-cudnn7-py3
           cuda_version: "10"
           python_version: "3.6"
           vc_version: ""
@@ -116,6 +127,8 @@
             - setup
       - pytorch_windows_test:
           name: pytorch_windows_vs2019_py36_cuda10.1_test1
+          executor: windows-with-nvidia-gpu
+          build_environment: pytorch-win-vs2019-cuda10-cudnn7-py3
           test_name: pytorch-windows-test1
           cuda_version: "10"
           python_version: "3.6"
@@ -128,6 +141,8 @@
             - pytorch_windows_vs2019_py36_cuda10.1_build
       - pytorch_windows_test:
           name: pytorch_windows_vs2019_py36_cuda10.1_test2
+          executor: windows-with-nvidia-gpu
+          build_environment: pytorch-win-vs2019-cuda10-cudnn7-py3
           test_name: pytorch-windows-test2
           cuda_version: "10"
           python_version: "3.6"
@@ -138,3 +153,150 @@
           requires:
             - setup
             - pytorch_windows_vs2019_py36_cuda10.1_build
+      - pytorch_windows_build:
+          name: pytorch_windows_vs2017_14.11_py36_cpu_build
+          build_environment: pytorch-win-vs2017-14-11-cpu-py3
+          cuda_version: "cpu"
+          python_version: "3.6"
+          vc_version: "14.11"
+          vc_year: "2017"
+          vc_product: "BuildTools"
+          use_cuda: "0"
+          requires:
+            - setup
+          filters:
+            branches:
+              only:
+                - master
+                - /ci-all\/.*/
+                - /release\/.*/
+      - pytorch_windows_test:
+          name: pytorch_windows_vs2017_14.11_py36_cpu_test1
+          build_environment: pytorch-win-vs2017-14-11-cpu-py3
+          test_name: pytorch-windows-test1
+          cuda_version: "cpu"
+          python_version: "3.6"
+          vc_version: "14.11"
+          vc_year: "2017"
+          vc_product: "BuildTools"
+          use_cuda: "0"
+          requires:
+            - setup
+            - pytorch_windows_vs2017_14.11_py36_cpu_build
+          filters:
+            branches:
+              only:
+                - master
+                - /ci-all\/.*/
+                - /release\/.*/
+      - pytorch_windows_test:
+          name: pytorch_windows_vs2017_14.11_py36_cpu_test2
+          build_environment: pytorch-win-vs2017-14-11-cpu-py3
+          test_name: pytorch-windows-test2
+          cuda_version: "cpu"
+          python_version: "3.6"
+          vc_version: "14.11"
+          vc_year: "2017"
+          vc_product: "BuildTools"
+          use_cuda: "0"
+          requires:
+            - setup
+            - pytorch_windows_vs2017_14.11_py36_cpu_build
+          filters:
+            branches:
+              only:
+                - master
+                - /ci-all\/.*/
+                - /release\/.*/
+      - pytorch_windows_build:
+          name: pytorch_windows_vs2017_14.16_py36_cpu_build
+          build_environment: pytorch-win-vs2017-14-16-cpu-py3
+          cuda_version: "cpu"
+          python_version: "3.6"
+          vc_version: "14.16"
+          vc_year: "2017"
+          vc_product: "BuildTools"
+          use_cuda: "0"
+          requires:
+            - setup
+          filters:
+            branches:
+              only:
+                - master
+                - /ci-all\/.*/
+                - /release\/.*/
+      - pytorch_windows_test:
+          name: pytorch_windows_vs2017_14.16_py36_cpu_test1
+          build_environment: pytorch-win-vs2017-14-16-cpu-py3
+          test_name: pytorch-windows-test1
+          cuda_version: "cpu"
+          python_version: "3.6"
+          vc_version: "14.16"
+          vc_year: "2017"
+          vc_product: "BuildTools"
+          use_cuda: "0"
+          requires:
+            - setup
+            - pytorch_windows_vs2017_14.16_py36_cpu_build
+          filters:
+            branches:
+              only:
+                - master
+                - /ci-all\/.*/
+                - /release\/.*/
+      - pytorch_windows_test:
+          name: pytorch_windows_vs2017_14.16_py36_cpu_test2
+          build_environment: pytorch-win-vs2017-14-16-cpu-py3
+          test_name: pytorch-windows-test2
+          cuda_version: "cpu"
+          python_version: "3.6"
+          vc_version: "14.16"
+          vc_year: "2017"
+          vc_product: "BuildTools"
+          use_cuda: "0"
+          requires:
+            - setup
+            - pytorch_windows_vs2017_14.16_py36_cpu_build
+          filters:
+            branches:
+              only:
+                - master
+                - /ci-all\/.*/
+                - /release\/.*/
+      - pytorch_windows_build:
+          name: pytorch_windows_vs2019_py36_cpu_build
+          build_environment: pytorch-win-vs2019-cpu-py3
+          cuda_version: "cpu"
+          python_version: "3.6"
+          vc_version: ""
+          vc_year: "2019"
+          vc_product: "Community"
+          use_cuda: "0"
+          requires:
+            - setup
+      - pytorch_windows_test:
+          name: pytorch_windows_vs2019_py36_cpu_test1
+          build_environment: pytorch-win-vs2019-cpu-py3
+          test_name: pytorch-windows-test1
+          cuda_version: "cpu"
+          python_version: "3.6"
+          vc_version: ""
+          vc_year: "2019"
+          vc_product: "Community"
+          use_cuda: "0"
+          requires:
+            - setup
+            - pytorch_windows_vs2019_py36_cpu_build
+      - pytorch_windows_test:
+          name: pytorch_windows_vs2019_py36_cpu_test2
+          build_environment: pytorch-win-vs2019-cpu-py3
+          test_name: pytorch-windows-test2
+          cuda_version: "cpu"
+          python_version: "3.6"
+          vc_version: ""
+          vc_year: "2019"
+          vc_product: "Community"
+          use_cuda: "0"
+          requires:
+            - setup
+            - pytorch_windows_vs2019_py36_cpu_build

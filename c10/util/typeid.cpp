@@ -46,6 +46,8 @@ CAFFE_KNOWN_TYPE(double)
 CAFFE_KNOWN_TYPE(at::ComplexHalf)
 CAFFE_KNOWN_TYPE(std::complex<float>)
 CAFFE_KNOWN_TYPE(std::complex<double>)
+CAFFE_KNOWN_TYPE(c10::complex<float>)
+CAFFE_KNOWN_TYPE(c10::complex<double>)
 // 11 = undefined type id
 // 12 = Tensor (defined in tensor.cc)
 CAFFE_KNOWN_TYPE(std::string)

@@ -414,6 +414,50 @@ class TestQuantizedTensor(TestCase):
             # view on contiguous tensor is fine
             b.contiguous().view(1, 4, 2, 3)
 
+    def test_qtensor_resize(self):
+        scale, zero_point, dtype = 1.0, 2, torch.uint8
+        sizes1 = [1, 2, 3, 4]
+        sizes2 = [1 * 2, 3 * 4]
+        sizes3 = [1, 2 * 3, 4]
+        sizes4 = [1 * 2 * 3 * 4]
+        sizes5 = [1, 2, 1, 3, 1, 4]
+
+        q1_int = torch.randint(0, 100, sizes1, dtype=dtype)
+        q1 = torch._make_per_tensor_quantized_tensor(q1_int, scale=scale, zero_point=zero_point)
+        q2 = q1.resize(*sizes2)
+        q3 = q2.resize(*sizes3)
+        q4 = q3.resize(*sizes4)
+        q5 = q4.resize(*sizes5)
+
+        self.assertEqual(q1.numel(), q2.numel())
+        self.assertEqual(q1.numel(), q3.numel())
+        self.assertEqual(q1.numel(), q4.numel())
+        self.assertEqual(q1.numel(), q5.numel())
+
+        # Compare original and post-transpose
+        a_int = torch.randint(0, 100, sizes1, dtype=dtype)
+        a = torch._make_per_tensor_quantized_tensor(a_int, scale=scale, zero_point=zero_point)
+        b = a.transpose(1, 2)  # swaps 2nd and 3rd dimension
+        c = b.resize(*sizes1)  # Change the sizes back to the original
+
+        self.assertEqual(a.size(), c.size())
+        self.assertEqual(b.q_scale(), c.q_scale())
+        self.assertEqual(b.q_zero_point(), c.q_zero_point())
+        self.assertNotEqual(b.stride(), c.stride())
+        # size is the same but the underlying data is different
+        self.assertNotEqual(b.int_repr(), c.int_repr())
+        self.assertFalse(torch.equal(b, c))
+
+        # Throws an error if numel is wrong
+        q1_int = torch.randint(0, 100, sizes1, dtype=dtype)
+        q1 = torch._make_per_tensor_quantized_tensor(a_int, scale=scale, zero_point=zero_point)
+        err_str = "requested resize to*"
+        with self.assertRaisesRegex(RuntimeError, err_str):
+            q2 = q1.resize(*sizes1[:-1])
+        # resize on both contiguous and non-contiguous tensor should be fine
+        q3 = q1.resize(*sizes2)
+        q4 = q1.contiguous().resize(*sizes2)
+
     def test_qtensor_reshape(self):
         scale, zero_point, dtype = 1.0, 2, torch.uint8
         for device in get_supported_device_types():
