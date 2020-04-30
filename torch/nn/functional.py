@@ -3913,7 +3913,7 @@ def multi_head_attention_forward(query,                           # type: Tensor
 
     if attn_mask is not None:
         assert attn_mask.dtype == torch.float32 or attn_mask.dtype == torch.float64 or \
-            attn_mask.dtype == torch.uint8 or attn_mask.dtype == torch.bool, \
+            attn_mask.dtype == torch.float16 or attn_mask.dtype == torch.uint8 or attn_mask.dtype == torch.bool, \
             'Only float, byte, and bool types are supported for attn_mask, not {}'.format(attn_mask.dtype)
         if attn_mask.dtype == torch.uint8:
             warnings.warn("Byte tensor for attn_mask in nn.MultiheadAttention is deprecated. Use bool tensor instead.")

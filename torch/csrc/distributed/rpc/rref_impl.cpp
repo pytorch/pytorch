@@ -217,16 +217,16 @@ bool OwnerRRef::hasValue() const {
   return value_.has_value() || error_.has_value();
 }
 
-std::shared_ptr<FutureMessage> OwnerRRef::getFuture() {
+std::shared_ptr<FutureIValue> OwnerRRef::getFuture() {
   std::unique_lock<std::mutex> lock(mutex_);
   if (future_.get()) {
     return future_;
   }
-  future_ = std::make_shared<FutureMessage>();
-  std::shared_ptr<FutureMessage> ret = future_;
+  future_ = std::make_shared<FutureIValue>();
+  std::shared_ptr<FutureIValue> ret = future_;
   if (value_.has_value()) {
     lock.unlock();
-    ret->markCompleted(Message());
+    ret->markCompleted(IValue());
   } else if (error_.has_value()) {
     auto err = *error_;
     lock.unlock();
@@ -238,19 +238,19 @@ std::shared_ptr<FutureMessage> OwnerRRef::getFuture() {
 void OwnerRRef::setValue(IValue&& value) {
   std::unique_lock<std::mutex> lock(mutex_);
   value_ = std::move(value);
-  std::shared_ptr<FutureMessage> future;
+  std::shared_ptr<FutureIValue> future;
   future.swap(future_);
   lock.unlock();
   valueCV_.notify_all();
   if (future.get() && !future->completed()) {
-    future->markCompleted(Message());
+    future->markCompleted(IValue());
   }
 }
 
 void OwnerRRef::setError(const std::string& error) {
   std::unique_lock<std::mutex> lock(mutex_);
   error_ = error;
-  std::shared_ptr<FutureMessage> future;
+  std::shared_ptr<FutureIValue> future;
   future.swap(future_);
   lock.unlock();
   valueCV_.notify_all();
