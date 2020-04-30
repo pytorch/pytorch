@@ -18,7 +18,7 @@
 
 // TH & THC are now part of the same library as ATen and Caffe2
 // NB: However, we are planning to split it out to a torch_cuda library
-#define THC_API THC_EXTERNC TORCH_CUDA_API
+#define THC_API TORCH_CUDA_API
 #define THC_CLASS TORCH_CUDA_API
 
 #ifndef THAssert
