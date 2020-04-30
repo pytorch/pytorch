@@ -1216,6 +1216,26 @@ if(USE_GLOO)
   endif()
 endif()
 
+if(USE_DISTRIBUTED AND USE_TENSORPIPE)
+  if(MSVC)
+    message(WARNING "Tensorpipe cannot be used on Windows.")
+  else()
+    set(__PYTORCH_BUILD ${PYTORCH_BUILD})
+    set(PYTORCH_BUILD ON)
+    set(__BUILD_TESTING ${BUILD_TESTING})
+    set(BUILD_TESTING OFF)
+    set(TP_BUILD_PYTHON OFF)
+    set(TP_BUILD_LIBUV ON)
+
+    add_subdirectory(${PROJECT_SOURCE_DIR}/third_party/tensorpipe)
+
+    set(PYTORCH_BUILD ${__PYTORCH_BUILD})
+    set(BUILD_TESING ${__BUILD_TESTING})
+
+    list(APPEND Caffe2_DEPENDENCY_LIBS tensorpipe)
+  endif()
+endif()
+
 # ---[ profiling
 if(USE_PROF)
   find_package(htrace)
