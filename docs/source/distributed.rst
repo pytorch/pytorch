@@ -156,6 +156,8 @@ The package needs to be initialized using the :func:`torch.distributed.init_proc
 function before calling any other methods. This blocks until all processes have
 joined.
 
+.. autofunction:: is_available
+
 .. autofunction:: init_process_group
 
 .. autoclass:: Backend
@@ -433,8 +435,7 @@ Launch utility
 
 The `torch.distributed` package also provides a launch utility in
 `torch.distributed.launch`. This helper utility can be used to launch
-multiple processes per node for distributed training. This utility also supports
-both python2 and python3.
+multiple processes per node for distributed training.
 
 
 .. automodule:: torch.distributed.launch

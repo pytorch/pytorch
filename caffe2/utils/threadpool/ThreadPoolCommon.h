@@ -15,9 +15,6 @@
 #elif (defined(__APPLE__) &&                                            \
        (TARGET_IPHONE_SIMULATOR || TARGET_OS_SIMULATOR || TARGET_OS_IPHONE))
 #define C10_IOS 1
-#elif (defined(__APPLE__) && TARGET_OS_MAC)
-#define C10_IOS 1
-#else
-#endif // ANDROID / IOS / MACOS
+#endif // ANDROID / IOS
 
 #endif  // CAFFE2_UTILS_THREADPOOL_COMMON_H_

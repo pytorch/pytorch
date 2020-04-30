@@ -9,8 +9,8 @@
     jobs:
       - docker_for_ecr_gc_build_job
       - docker_build_job:
-          name: "pytorch-linux-bionic-clang9-thrift-llvmdev"
-          image_name: "pytorch-linux-bionic-clang9-thrift-llvmdev"
+          name: "pytorch-linux-bionic-py3.6-clang9"
+          image_name: "pytorch-linux-bionic-py3.6-clang9"
       - docker_build_job:
           name: "pytorch-linux-xenial-cuda10-cudnn7-py3-gcc7"
           image_name: "pytorch-linux-xenial-cuda10-cudnn7-py3-gcc7"

@@ -207,8 +207,7 @@ void mergeFp32InputsAndConvertToFp16(
     const std::unordered_set<std::string>& weights,
     NetDef* pred_net,
     ShapeInfoMap* shape_hints) {
-  std::vector<std::pair<std::string, ShapeInfo>> user_inputs;
-  std::unordered_set<std::string> user_input_set;
+  std::unordered_map<std::string, ShapeInfo> user_input_map;
   for (const auto& i : pred_net->external_input()) {
     if (weights.count(i)) {
       continue;
@@ -227,33 +226,29 @@ void mergeFp32InputsAndConvertToFp16(
     }
     shape_info.shape.set_data_type(TensorProto_DataType_FLOAT16);
 
-    user_inputs.emplace_back(i, shape_info);
-    user_input_set.emplace(i);
+    user_input_map[i] = shape_info;
   }
 
-  if (user_inputs.empty()) {
+  if (user_input_map.empty()) {
     return;
   }
-  std::string partition;
-  std::set<std::string> partition_set;
+  std::unordered_map<std::string, std::vector<std::string>>
+      user_inputs_by_partition;
+  std::unordered_map<std::string, std::unordered_set<std::string>>
+      user_input_set_by_partition;
   for (const auto& op : pred_net->op()) {
     for (const auto& i : op.input()) {
-      if (user_input_set.count(i)) {
-        if (!op.device_option().node_name().empty()) {
-          partition_set.emplace(op.device_option().node_name());
-          break;
+      if (user_input_map.find(i) != user_input_map.end()) {
+        const auto& partition = op.device_option().node_name().empty()
+            ? "default"
+            : op.device_option().node_name();
+        if (user_input_set_by_partition[partition].find(i) ==
+            user_input_set_by_partition[partition].end()) {
+          user_inputs_by_partition[partition].emplace_back(i);
+          user_input_set_by_partition[partition].insert(i);
         }
       }
     }
-  }
-  if (partition_set.size() == 1) {
-    partition = *partition_set.begin();
-    LOG(INFO) << "Assigning Split and Float2Half ops to partition "
-              << partition;
-  } else {
-    LOG(INFO)
-        << "Won't assign Split and Float2Half ops to partition because their outputs belong to "
-        << partition_set.size() << " partitions.";
   }
 
   std::vector<OperatorDef> ops;
@@ -262,72 +257,83 @@ void mergeFp32InputsAndConvertToFp16(
   }
   pred_net->clear_op();
 
-  OperatorDef op1;
-  op1.set_type("Concat");
-  for (const auto& i : user_inputs) {
-    op1.add_input(i.first);
-  }
-  op1.add_output("fp32_input_concated");
-  op1.add_output("fp32_input_concated_split_info");
-  auto shape_info = user_inputs.front().second;
-  int total = 0;
-  for (const auto& u : user_inputs) {
-    total += u.second.shape.dims(1);
-  }
-  shape_info.shape.set_dims(1, total);
-  auto* arg = op1.add_arg();
-  arg->set_name("axis");
-  arg->set_i(1);
-  pred_net->add_op()->CopyFrom(op1);
+  for (const auto& elem : user_inputs_by_partition) {
+    const auto& partition = elem.first;
+    const auto& user_inputs = elem.second;
+    const auto& user_input_set = user_input_set_by_partition[partition];
 
-  // TODO: a possible optimization is to fuse the fp16 conversion into Concat
-  OperatorDef op2;
-  op2.set_type("FloatToHalf");
-  op2.add_input("fp32_input_concated");
-  op2.add_output("fp16_input_concated");
-  arg = op2.add_arg();
-  arg->set_name("clip");
-  arg->set_i(1);
-  shape_hints->emplace("fp16_input_concated", shape_info);
-  pred_net->add_op()->CopyFrom(op2);
+    OperatorDef op1;
+    op1.set_type("Concat");
+    for (const auto& i : user_inputs) {
+      op1.add_input(i);
+    }
+    op1.add_output(partition + "_fp32_input_concated");
+    op1.add_output(partition + "_fp32_input_concated_split_info");
+    auto shape_info = user_input_map[user_inputs.front()];
+    int total = 0;
+    for (const auto& u : user_inputs) {
+      total += user_input_map[u].shape.dims(1);
+    }
+    shape_info.shape.set_dims(1, total);
+    auto* arg = op1.add_arg();
+    arg->set_name("axis");
+    arg->set_i(1);
+    pred_net->add_op()->CopyFrom(op1);
 
-  OperatorDef op3;
-  op3.set_type("Split");
-  op3.add_input("fp16_input_concated");
-  op3.mutable_device_option()->set_node_name(partition);
-  std::vector<OperatorDef> converts;
-  for (const auto& i : user_inputs) {
-    std::string new_name = i.first + "_split_fp16";
-    op3.add_output(new_name);
-    shape_hints->emplace(new_name, i.second);
-    converts.emplace_back(CreateOperatorDef(
-        "HalfToFloat",
-        "",
-        {i.first + "_split_fp16"},
-        {i.first + "_split"},
-        {}));
-    converts.back().mutable_device_option()->set_node_name(partition);
-    auto converted_shape = i.second;
-    converted_shape.shape.set_data_type(TensorProto_DataType_FLOAT);
-    shape_hints->emplace(i.first + "_split", converted_shape);
-  }
-  arg = op3.add_arg();
-  arg->set_name("axis");
-  arg->set_i(1);
-  arg = op3.add_arg();
-  arg->set_name("split");
-  for (const auto& u : user_inputs) {
-    arg->add_ints(u.second.shape.dims(1));
-  }
-  pred_net->add_op()->CopyFrom(op3);
-  for (const auto& op : converts) {
-    pred_net->add_op()->CopyFrom(op);
-  }
+    // TODO: a possible optimization is to fuse the fp16 conversion into Concat
+    OperatorDef op2;
+    op2.set_type("FloatToHalf");
+    op2.add_input(partition + "_fp32_input_concated");
+    op2.add_output(partition + "_fp16_input_concated");
+    arg = op2.add_arg();
+    arg->set_name("clip");
+    arg->set_i(1);
+    shape_hints->emplace(partition + "_fp16_input_concated", shape_info);
+    pred_net->add_op()->CopyFrom(op2);
 
-  for (auto& op : ops) {
-    for (auto& i : *op.mutable_input()) {
-      if (user_input_set.count(i)) {
-        i = i + "_split";
+    OperatorDef op3;
+    op3.set_type("Split");
+    op3.add_input(partition + "_fp16_input_concated");
+    op3.mutable_device_option()->set_node_name(partition);
+
+    std::vector<OperatorDef> converts;
+    for (const auto& i : user_inputs) {
+      std::string new_name = partition + "_" + i + "_split_fp16";
+      op3.add_output(new_name);
+      shape_hints->emplace(new_name, user_input_map[i]);
+      converts.emplace_back(CreateOperatorDef(
+          "HalfToFloat",
+          "",
+          {partition + "_" + i + "_split_fp16"},
+          {partition + "_" + i + "_split"},
+          {}));
+      converts.back().mutable_device_option()->set_node_name(partition);
+
+      auto converted_shape = user_input_map[i];
+      converted_shape.shape.set_data_type(TensorProto_DataType_FLOAT);
+      shape_hints->emplace(partition + "_" + i + "_split", converted_shape);
+    }
+    arg = op3.add_arg();
+    arg->set_name("axis");
+    arg->set_i(1);
+    arg = op3.add_arg();
+    arg->set_name("split");
+    for (const auto& u : user_inputs) {
+      arg->add_ints(user_input_map[u].shape.dims(1));
+    }
+    pred_net->add_op()->CopyFrom(op3);
+    for (const auto& op : converts) {
+      pred_net->add_op()->CopyFrom(op);
+    }
+
+    for (auto& op : ops) {
+      if (!op.device_option().node_name().empty() &&
+          op.device_option().node_name() == partition) {
+        for (auto& i : *op.mutable_input()) {
+          if (user_input_set.count(i)) {
+            i = partition + "_" + i + "_split";
+          }
+        }
       }
     }
   }
@@ -1454,7 +1460,14 @@ void OnnxifiTransformer::transform(
   }
 
   if (opts_.debug) {
-    dumpNet(*pred_net, shape_hints, "debug_ssa_net.pb_txt");
+    caffe2::NetDef ssa_net;
+    ssa_net.CopyFrom(*pred_net);
+    auto* w_arg = ssa_net.add_arg();
+    w_arg->set_name(kInitializers);
+    for (const auto& w : weights) {
+      w_arg->add_strings(w);
+    }
+    dumpNet(ssa_net, shape_hints, "debug_ssa_net.pb_txt");
   }
   extractPartitionInfo(*pred_net);
 

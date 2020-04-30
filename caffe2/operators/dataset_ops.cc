@@ -14,6 +14,7 @@ namespace caffe2 {
 CAFFE_KNOWN_TYPE(std::unique_ptr<dataset_ops::TreeCursor>);
 CAFFE_KNOWN_TYPE(dataset_ops::TensorVectorPtr);
 CAFFE_KNOWN_TYPE(dataset_ops::SharedTensorVectorPtr);
+CAFFE_KNOWN_TYPE(dataset_ops::Shared2DTensorVectorPtr);
 
 namespace dataset_ops {
 namespace {
@@ -305,7 +306,10 @@ class PackRecordsOp : public Operator<CPUContext> {
   template <class... Args>
   explicit PackRecordsOp(Args&&... args)
       : Operator(std::forward<Args>(args)...),
-        fields_(OperatorBase::GetRepeatedArgument<std::string>("fields")) {}
+        fields_(OperatorBase::GetRepeatedArgument<std::string>("fields")),
+        packToSingleSharedPtr_(OperatorBase::GetSingleArgument<int>(
+            "pack_to_single_shared_ptr",
+            0)) {}
 
   bool RunOnDevice() override {
     // There should be one input per field
@@ -316,26 +320,44 @@ class PackRecordsOp : public Operator<CPUContext> {
 
     TreeWalker walker(Inputs(), cursor);
 
-    Output(0)->Resize(walker.size());
+    if (packToSingleSharedPtr_) {
+      Output(0)->Resize(1);
+      auto* dst = Output(0)->template mutable_data<Shared2DTensorVectorPtr>();
+      dst[0] = std::make_shared<Tensor2DVector>();
+      dst[0]->resize(walker.size());
 
-    // Output(0)->raw_mutable_data(TypeMeta::Make<SharedTensorVectorPtr>()));
-    auto* dst = Output(0)->template mutable_data<SharedTensorVectorPtr>();
-
-    for (int batchId = 0; batchId < walker.size(); ++batchId) {
-      dst[batchId] = std::make_shared<std::vector<TensorCPU>>();
-      dst[batchId]->reserve(walker.fields().size());
-
-      for (const auto& field : walker.fields()) {
-        dst[batchId]->emplace_back(field.dim(), CPU);
-        auto& tensor = dst[batchId]->back();
-        context_.CopyItemsSameDevice(
-            field.meta(),
-            tensor.numel(),
-            field.ptr() /* src */,
-            tensor.raw_mutable_data(field.meta()) /* dst */);
+      for (int batchId = 0; batchId < walker.size(); ++batchId) {
+        std::vector<TensorCPU>& tensors = dst[0]->at(batchId);
+        tensors.reserve(walker.fields().size());
+        for (const auto& field : walker.fields()) {
+          tensors.emplace_back(field.dim(), CPU);
+          auto& tensor = tensors.back();
+          context_.CopyItemsSameDevice(
+              field.meta(),
+              tensor.numel(),
+              field.ptr() /* src */,
+              tensor.raw_mutable_data(field.meta()) /* dst */);
+        }
+        walker.advance();
       }
+    } else {
+      Output(0)->Resize(walker.size());
+      auto* dst = Output(0)->template mutable_data<SharedTensorVectorPtr>();
 
-      walker.advance();
+      for (int batchId = 0; batchId < walker.size(); ++batchId) {
+        dst[batchId] = std::make_shared<std::vector<TensorCPU>>();
+        dst[batchId]->reserve(walker.fields().size());
+        for (const auto& field : walker.fields()) {
+          dst[batchId]->emplace_back(field.dim(), CPU);
+          auto& tensor = dst[batchId]->back();
+          context_.CopyItemsSameDevice(
+              field.meta(),
+              tensor.numel(),
+              field.ptr() /* src */,
+              tensor.raw_mutable_data(field.meta()) /* dst */);
+        }
+        walker.advance();
+      }
     }
 
     return true;
@@ -343,6 +365,7 @@ class PackRecordsOp : public Operator<CPUContext> {
 
  private:
   std::vector<std::string> fields_;
+  const bool packToSingleSharedPtr_;
 };
 
 class UnPackRecordsOp : public Operator<CPUContext> {
@@ -353,10 +376,32 @@ class UnPackRecordsOp : public Operator<CPUContext> {
         fields_(OperatorBase::GetRepeatedArgument<std::string>("fields")) {}
 
   bool RunOnDevice() override {
-    const auto* inputs = Input(0).template data<SharedTensorVectorPtr>();
-    const auto numRows = Input(0).numel();
+    size_t numRows = 0;
+    Shared2DTensorVectorPtr data_ptr = nullptr;
+    if (Input(0).IsType<SharedTensorVectorPtr>()) {
+      numRows = Input(0).numel();
+      CAFFE_ENFORCE_GE(numRows, 0);
+      data_ptr = std::make_shared<Tensor2DVector>();
+      data_ptr->reserve(numRows);
 
-    CAFFE_ENFORCE_GE(numRows, 0);
+      const auto* inputs = Input(0).template data<SharedTensorVectorPtr>();
+      for (int i = 0; i < numRows; i++) {
+        data_ptr->emplace_back(*inputs[i]);
+      }
+    } else if (Input(0).IsType<Shared2DTensorVectorPtr>()) {
+      CAFFE_ENFORCE_EQ(Input(0).numel(), 1);
+      const auto* inputs = Input(0).template data<Shared2DTensorVectorPtr>();
+      CAFFE_ENFORCE(inputs[0] != nullptr);
+      data_ptr = inputs[0];
+      numRows = inputs[0]->size();
+      CAFFE_ENFORCE_GE(numRows, 0);
+    } else {
+      // input contains a single tensor
+      CAFFE_ENFORCE_EQ(InputSize(), 1);
+      CAFFE_ENFORCE_EQ(OutputSize(), 1);
+      Output(0)->CopyFrom(Input(0));
+      return true;
+    }
 
     auto numTensors = OutputSize();
 
@@ -370,15 +415,16 @@ class UnPackRecordsOp : public Operator<CPUContext> {
         "undefined state.");
 
     if (InputSize() == 1) {
-      getShapeAndMetaFromInput(outputDims, metas);
+      getShapeAndMetaFromInput(data_ptr, outputDims, metas);
     } else {
       getShapeAndMetaFromPrototypeBlobs(outputDims, metas);
     }
 
+    // inputs contains a single shared_ptr of vector<vector<caffe2::TensorCPU>>
+    auto& tensors = *data_ptr;
     for (int i = 0; i < numRows; ++i) {
-      CAFFE_ENFORCE(inputs[i]);
-      for (int j = 0; j < inputs[i]->size(); ++j) {
-        const auto& input = inputs[i]->at(j);
+      for (int j = 0; j < tensors[i].size(); ++j) {
+        const auto& input = tensors[i][j];
 
         // Checks to ensure that dimensions/sizes match
         CAFFE_ENFORCE_EQ(outputDims[j].size(), input.dim());
@@ -401,7 +447,7 @@ class UnPackRecordsOp : public Operator<CPUContext> {
 
     for (int i = 0; i < numRows; ++i) {
       for (int j = 0; j < numTensors; ++j) {
-        const auto& input = inputs[i]->at(j);
+        const auto& input = tensors[i][j];
 
         context_.CopyItemsSameDevice(
             *metas[j],
@@ -420,22 +466,20 @@ class UnPackRecordsOp : public Operator<CPUContext> {
 
  private:
   void getShapeAndMetaFromInput(
+      const Shared2DTensorVectorPtr& inputs,
       std::vector<std::vector<int64_t>>& outputDims,
       std::vector<const TypeMeta*>& metas) {
-    const auto* inputs = Input(0).template data<SharedTensorVectorPtr>();
+    const auto& inputZero = inputs->at(0);
 
-    const auto& inputZero = inputs[0];
-    CAFFE_ENFORCE(inputZero);
-
-    const auto numTensors = inputZero->size();
+    const auto numTensors = inputZero.size();
 
     CAFFE_ENFORCE_EQ(numTensors, fields_.size());
     CAFFE_ENFORCE_EQ(numTensors, OutputSize());
 
     for (int i = 0; i < numTensors; ++i) {
-      outputDims[i] = inputZero->at(i).sizes().vec();
+      outputDims[i] = inputZero[i].sizes().vec();
       outputDims[i][0] = 0;
-      metas[i] = &inputZero->at(i).dtype();
+      metas[i] = &inputZero[i].dtype();
     }
   }
 

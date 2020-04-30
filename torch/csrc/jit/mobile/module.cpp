@@ -1,9 +1,11 @@
-#include "module.h"
+#include <torch/csrc/jit/mobile/module.h>
 #include <torch/csrc/jit/mobile/interpreter.h>
 #include <torch/csrc/jit/runtime/jit_exception.h>
 #if defined(PYTORCH_MOBILE_OBSERVER)
 #include <torch/csrc/jit/mobile/observer.h>
 #endif
+
+#include <torch/csrc/autograd/record_function.h>
 
 namespace torch {
 namespace jit {
@@ -46,10 +48,14 @@ c10::IValue Module::run_method(const std::string& method_name, Stack stack) {
   at::DebugInfoGuard guard(at::DebugInfoKind::MOBILE_RUNTIME_INFO, debug_info);
 #endif
 
-  auto m = find_method(method_name);
-  stack.insert(stack.begin(), object_);
-  m->run(stack);
-  c10::IValue result = stack.front();
+  c10::IValue result;
+  {
+    torch::autograd::profiler::RecordFunctionGuard g;
+    auto m = find_method(method_name);
+    stack.insert(stack.begin(), object_);
+    m->run(stack);
+    result = stack.front();
+  }
 
 #if defined(PYTORCH_MOBILE_OBSERVER)
   if (observer) {

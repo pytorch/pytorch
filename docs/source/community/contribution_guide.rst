@@ -279,6 +279,7 @@ Common Mistakes To Avoid
    related to your changes.
 
 Frequently asked questions
+--------------------------
 
 -  **How can I contribute as a reviewer?** There is lots of value if
    community developer reproduce issues, try out new functionality, or

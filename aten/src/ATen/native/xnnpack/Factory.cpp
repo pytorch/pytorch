@@ -1,23 +1,20 @@
 #ifdef USE_XNNPACK
 
+#include <ATen/NamedTensorUtils.h>
 #include <ATen/native/xnnpack/Factory.h>
-#include <ATen/native/utils/Allocator.h>
+#include <c10/core/CPUAllocator.h>
 
 namespace at {
 namespace native {
 namespace xnnpack {
 namespace internal {
 
-GuardingAllocator<0u, XNN_EXTRA_BYTES>* get_guarding_allocator() {
-  static GuardingAllocator<0u, XNN_EXTRA_BYTES> allocator;
-  return &allocator;
-}
-
 Tensor empty_with_tail_padding(
     const IntArrayRef size,
     const caffe2::TypeMeta dtype,
-    const c10::MemoryFormat memory_format) {
-  auto* const allocator_ptr = get_guarding_allocator();
+    const c10::MemoryFormat memory_format,
+    const DimnameList maybe_names) {
+  auto* const allocator_ptr = c10::GetDefaultMobileCPUAllocator();
   const int64_t nelements = prod_intlist(size);
 
   Tensor tensor(
@@ -29,21 +26,23 @@ Tensor empty_with_tail_padding(
               allocator_ptr,
               /*resizable=*/true,
           },
-          DispatchKeySet{DispatchKey::CPUTensorId}));
+          DispatchKeySet{DispatchKey::CPU}));
 
-  return tensor.resize_(size, memory_format);
+  return namedinference::propagate_names_if_nonempty(
+      tensor.resize_(size, memory_format),
+      maybe_names);
 }
 
 Tensor allocate_padded_contiguous_if_needed(
     const Tensor& input,
     const c10::MemoryFormat memory_format) {
   const auto* const allocator = input.storage().allocator();
-  const auto* const guarding_allocator = get_guarding_allocator();
+  const auto* const mobile_allocator = c10::GetDefaultMobileCPUAllocator();
 
   // If the allocators are the same and the memory is contiguous in the requested
   // format, then there is no need to reallocate the tensor.
 
-  if ((allocator == guarding_allocator) && input.is_contiguous(memory_format)) {
+  if ((allocator == mobile_allocator) && input.is_contiguous(memory_format)) {
     return input;
   }
 
@@ -56,7 +55,8 @@ Tensor allocate_padded_contiguous_if_needed(
   Tensor padded_input = empty_with_tail_padding(
       input.sizes(),
       input.options().dtype(),
-      memory_format);
+      memory_format,
+      input.names());
 
   return padded_input.copy_(input);
 }
