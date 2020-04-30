@@ -1606,6 +1606,7 @@ class TestQuantizeScriptPTSQOps(JitTestCase):
                 self.tanh = torch.nn.Tanh()
                 self.hardtanh = torch.nn.Hardtanh()
                 self.elu = torch.nn.ELU()
+                self.hardsigmoid = torch.nn.Hardsigmoid()
 
             def forward(self, x):
                 x = self.conv(x)
@@ -1656,6 +1657,8 @@ class TestQuantizeScriptPTSQOps(JitTestCase):
                 x = F.hardtanh(x)
                 x = self.elu(x)
                 x = F.elu(x)
+                x = self.hardsigmoid(x)
+                x = F.hardsigmoid(x)
                 x = self.conv(x)
                 return x
 
