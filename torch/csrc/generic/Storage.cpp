@@ -289,7 +289,7 @@ static PyObject * THPStorage_(dtype)(THPStorage *self, void *unused)
 {
   HANDLE_TH_ERRORS
   return torch::autograd::utils::wrap(
-      torch::getDtype(at::typeMetaToScalarType(self->cdata->dtype())));
+      torch::getTHPDtype(at::typeMetaToScalarType(self->cdata->dtype())));
   END_HANDLE_TH_ERRORS
 }
 

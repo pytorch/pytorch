@@ -37,7 +37,7 @@ static PyObject * THPVariable__parse_to(PyObject* module, PyObject* args, PyObje
     PyTuple_SET_ITEM(tuple.get(), 0, Py_None);
   }
   if (scalarType) {
-    PyTuple_SET_ITEM(tuple.get(), 1, torch::autograd::utils::wrap(torch::getDtype(*scalarType)));
+    PyTuple_SET_ITEM(tuple.get(), 1, torch::autograd::utils::wrap(torch::getTHPDtype(*scalarType)));
   } else {
     Py_INCREF(Py_None);
     PyTuple_SET_ITEM(tuple.get(), 1, Py_None);
