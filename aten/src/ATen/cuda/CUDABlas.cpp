@@ -326,6 +326,9 @@ void gemv<at::Half>(CUDABLAS_GEMV_ARGTYPES(at::Half)) {
   TORCH_CHECK(
       incy == 1,
       "at::cuda::blas::gemv<Half>: support for incy != 1 not implemented");
+  if (_cublasOpFromChar(trans) != CUBLAS_OP_N) {
+    std::swap(m, n);
+  }
   gemm<at::Half>(
       trans, 'n', m, 1, n, alpha, a, n, x, n, beta, y, m);
 }
