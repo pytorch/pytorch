@@ -26,6 +26,7 @@ py::tuple toPyTuple(const RRefForkData& rrefForkData) {
       rrefForkData.parent_,
       rrefForkData.typeStr_);
 }
+
 RRefForkData fromPyTuple(const py::tuple& pyTuple) {
   // add GIL as it is accessing a py::object
   pybind11::gil_scoped_acquire ag;
@@ -93,7 +94,7 @@ TypePtr tryInferTypeWithTypeHint(
   // Otherwise it's a pure pyobject, create the RRef
   // that holds an IValue of an pyobject.
   return PyObjectType::get();
-} // namespace
+}
 
 } // namespace
 
