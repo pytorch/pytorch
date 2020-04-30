@@ -380,7 +380,7 @@ class DeconvolutionOperatorTester {
     Runtime,
   };
 
-  void testQ8(const Mode mode = Mode::Runtime) const {
+  void testQ8(const Mode mode = Mode::Static) const {
     std::random_device randomDevice;
     auto rng = std::mt19937(randomDevice());
     auto s32rng =
