@@ -52,8 +52,8 @@ struct TopoMoveTestFixture {
       const std::vector<std::string>& inputNames,
       const std::vector<std::string>& blockInputNames = {}) {
     std::vector<Value*> inputs;
-    for (const auto& name : inputNames) {
-      inputs.push_back(nodes.at(name)->output());
+    for (const auto& name_ : inputNames) {
+      inputs.push_back(nodes.at(name_)->output());
     }
     auto node = graph->appendNode(graph->create(prim::AutogradZero, inputs));
     node->output()->setDebugName(name);
@@ -62,8 +62,8 @@ struct TopoMoveTestFixture {
     if (blockInputNames.size() != 0) {
       node->addBlock();
       std::vector<Value*> blockDeps;
-      for (const auto& name : blockInputNames) {
-        blockDeps.push_back(nodes.at(name)->output());
+      for (const auto& name_ : blockInputNames) {
+        blockDeps.push_back(nodes.at(name_)->output());
       }
 
       auto block = node->blocks().at(0);
