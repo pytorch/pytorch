@@ -50,7 +50,7 @@ class TestFreezing(JitTestCase):
                 self.h = {"layer" : [torch.tensor([7.7], requires_grad=True)]}
                 self.t = torch.tensor([1.2, 2.4], requires_grad=True)  # folded
                 self.ts = [torch.tensor([1.0, 2.0], requires_grad=True), torch.tensor([3.0, 4.0], requires_grad=True)]  # folded
-                self.tt = [[torch.tensor([3.3, 2.3], requires_grad=True), None]]  # not folded. TODO: fold Generic list
+                self.tt = [[torch.tensor([3.3, 2.3], requires_grad=True), None]]
 
             def forward(self, x):
                 return str(self.a) + str(self.b) + self.c + str(self.d) + \
@@ -80,7 +80,7 @@ class TestFreezing(JitTestCase):
         self.assertFalse(m._c.hasattr('h'))
         self.assertFalse(m._c.hasattr('t'))
         self.assertFalse(m._c.hasattr('ts'))
-        self.assertTrue(m._c.hasattr('tt'))
+        self.assertFalse(m._c.hasattr('tt'))
         output_f = m.forward(input)
         self.assertEqual(output_s, output_f)
 
@@ -583,7 +583,7 @@ class TestFreezing(JitTestCase):
 
             def forward(self, x):
                 self.d[0][0] += 10
-                return self.a.sum() 
+                return self.a.sum()
 
         m = FreezeMe()
         m_s = torch.jit.script(m)
