@@ -331,13 +331,18 @@ PyObject* rpc_init(PyObject* /* unused */) {
   // pythonRpcHandler is cleaned up in shutdown(), after
   // shutdown(), python objects returned from rpc python call can not be
   // resolved.
-  // TODO Once python object can be tagged as IValue and c10::ivalue::Future is
-  // implemented as generic Future<IValue>, we can consider all rpc call
-  // to return a future<IValue> later on.
-  auto future = shared_ptr_class_<FutureMessage>(module, "Future")
+  auto future = shared_ptr_class_<FutureIValue>(module, "Future")
                     .def(
                         "wait",
-                        [&](FutureMessage& fut) { return toPyObj(fut.wait()); },
+                        [&](FutureIValue& fut) {
+                          auto& pythonRpcHandler =
+                              PythonRpcHandler::getInstance();
+                          const auto& value = fut.wait();
+                          pybind11::gil_scoped_acquire ag;
+                          auto obj = torch::jit::toPyObject(value);
+                          pythonRpcHandler.handleException(obj);
+                          return obj;
+                        },
                         py::call_guard<py::gil_scoped_release>(),
                         R"(
 Wait on future to complete and return the object it completed with.

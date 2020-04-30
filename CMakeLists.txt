@@ -204,8 +204,12 @@ cmake_dependent_option(
 cmake_dependent_option(
     USE_GLOO "Use Gloo. Only available if USE_DISTRIBUTED is on." ON
     "USE_DISTRIBUTED" OFF)
+cmake_dependent_option(
+    USE_TENSORPIPE "Use TensorPipe. Only available if USE_DISTRIBUTED is on." ON
+    "USE_DISTRIBUTED" OFF)
 option(USE_TBB "Use TBB" OFF)
 option(ONNX_ML "Enable traditional ONNX ML API." ON)
+option(HAVE_SOVERSION "Whether to add SOVERSION to the shared objects" OFF)
 
 # Linux distributions do not want too many embedded sources, in that sense we
 # need to be able to build pytorch with an (almost) empty third_party
@@ -222,6 +226,8 @@ option(USE_SYSTEM_PTHREADPOOL "Use system-provided pthreadpool." OFF)
 option(USE_SYSTEM_PSIMD "Use system-provided psimd." OFF)
 option(USE_SYSTEM_FXDIV "Use system-provided fxdiv." OFF)
 option(USE_SYSTEM_BENCHMARK "Use system-provided google benchmark." OFF)
+option(USE_SYSTEM_ONNX "Use system-provided onnx." OFF)
+option(USE_SYSTEM_XNNPACK "Use system-provided xnnpack." OFF)
 if(USE_SYSTEM_LIBS)
   set(USE_SYSTEM_CPUINFO ON)
   set(USE_SYSTEM_SLEEF ON)
@@ -233,6 +239,8 @@ if(USE_SYSTEM_LIBS)
   set(USE_SYSTEM_PSIMD ON)
   set(USE_SYSTEM_FXDIV ON)
   set(USE_SYSTEM_BENCHMARK ON)
+  set(USE_SYSTEM_ONNX ON)
+  set(USE_SYSTEM_XNNPACK ON)
 endif()
 
 # Used when building Caffe2 through setup.py
@@ -246,7 +254,11 @@ cmake_dependent_option(
   MSVC_Z7_OVERRIDE "Work around sccache bug by replacing /Zi and /ZI with /Z7 when using MSVC (if you are not using sccache, you can turn this OFF)" ON
   "MSVC" OFF)
 
-set(ONNX_NAMESPACE "onnx_torch" CACHE STRING "A namespace for ONNX; needed to build with other frameworks that share ONNX.")
+if(NOT USE_SYSTEM_ONNX)
+  set(ONNX_NAMESPACE "onnx_torch" CACHE STRING "A namespace for ONNX; needed to build with other frameworks that share ONNX.")
+elseif()
+  set(ONNX_NAMESPACE "onnx" CACHE STRING "A namespace for ONNX; needed to build with other frameworks that share ONNX.")
+endif()
 set(SELECTED_OP_LIST "" CACHE STRING
     "Path to the yaml file that contains the list of operators to include for custom build. Include all operators by default.")
 set(OP_DEPENDENCY "" CACHE STRING
@@ -282,16 +294,10 @@ if(MSVC)
     # NB2: This is NOT enough to prevent warnings from nvcc on MSVC.  At the
     # moment only CMP0092 is enough to prevent those warnings too.
     string(REPLACE "/W3" "" ${flag_var} "${${flag_var}}")
-    # Suppress EHs is overridden by EHa warning
-    string(REPLACE "/EHsc" "" ${flag_var} "${${flag_var}}")
 
     # Turn off warnings (Windows build is currently is extremely warning
     # unclean and the warnings aren't telling us anything useful.)
-    #
-    # Turn on EHa; I'm not altogether clear why we use the asynchronous
-    # exception handling model, but someone added it at some point, so
-    # keep using it.
-    string(APPEND ${flag_var} " /w /EHa")
+    string(APPEND ${flag_var} " /w")
 
     if(${CAFFE2_USE_MSVC_STATIC_RUNTIME})
       if(${flag_var} MATCHES "/MD")
@@ -413,6 +419,7 @@ if(NOT TORCH_BUILD_VERSION)
 endif()
 caffe2_parse_version_str(TORCH ${TORCH_BUILD_VERSION})
 caffe2_parse_version_str(CAFFE2 ${TORCH_BUILD_VERSION})
+set(TORCH_SOVERSION "${TORCH_VERSION_MAJOR}.${TORCH_VERSION_MINOR}")
 
 # ---[ CMake scripts + modules
 list(APPEND CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake/Modules)
