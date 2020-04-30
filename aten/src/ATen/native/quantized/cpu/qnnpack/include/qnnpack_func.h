@@ -18,8 +18,9 @@ class PrePackConvWeights final {
 
   ~PrePackConvWeights()
   {
-    if (packed_weights_ != nullptr) {
+    if (packed_weights_) {
       free(packed_weights_);
+      packed_weights_ = nullptr;
     }
   }
 
@@ -108,7 +109,7 @@ enum pytorch_qnnp_status qnnpackConv(
     pthreadpool_t threadpool);
 
 enum pytorch_qnnp_status qnnpackDeConv(
-    const conv_param_t& conv_p,
+    const conv_param_t& deconv_p,
     void* packed_weights,
     const size_t batch_size,
     const size_t input_height,

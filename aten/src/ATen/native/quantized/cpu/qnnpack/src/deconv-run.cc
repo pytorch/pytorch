@@ -21,7 +21,6 @@ enum pytorch_qnnp_status qnnpackDeConv(
     const uint8_t* input,
     const float output_scale,
     const uint8_t output_zero_point,
-    const bool transpose,
     uint8_t* output,
     pthreadpool_t threadpool) {
 
@@ -29,7 +28,6 @@ enum pytorch_qnnp_status qnnpackDeConv(
     // Doesn't matter what's going on, if no batches, return
     return pytorch_qnnp_status_success;
   }
-
   // Check all invalid parameters
   const size_t kernel_width = deconv_p.kernel_dims[0];
   const size_t kernel_height = deconv_p.kernel_dims[1];
@@ -115,8 +113,6 @@ enum pytorch_qnnp_status qnnpackDeConv(
   deconvolution->zero_buffer = zero_buffer;
   deconvolution->zero_pointer = (void*) ((uintptr_t) zero_buffer + zero_offset);
 
-  deconvolution->packed_weights = packed_weights;
-
   deconvolution->input_padding_top = deconv_p.padding[0];
   deconvolution->input_padding_left = deconv_p.padding[1];
   deconvolution->input_padding_bottom = deconv_p.padding[2];
@@ -135,7 +131,6 @@ enum pytorch_qnnp_status qnnpackDeConv(
   deconvolution->group_output_channels = group_output_channels;
 
   deconvolution->kernel_zero_point = deconv_p.kernel_zero_point;
-
   deconvolution->conv_quantization_params =
       pytorch_qnnp_compute_conv_quantization_params(
           input_zero_point,
@@ -149,14 +144,6 @@ enum pytorch_qnnp_status qnnpackDeConv(
   deconvolution->format = pytorch_qnnp_format_quint8;
 
   // Setup the kernel
-  deconvolution->batch_size = batch_size;
-  deconvolution->input_height = input_height;
-  deconvolution->input_width = input_width;
-  deconvolution->input = input;
-  deconvolution->input_pixel_stride = deconv_p.input_channels;
-  deconvolution->output = output;
-  deconvolution->output_pixel_stride = deconv_p.output_channels;
-
   const std::array<size_t, 2> output_dims =
       deconv_p.compute_output_dims({input_width, input_height});
   const size_t output_width = output_dims[0];
@@ -168,6 +155,16 @@ enum pytorch_qnnp_status qnnpackDeConv(
   const size_t tiled_output_size = round_up(output_size, output_tile_size);
   const size_t indirection_buffer_size =
       sizeof(void*) * batch_size * groups * tiled_output_size * kernel_size;
+
+  deconvolution->batch_size = batch_size;
+  deconvolution->input_height = input_height;
+  deconvolution->input_width = input_width;
+  deconvolution->input = input;
+  deconvolution->input_pixel_stride = deconv_p.input_channels;
+  deconvolution->output_height = output_height;
+  deconvolution->output_width = output_width;
+  deconvolution->output = output;
+  deconvolution->output_pixel_stride = deconv_p.output_channels;
 
   const void** indirection_buffer = (const void**)realloc(
       deconvolution->indirection_buffer, indirection_buffer_size);
