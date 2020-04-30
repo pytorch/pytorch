@@ -176,9 +176,6 @@ class TestFuser(JitTestCase):
         def cuda_rem(x, y):
             return 1 + torch.remainder(x, y) - 1
 
-        def cuda_rem(x, y):
-            return 1 + x.abs() - 1
-
         a = torch.rand([512], dtype=torch.float).cuda()
         b = torch.rand([512], dtype=torch.float).cuda()
         inputs = [a, b]
