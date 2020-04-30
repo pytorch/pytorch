@@ -64,10 +64,10 @@
 
 #define THPUtils_unpackReal_COMPLEX(object)                                                                        \
     (PyComplex_Check(object) ?                                                                                     \
-    (std::complex<double>(PyComplex_RealAsDouble(object), PyComplex_ImagAsDouble(object))) :                       \
-    PyFloat_Check(object) ? (std::complex<double>(PyFloat_AsDouble(object), 0)) :                                  \
-    PyLong_Check(object) ? (std::complex<double>(PyLong_AsLongLong(object), 0)) :                                  \
-    (throw std::runtime_error("Could not parse real"), std::complex<double>(0,0)))                                 \
+    (c10::complex<double>(PyComplex_RealAsDouble(object), PyComplex_ImagAsDouble(object))) :                       \
+    PyFloat_Check(object) ? (c10::complex<double>(PyFloat_AsDouble(object), 0)) :                                  \
+    PyLong_Check(object) ? (c10::complex<double>(PyLong_AsLongLong(object), 0)) :                                  \
+    (throw std::runtime_error("Could not parse real"), c10::complex<double>(0,0)))                                 \
 
 #define THPUtils_checkReal_BOOL(object)                                        \
     PyBool_Check(object)
@@ -97,7 +97,7 @@
 #define THPComplexDoubleUtils_unpackReal(object)     THPUtils_unpackReal_COMPLEX(object)
 #define THPComplexDoubleUtils_newReal(value)         THPUtils_newReal_COMPLEX(value)
 #define THPComplexFloatUtils_checkReal(object)       THPUtils_checkReal_COMPLEX(object)
-#define THPComplexFloatUtils_unpackReal(object)      (std::complex<float>)THPUtils_unpackReal_COMPLEX(object)
+#define THPComplexFloatUtils_unpackReal(object)      (c10::complex<float>)THPUtils_unpackReal_COMPLEX(object)
 #define THPComplexFloatUtils_newReal(value)          THPUtils_newReal_COMPLEX(value)
 #define THPBFloat16Utils_checkReal(object)           THPUtils_checkReal_FLOAT(object)
 #define THPBFloat16Utils_unpackReal(object)          (at::BFloat16)THPUtils_unpackReal_FLOAT(object)

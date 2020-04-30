@@ -66,6 +66,16 @@ template <typename dest_value_t, typename src_value_t>
     }
 };
 #endif
+
+#if defined(__CUDACC__) || defined(__HIPCC__)
+template <typename dest_value_t, typename src_value_t>
+  struct static_cast_with_inter_type<c10::complex<dest_value_t>, c10::complex<src_value_t>> {
+    C10_HOST_DEVICE static inline c10::complex<dest_value_t> apply(c10::complex<src_value_t> src) {
+      return c10::complex<dest_value_t>(src.real(), src.imag());
+    }
+};
+#endif
+
 #if defined(__CUDACC__)
 template <typename dest_value_t, typename src_value_t>
   struct static_cast_with_inter_type<thrust::complex<dest_value_t>, c10::complex<src_value_t>> {

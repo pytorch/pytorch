@@ -2,8 +2,8 @@
 #error "You must define THC_GENERIC_FILE before including THGenerateComplexDoubleType.h"
 #endif
 
-#define scalar_t std::complex<double>
-#define accreal std::complex<double>
+#define scalar_t c10::complex<double>
+#define accreal c10::complex<double>
 #define Real ComplexDouble
 
 #define CReal CudaComplexDouble

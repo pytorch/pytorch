@@ -2,8 +2,8 @@
 #error "You must define THC_GENERIC_FILE before including THGenerateComplexFloatType.h"
 #endif
 
-#define scalar_t std::complex<float>
-#define accreal std::complex<float>
+#define scalar_t c10::complex<float>
+#define accreal c10::complex<float>
 #define Real ComplexFloat
 
 #define CReal CudaComplexFloat
