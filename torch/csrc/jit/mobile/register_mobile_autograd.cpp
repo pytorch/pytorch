@@ -1,4 +1,5 @@
 #include <ATen/ATen.h>
+#include <ATen/FunctionSequenceNumber.h>
 #include <ATen/TypeDefault.h>
 #include <ATen/core/stack.h>
 #include <torch/csrc/autograd/function.h>
@@ -69,7 +70,7 @@ void conv2d_kernel(const c10::OperatorHandle& op, Stack* stack) {
   RECORD_FUNCTION(
       "conv2d",
       std::vector<c10::IValue>({input, weight, bias}),
-      Node::peek_at_next_sequence_nr());
+      at::FunctionSequenceNumber::peek());
   auto result_ = VariableType::conv2d(
       input,
       weight,

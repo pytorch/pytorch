@@ -194,7 +194,7 @@ inline std::complex<float> Tensor::item() const {
 template <>
 inline std::complex<double> Tensor::item() const {
   // casting from c10::complex<double> to std::complex<double>
-  return static_cast<std::complex<double>>(item().toComplexFloat()); 
+  return static_cast<std::complex<double>>(item().toComplexFloat());
 }
 // end TODO
 

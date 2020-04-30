@@ -11,6 +11,7 @@
 #include <torch/csrc/utils/variadic.h>
 
 #include <ATen/ATen.h>
+#include <ATen/FunctionSequenceNumber.h>
 #include <c10/util/Exception.h>
 
 #include <algorithm>
@@ -100,7 +101,7 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
   }
 
   explicit Node(edge_list&& next_edges = edge_list())
-      : Node(get_next_sequence_nr()++, std::move(next_edges)) {}
+      : Node(at::FunctionSequenceNumber::get_and_increment(), std::move(next_edges)) {}
 
   /// Nodes are neither copyable nor moveable.
   Node(const Node& other) = delete;
@@ -331,11 +332,7 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
     return false;
   }
 
-  static uint64_t peek_at_next_sequence_nr();
-
  protected:
-  static uint64_t& get_next_sequence_nr();
-
   /// Performs the `Node`'s actual operation.
   virtual variable_list apply(variable_list&& inputs) = 0;
 

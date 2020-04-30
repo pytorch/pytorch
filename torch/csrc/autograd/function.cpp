@@ -15,18 +15,6 @@
 
 namespace torch { namespace autograd {
 
-/// Monotonically incrementing (thread local!) counter to supply sequence
-/// numbers.
-thread_local uint64_t Function_next_sequence_nr_ = 0;
-
-uint64_t Node::peek_at_next_sequence_nr() {
-  return Function_next_sequence_nr_;
-}
-
-uint64_t& Node::get_next_sequence_nr() {
-  return Function_next_sequence_nr_;
-}
-
 auto Node::name() const -> std::string {
   return c10::demangle(typeid(*this).name());
 }

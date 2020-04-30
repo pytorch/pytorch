@@ -18,6 +18,35 @@ const int kSmallTensorSize = 1;
 const float kSampingProb = 0.1;
 }
 
+struct MyTensor {
+  MyTensor() { str = "empty"; }
+  std::string str;
+};
+
+struct MyIValue {
+  MyIValue() {}
+  MyIValue(const MyTensor& t) : tensor(t) {}
+  MyTensor tensor;
+};
+
+template <class T>
+MyIValue my_fn(const T& t) {
+  std::cout << "Generic" << std::endl;
+  return MyIValue();
+};
+
+template <>
+MyIValue my_fn<MyIValue>(const MyIValue& m) {
+  std::cout << "specialized for MyIValue" << std::endl;
+  return m;
+}
+
+template <>
+MyIValue my_fn<MyTensor>(const MyTensor& m) {
+  std::cout << "specialized for MyTensor" << std::endl;
+  return m;
+}
+
 using namespace torch::autograd;
 
 void setupCallbacks() {
@@ -61,6 +90,19 @@ int main(int argc, char** argv) {
     std::cout << "Failed to parse command line flags" << std::endl;
     return -1;
   }
+
+  MyIValue iv;
+  MyTensor t;
+
+  std::cout << "iv: " << std::endl;
+  my_fn(iv);
+
+  std::cout << "t: " << std::endl;
+  my_fn(t);
+
+  std::cout << "t: " << std::endl;
+  my_fn(t);
+
 
   setupCallbacks();
 

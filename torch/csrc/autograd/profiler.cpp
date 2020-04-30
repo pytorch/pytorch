@@ -32,9 +32,6 @@ std::unordered_map<uint16_t, std::shared_ptr<RangeEventList>>
 thread_local std::shared_ptr<RangeEventList> event_list;
 thread_local uint16_t thread_id;
 
-// use RecordFunctionGuard to keep track of observers,
-// enable/disableProfiler are tied to the code range
-thread_local std::vector<std::shared_ptr<at::RecordFunctionGuard>> g_;
 // use thread_local vector to save profiler callback ids
 thread_local std::vector<uint64_t> callback_handles_;
 
@@ -203,7 +200,6 @@ void enableProfiler(ProfilerConfig config) {
       .scopes({at::RecordScope::FUNCTION, at::RecordScope::USER_SCOPE}));
   state = new_state;
   callback_handles_.push_back(handle);
-  g_.emplace_back(std::make_shared<at::RecordFunctionGuard>());
 
   if(state == ProfilerState::CUDA) {
     // event recording appears to have some startup overhead, so we need to
@@ -235,8 +231,6 @@ thread_event_lists disableProfiler() {
   TORCH_INTERNAL_ASSERT(!callback_handles_.empty());
   at::removeCallback(callback_handles_.back());
   callback_handles_.pop_back();
-  TORCH_INTERNAL_ASSERT(!g_.empty());
-  g_.pop_back();
   state = ProfilerState::Disabled;
 
   if (old_state == ProfilerState::NVTX) {
@@ -359,11 +353,6 @@ void RecordProfile::processEvents(const std::vector<Event*>& events) {
 
 void profile_wrapper(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
   c10::impl::ExcludeDispatchKeyGuard key_guard(c10::DispatchKey::Profiler);
-#if !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
-  RECORD_FUNCTION(op.schema().name(), *stack, torch::autograd::Node::peek_at_next_sequence_nr());
-#else
-  RECORD_FUNCTION(op.schema().name(), *stack);
-#endif
   op.callBoxed(stack);
 }
 
