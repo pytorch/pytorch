@@ -88,7 +88,7 @@ class FaultyProcessGroupAgent : public ProcessGroupAgent {
   // Mutex to guard failMessageCountMap_
   std::mutex failMapMutex_;
 
-  const MessageType messageStringToType(const std::string& messageString) const;
+  MessageType messageStringToType(const std::string& messageString) const;
 };
 } // namespace rpc
 } // namespace distributed

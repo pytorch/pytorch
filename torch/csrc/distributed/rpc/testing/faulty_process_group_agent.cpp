@@ -109,7 +109,7 @@ float FaultyProcessGroupAgent::getDelayForMessage(MessageType type) const {
   return it == messageTypesToDelay_.end() ? 0 : it->second;
 }
 
-const MessageType FaultyProcessGroupAgent::messageStringToType(
+MessageType FaultyProcessGroupAgent::messageStringToType(
     const std::string& messageString) const {
   // Lazily constructed map that returns string to message type mapping
   static std::unordered_map<std::string, MessageType> msgMap = {
