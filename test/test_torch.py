@@ -6117,6 +6117,8 @@ class TestTorchDeviceType(TestCase):
 
             # The complex64 implementation in CPU may show some precision issues
             # when comparing the resulting float value with python double precision
+            # Also using pythons pow instead of math.pow can lead to precision issues with
+            # float32
             tol_kwargs = {}
             if dtype in (torch.complex64, torch.float32):
                 tol_kwargs = {'atol': 10e-4}
@@ -6125,7 +6127,7 @@ class TestTorchDeviceType(TestCase):
             if m1.is_complex():
                 exponents += [-2.5j, -1.0j, 0j, 1.0j, 2.5j, 1.0 + 1.0j, -1.0 - 1.5j]
 
-            for num in [-2.8, -2, -1, -0.5, 0, 0.5, 1, 2, 3, 4, 3.3]:
+            for num in exponents:
                 if isinstance(num, int) and num < 0 and not m1.is_floating_point() and not m1.is_complex():
                     with self.assertRaisesRegex(RuntimeError,
                                                 r'Integers to negative integer powers are not allowed\.'):
