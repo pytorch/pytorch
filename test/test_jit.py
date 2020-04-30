@@ -3577,8 +3577,8 @@ class TestScript(JitTestCase):
             test_not_const(torch.rand([3, 2]))
 
             graph_str = torch.jit.last_executed_optimized_graph()
-            FileCheck().check("Double(*, 2) = ").run(graph_str)
-            FileCheck().check_not("Double(2, 2) = ").run(graph_str)
+            FileCheck().check("Double(*:2, 2:1) = ").run(graph_str)
+            FileCheck().check_not("Double(1:2, 2:1) = ").run(graph_str)
 
         torch._C._jit_set_num_profiled_runs(old_num_runs)
 
