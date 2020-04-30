@@ -81,7 +81,7 @@ Tensor & fmod_cuda_out(Tensor & result, const Tensor & self, const Tensor & othe
   Tensor b_self, b_other;
   // optimization that codegen used to do; avoids broadcast.
   if (other.dim() == 0) {
-    return fmod_cuda_out(self, other.item());
+    return fmod_cuda_out(result, self, other.item());
   }
   std::tie(b_self, b_other) = expand_outplace(self, other, "fmod_out");
   return legacy::cuda::_th_fmod_out(result, b_self, b_other);
