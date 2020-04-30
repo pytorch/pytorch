@@ -51,5 +51,17 @@ struct ztype_cuda<std::complex<double>> {
   using thrust_t = thrust::complex<double>;
 };
 
+template <>
+struct ztype_cuda<c10::complex<float>> {
+  using value_t = float;
+  using thrust_t = thrust::complex<float>;
+};
+
+template <>
+struct ztype_cuda<c10::complex<double>> {
+  using value_t = double;
+  using thrust_t = thrust::complex<double>;
+};
+
 } // end namespace
 }} //end at::native
