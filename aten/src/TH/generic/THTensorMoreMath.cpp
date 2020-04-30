@@ -58,94 +58,7 @@ int THTensor_(equal)(THTensor *ta, THTensor* tb) {
   return THTensor_(equalImpl)(ta, tb);
 }
 
-#if !defined(TH_REAL_IS_BFLOAT16)
-
-// Helper function to be used in a reduction operation.
-// Due to resize semantics of outputs, if the specified output tensor r_ has
-// same size as the output of the reduction operation, then any noncontiguities
-// in r_ should be preserved.
-// The reduction operation, however, needs to act on r_ with an extra dimension
-// (the reduced dimension), so this function "resizes" r_ and preserves its
-// noncontiguities if necessary.
-void THTensor_(preserveReduceDimSemantics)(
-    THTensor *r_, int in_dims, int reduce_dimension, int keepdim) {
-  if (r_ && !keepdim &&
-      THTensor_(nDimensionLegacyAll)(r_) == in_dims - 1 &&
-      THTensor_(nDimensionLegacyAll)(r_) != 0) {
-    THTensor_(unsqueeze1d)(r_, r_, reduce_dimension);
-  }
-}
-
-#if !defined(TH_REAL_IS_BOOL) /* non bool only part */
-
-void THTensor_(baddbmm)(THTensor *result, scalar_t beta, THTensor *t, scalar_t alpha, THTensor *batch1, THTensor *batch2)
-{
-  int64_t batch;
-
-  THArgCheck(THTensor_(nDimensionLegacyNoScalars)(batch1) == 3, 1, "expected 3D tensor, got %dD", THTensor_(nDimensionLegacyNoScalars)(batch1));
-  THArgCheck(THTensor_(nDimensionLegacyNoScalars)(batch2) == 3, 2, "expected 3D tensor, got %dD", THTensor_(nDimensionLegacyNoScalars)(batch2));
-  THArgCheck(THTensor_(size)(batch1, 0) == THTensor_(size)(batch2, 0), 2,
-             "equal number of batches expected, got %d, %d",
-             THTensor_(size)(batch1, 0), THTensor_(size)(batch2, 0));
-  THArgCheck(THTensor_(size)(batch1, 2) == THTensor_(size)(batch2, 1), 2,
-             "wrong matrix size, batch1: %dx%d, batch2: %dx%d",
-             THTensor_(size)(batch1, 1), THTensor_(size)(batch1, 2),
-             THTensor_(size)(batch2, 1), THTensor_(size)(batch2, 2));
-
-  int64_t bs = THTensor_(size)(batch1, 0);
-  int64_t dim1 = THTensor_(size)(batch1, 1);
-  int64_t dim2 = THTensor_(size)(batch2, 2);
-  THArgCheck(THTensor_(size)(t, 0) == bs, 1,   "output tensor of incorrect size");
-  THArgCheck(THTensor_(size)(t, 1) == dim1, 1, "output tensor of incorrect size");
-  THArgCheck(THTensor_(size)(t, 2) == dim2, 1, "output tensor of incorrect size");
-
-  if (t != result) {
-    THTensor_(resizeAs)(result, t);
-    if (beta != 0.0) {
-      at::Tensor result_wrap = THTensor_wrap(result);
-      at::Tensor t_wrap = THTensor_wrap(t);
-      at::native::copy_(result_wrap, t_wrap);
-    }
-  }
-
-  THTensor *matrix1 = THTensor_(new)();
-  THTensor *matrix2 = THTensor_(new)();
-  THTensor *result_matrix = THTensor_(new)();
-
-  for (batch = 0; batch < THTensor_(size)(batch1, 0); ++batch) {
-    THTensor_(select)(matrix1, batch1, 0, batch);
-    THTensor_(select)(matrix2, batch2, 0, batch);
-    THTensor_(select)(result_matrix, result, 0, batch);
-
-    THTensor_(addmm)(result_matrix, result_matrix, matrix1, matrix2, beta, alpha);
-  }
-
-  c10::raw::intrusive_ptr::decref(matrix1);
-  c10::raw::intrusive_ptr::decref(matrix2);
-  c10::raw::intrusive_ptr::decref(result_matrix);
-}
-
-accreal THTensor_(trace)(THTensor *t)
-{
-  scalar_t *t_data = t->data<scalar_t>();
-  accreal sum = 0;
-  int64_t i = 0;
-  int64_t t_stride_0, t_stride_1, t_diag_size;
-
-  THArgCheck(THTensor_(nDimensionLegacyAll)(t) == 2, 1, "expected a matrix");
-
-  t_stride_0 = THTensor_(stride)(t, 0);
-  t_stride_1 = THTensor_(stride)(t, 1);
-  t_diag_size = THMin(THTensor_(size)(t, 0), THTensor_(size)(t, 1));
-  while(i < t_diag_size)
-  {
-    sum += t_data[i*(t_stride_0+t_stride_1)];
-    i++;
-  }
-
-  return sum;
-}
-
+#if !defined(TH_REAL_IS_BFLOAT16) && !defined(TH_REAL_IS_BOOL)
 /* I cut and pasted (slightly adapted) the quicksort code from
    Sedgewick's 1978 "Implementing Quicksort Programs" article
    http://www.csie.ntu.edu.tw/~b93076/p847-sedgewick.pdf
@@ -390,6 +303,96 @@ void THTensor_(sort)(THTensor *rt_, THLongTensor *ri_, THTensor *t, int dimensio
                            ri__data[i*ri__stride] = i;
                          THTensor_(quicksortascend)(rt__data, ri__data, rt__size, rt__stride);)
       }
+}
+
+#endif
+
+#if !defined(TH_REAL_IS_BFLOAT16) && !defined(TH_REAL_IS_HALF)
+
+// Helper function to be used in a reduction operation.
+// Due to resize semantics of outputs, if the specified output tensor r_ has
+// same size as the output of the reduction operation, then any noncontiguities
+// in r_ should be preserved.
+// The reduction operation, however, needs to act on r_ with an extra dimension
+// (the reduced dimension), so this function "resizes" r_ and preserves its
+// noncontiguities if necessary.
+void THTensor_(preserveReduceDimSemantics)(
+    THTensor *r_, int in_dims, int reduce_dimension, int keepdim) {
+  if (r_ && !keepdim &&
+      THTensor_(nDimensionLegacyAll)(r_) == in_dims - 1 &&
+      THTensor_(nDimensionLegacyAll)(r_) != 0) {
+    THTensor_(unsqueeze1d)(r_, r_, reduce_dimension);
+  }
+}
+
+#if !defined(TH_REAL_IS_BOOL) /* non bool only part */
+
+void THTensor_(baddbmm)(THTensor *result, scalar_t beta, THTensor *t, scalar_t alpha, THTensor *batch1, THTensor *batch2)
+{
+  int64_t batch;
+
+  THArgCheck(THTensor_(nDimensionLegacyNoScalars)(batch1) == 3, 1, "expected 3D tensor, got %dD", THTensor_(nDimensionLegacyNoScalars)(batch1));
+  THArgCheck(THTensor_(nDimensionLegacyNoScalars)(batch2) == 3, 2, "expected 3D tensor, got %dD", THTensor_(nDimensionLegacyNoScalars)(batch2));
+  THArgCheck(THTensor_(size)(batch1, 0) == THTensor_(size)(batch2, 0), 2,
+             "equal number of batches expected, got %d, %d",
+             THTensor_(size)(batch1, 0), THTensor_(size)(batch2, 0));
+  THArgCheck(THTensor_(size)(batch1, 2) == THTensor_(size)(batch2, 1), 2,
+             "wrong matrix size, batch1: %dx%d, batch2: %dx%d",
+             THTensor_(size)(batch1, 1), THTensor_(size)(batch1, 2),
+             THTensor_(size)(batch2, 1), THTensor_(size)(batch2, 2));
+
+  int64_t bs = THTensor_(size)(batch1, 0);
+  int64_t dim1 = THTensor_(size)(batch1, 1);
+  int64_t dim2 = THTensor_(size)(batch2, 2);
+  THArgCheck(THTensor_(size)(t, 0) == bs, 1,   "output tensor of incorrect size");
+  THArgCheck(THTensor_(size)(t, 1) == dim1, 1, "output tensor of incorrect size");
+  THArgCheck(THTensor_(size)(t, 2) == dim2, 1, "output tensor of incorrect size");
+
+  if (t != result) {
+    THTensor_(resizeAs)(result, t);
+    if (beta != 0.0) {
+      at::Tensor result_wrap = THTensor_wrap(result);
+      at::Tensor t_wrap = THTensor_wrap(t);
+      at::native::copy_(result_wrap, t_wrap);
+    }
+  }
+
+  THTensor *matrix1 = THTensor_(new)();
+  THTensor *matrix2 = THTensor_(new)();
+  THTensor *result_matrix = THTensor_(new)();
+
+  for (batch = 0; batch < THTensor_(size)(batch1, 0); ++batch) {
+    THTensor_(select)(matrix1, batch1, 0, batch);
+    THTensor_(select)(matrix2, batch2, 0, batch);
+    THTensor_(select)(result_matrix, result, 0, batch);
+
+    THTensor_(addmm)(result_matrix, result_matrix, matrix1, matrix2, beta, alpha);
+  }
+
+  c10::raw::intrusive_ptr::decref(matrix1);
+  c10::raw::intrusive_ptr::decref(matrix2);
+  c10::raw::intrusive_ptr::decref(result_matrix);
+}
+
+accreal THTensor_(trace)(THTensor *t)
+{
+  scalar_t *t_data = t->data<scalar_t>();
+  accreal sum = 0;
+  int64_t i = 0;
+  int64_t t_stride_0, t_stride_1, t_diag_size;
+
+  THArgCheck(THTensor_(nDimensionLegacyAll)(t) == 2, 1, "expected a matrix");
+
+  t_stride_0 = THTensor_(stride)(t, 0);
+  t_stride_1 = THTensor_(stride)(t, 1);
+  t_diag_size = THMin(THTensor_(size)(t, 0), THTensor_(size)(t, 1));
+  while(i < t_diag_size)
+  {
+    sum += t_data[i*(t_stride_0+t_stride_1)];
+    i++;
+  }
+
+  return sum;
 }
 
 /* Implementation of the Quickselect algorithm, based on Nicolas Devillard's

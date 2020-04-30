@@ -18,7 +18,6 @@ namespace {
 Operator createOperatorFromC10_withTracingHandledHere(
     const c10::OperatorHandle& op) {
   return Operator(op, [op](Stack& stack) {
-    RECORD_FUNCTION(op.schema().name(), stack);
     const auto input_size = op.schema().arguments().size();
     const auto output_size = op.schema().returns().size();
 
@@ -73,6 +72,15 @@ Operator createOperatorFromC10_withTracingHandledHere(
             AT_ASSERT(iter->isTensorList());
             auto list = iter->toTensorVector();
             tracer::addInputs(node, args[i].name().c_str(), list);
+          } else if (auto class_type = elem_type->cast<ClassType>()) {
+            AT_ASSERT(iter->isList());
+            auto list = iter->toList();
+            std::vector<c10::intrusive_ptr<c10::ivalue::Object>> objects;
+            for (IValue iv : list) {
+              objects.emplace_back(std::move(iv).toObject());
+            }
+            tracer::addInputs(
+                node, args[i].name().c_str(), objects, class_type);
           } else if (elem_type->kind() == TypeKind::FloatType) {
             AT_ASSERT(iter->isDoubleList());
             // NB: now, tracer doesn't support tracing double list. We add
@@ -115,10 +123,10 @@ Operator createOperatorFromC10_withTracingHandledHere(
 #ifdef USE_STATIC_DISPATCH
     {
       at::AutoNonVariableTypeMode non_var_type_mode(true);
-      c10::Dispatcher::singleton().callBoxed(op, &stack);
+      op.callBoxed(&stack);
     }
 #else
-      c10::Dispatcher::singleton().callBoxed(op, &stack);
+    op.callBoxed(&stack);
 #endif // USE_STATIC_DISPATCH
 
     if (tracer_state) {
@@ -152,7 +160,7 @@ Operator createOperatorFromC10_withTracingHandledHere(
 Operator createOperatorFromC10_withTracingNotHandledHere(
     const c10::OperatorHandle& op) {
   return Operator(op, [op](Stack& stack) {
-    c10::Dispatcher::singleton().callBoxed(op, &stack);
+    op.callBoxed(&stack);
     return 0;
   });
 }

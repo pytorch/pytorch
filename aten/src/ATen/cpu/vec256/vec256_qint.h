@@ -2,11 +2,10 @@
 
 #include <ATen/cpu/vec256/intrinsics.h>
 #include <ATen/cpu/vec256/vec256_base.h>
-#include <ATen/quantized/Quantizer.h>
+#include <ATen/native/quantized/affine_quantizer.h>
+#include <c10/util/qint32.h>
 #include <c10/util/qint8.h>
 #include <c10/util/quint8.h>
-#include <c10/util/qint32.h>
-
 
 #include <array>
 
@@ -37,7 +36,7 @@ namespace at {
 namespace vec256 {
 namespace {
 
-#if defined(__AVX__) && !defined(_MSC_VER)
+#if (defined(CPU_CAPABILITY_AVX) || defined(CPU_CAPABILITY_AVX2)) && !defined(_MSC_VER)
 
 struct Vec256qi {
  protected:
@@ -51,7 +50,7 @@ struct Vec256qi {
   }
 };
 
-#if defined(__AVX2__) && defined(__FMA__)
+#if defined(CPU_CAPABILITY_AVX2)
 template <typename T>
 __m256i pack_saturate_and_clamp(
     __m256i first,
@@ -101,7 +100,7 @@ inline void __attribute__((always_inline)) QuantizeAvx2(
     int len,
     float inverse_scale,
     int64_t zero_point) {
-#if defined(__AVX2__) && defined(__FMA__)
+#if defined(CPU_CAPABILITY_AVX2)
   constexpr int VLEN = 8;
   constexpr auto min_val = std::numeric_limits<typename T::underlying>::min();
   constexpr auto max_val = std::numeric_limits<typename T::underlying>::max();
@@ -212,7 +211,7 @@ inline void __attribute__((always_inline)) QuantizeAvx2(
     dst[i] = nearbyint(clipped);
   }
 #else
-  at::quantize_vec<T>(
+  at::native::quantize_vec<T>(
       1.0f / inverse_scale, zero_point, src, reinterpret_cast<T*>(dst), len);
 #endif
 }
@@ -264,7 +263,7 @@ struct Vec256<c10::qint32> : public Vec256qi {
         Vec256<float> zero_point,
         Vec256<float> scale_zp_premul) const {
       __m256 float_vals = _mm256_cvtepi32_ps(vals);
-#if defined(__AVX2__) && defined(__FMA__)
+#if defined(CPU_CAPABILITY_AVX2)
       return {vec256::fmadd(scale, Vec256<float>(float_vals), scale_zp_premul)};
 #else
       return {scale * (Vec256<float>(float_vals) - zero_point)};
@@ -278,13 +277,13 @@ struct Vec256<c10::qint32> : public Vec256qi {
         float inverse_scale) {
       Vec256<c10::qint32> retval;
       auto rhs_data = (__m256)rhs[0];
-      at::quantize_vec<c10::qint32, /*precision=*/32>(
+      at::native::quantize_vec<c10::qint32, /*precision=*/32>(
           scale, zero_point, (float*)&rhs_data, (c10::qint32*)&retval.vals, 8);
       return retval;
     }
 
     Vec256<c10::qint32> maximum(Vec256<c10::qint32> b) const {
-#ifdef __AVX2__
+#ifdef CPU_CAPABILITY_AVX2
       return _mm256_max_epi32(vals, b.vals);
 #else
       // Pray the compiler can autovectorize this
@@ -302,7 +301,7 @@ struct Vec256<c10::qint32> : public Vec256qi {
     }
 
     Vec256<c10::qint32> minimum(Vec256<c10::qint32> b) const {
-#ifdef __AVX2__
+#ifdef CPU_CAPABILITY_AVX2
       return _mm256_min_epi32(vals, b.vals);
 #else
       // Pray the compiler can autovectorize this
@@ -326,7 +325,7 @@ struct Vec256<c10::qint32> : public Vec256qi {
     Vec256<c10::qint32> relu6(
         Vec256<c10::qint32> zero_point,
         Vec256<c10::qint32> q_six) {
-#ifdef __AVX2__
+#ifdef CPU_CAPABILITY_AVX2
       return _mm256_min_epi32(
           _mm256_max_epi32(vals, zero_point.vals), q_six.vals);
 #else
@@ -348,7 +347,7 @@ struct Vec256<c10::qint32> : public Vec256qi {
     }
 
     int_vec_return_type widening_subtract(Vec256<c10::qint32> b) const {
-#ifdef __AVX2__
+#ifdef CPU_CAPABILITY_AVX2
       return {_mm256_sub_epi32(vals, b)};
 #else
       std::array<int32_t, size()> int_vals;
@@ -367,7 +366,7 @@ struct Vec256<c10::qint32> : public Vec256qi {
         const int_vec_return_type& inp,
         float multiplier,
         int32_t zero_point) {
-#ifdef __AVX2__
+#ifdef CPU_CAPABILITY_AVX2
       __m256 multiplier_v = _mm256_set1_ps(multiplier);
       __m256i zero_point_v = _mm256_set1_epi32(zero_point);
 
@@ -409,7 +408,7 @@ template <>
 Vec256<c10::qint32> inline operator*(
     const Vec256<c10::qint32>& a,
     const Vec256<c10::qint32>& b) {
-#ifdef __AVX2__
+#ifdef CPU_CAPABILITY_AVX2
   return _mm256_mullo_epi32(a, b);
 #else
   // Pray the compiler can autovectorize this
@@ -429,7 +428,7 @@ template <>
 Vec256<c10::qint32> inline operator+(
     const Vec256<c10::qint32>& a,
     const Vec256<c10::qint32>& b) {
-#ifdef __AVX2__
+#ifdef CPU_CAPABILITY_AVX2
   return _mm256_add_epi32(a, b);
 #else
   // Pray the compiler can autovectorize this
@@ -445,7 +444,7 @@ Vec256<c10::qint32> inline operator+(
 #endif
 }
 
-#ifdef __AVX2__
+#ifdef CPU_CAPABILITY_AVX2
 /*
  * Convert values from int32 back to int8/uint8
  */
@@ -541,9 +540,9 @@ struct Vec256<c10::qint8> : public Vec256qi {
 
  private:
     __m256i cvtepi8_epi32(__m128i epi8_vals) const {
-#ifdef __AVX2__
+#ifdef CPU_CAPABILITY_AVX2
         return _mm256_cvtepi8_epi32(epi8_vals);
-#else  // __AVX2__
+#else  // CPU_CAPABILITY_AVX2
         __m128i result_data[2];
         __m128i unpacked1 = _mm_unpacklo_epi8(epi8_vals, epi8_vals);
         __m128i unpacked2 = _mm_unpacklo_epi16(unpacked1, unpacked1);
@@ -573,7 +572,7 @@ struct Vec256<c10::qint8> : public Vec256qi {
     __m256 float_val2 = _mm256_cvtepi32_ps(cvtepi8_epi32(int_val2));
     __m256 float_val3 = _mm256_cvtepi32_ps(cvtepi8_epi32(int_val3));
 
-#if defined(__AVX2__) && defined(__FMA__)
+#if defined(CPU_CAPABILITY_AVX2)
     auto val0 =
         vec256::fmadd(scale, Vec256<float>(float_val0), scale_neg_zp_premul);
     auto val1 =
@@ -604,7 +603,7 @@ struct Vec256<c10::qint8> : public Vec256qi {
   }
 
   Vec256<c10::qint8> maximum(Vec256<c10::qint8> b) const {
-#ifdef __AVX2__
+#ifdef CPU_CAPABILITY_AVX2
       return _mm256_max_epi8(vals, b.vals);
 #else
       // Pray the compiler can autovectorize this
@@ -622,7 +621,7 @@ struct Vec256<c10::qint8> : public Vec256qi {
     }
 
   Vec256<c10::qint8> minimum(Vec256<c10::qint8> b) const {
-#ifdef __AVX2__
+#ifdef CPU_CAPABILITY_AVX2
       return _mm256_min_epi8(vals, b.vals);
 #else
       // Pray the compiler can autovectorize this
@@ -646,7 +645,7 @@ struct Vec256<c10::qint8> : public Vec256qi {
     Vec256<c10::qint8> relu6(
         Vec256<c10::qint8> zero_point,
         Vec256<c10::qint8> q_six) {
-#ifdef __AVX2__
+#ifdef CPU_CAPABILITY_AVX2
       return _mm256_min_epi8(
           _mm256_max_epi8(vals, zero_point.vals), q_six.vals);
 #else
@@ -668,7 +667,7 @@ struct Vec256<c10::qint8> : public Vec256qi {
     }
 
     int_vec_return_type widening_subtract(Vec256<c10::qint8> b) const {
-#ifdef __AVX2__
+#ifdef CPU_CAPABILITY_AVX2
       __m128i int_val0 = _mm_set1_epi64x(_mm256_extract_epi64(vals, 0));
       __m128i int_val1 = _mm_set1_epi64x(_mm256_extract_epi64(vals, 1));
       __m128i int_val2 = _mm_set1_epi64x(_mm256_extract_epi64(vals, 2));
@@ -723,7 +722,7 @@ struct Vec256<c10::qint8> : public Vec256qi {
         const int_vec_return_type& inp,
         float multiplier,
         int32_t zero_point) {
-#ifdef __AVX2__
+#ifdef CPU_CAPABILITY_AVX2
       __m256 multiplier_v = _mm256_set1_ps(multiplier);
       __m256i zero_point_v = _mm256_set1_epi32(zero_point);
       return RequantizeAvx2<value_type>(inp, multiplier_v, zero_point_v);
@@ -813,9 +812,9 @@ struct Vec256<c10::quint8> : public Vec256qi {
 
  private:
     __m256i cvtepu8_epi32(__m128i epu8_vals) const {
-#ifdef __AVX2__
+#ifdef CPU_CAPABILITY_AVX2
         return _mm256_cvtepu8_epi32(epu8_vals);
-#else  // __AVX2__
+#else  // CPU_CAPABILITY_AVX2
         __m128i result_data[2];
         __m128i zeros = _mm_setzero_si128();
         __m128i unpacked1 = _mm_unpacklo_epi8(epu8_vals, zeros);
@@ -844,7 +843,7 @@ struct Vec256<c10::quint8> : public Vec256qi {
     __m256 float_val2 = _mm256_cvtepi32_ps(cvtepu8_epi32(int_val2));
     __m256 float_val3 = _mm256_cvtepi32_ps(cvtepu8_epi32(int_val3));
 
-#if defined(__AVX2__) && defined(__FMA__)
+#if defined(CPU_CAPABILITY_AVX2)
     auto val0 =
         vec256::fmadd(scale, Vec256<float>(float_val0), scale_zp_premul);
     auto val1 =
@@ -875,7 +874,7 @@ struct Vec256<c10::quint8> : public Vec256qi {
   }
 
   Vec256<c10::quint8> maximum(Vec256<c10::quint8> b) const {
-#ifdef __AVX2__
+#ifdef CPU_CAPABILITY_AVX2
       return _mm256_max_epu8(vals, b.vals);
 #else
       // Pray the compiler can autovectorize this
@@ -893,7 +892,7 @@ struct Vec256<c10::quint8> : public Vec256qi {
     }
 
   Vec256<c10::quint8> minimum(Vec256<c10::quint8> b) const {
-#ifdef __AVX2__
+#ifdef CPU_CAPABILITY_AVX2
       return _mm256_min_epu8(vals, b.vals);
 #else
       // Pray the compiler can autovectorize this
@@ -917,7 +916,7 @@ struct Vec256<c10::quint8> : public Vec256qi {
     Vec256<c10::quint8> relu6(
         Vec256<c10::quint8> zero_point,
         Vec256<c10::quint8> q_six) {
-#ifdef __AVX2__
+#ifdef CPU_CAPABILITY_AVX2
       return _mm256_min_epu8(
           _mm256_max_epu8(vals, zero_point.vals), q_six.vals);
 #else
@@ -939,7 +938,7 @@ struct Vec256<c10::quint8> : public Vec256qi {
     }
 
     int_vec_return_type widening_subtract(Vec256<c10::quint8> b) const {
-#ifdef __AVX2__
+#ifdef CPU_CAPABILITY_AVX2
       __m128i int_val0 = _mm_set1_epi64x(_mm256_extract_epi64(vals, 0));
       __m128i int_val1 = _mm_set1_epi64x(_mm256_extract_epi64(vals, 1));
       __m128i int_val2 = _mm_set1_epi64x(_mm256_extract_epi64(vals, 2));
@@ -993,7 +992,7 @@ struct Vec256<c10::quint8> : public Vec256qi {
         const int_vec_return_type& inp,
         float multiplier,
         int32_t zero_point) {
-#ifdef __AVX2__
+#ifdef CPU_CAPABILITY_AVX2
       __m256 multiplier_v = _mm256_set1_ps(multiplier);
       __m256i zero_point_v = _mm256_set1_epi32(zero_point);
       return RequantizeAvx2<value_type>(inp, multiplier_v, zero_point_v);
@@ -1093,8 +1092,8 @@ struct Vec256QuantizedConverter {
     float_vec_return_type rv;
     for (int i = 0; i < float_num_vecs(); ++i) {
       for (int j = 0; j < 8; ++j) {
-        rv[i][j] =
-            at::dequantize_val<T>(scale[j], zero_point[j], T(vals[8 * i + j]));
+        rv[i][j] = at::native::dequantize_val<T>(
+            scale[j], zero_point[j], T(vals[8 * i + j]));
       }
     }
     return rv;
@@ -1152,7 +1151,7 @@ struct Vec256<c10::qint32> : public Vec256QuantizedConverter<
       rhs[i].store(&float_vals[i * 8], 8);
     }
 
-    at::quantize_vec<c10::qint32, /*precision=*/32>(
+    at::native::quantize_vec<c10::qint32, /*precision=*/32>(
         scale,
         zero_point,
         float_vals.data(),
@@ -1284,7 +1283,7 @@ struct Vec256<c10::qint8> : public Vec256QuantizedConverter<
       rhs[i].store(&float_vals[i * 8], 8);
     }
 
-    at::quantize_vec<c10::qint8>(
+    at::native::quantize_vec<c10::qint8>(
         scale,
         zero_point,
         float_vals.data(),
@@ -1404,7 +1403,7 @@ struct Vec256<c10::quint8> : public Vec256QuantizedConverter<
       rhs[i].store(&float_vals[i * 8], 8);
     }
 
-    at::quantize_vec<c10::quint8>(
+    at::native::quantize_vec<c10::quint8>(
         scale,
         zero_point,
         float_vals.data(),
@@ -1484,6 +1483,6 @@ Vec256<c10::quint8> inline maximum(const Vec256<c10::quint8>& a, const Vec256<c1
   return a.maximum(b);
 }
 
-#endif // defined(__AVX__) && !defined(_MSC_VER)
+#endif // (defined(CPU_CAPABILITY_AVX) || defined(CPU_CAPABILITY_AVX2)) && !defined(_MSC_VER)
 
 }}}
