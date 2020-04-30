@@ -1728,7 +1728,10 @@ class InsertQuantDeQuantHelper {
     is_dynamic_ = is_dynamic;
   }
 
-  void quantizeGeneralOps(Module& module);
+  // In order to propagate quantization ops through the ops that doesn't
+  // require observation, we'll first inline the graph, and call the
+  // PropgateQuantizationOps pass
+  void propagateQuantizationOps(Module& module);
 
  private:
   std::unordered_map<Graph*, std::vector<std::string>>
@@ -1956,7 +1959,7 @@ void RemoveRedundantQuantizationOps(std::shared_ptr<Graph>& graph) {
   rewriter.runOnGraph(graph, filter);
 }
 
-void InsertQuantDeQuantHelper::quantizeGeneralOps(Module& module) {
+void InsertQuantDeQuantHelper::propagateQuantizationOps(Module& module) {
   SwapFunctionalLinear(module);
   auto graph = module.get_method("forward").graph();
   Inline(*graph);
@@ -1965,7 +1968,7 @@ void InsertQuantDeQuantHelper::quantizeGeneralOps(Module& module) {
   RemoveRedundantQuantizationOps(graph);
   ReplicateQuant(graph);
   ReplicateDeQuant(graph);
-  QuantizeGeneralOps(graph);
+  PropagateQuantizationOps(graph);
 }
 
 void checkGetQParamsResult(const IValue& qparams) {
@@ -2689,8 +2692,8 @@ Node* insertQParam(
     Graph* graph,
     Value* quantized_input,
     NodeKind node_kind,
-    TypePtr output_type,
-    const std::string param_name) {
+    const TypePtr& output_type,
+    const std::string& param_name) {
   Node* qparam = graph->create(node_kind, {quantized_input});
   qparam->output()
       ->setDebugName(quantized_input->debugName() + "." + param_name)
@@ -2699,12 +2702,12 @@ Node* insertQParam(
   return qparam;
 }
 
-void quantizeGeneralOps(Block* block) {
+void propagateQuantizationOps(Block* block) {
   auto graph = block->owningGraph();
   for (Node* n : block->nodes()) {
     if (n->kind() == prim::If) {
       for (Block* subblock : n->blocks()) {
-        quantizeGeneralOps(subblock);
+        propagateQuantizationOps(subblock);
       }
       if (n->outputs().size() == 0) {
         continue;
@@ -2837,7 +2840,7 @@ Module InsertQuantDeQuant(
   h.setDynamicFlag(is_dynamic);
   h.run(module, method_name);
   h.cleanup(module);
-  h.quantizeGeneralOps(module);
+  h.propagateQuantizationOps(module);
   return module;
 }
 
@@ -2967,8 +2970,8 @@ void ReplicateDeQuant(std::shared_ptr<Graph>& graph) {
 // This is the pass to handle ops that does not require observation
 // for example: flatten, average_pool, upsample
 // This is called after inline and before graph execution
-void QuantizeGeneralOps(std::shared_ptr<Graph>& graph) {
-  quantizeGeneralOps(graph->block());
+void PropagateQuantizationOps(std::shared_ptr<Graph>& graph) {
+  propagateQuantizationOps(graph->block());
 }
 
 void QuantFusion(std::shared_ptr<Graph>& graph, bool is_dynamic) {
