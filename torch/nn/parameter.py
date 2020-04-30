@@ -1,4 +1,5 @@
 import torch
+from torch._C import DisableTorchFunction
 from collections import OrderedDict
 
 
@@ -19,7 +20,6 @@ class Parameter(torch.Tensor):
         requires_grad (bool, optional): if the parameter requires gradient. See
             :ref:`excluding-subgraphs` for more details. Default: `True`
     """
-
     def __new__(cls, data=None, requires_grad=True):
         if data is None:
             data = torch.Tensor()
@@ -42,3 +42,9 @@ class Parameter(torch.Tensor):
             torch._utils._rebuild_parameter,
             (self.data, self.requires_grad, OrderedDict())
         )
+
+    def __torch_function__(self, func, types, args=(), kwargs=None):
+        if kwargs is None:
+            kwargs = {}
+        with DisableTorchFunction():
+            return func(*args, **kwargs)

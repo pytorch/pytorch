@@ -28,4 +28,4 @@ class SubWithTorchFunction(torch.Tensor):
         if kwargs is None:
             kwargs = {}
 
-        return args[0] + args[1]
+        return super().__torch_function__(func, types, args, kwargs)
