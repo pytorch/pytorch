@@ -3,9 +3,9 @@
 /// Defines the Half type (half-precision floating-point) including conversions
 /// to standard C types and basic arithmetic operations. Note that arithmetic
 /// operations are implemented by converting to floating point and
-/// performing the operation in float32, instead of using CUDA half intrinisics.
+/// performing the operation in float32, instead of using CUDA half intrinsics.
 /// Most uses of this type within ATen are memory bound, including the
-/// element-wise kernels, and the half intrinisics aren't efficient on all GPUs.
+/// element-wise kernels, and the half intrinsics aren't efficient on all GPUs.
 /// If you are writing a compute bound kernel, you can use the CUDA half
 /// intrinsics directly on the Half type from device code.
 
@@ -386,6 +386,7 @@ struct is_complex_t<std::complex<T>> : public std::true_type {};
 
 template <typename T>
 struct is_complex_t<c10::complex<T>> : public std::true_type {};
+
 
 // Extract double from std::complex<double>; is identity otherwise
 // TODO: Write in more idiomatic C++17
