@@ -648,11 +648,18 @@ def check_disabled(test_name):
             " To enable set the environment variable PYTORCH_RUN_DISABLED_TESTS=1")
 
 class TestCase(expecttest.TestCase):
-    precision = 1e-7
-    maxDiff = None
+    # Note: "precision" lets classes and generated tests set minimum
+    # atol values when comparing tensors.
+    # TODO: provide a better mechanism for generated tests to set rtol/atol.
+    precision = 0
+
+    # exact_dtype controls whether comparison tensors checks their dtypes
+    # by default, too.
+    # TODO: default this to True and remove it at the class level
+    exact_dtype = False
+
     _do_cuda_memory_leak_check = False
     _do_cuda_non_default_stream = False
-    exact_dtype = False
 
     def __init__(self, method_name='runTest'):
         super().__init__(method_name)
@@ -890,22 +897,44 @@ class TestCase(expecttest.TestCase):
 
         return common_dtype
 
-    # Checks if two dense tensors are equal(-ish), returning true when they are.
+    # Helper function that maps a flattened index back into the given shape
+    # TODO: consider adding torch.unravel_index
+    def _unravel_index(self, flat_index, shape):
+        res = []
+
+        # Short-circuits on zero dim tensors
+        if shape == torch.Size([]):
+            return 0
+
+        for size in shape[::-1]:
+            res.append(int(flat_index % size))
+            flat_index = int(flat_index // size)
+
+        if len(res) == 1:
+            return res[0]
+        return tuple(res[::-1])
+
+    # Checks if two dense tensors are equal(-ish), returning (True, None)
+    # when they are and (False, debug_msg) when they are not, where the
+    # debug_msg is a string containing information about why the tensors
+    # failed to compare as equal(-ish).
     # If exact_dtype is true both tensors must have the same dtype.
     # If exact_device is true both tensors must be on the same device.
     # Note: tensors on different devices are moved to the CPU to be compared when
     # exact_device is False.
     # TODO: default exact_device to True.
-    def compareTensors(self, a, b, *, rtol, atol, equal_nan,
+    def compareTensors(self, a, b, *, rtol=None, atol=None, equal_nan=True,
                        exact_dtype=False, exact_device=False):
-        self.assertTrue(isinstance(a, torch.Tensor) and isinstance(b, torch.Tensor))
+        if not isinstance(a, torch.Tensor):
+            return (False, "argument a, {0}, to compareTensors is not a tensor!".format(a))
+        if not isinstance(b, torch.Tensor):
+            return (False, "argument b, {0}, to compareTensors is not a tensor!".format(b))
 
         # Validates tensors are on the same device
-        if exact_device:
-            if a.device != b.device:
-                raise Exception("Attempted to compare equality of tensors on"
-                                " different devices. Got device {0} and"
-                                " {1}.".format(a.device, b.device))
+        if exact_device and a.device != b.device:
+            return (False, ("Attempted to compare equality of tensors on "
+                            "different devices! Got devices {0} and "
+                            "{1}.".format(a.device, b.device)))
 
         # Compares tensors of different devices on the CPU
         if a.device != b.device:
@@ -914,11 +943,13 @@ class TestCase(expecttest.TestCase):
 
         # Checks size matches
         if a.size() != b.size():
-            return False
+            return (False, ("Attempted to compare equality of tensors with "
+                            "different sizes. Got sizes {0} and {1}.").format(a.size(), b.size()))
 
         # Checks dtype (if exact_dtype)
         if exact_dtype and a.dtype is not b.dtype:
-            return False
+            return (False, ("Attempted to compare equality of tensors with "
+                            "different dtypes. Got dtypes {0} and {1}.").format(a.dtype, b.dtype))
 
         # Acquires atol and rtol
         # Note: atol can be overriden by a class's precision value. This
@@ -944,7 +975,24 @@ class TestCase(expecttest.TestCase):
 
         # Integer (including bool) comparisons are identity comparisons
         if self.is_integral(dtype):
-            return (a == b).all().item()
+            if (a == b).all().item():
+                return (True, None)
+
+            # Gathers debug info for failed integer comparison
+            identity_mask = a != b
+            a_flat = a.to(torch.long).flatten()
+            b_flat = b.to(torch.long).flatten()
+            count_non_identical = torch.sum(identity_mask, dtype=torch.long)
+            diff = torch.abs(a_flat - b_flat)
+            greatest_diff_index = torch.argmax(diff)
+            debug_msg = ("Found {0} different element(s), with the greatest "
+                         "difference of {1} ({2} vs. {3}) occuring at index "
+                         "{4}.".format(count_non_identical.item(),
+                                       diff[greatest_diff_index],
+                                       a_flat[greatest_diff_index],
+                                       b_flat[greatest_diff_index],
+                                       self._unravel_index(greatest_diff_index, a.shape)))
+            return (False, debug_msg)
 
         # Compares complex tensors' real and imaginary parts separately.
         # Note: this is intentionally divergent from complex torch.isclose
@@ -954,20 +1002,46 @@ class TestCase(expecttest.TestCase):
             float_dtype = torch.float32 if a.dtype == torch.complex64 else torch.float64
             a_real = a.copy_real().to(float_dtype)
             b_real = b.copy_real().to(float_dtype)
-            real_result = self.compareTensors(a_real, b_real, rtol=rtol, atol=atol,
-                                              equal_nan=equal_nan, exact_dtype=exact_dtype,
-                                              exact_device=exact_device)
+            real_result, debug_msg = self.compareTensors(a_real, b_real, rtol=rtol, atol=atol,
+                                                         equal_nan=equal_nan, exact_dtype=exact_dtype,
+                                                         exact_device=exact_device)
+
+            if not real_result:
+                debug_msg = "Real parts failed to compare as equal! " + debug_msg
+                return (real_result, debug_msg)
 
             a_imag = a.copy_imag().to(float_dtype)
             b_imag = b.copy_imag().to(float_dtype)
-            imag_result = self.compareTensors(a_imag, b_imag, rtol=rtol, atol=atol,
-                                              equal_nan=equal_nan, exact_dtype=exact_dtype,
-                                              exact_device=exact_device)
+            imag_result, debug_msg = self.compareTensors(a_imag, b_imag, rtol=rtol, atol=atol,
+                                                         equal_nan=equal_nan, exact_dtype=exact_dtype,
+                                                         exact_device=exact_device)
 
-            return real_result and imag_result
+            if not imag_result:
+                debug_msg = "Imaginary parts failed to compare as equal! " + debug_msg
+                return (imag_result, debug_msg)
+
+            return (True, None)
 
         # All other types use torch.allclose directly
-        return torch.allclose(a, b, rtol=rtol, atol=atol, equal_nan=equal_nan)
+        if torch.allclose(a, b, rtol=rtol, atol=atol, equal_nan=equal_nan):
+            return (True, None)
+
+        # Gathers debug info for failed float tensor comparison
+        a_flat = a.to(torch.float64).flatten()
+        b_flat = b.to(torch.float64).flatten()
+        diff = torch.abs(a_flat - b_flat)
+        outside_range = diff > (atol + rtol * torch.abs(b_flat))
+        count_outside_range = torch.sum(outside_range, dtype=torch.long)
+        greatest_diff_index = torch.argmax(diff)
+        debug_msg = ("With rtol={0} and atol={1}, found {2} element(s) whose "
+                     "difference(s) exceeded the margin of error. "
+                     "The greatest difference was {3} ({4} vs. {5}), which "
+                     "occurred at index {6}.".format(rtol, atol, count_outside_range,
+                                                     diff[greatest_diff_index],
+                                                     a_flat[greatest_diff_index],
+                                                     b_flat[greatest_diff_index],
+                                                     self._unravel_index(greatest_diff_index, a.shape)))
+        return (False, debug_msg)
 
     # Compares x and y
     # TODO: make message kwarg-only
@@ -984,12 +1058,14 @@ class TestCase(expecttest.TestCase):
         if exact_dtype is None:
             exact_dtype = self.exact_dtype
 
+        # Tensor x Number and Number x Tensor comparisons
         if isinstance(x, torch.Tensor) and isinstance(y, Number):
             self.assertEqual(x.item(), y, atol=atol, rtol=rtol, message=message,
                              exact_dtype=exact_dtype, exact_device=exact_device)
         elif isinstance(y, torch.Tensor) and isinstance(x, Number):
             self.assertEqual(x, y.item(), atol=atol, rtol=rtol, message=message,
                              exact_dtype=exact_dtype, exact_device=exact_device)
+        # Tensor x np.bool
         elif isinstance(x, torch.Tensor) and isinstance(y, numpy.bool_):
             self.assertEqual(x.item(), y, atol=atol, rtol=rtol, message=message,
                              exact_dtype=exact_dtype, exact_device=exact_device)
@@ -1002,19 +1078,28 @@ class TestCase(expecttest.TestCase):
             if x.is_sparse:
                 x = self.safeCoalesce(x)
                 y = self.safeCoalesce(y)
-                result0 = self.compareTensors(x._indices(), y._indices(),
-                                              rtol=rtol, atol=atol,
-                                              equal_nan=equal_nan, exact_dtype=exact_dtype,
-                                              exact_device=exact_device)
-                result1 = self.compareTensors(x._values(), y._values(),
-                                              rtol=rtol, atol=atol,
-                                              equal_nan=equal_nan, exact_dtype=exact_dtype,
-                                              exact_device=exact_device)
-                self.assertTrue(result0 and result1, msg=message)
+                indices_result, debug_msg = self.compareTensors(x._indices(), y._indices(),
+                                                                rtol=rtol, atol=atol,
+                                                                equal_nan=equal_nan, exact_dtype=exact_dtype,
+                                                                exact_device=exact_device)
+
+                if not indices_result and message is None:
+                    message = "Sparse tensor indices failed to compare as equal! " + debug_msg
+                self.assertTrue(indices_result, msg=message)
+
+                values_result, debug_msg = self.compareTensors(x._values(), y._values(),
+                                                               rtol=rtol, atol=atol,
+                                                               equal_nan=equal_nan, exact_dtype=exact_dtype,
+                                                               exact_device=exact_device)
+
+                if not values_result and message is None:
+                    message = "Sparse tensor values failed to compare as equal! " + debug_msg
+                self.assertTrue(values_result, msg=message)
             elif x.is_quantized and y.is_quantized:
                 self.assertEqual(x.qscheme(), y.qscheme(), atol=atol, rtol=rtol,
                                  message=message, exact_dtype=exact_dtype,
                                  exact_device=exact_device)
+
                 if x.qscheme() == torch.per_tensor_affine:
                     self.assertEqual(x.q_scale(), y.q_scale(), atol=atol, rtol=rtol,
                                      message=message, exact_dtype=exact_dtype,
@@ -1032,15 +1117,28 @@ class TestCase(expecttest.TestCase):
                     self.assertEqual(x.q_per_channel_axis(), y.q_per_channel_axis(),
                                      atol=atol, rtol=rtol, message=message,
                                      exact_dtype=exact_dtype, exact_device=exact_device)
+
+                # TODO: the following line should be removed once exact_dtype
+                # defaults to True.
                 self.assertTrue(x.dtype is y.dtype, msg=message)
-                self.assertEqual(x.int_repr().to(torch.int32),
-                                 y.int_repr().to(torch.int32), atol=atol, rtol=rtol,
-                                 message=message, exact_dtype=exact_dtype,
-                                 exact_device=exact_device)
+
+                # TODO: use compareTensors
+                result, debug_msg = self.compareTensors(x.int_repr().to(torch.int32),
+                                                        y.int_repr().to(torch.int32),
+                                                        atol=atol, rtol=rtol,
+                                                        exact_dtype=exact_dtype,
+                                                        exact_device=exact_device)
+
+                if not result and message is None:
+                    message = "Quantized representations failed to compare as equal! " + debug_msg
+                self.assertTrue(result, msg=message)
             else:
-                result = self.compareTensors(x, y, rtol=rtol, atol=atol,
-                                             equal_nan=equal_nan, exact_dtype=exact_dtype,
-                                             exact_device=exact_device)
+                result, debug_msg = self.compareTensors(x, y, rtol=rtol, atol=atol,
+                                                        equal_nan=equal_nan, exact_dtype=exact_dtype,
+                                                        exact_device=exact_device)
+
+                if not result and message is None:
+                    message = "Tensors failed to compare as equal! " + debug_msg
                 self.assertTrue(result, msg=message)
         elif isinstance(x, string_classes) and isinstance(y, string_classes):
             super().assertEqual(x, y, message)
@@ -1072,35 +1170,51 @@ class TestCase(expecttest.TestCase):
             if x == y or (equal_nan and x != x and y != y):
                 return
 
+            # Helper for comparing scalars and formatting debug info
+            def _scalar_compare_helper(message, s, x, y, rtol, atol):
+                diff = abs(x - y)
+                allowed_diff = atol + rtol * abs(y)
+                result = diff <= allowed_diff
+
+                if not result and message is None:
+                    message = ("Comparing " + s + "{0} and {1} gives a "
+                               "difference of {2}, but the allowed difference "
+                               "with rtol={3} and atol={4} is "
+                               "only {5}!").format(x, y, diff,
+                                                   rtol, atol, allowed_diff)
+
+                self.assertTrue(result, msg=message)
+
             # Acquires rtol and atol based on number type
+            # Note: Complex number comparisons compare the real and imaginary parts
+            # separately, just like complex tensor comparisons.
             if isinstance(x, complex) or isinstance(y, complex):
                 rtol = self.dtype_precisions[torch.complex64][0] if rtol is None else rtol
                 atol = self.dtype_precisions[torch.complex64][1] if atol is None else atol
-            elif isinstance(x, float) or isinstance(y, float):
-                rtol = self.dtype_precisions[torch.float32][0] if rtol is None else rtol
-                atol = self.dtype_precisions[torch.float32][1] if atol is None else atol
-            else:
-                rtol = 0 if rtol is None else rtol
-                atol = 0 if atol is None else atol
 
-            self.assertTrue(abs(x - y) <= (atol + rtol * abs(y)), msg=message)
+                _scalar_compare_helper(message, "the real part ", x.real, y.real, rtol, atol)
+                _scalar_compare_helper(message, "the imaginary part ", x.imag, y.imag, rtol, atol)
+            else:
+                if isinstance(x, float) or isinstance(y, float):
+                    rtol = self.dtype_precisions[torch.float32][0] if rtol is None else rtol
+                    atol = self.dtype_precisions[torch.float32][1] if atol is None else atol
+                else:
+                    rtol = 0 if rtol is None else rtol
+                    atol = 0 if atol is None else atol
+
+                _scalar_compare_helper(message, "", x.real, y.real, rtol, atol)
         else:
             super().assertEqual(x, y, msg=message)
 
-    def assertAlmostEqual(self, x, y, places=None, msg='', delta=None):
+    def assertAlmostEqual(self, x, y, places=None, msg=None, delta=None):
         prec = delta
         if places:
             prec = 10**(-places)
-        self.assertEqual(x, y, msg, atol=prec)
+        self.assertEqual(x, y, message=msg, atol=prec)
 
-    def assertNotEqual(self, x, y, message='', *, atol=None):
-        threw = False
-        try:
-            self.assertEqual(x, y, message, atol=atol)
-        except Exception:
-            threw = True
-
-        self.assertTrue(threw)
+    def assertNotEqual(self, x, y, message=None, *, atol=None):
+        with self.assertRaises(AssertionError):
+            self.assertEqual(x, y, message=message, atol=atol)
 
     def assertObjectIn(self, obj, iterable):
         for elem in iterable:
