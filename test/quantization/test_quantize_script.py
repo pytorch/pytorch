@@ -1755,23 +1755,19 @@ class TestQuantizeDynamicScript(JitTestCase):
         m(data)
         quant_func = "aten::quantize_per_tensor"
 
+        print(m.graph)
         # quantizing activations
         FileCheck().check("aten::_choose_qparams_per_tensor") \
-                   .check(quant_func) \
-                   .check("prim::CallMethod[name=\"forward\"]") \
+                   .check_next(quant_func) \
+                   .check_next("aten::dequantize") \
                    .check("aten::_choose_qparams_per_tensor") \
+                   .check_next(quant_func) \
+                   .check_next("aten::dequantize") \
                    .check(quant_func) \
-                   .check("prim::CallMethod[name=\"forward\"]") \
+                   .check_next("aten::dequantize") \
                    .check_not(quant_func) \
                    .check("return") \
-                   .run(str(get_forward_graph(m._c)))
-        # quantizing weight in forward function of fc module, no choose_qparams
-        FileCheck().check_not("aten::_choose_qparams_per_tensor") \
-                   .check(quant_func) \
-                   .check("prim::CallFunction") \
-                   .check_not(quant_func) \
-                   .check("return") \
-                   .run(str(get_forward_graph(m.fc1._c)))
+                   .run(m.graph)
 
     def test_finalize_for_linear_dynamic(self):
         class M(torch.nn.Module):
