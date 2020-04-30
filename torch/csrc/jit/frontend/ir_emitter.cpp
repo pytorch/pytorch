@@ -413,6 +413,17 @@ struct Environment {
     return getSugaredVar(ident)->asValue(ident.range(), method);
   }
 
+  void throwVarNotFoundError(
+      const std::string& ident,
+      const SourceRange& range) {
+    // check if this value was not emitted in an if statement because of a
+    // type mismatch. if it was, then we print a more informative error msg
+    if (auto msg = findVariableTypeError(ident)) {
+      throw ErrorReport(range) << *msg << "and was used here";
+    }
+    throw ErrorReport(range) << "undefined value " << ident;
+  }
+
   SugaredValuePtr getSugaredVar(
       const std::string& ident,
       const SourceRange& range,
@@ -509,18 +520,27 @@ struct Environment {
     }
 
     if (!retval && required) {
-      // check if this value was not emitted in an if statement because of a
-      // type mismatch. if it was, then we print a more informative error msg
-      if (auto msg = findVariableTypeError(ident)) {
-        throw ErrorReport(range) << *msg << "and was used here";
-      }
-      throw ErrorReport(range) << "undefined value " << ident;
+      throwVarNotFoundError(ident, range);
     }
     return retval;
   }
 
   Value* getVar(const std::string& ident, const SourceRange& range) {
     return getSugaredVar(ident, range)->asValue(range, method);
+  }
+
+  void removeVar(const Ident& ident, bool check_if_removed = false) {
+    bool removed = false;
+
+    for (auto runner = this; runner; runner = runner->next.get()) {
+      auto a = runner->value_table.erase(ident.name());
+      auto b = runner->type_table.erase(ident.name());
+      removed = a || b;
+    }
+
+    if (check_if_removed && !removed) {
+      throwVarNotFoundError(ident.name(), ident.range());
+    }
   }
 
   std::vector<std::string> definedVariables() {
@@ -901,26 +921,30 @@ struct to_ir {
   }
 
   void emitDelete(const Delete& stmt) {
-    if (stmt.expr().kind() != TK_SUBSCRIPT) {
+    if (stmt.expr().kind() == TK_SUBSCRIPT) {
+      Subscript subscript(stmt.expr());
+      const List<Expr>& subscript_exprs = subscript.subscript_exprs();
+      if (subscript_exprs[0].kind() == TK_SLICE_EXPR) {
+        throw ErrorReport(stmt.range())
+            << "del statements only support deletion at a single index, "
+               "slicing is not supported"
+               " (see https://github.com/pytorch/pytorch/issues/31430)";
+      }
+      const SugaredValuePtr sv = emitSugaredExpr(subscript.value(), 1);
+      const SourceRange& val_range = subscript.value().range();
+      Value* idx = emitExpr(subscript_exprs[0]);
+      Value* val = sv->asValue(val_range, method);
+      auto node = graph->create(aten::Delete, {val, idx}, 0)
+                      ->setSourceRange(stmt.range());
+      graph->insertNode(node);
+    } else if (stmt.expr().kind() == TK_VAR) {
+      Var var(stmt.expr());
+      environment_stack->removeVar(var.name(), /*check_if_removed=*/true);
+    } else {
       throw ErrorReport(stmt.range())
-          << "del statements are only supported for list"
-             " and dict item deletion";
+          << "del statements are only supported for deleting"
+             " list and dict items and variables";
     }
-    Subscript subscript(stmt.expr());
-    const List<Expr>& subscript_exprs = subscript.subscript_exprs();
-    if (subscript_exprs[0].kind() == TK_SLICE_EXPR) {
-      throw ErrorReport(stmt.range())
-          << "del statements only support deletion at a single index, "
-             "slicing is not supported"
-             " (see https://github.com/pytorch/pytorch/issues/31430)";
-    }
-    const SugaredValuePtr sv = emitSugaredExpr(subscript.value(), 1);
-    const SourceRange& val_range = subscript.value().range();
-    Value* idx = emitExpr(subscript_exprs[0]);
-    Value* val = sv->asValue(val_range, method);
-    auto node = graph->create(aten::Delete, {val, idx}, 0)
-                    ->setSourceRange(stmt.range());
-    graph->insertNode(node);
   }
 
   void emitReturn(const Return& stmt) {
