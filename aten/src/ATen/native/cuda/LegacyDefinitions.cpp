@@ -70,7 +70,7 @@ Tensor gather_cuda(const Tensor & self, int64_t dim, const Tensor & index, bool 
 }
 
 Tensor & fmod_cuda_out(Tensor & result, const Tensor & self, Scalar other) {
-  return legacy::cuda::_th_fmod_out(result, self, other)
+  return legacy::cuda::_th_fmod_out(result, self, other);
 }
 
 Tensor fmod_cuda(const Tensor & self, Scalar other) {
@@ -80,7 +80,7 @@ Tensor fmod_cuda(const Tensor & self, Scalar other) {
 Tensor & fmod_cuda_out(Tensor & result, const Tensor & self, const Tensor & other) {
   Tensor b_self, b_other;
   std::tie(b_self, b_other) = expand_outplace(self, other, "fmod_out");
-  return legacy::cuda::_th_fmod_out(b_self, b_other);
+  return legacy::cuda::_th_fmod_out(result, b_self, b_other);
 }
 
 Tensor fmod_cuda(const Tensor & self, const Tensor & other) {
@@ -90,7 +90,7 @@ Tensor fmod_cuda(const Tensor & self, const Tensor & other) {
 }
 
 Tensor & fmod_cuda_(Tensor & self, Scalar other) {
-  return legacy::cuda::_th_fmod(self, other);
+  return legacy::cuda::_th_fmod_(self, other);
 }
 
 Tensor & fmod_cuda_(Tensor & self, const Tensor & other) {
