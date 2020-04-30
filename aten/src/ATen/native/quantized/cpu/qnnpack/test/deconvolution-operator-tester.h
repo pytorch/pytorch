@@ -166,6 +166,15 @@ class DeconvolutionOperatorTester {
     return this->groupInputChannels_;
   }
 
+  inline DeconvolutionOperatorTester& per_channel(bool per_channel) {
+    this->per_channel_ = per_channel;
+    return *this;
+  }
+
+  inline bool per_channel() const {
+    return this->per_channel_;
+  }
+
   inline DeconvolutionOperatorTester& groupOutputChannels(
       size_t groupOutputChannels) {
     assert(groupOutputChannels >= 1);
@@ -411,7 +420,9 @@ class DeconvolutionOperatorTester {
       std::generate(input.begin(), input.end(), std::ref(u8rng));
       std::generate(kernel.begin(), kernel.end(), std::ref(u8rng));
       std::generate(bias.begin(), bias.end(), std::ref(s32rng));
-      //std::generate(kernelZeroPoints.begin(), kernelZeroPoints.end(), std::ref(u8rng));
+      if (per_channel()) {
+        std::generate(kernelZeroPoints.begin(), kernelZeroPoints.end(), std::ref(u8rng));
+      }
       std::fill(output.begin(), output.end(), 0xA5);
       std::fill(accumulators.begin(), accumulators.end(), 0);
 
@@ -500,7 +511,17 @@ class DeconvolutionOperatorTester {
           long(std::numeric_limits<uint8_t>::min())));
 
       ASSERT_EQ(pytorch_qnnp_status_success, pytorch_qnnp_initialize());
-      std::vector<float> requantization_scales(num_zero_points_padded, 1.0 * 1.0 / outputScale);
+      std::vector<float>
+        requantization_scales(num_zero_points_padded, 1.0 * 1.0 / outputScale);
+      auto f32rng =
+          std::bind(std::uniform_real_distribution<float>(1, 5), rng);
+      if (per_channel()) {
+        auto scale_generator = [&]() -> float {return (f32rng()/outputScale);};
+        std::generate(
+            requantization_scales.begin(),
+            requantization_scales.end(),
+            std::ref(scale_generator));
+      }
       pytorch_qnnp_operator_t deconvolution = nullptr;
 
       ASSERT_EQ(
@@ -637,4 +658,5 @@ class DeconvolutionOperatorTester {
   uint8_t qmin_{0};
   uint8_t qmax_{255};
   size_t iterations_{1};
+  bool per_channel_{false};
 };
