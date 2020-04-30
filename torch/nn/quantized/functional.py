@@ -395,10 +395,7 @@ def hardswish(input, scale, zero_point):
     """
     if not input.is_quantized:
         raise ValueError("Input to 'quantized.hardswish' must be quantized!")
-    output = torch._empty_affine_quantized(
-        input.shape, scale=scale, zero_point=int(zero_point), dtype=input.dtype)
-    torch._C._nn.hardswish(input, out=output)
-    return output
+    return torch._ops.ops.quantized.hardswish(input, scale, zero_point)
 
 def elu(input, alpha=1., inplace=False, scale=None, zero_point=None):
     # type: (Tensor, Optional[float], bool, Optional[float], Optional[int]) -> Tensor

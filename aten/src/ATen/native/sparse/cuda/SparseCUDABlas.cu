@@ -3,6 +3,9 @@
 #include <c10/util/Exception.h>
 #include <ATen/cuda/Exceptions.h>
 #include <ATen/native/sparse/cuda/SparseCUDABlas.cuh>
+#include <c10/cuda/CUDACachingAllocator.h>
+#include <ATen/cuda/CuSparseDescriptors.h>
+#include <ATen/cuda/CuSparseGenericOps.h>
 
 #include <TH/THGeneral.h>
 
@@ -71,6 +74,59 @@ cusparseOperation_t convertTransToCusparseOperation(char trans) {
   }
 }
 
+// use new cusparse API
+#if !defined(_MSC_VER) && defined(__CUDACC__) && CUSPARSE_VERSION >= 10301 // CUDA release >= 10.2 and not windows
+
+template<typename T> 
+void csrmm2(
+  char transa, char transb, 
+  int64_t m, int64_t n, int64_t k, int64_t nnz, 
+  T alpha, T *csrvala, int *csrrowptra, int *csrcolinda, 
+  T *b, int64_t ldb, T beta, T *c, int64_t ldc)
+{
+  static_assert(std::is_same<float, T>::value || std::is_same<double, T>::value); 
+
+  if (csrvala == nullptr || b == nullptr || c == nullptr) return; 
+
+  cusparseOperation_t opa = convertTransToCusparseOperation(transa);
+  cusparseOperation_t opb = convertTransToCusparseOperation(transb);
+
+  // cusparseSpMM actually supports int64_t. 
+  // In order to support int64 here, index pointers csrrowptra, csrcolinda have to be passed as int64_t. 
+  TORCH_CHECK((m <= INT_MAX) && (n <= INT_MAX) && (k <= INT_MAX) && (nnz <= INT_MAX) && (ldb <= INT_MAX) && (ldc <= INT_MAX),
+    "At the moment, cusparseSpMM only supports m, n, k, nnz, ldb, ldc with the bound [val] <= ", INT_MAX, ".", 
+    "If you need this, please file an issue on GitHub."
+  );
+
+  int64_t ma = m, ka = k; 
+  if (transa != 'n') std::swap(ma, ka); 
+  auto descA = at::cuda::sparse::CuSparseSpMatCsrDescriptor<T, int>(ma, ka, nnz, csrrowptra, csrcolinda, csrvala);
+
+  int64_t kb = k, nb = n;
+  if (transb != 'n') std::swap(kb, nb); 
+  auto descB = at::cuda::sparse::CuSparseDnMatDescriptor<T>(kb, nb, ldb, b);
+
+  auto descC = at::cuda::sparse::CuSparseDnMatDescriptor<T>(m, n, ldc, c);
+
+  at::cuda::sparse::CuSparseSpMM(
+    opa, opb, 
+    alpha, beta, 
+    descA.desc(), descB.desc(), descC.desc(), 
+    CUSPARSE_CSRMM_ALG1);
+}
+template void csrmm2<float>(
+  char transa, char transb, 
+  int64_t m, int64_t n, int64_t k, int64_t nnz, 
+  float alpha, float *csrvala, int *csrrowptra, int *csrcolinda, 
+  float *b, int64_t ldb, float beta, float *c, int64_t ldc); 
+template void csrmm2<double>(
+  char transa, char transb, 
+  int64_t m, int64_t n, int64_t k, int64_t nnz, 
+  double alpha, double *csrvala, int *csrrowptra, int *csrcolinda, 
+  double *b, int64_t ldb, double beta, double *c, int64_t ldc); 
+
+#else 
+
 void adjustLd(char transb, int64_t m, int64_t n, int64_t k, int64_t *ldb, int64_t *ldc)
 {
   int transb_ = ((transb == 't') || (transb == 'T'));
@@ -90,7 +146,6 @@ void adjustLd(char transb, int64_t m, int64_t n, int64_t k, int64_t *ldb, int64_
   }
 }
 
-/* Level 3 */
 void Scsrmm2(char transa, char transb, int64_t m, int64_t n, int64_t k, int64_t nnz, float alpha, float *csrvala, int *csrrowptra, int *csrcolinda, float *b, int64_t ldb, float beta, float *c, int64_t ldc)
 {
   adjustLd(transb, m, n, k, &ldb, &ldc);
@@ -136,6 +191,36 @@ void Dcsrmm2(char transa, char transb, int64_t m, int64_t n, int64_t k, int64_t 
   TORCH_CUDASPARSE_CHECK(cusparseDestroyMatDescr(desc));
   // TODO: Proper fix is to create real descriptor classes
 }
+
+// T can only be float or double
+template<typename T> 
+void csrmm2(
+  char transa, char transb, 
+  int64_t m, int64_t n, int64_t k, int64_t nnz, 
+  T alpha, T *csrvala, int *csrrowptra, int *csrcolinda, 
+  T *b, int64_t ldb, T beta, T *c, int64_t ldc)
+{
+  TORCH_INTERNAL_ASSERT(false, "cusparse csr MM only supports data type of float and double.");
+}
+
+template<> void csrmm2<float>(
+  char transa, char transb, 
+  int64_t m, int64_t n, int64_t k, int64_t nnz, 
+  float alpha, float *csrvala, int *csrrowptra, int *csrcolinda, 
+  float *b, int64_t ldb, float beta, float *c, int64_t ldc)
+{
+  Scsrmm2(transa, transb, m, n, k, nnz, alpha, csrvala, csrrowptra, csrcolinda, b, ldb, beta, c, ldc);
+} 
+template<> void csrmm2<double>(
+  char transa, char transb, 
+  int64_t m, int64_t n, int64_t k, int64_t nnz, 
+  double alpha, double *csrvala, int *csrrowptra, int *csrcolinda, 
+  double *b, int64_t ldb, double beta, double *c, int64_t ldc)
+{
+  Dcsrmm2(transa, transb, m, n, k, nnz, alpha, csrvala, csrrowptra, csrcolinda, b, ldb, beta, c, ldc); 
+} 
+
+#endif
 
 /* format conversion */
 void CreateIdentityPermutation(int64_t nnz, int *P) {

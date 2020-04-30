@@ -7,12 +7,8 @@ namespace at { namespace native { namespace sparse { namespace cuda {
 TORCH_CUDA_API void Xcoo2csr(const int *coorowind, int64_t nnz, int64_t m, int *csrrowptr);
 
 /* Level 3 */
-TORCH_CUDA_API void Scsrmm2(char transa, char transb, int64_t m, int64_t n, int64_t k, int64_t nnz, float alpha, float *csrvala, int *csrrowptra, int *csrcolinda, float *b, int64_t ldb, float beta, float *c, int64_t ldc);
-TORCH_CUDA_API void Dcsrmm2(char transa, char transb, int64_t m, int64_t n, int64_t k, int64_t nnz, double alpha, double *csrvala, int *csrrowptra, int *csrcolinda, double *b, int64_t ldb, double beta, double *c, int64_t ldc);
-
-// overloaded version
-inline void csrmm2(char transa, char transb, int64_t m, int64_t n, int64_t k, int64_t nnz, float alpha, float *csrvala, int *csrrowptra, int *csrcolinda, float *b, int64_t ldb, float beta, float *c, int64_t ldc) { Scsrmm2(transa, transb, m, n, k, nnz, alpha, csrvala, csrrowptra, csrcolinda, b, ldb, beta, c, ldc); }
-inline void csrmm2(char transa, char transb, int64_t m, int64_t n, int64_t k, int64_t nnz, double alpha, double *csrvala, int *csrrowptra, int *csrcolinda, double *b, int64_t ldb, double beta, double *c, int64_t ldc) { Dcsrmm2(transa, transb, m, n, k, nnz, alpha, csrvala, csrrowptra, csrcolinda, b, ldb, beta, c, ldc); }
+template<typename T> 
+TORCH_CUDA_API void csrmm2(char transa, char transb, int64_t m, int64_t n, int64_t k, int64_t nnz, T alpha, T *csrvala, int *csrrowptra, int *csrcolinda, T *b, int64_t ldb, T beta, T *c, int64_t ldc);
 
 /* format conversion */
 TORCH_CUDA_API void CreateIdentityPermutation(int64_t nnz, int *P);

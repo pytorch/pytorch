@@ -37,6 +37,7 @@ struct PythonFunction {
 };
 
 constexpr std::chrono::milliseconds kDeleteAllUsersTimeout(100000);
+constexpr float kSecToMsConversion = 1000;
 
 template <typename T>
 using shared_ptr_class_ = py::class_<T, std::shared_ptr<T>>;
@@ -61,8 +62,8 @@ PyObject* rpc_init(PyObject* /* unused */) {
             ``init_method`` to be used. )")
           .def_readwrite(
               "rpc_timeout",
-              &RpcBackendOptions::rpcTimeout,
-              R"(A ``datetime.timedelta`` indicating the timeout to use for all
+              &RpcBackendOptions::rpcTimeoutSeconds,
+              R"(A float indicating the timeout to use for all
                 RPCs. If an RPC does not complete in this timeframe, it will
                 complete with an exception indicating that it has timed out.)")
           .def_readwrite(
@@ -73,7 +74,7 @@ PyObject* rpc_init(PyObject* /* unused */) {
 
   // The following C++ constants need to be cast so they can be used from
   // python.
-  module.attr("_DEFAULT_RPC_TIMEOUT") = py::cast(kDefaultRpcTimeout);
+  module.attr("_DEFAULT_RPC_TIMEOUT_SEC") = py::cast(kDefaultRpcTimeoutSeconds);
   module.attr("_UNSET_RPC_TIMEOUT") = py::cast(kUnsetRpcTimeout);
   module.attr("_DEFAULT_INIT_METHOD") = py::cast(kDefaultInitMethod);
 
@@ -343,32 +344,45 @@ PyObject* rpc_init(PyObject* /* unused */) {
   // pythonRpcHandler is cleaned up in shutdown(), after
   // shutdown(), python objects returned from rpc python call can not be
   // resolved.
-  // TODO Once python object can be tagged as IValue and c10::ivalue::Future is
-  // implemented as generic Future<IValue>, we can consider all rpc call
-  // to return a future<IValue> later on.
-  shared_ptr_class_<FutureMessage>(module, "Future")
+  shared_ptr_class_<FutureIValue>(module, "Future")
       .def(
           "wait",
-          [&](FutureMessage& fut) { return toPyObj(fut.wait()); },
+          [&](FutureIValue& fut) {
+            auto& pythonRpcHandler =
+                PythonRpcHandler::getInstance();
+            const auto& value = fut.wait();
+            pybind11::gil_scoped_acquire ag;
+            auto obj = torch::jit::toPyObject(value);
+            pythonRpcHandler.handleException(obj);
+            return obj;
+          },
           py::call_guard<py::gil_scoped_release>(),
           R"(
-              Wait on future to complete and return the object it completed
-              with. If the future completes with an error, an exception is
-              thrown.
+Wait on future to complete and return the object it completed with.
+If the future completes with an error, an exception is thrown.
           )")
       .def(
           "add_done_callback",
-          [&](FutureMessage& fut, py::function cb) {
-            // We this an additional layer of wrapper here to guard the
+          [&](FutureIValue& fut, py::function cb) {
+            // We need this an additional layer of wrapper here to guard the
             // destruction of the py::function object. Because, the
-            // FutureMessage owns a reference to the py::function in its
-            // callback vector, but FutureMessage does acquire GIL.
+            // FutureIValue owns a reference to the py::function in its
+            // callback vector, but FutureIValue does not acquire GIL on
+            // destruction and it does not need to do so either. FutureIValue
+            // only acquires GIL if the IValue holds a py::object. However,
+            // nothing prevents applications to insert py::function as callbacks
+            // non-py::object FutureIValue. For example, the application can
+            // call a TorchScript function using rpc_async, and then append
+            // py::function as a callback. Hence, we use PythonFunction wrapper
+            // here to explicitly acquire GIL and decouple value destruction and
+            // callback destruction.
             PythonFunction pf(std::move(cb));
-            fut.addCallback([pf](const FutureMessage& fut) {
+            fut.addCallback([pf](const FutureIValue& fut) {
                 pybind11::gil_scoped_acquire ag;
                 pf.func_(fut);
             });
           },
+          py::call_guard<py::gil_scoped_release>(),
           R"(
               Registers a callback to the ``Future``, which will be fired
               when the value in ``Future`` is ready. Multiple callbacks can
@@ -402,8 +416,8 @@ PyObject* rpc_init(PyObject* /* unused */) {
           Arguments:
               num_send_recv_threads (int, optional): The number of threads in
                   the thread-pool used by ``ProcessGroupAgent`` (default: 4).
-              rpc_timeout (datetime.timedelta, optional): The default timeout
-                  for RPC requests (default: ``timedelta(seconds=60)``). If the
+              rpc_timeout (float, optional): The default timeout, in seconds,
+                  for RPC requests (default: 60 seconds). If the
                   RPC has not completed in this timeframe, an exception
                   indicating so will be raised. Callers can override this
                   timeout for individual RPCs in
@@ -425,16 +439,16 @@ PyObject* rpc_init(PyObject* /* unused */) {
               >>>     world_size=2,
               >>>     rpc_backend_options=rpc.ProcessGroupRpcBackendOptions(
               >>>         num_send_recv_threads=16,
-              >>>         datetime.timedelta(seconds=20)
+              >>>         20 # 20 second timeout
               >>>     )
               >>> )
               >>>
               >>> # omitting init_rpc invocation on worker2
       )")
       .def(
-          py::init<int, std::chrono::milliseconds, std::string>(),
+          py::init<int, float, std::string>(),
           py::arg("num_send_recv_threads") = kDefaultNumSendRecvThreads,
-          py::arg("rpc_timeout") = kDefaultRpcTimeout,
+          py::arg("rpc_timeout") = kDefaultRpcTimeoutSeconds,
           py::arg("init_method") = kDefaultInitMethod)
       .def_readwrite(
           "num_send_recv_threads",
@@ -651,12 +665,15 @@ PyObject* rpc_init(PyObject* /* unused */) {
 
   module.def(
       "get_rpc_timeout",
-      []() { return RpcAgent::getCurrentRpcAgent()->getRpcTimeout(); },
+      []() {
+        return RpcAgent::getCurrentRpcAgent()->getRpcTimeout().count() /
+            kSecToMsConversion;
+      },
       R"(
-          Retrieve the timeout for all RPCs that was set during RPC initialization.
-
+          Retrieve the default timeout for all RPCs that was set during RPC initialization.
+          The returned value will be in seconds.
           Returns:
-            ``datetime.timedelta`` instance indicating the RPC timeout.
+            ``float`` indicating the RPC timeout in seconds.
       )");
 
   module.def(
@@ -674,15 +691,21 @@ PyObject* rpc_init(PyObject* /* unused */) {
 
   module.def(
       "_set_rpc_timeout",
-      [](const std::chrono::milliseconds& rpcTimeout) {
+      [](const float rpcTimeoutSeconds) {
+        auto rpcTimeout = std::chrono::milliseconds(
+            static_cast<int>(rpcTimeoutSeconds * kSecToMsConversion));
         RpcAgent::getCurrentRpcAgent()->setRpcTimeout(rpcTimeout);
       },
       R"(
-          Set the default timeout for all RPCs. If an RPC is not completed
-          within this time, an exception indicating it has timed out will be
-          raised. To control timeout for specific RPCs, a timeout parameter can
-          be passed into :meth:`~torch.distributed.rpc.rpc_sync` and
+          Set the default timeout for all RPCs. The input unit is expected to be
+          in seconds. If an RPC is not completed within this time, an exception
+          indicating it has timed out will be raised. To control timeout for
+          specific RPCs, a timeout parameter can be passed into
+          :meth:`~torch.distributed.rpc.rpc_sync` and
           :meth:`~torch.distributed.rpc.rpc_async`.
+
+          Arguments:
+            rpcTimeoutSeconds (float): Timeout value in seconds.
       )");
 
   Py_RETURN_TRUE;
