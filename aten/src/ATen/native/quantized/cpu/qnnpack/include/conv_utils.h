@@ -96,15 +96,14 @@ struct conv_param_t {
       assert("Failed to initialize QNNPACK conv_param_t struct.");
     }
 
-    //if (kernel_scale <= 0.0f || !std::isnormal(kernel_scale)) {
-    // This has to be checked for all the output channel requant scales.
-    // TODO
-    if (requantization_scales[0] <= 0.0f || !std::isnormal(requantization_scales[0])) {
-      pytorch_qnnp_log_error(
-          "failed to create convolution with %.7g kernel scale: scale must be"
-          "finite and positive",
-          requantization_scales[0]);
-      assert("Failed to initialize QNNPACK conv_param_t struct.");
+    for (int i = 0; i < groups * group_output_channels; ++i) {
+      if (requantization_scales[i] <= 0.0f ||
+          !isnormal(requantization_scales[i])) {
+        pytorch_qnnp_log_error(
+            "failed to create fully connected operator with %.7g requantization scale: scale must be finite and positive",
+            requantization_scales[i]);
+        assert("Failed to initialize QNNPACK conv_param_t struct.");
+      }
     }
 
     if (subsampling_dims[1] > kernel_height) {
@@ -194,6 +193,12 @@ struct conv_param_t {
       ukernel_type = group_input_channels >= SIZE_MAX ? pytorch_qnnp_ukernel_type_xzp_gemm : pytorch_qnnp_ukernel_type_gemm;
     } else {
       ukernel_type = pytorch_qnnp_ukernel_type_conv;
+    }
+
+    if (per_channel && ukernel_type == pytorch_qnnp_ukernel_type_xzp_gemm) {
+      pytorch_qnnp_log_error(
+          "Per channel quantized weights are not supported for XZP kernesl");
+      assert("Failed to initialize QNNPACK conv_param_t struct.");
     }
   }
 };
