@@ -2528,20 +2528,20 @@ static auto cell_params_base_registry =
 
 static auto registry =
     torch::RegisterOperators()
-        .op("aten::quantized_lstm.input(Tensor input, Tensor[] hx, __torch__.torch.classes.rnn.CellParamsBase[] params, bool has_biases, int num_layers, float dropout, bool train, bool bidirectional, bool batch_first, *, ScalarType? dtype=None, bool use_dynamic=False) -> (Tensor, Tensor, Tensor)",
+        .op("aten::quantized_lstm.input(Tensor input, Tensor[] hx, __torch__.torch.classes.rnn.CellParamsBase[] params, bool has_biases, int num_layers, float dropout, bool train, bool bidirectional, bool type_2, bool batch_first, *, ScalarType? dtype=None, bool use_dynamic=False) -> (Tensor, Tensor, Tensor)",
             torch::RegisterOperators::options()
                 .kernel<decltype(quantized_lstm_input), quantized_lstm_input>(
                     DispatchKey::CPUTensorId))
-        .op("aten::quantized_lstm.data(Tensor data, Tensor batch_sizes, Tensor[] hx, __torch__.torch.classes.rnn.CellParamsBase[] params, bool has_biases, int num_layers, float dropout, bool train, bool bidirectional, *, ScalarType? dtype=None, bool use_dynamic=False) -> (Tensor, Tensor, Tensor)",
+        .op("aten::quantized_lstm.data(Tensor data, Tensor batch_sizes, Tensor[] hx, __torch__.torch.classes.rnn.CellParamsBase[] params, bool has_biases, int num_layers, float dropout, bool train, bool bidirectional, bool type_2, *, ScalarType? dtype=None, bool use_dynamic=False) -> (Tensor, Tensor, Tensor)",
             torch::RegisterOperators::options()
                 .kernel<decltype(quantized_lstm_data), quantized_lstm_data>(
                     DispatchKey::CPUTensorId))
-        .op("aten::quantized_lstm.input_legacy(Tensor input, Tensor[] hx, Tensor[] params, bool has_biases, int num_layers, float dropout, bool train, bool bidirectional, bool batch_first, *, ScalarType? dtype=None, bool use_dynamic=False) -> (Tensor, Tensor, Tensor)",
+        .op("aten::quantized_lstm.input_legacy(Tensor input, Tensor[] hx, Tensor[] params, bool has_biases, int num_layers, float dropout, bool train, bool bidirectional, bool type_2, bool batch_first, *, ScalarType? dtype=None, bool use_dynamic=False) -> (Tensor, Tensor, Tensor)",
             torch::RegisterOperators::options()
                 .kernel<
                     decltype(quantized_lstm_input_legacy),
                     quantized_lstm_input_legacy>(DispatchKey::CPUTensorId))
-        .op("aten::quantized_lstm.data_legacy(Tensor data, Tensor batch_sizes, Tensor[] hx, Tensor[] params, bool has_biases, int num_layers, float dropout, bool train, bool bidirectional, *, ScalarType? dtype=None, bool use_dynamic=False) -> (Tensor, Tensor, Tensor)",
+        .op("aten::quantized_lstm.data_legacy(Tensor data, Tensor batch_sizes, Tensor[] hx, Tensor[] params, bool has_biases, int num_layers, float dropout, bool train, bool bidirectional, bool type_2, *, ScalarType? dtype=None, bool use_dynamic=False) -> (Tensor, Tensor, Tensor)",
             torch::RegisterOperators::options()
                 .kernel<
                     decltype(quantized_lstm_data_legacy),
@@ -2562,20 +2562,20 @@ static auto registry =
                 .kernel<
                     decltype(make_quantized_cell_params),
                     make_quantized_cell_params>(DispatchKey::CPUTensorId))
-        .op("aten::quantized_gru.input(Tensor input, Tensor hx, __torch__.torch.classes.rnn.CellParamsBase[] params, bool has_biases, int num_layers, float dropout, bool train, bool bidirectional, bool batch_first) -> (Tensor, Tensor)",
+        .op("aten::quantized_gru.input(Tensor input, Tensor hx, __torch__.torch.classes.rnn.CellParamsBase[] params, bool has_biases, int num_layers, float dropout, bool train, bool bidirectional, bool type_2, bool batch_first) -> (Tensor, Tensor)",
             torch::RegisterOperators::options()
                 .kernel<decltype(quantized_gru_input), quantized_gru_input>(
                     DispatchKey::CPUTensorId))
-        .op("aten::quantized_gru.data(Tensor data, Tensor batch_sizes, Tensor hx, __torch__.torch.classes.rnn.CellParamsBase[] params, bool has_biases, int num_layers, float dropout, bool train, bool bidirectional) -> (Tensor, Tensor)",
+        .op("aten::quantized_gru.data(Tensor data, Tensor batch_sizes, Tensor hx, __torch__.torch.classes.rnn.CellParamsBase[] params, bool has_biases, int num_layers, float dropout, bool train, bool bidirectional, bool type_2) -> (Tensor, Tensor)",
             torch::RegisterOperators::options()
                 .kernel<decltype(quantized_gru_data), quantized_gru_data>(
                     DispatchKey::CPUTensorId))
-        .op("aten::quantized_gru.input_legacy(Tensor input, Tensor hx, Tensor[] params, bool has_biases, int num_layers, float dropout, bool train, bool bidirectional, bool batch_first) -> (Tensor, Tensor)",
+        .op("aten::quantized_gru.input_legacy(Tensor input, Tensor hx, Tensor[] params, bool has_biases, int num_layers, float dropout, bool train, bool bidirectional, bool type_2, bool batch_first) -> (Tensor, Tensor)",
             torch::RegisterOperators::options()
                 .kernel<
                     decltype(quantized_gru_input_legacy),
                     quantized_gru_input_legacy>(DispatchKey::CPUTensorId))
-        .op("aten::quantized_gru.data_legacy(Tensor data, Tensor batch_sizes, Tensor hx, Tensor[] params, bool has_biases, int num_layers, float dropout, bool train, bool bidirectional) -> (Tensor, Tensor)",
+        .op("aten::quantized_gru.data_legacy(Tensor data, Tensor batch_sizes, Tensor hx, Tensor[] params, bool has_biases, int num_layers, float dropout, bool train, bool bidirectional, bool type_2) -> (Tensor, Tensor)",
             torch::RegisterOperators::options()
                 .kernel<
                     decltype(quantized_gru_data_legacy),
