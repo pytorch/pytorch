@@ -2777,7 +2777,6 @@ Args:
 
 Examples::
 
-    >>> channel_shuffle = nn.ChannelShuffle(3)
     >>> input = torch.randn(1, 4, 2, 2)
     >>> print(input)
     [[[[1, 2],
@@ -2789,7 +2788,7 @@ Examples::
       [[13, 14],
        [15, 16]],
      ]]
-    >>> output = channel_shuffle(input)
+    >>> output = torch.nn.functional.channel_shuffle(input, 2)
     >>> print(output)
     [[[[1, 2],
        [3, 4]],
