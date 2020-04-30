@@ -1248,6 +1248,8 @@ jobs:
           export DEBUG_COMMIT_DOCKER_IMAGE=${COMMIT_DOCKER_IMAGE}-debug
           docker commit "$id" ${DEBUG_COMMIT_DOCKER_IMAGE}
           time docker push ${DEBUG_COMMIT_DOCKER_IMAGE}
+    - store_artifacts: 
+        path: ./docs/build/
 
   pytorch_cpp_doc_push:
     environment:
