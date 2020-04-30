@@ -73,7 +73,7 @@
     PyBool_Check(object)
 
 #define THPUtils_checkReal_COMPLEX(object)                                        \
-    PyComplex_Check(object)
+    PyComplex_Check(object) || PyFloat_Check(object) || PyLong_Check(object) || PyInt_Check(object)
 
 #define THPUtils_newReal_FLOAT(value) PyFloat_FromDouble(value)
 // TODO: handle int overflows for py2
