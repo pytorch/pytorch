@@ -362,6 +362,10 @@ inline Return Dispatcher::callUnboxedWithDispatchKey(const OperatorHandle& op, D
   std::vector<c10::IValue> stack;
   auto v = std::vector<bool>{push_ivalue_copy_2(stack, args)...};
 
+  // check if we can box some useful types here
+  at::Tensor t;
+  at::Scalar s;
+
   return kernel.template callUnboxed<Return, Args...>(op, std::forward<Args>(args)...);
 }
 
