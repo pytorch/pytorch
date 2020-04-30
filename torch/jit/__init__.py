@@ -316,6 +316,15 @@ def _create_interpreter_name_lookup_fn(frames_up=1):
         return ''
     return _get_interpreter_name_for_var
 
+def blah():
+    return "x"
+
+class ConstMap:
+    def __init__(self, const_mapping):
+        self.const_mapping = const_mapping
+
+    def __getattr__(self, attr):
+        return self.const_mapping[attr]
 
 class ONNXTracedModule(Module):
     def __init__(self, inner, strict=True, force_outplace=False, return_inputs=False, return_inputs_states=False):
@@ -1119,6 +1128,7 @@ def _compile_and_register_class(obj, rcb, qualified_name):
     _add_script_class(obj, qualified_name)
 
 def script(obj, optimize=None, _frames_up=0, _rcb=None):
+    print("SCRIPT!!")
     r"""
     Scripting a function or ``nn.Module`` will inspect the source code, compile
     it as TorchScript code using the TorchScript compiler, and return a :class:`ScriptModule` or
@@ -1301,6 +1311,7 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None):
         # Forward docstrings
         fn.__doc__ = obj.__doc__
         _set_jit_function_cache(obj, fn)
+        print(fn)
         return fn
 
 def interface(obj):
@@ -1471,6 +1482,7 @@ class OrderedModuleDict(OrderedDictWrapper):
 #     `self.param` or `self.module`.
 class ScriptMeta(type):
     def __init__(cls, name, bases, attrs):
+        print("In meta: " + name)
         # Aggregate all the ScriptMethods and constants from superclasses
         cls._methods = {}
         cls._constants_set = set(getattr(cls, '__constants__', ()))
@@ -1676,6 +1688,13 @@ if _enabled:
             for details.
             """
             return self.forward.code
+
+        @property
+        def code_with_constants(self):
+            r"""
+            """
+            r = self.forward.code_with_constants
+            return (r[0], ConstMap(r[1]))
 
         def save(self, *args, **kwargs):
             r"""
