@@ -6,6 +6,8 @@
 #include <string>
 #include <stdexcept>
 
+struct __at_dont_care__ {};
+
 namespace at {
 
 inline Tensor & Tensor::operator=(Tensor const & rhs) && {
@@ -81,6 +83,10 @@ _(==,x.eq(y), y.eq(x)) \
 _(!=,x.ne(y), y.ne(x))
 
 #define DEFINE_OPERATOR(op,body,reverse_scalar_body) \
+} /* namespace at */  \
+inline void operator op(__at_dont_care__, __at_dont_care__) {}  \
+namespace at {  \
+using ::operator op; \
 static inline Tensor operator op(const Tensor & x, const Tensor & y) { \
   return body; \
 } \
