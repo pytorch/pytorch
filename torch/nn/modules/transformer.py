@@ -27,6 +27,7 @@ class Transformer(Module):
         num_encoder_layers: the number of sub-encoder-layers in the encoder (default=6).
         num_decoder_layers: the number of sub-decoder-layers in the decoder (default=6).
         dim_feedforward: the dimension of the feedforward network model (default=2048).
+        batch_first: if the src tensor is in the shape of (N, S, E) instead of (S, N, E) and the tgt tensor is in the shape of (N, T, E) instead of (T, N, E) (default=False).
         dropout: the dropout value (default=0.1).
         activation: the activation function of encoder/decoder intermediate layer, relu or gelu (default=relu).
         custom_encoder: custom encoder (default=None).
@@ -43,8 +44,8 @@ class Transformer(Module):
     """
 
     def __init__(self, d_model=512, nhead=8, num_encoder_layers=6,
-                 num_decoder_layers=6, dim_feedforward=2048, dropout=0.1,
-                 activation="relu", custom_encoder=None, custom_decoder=None):
+                 num_decoder_layers=6, dim_feedforward=2048, batch_first=False,
+                 dropout=0.1, activation="relu", custom_encoder=None, custom_decoder=None):
         super(Transformer, self).__init__()
 
         if custom_encoder is not None:
@@ -52,14 +53,14 @@ class Transformer(Module):
         else:
             encoder_layer = TransformerEncoderLayer(d_model, nhead, dim_feedforward, dropout, activation)
             encoder_norm = LayerNorm(d_model)
-            self.encoder = TransformerEncoder(encoder_layer, num_encoder_layers, encoder_norm)
+            self.encoder = TransformerEncoder(encoder_layer, num_encoder_layers, encoder_norm, batch_first)
 
         if custom_decoder is not None:
             self.decoder = custom_decoder
         else:
             decoder_layer = TransformerDecoderLayer(d_model, nhead, dim_feedforward, dropout, activation)
             decoder_norm = LayerNorm(d_model)
-            self.decoder = TransformerDecoder(decoder_layer, num_decoder_layers, decoder_norm)
+            self.decoder = TransformerDecoder(decoder_layer, num_decoder_layers, decoder_norm, batch_first)
 
         self._reset_parameters()
 
@@ -81,10 +82,11 @@ class Transformer(Module):
             src_key_padding_mask: the ByteTensor mask for src keys per batch (optional).
             tgt_key_padding_mask: the ByteTensor mask for tgt keys per batch (optional).
             memory_key_padding_mask: the ByteTensor mask for memory keys per batch (optional).
+            batch_first: if the src tensor is in the shape of (N, S, E) instead of (S, N, E) and the tgt tensor is in the shape of (N, T, E) instead of (T, N, E) (default=False).
 
         Shape:
-            - src: :math:`(S, N, E)`.
-            - tgt: :math:`(T, N, E)`.
+            - src: :math:`(S, N, E)` by default or `(N, S, E)` if batch_first is True.
+            - tgt: :math:`(T, N, E)` by default or `(N, S, E)` if batch_first is True.
             - src_mask: :math:`(S, S)`.
             - tgt_mask: :math:`(T, T)`.
             - memory_mask: :math:`(T, S)`.
@@ -102,7 +104,7 @@ class Transformer(Module):
             positions will be unchanged. If a BoolTensor is provided, the positions with the
             value of ``True`` will be ignored while the position with the value of ``False`` will be unchanged.
 
-            - output: :math:`(T, N, E)`.
+            - output: :math:`(T, N, E)` by default or `(N, T, E)` if batch_first is True.
 
             Note: Due to the multi-head attention architecture in the transformer model,
             the output sequence length of a transformer is same as the input sequence
@@ -150,6 +152,7 @@ class TransformerEncoder(Module):
         encoder_layer: an instance of the TransformerEncoderLayer() class (required).
         num_layers: the number of sub-encoder-layers in the encoder (required).
         norm: the layer normalization component (optional).
+        batch_first: if the src tensor is in the shape of (N, S, E) instead of (S, N, E) (default=False).
 
     Examples::
         >>> encoder_layer = nn.TransformerEncoderLayer(d_model=512, nhead=8)
@@ -159,11 +162,12 @@ class TransformerEncoder(Module):
     """
     __constants__ = ['norm']
 
-    def __init__(self, encoder_layer, num_layers, norm=None):
+    def __init__(self, encoder_layer, num_layers, norm=None, batch_first=False):
         super(TransformerEncoder, self).__init__()
         self.layers = _get_clones(encoder_layer, num_layers)
         self.num_layers = num_layers
         self.norm = norm
+        self.batch_first = batch_first
 
     def forward(self, src, mask=None, src_key_padding_mask=None):
         # type: (Tensor, Optional[Tensor], Optional[Tensor]) -> Tensor
@@ -177,15 +181,21 @@ class TransformerEncoder(Module):
         Shape:
             see the docs in Transformer class.
         """
-        output = src
+        if self.batch_first:
+            output = src.permute(1,0,2)
+        else:
+            output = src
 
         for mod in self.layers:
             output = mod(output, src_mask=mask, src_key_padding_mask=src_key_padding_mask)
 
         if self.norm is not None:
             output = self.norm(output)
-
-        return output
+        
+        if self.batch_first:
+            return output.permute(1,0,2)
+        else:
+            return output
 
 
 class TransformerDecoder(Module):
@@ -195,6 +205,7 @@ class TransformerDecoder(Module):
         decoder_layer: an instance of the TransformerDecoderLayer() class (required).
         num_layers: the number of sub-decoder-layers in the decoder (required).
         norm: the layer normalization component (optional).
+        batch_first: if the tgt tensor is in the shape of (N, T, E) instead of (T, N, E) and the memory tensor is in the shape of (N, M, E) instead of (M, N, E) (default=False).
 
     Examples::
         >>> decoder_layer = nn.TransformerDecoderLayer(d_model=512, nhead=8)
@@ -205,11 +216,12 @@ class TransformerDecoder(Module):
     """
     __constants__ = ['norm']
 
-    def __init__(self, decoder_layer, num_layers, norm=None):
+    def __init__(self, decoder_layer, num_layers, norm=None, batch_first=False):
         super(TransformerDecoder, self).__init__()
         self.layers = _get_clones(decoder_layer, num_layers)
         self.num_layers = num_layers
         self.norm = norm
+        self.batch_first = batch_first
 
     def forward(self, tgt, memory, tgt_mask=None,
                 memory_mask=None, tgt_key_padding_mask=None,
@@ -224,11 +236,16 @@ class TransformerDecoder(Module):
             memory_mask: the mask for the memory sequence (optional).
             tgt_key_padding_mask: the mask for the tgt keys per batch (optional).
             memory_key_padding_mask: the mask for the memory keys per batch (optional).
+            batch_first: if the tgt tensor is in the shape of (N, T, E) instead of (T, N, E) and the memory tensor is in the shape of (N, M, E) instead of (M, N, E) (default=False).
 
         Shape:
             see the docs in Transformer class.
         """
-        output = tgt
+        if self.batch_first:
+            output = tgt.permute(1,0,2)
+            memory = memory.permute(1,0,2)
+        else:
+            output = tgt
 
         for mod in self.layers:
             output = mod(output, memory, tgt_mask=tgt_mask,
@@ -239,7 +256,10 @@ class TransformerDecoder(Module):
         if self.norm is not None:
             output = self.norm(output)
 
-        return output
+        if self.batch_first:
+            return output.permute(1,0,2)
+        else:
+            return output
 
 class TransformerEncoderLayer(Module):
     r"""TransformerEncoderLayer is made up of self-attn and feedforward network.
