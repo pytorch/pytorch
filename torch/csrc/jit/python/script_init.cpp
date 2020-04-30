@@ -1020,19 +1020,6 @@ void initJitScriptBindings(PyObject* module) {
             pp.printFunction(*self.function_);
             return pp.str();
           })
-      .def_property_readonly("code_with_constants", [](const StrongFunctionPtr& self) {
-        std::vector<at::Tensor> tensors;
-        std::vector<c10::NamedTypePtr> deps;
-        PythonPrint pp(tensors, deps);
-        pp.printFunction(*self.function_);
-        std::map<std::string, at::Tensor> consts;
-        int i = 0;
-        for(auto const& tensor: tensors){
-          consts["c" + std::to_string(i)] = tensor;
-          i += 1;
-        }
-        return std::make_tuple(pp.str(), consts);
-      })
       .def(
           "get_debug_state",
           [](const StrongFunctionPtr& self) {
