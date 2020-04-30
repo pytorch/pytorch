@@ -859,12 +859,16 @@ class Module(object):
                                self.__class__.__name__, "\n\t".join(error_msgs)))
         return _IncompatibleKeys(missing_keys, unexpected_keys)
 
-    def _named_members(self, get_members_fn, prefix='', recurse=True):
+    def _named_members(self, get_members_fn, get_children_members_fn,
+                       prefix='', recurse=True):
         r"""Helper method for yielding various names + members of modules."""
         memo = set()
         modules = self.named_modules(prefix=prefix) if recurse else [(prefix, self)]
         for module_prefix, module in modules:
-            members = get_members_fn(module)
+            if module is self:
+                members = get_members_fn(module)
+            else:
+                members = get_children_members_fn(module)
             for k, v in members:
                 if v is None or v in memo:
                     continue
@@ -918,6 +922,7 @@ class Module(object):
         """
         gen = self._named_members(
             lambda module: module._parameters.items(),
+            lambda module: module.named_parameters(),
             prefix=prefix, recurse=recurse)
         for elem in gen:
             yield elem
@@ -966,6 +971,7 @@ class Module(object):
         """
         gen = self._named_members(
             lambda module: module._buffers.items(),
+            lambda module: module.named_buffers(),
             prefix=prefix, recurse=recurse)
         for elem in gen:
             yield elem
