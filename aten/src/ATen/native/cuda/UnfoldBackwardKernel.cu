@@ -6,6 +6,42 @@
 
 #include <vector>
 
+// unfold_backward, the algorithm.
+//
+// Consider out = in.unfold(dim, size, step), then
+// out.shape[dim] == (in.shape[dim] - size) / step + 1,
+// out.shape[-1] == size.
+// out.dims() == in.dims() + 1
+//
+// unfold_backward receives grad_in and returns grad_out such that
+// grad_in.shape == out.shape,
+// grad_out.shape = in.shape.
+//
+// unfold_backward considers the following two cases:
+// case1. step >= size.
+// case2. step < size.
+//
+// case1. step >= size.
+// In this case the iteration takes over grad_in and performs the following copy:
+// grad_out[..., i_out_dim,...] = grad_in[..., i_in_dim,..., i_in_last_dim],
+// where i_out_dim = i_in_dim * step + i_in_last_dim.
+//
+// case2. step < size.
+// In this case the iteration takes over grad_out,
+// where grad_out[...,i_out_dim,...] accumulates all values
+// grad_in[...,i_in_dim,...,i_in_last_dim], where
+// i_in_dim is in [left_idx_fold, right_idx_fold],
+// i_in_last_dim = i_out_dim - i_in_dim * step,
+// left_idx_fold = (i_out_dim - size) / step 
+//  if i_out_dim in [left_idx_fold * step, left_idx_fold * step + size)
+//  else (i_out_dim - size) / step + 1,
+// right_idx_fold = i_out_dim / step.
+//
+// Simply put, given i_out_dim, we find which folds of grad_in
+// intersect with i_out_dim, these are precisely [left_idx_fold, right_idx_fold],
+// and then the corresponding value of grad_in[...,i_in_dim,...,i_in_last_dim]
+// gets added up to grad_out[...,i_out_dim,...].
+
 namespace at { namespace native {
 
 namespace {
@@ -124,8 +160,8 @@ void _unfold_backward_internal_kernel(
       }
 
       auto right_fold_idx = idx_dim / step;
-      right_fold_idx = (right_fold_idx >= grad_in_dim_size)
-        ? (grad_in_dim_size - 1) : right_fold_idx;
+      right_fold_idx = (right_fold_idx >= grad_in_dim_size) ?
+        (grad_in_dim_size - 1) : right_fold_idx;
 
       for (auto fold_idx = left_fold_idx; fold_idx <= right_fold_idx; ++fold_idx) {
         auto idx_last_dim = idx_dim - fold_idx * step;
@@ -174,7 +210,8 @@ void unfold_backward_cuda_kernel(
     at::ScalarType::Half, at::ScalarType::Bool, at::ScalarType::BFloat16,
     iter.dtype(),
     "unfold_backward_cuda", [&] {
-      _unfold_backward_internal_kernel<scalar_t>(
+      using thrust_t = typename ztype_cuda<scalar_t>::thrust_t;
+      _unfold_backward_internal_kernel<thrust_t>(
         iter,
         size,
         step,
