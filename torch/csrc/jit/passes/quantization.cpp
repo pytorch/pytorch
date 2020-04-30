@@ -51,6 +51,8 @@ std::vector<std::string> _static_quantizable_call_funcs = {
     "conv2d",
     "linear",
     "batch_norm",
+    "hardswish",
+    "layer_norm",
 };
 
 std::vector<std::string> _dynamic_quantizable_call_funcs = {
@@ -69,6 +71,8 @@ std::vector<std::string> _static_quantizable_aten_funcs = {
     "lstm",
     "mul",
     "mul_",
+    "hardswish",
+    "layer_norm",
 };
 
 std::vector<std::string> _dynamic_quantizable_aten_funcs = {
@@ -100,6 +104,9 @@ std::vector<std::string> _single_input_general_shape_call_funcs = {
     "relu",
     "sigmoid",
     "tanh",
+    "hardtanh",
+    "elu",
+    "hardsigmoid",
 };
 
 // Similar to prim::CallFunctions, there are aten ops that doesn't
@@ -142,6 +149,9 @@ std::vector<std::string> _single_input_general_shape_aten_funcs = {
     "relu",
     "sigmoid",
     "tanh",
+    "hardtanh",
+    "elu",
+    "hardsigmoid",
 };
 
 // Theses are prim::CallFunctions for ops that doesn't require observation and
@@ -962,7 +972,7 @@ void InsertObserversHelper::insertObserverFor(
   if (observed_values_.count(v)) {
     return;
   }
-  Module observer = observer_module.clone_instance();
+  Module observer = observer_module.deepcopy();
   std::string observer_name = "_observer_" + c10::to_string(uid_++);
   while (module.hasattr(observer_name)) {
     observer_name = "_observer_" + c10::to_string(uid_++);
@@ -1320,7 +1330,7 @@ InsertObserversHelper::insertObserversFor(
     for (const auto& observer_attrs : block_observer_map_.at(block)) {
       const auto& name = std::get<0>(observer_attrs);
       const auto& observer = std::get<1>(observer_attrs);
-      module._ivalue()->setAttr(name, observer.clone_instance()._ivalue());
+      module._ivalue()->setAttr(name, observer.deepcopy()._ivalue());
     }
   }
   // NB: Why do we need to process the graph even if it's visited?
@@ -2309,7 +2319,7 @@ class ModuleUseDeduper {
     while (parent_of_leaf.hasattr(child_name)) {
       child_name = original_name + "_" + c10::to_string(uid++);
     }
-    parent_of_leaf.register_module(child_name, child_module.clone_instance());
+    parent_of_leaf.register_module(child_name, child_module.deepcopy());
     return child_name;
   }
 
