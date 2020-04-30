@@ -14,6 +14,7 @@
 #include <torch/csrc/utils/python_compat.h>
 #include <torch/types.h>
 
+
 #include <pybind11/chrono.h>
 #include <pybind11/functional.h>
 #include <pybind11/operators.h>
@@ -345,6 +346,7 @@ PyObject* rpc_init(PyObject* /* unused */) {
   // shutdown(), python objects returned from rpc python call can not be
   // resolved.
   shared_ptr_class_<FutureIValue>(module, "Future")
+      .def(py::init())
       .def(
           "wait",
           [&](FutureIValue& fut) {
@@ -402,7 +404,15 @@ If the future completes with an error, an exception is thrown.
                   >>> # The inserted callback will print the return value when
                   >>> # receiving the response from "worker1"
                   >>> fut.add_done_callback(callback)
-          )");
+          )")
+      .def(
+          "set_result",
+          [&](FutureIValue& fut, py::object result) {
+            fut.markCompleted(torch::jit::toIValue(
+                std::move(result),
+                PyObjectType::get()));
+          },
+          py::call_guard<py::gil_scoped_release>());
 
   shared_ptr_class_<ProcessGroupRpcBackendOptions>(
       module,
