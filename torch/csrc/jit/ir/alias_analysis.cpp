@@ -126,8 +126,9 @@ bool AliasDb::isContainerType(const TypePtr& type) const {
 
 AliasDb::~AliasDb() = default;
 
-// Structure that keeps tracks of all writes at a high level. When alias
-// analysis is done, this will be used to construct a more efficient WriteIndex.
+// Structure used during analysis to keeps track of all writes at a high level.
+// When analysis is completed this will be used to construct a more efficient
+// WriteIndex.
 struct AliasDb::WriteRegistry {
   void registerWrite(const Value* v, Node* n) {
     writes_[n].emplace_back(v);
@@ -181,7 +182,7 @@ AliasDb::AliasDb(std::shared_ptr<Graph> graph, bool isFrozen)
 
   for (const auto& write : writeRegistry_->containedWrites_) {
     Node* node = write.first;
-    const std::vector<const Value*> writtenValues = write.second;
+    const std::vector<const Value*>& writtenValues = write.second;
     for (const Value* writtenValue : writtenValues) {
       auto elem = elementMap_.at(writtenValue);
       MemoryLocations writtenMemoryLocations;
@@ -197,7 +198,10 @@ AliasDb::AliasDb(std::shared_ptr<Graph> graph, bool isFrozen)
     }
   }
 
-  writeRegistry_ = nullptr; // to make future access an error
+  // Now that we've built the write index, we can null out the WriteRegistry to
+  // make future access an error. In this way we prevent the index from getting
+  // out of sync (since we have no way of registering new writes)
+  writeRegistry_ = nullptr;
 
   // initialize the write cache
   writtenToLocationsIndex_ = buildWrittenToLocationsIndex();
@@ -849,7 +853,7 @@ void AliasDb::analyzeConservative(Node* node) {
     if (!isMutableTypeInternal(input)) {
       continue;
     }
-    registerWrite(input, node, true);
+    registerWrite(input, node, /*writeToContained=*/true);
     setWildcard(input);
   }
 

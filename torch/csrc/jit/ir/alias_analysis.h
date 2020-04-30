@@ -123,9 +123,10 @@ class AliasDb {
    * These methods allow you to update AliasDb in-place if you are performing
    * graph mutation.
    *
-   * WARNING: They do not perform very many correctness checks, the user is
-   * responsible for making sure they are updating AliasDb correctly.
-   * `Lint()`ing the AliasDb can help with this.
+   * WARNING: These methods should be considered INTERNAL. They do not perform
+   * very many correctness checks, the user is responsible for making sure they
+   * are updating AliasDb correctly. `Lint()`ing the AliasDb can help with
+   * this.
    */
   // Copy `existing`s aliasing info to `new_value`, and remove `existing`.
   void replaceWithNewValue(Value* existing, Value* new_value);

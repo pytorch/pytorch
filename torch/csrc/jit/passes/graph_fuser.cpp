@@ -291,6 +291,7 @@ struct GraphFuser {
     for (size_t i = 0; i < subgraph_outputs.size(); ++i) {
       auto outer_output = inner_to_outer.at(subgraph_outputs[i]);
       producer_group->outputs()[i]->replaceAllUsesWith(outer_output);
+      // new producer outputs have same aliasing properties as outer_output
       aliasDb_->replaceWithNewValue(producer_group->outputs()[i], outer_output);
     }
     producer_group->destroy();

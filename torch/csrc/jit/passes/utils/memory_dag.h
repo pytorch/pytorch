@@ -98,14 +98,16 @@ class TORCH_API MemoryDAG {
   /**
    * The following methods are special cases where we need to reach mutate the
    * internals of MemoryDAG for efficiency reasons. Don't call them unless you
-   * know what you're doing!
+   * know what you're doing! In particular, don't add new mutating methods
+   * without ensuring that you are maintaining cache consistency for memory
+   * locations.
    */
   // Adding wildcards can trigger extremely expensive cache invalidations. This
   // method adds them in a more efficient cache-aware way.
   void setWildcards(
       const std::unordered_set<const Value*>& wildcards,
       const ska::flat_hash_map<const Value*, Element*>& elementMap,
-      std::function<Element*(const Value*)> getWildcardElement);
+      const std::function<Element*(const Value*)>& getWildcardElement);
   Element* unsafeMakeFreshValue(const Value* v);
 
  private:
