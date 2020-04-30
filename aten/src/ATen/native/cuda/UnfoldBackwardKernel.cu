@@ -53,7 +53,8 @@ void _unfold_backward_internal_kernel(
   int64_t grad_in_dim_stride,
   int64_t grad_in_last_dim_stride,
   int64_t grad_in_dim_size,
-  int64_t grad_out_dim_stride
+  int64_t grad_out_dim_stride,
+  bool is_step_ge_size
 ) {
   if (iter.numel() == 0) {
     return;
@@ -68,7 +69,8 @@ void _unfold_backward_internal_kernel(
         grad_in_dim_stride,
         grad_in_last_dim_stride,
         grad_in_dim_size,
-        grad_out_dim_stride
+        grad_out_dim_stride,
+        is_step_ge_size
       );
     }
     return;
@@ -78,12 +80,12 @@ void _unfold_backward_internal_kernel(
   char* __restrict__ grad_in_ptr = reinterpret_cast<char*>(iter.data_ptr(1));
   char* __restrict__ idx_dim_ptr = reinterpret_cast<char*>(iter.data_ptr(2));
 
-  if (step >= size) {
+  if (is_step_ge_size) {
     char* __restrict__ idx_last_dim_ptr = reinterpret_cast<char*>(iter.data_ptr(3));
 
     auto offset_calc = make_offset_calculator<4>(iter);
 
-    // this loop simply compies the data
+    // this loop simply copies the data
     // from proper places in grad_out to grad_in
     auto loop = [=]C10_DEVICE(int i) {
       auto offsets = offset_calc.get(i);
@@ -154,8 +156,10 @@ void unfold_backward_cuda_kernel(
 
   auto grad_out_dim_stride = ensure_nonempty_stride(grad_out, dim);
 
+  auto is_step_ge_size = (step >= size);
+
   TensorIterator iter;
-  if (step >= size) {
+  if (is_step_ge_size) {
     iter = _make_unfold_backward_iter_over_grad_in(
       grad_out, grad_in, dim, size, step
     );
@@ -177,7 +181,8 @@ void unfold_backward_cuda_kernel(
         grad_in_dim_stride,
         grad_in_last_dim_stride,
         grad_in_dim_size,
-        grad_out_dim_stride
+        grad_out_dim_stride,
+        is_step_ge_size
       );
     }
   );

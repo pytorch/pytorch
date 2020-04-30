@@ -16,7 +16,8 @@ void _unfold_backward_internal_kernel(
   int64_t grad_in_dim_stride,
   int64_t grad_in_last_dim_stride,
   int64_t grad_in_dim_size,
-  int64_t grad_out_dim_stride
+  int64_t grad_out_dim_stride,
+  bool is_step_ge_size
 ) {
   if (iter.numel() == 0) {
     return;
@@ -27,7 +28,7 @@ void _unfold_backward_internal_kernel(
     auto* __restrict__ grad_in_ptr = data[1];
     auto* __restrict__ idx_dim_ptr = data[2];
 
-    if (step >= size) {
+    if (is_step_ge_size) {
       auto* __restrict__ idx_last_dim_ptr = data[3];
 
       for (int64_t elem = 0; elem < nelems; ++elem) {
@@ -97,8 +98,10 @@ void unfold_backward_cpu_kernel(
 
   auto grad_out_dim_stride = ensure_nonempty_stride(grad_out, dim);
 
+  auto is_step_ge_size = (step >= size);
+
   TensorIterator iter;
-  if (step >= size) {
+  if (is_step_ge_size) {
     iter = _make_unfold_backward_iter_over_grad_in(
       grad_out, grad_in, dim, size, step
     );
@@ -120,7 +123,8 @@ void unfold_backward_cpu_kernel(
         grad_in_dim_stride,
         grad_in_last_dim_stride,
         grad_in_dim_size,
-        grad_out_dim_stride
+        grad_out_dim_stride,
+        is_step_ge_size
       );
     }
   );
