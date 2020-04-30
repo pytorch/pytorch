@@ -90,10 +90,9 @@ variable_list PythonEngine::execute(
 
 std::shared_ptr<FutureVariableList> PythonEngine::execute_with_graph_task(
     const std::shared_ptr<GraphTask>& graph_task,
-    std::shared_ptr<Node> graph_root,
-    bool async_mode) {
+    std::shared_ptr<Node> graph_root) {
   try {
-    return Engine::execute_with_graph_task(graph_task, graph_root, async_mode);
+    return Engine::execute_with_graph_task(graph_task, graph_root);
   } catch (python_error& e) {
     pybind11::gil_scoped_acquire gil;
     if (!PyErr_Occurred()) {

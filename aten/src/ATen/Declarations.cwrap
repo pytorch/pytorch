@@ -69,8 +69,7 @@
   arguments:
     - arg: THTensor* result
       output: True
-    - arg: THTensor* self
-      broadcast: mask fallback types:Byte
+    - THTensor* self
     - THByteTensor* mask
 ]]
 [[
@@ -86,8 +85,7 @@
   arguments:
     - arg: THTensor* result
       output: True
-    - arg: THTensor* self
-      broadcast: mask fallback types:Bool
+    - THTensor* self
     - THBoolTensor* mask
 ]]
 [[
@@ -181,27 +179,6 @@
       - real value
 ]]
 [[
-  name: _th_scatter_
-  return: argument 0
-  backends:
-    - CUDA
-  cuda_bool: True
-  variants: function
-  options:
-    - cname: scatter
-      arguments:
-        - THTensor* self
-        - long dim
-        - THIndexTensor* index
-        - THTensor* src
-    - cname: scatterFill
-      arguments:
-        - THTensor* self
-        - long dim
-        - THIndexTensor* index
-        - real value
-]]
-[[
   name: _th_scatter_add_
   return: argument 0
   cname: scatterAdd
@@ -236,6 +213,7 @@
   cname: equal
   cpu_bool: True
   cpu_bfloat16: True
+  cpu_half: True
   cuda_bool: True
   variants:
     - function
@@ -323,6 +301,7 @@
 [[
   name: _th_sort
   cname: sort
+  cpu_half: True
   variants:
     - function
   return: argument 0,1
@@ -358,20 +337,6 @@
 [[
   name: _th_exp
   cname: exp
-  types:
-    - floating_point
-  backends:
-    - CUDA
-  variants: function
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - THTensor* self
-]]
-[[
-  name: _th_cos
-  cname: cos
   types:
     - floating_point
   backends:
@@ -646,6 +611,7 @@
   name: _th_dot
   backend_types: {CUDA: [floating_point], CPU: [all]}
   cname: dot
+  cpu_half: True
   variants: function
   return: accreal
   arguments:
