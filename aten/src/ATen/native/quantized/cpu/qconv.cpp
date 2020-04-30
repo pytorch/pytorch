@@ -690,13 +690,6 @@ class QConvInt8ForBC final {
   }
 };
 
-namespace {
-
-static auto conv2d_params = register_conv_params<2>();
-static auto conv3d_params = register_conv_params<3>();
-
-} // namespace
-
 TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
   m.impl("conv2d",      QConvInt8<2, false>::run);
   m.impl("conv2d_relu", QConvInt8<2, true>::run);

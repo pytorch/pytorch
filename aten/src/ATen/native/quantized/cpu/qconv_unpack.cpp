@@ -155,13 +155,6 @@ class QConvUnpackWeightsInt8 final {
   }
 };
 
-namespace {
-
-static auto conv2d_params = register_conv_params<2>();
-static auto conv3d_params = register_conv_params<3>();
-
-} // namespace
-
 TORCH_LIBRARY_IMPL(quantized, CatchAll, m) {
   // conv_unpack is deprecated, please use conv2d_unpack for 2D conv.
   m.impl("conv_unpack", QConvUnpackWeightsInt8<2>::run);

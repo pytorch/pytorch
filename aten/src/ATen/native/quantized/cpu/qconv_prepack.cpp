@@ -305,13 +305,6 @@ class QConvPackWeightInt8 final {
   }
 };
 
-namespace {
-
-static auto conv2d_params = register_conv_params<2>();
-static auto conv3d_params = register_conv_params<3>();
-
-} // namespace
-
 TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
   // conv_prepack is deprecated, please use conv2d_prepack for 2D conv.
   m.impl("conv_prepack", QConvPackWeightInt8<2>::run);
