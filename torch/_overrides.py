@@ -119,6 +119,7 @@ def get_ignored_functions():
         torch.randperm,
         torch.range,
         torch.sparse_coo_tensor,
+        torch.vander,
         torch.zeros,
         torch.nn.functional.assert_int_or_pair,
         torch.nn.functional.boolean_dispatch,
