@@ -5,6 +5,7 @@
 #include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Half.h>
+#include <c10/util/complex_type.h>
 
 #define AT_PRIVATE_CASE_TYPE(enum_type, type, ...) \
   case enum_type: {                                \
@@ -519,6 +520,38 @@ inline void deprecated_AT_DISPATCH_ALL_TYPES_AND_HALF_AND_COMPLEX() {}
           at::ScalarType::ComplexFloat, std::complex<float>, __VA_ARGS__)   \
       AT_PRIVATE_CASE_TYPE(                                                 \
           at::ScalarType::ComplexDouble, std::complex<double>, __VA_ARGS__) \
+      AT_PRIVATE_CASE_TYPE(                                                 \
+          SCALARTYPE1,                                                      \
+          decltype(c10::impl::ScalarTypeToCPPType<SCALARTYPE1>::t),         \
+          __VA_ARGS__)                                                      \
+      AT_PRIVATE_CASE_TYPE(                                                 \
+          SCALARTYPE2,                                                      \
+          decltype(c10::impl::ScalarTypeToCPPType<SCALARTYPE2>::t),         \
+          __VA_ARGS__)                                                      \
+      AT_PRIVATE_CASE_TYPE(                                                 \
+          SCALARTYPE3,                                                      \
+          decltype(c10::impl::ScalarTypeToCPPType<SCALARTYPE3>::t),         \
+          __VA_ARGS__)                                                      \
+      default:                                                              \
+        AT_ERROR(#NAME, " not implemented for '", TYPE, "'");               \
+    }                                                                       \
+  }()
+
+#define AT_DISPATCH_ALL_TYPES_AND_C10_COMPLEX_AND3(                         \
+    SCALARTYPE1, SCALARTYPE2, SCALARTYPE3, TYPE, NAME, ...)                 \
+  [&] {                                                                     \
+    switch (TYPE) {                                                         \
+      AT_PRIVATE_CASE_TYPE(at::ScalarType::Byte, uint8_t, __VA_ARGS__)      \
+      AT_PRIVATE_CASE_TYPE(at::ScalarType::Char, int8_t, __VA_ARGS__)       \
+      AT_PRIVATE_CASE_TYPE(at::ScalarType::Double, double, __VA_ARGS__)     \
+      AT_PRIVATE_CASE_TYPE(at::ScalarType::Float, float, __VA_ARGS__)       \
+      AT_PRIVATE_CASE_TYPE(at::ScalarType::Int, int32_t, __VA_ARGS__)       \
+      AT_PRIVATE_CASE_TYPE(at::ScalarType::Long, int64_t, __VA_ARGS__)      \
+      AT_PRIVATE_CASE_TYPE(at::ScalarType::Short, int16_t, __VA_ARGS__)     \
+      AT_PRIVATE_CASE_TYPE(                                                 \
+          at::ScalarType::ComplexFloat, c10::complex<float>, __VA_ARGS__)   \
+      AT_PRIVATE_CASE_TYPE(                                                 \
+          at::ScalarType::ComplexDouble, c10::complex<double>, __VA_ARGS__) \
       AT_PRIVATE_CASE_TYPE(                                                 \
           SCALARTYPE1,                                                      \
           decltype(c10::impl::ScalarTypeToCPPType<SCALARTYPE1>::t),         \
