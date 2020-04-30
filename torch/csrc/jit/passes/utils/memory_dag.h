@@ -65,7 +65,7 @@ class TORCH_API MemoryDAGBuilder {
 // which memory locations an element may point to.
 class TORCH_API MemoryDAG {
  public:
-  MemoryDAG(std::unique_ptr<MemoryDAGBuilder> builder)
+  explicit MemoryDAG(std::unique_ptr<MemoryDAGBuilder> builder)
       : indexToElementMap_(std::move(builder->indexToElementMap_)) {}
   // explicitly delete copy constructor because otherwise windows build is
   // confused for an exported class see
@@ -140,7 +140,7 @@ struct Element {
   // The values that this element corresponds to. May be empty if this element
   // doesn't represent a first-class value.
   // This is for debug information only.
-  std::unordered_set<const Value*> values = {};
+  std::unordered_set<const Value*> values;
 
  private:
   // Make `from` point at `to`.
