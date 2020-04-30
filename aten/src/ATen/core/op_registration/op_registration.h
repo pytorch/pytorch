@@ -11,7 +11,7 @@
 #if defined(EXPOSE_C2_OPS) || !defined(CAFFE2_IS_XPLAT_BUILD)
 #include <torch/csrc/jit/frontend/function_schema_parser.h>
 #endif
-#include <ATen/core/OpsAlreadyMovedToC10.h>
+#include <ATen/core/ATenOpList.h>
 
 namespace c10 {
 

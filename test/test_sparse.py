@@ -7,7 +7,6 @@ torch.set_default_dtype(torch.double)
 import itertools
 import functools
 import random
-import sys
 import unittest
 from torch.testing._internal.common_utils import TestCase, run_tests, skipIfRocm, do_test_dtypes, \
     do_test_empty_full, load_tests, TEST_NUMPY, TEST_WITH_ROCM, IS_WINDOWS
@@ -1032,6 +1031,7 @@ class TestSparse(TestCase):
             ab = a.bmm(b)
 
     @cuda_only
+    @skipIfRocm
     @unittest.skipIf(
         (torch.version.cuda
             and [int(x) for x in torch.version.cuda.split(".")] >= [10, 1]),
@@ -1211,6 +1211,7 @@ class TestSparse(TestCase):
         self._test_spadd_shape(10, [50, 30, 20], [2, 0])
 
     @cuda_only
+    @skipIfRocm
     @unittest.skipIf(not TEST_WITH_ROCM, "runs only on ROCm")
     def test_sparse_add_out_bfloat16(self):
         # fp32
@@ -2283,10 +2284,7 @@ class TestSparse(TestCase):
         self.assertEqual(list(t.coalesce().values().size()), [1, 3])
 
     def test_pickle(self):
-        if sys.version_info[0] == 2:
-            import cPickle as pickle
-        else:
-            import pickle
+        import pickle
 
         shape_sparse_dim_nnz = [
             ((), 0, 2),
