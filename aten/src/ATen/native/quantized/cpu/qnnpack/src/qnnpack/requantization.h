@@ -55,6 +55,28 @@ pytorch_qnnp_compute_scalar_requantization_params(
   return params;
 }
 
+static inline union pytorch_qnnp_fp32_requantization_params
+pytorch_qnnp_compute_scalar_fp32_requantization_params(
+    float scale,
+    uint8_t zero_point,
+    uint8_t min,
+    uint8_t max) {
+
+  union pytorch_qnnp_fp32_requantization_params params;
+  params.scalar.scale = scale;
+  params.scalar.output_zero_point = zero_point;
+  params.scalar.output_max = max;
+  params.scalar.output_min = min;
+  params.scalar.min_less_zero_point = ((float)((int32_t)(uint32_t)min -
+      (int32_t)(uint32_t)zero_point));
+  params.scalar.max_less_zero_point = ((float)((int32_t)(uint32_t)max -
+      (int32_t)(uint32_t)zero_point));
+  params.scalar.magic = 12582912.0f;
+  params.scalar.magic_less_zero_point = (INT32_C(0x4B400000) -
+      (int32_t)(uint32_t)zero_point);
+  return params;
+}
+
 static inline union pytorch_qnnp_q31_requantization_params
 pytorch_qnnp_compute_requantization_params(
     float scale,
@@ -128,48 +150,21 @@ static inline union pytorch_qnnp_conv_quantization_params
 pytorch_qnnp_compute_conv_quantization_params(
     uint8_t input_zero_point,
     uint8_t kernel_zero_point,
-    float scale,
+    float requantization_scale,
     uint8_t output_zero_point,
     uint8_t output_min,
     uint8_t output_max) {
-  /* Compute requantization parameters */
-  const uint32_t scale_bits = fp32_to_bits(scale);
-
-  /* Multiplier is in [0x40000000, 0x7FFFFF80] range */
-  const int32_t multiplier = (int32_t)(
-      ((scale_bits & UINT32_C(0x007FFFFF)) | UINT32_C(0x00800000)) << 7);
-  assert(multiplier >= INT32_C(0x40000000));
-  assert(multiplier <= INT32_C(0x7FFFFF80));
-
-  /* Shift is in [0, 31] range */
-  const int32_t shift = 127 + 31 - 32 - (fp32_to_bits(scale) >> 23);
-  assert(shift >= 0);
-  assert(shift < 32);
 
   union pytorch_qnnp_conv_quantization_params params;
 #if CPUINFO_ARCH_X86 || CPUINFO_ARCH_X86_64
-  const uint32_t remainder_mask = (UINT32_C(1) << shift) - UINT32_C(1);
-  const uint32_t remainder_threshold = remainder_mask >> 1;
   for (uint32_t i = 0; i < 8; i++) {
     params.sse2.input_zero_point[i] = (int16_t)(uint16_t)input_zero_point;
     params.sse2.kernel_zero_point[i] = (int16_t)(uint16_t)kernel_zero_point;
   }
-  params.sse2.multiplier[0] = multiplier;
-  params.sse2.multiplier[1] = multiplier;
-  params.sse2.multiplier[2] = multiplier;
-  params.sse2.multiplier[3] = multiplier;
-  params.sse2.rounding[0] = UINT64_C(0x40000000);
-  params.sse2.rounding[1] = UINT64_C(0x40000000);
-  params.sse2.remainder_mask[0] = (int32_t)remainder_mask;
-  params.sse2.remainder_mask[1] = (int32_t)remainder_mask;
-  params.sse2.remainder_mask[2] = (int32_t)remainder_mask;
-  params.sse2.remainder_mask[3] = (int32_t)remainder_mask;
-  params.sse2.remainder_threshold[0] = (int32_t)remainder_threshold;
-  params.sse2.remainder_threshold[1] = (int32_t)remainder_threshold;
-  params.sse2.remainder_threshold[2] = (int32_t)remainder_threshold;
-  params.sse2.remainder_threshold[3] = (int32_t)remainder_threshold;
-  params.sse2.shift[0] = (uint64_t)(uint32_t)shift;
-  params.sse2.shift[1] = (uint64_t)(uint32_t)shift;
+  params.sse2.requantization_scale[0] = requantization_scale;
+  params.sse2.requantization_scale[1] = requantization_scale;
+  params.sse2.requantization_scale[2] = requantization_scale;
+  params.sse2.requantization_scale[3] = requantization_scale;
   for (uint32_t i = 0; i < 8; i++) {
     params.sse2.output_zero_point[i] = (int16_t)(uint16_t)output_zero_point;
   }
@@ -180,20 +175,21 @@ pytorch_qnnp_compute_conv_quantization_params(
 #elif CPUINFO_ARCH_ARM || CPUINFO_ARCH_ARM64
   params.neon.input_zero_point = (int16_t)(uint16_t)input_zero_point;
   params.neon.kernel_zero_point = (int16_t)(uint16_t)kernel_zero_point;
-  params.neon.multiplier = multiplier;
-  params.neon.right_shift = -shift;
+  params.neon.requantization_scale = requantization_scale;
   params.neon.output_zero_point = (int16_t)(uint16_t)output_zero_point;
   params.neon.output_max = output_max;
   params.neon.output_min = output_min;
+  params.neon.vfmin = ((float)((int32_t)(uint32_t)output_min -
+      (int32_t)(uint32_t)output_zero_point));
+  params.neon.vfmax = ((float)((int32_t)(uint32_t)output_max -
+      (int32_t)(uint32_t)output_zero_point));
+  params.neon.vfmagic = 12582912.0f;
+  params.neon.vimagic = (INT32_C(0x4B400000) -
+      (int32_t)(uint32_t)output_zero_point);
 #else
-  const uint32_t remainder_mask = (UINT32_C(1) << shift) - UINT32_C(1);
-  const uint32_t remainder_threshold = remainder_mask >> 1;
   params.scalar.input_zero_point = (int32_t)(uint32_t)input_zero_point;
   params.scalar.kernel_zero_point = (int32_t)(uint32_t)kernel_zero_point;
-  params.scalar.multiplier = multiplier;
-  params.scalar.remainder_mask = (int32_t)remainder_mask;
-  params.scalar.remainder_threshold = (int32_t)remainder_threshold;
-  params.scalar.shift = (uint32_t)shift;
+  params.scalar.requantization_scale = requantization_scale;
   params.scalar.output_min_less_zero_point =
       (int32_t)(uint32_t)output_min - (int32_t)(uint32_t)output_zero_point;
   params.scalar.output_max_less_zero_point =
@@ -213,35 +209,17 @@ pytorch_qnnp_compute_avgpool_quantization_params(
   /* Compute requantization parameters */
   assert(scale >= 0x1.0p-32f);
   assert(scale < 256.0f);
-  const uint32_t scale_bits = fp32_to_bits(scale);
-
-  /* Multiplier is in [0x00800000, 0x00FFFFFF] range */
-  const int32_t multiplier =
-      ((int32_t)scale_bits & INT32_C(0x007FFFFF)) | INT32_C(0x00800000);
-  assert(multiplier >= INT32_C(0x00800000));
-  assert(multiplier <= INT32_C(0x00FFFFFF));
-
-  /* Shift is in [16, 55] range */
-  const int32_t shift = 127 + 23 - (scale_bits >> 23);
-  assert(shift >= 16);
-  assert(shift < 64);
 
   union pytorch_qnnp_avgpool_quantization_params params;
 #if CPUINFO_ARCH_X86 || CPUINFO_ARCH_X86_64
-  const uint32_t right_shift = (uint32_t)shift;
-  const uint64_t rounding = UINT64_C(1) << (right_shift - 1);
   params.sse2.bias[0] = bias;
   params.sse2.bias[1] = bias;
   params.sse2.bias[2] = bias;
   params.sse2.bias[3] = bias;
-  params.sse2.multiplier[0] = (uint32_t)multiplier;
-  params.sse2.multiplier[1] = (uint32_t)multiplier;
-  params.sse2.multiplier[2] = (uint32_t)multiplier;
-  params.sse2.multiplier[3] = (uint32_t)multiplier;
-  params.sse2.rounding[0] = rounding;
-  params.sse2.rounding[1] = rounding;
-  params.sse2.right_shift[0] = (uint64_t)right_shift;
-  params.sse2.right_shift[1] = (uint64_t)right_shift;
+  params.sse2.scale[0] = scale;
+  params.sse2.scale[1] = scale;
+  params.sse2.scale[2] = scale;
+  params.sse2.scale[3] = scale;
   for (uint32_t i = 0; i < 8; i++) {
     params.sse2.output_zero_point[i] = (int16_t)(uint16_t)output_zero_point;
   }
@@ -251,23 +229,23 @@ pytorch_qnnp_compute_avgpool_quantization_params(
   }
 #elif CPUINFO_ARCH_ARM || CPUINFO_ARCH_ARM64
   params.neon.bias = bias;
-  params.neon.multiplier = multiplier;
-  params.neon.left_shift = (int64_t)-shift;
+  params.neon.scale = scale;
   params.neon.output_zero_point = (int16_t)(uint16_t)output_zero_point;
   params.neon.output_max = output_max;
   params.neon.output_min = output_min;
+  params.neon.vfmin = ((float)((int32_t)(uint32_t)output_min -
+      (int32_t)(uint32_t)output_zero_point));
+  params.neon.vfmax = ((float)((int32_t)(uint32_t)output_max -
+      (int32_t)(uint32_t)output_zero_point));
+  params.neon.vfmagic = 12582912.0f;
+  params.neon.vimagic = (INT32_C(0x4B400000) -
+      (int32_t)(uint32_t)output_zero_point);
 #else
-  const uint32_t right_shift = (uint32_t)shift;
-  const int64_t rounding = INT64_C(1) << (right_shift - 1);
   params.scalar.bias = bias;
-  params.scalar.multiplier = multiplier;
-  params.scalar.rounding = rounding;
-  params.scalar.right_shift = right_shift;
-  params.scalar.output_min_less_zero_point =
-      (int32_t)(uint32_t)output_min - (int32_t)(uint32_t)output_zero_point;
-  params.scalar.output_max_less_zero_point =
-      (int32_t)(uint32_t)output_max - (int32_t)(uint32_t)output_zero_point;
+  params.scalar.scale = scale;
   params.scalar.output_zero_point = (int32_t)(uint32_t)output_zero_point;
+  params.scalar.output_max = (int32_t)(uint32_t)output_max;
+  params.scalar.output_min = (int32_t)(uint32_t)output_min;
 #endif
   return params;
 }
@@ -282,31 +260,13 @@ pytorch_qnnp_compute_scalar_avgpool_quantization_params(
   /* Compute requantization parameters */
   assert(scale >= 0x1.0p-32f);
   assert(scale < 256.0f);
-  const uint32_t scale_bits = fp32_to_bits(scale);
-
-  /* Multiplier is in [0x00800000, 0x00FFFFFF] range */
-  const int32_t multiplier =
-      ((int32_t)scale_bits & INT32_C(0x007FFFFF)) | INT32_C(0x00800000);
-  assert(multiplier >= INT32_C(0x00800000));
-  assert(multiplier <= INT32_C(0x00FFFFFF));
-
-  /* Shift is in [16, 55] range */
-  const int32_t shift = 127 + 23 - (scale_bits >> 23);
-  assert(shift >= 16);
-  assert(shift < 64);
 
   union pytorch_qnnp_avgpool_quantization_params params;
-  const uint32_t right_shift = (uint32_t)shift;
-  const int64_t rounding = INT64_C(1) << (right_shift - 1);
   params.scalar.bias = bias;
-  params.scalar.rounding = rounding;
-  params.scalar.multiplier = multiplier;
-  params.scalar.right_shift = right_shift;
-  params.scalar.output_min_less_zero_point =
-      (int32_t)(uint32_t)output_min - (int32_t)(uint32_t)output_zero_point;
-  params.scalar.output_max_less_zero_point =
-      (int32_t)(uint32_t)output_max - (int32_t)(uint32_t)output_zero_point;
+  params.scalar.scale = scale;
   params.scalar.output_zero_point = (int32_t)(uint32_t)output_zero_point;
+  params.scalar.output_max = (int32_t)(uint32_t)output_max;
+  params.scalar.output_min = (int32_t)(uint32_t)output_min;
   return params;
 }
 
@@ -505,22 +465,60 @@ static inline uint8_t pytorch_qnnp_q31_requantize(
   return (uint8_t)(n + params.scalar.zero_point);
 }
 
+static inline uint8_t pytorch_qnnp_fp32_requantize(
+    int32_t n,
+    union pytorch_qnnp_fp32_requantization_params params) {
+
+  const long lmin =
+      (long)((int32_t)(uint32_t)params.scalar.output_min -
+          (int32_t)(uint32_t)params.scalar.output_zero_point);
+  const long lmax =
+      (long)((int32_t)(uint32_t)params.scalar.output_max -
+          (int32_t)(uint32_t)params.scalar.output_zero_point);
+
+  const float n_scaled = (float)n * params.scalar.scale;
+  const long n_rounded = lrintf(n_scaled);
+  const int32_t n_clamped = (int32_t)(
+      n_rounded < lmin ? lmin : n_rounded > lmax ? lmax : n_rounded);
+  const int32_t n_biased =
+      n_clamped + (int32_t)(uint32_t)params.scalar.output_zero_point;
+
+  return (uint8_t)n_biased;
+}
+
+static inline uint8_t pytorch_qnnp_fp32_requantize_magic(
+    int32_t n,
+    union pytorch_qnnp_fp32_requantization_params params) {
+
+  const float fmin = params.scalar.min_less_zero_point;
+  const float fmax = params.scalar.max_less_zero_point;
+  const float fmagic = params.scalar.magic;
+  const int32_t imagic = params.scalar.magic_less_zero_point;
+
+  const float n_scaled = (float)n * params.scalar.scale;
+  const float n_clamped =
+      n_scaled < fmin ? fmin : n_scaled > fmax ? fmax : n_scaled;
+  const int32_t n_biased = (int32_t)fp32_to_bits(n_clamped + fmagic) - imagic;
+
+  return (uint8_t)n_biased;
+}
+
 static inline uint8_t pytorch_qnnp_avgpool_quantize(
     int32_t n,
     union pytorch_qnnp_avgpool_quantization_params params) {
-  const int64_t product = (int64_t)n * (int64_t)params.scalar.multiplier;
-  const int64_t adjusted_product = product - (int64_t)(n < 0);
 
-  n = (int32_t)asr_s64(
-      adjusted_product + params.scalar.rounding, params.scalar.right_shift);
-  if (n < params.scalar.output_min_less_zero_point) {
-    n = params.scalar.output_min_less_zero_point;
-  }
-  if (n > params.scalar.output_max_less_zero_point) {
-    n = params.scalar.output_max_less_zero_point;
-  }
+  const float scaled_n = ((float)n)*params.scalar.scale;
+  int32_t n_rounded = (int32_t)lrintf(scaled_n) + params.scalar.output_zero_point;
 
-  return (uint8_t)(n + params.scalar.output_zero_point);
+  const int32_t lmin =
+      (int32_t)(uint32_t)params.scalar.output_min;
+  const int32_t lmax =
+      (int32_t)(uint32_t)params.scalar.output_max;
+
+  n_rounded = (
+      n_rounded < lmin ? lmin : n_rounded > lmax ? lmax : n_rounded);
+
+  return (uint8_t)n_rounded;
 }
 
 static inline uint8_t pytorch_qnnp_add_quantize(

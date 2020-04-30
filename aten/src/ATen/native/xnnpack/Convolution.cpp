@@ -79,6 +79,7 @@ bool usable(const Tensor& input) {
          (input.size(Layout::Activation4D::channels) > 0) &&
          (input.size(Layout::Activation4D::height) > 0) &&
          (input.size(Layout::Activation4D::width) > 0) &&
+         !input.requires_grad() &&
          true;
 }
 
@@ -154,7 +155,9 @@ ContextConv2D create(
       weight_nhwc.size(Layout::Filter::input) * groups,               // input_pixel_stride
       weight_nhwc.size(Layout::Filter::output),                       // output_pixel_stride
       weight_nhwc.data_ptr<float>(),                                  // kernel
-      (bias && bias->defined()) ? bias->data_ptr<float>() : nullptr,  // bias
+      (bias && bias->defined())
+          ? bias->contiguous().data_ptr<float>()
+          : nullptr,                                                  // bias
       output_min,                                                     // output_min
       output_max,                                                     // output_max
       0u,                                                             // flags
@@ -179,8 +182,8 @@ Tensor run(
     const Tensor& input) {
   using namespace internal;
 
-  const Tensor input_nhwc = input.contiguous(MemoryFormat::ChannelsLast);
-  const Tensor padded_input_nhwc = allocate_padded_if_needed(input_nhwc);
+  const Tensor padded_input_nhwc = allocate_padded_contiguous_if_needed(
+      input, MemoryFormat::ChannelsLast);
 
   TORCH_CHECK(
       usable(padded_input_nhwc),
@@ -195,7 +198,8 @@ Tensor run(
           context.stride_,
           context.dilation_),
       padded_input_nhwc.options().dtype(),
-      MemoryFormat::ChannelsLast);
+      MemoryFormat::ChannelsLast,
+      padded_input_nhwc.names());
 
   const xnn_status setup_status = xnn_setup_convolution2d_nhwc_f32(
       context.op.get(),                                      // operator
@@ -229,8 +233,8 @@ c10::intrusive_ptr<xnnpack::Conv2dOpContext>
         std::vector<int64_t> padding,
         std::vector<int64_t> dilation,
         int64_t groups,
-        c10::optional<double> output_min,
-        c10::optional<double> output_max) {
+        c10::optional<Scalar> output_min,
+        c10::optional<Scalar> output_max) {
       return xnnpack::XNNPackConv2dOpContext::create_context(
           std::move(weight),
           std::move(bias),
@@ -242,7 +246,7 @@ c10::intrusive_ptr<xnnpack::Conv2dOpContext>
           output_max);
 }
 
-Tensor Conv2dClampRun::operator()(
+Tensor conv2d_clamp_run(
     const Tensor& input,
     const c10::intrusive_ptr<xnnpack::Conv2dOpContext>& op_context) {
   return op_context->run(input);

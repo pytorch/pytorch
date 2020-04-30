@@ -7,5 +7,7 @@ To use it, install the following dependencies:
 pip install mypy mypy-extensions
 
 # Run type checker in the pytorch/ directory
-mypy @mypy-files.txt
+mypy
 ```
+
+Note that the minimum version of MyPy that is supported is 0.770

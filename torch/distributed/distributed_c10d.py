@@ -45,7 +45,8 @@ except ImportError:
 
 class Backend(object):
     """
-    An enum-like class of available backends: GLOO, NCCL, and MPI.
+    An enum-like class of available backends: GLOO, NCCL, MPI, and other registered
+    backends.
 
     The values of this class are lowercase strings, e.g., ``"gloo"``. They can
     be accessed as attributes, e.g., ``Backend.NCCL``.
@@ -76,7 +77,28 @@ class Backend(object):
                              "on CPU tensors.")
         elif value == Backend.UNDEFINED:
             raise ValueError("Invalid backend: '{}'".format(name))
+        elif value != Backend.GLOO and value != Backend.NCCL and value != Backend.MPI:
+            value = name
         return value
+
+    @classmethod
+    def register_backend(cls, name, func):
+        """
+        Registers a new backend.
+
+        This class method is used by 3rd party cpp extension to register new backend.
+
+        Arguments:
+            name (str): Backend name matching with the one in `init_process_group()`.
+            func (function): Function handler that instantiates the backend.
+                             The function should be implemented in the backend cpp extension
+                             and takes four arguments, including prefix_store, rank,
+                             world_size, and timeout.
+
+        .. note:: This support of 3rd party backend is experimental and subject to change.
+
+        """ 
+        setattr(Backend, name.upper(), func)
 
 # `_backend`, `dist_backend`, and `reduce_op` are here to maintain backward
 # compatibility with pre-c10d distributed package.
@@ -377,6 +399,12 @@ def init_process_group(backend,
     backend = Backend(backend)
 
     if backend == Backend.MPI:
+        if world_size != -1 or rank != -1:
+            warnings.warn(
+                "For MPI backend, world_size ({}) and rank ({}) "
+                "are ignored since they are assigned by the "
+                "MPI runtime.".format(world_size, rank))
+
         _default_pg = _new_process_group_helper(
             -1,
             -1,
@@ -446,7 +474,10 @@ def _new_process_group_helper(world_size,
     backend = Backend(backend)
     if backend == Backend.MPI:
         if not is_mpi_available():
-            raise RuntimeError("Distributed package doesn't have MPI built in")
+            raise RuntimeError(
+                "Distributed package doesn't have MPI built in."
+                " MPI is only included if you build PyTorch from"
+                " source on a host that has MPI installed.")
         pg = ProcessGroupMPI.create(group_ranks)
         if not pg:
             return GroupMember.NON_GROUP_MEMBER
@@ -484,7 +515,13 @@ def _new_process_group_helper(world_size,
             _pg_map[pg] = (Backend.NCCL, store)
             _pg_names[pg] = group_name
         else:
-            raise RuntimeError("Unsupported distributed backend by group")
+            pg = getattr(Backend, backend.upper())(
+                prefix_store,
+                rank,
+                world_size,
+                timeout)
+            _pg_map[pg] = (backend, store)
+            _pg_names[pg] = group_name
 
     return pg
 

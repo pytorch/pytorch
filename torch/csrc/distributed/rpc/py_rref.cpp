@@ -13,6 +13,7 @@ namespace rpc {
 /////////////////////  Pickle/Unpickle Helplers ////////////////////////////
 
 namespace {
+
 py::tuple toPyTuple(const RRefForkData& rrefForkData) {
   // add GIL as it is contructing a py::object
   pybind11::gil_scoped_acquire ag;
@@ -25,6 +26,7 @@ py::tuple toPyTuple(const RRefForkData& rrefForkData) {
       rrefForkData.parent_,
       rrefForkData.typeStr_);
 }
+
 RRefForkData fromPyTuple(const py::tuple& pyTuple) {
   // add GIL as it is accessing a py::object
   pybind11::gil_scoped_acquire ag;
@@ -63,13 +65,16 @@ TypePtr tryInferTypeWithTypeHint(
                                   .attr("_qualified_name")(type_hint)));
     TypePtr type_hint_ptr =
         jit::get_python_cu()->get_interface(type_qualified_name);
+    std::ostringstream subtype_check_msg;
     TORCH_CHECK(
         type_hint_ptr != nullptr &&
-            module.value().type()->isSubtypeOf(type_hint_ptr),
+            module.value().type()->isSubtypeOfExt(
+                type_hint_ptr, &subtype_check_msg),
         module.value().type()->python_str(),
         " is not a subtype of the type hint: ",
         type_qualified_name.qualifiedName(),
-        ", did you pass a valid interface type?");
+        ", did you pass a valid interface type?\n",
+        subtype_check_msg.str());
     return type_hint_ptr;
   } else {
     TORCH_CHECK(
@@ -89,7 +94,7 @@ TypePtr tryInferTypeWithTypeHint(
   // Otherwise it's a pure pyobject, create the RRef
   // that holds an IValue of an pyobject.
   return PyObjectType::get();
-} // namespace
+}
 
 } // namespace
 
@@ -108,6 +113,13 @@ PyRRef::PyRRef(const py::object& value, const py::object& type_hint)
         rref->setValue(std::move(ivalue));
         return rref;
       }()) {}
+
+const std::shared_ptr<FutureIValue> PyRRef::getFuture() const {
+  // Marking hasValue to false, as this Future is only used for signaling
+  // profiler to update profiling result and the profiler does not retrieve
+  // any value from it.
+  return toFutureIValue(rref_->getOwnerCreationFuture(), false /* hasValue */);
+}
 
 bool PyRRef::isOwner() const {
   return rref_->isOwner();
@@ -179,6 +191,28 @@ std::string PyRRef::str() const {
         ", ForkId = ",
         c10::static_intrusive_pointer_cast<UserRRef>(rref_)->forkId(),
         ")");
+  }
+}
+
+py::object PyRRef::createRRefProxy(PyRRef& self, const RRefProxyType& type)
+    const {
+  auto& pythonRpcHandler = PythonRpcHandler::getInstance();
+  pybind11::gil_scoped_acquire ag;
+  auto& functions = pythonRpcHandler.getRRefProxyFunctions();
+  auto& ctor = functions.rrefProxyCtor_;
+  switch (type) {
+    case RRefProxyType::RPC_SYNC: {
+      return ctor(self, functions.rpcSync_);
+    }
+    case RRefProxyType::RPC_ASYNC: {
+      return ctor(self, functions.rpcAsync_);
+    }
+    case RRefProxyType::REMOTE: {
+      return ctor(self, functions.remote_);
+    }
+    default: {
+      TORCH_INTERNAL_ASSERT(false, "Unrecognized RRefProxy type ", type);
+    }
   }
 }
 

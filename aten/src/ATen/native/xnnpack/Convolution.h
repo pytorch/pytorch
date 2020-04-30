@@ -20,15 +20,12 @@ c10::intrusive_ptr<xnnpack::Conv2dOpContext>
         std::vector<int64_t> padding,
         std::vector<int64_t> dilation,
         int64_t groups,
-        c10::optional<double> output_min,
-        c10::optional<double> output_max);
+        c10::optional<Scalar> output_min,
+        c10::optional<Scalar> output_max);
 
-class Conv2dClampRun final : public torch::OperatorKernel {
- public:
-  Tensor operator()(
-      const Tensor& input,
-      const c10::intrusive_ptr<xnnpack::Conv2dOpContext>& op_context);
-};
+Tensor conv2d_clamp_run(
+    const Tensor& input,
+    const c10::intrusive_ptr<xnnpack::Conv2dOpContext>& op_context);
 
 ContextConv2D create(
     const Tensor& weight,
@@ -41,6 +38,7 @@ ContextConv2D create(
     const float output_max);
 
 Tensor run(const ContextConv2D& context, const Tensor& input);
+
 } // namespace convolution2d
 } // namespace internal
 } // namespace xnnpack
