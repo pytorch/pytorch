@@ -1120,7 +1120,8 @@ struct CAFFE2_API FunctionType : public NamedType {
  private:
   FunctionType(torch::jit::Function* function);
   std::string python_str_impl(TypePrinter printer = nullptr) const override {
-    return "Function";
+    const auto& n = name().value();
+    return n.qualifiedName();
   }
   torch::jit::Function* function_;
 };
@@ -1381,6 +1382,12 @@ struct getTypePtr_<double> final {
 };
 template <>
 struct getTypePtr_<int64_t> final {
+  static TypePtr call() {
+    return IntType::get();
+  }
+};
+template <>
+struct getTypePtr_<c10::ScalarType> final {
   static TypePtr call() {
     return IntType::get();
   }
