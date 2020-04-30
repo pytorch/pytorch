@@ -313,3 +313,6 @@ shape
    :outertype: Tensor
 
    Returns the shape of this tensor. (The array is a fresh copy.)
+
+.. toctree::
+    TensorImageUtils

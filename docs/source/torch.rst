@@ -235,7 +235,7 @@ Math operations
 ----------------------------------
 
 .. autosummary::
-    :toctree: generated/point
+    :toctree: generated
     :nosignatures:
 
     abs
