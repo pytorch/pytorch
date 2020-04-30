@@ -1,10 +1,10 @@
-#include "function.h"
-#include <ATen/core/op_registration/op_registration.h>
+#include <torch/csrc/jit/mobile/function.h>
+#include <torch/csrc/jit/mobile/interpreter.h>
 #include <torch/csrc/jit/runtime/instruction.h>
 #include <torch/csrc/jit/runtime/operator.h>
 #include <torch/csrc/jit/runtime/vararg_functions.h>
 #include <torch/custom_class_detail.h>
-#include "interpreter.h"
+#include <torch/library.h>
 
 namespace torch {
 namespace jit {
@@ -32,22 +32,16 @@ bool Function::append_operator(
   auto opname_c10 = opname;
   std::function<void(Stack&)> fn;
 
-  // Add "_" prefix to work around the double registration, for operators
-  // registered in register_mobile_ops.cpp.
-  // TODO: remove it when we migrate all c10 ops.
-  if (opname_c10.name != "aten::Int") {
-    opname_c10.name = "_" + opname_c10.name;
-  }
-  auto op = c10::Dispatcher::singleton().findSchema(opname_c10);
-  if (op.has_value()) {
-    fn = [op](Stack& stack) {
-      c10::Dispatcher::singleton().callBoxed(*op, &stack);
-    };
-  } else { // Not found in c10 registration, use JIT dispatch
-    auto jit_op = findOperatorFor(opname);
-    TORCH_CHECK(
-        jit_op, opname.name, ".", opname.overload_name, " cannot be found.");
+  auto jit_op = findOperatorFor(opname);
+  if (jit_op) {
     fn = [jit_op](Stack& stack) { jit_op->getOperation()(stack); };
+  } else {
+    auto op = c10::Dispatcher::singleton().findSchema(opname_c10);
+    if (op.has_value()) {
+      fn = [op](Stack& stack) { op->callBoxed(&stack); };
+    } else {
+      return false;
+    }
   }
 
   code_->operators_.emplace_back(fn);

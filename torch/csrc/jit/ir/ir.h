@@ -1367,7 +1367,10 @@ TORCH_API std::vector<Value*> insertGraph(
  * This asserts that the number of outputs of the original node and the
  * graph are the same.
  */
-TORCH_API std::vector<Value*> inlineCallTo(Node* to_replace, Function* callee);
+TORCH_API std::vector<Value*> inlineCallTo(
+    Node* to_replace,
+    Function* callee,
+    bool use_graph = true);
 
 /** If there is only one value in \p OUTPUTS and its kind is Tuple, insert a
  * tuple unpack node and return the resulting values.

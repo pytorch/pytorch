@@ -17,7 +17,7 @@
 #include <c10/util/Half.h>
 #include <c10/core/UndefinedTensorImpl.h>
 #include <c10/util/Optional.h>
-#include <ATen/core/op_registration/op_registration.h>
+#include <torch/library.h>
 
 #include <cstddef>
 #include <functional>
@@ -42,9 +42,8 @@ ${type_derived_method_definitions}
 
 }  // namespace ${Type}
 
-namespace {
-static auto registerer = torch::import()
+TORCH_LIBRARY_IMPL(aten, ${Backend}, m) {
   ${function_registrations};
 }
 
-}
+} // namespace at

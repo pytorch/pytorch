@@ -8,6 +8,7 @@ jobs:
     - attach_scripts
     - setup_linux_system_environment
     - checkout
+    - optional_merge_target_branch
     - setup_ci_environment
     - run:
         name: Build
@@ -18,28 +19,6 @@ jobs:
           echo "DOCKER_IMAGE: "${DOCKER_IMAGE}
           time docker pull ${DOCKER_IMAGE} >/dev/null
           export id=$(docker run --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -t -d -w /var/lib/jenkins ${DOCKER_IMAGE})
-
-          # TODO We may want to move the rebase logic to a separate step after checkout
-          # Rebase to master only if in xenial_py3_6_gcc5_4 case
-          if [[ "${CIRCLE_BRANCH}" != "master" && "${BUILD_ENVIRONMENT}" == *"gcc5"* ]]; then
-            echo "Merge master branch into $CIRCLE_BRANCH before build in environment $BUILD_ENVIRONMENT"
-            set -x
-            git config --global user.email "circleci.ossci@gmail.com"
-            git config --global user.name "CircleCI"
-            git config remote.origin.url https://github.com/pytorch/pytorch.git
-            git config --add remote.origin.fetch +refs/heads/master:refs/remotes/origin/master
-            git fetch --tags --progress https://github.com/pytorch/pytorch.git +refs/heads/master:refs/remotes/origin/master --depth=100 --quiet
-            export GIT_MERGE_TARGET=`git log -n 1 --pretty=format:"%H" origin/master`
-            echo "GIT_MERGE_TARGET: " ${GIT_MERGE_TARGET}
-            export GIT_COMMIT=${CIRCLE_SHA1}
-            echo "GIT_COMMIT: " ${GIT_COMMIT}
-            git checkout -f ${GIT_COMMIT}
-            git reset --hard ${GIT_COMMIT}
-            git merge --allow-unrelated-histories --no-edit --no-ff ${GIT_MERGE_TARGET}
-            set +x
-          else
-            echo "Do NOT merge master branch into $CIRCLE_BRANCH in environment $BUILD_ENVIRONMENT"
-          fi
 
           git submodule sync && git submodule update -q --init --recursive
 
@@ -136,12 +115,19 @@ jobs:
           echo ${COMMAND} > ./command.sh && unbuffer bash ./command.sh | ts
 
           retrieve_test_reports
+          docker stats --all --no-stream
     - store_test_results:
         path: test-reports
 
   pytorch_windows_build:
     <<: *pytorch_windows_params
     parameters:
+      executor:
+        type: string
+        default: "windows-cpu-with-nvidia-cuda"
+      build_environment:
+        type: string
+        default: ""
       test_name:
         type: string
         default: ""
@@ -163,7 +149,7 @@ jobs:
       use_cuda:
         type: string
         default: ""
-    executor: windows-cpu-with-nvidia-cuda
+    executor: <<parameters.executor>>
     steps:
       - checkout
       - run:
@@ -176,37 +162,41 @@ jobs:
           name: Install Cuda
           no_output_timeout: 30m
           command: |
-            curl --retry 3 -kLO https://ossci-windows.s3.amazonaws.com/cuda_10.1.243_426.00_win10.exe
-            7z x cuda_10.1.243_426.00_win10.exe -ocuda_10.1.243_426.00_win10
-            cd cuda_10.1.243_426.00_win10
-            mkdir cuda_install_logs
-            ./setup.exe -s nvcc_10.1 cuobjdump_10.1 nvprune_10.1 cupti_10.1 cublas_10.1 cublas_dev_10.1 cudart_10.1 cufft_10.1 cufft_dev_10.1 curand_10.1 curand_dev_10.1 cusolver_10.1 cusolver_dev_10.1 cusparse_10.1 cusparse_dev_10.1 nvgraph_10.1 nvgraph_dev_10.1 npp_10.1 npp_dev_10.1 nvrtc_10.1 nvrtc_dev_10.1 nvml_dev_10.1 -loglevel:6 -log:"$(pwd -W)/cuda_install_logs"
-            if [[ "${VC_YEAR}" == "2017" ]]; then
-              cp -r CUDAVisualStudioIntegration/extras/visual_studio_integration/MSBuildExtensions/* "C:/Program Files (x86)/Microsoft Visual Studio/2017/BuildTools/Common7/IDE/VC/VCTargets/BuildCustomizations/"
-            else
-              cp -r CUDAVisualStudioIntegration/extras/visual_studio_integration/MSBuildExtensions/* "C:/Program Files (x86)/Microsoft Visual Studio/2019/Community/MSBuild/Microsoft/VC/v160/BuildCustomizations/"
+            if [[ "${USE_CUDA}" == "1" ]]; then
+              curl --retry 3 -kLO https://ossci-windows.s3.amazonaws.com/cuda_10.1.243_426.00_win10.exe
+              7z x cuda_10.1.243_426.00_win10.exe -ocuda_10.1.243_426.00_win10
+              cd cuda_10.1.243_426.00_win10
+              mkdir cuda_install_logs
+              ./setup.exe -s nvcc_10.1 cuobjdump_10.1 nvprune_10.1 cupti_10.1 cublas_10.1 cublas_dev_10.1 cudart_10.1 cufft_10.1 cufft_dev_10.1 curand_10.1 curand_dev_10.1 cusolver_10.1 cusolver_dev_10.1 cusparse_10.1 cusparse_dev_10.1 nvgraph_10.1 nvgraph_dev_10.1 npp_10.1 npp_dev_10.1 nvrtc_10.1 nvrtc_dev_10.1 nvml_dev_10.1 -loglevel:6 -log:"$(pwd -W)/cuda_install_logs"
+              if [[ "${VC_YEAR}" == "2017" ]]; then
+                cp -r CUDAVisualStudioIntegration/extras/visual_studio_integration/MSBuildExtensions/* "C:/Program Files (x86)/Microsoft Visual Studio/2017/BuildTools/Common7/IDE/VC/VCTargets/BuildCustomizations/"
+              else
+                cp -r CUDAVisualStudioIntegration/extras/visual_studio_integration/MSBuildExtensions/* "C:/Program Files (x86)/Microsoft Visual Studio/2019/Community/MSBuild/Microsoft/VC/v160/BuildCustomizations/"
+              fi
+              curl --retry 3 -kLO https://ossci-windows.s3.amazonaws.com/NvToolsExt.7z
+              7z x NvToolsExt.7z -oNvToolsExt
+              mkdir -p "C:/Program Files/NVIDIA Corporation/NvToolsExt"
+              cp -r NvToolsExt/* "C:/Program Files/NVIDIA Corporation/NvToolsExt/"
+              export NVTOOLSEXT_PATH="C:\\Program Files\\NVIDIA Corporation\\NvToolsExt\\"
+              cat cuda_install_logs/LOG.setup.exe.log
+              if ! ls "/c/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v10.1/bin/nvcc.exe"
+              then
+                echo "CUDA installation failed"
+                exit 1
+              fi
+              cd ..
+              rm -rf ./cuda_10.1.243_426.00_win10
+              rm -f ./cuda_10.1.243_426.00_win10.exe
             fi
-            curl --retry 3 -kLO https://ossci-windows.s3.amazonaws.com/NvToolsExt.7z
-            7z x NvToolsExt.7z -oNvToolsExt
-            mkdir -p "C:/Program Files/NVIDIA Corporation/NvToolsExt"
-            cp -r NvToolsExt/* "C:/Program Files/NVIDIA Corporation/NvToolsExt/"
-            export NVTOOLSEXT_PATH="C:\\Program Files\\NVIDIA Corporation\\NvToolsExt\\"
-            cat cuda_install_logs/LOG.setup.exe.log
-            if ! ls "/c/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v10.1/bin/nvcc.exe"
-            then
-              echo "CUDA installation failed"
-              exit 1
-            fi
-            cd ..
-            rm -rf ./cuda_10.1.243_426.00_win10
-            rm -f ./cuda_10.1.243_426.00_win10.exe
       - run:
           name: Install Cudnn
           command : |
-            cd c:/
-            curl --retry 3 -O https://ossci-windows.s3.amazonaws.com/cudnn-10.1-windows10-x64-v7.6.4.38.zip
-            7z x cudnn-10.1-windows10-x64-v7.6.4.38.zip -ocudnn
-            cp -r cudnn/cuda/* "C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v10.1/"
+            if [[ "${USE_CUDA}" == "1" ]]; then
+              cd c:/
+              curl --retry 3 -O https://ossci-windows.s3.amazonaws.com/cudnn-10.1-windows10-x64-v7.6.4.38.zip
+              7z x cudnn-10.1-windows10-x64-v7.6.4.38.zip -ocudnn
+              cp -r cudnn/cuda/* "C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v10.1/"
+            fi
       - run:
           name: Build
           no_output_timeout: "90m"
@@ -220,6 +210,12 @@ jobs:
   pytorch_windows_test:
     <<: *pytorch_windows_params
     parameters:
+      executor:
+        type: string
+        default: "windows-cpu-with-nvidia-cuda"
+      build_environment:
+        type: string
+        default: ""
       test_name:
         type: string
         default: ""
@@ -241,7 +237,7 @@ jobs:
       use_cuda:
         type: string
         default: ""
-    executor: windows-with-nvidia-gpu
+    executor: <<parameters.executor>>
     steps:
       - checkout
       - run:

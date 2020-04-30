@@ -7,8 +7,6 @@ import datetime
 
 from .runner import get_nn_runners
 
-PY3 = sys.version_info >= (3, 0)
-
 
 def run_rnn(name, rnn_creator, nloops=5,
             seqLength=100, numLayers=1, inputSize=512, hiddenSize=512,
@@ -60,9 +58,8 @@ def system(command):
                          stderr=subprocess.PIPE, shell=True)
     output, err = p.communicate()
     rc = p.returncode
-    if PY3:
-        output = output.decode("ascii")
-        err = err.decode("ascii")
+    output = output.decode("ascii")
+    err = err.decode("ascii")
     return rc, output, err
 
 
