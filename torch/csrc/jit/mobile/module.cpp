@@ -5,7 +5,7 @@
 #include <torch/csrc/jit/mobile/observer.h>
 #endif
 
-#include <ATen/core/record_function.h>
+#include <ATen/record_function.h>
 
 namespace torch {
 namespace jit {

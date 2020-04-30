@@ -1,5 +1,5 @@
 #pragma once
-#include <ATen/core/record_function.h>
+#include <ATen/record_function.h>
 #include <torch/csrc/utils/future.h>
 
 namespace torch {

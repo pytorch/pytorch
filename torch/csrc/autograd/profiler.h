@@ -18,7 +18,7 @@
 #include <sys/time.h> // for gettimeofday()
 #endif
 
-#include <ATen/core/record_function.h>
+#include <ATen/record_function.h>
 
 typedef struct CUevent_st* CUDAEventStub;
 
