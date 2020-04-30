@@ -882,11 +882,12 @@ def create_generic(top_env, declarations):
         # type: (THFormal, bool, bool) -> List[str]
         # Note: broadcast_dims can change type...
         # return the actuals that will be passed to the broadcast function.
-        # 1) in the common case, this is the broadcasted argument (e.g. "self") followed by the tensors
-        #    that it is broadcasted against (comma-separated) (e.g. "self, tensor1, tensor2").
-        # 2) in the broadcast_dims case, this is the broadcasted argument (e.g. "self") followed by the sizes
-        #    it is broadcasted to (as an initializer list), so e.g. the specification
-        #    "mat1.dim0,mat2.dim1" gets transformed to "self, {mat1.size(0),mat2.size(1)}"
+        # in the broadcast_dims case (the only currently supported case), this is
+        # the broadcasted argument (e.g. "self") followed by the sizes it is broadcasted
+        # to (as an initializer list), so e.g. the specification:
+        # "mat1.dim0,mat2.dim1"
+        # gets transformed to
+        # "self, {mat1.size(0),mat2.size(1)}"
         assert broadcast_dims
         broadcast_dims_spec = broadcast_arg['broadcast'].split()[1].split(':')[1].split(',')
         # generate size call for each dimension
