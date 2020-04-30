@@ -601,7 +601,7 @@ class QConvInt8 final {
 #ifdef C10_MOBILE
       // On mobile, we release the original weight by freeing the underlying storage.
       // After this calling unpack will throw an assertion.
-      pack_ptr.orig_weight.unsafeGetTensorImpl()->release_resources();
+      pack_data.orig_weight.unsafeGetTensorImpl()->release_resources();
 #endif
     }
     TORCH_INTERNAL_ASSERT(pack_w != nullptr, "Packed Weights are NULL");
