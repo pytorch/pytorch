@@ -223,6 +223,10 @@ class QLinearDynamicInt8 final {
 
     auto& pack_ptr =
         cpp_custom_type_hack::cast<PackedLinearWeightsQnnp>(packed_weight);
+    TORCH_CHECK(
+        pack_ptr.orig_weight.qscheme() == kPerTensorAffine,
+        "quantized::linear_dynamic (qnnpack) only supports "
+        "Per Tensor Quantization Scheme");
     auto packB = pack_ptr.w.get();
     // Adjust weight zero point, similar to weight data.
     auto kernel_zp = pack_ptr.orig_weight.q_zero_point() + 128;

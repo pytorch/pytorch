@@ -219,10 +219,6 @@ class QConvPackWeightInt8 final {
         "quantized::conv2d_prepack (qnnpack): Weights are expected to have 4 "
         "dimensions");
     TORCH_CHECK(
-        weight.qscheme() == kPerTensorAffine,
-        "quantized::conv2d_prepack (qnnpack): only supports Per Tensor "
-        "Quantization Scheme")
-    TORCH_CHECK(
         stride.size() == 2,
         "quantized::conv2d_prepack (qnnpack): 2D convolution only");
     TORCH_CHECK(

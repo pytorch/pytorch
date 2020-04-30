@@ -371,7 +371,6 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         if qengine == 'qnnpack':
             if IS_PPC or TEST_WITH_UBSAN:
                 return
-            use_channelwise = False
 
         in_channels = in_channels_per_group * groups
         out_channels = out_channels_per_group * groups

@@ -132,9 +132,6 @@ class QLinearPackWeightInt8 final {
     TORCH_CHECK(
         weight.dim() == 2,
         "quantized::linear_prepack (qnnpack): Weight tensor rank should be == 2");
-    TORCH_CHECK(
-        weight.qscheme() == kPerTensorAffine,
-        "quantized::linear_prepack (qnnpack) only supports Per Tensor Quantization Scheme")
 
     int64_t rows_w = weight.size(0);
     Tensor bias_fp32;
