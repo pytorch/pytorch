@@ -3,30 +3,9 @@ producer_name: "pytorch"
 producer_version: "1.5"
 graph {
   node {
-    output: "1"
-    name: "Constant_0"
-    op_type: "Constant"
-    attribute {
-      name: "value"
-      t {
-        data_type: 1
-        raw_data: "\000\000\000?"
-      }
-      type: TENSOR
-    }
-  }
-  node {
     input: "x"
-    input: "1"
-    output: "2"
-    output: "3"
-    name: "Dropout_1"
-    op_type: "Dropout"
-  }
-  node {
-    input: "2"
-    output: "4"
-    name: "ReduceMax_2"
+    output: "1"
+    name: "ReduceMax_0"
     op_type: "ReduceMax"
     attribute {
       name: "keepdims"
@@ -52,7 +31,7 @@ graph {
     }
   }
   output {
-    name: "4"
+    name: "1"
     type {
       tensor_type {
         elem_type: 1
