@@ -50,18 +50,16 @@ Tensor& _clamp_min_out_cuda(Tensor& result, const Tensor& self, Scalar min) {
 
 #define IMPLEMENT_UNARY_OP_PREQUEL(op, _th_op)                   \
   Tensor& _##op##__cuda(Tensor& self) {                          \
-    return legacy::cuda::##_th_op##_out(self, self);             \
+    return _th_op##_out(self, self);                             \
   }                                                              \
   Tensor& _##op##_out_cuda(Tensor& result, const Tensor& self) { \
-    return legacy::cuda::##_th_op##_out(result, self);           \
+    return _th_op##_out(result, self);                           \
   }
 
-
-IMPLEMENT_UNARY_OP_PREQUEL(atan, _th_atan)
-IMPLEMENT_UNARY_OP_PREQUEL(cos,  _th_cos)
-IMPLEMENT_UNARY_OP_PREQUEL(erf,  _th_erf)
-IMPLEMENT_UNARY_OP_PREQUEL(erfc, _th_erfc)
-IMPLEMENT_UNARY_OP_PREQUEL(exp,  _th_exp)
-IMPLEMENT_UNARY_OP_PREQUEL(tan,  _th_tan)
+IMPLEMENT_UNARY_OP_PREQUEL(atan, legacy::cuda::_th_atan)
+IMPLEMENT_UNARY_OP_PREQUEL(erf,  legacy::cuda::_th_erf)
+IMPLEMENT_UNARY_OP_PREQUEL(erfc, legacy::cuda::_th_erfc)
+IMPLEMENT_UNARY_OP_PREQUEL(exp,  legacy::cuda::_th_exp)
+IMPLEMENT_UNARY_OP_PREQUEL(tan,  legacy::cuda::_th_tan)
 
 }}
