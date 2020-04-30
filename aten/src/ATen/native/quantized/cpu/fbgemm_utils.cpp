@@ -321,9 +321,5 @@ torch::jit::class_<ConvPackedParamsBase<kSpatialDim>> register_conv_params() {
   return register_conv_params;
 }
 
-namespace {
-
 static auto conv2d_params = register_conv_params<2>();
 static auto conv3d_params = register_conv_params<3>();
-
-} // namespace
