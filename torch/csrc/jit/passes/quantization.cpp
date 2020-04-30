@@ -157,7 +157,6 @@ std::vector<std::string> _single_input_general_value_aten_funcs = {
     "avg_pool2d",
 };
 
-
 struct FuncArg {
   std::string func_name;
   int arg_index;
@@ -260,12 +259,14 @@ bool isSingleInputGeneralValueAtenFunction(Node* n) {
 
 bool isSingleInputGeneralCallFunction(Node* n) {
   static std::vector<std::string> _single_input_general_call_funcs;
-  std::copy(_single_input_general_shape_call_funcs.begin(),
-            _single_input_general_shape_call_funcs.end(),
-            std::back_inserter(_single_input_general_call_funcs));
-  std::copy(_single_input_general_value_call_funcs.begin(),
-            _single_input_general_value_call_funcs.end(),
-            std::back_inserter(_single_input_general_call_funcs));
+  std::copy(
+      _single_input_general_shape_call_funcs.begin(),
+      _single_input_general_shape_call_funcs.end(),
+      std::back_inserter(_single_input_general_call_funcs));
+  std::copy(
+      _single_input_general_value_call_funcs.begin(),
+      _single_input_general_value_call_funcs.end(),
+      std::back_inserter(_single_input_general_call_funcs));
   return isFunctionNode(
       n,
       /* call_funcs = */ _single_input_general_shape_call_funcs,
@@ -274,12 +275,14 @@ bool isSingleInputGeneralCallFunction(Node* n) {
 
 bool isSingleInputGeneralAtenFunction(Node* n) {
   static std::vector<std::string> _single_input_general_aten_funcs;
-  std::copy(_single_input_general_shape_aten_funcs.begin(),
-            _single_input_general_shape_aten_funcs.end(),
-            std::back_inserter(_single_input_general_aten_funcs));
-  std::copy(_single_input_general_value_aten_funcs.begin(),
-            _single_input_general_value_aten_funcs.end(),
-            std::back_inserter(_single_input_general_aten_funcs));
+  std::copy(
+      _single_input_general_shape_aten_funcs.begin(),
+      _single_input_general_shape_aten_funcs.end(),
+      std::back_inserter(_single_input_general_aten_funcs));
+  std::copy(
+      _single_input_general_value_aten_funcs.begin(),
+      _single_input_general_value_aten_funcs.end(),
+      std::back_inserter(_single_input_general_aten_funcs));
   return isFunctionNode(
       n,
       /* call_funcs = */ {},
@@ -293,7 +296,7 @@ bool isSingleInputGeneralAtenFunction(Node* n) {
 std::vector<Value*> getPassThroughInputs(Value* v) {
   Node* n = v->node();
   if (isSingleInputGeneralCallFunction(n)) {
-      return {n->input(1)};
+    return {n->input(1)};
   } else if (
       isSingleInputGeneralAtenFunction(n) ||
       (n->kind() == Symbol::aten("sort") && v->offset() == 0)) {
@@ -2678,7 +2681,8 @@ Node* insertQParam(
     NodeKind node_kind,
     const std::string param_name) {
   Node* qparam = graph->create(node_kind, {quantized_input});
-  qparam->output()->setDebugName(quantized_input->debugName() + "." + param_name);
+  qparam->output()->setDebugName(
+      quantized_input->debugName() + "." + param_name);
   graph->insertNode(qparam);
   return qparam;
 }
@@ -2717,21 +2721,37 @@ void quantizeGeneralOps(Block* block) {
           // for ops like average pool, we'll insert quant dequant after the op
           // We'll assume the tensor is a PerTensorAffine quantized Tensor for
           // now, and may generalize later if this becomes an issue
-          TORCH_INTERNAL_ASSERT(inputs.size() == 1, "Expecting single input for the aten function");
+          TORCH_INTERNAL_ASSERT(
+              inputs.size() == 1,
+              "Expecting single input for the aten function");
           // input of the dequantize node
           Value* quantized_input = inputs[0]->node()->input(0);
           // insert ops after the general op
           WithInsertPoint ins(n->next());
           // get quantization parameters from previous quantized op
-          Node* scale = insertQParam(graph, quantized_input, at::Symbol::aten("q_scale"), "q_scale");
-          Node* zero_point = insertQParam(graph, quantized_input, at::Symbol::aten("q_zero_point"), "q_zero_point");
-          Node* dtype = insertQParam(graph, quantized_input, prim::dtype, "dtype");
+          Node* scale = insertQParam(
+              graph, quantized_input, at::Symbol::aten("q_scale"), "q_scale");
+          Node* zero_point = insertQParam(
+              graph,
+              quantized_input,
+              at::Symbol::aten("q_zero_point"),
+              "q_zero_point");
+          Node* dtype =
+              insertQParam(graph, quantized_input, prim::dtype, "dtype");
           Value* original_output = n->output();
-          std::vector<Value*> quant_inputs = {original_output, scale->output(), zero_point->output(), dtype->output()};
+          std::vector<Value*> quant_inputs = {original_output,
+                                              scale->output(),
+                                              zero_point->output(),
+                                              dtype->output()};
           auto quant_kind = at::Symbol::aten("quantize_per_tensor");
-          Node* quant = insertQuant(graph, quant_inputs, quant_kind, original_output->debugName() + ".quant");
+          Node* quant = insertQuant(
+              graph,
+              quant_inputs,
+              quant_kind,
+              original_output->debugName() + ".quant");
           Value* quantized_output = quant->output();
-          // replace uses of original output of the general op with quantized output
+          // replace uses of original output of the general op with quantized
+          // output
           std::vector<Use> original_uses = original_output->uses();
           for (const auto& use : original_uses) {
             auto* user = use.user;
@@ -2740,7 +2760,8 @@ void quantizeGeneralOps(Block* block) {
             }
           }
           std::vector<Use> uses = quantized_output->uses();
-          insertDeQuantForAllUse(graph, quantized_output, original_output, uses);
+          insertDeQuantForAllUse(
+              graph, quantized_output, original_output, uses);
         } else {
           // Delete dequantize node, we have one dequantize
           // for each use of the value

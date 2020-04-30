@@ -407,7 +407,6 @@ graph(%a_quant, %b_scalar):
          %r = quantized::mul_scalar_relu_out(%a_quant, %b_scalar, %a_quant)
          return (%r) )";
 
-
   // ============= General Ops that doesn't require observation =============
   // aten::avg_pool2d
   std::string avg_pool2d = R"(
