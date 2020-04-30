@@ -781,17 +781,17 @@ void checkScopeCallbacks() {
   bool bad_scope = false;
   auto pushScopedCallback = [&](profiler::RecordScope scope, size_t& cnt) {
     profiler::addGlobalCallback(
-      profiler::RecordFunctionCallback(
-        [&bad_scope, &cnt, scope](const profiler::RecordFunction& fn) {
-          if (fn.scope() == scope) {
-            ++cnt;
-          } else {
-            bad_scope = true;
-          }
-          return true;
-        },
-        [](const profiler::RecordFunction&) {})
-      .scopes({scope}));
+        profiler::RecordFunctionCallback(
+            [&bad_scope, &cnt, scope](const profiler::RecordFunction& fn) {
+              if (fn.scope() == scope) {
+                ++cnt;
+              } else {
+                bad_scope = true;
+              }
+              return true;
+            },
+            [](const profiler::RecordFunction&) {})
+            .scopes({scope}));
   };
 
   size_t fun_cnt = 0;
@@ -829,27 +829,25 @@ void testRecordFunction() {
   TracedTestInputs traced_inputs;
   std::unordered_set<std::string> ts_names;
   addGlobalCallback(
-    RecordFunctionCallback(
-      [&](const RecordFunction& fn) {
-        if (fn.scope() == RecordScope::FUNCTION) {
-          auto inputs = fn.inputs();
-          std::vector<std::vector<int64_t>> sizes;
-          for (const auto& input : inputs) {
-            if (input.isTensor()) {
-              sizes.push_back(input.toTensor().sizes().vec());
-            } else if (input.isScalar()) {
-              sizes.push_back(std::vector<int64_t>());
+      RecordFunctionCallback(
+          [&](const RecordFunction& fn) {
+            if (fn.scope() == RecordScope::FUNCTION) {
+              auto inputs = fn.inputs();
+              std::vector<std::vector<int64_t>> sizes;
+              for (const auto& input : inputs) {
+                if (input.isTensor()) {
+                  sizes.push_back(input.toTensor().sizes().vec());
+                } else if (input.isScalar()) {
+                  sizes.push_back(std::vector<int64_t>());
+                }
+              }
+              traced_inputs.push_back(std::make_tuple(fn.name().str(), sizes));
+            } else if (fn.scope() == RecordScope::TORCHSCRIPT_FUNCTION) {
+              ts_names.insert(fn.name().str());
             }
-          }
-          traced_inputs.push_back(std::make_tuple(fn.name().str(), sizes));
-        } else if (
-            fn.scope() ==
-            RecordScope::TORCHSCRIPT_FUNCTION) {
-          ts_names.insert(fn.name().str());
-        }
-      },
-      [](const RecordFunction&) {})
-    .needsInputs(true));
+          },
+          [](const RecordFunction&) {})
+          .needsInputs(true));
 
   TracedTestInputs eager_inputs, jit_inputs;
   {
@@ -881,21 +879,19 @@ void testRecordFunction() {
   // test sampled callbacks
   int sampled_cb_ctr = 0;
   auto setup_sampled_callback = [&sampled_cb_ctr](double sampling_prob) {
-    return addGlobalCallback(
-      RecordFunctionCallback(
-        [&sampled_cb_ctr](const RecordFunction& fn) {
-          if (std::string(fn.name().str()) == "test") {
-            ++sampled_cb_ctr;
-          }
-          return true;
-        },
-        [](const RecordFunction&) {})
-      .samplingProb(sampling_prob));
+    return addGlobalCallback(RecordFunctionCallback(
+                                 [&sampled_cb_ctr](const RecordFunction& fn) {
+                                   if (std::string(fn.name().str()) == "test") {
+                                     ++sampled_cb_ctr;
+                                   }
+                                   return true;
+                                 },
+                                 [](const RecordFunction&) {})
+                                 .samplingProb(sampling_prob));
   };
 
   int non_sampled_cb_ctr = 0;
-  addGlobalCallback(
-    RecordFunctionCallback(
+  addGlobalCallback(RecordFunctionCallback(
       [&non_sampled_cb_ctr](const RecordFunction& fn) {
         if (std::string(fn.name().str()) == "test") {
           ++non_sampled_cb_ctr;
@@ -941,8 +937,7 @@ void testRecordFunction() {
   // check record function guard
   std::vector<std::string> fn_names;
   std::mutex mtx;
-  addGlobalCallback(
-    RecordFunctionCallback(
+  addGlobalCallback(RecordFunctionCallback(
       [&fn_names, &mtx](const RecordFunction& fn) {
         std::lock_guard<std::mutex> lock(mtx);
         fn_names.push_back(fn.name().str());
@@ -971,12 +966,9 @@ void testRecordFunction() {
   // test add/remove
   std::vector<size_t> ids;
   auto add_remove_test_add_cb = [&ids](size_t id) {
-      return addGlobalCallback(
-        RecordFunctionCallback(
-          [&ids, id](const RecordFunction& fn) {
-            ids.push_back(id);
-          },
-          [](const RecordFunction&) {}));
+    return addGlobalCallback(RecordFunctionCallback(
+        [&ids, id](const RecordFunction& fn) { ids.push_back(id); },
+        [](const RecordFunction&) {}));
   };
 
   auto h1 = add_remove_test_add_cb(1);
@@ -1012,11 +1004,8 @@ void testRecordFunction() {
   // thread local / global callbacks
 
   ids.clear();
-  addGlobalCallback(
-    RecordFunctionCallback(
-      [&ids](const RecordFunction& fn) {
-        ids.push_back(1);
-      },
+  addGlobalCallback(RecordFunctionCallback(
+      [&ids](const RecordFunction& fn) { ids.push_back(1); },
       [](const RecordFunction&) {}));
 
   { RECORD_USER_SCOPE("test"); }
@@ -1026,12 +1015,10 @@ void testRecordFunction() {
   ids.clear();
 
   auto th = std::thread([&ids]() {
-    c10::impl::IncludeDispatchKeyGuard observer_guard(c10::DispatchKey::Profiler);
-    addThreadLocalCallback(
-      RecordFunctionCallback(
-        [&ids](const RecordFunction& fn) {
-          ids.push_back(2);
-        },
+    c10::impl::IncludeDispatchKeyGuard observer_guard(
+        c10::DispatchKey::Profiler);
+    addThreadLocalCallback(RecordFunctionCallback(
+        [&ids](const RecordFunction& fn) { ids.push_back(2); },
         [](const RecordFunction&) {}));
 
     { RECORD_USER_SCOPE("test_thread"); }
@@ -1053,14 +1040,12 @@ void testRecordFunction() {
   bool ran = false;
   bool should_run = false;
   addGlobalCallback(
-    RecordFunctionCallback(
-      [&ran](const RecordFunction& fn) {
-        ran = true;
-      },
-      [](const RecordFunction&) {})
-    .setShouldRun([&should_run](const RecordFunctionCallback&) {
-      return should_run;
-    }));
+      RecordFunctionCallback(
+          [&ran](const RecordFunction& fn) { ran = true; },
+          [](const RecordFunction&) {})
+          .setShouldRun([&should_run](const RecordFunctionCallback&) {
+            return should_run;
+          }));
 
   { RECORD_USER_SCOPE("test"); }
 
@@ -1131,8 +1116,7 @@ void testThreadLocalDebugInfo() {
   TORCH_CHECK(
       at::ThreadLocalDebugInfo::get(at::DebugInfoKind::TEST_INFO) == nullptr);
   done = false;
-  auto handle = addGlobalCallback(
-    RecordFunctionCallback(
+  auto handle = addGlobalCallback(RecordFunctionCallback(
       [&done](const RecordFunction&) {
         checkDebugInfo(at::DebugInfoKind::TEST_INFO, 42);
         done = true;
