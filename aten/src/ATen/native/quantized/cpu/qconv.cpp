@@ -6,14 +6,9 @@
 #include <ATen/Parallel.h>
 #include <ATen/SmallVector.h>
 #include <torch/library.h>
-#include <ATen/native/quantized/cpu/conv_packed_params.h>
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
 #include <ATen/native/quantized/cpu/qnnpack_utils.h>
 #include <caffe2/utils/threadpool/ThreadPoolMobile.h>
-#include <torch/custom_class.h>
-
-template <int kSpatialDim>
-torch::jit::class_<ConvPackedParamsBase<kSpatialDim>> register_conv_params();
 
 template <int kSpatialDim = 2>
 bool ConvDimChecks(

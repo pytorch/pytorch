@@ -3,15 +3,10 @@
 
 #include <ATen/ATen.h>
 #include <torch/library.h>
-#include <ATen/native/quantized/cpu/conv_packed_params.h>
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
 #include <ATen/native/quantized/cpu/init_qnnpack.h>
 #include <ATen/native/quantized/cpu/qnnpack_utils.h>
 #include <ATen/quantized/Quantizer.h>
-#include <torch/custom_class.h>
-
-template <int kSpatialDim>
-torch::jit::class_<ConvPackedParamsBase<kSpatialDim>> register_conv_params();
 
 #ifdef USE_FBGEMM
 template <int kSpatialDim>

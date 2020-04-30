@@ -146,7 +146,7 @@ inline void convert_int8_uint8(
 }
 
 template <int kSpatialDim = 2>
-torch::jit::class_<ConvPackedParamsBase<kSpatialDim>> register_conv_params() {
+CAFFE2_API torch::jit::class_<ConvPackedParamsBase<kSpatialDim>> register_conv_params() {
   using SerializationType = std::tuple<
       at::Tensor,
       c10::optional<at::Tensor>,
