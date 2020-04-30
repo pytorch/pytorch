@@ -1584,6 +1584,20 @@ class TestQuantizeScriptPTSQOps(JitTestCase):
                        .check_not("quantized::relu") \
                        .run(m.graph)
 
+    def test_hardswish(self):
+        data = [(torch.rand((1, 3, 10, 10), dtype=torch.float), torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
+        m = self._test_op_impl(torch.nn.Hardswish(), data, "quantized::hardswish")
+        FileCheck().check_not("aten::hardswish") \
+                   .run(m.graph)
+
+    def test_layer_norm(self):
+        data = [(torch.rand((1, 3, 10, 10), dtype=torch.float), torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
+        layer_norm = torch.nn.LayerNorm([3, 10, 10])
+        m = self._test_op_impl(layer_norm, data, "quantized::layer_norm")
+        FileCheck().check_not("aten::layer_norm") \
+                   .run(m.graph)
+
+
     def test_swap_dequantize_all_ops(self):
         """ A test that checks dequantize will be swapped for
         all supported general ops without actually checking for execution of these ops
@@ -1604,6 +1618,9 @@ class TestQuantizeScriptPTSQOps(JitTestCase):
                 self.conv = torch.nn.Conv2d(3, 3, 3)
                 self.sigmoid = torch.nn.Sigmoid()
                 self.tanh = torch.nn.Tanh()
+                self.hardtanh = torch.nn.Hardtanh()
+                self.elu = torch.nn.ELU()
+                self.hardsigmoid = torch.nn.Hardsigmoid()
 
             def forward(self, x):
                 x = self.conv(x)
@@ -1650,6 +1667,12 @@ class TestQuantizeScriptPTSQOps(JitTestCase):
                 x = self.tanh(x)
                 x = F.tanh(x)
                 x = torch.tanh(x)
+                x = self.hardtanh(x)
+                x = F.hardtanh(x)
+                x = self.elu(x)
+                x = F.elu(x)
+                x = self.hardsigmoid(x)
+                x = F.hardsigmoid(x)
                 x = self.conv(x)
                 return x
 
