@@ -22,6 +22,38 @@ namespace rpc {
 
 namespace {
 
+py::object toPyObjInternal(RpcCommandBase& rpc, MessageType messageType) {
+  switch (messageType) {
+    case MessageType::SCRIPT_RET: {
+      auto& ret = static_cast<ScriptResp&>(rpc);
+      Stack stack;
+      stack.push_back(ret.value());
+      {
+        pybind11::gil_scoped_acquire ag;
+        // The createPyObjectForStack does not acquire GIL, but creating a new
+        // py::object requires GIL.
+        return torch::jit::createPyObjectForStack(std::move(stack));
+      }
+    }
+    case MessageType::PYTHON_RET: {
+      // TODO: Try to avoid a copy here.
+      auto& resp = static_cast<PythonResp&>(rpc);
+      auto& pythonRpcHandler = PythonRpcHandler::getInstance();
+      py::object ret = pythonRpcHandler.deserialize(resp.serializedPyObj());
+      return ret;
+    }
+    default: {
+      TORCH_CHECK(false, "Unrecognized response message type ", messageType);
+    }
+  }
+}
+
+py::object toPyObj(const Message& message) {
+  MessageType msgType = message.type();
+  auto response = deserializeResponse(message, msgType);
+  return toPyObjInternal(*response, msgType);
+}
+
 std::shared_ptr<Operator> matchBuiltinOp(
     const std::string& opName,
     const py::args& args,
@@ -77,44 +109,55 @@ std::shared_ptr<FutureMessage> sendPythonRemoteCall(
       true /*forceGradRecording*/);
 }
 
+void DeleteFutureIValue(FutureIValue* fv) {
+  if (fv->constValue().isPyObject()) {
+    pybind11::gil_scoped_acquire ag;
+    delete fv;
+  } else {
+    delete fv;
+  }
+}
+
 } // namespace
 
 using namespace torch::distributed::autograd;
 
-py::object toPyObjInternal(RpcCommandBase& rpc, MessageType messageType) {
-  switch (messageType) {
-    case MessageType::SCRIPT_RET: {
-      auto& ret = static_cast<ScriptResp&>(rpc);
-      Stack stack;
-      stack.push_back(ret.value());
-      {
-        pybind11::gil_scoped_acquire ag;
-        // The createPyObjectForStack does not acquire GIL, but creating a new
-        // py::object requires GIL.
-        return torch::jit::createPyObjectForStack(std::move(stack));
+std::shared_ptr<FutureIValue> toFutureIValue(
+    const std::shared_ptr<FutureMessage>& fm,
+    bool hasValue) {
+  if (hasValue) {
+    // NB: The custom deleter is necessary because the FutureIValue object
+    // holds a py::object and it would require GIL to delete.
+    std::shared_ptr<FutureIValue> fv(new FutureIValue(), DeleteFutureIValue);
+
+    fm->addCallback([fv](const FutureMessage& fm) {
+      // Don't need to acquire GIL here, as toPyObj acquires GIL
+      // when creating the py::object
+      if (fm.hasError()) {
+        fv->setError(*fm.error());
+      } else {
+        fv->markCompleted(
+            jit::toIValue(toPyObj(fm.constValue()), PyObjectType::get()));
       }
-    }
-    case MessageType::PYTHON_RET: {
-      // TODO: Try to avoid a copy here.
-      auto& resp = static_cast<PythonResp&>(rpc);
-      auto& pythonRpcHandler = PythonRpcHandler::getInstance();
-      py::object ret = pythonRpcHandler.deserialize(resp.serializedPyObj());
-      pythonRpcHandler.handleException(ret);
-      return ret;
-    }
-    default: {
-      TORCH_CHECK(false, "Unrecognized response message type ", messageType);
-    }
+    });
+
+    return fv;
+  } else {
+    auto fv = std::make_shared<FutureIValue>();
+
+    fm->addCallback([fv](const FutureMessage& fm) {
+      if (fm.hasError()) {
+        fv->setError(*fm.error());
+      } else {
+        fv->markCompleted(IValue());
+      }
+    });
+
+    return fv;
   }
 }
 
-py::object toPyObj(const Message& message) {
-  MessageType msgType = message.type();
-  auto response = deserializeResponse(message, msgType);
-  return toPyObjInternal(*response, msgType);
-}
-
-std::shared_ptr<FutureMessage> pyRpcBuiltin(
+std::shared_ptr<FutureIValue> pyRpcBuiltin(
     const WorkerInfo& dst,
     const std::string& opName,
     const py::args& args,
@@ -126,12 +169,12 @@ std::shared_ptr<FutureMessage> pyRpcBuiltin(
   py::gil_scoped_release release;
   auto scriptCall = std::make_unique<ScriptCall>(op, std::move(stack));
   auto agent = RpcAgent::getCurrentRpcAgent();
-  return sendMessageWithAutograd(
+  return toFutureIValue(sendMessageWithAutograd(
       *agent,
       dst,
       std::move(*scriptCall).toMessage(),
       false,
-      rpcTimeoutSeconds);
+      rpcTimeoutSeconds));
 }
 
 PyRRef pyRemoteBuiltin(
@@ -183,7 +226,7 @@ PyRRef pyRemoteBuiltin(
   }
 }
 
-std::shared_ptr<FutureMessage> pyRpcPythonUdf(
+std::shared_ptr<FutureIValue> pyRpcPythonUdf(
     const WorkerInfo& dst,
     std::string& pickledPythonUDF,
     std::vector<torch::Tensor>& tensors,
@@ -193,12 +236,12 @@ std::shared_ptr<FutureMessage> pyRpcPythonUdf(
   auto pythonCall = std::make_unique<PythonCall>(std::move(serializedPyObj));
 
   auto agent = RpcAgent::getCurrentRpcAgent();
-  return sendMessageWithAutograd(
+  return toFutureIValue(sendMessageWithAutograd(
       *agent,
       dst,
       std::move(*pythonCall).toMessage(),
       true /*forceGradRecording*/,
-      rpcTimeoutSeconds);
+      rpcTimeoutSeconds));
 }
 
 PyRRef pyRemotePythonUdf(

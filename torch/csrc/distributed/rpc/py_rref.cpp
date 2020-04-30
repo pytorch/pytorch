@@ -13,6 +13,7 @@ namespace rpc {
 /////////////////////  Pickle/Unpickle Helplers ////////////////////////////
 
 namespace {
+
 py::tuple toPyTuple(const RRefForkData& rrefForkData) {
   // add GIL as it is contructing a py::object
   pybind11::gil_scoped_acquire ag;
@@ -112,8 +113,11 @@ PyRRef::PyRRef(const py::object& value, const py::object& type_hint)
         return rref;
       }()) {}
 
-const std::shared_ptr<FutureMessage> PyRRef::getFuture() const {
-  return rref_->getOwnerCreationFuture();
+const std::shared_ptr<FutureIValue> PyRRef::getFuture() const {
+  // Marking hasValue to false, as this Future is only used for signaling
+  // profiler to update profiling result and the profiler does not retrieve
+  // any value from it.
+  return toFutureIValue(rref_->getOwnerCreationFuture(), false /* hasValue */);
 }
 
 bool PyRRef::isOwner() const {
