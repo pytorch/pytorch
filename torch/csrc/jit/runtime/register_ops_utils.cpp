@@ -1,4 +1,4 @@
-#include "register_ops_utils.h"
+#include <torch/csrc/jit/runtime/register_ops_utils.h>
 
 namespace torch {
 namespace jit {
@@ -142,6 +142,7 @@ IValue tensorToListRecursive(
     int64_t cur_dim,
     int64_t num_tensor_dims,
     TypePtr ty,
+    at::ScalarType scalar_ty,
     at::IntArrayRef sizes,
     at::IntArrayRef strides,
     size_t element_size) {
@@ -155,7 +156,12 @@ IValue tensorToListRecursive(
       int64_t scalar = *(int64_t*)data;
       return IValue(scalar);
     } else if (ty == FloatType::get()) {
-      double scalar = *(double*)data;
+      TORCH_INTERNAL_ASSERT(
+          scalar_ty == at::ScalarType::Float ||
+              scalar_ty == at::ScalarType::Double,
+          "Unexpected scalar type for Tensor");
+      double scalar =
+          scalar_ty == at::ScalarType::Float ? *(float*)data : *(double*)data;
       return IValue(scalar);
     } else if (ty == BoolType::get()) {
       bool scalar = *(bool*)data;
@@ -178,7 +184,14 @@ IValue tensorToListRecursive(
   // recursively on each slice of the tensor in the current dimension.
   for (int64_t i = 0, e = sizes[cur_dim]; i < e; ++i) {
     auto inner_result = tensorToListRecursive(
-        data, cur_dim + 1, num_tensor_dims, ty, sizes, strides, element_size);
+        data,
+        cur_dim + 1,
+        num_tensor_dims,
+        ty,
+        scalar_ty,
+        sizes,
+        strides,
+        element_size);
 
     if (inner_result.isList()) {
       result.emplace_back(inner_result.toList());

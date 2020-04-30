@@ -33,6 +33,11 @@ using namespace torch::distributed::autograd;
 
 namespace {
 
+py::object toPyObj(IValue value) {
+  pybind11::gil_scoped_acquire ag;
+  return torch::jit::toPyObject(std::move(value));
+}
+
 std::unique_ptr<RpcCommandBase> deserializePythonRpcCommandReference(
     RpcCommandBase& rpc,
     const MessageType& messageType) {
@@ -312,15 +317,26 @@ void RequestCallbackImpl::processRpc(
     case MessageType::SCRIPT_RREF_FETCH_CALL: {
       auto& srf = static_cast<ScriptRRefFetchCall&>(rpc);
       auto& ctx = RRefContext::getInstance();
-      c10::intrusive_ptr<OwnerRRef> rref = ctx.getOwnerRRef(srf.rrefId());
-      if (rref->hasValue()) { // optional fast-path
-        markComplete(ScriptRRefFetchRet({rref->getValue()}).toMessage());
-        return;
-      } else {
+
+      auto futureOwner = ctx.getOwnerRRef(srf.rrefId());
+
+      if (futureOwner->completed()) { // optional fast-path
+        // the OwnerRRef has been created
+        const auto& rref = futureOwner->constValue();
+        if (rref->hasValue()) {
+          markComplete(ScriptRRefFetchRet({rref->getValue()}).toMessage());
+          return;
+        }
+      }
+
+      futureOwner->addCallback([responseFuture, messageId, futureOwner]() {
+        const auto& rref = futureOwner->constValue();
         auto whenValueSet = rref->getFuture();
-        // Our response is satisfied when the rpcs come back.
+
+        // Our response is satisfied when the rpc.remote() request
+        // finishes executing on the owner.
         whenValueSet->addCallback([responseFuture, messageId, rref](
-                                      const FutureMessage& whenValueSet) {
+                                      const FutureIValue& whenValueSet) {
           if (whenValueSet.hasError()) {
             responseFuture->setError(*whenValueSet.error());
             return;
@@ -333,53 +349,53 @@ void RequestCallbackImpl::processRpc(
             responseFuture->setError(e.what());
           }
         });
-      }
+      });
+
       return;
     }
     case MessageType::PYTHON_RREF_FETCH_CALL: {
       auto& prf = static_cast<PythonRRefFetchCall&>(rpc);
       auto& ctx = RRefContext::getInstance();
-      c10::intrusive_ptr<OwnerRRef> rref = ctx.getOwnerRRef(prf.rrefId());
-      if (rref->hasValue()) { // optional fast-path
-        auto value = rref->getValue();
-        py::object pyValue;
-        {
-          pybind11::gil_scoped_acquire ag;
-          pyValue = torch::jit::toPyObject(std::move(value));
+
+      auto futureOwner = ctx.getOwnerRRef(prf.rrefId());
+
+      if (futureOwner->completed()) { // optional fast-path
+        // the OwnerRRef has been created
+        const auto& rref = futureOwner->constValue();
+        if (rref->hasValue()) {
+          SerializedPyObj result = PythonRpcHandler::getInstance().serialize(
+              toPyObj(rref->getValue()));
+          markComplete(
+              PythonRRefFetchRet(std::move(result).toIValues()).toMessage());
+          return;
         }
-        SerializedPyObj result =
-            PythonRpcHandler::getInstance().serialize(pyValue);
-        markComplete(
-            PythonRRefFetchRet(std::move(result).toIValues()).toMessage());
-        return;
       }
 
-      auto whenValueSet = rref->getFuture();
+      futureOwner->addCallback([responseFuture, messageId, futureOwner]() {
+        const auto& rref = futureOwner->constValue();
+        auto whenValueSet = rref->getFuture();
 
-      // Our response is satisfied when the rpcs come back.
-      whenValueSet->addCallback(
-          [responseFuture, messageId, rref](const FutureMessage& whenValueSet) {
-            if (whenValueSet.hasError()) {
-              responseFuture->setError(*whenValueSet.error());
-              return;
-            }
-            try {
-              IValue value = rref->getValue();
-              py::object pyValue;
-              {
-                pybind11::gil_scoped_acquire ag;
-                pyValue = torch::jit::toPyObject(std::move(value));
-              }
-              SerializedPyObj result =
-                  PythonRpcHandler::getInstance().serialize(pyValue);
-              Message m =
-                  PythonRRefFetchRet(std::move(result).toIValues()).toMessage();
-              m.setId(messageId);
-              responseFuture->markCompleted(std::move(m));
-            } catch (const std::exception& e) {
-              responseFuture->setError(e.what());
-            }
-          });
+        // Our response is satisfied when the the rpc.remote() request
+        // finishes executing on the owner.
+        whenValueSet->addCallback([responseFuture, messageId, rref](
+                                      const FutureIValue& whenValueSet) {
+          if (whenValueSet.hasError()) {
+            responseFuture->setError(*whenValueSet.error());
+            return;
+          }
+          try {
+            SerializedPyObj result = PythonRpcHandler::getInstance().serialize(
+                toPyObj(rref->getValue()));
+            Message m =
+                PythonRRefFetchRet(std::move(result).toIValues()).toMessage();
+            m.setId(messageId);
+            responseFuture->markCompleted(std::move(m));
+          } catch (const std::exception& e) {
+            responseFuture->setError(e.what());
+          }
+        });
+      });
+
       return;
     }
     case MessageType::RREF_USER_DELETE: {
