@@ -132,6 +132,11 @@ class QConvUnpackWeightsInt8 final {
 #ifdef USE_PYTORCH_QNNPACK
   static std::tuple<at::Tensor, c10::optional<Tensor>> qnnpack_conv_unpack(
       at::Tensor packed_weight) {
+#ifdef C10_MOBILE
+     TORCH_CHECK(
+        false,
+        "quantized::conv2d_unpack is currently not supported on Mobile");
+#endif
     auto& pack_ptr =
         cpp_custom_type_hack::cast<PackedConvWeightsQnnp>(packed_weight);
     return std::tuple<at::Tensor, c10::optional<Tensor>>(

@@ -274,6 +274,11 @@ class QLinearDynamicInt8 final {
           (uint8_t*)qnnp_w_data,
           nullptr);
       packB = pack_ptr.w.get();
+#ifdef C10_MOBILE
+      // On mobile, we release the original weight by freeing the underlying storage.
+      // After this calling unpack will throw an assertion.
+      pack_ptr.orig_weight.unsafeGetTensorImpl()->release_resources();
+#endif
     }
 
     // Quantize input

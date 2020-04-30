@@ -598,6 +598,11 @@ class QConvInt8 final {
           reinterpret_cast<uint8_t*>(qnnp_w_data),
           reinterpret_cast<int32_t*>(bias.data_ptr<c10::qint32>()));
       pack_w = pack_data.w.get();
+#ifdef C10_MOBILE
+      // On mobile, we release the original weight by freeing the underlying storage.
+      // After this calling unpack will throw an assertion.
+      pack_data.orig_weight.unsafeGetTensorImpl()->release_resources();
+#endif
     }
     TORCH_INTERNAL_ASSERT(pack_w != nullptr, "Packed Weights are NULL");
     const auto output_shape = MakeConvOutputShape<kSpatialDim>(
