@@ -1704,7 +1704,6 @@ class TestDynamicQuantizedLinear(TestCase):
         if qengine == 'qnnpack':
             if IS_PPC or TEST_WITH_ASAN or TEST_WITH_UBSAN or IS_MACOS:
                 return
-            use_channelwise = False
             use_relu = False
 
         with override_quantized_engine(qengine):
