@@ -81,6 +81,7 @@ set CC=sccache-clang-cl
 set CXX=sccache-clang-cl
 set LD=lld-link
 set CMAKE_NINJA_CMCLDEPS_RC=0
+set REL_WITH_DEB_INFO=1
 
 set CMAKE_GENERATOR=Ninja
 
