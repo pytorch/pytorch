@@ -246,7 +246,7 @@ c10::intrusive_ptr<xnnpack::Conv2dOpContext>
           output_max);
 }
 
-Tensor Conv2dClampRun::operator()(
+Tensor conv2d_clamp_run(
     const Tensor& input,
     const c10::intrusive_ptr<xnnpack::Conv2dOpContext>& op_context) {
   return op_context->run(input);

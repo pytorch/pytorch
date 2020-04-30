@@ -231,7 +231,7 @@ struct alignas(sizeof(T) * 2) complex_common {
 
 #if defined(__CUDACC__) || defined(__HIPCC__)
   template<typename U>
-  explicit operator thrust::complex<U>() const {
+  C10_HOST_DEVICE explicit operator thrust::complex<U>() const {
     return thrust::complex<U>(thrust::complex<T>(real(), imag()));
   }
 #endif
@@ -434,7 +434,15 @@ constexpr T imag(const c10::complex<T>& z) {
 
 template<typename T>
 C10_HOST_DEVICE T abs(const c10::complex<T>& z) {
-  return std::hypot(std::real(z), std::imag(z));
+  // Algorithm reference:
+  //   https://www.johndcook.com/blog/2010/06/02/whats-so-hard-about-finding-a-hypotenuse/
+  //   https://en.wikipedia.org/wiki/Hypot#Implementation
+  auto r = std::abs(std::real(z));
+  auto i = std::abs(std::imag(z));
+  auto max = r > i ? r : i;
+  auto min = r > i ? i : r;
+  auto rr = min / max;
+  return max * std::sqrt(1 + rr * rr);
 }
 
 template<typename T>

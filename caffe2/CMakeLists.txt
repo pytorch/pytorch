@@ -52,13 +52,18 @@ endif()
 # Note: the folders that are being commented out have not been properly
 # addressed yet.
 
-if(NOT MSVC)
+# For pthreadpool_new_if_impl. TODO: Remove when threadpools are unitied.
+if(NOT MSVC AND USE_XNNPACK)
   if(NOT TARGET fxdiv)
     set(FXDIV_BUILD_TESTS OFF CACHE BOOL "")
     set(FXDIV_BUILD_BENCHMARKS OFF CACHE BOOL "")
     add_subdirectory(
       "${FXDIV_SOURCE_DIR}"
       "${CMAKE_BINARY_DIR}/FXdiv")
+  endif()
+  if(NOT (INTERN_BUILD_MOBILE AND NOT BUILD_CAFFE2_MOBILE))
+    set_source_files_properties(
+        utils/threadpool/pthreadpool_new_if_impl.c PROPERTIES COMPILE_FLAGS -fno-openmp)
   endif()
 endif()
 
@@ -517,6 +522,10 @@ endif()
 
 
 add_library(torch_cpu ${Caffe2_CPU_SRCS})
+if(HAVE_SOVERSION)
+  set_target_properties(torch_cpu PROPERTIES
+      VERSION ${TORCH_VERSION} SOVERSION ${TORCH_SOVERSION})
+endif()
 torch_compile_options(torch_cpu)  # see cmake/public/utils.cmake
 
 if(USE_LLVM AND LLVM_FOUND)
@@ -541,6 +550,10 @@ file(WRITE ${DUMMY_EMPTY_FILE} ${DUMMY_FILE_CONTENT})
 # Wrapper library for people who link against torch and expect both CPU and CUDA support
 # Contains "torch_cpu" and "torch_cuda"
 add_library(torch ${DUMMY_EMPTY_FILE})
+if(HAVE_SOVERSION)
+  set_target_properties(torch PROPERTIES
+      VERSION ${TORCH_VERSION} SOVERSION ${TORCH_SOVERSION})
+endif()
 
 if(USE_ROCM)
   filter_list(__caffe2_hip_srcs_cpp Caffe2_HIP_SRCS "\\.(cu|hip)$")
@@ -1023,6 +1036,10 @@ endif()
 # this we have to preload those libs in a global namespace.
 if(BUILD_SHARED_LIBS)
   add_library(torch_global_deps SHARED ${TORCH_SRC_DIR}/csrc/empty.c)
+  if(HAVE_SOVERSION)
+    set_target_properties(torch_global_deps PROPERTIES
+        VERSION ${TORCH_VERSION} SOVERSION ${TORCH_SOVERSION})
+  endif()
   set_target_properties(torch_global_deps PROPERTIES LINKER_LANGUAGE C)
   if(USE_MPI)
       target_link_libraries(torch_global_deps ${MPI_CXX_LIBRARIES})

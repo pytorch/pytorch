@@ -15,7 +15,7 @@ from hypothesis import strategies as st
 import torch.testing._internal.hypothesis_utils as hu
 hu.assert_deadline_disabled()
 
-from torch.testing._internal.common_utils import TEST_WITH_UBSAN, TestCase, IS_PPC, IS_MACOS
+from torch.testing._internal.common_utils import TEST_WITH_ASAN, TEST_WITH_UBSAN, TestCase, IS_PPC, IS_MACOS
 from torch.testing._internal.common_quantized import _quantize, _dequantize, _calculate_dynamic_qparams, \
     override_quantized_engine
 
@@ -1650,7 +1650,7 @@ class TestDynamicQuantizedLinear(TestCase):
         if qengine not in torch.backends.quantized.supported_engines:
             return
         if qengine == 'qnnpack':
-            if IS_PPC or TEST_WITH_UBSAN or IS_MACOS:
+            if IS_PPC or TEST_WITH_ASAN or TEST_WITH_UBSAN or IS_MACOS:
                 return
             use_channelwise = False
             use_relu = False

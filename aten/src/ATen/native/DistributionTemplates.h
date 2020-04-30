@@ -288,6 +288,36 @@ at::Tensor& uniform_impl_(at::Tensor& self, double from, double to, c10::optiona
   return self;
 }
 
+// ================================================== LogNormal =======================================================
+
+template<template<typename> class log_normal_kernel, typename RNG>
+at::Tensor& log_normal_impl_(at::Tensor& self, double mean, double std, c10::optional<Generator> gen) {
+  TORCH_CHECK(std > 0.0, "log_normal_ expects std > 0.0, but found std=", std);
+  auto iter = TensorIterator::nullary_op(self);
+  log_normal_kernel<RNG>()(iter, mean, std, gen);
+  return self;
+}
+
+// =================================================== Geometric ======================================================
+
+template<template<typename> class geometric_kernel, typename RNG>
+Tensor& geometric_impl_(Tensor& self, double p, c10::optional<Generator> gen) {
+  TORCH_CHECK(0 < p && p < 1, "geometric_ expects p to be in (0, 1), but got p=", p);
+  auto iter = TensorIterator::nullary_op(self);
+  geometric_kernel<RNG>()(iter, p, gen);
+  return self;
+}
+
+// ================================================== Exponential =====================================================
+
+template<template<typename> class exponential_kernel, typename RNG>
+Tensor& exponential_impl_(Tensor& self, double lambda, c10::optional<Generator> gen) {
+  TORCH_CHECK(lambda >= 0.0, "exponential_ expects lambda >= 0.0, but found lambda=", lambda);
+  auto iter = TensorIterator::nullary_op(self);
+  exponential_kernel<RNG>()(iter, lambda, gen);
+  return self;
+}
+
 #undef CHECK_OUT_OF_BOUNDS_AND_SHOW_WARNING
 
 }}}
