@@ -1,4 +1,4 @@
-import benchmark
+from . import benchmark
 import scipy.special
 
 

@@ -1,7 +1,6 @@
 #include "test/cpp/jit/test_base.h"
 #include "test/cpp/jit/test_utils.h"
-#include "torch/csrc/jit/runtime/argument_spec.h"
-#include "torch/csrc/jit/runtime/autodiff.h"
+#include "torch/csrc/jit/frontend/tracer.h"
 #include "torch/csrc/jit/passes/common_subexpression_elimination.h"
 #include "torch/csrc/jit/passes/constant_propagation.h"
 #include "torch/csrc/jit/passes/create_autodiff_subgraphs.h"
@@ -11,7 +10,8 @@
 #include "torch/csrc/jit/passes/requires_grad_analysis.h"
 #include "torch/csrc/jit/passes/shape_analysis.h"
 #include "torch/csrc/jit/passes/utils/subgraph_utils.h"
-#include "torch/csrc/jit/frontend/tracer.h"
+#include "torch/csrc/jit/runtime/argument_spec.h"
+#include "torch/csrc/jit/runtime/autodiff.h"
 
 #include <ATen/ATen.h>
 #include "torch/csrc/autograd/engine.h"
@@ -28,8 +28,15 @@ using var_meta_list = std::vector<var_meta_type>;
 using test_fn_type = std::function<variable_list(const variable_list&)>;
 
 struct ADTestSpec {
-  ADTestSpec(const char* name, var_meta_list input_meta, test_fn_type test_fn, float clampMax = -1.0f)
-      : name(name), input_meta(input_meta), test_fn(test_fn), clampMax(clampMax) {}
+  ADTestSpec(
+      const char* name,
+      var_meta_list input_meta,
+      test_fn_type test_fn,
+      float clampMax = -1.0f)
+      : name(name),
+        input_meta(input_meta),
+        test_fn(test_fn),
+        clampMax(clampMax) {}
 
   variable_list operator()(const variable_list& inputs) const {
     return test_fn(inputs);
@@ -39,7 +46,8 @@ struct ADTestSpec {
     std::vector<Variable> out;
     for (const auto& m : input_meta) {
       if (clampMax > 0.0f) {
-        out.push_back(torch::randn(m, at::requires_grad(true)).clamp(-clampMax, clampMax));
+        out.push_back(torch::randn(m, at::requires_grad(true))
+                          .clamp(-clampMax, clampMax));
         continue;
       }
       out.push_back(torch::randn(m, at::requires_grad(true)));
@@ -63,7 +71,9 @@ variable_list grad(
     const variable_list& outputs,
     const variable_list& inputs,
     const variable_list& grad_outputs) {
-  const auto get_edge = [](const Variable& v) { return torch::autograd::impl::gradient_edge(v); };
+  const auto get_edge = [](const Variable& v) {
+    return torch::autograd::impl::gradient_edge(v);
+  };
   auto& engine = torch::autograd::Engine::get_default_engine();
   return engine.execute(
       fmap(outputs, get_edge),
@@ -74,7 +84,9 @@ variable_list grad(
 }
 
 void testADFormulas() {
-  const auto cast = [](const Variable& v) { return static_cast<at::Tensor>(v); };
+  const auto cast = [](const Variable& v) {
+    return static_cast<at::Tensor>(v);
+  };
 
   using VL = variable_list;
   const var_meta_list binary_pointwise = {{2, 3, 4, 5}, {2, 3, 4, 5}};
@@ -97,7 +109,8 @@ void testADFormulas() {
       // to set a minimum on gradient absolute values
       {"tanh",
        unary_pointwise,
-       [](const VL& v) -> VL { return {v[0].tanh()}; }, 3.0f},
+       [](const VL& v) -> VL { return {v[0].tanh()}; },
+       3.0f},
       {"t", unary_pointwise_2d, [](const VL& v) -> VL { return {v[0].t()}; }},
       {"view",
        unary_pointwise_2d,
@@ -133,15 +146,15 @@ void testADFormulas() {
 
     // Trace and differentiate the op
     auto graph = tracer::trace(
-      fmap<IValue>(vars_in),
-      [&test](Stack in) -> Stack {
-        auto ivalue_inps = fmap(in, [](const IValue& v){
-          return Variable(v.toTensor());
-        });
-        return fmap<IValue>(test(ivalue_inps));
-      },
-      [](const Variable& var) { return "";}
-    ).first->graph;
+                     fmap<IValue>(vars_in),
+                     [&test](Stack in) -> Stack {
+                       auto ivalue_inps = fmap(in, [](const IValue& v) {
+                         return Variable(v.toTensor());
+                       });
+                       return fmap<IValue>(test(ivalue_inps));
+                     },
+                     [](const Variable& var) { return ""; })
+                     .first->graph;
     EliminateDeadCode(graph); // Tracing of some ops depends on the DCE trick
     ConstantPropagation(graph);
     auto grad_spec = differentiate(graph);
@@ -164,22 +177,24 @@ void testADFormulas() {
 void testDifferentiate() {
   // Note: can't use IRParser for this test due to issue #23989
   auto graph = std::make_shared<Graph>();
-  const auto type = TensorType::create(at::ScalarType::Float, at::kCPU, {2, 3, 4}, {12, 4, 1});
+  const auto type = TensorType::create(
+      at::ScalarType::Float, at::kCPU, {2, 3, 4}, {12, 4, 1});
 
   // Builds graph a * b * a + b
   auto* a = graph->addInput()->setType(type);
   auto* b = graph->addInput()->setType(type);
   auto* cOne = graph->insertConstant(1);
 
-  auto* ab = graph->insertNode(graph->create(aten::mul, /*num_outputs =*/ 1));
+  auto* ab = graph->insertNode(graph->create(aten::mul, /*num_outputs =*/1));
   ab->addInput(a);
   ab->addInput(b);
 
-  auto* aba = graph->insertNode(graph->create(aten::mul, /*num_outputs =*/ 1));
+  auto* aba = graph->insertNode(graph->create(aten::mul, /*num_outputs =*/1));
   aba->addInput(ab->output());
   aba->addInput(a);
 
-  auto* abaplusb = graph->insertNode(graph->create(aten::add, /*num_outputs =*/ 1));
+  auto* abaplusb =
+      graph->insertNode(graph->create(aten::add, /*num_outputs =*/1));
   abaplusb->addInput(aba->output());
   abaplusb->addInput(b);
   abaplusb->addInput(cOne);

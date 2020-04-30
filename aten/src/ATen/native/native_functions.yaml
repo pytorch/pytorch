@@ -38,7 +38,7 @@
   variants: function
 
 # Computes the gradient of current tensor w.r.t. graph leaves.
-- func: backward(Tensor self, Tensor? gradient=None, bool keep_graph=False, bool create_graph=False) -> ()
+- func: backward(Tensor self, Tensor? gradient=None, bool? retain_graph=None, bool create_graph=False) -> ()
   manual_kernel_registration: True
   variants: method
 
@@ -86,7 +86,7 @@
   manual_kernel_registration: True
   variants: method
 
-- func: requires_grad_(Tensor(a!) self, bool _requires_grad=True) -> Tensor(a!)
+- func: requires_grad_(Tensor(a!) self, bool requires_grad=True) -> Tensor(a!)
   manual_kernel_registration: True
   variants: method
 
@@ -228,6 +228,27 @@
 - func: abs.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   supports_named_tensor: True
 
+- func: absolute(Tensor self) -> Tensor
+  use_c10_dispatcher: full
+  variants: function, method
+  dispatch:
+    CPU: abs
+    CUDA: abs
+  supports_named_tensor: True
+
+- func: absolute_(Tensor(a!) self) -> Tensor(a!)
+  variants: function, method
+  dispatch:
+    CPU: abs_
+    CUDA: abs_
+  supports_named_tensor: True
+
+- func: absolute.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: abs_out
+    CUDA: abs_out
+  supports_named_tensor: True
+
 - func: angle(Tensor self) -> Tensor
   use_c10_dispatcher: full
   variants: function, method
@@ -238,18 +259,34 @@
 
 - func: real(Tensor self) -> Tensor
   use_c10_dispatcher: full
-  variants: function, method
-  supports_named_tensor: True
-
-- func: real.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  variants: function
   supports_named_tensor: True
 
 - func: imag(Tensor self) -> Tensor
   use_c10_dispatcher: full
+  variants: function
+  supports_named_tensor: True
+
+# Temporary methods for getting the real and imaginary values in complex tensors. These are needed
+# until we support real and imag as tensor attributes which is blocked by the untyped storage task
+# TODO: remove these methods when we add real and imag as tensor attributes
+
+- func: copy_real(Tensor self) -> Tensor
+  use_c10_dispatcher: full
   variants: function, method
   supports_named_tensor: True
 
-- func: imag.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+- func: copy_real.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  variants: function
+  supports_named_tensor: True
+
+- func: copy_imag(Tensor self) -> Tensor
+  use_c10_dispatcher: full
+  variants: function, method
+  supports_named_tensor: True
+
+- func: copy_imag.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  variants: function
   supports_named_tensor: True
 
 - func: conj(Tensor self) -> Tensor
@@ -646,6 +683,15 @@
   dispatch:
     CPU: bmm_cpu
     CUDA: bmm_cuda
+    SparseCPU: bmm_sparse_cpu
+    SparseCUDA: bmm_sparse_cuda
+  supports_named_tensor: True
+
+- func: _bmm(Tensor self, Tensor mat2, *, bool deterministic=False) -> Tensor
+  use_c10_dispatcher: full
+  variants: function
+  dispatch:
+    SparseCUDA: _bmm_sparse_cuda
   supports_named_tensor: True
 
 - func: bmm.out(Tensor self, Tensor mat2, *, Tensor(a!) out) -> Tensor(a!)
@@ -653,6 +699,14 @@
   dispatch:
     CPU: bmm_out_cpu
     CUDA: bmm_out_cuda
+    SparseCPU: bmm_out_sparse_cpu
+    SparseCUDA: bmm_out_sparse_cuda
+  supports_named_tensor: True
+
+- func: _bmm.out(Tensor self, Tensor mat2, *, bool deterministic=False, Tensor(a!) out) -> Tensor(a!)
+  variants: function
+  dispatch:
+    SparseCUDA: _bmm_out_sparse_cuda
   supports_named_tensor: True
 
 - func: broadcast_tensors(Tensor[] tensors) -> Tensor[]
@@ -669,6 +723,9 @@
 
 - func: cat.names_out(Tensor[] tensors, Dimname dim, *, Tensor(a!) out) -> Tensor(a!)
   supports_named_tensor: True
+
+- func: block_diag(Tensor[] tensors) -> Tensor
+  variants: function
 
 - func: ceil(Tensor self) -> Tensor
   use_c10_dispatcher: full
@@ -828,15 +885,9 @@
 - func: cosh_(Tensor(a!) self) -> Tensor(a!)
   supports_named_tensor: True
   variants: function, method
-  dispatch:
-    CPU: _cosh__cpu
-    CUDA: _cosh__cuda
 
 - func: cosh.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   supports_named_tensor: True
-  dispatch:
-    CPU: _cosh_out_cpu
-    CUDA: _cosh_out_cuda
 
 - func: cosine_embedding_loss(Tensor input1, Tensor input2, Tensor target, float margin=0.0, int reduction=Mean) -> Tensor
   use_c10_dispatcher: full
@@ -1455,10 +1506,8 @@
   use_c10_dispatcher: full
 
 - func: _cufft_set_plan_cache_max_size(int device_index, int max_size) -> ()
-  use_c10_dispatcher: unboxed_only
 
 - func: _cufft_clear_plan_cache(int device_index) -> ()
-  use_c10_dispatcher: unboxed_only
 
 - func: index.Tensor(Tensor self, Tensor?[] indices) -> Tensor
   variants: function, method
@@ -1560,10 +1609,10 @@
   device_guard: False
   supports_named_tensor: True
 
-- func: kl_div(Tensor self, Tensor target, int reduction=Mean) -> Tensor
+- func: kl_div(Tensor self, Tensor target, int reduction=Mean, *, bool log_target=False) -> Tensor
   use_c10_dispatcher: full
 
-- func: kl_div_backward(Tensor grad_output, Tensor self, Tensor target, int reduction=Mean) -> Tensor
+- func: kl_div_backward(Tensor grad_output, Tensor self, Tensor target, int reduction=Mean, *, bool log_target=False) -> Tensor
   use_c10_dispatcher: full
   dispatch:
     CPU: kl_div_backward_cpu
@@ -1597,6 +1646,11 @@
   dispatch:
     CPU: layer_norm_backward_cpu
     CUDA: layer_norm_backward_cuda
+
+- func: quantized_layer_norm(Tensor input, int[] normalized_shape, Tensor? weight, Tensor? bias, float eps, float output_scale, int output_zero_point) -> Tensor
+  requires_tensor: True
+  dispatch:
+    QuantizedCPU: quantized_layer_norm_impl
 
 - func: linear(Tensor input, Tensor weight, Tensor? bias=None) -> Tensor
   python_module: nn
@@ -1961,7 +2015,7 @@
   variants: function, method
   dispatch:
     CPU: mm_cpu
-    CUDA: legacy::cuda::_th_mm
+    CUDA: mm_cuda
     SparseCPU: _sparse_mm
     SparseCUDA: _sparse_mm
   supports_named_tensor: True
@@ -1969,7 +2023,7 @@
 - func: mm.out(Tensor self, Tensor mat2, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU: mm_cpu_out
-    CUDA: legacy::cuda::_th_mm_out
+    CUDA: mm_out_cuda
     SparseCPU: _sparse_mm_out
     SparseCUDA: _sparse_mm_out
   supports_named_tensor: True
@@ -2035,6 +2089,8 @@
   dispatch:
     CPU: mv_cpu
     CUDA: legacy::cuda::_th_mv
+    SparseCPU: mv_sparse
+    SparseCUDA: mv_sparse
   supports_named_tensor: True
 
 - func: mv.out(Tensor self, Tensor vec, *, Tensor(a!) out) -> Tensor(a!)
@@ -2096,7 +2152,7 @@
   dispatch:
     CUDA: batch_norm_gather_stats_cuda
 
-- func: batch_norm_gather_stats_with_counts(Tensor input, Tensor mean, Tensor invstd, Tensor? running_mean, Tensor? running_var, float momentum, float eps, int[] counts) -> (Tensor, Tensor)
+- func: batch_norm_gather_stats_with_counts(Tensor input, Tensor mean, Tensor invstd, Tensor? running_mean, Tensor? running_var, float momentum, float eps, Tensor counts) -> (Tensor, Tensor)
   dispatch:
     CUDA: batch_norm_gather_stats_with_counts_cuda
 
@@ -2768,15 +2824,9 @@
 - func: tanh_(Tensor(a!) self) -> Tensor(a!)
   supports_named_tensor: True
   variants: function, method
-  dispatch:
-    CPU: _tanh__cpu
-    CUDA: _tanh__cuda
 
 - func: tanh.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   supports_named_tensor: True
-  dispatch:
-    CPU: _tanh_out_cpu
-    CUDA: _tanh_out_cuda
 
 - func: tensordot(Tensor self, Tensor other, int[] dims_self, int[] dims_other) -> Tensor
   variants: function
@@ -3084,6 +3134,11 @@
   dispatch:
     CPU: _s_poisson_cpu
     CUDA: _s_poisson_cuda
+
+- func: binomial(Tensor count, Tensor prob, Generator? generator=None) -> Tensor
+  dispatch:
+    CPU: _s_binomial_cpu
+    CUDA: _s_binomial_cuda
 
 # When more variants get ported to native, this dispatch will get more
 # complicated
@@ -3637,6 +3692,11 @@
   dispatch:
     CPU: quantize_per_tensor_cpu
 
+- func: quantize_per_tensor.tensors(Tensor[] tensors, Tensor scales, Tensor zero_points, ScalarType dtype) -> Tensor[]
+  variants: function
+  dispatch:
+    CPU: quantize_per_tensor_list_cpu
+
 - func: quantize_per_channel(Tensor self, Tensor scales, Tensor zero_points, int axis, ScalarType dtype) -> Tensor
   variants: function
   dispatch:
@@ -3714,6 +3774,10 @@
   variants: function
 
 - func: fake_quantize_per_channel_affine_backward(Tensor grad, Tensor self, Tensor scale, Tensor zero_point, int axis, int quant_min, int quant_max) -> Tensor
+  use_c10_dispatcher: full
+  variants: function
+
+- func: _choose_qparams_per_tensor(Tensor self, bool reduce_range=False) -> (float, int)
   use_c10_dispatcher: full
   variants: function
 
@@ -4364,9 +4428,6 @@
 
 - func: uniform_(Tensor(a!) self, float from=0, float to=1, *, Generator? generator=None) -> Tensor(a!)
   variants: method
-  dispatch:
-    CPU: legacy::cpu::_th_uniform_
-    CUDA: uniform_cuda_
   supports_named_tensor: True
 
 - func: cauchy_(Tensor(a!) self, float median=0, float sigma=1, *, Generator? generator=None) -> Tensor(a!)
@@ -4389,14 +4450,14 @@
 
 - func: diag.out(Tensor self, int diagonal=0, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU: legacy::cpu::_th_diag_out
+    CPU: diag_out
     CUDA: legacy::cuda::_th_diag_out
 
 - func: diag(Tensor self, int diagonal=0) -> Tensor
   use_c10_dispatcher: full
   variants: method, function
   dispatch:
-    CPU: legacy::cpu::_th_diag
+    CPU: diag
     CUDA: legacy::cuda::_th_diag
 
 - func: cross.out(Tensor self, Tensor other, int? dim=None, *, Tensor(a!) out) -> Tensor(a!)
@@ -5228,40 +5289,19 @@
 
 - func: normal_(Tensor(a!) self, float mean=0, float std=1, *, Generator? generator=None) -> Tensor(a!)
   variants: method
-  dispatch:
-    CPU: normal_cpu_
-    CUDA: normal_cuda_
   supports_named_tensor: True
 
 - func: normal.Tensor_float_out(Tensor mean, float std=1, *, Generator? generator=None, Tensor(a!) out) -> Tensor(a!)
-  dispatch:
-    CPU: normal_out_cpu
-    CUDA: normal_out_cuda
 
 - func: normal.Tensor_float(Tensor mean, float std=1, *, Generator? generator=None) -> Tensor
-  dispatch:
-    CPU: normal_cpu
-    CUDA: normal_cuda
 
 - func: normal.float_Tensor_out(float mean, Tensor std, *, Generator? generator=None, Tensor(a!) out) -> Tensor(a!)
-  dispatch:
-    CPU: normal_out_cpu
-    CUDA: normal_out_cuda
 
 - func: normal.float_Tensor(float mean, Tensor std, *, Generator? generator=None) -> Tensor
-  dispatch:
-    CPU: normal_cpu
-    CUDA: normal_cuda
 
 - func: normal.Tensor_Tensor_out(Tensor mean, Tensor std, *, Generator? generator=None, Tensor(a!) out) -> Tensor(a!)
-  dispatch:
-    CPU: normal_out_cpu
-    CUDA: normal_out_cuda
 
 - func: normal.Tensor_Tensor(Tensor mean, Tensor std, *, Generator? generator=None) -> Tensor
-  dispatch:
-    CPU: normal_cpu
-    CUDA: normal_cuda
 
 - func: normal.float_float(float mean, float std, int[] size, *, Generator? generator=None, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
 
@@ -5379,6 +5419,36 @@
   dispatch:
     CPU: _min_out_cpu
     CUDA: legacy::cuda::_th_min_out
+
+- func: bucketize.Tensor(Tensor self, Tensor boundaries, *, bool out_int32=False, bool right=False) -> Tensor
+  dispatch:
+    CPU: bucketize_cpu
+    CUDA: bucketize_cuda
+
+- func: bucketize.Tensor_out(Tensor self, Tensor boundaries, *, bool out_int32=False, bool right=False, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: bucketize_out_cpu
+    CUDA: bucketize_out_cuda
+
+- func: bucketize.Scalar(Scalar self, Tensor boundaries, *, bool out_int32=False, bool right=False) -> Tensor
+  dispatch:
+    CPU: bucketize_cpu
+    CUDA: bucketize_cuda
+
+- func: searchsorted.Tensor(Tensor sorted_sequence, Tensor self, *, bool out_int32=False, bool right=False) -> Tensor
+  dispatch:
+    CPU: searchsorted_cpu
+    CUDA: searchsorted_cuda
+
+- func: searchsorted.Tensor_out(Tensor sorted_sequence, Tensor self, *, bool out_int32=False, bool right=False, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: searchsorted_out_cpu
+    CUDA: searchsorted_out_cuda
+
+- func: searchsorted.Scalar(Tensor sorted_sequence, Scalar self, *, bool out_int32=False, bool right=False) -> Tensor
+  dispatch:
+    CPU: searchsorted_cpu
+    CUDA: searchsorted_cuda
 
 ## NN wrappers
 
@@ -5635,6 +5705,7 @@
   python_module: nn
   dispatch:
     CPU: hardsigmoid
+    CUDA: hardsigmoid
     QuantizedCPU: quantized_hardsigmoid
 
 - func: hardsigmoid_(Tensor(a!) self) -> Tensor(a!)
@@ -5643,6 +5714,9 @@
 - func: hardsigmoid_backward(Tensor grad_output, Tensor self) -> Tensor
   use_c10_dispatcher: full
   python_module: nn
+  dispatch:
+    CPU: hardsigmoid_backward
+    CUDA: hardsigmoid_backward
 
 - func: hardtanh.out(Tensor self, Scalar min_val=-1, Scalar max_val=1, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
@@ -5678,23 +5752,25 @@
 
 - func: hardswish.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
+  dispatch:
+    CPU: hardswish_out
+    CUDA: hardswish_out
+    QuantizedCPU: quantized_hardswish_out
+
 
 - func: hardswish(Tensor self) -> Tensor
   use_c10_dispatcher: full
   python_module: nn
-  dispatch:
-    CPU: hardswish
-    QuantizedCPU: quantized_hardswish
 
 - func: hardswish_(Tensor(a!) self) -> Tensor(a!)
   python_module: nn
-  dispatch:
-    CPU: hardswish_
-    QuantizedCPU: quantized_hardswish_
 
 - func: hardswish_backward(Tensor grad_output, Tensor self) -> Tensor
   use_c10_dispatcher: full
   python_module: nn
+  dispatch:
+    CPU: hardswish_backward
+    CUDA: hardswish_backward
 
 - func: leaky_relu.out(Tensor self, Scalar negative_slope=0.01, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
@@ -6665,3 +6741,8 @@
   variants: function
   device_guard: False
   supports_named_tensor: True
+
+# Note: this function is only for testing.
+# It is undocumented and should not be used outside of tests.
+- func: _test_serialization_subcmul(Tensor self, Tensor other, Scalar alpha=1) -> Tensor
+  use_c10_dispatcher: full

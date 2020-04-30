@@ -315,15 +315,9 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(model, (x,), rtol=1e-3, atol=1e-5)
 
     def get_image_from_url(self, url):
-        import sys
         import os
-        if sys.version_info < (3,):
-            from urlparse import urlsplit
-            import urllib2
-            request = urllib2
-        else:
-            from urllib.parse import urlsplit
-            from urllib import request
+        from urllib.parse import urlsplit
+        from urllib import request
         from PIL import Image
         from torchvision import transforms
         from torch._utils_internal import get_writable_path
@@ -346,7 +340,6 @@ class TestONNXRuntime(unittest.TestCase):
         return images
 
     @skipIfUnsupportedMinOpsetVersion(11)
-    @unittest.skip("disabled due to removal of aten::__interpolate")
     def test_mask_rcnn(self):
         model = torchvision.models.detection.mask_rcnn.maskrcnn_resnet50_fpn(pretrained=True, min_size=200,
                                                                              max_size=300)
@@ -354,7 +347,6 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(model, (images,), rtol=1e-3, atol=1e-5)
 
     @skipIfUnsupportedMinOpsetVersion(11)
-    @unittest.skip("Disabled w removal of aten::__interpolate")
     def test_keypoint_rcnn(self):
         class KeyPointRCNN(torch.nn.Module):
             def __init__(self):
@@ -457,6 +449,16 @@ class TestONNXRuntime(unittest.TestCase):
 
         x = torch.arange(-5, 5).to(dtype=torch.float32)
         self.run_test(MyModel(), x)
+
+    @skipIfUnsupportedMinOpsetVersion(12)
+    @unittest.skip("Enable once inverse is supported in ORT")
+    def test_inverse(self):
+        class Inverse(torch.nn.Module):
+            def forward(self, x):
+                return torch.inverse(x)
+
+        x = torch.randn(2, 3, 4, 4)
+        self.run_test(Inverse(), x)
 
     def test_clamp(self):
         class ClampModel(torch.nn.Module):
@@ -830,6 +832,7 @@ class TestONNXRuntime(unittest.TestCase):
                       'output_1': [0, 1, 2]})
 
     @skipIfUnsupportedMinOpsetVersion(9)
+    @unittest.skip("relies on not constant folding size calls, but other tests rely on constant folding")
     def test_arange_dynamic(self):
         class ArangeModel(torch.nn.Module):
             def forward(self, input):
@@ -874,7 +877,7 @@ class TestONNXRuntime(unittest.TestCase):
     def test_size(self):
         class SizeModel(torch.nn.Module):
             def forward(self, input):
-                return torch.arange(input.size(0)), torch.arange(input.size(-1))
+                return torch.arange(input.size(0)), torch.arange(input.size(-1)), torch.ones(input.shape)
 
         x = torch.randn(5, 3, 2)
         self.run_test(SizeModel(), x)
@@ -1198,9 +1201,6 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(MyModel(), x)
 
     def _interpolate_script(self, x, mode, use_size, is_upsample, align_corners=False):
-        # test disabled
-        return 
-
         class MyModel(torch.jit.ScriptModule):
             __constants__ = ['mode', 'use_size', 'is_upsample', 'size', 'scale', 'size_array', 'scale_array', 'align_corners']
 
@@ -1287,6 +1287,35 @@ class TestONNXRuntime(unittest.TestCase):
 
     def test_interpolate_upsample(self):
         self._interpolate_tests(True)
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_interpolate_function_substitution(self):
+        class ScriptModel(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, x):
+                return torch.nn.functional.interpolate(x, mode="nearest", scale_factor=2.)
+
+        class ScriptModule(torch.jit.ScriptModule):
+            def __init__(self):
+                super(ScriptModule, self).__init__()
+                self.submodule = ScriptModel()
+
+            @torch.jit.script_method
+            def forward(self, input):
+                return self.submodule(input)
+
+        x = torch.randn(1, 2, 4, 4, 6)
+        self.run_test(ScriptModule(), (x,))
+
+        @torch.jit.script
+        def script_method(x):
+            return torch.nn.functional.interpolate(x, mode="nearest", scale_factor=2.)
+
+        class TracingModule(torch.nn.Module):
+            def forward(self, x):
+                return script_method(x)
+
+        self.run_test(TracingModule(), (x,))
 
     @skipIfUnsupportedMinOpsetVersion(10)
     def test_interpolate_downsample(self):
@@ -2392,6 +2421,22 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.tensor(12)
         self.run_test(FullModel(), x)
 
+    def test_l1_norm(self):
+        class NormModel(torch.nn.Module):
+            def forward(self, x):
+                return torch.norm(x, p=1, dim=-1, keepdim=False)
+
+        x = torch.randn(4, 2, 3, requires_grad=True)
+        self.run_test(NormModel(), x)
+
+    def test_l2_norm(self):
+        class NormModel(torch.nn.Module):
+            def forward(self, x):
+                return torch.norm(x, p=2, dim=-2, keepdim=False)
+
+        x = torch.randn(4, 2, 3, requires_grad=True)
+        self.run_test(NormModel(), x)
+
     def test_frobenius_norm(self):
         class NormModel(torch.nn.Module):
             def forward(self, x):
@@ -2875,6 +2920,19 @@ class TestONNXRuntime(unittest.TestCase):
         mat1 = torch.randn(2, 3)
         mat2 = torch.randn(3, 3)
         self.run_test(M(), input=(mat1, mat2))
+
+    def test_shape_constant_fold(self):
+        class ShapeModule(torch.nn.Module):
+            def __init__(self):
+                super(ShapeModule, self).__init__()
+                self.register_buffer("weight", torch.ones(5))
+
+            def forward(self, x):
+                shape = self.weight.shape[0]
+                return x + shape
+
+        x = torch.randn(2, 5)
+        self.run_test(ShapeModule(), (x,), rtol=1e-3, atol=1e-5) 
 
     def test_onnx_proto_checker(self):
         class Model(torch.nn.Module):

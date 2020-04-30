@@ -370,7 +370,6 @@ class TestAsync(JitTestCase):
 
         traced = torch.jit.trace(fn, (torch.rand(3, 4),))
         torch._C._jit_pass_inline_fork_wait(traced.graph)
-        torch._C._jit_pass_dce(traced.graph)
         self.assertGraphContainsExactly(traced.graph, kind='prim::fork', num_kind_nodes=0)
         self.assertGraphContainsExactly(traced.graph, kind='aten::wait', num_kind_nodes=0)
         self.assertGraphContainsExactly(traced.graph, kind='aten::add', num_kind_nodes=2)

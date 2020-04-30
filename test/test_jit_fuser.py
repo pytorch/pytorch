@@ -299,6 +299,7 @@ class TestFuser(JitTestCase):
 
         funcs = (func2, funcInf, funcOptMin, funcOptMax)
         for f, inputs in product(funcs, [[a, b], [a, nan]]):
+            f.__disable_jit_function_caching__ = True
             inp1, inp2 = inputs
             s = self.checkScript(f, (inp1, inp2), profiling=ProfilingMode.PROFILING)
             self.assertAllFused(s.graph_for(inp1, inp2), except_for={'aten::size', 'aten::_size_if_not_equal'})
@@ -487,7 +488,7 @@ class TestFuser(JitTestCase):
                 with torch.jit.optimized_execution(False):
                     out_noopt = model_noopt(x, y)
                     rep_noopt = str(model_noopt.graph_for(x, y))
-                self.assertEqual(out, out_noopt, prec=3e-5)
+                self.assertEqual(out, out_noopt, atol=3e-5)
 
             # Check that normalization op has really been decomposed
             for node_in_graph in in_opt_graph:
@@ -765,6 +766,7 @@ class TestFuser(JitTestCase):
         warmup_backward((hy + cy).sum())
 
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
+    @unittest.skipIf(GRAPH_EXECUTOR == ProfilingMode.LEGACY, "borked on the legacy executor")
     def test_rand_cuda(self):
         class M(torch.jit.ScriptModule):
             __constants__ = ['d']
@@ -814,6 +816,7 @@ class TestFuser(JitTestCase):
                                                          "aten::_size_if_not_equal"))
 
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
+    @unittest.skipIf(GRAPH_EXECUTOR == ProfilingMode.LEGACY, "borked on the legacy executor")
     def test_rand_broadcast_cuda(self):
         def fn_test_rand(x, y):
             r = torch.rand_like(y)

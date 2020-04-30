@@ -13,7 +13,6 @@ size_t ComputeEditDistance(
     const char* word1,
     const char* word2,
     size_t maxEditDistance) {
-
   size_t m = strlen(word1);
   size_t n = strlen(word2);
 
