@@ -491,3 +491,20 @@ C10_HOST_DEVICE c10::complex<T> polar(const T& r, const T& theta = T()) {
 
 // math functions are included in a separate file
 #include <c10/util/complex_math.h>
+
+// See: https://github.com/pytorch/pytorch/issues/37563
+#define UNSHADOW_OPERATORS \
+using ::operator+;         \
+using ::operator-;         \
+using ::operator*;         \
+using ::operator/;         \
+using ::operator==;        \
+using ::operator!=;        \
+using ::operator>>;        \
+using ::operator<<;
+
+namespace at { UNSHADOW_OPERATORS }
+
+namespace c10 { UNSHADOW_OPERATORS }
+
+#undef UNSHADOW_OPERATORS
