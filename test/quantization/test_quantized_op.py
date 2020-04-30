@@ -531,7 +531,6 @@ class TestQuantizedOps(TestCase):
         _test_hardswish(self, X, Y_scale, Y_zero_point, 'fbgemm')
 
     """Tests the correctness of the scalar addition."""
-    # @unittest.skip("Failing on MacOS")
     @given(A=hu.tensor(shapes=hu.array_shapes(1, 4, 1, 5),
                        elements=hu.floats(-1e6, 1e6, allow_nan=False),
                        qparams=hu.qparams()),
@@ -2917,7 +2916,6 @@ class TestComparatorOps(TestCase):
             self.assertEqual(result_ref, result,
                              "'tensor.{}(tensor)'' failed".format(op))
 
-    # @unittest.skip("FIXME: Failing due to overflow error without width option")
     @given(A=hu.tensor(shapes=((3, 4, 5),),
                        qparams=hu.qparams()),
            b=hu.floats(allow_infinity=False, allow_nan=False))
