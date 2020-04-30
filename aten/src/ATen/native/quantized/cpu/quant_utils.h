@@ -62,7 +62,7 @@ inline TensorQuantizationParams ChooseQuantizationParams(
   // adjust the scale to 0.1 . We want to avoid scale's reciprocal being
   // infinity because some of fbgemm code pre-computes scale's reciprocal to do
   // multiplication instead of division in the time critical part of code.
-  if (scale == 0.0f || std::isinf(1.0f / scale)) {
+  if (float(scale) == 0.0f || std::isinf(1.0f / float(scale))) {
     scale = 0.1;
   }
   TORCH_CHECK(scale > 0, "quantization scale should be > 0");

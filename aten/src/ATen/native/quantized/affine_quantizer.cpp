@@ -1,4 +1,5 @@
 #include <ATen/native/quantized/affine_quantizer.h>
+#include <cfenv>
 
 #ifdef USE_FBGEMM
 #include <fbgemm/QuantUtils.h>
@@ -16,6 +17,13 @@ DEFINE_DISPATCH(dequantize_tensor_per_tensor_affine_stub);
 DEFINE_DISPATCH(dequantize_tensor_per_channel_affine_stub);
 
 namespace {
+
+void checkRoundingMode(const std::string& fn_name) {
+  TORCH_WARN_ONCE(
+      std::fegetround() != FE_TONEAREST,
+      fn_name,
+      " current rounding mode is not set to round-to-nearest-ties-to-even. This may cause accuracy issues in quantized models.");
+}
 
 void checkCPUTensor(const std::string& fn_name, Tensor t) {
   TORCH_CHECK(
@@ -83,6 +91,8 @@ Tensor quantize_tensor_per_tensor_affine(
     double scale,
     int64_t zero_point) {
   static const auto fn_name = "quantize_tensor_per_tensor_affine";
+
+  checkRoundingMode(fn_name);
   checkFloatTensor(fn_name, rtensor);
   checkSameDevice(fn_name, rtensor, qtensor);
   checkSameSize(fn_name, qtensor, rtensor);
@@ -105,6 +115,7 @@ Tensor quantize_tensor_per_channel_affine(
     int64_t axis) {
   static const auto fn_name = "quantize_tensor_per_channel_affine";
 
+  checkRoundingMode(fn_name);
   checkFloatTensor(fn_name, rtensor);
   checkCPUTensor(fn_name, rtensor);
   checkSameDevice(fn_name, rtensor, qtensor);

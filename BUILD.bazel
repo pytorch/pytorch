@@ -1739,6 +1739,7 @@ cc_library(
         "@foxi",
         "@gloo",
         "@onnx",
+        "@fmt",
     ] + if_cuda(
         [
             ":caffe2_cpp_cuda",
