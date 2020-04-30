@@ -90,6 +90,13 @@ int64_t _safe_size(IntArrayRef sizes, IntArrayRef dim) {
   return size;
 }
 
+Tensor sqrt_euclidean_dist_backward(const Tensor & grad, const Tensor & self) {
+  // handle case at 0 where we return a subgradient containing 0
+  Tensor result = grad / (2 * self);
+  result.masked_fill_(self == 0, 0);
+  return result;
+}
+
 Tensor norm_backward(const Tensor & grad, const Tensor & self, const optional<Scalar> & p_, const Tensor & norm) {
   double p = p_.value_or(2.0).toDouble();
   Tensor self_scaled;
