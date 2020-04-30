@@ -3,7 +3,6 @@
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cuda/Loops.cuh>
-#include <ATen/native/cuda/zmath.cuh>
 
 
 // NOTE: CUDA on Windows requires that the enclosing function
