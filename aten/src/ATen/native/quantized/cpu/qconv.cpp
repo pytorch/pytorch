@@ -600,7 +600,7 @@ class QConvInt8 final {
       pack_w = pack_data.w.get();
 #ifdef C10_MOBILE
       // On mobile, we release the original weight by freeing the underlying storage.
-      // After this calling unpack will throw an assertion.
+      // Calling unpack after this will throw an assertion.
       pack_data.orig_weight.unsafeGetTensorImpl()->release_resources();
 #endif
     }

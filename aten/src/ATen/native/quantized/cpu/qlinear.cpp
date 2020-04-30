@@ -270,7 +270,7 @@ class QLinearInt8 final {
       packB = pack_ptr.w.get();
 #ifdef C10_MOBILE
       // On mobile, we release the original weight by freeing the underlying storage.
-      // After this calling unpack will throw an assertion.
+      // Calling unpack after this will throw an assertion.
       pack_ptr.orig_weight.unsafeGetTensorImpl()->release_resources();
 #endif
     }
