@@ -239,7 +239,8 @@ class TransformerDecoder(Module):
             memory_mask: the mask for the memory sequence (optional).
             tgt_key_padding_mask: the mask for the tgt keys per batch (optional).
             memory_key_padding_mask: the mask for the memory keys per batch (optional).
-            batch_first: if the tgt tensor is in the shape of (N, T, E) instead of (T, N, E) and the memory tensor is in the shape of (N, M, E) instead of (M, N, E) (default=False).
+            batch_first: if the tgt tensor is in the shape of (N, T, E) instead of (T, N, E) and the memory tensor is
+                in the shape of (N, M, E) instead of (M, N, E) (default=False).
 
         Shape:
             see the docs in Transformer class.
