@@ -11103,10 +11103,6 @@ class TestTorchDeviceType(TestCase):
     def test_copy_all_dtypes_and_devices(self, device):
         from copy import copy
         for dt in torch.testing.get_all_dtypes():
-            # TODO: add test for complex when complex storage type is supported
-            if dt.is_complex:
-                self.assertRaises(RuntimeError, lambda: copy(torch.tensor([1], dtype=dt, device=device).clone()))
-                continue
             x = torch.tensor([1, 2, 3, 4], dtype=dt, device=device)
             x_clone = x.clone()
             y = copy(x)
