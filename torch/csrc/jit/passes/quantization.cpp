@@ -100,6 +100,7 @@ std::vector<std::string> _single_input_general_call_funcs = {
     "tanh",
     "hardtanh",
     "elu",
+    "hardsigmoid",
 };
 
 // Similar to prim::CallFunctions, there are aten ops that doesn't
@@ -142,6 +143,7 @@ std::vector<std::string> _single_input_general_aten_funcs = {
     "tanh",
     "hardtanh",
     "elu",
+    "hardsigmoid",
 };
 
 struct FuncArg {
