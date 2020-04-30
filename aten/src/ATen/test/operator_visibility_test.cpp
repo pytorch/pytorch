@@ -1,16 +1,14 @@
+namespace x {
 class A {};
-void operator+(A, A) {}
+}
+void operator+(x::A, x::A) {}
 
 #include <ATen/ATen.h>
 
-class B {};
-void operator+(B, B) {}
-
 namespace at { namespace native {
 
-void f(A a, B b) {
+void f(x::A a) {
   a + a;
-  b + b;
 }
 
 }}
