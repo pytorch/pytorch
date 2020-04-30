@@ -406,6 +406,22 @@ graph(%a_quant, %b_scalar):
 graph(%a_quant, %b_scalar):
          %r = quantized::mul_scalar_relu_out(%a_quant, %b_scalar, %a_quant)
          return (%r) )";
+
+
+  // ============= General Ops that doesn't require observation =============
+  // aten::avg_pool2d
+  std::string avg_pool2d = R"(
+graph(%a_quant, %r_scale, %r_zero_point, %r_dtype):
+          %a_dequant = aten::dequantize(%a_quant)
+          %r = aten::avg_pool2d(%a_quant)
+          %r_quant = aten::quantize_per_tensorr(%r, %r_scale, %r_zero_point, %r_dtype)
+          return (%r_quant) )";
+
+  std::string quantized_avg_pool2d = R"(
+graph(%a_quant, %r_scale, %r_zero_point, %r_dtype):
+          %r = aten::avg_pool2d(%a_quant)
+          return (%r) )";
+
   return {
       {"quantized::conv2d", conv2d, quantized_conv2d},
       {"quantized::conv2d_relu", conv2d_relu, quantized_conv2d_relu},
@@ -465,6 +481,7 @@ graph(%a_quant, %b_scalar):
       {"quantized::mul_relu", mul_inplace_relu, quantized_mul_relu},
       {"quantized::mul_relu", inplace_mul_relu, quantized_mul_relu},
       {"quantized::mul_relu", inplace_mul_inplace_relu, quantized_mul_relu},
+      {"aten::avg_pool2d", avg_pool2d, quantized_avg_pool2d},
   };
 }
 
