@@ -407,18 +407,47 @@ graph(%a_quant, %b_scalar):
          %r = quantized::mul_scalar_relu_out(%a_quant, %b_scalar, %a_quant)
          return (%r) )";
 
+  // quantized::hardswish
+  std::string hardswish = R"(
+graph(%a_quant, %r_scale, %r_zero_point, %r_dtype):
+         %a_dequant = aten::dequantize(%a_quant)
+         %r = aten::hardswish(%a_dequant)
+         %r_quant = aten::quantize_per_tensor(%r, %r_scale, %r_zero_point, %r_dtype)
+         return (%r_quant) )";
+
+  std::string quantized_hardswish = R"(
+graph(%a_quant, %r_scale, %r_zero_point, %r_dtype):
+         %r_quant = quantized::hardswish(%a_quant, %r_scale, %r_zero_point)
+         return (%r_quant) )";
+
+  // quantized::layer_norm
+  std::string layer_norm = R"(
+graph(%a_quant, %normalized_shape, %weight, %bias, %eps, %cudnn_enabled, %output_scale, %output_zero_point, %scalar_type):
+         %a_dequant = aten::dequantize(%a_quant)
+         %r_ln = aten::layer_norm(%a_dequant, %normalized_shape, %weight, %bias, %eps, %cudnn_enabled)
+         %r = aten::quantize_per_tensor(%r_ln, %output_scale, %output_zero_point, %scalar_type)
+         return (%r) )";
+
+  std::string quantized_layer_norm = R"(
+graph(%a_quant, %normalized_shape, %weight, %bias, %eps, %cudnn_enabled, %output_scale, %output_zero_point, %scalar_type):
+         %r = quantized::layer_norm(%a_quant, %normalized_shape, %weight, %bias, %eps, %output_scale, %output_zero_point)
+         return (%r) )";
+
   // ============= General Ops that doesn't require observation =============
   // aten::avg_pool2d
   std::string avg_pool2d = R"(
-graph(%a_quant, %r_scale, %r_zero_point, %r_dtype):
+graph(%a_quant, %kernel_size, %stride, %padding, %ceil_mode, %count_include_pad, %divisor_override):
           %a_dequant = aten::dequantize(%a_quant)
-          %r = aten::avg_pool2d(%a_quant)
-          %r_quant = aten::quantize_per_tensorr(%r, %r_scale, %r_zero_point, %r_dtype)
+          %r = aten::avg_pool2d(%a_dequant, %kernel_size, %stride, %padding, %ceil_mode, %count_include_pad, %divisor_override)
+          %r_scale : float = aten::q_scale(%a_quant)
+          %r_zero_point : int = aten::q_zero_point(%a_quant)
+          %r_dtype : int = prim::dtype(%a_quant)
+          %r_quant = aten::quantize_per_tensor(%r, %r_scale, %r_zero_point, %r_dtype)
           return (%r_quant) )";
 
   std::string quantized_avg_pool2d = R"(
-graph(%a_quant, %r_scale, %r_zero_point, %r_dtype):
-          %r = aten::avg_pool2d(%a_quant)
+graph(%a_quant, %kernel_size, %stride, %padding, %ceil_mode, %count_include_pad, %divisor_override):
+          %r = aten::avg_pool2d(%a_quant, %kernel_size, %stride, %padding, %ceil_mode, %count_include_pad, %divisor_override)
           return (%r) )";
 
   return {
@@ -480,6 +509,8 @@ graph(%a_quant, %r_scale, %r_zero_point, %r_dtype):
       {"quantized::mul_relu", mul_inplace_relu, quantized_mul_relu},
       {"quantized::mul_relu", inplace_mul_relu, quantized_mul_relu},
       {"quantized::mul_relu", inplace_mul_inplace_relu, quantized_mul_relu},
+      {"quantized::hardswish", hardswish, quantized_hardswish},
+      {"quantized::layer_norm", layer_norm, quantized_layer_norm},
       {"aten::avg_pool2d", avg_pool2d, quantized_avg_pool2d},
   };
 }

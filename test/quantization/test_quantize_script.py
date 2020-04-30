@@ -1566,9 +1566,24 @@ class TestQuantizeScriptPTSQOps(JitTestCase):
                        .check_not("quantized::relu") \
                        .run(m.graph)
 
-    def test_swap_dequantize_all_ops(self):
+    def test_hardswish(self):
+        data = [(torch.rand((1, 3, 10, 10), dtype=torch.float), torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
+        m = self._test_op_impl(torch.nn.Hardswish(), data, "quantized::hardswish")
+        FileCheck().check_not("aten::hardswish") \
+                   .run(m.graph)
+
+    def test_layer_norm(self):
+        data = [(torch.rand((1, 3, 10, 10), dtype=torch.float), torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
+        layer_norm = torch.nn.LayerNorm([3, 10, 10])
+        m = self._test_op_impl(layer_norm, data, "quantized::layer_norm")
+        FileCheck().check_not("aten::layer_norm") \
+                   .run(m.graph)
+
+
+    def test_quantize_general_shape_ops(self):
         """ A test that checks dequantize will be swapped for
-        all supported general ops without actually checking for execution of these ops
+        all supported general shape ops like aten::flatten
+        without actually checking for execution of these ops
         """
         class M(torch.nn.Module):
             def __init__(self):
@@ -1586,6 +1601,9 @@ class TestQuantizeScriptPTSQOps(JitTestCase):
                 self.conv = torch.nn.Conv2d(3, 3, 3)
                 self.sigmoid = torch.nn.Sigmoid()
                 self.tanh = torch.nn.Tanh()
+                self.hardtanh = torch.nn.Hardtanh()
+                self.elu = torch.nn.ELU()
+                self.hardsigmoid = torch.nn.Hardsigmoid()
 
             def forward(self, x):
                 x = self.conv(x)
@@ -1632,6 +1650,12 @@ class TestQuantizeScriptPTSQOps(JitTestCase):
                 x = self.tanh(x)
                 x = F.tanh(x)
                 x = torch.tanh(x)
+                x = self.hardtanh(x)
+                x = F.hardtanh(x)
+                x = self.elu(x)
+                x = F.elu(x)
+                x = self.hardsigmoid(x)
+                x = F.hardsigmoid(x)
                 x = self.conv(x)
                 return x
 
@@ -1654,6 +1678,57 @@ class TestQuantizeScriptPTSQOps(JitTestCase):
                    .check_count("quantized::conv2d", 2, exactly=True) \
                    .check("aten::dequantize") \
                    .run(m.graph)
+
+    def test_quantize_general_value_ops(self):
+        """ A test that checks dequantize will be swapped for \
+        all supported general value ops like aten::avg_pool2d \
+        without actually checking for execution of these ops
+        """
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+                self.avgpool2d = torch.nn.AvgPool2d(3)
+                self.conv = torch.nn.Conv2d(3, 3, 3)
+
+            def forward(self, x):
+                x = self.conv(x)
+                x = self.avgpool2d(x)
+                x = F.avg_pool2d(x, 3)
+                x = self.conv(x)
+                return x
+
+        m = torch.jit.script(M())
+        qconfig = script_qconfig(default_qconfig)
+        # dummy data to suppress warning
+        data = torch.rand((1, 3, 10, 10))
+        get_forward(qconfig.activation)(data)
+        get_forward(qconfig.weight)(data)
+
+        m = wrap_cpp_module(torch._C._jit_pass_insert_observers(
+            m._c, 'forward', {'': qconfig}, inplace=False))
+        # Checking the model before fianlize contain unfused patterns
+        # that numerically matches the model after quantize by checking
+        # number of aten::quantize_per_tensor functions
+        # conv has 3 quantize_per_tensor for activations and 1 for weight
+        # and for N general value op between conv we should have
+        # N + 1 quantize_per_tensor between these ops
+        m1 = convert_script(m, debug=True)
+        conv_op_quant = 4
+        general_value_op_quant = 2
+        FileCheck().check_count("aten::quantize_per_tensor", conv_op_quant + general_value_op_quant + 1, exactly=True) \
+                   .run(m1.graph)
+
+        # This checks that the dequantize from the output of first conv
+        # is being propagated to the end, so that we don't insert extra
+        # observers and also successfully fused two quantized::conv2d
+        # patterns
+        # one quantize_per_tensor for input
+        m2 = convert_script(m, debug=False)
+        print(m2.graph)
+        FileCheck().check_count("aten::quantize_per_tensor", 1, exactly=True) \
+                   .check_count("quantized::conv2d", 2, exactly=True) \
+                   .check("aten::dequantize") \
+                   .run(m2.graph)
 
 class TestQuantizeDynamicScript(JitTestCase):
     def test_prepare_dynamic(self):

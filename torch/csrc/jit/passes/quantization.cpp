@@ -51,6 +51,8 @@ std::vector<std::string> _static_quantizable_call_funcs = {
     "conv2d",
     "linear",
     "batch_norm",
+    "hardswish",
+    "layer_norm",
 };
 
 std::vector<std::string> _dynamic_quantizable_call_funcs = {
@@ -69,6 +71,8 @@ std::vector<std::string> _static_quantizable_aten_funcs = {
     "lstm",
     "mul",
     "mul_",
+    "hardswish",
+    "layer_norm",
 };
 
 std::vector<std::string> _dynamic_quantizable_aten_funcs = {
@@ -99,6 +103,9 @@ std::vector<std::string> _single_input_general_shape_call_funcs = {
     "relu",
     "sigmoid",
     "tanh",
+    "hardtanh",
+    "elu",
+    "hardsigmoid",
 };
 
 // Similar to prim::CallFunctions, there are aten ops that doesn't
@@ -140,6 +147,9 @@ std::vector<std::string> _single_input_general_shape_aten_funcs = {
     "relu",
     "sigmoid",
     "tanh",
+    "hardtanh",
+    "elu",
+    "hardsigmoid",
 };
 
 // Theses are prim::CallFunctions for ops that doesn't require observation and
@@ -152,7 +162,7 @@ std::vector<std::string> _single_input_general_value_call_funcs = {
 // Theses are aten functions for ops that doesn't require observation and
 // have a single input Tensor
 // Also these ops do computation on the value of Tensor
-// e.g. `aten::maxpool(%input_tensor, ...)`
+// e.g. `aten::avg_pool2d(%input_tensor, ...)`
 std::vector<std::string> _single_input_general_value_aten_funcs = {
     "avg_pool2d",
 };
@@ -971,7 +981,7 @@ void InsertObserversHelper::insertObserverFor(
   if (observed_values_.count(v)) {
     return;
   }
-  Module observer = observer_module.clone_instance();
+  Module observer = observer_module.deepcopy();
   std::string observer_name = "_observer_" + c10::to_string(uid_++);
   while (module.hasattr(observer_name)) {
     observer_name = "_observer_" + c10::to_string(uid_++);
@@ -1329,7 +1339,7 @@ InsertObserversHelper::insertObserversFor(
     for (const auto& observer_attrs : block_observer_map_.at(block)) {
       const auto& name = std::get<0>(observer_attrs);
       const auto& observer = std::get<1>(observer_attrs);
-      module._ivalue()->setAttr(name, observer.clone_instance()._ivalue());
+      module._ivalue()->setAttr(name, observer.deepcopy()._ivalue());
     }
   }
   // NB: Why do we need to process the graph even if it's visited?
@@ -2318,7 +2328,7 @@ class ModuleUseDeduper {
     while (parent_of_leaf.hasattr(child_name)) {
       child_name = original_name + "_" + c10::to_string(uid++);
     }
-    parent_of_leaf.register_module(child_name, child_module.clone_instance());
+    parent_of_leaf.register_module(child_name, child_module.deepcopy());
     return child_name;
   }
 
@@ -2679,10 +2689,12 @@ Node* insertQParam(
     Graph* graph,
     Value* quantized_input,
     NodeKind node_kind,
+    TypePtr output_type,
     const std::string param_name) {
   Node* qparam = graph->create(node_kind, {quantized_input});
-  qparam->output()->setDebugName(
-      quantized_input->debugName() + "." + param_name);
+  qparam->output()
+      ->setDebugName(quantized_input->debugName() + "." + param_name)
+      ->setType(output_type);
   graph->insertNode(qparam);
   return qparam;
 }
@@ -2730,14 +2742,19 @@ void quantizeGeneralOps(Block* block) {
           WithInsertPoint ins(n->next());
           // get quantization parameters from previous quantized op
           Node* scale = insertQParam(
-              graph, quantized_input, at::Symbol::aten("q_scale"), "q_scale");
+              graph,
+              quantized_input,
+              at::Symbol::aten("q_scale"),
+              FloatType::get(),
+              "q_scale");
           Node* zero_point = insertQParam(
               graph,
               quantized_input,
               at::Symbol::aten("q_zero_point"),
+              IntType::get(),
               "q_zero_point");
-          Node* dtype =
-              insertQParam(graph, quantized_input, prim::dtype, "dtype");
+          Node* dtype = insertQParam(
+              graph, quantized_input, prim::dtype, IntType::get(), "dtype");
           Value* original_output = n->output();
           std::vector<Value*> quant_inputs = {original_output,
                                               scale->output(),
@@ -2759,9 +2776,10 @@ void quantizeGeneralOps(Block* block) {
               user->replaceInputWith(original_output, quantized_output);
             }
           }
-          std::vector<Use> uses = quantized_output->uses();
+          std::vector<Use> quantized_uses = quantized_output->uses();
+          GRAPH_DEBUG("quantized uses: ", quantized_uses.size());
           insertDeQuantForAllUse(
-              graph, quantized_output, original_output, uses);
+              graph, quantized_output, quantized_output, quantized_uses);
         } else {
           // Delete dequantize node, we have one dequantize
           // for each use of the value
