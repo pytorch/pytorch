@@ -1098,15 +1098,24 @@ graph(%input, %weight):
             def __init__(self):
                 super(M, self).__init__()
                 self.conv = torch.nn.Conv2d(3, 3, 3).float()
+                self.avgpool = torch.nn.AvgPool2d(3)
 
             def forward(self, x):
-                return self.conv(x)
+                x = self.conv(x)
+                x = self.avgpool(x)
+                return x
 
         data = [(torch.rand((1, 3, 10, 10), dtype=torch.float), torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
         qconfig_dict = {'': default_qconfig}
         model = torch.jit.script(M()).eval()
         model = quantize_script(model, qconfig_dict, _test_only_eval_fn, [data], inplace=False, debug=True)
         FileCheck().check_not("quantized::conv2d") \
+                   .check("aten::avg_pool2d") \
+                   .check("aten::q_scale") \
+                   .check("aten::q_zero_point") \
+                   .check("prim::dtype") \
+                   .check("aten::quantize_per_tensor") \
+                   .check("aten::dequantize") \
                    .run(model.graph)
 
     def test_module_list(self):

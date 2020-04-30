@@ -2717,27 +2717,30 @@ void quantizeGeneralOps(Block* block) {
           // for ops like average pool, we'll insert quant dequant after the op
           // We'll assume the tensor is a PerTensorAffine quantized Tensor for
           // now, and may generalize later if this becomes an issue
-          auto quant_kind = at::Symbol::aten("quantize_per_tensor");
           TORCH_INTERNAL_ASSERT(inputs.size() == 1, "Expecting single input for the aten function");
-          Value* quantized_input = inputs[0];
+          // input of the dequantize node
+          Value* quantized_input = inputs[0]->node()->input(0);
           // insert ops after the general op
           WithInsertPoint ins(n->next());
           // get quantization parameters from previous quantized op
           Node* scale = insertQParam(graph, quantized_input, at::Symbol::aten("q_scale"), "q_scale");
           Node* zero_point = insertQParam(graph, quantized_input, at::Symbol::aten("q_zero_point"), "q_zero_point");
           Node* dtype = insertQParam(graph, quantized_input, prim::dtype, "dtype");
-          Value* original_val = n->output();
-          std::vector<Value*> quant_inputs = {original_val, scale->output(), zero_point->output(), dtype->output()};
-          Node* quant = insertQuant(graph, quant_inputs, quant_kind, original_val->debugName() + ".quant");
+          Value* original_output = n->output();
+          std::vector<Value*> quant_inputs = {original_output, scale->output(), zero_point->output(), dtype->output()};
+          auto quant_kind = at::Symbol::aten("quantize_per_tensor");
+          Node* quant = insertQuant(graph, quant_inputs, quant_kind, original_output->debugName() + ".quant");
           Value* quantized_output = quant->output();
           // replace uses of original output of the general op with quantized output
-          for (const auto& use : original_val->uses()) {
-            if (use.user != quant) {
-              original_val->replaceAllUsesWith(quantized_output);
+          std::vector<Use> original_uses = original_output->uses();
+          for (const auto& use : original_uses) {
+            auto* user = use.user;
+            if (user != quant) {
+              user->replaceInputWith(original_output, quantized_output);
             }
           }
           std::vector<Use> uses = quantized_output->uses();
-          insertDeQuantForAllUse(graph, quantized_output, quantized_output, uses);
+          insertDeQuantForAllUse(graph, quantized_output, original_output, uses);
         } else {
           // Delete dequantize node, we have one dequantize
           // for each use of the value
