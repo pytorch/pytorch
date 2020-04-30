@@ -272,6 +272,8 @@ class QLinearInt8 final {
       // On mobile, we release the original weight by freeing the underlying storage.
       // Calling unpack after this will throw an assertion.
       pack_ptr.orig_weight.unsafeGetTensorImpl()->release_resources();
+      // Update the size of tensor to reflect freed storage.
+      pack_ptr.orig_weight.resize_(0);
 #endif
     }
 
