@@ -67,10 +67,12 @@ __host__ __device__ static inline thrust::complex<T> sqrt_wrapper(thrust::comple
 }
 
 void sqrt_kernel_cuda(TensorIterator& iter) {
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(ScalarType::Half, iter.dtype(), "sqrt_cuda", [&]() {
-    using thrust_t = typename ztype_cuda<scalar_t>::thrust_t;
-    gpu_kernel(iter, []GPU_LAMBDA(thrust_t a) -> thrust_t {
-      return sqrt_wrapper(a);
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(ScalarType::Half, ScalarType::BFloat16, iter.dtype(), "sqrt_cuda", [&]() {
+    AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "sqrt_cuda", [&] {
+      using thrust_t = typename ztype_cuda<scalar_t>::thrust_t;
+      gpu_kernel(iter, []GPU_LAMBDA(thrust_t a) -> thrust_t {
+        return sqrt_wrapper(a);
+      });
     });
   });
 }
