@@ -249,6 +249,9 @@ class QLinearInt8 final {
           generate_requantization_scales(
               pack_ptr.w_scales, input_scale, output_scale);
 
+      // TODO Kimish, we are allocating affine_quantized regardless of per channel or not.
+      // This allocation is actually used only for packing weight and thus will be freed.
+      // Still we should be consistent. Fix this.
       Tensor qnnp_weight = at::_empty_affine_quantized(
           weight_contig.sizes(),
           at::device(kCPU).dtype(kQUInt8),

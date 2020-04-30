@@ -39,6 +39,7 @@ static void compute_q8gemm_dq(
   const size_t c_stride = context->c_stride;
   const float* bias = context->bias;
 
+  size_t output_channel_index = nr_block_start;
   context->ukernel(
       mr_block_size,
       nr_block_size,
@@ -50,6 +51,7 @@ static void compute_q8gemm_dq(
       c + (pixel_index + mr_block_start) * c_stride + nr_block_start +
           group_index * n,
       c_stride,
+      output_channel_index,
       &context->quantization_params);
 }
 
@@ -58,9 +60,8 @@ enum pytorch_qnnp_status qnnpackLinearDynamic(
     const size_t input_channels,
     const size_t output_channels,
     const uint8_t input_zero_point,
-    const float input_scale,
-    const uint8_t kernel_zero_point,
-    const float kernel_scale,
+    const uint8_t* kernel_zero_points,
+    const float* dequantization_scales,
     const uint8_t* input,
     const size_t input_stride,
     void* packed_weights,
@@ -81,7 +82,7 @@ enum pytorch_qnnp_status qnnpackLinearDynamic(
 
   const struct pytorch_qnnp_conv_dynamic_quantization_params
       quantizationParams {
-    input_zero_point, kernel_zero_point, input_scale *kernel_scale,
+    input_zero_point, kernel_zero_points, dequantization_scales,
   };
 
   struct q8gemm_dq_context q8gemm_dq_context = {

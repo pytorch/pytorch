@@ -366,6 +366,10 @@ class GemmMicrokernelTester {
 
       std::fill(packedW.begin(), packedW.end(), bZeroPoint());
 
+      size_t num_zero_points_padded = n() + 8;
+      std::vector<uint8_t> kernel_zero_points
+        (num_zero_points_padded, bZeroPoint());
+      std::generate(kernel_zero_points.begin(), kernel_zero_points.end(), std::ref(u8rng));
       pytorch_pack_q8gemm_w(
           n(),
           k(),
@@ -378,7 +382,7 @@ class GemmMicrokernelTester {
 #endif
           b.data(),
           nullptr,
-          nullptr,
+          kernel_zero_points.data(),
           packedW.data());
 
       ASSERT_NE(
@@ -388,6 +392,13 @@ class GemmMicrokernelTester {
           *std::max_element(b.cbegin(), b.cend()),
           *std::min_element(b.cbegin(), b.cend()));
 
+      auto f32rng =
+          std::bind(std::uniform_real_distribution<float>(1, 5), rng);
+      std::vector<float> dequantization_scales(num_zero_points_padded);
+      std::generate(
+          dequantization_scales.begin(),
+          dequantization_scales.end(),
+          std::ref(f32rng));
       /* Compute 32-bit results and output quantization arguments */
       std::fill(acc.begin(), acc.end(), 0);
       for (size_t mIndex = 0; mIndex < m(); mIndex++) {
@@ -399,16 +410,19 @@ class GemmMicrokernelTester {
             acc[mIndex * n() + nIndex] +=
                 (int32_t(aPtr[mIndex * aStride() + kIndex]) -
                  int32_t(aZeroPoint())) *
-                (int32_t(b[nIndex * k() + kIndex]) - int32_t(bZeroPoint()));
+                (int32_t(b[nIndex * k() + kIndex]) - int32_t(kernel_zero_points[nIndex]));
           }
-          acc[mIndex * n() + nIndex] = acc[mIndex * n() + nIndex] * multiplier() + bias[nIndex];
+          acc[mIndex * n() + nIndex] =
+            acc[mIndex * n() + nIndex] *
+            dequantization_scales[nIndex] +
+            bias[nIndex];
         }
       }
 
       const struct pytorch_qnnp_conv_dynamic_quantization_params quantizationParams{
         aZeroPoint(),
-        bZeroPoint(),
-        multiplier(),
+        kernel_zero_points.data(),
+        dequantization_scales.data(),
       };
 
       qgemm(
@@ -421,6 +435,7 @@ class GemmMicrokernelTester {
           bias.data(),
           c.data(),
           cStride(),
+          0,
           &quantizationParams);
 
       for (size_t mIndex = 0; mIndex < m(); mIndex++) {

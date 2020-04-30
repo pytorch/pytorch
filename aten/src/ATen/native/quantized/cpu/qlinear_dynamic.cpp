@@ -228,9 +228,6 @@ class QLinearDynamicInt8 final {
         "quantized::linear_dynamic (qnnpack) only supports "
         "Per Tensor Quantization Scheme");
     auto packB = pack_ptr.w.get();
-    // Adjust weight zero point, similar to weight data.
-    auto kernel_zp = pack_ptr.orig_weight.q_zero_point() + 128;
-    auto kernel_scale = pack_ptr.orig_weight.q_scale();
     size_t rows_w = pack_ptr.bias.size(0);
     size_t cols_w = input_contig.size(input_contig.dim() - 1);
 
@@ -254,13 +251,24 @@ class QLinearDynamicInt8 final {
     if (!pack_ptr.input_scale.has_value()) {
       // Get the original weight and adjust it to uint8 from int8
       auto weight_contig = pack_ptr.orig_weight;
-      int8_t* w_data = (int8_t*)weight_contig.data_ptr<c10::qint8>();
+      std::tie(pack_ptr.w_zero_points, pack_ptr.w_scales) =
+          make_zero_points_and_scales_tensor(weight_contig);
+      uint8_t* weight_zp_data = (uint8_t*)pack_ptr.w_zero_points.data_ptr<c10::quint8>();
+      float* weight_scales_data = pack_ptr.w_scales.data_ptr<float>();
+      pack_ptr.requantization_scale =
+          generate_requantization_scales(
+              pack_ptr.w_scales, q_params.scale, 1.f);
+
+      // TODO Kimish, we are allocating affine_quantized regardless of per channel or not.
+      // This allocation is actually used only for packing weight and thus will be freed.
+      // Still we should be consistent. Fix this.
       Tensor qnnp_weight = at::_empty_affine_quantized(
           weight_contig.sizes(),
           at::device(kCPU).dtype(kQUInt8),
-          kernel_scale,
-          kernel_zp);
+          weight_scales_data[0],
+          weight_zp_data[0]);
       auto* qnnp_w_data = qnnp_weight.data_ptr<c10::quint8>();
+      int8_t* w_data = (int8_t*)weight_contig.data_ptr<c10::qint8>();
       auto wt_numel = weight_contig.numel();
       for (int i = 0; i < wt_numel; ++i) {
         qnnp_w_data[i] = static_cast<c10::quint8>(w_data[i] + 128);
@@ -273,8 +281,8 @@ class QLinearDynamicInt8 final {
       pack_ptr.w = std::make_unique<qnnpack::PackBMatrix>(
           cols_w /* input_channels */,
           rows_w /* output_channels */,
-          kernel_zp,
-          kernel_scale,
+          weight_zp_data,
+          pack_ptr.requantization_scale.data(),
           (uint8_t*)qnnp_w_data,
           nullptr);
       packB = pack_ptr.w.get();
@@ -303,9 +311,9 @@ class QLinearDynamicInt8 final {
         cols_input /* input_channels */,
         rows_w /* output_channels */,
         q_input.q_zero_point(),
-        q_input.q_scale(),
-        kernel_zp,
-        kernel_scale,
+        (uint8_t*)pack_ptr.w_zero_points.data_ptr<c10::quint8>(),
+        /* for dynamic should really be called dequant scale */
+        pack_ptr.requantization_scale.data(),
         (uint8_t*)q_input.data_ptr<c10::quint8>(),
         cols_input /* input_stride */,
         packB->getPackedWeights(),

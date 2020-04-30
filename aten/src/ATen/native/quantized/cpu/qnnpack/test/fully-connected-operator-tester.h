@@ -157,19 +157,11 @@ class FullyConnectedOperatorTester {
       for (size_t i = 0; i < batchSize(); i++) {
         for (size_t oc = 0; oc < outputChannels(); oc++) {
           for (size_t ic = 0; ic < inputChannels(); ic++) {
-            if (mode == Mode::Dynamic) {
-              accumulators[i * outputChannels() + oc] +=
-                  (int32_t(inputPtr[i * inputStride() + ic]) -
-                   int32_t(inputZeroPoint)) *
-                  (int32_t(kernel[oc * inputChannels() + ic]) -
-                   int32_t(kernelZeroPoints[0]));
-            } else {
-              accumulators[i * outputChannels() + oc] +=
-                  (int32_t(inputPtr[i * inputStride() + ic]) -
-                   int32_t(inputZeroPoint)) *
-                  (int32_t(kernel[oc * inputChannels() + ic]) -
-                   int32_t(kernelZeroPoints[oc]));
-            }
+            accumulators[i * outputChannels() + oc] +=
+                (int32_t(inputPtr[i * inputStride() + ic]) -
+                 int32_t(inputZeroPoint)) *
+                (int32_t(kernel[oc * inputChannels() + ic]) -
+                 int32_t(kernelZeroPoints[oc]));
           }
         }
       }
@@ -252,8 +244,8 @@ class FullyConnectedOperatorTester {
               new qnnpack::PackBMatrix(
                   inputChannels(),
                   outputChannels(),
-                  kernelZeroPoints[0],
-                  1.0f,
+                  kernelZeroPoints.data(),
+                  requantization_scales.data(),
                   kernel.data(),
                   nullptr));
 
@@ -268,9 +260,8 @@ class FullyConnectedOperatorTester {
               inputChannels() /* input_channels */,
               outputChannels() /* output_channels */,
               inputZeroPoint,
-              1.0f /* input scale */,
-              kernelZeroPoints[0],
-              1.0f /* kernel scale */,
+              kernelZeroPoints.data(),
+              requantization_scales.data(), /* Dequantization scale */
               inputPtr,
               inputChannels() /* input_stride */,
               packW->getPackedWeights(),
@@ -343,13 +334,22 @@ class FullyConnectedOperatorTester {
 
         case Mode::Dynamic:
         {
+          // Bias is added post scaling, as float.
+          for (size_t i = 0; i < batchSize(); i++) {
+            for (size_t oc = 0; oc < outputChannels(); oc++) {
+              accumulators[i * outputChannels() + oc] -= bias[oc];
+            }
+          }
           for (size_t i = 0; i < batchSize(); i++) {
             for (size_t c = 0; c < outputChannels(); c++) {
               ASSERT_EQ(
                   output_dynamic[i * outputChannels() + c],
-                  (float)accumulators[i * outputChannels() + c])
+                  ((float)accumulators[i * outputChannels() + c] *
+                  requantization_scales[c]) + float(bias[c]))
                   << "at " << i << ", " << c
-                  << ": reference = " << (float)accumulators[i * outputChannels() + c]
+                  << ": reference = " <<
+                  ((float)accumulators[i * outputChannels() + c] *
+                  requantization_scales[c]) + float(bias[c])
                   << ", optimized = " << output_dynamic[i * outputChannels() + c];
             }
           }

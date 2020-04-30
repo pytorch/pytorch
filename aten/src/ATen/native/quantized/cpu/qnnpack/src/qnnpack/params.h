@@ -166,8 +166,8 @@ union pytorch_qnnp_conv_quantization_params {
 
 struct pytorch_qnnp_conv_dynamic_quantization_params {
   int16_t input_zero_point;
-  int16_t kernel_zero_point;
-  float multiplier;
+  const uint8_t* kernel_zero_points;
+  const float* multipliers;
 };
 
 union pytorch_qnnp_requantization_params {
@@ -314,6 +314,7 @@ typedef void (*pytorch_q8gemm_dq_ukernel_function)(
     const float* bias,
     float* c,
     size_t c_stride,
+    size_t output_channel_index,
     const struct pytorch_qnnp_conv_dynamic_quantization_params* quantization_params);
 
 typedef void (*pytorch_q8conv_ukernel_function)(
