@@ -1686,6 +1686,14 @@ if _enabled:
         @property
         def code_with_constants(self):
             r"""
+            Returns a tuple of:
+
+            [0] a pretty-printed representation (as valid Python syntax) of
+            the internal graph for the ``forward`` method. See `code`.
+            [1] a ConstMap following the CONSTANT.cN format of the output in [0].
+            The indices in the [0] output are keys to the underlying constant's values.
+
+            See `Inspecting Code`_ for details.
             """
             r = self.forward.code_with_constants
             return (r[0], ConstMap(r[1]))
