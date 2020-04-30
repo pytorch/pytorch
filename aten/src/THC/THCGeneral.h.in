@@ -73,6 +73,4 @@ at::DataPtr THCudaHostAlloc(THCState *state, size_t size);
 
 THC_API void THCudaHostRecord(THCState *state, void *ptr);
 
-THC_API cudaError_t THCudaMemGetInfo(THCState *state, size_t* freeBytes, size_t* totalBytes, size_t* largestBlock);
-
 #endif
