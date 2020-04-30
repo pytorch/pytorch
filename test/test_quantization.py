@@ -9,6 +9,7 @@ from quantization.test_quantized_tensor import TestQuantizedTensor  # noqa: F401
 from quantization.test_quantized_op import TestQuantizedOps  # noqa: F401
 from quantization.test_quantized_op import TestQNNPackOps  # noqa: F401
 from quantization.test_quantized_op import TestQuantizedLinear  # noqa: F401
+from quantization.test_quantized_op import TestQuantizedConv  # noqa: F401
 from quantization.test_quantized_op import TestDynamicQuantizedLinear  # noqa: F401
 from quantization.test_quantized_op import TestComparatorOps  # noqa: F401
 

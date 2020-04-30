@@ -11196,6 +11196,54 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual((1, 1, 0), torch.tensor([[[]]], device=device).shape)
         self.assertEqual((1, 1, 0), torch.as_tensor([[[]]], device=device).shape)
 
+    @onlyOnCPUAndCUDA
+    def test_vander(self, device):
+        x = torch.tensor([1, 2, 3, 5], device=device)
+
+        self.assertEqual((0, 0), torch.vander(torch.tensor([]), 0).shape)
+
+        with self.assertRaisesRegex(RuntimeError, "N must be non-negative."):
+            torch.vander(x, N=-1)
+
+        with self.assertRaisesRegex(RuntimeError, "x must be a one-dimensional tensor."):
+            torch.vander(torch.stack((x, x)))
+
+        # This passes on the xla backend
+        if device != 'xla':
+            with self.assertRaises(RuntimeError):
+                torch.vander(x.to(torch.complex64))
+
+    @unittest.skipIf(not TEST_NUMPY, 'NumPy not found')
+    @onlyOnCPUAndCUDA
+    @dtypes(torch.bool, torch.uint8, torch.int8, torch.short, torch.int, torch.long, torch.float, torch.double)
+    def test_vander_types(self, device, dtype):
+        if dtype is torch.uint8:
+            # Note: no negative uint8 values
+            X = [[1, 2, 3, 5], [0, 1 / 3, 1, math.pi, 3 / 7]]
+        elif dtype is torch.bool:
+            # Note: see https://github.com/pytorch/pytorch/issues/37398
+            # for why this is necessary.
+            X = [[True, True, True, True], [False, True, True, True, True]]
+        else:
+            X = [[1, 2, 3, 5], [-math.pi, 0, 1 / 3, 1, math.pi, 3 / 7]]
+
+        N = [None, 0, 1, 3]
+        increasing = [False, True]
+
+        for x, n, inc in product(X, N, increasing):
+            numpy_dtype = torch_to_numpy_dtype_dict[dtype]
+            pt_x = torch.tensor(x, device=device, dtype=dtype)
+            np_x = np.array(x, dtype=numpy_dtype)
+
+            pt_res = torch.vander(pt_x, increasing=inc) if n is None else torch.vander(pt_x, n, inc)
+            np_res = np.vander(np_x, n, inc)
+
+            self.assertEqual(
+                pt_res,
+                torch.from_numpy(np_res),
+                atol=1e-3,
+                exact_dtype=False)
+
     def test_eye(self, device):
         for dtype in torch.testing.get_all_dtypes():
             if dtype == torch.bfloat16:
@@ -11329,8 +11377,21 @@ class TestTorchDeviceType(TestCase):
         res2 = torch.tensor((), device=device, dtype=dtype)
         torch.linspace(_from, to, 137, dtype=dtype, out=res2)
         self.assertEqual(res1, res2, 0)
-        self.assertRaises(RuntimeError, lambda: torch.linspace(0, 1, -1, device=device))
-        self.assertEqual(torch.linspace(0, 1, 1, device=device), torch.zeros(1, device=device), 0)
+
+        # small tensor
+        self.assertEqual(torch.linspace(10, 20, 11, device=device, dtype=dtype),
+                         torch.tensor(list(range(10, 21)), device=device, dtype=dtype))
+        # large tensor
+        if dtype not in (torch.int8, torch.uint8):
+            self.assertEqual(torch.linspace(10, 2000, 1991, device=device, dtype=dtype),
+                             torch.tensor(list(range(10, 2001)), device=device, dtype=dtype))
+
+        self.assertRaises(RuntimeError, lambda: torch.linspace(0, 1, -1, device=device, dtype=dtype))
+        # steps = 1
+        self.assertEqual(torch.linspace(0, 1, 1, device=device, dtype=dtype),
+                         torch.zeros(1, device=device, dtype=dtype), 0)
+        # steps = 0
+        self.assertEqual(torch.linspace(0, 1, 0, device=device, dtype=dtype).numel(), 0)
 
         # Check linspace for generating the correct output for each dtype.
         expected_lin = torch.tensor([-100. + .5 * i for i in range(401)], device=device, dtype=torch.double)
@@ -11351,6 +11412,14 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(torch.linspace(2, 0, 3, device=device, dtype=dtype),
                          torch.tensor((2, 1, 0), device=device, dtype=dtype),
                          0)
+
+        # Check for race condition (correctness when applied on a large tensor).
+        if dtype not in (torch.int8, torch.uint8, torch.int16, torch.half):
+            y = torch.linspace(0, 1000000 - 1, 1000000, device=device, dtype=dtype)
+            correct = True
+            for i in range(y.shape[0] - 1):
+                correct = correct and y[i] < y[i + 1]
+            self.assertTrue(correct)
 
         # Check linspace for non-contiguous tensors.
         x = torch.zeros(2, 3, device=device, dtype=dtype)
@@ -12198,7 +12267,7 @@ class TestTorchDeviceType(TestCase):
             ("ceil", doubles, True, True, 'cpu'),
             ("ceil", doubles, True, True, 'cuda'),
             ("cos", doubles, True, True, 'cpu'),
-            ("cos", doubles, False, True, 'cuda'),
+            ("cos", doubles, True, True, 'cuda'),
             ("cosh", doubles, True, True, 'cpu'),
             ("cosh", doubles, True, True, 'cuda'),
             ("digamma", doubles, True, True, 'cpu'),
