@@ -9,6 +9,8 @@
 #include <mutex>
 #include <list>
 
+#include <ATen/core/boxing/impl/boxing.h>
+
 namespace c10 {
 
 class CAFFE2_API OperatorHandle;
@@ -303,6 +305,19 @@ IVALUE_COPY_FOR_TYPE(int64_t);
 IVALUE_COPY_FOR_TYPE(int32_t);
 IVALUE_COPY_FOR_TYPE(bool);
 
+
+// currently not working with incomplete type
+template <typename T, std::enable_if_t<c10::impl::not_ok_to_box<T>::value>* = nullptr>
+inline bool push_ivalue_copy(std::vector<c10::IValue>& stack, const T& v) {
+  // don't do anything with stack
+  return false;
+}
+template <typename T, std::enable_if_t<!c10::impl::not_ok_to_box<T>::value>* = nullptr>
+inline bool push_ivalue_copy(std::vector<c10::IValue>& stack, const T& v) {
+  torch::jit::push(stack, v);
+  return true;
+}
+
 template<class Return, class... Args>
 inline Return Dispatcher::callUnboxedWithDispatchKey(const OperatorHandle& op, DispatchKey dispatchKey, Args... args) const {
   detail::unused_arg_(args...);  // workaround for a false-positive warning about unused parameters in gcc 5
@@ -311,6 +326,9 @@ inline Return Dispatcher::callUnboxedWithDispatchKey(const OperatorHandle& op, D
 
   // RECORD_FUNCTION macro will attempt to box the arguments only if we have active observers enabled
   RECORD_FUNCTION(op.schema().name(), std::vector<c10::IValue>{get_ivalue_copy(args)...}, at::FunctionSequenceNumber::peek());
+
+  //std::vector<c10::IValue> stack;
+  //auto v = std::vector<bool>{push_ivalue_copy(stack, args)...};
 
   return kernel.template callUnboxed<Return, Args...>(op, std::forward<Args>(args)...);
 }
