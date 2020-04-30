@@ -42,6 +42,16 @@ def gen_transitive_closure(dep_graph, root_ops):
     result = set(root_ops)
     queue = root_ops[:]
 
+    # The dependency graph might contain a special entry with key = `__BASE__`
+    # and value = (set of `base` ops to always include in custom build).
+    queue.append('__BASE__')
+
+    # The dependency graph might contain a special entry with key = `__ROOT__`
+    # and value = (set of ops reachable from C++ functions). Insert the special
+    # `__ROOT__` key to include ops which can be called from C++ code directly,
+    # in addition to ops that are called from TorchScript model.
+    queue.append('__ROOT__')
+
     while queue:
         cur = queue.pop()
         for dep in dep_graph.get(cur, []):

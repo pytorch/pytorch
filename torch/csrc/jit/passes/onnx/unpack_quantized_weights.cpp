@@ -17,6 +17,11 @@ using namespace ::c10::onnx;
 template <class Result, class... Args>
 inline Result callOpUnboxed(const c10::OperatorHandle& op, Args... args) {
   at::AutoNonVariableTypeMode non_var_type_mode(true);
+  // Temporary hack: when the `Profiler` dispatch key is inserted, this call
+  // will fail since the `unpack()` ops return multiple values, however the
+  // boxing code currently does not support this. Instead, exclude the Profiler
+  // dispatch key and go through unboxed dispatch, avoiding boxing altogether
+  c10::impl::ExcludeDispatchKeyGuard key_guard(c10::DispatchKey::Profiler);
   return c10::Dispatcher::singleton().template callUnboxed<Result, Args...>(
       op, std::forward<Args>(args)...);
 }
@@ -40,7 +45,10 @@ double getScaleFromInput(Node* input_node) {
                                                  "aten::slice",
                                                  "aten::avg_pool2d",
                                                  "quantized::cat",
-                                                 "prim::ListConstruct"};
+                                                 "prim::ListConstruct",
+                                                 "aten::upsample_nearest2d",
+                                                 "aten::sigmoid",
+                                                 "aten::reshape"};
   if (input_name == "aten::quantize_per_tensor") {
     TORCH_CHECK(
         input_node->inputs().size() > 1,

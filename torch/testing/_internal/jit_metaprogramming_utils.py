@@ -1,5 +1,4 @@
 # Torch
-from torch._six import PY2
 from torch.jit.annotations import BroadcastingList2, BroadcastingList3  # noqa: F401
 from torch.testing._internal.common_methods_invocations import non_differentiable, create_input, \
     unpack_variables
@@ -15,6 +14,7 @@ import math  # noqa: F401
 
 # Testing utils
 from torch._six import inf
+torch.set_default_dtype(torch.double)
 
 L = 20
 M = 10
@@ -248,9 +248,9 @@ def get_call(method_name, func_type, args, kwargs):
 
 def get_constant(x):
     if x == inf:
-        return 'float(\'inf\')' if PY2 else 'math.inf'
+        return 'math.inf'
     if x == -inf:
-        return 'float(\'-inf\')' if PY2 else '-math.inf'
+        return '-math.inf'
     return x
 
 def get_script_args(args):
@@ -443,6 +443,14 @@ def get_nn_mod_test_name(**kwargs):
     if 'desc' in kwargs:
         test_name = "{}_{}".format(test_name, kwargs['desc'])
     return 'test_nn_{}'.format(test_name)
+
+def get_nn_module_class_from_kwargs(**kwargs):
+    name = get_nn_module_name_from_kwargs(**kwargs)
+    index = name.find("_")
+    if index == -1:
+        return name
+    else:
+        return name[0:name.find("_")]
 
 def try_get_nn_module_compiled_mod_and_inputs(*args, **kwargs):
     name = get_nn_module_name_from_kwargs(**kwargs)

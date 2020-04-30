@@ -4,6 +4,8 @@
             branches:
               only:
                 - master
+                - /ci-all\/.*/
+                - /release\/.*/
           requires:
             - pytorch_linux_xenial_py3_clang5_android_ndk_r19c_x86_32_build
 
@@ -13,6 +15,8 @@
             branches:
               only:
                 - master
+                - /ci-all\/.*/
+                - /release\/.*/
           requires:
             - pytorch_linux_xenial_py3_clang5_android_ndk_r19c_x86_32_build
             - pytorch_linux_xenial_py3_clang5_android_ndk_r19c_x86_64_build

@@ -6,6 +6,7 @@
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/frontend/error_report.h>
 #include <torch/csrc/jit/frontend/schema_matching.h>
+#include <torch/csrc/jit/frontend/versioned_symbols.h>
 #include <torch/csrc/jit/ir/ir.h>
 
 namespace torch {
@@ -284,8 +285,15 @@ struct TORCH_API BuiltinModule : public SugaredValue {
       // methods under its module.
       return std::make_shared<BuiltinModule>("aten", version);
     }
-    return std::make_shared<BuiltinFunction>(
-        Symbol::fromQualString(name + "::" + field), c10::nullopt);
+
+    auto sym = Symbol::fromQualString(name + "::" + field);
+    if (version.has_value()) {
+      // Possibly replaces symbol with another that implements its
+      // historic behavior.
+      // See note [Versioned Symbols]
+      sym = get_symbol_for_version(sym, *version);
+    }
+    return std::make_shared<BuiltinFunction>(sym, c10::nullopt);
   }
 
  private:

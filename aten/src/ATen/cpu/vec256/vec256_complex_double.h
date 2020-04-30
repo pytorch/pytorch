@@ -2,7 +2,7 @@
 
 #include <ATen/cpu/vec256/intrinsics.h>
 #include <ATen/cpu/vec256/vec256_base.h>
-#if defined(__AVX__) && !defined(_MSC_VER)
+#if (defined(CPU_CAPABILITY_AVX) || defined(CPU_CAPABILITY_AVX2)) && !defined(_MSC_VER)
 #include <sleef.h>
 #endif
 
@@ -11,11 +11,12 @@ namespace vec256 {
 // See Note [Acceptable use of anonymous namespace in header]
 namespace {
 
-#if defined(__AVX__) && !defined(_MSC_VER)
+#if (defined(CPU_CAPABILITY_AVX) || defined(CPU_CAPABILITY_AVX2)) && !defined(_MSC_VER)
 
 template <> class Vec256<std::complex<double>> {
 private:
   __m256d values;
+  static const Vec256<std::complex<double>> ones;
 public:
   using value_type = std::complex<double>;
   static constexpr int size() {
@@ -210,7 +211,8 @@ public:
     exp = _mm256_blend_pd(exp, _mm256_permute_pd(exp, 0x05), 0x0A);   //exp(a)           exp(a)
 
     auto sin_cos = Sleef_sincosd4_u10(values);                        //[sin(a), cos(a)] [sin(b), cos(b)]
-    auto cos_sin = _mm256_blend_pd(sin_cos.y, sin_cos.x, 0x0A);       //cos(b)           sin(b)
+    auto cos_sin = _mm256_blend_pd(_mm256_permute_pd(sin_cos.y, 0x05),
+                                   sin_cos.x, 0x0A);                  //cos(b)           sin(b)
     return _mm256_mul_pd(exp, cos_sin);
   }
   Vec256<std::complex<double>> expm1() const {
@@ -288,16 +290,31 @@ public:
     return _mm256_cmp_pd(values, other.values, _CMP_NEQ_OQ);
   }
   Vec256<std::complex<double>> operator<(const Vec256<std::complex<double>>& other) const {
-    AT_ERROR("not supported for complex numbers");
+    TORCH_CHECK(false, "not supported for complex numbers");
   }
   Vec256<std::complex<double>> operator<=(const Vec256<std::complex<double>>& other) const {
-    AT_ERROR("not supported for complex numbers");
+    TORCH_CHECK(false, "not supported for complex numbers");
   }
   Vec256<std::complex<double>> operator>(const Vec256<std::complex<double>>& other) const {
-    AT_ERROR("not supported for complex numbers");
+    TORCH_CHECK(false, "not supported for complex numbers");
   }
   Vec256<std::complex<double>> operator>=(const Vec256<std::complex<double>>& other) const {
-    AT_ERROR("not supported for complex numbers");
+    TORCH_CHECK(false, "not supported for complex numbers");
+  }
+
+  Vec256<std::complex<double>> eq(const Vec256<std::complex<double>>& other) const;
+  Vec256<std::complex<double>> ne(const Vec256<std::complex<double>>& other) const;
+  Vec256<std::complex<double>> lt(const Vec256<std::complex<double>>& other) const {
+    TORCH_CHECK(false, "not supported for complex numbers");
+  }
+  Vec256<std::complex<double>> le(const Vec256<std::complex<double>>& other) const {
+    TORCH_CHECK(false, "not supported for complex numbers");
+  }
+  Vec256<std::complex<double>> gt(const Vec256<std::complex<double>>& other) const {
+    TORCH_CHECK(false, "not supported for complex numbers");
+  }
+  Vec256<std::complex<double>> ge(const Vec256<std::complex<double>>& other) const {
+    TORCH_CHECK(false, "not supported for complex numbers");
   }
 };
 
@@ -421,11 +438,15 @@ Vec256<std::complex<double>> inline operator^(const Vec256<std::complex<double>>
   return _mm256_xor_pd(a, b);
 }
 
-#ifdef __AVX2__
-template <> inline Vec256<std::complex<double>> fmadd(const Vec256<std::complex<double>>& a, const Vec256<std::complex<double>>& b, const Vec256<std::complex<double>>& c) {
-  return a * b + c;
+const Vec256<std::complex<double>> Vec256<std::complex<double>>::ones(_mm256_set1_pd(1.0));
+
+Vec256<std::complex<double>> Vec256<std::complex<double>>::eq(const Vec256<std::complex<double>>& other) const {
+  return (*this == other) & Vec256<std::complex<double>>::ones;
 }
-#endif
+
+Vec256<std::complex<double>> Vec256<std::complex<double>>::ne(const Vec256<std::complex<double>>& other) const {
+  return (*this != other) & Vec256<std::complex<double>>::ones;
+}
 
 #endif
 

@@ -16,6 +16,8 @@ import os
 import shutil
 import torch.testing._internal.common_utils as common
 
+import unittest
+
 '''Usage: python test/onnx/test_operators.py [--no-onnx] [--produce-onnx-test-data]
           --no-onnx: no onnx python dependence
           --produce-onnx-test-data: generate onnx test data
@@ -255,11 +257,6 @@ class TestOperators(TestCase):
     def test_batchnorm_training(self):
         x = torch.ones(2, 2, 2, 2, requires_grad=True)
         self.assertONNX(nn.BatchNorm2d(2), x, training=torch.onnx.TrainingMode.TRAINING, keep_initializers_as_inputs=True)
-
-    def test_batchnorm_training_opset12(self):
-        x = torch.ones(2, 2, 2, 2, requires_grad=True)
-        self.assertONNX(nn.BatchNorm2d(2), x, training=torch.onnx.TrainingMode.TRAINING,
-                        keep_initializers_as_inputs=True, opset_version=12)
 
     def test_conv(self):
         x = torch.ones(20, 16, 50, 40, requires_grad=True)
@@ -877,6 +874,41 @@ class TestOperators(TestCase):
         x = torch.randn(2, 3, 5, 5, device=torch.device('cpu'))
         self.assertONNX(lambda x: torch.det(x), x, opset_version=11)
 
+    @unittest.skip("disable test until onnx submodule is updated")
+    def test_softmaxcrossentropy(self):
+        x = torch.randn(3, 5)
+        y = torch.empty(3, dtype=torch.long).random_(5)
+        self.assertONNX(torch.nn.CrossEntropyLoss(), (x, y), opset_version=12)
+
+    @unittest.skip("disable test until onnx submodule is updated")
+    def test_softmaxcrossentropy_ignore_index(self):
+        x = torch.randn(3, 5)
+        y = torch.empty(3, dtype=torch.long).random_(5)
+        self.assertONNX(torch.nn.CrossEntropyLoss(ignore_index=1), (x, y), opset_version=12)
+
+    @unittest.skip("disable test until onnx submodule is updated")
+    def test_softmaxcrossentropy_weights(self):
+        x = torch.randn(3, 5)
+        y = torch.empty(3, dtype=torch.long).random_(5)
+        self.assertONNX(torch.nn.CrossEntropyLoss(weight=torch.randn(5)), (x, y), opset_version=12)
+
+    @unittest.skip("disable test until onnx submodule is updated")
+    def test_softmaxcrossentropy_3d(self):
+        x = torch.randn(3, 5, 2)
+        y = torch.empty(3, 2, dtype=torch.long).random_(5)
+        self.assertONNX(torch.nn.CrossEntropyLoss(), (x, y), opset_version=12)
+
+    @unittest.skip("disable test until onnx submodule is updated")
+    def test_softmaxcrossentropy_3d_none(self):
+        x = torch.randn(3, 5, 2)
+        y = torch.empty(3, 2, dtype=torch.long).random_(5)
+        self.assertONNX(torch.nn.CrossEntropyLoss(reduction='none'), (x, y), opset_version=12)
+
+    @unittest.skip("disable test until onnx submodule is updated")
+    def test_softmaxcrossentropy_4d(self):
+        x = torch.randn(3, 5, 2, 1)
+        y = torch.empty(3, 2, 1, dtype=torch.long).random_(5)
+        self.assertONNX(torch.nn.CrossEntropyLoss(), (x, y), opset_version=12)
 
 if __name__ == '__main__':
     no_onnx_dep_flag = '--no-onnx'

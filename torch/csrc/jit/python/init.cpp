@@ -30,6 +30,7 @@
 #include <torch/csrc/jit/passes/onnx/constant_fold.h>
 #include <torch/csrc/jit/passes/onnx/fixup_onnx_conditionals.h>
 #include <torch/csrc/jit/passes/onnx/fixup_onnx_loop.h>
+#include <torch/csrc/jit/passes/onnx/function_substitution.h>
 #include <torch/csrc/jit/passes/onnx/peephole.h>
 #include <torch/csrc/jit/passes/onnx/prepare_division_for_onnx.h>
 #include <torch/csrc/jit/passes/onnx/prepare_inplace_ops_for_onnx.h>
@@ -122,6 +123,7 @@ void initJITBindings(PyObject* module) {
       .def("_jit_pass_onnx_preprocess_caffe2", PreprocessCaffe2Ops)
       .def("_jit_pass_onnx", ToONNX)
       .def("_jit_pass_lower_all_tuples", LowerAllTuples)
+      .def("_jit_pass_onnx_function_substitution", ONNXFunctionCallSubstitution)
       .def(
           "_jit_pass_onnx_peephole",
           [](std::shared_ptr<Graph>& graph,
@@ -271,7 +273,10 @@ void initJITBindings(PyObject* module) {
           [](std::shared_ptr<Graph>& g) { return CreateFunctionalGraphs(g); })
       .def(
           "_jit_pass_remove_mutation",
-          [](std::shared_ptr<Graph>& g) { return RemoveMutation(g); })
+          [](std::shared_ptr<Graph>& g) {
+            RemoveListMutation(g);
+            return RemoveTensorMutation(g);
+          })
       .def(
           "_jit_pass_inline_functional_graphs",
           [](std::shared_ptr<Graph>& g) { return InlineFunctionalGraphs(g); })
@@ -282,6 +287,9 @@ void initJITBindings(PyObject* module) {
           },
           py::arg("graph"),
           py::arg("addmm_fusion_enabled") = false)
+      .def(
+          "_jit_pass_fuse_addmm",
+          [](std::shared_ptr<Graph>& g) { return FuseAddMM(g); })
       .def(
           "_jit_pass_canonicalize",
           [](const std::shared_ptr<Graph>& g) { return Canonicalize(g); })
@@ -375,14 +383,8 @@ void initJITBindings(PyObject* module) {
       .def("_jit_pass_canonicalize_ops", CanonicalizeOps)
       .def("_jit_pass_decompose_ops", DecomposeOps)
       .def("_jit_pass_specialize_autogradzero", specializeAutogradZero)
-      .def("_jit_can_fuse_on_cpu", &canFuseOnCPU)
-      .def("_jit_can_fuse_on_gpu", &canFuseOnGPU)
       .def("_jit_override_can_fuse_on_cpu", &overrideCanFuseOnCPU)
       .def("_jit_override_can_fuse_on_gpu", &overrideCanFuseOnGPU)
-      .def(
-          "_jit_register_tensorexpr_fuser",
-          &RegisterTensorExprFuser::registerPass)
-      .def("_jit_clear_tensorexpr_fuser", &RegisterTensorExprFuser::clearPass)
       .def("_jit_can_fuse_on_cpu", &canFuseOnCPU)
       .def("_jit_can_fuse_on_gpu", &canFuseOnGPU)
       .def(
@@ -491,6 +493,8 @@ void initJITBindings(PyObject* module) {
             using namespace torch::jit::tensorexpr;
             return getTECudaPointwiseBlockSize() = block_size;
           })
+      .def("_jit_set_texpr_fuser_enabled", &setTensorExprFuserEnabled)
+      .def("_jit_texpr_fuser_enabled", &tensorExprFuserEnabled)
       .def(
           "_jit_fuser_get_fused_kernel_code",
           [](Graph& g, std::vector<at::Tensor> inps) {
@@ -504,6 +508,11 @@ void initJITBindings(PyObject* module) {
       .def(
           "_jit_pass_insert_prepacked_ops",
           [](script::Module& module) { return insertPrePackedOps(module); })
+      .def(
+          "_jit_pass_fuse_clamp_w_prepacked_linear_conv",
+          [](script::Module& module) {
+            return fusePrePackedLinearConvWithClamp(module);
+          })
       .def(
           "_jit_pass_fold_prepacking_ops",
           [](script::Module& module) { return FoldPrePackingOps(module); })

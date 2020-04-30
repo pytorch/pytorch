@@ -73,7 +73,7 @@ struct TORCH_API RRefForkData {
 //
 // TODO: current RRef implementation does not tolerate failures
 //
-// The RRef design aims to handle transient network failures by retrying
+// The RRef design handles transient network failures by retrying
 // messages. Node crashes or permanent network partition is beyond the scope.
 // When those incidents occur, the application may take down all workers, revert
 // to the previous checkpoint, and resume training.
@@ -81,7 +81,8 @@ struct TORCH_API RRefForkData {
 // 2. Non-idempotent UDFs
 //
 // We assume UDFs are not idempotent and therefore cannot be retried. However,
-// internal RRef control messages will be made idempotent and retryable.
+// internal RRef control messages are idempotent and retried upon message
+// failure.
 //
 // TODO: RRef internal messages are not yet idempotent
 //
@@ -218,6 +219,19 @@ class TORCH_API RRef : public RRefInterface {
     return type_;
   }
 
+  // Save the future corresponding to the creation of this RRef on a remote
+  // node. Note that this is only set when processing requests invoked with
+  // rpc.remote. This is only used to get the future corresponding to the rref
+  // for profiling use cases.
+  inline void registerOwnerCreationFuture(std::shared_ptr<FutureMessage> fut) {
+    ownerCreationFuture_ = std::move(fut);
+  }
+
+  // Get the future corresponding to the creation of this rref.
+  inline std::shared_ptr<FutureMessage> getOwnerCreationFuture() const {
+    return ownerCreationFuture_;
+  }
+
   // Send delete UserRRef request to Owner,
   // if the request hasn't been sent yet.
   // There are 2 cases to call it,
@@ -239,6 +253,8 @@ class TORCH_API RRef : public RRefInterface {
   // type field to denote the type of the element that the RRef is holding
   // it could be any TypePtr that JIT support, including PyObjectType
   const TypePtr type_;
+  // Future corresponding to request to create RRef on remote node.
+  std::shared_ptr<FutureMessage> ownerCreationFuture_;
 };
 
 // ``UserRRef`` represents a user of an RRef. Besides the ``RRefId``, each user
@@ -350,16 +366,17 @@ class TORCH_API OwnerRRef final : public RRef {
   // Has a value or error been set?
   bool hasValue() const;
   // Gets a future that is satisfied when the value or error is set.
-  std::shared_ptr<FutureMessage> getFuture();
+  std::shared_ptr<FutureIValue> getFuture();
 
  private:
   friend class RRefContext;
 
+  // See #32608 for dicussion on whether value_ should be merged into future_
   c10::optional<IValue> value_;
   c10::optional<std::string> error_;
   mutable std::mutex mutex_;
   mutable std::condition_variable valueCV_;
-  std::shared_ptr<FutureMessage> future_;
+  std::shared_ptr<FutureIValue> future_;
 };
 
 } // namespace rpc

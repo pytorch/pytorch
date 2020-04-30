@@ -18,7 +18,7 @@ import warnings
 from torch._six import string_classes
 from torch.jit import _unique_state_dict
 from torch.onnx import ONNX_ARCHIVE_MODEL_PROTO_NAME, ExportTypes, OperatorExportTypes, TrainingMode
-from torch._C import ListType, _propagate_and_assign_input_shapes, _assign_output_shapes, _check_onnx_proto
+from torch._C import ListType, OptionalType, _propagate_and_assign_input_shapes, _assign_output_shapes, _check_onnx_proto
 
 
 # the flag to tell the user whether it's in the middle of ONNX export or not
@@ -43,8 +43,8 @@ def select_model_mode_for_export(model, mode):
             if is_originally_training:
                 warnings.warn("You are exporting the model to ONNX while in training mode with "
                               "'train' parameter not specified. The model will default to inference mode export. "
-                              "If you wish to export a training amenable ONNX model, specify train=TrainingMode.TRAIN or "
-                              "train=TrainingMode.PRESERVE (to preserve the original model state) in torch.onnx.export().")
+                              "If you wish to export a training amenable ONNX model, specify training=TrainingMode.TRAINING or "
+                              "training=TrainingMode.PRESERVE (to preserve the original model state) in torch.onnx.export().")
 
         # if mode == TrainingMode.EVAL or (mode == TrainingMode.PRESERVE and not is_originally_training) => is_training = False
         is_export_training = False
@@ -92,24 +92,33 @@ def export(model, args, f, export_params=True, verbose=False, training=None,
             use_external_data_format=use_external_data_format)
 
 
+def _is_constant_tensor_list(node):
+    if node.kind() != "prim::Constant":
+        return False
+    output_type = node.output().type()
+    if output_type.isSubtypeOf(ListType.ofTensors()):
+        return True
+    if output_type.isSubtypeOf(ListType(OptionalType.ofTensor())):
+        return True
+
 # ONNX can't handle constants that are lists of tensors, which can
 # get generated in constant prop. So we split them back into prim::ListConstructs
 def _split_tensor_list_constants(g, block):
     for node in block.nodes():
         for subblock in node.blocks():
             _split_tensor_list_constants(g, subblock)
-        if node.kind() == "prim::Constant":
-            output_type = node.output().type()
-            if output_type.isSubtypeOf(ListType.ofTensors()):
-                inputs = [g.create("prim::Constant").t_('value', t)
-                           .insertBefore(node).output()
-                          for t in node['value']]
-                lc = (g.create("prim::ListConstruct", inputs)
-                      .insertBefore(node)
-                      .output()
-                      .setType(ListType.ofTensors()))
-                node.output().replaceAllUsesWith(lc)
+        if _is_constant_tensor_list(node):
+            inputs = []
+            for val in node.output().toIValue():
+                input = g.insertConstant(val)
+                input.node().moveBefore(node)
+                inputs.append(input)
 
+            lc = (g.create("prim::ListConstruct", inputs)
+                  .insertBefore(node)
+                  .output()
+                  .setType(ListType.ofTensors()))
+            node.output().replaceAllUsesWith(lc)
 
 def _optimize_graph(graph, operator_export_type, _disable_torch_constant_prop=False, fixed_batch_size=False, params_dict=None):
     # Inline everyting
@@ -136,6 +145,7 @@ def _optimize_graph(graph, operator_export_type, _disable_torch_constant_prop=Fa
     torch._C._jit_pass_lint(graph)
 
     torch._C._jit_pass_peephole(graph, True)
+    torch._C._jit_pass_fuse_addmm(graph)
     torch._C._jit_pass_lint(graph)
 
     if operator_export_type != OperatorExportTypes.RAW:
@@ -288,7 +298,7 @@ def _trace(func, args, operator_export_type, return_outs=False):
         args = (args, )
 
     trace_graph, torch_out, inputs_states = \
-        torch.jit._get_trace_graph(func, args, _force_outplace=False, _return_inputs_states=True)
+        torch.jit._get_trace_graph(func, args, strict=False, _force_outplace=False, _return_inputs_states=True)
     warn_on_static_input_change(inputs_states)
 
     trace_graph = _optimize_graph(trace_graph, operator_export_type)
@@ -304,7 +314,7 @@ def _trace_and_get_graph_from_model(model, args):
     orig_state_dict_keys = _unique_state_dict(model).keys()
 
     trace_graph, torch_out, inputs_states = \
-        torch.jit._get_trace_graph(model, args, _force_outplace=False, _return_inputs_states=True)
+        torch.jit._get_trace_graph(model, args, strict=False, _force_outplace=False, _return_inputs_states=True)
     warn_on_static_input_change(inputs_states)
 
     if orig_state_dict_keys != _unique_state_dict(model).keys():
@@ -333,7 +343,9 @@ def _model_to_graph(model, args, verbose=False,
     if isinstance(model, torch.jit.ScriptModule):
         assert example_outputs is not None, "example_outputs must be provided when exporting a ScriptModule"
         try:
-            method_graph, params = torch._C._jit_pass_lower_graph(model.forward.graph, model._c)
+            graph = model.forward.graph
+            torch._C._jit_pass_onnx_function_substitution(graph)
+            method_graph, params = torch._C._jit_pass_lower_graph(graph, model._c)
             in_vars, in_desc = torch.jit._flatten(tuple(args) + tuple(params))
             graph = _propagate_and_assign_input_shapes(
                 method_graph, tuple(in_vars), False, propagate)
@@ -344,8 +356,10 @@ def _model_to_graph(model, args, verbose=False,
         method = model
         params = ()
         in_vars, in_desc = torch.jit._flatten(tuple(args))
+        graph = model.graph
+        torch._C._jit_pass_onnx_function_substitution(graph)
         graph = _propagate_and_assign_input_shapes(
-            model.graph, tuple(in_vars), False, propagate)
+            graph, tuple(in_vars), False, propagate)
     else:
         graph, torch_out = _trace_and_get_graph_from_model(model, args)
         state_dict = _unique_state_dict(model)
@@ -357,6 +371,7 @@ def _model_to_graph(model, args, verbose=False,
             for i, inp in enumerate(graph_inputs):
                 if i >= user_input_num:
                     inp.setDebugName(param_names[i - user_input_num])
+        torch._C._jit_pass_onnx_function_substitution(graph)
 
     input_and_param_names = [val.debugName() for val in graph.inputs()]
     param_names = input_and_param_names[len(input_and_param_names) - len(params):]
@@ -492,9 +507,9 @@ def _export(model, args, f, export_params=True, verbose=False, training=None,
         # If you really know what you're doing, you can turn
         # training=TrainingMode.TRAINING or training=TrainingMode.PRESERVE,
         # (to preserve whatever the original training mode was.)
+        _set_opset_version(opset_version)
+        _set_operator_export_type(operator_export_type)
         with select_model_mode_for_export(model, training):
-            _set_opset_version(opset_version)
-            _set_operator_export_type(operator_export_type)
             val_keep_init_as_ip = _decide_keep_init_as_input(keep_initializers_as_inputs,
                                                              operator_export_type,
                                                              opset_version)
@@ -767,11 +782,9 @@ def _run_symbolic_function(g, n, inputs, env, operator_export_type=OperatorExpor
                     return g.op("Constant", value_t=n["value"])
                 if n.kindOf("value") == "s":
                     return g.op("Constant", value_s=n["value"])
-                elif n.kindOf("value") == "is":
-                    value = torch.stack([torch.tensor(v) for v in n["value"]]) if n["value"] else []
-                    return g.op("Constant", value_t=value)
-                elif n.kindOf("value") == "fs":
-                    value = torch.stack([torch.tensor(v) for v in n["value"]]) if n["value"] else []
+                elif n.output().type().isSubtypeOf(ListType.ofInts()) or n.output().type().isSubtypeOf(ListType.ofFloats()):
+                    vals = n.output().toIValue()
+                    value = torch.stack([torch.tensor(v) for v in vals]) if len(vals) else []
                     return g.op("Constant", value_t=value)
                 elif n.output().type().kind() == "DeviceObjType":
                     return None

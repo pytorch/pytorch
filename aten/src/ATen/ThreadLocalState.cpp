@@ -26,9 +26,9 @@ void ThreadLocalState::setThreadLocalState(
   }
 #endif
 
-  c10::impl::_force_tls_local_dispatch_key_set(state.dispatch_key_);
-
   ThreadLocalDebugInfo::_forceCurrentDebugInfo(state.debug_info_);
+
+  c10::impl::_force_tls_local_dispatch_key_set(state.dispatch_key_);
 }
 
-} // namespace torch
+} // namespace at

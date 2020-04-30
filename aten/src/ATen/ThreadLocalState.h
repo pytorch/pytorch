@@ -9,7 +9,7 @@ namespace at {
 
 // Thread local state contains values that are preserved across
 // thread boundaries (e.g. at::launch/JIT fork, autograd, at::parallel_for)
-class ThreadLocalState {
+class TORCH_API ThreadLocalState {
  public:
   // Saves the thread local variables' values and
   // returns them as a ThreadLocalState
@@ -38,7 +38,7 @@ class ThreadLocalState {
 };
 
 // Guard to set and reset the thread local state
-class ThreadLocalStateGuard {
+class TORCH_API ThreadLocalStateGuard {
  public:
   explicit ThreadLocalStateGuard(const ThreadLocalState& state)
       : prev_state_(ThreadLocalState()) {
@@ -55,4 +55,4 @@ class ThreadLocalStateGuard {
   const ThreadLocalState prev_state_;
 };
 
-} // namespace torch
+} // namespace at
