@@ -332,8 +332,10 @@ void IRPrinter::visit(const ReduceOp* v) {
   os() << "ReduceOp(";
   os() << *v->accumulator() << ", ";
   os() << *v->initializer() << ", ";
-  os() << v->complete() << ", {";
+  os() << v->complete() << ", ";
+
   bool first = true;
+  os() << "out_args={";
   for (auto* d : v->output_args()) {
     if (!first) {
       os() << ", ";
@@ -341,8 +343,10 @@ void IRPrinter::visit(const ReduceOp* v) {
     os() << *d;
     first = false;
   }
-  first = true;
+  os() << "}, ";
 
+  first = true;
+  os() << "reduce_args={";
   for (auto* d : v->reduce_args()) {
     if (!first) {
       os() << ", ";
@@ -457,6 +461,23 @@ void IRPrinter::visit(const Cond* v) {
     }
     os() << std::endl;
   }
+}
+
+void IRPrinter::visit(const AtomicAdd* v) {
+  emitIndent();
+  os() << "atomicAdd(&" << *v->base_handle() << "[";
+  size_t i = 0;
+  for (const Expr* ind : v->indices()) {
+    if (i++) {
+      os() << ", ";
+    }
+    ind->accept(this);
+  }
+  if (v->indices().empty()) {
+    os() << "0";
+  }
+  os() << "], " << *v->value() << ");";
+  os() << std::endl;
 }
 
 void IRPrinter::emitIndent() {
