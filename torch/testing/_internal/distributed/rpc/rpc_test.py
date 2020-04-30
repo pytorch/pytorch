@@ -3,7 +3,6 @@ import sys
 import time
 import unittest
 from collections import namedtuple
-from datetime import timedelta
 from functools import partial
 from unittest import mock
 

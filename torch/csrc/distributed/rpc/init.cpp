@@ -348,8 +348,7 @@ PyObject* rpc_init(PyObject* /* unused */) {
       .def(
           "wait",
           [&](FutureIValue& fut) {
-            auto& pythonRpcHandler =
-                PythonRpcHandler::getInstance();
+            auto& pythonRpcHandler = PythonRpcHandler::getInstance();
             const auto& value = fut.wait();
             pybind11::gil_scoped_acquire ag;
             auto obj = torch::jit::toPyObject(value);
@@ -378,8 +377,8 @@ If the future completes with an error, an exception is thrown.
             // callback destruction.
             PythonFunction pf(std::move(cb));
             fut.addCallback([pf](const FutureIValue& fut) {
-                pybind11::gil_scoped_acquire ag;
-                pf.func_(fut);
+              pybind11::gil_scoped_acquire ag;
+              pf.func_(fut);
             });
           },
           py::call_guard<py::gil_scoped_release>(),
