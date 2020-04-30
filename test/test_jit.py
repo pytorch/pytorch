@@ -4688,7 +4688,7 @@ def foo(x):
         mod = TorchBindOptionalExplicitAttr()
         scripted = torch.jit.script(mod)
 
-    def _test_torchbind_lower_graph_conv_impl(self, model, data):
+    def _testlower_graph_impl(self, model, data):
         model.qconfig = torch.quantization.default_qconfig
         model = torch.quantization.prepare(model)
         model = torch.quantization.convert(model)
@@ -4713,22 +4713,31 @@ def foo(x):
     @unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
                          'Quantized RNN requires FBGEMM. FBGEMM is only optimized for CPUs'
                          ' with instruction set support avx2 or newer.')
-    def test_torchbind_lower_graph_conv2d(self):
+    def test_lower_graph_linear(self):
+        model = torch.quantization.QuantWrapper(torch.nn.Linear(5, 10, bias=True)).to(dtype=torch.float)
+        data_numpy = np.random.rand(1, 2, 5).astype(np.float32)
+        data = torch.from_numpy(data_numpy).to(dtype=torch.float)
+        self._test_lower_graph_impl(model, data)
+
+    @unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
+                         'Quantized RNN requires FBGEMM. FBGEMM is only optimized for CPUs'
+                         ' with instruction set support avx2 or newer.')
+    def test_lower_graph_conv2d(self):
         model = torch.quantization.QuantWrapper(torch.nn.Conv2d(3, 5, 2, bias=True)).to(dtype=torch.float)
         data_numpy = np.random.rand(1, 3, 6, 6).astype(np.float32)
         data = torch.from_numpy(data_numpy).to(dtype=torch.float)
-        self._test_torchbind_lower_graph_conv_impl(model, data)
+        self._test_lower_graph_impl(model, data)
 
     @unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
                          'Quantized RNN requires FBGEMM. FBGEMM is only optimized for CPUs'
                          ' with instruction set support avx2 or newer.')
     @unittest.skip("onnx opset9 does not support quantize_per_tensor and caffe2 \
     does not support conv3d")
-    def test_torchbind_lower_graph_conv3d(self):
+    def test_lower_graph_conv3d(self):
         model = torch.quantization.QuantWrapper(torch.nn.Conv3d(3, 5, 2, bias=True)).to(dtype=torch.float)
         data_numpy = np.random.rand(1, 3, 6, 6, 6).astype(np.float32)
         data = torch.from_numpy(data_numpy).to(dtype=torch.float)
-        self._test_torchbind_lower_graph_conv_impl(model, data)
+        self._test_lower_graph_impl(model, data)
 
     def test_jitter_bug(self):
         @torch.jit.script
