@@ -46,6 +46,9 @@ CONFIG_TREE_DATA = [
     ("bionic", [
         ("clang", [
             ("9", [
+                XImportant("3.6"),
+            ]),
+            ("9", [
                 ("3.6", [
                     ("xla", [XImportant(True)]),
                 ]),

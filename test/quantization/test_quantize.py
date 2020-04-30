@@ -366,24 +366,25 @@ class TestPostTrainingStatic(QuantizationTestCase):
         r"""
         Test quantization of normalization layers
         """
-        model = NormalizationTestModel()
-        model.qconfig = torch.quantization.get_default_qconfig('fbgemm')
-        prepare(model, inplace=True)
-        self.checkObservers(model)
-        test_only_eval_fn(model, self.calib_data)
-        model = convert(model)
-
-        def checkQuantized(model):
-            self.checkNoPrepModules(model.layer_norm)
-            self.assertEqual(type(model.layer_norm), nnq.LayerNorm)
+        if 'fbgemm' in supported_qengines:
+            model = NormalizationTestModel()
+            model.qconfig = torch.quantization.get_default_qconfig('fbgemm')
+            prepare(model, inplace=True)
+            self.checkObservers(model)
             test_only_eval_fn(model, self.calib_data)
-            self.checkScriptable(model, self.calib_data)
+            model = convert(model)
 
-        checkQuantized(model)
+            def checkQuantized(model):
+                self.checkNoPrepModules(model.layer_norm)
+                self.assertEqual(type(model.layer_norm), nnq.LayerNorm)
+                test_only_eval_fn(model, self.calib_data)
+                self.checkScriptable(model, self.calib_data)
 
-        model_oneline = quantize(
-            NormalizationTestModel(), test_only_eval_fn, self.calib_data)
-        checkQuantized(model)
+            checkQuantized(model)
+
+            model_oneline = quantize(
+                NormalizationTestModel(), test_only_eval_fn, self.calib_data)
+            checkQuantized(model)
 
     def test_save_load_state_dict(self):
         r"""Test PTQ flow of creating a model and quantizing it and saving the quantized state_dict
@@ -425,25 +426,26 @@ class TestPostTrainingStatic(QuantizationTestCase):
         r"""
         Test quantization of activations
         """
-        model = ActivationsTestModel()
-        model.qconfig = torch.quantization.get_default_qconfig('fbgemm')
-        prepare(model, inplace=True)
-        self.checkObservers(model)
-        test_only_eval_fn(model, self.calib_data)
-        model = convert(model)
-
-        def checkQuantized(model):
-            self.checkNoPrepModules(model.hardswish)
-            self.assertEqual(type(model.hardswish), nnq.Hardswish)
+        if 'fbgemm' in supported_qengines:
+            model = ActivationsTestModel()
+            model.qconfig = torch.quantization.get_default_qconfig('fbgemm')
+            prepare(model, inplace=True)
+            self.checkObservers(model)
             test_only_eval_fn(model, self.calib_data)
-            self.checkScriptable(model, self.calib_data)
+            model = convert(model)
 
-        checkQuantized(model)
+            def checkQuantized(model):
+                self.checkNoPrepModules(model.hardswish)
+                self.assertEqual(type(model.hardswish), nnq.Hardswish)
+                test_only_eval_fn(model, self.calib_data)
+                self.checkScriptable(model, self.calib_data)
 
-        # test one line API
-        model_oneline = quantize(ActivationsTestModel(), test_only_eval_fn,
-                                 self.calib_data)
-        checkQuantized(model_oneline)
+            checkQuantized(model)
+
+            # test one line API
+            model_oneline = quantize(ActivationsTestModel(), test_only_eval_fn,
+                                     self.calib_data)
+            checkQuantized(model_oneline)
 
 
 @unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
