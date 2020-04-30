@@ -6,7 +6,6 @@
 #include <fbgemm/QuantUtils.h>
 
 #include <ATen/Tensor.h>
-#include <ATen/native/quantized/cpu/qnnpack_utils.h>
 #include <c10/core/QScheme.h>
 
 // The struct for the packed weight matrix (PackBMatrix) and the corresponding
