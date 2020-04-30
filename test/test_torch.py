@@ -3271,39 +3271,6 @@ class _TestTorchMixin(object):
             "Tensor.__contains__ only supports Tensor or scalar, but you passed in a {}.".format(type([1, 2])),
             lambda: [1, 2] in x)
 
-    def test_storage(self):
-        v = torch.randn(3, 5)
-        self.assertEqual(v.storage()[0], v[0][0])
-        self.assertEqual(v.storage()[14], v[2][4])
-
-    def test_deepcopy(self):
-        from copy import deepcopy
-        a = torch.randn(5, 5)
-        b = torch.randn(5, 5)
-        c = a.view(25)
-        q = [a, [a.storage(), b.storage()], b, c]
-        w = deepcopy(q)
-        self.assertEqual(w[0], q[0], 0)
-        self.assertEqual(w[1][0], q[1][0], 0)
-        self.assertEqual(w[1][1], q[1][1], 0)
-        self.assertEqual(w[1], q[1], 0)
-        self.assertEqual(w[2], q[2], 0)
-
-        # Check that deepcopy preserves sharing
-        w[0].add_(1)
-        for i in range(a.numel()):
-            self.assertEqual(w[1][0][i], q[1][0][i] + 1)
-        self.assertEqual(w[3], c + 1)
-        w[2].sub_(1)
-        for i in range(a.numel()):
-            self.assertEqual(w[1][1][i], q[1][1][i] - 1)
-
-    def test_deepcopy_scalar(self):
-        from copy import deepcopy
-        a = torch.tensor(5)
-        self.assertEqual(a.size(), deepcopy(a).size())
-        self.assertEqual(a, deepcopy(a))
-
     def test_deepcopy_parameter(self):
         from copy import deepcopy
         l = torch.nn.Linear(10, 1)
@@ -5320,6 +5287,42 @@ def add_neg_dim_tests():
 # Device-generic tests. Instantiated below and not run directly.
 class TestTorchDeviceType(TestCase):
     exact_dtype = True
+
+    @dtypes(torch.float32, torch.complex64)
+    def test_storage(self, device, dtype):
+        v = torch.randn(3, 5, dtype=dtype, device=device)
+        self.assertEqual(v.storage()[0], v[0][0])
+        self.assertEqual(v.storage()[14], v[2][4])
+
+    @dtypes(torch.float32, torch.complex64)
+    def test_deepcopy(self, device, dtype):
+        from copy import deepcopy
+        a = torch.randn(5, 5, dtype=dtype, device=device)
+        b = torch.randn(5, 5, dtype=dtype, device=device)
+        c = a.view(25)
+        q = [a, [a.storage(), b.storage()], b, c]
+        w = deepcopy(q)
+        self.assertEqual(w[0], q[0], 0)
+        self.assertEqual(w[1][0], q[1][0], 0)
+        self.assertEqual(w[1][1], q[1][1], 0)
+        self.assertEqual(w[1], q[1], 0)
+        self.assertEqual(w[2], q[2], 0)
+
+        # Check that deepcopy preserves sharing
+        w[0].add_(1)
+        for i in range(a.numel()):
+            self.assertEqual(w[1][0][i], q[1][0][i] + 1)
+        self.assertEqual(w[3], c + 1)
+        w[2].sub_(1)
+        for i in range(a.numel()):
+            self.assertEqual(w[1][1][i], q[1][1][i] - 1)
+
+    @dtypes(torch.float32, torch.complex64)
+    def test_deepcopy_scalar(self, device, dtype):
+        from copy import deepcopy
+        a = torch.tensor(5, dtype=dtype, device=device)
+        self.assertEqual(a.size(), deepcopy(a).size())
+        self.assertEqual(a, deepcopy(a))
 
     def _isclose_helper(self, tests, device, dtype, equal_nan, atol=1e-08, rtol=1e-05):
         for test in tests:
