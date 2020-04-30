@@ -100,6 +100,13 @@ struct conv_param_t {
       assert("Failed to initialize QNNPACK conv_param_t struct.");
     }
 
+    if (input_channels % groups != 0 || output_channels % groups != 0) {
+      pytorch_qnnp_log_error(
+          "failed to create %s: input and output channels must be divisible by"
+          " groups.", _name);
+      assert("Failed to initialize QNNPACK conv_param_t struct.");
+    }
+
     group_input_channels = input_channels / groups;
     group_output_channels = output_channels / groups;
 
