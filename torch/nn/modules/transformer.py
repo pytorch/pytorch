@@ -27,7 +27,8 @@ class Transformer(Module):
         num_encoder_layers: the number of sub-encoder-layers in the encoder (default=6).
         num_decoder_layers: the number of sub-decoder-layers in the decoder (default=6).
         dim_feedforward: the dimension of the feedforward network model (default=2048).
-        batch_first: if the src tensor is in the shape of (N, S, E) instead of (S, N, E) and the tgt tensor is in the shape of (N, T, E) instead of (T, N, E) (default=False).
+        batch_first: if the src tensor is in the shape of (N, S, E) instead of (S, N, E) and the tgt tensor is
+            in the shape of (N, T, E) instead of (T, N, E) (default=False).
         dropout: the dropout value (default=0.1).
         activation: the activation function of encoder/decoder intermediate layer, relu or gelu (default=relu).
         custom_encoder: custom encoder (default=None).
@@ -82,7 +83,8 @@ class Transformer(Module):
             src_key_padding_mask: the ByteTensor mask for src keys per batch (optional).
             tgt_key_padding_mask: the ByteTensor mask for tgt keys per batch (optional).
             memory_key_padding_mask: the ByteTensor mask for memory keys per batch (optional).
-            batch_first: if the src tensor is in the shape of (N, S, E) instead of (S, N, E) and the tgt tensor is in the shape of (N, T, E) instead of (T, N, E) (default=False).
+            batch_first: if the src tensor is in the shape of (N, S, E) instead of (S, N, E) and the tgt tensor is
+                in the shape of (N, T, E) instead of (T, N, E) (default=False).
 
         Shape:
             - src: :math:`(S, N, E)` by default or `(N, S, E)` if batch_first is True.
@@ -182,7 +184,7 @@ class TransformerEncoder(Module):
             see the docs in Transformer class.
         """
         if self.batch_first:
-            output = src.permute(1,0,2)
+            output = src.permute(1, 0, 2)
         else:
             output = src
 
@@ -191,9 +193,9 @@ class TransformerEncoder(Module):
 
         if self.norm is not None:
             output = self.norm(output)
-        
+
         if self.batch_first:
-            return output.permute(1,0,2)
+            return output.permute(1, 0, 2)
         else:
             return output
 
@@ -205,7 +207,8 @@ class TransformerDecoder(Module):
         decoder_layer: an instance of the TransformerDecoderLayer() class (required).
         num_layers: the number of sub-decoder-layers in the decoder (required).
         norm: the layer normalization component (optional).
-        batch_first: if the tgt tensor is in the shape of (N, T, E) instead of (T, N, E) and the memory tensor is in the shape of (N, M, E) instead of (M, N, E) (default=False).
+        batch_first: if the tgt tensor is in the shape of (N, T, E) instead of (T, N, E) and the memory tensor is
+            in the shape of (N, M, E) instead of (M, N, E) (default=False).
 
     Examples::
         >>> decoder_layer = nn.TransformerDecoderLayer(d_model=512, nhead=8)
@@ -242,8 +245,8 @@ class TransformerDecoder(Module):
             see the docs in Transformer class.
         """
         if self.batch_first:
-            output = tgt.permute(1,0,2)
-            memory = memory.permute(1,0,2)
+            output = tgt.permute(1, 0, 2)
+            memory = memory.permute(1, 0, 2)
         else:
             output = tgt
 
@@ -257,7 +260,7 @@ class TransformerDecoder(Module):
             output = self.norm(output)
 
         if self.batch_first:
-            return output.permute(1,0,2)
+            return output.permute(1, 0, 2)
         else:
             return output
 
