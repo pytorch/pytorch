@@ -318,6 +318,15 @@ Tensor& exponential_impl_(Tensor& self, double lambda, c10::optional<Generator> 
   return self;
 }
 
+// ==================================================== Cauchy ========================================================
+
+template<template<typename> class cauchy_kernel, typename RNG>
+Tensor& cauchy_impl_(Tensor& self, double median, double sigma, c10::optional<Generator> gen) {
+  auto iter = TensorIterator::nullary_op(self);
+  cauchy_kernel<RNG>()(iter, median, sigma, gen);
+  return self;
+}
+
 #undef CHECK_OUT_OF_BOUNDS_AND_SHOW_WARNING
 
 }}}
