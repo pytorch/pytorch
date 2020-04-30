@@ -352,7 +352,7 @@ void THPStorage_(initCopyMethods)()
     THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THCPComplexDoubleStorageType, h, &THWStorage_(copyCudaComplexDouble));
   #endif
   // add CPU <- GPU copies to base type
-  #define THPCpuStorage TH_CONCAT_3(THP, Real, Storage)
+  /// #define THPCpuStorage TH_CONCAT_3(THP, Real, Storage)
   #define THCpuStorage_(name) TH_CONCAT_4(TH, Real, Storage_, name)
   extern THPCopyList THCpuStorage_(copy_functions);
   auto& b = THCpuStorage_(copy_functions);
