@@ -255,7 +255,7 @@ class MultiProcessTestCase(TestCase):
                 # This is the exit code processes exit with if they
                 # encountered an exception.
                 if p.exitcode == MultiProcessTestCase.TEST_ERROR_EXIT_CODE:
-                    print("Process {} terminated with exit code {}, terminating remaining processes..".format(i, p.exitcode))
+                    print("Process {} terminated with exit code {}, terminating remaining processes.".format(i, p.exitcode))
                     active_children = torch.multiprocessing.active_children()
                     for ac in active_children:
                         ac.terminate()
