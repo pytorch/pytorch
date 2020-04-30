@@ -271,8 +271,8 @@ class GemmMicrokernelTester {
       const union pytorch_qnnp_conv_quantization_params quantizationParams =
           pytorch_qnnp_compute_conv_quantization_params(
               aZeroPoint(),
-              bZeroPoint(),
-              requantizationScale,
+              &this->bZeroPoint_,
+              &requantizationScale,
               cZeroPoint,
               qmin(),
               qmax());
@@ -539,8 +539,8 @@ class GemmMicrokernelTester {
       const union pytorch_qnnp_conv_quantization_params quantizationParams =
           pytorch_qnnp_compute_conv_quantization_params(
               aZeroPoint(),
-              bZeroPoint(),
-              requantizationScale,
+              &this->bZeroPoint_,
+              &requantizationScale,
               cZeroPoint,
               qmin(),
               qmax());

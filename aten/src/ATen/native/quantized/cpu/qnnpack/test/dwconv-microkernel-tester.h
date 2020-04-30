@@ -266,8 +266,8 @@ class DWConvMicrokernelTester {
       const union pytorch_qnnp_conv_quantization_params quantizationParams =
           pytorch_qnnp_compute_conv_quantization_params(
               inputZeroPoint(),
-              kernelZeroPoint(),
-              requantizationScale,
+              &this->kernelZeroPoint_,
+              &requantizationScale,
               outputZeroPoint,
               qmin(),
               qmax());
@@ -445,8 +445,8 @@ class DWConvMicrokernelTester {
       const union pytorch_qnnp_conv_quantization_params quantizationParams =
           pytorch_qnnp_compute_conv_quantization_params(
               inputZeroPoint(),
-              kernelZeroPoint(),
-              requantizationScale,
+              &this->kernelZeroPoint_,
+              &requantizationScale,
               outputZeroPoint,
               qmin(),
               qmax());

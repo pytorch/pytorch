@@ -38,7 +38,7 @@ class PackBMatrix final {
       size_t input_channels,
       size_t output_channels,
       uint8_t kernel_zero_point,
-      float kernel_scale,
+      float requantization_scale,
       const uint8_t* kernel,
       const int32_t* bias);
 
@@ -79,11 +79,9 @@ enum pytorch_qnnp_status qnnpackLinear(
     const size_t input_channels,
     const size_t output_channels,
     const uint8_t input_zero_point,
-    const float input_scale,
-    const uint8_t kernel_zero_point,
-    const float kernel_scale,
+    const uint8_t* kernel_zero_point,
+    const float* requantization_scale_ptr,
     const uint8_t output_zero_point,
-    const float output_scale,
     const uint8_t output_min,
     const uint8_t output_max,
     const uint8_t* input,
@@ -99,10 +97,8 @@ enum pytorch_qnnp_status qnnpackConv(
     const size_t batch_size,
     const size_t input_height,
     const size_t input_width,
-    const float input_scale,
     const uint8_t input_zero_point,
     const uint8_t* input,
-    const float output_scale,
     const uint8_t output_zero_point,
     uint8_t* output,
     pthreadpool_t threadpool);

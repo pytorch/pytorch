@@ -225,8 +225,8 @@ class QLinearDynamicInt8 final {
         cpp_custom_type_hack::cast<PackedLinearWeightsQnnp>(packed_weight);
     auto packB = pack_ptr.w.get();
     // Adjust weight zero point, similar to weight data.
-    auto kernel_zp = pack_ptr.w_zp + 128;
-    auto kernel_scale = pack_ptr.w_scale;
+    auto kernel_zp = pack_ptr.orig_weight.q_zero_point() + 128;
+    auto kernel_scale = pack_ptr.orig_weight.q_scale();
     size_t rows_w = pack_ptr.bias.size(0);
     size_t cols_w = input_contig.size(input_contig.dim() - 1);
 

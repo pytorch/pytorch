@@ -142,9 +142,11 @@ PrePackConvWeights::PrePackConvWeights(
             packed_group_weights_size * groups);
         assert("QNNPACK Runtime Error.");
       }
+      // Setting packed weights to first channel's zero point.
+      // But this will be overwritten by weight packing.
       memset(
           packed_weights_,
-          conv_p.kernel_zero_point,
+          conv_p.kernel_zero_points[0],
           packed_group_weights_size * groups);
 
       switch (ukernel_type) {

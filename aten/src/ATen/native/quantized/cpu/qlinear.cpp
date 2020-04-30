@@ -231,9 +231,6 @@ class QLinearInt8 final {
     auto& pack_ptr =
         cpp_custom_type_hack::cast<PackedLinearWeightsQnnp>(packed_weight);
     auto packB = pack_ptr.w.get();
-    // Adjust weight zero point, similar to weight data.
-    auto kernel_zp = pack_ptr.w_zp + 128;
-    auto kernel_scale = pack_ptr.w_scale;
     size_t rows_w = pack_ptr.bias.size(0);
     size_t cols_w = input_contig.size(input_contig.dim() - 1);
     auto input_scale = input_contig.q_scale();
@@ -243,28 +240,39 @@ class QLinearInt8 final {
       // Get the original weight and adjust it to uint8 from int8
       auto weight_contig = pack_ptr.orig_weight;
       auto bias_fp32 = pack_ptr.bias;
-      int8_t* w_data = (int8_t*)weight_contig.data_ptr<c10::qint8>();
+
+      std::tie(pack_ptr.w_zero_points, pack_ptr.w_scales) =
+          make_zero_points_and_scales_tensor(weight_contig);
+      uint8_t* weight_zp_data = (uint8_t*)pack_ptr.w_zero_points.data_ptr<c10::quint8>();
+      float* weight_scales_data = pack_ptr.w_scales.data_ptr<float>();
+      pack_ptr.requantization_scale =
+          generate_requantization_scales(
+              pack_ptr.w_scales, input_scale, output_scale);
+
       Tensor qnnp_weight = at::_empty_affine_quantized(
           weight_contig.sizes(),
           at::device(kCPU).dtype(kQUInt8),
-          kernel_scale,
-          kernel_zp);
+          weight_scales_data[0],
+          weight_zp_data[0]);
       auto* qnnp_w_data = qnnp_weight.data_ptr<c10::quint8>();
+      int8_t* w_data = (int8_t*)weight_contig.data_ptr<c10::qint8>();
       auto wt_numel = weight_contig.numel();
       for (int i = 0; i < wt_numel; ++i) {
         qnnp_w_data[i] = static_cast<c10::quint8>(w_data[i] + 128);
       }
       // Original bias was float, so we requantize it here.
       auto bias = at::quantize_per_tensor(
-          bias_fp32, kernel_scale * input_scale, 0, kQInt32);
+          bias_fp32,
+          weight_scales_data[0] * input_scale,
+          0, kQInt32);
       // Update the input scale to not pack again.
       pack_ptr.input_scale = input_scale;
       pack_ptr.w.reset();
       pack_ptr.w = std::make_unique<qnnpack::PackBMatrix>(
           cols_w /* input_channels */,
           rows_w /* output_channels */,
-          kernel_zp,
-          kernel_scale,
+          weight_zp_data[0],
+          pack_ptr.requantization_scale.data()[0],
           (uint8_t*)qnnp_w_data,
           (int32_t*)bias.data_ptr<c10::qint32>());
       packB = pack_ptr.w.get();
@@ -305,11 +313,9 @@ class QLinearInt8 final {
         cols_input /* input_channels */,
         rows_w /* output_channels */,
         input_contig.q_zero_point(),
-        input_contig.q_scale(),
-        kernel_zp,
-        kernel_scale,
+        (uint8_t*)pack_ptr.w_zero_points.data_ptr<c10::quint8>(),
+        pack_ptr.requantization_scale.data(),
         output_zero_point,
-        output_scale,
         output_min,
         output_max,
         (uint8_t*)input_contig.data_ptr<c10::quint8>(),

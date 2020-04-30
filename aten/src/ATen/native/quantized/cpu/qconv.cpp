@@ -518,8 +518,6 @@ class QConvInt8 final {
     auto* pack_w = pack_data.w.get();
     const auto& kernel = pack_data.kernel;
     // Adjust weight zero point, similar to weight data.
-    const auto kernel_zp = pack_data.w_zp + 128;
-    const auto& kernel_scale = pack_data.w_scale;
 
     const uint32_t kernel_h = kernel[0];
     const uint32_t kernel_w = kernel[1];
@@ -550,18 +548,6 @@ class QConvInt8 final {
         ? activationLimits(output_scale, output_zero_point, Activation::RELU)
               .second
         : std::numeric_limits<uint8_t>::max();
-    qnnpack::conv_param_t conv_p(
-        {kernel_w, kernel_h},
-        {stride_w, stride_h},
-        {dilation_w, dilation_h},
-        {pad_h, pad_w, pad_h, pad_w},
-        groups,
-        C,
-        M,
-        kernel_zp,
-        kernel_scale,
-        output_min,
-        output_max);
 
     auto input_scale = act_nhwc.q_scale();
 
@@ -574,22 +560,49 @@ class QConvInt8 final {
       auto bias_fp32 = pack_data.bias;
       int8_t* w_data =
           reinterpret_cast<int8_t*>(weight_contig.data_ptr<c10::qint8>());
+
+      std::tie(pack_data.w_zero_points, pack_data.w_scales) =
+          make_zero_points_and_scales_tensor(weight_contig);
+      uint8_t* weight_zp_data =
+        (uint8_t*)pack_data.w_zero_points.data_ptr<c10::quint8>();
+      float* weight_scales_data = pack_data.w_scales.data_ptr<float>();
+      pack_data.requantization_scale =
+          generate_requantization_scales(
+              pack_data.w_scales, input_scale, output_scale);
+
       Tensor qnnp_weight = at::_empty_affine_quantized(
           weight_contig.sizes(),
           at::device(kCPU)
              .dtype(kQUInt8)
              .memory_format(MemoryFormat::ChannelsLast),
-          kernel_scale,
-          kernel_zp,
+          weight_scales_data[0],
+          weight_zp_data[0],
           c10::nullopt);
       auto* qnnp_w_data = qnnp_weight.data_ptr<c10::quint8>();
       auto wt_numel = weight_contig.numel();
       for (int i = 0; i < wt_numel; ++i) {
         qnnp_w_data[i] = static_cast<c10::quint8>(w_data[i] + 128);
       }
+
       // Original bias was float, so we requantize it here.
       auto bias = at::quantize_per_tensor(
-          bias_fp32, kernel_scale * input_scale, 0, kQInt32);
+          bias_fp32,
+          weight_scales_data[0] * input_scale,
+          0, kQInt32);
+
+      qnnpack::conv_param_t conv_p(
+          {kernel_w, kernel_h},
+          {stride_w, stride_h},
+          {dilation_w, dilation_h},
+          {pad_h, pad_w, pad_h, pad_w},
+          groups,
+          C,
+          M,
+          weight_zp_data,
+          pack_data.requantization_scale.data(),
+          output_min,
+          output_max);
+
       // Update the input scale to not pack again.
       pack_data.input_scale = input_scale;
       pack_data.w.reset();
@@ -620,16 +633,27 @@ class QConvInt8 final {
         output_zero_point,
         c10::nullopt);
 
+    qnnpack::conv_param_t conv_p(
+        {kernel_w, kernel_h},
+        {stride_w, stride_h},
+        {dilation_w, dilation_h},
+        {pad_h, pad_w, pad_h, pad_w},
+        groups,
+        C,
+        M,
+        (uint8_t*)pack_data.w_zero_points.data_ptr<c10::quint8>(),
+        pack_data.requantization_scale.data(),
+        output_min,
+        output_max);
+
     const pytorch_qnnp_status run_status = qnnpack::qnnpackConv(
         conv_p,
         pack_w->getPackedWeights(),
         N,
         H,
         W,
-        act_nhwc.q_scale(),
         act_nhwc.q_zero_point(),
         reinterpret_cast<uint8_t*>(act_nhwc.data_ptr<c10::quint8>()),
-        output.q_scale(),
         output.q_zero_point(),
         reinterpret_cast<uint8_t*>(output.data_ptr<c10::quint8>()),
         caffe2::mobile_pthreadpool());

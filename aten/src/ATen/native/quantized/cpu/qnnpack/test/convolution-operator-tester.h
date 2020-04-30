@@ -391,7 +391,8 @@ class ConvolutionOperatorTester {
 
     const uint8_t* inputPtr = input.data() + 8;
     const uint8_t inputZeroPoint = 127;
-    const uint8_t kernelZeroPoint = 127;
+    // TODO Kimish: kernelZeroPoints
+    std::vector<uint8_t> kernelZeroPoint(1, 127);
 
     for (size_t iteration = 0; iteration < iterations(); iteration++) {
       std::generate(input.begin(), input.end(), std::ref(u8rng));
@@ -452,7 +453,7 @@ class ConvolutionOperatorTester {
                                              kx) *
                                                 groupInputChannels() +
                                             ic]) -
-                               int32_t(kernelZeroPoint));
+                               int32_t(kernelZeroPoint[0]));
                         }
                       }
                     }
@@ -485,6 +486,7 @@ class ConvolutionOperatorTester {
           long(std::numeric_limits<uint8_t>::min())));
 
       ASSERT_EQ(pytorch_qnnp_status_success, pytorch_qnnp_initialize());
+      std::vector<float> requantization_scale(1, 1.0 * 1.0 / outputScale);
 
       switch(mode) {
         case Mode::Static:
@@ -509,7 +511,7 @@ class ConvolutionOperatorTester {
                   groupOutputChannels(),
                   inputZeroPoint,
                   1.0f /* input scale */,
-                  kernelZeroPoint,
+                  kernelZeroPoint[0],
                   1.0f /* kernel scale */,
                   kernel.data(),
                   bias.data(),
@@ -554,8 +556,8 @@ class ConvolutionOperatorTester {
             groups(),
             groupInputChannels() * groups(),
             groupOutputChannels() * groups(),
-            kernelZeroPoint,
-            1.0,
+            kernelZeroPoint.data(),
+            requantization_scale.data(),
             qmin(),
             qmax());
           auto packW = std::unique_ptr<qnnpack::PrePackConvWeights>(
@@ -569,10 +571,8 @@ class ConvolutionOperatorTester {
               batchSize(),
               inputHeight(),
               inputWidth(),
-              1.0,
               inputZeroPoint,
               inputPtr,
-              outputScale,
               outputZeroPoint,
               output.data(),
               nullptr);
