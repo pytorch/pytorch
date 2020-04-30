@@ -2551,10 +2551,10 @@ def _pointwise_loss(lambd, lambd_optimized, input, target, reduction='mean'):
         return lambd_optimized(expanded_input, expanded_target, _Reduction.get_enum(reduction))
 
 
-def _smooth_l1_loss(input, target):
+def _huber_loss(input, target, delta=1.):
     # type: (Tensor, Tensor) -> Tensor
     t = torch.abs(input - target)
-    return torch.where(t < 1, 0.5 * t ** 2, t - 0.5)
+    return torch.where(t < delta, 0.5 * t ** 2, t * delta - (0.5 * delta))
 
 
 def smooth_l1_loss(input, target, size_average=None, reduce=None, reduction='mean'):
@@ -2578,7 +2578,37 @@ def smooth_l1_loss(input, target, size_average=None, reduce=None, reduction='mea
     if size_average is not None or reduce is not None:
         reduction = _Reduction.legacy_get_string(size_average, reduce)
     if target.requires_grad:
-        ret = _smooth_l1_loss(input, target)
+        ret = _huber_loss(input, target)
+        if reduction != 'none':
+            ret = torch.mean(ret) if reduction == 'mean' else torch.sum(ret)
+    else:
+        expanded_input, expanded_target = torch.broadcast_tensors(input, target)
+        ret = torch._C._nn.smooth_l1_loss(expanded_input, expanded_target, _Reduction.get_enum(reduction))
+    return ret
+
+
+def huber_loss(input, target, delta, size_average=None, reduce=None, reduction='mean'):
+    # type: (Tensor, Tensor, Optional[bool], Optional[bool], str) -> Tensor
+    r"""Function that uses a squared term if the absolute
+    element-wise error falls below delta and an L1 term otherwise. (i.e. Huber loss)
+
+    See :class:`~torch.nn.HuberLoss` for details.
+    """
+    if not torch.jit.is_scripting():
+        tens_ops = (input, target)
+        if any([type(t) is not Tensor for t in tens_ops]) and has_torch_function(tens_ops):
+            return handle_torch_function(
+                smooth_l1_loss, tens_ops, input, target, size_average=size_average,
+                reduce=reduce, reduction=reduction)
+    if not (target.size() == input.size()):
+        warnings.warn("Using a target size ({}) that is different to the input size ({}). "
+                      "This will likely lead to incorrect results due to broadcasting. "
+                      "Please ensure they have the same size.".format(target.size(), input.size()),
+                     stacklevel=2)
+    if size_average is not None or reduce is not None:
+        reduction = _Reduction.legacy_get_string(size_average, reduce)
+    if target.requires_grad:
+        ret = _huber_loss(input, target, delta)
         if reduction != 'none':
             ret = torch.mean(ret) if reduction == 'mean' else torch.sum(ret)
     else:
