@@ -397,10 +397,13 @@ If the future completes with an error, an exception is thrown.
                   ``Future`` object as the only argument.
 
               Example::
+                  >>> from torch.distributed import rpc
+                  >>> import torch
+                  >>>
                   >>> def callback(fut):
                   >>>     print(f"RPC return value is {fut.wait()}.")
                   >>>
-                  >>> fut = dist.rpc_async("worker1", torch.add, args=(torch.ones(2), 3))
+                  >>> fut = rpc.rpc_async("worker1", torch.add, args=(torch.ones(2), 3))
                   >>> # The inserted callback will print the return value when
                   >>> # receiving the response from "worker1"
                   >>> fut.add_done_callback(callback)
@@ -412,7 +415,35 @@ If the future completes with an error, an exception is thrown.
                 std::move(result),
                 PyObjectType::get()));
           },
-          py::call_guard<py::gil_scoped_release>());
+          py::call_guard<py::gil_scoped_release>(),
+          R"(
+              Set the result for this ``Future``, which will mark this
+              ``Future`` as completed and trigger all attached callbacks. Note
+              that as a ``Future`` cannot be marked completed twice,
+              applications should never call this method on a ``Future``
+              returned by :meth:`~torch.distributed.rpc.rpc_async`, because the
+              RPC system will also set result for that ``Future`` when the
+              response is received. This method should only be called on
+              ``Future`` objects created using the ``rpc.Future()`` constructor.
+
+              Arguments:
+                  result (object): the result object of this ``Future``.
+
+              Example::
+                  >>> from torch.distributed import rpc
+                  >>> import torch
+                  >>>
+                  >>> fut = rpc.Future()
+                  >>> rpc_fut = rpc.async(
+                  >>>     "worker1",
+                  >>>     torch.add,
+                  >>>     args=(torch.ones(2), 1)
+                  >>> )
+                  >>> rpc_fut.add_done_callback(
+                  >>>     lambda rpc_fut : fut.set_result(rpc_fut.wait() + 1)
+                  >>> )
+                  >>> print(fut.wait())  # tensor([3., 3.])
+          )");
 
   shared_ptr_class_<ProcessGroupRpcBackendOptions>(
       module,
