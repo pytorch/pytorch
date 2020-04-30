@@ -24,6 +24,14 @@ fi
 export TMP_DIR="${PWD}/build/win_tmp"
 export TMP_DIR_WIN=$(cygpath -w "${TMP_DIR}")
 
+# This directory is used only to hold "pytorch_env_restore.bat", called via "setup_pytorch_env.bat"
+CI_SCRIPTS_DIR=$TMP_DIR/ci_scripts
+mkdir -p $CI_SCRIPTS_DIR
+
+if [ -n "$(ls $CI_SCRIPTS_DIR/*)" ]; then
+    rm $CI_SCRIPTS_DIR/*
+fi
+
 export SCRIPT_HELPERS_DIR=$SCRIPT_PARENT_DIR/win-test-helpers
 
 
